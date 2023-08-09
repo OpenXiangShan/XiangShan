@@ -316,11 +316,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s1_repl_way_en = WireInit(0.U(nWays.W))
   s1_repl_way_en := Mux(
     RegNext(s0_fire),
-    Mux(
-      s1_have_invalid_way,
-      s1_invalid_way_en,
-      UIntToOH(io.replace_way.way)
-      ),
+    UIntToOH(io.replace_way.way),
     RegNext(s1_repl_way_en)
   )
   val s1_repl_tag = Mux1H(s1_repl_way_en, wayMap(w => tag_resp(w)))
@@ -372,9 +368,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s1_hit = s1_tag_match && s1_has_permission
   val s1_pregen_can_go_to_mq = !s1_req.replace && !s1_req.probe && !s1_req.miss && (s1_req.isStore || s1_req.isAMO) && !s1_hit
 
-  val s1_ttob_probe = s1_valid && s1_req.probe && s1_req.probe_param === TLPermissions.toB
-  io.probe_ttob_check_req.valid := s1_ttob_probe
-  io.probe_ttob_check_req.bits.addr := get_block_addr(Cat(s1_tag, get_untag(s1_req.vaddr)))
+  val s1_ttob_probe_valid = s1_valid && s1_req.probe && s1_req.probe_param === TLPermissions.toB
+  val s1_ttob_probe_addr = get_block_addr(Cat(s1_tag, get_untag(s1_req.vaddr)))
 
   // s2: select data, return resp if this is a store miss
   val s2_valid = RegInit(false.B)
@@ -466,8 +461,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
 
   val s2_data_word = s2_store_data_merged(s2_req.word_idx)
 
-  val s2_probe_ttob_check_resp = Wire(io.probe_ttob_check_resp.cloneType)
-  s2_probe_ttob_check_resp := Mux(RegNext(s1_fire), io.probe_ttob_check_resp, RegNext(s2_probe_ttob_check_resp))
+  val s2_ttob_probe_valid = RegEnable(s1_ttob_probe_valid, s1_fire)
+  val s2_ttob_probe_addr = RegEnable(s1_ttob_probe_addr, s1_fire)
+
+  io.probe_ttob_check_req.valid := s2_ttob_probe_valid && s2_valid
+  io.probe_ttob_check_req.bits.addr := s2_ttob_probe_addr
 
   // s3: write data, meta and tag
   val s3_valid = RegInit(false.B)
@@ -498,7 +496,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s3_error = RegEnable(s2_error, s2_fire_to_s3) || s3_data_error
   val (_, _, probe_new_coh) = s3_coh.onProbe(s3_req.probe_param)
   val s3_need_replacement = RegEnable(s2_need_replacement, s2_fire_to_s3)
-  val s3_probe_ttob_check_resp = RegEnable(s2_probe_ttob_check_resp, s2_fire_to_s3)
+  val s3_probe_ttob_check_resp_r = RegEnable(io.probe_ttob_check_resp, RegNext(s2_fire_to_s3))
+  val s3_probe_ttob_check_resp = Mux(RegNext(s2_fire_to_s3), io.probe_ttob_check_resp, s3_probe_ttob_check_resp_r)
 
   // duplicate regs to reduce fanout
   val s3_valid_dup = RegInit(VecInit(Seq.fill(14)(false.B)))

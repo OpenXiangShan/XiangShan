@@ -15,7 +15,7 @@
 ***************************************************************************************/
 package xiangshan.mem
 
-import chisel3._ 
+import chisel3._
 import chisel3.util._
 import chipsalliance.rocketchip.config._
 import xiangshan._
@@ -25,7 +25,7 @@ import xiangshan.cache._
 import utils._
 import utility._
 
-class VirtualLoadQueue(implicit p: Parameters) extends XSModule 
+class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
   with HasCircularQueuePtrHelper
   with HasLoadHelper
@@ -33,18 +33,18 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
 {
   val io = IO(new Bundle() {
     // control
-    val redirect    = Flipped(Valid(new Redirect)) 
+    val redirect    = Flipped(Valid(new Redirect))
     // from dispatch
-    val enq         = new LqEnqIO 
+    val enq         = new LqEnqIO
     // from ldu s3
-    val ldin        = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new LqWriteBundle))) 
+    val ldin        = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new LqWriteBundle)))
     // to LoadQueueReplay and LoadQueueRAR
     val ldWbPtr     = Output(new LqPtr)
     // global
     val lqFull      = Output(Bool())
     // to dispatch
     val lqDeq       = Output(UInt(log2Up(CommitWidth + 1).W))
-    val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize+1).W))   
+    val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize+1).W))
   })
 
   println("VirtualLoadQueue: size: " + VirtualLoadQueueSize)
@@ -62,7 +62,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
 
   /**
    * used for debug
-   */ 
+   */
   val debug_mmio = Reg(Vec(VirtualLoadQueueSize, Bool())) // mmio: inst is an mmio inst
   val debug_paddr = Reg(Vec(VirtualLoadQueueSize, UInt(PAddrBits.W))) // mmio: inst's paddr
 
@@ -82,23 +82,25 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   val allowEnqueue = validCount <= (VirtualLoadQueueSize - LoadPipelineWidth).U
   val canEnqueue = io.enq.req.map(_.valid)
   val needCancel = WireInit(VecInit((0 until VirtualLoadQueueSize).map(i => {
-    uop(i).robIdx.needFlush(io.redirect) && allocated(i) 
+    uop(i).robIdx.needFlush(io.redirect) && allocated(i)
   })))
   val lastNeedCancel = RegNext(needCancel)
   val enqCancel = io.enq.req.map(_.bits.robIdx.needFlush(io.redirect))
   val lastEnqCancel = PopCount(RegNext(VecInit(canEnqueue.zip(enqCancel).map(x => x._1 && x._2))))
   val lastCycleCancelCount = PopCount(lastNeedCancel)
+  val redirectCancelCount = RegEnable(next = lastCycleCancelCount + lastEnqCancel, init = 0.U, enable = lastCycleRedirect.valid)
 
   // update enqueue pointer
-  val enqCount = Mux(io.enq.canAccept && io.enq.sqCanAccept, PopCount(io.enq.req.map(_.valid)), 0.U)
+  val enqNumber = Mux(io.enq.canAccept && io.enq.sqCanAccept, PopCount(io.enq.req.map(_.valid)), 0.U)
   val enqPtrExtNextVec = Wire(Vec(io.enq.req.length, new LqPtr))
   val enqPtrExtNext = Wire(Vec(io.enq.req.length, new LqPtr))
-  when (lastCycleRedirect.valid) {
+  when (lastLastCycleRedirect.valid) {
     // we recover the pointers in the next cycle after redirect
-    enqPtrExtNextVec := VecInit(enqPtrExt.map(_ - (lastCycleCancelCount + lastEnqCancel)))
-  }.otherwise {
-    enqPtrExtNextVec := VecInit(enqPtrExt.map(_ + enqCount))
-  } 
+    enqPtrExtNextVec := VecInit(enqPtrExt.map(_ - redirectCancelCount))
+  } .otherwise {
+    enqPtrExtNextVec := VecInit(enqPtrExt.map(_ + enqNumber))
+  }
+  assert(!(lastCycleRedirect.valid && enqNumber =/= 0.U))
 
   when (isAfter(enqPtrExtNextVec(0), deqPtrNext)) {
     enqPtrExtNext := enqPtrExtNextVec
@@ -114,7 +116,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   val deqLookup = VecInit(deqLookupVec.map(ptr => allocated(ptr.value) && datavalid(ptr.value) && addrvalid(ptr.value) && ptr =/= enqPtrExt(0)))
   val deqInSameRedirectCycle = VecInit(deqLookupVec.map(ptr => needCancel(ptr.value)))
   // make chisel happy
-  val deqCountMask = Wire(UInt(DeqPtrMoveStride.W)) 
+  val deqCountMask = Wire(UInt(DeqPtrMoveStride.W))
   deqCountMask := deqLookup.asUInt & ~deqInSameRedirectCycle.asUInt
   val commitCount = PopCount(PriorityEncoderOH(~deqCountMask) - 1.U)
   val lastCommitCount = RegNext(commitCount)
@@ -122,17 +124,17 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   // update deqPtr
   // cycle 1: generate deqPtrNext
   // cycle 2: update deqPtr
-  val deqPtrUpdateEna = lastCommitCount =/= 0.U 
+  val deqPtrUpdateEna = lastCommitCount =/= 0.U
   deqPtrNext := deqPtr + lastCommitCount
   deqPtr := RegEnable(next = deqPtrNext, init = 0.U.asTypeOf(new LqPtr), enable = deqPtrUpdateEna)
 
   io.lqDeq := RegNext(lastCommitCount)
-  io.lqCancelCnt := RegNext(lastCycleCancelCount + lastEnqCancel)
-  io.ldWbPtr := deqPtr 
+  io.lqCancelCnt := redirectCancelCount
+  io.ldWbPtr := deqPtr
 
   /**
    * Enqueue at dispatch
-   * 
+   *
    * Currently, VirtualLoadQueue only allows enqueue when #emptyEntries > EnqWidth
    */
   io.enq.canAccept := allowEnqueue
@@ -146,7 +148,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
       uop(index).lqIdx := lqIdx
 
       // init
-      addrvalid(index) := false.B 
+      addrvalid(index) := false.B
       datavalid(index) := false.B
 
       debug_mmio(index) := false.B
@@ -154,9 +156,9 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
 
       XSError(!io.enq.canAccept || !io.enq.sqCanAccept, s"must accept $i\n")
       XSError(index =/= lqIdx.value, s"must be the same entry $i\n")
-    } 
+    }
     io.enq.resp(i) := lqIdx
-  }  
+  }
 
   /**
     * Load commits
@@ -186,10 +188,10 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     * Most load instructions writeback to regfile at the same time.
     * However,
     *   (1) For ready load instruction (no need replay), it writes back to ROB immediately.
-    */  
+    */
   for(i <- 0 until LoadPipelineWidth) {
     //   most lq status need to be updated immediately after load writeback to lq
-    //   flag bits in lq needs to be updated accurately     
+    //   flag bits in lq needs to be updated accurately
     io.ldin(i).ready := true.B
     val loadWbIndex = io.ldin(i).bits.uop.lqIdx.value
 
@@ -200,7 +202,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
       when (!need_rep) {
       // update control flag
         addrvalid(loadWbIndex) := hasExceptions || !io.ldin(i).bits.tlbMiss
-        datavalid(loadWbIndex) := 
+        datavalid(loadWbIndex) :=
           (if (EnableFastForward) {
               hasExceptions ||
               io.ldin(i).bits.mmio ||
@@ -209,12 +211,12 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
            } else {
               hasExceptions ||
               io.ldin(i).bits.mmio ||
-             !io.ldin(i).bits.miss 
+             !io.ldin(i).bits.miss
            })
 
-        // 
+        //
         when (io.ldin(i).bits.data_wen_dup(1)) {
-          uop(loadWbIndex).pdest := io.ldin(i).bits.uop.pdest 
+          uop(loadWbIndex).pdest := io.ldin(i).bits.uop.pdest
         }
         when (io.ldin(i).bits.data_wen_dup(2)) {
           uop(loadWbIndex).cf := io.ldin(i).bits.uop.cf
@@ -228,7 +230,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
         uop(loadWbIndex).debugInfo := io.ldin(i).bits.rep_info.debug
 
         //  Debug info
-        debug_mmio(loadWbIndex) := io.ldin(i).bits.mmio 
+        debug_mmio(loadWbIndex) := io.ldin(i).bits.mmio
         debug_paddr(loadWbIndex) := io.ldin(i).bits.paddr
 
         XSInfo(io.ldin(i).valid, "load hit write to lq idx %d pc 0x%x vaddr %x paddr %x mask %x forwardData %x forwardMask: %x mmio %x\n",
@@ -240,7 +242,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
           io.ldin(i).bits.forwardData.asUInt,
           io.ldin(i).bits.forwardMask.asUInt,
           io.ldin(i).bits.mmio
-        )    
+        )
       }
     }
   }
@@ -249,7 +251,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   QueuePerf(VirtualLoadQueueSize, validCount, !allowEnqueue)
   io.lqFull := !allowEnqueue
   val perfEvents: Seq[(String, UInt)] = Seq()
-  generatePerfEvent() 
+  generatePerfEvent()
 
   // debug info
   XSDebug("enqPtrExt %d:%d deqPtrExt %d:%d\n", enqPtrExt(0).flag, enqPtr, deqPtr.flag, deqPtr.value)
