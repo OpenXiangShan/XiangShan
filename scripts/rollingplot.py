@@ -32,7 +32,7 @@ class DataSet:
                 aggcnt = 0
                 aggydata = 0
     
-    def plot(self)
+    def plot(self):
         plt.plot(self.xdata, self.ydata, lw=1, ls='-', c='black')
         plt.show()
 
