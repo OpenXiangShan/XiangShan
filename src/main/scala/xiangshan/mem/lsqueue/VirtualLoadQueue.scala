@@ -88,17 +88,19 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   val enqCancel = io.enq.req.map(_.bits.robIdx.needFlush(io.redirect))
   val lastEnqCancel = PopCount(RegNext(VecInit(canEnqueue.zip(enqCancel).map(x => x._1 && x._2))))
   val lastCycleCancelCount = PopCount(lastNeedCancel)
+  val redirectCancelCount = RegEnable(next = lastCycleCancelCount + lastEnqCancel, init = 0.U, enable = lastCycleRedirect.valid)
 
   // update enqueue pointer
-  val enqCount = Mux(io.enq.canAccept && io.enq.sqCanAccept, PopCount(io.enq.req.map(_.valid)), 0.U)
+  val enqNumber = Mux(io.enq.canAccept && io.enq.sqCanAccept, PopCount(io.enq.req.map(_.valid)), 0.U)
   val enqPtrExtNextVec = Wire(Vec(io.enq.req.length, new LqPtr))
   val enqPtrExtNext = Wire(Vec(io.enq.req.length, new LqPtr))
-  when (lastCycleRedirect.valid) {
+  when (lastLastCycleRedirect.valid) {
     // we recover the pointers in the next cycle after redirect
-    enqPtrExtNextVec := VecInit(enqPtrExt.map(_ - (lastCycleCancelCount + lastEnqCancel)))
-  }.otherwise {
-    enqPtrExtNextVec := VecInit(enqPtrExt.map(_ + enqCount))
+    enqPtrExtNextVec := VecInit(enqPtrExt.map(_ - redirectCancelCount))
+  } .otherwise {
+    enqPtrExtNextVec := VecInit(enqPtrExt.map(_ + enqNumber))
   }
+  assert(!(lastCycleRedirect.valid && enqNumber =/= 0.U))
 
   when (isAfter(enqPtrExtNextVec(0), deqPtrNext)) {
     enqPtrExtNext := enqPtrExtNextVec
@@ -127,7 +129,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   deqPtr := RegEnable(next = deqPtrNext, init = 0.U.asTypeOf(new LqPtr), enable = deqPtrUpdateEna)
 
   io.lqDeq := RegNext(lastCommitCount)
-  io.lqCancelCnt := RegNext(lastCycleCancelCount + lastEnqCancel)
+  io.lqCancelCnt := redirectCancelCount
   io.ldWbPtr := deqPtr
 
   /**
@@ -203,7 +205,6 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
         datavalid(loadWbIndex) := hasExceptions ||
                                   io.ldin(i).bits.mmio ||
                                  !io.ldin(i).bits.miss
-
 
         //
         when (io.ldin(i).bits.data_wen_dup(1)) {
