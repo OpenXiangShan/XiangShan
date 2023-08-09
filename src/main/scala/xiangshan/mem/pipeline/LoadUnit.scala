@@ -1159,7 +1159,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("s2_in_fire_first_issue",            s2_fire && s2_in.isFirstIssue)
   XSPerfAccumulate("s2_dcache_miss",                    s2_fire && s2_cache_miss)
   XSPerfAccumulate("s2_dcache_miss_first_issue",        s2_fire && s2_cache_miss && s2_in.isFirstIssue)
-  XSPerfAccumulate("s2_dcache_real_miss_first_issue",   s2_fire && io.dcache.resp.bits.real_miss && s2_in.isFirstIssue)
+  XSPerfAccumulate("s2_dcache_real_miss_first_issue",   s2_fire && io.dcache.resp.bits.miss && s2_in.isFirstIssue)
   XSPerfAccumulate("s2_full_forward",                   s2_fire && s2_full_fwd)
   XSPerfAccumulate("s2_dcache_miss_full_forward",       s2_fire && s2_cache_miss && s2_full_fwd)
   XSPerfAccumulate("s2_stall_out",                      s2_fire && !s2_can_go)
