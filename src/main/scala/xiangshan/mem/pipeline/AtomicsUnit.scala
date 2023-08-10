@@ -118,7 +118,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
   // since we will continue polling tlb all by ourself
   io.feedbackSlow.valid       := RegNext(RegNext(io.in.valid))
   io.feedbackSlow.bits.hit    := true.B
-  io.feedbackSlow.bits.rsIdx  := RegEnable(io.in.bits.iqIdx, io.in.valid)
+  io.feedbackSlow.bits.robIdx  := RegEnable(io.in.bits.uop.robIdx, io.in.valid)
   io.feedbackSlow.bits.flushState := DontCare
   io.feedbackSlow.bits.sourceType := DontCare
   io.feedbackSlow.bits.dataInvalidSqIdx := DontCare

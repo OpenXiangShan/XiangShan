@@ -136,13 +136,8 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
   io.rsFeedback.valid := io.in.valid
   io.rsFeedback.bits.hit := !s1_tlb_miss
   io.rsFeedback.bits.flushState := io.dtlbResp.bits.ptwBack
-  io.rsFeedback.bits.rsIdx := io.in.bits.rsIdx
+  io.rsFeedback.bits.robIdx := io.in.bits.uop.robIdx
   io.rsFeedback.bits.sourceType := RSFeedbackType.tlbMiss
-  XSDebug(io.rsFeedback.valid,
-    "S1 Store: tlbHit: %d robIdx: %d\n",
-    io.rsFeedback.bits.hit,
-    io.rsFeedback.bits.rsIdx
-  )
   io.rsFeedback.bits.dataInvalidSqIdx := DontCare
 
   // get paddr from dtlb, check if rollback is needed
