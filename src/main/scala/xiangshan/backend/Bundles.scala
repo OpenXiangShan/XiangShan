@@ -15,7 +15,7 @@ import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.vector.Bundles._
-import xiangshan.backend.issue.{IssueBlockParams, IssueQueueJumpBundle, SchedulerType, StatusArrayDeqRespBundle}
+import xiangshan.backend.issue.{IssueBlockParams, IssueQueueDeqRespBundle, IssueQueueJumpBundle, SchedulerType, EntryDeqRespBundle}
 import xiangshan.backend.regfile.{RfReadPortWithConfig, RfWritePortWithConfig}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend._
@@ -375,8 +375,8 @@ object Bundles {
 
   class OGRespBundle(implicit p:Parameters, params: IssueBlockParams) extends XSBundle {
     val issueQueueParams = this.params
-    val og0resp = Valid(new StatusArrayDeqRespBundle)
-    val og1resp = Valid(new StatusArrayDeqRespBundle)
+    val og0resp = Valid(new EntryDeqRespBundle)
+    val og1resp = Valid(new EntryDeqRespBundle)
   }
 
   class fuBusyRespBundle(implicit p: Parameters, params: IssueBlockParams) extends Bundle {
