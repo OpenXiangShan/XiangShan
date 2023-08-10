@@ -44,7 +44,7 @@ case class ICacheParameters(
     nReleaseEntries: Int = 1,
     nProbeEntries: Int = 2,
     nPrefetchEntries: Int = 12,
-    nPrefBufferEntries: Int = 32,
+    nPrefBufferEntries: Int = 64,
     prefetchPipeNum: Int = 2,
     hasPrefetch: Boolean = true,
     nMMIOs: Int = 1,
