@@ -403,7 +403,7 @@ class RobCommitIO(implicit p: Parameters) extends XSBundle {
 }
 
 class RSFeedback(implicit p: Parameters) extends XSBundle {
-  val rsIdx = UInt(log2Up(IQSizeMax).W)
+  val robIdx = new RobPtr
   val hit = Bool()
   val flushState = Bool()
   val sourceType = RSFeedbackType()

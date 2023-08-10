@@ -720,7 +720,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule
   io.feedbackFast.valid := io.in.valid && !io.in.bits.isLoadReplay && !s2_exception && io.lqReplayFull && io.out.bits.replayInfo.needReplay() && !io.out.bits.uop.robIdx.needFlush(io.redirect)
   io.feedbackFast.bits.hit := false.B
   io.feedbackFast.bits.flushState := io.in.bits.ptwBack
-  io.feedbackFast.bits.rsIdx := io.in.bits.rsIdx
+  io.feedbackFast.bits.robIdx := io.in.bits.uop.robIdx
   io.feedbackFast.bits.sourceType := RSFeedbackType.lrqFull
   io.feedbackFast.bits.dataInvalidSqIdx := DontCare
 
@@ -1213,7 +1213,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.feedbackSlow.valid := s3_loadOutValid && !s3_loadOutBits.uop.robIdx.needFlush(io.redirect) && s3_need_feedback 
   io.feedbackSlow.bits.hit := !io.lsq.loadIn.bits.replayInfo.needReplay() || io.lsq.loadIn.ready
   io.feedbackSlow.bits.flushState := s3_loadOutBits.ptwBack
-  io.feedbackSlow.bits.rsIdx := s3_loadOutBits.rsIdx
+  io.feedbackSlow.bits.robIdx := s3_loadOutBits.uop.robIdx
   io.feedbackSlow.bits.sourceType := RSFeedbackType.lrqFull
   io.feedbackSlow.bits.dataInvalidSqIdx := DontCare
 

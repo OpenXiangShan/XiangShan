@@ -7,8 +7,8 @@ import utility.SelectOne
 import xiangshan.XSModule
 
 class EnqPolicyIO(implicit p: IssueBlockParams) extends Bundle {
-  val valid = Input(UInt(p.numEntries.W))
-  val enqSelOHVec = Vec(p.numEnq, ValidIO(UInt(p.numEntries.W)))
+  val valid = Input(UInt((p.numEntries-p.numEnq).W))
+  val enqSelOHVec = Vec(p.numEnq, ValidIO(UInt((p.numEntries-p.numEnq).W)))
 }
 
 class EnqPolicy(implicit p: Parameters, iqP: IssueBlockParams) extends XSModule {
