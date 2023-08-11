@@ -164,5 +164,5 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
     io.diffCommits.commitValid(i) := state === s_idle && i.U < io.commitSize
     io.diffCommits.info(i) := diffCandidates(i)
   }
-
+  QueuePerf(RabSize, numValidEntries, !allowEnqueue)
 }
