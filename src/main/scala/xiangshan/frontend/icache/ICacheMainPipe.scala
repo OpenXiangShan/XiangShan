@@ -357,8 +357,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val PIQ_hit         = VecInit(Seq(PIQ_hit_oh(0).reduce(_||_) && s1_valid && tlbRespAllValid, PIQ_hit_oh(1).reduce(_||_) && s1_valid && s1_double_line && tlbRespAllValid)) // TODO: Handle TLB blocking in the PIQ
   val PIQ_hit_data    = VecInit((0 until PortNumber).map(i => Mux1H(PIQ_hit_oh(i), fromPIQ.map(_.bits.cacheline))))
   val PIQ_data_valid  = VecInit((0 until PortNumber).map(i => Mux1H(PIQ_hit_oh(i), fromPIQ.map(_.bits.writeBack))))
-  val s1_wait_vec     = VecInit((0 until PortNumber).map(i => !s1_port_hit(i) && !s1_ipf_hit_latch(i) && PIQ_hit(i) && !PIQ_data_valid(i) && !PIQ_hold_res(i)))
-  val PIQ_write_back  = VecInit((0 until PortNumber).map(i => !s1_port_hit(i) && !s1_ipf_hit_latch(i) && PIQ_hit(i) && PIQ_data_valid(i)))
+  // val s1_wait_vec     = VecInit((0 until PortNumber).map(i => !s1_port_hit(i) && !s1_ipf_hit_latch(i) && PIQ_hit(i) && !PIQ_data_valid(i) && !PIQ_hold_res(i)))
+  // val PIQ_write_back  = VecInit((0 until PortNumber).map(i => !s1_port_hit(i) && !s1_ipf_hit_latch(i) && PIQ_hit(i) && PIQ_data_valid(i)))
+  val s1_wait_vec     = VecInit((0 until PortNumber).map(i => !s1_ipf_hit_latch(i) && PIQ_hit(i) && !PIQ_data_valid(i) && !PIQ_hold_res(i)))
+  val PIQ_write_back  = VecInit((0 until PortNumber).map(i => !s1_ipf_hit_latch(i) && PIQ_hit(i) && PIQ_data_valid(i)))
   val s1_PIQ_hit      = VecInit((0 until PortNumber).map(i => PIQ_write_back(i) || PIQ_hold_res(i)))
   s1_wait := s1_valid && ((s1_wait_vec(0) && !tlbExcp(0)) || (s1_double_line && s1_wait_vec(1) && !tlbExcp(0) && !tlbExcp(1)))
 
@@ -376,7 +378,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   ))
 
   val s1_prefetch_hit = VecInit((0 until PortNumber).map(i => s1_ipf_hit_latch(i) || s1_PIQ_hit(i)))
-  val s1_prefetch_hit_data = VecInit((0 until PortNumber).map(i => Mux(s1_ipf_hit_latch(i),s1_ipf_data(i), s1_PIQ_data(i))))
+  val s1_prefetch_hit_data = VecInit((0 until PortNumber).map(i => Mux(s1_ipf_hit_latch(i), s1_ipf_data(i), s1_PIQ_data(i))))
 
   if (env.EnableDifftest) {
     (0 until PortNumber).foreach { i =>
@@ -782,7 +784,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     port_hit_data
   })
 
-  val s2_register_datas       = Wire(Vec(2, UInt(blockBits.W)))
+  val s2_register_datas       = Wire(Vec(2, UInt(blockBits.W))) 
 
   s2_register_datas.zipWithIndex.map{case(bank,i) =>
     // if(i == 0) bank := Mux(s2_port_hit(i), s2_hit_datas(i), Mux(miss_0_s2_0_latch,reservedRefillData(0), Mux(miss_1_s2_0_latch,reservedRefillData(1), missSlot(0).m_data)))
