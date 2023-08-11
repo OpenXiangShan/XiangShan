@@ -29,10 +29,10 @@ import utility._
 import utils._
 import xiangshan._
 import xiangshan.backend.Bundles.{DynInst, MemExuInput, MemExuOutput}
-import xiangshan.backend.ctrlblock.DebugLSIO
+import xiangshan.backend.ctrlblock.{DebugLSIO, LsTopdownInfo}
 import xiangshan.backend.exu.MemExeUnit
 import xiangshan.backend.fu._
-import xiangshan.backend.rob.{DebugLSIO, LsTopdownInfo, RobLsqIO}
+import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
 import xiangshan.cache.mmu._
 import xiangshan.mem._
@@ -127,7 +127,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
     val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
     val debug_ls = new DebugLSIO
-    val lsTopdownInfo = Vec(exuParameters.LduCnt, Output(new LsTopdownInfo))
+    val lsTopdownInfo = Vec(LduCnt, Output(new LsTopdownInfo))
     val l2_hint = Input(Valid(new L2ToL1Hint()))
   })
 
@@ -183,7 +183,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   storeUnits.zipWithIndex.map(x => x._1.suggestName("StoreUnit_"+x._2))
   val atomicsUnit = Module(new AtomicsUnit)
 
-  io.writeback <> VecInit(loadUnits.map(_.io.loadOut)) ++ VecInit(storeUnits.map(_.io.stout)) ++ VecInit(stdExeUnits.map(_.io.out))
+  io.writeback <> VecInit(loadUnits.map(_.io.ldout)) ++ VecInit(storeUnits.map(_.io.stout)) ++ VecInit(stdExeUnits.map(_.io.out))
   io.otherFastWakeup := DontCare
   io.otherFastWakeup.take(2).zip(loadUnits.map(_.io.fast_uop)).foreach{case(a,b)=> a := b}
   val stOut = io.writeback.drop(LduCnt).dropRight(StdCnt)
@@ -260,7 +260,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     tlb_prefetch.io // let the module have name in waveform
   })
   val dtlb = dtlb_ld ++ dtlb_st ++ dtlb_prefetch
-  val ptwio = Wire(new VectorTlbPtwIO(LduCnt + StuCnt + 1)) // load + store + hw prefetch
+  val ptwio = Wire(new VectorTlbPtwIO(LduCnt + StaCnt + 1)) // load + store + hw prefetch
   val dtlb_reqs = dtlb.map(_.requestor).flatten
   val dtlb_pmps = dtlb.map(_.pmp).flatten
   dtlb.map(_.sfence := sfence)
@@ -331,8 +331,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   for (i <- 0 until LduCnt) {
     io.debug_ls.debugLsInfo(i) := loadUnits(i).io.debug_ls
   }
-  for (i <- 0 until StuCnt) {
-    io.debug_ls.debugLsInfo(i + exuParameters.LduCnt) := storeUnits(i).io.debug_ls
+  for (i <- 0 until StaCnt) {
+    io.debug_ls.debugLsInfo(i + LduCnt) := storeUnits(i).io.debug_ls
   }
 
   io.lsTopdownInfo := loadUnits.map(_.io.lsTopdownInfo)
@@ -393,19 +393,18 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   for (i <- 0 until LduCnt) {
     loadUnits(i).io.redirect <> redirect
-    loadUnits(i).io.isFirstIssue := true.B
 
     // get input form dispatch
     loadUnits(i).io.ldin <> io.issue(i)
-    loadUnits(i).io.feedback_slow <> io.rsfeedback(i).feedbackSlow
-    loadUnits(i).io.feedback_fast <> io.rsfeedback(i).feedbackFast
+    loadUnits(i).io.feedback_slow <> io.ldaIqFeedback(i).feedbackSlow
+    loadUnits(i).io.feedback_fast <> io.ldaIqFeedback(i).feedbackFast
 
     // fast replay
     loadUnits(i).io.fast_rep_in.valid := balanceFastReplaySel(i).valid
     loadUnits(i).io.fast_rep_in.bits := balanceFastReplaySel(i).bits.req
 
     loadUnits(i).io.fast_rep_out.ready := false.B
-    for (j <- 0 until exuParameters.LduCnt) {
+    for (j <- 0 until LduCnt) {
       when (balanceFastReplaySel(j).valid && balanceFastReplaySel(j).bits.port === i.U) {
         loadUnits(i).io.fast_rep_out.ready := loadUnits(j).io.fast_rep_in.ready
       }

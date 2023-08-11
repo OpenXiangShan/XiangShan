@@ -536,7 +536,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
 
 
-    when (RegNext(io.forward(i).uop.cf.loadWaitStrict)) {
+    when (RegNext(io.forward(i).uop.loadWaitStrict)) {
       io.forward(i).addrInvalidSqIdx := RegNext(io.forward(i).uop.sqIdx - 1.U)
     } .elsewhen (addrInvalidFlag) {
       io.forward(i).addrInvalidSqIdx.flag := Mux(!s2_differentFlag || addrInvalidSqIdx >= s2_deqPtrExt.value, s2_deqPtrExt.flag, s2_enqPtrExt.flag)
@@ -545,7 +545,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       // may be store inst has been written to sbuffer already.
       io.forward(i).addrInvalidSqIdx := RegNext(io.forward(i).uop.sqIdx)
     }
-    io.forward(i).addrInvalid := Mux(RegNext(io.forward(i).uop.cf.loadWaitStrict), RegNext(hasInvalidAddr), addrInvalidFlag)
+    io.forward(i).addrInvalid := Mux(RegNext(io.forward(i).uop.loadWaitStrict), RegNext(hasInvalidAddr), addrInvalidFlag)
 
     // data invalid sq index
     // make chisel happy

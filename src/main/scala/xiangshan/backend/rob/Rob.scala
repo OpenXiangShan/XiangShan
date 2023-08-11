@@ -28,8 +28,10 @@ import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput}
 import xiangshan.backend.fu.FuType
 import xiangshan.frontend.FtqPtr
-import xiangshan.mem.{LqPtr, SqPtr}
+import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput}
+import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfo, LsTopdownInfo}
+import xiangshan.backend.rename.SnapshotGenerator
 
 class RobPtr(entries: Int) extends CircularQueuePtr[RobPtr](
   entries
@@ -300,6 +302,9 @@ class Rob(params: BackendParams)(implicit p: Parameters) extends LazyModule with
 class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendParams) extends LazyModuleImp(wrapper)
   with HasXSParameter with HasCircularQueuePtrHelper with HasPerfEvents {
 
+  private val LduCnt = params.LduCnt
+  private val StaCnt = params.StaCnt
+
   val io = IO(new Bundle() {
     val hartId = Input(UInt(8.W))
     val redirect = Input(Valid(new Redirect))
@@ -322,10 +327,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val cpu_halt = Output(Bool())
     val wfi_enable = Input(Bool())
     val debug_ls = Flipped(new DebugLSIO)
-    val debugRobHead = Output(new MicroOp)
+    val debugRobHead = Output(new DynInst)
     val debugEnqLsq = Input(new LsqEnqIO)
     val debugHeadLsIssue = Input(Bool())
-    val lsTopdownInfo = Vec(exuParameters.LduCnt, Input(new LsTopdownInfo))
+    val lsTopdownInfo = Vec(LduCnt, Input(new LsTopdownInfo))
   })
 
   val exuWBs: Seq[ValidIO[ExuOutput]] = io.writeback.filter(!_.bits.params.hasStdFu)
@@ -730,7 +735,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     misPredBlockCounter >> 1.U
   )
   val misPredBlock = misPredBlockCounter(0)
-  val blockCommit = misPredBlock || isReplaying || lastCycleFlush || hasWFI || io.redirect.valid
   val blockCommit = misPredBlock && !io.flushOut.valid || isReplaying || lastCycleFlush || hasWFI || io.redirect.valid
 
   io.commits.isWalk := state === s_walk
@@ -909,32 +913,15 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
 
   // debug_inst update
-  for(i <- 0 until (exuParameters.LduCnt + exuParameters.StuCnt)) {
+  for(i <- 0 until (LduCnt + StaCnt)) {
     debug_lsInfo(io.debug_ls.debugLsInfo(i).s1_robIdx).s1SignalEnable(io.debug_ls.debugLsInfo(i))
     debug_lsInfo(io.debug_ls.debugLsInfo(i).s2_robIdx).s2SignalEnable(io.debug_ls.debugLsInfo(i))
   }
-  for (i <- 0 until exuParameters.LduCnt) {
+  for (i <- 0 until LduCnt) {
     debug_lsTopdownInfo(io.lsTopdownInfo(i).s1.robIdx).s1SignalEnable(io.lsTopdownInfo(i))
     debug_lsTopdownInfo(io.lsTopdownInfo(i).s2.robIdx).s2SignalEnable(io.lsTopdownInfo(i))
   }
 
-  // status field: writebacked
-  // enqueue logic set 6 writebacked to false
-  for (i <- 0 until RenameWidth) {
-    when (canEnqueue(i)) {
-      val enqHasException = ExceptionNO.selectFrontend(io.enq.req(i).bits.cf.exceptionVec).asUInt.orR
-      val enqHasTriggerHit = io.enq.req(i).bits.cf.trigger.getHitFrontend
-      val enqIsWritebacked = io.enq.req(i).bits.eliminatedMove
-      writebacked(allocatePtrVec(i).value) := enqIsWritebacked && !enqHasException && !enqHasTriggerHit
-      val isStu = io.enq.req(i).bits.ctrl.fuType === FuType.stu
-      store_data_writebacked(allocatePtrVec(i).value) := !isStu
-    }
-  }
-  when (exceptionGen.io.out.valid) {
-    val wbIdx = exceptionGen.io.out.bits.robIdx.value
-    writebacked(wbIdx) := true.B
-    store_data_writebacked(wbIdx) := true.B
-  }
   // writeback logic set numWbPorts writebacked to true
   val blockWbSeq = Wire(Vec(exuWBs.length, Bool()))
   blockWbSeq.map(_ := false.B)
@@ -1059,7 +1046,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     wdata.ftqIdx := req.ftqPtr
     wdata.ftqOffset := req.ftqOffset
     wdata.isMove := req.eliminatedMove
-    wdata.isRVC := req.cf.pd.isRVC
+    wdata.isRVC := req.preDecodeInfo.isRVC
     wdata.pc := req.pc
     wdata.vtype := req.vpu.vtype
     wdata.isVset := req.isVset
@@ -1219,48 +1206,18 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   ExcitingUtils.addSource(sourceHeadLsIssue, s"rob_head_ls_issue_${coreParams.HartId}", ExcitingUtils.Perf, true)
   // dummy sink
   ExcitingUtils.addSink(WireDefault(sourceLqIdx), s"rob_head_lqIdx_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSink(WireDefault(sourcePaddr), name=s"rob_head_paddr_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSink(WireDefault(sourceVaddr), name=s"rob_head_vaddr_${coreParams.HartId}", ExcitingUtils.Perf)
 
   /**
     * DataBase info:
     * log trigger is at writeback valid
     * */
-  if(!env.FPGAPlatform){
-    val isWriteInstInfoTable = WireInit(Constantin.createRecord("isWriteInstInfoTable" + p(XSCoreParamsKey).HartId.toString))
-    val instTableName = "InstTable" + p(XSCoreParamsKey).HartId.toString
-    val instSiteName = "Rob" + p(XSCoreParamsKey).HartId.toString
-    val debug_instTable = ChiselDB.createTable(instTableName, new InstInfoEntry)
-    // FIXME lyq: only get inst (alu, bj, ls) in exuWriteback
-    for (wb <- exuWriteback) {
-      when(wb.valid) {
-        val debug_instData = Wire(new InstInfoEntry)
-        val idx = wb.bits.uop.robIdx.value
-        debug_instData.globalID := wb.bits.uop.ctrl.debug_globalID
-        debug_instData.robIdx := idx
-        debug_instData.instType := wb.bits.uop.ctrl.fuType
-        debug_instData.ivaddr := wb.bits.uop.cf.pc
-        debug_instData.dvaddr := wb.bits.debug.vaddr
-        debug_instData.dpaddr := wb.bits.debug.paddr
-        debug_instData.tlbLatency := wb.bits.uop.debugInfo.tlbRespTime - wb.bits.uop.debugInfo.tlbFirstReqTime
-        debug_instData.accessLatency := wb.bits.uop.debugInfo.writebackTime - wb.bits.uop.debugInfo.issueTime
-        debug_instData.executeLatency := wb.bits.uop.debugInfo.writebackTime - wb.bits.uop.debugInfo.issueTime
-        debug_instData.issueLatency := wb.bits.uop.debugInfo.issueTime - wb.bits.uop.debugInfo.selectTime
-        debug_instData.exceptType := Cat(wb.bits.uop.cf.exceptionVec)
-        debug_instData.lsInfo := debug_lsInfo(idx)
-        debug_instData.mdpInfo.ssid := wb.bits.uop.cf.ssid
-        debug_instData.mdpInfo.waitAllStore := wb.bits.uop.cf.loadWaitStrict && wb.bits.uop.cf.loadWaitBit
-        debug_instData.issueTime := wb.bits.uop.debugInfo.issueTime
-        debug_instData.writebackTime := wb.bits.uop.debugInfo.writebackTime
-        debug_instTable.log(
-          data = debug_instData,
-          en = wb.valid,
-          site = instSiteName,
-          clock = clock,
-          reset = reset
-        )
-      }
-    }
-  }
 
+  /**
+    * @todo add InstInfoEntry back
+    * @author Maxpicca-Li
+    */
 
   //difftest signals
   val firstValidCommit = (deqPtr + PriorityMux(io.commits.commitValid, VecInit(List.tabulate(CommitWidth)(_.U(log2Up(CommitWidth).W))))).value

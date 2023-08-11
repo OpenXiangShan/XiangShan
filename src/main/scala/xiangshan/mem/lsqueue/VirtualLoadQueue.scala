@@ -117,7 +117,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   val deqInSameRedirectCycle = VecInit(deqLookupVec.map(ptr => needCancel(ptr.value)))
   // make chisel happy
   val deqCountMask = Wire(UInt(DeqPtrMoveStride.W)) 
-  deqCountMask := deqLookup.asUInt & ~deqInSameRedirectCycle.asUInt
+  deqCountMask := deqLookup.asUInt & (~deqInSameRedirectCycle.asUInt).asUInt
   val commitCount = PopCount(PriorityEncoderOH(~deqCountMask) - 1.U)
   val lastCommitCount = RegNext(commitCount)
 
@@ -196,7 +196,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     val loadWbIndex = io.ldin(i).bits.uop.lqIdx.value
 
     when (io.ldin(i).valid) {
-      val hasExceptions = ExceptionNO.selectByFu(io.ldin(i).bits.uop.cf.exceptionVec, LduCfg).asUInt.orR
+      val hasExceptions = ExceptionNO.selectByFu(io.ldin(i).bits.uop.exceptionVec, LduCfg).asUInt.orR
       val need_rep = io.ldin(i).bits.rep_info.need_rep
 
       when (!need_rep) {
@@ -216,13 +216,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
 
         // 
         when (io.ldin(i).bits.data_wen_dup(1)) {
-          uop(loadWbIndex).pdest := io.ldin(i).bits.uop.pdest
-        }
-        when (io.ldin(i).bits.data_wen_dup(2)) {
-          uop(loadWbIndex).cf := io.ldin(i).bits.uop.cf
-        }
-        when (io.ldin(i).bits.data_wen_dup(3)) {
-          uop(loadWbIndex).ctrl := io.ldin(i).bits.uop.ctrl
+          uop(loadWbIndex) := io.ldin(i).bits.uop
         }
         when (io.ldin(i).bits.data_wen_dup(4)) {
           uop(loadWbIndex).debugInfo := io.ldin(i).bits.uop.debugInfo

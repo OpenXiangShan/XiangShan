@@ -188,12 +188,9 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
   io.ldout.bits.uop           := selUop
   io.ldout.bits.uop.lqIdx     := req.uop.lqIdx
   io.ldout.bits.data          := rdataPartialLoad
-  io.ldout.bits.redirectValid := false.B
-  io.ldout.bits.redirect      := DontCare
   io.ldout.bits.debug.isMMIO  := true.B
   io.ldout.bits.debug.paddr   := req.paddr
   io.ldout.bits.debug.vaddr   := req.vaddr
-  io.ldout.bits.fflags        := DontCare
 
   io.ld_raw_data.lqData     := uncacheData
   io.ld_raw_data.uop        := req.uop

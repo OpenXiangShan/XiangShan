@@ -23,7 +23,6 @@ import utility.HasCircularQueuePtrHelper
 import utility.ParallelPriorityMux
 import utils.XSError
 import xiangshan._
-import xiangshan.backend.SnapshotGenerator
 
 abstract class RegType
 case object Reg_I extends RegType
@@ -286,6 +285,8 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   io.diff_vconfig_rat := vecRat.io.diff_vconfig.get
   vecRat.io.readPorts <> io.vecReadPorts.flatten
   vecRat.io.redirect := io.redirect
+  vecRat.io.snpt := io.snpt
+
   //TODO: RM the donTouch
   dontTouch(vecRat.io)
   for ((arch, i) <- vecRat.io.archWritePorts.zipWithIndex) {

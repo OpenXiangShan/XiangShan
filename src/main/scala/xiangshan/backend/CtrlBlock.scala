@@ -25,14 +25,14 @@ import utils._
 import xiangshan.ExceptionNO._
 import xiangshan._
 import xiangshan.backend.Bundles.{DecodedInst, DynInst, ExceptionInfo, ExuOutput}
-import xiangshan.backend.ctrlblock.{MemCtrl, RedirectGenerator}
+import xiangshan.backend.ctrlblock.{LsTopdownInfo, MemCtrl, RedirectGenerator}
 import xiangshan.backend.datapath.DataConfig.VAddrData
 import xiangshan.backend.decode.{DecodeStage, FusionDecoder}
 import xiangshan.backend.dispatch.{Dispatch, DispatchQueue}
 import xiangshan.backend.fu.PFEvent
 import xiangshan.backend.fu.vector.Bundles.VType
-import xiangshan.backend.rename.{Rename, RenameTableWrapper}
-import xiangshan.backend.rob.{Rob, RobCSRIO, RobLsqIO}
+import xiangshan.backend.rename.{Rename, RenameTableWrapper, SnapshotGenerator}
+import xiangshan.backend.rob.{Rob, RobCSRIO, RobLsqIO, RobPtr}
 import xiangshan.frontend.{FtqRead, Ftq_RF_Components}
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
@@ -101,6 +101,7 @@ class CtrlBlockImp(
   pcMem.io.raddr(pcMemRdIndexes("robFlush").head) := s0_robFlushRedirect.bits.ftqIdx.value
   private val s1_robFlushPc = pcMem.io.rdata(pcMemRdIndexes("robFlush").head).getPc(RegNext(s0_robFlushRedirect.bits.ftqOffset))
   private val s3_redirectGen = redirectGen.io.stage2Redirect
+  private val stage2Redirect = redirectGen.io.stage2Redirect
   private val s1_s3_redirect = Mux(s1_robFlushRedirect.valid, s1_robFlushRedirect, s3_redirectGen)
   private val s2_s4_pendingRedirectValid = RegInit(false.B)
   when (s1_s3_redirect.valid) {
@@ -183,7 +184,7 @@ class CtrlBlockImp(
   // T6: io.frontend.toFtq.stage2Redirect.valid
   val s2_robFlushPc = RegEnable(Mux(s1_robFlushRedirect.bits.flushItself(),
     s1_robFlushPc, // replay inst
-    s1_robFlushPc + Mux(flushRedirect.bits.isRVC, 2.U, 4.U) // flush pipe
+    s1_robFlushPc + Mux(s1_robFlushRedirect.bits.isRVC, 2.U, 4.U) // flush pipe
   ), s1_robFlushRedirect.valid)
   private val s2_csrIsXRet = io.robio.csr.isXRet
   private val s5_csrIsTrap = DelayN(rob.io.exception.valid, 4)
@@ -229,6 +230,7 @@ class CtrlBlockImp(
   decode.io.fpRat <> rat.io.fpReadPorts
   decode.io.vecRat <> rat.io.vecReadPorts
   decode.io.fusion := 0.U.asTypeOf(decode.io.fusion) // Todo
+  decode.io.stallReason.in <> io.frontend.stallReason
 
   // snapshot check
   val snpt = Module(new SnapshotGenerator(rename.io.out.head.bits.robIdx))
@@ -256,17 +258,6 @@ class CtrlBlockImp(
   rat.io.snpt.snptDeq := snpt.io.deq
   rat.io.snpt.useSnpt := useSnpt
   rat.io.snpt.snptSelect := snptSelect
-  rename.io.snpt.snptEnq := DontCare
-  rename.io.snpt.snptDeq := snpt.io.deq
-  rename.io.snpt.useSnpt := useSnpt
-  rename.io.snpt.snptSelect := snptSelect
-
-  // prevent rob from generating snapshot when full here
-  val renameOut = Wire(chiselTypeOf(rename.io.out))
-  renameOut <> rename.io.out
-  when(isFull(snpt.io.enqPtr, snpt.io.deqPtr)) {
-    renameOut.head.bits.snapshot := false.B
-  }
 
   val decodeHasException = decode.io.out.map(x => x.bits.exceptionVec(instrPageFault) || x.bits.exceptionVec(instrAccessFault))
   // fusion decoder
@@ -355,10 +346,21 @@ class CtrlBlockImp(
   rename.io.debug_vec_rat := rat.io.debug_vec_rat
   rename.io.debug_vconfig_rat := rat.io.debug_vconfig_rat
   rename.io.stallReason.in <> decode.io.stallReason.out
+  rename.io.snpt.snptEnq := DontCare
+  rename.io.snpt.snptDeq := snpt.io.deq
+  rename.io.snpt.useSnpt := useSnpt
+  rename.io.snpt.snptSelect := snptSelect
+
+  // prevent rob from generating snapshot when full here
+  val renameOut = Wire(chiselTypeOf(rename.io.out))
+  renameOut <> rename.io.out
+  when(isFull(snpt.io.enqPtr, snpt.io.deqPtr)) {
+    renameOut.head.bits.snapshot := false.B
+  }
 
   // pipeline between rename and dispatch
   for (i <- 0 until RenameWidth) {
-    PipelineConnect(rename.io.out(i), dispatch.io.fromRename(i), dispatch.io.recv(i), s1_s3_redirect.valid)
+    PipelineConnect(renameOut(i), dispatch.io.fromRename(i), dispatch.io.recv(i), s1_s3_redirect.valid)
   }
 
   dispatch.io.hartId := io.fromTop.hartId
@@ -544,7 +546,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   // Todo: add these
   val sqCanAccept = Input(Bool())
   val lqCanAccept = Input(Bool())
-  val lsTopdownInfo = Vec(LduCnt, Input(new LsTopdownInfo))
+  val lsTopdownInfo = Vec(params.LduCnt, Input(new LsTopdownInfo))
   val robDeqPtr = Output(new RobPtr)
   val robHeadLsIssue = Input(Bool())
 }

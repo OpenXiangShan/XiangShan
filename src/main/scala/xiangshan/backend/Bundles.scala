@@ -157,10 +157,11 @@ object Bundles {
     val srcState        = Vec(numSrc, SrcState())
     val psrc            = Vec(numSrc, UInt(PhyRegIdxWidth.W))
     val pdest           = UInt(PhyRegIdxWidth.W)
-    val oldPdest        = UInt(PhyRegIdxWidth.W)
     val robIdx          = new RobPtr
 
     val eliminatedMove  = Bool()
+    // Take snapshot at this CFI inst
+    val snapshot        = Bool()
     val debugInfo       = new PerfDebugInfo
     val storeSetHit     = Bool() // inst has been allocated an store set
     val waitForRobIdx   = new RobPtr // store set predicted previous store robIdx

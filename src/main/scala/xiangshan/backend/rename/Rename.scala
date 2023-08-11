@@ -219,7 +219,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       }
     }
     uops(i).psrc(2) := io.fpReadPorts(i)(2)
-    uops(i).old_pdest := Mux(uops(i).ctrl.rfWen, io.intReadPorts(i).last, io.fpReadPorts(i).last)
+    // Todo
+    // uops(i).old_pdest := Mux(uops(i).ctrl.rfWen, io.intReadPorts(i).last, io.fpReadPorts(i).last)
     uops(i).eliminatedMove := isMove(i)
 
     // update pdest
@@ -341,7 +342,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   }
 
-  val hasCFI = VecInit(io.in.map(in => (!in.bits.cf.pd.notCFI || FuType.isJumpExu(in.bits.ctrl.fuType)) && in.fire)).asUInt.orR
+  val hasCFI = VecInit(io.in.map(in => (!in.bits.preDecodeInfo.notCFI || FuType.isJump(in.bits.fuType)) && in.fire)).asUInt.orR
   val snapshotCtr = RegInit((4 * CommitWidth).U)
   val allowSnpt = if (EnableRenameSnapshot) !snapshotCtr.orR else false.B
   io.out.head.bits.snapshot := hasCFI && allowSnpt
@@ -382,22 +383,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     intFreeList.io.freePhyReg(i) := RegNext(io.int_old_pdest(i))
     fpFreeList.io.freeReq(i)  := RegNext(commitValid && (needDestRegCommit(Reg_F, io.robCommits.info(i)) || needDestRegCommit(Reg_V, io.robCommits.info(i))))
     fpFreeList.io.freePhyReg(i) := io.fp_old_pdest(i)
-
-    intRefCounter.io.deallocate(i).valid := commitValid && needDestRegCommit(Reg_I, io.robCommits.info(i)) && !io.robCommits.isWalk
-    intRefCounter.io.deallocate(i).bits := io.robCommits.info(i).old_pdest
-  }
-
-  when(io.robCommits.isWalk) {
-    (intFreeList.io.allocateReq zip intFreeList.io.allocatePhyReg).take(CommitWidth) zip io.robCommits.info foreach {
-      case ((reqValid, allocReg), commitInfo) => when(reqValid) {
-        XSError(allocReg =/= commitInfo.pdest, "walk alloc reg =/= rob reg\n")
-      }
-    }
-    (fpFreeList.io.allocateReq zip fpFreeList.io.allocatePhyReg).take(CommitWidth) zip io.robCommits.info foreach {
-      case ((reqValid, allocReg), commitInfo) => when(reqValid) {
-        XSError(allocReg =/= commitInfo.pdest, "walk alloc reg =/= rob reg\n")
-      }
-    }
   }
 
   /*

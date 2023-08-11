@@ -22,6 +22,7 @@ import chisel3.util._
 import utils._
 import utility._
 import xiangshan._
+import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
@@ -52,7 +53,7 @@ class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircula
     !s2_req(i).uop.robIdx.needFlush(RegNext(io.redirect)) &&
     !s2_req(i).uop.robIdx.needFlush(io.redirect)
   )
-  val s2_has_exception = s2_req.map(x => ExceptionNO.selectByFu(x.uop.cf.exceptionVec, lduCfg).asUInt.orR)
+  val s2_has_exception = s2_req.map(x => ExceptionNO.selectByFu(x.uop.exceptionVec, LduCfg).asUInt.orR)
 
   val s2_enqueue = Wire(Vec(LoadPipelineWidth, Bool()))
   for (w <- 0 until LoadPipelineWidth) {

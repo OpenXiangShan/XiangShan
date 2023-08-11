@@ -74,3 +74,34 @@ class DebugLsInfoBundle(implicit p: Parameters) extends DebugLsInfo {
 class DebugLSIO(implicit p: Parameters) extends XSBundle {
   val debugLsInfo = Vec(backendParams.LduCnt + backendParams.StaCnt, Output(new DebugLsInfoBundle))
 }
+
+class LsTopdownInfo(implicit p: Parameters) extends XSBundle {
+  val s1 = new Bundle {
+    val robIdx = UInt(log2Ceil(RobSize).W)
+    val vaddr_valid = Bool()
+    val vaddr_bits = UInt(VAddrBits.W)
+  }
+  val s2 = new Bundle {
+    val robIdx = UInt(log2Ceil(RobSize).W)
+    val paddr_valid = Bool()
+    val paddr_bits = UInt(PAddrBits.W)
+  }
+
+  def s1SignalEnable(ena: LsTopdownInfo) = {
+    when(ena.s1.vaddr_valid) {
+      s1.vaddr_valid := true.B
+      s1.vaddr_bits := ena.s1.vaddr_bits
+    }
+  }
+
+  def s2SignalEnable(ena: LsTopdownInfo) = {
+    when(ena.s2.paddr_valid) {
+      s2.paddr_valid := true.B
+      s2.paddr_bits := ena.s2.paddr_bits
+    }
+  }
+}
+
+object LsTopdownInfo {
+  def init(implicit p: Parameters): LsTopdownInfo = 0.U.asTypeOf(new LsTopdownInfo)
+}

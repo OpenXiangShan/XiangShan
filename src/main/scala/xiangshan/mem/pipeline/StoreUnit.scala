@@ -23,24 +23,24 @@ import utils._
 import utility._
 import xiangshan.ExceptionNO._
 import xiangshan._
+import xiangshan.backend.Bundles.{MemExuInput, MemExuOutput}
 import xiangshan.backend.fu.PMPRespBundle
-import xiangshan.backend.rob.DebugLsInfoBundle
+import xiangshan.backend.fu.FuConfig._
+import xiangshan.backend.ctrlblock.DebugLsInfoBundle
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
 
 class StoreUnit(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val redirect        = Flipped(ValidIO(new Redirect))
-    val stin            = Flipped(Decoupled(new ExuInput))
-    val issue           = Valid(new ExuInput)
+    val stin            = Flipped(Decoupled(new MemExuInput))
+    val issue           = Valid(new MemExuInput)
     val tlb             = new TlbRequestIO()
     val pmp             = Flipped(new PMPRespBundle())
-    val rsIdx           = Input(UInt(log2Up(IssQueSize).W))
-    val isFirstIssue    = Input(Bool())
     val lsq             = ValidIO(new LsPipelineBundle)
     val lsq_replenish   = Output(new LsPipelineBundle())
     val feedback_slow   = ValidIO(new RSFeedback)
     val stld_nuke_query = Valid(new StoreNukeQueryIO)
-    val stout           = DecoupledIO(new ExuOutput) // writeback store
+    val stout           = DecoupledIO(new MemExuOutput) // writeback store
     // store mask, send to sq in store_s0
     val st_mask_out     = Valid(new StoreMaskBundle)
     val debug_ls        = Output(new DebugLsInfoBundle)
@@ -55,16 +55,16 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   // generate addr, use addr to query DCache and DTLB
   val s0_valid        = io.stin.valid
   val s0_in           = io.stin.bits
-  val s0_isFirstIssue = io.isFirstIssue
-  val s0_rsIdx        = io.rsIdx
+  val s0_isFirstIssue = io.stin.bits.isFirstIssue
+  val s0_rsIdx        = io.stin.bits.iqIdx
   val s0_out          = Wire(new LsPipelineBundle)
   val s0_kill         = s0_in.uop.robIdx.needFlush(io.redirect)
   val s0_can_go       = s1_ready
   val s0_fire         = s0_valid && !s0_kill && s0_can_go
 
   // generate addr
-  // val saddr = s0_in.bits.src(0) + SignExt(s0_in.bits.uop.ctrl.imm(11,0), VAddrBits)
-  val imm12 = WireInit(s0_in.uop.ctrl.imm(11,0))
+  // val saddr = s0_in.bits.src(0) + SignExt(s0_in.bits.uop.imm(11,0), VAddrBits)
+  val imm12 = WireInit(s0_in.uop.imm(11,0))
   val saddr_lo = s0_in.src(0)(11,0) + Cat(0.U(1.W), imm12)
   val saddr_hi = Mux(saddr_lo(12),
     Mux(imm12(11), s0_in.src(0)(VAddrBits-1, 12), s0_in.src(0)(VAddrBits-1, 12)+1.U),
@@ -75,41 +75,41 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   io.tlb.req.valid             := s0_valid
   io.tlb.req.bits.vaddr        := s0_saddr
   io.tlb.req.bits.cmd          := TlbCmd.write
-  io.tlb.req.bits.size         := LSUOpType.size(s0_in.uop.ctrl.fuOpType)
+  io.tlb.req.bits.size         := LSUOpType.size(s0_in.uop.fuOpType)
   io.tlb.req.bits.kill         := DontCare
   io.tlb.req.bits.memidx.is_ld := false.B
   io.tlb.req.bits.memidx.is_st := true.B
   io.tlb.req.bits.memidx.idx   := s0_in.uop.sqIdx.value
   io.tlb.req.bits.debug.robIdx := s0_in.uop.robIdx
   io.tlb.req.bits.no_translate := false.B
-  io.tlb.req.bits.debug.pc     := s0_in.uop.cf.pc
+  io.tlb.req.bits.debug.pc     := s0_in.uop.pc
   io.tlb.req.bits.debug.isFirstIssue := s0_isFirstIssue
   io.tlb.req_kill              := false.B
 
   s0_out              := DontCare
   s0_out.vaddr        := s0_saddr
   // Now data use its own io
-  // s1_out.data := genWdata(s1_in.src(1), s1_in.uop.ctrl.fuOpType(1,0))
+  // s1_out.data := genWdata(s1_in.src(1), s1_in.uop.fuOpType(1,0))
   s0_out.data         := s0_in.src(1) // FIXME: remove data from pipeline
   s0_out.uop          := s0_in.uop
   s0_out.miss         := DontCare
   s0_out.rsIdx        := s0_rsIdx
-  s0_out.mask         := genVWmask(s0_saddr, s0_in.uop.ctrl.fuOpType(1,0))
+  s0_out.mask         := genVWmask(s0_saddr, s0_in.uop.fuOpType(1,0))
   s0_out.isFirstIssue := s0_isFirstIssue
   s0_out.isHWPrefetch := false.B // TODO
-  s0_out.wlineflag    := s0_in.uop.ctrl.fuOpType === LSUOpType.cbo_zero
+  s0_out.wlineflag    := s0_in.uop.fuOpType === LSUOpType.cbo_zero
   when(s0_valid && s0_isFirstIssue) {
     s0_out.uop.debugInfo.tlbFirstReqTime := GTimer()
   }
 
   // exception check
-  val s0_addr_aligned = LookupTree(s0_in.uop.ctrl.fuOpType(1,0), List(
+  val s0_addr_aligned = LookupTree(s0_in.uop.fuOpType(1,0), List(
     "b00".U   -> true.B,              //b
     "b01".U   -> (s0_out.vaddr(0) === 0.U),   //h
     "b10".U   -> (s0_out.vaddr(1,0) === 0.U), //w
     "b11".U   -> (s0_out.vaddr(2,0) === 0.U)  //d
   ))
-  s0_out.uop.cf.exceptionVec(storeAddrMisaligned) := !s0_addr_aligned
+  s0_out.uop.exceptionVec(storeAddrMisaligned) := !s0_addr_aligned
 
   io.st_mask_out.valid       := s0_valid
   io.st_mask_out.bits.mask   := s0_out.mask
@@ -130,13 +130,13 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   val s1_fire   = s1_valid && !s1_kill && s1_can_go
 
   // mmio cbo decoder
-  val s1_mmio_cbo  = s1_in.uop.ctrl.fuOpType === LSUOpType.cbo_clean ||
-                     s1_in.uop.ctrl.fuOpType === LSUOpType.cbo_flush ||
-                     s1_in.uop.ctrl.fuOpType === LSUOpType.cbo_inval
+  val s1_mmio_cbo  = s1_in.uop.fuOpType === LSUOpType.cbo_clean ||
+                     s1_in.uop.fuOpType === LSUOpType.cbo_flush ||
+                     s1_in.uop.fuOpType === LSUOpType.cbo_inval
   val s1_paddr     = io.tlb.resp.bits.paddr(0)
   val s1_tlb_miss  = io.tlb.resp.bits.miss
   val s1_mmio      = s1_mmio_cbo
-  val s1_exception = ExceptionNO.selectByFu(s1_out.uop.cf.exceptionVec, staCfg).asUInt.orR
+  val s1_exception = ExceptionNO.selectByFu(s1_out.uop.exceptionVec, StaCfg).asUInt.orR
   s1_kill := s1_in.uop.robIdx.needFlush(io.redirect) || s1_tlb_miss
 
   s1_ready := !s1_valid || s1_kill || s2_ready
@@ -190,8 +190,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   s1_out.miss   := false.B
   s1_out.mmio   := s1_mmio
   s1_out.atomic := s1_mmio
-  s1_out.uop.cf.exceptionVec(storePageFault)   := io.tlb.resp.bits.excp(0).pf.st
-  s1_out.uop.cf.exceptionVec(storeAccessFault) := io.tlb.resp.bits.excp(0).af.st
+  s1_out.uop.exceptionVec(storePageFault)   := io.tlb.resp.bits.excp(0).pf.st
+  s1_out.uop.exceptionVec(storeAccessFault) := io.tlb.resp.bits.excp(0).af.st
 
   io.lsq.valid     := s1_valid
   io.lsq.bits      := s1_out
@@ -230,14 +230,14 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
     s2_pmp.mmio  := s2_static_pm.bits
   }
 
-  val s2_exception = ExceptionNO.selectByFu(s2_out.uop.cf.exceptionVec, staCfg).asUInt.orR
+  val s2_exception = ExceptionNO.selectByFu(s2_out.uop.exceptionVec, StaCfg).asUInt.orR
   val s2_mmio = s2_in.mmio || s2_pmp.mmio
   s2_kill := (s2_mmio && !s2_exception) || s2_in.uop.robIdx.needFlush(io.redirect)
 
   s2_out        := s2_in
   s2_out.mmio   := s2_mmio && !s2_exception
   s2_out.atomic := s2_in.atomic || s2_pmp.atomic
-  s2_out.uop.cf.exceptionVec(storeAccessFault) := s2_in.uop.cf.exceptionVec(storeAccessFault) || s2_pmp.st
+  s2_out.uop.exceptionVec(storeAccessFault) := s2_in.uop.exceptionVec(storeAccessFault) || s2_pmp.st
 
   // feedback tlb miss to RS in store_s2
   io.feedback_slow.valid := RegNext(s1_feedback.valid && !s1_out.uop.robIdx.needFlush(io.redirect))
@@ -253,7 +253,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   // store write back
   val s3_valid  = RegInit(false.B)
   val s3_in     = RegEnable(s2_out, s2_fire)
-  val s3_out    = Wire(new ExuOutput)
+  val s3_out    = Wire(new MemExuOutput)
   val s3_kill   = s3_in.uop.robIdx.needFlush(io.redirect)
   val s3_can_go = s3_ready
   val s3_fire   = s3_valid && !s3_kill && s3_can_go
@@ -270,13 +270,10 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   s3_out                 := DontCare
   s3_out.uop             := s3_in.uop
   s3_out.data            := DontCare
-  s3_out.redirectValid   := false.B
-  s3_out.redirect        := DontCare
   s3_out.debug.isMMIO    := s3_in.mmio
   s3_out.debug.paddr     := s3_in.paddr
   s3_out.debug.vaddr     := s3_in.vaddr
   s3_out.debug.isPerfCnt := false.B
-  s3_out.fflags          := DontCare
 
   // Pipeline
   // --------------------------------------------------------------------------------
@@ -286,7 +283,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   val TotalDelayCycles = TotalSelectCycles - 2
   val sx_valid = Wire(Vec(TotalDelayCycles + 1, Bool()))
   val sx_ready = Wire(Vec(TotalDelayCycles + 1, Bool()))
-  val sx_in    = Wire(Vec(TotalDelayCycles + 1, new ExuOutput))
+  val sx_in    = Wire(Vec(TotalDelayCycles + 1, new MemExuOutput))
 
   // backward ready signal
   s3_ready := sx_ready.head
@@ -321,9 +318,9 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
 
   private def printPipeLine(pipeline: LsPipelineBundle, cond: Bool, name: String): Unit = {
     XSDebug(cond,
-      p"$name" + p" pc ${Hexadecimal(pipeline.uop.cf.pc)} " +
+      p"$name" + p" pc ${Hexadecimal(pipeline.uop.pc)} " +
         p"addr ${Hexadecimal(pipeline.vaddr)} -> ${Hexadecimal(pipeline.paddr)} " +
-        p"op ${Binary(pipeline.uop.ctrl.fuOpType)} " +
+        p"op ${Binary(pipeline.uop.fuOpType)} " +
         p"data ${Hexadecimal(pipeline.data)} " +
         p"mask ${Hexadecimal(pipeline.mask)}\n"
     )

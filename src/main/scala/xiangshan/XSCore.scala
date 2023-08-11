@@ -27,13 +27,9 @@ import system.HasSoCParameter
 import utility._
 import utils._
 import xiangshan.backend._
-import xiangshan.backend.exu.{ExuConfig, Wb2Ctrl, WbArbiterWrapper}
 import xiangshan.cache.mmu._
 import xiangshan.frontend._
-import xiangshan.backend._
 import xiangshan.mem.L1PrefetchFuzzer
-
-import scala.collection.mutable.ListBuffer
 
 abstract class XSModule(implicit val p: Parameters) extends Module
   with HasXSParameter
@@ -152,6 +148,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.loadFastImm <> memBlock.io.loadFastImm
   backend.io.mem.exceptionVAddr := memBlock.io.lsqio.exceptionAddr.vaddr
   backend.io.mem.csrDistributedUpdate := memBlock.io.csrUpdate
+  backend.io.mem.debugLS := memBlock.io.debug_ls
+  backend.io.mem.lsTopdownInfo := memBlock.io.lsTopdownInfo
 
   backend.io.perf.frontendInfo := frontend.io.frontendInfo
   backend.io.perf.memInfo := memBlock.io.memInfo
@@ -168,14 +166,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.lsqio.rob <> backend.io.mem.robLsqIO
   memBlock.io.lsqio.exceptionAddr.isStore := backend.io.mem.isStoreException
   memBlock.io.itlb <> frontend.io.ptw
-  memBlock.io.redirect <> ctrlBlock.io.redirect
-  memBlock.io.rsfeedback <> exuBlocks(0).io.scheExtra.feedback.get
-  memBlock.io.csrCtrl <> csrioIn.customCtrl
-  memBlock.io.tlbCsr <> csrioIn.tlb
-  memBlock.io.lsqio.rob <> ctrlBlock.io.robio.lsq
-  memBlock.io.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(ctrlBlock.io.robio.exception.bits.uop.ctrl.commitType)
-  memBlock.io.debug_ls <> ctrlBlock.io.robio.debug_ls
-  memBlock.io.lsTopdownInfo <> ctrlBlock.io.robio.lsTopdownInfo
   memBlock.io.l2_hint.valid := io.l2_hint.valid
   memBlock.io.l2_hint.bits.sourceId := io.l2_hint.bits.sourceId
 

@@ -9,6 +9,10 @@ import utility._
 import xiangshan.backend.Bundles.DynInst
 import xiangshan.backend.decode.VectorConstants
 
+class RenameBufferEntry(implicit p: Parameters) extends RobCommitInfo {
+  val robIdx = new RobPtr
+}
+
 class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
     val redirectValid = Input(Bool())
@@ -50,7 +54,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
     robWalkEnd := true.B
   }
 
-  val renameBuffer = RegInit(VecInit(Seq.fill(size){0.U.asTypeOf(new RobCommitInfo)}))
+  val renameBuffer = RegInit(VecInit(Seq.fill(size){0.U.asTypeOf(new RenameBufferEntry)}))
 
   // pointer
   // tail: enq and walk
@@ -127,11 +131,11 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
     when(realNeedAlloc){
       renameBuffer(allocatePtr).ldest := req.bits.ldest
       renameBuffer(allocatePtr).pdest := req.bits.pdest
-      renameBuffer(allocatePtr).old_pdest := req.bits.oldPdest
       renameBuffer(allocatePtr).rfWen := req.bits.rfWen
       renameBuffer(allocatePtr).fpWen := req.bits.fpWen
       renameBuffer(allocatePtr).vecWen := req.bits.vecWen
       renameBuffer(allocatePtr).isMove := req.bits.eliminatedMove
+      renameBuffer(allocatePtr).robIdx := req.bits.robIdx
     }
   }
 
@@ -142,6 +146,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
     io.commits.commitValid(i) := state === s_idle && i.U < commitSize
     io.commits.walkValid(i) := state === s_walk && i.U < walkSize
     io.commits.info(i) := Mux(state === s_idle, commitCandidates(i), walkCandidates(i))
+    io.commits.robIdx(i) := Mux(state === s_idle, commitCandidates(i).robIdx, walkCandidates(i).robIdx)
   }
 
   stateNxt := Mux(io.redirectValid, s_walk,

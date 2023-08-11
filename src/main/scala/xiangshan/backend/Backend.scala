@@ -7,6 +7,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility.ZeroExt
 import xiangshan._
 import xiangshan.backend.Bundles.{DynInst, IssueQueueIQWakeUpBundle, MemExuInput, MemExuOutput}
+import xiangshan.backend.ctrlblock.{DebugLSIO, LsTopdownInfo}
 import xiangshan.backend.datapath.DataConfig.{IntData, VecData}
 import xiangshan.backend.datapath.RdConfig.{IntRD, VfRD}
 import xiangshan.backend.datapath.WbConfig._
@@ -113,6 +114,7 @@ class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyMod
 class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends LazyModuleImp(wrapper)
   with HasXSParameter {
   implicit private val params = wrapper.params
+
   val io = IO(new BackendIO()(p, wrapper.params))
 
   private val ctrlBlock = wrapper.ctrlBlock.module
@@ -429,9 +431,12 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
 
   val csrDistributedUpdate = Flipped(new DistributedCSRUpdateReq)
 
+  val debugLS = Flipped(Output(new DebugLSIO))
+
+  val lsTopdownInfo = Vec(params.LduCnt, Flipped(Output(new LsTopdownInfo)))
   // Output
   val redirect = ValidIO(new Redirect)   // rob flush MemBlock
-  val issueUops = MixedVec(Seq.fill(params.LduCnt + params.StaCnt * 2)(DecoupledIO(new MemExuInput())) ++ Seq.fill(params.VlduCnt)(DecoupledIO(new MemExuInput(true))))
+  val issueUops = MixedVec(Seq.fill(params.LduCnt + params.StaCnt + params.StdCnt)(DecoupledIO(new MemExuInput())) ++ Seq.fill(params.VlduCnt)(DecoupledIO(new MemExuInput(true))))
   val loadFastMatch = Vec(params.LduCnt, Output(UInt(params.LduCnt.W)))
   val loadFastImm   = Vec(params.LduCnt, Output(UInt(12.W))) // Imm_I
 

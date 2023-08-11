@@ -19,9 +19,10 @@ import chisel3._
 import chisel3.util._
 import chipsalliance.rocketchip.config._
 import xiangshan._
-import xiangshan.backend.rob.{RobPtr, RobLsqIO}
+import xiangshan.backend.rob.{RobLsqIO, RobPtr}
 import xiangshan.cache._
 import xiangshan.backend.fu.fpu.FPU
+import xiangshan.backend.fu.FuConfig._
 import xiangshan.cache._
 import xiangshan.frontend.FtqPtr
 import xiangshan.ExceptionNO._
@@ -29,6 +30,7 @@ import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.mem.mdp._
 import utils._
 import utility._
+import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
 
 object LoadReplayCauses {
   // these causes have priority, lower coding has higher priority.
@@ -160,7 +162,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
 
     // from std s1
-    val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new ExuOutput)))
+    val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new MemExuOutput)))
 
     // queue-based replay
     val replay = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))
@@ -195,7 +197,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   //  Flags       : rar/raw queue allocate flags
   val allocated = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B))) // The control signals need to explicitly indicate the initial value
   val scheduled = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
-  val uop = Reg(Vec(LoadQueueReplaySize, new MicroOp))
+  val uop = Reg(Vec(LoadQueueReplaySize, new DynInst))
   val vaddrModule = Module(new LqVAddrModule(
     gen = UInt(VAddrBits.W),
     numEntries = LoadQueueReplaySize,
@@ -261,7 +263,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val canEnqueue = io.enq.map(_.valid)
   val cancelEnq = io.enq.map(enq => enq.bits.uop.robIdx.needFlush(io.redirect))
   val needReplay = io.enq.map(enq => enq.bits.rep_info.need_rep)
-  val hasExceptions = io.enq.map(enq => ExceptionNO.selectByFu(enq.bits.uop.cf.exceptionVec, lduCfg).asUInt.orR && !enq.bits.tlbMiss)
+  val hasExceptions = io.enq.map(enq => ExceptionNO.selectByFu(enq.bits.uop.exceptionVec, LduCfg).asUInt.orR && !enq.bits.tlbMiss)
   val loadReplay = io.enq.map(enq => enq.bits.isLoadReplay)
   val needEnqueue = VecInit((0 until LoadPipelineWidth).map(w => {
     canEnqueue(w) && !cancelEnq(w) && needReplay(w) && !hasExceptions(w)

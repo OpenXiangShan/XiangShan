@@ -77,6 +77,8 @@ object FuType {
 
   def isVector(fuType: UInt): Bool = fuType(27, 24).orR || fuType(21, 16).orR // except vset
 
+  def isDivSqrt(fuType: UInt): Bool = fuType(6) || fuType(12)
+
   def storeIsAMO(fuType: UInt): Bool = fuType(15)
 
   val functionNameMap = Map(

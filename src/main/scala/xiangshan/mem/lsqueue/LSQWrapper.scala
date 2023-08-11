@@ -22,9 +22,10 @@ import chisel3.util._
 import utils._
 import utility._
 import xiangshan._
+import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
 import xiangshan.cache._
-import xiangshan.cache.{DCacheWordIO, DCacheLineIO, MemoryOpConstants}
-import xiangshan.cache.mmu.{TlbRequestIO}
+import xiangshan.cache.{DCacheLineIO, DCacheWordIO, MemoryOpConstants}
+import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.mem._
 import xiangshan.backend.rob.RobLsqIO
 
