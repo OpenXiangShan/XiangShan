@@ -27,8 +27,8 @@ import freechips.rocketchip.tilelink.ClientStates._
 import freechips.rocketchip.tilelink.MemoryOpCategories._
 import freechips.rocketchip.tilelink.TLPermissions._
 import difftest._
-import coupledL2.{AliasKey, DirtyKey, PrefetchKey}
-import mem.{AddPipelineReg}
+import coupledL2.{AliasKey, VaddrKey, DirtyKey, PrefetchKey}
+import mem.AddPipelineReg
 import mem.trace._
 
 class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
@@ -187,6 +187,8 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
     acquire := Mux(req.full_overwrite, acquirePerm, acquireBlock)
     // resolve cache alias by L2
     acquire.user.lift(AliasKey).foreach( _ := req.vaddr(13, 12))
+    // pass vaddr to l2
+    acquire.user.lift(VaddrKey).foreach(_ := req.vaddr(VAddrBits - 1, blockOffBits))
     // trigger prefetch
     acquire.user.lift(PrefetchKey).foreach(_ := Mux(l2_pf_store_only, req.isFromStore, true.B))
     // req source
@@ -586,6 +588,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   io.mem_acquire.bits := Mux(full_overwrite, acquirePerm, acquireBlock)
   // resolve cache alias by L2
   io.mem_acquire.bits.user.lift(AliasKey).foreach( _ := req.vaddr(13, 12))
+  // pass vaddr to l2
+  io.mem_acquire.bits.user.lift(VaddrKey).foreach( _ := req.vaddr(VAddrBits-1, blockOffBits))
   // trigger prefetch
   io.mem_acquire.bits.user.lift(PrefetchKey).foreach(_ := Mux(io.l2_pf_store_only, req.isFromStore, true.B))
   // req source
