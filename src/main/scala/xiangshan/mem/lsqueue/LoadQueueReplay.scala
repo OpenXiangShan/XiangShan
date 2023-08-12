@@ -44,12 +44,12 @@ object LoadReplayCauses {
    * ************************************************************
    *
    */
-  // tlb miss check
-  val C_TM  = 0
-  // st-ld violation
-  val C_NK  = 1
   // st-ld violation re-execute check
-  val C_MA  = 2
+  val C_MA  = 0
+  // tlb miss check
+  val C_TM  = 1
+  // st-ld violation
+  val C_NK  = 2
   // store-to-load-forwarding check
   val C_FF  = 3
   // dcache replay check
