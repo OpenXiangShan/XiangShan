@@ -73,13 +73,14 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     }
     val ldout = Vec(LoadPipelineWidth, DecoupledIO(new ExuOutput))
     val ld_raw_data = Vec(LoadPipelineWidth, Output(new LoadDataFromLQBundle))
-    val replay = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle)) 
-    val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddr)) 
+    val replay = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))
+    val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddr))
     val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
     val rob = Flipped(new RobLsqIO)
     val rollback = Output(Valid(new Redirect))
     val release = Flipped(Valid(new Release))
     val refill = Flipped(Valid(new Refill))
+    val tl_d_channel  = Input(new DcacheToLduForwardIO)
     val uncacheOutstanding = Input(Bool())
     val uncache = new UncacheWordIO
     val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
@@ -97,6 +98,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
     val issuePtrExt = Output(new SqPtr)
     val l2_hint = Input(Valid(new L2ToL1Hint()))
+    val force_write = Output(Bool())
   })
 
   val loadQueue = Module(new LoadQueue)
@@ -104,7 +106,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
 
   storeQueue.io.hartId := io.hartId
   storeQueue.io.uncacheOutstanding := io.uncacheOutstanding
-  
+
 
   dontTouch(loadQueue.io.tlbReplayDelayCycleCtrl)
   val tlbReplayDelayCycleCtrl = WireInit(VecInit(Seq(14.U(ReSelectLen.W), 0.U(ReSelectLen.W), 125.U(ReSelectLen.W), 0.U(ReSelectLen.W))))
@@ -149,6 +151,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   storeQueue.io.sqEmpty     <> io.sqEmpty
   storeQueue.io.sqFull      <> io.sqFull
   storeQueue.io.forward     <> io.forward // overlap forwardMask & forwardData, DO NOT CHANGE SEQUENCE
+  storeQueue.io.force_write <> io.force_write
 
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
 
@@ -161,10 +164,11 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   loadQueue.io.rollback            <> io.rollback
   loadQueue.io.replay              <> io.replay
   loadQueue.io.refill              <> io.refill
+  loadQueue.io.tl_d_channel        <> io.tl_d_channel
   loadQueue.io.release             <> io.release
   loadQueue.io.trigger             <> io.trigger
   loadQueue.io.exceptionAddr.isStore := DontCare
-  loadQueue.io.lqCancelCnt         <> io.lqCancelCnt 
+  loadQueue.io.lqCancelCnt         <> io.lqCancelCnt
   loadQueue.io.sq.stAddrReadySqPtr <> storeQueue.io.stAddrReadySqPtr
   loadQueue.io.sq.stAddrReadyVec   <> storeQueue.io.stAddrReadyVec
   loadQueue.io.sq.stDataReadySqPtr <> storeQueue.io.stDataReadySqPtr
@@ -194,7 +198,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   switch(pendingstate){
     is(s_idle){
       when(io.uncache.req.fire() && !io.uncacheOutstanding){
-        pendingstate := Mux(loadQueue.io.uncache.req.valid, s_load, 
+        pendingstate := Mux(loadQueue.io.uncache.req.valid, s_load,
                           Mux(io.uncacheOutstanding, s_idle, s_store))
       }
     }
@@ -220,7 +224,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     io.uncache.req <> storeQueue.io.uncache.req
   }
   when (io.uncacheOutstanding) {
-    io.uncache.resp <> loadQueue.io.uncache.resp  
+    io.uncache.resp <> loadQueue.io.uncache.resp
   } .otherwise {
     when(pendingstate === s_load){
       io.uncache.resp <> loadQueue.io.uncache.resp
@@ -228,7 +232,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
       io.uncache.resp <> storeQueue.io.uncache.resp
     }
   }
-  
+
 
   assert(!(loadQueue.io.uncache.req.valid && storeQueue.io.uncache.req.valid))
   assert(!(loadQueue.io.uncache.resp.valid && storeQueue.io.uncache.resp.valid))

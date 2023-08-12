@@ -623,6 +623,8 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   val s2_pht_hit = Cat(s2_hit_vec).orR
   val s2_hist = Mux(s2_pht_hit, Mux1H(s2_hit_vec, s2_hist_update), s2_new_hist)
   val s2_repl_way_mask = UIntToOH(s2_replace_way)
+  val s2_incr_region_vaddr = s2_region_vaddr + 1.U
+  val s2_decr_region_vaddr = s2_region_vaddr - 1.U
 
   // pipe s3: send addr/data to ram, gen pf_req
   val s3_valid = RegNext(s2_valid, false.B)
@@ -643,6 +645,8 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   val s3_repl_way_mask = RegEnable(s2_repl_way_mask, s2_valid)
   val s3_repl_update_mask = RegEnable(VecInit((0 until PHT_SETS).map(i => i.U === s2_ram_waddr)), s2_valid)
   val s3_ram_waddr = RegEnable(s2_ram_waddr, s2_valid)
+  val s3_incr_region_vaddr = RegEnable(s2_incr_region_vaddr, s2_valid)
+  val s3_decr_region_vaddr = RegEnable(s2_decr_region_vaddr, s2_valid)
   s3_ram_en := s3_valid && s3_evict
   val s3_ram_wdata = Wire(new PhtEntry())
   s3_ram_wdata.hist := s3_hist
@@ -699,9 +703,7 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   val s3_cur_region_valid =  s3_pf_gen_valid && (s3_hist_pf_gen & s3_hist_update_mask).orR
   val s3_incr_region_valid = s3_pf_gen_valid && (s3_hist_hi & (~s3_hist_update_mask.head(REGION_BLKS - 1)).asUInt).orR
   val s3_decr_region_valid = s3_pf_gen_valid && (s3_hist_lo & (~s3_hist_update_mask.tail(REGION_BLKS - 1)).asUInt).orR
-  val s3_incr_region_vaddr = s3_region_vaddr + 1.U
   val s3_incr_alias_bits = get_alias_bits(s3_incr_region_vaddr)
-  val s3_decr_region_vaddr = s3_region_vaddr - 1.U
   val s3_decr_alias_bits = get_alias_bits(s3_decr_region_vaddr)
   val s3_incr_region_paddr = Cat(
     s3_region_paddr(REGION_ADDR_BITS - 1, REGION_ADDR_PAGE_BIT),

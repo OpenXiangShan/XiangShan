@@ -116,7 +116,7 @@ class DataSRAM(bankIdx: Int, wayIdx: Int)(implicit p: Parameters) extends DCache
   data_sram.io.r.req.valid := io.r.en
   data_sram.io.r.req.bits.apply(setIdx = io.r.addr)
   io.r.data := data_sram.io.r.resp.data(0)
-  XSPerfAccumulate("data_sram_read_counter", data_sram.io.r.req.valid)
+  XSPerfAccumulate("part_data_read_counter", data_sram.io.r.req.valid)
 
   def dump_r() = {
     when(RegNext(io.r.en)) {
@@ -191,7 +191,7 @@ class DataSRAMBank(index: Int)(implicit p: Parameters) extends DCacheModule {
     data_bank(w).io.r.req.valid := io.r.en
     data_bank(w).io.r.req.bits.apply(setIdx = io.r.addr)
   }
-  XSPerfAccumulate("data_read_counter", PopCount(Cat(data_bank.map(_.io.r.req.valid))))
+  XSPerfAccumulate("part_data_read_counter", PopCount(Cat(data_bank.map(_.io.r.req.valid))))
 
   val half = nWays / 2
   val data_read = data_bank.map(_.io.r.resp.data(0))
@@ -345,7 +345,9 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
   val line_set_addr = addr_to_dcache_div_set(io.readline.bits.addr)
   val line_div_addr = addr_to_dcache_div(io.readline.bits.addr)
-  val line_way_en = io.readline.bits.way_en
+  // when WPU is enabled, line_way_en is all enabled when read data
+  val line_way_en = Fill(DCacheWays, 1.U) // val line_way_en = io.readline.bits.way_en
+  val line_way_en_reg = RegNext(io.readline.bits.way_en)
 
   val write_bank_mask_reg = RegNext(io.write.bits.wmask)
   val write_data_reg = RegNext(io.write.bits.data)
@@ -380,8 +382,8 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val rrl_bank_conflict = Wire(Vec(LoadPipelineWidth, Bool()))
   val rrl_bank_conflict_intend = Wire(Vec(LoadPipelineWidth, Bool()))
   (0 until LoadPipelineWidth).foreach { i =>
-    val judge = if (ReduceReadlineConflict) io.read(i).valid && (io.readline.bits.rmask & io.read(i).bits.bankMask) =/= 0.U && line_div_addr === div_addrs(i) && io.readline.bits.way_en === way_en(i) && line_set_addr =/= set_addrs(i)
-                else io.read(i).valid && line_div_addr === div_addrs(i) && io.readline.bits.way_en === way_en(i) && line_set_addr =/= set_addrs(i)
+    val judge = if (ReduceReadlineConflict) io.read(i).valid && (io.readline.bits.rmask & io.read(i).bits.bankMask) =/= 0.U && line_div_addr === div_addrs(i) && line_set_addr =/= set_addrs(i)
+                else io.read(i).valid && line_div_addr === div_addrs(i) && line_set_addr =/= set_addrs(i)
     rrl_bank_conflict(i) := judge && io.readline.valid
     rrl_bank_conflict_intend(i) := judge && io.readline_intend
   }
@@ -391,7 +393,7 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     way_en(x) === write_wayen_dup_reg.head &&
     (write_bank_mask_reg(bank_addrs(x)(0)) || write_bank_mask_reg(bank_addrs(x)(1)) && io.is128Req(x))
   )
-  val wrl_bank_conflict = io.readline.valid && write_valid_reg && line_div_addr === write_div_addr_dup_reg.head && line_way_en === write_wayen_dup_reg.head
+  val wrl_bank_conflict = io.readline.valid && write_valid_reg && line_div_addr === write_div_addr_dup_reg.head
   // ready
   io.readline.ready := !(wrl_bank_conflict)
   io.read.zipWithIndex.map { case (x, i) => x.ready := !(wr_bank_conflict(i) || rrhazard) }
@@ -443,9 +445,9 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
         })))
         val readline_en = Wire(Bool())
         if (ReduceReadlineConflict) {
-          readline_en := io.readline.valid && io.readline.bits.rmask(bank_index) && io.readline.bits.way_en(way_index) && div_index.U === line_div_addr
+          readline_en := io.readline.valid && io.readline.bits.rmask(bank_index) && line_way_en(way_index) && div_index.U === line_div_addr
         } else {
-          readline_en := io.readline.valid && io.readline.bits.way_en(way_index) && div_index.U === line_div_addr
+          readline_en := io.readline.valid && line_way_en(way_index) && div_index.U === line_div_addr
         }
         val sram_set_addr = Mux(readline_en,
           addr_to_dcache_div_set(io.readline.bits.addr),
@@ -471,6 +473,16 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       }
     }
   }
+  
+  val data_read_oh = WireInit(VecInit(Seq.fill(DCacheSetDiv * DCacheBanks * DCacheWays)(0.U(1.W))))
+  for(div_index <- 0 until DCacheSetDiv){
+    for (bank_index <- 0 until DCacheBanks) {
+      for (way_index <- 0 until DCacheWays) {
+        data_read_oh(div_index *  DCacheBanks * DCacheWays + bank_index * DCacheBanks + way_index) := data_banks(div_index)(bank_index)(way_index).io.r.en
+      }
+    }
+  }
+  XSPerfAccumulate("data_read_counter", PopCount(Cat(data_read_oh)))
 
   // read result: expose banked read result
   val read_result_delayed = RegNext(read_result)
@@ -641,7 +653,7 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   )
 
   (1 until LoadPipelineWidth).foreach(y => (0 until y).foreach(x =>
-    XSPerfAccumulate(s"data_array_fake_rr_bank_conflict_${x}_${y}", rr_bank_conflict(x)(y) && set_addrs(x)===set_addrs(y))
+    XSPerfAccumulate(s"data_array_fake_rr_bank_conflict_${x}_${y}", rr_bank_conflict(x)(y) && set_addrs(x)===set_addrs(y) && div_addrs(x) === div_addrs(y))
   ))
 
 }
@@ -821,6 +833,16 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     }
   }
 
+  val data_read_oh = WireInit(VecInit(Seq.fill(DCacheSetDiv)(0.U(XLEN.W))))
+  for (div_index <- 0 until DCacheSetDiv){
+    val temp = WireInit(VecInit(Seq.fill(DCacheBanks)(0.U(XLEN.W))))
+    for (bank_index <- 0 until DCacheBanks) {
+      temp(bank_index) := PopCount(Fill(DCacheWays, data_banks(div_index)(bank_index).io.r.en.asUInt))
+    }
+    data_read_oh(div_index) := temp.reduce(_ + _)
+  }
+  XSPerfAccumulate("data_read_counter", data_read_oh.foldLeft(0.U)(_ + _))
+
   val bank_result_delayed = RegNext(bank_result)
   (0 until LoadPipelineWidth).map(i => {
     val rr_read_fire = RegNext(RegNext(io.read(i).fire))
@@ -978,7 +1000,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   )
 
   (1 until LoadPipelineWidth).foreach(y => (0 until y).foreach(x =>
-    XSPerfAccumulate(s"data_array_fake_rr_bank_conflict_${x}_${y}", rr_bank_conflict(x)(y) && set_addrs(x) === set_addrs(y))
+    XSPerfAccumulate(s"data_array_fake_rr_bank_conflict_${x}_${y}", rr_bank_conflict(x)(y) && set_addrs(x) === set_addrs(y) && div_addrs(x) === div_addrs(y))
   ))
 
 }
