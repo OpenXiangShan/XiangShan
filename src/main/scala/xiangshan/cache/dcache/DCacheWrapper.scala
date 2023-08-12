@@ -27,7 +27,7 @@ import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, Trans
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{BundleFieldBase, UIntToOH1}
 import device.RAMHelper
-import coupledL2.{AliasField, AliasKey, DirtyField, PrefetchField}
+import coupledL2.{AliasField, VaddrField, PrefetchField}
 import utility.ReqSourceField
 import utility.FastArbiter
 import mem.AddPipelineReg
@@ -58,11 +58,6 @@ case class DCacheParameters
   // we need to avoid this by recoding additional bits in L2 cache
   val setBytes = nSets * blockBytes
   val aliasBitsOpt = if(setBytes > pageSize) Some(log2Ceil(setBytes / pageSize)) else None
-  val reqFields: Seq[BundleFieldBase] = Seq(
-    PrefetchField(),
-    ReqSourceField()
-  ) ++ aliasBitsOpt.map(AliasField)
-  val echoFields: Seq[BundleFieldBase] = Nil
 
   def tagCode: Code = Code.fromString(tagECC)
 
@@ -708,14 +703,21 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
 
 class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
 
+  val reqFields: Seq[BundleFieldBase] = Seq(
+    PrefetchField(),
+    ReqSourceField(),
+    VaddrField(VAddrBits - blockOffBits),
+  ) ++ cacheParams.aliasBitsOpt.map(AliasField)
+  val echoFields: Seq[BundleFieldBase] = Nil
+
   val clientParameters = TLMasterPortParameters.v1(
     Seq(TLMasterParameters.v1(
       name = "dcache",
       sourceId = IdRange(0, nEntries + 1),
       supportsProbe = TransferSizes(cfg.blockBytes)
     )),
-    requestFields = cacheParams.reqFields,
-    echoFields = cacheParams.echoFields
+    requestFields = reqFields,
+    echoFields = echoFields
   )
 
   val clientNode = TLClientNode(Seq(clientParameters))
