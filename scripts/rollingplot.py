@@ -20,17 +20,18 @@ class DataSet:
         sql = "SELECT xAxisPt, yAxisPt FROM {}_rolling_{}".format(perf_name, hart)
         self.cursor.execute(sql)
         result = self.cursor.fetchall()
-        granularity = result[1][0] - result[0][0]
         aggcnt = 0
         aggydata = 0
+        aggxdata = 0
         for row in result:
             aggcnt += 1
             aggydata += row[1]
             if aggcnt == aggregate:
                 self.xdata.append(row[0])
-                self.ydata.append(aggydata/(granularity*aggregate))
+                self.ydata.append(aggydata/(row[0]-aggxdata))
                 aggcnt = 0
                 aggydata = 0
+                aggxdata = row[0]
     
     def plot(self):
         plt.plot(self.xdata, self.ydata, lw=1, ls='-', c='black')
