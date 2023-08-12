@@ -774,6 +774,34 @@ package object xiangshan {
     latency = UncertainLatency()
   )
 
+  val veclduCfg = FuConfig(
+    "vecldu",
+    null, // DontCare
+    (uop: MicroOp) => FuType.loadCanAccept(uop.ctrl.fuType),
+    FuType.ldu, 1, 0, writeIntRf = false, writeFpRf = false,
+    latency = UncertainLatency(),
+    exceptionOut = Seq(loadAddrMisaligned, loadAccessFault, loadPageFault),
+    flushPipe = true,
+    replayInst = true,
+    hasLoadError = true
+  )
+
+  val vecstaCfg = FuConfig(
+    "vecsta",
+    null,
+    (uop: MicroOp) => FuType.storeCanAccept(uop.ctrl.fuType),
+    FuType.stu, 1, 0, writeIntRf = false, writeFpRf = false,
+    latency = UncertainLatency(),
+    exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault)
+  )
+
+  val vecstdCfg = FuConfig(
+    "vecstd",
+    fuGen = stdGen, fuSel = (uop: MicroOp) => FuType.storeCanAccept(uop.ctrl.fuType), FuType.stu, 1, 1,
+    writeIntRf = false, writeFpRf = false, latency = CertainLatency(1)
+  )
+
+
   val JumpExeUnitCfg = ExuConfig("JmpExeUnit", "Int", Seq(jmpCfg, i2fCfg), 2, Int.MaxValue)
   val AluExeUnitCfg = ExuConfig("AluExeUnit", "Int", Seq(aluCfg), 0, Int.MaxValue)
   val JumpCSRExeUnitCfg = ExuConfig("JmpCSRExeUnit", "Int", Seq(jmpCfg, csrCfg, fenceCfg, i2fCfg), 2, Int.MaxValue)
@@ -788,6 +816,10 @@ package object xiangshan {
   val LdExeUnitCfg = ExuConfig("LoadExu", "Mem", Seq(lduCfg), wbIntPriority = 0, wbFpPriority = 0, extendsExu = false)
   val StaExeUnitCfg = ExuConfig("StaExu", "Mem", Seq(staCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue, extendsExu = false)
   val StdExeUnitCfg = ExuConfig("StdExu", "Mem", Seq(stdCfg, mouDataCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue, extendsExu = false)
+  // TODO: Backend for VLSU, fix vlsu exeunit config
+  val vecLdExeUnitCfg = ExuConfig("vecLoadExu", "Mem", Seq(veclduCfg), wbIntPriority = 0, wbFpPriority = 0, extendsExu = false)
+  val vecStaExeUnitCfg = ExuConfig("vecStaExu", "Mem", Seq(vecstaCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue, extendsExu = false)
+  val vecStdExeUnitCfg = ExuConfig("vecStdExu", "Mem", Seq(vecstdCfg, mouDataCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue, extendsExu = false)
 
   // indicates where the memory access request comes from
   // a dupliacte of this is in HuanCun.common and CoupledL2.common

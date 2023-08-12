@@ -146,7 +146,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
     ptw_to_l2_buffer.node := ptw.node
   }
 
-  val wbArbiter = LazyModule(new WbArbiterWrapper(exuConfigs, NRIntWritePorts, NRFpWritePorts))
+  val wbArbiter = LazyModule(new WbArbiterWrapper(exuWritebackConfigs, NRIntWritePorts, NRFpWritePorts))
   val intWbPorts = wbArbiter.intWbPorts
   val fpWbPorts = wbArbiter.fpWbPorts
 
@@ -157,6 +157,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   require(exuParameters.FmiscCnt <= exuParameters.FmacCnt && exuParameters.FmiscCnt > 0)
   require(exuParameters.LduCnt == exuParameters.StuCnt) // TODO: remove this limitation
 
+  // TODO: Backend for VLSU, fix schedule and dispatch
   // one RS every 2 MDUs
   val schedulePorts = Seq(
     // exuCfg, numDeq, intFastWakeupTarget, fpFastWakeupTarget
@@ -170,7 +171,10 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
     ),
     Seq(
       (FmacExeUnitCfg, exuParameters.FmacCnt, Seq(), Seq(FmacExeUnitCfg, FmiscExeUnitCfg)),
-      (FmiscExeUnitCfg, exuParameters.FmiscCnt, Seq(), Seq())
+      (FmiscExeUnitCfg, exuParameters.FmiscCnt, Seq(), Seq()),
+      (vecLdExeUnitCfg, exuParameters.VlCnt, Seq(AluExeUnitCfg, vecLdExeUnitCfg), Seq()),
+      (vecStaExeUnitCfg, exuParameters.VsCnt, Seq(), Seq()),
+      (vecStdExeUnitCfg, exuParameters.VsCnt, Seq(), Seq())
     )
   )
 
@@ -207,7 +211,11 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
     else Seq((0, i))
   })
 
-  val dispatchPorts = Seq(intDpPorts ++ lsDpPorts, fpDpPorts)
+  val vlsDpPorts = (0 until exuParameters.VlCnt).map(i => Seq((2, i))) ++
+                   (0 until exuParameters.VsCnt).map(i => Seq((3, i))) ++
+                   (0 until exuParameters.VsCnt).map(i => Seq((4, i)))
+
+  val dispatchPorts = Seq(intDpPorts ++ lsDpPorts, fpDpPorts ++ vlsDpPorts)
 
   val outIntRfReadPorts = Seq(0, 0)
   val outFpRfReadPorts = Seq(0, StorePipelineWidth)
@@ -224,7 +232,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
     )
   })))
 
-  val wb2Ctrl = LazyModule(new Wb2Ctrl(exuConfigs))
+  val wb2Ctrl = LazyModule(new Wb2Ctrl(exuWritebackConfigs))
   wb2Ctrl.addWritebackSink(exuBlocks :+ memBlock)
   val dpExuConfigs = exuBlocks.flatMap(_.scheduler.dispatch2.map(_.configs))
   val ctrlBlock = LazyModule(new CtrlBlock(dpExuConfigs))
@@ -271,8 +279,10 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   io.cpu_halt := ctrlBlock.io.cpu_halt
 
   outer.wbArbiter.module.io.redirect <> ctrlBlock.io.redirect
-  val allWriteback = exuBlocks.flatMap(_.io.fuWriteback) ++ memBlock.io.writeback
-  require(exuConfigs.length == allWriteback.length, s"${exuConfigs.length} != ${allWriteback.length}")
+  val allWriteback = exuBlocks.flatMap(_.io.fuWriteback) ++ memBlock.io.writeback ++ memBlock.io.vecWriteback
+  // TODO: Backend for VLSU, fix it
+  // Now vector store insts have vecsta and vecstd, but will writeback vecsta and vecstd together
+  require(exuConfigs.length == allWriteback.length + exuParameters.VsCnt, s"${exuConfigs.length} != ${allWriteback.length}")
   outer.wbArbiter.module.io.in <> allWriteback
   val rfWriteback = outer.wbArbiter.module.io.out
 
@@ -312,7 +322,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   outer.ctrlBlock.generateWritebackIO()
 
   val allFastUop = exuBlocks.flatMap(b => b.io.fastUopOut.dropRight(b.numOutFu)) ++ memBlock.io.otherFastWakeup
-  require(allFastUop.length == exuConfigs.length, s"${allFastUop.length} != ${exuConfigs.length}")
+  // TODO: Backend for VLSU, Fix fastuop logic
+  require(allFastUop.length == exuConfigs.length - exuParameters.VlCnt - 2 * exuParameters.VsCnt, s"${allFastUop.length} != ${exuConfigs.length}")
   val intFastUop = allFastUop.zip(exuConfigs).filter(_._2.writeIntRf).map(_._1)
   val fpFastUop = allFastUop.zip(exuConfigs).filter(_._2.writeFpRf).map(_._1)
   val intFastUop1 = outer.wbArbiter.intConnections.map(c => intFastUop(c.head))
@@ -426,6 +437,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.lsTopdownInfo <> ctrlBlock.io.robio.lsTopdownInfo
   memBlock.io.l2_hint.valid := io.l2_hint.valid
   memBlock.io.l2_hint.bits.sourceId := io.l2_hint.bits.sourceId
+  // TODO: Backend for VLSU, implement vector load & store in
+  memBlock.io.VecloadRegIn := DontCare
+  memBlock.io.vecStoreIn := DontCare
 
   val itlbRepeater1 = PTWFilter(itlbParams.fenceDelay,frontend.io.ptw, fenceio.sfence, csrioIn.tlb, l2tlbParams.ifilterSize)
   val itlbRepeater2 = PTWRepeaterNB(passReady = false, itlbParams.fenceDelay, itlbRepeater1.io.ptw, ptw.io.tlb(0), fenceio.sfence, csrioIn.tlb)

@@ -64,8 +64,8 @@ class MinimalConfig(n: Int = 1) extends Config(
         IssQueSize = 8,
         NRPhyRegs = 64,
         VirtualLoadQueueSize = 16,
-        LoadQueueRARSize = 16, 
-        LoadQueueRAWSize = 12, 
+        LoadQueueRARSize = 16,
+        LoadQueueRAWSize = 12,
         LoadQueueReplaySize = 8,
         LoadUncacheBufferSize = 8,
         LoadQueueNWriteBanks = 4, // NOTE: make sure that LoadQueue{RAR, RAW, Replay}Size is divided by LoadQueueNWriteBanks.
@@ -78,13 +78,24 @@ class MinimalConfig(n: Int = 1) extends Config(
         IBufSize = 16,
         StoreBufferSize = 4,
         StoreBufferThreshold = 3,
+        // TODO: VLSU, enqueue logic should be optimized for minimal config (Now vlsu queue size is same as default config)
+        // However, VirtualLoadQueueSize is 16 for minimal config
+        // So in fact Vector load/store instructions cannot be executed at minimalconfig now
+        // New vector load/store queue will be implemented soon
+        UsQueueSize = 8,
+        VlFlowSize = 32,
+        VlUopSize = 32,
+        VsFlowSize = 32,
+        VsUopSize = 32,
         dpParams = DispatchParameters(
           IntDqSize = 12,
           FpDqSize = 12,
           LsDqSize = 12,
+          VlsDqSize = 12,
           IntDqDeqWidth = 4,
           FpDqDeqWidth = 4,
-          LsDqDeqWidth = 4
+          LsDqDeqWidth = 4,
+          VlsDqDeqWidth = 4
         ),
         exuParameters = ExuParameters(
           JmpCnt = 1,
@@ -95,7 +106,9 @@ class MinimalConfig(n: Int = 1) extends Config(
           FmiscCnt = 1,
           FmiscDivSqrtCnt = 0,
           LduCnt = 2,
-          StuCnt = 2
+          StuCnt = 2,
+          VlCnt = 2,
+          VsCnt = 2
         ),
         icacheParameters = ICacheParameters(
           nSets = 64, // 16KB ICache

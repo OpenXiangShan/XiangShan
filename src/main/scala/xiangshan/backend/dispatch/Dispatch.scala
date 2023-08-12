@@ -33,9 +33,11 @@ case class DispatchParameters
   IntDqSize: Int,
   FpDqSize: Int,
   LsDqSize: Int,
+  VlsDqSize: Int,
   IntDqDeqWidth: Int,
   FpDqDeqWidth: Int,
-  LsDqDeqWidth: Int
+  LsDqDeqWidth: Int,
+  VlsDqDeqWidth: Int
 )
 
 // read rob and enqueue
@@ -61,6 +63,11 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
       val req = Vec(RenameWidth, ValidIO(new MicroOp))
     }
     val toLsDq = new Bundle {
+      val canAccept = Input(Bool())
+      val needAlloc = Vec(RenameWidth, Output(Bool()))
+      val req = Vec(RenameWidth, ValidIO(new MicroOp))
+    }
+    val toVlsDq = new Bundle {
       val canAccept = Input(Bool())
       val needAlloc = Vec(RenameWidth, Output(Bool()))
       val req = Vec(RenameWidth, ValidIO(new MicroOp))
@@ -242,6 +249,9 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     io.toLsDq.req(i).valid  := io.fromRename(i).valid && isMem(i) &&
                                canEnterDpq && io.toIntDq.canAccept && io.toFpDq.canAccept
     io.toLsDq.req(i).bits   := updatedUop(i)
+
+    // TODO: Backend for VLSU, implement it
+    io.toVlsDq := DontCare
 
     XSDebug(io.toIntDq.req(i).valid, p"pc 0x${Hexadecimal(io.toIntDq.req(i).bits.cf.pc)} int index $i\n")
     XSDebug(io.toFpDq.req(i).valid , p"pc 0x${Hexadecimal(io.toFpDq.req(i).bits.cf.pc )} fp  index $i\n")

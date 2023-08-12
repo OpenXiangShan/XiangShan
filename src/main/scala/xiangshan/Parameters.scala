@@ -128,6 +128,7 @@ case class XSCoreParameters
   DecodeWidth: Int = 6,
   RenameWidth: Int = 6,
   CommitWidth: Int = 6,
+  MaxUopSize: Int = 37,
   EnableRenameSnapshot: Boolean = true,
   RenameSnapshotNum: Int = 4,
   FtqSize: Int = 64,
@@ -144,15 +145,21 @@ case class XSCoreParameters
   StoreQueueSize: Int = 64,
   StoreQueueNWriteBanks: Int = 8, // NOTE: make sure that StoreQueueSize is divided by StoreQueueNWriteBanks
   StoreQueueForwardWithMask: Boolean = true,
-  VlsQueueSize: Int = 8,
+  UsQueueSize: Int = 8,
+  VlFlowSize: Int = 32,
+  VlUopSize: Int = 32,
+  VsFlowSize: Int = 32,
+  VsUopSize: Int = 32,
   RobSize: Int = 256,
   dpParams: DispatchParameters = DispatchParameters(
     IntDqSize = 16,
     FpDqSize = 16,
     LsDqSize = 16,
+    VlsDqSize = 16,
     IntDqDeqWidth = 4,
     FpDqDeqWidth = 4,
-    LsDqDeqWidth = 4
+    LsDqDeqWidth = 4,
+    VlsDqDeqWidth = 4,
   ),
   exuParameters: ExuParameters = ExuParameters(
     JmpCnt = 1,
@@ -163,14 +170,15 @@ case class XSCoreParameters
     FmiscCnt = 2,
     FmiscDivSqrtCnt = 0,
     LduCnt = 2,
-    StuCnt = 2
+    StuCnt = 2,
+    VlCnt = 2,
+    VsCnt = 2
   ),
   prefetcher: Option[PrefetcherParams] = Some(SMSParams()),
   LoadPipelineWidth: Int = 2,
   StorePipelineWidth: Int = 2,
-  VecMemSrcInWidth: Int = 2,
-  VecMemInstWbWidth: Int = 1,
-  VecMemDispatchWidth: Int = 1,
+  VecLoadPipelineWidth: Int = 2,
+  VecStorePipelineWidth: Int = 2,
   StoreBufferSize: Int = 16,
   StoreBufferThreshold: Int = 7,
   EnsbufferWidth: Int = 2,
@@ -287,7 +295,16 @@ case class XSCoreParameters
     Seq.fill(exuParameters.FmacCnt)(FmacExeUnitCfg) ++
       Seq.fill(exuParameters.FmiscCnt)(FmiscExeUnitCfg)
 
-  val exuConfigs: Seq[ExuConfig] = intExuConfigs ++ fpExuConfigs ++ loadExuConfigs ++ storeExuConfigs
+  // TODO: Backend for VLSU, fix Vector exuconfigs and writebackconfigs
+  val vecloadExuConfigs = Seq.fill(exuParameters.VlCnt)(vecLdExeUnitCfg)
+  val vecstoreExuConfigs = Seq.fill(exuParameters.VsCnt)(vecStaExeUnitCfg) ++ Seq.fill(exuParameters.VsCnt)(vecStdExeUnitCfg)
+  val vecstoreWritebackConfigs = Seq.fill(exuParameters.VsCnt)(vecStaExeUnitCfg)
+
+  val vlsuExuConfigs = vecloadExuConfigs ++ vecstoreExuConfigs
+  val vlsuWritebackConfigs = vecloadExuConfigs ++ vecstoreWritebackConfigs
+
+  val exuConfigs: Seq[ExuConfig] = intExuConfigs ++ fpExuConfigs ++ loadExuConfigs ++ storeExuConfigs ++ vlsuExuConfigs
+  val exuWritebackConfigs: Seq[ExuConfig] = intExuConfigs ++ fpExuConfigs ++ loadExuConfigs ++ storeExuConfigs ++ vlsuWritebackConfigs
 }
 
 case object DebugOptionsKey extends Field[DebugOptions]
@@ -401,6 +418,7 @@ trait HasXSParameter {
   val DecodeWidth = coreParams.DecodeWidth
   val RenameWidth = coreParams.RenameWidth
   val CommitWidth = coreParams.CommitWidth
+  val MaxUopSize = coreParams.MaxUopSize
   val EnableRenameSnapshot = coreParams.EnableRenameSnapshot
   val RenameSnapshotNum = coreParams.RenameSnapshotNum
   val FtqSize = coreParams.FtqSize
@@ -420,19 +438,22 @@ trait HasXSParameter {
   val StoreQueueSize = coreParams.StoreQueueSize
   val StoreQueueNWriteBanks = coreParams.StoreQueueNWriteBanks
   val StoreQueueForwardWithMask = coreParams.StoreQueueForwardWithMask
-  val VlsQueueSize = coreParams.VlsQueueSize
+  val UsQueueSize = coreParams.UsQueueSize
+  val VlFlowSize = coreParams.VlFlowSize
+  val VlUopSize = coreParams.VlUopSize
+  val VsFlowSize = coreParams.VsFlowSize
+  val VsUopSize = coreParams.VsUopSize
   val dpParams = coreParams.dpParams
   val exuParameters = coreParams.exuParameters
   val NRMemReadPorts = exuParameters.LduCnt + 2 * exuParameters.StuCnt
   val NRIntReadPorts = 2 * exuParameters.AluCnt + NRMemReadPorts
   val NRIntWritePorts = exuParameters.AluCnt + exuParameters.MduCnt + exuParameters.LduCnt
   val NRFpReadPorts = 3 * exuParameters.FmacCnt + exuParameters.StuCnt
-  val NRFpWritePorts = exuParameters.FpExuCnt + exuParameters.LduCnt
+  val NRFpWritePorts = exuParameters.FpExuCnt + exuParameters.LduCnt + exuParameters.VlCnt
   val LoadPipelineWidth = coreParams.LoadPipelineWidth
   val StorePipelineWidth = coreParams.StorePipelineWidth
-  val VecMemSrcInWidth = coreParams.VecMemSrcInWidth
-  val VecMemInstWbWidth = coreParams.VecMemInstWbWidth
-  val VecMemDispatchWidth = coreParams.VecMemDispatchWidth
+  val VecLoadPipelineWidth = coreParams.VecLoadPipelineWidth
+  val VecStorePipelineWidth = coreParams.VecStorePipelineWidth
   val StoreBufferSize = coreParams.StoreBufferSize
   val StoreBufferThreshold = coreParams.StoreBufferThreshold
   val EnsbufferWidth = coreParams.EnsbufferWidth
@@ -459,7 +480,8 @@ trait HasXSParameter {
   val NumRs = (exuParameters.JmpCnt+1)/2 + (exuParameters.AluCnt+1)/2 + (exuParameters.MulCnt+1)/2 +
               (exuParameters.MduCnt+1)/2 + (exuParameters.FmacCnt+1)/2 +  + (exuParameters.FmiscCnt+1)/2 +
               (exuParameters.FmiscDivSqrtCnt+1)/2 + (exuParameters.LduCnt+1)/2 +
-              (exuParameters.StuCnt+1)/2 + (exuParameters.StuCnt+1)/2
+              (exuParameters.StuCnt+1)/2 + (exuParameters.StuCnt+1)/2 +
+              (exuParameters.VlCnt+1)/2 + (exuParameters.VsCnt+1)/2 + (exuParameters.VsCnt+1)/2
 
   val instBytes = if (HasCExtension) 2 else 4
   val instOffsetBits = log2Ceil(instBytes)
@@ -498,6 +520,10 @@ trait HasXSParameter {
   val fpExuConfigs = coreParams.fpExuConfigs
 
   val exuConfigs = coreParams.exuConfigs
+  val exuWritebackConfigs = coreParams.exuWritebackConfigs
+
+  val vlsuExuConfigs = coreParams.vlsuExuConfigs
+  val vlsuWritebackConfigs = coreParams.vlsuWritebackConfigs
 
   val PCntIncrStep: Int = 6
   val numPCntHc: Int = 25

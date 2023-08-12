@@ -154,6 +154,19 @@ class FPUCtrlSignals(implicit p: Parameters) extends XSBundle {
   val rm = UInt(3.W)
 }
 
+class VType(implicit p: Parameters) extends XSBundle {
+  val vma   = Bool()
+  val vta   = Bool()
+  val vsew = UInt(3.W)
+  val vlmul = UInt(3.W)
+}
+
+class VConfig(implicit p: Parameters) extends XSBundle {
+  val vl     = UInt(8.W)
+  val vstart = UInt(8.W)
+  val vtype = new VType
+}
+
 // Decode DecodeWidth insts at Decode Stage
 class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val debug_globalID = UInt(XLEN.W)
@@ -172,6 +185,11 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val imm = UInt(ImmUnion.maxLen.W)
   val commitType = CommitType()
   val fpu = new FPUCtrlSignals
+  val uopIdx = UInt(log2Up(MaxUopSize).W)
+  val total_num = UInt(log2Up(MaxUopSize).W)
+  val firstUop = Bool()
+  val lastUop = Bool()
+  val vconfig = new VConfig
   val isMove = Bool()
   val singleStep = Bool()
   // This inst will flush all the pipe when it is the oldest inst in ROB,
@@ -335,12 +353,16 @@ class DebugBundle(implicit p: Parameters) extends XSBundle {
   // val levelTlbHit = UInt(2.W)
 }
 
-class ExuInput(implicit p: Parameters) extends XSBundleWithMicroOp {
-  val src = Vec(3, UInt(XLEN.W))
+class ExuInput(isVpu: Boolean = false)(implicit p: Parameters) extends XSBundleWithMicroOp {
+  val dataWidth = if (isVpu) VLEN else XLEN
+
+  val src = Vec(4, UInt(dataWidth.W))
 }
 
-class ExuOutput(implicit p: Parameters) extends XSBundleWithMicroOp {
-  val data = UInt(XLEN.W)
+class ExuOutput(isVpu: Boolean = false)(implicit p: Parameters) extends XSBundleWithMicroOp {
+  val dataWidth = if (isVpu) VLEN else XLEN
+
+  val data = UInt(dataWidth.W)
   val fflags = UInt(5.W)
   val redirectValid = Bool()
   val redirect = new Redirect

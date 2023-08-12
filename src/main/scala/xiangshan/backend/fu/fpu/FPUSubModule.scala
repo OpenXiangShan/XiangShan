@@ -52,7 +52,8 @@ abstract class FPUSubModule(implicit p: Parameters) extends FunctionUnit
   val fflags = IO(Output(UInt(5.W)))
   val dataModule: FPUDataModule
   def connectDataModule = {
-    dataModule.io.in.src <> io.in.bits.src
+    // TODO: Backend for VLSU, fix it
+    dataModule.io.in.src <> io.in.bits.src.take(dataModule.io.in.src.length)
     dataModule.io.in.fpCtrl <> io.in.bits.uop.ctrl.fpu
     dataModule.io.in.rm <> rm
     io.out.bits.data := dataModule.io.out.data

@@ -49,9 +49,12 @@ case class RSParams
   var isJump: Boolean = false,
   var isAlu: Boolean = false,
   var isStore: Boolean = false,
+  var isvecStore: Boolean = false,
   var isMul: Boolean = false,
   var isLoad: Boolean = false,
+  var isvecLoad: Boolean = false,
   var isStoreData: Boolean = false,
+  var isvecStoreData: Boolean = false,
   var exuCfg: Option[ExuConfig] = None
 ){
   def allWakeup: Int = numFastWakeup + numWakeup
@@ -59,7 +62,7 @@ case class RSParams
   // oldestFirst: (Enable_or_not, Need_balance, Victim_index)
   def oldestFirst: (Boolean, Boolean, Int) = (true, false, 0)
   def hasMidState: Boolean = exuCfg.get == FmacExeUnitCfg
-  def delayedFpRf: Boolean = exuCfg.get == StdExeUnitCfg
+  def delayedFpRf: Boolean = exuCfg.get == StdExeUnitCfg || exuCfg.get == vecStdExeUnitCfg
   def delayedSrc: Boolean = delayedFpRf
   def needScheduledBit: Boolean = hasFeedback || delayedSrc || hasMidState
   def needBalance: Boolean = exuCfg.get.needLoadBalance && exuCfg.get != LdExeUnitCfg
@@ -90,13 +93,16 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
       case StdExeUnitCfg => params.isStoreData = true
       case MulDivExeUnitCfg => params.isMul = true
       case LdExeUnitCfg => params.isLoad = true
+      case vecLdExeUnitCfg => params.isvecLoad = true
+      case vecStaExeUnitCfg => params.isvecStore = true
+      case vecStdExeUnitCfg => params.isvecStoreData = true
       case _ =>
     }
     // TODO: why jump needs two sources?
     if (cfg == JumpCSRExeUnitCfg) {
       params.numSrc = 2
     }
-    if (cfg == StaExeUnitCfg || cfg == LdExeUnitCfg) {
+    if (cfg == StaExeUnitCfg || cfg == LdExeUnitCfg || cfg == vecLdExeUnitCfg) {
       params.lsqFeedback = true
       params.hasFeedback = true
       params.checkWaitBit = false
@@ -160,6 +166,9 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
     if (params.isStoreData) rs.zipWithIndex.foreach { case (rs, index) => rs.suggestName(s"stdRS_${index}") }
     if (params.isMul)       rs.zipWithIndex.foreach { case (rs, index) => rs.suggestName(s"mulRS_${index}") }
     if (params.isLoad)      rs.zipWithIndex.foreach { case (rs, index) => rs.suggestName(s"loadRS_${index}") }
+    if (params.isvecLoad)      rs.zipWithIndex.foreach { case (rs, index) => rs.suggestName(s"vecloadRS_${index}") }
+    if (params.isvecStore)     rs.zipWithIndex.foreach { case (rs, index) => rs.suggestName(s"vecstaRS_${index}") }
+    if (params.isvecStoreData) rs.zipWithIndex.foreach { case (rs, index) => rs.suggestName(s"vecstdRS_${index}") }
 
     val updatedP = p.alter((site, here, up) => {
       case XSCoreParamsKey => up(XSCoreParamsKey).copy(
