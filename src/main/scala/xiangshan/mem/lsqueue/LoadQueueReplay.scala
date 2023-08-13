@@ -315,23 +315,23 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   // update blocking condition
   (0 until LoadQueueReplaySize).map(i => {
     // case C_MA
-    when (cause(LoadReplayCauses.C_MA)) {
+    when (cause(i)(LoadReplayCauses.C_MA)) {
       blocking(i) := Mux(stAddrDeqVec(i), false.B, blocking(i))
     }
     // case C_FF
-    when (cause(LoadReplayCauses.C_FF)) {
+    when (cause(i)(LoadReplayCauses.C_FF)) {
       blocking(i) := Mux(stDataDeqVec(i), false.B, blocking(i))
     }
     // case C_DM
-    when (cause(LoadReplayCauses.C_DM)) {
+    when (cause(i)(LoadReplayCauses.C_DM)) {
       blocking(i) := Mux(io.tl_d_channel.valid && io.tl_d_channel.mshrid === missMSHRId(i), false.B, blocking(i))
     }
     // case C_RAR
-    when (cause(LoadReplayCauses.C_RAR)) {
+    when (cause(i)(LoadReplayCauses.C_RAR)) {
       blocking(i) := Mux((!io.rarFull || !isAfter(uop(i).lqIdx, io.ldWbPtr)), false.B, blocking(i))
     }
     // case C_RAW
-    when (cause(LoadReplayCauses.C_RAW)) {
+    when (cause(i)(LoadReplayCauses.C_RAW)) {
       blocking(i) := Mux((!io.rawFull || !isAfter(uop(i).sqIdx, io.stAddrReadySqPtr)), false.B, blocking(i))
     }
   })
@@ -394,6 +394,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val hasHigherPriority = cause(i)(LoadReplayCauses.C_DM) || cause(i)(LoadReplayCauses.C_FF)
     allocated(i) && !scheduled(i) && !blocked && hasHigherPriority && !needCancel(i)
   })).asUInt // use uint instead vec to reduce verilog lines
+  val s0_remLoadHigherPriorityReplaySelMask = VecInit((0 until LoadPipelineWidth).map(rem => getRemBits(s0_loadHigherPriorityReplaySelMask)(rem)))
   val s0_loadLowerPriorityReplaySelMask = VecInit((0 until LoadQueueReplaySize).map(i => {
     val blocked = selBlocked(i) || blocking(i)
     val hasLowerPriority = !cause(i)(LoadReplayCauses.C_DM) && !cause(i)(LoadReplayCauses.C_FF)
