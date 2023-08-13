@@ -275,7 +275,7 @@ case class XSCoreParameters
     nMissEntries = 2,
     nProbeEntries = 2,
     nPrefetchEntries = 12,
-    nPrefBufferEntries = 64,
+    nPrefBufferEntries = 32,
     hasPrefetch = true,
   ),
   dcacheParametersOpt: Option[DCacheParameters] = Some(DCacheParameters(
@@ -327,6 +327,7 @@ case class DebugOptions
   EnableConstantin: Boolean = false,
   EnableChiselDB: Boolean = false,
   AlwaysBasicDB: Boolean = true,
+  EnableRollingDB: Boolean = false
 )
 
 trait HasXSParameter {
