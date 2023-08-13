@@ -32,6 +32,7 @@ import xiangshan.frontend._
 import xiangshan.mem.L1PrefetchFuzzer
 
 import scala.collection.mutable.ListBuffer
+import xiangshan.cache.mmu.TlbRequestIO
 
 abstract class XSModule(implicit val p: Parameters) extends Module
   with HasXSParameter
@@ -241,6 +242,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
     val beu_errors = Output(new XSL1BusErrors())
     val l2_hint = Input(Valid(new L2ToL1Hint()))
+    val l2_tlb_req = Flipped(new TlbRequestIO(nRespDups = 1))
   })
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
@@ -424,6 +426,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.mem_to_ooo.lsTopdownInfo <> ctrlBlock.io.robio.lsTopdownInfo
   memBlock.io.l2_hint.valid := io.l2_hint.valid
   memBlock.io.l2_hint.bits.sourceId := io.l2_hint.bits.sourceId
+  io.l2_tlb_req <> memBlock.io.l2_tlb_req
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   io.l2_pf_enable := csrioIn.customCtrl.l2_pf_enable

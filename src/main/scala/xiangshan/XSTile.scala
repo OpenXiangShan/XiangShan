@@ -128,7 +128,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   misc.misc_l2_pmu := TLLogger(s"L2_L1I_${coreParams.HartId}", !debugOpts.FPGAPlatform && debugOpts.AlwaysBasicDB) := core.frontend.icache.clientNode
   if (!coreParams.softPTW) {
     misc.misc_l2_pmu := TLLogger(s"L2_PTW_${coreParams.HartId}", !debugOpts.FPGAPlatform && debugOpts.AlwaysBasicDB) := core.memBlock.ptw_to_l2_buffer.node
-  } 
+  }
 
   l2cache match {
     case Some(l2) =>
@@ -176,10 +176,32 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       misc.module.beu_errors.l2 <> 0.U.asTypeOf(misc.module.beu_errors.l2)
       core.module.io.l2_hint.bits.sourceId := l2cache.get.module.io.l2_hint.bits
       core.module.io.l2_hint.valid := l2cache.get.module.io.l2_hint.valid
+
+      core.module.io.l2_tlb_req.req.bits := DontCare
+      core.module.io.l2_tlb_req.req.valid := l2cache.get.module.io.l2_tlb_req.req.valid
+      core.module.io.l2_tlb_req.req.bits.vaddr := l2cache.get.module.io.l2_tlb_req.req.bits.vaddr
+      core.module.io.l2_tlb_req.req.bits.cmd := l2cache.get.module.io.l2_tlb_req.req.bits.cmd
+      core.module.io.l2_tlb_req.req.bits.size := l2cache.get.module.io.l2_tlb_req.req.bits.size
+      core.module.io.l2_tlb_req.req.bits.kill := l2cache.get.module.io.l2_tlb_req.req.bits.kill
+      core.module.io.l2_tlb_req.req.bits.no_translate := l2cache.get.module.io.l2_tlb_req.req.bits.no_translate
+      core.module.io.l2_tlb_req.req_kill := l2cache.get.module.io.l2_tlb_req.req_kill
+
+      l2cache.get.module.io.l2_tlb_req.resp.bits.paddr := core.module.io.l2_tlb_req.resp.bits.paddr
+      l2cache.get.module.io.l2_tlb_req.resp.bits.miss := core.module.io.l2_tlb_req.resp.bits.miss
+      l2cache.get.module.io.l2_tlb_req.resp.bits.fast_miss := core.module.io.l2_tlb_req.resp.bits.fast_miss
+      l2cache.get.module.io.l2_tlb_req.resp.bits.excp <> core.module.io.l2_tlb_req.resp.bits.excp
+      l2cache.get.module.io.l2_tlb_req.resp.bits.static_pm := core.module.io.l2_tlb_req.resp.bits.static_pm
+      l2cache.get.module.io.l2_tlb_req.resp.bits.ptwBack := core.module.io.l2_tlb_req.resp.bits.ptwBack
     } else {
       misc.module.beu_errors.l2 <> 0.U.asTypeOf(misc.module.beu_errors.l2)
       core.module.io.l2_hint.bits.sourceId := DontCare
       core.module.io.l2_hint.valid := false.B
+
+      core.module.io.l2_tlb_req.req.valid := false.B
+      core.module.io.l2_tlb_req.req.bits := DontCare
+      core.module.io.l2_tlb_req.req_kill := DontCare
+      l2cache.get.module.io.l2_tlb_req.resp.valid := false.B
+      l2cache.get.module.io.l2_tlb_req.resp.bits := DontCare
     }
 
     // Modules are reset one by one
