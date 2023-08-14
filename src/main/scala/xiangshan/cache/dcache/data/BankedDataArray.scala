@@ -239,6 +239,7 @@ class DataSRAMBank(index: Int)(implicit p: Parameters) extends DCacheModule {
 // -----------------------------------------------------------------
 abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheModule
 {
+  val enableEcc = false
   val ReadlinePortErrorIndex = LoadPipelineWidth
   val io = IO(new DCacheBundle {
     // load pipeline read word req
@@ -496,7 +497,11 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       io.read_resp_delayed(i)(j) := read_result_delayed(rr_div_addr)(rr_bank_addr(j))(rr_way_addr)
       // error detection
       // normal read ports
-      io.read_error_delayed(i)(j) := rr_read_fire && read_error_delayed_result(rr_div_addr)(rr_bank_addr(j))(rr_way_addr) && !RegNext(io.bank_conflict_slow(i))
+      if(enableEcc) {
+        io.read_error_delayed(i)(j) := rr_read_fire && read_error_delayed_result(rr_div_addr)(rr_bank_addr(j))(rr_way_addr) && !RegNext(io.bank_conflict_slow(i))
+      }else {
+        io.read_error_delayed(i)(j) := RegNext(rr_read_fire && read_error_delayed_result(rr_div_addr)(rr_bank_addr(j))(rr_way_addr) && !RegNext(io.bank_conflict_slow(i)))
+      }
     })
   })
 
@@ -852,7 +857,11 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     (0 until VLEN/DCacheSRAMRowBits).map( j =>{
       io.read_resp_delayed(i)(j) := bank_result_delayed(rr_div_addr)(rr_bank_addr(j))
       // error detection
-      io.read_error_delayed(i)(j) := rr_read_fire && read_bank_error_delayed(rr_div_addr)(rr_bank_addr(j)) && !RegNext(io.bank_conflict_slow(i))
+      if(enableEcc) {
+        io.read_error_delayed(i)(j) := rr_read_fire && read_bank_error_delayed(rr_div_addr)(rr_bank_addr(j)) && !RegNext(io.bank_conflict_slow(i))
+      }else {
+        io.read_error_delayed(i)(j) := RegNext(rr_read_fire && read_bank_error_delayed(rr_div_addr)(rr_bank_addr(j)) && !RegNext(io.bank_conflict_slow(i)))
+      }
     })
   })
 
