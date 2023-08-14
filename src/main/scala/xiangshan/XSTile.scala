@@ -200,6 +200,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       core.module.io.l2_tlb_req.req.valid := false.B
       core.module.io.l2_tlb_req.req.bits := DontCare
       core.module.io.l2_tlb_req.req_kill := DontCare
+      core.module.io.l2_tlb_req.resp.ready := true.B
+      l2cache.get.module.io.l2_tlb_req.req.ready := true.B
       l2cache.get.module.io.l2_tlb_req.resp.valid := false.B
       l2cache.get.module.io.l2_tlb_req.resp.bits := DontCare
     }
