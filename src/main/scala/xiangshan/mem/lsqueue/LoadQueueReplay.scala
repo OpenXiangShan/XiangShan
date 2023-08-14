@@ -624,10 +624,10 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
       // update credit
       val blockCyclesTlbPtr = blockPtrTlb(enqIndex)
-      creditUpdate(enqIndex) := 0.U
 
       // init
-      blocking(enqIndex)     := false.B
+      blocking(enqIndex)     := true.B
+      creditUpdate(enqIndex) := 0.U
 
       // update blocking pointer
       when (replayInfo.cause(LoadReplayCauses.C_BC) ||
@@ -635,7 +635,6 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
             replayInfo.cause(LoadReplayCauses.C_DR)) {
         // normal case: bank conflict or schedule error or dcache replay
         // can replay next cycle
-        creditUpdate(enqIndex) := 0.U
         blocking(enqIndex) := false.B
       }
 
@@ -648,7 +647,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       // special case: dcache miss
       when (replayInfo.cause(LoadReplayCauses.C_DM) && enq.bits.handledByMSHR) {
         blocking(enqIndex) := !replayInfo.full_fwd && //  dcache miss
-                          !(io.tl_d_channel.valid && io.tl_d_channel.mshrid === replayInfo.mshr_id) // no refill in this cycle
+                              !(io.tl_d_channel.valid && io.tl_d_channel.mshrid === replayInfo.mshr_id) // no refill in this cycle
       }
 
       // special case: st-ld violation
