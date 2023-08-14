@@ -427,7 +427,7 @@ object Bundles {
     val rfWen         = if (params.writeIntRf)    Some(Bool())                        else None
     val fpWen         = if (params.writeFpRf)     Some(Bool())                        else None
     val vecWen        = if (params.writeVecRf)    Some(Bool())                        else None
-    val fpu           = if (params.needFPUCtrl)   Some(new FPUCtrlSignals)            else None
+    val fpu           = if (params.writeFflags)   Some(new FPUCtrlSignals)            else None
     val vpu           = if (params.needVPUCtrl)   Some(new VPUCtrlSignals)            else None
     val flushPipe     = if (params.flushPipe)     Some(Bool())                        else None
     val pc            = if (params.needPc)        Some(UInt(VAddrData().dataWidth.W)) else None
@@ -514,6 +514,7 @@ object Bundles {
     val vecWen       = if (params.writeVecRf)   Some(Bool())                  else None
     val redirect     = if (params.hasRedirect)  Some(ValidIO(new Redirect))   else None
     val fflags       = if (params.writeFflags)  Some(UInt(5.W))               else None
+    val wflags       = if (params.writeFflags)  Some(Bool())                  else None
     val vxsat        = if (params.writeVxsat)   Some(Bool())                  else None
     val exceptionVec = if (params.exceptionOut.nonEmpty) Some(ExceptionVec()) else None
     val flushPipe    = if (params.flushPipe)    Some(Bool())                  else None

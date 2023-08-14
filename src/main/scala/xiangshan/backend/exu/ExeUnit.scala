@@ -8,7 +8,7 @@ import utility.DelayN
 import utils._
 import xiangshan.backend.fu.{CSRFileIO, FenceIO, FuncUnitInput}
 import xiangshan.backend.Bundles.{ExuInput, ExuOutput, MemExuInput, MemExuOutput}
-import xiangshan.{HasXSParameter, Redirect, XSBundle, XSModule}
+import xiangshan.{FPUCtrlSignals, HasXSParameter, Redirect, XSBundle, XSModule}
 
 class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
   val flush = Flipped(ValidIO(new Redirect()))
@@ -132,6 +132,7 @@ class ExeUnitImp(
   io.out.bits.vecWen.foreach(x => x := Mux1H(fuOutValidOH, fuVecWenVec))
   io.out.bits.redirect.foreach(x => x := Mux1H((fuOutValidOH zip fuRedirectVec).filter(_._2.isDefined).map(x => (x._1, x._2.get))))
   io.out.bits.fflags.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.res.fflags.getOrElse(0.U.asTypeOf(io.out.bits.fflags.get)))))
+  io.out.bits.wflags.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.fpu.getOrElse(0.U.asTypeOf(new FPUCtrlSignals)).wflags)))
   io.out.bits.vxsat.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.res.vxsat.getOrElse(0.U.asTypeOf(io.out.bits.vxsat.get)))))
   io.out.bits.exceptionVec.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.exceptionVec.getOrElse(0.U.asTypeOf(io.out.bits.exceptionVec.get)))))
   io.out.bits.flushPipe.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.flushPipe.getOrElse(0.U.asTypeOf(io.out.bits.flushPipe.get)))))
