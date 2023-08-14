@@ -993,6 +993,14 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val (s3_fwd_frm_d_chan, s3_fwd_data_frm_d_chan) = io.tl_d_channel.forward(s2_valid && s2_out.forward_tlDchannel, s2_out.mshrid, s2_out.paddr)
   val s3_fwd_data_valid = RegEnable(s2_fwd_data_valid, s2_valid)
   val s3_fwd_frm_d_chan_valid = (s3_fwd_frm_d_chan && s3_fwd_data_valid)
+  val s3_nuke          = VecInit((0 until StorePipelineWidth).map(w => {
+                          io.stld_nuke_query(w).valid && // query valid
+                          isAfter(s3_in.uop.robIdx, io.stld_nuke_query(w).bits.robIdx) && // older store
+                          // TODO: Fix me when vector instruction
+                          (s3_in.paddr(PAddrBits-1, 3) === io.stld_nuke_query(w).bits.paddr(PAddrBits-1, 3)) && // paddr match
+                          (s3_in.mask & io.stld_nuke_query(w).bits.mask).orR // data mask contain
+                        })).asUInt.orR && !s3_in.tlbMiss || s3_in.rep_info.nuke
+
 
   // s3 load fast replay
   io.fast_rep_out.valid := s3_valid && s3_fast_rep && !s3_in.uop.robIdx.needFlush(io.redirect)
@@ -1023,9 +1031,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       RegNext(io.csrCtrl.ldld_vio_check_enable)
 
   val s3_rep_info = WireInit(s3_in.rep_info)
-  s3_rep_info.wpu_fail       := s3_in.rep_info.wpu_fail && !s3_fwd_frm_d_chan_valid && s3_troublem
+  s3_rep_info.wpu_fail      := s3_in.rep_info.wpu_fail && !s3_fwd_frm_d_chan_valid && s3_troublem
   s3_rep_info.bank_conflict := s3_in.rep_info.bank_conflict && !s3_fwd_frm_d_chan_valid && s3_troublem
   s3_rep_info.dcache_miss   := s3_in.rep_info.dcache_miss && !s3_fwd_frm_d_chan_valid && s3_troublem
+  s3_rep_info.nuke          := s3_nuke && s3_troublem
   val s3_rep_frm_fetch = s3_vp_match_fail || s3_ldld_rep_inst
   val s3_sel_rep_cause = PriorityEncoderOH(s3_rep_info.cause.asUInt)
   val s3_force_rep     = s3_sel_rep_cause(LoadReplayCauses.C_TM) &&

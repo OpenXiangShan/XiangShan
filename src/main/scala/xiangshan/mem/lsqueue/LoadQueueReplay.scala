@@ -48,22 +48,22 @@ object LoadReplayCauses {
   val C_MA  = 0
   // tlb miss check
   val C_TM  = 1
-  // st-ld violation
-  val C_NK  = 2
   // store-to-load-forwarding check
-  val C_FF  = 3
+  val C_FF  = 2
   // dcache replay check
-  val C_DR  = 4
+  val C_DR  = 3
   // dcache miss check
-  val C_DM  = 5
+  val C_DM  = 4
   // wpu predict fail
-  val C_WF  = 6
+  val C_WF  = 5
   // dcache bank conflict check
-  val C_BC  = 7
+  val C_BC  = 6
   // RAR queue accept check
-  val C_RAR = 8
+  val C_RAR = 7
   // RAW queue accept check
-  val C_RAW = 9
+  val C_RAW = 8
+  // st-ld violation
+  val C_NK  = 9
   // total causes
   val allCauses = 10
 }
