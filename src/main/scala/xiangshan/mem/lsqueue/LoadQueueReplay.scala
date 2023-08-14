@@ -318,6 +318,10 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     when (cause(i)(LoadReplayCauses.C_MA)) {
       blocking(i) := Mux(stAddrDeqVec(i), false.B, blocking(i))
     }
+    // case C_TM
+    when (cause(i)(LoadReplayCauses.C_TM)) {
+      blocking(i) := Mux((blockByTlbMiss(i) && creditUpdate(i) === 0.U), false.B, blocking(i))
+    }
     // case C_FF
     when (cause(i)(LoadReplayCauses.C_FF)) {
       blocking(i) := Mux(stDataDeqVec(i), false.B, blocking(i))
