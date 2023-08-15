@@ -49,6 +49,10 @@ trait HasStreamPrefetchHelper extends HasCircularQueuePtrHelper with HasDCachePa
   val L2_WIDTH_BYTES = WIDTH_BYTES * 2
   val L2_WIDTH_CACHE_BLOCKS = L2_WIDTH_BYTES / dcacheParameters.blockBytes
 
+  val L3_DEPTH_RATIO = 3
+  val L3_WIDTH_BYTES = WIDTH_BYTES * 2 * 2
+  val L3_WIDTH_CACHE_BLOCKS = L3_WIDTH_BYTES / dcacheParameters.blockBytes
+
   val DEPTH_LOOKAHEAD = 6
   val DEPTH_BITS = log2Up(DEPTH_CACHE_BLOCKS) + DEPTH_LOOKAHEAD
 
@@ -386,6 +390,9 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   val ratio_const = WireInit(Constantin.createRecord("l2DepthRatio" + p(XSCoreParamsKey).HartId.toString, initValue = L2_DEPTH_RATIO.U))
   val ratio = ratio_const(3, 0)
 
+  val l3_ratio_const = WireInit(Constantin.createRecord("l3DepthRatio" + p(XSCoreParamsKey).HartId.toString, initValue = L3_DEPTH_RATIO.U))
+  val l3_ratio = l3_ratio_const(3, 0)
+
   // s1: alloc or update
   val s1_valid = RegNext(s0_valid)
   val s1_index = RegEnable(s0_index, s0_valid)
@@ -408,6 +415,8 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   val s1_pf_l1_decr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) - io.dynamic_depth, 0.U(BLOCK_OFFSET.W))
   val s1_pf_l2_incr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) + (io.dynamic_depth << ratio), 0.U(BLOCK_OFFSET.W))
   val s1_pf_l2_decr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) - (io.dynamic_depth << ratio), 0.U(BLOCK_OFFSET.W))
+  val s1_pf_l3_incr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) + (io.dynamic_depth << l3_ratio), 0.U(BLOCK_OFFSET.W))
+  val s1_pf_l3_decr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) - (io.dynamic_depth << l3_ratio), 0.U(BLOCK_OFFSET.W))
   // TODO: remove this
   val s1_can_send_pf = Mux(s1_update, !((array(s1_index).bit_vec & UIntToOH(s1_region_bits)).orR), true.B)
   s0_can_accept := !(s1_valid && (region_hash_tag(s1_region_tag) === region_hash_tag(s0_region_tag)))
@@ -442,11 +451,14 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   val s2_pf_l1_decr_vaddr = RegEnable(s1_pf_l1_decr_vaddr, s1_valid)
   val s2_pf_l2_incr_vaddr = RegEnable(s1_pf_l2_incr_vaddr, s1_valid)
   val s2_pf_l2_decr_vaddr = RegEnable(s1_pf_l2_decr_vaddr, s1_valid)
+  val s2_pf_l3_incr_vaddr = RegEnable(s1_pf_l3_incr_vaddr, s1_valid)
+  val s2_pf_l3_decr_vaddr = RegEnable(s1_pf_l3_decr_vaddr, s1_valid)
   val s2_can_send_pf = RegEnable(s1_can_send_pf, s1_valid)
   val s2_active = array(s2_index).active
   val s2_decr_mode = array(s2_index).decr_mode
   val s2_l1_vaddr = Mux(s2_decr_mode, s2_pf_l1_decr_vaddr, s2_pf_l1_incr_vaddr)
   val s2_l2_vaddr = Mux(s2_decr_mode, s2_pf_l2_decr_vaddr, s2_pf_l2_incr_vaddr)
+  val s2_l3_vaddr = Mux(s2_decr_mode, s2_pf_l3_decr_vaddr, s2_pf_l3_incr_vaddr)
   val s2_will_send_pf = s2_valid && s2_active && s2_can_send_pf
   val s2_pf_req_valid = s2_will_send_pf && io.enable
   val s2_pf_l1_req_bits = (new StreamPrefetchReqBundle).getStreamPrefetchReqBundle(
@@ -461,6 +473,12 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
     decr_mode = s2_decr_mode,
     sink = SINK_L2,
     source = L1_HW_PREFETCH_STREAM)
+  val s2_pf_l3_req_bits = (new StreamPrefetchReqBundle).getStreamPrefetchReqBundle(
+    vaddr = s2_l3_vaddr,
+    width = L3_WIDTH_CACHE_BLOCKS,
+    decr_mode = s2_decr_mode,
+    sink = SINK_L3,
+    source = L1_HW_PREFETCH_STREAM)
   
   XSPerfAccumulate("s2_valid", s2_valid)
   XSPerfAccumulate("s2_will_not_send_pf", s2_valid && !s2_will_send_pf)
@@ -472,15 +490,21 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   val s3_pf_l1_bits = RegEnable(s2_pf_l1_req_bits, s2_pf_req_valid)
   val s3_pf_l2_valid = RegNext(s2_pf_req_valid)
   val s3_pf_l2_bits = RegEnable(s2_pf_l2_req_bits, s2_pf_req_valid)
+  val s3_pf_l3_bits = RegEnable(s2_pf_l3_req_bits, s2_pf_req_valid)
 
   XSPerfAccumulate("s3_pf_sent", s3_pf_l1_valid)
 
   // s4: send the l2 prefetch req out
   val s4_pf_l2_valid = RegNext(s3_pf_l2_valid)
   val s4_pf_l2_bits = RegEnable(s3_pf_l2_bits, s3_pf_l2_valid)
+  val s4_pf_l3_bits = RegEnable(s3_pf_l3_bits, s3_pf_l2_valid)
 
-  io.prefetch_req.valid := s3_pf_l1_valid || s4_pf_l2_valid
-  io.prefetch_req.bits := Mux(s3_pf_l1_valid, s3_pf_l1_bits, s4_pf_l2_bits)
+  // s5: send the l3 prefetch req out
+  val s5_pf_l3_valid = RegNext(s4_pf_l2_valid)
+  val s5_pf_l3_bits = RegEnable(s4_pf_l3_bits, s4_pf_l2_valid)
+
+  io.prefetch_req.valid := s3_pf_l1_valid || s4_pf_l2_valid || s5_pf_l3_valid
+  io.prefetch_req.bits := Mux(s3_pf_l1_valid, s3_pf_l1_bits, Mux(s4_pf_l2_valid, s4_pf_l2_bits, s5_pf_l3_bits))
 
   XSPerfAccumulate("s4_pf_sent", !s3_pf_l1_valid && s4_pf_l2_valid)
   XSPerfAccumulate("s4_pf_blocked", s3_pf_l1_valid && s4_pf_l2_valid)
@@ -615,7 +639,8 @@ class StreamFilterBundle(implicit p: Parameters) extends XSBundle with HasStream
 // 2. tlb request
 // 3. actual l1 prefetch
 // 4. actual l2 prefetch
-class L1L2prefetchFilter(implicit p: Parameters) extends XSModule with HasStreamPrefetchHelper {
+// 5. actual l3 prefetch
+class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasStreamPrefetchHelper {
   val io = IO(new XSBundle {
     val enable = Input(Bool())
     val flush = Input(Bool())
@@ -623,6 +648,7 @@ class L1L2prefetchFilter(implicit p: Parameters) extends XSModule with HasStream
     val tlb_req = new TlbRequestIO(nRespDups = 2)
     val l1_req = DecoupledIO(new L1PrefetchReq())
     val pf_addr = ValidIO(UInt(PAddrBits.W))
+    val l3_pf_addr = ValidIO(UInt(PAddrBits.W))
     val confidence = Input(UInt(1.W))
     val l2PfqBusy = Input(Bool())
   })
@@ -632,6 +658,7 @@ class L1L2prefetchFilter(implicit p: Parameters) extends XSModule with HasStream
   val tlb_req_arb = Module(new RRArbiterInit(new TlbReq, STREAM_FILTER_SIZE))
   val l1_pf_req_arb = Module(new RRArbiterInit(new L1PrefetchReq, STREAM_FILTER_SIZE))
   val l2_pf_req_arb = Module(new RRArbiterInit(UInt(PAddrBits.W), STREAM_FILTER_SIZE))
+  val l3_pf_req_arb = Module(new RRArbiterInit(UInt(PAddrBits.W), STREAM_FILTER_SIZE))
 
   // enq
   // s0: hash tag match
@@ -817,6 +844,23 @@ class L1L2prefetchFilter(implicit p: Parameters) extends XSModule with HasStream
     array(l2_pf_req_arb.io.chosen).sent_vec := array(l2_pf_req_arb.io.chosen).sent_vec | get_candidate_oh(l2_pf_req_arb.io.out.bits)
   }
 
+  // last level cache pf
+  // s0: generate prefetch req paddr per entry, arb them, sent out
+  io.l3_pf_addr.valid := l3_pf_req_arb.io.out.valid
+  io.l3_pf_addr.bits := l3_pf_req_arb.io.out.bits
+
+  l3_pf_req_arb.io.out.ready := true.B
+
+  for(i <- 0 until STREAM_FILTER_SIZE) {
+    val evict = s1_alloc && (s1_index === i.U)
+    l3_pf_req_arb.io.in(i).valid := array(i).can_send_pf() && (array(i).sink === SINK_L3) && !evict
+    l3_pf_req_arb.io.in(i).bits := array(i).get_pf_addr()
+  }
+
+  when(l3_pf_req_arb.io.out.valid) {
+    array(l3_pf_req_arb.io.chosen).sent_vec := array(l3_pf_req_arb.io.chosen).sent_vec | get_candidate_oh(l3_pf_req_arb.io.out.bits)
+  }
+
   // reset meta to avoid muti-hit problem
   for(i <- 0 until STREAM_FILTER_SIZE) {
     when(reset.asBool || RegNext(io.flush)) {
@@ -828,6 +872,7 @@ class L1L2prefetchFilter(implicit p: Parameters) extends XSModule with HasStream
   XSPerfHistogram("filter_active", PopCount(VecInit(array.map(_.can_send_pf())).asUInt), true.B, 0, STREAM_FILTER_SIZE, 1)
   XSPerfHistogram("l1_filter_active", PopCount(VecInit(array.map(x => x.can_send_pf() && (x.sink === SINK_L1))).asUInt), true.B, 0, STREAM_FILTER_SIZE, 1)
   XSPerfHistogram("l2_filter_active", PopCount(VecInit(array.map(x => x.can_send_pf() && (x.sink === SINK_L2))).asUInt), true.B, 0, STREAM_FILTER_SIZE, 1)
+  XSPerfHistogram("l3_filter_active", PopCount(VecInit(array.map(x => x.can_send_pf() && (x.sink === SINK_L3))).asUInt), true.B, 0, STREAM_FILTER_SIZE, 1)
 }
 
 class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamPrefetchHelper {
@@ -839,7 +884,7 @@ class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamP
   val stride_meta_array = Module(new StrideMetaArray)
   val stream_train_filter = Module(new StreamTrainFilter)
   val stream_bit_vec_array = Module(new StreamBitVectorArray)
-  val pf_queue_filter = Module(new L1L2prefetchFilter)
+  val pf_queue_filter = Module(new MutiLevelPrefetchFilter)
 
   // for now, if the stream is disabled, train and prefetch process will continue, without sending out and reqs
   val enable = io.enable
@@ -889,4 +934,7 @@ class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamP
 
   io.pf_addr.valid := pf_queue_filter.io.pf_addr.valid && pf_queue_filter.io.pf_addr.bits > 0x80000000L.U && enable && pf_ctrl.enable
   io.pf_addr.bits := pf_queue_filter.io.pf_addr.bits
+
+  io.l3_pf_addr.valid := pf_queue_filter.io.l3_pf_addr.valid && pf_queue_filter.io.l3_pf_addr.bits > 0x80000000L.U && enable && pf_ctrl.enable
+  io.l3_pf_addr.bits := pf_queue_filter.io.l3_pf_addr.bits
 }

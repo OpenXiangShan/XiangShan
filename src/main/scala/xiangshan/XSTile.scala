@@ -101,6 +101,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   )
 
   // public ports
+  val core_l3_pf_port = core.memBlock.l3_pf_sender_opt
   val memory_port = misc.memory_port
   val uncache = misc.mmio_port
   val clint_int_sink = core.clint_int_sink

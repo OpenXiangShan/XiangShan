@@ -49,6 +49,9 @@ class MemBlock()(implicit p: Parameters) extends LazyModule
   val pf_sender_opt = coreParams.prefetcher.map(_ =>
     BundleBridgeSource(() => new PrefetchRecv)
   )
+  val l3_pf_sender_opt = coreParams.prefetcher.map(_ =>
+    BundleBridgeSource(() => new huancun.PrefetchRecv)
+  )
 
   lazy val module = new MemBlockImp(this)
 
@@ -266,12 +269,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   // load/store prefetch to l2 cache
   prefetcherOpt.foreach(sms_pf => {
-    l1PrefetcherOpt.foreach(stream_pf => {
+    l1PrefetcherOpt.foreach(l1_pf => {
       val sms_pf_to_l2 = ValidIODelay(sms_pf.io.pf_addr, 2)
-      val stream_pf_to_l2 = ValidIODelay(stream_pf.io.pf_addr, 2)
+      val l1_pf_to_l2 = ValidIODelay(l1_pf.io.pf_addr, 2)
 
-      outer.pf_sender_opt.get.out.head._1.addr_valid := sms_pf_to_l2.valid || stream_pf_to_l2.valid
-      outer.pf_sender_opt.get.out.head._1.addr := Mux(stream_pf_to_l2.valid, stream_pf_to_l2.bits, sms_pf_to_l2.bits)
+      outer.pf_sender_opt.get.out.head._1.addr_valid := sms_pf_to_l2.valid || l1_pf_to_l2.valid
+      outer.pf_sender_opt.get.out.head._1.addr := Mux(l1_pf_to_l2.valid, l1_pf_to_l2.bits, sms_pf_to_l2.bits)
       outer.pf_sender_opt.get.out.head._1.l2_pf_en := RegNextN(io.csrCtrl.l2_pf_enable, 2, Some(true.B))
 
       sms_pf.io.enable := RegNextN(io.csrCtrl.l1D_pf_enable, 2, Some(false.B))
@@ -279,13 +282,24 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       val l2_trace = Wire(new LoadPfDbBundle)
       l2_trace.paddr := outer.pf_sender_opt.get.out.head._1.addr
       val table = ChiselDB.createTable("L2PrefetchTrace"+ p(XSCoreParamsKey).HartId.toString, new LoadPfDbBundle, basicDB = true)
-      table.log(l2_trace, stream_pf_to_l2.valid, "StreamPrefetchTrace", clock, reset)
-      table.log(l2_trace, !stream_pf_to_l2.valid && sms_pf_to_l2.valid, "L2PrefetchTrace", clock, reset)
+      table.log(l2_trace, l1_pf_to_l2.valid, "StreamPrefetchTrace", clock, reset)
+      table.log(l2_trace, !l1_pf_to_l2.valid && sms_pf_to_l2.valid, "L2PrefetchTrace", clock, reset)
+
+      val l1_pf_to_l3 = ValidIODelay(l1_pf.io.l3_pf_addr, 4)
+      outer.l3_pf_sender_opt.get.out.head._1.addr_valid := l1_pf_to_l3.valid
+      outer.l3_pf_sender_opt.get.out.head._1.addr := l1_pf_to_l3.bits
+      outer.l3_pf_sender_opt.get.out.head._1.l2_pf_en := RegNextN(io.csrCtrl.l2_pf_enable, 4, Some(true.B))
+
+      val l3_trace = Wire(new LoadPfDbBundle)
+      l3_trace.paddr := outer.l3_pf_sender_opt.get.out.head._1.addr
+      val l3_table = ChiselDB.createTable("L3PrefetchTrace"+ p(XSCoreParamsKey).HartId.toString, new LoadPfDbBundle, basicDB = true)
+      l3_table.log(l3_trace, l1_pf_to_l3.valid, "StreamPrefetchTrace", clock, reset)
 
       XSPerfAccumulate("prefetch_fire_l2", outer.pf_sender_opt.get.out.head._1.addr_valid)
-      XSPerfAccumulate("stream_fire_l2", stream_pf_to_l2.valid)
-      XSPerfAccumulate("sms_fire_l2", !stream_pf_to_l2.valid && sms_pf_to_l2.valid)
-      XSPerfAccumulate("sms_block_by_stream", stream_pf_to_l2.valid && sms_pf_to_l2.valid)
+      XSPerfAccumulate("prefetch_fire_l3", outer.l3_pf_sender_opt.get.out.head._1.addr_valid)
+      XSPerfAccumulate("l1pf_fire_l2", l1_pf_to_l2.valid)
+      XSPerfAccumulate("sms_fire_l2", !l1_pf_to_l2.valid && sms_pf_to_l2.valid)
+      XSPerfAccumulate("sms_block_by_l1pf", l1_pf_to_l2.valid && sms_pf_to_l2.valid)
     })
   })
 
