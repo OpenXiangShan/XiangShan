@@ -763,6 +763,8 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
     // forward missqueue
     val forward = Vec(LoadPipelineWidth, new LduToMissqueueForwardIO)
     val l2_pf_store_only = Input(Bool())
+
+    val mq_enq_cancel = Output(Bool())
   })
   
   // 128KBL1: FIXME: provide vaddr for l2
@@ -879,6 +881,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   }
 
   io.req.ready := accept
+  io.mq_enq_cancel := io.req.bits.cancel
   io.refill_to_ldq.valid := Cat(entries.map(_.io.refill_to_ldq.valid)).orR
   io.refill_to_ldq.bits := ParallelMux(entries.map(_.io.refill_to_ldq.valid) zip entries.map(_.io.refill_to_ldq.bits))
 
