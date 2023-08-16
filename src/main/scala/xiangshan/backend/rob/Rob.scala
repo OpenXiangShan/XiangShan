@@ -93,7 +93,7 @@ class RobEnqIO(implicit p: Parameters) extends XSBundle {
   val resp = Vec(RenameWidth, Output(new RobPtr))
 }
 
-class RobDispatchData(implicit p: Parameters) extends RobCommitInfo
+class RobDispatchData(implicit p: Parameters) extends RobCommitInfo {}
 
 class RobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
@@ -404,7 +404,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   val snptEnq = io.enq.canAccept && io.enq.req.head.valid && io.enq.req.head.bits.snapshot
   val snapshots = SnapshotGenerator(enqPtrVec, snptEnq, io.snpt.snptDeq, io.redirect.valid)
-
   val debug_lsIssue = WireDefault(debug_lsIssued)
   debug_lsIssue(deqPtr.value) := io.debugHeadLsIssue
 
@@ -425,7 +424,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     * (1) read: commits/walk/exception
     * (2) write: write back from exe units
     */
-  val dispatchData = Module(new SyncDataModuleTemplate(new RobCommitInfo, RobSize, CommitWidth, RenameWidth))
+  val dispatchData = Module(new SyncDataModuleTemplate(new RobDispatchData, RobSize, CommitWidth, RenameWidth))
   val dispatchDataRead = dispatchData.io.rdata
 
   val exceptionGen = Module(new ExceptionGen(params))
@@ -437,19 +436,30 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.debugRobHead := debug_microOp(deqPtr.value)
 
   val rab = Module(new RenameBuffer(RabSize))
-  rab.io.redirectValid := io.redirect.valid
+
+  rab.io.redirect.valid := io.redirect.valid
+
   rab.io.req.zip(io.enq.req).map { case (dest, src) =>
     dest.bits := src.bits
     dest.valid := src.valid && io.enq.canAccept
   }
 
-  val realDestSizeCandidates = (0 until CommitWidth).map(i => realDestSize(Mux(state === s_idle, deqPtrVec(i).value, walkPtrVec(i).value)))
-  val wbSizeSeq = io.commits.commitValid.zip(io.commits.walkValid).zip(realDestSizeCandidates).map { case ((commitValid, walkValid), realDestSize) =>
-    Mux(io.commits.isCommit, Mux(commitValid, realDestSize, 0.U), Mux(walkValid, realDestSize, 0.U))
-  }
-  val wbSizeSum = wbSizeSeq.reduce(_ + _)
-  rab.io.commitSize := wbSizeSum
-  rab.io.walkSize := wbSizeSum
+  val commitDestSizeSeq = (0 until CommitWidth).map(i => realDestSize(deqPtrVec(i).value))
+  val walkDestSizeSeq = (0 until CommitWidth).map(i => realDestSize(walkPtrVec(i).value))
+
+  val commitSizeSum = io.commits.commitValid.zip(commitDestSizeSeq).map { case (commitValid, destSize) =>
+    Mux(io.commits.isCommit && commitValid, destSize, 0.U)
+  }.reduce(_ +& _)
+  val walkSizeSum = io.commits.walkValid.zip(walkDestSizeSeq).map { case (walkValid, destSize) =>
+    Mux(io.commits.isWalk && walkValid, destSize, 0.U)
+  }.reduce(_ +& _)
+
+  rab.io.commitSize := commitSizeSum
+  rab.io.walkSize := walkSizeSum
+  rab.io.snpt.snptEnq := false.B
+  rab.io.snpt.snptDeq := io.snpt.snptDeq
+  rab.io.snpt.snptSelect := io.snpt.snptSelect
+  rab.io.snpt.useSnpt := io.snpt.useSnpt
 
   io.rabCommits := rab.io.commits
   io.diffCommits := rab.io.diffCommits
@@ -838,7 +848,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   val enqPtrGenModule = Module(new RobEnqPtrWrapper)
   enqPtrGenModule.io.redirect := io.redirect
-  enqPtrGenModule.io.allowEnqueue := allowEnqueue
+  enqPtrGenModule.io.allowEnqueue := allowEnqueue && rab.io.canEnq
   enqPtrGenModule.io.hasBlockBackward := hasBlockBackward
   enqPtrGenModule.io.enq := VecInit(io.enq.req.map(req => req.valid && req.bits.firstUop))
   enqPtrVec := enqPtrGenModule.io.out
@@ -1035,7 +1045,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   )
   dispatchData.io.wen := canEnqueue
   dispatchData.io.waddr := allocatePtrVec.map(_.value)
-  dispatchData.io.wdata.zip(io.enq.req.map(_.bits)).foreach{ case (wdata, req) =>
+  dispatchData.io.wdata.zip(io.enq.req.map(_.bits)).zipWithIndex.foreach{ case ((wdata, req), portIdx) =>
     wdata.ldest := req.ldest
     wdata.rfWen := req.rfWen
     wdata.fpWen := req.fpWen
@@ -1208,6 +1218,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   ExcitingUtils.addSink(WireDefault(sourceLqIdx), s"rob_head_lqIdx_${coreParams.HartId}", ExcitingUtils.Perf)
   ExcitingUtils.addSink(WireDefault(sourcePaddr), name=s"rob_head_paddr_${coreParams.HartId}", ExcitingUtils.Perf)
   ExcitingUtils.addSink(WireDefault(sourceVaddr), name=s"rob_head_vaddr_${coreParams.HartId}", ExcitingUtils.Perf)
+  ExcitingUtils.addSink(WireDefault(sourceHeadLsIssue), name=s"rob_head_ls_issue_${coreParams.HartId}", ExcitingUtils.Perf)
 
   /**
     * DataBase info:

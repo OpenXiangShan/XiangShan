@@ -8,6 +8,20 @@ import utils._
 import utility._
 import xiangshan.backend.Bundles.DynInst
 import xiangshan.backend.decode.VectorConstants
+import xiangshan.backend.rename.SnapshotGenerator
+
+class RenameBufferPtr(size: Int) extends CircularQueuePtr[RenameBufferPtr](size) {
+  def this()(implicit p: Parameters) = this(p(XSCoreParamsKey).RabSize)
+}
+
+object RenameBufferPtr {
+  def apply(flag: Boolean = false, v: Int = 0)(implicit p: Parameters): RenameBufferPtr = {
+    val ptr = Wire(new RenameBufferPtr(p(XSCoreParamsKey).RabSize))
+    ptr.flag := flag.B
+    ptr.value := v.U
+    ptr
+  }
+}
 
 class RenameBufferEntry(implicit p: Parameters) extends RobCommitInfo {
   val robIdx = new RobPtr
@@ -15,58 +29,51 @@ class RenameBufferEntry(implicit p: Parameters) extends RobCommitInfo {
 
 class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
-    val redirectValid = Input(Bool())
+    val redirect = Input(ValidIO(new Bundle {
+    }))
 
     val req = Vec(RenameWidth, Flipped(ValidIO(new DynInst)))
-    val canEnq = Output(Bool())
 
     val walkSize = Input(UInt(log2Up(size).W))
     val robWalkEnd = Input(Bool())
     val commitSize = Input(UInt(log2Up(size).W))
+    val snpt = Input(new SnapshotPort)
+
+    val canEnq = Output(Bool())
     val rabWalkEnd = Output(Bool())
-
+    val enqPtrVec = Output(Vec(RenameWidth, new RenameBufferPtr))
     val vconfigPdest = Output(UInt(PhyRegIdxWidth.W))
-
     val commits = Output(new RobCommitIO)
     val diffCommits = Output(new DiffCommitIO)
   })
 
-  class RenameBufferPtr extends CircularQueuePtr[RenameBufferPtr](size)
-
-  object RenameBufferPtr {
-    def apply(f: Boolean, v: Int): RenameBufferPtr = {
-      val ptr = Wire(new RenameBufferPtr)
-      ptr.flag := f.B
-      ptr.value := v.U
-      ptr
-    }
-  }
-
-  val s_idle :: s_walk :: s_cancel :: Nil = Enum(3)
-  val state = RegInit(s_idle)
-  val stateNxt = WireInit(s_idle)
-
-  val robWalkEnd = RegInit(false.B)
-
-  when(io.redirectValid){
-    robWalkEnd := false.B
-  }.elsewhen(io.robWalkEnd){
-    robWalkEnd := true.B
-  }
-
-  val renameBuffer = RegInit(VecInit(Seq.fill(size){0.U.asTypeOf(new RenameBufferEntry)}))
-
   // pointer
-  // tail: enq and walk
-  // head: commit to arch rat
-  // diff: commit to diff rat
-  val headPtr = RegInit(RenameBufferPtr(false, 0))
-  val headPtrOH = RegInit(1.U(size.W))
-  XSError(headPtr.toOH =/= headPtrOH, p"wrong one-hot reg between $headPtr and $headPtrOH")
-  val headPtrOHShift = CircularShift(headPtrOH)
+  private val enqPtrVec = RegInit(VecInit.tabulate(RenameWidth)(idx => RenameBufferPtr(flag = false, idx)))
+  private val enqPtr = enqPtrVec.head
+  private val enqPtrOH = RegInit(1.U(size.W))
+  private val enqPtrOHShift = CircularShift(enqPtrOH)
+  // may shift [0, RenameWidth] steps
+  private val enqPtrOHVec = VecInit.tabulate(RenameWidth + 1)(enqPtrOHShift.left)
+  private val enqPtrVecNext = Wire(enqPtrVec.cloneType)
+
+  private val deqPtrVec = RegInit(VecInit.tabulate(CommitWidth)(idx => RenameBufferPtr(flag = false, idx)))
+  private val deqPtr = deqPtrVec.head
+  private val deqPtrOH = RegInit(1.U(size.W))
+  private val deqPtrOHShift = CircularShift(deqPtrOH)
+  private val deqPtrOHVec = VecInit.tabulate(CommitWidth + 1)(deqPtrOHShift.left)
+  private val deqPtrVecNext = Wire(deqPtrVec.cloneType)
+  XSError(deqPtr.toOH =/= deqPtrOH, p"wrong one-hot reg between $deqPtr and $deqPtrOH")
+
+  private val walkPtr = Reg(new RenameBufferPtr)
+  private val walkPtrOH = walkPtr.toOH
+  private val walkPtrOHVec = VecInit.tabulate(CommitWidth + 1)(CircularShift(walkPtrOH).left)
+  private val walkPtrNext = Wire(new RenameBufferPtr)
+
+  private val snptEnq = io.canEnq && io.req.head.valid && io.req.head.bits.snapshot
+  private val walkPtrSnapshots = SnapshotGenerator(enqPtr, snptEnq, io.snpt.snptDeq, io.redirect.valid)
+
   // may shift [0, CommitWidth] steps
-  val headPtrOHVec = VecInit.tabulate(CommitWidth + 1)(headPtrOHShift.left)
-  val headPtrOHVec2 = VecInit(Seq.tabulate(CommitWidth * MaxUopSize + 1)(_ % size).map(step => headPtrOHShift.left(step)))
+  val headPtrOHVec2 = VecInit(Seq.tabulate(CommitWidth * MaxUopSize + 1)(_ % size).map(step => deqPtrOHShift.left(step)))
 
   val vcfgPtrOH = RegInit(1.U(size.W))
   val vcfgPtrOHShift = CircularShift(vcfgPtrOH)
@@ -78,55 +85,90 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   // may shift [0, CommitWidth * MaxUopSize] steps
   val diffPtrOHVec = VecInit(Seq.tabulate(CommitWidth * MaxUopSize + 1)(_ % size).map(step => diffPtrOHShift.left(step)))
 
-  val tailPtr = RegInit(RenameBufferPtr(false, 0))
-  val tailPtrOH = RegInit(1.U(size.W))
-  val tailPtrOHShift = CircularShift(tailPtrOH)
-  // may shift [0, RenameWidth] steps
-  val tailPtrOHVec = VecInit.tabulate(RenameWidth + 1)(tailPtrOHShift.left)
-  val tailPtrVec = RegInit(VecInit.tabulate(RenameWidth)(_.U.asTypeOf(new RenameBufferPtr)))
+  // Regs
+  val renameBuffer = RegInit(VecInit(Seq.fill(size){0.U.asTypeOf(new RenameBufferEntry)}))
+
+  val s_idle :: s_walk :: s_cancel :: Nil = Enum(3)
+  val state = RegInit(s_idle)
+  val stateNxt = WireInit(s_idle)
+
+  val robWalkEnd = RegInit(false.B)
+  val rabWalkEndWire = Wire(Bool())
+
+  when(io.redirect.valid){
+    robWalkEnd := false.B
+  }.elsewhen(io.robWalkEnd){
+    robWalkEnd := true.B
+  }
 
   val realNeedAlloc = io.req.map(req => req.valid && req.bits.needWriteRf)
   val enqCount    = PopCount(realNeedAlloc)
-  val commitCount = PopCount(io.commits.commitValid)
-  val walkCount   = PopCount(io.commits.walkValid)
+  val commitCount = Mux(io.commits.isCommit, PopCount(io.commits.commitValid), 0.U)
+  val walkCount   = Mux(io.commits.isWalk, PopCount(io.commits.walkValid), 0.U)
+
+  walkPtrNext := Mux(
+    io.redirect.valid,
+    Mux(
+      io.snpt.useSnpt,
+      walkPtrSnapshots(io.snpt.snptSelect),
+      deqPtrVecNext.head
+    ),
+    Mux(
+      state === s_walk,
+      walkPtr + walkCount,
+      walkPtr
+    )
+  )
+
+  walkPtr := walkPtrNext
 
   // number of pair(ldest, pdest) ready to commit to arch_rat
   val commitSize = RegInit(0.U(log2Up(size).W))
-  val commitSizeNxt = Mux(state === s_idle, commitSize - Mux(io.commits.isCommit, commitCount, 0.U) + io.commitSize, commitSize)
-  commitSize := commitSizeNxt
   val walkSize = RegInit(0.U(log2Up(size).W))
+
+  val commitSizeNxt = commitSize + io.commitSize - commitCount
   val walkSizeNxt = walkSize + io.walkSize - walkCount
-  walkSize := Mux(io.redirectValid, commitSizeNxt, walkSizeNxt)
 
-  val rabWalkEnd = robWalkEnd === true.B && walkSizeNxt === 0.U
+  commitSize := commitSizeNxt
+  walkSize := Mux(io.redirect.valid, 0.U, walkSizeNxt)
 
-  val walkCandidates   = VecInit(tailPtrOHVec.map(sel => Mux1H(sel, renameBuffer)))
-  val commitCandidates = VecInit(headPtrOHVec.map(sel => Mux1H(sel, renameBuffer)))
+  val walkCandidates   = VecInit(walkPtrOHVec.map(sel => Mux1H(sel, renameBuffer)))
+  val commitCandidates = VecInit(deqPtrOHVec.map(sel => Mux1H(sel, renameBuffer)))
   val vcfgCandidates   = VecInit(vcfgPtrOHVec.map(sel => Mux1H(sel, renameBuffer)))
   val diffCandidates   = VecInit(diffPtrOHVec.map(sel => Mux1H(sel, renameBuffer)))
 
-  // update head pointer
-  val headPtrNext =  headPtr + commitCount
-  val headPtrOHNext = headPtrOHVec(commitCount)
-  headPtr := headPtrNext
-  headPtrOH := headPtrOHNext
   // update diff pointer
   val diffPtrOHNext = Mux(state === s_idle, diffPtrOHVec(io.commitSize), diffPtrOH)
   diffPtrOH := diffPtrOHNext
+
   // update vcfg pointer
   vcfgPtrOH := diffPtrOHNext
-  // update tail pointer
-  val tailPtrEnqNext = tailPtr + PopCount(realNeedAlloc)
-  val tailPtrWalkNext = tailPtr + walkCount
-  val tailPtrNext = Mux(io.redirectValid, headPtrNext,
-    Mux(io.commits.isWalk, tailPtrWalkNext, tailPtrEnqNext))
-  val tailPtrOHNext = Mux(io.redirectValid, headPtrOHVec2(commitCount),
-    Mux(io.commits.isWalk, tailPtrOHVec(walkCount), tailPtrOHVec(PopCount(realNeedAlloc))))
-  tailPtr := tailPtrNext
-  tailPtrOH := tailPtrOHNext
-  tailPtrVec.zipWithIndex.map{ case(ptr, i) => ptr := tailPtrNext + i.U}
 
-  val allocatePtrVec = VecInit((0 until RenameWidth).map(i => tailPtrVec(PopCount(realNeedAlloc.take(i))).value))
+  // update enq pointer
+  val enqPtrNext = Mux(
+    state === s_walk && stateNxt === s_idle,
+    walkPtrNext,
+    enqPtr + enqCount
+  )
+  val enqPtrOHNext = Mux(
+    state === s_walk && stateNxt === s_idle,
+    walkPtrNext.toOH,
+    enqPtrOHVec(enqCount)
+  )
+  enqPtr := enqPtrNext
+  enqPtrOH := enqPtrOHNext
+  enqPtrVecNext.zipWithIndex.map{ case(ptr, i) => ptr := enqPtrNext + i.U }
+  enqPtrVec := enqPtrVecNext
+
+  // update deq pointer
+  val deqPtrNext = deqPtr + commitCount
+  val deqPtrOHNext = deqPtrOHVec(commitCount)
+  deqPtr := deqPtrNext
+  deqPtrOH := deqPtrOHNext
+  deqPtrVecNext.zipWithIndex.map{ case(ptr, i) => ptr := deqPtrNext + i.U }
+  deqPtrVec := deqPtrVecNext
+
+  val allocatePtrVec = VecInit((0 until RenameWidth).map(i => enqPtrVec(PopCount(realNeedAlloc.take(i))).value))
   allocatePtrVec.zip(io.req).zip(realNeedAlloc).map{ case((allocatePtr, req), realNeedAlloc) =>
     when(realNeedAlloc){
       renameBuffer(allocatePtr).ldest := req.bits.ldest
@@ -149,16 +191,18 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
     io.commits.robIdx(i) := Mux(state === s_idle, commitCandidates(i).robIdx, walkCandidates(i).robIdx)
   }
 
-  stateNxt := Mux(io.redirectValid, s_walk,
-    Mux(state === s_walk && rabWalkEnd, s_idle, state))
+  stateNxt := Mux(io.redirect.valid, s_walk,
+    Mux(io.rabWalkEnd, s_idle, state))
   state := stateNxt
 
-  io.rabWalkEnd := state === s_walk && rabWalkEnd
+  rabWalkEndWire := robWalkEnd && state === s_walk && walkSizeNxt === 0.U
+  io.rabWalkEnd := rabWalkEndWire
 
   val allowEnqueue = RegInit(true.B)
-  val numValidEntries = distanceBetween(tailPtr, headPtr)
+  val numValidEntries = distanceBetween(enqPtr, deqPtr)
   allowEnqueue := numValidEntries + enqCount <= (size - RenameWidth).U
   io.canEnq := allowEnqueue
+  io.enqPtrVec := enqPtrVec
 
   io.vconfigPdest := Mux(vcfgCandidates(0).ldest === VCONFIG_IDX.U && vcfgCandidates(0).vecWen, vcfgCandidates(0).pdest, vcfgCandidates(1).pdest)
 
@@ -170,4 +214,5 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
     io.diffCommits.info(i) := diffCandidates(i)
   }
 
+  XSError(isBefore(enqPtr, deqPtr) && !isFull(enqPtr, deqPtr), "\ndeqPtr is older than enqPtr!\n")
 }
