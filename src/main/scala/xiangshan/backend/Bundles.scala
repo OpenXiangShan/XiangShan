@@ -82,6 +82,7 @@ object Bundles {
     val imm             = UInt(ImmUnion.maxLen.W)
     val fpu             = new FPUCtrlSignals
     val vpu             = new VPUCtrlSignals
+    val wfflags         = Bool()
     val isMove          = Bool()
     val uopIdx          = UInt(5.W)
     val uopSplitType    = UopSplitType()
@@ -148,6 +149,7 @@ object Bundles {
     val imm             = UInt(XLEN.W) // Todo: check if it need minimized
     val fpu             = new FPUCtrlSignals
     val vpu             = new VPUCtrlSignals
+    val wfflags         = Bool()
     val isMove          = Bool()
     val uopIdx          = UInt(5.W)
     val isVset          = Bool()
@@ -288,6 +290,8 @@ object Bundles {
 
     // float rounding mode
     val frm       = Frm()
+    // scalar float instr
+    val fpu       = Fpu()
     // vector fix int rounding mode
     val vxrm      = Vxrm()
     // vector uop index, exclude other non-vector uop

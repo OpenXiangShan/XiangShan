@@ -342,16 +342,14 @@ case class XSCoreParameters
     implicit val schdType: SchedulerType = VfScheduler()
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams("FEX0", Seq(FmacCfg), Seq(VfWB(port = 0, 0)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)))),
-        ExeUnitParams("FEX1", Seq(FmacCfg), Seq(VfWB(port = 1, 0)), Seq(Seq(VfRD(4, 0)), Seq(VfRD(5, 0)), Seq(VfRD(6, 0)))),
+        ExeUnitParams("FEX0", Seq(F2fCfg, F2iCfg, VSetRvfWvfCfg), Seq(VfWB(port = 0, 0), IntWB(port = 0, 1)), Seq(Seq(VfRD(12, 0)), Seq(VfRD(13, 0)))),
       ), numEntries = 32, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams("FEX2", Seq(FDivSqrtCfg), Seq(VfWB(port = 2, 0)), Seq(Seq(VfRD(11, 0)), Seq(VfRD(12, 0)))),
-        ExeUnitParams("FEX3", Seq(F2fCfg, F2iCfg, VSetRvfWvfCfg), Seq(VfWB(port = 3, 0), IntWB(port = 5, 0)), Seq(Seq(VfRD(7, 0)), Seq(VfRD(8, 0)))),
+        ExeUnitParams("VEX0", Seq(VialuCfg, VimacCfg, VppuCfg, VipuCfg), Seq(VfWB(port = 1, 0)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
       ), numEntries = 32, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams("VEX0", Seq(VialuCfg, VimacCfg, VppuCfg, VipuCfg), Seq(VfWB(port = 4, 0)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
-        ExeUnitParams("VEX1", Seq(VfaluCfg, VfmaCfg), Seq(VfWB(port = 5, 0)), Seq(Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(VfRD(9, 0)), Seq(VfRD(10, 0)), Seq(VfRD(11, 0)))),
+        ExeUnitParams("VEX1", Seq(VfaluCfg, VfmaCfg), Seq(VfWB(port = 2, 0), IntWB(port = 4, 1)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
+        ExeUnitParams("VEX2", Seq(VfaluCfg, VfmaCfg), Seq(VfWB(port = 3, 0), IntWB(port = 5, 1)), Seq(Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(VfRD(9, 0)), Seq(VfRD(10, 0)), Seq(VfRD(11, 0)))),
       ), numEntries = 32, numEnq = 2),
       IssueBlockParams(Seq(
         ExeUnitParams("VEX3", Seq(VfdivCfg), Seq(VfWB(port = 5, 0)), Seq(Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(VfRD(9, 0)), Seq(VfRD(10, 0)), Seq(VfRD(11, 0)))),
@@ -436,14 +434,6 @@ case class XSCoreParameters
       WakeUpConfig("MUL1" -> "STA0"),
       WakeUpConfig("MUL1" -> "STA1"),
       WakeUpConfig("IMISC0" -> "FEX0"),
-      WakeUpConfig("IMISC0" -> "FEX1"),
-      WakeUpConfig("IMISC0" -> "FEX2"),
-      WakeUpConfig("IMISC0" -> "FEX3"),
-      WakeUpConfig("IMISC0" -> "FEX4"),
-      WakeUpConfig("FEX3" -> "FEX0"),
-      WakeUpConfig("FEX3" -> "FEX1"),
-      WakeUpConfig("FEX3" -> "FEX2"),
-      WakeUpConfig("FEX3" -> "FEX3"),
     )
   }
 

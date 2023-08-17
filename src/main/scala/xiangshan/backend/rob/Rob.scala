@@ -1059,7 +1059,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     wdata.rfWen := req.rfWen
     wdata.fpWen := req.fpWen
     wdata.vecWen := req.vecWen
-    wdata.wflags := req.fpu.wflags
+    wdata.wflags := req.wfflags
     wdata.commitType := req.commitType
     wdata.pdest := req.pdest
     wdata.ftqIdx := req.ftqPtr

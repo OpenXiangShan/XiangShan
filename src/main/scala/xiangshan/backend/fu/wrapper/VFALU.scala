@@ -7,9 +7,8 @@ import utils.XSError
 import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.backend.fu.vector.utils.VecDataSplitModule
-import xiangshan.backend.fu.vector.{Mgu, Utils, VecInfo, VecPipedFuncUnit, VecSrcTypeModule}
+import xiangshan.backend.fu.vector.{Mgu, VecInfo, VecPipedFuncUnit}
 import yunsuan.{VfaluType, VfpuType}
-import xiangshan.backend.fu.vector.Bundles.{VSew, Vl}
 import yunsuan.vector.VectorFloatAdder
 
 class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) {
@@ -73,6 +72,8 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
     outMask
   }
   srcMaskRShift := (srcMask >> (vecCtrl.vuopIdx * (16.U >> vecCtrl.vsew)))(4 * numVecModule - 1, 0)
+  val fp_aIsFpCanonicalNAN = Wire(Vec(numVecModule,Bool()))
+  val fp_bIsFpCanonicalNAN = Wire(Vec(numVecModule,Bool()))
   vfalus.zipWithIndex.foreach {
     case (mod, i) =>
       mod.io.fp_a         := Mux(opbWiden, vs1Split.io.outVec64b(i), vs2Split.io.outVec64b(i))  // very dirty TODO
@@ -91,6 +92,16 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
       mod.io.op_code      := opcode
       resultData(i)       := mod.io.fp_result
       fflagsData(i)       := mod.io.fflags
+      fp_aIsFpCanonicalNAN(i) := vecCtrl.fpu.isFpToVecInst & (
+          ((vsew === VSew.e32) & (!vs2Split.io.outVec64b(i).head(32).andR)) |
+          ((vsew === VSew.e16) & (!vs2Split.io.outVec64b(i).head(48).andR))
+        )
+      fp_bIsFpCanonicalNAN(i) := vecCtrl.fpu.isFpToVecInst & (
+          ((vsew === VSew.e32) & (!vs1Split.io.outVec64b(i).head(32).andR)) |
+          ((vsew === VSew.e16) & (!vs1Split.io.outVec64b(i).head(48).andR))
+        )
+      mod.io.fp_aIsFpCanonicalNAN := fp_aIsFpCanonicalNAN(i)
+      mod.io.fp_bIsFpCanonicalNAN := fp_bIsFpCanonicalNAN(i)
   }
   val resultDataUInt = resultData.asUInt
   val cmpResultWidth = dataWidth / 16
@@ -122,9 +133,25 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
     }
   }
 
+  val outEew = Mux(RegNext(resWiden), outVecCtrl.vsew + 1.U, outVecCtrl.vsew)
+  val outVuopidx = outVecCtrl.vuopIdx(2, 0)
+  val vlMax = ((VLEN/8).U >> outEew).asUInt
+  val lmulAbs = Mux(outVecCtrl.vlmul(2), (~outVecCtrl.vlmul(1,0)).asUInt + 1.U, outVecCtrl.vlmul(1,0))
+  val outVlFix = Mux(outVecCtrl.fpu.isFpToVecInst, 1.U, outVl)
+  val vlMaxAllUop = Wire(outVl.cloneType)
+  vlMaxAllUop := Mux(outVecCtrl.vlmul(2), vlMax >> lmulAbs, vlMax << lmulAbs).asUInt
+  val vlMaxThisUop = Mux(outVecCtrl.vlmul(2), vlMax >> lmulAbs, vlMax).asUInt
+  val vlSetThisUop = Mux(outVlFix > outVuopidx*vlMaxThisUop, outVlFix - outVuopidx*vlMaxThisUop, 0.U)
+  val vlThisUop = Wire(UInt(3.W))
+  vlThisUop := Mux(vlSetThisUop < vlMaxThisUop, vlSetThisUop, vlMaxThisUop)
+  val vlMaskRShift = Wire(UInt((4 * numVecModule).W))
+  vlMaskRShift := Fill(4 * numVecModule, 1.U(1.W)) >> ((4 * numVecModule).U - vlThisUop)
+
+  private val needNoMask = (outCtrl.fuOpType === VfaluType.vfmerge) || outVecCtrl.fpu.isFpToVecInst
+  val maskToMgu = Mux(needNoMask, allMaskTrue, outSrcMask)
   val allFFlagsEn = Wire(Vec(4*numVecModule,Bool()))
   val outSrcMaskRShift = Wire(UInt((4*numVecModule).W))
-  outSrcMaskRShift := (outSrcMask >> (outVecCtrl.vuopIdx * (16.U >> outVecCtrl.vsew)))(4*numVecModule-1,0)
+  outSrcMaskRShift := (maskToMgu >> (outVecCtrl.vuopIdx(2,0) * vlMax))(4*numVecModule-1,0)
   val f16FFlagsEn = outSrcMaskRShift
   val f32FFlagsEn = Wire(Vec(numVecModule,UInt(4.W)))
   for (i <- 0 until numVecModule){
@@ -136,12 +163,12 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   }
   val fflagsEn= Mux1H(
     Seq(
-      (outVecCtrl.vsew === 1.U) -> f16FFlagsEn.asUInt,
-      (outVecCtrl.vsew === 2.U) -> f32FFlagsEn.asUInt,
-      (outVecCtrl.vsew === 3.U) -> f64FFlagsEn.asUInt
+      (outEew === 1.U) -> f16FFlagsEn.asUInt,
+      (outEew === 2.U) -> f32FFlagsEn.asUInt,
+      (outEew === 3.U) -> f64FFlagsEn.asUInt
     )
   )
-  allFFlagsEn := fflagsEn.asTypeOf(allFFlagsEn)
+  allFFlagsEn := (fflagsEn & vlMaskRShift).asTypeOf(allFFlagsEn)
 
   val allFFlags = fflagsData.asTypeOf(Vec(4*numVecModule,UInt(5.W)))
   val outFFlags = allFFlagsEn.zip(allFFlags).map{
@@ -157,23 +184,24 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
     cmpResultForMgu(i) := Mux(outSrcMaskRShift(i), cmpResult(i), Mux(outVecCtrl.vma, true.B, cmpResultOldVd(i)))
   }
 
-  private val needNoMask = outCtrl.fuOpType === VfaluType.vfmerge
-  private val maskToMgu = Mux(needNoMask, allMaskTrue, outSrcMask)
-  private val outEew = Mux(RegNext(resWiden), outVecCtrl.vsew + 1.U, outVecCtrl.vsew)
   mgu.io.in.vd := Mux(outVecCtrl.isDstMask, Cat(0.U((dataWidth / 16 * 15).W), cmpResultForMgu.asUInt), resultDataUInt)
   mgu.io.in.oldVd := outOldVd
   mgu.io.in.mask := maskToMgu
   mgu.io.in.info.ta := outVecCtrl.vta
   mgu.io.in.info.ma := outVecCtrl.vma
-  mgu.io.in.info.vl := outVl
+  mgu.io.in.info.vl := outVlFix
   mgu.io.in.info.vstart := outVecCtrl.vstart
   mgu.io.in.info.eew := outEew
   mgu.io.in.info.vdIdx := outVecCtrl.vuopIdx
   mgu.io.in.info.narrow := outVecCtrl.isNarrow
   mgu.io.in.info.dstMask := outVecCtrl.isDstMask
-  io.out.bits.res.data := mgu.io.out.vd
+  val resultFpMask = Wire(UInt(VLEN.W))
+  val isFclass = outVecCtrl.fpu.isFpToVecInst && (outCtrl.fuOpType === VfaluType.vfclass)
+  val fpCmpFuOpType = Seq(VfaluType.vfeq, VfaluType.vflt, VfaluType.vfle)
+  val isCmp = outVecCtrl.fpu.isFpToVecInst && (fpCmpFuOpType.map(_ === outCtrl.fuOpType).reduce(_|_))
+  resultFpMask := Mux(isFclass || isCmp, Fill(16, 1.U(1.W)), Fill(VLEN, 1.U(1.W)))
+  io.out.bits.res.data := mgu.io.out.vd & resultFpMask
 
-//  io.out.bits.res.data := resultData.asUInt
 }
 
 class VFMgu(vlen:Int)(implicit p: Parameters) extends Module{

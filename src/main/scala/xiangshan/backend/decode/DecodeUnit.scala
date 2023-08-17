@@ -307,21 +307,11 @@ object FpDecode extends DecodeConstants{
     FSW     -> FDecode(SrcType.reg, SrcType.fp,  SrcType.X, FuType.stu, LSUOpType.sw, selImm = SelImm.IMM_S          ),
     FSD     -> FDecode(SrcType.reg, SrcType.fp,  SrcType.X, FuType.stu, LSUOpType.sd, selImm = SelImm.IMM_S          ),
 
-    FCLASS_S-> FDecode(SrcType.fp , SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, xWen = T, canRobCompress = T),
-    FCLASS_D-> FDecode(SrcType.fp , SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, xWen = T, canRobCompress = T),
-
     FMV_X_D -> FDecode(SrcType.fp , SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, xWen = T, canRobCompress = T),
     FMV_X_W -> FDecode(SrcType.fp , SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, xWen = T, canRobCompress = T),
 
     FMV_D_X -> FDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.i2f,   FuOpType.X, fWen = T, canRobCompress = T),
     FMV_W_X -> FDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.i2f,   FuOpType.X, fWen = T, canRobCompress = T),
-
-    FSGNJ_S  -> FDecode(SrcType.fp,  SrcType.fp, SrcType.X, FuType.fmisc, FuOpType.X, fWen = T, canRobCompress = T),
-    FSGNJ_D  -> FDecode(SrcType.fp,  SrcType.fp, SrcType.X, FuType.fmisc, FuOpType.X, fWen = T, canRobCompress = T),
-    FSGNJX_S -> FDecode(SrcType.fp,  SrcType.fp, SrcType.X, FuType.fmisc, FuOpType.X, fWen = T, canRobCompress = T),
-    FSGNJX_D -> FDecode(SrcType.fp,  SrcType.fp, SrcType.X, FuType.fmisc, FuOpType.X, fWen = T, canRobCompress = T),
-    FSGNJN_S -> FDecode(SrcType.fp,  SrcType.fp, SrcType.X, FuType.fmisc, FuOpType.X, fWen = T, canRobCompress = T),
-    FSGNJN_D -> FDecode(SrcType.fp,  SrcType.fp, SrcType.X, FuType.fmisc, FuOpType.X, fWen = T, canRobCompress = T),
 
     // FP to FP
     FCVT_S_D -> FDecode(SrcType.fp, SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, fWen = T, canRobCompress = T),
@@ -349,34 +339,6 @@ object FpDecode extends DecodeConstants{
     FCVT_L_D  -> FDecode(SrcType.fp , SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, xWen = T, canRobCompress = T),
     FCVT_LU_D -> FDecode(SrcType.fp , SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, xWen = T, canRobCompress = T),
 
-    FEQ_S    -> FDecode(SrcType.fp , SrcType.fp, SrcType.X, FuType.fmisc, FuOpType.X, xWen = T, canRobCompress = T),
-    FLT_S    -> FDecode(SrcType.fp , SrcType.fp, SrcType.X, FuType.fmisc, FuOpType.X, xWen = T, canRobCompress = T),
-    FLE_S    -> FDecode(SrcType.fp , SrcType.fp, SrcType.X, FuType.fmisc, FuOpType.X, xWen = T, canRobCompress = T),
-
-    FEQ_D    -> FDecode(SrcType.fp , SrcType.fp, SrcType.X, FuType.fmisc, FuOpType.X, xWen = T, canRobCompress = T),
-    FLT_D    -> FDecode(SrcType.fp , SrcType.fp, SrcType.X, FuType.fmisc, FuOpType.X, xWen = T, canRobCompress = T),
-    FLE_D    -> FDecode(SrcType.fp , SrcType.fp, SrcType.X, FuType.fmisc, FuOpType.X, xWen = T, canRobCompress = T),
-
-    FMIN_S   -> FDecode(SrcType.fp,  SrcType.fp, SrcType.X, FuType.fmisc, FuOpType.X, fWen = T, canRobCompress = T),
-    FMAX_S   -> FDecode(SrcType.fp,  SrcType.fp, SrcType.X, FuType.fmisc, FuOpType.X, fWen = T, canRobCompress = T),
-    FMIN_D   -> FDecode(SrcType.fp,  SrcType.fp, SrcType.X, FuType.fmisc, FuOpType.X, fWen = T, canRobCompress = T),
-    FMAX_D   -> FDecode(SrcType.fp,  SrcType.fp, SrcType.X, FuType.fmisc, FuOpType.X, fWen = T, canRobCompress = T),
-
-    FADD_S   -> FDecode(SrcType.fp,  SrcType.fp, SrcType.X, FuType.fmac, FuOpType.X, fWen = T, canRobCompress = T),
-    FSUB_S   -> FDecode(SrcType.fp,  SrcType.fp, SrcType.X, FuType.fmac, FuOpType.X, fWen = T, canRobCompress = T),
-    FMUL_S   -> FDecode(SrcType.fp,  SrcType.fp, SrcType.X, FuType.fmac, FuOpType.X, fWen = T, canRobCompress = T),
-    FADD_D   -> FDecode(SrcType.fp,  SrcType.fp, SrcType.X, FuType.fmac, FuOpType.X, fWen = T, canRobCompress = T),
-    FSUB_D   -> FDecode(SrcType.fp,  SrcType.fp, SrcType.X, FuType.fmac, FuOpType.X, fWen = T, canRobCompress = T),
-    FMUL_D   -> FDecode(SrcType.fp,  SrcType.fp, SrcType.X, FuType.fmac, FuOpType.X, fWen = T, canRobCompress = T),
-
-    FMADD_S  -> FDecode(SrcType.fp,  SrcType.fp, SrcType.fp, FuType.fmac, FuOpType.X, fWen = T, canRobCompress = T),
-    FMSUB_S  -> FDecode(SrcType.fp,  SrcType.fp, SrcType.fp, FuType.fmac, FuOpType.X, fWen = T, canRobCompress = T),
-    FNMADD_S -> FDecode(SrcType.fp,  SrcType.fp, SrcType.fp, FuType.fmac, FuOpType.X, fWen = T, canRobCompress = T),
-    FNMSUB_S -> FDecode(SrcType.fp,  SrcType.fp, SrcType.fp, FuType.fmac, FuOpType.X, fWen = T, canRobCompress = T),
-    FMADD_D  -> FDecode(SrcType.fp,  SrcType.fp, SrcType.fp, FuType.fmac, FuOpType.X, fWen = T, canRobCompress = T),
-    FMSUB_D  -> FDecode(SrcType.fp,  SrcType.fp, SrcType.fp, FuType.fmac, FuOpType.X, fWen = T, canRobCompress = T),
-    FNMADD_D -> FDecode(SrcType.fp,  SrcType.fp, SrcType.fp, FuType.fmac, FuOpType.X, fWen = T, canRobCompress = T),
-    FNMSUB_D -> FDecode(SrcType.fp,  SrcType.fp, SrcType.fp, FuType.fmac, FuOpType.X, fWen = T, canRobCompress = T),
   )
 }
 
@@ -674,7 +636,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   val decode_table: Array[(BitPat, List[BitPat])] = XDecode.table ++
     FpDecode.table ++
-    FDivSqrtDecode.table ++
+//    FDivSqrtDecode.table ++
     X64Decode.table ++
     XSTrapDecode.table ++
     BDecode.table ++
@@ -725,8 +687,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   val vecException = Module(new VecExceptionGen)
   vecException.io.inst := io.enq.ctrlFlow.instr
   vecException.io.decodedInst := decodedInst
-  vecException.io.vtype := io.enq.vtype
-
+  vecException.io.vtype := decodedInst.vpu.vtype
   decodedInst.exceptionVec(illegalInstr) := decodedInst.selImm === SelImm.INVALID_INSTR || vecException.io.illegalInst
 
   when (!io.csrCtrl.svinval_enable) {
@@ -774,21 +735,60 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     VMSGT_VX, VMSGT_VI, VMSGTU_VX, VMSGTU_VI,
     VMFEQ_VV, VMFEQ_VF, VMFNE_VV, VMFNE_VF, VMFLT_VV, VMFLT_VF, VMFLE_VV, VMFLE_VF, VMFGT_VF, VMFGE_VF,
   )
-
+  private val wfflagsInsts = Seq(
+    // opfff
+    FADD_S, FSUB_S, FADD_D, FSUB_D,
+    FEQ_S, FLT_S, FLE_S, FEQ_D, FLT_D, FLE_D,
+    FMIN_S, FMAX_S, FMIN_D, FMAX_D,
+    FMUL_S, FMUL_D,
+    FDIV_S, FDIV_D, FSQRT_S, FSQRT_D,
+    FMADD_S, FMSUB_S, FNMADD_S, FNMSUB_S, FMADD_D, FMSUB_D, FNMADD_D, FNMSUB_D,
+    FSGNJ_S, FSGNJN_S, FSGNJX_S,
+    // opfvv
+    VFADD_VV, VFSUB_VV, VFWADD_VV, VFWSUB_VV, VFWADD_WV, VFWSUB_WV,
+    VFMUL_VV, VFDIV_VV, VFWMUL_VV,
+    VFMACC_VV, VFNMACC_VV, VFMSAC_VV, VFNMSAC_VV, VFMADD_VV, VFNMADD_VV, VFMSUB_VV, VFNMSUB_VV,
+    VFWMACC_VV, VFWNMACC_VV, VFWMSAC_VV, VFWNMSAC_VV,
+    VFSQRT_V,
+    VFMIN_VV, VFMAX_VV,
+    VMFEQ_VV, VMFNE_VV, VMFLT_VV, VMFLE_VV,
+    VFSGNJ_VV, VFSGNJN_VV, VFSGNJX_VV,
+    // opfvf
+    VFADD_VF, VFSUB_VF, VFRSUB_VF, VFWADD_VF, VFWSUB_VF, VFWADD_WF, VFWSUB_WF,
+    VFMUL_VF, VFDIV_VF, VFRDIV_VF, VFWMUL_VF,
+    VFMACC_VF, VFNMACC_VF, VFMSAC_VF, VFNMSAC_VF, VFMADD_VF, VFNMADD_VF, VFMSUB_VF, VFNMSUB_VF,
+    VFWMACC_VF, VFWNMACC_VF, VFWMSAC_VF, VFWNMSAC_VF,
+    VFMIN_VF, VFMAX_VF,
+    VMFEQ_VF, VMFNE_VF, VMFLT_VF, VMFLE_VF, VMFGT_VF, VMFGE_VF,
+    VFSGNJ_VF, VFSGNJN_VF, VFSGNJX_VF,
+    // fcvt & vfcvt
+    FCVT_S_W, FCVT_S_WU, FCVT_S_L, FCVT_S_LU,
+    FCVT_W_S, FCVT_WU_S, FCVT_L_S, FCVT_LU_S,
+    FCVT_D_W, FCVT_D_WU, FCVT_D_L, FCVT_D_LU,
+    FCVT_W_D, FCVT_WU_D, FCVT_L_D, FCVT_LU_D, FCVT_S_D, FCVT_D_S,
+  )
+  decodedInst.wfflags := wfflagsInsts.map(_ === inst.ALL).reduce(_ || _)
+  val fpToVecDecoder = Module(new FPToVecDecoder())
+  fpToVecDecoder.io.instr := inst.asUInt
+  val isFpToVecInst = fpToVecDecoder.io.vpuCtrl.fpu.isFpToVecInst
   decodedInst.vpu := 0.U.asTypeOf(decodedInst.vpu) // Todo: Connect vpu decoder
-  decodedInst.vpu.vill  := io.enq.vtype.illegal
-  decodedInst.vpu.vma   := io.enq.vtype.vma
-  decodedInst.vpu.vta   := io.enq.vtype.vta
-  decodedInst.vpu.vsew  := io.enq.vtype.vsew
-  decodedInst.vpu.vlmul := io.enq.vtype.vlmul
-  decodedInst.vpu.vm    := inst.VM
-  decodedInst.vpu.nf    := inst.NF
-  decodedInst.vpu.needScalaSrc       := Category.needScalaSrc(inst.VCATEGORY)
-  decodedInst.vpu.permImmTruncate    := Category.permImmTruncate(inst.VCATEGORY)
-  decodedInst.vpu.isReverse := needReverseInsts.map(_ === inst.ALL).reduce(_ || _)
-  decodedInst.vpu.isExt     := vextInsts.map(_ === inst.ALL).reduce(_ || _)
-  decodedInst.vpu.isNarrow  := narrowInsts.map(_ === inst.ALL).reduce(_ || _)
-  decodedInst.vpu.isDstMask := maskDstInsts.map(_ === inst.ALL).reduce(_ || _)
+  when(isFpToVecInst){
+    decodedInst.vpu := fpToVecDecoder.io.vpuCtrl
+  }.otherwise{
+    decodedInst.vpu.vill := io.enq.vtype.illegal
+    decodedInst.vpu.vma := io.enq.vtype.vma
+    decodedInst.vpu.vta := io.enq.vtype.vta
+    decodedInst.vpu.vsew := io.enq.vtype.vsew
+    decodedInst.vpu.vlmul := io.enq.vtype.vlmul
+    decodedInst.vpu.vm := inst.VM
+    decodedInst.vpu.nf := inst.NF
+    decodedInst.vpu.needScalaSrc := Category.needScalaSrc(inst.VCATEGORY)
+    decodedInst.vpu.permImmTruncate := Category.permImmTruncate(inst.VCATEGORY)
+    decodedInst.vpu.isReverse := needReverseInsts.map(_ === inst.ALL).reduce(_ || _)
+    decodedInst.vpu.isExt := vextInsts.map(_ === inst.ALL).reduce(_ || _)
+    decodedInst.vpu.isNarrow := narrowInsts.map(_ === inst.ALL).reduce(_ || _)
+    decodedInst.vpu.isDstMask := maskDstInsts.map(_ === inst.ALL).reduce(_ || _)
+  }
 
   val uopInfoGen = Module(new UopInfoGen)
   uopInfoGen.io.in.preInfo.typeOfSplit := decodedInst.uopSplitType
