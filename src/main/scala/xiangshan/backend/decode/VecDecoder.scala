@@ -67,6 +67,13 @@ case class OPFVV(src1:BitPat, src3:BitPat, fu: Int, fuOp: BitPat, fWen: Boolean,
   }
 }
 
+case class OPFFF(src1:BitPat, src3:BitPat, fu: Int, fuOp: BitPat, xWen: Boolean, fWen: Boolean, vWen: Boolean, uopSplitType: BitPat = UopSplitType.dummy) extends XSDecodeBase {
+  def generate() : List[BitPat] = {
+    XSDecode(src1, SrcType.fp, src3, fu, fuOp, SelImm.X, uopSplitType,
+      xWen = xWen, fWen = fWen, vWen = vWen, mWen = F, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F, canRobCompress = T).generate()
+  }
+}
+
 case class OPFVF(src1:BitPat, src3:BitPat, fu: Int, fuOp: BitPat, fWen: Boolean, vWen: Boolean, mWen: Boolean, uopSplitType: BitPat = UopSplitType.dummy) extends XSDecodeBase {
   def generate() : List[BitPat] = {
     XSDecode(src1, SrcType.vp, src3, fu, fuOp, SelImm.X, uopSplitType,
@@ -382,6 +389,50 @@ object VecDecoder extends DecodeConstants {
     VWSUBU_WX      -> OPMVX(T, FuType.vialuF, VialuFixType.vwsubu_wv, F, T, F, UopSplitType.VEC_WXW),
   )
 
+  val opfff: Array[(BitPat, XSDecodeBase)] = Array(
+    // Scalar Float Point
+    FADD_S -> OPFFF(SrcType.fp, SrcType.X, FuType.vfalu, VfaluType.vfadd, F, T, F, UopSplitType.SCA_SIM),
+    FADD_D -> OPFFF(SrcType.fp, SrcType.X, FuType.vfalu, VfaluType.vfadd, F, T, F, UopSplitType.SCA_SIM),
+    FSUB_S -> OPFFF(SrcType.fp, SrcType.X, FuType.vfalu, VfaluType.vfsub, F, T, F, UopSplitType.SCA_SIM),
+    FSUB_D -> OPFFF(SrcType.fp, SrcType.X, FuType.vfalu, VfaluType.vfsub, F, T, F, UopSplitType.SCA_SIM),
+    FEQ_S  -> OPFFF(SrcType.fp, SrcType.X, FuType.vfalu, VfaluType.vfeq , T, F, F, UopSplitType.SCA_SIM),
+    FLT_S  -> OPFFF(SrcType.fp, SrcType.X, FuType.vfalu, VfaluType.vflt , T, F, F, UopSplitType.SCA_SIM),
+    FLE_S  -> OPFFF(SrcType.fp, SrcType.X, FuType.vfalu, VfaluType.vfle , T, F, F, UopSplitType.SCA_SIM),
+    FEQ_D  -> OPFFF(SrcType.fp, SrcType.X, FuType.vfalu, VfaluType.vfeq , T, F, F, UopSplitType.SCA_SIM),
+    FLT_D  -> OPFFF(SrcType.fp, SrcType.X, FuType.vfalu, VfaluType.vflt , T, F, F, UopSplitType.SCA_SIM),
+    FLE_D  -> OPFFF(SrcType.fp, SrcType.X, FuType.vfalu, VfaluType.vfle , T, F, F, UopSplitType.SCA_SIM),
+    FMIN_S -> OPFFF(SrcType.fp, SrcType.X, FuType.vfalu, VfaluType.vfmin, F, T, F, UopSplitType.SCA_SIM),
+    FMIN_D -> OPFFF(SrcType.fp, SrcType.X, FuType.vfalu, VfaluType.vfmin, F, T, F, UopSplitType.SCA_SIM),
+    FMAX_S -> OPFFF(SrcType.fp, SrcType.X, FuType.vfalu, VfaluType.vfmax, F, T, F, UopSplitType.SCA_SIM),
+    FMAX_D -> OPFFF(SrcType.fp, SrcType.X, FuType.vfalu, VfaluType.vfmax, F, T, F, UopSplitType.SCA_SIM),
+    // donot wflags
+    FCLASS_S -> OPFFF(SrcType.fp, SrcType.X, FuType.vfalu, VfaluType.vfclass, T, F, F, UopSplitType.SCA_SIM),
+    FCLASS_D -> OPFFF(SrcType.fp, SrcType.X, FuType.vfalu, VfaluType.vfclass, T, F, F, UopSplitType.SCA_SIM),
+    FSGNJ_S  -> OPFFF(SrcType.fp, SrcType.X, FuType.vfalu, VfaluType.vfsgnj , F, T, F, UopSplitType.SCA_SIM),
+    FSGNJ_D  -> OPFFF(SrcType.fp, SrcType.X, FuType.vfalu, VfaluType.vfsgnj , F, T, F, UopSplitType.SCA_SIM),
+    FSGNJX_S -> OPFFF(SrcType.fp, SrcType.X, FuType.vfalu, VfaluType.vfsgnjx, F, T, F, UopSplitType.SCA_SIM),
+    FSGNJX_D -> OPFFF(SrcType.fp, SrcType.X, FuType.vfalu, VfaluType.vfsgnjx, F, T, F, UopSplitType.SCA_SIM),
+    FSGNJN_S -> OPFFF(SrcType.fp, SrcType.X, FuType.vfalu, VfaluType.vfsgnjn, F, T, F, UopSplitType.SCA_SIM),
+    FSGNJN_D -> OPFFF(SrcType.fp, SrcType.X, FuType.vfalu, VfaluType.vfsgnjn, F, T, F, UopSplitType.SCA_SIM),
+
+    FMUL_S -> OPFFF(SrcType.fp, SrcType.X, FuType.vfma , VfmaType.vfmul, F, T, F, UopSplitType.SCA_SIM),
+    FMUL_D -> OPFFF(SrcType.fp, SrcType.X, FuType.vfma , VfmaType.vfmul, F, T, F, UopSplitType.SCA_SIM),
+
+    FDIV_S  -> OPFFF(SrcType.fp, SrcType.X, FuType.vfdiv, VfdivType.vfdiv , F, T, F, UopSplitType.SCA_SIM),
+    FDIV_D  -> OPFFF(SrcType.fp, SrcType.X, FuType.vfdiv, VfdivType.vfdiv , F, T, F, UopSplitType.SCA_SIM),
+    FSQRT_S -> OPFFF(SrcType.fp, SrcType.X, FuType.vfdiv, VfdivType.vfsqrt, F, T, F, UopSplitType.SCA_SIM),
+    FSQRT_D -> OPFFF(SrcType.fp, SrcType.X, FuType.vfdiv, VfdivType.vfsqrt, F, T, F, UopSplitType.SCA_SIM),
+
+    FMADD_S  -> OPFFF(SrcType.fp, SrcType.fp, FuType.vfma, VfmaType.vfmacc , F, T, F, UopSplitType.SCA_SIM),
+    FMSUB_S  -> OPFFF(SrcType.fp, SrcType.fp, FuType.vfma, VfmaType.vfmsac , F, T, F, UopSplitType.SCA_SIM),
+    FNMADD_S -> OPFFF(SrcType.fp, SrcType.fp, FuType.vfma, VfmaType.vfnmacc, F, T, F, UopSplitType.SCA_SIM),
+    FNMSUB_S -> OPFFF(SrcType.fp, SrcType.fp, FuType.vfma, VfmaType.vfnmsac, F, T, F, UopSplitType.SCA_SIM),
+    FMADD_D  -> OPFFF(SrcType.fp, SrcType.fp, FuType.vfma, VfmaType.vfmacc , F, T, F, UopSplitType.SCA_SIM),
+    FMSUB_D  -> OPFFF(SrcType.fp, SrcType.fp, FuType.vfma, VfmaType.vfmsac , F, T, F, UopSplitType.SCA_SIM),
+    FNMADD_D -> OPFFF(SrcType.fp, SrcType.fp, FuType.vfma, VfmaType.vfnmacc, F, T, F, UopSplitType.SCA_SIM),
+    FNMSUB_D -> OPFFF(SrcType.fp, SrcType.fp, FuType.vfma, VfmaType.vfnmsac, F, T, F, UopSplitType.SCA_SIM),
+  )
+
   val opfvv: Array[(BitPat, XSDecodeBase)] = Array(
     // 13.2. Vector Single-Width Floating-Point Add/Subtract Instructions
     VFADD_VV           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfalu, VfaluType.vfadd, F, T, F, UopSplitType.VEC_VVV),
@@ -635,5 +686,5 @@ object VecDecoder extends DecodeConstants {
   )
 
   override val decodeArray: Array[(BitPat, XSDecodeBase)] = vset ++ vls ++
-    opivv ++ opivx ++ opivi ++ opmvv ++ opmvx ++ opfvv ++ opfvf
+    opivv ++ opivx ++ opivi ++ opmvv ++ opmvx ++ opfvv ++ opfvf ++ opfff
 }

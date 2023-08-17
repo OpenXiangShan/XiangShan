@@ -312,8 +312,8 @@ case class XSCoreParameters
         ExeUnitParams("BJU1", Seq(AluCfg, BrhCfg), Seq(IntWB(port = 3, 0)), Seq(Seq(IntRD(1, 1)), Seq(IntRD(7, 1)))),
       ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams("IMISC0", Seq(I2fCfg, VSetRiWvfCfg), Seq(VfWB(4, 0)), Seq(Seq(IntRD(6, 1)), Seq(IntRD(12, 1)))),
-        ExeUnitParams("IMISC1", Seq(DivCfg, VSetRiWiCfg, CsrCfg, FenceCfg), Seq(IntWB(port = 4, 0)), Seq(Seq(IntRD(10, Int.MaxValue)), Seq(IntRD(13, Int.MaxValue)))),
+        ExeUnitParams("IMISC0", Seq(I2fCfg, VSetRiWvfCfg, VSetRiWiCfg, CsrCfg, FenceCfg), Seq(VfWB(4, 0), IntWB(port = 8, 0)), Seq(Seq(IntRD(6, 1)), Seq(IntRD(12, 1)))),
+        ExeUnitParams("IMISC1", Seq(DivCfg), Seq(IntWB(port = 4, 0)), Seq(Seq(IntRD(10, Int.MaxValue)), Seq(IntRD(13, Int.MaxValue)))),
       ), numEntries = IssueQueueSize, numEnq = 2),
     ),
       numPregs = intPreg.numEntries,
@@ -327,16 +327,14 @@ case class XSCoreParameters
     implicit val schdType: SchedulerType = VfScheduler()
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams("FEX0", Seq(FmacCfg), Seq(VfWB(port = 0, 0)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)))),
-        ExeUnitParams("FEX1", Seq(FmacCfg), Seq(VfWB(port = 1, 0)), Seq(Seq(VfRD(4, 0)), Seq(VfRD(5, 0)), Seq(VfRD(6, 0)))),
+        ExeUnitParams("FEX0", Seq(F2fCfg, F2iCfg, VSetRvfWvfCfg), Seq(VfWB(port = 0, 0), IntWB(port = 0, 1)), Seq(Seq(VfRD(12, 0)), Seq(VfRD(13, 0)))),
       ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams("FEX2", Seq(FDivSqrtCfg), Seq(VfWB(port = 2, 0)), Seq(Seq(VfRD(11, 0)), Seq(VfRD(12, 0)))),
-        ExeUnitParams("FEX3", Seq(F2fCfg, F2iCfg, VSetRvfWvfCfg), Seq(VfWB(port = 3, 0), IntWB(port = 5, 1)), Seq(Seq(VfRD(7, 0)), Seq(VfRD(8, 0)))),
+        ExeUnitParams("VEX0", Seq(VialuCfg, VimacCfg, VppuCfg, VipuCfg), Seq(VfWB(port = 1, 0)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
       ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams("VEX0", Seq(VialuCfg, VimacCfg, VppuCfg, VipuCfg), Seq(VfWB(port = 4, 0)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
-        ExeUnitParams("VEX1", Seq(VfaluCfg, VfmaCfg), Seq(VfWB(port = 5, 0)), Seq(Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(VfRD(9, 0)), Seq(VfRD(10, 0)), Seq(VfRD(11, 0)))),
+        ExeUnitParams("VEX1", Seq(VfaluCfg, VfmaCfg), Seq(VfWB(port = 2, 0), IntWB(port = 4, 1)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
+        ExeUnitParams("VEX2", Seq(VfaluCfg, VfmaCfg), Seq(VfWB(port = 3, 0), IntWB(port = 5, 1)), Seq(Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(VfRD(9, 0)), Seq(VfRD(10, 0)), Seq(VfRD(11, 0)))),
       ), numEntries = 8, numEnq = 2),
       IssueBlockParams(Seq(
         ExeUnitParams("VEX3", Seq(VfdivCfg), Seq(VfWB(port = 5, 0)), Seq(Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(VfRD(9, 0)), Seq(VfRD(10, 0)), Seq(VfRD(11, 0)))),
@@ -356,20 +354,20 @@ case class XSCoreParameters
 
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams("LDU0", Seq(LduCfg), Seq(IntWB(6, 0), VfWB(6, 0)), Seq(Seq(IntRD(12, 0)))),
-        ExeUnitParams("LDU1", Seq(LduCfg), Seq(IntWB(7, 0), VfWB(7, 0)), Seq(Seq(IntRD(13, 0)))),
+        ExeUnitParams("LDU0", Seq(LduCfg), Seq(IntWB(port = 6, 0), VfWB(port = 6, 0)), Seq(Seq(IntRD(port = 12, 0)))),
+        ExeUnitParams("LDU1", Seq(LduCfg), Seq(IntWB(port = 7, 0), VfWB(port = 7, 0)), Seq(Seq(IntRD(port = 13, 0)))),
       ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams("STA0", Seq(StaCfg, MouCfg), Seq(IntWB(2, 1)), Seq(Seq(IntRD(8, 0)))),
-        ExeUnitParams("STA1", Seq(StaCfg, MouCfg), Seq(IntWB(3, 1)), Seq(Seq(IntRD(9, 0)))),
+        ExeUnitParams("STA0", Seq(StaCfg, MouCfg), Seq(IntWB(port = 2, 1)), Seq(Seq(IntRD(port = 8, 0)))),
+        ExeUnitParams("STA1", Seq(StaCfg, MouCfg), Seq(IntWB(port = 3, 1)), Seq(Seq(IntRD(port = 9, 0)))),
       ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
         ExeUnitParams("STD0", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(7, Int.MaxValue), VfRD(12, Int.MaxValue)))),
         ExeUnitParams("STD1", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(6, Int.MaxValue), VfRD(10, Int.MaxValue)))),
       ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams("VLDU0", Seq(VlduCfg), Seq(VfWB(6, 1)), Seq(Seq(VfRD(0, 0)), Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)))),
-        ExeUnitParams("VLDU1", Seq(VlduCfg), Seq(VfWB(7, 1)), Seq(Seq(VfRD(5, 0)), Seq(VfRD(6, 0)), Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(VfRD(9, 0)))),
+        ExeUnitParams("VLDU0", Seq(VlduCfg), Seq(VfWB(port = 6, 1)), Seq(Seq(VfRD(port = 0, 0)), Seq(VfRD(port = 1, 0)), Seq(VfRD(port = 2, 0)), Seq(VfRD(port = 3, 0)), Seq(VfRD(port = 4, 0)))),
+        ExeUnitParams("VLDU1", Seq(VlduCfg), Seq(VfWB(port = 7, 1)), Seq(Seq(VfRD(port = 5, 0)), Seq(VfRD(port = 6, 0)), Seq(VfRD(port = 7, 0)), Seq(VfRD(port = 8, 0)), Seq(VfRD(port = 9, 0)))),
       ), numEntries = IssueQueueSize, numEnq = 2),
     ),
       numPregs = intPreg.numEntries max vfPreg.numEntries,
@@ -439,14 +437,6 @@ case class XSCoreParameters
       WakeUpConfig("BJU1" -> "STA0"),
       WakeUpConfig("BJU1" -> "STA1"),
       WakeUpConfig("IMISC0" -> "FEX0"),
-      WakeUpConfig("IMISC0" -> "FEX1"),
-      WakeUpConfig("IMISC0" -> "FEX2"),
-      WakeUpConfig("IMISC0" -> "FEX3"),
-      WakeUpConfig("IMISC0" -> "FEX4"),
-      WakeUpConfig("FEX3" -> "FEX0"),
-      WakeUpConfig("FEX3" -> "FEX1"),
-      WakeUpConfig("FEX3" -> "FEX2"),
-      WakeUpConfig("FEX3" -> "FEX3"),
     )
   }
 
