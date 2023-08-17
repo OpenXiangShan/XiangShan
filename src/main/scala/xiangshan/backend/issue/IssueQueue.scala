@@ -547,11 +547,9 @@ class IssueQueueIntImp(override val wrapper: IssueQueue)(implicit p: Parameters,
 class IssueQueueVfImp(override val wrapper: IssueQueue)(implicit p: Parameters, iqParams: IssueBlockParams)
   extends IssueQueueImp(wrapper)
 {
-  entries.io match { case entriesIO =>
-    entriesIO.enq.zipWithIndex.foreach { case (enq, i) =>
-      if (enq.bits.status.srcType.isDefinedAt(3)) enq.bits.status.srcType(3) := SrcType.vp // v0: mask src
-      if (enq.bits.status.srcType.isDefinedAt(4)) enq.bits.status.srcType(4) := SrcType.vp // vl&vtype
-    }
+  s0_enqBits.foreach{ x =>
+    x.srcType(3) := SrcType.vp // v0: mask src
+    x.srcType(4) := SrcType.vp // vl&vtype
   }
   io.deq.zipWithIndex.foreach{ case (deq, i) => {
     deq.bits.common.fpu.foreach(_ := deqEntryVec(i).bits.payload.fpu)

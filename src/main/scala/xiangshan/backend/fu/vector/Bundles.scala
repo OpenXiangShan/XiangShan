@@ -121,6 +121,15 @@ object Bundles {
 
   object Nf extends NamedUInt(3)
 
+  class Fpu extends Bundle{
+    val isFpToVecInst = Bool()
+    val isFP32Instr   = Bool()
+    val isFP64Instr   = Bool()
+  }
+  object Fpu {
+    def apply() = new Fpu
+  }
+
   object Category extends NamedUInt(3) {
     def OPIVV : UInt = "b000".U(width.W)
     def OPFVV : UInt = "b001".U(width.W)
