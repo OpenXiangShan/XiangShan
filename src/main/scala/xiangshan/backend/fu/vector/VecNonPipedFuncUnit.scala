@@ -7,6 +7,7 @@ import utility.DataHoldBypass
 import xiangshan.backend.fu.vector.Bundles.VConfig
 import xiangshan.backend.fu.vector.utils.ScalaDupToVector
 import xiangshan.backend.fu.{FuConfig, FuncUnit}
+import xiangshan.ExceptionNO.illegalInstr
 import yunsuan.VialuFixType
 
 class VecNonPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
@@ -49,6 +50,14 @@ class VecNonPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUni
         outVm -> allMaskTrue
       )
     )
+  }
+
+  // vstart illegal
+  if (cfg.exceptionOut.nonEmpty) {
+    val outVstart = outCtrl.vpu.get.vstart
+    val vstartIllegal = outVstart =/= 0.U
+    io.out.bits.ctrl.exceptionVec.get := 0.U.asTypeOf(io.out.bits.ctrl.exceptionVec.get)
+    io.out.bits.ctrl.exceptionVec.get(illegalInstr) := vstartIllegal
   }
 
   connectNonPipedCtrlSingal

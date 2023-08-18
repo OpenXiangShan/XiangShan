@@ -11,6 +11,7 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend.{FtqPtr, PreDecodeInfo}
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.fu.vector.Bundles.Vxsat
+import xiangshan.ExceptionNO.illegalInstr
 
 class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val fuOpType    = FuOpType()
@@ -134,7 +135,22 @@ trait HasPipelineReg { this: FuncUnit =>
   io.in.ready := rdyVec.head
   io.out.valid := validVec.last
   io.out.bits.res.pc.zip(pcVec.last).foreach { case (l, r) => l := r }
-  io.out.bits.ctrl := ctrlVec.last
+
+  io.out.bits.ctrl.robIdx := ctrlVec.last.robIdx
+  io.out.bits.ctrl.pdest := ctrlVec.last.pdest
+  io.out.bits.ctrl.rfWen.foreach(_ := ctrlVec.last.rfWen.get)
+  io.out.bits.ctrl.fpWen.foreach(_ := ctrlVec.last.fpWen.get)
+  io.out.bits.ctrl.vecWen.foreach(_ := ctrlVec.last.vecWen.get)
+  io.out.bits.ctrl.fpu.foreach(_ := ctrlVec.last.fpu.get)
+  io.out.bits.ctrl.vpu.foreach(_ := ctrlVec.last.vpu.get)
+
+  // vstart illegal
+  if (cfg.exceptionOut.nonEmpty) {
+    val outVstart = ctrlVec.last.vpu.get.vstart
+    val vstartIllegal = outVstart =/= 0.U
+    io.out.bits.ctrl.exceptionVec.get := 0.U.asTypeOf(io.out.bits.ctrl.exceptionVec.get)
+    io.out.bits.ctrl.exceptionVec.get(illegalInstr) := vstartIllegal
+  }
 
   def regEnable(i: Int): Bool = validVec(i - 1) && rdyVec(i - 1) && !flushVec(i - 1)
 
