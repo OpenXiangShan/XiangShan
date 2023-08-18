@@ -474,6 +474,7 @@ object FuConfig {
     vconfigWakeUp = true,
     maskWakeUp = true,
     dataBits = 128,
+    exceptionOut = Seq(illegalInstr),
     immType = Set(SelImm.IMM_OPIVIU, SelImm.IMM_OPIVIS),
   )
 
@@ -491,6 +492,7 @@ object FuConfig {
     vconfigWakeUp = true,
     maskWakeUp = true,
     dataBits = 128,
+    exceptionOut = Seq(illegalInstr),
   )
 
   val VppuCfg = FuConfig (
@@ -507,6 +509,7 @@ object FuConfig {
     vconfigWakeUp = true,
     maskWakeUp = true,
     dataBits = 128,
+    exceptionOut = Seq(illegalInstr),
     immType = Set(SelImm.IMM_OPIVIU, SelImm.IMM_OPIVIS),
   )
 
@@ -523,6 +526,7 @@ object FuConfig {
     vconfigWakeUp = true,
     maskWakeUp = true,
     dataBits = 128,
+    exceptionOut = Seq(illegalInstr),
   )
 
   val VfaluCfg = FuConfig (
@@ -539,6 +543,7 @@ object FuConfig {
     vconfigWakeUp = true,
     maskWakeUp = true,
     dataBits = 128,
+    exceptionOut = Seq(illegalInstr),
   )
 
   val VfmaCfg = FuConfig (
@@ -555,6 +560,7 @@ object FuConfig {
     vconfigWakeUp = true,
     maskWakeUp = true,
     dataBits = 128,
+    exceptionOut = Seq(illegalInstr),
   )
 
   val VfdivCfg = FuConfig(
@@ -571,6 +577,7 @@ object FuConfig {
     vconfigWakeUp = true,
     maskWakeUp = true,
     dataBits = 128,
+    exceptionOut = Seq(illegalInstr),
   )
 
   val VlduCfg: FuConfig = FuConfig (
