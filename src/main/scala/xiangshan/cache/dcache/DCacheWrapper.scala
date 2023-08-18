@@ -641,7 +641,7 @@ class MissEntryForwardIO(implicit p: Parameters) extends DCacheBundle {
     val forward_mshr = RegInit(false.B)
     val forwardData = RegInit(VecInit(List.fill(VLEN/8)(0.U(8.W))))
 
-    val block_idx = req_paddr(log2Up(refillBytes) - 1, 3)
+    val block_idx = req_paddr(log2Up(refillBytes), 3)
     val block_data = raw_data
 
     val selected_data = Wire(UInt(128.W))
