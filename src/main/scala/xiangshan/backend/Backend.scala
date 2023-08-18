@@ -302,6 +302,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
           vfExuBlock.io.in(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush)
         )
       )
+
+      vfExuBlock.io.in(i)(j).bits.vpu.foreach(_.vstart := csrio.vpu.vstart)
     }
   }
   vfExuBlock.io.frm.foreach(_ := csrio.fpu.frm)
