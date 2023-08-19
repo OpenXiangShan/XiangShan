@@ -687,7 +687,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   io.debug_early_replace.bits.idx := addr_to_dcache_set(req.vaddr)
   io.debug_early_replace.bits.tag := req.replace_tag
 
-  io.forwardInfo.apply(req_valid, req.addr, refill_data_raw, w_grantfirst, w_grantlast)
+  io.forwardInfo.apply(req_valid, req.addr, refill_and_store_data, w_grantfirst, w_grantlast)
 
   // refill latency monitor
   io.latency_monitor.load_miss_refilling  := req_valid && req_primary_fire.isFromLoad     && BoolStopWatch(io.mem_acquire.fire, io.mem_grant.fire && !refill_done, true)
