@@ -60,23 +60,23 @@ case class OPMVX(vdRen: Boolean, fu: Int, fuOp: BitPat, xWen: Boolean, vWen: Boo
   }
 }
 
-case class OPFVV(src1:BitPat, src3:BitPat, fu: Int, fuOp: BitPat, fWen: Boolean, vWen: Boolean, mWen: Boolean, uopSplitType: BitPat = UopSplitType.dummy) extends XSDecodeBase {
+case class OPFVV(src1: BitPat, src3: BitPat, fu: Int, fuOp: BitPat, fWen: Boolean, vWen: Boolean, mWen: Boolean, uopSplitType: BitPat = UopSplitType.dummy) extends XSDecodeBase {
   def generate() : List[BitPat] = {
     XSDecode(src1, SrcType.vp, src3, fu, fuOp, SelImm.X, uopSplitType,
       xWen = F, fWen = fWen, vWen = vWen, mWen = mWen, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
 
-case class OPFFF(src1:BitPat, src3:BitPat, fu: Int, fuOp: BitPat, xWen: Boolean, fWen: Boolean, vWen: Boolean, uopSplitType: BitPat = UopSplitType.dummy) extends XSDecodeBase {
+case class OPFFF(src1: BitPat, src3: BitPat, fu: Int, fuOp: BitPat, xWen: Boolean, fWen: Boolean, vWen: Boolean, uopSplitType: BitPat = UopSplitType.dummy) extends XSDecodeBase {
   def generate() : List[BitPat] = {
     XSDecode(src1, SrcType.fp, src3, fu, fuOp, SelImm.X, uopSplitType,
       xWen = xWen, fWen = fWen, vWen = vWen, mWen = F, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F, canRobCompress = T).generate()
   }
 }
 
-case class OPFVF(src1:BitPat, src3:BitPat, fu: Int, fuOp: BitPat, fWen: Boolean, vWen: Boolean, mWen: Boolean, uopSplitType: BitPat = UopSplitType.dummy) extends XSDecodeBase {
+case class OPFVF(src1: BitPat, src3: BitPat, fu: Int, fuOp: BitPat, fWen: Boolean, vWen: Boolean, mWen: Boolean, uopSplitType: BitPat = UopSplitType.dummy, src2: BitPat = SrcType.vp) extends XSDecodeBase {
   def generate() : List[BitPat] = {
-    XSDecode(src1, SrcType.vp, src3, fu, fuOp, SelImm.X, uopSplitType,
+    XSDecode(src1, src2, src3, fu, fuOp, SelImm.X, uopSplitType,
       xWen = F, fWen = fWen, vWen = vWen, mWen = mWen, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
@@ -532,8 +532,6 @@ object VecDecoder extends DecodeConstants {
     VFWREDOSUM_VS      -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
     VFWREDUSUM_VS      -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
 
-    // 16.2. Floating-Point Scalar Move Instructions
-    VFMV_F_S           -> OPFVV(SrcType.vp, SrcType.X , FuType.vfalu, VfaluType.vfmv, F, T, F),// f[rd] = vs2[0] (rs1=0)
   )
 
   val opfvf: Array[(BitPat, XSDecodeBase)] = Array(
@@ -596,8 +594,8 @@ object VecDecoder extends DecodeConstants {
     VFMV_V_F           -> OPFVF(SrcType.fp, SrcType.X , FuType.vfalu, VfaluType.vfmv, F, T, F),// src2=SrcType.X
 
     // 16.2. Floating-Point Scalar Move Instructions
-    VFMV_S_F           -> OPFVF(SrcType.fp, SrcType.vp, FuType.vppu, VpermType.dummy, F, T, F),// vs2=0 // vs3 = vd // Todo
-
+    VFMV_F_S           -> OPFVF(SrcType.X, SrcType.X, FuType.vfalu, VfaluType.vfmv_f_s, T, F, F, UopSplitType.SCA_SIM), // f[rd] = vs2[0] (rs1=0)
+    VFMV_S_F           -> OPFVF(SrcType.fp, SrcType.X, FuType.vfalu, VfaluType.vfmv_s_f, F, T, F, UopSplitType.VEC_VFV, src2 = SrcType.X),
     // 16.3.3. Vector Slide1up
     VFSLIDE1UP_VF      -> OPFVF(SrcType.fp, SrcType.vp , FuType.vppu, VpermType.vfslide1up, F, T, F, UopSplitType.VEC_FSLIDE1UP),// vd[0]=f[rs1], vd[i+1] = vs2[i]
 

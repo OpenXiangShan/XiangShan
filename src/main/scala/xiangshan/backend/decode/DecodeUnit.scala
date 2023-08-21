@@ -719,7 +719,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   decodedInst.isVset := FuType.isVset(decodedInst.fuType)
 
-  private val needReverseInsts = Seq(VRSUB_VI, VRSUB_VX, VREM_VV, VREM_VX, VREMU_VV, VFRDIV_VF, VFRSUB_VF)
+  private val needReverseInsts = Seq(VRSUB_VI, VRSUB_VX, VREM_VV, VREM_VX, VREMU_VV, VFRDIV_VF, VFRSUB_VF, VFMV_F_S)
   private val vextInsts = Seq(VZEXT_VF2, VZEXT_VF4, VZEXT_VF8, VSEXT_VF2, VSEXT_VF4, VSEXT_VF8)
   private val narrowInsts = Seq(
     VNSRA_WV, VNSRA_WX, VNSRA_WI, VNSRL_WV, VNSRL_WX, VNSRL_WI,
