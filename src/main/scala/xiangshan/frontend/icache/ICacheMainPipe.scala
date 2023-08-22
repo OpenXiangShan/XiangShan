@@ -393,6 +393,29 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     }
   }
 
+  /** select data in advance to fix timing */
+  def split_vec[T <: Data](vec: Vec[T], num: Int): Vec[Vec[T]] = {
+    assert(vec.length % num == 0, "The length of vec must be a multiple of num")
+    val my_vec = Wire(Vec(vec.length/num, Vec(num, vec(0).cloneType)))
+    for (i <- 0 until (vec.length/num)) {
+      for (j <- 0 until num) {
+        my_vec(i)(j) := vec(4 * i + j)
+      }
+    }
+    my_vec
+  }
+
+  val s1_data_cacheline_split = s1_data_cacheline.map(split_vec(_, 4))
+  val s1_tag_match_vec_split  = s1_tag_match_vec.map(split_vec(_, 4))
+  val s1_select_data = VecInit((0 until PortNumber).map (i =>
+    VecInit((s1_data_cacheline_split(i) zip s1_tag_match_vec_split(i)).map{ case(data, sel) =>
+      Mux1H(sel, data)
+    })
+  ))
+  val s1_select_vec = VecInit((0 until PortNumber).map (i =>
+    VecInit(s1_tag_match_vec_split(i).map(ParallelOR(_)))
+  ))
+
   /** when tlb stall, ipfBuffer stage2 need also stall */
   mainPipeMissInfo.s1_already_check_ipf := s1_valid && tlbRespAllValid // when tlb back, s1 must has already check ipf
 
@@ -451,6 +474,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_prefetch_hit_data = RegEnable(s1_prefetch_hit_data, s1_fire)
   val s2_prefetch_hit_in_ipf = RegEnable(s1_ipf_hit_latch, s1_fire)
   val s2_prefetch_hit_in_piq = RegEnable(s1_PIQ_hit, s1_fire)
+  val s2_select_vec   = RegEnable(s1_select_vec, s1_fire)
+  val s2_select_data  = RegEnable(s1_select_data, s1_fire)
 
   val icacheMissStage = RegInit(VecInit(Seq.fill(numOfStage - 2)(0.B)))
   icacheMissStage(0) := !s2_hit
@@ -779,8 +804,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   }
 
   //** use hit one-hot select data
-  val s2_hit_datas    = VecInit(s2_data_cacheline.zipWithIndex.map { case(bank, i) =>
-    val port_hit_data = Mux1H(s2_tag_match_vec(i).asUInt, bank)
+  val s2_hit_datas    = VecInit(s2_select_data.zipWithIndex.map { case(bank, i) =>
+    val port_hit_data = Mux1H(s2_select_vec(i).asUInt, bank)
     port_hit_data
   })
 
