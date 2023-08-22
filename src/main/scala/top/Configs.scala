@@ -73,6 +73,7 @@ class MinimalConfig(n: Int = 1) extends Config(
         StoreQueueNWriteBanks = 4, // NOTE: make sure that StoreQueueSize is divided by StoreQueueNWriteBanks
         StoreQueueForwardWithMask = true,
         RobSize = 32,
+        RabSize = 32,
         FtqSize = 8,
         IBufSize = 16,
         StoreBufferSize = 4,

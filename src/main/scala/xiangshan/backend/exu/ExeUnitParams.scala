@@ -57,6 +57,7 @@ case class ExeUnitParams(
   val needSrcFrm: Boolean = fuConfigs.map(_.needSrcFrm).reduce(_ || _)
   val needFPUCtrl: Boolean = fuConfigs.map(_.needFPUCtrl).reduce(_ || _)
   val needVPUCtrl: Boolean = fuConfigs.map(_.needVecCtrl).reduce(_ || _)
+  val isHighestWBPriority: Boolean = wbPortConfigs.forall(_.priority == 0)
 
   def rdPregIdxWidth: Int = {
     this.pregRdDataCfgSet.map(dataCfg => backendParam.getPregParams(dataCfg).addrWidth).fold(0)(_ max _)

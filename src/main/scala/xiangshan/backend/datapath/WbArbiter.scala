@@ -40,12 +40,12 @@ class WbArbiterIO()(implicit p: Parameters, params: WbArbiterParams) extends XSB
   val in: MixedVec[DecoupledIO[WriteBackBundle]] = Flipped(params.genInput)
   val out: MixedVec[ValidIO[WriteBackBundle]] = params.genOutput
 
-  def inGroup: Map[Int, IndexedSeq[DecoupledIO[WriteBackBundle]]] = in.groupBy(_.bits.params.port)
+  def inGroup: Map[Int, IndexedSeq[DecoupledIO[WriteBackBundle]]] = in.groupBy(_.bits.params.port).map(x => (x._1, x._2.sortBy(_.bits.params.priority)))
 }
 
 class WbArbiter(params: WbArbiterParams)(implicit p: Parameters) extends XSModule {
   val io = IO(new WbArbiterIO()(p, params))
-  // Todo: Sorted by priority
+
   private val inGroup: Map[Int, IndexedSeq[DecoupledIO[WriteBackBundle]]] = io.inGroup
 
   private val arbiters: Seq[Option[Arbiter[WriteBackBundle]]] = Seq.tabulate(params.numOut) { x => {
@@ -189,8 +189,9 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
   (memExuWBs zip memExuInputs).foreach { case (wb, input) => wb.valid := input.fire }
 
   // the ports not writting back pregs are always ready
+  // the ports set highest priority are always ready
   (intExuInputs ++ vfExuInputs ++ memExuInputs).foreach( x =>
-    if (x.bits.params.hasNoDataWB) x.ready := true.B
+    if (x.bits.params.hasNoDataWB || x.bits.params.isHighestWBPriority) x.ready := true.B
   )
 
   // io assign
