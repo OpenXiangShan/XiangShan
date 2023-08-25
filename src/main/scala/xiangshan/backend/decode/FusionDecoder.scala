@@ -77,6 +77,8 @@ abstract class BaseFusionCase(pair: Seq[Valid[UInt]])(implicit p: Parameters)
     if (t.isDefined) Some((_: UInt) => t.get.U) else None
   }
   def src2Type: Option[Int] = compareAndGet(getInstrSrc2Type)
+  def selImm: Option[UInt] = None
+  def imm: Option[UInt] = None
   def lsrc2NeedZero: Boolean = false
   def lsrc2NeedMux: Boolean = false
   def lsrc2MuxResult: UInt = Mux(destToRs1, instr2Rs2, instr2Rs1)
@@ -465,6 +467,25 @@ class FusedMulw7(pair: Seq[Valid[UInt]])(implicit p: Parameters)
   def fusionName: String = "andi127_mulw"
 }
 
+// Case: get 32 bits imm
+// Source: `lui r1, 0xffffa`` + `addi r1, r1, 1`
+// Target: `lui32 r1, 0xffffa001` (customized internal opcode)
+class FusedLui32(pair: Seq[Valid[UInt]])(implicit p: Parameters)
+  extends BaseFusionCase(pair) {
+  def inst1Cond = instr(0) === Instructions.LUI
+  def inst2Cond = instr(1) === Instructions.ADDI
+
+  def isValid: Bool = inst1Cond && inst2Cond && withSameDest && destToRs1
+
+  override def fuOpType: Option[UInt => UInt] = Some((_: UInt) => ALUOpType.lui32add)
+  override def selImm: Option[UInt] = Some(SelImm.IMM_LUI32)
+  override def imm: Option[UInt] = Some(Cat(instr(0)(31, 12), instr(1)(31, 20)))
+
+  def fusionName: String = "lui_addi"
+
+  XSDebug(isValid, p"[fusedLui32] ${Hexadecimal(imm.get)} instr0=${Hexadecimal(instr(0))} instr1=${Hexadecimal(instr(1))}\n")
+}
+
 class FusionDecodeInfo extends Bundle {
   val rs2FromRs1 = Output(Bool())
   val rs2FromRs2 = Output(Bool())
@@ -476,6 +497,8 @@ class FusionDecodeReplace extends Bundle {
   val fuOpType = Valid(FuOpType())
   val lsrc2 = Valid(UInt(6.W))
   val src2Type = Valid(SrcType())
+  val selImm = Valid(SelImm())
+  val imm = Valid(UInt(ImmUnion.maxLen.W))
 
   def update(cs: DecodedInst): Unit = {
     when (fuType.valid) {
@@ -489,6 +512,12 @@ class FusionDecodeReplace extends Bundle {
     }
     when (src2Type.valid) {
       cs.srcType(1) := src2Type.bits
+    }
+    when (selImm.valid) {
+      cs.selImm := selImm.bits
+    }
+    when (imm.valid) {
+      cs.imm := imm.bits
     }
   }
 }
@@ -537,7 +566,8 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
       new FusedAddwzexth(pair),
       new FusedAddwsexth(pair),
       new FusedLogiclsb(pair),
-      new FusedLogicZexth(pair)
+      new FusedLogicZexth(pair),
+      new FusedLui32(pair)
     )
     val fire = io.in(i).valid && io.inReady(i)
     val instrPairValid = RegEnable(VecInit(pair.map(_.valid)).asUInt.andR, false.B, io.inReady(i))
@@ -556,6 +586,18 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
         val replSel = replTypes.map(t => VecInit(replaceVec.filter(_._2.get == t).map(_._1)).asUInt.orR)
         field(out.bits).valid := replEnable
         field(out.bits).bits := Mux1H(replSel, replTypes.map(_.U))
+      }
+    }
+    def connectByUInt(field: FusionDecodeReplace => Valid[UInt], replace: Seq[Option[UInt]], needReg: Boolean): Unit = {
+      field(out.bits).valid := false.B
+      field(out.bits).bits := DontCare
+      val replaceVec = if (needReg) fusionVec.zip(replace).filter(_._2.isDefined).map(x => (x._1, RegEnable(x._2.get, fire))) else fusionVec.zip(replace).filter(_._2.isDefined).map(x => (x._1, x._2.get))
+      if (replaceVec.nonEmpty) {
+        val replEnable = VecInit(replaceVec.map(_._1)).asUInt.orR
+        val replTypes = replaceVec.map(_._2).distinct
+        val replSel = replTypes.map(t => VecInit(replaceVec.filter(_._2 == t).map(_._1)).asUInt.orR)
+        field(out.bits).valid := replEnable
+        field(out.bits).bits := Mux1H(replSel, replTypes)
       }
     }
     def connectByUIntFunc(
@@ -582,6 +624,8 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
     connectByInt((x: FusionDecodeReplace) => x.fuType, fusionList.map(_.fuType))
     connectByUIntFunc((x: FusionDecodeReplace) => x.fuOpType, (x: DecodedInst) => x.fuOpType, fusionList.map(_.fuOpType))
     connectByInt((x: FusionDecodeReplace) => x.src2Type, fusionList.map(_.src2Type))
+    connectByUInt((x: FusionDecodeReplace) => x.selImm, fusionList.map(_.selImm), false)
+    connectByUInt((x: FusionDecodeReplace) => x.imm, fusionList.map(_.imm), true)
     val src2WithZero = VecInit(fusionVec.zip(fusionList.map(_.lsrc2NeedZero)).filter(_._2).map(_._1)).asUInt.orR
     val src2WithMux = VecInit(fusionVec.zip(fusionList.map(_.lsrc2NeedMux)).filter(_._2).map(_._1)).asUInt.orR
     io.info(i).rs2FromZero := src2WithZero
@@ -600,6 +644,9 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
       XSPerfAccumulate(s"case_${f.fusionName}_$i", instrPairValid && !thisCleared && v && lastFire)
     }
     XSPerfAccumulate(s"conflict_fusion_$i", instrPairValid && thisCleared && fusionVec.asUInt.orR && lastFire)
+
+    XSDebug(out.valid, p"[fusion] valid ${i}, outvalid: ${out.bits.fuType.valid} ${out.bits.fuOpType.valid} ${out.bits.src2Type.valid} ${out.bits.lsrc2.valid} ${out.bits.selImm.valid} ${out.bits.imm.valid}\n")
+    XSDebug(out.valid, p"[fusion] valid ${i}, outbits: ${out.bits.fuType.bits} ${out.bits.fuOpType.bits} ${out.bits.src2Type.bits} ${out.bits.lsrc2.bits} ${out.bits.selImm.bits} ${Hexadecimal(out.bits.imm.bits)}\n")
   }
 
   XSPerfAccumulate("fused_instr", PopCount(io.out.map(_.fire)))

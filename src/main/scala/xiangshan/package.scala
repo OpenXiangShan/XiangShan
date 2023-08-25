@@ -204,6 +204,7 @@ package object xiangshan {
     def adduw      = "b010_0000".U // adduw:  src1[31:0]  + src2
     def add        = "b010_0001".U // add:     src1        + src2
     def oddadd     = "b010_0010".U // oddadd:  src1[0]     + src2
+    def lui32add   = "b010_0011".U // lui32add: SEXT(src2[11:0]) + {src2[63:12], 12'b0}
 
     def sr29add    = "b010_0100".U // sr29add: src1[63:29] + src2
     def sr30add    = "b010_0101".U // sr30add: src1[63:30] + src2
@@ -562,6 +563,7 @@ package object xiangshan {
     def IMM_OPIVIU = "b1010".U
     def IMM_VSETVLI   = "b1100".U
     def IMM_VSETIVLI  = "b1101".U
+    def IMM_LUI32 = "b1011".U
 
     def X      = BitPat("b0000")
 
@@ -580,6 +582,7 @@ package object xiangshan {
         IMM_OPIVIU.litValue    -> "VIU",
         IMM_VSETVLI.litValue   -> "VSETVLI",
         IMM_VSETIVLI.litValue  -> "VSETIVLI",
+        IMM_LUI32.litValue     -> "LUI32",
         INVALID_INSTR.litValue -> "INVALID",
       )
       strMap(immType.litValue)
