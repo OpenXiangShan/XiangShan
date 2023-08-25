@@ -32,6 +32,7 @@ class ImmExtractor(dataBits: Int, immTypeSet: Set[BigInt]) extends Module {
     SelImm.IMM_VSETIVLI .litValue -> SignExt(ImmUnion.VSETIVLI.toImm32(io.in.imm), IntData().dataWidth),
     SelImm.IMM_OPIVIS   .litValue -> SignExt(ImmUnion.OPIVIS  .toImm32(io.in.imm), IntData().dataWidth),
     SelImm.IMM_OPIVIU   .litValue -> SignExt(ImmUnion.OPIVIU  .toImm32(io.in.imm), IntData().dataWidth),
+    SelImm.IMM_LUI32    .litValue -> SignExt(ImmUnion.LUI32   .toImm32(io.in.imm), IntData().dataWidth),
   )
 
   val usedMap: Map[BigInt, UInt] = extractMap.filterKeys(x => immTypeSet.contains(x))

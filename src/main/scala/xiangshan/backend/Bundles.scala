@@ -185,7 +185,7 @@ object Bundles {
     // schedule
     val replayInst      = Bool()
 
-    def isLUI: Bool = this.fuType === FuType.alu.U && this.selImm === SelImm.IMM_U
+    def isLUI: Bool = this.fuType === FuType.alu.U && (this.selImm === SelImm.IMM_U || this.selImm === SelImm.IMM_LUI32)
     def isWFI: Bool = this.fuType === FuType.csr.U && fuOpType === CSROpType.wfi
 
     def isSvinvalBegin(flush: Bool) = FuType.isFence(fuType) && fuOpType === FenceOpType.nofence && !flush
