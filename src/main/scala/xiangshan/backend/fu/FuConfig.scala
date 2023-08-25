@@ -239,7 +239,7 @@ object FuConfig {
     ),
     piped = true,
     writeIntRf = true,
-    immType = Set(SelImm.IMM_I, SelImm.IMM_U),
+    immType = Set(SelImm.IMM_I, SelImm.IMM_U, SelImm.IMM_LUI32),
   )
 
   val MulCfg: FuConfig = FuConfig (
