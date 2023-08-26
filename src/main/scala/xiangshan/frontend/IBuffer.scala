@@ -63,19 +63,23 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Ceil(PredictWidth).W)
   val ipf = Bool()
+  val igpf = Bool()
   val acf = Bool()
   val crossPageIPFFix = Bool()
   val triggered = new TriggerCf
+  val gpaddr = UInt(GPAddrBits.W)
 
   def fromFetch(fetch: FetchToIBuffer, i: Int): IBufEntry = {
     inst   := fetch.instrs(i)
     pc     := fetch.pc(i)
     foldpc := fetch.foldpc(i)
+    gpaddr := fetch.gpaddr(i)
     pd     := fetch.pd(i)
     pred_taken := fetch.ftqOffset(i).valid
     ftqPtr := fetch.ftqPtr
     ftqOffset := fetch.ftqOffset(i).bits
     ipf := fetch.ipf(i)
+    igpf:= fetch.igpf(i)
     acf := fetch.acf(i)
     crossPageIPFFix := fetch.crossPageIPFFix(i)
     triggered := fetch.triggered(i)
@@ -89,6 +93,7 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
     cf.foldpc := foldpc
     cf.exceptionVec := 0.U.asTypeOf(ExceptionVec())
     cf.exceptionVec(instrPageFault) := ipf
+    cf.exceptionVec(instrGuestPageFault) := igpf
     cf.exceptionVec(instrAccessFault) := acf
     cf.trigger := triggered
     cf.pd := pd
@@ -101,6 +106,7 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
     cf.ssid := DontCare
     cf.ftqPtr := ftqPtr
     cf.ftqOffset := ftqOffset
+    cf.gpaddr := gpaddr
     cf
   }
 }

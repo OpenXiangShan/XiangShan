@@ -55,7 +55,7 @@ class PTWRepeater(Width: Int = 1, FenceDelay: Int)(implicit p: Parameters) exten
     arb.io.in <> io.tlb.req
     arb.io.out
   }
-  val (tlb, ptw, flush) = (io.tlb, io.ptw, DelayN(io.sfence.valid || io.csr.satp.changed, FenceDelay))
+  val (tlb, ptw, flush) = (io.tlb, io.ptw, DelayN(io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed, FenceDelay))
   val req = RegEnable(req_in.bits, req_in.fire)
   val resp = RegEnable(ptw.resp.bits, ptw.resp.fire)
   val haveOne = BoolStopWatch(req_in.fire, tlb.resp.fire || flush)
@@ -451,6 +451,8 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   val v = RegInit(VecInit(Seq.fill(Size)(false.B)))
   val ports = Reg(Vec(Size, Vec(Width, Bool()))) // record which port(s) the entry come from, may not able to cover all the ports
   val vpn = Reg(Vec(Size, UInt(vpnLen.W)))
+  val gvpn = Reg(Vec(Size, UInt(gvpnLen.W)))
+  val s2xlate = Reg(Vec(Size, UInt(2.W)))
   val memidx = Reg(Vec(Size, new MemBlockidxBundle))
   val enqPtr = RegInit(0.U(log2Up(Size).W)) // Enq
   val issPtr = RegInit(0.U(log2Up(Size).W)) // Iss to Ptw
@@ -458,30 +460,40 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   val mayFullDeq = RegInit(false.B)
   val mayFullIss = RegInit(false.B)
   val counter = RegInit(0.U(log2Up(Size+1).W))
-
-  val flush = DelayN(io.sfence.valid || io.csr.satp.changed, FenceDelay)
+  val flush = DelayN(io.sfence.valid || io.csr.satp.changed || (io.csr.priv.virt && io.csr.vsatp.changed, FenceDelay)
   val tlb_req = WireInit(io.tlb.req) // NOTE: tlb_req is not io.tlb.req, see below codes, just use cloneType
   tlb_req.suggestName("tlb_req")
 
   val inflight_counter = RegInit(0.U(log2Up(Size + 1).W))
   val inflight_full = inflight_counter === Size.U
+
+  def ptwResp_hit(vpn: UInt, s2xlate: UInt, resp: PtwRespS2): Bool = {
+    val enableS2xlate = resp.s2xlate(0)
+    val onlyS2 = enableS2xlate && resp.s2xlate(1)
+    val s1hit = resp.s1.hit(vpn, 0, io.csr.hgatp.asid, true, true, enableS2xlate)
+    val s2hit = resp.s2.hit(vpn, io.csr.hgatp.asid)
+    s2xlate === resp.s2xlate && Mux(enableS2xlate, Mux(onlyS2, s2hit, s1hit && s2hit), s1hit)
+  }
+
   when (io.ptw.req(0).fire =/= io.ptw.resp.fire) {
     inflight_counter := Mux(io.ptw.req(0).fire, inflight_counter + 1.U, inflight_counter - 1.U)
   }
 
   val canEnqueue = Wire(Bool()) // NOTE: actually enqueue
   val ptwResp = RegEnable(io.ptw.resp.bits, io.ptw.resp.fire)
-  val ptwResp_OldMatchVec = vpn.zip(v).map{ case (pi, vi) =>
-    vi && io.ptw.resp.bits.hit(pi, io.csr.satp.asid, true, true)}
+  val ptwResp_OldMatchVec = vpn.zip(v).zip(s2xlate).map { case (((vpn, v), s2xlate)) =>{
+    v && ptwResp_hit(vpn, s2xlate, ptwResp)
+  }
+  }
   val ptwResp_valid = RegNext(io.ptw.resp.fire && Cat(ptwResp_OldMatchVec).orR, init = false.B)
   // May send repeated requests to L2 tlb with same vpn(26, 3) when sector tlb
-  val oldMatchVec_early = io.tlb.req.map(a => vpn.zip(v).map{ case (pi, vi) => vi && pi === a.bits.vpn})
-  val lastReqMatchVec_early = io.tlb.req.map(a => tlb_req.map{ b => b.valid && b.bits.vpn === a.bits.vpn && canEnqueue})
-  val newMatchVec_early = io.tlb.req.map(a => io.tlb.req.map(b => a.bits.vpn === b.bits.vpn))
+  val oldMatchVec_early = io.tlb.req.map(a => vpn.zip(v).zip(s2xlate).map{ case ((pi, vi), s2xlate) => vi && pi === a.bits.vpn && s2xlate === a.bits.s2xlate })
+  val lastReqMatchVec_early = io.tlb.req.map(a => tlb_req.map{ b => b.valid && b.bits.vpn === a.bits.vpn && canEnqueue && b.bits.s2xlate === a.bits.s2xlate})
+  val newMatchVec_early = io.tlb.req.map(a => io.tlb.req.map(b => a.bits.vpn === b.bits.vpn && a.bits.s2xlate === b.bits.s2xlate))
 
   (0 until Width) foreach { i =>
     tlb_req(i).valid := RegNext(io.tlb.req(i).valid &&
-      !(ptwResp_valid && ptwResp.hit(io.tlb.req(i).bits.vpn, 0.U, true, true)) &&
+      !(ptwResp_valid && ptwResp_hit(io.tlb.req(i).bits.vpn, io.tlb.req(i).bits.s2xlate, ptwResp)) &&
       !Cat(lastReqMatchVec_early(i)).orR,
       init = false.B)
     tlb_req(i).bits := RegEnable(io.tlb.req(i).bits, io.tlb.req(i).valid)
@@ -492,7 +504,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
     RegNext(newMatchVec_early(i)(j)) && tlb_req(j).valid
   ))
   val ptwResp_newMatchVec = tlb_req.map(a =>
-    ptwResp_valid && ptwResp.hit(a.bits.vpn, 0.U, allType = true, true))
+    ptwResp_valid && ptwResp_hit(a.bits.vpn, a.bits.s2xlate, ptwResp))
 
   val oldMatchVec2 = (0 until Width).map(i => oldMatchVec_early(i).map(RegNext(_)).map(_ & tlb_req(i).valid))
   val update_ports = v.indices.map(i => oldMatchVec2.map(j => j(i)))
@@ -534,24 +546,20 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
 
   // tlb req flushed by ptw resp: last ptw resp && current ptw resp
   // the flushed tlb req will fakely enq, with a false valid
-  val tlb_req_flushed = reqs.map(a => io.ptw.resp.valid && io.ptw.resp.bits.hit(a.bits.vpn, 0.U, true, true))
+  val tlb_req_flushed = reqs.map(a => io.ptw.resp.valid && ptwResp_hit(a.bits.vpn, a.bits.s2xlate, io.ptw.resp.bits))
 
   io.tlb.resp.valid := ptwResp_valid
-  io.tlb.resp.bits.data.entry := ptwResp.entry
-  io.tlb.resp.bits.data.addr_low := ptwResp.addr_low
-  io.tlb.resp.bits.data.ppn_low := ptwResp.ppn_low
-  io.tlb.resp.bits.data.valididx := ptwResp.valididx
-  io.tlb.resp.bits.data.pteidx := ptwResp.pteidx
-  io.tlb.resp.bits.data.pf := ptwResp.pf
-  io.tlb.resp.bits.data.af := ptwResp.af
+  io.tlb.resp.bits.data := ptwResp
   io.tlb.resp.bits.data.memidx := memidx(OHToUInt(ptwResp_OldMatchVec))
   io.tlb.resp.bits.vector := resp_vector
 
   val issue_valid = v(issPtr) && !isEmptyIss && !inflight_full
-  val issue_filtered = ptwResp_valid && ptwResp.hit(io.ptw.req(0).bits.vpn, io.csr.satp.asid, allType=true, ignoreAsid=true)
+  val issue_filtered = ptwResp_valid && ptwResp_hit(io.ptw.req(0).bits.vpn, io.ptw.req(0).bits.s2xlate, ptwResp)
   val issue_fire_fake = issue_valid && (io.ptw.req(0).ready || (issue_filtered && false.B /*timing-opt*/))
   io.ptw.req(0).valid := issue_valid && !issue_filtered
   io.ptw.req(0).bits.vpn := vpn(issPtr)
+  io.ptw.req(0).bits.gvpn := gvpn(issPtr)
+  io.ptw.req(0).bits.s2xlate := s2xlate(issPtr)
   io.ptw.resp.ready := true.B
 
   reqs.zipWithIndex.map{
@@ -559,6 +567,8 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
       when (req.valid && canEnqueue) {
         v(enqPtrVec(i)) := !tlb_req_flushed(i)
         vpn(enqPtrVec(i)) := req.bits.vpn
+        gvpn(enqPtrVec(i)) := req.bits.gvpn
+        s2xlate(enqPtrVec(i)) := req.bits.s2xlate
         memidx(enqPtrVec(i)) := req.bits.memidx
         ports(enqPtrVec(i)) := req_ports(i).asBools
       }

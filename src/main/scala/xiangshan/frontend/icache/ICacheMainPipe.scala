@@ -42,8 +42,10 @@ class ICacheMainPipeResp(implicit p: Parameters) extends ICacheBundle
   // val select   = Bool()
   val data = UInt((blockBits/2).W)
   val paddr    = UInt(PAddrBits.W)
+  val gpaddr    = UInt(GPAddrBits.W)
   val tlbExcp  = new Bundle{
     val pageFault = Bool()
+    val guestPageFault = Bool()
     val accessFault = Bool()
     val mmio = Bool()
   }
@@ -279,11 +281,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
                                   (RegNext(s0_fire) || s1_wait_itlb(1)) && !fromITLB(1).bits.miss && s1_double_line))
   val tlbRespPAddr  = VecInit((0 until PortNumber).map(i =>
                         ResultHoldBypass(valid = tlb_valid_tmp(i), data = fromITLB(i).bits.paddr(0))))
+  val tlbRespGPAddr = VecInit((0 until PortNumber).map(i => ResultHoldBypass(valid = tlb_back(i), data = fromITLB(i).bits.gpaddr(0))))
+  val tlbExcpGPF = VecInit((0 until PortNumber).map(i => ResultHoldBypass(valid = tlb_back(i), data = fromITLB(i).bits.excp(0).gpf.instr) && tlb_need_back(i)))
   val tlbExcpPF     = VecInit((0 until PortNumber).map(i =>
                         ResultHoldBypass(valid = tlb_valid_tmp(i), data = fromITLB(i).bits.excp(0).pf.instr)))
   val tlbExcpAF     = VecInit((0 until PortNumber).map(i =>
                         ResultHoldBypass(valid = tlb_valid_tmp(i), data = fromITLB(i).bits.excp(0).af.instr)))
-  val tlbExcp       = VecInit((0 until PortNumber).map(i => tlbExcpAF(i) || tlbExcpPF(i)))
+  val tlbExcp       = VecInit((0 until PortNumber).map(i => tlbExcpAF(i) || tlbExcpAF(i) || tlbExcpGPF(i)))
 
   val s1_tlb_valid = VecInit((0 until PortNumber).map(i => ValidHoldBypass(tlb_valid_tmp(i), s1_fire)))
   val tlbRespAllValid = s1_tlb_valid(0) && (!s1_double_line || s1_double_line && s1_tlb_valid(1))
@@ -298,6 +302,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   
   /** s1 hit check/tag compare */
   val s1_req_paddr              = tlbRespPAddr
+  val s1_req_gpaddr             = tlbRespGPAddr
   val s1_req_ptags              = VecInit(s1_req_paddr.map(get_phy_tag(_)))
 
   val s1_meta_ptags              = ResultHoldBypass(data = metaResp.tags, valid = RegNext(s0_fire))
@@ -420,6 +425,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   /** s2 data */
   // val mmio = fromPMP.map(port => port.mmio) // TODO: handle it
   val (s2_req_paddr , s2_req_vaddr) = (RegEnable(s1_req_paddr, s1_fire), RegEnable(s1_req_vaddr, s1_fire))
+  val s2_req_gpaddr   = RegEnable(s1_req_gpaddr, s1_fire)
   val s2_req_vsetIdx          = RegEnable(s1_req_vsetIdx,       s1_fire)
   val s2_req_ptags            = RegEnable(s1_req_ptags,         s1_fire)
   val s2_double_line          = RegEnable(s1_double_line,       s1_fire)

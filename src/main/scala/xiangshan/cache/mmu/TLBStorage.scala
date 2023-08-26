@@ -107,10 +107,23 @@ class TLBFA(
     val access = io.access(i)
 
     val vpn = req.bits.vpn
-    val vpn_reg = RegEnable(vpn, req.fire)
-
+    val vpn_extend = req.bits.vpn_extend
+    val gvpn = Cat(vpn_extend, vpn)
+    val vpn_reg = RegEnable(vpn, req.fire())
+    val gvpn_reg = RegEnable(gvpn, req.fire())
+    val vpn_gen_ppn = if(saveLevel) vpn else vpn_reg
+    val gvpn_gen_ppn = if(saveLevel) gvpn else gvpn_reg
+    val hasS2xlate = req.bits.s2xlate =/= noS2xlate
+    val OnlyS2 = req.bits.s2xlate === onlyStage2
     val refill_mask = Mux(io.w.valid, UIntToOH(io.w.bits.wayIdx), 0.U(nWays.W))
-    val hitVec = VecInit((entries.zipWithIndex).zip(v zip refill_mask.asBools).map{case (e, m) => e._1.hit(vpn, io.csr.satp.asid) && m._1 && !m._2 })
+    val hitVec = VecInit((entries.zipWithIndex).zip(v zip refill_mask.asBools).map{
+      case (e, m) => {
+        val s2xlate_hit = e._1.s2xlate === req.bits.s2xlate
+        val normal_hit = e._1.hit(vpn, Mux(req.bits.s2xlate(0), io.csr.vsatp.asid, io.csr.satp.asid), vmid = io.csr.hgatp.asid, s2xlate = req.bits.s2xlate(0).asBool())
+        val OnlyS2_hit = e._1.hit_S2(gvpn, io.csr.hgatp.asid)
+        s2xlate_hit && Mux(OnlyS2, OnlyS2_hit, normal_hit) && m._1 && !m._2
+      }
+    })
 
     hitVec.suggestName("hitVec")
 
@@ -139,6 +152,8 @@ class TLBFA(
     resp.bits.hit.suggestName("hit")
     resp.bits.ppn.suggestName("ppn")
     resp.bits.perm.suggestName("perm")
+    resp.bits.gvpn.suggestName("gvpn")
+    resp.bits.g_perm.suggestName("g_perm")
   }
 
   when (io.w.valid) {
@@ -149,7 +164,7 @@ class TLBFA(
   val w_hit_vec = VecInit(entries.zip(v).map{case (e, vi) => e.wbhit(io.w.bits.data, io.csr.satp.asid) && vi })
   XSError(io.w.valid && Cat(w_hit_vec).orR, s"${parentName} refill, duplicate with existing entries")
 
-  val refill_vpn_reg = RegNext(io.w.bits.data.entry.tag)
+  val refill_vpn_reg = RegNext(io.w.bits.data.s1.entry.tag)
   val refill_wayIdx_reg = RegNext(io.w.bits.wayIdx)
   when (RegNext(io.w.valid)) {
     io.access.map { access =>
@@ -160,26 +175,73 @@ class TLBFA(
   }
 
   val sfence = io.sfence
-  val sfence_vpn = sfence.bits.addr.asTypeOf(new VaBundle().cloneType).vpn
-  val sfenceHit = entries.map(_.hit(sfence_vpn, sfence.bits.asid))
-  val sfenceHit_noasid = entries.map(_.hit(sfence_vpn, sfence.bits.asid, ignoreAsid = true))
+  val sfence_valid = sfence.valid && !sfence.bits.hg && !sfence.bits.hv
+  val sfence_vpn = sfence.bits.addr(VAddrBits - 1, offLen)
+  val sfenceHit = entries.map(_.hit(sfence_vpn, sfence.bits.id, vmid = io.csr.hgatp.asid, s2xlate = io.csr.priv.virt))
+  val sfenceHit_noasid = entries.map(_.hit(sfence_vpn, sfence.bits.id, ignoreAsid = true, vmid = io.csr.hgatp.asid, s2xlate = io.csr.priv.virt))
   // Sfence will flush all sectors of an entry when hit
-  when (io.sfence.valid) {
+  when (sfence_valid) {
     when (sfence.bits.rs1) { // virtual address *.rs1 <- (rs1===0.U)
       when (sfence.bits.rs2) { // asid, but i do not want to support asid, *.rs2 <- (rs2===0.U)
         // all addr and all asid
-        v.map(_ := false.B)
+        v.zipWithIndex.map{ case(a, i) => a := a && !((io.csr.priv.virt === false.B && entries(i).s2xlate(0) === 0.U) ||
+          (io.csr.priv.virt && entries(i).s2xlate(0) === 1.U && entries(i).vmid === io.csr.hgatp.asid))}
       }.otherwise {
         // all addr but specific asid
-        v.zipWithIndex.map{ case (a,i) => a := a & (g(i) | !(entries(i).asid === sfence.bits.asid)) }
+        v.zipWithIndex.map{ case (a, i) => a := a && !(!g(i) && ((!io.csr.priv.virt && entries(i).s2xlate(0) === 0.U && entries(i).asid === sfence.bits.id) ||
+          (io.csr.priv.virt && entries(i).s2xlate(0) === 1.U && entries(i).asid === sfence.bits.id && entries(i).vmid === io.csr.hgatp.asid)))}
       }
     }.otherwise {
       when (sfence.bits.rs2) {
         // specific addr but all asid
-        v.zipWithIndex.map{ case (a,i) => a := a & !sfenceHit_noasid(i) }
+        v.zipWithIndex.map{ case (a, i) => a := a & !sfenceHit_noasid(i) }
       }.otherwise {
         // specific addr and specific asid
-        v.zipWithIndex.map{ case (a,i) => a := a & !(sfenceHit(i) && !g(i)) }
+        v.zipWithIndex.map{ case (a, i) => a := a & !(sfenceHit(i) && !g(i)) }
+      }
+    }
+  }
+
+  val hfencev_valid = sfence.valid && sfence.bits.hv
+  val hfenceg_valid = sfence.valid && sfence.bits.hg
+  val hfencev = io.sfence
+  val hfencev_vpn = sfence_vpn
+  val hfencevHit = entries.map(_.hit(hfencev_vpn, hfencev.bits.id, vmid = io.csr.hgatp.asid, s2xlate = true.B))
+  val hfencevHit_noasid = entries.map(_.hit(hfencev_vpn, 0.U, ignoreAsid = true, vmid = io.csr.hgatp.asid, s2xlate = true.B))
+  when (hfencev_valid) {
+    when (hfencev.bits.rs1) {
+      when (hfencev.bits.rs2) {
+        v.zipWithIndex.map { case (a, i) => a := a && !(entries(i).s2xlate(0) === 1.U && entries(i).vmid === io.csr.hgatp.asid)}
+      }.otherwise {
+        v.zipWithIndex.map { case (a, i) => a := a && !(!g(i) && (entries(i).s2xlate(0) === 1.U && entries(i).asid === sfence.bits.id && entries(i).vmid === io.csr.hgatp.asid))
+        }
+      }
+    }.otherwise {
+      when (hfencev.bits.rs2) {
+        v.zipWithIndex.map{ case (a, i) => a := a && !hfencevHit_noasid(i) }
+      }.otherwise {
+        v.zipWithIndex.map{ case (a, i) => a := a && !(hfencevHit(i) && !g(i)) }
+      }
+    }
+  }
+
+
+  val hfenceg = io.sfence
+  val hfenceg_gvpn = sfence_vpn
+  val hfencegHit = entries.map(_.hit_S2(hfenceg_gvpn, io.csr.hgatp.asid))
+  val hfencegHit_novmid = entries.map(_.hit_S2(hfenceg_gvpn, 0.U, ignoreVmid = true.B))
+  when (hfenceg_valid) {
+    when (hfenceg.bits.rs1) {
+      when(hfenceg.bits.rs2) {
+        v.zipWithIndex.map { case (a, i) => a := a && !(entries(i).s2xlate(0) === 1.U) }
+      }.otherwise {
+        v.zipWithIndex.map { case (a, i) => a := a && !(entries(i).s2xlate(0) === 1.U && entries(i).vmid === sfence.bits.id) }
+      }
+    }.otherwise {
+      when(hfenceg.bits.rs2) {
+        v.zipWithIndex.map { case (a, i) => a := a && !hfencegHit_novmid(i) }
+      }.otherwise {
+        v.zipWithIndex.map { case (a, i) => a := a && !hfencegHit(i) }
       }
     }
   }
@@ -305,7 +367,9 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
     page.r_req_apply(
       valid = io.r.req(i).valid,
       vpn = io.r.req(i).bits.vpn,
-      i = i
+      i = i,
+      vpn_extend = io.r.req(i).bits.vpn_extend,
+      s2xlate = io.r.req(i).bits.s2xlate
     )
   }
 

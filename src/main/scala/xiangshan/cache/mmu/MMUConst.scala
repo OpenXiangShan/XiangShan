@@ -83,7 +83,10 @@ trait HasTlbConst extends HasXSParameter {
   val offLen  = 12
   val ppnLen  = PAddrBits - offLen
   val vpnnLen = 9
+  val extendVpnBits = 2 // gvpn is two bits longer than vpn
+  val extendVpnnLen = vpnnLen + extendVpnBits
   val vpnLen  = VAddrBits - offLen
+  val gvpnLen = GPAddrBits - offLen
   val flagLen = 8
   val pteResLen = XLEN - 44 - 2 - flagLen
   val ppnHignLen = 44 - ppnLen
@@ -96,10 +99,15 @@ trait HasTlbConst extends HasXSParameter {
   val loadfiltersize = 16
   val storefiltersize = 8
   val prefetchfiltersize = 8
-
+  val sectorgvpnLen = gvpnLen - sectortlbwidth
   val sramSinglePort = true
 
   val timeOutThreshold = 10000
+
+  val noS2xlate = "b00".U
+  val allStage = "b11".U
+  val onlyStage1 = "b10".U
+  val onlyStage2 = "b01".U
 
   def get_pn(addr: UInt) = {
     require(addr.getWidth > offLen)
@@ -142,7 +150,22 @@ trait HasTlbConst extends HasXSParameter {
     replaceWrapper(VecInit(v).asUInt, lruIdx)
   }
 
-  implicit def ptwresp_to_tlbperm(ptwResp: PtwSectorRespwithMemIdx): TlbPermBundle = {
+  def hptwresp_to_tlbperm(hptwResp: HptwResp): TlbPermBundle = {
+    val tp = Wire(new TlbPermBundle)
+    val ptePerm = hptwResp.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
+    tp.pf := hptwResp.pf
+    tp.af := hptwResp.af
+    tp.d := ptePerm.d
+    tp.a := ptePerm.a
+    tp.g := ptePerm.g
+    tp.u := ptePerm.u
+    tp.x := ptePerm.x
+    tp.w := ptePerm.w
+    tp.r := ptePerm.r
+    tp.pm := DontCare
+    tp
+  }
+  def ptwresp_to_tlbperm(ptwResp: PtwSectorResp): TlbPermBundle = {
     val tp = Wire(new TlbPermBundle)
     val ptePerm = ptwResp.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
     tp.pf := ptwResp.pf
@@ -168,7 +191,7 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val bPtwWidth = log2Up(PtwWidth)
   val bSourceWidth = log2Up(sourceWidth)
   // ptwl1: fully-associated
-  val PtwL1TagLen = vpnnLen
+  val PtwL1TagLen = vpnnLen + (if (HasHExtension) extendVpnnBits else 0)
 
   /* +-------+----------+-------------+
    * |  Tag  |  SetIdx  |  SectorIdx  |
@@ -181,7 +204,7 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val PtwL2IdxLen = log2Up(PtwL2SetNum * PtwL2SectorSize)
   val PtwL2SectorIdxLen = log2Up(PtwL2SectorSize)
   val PtwL2SetIdxLen = log2Up(PtwL2SetNum)
-  val PtwL2TagLen = vpnnLen * 2 - PtwL2IdxLen
+  val PtwL2TagLen = vpnnLen * 2 - PtwL2IdxLen + (if (HasHExtension) extendVpnnBits else 0)
 
   // ptwl3: 16-way group-associated
   val l2tlbParams.l3nWays = l2tlbParams.l3nWays
@@ -190,14 +213,15 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val PtwL3IdxLen = log2Up(PtwL3SetNum * PtwL3SectorSize)
   val PtwL3SectorIdxLen = log2Up(PtwL3SectorSize)
   val PtwL3SetIdxLen = log2Up(PtwL3SetNum)
-  val PtwL3TagLen = vpnnLen * 3 - PtwL3IdxLen
+  val PtwL3TagLen = vpnnLen * 3 - PtwL3IdxLen + (if (HasHExtension) extendVpnnBits else 0)
 
   // super page, including 1GB and 2MB page
-  val SPTagLen = vpnnLen * 2
+  val SPTagLen = vpnnLen * 2 + (if (HasHExtension) extendVpnnBits else 0)
 
   // miss queue
   val MissQueueSize = l2tlbParams.ifilterSize + l2tlbParams.dfilterSize
-  val MemReqWidth = l2tlbParams.llptwsize + 1
+  val MemReqWidth = l2tlbParams.llptwsize + 1 + 1
+  val HptwReqId = l2tlbParams.llptwsize + 1
   val FsmReqID = l2tlbParams.llptwsize
   val bMemID = log2Up(MemReqWidth)
 
@@ -234,8 +258,21 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
     Cat(ppn, off, 0.U(log2Up(XLEN/8).W))(PAddrBits-1, 0)
   }
 
+  def MakeGAddr(ppn: UInt, off: UInt) = {
+    require(off.getWidth == 9 || off.getWidth == 11)
+    (Cat(ppn, 0.U(offLen.W)) + Cat(off, 0.U(log2Up(XLEN / 8).W)))(GPAddrBits - 1, 0)
+  }
+
   def getVpnn(vpn: UInt, idx: Int): UInt = {
     vpn(vpnnLen*(idx+1)-1, vpnnLen*idx)
+  }
+
+  def getVpnn(vpn: UInt, idx: UInt): UInt = {
+    Mux(idx === 0.U, vpn(vpnnLen - 1, 0), Mux(idx === 1.U, vpn(vpnnLen * 2 - 1, vpnnLen), vpn(vpnnLen * 3 - 1, vpnnLen * 2)))
+  }
+
+  def getGVpnn(vpn: UInt, idx: UInt): UInt = {
+    Mux(idx === 0.U, vpn(vpnnLen - 1, 0), Mux(idx === 1.U, vpn(vpnnLen * 2 - 1, vpnnLen), vpn(vpnnLen * 3 + 1, vpnnLen * 2)))
   }
 
   def getVpnClip(vpn: UInt, level: Int) = {

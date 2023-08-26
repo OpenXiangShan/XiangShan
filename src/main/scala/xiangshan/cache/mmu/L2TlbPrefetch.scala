@@ -44,7 +44,7 @@ class L2TlbPrefetch(implicit p: Parameters) extends XSModule with HasPtwConst {
     Cat(old_reqs.zip(old_v).map{ case (o,v) => dup(o,vpn) && v}).orR
   }
 
-  val flush = io.sfence.valid || io.csr.satp.changed
+  val flush = io.sfence.valid || (io.csr.priv.virt && io.csr.vsatp.changed)
   val next_line = get_next_line(io.in.bits.vpn)
   val next_req = RegEnable(next_line, io.in.valid)
   val input_valid = io.in.valid && !flush && !already_have(next_line)

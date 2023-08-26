@@ -86,12 +86,15 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
     Mux(imm12(11), s0_in.src(0)(VAddrBits-1, 12)+SignExt(1.U, VAddrBits-12), s0_in.src(0)(VAddrBits-1, 12)),
   )
   val s0_saddr = Cat(saddr_hi, saddr_lo(11,0))
+  val isHsv = WireInit(LSUOpType.isHsv(io.in.bits.uop.ctrl.fuOpType))
   val s0_vaddr = Mux(s0_use_flow_rs, s0_saddr, io.prefetch_req.bits.vaddr)
   val s0_mask  = Mux(s0_use_flow_rs, genVWmask(s0_saddr, s0_in.uop.ctrl.fuOpType(1,0)), 3.U)
 
   io.tlb.req.valid                   := s0_valid
   io.tlb.req.bits.vaddr              := s0_vaddr
   io.tlb.req.bits.cmd                := TlbCmd.write
+  io.dtlbReq.bits.hyperinst := isHsv
+  io.dtlbReq.bits.hlvx := false.B
   io.tlb.req.bits.size               := s0_size
   io.tlb.req.bits.kill               := false.B
   io.tlb.req.bits.memidx.is_ld       := false.B
@@ -163,6 +166,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
                      s1_in.uop.ctrl.fuOpType === LSUOpType.cbo_flush ||
                      s1_in.uop.ctrl.fuOpType === LSUOpType.cbo_inval
   val s1_paddr     = io.tlb.resp.bits.paddr(0)
+  val s1_gpaddr = io.dtlbResp.bits.gpaddr(0)
   val s1_tlb_miss  = io.tlb.resp.bits.miss
   val s1_mmio      = s1_mmio_cbo
   val s1_exception = ExceptionNO.selectByFu(s1_out.uop.cf.exceptionVec, staCfg).asUInt.orR
@@ -206,12 +210,14 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   // writeback store inst to lsq
   s1_out         := s1_in
   s1_out.paddr   := s1_paddr
+  io.out.bits.gpaddr := s1_gpaddr
   s1_out.miss    := false.B
   s1_out.mmio    := s1_mmio
   s1_out.tlbMiss := s1_tlb_miss
   s1_out.atomic  := s1_mmio
   s1_out.uop.cf.exceptionVec(storePageFault)   := io.tlb.resp.bits.excp(0).pf.st
   s1_out.uop.cf.exceptionVec(storeAccessFault) := io.tlb.resp.bits.excp(0).af.st
+  io.out.bits.uop.cf.exceptionVec(storeGuestPageFault) := io.dtlbResp.bits.excp(0).gpf.st
 
   io.lsq.valid     := s1_valid && !s1_in.isHWPrefetch
   io.lsq.bits      := s1_out

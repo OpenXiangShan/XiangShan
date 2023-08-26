@@ -47,17 +47,21 @@ case class XSCoreParameters
   HartId: Int = 0,
   XLEN: Int = 64,
   VLEN: Int = 128,
+  HSXLEN: Int = 64,
   HasMExtension: Boolean = true,
   HasCExtension: Boolean = true,
+  HasHExtension: Boolean = true,
   HasDiv: Boolean = true,
   HasICache: Boolean = true,
   HasDCache: Boolean = true,
   AddrBits: Int = 64,
   VAddrBits: Int = 39,
+  GPAddrBit: Int = 41,
   HasFPU: Boolean = true,
   HasCustomCSRCacheOp: Boolean = true,
   FetchWidth: Int = 8,
   AsidLength: Int = 16,
+  VmidLength: Int = 14,
   EnableBPU: Boolean = true,
   EnableBPD: Boolean = true,
   EnableRAS: Boolean = true,
@@ -194,6 +198,7 @@ case class XSCoreParameters
   EnableStorePrefetchSMS: Boolean = false,
   EnableStorePrefetchSPB: Boolean = false,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
+  MMUVmidLen: Int = 14,
   ReSelectLen: Int = 7, // load replay queue replay select counter len
   iwpuParameters: WPUParameters = WPUParameters(
     enWPU = false,
@@ -318,6 +323,7 @@ trait HasXSParameter {
 
   val XLEN = coreParams.XLEN
   val VLEN = coreParams.VLEN
+  val HSXLEN = coreParams.HSXLEN
   val minFLen = 32
   val fLen = 64
   val hartIdLen = p(MaxHartIdBits)
@@ -325,12 +331,22 @@ trait HasXSParameter {
 
   val HasMExtension = coreParams.HasMExtension
   val HasCExtension = coreParams.HasCExtension
+  val HasHExtension = coreParams.HasHExtension
   val HasDiv = coreParams.HasDiv
   val HasIcache = coreParams.HasICache
   val HasDcache = coreParams.HasDCache
   val AddrBits = coreParams.AddrBits // AddrBits is used in some cases
-  val VAddrBits = coreParams.VAddrBits // VAddrBits is Virtual Memory addr bits
+  val GPAddrBits = coreParams.GPAddrBits
+  val VAddrBits = {
+    if(HasHExtension){
+      coreParams.GPAddrBits
+    }else{
+      coreParams.VAddrBits
+    }
+  } // VAddrBits is Virtual Memory addr bits
+
   val AsidLength = coreParams.AsidLength
+  val VmidLength = coreParams.VmidLength
   val ReSelectLen = coreParams.ReSelectLen
   val AddrBytes = AddrBits / 8 // unused
   val DataBits = XLEN
@@ -464,6 +480,7 @@ trait HasXSParameter {
   require(StorePipelineWidth == exuParameters.StuCnt, "StorePipelineWidth must be equal exuParameters.StuCnt!")
   val Enable3Load3Store = (LoadPipelineWidth == 3 && StorePipelineWidth == 3)
   val asidLen = coreParams.MMUAsidLen
+  val vmidLen = coreParams.MMUVmidLen
   val BTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
   val refillBothTlb = coreParams.refillBothTlb
   val iwpuParam = coreParams.iwpuParameters

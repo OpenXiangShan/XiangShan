@@ -41,5 +41,5 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   require(MissQueueSize >= (l2tlbParams.ifilterSize + l2tlbParams.dfilterSize))
   val io = IO(new L2TlbMQIO())
 
-  io.out <> Queue(io.in, MissQueueSize, flush = Some(io.sfence.valid || io.csr.satp.changed))
+  io.out <> Queue(io.in, MissQueueSize, flush = Some(io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed))
 }

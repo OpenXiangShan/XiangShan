@@ -496,7 +496,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
 
   val ptw_resp_next = RegEnable(ptwio.resp.bits, ptwio.resp.valid)
-  val ptw_resp_v = RegNext(ptwio.resp.valid && !(sfence.valid && tlbcsr.satp.changed), init = false.B)
+  val ptw_resp_v = RegNext(ptwio.resp.valid && !(sfence.valid && tlbcsr.satp.changed && tlbcsr.vsatp.changed && tlbcsr.hgatp.changed), init = false.B)
   ptwio.resp.ready := true.B
 
   val tlbReplayWidth = (if (Enable3Load3Store) 3 else 2)
@@ -517,7 +517,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       else if (i < (exuParameters.LduCnt + 1 + exuParameters.StuCnt)) Cat(ptw_resp_next.vector.drop(exuParameters.LduCnt + 1).take(exuParameters.StuCnt)).orR
       else Cat(ptw_resp_next.vector.drop(exuParameters.LduCnt + 1 + exuParameters.StuCnt)).orR
     ptwio.req(i).valid := tlb.valid && !(ptw_resp_v && vector_hit &&
-      ptw_resp_next.data.hit(tlb.bits.vpn, tlbcsr.satp.asid, allType = true, ignoreAsid = true))
+      ptw_resp_next.data.hit(tlb.bits.vpn, tlbcsr.satp.asid, allType = true, ignoreAsid = true, tlb.bits.virt || tlb.bits.hyperinst))
   }
   dtlb.foreach(_.ptw.resp.bits := ptw_resp_next.data)
   if (refillBothTlb) {
@@ -894,7 +894,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     atomicsException := true.B
   }
   val atomicsExceptionAddress = RegEnable(atomicsUnit.io.exceptionAddr.bits, atomicsUnit.io.exceptionAddr.valid)
+  val atomicsExceptionGPAddress = RegEnable(atomicsUnit.io.exceptionAddr.bits.gpaddr, atomicsUnit.io.exceptionAddr.valid)
   io.mem_to_ooo.lsqio.vaddr := RegNext(Mux(atomicsException, atomicsExceptionAddress, lsq.io.exceptionAddr.vaddr))
+  io.lsqio.exceptionAddr.gpaddr := RegNext(Mux(atomicsException, atomicsExceptionGPAddress, lsq.io.exceptionAddr.gpaddr))
 
   io.memInfo.sqFull := RegNext(lsq.io.sqFull)
   io.memInfo.lqFull := RegNext(lsq.io.lqFull)

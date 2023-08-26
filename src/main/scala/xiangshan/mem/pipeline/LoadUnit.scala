@@ -310,6 +310,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // prefetch related ctrl signal
   io.canAcceptLowConfPrefetch  := s0_low_conf_prf_ready
   io.canAcceptHighConfPrefetch := s0_high_conf_prf_ready
+  val isHlv = WireInit(LSUOpType.isHlv(s0_uop.ctrl.fuOpType))
+  val isHlvx = WireInit(LSUOpType.isHlvx(s0_uop.ctrl.fuOpType))
 
   // query DTLB
   io.tlb.req.valid                   := s0_valid
@@ -617,6 +619,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.sbuffer.valid := s1_valid && !(s1_exception || s1_tlb_miss || s1_kill || s1_dly_err || s1_prf)
   io.sbuffer.vaddr := s1_vaddr
   io.sbuffer.paddr := s1_paddr_dup_lsu
+  io.sbuffer.gpaddr := s1_gpaddr_dup_lsu
   io.sbuffer.uop   := s1_in.uop
   io.sbuffer.sqIdx := s1_in.uop.sqIdx
   io.sbuffer.mask  := s1_in.mask
@@ -625,6 +628,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.lsq.forward.valid     := s1_valid && !(s1_exception || s1_tlb_miss || s1_kill || s1_dly_err || s1_prf)
   io.lsq.forward.vaddr     := s1_vaddr
   io.lsq.forward.paddr     := s1_paddr_dup_lsu
+  io.lsq.gpaddr := s1_gpaddr_dup_lsu
   io.lsq.forward.uop       := s1_in.uop
   io.lsq.forward.sqIdx     := s1_in.uop.sqIdx
   io.lsq.forward.sqIdxMask := 0.U

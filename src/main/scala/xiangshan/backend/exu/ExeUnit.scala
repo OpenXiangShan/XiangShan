@@ -37,6 +37,9 @@ class FenceIO(implicit p: Parameters) extends XSBundle {
 class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config) {
 
   val disableSfence = WireInit(false.B)
+  val disableHfenceg = WireInit(false.B)
+  val disableHfencev = WireInit(false.B)
+  val virtMode = WireInit(false.B)
   val csr_frm = WireInit(frm.getOrElse(0.U(3.W)))
 
   val hasRedirect = config.fuConfigs.zip(functionUnits).filter(_._1.hasRedirect).map(_._2)
@@ -57,6 +60,9 @@ class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config) {
     csrio.get.trapTarget := RegNext(csr.csrio.trapTarget)
     csr.csrio.exception := DelayN(csrio.get.exception, 2)
     disableSfence := csr.csrio.disableSfence
+    disableHfenceg := csr.csrio.disableHfenceg
+    disableHfencev := csr.csrio.disableHfencev
+    virtMode := csr.csrio.customCtrl.virtMode
     csr_frm := csr.csrio.fpu.frm
     // setup skip for hpm CSR read
     io.out.bits.debug.isPerfCnt := RegNext(csr.csrio.isPerfCnt) // TODO: this is dirty
@@ -71,6 +77,9 @@ class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config) {
     fenceio.get.sbuffer <> fence.toSbuffer
     fence.io.out.ready := true.B
     fence.disableSfence := disableSfence
+    fence.disableHfenceg := disableHfenceg
+    fence.disableHfencev := disableHfencev
+    fence.virtMode := virtMode
   }
 
   val fpModules = functionUnits.zip(config.fuConfigs.zipWithIndex).filter(_._1.isInstanceOf[FPUSubModule])
