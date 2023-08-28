@@ -188,6 +188,7 @@ package object xiangshan {
     def addw       = "b001_0000".U // addw:      SEXT((src1 + src2)[31:0])
     def oddaddw    = "b001_0001".U // oddaddw:   SEXT((src1[0] + src2)[31:0])
     def subw       = "b001_0010".U // subw:      SEXT((src1 - src2)[31:0])
+    def lui32addw  = "b001_0011".U // lui32addw: SEXT(SEXT(src2[11:0], 32) + {src2[31:12], 12'b0}, 64)
 
     def addwbit    = "b001_0100".U // addwbit:   (src1 + src2)[0]
     def addwbyte   = "b001_0101".U // addwbyte:  (src1 + src2)[7:0]
