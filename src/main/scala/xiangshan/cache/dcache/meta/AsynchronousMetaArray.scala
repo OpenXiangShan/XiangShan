@@ -180,7 +180,7 @@ class L1PrefetchSourceArray(readPorts: Int, writePorts: Int)(implicit p: Paramet
   val s0_way_wen = Wire(Vec(nWays, Vec(writePorts, Bool())))
   val s1_way_wen = Wire(Vec(nWays, Vec(writePorts, Bool())))
   val s1_way_waddr = Wire(Vec(nWays, Vec(writePorts, UInt(idxBits.W))))
-  val s1_way_wdata = Wire(Vec(nWays, Vec(writePorts, Bool())))
+  val s1_way_wdata = Wire(Vec(nWays, Vec(writePorts, UInt(L1PfSourceBits.W))))
 
   (io.read.zip(io.resp)).zipWithIndex.foreach {
     case ((read, resp), i) =>

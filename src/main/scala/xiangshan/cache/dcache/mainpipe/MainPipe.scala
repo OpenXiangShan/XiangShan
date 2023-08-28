@@ -1446,6 +1446,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   miss_req.req_coh := s2_hit_coh
   miss_req.replace_coh := s2_repl_coh
   miss_req.replace_tag := s2_repl_tag
+  miss_req.replace_pf := L1_HW_PREFETCH_STORE // TODO: support store cache pollution monitor
   miss_req.id := s2_req.id
   miss_req.cancel := false.B
   miss_req.pc := DontCare

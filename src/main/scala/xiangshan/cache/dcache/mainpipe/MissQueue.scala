@@ -30,6 +30,7 @@ import difftest._
 import coupledL2.{AliasKey, DirtyKey, PrefetchKey}
 import mem.{AddPipelineReg}
 import mem.trace._
+import xiangshan.mem.prefetch._
 
 class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   val source = UInt(sourceTypeWidth.W)
@@ -52,6 +53,8 @@ class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   val replace_coh = new ClientMetadata
   val replace_tag = UInt(tagBits.W)
   val id = UInt(reqIdWidth.W)
+
+  val replace_pf = UInt(L1PfSourceBits.W)
 
   // For now, miss queue entry req is actually valid when req.valid && !cancel
   // * req.valid is fast to generate
@@ -98,6 +101,7 @@ class MissReq(implicit p: Parameters) extends MissReqWoStoreData {
   def toMissReqWoStoreData(): MissReqWoStoreData = {
     val out = Wire(new MissReqWoStoreData)
     out.source := source
+    out.replace_pf := replace_pf
     out.pf_source := pf_source
     out.cmd := cmd
     out.addr := addr
@@ -156,6 +160,11 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
   def matched(new_req: MissReq): Bool = {
     val block_match = get_block(req.addr) === get_block(new_req.addr)
     block_match && reg_valid() && !(req.isFromPrefetch)
+  }
+
+  def prefetch_late_en(new_req: MissReqWoStoreData, new_req_valid: Bool): Bool = {
+    val block_match = get_block(req.addr) === get_block(new_req.addr)
+    new_req_valid && alloc && block_match && (req.isFromPrefetch) && !(new_req.isFromPrefetch)
   }
 
   def reject_req(new_req: MissReq): Bool = {
@@ -312,6 +321,9 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
       val pf_miss_refilling    = Output(Bool())
     }
 
+    val prefetch_info = new DCacheBundle {
+      val late_prefetch = Output(Bool())
+    }
     val nMaxPrefetchEntry = Input(UInt(64.W))
     val matched = Output(Bool())
   })
@@ -425,7 +437,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
     should_refill_data_reg := miss_req_pipe_reg_bits.isFromLoad
     error := false.B
-    prefetch := input_req_is_prefetch
+    prefetch := input_req_is_prefetch && !io.miss_req_pipe_reg.prefetch_late_en(io.req.bits, io.req.valid)
     access := false.B
     secondary_fired := false.B
   }
@@ -578,7 +590,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   }
 
   // req_valid will be updated 1 cycle after primary_fire, so next cycle, this entry cannot accept a new req
-  when(io.id >= ((cfg.nMissEntries).U - io.nMaxPrefetchEntry)) {
+  when(RegNext(io.id >= ((cfg.nMissEntries).U - io.nMaxPrefetchEntry))) {
     // can accept prefetch req
     io.primary_ready := !req_valid && !RegNext(primary_fire)
   }.otherwise {
@@ -729,12 +741,18 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   io.forwardInfo.apply(req_valid, req.addr, refill_data_raw, w_grantfirst, w_grantlast)
 
   io.matched := req_valid && (get_block(req.addr) === get_block(io.req.bits.addr)) && !prefetch
+  io.prefetch_info.late_prefetch := io.req.valid && !(io.req.bits.isFromPrefetch) && req_valid && (get_block(req.addr) === get_block(io.req.bits.addr)) && prefetch
+
+  when(io.prefetch_info.late_prefetch) {
+    prefetch := false.B
+  }
 
   // refill latency monitor
-  io.latency_monitor.load_miss_refilling  := req_valid && req_primary_fire.isFromLoad     && BoolStopWatch(io.mem_acquire.fire, io.mem_grant.fire && !refill_done, true)
-  io.latency_monitor.store_miss_refilling := req_valid && req_primary_fire.isFromStore    && BoolStopWatch(io.mem_acquire.fire, io.mem_grant.fire && !refill_done, true)
-  io.latency_monitor.amo_miss_refilling   := req_valid && req_primary_fire.isFromAMO      && BoolStopWatch(io.mem_acquire.fire, io.mem_grant.fire && !refill_done, true)
-  io.latency_monitor.pf_miss_refilling    := req_valid && req_primary_fire.isFromPrefetch && BoolStopWatch(io.mem_acquire.fire, io.mem_grant.fire && !refill_done, true)
+  val start_counting = RegNext(io.mem_acquire.fire) || (RegNextN(primary_fire, 2) && s_acquire)
+  io.latency_monitor.load_miss_refilling  := req_valid && req_primary_fire.isFromLoad     && BoolStopWatch(start_counting, io.mem_grant.fire && !refill_done, true, true)
+  io.latency_monitor.store_miss_refilling := req_valid && req_primary_fire.isFromStore    && BoolStopWatch(start_counting, io.mem_grant.fire && !refill_done, true, true)
+  io.latency_monitor.amo_miss_refilling   := req_valid && req_primary_fire.isFromAMO      && BoolStopWatch(start_counting, io.mem_grant.fire && !refill_done, true, true)
+  io.latency_monitor.pf_miss_refilling    := req_valid && req_primary_fire.isFromPrefetch && BoolStopWatch(start_counting, io.mem_grant.fire && !refill_done, true, true)
 
   XSPerfAccumulate("miss_req_primary", primary_fire)
   XSPerfAccumulate("miss_req_merged", secondary_fire)
@@ -761,7 +779,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   XSPerfHistogram("load_miss_penalty_to_use", load_miss_penalty, load_miss_penalty_sample, 0, 20, 1, true, true)
   XSPerfHistogram("load_miss_penalty_to_use", load_miss_penalty, load_miss_penalty_sample, 20, 100, 10, true, false)
 
-  val (a_to_d_penalty_sample, a_to_d_penalty) = TransactionLatencyCounter(io.mem_acquire.fire(), io.mem_grant.fire() && refill_done)
+  val (a_to_d_penalty_sample, a_to_d_penalty) = TransactionLatencyCounter(start_counting, RegNext(io.mem_grant.fire() && refill_done))
   XSPerfHistogram("a_to_d_penalty", a_to_d_penalty, a_to_d_penalty_sample, 0, 20, 1, true, true)
   XSPerfHistogram("a_to_d_penalty", a_to_d_penalty, a_to_d_penalty_sample, 20, 100, 10, true, false)
 }
@@ -808,7 +826,23 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
 
     val memSetPattenDetected = Output(Bool())
     val lqEmpty = Input(Bool())
-    val late_miss_prefetch = Output(Bool())
+
+    val prefetch_info = new Bundle {
+      val naive = new Bundle {
+        val late_miss_prefetch = Output(Bool())
+      }
+
+      val fdp = new Bundle {
+        val late_miss_prefetch = Output(Bool())
+        val prefetch_monitor_cnt = Output(Bool())
+        val total_prefetch = Output(Bool())
+      }
+    }
+
+    val bloom_filter_query = new Bundle {
+      val set = ValidIO(new BloomQueryBundle(BLOOM_FILTER_ENTRY_NUM))
+      val clr = ValidIO(new BloomQueryBundle(BLOOM_FILTER_ENTRY_NUM))
+    }
   })
   
   // 128KBL1: FIXME: provide vaddr for l2
@@ -897,7 +931,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
 
   io.mem_grant.ready := false.B
 
-  val nMaxPrefetchEntry = WireInit(Constantin.createRecord("nMaxPrefetchEntry" + p(XSCoreParamsKey).HartId.toString, initValue = 15.U))
+  val nMaxPrefetchEntry = WireInit(Constantin.createRecord("nMaxPrefetchEntry" + p(XSCoreParamsKey).HartId.toString, initValue = 14.U))
   entries.zipWithIndex.foreach {
     case (e, i) =>
       val former_primary_ready = if(i == 0)
@@ -977,7 +1011,19 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   io.probe_block := Cat(probe_block_vec).orR
 
   io.full := ~Cat(entries.map(_.io.primary_ready)).andR
-  io.late_miss_prefetch := io.req.valid && io.req.bits.isPrefetchRead && (miss_req_pipe_reg.matched(io.req.bits) || Cat(entries.map(_.io.matched)).orR)
+
+  // prefetch related
+  io.prefetch_info.naive.late_miss_prefetch := io.req.valid && io.req.bits.isPrefetchRead && (miss_req_pipe_reg.matched(io.req.bits) || Cat(entries.map(_.io.matched)).orR)
+
+  io.prefetch_info.fdp.late_miss_prefetch := (miss_req_pipe_reg.prefetch_late_en(io.req.bits.toMissReqWoStoreData(), io.req.valid) || Cat(entries.map(_.io.prefetch_info.late_prefetch)).orR)
+  io.prefetch_info.fdp.prefetch_monitor_cnt := io.refill_pipe_req.fire
+  io.prefetch_info.fdp.total_prefetch := alloc && io.req.valid && !io.req.bits.cancel && isFromL1Prefetch(io.req.bits.pf_source)
+
+  io.bloom_filter_query.set.valid := alloc && io.req.valid && !io.req.bits.cancel && !isFromL1Prefetch(io.req.bits.replace_pf) && io.req.bits.replace_coh.isValid() && isFromL1Prefetch(io.req.bits.pf_source)
+  io.bloom_filter_query.set.bits.addr := io.bloom_filter_query.set.bits.get_addr(Cat(io.req.bits.replace_tag, get_untag(io.req.bits.vaddr))) // the evict block address
+
+  io.bloom_filter_query.clr.valid := io.refill_pipe_req.fire && isFromL1Prefetch(io.refill_pipe_req.bits.prefetch)
+  io.bloom_filter_query.clr.bits.addr := io.bloom_filter_query.clr.bits.get_addr(io.refill_pipe_req.bits.addr)
 
   // L1MissTrace Chisel DB
   val debug_miss_trace = Wire(new L1MissTrace)

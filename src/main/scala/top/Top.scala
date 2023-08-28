@@ -78,7 +78,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
   val memblock_pf_recv_nodes: Seq[Option[BundleBridgeSink[PrefetchRecv]]] = core_with_l2.map(_.core_l3_pf_port).map{ _ => Some(BundleBridgeSink(Some(() => new PrefetchRecv))) }
   
   // pick one req per cycle, send it to l3 cache
-  val pf_sender_opt = soc.L3CacheParamsOpt.map(_ =>
+  val l3_pf_sender_opt = soc.L3CacheParamsOpt.map(_ =>
     BundleBridgeSource(() => new PrefetchRecv)
   )
 
@@ -89,8 +89,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     misc.plic.intnode := IntBuffer() := core_with_l2(i).beu_int_source
     misc.peripheral_ports(i) := core_with_l2(i).uncache
     misc.core_to_l3_ports(i) :=* core_with_l2(i).memory_port
-    println(s"Connecting Core_${i}'s L1 pf source to L3!")
     memblock_pf_recv_nodes(i).get := core_with_l2(i).core_l3_pf_port.get
+    println(s"Connecting Core_${i}'s L1 pf source to L3!")
   }
 
   l3cacheOpt.map(_.ctlnode.map(_ := misc.peripheralXbar))
@@ -113,7 +113,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       misc.l3_out :*= l3.node :*= TLBuffer.chainNode(2) :*= misc.l3_banked_xbar
       l3.pf_recv_node.map(recv => {
         println("Connecting L1 prefetcher to L3!")
-        recv := pf_sender_opt.get
+        recv := l3_pf_sender_opt.get
       })
     case None =>
       val dummyMatch = WireDefault(false.B)
@@ -190,11 +190,11 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       }
     }
 
-    pf_sender_opt.get.out.head._1.addr_valid := VecInit(memblock_pf_recv_nodes.map(_.get.in.head._1.addr_valid)).asUInt.orR
+    l3_pf_sender_opt.get.out.head._1.addr_valid := VecInit(memblock_pf_recv_nodes.map(_.get.in.head._1.addr_valid)).asUInt.orR
     for (i <- 0 until NumCores) {
       when(memblock_pf_recv_nodes(i).get.in.head._1.addr_valid) {
-        pf_sender_opt.get.out.head._1.addr := memblock_pf_recv_nodes(i).get.in.head._1.addr
-        pf_sender_opt.get.out.head._1.l2_pf_en := memblock_pf_recv_nodes(i).get.in.head._1.l2_pf_en
+        l3_pf_sender_opt.get.out.head._1.addr := memblock_pf_recv_nodes(i).get.in.head._1.addr
+        l3_pf_sender_opt.get.out.head._1.l2_pf_en := memblock_pf_recv_nodes(i).get.in.head._1.l2_pf_en
       }
     }
 

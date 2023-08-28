@@ -25,6 +25,7 @@ import utility.{ParallelPriorityMux, ChiselDB}
 import xiangshan.{XSCoreParamsKey, L1CacheErrorInfo}
 import xiangshan.cache.dcache.{DCacheWPU, IdealWPU}
 import xiangshan.mem.HasL1PrefetchSourceParameter
+import xiangshan.mem.prefetch._
 
 class LoadPfDbBundle(implicit p: Parameters) extends DCacheBundle {
   val paddr = UInt(PAddrBits.W)
@@ -51,6 +52,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
     // access bit update
     val access_flag_write = DecoupledIO(new FlagMetaWriteReq)
+    val prefetch_flag_write = DecoupledIO(new SourceMetaWriteReq)
 
     // banked data read conflict
     val bank_conflict_slow = Input(Bool())
@@ -71,18 +73,31 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     // ecc error
     val error = Output(new L1CacheErrorInfo())
 
-    // // debug_ls_info
-    // val debug_s2_cache_miss = Bool()
-
     val prefetch_info = new Bundle {
-      val total_prefetch = Output(Bool())
-      val late_hit_prefetch = Output(Bool())
-      val late_prefetch_hit = Output(Bool())
-      val late_load_hit = Output(Bool())
-      val useless_prefetch = Output(Bool())
-      val useful_prefetch = Output(Bool())
-      val prefetch_hit = Output(Bool())
+      val naive = new Bundle {
+        val total_prefetch = Output(Bool())
+        val late_hit_prefetch = Output(Bool())
+        val late_prefetch_hit = Output(Bool())
+        val late_load_hit = Output(Bool())
+        val useless_prefetch = Output(Bool())
+        val useful_prefetch = Output(Bool())
+        val prefetch_hit = Output(Bool())
+      }
+
+      val fdp = new Bundle {
+        val useful_prefetch = Output(Bool())
+        val demand_miss = Output(Bool())
+        val pollution = Output(Bool())
+      }
     }
+
+    val bloom_filter_query = new Bundle {
+      val query = ValidIO(new BloomQueryBundle(BLOOM_FILTER_ENTRY_NUM))
+      val resp = Flipped(ValidIO(new BloomRespBundle()))
+    }
+
+    val counter_filter_query = new CounterFilterQueryBundle
+    val counter_filter_enq = new ValidIO(new CounterFilterDataBundle())
   })
 
   assert(RegNext(io.meta_read.ready))
@@ -219,6 +234,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_repl_way_en_enc = OHToUInt(s1_repl_way_en_oh)
   val s1_repl_tag = Mux1H(s1_repl_way_en_oh, wayMap(w => tag_resp(w)))
   val s1_repl_coh = Mux1H(s1_repl_way_en_oh, wayMap(w => meta_resp(w).coh))
+  val s1_repl_prefetch = Mux1H(s1_repl_way_en_oh, wayMap(w => io.extra_meta_resp(w).prefetch))
   val s1_repl_extra_meta = Mux1H(s1_repl_way_en_oh, wayMap(w => io.extra_meta_resp(w)))
 
   val s1_need_replacement = !s1_tag_match_dup_dc
@@ -233,6 +249,10 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.banked_data_read.valid := s1_fire && !s1_nack
   io.banked_data_read.bits.addr := s1_vaddr
   io.banked_data_read.bits.way_en := s1_tag_match_way_dup_dc
+
+  // query bloom filter
+  io.bloom_filter_query.query.valid := s1_valid
+  io.bloom_filter_query.query.bits.addr := io.bloom_filter_query.query.bits.get_addr(s1_paddr_dup_dcache)
 
   // get s1_will_send_miss_req in lpad_s1
   val s1_has_permission = s1_hit_coh.onAccess(s1_req.cmd)._1
@@ -285,6 +305,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_repl_coh = RegEnable(s1_repl_coh, s1_fire)
   val s2_repl_tag = RegEnable(s1_repl_tag, s1_fire)
   val s2_repl_extra_meta = RegEnable(s1_repl_extra_meta, s1_fire) // not used for now
+  val s2_repl_prefetch = RegEnable(s1_repl_prefetch, s1_fire)
   val s2_encTag = RegEnable(s1_encTag, s1_fire)
 
   // when req got nacked, upper levels should replay this request
@@ -331,6 +352,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.miss_req.bits.req_coh := s2_hit_coh
   io.miss_req.bits.replace_coh := s2_repl_coh
   io.miss_req.bits.replace_tag := s2_repl_tag
+  io.miss_req.bits.replace_pf := s2_repl_prefetch
   io.miss_req.bits.cancel := io.lsu.s2_kill || s2_tag_error
   io.miss_req.bits.pc := io.lsu.s2_pc
 
@@ -382,13 +404,16 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   val prefetch_hit = s2_valid && (s2_req.instrtype =/= DCACHE_PREFETCH_SOURCE.U) && s2_hit && isFromL1Prefetch(s2_hit_prefetch) && s2_req.isFirstIssue
   
-  io.prefetch_info.total_prefetch := total_prefetch
-  io.prefetch_info.late_hit_prefetch := late_hit_prefetch
-  io.prefetch_info.late_load_hit := late_load_hit
-  io.prefetch_info.late_prefetch_hit := late_prefetch_hit
-  io.prefetch_info.useless_prefetch := useless_prefetch
-  io.prefetch_info.useful_prefetch := useful_prefetch
-  io.prefetch_info.prefetch_hit := prefetch_hit
+  io.prefetch_info.naive.total_prefetch := total_prefetch
+  io.prefetch_info.naive.late_hit_prefetch := late_hit_prefetch
+  io.prefetch_info.naive.late_load_hit := late_load_hit
+  io.prefetch_info.naive.late_prefetch_hit := late_prefetch_hit
+  io.prefetch_info.naive.useless_prefetch := useless_prefetch
+  io.prefetch_info.naive.useful_prefetch := useful_prefetch
+  io.prefetch_info.naive.prefetch_hit := prefetch_hit
+
+  io.prefetch_info.fdp.demand_miss := s2_valid && (s2_req.instrtype =/= DCACHE_PREFETCH_SOURCE.U) && !s2_hit && s2_req.isFirstIssue
+  io.prefetch_info.fdp.pollution := io.prefetch_info.fdp.demand_miss && io.bloom_filter_query.resp.valid && io.bloom_filter_query.resp.bits.res
 
   io.lsu.resp.valid := resp.valid
   io.lsu.resp.bits := resp.bits
@@ -420,6 +445,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s3_data_error = io.read_error_delayed && s3_hit // banked_data_resp_word.error && !bank_conflict
   val s3_tag_error = RegEnable(s2_tag_error, s2_fire)
   val s3_flag_error = RegEnable(s2_flag_error, s2_fire)
+  val s3_hit_prefetch = RegEnable(s2_hit_prefetch, s2_fire)
   val s3_error = s3_tag_error || s3_flag_error || s3_data_error
 
   // error_delayed signal will be used to update uop.exception 1 cycle after load writeback
@@ -483,6 +509,26 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.access_flag_write.bits.idx := get_idx(s3_vaddr)
   io.access_flag_write.bits.way_en := s3_tag_match_way
   io.access_flag_write.bits.flag := true.B
+
+  // clear prefetch source when prefetch hit
+  val s3_clear_pf_flag_en = s3_valid && s3_hit && !s3_is_prefetch && isFromL1Prefetch(s3_hit_prefetch)
+  io.prefetch_flag_write.valid := s3_clear_pf_flag_en && !io.counter_filter_query.resp
+  io.prefetch_flag_write.bits.idx := get_idx(s3_vaddr)
+  io.prefetch_flag_write.bits.way_en := s3_tag_match_way
+  io.prefetch_flag_write.bits.source := L1_HW_PREFETCH_NULL
+
+  io.counter_filter_query.req.valid := s3_clear_pf_flag_en
+  io.counter_filter_query.req.bits.idx := get_idx(s3_vaddr)
+  io.counter_filter_query.req.bits.way := OHToUInt(s3_tag_match_way)
+
+  io.counter_filter_enq.valid := io.prefetch_flag_write.valid
+  io.counter_filter_enq.bits.idx := get_idx(s3_vaddr)
+  io.counter_filter_enq.bits.way := OHToUInt(s3_tag_match_way)
+
+  io.prefetch_info.fdp.useful_prefetch := s3_clear_pf_flag_en && !io.counter_filter_query.resp
+  
+  XSPerfAccumulate("s3_pf_hit", s3_clear_pf_flag_en)
+  XSPerfAccumulate("s3_pf_hit_filter", s3_clear_pf_flag_en && !io.counter_filter_query.resp)
 
   // --------------------------------------------------------------------------------
   // Debug logging functions

@@ -949,9 +949,10 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   XSPerfAccumulate("sms_pf_filter_l2_req", io.l2_pf_addr.valid)
 }
 
-class PrefetchTrainFilter()(implicit p: Parameters) extends XSModule with HasSMSModuleHelper with HasCircularQueuePtrHelper {
+class SMSTrainFilter()(implicit p: Parameters) extends XSModule with HasSMSModuleHelper with HasTrainFilterHelper {
   val io = IO(new Bundle() {
     // train input
+    // hybrid load store
     val ld_in = Flipped(Vec(exuParameters.LduCnt, ValidIO(new LdPrefetchTrainBundle())))
     val st_in = Flipped(Vec(exuParameters.StuCnt, ValidIO(new StPrefetchTrainBundle())))
     // filter out
@@ -983,8 +984,10 @@ class PrefetchTrainFilter()(implicit p: Parameters) extends XSModule with HasSMS
 
   require(smsParams.train_filter_size >= enqLen)
 
-  val reqs_ls = io.ld_in.map(_.bits.asPrefetchReqBundle()) ++ io.st_in.map(_.bits.asPrefetchReqBundle())
-  val reqs_vls = io.ld_in.map(_.valid) ++ io.st_in.map(_.valid)
+  val ld_reorder = reorder(io.ld_in)
+  val st_reorder = reorder(io.st_in)
+  val reqs_ls = ld_reorder.map(_.bits.asPrefetchReqBundle()) ++ st_reorder.map(_.bits.asPrefetchReqBundle())
+  val reqs_vls = ld_reorder.map(_.valid) ++ st_reorder.map(_.valid)
   val needAlloc = Wire(Vec(enqLen, Bool()))
   val canAlloc = Wire(Vec(enqLen, Bool()))
 
@@ -1058,42 +1061,11 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   val io_act_threshold = IO(Input(UInt(REGION_OFFSET.W)))
   val io_act_stride = IO(Input(UInt(6.W)))
 
-  val train_filter = Module(new PrefetchTrainFilter)
+  val train_filter = Module(new SMSTrainFilter)
 
   train_filter.io.ld_in <> io.ld_in
   train_filter.io.st_in <> io.st_in
 
-  // val ld_curr = io.ld_in.map(_.bits)
-  // val ld_curr_block_tag = ld_curr.map(x => block_hash_tag(x.vaddr))
-
-  // block filter
-  // val ld_prev = io.ld_in.map(ld => RegEnable(ld.bits, ld.valid))
-  // val ld_prev_block_tag = ld_curr_block_tag.zip(io.ld_in.map(_.valid)).map({
-  //   case (tag, v) => RegEnable(tag, v)
-  // })
-  // val ld_prev_vld = io.ld_in.map(ld => RegNext(ld.valid, false.B))
-
-  // val ld_curr_match_prev = ld_curr_block_tag.map(cur_tag =>
-  //   Cat(ld_prev_block_tag.zip(ld_prev_vld).map({
-  //     case (prev_tag, prev_vld) => prev_vld && prev_tag === cur_tag
-  //   })).orR
-  // )
-  // val ld0_match_ld1 = io.ld_in.head.valid && io.ld_in.last.valid && ld_curr_block_tag.head === ld_curr_block_tag.last
-  // val ld_curr_vld = Seq(
-  //   io.ld_in.head.valid && !ld_curr_match_prev.head,
-  //   io.ld_in.last.valid && !ld_curr_match_prev.last && !ld0_match_ld1
-  // )
-  // val ld0_older_than_ld1 = Cat(ld_curr_vld).andR && isBefore(ld_curr.head.uop.robIdx, ld_curr.last.uop.robIdx)
-  // val pending_vld = RegNext(Cat(ld_curr_vld).andR, false.B)
-  // val pending_sel_ld0 = RegNext(Mux(pending_vld, ld0_older_than_ld1, !ld0_older_than_ld1))
-  // val pending_ld = Mux(pending_sel_ld0, ld_prev.head, ld_prev.last)
-  // val pending_ld_block_tag = Mux(pending_sel_ld0, ld_prev_block_tag.head, ld_prev_block_tag.last)
-  // val oldest_ld = Mux(pending_vld,
-  //   pending_ld,
-  //   Mux(ld0_older_than_ld1 || !ld_curr_vld.last, ld_curr.head, ld_curr.last)
-  // )
-
-  // val train_ld = RegEnable(oldest_ld, pending_vld || Cat(ld_curr_vld).orR)
   val train_ld = train_filter.io.train_req.bits
 
   val train_block_tag = block_hash_tag(train_ld.vaddr)
@@ -1187,8 +1159,8 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   pf_filter.io.gen_req.bits := pf_gen_req
   io.tlb_req <> pf_filter.io.tlb_req
   val is_valid_address = pf_filter.io.l2_pf_addr.bits > 0x80000000L.U
-  io.pf_addr.valid := pf_filter.io.l2_pf_addr.valid && io.enable && is_valid_address
-  io.pf_addr.bits := pf_filter.io.l2_pf_addr.bits
+  io.l2_pf_addr.valid := pf_filter.io.l2_pf_addr.valid && io.enable && is_valid_address
+  io.l2_pf_addr.bits := pf_filter.io.l2_pf_addr.bits
   // for now, sms will not send l1 prefetch requests
   io.l1_req.bits.paddr := pf_filter.io.l2_pf_addr.bits
   io.l1_req.bits.alias := pf_filter.io.pf_alias_bits
@@ -1204,17 +1176,17 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   val trace = Wire(new L1MissTrace)
   trace.vaddr := 0.U
   trace.pc := 0.U
-  trace.paddr := io.pf_addr.bits
+  trace.paddr := io.l2_pf_addr.bits
   trace.source := pf_filter.io.debug_source_type
   val table = ChiselDB.createTable("L1SMSMissTrace_hart"+ p(XSCoreParamsKey).HartId.toString, new L1MissTrace)
-  table.log(trace, io.pf_addr.fire, "SMSPrefetcher", clock, reset)
+  table.log(trace, io.l2_pf_addr.fire, "SMSPrefetcher", clock, reset)
 
   XSPerfAccumulate("sms_pf_gen_conflict",
     pht_gen_valid && agt_gen_valid
   )
   XSPerfAccumulate("sms_pht_disabled", pht.io.pf_gen_req.valid && !io_pht_en)
   XSPerfAccumulate("sms_agt_disabled", active_gen_table.io.s2_pf_gen_req.valid && !io_agt_en)
-  XSPerfAccumulate("sms_pf_real_issued", io.pf_addr.valid)
+  XSPerfAccumulate("sms_pf_real_issued", io.l2_pf_addr.valid)
   XSPerfAccumulate("sms_l1_req_valid", io.l1_req.valid)
   XSPerfAccumulate("sms_l1_req_fire", io.l1_req.fire)
 }

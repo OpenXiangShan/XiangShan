@@ -146,12 +146,6 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasPrefe
     val t = (1 << i)
     XSPerfAccumulate(s"depth${t}", depth === t.U)
   }
-  XSPerfAccumulate("flush", flush)
-  XSPerfAccumulate("disable", !enable)
-  XSPerfAccumulate("low_confidence", confidence === 0.U)
-  XSPerfAccumulate("trigger_late_hit", trigger_late_hit)
-  XSPerfAccumulate("trigger_late_miss", trigger_late_miss)
-  XSPerfAccumulate("trigger_bad_prefetch", trigger_bad_prefetch)
   XSPerfAccumulate("trigger_disable", trigger_disable)
   XSPerfAccumulate("prefetch_hit", io.timely.prefetch_hit)
 
