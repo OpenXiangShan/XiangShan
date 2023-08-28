@@ -486,6 +486,25 @@ class FusedLui32(pair: Seq[Valid[UInt]])(implicit p: Parameters)
   XSDebug(isValid, p"[fusedLui32] ${Hexadecimal(imm.get)} instr0=${Hexadecimal(instr(0))} instr1=${Hexadecimal(instr(1))}\n")
 }
 
+// Case: get 32 bits imm (in word format)
+// Source: `lui r1, 0xffffa`` + `addiw r1, r1, 1`
+// Target: `lui32 r1, 0xffffa001` (customized internal opcode)
+class FusedLui32w(pair: Seq[Valid[UInt]])(implicit p: Parameters)
+  extends BaseFusionCase(pair) {
+  def inst1Cond = instr(0) === Instructions.LUI
+  def inst2Cond = instr(1) === Instructions.ADDIW
+
+  def isValid: Bool = inst1Cond && inst2Cond && withSameDest && destToRs1
+
+  override def fuOpType: Option[UInt => UInt] = Some((_: UInt) => ALUOpType.lui32addw)
+  override def selImm: Option[UInt] = Some(SelImm.IMM_LUI32)
+  override def imm: Option[UInt] = Some(Cat(instr(0)(31, 12), instr(1)(31, 20)))
+
+  def fusionName: String = "lui_addiw"
+
+  XSDebug(isValid, p"[fusedLui32w] ${Hexadecimal(imm.get)} instr0=${Hexadecimal(instr(0))} instr1=${Hexadecimal(instr(1))}\n")
+}
+
 class FusionDecodeInfo extends Bundle {
   val rs2FromRs1 = Output(Bool())
   val rs2FromRs2 = Output(Bool())
@@ -567,7 +586,8 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
       new FusedAddwsexth(pair),
       new FusedLogiclsb(pair),
       new FusedLogicZexth(pair),
-      new FusedLui32(pair)
+      new FusedLui32(pair),
+      new FusedLui32w(pair)
     )
     val fire = io.in(i).valid && io.inReady(i)
     val instrPairValid = RegEnable(VecInit(pair.map(_.valid)).asUInt.andR, false.B, io.inReady(i))

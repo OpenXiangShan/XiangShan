@@ -158,7 +158,7 @@ class WordResultSelect(implicit p: Parameters) extends XSModule {
     val wordRes = Output(UInt(XLEN.W))
   })
 
-  val addsubRes = Mux(!io.func(2) && io.func(1), io.subw, io.addw)
+  val addsubRes = Mux(!io.func(2) && io.func(1) && !io.func(0), io.subw, io.addw)
   val shiftRes = Mux(io.func(2), Mux(io.func(0), io.rorw, io.rolw),
                   Mux(io.func(1), io.sraw, Mux(io.func(0), io.srlw, io.sllw)))
   val wordRes = Mux(io.func(3), shiftRes, addsubRes)
@@ -219,7 +219,7 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
 
   // addw
   val addModule = Module(new AddModule)
-  addModule.io.srcw := Mux(!func(2) && func(0), ZeroExt(src1(0), XLEN), src1(31, 0))
+  addModule.io.srcw := Mux(!func(2) && func(0), Mux(func(1), SignExt(src2(11, 0), XLEN), ZeroExt(src1(0), XLEN)), src1(31, 0))
   val addwResultAll = VecInit(Seq(
     ZeroExt(addModule.io.addw(0), XLEN),
     ZeroExt(addModule.io.addw(7, 0), XLEN),
@@ -358,4 +358,7 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
 
   XSDebug(func === ALUOpType.lui32add, p"[alu] func lui32: src1=${Hexadecimal(src1)} src2=${Hexadecimal(src2)} alures=${Hexadecimal(aluRes)}\n")
   XSDebug(func === ALUOpType.lui32add, p"[alu] func lui32: add_src1=${Hexadecimal(addModule.io.src(0))} add_src2=${Hexadecimal(addModule.io.src(1))} addres=${Hexadecimal(add)}\n")
+
+  XSDebug(func === ALUOpType.lui32addw, p"[alu] func lui32w: src1=${Hexadecimal(src1)} src2=${Hexadecimal(src2)} alures=${Hexadecimal(aluRes)}\n")
+  XSDebug(func === ALUOpType.lui32addw, p"[alu] func lui32w: add_src1=${Hexadecimal(addModule.io.srcw)} add_src2=${Hexadecimal(addModule.io.src(1)(31,0))} addres=${Hexadecimal(addw)}\n")
 }
