@@ -186,7 +186,7 @@ class BloomFilter(n: Int, bypass: Boolean = true)(implicit p: Parameters) extend
 
   assert(PopCount(data ^ data_next.asUInt) <= 2.U)
 
-  XSPerfHistogram("valid_nums", PopCount(data), true.B, 0, n + 1, 1)
+  XSPerfHistogram("valid_nums", PopCount(data), true.B, 0, n + 1, 20)
 }
 
 class FDPrefetcherMonitorBundle()(implicit p: Parameters) extends XSBundle {

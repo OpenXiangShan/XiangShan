@@ -75,7 +75,9 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
   )
 
   // recieve all prefetch req from cores
-  val memblock_pf_recv_nodes: Seq[Option[BundleBridgeSink[PrefetchRecv]]] = core_with_l2.map(_.core_l3_pf_port).map{ _ => Some(BundleBridgeSink(Some(() => new PrefetchRecv))) }
+  val memblock_pf_recv_nodes: Seq[Option[BundleBridgeSink[PrefetchRecv]]] = core_with_l2.map(_.core_l3_pf_port).map{
+    x => x.map(_ => BundleBridgeSink(Some(() => new PrefetchRecv)))
+  }
   
   // pick one req per cycle, send it to l3 cache
   val l3_pf_sender_opt = soc.L3CacheParamsOpt.map(_ =>
@@ -89,8 +91,10 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     misc.plic.intnode := IntBuffer() := core_with_l2(i).beu_int_source
     misc.peripheral_ports(i) := core_with_l2(i).uncache
     misc.core_to_l3_ports(i) :=* core_with_l2(i).memory_port
-    memblock_pf_recv_nodes(i).get := core_with_l2(i).core_l3_pf_port.get
-    println(s"Connecting Core_${i}'s L1 pf source to L3!")
+    memblock_pf_recv_nodes(i).map(recv => {
+      println(s"Connecting Core_${i}'s L1 pf source to L3!")
+      recv := core_with_l2(i).core_l3_pf_port.get
+    })
   }
 
   l3cacheOpt.map(_.ctlnode.map(_ := misc.peripheralXbar))
@@ -190,13 +194,20 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       }
     }
 
-    l3_pf_sender_opt.get.out.head._1.addr_valid := VecInit(memblock_pf_recv_nodes.map(_.get.in.head._1.addr_valid)).asUInt.orR
-    for (i <- 0 until NumCores) {
-      when(memblock_pf_recv_nodes(i).get.in.head._1.addr_valid) {
-        l3_pf_sender_opt.get.out.head._1.addr := memblock_pf_recv_nodes(i).get.in.head._1.addr
-        l3_pf_sender_opt.get.out.head._1.l2_pf_en := memblock_pf_recv_nodes(i).get.in.head._1.l2_pf_en
+    l3cacheOpt.map (l3 => {
+      l3.pf_recv_node match {
+        case Some(recv) =>
+          l3_pf_sender_opt.get.out.head._1.addr_valid := VecInit(memblock_pf_recv_nodes.map(_.get.in.head._1.addr_valid)).asUInt.orR
+          for (i <- 0 until NumCores) {
+            when(memblock_pf_recv_nodes(i).get.in.head._1.addr_valid) {
+              l3_pf_sender_opt.get.out.head._1.addr := memblock_pf_recv_nodes(i).get.in.head._1.addr
+              l3_pf_sender_opt.get.out.head._1.l2_pf_en := memblock_pf_recv_nodes(i).get.in.head._1.l2_pf_en
+            }
+          }
+        case None =>
+          l3_pf_sender_opt.get.out.head._1 := DontCare
       }
-    }
+    })
 
     misc.module.debug_module_io.resetCtrl.hartIsInReset := core_with_l2.map(_.module.reset.asBool)
     misc.module.debug_module_io.clock := io.clock

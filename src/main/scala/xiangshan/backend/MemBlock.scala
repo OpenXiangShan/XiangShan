@@ -199,21 +199,21 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       sms
   }
   prefetcherOpt.foreach{ pf => pf.io.l1_req.ready := false.B }
-  val l1PrefetcherOpt: Option[BasePrefecher] = {
-    val l1Prefetcher = Module(new L1Prefetcher())
-    l1Prefetcher.io.enable := WireInit(Constantin.createRecord("enableL1StreamPrefetcher" + p(XSCoreParamsKey).HartId.toString, initValue = 0.U)) === 1.U
-    l1Prefetcher.pf_ctrl <> dcache.io.pf_ctrl
-    l1Prefetcher.l2PfqBusy := io.l2PfqBusy
+  val l1PrefetcherOpt: Option[BasePrefecher] = coreParams.prefetcher.map {
+    case _ =>
+      val l1Prefetcher = Module(new L1Prefetcher())
+      l1Prefetcher.io.enable := WireInit(Constantin.createRecord("enableL1StreamPrefetcher" + p(XSCoreParamsKey).HartId.toString, initValue = 1.U)) === 1.U
+      l1Prefetcher.pf_ctrl <> dcache.io.pf_ctrl
+      l1Prefetcher.l2PfqBusy := io.l2PfqBusy
 
-    // stride will train on miss or prefetch hit
-    for (i <- 0 until exuParameters.LduCnt) {
-      l1Prefetcher.stride_train(i).valid := loadUnits(i).io.prefetch_train_l1.valid && loadUnits(i).io.prefetch_train_l1.bits.isFirstIssue && (
-        loadUnits(i).io.prefetch_train_l1.bits.miss || isFromStride(loadUnits(i).io.prefetch_train_l1.bits.meta_prefetch)
-      )
-      l1Prefetcher.stride_train(i).bits := loadUnits(i).io.prefetch_train_l1.bits
-    }
-
-    Some(l1Prefetcher)
+      // stride will train on miss or prefetch hit
+      for (i <- 0 until exuParameters.LduCnt) {
+        l1Prefetcher.stride_train(i).valid := loadUnits(i).io.prefetch_train_l1.valid && loadUnits(i).io.prefetch_train_l1.bits.isFirstIssue && (
+          loadUnits(i).io.prefetch_train_l1.bits.miss || isFromStride(loadUnits(i).io.prefetch_train_l1.bits.meta_prefetch)
+        )
+        l1Prefetcher.stride_train(i).bits := loadUnits(i).io.prefetch_train_l1.bits
+      }
+      l1Prefetcher
   }
   // load prefetch to l1 Dcache
   l1PrefetcherOpt match {
@@ -641,18 +641,13 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     dtlb_reqs(PrefetcherDTLBPortIndex).req.valid := false.B
     dtlb_reqs(PrefetcherDTLBPortIndex).resp.ready := true.B
   }
-
-  l1PrefetcherOpt.foreach(pf => {
-    pf.io.tlb_req.resp.valid := dtlb_reqs(StreamDTLBPortIndex).resp.valid
-    pf.io.tlb_req.resp.bits := dtlb_reqs(StreamDTLBPortIndex).resp.bits
-    dtlb_reqs(StreamDTLBPortIndex).resp.ready := pf.io.tlb_req.resp.ready
-
-    dtlb_reqs(StreamDTLBPortIndex).req_kill := false.B
-
-    dtlb_reqs(StreamDTLBPortIndex).req.valid := pf.io.tlb_req.req.valid
-    dtlb_reqs(StreamDTLBPortIndex).req.bits := pf.io.tlb_req.req.bits
-    pf.io.tlb_req.req.ready := dtlb_reqs(StreamDTLBPortIndex).req.ready
-  })
+  l1PrefetcherOpt match {
+    case Some(pf) => dtlb_reqs(StreamDTLBPortIndex) <> pf.io.tlb_req
+    case None => 
+        dtlb_reqs(StreamDTLBPortIndex) := DontCare
+        dtlb_reqs(StreamDTLBPortIndex).req.valid := false.B
+        dtlb_reqs(StreamDTLBPortIndex).resp.ready := true.B
+  }
 
   // StoreUnit
   for (i <- 0 until exuParameters.StuCnt) {
