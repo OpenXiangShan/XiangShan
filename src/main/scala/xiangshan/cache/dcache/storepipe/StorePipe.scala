@@ -137,7 +137,8 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
     * query replacer to choose a way to replace
     */
   io.replace_way.set.valid := s1_valid
-  io.replace_way.set.bits := get_idx(s1_req.vaddr)
+  io.replace_way.set.bits  := get_idx(s1_req.vaddr)
+  io.replace_way.dmWay     := get_direct_map_way(s1_req.vaddr)
   val s1_repl_way_en = UIntToOH(io.replace_way.way)
   val s1_repl_tag = Mux1H(s1_repl_way_en, wayMap(w => s1_tag_resp(w)))
   val s1_repl_coh = Mux1H(s1_repl_way_en, wayMap(w => s1_meta_resp(w).coh))
