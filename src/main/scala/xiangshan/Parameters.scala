@@ -30,6 +30,7 @@ import freechips.rocketchip.diplomacy.AddressSet
 import system.SoCParamsKey
 import huancun._
 import huancun.debug._
+import xiangshan.cache.wpu.WPUParameters
 import coupledL2._
 import xiangshan.mem.prefetch.{PrefetcherParams, SMSParams}
 
@@ -44,6 +45,7 @@ case class XSCoreParameters
   HasPrefetch: Boolean = false,
   HartId: Int = 0,
   XLEN: Int = 64,
+  VLEN: Int = 128,
   HasMExtension: Boolean = true,
   HasCExtension: Boolean = true,
   HasDiv: Boolean = true,
@@ -127,6 +129,8 @@ case class XSCoreParameters
   DecodeWidth: Int = 6,
   RenameWidth: Int = 6,
   CommitWidth: Int = 6,
+  EnableRenameSnapshot: Boolean = true,
+  RenameSnapshotNum: Int = 4,
   FtqSize: Int = 64,
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
   IssQueSize: Int = 16,
@@ -173,11 +177,10 @@ case class XSCoreParameters
   EnsbufferWidth: Int = 2,
   UncacheBufferSize: Int = 4,
   EnableLoadToLoadForward: Boolean = true,
-  EnableFastForward: Boolean = false,
+  EnableFastForward: Boolean = true,
   EnableLdVioCheckAfterReset: Boolean = true,
   EnableSoftPrefetchAfterReset: Boolean = true,
   EnableCacheErrorAfterReset: Boolean = true,
-  EnableDCacheWPU: Boolean = false,
   EnableAccurateLoadError: Boolean = true,
   EnableUncacheWriteOutstanding: Boolean = false,
   EnableStorePrefetchAtIssue: Boolean = false,
@@ -187,6 +190,17 @@ case class XSCoreParameters
   EnableStorePrefetchSPB: Boolean = false,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
   ReSelectLen: Int = 7, // load replay queue replay select counter len
+  iwpuParameters: WPUParameters = WPUParameters(
+    enWPU = false,
+    algoName = "mmru",
+    isICache = true,
+  ),
+  dwpuParameters: WPUParameters = WPUParameters(
+    enWPU = false,
+    algoName = "mmru",
+    enCfPred = false,
+    isICache = false,
+  ),
   itlbParameters: TLBParameters = TLBParameters(
     name = "itlb",
     fetchi = true,
@@ -253,7 +267,7 @@ case class XSCoreParameters
     nMissEntries = 2,
     nProbeEntries = 2,
     nPrefetchEntries = 12,
-    nPrefBufferEntries = 64,
+    nPrefBufferEntries = 32,
     hasPrefetch = true,
   ),
   dcacheParametersOpt: Option[DCacheParameters] = Some(DCacheParameters(
@@ -306,6 +320,7 @@ case class DebugOptions
   EnableConstantin: Boolean = false,
   EnableChiselDB: Boolean = false,
   AlwaysBasicDB: Boolean = true,
+  EnableRollingDB: Boolean = false
 )
 
 trait HasXSParameter {
@@ -318,6 +333,7 @@ trait HasXSParameter {
   val env = p(DebugOptionsKey)
 
   val XLEN = coreParams.XLEN
+  val VLEN = coreParams.VLEN
   val minFLen = 32
   val fLen = 64
   def xLen = XLEN
@@ -334,6 +350,7 @@ trait HasXSParameter {
   val AddrBytes = AddrBits / 8 // unused
   val DataBits = XLEN
   val DataBytes = DataBits / 8
+  val VDataBytes = VLEN / 8
   val HasFPU = coreParams.HasFPU
   val HasCustomCSRCacheOp = coreParams.HasCustomCSRCacheOp
   val FetchWidth = coreParams.FetchWidth
@@ -402,6 +419,8 @@ trait HasXSParameter {
   val DecodeWidth = coreParams.DecodeWidth
   val RenameWidth = coreParams.RenameWidth
   val CommitWidth = coreParams.CommitWidth
+  val EnableRenameSnapshot = coreParams.EnableRenameSnapshot
+  val RenameSnapshotNum = coreParams.RenameSnapshotNum
   val FtqSize = coreParams.FtqSize
   val IssQueSize = coreParams.IssQueSize
   val EnableLoadFastWakeUp = coreParams.EnableLoadFastWakeUp
@@ -441,7 +460,6 @@ trait HasXSParameter {
   val EnableLdVioCheckAfterReset = coreParams.EnableLdVioCheckAfterReset
   val EnableSoftPrefetchAfterReset = coreParams.EnableSoftPrefetchAfterReset
   val EnableCacheErrorAfterReset = coreParams.EnableCacheErrorAfterReset
-  val EnableDCacheWPU = coreParams.EnableDCacheWPU
   val EnableAccurateLoadError = coreParams.EnableAccurateLoadError
   val EnableUncacheWriteOutstanding = coreParams.EnableUncacheWriteOutstanding
   val EnableStorePrefetchAtIssue = coreParams.EnableStorePrefetchAtIssue
@@ -452,6 +470,8 @@ trait HasXSParameter {
   val asidLen = coreParams.MMUAsidLen
   val BTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
   val refillBothTlb = coreParams.refillBothTlb
+  val iwpuParam = coreParams.iwpuParameters
+  val dwpuParam = coreParams.dwpuParameters
   val itlbParams = coreParams.itlbParameters
   val ldtlbParams = coreParams.ldtlbParameters
   val sttlbParams = coreParams.sttlbParameters

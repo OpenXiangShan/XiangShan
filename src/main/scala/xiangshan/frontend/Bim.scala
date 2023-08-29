@@ -13,7 +13,7 @@
 *
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
-
+/*
 package xiangshan.frontend
 
 import chipsalliance.rocketchip.config.Parameters
@@ -40,7 +40,7 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
   resetRow := resetRow + doing_reset
   when (resetRow === (bimSize-1).U) { doing_reset := false.B }
 
-  val s0_idx = bimAddr.getIdx(s0_pc)
+  val s0_idx = bimAddr.getIdx(s0_pc_dup(0))
 
   // bim.io.r.req.valid := io.s0_fire
   bim.io.r.req.valid := false.B
@@ -60,7 +60,7 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
   // io.out.s1.full_pred.br_taken_mask := s1_latch_taken_mask
   // io.out.s2.full_pred.br_taken_mask := RegEnable(s1_latch_taken_mask, 0.U.asTypeOf(Vec(numBr, Bool())), io.s1_fire)
 
-  io.out.last_stage_meta := RegEnable(RegEnable(s1_latch_meta, io.s1_fire), io.s2_fire) // TODO: configurable with total-stages
+  io.out.last_stage_meta := RegEnable(RegEnable(s1_latch_meta, io.s1_fire(0)), io.s2_fire(0)) // TODO: configurable with total-stages
 
   // Update logic
   val u_valid = RegNext(io.update.valid)
@@ -104,7 +104,7 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
 
   XSDebug(doing_reset, "Doing reset...\n")
 
-  XSDebug(io.s0_fire, "req_pc=%x, req_idx=%d\n", s0_pc, s0_idx)
+  XSDebug(io.s0_fire, "req_pc=%x, req_idx=%d\n", s0_pc_dup(0), s0_idx)
 
   for(i <- 0 until numBr) {
     XSDebug(latch_s0_fire, "last_cycle req %d: ctr=%b\n", i.U, s1_read(i))
@@ -123,3 +123,4 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
   }
 
 }
+*/

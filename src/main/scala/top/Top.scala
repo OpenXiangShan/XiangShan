@@ -110,7 +110,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
   l3cacheOpt match {
     case Some(l3) =>
-      misc.l3_out :*= l3.node :*= TLBuffer.chainNode(2) :*= misc.l3_banked_xbar
+      misc.l3_out :*= l3.node :*= misc.l3_banked_xbar
       l3.pf_recv_node.map(recv => {
         println("Connecting L1 prefetcher to L3!")
         recv := l3_pf_sender_opt.get

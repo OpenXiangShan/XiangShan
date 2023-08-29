@@ -16,6 +16,12 @@ class LoadMissEntry(implicit p: Parameters) extends DCacheBundle {
   val missState = UInt(3.W)
 }
 
+class LoadAccessEntry(implicit p: Parameters) extends LoadMissEntry{
+  val pred_way_num = UInt(XLEN.W)
+  val dm_way_num = UInt(XLEN.W)
+  val real_way_num = UInt(XLEN.W)
+}
+
 class InstInfoEntry(implicit p: Parameters) extends XSBundle{
   val globalID = UInt(XLEN.W)
   val robIdx = UInt(log2Ceil(RobSize).W)
