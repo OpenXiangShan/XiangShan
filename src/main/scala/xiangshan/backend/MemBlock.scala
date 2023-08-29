@@ -317,7 +317,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
       val l2_trace = Wire(new LoadPfDbBundle)
       l2_trace.paddr := outer.l2_pf_sender_opt.get.out.head._1.addr
-      val table = ChiselDB.createTable("L2PrefetchTrace"+ p(XSCoreParamsKey).HartId.toString, new LoadPfDbBundle, basicDB = true)
+      val table = ChiselDB.createTable("L2PrefetchTrace"+ p(XSCoreParamsKey).HartId.toString, new LoadPfDbBundle, basicDB = false)
       table.log(l2_trace, l1_pf_to_l2.valid, "StreamPrefetchTrace", clock, reset)
       table.log(l2_trace, !l1_pf_to_l2.valid && sms_pf_to_l2.valid, "L2PrefetchTrace", clock, reset)
 
@@ -328,7 +328,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
       val l3_trace = Wire(new LoadPfDbBundle)
       l3_trace.paddr := outer.l3_pf_sender_opt.get.out.head._1.addr
-      val l3_table = ChiselDB.createTable("L3PrefetchTrace"+ p(XSCoreParamsKey).HartId.toString, new LoadPfDbBundle, basicDB = true)
+      val l3_table = ChiselDB.createTable("L3PrefetchTrace"+ p(XSCoreParamsKey).HartId.toString, new LoadPfDbBundle, basicDB = false)
       l3_table.log(l3_trace, l1_pf_to_l3.valid, "StreamPrefetchTrace", clock, reset)
 
       XSPerfAccumulate("prefetch_fire_l2", outer.l2_pf_sender_opt.get.out.head._1.addr_valid)

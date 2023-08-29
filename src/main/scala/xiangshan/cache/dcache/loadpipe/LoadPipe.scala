@@ -613,19 +613,19 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   miss_trace.paddr := get_block_addr(s2_paddr)
   mshr_trace.paddr := get_block_addr(s2_paddr)
 
-  val table_load = ChiselDB.createTable("LoadTrace" + id.toString + "_hart"+ p(XSCoreParamsKey).HartId.toString, new LoadPfDbBundle, basicDB = true)
+  val table_load = ChiselDB.createTable("LoadTrace" + id.toString + "_hart"+ p(XSCoreParamsKey).HartId.toString, new LoadPfDbBundle, basicDB = false)
   val site_load = "LoadPipe_load" + id.toString
   table_load.log(load_trace, s2_valid && s2_req.isFirstIssue && (s2_req.instrtype =/= DCACHE_PREFETCH_SOURCE.U), site_load, clock, reset)
 
-  val table_pf = ChiselDB.createTable("LoadPfTrace" + id.toString + "_hart"+ p(XSCoreParamsKey).HartId.toString, new LoadPfDbBundle, basicDB = true)
+  val table_pf = ChiselDB.createTable("LoadPfTrace" + id.toString + "_hart"+ p(XSCoreParamsKey).HartId.toString, new LoadPfDbBundle, basicDB = false)
   val site_pf = "LoadPipe_pf" + id.toString
   table_pf.log(pf_trace, s2_valid && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U), site_pf, clock, reset)
 
-  val table_miss = ChiselDB.createTable("LoadTraceMiss" + id.toString + "_hart"+ p(XSCoreParamsKey).HartId.toString, new LoadPfDbBundle, basicDB = true)
+  val table_miss = ChiselDB.createTable("LoadTraceMiss" + id.toString + "_hart"+ p(XSCoreParamsKey).HartId.toString, new LoadPfDbBundle, basicDB = false)
   val site_load_miss = "LoadPipe_load_miss" + id.toString
   table_miss.log(miss_trace, s2_valid && s2_req.isFirstIssue && (s2_req.instrtype =/= DCACHE_PREFETCH_SOURCE.U) && real_miss, site_load_miss, clock, reset)
 
-  val table_mshr = ChiselDB.createTable("LoadPfMshr" + id.toString + "_hart"+ p(XSCoreParamsKey).HartId.toString, new LoadPfDbBundle, basicDB = true)
+  val table_mshr = ChiselDB.createTable("LoadPfMshr" + id.toString + "_hart"+ p(XSCoreParamsKey).HartId.toString, new LoadPfDbBundle, basicDB = false)
   val site_mshr = "LoadPipe_mshr" + id.toString
   table_mshr.log(mshr_trace, s2_valid && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U) && io.miss_req.fire(), site_mshr, clock, reset)
 
