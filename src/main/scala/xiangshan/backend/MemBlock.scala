@@ -208,10 +208,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
       // stride will train on miss or prefetch hit
       for (i <- 0 until exuParameters.LduCnt) {
-        l1Prefetcher.stride_train(i).valid := loadUnits(i).io.prefetch_train_l1.valid && loadUnits(i).io.prefetch_train_l1.bits.isFirstIssue && (
-          loadUnits(i).io.prefetch_train_l1.bits.miss || isFromStride(loadUnits(i).io.prefetch_train_l1.bits.meta_prefetch)
+        val source = loadUnits(i).io.prefetch_train_l1
+        l1Prefetcher.stride_train(i).valid := source.valid && source.bits.isFirstIssue && (
+          source.bits.miss || isFromStride(source.bits.meta_prefetch)
         )
-        l1Prefetcher.stride_train(i).bits := loadUnits(i).io.prefetch_train_l1.bits
+        l1Prefetcher.stride_train(i).bits := source.bits
+        l1Prefetcher.stride_train(i).bits.uop.cf.pc := Mux(loadUnits(i).io.s2_ptr_chasing, io.ooo_to_mem.loadPc(i), RegNext(io.ooo_to_mem.loadPc(i)))
       }
       l1Prefetcher
   }
@@ -558,18 +560,20 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.lq_rep_full <> lsq.io.lq_rep_full
     // load prefetch train
     prefetcherOpt.foreach(pf => {
+      // sms will train on all miss load sources
+      val source = loadUnits(i).io.prefetch_train
       pf.io.ld_in(i).valid := Mux(pf_train_on_hit,
-        loadUnits(i).io.prefetch_train.valid,
-        loadUnits(i).io.prefetch_train.valid && loadUnits(i).io.prefetch_train.bits.isFirstIssue && (
-          loadUnits(i).io.prefetch_train.bits.miss
-          )
+        source.valid,
+        source.valid && source.bits.isFirstIssue && source.bits.miss
       )
-      pf.io.ld_in(i).bits := loadUnits(i).io.prefetch_train.bits
+      pf.io.ld_in(i).bits := source.bits
       pf.io.ld_in(i).bits.uop.cf.pc := Mux(loadUnits(i).io.s2_ptr_chasing, io.ooo_to_mem.loadPc(i), RegNext(io.ooo_to_mem.loadPc(i)))
     })
     l1PrefetcherOpt.foreach(pf => {
-      pf.io.ld_in(i).valid := loadUnits(i).io.prefetch_train_l1.valid && loadUnits(i).io.prefetch_train_l1.bits.isFirstIssue
-      pf.io.ld_in(i).bits := loadUnits(i).io.prefetch_train_l1.bits
+      // stream will train on all load sources
+      val source = loadUnits(i).io.prefetch_train_l1
+      pf.io.ld_in(i).valid := source.valid && source.bits.isFirstIssue
+      pf.io.ld_in(i).bits := source.bits
       pf.io.st_in(i).valid := false.B
       pf.io.st_in(i).bits := DontCare
     })
