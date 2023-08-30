@@ -30,7 +30,7 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.jtag.JTAGIO
 import freechips.rocketchip.util.{HasRocketChipStageUtils, UIntToOH1}
-import huancun.{HCCacheParamsKey, HuanCun}
+import huancun.{HCCacheParamsKey, HuanCun, HCCacheParameters}
 
 abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
   with BindingScope
@@ -78,11 +78,11 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
   val memblock_pf_recv_nodes: Seq[Option[BundleBridgeSink[PrefetchRecv]]] = core_with_l2.map(_.core_l3_pf_port).map{
     x => x.map(_ => BundleBridgeSink(Some(() => new PrefetchRecv)))
   }
-  
-  // pick one req per cycle, send it to l3 cache
-  val l3_pf_sender_opt = soc.L3CacheParamsOpt.map(_ =>
-    BundleBridgeSource(() => new PrefetchRecv)
-  )
+
+  val l3_pf_sender_opt = soc.L3CacheParamsOpt.getOrElse(HCCacheParameters()).prefetch match {
+    case Some(pf) => Some(BundleBridgeSource(() => new PrefetchRecv))
+    case None => None
+  }
 
   for (i <- 0 until NumCores) {
     core_with_l2(i).clint_int_sink := misc.clint.intnode
@@ -204,8 +204,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
               l3_pf_sender_opt.get.out.head._1.l2_pf_en := memblock_pf_recv_nodes(i).get.in.head._1.l2_pf_en
             }
           }
-        case None =>
-          l3_pf_sender_opt.get.out.head._1 := DontCare
+        case None => None
       }
     })
 

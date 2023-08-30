@@ -206,7 +206,8 @@ class MinimalConfig(n: Int = 1) extends Config(
             val l2params = core.L2CacheParamsOpt.get.toCacheParams
             l2params.copy(sets = 2 * clientDirBytes / core.L2NBanks / l2params.ways / 64)
           },
-          simulation = !site(DebugOptionsKey).FPGAPlatform
+          simulation = !site(DebugOptionsKey).FPGAPlatform,
+          prefetch = None
         )),
         L3NBanks = 1
       )
