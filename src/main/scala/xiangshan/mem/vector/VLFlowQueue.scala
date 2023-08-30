@@ -139,7 +139,7 @@ class VecLoadPipeBundle(implicit p: Parameters) extends XSBundleWithMicroOp{
 
 class VlFlowQueueIOBundle(implicit p: Parameters) extends XSBundle {
   val loadRegIn    = Vec(VecLoadPipelineWidth, Flipped(Decoupled(new ExuInput(isVpu = true))))
-  val Redirect     = Flipped(ValidIO(new Redirect))
+  val redirect     = Flipped(ValidIO(new Redirect))
   val flowFeedback = Vec(VecLoadPipelineWidth, ValidIO(Bool()))
   val eew          = Vec(VecLoadPipelineWidth, Input(UInt(3.W)))
   val sew          = Vec(VecLoadPipelineWidth, Input(UInt(3.W)))
@@ -185,11 +185,11 @@ class VlFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
   val unitStrideValid  = RegInit(VecInit(Seq.fill(VecLoadPipelineWidth)(VecInit(Seq.fill(UsQueueSize)(false.B)))))
   val unitStrideEntry  = RegInit(VecInit(Seq.fill(VecLoadPipelineWidth)(VecInit(Seq.fill(UsQueueSize)(0.U.asTypeOf(new unitStrideBundle))))))
 
-  val loadRegInValid  = WireInit(VecInit(Seq.fill(VecStorePipelineWidth)(false.B)))
+  val loadRegInValid  = WireInit(VecInit(Seq.fill(VecLoadPipelineWidth)(false.B)))
   val UsNeedFlush     = WireInit(VecInit(Seq.fill(VecLoadPipelineWidth)(VecInit(Seq.fill(UsQueueSize)(false.B)))))
   val needFlush       = WireInit(VecInit(Seq.fill(VecLoadPipelineWidth)(VecInit(Seq.fill(VlFlowSize)(false.B)))))
-  val UsRedirectCnt   = RegInit(VecInit(Seq.fill(VecStorePipelineWidth)(0.U(log2Up(UsQueueSize).W))))
-  val flowRedirectCnt = RegInit(VecInit(Seq.fill(VecStorePipelineWidth)(0.U(log2Up(VsFlowSize).W))))
+  val UsRedirectCnt   = RegInit(VecInit(Seq.fill(VecLoadPipelineWidth)(0.U(log2Up(UsQueueSize).W))))
+  val flowRedirectCnt = RegInit(VecInit(Seq.fill(VecLoadPipelineWidth)(0.U(log2Up(VsFlowSize).W))))
   val cam             = WireInit(VecInit(Seq.fill(VecLoadPipelineWidth)(VecInit(Seq.fill(VecLoadPipelineWidth)(VecInit(Seq.fill(UsQueueSize)(false.B)))))))
   val uSAlloc         = Wire(Vec(VecLoadPipelineWidth,Bool()))
   val needAlloc       = Wire(Vec(VecLoadPipelineWidth, Bool()))
@@ -199,7 +199,7 @@ class VlFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
   val realFlowNum     = Wire(Vec(VecLoadPipelineWidth, UInt(5.W)))
 
   val cross128    = Wire(Vec(VecLoadPipelineWidth, Bool()))
-  val uopIdx      = Wire(Vec(VecStorePipelineWidth, UInt(6.W)))
+  val uopIdx      = Wire(Vec(VecLoadPipelineWidth, UInt(6.W)))
   val instType    = Wire(Vec(VecLoadPipelineWidth, UInt(3.W)))
   val stride      = Wire(Vec(VecLoadPipelineWidth, UInt(XLEN.W)))
   val index       = Wire(Vec(VecLoadPipelineWidth, UInt(VLEN.W)))
@@ -208,13 +208,13 @@ class VlFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
   val emul        = Wire(Vec(VecLoadPipelineWidth, UInt(3.W)))
   val lmul        = Wire(Vec(VecLoadPipelineWidth, UInt(3.W)))
   val mul         = Wire(Vec(VecLoadPipelineWidth, UInt(3.W)))
-  val emulNum     = Wire(Vec(VecStorePipelineWidth, UInt(4.W)))
-  val lmulNum     = Wire(Vec(VecStorePipelineWidth, UInt(4.W)))
-  val vma         = Wire(Vec(VecStorePipelineWidth, Bool()))
-  val vta         = Wire(Vec(VecStorePipelineWidth, Bool()))
-  val vl          = Wire(Vec(VecStorePipelineWidth, UInt(8.W)))
-  val vmask       = Wire(Vec(VecStorePipelineWidth, UInt(VLEN.W)))
-  val vstart      = Wire(Vec(VecStorePipelineWidth, UInt(8.W)))
+  val emulNum     = Wire(Vec(VecLoadPipelineWidth, UInt(4.W)))
+  val lmulNum     = Wire(Vec(VecLoadPipelineWidth, UInt(4.W)))
+  val vma         = Wire(Vec(VecLoadPipelineWidth, Bool()))
+  val vta         = Wire(Vec(VecLoadPipelineWidth, Bool()))
+  val vl          = Wire(Vec(VecLoadPipelineWidth, UInt(8.W)))
+  val vmask       = Wire(Vec(VecLoadPipelineWidth, UInt(VLEN.W)))
+  val vstart      = Wire(Vec(VecLoadPipelineWidth, UInt(8.W)))
   val segMulIdx   = Wire(Vec(VecLoadPipelineWidth, UInt(6.W)))
   val segNfIdx    = Wire(Vec(VecLoadPipelineWidth, UInt(6.W)))
   val alignedType = Wire(Vec(VecLoadPipelineWidth, UInt(2.W)))
@@ -230,7 +230,7 @@ class VlFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
 
   /**
     * vlFlowQueue enqPtr update */
-  val lastRedirect = RegNext(io.Redirect)
+  val lastRedirect = RegNext(io.redirect)
   for (i <- 0 until VecLoadPipelineWidth) {
     flowRedirectCnt(i) := RegNext(PopCount(needFlush(i)))
     when (lastRedirect.valid) {
@@ -319,7 +319,7 @@ class VlFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
   * Redirection occurred, flush FlowQueue and unitStrideQueue*/
   for (i <- 0 until VecLoadPipelineWidth) {
     for (entry <- 0 until VlFlowSize) {
-      needFlush(i)(entry) := flow_entry(i)(entry).rob_idx(0).needFlush(io.Redirect) && flow_entry_valid(i)(entry)
+      needFlush(i)(entry) := flow_entry(i)(entry).rob_idx(0).needFlush(io.redirect) && flow_entry_valid(i)(entry)
       when (needFlush(i)(entry)) {
         flow_entry_valid(i)(entry) := false.B
         flow_entry(i)(entry).mask := 0.U
@@ -327,12 +327,12 @@ class VlFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
       }
     }
     for (entry <- 0 until UsQueueSize) {
-      UsNeedFlush(i)(entry) := unitStrideEntry(i)(uSEnqPtr(i).value).robIdx.needFlush(io.Redirect) && unitStrideValid(i)(entry)
+      UsNeedFlush(i)(entry) := unitStrideEntry(i)(uSEnqPtr(i).value).robIdx.needFlush(io.redirect) && unitStrideValid(i)(entry)
       when (UsNeedFlush(i)(entry)) {
         unitStrideValid(i)(entry) := false.B
       }
     }
-    loadRegInValid(i) := !io.loadRegIn(i).bits.uop.robIdx.needFlush(io.Redirect) && io.loadRegIn(i).fire
+    loadRegInValid(i) := !io.loadRegIn(i).bits.uop.robIdx.needFlush(io.redirect) && io.loadRegIn(i).fire
   }
 
   for (i <- 0 until VecLoadPipelineWidth) {

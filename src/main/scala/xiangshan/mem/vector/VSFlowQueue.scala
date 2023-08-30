@@ -212,7 +212,7 @@ class VecStorePipeBundle(implicit p: Parameters) extends ExuInput(isVpu = true) 
 
 class VsFlowBundle (implicit p: Parameters) extends XSBundle {
   val uopIn        = Vec(VecStorePipelineWidth,Flipped(Decoupled(new Uop2Flow())))
-  val Redirect     = Flipped(ValidIO(new Redirect))
+  val redirect     = Flipped(ValidIO(new Redirect))
   val storePipeOut = Vec(VecStorePipelineWidth,Decoupled(new VecStorePipeBundle()))
   val isFirstIssue = Vec(VecStorePipelineWidth,Output(Bool()))
   val vsfqFeedback = Vec(VecStorePipelineWidth,Flipped(ValidIO(new VSFQFeedback)))
@@ -265,7 +265,7 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
 
   for (i <- 0 until VecStorePipelineWidth) {
     io.uopIn(i).ready := vsFlowFreeList(i).io.allocReq.ready
-    uopInValid(i) := !io.uopIn(i).bits.uop.robIdx.needFlush(io.Redirect) && io.uopIn(i).fire
+    uopInValid(i) := !io.uopIn(i).bits.uop.robIdx.needFlush(io.redirect) && io.uopIn(i).fire
   }
 
   /**
@@ -454,7 +454,7 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
     * Redirection occurred, flush FlowQueue */
   for (i <- 0 until VecStorePipelineWidth) {
     for (entry <- 0 until VsFlowSize) {
-      needFlush(i)(entry) := flowEntry(i)(entry).uop.robIdx.needFlush(io.Redirect) && valid(i)(entry)
+      needFlush(i)(entry) := flowEntry(i)(entry).uop.robIdx.needFlush(io.redirect) && valid(i)(entry)
       when(needFlush(i)(entry)) {
         valid(i)(entry) := false.B
         canDeq(i)(entry) := false.B
@@ -462,7 +462,7 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
     }
   }
 
-  val lastRedirect = RegNext(io.Redirect)
+  val lastRedirect = RegNext(io.redirect)
   for (i <- 0 until VecStorePipelineWidth) {
     when (lastRedirect.valid) {
       vsFlowFreeList(i).io.free := RegNext(needFlush(i).asUInt)

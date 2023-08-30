@@ -389,19 +389,19 @@ object GenRealFlowNum {
     (LookupTree(instType,List(
       "b000".U ->  (MulDataSize(emul) >> eew(1,0)).asUInt, // store use, load do not use
       "b010".U ->  (MulDataSize(emul) >> eew(1,0)).asUInt, // strided
-      "b001".U ->  Mux(!emul(2) && !lmul(2) && emul > lmul,(MulDataSize(emul) >> eew(1,0)).asUInt,(MulDataSize(lmul) >> sew(1,0)).asUInt), // indexed-unordered
-      "b011".U ->  Mux(!emul(2) && !lmul(2) && emul > lmul,(MulDataSize(emul) >> eew(1,0)).asUInt,(MulDataSize(lmul) >> sew(1,0)).asUInt), // indexed-ordered
+      "b001".U ->  Mux(emul.asSInt > lmul.asSInt, (MulDataSize(emul) >> eew(1,0)).asUInt, (MulDataSize(lmul) >> sew(1,0)).asUInt), // indexed-unordered
+      "b011".U ->  Mux(emul.asSInt > lmul.asSInt, (MulDataSize(emul) >> eew(1,0)).asUInt, (MulDataSize(lmul) >> sew(1,0)).asUInt), // indexed-ordered
       "b100".U ->  (MulDataSize(emul) >> eew(1,0)).asUInt, // segment unit-stride
       "b110".U ->  (MulDataSize(emul) >> eew(1,0)).asUInt, // segment strided
-      "b101".U ->  Mux(!emul(2) && !lmul(2) && emul > lmul,(MulDataSize(emul) >> eew(1,0)).asUInt,(MulDataSize(lmul) >> sew(1,0)).asUInt), // segment indexed-unordered
-      "b111".U ->  Mux(!emul(2) && !lmul(2) && emul > lmul,(MulDataSize(emul) >> eew(1,0)).asUInt,(MulDataSize(lmul) >> sew(1,0)).asUInt)  // segment indexed-ordered
+      "b101".U ->  Mux(emul.asSInt > lmul.asSInt, (MulDataSize(emul) >> eew(1,0)).asUInt, (MulDataSize(lmul) >> sew(1,0)).asUInt), // segment indexed-unordered
+      "b111".U ->  Mux(emul.asSInt > lmul.asSInt, (MulDataSize(emul) >> eew(1,0)).asUInt, (MulDataSize(lmul) >> sew(1,0)).asUInt)  // segment indexed-ordered
     )))}
 }
 
 object GenEleIdx {
   def apply (instType: UInt, emul: UInt, lmul: UInt, eew: UInt, sew: UInt, uopIdx:UInt, flowIdx: UInt):UInt = {
     val eleIdx = Wire(UInt(7.W))
-    when (instType(1,0) === "b00".U || instType(1,0) === "b10".U || !emul(2) && !lmul(2) && emul > lmul) {
+    when (instType(1,0) === "b00".U || instType(1,0) === "b10".U || emul.asSInt > lmul.asSInt) {
       eleIdx := (uopIdx << Log2Num((MulDataSize(emul) >> eew(1,0)).asUInt)).asUInt + flowIdx
     }.otherwise {
       eleIdx := (uopIdx << Log2Num((MulDataSize(lmul) >> sew(1,0)).asUInt)).asUInt + flowIdx

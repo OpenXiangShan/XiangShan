@@ -26,7 +26,7 @@ import xiangshan._
 class VectorLoadWrapperIOBundle(implicit p: Parameters) extends XSBundle {
   val loadRegIn = Vec(VecLoadPipelineWidth, Flipped(Decoupled(new ExuInput(isVpu = true))))
   val loadPipleIn = Vec(VecLoadPipelineWidth, Flipped(Decoupled(new VecExuOutput())))
-  val Redirect    = Flipped(ValidIO(new Redirect))
+  val redirect    = Flipped(ValidIO(new Redirect))
   val loadPipeOut = Vec(VecLoadPipelineWidth, Decoupled(new VecLoadPipeBundle()))
   val vecFeedback = Vec(VecLoadPipelineWidth, ValidIO(Bool()))
   val vecLoadWriteback = Vec(VecLoadPipelineWidth, Decoupled(new ExuOutput(isVpu = true)))
@@ -45,7 +45,7 @@ class VectorLoadWrapper(implicit p: Parameters) extends XSModule with HasCircula
   val instType    = Wire(Vec(VecLoadPipelineWidth, UInt(3.W)))
   val uop_unit_stride_fof = Wire(Vec(VecLoadPipelineWidth, Bool()))
   val uop_unit_whole_reg = Wire(Vec(VecLoadPipelineWidth, Bool()))
-  val uop_segment_num = Wire(Vec(VecLoadPipelineWidth, Bool()))
+  val uop_segment_num = Wire(Vec(VecLoadPipelineWidth, UInt(3.W)))
   val realFlowNum     = Wire(Vec(VecLoadPipelineWidth, UInt(5.W)))
 
 
@@ -67,8 +67,8 @@ class VectorLoadWrapper(implicit p: Parameters) extends XSModule with HasCircula
   val vlFlowQueue = Module(new VlFlowQueue())
   val vlUopQueue = Module(new VlUopQueue())
 
-  vlUopQueue.io.Redirect <> io.Redirect
-  vlFlowQueue.io.Redirect <> io.Redirect
+  vlUopQueue.io.redirect <> io.redirect
+  vlFlowQueue.io.redirect <> io.redirect
   for (i <- 0 until VecLoadPipelineWidth) {
     io.loadRegIn(i).ready := vlUopQueue.io.loadRegIn(i).ready && vlFlowQueue.io.loadRegIn(i).ready
     io.vecFeedback(i).valid := vlUopQueue.io.uopVecFeedback(i).valid && vlFlowQueue.io.flowFeedback(i).valid

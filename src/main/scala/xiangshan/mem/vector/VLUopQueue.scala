@@ -88,7 +88,7 @@ class VluopBundle(implicit p: Parameters) extends XSBundle {
 
 class VlUopQueueIOBundle(implicit p: Parameters) extends XSBundle {
   val loadRegIn   = Vec(VecLoadPipelineWidth, Flipped(DecoupledIO(new ExuInput(isVpu = true))))
-  val Redirect    = Flipped(ValidIO(new Redirect))
+  val redirect    = Flipped(ValidIO(new Redirect))
   val instType    = Vec(VecLoadPipelineWidth, Input(UInt(3.W)))
   val fof         = Vec(VecLoadPipelineWidth, Input(Bool()))
   val whole_reg   = Vec(VecLoadPipelineWidth, Input(Bool()))
@@ -123,10 +123,10 @@ class VlUopQueue(implicit p: Parameters) extends XSModule with HasCircularQueueP
   val enq_valid      = WireInit(VecInit(Seq.fill(VecLoadPipelineWidth)(false.B)))
   val instType       = Wire(Vec(VecLoadPipelineWidth, UInt(3.W)))
   val mul            = Wire(Vec(VecLoadPipelineWidth, UInt(3.W)))
-  val loadRegInValid = WireInit(VecInit(Seq.fill(VecStorePipelineWidth)(false.B)))
+  val loadRegInValid = WireInit(VecInit(Seq.fill(VecLoadPipelineWidth)(false.B)))
   val needFlush      = WireInit(VecInit(Seq.fill(VlUopSize)(false.B)))
   val uopNum         = Wire(Vec(VecLoadPipelineWidth, UInt(4.W)))
-  val free           = WireInit(VecInit(Seq.fill(VecStorePipelineWidth)(0.U(VlUopSize.W))))
+  val free           = WireInit(VecInit(Seq.fill(VecLoadPipelineWidth)(0.U(VlUopSize.W))))
 
   //First-level buffer
   val buffer_valid_s0    = RegInit(VecInit(Seq.fill(VecLoadPipelineWidth)(false.B)))
@@ -188,7 +188,7 @@ class VlUopQueue(implicit p: Parameters) extends XSModule with HasCircularQueueP
     vend(i) := DontCare
     already_in(i) := already_in_vec(i).asUInt.orR
     instType(i) := io.instType(i)
-    loadRegInValid(i) := !io.loadRegIn(i).bits.uop.robIdx.needFlush(io.Redirect) && io.loadRegIn(i).fire
+    loadRegInValid(i) := !io.loadRegIn(i).bits.uop.robIdx.needFlush(io.redirect) && io.loadRegIn(i).fire
     enq_valid(i) := !already_in(i) && loadRegInValid(i)
     mul(i) := Mux(instType(i)(1,0) === "b00".U || instType(i)(1,0) === "b10".U,io.emul(i),io.loadRegIn(i).bits.uop.ctrl.vconfig.vtype.vlmul(i))
     when (instType(0) === "b000".U) {
@@ -363,7 +363,7 @@ class VlUopQueue(implicit p: Parameters) extends XSModule with HasCircularQueueP
   /**
     * Redirection occurred, refreshing queue */
   for (entry <- 0 until VlUopSize) {
-    needFlush(entry) := VluopEntry(entry).uop.robIdx.needFlush(io.Redirect) && valid(entry)
+    needFlush(entry) := VluopEntry(entry).uop.robIdx.needFlush(io.redirect) && valid(entry)
     when (needFlush(entry)) {
       valid(entry)         := false.B
       allocated(entry)     := false.B
@@ -373,7 +373,7 @@ class VlUopQueue(implicit p: Parameters) extends XSModule with HasCircularQueueP
     }
   }
 
-  val lastRedirect = RegNext(io.Redirect)
+  val lastRedirect = RegNext(io.redirect)
   when (lastRedirect.valid) {
     vlUopFreeList.io.free := RegNext(needFlush.asUInt)
   }.otherwise {
