@@ -72,7 +72,7 @@ class Fence(implicit p: Parameters) extends FunctionUnit {
   XSError(sfence.valid && uop.ctrl.lsrc(0) =/= uop.ctrl.imm(4, 0), "lsrc0 is passed by imm\n")
   XSError(sfence.valid && uop.ctrl.lsrc(1) =/= uop.ctrl.imm(9, 5), "lsrc1 is passed by imm\n")
   sfence.bits.addr := RegEnable(io.in.bits.src(0), io.in.fire)
-  sfence.bits.asid := RegEnable(io.in.bits.src(1), io.in.fire)
+  sfence.bits.id := RegEnable(io.in.bits.src(1), io.in.fire)
 
   when (state === s_idle && io.in.valid) { state := s_wait }
   when (state === s_wait && func === FenceOpType.fencei && sbEmpty) { state := s_icache }

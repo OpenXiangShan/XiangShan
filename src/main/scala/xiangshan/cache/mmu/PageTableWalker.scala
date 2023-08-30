@@ -58,7 +58,7 @@ class PTWIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
   val hptw = new Bundle {
     val req = DecoupledIO(new Bundle {
       val id = UInt(log2Up(l2tlbParams.llptwsize).W)
-      val gvpn = UInt(gvpnLen.W)
+      val gvpn = UInt(vpnLen.W)
     })
     val resp = Flipped(Valid(new Bundle {
       val h_resp = Output(new HptwResp)
@@ -86,19 +86,17 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val mem = io.mem
   val req_s2xlate = Reg(UInt(2.W))
   val enableS2xlate = RegInit(false.B)
+  val onlyS1xlate = RegInit(false.B)
+  val onlyS2xlate = RegInit(false.B)
 
   val satp = Mux(enableS2xlate, io.csr.vsatp, io.csr.satp)
   val hgatp = io.csr.hgatp
   val flush = io.sfence.valid || satp.changed
-  val onlyS1xlate = satp.mode =/= 0.U && hgatp.mode === 0.U
-  val onlyS2xlate = satp.mode === 0.U && hgatp.mode =/= 0.U
   val s2xlate = enableS2xlate && !onlyS1xlate
-
   val level = RegInit(0.U(log2Up(Level).W))
   val af_level = RegInit(0.U(log2Up(Level).W)) // access fault return this level
   val ppn = Reg(UInt(ppnLen.W))
-  val vpn = Reg(UInt(vpnLen.W))
-  val gvpn = Reg(UInt(gvpnLen.W)) // for the cases: 1. satp == 0 and hgatp != 0 and exec hlv; 2. virtmode == 1, vsatp == 0 and hgatp != 0
+  val vpn = Reg(UInt(vpnLen.W)) // vpn or gvpn
   val levelNext = level + 1.U
   val l1Hit = Reg(Bool())
   val pte = mem.resp.bits.asTypeOf(new PteBundle().cloneType)
@@ -136,7 +134,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val mem_addr = Mux(af_level === 0.U, l1addr, l2addr)
 
   val hptw_resp = io.hptw.resp.bits.h_resp
-  val gpaddr = Mux(onlyS2xlate, Cat(gvpn, 0.U(offLen.W)), mem_addr)
+  val gpaddr = Mux(onlyS2xlate, Cat(vpn, 0.U(offLen.W)), mem_addr)
   val hpaddr = Cat(hptw_resp.entry.ppn, 0.U(offLen.W))
 
   io.req.ready := idle
@@ -150,9 +148,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.llptw.valid := s_llptw_req === false.B && to_find_pte && !accessFault
   io.llptw.bits.req_info.source := source
   io.llptw.bits.req_info.vpn := vpn
-  io.llptw.bits.req_info.gvpn := pte.ppn
-  io.llptw.bits.req_info.s2xlate(0) := enableS2xlate
-  io.llptw.bits.req_info.s2xlate(1) := 0.U
+  io.llptw.bits.req_info.s2xlate := req_s2xlate
 
   io.pmp.req.valid := DontCare // samecycle, do not use valid
   io.pmp.req.bits.addr := Mux(s2xlate, hpaddr, mem_addr)
@@ -169,7 +165,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   io.hptw.req.valid := !s_hptw_req || !s_last_hptw_req
   io.hptw.req.bits.id := FsmReqID.U(bMemID.W)
-  io.hptw.req.bits.gvpn := gvpn
+  io.hptw.req.bits.gvpn := get_pn(gpaddr)
 
   io.hptw.req.valid := !s_hptw_req || !s_last_hptw_req
   io.hptw.req.bits.id := FsmReqID.U(bMemID.W)
@@ -181,15 +177,16 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     af_level := Mux(req.l1Hit, 1.U, 0.U)
     ppn := Mux(req.l1Hit, io.req.bits.ppn, satp.ppn)
     vpn := io.req.bits.req_info.vpn
-    gvpn := io.req.bits.req_info.gvpn
-    enableS2xlate := io.req.bits.req_info.s2xlate(0)
+    enableS2xlate := io.req.bits.req_info.s2xlate =/= noS2xlate
+    onlyS1xlate := io.req.bits.req_info.s2xlate === onlyS1xlate
+    onlyS2xlate := io.req.bits.req_info.s2xlate === onlyS2xlate
     l1Hit := req.l1Hit
     accessFault := false.B
     s_pmp_check := false.B
     idle := false.B
     hptw_pageFault := false.B
     s2xlate := io.req.bits.req_info.s2xlate
-    when((io.req.bits.req_info.s2xlate(0)) && hgatp.mode =/= 0.U){
+    when(io.req.bits.req_info.s2xlate =/= noS2xlate && io.req.bits.req_info.s2xlate =/= onlyStage1){
       last_s2xlate := true.B
       s_hptw_req := false.B
     }.otherwise {
@@ -371,7 +368,7 @@ class LLPTWIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
   val hptw = new Bundle {
     val req = DecoupledIO(new Bundle{
       val id = UInt(log2Up(l2tlbParams.llptwsize).W)
-      val gvpn = UInt(gvpnLen.W)
+      val gvpn = UInt(vpnLen.W)
     })
     val resp = Flipped(Valid(new Bundle {
       val id = Output(UInt(log2Up(l2tlbParams.llptwsize).W))
@@ -383,7 +380,6 @@ class LLPTWIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
 class LLPTWEntry(implicit p: Parameters) extends XSBundle with HasPtwConst {
   val req_info = new L2TlbInnerBundle()
   val s2xlate = Bool()
-  val gvpn = UInt(gvpnLen.W) // the vpn of guest address translation
   val ppn = UInt(ppnLen.W)
   val wait_id = UInt(log2Up(l2tlbParams.llptwsize).W)
   val af = Bool()
@@ -394,7 +390,7 @@ class LLPTWEntry(implicit p: Parameters) extends XSBundle with HasPtwConst {
 
 class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPerfEvents {
   val io = IO(new LLPTWIO())
-  val enableS2xlate = io.in.bits.req_info.s2xlate(0)
+  val enableS2xlate = io.in.bits.req_info.s2xlate =/= noS2xlate
   val satp = Mux(enableS2xlate, io.csr.vsatp, io.csr.satp)
 
   val flush = io.sfence.valid || satp.changed
@@ -460,7 +456,6 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     // so 2 + FilterSize is enough to avoid dead-lock
     state(enq_ptr) := enq_state
     entries(enq_ptr).req_info := io.in.bits.req_info
-    entries(enq_ptr).gvpn := io.in.bits.req_info.gvpn
     entries(enq_ptr).ppn := io.in.bits.ppn
     entries(enq_ptr).wait_id := Mux(to_wait, wait_id, enq_ptr)
     entries(enq_ptr).af := false.B
@@ -473,7 +468,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val enq_ptr_reg = RegNext(enq_ptr)
   val need_addr_check = RegNext(enq_state === state_addr_check && (io.in.fire() || io.hptw.resp.fire()) && !flush)
 
-  val gpaddr = MakeGAddr(io.in.bits.req_info.gvpn, getVpnn(io.in.bits.req_info.vpn, 0))
+  val gpaddr = MakeGAddr(io.in.bits.ppn, getVpnn(io.in.bits.req_info.vpn, 0))
   val hpaddr = Cat(io.in.bits.ppn, gpaddr(offLen-1, 0))
 
   val addr = Mux(enableS2xlate, hpaddr, MakeAddr(io.in.bits.ppn, getVpnn(io.in.bits.req_info.vpn, 0)))
@@ -566,7 +561,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.out.bits.h_resp := io.hptw.resp.bits.h_resp
 
   io.hptw.req.valid := (hyper_arb1.io.out.valid || hyper_arb2.io.out.valid) && !flush
-  io.hptw.req.bits.gvpn := Mux(hyper_arb1.io.out.valid, hyper_arb1.io.out.bits.gvpn, hyper_arb2.io.out.bits.gvpn)
+  io.hptw.req.bits.gvpn := Mux(hyper_arb1.io.out.valid, hyper_arb1.io.out.bits.ppn, hyper_arb2.io.out.bits.ppn)
   io.hptw.req.bits.id := Mux(hyper_arb1.io.out.valid, hyper_arb1.io.chosen, hyper_arb2.io.chosen)
   hyper_arb1.io.out.ready := io.hptw.req.ready
   hyper_arb2.io.out.ready := io.hptw.req.ready
@@ -618,7 +613,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 class HPTWIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
   val req = Flipped(DecoupledIO(new Bundle {
     val id = UInt(log2Up(l2tlbParams.llptwsize).W)
-    val gvpn = UInt(gvpnLen.W)
+    val gvpn = UInt(vpnLen.W)
     val l1Hit = Bool()
     val l2Hit = Bool()
     val ppn = UInt(ppnLen.W)
@@ -696,7 +691,7 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   io.mem.req.bits.addr := mem_addr
   io.mem.req.bits.id := HptwReqId.U(bMemID.W)
 
-  io.refill.req_info.gvpn := vpn
+  io.refill.req_info.vpn := vpn
   io.refill.level := level
   when (idle){
     when(io.req.fire()){

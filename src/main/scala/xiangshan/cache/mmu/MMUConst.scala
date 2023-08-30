@@ -83,10 +83,7 @@ trait HasTlbConst extends HasXSParameter {
   val offLen  = 12
   val ppnLen  = PAddrBits - offLen
   val vpnnLen = 9
-  val extendVpnBits = 2 // gvpn is two bits longer than vpn
-  val extendVpnnLen = vpnnLen + extendVpnBits
-  val vpnLen  = VAddrBits - offLen
-  val gvpnLen = GPAddrBits - offLen
+  val vpnLen  = VAddrBits - offLen // when opening H extention, vpnlen broaden two bits
   val flagLen = 8
   val pteResLen = XLEN - 44 - 2 - flagLen
   val ppnHignLen = 44 - ppnLen
@@ -99,7 +96,6 @@ trait HasTlbConst extends HasXSParameter {
   val loadfiltersize = 16
   val storefiltersize = 8
   val prefetchfiltersize = 8
-  val sectorgvpnLen = gvpnLen - sectortlbwidth
   val sramSinglePort = true
 
   val timeOutThreshold = 10000

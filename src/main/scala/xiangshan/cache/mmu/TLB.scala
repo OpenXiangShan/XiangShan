@@ -88,15 +88,19 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val req_out = req.map(a => RegEnable(a.bits, a.fire))
   val req_out_v = (0 until Width).map(i => ValidHold(req_in(i).fire && !req_in(i).bits.kill, resp(i).fire, flush_pipe(i)))
 
-  val refill = (0 until Width).map(i => ptw.resp.fire && !flush_mmu && (vmEnable(i) || ptw.resp.bits.s2xlate(0))
+  val refill = (0 until Width).map(i => ptw.resp.fire && !flush_mmu && (vmEnable(i) || ptw.resp.bits.s2xlate =/= noS2xlate)
 
   val entries = Module(new TlbStorageWrapper(Width, q, nRespDups))
   entries.io.base_connect(sfence, csr, satp)
   if (q.outReplace) { io.replace <> entries.io.replace }
   for (i <- 0 until Width) {
     val s2xlate = Wire(UInt(2.W))
-    s2xlate(0) := virt || req_in(i).bits.hyperinst
-    s2xlate(1) := s2xlate(0) && vsatp.mode === 0.U && hgatp.mode === 8.U
+    s2xlate := MuxCase(noS2xlate, Seq(
+      !(virt || req_in(i).bits.hyperinst) -> noS2xlate,
+      vsatp.mode =/= 0.U && hgatp.mode =/= 0.U -> allStage,
+      vsatp.mode === 0.U -> onlyStage2,
+      hgatp.mode === 0.U -> onlyStage1
+    ))
     entries.io.r_req_apply(io.requestor(i).req.valid, get_pn(req_in(i).bits.vaddr), i, s2xlate)
     entries.io.w_apply(refill, ptw.resp.bits)
     resp(i).bits.debug.isFirstIssue := RegNext(req(i).bits.debug.isFirstIssue)
@@ -111,6 +115,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val perm = readResult.map(_._4)
   val g_perm = readResult.map(_._7)
   val s2xlate = readResult.map(_._8)
+  val need_gpa = readResult.map(_._9)
   // check pmp use paddr (for timing optization, use pmp_addr here)
   // check permisson
   (0 until Width).foreach{i =>
@@ -133,12 +138,19 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   /************************  main body above | method/log/perf below ****************************/
   def TLBRead(i: Int) = {
     val s2xlate = Wire(UInt(2.W))
-    s2xlate(0) := virt || req_in(i).bits.hyperinst
-    s2xlate(1) := s2xlate(0) && vsatp.mode === 0.U && hgatp.mode === 8.U
-    val (e_hit, e_ppn, e_perm, e_gvpn, e_g_perm, e_s2xlate) = entries.io.r_resp_apply(i)
+    s2xlate := MuxCase(noS2xlate, Seq(
+      !(virt || req_in(i).bits.hyperinst) -> noS2xlate,
+      vsatp.mode =/= 0.U && hgatp.mode =/= 0.U -> allStage,
+      vsatp.mode === 0.U -> onlyStage2,
+      hgatp.mode === 0.U -> onlyStage1
+    ))
+    val (e_hit_tmp, e_ppn, e_perm, e_super_hit_tmp, e_super_ppn, static_pm, e_g_perm, e_s2xlate) = entries.io.r_resp_apply(i)
     val (p_hit, p_ppn, p_perm, p_gvpn, p_g_perm, p_s2xlate) = ptw_resp_bypass(get_pn(req_in(i).bits.vaddr), s2xlate)
     val enable = portTranslateEnable(i)
 
+    val need_gpa = Mux(p_hit, false.B, !(s2xlate === onlyStage2) && (resp(i).bits.excp(0).gpf.ld || resp(i).bits.excp(0).gpf.st || resp(i).bits.excp(0).gpf.instr))
+    val e_hit = e_hit_tmp && !need_gpa
+    val e_super_hit = e_super_hit_tmp && !need_gpa
     val hit = e_hit || p_hit
     val miss = !hit && enable
     hit.suggestName(s"hit_read_${i}")
@@ -151,25 +163,25 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
     val ppn = WireInit(VecInit(Seq.fill(nRespDups)(0.U(ppnLen.W))))
     val perm = WireInit(VecInit(Seq.fill(nRespDups)(0.U.asTypeOf(new TlbPermBundle))))
-    val gvpn = WireInit(VecInit(Seq.fill(nRespDups)(0.U(gvpnLen.W))))
+    val gvpn = WireInit(VecInit(Seq.fill(nRespDups)(0.U(vpnLen.W))))
     val g_perm = WireInit(VecInit(Seq.fill(nRespDups)(0.U.asTypeOf(new TlbPermBundle))))
     for (d <- 0 until nRespDups) {
       ppn(d) := Mux(p_hit, p_ppn, e_ppn(d))
       perm(d) := Mux(p_hit, p_perm, e_perm(d))
-      gvpn(d) := Mux(p_hit, p_gvpn, e_gvpn(d))
+      gvpn(d) :=  p_gvpn
       g_perm(d) := Mux(p_hit, p_g_perm, e_g_perm(d))
       s2xlate(d) := Mux(p_hit, p_s2xlate, e_s2xlate(d))
       val paddr = Cat(ppn(d), get_off(req_out(i).vaddr))
       val gpaddr = Cat(gvpn(d), get_off(req_out(i).vaddr))
       resp(i).bits.paddr(d) := Mux(enable, paddr, vaddr)
-      resp(i).bits.gpaddr(d) := gpaddr
+      resp(i).bits.gpaddr(d) := Mux(s2xlate === onlyStage2, vaddr, gpaddr)
     }
 
     XSDebug(req_out_v(i), p"(${i.U}) hit:${hit} miss:${miss} ppn:${Hexadecimal(ppn(0))} perm:${perm(0)}\n")
 
     val pmp_paddr = resp(i).bits.paddr(0)
 
-    (hit, miss, pmp_paddr, perm, g_perm, s2xlate)
+    (hit, miss, pmp_paddr, perm, g_perm, s2xlate, need_gpa)
   }
 
   def pmp_check(addr: UInt, size: UInt, cmd: UInt, idx: Int): Unit = {
@@ -240,11 +252,15 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     XSError(!io.requestor(idx).resp.ready, s"${q.name} port ${idx} is non-block, resp.ready must be true.B")
 
     val req_s2xlate = Wire(UInt(2.W))
-    req_s2xlate(0) := virt || req_out(idx).hyperinst
-    req_s2xlate(1) := req_s2xlate(0) && vsatp.mode === 0.U && hgatp.mode === 8.U
-    val ptw_s2xlate = ptw.resp.bits.s2xlate
-    val onlyS2 = ptw_s2xlate === 11.U
-    val ptw_s1_hit = ptw.resp.bits.s1.hit(get_pn(req_out(idx).vaddr), Mux(ptw_s2xlate(0), io.csr.vsatp.asid, io.csr.satp.asid), io.csr.hgatp.asid, true, false, ptw_s2xlate(0))
+    req_s2xlate := MuxCase(noS2xlate, Seq(
+      !(virt || req_in(idx).bits.hyperinst) -> noS2xlate,
+      vsatp.mode =/= 0.U && hgatp.mode =/= 0.U -> allStage,
+      vsatp.mode === 0.U -> onlyStage2,
+      hgatp.mode === 0.U || need_gpa(idx) -> onlyStage1
+    ))
+    val ptw_s2xlate = ptw.resp.bits.s2xlate =/= noS2xlate
+    val onlyS2 = ptw_s2xlate === onlyStage2
+    val ptw_s1_hit = ptw.resp.bits.s1.hit(get_pn(req_out(idx).vaddr), Mux(ptw_s2xlate, io.csr.vsatp.asid, io.csr.satp.asid), io.csr.hgatp.asid, true, false, ptw_s2xlate)
     val ptw_s2_hit = ptw.resp.bits.s2.hit(get_pn(req_out(idx).vaddr), io.csr.hgatp.asid)
     val ptw_just_back = ptw.resp.fire && req_s2xlate === ptw_s2xlate&& Mux(onlyS2, ptw_s2_hit, ptw_s1_hit)
     val ptw_already_back = RegNext(ptw.resp.fire) && RegNext(ptw.resp.bits).hit(get_pn(req_out(idx).vaddr), asid = io.csr.satp.asid, allType = true)
@@ -255,7 +271,6 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       io.tlbreplay(idx) := true.B
     }
     io.ptw.req(idx).bits.vpn := get_pn(req_out(idx).vaddr)
-    io.ptw.req(idx).bits.gvpn := RegNext(get_pn(req_out(idx).vaddr)) // for only stage two translation, longer than vpn
     io.ptw.req(idx).bits.s2xlate := RegNext(req_s2xlate)
     io.ptw.req(idx).bits.memidx := req_out(idx).memidx
   }
@@ -267,13 +282,17 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
     // miss request entries
     val miss_req_vpn = get_pn(req_out(idx).vaddr)
-    val miss_req_gvpn = get_pn(req_out(idx).vaddr)
     val miss_req_memidx = req_out(idx).memidx
     val miss_req_s2xlate = Wire(UInt(2.W))
-    miss_req_s2xlate(0) := virt || req_out(idx).hyperinst
-    miss_req_s2xlate(1) := miss_req_s2xlate(0) && vsatp.mode === 0.U && hgatp.mode === 8.U
-    val onlyS2 = miss_req_s2xlate === 11.U
-    val hit_s1 = io.ptw.resp.bits.s1.hit(miss_req_vpn, Mux(miss_req_s2xlate(0), io.csr.vsatp.asid, io.csr.satp.asid), io.csr.hgatp.asid, allType = true, false, miss_req_s2xlate(0))
+    miss_req_s2xlate := MuxCase(noS2xlate, Seq(
+      !(virt || req_in(idx).bits.hyperinst) -> noS2xlate,
+      vsatp.mode =/= 0.U && hgatp.mode =/= 0.U -> allStage,
+      vsatp.mode === 0.U -> onlyStage2,
+      hgatp.mode === 0.U || need_gpa -> onlyStage1
+    ))
+    val hasS2xlate = miss_req_s2xlate =/= noS2xlate
+    val onlyS2 = miss_req_s2xlate === onlyStage2
+    val hit_s1 = io.ptw.resp.bits.s1.hit(miss_req_vpn, Mux(hasS2xlate, io.csr.vsatp.asid, io.csr.satp.asid), io.csr.hgatp.asid, allType = true, false, hasS2xlate)
     val hit_s2 = io.ptw.resp.bits.s2.hit(miss_req_vpn, io.csr.hgatp.asid)
     val hit = Mux(onlyS2, hit_s2, hit_s1) && io.ptw.resp.valid && miss_req_s2xlate === io.ptw.resp.bits.s2xlate
 
@@ -292,11 +311,11 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       resp(idx).valid := true.B
       resp(idx).bits.miss := false.B // for blocked tlb, this is useless
       val s1_paddr = Cat(stage1.genPPN(get_pn(req_out(idx).vaddr)), get_off(req_out(idx).vaddr))
-      val s2_paddr = Cat(stage2.genPPNS2()
+      val s2_paddr = Cat(stage2.genPPNS2(), get_off(req_out(idx).vaddr))
       for (d <- 0 until nRespDups) {
-        resp(idx).bits.paddr(d) := Mux(s2xlate(0), s2_paddr, s1_paddr)
+        resp(idx).bits.paddr(d) := Mux(s2xlate =/= noS2xlate, s2_paddr, s1_paddr)
         resp(idx).bits.gpaddr(d) := s1_paddr
-        perm_check(stage1.entry.perm.get(), req_out(idx).cmd, idx, d, stage2.entry.perm, req_out(idx).hlvx, s2xlate(0))
+        perm_check(stage1.entry.perm.get(), req_out(idx).cmd, idx, d, stage2.entry.perm, req_out(idx).hlvx, s2xlate)
       }
       pmp_check(resp(idx).bits.paddr(0), req_out(idx).size, req_out(idx).cmd, idx)
 
@@ -308,7 +327,6 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val ptw_req = io.ptw.req(idx)
     ptw_req.valid := miss_req_v
     ptw_req.bits.vpn := miss_req_vpn
-    ptw_req.bits.gvpn := miss_req_gvpn
     ptw_req.bits.s2xlate := miss_req_s2xlate
     ptw_req.bits.memidx := miss_req_memidx
 
@@ -410,8 +428,12 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       difftest.io.vsatp := io.csr.vsatp
       difftest.io.hgatp := io.csr.hgatp
       val s2xlate = Wire(UInt(2.W))
-      s2xlate(0) := virt || req_in(i).bits.hyperinst
-      s2xlate(1) := s2xlate(0) && io.csr.vsatp.mode === 0.U && io.csr.hgatp.mode === 8.U
+      s2xlate := MuxCase(noS2xlate, Seq(
+        !(virt || req_in(idx).bits.hyperinst) -> noS2xlate,
+        vsatp.mode =/= 0.U && hgatp.mode =/= 0.U -> allStage,
+        vsatp.mode === 0.U -> onlyStage2,
+        hgatp.mode === 0.U || need_gpa -> onlyStage1
+      ))
       difftest.io.s2xlate := s2xlate
     }
   }

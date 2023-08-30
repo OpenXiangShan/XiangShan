@@ -253,26 +253,22 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
 
 
-  def vpn_match(vpn1: UInt, vpn2: UInt, level: Int, isGvpn: Bool) = {
-    (vpn1(vpnnLen*3-1, vpnnLen*(2-level)+3) === vpn2(vpnnLen*3-1, vpnnLen*(2-level)+3)) &&
-      Mux(isGvpn, vpn1(vpnnLen*3+extendVpnnBits-1, vpnnLen*3) === vpn2(vpnnLen*3+extendVpnnBits-1, vpnnLen*3), true.B)
+  def vpn_match(vpn1: UInt, vpn2: UInt, level: Int) = {
+    (vpn1(vpnLen-1, vpnnLen*(2-level)+3) === vpn2(vpnLen-1, vpnnLen*(2-level)+3))
   }
   // NOTE: not actually bypassed, just check if hit, re-access the page cache
   def refill_bypass(vpn: UInt, level: Int, h_search: UInt) = {
     val refill_vpn = io.refill.bits.req_info_dup(0).vpn
-    val refill_gvpn = io.refill.bits.req_info_dup(0).gvpn
-    val refill_isGvpn = io.refill.bits.req_info_dup(0).s2xlate(0) && io.refill.bits.req_info_dup(0).s2xlate(1)
-    io.refill.valid && (level.U === io.refill.bits.level_dup(0)) && vpn_match(Mux(refill_isGvpn, refill_gvpn, refill_vpn), vpn, level, isGvpn) && h_search === io.refill.bits.req_info_dup(0).s2xlate
+    io.refill.valid && (level.U === io.refill.bits.level_dup(0)) && vpn_match(refill_vpn, vpn, level) && h_search === io.refill.bits.req_info_dup(0).s2xlate
   }
 
-  val isGvpn = stageReq.bits.req_info.s2xlate(0) && stageReq.bits.req_info.s2xlate(1) // only stage 2 xlate use gvpn
-  val vpn_search = Mux(isGvpn, stageReq.bits.req_info.gvpn, stageReq.bits.req_info.vpn)
+  val vpn_search = stageReq.bits.req_info.vpn
   val h_search = stageReq.bits.req_info.s2xlate
   // l1
   val ptwl1replace = ReplacementPolicy.fromString(l2tlbParams.l1Replacer, l2tlbParams.l1Size)
   val (l1Hit, l1HitPPN, l1Pre) = {
     val hitVecT = l1.zipWithIndex.map {
-      case (e, i) => (e.hit(vpn_search, io.csr_dup(0).satp.asid, io.csr_dup(0).hgatp.asid, s2xlate = h_search(0), isGvpn = isGvpn)
+      case (e, i) => (e.hit(vpn_search, io.csr_dup(0).satp.asid, io.csr_dup(0).hgatp.asid, s2xlate = h_search =/= noS2xlate)
         && l1v(i) && h_search === l1h(i))
     }
     val hitVec = hitVecT.map(RegEnable(_, stageReq.fire))
@@ -286,7 +282,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
     l1AccessPerf.zip(hitVec).map{ case (l, h) => l := h && stageDelay_valid_1cycle}
     for (i <- 0 until l2tlbParams.l1Size) {
-      XSDebug(stageReq.fire, p"[l1] l1(${i.U}) ${l1(i)} hit:${l1(i).hit(vpn_search, io.csr_dup(0).satp.asid, io.csr_dup(0).hgatp.asid, s2xlate = h_search(0), isGvpn = isGvpn)}\n")
+      XSDebug(stageReq.fire, p"[l1] l1(${i.U}) ${l1(i)} hit:${l1(i).hit(vpn_search, Mux(h_search =/= noS2xlate, io.csr_dup(0).vsatp.asid, io.csr_dup(0).satp.asid), io.csr_dup(0).hgatp.asid, s2xlate = h_search =/= noS2xlate}\n")
     }
     XSDebug(stageReq.fire, p"[l1] l1v:${Binary(l1v)} hitVecT:${Binary(VecInit(hitVecT).asUInt)}\n")
     XSDebug(stageDelay(0).valid, p"[l1] l1Hit:${hit} l1HitPPN:0x${Hexadecimal(hitPPN)} hitVec:${VecInit(hitVec).asUInt}\n")
@@ -310,16 +306,16 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val hVec_req = getl2hSet(vpn_search)
 
     // delay one cycle after sram read
-    val delay_vpn = Mux(stageDelay(0).bits.req_info.s2xlate(0) && stageDelay(0).bits.req_info.s2xlate(1), stageDelay(0).bits.req_info.gvpn, stageDelay(0).bits.req_info.vpn)
+    val delay_vpn = stageDelay(0).bits.req_info.vpn
     val delay_h = stageDelay(0).bits.req_info.s2xlate
     val data_resp = DataHoldBypass(l2.io.r.resp.data, stageDelay_valid_1cycle)
     val vVec_delay = RegEnable(vVec_req, stageReq.fire)
     val hVec_delay = RegEnable(hVec_req, stageReq.fire)
     val hitVec_delay = VecInit(data_resp.zip(vVec_delay.asBools).zip(hVec_delay).map { case ((wayData, v), h) =>
-      wayData.entries.hit(delay_vpn, io.csr_dup(1).satp.asid, io.csr_dup(1).hgatp.asid, s2xlate = delay_h(0), isGvpn = delay_h(0) && delay_h(1)) && v && (delay_h === h)})
+      wayData.entries.hit(delay_vpn, io.csr_dup(1).satp.asid, io.csr_dup(1).hgatp.asid, s2xlate = delay_h =/= noS2xlate) && v && (delay_h === h)})
 
     // check hit and ecc
-    val check_vpn = Mux(stageCheck(0).bits.req_info.s2xlate(0) && stageCheck(0).bits.req_info.s2xlate(1), stageCheck(0).bits.req_info.gvpn, stageCheck(0).bits.req_info.vpn)
+    val check_vpn = stageCheck(0).bits.req_info.vpn
     val ramDatas = RegEnable(data_resp, stageDelay(1).fire)
     val vVec = RegEnable(vVec_delay, stageDelay(1).fire).asBools
 
@@ -358,16 +354,16 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val hVec_req = getl3hSet(vpn_search)
 
     // delay one cycle after sram read
-    val delay_vpn = Mux(stageDelay(0).bits.req_info.s2xlate(0) && stageDelay(0).bits.req_info.s2xlate(1), stageDelay(0).bits.req_info.gvpn, stageDelay(0).bits.req_info.vpn)
+    val delay_vpn = stageDelay(0).bits.req_info.vpn
     val delay_h = stageDelay(0).bits.req_info.s2xlate
     val data_resp = DataHoldBypass(l3.io.r.resp.data, stageDelay_valid_1cycle)
     val vVec_delay = RegEnable(vVec_req, stageReq.fire)
     val hVec_delay = RegEnable(hVec_req, stageReq.fire)
     val hitVec_delay = VecInit(data_resp.zip(vVec_delay.asBools).zip(hVec_delay).map { case ((wayData, v), h) =>
-      wayData.entries.hit(delay_vpn, io.csr_dup(2).satp.asid, io.csr_dup(2).hgatp.asid, s2xlate = delay_h(0), isGvpn = delay_h(0) && delay_h(1)) && v && (delay_h === h)})
+      wayData.entries.hit(delay_vpn, io.csr_dup(2).satp.asid, io.csr_dup(2).hgatp.asid, s2xlate = delay_h =/= noS2xlate) && v && (delay_h === h)})
 
     // check hit and ecc
-    val check_vpn = Mux(stageCheck(0).bits.req_info.s2xlate(0) && stageCheck(0).bits.req_info.s2xlate(1), stageCheck(0).bits.req_info.gvpn, stageCheck(0).bits.req_info.vpn)
+    val check_vpn = stageCheck(0).bits.req_info.vpn
     val ramDatas = RegEnable(data_resp, stageDelay(1).fire)
     val vVec = RegEnable(vVec_delay, stageDelay(1).fire).asBools
 
@@ -402,7 +398,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   // super page
   val spreplace = ReplacementPolicy.fromString(l2tlbParams.spReplacer, l2tlbParams.spSize)
   val (spHit, spHitData, spPre, spValid) = {
-    val hitVecT = sp.zipWithIndex.map { case (e, i) => e.hit(vpn_search, io.csr_dup(0).satp.asid, io.csr_dup(0).hgatp.asid, s2xlate = h_search(0), isGvpn = h_search(0) && h_search(1)) && spv(i) && (sph(i) === h_search) }
+    val hitVecT = sp.zipWithIndex.map { case (e, i) => e.hit(vpn_search, Mux(h_search =/= noS2xlate, io.csr_dup(0).vsatp.asid, io.csr_dup(0).satp.asid), io.csr_dup(0).hgatp.asid, s2xlate = h_search =/= noS2xlate) && spv(i) && (sph(i) === h_search) }
     val hitVec = hitVecT.map(RegEnable(_, stageReq.fire))
     val hitData = ParallelPriorityMux(hitVec zip sp)
     val hit = ParallelOR(hitVec)
@@ -411,7 +407,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
     spAccessPerf.zip(hitVec).map{ case (s, h) => s := h && stageDelay_valid_1cycle }
     for (i <- 0 until l2tlbParams.spSize) {
-      XSDebug(stageReq.fire, p"[sp] sp(${i.U}) ${sp(i)} hit:${sp(i).hit(vpn_search, io.csr_dup(0).satp.asid, io.csr_dup(0).hgatp.asid, s2xlate = h_search(0), isGvpn = h_search(0) && h_search(1))} spv:${spv(i)}\n")
+      XSDebug(stageReq.fire, p"[sp] sp(${i.U}) ${sp(i)} hit:${sp(i).hit(vpn_search, Mux(h_search =/= noS2xlate, io.csr_dup(0).vsatp.asid, io.csr_dup(0).satp.asid), io.csr_dup(0).hgatp.asid, s2xlate = h_search =/= noS2xlate)} spv:${spv(i)}\n")
     }
     XSDebug(stageDelay_valid_1cycle, p"[sp] spHit:${hit} spHitData:${hitData} hitVec:${Binary(VecInit(hitVec).asUInt)}\n")
 
@@ -443,7 +439,6 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
         OneCycleValid(stageCheck(1).fire, false.B) || io.refill.valid)
   )
 
-  val resp_isGvpn = stageResp.bits.req_info.s2xlate(0) && stageResp.bits.req_info.s2xlate(1)
   io.resp.bits.req_info   := stageResp.bits.req_info
   io.resp.bits.isFirst  := stageResp.bits.isFirst
   io.resp.bits.hit      := resp_res.l3.hit || resp_res.sp.hit
@@ -458,8 +453,8 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   io.resp.bits.toHptw.l1Hit := resp_res.l1.hit
   io.resp.bits.toHptw.l2Hit := resp_res.l2.hit
   io.resp.bits.toHptw.ppn := Mux(resp_res.l2.hit, resp_res.l2.ppn, resp_res.l1.ppn)
-  val idx = stageResp.bits.req_info.gvpn(2, 0)
-  io.resp.bits.toHptw.resp.entry.tag := stageResp.bits.req_info.gvpn
+  val idx = stageResp.bits.req_info.vpn(2, 0)
+  io.resp.bits.toHptw.resp.entry.tag := stageResp.bits.req_info.vpn
   io.resp.bits.toHptw.resp.entry.vmid := io.csr_dup(0).hgatp.asid
   io.resp.bits.toHptw.resp.entry.level.map(_ := Mux(resp_res.l3.hit, 2.U, resp_res.sp.level))
   io.resp.bits.toHptw.resp.entry.prefetch := from_pre(stageResp.bits.req_info.source)
@@ -469,7 +464,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   io.resp.bits.toHptw.resp.gpf := !io.resp.bits.toHptw.resp.entry.v
   io.resp.bits.toHptw.resp.gaf := false.B
 
-  io.resp.bits.toTlb.entry.map(_.tag := Mux(resp_isGvpn, stageResp.bits.req_info.gvpn(gvpnLen - 1, 3), stageResp.bits.req_info.vpn(vpnLen - 1, 3)))
+  io.resp.bits.toTlb.entry.map(_.tag := stageResp.bits.req_info.vpn(vpnLen - 1, 3))
   io.resp.bits.toTlb.entry.map(_.asid := io.csr_dup(0).satp.asid) // DontCare
   io.resp.bits.toTlb.entry.map(_.level.map(_ := Mux(resp_res.l3.hit, 2.U, resp_res.sp.level)))
   io.resp.bits.toTlb.entry.map(_.prefetch := from_pre(stageResp.bits.req_info.source))
@@ -515,7 +510,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     refillIdx.suggestName(s"PtwL1RefillIdx")
     val rfOH = UIntToOH(refillIdx)
     l1(refillIdx).refill(
-      Mux(refill.req_info_dup(0).s2xlate === "0b11".U, refill.req_info_dup(0).gvpn, refill.req_info_dup(0).vpn),
+      refill.req_info_dup(0).vpn,
       Mux(refill.req_info_dup(0).s2xlate(0).asBool(), io.csr_dup(0).vsatp.asid, io.csr_dup(0).satp.asid),
       io.csr_dup(0).hgatp.asid,
       memSelData(0),
@@ -545,7 +540,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val rfvOH = UIntToOH(Cat(refillIdx, victimWay))
     val wdata = Wire(l2EntryType)
     wdata.gen(
-      vpn = Mux(refill.req_info_dup(1).s2xlate === "0b11".U, refill.req_info_dup(1).gvpn, refill.req_info_dup(1).vpn),
+      vpn = refill.req_info_dup(1).vpn,
       asid = Mux(refill.req_info_dup(1).s2xlate(0).asBool(), io.csr_dup(1).vsatp.asid, io.csr_dup(1).satp.asid),
       vmid = io.csr_dup(1).hgatp.asid,
       data = memRdata,
@@ -585,7 +580,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val rfvOH = UIntToOH(Cat(refillIdx, victimWay))
     val wdata = Wire(l3EntryType)
     wdata.gen(
-      vpn = Mux(refill.req_info_dup(2).s2xlate === "0b11".U, refill.req_info_dup(2).gvpn, refill.req_info_dup(2).vpn),
+      vpn =  refill.req_info_dup(2).vpn,
       asid = Mux(refill.req_info_dup(2).s2xlate(0).asBool(), io.csr_dup(2).vsatp.asid, io.csr_dup(2).satp.asid),
       vmid = io.csr_dup(2).hgatp.asid,
       data = memRdata,
@@ -740,10 +735,10 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     } .otherwise {
       when (sfence_dup(0).bits.rs2) {
         // specific leaf of addr && all asid
-        spv := spv & (~VecInit(sp.map(_.hit(sfence_vpn, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.asid, ignoreAsid = true, s2xlate = io.csr_dup(0).priv.virt, isGvpn = false))).asUInt)
+        spv := spv & (~VecInit(sp.map(_.hit(sfence_vpn, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.asid, ignoreAsid = true, s2xlate = io.csr_dup(0).priv.virt))).asUInt)
       } .otherwise {
         // specific leaf of addr && specific asid
-        spv := spv & (~VecInit(sp.map(_.hit(sfence_vpn, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.asid, s2xlate = io.csr_dup(0).priv.virt, isGvpn = false))).asUInt | spg)
+        spv := spv & (~VecInit(sp.map(_.hit(sfence_vpn, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.asid, s2xlate = io.csr_dup(0).priv.virt))).asUInt | spg)
       }
     }
   }
@@ -768,9 +763,9 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
       }
     }.otherwise {
       when(sfence_dup(0).bits.rs2) {
-        spv := spv & (~VecInit(sp.map(_.hit(hfencev_vpn, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.asid, ignoreAsid = true, s2xlate = true.B, isGvpn = false))).asUInt)
+        spv := spv & (~VecInit(sp.map(_.hit(hfencev_vpn, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.asid, ignoreAsid = true, s2xlate = true.B))).asUInt)
       }.otherwise {
-        spv := spv & (~VecInit(sp.map(_.hit(hfencev_vpn, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.asid, s2xlate = true.B, isGvpn = false))).asUInt | spg)
+        spv := spv & (~VecInit(sp.map(_.hit(hfencev_vpn, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.asid, s2xlate = true.B))).asUInt | spg)
       }
     }
   }
@@ -796,9 +791,9 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
       }
     }.otherwise {
       when(sfence_dup(0).bits.rs2) {
-        spv := spv & (~VecInit(sp.map(_.hit(hfenceg_gvpn, 0.U, sfence_dup(0).bits.id, ignoreAsid = true, s2xlate = true.B, isGvpn = true))).asUInt)
+        spv := spv & (~VecInit(sp.map(_.hit(hfenceg_gvpn, 0.U, sfence_dup(0).bits.id, ignoreAsid = true, s2xlate = true.B))).asUInt)
       }.otherwise {
-        spv := spv & (~VecInit(sp.map(_.hit(hfenceg_gvpn, 0.U, sfence_dup(0).bits.id, ignoreAsid = true, s2xlate = false.B, isGvpn = true))).asUInt)
+        spv := spv & (~VecInit(sp.map(_.hit(hfenceg_gvpn, 0.U, sfence_dup(0).bits.id, ignoreAsid = true, s2xlate = false.B))).asUInt)
       }
     }
   }

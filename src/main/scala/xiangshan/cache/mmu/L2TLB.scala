@@ -100,13 +100,12 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val arb1 = Module(new Arbiter(new PtwReq, PtwWidth))
   val arb2 = Module(new Arbiter(new Bundle {
     val vpn = UInt(vpnLen.W)
-    val gvpn = UInt(gvpnLen.W)
     val s2xlate = UInt(2.W)
     val source = UInt(bSourceWidth.W)
   }, if (l2tlbParams.enablePrefetch) 4 else 3 + if(l2tlbParams.HasHExtension) 1 else 0))
   val hptw_req_arb = Module(new Arbiter(new Bundle {
     val id = UInt(log2Up(l2tlbParams.llptwsize).W)
-    val gvpn = UInt(gvpnLen.W)
+    val gvpn = UInt(vpnLen.W)
   }, 2))
   val hptw_resp_arb = Module(new Arbiter(new Bundle {
     val resp = new HptwResp()
@@ -155,7 +154,6 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   arb2.io.in(InArbPTWPort).valid := ptw.io.llptw.valid
   arb2.io.in(InArbPTWPort).bits.vpn := ptw.io.llptw.bits.req_info.vpn
-  arb2.io.in(InArbPTWPort).bits.gvpn := ptw.io.llptw.bits.req_info.gvpn
   arb2.io.in(InArbPTWPort).bits.s2xlate := ptw.io.llptw.bits.req_info.s2xlate
   arb2.io.in(InArbPTWPort).bits.source := ptw.io.llptw.bits.req_info.source
   ptw.io.llptw.ready := arb2.io.in(InArbPTWPort).ready
@@ -163,14 +161,12 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   arb2.io.in(InArbTlbPort).valid := arb1.io.out.valid
   arb2.io.in(InArbTlbPort).bits.vpn := arb1.io.out.bits.vpn
-  arb2.io.in(InArbTlbPort).bits.gvpn := arb1.io.out.bits.gvpn
   arb2.io.in(InArbTlbPort).bits.s2xlate := arb1.io.out.bits.s2xlate
   arb2.io.in(InArbTlbPort).bits.source := arb1.io.chosen
 
   arb2.io.in(InArbHPTWPort).valid := hptw_req_arb.io.out.valid
-  arb2.io.in(InArbHPTWPort).bits.vpn := DontCare
-  arb2.io.in(InArbHPTWPort).bits.gvpn := hptw_req_arb.io.out.bits.gvpn
-  arb2.io.in(InArbHPTWPort).bits.s2xlate := "0b11".U
+  arb2.io.in(InArbHPTWPort).bits.vpn := hptw_req_arb.io.out.bits.gvpn
+  arb2.io.in(InArbHPTWPort).bits.s2xlate := onlyStage2
   arb2.io.in(InArbHPTWPort).bits.source := DontCare
   if (l2tlbParams.enablePrefetch) {
     val prefetch = Module(new L2TlbPrefetch())
@@ -219,7 +215,6 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   cache.io.req.valid := arb2.io.out.valid
   cache.io.req.bits.req_info.vpn := arb2.io.out.bits.vpn
-  cache.io.req.bits.req_info.gvpn := arb2.io.out.bits.gvpn
   cache.io.req.bits.req_info.s2xlate := arb2.io.out.bits.s2xlate
   cache.io.req.bits.req_info.source := arb2.io.out.bits.source
   cache.io.req.bits.isFirst := arb2.io.chosen =/= InArbMissQueuePort.U
@@ -248,7 +243,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   ptw.io.resp.ready := outReady(ptw.io.resp.bits.source, outArbFsmPort)
 
   hptw.io.req.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && !cache.io.resp.bits.bypassed & cache.io.resp.bits.isHptw
-  hptw.io.req.bits.gvpn := cache.io.resp.bits.req_info.gvpn
+  hptw.io.req.bits.gvpn := cache.io.resp.bits.req_info.vpn
   hptw.io.req.bits.id := cache.io.resp.bits.toHptw.id
   hptw.io.req.bits.l1Hit := cache.io.resp.bits.toHptw.l1Hit
   hptw.io.req.bits.l2Hit := cache.io.resp.bits.toHptw.l2Hit
@@ -411,6 +406,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       for (j <- 0 until tlbcontiguous) {
         difftest.ppn(j) := Cat(io.tlb(i).resp.bits.entry.ppn, io.tlb(i).resp.bits.ppn_low(j))
         difftest.valididx(j) := io.tlb(i).resp.bits.valididx(j)
+        difftest.io.pteidx(j) := io.tlb(i).resp.bits.s1.pteidx(j)
       }
       difftest.perm := io.tlb(i).resp.bits.entry.perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt
       difftest.level := io.tlb(i).resp.bits.entry.level.getOrElse(0.U.asUInt)
