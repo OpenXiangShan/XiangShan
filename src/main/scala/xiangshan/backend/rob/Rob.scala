@@ -745,7 +745,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     misPredBlockCounter >> 1.U
   )
   val misPredBlock = misPredBlockCounter(0)
-  val blockCommit = misPredBlock && !io.flushOut.valid || isReplaying || lastCycleFlush || hasWFI || io.redirect.valid
+  val blockCommit = misPredBlock || isReplaying || lastCycleFlush || hasWFI
 
   io.commits.isWalk := state === s_walk
   io.commits.isCommit := state === s_idle && !blockCommit
@@ -768,7 +768,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     when (state === s_walk) {
       io.commits.walkValid(i) := shouldWalkVec(i)
       when (io.commits.isWalk && state === s_walk && shouldWalkVec(i)) {
-        XSError(!walk_v(i), s"why not $i???\n")
+        XSError(!walk_v(i), s"The walking entry($i) should be valid\n")
       }
     }
 

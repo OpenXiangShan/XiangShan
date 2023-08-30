@@ -101,7 +101,6 @@ class CtrlBlockImp(
   pcMem.io.raddr(pcMemRdIndexes("robFlush").head) := s0_robFlushRedirect.bits.ftqIdx.value
   private val s1_robFlushPc = pcMem.io.rdata(pcMemRdIndexes("robFlush").head).getPc(RegNext(s0_robFlushRedirect.bits.ftqOffset))
   private val s3_redirectGen = redirectGen.io.stage2Redirect
-  private val stage2Redirect = redirectGen.io.stage2Redirect
   private val s1_s3_redirect = Mux(s1_robFlushRedirect.valid, s1_robFlushRedirect, s3_redirectGen)
   private val s2_s4_pendingRedirectValid = RegInit(false.B)
   when (s1_s3_redirect.valid) {
@@ -196,14 +195,6 @@ class CtrlBlockImp(
     io.frontend.toFtq.redirect.bits.cfiUpdate.target := RegNext(flushTarget)
   }
 
-
-  val pendingRedirect = RegInit(false.B)
-  when (stage2Redirect.valid) {
-    pendingRedirect := true.B
-  }.elsewhen (RegNext(io.frontend.toFtq.redirect.valid)) {
-    pendingRedirect := false.B
-  }
-
   // vtype commit
   decode.io.commitVType.bits := io.fromDataPath.vtype
   decode.io.commitVType.valid := RegNext(rob.io.isVsetFlushPipe)
@@ -238,15 +229,15 @@ class CtrlBlockImp(
   snpt.io.enqData.head := rename.io.out.head.bits.robIdx
   snpt.io.deq := snpt.io.valids(snpt.io.deqPtr.value) && rob.io.commits.isCommit &&
     Cat(rob.io.commits.commitValid.zip(rob.io.commits.robIdx).map(x => x._1 && x._2 === snpt.io.snapshots(snpt.io.deqPtr.value))).orR
-  snpt.io.flush := stage2Redirect.valid
+  snpt.io.flush := s1_s3_redirect.valid
 
   val useSnpt = VecInit.tabulate(RenameSnapshotNum)(idx =>
-    snpt.io.valids(idx) && stage2Redirect.bits.robIdx >= snpt.io.snapshots(idx)
+    snpt.io.valids(idx) && s1_s3_redirect.bits.robIdx >= snpt.io.snapshots(idx)
   ).reduceTree(_ || _)
   val snptSelect = MuxCase(
     0.U(log2Ceil(RenameSnapshotNum).W),
     (1 to RenameSnapshotNum).map(i => (snpt.io.enqPtr - i.U).value).map(idx =>
-      (snpt.io.valids(idx) && stage2Redirect.bits.robIdx >= snpt.io.snapshots(idx), idx)
+      (snpt.io.valids(idx) && s1_s3_redirect.bits.robIdx >= snpt.io.snapshots(idx), idx)
     )
   )
 
