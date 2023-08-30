@@ -612,7 +612,7 @@ class DcacheToLduForwardIO(implicit p: Parameters) extends DCacheBundle {
 class MissEntryForwardIO(implicit p: Parameters) extends DCacheBundle {
   val inflight = Bool()
   val paddr = UInt(PAddrBits.W)
-  val raw_data = Vec(blockBytes/beatBytes, UInt(beatBits.W))
+  val raw_data = Vec(blockRows, UInt(rowBits.W))
   val firstbeat_valid = Bool()
   val lastbeat_valid = Bool()
 
@@ -636,12 +636,9 @@ class MissEntryForwardIO(implicit p: Parameters) extends DCacheBundle {
     val forward_mshr = RegInit(false.B)
     val forwardData = RegInit(VecInit(List.fill(VLEN/8)(0.U(8.W))))
 
-    val beat_data = raw_data(req_paddr(log2Up(refillBytes)))
-    val block_idx = req_paddr(log2Up(refillBytes) - 1, 3)
-    val block_data = Wire(Vec(l1BusDataWidth / 64, UInt(64.W)))
-    (0 until l1BusDataWidth / 64).map(i => {
-      block_data(i) := beat_data(64 * i + 63, 64 * i)
-    })
+    val block_idx = req_paddr(log2Up(refillBytes), 3)
+    val block_data = raw_data
+
     val selected_data = Wire(UInt(128.W))
     selected_data := Mux(req_paddr(3), Fill(2, block_data(block_idx)), Cat(block_data(block_idx + 1.U), block_data(block_idx)))
 
