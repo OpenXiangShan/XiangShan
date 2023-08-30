@@ -145,6 +145,148 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   io.backend.fromFtq <> ftq.io.toBackend
   io.frontendInfo.bpuInfo <> ftq.io.bpuInfo
 
+  val checkPcMem = Reg(Vec(FtqSize, new Ftq_RF_Components))
+  when (ftq.io.toBackend.pc_mem_wen) {
+    checkPcMem(ftq.io.toBackend.pc_mem_waddr) := ftq.io.toBackend.pc_mem_wdata
+  }
+
+  val checkTargetIdx = Wire(Vec(DecodeWidth, UInt(log2Up(FtqSize).W)))
+  val checkTarget = Wire(Vec(DecodeWidth, UInt(VAddrBits.W)))
+
+  for (i <- 0 until DecodeWidth) {
+    checkTargetIdx(i) := ibuffer.io.out(i).bits.ftqPtr.value
+    checkTarget(i) := Mux(ftq.io.toBackend.newest_entry_ptr.value === checkTargetIdx(i), 
+                        ftq.io.toBackend.newest_entry_target,
+                        checkPcMem(checkTargetIdx(i) + 1.U).startAddr)
+  }
+
+  // commented out for this br could be the last instruction in the fetch block
+  def checkNotTakenConsecutive = {
+    val prevNotTakenValid = RegInit(0.B)
+    val prevNotTakenFtqIdx = Reg(UInt(log2Up(FtqSize).W))
+    for (i <- 0 until DecodeWidth - 1) {
+      // for instrs that is not the last, if a not-taken br, the next instr should have the same ftqPtr
+      // for instrs that is the last, record and check next request
+      when (ibuffer.io.out(i).fire && ibuffer.io.out(i).bits.pd.isBr) {
+        when (ibuffer.io.out(i+1).fire) {
+          // not last br, check now
+          XSError(checkTargetIdx(i) =/= checkTargetIdx(i+1), "not-taken br should have same ftqPtr\n")
+        } .otherwise {
+          // last br, record its info
+          prevNotTakenValid := true.B
+          prevNotTakenFtqIdx := checkTargetIdx(i)
+        }
+      }
+    }
+    when (ibuffer.io.out(DecodeWidth - 1).fire && ibuffer.io.out(DecodeWidth - 1).bits.pd.isBr) {
+      // last instr is a br, record its info
+      prevNotTakenValid := true.B
+      prevNotTakenFtqIdx := checkTargetIdx(DecodeWidth - 1)
+    }
+    when (prevNotTakenValid && ibuffer.io.out(0).fire) {
+      XSError(prevNotTakenFtqIdx =/= checkTargetIdx(0), "not-taken br should have same ftqPtr\n")
+      prevNotTakenValid := false.B
+    }
+    when (needFlush) {
+      prevNotTakenValid := false.B
+    }
+  }
+
+  def checkTakenNotConsecutive = {
+    val prevTakenValid = RegInit(0.B)
+    val prevTakenFtqIdx = Reg(UInt(log2Up(FtqSize).W))
+    for (i <- 0 until DecodeWidth - 1) {
+      // for instrs that is not the last, if a taken br, the next instr should not have the same ftqPtr
+      // for instrs that is the last, record and check next request
+      when (ibuffer.io.out(i).fire && ibuffer.io.out(i).bits.pd.isBr && ibuffer.io.out(i).bits.pred_taken) {
+        when (ibuffer.io.out(i+1).fire) {
+          // not last br, check now
+          XSError(checkTargetIdx(i) + 1.U =/= checkTargetIdx(i+1), "taken br should have consecutive ftqPtr\n")
+        } .otherwise {
+          // last br, record its info
+          prevTakenValid := true.B
+          prevTakenFtqIdx := checkTargetIdx(i)
+        }
+      }
+    }
+    when (ibuffer.io.out(DecodeWidth - 1).fire && ibuffer.io.out(DecodeWidth - 1).bits.pd.isBr && ibuffer.io.out(DecodeWidth - 1).bits.pred_taken) {
+      // last instr is a br, record its info
+      prevTakenValid := true.B
+      prevTakenFtqIdx := checkTargetIdx(DecodeWidth - 1)
+    }
+    when (prevTakenValid && ibuffer.io.out(0).fire) {
+      XSError(prevTakenFtqIdx + 1.U =/= checkTargetIdx(0), "taken br should have consecutive ftqPtr\n")
+      prevTakenValid := false.B
+    }
+    when (needFlush) {
+      prevTakenValid := false.B
+    }
+  }
+
+  def checkNotTakenPC = {
+    val prevNotTakenPC = Reg(UInt(VAddrBits.W))
+    val prevIsRVC = Reg(Bool())
+    val prevNotTakenValid = RegInit(0.B)
+
+    for (i <- 0 until DecodeWidth - 1) {
+      when (ibuffer.io.out(i).fire && ibuffer.io.out(i).bits.pd.isBr && !ibuffer.io.out(i).bits.pred_taken) {
+        when (ibuffer.io.out(i+1).fire) {
+          XSError(ibuffer.io.out(i).bits.pc + Mux(ibuffer.io.out(i).bits.pd.isRVC, 2.U, 4.U) =/= ibuffer.io.out(i+1).bits.pc, "not-taken br should have consecutive pc\n")
+        } .otherwise {
+          prevNotTakenValid := true.B
+          prevIsRVC := ibuffer.io.out(i).bits.pd.isRVC
+          prevNotTakenPC := ibuffer.io.out(i).bits.pc
+        }
+      }
+    }
+    when (ibuffer.io.out(DecodeWidth - 1).fire && ibuffer.io.out(DecodeWidth - 1).bits.pd.isBr && !ibuffer.io.out(DecodeWidth - 1).bits.pred_taken) {
+      prevNotTakenValid := true.B
+      prevIsRVC := ibuffer.io.out(DecodeWidth - 1).bits.pd.isRVC
+      prevNotTakenPC := ibuffer.io.out(DecodeWidth - 1).bits.pc
+    }
+    when (prevNotTakenValid && ibuffer.io.out(0).fire) {
+      XSError(prevNotTakenPC + Mux(prevIsRVC, 2.U, 4.U) =/= ibuffer.io.out(0).bits.pc, "not-taken br should have same pc\n")
+      prevNotTakenValid := false.B
+    }
+    when (needFlush) {
+      prevNotTakenValid := false.B
+    }
+  }
+
+  def checkTakenPC = {
+    val prevTakenFtqIdx = Reg(UInt(log2Up(FtqSize).W))
+    val prevTakenValid = RegInit(0.B)
+    val prevTakenTarget = Wire(UInt(VAddrBits.W))
+    prevTakenTarget := checkPcMem(prevTakenFtqIdx + 1.U).startAddr
+
+    for (i <- 0 until DecodeWidth - 1) {
+      when (ibuffer.io.out(i).fire && !ibuffer.io.out(i).bits.pd.notCFI && ibuffer.io.out(i).bits.pred_taken) {
+        when (ibuffer.io.out(i+1).fire) {
+          XSError(checkTarget(i) =/= ibuffer.io.out(i+1).bits.pc, "taken instr should follow target pc\n")
+        } .otherwise {
+          prevTakenValid := true.B
+          prevTakenFtqIdx := checkTargetIdx(i)
+        }
+      }
+    }
+    when (ibuffer.io.out(DecodeWidth - 1).fire && !ibuffer.io.out(DecodeWidth - 1).bits.pd.notCFI && ibuffer.io.out(DecodeWidth - 1).bits.pred_taken) {
+      prevTakenValid := true.B
+      prevTakenFtqIdx := checkTargetIdx(DecodeWidth - 1)
+    }
+    when (prevTakenValid && ibuffer.io.out(0).fire) {
+      XSError(prevTakenTarget =/= ibuffer.io.out(0).bits.pc, "taken instr should follow target pc\n")
+      prevTakenValid := false.B
+    }
+    when (needFlush) {
+      prevTakenValid := false.B
+    }
+  }
+
+  //checkNotTakenConsecutive
+  checkTakenNotConsecutive
+  checkTakenPC
+  checkNotTakenPC
+
   ifu.io.rob_commits <> io.backend.toFtq.rob_commits
 
   ibuffer.io.flush := needFlush
