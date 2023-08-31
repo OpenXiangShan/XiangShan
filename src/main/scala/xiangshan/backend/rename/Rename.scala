@@ -364,7 +364,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val last_is_lui = io.in(i - 1).bits.selImm === SelImm.IMM_U && io.in(i - 1).bits.srcType(0) =/= SrcType.pc
     val this_is_load = io.in(i).bits.fuType === FuType.ldu.U
     val lui_to_load = io.in(i - 1).valid && io.in(i - 1).bits.ldest === io.in(i).bits.lsrc(0)
-    val fused_lui_load = last_is_lui && this_is_load && lui_to_load && false.B // Todo: enable it
+    val fused_lui_load = last_is_lui && this_is_load && lui_to_load
     when (fused_lui_load) {
       // The first LOAD operand (base address) is replaced by LUI-imm and stored in {psrc, imm}
       val lui_imm = io.in(i - 1).bits.imm(19, 0)

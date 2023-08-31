@@ -10,6 +10,7 @@ import utils.SeqUtils._
 import xiangshan._
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles._
+import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.issue.{ImmExtractor, IntScheduler, MemScheduler, VfScheduler}
@@ -316,6 +317,11 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
               s1_data.params.immType.map(_.litValue)
             )
           }
+        } else if (s1_data.params.hasLoadFu) {
+          // dirty code for fused_lui_load
+          when(SrcType.isImm(s0.bits.srcType(0))) {
+            s1_data.src(0) := ImmUnion.U.toImm32(s0.bits.common.imm(s0.bits.common.imm.getWidth - 1, ImmUnion.I.len))
+          }
         }
       }
       // IQ(s0) --[Data]--> s1Reg ---------- end
@@ -393,6 +399,10 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
           sinkData.src(0) := s1_toExuData(i)(j).src(0)
         }
       } else if (sinkData.params.hasVecFu) {
+        when(SrcType.isImm(s1_srcType(i)(j)(0))) {
+          sinkData.src(0) := s1_toExuData(i)(j).src(0)
+        }
+      } else if (sinkData.params.hasLoadFu) {
         when(SrcType.isImm(s1_srcType(i)(j)(0))) {
           sinkData.src(0) := s1_toExuData(i)(j).src(0)
         }
