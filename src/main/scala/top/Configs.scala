@@ -264,7 +264,8 @@ class WithNKBL2
           "dcache",
           sets = 2 * p.dcacheParametersOpt.get.nSets / banks,
           ways = p.dcacheParametersOpt.get.nWays + 2,
-          aliasBitsOpt = p.dcacheParametersOpt.get.aliasBitsOpt
+          aliasBitsOpt = p.dcacheParametersOpt.get.aliasBitsOpt,
+          vaddrBitsOpt = Some(p.VAddrBits - log2Up(p.dcacheParametersOpt.get.blockBytes))
         )),
         reqField = Seq(utility.ReqSourceField()),
         echoField = Seq(huancun.DirtyField()),

@@ -308,11 +308,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // load/store prefetch to l2 cache
   prefetcherOpt.foreach(sms_pf => {
     l1PrefetcherOpt.foreach(l1_pf => {
-      val sms_pf_to_l2 = ValidIODelay(sms_pf.io.l2_pf_addr, 2)
-      val l1_pf_to_l2 = ValidIODelay(l1_pf.io.l2_pf_addr, 2)
+      val sms_pf_to_l2 = ValidIODelay(sms_pf.io.l2_req, 2)
+      val l1_pf_to_l2 = ValidIODelay(l1_pf.io.l2_req, 2)
 
       outer.l2_pf_sender_opt.get.out.head._1.addr_valid := sms_pf_to_l2.valid || l1_pf_to_l2.valid
-      outer.l2_pf_sender_opt.get.out.head._1.addr := Mux(l1_pf_to_l2.valid, l1_pf_to_l2.bits, sms_pf_to_l2.bits)
+      outer.l2_pf_sender_opt.get.out.head._1.addr := Mux(l1_pf_to_l2.valid, l1_pf_to_l2.bits.addr, sms_pf_to_l2.bits.addr)
+      outer.l2_pf_sender_opt.get.out.head._1.pf_source := Mux(l1_pf_to_l2.valid, l1_pf_to_l2.bits.source, sms_pf_to_l2.bits.source)
       outer.l2_pf_sender_opt.get.out.head._1.l2_pf_en := RegNextN(io.ooo_to_mem.csrCtrl.l2_pf_enable, 2, Some(true.B))
 
       sms_pf.io.enable := RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_enable, 2, Some(false.B))
@@ -323,7 +324,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       table.log(l2_trace, l1_pf_to_l2.valid, "StreamPrefetchTrace", clock, reset)
       table.log(l2_trace, !l1_pf_to_l2.valid && sms_pf_to_l2.valid, "L2PrefetchTrace", clock, reset)
 
-      val l1_pf_to_l3 = ValidIODelay(l1_pf.io.l3_pf_addr, 4)
+      val l1_pf_to_l3 = ValidIODelay(l1_pf.io.l3_req, 4)
       outer.l3_pf_sender_opt.get.out.head._1.addr_valid := l1_pf_to_l3.valid
       outer.l3_pf_sender_opt.get.out.head._1.addr := l1_pf_to_l3.bits
       outer.l3_pf_sender_opt.get.out.head._1.l2_pf_en := RegNextN(io.ooo_to_mem.csrCtrl.l2_pf_enable, 4, Some(true.B))

@@ -30,6 +30,7 @@ trait HasStreamPrefetchHelper extends HasCircularQueuePtrHelper with HasDCachePa
   // capacity related
   val TRAIN_FILTER_SIZE = 4
   val STREAM_FILTER_SIZE = 16
+  val MLP_SIZE = 16
   val BIT_VEC_ARRAY_SIZE = 16
   val ACTIVE_THRESHOLD = BIT_VEC_WITDH - 4
   val INIT_DEC_MODE = false

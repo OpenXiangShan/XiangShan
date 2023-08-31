@@ -1161,8 +1161,11 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   pf_filter.io.gen_req.bits := pf_gen_req
   io.tlb_req <> pf_filter.io.tlb_req
   val is_valid_address = pf_filter.io.l2_pf_addr.bits > 0x80000000L.U
-  io.l2_pf_addr.valid := pf_filter.io.l2_pf_addr.valid && io.enable && is_valid_address
-  io.l2_pf_addr.bits := pf_filter.io.l2_pf_addr.bits
+  
+  io.l2_req.valid := pf_filter.io.l2_pf_addr.valid && io.enable && is_valid_address
+  io.l2_req.bits.addr := pf_filter.io.l2_pf_addr.bits
+  io.l2_req.bits.source := MemReqSource.Prefetch2L2SMS.id.U
+
   // for now, sms will not send l1 prefetch requests
   io.l1_req.bits.paddr := pf_filter.io.l2_pf_addr.bits
   io.l1_req.bits.alias := pf_filter.io.pf_alias_bits
@@ -1178,17 +1181,17 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   val trace = Wire(new L1MissTrace)
   trace.vaddr := 0.U
   trace.pc := 0.U
-  trace.paddr := io.l2_pf_addr.bits
+  trace.paddr := io.l2_req.bits.addr
   trace.source := pf_filter.io.debug_source_type
   val table = ChiselDB.createTable("L1SMSMissTrace_hart"+ p(XSCoreParamsKey).HartId.toString, new L1MissTrace)
-  table.log(trace, io.l2_pf_addr.fire, "SMSPrefetcher", clock, reset)
+  table.log(trace, io.l2_req.fire, "SMSPrefetcher", clock, reset)
 
   XSPerfAccumulate("sms_pf_gen_conflict",
     pht_gen_valid && agt_gen_valid
   )
   XSPerfAccumulate("sms_pht_disabled", pht.io.pf_gen_req.valid && !io_pht_en)
   XSPerfAccumulate("sms_agt_disabled", active_gen_table.io.s2_pf_gen_req.valid && !io_agt_en)
-  XSPerfAccumulate("sms_pf_real_issued", io.l2_pf_addr.valid)
+  XSPerfAccumulate("sms_pf_real_issued", io.l2_req.valid)
   XSPerfAccumulate("sms_l1_req_valid", io.l1_req.valid)
   XSPerfAccumulate("sms_l1_req_fire", io.l1_req.fire)
 }
