@@ -443,10 +443,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   def fromLoadToLoadSource(src: LoadToLoadIO) = {
     s0_vaddr              := Cat(src.data(XLEN-1, 6), s0_ptr_chasing_vaddr(5,0))
-    s0_mask               := genVWmask(Cat(s0_ptr_chasing_vaddr(3), 0.U(3.W)), LSUOpType.ld)
+    s0_mask               := genVWmask(s0_vaddr, src.uop.ctrl.fuOpType)
     // When there's no valid instruction from RS and LSQ, we try the load-to-load forwarding.
     // Assume the pointer chasing is always ld.
-    s0_uop.ctrl.fuOpType  := LSUOpType.ld
+    s0_uop.ctrl.fuOpType  := src.uop.ctrl.fuOpType
     s0_try_l2l            := true.B
     // we dont care s0_isFirstIssue and s0_rsIdx and s0_sqIdx in S0 when trying pointchasing
     // because these signals will be updated in S1
