@@ -735,6 +735,9 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     VMSGT_VX, VMSGT_VI, VMSGTU_VX, VMSGTU_VI,
     VMFEQ_VV, VMFEQ_VF, VMFNE_VV, VMFNE_VF, VMFLT_VV, VMFLT_VF, VMFLE_VV, VMFLE_VF, VMFGT_VF, VMFGE_VF,
   )
+  private val maskOpInsts = Seq(
+    VMAND_MM, VMNAND_MM, VMANDN_MM, VMXOR_MM, VMOR_MM, VMNOR_MM, VMORN_MM, VMXNOR_MM,
+  )
   private val wfflagsInsts = Seq(
     // opfff
     FADD_S, FSUB_S, FADD_D, FSUB_D,
@@ -788,6 +791,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     decodedInst.vpu.isExt := vextInsts.map(_ === inst.ALL).reduce(_ || _)
     decodedInst.vpu.isNarrow := narrowInsts.map(_ === inst.ALL).reduce(_ || _)
     decodedInst.vpu.isDstMask := maskDstInsts.map(_ === inst.ALL).reduce(_ || _)
+    decodedInst.vpu.isOpMask := maskOpInsts.map(_ === inst.ALL).reduce(_ || _)
   }
 
   val uopInfoGen = Module(new UopInfoGen)

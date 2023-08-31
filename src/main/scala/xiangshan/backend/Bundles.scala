@@ -309,6 +309,7 @@ object Bundles {
     val isExt     = Bool()
     val isNarrow  = Bool()
     val isDstMask = Bool() // vvm, vvvm, mmm
+    val isOpMask  = Bool() // vmand, vmnand
     val isMove    = Bool() // vmv.s.x, vmv.v.v, vmv.v.x, vmv.v.i
 
     def vtype: VType = {

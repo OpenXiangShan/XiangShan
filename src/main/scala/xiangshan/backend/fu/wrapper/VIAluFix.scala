@@ -8,7 +8,7 @@ import utility.DelayN
 import utils.XSError
 import xiangshan.XSCoreParamsKey
 import xiangshan.backend.fu.vector.Bundles.{VConfig, VSew, ma}
-import xiangshan.backend.fu.vector.{Mgu, VecPipedFuncUnit}
+import xiangshan.backend.fu.vector.{Mgu, Mgtu, VecPipedFuncUnit}
 import xiangshan.backend.fu.vector.Utils.VecDataToMaskDataVec
 import xiangshan.backend.fu.vector.utils.VecDataSplitModule
 import xiangshan.backend.fu.{FuConfig, FuType}
@@ -146,6 +146,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   private val oldVdSplit = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
   private val vIntFixpAlus = Seq.fill(numVecModule)(Module(new VIntFixpAlu64b))
   private val mgu = Module(new Mgu(dataWidth))
+  private val mgtu = Module(new Mgtu(dataWidth))
 
   /**
    * [[typeMod]]'s in connection
@@ -281,7 +282,13 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   mgu.io.in.info.narrow := narrow
   mgu.io.in.info.dstMask := dstMask
 
-  io.out.bits.res.data := mgu.io.out.vd
+  /**
+   * [[mgtu]]'s in connection, for vmask instructions
+   */
+  mgtu.io.in.vd := outVd
+  mgtu.io.in.vl := outVl
+
+  io.out.bits.res.data := Mux(outVecCtrl.isOpMask, mgtu.io.out.vd, mgu.io.out.vd)
   io.out.bits.res.vxsat.get := (Cat(vIntFixpAlus.map(_.io.vxsat)) & mgu.io.out.asUInt).orR
 
   // util function
