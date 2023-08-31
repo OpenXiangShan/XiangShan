@@ -664,16 +664,18 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // These can be put at S0 if timing is bad at S1.
     // Case 0: CACHE_SET(base + offset) != CACHE_SET(base) (lowest 6-bit addition has an overflow)
     s1_addr_mismatch      := s1_ptr_chasing_vaddr(6) || RegEnable(io.ld_fast_imm(11, 6).orR, s0_do_try_ptr_chasing)
-    // Case 1: the address is not 64-bit aligned or the fuOpType is not LD
-    // s1_addr_misaligned    := s1_ptr_chasing_vaddr(2, 0).orR
-    // s1_fu_op_type_not_ld  := io.ldin.bits.uop.ctrl.fuOpType =/= LSUOpType.ld
-    // Case 2: this is not a valid load-load pair
-    s1_not_fast_match     := RegEnable(!io.ld_fast_match, s0_try_ptr_chasing)
-    // Case 3: this load-load uop is cancelled
+    // Case 1: the address is misaligned, kill s0
+    s1_addr_misaligned    := LookupTree(s1_in.uop.ctrl.fuOpType(1, 0), List(
+                             "b00".U   -> true.B,                   //b
+                             "b01".U   -> (s1_vaddr(0)    === 0.U), //h
+                             "b10".U   -> (s1_vaddr(1, 0) === 0.U), //w
+                             "b11".U   -> (s1_vaddr(2, 0) === 0.U)  //d
+                          ))
+    // Case 2: this load-load uop is cancelled
     s1_ptr_chasing_canceled := !io.ldin.valid
 
     when (s1_try_ptr_chasing) {
-      s1_cancel_ptr_chasing := s1_addr_mismatch || s1_addr_misaligned || s1_fu_op_type_not_ld || s1_not_fast_match || s1_ptr_chasing_canceled
+      s1_cancel_ptr_chasing := s1_addr_mismatch || s1_ptr_chasing_canceled
 
       s1_in.uop           := io.ldin.bits.uop
       s1_in.rsIdx         := io.rsIdx
@@ -687,11 +689,15 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       s1_in.uop.debugInfo.tlbRespTime     := GTimer()
     }
     when (!s1_cancel_ptr_chasing) {
-      s0_ptr_chasing_canceled := s1_try_ptr_chasing && !io.replay.fire && !io.fast_rep_in.fire
+      s0_ptr_chasing_canceled := (s1_try_ptr_chasing || s1_addr_misaligned) && !io.replay.fire && !io.fast_rep_in.fire
       when (s1_try_ptr_chasing) {
         io.ldin.ready := true.B
-        s1_mask := genVWmask(s1_vaddr, io.ldin.bits.uop.ctrl.fuOpType)
-        s1_fuOpType := io.ldin.bits.uop.ctrl.fuOpType
+        s1_mask       := genVWmask(s1_vaddr, io.ldin.bits.uop.ctrl.fuOpType)
+        s1_fuOpType   := io.ldin.bits.uop.ctrl.fuOpType
+
+        when (!s1_late_kill) {
+          s1_out.uop.ctrl.exceptionVec(loadAddrMisaligned) := s1_addr_misaligned
+        }
       }
     }
   }
