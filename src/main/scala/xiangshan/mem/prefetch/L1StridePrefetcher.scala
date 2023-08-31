@@ -12,7 +12,7 @@ import xiangshan.mem.{L1PrefetchReq, LdPrefetchTrainBundle}
 import xiangshan.mem.trace._
 import scala.collection.SeqLike
 
-trait HasStridePrefetchHelper extends HasStreamPrefetchHelper {
+trait HasStridePrefetchHelper extends HasL1PrefetchHelper {
   val STRIDE_FILTER_SIZE = 6
   val STRIDE_ENTRY_NUM = 10
   val STRIDE_BITS = 10 + BLOCK_OFFSET
@@ -85,7 +85,7 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     val enable = Input(Bool())
     // TODO: flush all entry when process changing happens, or disable stream prefetch for a while
     val flush = Input(Bool())
-    val dynamic_depth = Input(UInt(DEPTH_BITS.W))
+    val dynamic_depth = Input(UInt(32.W)) // TODO: enable dynamic stride depth
     val train_req = Flipped(DecoupledIO(new PrefetchReqBundle))
     val prefetch_req = ValidIO(new StreamPrefetchReqBundle)
     // query Stream component to see if a stream pattern has already been detected

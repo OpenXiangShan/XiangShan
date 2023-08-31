@@ -49,7 +49,7 @@ class CounterFilterQueryBundle(implicit p: Parameters) extends DCacheBundle {
 // if 3 load insts is accessing the same cache line(set0, way0) in s0, s1, s2
 // they think they all prefetch hit, increment useful prefetch counter 3 times
 // so when load arrives at s3, save it's set&way to an FIFO, all loads will search this FIFO to avoid this case
-class CounterFilter()(implicit p: Parameters) extends DCacheModule{
+class CounterFilter()(implicit p: Parameters) extends DCacheModule {
   val io = IO(new Bundle() {
     // input, only from load for now
     val ld_in = Flipped(Vec(exuParameters.LduCnt, ValidIO(new CounterFilterDataBundle())))
@@ -208,7 +208,7 @@ class FDPrefetcherMonitorBundle()(implicit p: Parameters) extends XSBundle {
   val pf_ctrl = Output(new PrefetchControlBundle)
 }
 
-class FDPrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasPrefetcherMonitorHelper with HasStreamPrefetchHelper {
+class FDPrefetcherMonitor()(implicit p: Parameters) extends XSModule {
   val io = IO(new FDPrefetcherMonitorBundle)
 
   val INTERVAL = 8192

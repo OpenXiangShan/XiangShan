@@ -12,6 +12,90 @@ import xiangshan.mem.{L1PrefetchReq, LdPrefetchTrainBundle}
 import xiangshan.mem.trace._
 import xiangshan.mem.L1PrefetchSource
 
+trait HasL1PrefetchHelper extends HasCircularQueuePtrHelper with HasDCacheParameters {
+  // region related
+  val REGION_SIZE = 1024
+  val PAGE_OFFSET = 12
+  val BLOCK_OFFSET = log2Up(dcacheParameters.blockBytes)
+  val BIT_VEC_WITDH = REGION_SIZE / dcacheParameters.blockBytes
+  val REGION_BITS = log2Up(BIT_VEC_WITDH)
+  val REGION_TAG_OFFSET = BLOCK_OFFSET + REGION_BITS
+  val REGION_TAG_BITS = VAddrBits - BLOCK_OFFSET - REGION_BITS
+
+  // hash related
+  val VADDR_HASH_WIDTH = 5
+  val BLK_ADDR_RAW_WIDTH = 10
+  val HASH_TAG_WIDTH = VADDR_HASH_WIDTH + BLK_ADDR_RAW_WIDTH
+
+  // capacity related
+  val MLP_SIZE = 16
+
+  // prefetch sink related
+  val SINK_BITS = 2
+  def SINK_L1 = "b00".U
+  def SINK_L2 = "b01".U
+  def SINK_L3 = "b10".U
+
+  // vaddr: |       region tag        |  region bits  | block offset |
+  def get_region_tag(vaddr: UInt) = {
+    require(vaddr.getWidth == VAddrBits)
+    vaddr(vaddr.getWidth - 1, REGION_TAG_OFFSET)
+  }
+
+  def get_region_bits(vaddr: UInt) = {
+    require(vaddr.getWidth == VAddrBits)
+    vaddr(REGION_TAG_OFFSET - 1, BLOCK_OFFSET)
+  }
+
+  def block_addr(x: UInt): UInt = {
+    x(x.getWidth - 1, BLOCK_OFFSET)
+  }
+
+  def vaddr_hash(x: UInt): UInt = {
+    val width = VADDR_HASH_WIDTH
+    val low = x(width - 1, 0)
+    val mid = x(2 * width - 1, width)
+    val high = x(3 * width - 1, 2 * width)
+    low ^ mid ^ high
+  }
+
+  def pc_hash_tag(x: UInt): UInt = {
+    val low = x(BLK_ADDR_RAW_WIDTH - 1, 0)
+    val high = x(BLK_ADDR_RAW_WIDTH - 1 + 3 * VADDR_HASH_WIDTH, BLK_ADDR_RAW_WIDTH)
+    val high_hash = vaddr_hash(high)
+    Cat(high_hash, low)
+  }
+
+  def block_hash_tag(x: UInt): UInt = {
+    val blk_addr = block_addr(x)
+    val low = blk_addr(BLK_ADDR_RAW_WIDTH - 1, 0)
+    val high = blk_addr(BLK_ADDR_RAW_WIDTH - 1 + 3 * VADDR_HASH_WIDTH, BLK_ADDR_RAW_WIDTH)
+    val high_hash = vaddr_hash(high)
+    Cat(high_hash, low)
+  }
+
+  def region_hash_tag(region_tag: UInt): UInt = {
+    val low = region_tag(BLK_ADDR_RAW_WIDTH - 1, 0)
+    val high = region_tag(BLK_ADDR_RAW_WIDTH - 1 + 3 * VADDR_HASH_WIDTH, BLK_ADDR_RAW_WIDTH)
+    val high_hash = vaddr_hash(high)
+    Cat(high_hash, low)
+  }
+
+  def region_to_block_addr(region_tag: UInt, region_bits: UInt): UInt = {
+    Cat(region_tag, region_bits)
+  }
+
+  def get_candidate_oh(x: UInt): UInt = {
+    require(x.getWidth == PAddrBits)
+    UIntToOH(x(REGION_BITS + BLOCK_OFFSET - 1, BLOCK_OFFSET))
+  }
+
+  def toBinary(n: Int): String = n match {
+    case 0|1 => s"$n"
+    case _   => s"${toBinary(n/2)}${n%2}"
+  }
+}
+
 trait HasTrainFilterHelper extends HasCircularQueuePtrHelper {
   def reorder[T <: LdPrefetchTrainBundle](source: Vec[ValidIO[T]]): Vec[ValidIO[T]] = {
     if(source.length == 1) {
@@ -58,7 +142,7 @@ trait HasTrainFilterHelper extends HasCircularQueuePtrHelper {
 
 // get prefetch train reqs from `exuParameters.LduCnt` load pipelines (up to `exuParameters.LduCnt`/cycle)
 // filter by cache line address, send out train req to stride (up to 1 req/cycle)
-class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSModule with HasStreamPrefetchHelper with HasTrainFilterHelper {
+class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSModule with HasL1PrefetchHelper with HasTrainFilterHelper {
   val io = IO(new Bundle() {
     val enable = Input(Bool())
     val flush = Input(Bool())
@@ -159,7 +243,7 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
   }
 }
 
-class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasStreamPrefetchHelper {
+class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1PrefetchHelper {
   val tag = UInt(HASH_TAG_WIDTH.W)
   val region = UInt(REGION_TAG_BITS.W)
   val bit_vec = UInt(BIT_VEC_WITDH.W)
@@ -255,7 +339,7 @@ class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasStream
 // 3. actual l1 prefetch
 // 4. actual l2 prefetch
 // 5. actual l3 prefetch
-class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasStreamPrefetchHelper {
+class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL1PrefetchHelper {
   val io = IO(new XSBundle {
     val enable = Input(Bool())
     val flush = Input(Bool())
