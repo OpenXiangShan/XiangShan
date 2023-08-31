@@ -71,7 +71,7 @@ object chiseltest extends CommonModule with SbtModule {
     ivy"org.scalatest::scalatest:3.2.0",
     ivy"com.lihaoyi::utest:0.7.4"
   ) ++ chisel
-  object test extends Tests {
+  object test extends SbtModuleTests with TestModule.ScalaTest {
     def ivyDeps = Agg(ivy"org.scalacheck::scalacheck:1.14.3")
     def testFrameworks = Seq("org.scalatest.tools.Framework")
   }
@@ -90,7 +90,7 @@ object XiangShan extends CommonModule with SbtModule {
     chiseltest
   )
 
-  object test extends Tests {
+  object test extends SbtModuleTests with TestModule.ScalaTest {
 
     override def forkArgs = Seq("-Xmx64G")
 
