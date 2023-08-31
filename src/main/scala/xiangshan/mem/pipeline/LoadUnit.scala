@@ -664,10 +664,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s1_addr_mismatch      := s1_ptr_chasing_vaddr(6) || RegEnable(io.ld_fast_imm(11, 6).orR, s0_do_try_ptr_chasing)
     // Case 1: the address is misaligned, kill s1
     s1_addr_misaligned    := LookupTree(s1_in.uop.ctrl.fuOpType(1, 0), List(
-                             "b00".U   -> true.B,                   //b
-                             "b01".U   -> (s1_vaddr(0)    === 0.U), //h
-                             "b10".U   -> (s1_vaddr(1, 0) === 0.U), //w
-                             "b11".U   -> (s1_vaddr(2, 0) === 0.U)  //d
+                             "b00".U   -> false.B,                   //b
+                             "b01".U   -> (s1_vaddr(0)    =/= 0.U), //h
+                             "b10".U   -> (s1_vaddr(1, 0) =/= 0.U), //w
+                             "b11".U   -> (s1_vaddr(2, 0) =/= 0.U)  //d
                           ))
     // Case 2: this load-load uop is cancelled
     s1_ptr_chasing_canceled := !io.ldin.valid
