@@ -200,7 +200,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s0_high_conf_prf_valid = io.prefetch_req.valid && io.prefetch_req.bits.confidence > 0.U
   val s0_int_iss_valid       = io.ldin.valid // int flow first issue or software prefetch
   val s0_vec_iss_valid       = WireInit(false.B) // TODO
-  val s0_l2l_fwd_valid       = io.l2l_fwd_in.valid
+  val s0_l2l_fwd_valid       = io.l2l_fwd_in.valid && io.ld_fast_match
   val s0_low_conf_prf_valid  = io.prefetch_req.valid && io.prefetch_req.bits.confidence === 0.U
   dontTouch(s0_super_ld_rep_valid)
   dontTouch(s0_ld_fast_rep_valid)
