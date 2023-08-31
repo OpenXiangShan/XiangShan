@@ -613,7 +613,7 @@ case class Imm_LUI_LOAD() {
   def getLuiImm(uop: DynInst): UInt = {
     val loadImmLen = Imm_I().len
     val imm_u = Cat(uop.psrc(1), uop.psrc(0), uop.imm(ImmUnion.maxLen - 1, loadImmLen))
-    Imm_U().do_toImm32(imm_u)
+    Cat(Imm_U().toImm32(imm_u)(31, loadImmLen), uop.imm(loadImmLen - 1, 0))
   }
 }
 

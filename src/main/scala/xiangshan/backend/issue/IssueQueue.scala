@@ -8,7 +8,7 @@ import utility.HasCircularQueuePtrHelper
 import utils._
 import xiangshan._
 import xiangshan.backend.Bundles._
-import xiangshan.backend.decode.ImmUnion
+import xiangshan.backend.decode.{ImmUnion, Imm_LUI_LOAD}
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.{FuConfig, FuType}
@@ -466,6 +466,11 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     when (deqEntryVec(i).bits.payload.isLUI32) {
       val lui_imm = Cat(deqEntryVec(i).bits.payload.lsrc(1), deqEntryVec(i).bits.payload.lsrc(0), deqEntryVec(i).bits.imm(ImmUnion.maxLen - 1, 0))
       deq.bits.common.imm := ImmUnion.LUI32.toImm32(lui_imm)
+    }
+
+    // dirty code for fused_lui_load
+    when (SrcType.isImm(deqEntryVec(i).bits.payload.srcType(0)) && deqEntryVec(i).bits.payload.fuType === FuType.ldu.U) {
+      deq.bits.common.imm := Imm_LUI_LOAD().getLuiImm(deqEntryVec(i).bits.payload)
     }
   }
   io.deqDelay.zip(io.fromCancelNetwork).foreach{ case(deqDly, deq) =>
