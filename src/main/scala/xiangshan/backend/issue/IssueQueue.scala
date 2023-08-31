@@ -5,9 +5,10 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility.HasCircularQueuePtrHelper
-import utils.{MathUtils, OptionWrapper}
+import utils._
 import xiangshan._
 import xiangshan.backend.Bundles._
+import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.{FuConfig, FuType}
@@ -460,6 +461,12 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       sink := source
     }
     deq.bits.immType := deqEntryVec(i).bits.payload.selImm
+
+    // dirty code for lui+addi(w) fusion
+    when (deqEntryVec(i).bits.payload.isLUI32) {
+      val lui_imm = Cat(deqEntryVec(i).bits.payload.lsrc(1), deqEntryVec(i).bits.payload.lsrc(0), deqEntryVec(i).bits.imm(ImmUnion.maxLen - 1, 0))
+      deq.bits.common.imm := ImmUnion.LUI32.toImm32(lui_imm)
+    }
   }
   io.deqDelay.zip(io.fromCancelNetwork).foreach{ case(deqDly, deq) =>
     NewPipelineConnect(

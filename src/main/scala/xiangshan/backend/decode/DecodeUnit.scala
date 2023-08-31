@@ -587,7 +587,7 @@ object ImmUnion {
   val VSETIVLI = Imm_VSETIVLI()
   val LUI32 = Imm_LUI32()
 
-  val imms = Seq(I, S, B, U, J, Z, B6, OPIVIS, OPIVIU, VSETVLI, VSETIVLI, LUI32)
+  val imms = Seq(I, S, B, U, J, Z, B6, OPIVIS, OPIVIU, VSETVLI, VSETIVLI)
   val maxLen = imms.maxBy(_.len).len
   val immSelMap = Seq(
     SelImm.IMM_I,
@@ -601,7 +601,6 @@ object ImmUnion {
     SelImm.IMM_OPIVIU,
     SelImm.IMM_VSETVLI,
     SelImm.IMM_VSETIVLI,
-    SelImm.IMM_LUI32
   ).zip(imms)
   println(s"ImmUnion max len: $maxLen")
 }
@@ -609,7 +608,7 @@ object ImmUnion {
 case class Imm_LUI_LOAD() {
   def immFromLuiLoad(lui_imm: UInt, load_imm: UInt): UInt = {
     val loadImm = load_imm(Imm_I().len - 1, 0)
-    Cat(lui_imm(Imm_U().len - loadImm.getWidth - 1, 0), loadImm)
+    Cat(lui_imm(ImmUnion.maxLen - loadImm.getWidth - 1, 0), loadImm)
   }
   def getLuiImm(uop: DynInst): UInt = {
     val loadImmLen = Imm_I().len

@@ -23,7 +23,7 @@ import utility._
 import utils._
 import xiangshan._
 import xiangshan.backend.Bundles.{DecodedInst, DynInst}
-import xiangshan.backend.decode.{FusionDecodeInfo, Imm_I, Imm_LUI_LOAD, Imm_U}
+import xiangshan.backend.decode.{FusionDecodeInfo, ImmUnion, Imm_I, Imm_LUI_LOAD, Imm_U}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.rename.freelist._
 import xiangshan.backend.rob.RobPtr
@@ -261,6 +261,22 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 //      io.out(i).bits.selImm := SelImm.IMM_S
 //      io.out(i).bits.imm := Cat(io.in(i).bits.imm(io.in(i).bits.imm.getWidth - 1, 5), 0.U(5.W))
 //    }
+
+    // dirty code for lui+addi(w) fusion
+    if (i < RenameWidth - 1) {
+      val fused_lui32 = io.in(i).bits.selImm === SelImm.IMM_LUI32 && io.in(i).bits.fuType === FuType.alu.U
+      when (fused_lui32) {
+        val lui_imm = io.in(i).bits.imm(19, 0)
+        val add_imm = io.in(i + 1).bits.imm(11, 0)
+        io.out(i).bits.imm := Imm_LUI_LOAD().immFromLuiLoad(lui_imm, add_imm)
+        val lsrcWidth = uops(i).lsrc.head.getWidth
+        val lui_imm_in_imm = ImmUnion.maxLen - Imm_I().len
+        val left_lui_imm = Imm_U().len - lui_imm_in_imm
+        require(2 * lsrcWidth >= left_lui_imm, "cannot fused lui and addi(w) with lsrc")
+        io.out(i).bits.lsrc(0) := lui_imm(lui_imm_in_imm + lsrcWidth - 1, lui_imm_in_imm)
+        io.out(i).bits.lsrc(1) := lui_imm(lui_imm.getWidth - 1, lui_imm_in_imm + lsrcWidth)
+      }
+    }
 
     // write speculative rename table
     // we update rat later inside commit code
