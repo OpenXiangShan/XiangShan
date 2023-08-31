@@ -128,8 +128,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // load to load fast path
     val l2l_fwd_in    = Input(new LoadToLoadIO)
     val l2l_fwd_out   = Output(new LoadToLoadIO)
-    val ld_fast_match = Input(Bool())
-    val ld_fast_imm   = Input(UInt(12.W))
+
+    val ld_fast_match    = Input(Bool())
+    val ld_fast_fuOpType = Input(UInt())
+    val ld_fast_imm      = Input(UInt(12.W))
 
     // rs feedback
     val feedback_fast = ValidIO(new RSFeedback) // stage 2
@@ -443,10 +445,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   def fromLoadToLoadSource(src: LoadToLoadIO) = {
     s0_vaddr              := Cat(src.data(XLEN-1, 6), s0_ptr_chasing_vaddr(5,0))
-    s0_mask               := genVWmask(s0_vaddr, LSUOpType.ld)
+    s0_mask               := genVWmask(s0_vaddr, io.ld_fast_fuOpType)
     // When there's no valid instruction from RS and LSQ, we try the load-to-load forwarding.
     // Assume the pointer chasing is always ld.
-    s0_uop.ctrl.fuOpType  := LSUOpType.ld
+    s0_uop.ctrl.fuOpType  := io.ld_fast_fuOpType
     s0_try_l2l            := true.B
     // we dont care s0_isFirstIssue and s0_rsIdx and s0_sqIdx in S0 when trying pointchasing
     // because these signals will be updated in S1
@@ -619,14 +621,12 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                        isAfter(s1_in.uop.robIdx, io.stld_nuke_query(w).bits.robIdx) && // older store
                        // TODO: Fix me when vector instruction
                        (s1_paddr_dup_lsu(PAddrBits-1, 3) === io.stld_nuke_query(w).bits.paddr(PAddrBits-1, 3)) && // paddr match
-                       (s1_out.mask & io.stld_nuke_query(w).bits.mask).orR // data mask contain
+                       (s1_in.mask & io.stld_nuke_query(w).bits.mask).orR // data mask contain
                       })).asUInt.orR && !s1_tlb_miss
 
   s1_out                   := s1_in
   s1_out.vaddr             := s1_vaddr
   s1_out.paddr             := s1_paddr_dup_lsu
-  s1_out.mask              := s1_mask
-  s1_out.uop.ctrl.fuOpType := s1_fuOpType
   s1_out.tlbMiss           := s1_tlb_miss
   s1_out.ptwBack           := io.tlb.resp.bits.ptwBack
   s1_out.rsIdx             := s1_in.rsIdx
@@ -664,7 +664,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // These can be put at S0 if timing is bad at S1.
     // Case 0: CACHE_SET(base + offset) != CACHE_SET(base) (lowest 6-bit addition has an overflow)
     s1_addr_mismatch      := s1_ptr_chasing_vaddr(6) || RegEnable(io.ld_fast_imm(11, 6).orR, s0_do_try_ptr_chasing)
-    // Case 1: the address is misaligned, kill s0
+    // Case 1: the address is misaligned, kill s1
     s1_addr_misaligned    := LookupTree(s1_in.uop.ctrl.fuOpType(1, 0), List(
                              "b00".U   -> true.B,                   //b
                              "b01".U   -> (s1_vaddr(0)    === 0.U), //h
@@ -675,7 +675,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s1_ptr_chasing_canceled := !io.ldin.valid
 
     when (s1_try_ptr_chasing) {
-      s1_cancel_ptr_chasing := s1_addr_mismatch || s1_ptr_chasing_canceled
+      s1_cancel_ptr_chasing := s1_addr_mismatch || s1_addr_misaligned || s1_ptr_chasing_canceled
 
       s1_in.uop           := io.ldin.bits.uop
       s1_in.rsIdx         := io.rsIdx
@@ -689,15 +689,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       s1_in.uop.debugInfo.tlbRespTime     := GTimer()
     }
     when (!s1_cancel_ptr_chasing) {
-      s0_ptr_chasing_canceled := (s1_try_ptr_chasing || s1_addr_misaligned) && !io.replay.fire && !io.fast_rep_in.fire
+      s0_ptr_chasing_canceled := s1_try_ptr_chasing && !io.replay.fire && !io.fast_rep_in.fire
       when (s1_try_ptr_chasing) {
         io.ldin.ready := true.B
-        s1_mask       := genVWmask(s1_vaddr, io.ldin.bits.uop.ctrl.fuOpType)
-        s1_fuOpType   := io.ldin.bits.uop.ctrl.fuOpType
-
-        when (!s1_late_kill) {
-          s1_out.uop.ctrl.exceptionVec(loadAddrMisaligned) := s1_addr_misaligned
-        }
       }
     }
   }
