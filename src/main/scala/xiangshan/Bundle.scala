@@ -357,6 +357,10 @@ class ExuInput(isVpu: Boolean = false)(implicit p: Parameters) extends XSBundleW
   val dataWidth = if (isVpu) VLEN else XLEN
 
   val src = Vec(4, UInt(dataWidth.W))
+  def src_rs1 = src(0) // base address
+  def src_stride = src(1) // stride in strided/unit-stride instrs, or index in indexed instrs
+  def src_vs3 = src(2)
+  def src_mask = src(3)
 }
 
 class ExuOutput(isVpu: Boolean = false)(implicit p: Parameters) extends XSBundleWithMicroOp {

@@ -72,7 +72,9 @@ object shiftMaskToLow {
   }
 }
 
-class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with HasDCacheParameters{
+class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp
+  with HasDCacheParameters
+  with HasVLSUParameters {
   val vaddr = UInt(VAddrBits.W)
   val paddr = UInt(PAddrBits.W)
   // val func = UInt(6.W)
@@ -102,11 +104,11 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
   val is_first_ele = Bool()
   val flow_index = UInt(8.W)
   val uop_unit_stride_fof = Bool()
-  val rob_idx_valid = Vec(2,Bool())
-  val inner_idx = Vec(2,UInt(3.W))
-  val rob_idx = Vec(2,new RobPtr)
-  val reg_offset = Vec(2,UInt(4.W))
-  val offset = Vec(2,UInt(4.W))
+  // val rob_idx_valid = Vec(2,Bool())
+  // val inner_idx = Vec(2,UInt(3.W))
+  // val rob_idx = Vec(2,new RobPtr)
+  val reg_offset = UInt(vOffsetBits.W)
+  // val offset = Vec(2,UInt(4.W))
   val fqIdx = UInt(log2Ceil(VsFlowSize).W)
 
   // For debug usage
@@ -162,11 +164,11 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     flow_index := input.flow_index
     is_first_ele := input.is_first_ele
     uop_unit_stride_fof := input.uop_unit_stride_fof
-    rob_idx_valid := input.rob_idx_valid
-    rob_idx := input.rob_idx
-    inner_idx := input.inner_idx
+    // rob_idx_valid := input.rob_idx_valid
+    // rob_idx := input.rob_idx
+    // inner_idx := input.inner_idx
     reg_offset := input.reg_offset
-    offset := input.offset
+    // offset := input.offset
     fqIdx := input.fqIdx
     isFirstIssue := input.isFirstIssue
     dcacheRequireReplay := input.dcacheRequireReplay
@@ -224,11 +226,11 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     is128bit := input.is128bit
     exp := input.exp
     uop_unit_stride_fof := input.uop_unit_stride_fof
-    rob_idx_valid := input.rob_idx_valid
-    rob_idx := input.rob_idx
-    inner_idx := input.inner_idx
+    // rob_idx_valid := input.rob_idx_valid
+    // rob_idx := input.rob_idx
+    // inner_idx := input.inner_idx
     reg_offset := input.reg_offset
-    offset := input.offset
+    // offset := input.offset
     fqIdx := input.fqIdx
     
     isFirstIssue := input.isFirstIssue

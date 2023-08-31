@@ -92,6 +92,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   with HasPerfEvents
   with HasDCacheParameters
   with HasCircularQueuePtrHelper
+  with HasVLSUParameters
 {
   val io = IO(new Bundle() {
     // control
@@ -194,11 +195,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s0_isvec               = WireInit(false.B)
   val s0_is128bit            = WireInit(false.B)
   val s0_uop_unit_stride_fof = WireInit(false.B)
-  val s0_rob_idx_valid       = WireInit(VecInit(Seq.fill(2)(false.B)))
-  val s0_inner_idx           = WireInit(VecInit(Seq.fill(2)(0.U(3.W))))
-  val s0_rob_idx             = WireInit(VecInit(Seq.fill(2)(0.U.asTypeOf(new RobPtr))))
-  val s0_reg_offset          = WireInit(VecInit(Seq.fill(2)(0.U(4.W))))
-  val s0_offset              = WireInit(VecInit(Seq.fill(2)(0.U(4.W))))
+  // val s0_rob_idx_valid       = WireInit(VecInit(Seq.fill(2)(false.B)))
+  // val s0_inner_idx           = WireInit(VecInit(Seq.fill(2)(0.U(3.W))))
+  // val s0_rob_idx             = WireInit(VecInit(Seq.fill(2)(0.U.asTypeOf(new RobPtr))))
+  val s0_reg_offset          = WireInit(0.U(vOffsetBits.W))
+  // val s0_offset              = WireInit(VecInit(Seq.fill(2)(0.U(4.W))))
   val s0_exp                 = WireInit(true.B)
   val s0_is_first_ele        = WireInit(false.B)
 
@@ -467,11 +468,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // TODO: VLSU, whether req is 128 bits should be separated
     s0_is128bit            := true.B
     s0_uop_unit_stride_fof := src.uop_unit_stride_fof
-    s0_rob_idx_valid       := src.rob_idx_valid
-    s0_inner_idx           := src.inner_idx
-    s0_rob_idx             := src.rob_idx
+    // s0_rob_idx_valid       := src.rob_idx_valid
+    // s0_inner_idx           := src.inner_idx
+    // s0_rob_idx             := src.rob_idx
     s0_reg_offset          := src.reg_offset
-    s0_offset              := src.offset
+    // s0_offset              := src.offset
     s0_exp                 := src.exp
     s0_is_first_ele        := src.is_first_ele
   }
@@ -541,11 +542,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s0_out.isvec           := s0_isvec
   s0_out.is128bit        := s0_is128bit
   s0_out.uop_unit_stride_fof := s0_uop_unit_stride_fof
-  s0_out.rob_idx_valid   := s0_rob_idx_valid
-  s0_out.inner_idx       := s0_inner_idx
-  s0_out.rob_idx         := s0_rob_idx
+  // s0_out.rob_idx_valid   := s0_rob_idx_valid
+  // s0_out.inner_idx       := s0_inner_idx
+  // s0_out.rob_idx         := s0_rob_idx
   s0_out.reg_offset      := s0_reg_offset
-  s0_out.offset          := s0_offset
+  // s0_out.offset          := s0_offset
   s0_out.exp             := s0_exp
   s0_out.is_first_ele    := s0_is_first_ele
   s0_out.uop.cf.exceptionVec(loadAddrMisaligned) := !s0_addr_aligned && s0_exp
@@ -1126,10 +1127,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_vecout.isvec             := s3_isvec
   s3_vecout.vecdata           := 0.U // Data will be assigned later
   s3_vecout.mask              := s3_in.mask
-  s3_vecout.rob_idx_valid     := s3_in.rob_idx_valid
-  s3_vecout.inner_idx         := s3_in.inner_idx
-  s3_vecout.rob_idx           := s3_in.rob_idx
-  s3_vecout.offset            := s3_in.offset
+  // s3_vecout.rob_idx_valid     := s3_in.rob_idx_valid
+  // s3_vecout.inner_idx         := s3_in.inner_idx
+  // s3_vecout.rob_idx           := s3_in.rob_idx
+  // s3_vecout.offset            := s3_in.offset
   s3_vecout.reg_offset        := s3_in.reg_offset
   s3_vecout.exp               := s3_exp
   s3_vecout.is_first_ele      := s3_in.is_first_ele

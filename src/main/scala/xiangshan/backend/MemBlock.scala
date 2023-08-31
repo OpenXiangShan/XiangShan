@@ -454,7 +454,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.ldin <> io.ooo_to_mem.issue(i)
 
     // vector input from vector load queue
-    loadUnits(i).io.vecldin <> vectorLoadWrapperModule.io.loadPipeOut(i)
+    loadUnits(i).io.vecldin <> vectorLoadWrapperModule.io.pipeIssue(i)
 
     loadUnits(i).io.feedback_slow <> io.rsfeedback(i).feedbackSlow
     loadUnits(i).io.feedback_fast <> io.rsfeedback(i).feedbackFast
@@ -539,7 +539,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // io.memPredUpdate(i) := DontCare
 
     // vector load resp
-    vectorLoadWrapperModule.io.loadPipleIn(i) <> loadUnits(i).io.vecldout
+    vectorLoadWrapperModule.io.pipeResult(i) <> loadUnits(i).io.vecldout
+    // !!!!!!!!!!!!!!! TODO !!!!!!!!!!!!!!!
+    vectorLoadWrapperModule.io.pipeReplay(i) <> DontCare
 
     // --------------------------------
     // Load Triggers
@@ -578,8 +580,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
 
   // vector store
-  vsUopQueue.io.Redirect <> redirect
-  vsFlowQueue.io.Redirect <> redirect
+  vsUopQueue.io.redirect <> redirect
+  vsFlowQueue.io.redirect <> redirect
   for (i <- 0 until VecStorePipelineWidth) {
     // TODO: VLSU, implement it
     vsUopQueue.io.storeIn(i) := DontCare
@@ -718,15 +720,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   dcache.io.force_write := lsq.io.force_write
 
   // vector loadqueue wrapper
-  vectorLoadWrapperModule.io.loadRegIn := DontCare
-  vectorLoadWrapperModule.io.Redirect := DontCare
-  vectorLoadWrapperModule.io.vecLoadWriteback := DontCare
-  vectorLoadWrapperModule.io.vecFeedback := DontCare
-
-  for (i <- 0 until 2) {
-    dontTouch(vectorLoadWrapperModule.io.loadPipleIn(i))
-    vectorLoadWrapperModule.io.loadPipleIn(i) <> loadUnits(i).io.vecldout
-  }
+  /**
+    * TODO @hx @zlj
+    */
+  vectorLoadWrapperModule.io.redirect := redirect
+  vectorLoadWrapperModule.io.loadRegIn <> DontCare
+  vectorLoadWrapperModule.io.uopWriteback <> DontCare
 
   // Sbuffer
   sbuffer.io.csrCtrl    <> csrCtrl

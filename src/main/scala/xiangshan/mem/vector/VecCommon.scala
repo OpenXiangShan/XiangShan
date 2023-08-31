@@ -24,7 +24,35 @@ import utility._
 import xiangshan._
 import xiangshan.backend.rob.RobPtr
 
-class VecOperand(implicit p: Parameters) extends XSBundleWithMicroOp {
+/**
+  * Common used parameters or functions in vlsu
+  */
+trait HasVLSUParameters extends HasXSParameter {
+  def VLENB = VLEN/8
+  def vOffsetBits = log2Up(VLENB) // bits-width to index offset inside a vector reg
+
+  def alignTypeBits = 2 // eew/sew = 1/2/4/8
+  def maxUopNum = 8
+  def maxFlowNum = 16
+  def maxElemNum = maxUopNum * maxFlowNum // 128
+  def elemIdxBits = log2Up(maxElemNum) + 1 // 8
+
+  def ewBits = 3 // bits-width of EEW/SEW
+  // TODO
+}
+
+abstract class VLSUModule(implicit p: Parameters) extends XSModule
+  with HasVLSUParameters
+  with HasCircularQueuePtrHelper
+abstract class VLSUBundle(implicit p: Parameters) extends XSBundle
+  with HasVLSUParameters
+
+class VLSUBundleWithMicroOp(implicit p: Parameters) extends VLSUBundle {
+  val uop = new MicroOp
+}
+
+// Where is VecOperand used?
+class VecOperand(implicit p: Parameters) extends VLSUBundleWithMicroOp {
   val vmask = UInt(VLEN.W) // the mask of inst which is readed from reg
   val vecData = UInt(VLEN.W)
   val baseaddr = UInt(VAddrBits.W) // base address from rs1
@@ -44,14 +72,14 @@ class VecOperand(implicit p: Parameters) extends XSBundleWithMicroOp {
   val total_num = UInt(3.W) // An inst to how many uops
 }
 
-class VecDecode(implicit p: Parameters) extends XSBundle {
+class VecDecode(implicit p: Parameters) extends VLSUBundle {
   val uop_segment_num = UInt(3.W)
   val uop_type = UInt(2.W)
   val mask_en = Bool()
   val uop_unit_stride_whole_reg = Bool()
   val uop_unit_stride_mask = Bool()
   val uop_unit_stride_fof = Bool()
-  val uop_eew = UInt(3.W) // this is also the index width when the inst is a index load
+  val uop_eew = UInt(ewBits.W) // this is also the index width when the inst is a index load
 
   def apply(inst: UInt) = {
     this.uop_segment_num := inst(31, 29)
@@ -60,30 +88,31 @@ class VecDecode(implicit p: Parameters) extends XSBundle {
     this.uop_unit_stride_whole_reg := (inst(24,20) === "b01000".U)
     this.uop_unit_stride_mask := (inst(24,20) === "b01011".U)
     this.uop_unit_stride_fof := (inst(24,20) === "b10000".U)
-    this.uop_eew := inst(14, 12)
+    this.uop_eew := inst(12 + ewBits - 1, 12)
     this
   }
 }
 
-class OnlyVecExuOutput(implicit p: Parameters) extends XSBundle {
+class OnlyVecExuOutput(implicit p: Parameters) extends VLSUBundle {
   val isvec = Bool()
   val vecdata = UInt(VLEN.W)
-  val mask = UInt((VLEN/8).W)
-  val rob_idx_valid = Vec(2, Bool())
-  val inner_idx = Vec(2, UInt(3.W))
-  val rob_idx = Vec(2, new RobPtr)
-  val offset = Vec(2, UInt(4.W))
-  val reg_offset = Vec(2, UInt(4.W))
+  val mask = UInt(VLENB.W)
+  // val rob_idx_valid = Vec(2, Bool())
+  // val inner_idx = Vec(2, UInt(3.W))
+  // val rob_idx = Vec(2, new RobPtr)
+  // val offset = Vec(2, UInt(4.W))
+  val reg_offset = UInt(vOffsetBits.W)
   val exp = Bool()
   val is_first_ele = Bool()
-  val exp_ele_index = UInt(8.W)
+  val exp_ele_index = UInt(elemIdxBits.W)
 }
 
-class VecExuOutput(implicit p: Parameters) extends ExuOutput {
+class VecExuOutput(implicit p: Parameters) extends ExuOutput with HasVLSUParameters {
   val vec = new OnlyVecExuOutput
 }
 
-class Uop2Flow(implicit p: Parameters) extends ExuInput(isVpu = true){
+// Not used for now
+class Uop2Flow(implicit p: Parameters) extends ExuInput(isVpu = true) with HasVLSUParameters {
   val vstart   = UInt(8.W)
   val mask     = UInt(16.W)
   val eew      = UInt(3.W)

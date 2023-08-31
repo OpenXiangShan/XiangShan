@@ -25,7 +25,7 @@ import xiangshan._
 import xiangshan.backend.rob.RobPtr
 
 class VlUopFreeList(size: Int, allocWidth: Int, maxIdxNum: Int, freeWidth: Int, moduleName: String = "")(implicit p: Parameters)
-  extends XSModule with HasCircularQueuePtrHelper {
+  extends VLSUModule {
   val io = IO(new Bundle(){
     val accllReq = Vec(allocWidth,Flipped(Decoupled(UInt(log2Up(maxIdxNum + 1).W))))
     val idxValue = Output(Vec(allocWidth,Vec(maxIdxNum,UInt(log2Ceil(size).W))))
