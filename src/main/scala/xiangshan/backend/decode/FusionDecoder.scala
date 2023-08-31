@@ -78,7 +78,6 @@ abstract class BaseFusionCase(pair: Seq[Valid[UInt]])(implicit p: Parameters)
   }
   def src2Type: Option[Int] = compareAndGet(getInstrSrc2Type)
   def selImm: Option[UInt] = None
-  def imm: Option[UInt] = None
   def lsrc2NeedZero: Boolean = false
   def lsrc2NeedMux: Boolean = false
   def lsrc2MuxResult: UInt = Mux(destToRs1, instr2Rs2, instr2Rs1)
@@ -479,11 +478,10 @@ class FusedLui32(pair: Seq[Valid[UInt]])(implicit p: Parameters)
 
   override def fuOpType: Option[UInt => UInt] = Some((_: UInt) => ALUOpType.lui32add)
   override def selImm: Option[UInt] = Some(SelImm.IMM_LUI32)
-  override def imm: Option[UInt] = Some(Cat(instr(0)(31, 12), instr(1)(31, 20)))
 
   def fusionName: String = "lui_addi"
 
-  XSDebug(isValid, p"[fusedLui32] ${Hexadecimal(imm.get)} instr0=${Hexadecimal(instr(0))} instr1=${Hexadecimal(instr(1))}\n")
+  XSDebug(isValid, p"[fusedLui32] instr0=${Hexadecimal(instr(0))} instr1=${Hexadecimal(instr(1))}\n")
 }
 
 // Case: get 32 bits imm (in word format)
@@ -498,11 +496,10 @@ class FusedLui32w(pair: Seq[Valid[UInt]])(implicit p: Parameters)
 
   override def fuOpType: Option[UInt => UInt] = Some((_: UInt) => ALUOpType.lui32addw)
   override def selImm: Option[UInt] = Some(SelImm.IMM_LUI32)
-  override def imm: Option[UInt] = Some(Cat(instr(0)(31, 12), instr(1)(31, 20)))
 
   def fusionName: String = "lui_addiw"
 
-  XSDebug(isValid, p"[fusedLui32w] ${Hexadecimal(imm.get)} instr0=${Hexadecimal(instr(0))} instr1=${Hexadecimal(instr(1))}\n")
+  XSDebug(isValid, p"[fusedLui32w] instr0=${Hexadecimal(instr(0))} instr1=${Hexadecimal(instr(1))}\n")
 }
 
 class FusionDecodeInfo extends Bundle {
@@ -517,7 +514,6 @@ class FusionDecodeReplace extends Bundle {
   val lsrc2 = Valid(UInt(6.W))
   val src2Type = Valid(SrcType())
   val selImm = Valid(SelImm())
-  val imm = Valid(UInt(ImmUnion.maxLen.W))
 
   def update(cs: DecodedInst): Unit = {
     when (fuType.valid) {
@@ -534,9 +530,6 @@ class FusionDecodeReplace extends Bundle {
     }
     when (selImm.valid) {
       cs.selImm := selImm.bits
-    }
-    when (imm.valid) {
-      cs.imm := imm.bits
     }
   }
 }
@@ -645,7 +638,7 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
     connectByUIntFunc((x: FusionDecodeReplace) => x.fuOpType, (x: DecodedInst) => x.fuOpType, fusionList.map(_.fuOpType))
     connectByInt((x: FusionDecodeReplace) => x.src2Type, fusionList.map(_.src2Type))
     connectByUInt((x: FusionDecodeReplace) => x.selImm, fusionList.map(_.selImm), false)
-    connectByUInt((x: FusionDecodeReplace) => x.imm, fusionList.map(_.imm), true)
+
     val src2WithZero = VecInit(fusionVec.zip(fusionList.map(_.lsrc2NeedZero)).filter(_._2).map(_._1)).asUInt.orR
     val src2WithMux = VecInit(fusionVec.zip(fusionList.map(_.lsrc2NeedMux)).filter(_._2).map(_._1)).asUInt.orR
     io.info(i).rs2FromZero := src2WithZero
@@ -665,9 +658,9 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
     }
     XSPerfAccumulate(s"conflict_fusion_$i", instrPairValid && thisCleared && fusionVec.asUInt.orR && lastFire)
 
-    XSDebug(out.valid, p"[fusion] valid ${i}, outvalid: ${out.bits.fuType.valid} ${out.bits.fuOpType.valid} ${out.bits.src2Type.valid} ${out.bits.lsrc2.valid} ${out.bits.selImm.valid} ${out.bits.imm.valid}\n")
-    XSDebug(out.valid, p"[fusion] valid ${i}, outbits: ${out.bits.fuType.bits} ${out.bits.fuOpType.bits} ${out.bits.src2Type.bits} ${out.bits.lsrc2.bits} ${out.bits.selImm.bits} ${Hexadecimal(out.bits.imm.bits)}\n")
+    XSDebug(out.valid, p"[fusion] valid ${i}, outvalid: ${out.bits.fuType.valid} ${out.bits.fuOpType.valid} ${out.bits.src2Type.valid} ${out.bits.lsrc2.valid} ${out.bits.selImm.valid}\n")
+    XSDebug(out.valid, p"[fusion] valid ${i}, outbits: ${out.bits.fuType.bits} ${out.bits.fuOpType.bits} ${out.bits.src2Type.bits} ${out.bits.lsrc2.bits} ${out.bits.selImm.bits}\n")
   }
 
-  XSPerfAccumulate("fused_instr", PopCount(io.out.map(_.fire)))
+  XSPerfAccumulate("fused_instr", PopCount(io.out.zipWithIndex.map{ case (x, i) => x.valid && RegNext(io.in(i).valid && io.inReady(i)) }))
 }
