@@ -445,7 +445,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   def fromLoadToLoadSource(src: LoadToLoadIO) = {
     s0_vaddr              := Cat(src.data(XLEN-1, 6), s0_ptr_chasing_vaddr(5,0))
-    s0_mask               := genVWmask(s0_vaddr, io.ld_fast_fuOpType)
+    s0_mask               := genVWmask(s0_vaddr, io.ld_fast_fuOpType(1, 0))
     // When there's no valid instruction from RS and LSQ, we try the load-to-load forwarding.
     // Assume the pointer chasing is always ld.
     s0_uop.ctrl.fuOpType  := io.ld_fast_fuOpType
@@ -570,8 +570,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s1_vaddr            = Wire(UInt())
   val s1_paddr_dup_lsu    = Wire(UInt())
   val s1_paddr_dup_dcache = Wire(UInt())
-  val s1_mask             = WireInit(s1_in.mask)
-  val s1_fuOpType         = WireInit(s1_in.uop.ctrl.fuOpType)
   val s1_exception        = ExceptionNO.selectByFu(s1_out.uop.cf.exceptionVec, lduCfg).asUInt.orR   // af & pf exception were modified below.
   val s1_tlb_miss         = io.tlb.resp.bits.miss
   val s1_prf              = s1_in.isPrefetch
