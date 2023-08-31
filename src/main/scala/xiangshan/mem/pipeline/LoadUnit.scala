@@ -661,8 +661,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // Case 0: CACHE_SET(base + offset) != CACHE_SET(base) (lowest 6-bit addition has an overflow)
     s1_addr_mismatch      := s1_ptr_chasing_vaddr(6) || RegEnable(io.ld_fast_imm(11, 6).orR, s0_do_try_ptr_chasing)
     // Case 1: the address is not 64-bit aligned or the fuOpType is not LD
-    s1_addr_misaligned    := s1_ptr_chasing_vaddr(2, 0).orR
-    s1_fu_op_type_not_ld  := io.ldin.bits.uop.ctrl.fuOpType =/= LSUOpType.ld
+    // s1_addr_misaligned    := s1_ptr_chasing_vaddr(2, 0).orR
+    // s1_fu_op_type_not_ld  := io.ldin.bits.uop.ctrl.fuOpType =/= LSUOpType.ld
     // Case 2: this is not a valid load-load pair
     s1_not_fast_match     := RegEnable(!io.ld_fast_match, s0_try_ptr_chasing)
     // Case 3: this load-load uop is cancelled
@@ -674,7 +674,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       s1_in.uop           := io.ldin.bits.uop
       s1_in.rsIdx         := io.rsIdx
       s1_in.isFirstIssue  := io.isFirstIssue
-      s1_vaddr_lo         := Cat(s1_ptr_chasing_vaddr(5, 3), 0.U(3.W))
+      s1_vaddr_lo         := s1_ptr_chasing_vaddr(5, 0)
       s1_paddr_dup_lsu    := Cat(io.tlb.resp.bits.paddr(0)(PAddrBits - 1, 6), s1_vaddr_lo)
       s1_paddr_dup_dcache := Cat(io.tlb.resp.bits.paddr(0)(PAddrBits - 1, 6), s1_vaddr_lo)
 
