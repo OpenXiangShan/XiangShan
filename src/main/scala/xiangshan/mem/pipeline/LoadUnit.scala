@@ -443,10 +443,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   def fromLoadToLoadSource(src: LoadToLoadIO) = {
     s0_vaddr              := Cat(src.data(XLEN-1, 6), s0_ptr_chasing_vaddr(5,0))
-    s0_mask               := genVWmask(s0_vaddr, src.uop.ctrl.fuOpType)
+    s0_mask               := genVWmask(s0_vaddr, LSUOpType.ld)
     // When there's no valid instruction from RS and LSQ, we try the load-to-load forwarding.
     // Assume the pointer chasing is always ld.
-    s0_uop.ctrl.fuOpType  := src.uop.ctrl.fuOpType
+    s0_uop.ctrl.fuOpType  := LSUOpType.ld
     s0_try_l2l            := true.B
     // we dont care s0_isFirstIssue and s0_rsIdx and s0_sqIdx in S0 when trying pointchasing
     // because these signals will be updated in S1
@@ -568,6 +568,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s1_vaddr            = Wire(UInt())
   val s1_paddr_dup_lsu    = Wire(UInt())
   val s1_paddr_dup_dcache = Wire(UInt())
+  val s1_mask             = WireInit(s1_in.mask)
+  val s1_fuOpType         = WireInit(s1_in.uop.ctrl.fuOpType)
   val s1_exception        = ExceptionNO.selectByFu(s1_out.uop.cf.exceptionVec, lduCfg).asUInt.orR   // af & pf exception were modified below.
   val s1_tlb_miss         = io.tlb.resp.bits.miss
   val s1_prf              = s1_in.isPrefetch
@@ -617,18 +619,20 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                        isAfter(s1_in.uop.robIdx, io.stld_nuke_query(w).bits.robIdx) && // older store
                        // TODO: Fix me when vector instruction
                        (s1_paddr_dup_lsu(PAddrBits-1, 3) === io.stld_nuke_query(w).bits.paddr(PAddrBits-1, 3)) && // paddr match
-                       (s1_in.mask & io.stld_nuke_query(w).bits.mask).orR // data mask contain
+                       (s1_out.mask & io.stld_nuke_query(w).bits.mask).orR // data mask contain
                       })).asUInt.orR && !s1_tlb_miss
 
-  s1_out                  := s1_in
-  s1_out.vaddr            := s1_vaddr
-  s1_out.paddr            := s1_paddr_dup_lsu
-  s1_out.tlbMiss          := s1_tlb_miss
-  s1_out.ptwBack          := io.tlb.resp.bits.ptwBack
-  s1_out.rsIdx            := s1_in.rsIdx
-  s1_out.rep_info.debug   := s1_in.uop.debugInfo
-  s1_out.rep_info.nuke    := s1_nuke && !s1_sw_prf
-  s1_out.lateKill         := s1_late_kill
+  s1_out                   := s1_in
+  s1_out.vaddr             := s1_vaddr
+  s1_out.paddr             := s1_paddr_dup_lsu
+  s1_out.mask              := s1_mask
+  s1_out.uop.ctrl.fuOpType := s1_fuOpType
+  s1_out.tlbMiss           := s1_tlb_miss
+  s1_out.ptwBack           := io.tlb.resp.bits.ptwBack
+  s1_out.rsIdx             := s1_in.rsIdx
+  s1_out.rep_info.debug    := s1_in.uop.debugInfo
+  s1_out.rep_info.nuke     := s1_nuke && !s1_sw_prf
+  s1_out.lateKill          := s1_late_kill
 
   when (!s1_late_kill) {
     // current ori test will cause the case of ldest == 0, below will be modifeid in the future.
@@ -686,6 +690,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       s0_ptr_chasing_canceled := s1_try_ptr_chasing && !io.replay.fire && !io.fast_rep_in.fire
       when (s1_try_ptr_chasing) {
         io.ldin.ready := true.B
+        s1_mask := genVWmask(s1_vaddr, io.ldin.bits.uop.ctrl.fuOpType)
+        s1_fuOpType := io.ldin.bits.uop.ctrl.fuOpType
       }
     }
   }
