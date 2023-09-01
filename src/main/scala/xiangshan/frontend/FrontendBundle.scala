@@ -513,7 +513,7 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
 
   def fromFtbEntry(entry: FTBEntry, pc: UInt, last_stage: Option[Tuple2[UInt, Bool]] = None) = {
     slot_valids := entry.brSlots.map(_.valid) :+ entry.tailSlot.valid
-    targets := entry.getTargetVec(pc)
+    targets := entry.getTargetVec(pc, last_stage) // Use previous stage pc for better timing
     jalr_target := targets.last
     offsets := entry.getOffsetVec
     is_jal := entry.tailSlot.valid && entry.isJal

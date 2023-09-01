@@ -77,10 +77,13 @@ class FtbSlot(val offsetLen: Int, val subOffsetLen: Option[Int] = None)(implicit
   def getTarget(pc: UInt, last_stage: Option[Tuple2[UInt, Bool]] = None) = {
     def getTarget(offLen: Int)(pc: UInt, lower: UInt, stat: UInt,
       last_stage: Option[Tuple2[UInt, Bool]] = None) = {
-      val h = pc(VAddrBits-1, offLen+1)
-      val higher = Wire(UInt((VAddrBits-offLen-1).W))
-      val higher_plus_one = Wire(UInt((VAddrBits-offLen-1).W))
+      val h                = pc(VAddrBits - 1, offLen + 1)
+      val higher           = Wire(UInt((VAddrBits - offLen - 1).W))
+      val higher_plus_one  = Wire(UInt((VAddrBits - offLen - 1).W))
       val higher_minus_one = Wire(UInt((VAddrBits-offLen-1).W))
+
+      // Switch between previous stage pc and current stage pc
+      // Give flexibility for timing
       if (last_stage.isDefined) {
         val last_stage_pc = last_stage.get._1
         val last_stage_pc_h = last_stage_pc(VAddrBits-1, offLen+1)
