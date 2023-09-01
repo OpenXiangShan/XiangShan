@@ -547,26 +547,28 @@ class SpeculativeInfo(implicit p: Parameters) extends XSBundle
 @chiselName
 class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
   with HasBPUConst with BPUUtils {
-  val pc = UInt(VAddrBits.W)
-  val valid = Bool()
-  val hasRedirect = Bool()
+  val pc    = Vec(numDup, UInt(VAddrBits.W))
+  val valid = Vec(numDup, Bool())
+  val hasRedirect  = Vec(numDup, Bool())
   val ftq_idx = new FtqPtr
-  val full_pred = new FullBranchPrediction
+  val full_pred    = Vec(numDup, new FullBranchPrediction)
 
 
-  def target(pc: UInt) = full_pred.target(pc)
-  def cfiIndex         = full_pred.cfiIndex
-  def lastBrPosOH      = full_pred.lastBrPosOH
-  def brTaken          = full_pred.brTaken
-  def shouldShiftVec   = full_pred.shouldShiftVec
-  def fallThruError    = full_pred.fallThruError
+  def target(pc: UInt) = VecInit(full_pred.map(_.target(pc)))
+  def targets(pc: Vec[UInt]) = VecInit(pc.zipWithIndex.map{case (a, i) => full_pred(i).target(a)})
+  def cfiIndex         = VecInit(full_pred.map(_.cfiIndex))
+  def lastBrPosOH      = VecInit(full_pred.map(_.lastBrPosOH))
+  def brTaken          = VecInit(full_pred.map(_.brTaken))
+  def shouldShiftVec   = VecInit(full_pred.map(_.shouldShiftVec))
+  def fallThruError    = VecInit(full_pred.map(_.fallThruError))
 
-  def getTarget = target(pc)
-  def taken = cfiIndex.valid
+  def taken = VecInit(cfiIndex.map(_.valid))
+
+  def getTarget = targets(pc)
 
   def display(cond: Bool): Unit = {
-    XSDebug(cond, p"[pc] ${Hexadecimal(pc)}\n")
-    full_pred.display(cond)
+    XSDebug(cond, p"[pc] ${Hexadecimal(pc(0))}\n")
+    full_pred(0).display(cond)
   }
 }
 
@@ -586,17 +588,17 @@ class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUC
   def selectedResp ={
     val res =
       PriorityMux(Seq(
-        ((s3.valid && s3.hasRedirect) -> s3),
-        ((s2.valid && s2.hasRedirect) -> s2),
-        (s1.valid -> s1)
+        ((s3.valid(3) && s3.hasRedirect(3)) -> s3),
+        ((s2.valid(3) && s2.hasRedirect(3)) -> s2),
+        (s1.valid(3) -> s1)
       ))
     res
   }
-  def selectedRespIdx =
+  def selectedRespIdxForFtq =
     PriorityMux(Seq(
-      ((s3.valid && s3.hasRedirect) -> BP_S3),
-      ((s2.valid && s2.hasRedirect) -> BP_S2),
-      (s1.valid -> BP_S1)
+      ((s3.valid(3) && s3.hasRedirect(3)) -> BP_S3),
+      ((s2.valid(3) && s2.hasRedirect(3)) -> BP_S2),
+      (s1.valid(3) -> BP_S1)
     ))
   def lastStage = s3
 }
