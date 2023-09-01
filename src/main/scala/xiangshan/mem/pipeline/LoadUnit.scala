@@ -1156,7 +1156,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // fast load to load forward
   io.l2l_fwd_out.valid      := s3_out.valid && !s3_in.lateKill
-  io.l2l_fwd_out.data       := Mux(s3_ld_raw_data_frm_cache.addrOffset(3), s3_merged_data_frm_cache(127, 64), s3_merged_data_frm_cache(63, 0)) // load to load is for ld only
+  io.l2l_fwd_out.data       := s3_ld_data_frm_cache
   io.l2l_fwd_out.dly_ld_err := s3_dly_ld_err // ecc delayed error
 
    // trigger
