@@ -955,7 +955,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   //
   io.s2_ptr_chasing                    := RegEnable(s1_try_ptr_chasing && !s1_cancel_ptr_chasing, s1_fire)
-  io.prefetch_train.valid              := s2_valid && !s2_in.mmio && !s2_in.tlbMiss
+  io.prefetch_train.valid              := s2_valid && !s2_mmio && !s2_in.tlbMiss
   io.prefetch_train.bits.fromLsPipelineBundle(s2_in)
   io.prefetch_train.bits.miss          := io.dcache.resp.bits.miss
   io.prefetch_train.bits.meta_prefetch := io.dcache.resp.bits.meta_prefetch
