@@ -969,7 +969,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     io.dcache.s1_pc := s1_out.uop.cf.pc
     io.dcache.s2_pc := s2_out.uop.cf.pc
   }
-  io.dcache.s2_kill := s2_pmp.ld || s2_pmp.mmio || s2_kill
+  io.dcache.s2_kill := s2_pmp.ld || s2_mmio || s2_kill
 
   val s1_ld_left_fire = s1_valid && !s1_kill && s2_ready
   val s2_ld_valid_dup = RegInit(0.U(6.W))
