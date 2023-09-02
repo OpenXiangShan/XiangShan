@@ -521,16 +521,15 @@ object VecDecoder extends DecodeConstants {
     VFNCVT_F_X_W       -> OPFVV(SrcType.X , SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
     VFNCVT_F_F_W       -> OPFVV(SrcType.X , SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
     VFNCVT_ROD_F_F_W   -> OPFVV(SrcType.X , SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
-
     // 14.3. Vector Single-Width Floating-Point Reduction Instructions
-    VFREDOSUM_VS       -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
-    VFREDUSUM_VS       -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
-    VFREDMAX_VS        -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
-    VFREDMIN_VS        -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
+    VFREDOSUM_VS -> OPFVV(SrcType.vp, SrcType.X, FuType.vfalu, VfpuType.dummy, F, T, F),
+    VFREDUSUM_VS -> OPFVV(SrcType.vp, SrcType.X, FuType.vfalu, VfaluType.vfredusum, F, T, F, UopSplitType.VEC_VFRED),
+    VFREDMAX_VS  -> OPFVV(SrcType.vp, SrcType.X, FuType.vfalu, VfaluType.vfredmax , F, T, F, UopSplitType.VEC_VFRED),
+    VFREDMIN_VS  -> OPFVV(SrcType.vp, SrcType.X, FuType.vfalu, VfaluType.vfredmin , F, T, F, UopSplitType.VEC_VFRED),
 
     // 14.4. Vector Widening Floating-Point Reduction Instructions
-    VFWREDOSUM_VS      -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
-    VFWREDUSUM_VS      -> OPFVV(SrcType.vp, SrcType.X , FuType.vfpu, VfpuType.dummy, F, T, F),
+    VFWREDOSUM_VS -> OPFVV(SrcType.vp, SrcType.X, FuType.vfalu, VfpuType.dummy, F, T, F),
+    VFWREDUSUM_VS -> OPFVV(SrcType.vp, SrcType.X, FuType.vfalu, VfpuType.dummy, F, T, F),
 
   )
 

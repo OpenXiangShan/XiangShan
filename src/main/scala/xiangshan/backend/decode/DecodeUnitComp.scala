@@ -30,7 +30,7 @@ import xiangshan.backend.fu.FuType
 import freechips.rocketchip.rocket.Instructions._
 import xiangshan.backend.Bundles.{DecodedInst, StaticInst}
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
-import xiangshan.backend.fu.vector.Bundles.VType
+import xiangshan.backend.fu.vector.Bundles.{VSew, VType, VLmul}
 import yunsuan.VpermType
 
 import scala.collection.Seq
@@ -717,6 +717,282 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(numOfUop - 1.U).lsrc(2) := dest
         csBundle(numOfUop - 1.U).ldest := dest
         csBundle(numOfUop - 1.U).uopIdx := numOfUop - 1.U
+      }
+    }
+    is(UopSplitType.VEC_VFRED) {
+      val vlmul = simple.io.enq.vtype.vlmul
+      val vsew = simple.io.enq.vtype.vsew
+      when(vlmul === VLmul.m8){
+        for (i <- 0 until 4) {
+          csBundle(i).lsrc(0) := src2 + (i * 2 + 1).U
+          csBundle(i).lsrc(1) := src2 + (i * 2).U
+          csBundle(i).ldest := (VECTOR_TMP_REG_LMUL + i).U
+          csBundle(i).uopIdx := i.U
+        }
+        for (i <- 4 until 6) {
+          csBundle(i).lsrc(0) := (VECTOR_TMP_REG_LMUL + (i - 4) * 2 + 1).U
+          csBundle(i).lsrc(1) := (VECTOR_TMP_REG_LMUL + (i - 4) * 2).U
+          csBundle(i).ldest := (VECTOR_TMP_REG_LMUL + i).U
+          csBundle(i).uopIdx := i.U
+        }
+        csBundle(6).lsrc(0) := (VECTOR_TMP_REG_LMUL + 5).U
+        csBundle(6).lsrc(1) := (VECTOR_TMP_REG_LMUL + 4).U
+        csBundle(6).ldest := (VECTOR_TMP_REG_LMUL + 6).U
+        csBundle(6).uopIdx := 6.U
+        when(vsew === VSew.e64) {
+          csBundle(7).lsrc(0) := (VECTOR_TMP_REG_LMUL + 6).U
+          csBundle(7).lsrc(1) := (VECTOR_TMP_REG_LMUL + 6).U
+          csBundle(7).ldest := (VECTOR_TMP_REG_LMUL + 7).U
+          csBundle(7).vpu.fpu.isFoldTo1_2 := true.B
+          csBundle(7).uopIdx := 7.U
+          csBundle(8).lsrc(0) := src1
+          csBundle(8).lsrc(1) := (VECTOR_TMP_REG_LMUL + 7).U
+          csBundle(8).ldest := dest
+          csBundle(8).uopIdx := 8.U
+        }
+        when(vsew === VSew.e32) {
+          csBundle(7).lsrc(0) := (VECTOR_TMP_REG_LMUL + 6).U
+          csBundle(7).lsrc(1) := (VECTOR_TMP_REG_LMUL + 6).U
+          csBundle(7).ldest := (VECTOR_TMP_REG_LMUL + 7).U
+          csBundle(7).vpu.fpu.isFoldTo1_2 := true.B
+          csBundle(7).uopIdx := 7.U
+          csBundle(8).lsrc(0) := (VECTOR_TMP_REG_LMUL + 7).U
+          csBundle(8).lsrc(1) := (VECTOR_TMP_REG_LMUL + 7).U
+          csBundle(8).ldest := (VECTOR_TMP_REG_LMUL + 8).U
+          csBundle(8).vpu.fpu.isFoldTo1_4 := true.B
+          csBundle(8).uopIdx := 8.U
+          csBundle(9).lsrc(0) := src1
+          csBundle(9).lsrc(1) := (VECTOR_TMP_REG_LMUL + 8).U
+          csBundle(9).ldest := dest
+          csBundle(9).uopIdx := 9.U
+        }
+        when(vsew === VSew.e16) {
+          csBundle(7).lsrc(0) := (VECTOR_TMP_REG_LMUL + 6).U
+          csBundle(7).lsrc(1) := (VECTOR_TMP_REG_LMUL + 6).U
+          csBundle(7).ldest := (VECTOR_TMP_REG_LMUL + 7).U
+          csBundle(7).vpu.fpu.isFoldTo1_2 := true.B
+          csBundle(7).uopIdx := 7.U
+          csBundle(8).lsrc(0) := (VECTOR_TMP_REG_LMUL + 7).U
+          csBundle(8).lsrc(1) := (VECTOR_TMP_REG_LMUL + 7).U
+          csBundle(8).ldest := (VECTOR_TMP_REG_LMUL + 8).U
+          csBundle(8).vpu.fpu.isFoldTo1_4 := true.B
+          csBundle(8).uopIdx := 8.U
+          csBundle(9).lsrc(0) := (VECTOR_TMP_REG_LMUL + 8).U
+          csBundle(9).lsrc(1) := (VECTOR_TMP_REG_LMUL + 8).U
+          csBundle(9).ldest := (VECTOR_TMP_REG_LMUL + 9).U
+          csBundle(9).vpu.fpu.isFoldTo1_8 := true.B
+          csBundle(9).uopIdx := 9.U
+          csBundle(10).lsrc(0) := src1
+          csBundle(10).lsrc(1) := (VECTOR_TMP_REG_LMUL + 9).U
+          csBundle(10).ldest := dest
+          csBundle(10).uopIdx := 10.U
+        }
+      }
+      when(vlmul === VLmul.m4) {
+        for (i <- 0 until 2) {
+          csBundle(i).lsrc(0) := src2 + (i * 2 + 1).U
+          csBundle(i).lsrc(1) := src2 + (i * 2).U
+          csBundle(i).ldest := (VECTOR_TMP_REG_LMUL + i).U
+          csBundle(i).uopIdx := i.U
+        }
+        csBundle(2).lsrc(0) := (VECTOR_TMP_REG_LMUL + 1).U
+        csBundle(2).lsrc(1) := (VECTOR_TMP_REG_LMUL + 0).U
+        csBundle(2).ldest := (VECTOR_TMP_REG_LMUL + 2).U
+        csBundle(2).uopIdx := 2.U
+        when(vsew === VSew.e64) {
+          csBundle(3).lsrc(0) := (VECTOR_TMP_REG_LMUL + 2).U
+          csBundle(3).lsrc(1) := (VECTOR_TMP_REG_LMUL + 2).U
+          csBundle(3).ldest := (VECTOR_TMP_REG_LMUL + 3).U
+          csBundle(3).vpu.fpu.isFoldTo1_2 := true.B
+          csBundle(3).uopIdx := 3.U
+          csBundle(4).lsrc(0) := src1
+          csBundle(4).lsrc(1) := (VECTOR_TMP_REG_LMUL + 3).U
+          csBundle(4).ldest := dest
+          csBundle(4).uopIdx := 4.U
+        }
+        when(vsew === VSew.e32) {
+          csBundle(3).lsrc(0) := (VECTOR_TMP_REG_LMUL + 2).U
+          csBundle(3).lsrc(1) := (VECTOR_TMP_REG_LMUL + 2).U
+          csBundle(3).ldest := (VECTOR_TMP_REG_LMUL + 3).U
+          csBundle(3).vpu.fpu.isFoldTo1_2 := true.B
+          csBundle(3).uopIdx := 3.U
+          csBundle(4).lsrc(0) := (VECTOR_TMP_REG_LMUL + 3).U
+          csBundle(4).lsrc(1) := (VECTOR_TMP_REG_LMUL + 3).U
+          csBundle(4).ldest := (VECTOR_TMP_REG_LMUL + 4).U
+          csBundle(4).vpu.fpu.isFoldTo1_4 := true.B
+          csBundle(4).uopIdx := 4.U
+          csBundle(5).lsrc(0) := src1
+          csBundle(5).lsrc(1) := (VECTOR_TMP_REG_LMUL + 4).U
+          csBundle(5).ldest := dest
+          csBundle(5).uopIdx := 5.U
+        }
+        when(vsew === VSew.e16) {
+          csBundle(3).lsrc(0) := (VECTOR_TMP_REG_LMUL + 2).U
+          csBundle(3).lsrc(1) := (VECTOR_TMP_REG_LMUL + 2).U
+          csBundle(3).ldest := (VECTOR_TMP_REG_LMUL + 3).U
+          csBundle(3).vpu.fpu.isFoldTo1_2 := true.B
+          csBundle(3).uopIdx := 3.U
+          csBundle(4).lsrc(0) := (VECTOR_TMP_REG_LMUL + 3).U
+          csBundle(4).lsrc(1) := (VECTOR_TMP_REG_LMUL + 3).U
+          csBundle(4).ldest := (VECTOR_TMP_REG_LMUL + 4).U
+          csBundle(4).vpu.fpu.isFoldTo1_4 := true.B
+          csBundle(4).uopIdx := 4.U
+          csBundle(5).lsrc(0) := (VECTOR_TMP_REG_LMUL + 4).U
+          csBundle(5).lsrc(1) := (VECTOR_TMP_REG_LMUL + 4).U
+          csBundle(5).ldest := (VECTOR_TMP_REG_LMUL + 5).U
+          csBundle(5).vpu.fpu.isFoldTo1_8 := true.B
+          csBundle(5).uopIdx := 5.U
+          csBundle(6).lsrc(0) := src1
+          csBundle(6).lsrc(1) := (VECTOR_TMP_REG_LMUL + 5).U
+          csBundle(6).ldest := dest
+          csBundle(6).uopIdx := 6.U
+        }
+      }
+      when(vlmul === VLmul.m2) {
+        csBundle(0).lsrc(0) := src2 + 1.U
+        csBundle(0).lsrc(1) := src2 + 0.U
+        csBundle(0).ldest := (VECTOR_TMP_REG_LMUL + 0).U
+        csBundle(0).uopIdx := 0.U
+        when(vsew === VSew.e64) {
+          csBundle(1).lsrc(0) := (VECTOR_TMP_REG_LMUL + 0).U
+          csBundle(1).lsrc(1) := (VECTOR_TMP_REG_LMUL + 0).U
+          csBundle(1).ldest := (VECTOR_TMP_REG_LMUL + 1).U
+          csBundle(1).vpu.fpu.isFoldTo1_2 := true.B
+          csBundle(1).uopIdx := 1.U
+          csBundle(2).lsrc(0) := src1
+          csBundle(2).lsrc(1) := (VECTOR_TMP_REG_LMUL + 1).U
+          csBundle(2).ldest := dest
+          csBundle(2).uopIdx := 2.U
+        }
+        when(vsew === VSew.e32) {
+          csBundle(1).lsrc(0) := (VECTOR_TMP_REG_LMUL + 0).U
+          csBundle(1).lsrc(1) := (VECTOR_TMP_REG_LMUL + 0).U
+          csBundle(1).ldest := (VECTOR_TMP_REG_LMUL + 1).U
+          csBundle(1).vpu.fpu.isFoldTo1_2 := true.B
+          csBundle(1).uopIdx := 1.U
+          csBundle(2).lsrc(0) := (VECTOR_TMP_REG_LMUL + 1).U
+          csBundle(2).lsrc(1) := (VECTOR_TMP_REG_LMUL + 1).U
+          csBundle(2).ldest := (VECTOR_TMP_REG_LMUL + 2).U
+          csBundle(2).vpu.fpu.isFoldTo1_4 := true.B
+          csBundle(2).uopIdx := 2.U
+          csBundle(3).lsrc(0) := src1
+          csBundle(3).lsrc(1) := (VECTOR_TMP_REG_LMUL + 2).U
+          csBundle(3).ldest := dest
+          csBundle(3).uopIdx := 3.U
+        }
+        when(vsew === VSew.e16) {
+          csBundle(1).lsrc(0) := (VECTOR_TMP_REG_LMUL + 0).U
+          csBundle(1).lsrc(1) := (VECTOR_TMP_REG_LMUL + 0).U
+          csBundle(1).ldest := (VECTOR_TMP_REG_LMUL + 1).U
+          csBundle(1).vpu.fpu.isFoldTo1_2 := true.B
+          csBundle(1).uopIdx := 1.U
+          csBundle(2).lsrc(0) := (VECTOR_TMP_REG_LMUL + 1).U
+          csBundle(2).lsrc(1) := (VECTOR_TMP_REG_LMUL + 1).U
+          csBundle(2).ldest := (VECTOR_TMP_REG_LMUL + 2).U
+          csBundle(2).vpu.fpu.isFoldTo1_4 := true.B
+          csBundle(2).uopIdx := 2.U
+          csBundle(3).lsrc(0) := (VECTOR_TMP_REG_LMUL + 2).U
+          csBundle(3).lsrc(1) := (VECTOR_TMP_REG_LMUL + 2).U
+          csBundle(3).ldest := (VECTOR_TMP_REG_LMUL + 3).U
+          csBundle(3).vpu.fpu.isFoldTo1_8 := true.B
+          csBundle(3).uopIdx := 3.U
+          csBundle(4).lsrc(0) := src1
+          csBundle(4).lsrc(1) := (VECTOR_TMP_REG_LMUL + 3).U
+          csBundle(4).ldest := dest
+          csBundle(4).uopIdx := 4.U
+        }
+      }
+      when(vlmul === VLmul.m1) {
+        when(vsew === VSew.e64) {
+          csBundle(0).lsrc(0) := src2
+          csBundle(0).lsrc(1) := src2
+          csBundle(0).ldest := (VECTOR_TMP_REG_LMUL + 0).U
+          csBundle(0).vpu.fpu.isFoldTo1_2 := true.B
+          csBundle(0).uopIdx := 0.U
+          csBundle(1).lsrc(0) := src1
+          csBundle(1).lsrc(1) := (VECTOR_TMP_REG_LMUL + 0).U
+          csBundle(1).ldest := dest
+          csBundle(1).uopIdx := 1.U
+        }
+        when(vsew === VSew.e32) {
+          csBundle(0).lsrc(0) := src2
+          csBundle(0).lsrc(1) := src2
+          csBundle(0).ldest := (VECTOR_TMP_REG_LMUL + 0).U
+          csBundle(0).vpu.fpu.isFoldTo1_2 := true.B
+          csBundle(0).uopIdx := 0.U
+          csBundle(1).lsrc(0) := (VECTOR_TMP_REG_LMUL + 0).U
+          csBundle(1).lsrc(1) := (VECTOR_TMP_REG_LMUL + 0).U
+          csBundle(1).ldest := (VECTOR_TMP_REG_LMUL + 1).U
+          csBundle(1).vpu.fpu.isFoldTo1_4 := true.B
+          csBundle(1).uopIdx := 1.U
+          csBundle(2).lsrc(0) := src1
+          csBundle(2).lsrc(1) := (VECTOR_TMP_REG_LMUL + 1).U
+          csBundle(2).ldest := dest
+          csBundle(2).uopIdx := 2.U
+        }
+        when(vsew === VSew.e16) {
+          csBundle(0).lsrc(0) := src2
+          csBundle(0).lsrc(1) := src2
+          csBundle(0).ldest := (VECTOR_TMP_REG_LMUL + 0).U
+          csBundle(0).vpu.fpu.isFoldTo1_2 := true.B
+          csBundle(0).uopIdx := 0.U
+          csBundle(1).lsrc(0) := (VECTOR_TMP_REG_LMUL + 0).U
+          csBundle(1).lsrc(1) := (VECTOR_TMP_REG_LMUL + 0).U
+          csBundle(1).ldest := (VECTOR_TMP_REG_LMUL + 1).U
+          csBundle(1).vpu.fpu.isFoldTo1_4 := true.B
+          csBundle(1).uopIdx := 1.U
+          csBundle(2).lsrc(0) := (VECTOR_TMP_REG_LMUL + 1).U
+          csBundle(2).lsrc(1) := (VECTOR_TMP_REG_LMUL + 1).U
+          csBundle(2).ldest := (VECTOR_TMP_REG_LMUL + 2).U
+          csBundle(2).vpu.fpu.isFoldTo1_8 := true.B
+          csBundle(2).uopIdx := 2.U
+          csBundle(3).lsrc(0) := src1
+          csBundle(3).lsrc(1) := (VECTOR_TMP_REG_LMUL + 2).U
+          csBundle(3).ldest := dest
+          csBundle(3).uopIdx := 3.U
+        }
+      }
+      when(vlmul === VLmul.mf2) {
+        when(vsew === VSew.e32) {
+          csBundle(0).lsrc(0) := src2
+          csBundle(0).lsrc(1) := src2
+          csBundle(0).ldest := (VECTOR_TMP_REG_LMUL + 0).U
+          csBundle(0).vpu.fpu.isFoldTo1_4 := true.B
+          csBundle(0).uopIdx := 0.U
+          csBundle(1).lsrc(0) := src1
+          csBundle(1).lsrc(1) := (VECTOR_TMP_REG_LMUL + 0).U
+          csBundle(1).ldest := dest
+          csBundle(1).uopIdx := 1.U
+        }
+        when(vsew === VSew.e16) {
+          csBundle(0).lsrc(0) := src2
+          csBundle(0).lsrc(1) := src2
+          csBundle(0).ldest := (VECTOR_TMP_REG_LMUL + 0).U
+          csBundle(0).vpu.fpu.isFoldTo1_4 := true.B
+          csBundle(0).uopIdx := 0.U
+          csBundle(1).lsrc(0) := (VECTOR_TMP_REG_LMUL + 0).U
+          csBundle(1).lsrc(1) := (VECTOR_TMP_REG_LMUL + 0).U
+          csBundle(1).ldest := (VECTOR_TMP_REG_LMUL + 1).U
+          csBundle(1).vpu.fpu.isFoldTo1_8 := true.B
+          csBundle(1).uopIdx := 1.U
+          csBundle(2).lsrc(0) := src1
+          csBundle(2).lsrc(1) := (VECTOR_TMP_REG_LMUL + 1).U
+          csBundle(2).ldest := dest
+          csBundle(2).uopIdx := 2.U
+        }
+      }
+      when(vlmul === VLmul.mf4) {
+        when(vsew === VSew.e16) {
+          csBundle(0).lsrc(0) := src2
+          csBundle(0).lsrc(1) := src2
+          csBundle(0).ldest := (VECTOR_TMP_REG_LMUL + 0).U
+          csBundle(0).vpu.fpu.isFoldTo1_8 := true.B
+          csBundle(0).uopIdx := 0.U
+          csBundle(1).lsrc(0) := src1
+          csBundle(1).lsrc(1) := (VECTOR_TMP_REG_LMUL + 0).U
+          csBundle(1).ldest := dest
+          csBundle(1).uopIdx := 1.U
+        }
       }
     }
 
