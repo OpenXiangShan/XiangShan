@@ -26,7 +26,7 @@ import utils._
 import xiangshan._
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput}
-import xiangshan.backend.fu.FuType
+import xiangshan.backend.fu.{FuType, FuConfig}
 import xiangshan.frontend.FtqPtr
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput}
@@ -203,7 +203,6 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
 
   def getOldest(valid: Seq[Bool], bits: Seq[RobExceptionInfo]): (Seq[Bool], Seq[RobExceptionInfo]) = {
     assert(valid.length == bits.length)
-    assert(isPow2(valid.length))
     if (valid.length == 1) {
       (valid, bits)
     } else if (valid.length == 2) {
@@ -216,7 +215,7 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
       (Seq(oldest.valid), Seq(oldest.bits))
     } else {
       val left = getOldest(valid.take(valid.length / 2), bits.take(valid.length / 2))
-      val right = getOldest(valid.takeRight(valid.length / 2), bits.takeRight(valid.length / 2))
+      val right = getOldest(valid.drop(valid.length / 2), bits.drop(valid.length / 2))
       getOldest(left._1 ++ right._1, left._2 ++ right._2)
     }
   }
@@ -229,21 +228,14 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
   val in_enq_valid = VecInit(io.enq.map(e => e.valid && e.bits.has_exception && !lastCycleFlush))
   val in_wb_valid = io.wb.map(w => w.valid && w.bits.has_exception && !lastCycleFlush)
 
-  // s0: compare wb(1)~wb(LoadPipelineWidth) and wb(1 + LoadPipelineWidth)~wb(LoadPipelineWidth + StorePipelineWidth)
+  // TODO: s0,s1 need retiming
   val wb_valid = in_wb_valid.zip(io.wb.map(_.bits)).map{ case (v, bits) => v && !(bits.robIdx.needFlush(io.redirect) || io.flush) }
-  val csr_wb_bits = io.wb(0).bits
-  val load_wb_bits = getOldest(in_wb_valid.slice(1, 1 + LoadPipelineWidth), io.wb.map(_.bits).slice(1, 1 + LoadPipelineWidth))._2(0)
-  val store_wb_bits = getOldest(in_wb_valid.slice(1 + LoadPipelineWidth, 1 + LoadPipelineWidth + StorePipelineWidth), io.wb.map(_.bits).slice(1 + LoadPipelineWidth, 1 + LoadPipelineWidth + StorePipelineWidth))._2(0)
-  val s0_out_valid = RegNext(VecInit(Seq(wb_valid(0), wb_valid.slice(1, 1 + LoadPipelineWidth).reduce(_ || _), wb_valid.slice(1 + LoadPipelineWidth, 1 + LoadPipelineWidth + StorePipelineWidth).reduce(_ || _))))
-  val s0_out_bits = RegNext(VecInit(Seq(csr_wb_bits, load_wb_bits, store_wb_bits)))
+  val oldest = getOldest(wb_valid, io.wb.map(_.bits))
+  val s0_out_valid = RegNext(oldest._1(0))
+  val s0_out_bits = RegNext(oldest._2(0))
 
-  // s1: compare last four and current flush
-  val s1_valid = VecInit(s0_out_valid.zip(s0_out_bits).map{ case (v, b) => v && !(b.robIdx.needFlush(io.redirect) || io.flush) })
-  val compare_01_valid = s0_out_valid(0) || s0_out_valid(1)
-  val compare_01_bits = Mux(!s0_out_valid(0) || s0_out_valid(1) && isAfter(s0_out_bits(0).robIdx, s0_out_bits(1).robIdx), s0_out_bits(1), s0_out_bits(0))
-  val compare_bits = Mux(!s0_out_valid(2) || compare_01_valid && isAfter(s0_out_bits(2).robIdx, compare_01_bits.robIdx), compare_01_bits, s0_out_bits(2))
-  val s1_out_bits = RegNext(compare_bits)
-  val s1_out_valid = RegNext(s1_valid.asUInt.orR)
+  val s1_out_bits = RegNext(s0_out_bits)
+  val s1_out_valid = RegNext(s0_out_valid && (!s0_out_bits.robIdx.needFlush(io.redirect) || io.flush))
 
   val enq_valid = RegNext(in_enq_valid.asUInt.orR && !io.redirect.valid && !io.flush)
   val enq_bits = RegNext(ParallelPriorityMux(in_enq_valid, io.enq.map(_.bits)))
