@@ -137,7 +137,7 @@ class VFMA(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   mgu.io.in.info.ta := outVecCtrl.vta
   mgu.io.in.info.ma := outVecCtrl.vma
   mgu.io.in.info.vl := Mux(outVecCtrl.fpu.isFpToVecInst, 1.U, outVl)
-  mgu.io.in.info.vstart := outVecCtrl.vstart
+  mgu.io.in.info.vstart := Mux(outVecCtrl.fpu.isFpToVecInst, 0.U, outVecCtrl.vstart)
   mgu.io.in.info.eew := outEew
   mgu.io.in.info.vdIdx := outVecCtrl.vuopIdx
   mgu.io.in.info.narrow := outVecCtrl.isNarrow
