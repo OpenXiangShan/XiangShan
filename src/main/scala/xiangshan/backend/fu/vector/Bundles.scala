@@ -125,6 +125,10 @@ object Bundles {
     val isFpToVecInst = Bool()
     val isFP32Instr   = Bool()
     val isFP64Instr   = Bool()
+    val isReduction   = Bool()
+    val isFoldTo1_2   = Bool()
+    val isFoldTo1_4   = Bool()
+    val isFoldTo1_8   = Bool()
   }
   object Fpu {
     def apply() = new Fpu
