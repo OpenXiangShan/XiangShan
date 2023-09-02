@@ -9,6 +9,7 @@ import utils._
 import xiangshan.backend.fu.{CSRFileIO, FenceIO, FuncUnitInput}
 import xiangshan.backend.Bundles.{ExuInput, ExuOutput, MemExuInput, MemExuOutput}
 import xiangshan.{FPUCtrlSignals, HasXSParameter, Redirect, XSBundle, XSModule}
+import xiangshan.backend.datapath.WbConfig.{PregWB, _}
 
 class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
   val flush = Flipped(ValidIO(new Redirect()))
@@ -49,24 +50,57 @@ class ExeUnitImp(
   }.elsewhen(io.in.fire) {
     busy := true.B
   }
-  val intWbPort = exuParams.getIntWBPort
-  val intFlag = if(intWbPort.isDefined) backendParams.allExuParams.map(exuParam => (exuParam.getIntWBPort, exuParam.latencyCertain))
-    .filter(_._1.isDefined)
-    .filter(_._1.get.port == intWbPort.get.port)
-    .map(_._2)
-    .reduce(_ | _)
-  else true
-
-  val vfWbPort = exuParams.getVfWBPort
-  val vfFlag = if (vfWbPort.isDefined) backendParams.allExuParams.map(exuParam => (exuParam.getVfWBPort, exuParam.latencyCertain))
-    .filter(_._1.isDefined)
-    .filter(_._1.get.port == vfWbPort.get.port)
-    .map(_._2)
-    .reduce(_ | _)
-  else true
-
-  if(intFlag && vfFlag){
+  
+  if (exuParams.latencyCertain){
     busy := false.B
+  }
+
+  exuParams.wbPortConfigs.map{
+    x => x match {
+      case IntWB(port, priority) => assert((priority == 0) || (priority == 1),
+        s"${exuParams.name}: WbPort must priority=0 or priority=1")
+      case VfWB (port, priority) => assert((priority == 0) || (priority == 1),
+        s"${exuParams.name}: WbPort must priority=0 or priority=1")
+      case _ =>
+    }
+  }
+  val intWbPort = exuParams.getIntWBPort
+  if (intWbPort.isDefined){
+    val sameIntPortExuParam = backendParams.allExuParams.filter(_.getIntWBPort.isDefined)
+      .filter(_.getIntWBPort.get.port == intWbPort.get.port)
+    val samePortOneCertainOneUncertain = sameIntPortExuParam.map(_.latencyCertain).contains(true) && sameIntPortExuParam.map(_.latencyCertain).contains(false)
+    if (samePortOneCertainOneUncertain) sameIntPortExuParam.map(samePort =>
+      samePort.wbPortConfigs.map(
+        x => x match {
+          case IntWB(port, priority) => {
+            if (!samePort.latencyCertain) assert(priority == 1,
+              s"${samePort.name}: IntWbPort $port must latencyCertain priority=0 or latencyUnCertain priority=1")
+            else assert(priority == 0,
+              s"${samePort.name}: IntWbPort $port must latencyCertain priority=0 or latencyUnCertain priority=1")
+          }
+          case _ =>
+        }
+      )
+    )
+  }
+  val vfWbPort = exuParams.getVfWBPort
+  if (vfWbPort.isDefined) {
+    val sameVfPortExuParam = backendParams.allExuParams.filter(_.getVfWBPort.isDefined)
+      .filter(_.getVfWBPort.get.port == vfWbPort.get.port)
+    val samePortOneCertainOneUncertain = sameVfPortExuParam.map(_.latencyCertain).contains(true) && sameVfPortExuParam.map(_.latencyCertain).contains(false)
+    if (samePortOneCertainOneUncertain)  sameVfPortExuParam.map(samePort =>
+      samePort.wbPortConfigs.map(
+        x => x match {
+          case VfWB(port, priority) => {
+            if (!samePort.latencyCertain) assert(priority == 1,
+              s"${samePort.name}: VfWbPort $port must latencyCertain priority=0 or latencyUnCertain priority=1")
+            else assert(priority == 0,
+              s"${samePort.name}: VfWbPort $port must latencyCertain priority=0 or latencyUnCertain priority=1")
+          }
+          case _ =>
+        }
+      )
+    )
   }
   dontTouch(io.out.ready)
   // rob flush --> funcUnits
@@ -175,7 +209,7 @@ class Dispatcher[T <: Data](private val gen: T, n: Int, acceptCond: T => Seq[Boo
     out.bits := io.in.bits
   }
 
-  io.in.ready := Cat(io.out.map(_.ready)).orR
+  io.in.ready := Mux1H(acceptVec,io.out.map(_.ready))
 }
 
 class MemExeUnitIO (implicit p: Parameters) extends XSBundle {
