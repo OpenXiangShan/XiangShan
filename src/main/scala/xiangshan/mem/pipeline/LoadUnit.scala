@@ -955,7 +955,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   //
   io.s2_ptr_chasing                    := RegEnable(s1_try_ptr_chasing && !s1_cancel_ptr_chasing, s1_fire)
-  io.prefetch_train.valid              := s2_valid && !s2_mmio && !s2_in.tlbMiss
+  io.prefetch_train.valid              := s2_valid && !s2_actually_mmio && !s2_in.tlbMiss
   io.prefetch_train.bits.fromLsPipelineBundle(s2_in)
   io.prefetch_train.bits.miss          := io.dcache.resp.bits.miss
   io.prefetch_train.bits.meta_prefetch := io.dcache.resp.bits.meta_prefetch
@@ -969,7 +969,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     io.dcache.s1_pc := s1_out.uop.cf.pc
     io.dcache.s2_pc := s2_out.uop.cf.pc
   }
-  io.dcache.s2_kill := s2_pmp.ld || s2_mmio || s2_kill
+  io.dcache.s2_kill := s2_pmp.ld || s2_actually_mmio || s2_kill
 
   val s1_ld_left_fire = s1_valid && !s1_kill && s2_ready
   val s2_ld_valid_dup = RegInit(0.U(6.W))
