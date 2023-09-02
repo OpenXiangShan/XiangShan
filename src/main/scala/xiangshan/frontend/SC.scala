@@ -283,13 +283,13 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
       val s2_scPreds = VecInit(s2_totalSums.map(_ >= 0.S))
 
       val s2_scResps = VecInit(RegEnable(s1_scResps, io.s1_fire(3)).map(_.ctrs(w)))
-      val s2_scCtrs = VecInit(s2_scResps.map(_(s2_tageTakens_dup(3)(w).asUInt)))
-      val s2_chooseBit = s2_tageTakens_dup(3)(w)
+      val s2_scCtrs = VecInit(s2_scResps.map(_(s2_tageTakens(w).asUInt)))
+      val s2_chooseBit = s2_tageTakens(w)
 
       val s2_pred =
         Mux(s2_provideds(w) && s2_sumAboveThresholds(s2_chooseBit),
           s2_scPreds(s2_chooseBit),
-          s2_tageTakens_dup(3)(w)
+          s2_tageTakens(w)
         )
 
       val s3_disagree = RegEnable(s2_disagree, io.s2_fire(3))
@@ -297,7 +297,7 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
       io.out.last_stage_ftb_entry.brSlots(0).sc := RegEnable(s2_disagree(0), io.s2_fire(3))
       io.out.last_stage_ftb_entry.tailSlot.sc := RegEnable(s2_disagree(1), io.s2_fire(3))
 
-      scMeta.tageTakens(w) := RegEnable(s2_tageTakens_dup(3)(w), io.s2_fire(3))
+      scMeta.tageTakens(w) := RegEnable(s2_tageTakens(w), io.s2_fire(3))
       scMeta.scUsed(w)     := RegEnable(s2_provideds(w), io.s2_fire(3))
       scMeta.scPreds(w)    := RegEnable(s2_scPreds(s2_chooseBit), io.s2_fire(3))
       scMeta.ctrs(w)       := RegEnable(s2_scCtrs, io.s2_fire(3))

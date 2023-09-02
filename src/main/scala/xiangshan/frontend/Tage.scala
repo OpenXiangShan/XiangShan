@@ -726,7 +726,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
     resp_meta.pred_cycle.foreach(_ := RegEnable(GTimer(), io.s2_fire(1)))
 
     when(io.ctrl.tage_enable) {
-      io.out.s2.full_pred.br_taken_mask(i) := s2_tageTakens(i)
+      io.out.s2.full_pred.map(_.br_taken_mask(i) := s2_tageTakens(i))
     }
 
     // Debug signal
