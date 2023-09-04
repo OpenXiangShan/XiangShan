@@ -132,8 +132,11 @@ class VIMacU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg
   mgu.io.in.info.ta := outVecCtrl.vta
   mgu.io.in.info.ma := outVecCtrl.vma
   mgu.io.in.info.vl := outVl
+  mgu.io.in.info.vlmul := outVecCtrl.vlmul
+  mgu.io.in.info.valid := io.out.valid
   mgu.io.in.info.vstart := outVecCtrl.vstart
   mgu.io.in.info.eew := outEew
+  mgu.io.in.info.vsew := outVecCtrl.vsew
   mgu.io.in.info.vdIdx := outVecCtrl.vuopIdx
   mgu.io.in.info.narrow := 0.B
   mgu.io.in.info.dstMask := 0.B
