@@ -53,6 +53,11 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
   private val vstartMapVdIdx = elemIdxMapVdIdx(info.vstart)(2, 0) // 3bits 0~7
   private val vlMapVdIdx = elemIdxMapVdIdx(info.vl)(3, 0)         // 4bits 0~8
   private val uvlMax = numBytes.U >> info.eew
+  private val uvlMaxForAssert = numBytes.U >> info.vsew
+  private val vlMaxForAssert = Mux(io.in.info.vlmul(2), uvlMaxForAssert >> (-io.in.info.vlmul), uvlMaxForAssert << io.in.info.vlmul).asUInt
+  when(info.valid){
+    assert(info.vl <= vlMaxForAssert, "mgu's vl must <= vlmax")
+  }
   private val maskDataVec: Vec[UInt] = VecDataToMaskDataVec(in.mask, info.eew)
   private val maskUsed = maskDataVec(vdIdx)
 
@@ -166,7 +171,10 @@ class VecInfo(implicit p: Parameters) extends Bundle {
   val vl = Vl()
   val vstart = Vl()
   val eew = VSew()
+  val vsew = VSew()
   val vdIdx = UInt(3.W) // 0~7
+  val vlmul = UInt(3.W)
+  val valid = Bool()
   val narrow = Bool()
   val dstMask = Bool()
 }
