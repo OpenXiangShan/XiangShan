@@ -277,7 +277,7 @@ case class BackendParams(
 
   def configCheck = {
     // check 0
-    val maxPortSource = 2
+    val maxPortSource = 4
 
     allExuParams.map {
       case exuParam => exuParam.wbPortConfigs.collectFirst { case x: IntWB => x }

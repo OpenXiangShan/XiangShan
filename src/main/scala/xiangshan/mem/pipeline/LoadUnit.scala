@@ -901,7 +901,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                                             !s2_hw_prf                  // not hardware prefetch
   io.feedback_fast.bits.hit              := false.B
   io.feedback_fast.bits.flushState       := s2_in.ptwBack
-  io.feedback_fast.bits.rsIdx            := s2_in.rsIdx
+  io.feedback_fast.bits.robIdx           := s2_in.uop.robIdx
   io.feedback_fast.bits.sourceType       := RSFeedbackType.lrqFull
   io.feedback_fast.bits.dataInvalidSqIdx := DontCare
 

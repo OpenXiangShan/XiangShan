@@ -156,12 +156,12 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   io.feedback_slow.valid           := s1_fire
   io.feedback_slow.bits.hit        := !s1_tlb_miss
   io.feedback_slow.bits.flushState := io.tlb.resp.bits.ptwBack
-  io.feedback_slow.bits.robIdx      := s1_in.robIdx
+  io.feedback_slow.bits.robIdx     := s1_in.uop.robIdx
   io.feedback_slow.bits.sourceType := RSFeedbackType.tlbMiss
   XSDebug(io.feedback_slow.valid,
     "S1 Store: tlbHit: %d robIdx: %d\n",
     io.feedback_slow.bits.hit,
-    io.feedback_slow.bits.rsIdx
+    io.feedback_slow.bits.robIdx.value
   )
   io.feedback_slow.bits.dataInvalidSqIdx := DontCare
 
@@ -174,13 +174,14 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   s1_feedback.valid                 := s1_valid & !s1_in.isHWPrefetch
   s1_feedback.bits.hit              := !s1_tlb_miss
   s1_feedback.bits.flushState       := io.tlb.resp.bits.ptwBack
-  s1_feedback.bits.robIdx            := s1_out.robIdx
+  s1_feedback.bits.robIdx            := s1_out.uop.robIdx
   s1_feedback.bits.sourceType       := RSFeedbackType.tlbMiss
   s1_feedback.bits.dataInvalidSqIdx := DontCare
+
   XSDebug(s1_feedback.valid,
     "S1 Store: tlbHit: %d robIdx: %d\n",
     s1_feedback.bits.hit,
-    s1_feedback.bits.rsIdx
+    s1_feedback.bits.robIdx.value
   )
 
   // get paddr from dtlb, check if rollback is needed
