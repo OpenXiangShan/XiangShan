@@ -131,8 +131,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // load to load fast path
     val l2l_fwd_in    = Input(new LoadToLoadIO)
     val l2l_fwd_out   = Output(new LoadToLoadIO)
-    val ld_fast_match = Input(Bool())
-    val ld_fast_imm   = Input(UInt(12.W))
+
+    val ld_fast_match    = Input(Bool())
+    val ld_fast_fuOpType = Input(UInt())
+    val ld_fast_imm      = Input(UInt(12.W))
 
     // rs feedback
     val feedback_fast = ValidIO(new RSFeedback) // stage 2
@@ -204,7 +206,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s0_high_conf_prf_valid = io.prefetch_req.valid && io.prefetch_req.bits.confidence > 0.U
   val s0_int_iss_valid       = io.ldin.valid // int flow first issue or software prefetch
   val s0_vec_iss_valid       = WireInit(false.B) // TODO
-  val s0_l2l_fwd_valid       = io.l2l_fwd_in.valid
+  val s0_l2l_fwd_valid       = io.l2l_fwd_in.valid && io.ld_fast_match
   val s0_low_conf_prf_valid  = io.prefetch_req.valid && io.prefetch_req.bits.confidence === 0.U
   dontTouch(s0_super_ld_rep_valid)
   dontTouch(s0_ld_fast_rep_valid)
@@ -451,10 +453,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   def fromLoadToLoadSource(src: LoadToLoadIO) = {
     s0_vaddr              := Cat(src.data(XLEN-1, 6), s0_ptr_chasing_vaddr(5,0))
-    s0_mask               := genVWmask(Cat(s0_ptr_chasing_vaddr(3), 0.U(3.W)), LSUOpType.ld)
+    s0_mask               := genVWmask(s0_vaddr, io.ld_fast_fuOpType(1, 0))
     // When there's no valid instruction from RS and LSQ, we try the load-to-load forwarding.
     // Assume the pointer chasing is always ld.
-    s0_uop.ctrl.fuOpType  := LSUOpType.ld
+    s0_uop.ctrl.fuOpType  := io.ld_fast_fuOpType
     s0_try_l2l            := true.B
     // we dont care s0_isFirstIssue and s0_rsIdx and s0_sqIdx in S0 when trying pointchasing
     // because these signals will be updated in S1
@@ -628,15 +630,15 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                        (s1_in.mask & io.stld_nuke_query(w).bits.mask).orR // data mask contain
                       })).asUInt.orR && !s1_tlb_miss
 
-  s1_out                  := s1_in
-  s1_out.vaddr            := s1_vaddr
-  s1_out.paddr            := s1_paddr_dup_lsu
-  s1_out.tlbMiss          := s1_tlb_miss
-  s1_out.ptwBack          := io.tlb.resp.bits.ptwBack
-  s1_out.rsIdx            := s1_in.rsIdx
-  s1_out.rep_info.debug   := s1_in.uop.debugInfo
-  s1_out.rep_info.nuke    := s1_nuke && !s1_sw_prf
-  s1_out.lateKill         := s1_late_kill
+  s1_out                   := s1_in
+  s1_out.vaddr             := s1_vaddr
+  s1_out.paddr             := s1_paddr_dup_lsu
+  s1_out.tlbMiss           := s1_tlb_miss
+  s1_out.ptwBack           := io.tlb.resp.bits.ptwBack
+  s1_out.rsIdx             := s1_in.rsIdx
+  s1_out.rep_info.debug    := s1_in.uop.debugInfo
+  s1_out.rep_info.nuke     := s1_nuke && !s1_sw_prf
+  s1_out.lateKill          := s1_late_kill
 
   when (!s1_late_kill) {
     // current ori test will cause the case of ldest == 0, below will be modifeid in the future.
@@ -668,21 +670,23 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // These can be put at S0 if timing is bad at S1.
     // Case 0: CACHE_SET(base + offset) != CACHE_SET(base) (lowest 6-bit addition has an overflow)
     s1_addr_mismatch      := s1_ptr_chasing_vaddr(6) || RegEnable(io.ld_fast_imm(11, 6).orR, s0_do_try_ptr_chasing)
-    // Case 1: the address is not 64-bit aligned or the fuOpType is not LD
-    s1_addr_misaligned    := s1_ptr_chasing_vaddr(2, 0).orR
-    s1_fu_op_type_not_ld  := io.ldin.bits.uop.ctrl.fuOpType =/= LSUOpType.ld
-    // Case 2: this is not a valid load-load pair
-    s1_not_fast_match     := RegEnable(!io.ld_fast_match, s0_try_ptr_chasing)
-    // Case 3: this load-load uop is cancelled
+    // Case 1: the address is misaligned, kill s1
+    s1_addr_misaligned    := LookupTree(s1_in.uop.ctrl.fuOpType(1, 0), List(
+                             "b00".U   -> false.B,                   //b
+                             "b01".U   -> (s1_vaddr(0)    =/= 0.U), //h
+                             "b10".U   -> (s1_vaddr(1, 0) =/= 0.U), //w
+                             "b11".U   -> (s1_vaddr(2, 0) =/= 0.U)  //d
+                          ))
+    // Case 2: this load-load uop is cancelled
     s1_ptr_chasing_canceled := !io.ldin.valid
 
     when (s1_try_ptr_chasing) {
-      s1_cancel_ptr_chasing := s1_addr_mismatch || s1_addr_misaligned || s1_fu_op_type_not_ld || s1_not_fast_match || s1_ptr_chasing_canceled
+      s1_cancel_ptr_chasing := s1_addr_mismatch || s1_addr_misaligned || s1_ptr_chasing_canceled
 
       s1_in.uop           := io.ldin.bits.uop
       s1_in.rsIdx         := io.rsIdx
       s1_in.isFirstIssue  := io.isFirstIssue
-      s1_vaddr_lo         := Cat(s1_ptr_chasing_vaddr(5, 3), 0.U(3.W))
+      s1_vaddr_lo         := s1_ptr_chasing_vaddr(5, 0)
       s1_paddr_dup_lsu    := Cat(io.tlb.resp.bits.paddr(0)(PAddrBits - 1, 6), s1_vaddr_lo)
       s1_paddr_dup_dcache := Cat(io.tlb.resp.bits.paddr(0)(PAddrBits - 1, 6), s1_vaddr_lo)
 
@@ -960,14 +964,14 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   //
   io.s2_ptr_chasing                    := RegEnable(s1_try_ptr_chasing && !s1_cancel_ptr_chasing, s1_fire)
 
-  io.prefetch_train.valid              := s2_valid && !s2_in.mmio && !s2_in.tlbMiss
+  io.prefetch_train.valid              := s2_valid && !s2_actually_mmio && !s2_in.tlbMiss
   io.prefetch_train.bits.fromLsPipelineBundle(s2_in)
   io.prefetch_train.bits.miss          := io.dcache.resp.bits.miss // TODO: use trace with bank conflict?
   io.prefetch_train.bits.meta_prefetch := io.dcache.resp.bits.meta_prefetch
   io.prefetch_train.bits.meta_access   := io.dcache.resp.bits.meta_access
   
 
-  io.prefetch_train_l1.valid              := s2_valid && !s2_in.mmio
+  io.prefetch_train_l1.valid              := s2_valid && !s2_actually_mmio
   io.prefetch_train_l1.bits.fromLsPipelineBundle(s2_in)
   io.prefetch_train_l1.bits.miss          := io.dcache.resp.bits.miss
   io.prefetch_train_l1.bits.meta_prefetch := io.dcache.resp.bits.meta_prefetch
@@ -981,7 +985,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     io.dcache.s1_pc := s1_out.uop.cf.pc
     io.dcache.s2_pc := s2_out.uop.cf.pc
   }
-  io.dcache.s2_kill := s2_pmp.ld || s2_pmp.mmio || s2_kill
+  io.dcache.s2_kill := s2_pmp.ld || s2_actually_mmio || s2_kill
 
   val s1_ld_left_fire = s1_valid && !s1_kill && s2_ready
   val s2_ld_valid_dup = RegInit(0.U(6.W))
@@ -1169,7 +1173,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // fast load to load forward
   io.l2l_fwd_out.valid      := s3_out.valid && !s3_in.lateKill
-  io.l2l_fwd_out.data       := Mux(s3_ld_raw_data_frm_cache.addrOffset(3), s3_merged_data_frm_cache(127, 64), s3_merged_data_frm_cache(63, 0)) // load to load is for ld only
+  io.l2l_fwd_out.data       := s3_ld_data_frm_cache
   io.l2l_fwd_out.dly_ld_err := s3_dly_ld_err // ecc delayed error
 
    // trigger
@@ -1243,8 +1247,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("s2_prefetch_miss",             s2_fire && s2_prf && io.dcache.resp.bits.miss) // prefetch req miss in l1
   XSPerfAccumulate("s2_prefetch_hit",              s2_fire && s2_prf && !io.dcache.resp.bits.miss) // prefetch req hit in l1
   XSPerfAccumulate("s2_prefetch_accept",           s2_fire && s2_prf && io.dcache.resp.bits.miss && !s2_mq_nack) // prefetch a missed line in l1, and l1 accepted it
-  XSPerfAccumulate("s2_successfully_forward_channel_D", s2_fwd_frm_d_chan && s2_fwd_data_valid)
-  XSPerfAccumulate("s2_successfully_forward_mshr",      s2_fwd_frm_mshr && s2_fwd_data_valid)
+  XSPerfAccumulate("s2_forward_req",               s2_fire && s2_in.forward_tlDchannel)
+  XSPerfAccumulate("s2_successfully_forward_channel_D", s2_fire && s2_fwd_frm_d_chan && s2_fwd_data_valid)
+  XSPerfAccumulate("s2_successfully_forward_mshr",      s2_fire && s2_fwd_frm_mshr && s2_fwd_data_valid)
 
   XSPerfAccumulate("s3_fwd_frm_d_chan",            s3_valid && s3_fwd_frm_d_chan_valid)
 

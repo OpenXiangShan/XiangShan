@@ -344,6 +344,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   // By default, instructions do not have exceptions when they enter the function units.
   memBlock.io.ooo_to_mem.issue.map(_.bits.uop.clearExceptions())
   exuBlocks(0).io.scheExtra.loadFastMatch.get <> memBlock.io.ooo_to_mem.loadFastMatch
+  exuBlocks(0).io.scheExtra.loadFastFuOpType.get <> memBlock.io.ooo_to_mem.loadFastFuOpType
   exuBlocks(0).io.scheExtra.loadFastImm.get <> memBlock.io.ooo_to_mem.loadFastImm
 
   val stdIssue = exuBlocks(0).io.issue.get.takeRight(exuParameters.StuCnt)
