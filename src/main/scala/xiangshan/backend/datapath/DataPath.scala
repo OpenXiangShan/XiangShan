@@ -320,7 +320,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
         } else if (s1_data.params.hasLoadFu) {
           // dirty code for fused_lui_load
           when(SrcType.isImm(s0.bits.srcType(0))) {
-            s1_data.src(0) := ImmUnion.U.toImm32(s0.bits.common.imm(s0.bits.common.imm.getWidth - 1, ImmUnion.I.len))
+            s1_data.src(0) := SignExt(ImmUnion.U.toImm32(s0.bits.common.imm(s0.bits.common.imm.getWidth - 1, ImmUnion.I.len)), XLEN)
           }
         }
       }
