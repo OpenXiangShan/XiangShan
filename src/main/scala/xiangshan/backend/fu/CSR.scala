@@ -662,7 +662,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   )
 
   // Vector extension CSRs
-  val vstart = Reg(UInt(XLEN.W))
+  val vstart = RegInit(0.U(XLEN.W))
   val vcsr = RegInit(0.U(XLEN.W))
   val vl = Reg(UInt(XLEN.W))
   val vtype = Reg(UInt(XLEN.W))
