@@ -150,7 +150,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val needIntDest    = Wire(Vec(RenameWidth, Bool()))
   val hasValid = Cat(io.in.map(_.valid)).orR
 
-  val isMove = io.in.map(_.bits.isMove)
+  val isMove = Wire(Vec(RenameWidth, Bool()))
+  isMove zip io.in.map(_.bits) foreach {
+    case (move, in) => move := Mux(in.exceptionVec.asUInt.orR, false.B, in.isMove)
+  }
 
   val walkNeedIntDest = WireDefault(VecInit(Seq.fill(RenameWidth)(false.B)))
   val walkNeedFpDest = WireDefault(VecInit(Seq.fill(RenameWidth)(false.B)))
