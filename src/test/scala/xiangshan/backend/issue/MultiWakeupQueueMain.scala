@@ -16,7 +16,7 @@ object MultiWakeupQueueMain extends App {
       new DynInst()(p),
       ValidIO(new Redirect()(p)),
       Set(2, 4),
-      (dynInst: DynInst, flush: ValidIO[Redirect]) => dynInst.robIdx.needFlush(flush)
+      (dynInst: DynInst, flush: ValidIO[Redirect], stage: Int) => dynInst.robIdx.needFlush(flush)
     ),
     Array("--full-stacktrace", "--target-dir", "build/issue")
   )
