@@ -75,23 +75,26 @@ case class ExeUnitParams(
   def latencyCertain: Boolean = fuConfigs.map(x => x.latency.latencyVal.nonEmpty).reduce(_ && _)
   def intLatencyCertain: Boolean = writeIntFuConfigs.forall(x => x.latency.latencyVal.nonEmpty)
   def vfLatencyCertain: Boolean = writeVfFuConfigs.forall(x => x.latency.latencyVal.nonEmpty)
+  def hasUncertainLatencyVal: Boolean = fuConfigs.map(x => x.latency.uncertainLatencyVal.nonEmpty).reduce(_ && _)
 
   /**
     * Get mapping from FuType to Latency value.
-    * If [[latencyCertain]] is false, get empty [[Map]]
+    * If both [[latencyCertain]] and [[hasUncertainLatencyVal]] are false, get empty [[Map]]
     *
     * @return Map[FuType, Latency]
     */
   def fuLatencyMap: Map[Int, Int] = {
     if (latencyCertain)
       fuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
+    else if (hasUncertainLatencyVal)
+      fuConfigs.map(x => (x.fuType, x.latency.uncertainLatencyVal.get)).toMap
     else
       Map()
   }
 
   /**
     * Get set of latency of function units.
-    * If [[latencyCertain]] is false, get empty [[Set]]
+    * If both [[latencyCertain]] and [[hasUncertainLatencyVal]] are false, get empty [[Set]]
     *
     * @return Set[Latency]
     */
@@ -178,7 +181,7 @@ case class ExeUnitParams(
     this.iqWakeUpSourcePairs = cfgs.filter(_.source.name == this.name)
     this.iqWakeUpSinkPairs = cfgs.filter(_.sink.name == this.name)
     if (this.isIQWakeUpSource)
-      require(!this.hasUncertainLatency, s"${this.name} is IQ wake up source, but has UncertainLatency")
+      require(!this.hasUncertainLatency || hasLoadFu, s"${this.name} is a not-LDU IQ wake up source , but has UncertainLatency")
   }
 
   def updateExuIdx(idx: Int): Unit = {
