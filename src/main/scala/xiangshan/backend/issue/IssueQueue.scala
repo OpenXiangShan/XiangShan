@@ -415,7 +415,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     wakeUpQueueOption.foreach {
       wakeUpQueue =>
         wakeUpQueue.io.flush := io.flush
-        wakeUpQueue.io.enq.valid := io.deq(i).fire && {
+        wakeUpQueue.io.enq.valid := io.deq(i).fire && !io.deq(i).bits.common.needCancel(io.og0Cancel, io.og1Cancel) && {
           if (io.deq(i).bits.common.rfWen.isDefined)
             io.deq(i).bits.common.rfWen.get && io.deq(i).bits.common.pdest =/= 0.U
           else
