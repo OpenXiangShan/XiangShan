@@ -17,7 +17,8 @@ class PipeWithFlush[T <: Data, TFlush <: Data] (
   gen: T,
   flushGen: TFlush,
   latency: Int,
-  flushFunc: (T, TFlush, Int) => Bool
+  flushFunc: (T, TFlush, Int) => Bool,
+  modificationFunc: T => T = { x: T => x }
 ) extends Module {
   require(latency >= 0, "Pipe latency must be greater than or equal to zero!")
 
@@ -31,11 +32,12 @@ class PipeWithFlush[T <: Data, TFlush <: Data] (
 
   val valids: Seq[Bool] = io.enq.valid +: Seq.fill(latency)(RegInit(false.B))
   val bits: Seq[T] = io.enq.bits +: Seq.fill(latency)(Reg(gen))
+  val modifiedBits: Seq[T] = bits.map(modificationFunc)
 
   for (i <- 0 until latency) {
     valids(i + 1) := valids(i) && !flushFunc(bits(i), io.flush, i)
     when (valids(i)) {
-      bits(i + 1) := bits(i)
+      bits(i + 1) := modifiedBits(i)
     }
   }
   io.deq.valid := valids.last
