@@ -50,7 +50,7 @@ object genWdata {
   }
 }
 
-class LsPipelineBundle(implicit val p: Parameters) extends Bundle with HasXSParameter with HasDCacheParameters{
+class LsPipelineBundle(implicit p: Parameters) extends XSBundle with HasDCacheParameters{
   val uop = new DynInst
   val vaddr = UInt(VAddrBits.W)
   val paddr = UInt(PAddrBits.W)

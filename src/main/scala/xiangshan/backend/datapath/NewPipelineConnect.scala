@@ -40,11 +40,10 @@ object NewPipelineConnect {
     val valid = RegInit(false.B)
 
     left.ready := right.ready || !valid
-    val leftFire = left.valid && left.ready
-    val data = RegEnable(left.bits, leftFire)
+    val data = RegEnable(left.bits, left.fire)
 
     when (rightOutFire) { valid := false.B }
-    when (leftFire) { valid := true.B }
+    when (left.fire) { valid := true.B }
     when (isFlush) { valid := false.B }
 
     right.bits := data
