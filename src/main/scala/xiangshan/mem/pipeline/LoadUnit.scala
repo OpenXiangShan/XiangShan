@@ -180,6 +180,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s0_ld_rep        = Wire(Bool())
   val s0_l2l_fwd       = Wire(Bool())
   val s0_sched_idx     = Wire(UInt())
+  val s0_deqPortIdx    = Wire(UInt(log2Ceil(LoadPipelineWidth).W))
   val s0_can_go        = s1_ready
   val s0_fire          = s0_valid && s0_can_go
   val s0_out           = Wire(new LqWriteBundle)
@@ -346,6 +347,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s0_prf_rd        := false.B
     s0_prf_wr        := false.B
     s0_sched_idx     := 0.U
+    s0_deqPortIdx    := 0.U
   }
 
   def fromFastReplaySource(src: LqWriteBundle) = {
@@ -366,6 +368,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s0_prf_rd        := src.uop.fuOpType === LSUOpType.prefetch_r
     s0_prf_wr        := src.uop.fuOpType === LSUOpType.prefetch_w
     s0_sched_idx     := src.schedIndex
+    s0_deqPortIdx    := src.deqPortIdx
   }
 
   def fromNormalReplaySource(src: LsPipelineBundle) = {
@@ -386,6 +389,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s0_prf_rd        := src.uop.fuOpType === LSUOpType.prefetch_r
     s0_prf_wr        := src.uop.fuOpType === LSUOpType.prefetch_w
     s0_sched_idx     := src.schedIndex
+    s0_deqPortIdx    := src.deqPortIdx
   }
 
   def fromPrefetchSource(src: L1PrefetchReq) = {
@@ -406,6 +410,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s0_prf_rd        := !src.is_store
     s0_prf_wr        := src.is_store
     s0_sched_idx     := 0.U
+    s0_deqPortIdx    := src.deqPortIdx
   }
 
   def fromIntIssueSource(src: MemExuInput) = {
@@ -426,6 +431,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s0_prf_rd        := src.uop.fuOpType === LSUOpType.prefetch_r
     s0_prf_wr        := src.uop.fuOpType === LSUOpType.prefetch_w
     s0_sched_idx     := 0.U
+    s0_deqPortIdx    := src.deqPortIdx
   }
 
   def fromVecIssueSource() = {
@@ -446,6 +452,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s0_prf_rd        := false.B
     s0_prf_wr        := false.B
     s0_sched_idx     := 0.U
+    s0_deqPortIdx    := 0.U
   }
 
   def fromLoadToLoadSource(src: LoadToLoadIO) = {
@@ -470,6 +477,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s0_prf_rd             := false.B
     s0_prf_wr             := false.B
     s0_sched_idx          := 0.U
+    s0_deqPortIdx         := src.deqPortIdx
   }
 
   // set default
@@ -519,6 +527,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s0_out.uop.debugInfo.tlbFirstReqTime := s0_uop.debugInfo.tlbFirstReqTime
   }
   s0_out.schedIndex     := s0_sched_idx
+  s0_out.deqPortIdx     := s0_deqPortIdx
 
   // load fast replay
   io.fast_rep_in.ready := (s0_can_go && io.dcache.req.ready && s0_ld_fast_rep_ready)
@@ -853,10 +862,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   //
   s2_out                     := s2_in
   s2_out.data                := 0.U // data will be generated in load s3
-  s2_out.uop.fpWen      := s2_in.uop.fpWen && !s2_exception
+  s2_out.uop.fpWen           := s2_in.uop.fpWen && !s2_exception
   s2_out.mmio                := s2_mmio
-  s2_out.uop.flushPipe  := false.B // io.fast_uop.valid && s2_mmio
-  s2_out.uop.exceptionVec := s2_exception_vec
+  s2_out.uop.flushPipe       := false.B // io.fast_uop.valid && s2_mmio
+  s2_out.uop.exceptionVec    := s2_exception_vec
   s2_out.forwardMask         := s2_fwd_mask
   s2_out.forwardData         := s2_fwd_data
   s2_out.handledByMSHR       := s2_cache_handled
@@ -1036,8 +1045,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.feedback_slow.bits.sourceType       := RSFeedbackType.lrqFull
   io.feedback_slow.bits.dataInvalidSqIdx := DontCare
 
-  val s3_ld_wb_meta = Mux(s3_out.valid, s3_out.bits, io.lsq.uncache.bits)
+  io.ldCancel.ld2Cancel.valid := s3_loadOutValid && !s3_loadOutBits.uop.robIdx.needFlush(io.redirect) && !s3_loadOutBits.isLoadReplay && !io.feedbackSlow.bits.hit
+  io.ldCancel.ld2Cancel.bits := s3_loadOutBits.deqPortIdx
 
+  val s3_ld_wb_meta = Mux(s3_out.valid, s3_out.bits, io.lsq.uncache.bits)
   // data from load queue refill
   val s3_ld_raw_data_frm_uncache = io.lsq.ld_raw_data
   val s3_merged_data_frm_uncache = s3_ld_raw_data_frm_uncache.mergedData()

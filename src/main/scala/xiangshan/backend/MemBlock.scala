@@ -84,14 +84,15 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val issue = Vec(MemExuCnt, Flipped(DecoupledIO(new MemExuInput)))
     val loadFastMatch = Vec(LduCnt, Input(UInt(LduCnt.W)))
     val loadFastImm = Vec(LduCnt, Input(UInt(12.W)))
-    val ldaIqFeedback = Vec(LduCnt, new MemRSFeedbackIO)
-    val staIqFeedback = Vec(StaCnt, new MemRSFeedbackIO)
     val loadPc = Vec(LduCnt, Input(UInt(VAddrBits.W))) // for hw prefetch
     val stIssuePtr = Output(new SqPtr())
     val int2vlsu = Flipped(new Int2VLSUIO)
     val vec2vlsu = Flipped(new Vec2VLSUIO)
     // out
     val writeback = Vec(MemExuCnt, DecoupledIO(new MemExuOutput))
+    val ldaIqFeedback = Vec(LduCnt, new MemRSFeedbackIO)
+    val staIqFeedback = Vec(StaCnt, new MemRSFeedbackIO)
+    val ldCancel = Vec(LduCnt, new LoadCancelIO)
     val s3_delayed_load_error = Vec(LduCnt, Output(Bool()))
     val otherFastWakeup = Vec(MemExuCnt, ValidIO(new DynInst))
     val vlsu2vec = new VLSU2VecIO
@@ -393,11 +394,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   for (i <- 0 until LduCnt) {
     loadUnits(i).io.redirect <> redirect
-
-    // get input form dispatch
-    loadUnits(i).io.ldin <> io.issue(i)
-    loadUnits(i).io.feedback_slow <> io.ldaIqFeedback(i).feedbackSlow
-    loadUnits(i).io.feedback_fast <> io.ldaIqFeedback(i).feedbackFast
+    // send feedback to dispatch
+    loadUnits(i).io.feedbackSlow <> io.ldaIqFeedback(i).feedbackSlow
+    loadUnits(i).io.feedbackFast <> io.ldaIqFeedback(i).feedbackFast
+    io.ldCancel(i) := loadUnits(i).io.ldCancel
 
     // fast replay
     loadUnits(i).io.fast_rep_in.valid := balanceFastReplaySel(i).valid

@@ -120,6 +120,9 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle with HasDCachePa
 
   // loadQueueReplay index.
   val schedIndex = UInt(log2Up(LoadQueueReplaySize).W)
+
+  // issue dequeue port index
+  val deqPortIdx = UInt(log2Ceil(LoadPipelineWidth).W)
 }
 
 class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
@@ -146,6 +149,7 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     hasROBEntry := input.hasROBEntry
     dcacheRequireReplay := input.dcacheRequireReplay
     schedIndex := input.schedIndex
+    deqPortIdx := input.deqPortIdx
 
     meta_prefetch := DontCare
     meta_access := DontCare

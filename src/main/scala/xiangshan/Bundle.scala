@@ -433,6 +433,11 @@ class MemRSFeedbackIO(implicit p: Parameters) extends XSBundle {
   val feedbackFast = ValidIO(new RSFeedback()) // bank conflict
 }
 
+class LoadCancelIO(implicit p: Parameters) extends XSBundle {
+  val ld1Cancel = ValidIO(UInt(log2Ceil(LoadPipelineWidth).W))
+  val ld2Cancel = ValidIO(UInt(log2Ceil(LoadPipelineWidth).W))
+}
+
 class FrontendToCtrlIO(implicit p: Parameters) extends XSBundle {
   // to backend end
   val cfVec = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))

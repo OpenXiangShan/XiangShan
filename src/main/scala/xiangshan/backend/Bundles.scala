@@ -263,6 +263,7 @@ object Bundles {
   }
 
   class IssueQueueIQWakeUpBundle(exuIdx: Int, backendParams: BackendParams) extends IssueQueueWakeUpBaseBundle(backendParams.pregIdxWidth, Seq(exuIdx)) {
+    val loadDependency = Vec(backendParams.LduCnt, UInt(3.W))
     def fromExuInput(exuInput: ExuInput, l2ExuVecs: Vec[Vec[Bool]]): Unit = {
       this.rfWen := exuInput.rfWen.getOrElse(false.B)
       this.fpWen := exuInput.fpWen.getOrElse(false.B)
@@ -453,6 +454,8 @@ object Bundles {
     val dataSources = Vec(params.numRegSrc, DataSource())
     val l1ExuVec = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, ExuVec()))
     val srcTimer = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, UInt(3.W)))
+    val loadDependency = OptionWrapper(params.isIQWakeUpSink, Vec(LoadPipelineWidth, UInt(3.W)))
+    val deqPortIdx = OptionWrapper(params.hasLoadFu, UInt(log2Ceil(LoadPipelineWidth).W))
 
     def exuIdx = this.params.exuIdx
 
@@ -480,30 +483,32 @@ object Bundles {
 
     def fromIssueBundle(source: IssueQueueIssueBundle): Unit = {
       // src is assigned to rfReadData
-      this.fuType       := source.common.fuType
-      this.fuOpType     := source.common.fuOpType
-      this.imm          := source.common.imm
-      this.robIdx       := source.common.robIdx
-      this.pdest        := source.common.pdest
-      this.isFirstIssue := source.common.isFirstIssue // Only used by mem debug log
-      this.iqIdx        := source.common.iqIdx        // Only used by mem feedback
-      this.dataSources  := source.common.dataSources
-      this.rfWen        .foreach(_ := source.common.rfWen.get)
-      this.fpWen        .foreach(_ := source.common.fpWen.get)
-      this.vecWen       .foreach(_ := source.common.vecWen.get)
-      this.fpu          .foreach(_ := source.common.fpu.get)
-      this.vpu          .foreach(_ := source.common.vpu.get)
-      this.flushPipe    .foreach(_ := source.common.flushPipe.get)
-      this.pc           .foreach(_ := source.jmp.get.pc)
-      this.jalrTarget   .foreach(_ := source.jmp.get.target)
-      this.preDecode    .foreach(_ := source.common.preDecode.get)
-      this.ftqIdx       .foreach(_ := source.common.ftqIdx.get)
-      this.ftqOffset    .foreach(_ := source.common.ftqOffset.get)
-      this.predictInfo  .foreach(_ := source.common.predictInfo.get)
-      this.lqIdx        .foreach(_ := source.common.lqIdx.get)
-      this.sqIdx        .foreach(_ := source.common.sqIdx.get)
-      this.l1ExuVec     .foreach(_ := source.common.l1ExuVec.get)
-      this.srcTimer     .foreach(_ := source.common.srcTimer.get)
+      this.fuType        := source.common.fuType
+      this.fuOpType      := source.common.fuOpType
+      this.imm           := source.common.imm
+      this.robIdx        := source.common.robIdx
+      this.pdest         := source.common.pdest
+      this.isFirstIssue  := source.common.isFirstIssue // Only used by mem debug log
+      this.iqIdx         := source.common.iqIdx        // Only used by mem feedback
+      this.dataSources   := source.common.dataSources
+      this.rfWen         .foreach(_ := source.common.rfWen.get)
+      this.fpWen         .foreach(_ := source.common.fpWen.get)
+      this.vecWen        .foreach(_ := source.common.vecWen.get)
+      this.fpu           .foreach(_ := source.common.fpu.get)
+      this.vpu           .foreach(_ := source.common.vpu.get)
+      this.flushPipe     .foreach(_ := source.common.flushPipe.get)
+      this.pc            .foreach(_ := source.jmp.get.pc)
+      this.jalrTarget    .foreach(_ := source.jmp.get.target)
+      this.preDecode     .foreach(_ := source.common.preDecode.get)
+      this.ftqIdx        .foreach(_ := source.common.ftqIdx.get)
+      this.ftqOffset     .foreach(_ := source.common.ftqOffset.get)
+      this.predictInfo   .foreach(_ := source.common.predictInfo.get)
+      this.lqIdx         .foreach(_ := source.common.lqIdx.get)
+      this.sqIdx         .foreach(_ := source.common.sqIdx.get)
+      this.l1ExuVec      .foreach(_ := source.common.l1ExuVec.get)
+      this.srcTimer      .foreach(_ := source.common.srcTimer.get)
+      this.loadDependency.foreach(_ := source.common.loadDependency.get.map(_ << 1))
+      this.deqPortIdx    .foreach(_ := source.common.deqPortIdx.get)
     }
   }
 
@@ -643,6 +648,7 @@ object Bundles {
     val src = if (isVector) Vec(5, UInt(VLEN.W)) else Vec(3, UInt(XLEN.W))
     val iqIdx = UInt(log2Up(MemIQSizeMax).W)
     val isFirstIssue = Bool()
+    val deqPortIdx = UInt(log2Ceil(LoadPipelineWidth).W)
   }
 
   class MemExuOutput(isVector: Boolean = false)(implicit p: Parameters) extends XSBundle {
@@ -654,5 +660,21 @@ object Bundles {
   class MemMicroOpRbExt(implicit p: Parameters) extends XSBundle {
     val uop = new DynInst
     val flag = UInt(1.W)
+  }
+
+  object LoadShouldCancel {
+    def apply(loadDependency: Option[Seq[UInt]], ldCancel: Seq[LoadCancelIO]): Bool = {
+      val ld1Cancel = loadDependency.map(deps =>
+        deps.zipWithIndex.map { case (dep, ldPortIdx) =>
+          ldCancel.map(_.ld1Cancel).map(cancel => cancel.fire && dep(1) && cancel.bits === ldPortIdx.U).reduce(_ || _)
+        }.reduce(_ || _)
+      )
+      val ld2Cancel = loadDependency.map(deps =>
+        deps.zipWithIndex.map { case (dep, ldPortIdx) =>
+          ldCancel.map(_.ld2Cancel).map(cancel => cancel.fire && dep(2) && cancel.bits === ldPortIdx.U).reduce(_ || _)
+        }.reduce(_ || _)
+      )
+      ld1Cancel.map(_ || ld2Cancel.get).getOrElse(false.B)
+    }
   }
 }

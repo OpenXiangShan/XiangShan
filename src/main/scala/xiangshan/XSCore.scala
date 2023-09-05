@@ -124,6 +124,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.otherFastWakeup := memBlock.io.otherFastWakeup
   backend.io.mem.ldaIqFeedback <> memBlock.io.ldaIqFeedback
   backend.io.mem.staIqFeedback <> memBlock.io.staIqFeedback
+  backend.io.mem.ldCancel <> memBlock.io.ldCancel
   backend.io.mem.writeBack.zip(memBlock.io.writeback).foreach { case(back, mem) =>
     back <> mem
   }
