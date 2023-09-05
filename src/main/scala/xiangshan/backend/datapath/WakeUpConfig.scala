@@ -41,7 +41,8 @@ class WakeUpConfig (val source: WakeUpSource, val sink: WakeUpSink) {
 }
 
 object WakeUpConfig {
-  def apply(source: String, sink: String): WakeUpConfig = new WakeUpConfig(source, sink)
-
-  def apply(pair: (String, String)): WakeUpConfig = new WakeUpConfig(pair)
+  def apply(pair: (Seq[String], Seq[String])): Seq[WakeUpConfig] = for {
+    source <- pair._1
+    sink <- pair._2
+  } yield new WakeUpConfig(source, sink)
 }
