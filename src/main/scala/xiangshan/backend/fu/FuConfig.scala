@@ -402,7 +402,7 @@ object FuConfig {
     piped = false, // Todo: check it
     writeIntRf = true,
     writeFpRf = true,
-    latency = UncertainLatency(),
+    latency = UncertainLatency(3),
     exceptionOut = Seq(loadAddrMisaligned, loadAccessFault, loadPageFault),
     flushPipe = true,
     replayInst = true,

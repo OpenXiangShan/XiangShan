@@ -25,14 +25,22 @@ import xiangshan.backend.fu.fpu._
 
 trait HasFuLatency {
   val latencyVal: Option[Int]
+  val uncertainLatencyVal: Option[Int]
 }
 
 case class CertainLatency(value: Int) extends HasFuLatency {
   override val latencyVal: Option[Int] = Some(value)
+  override val uncertainLatencyVal: Option[Int] = None
 }
 
-case class UncertainLatency() extends HasFuLatency {
+case class UncertainLatency(value: Option[Int]) extends HasFuLatency {
   override val latencyVal: Option[Int] = None
+  override val uncertainLatencyVal: Option[Int] = value
+}
+
+object UncertainLatency {
+  def apply(): UncertainLatency = UncertainLatency(None)
+  def apply(value: Int): UncertainLatency = UncertainLatency(Some(value))
 }
 
 class FuOutput(val len: Int)(implicit p: Parameters) extends XSBundle {
