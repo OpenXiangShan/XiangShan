@@ -25,13 +25,14 @@ class MultiWakeupQueue[T <: Data, TFlush <: Data](
   val gen       : T,
   val flushGen  : TFlush,
   val latencySet: Set[Int],
-  flushFunc : (T, TFlush, Int) => Bool
+  flushFunc : (T, TFlush, Int) => Bool,
+  modificationFunc: T => T = { x: T => x }
 ) extends Module {
   require(latencySet.min >= 0)
 
   val io = IO(new MultiWakeupQueueIO(gen, flushGen, log2Up(latencySet.max) + 1))
 
-  val pipes = latencySet.map(x => Module(new PipeWithFlush[T, TFlush](gen, flushGen, x, flushFunc))).toSeq
+  val pipes = latencySet.map(x => Module(new PipeWithFlush[T, TFlush](gen, flushGen, x, flushFunc, modificationFunc))).toSeq
 
   pipes.zip(latencySet).foreach {
     case (pipe, lat) =>
