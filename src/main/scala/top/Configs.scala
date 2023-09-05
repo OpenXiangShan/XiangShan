@@ -236,7 +236,8 @@ class WithNKBL2
   ways: Int = 8,
   inclusive: Boolean = true,
   banks: Int = 1,
-  alwaysReleaseData: Boolean = false
+  alwaysReleaseData: Boolean = false,
+  hasPrefetch: Boolean = true,
 ) extends Config((site, here, up) => {
   case XSTileKey =>
     val upParams = up(XSTileKey)
@@ -258,7 +259,7 @@ class WithNKBL2
         )),
         reqField = Seq(PreferCacheField()),
         echoField = Seq(DirtyField()),
-        prefetch = Some(huancun.prefetch.PrefetchReceiverParams()),
+        prefetch = if (hasPrefetch) Some(huancun.prefetch.PrefetchReceiverParams()) else None,
         enablePerf = true,
         sramDepthDiv = 2,
         tagECC = None,
@@ -492,6 +493,15 @@ class NohypeSimConfig(n: Int = 1) extends Config(
     ++ new WithNKBL2(256, inclusive = false, alwaysReleaseData = true)
     ++ new WithNKBL1D(64)
     ++ new PerfetchMinimalConfig(n)
+    ++ new MinimalConfig(n)
+)
+
+class LvNASingleSimConfig(n: Int = 1) extends Config(
+  new WithLvNANKBL3(256, inclusive = false, banks = 1)
+    ++ new WithNohypeOffsetDevices(0x3000000)
+    ++ new WithLvNATile(n)
+    ++ new WithNKBL2(64, inclusive = false, alwaysReleaseData = true, hasPrefetch = false)
+    // ++ new WithNKBL1D(64)
     ++ new MinimalConfig(n)
 )
 

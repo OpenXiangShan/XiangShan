@@ -257,6 +257,8 @@ case class XSCoreParameters
       Seq.fill(exuParameters.FmiscCnt)(FmiscExeUnitCfg)
 
   val exuConfigs: Seq[ExuConfig] = intExuConfigs ++ fpExuConfigs ++ loadExuConfigs ++ storeExuConfigs
+
+  val unusedDsid = ((1 << DsidWidth) - 1).U(DsidWidth.W)
 }
 
 case object DebugOptionsKey extends Field[DebugOptions]
