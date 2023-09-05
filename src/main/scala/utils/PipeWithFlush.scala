@@ -2,9 +2,7 @@ package utils
 
 import chisel3._
 import chisel3.util._
-import top.{ArgParser, BaseConfig, DefaultConfig}
 import xiangshan._
-import xiangshan.backend.Bundles.DynInst
 
 /** Pipeline module generator parameterized by data type and latency.
   *
@@ -16,34 +14,30 @@ import xiangshan.backend.Bundles.DynInst
   * @tparam TFlush Type of [[io.flush]]
   */
 class PipeWithFlush[T <: Data, TFlush <: Data] (
-  val gen: T,
-  val flushGen: TFlush,
-  val latency: Int,
-  flushFunc: (T, TFlush) => Bool
+  gen: T,
+  flushGen: TFlush,
+  latency: Int,
+  flushFunc: (T, TFlush, Int) => Bool
 ) extends Module {
   require(latency >= 0, "Pipe latency must be greater than or equal to zero!")
 
   class PipeIO extends Bundle {
-    val flush = Flipped(flushGen)
+    val flush = Input(flushGen)
     val enq = Input(Valid(gen))
     val deq = Output(Valid(gen))
   }
 
   val io = IO(new PipeIO)
 
-  if (latency == 0) {
-    io.deq := io.enq
-  } else {
-    val valids: Seq[Bool] = io.enq.valid +: Seq.fill(latency)(RegInit(false.B))
-    val bits: Seq[T] = io.enq.bits +: Seq.fill(latency)(Reg(gen))
+  val valids: Seq[Bool] = io.enq.valid +: Seq.fill(latency)(RegInit(false.B))
+  val bits: Seq[T] = io.enq.bits +: Seq.fill(latency)(Reg(gen))
 
-    for (i <- 0 until latency) {
-      valids(i + 1) := valids(i) && !flushFunc(bits(i), io.flush)
-      when (valids(i)) {
-        bits(i + 1) := bits(i)
-      }
+  for (i <- 0 until latency) {
+    valids(i + 1) := valids(i) && !flushFunc(bits(i), io.flush, i)
+    when (valids(i)) {
+      bits(i + 1) := bits(i)
     }
-    io.deq.valid := valids.last
-    io.deq.bits := bits.last
   }
+  io.deq.valid := valids.last
+  io.deq.bits := bits.last
 }

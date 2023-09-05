@@ -92,13 +92,24 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val vfWbBusyTableWrite = params.exuBlockParams.map { case x => OptionWrapper(x.vfLatencyCertain, Module(new FuBusyTableWrite(x.vfFuLatencyMap))) }
   val vfWbBusyTableRead = params.exuBlockParams.map { case x => OptionWrapper(x.vfLatencyCertain, Module(new FuBusyTableRead(x.vfFuLatencyMap))) }
 
-  val wakeUpQueues: Seq[Option[MultiWakeupQueue[ExuInput, ValidIO[Redirect]]]] = params.exuBlockParams.map { x => OptionWrapper(x.isIQWakeUpSource, Module(
-    new MultiWakeupQueue(
-      new ExuInput(x),
-      ValidIO(new Redirect) ,
-      x.fuLatancySet,
-      (exuInput: ExuInput, flush: ValidIO[Redirect]) => exuInput.robIdx.needFlush(flush)
-    )
+  class WakeupQueueFlush extends Bundle {
+    val redirect = ValidIO(new Redirect)
+    val og0Fail = Output(Bool())
+    val og1Fail = Output(Bool())
+  }
+
+  private def flushFunc(exuInput: ExuInput, flush: WakeupQueueFlush, stage: Int): Bool = {
+    val redirectFlush = exuInput.robIdx.needFlush(flush.redirect)
+    val ogFailFlush = stage match {
+      case 1 => flush.og0Fail
+      case 2 => flush.og1Fail
+      case _ => false.B
+    }
+    redirectFlush || ogFailFlush
+  }
+
+  val wakeUpQueues: Seq[Option[MultiWakeupQueue[ExuInput, WakeupQueueFlush]]] = params.exuBlockParams.map { x => OptionWrapper(x.isIQWakeUpSource, Module(
+    new MultiWakeupQueue(new ExuInput(x), new WakeupQueueFlush, x.fuLatancySet, flushFunc)
   ))}
 
   val intWbBusyTableIn = io.wbBusyTableRead.map(_.intWbBusyTable)
@@ -414,7 +425,11 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   wakeUpQueues.zipWithIndex.foreach { case (wakeUpQueueOption, i) =>
     wakeUpQueueOption.foreach {
       wakeUpQueue =>
-        wakeUpQueue.io.flush := io.flush
+        val flush = Wire(new WakeupQueueFlush)
+        flush.redirect := io.flush
+        flush.og0Fail := io.og0Resp(i).valid && RSFeedbackType.isBlocked(io.og0Resp(i).bits.respType)
+        flush.og1Fail := io.og1Resp(i).valid && RSFeedbackType.isBlocked(io.og1Resp(i).bits.respType)
+        wakeUpQueue.io.flush := flush
         wakeUpQueue.io.enq.valid := io.deq(i).fire && !io.deq(i).bits.common.needCancel(io.og0Cancel, io.og1Cancel) && {
           if (io.deq(i).bits.common.rfWen.isDefined)
             io.deq(i).bits.common.rfWen.get && io.deq(i).bits.common.pdest =/= 0.U
@@ -423,6 +438,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         }
         wakeUpQueue.io.enq.bits.uop := io.deq(i).bits.common
         wakeUpQueue.io.enq.bits.lat := getDeqLat(i, io.deq(i).bits.common.fuType)
+        wakeUpQueue.io.og0IssueFail := flush.og0Fail
+        wakeUpQueue.io.og1IssueFail := flush.og1Fail
     }
   }
 

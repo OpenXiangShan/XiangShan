@@ -17,7 +17,7 @@ object GenPipeWithFlush extends App {
       new DynInst()(p),
       ValidIO(new Redirect()(p)),
       2,
-      (dynInst: DynInst, flush: ValidIO[Redirect]) => dynInst.robIdx.needFlush(flush)
+      (dynInst: DynInst, flush: ValidIO[Redirect], stage: Int) => dynInst.robIdx.needFlush(flush)
     ),
     Array("--target-dir", "build/vifu"))
 }
