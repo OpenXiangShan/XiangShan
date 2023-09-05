@@ -34,14 +34,9 @@ class Scheduler(val params: SchdBlockParams)(implicit p: Parameters) extends Laz
   }
 }
 
-class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends Bundle {
+class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSBundle {
   // params alias
-  private val backendParams = params.backendParam
-  private val LoadQueueSize = p(XSCoreParamsKey).VirtualLoadQueueSize
-  private val RenameWidth = p(XSCoreParamsKey).RenameWidth
-  private val CommitWidth = p(XSCoreParamsKey).CommitWidth
-  private val EnsbufferWidth = p(XSCoreParamsKey).EnsbufferWidth
-  private val StoreQueueSize = p(XSCoreParamsKey).StoreQueueSize
+  private val LoadQueueSize = VirtualLoadQueueSize
 
   val fromTop = new Bundle {
     val hartId = Input(UInt(8.W))

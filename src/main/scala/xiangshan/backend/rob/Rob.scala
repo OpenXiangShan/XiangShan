@@ -948,16 +948,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   private val enqWriteStdVec: Vec[Bool] = VecInit(io.enq.req.map {
     req => FuType.isAMO(req.bits.fuType) || FuType.isStore(req.bits.fuType)
   })
-  val enqWbSizeSeq = io.enq.req.map { req =>
-    val enqHasException = ExceptionNO.selectFrontend(req.bits.exceptionVec).asUInt.orR
-    val enqHasTriggerHit = req.bits.trigger.getHitFrontend
-    Mux(req.bits.eliminatedMove, Mux(enqHasException || enqHasTriggerHit, 1.U, 0.U),
-      Mux(FuType.isAMO(req.bits.fuType) || FuType.isStore(req.bits.fuType), 2.U, 1.U))
-  }
-  val enqWbSizeSumSeq = enqRobIdxSeq.zipWithIndex.map { case (robIdx, idx) =>
-    val addend = enqRobIdxSeq.zip(enqWbSizeSeq).take(idx + 1).map { case (uopRobIdx, uopWbSize) => Mux(robIdx === uopRobIdx, uopWbSize, 0.U) }
-    addend.reduce(_ +& _)
-  }
   val fflags_wb = fflagsPorts
   val vxsat_wb = vxsatPorts
   for(i <- 0 until RobSize){
