@@ -454,8 +454,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     Mux(io.commits.isWalk && walkValid, destSize, 0.U)
   }.reduce(_ +& _)
 
-  rab.io.commitSize := commitSizeSum
-  rab.io.walkSize := walkSizeSum
+  rab.io.fromRob.commitSize := commitSizeSum
+  rab.io.fromRob.walkSize := walkSizeSum
   rab.io.snpt.snptEnq := false.B
   rab.io.snpt.snptDeq := io.snpt.snptDeq
   rab.io.snpt.snptSelect := io.snpt.snptSelect
@@ -711,7 +711,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     */
   val shouldWalkVec = VecInit(walkPtrVec.map(_ <= lastWalkPtr))
   val walkFinished = VecInit(walkPtrVec.map(_ >= lastWalkPtr)).asUInt.orR
-  rab.io.robWalkEnd := state === s_walk && walkFinished
+  rab.io.fromRob.walkEnd := state === s_walk && walkFinished
 
   require(RenameWidth <= CommitWidth)
 
@@ -824,7 +824,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     * (1) redirect: switch to s_walk
     * (2) walk: when walking comes to the end, switch to s_idle
     */
-  val state_next = Mux(io.redirect.valid, s_walk, Mux(state === s_walk && walkFinished && rab.io.rabWalkEnd, s_idle, state))
+  val state_next = Mux(io.redirect.valid, s_walk, Mux(state === s_walk && walkFinished && rab.io.status.walkEnd, s_idle, state))
   XSPerfAccumulate("s_idle_to_idle",            state === s_idle && state_next === s_idle)
   XSPerfAccumulate("s_idle_to_walk",            state === s_idle && state_next === s_walk)
   XSPerfAccumulate("s_walk_to_idle",            state === s_walk && state_next === s_idle)
