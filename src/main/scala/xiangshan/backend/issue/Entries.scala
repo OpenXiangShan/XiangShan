@@ -22,7 +22,7 @@ class StatusMemPart(implicit p:Parameters, params: IssueBlockParams) extends Bun
   val sqIdx = new SqPtr
 }
 
-class Status(implicit p:Parameters, params: IssueBlockParams) extends Bundle {
+class Status(implicit p:Parameters, params: IssueBlockParams) extends XSBundle {
   val srcState = Vec(params.numRegSrc, SrcState())
 
   val psrc = Vec(params.numRegSrc, UInt(params.rdPregIdxWidth.W))
@@ -40,6 +40,7 @@ class Status(implicit p:Parameters, params: IssueBlockParams) extends Bundle {
   val srcTimer = OptionWrapper(params.hasIQWakeUp, Vec(params.numRegSrc, UInt(3.W)))
   val issueTimer = UInt(2.W)
   val deqPortIdx = UInt(1.W)
+  val srcLoadDependency = OptionWrapper(params.hasIQWakeUp, Vec(params.numRegSrc, Vec(LoadPipelineWidth, UInt(3.W))))
 
 
   // mem only
@@ -56,6 +57,8 @@ class Status(implicit p:Parameters, params: IssueBlockParams) extends Bundle {
   def canIssue: Bool = {
     srcReady && !issued && !blocked
   }
+
+  def mergedLoadDependency = srcLoadDependency.map(_.map(_.toSeq).reduce(_ zip _ map(x => x._1 | x._2)))
 }
 
 class EntryDeqRespBundle(implicit p:Parameters, params: IssueBlockParams) extends Bundle {
@@ -94,11 +97,13 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val wakeUpFromIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
   val og0Cancel = Input(ExuVec(backendParams.numExu))
   val og1Cancel = Input(ExuVec(backendParams.numExu))
+  val ldCancel = Vec(backendParams.LduCnt, Flipped(new LoadCancelIO))
   //deq
   val deq = Vec(params.numDeq, new DeqBundle)
   val deqResp = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
   val og0Resp = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
   val og1Resp = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
+  val finalIssueResp = OptionWrapper(params.LduCnt > 0, Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle))))
   val transEntryDeqVec = Vec(params.numEnq, ValidIO(new EntryBundle))
   val deqEntry = Vec(params.numDeq, ValidIO(new EntryBundle))
   val transSelVec = Output(Vec(params.numEnq, UInt((params.numEntries-params.numEnq).W)))
@@ -121,7 +126,8 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   private val OthersEntryNum = params.numEntries - params.numEnq
   val io = IO(new EntriesIO)
 
-  val resps: Vec[Vec[ValidIO[EntryDeqRespBundle]]] = if(params.isMemAddrIQ) VecInit(io.deqResp, io.og0Resp, io.og1Resp, io.fromMem.get.fastResp, io.fromMem.get.slowResp)
+  val resps: Vec[Vec[ValidIO[EntryDeqRespBundle]]] = if(params.isLdAddrIQ) VecInit(io.deqResp, io.og0Resp, io.og1Resp, io.finalIssueResp.get, io.fromMem.get.fastResp, io.fromMem.get.slowResp)
+                                                     else if(params.isMemAddrIQ) VecInit(io.deqResp, io.og0Resp, io.og1Resp, io.fromMem.get.fastResp, io.fromMem.get.slowResp)
                                                      else VecInit(io.deqResp, io.og0Resp, io.og1Resp, 0.U.asTypeOf(io.deqResp))
 
   //Module
@@ -160,6 +166,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     enqEntry.io.wakeUpFromIQ := io.wakeUpFromIQ
     enqEntry.io.og0Cancel := io.og0Cancel
     enqEntry.io.og1Cancel := io.og1Cancel
+    enqEntry.io.ldCancel := io.ldCancel
     enqEntry.io.deqSel := deqSelVec(entryIdx)
     enqEntry.io.deqPortIdxWrite := deqPortIdxWriteVec(entryIdx)
     enqEntry.io.transSel := transSelVec(entryIdx).asUInt.orR
@@ -194,6 +201,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     othersEntry.io.wakeUpFromIQ := io.wakeUpFromIQ
     othersEntry.io.og0Cancel := io.og0Cancel
     othersEntry.io.og1Cancel := io.og1Cancel
+    othersEntry.io.ldCancel := io.ldCancel
     othersEntry.io.deqSel := deqSelVec(entryIdx + EnqEntryNum)
     othersEntry.io.deqPortIdxWrite := deqPortIdxWriteVec(entryIdx + EnqEntryNum)
     othersEntry.io.transSel := transSelVec.map(x => x(entryIdx)).reduce(_ | _)

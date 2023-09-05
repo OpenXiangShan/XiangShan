@@ -279,7 +279,8 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       val notBlock = intRdNotBlock(i)(j) && intWbNotBlock(i)(j) && vfRdNotBlock(i)(j) && vfWbNotBlock(i)(j)
       val s1_flush = s0.bits.common.robIdx.needFlush(Seq(io.flush, RegNextWithEnable(io.flush)))
       val s1_cancel = og1FailedVec2(i)(j)
-      when (s0.fire && !s1_flush && notBlock && !s1_cancel) {
+      val s1_ldCancel = LoadShouldCancel(s0.bits.common.loadDependency, io.ldCancel)
+      when (s0.fire && !s1_flush && notBlock && !s1_cancel && !s1_ldCancel) {
         s1_valid := s0.valid
         s1_data.fromIssueBundle(s0.bits) // no src data here
         s1_addrOH := s0.bits.addrOH
@@ -463,6 +464,8 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
   val og0CancelVec = Output(ExuVec(backendParams.numExu))
 
   val og1CancelVec = Output(ExuVec(backendParams.numExu))
+
+  val ldCancel = Vec(backendParams.LduCnt, Flipped(new LoadCancelIO))
 
   val toIntExu: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = intSchdParams.genExuInputBundle
 
