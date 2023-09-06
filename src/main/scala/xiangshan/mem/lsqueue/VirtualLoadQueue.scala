@@ -42,6 +42,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     val ldWbPtr     = Output(new LqPtr)
     // global
     val lqFull      = Output(Bool())
+    val lqEmpty     = Output(Bool())
     // to dispatch
     val lqDeq       = Output(UInt(log2Up(CommitWidth + 1).W))
     val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize+1).W))
@@ -131,6 +132,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   io.lqDeq := RegNext(lastCommitCount)
   io.lqCancelCnt := redirectCancelCount
   io.ldWbPtr := deqPtr
+  io.lqEmpty := RegNext(validCount === 0.U)
 
   /**
    * Enqueue at dispatch

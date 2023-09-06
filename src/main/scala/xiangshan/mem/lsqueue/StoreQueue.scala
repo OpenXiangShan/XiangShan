@@ -57,6 +57,7 @@ class DataBufferEntry (implicit p: Parameters)  extends DCacheBundle {
   val mask   = UInt((VLEN/8).W)
   val wline = Bool()
   val sqPtr  = new SqPtr
+  val prefetch = Bool()
 }
 
 // Store Queue
@@ -70,7 +71,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val storeAddrInRe = Vec(StorePipelineWidth, Input(new LsPipelineBundle())) // store more mmio and exception
     val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new ExuOutput))) // store data, send to sq from rs
     val storeMaskIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreMaskBundle))) // store mask, send to sq from rs
-    val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddr)) // write committed store to sbuffer
+    val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddrAndPfFlag)) // write committed store to sbuffer
     val uncacheOutstanding = Input(Bool())
     val mmioStout = DecoupledIO(new ExuOutput) // writeback uncached store
     val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
@@ -133,6 +134,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val pending = Reg(Vec(StoreQueueSize, Bool())) // mmio pending: inst is an mmio inst, it will not be executed until it reachs the end of rob
   val mmio = Reg(Vec(StoreQueueSize, Bool())) // mmio: inst is an mmio inst
   val atomic = Reg(Vec(StoreQueueSize, Bool()))
+  val prefetch = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // need prefetch when committing this store to sbuffer?
 
   // ptr
   val enqPtrExt = RegInit(VecInit((0 until io.enq.req.length).map(_.U.asTypeOf(new SqPtr))))
@@ -220,6 +222,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       addrvalid(index) := false.B
       committed(index) := false.B
       pending(index) := false.B
+      prefetch(index) := false.B
       mmio(index) := false.B
 
       XSError(!io.enq.canAccept || !io.enq.lqCanAccept, s"must accept $i\n")
@@ -337,6 +340,11 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       pending(stWbIndexReg) := io.storeAddrInRe(i).mmio
       mmio(stWbIndexReg) := io.storeAddrInRe(i).mmio
       atomic(stWbIndexReg) := io.storeAddrInRe(i).atomic
+    }
+    // dcache miss info (one cycle later than storeIn)
+    // if dcache report a miss in sta pipeline, this store will trigger a prefetch when committing to sbuffer (if EnableAtCommitMissTrigger)
+    when (storeAddrInFireReg) {
+      prefetch(stWbIndexReg) := io.storeAddrInRe(i).miss
     }
 
     when(vaddrModule.io.wen(i)){
@@ -700,12 +708,13 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     dataBuffer.io.enq(i).valid := allocated(ptr) && committed(ptr) && !mmioStall
     // Note that store data/addr should both be valid after store's commit
     assert(!dataBuffer.io.enq(i).valid || allvalid(ptr))
-    dataBuffer.io.enq(i).bits.addr  := paddrModule.io.rdata(i)
-    dataBuffer.io.enq(i).bits.vaddr := vaddrModule.io.rdata(i)
-    dataBuffer.io.enq(i).bits.data  := dataModule.io.rdata(i).data
-    dataBuffer.io.enq(i).bits.mask  := dataModule.io.rdata(i).mask
-    dataBuffer.io.enq(i).bits.wline := paddrModule.io.rlineflag(i)
-    dataBuffer.io.enq(i).bits.sqPtr := rdataPtrExt(i)
+    dataBuffer.io.enq(i).bits.addr     := paddrModule.io.rdata(i)
+    dataBuffer.io.enq(i).bits.vaddr    := vaddrModule.io.rdata(i)
+    dataBuffer.io.enq(i).bits.data     := dataModule.io.rdata(i).data
+    dataBuffer.io.enq(i).bits.mask     := dataModule.io.rdata(i).mask
+    dataBuffer.io.enq(i).bits.wline    := paddrModule.io.rlineflag(i)
+    dataBuffer.io.enq(i).bits.sqPtr    := rdataPtrExt(i)
+    dataBuffer.io.enq(i).bits.prefetch := prefetch(ptr)
   }
 
   // Send data stored in sbufferReqBitsReg to sbuffer
@@ -721,6 +730,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     io.sbuffer(i).bits.data  := dataBuffer.io.deq(i).bits.data
     io.sbuffer(i).bits.mask  := dataBuffer.io.deq(i).bits.mask
     io.sbuffer(i).bits.wline := dataBuffer.io.deq(i).bits.wline
+    io.sbuffer(i).bits.prefetch := dataBuffer.io.deq(i).bits.prefetch
 
     // io.sbuffer(i).fire() is RegNexted, as sbuffer data write takes 2 cycles.
     // Before data write finish, sbuffer is unable to provide store to load

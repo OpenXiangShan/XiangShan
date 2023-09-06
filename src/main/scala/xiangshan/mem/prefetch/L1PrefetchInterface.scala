@@ -27,11 +27,29 @@ import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache._
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
 
-class L1PrefetchReq (implicit p: Parameters) extends XSBundle with HasDCacheParameters{
+trait HasL1PrefetchSourceParameter {
+  // l1 prefetch source related
+  def L1PfSourceBits = 3
+  def L1_HW_PREFETCH_NULL = 0.U
+  def L1_HW_PREFETCH_STRIDE = 1.U
+  def L1_HW_PREFETCH_STREAM = 2.U
+  def L1_HW_PREFETCH_STORE  = 3.U
+
+  def isFromL1Prefetch(value: UInt) = value =/= L1_HW_PREFETCH_NULL
+  def isFromStride(value: UInt)     = value === L1_HW_PREFETCH_STRIDE
+  def isFromStream(value: UInt)     = value === L1_HW_PREFETCH_STREAM
+}
+
+class L1PrefetchSource(implicit p: Parameters) extends XSBundle with HasL1PrefetchSourceParameter {
+  val value = UInt(L1PfSourceBits.W)
+}
+
+class L1PrefetchReq(implicit p: Parameters) extends XSBundle with HasDCacheParameters {
   val paddr = UInt(PAddrBits.W)
   val alias = UInt(2.W)
   val confidence = UInt(1.W)
   val is_store = Bool()
+  val pf_source = new L1PrefetchSource
 
   // only index bit is used, do not use tag
   def getVaddr(): UInt = {
@@ -47,7 +65,7 @@ class L1PrefetchReq (implicit p: Parameters) extends XSBundle with HasDCachePara
   //   report prefetch !ready
 }
 
-class L1PrefetchHint (implicit p: Parameters) extends XSBundle with HasDCacheParameters{
+class L1PrefetchHint(implicit p: Parameters) extends XSBundle with HasDCacheParameters {
   val loadbusy = Bool()
   val missqbusy = Bool()
 }
