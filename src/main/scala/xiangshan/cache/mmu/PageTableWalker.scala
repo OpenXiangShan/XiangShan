@@ -339,7 +339,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
 class LLPTWInBundle(implicit p: Parameters) extends XSBundle with HasPtwConst {
   val req_info = Output(new L2TlbInnerBundle())
-  val ppn = Output(if(HasHExtension) UInt(gvpnLen.W) else UInt(ppnLen.W))
+  val ppn = Output(if(HasHExtension) UInt((vpnLen.max(ppnLen)).W) else UInt(ppnLen.W))
 }
 
 class LLPTWIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {

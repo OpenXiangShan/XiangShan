@@ -284,7 +284,7 @@ trait HasCSRConst {
     IRQ_VSEIP, IRQ_VSSIP, IRQ_VSTIP, IRQ_SGEIP
   )
 
-  ddef csrAccessPermissionCheck(addr: UInt, wen: Bool, mode: UInt, virt: Bool, hasH: Bool): UInt = {
+  def csrAccessPermissionCheck(addr: UInt, wen: Bool, mode: UInt, virt: Bool, hasH: Bool): UInt = {
     val readOnly = addr(11, 10) === "b11".U
     val lowestAccessPrivilegeLevel = addr(9,8)
     val priv = Mux(mode === ModeS, ModeH, mode)

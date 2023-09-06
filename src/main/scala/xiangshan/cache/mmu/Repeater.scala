@@ -460,7 +460,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   val mayFullDeq = RegInit(false.B)
   val mayFullIss = RegInit(false.B)
   val counter = RegInit(0.U(log2Up(Size+1).W))
-  val flush = DelayN(io.sfence.valid || io.csr.satp.changed || (io.csr.priv.virt && io.csr.vsatp.changed, FenceDelay)
+  val flush = DelayN(io.sfence.valid || io.csr.satp.changed || (io.csr.priv.virt && io.csr.vsatp.changed, FenceDelay))
   val tlb_req = WireInit(io.tlb.req) // NOTE: tlb_req is not io.tlb.req, see below codes, just use cloneType
   tlb_req.suggestName("tlb_req")
 

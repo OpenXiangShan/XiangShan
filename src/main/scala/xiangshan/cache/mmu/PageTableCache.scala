@@ -35,7 +35,7 @@ import freechips.rocketchip.tilelink._
 class PageCachePerPespBundle(implicit p: Parameters) extends PtwBundle {
   val hit = Bool()
   val pre = Bool()
-  val ppn = if (HasHExtension) UInt(gvpnLen.W) else UInt(ppnLen.W)
+  val ppn = if (HasHExtension) UInt((vpnLen max ppnLen).W) else UInt(ppnLen.W)
   val perm = new PtePermBundle()
   val ecc = Bool()
   val level = UInt(2.W)
@@ -57,7 +57,7 @@ class PageCacheMergePespBundle(implicit p: Parameters) extends PtwBundle {
   assert(tlbcontiguous == 8, "Only support tlbcontiguous = 8!")
   val hit = Bool()
   val pre = Bool()
-  val ppn = Vec(tlbcontiguous, if(HasHExtension) UInt(gvpnLen.W) else UInt(ppnLen.W))
+  val ppn = Vec(tlbcontiguous, if(HasHExtension) UInt((vpnLen max ppnLen).W) else UInt(ppnLen.W))
   val perm = Vec(tlbcontiguous, new PtePermBundle())
   val ecc = Bool()
   val level = UInt(2.W)
@@ -101,7 +101,7 @@ class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCo
     val toFsm = new Bundle {
       val l1Hit = Bool()
       val l2Hit = Bool()
-      val ppn = if(HasHExtension) UInt(gvpnLen.W) else UInt(ppnLen.W)
+      val ppn = if(HasHExtension) UInt((vpnLen.max(ppnLen)).W) else UInt(ppnLen.W)
     }
     val toTlb = new PtwMergeResp()
     val isHptw = Bool()
@@ -139,7 +139,6 @@ class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCo
 
 class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPerfEvents {
   val io = IO(new PtwCacheIO)
-  val HasHExtension = l2tlbParams.HasHExtension
   val ecc = Code.fromString(l2tlbParams.ecc)
   val l2EntryType = new PTWEntriesWithEcc(ecc, num = PtwL2SectorSize, tagLen = PtwL2TagLen, level = 1, hasPerm = false)
   val l3EntryType = new PTWEntriesWithEcc(ecc, num = PtwL3SectorSize, tagLen = PtwL3TagLen, level = 2, hasPerm = true)
@@ -181,7 +180,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val l1g = Reg(UInt(l2tlbParams.l1Size.W))
   val l1asids = l1.map(_.asid)
   val l1vmids = l1.map(_.vmid)
-  val l1h = Reg(Vec(l2tlbParams.l1Size.W, UInt(2.W))) // 0 bit: s2xlate, 1 bit: stage 1 or stage 2
+  val l1h = Reg(Vec(l2tlbParams.l1Size, UInt(2.W))) // 0 bit: s2xlate, 1 bit: stage 1 or stage 2
 
   // l2: level 1 non-leaf pte
   val l2 = Module(new SRAMTemplate(
@@ -239,7 +238,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val spg = Reg(UInt(l2tlbParams.spSize.W))
   val spasids = sp.map(_.asid)
   val spvmids = sp.map(_.vmid)
-  val sph = Reg(Vec(l2tlbParams.spSize.W, UInt(2.W)))
+  val sph = Reg(Vec(l2tlbParams.spSize, UInt(2.W)))
 
   // Access Perf
   val l1AccessPerf = Wire(Vec(l2tlbParams.l1Size, Bool()))
@@ -282,7 +281,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
     l1AccessPerf.zip(hitVec).map{ case (l, h) => l := h && stageDelay_valid_1cycle}
     for (i <- 0 until l2tlbParams.l1Size) {
-      XSDebug(stageReq.fire, p"[l1] l1(${i.U}) ${l1(i)} hit:${l1(i).hit(vpn_search, Mux(h_search =/= noS2xlate, io.csr_dup(0).vsatp.asid, io.csr_dup(0).satp.asid), io.csr_dup(0).hgatp.asid, s2xlate = h_search =/= noS2xlate}\n")
+      XSDebug(stageReq.fire, p"[l1] l1(${i.U}) ${l1(i)} hit:${l1(i).hit(vpn_search, Mux(h_search =/= noS2xlate, io.csr_dup(0).vsatp.asid, io.csr_dup(0).satp.asid), io.csr_dup(0).hgatp.asid, s2xlate = h_search =/= noS2xlate)}\n")
     }
     XSDebug(stageReq.fire, p"[l1] l1v:${Binary(l1v)} hitVecT:${Binary(VecInit(hitVecT).asUInt)}\n")
     XSDebug(stageDelay(0).valid, p"[l1] l1Hit:${hit} l1HitPPN:0x${Hexadecimal(hitPPN)} hitVec:${VecInit(hitVec).asUInt}\n")
@@ -455,11 +454,11 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   io.resp.bits.toHptw.ppn := Mux(resp_res.l2.hit, resp_res.l2.ppn, resp_res.l1.ppn)
   val idx = stageResp.bits.req_info.vpn(2, 0)
   io.resp.bits.toHptw.resp.entry.tag := stageResp.bits.req_info.vpn
-  io.resp.bits.toHptw.resp.entry.vmid := io.csr_dup(0).hgatp.asid
+  io.resp.bits.toHptw.resp.entry.vmid.map(_ := io.csr_dup(0).hgatp.asid)
   io.resp.bits.toHptw.resp.entry.level.map(_ := Mux(resp_res.l3.hit, 2.U, resp_res.sp.level))
   io.resp.bits.toHptw.resp.entry.prefetch := from_pre(stageResp.bits.req_info.source)
   io.resp.bits.toHptw.resp.entry.ppn := Mux(resp_res.l3.hit, resp_res.l3.ppn(idx), resp_res.sp.ppn)
-  io.resp.bits.toHptw.resp.entry.perm := Mux(resp_res.l3.hit, resp_res.l3.perm(idx), resp_res.sp.perm)
+  io.resp.bits.toHptw.resp.entry.perm.map(_ := Mux(resp_res.l3.hit, resp_res.l3.perm(idx), resp_res.sp.perm))
   io.resp.bits.toHptw.resp.entry.v := Mux(resp_res.l3.hit, resp_res.l3.v(idx), resp_res.sp.v)
   io.resp.bits.toHptw.resp.gpf := !io.resp.bits.toHptw.resp.entry.v
   io.resp.bits.toHptw.resp.gaf := false.B

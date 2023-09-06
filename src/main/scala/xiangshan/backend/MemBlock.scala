@@ -86,6 +86,7 @@ class mem_to_ooo(implicit p: Parameters ) extends XSBundle {
 
   val lsqio = new Bundle {
     val vaddr = Output(UInt(VAddrBits.W))
+    val gpaddr = Output(UInt(GPAddrBits.W))
     val mmio = Output(Vec(LoadPipelineWidth, Bool()))
     val uop = Output(Vec(LoadPipelineWidth, new MicroOp))
     val lqCanAccept = Output(Bool())
@@ -479,15 +480,15 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     require(ldtlbParams.outReplace)
 
     val replace = Module(new TlbReplace(exuParameters.LduCnt + 1 + exuParameters.StuCnt + 1, ldtlbParams))
-    replace.io.apply_sep(dtlb_ld.map(_.replace) ++ dtlb_st.map(_.replace) ++ dtlb_prefetch.map(_.replace), ptwio.resp.bits.data.entry.tag)
+    replace.io.apply_sep(dtlb_ld.map(_.replace) ++ dtlb_st.map(_.replace) ++ dtlb_prefetch.map(_.replace), ptwio.resp.bits.data.s1.entry.tag)
   } else {
     if (ldtlbParams.outReplace) {
       val replace_ld = Module(new TlbReplace(exuParameters.LduCnt + 1, ldtlbParams))
-      replace_ld.io.apply_sep(dtlb_ld.map(_.replace), ptwio.resp.bits.data.entry.tag)
+      replace_ld.io.apply_sep(dtlb_ld.map(_.replace), ptwio.resp.bits.data.s1.entry.tag)
     }
     if (sttlbParams.outReplace) {
       val replace_st = Module(new TlbReplace(exuParameters.StuCnt, sttlbParams))
-      replace_st.io.apply_sep(dtlb_st.map(_.replace), ptwio.resp.bits.data.entry.tag)
+      replace_st.io.apply_sep(dtlb_st.map(_.replace), ptwio.resp.bits.data.s1.entry.tag)
     }
     if (pftlbParams.outReplace) {
       val replace_pf = Module(new TlbReplace(1, pftlbParams))
@@ -516,8 +517,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       else if (i < (exuParameters.LduCnt + 1)) Cat(ptw_resp_next.vector.take(exuParameters.LduCnt + 1)).orR
       else if (i < (exuParameters.LduCnt + 1 + exuParameters.StuCnt)) Cat(ptw_resp_next.vector.drop(exuParameters.LduCnt + 1).take(exuParameters.StuCnt)).orR
       else Cat(ptw_resp_next.vector.drop(exuParameters.LduCnt + 1 + exuParameters.StuCnt)).orR
+    val hasS2xlate = tlb.bits.hasS2xlate()
     ptwio.req(i).valid := tlb.valid && !(ptw_resp_v && vector_hit &&
-      ptw_resp_next.data.hit(tlb.bits.vpn, tlbcsr.satp.asid, allType = true, ignoreAsid = true, tlb.bits.virt || tlb.bits.hyperinst))
+      ptw_resp_next.data.s1.hit(tlb.bits.vpn, Mux(hasS2xlate, tlbcsr.vsatp.asid, tlbcsr.satp.asid), tlbcsr.hgatp.asid, allType = true, ignoreAsid = true, hasS2xlate))
   }
   dtlb.foreach(_.ptw.resp.bits := ptw_resp_next.data)
   if (refillBothTlb) {

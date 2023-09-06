@@ -83,6 +83,7 @@ trait HasTlbConst extends HasXSParameter {
   val offLen  = 12
   val ppnLen  = PAddrBits - offLen
   val vpnnLen = 9
+  val extendVpnnBits = 2
   val vpnLen  = VAddrBits - offLen // when opening H extention, vpnlen broaden two bits
   val flagLen = 8
   val pteResLen = XLEN - 44 - 2 - flagLen
@@ -149,8 +150,8 @@ trait HasTlbConst extends HasXSParameter {
   def hptwresp_to_tlbperm(hptwResp: HptwResp): TlbPermBundle = {
     val tp = Wire(new TlbPermBundle)
     val ptePerm = hptwResp.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
-    tp.pf := hptwResp.pf
-    tp.af := hptwResp.af
+    tp.pf := hptwResp.gpf
+    tp.af := hptwResp.gaf
     tp.d := ptePerm.d
     tp.a := ptePerm.a
     tp.g := ptePerm.g

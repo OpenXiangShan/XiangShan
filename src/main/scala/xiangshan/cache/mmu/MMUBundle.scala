@@ -186,7 +186,7 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
 
   val g_perm = new TlbPermBundle
   val vmid = UInt(vmidLen.W)
-  val s2xlate = UInt(2.U)
+  val s2xlate = UInt(2.W)
 
   /** s2xlate usage:
     * bits0 0: disable s2xlate
@@ -252,7 +252,7 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
     }
     this.ppn := Mux(item.s2xlate === noS2xlate || item.s2xlate === onlyStage1, s1ppn, s2ppn)
     this.perm.apply(item.s1)
-    this.vmid := item.s1.entry.vmid
+    this.vmid := item.s1.entry.vmid.getOrElse(0.U)
     this.g_perm.applyS2(item.s2, pm)
     this.s2xlate := item.s2xlate
     this
@@ -305,7 +305,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
 
   val g_perm = new TlbPermBundle
   val vmid = UInt(vmidLen.W)
-  val s2xlate = UInt(2.U)
+  val s2xlate = UInt(2.W)
 
   /** s2xlate usage:
     * bits0 0: disable s2xlate
@@ -331,12 +331,12 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     val pteidx_hit = Mux(hasS2xlate, pteidx(vpn(2, 0)), true.B)
     // NOTE: for timing, dont care low set index bits at hit check
     //       do not need store the low bits actually
-    if (!pageSuper) asid_hit && drop_set_equal(vpn(vpn.getWidth - 1, sectortlbwidth), tag, nSets) && addr_low_hit && vmid_hit && pteidx_hit && s2xlate_hit
+    if (!pageSuper) asid_hit && drop_set_equal(vpn(vpn.getWidth - 1, sectortlbwidth), tag, nSets) && addr_low_hit && vmid_hit && pteidx_hit 
     else if (!pageNormal) {
       val tag_match_hi = tag(vpnnLen * 2 - 1, vpnnLen) === vpn(vpnnLen * 3 - 1, vpnnLen * 2)
       val tag_match_mi = tag(vpnnLen - 1, 0) === vpn(vpnnLen * 2 - 1, vpnnLen)
       val tag_match = tag_match_hi && (level.get.asBool || tag_match_mi)
-      asid_hit && tag_match && addr_low_hit && vmid_hit && pteidx_hit && s2xlate_hit
+      asid_hit && tag_match && addr_low_hit && vmid_hit && pteidx_hit
     }
     else {
       val tmp_level = level.get
@@ -344,7 +344,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
       val tag_match_mi = tag(vpnnLen * 2 - sectortlbwidth - 1, vpnnLen - sectortlbwidth) === vpn(vpnnLen * 2 - 1, vpnnLen)
       val tag_match_lo = tag(vpnnLen - sectortlbwidth - 1, 0) === vpn(vpnnLen - 1, sectortlbwidth) // if pageNormal is false, this will always be false
       val tag_match = tag_match_hi && (tmp_level(1) || tag_match_mi) && (tmp_level(0) || tag_match_lo)
-      asid_hit && tag_match && addr_low_hit && vmid_hit && pteidx_hit && s2xlate_hit
+      asid_hit && tag_match && addr_low_hit && vmid_hit && pteidx_hit
     }
   }
 
@@ -398,7 +398,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
                           else 0.U })
     this.perm.apply(item.s1)
 
-    this.pteidx := Mux(item.s2xlate === noS2xlate || item.s2xlate === onlyStage1, item.s1.pteidx, UIntToOH(item.s2.entry.tag(sectortlbwidth - 1, 0)).asBools)
+    this.pteidx := Mux(item.s2xlate === noS2xlate || item.s2xlate === onlyStage1, item.s1.pteidx, UIntToOH(item.s2.entry.tag(sectortlbwidth - 1, 0)))
     this.valididx := Mux(item.s2xlate === noS2xlate || item.s2xlate === onlyStage1, item.s1.valididx, OHToUInt(this.pteidx))
 
     val s1tag = {if (pageNormal) item.s1.entry.tag else item.s1.entry.tag(sectorvpnLen - 1, vpnnLen - sectortlbwidth)}
@@ -415,7 +415,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     val s2ppn_low = VecInit(Seq.fill(tlbcontiguous)(item.s2.entry.ppn(sectortlbwidth - 1, 0)))
     this.ppn := Mux(item.s2xlate === noS2xlate || item.s2xlate === onlyStage1, s1ppn, s2ppn)
     this.ppn_low := Mux(item.s2xlate === noS2xlate || item.s2xlate === onlyStage1, s1ppn_low, s2ppn_low)
-    this.vmid := item.s1.entry.vmid
+    this.vmid := item.s1.entry.vmid.getOrElse(0.U)
     this.g_perm.applyS2(item.s2, pm(0))
     this.s2xlate := item.s2xlate
     this
@@ -448,6 +448,10 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
       }
     }
     else ppn_res
+  }
+
+  def hasS2xlate(): Bool = {
+    this.s2xlate =/= noS2xlate
   }
 
   override def toPrintable: Printable = {
@@ -826,7 +830,7 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
     require(vpn.getWidth == vpnLen)
 //    require(this.asid.getWidth <= asid.getWidth)
     val asid_hit = if (ignoreAsid) true.B else (this.asid === asid)
-    val vmid_hit = Mux(s2xlate, this.vmid === vmid, true.B)
+    val vmid_hit = Mux(s2xlate, (this.vmid.getOrElse(0.U) === vmid), true.B)
     if (allType) {
       require(hasLevel)
       val hit0 = tag(tagLen - 1,    vpnnLen*2) === vpn(tagLen - 1, vpnnLen*2)
@@ -851,7 +855,7 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
     ppn := pte.asTypeOf(new PteBundle().cloneType).ppn
     perm.map(_ := pte.asTypeOf(new PteBundle().cloneType).perm)
     this.asid := asid
-    this.vmid := vmid
+    this.vmid.map(_ := vmid)
     this.prefetch := prefetch
     this.v := valid
     this.level.map(_ := level)
@@ -895,7 +899,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
   val tag  = UInt(tagLen.W)
   val asid = UInt(asidLen.W)
   val vmid = if (HasHExtension) Some(UInt(vmidLen.W)) else None
-  val ppns = if (HasHExtension) Vec(num, UInt(gvpnLen.W)) else Vec(num, UInt(ppnLen.W))
+  val ppns = if (HasHExtension) Vec(num, UInt((vpnLen.max(ppnLen)).W)) else Vec(num, UInt(ppnLen.W))
   val vs   = Vec(num, Bool())
   val perms = if (hasPerm) Some(Vec(num, new PtePermBundle)) else None
   val prefetch = Bool()
@@ -919,7 +923,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
 
   def hit(vpn: UInt, asid: UInt, vmid:UInt, ignoreAsid: Boolean = false, s2xlate: Bool) = {
     val asid_hit = if (ignoreAsid) true.B else (this.asid === asid)
-    val vmid_hit = Mux(s2xlate, this.vmid === vmid, true.B)
+    val vmid_hit = Mux(s2xlate, this.vmid.getOrElse(0.U) === vmid, true.B)
     asid_hit && vmid_hit && tag === tagClip(vpn) && (if (hasPerm) true.B else vs(sectorIdxClip(vpn, level)))
   }
 
@@ -930,7 +934,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
     val ps = Wire(new PtwEntries(num, tagLen, level, hasPerm))
     ps.tag := tagClip(vpn)
     ps.asid := asid
-    ps.vmid := vmid
+    ps.vmid.map(_ := vmid)
     ps.prefetch := prefetch
     for (i <- 0 until num) {
       val pte = data((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle)
@@ -1005,6 +1009,9 @@ class PTWEntriesWithEcc(eccCode: Code, num: Int, tagLen: Int, level: Int, hasPer
 class PtwReq(implicit p: Parameters) extends PtwBundle {
   val vpn = UInt(vpnLen.W) //vpn or gvpn
   val s2xlate = UInt(2.W) // 0 bit: s2xlate, 1 bit: stage 1 or stage 2
+  def hasS2xlate(): Bool = {
+    this.s2xlate =/= noS2xlate
+  }
   override def toPrintable: Printable = {
     p"vpn:0x${Hexadecimal(vpn)}"
   }
@@ -1037,7 +1044,7 @@ class PtwResp(implicit p: Parameters) extends PtwBundle {
 }
 
 class HptwResp(implicit p: Parameters) extends PtwBundle {
-  val entry = new PtwEntry(tagLen = gvpnLen, hasPerm = true, hasLevel = true)
+  val entry = new PtwEntry(tagLen = vpnLen, hasPerm = true, hasLevel = true)
   val gpf = Bool()
   val gaf = Bool()
 
@@ -1048,7 +1055,7 @@ class HptwResp(implicit p: Parameters) extends PtwBundle {
     this.entry.ppn := pte.ppn
     this.entry.prefetch := DontCare
     this.entry.asid := DontCare
-    this.entry.vmid := vmid
+    this.entry.vmid.map(_ := vmid)
     this.entry.v := !gpf
     this.gpf := gpf
     this.gaf := gaf
@@ -1063,9 +1070,8 @@ class HptwResp(implicit p: Parameters) extends PtwBundle {
   }
 
   def hit(gvpn: UInt, vmid: UInt): Bool = {
-    require(gvpn.getWidth == gvpnLen)
-    val vmid_hit = this.entry.vmid === vmid
-    val hit0 = entry.tag(gvpnLen - 1, vpnnLen * 2) === gvpn(gvpnLen - 1, vpnnLen * 2)
+    val vmid_hit = this.entry.vmid.getOrElse(0.U) === vmid
+    val hit0 = entry.tag(vpnLen - 1, vpnnLen * 2) === gvpn(vpnLen - 1, vpnnLen * 2)
     val hit1 = entry.tag(vpnnLen * 2  - 1, vpnnLen) === gvpn(vpnnLen * 2 - 1, vpnnLen)
     val hit2 = entry.tag(vpnnLen - 1, 0) === gvpn(vpnnLen - 1, 0)
     vmid_hit && Mux(entry.level.getOrElse(0.U) === 2.U, hit2 && hit1 && hit0, Mux(entry.level.getOrElse(0.U) === 1.U, hit1 && hit0, hit0))
@@ -1124,7 +1130,7 @@ class PtwSectorResp(implicit p: Parameters) extends PtwBundle {
     require(vpn.getWidth == vpnLen)
     //    require(this.asid.getWidth <= asid.getWidth)
     val asid_hit = if (ignoreAsid) true.B else (this.entry.asid === asid)
-    val vmid_hit = Mux(s2xlate, this.entry.vmid === vmid, true.B)
+    val vmid_hit = Mux(s2xlate, this.entry.vmid.getOrElse(0.U) === vmid, true.B)
     if (allType) {
       val hit0 = entry.tag(sectorvpnLen - 1, vpnnLen * 2 - sectortlbwidth) === vpn(vpnLen - 1, vpnnLen * 2)
       val hit1 = entry.tag(vpnnLen * 2 - sectortlbwidth - 1, vpnnLen - sectortlbwidth)   === vpn(vpnnLen * 2 - 1,  vpnnLen)
@@ -1179,8 +1185,8 @@ class HptwMergeResp(implicit p: Parameters) extends PtwBundle {
   def genPPN(): UInt = {
     val idx = OHToUInt(pteidx)
     MuxLookup(entry(idx).level.get, 0.U, Seq(
-      0.U -> Cat(entry(idx).ppn(entry(idx).ppn.getWidth - 1, vpnnLen * 2 - sectortlbwidth), vpn(vpnnLen * 2 - 1, 0)),
-      1.U -> Cat(entry(idx).ppn(entry(idx).ppn.getWidth - 1, vpnnLen - sectortlbwidth), vpn(vpnnLen - 1, 0)),
+      0.U -> Cat(entry(idx).ppn(entry(idx).ppn.getWidth - 1, vpnnLen * 2 - sectortlbwidth), entry(idx).tag(vpnnLen * 2 - 1, 0)),
+      1.U -> Cat(entry(idx).ppn(entry(idx).ppn.getWidth - 1, vpnnLen - sectortlbwidth), entry(idx).tag(vpnnLen - 1, 0)),
       2.U -> Cat(entry(idx).ppn(entry(idx).ppn.getWidth - 1, 0), entry(idx).ppn_low))
     )
   }
@@ -1199,7 +1205,7 @@ class HptwMergeResp(implicit p: Parameters) extends PtwBundle {
     val idx = OHToUInt(pteidx)
     val resp = Wire(new PteBundle())
     resp.ppn := Cat(entry(idx).ppn, entry(idx).ppn_low)
-    resp.perm := entry(idx).perm
+    resp.perm := entry(idx).perm.getOrElse(0.U)
     resp
   }
 
@@ -1231,6 +1237,11 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
   val s2xlate = UInt(2.W)
   val s1 = new PtwSectorResp()
   val s2 = new HptwResp()
+  def genPPNS2(i: Int):UInt = {
+    val s1ppn = Cat(this.s1.entry.ppn, this.s1.ppn_low(i), 0.U(12.W)).asUInt
+    val s2ppn = this.s2.entry.ppn
+    Mux(s2xlate =/= noS2xlate, s2ppn, s1ppn)
+  }
 }
 
 class PtwRespS2withMemIdx(implicit p: Parameters) extends PtwRespS2 {

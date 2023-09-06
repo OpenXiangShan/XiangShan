@@ -968,6 +968,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     addr := src2(11, 0)
   }
   val csri = ZeroExt(src2(16, 12), XLEN)
+  val rdata = Wire(UInt(XLEN.W))
   val rdata_tmp = Wire(UInt(XLEN.W))
   val wdata_tmp = LookupTree(func, List(
     CSROpType.wrt  -> src1,
@@ -1417,7 +1418,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
       debugIntrEnable := false.B
     }.elsewhen (debugMode) {
       //do nothing
-    }}.elsewhen (delegVS) {
+    }.elsewhen (delegVS) {
       vscause := (raiseIntr << (XLEN-1)).asUInt | Mux(raiseIntr, intrNO >> 1.U, exceptionNO)
       vsepc := Mux(hasInstrPageFault || hasInstrAccessFault, iexceptionPC, dexceptionPC)
       vsstatusNew.spp := privilegeMode

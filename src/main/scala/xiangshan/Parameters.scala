@@ -56,7 +56,7 @@ case class XSCoreParameters
   HasDCache: Boolean = true,
   AddrBits: Int = 64,
   VAddrBits: Int = 39,
-  GPAddrBit: Int = 41,
+  GPAddrBits: Int = 41,
   HasFPU: Boolean = true,
   HasCustomCSRCacheOp: Boolean = true,
   FetchWidth: Int = 8,
