@@ -182,6 +182,7 @@ class VlflowBundle(implicit p: Parameters) extends VLSUBundle {
   val exp               = Bool()
   val flow_idx          = UInt(elemIdxBits.W)
   val is_first_ele      = Bool()
+  val uopQueuePtr = new VluopPtr
 }
 
 class unitStrideBundle(implicit p: Parameters) extends VLSUBundle {

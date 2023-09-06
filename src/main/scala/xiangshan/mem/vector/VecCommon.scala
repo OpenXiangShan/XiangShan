@@ -27,20 +27,33 @@ import xiangshan.backend.rob.RobPtr
 /**
   * Common used parameters or functions in vlsu
   */
-trait HasVLSUParameters extends HasXSParameter {
+trait VLSUConstants {
+  private val VLEN = 128
   def VLENB = VLEN/8
   def vOffsetBits = log2Up(VLENB) // bits-width to index offset inside a vector reg
 
-  def alignTypeBits = 2 // eew/sew = 1/2/4/8
-  def maxUopNum = 8
+  def alignTypes = 4 // eew/sew = 1/2/4/8
+  def alignTypeBits = log2Up(alignTypes)
+  def maxMUL = 8
+  def maxFields = 8
+  /**
+    * In the most extreme cases like a segment indexed instruction, eew=64, emul=8, sew=8, lmul=1,
+    * and nf=8, each data reg is mapped with 8 index regs and there are 8 data regs in total,
+    * each for a field. Therefore an instruction can be divided into 64 uops at most.
+    */
+  def maxUopNum = maxMUL * maxFields // 64
   def maxFlowNum = 16
-  def maxElemNum = maxUopNum * maxFlowNum // 128
-  def elemIdxBits = log2Up(maxElemNum) + 1 // 8
-
+  def maxElemNum = maxMUL * maxFlowNum // 128
+  def uopIdxBits = log2Up(maxUopNum) // to index uop inside an robIdx
+  def elemIdxBits = log2Up(maxElemNum) + 1 // to index which element in an instruction
+  def flowIdxBits = log2Up(maxFlowNum) + 1 // to index which flow in a uop
+  def fieldBits = log2Up(maxFields) + 1 // 4-bits to indicate 1~8
+  
   def ewBits = 3 // bits-width of EEW/SEW
+  def mulBits = 3 // bits-width of emul/lmul
   // TODO
 }
-
+trait HasVLSUParameters extends HasXSParameter with VLSUConstants
 abstract class VLSUModule(implicit p: Parameters) extends XSModule
   with HasVLSUParameters
   with HasCircularQueuePtrHelper
@@ -91,6 +104,10 @@ class VecDecode(implicit p: Parameters) extends VLSUBundle {
     this.uop_eew := inst(12 + ewBits - 1, 12)
     this
   }
+
+  def isUnitStride = uop_type === "b00".U
+  def isStrided = uop_type === "b10".U
+  def isIndexed = uop_type(0) === "b1".U
 }
 
 class OnlyVecExuOutput(implicit p: Parameters) extends VLSUBundle {
@@ -105,6 +122,7 @@ class OnlyVecExuOutput(implicit p: Parameters) extends VLSUBundle {
   val exp = Bool()
   val is_first_ele = Bool()
   val exp_ele_index = UInt(elemIdxBits.W)
+  val uopQueuePtr = new VluopPtr
 }
 
 class VecExuOutput(implicit p: Parameters) extends ExuOutput with HasVLSUParameters {
@@ -199,11 +217,22 @@ object loadDataSize {
     )))}
 }
 
-object GenVecLoadMask {
-  def apply (instType: UInt, emul: UInt, eew: UInt, sew: UInt): UInt = {
-    val mask = Wire(UInt(16.W))
-    mask := UIntToOH(loadDataSize(instType = instType, emul = emul, eew = eew, sew = sew)) - 1.U
-    mask
+// object GenVecLoadMask {
+//   def apply (instType: UInt, emul: UInt, eew: UInt, sew: UInt): UInt = {
+//     val mask = Wire(UInt(16.W))
+//     mask := UIntToOH(loadDataSize(instType = instType, emul = emul, eew = eew, sew = sew)) - 1.U
+//     mask
+//   }
+// }
+
+object GenVecLoadMask extends VLSUConstants {
+  def apply(alignedType: UInt, vaddr: UInt): UInt = {
+    LookupTree(alignedType, List(
+      "b00".U -> 0x1.U, // b1
+      "b01".U -> 0x3.U, // b11
+      "b10".U -> 0xf.U, // b1111
+      "b11".U -> 0xff.U // b11111111
+    )) << vaddr(vOffsetBits - 1, 0)
   }
 }
 
@@ -398,14 +427,15 @@ object GenSegMulIdx {
 }
 
 //eew decode
-object EewLog2 {
-  def apply (eew: UInt): UInt = {
-    (LookupTree(eew,List(
-      "b000".U -> "b000".U , // 1
-      "b101".U -> "b001".U , // 2
-      "b110".U -> "b010".U , // 4
-      "b111".U -> "b011".U   // 8
-    )))}
+object EewLog2 extends VLSUConstants {
+  // def apply (eew: UInt): UInt = {
+  //   (LookupTree(eew,List(
+  //     "b000".U -> "b000".U , // 1
+  //     "b101".U -> "b001".U , // 2
+  //     "b110".U -> "b010".U , // 4
+  //     "b111".U -> "b011".U   // 8
+  //   )))}
+  def apply(eew: UInt): UInt = ZeroExt(eew(1, 0), ewBits)
 }
 
 /**
@@ -427,6 +457,70 @@ object GenRealFlowNum {
     )))}
 }
 
+/**
+  * GenRealFlowLog2 = Log2(GenRealFlowNum)
+  */
+object GenRealFlowLog2 extends VLSUConstants {
+  def apply(instType: UInt, emul: UInt, lmul: UInt, eew: UInt, sew: UInt): UInt = {
+    val emulLog2 = Mux(emul.asSInt >= 0.S, 0.U, emul)
+    val lmulLog2 = Mux(lmul.asSInt >= 0.S, 0.U, lmul)
+    val eewRealFlowLog2 = emulLog2 + log2Up(VLENB).U - eew(1, 0)
+    val sewRealFlowLog2 = lmulLog2 + log2Up(VLENB).U - sew(1, 0)
+    (LookupTree(instType, List(
+      "b000".U -> eewRealFlowLog2, // unit-stride
+      "b010".U -> eewRealFlowLog2, // strided
+      "b001".U -> Mux(emul.asSInt > lmul.asSInt, eewRealFlowLog2, sewRealFlowLog2), // indexed-unordered
+      "b011".U -> Mux(emul.asSInt > lmul.asSInt, eewRealFlowLog2, sewRealFlowLog2), // indexed-ordered
+      "b100".U -> eewRealFlowLog2, // segment unit-stride
+      "b110".U -> eewRealFlowLog2, // segment strided
+      "b101".U -> Mux(emul.asSInt > lmul.asSInt, eewRealFlowLog2, sewRealFlowLog2), // segment indexed-unordered
+      "b111".U -> Mux(emul.asSInt > lmul.asSInt, eewRealFlowLog2, sewRealFlowLog2), // segment indexed-ordered
+    )))
+  }
+}
+
+/**
+  * GenElemIdx generals an element index within an instruction, given a certain uopIdx and a known flowIdx
+  * inside the uop.
+  * 
+  * eew = 0, elemIdx = uopIdx ## flowIdx(3, 0)
+  * eew = 1, elemIdx = uopIdx ## flowIdx(2, 0)
+  * eew = 2, elemIdx = uopIdx ## flowIdx(1, 0)
+  * eew = 3, elemIdx = uopIdx ## flowIdx(0)
+  */
+object GenElemIdx extends VLSUConstants {
+  def apply(alignedType: UInt, uopIdx: UInt, flowIdx: UInt): UInt = {
+    LookupTree(
+      alignedType,
+      (0 until alignTypes).map(i =>
+        i.U -> ((uopIdx ## flowIdx(log2Up(VLENB) - i - 1, 0))(log2Up(maxElemNum) - 1, 0))
+      )
+    )
+  }
+}
+
+/**
+  * GenVLMAX calculates VLMAX, which equals MUL * ew
+  */
+object GenVLMAXLog2 extends VLSUConstants {
+  def apply(lmul: UInt, sew: UInt): UInt = lmul + log2Up(VLENB).U - sew
+}
+object GenVLMAX {
+  def apply(lmul: UInt, sew: UInt): UInt = 1.U << GenVLMAXLog2(lmul, sew)
+}
+
+object GenUSWholeRegVL extends VLSUConstants {
+  def apply(nfields: UInt, eew: UInt): UInt = {
+    LookupTree(eew(1, 0), List(
+      "b000".U -> (nfields << (log2Up(VLENB) - 0)),
+      "b101".U -> (nfields << (log2Up(VLENB) - 1)),
+      "b110".U -> (nfields << (log2Up(VLENB) - 2)),
+      "b111".U -> (nfields << (log2Up(VLENB) - 3))
+    ))
+  }
+}
+
+// TODO: delete this in vs flow queue
 object GenEleIdx {
   def apply (instType: UInt, emul: UInt, lmul: UInt, eew: UInt, sew: UInt, uopIdx:UInt, flowIdx: UInt):UInt = {
     val eleIdx = Wire(UInt(7.W))

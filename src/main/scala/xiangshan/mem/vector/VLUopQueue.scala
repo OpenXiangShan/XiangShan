@@ -69,21 +69,37 @@ object VecGenData {
     vData
   }
 }
-/**
- * */
+
 class VluopBundle(implicit p: Parameters) extends VLSUBundle {
   val uop            = new MicroOp
   val dataVMask      = Vec(VLENB, Bool())
   val data           = Vec(VLENB, UInt(8.W))
   val fof            = Bool()
-  val excp_eew_index = UInt(8.W)
-  val exceptionVec   = ExceptionVec()
+  val excp_eew_index = UInt(elemIdxBits.W)
+  // val exceptionVec   = ExceptionVec() // uop has exceptionVec
+  val baseAddr = UInt(VAddrBits.W)
+  val stride = UInt(VLEN.W)
+  val flow_counter = UInt(flowIdxBits.W)
+  val vd_last_uop = Bool()
 
-  def apply (uop: MicroOp, fof: Bool) = {
-    this.uop  := uop
-    this.fof  := fof
-    this
-  }
+  // def apply (uop: MicroOp, fof: Bool) = {
+  //   this.uop  := uop
+  //   this.fof  := fof
+  //   this
+  // }
+
+  // instruction decode result
+  val flowNum = UInt(flowIdxBits.W) // # of flows in a uop
+  // val flowNumLog2 = UInt(log2Up(flowIdxBits).W) // log2(flowNum), for better timing of multiplication
+  val nfields = UInt(fieldBits.W) // NFIELDS
+  val vm = Bool() // whether vector masking is enabled
+  val usWholeReg = Bool() // unit-stride, whole register load
+  val eew = UInt(ewBits.W) // size of memory elements
+  val sew = UInt(ewBits.W)
+  val emul = UInt(mulBits.W)
+  val lmul = UInt(mulBits.W)
+  val vlmax = UInt(elemIdxBits.W)
+  val instType = UInt(3.W)
 }
 
 // class VlUopQueueIOBundle(implicit p: Parameters) extends XSBundle {
@@ -103,7 +119,7 @@ class VlUopQueueIOBundle(implicit p: Parameters) extends VLSUBundle {
   // redirect
   val redirect = Flipped(ValidIO(new Redirect))
   // input from load rs along with regfile src data
-  val loadRegIn = Vec(VecLoadPipelineWidth, Flipped(DecoupledIO(new ExuInput(isVpu = true))))
+  val loadRegIn = Flipped(DecoupledIO(new ExuInput(isVpu = true)))
   // issue 2 flows from uop queue each cycle
   val flowIssue = Vec(VecLoadPipelineWidth, DecoupledIO(new VlflowBundle()))
   // writeback 2 flow results orderly from flow queue each cycle
@@ -111,7 +127,7 @@ class VlUopQueueIOBundle(implicit p: Parameters) extends VLSUBundle {
   // feedbacks to signal that uop queue is full
   // val uopFeedback = Output(Vec(VecLoadPipelineWidth, Bool()))
   // writeback uop results
-  val uopWriteback = Vec(VecLoadPipelineWidth,DecoupledIO(new ExuOutput(isVpu = true)))
+  val uopWriteback = DecoupledIO(new ExuOutput(isVpu = true))
 }
 
 /**
@@ -129,11 +145,200 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
   val io = IO(new VlUopQueueIOBundle())
 
   println("LoadUopQueue: size:" + VlUopSize)
+  val flowIssueWidth = io.flowIssue.length
 
   /**
     * TODO @zlj
     */
-  io <> DontCare
+  io.flowWriteback <> DontCare
+  io.uopWriteback <> DontCare
+
+  val uopq = Reg(Vec(VlUopSize, new VluopBundle))
+  val valid = RegInit(VecInit(Seq.fill(VlUopSize)(false.B)))
+  val preAlloc = RegInit(VecInit(Seq.fill(VlUopSize)(false.B)))
+
+  val enqPtrExt = RegInit(VecInit((0 until maxMUL).map(_.U.asTypeOf(new VluopPtr))))
+  val enqPtr = enqPtrExt(0)
+  val deqPtr = RegInit(0.U.asTypeOf(new VluopPtr))
+  val flowSplitPtr = RegInit(0.U.asTypeOf(new VluopPtr))
+  val flowSplitIdx = RegInit(VecInit((0 until flowIssueWidth).map(_.U(flowIdxBits.W))))
+  val vdResult = Reg(UInt(VLEN.W)) // joint all the uops' result that is written into the same vd
+  val vdResultValid = RegInit(false.B)
+
+  val full = isFull(enqPtr, deqPtr)
+
+  /**
+    * Enqueue from issue queue:
+    * 
+    * (1) Decode the instruction and obtain nf, eew, etc.
+    * (2) Pre-allocate all the incoming uops with the same robIdx that will write into the same vd.
+    * 
+    * TODO: decode logic is too long for timing.
+    */
+  val decode = Wire(new VecDecode())
+  decode.apply(io.loadRegIn.bits.uop.cf.instr)
+  val sew = io.loadRegIn.bits.uop.ctrl.vconfig.vtype.vsew
+  val eew = decode.uop_eew
+  val lmul = io.loadRegIn.bits.uop.ctrl.vconfig.vtype.vlmul
+  val emul = EewLog2(eew) - sew + lmul
+  val lmulLog2 = Mux(lmul.asSInt >= 0.S, 0.U, lmul)
+  val emulLog2 = Mux(emul.asSInt >= 0.S, 0.U, emul)
+  val numEewLog2 = emulLog2 - EewLog2(eew)
+  val numSewLog2 = lmulLog2 - sew
+  val numUopsSameVd = Mux(
+    decode.isIndexed && numSewLog2 > numEewLog2,
+    // If this is an index load, and multiple index regs are mapped into a data reg:
+    1.U << (numSewLog2 - numEewLog2),
+    // otherwise:
+    1.U
+  )
+
+  when (io.loadRegIn.fire()) {
+    val id = enqPtr.value
+    val preAllocated = preAlloc(id)
+    val isSegment = decode.uop_segment_num =/= 0.U && !decode.uop_unit_stride_whole_reg
+    val instType = Cat(isSegment, decode.uop_type)
+    val flows = GenRealFlowNum(instType, emul, lmul, eew, sew)
+    valid(id) := true.B
+    uopq(id).uop := io.loadRegIn.bits.uop
+    uopq(id).fof := decode.isUnitStride && decode.uop_unit_stride_fof
+    uopq(id).baseAddr := io.loadRegIn.bits.src_rs1
+    uopq(id).stride := io.loadRegIn.bits.src_stride
+    uopq(id).flow_counter := flows
+    uopq(id).flowNum := flows
+    // uopq(id).flowNumLog2 := GenRealFlowLog2(instType, emul, lmul, eew, sew)
+    uopq(id).nfields := decode.uop_segment_num + 1.U
+    uopq(id).vm := decode.mask_en
+    uopq(id).usWholeReg := decode.isUnitStride && decode.uop_unit_stride_whole_reg
+    uopq(id).eew := eew
+    uopq(id).sew := sew
+    uopq(id).emul := emul
+    uopq(id).lmul := lmul
+    uopq(id).vlmax := GenVLMAX(lmul, sew)
+    uopq(id).instType := instType
+
+    // Assertion
+    assert(!uopq(id).dataVMask.asUInt.orR, "mask should be cleared when a uop entry deallocated")
+    assert(PopCount(flows) <= 1.U, "flowNum should be the power of 2")
+
+    // Pre-allocate
+    when (!preAllocated) {
+      // This is the first uop mapped into the same vd
+      enqPtrExt.zipWithIndex.foreach { case (ptr, i) =>
+        when (i.U < numUopsSameVd) {
+          assert(!preAlloc(ptr.value))
+          assert(!uopq(ptr.value).vd_last_uop)
+
+          preAlloc(ptr.value) := true.B
+          uopq(ptr.value).vd_last_uop := (i + 1).U === numUopsSameVd
+        }
+      }
+    }.otherwise {
+      // Otherwise, this uop has already been pre-allocated
+      assert(io.loadRegIn.bits.uop.robIdx === uopq(id).uop.robIdx)
+      assert(io.loadRegIn.bits.src_rs1(VAddrBits - 1, 0) === uopq(id).baseAddr)
+    }
+
+    // update enqPtrExt
+    enqPtrExt.foreach(ptr => ptr := ptr + 1.U)
+  }
+
+  /**
+    * Split uop into flows
+    */
+  // Common info of all the flows included in a uop
+  val issueValid = valid(flowSplitPtr.value)
+  val issueEntry = uopq(flowSplitPtr.value)
+  val issueFlowNum = issueEntry.flowNum
+  // val issueFlowNumLog2 = issueEntry.flowNumLog2
+  val issueBaseAddr = issueEntry.baseAddr
+  val issueUop = issueEntry.uop
+  val issueUopIdx = issueUop.ctrl.uopIdx(uopIdxBits - 1, 0)
+  val issueInstType = issueEntry.instType
+  val issueEew = issueEntry.eew
+  val issueSew = issueEntry.sew
+  val issueAlignedType = Mux(isIndexed(issueInstType), issueSew(1, 0), issueEew(1, 0))
+  val issueVLMAXMask = issueEntry.vlmax - 1.U
+  val issueVLMAXLog2 = GenVLMAXLog2(issueEntry.lmul, issueEntry.sew)
+  val issueNFIELDS = issueEntry.nfields
+  val issueVstart = issueUop.ctrl.vconfig.vstart
+  val issueVl = issueUop.ctrl.vconfig.vl
+  assert(!issueValid || PopCount(issueEntry.vlmax) === 1.U, "VLMAX should be power of 2 and non-zero")
+
+  flowSplitIdx.zip(io.flowIssue).foreach { case (flowIdx, issuePort) =>
+    // AGU
+    // TODO: DONT use * to implement multiplication!!!
+    val elemIdx = GenElemIdx(issueAlignedType, issueUopIdx, flowIdx) // elemIdx inside an inst
+    val elemIdxInsideField = elemIdx & issueVLMAXMask // elemIdx inside a field, equals elemIdx when nf = 1
+    val nfIdx = elemIdx >> issueVLMAXLog2
+    val notIndexedStride = Mux( // stride for strided/unit-stride instruction
+      isStrided(issueInstType),
+      issueEntry.stride(XLEN - 1, 0), // for strided load, stride = x[rs2]
+      issueNFIELDS << issueEew(1, 0) // for unit-stride load, stride = eew * NFIELDS
+    ) * elemIdxInsideField
+    val indexedStride = IndexAddr( // index for indexed instruction
+      index = issueEntry.stride,
+      flow_inner_idx = (elemIdxInsideField << issueEew(1, 0))(vOffsetBits - 1, 0) >> issueEew(1, 0),
+      eew = issueEew
+    )
+    val stride = Mux(isIndexed(issueInstType), indexedStride, notIndexedStride)
+    val fieldOffset = nfIdx << issueAlignedType // field offset inside a segment
+    val vaddr = issueBaseAddr + stride + fieldOffset
+    val mask = GenVecLoadMask(issueAlignedType, vaddr)
+    val regOffset = (elemIdxInsideField << issueAlignedType)(vOffsetBits - 1, 0)
+    val exp = VLExpCtrl(
+      vstart = issueVstart,
+      vl = Mux(issueEntry.usWholeReg, GenUSWholeRegVL(issueNFIELDS, issueEew), issueVl),
+      eleIdx = elemIdxInsideField
+    )
+
+    when (issueValid && flowIdx < issueFlowNum) {
+      issuePort.valid := true.B
+    }
+    
+    val port = issuePort.bits
+    port.uop := issueUop
+    port.vaddr := vaddr
+    port.mask := mask
+    port.unit_stride_fof := issueEntry.fof
+    port.reg_offset := regOffset
+    port.alignedType := issueAlignedType
+    port.exp := exp
+    port.flow_idx := elemIdx
+    port.is_first_ele := elemIdx === 0.U
+  }
+
+  val numFlowIssue = PopCount(io.flowIssue.map(_.fire()))
+  val flowIssueFire = Cat(io.flowIssue.map(_.fire())).orR
+
+  when (flowSplitIdx.last < (issueFlowNum - 1.U)) {
+    // The uop has not been entirly splited yet
+    flowSplitIdx.foreach(p => p := p + numFlowIssue)
+    assert(!flowIssueFire || numFlowIssue === flowIssueWidth.U, "both issue port should fire together")
+  }.otherwise {
+    when (flowIssueFire) {
+      // The uop is done spliting
+      flowSplitIdx := VecInit((0 until flowIssueWidth).map(_.U)) // initialize flowIdx
+      flowSplitPtr := flowSplitPtr + 1.U
+    }
+  }
+
+  
+  /**
+    * IO connections
+    */
+  io.loadRegIn.ready := !full && preAlloc(enqPtr.value) || distanceBetween(enqPtr, deqPtr) >= numUopsSameVd
+
+  assert(!(issueValid && !io.flowIssue(0).valid && io.flowIssue(1).valid), "flow issue port 0 should have higher priority")
+
+  /**
+    * Miscs
+    */
+  def isUnitStride(instType: UInt) = instType(1, 0) === "b00".U
+  def isStrided(instType: UInt) = instType(1, 0) === "b10".U
+  def isIndexed(instType: UInt) = instType(0) === "b1".U
+  def isNotIndexed(instType: UInt) = instType(0) === "b0".U
+
 
 //   val VluopEntry = Reg(Vec(VlUopSize, new VluopBundle))
 //   // For example, an inst -> 4 uops,

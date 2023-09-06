@@ -27,7 +27,7 @@ class VectorLoadWrapperIOBundle(implicit p: Parameters) extends VLSUBundle {
   // redirect
   val redirect    = Flipped(ValidIO(new Redirect))
   // input from load rs along with regfile src data
-  val loadRegIn = Vec(VecLoadPipelineWidth, Flipped(Decoupled(new ExuInput(isVpu = true))))
+  val loadRegIn = Flipped(Decoupled(new ExuInput(isVpu = true)))
 
   // issue load to ldu
   val pipeIssue = Vec(VecLoadPipelineWidth, Decoupled(new VecLoadPipeBundle()))
@@ -37,7 +37,7 @@ class VectorLoadWrapperIOBundle(implicit p: Parameters) extends VLSUBundle {
   val pipeResult = Vec(VecLoadPipelineWidth, Flipped(DecoupledIO(new VecExuOutput())))
 
   // writeback uop results
-  val uopWriteback = Vec(VecLoadPipelineWidth,DecoupledIO(new ExuOutput(isVpu = true)))
+  val uopWriteback = DecoupledIO(new ExuOutput(isVpu = true))
 }
 
 class VectorLoadWrapper(implicit p: Parameters) extends VLSUModule {
