@@ -1212,51 +1212,52 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   // Always instantiate basic difftest modules.
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
-    val difftest = Module(new DifftestArchEvent)
-    difftest.io.clock := clock
-    difftest.io.coreid := csrio.hartId
-    difftest.io.intrNO := RegNext(RegNext(RegNext(difftestIntrNO)))
-    difftest.io.cause  := RegNext(RegNext(RegNext(Mux(csrio.exception.valid, causeNO, 0.U))))
-    difftest.io.exceptionPC := RegNext(RegNext(RegNext(dexceptionPC)))
+    val difftest = DifftestModule(new DiffArchEvent, delay = 3, dontCare = true)
+    difftest.clock       := clock
+    difftest.coreid      := csrio.hartId
+    difftest.valid       := csrio.exception.valid
+    difftest.interrupt   := Mux(raiseIntr, causeNO, 0.U)
+    difftest.exception   := Mux(raiseException, causeNO, 0.U)
+    difftest.exceptionPC := dexceptionPC
     if (env.EnableDifftest) {
-      difftest.io.exceptionInst := RegNext(RegNext(RegNext(csrio.exception.bits.uop.cf.instr)))
+      difftest.exceptionInst := csrio.exception.bits.uop.cf.instr
     }
   }
 
   // Always instantiate basic difftest modules.
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
-    val difftest = Module(new DifftestCSRState)
-    difftest.io.clock := clock
-    difftest.io.coreid := csrio.hartId
-    difftest.io.priviledgeMode := priviledgeMode
-    difftest.io.mstatus := mstatus
-    difftest.io.sstatus := mstatus & sstatusRmask
-    difftest.io.mepc := mepc
-    difftest.io.sepc := sepc
-    difftest.io.mtval:= mtval
-    difftest.io.stval:= stval
-    difftest.io.mtvec := mtvec
-    difftest.io.stvec := stvec
-    difftest.io.mcause := mcause
-    difftest.io.scause := scause
-    difftest.io.satp := satp
-    difftest.io.mip := mipReg
-    difftest.io.mie := mie
-    difftest.io.mscratch := mscratch
-    difftest.io.sscratch := sscratch
-    difftest.io.mideleg := mideleg
-    difftest.io.medeleg := medeleg
+    val difftest = DifftestModule(new DiffCSRState)
+    difftest.clock := clock
+    difftest.coreid := csrio.hartId
+    difftest.priviledgeMode := priviledgeMode
+    difftest.mstatus := mstatus
+    difftest.sstatus := mstatus & sstatusRmask
+    difftest.mepc := mepc
+    difftest.sepc := sepc
+    difftest.mtval:= mtval
+    difftest.stval:= stval
+    difftest.mtvec := mtvec
+    difftest.stvec := stvec
+    difftest.mcause := mcause
+    difftest.scause := scause
+    difftest.satp := satp
+    difftest.mip := mipReg
+    difftest.mie := mie
+    difftest.mscratch := mscratch
+    difftest.sscratch := sscratch
+    difftest.mideleg := mideleg
+    difftest.medeleg := medeleg
   }
 
   if(env.AlwaysBasicDiff || env.EnableDifftest) {
-    val difftest = Module(new DifftestDebugMode)
-    difftest.io.clock := clock
-    difftest.io.coreid := csrio.hartId
-    difftest.io.debugMode := debugMode
-    difftest.io.dcsr := dcsr
-    difftest.io.dpc := dpc
-    difftest.io.dscratch0 := dscratch
-    difftest.io.dscratch1 := dscratch1
+    val difftest = DifftestModule(new DiffDebugMode)
+    difftest.clock := clock
+    difftest.coreid := csrio.hartId
+    difftest.debugMode := debugMode
+    difftest.dcsr := dcsr
+    difftest.dpc := dpc
+    difftest.dscratch0 := dscratch
+    difftest.dscratch1 := dscratch1
   }
 }
 

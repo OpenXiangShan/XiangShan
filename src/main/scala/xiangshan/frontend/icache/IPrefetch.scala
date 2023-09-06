@@ -19,7 +19,7 @@ package xiangshan.frontend.icache
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import difftest.DifftestRefillEvent
+import difftest._
 import freechips.rocketchip.tilelink._
 import utils._
 import xiangshan.cache.mmu._
@@ -73,7 +73,7 @@ class PrefetchBufferIO(implicit p: Parameters) extends IPrefetchBundle {
 class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
 {
   val io = IO(new PrefetchBufferIO)
-  
+
   val fromIPrefetch = io.IPFFilterRead.req
   val toIPrefetch   = io.IPFFilterRead.resp
   val fromMainPipe  = io.IPFBufferRead.req
@@ -138,7 +138,7 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
     assert(PopCount(r_hit_oh(i)) <= 1.U, "More than 1 hit in L1 prefetch buffer")
     XSPerfAccumulate("fdip_mainpipe_hit_in_ipf_" + i, r_hit(i))
   })
-  
+
 
   /**
     ******************************************************************************
@@ -153,7 +153,7 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
   val curr_move_ptr  = PriorityEncoder(move_oh)
 
   fromReplacer.vsetIdx := meta_buffer(curr_move_ptr).vSetIdx
-  
+
   toICacheMeta.valid := move_need
   toICacheMeta.bits.generate(
     tag     = get_phy_tag(meta_buffer(curr_move_ptr).paddr),
@@ -189,7 +189,7 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
     * - 2. Move prefetch cacheline to icache
     * - 3. Receive write request from ICacheMissUnit
     * - 4. Receive fencei req that need to flush all buffer
-    * Priority: 4 > 3 > 2 > 1   
+    * Priority: 4 > 3 > 2 > 1
     * The order of the code determines the priority, with the following priority being higher
     ******************************************************************************
     */
@@ -210,7 +210,7 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
   }
 
   /** 3. write prefetch data to entry */
-  // try to get a free entry ptr  
+  // try to get a free entry ptr
   val free_oh       = meta_buffer.map (_.valid === false.B)
   val has_free      = ParallelOR(free_oh)
   val ptr_from_free = PriorityEncoder(free_oh)
@@ -247,13 +247,13 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
   XSPerfAccumulate("fdip_fencei_cycle", io.fencei)
 
   if (env.EnableDifftest) {
-    val difftest = Module(new DifftestRefillEvent)
-    difftest.io.clock   := clock
-    difftest.io.coreid  := io.hartId
-    difftest.io.cacheid := 6.U
-    difftest.io.valid   := toICacheData.fire
-    difftest.io.addr    := toICacheData.bits.paddr
-    difftest.io.data    := toICacheData.bits.data.asTypeOf(difftest.io.data)
+    val difftest = DifftestModule(new DiffRefillEvent)
+    difftest.clock   := clock
+    difftest.coreid  := io.hartId
+    difftest.cacheid := 6.U
+    difftest.valid   := toICacheData.fire
+    difftest.addr    := toICacheData.bits.paddr
+    difftest.data    := toICacheData.bits.data.asTypeOf(difftest.data)
   }
 }
 
@@ -337,7 +337,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   p0_req_cancel := !enableBit || p0_hit_behind || io.fencei
   p0_ready      := p0_req_cancel || p1_ready && toITLB.ready && toIMeta.ready
   p0_fire       := p0_valid && p1_ready && toITLB.ready && toIMeta.ready && enableBit && !p0_req_cancel
-  p0_discard    := p0_valid && p0_req_cancel 
+  p0_discard    := p0_valid && p0_req_cancel
 
   if(DebugFlags.fdip) {
     when(p0_discard) {
@@ -354,7 +354,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     ******************************************************************************
     */
   val p1_valid  = generatePipeControl(lastFire = p0_fire, thisFire = p1_fire || p1_discard, thisFlush = false.B, lastFlush = false.B)
-  
+
   val p1_vaddr      = RegEnable(p0_vaddr, p0_fire)
   val p1_req_cancel = Wire(Bool())
 
@@ -391,13 +391,13 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     * - 2. PMP Check: send req and receive resq in the same cycle
     * - 3. Check miss handling by main pipe
     * - 4. Prefetch buffer Check
-    * - 5. Prefetch Queue Check 
+    * - 5. Prefetch Queue Check
     * - 6. MSHR check
     * - 7. send req to piq
     ******************************************************************************
     */
   val p2_valid  = generatePipeControl(lastFire = p1_fire, thisFire = p2_fire || p2_discard, thisFlush = false.B, lastFlush = false.B)
-  
+
   val p2_paddr      = RegEnable(p1_paddr, p1_fire)
   val p2_vaddr      = RegEnable(p1_vaddr, p1_fire)
   val p2_req_cancel = Wire(Bool())
@@ -462,8 +462,8 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   XSPerfAccumulate("prefetch_req_send", toPIQEnqReq.fire())
   /**
     * Count the number of requests that are filtered for various reasons.
-    * The number of prefetch discard in Performance Accumulator may be 
-    * a littel larger the number of really discarded. Because there can 
+    * The number of prefetch discard in Performance Accumulator may be
+    * a littel larger the number of really discarded. Because there can
     * be multiple reasons for a canceled request at the same time.
     */
   // discard prefetch request by fencei instruction
@@ -618,7 +618,7 @@ class PrefetchQueueIO(edge: TLEdgeOut)(implicit p: Parameters) extends IPrefetch
 
 class PrefetchQueue(edge: TLEdgeOut)(implicit p: Parameters) extends IPrefetchModule {
   val io = IO(new PrefetchQueueIO(edge))
-  
+
   val enqueReq          = io.prefetchReq
   val fromIPrefetch     = io.PIQFilterRead.req
   val toIPrefetch       = io.PIQFilterRead.resp
@@ -765,7 +765,7 @@ class PrefetchQueue(edge: TLEdgeOut)(implicit p: Parameters) extends IPrefetchMo
     handleEntry.flash       := false.B
     handleEntry.readBeatCnt := 0.U
   }
-  
+
   /** 6. Cancel handleEntry hitted mainpipe or receive fencei if hasn't been issued */
   when(cancelHandleEntry) {
     handleEntry.valid := false.B

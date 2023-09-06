@@ -215,17 +215,6 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   io.memPredUpdate.ldpc := RegNext(XORFold(real_pc(VAddrBits-1, 1), MemPredPCWidth))
   // store pc is ready 1 cycle after s1_isReplay is judged
   io.memPredUpdate.stpc := XORFold(store_pc(VAddrBits-1, 1), MemPredPCWidth)
-
-  // // recover runahead checkpoint if redirect
-  // if (!env.FPGAPlatform) {
-  //   val runahead_redirect = Module(new DifftestRunaheadRedirectEvent)
-  //   runahead_redirect.io.clock := clock
-  //   runahead_redirect.io.coreid := io.hartId
-  //   runahead_redirect.io.valid := io.stage3Redirect.valid
-  //   runahead_redirect.io.pc :=  s2_pc // for debug only
-  //   runahead_redirect.io.target_pc := s2_target // for debug only
-  //   runahead_redirect.io.checkpoint_id := io.stage3Redirect.bits.debug_runahead_checkpoint_id // make sure it is right
-  // }
 }
 
 class CtrlBlock(dpExuConfigs: Seq[Seq[Seq[ExuConfig]]])(implicit p: Parameters) extends LazyModule
