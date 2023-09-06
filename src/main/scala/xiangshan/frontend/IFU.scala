@@ -480,8 +480,11 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_pAddrs   = RegEnable(f2_paddrs,  f2_fire)
   val f3_resend_vaddr   = RegEnable(f2_resend_vaddr,       f2_fire)
 
+  // Expand 1 bit to prevent overflow when assert
+  val f3_ftq_req_startAddr      = Cat(0.U(1.W), f3_ftq_req.startAddr)
+  val f3_ftq_req_nextStartAddr  = Cat(0.U(1.W), f3_ftq_req.nextStartAddr)
   when(f3_valid && !f3_ftq_req.ftqOffset.valid){
-    assert(f3_ftq_req.startAddr + 32.U >= f3_ftq_req.nextStartAddr , "More tha 32 Bytes fetch is not allowed!")
+    assert(f3_ftq_req_startAddr + (2*PredictWidth).U >= f3_ftq_req_nextStartAddr, s"More tha ${2*PredictWidth} Bytes fetch is not allowed!")
   }
 
   /*** MMIO State Machine***/
