@@ -191,13 +191,13 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
   /* Storage */
 
   // circuit queue for flows
-  val flowQueueBundles = RegInit(VecInit(List.fill(VlFlowSize)(0.U.asTypeOf(new VlflowBundle))))
+  val flowQueueBundles = Reg(Vec(VlFlowSize, new VlflowBundle))
   // mark whether a flow is finished
   //   1: finished and can be dequeued
   //   2: issued but not finished
   val flowFinished = RegInit(VecInit(List.fill(VlFlowSize)(false.B)))
   // loaded data from load unit
-  val flowLoadData = RegInit(VecInit(List.fill(VlFlowSize)(0.U(VLEN.W))))
+  val flowLoadData = Reg(Vec(VlFlowSize, UInt(VLEN.W)))
 
 
   /* Queue Pointers */
@@ -223,15 +223,14 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
   val needCancel = io.flowIn.map(_.bits.uop.robIdx.needFlush(io.redirect))
 
   val doEnqueue = Wire(Vec(VecLoadPipelineWidth, Bool()))
-  val enqueueCount = 0.U(log2Up(VecLoadPipelineWidth + 1).W)
+  val enqueueCount = PopCount(doEnqueue)
 
   // enqueue flows
   for (i <- 0 until VecLoadPipelineWidth) {
     doEnqueue(i) := allowEnqueue && canEnqueue(i) && !needCancel(i)
     // Assuming that if io.flowIn(i).valid then io.flowIn(i-1).valid
     when (doEnqueue(i)) {
-      flowQueueBundles(enqPtr(i).value) := io.flowIn(i)
-      enqueueCount := i.U
+      flowQueueBundles(enqPtr(i).value) := io.flowIn(i).bits
     }
   }
 
@@ -256,14 +255,11 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
 
   val allowDequeue = io.flowWriteback.map(_.ready)
   val doDequeue = Wire(Vec(VecLoadPipelineWidth, Bool()))
-  val dequeueCount = 0.U(log2Up(VecLoadPipelineWidth + 1).W)
+  val dequeueCount = PopCount(doDequeue)
 
   for (i <- 0 until VecLoadPipelineWidth) {
     doDequeue(i) := canDequeue(i) && allowDequeue(i)
-  
-    when (doDequeue(i)) {
-      dequeueCount := i.U
-    }
+    io.flowWriteback(i).bits := flowQueueBundles(deqPtr(i).value)
   }
 
   // update deqPtr
