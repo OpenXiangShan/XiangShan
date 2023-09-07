@@ -760,7 +760,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   if (env.EnableDifftest) {
     for (i <- 0 until EnsbufferWidth) {
       val storeCommit = io.sbuffer(i).fire()
-      val waddr = SignExt(io.sbuffer(i).bits.addr, 64)
+      val waddr = ZeroExt(Cat(io.sbuffer(i).bits.addr(PAddrBits - 1, 3), 0.U(3.W)), 64)
       val sbufferMask = shiftMaskToLow(io.sbuffer(i).bits.addr, io.sbuffer(i).bits.mask)
       val sbufferData = shiftDataToLow(io.sbuffer(i).bits.addr, io.sbuffer(i).bits.data)
       val wmask = sbufferMask
