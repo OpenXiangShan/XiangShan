@@ -250,7 +250,7 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
     val difftest = DifftestModule(new DiffRefillEvent)
     difftest.clock   := clock
     difftest.coreid  := io.hartId
-    difftest.cacheid := 6.U
+    difftest.index   := 6.U
     difftest.valid   := toICacheData.fire
     difftest.addr    := toICacheData.bits.paddr
     difftest.data    := toICacheData.bits.data.asTypeOf(difftest.data)
@@ -846,13 +846,13 @@ class PrefetchQueue(edge: TLEdgeOut)(implicit p: Parameters) extends IPrefetchMo
   }
 
   if (env.EnableDifftest) {
-    val diffipfrefill = Module(new DifftestRefillEvent)
-    diffipfrefill.io.clock    := clock
-    diffipfrefill.io.coreid   := io.hartId
-    diffipfrefill.io.cacheid  := 3.U
-    diffipfrefill.io.valid    := handleEntry.valid && handleEntry.finish
-    diffipfrefill.io.addr     := handleEntry.paddr
-    diffipfrefill.io.data     := handleEntry.cacheline.asTypeOf(diffipfrefill.io.data)
+    val diffipfrefill = DifftestModule(new DiffRefillEvent)
+    diffipfrefill.clock    := clock
+    diffipfrefill.coreid   := io.hartId
+    diffipfrefill.index    := 3.U
+    diffipfrefill.valid    := handleEntry.valid && handleEntry.finish
+    diffipfrefill.addr     := handleEntry.paddr
+    diffipfrefill.data     := handleEntry.cacheline.asTypeOf(diffipfrefill.data)
   }
 }
 

@@ -360,13 +360,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   if (env.EnableDifftest) {
     (0 until PortNumber).foreach { i =>
       val diffPIQ = DifftestModule(new DiffRefillEvent)
-      diffPIQ.io.clock := clock
-      diffPIQ.io.coreid := io.hartId
-      diffPIQ.io.cacheid := (i + 7).U
-      if (i == 0) diffPIQ.io.valid := s1_fire && !s1_port_hit(i) && !s1_ipf_hit_latch(i) && s1_piq_hit_latch(i) && !tlbExcp(0)
-      else diffPIQ.io.valid := s1_fire && !s1_port_hit(i) && !s1_ipf_hit_latch(i) && s1_piq_hit_latch(i) && s1_double_line && !tlbExcp(0) && !tlbExcp(1)
-      diffPIQ.io.addr := s1_req_paddr(i)
-      diffPIQ.io.data := s1_piq_data(i).asTypeOf(diffPIQ.io.data)
+      diffPIQ.clock := clock
+      diffPIQ.coreid := io.hartId
+      diffPIQ.index := (i + 7).U
+      if (i == 0) diffPIQ.valid := s1_fire && !s1_port_hit(i) && !s1_ipf_hit_latch(i) && s1_piq_hit_latch(i) && !tlbExcp(0)
+      else diffPIQ.valid := s1_fire && !s1_port_hit(i) && !s1_ipf_hit_latch(i) && s1_piq_hit_latch(i) && s1_double_line && !tlbExcp(0) && !tlbExcp(1)
+      diffPIQ.addr := s1_req_paddr(i)
+      diffPIQ.data := s1_piq_data(i).asTypeOf(diffPIQ.data)
     }
   }
 
