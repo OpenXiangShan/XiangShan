@@ -122,8 +122,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val trigger = Vec(3, new LoadUnitTriggerIO)
 
     // prefetch
-    val prefetch_train = ValidIO(new LdPrefetchTrainBundle())  // provide prefetch info
-    val prefetch_req   = Flipped(ValidIO(new L1PrefetchReq))  // hardware prefetch to l1 cache req
+    val prefetch_train            = ValidIO(new LdPrefetchTrainBundle()) // provide prefetch info to sms
+    val prefetch_train_l1         = ValidIO(new LdPrefetchTrainBundle()) // provide prefetch info to stream & stride
+    val prefetch_req              = Flipped(ValidIO(new L1PrefetchReq)) // hardware prefetch to l1 cache req
+    val canAcceptLowConfPrefetch  = Output(Bool())
+    val canAcceptHighConfPrefetch = Output(Bool())
 
     // load to load fast path
     val l2l_fwd_in    = Input(new LoadToLoadIO)
@@ -155,8 +158,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val fast_rep_out = Decoupled(new LqWriteBundle)
 
     // perf
-    val debug_ls      = Output(new DebugLsInfoBundle)
-    val lsTopdownInfo = Output(new LsTopdownInfo)
+    val debug_ls         = Output(new DebugLsInfoBundle)
+    val lsTopdownInfo    = Output(new LsTopdownInfo)
+    val correctMissTrain = Input(Bool())
   })
 
   val s1_ready, s2_ready, s3_ready = WireInit(false.B)
@@ -296,6 +300,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s0_prf_wr = Wire(Bool())
   val s0_hw_prf = s0_hw_prf_select
 
+  io.canAcceptLowConfPrefetch  := s0_low_conf_prf_ready
+  io.canAcceptHighConfPrefetch := s0_high_conf_prf_ready
+
   // query DTLB
   io.tlb.req.valid                   := s0_valid
   io.tlb.req.bits.cmd                := Mux(s0_prf,
@@ -327,6 +334,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.dcache.req.bits.debug_robIdx := s0_uop.robIdx.value
   io.dcache.req.bits.replayCarry  := s0_rep_carry
   io.dcache.req.bits.id           := DontCare // TODO: update cache meta
+  io.dcache.pf_source             := Mux(s0_hw_prf_select, io.prefetch_req.bits.pf_source.value, L1_HW_PREFETCH_NULL)
 
   // load flow priority mux
   def fromNullSource() = {
@@ -955,11 +963,19 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   //
   io.s2_ptr_chasing                    := RegEnable(s1_try_ptr_chasing && !s1_cancel_ptr_chasing, s1_fire)
+
   io.prefetch_train.valid              := s2_valid && !s2_actually_mmio && !s2_in.tlbMiss
   io.prefetch_train.bits.fromLsPipelineBundle(s2_in)
-  io.prefetch_train.bits.miss          := io.dcache.resp.bits.miss
+  io.prefetch_train.bits.miss          := io.dcache.resp.bits.miss // TODO: use trace with bank conflict?
   io.prefetch_train.bits.meta_prefetch := io.dcache.resp.bits.meta_prefetch
   io.prefetch_train.bits.meta_access   := io.dcache.resp.bits.meta_access
+  
+
+  io.prefetch_train_l1.valid              := s2_valid && !s2_actually_mmio
+  io.prefetch_train_l1.bits.fromLsPipelineBundle(s2_in)
+  io.prefetch_train_l1.bits.miss          := io.dcache.resp.bits.miss
+  io.prefetch_train_l1.bits.meta_prefetch := io.dcache.resp.bits.meta_prefetch
+  io.prefetch_train_l1.bits.meta_access   := io.dcache.resp.bits.meta_access
   if (env.FPGAPlatform){
     io.dcache.s0_pc := DontCare
     io.dcache.s1_pc := DontCare
@@ -1017,6 +1033,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
   io.lsq.ldin.bits.data_wen_dup := s3_ld_valid_dup.asBools
   io.lsq.ldin.bits.replacementUpdated := io.dcache.resp.bits.replacementUpdated
+  io.lsq.ldin.bits.missDbUpdated := RegNext(s2_fire && s2_in.hasROBEntry && !s2_in.tlbMiss && !s2_in.missDbUpdated)
 
   val s3_dly_ld_err =
     if (EnableAccurateLoadError) {
@@ -1178,12 +1195,14 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.debug_ls := DontCare
 
   // Topdown
-  io.lsTopdownInfo.s1.robIdx      := s1_in.uop.robIdx.value
-  io.lsTopdownInfo.s1.vaddr_valid := s1_valid && s1_in.hasROBEntry
-  io.lsTopdownInfo.s1.vaddr_bits  := s1_vaddr
-  io.lsTopdownInfo.s2.robIdx      := s2_in.uop.robIdx.value
-  io.lsTopdownInfo.s2.paddr_valid := s2_fire && s2_in.hasROBEntry && !s2_in.tlbMiss
-  io.lsTopdownInfo.s2.paddr_bits  := s2_in.paddr
+  io.lsTopdownInfo.s1.robIdx          := s1_in.uop.robIdx.value
+  io.lsTopdownInfo.s1.vaddr_valid     := s1_valid && s1_in.hasROBEntry
+  io.lsTopdownInfo.s1.vaddr_bits      := s1_vaddr
+  io.lsTopdownInfo.s2.robIdx          := s2_in.uop.robIdx.value
+  io.lsTopdownInfo.s2.paddr_valid     := s2_fire && s2_in.hasROBEntry && !s2_in.tlbMiss
+  io.lsTopdownInfo.s2.paddr_bits      := s2_in.paddr
+  io.lsTopdownInfo.s2.first_real_miss := io.dcache.resp.bits.real_miss
+  io.lsTopdownInfo.s2.cache_miss_en   := s2_fire && s2_in.hasROBEntry && !s2_in.tlbMiss && !s2_in.missDbUpdated
 
   // perf cnt
   XSPerfAccumulate("s0_in_valid",                  io.ldin.valid)

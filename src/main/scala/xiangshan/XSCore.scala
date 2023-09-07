@@ -162,6 +162,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
     val beu_errors = Output(new XSL1BusErrors())
     val l2_hint = Input(Valid(new L2ToL1Hint()))
+    val l2PfqBusy = Input(Bool())
   })
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
@@ -222,6 +223,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.ooo_to_mem.loadFastMatch <> backend.io.memBlock.loadFastMatch
   memBlock.io.ooo_to_mem.loadFastImm <> backend.io.memBlock.loadFastImm
   memBlock.io.ooo_to_mem.loadPc <> backend.io.memBlock.loadPc
+  memBlock.io.ooo_to_mem.storePc <> backend.io.memBlock.storePc
 
   backend.io.perf <> DontCare
   backend.io.perf.memInfo <> memBlock.io.memInfo
@@ -233,7 +235,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.perf.perfEventsHc       <> memBlock.io.inner_hc_perfEvents
 
   backend.io.externalInterrupt := memBlock.io.externalInterrupt
-
   backend.io.distributedUpdate(0).w.valid := memBlock.io.mem_to_ooo.csrUpdate.w.valid
   backend.io.distributedUpdate(0).w.bits := memBlock.io.mem_to_ooo.csrUpdate.w.bits
   backend.io.distributedUpdate(1).w.valid := frontend.io.csrUpdate.w.valid
@@ -252,6 +253,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.mem_to_ooo.lsTopdownInfo <> backend.io.memBlock.lsTopdownInfo
   memBlock.io.l2_hint.valid := io.l2_hint.valid
   memBlock.io.l2_hint.bits.sourceId := io.l2_hint.bits.sourceId
+  memBlock.io.l2PfqBusy := io.l2PfqBusy
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   memBlock.io.inner_l2_pf_enable := backend.io.l2_pf_enable

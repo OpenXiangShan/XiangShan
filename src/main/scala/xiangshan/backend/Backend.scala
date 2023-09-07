@@ -158,6 +158,7 @@ class BackendImp(outer: Backend)(implicit p: Parameters) extends LazyModuleImp(o
       val loadFastImm = Vec(exuParameters.LduCnt, Output(UInt(12.W)))
       val rsfeedback = Vec(exuParameters.LsExuCnt, Flipped(new MemRSFeedbackIO))
       val loadPc = Vec(exuParameters.LduCnt, Output(UInt(VAddrBits.W)))
+      val storePC = Vec(exuParameters.LduCnt, Output(UInt(VAddrBits.W)))
       val stIssuePtr = Input(new SqPtr())
       val writeback = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, Flipped(DecoupledIO(new ExuOutput)))
       val s3_delayed_load_error = Vec(exuParameters.LduCnt, Input(Bool()))
@@ -283,6 +284,15 @@ class BackendImp(outer: Backend)(implicit p: Parameters) extends LazyModuleImp(o
   }
   // return load pc at load s2
   mem.loadPc <> VecInit(ctrlBlock.io.ld_pc_read.map(_.data))
+
+  for((c, e) <- ctrlBlock.io.st_pc_read.zip(exuBlocks(0).io.issue.get.drop(exuParameters.LduCnt))){
+    // read store pc at store s0
+    c.ptr := e.bits.uop.cf.ftqPtr
+    c.offset := e.bits.uop.cf.ftqOffset
+  }
+  // return store pc at load s2
+  mem.storePc <> VecInit(ctrlBlock.io.st_pc_read.map(_.data))
+
   mem.issue <> exuBlocks(0).io.issue.get
   // By default, instructions do not have exceptions when they enter the function units.
   mem.issue.map(_.bits.uop.clearExceptions())

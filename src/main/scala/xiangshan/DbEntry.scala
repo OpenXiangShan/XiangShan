@@ -39,3 +39,12 @@ class InstInfoEntry(implicit p: Parameters) extends XSBundle{
   val issueTime = UInt(XLEN.W)
   val writebackTime = UInt(XLEN.W)
 }
+
+class LoadInfoEntry(implicit p: Parameters) extends XSBundle{
+  val pc = UInt(VAddrBits.W)
+  val vaddr = UInt(VAddrBits.W)
+  val paddr = UInt(PAddrBits.W)
+  val cacheMiss = Bool()
+  val tlbQueryLatency = UInt(64.W)
+  val exeLatency = UInt(64.W)
+}

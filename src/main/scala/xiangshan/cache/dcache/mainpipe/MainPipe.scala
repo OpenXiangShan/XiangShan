@@ -26,6 +26,7 @@ import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLPermission
 import utils._
 import utility._
 import xiangshan.{L1CacheErrorInfo, XSCoreParamsKey}
+import xiangshan.mem.HasL1PrefetchSourceParameter
 
 class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
   val miss = Bool() // only amo miss will refill in main pipe
@@ -96,7 +97,7 @@ class MainPipeStatus(implicit p: Parameters) extends DCacheBundle {
   val way_en = UInt(nWays.W)
 }
 
-class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
+class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents with HasL1PrefetchSourceParameter {
   val io = IO(new Bundle() {
     // probe queue
     val probe_req = Flipped(DecoupledIO(new MainPipeReq))
@@ -136,7 +137,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
     val meta_write = DecoupledIO(new CohMetaWriteReq)
     val extra_meta_resp = Input(Vec(nWays, new DCacheExtraMeta))
     val error_flag_write = DecoupledIO(new FlagMetaWriteReq)
-    val prefetch_flag_write = DecoupledIO(new FlagMetaWriteReq)
+    val prefetch_flag_write = DecoupledIO(new SourceMetaWriteReq)
     val access_flag_write = DecoupledIO(new FlagMetaWriteReq)
 
     // tag sram
@@ -306,8 +307,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val s1_extra_meta = Mux1H(s1_tag_match_way, wayMap(w => io.extra_meta_resp(w)))
   val s1_l2_error = s1_req.error
 
-  XSPerfAccumulate("probe_unused_prefetch", s1_req.probe && s1_extra_meta.prefetch && !s1_extra_meta.access) // may not be accurate
-  XSPerfAccumulate("replace_unused_prefetch", s1_req.replace && s1_extra_meta.prefetch && !s1_extra_meta.access) // may not be accurate
+  XSPerfAccumulate("probe_unused_prefetch", s1_req.probe && isFromL1Prefetch(s1_extra_meta.prefetch) && !s1_extra_meta.access) // may not be accurate
+  XSPerfAccumulate("replace_unused_prefetch", s1_req.replace && isFromL1Prefetch(s1_extra_meta.prefetch) && !s1_extra_meta.access) // may not be accurate
 
   // replacement policy
   val s1_invalid_vec = wayMap(w => !meta_resp(w).asTypeOf(new Meta).coh.isValid())
@@ -1435,6 +1436,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   val miss_req = io.miss_req.bits
   miss_req := DontCare
   miss_req.source := s2_req.source
+  miss_req.pf_source := L1_HW_PREFETCH_NULL
   miss_req.cmd := s2_req.cmd
   miss_req.addr := s2_req.addr
   miss_req.vaddr := s2_req_vaddr_dup_for_miss_req
@@ -1447,6 +1449,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents {
   miss_req.req_coh := s2_hit_coh
   miss_req.replace_coh := s2_repl_coh
   miss_req.replace_tag := s2_repl_tag
+  miss_req.replace_pf := L1_HW_PREFETCH_STORE // TODO: support store cache pollution monitor
   miss_req.id := s2_req.id
   miss_req.cancel := false.B
   miss_req.pc := DontCare

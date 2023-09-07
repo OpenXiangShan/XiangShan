@@ -36,6 +36,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   private val l2top = LazyModule(new L2Top())
 
   // =========== Public Ports ============
+  val core_l3_pf_port = core.memBlock.l3_pf_sender_opt
   val memory_port = l2top.memory_port
   val uncache = l2top.mmio_port
   val beu_int_source = l2top.beu.intNode
@@ -65,8 +66,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     case Some(l2) =>
       l2.node :*= l2top.l1_xbar
       l2.pf_recv_node.map(recv => {
-          println("Connecting L1 prefetcher to L2!")
-          recv := core.memBlock.pf_sender_opt.get
+        println("Connecting L1 prefetcher to L2!")
+        recv := core.memBlock.l2_pf_sender_opt.get
       })
     case None =>
       val dummyMatch = WireDefault(false.B)
@@ -110,6 +111,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     l2top.module.beu_errors.l2 <> 0.U.asTypeOf(l2top.module.beu_errors.l2) // TODO: add ECC interface of L2
     core.module.io.l2_hint.bits.sourceId := l2top.module.l2_hint.bits
     core.module.io.l2_hint.valid := l2top.module.l2_hint.valid
+    core.module.io.l2PfqBusy := false.B
 
     // Modules are reset one by one
     // io_reset ----

@@ -118,6 +118,7 @@ class MinimalConfig(n: Int = 1) extends Config(
           nMissEntries = 4,
           nProbeEntries = 4,
           nReleaseEntries = 8,
+          nMaxPrefetchEntry = 2,
         )),
         EnableBPD = false, // disable TAGE
         EnableLoop = false,
@@ -205,7 +206,8 @@ class MinimalConfig(n: Int = 1) extends Config(
             val l2params = core.L2CacheParamsOpt.get.toCacheParams
             l2params.copy(sets = 2 * clientDirBytes / core.L2NBanks / l2params.ways / 64)
           },
-          simulation = !site(DebugOptionsKey).FPGAPlatform
+          simulation = !site(DebugOptionsKey).FPGAPlatform,
+          prefetch = None
         )),
         L3NBanks = 1
       )
@@ -237,7 +239,8 @@ class WithNKBL1D(n: Int, ways: Int = 8) extends Config((site, here, up) => {
         replacer = Some("setplru"),
         nMissEntries = 16,
         nProbeEntries = 8,
-        nReleaseEntries = 18
+        nReleaseEntries = 18,
+        nMaxPrefetchEntry = 6,
       ))
     ))
 })
@@ -303,7 +306,8 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
         sramDepthDiv = 4,
         tagECC = Some("secded"),
         dataECC = Some("secded"),
-        simulation = !site(DebugOptionsKey).FPGAPlatform
+        simulation = !site(DebugOptionsKey).FPGAPlatform,
+        prefetch = Some(huancun.prefetch.L3PrefetchReceiverParams())
       ))
     )
 })

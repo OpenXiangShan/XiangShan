@@ -27,6 +27,7 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.cache._
 import xiangshan.backend.fu.FenceToSbuffer
 import xiangshan.cache.wpu.ReplayCarry
+import xiangshan.mem.prefetch.PrefetchReqBundle
 
 object genWmask {
   def apply(addr: UInt, sizeEncode: UInt): UInt = {
@@ -109,6 +110,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
   val mshrid = UInt(log2Up(cfg.nMissEntries).W)
   val handledByMSHR = Bool()
   val replacementUpdated = Bool()
+  val missDbUpdated = Bool()
 
   val forward_tlDchannel = Bool()
   val dcacheRequireReplay = Bool()
@@ -121,7 +123,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
 }
 
 class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
-  val meta_prefetch = Bool()
+  val meta_prefetch = UInt(L1PfSourceBits.W)
   val meta_access = Bool()
 
   def fromLsPipelineBundle(input: LsPipelineBundle) = {
@@ -156,11 +158,23 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     isFastReplay := DontCare
     handledByMSHR := DontCare
     replacementUpdated := DontCare
+    missDbUpdated := DontCare
     delayedLoadError := DontCare
     lateKill := DontCare
     feedbacked := DontCare
   }
+
+  def asPrefetchReqBundle(): PrefetchReqBundle = {
+    val res = Wire(new PrefetchReqBundle)
+    res.vaddr := this.vaddr
+    res.paddr := this.paddr
+    res.pc    := this.uop.cf.pc
+
+    res
+  }
 }
+
+class StPrefetchTrainBundle(implicit p: Parameters) extends LdPrefetchTrainBundle {}
 
 class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
   // load inst replay informations
@@ -199,6 +213,7 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     schedIndex := input.schedIndex
     handledByMSHR := input.handledByMSHR
     replacementUpdated := input.replacementUpdated
+    missDbUpdated := input.missDbUpdated
     delayedLoadError := input.delayedLoadError
     lateKill := input.lateKill
     feedbacked := input.feedbacked

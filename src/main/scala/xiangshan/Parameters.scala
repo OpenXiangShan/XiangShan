@@ -183,6 +183,11 @@ case class XSCoreParameters
   EnableCacheErrorAfterReset: Boolean = true,
   EnableAccurateLoadError: Boolean = true,
   EnableUncacheWriteOutstanding: Boolean = false,
+  EnableStorePrefetchAtIssue: Boolean = false,
+  EnableStorePrefetchAtCommit: Boolean = false,
+  EnableAtCommitMissTrigger: Boolean = true,
+  EnableStorePrefetchSMS: Boolean = false,
+  EnableStorePrefetchSPB: Boolean = false,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
   ReSelectLen: Int = 7, // load replay queue replay select counter len
   iwpuParameters: WPUParameters = WPUParameters(
@@ -271,7 +276,8 @@ case class XSCoreParameters
     replacer = Some("setplru"),
     nMissEntries = 16,
     nProbeEntries = 8,
-    nReleaseEntries = 18
+    nReleaseEntries = 18,
+    nMaxPrefetchEntry = 6,
   )),
   L2CacheParamsOpt: Option[L2Param] = Some(L2Param(
     name = "l2",
@@ -456,6 +462,11 @@ trait HasXSParameter {
   val EnableCacheErrorAfterReset = coreParams.EnableCacheErrorAfterReset
   val EnableAccurateLoadError = coreParams.EnableAccurateLoadError
   val EnableUncacheWriteOutstanding = coreParams.EnableUncacheWriteOutstanding
+  val EnableStorePrefetchAtIssue = coreParams.EnableStorePrefetchAtIssue
+  val EnableStorePrefetchAtCommit = coreParams.EnableStorePrefetchAtCommit
+  val EnableAtCommitMissTrigger = coreParams.EnableAtCommitMissTrigger
+  val EnableStorePrefetchSMS = coreParams.EnableStorePrefetchSMS
+  val EnableStorePrefetchSPB = coreParams.EnableStorePrefetchSPB
   val asidLen = coreParams.MMUAsidLen
   val BTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
   val refillBothTlb = coreParams.refillBothTlb

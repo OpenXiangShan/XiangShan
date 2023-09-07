@@ -74,7 +74,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val ldout = Vec(LoadPipelineWidth, DecoupledIO(new ExuOutput))
     val ld_raw_data = Vec(LoadPipelineWidth, Output(new LoadDataFromLQBundle))
     val replay = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))
-    val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddr))
+    val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddrAndPfFlag))
     val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
     val rob = Flipped(new RobLsqIO)
     val rollback = Output(Valid(new Redirect))
@@ -99,6 +99,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val issuePtrExt = Output(new SqPtr)
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val force_write = Output(Bool())
+    val lqEmpty = Output(Bool())
   })
 
   val loadQueue = Module(new LoadQueue)
@@ -181,6 +182,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   loadQueue.io.lq_rep_full         <> io.lq_rep_full
   loadQueue.io.lqDeq               <> io.lqDeq
   loadQueue.io.l2_hint             <> io.l2_hint
+  loadQueue.io.lqEmpty             <> io.lqEmpty
 
   // rob commits for lsq is delayed for two cycles, which causes the delayed update for deqPtr in lq/sq
   // s0: commit
