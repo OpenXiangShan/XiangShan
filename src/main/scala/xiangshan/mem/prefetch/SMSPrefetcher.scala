@@ -623,6 +623,8 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   val s2_pht_hit = Cat(s2_hit_vec).orR
   val s2_hist = Mux(s2_pht_hit, Mux1H(s2_hit_vec, s2_hist_update), s2_new_hist)
   val s2_repl_way_mask = UIntToOH(s2_replace_way)
+  val s2_incr_region_vaddr = s2_region_vaddr + 1.U
+  val s2_decr_region_vaddr = s2_region_vaddr - 1.U
 
   // pipe s3: send addr/data to ram, gen pf_req
   val s3_valid = RegNext(s2_valid, false.B)
@@ -643,6 +645,8 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   val s3_repl_way_mask = RegEnable(s2_repl_way_mask, s2_valid)
   val s3_repl_update_mask = RegEnable(VecInit((0 until PHT_SETS).map(i => i.U === s2_ram_waddr)), s2_valid)
   val s3_ram_waddr = RegEnable(s2_ram_waddr, s2_valid)
+  val s3_incr_region_vaddr = RegEnable(s2_incr_region_vaddr, s2_valid)
+  val s3_decr_region_vaddr = RegEnable(s2_decr_region_vaddr, s2_valid)
   s3_ram_en := s3_valid && s3_evict
   val s3_ram_wdata = Wire(new PhtEntry())
   s3_ram_wdata.hist := s3_hist
@@ -699,9 +703,7 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   val s3_cur_region_valid =  s3_pf_gen_valid && (s3_hist_pf_gen & s3_hist_update_mask).orR
   val s3_incr_region_valid = s3_pf_gen_valid && (s3_hist_hi & (~s3_hist_update_mask.head(REGION_BLKS - 1)).asUInt).orR
   val s3_decr_region_valid = s3_pf_gen_valid && (s3_hist_lo & (~s3_hist_update_mask.tail(REGION_BLKS - 1)).asUInt).orR
-  val s3_incr_region_vaddr = s3_region_vaddr + 1.U
   val s3_incr_alias_bits = get_alias_bits(s3_incr_region_vaddr)
-  val s3_decr_region_vaddr = s3_region_vaddr - 1.U
   val s3_decr_alias_bits = get_alias_bits(s3_decr_region_vaddr)
   val s3_incr_region_paddr = Cat(
     s3_region_paddr(REGION_ADDR_BITS - 1, REGION_ADDR_PAGE_BIT),
@@ -1079,8 +1081,9 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   pf_filter.io.gen_req.bits := pf_gen_req
   io.tlb_req <> pf_filter.io.tlb_req
   val is_valid_address = pf_filter.io.l2_pf_addr.bits > 0x80000000L.U
-  io.pf_addr.valid := pf_filter.io.l2_pf_addr.valid && io.enable && is_valid_address
-  io.pf_addr.bits := pf_filter.io.l2_pf_addr.bits
+  io.l2_req.valid := pf_filter.io.l2_pf_addr.valid && io.enable && is_valid_address
+  io.l2_req.bits.addr := pf_filter.io.l2_pf_addr.bits
+  io.l2_req.bits.source := MemReqSource.Prefetch2L2SMS.id.U
   io.l1_req.bits.paddr := pf_filter.io.l2_pf_addr.bits
   io.l1_req.bits.alias := pf_filter.io.pf_alias_bits
   io.l1_req.bits.is_store := true.B
@@ -1094,17 +1097,17 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   val trace = Wire(new L1MissTrace)
   trace.vaddr := 0.U
   trace.pc := 0.U
-  trace.paddr := io.pf_addr.bits
+  trace.paddr := io.l2_req.bits.addr
   trace.source := pf_filter.io.debug_source_type
   val table = ChiselDB.createTable("L1SMSMissTrace_hart"+ p(XSCoreParamsKey).HartId.toString, new L1MissTrace)
-  table.log(trace, io.pf_addr.fire, "SMSPrefetcher", clock, reset)
+  table.log(trace, io.l2_req.fire, "SMSPrefetcher", clock, reset)
 
   XSPerfAccumulate("sms_pf_gen_conflict",
     pht_gen_valid && agt_gen_valid
   )
   XSPerfAccumulate("sms_pht_disabled", pht.io.pf_gen_req.valid && !io_pht_en)
   XSPerfAccumulate("sms_agt_disabled", active_gen_table.io.s2_pf_gen_req.valid && !io_agt_en)
-  XSPerfAccumulate("sms_pf_real_issued", io.pf_addr.valid)
+  XSPerfAccumulate("sms_pf_real_issued", io.l2_req.valid)
   XSPerfAccumulate("sms_l1_req_valid", io.l1_req.valid)
   XSPerfAccumulate("sms_l1_req_fire", io.l1_req.fire)
 }

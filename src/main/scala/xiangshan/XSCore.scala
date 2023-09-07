@@ -179,7 +179,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.inner_cpu_halt := backend.io.cpu_halt
   io.cpu_halt := memBlock.io.outer_cpu_halt
 
-  backend.io.memBlock.writeback <> memBlock.io.writeback
+  backend.io.memBlock.writeback <> memBlock.io.mem_to_ooo.writeback
 
   // memblock error exception writeback, 1 cycle after normal writeback
   backend.io.memBlock.s3_delayed_load_error <> memBlock.io.s3_delayed_load_error
@@ -205,10 +205,10 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.memBlock.lsqio <> memBlock.io.lsqio
   backend.io.memBlock.stIssuePtr := memBlock.io.stIssuePtr
 
-  memBlock.io.issue <> backend.io.memBlock.issue
-  memBlock.io.loadFastMatch <> backend.io.memBlock.loadFastMatch
-  memBlock.io.loadFastImm <> backend.io.memBlock.loadFastImm
-  memBlock.io.loadPc <> backend.io.memBlock.loadPc
+  memBlock.io.ooo_to_mem.issue <> backend.io.memBlock.issue
+  memBlock.io.ooo_to_mem.loadFastMatch <> backend.io.memBlock.loadFastMatch
+  memBlock.io.ooo_to_mem.loadFastImm <> backend.io.memBlock.loadFastImm
+  memBlock.io.ooo_to_mem.loadPc <> backend.io.memBlock.loadPc
 
   backend.io.perf <> DontCare
   backend.io.perf.memInfo <> memBlock.io.memInfo
@@ -221,23 +221,23 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   backend.io.externalInterrupt := memBlock.io.externalInterrupt
 
-  backend.io.distributedUpdate(0).w.valid := memBlock.io.csrUpdate.w.valid
-  backend.io.distributedUpdate(0).w.bits := memBlock.io.csrUpdate.w.bits
+  backend.io.distributedUpdate(0).w.valid := memBlock.io.mem_to_ooo.csrUpdate.w.valid
+  backend.io.distributedUpdate(0).w.bits := memBlock.io.mem_to_ooo.csrUpdate.w.bits
   backend.io.distributedUpdate(1).w.valid := frontend.io.csrUpdate.w.valid
   backend.io.distributedUpdate(1).w.bits := frontend.io.csrUpdate.w.bits
 
-  backend.io.memBlock.sfence <> memBlock.io.sfence
-  backend.io.memBlock.fenceToSbuffer <> memBlock.io.fenceToSbuffer
+  backend.io.memBlock.sfence <> memBlock.io.ooo_to_mem.sfence
+  backend.io.memBlock.fenceToSbuffer <> memBlock.io.ooo_to_mem.fenceToSbuffer
 
-  memBlock.io.itlb <> frontend.io.ptw
+  memBlock.io.fetch_to_mem.itlb <> frontend.io.ptw
   memBlock.io.redirect <> backend.io.memBlock.redirect
   memBlock.io.rsfeedback <> backend.io.memBlock.rsfeedback
-  memBlock.io.csrCtrl <> backend.io.memBlock.csrCtrl
-  memBlock.io.tlbCsr <> backend.io.memBlock.tlbCsr
-  memBlock.io.lsqio.rob <> backend.io.memBlock.lsqio.rob
-  memBlock.io.lsqio.exceptionAddr.isStore := backend.io.memBlock.lsqio.exceptionAddr.isStore
+  memBlock.io.ooo_to_mem.csrCtrl <> backend.io.memBlock.csrCtrl
+  memBlock.io.ooo_to_mem.tlbCsr <> backend.io.memBlock.tlbCsr
+  // memBlock.io.lsqio.rob <> backend.io.memBlock.lsqio.rob // delected by XueYuKun
+  // memBlock.io.lsqio.exceptionAddr.isStore := backend.io.memBlock.lsqio.exceptionAddr.isStore // delected by XueYuKun
   memBlock.io.debug_ls <> backend.io.memBlock.debug_ls
-  memBlock.io.lsTopdownInfo <> backend.io.memBlock.lsTopdownInfo
+  memBlock.io.mem_to_ooo.lsTopdownInfo <> backend.io.memBlock.lsTopdownInfo
   memBlock.io.l2_hint.valid := io.l2_hint.valid
   memBlock.io.l2_hint.bits.sourceId := io.l2_hint.bits.sourceId
 

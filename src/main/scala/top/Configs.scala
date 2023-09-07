@@ -261,7 +261,8 @@ class WithNKBL2
           "dcache",
           sets = 2 * p.dcacheParametersOpt.get.nSets / banks,
           ways = p.dcacheParametersOpt.get.nWays + 2,
-          aliasBitsOpt = p.dcacheParametersOpt.get.aliasBitsOpt
+          aliasBitsOpt = p.dcacheParametersOpt.get.aliasBitsOpt,
+          vaddrBitsOpt = Some(p.VAddrBits - log2Up(p.dcacheParametersOpt.get.blockBytes))
         )),
         reqField = Seq(utility.ReqSourceField()),
         echoField = Seq(huancun.DirtyField()),
@@ -290,7 +291,7 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
         inclusive = inclusive,
         clientCaches = tiles.map{ core =>
           val l2params = core.L2CacheParamsOpt.get.toCacheParams
-          l2params.copy(sets = 2 * clientDirBytes / core.L2NBanks / l2params.ways / 64)
+          l2params.copy(sets = 2 * clientDirBytes / core.L2NBanks / l2params.ways / 64, ways = l2params.ways + 2)
         },
         enablePerf = true,
         ctrl = Some(CacheCtrl(

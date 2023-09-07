@@ -27,8 +27,8 @@ import freechips.rocketchip.tilelink.ClientStates._
 import freechips.rocketchip.tilelink.MemoryOpCategories._
 import freechips.rocketchip.tilelink.TLPermissions._
 import difftest._
-import coupledL2.{AliasKey, DirtyKey, PrefetchKey}
-import mem.{AddPipelineReg}
+import coupledL2.{AliasKey, VaddrKey, DirtyKey, PrefetchKey}
+import mem.AddPipelineReg
 import mem.trace._
 
 class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
@@ -187,6 +187,8 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
     acquire := Mux(req.full_overwrite, acquirePerm, acquireBlock)
     // resolve cache alias by L2
     acquire.user.lift(AliasKey).foreach( _ := req.vaddr(13, 12))
+    // pass vaddr to l2
+    acquire.user.lift(VaddrKey).foreach(_ := req.vaddr(VAddrBits - 1, blockOffBits))
     // trigger prefetch
     acquire.user.lift(PrefetchKey).foreach(_ := Mux(l2_pf_store_only, req.isFromStore, true.B))
     // req source
@@ -586,6 +588,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   io.mem_acquire.bits := Mux(full_overwrite, acquirePerm, acquireBlock)
   // resolve cache alias by L2
   io.mem_acquire.bits.user.lift(AliasKey).foreach( _ := req.vaddr(13, 12))
+  // pass vaddr to l2
+  io.mem_acquire.bits.user.lift(VaddrKey).foreach( _ := req.vaddr(VAddrBits-1, blockOffBits))
   // trigger prefetch
   io.mem_acquire.bits.user.lift(PrefetchKey).foreach(_ := Mux(io.l2_pf_store_only, req.isFromStore, true.B))
   // req source
@@ -687,7 +691,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   io.debug_early_replace.bits.idx := addr_to_dcache_set(req.vaddr)
   io.debug_early_replace.bits.tag := req.replace_tag
 
-  io.forwardInfo.apply(req_valid, req.addr, refill_data_raw, w_grantfirst, w_grantlast)
+  io.forwardInfo.apply(req_valid, req.addr, refill_and_store_data, w_grantfirst, w_grantlast)
 
   // refill latency monitor
   io.latency_monitor.load_miss_refilling  := req_valid && req_primary_fire.isFromLoad     && BoolStopWatch(io.mem_acquire.fire, io.mem_grant.fire && !refill_done, true)
@@ -763,6 +767,8 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
     // forward missqueue
     val forward = Vec(LoadPipelineWidth, new LduToMissqueueForwardIO)
     val l2_pf_store_only = Input(Bool())
+
+    val mq_enq_cancel = Output(Bool())
   })
   
   // 128KBL1: FIXME: provide vaddr for l2
@@ -875,9 +881,11 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
       e.io.main_pipe_resp := io.main_pipe_resp.valid && io.main_pipe_resp.bits.ack_miss_queue && io.main_pipe_resp.bits.miss_id === i.U
 
       io.debug_early_replace(i) := e.io.debug_early_replace
+      e.io.main_pipe_req.ready := io.main_pipe_req.ready
   }
 
   io.req.ready := accept
+  io.mq_enq_cancel := io.req.bits.cancel
   io.refill_to_ldq.valid := Cat(entries.map(_.io.refill_to_ldq.valid)).orR
   io.refill_to_ldq.bits := ParallelMux(entries.map(_.io.refill_to_ldq.valid) zip entries.map(_.io.refill_to_ldq.bits))
 
@@ -907,7 +915,11 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
 
   arbiter_with_pipereg(entries.map(_.io.replace_pipe_req), io.replace_pipe_req, Some("replace_pipe_req"))
 
-  fastArbiter(entries.map(_.io.main_pipe_req), io.main_pipe_req, Some("main_pipe_req"))
+  // amo's main pipe req out
+  val main_pipe_req_vec = entries.map(_.io.main_pipe_req)
+  io.main_pipe_req.valid := VecInit(main_pipe_req_vec.map(_.valid)).asUInt.orR
+  io.main_pipe_req.bits := Mux1H(main_pipe_req_vec.map(_.valid), main_pipe_req_vec.map(_.bits))
+  assert(PopCount(VecInit(main_pipe_req_vec.map(_.valid))) <= 1.U, "multi main pipe req")
 
   io.probe_block := Cat(probe_block_vec).orR
 

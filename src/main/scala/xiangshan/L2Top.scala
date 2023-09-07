@@ -88,7 +88,10 @@ class L2Top()(implicit p: Parameters) extends LazyModule
 
   val l2cache = coreParams.L2CacheParamsOpt.map(l2param =>
     LazyModule(new CoupledL2()(new Config((_, _, _) => {
-      case L2ParamKey => l2param.copy(hartIds = Seq(p(XSCoreParamsKey).HartId))
+      case L2ParamKey => l2param.copy(
+        hartIds = Seq(p(XSCoreParamsKey).HartId),
+        FPGAPlatform = debugOpts.FPGAPlatform
+      )
     })))
   )
   val l2_binder = coreParams.L2CacheParamsOpt.map(_ => BankBinder(coreParams.L2NBanks, 64))

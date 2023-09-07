@@ -283,7 +283,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val tlbRespPAddr = VecInit((0 until PortNumber).map(i => ResultHoldBypass(valid = tlb_back(i), data = fromITLB(i).bits.paddr(0))))
   val tlbExcpPF = VecInit((0 until PortNumber).map(i => ResultHoldBypass(valid = tlb_back(i), data = fromITLB(i).bits.excp(0).pf.instr) && tlb_need_back(i)))
   val tlbExcpAF = VecInit((0 until PortNumber).map(i => ResultHoldBypass(valid = tlb_back(i), data = fromITLB(i).bits.excp(0).af.instr) && tlb_need_back(i)))
-  val tlbExcp = VecInit((0 until PortNumber).map(i => tlbExcpPF(i) || tlbExcpPF(i)))
+  val tlbExcp = VecInit((0 until PortNumber).map(i => tlbExcpPF(i) || tlbExcpAF(i)))
 
   val tlbRespAllValid = Cat((0 until PortNumber).map(i => !tlb_need_back(i) || tlb_resp_valid(i))).andR
   s1_ready := s2_ready && tlbRespAllValid && !s1_wait  || !s1_valid
@@ -357,8 +357,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val PIQ_hit         = VecInit(Seq(PIQ_hit_oh(0).reduce(_||_) && s1_valid && tlbRespAllValid, PIQ_hit_oh(1).reduce(_||_) && s1_valid && s1_double_line && tlbRespAllValid)) // TODO: Handle TLB blocking in the PIQ
   val PIQ_hit_data    = VecInit((0 until PortNumber).map(i => Mux1H(PIQ_hit_oh(i), fromPIQ.map(_.bits.cacheline))))
   val PIQ_data_valid  = VecInit((0 until PortNumber).map(i => Mux1H(PIQ_hit_oh(i), fromPIQ.map(_.bits.writeBack))))
-  val s1_wait_vec     = VecInit((0 until PortNumber).map(i => !s1_port_hit(i) && !s1_ipf_hit_latch(i) && PIQ_hit(i) && !PIQ_data_valid(i) && !PIQ_hold_res(i)))
-  val PIQ_write_back  = VecInit((0 until PortNumber).map(i => !s1_port_hit(i) && !s1_ipf_hit_latch(i) && PIQ_hit(i) && PIQ_data_valid(i)))
+  // val s1_wait_vec     = VecInit((0 until PortNumber).map(i => !s1_port_hit(i) && !s1_ipf_hit_latch(i) && PIQ_hit(i) && !PIQ_data_valid(i) && !PIQ_hold_res(i)))
+  // val PIQ_write_back  = VecInit((0 until PortNumber).map(i => !s1_port_hit(i) && !s1_ipf_hit_latch(i) && PIQ_hit(i) && PIQ_data_valid(i)))
+  val s1_wait_vec     = VecInit((0 until PortNumber).map(i => !s1_ipf_hit_latch(i) && PIQ_hit(i) && !PIQ_data_valid(i) && !PIQ_hold_res(i)))
+  val PIQ_write_back  = VecInit((0 until PortNumber).map(i => !s1_ipf_hit_latch(i) && PIQ_hit(i) && PIQ_data_valid(i)))
   val s1_PIQ_hit      = VecInit((0 until PortNumber).map(i => PIQ_write_back(i) || PIQ_hold_res(i)))
   s1_wait := s1_valid && ((s1_wait_vec(0) && !tlbExcp(0)) || (s1_double_line && s1_wait_vec(1) && !tlbExcp(0) && !tlbExcp(1)))
 
@@ -376,7 +378,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   ))
 
   val s1_prefetch_hit = VecInit((0 until PortNumber).map(i => s1_ipf_hit_latch(i) || s1_PIQ_hit(i)))
-  val s1_prefetch_hit_data = VecInit((0 until PortNumber).map(i => Mux(s1_ipf_hit_latch(i),s1_ipf_data(i), s1_PIQ_data(i))))
+  val s1_prefetch_hit_data = VecInit((0 until PortNumber).map(i => Mux(s1_ipf_hit_latch(i), s1_ipf_data(i), s1_PIQ_data(i))))
 
   if (env.EnableDifftest) {
     (0 until PortNumber).foreach { i =>
@@ -390,6 +392,29 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
       diffPIQ.io.data := s1_PIQ_data(i).asTypeOf(diffPIQ.io.data)
     }
   }
+
+  /** select data in advance to fix timing */
+  def split_vec[T <: Data](vec: Vec[T], num: Int): Vec[Vec[T]] = {
+    assert(vec.length % num == 0, "The length of vec must be a multiple of num")
+    val my_vec = Wire(Vec(vec.length/num, Vec(num, vec(0).cloneType)))
+    for (i <- 0 until (vec.length/num)) {
+      for (j <- 0 until num) {
+        my_vec(i)(j) := vec(4 * i + j)
+      }
+    }
+    my_vec
+  }
+
+  val s1_data_cacheline_split = s1_data_cacheline.map(split_vec(_, 4))
+  val s1_tag_match_vec_split  = s1_tag_match_vec.map(split_vec(_, 4))
+  val s1_select_data = VecInit((0 until PortNumber).map (i =>
+    VecInit((s1_data_cacheline_split(i) zip s1_tag_match_vec_split(i)).map{ case(data, sel) =>
+      Mux1H(sel, data)
+    })
+  ))
+  val s1_select_vec = VecInit((0 until PortNumber).map (i =>
+    VecInit(s1_tag_match_vec_split(i).map(ParallelOR(_)))
+  ))
 
   /** when tlb stall, ipfBuffer stage2 need also stall */
   mainPipeMissInfo.s1_already_check_ipf := s1_valid && tlbRespAllValid // when tlb back, s1 must has already check ipf
@@ -449,6 +474,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_prefetch_hit_data = RegEnable(s1_prefetch_hit_data, s1_fire)
   val s2_prefetch_hit_in_ipf = RegEnable(s1_ipf_hit_latch, s1_fire)
   val s2_prefetch_hit_in_piq = RegEnable(s1_PIQ_hit, s1_fire)
+  val s2_select_vec   = RegEnable(s1_select_vec, s1_fire)
+  val s2_select_data  = RegEnable(s1_select_data, s1_fire)
 
   val icacheMissStage = RegInit(VecInit(Seq.fill(numOfStage - 2)(0.B)))
   icacheMissStage(0) := !s2_hit
@@ -777,12 +804,12 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   }
 
   //** use hit one-hot select data
-  val s2_hit_datas    = VecInit(s2_data_cacheline.zipWithIndex.map { case(bank, i) =>
-    val port_hit_data = Mux1H(s2_tag_match_vec(i).asUInt, bank)
+  val s2_hit_datas    = VecInit(s2_select_data.zipWithIndex.map { case(bank, i) =>
+    val port_hit_data = Mux1H(s2_select_vec(i).asUInt, bank)
     port_hit_data
   })
 
-  val s2_register_datas       = Wire(Vec(2, UInt(blockBits.W)))
+  val s2_register_datas       = Wire(Vec(2, UInt(blockBits.W))) 
 
   s2_register_datas.zipWithIndex.map{case(bank,i) =>
     // if(i == 0) bank := Mux(s2_port_hit(i), s2_hit_datas(i), Mux(miss_0_s2_0_latch,reservedRefillData(0), Mux(miss_1_s2_0_latch,reservedRefillData(1), missSlot(0).m_data)))

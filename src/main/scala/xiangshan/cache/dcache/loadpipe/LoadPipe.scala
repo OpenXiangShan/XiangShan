@@ -69,6 +69,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     // ecc error
     val error = Output(new L1CacheErrorInfo())
 
+    // miss queue cancel the miss request
+    val mq_enq_cancel = Input(Bool())
+
     // // debug_ls_info
     // val debug_s2_cache_miss = Bool()
   })
@@ -322,7 +325,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_nack_data = RegEnable(!io.banked_data_read.ready, s1_fire)
   val s2_nack = s2_nack_hit || s2_nack_no_mshr || s2_nack_data
   // s2 miss merged
-  val s2_miss_merged = io.miss_req.fire && !io.miss_req.bits.cancel && io.miss_resp.merged
+  val s2_miss_merged = io.miss_req.fire && !io.mq_enq_cancel && io.miss_resp.merged
 
   val s2_bank_addr = addr_to_dcache_bank(s2_paddr)
   dontTouch(s2_bank_addr)
@@ -377,13 +380,13 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.lsu.s2_first_hit := s2_req.isFirstIssue && s2_hit
   // load pipe need replay when there is a bank conflict or wpu predict fail
   resp.bits.replay := DontCare 
-  resp.bits.replayCarry.valid := (resp.bits.miss && (!io.miss_req.fire() || s2_nack)) || io.bank_conflict_slow || s2_wpu_pred_fail
+  resp.bits.replayCarry.valid := (resp.bits.miss && (!io.miss_req.fire() || s2_nack || io.mq_enq_cancel)) || io.bank_conflict_slow || s2_wpu_pred_fail
   resp.bits.replayCarry.real_way_en := s2_real_way_en
   resp.bits.meta_prefetch := s2_hit_prefetch
   resp.bits.meta_access := s2_hit_access
   resp.bits.tag_error := s2_tag_error // report tag_error in load s2
   resp.bits.mshr_id := io.miss_resp.id
-  resp.bits.handled := io.miss_req.fire && !io.miss_req.bits.cancel && io.miss_resp.handled
+  resp.bits.handled := io.miss_req.fire && !io.mq_enq_cancel && io.miss_resp.handled
   resp.bits.debug_robIdx := s2_req.debug_robIdx
   // debug info
   io.lsu.s2_first_hit := s2_req.isFirstIssue && s2_hit
@@ -416,7 +419,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.lsu.s1_disable_fast_wakeup := io.disable_ld_fast_wakeup
   io.lsu.s2_bank_conflict := io.bank_conflict_slow
   io.lsu.s2_wpu_pred_fail := s2_wpu_pred_fail_and_real_hit 
-  io.lsu.s2_mq_nack       := (resp.bits.miss && (!io.miss_req.fire() || s2_nack))
+  io.lsu.s2_mq_nack       := (resp.bits.miss && (!io.miss_req.fire() || s2_nack || io.mq_enq_cancel))
   assert(RegNext(s1_ready && s2_ready), "load pipeline should never be blocked")
 
   // --------------------------------------------------------------------------------
@@ -459,7 +462,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s3_miss_merged = RegNext(s2_miss_merged)
   val first_update = RegNext(RegNext(RegNext(!io.lsu.replacementUpdated)))
   val hit_update_replace_en  = RegNext(s2_valid) && RegNext(!resp.bits.miss)
-  val miss_update_replace_en = RegNext(io.miss_req.fire) && RegNext(!io.miss_req.bits.cancel) && RegNext(io.miss_resp.handled)
+  val miss_update_replace_en = RegNext(io.miss_req.fire) && RegNext(!io.mq_enq_cancel) && RegNext(io.miss_resp.handled)
 
   if (!cfg.updateReplaceOn2ndmiss) {
     // replacement is only updated on 1st miss

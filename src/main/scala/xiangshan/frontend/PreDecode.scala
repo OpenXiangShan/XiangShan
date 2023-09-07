@@ -203,6 +203,7 @@ class PredCheckerResp(implicit p: Parameters) extends XSBundle with HasPdConst {
   //to Ftq write back port (stage 2)
   val stage2Out = new Bundle{
     val fixedTarget = Vec(PredictWidth, UInt(VAddrBits.W))
+    val jalTarget = Vec(PredictWidth, UInt(VAddrBits.W))
     val fixedMissPred = Vec(PredictWidth,  Bool())
     val faultType   = Vec(PredictWidth, new CheckInfo) 
   }
@@ -273,6 +274,7 @@ class PredChecker(implicit p: Parameters) extends XSModule with HasPdConst {
 
   io.out.stage2Out.fixedMissPred.zipWithIndex.map{case(missPred, i ) => missPred := jalFaultVecNext(i) || retFaultVecNext(i) || notCFITakenNext(i) || invalidTakenNext(i) || targetFault(i)}
   io.out.stage2Out.fixedTarget.zipWithIndex.map{case(target, i) => target := Mux(jalFaultVecNext(i) || targetFault(i), jumpTargetsNext(i),  seqTargetsNext(i) )}
+  io.out.stage2Out.jalTarget.zipWithIndex.map{case(target, i) => target := jumpTargetsNext(i) }
 
 }
 

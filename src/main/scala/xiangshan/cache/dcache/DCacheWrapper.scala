@@ -27,7 +27,7 @@ import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, Trans
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{BundleFieldBase, UIntToOH1}
 import device.RAMHelper
-import coupledL2.{AliasField, AliasKey, DirtyField, PrefetchField}
+import coupledL2.{AliasField, VaddrField, PrefetchField}
 import utility.ReqSourceField
 import utility.FastArbiter
 import mem.AddPipelineReg
@@ -58,11 +58,6 @@ case class DCacheParameters
   // we need to avoid this by recoding additional bits in L2 cache
   val setBytes = nSets * blockBytes
   val aliasBitsOpt = if(setBytes > pageSize) Some(log2Ceil(setBytes / pageSize)) else None
-  val reqFields: Seq[BundleFieldBase] = Seq(
-    PrefetchField(),
-    ReqSourceField()
-  ) ++ aliasBitsOpt.map(AliasField)
-  val echoFields: Seq[BundleFieldBase] = Nil
 
   def tagCode: Code = Code.fromString(tagECC)
 
@@ -617,7 +612,7 @@ class DcacheToLduForwardIO(implicit p: Parameters) extends DCacheBundle {
 class MissEntryForwardIO(implicit p: Parameters) extends DCacheBundle {
   val inflight = Bool()
   val paddr = UInt(PAddrBits.W)
-  val raw_data = Vec(blockBytes/beatBytes, UInt(beatBits.W))
+  val raw_data = Vec(blockRows, UInt(rowBits.W))
   val firstbeat_valid = Bool()
   val lastbeat_valid = Bool()
 
@@ -641,12 +636,9 @@ class MissEntryForwardIO(implicit p: Parameters) extends DCacheBundle {
     val forward_mshr = RegInit(false.B)
     val forwardData = RegInit(VecInit(List.fill(VLEN/8)(0.U(8.W))))
 
-    val beat_data = raw_data(req_paddr(log2Up(refillBytes)))
-    val block_idx = req_paddr(log2Up(refillBytes) - 1, 3)
-    val block_data = Wire(Vec(l1BusDataWidth / 64, UInt(64.W)))
-    (0 until l1BusDataWidth / 64).map(i => {
-      block_data(i) := beat_data(64 * i + 63, 64 * i)
-    })
+    val block_idx = req_paddr(log2Up(refillBytes), 3)
+    val block_data = raw_data
+
     val selected_data = Wire(UInt(128.W))
     selected_data := Mux(req_paddr(3), Fill(2, block_data(block_idx)), Cat(block_data(block_idx + 1.U), block_data(block_idx)))
 
@@ -687,6 +679,7 @@ class LduToMissqueueForwardIO(implicit p: Parameters) extends DCacheBundle {
 class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
   val load  = Vec(LoadPipelineWidth, Flipped(new DCacheLoadIO)) // for speculative load
   val lsq = ValidIO(new Refill)  // refill to load queue, wake up load misses
+  val tl_d_channel = Output(new DcacheToLduForwardIO)
   val store = new DCacheToSbufferIO // for sbuffer
   val atomics  = Flipped(new AtomicWordIO)  // atomics reqs
   val release = ValidIO(new Release) // cacheline release hint for ld-ld violation check
@@ -707,14 +700,21 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
 
 class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
 
+  val reqFields: Seq[BundleFieldBase] = Seq(
+    PrefetchField(),
+    ReqSourceField(),
+    VaddrField(VAddrBits - blockOffBits),
+  ) ++ cacheParams.aliasBitsOpt.map(AliasField)
+  val echoFields: Seq[BundleFieldBase] = Nil
+
   val clientParameters = TLMasterPortParameters.v1(
     Seq(TLMasterParameters.v1(
       name = "dcache",
       sourceId = IdRange(0, nEntries + 1),
       supportsProbe = TransferSizes(cfg.blockBytes)
     )),
-    requestFields = cacheParams.reqFields,
-    echoFields = cacheParams.echoFields
+    requestFields = reqFields,
+    echoFields = echoFields
   )
 
   val clientNode = TLClientNode(Seq(clientParameters))
@@ -893,6 +893,13 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
       io.lsu.forward_D(i).dontCare()
     }
   })
+  // tl D channel wakeup
+  val (_, _, done, _) = edge.count(bus.d)
+  when (bus.d.bits.opcode === TLMessages.GrantData || bus.d.bits.opcode === TLMessages.Grant) {
+    io.lsu.tl_d_channel.apply(bus.d.valid, bus.d.bits.data, bus.d.bits.source, done)
+  } .otherwise {
+    io.lsu.tl_d_channel.dontCare()
+  }
   mainPipe.io.force_write <> io.force_write
 
   /** dwpu */
@@ -1011,6 +1018,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     missQueue.io.req.bits.cancel := true.B
     missReqArb.io.out.ready := false.B
   }
+
+  for (w <- 0 until LoadPipelineWidth) { ldu(w).io.mq_enq_cancel := missQueue.io.mq_enq_cancel }
 
   XSPerfAccumulate("miss_queue_fire", PopCount(VecInit(missReqArb.io.in.map(_.fire))) >= 1.U)
   XSPerfAccumulate("miss_queue_muti_fire", PopCount(VecInit(missReqArb.io.in.map(_.fire))) > 1.U)

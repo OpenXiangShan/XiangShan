@@ -254,6 +254,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val fpRfReadOut = if (outer.outFpRfReadPorts > 0) Some(Vec(outer.outFpRfReadPorts, new RfReadPort(XLEN))) else None
     val fpStateReadOut = if (outer.outFpRfReadPorts > 0) Some(Vec(outer.outFpRfReadPorts, new BusyTableReadIO)) else None
     val loadFastMatch = if (numLoadPorts > 0) Some(Vec(numLoadPorts, Output(UInt(exuParameters.LduCnt.W)))) else None
+    val loadFastFuOpType = if (numLoadPorts > 0) Some(Vec(numLoadPorts, Output(FuOpType()))) else None
     val loadFastImm = if (numLoadPorts > 0) Some(Vec(numLoadPorts, Output(UInt(12.W)))) else None
     // misc
     val jumpPc = Input(UInt(VAddrBits.W))
@@ -474,6 +475,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   if (io.extra.loadFastMatch.isDefined) {
     val allLoadRS = outer.reservationStations.map(_.module.io.load).filter(_.isDefined)
     io.extra.loadFastMatch.get := allLoadRS.map(_.get.map(_.fastMatch)).fold(Seq())(_ ++ _)
+    io.extra.loadFastFuOpType.get := allLoadRS.map(_.get.map(_.fastFuOpType)).fold(Seq())(_ ++ _)
     io.extra.loadFastImm.get := allLoadRS.map(_.get.map(_.fastImm)).fold(Seq())(_ ++ _)
   }
 

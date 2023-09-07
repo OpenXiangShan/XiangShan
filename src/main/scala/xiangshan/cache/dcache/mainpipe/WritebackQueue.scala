@@ -439,6 +439,12 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
             s_sleep
           ))
           req := req_later.toWritebackReqCtrl
+          when(io.release_wakeup.valid && io.release_wakeup.bits === req_later.miss_id || !req_later.delay_release) {
+            remain_set := Mux(req_later.hasData, ~0.U(refillCycles.W), 1.U(refillCycles.W))
+            remain_clr := 0.U
+          }.otherwise {
+            remain_set := 0.U
+          }
           when (io.release_wakeup.valid && io.release_wakeup.bits === req_later.miss_id) {
             req.delay_release := false.B
           }
@@ -509,9 +515,11 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   io.secondary_ready := state_dup_1 =/= s_invalid && io.req.bits.addr === paddr_dup_0
 
   io.probe_ttob_check_resp.valid := RegNext(io.probe_ttob_check_req.valid) // for debug only
-  io.probe_ttob_check_resp.bits.toN := state_dup_1 === s_sleep && 
-    RegNext(io.probe_ttob_check_req.bits.addr) === paddr_dup_0 &&
-    RegNext(io.probe_ttob_check_req.valid)
+  io.probe_ttob_check_resp.bits.toN := RegNext(
+    state_dup_1 === s_sleep &&
+    io.probe_ttob_check_req.bits.addr === paddr_dup_0 &&
+    io.probe_ttob_check_req.valid
+  )
 
   // data update logic
   when (!s_data_merge) {

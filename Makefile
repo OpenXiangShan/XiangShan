@@ -48,6 +48,16 @@ endif
 override SIM_ARGS += --with-dramsim3
 endif
 
+# run emu with chisel-db
+ifeq ($(WITH_CHISELDB),1)
+override SIM_ARGS += --with-chiseldb
+endif
+
+# run emu with chisel-db
+ifeq ($(WITH_ROLLINGDB),1)
+override SIM_ARGS += --with-rollingdb
+endif
+
 # dynamic switch CONSTANTIN
 ifeq ($(WITH_CONSTANTIN),0)
 $(info disable WITH_CONSTANTIN)
