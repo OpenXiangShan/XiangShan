@@ -332,6 +332,7 @@ class CtrlBlockImp(
   rename.io.int_need_free := rat.io.int_need_free
   rename.io.int_old_pdest := rat.io.int_old_pdest
   rename.io.fp_old_pdest := rat.io.fp_old_pdest
+  rename.io.vec_old_pdest := rat.io.vec_old_pdest
   rename.io.debug_int_rat := rat.io.debug_int_rat
   rename.io.debug_fp_rat := rat.io.debug_fp_rat
   rename.io.debug_vec_rat := rat.io.debug_vec_rat

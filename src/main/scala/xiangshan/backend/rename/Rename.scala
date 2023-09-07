@@ -59,6 +59,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // from rename table
     val int_old_pdest = Vec(CommitWidth, Input(UInt(PhyRegIdxWidth.W)))
     val fp_old_pdest = Vec(CommitWidth, Input(UInt(PhyRegIdxWidth.W)))
+    val vec_old_pdest = Vec(CommitWidth, Input(UInt(PhyRegIdxWidth.W)))
     val int_need_free = Vec(CommitWidth, Input(Bool()))
     // to dispatch1
     val out = Vec(RenameWidth, DecoupledIO(new DynInst))
@@ -382,7 +383,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     intFreeList.io.freeReq(i) := io.int_need_free(i)
     intFreeList.io.freePhyReg(i) := RegNext(io.int_old_pdest(i))
     fpFreeList.io.freeReq(i)  := RegNext(commitValid && (needDestRegCommit(Reg_F, io.robCommits.info(i)) || needDestRegCommit(Reg_V, io.robCommits.info(i))))
-    fpFreeList.io.freePhyReg(i) := io.fp_old_pdest(i)
+    fpFreeList.io.freePhyReg(i) := Mux(RegNext(needDestRegCommit(Reg_F, io.robCommits.info(i))), io.fp_old_pdest(i), io.vec_old_pdest(i))
   }
 
   /*
