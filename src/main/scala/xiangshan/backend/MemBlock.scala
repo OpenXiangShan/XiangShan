@@ -120,8 +120,6 @@ class MemBlock()(implicit p: Parameters) extends LazyModule
   val debug_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
   val plic_int_sink = IntSinkNode(IntSinkPortSimple(2, 1))
 
-  ptw_to_l2_buffer.node := ptw.node
-
   if (!coreParams.softPTW) {
     ptw_to_l2_buffer.node := ptw.node
   }

@@ -194,16 +194,29 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   frontend.io.csrCtrl <> backend.io.frontend.csrCtrl
   frontend.io.fencei := backend.io.frontend.fencei
 
-  backend.io.memBlock.stIn <> memBlock.io.stIn
-  backend.io.memBlock.memoryViolation <> memBlock.io.memoryViolation
-  backend.io.memBlock.enqLsq <> memBlock.io.enqLsq
-  backend.io.memBlock.lcommit := memBlock.io.lqDeq
-  backend.io.memBlock.scommit := memBlock.io.sqDeq
-  backend.io.memBlock.lqCancelCnt := memBlock.io.lqCancelCnt
-  backend.io.memBlock.sqCancelCnt := memBlock.io.sqCancelCnt
-  backend.io.memBlock.otherFastWakeup <> memBlock.io.otherFastWakeup
-  backend.io.memBlock.lsqio <> memBlock.io.lsqio
-  backend.io.memBlock.stIssuePtr := memBlock.io.stIssuePtr
+  backend.io.memBlock.stIn <> memBlock.io.mem_to_ooo.stIn
+  backend.io.memBlock.memoryViolation <> memBlock.io.mem_to_ooo.memoryViolation
+  backend.io.memBlock.enqLsq <> memBlock.io.ooo_to_mem.enqLsq
+  backend.io.memBlock.lcommit := memBlock.io.mem_to_ooo.lqDeq
+  backend.io.memBlock.scommit := memBlock.io.mem_to_ooo.sqDeq
+  backend.io.memBlock.lqCancelCnt := memBlock.io.mem_to_ooo.lqCancelCnt
+  backend.io.memBlock.sqCancelCnt := memBlock.io.mem_to_ooo.sqCancelCnt
+  backend.io.memBlock.otherFastWakeup <> memBlock.io.mem_to_ooo.otherFastWakeup
+  backend.io.memBlock.stIssuePtr := memBlock.io.mem_to_ooo.stIssuePtr
+
+  // lsqio
+  backend.io.memBlock.lsqio.exceptionAddr.vaddr := memBlock.io.mem_to_ooo.lsqio.vaddr
+  memBlock.io.ooo_to_mem.isStore := backend.io.memBlock.lsqio.exceptionAddr.isStore
+  backend.io.memBlock.lsqio.lqCanAccept   := memBlock.io.mem_to_ooo.lsqio.lqCanAccept
+  backend.io.memBlock.lsqio.sqCanAccept   := memBlock.io.mem_to_ooo.lsqio.sqCanAccept
+  memBlock.io.ooo_to_mem.lsqio.lcommit    := backend.io.memBlock.lsqio.rob.lcommit
+  memBlock.io.ooo_to_mem.lsqio.scommit    := backend.io.memBlock.lsqio.rob.scommit
+  memBlock.io.ooo_to_mem.lsqio.pendingld  := backend.io.memBlock.lsqio.rob.pendingld
+  memBlock.io.ooo_to_mem.lsqio.pendingst  := backend.io.memBlock.lsqio.rob.pendingst
+  memBlock.io.ooo_to_mem.lsqio.commit     := backend.io.memBlock.lsqio.rob.commit
+  memBlock.io.ooo_to_mem.lsqio.pendingPtr := backend.io.memBlock.lsqio.rob.pendingPtr
+  backend.io.memBlock.lsqio.rob.mmio      := memBlock.io.mem_to_ooo.lsqio.mmio
+  backend.io.memBlock.lsqio.rob.uop       := memBlock.io.mem_to_ooo.lsqio.uop
 
   memBlock.io.ooo_to_mem.issue <> backend.io.memBlock.issue
   memBlock.io.ooo_to_mem.loadFastMatch <> backend.io.memBlock.loadFastMatch
@@ -226,16 +239,15 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.distributedUpdate(1).w.valid := frontend.io.csrUpdate.w.valid
   backend.io.distributedUpdate(1).w.bits := frontend.io.csrUpdate.w.bits
 
-  backend.io.memBlock.sfence <> memBlock.io.ooo_to_mem.sfence
-  backend.io.memBlock.fenceToSbuffer <> memBlock.io.ooo_to_mem.fenceToSbuffer
+  // fenceToSbuffer
+  memBlock.io.ooo_to_mem.flushSb := backend.io.memBlock.fenceToSbuffer.flushSb
+  backend.io.memBlock.fenceToSbuffer.sbIsEmpty := memBlock.io.mem_to_ooo.sbIsEmpty
 
   memBlock.io.fetch_to_mem.itlb <> frontend.io.ptw
   memBlock.io.redirect <> backend.io.memBlock.redirect
   memBlock.io.rsfeedback <> backend.io.memBlock.rsfeedback
   memBlock.io.ooo_to_mem.csrCtrl <> backend.io.memBlock.csrCtrl
   memBlock.io.ooo_to_mem.tlbCsr <> backend.io.memBlock.tlbCsr
-  // memBlock.io.lsqio.rob <> backend.io.memBlock.lsqio.rob // delected by XueYuKun
-  // memBlock.io.lsqio.exceptionAddr.isStore := backend.io.memBlock.lsqio.exceptionAddr.isStore // delected by XueYuKun
   memBlock.io.debug_ls <> backend.io.memBlock.debug_ls
   memBlock.io.mem_to_ooo.lsTopdownInfo <> backend.io.memBlock.lsTopdownInfo
   memBlock.io.l2_hint.valid := io.l2_hint.valid
