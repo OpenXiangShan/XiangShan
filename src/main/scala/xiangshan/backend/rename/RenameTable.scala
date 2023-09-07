@@ -195,6 +195,7 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
 
     val int_old_pdest = Vec(CommitWidth, Output(UInt(PhyRegIdxWidth.W)))
     val fp_old_pdest = Vec(CommitWidth, Output(UInt(PhyRegIdxWidth.W)))
+    val vec_old_pdest = Vec(CommitWidth, Output(UInt(PhyRegIdxWidth.W)))
     val int_need_free = Vec(CommitWidth, Output(Bool()))
     val snpt = Input(new SnapshotPort)
 
@@ -286,6 +287,7 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   vecRat.io.readPorts <> io.vecReadPorts.flatten
   vecRat.io.redirect := io.redirect
   vecRat.io.snpt := io.snpt
+  io.vec_old_pdest := vecRat.io.old_pdest
 
   //TODO: RM the donTouch
   dontTouch(vecRat.io)
