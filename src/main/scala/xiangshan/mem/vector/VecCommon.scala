@@ -121,7 +121,7 @@ class OnlyVecExuOutput(implicit p: Parameters) extends VLSUBundle {
   val reg_offset = UInt(vOffsetBits.W)
   val exp = Bool()
   val is_first_ele = Bool()
-  val exp_ele_index = UInt(elemIdxBits.W)
+  val exp_ele_index = UInt(elemIdxBits.W) // element index
   val uopQueuePtr = new VluopPtr
 }
 
@@ -217,24 +217,16 @@ object loadDataSize {
     )))}
 }
 
-// object GenVecLoadMask {
-//   def apply (instType: UInt, emul: UInt, eew: UInt, sew: UInt): UInt = {
-//     val mask = Wire(UInt(16.W))
-//     mask := UIntToOH(loadDataSize(instType = instType, emul = emul, eew = eew, sew = sew)) - 1.U
-//     mask
+// object GenVecLoadMask extends VLSUConstants {
+//   def apply(alignedType: UInt, vaddr: UInt): UInt = {
+//     LookupTree(alignedType, List(
+//       "b00".U -> 0x1.U, // b1
+//       "b01".U -> 0x3.U, // b11
+//       "b10".U -> 0xf.U, // b1111
+//       "b11".U -> 0xff.U // b11111111
+//     )) << vaddr(vOffsetBits - 1, 0)
 //   }
 // }
-
-object GenVecLoadMask extends VLSUConstants {
-  def apply(alignedType: UInt, vaddr: UInt): UInt = {
-    LookupTree(alignedType, List(
-      "b00".U -> 0x1.U, // b1
-      "b01".U -> 0x3.U, // b11
-      "b10".U -> 0xf.U, // b1111
-      "b11".U -> 0xff.U // b11111111
-    )) << vaddr(vOffsetBits - 1, 0)
-  }
-}
 
 object storeDataSize {
   def apply (instType: UInt, eew: UInt, sew: UInt): UInt = {
@@ -516,6 +508,28 @@ object GenUSWholeRegVL extends VLSUConstants {
       "b101".U -> (nfields << (log2Up(VLENB) - 1)),
       "b110".U -> (nfields << (log2Up(VLENB) - 2)),
       "b111".U -> (nfields << (log2Up(VLENB) - 3))
+    ))
+  }
+}
+
+object GenUopByteMask {
+  def apply(flowMask: UInt, alignedType: UInt): UInt = {
+    LookupTree(alignedType, List(
+      "b00".U -> flowMask,
+      "b01".U -> FillInterleaved(2, flowMask),
+      "b10".U -> FillInterleaved(4, flowMask),
+      "b11".U -> FillInterleaved(8, flowMask)
+    ))
+  }
+}
+
+object GenFlowMaskInsideReg extends VLSUConstants {
+  def apply(alignedType: UInt, elemIdx: UInt): UInt = {
+    LookupTree(alignedType, List(
+      "b00".U -> UIntToOH(elemIdx(3, 0)),
+      "b01".U -> FillInterleaved(2, UIntToOH(elemIdx(2, 0))),
+      "b10".U -> FillInterleaved(4, UIntToOH(elemIdx(1, 0))),
+      "b11".U -> FillInterleaved(8, UIntToOH(elemIdx(0)))
     ))
   }
 }

@@ -365,8 +365,10 @@ class ExuInput(isVpu: Boolean = false)(implicit p: Parameters) extends XSBundleW
 
 class ExuOutput(isVpu: Boolean = false)(implicit p: Parameters) extends XSBundleWithMicroOp {
   val dataWidth = if (isVpu) VLEN else XLEN
+  val maskWidth = dataWidth / 8
 
   val data = UInt(dataWidth.W)
+  val mask = UInt(maskWidth.W)
   val fflags = UInt(5.W)
   val redirectValid = Bool()
   val redirect = new Redirect
