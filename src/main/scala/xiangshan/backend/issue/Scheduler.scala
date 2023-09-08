@@ -76,6 +76,7 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
     val og0Cancel = Input(ExuVec(backendParams.numExu))
     // Todo: remove this after no cancel signal from og1
     val og1Cancel = Input(ExuVec(backendParams.numExu))
+    val cancelToBusyTable = Vec(backendParams.numExu, Flipped(ValidIO(new CancelSignal)))
     // just be compatible to old code
     def apply(i: Int)(j: Int) = resp(i)(j)
   }
@@ -120,12 +121,12 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
 
   // BusyTable Modules
   val intBusyTable = schdType match {
-    case IntScheduler() | MemScheduler() => Some(Module(new BusyTable(dispatch2Iq.numIntStateRead, wrapper.numIntStateWrite, IntPhyRegs)))
+    case IntScheduler() | MemScheduler() => Some(Module(new BusyTable(dispatch2Iq.numIntStateRead, wrapper.numIntStateWrite, IntPhyRegs, IntWB())))
     case _ => None
   }
 
   val vfBusyTable = schdType match {
-    case VfScheduler() | MemScheduler() => Some(Module(new BusyTable(dispatch2Iq.numVfStateRead, wrapper.numVfStateWrite, VfPhyRegs)))
+    case VfScheduler() | MemScheduler() => Some(Module(new BusyTable(dispatch2Iq.numVfStateRead, wrapper.numVfStateWrite, VfPhyRegs, VfWB())))
     case _ => None
   }
 
@@ -146,6 +147,8 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
         wb.valid := io.intWriteBack(i).wen && io.intWriteBack(i).intWen
         wb.bits := io.intWriteBack(i).addr
       }
+      bt.io.wakeUp := io.fromSchedulers.wakeupVec
+      bt.io.cancel := io.fromDataPath.cancelToBusyTable
     case None =>
   }
 
@@ -159,6 +162,8 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
         wb.valid := io.vfWriteBack(i).wen && (io.vfWriteBack(i).fpWen || io.vfWriteBack(i).vecWen)
         wb.bits := io.vfWriteBack(i).addr
       }
+      bt.io.wakeUp := io.fromSchedulers.wakeupVec
+      bt.io.cancel := io.fromDataPath.cancelToBusyTable
     case None =>
   }
 
@@ -356,6 +361,8 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
       // instead of dispatch2Iq.io.out(x).bits.src*(1)
       stdIQEnq.bits.srcState(0) := staIQEnq.bits.srcState(1)
       stdIQEnq.bits.srcType(0) := staIQEnq.bits.srcType(1)
+      stdIQEnq.bits.dataSource(0) := staIQEnq.bits.dataSource(1)
+      stdIQEnq.bits.l1ExuOH(0) := staIQEnq.bits.l1ExuOH(1)
       stdIQEnq.bits.psrc(0) := staIQEnq.bits.psrc(1)
       stdIQEnq.bits.sqIdx := staIQEnq.bits.sqIdx
     }

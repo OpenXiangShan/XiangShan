@@ -159,6 +159,8 @@ object Bundles {
     val commitType      = CommitType()
     // rename
     val srcState        = Vec(numSrc, SrcState())
+    val dataSource      = Vec(numSrc, DataSource())
+    val l1ExuOH         = Vec(numSrc, ExuVec())
     val psrc            = Vec(numSrc, UInt(PhyRegIdxWidth.W))
     val pdest           = UInt(PhyRegIdxWidth.W)
     val oldPdest        = UInt(PhyRegIdxWidth.W)
@@ -451,7 +453,7 @@ object Bundles {
     val sqIdx = if (params.hasMemAddrFu || params.hasStdFu) Some(new SqPtr) else None
     val lqIdx = if (params.hasMemAddrFu) Some(new LqPtr) else None
     val dataSources = Vec(params.numRegSrc, DataSource())
-    val l1ExuVec = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, ExuVec()))
+    val l1ExuVec = Vec(params.numRegSrc, ExuVec())
     val srcTimer = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, UInt(3.W)))
     val loadDependency = OptionWrapper(params.isIQWakeUpSink, Vec(LoadPipelineWidth, UInt(3.W)))
     val deqPortIdx = OptionWrapper(params.hasLoadFu, UInt(log2Ceil(LoadPipelineWidth).W))
@@ -461,10 +463,10 @@ object Bundles {
     def needCancel(og0CancelVec: Vec[Bool], og1CancelVec: Vec[Bool]) : Bool = {
       if (params.isIQWakeUpSink) {
         require(
-          og0CancelVec.size == l1ExuVec.get.head.size,
+          og0CancelVec.size == l1ExuVec.head.size,
           s"cancelVecSize: {og0: ${og0CancelVec.size}, og1: ${og1CancelVec.size}}"
         )
-        val l1Cancel: Bool = l1ExuVec.get.zip(srcTimer.get).map {
+        val l1Cancel: Bool = l1ExuVec.zip(srcTimer.get).map {
           case(exuOH: Vec[Bool], srcTimer: UInt) =>
             (exuOH.asUInt & og0CancelVec.asUInt).orR && srcTimer === 1.U
         }.reduce(_ | _)
@@ -490,6 +492,7 @@ object Bundles {
       this.isFirstIssue  := source.common.isFirstIssue // Only used by mem debug log
       this.iqIdx         := source.common.iqIdx        // Only used by mem feedback
       this.dataSources   := source.common.dataSources
+      this.l1ExuVec     := source.common.l1ExuVec
       this.rfWen         .foreach(_ := source.common.rfWen.get)
       this.fpWen         .foreach(_ := source.common.fpWen.get)
       this.vecWen        .foreach(_ := source.common.vecWen.get)
@@ -504,7 +507,6 @@ object Bundles {
       this.predictInfo   .foreach(_ := source.common.predictInfo.get)
       this.lqIdx         .foreach(_ := source.common.lqIdx.get)
       this.sqIdx         .foreach(_ := source.common.sqIdx.get)
-      this.l1ExuVec      .foreach(_ := source.common.l1ExuVec.get)
       this.srcTimer      .foreach(_ := source.common.srcTimer.get)
       this.loadDependency.foreach(_ := source.common.loadDependency.get.map(_ << 1))
       this.deqPortIdx    .foreach(_ := source.common.deqPortIdx.get)
@@ -640,6 +642,20 @@ object Bundles {
     def apply()(implicit p: Parameters): Vec[Bool] = Vec(width, Bool())
 
     def width(implicit p: Parameters): Int = p(XSCoreParamsKey).backendParams.numExu
+  }
+
+  class CancelSignal(implicit p: Parameters) extends XSBundle {
+    val rfWen = Bool()
+    val pdest = UInt(PhyRegIdxWidth.W)
+
+    def needCancel(srcType: UInt, psrc: UInt, valid: Bool): Bool = {
+      val pdestMatch = pdest === psrc
+      pdestMatch && (
+        SrcType.isFp(srcType) && !this.rfWen ||
+          SrcType.isXp(srcType) && this.rfWen ||
+          SrcType.isVp(srcType) && !this.rfWen
+        ) && valid
+    }
   }
 
   class MemExuInput(isVector: Boolean = false)(implicit p: Parameters) extends XSBundle {

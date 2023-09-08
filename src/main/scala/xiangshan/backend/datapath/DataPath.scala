@@ -361,6 +361,17 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     og1Cancel := toFlattenExu(i).valid && !toFlattenExu(i).fire
   }
 
+  io.cancelToBusyTable.zipWithIndex.foreach { case (cancel, i) =>
+    cancel.valid := fromFlattenIQ(i).valid && !fromFlattenIQ(i).fire && {
+      if (fromFlattenIQ(i).bits.common.rfWen.isDefined)
+        fromFlattenIQ(i).bits.common.rfWen.get && fromFlattenIQ(i).bits.common.pdest =/= 0.U
+      else
+        true.B
+    }
+    cancel.bits.rfWen := fromFlattenIQ(i).bits.common.rfWen.getOrElse(false.B)
+    cancel.bits.pdest := fromFlattenIQ(i).bits.common.pdest
+  }
+
   for (i <- toExu.indices) {
     for (j <- toExu(i).indices) {
       // s1Reg --[Ctrl]--> exu(s1) ---------- begin
@@ -466,6 +477,8 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
   val og1CancelVec = Output(ExuVec(backendParams.numExu))
 
   val ldCancel = Vec(backendParams.LduCnt, Flipped(new LoadCancelIO))
+
+  val cancelToBusyTable = Vec(backendParams.numExu, ValidIO(new CancelSignal))
 
   val toIntExu: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = intSchdParams.genExuInputBundle
 

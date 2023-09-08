@@ -243,7 +243,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
                                        wakeupEnqSrcStateBypassFromIQ(i)(j)
         enq.bits.status.psrc(j) := s0_enqBits(i).psrc(j)
         enq.bits.status.srcType(j) := s0_enqBits(i).srcType(j)
-        enq.bits.status.dataSources(j).value := Mux(wakeupEnqSrcStateBypassFromIQ(i)(j).asBool, DataSource.forward, DataSource.reg)
+        enq.bits.status.dataSources(j).value := Mux(wakeupEnqSrcStateBypassFromIQ(i)(j).asBool, DataSource.forward, s0_enqBits(i).dataSource(j).value)
       }
       enq.bits.status.fuType := s0_enqBits(i).fuType
       enq.bits.status.robIdx := s0_enqBits(i).robIdx
@@ -258,7 +258,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
             when(wakeUpByIQOH.asUInt.orR) {
               exuOH := Mux1H(wakeUpByIQOH, io.wakeupFromIQ.map(x => MathUtils.IntToOH(x.bits.exuIdx).U(backendParams.numExu.W))).asBools
             }.otherwise {
-              exuOH := 0.U.asTypeOf(exuOH)
+              exuOH := s0_enqBits(i).l1ExuOH(srcIdx)
             }
         }
         case None =>
@@ -269,7 +269,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
             when(wakeUpByIQOH.asUInt.orR) {
               timer := 1.U.asTypeOf(timer)
             }.otherwise {
-              timer := 0.U.asTypeOf(timer)
+              timer := Mux(s0_enqBits(i).dataSource(srcIdx).value === DataSource.bypass, 2.U.asTypeOf(timer), 0.U.asTypeOf(timer))
             }
         }
         case None =>
@@ -465,6 +465,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   }
 
   wakeUpQueues.zipWithIndex.foreach { case (wakeUpQueueOption, i) =>
+    val og0RespEach = io.og0Resp(i)
+    val og1RespEach = io.og1Resp(i)
     wakeUpQueueOption.foreach {
       wakeUpQueue =>
         val flush = Wire(new WakeupQueueFlush)
@@ -508,7 +510,11 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
           source.value
         )
     }
-    deq.bits.common.l1ExuVec.foreach(_ := finalWakeUpL1ExuOH.get(i))
+    if(params.hasIQWakeUp) {
+      deq.bits.common.l1ExuVec := finalWakeUpL1ExuOH.get(i)
+    } else {
+      deq.bits.common.l1ExuVec := deqEntryVec(i).bits.payload.l1ExuOH.take(deq.bits.common.l1ExuVec.length)
+    }
     deq.bits.common.srcTimer.foreach(_ := finalSrcTimer.get(i))
     deq.bits.common.loadDependency.foreach(_ := deqEntryVec(i).bits.status.mergedLoadDependency.get)
     deq.bits.common.deqPortIdx.foreach(_ := i.U)
