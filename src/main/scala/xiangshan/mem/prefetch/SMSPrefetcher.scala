@@ -464,7 +464,7 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   io.s2_pf_gen_req.bits.region_bits := s2_pf_gen_region_bits
   io.s2_pf_gen_req.bits.paddr_valid := s2_paddr_valid
   io.s2_pf_gen_req.bits.decr_mode := s2_pf_gen_decr_mode
-  io.s2_pf_gen_req.valid := s2_pf_gen_valid
+  io.s2_pf_gen_req.valid := false.B
   io.s2_pf_gen_req.bits.debug_source_type := HW_PREFETCH_AGT.U
 
   io.s2_pht_lookup.valid := s2_pht_lookup_valid
