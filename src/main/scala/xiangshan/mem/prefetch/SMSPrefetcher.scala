@@ -455,7 +455,7 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   val s2_pht_lookup_valid = RegNext(s1_pht_lookup_valid, false.B) && !io.s2_stride_hit
   val s2_pht_lookup = RegEnable(s1_pht_lookup, s1_pht_lookup_valid)
 
-  io.s2_evict.valid := s2_evict_valid
+  io.s2_evict.valid := s2_evict_valid && (s2_evict_entry.access_cnt > 1.U)
   io.s2_evict.bits := s2_evict_entry
 
   io.s2_pf_gen_req.bits.region_tag := s2_pf_gen_region_tag
@@ -485,7 +485,8 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
       s1_alloc && s1_replace_mask(i) || s1_update && s1_update_mask(i)
     )
   }
-
+  XSPerfAccumulate("sms_agt_evict", s2_evict_valid)
+  XSPerfAccumulate("sms_agt_evict_one_hot_pattern", s2_evict_valid && (s2_evict_entry.access_cnt === 1.U))
 }
 
 class PhtLookup()(implicit p: Parameters) extends XSBundle with HasSMSModuleHelper {
