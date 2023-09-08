@@ -201,24 +201,30 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
     val state = ValidIO(new RobExceptionInfo)
   })
 
-  def getOldest(valid: Seq[Bool], bits: Seq[RobExceptionInfo]): (Seq[Bool], Seq[RobExceptionInfo]) = {
-    assert(valid.length == bits.length)
-    if (valid.length == 1) {
-      (valid, bits)
-    } else if (valid.length == 2) {
-      val res = Seq.fill(2)(Wire(ValidIO(chiselTypeOf(bits(0)))))
-      for (i <- res.indices) {
-        res(i).valid := valid(i)
-        res(i).bits := bits(i)
+  val wbExuParams = params.allExuParams.filter(_.exceptionOut.nonEmpty)
+
+  def getOldest(valid: Seq[Bool], bits: Seq[RobExceptionInfo]): RobExceptionInfo = {
+    def getOldest_recursion(valid: Seq[Bool], bits: Seq[RobExceptionInfo]): (Seq[Bool], Seq[RobExceptionInfo]) = {
+      assert(valid.length == bits.length)
+      if (valid.length == 1) {
+        (valid, bits)
+      } else if (valid.length == 2) {
+        val res = Seq.fill(2)(Wire(ValidIO(chiselTypeOf(bits(0)))))
+        for (i <- res.indices) {
+          res(i).valid := valid(i)
+          res(i).bits := bits(i)
+        }
+        val oldest = Mux(!valid(1) || valid(0) && isAfter(bits(1).robIdx, bits(0).robIdx), res(0), res(1))
+        (Seq(oldest.valid), Seq(oldest.bits))
+      } else {
+        val left = getOldest_recursion(valid.take(valid.length / 2), bits.take(valid.length / 2))
+        val right = getOldest_recursion(valid.drop(valid.length / 2), bits.drop(valid.length / 2))
+        getOldest_recursion(left._1 ++ right._1, left._2 ++ right._2)
       }
-      val oldest = Mux(!valid(1) || valid(0) && isAfter(bits(1).robIdx, bits(0).robIdx), res(0), res(1))
-      (Seq(oldest.valid), Seq(oldest.bits))
-    } else {
-      val left = getOldest(valid.take(valid.length / 2), bits.take(valid.length / 2))
-      val right = getOldest(valid.drop(valid.length / 2), bits.drop(valid.length / 2))
-      getOldest(left._1 ++ right._1, left._2 ++ right._2)
     }
+    getOldest_recursion(valid, bits)._2.head
   }
+
 
   val currentValid = RegInit(false.B)
   val current = Reg(new RobExceptionInfo)
@@ -226,16 +232,28 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
   // orR the exceptionVec
   val lastCycleFlush = RegNext(io.flush)
   val in_enq_valid = VecInit(io.enq.map(e => e.valid && e.bits.has_exception && !lastCycleFlush))
-  val in_wb_valid = io.wb.map(w => w.valid && w.bits.has_exception && !lastCycleFlush)
 
-  // TODO: s0,s1 need retiming
-  val wb_valid = in_wb_valid.zip(io.wb.map(_.bits)).map{ case (v, bits) => v && !(bits.robIdx.needFlush(io.redirect) || io.flush) }
-  val oldest = getOldest(wb_valid, io.wb.map(_.bits))
-  val s0_out_valid = RegNext(oldest._1(0))
-  val s0_out_bits = RegNext(oldest._2(0))
+  // s0: compare wb in 4 groups
+  val csrvldu_wb = io.wb.zip(wbExuParams).filter(_._2.fuConfigs.filter(t => t.isCsr || t.fuType == FuType.vldu).nonEmpty).map(_._1)
+  val load_wb = io.wb.zip(wbExuParams).filter(_._2.fuConfigs.filter(_.fuType == FuType.ldu).nonEmpty).map(_._1)
+  val store_wb = io.wb.zip(wbExuParams).filter(_._2.fuConfigs.filter(t => t.isSta || t.fuType == FuType.mou).nonEmpty).map(_._1)
+  val varith_wb = io.wb.zip(wbExuParams).filter(_._2.fuConfigs.filter(_.isVecArith).nonEmpty).map(_._1)
+  // TODO: vsta_wb = ???
 
-  val s1_out_bits = RegNext(s0_out_bits)
-  val s1_out_valid = RegNext(s0_out_valid && (!s0_out_bits.robIdx.needFlush(io.redirect) || io.flush))
+  val writebacks = Seq(csrvldu_wb, load_wb, store_wb, varith_wb)
+  val in_wb_valids = writebacks.map(_.map(w => w.valid && w.bits.has_exception && !lastCycleFlush))
+  val wb_valid = in_wb_valids.zip(writebacks).map { case (valid, wb) =>
+    valid.zip(wb.map(_.bits)).map { case (v, bits) => v && !(bits.robIdx.needFlush(io.redirect) || io.flush) }.reduce(_ || _)
+  }
+  val wb_bits = in_wb_valids.zip(writebacks).map { case (valid, wb) => getOldest(valid, wb.map(_.bits))}
+
+  val s0_out_valid = wb_valid.map(x => RegNext(x))
+  val s0_out_bits = wb_bits.map(x => RegNext(x))
+
+  // s1: compare last four and current flush
+  val s1_valid = VecInit(s0_out_valid.zip(s0_out_bits).map{ case (v, b) => v && !(b.robIdx.needFlush(io.redirect) || io.flush) })
+  val s1_out_bits = RegNext(getOldest(s0_out_valid, s0_out_bits))
+  val s1_out_valid = RegNext(s1_valid.asUInt.orR)
 
   val enq_valid = RegNext(in_enq_valid.asUInt.orR && !io.redirect.valid && !io.flush)
   val enq_bits = RegNext(ParallelPriorityMux(in_enq_valid, io.enq.map(_.bits)))
