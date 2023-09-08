@@ -151,6 +151,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   private val og0CancelVecFromCancelNet: Vec[Bool] = cancelNetwork.io.out.og0CancelVec
   private val og0CancelVecFromFinalIssue: Vec[Bool] = Wire(chiselTypeOf(dataPath.io.og0CancelVec))
   private val og0CancelVec: Seq[Bool] = og0CancelVecFromDataPath.zip(og0CancelVecFromCancelNet).zip(og0CancelVecFromFinalIssue).map(x => x._1._1 | x._1._2 | x._2)
+  private val cancelToBusyTable = dataPath.io.cancelToBusyTable
 
   ctrlBlock.io.fromTop.hartId := io.fromTop.hartId
   ctrlBlock.io.frontend <> io.frontend
@@ -178,6 +179,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   intScheduler.io.fromDataPath.og0Cancel := og0CancelVec
   intScheduler.io.fromDataPath.og1Cancel := og1CancelVec
   intScheduler.io.ldCancel := io.mem.ldCancel
+  intScheduler.io.fromDataPath.cancelToBusyTable := cancelToBusyTable
 
   memScheduler.io.fromTop.hartId := io.fromTop.hartId
   memScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
@@ -202,6 +204,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   memScheduler.io.fromDataPath.og0Cancel := og0CancelVec
   memScheduler.io.fromDataPath.og1Cancel := og1CancelVec
   memScheduler.io.ldCancel := io.mem.ldCancel
+  memScheduler.io.fromDataPath.cancelToBusyTable := cancelToBusyTable
 
   vfScheduler.io.fromTop.hartId := io.fromTop.hartId
   vfScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
@@ -214,6 +217,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   vfScheduler.io.fromDataPath.og0Cancel := og0CancelVec
   vfScheduler.io.fromDataPath.og1Cancel := og1CancelVec
   vfScheduler.io.ldCancel := io.mem.ldCancel
+  vfScheduler.io.fromDataPath.cancelToBusyTable := cancelToBusyTable
 
   cancelNetwork.io.in.int <> intScheduler.io.toDataPath
   cancelNetwork.io.in.vf  <> vfScheduler.io.toDataPath
