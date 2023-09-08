@@ -1275,13 +1275,13 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       difftest.coreid  := io.hartId
       difftest.index   := i.U
       difftest.valid   := io.commits.commitValid(i) && io.commits.isCommit
-      difftest.special := CommitType.isFused(commitInfo.commitType)
       difftest.skip    := Mux(eliminatedMove, false.B, exuOut.isMMIO || exuOut.isPerfCnt)
       difftest.isRVC   := isRVC
       difftest.rfwen   := io.commits.commitValid(i) && commitInfo.rfWen && commitInfo.ldest =/= 0.U
       difftest.fpwen   := io.commits.commitValid(i) && commitInfo.fpWen
       difftest.wpdest  := commitInfo.pdest
       difftest.wdest   := commitInfo.ldest
+      difftest.nFused  := Mux(CommitType.isFused(commitInfo.commitType), 1.U, 0.U)
 
       if (env.EnableDifftest) {
         val uop = commitDebugUop(i)
