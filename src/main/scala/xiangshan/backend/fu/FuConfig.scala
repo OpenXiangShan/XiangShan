@@ -155,6 +155,13 @@ case class FuConfig (
 
   def isFence: Boolean = fuType == FuType.fence
 
+  def isVecArith: Boolean = fuType == FuType.vialuF || fuType == FuType.vimac ||
+                            fuType == FuType.vppu || fuType == FuType.vipu ||
+                            fuType == FuType.vfalu || fuType == FuType.vfma ||
+                            fuType == FuType.vfdiv
+
+  def isSta: Boolean = name.contains("sta")
+
   /**
     * Get index of special src data, like [[VConfigData]], [[MaskSrcData]]
     * @param data [[DataConfig]]
@@ -432,8 +439,7 @@ object FuConfig {
       Seq(FpData()),
     ),
     piped = true,
-    latency = CertainLatency(0),
-    exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault)
+    latency = CertainLatency(0)
   )
 
   val MouCfg: FuConfig = FuConfig (

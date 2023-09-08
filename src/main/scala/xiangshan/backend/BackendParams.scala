@@ -99,7 +99,7 @@ case class BackendParams(
   }
 
   def genWrite2CtrlBundles(implicit p: Parameters): MixedVec[ValidIO[ExuOutput]] = {
-    MixedVec(allSchdParams.map(_.genExuOutputValidBundle.flatten).reduce(_ ++ _))
+    MixedVec(allSchdParams.map(_.genExuOutputValidBundle.flatten).flatten)
   }
 
   def getIntWbArbiterParams: WbArbiterParams = {
