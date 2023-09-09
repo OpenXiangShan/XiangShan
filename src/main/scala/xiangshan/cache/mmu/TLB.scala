@@ -329,7 +329,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       if (!Seq("itlb", "ldtlb", "sttlb").contains(q.name)) {
         difftest.valid := false.B
       }
-      difftest.index := TLBDiffId().U
+      difftest.index := TLBDiffId(p(XSCoreParamsKey).HartId).U
       difftest.satp := io.csr.satp.ppn
       difftest.vpn := RegNext(get_pn(req_in(i).bits.vaddr))
       difftest.ppn := get_pn(io.requestor(i).resp.bits.paddr(0))
@@ -339,7 +339,12 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
 object TLBDiffId {
   var i: Int = 0
-  def apply(): Int = {
+  var lastHartId: Int = -1
+  def apply(hartId: Int): Int = {
+    if (lastHartId != hartId) {
+      i = 0
+      lastHartId = hartId
+    }
     i += 1
     i - 1
   }
