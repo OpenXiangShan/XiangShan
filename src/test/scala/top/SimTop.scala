@@ -128,5 +128,6 @@ object SimTop extends App {
     ChiselDB.addToFileRegisters
     Constantin.addToFileRegisters
     FileRegisters.write(fileDir = "./build")
+    DifftestModule.finish("XiangShan")
   }
 }

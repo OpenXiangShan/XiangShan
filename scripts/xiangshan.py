@@ -74,7 +74,7 @@ class XSArgs(object):
         self.threads = args.threads
         self.with_dramsim3 = 1 if args.with_dramsim3 else None
         self.is_release = 1 if args.release else None
-        self.is_spike = "spike" if args.spike else None
+        self.is_spike = "Spike" if args.spike else None
         self.trace = 1 if args.trace or not args.disable_fork and not args.trace_fst else None
         self.trace_fst = "fst" if args.trace_fst else None
         self.config = args.config
