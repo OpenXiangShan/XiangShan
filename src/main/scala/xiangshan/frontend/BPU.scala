@@ -476,8 +476,9 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     )
   )
 
-
-  for (((npcGen, s1_valid), s1_target) <- npcGen_dup zip s1_valid_dup zip resp.s1.getTarget)
+  val jA_s1_target_valid = RegNext(io.ftq_to_bpu.jA_r_hit) && io.ftq_to_bpu.jA_r_hit
+  val jA_s1_target_data = RegEnable(VecInit(Seq.fill(numDup)(io.ftq_to_bpu.jA_r_endpc)), VecInit(Seq.fill(numDup)(0.U(VAddrBits.W))), io.ftq_to_bpu.jA_r_hit)
+  for (((npcGen, s1_valid), s1_target) <- npcGen_dup zip s1_valid_dup zip (Mux(jA_s1_target_valid, jA_s1_target_data, resp.s1.getTarget)))
     npcGen.register(s1_valid, s1_target, Some("s1_target"), 4)
   for (((foldedGhGen, s1_valid), s1_predicted_fh) <- foldedGhGen_dup zip s1_valid_dup zip s1_predicted_fh_dup)
     foldedGhGen.register(s1_valid, s1_predicted_fh, Some("s1_FGH"), 4)
