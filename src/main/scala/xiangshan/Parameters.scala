@@ -125,6 +125,8 @@ case class XSCoreParameters
 
       (preds, ras.io.out)
     }),
+  JABlockNumWidth: Int = 5,
+  JAMinBlockNum: Int = 3, // > 3  
   IBufSize: Int = 48,
   DecodeWidth: Int = 6,
   RenameWidth: Int = 6,
@@ -365,6 +367,8 @@ trait HasXSParameter {
   val FtbSize = coreParams.FtbSize
   val FtbWays = coreParams.FtbWays
   val RasSize = coreParams.RasSize
+  val JABlockNumWidth = coreParams.JABlockNumWidth
+  val JAMinBlockNum = coreParams.JAMinBlockNum
 
   def getBPDComponents(resp_in: BranchPredictionResp, p: Parameters) = {
     coreParams.branchPredictor(resp_in, p)
