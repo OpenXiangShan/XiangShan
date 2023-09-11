@@ -398,8 +398,8 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
                           else 0.U })
     this.perm.apply(item.s1)
 
-    this.pteidx := Mux(item.s2xlate === noS2xlate || item.s2xlate === onlyStage1, item.s1.pteidx, UIntToOH(item.s2.entry.tag(sectortlbwidth - 1, 0)))
-    this.valididx := Mux(item.s2xlate === noS2xlate || item.s2xlate === onlyStage1, item.s1.valididx, OHToUInt(this.pteidx))
+    this.pteidx := Mux(item.s2xlate === noS2xlate || item.s2xlate === onlyStage1, item.s1.pteidx, VecInit(UIntToOH(item.s2.entry.tag(sectortlbwidth - 1, 0)).asBools))
+    this.valididx := Mux(item.s2xlate === noS2xlate || item.s2xlate === onlyStage1, item.s1.valididx, item.s1.pteidx)
 
     val s1tag = {if (pageNormal) item.s1.entry.tag else item.s1.entry.tag(sectorvpnLen - 1, vpnnLen - sectortlbwidth)}
     val s2tag = {if (pageNormal) item.s2.entry.tag else item.s2.entry.tag(sectorvpnLen - 1, vpnnLen - sectortlbwidth)}

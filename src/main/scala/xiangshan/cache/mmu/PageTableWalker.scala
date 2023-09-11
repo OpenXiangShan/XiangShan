@@ -85,9 +85,9 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val sfence = io.sfence
   val mem = io.mem
   val req_s2xlate = Reg(UInt(2.W))
-  val enableS2xlate = RegInit(false.B)
-  val onlyS1xlate = RegInit(false.B)
-  val onlyS2xlate = RegInit(false.B)
+  val enableS2xlate = io.req.bits.req_info.s2xlate =/= noS2xlate
+  val onlyS1xlate = io.req.bits.req_info.s2xlate === onlyStage1
+  val onlyS2xlate = io.req.bits.req_info.s2xlate === onlyStage2
 
   val satp = Mux(enableS2xlate, io.csr.vsatp, io.csr.satp)
   val hgatp = io.csr.hgatp
@@ -177,15 +177,12 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     af_level := Mux(req.l1Hit, 1.U, 0.U)
     ppn := Mux(req.l1Hit, io.req.bits.ppn, satp.ppn)
     vpn := io.req.bits.req_info.vpn
-    enableS2xlate := io.req.bits.req_info.s2xlate =/= noS2xlate
-    onlyS1xlate := io.req.bits.req_info.s2xlate === onlyS1xlate
-    onlyS2xlate := io.req.bits.req_info.s2xlate === onlyS2xlate
     l1Hit := req.l1Hit
     accessFault := false.B
     s_pmp_check := false.B
     idle := false.B
     hptw_pageFault := false.B
-    s2xlate := io.req.bits.req_info.s2xlate
+    req_s2xlate := io.req.bits.req_info.s2xlate
     when(io.req.bits.req_info.s2xlate =/= noS2xlate && io.req.bits.req_info.s2xlate =/= onlyStage1){
       last_s2xlate := true.B
       s_hptw_req := false.B
@@ -652,7 +649,7 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val l1Hit = Reg(Bool())
   val l2Hit = Reg(Bool())
   val ppn = Reg(UInt(ppnLen.W))
-  val pg_base = MakeAddr(hgatp.ppn, getGVpnn(vpn, 2.U))
+  val pg_base = MakeGAddr(hgatp.ppn, getGVpnn(vpn, 2.U))
 //  val pte = io.mem.resp.bits.MergeRespToPte()
   val pte = io.mem.resp.bits.asTypeOf(new PteBundle().cloneType)
   val p_pte = MakeAddr(ppn, getVpnn(vpn, 2.U - level))

@@ -548,7 +548,9 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   val tlb_req_flushed = reqs.map(a => io.ptw.resp.valid && ptwResp_hit(a.bits.vpn, a.bits.s2xlate, io.ptw.resp.bits))
 
   io.tlb.resp.valid := ptwResp_valid
-  io.tlb.resp.bits.data := ptwResp
+  io.tlb.resp.bits.data.s2xlate := ptwResp.s2xlate
+  io.tlb.resp.bits.data.s1 := ptwResp.s1
+  io.tlb.resp.bits.data.s2 := ptwResp.s2
   io.tlb.resp.bits.data.memidx := memidx(OHToUInt(ptwResp_OldMatchVec))
   io.tlb.resp.bits.vector := resp_vector
 

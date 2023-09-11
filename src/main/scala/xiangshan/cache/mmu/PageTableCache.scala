@@ -664,7 +664,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
   // sfence for not-virtualization for l3、l2
   val sfence_valid_l3 = sfence_dup(3).valid && !sfence_dup(3).bits.hg && !sfence_dup(3).bits.hv
-  when (sfence_valid_l3 && io.csr_dup(3).priv.virt === false.B) {
+  when (sfence_valid_l3 && io.csr_dup(2).priv.virt === false.B) {
     val sfence_vpn = sfence_dup(3).bits.addr(sfence_dup(3).bits.addr.getWidth-1, offLen)
     when (sfence_dup(3).bits.rs1/*va*/) {
       when (sfence_dup(3).bits.rs2) {
@@ -694,7 +694,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
   // sfence for virtualization and hfencev, simple implementation for l3、l2
   val hfencev_valid_l3 = sfence_dup(3).valid && sfence_dup(3).bits.hv
-  when((hfencev_valid_l3 && io.csr_dup(3).priv.virt) || hfencev_valid_l3) {
+  when((hfencev_valid_l3 && io.csr_dup(2).priv.virt) || hfencev_valid_l3) {
     val flushMask = VecInit(l3h.flatMap(_.map(_  === onlyStage1))).asUInt
     l3v := l3v & ~flushMask // all VS-stage l3 pte
   }
