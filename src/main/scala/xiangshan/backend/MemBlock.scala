@@ -395,8 +395,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   for (i <- 0 until LduCnt) {
     loadUnits(i).io.redirect <> redirect
     // send feedback to dispatch
-    loadUnits(i).io.feedbackSlow <> io.ldaIqFeedback(i).feedbackSlow
-    loadUnits(i).io.feedbackFast <> io.ldaIqFeedback(i).feedbackFast
+    loadUnits(i).io.feedback_slow <> io.ldaIqFeedback(i).feedbackSlow
+    loadUnits(i).io.feedback_fast <> io.ldaIqFeedback(i).feedbackFast
     io.ldCancel(i) := loadUnits(i).io.ldCancel
 
     // fast replay

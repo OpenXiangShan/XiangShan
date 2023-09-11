@@ -25,7 +25,7 @@ import utils._
 import xiangshan.ExceptionNO._
 import xiangshan._
 import xiangshan.backend.Bundles.{DecodedInst, DynInst, ExceptionInfo, ExuOutput}
-import xiangshan.backend.ctrlblock.{DebugLsInfoBundle, LsTopdownInfo, MemCtrl, RedirectGenerator}
+import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfoBundle, LsTopdownInfo, MemCtrl, RedirectGenerator}
 import xiangshan.backend.datapath.DataConfig.VAddrData
 import xiangshan.backend.decode.{DecodeStage, FusionDecoder}
 import xiangshan.backend.dispatch.{Dispatch, DispatchQueue}
@@ -520,7 +520,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val exception = ValidIO(new ExceptionInfo)
     val lsq = new RobLsqIO
     val lsTopdownInfo = Vec(params.LduCnt, Input(new LsTopdownInfo))
-    val debug_ls = Input(new DebugLsInfoBundle)
+    val debug_ls = Input(new DebugLSIO())
     val robHeadLsIssue = Input(Bool())
     val robDeqPtr = Output(new RobPtr)
   }

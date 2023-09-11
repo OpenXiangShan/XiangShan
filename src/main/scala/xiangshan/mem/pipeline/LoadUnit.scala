@@ -134,6 +134,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // rs feedback
     val feedback_fast = ValidIO(new RSFeedback) // stage 2
     val feedback_slow = ValidIO(new RSFeedback) // stage 3
+    val ldCancel = Output(new LoadCancelIO()) // use to cancel the uops waked by this load, and cancel load
 
     // load ecc error
     val s3_dly_ld_err = Output(Bool()) // Note that io.s3_dly_ld_err and io.lsq.s3_dly_ld_err is different
@@ -180,6 +181,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s0_ld_rep        = Wire(Bool())
   val s0_l2l_fwd       = Wire(Bool())
   val s0_sched_idx     = Wire(UInt())
+  // Record the issue port idx of load issue queue. This signal is used by load cancel.
   val s0_deqPortIdx    = Wire(UInt(log2Ceil(LoadPipelineWidth).W))
   val s0_can_go        = s1_ready
   val s0_fire          = s0_valid && s0_can_go
@@ -410,7 +412,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s0_prf_rd        := !src.is_store
     s0_prf_wr        := src.is_store
     s0_sched_idx     := 0.U
-    s0_deqPortIdx    := src.deqPortIdx
+    s0_deqPortIdx    := 0.U
   }
 
   def fromIntIssueSource(src: MemExuInput) = {
@@ -462,7 +464,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // Assume the pointer chasing is always ld.
     s0_uop.fuOpType       := LSUOpType.ld
     s0_try_l2l            := s0_l2l_fwd_select
-    // we dont care s0_isFirstIssue and s0_rsIdx and s0_sqIdx in S0 when trying pointchasing
+    // we dont care s0_isFirstIssue and s0_rsIdx and s0_sqIdx and s0_deqPortIdx in S0 when trying pointchasing
     // because these signals will be updated in S1
     s0_has_rob_entry      := false.B
     s0_sqIdx              := DontCare
@@ -477,7 +479,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s0_prf_rd             := false.B
     s0_prf_wr             := false.B
     s0_sched_idx          := 0.U
-    s0_deqPortIdx         := src.deqPortIdx
+    s0_deqPortIdx         := 0.U
   }
 
   // set default
@@ -690,6 +692,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       s1_in.uop           := io.ldin.bits.uop
       s1_in.rsIdx         := io.ldin.bits.iqIdx
       s1_in.isFirstIssue  := io.ldin.bits.isFirstIssue
+      s1_in.deqPortIdx    := io.ldin.bits.deqPortIdx
       s1_vaddr_lo         := Cat(s1_ptr_chasing_vaddr(5, 3), 0.U(3.W))
       s1_paddr_dup_lsu    := Cat(io.tlb.resp.bits.paddr(0)(PAddrBits - 1, 6), s1_ptr_chasing_vaddr(5, 3), 0.U(3.W))
       s1_paddr_dup_dcache := Cat(io.tlb.resp.bits.paddr(0)(PAddrBits - 1, 6), s1_ptr_chasing_vaddr(5, 3), 0.U(3.W))
@@ -914,6 +917,14 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.feedback_fast.bits.sourceType       := RSFeedbackType.lrqFull
   io.feedback_fast.bits.dataInvalidSqIdx := DontCare
 
+  io.ldCancel.ld1Cancel.valid := s2_valid &&                 // inst is valid
+                                 !s2_in.isLoadReplay &&      // already feedbacked
+                                 io.lq_rep_full &&           // LoadQueueReplay is full
+                                 s2_out.rep_info.need_rep && // need replay
+                                 !s2_exception &&            // no exception is triggered
+                                 !s2_hw_prf                  // not hardware prefetch
+  io.ldCancel.ld1Cancel.bits := s2_out.deqPortIdx
+
   // fast wakeup
   io.fast_uop.valid := RegNext(
     !io.dcache.s1_disable_fast_wakeup &&
@@ -1041,12 +1052,13 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.feedback_slow.valid                 := s3_valid && !s3_in.uop.robIdx.needFlush(io.redirect) && s3_fb_no_waiting
   io.feedback_slow.bits.hit              := !io.lsq.ldin.bits.rep_info.need_rep || io.lsq.ldin.ready
   io.feedback_slow.bits.flushState       := s3_in.ptwBack
-  io.feedback_slow.bits.robIdx            := s3_in.uop.robIdx
+  io.feedback_slow.bits.robIdx           := s3_in.uop.robIdx
   io.feedback_slow.bits.sourceType       := RSFeedbackType.lrqFull
   io.feedback_slow.bits.dataInvalidSqIdx := DontCare
 
-  io.ldCancel.ld2Cancel.valid := s3_loadOutValid && !s3_loadOutBits.uop.robIdx.needFlush(io.redirect) && !s3_loadOutBits.isLoadReplay && !io.feedbackSlow.bits.hit
-  io.ldCancel.ld2Cancel.bits := s3_loadOutBits.deqPortIdx
+  val slowHit = !io.lsq.ldin.bits.rep_info.need_rep || io.lsq.ldin.ready
+  io.ldCancel.ld2Cancel.valid := s3_valid && !s3_in.uop.robIdx.needFlush(io.redirect) && s3_fb_no_waiting && !slowHit
+  io.ldCancel.ld2Cancel.bits := s3_in.deqPortIdx
 
   val s3_ld_wb_meta = Mux(s3_out.valid, s3_out.bits, io.lsq.uncache.bits)
   // data from load queue refill
