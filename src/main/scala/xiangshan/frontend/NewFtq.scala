@@ -1230,6 +1230,45 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   //   update.full_pred.targets.last := commit_target
   // }
 
+  // *** jump ahead write ***
+  val jA_w_blockNum = RegInit(0.U(JABlockNumWidth.W))
+  val jA_w_pending = RegInit(0.B)
+  val jA_w_tgtpc    = RegInit(0.U(VAddrBits.W))
+  val real_tk_or_jmp = update.jmp_taken || update.br_taken_mask.reduce(_||_)
+  val have_br_or_jmp = commitIsBranchQueue(RegNext(commPtr.value)).reduce(_||_) //update_ftb_entry.brValids.reduce(_|_) || update_ftb_entry.jmpValid
+  jATable.io.wen := false.B
+  jATable.io.w_tgtpc := jA_w_tgtpc
+  jATable.io.w_endpc := update.pc
+  jATable.io.w_blckN := jA_w_blockNum
+  when(do_commit){ // new commit
+    when(jA_w_pending){ // JA has start
+      when(!have_br_or_jmp){ // blocks need to jump over
+        jA_w_blockNum := jA_w_blockNum + 1.U
+      }
+      .otherwise{ // JA end
+        JA_w_end
+        when(real_tk_or_jmp){ JA_w_start }
+      }
+    }.otherwise{ // JA start
+      when(real_tk_or_jmp){ JA_w_start }
+    }
+  }
+
+  def JA_w_start: Unit = {
+    jA_w_pending := true.B
+    jA_w_tgtpc := update.full_target
+    jA_w_blockNum := 0.U
+  }
+
+  def JA_w_end: Unit = {
+    jA_w_pending := false.B
+    when(jA_w_blockNum >= JAMinBlockNum.U){ jATable.io.wen := true.B }
+  }
+
+  // jump ahead assert
+  when(do_commit && jA_w_pending && (jA_w_blockNum === 0.U)){ assert(jA_w_tgtpc === update.pc) } // committing block after BrBlock IS TargetBlock
+
+
   // ****************************************************************
   // *********************** to prefetch ****************************
   // ****************************************************************
