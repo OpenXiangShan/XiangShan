@@ -48,12 +48,12 @@ trait HasXSDts {
       )
 
       val dtlb = Map(
-        "d-tlb-size" -> Nil,
+        "d-tlb-size" -> (ldtlbParams.NSets * ldtlbParams.NWays).asProperty,
         "d-tlb-sets" -> 1.asProperty
       )
 
       val itlb = Map(
-        "i-tlb-size" -> Nil,
+        "i-tlb-size" -> (itlbParams.NSets * itlbParams.NWays).asProperty,
         "i-tlb-sets" -> 1.asProperty
       )
 
