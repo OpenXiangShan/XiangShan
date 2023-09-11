@@ -158,12 +158,16 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   ctrlBlock.io.fromWB.wbData <> wbDataPath.io.toCtrlBlock.writeback
   ctrlBlock.io.fromMem.stIn <> io.mem.stIn
   ctrlBlock.io.fromMem.violation <> io.mem.memoryViolation
+  ctrlBlock.io.lqCanAccept := io.mem.lqCanAccept
+  ctrlBlock.io.sqCanAccept := io.mem.sqCanAccept
   ctrlBlock.io.csrCtrl <> intExuBlock.io.csrio.get.customCtrl
   ctrlBlock.io.robio.csr.intrBitSet := intExuBlock.io.csrio.get.interrupt
   ctrlBlock.io.robio.csr.trapTarget := intExuBlock.io.csrio.get.trapTarget
   ctrlBlock.io.robio.csr.isXRet := intExuBlock.io.csrio.get.isXRet
   ctrlBlock.io.robio.csr.wfiEvent := intExuBlock.io.csrio.get.wfi_event
   ctrlBlock.io.robio.lsq <> io.mem.robLsqIO
+  ctrlBlock.io.robio.lsTopdownInfo <> io.mem.lsTopdownInfo
+  ctrlBlock.io.robio.debug_ls <> io.mem.debugLS
   ctrlBlock.io.fromDataPath.vtype := vconfig(7, 0).asTypeOf(new VType)
 
   intScheduler.io.fromTop.hartId := io.fromTop.hartId
@@ -383,6 +387,9 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     ctrlBlock.io.memLdPcRead(i).ptr := loadPcRead.ptr
     ctrlBlock.io.memLdPcRead(i).offset := loadPcRead.offset
   }
+
+  ctrlBlock.io.robio.robHeadLsIssue := io.mem.issueUops.map(deq => deq.fire && deq.bits.uop.robIdx === ctrlBlock.io.robio.robDeqPtr).reduce(_ || _)
+
   // mem io
   io.mem.lsqEnqIO <> memScheduler.io.memIO.get.lsqEnqIO
   io.mem.robLsqIO <> ctrlBlock.io.robio.lsq
@@ -425,6 +432,9 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
 
   val lqCancelCnt = Input(UInt(log2Up(VirtualLoadQueueSize + 1).W))
   val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))
+
+  val lqCanAccept = Input(Bool())
+  val sqCanAccept = Input(Bool())
 
   val otherFastWakeup = Flipped(Vec(params.LduCnt + 2 * params.StaCnt, ValidIO(new DynInst)))
   val stIssuePtr = Input(new SqPtr())

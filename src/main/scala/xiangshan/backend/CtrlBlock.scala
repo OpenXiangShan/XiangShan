@@ -25,7 +25,7 @@ import utils._
 import xiangshan.ExceptionNO._
 import xiangshan._
 import xiangshan.backend.Bundles.{DecodedInst, DynInst, ExceptionInfo, ExuOutput}
-import xiangshan.backend.ctrlblock.{LsTopdownInfo, MemCtrl, RedirectGenerator}
+import xiangshan.backend.ctrlblock.{DebugLsInfoBundle, LsTopdownInfo, MemCtrl, RedirectGenerator}
 import xiangshan.backend.datapath.DataConfig.VAddrData
 import xiangshan.backend.decode.{DecodeStage, FusionDecoder}
 import xiangshan.backend.dispatch.{Dispatch, DispatchQueue}
@@ -452,11 +452,10 @@ class CtrlBlockImp(
   io.debug_vec_rat := rat.io.diff_vec_rat
   io.debug_vconfig_rat := rat.io.diff_vconfig_rat
 
-  // Todo: merge
-//  rob.io.debug_ls := io.robio.debug_ls
-//  rob.io.debugHeadLsIssue := io.robHeadLsIssue
-//  rob.io.lsTopdownInfo := io.robio.lsTopdownInfo
-//  io.robDeqPtr := rob.io.robDeqPtr
+  rob.io.debug_ls := io.robio.debug_ls
+  rob.io.debugHeadLsIssue := io.robio.robHeadLsIssue
+  rob.io.lsTopdownInfo := io.robio.lsTopdownInfo
+  io.robio.robDeqPtr := rob.io.robDeqPtr
 
   io.perfInfo.ctrlInfo.robFull := RegNext(rob.io.robFull)
   io.perfInfo.ctrlInfo.intdqFull := RegNext(intDq.io.dqFull)
@@ -520,6 +519,10 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val csr = new RobCSRIO
     val exception = ValidIO(new ExceptionInfo)
     val lsq = new RobLsqIO
+    val lsTopdownInfo = Vec(params.LduCnt, Input(new LsTopdownInfo))
+    val debug_ls = Input(new DebugLsInfoBundle)
+    val robHeadLsIssue = Input(Bool())
+    val robDeqPtr = Output(new RobPtr)
   }
 
   val perfInfo = Output(new Bundle{
@@ -535,12 +538,8 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   val debug_vec_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
   val debug_vconfig_rat = Output(UInt(PhyRegIdxWidth.W)) // TODO: use me
 
-  // Todo: add these
   val sqCanAccept = Input(Bool())
   val lqCanAccept = Input(Bool())
-  val lsTopdownInfo = Vec(params.LduCnt, Input(new LsTopdownInfo))
-  val robDeqPtr = Output(new RobPtr)
-  val robHeadLsIssue = Input(Bool())
 }
 
 class NamedIndexes(namedCnt: Seq[(String, Int)]) {
