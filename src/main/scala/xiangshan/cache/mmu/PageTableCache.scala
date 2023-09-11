@@ -540,7 +540,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val wdata = Wire(l2EntryType)
     wdata.gen(
       vpn = refill.req_info_dup(1).vpn,
-      asid = Mux(refill.req_info_dup(1).s2xlate(0).asBool(), io.csr_dup(1).vsatp.asid, io.csr_dup(1).satp.asid),
+      asid = Mux(refill.req_info_dup(1).s2xlate =/= noS2xlate, io.csr_dup(1).vsatp.asid, io.csr_dup(1).satp.asid),
       vmid = io.csr_dup(1).hgatp.asid,
       data = memRdata,
       levelUInt = 1.U,
@@ -580,7 +580,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val wdata = Wire(l3EntryType)
     wdata.gen(
       vpn =  refill.req_info_dup(2).vpn,
-      asid = Mux(refill.req_info_dup(2).s2xlate(0).asBool(), io.csr_dup(2).vsatp.asid, io.csr_dup(2).satp.asid),
+      asid = Mux(refill.req_info_dup(2).s2xlate =/= noS2xlate, io.csr_dup(2).vsatp.asid, io.csr_dup(2).satp.asid),
       vmid = io.csr_dup(2).hgatp.asid,
       data = memRdata,
       levelUInt = 2.U,
@@ -695,14 +695,14 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   // sfence for virtualization and hfencev, simple implementation for l3、l2
   val hfencev_valid_l3 = sfence_dup(3).valid && sfence_dup(3).bits.hv
   when((hfencev_valid_l3 && io.csr_dup(3).priv.virt) || hfencev_valid_l3) {
-    val flushMask = VecInit(l3h.map(_.map(_ === 10.U))).asUInt
+    val flushMask = VecInit(l3h.flatMap(_.map(_  === onlyStage1))).asUInt
     l3v := l3v & ~flushMask // all VS-stage l3 pte
   }
 
   // hfenceg, simple implementation for l3
   val hfenceg_valid_l3 = sfence_dup(3).valid && sfence_dup(3).bits.hg
   when(hfenceg_valid_l3) {
-    val flushMask = VecInit(l3h.map(_.map(_ === 11.U))).asUInt
+    val flushMask = VecInit(l3h.flatMap(_.map(_ === onlyStage2))).asUInt
     l3v := l3v & ~flushMask // all G-stage l3 pte
   }
 
@@ -711,11 +711,11 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val spasidhit = VecInit(spasids.map(_ === sfence_dup(0).bits.id)).asUInt
   val sfence_valid = sfence_dup(0).valid && !sfence_dup(0).bits.hg && !sfence_dup(0).bits.hv
   when (sfence_valid) {
-    val l1vmidhit = VecInit(l1vmids.map(_ === io.csr_dup(0).hgatp.asid)).asUInt
-    val spvmidhit = VecInit(spvmids.map(_ === io.csr_dup(0).hgatp.asid)).asUInt
-    val l1hhit = VecInit(l1h.map(_(0) === io.csr_dup(0).priv.virt)).asUInt
-    val sphhit = VecInit(sph.map(_(0) === io.csr_dup(0).priv.virt)).asUInt
-    val l2hhit = VecInit(l2h.map(_.map(_(0) === io.csr_dup(0).priv.virt))).asUInt
+    val l1vmidhit = VecInit(l1vmids.map(_.getOrElse(0.U) === io.csr_dup(0).hgatp.asid)).asUInt
+    val spvmidhit = VecInit(spvmids.map(_.getOrElse(0.U) === io.csr_dup(0).hgatp.asid)).asUInt
+    val l1hhit = VecInit(l1h.map(_ === onlyStage1 && io.csr_dup(0).priv.virt)).asUInt
+    val sphhit = VecInit(sph.map(_ === onlyStage1 && io.csr_dup(0).priv.virt)).asUInt
+    val l2hhit = VecInit(l2h.flatMap(_.map(_ === onlyStage1 && io.csr_dup(0).priv.virt))).asUInt
     val sfence_vpn = sfence_dup(0).bits.addr(sfence_dup(0).bits.addr.getWidth-1, offLen)
     val l2h_set = getl2hSet(sfence_vpn)
 
@@ -744,11 +744,11 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
   val hfencev_valid = sfence_dup(0).valid && sfence_dup(0).bits.hv
   when (hfencev_valid) {
-    val l1vmidhit = VecInit(l1vmids.map(_ === io.csr_dup(0).hgatp.asid)).asUInt
-    val spvmidhit = VecInit(spvmids.map(_ === io.csr_dup(0).hgatp.asid)).asUInt
-    val l1hhit = VecInit(l1h.map(_ === 10.U)).asUInt
-    val sphhit = VecInit(sph.map(_ === 10.U)).asUInt
-    val l2hhit = VecInit(l2h.map(_.map(_ === 10.U))).asUInt
+    val l1vmidhit = VecInit(l1vmids.map(_.getOrElse(0.U) === io.csr_dup(0).hgatp.asid)).asUInt
+    val spvmidhit = VecInit(spvmids.map(_.getOrElse(0.U) === io.csr_dup(0).hgatp.asid)).asUInt
+    val l1hhit = VecInit(l1h.map(_ === onlyStage1)).asUInt
+    val sphhit = VecInit(sph.map(_ === onlyStage1)).asUInt
+    val l2hhit = VecInit(l2h.flatMap(_.map(_ === onlyStage1))).asUInt
     val hfencev_vpn = sfence_dup(0).bits.addr(sfence_dup(0).bits.addr.getWidth-1, offLen)
     when(sfence_dup(0).bits.rs1) {
       when(sfence_dup(0).bits.rs2) {
@@ -772,11 +772,11 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
   val hfenceg_valid = sfence_dup(0).valid && sfence_dup(0).bits.hg
   when(hfenceg_valid) {
-    val l1vmidhit = VecInit(l1vmids.map(_ === sfence_dup(0).bits.id)).asUInt
-    val spvmidhit = VecInit(spvmids.map(_ === sfence_dup(0).bits.id)).asUInt
-    val l1hhit = VecInit(l1h.map(_ === 11.U)).asUInt
-    val sphhit = VecInit(sph.map(_ === 11.U)).asUInt
-    val l2hhit = VecInit(l2h.map(_.map(_ === 11.U))).asUInt
+    val l1vmidhit = VecInit(l1vmids.map(_.getOrElse(0.U) === sfence_dup(0).bits.id)).asUInt
+    val spvmidhit = VecInit(spvmids.map(_.getOrElse(0.U) === sfence_dup(0).bits.id)).asUInt
+    val l1hhit = VecInit(l1h.map(_ === onlyStage2)).asUInt
+    val sphhit = VecInit(sph.map(_ === onlyStage2)).asUInt
+    val l2hhit = VecInit(l2h.flatMap(_.map(_ === onlyStage2))).asUInt
     val hfenceg_gvpn = sfence_dup(0).bits.addr(sfence_dup(0).bits.addr.getWidth - 1, offLen)
     when(sfence_dup(0).bits.rs1) {
       when(sfence_dup(0).bits.rs2) {

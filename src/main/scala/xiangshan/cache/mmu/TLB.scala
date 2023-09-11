@@ -96,13 +96,13 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   for (i <- 0 until Width) {
     val s2xlate = Wire(UInt(2.W))
     s2xlate := MuxCase(noS2xlate, Seq(
-      !(virt || req_in(i).bits.hyperinst) -> noS2xlate,
-      vsatp.mode =/= 0.U && hgatp.mode =/= 0.U -> allStage,
-      vsatp.mode === 0.U -> onlyStage2,
-      hgatp.mode === 0.U -> onlyStage1
+      (!(virt || req_in(i).bits.hyperinst)) -> noS2xlate,
+      (vsatp.mode =/= 0.U && hgatp.mode =/= 0.U) -> allStage,
+      (vsatp.mode === 0.U) -> onlyStage2,
+      (hgatp.mode === 0.U) -> onlyStage1
     ))
     entries.io.r_req_apply(io.requestor(i).req.valid, get_pn(req_in(i).bits.vaddr), i, s2xlate)
-    entries.io.w_apply(refill, ptw.resp.bits)
+    entries.io.w_apply(refill(i), ptw.resp.bits)
     resp(i).bits.debug.isFirstIssue := RegNext(req(i).bits.debug.isFirstIssue)
     resp(i).bits.debug.robIdx := RegNext(req(i).bits.debug.robIdx)
   }
@@ -139,10 +139,10 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   def TLBRead(i: Int) = {
     val s2xlate = Wire(UInt(2.W))
     s2xlate := MuxCase(noS2xlate, Seq(
-      !(virt || req_in(i).bits.hyperinst) -> noS2xlate,
-      vsatp.mode =/= 0.U && hgatp.mode =/= 0.U -> allStage,
-      vsatp.mode === 0.U -> onlyStage2,
-      hgatp.mode === 0.U -> onlyStage1
+      (!(virt || req_in(i).bits.hyperinst)) -> noS2xlate,
+      (vsatp.mode =/= 0.U && hgatp.mode =/= 0.U) -> allStage,
+      (vsatp.mode === 0.U) -> onlyStage2,
+      (hgatp.mode === 0.U) -> onlyStage1
     ))
     val (e_hit_tmp, e_ppn, e_perm, e_super_hit_tmp, e_super_ppn, static_pm, e_g_perm, e_s2xlate) = entries.io.r_resp_apply(i)
     val (p_hit, p_ppn, p_perm, p_gvpn, p_g_perm, p_s2xlate) = ptw_resp_bypass(get_pn(req_in(i).bits.vaddr), s2xlate)
@@ -195,8 +195,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     // for timing optimization, pmp check is divided into dynamic and static
     // dynamic: superpage (or full-connected reg entries) -> check pmp when translation done
     // static: 4K pages (or sram entries) -> check pmp with pre-checked results
-    val hasS2xlate = s2xlate(0) === 1.U
-    val onlyS2 = s2xlate === 11.U
+    val hasS2xlate = s2xlate(0) =/= noS2xlate
+    val onlyS2 = s2xlate === onlyS2xlate
     val af = perm.af || (hasS2xlate && g_perm.af)
 
     // Stage 1 perm check
@@ -253,10 +253,10 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
     val req_s2xlate = Wire(UInt(2.W))
     req_s2xlate := MuxCase(noS2xlate, Seq(
-      !(virt || req_in(idx).bits.hyperinst) -> noS2xlate,
-      vsatp.mode =/= 0.U && hgatp.mode =/= 0.U -> allStage,
-      vsatp.mode === 0.U -> onlyStage2,
-      hgatp.mode === 0.U || need_gpa(idx) -> onlyStage1
+      (!(virt || req_in(idx).bits.hyperinst)) -> noS2xlate,
+      (vsatp.mode =/= 0.U && hgatp.mode =/= 0.U) -> allStage,
+      (vsatp.mode === 0.U) -> onlyStage2,
+      (hgatp.mode === 0.U || need_gpa(idx)) -> onlyStage1
     ))
     val ptw_s2xlate = ptw.resp.bits.s2xlate =/= noS2xlate
     val onlyS2 = ptw_s2xlate === onlyStage2
@@ -285,10 +285,10 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val miss_req_memidx = req_out(idx).memidx
     val miss_req_s2xlate = Wire(UInt(2.W))
     miss_req_s2xlate := MuxCase(noS2xlate, Seq(
-      !(virt || req_in(idx).bits.hyperinst) -> noS2xlate,
-      vsatp.mode =/= 0.U && hgatp.mode =/= 0.U -> allStage,
-      vsatp.mode === 0.U -> onlyStage2,
-      hgatp.mode === 0.U || need_gpa -> onlyStage1
+      (!(virt || req_in(idx).bits.hyperinst)) -> noS2xlate,
+      (vsatp.mode =/= 0.U && hgatp.mode =/= 0.U) -> allStage,
+      (vsatp.mode === 0.U) -> onlyStage2,
+      (hgatp.mode === 0.U || need_gpa(idx)) -> onlyStage1
     ))
     val hasS2xlate = miss_req_s2xlate =/= noS2xlate
     val onlyS2 = miss_req_s2xlate === onlyStage2
@@ -315,7 +315,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       for (d <- 0 until nRespDups) {
         resp(idx).bits.paddr(d) := Mux(s2xlate =/= noS2xlate, s2_paddr, s1_paddr)
         resp(idx).bits.gpaddr(d) := s1_paddr
-        perm_check(stage1.entry.perm.get(), req_out(idx).cmd, idx, d, stage2.entry.perm, req_out(idx).hlvx, s2xlate)
+        perm_check(stage1, req_out(idx).cmd, idx, d, stage2, req_out(idx).hlvx, s2xlate)
       }
       pmp_check(resp(idx).bits.paddr(0), req_out(idx).size, req_out(idx).cmd, idx)
 
@@ -350,8 +350,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   // when ptw resp, tlb at refill_idx maybe set to miss by force.
   // Bypass ptw resp to check.
   def ptw_resp_bypass(vpn: UInt, s2xlate: UInt) = {
-    val hasS2xlate = s2xlate(0) === 1.U
-    val onlyS2 = s2xlate(1) === 1.U && hasS2xlate
+    val hasS2xlate = s2xlate =/= noS2xlate
+    val onlyS2 = s2xlate === onlyStage2
     val s2xlate_hit = s2xlate === ptw.resp.bits.s2xlate
     val normal_hit = ptw.resp.bits.s1.hit(vpn, Mux(hasS2xlate, io.csr.vsatp.asid, io.csr.satp.asid), io.csr.hgatp.asid, true, false, hasS2xlate)
     val onlyS2_hit = ptw.resp.bits.s2.hit(vpn, io.csr.hgatp.asid)
@@ -393,7 +393,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     }
   }
   XSPerfAccumulate("ptw_resp_count", ptw.resp.fire)
-  XSPerfAccumulate("ptw_resp_pf_count", ptw.resp.fire && ptw.resp.bits.pf)
+  XSPerfAccumulate("ptw_resp_pf_count", ptw.resp.fire && ptw.resp.bits.s1.pf)
 
   // Log
   for(i <- 0 until Width) {
@@ -429,10 +429,10 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       difftest.io.hgatp := io.csr.hgatp
       val s2xlate = Wire(UInt(2.W))
       s2xlate := MuxCase(noS2xlate, Seq(
-        !(virt || req_in(idx).bits.hyperinst) -> noS2xlate,
-        vsatp.mode =/= 0.U && hgatp.mode =/= 0.U -> allStage,
-        vsatp.mode === 0.U -> onlyStage2,
-        hgatp.mode === 0.U || need_gpa -> onlyStage1
+        (!(virt || req_in(i).bits.hyperinst)) -> noS2xlate,
+        (vsatp.mode =/= 0.U && hgatp.mode =/= 0.U) -> allStage,
+        (vsatp.mode === 0.U) -> onlyStage2,
+        (hgatp.mode === 0.U || need_gpa(i)) -> onlyStage1
       ))
       difftest.io.s2xlate := s2xlate
     }

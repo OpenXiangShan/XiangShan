@@ -432,9 +432,9 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   // to_wait: wait for the last to access mem, set to mem_resp
   // to_cache: the last is back just right now, set to mem_cache
   val dup_vec = state.indices.map(i =>
-    dup(io.in.bits.req_info.vpn, entries(i).req_info.vpn) && io.in.bits.req_info.hyperinst === entries(i).req_info.hyperinst
+    dup(io.in.bits.req_info.vpn, entries(i).req_info.vpn) && io.in.bits.req_info.s2xlate === entries(i).req_info.s2xlate
   )
-  val dup_req_fire = mem_arb.io.out.fire && dup(io.in.bits.req_info.vpn, mem_arb.io.out.bits.req_info.vpn) && io.in.bits.req_info.hyperinst === entries(i).req_info.hyperinst // dup with the req fire entry
+  val dup_req_fire = mem_arb.io.out.fire && dup(io.in.bits.req_info.vpn, mem_arb.io.out.bits.req_info.vpn) && io.in.bits.req_info.s2xlate === mem_arb.io.out.bits.req_info.s2xlate // dup with the req fire entry
   val dup_vec_wait = dup_vec.zip(is_waiting).map{case (d, w) => d && w} // dup with "mem_waiting" entres, sending mem req already
   val dup_vec_having = dup_vec.zipWithIndex.map{case (d, i) => d && is_having(i)} // dup with the "mem_out" entry recv the data just now
   val wait_id = Mux(dup_req_fire, mem_arb.io.chosen, ParallelMux(dup_vec_wait zip entries.map(_.wait_id)))

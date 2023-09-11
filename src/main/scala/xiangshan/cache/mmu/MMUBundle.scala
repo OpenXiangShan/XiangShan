@@ -888,9 +888,7 @@ class PtwMergeEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = f
   val pf = Bool()
 }
 
-class HptwMergeEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)(implicit p: Parameters) extends PtwMergeEntry(tagLen, hasPerm, hasLevel) {
-  val vmid = UInt(vmidLen.W)
-}
+class HptwMergeEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)(implicit p: Parameters) extends PtwMergeEntry(tagLen, hasPerm, hasLevel)
 
 class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p: Parameters) extends PtwBundle {
   require(log2Up(num)==log2Down(num))
@@ -1222,7 +1220,7 @@ class HptwMergeResp(implicit p: Parameters) extends PtwBundle {
     ptw_resp.af := af
     ptw_resp.v := !pf
     ptw_resp.prefetch := DontCare
-    ptw_resp.vmid := vmid
+    ptw_resp.vmid.map(_ := vmid)
     this.pteidx := UIntToOH(addr_low).asBools
     this.not_super := not_super.B
 

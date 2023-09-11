@@ -589,6 +589,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s1_vaddr_lo         = Wire(UInt())
   val s1_vaddr            = Wire(UInt())
   val s1_paddr_dup_lsu    = Wire(UInt())
+  val s1_gpaddr_dup_lsu   = Wire(UInt())
   val s1_paddr_dup_dcache = Wire(UInt())
   val s1_exception        = ExceptionNO.selectByFu(s1_out.uop.cf.exceptionVec, lduCfg).asUInt.orR   // af & pf exception were modified below.
   val s1_tlb_miss         = io.tlb.resp.bits.miss

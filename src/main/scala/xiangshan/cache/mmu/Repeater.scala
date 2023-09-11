@@ -79,7 +79,7 @@ class PTWRepeater(Width: Int = 1, FenceDelay: Int)(implicit p: Parameters) exten
   XSDebug(io.ptw.req(0).valid || io.ptw.resp.valid, p"ptw: ${ptw}\n")
   assert(!RegNext(recv && io.ptw.resp.valid, init = false.B), "re-receive ptw.resp")
   XSError(io.ptw.req(0).valid && io.ptw.resp.valid && !flush, "ptw repeater recv resp when sending")
-  XSError(io.ptw.resp.valid && (req.vpn =/= io.ptw.resp.bits.entry.tag), "ptw repeater recv resp with wrong tag")
+  XSError(io.ptw.resp.valid && (req.vpn =/= io.ptw.resp.bits.s1.entry.tag), "ptw repeater recv resp with wrong tag")
   XSError(io.ptw.resp.valid && !io.ptw.resp.ready, "ptw repeater's ptw resp back, but not ready")
   TimeOutAssert(sent && !recv, timeOutThreshold, "Repeater doesn't recv resp in time")
 }
@@ -451,7 +451,6 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   val v = RegInit(VecInit(Seq.fill(Size)(false.B)))
   val ports = Reg(Vec(Size, Vec(Width, Bool()))) // record which port(s) the entry come from, may not able to cover all the ports
   val vpn = Reg(Vec(Size, UInt(vpnLen.W)))
-  val gvpn = Reg(Vec(Size, UInt(gvpnLen.W)))
   val s2xlate = Reg(Vec(Size, UInt(2.W)))
   val memidx = Reg(Vec(Size, new MemBlockidxBundle))
   val enqPtr = RegInit(0.U(log2Up(Size).W)) // Enq
@@ -460,7 +459,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   val mayFullDeq = RegInit(false.B)
   val mayFullIss = RegInit(false.B)
   val counter = RegInit(0.U(log2Up(Size+1).W))
-  val flush = DelayN(io.sfence.valid || io.csr.satp.changed || (io.csr.priv.virt && io.csr.vsatp.changed, FenceDelay))
+  val flush = DelayN(io.sfence.valid || io.csr.satp.changed || (io.csr.priv.virt && io.csr.vsatp.changed), FenceDelay)
   val tlb_req = WireInit(io.tlb.req) // NOTE: tlb_req is not io.tlb.req, see below codes, just use cloneType
   tlb_req.suggestName("tlb_req")
 
@@ -468,9 +467,9 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   val inflight_full = inflight_counter === Size.U
 
   def ptwResp_hit(vpn: UInt, s2xlate: UInt, resp: PtwRespS2): Bool = {
-    val enableS2xlate = resp.s2xlate(0)
-    val onlyS2 = enableS2xlate && resp.s2xlate(1)
-    val s1hit = resp.s1.hit(vpn, 0, io.csr.hgatp.asid, true, true, enableS2xlate)
+    val enableS2xlate = resp.s2xlate =/= noS2xlate
+    val onlyS2 = resp.s2xlate === onlyStage1
+    val s1hit = resp.s1.hit(vpn, 0.U, io.csr.hgatp.asid, true, true, enableS2xlate)
     val s2hit = resp.s2.hit(vpn, io.csr.hgatp.asid)
     s2xlate === resp.s2xlate && Mux(enableS2xlate, Mux(onlyS2, s2hit, s1hit && s2hit), s1hit)
   }
@@ -558,7 +557,6 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   val issue_fire_fake = issue_valid && (io.ptw.req(0).ready || (issue_filtered && false.B /*timing-opt*/))
   io.ptw.req(0).valid := issue_valid && !issue_filtered
   io.ptw.req(0).bits.vpn := vpn(issPtr)
-  io.ptw.req(0).bits.gvpn := gvpn(issPtr)
   io.ptw.req(0).bits.s2xlate := s2xlate(issPtr)
   io.ptw.resp.ready := true.B
 
@@ -567,7 +565,6 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
       when (req.valid && canEnqueue) {
         v(enqPtrVec(i)) := !tlb_req_flushed(i)
         vpn(enqPtrVec(i)) := req.bits.vpn
-        gvpn(enqPtrVec(i)) := req.bits.gvpn
         s2xlate(enqPtrVec(i)) := req.bits.s2xlate
         memidx(enqPtrVec(i)) := req.bits.memidx
         ports(enqPtrVec(i)) := req_ports(i).asBools

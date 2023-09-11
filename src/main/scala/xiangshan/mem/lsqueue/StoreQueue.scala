@@ -326,8 +326,9 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       vaddrModule.io.wen(i) := true.B
 
       gpaddrModule.io.waddr(i) := stWbIndex
-      gpaddrModule.io.wdata(i) := io.storeIn(i).bits.gpaddr
-      gpaddrModule.io.wlineflag(i) := io.storeIn(i).bits.wlineflag
+      gpaddrModule.io.wdata(i) := io.storeAddrIn(i).bits.gpaddr
+      vaddrModule.io.wmask(i)  := io.storeAddrIn(i).bits.mask
+      gpaddrModule.io.wlineflag(i) := io.storeAddrIn(i).bits.wlineflag
       gpaddrModule.io.wen(i) := true.B
 
       debug_paddr(paddrModule.io.waddr(i)) := paddrModule.io.wdata(i)
