@@ -202,6 +202,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // val s0_offset              = WireInit(VecInit(Seq.fill(2)(0.U(4.W))))
   val s0_exp                 = WireInit(true.B)
   val s0_is_first_ele        = WireInit(false.B)
+  val s0_flowIdx            = WireInit(0.U(elemIdxBits.W))
+  val s0_flowPtr             = WireInit(0.U.asTypeOf(new VlflowPtr))
 
   // load flow select/gen
   // src0: super load replayed by LSQ (cache miss replay) (io.replay)
@@ -475,6 +477,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // s0_offset              := src.offset
     s0_exp                 := src.exp
     s0_is_first_ele        := src.is_first_ele
+    s0_flowIdx            := src.flowIdx
+    s0_flowPtr             := src.flowPtr
   }
 
   def fromLoadToLoadSource(src: LoadToLoadIO) = {
@@ -549,6 +553,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // s0_out.offset          := s0_offset
   s0_out.exp             := s0_exp
   s0_out.is_first_ele    := s0_is_first_ele
+  s0_out.flowIdx         := s0_flowIdx
+  s0_out.flowPtr         := s0_flowPtr
   s0_out.uop.cf.exceptionVec(loadAddrMisaligned) := !s0_addr_aligned && s0_exp
   s0_out.forward_tlDchannel := s0_super_ld_rep_select
   when(io.tlb.req.valid && s0_isFirstIssue) {
@@ -1135,6 +1141,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_vecout.exp               := s3_exp
   s3_vecout.is_first_ele      := s3_in.is_first_ele
   // TODO: VLSU, fix it!
+  // s3_vecout.uopQueuePtr       := s3_in.uopQueuePtr
+  s3_vecout.flowPtr      := s3_in.flowPtr
   s3_vecout.exp_ele_index     := 0.U
 
   when (s3_force_rep) {

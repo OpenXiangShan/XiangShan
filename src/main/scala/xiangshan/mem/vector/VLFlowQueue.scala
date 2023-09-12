@@ -133,7 +133,8 @@ class VecLoadPipeBundle(implicit p: Parameters) extends VLSUBundleWithMicroOp {
   val alignedType         = UInt(alignTypeBits.W)
   val exp                 = Bool()
   val is_first_ele        = Bool()
-  val flow_idx            = UInt(elemIdxBits.W)
+  val flowIdx             = UInt(elemIdxBits.W)
+  val flowPtr             = new VlflowPtr
 }
 
 // class VlFlowQueueIOBundle(implicit p: Parameters) extends XSBundle {
@@ -197,7 +198,7 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
   //   2: issued but not finished
   val flowFinished = RegInit(VecInit(List.fill(VlFlowSize)(false.B)))
   // loaded data from load unit
-  val flowLoadData = Reg(Vec(VlFlowSize, UInt(VLEN.W)))
+  val flowLoadResult = Reg(Vec(VlFlowSize, new VecExuOutput))
 
 
   /* Queue Pointers */
@@ -208,7 +209,7 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
   val deqPtr = RegInit(VecInit((0 until VecLoadPipelineWidth).map(_.U.asTypeOf(new VlflowPtr))))
   // issue pointers, issuePtr(0) is the exact one
   val issuePtr = RegInit(VecInit((0 until VecLoadPipelineWidth).map(_.U.asTypeOf(new VlflowPtr))))
-  
+
 
   /* Enqueue logic */
 
@@ -235,7 +236,7 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
   }
 
   // update enqPtr
-  // TODO: when redirect happens, need to subtract flushed flows 
+  // TODO: when redirect happens, need to subtract flushed flows
   for (i <- 0 until VecLoadPipelineWidth) {
     enqPtr(i) := enqPtr(i) + enqueueCount
   }
@@ -244,6 +245,10 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
   /* Dequeue logic */
 
   val canDequeue = Wire(Vec(VecLoadPipelineWidth, Bool()))
+  val allowDequeue = io.flowWriteback.map(_.ready)
+  val doDequeue = Wire(Vec(VecLoadPipelineWidth, Bool()))
+  val dequeueCount = PopCount(doDequeue)
+
   for (i <- 0 until VecLoadPipelineWidth) {
     if (i == 0) {
       canDequeue(i) := flowFinished(i) && deqPtr(i) < issuePtr(0)
@@ -253,22 +258,101 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
     io.flowWriteback(i).valid := canDequeue(i)
   }
 
-  val allowDequeue = io.flowWriteback.map(_.ready)
-  val doDequeue = Wire(Vec(VecLoadPipelineWidth, Bool()))
-  val dequeueCount = PopCount(doDequeue)
-
+  // handshake
   for (i <- 0 until VecLoadPipelineWidth) {
     doDequeue(i) := canDequeue(i) && allowDequeue(i)
-    io.flowWriteback(i).bits := flowQueueBundles(deqPtr(i).value)
   }
-
   // update deqPtr
   for (i <- 0 until VecLoadPipelineWidth) {
     deqPtr(i) := deqPtr(i) + dequeueCount
   }
+  // write back results
+  for (i <- 0 until VecLoadPipelineWidth) {
+    io.flowWriteback(i).bits := flowLoadResult(deqPtr(i).value)
+  }
 
 
   /* Execute logic */
+  /** Issue **/
+
+  val canIssue = Wire(Vec(VecLoadPipelineWidth, Bool()))
+  val allowIssue = io.pipeIssue.map(_.ready)
+  val doIssue = Wire(Vec(VecLoadPipelineWidth, Bool()))
+  val issueCount = PopCount(doIssue)
+
+  // handshake
+  for (i <- 0 until VecLoadPipelineWidth) {
+    canIssue(i) := issuePtr(i) < enqPtr(0)
+    io.pipeIssue(i).valid := canIssue(i)
+    doIssue(i) := canIssue(i) && allowIssue(i)
+  }
+  // update IssuePtr and finished
+  for (i <- 0 until VecLoadPipelineWidth) {
+    issuePtr(i) := issuePtr(i) + issueCount
+    when (doIssue(i)) {
+      flowFinished(issuePtr(i).value) := false.B
+    }
+  }
+  // data
+  for (i <- 0 until VecLoadPipelineWidth) {
+    val thisFlow = flowQueueBundles(issuePtr(i).value)
+    // It works, but it's not elegant
+    io.pipeIssue(i).bits match { case x =>
+      x.vaddr               := thisFlow.vaddr
+      x.mask                := thisFlow.mask
+      x.uop_unit_stride_fof := thisFlow.unit_stride_fof
+      x.reg_offset          := thisFlow.reg_offset
+      x.alignedType         := thisFlow.alignedType
+      x.exp                 := thisFlow.exp
+      x.is_first_ele        := thisFlow.is_first_ele
+      x.flowIdx             := thisFlow.flowIdx
+      x.flowPtr             := issuePtr(i)
+    }
+  }
+
+  /** Replay **/
+  val requireReplay = io.pipeReplay.map(_.valid)
+  // It seems there isn't anything to prohibit accept a replay
+  val allowReplay = Vec(VecLoadPipelineWidth, true.B)
+  val doReplay = Wire(Vec(VecLoadPipelineWidth, Bool()))
+  // handshake
+  for (i <- 0 until VecLoadPipelineWidth) {
+    io.pipeReplay(i).ready := allowReplay(i)
+    doReplay(i) := requireReplay(i) && allowReplay(i)
+  }
+  // get the oldest flow ptr
+  val oldestReplayFlowPtr = (doReplay zip io.pipeReplay.map(_.bits.flowPtr)).reduce { (a, b) => (
+    a._1 || b._1,
+    Mux(
+      a._1 && ((b._1 && isBefore(a._2, b._2)) || !b._1),
+      a._2, b._2
+    )
+  )}
+  // update IssuePtr, this will overlap updating above
+  for (i <- 0 until VecLoadPipelineWidth) {
+    when (oldestReplayFlowPtr._1) {
+      issuePtr(i) := oldestReplayFlowPtr._2 + i.U
+    }
+  }
+
+  /** Result **/
+  val requireResult = io.pipeResult.map(_.valid)
+  // It seems there isn't anything to prohibit accept a result
+  val allowResult = Vec(VecLoadPipelineWidth, true.B)
+  val doResult = Wire(Vec(VecLoadPipelineWidth, Bool()))
+  // handshake
+  for (i <- 0 until VecLoadPipelineWidth) {
+    io.pipeResult(i).ready := allowResult(i)
+    doResult(i) := requireResult(i) && allowResult(i)
+  }
+  // update data and finished
+  for (i <- 0 until VecLoadPipelineWidth) {
+    val thisPtr = io.pipeResult(i).bits.vec.flowPtr.value
+    when (doResult(i)) {
+      flowFinished(thisPtr) := true.B
+      flowLoadResult(thisPtr) := io.pipeResult(i).bits
+    }
+  }
 
 
 //   dontTouch(io.loadRegIn)
@@ -507,7 +591,7 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
 //           val exp = VLExpCtrl(vstart = vstart(i), vl = vl(i), eleIdx = eleIdx)
 //           flow_entry(i)(queueIdx).exp := exp
 //           flow_entry(i)(queueIdx).is_first_ele := (eleIdx === 0.U)
-//           flow_entry(i)(queueIdx).flow_idx := eleIdx
+//           flow_entry(i)(queueIdx).flowIdx := eleIdx
 
 //           vaddr := GenVLAddr(instType = instType(i), baseaddr = baseAddr(i), emul = emul(i), lmul = lmul(i), uopIdx = uopIdx(i),
 //             flow_inner_idx = vs2FlowIdx, stride = stride(i), index = index(i), eew = eew(i), sew = sew(i),
@@ -595,7 +679,7 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
 //       io.loadPipeOut(i).bits.alignedType         := flow_entry(i)(deqPtr(i).value).alignedType
 //       io.loadPipeOut(i).bits.exp                 := flow_entry(i)(deqPtr(i).value).exp
 //       io.loadPipeOut(i).bits.is_first_ele        := flow_entry(i)(deqPtr(i).value).is_first_ele
-//       io.loadPipeOut(i).bits.flow_idx            := flow_entry(i)(deqPtr(i).value).flow_idx
+//       io.loadPipeOut(i).bits.flowIdx            := flow_entry(i)(deqPtr(i).value).flowIdx
 //     }
 //   }
 

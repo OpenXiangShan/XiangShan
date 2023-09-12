@@ -347,7 +347,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
     port.reg_offset := regOffset
     port.alignedType := issueAlignedType
     port.exp := exp
-    port.flow_idx := elemIdx
+    port.flowIdx := elemIdx
     port.is_first_ele := elemIdx === 0.U
   }
 

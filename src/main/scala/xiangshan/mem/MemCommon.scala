@@ -100,15 +100,16 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp
   // Vector instruction
   val isvec = Bool()
   val is128bit = Bool()
-  val exp = Bool()
-  val is_first_ele = Bool()
-  val flow_index = UInt(8.W)
   val uop_unit_stride_fof = Bool()
   // val rob_idx_valid = Vec(2,Bool())
   // val inner_idx = Vec(2,UInt(3.W))
   // val rob_idx = Vec(2,new RobPtr)
   val reg_offset = UInt(vOffsetBits.W)
   // val offset = Vec(2,UInt(4.W))
+  val exp = Bool()
+  val is_first_ele = Bool()
+  val flowIdx = UInt(8.W)
+  val flowPtr = new VlflowPtr()
   val fqIdx = UInt(log2Ceil(VsFlowSize).W)
 
   // For debug usage
@@ -161,7 +162,7 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     isvec := input.isvec
     is128bit := input.is128bit
     exp := input.exp
-    flow_index := input.flow_index
+    flowIdx := input.flowIdx
     is_first_ele := input.is_first_ele
     uop_unit_stride_fof := input.uop_unit_stride_fof
     // rob_idx_valid := input.rob_idx_valid

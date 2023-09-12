@@ -123,6 +123,7 @@ class OnlyVecExuOutput(implicit p: Parameters) extends VLSUBundle {
   val is_first_ele = Bool()
   val exp_ele_index = UInt(elemIdxBits.W) // element index
   val uopQueuePtr = new VluopPtr
+  val flowPtr = new VlflowPtr
 }
 
 class VecExuOutput(implicit p: Parameters) extends ExuOutput with HasVLSUParameters {
