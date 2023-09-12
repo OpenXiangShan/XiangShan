@@ -383,7 +383,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s0_rsIdx         := src.rsIdx
     s0_rep_carry     := src.replayCarry
     s0_mshrid        := src.mshrid
-    s0_isFirstIssue  := src.isFirstIssue
+    s0_isFirstIssue  := false.B
     s0_fast_rep      := false.B
     s0_ld_rep        := true.B
     s0_l2l_fwd       := false.B
@@ -917,12 +917,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.feedback_fast.bits.sourceType       := RSFeedbackType.lrqFull
   io.feedback_fast.bits.dataInvalidSqIdx := DontCare
 
-  io.ldCancel.ld1Cancel.valid := s2_valid &&                 // inst is valid
-                                 !s2_in.isLoadReplay &&      // already feedbacked
-                                 io.lq_rep_full &&           // LoadQueueReplay is full
-                                 s2_out.rep_info.need_rep && // need replay
-                                 !s2_exception &&            // no exception is triggered
-                                 !s2_hw_prf                  // not hardware prefetch
+  io.ldCancel.ld1Cancel.valid := s2_valid && (
+    (s2_out.rep_info.need_rep && s2_out.isFirstIssue) ||                // exe fail and issued from IQ
+    s2_mmio                                                             // is mmio
+  )
   io.ldCancel.ld1Cancel.bits := s2_out.deqPortIdx
 
   // fast wakeup
@@ -1056,8 +1054,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.feedback_slow.bits.sourceType       := RSFeedbackType.lrqFull
   io.feedback_slow.bits.dataInvalidSqIdx := DontCare
 
-  val slowHit = !io.lsq.ldin.bits.rep_info.need_rep || io.lsq.ldin.ready
-  io.ldCancel.ld2Cancel.valid := s3_valid && !s3_in.uop.robIdx.needFlush(io.redirect) && s3_fb_no_waiting && !slowHit
+  io.ldCancel.ld2Cancel.valid := s3_valid && (
+    (io.lsq.ldin.bits.rep_info.need_rep && s3_in.isFirstIssue) ||
+    s3_in.mmio
+  )
   io.ldCancel.ld2Cancel.bits := s3_in.deqPortIdx
 
   val s3_ld_wb_meta = Mux(s3_out.valid, s3_out.bits, io.lsq.uncache.bits)
