@@ -197,6 +197,7 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
   //   1: finished and can be dequeued
   //   2: issued but not finished
   val flowFinished = RegInit(VecInit(List.fill(VlFlowSize)(false.B)))
+  val flowAllocated = RegInit(VecInit(List.fill(VlFlowSize)(false.B)))
   // loaded data from load unit
   val flowLoadResult = Reg(Vec(VlFlowSize, new VecExuOutput))
 
@@ -210,35 +211,47 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
   // issue pointers, issuePtr(0) is the exact one
   val issuePtr = RegInit(VecInit((0 until VecLoadPipelineWidth).map(_.U.asTypeOf(new VlflowPtr))))
 
+  /* Redirect */
+  val flowNeedFlush = Wire(Vec(VlFlowSize, Bool()))
+  val flowNeedCancel = Wire(Vec(VlFlowSize, Bool()))
+  val flowCancelCount = PopCount(flowNeedCancel)
+
+  flowNeedFlush := flowQueueBundles.map(_.uop.robIdx.needFlush(io.redirect))
+  flowNeedCancel := (flowNeedFlush zip flowAllocated).map { case(flush, alloc) => flush && alloc}
 
   /* Enqueue logic */
 
   // only allow enqueue when free queue terms >= VecLoadPipelineWidth(=2)
   val freeCount = distanceBetween(deqPtr(0), enqPtr(0))
-  val allowEnqueue = freeCount >= VecLoadPipelineWidth.U
+  val allowEnqueue = !io.redirect.valid && freeCount >= VecLoadPipelineWidth.U
   for (i <- 0 until VecLoadPipelineWidth) {
     io.flowIn(i).ready := allowEnqueue
   }
 
   val canEnqueue = io.flowIn.map(_.valid)
-  val needCancel = io.flowIn.map(_.bits.uop.robIdx.needFlush(io.redirect))
+  val enqueueCancel = io.flowIn.map(_.bits.uop.robIdx.needFlush(io.redirect))
 
   val doEnqueue = Wire(Vec(VecLoadPipelineWidth, Bool()))
   val enqueueCount = PopCount(doEnqueue)
 
   // enqueue flows
   for (i <- 0 until VecLoadPipelineWidth) {
-    doEnqueue(i) := allowEnqueue && canEnqueue(i) && !needCancel(i)
+    doEnqueue(i) := allowEnqueue && canEnqueue(i) && !enqueueCancel(i)
     // Assuming that if io.flowIn(i).valid then io.flowIn(i-1).valid
     when (doEnqueue(i)) {
       flowQueueBundles(enqPtr(i).value) := io.flowIn(i).bits
+      flowAllocated(enqPtr(i).value) := true.B
     }
   }
 
   // update enqPtr
   // TODO: when redirect happens, need to subtract flushed flows
   for (i <- 0 until VecLoadPipelineWidth) {
-    enqPtr(i) := enqPtr(i) + enqueueCount
+    when (io.redirect.valid) {
+      enqPtr(i) := enqPtr(i) - flowCancelCount
+    } .otherwise {
+      enqPtr(i) := enqPtr(i) + enqueueCount
+    }
   }
 
 
@@ -250,10 +263,11 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
   val dequeueCount = PopCount(doDequeue)
 
   for (i <- 0 until VecLoadPipelineWidth) {
+    val thisPtr = deqPtr(i).value
     if (i == 0) {
-      canDequeue(i) := flowFinished(i) && deqPtr(i) < issuePtr(0)
+      canDequeue(i) := flowFinished(thisPtr) && !flowNeedCancel(thisPtr) && deqPtr(i) < issuePtr(0)
     } else {
-      canDequeue(i) := flowFinished(i) && deqPtr(i) < issuePtr(0) && canDequeue(i - 1)
+      canDequeue(i) := flowFinished(thisPtr) && !flowNeedCancel(thisPtr) && deqPtr(i) < issuePtr(0) && canDequeue(i - 1)
     }
     io.flowWriteback(i).valid := canDequeue(i)
   }
@@ -261,6 +275,9 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
   // handshake
   for (i <- 0 until VecLoadPipelineWidth) {
     doDequeue(i) := canDequeue(i) && allowDequeue(i)
+    when (doDequeue(i)) {
+      flowAllocated(deqPtr(i).value) := false.B
+    }
   }
   // update deqPtr
   for (i <- 0 until VecLoadPipelineWidth) {
@@ -282,13 +299,18 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
 
   // handshake
   for (i <- 0 until VecLoadPipelineWidth) {
-    canIssue(i) := issuePtr(i) < enqPtr(0)
+    val thisPtr = issuePtr(i).value
+    canIssue(i) := !flowNeedCancel(thisPtr) && issuePtr(i) < enqPtr(0)
     io.pipeIssue(i).valid := canIssue(i)
     doIssue(i) := canIssue(i) && allowIssue(i)
   }
   // update IssuePtr and finished
   for (i <- 0 until VecLoadPipelineWidth) {
-    issuePtr(i) := issuePtr(i) + issueCount
+    when (io.redirect.valid && flowCancelCount > distanceBetween(enqPtr(0), issuePtr(0))) {
+      issuePtr(i) := enqPtr(i) - flowCancelCount
+    } .otherwise {
+      issuePtr(i) := issuePtr(i) + issueCount
+    }
     when (doIssue(i)) {
       flowFinished(issuePtr(i).value) := false.B
     }
@@ -353,7 +375,6 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
       flowLoadResult(thisPtr) := io.pipeResult(i).bits
     }
   }
-
 
 //   dontTouch(io.loadRegIn)
 //   // TODO: merge these to an FlowQueue Entry?
