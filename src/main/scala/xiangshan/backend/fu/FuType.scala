@@ -95,7 +95,20 @@ object FuType {
     fDivSqrt -> "fdiv_fsqrt",
     ldu -> "load",
     stu -> "store",
-    mou -> "mou"
+    mou -> "mou",
+    vsetiwi -> "vsetiwi",
+    vsetiwf -> "vsetiwf",
+    vsetfwf -> "vsetfwf",
+    vipu -> "vipu",
+    vialuF -> "vialuF",
+    vfpu -> "vfpu",
+    vldu -> "vldu",
+    vstu -> "vstu",
+    vppu -> "vppu",
+    vimac -> "vimac",
+    vfalu -> "vfalu",
+    vfma -> "vfma",
+    vfdiv -> "vfdiv"
   )
 }
 
