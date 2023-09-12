@@ -159,6 +159,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
   val preAlloc = RegInit(VecInit(Seq.fill(VlUopSize)(false.B)))
   val exception = RegInit(VecInit(Seq.fill(VlUopSize)(false.B)))
   val vstart = RegInit(VecInit(Seq.fill(VlUopSize)(0.U(elemIdxBits.W)))) // index of the exception element
+  val vl = RegInit(VecInit(Seq.fill(VlUopSize)(0.U.asTypeOf(Valid(UInt(elemIdxBits.W)))))) // only for fof instructions that modify vl
 
   val enqPtrExt = RegInit(VecInit((0 until maxMUL).map(_.U.asTypeOf(new VluopPtr))))
   val enqPtr = enqPtrExt(0)
@@ -176,6 +177,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
   val vdException = RegInit(0.U.asTypeOf(Valid(ExceptionVec())))
   val vdUop = Reg(new MicroOp)
   val vdMask = RegInit(0.U(VLENB.W))
+  val vdVl = RegInit(0.U.asTypeOf(Valid(UInt(elemIdxBits.W))))
 
   val full = isFull(enqPtr, deqPtr)
 
@@ -230,6 +232,8 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
     finish(id) := false.B
     exception(id) := false.B
     vstart(id) := 0.U
+    vl(id).valid := false.B
+    // vl(id).bits := io.loadRegIn.bits.uop.ctrl.vconfig.vtype.vl
     uopq(id).uop := io.loadRegIn.bits.uop
     uopq(id).flowMask := flowMask
     uopq(id).byteMask := GenUopByteMask(flowMask, alignedType)(VLENB - 1, 0)
@@ -399,9 +403,19 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
       entry.flow_counter := nextFlowCnt
       finish(ptr.value) := nextFlowCnt === 0.U
       when (!exception(ptr.value) && flowWbExcp(i).asUInt.orR) {
-        exception(ptr.value) := true.B
-        vstart(ptr.value) := wb.bits.vec.exp_ele_index
-        entry.uop.cf.exceptionVec := flowWbExcp(i)
+        when (!entry.fof || wb.bits.vec.exp_ele_index === 0.U) {
+          // For fof loads, if element 0 raises an exception, vl is not modified, and the trap is taken.
+          exception(ptr.value) := true.B
+          vstart(ptr.value) := wb.bits.vec.exp_ele_index
+          entry.uop.cf.exceptionVec := flowWbExcp(i)
+        }.otherwise {
+          // If an element > 0 raises an exception, the corresponding trap is not taken, and the vector longth vl is
+          // reduced to the index of the element that would have raised an exception.
+          when (!vl(ptr.value).valid) {
+            vl(ptr.value).valid := true.B
+            vl(ptr.value).bits := wb.bits.vec.exp_ele_index
+          }
+        }
       }
     }
 
@@ -426,6 +440,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
     preAlloc(id) := false.B
     exception(id) := false.B
     vstart (id) := 0.U
+    vl(id).valid := false.B
 
     uopq(id).flowMask := 0.U
     uopq(id).byteMask := 0.U
@@ -449,6 +464,11 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
         vdUop.ctrl.vconfig.vstart := vstart(id)
       }
 
+      when (!vdVl.valid && vl(id).valid) {
+        vdVl.valid := true.B
+        vdVl.bits := vl(id).bits
+      }
+
       when (uopq(id).vd_last_uop) {
         vdState := s_wb
       }
@@ -464,6 +484,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
     when (io.uopWriteback.ready || vdUop.robIdx.needFlush(io.redirect)) {
       vdException := 0.U.asTypeOf(vdException)
       vdMask := 0.U
+      vdVl.valid := false.B
 
       vdState := s_merge
     }
@@ -479,6 +500,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
   io.uopWriteback.valid := vdState === s_wb && !vdUop.robIdx.needFlush(io.redirect)
   io.uopWriteback.bits.uop := vdUop
   io.uopWriteback.bits.uop.cf.exceptionVec := vdException.bits
+  when (vdVl.valid) { io.uopWriteback.bits.uop.ctrl.vconfig.vl := vdVl.bits }
   io.uopWriteback.bits.data := vdResult
   io.uopWriteback.bits.mask := vdMask
   io.uopWriteback.bits.fflags := DontCare
