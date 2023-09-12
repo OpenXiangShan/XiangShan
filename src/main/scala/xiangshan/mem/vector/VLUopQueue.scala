@@ -226,7 +226,8 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
     val flowsLog2 = GenRealFlowLog2(instType, emul, lmul, eew, sew)
     val flowsPrev = uopIdx << flowsLog2 // # of flow before this uop
     val alignedType = Mux(isIndexed(instType), sew(1, 0), eew(1, 0))
-    val flowMask = ((io.loadRegIn.bits.src_mask >> flowsPrev) &
+    val srcMask = Mux(decode.mask_en, -1.asSInt.asUInt, io.loadRegIn.bits.src_mask)
+    val flowMask = ((srcMask >> flowsPrev) &
       ZeroExt(UIntToMask(flows, maxFlowNum), VLEN))(VLENB - 1, 0)
     valid(id) := true.B
     finish(id) := false.B
