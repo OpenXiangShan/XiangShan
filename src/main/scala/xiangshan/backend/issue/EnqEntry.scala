@@ -45,6 +45,8 @@ class EnqEntryIO(implicit p: Parameters, params: IssueBlockParams) extends XSBun
     val stIssuePtr = Input(new SqPtr)
     val memWaitUpdateReq = Flipped(new MemWaitUpdateReq)
   }) else None
+  // debug
+  val cancel = OptionWrapper(params.hasIQWakeUp, Output(Bool()))
 
   def wakeup = wakeUpFromWB ++ wakeUpFromIQ
 }
@@ -68,6 +70,7 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
   val srcWakeUpByIQVec = Wire(Vec(params.numRegSrc, Vec(params.numWakeupFromIQ, Bool())))
   val wakeupLoadDependencyByIQVec = Wire(Vec(params.numWakeupFromIQ, Vec(LoadPipelineWidth, UInt(3.W))))
   val shiftedWakeupLoadDependencyByIQVec = Wire(Vec(params.numWakeupFromIQ, Vec(LoadPipelineWidth, UInt(3.W))))
+  val cancelVec = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numRegSrc, Bool())))
 
   //Reg
   validReg := validRegNext
@@ -136,6 +139,9 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
   entryUpdate.status.srcState.zip(entryReg.status.srcState).zip(srcWakeUp).zipWithIndex.foreach { case (((stateNext, state), wakeup), srcIdx) =>
     val cancel = srcCancelVec.map(_ (srcIdx)).getOrElse(false.B)
     stateNext := Mux(cancel, false.B, wakeup | state)
+    if (params.hasIQWakeUp) {
+      cancelVec.get(srcIdx) := cancel
+    }
   }
   entryUpdate.status.dataSources.zip(entryReg.status.dataSources).zip(srcWakeUpByIQVec).foreach {
     case ((dataSourceNext: DataSource, dataSource: DataSource), wakeUpByIQOH: Vec[Bool]) =>
@@ -229,6 +235,7 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
   io.robIdx := entryReg.status.robIdx
   io.issueTimerRead := Mux(io.deqSel, 0.U, entryReg.status.issueTimer)
   io.deqPortIdxRead := Mux(io.deqSel, io.deqPortIdxWrite, entryReg.status.deqPortIdx)
+  io.cancel.foreach(_ := cancelVec.get.asUInt.orR)
 }
 
 class EnqEntryMem()(implicit p: Parameters, params: IssueBlockParams) extends EnqEntry
