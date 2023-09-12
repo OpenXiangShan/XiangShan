@@ -158,6 +158,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
   val finish = RegInit(VecInit(Seq.fill(VlUopSize)(false.B)))
   val preAlloc = RegInit(VecInit(Seq.fill(VlUopSize)(false.B)))
   val exception = RegInit(VecInit(Seq.fill(VlUopSize)(false.B)))
+  val vstart = RegInit(VecInit(Seq.fill(VlUopSize)(0.U(elemIdxBits.W)))) // index of the exception element
 
   val enqPtrExt = RegInit(VecInit((0 until maxMUL).map(_.U.asTypeOf(new VluopPtr))))
   val enqPtr = enqPtrExt(0)
@@ -228,6 +229,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
     valid(id) := true.B
     finish(id) := false.B
     exception(id) := false.B
+    vstart(id) := 0.U
     uopq(id).uop := io.loadRegIn.bits.uop
     uopq(id).flowMask := flowMask
     uopq(id).byteMask := GenUopByteMask(flowMask, alignedType)(VLENB - 1, 0)
@@ -398,6 +400,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
       finish(ptr.value) := nextFlowCnt === 0.U
       when (!exception(ptr.value) && flowWbExcp(i).asUInt.orR) {
         exception(ptr.value) := true.B
+        vstart(ptr.value) := wb.bits.vec.exp_ele_index
         entry.uop.cf.exceptionVec := flowWbExcp(i)
       }
     }
@@ -422,6 +425,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
     finish(id) := false.B
     preAlloc(id) := false.B
     exception(id) := false.B
+    vstart (id) := 0.U
 
     uopq(id).flowMask := 0.U
     uopq(id).byteMask := 0.U
@@ -442,6 +446,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
       when (!vdException.valid && exception(id)) {
         vdException.valid := true.B
         vdException.bits := uopq(id).uop.cf.exceptionVec
+        vdUop.ctrl.vconfig.vstart := vstart(id)
       }
 
       when (uopq(id).vd_last_uop) {
