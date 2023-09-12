@@ -118,6 +118,9 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
     val fastResp = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
   }) else None
 
+  // debug
+  val cancel = OptionWrapper(params.hasIQWakeUp, Output(Vec(params.numEntries, Bool())))
+
   def wakeup = wakeUpFromWB ++ wakeUpFromIQ
 }
 
@@ -155,6 +158,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val issueTimerVec = Wire(Vec(params.numEntries, UInt(2.W)))
   val deqPortIdxWriteVec = Wire(Vec(params.numEntries, UInt(1.W)))
   val deqPortIdxReadVec = Wire(Vec(params.numEntries, UInt(1.W)))
+  val cancelVec = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Bool())))
 
   io.transEntryDeqVec := transEntryDeqVec
 
@@ -179,15 +183,16 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     robIdxVec(entryIdx) := enqEntry.io.robIdx
     issueTimerVec(entryIdx) := enqEntry.io.issueTimerRead
     deqPortIdxReadVec(entryIdx) := enqEntry.io.deqPortIdxRead
-    if(params.hasIQWakeUp){
+    if (params.hasIQWakeUp) {
       srcWakeUpL1ExuOHVec.get(entryIdx) := enqEntry.io.srcWakeUpL1ExuOH.get
       srcTimerVec.get(entryIdx) := enqEntry.io.srcTimer.get
+      cancelVec.get(entryIdx) := enqEntry.io.cancel.get
     }
     transEntryDeqVec(entryIdx) := enqEntry.io.transEntry
     isFirstIssueVec(entryIdx) := enqEntry.io.isFirstIssue
     entries(entryIdx) := enqEntry.io.entry
     //for mem
-    if(params.isMemAddrIQ) {
+    if (params.isMemAddrIQ) {
       enqEntry.io.fromMem.get.stIssuePtr := io.fromMem.get.stIssuePtr
       enqEntry.io.fromMem.get.memWaitUpdateReq := io.fromMem.get.memWaitUpdateReq
     }
@@ -217,6 +222,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     if (params.hasIQWakeUp) {
       srcWakeUpL1ExuOHVec.get(entryIdx + EnqEntryNum) := othersEntry.io.srcWakeUpL1ExuOH.get
       srcTimerVec.get(entryIdx + EnqEntryNum) := othersEntry.io.srcTimer.get
+      cancelVec.get(entryIdx + EnqEntryNum) := othersEntry.io.cancel.get
     }
     isFirstIssueVec(entryIdx + EnqEntryNum) := othersEntry.io.isFirstIssue
     entries(entryIdx + EnqEntryNum) := othersEntry.io.entry
@@ -273,6 +279,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   io.dataSources := dataSourceVec
   io.srcWakeUpL1ExuOH.foreach(_ := srcWakeUpL1ExuOHVec.get)
   io.srcTimer.foreach(_ := srcTimerVec.get)
+  io.cancel.foreach(_ := cancelVec.get)
   io.rsFeedback := 0.U.asTypeOf(io.rsFeedback) //todo
   io.deq.foreach{ x =>
     x.isFirstIssue := Mux(x.deqSelOH.valid, Mux1H(x.deqSelOH.bits, isFirstIssueVec), false.B)
