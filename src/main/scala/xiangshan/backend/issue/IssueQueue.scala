@@ -591,6 +591,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     dontTouch(lat)
   }
 
+  // issue perf counter
+  // ready instr count
   XSPerfHistogram("issue_ready_hist", PopCount(validVec.zip(canIssueVec).map(x => x._1 && x._2)), true.B, 0, params.numEntries, 1)
   for (t <- FuType.functionNameMap.keys) {
     val fuName = FuType.functionNameMap(t)
@@ -599,6 +601,11 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     }
   }
 
+  // deq instr count
+  XSPerfAccumulate("issue_instr_count", PopCount(io.deq.map(_.valid)))
+  XSPerfHistogram("issue_instr_count_hist", PopCount(io.deq.map(_.valid)), true.B, 0, params.numDeq, 1)
+
+  // deq instr data source count
   XSPerfAccumulate("issue_datasource_reg", io.deq.map{ deq => 
     PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && ds.value === DataSource.reg && !SrcType.isNotReg(deq.bits.srcType(j)) }) 
   }.reduce(_ +& _))
@@ -607,6 +614,9 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   }.reduce(_ +& _))
   XSPerfAccumulate("issue_datasource_forward", io.deq.map{ deq => 
     PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && ds.value === DataSource.forward && !SrcType.isNotReg(deq.bits.srcType(j)) }) 
+  }.reduce(_ +& _))
+  XSPerfAccumulate("issue_datasource_noreg", io.deq.map{ deq => 
+    PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && SrcType.isNotReg(deq.bits.srcType(j)) }) 
   }.reduce(_ +& _))
 
   XSPerfHistogram("issue_datasource_reg_hist", io.deq.map{ deq => 
@@ -618,7 +628,11 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   XSPerfHistogram("issue_datasource_forward_hist", io.deq.map{ deq => 
     PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && ds.value === DataSource.forward && !SrcType.isNotReg(deq.bits.srcType(j)) }) 
   }.reduce(_ +& _), true.B, 0, params.numDeq * params.numRegSrc, 1)
+  XSPerfHistogram("issue_datasource_noreg_hist", io.deq.map{ deq => 
+    PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && SrcType.isNotReg(deq.bits.srcType(j)) }) 
+  }.reduce(_ +& _), true.B, 0, params.numDeq * params.numRegSrc, 1)
 
+  // deq instr data source count for each futype
   for (t <- FuType.functionNameMap.keys) {
     val fuName = FuType.functionNameMap(t)
     if (params.getFuCfgs.map(_.fuType == t).reduce(_ | _)) {
@@ -631,6 +645,9 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       XSPerfAccumulate(s"issue_datasource_forward_futype_${fuName}", io.deq.map{ deq => 
         PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && ds.value === DataSource.forward && !SrcType.isNotReg(deq.bits.srcType(j)) && deq.bits.common.fuType === t.U }) 
       }.reduce(_ +& _))
+      XSPerfAccumulate(s"issue_datasource_noreg_futype_${fuName}", io.deq.map{ deq => 
+        PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && SrcType.isNotReg(deq.bits.srcType(j)) && deq.bits.common.fuType === t.U }) 
+      }.reduce(_ +& _))
 
       XSPerfHistogram(s"issue_datasource_reg_hist_futype_${fuName}", io.deq.map{ deq => 
         PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && ds.value === DataSource.reg && !SrcType.isNotReg(deq.bits.srcType(j)) && deq.bits.common.fuType === t.U }) 
@@ -641,9 +658,13 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       XSPerfHistogram(s"issue_datasource_forward_hist_futype_${fuName}", io.deq.map{ deq => 
         PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && ds.value === DataSource.forward && !SrcType.isNotReg(deq.bits.srcType(j)) && deq.bits.common.fuType === t.U }) 
       }.reduce(_ +& _), true.B, 0, params.numDeq * params.numRegSrc, 1)
+      XSPerfHistogram(s"issue_datasource_noreg_hist_futype_${fuName}", io.deq.map{ deq => 
+        PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && SrcType.isNotReg(deq.bits.srcType(j)) && deq.bits.common.fuType === t.U }) 
+      }.reduce(_ +& _), true.B, 0, params.numDeq * params.numRegSrc, 1)
     }
   }
 
+  // cancel instr count
   if (params.hasIQWakeUp) {
     val cancelVec: Vec[Bool] = entries.io.cancel.get
     XSPerfAccumulate("cancel_instr_count", PopCount(validVec.zip(cancelVec).map(x => x._1 & x._2)))
