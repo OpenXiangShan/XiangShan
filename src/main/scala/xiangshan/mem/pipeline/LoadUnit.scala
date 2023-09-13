@@ -1103,6 +1103,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                     !s2_tlb_miss &&
                     !s2_fwd_fail) &&
                   (s3_dcache_fast_rep || s3_nuke_fast_rep || s3_hint_fast_rep) &&
+                  s3_troublem &&
                  !s3_in.feedbacked &&
                  !s3_in.lateKill &&
                  !s3_rep_frm_fetch &&
