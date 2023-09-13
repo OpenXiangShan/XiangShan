@@ -969,7 +969,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.prefetch_train.bits.miss          := io.dcache.resp.bits.miss // TODO: use trace with bank conflict?
   io.prefetch_train.bits.meta_prefetch := io.dcache.resp.bits.meta_prefetch
   io.prefetch_train.bits.meta_access   := io.dcache.resp.bits.meta_access
-  
+
 
   io.prefetch_train_l1.valid              := s2_valid && !s2_actually_mmio
   io.prefetch_train_l1.bits.fromLsPipelineBundle(s2_in)
@@ -1096,7 +1096,13 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.lsq.stld_nuke_query.revoke := s3_revoke
 
   // feedback slow
-  s3_fast_rep := RegNext(s2_fast_rep) &&
+  val s3_dcache_fast_rep = RegNext(s2_dcache_fast_rep)
+  val s3_nuke_fast_rep   = RegNext(s2_dcache_fast_rep)
+  val s3_hint_fast_rep   = RegNext(s2_hint_fast_rep) && !s3_fwd_frm_d_chan_valid
+  s3_fast_rep := RegNext(!s2_mem_amb &&
+                    !s2_tlb_miss &&
+                    !s2_fwd_fail) &&
+                  (s3_dcache_fast_rep || s3_nuke_fast_rep || s3_hint_fast_rep) &&
                  !s3_in.feedbacked &&
                  !s3_in.lateKill &&
                  !s3_rep_frm_fetch &&
