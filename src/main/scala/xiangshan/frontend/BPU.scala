@@ -438,6 +438,13 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   aheadFhObGen_dup.zip(s0_ahead_fh_oldest_bits_reg_dup).map{ case (gen, reg) =>
     gen.register(true.B, reg, Some("stallAFHOB"), 0)}
 
+  // assign pred cycle for profiling
+  io.bpu_to_ftq.resp.bits.s1.full_pred.map(_.predCycle.map(_ := GTimer()))
+  io.bpu_to_ftq.resp.bits.s2.full_pred.map(_.predCycle.map(_ := GTimer()))
+  io.bpu_to_ftq.resp.bits.s3.full_pred.map(_.predCycle.map(_ := GTimer()))
+
+
+
   // History manage
   // s1
   val s1_possible_predicted_ghist_ptrs_dup = s1_ghist_ptr_dup.map(ptr => (0 to numBr).map(ptr - _.U))
