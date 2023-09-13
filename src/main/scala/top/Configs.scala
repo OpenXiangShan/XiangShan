@@ -317,6 +317,24 @@ class DefaultL3DebugConfig(n: Int = 1) extends Config(
   new WithL3DebugConfig ++ new BaseConfig(n)
 )
 
+class WithFuzzer extends Config((site, here, up) => {
+  case DebugOptionsKey => up(DebugOptionsKey).copy(
+    EnablePerfDebug = false,
+  )
+  case SoCParamsKey => up(SoCParamsKey).copy(
+    L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
+      enablePerf = false,
+    )),
+  )
+  case XSTileKey => up(XSTileKey).zipWithIndex.map{ case (p, i) =>
+    p.copy(
+      L2CacheParamsOpt = Some(up(XSTileKey)(i).L2CacheParamsOpt.get.copy(
+        enablePerf = false,
+      )),
+    )
+  }
+})
+
 class MinimalAliasDebugConfig(n: Int = 1) extends Config(
   new WithNKBL3(512, inclusive = false) ++
     new WithNKBL2(256, inclusive = false) ++
@@ -329,6 +347,11 @@ class MediumConfig(n: Int = 1) extends Config(
     ++ new WithNKBL2(512, inclusive = false)
     ++ new WithNKBL1D(128)
     ++ new BaseConfig(n)
+)
+
+class FuzzConfig(dummy: Int = 0) extends Config(
+  new WithFuzzer
+    ++ new DefaultConfig(1)
 )
 
 class DefaultConfig(n: Int = 1) extends Config(
