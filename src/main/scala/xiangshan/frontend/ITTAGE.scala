@@ -468,12 +468,12 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val baseTarget = io.in.bits.resp_in(0).s2.full_pred(3).jalr_target // use ftb pred as base target
   
   s2_tageTaken := Mux1H(Seq(
-    (provided && !providerNull, providerInfo.ctr(ITTageCtrBits-1)),
-    (altProvided && providerNull, altProviderInfo.ctr(ITTageCtrBits-1)),
-    (!provided || providerNull && !altProvided, basePred)
+    (provided && !(providerNull && altProvided), true.B),
+    (altProvided && providerNull, true.B),
+    (!provided, basePred)
   )) // TODO: reintroduce BIM
   s2_tageTarget := Mux1H(Seq(
-    (provided && !providerNull, providerInfo.target),
+    (provided && !(providerNull && altProvided), providerInfo.target),
     (altProvided && providerNull, altProviderInfo.target),
     (!provided || providerNull && !altProvided, baseTarget)
   ))
