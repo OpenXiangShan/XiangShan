@@ -56,12 +56,13 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
     (vuopIdx === 1.U && (vlmul === VLmul.m4 || vlmul === VLmul.m8)) ||
     ((vuopIdx === 2.U || vuopIdx === 3.U) && vlmul === VLmul.m8)
   val maskRshiftWidthForReduction = Wire(UInt(6.W))
-  maskRshiftWidthForReduction := Mux1H(
-    Seq(
+  maskRshiftWidthForReduction := Mux(fuOpType === VfaluType.vfredosum,
+    vuopIdx,
+    Mux1H(Seq(
       (vsew === VSew.e16) -> (vuopIdx(1, 0) << 4),
       (vsew === VSew.e32) -> (vuopIdx(1, 0) << 3),
       (vsew === VSew.e64) -> (vuopIdx(1, 0) << 2),
-    )
+    ))
   )
   val vlMaskForReduction = (~(Fill(VLEN, 1.U) << vl)).asUInt
   srcMaskRShiftForReduction := ((srcMask & vlMaskForReduction) >> maskRshiftWidthForReduction)(8 * numVecModule - 1, 0)
@@ -125,7 +126,7 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
         (sew === 1.U) -> f16MaskI,
       )
     )
-    outMask
+    Mux(fuOpType === VfaluType.vfredosum || fuOpType === VfaluType.vfwredosum, outMask(0),outMask)
   }
   def genMaskForMerge(inmask:UInt, sew:UInt, i:Int): UInt = {
     val f64MaskNum = dataWidth / 64
@@ -169,11 +170,11 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
       mod.io.is_frs1          := false.B // already vf -> vv
       mod.io.mask             := Mux(isScalarMove, !vuopIdx.orR, genMaskForMerge(inmask = srcMaskRShift, sew = vsew, i = i))
       mod.io.maskForReduction := genMaskForReduction(inmask = srcMaskRShiftForReduction, sew = vsew, i = i)
-      mod.io.uop_idx          := vuopIdx(0)
+      mod.io.uop_idx          := Mux(fuOpType === VfaluType.vfwredosum, 0.U, vuopIdx(0))
       mod.io.is_vec           := true.B // Todo
       mod.io.round_mode       := frm
       mod.io.fp_format        := Mux(resWiden, vsew + 1.U, vsew)
-      mod.io.opb_widening     := opbWiden
+      mod.io.opb_widening     := opbWiden || (fuOpType === VfaluType.vfwredosum)
       mod.io.res_widening     := resWiden
       mod.io.op_code          := opcode
       resultData(i)           := mod.io.fp_result
@@ -241,8 +242,12 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
     val foldTime = Mux(outVecCtrl.vlmul(2), outVecCtrl.vlmul, 0.U) - foldLastVlmul
     addTime + foldTime
   }
-  val reductionVl = Mux(outVecCtrl.vuopIdx === numOfUopVFRED - 1.U, 1.U, vlMax)
-  val outIsResuction = outCtrl.fuOpType === VfaluType.vfredusum || outCtrl.fuOpType === VfaluType.vfredmax || outCtrl.fuOpType === VfaluType.vfredmin
+  val reductionVl = Mux((outVecCtrl.vuopIdx ===  numOfUopVFRED - 1.U) || (outCtrl.fuOpType === VfaluType.vfredosum || outCtrl.fuOpType === VfaluType.vfwredosum), 1.U, vlMax)
+  val outIsResuction = outCtrl.fuOpType === VfaluType.vfredusum ||
+    outCtrl.fuOpType === VfaluType.vfredmax ||
+    outCtrl.fuOpType === VfaluType.vfredmin ||
+    outCtrl.fuOpType === VfaluType.vfredosum ||
+    outCtrl.fuOpType === VfaluType.vfwredosum
   val outVlFix = Mux(
     outVecCtrl.fpu.isFpToVecInst || (outCtrl.fuOpType === VfaluType.vfmv_f_s),
     1.U,
@@ -308,11 +313,38 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   for (i <- 0 until cmpResultWidth) {
     cmpResultForMgu(i) := Mux(outSrcMaskRShift(i), cmpResult(i), Mux(outVecCtrl.vma, true.B, cmpResultOldVd(i)))
   }
-
+  val outIsFold = outVecCtrl.fpu.isFoldTo1_2 || outVecCtrl.fpu.isFoldTo1_4 || outVecCtrl.fpu.isFoldTo1_8
+  val outOldVdForREDO = Mux1H(Seq(
+    (outVecCtrl.vsew === VSew.e16) -> (outOldVd >> 16),
+    (outVecCtrl.vsew === VSew.e32) -> (outOldVd >> 32),
+    (outVecCtrl.vsew === VSew.e64) -> (outOldVd >> 64),
+  ))
+  val outOldVdForWREDO = Mux(
+    !outIsFold,
+    Mux(outVecCtrl.vsew === VSew.e16, Cat(outOldVd(VLEN-1-16,16), 0.U(32.W)), Cat(outOldVd(VLEN-1-32,32), 0.U(64.W))),
+    Mux(outVecCtrl.vsew === VSew.e16,
+      // Divide vuopIdx by 8 and the remainder is 1
+      Mux(outVecCtrl.vuopIdx(2,0) === 1.U, outOldVd, outOldVd >> 16),
+      // Divide vuopIdx by 4 and the remainder is 1
+      Mux(outVecCtrl.vuopIdx(1,0) === 1.U, outOldVd, outOldVd >> 32)
+    ),
+  )
+  val outOldVdForRED = Mux(outCtrl.fuOpType === VfaluType.vfredosum, outOldVdForREDO, outOldVdForWREDO)
+  val numOfUopVFREDOSUM = {
+    val uvlMax = MuxLookup(outVecCtrl.vsew, 0.U, Array(
+      VSew.e16 -> 8.U,
+      VSew.e32 -> 4.U,
+      VSew.e64 -> 2.U,
+    ))
+    val vlMax = Mux(outVecCtrl.vlmul(2), uvlMax >> (-outVecCtrl.vlmul)(1, 0), uvlMax << outVecCtrl.vlmul(1, 0)).asUInt
+    vlMax
+  }
+  val isOutOldVdForREDO = (outCtrl.fuOpType === VfaluType.vfredosum && outIsFold) || outCtrl.fuOpType === VfaluType.vfwredosum
+  val taIsFalseForVFREDO = ((outCtrl.fuOpType === VfaluType.vfredosum) || (outCtrl.fuOpType === VfaluType.vfwredosum)) && (outVecCtrl.vuopIdx =/= numOfUopVFREDOSUM - 1.U)
   mgu.io.in.vd := Mux(outVecCtrl.isDstMask, Cat(0.U((dataWidth / 16 * 15).W), cmpResultForMgu.asUInt), resultDataUInt)
-  mgu.io.in.oldVd := outOldVd
+  mgu.io.in.oldVd := Mux(isOutOldVdForREDO, outOldVdForRED, outOldVd)
   mgu.io.in.mask := maskToMgu
-  mgu.io.in.info.ta := Mux(outCtrl.fuOpType === VfaluType.vfmv_f_s, true.B , outVecCtrl.vta)
+  mgu.io.in.info.ta := Mux(outCtrl.fuOpType === VfaluType.vfmv_f_s, true.B , Mux(taIsFalseForVFREDO, false.B, outVecCtrl.vta))
   mgu.io.in.info.ma := Mux(outCtrl.fuOpType === VfaluType.vfmv_s_f, true.B , outVecCtrl.vma)
   mgu.io.in.info.vl := outVlFix
   mgu.io.in.info.vstart := outVecCtrl.vstart
