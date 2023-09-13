@@ -1097,7 +1097,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // feedback slow
   val s3_dcache_fast_rep = RegNext(s2_dcache_fast_rep)
-  val s3_nuke_fast_rep   = RegNext(s3_nuke_fast_rep)
+  val s3_nuke_fast_rep   = RegNext(s2_nuke_fast_rep)
   val s3_hint_fast_rep   = RegNext(s2_hint_fast_rep) && !s3_fwd_frm_d_chan_valid
   s3_fast_rep := RegNext(!s2_mem_amb &&
                     !s2_tlb_miss &&
