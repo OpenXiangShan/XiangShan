@@ -495,10 +495,10 @@ class ReplaceIO(Width: Int, nSets: Int, nWays: Int)(implicit p: Parameters) exte
 
 class TlbReplaceIO(Width: Int, q: TLBParameters)(implicit p: Parameters) extends
   TlbBundle {
-  val Page = new ReplaceIO(Width, q.NSets, q.NWays)
+  val page = new ReplaceIO(Width, q.NSets, q.NWays)
 
   def apply_sep(in: Seq[TlbReplaceIO], vpn: UInt) = {
-    this.Page.apply_sep(in.map(_.Page), vpn)
+    this.page.apply_sep(in.map(_.page), vpn)
   }
 
 }

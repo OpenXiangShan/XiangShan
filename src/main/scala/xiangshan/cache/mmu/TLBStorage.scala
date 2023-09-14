@@ -291,7 +291,7 @@ object TlbStorage {
 class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p: Parameters) extends TlbModule {
   val io = IO(new TlbStorageWrapperIO(ports, q, nDups))
 
-  val Page = TlbStorage(
+  val page = TlbStorage(
     parentName = q.name + "_storage",
     associative = q.Associative,
     ports = ports,
@@ -305,7 +305,7 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
   )
 
   for (i <- 0 until ports) {
-    Page.r_req_apply(
+    page.r_req_apply(
       valid = io.r.req(i).valid,
       vpn = io.r.req(i).bits.vpn,
       i = i
@@ -313,8 +313,8 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
   }
 
   for (i <- 0 until ports) {
-    val q = Page.r.req(i)
-    val p = Page.r.resp(i)
+    val q = page.r.req(i)
+    val p = page.r.resp(i)
     val rq = io.r.req(i)
     val rp = io.r.resp(i)
     rq.ready := q.ready // actually, not used
@@ -334,20 +334,20 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
     }
   }
 
-  Page.sfence <> io.sfence
-  Page.csr <> io.csr
+  page.sfence <> io.sfence
+  page.csr <> io.csr
 
   val refill_idx = if (q.outReplace) {
-    io.replace.Page.access <> Page.access
-    io.replace.Page.chosen_set := DontCare
-    io.replace.Page.refillIdx
+    io.replace.page.access <> page.access
+    io.replace.page.chosen_set := DontCare
+    io.replace.page.refillIdx
   } else {
     val re = ReplacementPolicy.fromString(q.Replacer, q.NWays)
-    re.access(Page.access.map(_.touch_ways))
+    re.access(page.access.map(_.touch_ways))
     re.way
   }
 
-  Page.w_apply(
+  page.w_apply(
     valid = io.w.valid,
     wayIdx = refill_idx,
     data = io.w.bits.data

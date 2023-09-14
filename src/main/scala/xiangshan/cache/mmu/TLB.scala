@@ -349,11 +349,11 @@ class TlbReplace(Width: Int, q: TLBParameters)(implicit p: Parameters) extends T
 
   if (q.Associative == "fa") {
     val re = ReplacementPolicy.fromString(q.Replacer, q.NWays)
-    re.access(io.Page.access.map(_.touch_ways))
-    io.Page.refillIdx := re.way
+    re.access(io.page.access.map(_.touch_ways))
+    io.page.refillIdx := re.way
   } else { // set-acco && plru
     val re = ReplacementPolicy.fromString(q.Replacer, q.NSets, q.NWays)
-    re.access(io.Page.access.map(_.sets), io.Page.access.map(_.touch_ways))
-    io.Page.refillIdx := { if (q.NWays == 1) 0.U else re.way(io.Page.chosen_set) }
+    re.access(io.page.access.map(_.sets), io.page.access.map(_.touch_ways))
+    io.page.refillIdx := { if (q.NWays == 1) 0.U else re.way(io.page.chosen_set) }
   }
 }
