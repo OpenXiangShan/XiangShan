@@ -441,12 +441,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     p.apply(tlbcsr.priv.dmode, pmp.io.pmp, pmp.io.pma, d)
     require(p.req.bits.size.getWidth == d.bits.size.getWidth)
   }
-  for (i <- 0 until 8) {
-    val pmp_check_ptw = Module(new PMPCheckerv2(lgMaxSize = 3, sameCycle = false, leaveHitMux = true))
-    pmp_check_ptw.io.apply(tlbcsr.priv.dmode, pmp.io.pmp, pmp.io.pma, ptwio.resp.valid,
-      Cat(ptwio.resp.bits.data.entry.ppn, ptwio.resp.bits.data.ppn_low(i), 0.U(12.W)).asUInt)
-    dtlb.map(_.ptw_replenish(i) := pmp_check_ptw.io.resp)
-  }
 
   for (i <- 0 until exuParameters.LduCnt) {
     io.debug_ls.debugLsInfo(i) := loadUnits(i).io.debug_ls
@@ -512,7 +506,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val balanceFastReplaySel = balanceReOrder(fastReplaySel)
 
   val correctMissTrain = WireInit(Constantin.createRecord("CorrectMissTrain" + p(XSCoreParamsKey).HartId.toString, initValue = 0.U)) === 1.U
-  
+
   for (i <- 0 until exuParameters.LduCnt) {
     loadUnits(i).io.redirect <> redirect
     loadUnits(i).io.isFirstIssue := true.B
@@ -649,7 +643,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
   l1PrefetcherOpt match {
     case Some(pf) => dtlb_reqs(StreamDTLBPortIndex) <> pf.io.tlb_req
-    case None => 
+    case None =>
         dtlb_reqs(StreamDTLBPortIndex) := DontCare
         dtlb_reqs(StreamDTLBPortIndex).req.valid := false.B
         dtlb_reqs(StreamDTLBPortIndex).resp.ready := true.B

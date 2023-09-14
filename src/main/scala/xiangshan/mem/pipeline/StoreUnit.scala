@@ -246,13 +246,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   .elsewhen (s2_kill) { s2_valid := false.B }
 
   val s2_pmp = WireInit(io.pmp)
-  val s2_static_pm = RegNext(io.tlb.resp.bits.static_pm)
-  when (s2_static_pm.valid) {
-    s2_pmp.ld    := false.B
-    s2_pmp.st    := false.B
-    s2_pmp.instr := false.B
-    s2_pmp.mmio  := s2_static_pm.bits
-  }
 
   val s2_exception = ExceptionNO.selectByFu(s2_out.uop.cf.exceptionVec, staCfg).asUInt.orR
   val s2_mmio = s2_in.mmio || s2_pmp.mmio

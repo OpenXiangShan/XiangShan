@@ -742,13 +742,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s2_in := RegEnable(s1_out, s1_fire)
 
   val s2_pmp = WireInit(io.pmp)
-  val s2_static_pm = RegNext(io.tlb.resp.bits.static_pm)
-  when (s2_static_pm.valid) {
-    s2_pmp.ld    := false.B
-    s2_pmp.st    := false.B
-    s2_pmp.instr := false.B
-    s2_pmp.mmio  := s2_static_pm.bits
-  }
+
   val s2_prf    = s2_in.isPrefetch
   val s2_hw_prf = s2_in.isHWPrefetch
 
@@ -956,7 +950,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     !io.dcache.s1_disable_fast_wakeup &&
     s1_valid &&
     !s1_kill &&
-    !io.tlb.resp.bits.fast_miss &&
+    !io.tlb.resp.bits.miss &&
     !io.lsq.forward.dataInvalidFast
   ) && (s2_valid && !s2_out.rep_info.need_rep && !s2_mmio)
   io.fast_uop.bits := RegNext(s1_out.uop)
@@ -969,7 +963,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.prefetch_train.bits.miss          := io.dcache.resp.bits.miss // TODO: use trace with bank conflict?
   io.prefetch_train.bits.meta_prefetch := io.dcache.resp.bits.meta_prefetch
   io.prefetch_train.bits.meta_access   := io.dcache.resp.bits.meta_access
-  
+
 
   io.prefetch_train_l1.valid              := s2_valid && !s2_actually_mmio
   io.prefetch_train_l1.bits.fromLsPipelineBundle(s2_in)
