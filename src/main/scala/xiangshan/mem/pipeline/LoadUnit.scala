@@ -842,17 +842,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                            !s2_raw_nack &&
                            s2_nuke
 
-  val s2_hint_fast_rep  = !s2_mq_nack &&
-                          s2_dcache_miss &&
-                          s2_cache_handled &&
-                          io.l2_hint.valid &&
-                          io.l2_hint.bits.sourceId === io.dcache.resp.bits.mshr_id
-
-
   val s2_fast_rep = !s2_mem_amb &&
                     !s2_tlb_miss &&
                     !s2_fwd_fail &&
-                    (s2_dcache_fast_rep || s2_hint_fast_rep || s2_nuke_fast_rep) &&
+                    (s2_dcache_fast_rep || s2_nuke_fast_rep) &&
                     s2_troublem
 
   // need allocate new entry
@@ -1096,14 +1089,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.lsq.stld_nuke_query.revoke := s3_revoke
 
   // feedback slow
-  val s3_dcache_fast_rep = RegNext(s2_dcache_fast_rep)
-  val s3_nuke_fast_rep   = RegNext(s2_nuke_fast_rep)
-  val s3_hint_fast_rep   = RegNext(s2_hint_fast_rep) && !s3_fwd_frm_d_chan_valid
-  s3_fast_rep := RegNext(!s2_mem_amb &&
-                    !s2_tlb_miss &&
-                    !s2_fwd_fail) &&
-                  (s3_dcache_fast_rep || s3_nuke_fast_rep || s3_hint_fast_rep) &&
-                  s3_troublem &&
+  s3_fast_rep := RegNext(s2_fast_rep) &&
                  !s3_in.feedbacked &&
                  !s3_in.lateKill &&
                  !s3_rep_frm_fetch &&
