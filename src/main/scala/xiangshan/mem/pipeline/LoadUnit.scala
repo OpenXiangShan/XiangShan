@@ -836,17 +836,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                            !s2_raw_nack &&
                            s2_nuke
 
-  val s2_hint_fast_rep  = !s2_mq_nack &&
-                          s2_dcache_miss &&
-                          s2_cache_handled &&
-                          io.l2_hint.valid &&
-                          io.l2_hint.bits.sourceId === io.dcache.resp.bits.mshr_id
-
-
   val s2_fast_rep = !s2_mem_amb &&
                     !s2_tlb_miss &&
                     !s2_fwd_fail &&
-                    (s2_dcache_fast_rep || s2_hint_fast_rep || s2_nuke_fast_rep) &&
+                    (s2_dcache_fast_rep || s2_nuke_fast_rep) &&
                     s2_troublem
 
   // need allocate new entry
