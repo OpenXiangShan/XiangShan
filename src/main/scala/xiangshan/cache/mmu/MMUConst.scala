@@ -103,8 +103,8 @@ trait HasTlbConst extends HasXSParameter {
 
   def noS2xlate = "b00".U
   def allStage = "b11".U
-  def onlyStage1 = "b10".U
-  def onlyStage2 = "b01".U
+  def onlyStage1 = "b01".U
+  def onlyStage2 = "b10".U
 
   def get_pn(addr: UInt) = {
     require(addr.getWidth > offLen)

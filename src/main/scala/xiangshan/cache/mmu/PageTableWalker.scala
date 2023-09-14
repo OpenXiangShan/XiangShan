@@ -46,7 +46,7 @@ class PTWIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
   }))
   val resp = DecoupledIO(new Bundle {
     val source = UInt(bSourceWidth.W)
-    val s2xlate = UInt(2.W) // 0 bit: has s2xlate, 1 bit: Only valid when 0 bit is 1. If 0, all stage; if 1, only stage 2
+    val s2xlate = UInt(2.W) 
     val resp = new PtwMergeResp
     val h_resp = new HptwResp
   })
@@ -57,6 +57,7 @@ class PTWIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
 
   val hptw = new Bundle {
     val req = DecoupledIO(new Bundle {
+      val source = UInt(bSourceWidth.W)
       val id = UInt(log2Up(l2tlbParams.llptwsize).W)
       val gvpn = UInt(vpnLen.W)
     })
@@ -149,6 +150,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.llptw.bits.req_info.source := source
   io.llptw.bits.req_info.vpn := vpn
   io.llptw.bits.req_info.s2xlate := req_s2xlate
+  io.llptw.bits.ppn := DontCare
 
   io.pmp.req.valid := DontCare // samecycle, do not use valid
   io.pmp.req.bits.addr := Mux(s2xlate, hpaddr, mem_addr)
@@ -159,6 +161,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   mem.req.bits.addr := Mux(s2xlate, hpaddr, mem_addr)
   mem.req.bits.id := FsmReqID.U(bMemID.W)
 
+  io.refill.req_info.s2xlate := req_s2xlate
   io.refill.req_info.vpn := vpn
   io.refill.level := level
   io.refill.req_info.source := source
@@ -166,6 +169,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.hptw.req.valid := !s_hptw_req || !s_last_hptw_req
   io.hptw.req.bits.id := FsmReqID.U(bMemID.W)
   io.hptw.req.bits.gvpn := get_pn(gpaddr)
+  io.hptw.req.bits.source := source
 
   io.hptw.req.valid := !s_hptw_req || !s_last_hptw_req
   io.hptw.req.bits.id := FsmReqID.U(bMemID.W)
@@ -364,6 +368,7 @@ class LLPTWIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
   }
   val hptw = new Bundle {
     val req = DecoupledIO(new Bundle{
+      val source = UInt(bSourceWidth.W)
       val id = UInt(log2Up(l2tlbParams.llptwsize).W)
       val gvpn = UInt(vpnLen.W)
     })
@@ -560,6 +565,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.hptw.req.valid := (hyper_arb1.io.out.valid || hyper_arb2.io.out.valid) && !flush
   io.hptw.req.bits.gvpn := Mux(hyper_arb1.io.out.valid, hyper_arb1.io.out.bits.ppn, hyper_arb2.io.out.bits.ppn)
   io.hptw.req.bits.id := Mux(hyper_arb1.io.out.valid, hyper_arb1.io.chosen, hyper_arb2.io.chosen)
+  io.hptw.req.bits.source := Mux(hyper_arb1.io.out.valid, hyper_arb1.io.out.bits.req_info.source, hyper_arb2.io.out.bits.req_info.source)
   hyper_arb1.io.out.ready := io.hptw.req.ready
   hyper_arb2.io.out.ready := io.hptw.req.ready
 
@@ -609,13 +615,14 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   **/
 class HPTWIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
   val req = Flipped(DecoupledIO(new Bundle {
+    val source = UInt(bSourceWidth.W)
     val id = UInt(log2Up(l2tlbParams.llptwsize).W)
     val gvpn = UInt(vpnLen.W)
     val l1Hit = Bool()
     val l2Hit = Bool()
-    val ppn = UInt(ppnLen.W)
   }))
   val resp = Valid(new Bundle {
+    val source = UInt(bSourceWidth.W)
     val resp = Output(new HptwResp())
     val id = Output(UInt(bMemID.W))
   })
@@ -672,12 +679,15 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   val resp_valid = !idle && mem_addr_update && ((w_mem_resp && find_pte) || (s_pmp_check && accessFault))
   val id = Reg(UInt(log2Up(l2tlbParams.llptwsize).W))
+  val source = RegEnable(io.req.bits.source, io.req.fire())
+
   io.req.ready := idle
-  val resp = new HptwResp()
+  val resp = Wire(new HptwResp())
   resp.apply(pageFault && !accessFault && !ppn_af, accessFault || ppn_af, level, pte, vpn, hgatp.asid)
   io.resp.valid := resp_valid
   io.resp.bits.id := id
   io.resp.bits.resp := resp
+  io.resp.bits.source := source
 
   io.pmp.req.valid := DontCare
   io.pmp.req.bits.addr := mem_addr
@@ -690,6 +700,8 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   io.refill.req_info.vpn := vpn
   io.refill.level := level
+  io.refill.req_info.source := source
+  io.refill.req_info.s2xlate := onlyStage2
   when (idle){
     when(io.req.fire()){
       level := Mux(io.req.bits.l2Hit, 2.U, Mux(io.req.bits.l1Hit, 1.U, 0.U))
@@ -700,7 +712,6 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
       id := io.req.bits.id
       l1Hit := io.req.bits.l1Hit
       l2Hit := io.req.bits.l2Hit
-      ppn := io.req.bits.ppn
     }
   }
 

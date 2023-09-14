@@ -1165,6 +1165,7 @@ class PtwMergeResp(implicit p: Parameters) extends PtwBundle {
     ptw_resp.v := !pf
     ptw_resp.prefetch := DontCare
     ptw_resp.asid := asid
+    ptw_resp.vmid.map(_ := vmid)
     this.pteidx := UIntToOH(addr_low).asBools
     this.not_super := not_super.B
 

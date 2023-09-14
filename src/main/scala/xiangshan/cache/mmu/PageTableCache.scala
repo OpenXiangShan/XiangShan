@@ -454,6 +454,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   io.resp.bits.toHptw.ppn := Mux(resp_res.l2.hit, resp_res.l2.ppn, resp_res.l1.ppn)
   val idx = stageResp.bits.req_info.vpn(2, 0)
   io.resp.bits.toHptw.resp.entry.tag := stageResp.bits.req_info.vpn
+  io.resp.bits.toHptw.resp.entry.asid := DontCare
   io.resp.bits.toHptw.resp.entry.vmid.map(_ := io.csr_dup(0).hgatp.asid)
   io.resp.bits.toHptw.resp.entry.level.map(_ := Mux(resp_res.l3.hit, 2.U, resp_res.sp.level))
   io.resp.bits.toHptw.resp.entry.prefetch := from_pre(stageResp.bits.req_info.source)
@@ -464,7 +465,8 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   io.resp.bits.toHptw.resp.gaf := false.B
 
   io.resp.bits.toTlb.entry.map(_.tag := stageResp.bits.req_info.vpn(vpnLen - 1, 3))
-  io.resp.bits.toTlb.entry.map(_.asid := io.csr_dup(0).satp.asid) // DontCare
+  io.resp.bits.toTlb.entry.map(_.asid := Mux(stageResp.bits.req_info.hasS2xlate(), io.csr_dup(0).vsatp.asid, io.csr_dup(0).satp.asid)) // DontCare
+  io.resp.bits.toTlb.entry.map(_.vmid.map(_ := io.csr_dup(0).hgatp.asid))
   io.resp.bits.toTlb.entry.map(_.level.map(_ := Mux(resp_res.l3.hit, 2.U, resp_res.sp.level)))
   io.resp.bits.toTlb.entry.map(_.prefetch := from_pre(stageResp.bits.req_info.source))
   for (i <- 0 until tlbcontiguous) {
