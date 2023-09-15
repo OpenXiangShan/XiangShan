@@ -160,12 +160,20 @@ trait HaveAXI4MemPort {
 
   val mem_xbar = TLXbar()
   mem_xbar :=* TLBuffer() :=* TLCacheCork() :=* bankedNode
+
+  val ram_latency = 0
+  val buffers = Seq.fill(ram_latency)(TLBuffer())
+  val delayer = buffers.foldLeft(mem_xbar){ case (up, down) =>
+    down := up
+    down
+  }
+
   memAXI4SlaveNode :=
     AXI4UserYanker() :=
     AXI4Deinterleaver(L3BlockSize) :=
     TLToAXI4() :=
     TLWidthWidget(L3BusWidth / 8) :=
-    mem_xbar
+    delayer
 
   val memory = InModuleBody {
     memAXI4SlaveNode.makeIOs()
