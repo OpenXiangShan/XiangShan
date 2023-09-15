@@ -327,7 +327,7 @@ object TopMain extends App {
     })
     XiangShanStage.execute(otherArgs, Seq(
       ChiselGeneratorAnnotation(() => {
-        val soc = LazyModule(new XSTop())
+        val soc = DisableMonitors(p => LazyModule(new XSTop()(p)))
         soc.module
       })
     ))
