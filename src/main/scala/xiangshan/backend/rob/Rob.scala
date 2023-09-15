@@ -95,6 +95,15 @@ class RobEnqIO(implicit p: Parameters) extends XSBundle {
 
 class RobDispatchData(implicit p: Parameters) extends RobCommitInfo {}
 
+class RobCoreTopDownIO(implicit p: Parameters) extends XSBundle {
+  val robHeadVaddr = Valid(UInt(VAddrBits.W))
+  val robHeadPaddr = Valid(UInt(PAddrBits.W))
+}
+
+class RobDispatchTopDownIO extends Bundle {
+  val robHeadLsIssue = Output(Bool())
+}
+
 class RobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
     // for commits/flush
@@ -336,11 +345,17 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val headNotReady = Output(Bool())
     val cpu_halt = Output(Bool())
     val wfi_enable = Input(Bool())
+
     val debug_ls = Flipped(new DebugLSIO)
     val debugRobHead = Output(new DynInst)
     val debugEnqLsq = Input(new LsqEnqIO)
     val debugHeadLsIssue = Input(Bool())
     val lsTopdownInfo = Vec(LduCnt, Input(new LsTopdownInfo))
+    val debugTopDown = new Bundle {
+      val toCore = new RobCoreTopDownIO
+      val toDispatch = new RobDispatchTopDownIO
+      val robHeadLqIdx = Valid(new LqPtr)
+    }
   })
 
   val exuWBs: Seq[ValidIO[ExuOutput]] = io.writeback.filter(!_.bits.params.hasStdFu)
@@ -1225,25 +1240,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }
   }
 
-  val sourceVaddr = Wire(Valid(UInt(VAddrBits.W)))
-  sourceVaddr.valid := debug_lsTopdownInfo(deqPtr.value).s1.vaddr_valid
-  sourceVaddr.bits  := debug_lsTopdownInfo(deqPtr.value).s1.vaddr_bits
-  val sourcePaddr = Wire(Valid(UInt(PAddrBits.W)))
-  sourcePaddr.valid := debug_lsTopdownInfo(deqPtr.value).s2.paddr_valid
-  sourcePaddr.bits  := debug_lsTopdownInfo(deqPtr.value).s2.paddr_bits
-  val sourceLqIdx = Wire(Valid(new LqPtr))
-  sourceLqIdx.valid := debug_lqIdxValid(deqPtr.value)
-  sourceLqIdx.bits  := debug_microOp(deqPtr.value).lqIdx
-  val sourceHeadLsIssue = WireDefault(debug_lsIssue(deqPtr.value))
-  ExcitingUtils.addSource(sourceVaddr, s"rob_head_vaddr_${coreParams.HartId}", ExcitingUtils.Perf, true)
-  ExcitingUtils.addSource(sourcePaddr, s"rob_head_paddr_${coreParams.HartId}", ExcitingUtils.Perf, true)
-  ExcitingUtils.addSource(sourceLqIdx, s"rob_head_lqIdx_${coreParams.HartId}", ExcitingUtils.Perf, true)
-  ExcitingUtils.addSource(sourceHeadLsIssue, s"rob_head_ls_issue_${coreParams.HartId}", ExcitingUtils.Perf, true)
-  // dummy sink
-  ExcitingUtils.addSink(WireDefault(sourceLqIdx), s"rob_head_lqIdx_${coreParams.HartId}", ExcitingUtils.Perf)
-  ExcitingUtils.addSink(WireDefault(sourcePaddr), name=s"rob_head_paddr_${coreParams.HartId}", ExcitingUtils.Perf)
-  ExcitingUtils.addSink(WireDefault(sourceVaddr), name=s"rob_head_vaddr_${coreParams.HartId}", ExcitingUtils.Perf)
-  ExcitingUtils.addSink(WireDefault(sourceHeadLsIssue), name=s"rob_head_ls_issue_${coreParams.HartId}", ExcitingUtils.Perf)
+  // top-down info
+  io.debugTopDown.toCore.robHeadVaddr.valid := debug_lsTopdownInfo(deqPtr.value).s1.vaddr_valid
+  io.debugTopDown.toCore.robHeadVaddr.bits  := debug_lsTopdownInfo(deqPtr.value).s1.vaddr_bits
+  io.debugTopDown.toCore.robHeadPaddr.valid := debug_lsTopdownInfo(deqPtr.value).s2.paddr_valid
+  io.debugTopDown.toCore.robHeadPaddr.bits  := debug_lsTopdownInfo(deqPtr.value).s2.paddr_bits
+  io.debugTopDown.toDispatch.robHeadLsIssue := debug_lsIssue(deqPtr.value)
+  io.debugTopDown.robHeadLqIdx.valid := debug_lqIdxValid(deqPtr.value)
+  io.debugTopDown.robHeadLqIdx.bits  := debug_microOp(deqPtr.value).lqIdx
 
   /**
     * DataBase info:

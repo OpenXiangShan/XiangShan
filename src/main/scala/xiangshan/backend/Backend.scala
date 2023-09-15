@@ -16,7 +16,8 @@ import xiangshan.backend.exu.ExuBlock
 import xiangshan.backend.fu.vector.Bundles.{VConfig, VType}
 import xiangshan.backend.fu.{FenceIO, FenceToSbuffer, FuConfig, PerfCounterIO}
 import xiangshan.backend.issue.{CancelNetwork, Scheduler}
-import xiangshan.backend.rob.RobLsqIO
+import xiangshan.backend.rob.{RobCoreTopDownIO, RobLsqIO}
+import xiangshan.backend.dispatch.CoreDispatchTopDownIO
 import xiangshan.frontend.{FtqPtr, FtqRead}
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 
@@ -445,6 +446,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
 
   io.csrCustomCtrl := csrio.customCtrl
 
+  io.debugTopDown <> ctrlBlock.io.debugTopDown
+
   dontTouch(memScheduler.io)
   dontTouch(io.mem)
   dontTouch(dataPath.io.toMemExu)
@@ -525,4 +528,9 @@ class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle 
   val tlb = Output(new TlbCsrBundle)
 
   val csrCustomCtrl = Output(new CustomCSRCtrlIO)
+
+  val debugTopDown = new Bundle {
+    val fromRob = new RobCoreTopDownIO
+    val fromCore = new CoreDispatchTopDownIO
+  }
 }

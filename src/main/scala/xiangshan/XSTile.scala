@@ -138,8 +138,6 @@ class XSTile()(implicit p: Parameters) extends LazyModule
         recv := core.memBlock.pf_sender_opt.get
       })
     case None =>
-      val dummyMatch = WireDefault(false.B)
-      ExcitingUtils.addSource(dummyMatch, s"L2MissMatch_${p(XSCoreParamsKey).HartId}", ExcitingUtils.Perf, true)
   }
 
   misc.i_mmio_port := core.frontend.instrUncache.clientNode
@@ -150,6 +148,10 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       val hartId = Input(UInt(64.W))
       val reset_vector = Input(UInt(PAddrBits.W))
       val cpu_halt = Output(Bool())
+      val debugTopDown = new Bundle {
+        val robHeadPaddr = Valid(UInt(PAddrBits.W))
+        val l3MissMatch = Input(Bool())
+      }
     })
 
     dontTouch(io.hartId)
@@ -176,11 +178,17 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       misc.module.beu_errors.l2 <> 0.U.asTypeOf(misc.module.beu_errors.l2)
       core.module.io.l2_hint.bits.sourceId := l2cache.get.module.io.l2_hint.bits
       core.module.io.l2_hint.valid := l2cache.get.module.io.l2_hint.valid
+      core.module.io.debugTopDown.l2MissMatch := l2cache.get.module.io.debugTopDown.l2MissMatch.head
+      l2cache.get.module.io.debugTopDown.robHeadPaddr.head := core.module.io.debugTopDown.robHeadPaddr
     } else {
       misc.module.beu_errors.l2 <> 0.U.asTypeOf(misc.module.beu_errors.l2)
       core.module.io.l2_hint.bits.sourceId := DontCare
       core.module.io.l2_hint.valid := false.B
+      core.module.io.debugTopDown.l2MissMatch := false.B
     }
+
+    io.debugTopDown.robHeadPaddr := core.module.io.debugTopDown.robHeadPaddr
+    core.module.io.debugTopDown.l3MissMatch := io.debugTopDown.l3MissMatch
 
     // Modules are reset one by one
     // io_reset ----

@@ -27,6 +27,7 @@ import system.HasSoCParameter
 import utility._
 import utils._
 import xiangshan.backend._
+import xiangshan.backend.rob.RobCoreTopDownIO
 import xiangshan.cache.mmu._
 import xiangshan.frontend._
 import xiangshan.mem.L1PrefetchFuzzer
@@ -81,6 +82,12 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
     val beu_errors = Output(new XSL1BusErrors())
     val l2_hint = Input(Valid(new L2ToL1Hint()))
+    val debugTopDown = new Bundle {
+      val fromRob = new RobCoreTopDownIO
+      val robHeadPaddr = Valid(UInt(PAddrBits.W))
+      val l2MissMatch = Input(Bool())
+      val l3MissMatch = Input(Bool())
+    }
   })
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
@@ -174,6 +181,14 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   io.l2_pf_enable := backend.io.csrCustomCtrl.l2_pf_enable
+
+  // top-down info
+  memBlock.io.debugTopDown.robHeadVaddr := backend.io.debugTopDown.fromRob.robHeadVaddr
+  frontend.io.debugTopDown.robHeadVaddr := backend.io.debugTopDown.fromRob.robHeadVaddr
+  io.debugTopDown.robHeadPaddr := backend.io.debugTopDown.fromRob.robHeadPaddr
+  backend.io.debugTopDown.fromCore.l2MissMatch := io.debugTopDown.l2MissMatch
+  backend.io.debugTopDown.fromCore.l3MissMatch := io.debugTopDown.l3MissMatch
+  backend.io.debugTopDown.fromCore.fromMem := memBlock.io.debugTopDown.toCore
 
   // Modules are reset one by one
   val resetTree = ResetGenNode(
