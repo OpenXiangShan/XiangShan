@@ -678,6 +678,14 @@ object Bundles {
     val flag = UInt(1.W)
   }
 
+  class MemCoreTopDownIO extends Bundle {
+    val robHeadMissInDCache = Output(Bool())
+    val robHeadTlbReplay = Output(Bool())
+    val robHeadTlbMiss = Output(Bool())
+    val robHeadLoadVio = Output(Bool())
+    val robHeadLoadMSHR = Output(Bool())
+  }
+
   object LoadShouldCancel {
     def apply(loadDependency: Option[Seq[UInt]], ldCancel: Seq[LoadCancelIO]): Bool = {
       val ld1Cancel = loadDependency.map(deps =>

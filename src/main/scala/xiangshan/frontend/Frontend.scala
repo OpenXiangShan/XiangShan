@@ -58,6 +58,9 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
         val bpWrong = Output(UInt(XLEN.W))
       }
     }
+    val debugTopDown = new Bundle {
+      val robHeadVaddr = Flipped(Valid(UInt(VAddrBits.W)))
+    }
   })
 
   //decouped-frontend modules
@@ -185,6 +188,8 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   io.error <> RegNext(RegNext(icache.io.error))
 
   icache.io.hartId := io.hartId
+
+  itlbRepeater1.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr
 
   val frontendBubble = PopCount((0 until DecodeWidth).map(i => io.backend.cfVec(i).ready && !ibuffer.io.out(i).valid))
   XSPerfAccumulate("FrontendBubble", frontendBubble)

@@ -101,8 +101,6 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     case Some(l3) =>
       misc.l3_out :*= l3.node :*= misc.l3_banked_xbar
     case None =>
-      val dummyMatch = WireDefault(false.B)
-      tiles.map(_.HartId).foreach(hartId => ExcitingUtils.addSource(dummyMatch, s"L3MissMatch_${hartId}", ExcitingUtils.Perf, true))
   }
 
   lazy val module = new LazyRawModuleImp(this) {
@@ -173,6 +171,13 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       for(node <- core_rst_nodes){
         node.out.head._1 := false.B.asAsyncReset()
       }
+    }
+
+    l3cacheOpt match {
+      case Some(l3) =>
+        l3.module.io.debugTopDown.robHeadPaddr := core_with_l2.map(_.module.io.debugTopDown.robHeadPaddr)
+        core_with_l2.zip(l3.module.io.debugTopDown.addrMatch).foreach { case (tile, l3Match) => tile.module.io.debugTopDown.l3MissMatch := l3Match }
+      case None => core_with_l2.foreach(_.module.io.debugTopDown.l3MissMatch := false.B)
     }
 
     misc.module.debug_module_io.resetCtrl.hartIsInReset := core_with_l2.map(_.module.reset.asBool)

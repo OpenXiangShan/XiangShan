@@ -28,11 +28,11 @@ import xiangshan.backend.Bundles.{DecodedInst, DynInst, ExceptionInfo, ExuOutput
 import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfoBundle, LsTopdownInfo, MemCtrl, RedirectGenerator}
 import xiangshan.backend.datapath.DataConfig.VAddrData
 import xiangshan.backend.decode.{DecodeStage, FusionDecoder}
-import xiangshan.backend.dispatch.{Dispatch, DispatchQueue}
+import xiangshan.backend.dispatch.{CoreDispatchTopDownIO, Dispatch, DispatchQueue}
 import xiangshan.backend.fu.PFEvent
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.rename.{Rename, RenameTableWrapper, SnapshotGenerator}
-import xiangshan.backend.rob.{Rob, RobCSRIO, RobLsqIO, RobPtr}
+import xiangshan.backend.rob.{Rob, RobCSRIO, RobLsqIO, RobPtr, RobCoreTopDownIO}
 import xiangshan.frontend.{FtqRead, Ftq_RF_Components}
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
@@ -461,6 +461,10 @@ class CtrlBlockImp(
   rob.io.lsTopdownInfo := io.robio.lsTopdownInfo
   io.robio.robDeqPtr := rob.io.robDeqPtr
 
+  io.debugTopDown.fromRob := rob.io.debugTopDown.toCore
+  dispatch.io.debugTopDown.fromRob := rob.io.debugTopDown.toDispatch
+  dispatch.io.debugTopDown.fromCore := io.debugTopDown.fromCore
+
   io.perfInfo.ctrlInfo.robFull := RegNext(rob.io.robFull)
   io.perfInfo.ctrlInfo.intdqFull := RegNext(intDq.io.dqFull)
   io.perfInfo.ctrlInfo.fpdqFull := RegNext(fpDq.io.dqFull)
@@ -541,6 +545,11 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   val debug_fp_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
   val debug_vec_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
   val debug_vconfig_rat = Output(UInt(PhyRegIdxWidth.W)) // TODO: use me
+
+  val debugTopDown = new Bundle {
+    val fromRob = new RobCoreTopDownIO
+    val fromCore = new CoreDispatchTopDownIO
+  }
 
   val sqCanAccept = Input(Bool())
   val lqCanAccept = Input(Bool())
