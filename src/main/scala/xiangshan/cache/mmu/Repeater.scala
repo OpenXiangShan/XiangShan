@@ -134,6 +134,9 @@ class PTWFilterIO(Width: Int)(implicit p: Parameters) extends MMUIOBaseBundle {
   val tlb = Flipped(new VectorTlbPtwIO(Width))
   val ptw = new TlbPtwIO()
   val rob_head_miss_in_tlb = Output(Bool())
+  val debugTopDown = new Bundle {
+    val robHeadVaddr = Flipped(Valid(UInt(VAddrBits.W)))
+  }
 
   def apply(tlb: VectorTlbPtwIO, ptw: TlbPtwIO, sfence: SfenceBundle, csr: TlbCsrBundle): Unit = {
     this.tlb <> tlb
@@ -325,12 +328,9 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
     inflight_counter := 0.U
   }
 
-  val sourceVaddr = WireInit(0.U.asTypeOf(new Valid(UInt(VAddrBits.W))))
-
-  ExcitingUtils.addSink(sourceVaddr, s"rob_head_vaddr_${coreParams.HartId}", ExcitingUtils.Perf)
-
+  val robHeadVaddr = io.debugTopDown.robHeadVaddr
   io.rob_head_miss_in_tlb := VecInit(v.zip(vpn).map{case (vi, vpni) => {
-    vi && sourceVaddr.valid && vpni === get_pn(sourceVaddr.bits)
+    vi && robHeadVaddr.valid && vpni === get_pn(robHeadVaddr.bits)
   }}).asUInt.orR
 
   // perf

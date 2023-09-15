@@ -42,7 +42,7 @@ class Std(implicit p: Parameters) extends FunctionUnit {
   io.out.bits.data := io.in.bits.src(0)
 }
 
-class ooo_to_mem(implicit p: Parameters) extends XSBundle{
+class ooo_to_mem(implicit p: Parameters) extends XSBundle {
   val loadFastMatch = Vec(exuParameters.LduCnt, Input(UInt(exuParameters.LduCnt.W)))
   val loadFastFuOpType = Vec(exuParameters.LduCnt, Input(FuOpType()))
   val loadFastImm = Vec(exuParameters.LduCnt, Input(UInt(12.W)))
@@ -66,7 +66,7 @@ class ooo_to_mem(implicit p: Parameters) extends XSBundle{
   val issue = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, Flipped(DecoupledIO(new ExuInput)))
 }
 
-class mem_to_ooo(implicit p: Parameters ) extends XSBundle{
+class mem_to_ooo(implicit p: Parameters ) extends XSBundle {
   val otherFastWakeup = Vec(exuParameters.LduCnt + 2 * exuParameters.StuCnt, ValidIO(new MicroOp))
   val csrUpdate = new DistributedCSRUpdateReq
   val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize + 1).W))
@@ -89,6 +89,14 @@ class mem_to_ooo(implicit p: Parameters ) extends XSBundle{
     val sqCanAccept = Output(Bool())
   }
   val writeback = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, DecoupledIO(new ExuOutput))
+}
+
+class MemCoreTopDownIO extends Bundle {
+  val robHeadMissInDCache = Output(Bool())
+  val robHeadTlbReplay = Output(Bool())
+  val robHeadTlbMiss = Output(Bool())
+  val robHeadLoadVio = Output(Bool())
+  val robHeadLoadMSHR = Output(Bool())
 }
 
 class fetch_to_mem(implicit p: Parameters) extends XSBundle{
@@ -161,6 +169,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val lsTopdownInfo = Vec(exuParameters.LduCnt, Output(new LsTopdownInfo))
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val l2PfqBusy = Input(Bool())
+
+    val debugTopDown = new Bundle {
+      val robHeadVaddr = Flipped(Valid(UInt(VAddrBits.W)))
+      val toCore = new MemCoreTopDownIO
+    }
   })
 
   override def writebackSource1: Option[Seq[Seq[DecoupledIO[ExuOutput]]]] = Some(Seq(io.mem_to_ooo.writeback))
@@ -430,7 +443,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val dtlbRepeater2  = PTWRepeaterNB(passReady = false, ldtlbParams.fenceDelay, dtlbRepeater1.io.ptw, ptw.io.tlb(1), sfence, tlbcsr)
   val itlbRepeater2 = PTWRepeaterNB(passReady = false, itlbParams.fenceDelay, io.fetch_to_mem.itlb, ptw.io.tlb(0), sfence, tlbcsr)
 
-  ExcitingUtils.addSource(dtlbRepeater1.io.rob_head_miss_in_tlb, s"miss_in_dtlb_${coreParams.HartId}", ExcitingUtils.Perf, true)
+  lsq.io.debugTopDown.robHeadMissInDTlb := dtlbRepeater1.io.rob_head_miss_in_tlb
 
   // pmp
   val pmp = Module(new PMP())
@@ -899,6 +912,17 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.memInfo.sqFull := RegNext(lsq.io.sqFull)
   io.memInfo.lqFull := RegNext(lsq.io.lqFull)
   io.memInfo.dcacheMSHRFull := RegNext(dcache.io.mshrFull)
+
+  // top-down info
+  dcache.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr
+  dtlbRepeater1.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr
+  lsq.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr
+  io.debugTopDown.toCore.robHeadMissInDCache := dcache.io.debugTopDown.robHeadMissInDCache
+  io.debugTopDown.toCore.robHeadTlbReplay := lsq.io.debugTopDown.robHeadTlbReplay
+  io.debugTopDown.toCore.robHeadTlbMiss := lsq.io.debugTopDown.robHeadTlbMiss
+  io.debugTopDown.toCore.robHeadLoadVio := lsq.io.debugTopDown.robHeadLoadVio
+  io.debugTopDown.toCore.robHeadLoadMSHR := lsq.io.debugTopDown.robHeadLoadMSHR
+  dcache.io.debugTopDown.robHeadOtherReplay := lsq.io.debugTopDown.robHeadOtherReplay
 
   val ldDeqCount = PopCount(io.ooo_to_mem.issue.take(exuParameters.LduCnt).map(_.valid))
   val stDeqCount = PopCount(io.ooo_to_mem.issue.drop(exuParameters.LduCnt).map(_.valid))
