@@ -1236,6 +1236,9 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
   val s2xlate = UInt(2.W)
   val s1 = new PtwSectorResp()
   val s2 = new HptwResp()
+  def getVpn: UInt = {
+    Cat(s1.entry.tag, s1.ppn_low(OHToUInt(s1.pteidx)))
+  }
   def genPPNS2(i: Int):UInt = {
     val s1ppn = Cat(this.s1.entry.ppn, this.s1.ppn_low(i), 0.U(12.W)).asUInt
     val s2ppn = this.s2.entry.ppn

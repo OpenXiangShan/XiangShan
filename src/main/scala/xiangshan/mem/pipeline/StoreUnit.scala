@@ -116,6 +116,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   io.dcache.req.bits.cmd           := MemoryOpConstants.M_PFW
   io.dcache.req.bits.vaddr         := s0_vaddr
   io.dcache.req.bits.instrtype     := s0_instr_type
+  io.tlb.req.bits.hyperinst    := LSUOpType.isHsv(s0_in.uop.ctrl.fuOpType)
+  io.tlb.req.bits.hlvx         := false.B
 
   s0_out              := DontCare
   s0_out.vaddr        := s0_vaddr

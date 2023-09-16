@@ -392,6 +392,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_wr        := src.uop.ctrl.fuOpType === LSUOpType.prefetch_w
     out.sched_idx     := src.schedIndex
     out
+    s0_hlv           := LSUOpType.isHlv(src.uop.ctrl.fuOpType)
+    s0_hlvx          := LSUOpType.isHlvx(src.uop.ctrl.fuOpType)
   }
 
   def fromPrefetchSource(src: L1PrefetchReq): FlowSource = {
@@ -413,6 +415,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_wr        := src.is_store
     out.sched_idx     := 0.U
     out
+    s0_hlv           := false.B
+    s0_hlvx          := false.B
   }
 
   def fromIntIssueSource(src: ExuInput): FlowSource = {
@@ -434,6 +438,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_wr        := src.uop.ctrl.fuOpType === LSUOpType.prefetch_w
     out.sched_idx     := 0.U
     out
+    s0_hlv           := LSUOpType.isHlv(src.uop.ctrl.fuOpType)
+    s0_hlvx          := LSUOpType.isHlvx(src.uop.ctrl.fuOpType)
   }
 
   def fromVecIssueSource(): FlowSource = {
@@ -455,6 +461,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_wr        := false.B
     out.sched_idx     := 0.U
     out
+    s0_hlv           := false.B
+    s0_hlvx          := false.B
   }
 
   def fromLoadToLoadSource(src: LoadToLoadIO): FlowSource = {
@@ -480,6 +488,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_wr             := false.B
     out.sched_idx          := 0.U
     out
+    s0_hlv                := LSUOpType.isHlv(s0_uop.ctrl.fuOpType)
+    s0_hlvx               := LSUOpType.isHlvx(s0_uop.ctrl.fuOpType)
   }
 
   // set default
@@ -622,6 +632,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.sbuffer.vaddr := s1_vaddr
   io.sbuffer.paddr := s1_paddr_dup_lsu
   io.sbuffer.gpaddr := s1_gpaddr_dup_lsu
+  io.sbuffer.gpaddr:= s1_gpaddr_dup_lsu
   io.sbuffer.uop   := s1_in.uop
   io.sbuffer.sqIdx := s1_in.uop.sqIdx
   io.sbuffer.mask  := s1_in.mask
