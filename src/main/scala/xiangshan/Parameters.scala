@@ -399,7 +399,7 @@ case class XSCoreParameters
     Seq(
       WakeUpConfig(
         Seq("ALU0", "ALU1", "MUL0", "MUL1", "BJU0", "BJU1", "LDU0", "LDU1") ->
-        Seq("ALU0", "ALU1", "MUL0", "MUL1", "BJU0", "BJU1", "LDU0", "LDU1", "STA0", "STA1")
+        Seq("ALU0", "ALU1", "MUL0", "MUL1", "BJU0", "BJU1", "LDU0", "LDU1", "STA0", "STA1", "STD0", "STD1")
       ),
       WakeUpConfig(Seq("IMISC0") -> Seq("FEX0")),
     ).flatten
