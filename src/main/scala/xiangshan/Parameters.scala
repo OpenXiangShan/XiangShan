@@ -246,9 +246,6 @@ case class XSCoreParameters
     replacer = Some("setplru"),
     nMissEntries = 2,
     nProbeEntries = 2,
-    nPrefetchEntries = 12,
-    nPrefBufferEntries = 32,
-    hasPrefetch = true,
   ),
   dcacheParametersOpt: Option[DCacheParameters] = Some(DCacheParameters(
     tagECC = Some("secded"),
