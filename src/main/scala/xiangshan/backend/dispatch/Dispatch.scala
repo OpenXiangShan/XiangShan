@@ -113,7 +113,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val updatedCommitType = Wire(Vec(RenameWidth, CommitType()))
   val checkpoint_id = RegInit(0.U(64.W))
   checkpoint_id := checkpoint_id + PopCount((0 until RenameWidth).map(i =>
-    io.fromRename(i).fire()
+    io.fromRename(i).fire
   ))
 
 
@@ -276,10 +276,12 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val stall_int_dq = hasValidInstr && io.enqRob.canAccept && !io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
   val stall_fp_dq = hasValidInstr && io.enqRob.canAccept && io.toIntDq.canAccept && !io.toFpDq.canAccept && io.toLsDq.canAccept
   val stall_ls_dq = hasValidInstr && io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && !io.toLsDq.canAccept
-  XSPerfAccumulate("in", Mux(RegNext(io.fromRename(0).ready), PopCount(io.fromRename.map(_.valid)), 0.U))
-  XSPerfAccumulate("empty", !hasValidInstr)
-  XSPerfAccumulate("utilization", PopCount(io.fromRename.map(_.valid)))
-  XSPerfAccumulate("waitInstr", PopCount((0 until RenameWidth).map(i => io.fromRename(i).valid && !io.recv(i))))
+
+  XSPerfAccumulate("in_valid_count", PopCount(io.fromRename.map(_.valid)))
+  XSPerfAccumulate("in_fire_count", PopCount(io.fromRename.zip(io.recv).map { case (inst, ready) => inst.valid && ready }))
+  XSPerfAccumulate("in_valid_not_ready_count", PopCount(io.fromRename.zip(io.recv).map { case (inst, ready) => inst.valid && !ready }))
+  XSPerfAccumulate("wait_cycle", !io.fromRename.head.valid && allResourceReady)
+
   XSPerfAccumulate("stall_cycle_rob", stall_rob)
   XSPerfAccumulate("stall_cycle_int_dq", stall_int_dq)
   XSPerfAccumulate("stall_cycle_fp_dq", stall_fp_dq)

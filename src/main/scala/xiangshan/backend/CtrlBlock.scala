@@ -130,6 +130,8 @@ class CtrlBlockImp(
     val out = Wire(Valid(new Redirect()))
     out.valid := x.valid && x.bits.redirect.get.valid && x.bits.redirect.get.bits.cfiUpdate.isMisPred
     out.bits := x.bits.redirect.get.bits
+    out.bits.debugIsCtrl := true.B
+    out.bits.debugIsMemVio := false.B
     out
   })
 
@@ -139,6 +141,8 @@ class CtrlBlockImp(
     !memViolation.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect))
   )
   loadReplay.bits := RegEnable(memViolation.bits, memViolation.valid)
+  loadReplay.bits.debugIsCtrl := false.B
+  loadReplay.bits.debugIsMemVio := true.B
 
   val pdestReverse = rob.io.commits.info.map(info => info.pdest).reverse
 

@@ -137,13 +137,16 @@ class DecodeStage(implicit p: Parameters) extends XSModule
                Mux(valid, TopDownCounters.NoStall.id.U, in))
   }
 
-  XSPerfAccumulate("utilization", PopCount(io.in.map(_.valid)))
-  XSPerfAccumulate("waitInstr", PopCount((0 until DecodeWidth).map(i => io.in(i).valid && !io.in(i).ready)))
-  XSPerfAccumulate("stall_cycle", hasValid && !io.out(0).ready)
+  XSPerfAccumulate("in_valid_count", PopCount(io.in.map(_.valid)))
+  XSPerfAccumulate("in_fire_count", PopCount(io.in.map(_.fire)))
+  XSPerfAccumulate("in_valid_not_ready_count", PopCount(io.in.map(x => x.valid && !x.ready)))
+  XSPerfAccumulate("stall_cycle", io.in.head match { case x => x.valid && !x.ready})
+  XSPerfAccumulate("wait_cycle", !io.in.head.valid && io.out.head.ready)
 
-  XSPerfHistogram("slots_fire", PopCount(io.out.map(_.fire)), true.B, 0, DecodeWidth+1, 1)
-  XSPerfHistogram("slots_valid_pure", PopCount(io.in.map(_.valid)), io.out(0).fire, 0, DecodeWidth+1, 1)
-  XSPerfHistogram("slots_valid_rough", PopCount(io.in.map(_.valid)), true.B, 0, DecodeWidth+1, 1)
+  XSPerfHistogram("in_valid_range", PopCount(io.in.map(_.valid)), true.B, 0, DecodeWidth + 1, 1)
+  XSPerfHistogram("in_fire_range", PopCount(io.in.map(_.fire)), true.B, 0, DecodeWidth + 1, 1)
+  XSPerfHistogram("out_valid_range", PopCount(io.out.map(_.valid)), true.B, 0, DecodeWidth + 1, 1)
+  XSPerfHistogram("out_fire_range", PopCount(io.out.map(_.fire)), true.B, 0, DecodeWidth + 1, 1)
 
   val fusionValid = RegNext(io.fusion)
   val inFire = io.in.map(in => RegNext(in.valid && !in.ready))

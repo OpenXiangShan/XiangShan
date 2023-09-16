@@ -160,6 +160,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val needFpDest     = Wire(Vec(RenameWidth, Bool()))
   val needIntDest    = Wire(Vec(RenameWidth, Bool()))
   val hasValid = Cat(io.in.map(_.valid)).orR
+  private val inHeadValid = io.in.head.valid
 
   val isMove = Wire(Vec(RenameWidth, Bool()))
   isMove zip io.in.map(_.bits) foreach {
@@ -457,8 +458,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   XSPerfAccumulate("other_recovery_stall", otherRecStall)
   // freelist stall
   val notRecStall = !io.out.head.valid && !recStall
-  val intFlStall = notRecStall && hasValid && !intFreeList.io.canAllocate
-  val fpFlStall = notRecStall && hasValid && !fpFreeList.io.canAllocate
+  val intFlStall = notRecStall && inHeadValid && !intFreeList.io.canAllocate
+  val fpFlStall = notRecStall && inHeadValid && intFreeList.io.canAllocate && !fpFreeList.io.canAllocate
   // other stall
   val otherStall = notRecStall && !intFlStall && !fpFlStall
 
@@ -488,31 +489,41 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   XSDebug(p"inValidVec: ${Binary(Cat(io.in.map(_.valid)))}\n")
 
-  XSPerfAccumulate("in", Mux(RegNext(io.in(0).ready), PopCount(io.in.map(_.valid)), 0.U))
-  XSPerfAccumulate("utilization", PopCount(io.in.map(_.valid)))
-  XSPerfAccumulate("waitInstr", PopCount((0 until RenameWidth).map(i => io.in(i).valid && !io.in(i).ready)))
-  XSPerfAccumulate("stall_cycle_dispatch", hasValid && !io.out(0).ready && fpFreeList.io.canAllocate && intFreeList.io.canAllocate && !io.robCommits.isWalk)
-  XSPerfAccumulate("stall_cycle_fp", hasValid && io.out(0).ready && !fpFreeList.io.canAllocate && intFreeList.io.canAllocate && !io.robCommits.isWalk)
-  XSPerfAccumulate("stall_cycle_int", hasValid && io.out(0).ready && fpFreeList.io.canAllocate && !intFreeList.io.canAllocate && !io.robCommits.isWalk)
-  XSPerfAccumulate("stall_cycle_walk", hasValid && io.out(0).ready && fpFreeList.io.canAllocate && intFreeList.io.canAllocate && io.robCommits.isWalk)
+  XSPerfAccumulate("in_valid_count", PopCount(io.in.map(_.valid)))
+  XSPerfAccumulate("in_fire_count", PopCount(io.in.map(_.fire)))
+  XSPerfAccumulate("in_valid_not_ready_count", PopCount(io.in.map(x => x.valid && !x.ready)))
+  XSPerfAccumulate("wait_cycle", !io.in.head.valid && io.out.head.ready)
 
-  XSPerfHistogram("slots_fire", PopCount(io.out.map(_.fire)), true.B, 0, RenameWidth+1, 1)
-  // Explaination: when out(0) not fire, PopCount(valid) is not meaningfull
-  XSPerfHistogram("slots_valid_pure", PopCount(io.in.map(_.valid)), io.out(0).fire, 0, RenameWidth+1, 1)
-  XSPerfHistogram("slots_valid_rough", PopCount(io.in.map(_.valid)), true.B, 0, RenameWidth+1, 1)
+  // These stall reasons could overlap each other, but we configure the priority as fellows.
+  // walk stall > dispatch stall > int freelist stall > fp freelist stall
+  private val inHeadStall = io.in.head match { case x => x.valid && !x.ready }
+  private val stallForWalk      = inHeadValid &&  io.robCommits.isWalk
+  private val stallForDispatch  = inHeadValid && !io.robCommits.isWalk && !io.out(0).ready
+  private val stallForIntFL     = inHeadValid && !io.robCommits.isWalk &&  io.out(0).ready && !intFreeList.io.canAllocate
+  private val stallForFpFL      = inHeadValid && !io.robCommits.isWalk &&  io.out(0).ready &&  intFreeList.io.canAllocate && !fpFreeList.io.canAllocate
+  XSPerfAccumulate("stall_cycle",          inHeadStall)
+  XSPerfAccumulate("stall_cycle_walk",     stallForWalk)
+  XSPerfAccumulate("stall_cycle_dispatch", stallForDispatch)
+  XSPerfAccumulate("stall_cycle_int",      stallForIntFL)
+  XSPerfAccumulate("stall_cycle_fp",       stallForFpFL)
+
+  XSPerfHistogram("in_valid_range",  PopCount(io.in.map(_.valid)),  true.B, 0, DecodeWidth + 1, 1)
+  XSPerfHistogram("in_fire_range",   PopCount(io.in.map(_.fire)),   true.B, 0, DecodeWidth + 1, 1)
+  XSPerfHistogram("out_valid_range", PopCount(io.out.map(_.valid)), true.B, 0, DecodeWidth + 1, 1)
+  XSPerfHistogram("out_fire_range",  PopCount(io.out.map(_.fire)),  true.B, 0, DecodeWidth + 1, 1)
 
   XSPerfAccumulate("move_instr_count", PopCount(io.out.map(out => out.fire && out.bits.isMove)))
   val is_fused_lui_load = io.out.map(o => o.fire && o.bits.fuType === FuType.ldu.U && o.bits.srcType(0) === SrcType.imm)
   XSPerfAccumulate("fused_lui_load_instr_count", PopCount(is_fused_lui_load))
 
-
   val renamePerf = Seq(
     ("rename_in                  ", PopCount(io.in.map(_.valid & io.in(0).ready ))                                                               ),
     ("rename_waitinstr           ", PopCount((0 until RenameWidth).map(i => io.in(i).valid && !io.in(i).ready))                                  ),
-    ("rename_stall_cycle_dispatch", hasValid && !io.out(0).ready &&  fpFreeList.io.canAllocate &&  intFreeList.io.canAllocate && !io.robCommits.isWalk),
-    ("rename_stall_cycle_fp      ", hasValid &&  io.out(0).ready && !fpFreeList.io.canAllocate &&  intFreeList.io.canAllocate && !io.robCommits.isWalk),
-    ("rename_stall_cycle_int     ", hasValid &&  io.out(0).ready &&  fpFreeList.io.canAllocate && !intFreeList.io.canAllocate && !io.robCommits.isWalk),
-    ("rename_stall_cycle_walk    ", hasValid &&  io.out(0).ready &&  fpFreeList.io.canAllocate &&  intFreeList.io.canAllocate &&  io.robCommits.isWalk)
+    ("rename_stall               ", inHeadStall),
+    ("rename_stall_cycle_walk    ", inHeadValid &&  io.robCommits.isWalk),
+    ("rename_stall_cycle_dispatch", inHeadValid && !io.robCommits.isWalk && !io.out(0).ready),
+    ("rename_stall_cycle_int     ", inHeadValid && !io.robCommits.isWalk &&  io.out(0).ready && !intFreeList.io.canAllocate),
+    ("rename_stall_cycle_fp      ", inHeadValid && !io.robCommits.isWalk &&  io.out(0).ready && intFreeList.io.canAllocate && !fpFreeList.io.canAllocate),
   )
   val intFlPerf = intFreeList.getPerfEvents
   val fpFlPerf = fpFreeList.getPerfEvents
