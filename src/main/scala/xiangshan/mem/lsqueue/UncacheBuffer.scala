@@ -56,7 +56,6 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
     // flush this entry
     val flush = Output(Bool())
 
-    val commitFire = Output(Bool())
   })
 
   val req_valid = RegInit(false.B)
@@ -66,8 +65,6 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
   //
   val s_idle :: s_req :: s_resp :: s_wait :: Nil = Enum(4)
   val uncacheState = RegInit(s_idle)
-  val uncacheCommitFire = WireInit(false.B)
-  val uncacheCommitFired = RegInit(false.B)
   val uncacheData = Reg(io.uncache.resp.bits.data.cloneType)
 
   // enqueue
@@ -104,9 +101,6 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
     * (4) writeback to ROB (and other units): mark as writebacked
     * (5) ROB commits the instruction: same as normal instructions
     */
-  when (uncacheState === s_req) {
-    uncacheCommitFired := false.B
-  }
 
   io.rob.mmio := DontCare
   io.rob.uop := DontCare
@@ -180,7 +174,7 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
     ))
   val rdataPartialLoad = rdataHelper(selUop, rdataSel)
 
-  io.ldout.valid              := (uncacheState === s_wait) && !uncacheCommitFired
+  io.ldout.valid              := (uncacheState === s_wait)
   io.ldout.bits               := DontCare
   io.ldout.bits.uop           := selUop
   io.ldout.bits.uop.lqIdx     := req.uop.lqIdx
@@ -197,12 +191,8 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
   io.ld_raw_data.addrOffset := req.paddr
 
 
-  val dummyCtrl = RegNext(io.ldout.valid)
-  uncacheCommitFire := false.B
-  when (io.ldout.fire && dummyCtrl) {
+  when (io.ldout.fire) {
     req_valid := false.B
-    uncacheCommitFire := true.B
-    uncacheCommitFired := true.B
 
     XSInfo("int load miss write to cbd robidx %d lqidx %d pc 0x%x mmio %x\n",
       io.ldout.bits.uop.robIdx.asUInt,
@@ -212,7 +202,6 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
     )
   }
 
-  io.commitFire := uncacheCommitFire
   // end
 }
 
@@ -331,11 +320,10 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
   }
 
   //
-  val uncacheReq = Wire(Valid(io.uncache.req.bits.cloneType))
-  val ldout = Wire(Valid(io.ldout(0).bits.cloneType))
+  val uncacheReq = Wire(DecoupledIO(io.uncache.req.bits.cloneType))
+  val ldout = Wire(DecoupledIO(io.ldout(0).bits.cloneType))
   val ld_raw_data = Wire(io.ld_raw_data(0).cloneType)
   val lqLoadAddrTriggerHitVec = Wire(io.trigger(0).lqLoadAddrTriggerHitVec.cloneType)
-  val commitFire = Wire(Bool())
 
   // init
   uncacheReq.valid := false.B
@@ -344,7 +332,6 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
   ldout.bits       := DontCare
   ld_raw_data        := DontCare
   lqLoadAddrTriggerHitVec := DontCare
-  commitFire       := false.B
 
   entries.zipWithIndex.foreach {
     case (e, i) =>
@@ -362,16 +349,16 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
 
       // uncache logic
       e.io.rob <> io.rob
-      e.io.uncache.req.ready <> io.uncache.req.ready
-      e.io.ldout.ready <> io.ldout(0).ready
+      e.io.uncache.req.ready := uncacheReq.ready
+      e.io.ldout.ready := ldout.ready
 
       when (e.io.select) {
         uncacheReq.valid := e.io.uncache.req.valid
         uncacheReq.bits := e.io.uncache.req.bits
 
-        ldout       := e.io.ldout
+        ldout.valid   := e.io.ldout.valid
+        ldout.bits    := e.io.ldout.bits
         ld_raw_data   := e.io.ld_raw_data
-        commitFire  := e.io.commitFire
         // Read vaddr for mem exception
         // no inst will be commited 1 cycle before tval update
         // read vaddr for mmio, and only port 0 is used
@@ -383,10 +370,12 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
       }
   }
 
-  io.uncache.req.valid := RegNext(uncacheReq.valid)
-  io.uncache.req.bits  := RegNext(uncacheReq.bits)
-  io.ldout(0).valid    := RegNext(ldout.valid) && !RegNext(commitFire)
-  io.ldout(0).bits     := RegNext(ldout.bits)
+  // uncache Request
+  AddPipelineReg(uncacheReq, io.uncache.req, false.B)
+
+  // uncache Writeback
+  AddPipelineReg(ldout, io.ldout(0), false.B)
+
   io.ld_raw_data(0)      := RegNext(ld_raw_data)
   io.trigger(0).lqLoadAddrTriggerHitVec := RegNext(lqLoadAddrTriggerHitVec)
 
