@@ -102,6 +102,7 @@ class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
 
   val IPFReplacer         = Flipped(new IPFReplacer)
   val ICacheMainPipeInfo  = new ICacheMainPipeInfo
+  val stopIPFWrite        = Output(Bool())
 
   val mshr        = Vec(PortNumber, new ICacheMSHRBundle)
   val errors      = Output(Vec(PortNumber, new L1CacheErrorInfo))
@@ -281,6 +282,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_tlb_valid = VecInit((0 until PortNumber).map(i => ValidHoldBypass(tlb_valid_tmp(i), s1_fire)))
   val tlbRespAllValid = s1_tlb_valid(0) && (!s1_double_line || s1_double_line && s1_tlb_valid(1))
 
+  // stop IPFBuffer write meta when tlb miss in stage s1 for avild multi-hit
+  io.stopIPFWrite := s1_valid && !tlbRespAllValid
 
   def numOfStage = 3
   val itlbMissStage = RegInit(VecInit(Seq.fill(numOfStage - 1)(0.B)))

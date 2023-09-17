@@ -65,6 +65,7 @@ class PrefetchBufferIO(implicit p: Parameters) extends IPrefetchBundle {
   val dataWrite       = DecoupledIO(new ICacheDataWriteBundle)
   val IPFReplacer     = new IPFReplacer
   val ipfRecentWrite  = Output(Vec(2, new FilterInfo))
+  val stopIPFWrite    = Input(Bool())
 }
 
 class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
@@ -148,14 +149,14 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
 
   fromReplacer.vsetIdx := meta_buffer(curr_move_ptr).vSetIdx
 
-  toICacheMeta.valid := move_need
+  toICacheMeta.valid := move_need && !io.stopIPFWrite
   toICacheMeta.bits.generate(
     tag     = get_phy_tag(meta_buffer(curr_move_ptr).paddr),
     idx     = meta_buffer(curr_move_ptr).vSetIdx,
     waymask = fromReplacer.waymask,
     bankIdx = meta_buffer(curr_move_ptr).vSetIdx(0))
 
-  toICacheData.valid := move_need
+  toICacheData.valid := move_need && !io.stopIPFWrite
   toICacheData.bits.generate(
     data    = data_buffer(curr_move_ptr).cacheline,
     idx     = meta_buffer(curr_move_ptr).vSetIdx,
@@ -836,6 +837,7 @@ class FDIPPrefetchIO(edge: TLEdgeOut)(implicit p: Parameters) extends IPrefetchB
   val metaWrite       = DecoupledIO(new ICacheMetaWriteBundle)
   val dataWrite       = DecoupledIO(new ICacheDataWriteBundle)
   val IPFReplacer     = new IPFReplacer
+  val stopIPFWrite    = Input(Bool())
 
   /** Prefetch Queue IO */
   val PIQRead         = new PIQRead
@@ -884,6 +886,7 @@ class FDIPPrefetch(edge: TLEdgeOut)(implicit p: Parameters) extends IPrefetchMod
     // outside
     prefetchBuffer.io.hartId          <> io.hartId
     prefetchBuffer.io.fencei          <> io.fencei
+    prefetchBuffer.io.stopIPFWrite    <> io.stopIPFWrite
     prefetchBuffer.io.IPFBufferRead   <> io.IPFBufferRead
     prefetchBuffer.io.metaWrite       <> io.metaWrite
     prefetchBuffer.io.dataWrite       <> io.dataWrite

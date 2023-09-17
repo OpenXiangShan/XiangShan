@@ -558,6 +558,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   fdipPrefetch.io.hartId              := io.hartId
   fdipPrefetch.io.fencei              := io.fencei
+  fdipPrefetch.io.stopIPFWrite        := mainPipe.io.stopIPFWrite
   fdipPrefetch.io.ftqReq              <> io.prefetch
   fdipPrefetch.io.metaReadReq         <> prefetchMetaArray.io.read(0)
   fdipPrefetch.io.metaReadResp        <> prefetchMetaArray.io.readResp(0)
