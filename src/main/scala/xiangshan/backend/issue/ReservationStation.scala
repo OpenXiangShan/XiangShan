@@ -72,6 +72,7 @@ case class RSParams
 }
 
 class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with HasXSParameter {
+  override def shouldBeInlined: Boolean = false
   val params = new RSParams
 
   def addIssuePort(cfg: ExuConfig, deq: Int): Unit = {

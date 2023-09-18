@@ -32,6 +32,7 @@ import xiangshan.backend.fu.util.HasCSRConst
 import difftest._
 
 class L2TLB()(implicit p: Parameters) extends LazyModule with HasPtwConst {
+  override def shouldBeInlined: Boolean = false
 
   val node = TLClientNode(Seq(TLMasterPortParameters.v1(
     clients = Seq(TLMasterParameters.v1(
@@ -670,6 +671,7 @@ class FakePTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
 }
 
 class L2TLBWrapper()(implicit p: Parameters) extends LazyModule with HasXSParameter {
+  override def shouldBeInlined: Boolean = false
   val useSoftPTW = coreParams.softPTW
   val node = if (!useSoftPTW) TLIdentityNode() else null
   val ptw = if (!useSoftPTW) LazyModule(new L2TLB()) else null

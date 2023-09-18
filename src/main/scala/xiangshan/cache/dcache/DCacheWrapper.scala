@@ -755,6 +755,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
 }
 
 class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
+  override def shouldBeInlined: Boolean = false
 
   val reqFields: Seq[BundleFieldBase] = Seq(
     PrefetchField(),
@@ -1476,6 +1477,7 @@ class AMOHelper() extends ExtModule {
 }
 
 class DCacheWrapper()(implicit p: Parameters) extends LazyModule with HasXSParameter {
+  override def shouldBeInlined: Boolean = false
 
   val useDcache = coreParams.dcacheParametersOpt.nonEmpty
   val clientNode = if (useDcache) TLIdentityNode() else null

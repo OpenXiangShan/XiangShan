@@ -504,6 +504,7 @@ class ICacheIO(implicit p: Parameters) extends ICacheBundle
 }
 
 class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParameters {
+  override def shouldBeInlined: Boolean = false
 
   val clientParameters = TLMasterPortParameters.v1(
     Seq(TLMasterParameters.v1(

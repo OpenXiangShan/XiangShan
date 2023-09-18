@@ -81,6 +81,7 @@ class ExuWbArbiter(n: Int, hasFastUopOut: Boolean, fastVec: Seq[Boolean])(implic
 }
 
 class WbArbiter(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean)(implicit p: Parameters) extends LazyModule {
+  override def shouldBeInlined: Boolean = false
   val priorities = cfgs.map(c => if(isFp) c.wbFpPriority else c.wbIntPriority)
 
   // NOTE:
@@ -231,6 +232,7 @@ class WbArbiterWrapper(
   numIntOut: Int,
   numFpOut: Int
 )(implicit p: Parameters) extends LazyModule with HasWritebackSource {
+  override def shouldBeInlined: Boolean = false
   val numInPorts = exuConfigs.length
 
   val intConfigs = exuConfigs.filter(_.writeIntRf)
@@ -340,6 +342,7 @@ class WbArbiterWrapper(
 
 class Wb2Ctrl(configs: Seq[ExuConfig])(implicit p: Parameters) extends LazyModule
   with HasWritebackSource with HasWritebackSink {
+  override def shouldBeInlined: Boolean = false
   override def generateWritebackIO(
     thisMod: Option[HasWritebackSource],
     thisModImp: Option[HasWritebackSourceImp]

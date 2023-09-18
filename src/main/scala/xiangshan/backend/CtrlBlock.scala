@@ -219,6 +219,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
 
 class CtrlBlock(dpExuConfigs: Seq[Seq[Seq[ExuConfig]]])(implicit p: Parameters) extends LazyModule
   with HasWritebackSink with HasWritebackSource {
+  override def shouldBeInlined: Boolean = false
   val rob = LazyModule(new Rob)
 
   override def addWritebackSink(source: Seq[HasWritebackSource], index: Option[Seq[Int]]): HasWritebackSink = {

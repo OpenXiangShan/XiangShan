@@ -397,6 +397,7 @@ class RobFlushInfo(implicit p: Parameters) extends XSBundle {
 }
 
 class Rob(implicit p: Parameters) extends LazyModule with HasWritebackSink with HasXSParameter {
+  override def shouldBeInlined: Boolean = false
 
   lazy val module = new RobImp(this)
 

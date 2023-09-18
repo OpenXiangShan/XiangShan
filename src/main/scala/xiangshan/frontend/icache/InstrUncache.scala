@@ -140,6 +140,7 @@ class InstrUncacheIO(implicit p: Parameters) extends ICacheBundle {
 }
 
 class InstrUncache()(implicit p: Parameters) extends LazyModule with HasICacheParameters {
+  override def shouldBeInlined: Boolean = false
 
   val clientParameters = TLMasterPortParameters.v1(
     clients = Seq(TLMasterParameters.v1(
