@@ -106,6 +106,7 @@ class fetch_to_mem(implicit p: Parameters) extends XSBundle{
 
 class MemBlock()(implicit p: Parameters) extends LazyModule
   with HasXSParameter with HasWritebackSource {
+  override def shouldBeInlined: Boolean = false
 
   val dcache = LazyModule(new DCacheWrapper())
   val uncache = LazyModule(new Uncache())

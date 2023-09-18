@@ -130,6 +130,7 @@ abstract class XSBundle(implicit val p: Parameters) extends Bundle
 abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   with HasXSParameter with HasExuWbHelper
 {
+  override def shouldBeInlined: Boolean = false
   // interrupt sinks
   val clint_int_sink = IntSinkNode(IntSinkPortSimple(1, 2))
   val debug_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))

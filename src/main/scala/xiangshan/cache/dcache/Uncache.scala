@@ -177,6 +177,7 @@ class UncacheIO(implicit p: Parameters) extends DCacheBundle {
 // for Now, we only deal with TL-UL
 
 class Uncache()(implicit p: Parameters) extends LazyModule with HasXSParameter {
+  override def shouldBeInlined: Boolean = false
   def idRange: Int = UncacheBufferSize
 
   val clientParameters = TLMasterPortParameters.v1(
