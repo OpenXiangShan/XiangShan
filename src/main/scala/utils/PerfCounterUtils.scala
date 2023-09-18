@@ -68,7 +68,7 @@ object XSPerfHistogram extends HasRegularPerfName {
     enable: Bool, 
     start: Int, 
     stop: Int, 
-    step: Int, 
+    step: Int = 1,
     left_strict: Boolean = false,
     right_strict: Boolean = false
   )
