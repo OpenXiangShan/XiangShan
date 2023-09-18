@@ -104,10 +104,12 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
 
   io.rob.mmio := DontCare
   io.rob.uop := DontCare
+  val pendingld = RegNext(io.rob.pendingld)
+  val pendingPtr = RegNext(io.rob.pendingPtr)
 
   switch (uncacheState) {
     is (s_idle) {
-      when (RegNext(io.rob.pendingld && req_valid && req.uop.robIdx === io.rob.pendingPtr)) {
+      when (req_valid && pendingld && req.uop.robIdx === pendingPtr) {
         uncacheState := s_req
       }
     }
@@ -122,7 +124,7 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
       }
     }
     is (s_wait) {
-      when (RegNext(io.rob.commit)) {
+      when (io.ldout.fire) {
         uncacheState := s_idle // ready for next mmio
       }
     }
@@ -240,6 +242,7 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
     size = LoadUncacheBufferSize,
     allocWidth = LoadPipelineWidth,
     freeWidth = 4,
+    enablePreAlloc = true,
     moduleName = "UncacheBuffer freelist"
   ))
   freeList.io := DontCare
@@ -306,7 +309,7 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
   val enqIndexVec = Wire(Vec(LoadPipelineWidth, UInt()))
 
   for (w <- 0 until LoadPipelineWidth) {
-    freeList.io.allocateReq(w) := s2_enqueue(w)
+    freeList.io.allocateReq(w) := true.B
   }
 
   // freeList real-allocate
@@ -316,7 +319,9 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
 
   for (w <- 0 until LoadPipelineWidth) {
     enqValidVec(w) := s2_enqueue(w) && freeList.io.canAllocate(w)
-    enqIndexVec(w) := freeList.io.allocateSlot(w)
+
+    val offset = PopCount(s2_enqueue.take(w))
+    enqIndexVec(w) := freeList.io.allocateSlot(offset)
   }
 
   //
@@ -393,7 +398,7 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
   // dealloc logic
   entries.zipWithIndex.foreach {
     case (e, i) =>
-      when ((e.io.select && io.ldout(0).fire) || e.io.flush) {
+      when ((e.io.select && e.io.ldout.fire) || e.io.flush) {
         freeMaskVec(i) := true.B
       }
   }
