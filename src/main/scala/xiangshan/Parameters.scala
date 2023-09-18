@@ -125,7 +125,7 @@ case class XSCoreParameters
 
       (preds, ras.io.out)
     }),
-  JABlockNumWidth: Int = 5,
+  JABlockNumWidth: Int = 8,
   JAMinBlockNum: Int = 3, // > 3  
   IBufSize: Int = 48,
   DecodeWidth: Int = 6,

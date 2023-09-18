@@ -1353,7 +1353,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   when(do_commit){ // new commit
     when(jA_w_pending){ // JA has start
       when(!have_br_or_jmp){ // blocks need to jump over
-        jA_w_blockNum := jA_w_blockNum + 1.U
+        when(jA_w_blockNum === Cat(VecInit(Seq.fill(JABlockNumWidth)(1.B)))){ JA_w_end }
+        .otherwise{ jA_w_blockNum := jA_w_blockNum + 1.U }
       }
       .otherwise{ // JA end
         JA_w_end
