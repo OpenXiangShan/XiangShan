@@ -76,4 +76,7 @@ class JATable (implicit p: Parameters) extends XSModule {
   // read logic
   io.r_endpc := end_reg(rIdx1)(rIdx2)
   io.r_hit   := (tag_reg(rIdx1)(rIdx2) === rTag) && vld_reg(rIdx1)(rIdx2)
+
+  // perf
+  XSPerfHistogram("writeJATableBlocksNum", io.w_blckN, realWen, 0, (1 << JABlockNumWidth) - 1, 1)
 }

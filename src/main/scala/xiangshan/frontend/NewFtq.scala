@@ -596,7 +596,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   assert(!(jARealHit && jA_r_pending))
 
   //* manual ftq_pc_mem enq
-  when(new_entry_ready && jA_r_pending){
+  when(ftq_in_fire && jA_r_pending){
     assert(jA_nowPC < jA_r_endpc)
     when((jA_nowPC + MaxBasicBlockSize.U) === jA_r_endpc){
       jA_r_pending := false.B
@@ -640,6 +640,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_pc_mem.io.wen   := ftq_in_fire
   ftq_pc_mem.io.waddr := ftq_in_resp_idx
   ftq_pc_mem.io.wdata.fromBranchPrediction(ftq_in_resp)
+
+  XSPerfAccumulate("predJATotalSkippedBlocks", jA_r_pending && ftq_in_fire)
+  XSPerfAccumulate("hitJANum", jARealHit)
 
   //* manual lastStage enq
 
@@ -1345,7 +1348,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val jA_w_pending = RegInit(0.B)
   val jA_w_tgtpc    = RegInit(0.U(VAddrBits.W))
   val real_tk_or_jmp = update.jmp_taken || update.br_taken_mask.reduce(_||_)
-  val have_br_or_jmp = commitIsBranchQueue(RegNext(commPtr.value)).reduce(_||_) //update_ftb_entry.brValids.reduce(_|_) || update_ftb_entry.jmpValid
+  val have_br_or_jmp = commitIsBranchQueue(RegNext(commPtr.value)).reduce(_||_)
   jATable.io.wen := false.B
   jATable.io.w_tgtpc := jA_w_tgtpc
   jATable.io.w_endpc := update.pc
