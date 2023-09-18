@@ -516,11 +516,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
         }
         else {
           val target = mod.io.srcRegValue(idx)
-          val isFp = RegNext(mod.io.fromDispatch(idx).bits.ctrl.srcType(0) === SrcType.fp)
-          val fromFp = if (numIntRfPorts > 0) isFp else false.B
-          when (fromFp) {
-            target := fpRfPorts.take(target.length)
-          }
+          target := fpRfPorts.take(target.length)
         }
       }
       fpReadPort += numFpRfPorts
