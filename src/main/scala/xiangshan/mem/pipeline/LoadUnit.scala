@@ -990,7 +990,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_in           = RegEnable(s2_out, s2_fire)
   val s3_out          = Wire(Valid(new ExuOutput))
   val s3_dcache_rep   = RegEnable(s2_dcache_fast_rep && s2_troublem, false.B, s2_fire)
-  val s3_ld_valid_dup = RegEnable(s2_ld_valid_dup, 0.U.asTypeOf(s2_ld_valid_dup.cloneType), s2_fire)
+  val s3_ld_valid_dup = RegEnable(s2_ld_valid_dup, s2_fire)
   val s3_fast_rep     = Wire(Bool())
   val s3_troublem     = RegNext(s2_troublem)
   val s3_kill         = s3_in.uop.robIdx.needFlush(io.redirect)
