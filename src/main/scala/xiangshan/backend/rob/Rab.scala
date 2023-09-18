@@ -237,6 +237,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
 
   val allowEnqueue = RegInit(true.B)
   val numValidEntries = distanceBetween(enqPtr, deqPtr)
+
   allowEnqueue := numValidEntries + enqCount <= (size - RenameWidth).U && state === s_idle
   io.canEnq := allowEnqueue
   io.enqPtrVec := enqPtrVec
@@ -255,5 +256,19 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
 
   XSError(isBefore(enqPtr, deqPtr) && !isFull(enqPtr, deqPtr), "\ndeqPtr is older than enqPtr!\n")
 
-  QueuePerf(RabSize, numValidEntries, !allowEnqueue)
+  QueuePerf(RabSize, numValidEntries, numValidEntries === size.U)
+
+  XSPerfAccumulate("s_idle_to_idle", state === s_idle         && stateNext === s_idle)
+  XSPerfAccumulate("s_idle_to_swlk", state === s_idle         && stateNext === s_special_walk)
+  XSPerfAccumulate("s_idle_to_walk", state === s_idle         && stateNext === s_walk)
+  XSPerfAccumulate("s_swlk_to_idle", state === s_special_walk && stateNext === s_idle)
+  XSPerfAccumulate("s_swlk_to_swlk", state === s_special_walk && stateNext === s_special_walk)
+  XSPerfAccumulate("s_swlk_to_walk", state === s_special_walk && stateNext === s_walk)
+  XSPerfAccumulate("s_walk_to_idle", state === s_walk         && stateNext === s_idle)
+  XSPerfAccumulate("s_walk_to_swlk", state === s_walk         && stateNext === s_special_walk)
+  XSPerfAccumulate("s_walk_to_walk", state === s_walk         && stateNext === s_walk)
+
+  XSPerfAccumulate("disallow_enq_cycle", !allowEnqueue)
+  XSPerfAccumulate("disallow_enq_full_cycle", numValidEntries + enqCount > (size - RenameWidth).U)
+  XSPerfAccumulate("disallow_enq_not_idle_cycle", state =/= s_idle)
 }

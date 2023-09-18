@@ -90,6 +90,11 @@ class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) w
   })
   XSError(distanceBetween(tailPtr, debugArchHeadPtr) +& PopCount(debugUniqPR) =/= size.U, "Integer physical register should be in either arch RAT or arch free list\n")
 
+  QueuePerf(size = size, utilization = freeRegCntReg, full = freeRegCntReg === 0.U)
+
+  XSPerfAccumulate("allocation_blocked_cycle", !io.canAllocate)
+  XSPerfAccumulate("can_alloc_wrong", !io.canAllocate && freeRegCnt >= RenameWidth.U)
+
   val perfEvents = Seq(
     ("me_freelist_1_4_valid", freeRegCntReg <  (size / 4).U                                     ),
     ("me_freelist_2_4_valid", freeRegCntReg >= (size / 4).U && freeRegCntReg <= (size / 2).U    ),

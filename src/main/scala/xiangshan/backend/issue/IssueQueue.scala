@@ -578,6 +578,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
 
   // Todo: better counter implementation
   private val enqHasValid = validVec.take(params.numEnq).reduce(_ | _)
+  private val enqEntryValidCnt = PopCount(validVec.take(params.numEnq))
   private val othersValidCnt = PopCount(validVec.drop(params.numEnq))
   io.status.leftVec(0) := validVec.drop(params.numEnq).reduce(_ & _)
   for (i <- 0 until params.numEnq) {
@@ -592,18 +593,31 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   }
 
   // issue perf counter
+  // enq count
+  XSPerfAccumulate("enq_valid_cnt", PopCount(io.enq.map(_.fire)))
+  XSPerfAccumulate("enq_fire_cnt", PopCount(io.enq.map(_.fire)))
+  // valid count
+  XSPerfHistogram("enq_entry_valid_cnt", enqEntryValidCnt, true.B, 0, params.numEnq + 1)
+  XSPerfHistogram("other_entry_valid_cnt", othersValidCnt, true.B, 0, params.numEntries - params.numEnq + 1, step = params.numEntries / 8)
+  XSPerfHistogram("valid_cnt", PopCount(validVec), true.B, 0, params.numEntries + 1)
   // ready instr count
-  XSPerfHistogram("issue_ready_hist", PopCount(validVec.zip(canIssueVec).map(x => x._1 && x._2)), true.B, 0, params.numEntries, 1)
-  for (t <- FuType.functionNameMap.keys) {
-    val fuName = FuType.functionNameMap(t)
-    if (params.getFuCfgs.map(_.fuType == t).reduce(_ | _)) {
-      XSPerfHistogram(s"issue_ready_hist_futype_${fuName}", PopCount(validVec.zip(canIssueVec).zip(fuTypeVec).map{ case ((v, c), fu) => v && c && fu === t.U }), true.B, 0, params.numEntries, 1)
+  private val readyEntriesCnt = PopCount(validVec.zip(canIssueVec).map(x => x._1 && x._2))
+  XSPerfHistogram("ready_cnt", readyEntriesCnt, true.B, 0, params.numEntries + 1)
+  // only split when more than 1 func type
+  if (params.getFuCfgs.size > 0) {
+    for (t <- FuType.functionNameMap.keys) {
+      val fuName = FuType.functionNameMap(t)
+      if (params.getFuCfgs.map(_.fuType == t).reduce(_ | _)) {
+        XSPerfHistogram(s"ready_cnt_hist_futype_${fuName}", PopCount(validVec.zip(canIssueVec).zip(fuTypeVec).map { case ((v, c), fu) => v && c && fu === t.U }), true.B, 0, params.numEntries, 1)
+      }
     }
   }
 
   // deq instr count
-  XSPerfAccumulate("issue_instr_count", PopCount(io.deq.map(_.valid)))
-  XSPerfHistogram("issue_instr_count_hist", PopCount(io.deq.map(_.valid)), true.B, 0, params.numDeq, 1)
+  XSPerfAccumulate("issue_instr_pre_count", PopCount(io.deq.map(_.valid)))
+  XSPerfHistogram("issue_instr_pre_count_hist", PopCount(io.deq.map(_.valid)), true.B, 0, params.numDeq + 1, 1)
+  XSPerfAccumulate("issue_instr_count", PopCount(io.deqDelay.map(_.valid)))
+  XSPerfHistogram("issue_instr_count_hist", PopCount(io.deqDelay.map(_.valid)), true.B, 0, params.numDeq + 1, 1)
 
   // deq instr data source count
   XSPerfAccumulate("issue_datasource_reg", io.deq.map{ deq => 
@@ -620,29 +634,29 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   }.reduce(_ +& _))
 
   XSPerfHistogram("issue_datasource_reg_hist", io.deq.map{ deq => 
-    PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && ds.value === DataSource.reg && !SrcType.isNotReg(deq.bits.srcType(j)) }) 
-  }.reduce(_ +& _), true.B, 0, params.numDeq * params.numRegSrc, 1)
+    PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && ds.value === DataSource.reg && !SrcType.isNotReg(deq.bits.srcType(j)) })
+  }.reduce(_ +& _), true.B, 0, params.numDeq * params.numRegSrc + 1, 1)
   XSPerfHistogram("issue_datasource_bypass_hist", io.deq.map{ deq => 
     PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && ds.value === DataSource.bypass && !SrcType.isNotReg(deq.bits.srcType(j)) }) 
-  }.reduce(_ +& _), true.B, 0, params.numDeq * params.numRegSrc, 1)
+  }.reduce(_ +& _), true.B, 0, params.numDeq * params.numRegSrc + 1, 1)
   XSPerfHistogram("issue_datasource_forward_hist", io.deq.map{ deq => 
     PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && ds.value === DataSource.forward && !SrcType.isNotReg(deq.bits.srcType(j)) }) 
-  }.reduce(_ +& _), true.B, 0, params.numDeq * params.numRegSrc, 1)
+  }.reduce(_ +& _), true.B, 0, params.numDeq * params.numRegSrc + 1, 1)
   XSPerfHistogram("issue_datasource_noreg_hist", io.deq.map{ deq => 
     PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && SrcType.isNotReg(deq.bits.srcType(j)) }) 
-  }.reduce(_ +& _), true.B, 0, params.numDeq * params.numRegSrc, 1)
+  }.reduce(_ +& _), true.B, 0, params.numDeq * params.numRegSrc + 1, 1)
 
   // deq instr data source count for each futype
   for (t <- FuType.functionNameMap.keys) {
     val fuName = FuType.functionNameMap(t)
     if (params.getFuCfgs.map(_.fuType == t).reduce(_ | _)) {
-      XSPerfAccumulate(s"issue_datasource_reg_futype_${fuName}", io.deq.map{ deq => 
+      XSPerfAccumulate(s"issue_datasource_reg_futype_${fuName}", io.deq.map{ deq =>
         PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && ds.value === DataSource.reg && !SrcType.isNotReg(deq.bits.srcType(j)) && deq.bits.common.fuType === t.U }) 
       }.reduce(_ +& _))
-      XSPerfAccumulate(s"issue_datasource_bypass_futype_${fuName}", io.deq.map{ deq => 
+      XSPerfAccumulate(s"issue_datasource_bypass_futype_${fuName}", io.deq.map{ deq =>
         PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && ds.value === DataSource.bypass && !SrcType.isNotReg(deq.bits.srcType(j)) && deq.bits.common.fuType === t.U }) 
       }.reduce(_ +& _))
-      XSPerfAccumulate(s"issue_datasource_forward_futype_${fuName}", io.deq.map{ deq => 
+      XSPerfAccumulate(s"issue_datasource_forward_futype_${fuName}", io.deq.map{ deq =>
         PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && ds.value === DataSource.forward && !SrcType.isNotReg(deq.bits.srcType(j)) && deq.bits.common.fuType === t.U }) 
       }.reduce(_ +& _))
       XSPerfAccumulate(s"issue_datasource_noreg_futype_${fuName}", io.deq.map{ deq => 
@@ -651,16 +665,16 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
 
       XSPerfHistogram(s"issue_datasource_reg_hist_futype_${fuName}", io.deq.map{ deq => 
         PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && ds.value === DataSource.reg && !SrcType.isNotReg(deq.bits.srcType(j)) && deq.bits.common.fuType === t.U }) 
-      }.reduce(_ +& _), true.B, 0, params.numDeq * params.numRegSrc, 1)
+      }.reduce(_ +& _), true.B, 0, params.numDeq * params.numRegSrc + 1, 1)
       XSPerfHistogram(s"issue_datasource_bypass_hist_futype_${fuName}", io.deq.map{ deq => 
         PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && ds.value === DataSource.bypass && !SrcType.isNotReg(deq.bits.srcType(j)) && deq.bits.common.fuType === t.U }) 
-      }.reduce(_ +& _), true.B, 0, params.numDeq * params.numRegSrc, 1)
+      }.reduce(_ +& _), true.B, 0, params.numDeq * params.numRegSrc + 1, 1)
       XSPerfHistogram(s"issue_datasource_forward_hist_futype_${fuName}", io.deq.map{ deq => 
         PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && ds.value === DataSource.forward && !SrcType.isNotReg(deq.bits.srcType(j)) && deq.bits.common.fuType === t.U }) 
-      }.reduce(_ +& _), true.B, 0, params.numDeq * params.numRegSrc, 1)
+      }.reduce(_ +& _), true.B, 0, params.numDeq * params.numRegSrc + 1, 1)
       XSPerfHistogram(s"issue_datasource_noreg_hist_futype_${fuName}", io.deq.map{ deq => 
         PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && SrcType.isNotReg(deq.bits.srcType(j)) && deq.bits.common.fuType === t.U }) 
-      }.reduce(_ +& _), true.B, 0, params.numDeq * params.numRegSrc, 1)
+      }.reduce(_ +& _), true.B, 0, params.numDeq * params.numRegSrc + 1, 1)
     }
   }
 

@@ -100,8 +100,8 @@ class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) 
     }
   }
 
-  XSPerfAccumulate("utilization", freeRegCnt)
-  XSPerfAccumulate("allocation_blocked", !io.canAllocate)
+  XSPerfAccumulate("utilization", PopCount(io.allocateReq))
+  XSPerfAccumulate("allocation_blocked_cycle", !io.canAllocate)
   XSPerfAccumulate("can_alloc_wrong", !io.canAllocate && freeRegCnt >= RenameWidth.U)
 
   val freeRegCntReg = RegNext(freeRegCnt)
@@ -111,5 +111,8 @@ class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) 
     ("std_freelist_3_4_valid", freeRegCntReg >= (size / 2).U && freeRegCntReg < (size * 3 / 4).U),
     ("std_freelist_4_4_valid", freeRegCntReg >= (size * 3 / 4).U                                )
   )
+
+  QueuePerf(size = size, utilization = freeRegCntReg, full = freeRegCntReg === 0.U)
+
   generatePerfEvent()
 }
