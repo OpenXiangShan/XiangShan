@@ -435,6 +435,8 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
   // val call_is_rvc = Bool()
   val hit = Bool()
 
+  val predCycle = if (!env.FPGAPlatform) Some(UInt(64.W)) else None
+
   def br_slot_valids = slot_valids.init
   def tail_slot_valid = slot_valids.last
 
@@ -527,6 +529,7 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
     is_ret := entry.tailSlot.valid && entry.isRet
     last_may_be_rvi_call := entry.last_may_be_rvi_call
     is_br_sharing := entry.tailSlot.valid && entry.tailSlot.sharing
+    predCycle.map(_ := GTimer())
     
     val startLower        = Cat(0.U(1.W),    pc(instOffsetBits+log2Ceil(PredictWidth)-1, instOffsetBits))
     val endLowerwithCarry = Cat(entry.carry, entry.pftAddr)

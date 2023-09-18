@@ -29,7 +29,6 @@ import xiangshan.backend.fu.fpu.FMAMidResultIO
 import xiangshan.mem.{MemWaitUpdateReq, SqPtr}
 
 import scala.math.max
-import chisel3.ExcitingUtils
 
 case class RSParams
 (

@@ -24,10 +24,10 @@ import utils._
 import utility._
 import xiangshan._
 import xiangshan.backend.decode.{DecodeStage, FusionDecoder, ImmUnion}
-import xiangshan.backend.dispatch.{Dispatch, Dispatch2Rs, DispatchQueue}
+import xiangshan.backend.dispatch._
 import xiangshan.backend.fu.PFEvent
 import xiangshan.backend.rename.{Rename, RenameTableWrapper}
-import xiangshan.backend.rob.{DebugLSIO, LsTopdownInfo, Rob, RobCSRIO, RobLsqIO, RobPtr}
+import xiangshan.backend.rob._
 import xiangshan.frontend.{FtqPtr, FtqRead, Ftq_RF_Components}
 import xiangshan.mem.mdp.{LFST, SSIT, WaitTable}
 import xiangshan.ExceptionNO._
@@ -301,6 +301,10 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     val debug_fp_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
     val robDeqPtr = Output(new RobPtr)
     val robHeadLsIssue = Input(Bool())
+    val debugTopDown = new Bundle {
+      val fromRob = new RobCoreTopDownIO
+      val fromCore = new CoreDispatchTopDownIO
+    }
   })
 
   override def writebackSource: Option[Seq[Seq[Valid[ExuOutput]]]] = {
@@ -666,6 +670,10 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   rob.io.debugHeadLsIssue := io.robHeadLsIssue
   rob.io.lsTopdownInfo := io.robio.lsTopdownInfo
   io.robDeqPtr := rob.io.robDeqPtr
+
+  io.debugTopDown.fromRob := rob.io.debugTopDown.toCore
+  dispatch.io.debugTopDown.fromRob := rob.io.debugTopDown.toDispatch
+  dispatch.io.debugTopDown.fromCore := io.debugTopDown.fromCore
 
   io.perfInfo.ctrlInfo.robFull := RegNext(rob.io.robFull)
   io.perfInfo.ctrlInfo.intdqFull := RegNext(intDq.io.dqFull)

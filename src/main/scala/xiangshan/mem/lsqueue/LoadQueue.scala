@@ -77,7 +77,15 @@ class LqTriggerIO(implicit p: Parameters) extends XSBundle {
   val lqLoadAddrTriggerHitVec = Output(Vec(3, Bool()))
 }
 
-
+class LoadQueueTopDownIO(implicit p: Parameters) extends XSBundle {
+  val robHeadVaddr = Flipped(Valid(UInt(VAddrBits.W)))
+  val robHeadTlbReplay = Output(Bool())
+  val robHeadTlbMiss = Output(Bool())
+  val robHeadLoadVio = Output(Bool())
+  val robHeadLoadMSHR = Output(Bool())
+  val robHeadMissInDTlb = Input(Bool())
+  val robHeadOtherReplay = Output(Bool())
+}
 
 class LoadQueue(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
@@ -125,6 +133,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val tlbReplayDelayCycleCtrl = Vec(4, Input(UInt(ReSelectLen.W)))
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val lqEmpty = Output(Bool())
+    val debugTopDown = new LoadQueueTopDownIO
   })
 
   val loadQueueRAR = Module(new LoadQueueRAR)  //  read-after-read violation
@@ -244,6 +253,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueReplay.io.rawFull          <> loadQueueRAW.io.lqFull
   loadQueueReplay.io.l2_hint          <> io.l2_hint
   loadQueueReplay.io.tlbReplayDelayCycleCtrl <> io.tlbReplayDelayCycleCtrl
+
+  loadQueueReplay.io.debugTopDown <> io.debugTopDown
 
   val full_mask = Cat(loadQueueRAR.io.lqFull, loadQueueRAW.io.lqFull, loadQueueReplay.io.lqFull)
   XSPerfAccumulate("full_mask_000", full_mask === 0.U)

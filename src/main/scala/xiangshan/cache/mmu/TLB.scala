@@ -88,7 +88,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   if (q.outReplace) { io.replace <> entries.io.replace }
   for (i <- 0 until Width) {
     entries.io.r_req_apply(io.requestor(i).req.valid, get_pn(req_in(i).bits.vaddr), i)
-    entries.io.w_apply(refill, ptw.resp.bits, io.ptw_replenish)
+    entries.io.w_apply(refill, ptw.resp.bits)
     resp(i).bits.debug.isFirstIssue := RegNext(req(i).bits.debug.isFirstIssue)
     resp(i).bits.debug.robIdx := RegNext(req(i).bits.debug.robIdx)
   }
@@ -98,16 +98,14 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val hitVec = readResult.map(_._1)
   val missVec = readResult.map(_._2)
   val pmp_addr = readResult.map(_._3)
-  val static_pm = readResult.map(_._4)
-  val static_pm_v = readResult.map(_._5)
-  val perm = readResult.map(_._6)
+  val perm = readResult.map(_._4)
 
   // check pmp use paddr (for timing optization, use pmp_addr here)
   // check permisson
   (0 until Width).foreach{i =>
     pmp_check(pmp_addr(i), req_out(i).size, req_out(i).cmd, i)
     for (d <- 0 until nRespDups) {
-      perm_check(perm(i)(d), req_out(i).cmd, static_pm(i), static_pm_v(i), i, d)
+      perm_check(perm(i)(d), req_out(i).cmd, i, d)
     }
   }
 
@@ -123,19 +121,17 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
   /************************  main body above | method/log/perf below ****************************/
   def TLBRead(i: Int) = {
-    val (e_hit, e_ppn, e_perm, e_super_hit, e_super_ppn, static_pm) = entries.io.r_resp_apply(i)
+    val (e_hit, e_ppn, e_perm) = entries.io.r_resp_apply(i)
     val (p_hit, p_ppn, p_perm) = ptw_resp_bypass(get_pn(req_in(i).bits.vaddr))
     val enable = portTranslateEnable(i)
 
     val hit = e_hit || p_hit
     val miss = !hit && enable
-    val fast_miss = !(e_super_hit || p_hit) && enable
     hit.suggestName(s"hit_read_${i}")
     miss.suggestName(s"miss_read_${i}")
 
     val vaddr = SignExt(req_out(i).vaddr, PAddrBits)
     resp(i).bits.miss := miss
-    resp(i).bits.fast_miss := fast_miss
     resp(i).bits.ptwBack := ptw.resp.fire()
     resp(i).bits.memidx := RegNext(req_in(i).bits.memidx)
 
@@ -152,12 +148,9 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
     XSDebug(req_out_v(i), p"(${i.U}) hit:${hit} miss:${miss} ppn:${Hexadecimal(ppn(0))} perm:${perm(0)}\n")
 
-    val pmp_paddr = Mux(enable, Cat(Mux(p_hit, p_ppn, e_super_ppn), get_off(req_out(i).vaddr)), vaddr)
-    // pmp_paddr seems same to paddr functionally. It abandons normal_ppn for timing optimization.
-    // val pmp_paddr = Mux(enable, paddr, vaddr)
-    val static_pm_valid = !(e_super_hit || p_hit) && enable && q.partialStaticPMP.B
+    val pmp_paddr = resp(i).bits.paddr(0)
 
-    (hit, miss, pmp_paddr, static_pm, static_pm_valid, perm)
+    (hit, miss, pmp_paddr, perm)
   }
 
   def pmp_check(addr: UInt, size: UInt, cmd: UInt, idx: Int): Unit = {
@@ -167,7 +160,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     pmp(idx).bits.cmd := cmd
   }
 
-  def perm_check(perm: TlbPermBundle, cmd: UInt, spm: TlbPMBundle, spm_v: Bool, idx: Int, nDups: Int) = {
+  def perm_check(perm: TlbPermBundle, cmd: UInt, idx: Int, nDups: Int) = {
     // for timing optimization, pmp check is divided into dynamic and static
     // dynamic: superpage (or full-connected reg entries) -> check pmp when translation done
     // static: 4K pages (or sram entries) -> check pmp with pre-checked results
@@ -191,11 +184,9 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     // but ptw may also have access fault, then af happens, the translation is wrong.
     // In this case, pf has lower priority than af
 
-    resp(idx).bits.excp(nDups).af.ld    := (af || (spm_v && !spm.r)) && TlbCmd.isRead(cmd) && fault_valid
-    resp(idx).bits.excp(nDups).af.st    := (af || (spm_v && !spm.w)) && TlbCmd.isWrite(cmd) && fault_valid
-    resp(idx).bits.excp(nDups).af.instr := (af || (spm_v && !spm.x)) && TlbCmd.isExec(cmd) && fault_valid
-    resp(idx).bits.static_pm.valid := spm_v && fault_valid // ls/st unit should use this mmio, not the result from pmp
-    resp(idx).bits.static_pm.bits := !spm.c
+    resp(idx).bits.excp(nDups).af.ld    := af && TlbCmd.isRead(cmd) && fault_valid
+    resp(idx).bits.excp(nDups).af.st    := af && TlbCmd.isWrite(cmd) && fault_valid
+    resp(idx).bits.excp(nDups).af.instr := af && TlbCmd.isExec(cmd) && fault_valid
   }
 
   def handle_nonblock(idx: Int): Unit = {
@@ -236,7 +227,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       resp(idx).bits.miss := false.B // for blocked tlb, this is useless
       for (d <- 0 until nRespDups) {
         resp(idx).bits.paddr(d) := Cat(pte.genPPN(get_pn(req_out(idx).vaddr)), get_off(req_out(idx).vaddr))
-        perm_check(pte, req_out(idx).cmd, 0.U.asTypeOf(new TlbPMBundle), false.B, idx, d)
+        perm_check(pte, req_out(idx).cmd, idx, d)
       }
       pmp_check(resp(idx).bits.paddr(0), req_out(idx).size, req_out(idx).cmd, idx)
 
@@ -316,7 +307,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   }
   XSDebug(ptw.resp.valid, p"L2TLB resp:${ptw.resp.bits} (v:${ptw.resp.valid}r:${ptw.resp.ready}) \n")
 
-  println(s"${q.name}: normal page: ${q.normalNWays} ${q.normalAssociative} ${q.normalReplacer.get} super page: ${q.superNWays} ${q.superAssociative} ${q.superReplacer.get}")
+  println(s"${q.name}: page: ${q.NWays} ${q.Associative} ${q.Replacer.get}")
 
   if (env.EnableDifftest) {
     for (i <- 0 until Width) {
@@ -356,23 +347,13 @@ class TLBBLock(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Par
 class TlbReplace(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule {
   val io = IO(new TlbReplaceIO(Width, q))
 
-  if (q.normalAssociative == "fa") {
-    val re = ReplacementPolicy.fromString(q.normalReplacer, q.normalNWays)
-    re.access(io.normalPage.access.map(_.touch_ways))
-    io.normalPage.refillIdx := re.way
+  if (q.Associative == "fa") {
+    val re = ReplacementPolicy.fromString(q.Replacer, q.NWays)
+    re.access(io.page.access.map(_.touch_ways))
+    io.page.refillIdx := re.way
   } else { // set-acco && plru
-    val re = ReplacementPolicy.fromString(q.normalReplacer, q.normalNSets, q.normalNWays)
-    re.access(io.normalPage.access.map(_.sets), io.normalPage.access.map(_.touch_ways))
-    io.normalPage.refillIdx := { if (q.normalNWays == 1) 0.U else re.way(io.normalPage.chosen_set) }
-  }
-
-  if (q.superAssociative == "fa") {
-    val re = ReplacementPolicy.fromString(q.superReplacer, q.superNWays)
-    re.access(io.superPage.access.map(_.touch_ways))
-    io.superPage.refillIdx := re.way
-  } else { // set-acco && plru
-    val re = ReplacementPolicy.fromString(q.superReplacer, q.superNSets, q.superNWays)
-    re.access(io.superPage.access.map(_.sets), io.superPage.access.map(_.touch_ways))
-    io.superPage.refillIdx := { if (q.superNWays == 1) 0.U else re.way(io.superPage.chosen_set) }
+    val re = ReplacementPolicy.fromString(q.Replacer, q.NSets, q.NWays)
+    re.access(io.page.access.map(_.sets), io.page.access.map(_.touch_ways))
+    io.page.refillIdx := { if (q.NWays == 1) 0.U else re.way(io.page.chosen_set) }
   }
 }

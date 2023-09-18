@@ -120,8 +120,6 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
         recv := l3_pf_sender_opt.get
       })
     case None =>
-      val dummyMatch = WireDefault(false.B)
-      tiles.map(_.HartId).foreach(hartId => ExcitingUtils.addSource(dummyMatch, s"L3MissMatch_${hartId}", ExcitingUtils.Perf, true))
   }
 
   lazy val module = new LazyRawModuleImp(this) {
@@ -194,19 +192,23 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       }
     }
 
-    l3cacheOpt.map (l3 => {
-      l3.pf_recv_node match {
-        case Some(recv) =>
-          l3_pf_sender_opt.get.out.head._1.addr_valid := VecInit(memblock_pf_recv_nodes.map(_.get.in.head._1.addr_valid)).asUInt.orR
-          for (i <- 0 until NumCores) {
-            when(memblock_pf_recv_nodes(i).get.in.head._1.addr_valid) {
-              l3_pf_sender_opt.get.out.head._1.addr := memblock_pf_recv_nodes(i).get.in.head._1.addr
-              l3_pf_sender_opt.get.out.head._1.l2_pf_en := memblock_pf_recv_nodes(i).get.in.head._1.l2_pf_en
+    l3cacheOpt match {
+      case Some(l3) =>
+        l3.pf_recv_node match {
+          case Some(recv) =>
+            l3_pf_sender_opt.get.out.head._1.addr_valid := VecInit(memblock_pf_recv_nodes.map(_.get.in.head._1.addr_valid)).asUInt.orR
+            for (i <- 0 until NumCores) {
+              when(memblock_pf_recv_nodes(i).get.in.head._1.addr_valid) {
+                l3_pf_sender_opt.get.out.head._1.addr := memblock_pf_recv_nodes(i).get.in.head._1.addr
+                l3_pf_sender_opt.get.out.head._1.l2_pf_en := memblock_pf_recv_nodes(i).get.in.head._1.l2_pf_en
+              }
             }
-          }
-        case None => None
-      }
-    })
+          case None =>
+        }
+        l3.module.io.debugTopDown.robHeadPaddr := core_with_l2.map(_.module.io.debugTopDown.robHeadPaddr)
+        core_with_l2.zip(l3.module.io.debugTopDown.addrMatch).foreach { case (tile, l3Match) => tile.module.io.debugTopDown.l3MissMatch := l3Match }
+      case None => core_with_l2.foreach(_.module.io.debugTopDown.l3MissMatch := false.B)
+    }
 
     misc.module.debug_module_io.resetCtrl.hartIsInReset := core_with_l2.map(_.module.reset.asBool)
     misc.module.debug_module_io.clock := io.clock

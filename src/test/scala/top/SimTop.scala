@@ -86,19 +86,18 @@ class SimTop(implicit p: Parameters) extends Module {
 
   simMMIO.io.uart <> io.uart
 
-  if (!debugOpts.FPGAPlatform && (debugOpts.EnableDebug || debugOpts.EnablePerfDebug)) {
-    val timer = GTimer()
-    val logEnable = (timer >= io.logCtrl.log_begin) && (timer < io.logCtrl.log_end)
-    ExcitingUtils.addSource(logEnable, "DISPLAY_LOG_ENABLE")
-    ExcitingUtils.addSource(timer, "logTimestamp")
-  }
+  val timer = if (!debugOpts.FPGAPlatform && (debugOpts.EnableDebug || debugOpts.EnablePerfDebug)) GTimer() else WireDefault(0.U(64.W))
+  val logEnable =
+    if (!debugOpts.FPGAPlatform && (debugOpts.EnableDebug || debugOpts.EnablePerfDebug))
+      (timer >= io.logCtrl.log_begin) && (timer < io.logCtrl.log_end)
+    else WireDefault(false.B)
+  val clean = if (!debugOpts.FPGAPlatform && debugOpts.EnablePerfDebug) WireDefault(io.perfInfo.clean) else WireDefault(false.B)
+  val dump = if (!debugOpts.FPGAPlatform && debugOpts.EnablePerfDebug) WireDefault(io.perfInfo.dump) else WireDefault(false.B)
 
-  if (!debugOpts.FPGAPlatform && debugOpts.EnablePerfDebug) {
-    val clean = io.perfInfo.clean
-    val dump = io.perfInfo.dump
-    ExcitingUtils.addSource(clean, "XSPERF_CLEAN")
-    ExcitingUtils.addSource(dump, "XSPERF_DUMP")
-  }
+  dontTouch(timer)
+  dontTouch(logEnable)
+  dontTouch(clean)
+  dontTouch(dump)
 
   // Check and dispaly all source and sink connections
   ExcitingUtils.fixConnections()
