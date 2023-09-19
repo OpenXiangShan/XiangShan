@@ -954,7 +954,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val toBpuCfi = ifuRedirectToBpu.bits.cfiUpdate
   toBpuCfi.fromFtqRedirectSram(ftq_redirect_sram.io.rdata.head)
   when (ifuRedirectReg.bits.cfiUpdate.pd.isRet && ifuRedirectReg.bits.cfiUpdate.pd.valid) {
-    toBpuCfi.target := toBpuCfi.rasEntry.retAddr
+    toBpuCfi.target := toBpuCfi.topAddr
   }
 
   when (ifuRedirectReg.valid) {
