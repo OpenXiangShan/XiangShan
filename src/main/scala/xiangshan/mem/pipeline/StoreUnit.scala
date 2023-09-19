@@ -341,7 +341,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
 
       sx_ready(i) := !sx_valid(i) || cur_kill || (if (i == TotalDelayCycles) io.stout.ready else sx_ready(i+1))
       val sx_valid_can_go = prev_fire || cur_fire || cur_kill
-      sx_valid(i) := RegEnable(Mux(prev_fire, true.B, false.B), sx_valid_can_go)
+      sx_valid(i) := RegEnable(Mux(prev_fire, true.B, false.B), false.B, sx_valid_can_go)
       sx_in(i) := RegEnable(sx_in(i-1), prev_fire)
     }
   }
@@ -352,6 +352,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
 
   io.stout.valid := sx_last_valid && !sx_last_in.uop.robIdx.needFlush(io.redirect)
   io.stout.bits := sx_last_in
+  io.stout.bits.redirectValid := false.B
 
   io.debug_ls := DontCare
   io.debug_ls.s1.isTlbFirstMiss := io.tlb.resp.valid && io.tlb.resp.bits.miss && io.tlb.resp.bits.debug.isFirstIssue && !s1_in.isHWPrefetch
