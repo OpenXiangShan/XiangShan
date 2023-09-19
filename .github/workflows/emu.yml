@@ -3,7 +3,7 @@ name: EMU Test
 
 on:
   push:
-    branches: [ master, nanhu, nanhu-clockdiv2 ]
+    branches: [ master, nanhu ]
   pull_request:
     branches: [ master, nanhu ]
 
