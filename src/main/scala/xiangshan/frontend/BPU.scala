@@ -476,8 +476,8 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     )
   )
 
-  val jA_s1_target_valid = RegNext(io.ftq_to_bpu.jA_r_hit) && io.ftq_to_bpu.jA_r_hit
-  val jA_s1_target_data = RegEnable(VecInit(Seq.fill(numDup)(io.ftq_to_bpu.jA_r_endpc)), VecInit(Seq.fill(numDup)(0.U(VAddrBits.W))), io.ftq_to_bpu.jA_r_hit)
+  val jA_s1_target_valid = io.ftq_to_bpu.jA_r_pending
+  val jA_s1_target_data = RegEnable(VecInit(Seq.fill(numDup)(io.ftq_to_bpu.jA_r_endpc)), VecInit(Seq.fill(numDup)(0.U(VAddrBits.W))), io.ftq_to_bpu.jA_r_hit || io.ftq_to_bpu.jA_r_pending)
   for (((npcGen, s1_valid), s1_target) <- npcGen_dup zip s1_valid_dup zip (Mux(jA_s1_target_valid, jA_s1_target_data, resp.s1.getTarget)))
     npcGen.register(s1_valid, s1_target, Some("s1_target"), 4)
   for (((foldedGhGen, s1_valid), s1_predicted_fh) <- foldedGhGen_dup zip s1_valid_dup zip s1_predicted_fh_dup)
@@ -561,8 +561,10 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   val s2_redirect_s1_last_pred_vec_dup = preds_needs_redirect_vec_dup(previous_s1_pred_info, resp.s2)
 
+  val s2_redirect_block = RegInit(0.B)
+  s2_redirect_block := Mux(io.ftq_to_bpu.jA_r_hit, 1.B, Mux(s2_redirect_block && !io.ftq_to_bpu.jA_r_pending && s1_fire_dup(0), 0.B, s2_redirect_block))
   for (((s2_redirect, s2_fire), s2_redirect_s1_last_pred_vec) <- s2_redirect_dup zip s2_fire_dup zip s2_redirect_s1_last_pred_vec_dup)
-    s2_redirect := s2_fire && s2_redirect_s1_last_pred_vec.reduce(_||_)
+    s2_redirect := s2_fire && s2_redirect_s1_last_pred_vec.reduce(_||_) && !s2_redirect_block
 
 
   for (((npcGen, s2_redirect), s2_target) <- npcGen_dup zip s2_redirect_dup zip resp.s2.getTarget)

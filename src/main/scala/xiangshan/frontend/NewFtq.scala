@@ -174,6 +174,7 @@ class FtqToBpuIO(implicit p: Parameters) extends XSBundle {
   val enq_ptr = Output(new FtqPtr)
   // jump ahead
   val jA_r_hit  = Output(Bool())
+  val jA_r_pending = Output(Bool())
   val jA_r_endpc = Output(UInt(VAddrBits.W))
 }
 
@@ -592,18 +593,24 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   //* JA flush to Bpu
   io.toBpu.jA_r_endpc := Mux(jARealHit, jATable.io.r_endpc, jA_r_endpc)
-  io.toBpu.jA_r_hit := jARealHit || jA_r_pending
+  io.toBpu.jA_r_hit := jARealHit
+  io.toBpu.jA_r_pending := jA_r_pending
   assert(!(jARealHit && jA_r_pending))
 
   //* manual ftq_pc_mem enq
-  when(ftq_in_fire && jA_r_pending){
-    assert(jA_nowPC < jA_r_endpc)
-    when((jA_nowPC + MaxBasicBlockSize.U) === jA_r_endpc){
+  when(jA_r_pending){
+    when(!allowFtqIn){ // redirect flush
       jA_r_pending := false.B
-    }
-    .otherwise{
-      Gen_ftq_pc_mem_Entry_whenJA
-      assert(!jARealHit)
+      jA_enq_block := false.B
+    }.elsewhen(ftq_in_fire){
+      assert(jA_nowPC < jA_r_endpc)
+      when((jA_nowPC + MaxBasicBlockSize.U) === jA_r_endpc){
+        jA_r_pending := false.B
+      }
+      .otherwise{
+        Gen_ftq_pc_mem_Entry_whenJA
+        assert(!jARealHit)
+      }
     }
   }
 
