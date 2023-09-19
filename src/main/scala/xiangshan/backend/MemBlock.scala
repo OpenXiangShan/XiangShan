@@ -492,7 +492,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     }
     if (pftlbParams.outReplace) {
       val replace_pf = Module(new TlbReplace(1, pftlbParams))
-      replace_pf.io.apply_sep(dtlb_prefetch.map(_.replace), ptwio.resp.bits.data.entry.tag)
+      replace_pf.io.apply_sep(dtlb_prefetch.map(_.replace), ptwio.resp.bits.data.s1.entry.tag)
     }
   }
 

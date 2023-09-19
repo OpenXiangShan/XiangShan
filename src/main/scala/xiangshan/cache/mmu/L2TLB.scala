@@ -404,19 +404,28 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   if (env.EnableDifftest) {
     for (i <- 0 until PtwWidth) {
       val difftest = DifftestModule(new DiffL2TLBEvent)
-      difftest.coreid := io.hartId
+      difftest.clock := clock
+      difftest.coreid := p(XSCoreParamsKey).HartId.asUInt
       difftest.valid := io.tlb(i).resp.fire && !io.tlb(i).resp.bits.s1.af && !io.tlb(i).resp.bits.s2.gaf
       difftest.index := i.U
-      difftest.satp := io.csr.tlb.satp.ppn
-      difftest.vpn := Cat(io.tlb(i).resp.bits.entry.tag, 0.U(sectortlbwidth.W))
+      difftest.vpn := Cat(io.tlb(i).resp.bits.s1.entry.tag, 0.U(sectortlbwidth.W))
       for (j <- 0 until tlbcontiguous) {
         difftest.ppn(j) := Cat(io.tlb(i).resp.bits.entry.ppn, io.tlb(i).resp.bits.ppn_low(j))
         difftest.valididx(j) := io.tlb(i).resp.bits.valididx(j)
-        difftest.io.pteidx(j) := io.tlb(i).resp.bits.s1.pteidx(j)
+        difftest.pteidx(j) := io.tlb(i).resp.bits.s1.pteidx(j)
       }
-      difftest.perm := io.tlb(i).resp.bits.entry.perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt
-      difftest.level := io.tlb(i).resp.bits.entry.level.getOrElse(0.U.asUInt)
-      difftest.pf := io.tlb(i).resp.bits.pf
+      difftest.perm := io.tlb(i).resp.bits.s1.entry.perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt
+      difftest.level := io.tlb(i).resp.bits.s1.entry.level.getOrElse(0.U.asUInt)
+      difftest.pf := io.tlb(i).resp.bits.s1.pf
+      difftest.satp := Cat(io.csr.tlb.satp.mode, io.csr.tlb.satp.asid, io.csr.tlb.satp.ppn)
+      difftest.vsatp := Cat(io.csr.tlb.vsatp.mode, io.csr.tlb.vsatp.asid, io.csr.tlb.vsatp.ppn)
+      difftest.hgatp := Cat(io.csr.tlb.hgatp.mode, io.csr.tlb.hgatp.asid, io.csr.tlb.hgatp.ppn)
+      difftest.gvpn := io.tlb(i).resp.bits.s2.entry.tag
+      difftest.g_perm := io.tlb(i).resp.bits.s2.entry.perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt
+      difftest.g_level := io.tlb(i).resp.bits.s2.entry.level.getOrElse(0.U.asUInt)
+      difftest.s2ppn := io.tlb(i).resp.bits.s2.entry.ppn
+      difftest.gpf := io.tlb(i).resp.bits.s2.gpf
+      difftest.s2xlate := io.tlb(i).resp.bits.s2xlate
     }
   }
 
