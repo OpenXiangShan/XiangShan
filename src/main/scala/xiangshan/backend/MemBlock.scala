@@ -54,6 +54,7 @@ class ooo_to_mem(implicit p: Parameters) extends XSBundle{
    val pendingst = Input(Bool())
    val commit = Input(Bool())
    val pendingPtr = Input(new RobPtr)
+   val pendingPtrNext = Input(new RobPtr)
   }
 
   val isStore = Input(Bool())
@@ -213,9 +214,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val atomicsUnit = Module(new AtomicsUnit)
   val vectorLoadWrapperModule = Module(new VectorLoadWrapper)
   val vsFlowQueue = Module(new VsFlowQueue)
-  // TODO: VLSU, implement it
-  vsFlowQueue.io.issuePtrExt := DontCare
-  vsFlowQueue.io.flowPtrExt := DontCare
+  // // TODO: VLSU, implement it
+  // vsFlowQueue.io.issuePtrExt := DontCare
+  // vsFlowQueue.io.flowPtrExt := DontCare
 
   val vsUopQueue = Module(new VsUopQueue)
 
@@ -582,12 +583,20 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // vector store
   vsUopQueue.io.redirect <> redirect
   vsFlowQueue.io.redirect <> redirect
+  vsUopQueue.io.storeIn <> DontCare
   for (i <- 0 until VecStorePipelineWidth) {
-    // TODO: VLSU, implement it
-    vsUopQueue.io.storeIn(i) := DontCare
-    vsUopQueue.io.vstart(i) := DontCare
-    vsFlowQueue.io.uopIn(i) <> vsUopQueue.io.uop2Flow(i)
+    // vsUopQueue.io.vstart(i) := DontCare
+    vsFlowQueue.io.flowIn(i) <> vsUopQueue.io.flowIssue(i)
+    vsUopQueue.io.flowWriteback(i) <> vsFlowQueue.io.flowWriteback(i)
   }
+  vsUopQueue.io.uopWriteback <> DontCare
+  vsFlowQueue.io.rob.lcommit := io.ooo_to_mem.lsqio.lcommit
+  vsFlowQueue.io.rob.scommit := io.ooo_to_mem.lsqio.scommit
+  vsFlowQueue.io.rob.pendingld := io.ooo_to_mem.lsqio.pendingld
+  vsFlowQueue.io.rob.pendingst := io.ooo_to_mem.lsqio.pendingst
+  vsFlowQueue.io.rob.commit := io.ooo_to_mem.lsqio.commit
+  vsFlowQueue.io.rob.pendingPtr := io.ooo_to_mem.lsqio.pendingPtr
+  vsFlowQueue.io.rob.pendingPtrNext := io.ooo_to_mem.lsqio.pendingPtrNext
 
   // StoreUnit
   for (i <- 0 until exuParameters.StuCnt) {
@@ -605,9 +614,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stu.io.isFirstIssue <> io.rsfeedback(exuParameters.LduCnt + i).isFirstIssue
     stu.io.stin         <> io.ooo_to_mem.issue(exuParameters.LduCnt + i)
     // vector store
-    stu.io.vecstin           <> vsFlowQueue.io.storePipeOut(i)
-    stu.io.vec_isFirstIssue  <> vsFlowQueue.io.isFirstIssue(i)
-    stu.io.vec_feedback_slow <> vsFlowQueue.io.vsfqFeedback(i)
+    stu.io.vecstin           <> vsFlowQueue.io.pipeIssue(i)
+    // TODO: isFirstIssue is only used for debug
+    stu.io.vec_isFirstIssue  <> DontCare // vsFlowQueue.io.isFirstIssue(i)
+    stu.io.vec_feedback_slow <> vsFlowQueue.io.pipeFeedback(i)
 
     stu.io.lsq           <> lsq.io.sta.storeAddrIn(i)
     stu.io.lsq_replenish <> lsq.io.sta.storeAddrInRe(i)
@@ -715,7 +725,18 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   lsq.io.tl_d_channel <> dcache.io.lsu.tl_d_channel
 
   // LSQ to store buffer
-  lsq.io.sbuffer        <> sbuffer.io.in
+  // lsq.io.sbuffer        <> sbuffer.io.in
+  val sbReq = Seq(vsFlowQueue.io.sbuffer, lsq.io.sbuffer)
+  val sbReqValid = sbReq.map(_.head.valid)
+  sbuffer.io.in.zipWithIndex.foreach { case (in, i) =>
+    in.valid := ParallelPriorityMux(sbReqValid, sbReq.map(_(i).valid))
+    in.bits := ParallelPriorityMux(sbReqValid, sbReq.map(_(i).bits))
+  }
+  for (i <- 0 until sbuffer.io.in.length) {
+    for (j <- 0 until sbReq.length) {
+        sbReq(j)(i).ready := sbuffer.io.in(i).ready && (if (j == 0) true.B else !sbReqValid.take(j).reduce(_||_))
+    }
+  }
   lsq.io.sqEmpty        <> sbuffer.io.sqempty
   dcache.io.force_write := lsq.io.force_write
 

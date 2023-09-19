@@ -129,19 +129,32 @@ class VecExuOutput(implicit p: Parameters) extends ExuOutput with HasVLSUParamet
   val vec = new OnlyVecExuOutput
 }
 
-// Not used for now
-class Uop2Flow(implicit p: Parameters) extends ExuInput(isVpu = true) with HasVLSUParameters {
-  val vstart   = UInt(8.W)
-  val mask     = UInt(16.W)
-  val eew      = UInt(3.W)
-  val emul     = UInt(3.W)
-  val instType = UInt(3.W)
-  val uop_unit_stride_fof = Bool()
-  val uop_unit_whole_reg = Bool()
-  val agnedType = UInt(2.W)
-  val uop_segment_num = UInt(3.W)
+class VecStoreExuOutput(implicit p: Parameters) extends ExuOutput with HasVLSUParameters {
+  val uopQueuePtr = new VsUopPtr
 }
 
+// // Not used for now
+// class Uop2Flow(implicit p: Parameters) extends ExuInput(isVpu = true) with HasVLSUParameters {
+//   val vstart   = UInt(8.W)
+//   val mask     = UInt(16.W)
+//   val eew      = UInt(3.W)
+//   val emul     = UInt(3.W)
+//   val instType = UInt(3.W)
+//   val uop_unit_stride_fof = Bool()
+//   val uop_unit_whole_reg = Bool()
+//   val agnedType = UInt(2.W)
+//   val uop_segment_num = UInt(3.W)
+// }
+
+class VecFlowBundle(implicit p: Parameters) extends VLSUBundleWithMicroOp {
+  val vaddr             = UInt(VAddrBits.W)
+  val mask              = UInt(VLENB.W)
+  val reg_offset        = UInt(vOffsetBits.W)
+  val alignedType       = UInt(alignTypeBits.W)
+  val exp               = Bool()
+  val flow_idx          = UInt(elemIdxBits.W)
+  val is_first_ele      = Bool()
+}
 
 object MulNum {
   def apply (mul: UInt): UInt = { //mul means emul or lmul

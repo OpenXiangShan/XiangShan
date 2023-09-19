@@ -168,20 +168,8 @@ class VlFlowQueueIOBundle(implicit p: Parameters) extends VLSUBundle {
   val pipeResult = Vec(VecLoadPipelineWidth, Flipped(DecoupledIO(new VecExuOutput())))
 }
 
-class VlflowBundle(implicit p: Parameters) extends VLSUBundle {
-  val uop               = new MicroOp
-  val vaddr             = UInt(VAddrBits.W)
-  val mask              = UInt(VLENB.W)
+class VlflowBundle(implicit p: Parameters) extends VecFlowBundle {
   val unit_stride_fof   = Bool()
-  // val rob_idx_valid     = Vec(2,Bool())
-  // val rob_idx           = Vec(2,new RobPtr)
-  // val inner_idx         = Vec(2,UInt(3.W)) // what is this?????
-  val reg_offset        = UInt(vOffsetBits.W)
-  // val offset            = Vec(2,UInt(4.W))
-  val alignedType       = UInt(alignTypeBits.W)
-  val exp               = Bool()
-  val flow_idx          = UInt(elemIdxBits.W)
-  val is_first_ele      = Bool()
   val uopQueuePtr = new VluopPtr
 }
 

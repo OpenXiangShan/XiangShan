@@ -170,6 +170,7 @@ class RobLsqIO(implicit p: Parameters) extends XSBundle {
   val pendingst = Output(Bool())
   val commit = Output(Bool())
   val pendingPtr = Output(new RobPtr)
+  val pendingPtrNext = Output(new RobPtr)
 
   val mmio = Input(Vec(LoadPipelineWidth, Bool()))
   val uop = Input(Vec(LoadPipelineWidth, new MicroOp))
@@ -798,6 +799,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   io.lsq.pendingst := RegNext(io.commits.isCommit && io.commits.info(0).commitType === CommitType.STORE && valid(deqPtr.value))
   io.lsq.commit := RegNext(io.commits.isCommit && io.commits.commitValid(0))
   io.lsq.pendingPtr := RegNext(deqPtr)
+  io.lsq.pendingPtrNext := RegNext(deqPtrVec_next(0))
 
   /**
     * state changes
