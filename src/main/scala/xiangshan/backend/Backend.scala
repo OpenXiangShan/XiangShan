@@ -192,11 +192,11 @@ class BackendImp(outer: Backend)(implicit p: Parameters) extends LazyModuleImp(o
       val fencei = Output(Bool())
     }
     val debugTopDown = new Bundle {
-      val robHeadPaddr = Flipped(Valid(UInt(PAddrBits.W)))
-      val robHeadVaddr = Flipped(Valid(UInt(VAddrBits.W)))
-      val l2MissMatch = Output(Bool())
-      val l3MissMatch = Output(Bool())
-      val fromMem = new MemCoreTopDownIO
+      val robHeadPaddr = Valid(UInt(PAddrBits.W))
+      val robHeadVaddr = Valid(UInt(VAddrBits.W))
+      val l2MissMatch = Input(Bool())
+      val l3MissMatch = Input(Bool())
+      val fromMem = Flipped(new MemCoreTopDownIO)
     }
 
     // CSR related

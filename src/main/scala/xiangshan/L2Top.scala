@@ -141,8 +141,8 @@ class L2Top()(implicit p: Parameters) extends LazyModule
     })
     if (l2cache.isDefined) {
       l2_hint := l2cache.get.module.io.l2_hint
-      l2cache.get.module.io.debugTopDown.robHeadPaddr := debugTopDown.robHeadPaddr
-      debugTopDown.l2MissMatch := l2cache.get.module.io.debugTopDown.l2MissMatch
+      l2cache.get.module.io.debugTopDown.robHeadPaddr.head := debugTopDown.robHeadPaddr
+      debugTopDown.l2MissMatch := l2cache.get.module.io.debugTopDown.l2MissMatch.head
     } else {
       l2_hint := 0.U.asTypeOf(l2_hint)
       debugTopDown.l2MissMatch := false.B
