@@ -27,9 +27,7 @@ case class SMSParams
   pht_tag_bits: Int = 13,
   pht_lookup_queue_size: Int = 4,
   pf_filter_size: Int = 16,
-  train_filter_size: Int = 8,
-  agt_pc_hash_entry: Int = 8,
-  agt_pc_hash_bits: Int = 2
+  train_filter_size: Int = 8
 ) extends PrefetcherParams
 
 trait HasSMSModuleHelper extends HasCircularQueuePtrHelper with HasDCacheParameters
@@ -53,8 +51,6 @@ trait HasSMSModuleHelper extends HasCircularQueuePtrHelper with HasDCacheParamet
   val REGION_ADDR_PAGE_BIT = log2Up(dcacheParameters.pageSize / smsParams.region_size)
   val STRIDE_PC_BITS = smsParams.stride_pc_bits
   val STRIDE_BLK_ADDR_BITS = log2Up(smsParams.max_stride)
-  val AGT_PC_HASH_ENTRY = smsParams.agt_pc_hash_entry
-  val AGT_PC_HASH_BITS = smsParams.agt_pc_hash_bits
 
   def block_addr(x: UInt): UInt = {
     val offset = log2Up(dcacheParameters.blockBytes)
@@ -107,16 +103,6 @@ trait HasSMSModuleHelper extends HasCircularQueuePtrHelper with HasDCacheParamet
     pc(PHT_INDEX_BITS + 2 + PHT_TAG_BITS - 1, PHT_INDEX_BITS + 2)
   }
 
-  def pc_hash_for_index(pc: UInt): UInt = {
-    pc(log2Up(AGT_PC_HASH_ENTRY), 1) ^ pc(2 * log2Up(AGT_PC_HASH_ENTRY), log2Up(AGT_PC_HASH_ENTRY) + 1)
-  }
-
-  def pc_hash_for_match(pc: UInt): UInt = {
-    val low_bits = pc(2 * log2Up(AGT_PC_HASH_ENTRY) + AGT_PC_HASH_BITS, 2 * log2Up(AGT_PC_HASH_ENTRY) + 1)
-    val hi_bits = pc(2 * log2Up(AGT_PC_HASH_ENTRY) + 2 * AGT_PC_HASH_BITS, 2 * log2Up(AGT_PC_HASH_ENTRY) + AGT_PC_HASH_BITS + 1)
-    low_bits ^ hi_bits
-  }
-  
   def get_alias_bits(region_vaddr: UInt): UInt = region_vaddr(7, 6)
 }
 
@@ -248,7 +234,6 @@ class AGTEntry()(implicit p: Parameters) extends XSBundle with HasSMSModuleHelpe
   val region_tag = UInt(REGION_TAG_WIDTH.W)
   val region_offset = UInt(REGION_OFFSET.W)
   val access_cnt = UInt((REGION_BLKS-1).U.getWidth.W)
-  val pc_hash_vec = Vec(AGT_PC_HASH_ENTRY, UInt((AGT_PC_HASH_BITS + 1).W))
   val decr_mode = Bool()
 }
 
@@ -278,8 +263,6 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
       val region_m1_cross_page = Bool()
       val region_paddr = UInt(REGION_ADDR_BITS.W)
       val region_vaddr = UInt(REGION_ADDR_BITS.W)
-      val pc_hash_index = UInt(log2Up(AGT_PC_HASH_ENTRY).W)
-      val pc_hash_match = UInt(AGT_PC_HASH_BITS.W)
     }))
     val s1_sel_stride = Output(Bool())
     val s2_stride_hit = Input(Bool())
@@ -342,13 +325,6 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   // lookup_region + 1 == entry_region
   // lookup_region = entry_region - 1 => decr mode
   s0_agt_entry.decr_mode := !s0_region_hit && !any_region_m1_match && any_region_p1_match
-  for (i <- 0 until AGT_PC_HASH_ENTRY) {
-    when(i.U === s0_lookup.pc_hash_index) {
-      s0_agt_entry.pc_hash_vec(i) := Cat(1.U(1.W), s0_lookup.pc_hash_match)
-    }.otherwise {
-      s0_agt_entry.pc_hash_vec(i) := 0.U
-    }
-  }
   val s0_replace_way = replacement.way
   val s0_replace_mask = UIntToOH(s0_replace_way)
   // s0 hit a entry that may be replaced in s1
@@ -380,9 +356,6 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   val s1_region_paddr = RegEnable(s0_lookup.region_paddr, s0_lookup_valid)
   val s1_region_vaddr = RegEnable(s0_lookup.region_vaddr, s0_lookup_valid)
   val s1_region_offset = RegEnable(s0_lookup.region_offset, s0_lookup_valid)
-  val s1_pc_hash_index = RegEnable(s0_lookup.pc_hash_index, s0_lookup_valid)
-  val s1_pc_hash_match = RegEnable(s0_lookup.pc_hash_match, s0_lookup_valid)
-  val s1_trigger_access_flag = WireInit(false.B)
   for(i <- entries.indices){
     val alloc = s1_replace_mask(i) && s1_alloc
     val update = s1_update_mask(i) && s1_update
@@ -392,16 +365,6 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
       entries(i).access_cnt,
       entries(i).access_cnt + (s1_agt_entry.region_bits & (~entries(i).region_bits).asUInt).orR
     )
-    for(j <- 0 until AGT_PC_HASH_ENTRY) {
-      when(j.U === s1_pc_hash_index) {
-        when(entries(i).pc_hash_vec(j).head(1).asBool) {
-          s1_trigger_access_flag := entries(i).pc_hash_vec(j).tail(AGT_PC_HASH_BITS) =/= s1_pc_hash_match && update
-        }.otherwise {
-          s1_trigger_access_flag := update
-          update_entry.pc_hash_vec(j) := Cat(1.U(1.W), s1_pc_hash_match)
-        }
-      }
-    }
     valids(i) := valids(i) || alloc
     entries(i) := Mux(alloc, s1_alloc_entry, Mux(update, update_entry, entries(i)))
   }
@@ -470,7 +433,7 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   val s1_pht_lookup_valid = Wire(Bool())
   val s1_pht_lookup = Wire(new PhtLookup())
 
-  s1_pht_lookup_valid := (s1_alloc || s1_trigger_access_flag) && prev_lookup_valid
+  s1_pht_lookup_valid := !s1_pf_gen_valid && prev_lookup_valid
   s1_pht_lookup.pht_index := s1_agt_entry.pht_index
   s1_pht_lookup.pht_tag := s1_agt_entry.pht_tag
   s1_pht_lookup.region_vaddr := s1_region_vaddr
@@ -1151,8 +1114,6 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   val train_region_m1_cross_page_s0 = RegEnable(train_region_m1_cross_page, train_vld)
   val train_region_paddr_s0 = RegEnable(train_region_paddr, train_vld)
   val train_region_vaddr_s0 = RegEnable(train_region_vaddr, train_vld)
-  val train_agt_pc_hash_index = RegEnable(pc_hash_for_index(train_ld.pc), train_vld)
-  val train_agt_pc_hash_match = RegEnable(pc_hash_for_match(train_ld.pc), train_vld)
 
   active_gen_table.io.agt_en := io_agt_en
   active_gen_table.io.act_threshold := io_act_threshold
@@ -1170,8 +1131,6 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   active_gen_table.io.s0_lookup.bits.region_m1_cross_page := train_region_m1_cross_page_s0
   active_gen_table.io.s0_lookup.bits.region_paddr := train_region_paddr_s0
   active_gen_table.io.s0_lookup.bits.region_vaddr := train_region_vaddr_s0
-  active_gen_table.io.s0_lookup.bits.pc_hash_index := train_agt_pc_hash_index
-  active_gen_table.io.s0_lookup.bits.pc_hash_match := train_agt_pc_hash_match
   active_gen_table.io.s2_stride_hit := stride.io.s2_gen_req.valid
 
   stride.io.stride_en := io_stride_en
