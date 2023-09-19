@@ -29,7 +29,6 @@ import xiangshan.backend.fu.fpu.FMAMidResultIO
 import xiangshan.mem.{MemWaitUpdateReq, SqPtr}
 
 import scala.math.max
-import chisel3.ExcitingUtils
 
 case class RSParams
 (
@@ -73,6 +72,7 @@ case class RSParams
 }
 
 class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with HasXSParameter {
+  override def shouldBeInlined: Boolean = false
   val params = new RSParams
 
   def addIssuePort(cfg: ExuConfig, deq: Int): Unit = {

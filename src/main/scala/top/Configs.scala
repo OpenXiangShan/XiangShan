@@ -64,8 +64,8 @@ class MinimalConfig(n: Int = 1) extends Config(
         IssQueSize = 8,
         NRPhyRegs = 64,
         VirtualLoadQueueSize = 16,
-        LoadQueueRARSize = 16, 
-        LoadQueueRAWSize = 12, 
+        LoadQueueRARSize = 16,
+        LoadQueueRAWSize = 12,
         LoadQueueReplaySize = 8,
         LoadUncacheBufferSize = 8,
         LoadQueueNWriteBanks = 4, // NOTE: make sure that LoadQueue{RAR, RAW, Replay}Size is divided by LoadQueueNWriteBanks.
@@ -126,53 +126,32 @@ class MinimalConfig(n: Int = 1) extends Config(
           name = "itlb",
           fetchi = true,
           useDmode = false,
-          normalReplacer = Some("plru"),
-          superReplacer = Some("plru"),
-          normalNWays = 4,
-          normalNSets = 1,
-          superNWays = 2
+          NWays = 4,
         ),
         ldtlbParameters = TLBParameters(
           name = "ldtlb",
-          normalNSets = 16, // when da or sa
-          normalNWays = 1, // when fa or sa
-          normalAssociative = "sa",
-          normalReplacer = Some("setplru"),
-          superNWays = 4,
-          normalAsVictim = true,
+          NWays = 4,
           partialStaticPMP = true,
           outsideRecvFlush = true,
           outReplace = false
         ),
         sttlbParameters = TLBParameters(
           name = "sttlb",
-          normalNSets = 16, // when da or sa
-          normalNWays = 1, // when fa or sa
-          normalAssociative = "sa",
-          normalReplacer = Some("setplru"),
-          normalAsVictim = true,
-          superNWays = 4,
+          NWays = 4,
           partialStaticPMP = true,
           outsideRecvFlush = true,
           outReplace = false
         ),
         pftlbParameters = TLBParameters(
           name = "pftlb",
-          normalNSets = 16, // when da or sa
-          normalNWays = 1, // when fa or sa
-          normalAssociative = "sa",
-          normalReplacer = Some("setplru"),
-          normalAsVictim = true,
-          superNWays = 4,
+          NWays = 4,
           partialStaticPMP = true,
           outsideRecvFlush = true,
           outReplace = false
         ),
         btlbParameters = TLBParameters(
           name = "btlb",
-          normalNSets = 1,
-          normalNWays = 8,
-          superNWays = 2
+          NWays = 4,
         ),
         l2tlbParameters = L2TLBParameters(
           l1Size = 4,
@@ -324,6 +303,24 @@ class DefaultL3DebugConfig(n: Int = 1) extends Config(
   new WithL3DebugConfig ++ new BaseConfig(n)
 )
 
+class WithFuzzer extends Config((site, here, up) => {
+  case DebugOptionsKey => up(DebugOptionsKey).copy(
+    EnablePerfDebug = false,
+  )
+  case SoCParamsKey => up(SoCParamsKey).copy(
+    L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
+      enablePerf = false,
+    )),
+  )
+  case XSTileKey => up(XSTileKey).zipWithIndex.map{ case (p, i) =>
+    p.copy(
+      L2CacheParamsOpt = Some(up(XSTileKey)(i).L2CacheParamsOpt.get.copy(
+        enablePerf = false,
+      )),
+    )
+  }
+})
+
 class MinimalAliasDebugConfig(n: Int = 1) extends Config(
   new WithNKBL3(512, inclusive = false) ++
     new WithNKBL2(256, inclusive = false) ++
@@ -336,6 +333,11 @@ class MediumConfig(n: Int = 1) extends Config(
     ++ new WithNKBL2(512, inclusive = false)
     ++ new WithNKBL1D(128)
     ++ new BaseConfig(n)
+)
+
+class FuzzConfig(dummy: Int = 0) extends Config(
+  new WithFuzzer
+    ++ new DefaultConfig(1)
 )
 
 class DefaultConfig(n: Int = 1) extends Config(

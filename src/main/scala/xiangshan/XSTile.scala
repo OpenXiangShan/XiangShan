@@ -32,6 +32,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   with HasXSParameter
   with HasSoCParameter
 {
+  override def shouldBeInlined: Boolean = false
   private val core = LazyModule(new XSCore())
   private val l2top = LazyModule(new L2Top())
 
@@ -70,8 +71,6 @@ class XSTile()(implicit p: Parameters) extends LazyModule
         recv := core.memBlock.l2_pf_sender_opt.get
       })
     case None =>
-      val dummyMatch = WireDefault(false.B)
-      ExcitingUtils.addSource(dummyMatch, s"L2MissMatch_${p(XSCoreParamsKey).HartId}", ExcitingUtils.Perf, true)
   }
 
   // mmio
@@ -84,6 +83,10 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       val hartId = Input(UInt(64.W))
       val reset_vector = Input(UInt(PAddrBits.W))
       val cpu_halt = Output(Bool())
+      val debugTopDown = new Bundle {
+        val robHeadPaddr = Valid(UInt(PAddrBits.W))
+        val l3MissMatch = Input(Bool())
+      }
     })
 
     dontTouch(io.hartId)
@@ -112,6 +115,12 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     core.module.io.l2_hint.bits.sourceId := l2top.module.l2_hint.bits
     core.module.io.l2_hint.valid := l2top.module.l2_hint.valid
     core.module.io.l2PfqBusy := false.B
+
+    core.module.io.debugTopDown.l2MissMatch := l2top.module.debugTopDown.l2MissMatch
+    l2top.module.debugTopDown.robHeadPaddr := core.module.io.debugTopDown.robHeadPaddr
+
+    io.debugTopDown.robHeadPaddr := core.module.io.debugTopDown.robHeadPaddr
+    core.module.io.debugTopDown.l3MissMatch := io.debugTopDown.l3MissMatch
 
     // Modules are reset one by one
     // io_reset ----

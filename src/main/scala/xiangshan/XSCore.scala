@@ -129,6 +129,7 @@ abstract class XSBundle(implicit val p: Parameters) extends Bundle
 abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   with HasXSParameter with HasExuWbHelper
 {
+  override def shouldBeInlined: Boolean = false
   // outer facing nodes
   val frontend = LazyModule(new Frontend())
   val csrOut = BundleBridgeSource(Some(() => new DistributedCSRIO()))
@@ -163,6 +164,11 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val beu_errors = Output(new XSL1BusErrors())
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val l2PfqBusy = Input(Bool())
+    val debugTopDown = new Bundle {
+      val robHeadPaddr = Valid(UInt(PAddrBits.W))
+      val l2MissMatch = Input(Bool())
+      val l3MissMatch = Input(Bool())
+    }
   })
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
@@ -258,6 +264,14 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   memBlock.io.inner_l2_pf_enable := backend.io.l2_pf_enable
   io.l2_pf_enable := memBlock.io.outer_l2_pf_enable
+
+  // top-down info
+  memBlock.io.debugTopDown.robHeadVaddr := backend.io.debugTopDown.robHeadVaddr
+  frontend.io.debugTopDown.robHeadVaddr := backend.io.debugTopDown.robHeadVaddr
+  io.debugTopDown.robHeadPaddr := backend.io.debugTopDown.robHeadPaddr
+  backend.io.debugTopDown.l2MissMatch := io.debugTopDown.l2MissMatch
+  backend.io.debugTopDown.l3MissMatch := io.debugTopDown.l3MissMatch
+  backend.io.debugTopDown.fromMem := memBlock.io.debugTopDown.toCore
 
   // Modules are reset one by one
   // val resetTree = ResetGenNode(

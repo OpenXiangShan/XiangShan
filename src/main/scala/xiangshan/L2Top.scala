@@ -135,10 +135,17 @@ class L2Top()(implicit p: Parameters) extends LazyModule
     dontTouch(cpu_halt)
 
     val l2_hint = IO(ValidIO(UInt(32.W))) // TODO: parameterize this
+    val debugTopDown = IO(new Bundle {
+      val robHeadPaddr = Flipped(Valid(UInt(36.W)))
+      val l2MissMatch = Output(Bool())
+    })
     if (l2cache.isDefined) {
       l2_hint := l2cache.get.module.io.l2_hint
+      l2cache.get.module.io.debugTopDown.robHeadPaddr := debugTopDown.robHeadPaddr
+      debugTopDown.l2MissMatch := l2cache.get.module.io.debugTopDown.l2MissMatch
     } else {
       l2_hint := 0.U.asTypeOf(l2_hint)
+      debugTopDown.l2MissMatch := false.B
     }
   }
 }

@@ -435,6 +435,8 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
   // val call_is_rvc = Bool()
   val hit = Bool()
 
+  val predCycle = if (!env.FPGAPlatform) Some(UInt(64.W)) else None
+
   def br_slot_valids = slot_valids.init
   def tail_slot_valid = slot_valids.last
 
@@ -527,6 +529,7 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
     is_ret := entry.tailSlot.valid && entry.isRet
     last_may_be_rvi_call := entry.last_may_be_rvi_call
     is_br_sharing := entry.tailSlot.valid && entry.tailSlot.sharing
+    predCycle.map(_ := GTimer())
     
     val startLower        = Cat(0.U(1.W),    pc(instOffsetBits+log2Ceil(PredictWidth)-1, instOffsetBits))
     val endLowerwithCarry = Cat(entry.carry, entry.pftAddr)
@@ -545,8 +548,12 @@ class SpeculativeInfo(implicit p: Parameters) extends XSBundle
   val afhob = new AllAheadFoldedHistoryOldestBits(foldedGHistInfos)
   val lastBrNumOH = UInt((numBr+1).W)
   val histPtr = new CGHPtr
-  val rasSp = UInt(log2Ceil(RasSize).W)
-  val rasTop = new RASEntry
+  val ssp = UInt(log2Up(RasSize).W)
+  val sctr = UInt(log2Up(RasCtrSize).W)
+  val TOSW = new RASPtr
+  val TOSR = new RASPtr
+  val NOS = new RASPtr
+  val topAddr = UInt(VAddrBits.W)
 }
 
 @chiselName
@@ -633,6 +640,9 @@ class BranchPredictionUpdate(implicit p: Parameters) extends XSBundle with HasBP
   def is_jalr = ftb_entry.tailSlot.valid && ftb_entry.isJalr
   def is_call = ftb_entry.tailSlot.valid && ftb_entry.isCall
   def is_ret = ftb_entry.tailSlot.valid && ftb_entry.isRet
+
+  def is_call_taken = is_call && jmp_taken && cfi_idx.valid && cfi_idx.bits === ftb_entry.tailSlot.offset
+  def is_ret_taken = is_ret && jmp_taken && cfi_idx.valid && cfi_idx.bits === ftb_entry.tailSlot.offset
 
   def display(cond: Bool) = {
     XSDebug(cond, p"-----------BranchPredictionUpdate-----------\n")

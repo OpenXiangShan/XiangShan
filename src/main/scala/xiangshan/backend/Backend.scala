@@ -191,6 +191,13 @@ class BackendImp(outer: Backend)(implicit p: Parameters) extends LazyModuleImp(o
       val csrCtrl = Output(new CustomCSRCtrlIO)
       val fencei = Output(Bool())
     }
+    val debugTopDown = new Bundle {
+      val robHeadPaddr = Flipped(Valid(UInt(PAddrBits.W)))
+      val robHeadVaddr = Flipped(Valid(UInt(VAddrBits.W)))
+      val l2MissMatch = Output(Bool())
+      val l3MissMatch = Output(Bool())
+      val fromMem = new MemCoreTopDownIO
+    }
 
     // CSR related
     val perf = Input(new PerfCounterIO)
@@ -362,6 +369,12 @@ class BackendImp(outer: Backend)(implicit p: Parameters) extends LazyModuleImp(o
   mem.lsqio.exceptionAddr.isStore := CommitType.lsInstIsStore(ctrlBlock.io.robio.exception.bits.uop.ctrl.commitType)
   mem.debug_ls <> ctrlBlock.io.robio.debug_ls
   mem.lsTopdownInfo <> ctrlBlock.io.robio.lsTopdownInfo
+
+  io.debugTopDown.robHeadPaddr := ctrlBlock.io.debugTopDown.fromRob.robHeadPaddr
+  io.debugTopDown.robHeadVaddr := ctrlBlock.io.debugTopDown.fromRob.robHeadVaddr
+  ctrlBlock.io.debugTopDown.fromCore.l2MissMatch := io.debugTopDown.l2MissMatch
+  ctrlBlock.io.debugTopDown.fromCore.l3MissMatch := io.debugTopDown.l3MissMatch
+  ctrlBlock.io.debugTopDown.fromCore.fromMem := io.debugTopDown.fromMem
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   io.l2_pf_enable := csrioIn.customCtrl.l2_pf_enable

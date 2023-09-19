@@ -100,6 +100,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val force_write = Output(Bool())
     val lqEmpty = Output(Bool())
+    val debugTopDown = new LoadQueueTopDownIO
   })
 
   val loadQueue = Module(new LoadQueue)
@@ -235,6 +236,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     }
   }
 
+  loadQueue.io.debugTopDown <> io.debugTopDown
 
   assert(!(loadQueue.io.uncache.req.valid && storeQueue.io.uncache.req.valid))
   assert(!(loadQueue.io.uncache.resp.valid && storeQueue.io.uncache.resp.valid))

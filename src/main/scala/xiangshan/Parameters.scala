@@ -73,6 +73,8 @@ case class XSCoreParameters
   UbtbSize: Int = 256,
   FtbSize: Int = 2048,
   RasSize: Int = 32,
+  RasSpecSize: Int = 64,
+  RasCtrSize: Int = 8,
   CacheLineSize: Int = 512,
   FtbWays: Int = 4,
   TageTableInfos: Seq[Tuple3[Int,Int,Int]] =
@@ -205,21 +207,13 @@ case class XSCoreParameters
     name = "itlb",
     fetchi = true,
     useDmode = false,
-    normalNWays = 32,
-    normalReplacer = Some("plru"),
-    superNWays = 4,
-    superReplacer = Some("plru")
+    NWays = 48,
   ),
   itlbPortNum: Int = 2 + ICacheParameters().prefetchPipeNum + 1,
   ipmpPortNum: Int = 2 + ICacheParameters().prefetchPipeNum + 1,
   ldtlbParameters: TLBParameters = TLBParameters(
     name = "ldtlb",
-    normalNSets = 64,
-    normalNWays = 1,
-    normalAssociative = "sa",
-    normalReplacer = Some("setplru"),
-    superNWays = 16,
-    normalAsVictim = true,
+    NWays = 48,
     outReplace = false,
     partialStaticPMP = true,
     outsideRecvFlush = true,
@@ -227,12 +221,7 @@ case class XSCoreParameters
   ),
   sttlbParameters: TLBParameters = TLBParameters(
     name = "sttlb",
-    normalNSets = 64,
-    normalNWays = 1,
-    normalAssociative = "sa",
-    normalReplacer = Some("setplru"),
-    superNWays = 16,
-    normalAsVictim = true,
+    NWays = 48,
     outReplace = false,
     partialStaticPMP = true,
     outsideRecvFlush = true,
@@ -240,12 +229,7 @@ case class XSCoreParameters
   ),
   pftlbParameters: TLBParameters = TLBParameters(
     name = "pftlb",
-    normalNSets = 64,
-    normalNWays = 1,
-    normalAssociative = "sa",
-    normalReplacer = Some("setplru"),
-    superNWays = 16,
-    normalAsVictim = true,
+    NWays = 48,
     outReplace = false,
     partialStaticPMP = true,
     outsideRecvFlush = true,
@@ -254,9 +238,7 @@ case class XSCoreParameters
   refillBothTlb: Boolean = false,
   btlbParameters: TLBParameters = TLBParameters(
     name = "btlb",
-    normalNSets = 1,
-    normalNWays = 64,
-    superNWays = 4,
+    NWays = 48,
   ),
   l2tlbParameters: L2TLBParameters = L2TLBParameters(),
   NumPerfCounters: Int = 16,
@@ -371,6 +353,8 @@ trait HasXSParameter {
   val FtbSize = coreParams.FtbSize
   val FtbWays = coreParams.FtbWays
   val RasSize = coreParams.RasSize
+  val RasSpecSize = coreParams.RasSpecSize
+  val RasCtrSize = coreParams.RasCtrSize
 
   def getBPDComponents(resp_in: BranchPredictionResp, p: Parameters) = {
     coreParams.branchPredictor(resp_in, p)

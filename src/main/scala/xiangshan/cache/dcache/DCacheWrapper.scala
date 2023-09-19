@@ -734,6 +734,12 @@ class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
   val forward_mshr = Vec(LoadPipelineWidth, new LduToMissqueueForwardIO)
 }
 
+class DCacheTopDownIO(implicit p: Parameters) extends DCacheBundle {
+  val robHeadVaddr = Flipped(Valid(UInt(VAddrBits.W)))
+  val robHeadMissInDCache = Output(Bool())
+  val robHeadOtherReplay = Input(Bool())
+}
+
 class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val hartId = Input(UInt(8.W))
   val l2_pf_store_only = Input(Bool())
@@ -745,10 +751,11 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val lqEmpty = Input(Bool())
   val pf_ctrl = Output(new PrefetchControlBundle)
   val force_write = Input(Bool())
+  val debugTopDown = new DCacheTopDownIO
 }
 
-
 class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
+  override def shouldBeInlined: Boolean = false
 
   val reqFields: Seq[BundleFieldBase] = Seq(
     PrefetchField(),
@@ -833,6 +840,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   missQueue.io.lqEmpty := io.lqEmpty
   missQueue.io.hartId := io.hartId
   missQueue.io.l2_pf_store_only := RegNext(io.l2_pf_store_only, false.B)
+  missQueue.io.debugTopDown <> io.debugTopDown
   io.memSetPattenDetected := missQueue.io.memSetPattenDetected
 
   val errors = ldu.map(_.io.error) ++ // load error
@@ -1469,6 +1477,7 @@ class AMOHelper() extends ExtModule {
 }
 
 class DCacheWrapper()(implicit p: Parameters) extends LazyModule with HasXSParameter {
+  override def shouldBeInlined: Boolean = false
 
   val useDcache = coreParams.dcacheParametersOpt.nonEmpty
   val clientNode = if (useDcache) TLIdentityNode() else null

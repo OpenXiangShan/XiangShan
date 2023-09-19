@@ -189,6 +189,16 @@ class RobEnqIO(implicit p: Parameters) extends XSBundle {
   val resp = Vec(RenameWidth, Output(new RobPtr))
 }
 
+class RobCoreTopDownIO(implicit p: Parameters) extends XSBundle {
+  val robHeadVaddr = Valid(UInt(VAddrBits.W))
+  val robHeadPaddr = Valid(UInt(PAddrBits.W))
+}
+
+class RobDispatchTopDownIO extends Bundle {
+  val robTrueCommit = Output(UInt(64.W))
+  val robHeadLsIssue = Output(Bool())
+}
+
 class RobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
     // for commits/flush
@@ -387,6 +397,7 @@ class RobFlushInfo(implicit p: Parameters) extends XSBundle {
 }
 
 class Rob(implicit p: Parameters) extends LazyModule with HasWritebackSink with HasXSParameter {
+  override def shouldBeInlined: Boolean = false
 
   lazy val module = new RobImp(this)
 
@@ -421,11 +432,17 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     val headNotReady = Output(Bool())
     val cpu_halt = Output(Bool())
     val wfi_enable = Input(Bool())
+
     val debug_ls = Flipped(new DebugLSIO)
     val debugRobHead = Output(new MicroOp)
     val debugEnqLsq = Input(new LsqEnqIO)
     val debugHeadLsIssue = Input(Bool())
     val lsTopdownInfo = Vec(exuParameters.LduCnt, Input(new LsTopdownInfo))
+    val debugTopDown = new Bundle {
+      val toCore = new RobCoreTopDownIO
+      val toDispatch = new RobDispatchTopDownIO
+      val robHeadLqIdx = Valid(new LqPtr)
+    }
   })
 
   def selectWb(index: Int, func: Seq[ExuConfig] => Boolean): Seq[(Seq[ExuConfig], ValidIO[ExuOutput])] = {
@@ -1085,7 +1102,6 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   val commitDebugExu = deqPtrVec.map(_.value).map(debug_exuDebug(_))
   val commitDebugUop = deqPtrVec.map(_.value).map(debug_microOp(_))
   val commitDebugLsInfo = deqPtrVec.map(_.value).map(debug_lsInfo(_))
-  ExcitingUtils.addSource(ifCommitReg(trueCommitCnt), "ROBTrueCommit_hart" + p(XSCoreParamsKey).HartId.toString, ExcitingUtils.Perf)
   XSPerfAccumulate("clock_cycle", 1.U)
   QueuePerf(RobSize, PopCount((0 until RobSize).map(valid(_))), !allowEnqueue)
   XSPerfAccumulate("commitUop", ifCommit(commitCnt))
@@ -1151,23 +1167,15 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     }
   }
 
-  val sourceVaddr = Wire(Valid(UInt(VAddrBits.W)))
-  sourceVaddr.valid := debug_lsTopdownInfo(deqPtr.value).s1.vaddr_valid
-  sourceVaddr.bits  := debug_lsTopdownInfo(deqPtr.value).s1.vaddr_bits
-  val sourcePaddr = Wire(Valid(UInt(PAddrBits.W)))
-  sourcePaddr.valid := debug_lsTopdownInfo(deqPtr.value).s2.paddr_valid
-  sourcePaddr.bits  := debug_lsTopdownInfo(deqPtr.value).s2.paddr_bits
-  val sourceLqIdx = Wire(Valid(new LqPtr))
-  sourceLqIdx.valid := debug_lqIdxValid(deqPtr.value)
-  sourceLqIdx.bits  := debug_microOp(deqPtr.value).lqIdx
-  val sourceHeadLsIssue = WireDefault(debug_lsIssue(deqPtr.value))
-  ExcitingUtils.addSource(sourceVaddr, s"rob_head_vaddr_${coreParams.HartId}", ExcitingUtils.Perf, true)
-  ExcitingUtils.addSource(sourcePaddr, s"rob_head_paddr_${coreParams.HartId}", ExcitingUtils.Perf, true)
-  println("Warning: delete all the ExcitingUtils for top-down in FPGA platform, please check CPL2 and HuanCun as well")
-  ExcitingUtils.addSource(sourceLqIdx, s"rob_head_lqIdx_${coreParams.HartId}", ExcitingUtils.Perf, true)
-  ExcitingUtils.addSource(sourceHeadLsIssue, s"rob_head_ls_issue_${coreParams.HartId}", ExcitingUtils.Perf, true)
-  // dummy sink
-  ExcitingUtils.addSink(WireDefault(sourceLqIdx), s"rob_head_lqIdx_${coreParams.HartId}", ExcitingUtils.Perf)
+  // top-down info
+  io.debugTopDown.toCore.robHeadVaddr.valid := debug_lsTopdownInfo(deqPtr.value).s1.vaddr_valid
+  io.debugTopDown.toCore.robHeadVaddr.bits  := debug_lsTopdownInfo(deqPtr.value).s1.vaddr_bits
+  io.debugTopDown.toCore.robHeadPaddr.valid := debug_lsTopdownInfo(deqPtr.value).s2.paddr_valid
+  io.debugTopDown.toCore.robHeadPaddr.bits  := debug_lsTopdownInfo(deqPtr.value).s2.paddr_bits
+  io.debugTopDown.toDispatch.robTrueCommit := ifCommitReg(trueCommitCnt)
+  io.debugTopDown.toDispatch.robHeadLsIssue := debug_lsIssue(deqPtr.value)
+  io.debugTopDown.robHeadLqIdx.valid := debug_lqIdxValid(deqPtr.value)
+  io.debugTopDown.robHeadLqIdx.bits  := debug_microOp(deqPtr.value).lqIdx
 
   /**
     * DataBase info:
@@ -1247,50 +1255,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     wpc(i) := SignExt(commitDebugUop(i).cf.pc, XLEN)
   }
 
-  if (env.EnableDifftest) {
-    for (i <- 0 until CommitWidth) {
-      val difftest = Module(new DifftestInstrCommit)
-      // assgin default value
-      difftest.io := DontCare
-
-      difftest.io.clock    := clock
-      difftest.io.coreid   := io.hartId
-      difftest.io.index    := i.U
-
-      val ptr = deqPtrVec(i).value
-      val uop = commitDebugUop(i)
-      val exuOut = debug_exuDebug(ptr)
-      val exuData = debug_exuData(ptr)
-      difftest.io.valid    := RegNext(RegNext(RegNext(io.commits.commitValid(i) && io.commits.isCommit)))
-      difftest.io.pc       := RegNext(RegNext(RegNext(SignExt(uop.cf.pc, XLEN))))
-      difftest.io.instr    := RegNext(RegNext(RegNext(uop.cf.instr)))
-      difftest.io.robIdx   := RegNext(RegNext(RegNext(ZeroExt(ptr, 10))))
-      difftest.io.lqIdx    := RegNext(RegNext(RegNext(ZeroExt(uop.lqIdx.value, 7))))
-      difftest.io.sqIdx    := RegNext(RegNext(RegNext(ZeroExt(uop.sqIdx.value, 7))))
-      difftest.io.isLoad   := RegNext(RegNext(RegNext(io.commits.info(i).commitType === CommitType.LOAD)))
-      difftest.io.isStore  := RegNext(RegNext(RegNext(io.commits.info(i).commitType === CommitType.STORE)))
-      difftest.io.special  := RegNext(RegNext(RegNext(CommitType.isFused(io.commits.info(i).commitType))))
-      // when committing an eliminated move instruction,
-      // we must make sure that skip is properly set to false (output from EXU is random value)
-      difftest.io.skip     := RegNext(RegNext(RegNext(Mux(uop.eliminatedMove, false.B, exuOut.isMMIO || exuOut.isPerfCnt))))
-      difftest.io.isRVC    := RegNext(RegNext(RegNext(uop.cf.pd.isRVC)))
-      difftest.io.rfwen    := RegNext(RegNext(RegNext(io.commits.commitValid(i) && io.commits.info(i).rfWen && io.commits.info(i).ldest =/= 0.U)))
-      difftest.io.fpwen    := RegNext(RegNext(RegNext(io.commits.commitValid(i) && io.commits.info(i).fpWen)))
-      difftest.io.wpdest   := RegNext(RegNext(RegNext(io.commits.info(i).pdest)))
-      difftest.io.wdest    := RegNext(RegNext(RegNext(io.commits.info(i).ldest)))
-
-      // // runahead commit hint
-      // val runahead_commit = Module(new DifftestRunaheadCommitEvent)
-      // runahead_commit.io.clock := clock
-      // runahead_commit.io.coreid := io.hartId
-      // runahead_commit.io.index := i.U
-      // runahead_commit.io.valid := difftest.io.valid &&
-      //   (commitBranchValid(i) || commitIsStore(i))
-      // // TODO: is branch or store
-      // runahead_commit.io.pc    := difftest.io.pc
-    }
-  }
-  else if (env.AlwaysBasicDiff) {
+  if (env.EnableDifftest || env.AlwaysBasicDiff) {
     // These are the structures used by difftest only and should be optimized after synthesis.
     val dt_eliminatedMove = Mem(RobSize, Bool())
     val dt_isRVC = Mem(RobSize, Bool())
@@ -1307,7 +1272,6 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
         dt_exuDebug(wbIdx) := wb.bits.debug
       }
     }
-    // Always instantiate basic difftest modules.
     for (i <- 0 until CommitWidth) {
       val commitInfo = io.commits.info(i)
       val ptr = deqPtrVec(i).value
@@ -1315,75 +1279,74 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       val eliminatedMove = dt_eliminatedMove(ptr)
       val isRVC = dt_isRVC(ptr)
 
-      val difftest = Module(new DifftestBasicInstrCommit)
-      difftest.io.clock   := clock
-      difftest.io.coreid  := io.hartId
-      difftest.io.index   := i.U
-      difftest.io.valid   := RegNext(RegNext(RegNext(io.commits.commitValid(i) && io.commits.isCommit)))
-      difftest.io.special := RegNext(RegNext(RegNext(CommitType.isFused(commitInfo.commitType))))
-      difftest.io.skip    := RegNext(RegNext(RegNext(Mux(eliminatedMove, false.B, exuOut.isMMIO || exuOut.isPerfCnt))))
-      difftest.io.isRVC   := RegNext(RegNext(RegNext(isRVC)))
-      difftest.io.rfwen   := RegNext(RegNext(RegNext(io.commits.commitValid(i) && commitInfo.rfWen && commitInfo.ldest =/= 0.U)))
-      difftest.io.fpwen   := RegNext(RegNext(RegNext(io.commits.commitValid(i) && commitInfo.fpWen)))
-      difftest.io.wpdest  := RegNext(RegNext(RegNext(commitInfo.pdest)))
-      difftest.io.wdest   := RegNext(RegNext(RegNext(commitInfo.ldest)))
+      val difftest = DifftestModule(new DiffInstrCommit(NRPhyRegs), delay = 3, dontCare = true)
+      difftest.clock   := clock
+      difftest.coreid  := io.hartId
+      difftest.index   := i.U
+      difftest.valid   := io.commits.commitValid(i) && io.commits.isCommit
+      difftest.skip    := Mux(eliminatedMove, false.B, exuOut.isMMIO || exuOut.isPerfCnt)
+      difftest.isRVC   := isRVC
+      difftest.rfwen   := io.commits.commitValid(i) && commitInfo.rfWen && commitInfo.ldest =/= 0.U
+      difftest.fpwen   := io.commits.commitValid(i) && commitInfo.fpWen
+      difftest.wpdest  := commitInfo.pdest
+      difftest.wdest   := commitInfo.ldest
+      difftest.nFused  := Mux(CommitType.isFused(commitInfo.commitType), 1.U, 0.U)
+
+      if (env.EnableDifftest) {
+        val uop = commitDebugUop(i)
+        difftest.pc       := SignExt(uop.cf.pc, XLEN)
+        difftest.instr    := uop.cf.instr
+        difftest.robIdx   := ZeroExt(ptr, 10)
+        difftest.lqIdx    := ZeroExt(uop.lqIdx.value, 7)
+        difftest.sqIdx    := ZeroExt(uop.sqIdx.value, 7)
+        difftest.isLoad   := io.commits.info(i).commitType === CommitType.LOAD
+        difftest.isStore  := io.commits.info(i).commitType === CommitType.STORE
+      }
     }
   }
 
   if (env.EnableDifftest) {
     for (i <- 0 until CommitWidth) {
-      val difftest = Module(new DifftestLoadEvent)
-      difftest.io.clock  := clock
-      difftest.io.coreid := io.hartId
-      difftest.io.index  := i.U
+      val difftest = DifftestModule(new DiffLoadEvent, delay = 3)
+      difftest.clock  := clock
+      difftest.coreid := io.hartId
+      difftest.index  := i.U
 
       val ptr = deqPtrVec(i).value
       val uop = commitDebugUop(i)
       val exuOut = debug_exuDebug(ptr)
-      difftest.io.valid  := RegNext(RegNext(RegNext(io.commits.commitValid(i) && io.commits.isCommit)))
-      difftest.io.paddr  := RegNext(RegNext(RegNext(exuOut.paddr)))
-      difftest.io.opType := RegNext(RegNext(RegNext(uop.ctrl.fuOpType)))
-      difftest.io.fuType := RegNext(RegNext(RegNext(uop.ctrl.fuType)))
+      difftest.valid  := io.commits.commitValid(i) && io.commits.isCommit
+      difftest.paddr  := exuOut.paddr
+      difftest.opType := uop.ctrl.fuOpType
+      difftest.fuType := uop.ctrl.fuType
     }
   }
 
-  // Always instantiate basic difftest modules.
-  if (env.EnableDifftest) {
+  if (env.EnableDifftest || env.AlwaysBasicDiff) {
     val dt_isXSTrap = Mem(RobSize, Bool())
     for (i <- 0 until RenameWidth) {
       when (canEnqueue(i)) {
         dt_isXSTrap(allocatePtrVec(i).value) := io.enq.req(i).bits.ctrl.isXSTrap
       }
     }
-    val trapVec = io.commits.commitValid.zip(deqPtrVec).map{ case (v, d) => io.commits.isCommit && v && dt_isXSTrap(d.value) }
-    val hitTrap = trapVec.reduce(_||_)
-    val trapCode = PriorityMux(wdata.zip(trapVec).map(x => x._2 -> x._1))
-    val trapPC = SignExt(PriorityMux(wpc.zip(trapVec).map(x => x._2 ->x._1)), XLEN)
-    val difftest = Module(new DifftestTrapEvent)
-    difftest.io.clock    := clock
-    difftest.io.coreid   := io.hartId
-    difftest.io.valid    := hitTrap
-    difftest.io.code     := trapCode
-    difftest.io.pc       := trapPC
-    difftest.io.cycleCnt := timer
-    difftest.io.instrCnt := instrCnt
-    difftest.io.hasWFI   := hasWFI
-  }
-  else if (env.AlwaysBasicDiff) {
-    val dt_isXSTrap = Mem(RobSize, Bool())
-    for (i <- 0 until RenameWidth) {
-      when (canEnqueue(i)) {
-        dt_isXSTrap(allocatePtrVec(i).value) := io.enq.req(i).bits.ctrl.isXSTrap
-      }
+    val trapVec = io.commits.commitValid.zip(deqPtrVec).map{ case (v, d) =>
+      io.commits.isCommit && v && dt_isXSTrap(d.value)
     }
-    val trapVec = io.commits.commitValid.zip(deqPtrVec).map{ case (v, d) => io.commits.isCommit && v && dt_isXSTrap(d.value) }
     val hitTrap = trapVec.reduce(_||_)
-    val difftest = Module(new DifftestBasicTrapEvent)
-    difftest.io.clock    := clock
-    difftest.io.coreid   := io.hartId
-    difftest.io.valid    := hitTrap
-    difftest.io.cycleCnt := timer
-    difftest.io.instrCnt := instrCnt
+    val difftest = DifftestModule(new DiffTrapEvent, dontCare = true)
+    difftest.clock    := clock
+    difftest.coreid   := io.hartId
+    difftest.hasTrap  := hitTrap
+    difftest.cycleCnt := timer
+    difftest.instrCnt := instrCnt
+    difftest.hasWFI   := hasWFI
+
+    if (env.EnableDifftest) {
+      val trapCode = PriorityMux(wdata.zip(trapVec).map(x => x._2 -> x._1))
+      val trapPC = SignExt(PriorityMux(wpc.zip(trapVec).map(x => x._2 ->x._1)), XLEN)
+      difftest.code     := trapCode
+      difftest.pc       := trapPC
+    }
   }
 
   val validEntriesBanks = (0 until (RobSize + 31) / 32).map(i => RegNext(PopCount(valid.drop(i * 32).take(32))))
