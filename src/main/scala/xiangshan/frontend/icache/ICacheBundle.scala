@@ -152,3 +152,25 @@ class IPFReplacer(implicit p: Parameters) extends  IPrefetchBundle{
   val vsetIdx = Output(UInt(idxBits.W))
   val waymask = Input(UInt(nWays.W))
 }
+
+class FilterInfo(implicit p: Parameters) extends ICacheBundle{
+  val paddr = UInt(PAddrBits.W)
+  val valid = Bool()
+}
+
+class MissSlotInfo(implicit p: Parameters) extends ICacheBundle{
+  val ptag    = UInt(tagBits.W)
+  val vSetIdx = UInt(idxBits.W)
+  val valid   = Bool()
+}
+
+class ICacheMissUnitInfo(implicit p: Parameters) extends IPrefetchBundle{
+  val mshr        = Output(Vec(PortNumber, new FilterInfo))
+  val recentWrite = Output(Vec(2, new FilterInfo))
+}
+
+class ICacheMainPipeInfo(implicit p: Parameters) extends IPrefetchBundle{
+  val s1Info = Output(Vec(PortNumber, new FilterInfo))
+  val s2Info = Output(Vec(PortNumber, new FilterInfo))
+  val missSlot = Output(Vec(PortNumber, new MissSlotInfo))
+}

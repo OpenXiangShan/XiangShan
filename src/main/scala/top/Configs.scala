@@ -105,9 +105,9 @@ class MinimalConfig(n: Int = 1) extends Config(
           nMissEntries = 2,
           nReleaseEntries = 1,
           nProbeEntries = 2,
-          nPrefetchEntries = 2,
-          nPrefBufferEntries = 32,
-          hasPrefetch = true
+          // fdip
+          enableICachePrefetch = true,
+          prefetchToL1 = false,
         ),
         dcacheParametersOpt = Some(DCacheParameters(
           nSets = 64, // 32KB DCache
