@@ -476,7 +476,15 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     )
   )
 
-  val jA_s1_target_valid = io.ftq_to_bpu.jA_r_pending
+
+  val jA_enq_blockReg = RegInit(0.B)
+  val jA_enq_release = WireDefault(0.B)
+  val jA_enq_block = jA_enq_blockReg && !jA_enq_release
+  val block_end = (jA_enq_blockReg && !io.ftq_to_bpu.jA_r_pending && io.ftq_to_bpu.jA_r_enq)
+  jA_enq_blockReg := Mux(io.ftq_to_bpu.jA_r_hit, 1.B, Mux(block_end, 0.B, jA_enq_blockReg))
+  jA_enq_release := Mux(block_end, 1.B, 0.B)
+
+  val jA_s1_target_valid = io.ftq_to_bpu.jA_r_pending || jA_enq_block
   val jA_s1_target_data = RegEnable(VecInit(Seq.fill(numDup)(io.ftq_to_bpu.jA_r_endpc)), VecInit(Seq.fill(numDup)(0.U(VAddrBits.W))), io.ftq_to_bpu.jA_r_hit || io.ftq_to_bpu.jA_r_pending)
   for (((npcGen, s1_valid), s1_target) <- npcGen_dup zip s1_valid_dup zip (Mux(jA_s1_target_valid, jA_s1_target_data, resp.s1.getTarget)))
     npcGen.register(s1_valid, s1_target, Some("s1_target"), 4)

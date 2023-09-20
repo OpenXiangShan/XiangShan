@@ -176,6 +176,7 @@ class FtqToBpuIO(implicit p: Parameters) extends XSBundle {
   val jA_r_hit  = Output(Bool())
   val jA_r_pending = Output(Bool())
   val jA_r_endpc = Output(UInt(VAddrBits.W))
+  val jA_r_enq = Output(Bool())
 }
 
 class FtqToIfuIO(implicit p: Parameters) extends XSBundle with HasCircularQueuePtrHelper {
