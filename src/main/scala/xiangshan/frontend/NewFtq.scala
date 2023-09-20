@@ -752,9 +752,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   io.toBackend.newest_entry_ptr := RegNext(newest_entry_ptr)
   io.toBackend.newest_entry_target := RegNext(newest_entry_target)
 
-
-  bpuPtr := bpuPtr + ftq_in_fire
-  copied_bpu_ptr.map(_ := bpuPtr + ftq_in_fire)
+  
+  val enq_fire = ftq_in_fire && !bpu_s2_redirect && !bpu_s3_redirect
+  bpuPtr := bpuPtr + enq_fire
+  copied_bpu_ptr.map(_ := bpuPtr + enq_fire)
   when (io.toIfu.req.fire && allowToIfu) {
     ifuPtr_write := ifuPtrPlus1
     ifuPtrPlus1_write := ifuPtrPlus2
