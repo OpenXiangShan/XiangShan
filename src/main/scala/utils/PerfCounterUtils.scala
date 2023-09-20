@@ -269,12 +269,6 @@ object XSPerfRolling extends HasRegularPerfName {
     if (env.EnableRollingDB && !env.FPGAPlatform) {
       val tableName = perfName + "_rolling_" + p(XSCoreParamsKey).HartId.toString
       val rollingTable = ChiselDB.createTable(tableName, new RollingEntry(), basicDB=true)
-      val logTimestamp = WireInit(0.U(64.W))
-      val perfClean = WireInit(false.B)
-      val perfDump = WireInit(false.B)
-      ExcitingUtils.addSink(logTimestamp, "logTimestamp")
-      ExcitingUtils.addSink(perfClean, "XSPERF_CLEAN")
-      ExcitingUtils.addSink(perfDump, "XSPERF_DUMP")
 
       val xAxisCnt = RegInit(0.U(64.W))
       val yAxisCnt = RegInit(0.U(64.W))
