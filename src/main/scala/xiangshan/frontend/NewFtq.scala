@@ -531,8 +531,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   
   val jA_r_pending = RegInit(0.B)
-  val jA_enq_block = RegInit(0.B)
-  val jA_enq_unblock = WireDefault(0.B)
+  val jA_enq_blockReg = RegInit(0.B)
+  val jA_enq_release = WireDefault(0.B)
+  val jA_enq_unblock = jA_enq_release || !jA_enq_blockReg
 
   val bpu_s2_resp = io.fromBpu.resp.bits.s2
   val bpu_s3_resp = io.fromBpu.resp.bits.s3
@@ -540,7 +541,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val bpu_s3_redirect = bpu_s3_resp.valid(3) && bpu_s3_resp.hasRedirect(3)
 
   io.toBpu.enq_ptr := bpuPtr
-  val bpu_in_fire = (io.fromBpu.resp.fire() || bpu_s2_redirect || bpu_s3_redirect) && allowFtqIn && !jA_r_pending && (jA_enq_unblock || !jA_enq_block)
+  val bpu_in_fire = (io.fromBpu.resp.fire() || bpu_s2_redirect || bpu_s3_redirect) && allowFtqIn && !jA_r_pending && jA_enq_unblock
 
   val bpu_in_resp = io.fromBpu.resp.bits.selectedResp
   val bpu_in_stage = io.fromBpu.resp.bits.selectedRespIdxForFtq
@@ -559,12 +560,11 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val jA_r_endpc      = RegEnable(jATable.io.r_endpc, jARealHit)
   when(jARealHit){
     jA_r_pending := true.B
-    jA_enq_block := true.B
   }
-  when(jA_enq_block && !jA_r_pending && bpu_in_resp.pc(3) === jA_r_endpc) {
-    jA_enq_unblock := true.B
-    jA_enq_block := false.B
-  }
+  val block_end = jA_enq_blockReg && !jA_r_pending && ((bpu_in_resp.pc(3) === jA_r_endpc) || !allowFtqIn)
+  jA_enq_blockReg := Mux(jARealHit, 1.B, Mux(block_end, 0.B, jA_enq_blockReg))
+  jA_enq_release := Mux(block_end, 1.B, 0.B)
+
 
   //* copy to generate JA ftq entries
   // copy s1
@@ -596,13 +596,14 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   io.toBpu.jA_r_endpc := Mux(jARealHit, jATable.io.r_endpc, jA_r_endpc)
   io.toBpu.jA_r_hit := jARealHit
   io.toBpu.jA_r_pending := jA_r_pending
+  io.toBpu.jA_r_enq := ftq_in_fire
   assert(!(jARealHit && jA_r_pending))
 
   //* manual ftq_pc_mem enq
   when(jA_r_pending){
     when(!allowFtqIn){ // redirect flush
       jA_r_pending := false.B
-      jA_enq_block := false.B
+      jA_enq_blockReg := false.B
     }.elsewhen(ftq_in_fire){
       assert(jA_nowPC < jA_r_endpc)
       when((jA_nowPC + MaxBasicBlockSize.U) === jA_r_endpc){
