@@ -43,9 +43,9 @@ class NaiveMultiplier(len: Int, val latency: Int)(implicit p: Parameters)
 
   val (src1, src2) = (io.in.bits.src(0), io.in.bits.src(1))
 
-  val mulRes = src1.asSInt() * src2.asSInt()
+  val mulRes = src1.asSInt * src2.asSInt
 
-  var dataVec = Seq(mulRes.asUInt())
+  var dataVec = Seq(mulRes.asUInt)
   var ctrlVec = Seq(ctrl)
 
   for(i <- 1 to latency){
@@ -71,7 +71,7 @@ class ArrayMulDataModule(len: Int) extends Module {
   val b_sext, bx2, neg_b, neg_bx2 = Wire(UInt((len+1).W))
   b_sext := SignExt(b, len+1)
   bx2 := b_sext << 1
-  neg_b := (~b_sext).asUInt()
+  neg_b := (~b_sext).asUInt
   neg_bx2 := neg_b << 1
 
   val columns: Array[Seq[Bool]] = Array.fill(2*len)(Seq())
@@ -119,22 +119,22 @@ class ArrayMulDataModule(len: Int) extends Module {
       case 2 =>
         val c22 = Module(new C22)
         c22.io.in := col
-        sum = c22.io.out(0).asBool() +: cin
-        cout2 = Seq(c22.io.out(1).asBool())
+        sum = c22.io.out(0).asBool +: cin
+        cout2 = Seq(c22.io.out(1).asBool)
       case 3 =>
         val c32 = Module(new C32)
         c32.io.in := col
-        sum = c32.io.out(0).asBool() +: cin
-        cout2 = Seq(c32.io.out(1).asBool())
+        sum = c32.io.out(0).asBool +: cin
+        cout2 = Seq(c32.io.out(1).asBool)
       case 4 =>
         val c53 = Module(new C53)
         for((x, y) <- c53.io.in.take(4) zip col){
           x := y
         }
         c53.io.in.last := (if(cin.nonEmpty) cin.head else 0.U)
-        sum = Seq(c53.io.out(0).asBool()) ++ (if(cin.nonEmpty) cin.drop(1) else Nil)
-        cout1 = Seq(c53.io.out(1).asBool())
-        cout2 = Seq(c53.io.out(2).asBool())
+        sum = Seq(c53.io.out(0).asBool) ++ (if(cin.nonEmpty) cin.drop(1) else Nil)
+        cout1 = Seq(c53.io.out(1).asBool)
+        cout2 = Seq(c53.io.out(2).asBool)
       case n =>
         val cin_1 = if(cin.nonEmpty) Seq(cin.head) else Nil
         val cin_2 = if(cin.nonEmpty) cin.drop(1) else Nil

@@ -36,7 +36,7 @@ object genWmask {
       "b01".U -> 0x3.U, //0011
       "b10".U -> 0xf.U, //1111
       "b11".U -> 0xff.U //11111111
-    )) << addr(2, 0)).asUInt()
+    )) << addr(2, 0)).asUInt
   }
 }
 
@@ -47,7 +47,7 @@ object genVWmask {
       "b01".U -> 0x3.U, //0011
       "b10".U -> 0xf.U, //1111
       "b11".U -> 0xff.U //11111111
-    )) << addr(3, 0)).asUInt()
+    )) << addr(3, 0)).asUInt
   }
 }
 
@@ -384,12 +384,12 @@ object AddPipelineReg {
 
     val valid = RegInit(false.B)
     valid.suggestName("pipeline_reg_valid")
-    when (io.out.fire()) { valid := false.B }
-    when (io.in.fire()) { valid := true.B }
+    when (io.out.fire) { valid := false.B }
+    when (io.in.fire) { valid := true.B }
     when (io.isFlush) { valid := false.B }
 
     io.in.ready := !valid || io.out.ready
-    io.out.bits := RegEnable(io.in.bits, io.in.fire())
+    io.out.bits := RegEnable(io.in.bits, io.in.fire)
     io.out.valid := valid //&& !isFlush
   }
 

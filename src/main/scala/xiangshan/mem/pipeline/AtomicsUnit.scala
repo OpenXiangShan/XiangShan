@@ -270,7 +270,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     // TODO: add assertions:
     // 1. add a replay delay counter?
     // 2. when req gets into MissQueue, it should not miss any more
-    when(io.dcache.resp.fire()) {
+    when(io.dcache.resp.fire) {
       when(io.dcache.resp.bits.miss) {
         when(io.dcache.resp.bits.replay) {
           state := s_cache_req

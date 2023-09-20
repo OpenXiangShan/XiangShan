@@ -197,19 +197,19 @@ class StreamBuffer(implicit p: Parameters) extends PrefetchModule with HasTlbCon
   val finishs = Wire(Vec(streamSize, DecoupledIO(new StreamPrefetchFinish)))
   (0 until streamSize).foreach{ i =>
     when (state(i) === s_req) {
-      when (reqs(i).fire()) {
+      when (reqs(i).fire) {
         state(i) := s_resp
       }
     }
 
     when (state(i) === s_resp) {
-      when (resps(i).fire()) {
+      when (resps(i).fire) {
         state(i) := s_finish
       }
     }
 
     when (state(i) === s_finish) {
-      when (finishs(i).fire()) {
+      when (finishs(i).fire) {
         state(i) := s_idle
         valid(i) := true.B
       }

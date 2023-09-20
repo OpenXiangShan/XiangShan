@@ -56,7 +56,7 @@ class AXI4Timer
     def getOffset(addr: UInt) = addr(15,0)
 
     RegMap.generate(mapping, getOffset(raddr), in.r.bits.data,
-      getOffset(waddr), in.w.fire(), in.w.bits.data, MaskExpand(in.w.bits.strb))
+      getOffset(waddr), in.w.fire, in.w.bits.data, MaskExpand(in.w.bits.strb))
 
     io.extra.get.mtip := RegNext(mtime >= mtimecmp)
   }

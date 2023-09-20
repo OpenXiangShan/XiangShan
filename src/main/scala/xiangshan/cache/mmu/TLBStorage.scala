@@ -18,7 +18,6 @@ package xiangshan.cache.mmu
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import chisel3.experimental.{ExtModule, chiselName}
 import chisel3.util._
 import utils._
 import utility._
@@ -84,7 +83,6 @@ class BankedAsyncDataModuleTemplateWithDup[T <: Data](
   }
 }
 
-@chiselName
 class TLBFA(
   parentName: String,
   ports: Int,
@@ -109,7 +107,7 @@ class TLBFA(
     val access = io.access(i)
 
     val vpn = req.bits.vpn
-    val vpn_reg = RegEnable(vpn, req.fire())
+    val vpn_reg = RegEnable(vpn, req.fire)
 
     val refill_mask = Mux(io.w.valid, UIntToOH(io.w.bits.wayIdx), 0.U(nWays.W))
     val hitVec = VecInit((entries.zipWithIndex).zip(v zip refill_mask.asBools).map{case (e, m) => e._1.hit(vpn, io.csr.satp.asid) && m._1 && !m._2 })
@@ -186,27 +184,26 @@ class TLBFA(
     }
   }
 
-  XSPerfAccumulate(s"access", io.r.resp.map(_.valid.asUInt()).fold(0.U)(_ + _))
-  XSPerfAccumulate(s"hit", io.r.resp.map(a => a.valid && a.bits.hit).fold(0.U)(_.asUInt() + _.asUInt()))
+  XSPerfAccumulate(s"access", io.r.resp.map(_.valid.asUInt).fold(0.U)(_ + _))
+  XSPerfAccumulate(s"hit", io.r.resp.map(a => a.valid && a.bits.hit).fold(0.U)(_.asUInt + _.asUInt))
 
   for (i <- 0 until nWays) {
     XSPerfAccumulate(s"access${i}", io.r.resp.zip(io.access.map(acc => UIntToOH(acc.touch_ways.bits))).map{ case (a, b) =>
-      a.valid && a.bits.hit && b(i)}.fold(0.U)(_.asUInt() + _.asUInt()))
+      a.valid && a.bits.hit && b(i)}.fold(0.U)(_.asUInt + _.asUInt))
   }
   for (i <- 0 until nWays) {
     XSPerfAccumulate(s"refill${i}", io.w.valid && io.w.bits.wayIdx === i.U)
   }
 
   val perfEvents = Seq(
-    ("tlbstore_access", io.r.resp.map(_.valid.asUInt()).fold(0.U)(_ + _)                            ),
-    ("tlbstore_hit   ", io.r.resp.map(a => a.valid && a.bits.hit).fold(0.U)(_.asUInt() + _.asUInt())),
+    ("tlbstore_access", io.r.resp.map(_.valid.asUInt).fold(0.U)(_ + _)                            ),
+    ("tlbstore_hit   ", io.r.resp.map(a => a.valid && a.bits.hit).fold(0.U)(_.asUInt + _.asUInt)),
   )
   generatePerfEvent()
 
   println(s"${parentName} tlb_fa: nSets${nSets} nWays:${nWays}")
 }
 
-@chiselName
 class TLBFakeFA(
              ports: Int,
              nDups: Int,

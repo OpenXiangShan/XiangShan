@@ -79,7 +79,7 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends XSModule w
   when (state === s_invalid) {
     io.req.ready := true.B
 
-    when (io.req.fire()) {
+    when (io.req.fire) {
       req   := io.req.bits
       state := s_refill_req
     }
@@ -95,7 +95,7 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends XSModule w
           lgSize          = log2Ceil(mmioBusBytes).U
         )._2
 
-    when (io.mmio_acquire.fire()) {
+    when (io.mmio_acquire.fire) {
       state := s_refill_resp
     }
   }
@@ -105,7 +105,7 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends XSModule w
   when (state === s_refill_resp) {
     io.mmio_grant.ready := true.B
 
-    when (io.mmio_grant.fire()) {
+    when (io.mmio_grant.fire) {
       respDataReg := io.mmio_grant.bits.data
       state := s_send_resp
     }
@@ -127,7 +127,7 @@ class InstrMMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends XSModule w
     io.resp.valid     := !needFlush
     io.resp.bits.data :=  getDataFromBus(req.addr)
     // meta data should go with the response
-    when (io.resp.fire() || needFlush) {
+    when (io.resp.fire || needFlush) {
       state := s_invalid
     }
   }

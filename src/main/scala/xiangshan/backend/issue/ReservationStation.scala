@@ -138,7 +138,7 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
   val maxRsDeq = 2
   def numRS = (params.numDeq + (maxRsDeq - 1)) / maxRsDeq
 
-  lazy val module = new LazyModuleImp(this) with HasPerfEvents {
+  class RSWrapperImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) with HasPerfEvents {
     require(params.numEnq < params.numDeq || params.numEnq % params.numDeq == 0)
     require(params.numEntries % params.numDeq == 0)
     val rs = (0 until numRS).map(i => {
@@ -201,6 +201,8 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
     val perfEvents = rs.flatMap(_.getPerfEvents)
     generatePerfEvent()
   }
+
+  lazy val module = new RSWrapperImp(this)
 
   var fastWakeupIdx = 0
   def connectFastWakeup(uop: ValidIO[MicroOp], data: UInt): Unit = {

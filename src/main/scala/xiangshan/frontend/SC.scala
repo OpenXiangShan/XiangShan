@@ -22,7 +22,6 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import utility._
-import chisel3.experimental.chiselName
 
 import scala.math.min
 import scala.{Tuple2 => &}
@@ -64,7 +63,6 @@ class SCTableIO(val ctrBits: Int = 6)(implicit p: Parameters) extends SCBundle {
   val update = Input(new SCUpdate(ctrBits))
 }
 
-@chiselName
 class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Parameters)
   extends SCModule with HasFoldedHistory {
   val io = IO(new SCTableIO(ctrBits))
@@ -98,7 +96,7 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
   val s0_idx = getIdx(io.req.bits.pc, io.req.bits.folded_hist)
   val s1_idx = RegEnable(s0_idx, io.req.valid)
 
-  val s1_pc = RegEnable(io.req.bits.pc, io.req.fire())
+  val s1_pc = RegEnable(io.req.bits.pc, io.req.fire)
   val s1_unhashed_idx = s1_pc >> instOffsetBits
 
   table.io.r.req.valid := io.req.valid

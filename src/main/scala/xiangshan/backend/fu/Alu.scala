@@ -39,7 +39,7 @@ class SubModule(implicit p: Parameters) extends XSModule {
     val src = Vec(2, Input(UInt(XLEN.W)))
     val sub = Output(UInt((XLEN+1).W))
   })
-  io.sub := (io.src(0) +& (~io.src(1)).asUInt()) + 1.U
+  io.sub := (io.src(0) +& (~io.src(1)).asUInt) + 1.U
 }
 
 class LeftShiftModule(implicit p: Parameters) extends XSModule {
@@ -75,7 +75,7 @@ class RightShiftModule(implicit p: Parameters) extends XSModule {
     val revSrl = Output(UInt(XLEN.W))
   })
   io.srl  := io.srlSrc >> io.shamt
-  io.sra  := (io.sraSrc.asSInt() >> io.shamt).asUInt()
+  io.sra  := (io.sraSrc.asSInt >> io.shamt).asUInt
   io.revSrl  := io.srlSrc >> io.revShamt
 }
 
@@ -89,7 +89,7 @@ class RightShiftWordModule(implicit p: Parameters) extends XSModule {
   })
 
   io.srlw := io.srlSrc >> io.shamt
-  io.sraw := (io.sraSrc.asSInt() >> io.shamt).asUInt()
+  io.sraw := (io.sraSrc.asSInt >> io.shamt).asUInt
   io.revSrlw := io.srlSrc >> io.revShamt
 }
 

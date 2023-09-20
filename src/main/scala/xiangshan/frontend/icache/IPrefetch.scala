@@ -253,6 +253,7 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
     difftest.valid   := toICacheData.fire
     difftest.addr    := toICacheData.bits.paddr
     difftest.data    := toICacheData.bits.data.asTypeOf(difftest.data)
+    difftest.idtfr   := DontCare
   }
 }
 
@@ -443,7 +444,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   /** Stage 2 control */
   p2_req_cancel := p2_tag_match || p2_exception || p2_hit_mp_miss || p2_hit_buffer || p2_hit_piq || p2_check_in_mshr || io.fencei
   p2_ready      := p2_valid && toPIQEnqReq.ready || !p2_valid
-  p2_fire       := toPIQEnqReq.fire()
+  p2_fire       := toPIQEnqReq.fire
   p2_discard    := p2_valid && p2_req_cancel
 
   when(p2_discard) {
@@ -456,9 +457,9 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   /** PerfAccumulate */
   // the number of prefetch request received from ftq
-  XSPerfAccumulate("prefetch_req_receive", fromFtq.req.fire())
+  XSPerfAccumulate("prefetch_req_receive", fromFtq.req.fire)
   // the number of prefetch request sent to PIQ
-  XSPerfAccumulate("prefetch_req_send", toPIQEnqReq.fire())
+  XSPerfAccumulate("prefetch_req_send", toPIQEnqReq.fire)
   /**
     * Count the number of requests that are filtered for various reasons.
     * The number of prefetch discard in Performance Accumulator may be
@@ -822,10 +823,10 @@ class PrefetchQueue(edge: TLEdgeOut)(implicit p: Parameters) extends IPrefetchMo
       }
     }
     is(s_memReadReq) {
-      state := Mux(io.mem_acquire.fire(), s_memReadResp, s_memReadReq)
+      state := Mux(io.mem_acquire.fire, s_memReadResp, s_memReadReq)
     }
     is(s_memReadResp) {
-      when (edge.hasData(io.mem_grant.bits) && io.mem_grant.fire()) {
+      when (edge.hasData(io.mem_grant.bits) && io.mem_grant.fire) {
         handleEntry.readBeatCnt := handleEntry.readBeatCnt + 1.U
         handleEntry.respData(handleEntry.readBeatCnt) := io.mem_grant.bits.data
         when (handleEntry.readBeatCnt === (refillCycles - 1).U) {
@@ -851,6 +852,7 @@ class PrefetchQueue(edge: TLEdgeOut)(implicit p: Parameters) extends IPrefetchMo
     diffipfrefill.valid    := handleEntry.valid && handleEntry.finish
     diffipfrefill.addr     := handleEntry.paddr
     diffipfrefill.data     := handleEntry.cacheline.asTypeOf(diffipfrefill.data)
+    diffipfrefill.idtfr    := DontCare
   }
 }
 
