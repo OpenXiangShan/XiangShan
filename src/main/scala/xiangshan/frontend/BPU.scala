@@ -535,7 +535,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     // We first compare all target with previous stage target,
     // then select the difference by taken & hit
     // Usually target is generated quicker than taken, so do target compare before select can help timing
-    val targetDiffVec  : IndexedSeq[Vec[Bool]] = x.target.zip(y.getAllTargets).map { case (t1, t2) => VecInit(t2.map(_ =/= t1)) } // [0:numDup][falttened all Target comparison]
+    val targetDiffVec  : IndexedSeq[Vec[Bool]] = x.target.zip(y.getAllTargets).map { case (t1, t2) => VecInit(t2.map(_ =/= t1)) } // [0:numDup][flattened all Target comparison]
     val targetDiff     : IndexedSeq[Bool]      = targetDiffVec.zipWithIndex.map { case (diff, idx) => selectByTaken(x.taken, x.hit(idx), diff) }
 
     val lastBrPosOHDiff: IndexedSeq[Bool]      = x.lastBrPosOH.zip(y.lastBrPosOH).map { case (oh1, oh2) => oh1.asUInt =/= oh2.asUInt }
