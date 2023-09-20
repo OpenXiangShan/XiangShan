@@ -369,6 +369,8 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
         true.B
     }
     cancel.bits.rfWen := fromFlattenIQ(i).bits.common.rfWen.getOrElse(false.B)
+    cancel.bits.fpWen := fromFlattenIQ(i).bits.common.fpWen.getOrElse(false.B)
+    cancel.bits.vecWen := fromFlattenIQ(i).bits.common.vecWen.getOrElse(false.B)
     cancel.bits.pdest := fromFlattenIQ(i).bits.common.pdest
   }
 
