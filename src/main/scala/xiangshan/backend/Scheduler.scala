@@ -529,13 +529,11 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
 
   if ((env.AlwaysBasicDiff || env.EnableDifftest) && intRfConfig._1) {
     val difftest = DifftestModule(new DiffArchIntRegState, delay = 2)
-    difftest.clock  := clock
     difftest.coreid := io.hartId
     difftest.value  := VecInit(intRfReadData.takeRight(32))
   }
   if ((env.AlwaysBasicDiff || env.EnableDifftest) && fpRfConfig._1) {
     val difftest = DifftestModule(new DiffArchFpRegState, delay = 2)
-    difftest.clock  := clock
     difftest.coreid := io.hartId
     difftest.value  := VecInit(fpRfReadData.takeRight(32))
   }

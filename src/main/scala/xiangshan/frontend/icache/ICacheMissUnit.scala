@@ -278,8 +278,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
   io.data_write     <> refill_arb.io.out
 
   if (env.EnableDifftest) {
-    val difftest = DifftestModule(new DiffRefillEvent)
-    difftest.clock := clock
+    val difftest = DifftestModule(new DiffRefillEvent, dontCare = true)
     difftest.coreid := io.hartId
     difftest.index := 0.U
     difftest.valid := refill_arb.io.out.valid

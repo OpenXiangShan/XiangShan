@@ -307,7 +307,6 @@ class WbArbiterWrapper(
     if (env.EnableDifftest || env.AlwaysBasicDiff) {
       intArbiter.module.io.out.foreach(out => {
         val difftest = DifftestModule(new DiffIntWriteback(NRPhyRegs))
-        difftest.clock   := clock
         difftest.coreid  := io.hartId
         difftest.valid   := out.valid && out.bits.uop.ctrl.rfWen
         difftest.address := out.bits.uop.pdest
@@ -328,7 +327,6 @@ class WbArbiterWrapper(
     if (env.EnableDifftest || env.AlwaysBasicDiff) {
       fpArbiter.module.io.out.foreach(out => {
         val difftest = DifftestModule(new DiffFpWriteback(NRPhyRegs))
-        difftest.clock   := clock
         difftest.coreid  := io.hartId
         difftest.valid   := out.valid // all fp instr will write fp rf
         difftest.address := out.bits.uop.pdest

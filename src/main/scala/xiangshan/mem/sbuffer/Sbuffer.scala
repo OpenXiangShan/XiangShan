@@ -746,7 +746,6 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     io.dcache.hit_resps.zipWithIndex.map{case (resp, index) => {
       val difftest = DifftestModule(new DiffSbufferEvent, delay = 1)
       val dcache_resp_id = resp.bits.id
-      difftest.clock  := clock
       difftest.coreid := io.hartId
       difftest.index  := index.U
       difftest.valid  := resp.fire()
