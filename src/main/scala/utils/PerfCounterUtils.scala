@@ -47,8 +47,9 @@ object XSPerfAccumulate extends HasRegularPerfName {
       ExcitingUtils.addSink(perfClean, "XSPERF_CLEAN")
       ExcitingUtils.addSink(perfDump, "XSPERF_DUMP")
 
-      val counter = RegInit(0.U(64.W))
-      val next_counter = counter + perfCnt
+      val counter = RegInit(0.U(64.W)).suggestName(perfName + "Counter")
+      val next_counter = WireInit(0.U(64.W)).suggestName(perfName + "Next")
+      next_counter := counter + perfCnt
       counter := Mux(perfClean, 0.U, next_counter)
 
       when (perfDump) {
@@ -83,8 +84,8 @@ object XSPerfHistogram extends HasRegularPerfName {
       ExcitingUtils.addSink(perfClean, "XSPERF_CLEAN")
       ExcitingUtils.addSink(perfDump, "XSPERF_DUMP")
 
-      val sum = RegInit(0.U(64.W))
-      val nSamples = RegInit(0.U(64.W))
+      val sum = RegInit(0.U(64.W)).suggestName(perfName + "Sum")
+      val nSamples = RegInit(0.U(64.W)).suggestName(perfName + "NSamples")
       when (perfClean) {
         sum := 0.U
         nSamples := 0.U
@@ -120,7 +121,8 @@ object XSPerfHistogram extends HasRegularPerfName {
           perfCnt >= stop.U && i.U === (nBins - 1).U
         val inc = inRange || leftOutOfRange || rightOutOfRange
 
-        val counter = RegInit(0.U(64.W))
+        val histName = s"${perfName}_${binRangeStart}_${binRangeStop}"
+        val counter = RegInit(0.U(64.W)).suggestName(histName)
         when (perfClean) {
           counter := 0.U
         } .elsewhen(enable && inc) {
@@ -128,7 +130,7 @@ object XSPerfHistogram extends HasRegularPerfName {
         }
 
         when (perfDump) {
-          XSPerfPrint(p"${perfName}_${binRangeStart}_${binRangeStop}, $counter\n")
+          XSPerfPrint(p"${histName}, $counter\n")
         }
       }
     }
