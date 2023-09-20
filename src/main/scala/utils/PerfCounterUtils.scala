@@ -253,6 +253,46 @@ object XSPerfRolling extends HasRegularPerfName {
       rollingTable.log(rollingPt, triggerDB, "", clock, reset)
     }
   }
+  
+  // event interval based mode
+  def apply(
+    perfName: String,
+    perfCntX: UInt,
+    perfCntY: UInt,
+    granularity: Int,
+    eventTrigger: UInt,
+    clock: Clock,
+    reset: Reset
+  )(implicit p: Parameters) = {
+    judgeName(perfName)
+    val env = p(DebugOptionsKey)
+    if (env.EnableRollingDB && !env.FPGAPlatform) {
+      val tableName = perfName + "_rolling_" + p(XSCoreParamsKey).HartId.toString
+      val rollingTable = ChiselDB.createTable(tableName, new RollingEntry(), basicDB=true)
+      val logTimestamp = WireInit(0.U(64.W))
+      val perfClean = WireInit(false.B)
+      val perfDump = WireInit(false.B)
+      ExcitingUtils.addSink(logTimestamp, "logTimestamp")
+      ExcitingUtils.addSink(perfClean, "XSPERF_CLEAN")
+      ExcitingUtils.addSink(perfDump, "XSPERF_DUMP")
+
+      val xAxisCnt = RegInit(0.U(64.W))
+      val yAxisCnt = RegInit(0.U(64.W))
+      val eventCnt = RegInit(0.U(64.W))
+      xAxisCnt := xAxisCnt + perfCntX
+      yAxisCnt := yAxisCnt + perfCntY
+      eventCnt := eventCnt + eventTrigger
+
+      val triggerDB = eventCnt >= granularity.U
+      when(triggerDB) {
+        eventCnt := eventTrigger
+        xAxisCnt := perfCntX
+        yAxisCnt := perfCntY
+      }
+      val rollingPt = new RollingEntry().apply(xAxisCnt, yAxisCnt)
+      rollingTable.log(rollingPt, triggerDB, "", clock, reset)
+    }
+  }
 }
 
 object XSPerfPrint {
