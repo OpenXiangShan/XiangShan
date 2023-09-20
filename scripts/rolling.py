@@ -6,10 +6,10 @@ import numpy as np
 
 
 # usage: single db file
-#   python3 rollingplot.py plot DB_FILE_PATH [--perf-name PERF_NAME] [--aggregate AGGREGATE] [--interval INTERVAL] [--perf-file PERF_FILE]
+#   python3 rolling.py plot DB_FILE_PATH [--perf-name PERF_NAME] [--aggregate AGGREGATE] [--interval INTERVAL] [--perf-file PERF_FILE]
 #
 # usage: diff mutiple db files
-#   python3 rollingplot.py diff MUTI_DB_FILE_PATH [--perf-name PERF_NAME] [--aggregate AGGREGATE] [--interval INTERVAL] [--perf-file PERF_FILE]
+#   python3 rolling.py diff MUTI_DB_FILE_PATH [--perf-name PERF_NAME] [--aggregate AGGREGATE] [--interval INTERVAL] [--perf-file PERF_FILE]
 #
 #  If you only observe one rolling counter, indicate the --perf-name parameter.
 #  If you want to observe multiple at the same time, you can indicate the --perf-file parameter,
@@ -22,7 +22,7 @@ import numpy as np
 #  If you want to compare multiple dbs to observe the difference between multiple runs, you can use diff mode.
 #  This requires specifying the path of a description file. Each line in this description file contains a specific db path.
 #  
-#  eg. 
+#  eg.
 #    exec emu twice with different parameters and obtained different db files (db0, db1).
 #    want to observe the changes in IPC and prefetch accuracy.
 #    create a file named db.txt:
@@ -31,10 +31,10 @@ import numpy as np
 #    create a file named perf.txt:
 #                            IPC
 #                            L1PrefetchAccuracy
-#    run python3 rolling.py diff db.txt --perf-file perf.txt -I (interval in RTL)
+#    run `python3 rolling.py diff db.txt --perf-file perf.txt -I (interval in RTL)`
 #  eg.
 #    want to observe the IPC rolling in single db (db0).
-#    run python3 rolling.py plot path-to-db0 --perf-name IPC
+#    run `python3 rolling.py plot path-to-db0 --perf-name IPC`
 #
 
 
