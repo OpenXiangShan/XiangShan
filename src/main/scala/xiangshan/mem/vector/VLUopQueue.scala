@@ -38,35 +38,19 @@ object VluopPtr {
   }
 }
 
-object VecGenMask {
-  def apply(rob_idx_valid: Vec[Bool], reg_offset: Vec[UInt], offset: Vec[UInt], mask: Vec[UInt]):Vec[UInt] = {
-    val vMask = VecInit(Seq.fill(2)(0.U(16.W)))
-    for (i <- 0 until 2){
-      when (rob_idx_valid(i)) {
-        when (offset(i) <= reg_offset(i)) {
-          vMask(i) := mask(i) << (reg_offset(i) - offset(i))
-        }.otherwise {
-          vMask(i) := mask(i) >> (offset(i) - reg_offset(i))
-        }
+object VLExpCtrl {
+  def apply (vstart: UInt, vl: UInt, eleIdx: UInt):Bool = {
+    val exp = Wire(Bool())
+    when (vstart >= vl || vl === 0.U) {
+      exp := false.B
+    }.otherwise {
+      when (eleIdx >= vstart && eleIdx < vl) {
+        exp := true.B
+      }.otherwise {
+        exp := false.B
       }
     }
-    vMask
-  }
-}
-
-object VecGenData {
-  def apply (rob_idx_valid: Vec[Bool], reg_offset: Vec[UInt], offset: Vec[UInt], data:UInt):Vec[UInt] = {
-    val vData = VecInit(Seq.fill(2)(0.U(128.W)))
-    for (i <- 0 until 2){
-      when (rob_idx_valid(i)) {
-        when (offset(i) <= reg_offset(i)) {
-          vData(i) := data << ((reg_offset(i) - offset(i)) << 3.U)
-        }.otherwise {
-          vData(i) := data >> ((offset(i) - reg_offset(i)) << 3.U)
-        }
-      }
-    }
-    vData
+    exp
   }
 }
 
@@ -83,12 +67,6 @@ class VluopBundle(implicit p: Parameters) extends VLSUBundle {
   val flow_counter = UInt(flowIdxBits.W)
   val vd_last_uop = Bool()
 
-  // def apply (uop: MicroOp, fof: Bool) = {
-  //   this.uop  := uop
-  //   this.fof  := fof
-  //   this
-  // }
-
   // instruction decode result
   val flowNum = UInt(flowIdxBits.W) // # of flows in a uop
   // val flowNumLog2 = UInt(log2Up(flowIdxBits).W) // log2(flowNum), for better timing of multiplication
@@ -102,19 +80,6 @@ class VluopBundle(implicit p: Parameters) extends VLSUBundle {
   val vlmax = UInt(elemIdxBits.W)
   val instType = UInt(3.W)
 }
-
-// class VlUopQueueIOBundle(implicit p: Parameters) extends XSBundle {
-//   val loadRegIn   = Vec(VecLoadPipelineWidth, Flipped(DecoupledIO(new ExuInput(isVpu = true))))
-//   val redirect    = Flipped(ValidIO(new Redirect))
-//   val instType    = Vec(VecLoadPipelineWidth, Input(UInt(3.W)))
-//   val fof         = Vec(VecLoadPipelineWidth, Input(Bool()))
-//   val whole_reg   = Vec(VecLoadPipelineWidth, Input(Bool()))
-//   val emul        = Vec(VecLoadPipelineWidth, Input(UInt(3.W)))
-//   val realFlowNum = Vec(VecLoadPipelineWidth, Input(UInt(5.W)))
-//   val loadPipeIn  = Vec(VecLoadPipelineWidth, Flipped(DecoupledIO(new VecExuOutput)))
-//   val uopVecFeedback = Vec(VecLoadPipelineWidth,ValidIO(Bool()))
-//   val vecLoadWriteback = Vec(VecLoadPipelineWidth,DecoupledIO(new ExuOutput(isVpu = true)))
-// }
 
 class VlUopQueueIOBundle(implicit p: Parameters) extends VLSUBundle {
   // redirect
@@ -347,7 +312,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
     port.reg_offset := regOffset
     port.alignedType := issueAlignedType
     port.exp := exp
-    port.flowIdx := elemIdx
+    port.flow_idx := elemIdx
     port.is_first_ele := elemIdx === 0.U
   }
 
