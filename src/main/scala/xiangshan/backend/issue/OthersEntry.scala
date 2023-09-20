@@ -210,7 +210,6 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
     entryRegNext.payload := entryReg.payload
     if (params.needPc) {
       entryRegNext.status.pc.get := entryReg.status.pc.get
-      entryRegNext.status.target.get := entryReg.status.target.get
     }
   }
 
