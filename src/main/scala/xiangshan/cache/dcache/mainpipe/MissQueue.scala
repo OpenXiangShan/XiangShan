@@ -1053,7 +1053,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
 
   // Difftest
   if (env.EnableDifftest) {
-    val difftest = DifftestModule(new DiffRefillEvent)
+    val difftest = DifftestModule(new DiffRefillEvent, dontCare = true)
     difftest.coreid := io.hartId
     difftest.index := 1.U
     difftest.valid := io.refill_to_ldq.valid && io.refill_to_ldq.bits.hasdata && io.refill_to_ldq.bits.refill_done

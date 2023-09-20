@@ -247,7 +247,7 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
   XSPerfAccumulate("fdip_fencei_cycle", io.fencei)
 
   if (env.EnableDifftest) {
-    val difftest = DifftestModule(new DiffRefillEvent)
+    val difftest = DifftestModule(new DiffRefillEvent, dontCare = true)
     difftest.coreid  := io.hartId
     difftest.index   := 6.U
     difftest.valid   := toICacheData.fire
@@ -845,7 +845,7 @@ class PrefetchQueue(edge: TLEdgeOut)(implicit p: Parameters) extends IPrefetchMo
   }
 
   if (env.EnableDifftest) {
-    val diffipfrefill = DifftestModule(new DiffRefillEvent)
+    val diffipfrefill = DifftestModule(new DiffRefillEvent, dontCare = true)
     diffipfrefill.coreid   := io.hartId
     diffipfrefill.index    := 3.U
     diffipfrefill.valid    := handleEntry.valid && handleEntry.finish

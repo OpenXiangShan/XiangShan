@@ -310,7 +310,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       difftest_ptw_addr(mem.a.bits.source) := mem.a.bits.address
     }
 
-    val difftest = DifftestModule(new DiffRefillEvent)
+    val difftest = DifftestModule(new DiffRefillEvent, dontCare = true)
     difftest.coreid := p(XSCoreParamsKey).HartId.asUInt
     difftest.index := 2.U
     difftest.valid := cache.io.refill.valid

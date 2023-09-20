@@ -359,7 +359,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   if (env.EnableDifftest) {
     (0 until PortNumber).foreach { i =>
-      val diffPIQ = DifftestModule(new DiffRefillEvent)
+      val diffPIQ = DifftestModule(new DiffRefillEvent, dontCare = true)
       diffPIQ.coreid := io.hartId
       diffPIQ.index := (i + 7).U
       if (i == 0) diffPIQ.valid := s1_fire && !s1_port_hit(i) && !s1_ipf_hit_latch(i) && s1_piq_hit_latch(i) && !tlbExcp(0)
@@ -817,7 +817,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
       discard
     }
     (0 until PortNumber).map { i =>
-      val diffMainPipeOut = DifftestModule(new DiffRefillEvent)
+      val diffMainPipeOut = DifftestModule(new DiffRefillEvent, dontCare = true)
       diffMainPipeOut.coreid := io.hartId
       diffMainPipeOut.index := (4 + i).U
       if (i == 0) diffMainPipeOut.valid := s2_fire && !discards(0)
