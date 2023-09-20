@@ -416,11 +416,13 @@ trait BasicPrediction extends HasXSParameter {
 
 // selectByTaken selects some data according to takenMask
 // allTargets should be in flattened 2-dim Vec, like [taken, not taken, not hit, taken, ...]
-def selectByTaken[T <: Data](takenMask: Vec[Bool], hit: Bool, allTargets: Vec[T]): T = {
-  val selVecOH =
-    takenMask.zipWithIndex.map { case (t, i) => !takenMask.take(i).fold(false.B)(_ || _) && t && hit } :+
-      (!takenMask.asUInt.orR && hit) :+ !hit
-  Mux1H(selVecOH, allTargets)
+object selectByTaken {
+  def apply[T <: Data](takenMask: Vec[Bool], hit: Bool, allTargets: Vec[T]): T = {
+    val selVecOH =
+      takenMask.zipWithIndex.map { case (t, i) => !takenMask.take(i).fold(false.B)(_ || _) && t && hit } :+
+        (!takenMask.asUInt.orR && hit) :+ !hit
+    Mux1H(selVecOH, allTargets)
+  }
 }
 
 @chiselName
