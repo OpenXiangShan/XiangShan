@@ -98,6 +98,7 @@ class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyMod
   }
 
   val ctrlBlock = LazyModule(new CtrlBlock(params))
+  val pcTargetMem = LazyModule(new PcTargetMem(params))
   val intScheduler = params.intSchdParams.map(x => LazyModule(new Scheduler(x)))
   val vfScheduler = params.vfSchdParams.map(x => LazyModule(new Scheduler(x)))
   val memScheduler = params.memSchdParams.map(x => LazyModule(new Scheduler(x)))
@@ -116,6 +117,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   val io = IO(new BackendIO()(p, wrapper.params))
 
   private val ctrlBlock = wrapper.ctrlBlock.module
+  private val pcTargetMem = wrapper.pcTargetMem.module
   private val intScheduler = wrapper.intScheduler.get.module
   private val vfScheduler = wrapper.vfScheduler.get.module
   private val memScheduler = wrapper.memScheduler.get.module
@@ -169,7 +171,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   intScheduler.io.fromTop.hartId := io.fromTop.hartId
   intScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
   intScheduler.io.fromCtrlBlock.pcVec := ctrlBlock.io.toIssueBlock.pcVec
-  intScheduler.io.fromCtrlBlock.targetVec := ctrlBlock.io.toIssueBlock.targetVec
   intScheduler.io.fromDispatch.allocPregs <> ctrlBlock.io.toIssueBlock.allocPregs
   intScheduler.io.fromDispatch.uops <> ctrlBlock.io.toIssueBlock.intUops
   intScheduler.io.intWriteBack := wbDataPath.io.toIntPreg
@@ -257,6 +258,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     sink.bits.data := source.bits.data
   }
 
+
   intExuBlock.io.flush := ctrlBlock.io.toExuBlock.flush
   for (i <- 0 until intExuBlock.io.in.length) {
     for (j <- 0 until intExuBlock.io.in(i).length) {
@@ -270,6 +272,13 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
         )
       )
     }
+  }
+
+  pcTargetMem.io.fromFrontendFtq := io.frontend.fromFtq
+  pcTargetMem.io.fromDataPathFtq := bypassNetwork.io.toExus.int.flatten.filter(_.bits.params.hasPredecode).map(_.bits.ftqIdx.get)
+  intExuBlock.io.in.flatten.filter(_.bits.params.hasPredecode).map(_.bits.predictInfo.get.target).zipWithIndex.foreach {
+    case (sink, i) =>
+      sink := pcTargetMem.io.toExus(i)
   }
 
   private val csrio = intExuBlock.io.csrio.get

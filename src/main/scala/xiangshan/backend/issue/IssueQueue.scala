@@ -681,7 +681,6 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
 
 class IssueQueueJumpBundle extends Bundle {
   val pc = UInt(VAddrData().dataWidth.W)
-  val target = UInt(VAddrData().dataWidth.W)
 }
 
 class IssueQueueLoadBundle(implicit p: Parameters) extends XSBundle {
@@ -702,20 +701,18 @@ class IssueQueueIntImp(override val wrapper: IssueQueue)(implicit p: Parameters,
   if(params.needPc) {
     entries.io.enq.zipWithIndex.foreach { case (entriesEnq, i) =>
       entriesEnq.bits.status.pc.foreach(_ := io.enq(i).bits.pc)
-      entriesEnq.bits.status.target.foreach(_ := io.enqJmp.get(i).target)
     }
   }
 
   io.deq.zipWithIndex.foreach{ case (deq, i) => {
     deq.bits.jmp.foreach((deqJmp: IssueQueueJumpBundle) => {
       deqJmp.pc := deqEntryVec(i).bits.status.pc.get
-      deqJmp.target := deqEntryVec(i).bits.status.target.get
     })
     deq.bits.common.preDecode.foreach(_ := deqEntryVec(i).bits.payload.preDecodeInfo)
     deq.bits.common.ftqIdx.foreach(_ := deqEntryVec(i).bits.payload.ftqPtr)
     deq.bits.common.ftqOffset.foreach(_ := deqEntryVec(i).bits.payload.ftqOffset)
     deq.bits.common.predictInfo.foreach(x => {
-      x.target := deqEntryVec(i).bits.status.target.get
+      x.target := DontCare
       x.taken := deqEntryVec(i).bits.payload.pred_taken
     })
     // for std

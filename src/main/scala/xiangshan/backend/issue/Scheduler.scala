@@ -48,7 +48,6 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
 
   val fromCtrlBlock = new Bundle {
     val pcVec = Input(Vec(params.numPcReadPort, UInt(VAddrData().dataWidth.W)))
-    val targetVec = Input(Vec(params.numPcReadPort, UInt(VAddrData().dataWidth.W)))
     val flush = Flipped(ValidIO(new Redirect))
   }
   val fromDispatch = new Bundle {
@@ -265,9 +264,8 @@ class SchedulerArithImp(override val wrapper: Scheduler)(implicit params: SchdBl
   }.filter(_.nonEmpty).flatMap(_.get)
   println(s"[Scheduler] iqJumpBundleVec: ${iqJumpBundleVec}")
 
-  iqJumpBundleVec.zip(io.fromCtrlBlock.pcVec zip io.fromCtrlBlock.targetVec).foreach { case (iqJmp, (pc, target)) =>
+  iqJumpBundleVec.zip(io.fromCtrlBlock.pcVec).foreach { case (iqJmp, pc) =>
     iqJmp.pc := pc
-    iqJmp.target := target
   }
 }
 
