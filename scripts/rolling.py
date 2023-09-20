@@ -153,12 +153,12 @@ if __name__ == "__main__":
     cmd1_parser.add_argument('--perf-file', '-F', default=None, type=str, help="path to a file including all interested performance counters")
     
     # sub function for diff multiple db files
-    cmd1_parser = subparsers.add_parser('diff', help='for diff multiple db files')
-    cmd1_parser.add_argument('db_path', metavar='muti_db_path', type=str, help="path to a file including all path to chiseldb files")
-    cmd1_parser.add_argument('--perf-name', default=None, type=str, help="name of the performance counter")
-    cmd1_parser.add_argument('--aggregate', '-A', default=1, type=int, help="aggregation ratio")
-    cmd1_parser.add_argument('--interval', '-I', default=-1, type=int, help="interval value in the interval based mode")
-    cmd1_parser.add_argument('--perf-file', '-F', default=None, type=str, help="path to a file including all interested performance counters")
+    cmd2_parser = subparsers.add_parser('diff', help='for diff multiple db files')
+    cmd2_parser.add_argument('db_path', metavar='muti_db_path', type=str, help="path to a file including all path to chiseldb files")
+    cmd2_parser.add_argument('--perf-name', default=None, type=str, help="name of the performance counter")
+    cmd2_parser.add_argument('--aggregate', '-A', default=1, type=int, help="aggregation ratio")
+    cmd2_parser.add_argument('--interval', '-I', default=-1, type=int, help="interval value in the interval based mode")
+    cmd2_parser.add_argument('--perf-file', '-F', default=None, type=str, help="path to a file including all interested performance counters")
 
     args = parser.parse_args()
     
