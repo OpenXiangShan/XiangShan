@@ -799,6 +799,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   io.lsq.pendingst := RegNext(io.commits.isCommit && io.commits.info(0).commitType === CommitType.STORE && valid(deqPtr.value))
   io.lsq.commit := RegNext(io.commits.isCommit && io.commits.commitValid(0))
   io.lsq.pendingPtr := RegNext(deqPtr)
+  val deqPtrVec_next = Wire(Vec(CommitWidth, new RobPtr))
   io.lsq.pendingPtrNext := RegNext(deqPtrVec_next(0))
 
   /**
@@ -826,7 +827,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   deqPtrGenModule.io.interrupt_safe := interrupt_safe(deqPtr.value)
   deqPtrGenModule.io.blockCommit := blockCommit
   deqPtrVec := deqPtrGenModule.io.out
-  val deqPtrVec_next = deqPtrGenModule.io.next_out
+  deqPtrVec_next := deqPtrGenModule.io.next_out
 
   val enqPtrGenModule = Module(new RobEnqPtrWrapper)
   enqPtrGenModule.io.redirect := io.redirect
