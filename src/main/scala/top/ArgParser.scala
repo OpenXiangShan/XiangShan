@@ -35,6 +35,8 @@ object ArgParser {
       |--fpga-platform
       |--enable-difftest
       |--enable-log
+      |--with-chiseldb
+      |--with-rollingdb
       |--disable-perf
       |--mfc
       |""".stripMargin
@@ -75,6 +77,10 @@ object ArgParser {
         case "--with-chiseldb" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(EnableChiselDB = true)
+          }), tail)
+        case "--with-rollingdb" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case DebugOptionsKey => up(DebugOptionsKey).copy(EnableRollingDB = true)
           }), tail)
         case "--with-constantin" :: tail =>
           nextOption(config.alter((site, here, up) => {

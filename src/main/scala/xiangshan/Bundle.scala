@@ -44,6 +44,7 @@ import xiangshan.backend.fu.PMPEntry
 import xiangshan.frontend.Ftq_Redirect_SRAMEntry
 import xiangshan.frontend.AllFoldedHistories
 import xiangshan.frontend.AllAheadFoldedHistoryOldestBits
+import xiangshan.frontend.RASPtr
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
   val valid = Bool()
@@ -81,8 +82,12 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   val pc = UInt(VAddrBits.W)
   // frontend -> backend -> frontend
   val pd = new PreDecodeInfo
-  val rasSp = UInt(log2Up(RasSize).W)
-  val rasEntry = new RASEntry
+  val ssp = UInt(log2Up(RasSize).W)
+  val sctr = UInt(log2Up(RasCtrSize).W)
+  val TOSW = new RASPtr
+  val TOSR = new RASPtr
+  val NOS = new RASPtr
+  val topAddr = UInt(VAddrBits.W)
   // val hist = new ShiftingGlobalHistory
   val folded_hist = new AllFoldedHistories(foldedGHistInfos)
   val afhob = new AllAheadFoldedHistoryOldestBits(foldedGHistInfos)
@@ -107,8 +112,12 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
     this.lastBrNumOH := entry.lastBrNumOH
     this.afhob := entry.afhob
     this.histPtr := entry.histPtr
-    this.rasSp := entry.rasSp
-    this.rasEntry := entry.rasTop
+    this.ssp := entry.ssp
+    this.sctr := entry.sctr
+    this.TOSW := entry.TOSW
+    this.TOSR := entry.TOSR
+    this.NOS := entry.NOS
+    this.topAddr := entry.topAddr
     this
   }
 }

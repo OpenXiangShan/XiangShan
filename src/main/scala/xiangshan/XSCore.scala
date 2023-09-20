@@ -130,6 +130,7 @@ abstract class XSBundle(implicit val p: Parameters) extends Bundle
 abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   with HasXSParameter with HasExuWbHelper
 {
+  override def shouldBeInlined: Boolean = false
   // interrupt sinks
   val clint_int_sink = IntSinkNode(IntSinkPortSimple(1, 2))
   val debug_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
@@ -241,6 +242,12 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
     val beu_errors = Output(new XSL1BusErrors())
     val l2_hint = Input(Valid(new L2ToL1Hint()))
+    val l2PfqBusy = Input(Bool())
+    val debugTopDown = new Bundle {
+      val robHeadPaddr = Valid(UInt(PAddrBits.W))
+      val l2MissMatch = Input(Bool())
+      val l3MissMatch = Input(Bool())
+    }
   })
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
@@ -330,6 +337,15 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   }
   // return load pc at load s2
   memBlock.io.ooo_to_mem.loadPc <> VecInit(ctrlBlock.io.ld_pc_read.map(_.data))
+
+  for((c, e) <- ctrlBlock.io.st_pc_read.zip(exuBlocks(0).io.issue.get.drop(exuParameters.LduCnt))){
+    // read store pc at store s0
+    c.ptr := e.bits.uop.cf.ftqPtr
+    c.offset := e.bits.uop.cf.ftqOffset
+  }
+  // return store pc at store s2
+  memBlock.io.ooo_to_mem.storePc <> VecInit(ctrlBlock.io.st_pc_read.map(_.data))
+
   memBlock.io.ooo_to_mem.issue <> exuBlocks(0).io.issue.get
   // By default, instructions do not have exceptions when they enter the function units.
   memBlock.io.ooo_to_mem.issue.map(_.bits.uop.clearExceptions())
@@ -425,9 +441,18 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.mem_to_ooo.lsTopdownInfo <> ctrlBlock.io.robio.lsTopdownInfo
   memBlock.io.l2_hint.valid := io.l2_hint.valid
   memBlock.io.l2_hint.bits.sourceId := io.l2_hint.bits.sourceId
+  memBlock.io.l2PfqBusy := io.l2PfqBusy
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   io.l2_pf_enable := csrioIn.customCtrl.l2_pf_enable
+
+  // top-down info
+  memBlock.io.debugTopDown.robHeadVaddr := ctrlBlock.io.debugTopDown.fromRob.robHeadVaddr
+  frontend.io.debugTopDown.robHeadVaddr := ctrlBlock.io.debugTopDown.fromRob.robHeadVaddr
+  io.debugTopDown.robHeadPaddr := ctrlBlock.io.debugTopDown.fromRob.robHeadPaddr
+  ctrlBlock.io.debugTopDown.fromCore.l2MissMatch := io.debugTopDown.l2MissMatch
+  ctrlBlock.io.debugTopDown.fromCore.l3MissMatch := io.debugTopDown.l3MissMatch
+  ctrlBlock.io.debugTopDown.fromCore.fromMem := memBlock.io.debugTopDown.toCore
 
   // Modules are reset one by one
   val resetTree = ResetGenNode(

@@ -77,10 +77,13 @@ class FtbSlot(val offsetLen: Int, val subOffsetLen: Option[Int] = None)(implicit
   def getTarget(pc: UInt, last_stage: Option[Tuple2[UInt, Bool]] = None) = {
     def getTarget(offLen: Int)(pc: UInt, lower: UInt, stat: UInt,
       last_stage: Option[Tuple2[UInt, Bool]] = None) = {
-      val h = pc(VAddrBits-1, offLen+1)
-      val higher = Wire(UInt((VAddrBits-offLen-1).W))
-      val higher_plus_one = Wire(UInt((VAddrBits-offLen-1).W))
+      val h                = pc(VAddrBits - 1, offLen + 1)
+      val higher           = Wire(UInt((VAddrBits - offLen - 1).W))
+      val higher_plus_one  = Wire(UInt((VAddrBits - offLen - 1).W))
       val higher_minus_one = Wire(UInt((VAddrBits-offLen-1).W))
+
+      // Switch between previous stage pc and current stage pc
+      // Give flexibility for timing
       if (last_stage.isDefined) {
         val last_stage_pc = last_stage.get._1
         val last_stage_pc_h = last_stage_pc(VAddrBits-1, offLen+1)
@@ -173,7 +176,15 @@ class FTBEntry(implicit p: Parameters) extends XSBundle with FTBParams with BPUU
 
   def getOffsetVec = VecInit(brSlots.map(_.offset) :+ tailSlot.offset)
   def isJal = !isJalr
-  def getFallThrough(pc: UInt) = getFallThroughAddr(pc, carry, pftAddr)
+  def getFallThrough(pc: UInt, last_stage_entry: Option[Tuple2[FTBEntry, Bool]] = None) = {
+    if (last_stage_entry.isDefined) {
+      var stashed_carry = RegEnable(last_stage_entry.get._1.carry, last_stage_entry.get._2)
+      getFallThroughAddr(pc, stashed_carry, pftAddr)
+    } else {
+      getFallThroughAddr(pc, carry, pftAddr)
+    }
+  }
+
   def hasBr(offset: UInt) =
     brSlots.map{ s => s.valid && s.offset <= offset}.reduce(_||_) ||
     (tailSlot.valid && tailSlot.offset <= offset && tailSlot.sharing)
@@ -422,20 +433,23 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   val s3_ftb_entry_dup = io.s2_fire.zip(s2_ftb_entry_dup).map {case (f, e) => RegEnable(e, f)}
   
   val s1_hit = ftbBank.io.read_hits.valid && io.ctrl.btb_enable
-  val s2_hit_dup = io.s1_fire.map(f => RegEnable(s1_hit, f))
-  val s3_hit_dup = io.s2_fire.zip(s2_hit_dup).map {case (f, h) => RegEnable(h, f)}
+  val s2_hit_dup = io.s1_fire.map(f => RegEnable(s1_hit, 0.B, f))
+  val s3_hit_dup = io.s2_fire.zip(s2_hit_dup).map {case (f, h) => RegEnable(h, 0.B, f)}
   val writeWay = ftbBank.io.read_hits.bits
 
   // io.out.bits.resp := RegEnable(io.in.bits.resp_in(0), 0.U.asTypeOf(new BranchPredictionResp), io.s1_fire)
   io.out := io.in.bits.resp_in(0)
 
-  val s1_latch_call_is_rvc   = DontCare // TODO: modify when add RAS
-
   io.out.s2.full_pred.zip(s2_hit_dup).map {case (fp, h) => fp.hit := h}
   io.out.s2.pc                  := s2_pc_dup
   for (full_pred & s2_ftb_entry & s2_pc & s1_pc & s1_fire <-
     io.out.s2.full_pred zip s2_ftb_entry_dup zip s2_pc_dup zip s1_pc_dup zip io.s1_fire) {
-      full_pred.fromFtbEntry(s2_ftb_entry, s2_pc, Some((s1_pc, s1_fire)))
+      full_pred.fromFtbEntry(s2_ftb_entry,
+        s2_pc,
+        // Previous stage meta for better timing
+        Some(s1_pc, s1_fire),
+        Some(ftbBank.io.read_resp, s1_fire)
+      )
   }
 
   io.out.s3.full_pred.zip(s3_hit_dup).map {case (fp, h) => fp.hit := h}

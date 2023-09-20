@@ -19,7 +19,7 @@ package xiangshan.backend.exu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import difftest.{DifftestFpWriteback, DifftestIntWriteback}
+import difftest._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utils._
 import utility._
@@ -81,6 +81,7 @@ class ExuWbArbiter(n: Int, hasFastUopOut: Boolean, fastVec: Seq[Boolean])(implic
 }
 
 class WbArbiter(cfgs: Seq[ExuConfig], numOut: Int, isFp: Boolean)(implicit p: Parameters) extends LazyModule {
+  override def shouldBeInlined: Boolean = false
   val priorities = cfgs.map(c => if(isFp) c.wbFpPriority else c.wbIntPriority)
 
   // NOTE:
@@ -231,6 +232,7 @@ class WbArbiterWrapper(
   numIntOut: Int,
   numFpOut: Int
 )(implicit p: Parameters) extends LazyModule with HasWritebackSource {
+  override def shouldBeInlined: Boolean = false
   val numInPorts = exuConfigs.length
 
   val intConfigs = exuConfigs.filter(_.writeIntRf)
@@ -304,12 +306,11 @@ class WbArbiterWrapper(
     }
     if (env.EnableDifftest || env.AlwaysBasicDiff) {
       intArbiter.module.io.out.foreach(out => {
-        val difftest = Module(new DifftestIntWriteback)
-        difftest.io.clock := clock
-        difftest.io.coreid := io.hartId
-        difftest.io.valid := out.valid && out.bits.uop.ctrl.rfWen
-        difftest.io.dest := out.bits.uop.pdest
-        difftest.io.data := out.bits.data
+        val difftest = DifftestModule(new DiffIntWriteback(NRPhyRegs))
+        difftest.coreid  := io.hartId
+        difftest.valid   := out.valid && out.bits.uop.ctrl.rfWen
+        difftest.address := out.bits.uop.pdest
+        difftest.data    := out.bits.data
       })
     }
 
@@ -325,12 +326,11 @@ class WbArbiterWrapper(
     }
     if (env.EnableDifftest || env.AlwaysBasicDiff) {
       fpArbiter.module.io.out.foreach(out => {
-        val difftest = Module(new DifftestFpWriteback)
-        difftest.io.clock := clock
-        difftest.io.coreid := io.hartId
-        difftest.io.valid := out.valid // all fp instr will write fp rf
-        difftest.io.dest := out.bits.uop.pdest
-        difftest.io.data := out.bits.data
+        val difftest = DifftestModule(new DiffFpWriteback(NRPhyRegs))
+        difftest.coreid  := io.hartId
+        difftest.valid   := out.valid // all fp instr will write fp rf
+        difftest.address := out.bits.uop.pdest
+        difftest.data    := out.bits.data
       })
     }
 
@@ -340,6 +340,7 @@ class WbArbiterWrapper(
 
 class Wb2Ctrl(configs: Seq[ExuConfig])(implicit p: Parameters) extends LazyModule
   with HasWritebackSource with HasWritebackSink {
+  override def shouldBeInlined: Boolean = false
   override def generateWritebackIO(
     thisMod: Option[HasWritebackSource],
     thisModImp: Option[HasWritebackSourceImp]

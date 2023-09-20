@@ -36,6 +36,7 @@ class ExuBlock(
   val hasIntRf: Boolean,
   val hasFpRf: Boolean
 )(implicit p: Parameters) extends LazyModule with HasWritebackSource with HasExuWbHelper {
+  override def shouldBeInlined: Boolean = false
   val scheduler = LazyModule(new Scheduler(configs, dpPorts, intRfWbPorts, fpRfWbPorts, outFastPorts, outIntRfReadPorts, outFpRfReadPorts, hasIntRf, hasFpRf))
 
   val allRfWbPorts = intRfWbPorts ++ fpRfWbPorts

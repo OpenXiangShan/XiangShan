@@ -27,7 +27,8 @@ import xiangshan.cache.mmu._
 import xiangshan.frontend.icache._
 
 
-class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter{
+class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter {
+  override def shouldBeInlined: Boolean = false
 
   val instrUncache  = LazyModule(new InstrUncache())
   val icache        = LazyModule(new ICache())
@@ -57,6 +58,9 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
         val bpRight = Output(UInt(XLEN.W))
         val bpWrong = Output(UInt(XLEN.W))
       }
+    }
+    val debugTopDown = new Bundle {
+      val robHeadVaddr = Flipped(Valid(UInt(VAddrBits.W)))
     }
   })
 
@@ -106,11 +110,10 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   ifu.io.pmp.resp <> pmp_check.last.resp
 
   val itlb = Module(new TLB(coreParams.itlbPortNum, nRespDups = 1,
-    Seq(true, true) ++ Seq.fill(prefetchPipeNum)(false) ++ Seq(true), itlbParams))
+    Seq(false, false) ++ Seq.fill(prefetchPipeNum)(false) ++ Seq(true), itlbParams))
   itlb.io.requestor.take(2 + prefetchPipeNum) zip icache.io.itlb foreach {case (a,b) => a <> b}
   itlb.io.requestor.last <> ifu.io.iTLBInter // mmio may need re-tlb, blocked
   itlb.io.base_connect(sfence, tlbCsr)
-  itlb.io.ptw_replenish <> DontCare
   itlb.io.flushPipe.map(_ := needFlush)
 
   val itlb_ptw = Wire(new VectorTlbPtwIO(coreParams.itlbPortNum))
@@ -143,8 +146,8 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   ifu.io.icachePerfInfo := icache.io.perfInfo
 
-  icache.io.csr.distribute_csr <> csrCtrl.distribute_csr
-  io.csrUpdate := RegNext(icache.io.csr.update)
+  icache.io.csr.distribute_csr <> DontCare
+  io.csrUpdate := DontCare
 
   icache.io.csr_pf_enable     := RegNext(csrCtrl.l1I_pf_enable)
   icache.io.csr_parity_enable := RegNext(csrCtrl.icache_parity_enable)
@@ -168,7 +171,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   for (i <- 0 until DecodeWidth) {
     checkTargetIdx(i) := ibuffer.io.out(i).bits.ftqPtr.value
-    checkTarget(i) := Mux(ftq.io.toBackend.newest_entry_ptr.value === checkTargetIdx(i), 
+    checkTarget(i) := Mux(ftq.io.toBackend.newest_entry_ptr.value === checkTargetIdx(i),
                         ftq.io.toBackend.newest_entry_target,
                         checkPcMem(checkTargetIdx(i) + 1.U).startAddr)
   }
@@ -327,6 +330,8 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   io.error <> RegNext(RegNext(icache.io.error))
 
   icache.io.hartId := io.hartId
+
+  itlbRepeater1.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr
 
   val frontendBubble = PopCount((0 until DecodeWidth).map(i => io.backend.cfVec(i).ready && !ibuffer.io.out(i).valid))
   XSPerfAccumulate("FrontendBubble", frontendBubble)

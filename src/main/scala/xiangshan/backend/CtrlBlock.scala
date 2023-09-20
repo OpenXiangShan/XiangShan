@@ -24,10 +24,10 @@ import utils._
 import utility._
 import xiangshan._
 import xiangshan.backend.decode.{DecodeStage, FusionDecoder, ImmUnion}
-import xiangshan.backend.dispatch.{Dispatch, Dispatch2Rs, DispatchQueue}
+import xiangshan.backend.dispatch._
 import xiangshan.backend.fu.PFEvent
 import xiangshan.backend.rename.{Rename, RenameTableWrapper}
-import xiangshan.backend.rob.{DebugLSIO, LsTopdownInfo, Rob, RobCSRIO, RobLsqIO, RobPtr}
+import xiangshan.backend.rob._
 import xiangshan.frontend.{FtqPtr, FtqRead, Ftq_RF_Components}
 import xiangshan.mem.mdp.{LFST, SSIT, WaitTable}
 import xiangshan.ExceptionNO._
@@ -215,21 +215,11 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   io.memPredUpdate.ldpc := RegNext(XORFold(real_pc(VAddrBits-1, 1), MemPredPCWidth))
   // store pc is ready 1 cycle after s1_isReplay is judged
   io.memPredUpdate.stpc := XORFold(store_pc(VAddrBits-1, 1), MemPredPCWidth)
-
-  // // recover runahead checkpoint if redirect
-  // if (!env.FPGAPlatform) {
-  //   val runahead_redirect = Module(new DifftestRunaheadRedirectEvent)
-  //   runahead_redirect.io.clock := clock
-  //   runahead_redirect.io.coreid := io.hartId
-  //   runahead_redirect.io.valid := io.stage3Redirect.valid
-  //   runahead_redirect.io.pc :=  s2_pc // for debug only
-  //   runahead_redirect.io.target_pc := s2_target // for debug only
-  //   runahead_redirect.io.checkpoint_id := io.stage3Redirect.bits.debug_runahead_checkpoint_id // make sure it is right
-  // }
 }
 
 class CtrlBlock(dpExuConfigs: Seq[Seq[Seq[ExuConfig]]])(implicit p: Parameters) extends LazyModule
   with HasWritebackSink with HasWritebackSource {
+  override def shouldBeInlined: Boolean = false
   val rob = LazyModule(new Rob)
 
   override def addWritebackSink(source: Seq[HasWritebackSource], index: Option[Seq[Int]]): HasWritebackSink = {
@@ -278,6 +268,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     val sqCanAccept = Input(Bool())
     val lqCanAccept = Input(Bool())
     val ld_pc_read = Vec(exuParameters.LduCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
+    val st_pc_read = Vec(exuParameters.StuCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
     // from int block
     val exuRedirect = Vec(exuParameters.AluCnt + exuParameters.JmpCnt, Flipped(ValidIO(new ExuOutput)))
     val stIn = Vec(exuParameters.StuCnt, Flipped(ValidIO(new ExuInput)))
@@ -311,6 +302,10 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     val debug_fp_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
     val robDeqPtr = Output(new RobPtr)
     val robHeadLsIssue = Input(Bool())
+    val debugTopDown = new Bundle {
+      val fromRob = new RobCoreTopDownIO
+      val fromCore = new CoreDispatchTopDownIO
+    }
   })
 
   override def writebackSource: Option[Seq[Seq[Valid[ExuOutput]]]] = {
@@ -341,9 +336,11 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
 
   // jumpPc (2) + redirects (1) + loadPredUpdate (1) + jalr_target (1) + [ld pc (LduCnt)] + robWriteback (sum(writebackLengths)) + robFlush (1)
   val PCMEMIDX_LD = 5
+  val PCMEMIDX_ST = PCMEMIDX_LD + exuParameters.LduCnt
+  val PCMEM_READ_PORT_COUNT = if(EnableStorePrefetchSMS) 6 + exuParameters.LduCnt + exuParameters.StuCnt else 6 + exuParameters.LduCnt
   val pcMem = Module(new SyncDataModuleTemplate(
     new Ftq_RF_Components, FtqSize,
-    6 + exuParameters.LduCnt, 1, "CtrlPcMem")
+    PCMEM_READ_PORT_COUNT, 1, "CtrlPcMem")
   )
   pcMem.io.wen.head   := RegNext(io.frontend.fromFtq.pc_mem_wen)
   pcMem.io.waddr.head := RegNext(io.frontend.fromFtq.pc_mem_waddr)
@@ -637,7 +634,18 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   for(i <- 0 until exuParameters.LduCnt){
     // load s0 -> get rdata (s1) -> reg next (s2) -> output (s2)
     pcMem.io.raddr(i + PCMEMIDX_LD) := io.ld_pc_read(i).ptr.value
-    io.ld_pc_read(i).data := pcMem.io.rdata(i + 5).getPc(RegNext(io.ld_pc_read(i).offset))
+    io.ld_pc_read(i).data := pcMem.io.rdata(i + PCMEMIDX_LD).getPc(RegNext(io.ld_pc_read(i).offset))
+  }
+  if(EnableStorePrefetchSMS) {
+    for(i <- 0 until exuParameters.StuCnt){
+      // store s0 -> get rdata (s1) -> reg next (s2) -> output (s2)
+      pcMem.io.raddr(i + PCMEMIDX_ST) := io.st_pc_read(i).ptr.value
+      io.st_pc_read(i).data := pcMem.io.rdata(i + PCMEMIDX_ST).getPc(RegNext(io.st_pc_read(i).offset))
+    }
+  }else {
+    for(i <- 0 until exuParameters.StuCnt){
+      io.st_pc_read(i).data := 0.U
+    }
   }
 
   rob.io.hartId := io.hartId
@@ -663,6 +671,10 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   rob.io.debugHeadLsIssue := io.robHeadLsIssue
   rob.io.lsTopdownInfo := io.robio.lsTopdownInfo
   io.robDeqPtr := rob.io.robDeqPtr
+
+  io.debugTopDown.fromRob := rob.io.debugTopDown.toCore
+  dispatch.io.debugTopDown.fromRob := rob.io.debugTopDown.toDispatch
+  dispatch.io.debugTopDown.fromCore := io.debugTopDown.fromCore
 
   io.perfInfo.ctrlInfo.robFull := RegNext(rob.io.robFull)
   io.perfInfo.ctrlInfo.intdqFull := RegNext(intDq.io.dqFull)

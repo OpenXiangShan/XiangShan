@@ -415,16 +415,11 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     GenMask(35, 32)       | // SXL and UXL cannot be changed
     GenMask(31, 23)       | // WPRI
     GenMask(16, 15)       | // XS is read-only
-    GenMask(10, 9)        | // WPRI
-    GenMask(6)            | // WPRI
-    GenMask(2)              // WPRI
-  ), 64)).asUInt
-  val mstatusMask = (~ZeroExt((
-    GenMask(XLEN - 2, 36) | // WPRI
-    GenMask(31, 23)       | // WPRI
-    GenMask(10, 9)        | // WPRI
-    GenMask(6)            | // WPRI
-    GenMask(2)              // WPRI
+    GenMask(10, 9)        | // VS, not supported yet
+    GenMask(6)            | // UBE, always little-endian (0)
+    GenMask(4)            | // WPRI
+    GenMask(2)            | // WPRI
+    GenMask(0)              // WPRI
   ), 64)).asUInt
 
   val medeleg = RegInit(UInt(XLEN.W), 0.U)
@@ -716,11 +711,11 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Mconfigptr, mconfigptr, 0.U(XLEN.W), MaskedRegMap.Unwritable),
 
     //--- Machine Trap Setup ---
-    MaskedRegMap(Mstatus, mstatus, mstatusWMask, mstatusUpdateSideEffect, mstatusMask),
+    MaskedRegMap(Mstatus, mstatus, mstatusWMask, mstatusUpdateSideEffect),
     MaskedRegMap(Misa, misa, 0.U, MaskedRegMap.Unwritable), // now whole misa is unchangeable
     MaskedRegMap(Medeleg, medeleg, "hb3ff".U(XLEN.W)),
     MaskedRegMap(Mideleg, mideleg, "h222".U(XLEN.W)),
-    MaskedRegMap(Mie, mie),
+    MaskedRegMap(Mie, mie, "haaa".U(XLEN.W)),
     MaskedRegMap(Mtvec, mtvec, mtvecMask, MaskedRegMap.NoSideEffect, mtvecMask),
     MaskedRegMap(Mcounteren, mcounteren),
 
@@ -1212,51 +1207,49 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   // Always instantiate basic difftest modules.
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
-    val difftest = Module(new DifftestArchEvent)
-    difftest.io.clock := clock
-    difftest.io.coreid := csrio.hartId
-    difftest.io.intrNO := RegNext(RegNext(RegNext(difftestIntrNO)))
-    difftest.io.cause  := RegNext(RegNext(RegNext(Mux(csrio.exception.valid, causeNO, 0.U))))
-    difftest.io.exceptionPC := RegNext(RegNext(RegNext(dexceptionPC)))
+    val difftest = DifftestModule(new DiffArchEvent, delay = 3, dontCare = true)
+    difftest.coreid      := csrio.hartId
+    difftest.valid       := csrio.exception.valid
+    difftest.interrupt   := Mux(raiseIntr, causeNO, 0.U)
+    difftest.exception   := Mux(raiseException, causeNO, 0.U)
+    difftest.exceptionPC := dexceptionPC
     if (env.EnableDifftest) {
-      difftest.io.exceptionInst := RegNext(RegNext(RegNext(csrio.exception.bits.uop.cf.instr)))
+      difftest.exceptionInst := csrio.exception.bits.uop.cf.instr
     }
   }
 
   // Always instantiate basic difftest modules.
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
-    val difftest = Module(new DifftestCSRState)
-    difftest.io.clock := clock
-    difftest.io.coreid := csrio.hartId
-    difftest.io.priviledgeMode := priviledgeMode
-    difftest.io.mstatus := mstatus
-    difftest.io.sstatus := mstatus & sstatusRmask
-    difftest.io.mepc := mepc
-    difftest.io.sepc := sepc
-    difftest.io.mtval:= mtval
-    difftest.io.stval:= stval
-    difftest.io.mtvec := mtvec
-    difftest.io.stvec := stvec
-    difftest.io.mcause := mcause
-    difftest.io.scause := scause
-    difftest.io.satp := satp
-    difftest.io.mip := mipReg
-    difftest.io.mie := mie
-    difftest.io.mscratch := mscratch
-    difftest.io.sscratch := sscratch
-    difftest.io.mideleg := mideleg
-    difftest.io.medeleg := medeleg
+    val difftest = DifftestModule(new DiffCSRState)
+    difftest.coreid := csrio.hartId
+    difftest.priviledgeMode := priviledgeMode
+    difftest.mstatus := mstatus
+    difftest.sstatus := mstatus & sstatusRmask
+    difftest.mepc := mepc
+    difftest.sepc := sepc
+    difftest.mtval:= mtval
+    difftest.stval:= stval
+    difftest.mtvec := mtvec
+    difftest.stvec := stvec
+    difftest.mcause := mcause
+    difftest.scause := scause
+    difftest.satp := satp
+    difftest.mip := mipReg
+    difftest.mie := mie
+    difftest.mscratch := mscratch
+    difftest.sscratch := sscratch
+    difftest.mideleg := mideleg
+    difftest.medeleg := medeleg
   }
 
   if(env.AlwaysBasicDiff || env.EnableDifftest) {
-    val difftest = Module(new DifftestDebugMode)
-    difftest.io.clock := clock
-    difftest.io.coreid := csrio.hartId
-    difftest.io.debugMode := debugMode
-    difftest.io.dcsr := dcsr
-    difftest.io.dpc := dpc
-    difftest.io.dscratch0 := dscratch
-    difftest.io.dscratch1 := dscratch1
+    val difftest = DifftestModule(new DiffDebugMode)
+    difftest.coreid := csrio.hartId
+    difftest.debugMode := debugMode
+    difftest.dcsr := dcsr
+    difftest.dpc := dpc
+    difftest.dscratch0 := dscratch
+    difftest.dscratch1 := dscratch1
   }
 }
 

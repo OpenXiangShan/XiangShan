@@ -26,19 +26,24 @@ import xiangshan._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.rob.DebugLsInfoBundle
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
+import xiangshan.cache.{DcacheStoreRequestIO, DCacheStoreIO, MemoryOpConstants, HasDCacheParameters, StorePrefetchReq}
 
-class StoreUnit(implicit p: Parameters) extends XSModule {
+class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameters {
   val io = IO(new Bundle() {
     val redirect        = Flipped(ValidIO(new Redirect))
     val stin            = Flipped(Decoupled(new ExuInput))
     val issue           = Valid(new ExuInput)
     val tlb             = new TlbRequestIO()
+    val dcache          = new DCacheStoreIO
     val pmp             = Flipped(new PMPRespBundle())
     val rsIdx           = Input(UInt(log2Up(IssQueSize).W))
     val isFirstIssue    = Input(Bool())
     val lsq             = ValidIO(new LsPipelineBundle)
     val lsq_replenish   = Output(new LsPipelineBundle())
     val feedback_slow   = ValidIO(new RSFeedback)
+    val prefetch_req    = Flipped(DecoupledIO(new StorePrefetchReq))
+    // provide prefetch info to sms
+    val prefetch_train  = ValidIO(new StPrefetchTrainBundle())
     val stld_nuke_query = Valid(new StoreNukeQueryIO)
     val stout           = DecoupledIO(new ExuOutput) // writeback store
     // store mask, send to sq in store_s0
@@ -53,10 +58,20 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   // stage 0
   // --------------------------------------------------------------------------------
   // generate addr, use addr to query DCache and DTLB
-  val s0_valid        = io.stin.valid
-  val s0_in           = io.stin.bits
-  val s0_isFirstIssue = io.isFirstIssue
-  val s0_rsIdx        = io.rsIdx
+  val s0_iss_valid    = io.stin.valid
+  val s0_prf_valid    = io.prefetch_req.valid && io.dcache.req.ready
+  val s0_valid        = s0_iss_valid || s0_prf_valid
+  val s0_use_flow_rs  = s0_iss_valid
+  val s0_use_flow_prf = !s0_iss_valid && s0_prf_valid
+  val s0_in           = Mux(s0_use_flow_rs, io.stin.bits, 0.U.asTypeOf(io.stin.bits))
+  val s0_isFirstIssue = Mux(s0_use_flow_rs, io.isFirstIssue, false.B)
+  val s0_rsIdx        = Mux(s0_use_flow_rs, io.rsIdx, 0.U)
+  val s0_size         = Mux(s0_use_flow_rs, LSUOpType.size(s0_in.uop.ctrl.fuOpType), 3.U)
+  val s0_mem_idx      = Mux(s0_use_flow_rs, s0_in.uop.sqIdx.value, 0.U)
+  val s0_rob_idx      = Mux(s0_use_flow_rs, s0_in.uop.robIdx, 0.U.asTypeOf(s0_in.uop.robIdx))
+  val s0_pc           = Mux(s0_use_flow_rs, s0_in.uop.cf.pc, 0.U)
+  val s0_instr_type   = Mux(s0_use_flow_rs, STORE_SOURCE.U, DCACHE_PREFETCH_SOURCE.U)
+  val s0_wlineflag    = Mux(s0_use_flow_rs, s0_in.uop.ctrl.fuOpType === LSUOpType.cbo_zero, false.B)
   val s0_out          = Wire(new LsPipelineBundle)
   val s0_kill         = s0_in.uop.robIdx.needFlush(io.redirect)
   val s0_can_go       = s1_ready
@@ -71,33 +86,46 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
     Mux(imm12(11), s0_in.src(0)(VAddrBits-1, 12)+SignExt(1.U, VAddrBits-12), s0_in.src(0)(VAddrBits-1, 12)),
   )
   val s0_saddr = Cat(saddr_hi, saddr_lo(11,0))
+  val s0_vaddr = Mux(s0_use_flow_rs, s0_saddr, io.prefetch_req.bits.vaddr)
+  val s0_mask  = Mux(s0_use_flow_rs, genVWmask(s0_saddr, s0_in.uop.ctrl.fuOpType(1,0)), 3.U)
 
-  io.tlb.req.valid             := s0_valid
-  io.tlb.req.bits.vaddr        := s0_saddr
-  io.tlb.req.bits.cmd          := TlbCmd.write
-  io.tlb.req.bits.size         := LSUOpType.size(s0_in.uop.ctrl.fuOpType)
-  io.tlb.req.bits.kill         := DontCare
-  io.tlb.req.bits.memidx.is_ld := false.B
-  io.tlb.req.bits.memidx.is_st := true.B
-  io.tlb.req.bits.memidx.idx   := s0_in.uop.sqIdx.value
-  io.tlb.req.bits.debug.robIdx := s0_in.uop.robIdx
-  io.tlb.req.bits.no_translate := false.B
-  io.tlb.req.bits.debug.pc     := s0_in.uop.cf.pc
+  io.tlb.req.valid                   := s0_valid
+  io.tlb.req.bits.vaddr              := s0_vaddr
+  io.tlb.req.bits.cmd                := TlbCmd.write
+  io.tlb.req.bits.size               := s0_size
+  io.tlb.req.bits.kill               := false.B
+  io.tlb.req.bits.memidx.is_ld       := false.B
+  io.tlb.req.bits.memidx.is_st       := true.B
+  io.tlb.req.bits.memidx.idx         := s0_mem_idx
+  io.tlb.req.bits.debug.robIdx       := s0_rob_idx
+  io.tlb.req.bits.no_translate       := false.B
+  io.tlb.req.bits.debug.pc           := s0_pc
   io.tlb.req.bits.debug.isFirstIssue := s0_isFirstIssue
-  io.tlb.req_kill              := false.B
+  io.tlb.req_kill                    := false.B
+
+  // Dcache access here: not **real** dcache write
+  // just read meta and tag in dcache, to find out the store will hit or miss
+
+  // NOTE: The store request does not wait for the dcache to be ready.
+  //       If the dcache is not ready at this time, the dcache is not queried.
+  //       But, store prefetch request will always wait for dcache to be ready to make progress.
+  io.dcache.req.valid              := s0_fire
+  io.dcache.req.bits.cmd           := MemoryOpConstants.M_PFW
+  io.dcache.req.bits.vaddr         := s0_vaddr
+  io.dcache.req.bits.instrtype     := s0_instr_type
 
   s0_out              := DontCare
-  s0_out.vaddr        := s0_saddr
+  s0_out.vaddr        := s0_vaddr
   // Now data use its own io
   // s1_out.data := genWdata(s1_in.src(1), s1_in.uop.ctrl.fuOpType(1,0))
   s0_out.data         := s0_in.src(1) // FIXME: remove data from pipeline
   s0_out.uop          := s0_in.uop
-  s0_out.miss         := DontCare
+  s0_out.miss         := false.B
   s0_out.rsIdx        := s0_rsIdx
-  s0_out.mask         := genVWmask(s0_saddr, s0_in.uop.ctrl.fuOpType(1,0))
+  s0_out.mask         := s0_mask
   s0_out.isFirstIssue := s0_isFirstIssue
-  s0_out.isHWPrefetch := false.B // TODO
-  s0_out.wlineflag    := s0_in.uop.ctrl.fuOpType === LSUOpType.cbo_zero
+  s0_out.isHWPrefetch := s0_use_flow_prf
+  s0_out.wlineflag    := s0_wlineflag
   when(s0_valid && s0_isFirstIssue) {
     s0_out.uop.debugInfo.tlbFirstReqTime := GTimer()
   }
@@ -109,13 +137,14 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
     "b10".U   -> (s0_out.vaddr(1,0) === 0.U), //w
     "b11".U   -> (s0_out.vaddr(2,0) === 0.U)  //d
   ))
-  s0_out.uop.cf.exceptionVec(storeAddrMisaligned) := !s0_addr_aligned
+  s0_out.uop.cf.exceptionVec(storeAddrMisaligned) := Mux(s0_use_flow_rs, !s0_addr_aligned, false.B)
 
-  io.st_mask_out.valid       := s0_valid
+  io.st_mask_out.valid       := s0_use_flow_rs
   io.st_mask_out.bits.mask   := s0_out.mask
   io.st_mask_out.bits.sqIdx  := s0_out.uop.sqIdx
 
   io.stin.ready := s1_ready
+  io.prefetch_req.ready := s1_ready && io.dcache.req.ready && !s0_iss_valid
 
   // Pipeline
   // --------------------------------------------------------------------------------
@@ -146,13 +175,13 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   .elsewhen (s1_kill) { s1_valid := false.B }
 
   // st-ld violation dectect request.
-  io.stld_nuke_query.valid       := s1_valid && !s1_tlb_miss
+  io.stld_nuke_query.valid       := s1_valid && !s1_tlb_miss && !s1_in.isHWPrefetch
   io.stld_nuke_query.bits.robIdx := s1_in.uop.robIdx
   io.stld_nuke_query.bits.paddr  := s1_paddr
   io.stld_nuke_query.bits.mask   := s1_in.mask
 
   // issue
-  io.issue.valid := s1_valid && !s1_tlb_miss
+  io.issue.valid := s1_valid && !s1_tlb_miss && !s1_in.isHWPrefetch
   io.issue.bits  := RegEnable(s0_in, s0_valid)
 
 
@@ -175,17 +204,22 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
 
   // get paddr from dtlb, check if rollback is needed
   // writeback store inst to lsq
-  s1_out        := s1_in
-  s1_out.paddr  := s1_paddr
-  s1_out.miss   := false.B
-  s1_out.mmio   := s1_mmio
-  s1_out.atomic := s1_mmio
+  s1_out         := s1_in
+  s1_out.paddr   := s1_paddr
+  s1_out.miss    := false.B
+  s1_out.mmio    := s1_mmio
+  s1_out.tlbMiss := s1_tlb_miss
+  s1_out.atomic  := s1_mmio
   s1_out.uop.cf.exceptionVec(storePageFault)   := io.tlb.resp.bits.excp(0).pf.st
   s1_out.uop.cf.exceptionVec(storeAccessFault) := io.tlb.resp.bits.excp(0).af.st
 
-  io.lsq.valid     := s1_valid
+  io.lsq.valid     := s1_valid && !s1_in.isHWPrefetch
   io.lsq.bits      := s1_out
   io.lsq.bits.miss := s1_tlb_miss
+
+  // kill dcache write intent request when tlb miss or exception
+  io.dcache.s1_kill  := (s1_tlb_miss || s1_exception || s1_mmio || s1_in.uop.robIdx.needFlush(io.redirect))
+  io.dcache.s1_paddr := s1_paddr
 
   // write below io.out.bits assign sentence to prevent overwriting values
   val s1_tlb_memidx = io.tlb.resp.bits.memidx
@@ -212,13 +246,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   .elsewhen (s2_kill) { s2_valid := false.B }
 
   val s2_pmp = WireInit(io.pmp)
-  val s2_static_pm = RegNext(io.tlb.resp.bits.static_pm)
-  when (s2_static_pm.valid) {
-    s2_pmp.ld    := false.B
-    s2_pmp.st    := false.B
-    s2_pmp.instr := false.B
-    s2_pmp.mmio  := s2_static_pm.bits
-  }
 
   val s2_exception = ExceptionNO.selectByFu(s2_out.uop.cf.exceptionVec, staCfg).asUInt.orR
   val s2_mmio = s2_in.mmio || s2_pmp.mmio
@@ -229,12 +256,33 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   s2_out.atomic := s2_in.atomic || s2_pmp.atomic
   s2_out.uop.cf.exceptionVec(storeAccessFault) := s2_in.uop.cf.exceptionVec(storeAccessFault) || s2_pmp.st
 
+  // kill dcache write intent request when mmio or exception
+  io.dcache.s2_kill := (s2_mmio || s2_exception || s2_in.uop.robIdx.needFlush(io.redirect))
+  io.dcache.s2_pc   := s2_out.uop.cf.pc
+  // TODO: dcache resp
+  io.dcache.resp.ready := true.B
+
   // feedback tlb miss to RS in store_s2
   io.feedback_slow.valid := RegNext(s1_feedback.valid && !s1_out.uop.robIdx.needFlush(io.redirect))
   io.feedback_slow.bits  := RegNext(s1_feedback.bits)
 
   // mmio and exception
   io.lsq_replenish := s2_out
+
+  // prefetch related
+  io.lsq_replenish.miss := io.dcache.resp.fire && io.dcache.resp.bits.miss // miss info
+
+  io.prefetch_train.bits.fromLsPipelineBundle(s2_in)
+  // override miss bit
+  io.prefetch_train.bits.miss := io.dcache.resp.bits.miss
+  // TODO: add prefetch and access bit
+  io.prefetch_train.bits.meta_prefetch := false.B
+  io.prefetch_train.bits.meta_access := false.B
+  if(EnableStorePrefetchSMS) {
+    io.prefetch_train.valid := s2_valid && io.dcache.resp.fire && !s2_out.mmio && !s2_in.tlbMiss && !s2_in.isHWPrefetch
+  }else {
+    io.prefetch_train.valid := false.B
+  }
 
   // Pipeline
   // --------------------------------------------------------------------------------
@@ -293,7 +341,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
 
       sx_ready(i) := !sx_valid(i) || cur_kill || (if (i == TotalDelayCycles) io.stout.ready else sx_ready(i+1))
       val sx_valid_can_go = prev_fire || cur_fire || cur_kill
-      sx_valid(i) := RegEnable(Mux(prev_fire, true.B, false.B), sx_valid_can_go)
+      sx_valid(i) := RegEnable(Mux(prev_fire, true.B, false.B), false.B, sx_valid_can_go)
       sx_in(i) := RegEnable(sx_in(i-1), prev_fire)
     }
   }
@@ -304,9 +352,10 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
 
   io.stout.valid := sx_last_valid && !sx_last_in.uop.robIdx.needFlush(io.redirect)
   io.stout.bits := sx_last_in
+  io.stout.bits.redirectValid := false.B
 
   io.debug_ls := DontCare
-  io.debug_ls.s1.isTlbFirstMiss := io.tlb.resp.valid && io.tlb.resp.bits.miss && io.tlb.resp.bits.debug.isFirstIssue
+  io.debug_ls.s1.isTlbFirstMiss := io.tlb.resp.valid && io.tlb.resp.bits.miss && io.tlb.resp.bits.debug.isFirstIssue && !s1_in.isHWPrefetch
   io.debug_ls.s1_robIdx := s1_in.uop.robIdx.value
 
   private def printPipeLine(pipeline: LsPipelineBundle, cond: Bool, name: String): Unit = {

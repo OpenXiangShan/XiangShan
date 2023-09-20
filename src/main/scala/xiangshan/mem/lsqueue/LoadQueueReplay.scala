@@ -183,6 +183,8 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val rawFull = Input(Bool())
     val l2_hint  = Input(Valid(new L2ToL1Hint()))
     val tlbReplayDelayCycleCtrl = Vec(4, Input(UInt(ReSelectLen.W)))
+
+    val debugTopDown = new LoadQueueTopDownIO
   })
 
   println("LoadQueueReplay size: " + LoadQueueReplaySize)
@@ -238,6 +240,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val missMSHRId = RegInit(VecInit(List.fill(LoadQueueReplaySize)(0.U((log2Up(cfg.nMissEntries).W)))))
   // Has this load already updated dcache replacement?
   val replacementUpdated = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
+  val missDbUpdated = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
   val trueCacheMissReplay = WireInit(VecInit(cause.map(_(LoadReplayCauses.C_DM))))
   val creditUpdate = WireInit(VecInit(List.fill(LoadQueueReplaySize)(0.U(ReSelectLen.W))))
   (0 until LoadQueueReplaySize).map(i => {
@@ -537,6 +540,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val s2_replayUop = RegEnable(uop(s1_replayIdx), s1_can_go(i))
     val s2_replayMSHRId = RegEnable(missMSHRId(s1_replayIdx), s1_can_go(i))
     val s2_replacementUpdated = RegEnable(replacementUpdated(s1_replayIdx), s1_can_go(i))
+    val s2_missDbUpdated = RegEnable(missDbUpdated(s1_replayIdx), s1_can_go(i))
     val s2_replayCauses = RegEnable(cause(s1_replayIdx), s1_can_go(i))
     val s2_replayCarry = RegEnable(replayCarryReg(s1_replayIdx), s1_can_go(i))
     val s2_replayCacheMissReplay = RegEnable(trueCacheMissReplay(s1_replayIdx), s1_can_go(i))
@@ -552,6 +556,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     io.replay(i).bits.replayCarry  := s2_replayCarry
     io.replay(i).bits.mshrid       := s2_replayMSHRId
     io.replay(i).bits.replacementUpdated := s2_replacementUpdated
+    io.replay(i).bits.missDbUpdated := s2_missDbUpdated
     io.replay(i).bits.forward_tlDchannel := s2_replayCauses(LoadReplayCauses.C_DM)
     io.replay(i).bits.schedIndex   := s2_oldestSel(i).bits
 
@@ -666,6 +671,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       // extra info
       replayCarryReg(enqIndex) := replayInfo.rep_carry
       replacementUpdated(enqIndex) := enq.bits.replacementUpdated
+      missDbUpdated(enqIndex) := enq.bits.missDbUpdated
       // update mshr_id only when the load has already been handled by mshr
       when(enq.bits.handledByMSHR) {
         missMSHRId(enqIndex) := replayInfo.mshr_id
@@ -699,9 +705,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   io.lqFull := lqFull
 
   // Topdown
-  val sourceVaddr = WireInit(0.U.asTypeOf(new Valid(UInt(VAddrBits.W))))
-
-  ExcitingUtils.addSink(sourceVaddr, s"rob_head_vaddr_${coreParams.HartId}", ExcitingUtils.Perf)
+  val robHeadVaddr = io.debugTopDown.robHeadVaddr
 
   val uop_wrapper = Wire(Vec(LoadQueueReplaySize, new XSBundleWithMicroOp))
   (uop_wrapper.zipWithIndex).foreach {
@@ -709,7 +713,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       u.uop := uop(i)
     }
   }
-  val lq_match_vec = (debug_vaddr.zip(allocated)).map{case(va, alloc) => alloc && (va === sourceVaddr.bits)}
+  val lq_match_vec = (debug_vaddr.zip(allocated)).map{case(va, alloc) => alloc && (va === robHeadVaddr.bits)}
   val rob_head_lq_match = ParallelOperation(lq_match_vec.zip(uop_wrapper), (a: Tuple2[Bool, XSBundleWithMicroOp], b: Tuple2[Bool, XSBundleWithMicroOp]) => {
     val (a_v, a_uop) = (a._1, a._2)
     val (b_v, b_uop) = (b._1, b._2)
@@ -722,7 +726,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   })
 
   val lq_match_bits = rob_head_lq_match._2.uop
-  val lq_match      = rob_head_lq_match._1 && sourceVaddr.valid
+  val lq_match      = rob_head_lq_match._1 && robHeadVaddr.valid
   val lq_match_idx  = lq_match_bits.lqIdx.value
 
   val rob_head_tlb_miss        = lq_match && cause(lq_match_idx)(LoadReplayCauses.C_TM)
@@ -738,14 +742,12 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
   val rob_head_vio_replay = rob_head_nuke || rob_head_mem_amb
 
-  val rob_head_miss_in_dtlb = WireInit(false.B)
-  ExcitingUtils.addSink(rob_head_miss_in_dtlb, s"miss_in_dtlb_${coreParams.HartId}", ExcitingUtils.Perf)
-  ExcitingUtils.addSource(rob_head_tlb_miss && !rob_head_miss_in_dtlb, s"load_tlb_replay_stall_${coreParams.HartId}", ExcitingUtils.Perf, true)
-  ExcitingUtils.addSource(rob_head_tlb_miss &&  rob_head_miss_in_dtlb, s"load_tlb_miss_stall_${coreParams.HartId}", ExcitingUtils.Perf, true)
-  ExcitingUtils.addSource(rob_head_vio_replay, s"load_vio_replay_stall_${coreParams.HartId}", ExcitingUtils.Perf, true)
-  ExcitingUtils.addSource(rob_head_mshrfull_replay, s"load_mshr_replay_stall_${coreParams.HartId}", ExcitingUtils.Perf, true)
-  // ExcitingUtils.addSource(rob_head_confilct_replay, s"load_l1_cache_stall_with_bank_conflict_${coreParams.HartId}", ExcitingUtils.Perf, true)
-  ExcitingUtils.addSource(rob_head_other_replay, s"rob_head_other_replay_${coreParams.HartId}", ExcitingUtils.Perf, true)
+  val rob_head_miss_in_dtlb = io.debugTopDown.robHeadMissInDTlb
+  io.debugTopDown.robHeadTlbReplay := rob_head_tlb_miss && !rob_head_miss_in_dtlb
+  io.debugTopDown.robHeadTlbMiss := rob_head_tlb_miss && rob_head_miss_in_dtlb
+  io.debugTopDown.robHeadLoadVio := rob_head_vio_replay
+  io.debugTopDown.robHeadLoadMSHR := rob_head_mshrfull_replay
+  io.debugTopDown.robHeadOtherReplay := rob_head_other_replay
   val perfValidCount = RegNext(PopCount(allocated))
 
   //  perf cnt
@@ -753,7 +755,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val deqNumber               = PopCount(io.replay.map(_.fire))
   val deqBlockCount           = PopCount(io.replay.map(r => r.valid && !r.ready))
   val replayTlbMissCount      = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_TM)))
-  val replayMemAmbCount    = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_NK)))
+  val replayMemAmbCount       = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_NK)))
   val replayNukeCount         = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_MA)))
   val replayRARRejectCount    = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_RAR)))
   val replayRAWRejectCount    = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_RAW)))

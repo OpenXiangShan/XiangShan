@@ -73,6 +73,8 @@ case class XSCoreParameters
   UbtbSize: Int = 256,
   FtbSize: Int = 2048,
   RasSize: Int = 32,
+  RasSpecSize: Int = 64,
+  RasCtrSize: Int = 8,
   CacheLineSize: Int = 512,
   FtbWays: Int = 4,
   TageTableInfos: Seq[Tuple3[Int,Int,Int]] =
@@ -185,6 +187,11 @@ case class XSCoreParameters
   EnableCacheErrorAfterReset: Boolean = true,
   EnableAccurateLoadError: Boolean = true,
   EnableUncacheWriteOutstanding: Boolean = false,
+  EnableStorePrefetchAtIssue: Boolean = false,
+  EnableStorePrefetchAtCommit: Boolean = false,
+  EnableAtCommitMissTrigger: Boolean = true,
+  EnableStorePrefetchSMS: Boolean = false,
+  EnableStorePrefetchSPB: Boolean = false,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
   ReSelectLen: Int = 7, // load replay queue replay select counter len
   iwpuParameters: WPUParameters = WPUParameters(
@@ -202,21 +209,13 @@ case class XSCoreParameters
     name = "itlb",
     fetchi = true,
     useDmode = false,
-    normalNWays = 32,
-    normalReplacer = Some("plru"),
-    superNWays = 4,
-    superReplacer = Some("plru")
+    NWays = 48,
   ),
   itlbPortNum: Int = 2 + ICacheParameters().prefetchPipeNum + 1,
   ipmpPortNum: Int = 2 + ICacheParameters().prefetchPipeNum + 1,
   ldtlbParameters: TLBParameters = TLBParameters(
     name = "ldtlb",
-    normalNSets = 64,
-    normalNWays = 1,
-    normalAssociative = "sa",
-    normalReplacer = Some("setplru"),
-    superNWays = 16,
-    normalAsVictim = true,
+    NWays = 48,
     outReplace = false,
     partialStaticPMP = true,
     outsideRecvFlush = true,
@@ -224,12 +223,7 @@ case class XSCoreParameters
   ),
   sttlbParameters: TLBParameters = TLBParameters(
     name = "sttlb",
-    normalNSets = 64,
-    normalNWays = 1,
-    normalAssociative = "sa",
-    normalReplacer = Some("setplru"),
-    superNWays = 16,
-    normalAsVictim = true,
+    NWays = 48,
     outReplace = false,
     partialStaticPMP = true,
     outsideRecvFlush = true,
@@ -237,12 +231,7 @@ case class XSCoreParameters
   ),
   pftlbParameters: TLBParameters = TLBParameters(
     name = "pftlb",
-    normalNSets = 64,
-    normalNWays = 1,
-    normalAssociative = "sa",
-    normalReplacer = Some("setplru"),
-    superNWays = 16,
-    normalAsVictim = true,
+    NWays = 48,
     outReplace = false,
     partialStaticPMP = true,
     outsideRecvFlush = true,
@@ -251,9 +240,7 @@ case class XSCoreParameters
   refillBothTlb: Boolean = false,
   btlbParameters: TLBParameters = TLBParameters(
     name = "btlb",
-    normalNSets = 1,
-    normalNWays = 64,
-    superNWays = 4,
+    NWays = 48,
   ),
   l2tlbParameters: L2TLBParameters = L2TLBParameters(),
   NumPerfCounters: Int = 16,
@@ -273,7 +260,8 @@ case class XSCoreParameters
     replacer = Some("setplru"),
     nMissEntries = 16,
     nProbeEntries = 8,
-    nReleaseEntries = 18
+    nReleaseEntries = 18,
+    nMaxPrefetchEntry = 6,
   )),
   L2CacheParamsOpt: Option[L2Param] = Some(L2Param(
     name = "l2",
@@ -369,6 +357,8 @@ trait HasXSParameter {
   val RasSize = coreParams.RasSize
   val JABlockNumWidth = coreParams.JABlockNumWidth
   val JAMinBlockNum = coreParams.JAMinBlockNum
+  val RasSpecSize = coreParams.RasSpecSize
+  val RasCtrSize = coreParams.RasCtrSize
 
   def getBPDComponents(resp_in: BranchPredictionResp, p: Parameters) = {
     coreParams.branchPredictor(resp_in, p)
@@ -460,6 +450,11 @@ trait HasXSParameter {
   val EnableCacheErrorAfterReset = coreParams.EnableCacheErrorAfterReset
   val EnableAccurateLoadError = coreParams.EnableAccurateLoadError
   val EnableUncacheWriteOutstanding = coreParams.EnableUncacheWriteOutstanding
+  val EnableStorePrefetchAtIssue = coreParams.EnableStorePrefetchAtIssue
+  val EnableStorePrefetchAtCommit = coreParams.EnableStorePrefetchAtCommit
+  val EnableAtCommitMissTrigger = coreParams.EnableAtCommitMissTrigger
+  val EnableStorePrefetchSMS = coreParams.EnableStorePrefetchSMS
+  val EnableStorePrefetchSPB = coreParams.EnableStorePrefetchSPB
   val asidLen = coreParams.MMUAsidLen
   val BTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
   val refillBothTlb = coreParams.refillBothTlb

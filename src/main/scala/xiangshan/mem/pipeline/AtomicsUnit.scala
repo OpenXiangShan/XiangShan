@@ -61,8 +61,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
   val paddr = Reg(UInt())
   val vaddr = in.src(0)
   val is_mmio = Reg(Bool())
-  // pmp check
-  val static_pm = Reg(Valid(Bool())) // valid for static, bits for mmio
+
   // dcache response data
   val resp_data = Reg(UInt())
   val resp_data_wire = WireInit(0.U)
@@ -159,7 +158,6 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
       exceptionVec(loadPageFault)       := io.dtlb.resp.bits.excp(0).pf.ld
       exceptionVec(storeAccessFault)    := io.dtlb.resp.bits.excp(0).af.st
       exceptionVec(loadAccessFault)     := io.dtlb.resp.bits.excp(0).af.ld
-      static_pm := io.dtlb.resp.bits.static_pm
 
       when (!io.dtlb.resp.bits.miss) {
         io.out.bits.uop.debugInfo.tlbRespTime := GTimer()
@@ -179,13 +177,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
 
   when (state === s_pm) {
     val pmp = WireInit(io.pmpResp)
-    when (static_pm.valid) {
-      pmp.ld := false.B
-      pmp.st := false.B
-      pmp.instr := false.B
-      pmp.mmio := static_pm.bits
-    }
     is_mmio := pmp.mmio
+
     // NOTE: only handle load/store exception here, if other exception happens, don't send here
     val exception_va = exceptionVec(storePageFault) || exceptionVec(loadPageFault) ||
       exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault)
@@ -441,24 +434,22 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
   }
 
   if (env.EnableDifftest) {
-    val difftest = Module(new DifftestAtomicEvent)
-    difftest.io.clock      := clock
-    difftest.io.coreid     := io.hartId
-    difftest.io.atomicResp := state === s_cache_resp_latch
-    difftest.io.atomicAddr := paddr_reg
-    difftest.io.atomicData := data_reg
-    difftest.io.atomicMask := mask_reg
-    difftest.io.atomicFuop := fuop_reg
-    difftest.io.atomicOut  := resp_data_wire
+    val difftest = DifftestModule(new DiffAtomicEvent)
+    difftest.coreid := io.hartId
+    difftest.valid  := state === s_cache_resp_latch
+    difftest.addr   := paddr_reg
+    difftest.data   := data_reg
+    difftest.mask   := mask_reg
+    difftest.fuop   := fuop_reg
+    difftest.out    := resp_data_wire
   }
 
   if (env.EnableDifftest || env.AlwaysBasicDiff) {
     val uop = io.out.bits.uop
-    val difftest = Module(new DifftestLrScEvent)
-    difftest.io.clock := clock
-    difftest.io.coreid := io.hartId
-    difftest.io.valid := io.out.fire &&
+    val difftest = DifftestModule(new DiffLrScEvent)
+    difftest.coreid := io.hartId
+    difftest.valid := io.out.fire &&
       (uop.ctrl.fuOpType === LSUOpType.sc_d || uop.ctrl.fuOpType === LSUOpType.sc_w)
-    difftest.io.success := is_lrsc_valid
+    difftest.success := is_lrsc_valid
   }
 }
