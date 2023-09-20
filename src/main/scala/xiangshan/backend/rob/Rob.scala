@@ -378,6 +378,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     !uopNumVec(ptr).orR && stdWritebacked(ptr)
   }
 
+  def isUopWritebacked(ptr: UInt): Bool = {
+    !uopNumVec(ptr).orR
+  }
+
   val mmio = RegInit(VecInit(Seq.fill(RobSize)(false.B)))
 
   // data for redirect, exception, etc.
@@ -1184,8 +1188,25 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   XSPerfHistogram("walkRabExtraCycleHist", waitRabWalkCycle, state === s_walk && walkFinished && rab.io.status.walkEnd, 0, 32)
   XSPerfHistogram("walkTotalCycleHist", walkCycle, state === s_walk && state_next === s_idle, 0, 32)
 
-  val deqNotWritebacked = valid(deqPtr.value) && !isWritebacked(deqPtr.value)
+  private val deqNotWritebacked = valid(deqPtr.value) && !isWritebacked(deqPtr.value)
+  private val deqStdNotWritebacked = valid(deqPtr.value) && !stdWritebacked(deqPtr.value)
+  private val deqUopNotWritebacked = valid(deqPtr.value) && !isUopWritebacked(deqPtr.value)
+  private val deqHeadInfo = debug_microOp(deqPtr.value)
   val deqUopCommitType = io.commits.info(0).commitType
+  XSPerfAccumulate("waitAluCycle", deqNotWritebacked && deqHeadInfo.fuType === FuType.alu.U)
+  XSPerfAccumulate("waitMulCycle", deqNotWritebacked && deqHeadInfo.fuType === FuType.mul.U)
+  XSPerfAccumulate("waitDivCycle", deqNotWritebacked && deqHeadInfo.fuType === FuType.div.U)
+  XSPerfAccumulate("waitBrhCycle", deqNotWritebacked && deqHeadInfo.fuType === FuType.brh.U)
+  XSPerfAccumulate("waitJmpCycle", deqNotWritebacked && deqHeadInfo.fuType === FuType.jmp.U)
+  XSPerfAccumulate("waitCsrCycle", deqNotWritebacked && deqHeadInfo.fuType === FuType.csr.U)
+  XSPerfAccumulate("waitFenCycle", deqNotWritebacked && deqHeadInfo.fuType === FuType.fence.U)
+  XSPerfAccumulate("waitBkuCycle", deqNotWritebacked && deqHeadInfo.fuType === FuType.bku.U)
+  XSPerfAccumulate("waitLduCycle", deqNotWritebacked && deqHeadInfo.fuType === FuType.ldu.U)
+  XSPerfAccumulate("waitStuCycle", deqNotWritebacked && deqHeadInfo.fuType === FuType.stu.U)
+  XSPerfAccumulate("waitStaCycle", deqUopNotWritebacked && deqHeadInfo.fuType === FuType.stu.U)
+  XSPerfAccumulate("waitStdCycle", deqStdNotWritebacked && deqHeadInfo.fuType === FuType.stu.U)
+  XSPerfAccumulate("waitAtmCycle", deqStdNotWritebacked && deqHeadInfo.fuType === FuType.mou.U)
+
   XSPerfAccumulate("waitNormalCycle", deqNotWritebacked && deqUopCommitType === CommitType.NORMAL)
   XSPerfAccumulate("waitBranchCycle", deqNotWritebacked && deqUopCommitType === CommitType.BRANCH)
   XSPerfAccumulate("waitLoadCycle", deqNotWritebacked && deqUopCommitType === CommitType.LOAD)
