@@ -435,7 +435,6 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
 
   if (env.EnableDifftest) {
     val difftest = DifftestModule(new DiffAtomicEvent)
-    difftest.clock  := clock
     difftest.coreid := io.hartId
     difftest.valid  := state === s_cache_resp_latch
     difftest.addr   := paddr_reg
@@ -448,7 +447,6 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
   if (env.EnableDifftest || env.AlwaysBasicDiff) {
     val uop = io.out.bits.uop
     val difftest = DifftestModule(new DiffLrScEvent)
-    difftest.clock := clock
     difftest.coreid := io.hartId
     difftest.valid := io.out.fire &&
       (uop.ctrl.fuOpType === LSUOpType.sc_d || uop.ctrl.fuOpType === LSUOpType.sc_w)

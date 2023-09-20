@@ -1280,7 +1280,6 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       val isRVC = dt_isRVC(ptr)
 
       val difftest = DifftestModule(new DiffInstrCommit(NRPhyRegs), delay = 3, dontCare = true)
-      difftest.clock   := clock
       difftest.coreid  := io.hartId
       difftest.index   := i.U
       difftest.valid   := io.commits.commitValid(i) && io.commits.isCommit
@@ -1308,7 +1307,6 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   if (env.EnableDifftest) {
     for (i <- 0 until CommitWidth) {
       val difftest = DifftestModule(new DiffLoadEvent, delay = 3)
-      difftest.clock  := clock
       difftest.coreid := io.hartId
       difftest.index  := i.U
 
@@ -1334,7 +1332,6 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     }
     val hitTrap = trapVec.reduce(_||_)
     val difftest = DifftestModule(new DiffTrapEvent, dontCare = true)
-    difftest.clock    := clock
     difftest.coreid   := io.hartId
     difftest.hasTrap  := hitTrap
     difftest.cycleCnt := timer
