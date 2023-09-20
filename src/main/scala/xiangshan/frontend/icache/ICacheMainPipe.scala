@@ -271,6 +271,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     port.bits.no_translate        := false.B
     port.bits.debug.isFirstIssue  := DontCare
     port.bits.kill                := DontCare
+    port.bits.hlvx                := DontCare
+    port.bits.hyperinst           := DontCare
   }
   io.itlb.foreach(_.req_kill := false.B)
 

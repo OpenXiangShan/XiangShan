@@ -67,7 +67,6 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val flush_pipe = io.flushPipe
 
   val isHyperInst = (0 until Width).map(i => ValidHold(req(i).fire && !req(i).bits.kill && req(i).bits.hyperinst, resp(i).fire, flush_pipe(i)))
-  val isHlvx = (0 until Width).map(i => ValidHold(req(i).fire && !req(i).bits.kill && req(i).bits.hlvx, resp(i).fire, flush_pipe(i)))
   val onlyS2xlate = vsatp.mode === 0.U && hgatp.mode === 8.U
 
   // ATTENTION: csr and flush from backend are delayed. csr should not be later than flush.
@@ -152,6 +151,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val (p_hit, p_ppn, p_perm, p_gvpn, p_g_perm, p_s2xlate) = ptw_resp_bypass(get_pn(req_in(i).bits.vaddr), s2xlate)
     val enable = portTranslateEnable(i)
 
+    val need_gpa_vpn_hit = RegNext(need_gpa_vpn === get_pn(req_in(i).bits.vaddr))
     when (ptw.resp.fire && need_gpa_vpn === ptw.resp.bits.getVpn) {
       need_gpa_gvpn := p_gvpn
     }
@@ -164,7 +164,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     }
 
     val hit = e_hit || p_hit
-    val miss = (!hit && enable) || !(hasGpf(i) && need_gpa_vpn === get_pn(req_in(i).bits.vaddr))
+    val miss = (!hit && enable) || !(hasGpf(i) && need_gpa_vpn_hit)
     hit.suggestName(s"hit_read_${i}")
     miss.suggestName(s"miss_read_${i}")
 
@@ -213,7 +213,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val af = perm.af || (hasS2xlate && g_perm.af)
 
     // Stage 1 perm check
-    val pf = perm.pf
+    val pf = perm.pf || (hlvx && !perm.x)
     val ldUpdate = !perm.a && TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd) // update A/D through exception
     val stUpdate = (!perm.a || !perm.d) && (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd)) // update A/D through exception
     val instrUpdate = !perm.a && TlbCmd.isExec(cmd) // update A/D through exception
@@ -227,7 +227,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val s1_valid = portTranslateEnable(idx) && !onlyS2
 
     // Stage 2 perm check
-    val gpf = g_perm.pf
+    val gpf = g_perm.pf || (hlvx && !g_perm.x)
     val g_ldUpdate = !g_perm.a && TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd)
     val g_stUpdate = (!g_perm.a || !g_perm.d) && (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd))
     val g_instrUpdate = !g_perm.a && TlbCmd.isExec(cmd)
