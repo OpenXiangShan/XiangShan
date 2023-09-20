@@ -71,9 +71,11 @@ case class BackendParams(
   def LsExuCnt = StaCnt + LduCnt
   def JmpCnt = allSchdParams.map(_.JmpCnt).sum
   def BrhCnt = allSchdParams.map(_.BrhCnt).sum
+  def CsrCnt = allSchdParams.map(_.CsrCnt).sum
   def IqCnt = allSchdParams.map(_.issueBlockParams.length).sum
 
   def numPcReadPort = allSchdParams.map(_.numPcReadPort).sum
+  def numTargetReadPort = allExuParams.count(x => x.needTarget)
 
   def numPregRd(dataCfg: DataConfig) = this.getRfReadSize(dataCfg)
   def numPregWb(dataCfg: DataConfig) = this.getRfWriteSize(dataCfg)

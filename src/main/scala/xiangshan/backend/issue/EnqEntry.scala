@@ -216,7 +216,6 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
   entryUpdate.payload := entryReg.payload
   if(params.needPc) {
     entryUpdate.status.pc.get := entryReg.status.pc.get
-    entryUpdate.status.target.get := entryReg.status.target.get
   }
 
   //output

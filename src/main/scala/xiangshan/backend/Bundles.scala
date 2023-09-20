@@ -441,7 +441,6 @@ object Bundles {
     val vpu           = if (params.needVPUCtrl)   Some(new VPUCtrlSignals)            else None
     val flushPipe     = if (params.flushPipe)     Some(Bool())                        else None
     val pc            = if (params.needPc)        Some(UInt(VAddrData().dataWidth.W)) else None
-    val jalrTarget    = if (params.hasJmpFu)      Some(UInt(VAddrData().dataWidth.W)) else None
     val preDecode     = if (params.hasPredecode)  Some(new PreDecodeInfo)             else None
     val ftqIdx        = if (params.needPc || params.replayInst)
                                                   Some(new FtqPtr)                    else None
@@ -501,7 +500,6 @@ object Bundles {
       this.vpu           .foreach(_ := source.common.vpu.get)
       this.flushPipe     .foreach(_ := source.common.flushPipe.get)
       this.pc            .foreach(_ := source.jmp.get.pc)
-      this.jalrTarget    .foreach(_ := source.jmp.get.target)
       this.preDecode     .foreach(_ := source.common.preDecode.get)
       this.ftqIdx        .foreach(_ := source.common.ftqIdx.get)
       this.ftqOffset     .foreach(_ := source.common.ftqOffset.get)
