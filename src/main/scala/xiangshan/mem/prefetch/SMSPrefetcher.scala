@@ -500,6 +500,8 @@ class PhtLookup()(implicit p: Parameters) extends XSBundle with HasSMSModuleHelp
 class PhtEntry()(implicit p: Parameters) extends XSBundle with HasSMSModuleHelper {
   val hist = Vec(2 * (REGION_BLKS - 1), UInt(PHT_HIST_BITS.W))
   val tag = UInt(PHT_TAG_BITS.W)
+  val region_offset = UInt(REGION_OFFSET.W)
+  val saturate_cnt = UInt(PHT_HIST_BITS.W)
   val decr_mode = Bool()
 }
 
@@ -622,9 +624,21 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
       Mux(do_update, hist_updated, h)
   })))
   val s2_hist_pf_gen = Mux1H(s2_hit_vec, s2_ram_rdata.map(way => VecInit(way.hist.map(_.head(1))).asUInt))
+  val s2_hit_region_offset = Mux1H(s2_hit_vec, s2_ram_rdata.map(way => VecInit(way.region_offset).asUInt))
+  val s2_hit_saturate_cnt = Mux1H(s2_hit_vec, s2_ram_rdata.map(way => VecInit(way.saturate_cnt).asUInt))
   val s2_new_hist = VecInit(s2_hist_bits.asBools.map(b => Cat(0.U((PHT_HIST_BITS - 1).W), b)))
   val s2_pht_hit = Cat(s2_hit_vec).orR
   val s2_hist = Mux(s2_pht_hit, Mux1H(s2_hit_vec, s2_hist_update), s2_new_hist)
+  val s2_region_offset_update = Mux(s2_hit_saturate_cnt.head(1).asBool,
+    s2_hit_region_offset,
+    s2_region_offset
+  )
+  val s2_saturate_cnt_update = Mux(s2_hit_region_offset === s2_region_offset,
+    Mux(s2_hit_saturate_cnt.andR, s2_hit_saturate_cnt, s2_hit_saturate_cnt + 1.U),
+    Mux(s2_hit_saturate_cnt === 0.U, s2_hit_saturate_cnt, s2_hit_saturate_cnt - 1.U)
+  )
+  val s2_ram_region_offset = Mux(s2_pht_hit, s2_region_offset_update, s2_region_offset)
+  val s2_ram_saturate_cnt = Mux(s2_pht_hit, s2_saturate_cnt_update, Cat(0.U((PHT_HIST_BITS - 1).W), 1.U(1.W)))
   val s2_repl_way_mask = UIntToOH(s2_replace_way)
   val s2_incr_region_vaddr = s2_region_vaddr + 1.U
   val s2_decr_region_vaddr = s2_region_vaddr - 1.U
@@ -640,10 +654,14 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   val s3_decr_mode = RegEnable(s2_decr_mode, s2_valid)
   val s3_region_paddr = RegEnable(s2_region_paddr, s2_valid)
   val s3_region_vaddr = RegEnable(s2_region_vaddr, s2_valid)
+  val s3_ram_region_offset = RegEnable(s2_ram_region_offset, s2_valid)
+  val s3_ram_saturate_cnt = RegEnable(s2_ram_saturate_cnt, s2_valid)
   val s3_pht_tag = RegEnable(s2_tag, s2_valid)
   val s3_hit_vec = s2_hit_vec.map(h => RegEnable(h, s2_valid))
   val s3_hit = Cat(s3_hit_vec).orR
   val s3_hit_way = OHToUInt(s3_hit_vec)
+  val s3_hit_region_offset = RegEnable(s2_hit_region_offset, s2_valid)
+  val s3_offset_match = s3_hit_region_offset === s3_region_offset
   val s3_repl_way = RegEnable(s2_replace_way, s2_valid)
   val s3_repl_way_mask = RegEnable(s2_repl_way_mask, s2_valid)
   val s3_repl_update_mask = RegEnable(VecInit((0 until PHT_SETS).map(i => i.U === s2_ram_waddr)), s2_valid)
@@ -655,6 +673,8 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   s3_ram_wdata.hist := s3_hist
   s3_ram_wdata.tag := s3_pht_tag
   s3_ram_wdata.decr_mode := s3_decr_mode
+  s3_ram_wdata.region_offset := s3_ram_region_offset
+  s3_ram_wdata.saturate_cnt := s3_ram_saturate_cnt
 
   s1_wait := (s2_valid && s2_evict && s2_ram_waddr === s1_ram_raddr) || s3_ram_en
 
@@ -702,7 +722,7 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
     Cat(0.U(1.W), s3_hist_lo_shifted.head(REGION_BLKS - 1))
   val s3_incr_region_bits = Cat(0.U(1.W), s3_hist_hi_shifted.head(REGION_BLKS - 1))
   val s3_decr_region_bits = Cat(s3_hist_lo_shifted.tail(REGION_BLKS - 1), 0.U(1.W))
-  val s3_pf_gen_valid = s3_valid && s3_hit && !s3_evict
+  val s3_pf_gen_valid = s3_valid && s3_hit && s3_offset_match && !s3_evict
   val s3_cur_region_valid =  s3_pf_gen_valid && (s3_hist_pf_gen & s3_hist_update_mask).orR
   val s3_incr_region_valid = s3_pf_gen_valid && (s3_hist_hi & (~s3_hist_update_mask.head(REGION_BLKS - 1)).asUInt).orR
   val s3_decr_region_valid = s3_pf_gen_valid && (s3_hist_lo & (~s3_hist_update_mask.tail(REGION_BLKS - 1)).asUInt).orR
