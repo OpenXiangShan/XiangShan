@@ -645,6 +645,8 @@ object Bundles {
 
   class CancelSignal(implicit p: Parameters) extends XSBundle {
     val rfWen = Bool()
+    val fpWen = Bool()
+    val vecWen = Bool()
     val pdest = UInt(PhyRegIdxWidth.W)
 
     def needCancel(srcType: UInt, psrc: UInt, valid: Bool): Bool = {
