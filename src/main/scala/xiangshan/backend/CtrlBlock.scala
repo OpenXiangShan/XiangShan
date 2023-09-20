@@ -69,11 +69,8 @@ class CtrlBlockImp(
   private val numPcMemReadForExu = params.numPcReadPort
   private val numPcMemRead = pcMemRdIndexes.maxIdx
 
-  private val numTargetMemRead = numPcMemReadForExu
-
   println(s"pcMem read num: $numPcMemRead")
   println(s"pcMem read num for exu: $numPcMemReadForExu")
-  println(s"targetMem read num: $numTargetMemRead")
 
   val io = IO(new CtrlBlockIO())
 
@@ -87,7 +84,6 @@ class CtrlBlockImp(
   val lsDq = Module(new DispatchQueue(dpParams.LsDqSize, RenameWidth, dpParams.LsDqDeqWidth))
   val redirectGen = Module(new RedirectGenerator)
   private val pcMem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize, numPcMemRead, 1, "BackendPC"))
-  private val targetMem = Module(new SyncDataModuleTemplate(UInt(VAddrData().dataWidth.W), FtqSize, numTargetMemRead, 1))
   private val rob = wrapper.rob.module
   private val memCtrl = Module(new MemCtrl(params))
 
@@ -388,15 +384,9 @@ class CtrlBlockImp(
   pcMem.io.wen.head   := RegNext(io.frontend.fromFtq.pc_mem_wen)
   pcMem.io.waddr.head := RegNext(io.frontend.fromFtq.pc_mem_waddr)
   pcMem.io.wdata.head := RegNext(io.frontend.fromFtq.pc_mem_wdata)
-  targetMem.io.wen.head := RegNext(io.frontend.fromFtq.pc_mem_wen)
-  targetMem.io.waddr.head := RegNext(io.frontend.fromFtq.pc_mem_waddr)
-  targetMem.io.wdata.head := RegNext(io.frontend.fromFtq.pc_mem_wdata.startAddr)
 
   private val jumpPcVec         : Vec[UInt] = Wire(Vec(params.numPcReadPort, UInt(VAddrData().dataWidth.W)))
-  private val jumpTargetReadVec : Vec[UInt] = Wire(Vec(params.numPcReadPort, UInt(VAddrData().dataWidth.W)))
-  private val jumpTargetVec     : Vec[UInt] = Wire(Vec(params.numPcReadPort, UInt(VAddrData().dataWidth.W)))
   io.toIssueBlock.pcVec := jumpPcVec
-  io.toIssueBlock.targetVec := jumpTargetVec
 
   io.toDataPath.flush := s2_s4_redirect
   io.toExuBlock.flush := s2_s4_redirect
@@ -414,20 +404,6 @@ class CtrlBlockImp(
         pc := realJumpPcVec(portIdx)
       }
     }
-  }
-
-  private val newestTarget: UInt = io.frontend.fromFtq.newest_entry_target
-  for (i <- 0 until numTargetMemRead) {
-    val targetPtr = intDq.io.deqNext(i).ftqPtr
-    // target pc stored in next entry
-    targetMem.io.raddr(i) := (targetPtr + 1.U).value
-    jumpTargetReadVec(i) := targetMem.io.rdata(i)
-    val needNewestTarget = RegNext(targetPtr === io.frontend.fromFtq.newest_entry_ptr)
-    jumpTargetVec(i) := Mux(
-      needNewestTarget,
-      RegNext(newestTarget),
-      jumpTargetReadVec(i)
-    )
   }
 
   rob.io.hartId := io.fromTop.hartId
@@ -501,7 +477,6 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val vfUops = Vec(dpParams.FpDqDeqWidth, DecoupledIO(new DynInst))
     val memUops = Vec(dpParams.LsDqDeqWidth, DecoupledIO(new DynInst))
     val pcVec = Output(Vec(params.numPcReadPort, UInt(VAddrData().dataWidth.W)))
-    val targetVec = Output(Vec(params.numPcReadPort, UInt(VAddrData().dataWidth.W)))
   }
   val fromDataPath = new Bundle{
     val vtype = Input(new VType)

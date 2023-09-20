@@ -48,7 +48,6 @@ class Status(implicit p:Parameters, params: IssueBlockParams) extends XSBundle {
 
   // need pc
   val pc = if (params.needPc) Some(UInt(VAddrData().dataWidth.W)) else None
-  val target = if(params.needPc) Some(UInt(VAddrData().dataWidth.W)) else None
 
   def srcReady: Bool = {
     VecInit(srcState.map(SrcState.isReady)).asUInt.andR
