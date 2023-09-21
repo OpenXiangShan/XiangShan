@@ -19,7 +19,7 @@ package xiangshan.backend.exu
 
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
-import chisel3.experimental.hierarchy.{Definition, instantiable, public}
+import chisel3.experimental.hierarchy.{Instance, instantiable, Instantiate}
 import chisel3.util._
 import utils._
 import utility._
@@ -117,16 +117,16 @@ class StdExeUnit(implicit p: Parameters) extends ExeUnit(StdExeUnitCfg)
 class FmacExeUnit(implicit p: Parameters) extends ExeUnit(FmacExeUnitCfg)
 class FmiscExeUnit(implicit p: Parameters) extends ExeUnit(FmiscExeUnitCfg)
 
-object ExeUnitDef {
-  def apply(cfg: ExuConfig)(implicit p: Parameters): Definition[ExeUnit] = {
+object ExeUnitInstantiate {
+  def apply(cfg: ExuConfig)(implicit p: Parameters): Instance[ExeUnit] = {
     cfg match {
-      case JumpExeUnitCfg => Definition(new JumpExeUnit)
-      case AluExeUnitCfg => Definition(new AluExeUnit)
-      case MulDivExeUnitCfg => Definition(new MulDivExeUnit)
-      case JumpCSRExeUnitCfg => Definition(new JumpCSRExeUnit)
-      case FmacExeUnitCfg => Definition(new FmacExeUnit)
-      case FmiscExeUnitCfg => Definition(new FmiscExeUnit)
-      case StdExeUnitCfg => Definition(new StdExeUnit)
+      case JumpExeUnitCfg => Instantiate(new JumpExeUnit)
+      case AluExeUnitCfg => Instantiate(new AluExeUnit)
+      case MulDivExeUnitCfg => Instantiate(new MulDivExeUnit)
+      case JumpCSRExeUnitCfg => Instantiate(new JumpCSRExeUnit)
+      case FmacExeUnitCfg => Instantiate(new FmacExeUnit)
+      case FmiscExeUnitCfg => Instantiate(new FmiscExeUnit)
+      case StdExeUnitCfg => Instantiate(new StdExeUnit)
       case _ => {
         println(s"cannot generate exeUnit from $cfg")
         null
