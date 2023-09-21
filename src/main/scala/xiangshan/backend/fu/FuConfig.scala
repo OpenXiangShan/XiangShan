@@ -144,7 +144,7 @@ case class FuConfig (
 
   def needVecCtrl: Boolean = {
     import FuType._
-    Set(vipu, vialuF, vimac, vfpu, vppu, vfalu, vfma, vfdiv).contains(fuType)
+    Set(vipu, vialuF, vimac, vfpu, vppu, vfalu, vfma, vfdiv, vfcvt).contains(fuType)
   }
 
   def isMul: Boolean = fuType == FuType.mul
@@ -158,7 +158,7 @@ case class FuConfig (
   def isVecArith: Boolean = fuType == FuType.vialuF || fuType == FuType.vimac ||
                             fuType == FuType.vppu || fuType == FuType.vipu ||
                             fuType == FuType.vfalu || fuType == FuType.vfma ||
-                            fuType == FuType.vfdiv
+                            fuType == FuType.vfdiv || fuType == FuType.vfcvt
 
   def isSta: Boolean = name.contains("sta")
 
@@ -590,6 +590,25 @@ object FuConfig {
     exceptionOut = Seq(illegalInstr),
   )
 
+  val VfcvtCfg = FuConfig(
+    name = "vfcvt",
+    fuType = FuType.vfcvt,
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VFDivSqrt(cfg)(p).suggestName("Vfcvt")),
+    srcData = Seq(
+      Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()), // vs1, vs2, vd_old, v0, vtype&vl
+    ),
+    piped = true,
+    writeVecRf = true,
+    writeFpRf = true,
+    writeFflags = true,
+    latency = CertainLatency(3),
+    vconfigWakeUp = true,
+    maskWakeUp = true,
+    dataBits = 128,
+    exceptionOut = Seq(illegalInstr),
+  )
+
+
   val VlduCfg: FuConfig = FuConfig (
     name = "vldu",
     fuType = FuType.vldu,
@@ -614,11 +633,11 @@ object FuConfig {
   def allConfigs = Seq(
     JmpCfg, BrhCfg, I2fCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg, VSetRvfWvfCfg, VSetRiWvfCfg, VSetRiWiCfg,
     FmacCfg, F2iCfg, F2fCfg, FDivSqrtCfg, LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg, VialuCfg, VipuCfg, VlduCfg,
-    VfaluCfg, VfmaCfg
+    VfaluCfg, VfmaCfg, VfcvtCfg
   )
 
   def VecArithFuConfigs = Seq(
-    VialuCfg, VimacCfg, VppuCfg, VipuCfg, VfaluCfg, VfmaCfg
+    VialuCfg, VimacCfg, VppuCfg, VipuCfg, VfaluCfg, VfmaCfg, VfcvtCfg
   )
 }
 
