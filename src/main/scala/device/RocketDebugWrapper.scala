@@ -21,7 +21,7 @@ import xiangshan._
 import chisel3.experimental.{ExtModule, IntParam, noPrefix}
 import chisel3.util._
 import chisel3.util.HasExtModuleResource
-import freechips.rocketchip.config.{Field, Parameters}
+import org.chipsalliance.cde.config.{Field, Parameters}
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.amba.apb._
 import freechips.rocketchip.diplomacy._

@@ -5,7 +5,7 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.frontend.icache._
 import utility._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import xiangshan.backend.fu.util.HasCSRConst
 
 object CacheOpMap{

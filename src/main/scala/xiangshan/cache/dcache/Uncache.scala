@@ -18,7 +18,7 @@ package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import utils._
 import utility._
 import xiangshan._

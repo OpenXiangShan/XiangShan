@@ -17,7 +17,7 @@
 package top
 
 import chisel3._
-import chipsalliance.rocketchip.config
+import org.chipsalliance.cde.config
 import device._
 import freechips.rocketchip.amba.axi4.{AXI4EdgeParameters, AXI4MasterNode, AXI4Xbar}
 import freechips.rocketchip.diplomacy.{AddressSet, InModuleBody, LazyModule, LazyModuleImp}

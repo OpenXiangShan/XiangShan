@@ -20,7 +20,6 @@ import chisel3.RawModule
 import chisel3.stage.{ChiselCli, ChiselGeneratorAnnotation}
 import firrtl.options.Shell
 import firrtl.stage.{FirrtlCli, RunFirrtlTransformAnnotation}
-import freechips.rocketchip.transforms.naming.RenameDesiredNames
 import xstransforms._
 
 trait XiangShanCli { this: Shell =>
@@ -75,8 +74,7 @@ object Generator {
         (new XiangShanStage).execute(args, Seq(
           ChiselGeneratorAnnotation(mod _),
           RunFirrtlTransformAnnotation(new PrintControl),
-          RunFirrtlTransformAnnotation(new PrintModuleName),
-          RunFirrtlTransformAnnotation(new RenameDesiredNames)
+          RunFirrtlTransformAnnotation(new PrintModuleName)
         ))
       case _ =>
         assert(false, s"Unknown firrtl compiler: ${fc.getClass.getName}!")

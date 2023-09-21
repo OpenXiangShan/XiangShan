@@ -16,7 +16,7 @@
 
 package top
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.diplomacy.{AdapterNode, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
 import chisel3._
