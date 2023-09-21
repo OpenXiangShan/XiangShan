@@ -162,7 +162,7 @@ object XiangShan extends SbtModule with ScalafmtModule with CommonModule {
 
   override def millSourcePath = millOuterCtx.millSourcePath
 
-  override def forkArgs = Seq("-Xmx64G", "-Xss256m")
+  override def forkArgs = Seq("-Xmx32G", "-Xss256m")
 
   override def ivyDeps = super.ivyDeps() ++ Agg(
     defaultVersions("chisel"),
@@ -179,6 +179,9 @@ object XiangShan extends SbtModule with ScalafmtModule with CommonModule {
   )
 
   object test extends SbtModuleTests with TestModule.ScalaTest {
+
+    override def forkArgs = XiangShan.forkArgs
+
     override def ivyDeps = super.ivyDeps() ++ Agg(
       defaultVersions("scalatest")
     )
