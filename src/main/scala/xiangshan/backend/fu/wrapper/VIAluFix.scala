@@ -197,7 +197,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
 
   private val vs1VecUsed: Vec[UInt] = Mux(widen || isNarrow, vs1GroupedVec, vs1Split.io.outVec64b)
   private val vs2VecUsed = Wire(Vec(numVecModule, UInt(64.W)))
-  when(vf2 || widen_vs2) {
+  when(vf2) {
     vs2VecUsed := vs2GroupedVec32b
   }.elsewhen(vf4) {
     vs2VecUsed := vs2GroupedVec16b
@@ -206,6 +206,8 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   }.otherwise {
     vs2VecUsed := vs2Split.io.outVec64b
   }
+
+  private val vs2Adder = Mux(widen, vs2GroupedVec32b, vs2Split.io.outVec64b)
 
   // mask
   private val maskDataVec: Vec[UInt] = VecDataToMaskDataVec(srcMask, vsew)
@@ -238,7 +240,8 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
       mod.io.widen := widen
       mod.io.widen_vs2 := widen_vs2
       mod.io.vs1 := vs1VecUsed(i)
-      mod.io.vs2 := vs2VecUsed(i)
+      mod.io.vs2_adder := vs2Adder(i)
+      mod.io.vs2_misc := vs2VecUsed(i)
       mod.io.vmask := maskUsed(i)
       mod.io.oldVd := oldVdUsed(i)
   }
