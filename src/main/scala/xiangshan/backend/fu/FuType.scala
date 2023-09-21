@@ -35,7 +35,8 @@ object FuType {
   val vimac = OHInt(24)
   val vfalu = OHInt(25)
   val vfma  = OHInt(26)
-  val vfdiv = OHInt(27) // Todo
+  val vfdiv = OHInt(27)
+  val vfcvt = OHInt(28)// Todo
 
   def X = BitPat.N(num) // Todo: Don't Care
 
@@ -106,7 +107,8 @@ object FuType {
     vimac -> "vimac",
     vfalu -> "vfalu",
     vfma -> "vfma",
-    vfdiv -> "vfdiv"
+    vfdiv -> "vfdiv",
+    vfcvt -> "vfcvt"
   )
 }
 
