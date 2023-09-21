@@ -48,7 +48,7 @@ class BusPerfMonitorImp(outer: BusPerfMonitor, name: String, stat_latency: Boole
 
   outer.node.in.zip(outer.node.out).foreach{
     case ((in, edgeIn), (out, edgeOut)) =>
-      out <> in
+      out :<>= in.waiveAll
   }
 
   def PERF_CHN[T <: TLChannel](clientName: String, chn: DecoupledIO[T]) = {
