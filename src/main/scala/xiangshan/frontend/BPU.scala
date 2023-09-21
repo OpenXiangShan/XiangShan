@@ -527,6 +527,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     val target = Vec(numDup, UInt(VAddrBits.W))
     val lastBrPosOH = Vec(numDup, Vec(numBr+1, Bool()))
     val taken = Vec(numDup, Bool())
+    val takenMask = Vec(numDup, Vec(numBr, Bool()))
     val cfiIndex = Vec(numDup, UInt(log2Ceil(PredictWidth).W))
   }
 
@@ -535,8 +536,14 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     // We first compare all target with previous stage target,
     // then select the difference by taken & hit
     // Usually target is generated quicker than taken, so do target compare before select can help timing
-    val targetDiffVec  : IndexedSeq[Vec[Bool]] = x.target.zip(y.getAllTargets).map { case (t1, t2) => VecInit(t2.map(_ =/= t1)) } // [0:numDup][flattened all Target comparison]
-    val targetDiff     : IndexedSeq[Bool]      = targetDiffVec.zipWithIndex.map { case (diff, idx) => selectByTaken(x.taken, x.hit(idx), diff) }
+    val targetDiffVec: IndexedSeq[Vec[Bool]] =
+      x.target.zip(y.getAllTargets).map {
+        case (t1, t2) => VecInit(t2.map(_ =/= t1))
+      } // [0:numDup][flattened all Target comparison]
+    val targetDiff   : IndexedSeq[Bool]      =
+      targetDiffVec.zip(x.hit).zip(x.takenMask).map {
+        case ((diff, hit), takenMask) => selectByTaken(takenMask, hit, diff)
+      }
 
     val lastBrPosOHDiff: IndexedSeq[Bool]      = x.lastBrPosOH.zip(y.lastBrPosOH).map { case (oh1, oh2) => oh1.asUInt =/= oh2.asUInt }
     val takenDiff      : IndexedSeq[Bool]      = x.taken.zip(y.taken).map { case (t1, t2) => t1 =/= t2 }
@@ -593,6 +600,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   s1_pred_info.target := resp.s1.getTarget
   s1_pred_info.lastBrPosOH := resp.s1.lastBrPosOH
   s1_pred_info.taken := resp.s1.taken
+  s1_pred_info.takenMask := resp.s1.full_pred.map(_.taken_mask_on_slot)
   s1_pred_info.cfiIndex := resp.s1.cfiIndex.map { case x => x.bits }
 
   val previous_s1_pred_info = RegEnable(s1_pred_info, init=0.U.asTypeOf(new PreviousPredInfo), s1_fire_dup(0))
