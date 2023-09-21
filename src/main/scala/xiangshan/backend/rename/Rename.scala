@@ -474,9 +474,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     )
   ))
   io.stallReason.out.reason.zip(io.stallReason.in.reason).zip(io.in.map(_.valid)).foreach { case ((out, in), valid) =>
-    out := Mux(io.stallReason.in.backReason.valid,
-               io.stallReason.in.backReason.bits,
-               Mux(valid, TopDownCounters.NoStall.id.U, in))
+    out := Mux(io.stallReason.in.backReason.valid, io.stallReason.in.backReason.bits, in)
   }
 
   XSDebug(io.robCommits.isWalk, p"Walk Recovery Enabled\n")
