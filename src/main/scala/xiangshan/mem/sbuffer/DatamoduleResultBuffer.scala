@@ -39,15 +39,9 @@ class DatamoduleResultBuffer[T <: Data]
   gen: T,
 )(implicit p: Parameters) extends XSModule {
 
-  val genType = if (compileOptions.declaredTypeMustBeUnbound) {
+  val genType = {
     requireIsChiselType(gen)
     gen
-  } else {
-    if (DataMirror.internal.isSynthesizable(gen)) {
-      chiselTypeOf(gen)
-    } else {
-      gen
-    }
   }
 
   val io = IO(new DatamoduleResultBufferIO[T](gen))

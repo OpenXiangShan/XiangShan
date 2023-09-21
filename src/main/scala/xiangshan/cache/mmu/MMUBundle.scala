@@ -192,7 +192,7 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
     else if (!pageNormal) {
       val tag_match_hi = tag(vpnnLen*2-1, vpnnLen) === vpn(vpnnLen*3-1, vpnnLen*2)
       val tag_match_mi = tag(vpnnLen-1, 0) === vpn(vpnnLen*2-1, vpnnLen)
-      val tag_match = tag_match_hi && (level.get.asBool() || tag_match_mi)
+      val tag_match = tag_match_hi && (level.get.asBool || tag_match_mi)
       asid_hit && tag_match
     }
     else {
@@ -285,7 +285,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     else if (!pageNormal) {
       val tag_match_hi = tag(vpnnLen * 2 - 1, vpnnLen) === vpn(vpnnLen * 3 - 1, vpnnLen * 2)
       val tag_match_mi = tag(vpnnLen - 1, 0) === vpn(vpnnLen * 2 - 1, vpnnLen)
-      val tag_match = tag_match_hi && (level.get.asBool() || tag_match_mi)
+      val tag_match = tag_match_hi && (level.get.asBool || tag_match_mi)
       asid_hit && tag_match && addr_low_hit
     }
     else {
@@ -312,7 +312,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     else if (!pageNormal) {
       val tag_match_hi = tag(vpnnLen * 2 - 1, vpnnLen - sectortlbwidth) === vpn(vpnnLen * 3 - 1, vpnnLen * 2)
       val tag_match_mi = tag(vpnnLen - 1, 0) === vpn(vpnnLen * 2 - 1, vpnnLen)
-      val tag_match = tag_match_hi && (level.get.asBool() || tag_match_mi)
+      val tag_match = tag_match_hi && (level.get.asBool || tag_match_mi)
       vpn_hit := asid_hit && tag_match
     }
     else {
@@ -858,19 +858,19 @@ class PTWEntriesWithEcc(eccCode: Code, num: Int, tagLen: Int, level: Int, hasPer
   }
 
   def encode() = {
-    val data = entries.asUInt()
+    val data = entries.asUInt
     val ecc_slices = Wire(Vec(ecc_info._3, UInt(ecc_info._2.W)))
     for (i <- 0 until ecc_info._3) {
       ecc_slices(i) := eccCode.encode(data((i+1)*ecc_block-1, i*ecc_block)) >> ecc_block
     }
     if (ecc_info._4 != 0) {
       val ecc_unaligned = eccCode.encode(data(data.getWidth-1, ecc_info._3*ecc_block)) >> ecc_info._4
-      ecc := Cat(ecc_unaligned, ecc_slices.asUInt())
-    } else { ecc := ecc_slices.asUInt() }
+      ecc := Cat(ecc_unaligned, ecc_slices.asUInt)
+    } else { ecc := ecc_slices.asUInt }
   }
 
   def decode(): Bool = {
-    val data = entries.asUInt()
+    val data = entries.asUInt
     val res = Wire(Vec(ecc_info._3 + 1, Bool()))
     for (i <- 0 until ecc_info._3) {
       res(i) := {if (ecc_info._2 != 0) eccCode.decode(Cat(ecc((i+1)*ecc_info._2-1, i*ecc_info._2), data((i+1)*ecc_block-1, i*ecc_block))).error else false.B}

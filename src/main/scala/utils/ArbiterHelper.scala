@@ -19,7 +19,6 @@ package utils
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import chisel3.internal.naming.chiselName
 import xiangshan.cache._
 
 object ArbiterCtrl {
@@ -46,7 +45,6 @@ object ArbiterCtrl {
   * consumer.io.in <> arb.io.out
   * }}}
   */
-@chiselName
 class ArbiterFilterByCacheLineAddr[T <: MissReqWoStoreData](val gen: T, val n: Int, val offset_width: Int, val paddr_bits: Int) extends Module{
   val io = IO(new ArbiterIO(gen, n))
 

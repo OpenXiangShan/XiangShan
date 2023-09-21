@@ -22,14 +22,12 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import utility._
-import chisel3.experimental.chiselName
 
 trait BimParams extends HasXSParameter {
   val bimSize = 2048
   val bypassEntries = 4
 }
 
-@chiselName
 class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUUtils {
   val bimAddr = new TableAddr(log2Up(bimSize), 1)
 
@@ -53,8 +51,8 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
 
   io.out := io.in.bits.resp_in(0)
 
-  val s1_latch_taken_mask = VecInit(Cat((0 until numBr reverse).map(i => s1_read(i)(1))).asBools())
-  val s1_latch_meta       = s1_read.asUInt()
+  val s1_latch_taken_mask = VecInit(Cat(((0 until numBr).reverse).map(i => s1_read(i)(1))).asBools)
+  val s1_latch_meta       = s1_read.asUInt
   override val meta_size = s1_latch_meta.getWidth
 
   // io.out.s1.full_pred.br_taken_mask := s1_latch_taken_mask
@@ -97,7 +95,7 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
     // valid = need_to_update.asUInt.orR || doing_reset,
     data = Mux(doing_reset, VecInit(Seq.fill(numBr)(2.U(2.W))), newCtrs),
     setIdx = Mux(doing_reset, resetRow, u_idx),
-    waymask = Mux(doing_reset, Fill(numBr, 1.U(1.W)).asUInt(), need_to_update.asUInt())
+    waymask = Mux(doing_reset, Fill(numBr, 1.U(1.W)).asUInt, need_to_update.asUInt)
   )
 
   val latch_s0_fire = RegNext(io.s0_fire)

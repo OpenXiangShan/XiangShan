@@ -29,7 +29,6 @@ import chipsalliance.rocketchip.config._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.jtag.JTAGIO
-import freechips.rocketchip.util.{HasRocketChipStageUtils, UIntToOH1}
 import huancun.{HCCacheParamsKey, HuanCun, HCCacheParameters}
 
 abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
@@ -122,7 +121,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     case None =>
   }
 
-  lazy val module = new LazyRawModuleImp(this) {
+  class XSTopImp(wrapper: LazyModule) extends LazyRawModuleImp(wrapper) {
     FileRegisters.add("dts", dts)
     FileRegisters.add("graphml", graphML)
     FileRegisters.add("json", json)
@@ -188,7 +187,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     if(l3cacheOpt.isEmpty || l3cacheOpt.get.rst_nodes.isEmpty){
       // tie off core soft reset
       for(node <- core_rst_nodes){
-        node.out.head._1 := false.B.asAsyncReset()
+        node.out.head._1 := false.B.asAsyncReset
       }
     }
 
@@ -235,9 +234,11 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     }
 
   }
+
+  lazy val module = new XSTopImp(this)
 }
 
-object TopMain extends App with HasRocketChipStageUtils {
+object TopMain extends App {
   override def main(args: Array[String]): Unit = {
     val (config, firrtlOpts, firrtlComplier, firtoolOpts) = ArgParser.parse(args)
 

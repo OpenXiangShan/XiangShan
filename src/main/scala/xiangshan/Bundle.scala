@@ -36,7 +36,6 @@ import utils._
 import utility._
 
 import scala.math.max
-import Chisel.experimental.chiselName
 import chipsalliance.rocketchip.config.Parameters
 import chisel3.util.BitPat.bitPatToUInt
 import xiangshan.backend.exu.ExuConfig
@@ -455,7 +454,7 @@ class TlbSatpBundle(implicit p: Parameters) extends SatpStruct {
     val sa = satp_value.asTypeOf(new SatpStruct)
     mode := sa.mode
     asid := sa.asid
-    ppn := Cat(0.U(44-PAddrBits), sa.ppn(PAddrBits-1, 0)).asUInt()
+    ppn := Cat(0.U((44-PAddrBits).W), sa.ppn(PAddrBits-1, 0)).asUInt
     changed := DataChanged(sa.asid) // when ppn is changed, software need do the flush
   }
 }

@@ -22,11 +22,6 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import utility._
-import chisel3.experimental.chiselName
-import chisel3.stage.{ChiselGeneratorAnnotation, ChiselStage}
-import firrtl.stage.RunFirrtlTransformAnnotation
-import firrtl.transforms.RenameModules
-import freechips.rocketchip.transforms.naming.RenameDesiredNames
 
 import scala.math.min
 import scala.util.matching.Regex
@@ -140,7 +135,6 @@ trait TBTParams extends HasXSParameter with TageParams {
   val bypassEntries = 8
 }
 
-@chiselName
 class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
   val io = IO(new Bundle {
     val s0_fire = Input(Bool())
@@ -221,13 +215,12 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
     valid = io.update_mask.reduce(_||_) || doing_reset,
     data = Mux(doing_reset, VecInit(Seq.fill(numBr)(2.U(2.W))), newCtrs),
     setIdx = Mux(doing_reset, resetRow, u_idx),
-    waymask = Mux(doing_reset, Fill(numBr, 1.U(1.W)).asUInt(), updateWayMask)
+    waymask = Mux(doing_reset, Fill(numBr, 1.U(1.W)).asUInt, updateWayMask)
   )
 
 }
 
 
-@chiselName
 class TageTable
 (
   val nRows: Int, val histLen: Int, val tagLen: Int, val tableIdx: Int
@@ -530,7 +523,6 @@ class FakeTage(implicit p: Parameters) extends BaseTage {
   io.s2_ready := true.B
 }
 
-@chiselName
 class Tage(implicit p: Parameters) extends BaseTage {
 
   val resp_meta = Wire(new TageMeta)
@@ -566,8 +558,8 @@ class Tage(implicit p: Parameters) extends BaseTage {
   // val s2_bim = RegEnable(s1_bim, io.s1_fire)
 
   val debug_pc_s0 = s0_pc_dup(1)
-  val debug_pc_s1 = RegEnable(s0_pc_dup(1), enable=io.s0_fire(1))
-  val debug_pc_s2 = RegEnable(debug_pc_s1, enable=io.s1_fire(1))
+  val debug_pc_s1 = RegEnable(s0_pc_dup(1), io.s0_fire(1))
+  val debug_pc_s2 = RegEnable(debug_pc_s1, io.s1_fire(1))
 
   val s1_provideds        = Wire(Vec(numBr, Bool()))
   val s1_providers        = Wire(Vec(numBr, UInt(log2Ceil(TageNTables).W)))

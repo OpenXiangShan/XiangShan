@@ -18,7 +18,6 @@ package xiangshan.frontend
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import chisel3.experimental.chiselName
 import xiangshan._
 import xiangshan.frontend.icache._
 import utils._
@@ -31,7 +30,6 @@ class FrontendTopDownBundle(implicit p: Parameters) extends XSBundle {
   val stallWidth = UInt(log2Ceil(PredictWidth).W)
 }
 
-@chiselName
 class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICacheParameters {
 
   //fast path: Timing critical
@@ -172,7 +170,7 @@ class ShiftingGlobalHistory(implicit p: Parameters) extends GlobalHistory {
   }
 
   // static read
-  def read(n: Int): Bool = predHist.asBools()(n)
+  def read(n: Int): Bool = predHist.asBools(n)
 
   final def === (that: ShiftingGlobalHistory): Bool = {
     predHist === that.predHist
@@ -425,7 +423,6 @@ object selectByTaken {
   }
 }
 
-@chiselName
 class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUConst with BasicPrediction {
   val br_taken_mask = Vec(numBr, Bool())
 
@@ -573,7 +570,6 @@ class SpeculativeInfo(implicit p: Parameters) extends XSBundle
   val topAddr = UInt(VAddrBits.W)
 }
 
-@chiselName
 class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
   with HasBPUConst with BPUUtils {
   val pc    = Vec(numDup, UInt(VAddrBits.W))
@@ -603,7 +599,6 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
   }
 }
 
-@chiselName
 class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUConst {
   // val valids = Vec(3, Bool())
   val s1 = new BranchPredictionBundle

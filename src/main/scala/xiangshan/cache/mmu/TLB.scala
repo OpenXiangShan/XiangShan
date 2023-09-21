@@ -18,7 +18,6 @@ package xiangshan.cache.mmu
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import chisel3.internal.naming.chiselName
 import chisel3.util._
 import difftest._
 import freechips.rocketchip.util.SRAMAnnotation
@@ -28,7 +27,6 @@ import utility._
 import xiangshan.backend.fu.{PMPChecker, PMPReqBundle, PMPConfig => XSPMPConfig}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.util.HasCSRConst
-import firrtl.FirrtlProtos.Firrtl.Module.ExternalModule.Parameter
 import freechips.rocketchip.rocket.PMPConfig
 
 /** TLB module
@@ -40,7 +38,6 @@ import freechips.rocketchip.rocket.PMPConfig
   * @param p: XiangShan Paramemters, like XLEN
   */
 
-@chiselName
 class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)(implicit p: Parameters) extends TlbModule
   with HasCSRConst
   with HasPerfEvents
@@ -76,10 +73,10 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val portTranslateEnable = (0 until Width).map(i => vmEnable && RegNext(!req(i).bits.no_translate))
 
   val req_in = req
-  val req_out = req.map(a => RegEnable(a.bits, a.fire()))
+  val req_out = req.map(a => RegEnable(a.bits, a.fire))
   val req_out_v = (0 until Width).map(i => ValidHold(req_in(i).fire && !req_in(i).bits.kill, resp(i).fire, flush_pipe(i)))
 
-  val refill = ptw.resp.fire() && !flush_mmu && vmEnable
+  val refill = ptw.resp.fire && !flush_mmu && vmEnable
   refill_to_mem.valid := refill
   refill_to_mem.memidx := ptw.resp.bits.memidx
 
@@ -132,7 +129,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
     val vaddr = SignExt(req_out(i).vaddr, PAddrBits)
     resp(i).bits.miss := miss
-    resp(i).bits.ptwBack := ptw.resp.fire()
+    resp(i).bits.ptwBack := ptw.resp.fire
     resp(i).bits.memidx := RegNext(req_in(i).bits.memidx)
 
     val ppn = WireInit(VecInit(Seq.fill(nRespDups)(0.U(ppnLen.W))))
@@ -205,7 +202,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
   def handle_block(idx: Int): Unit = {
     // three valid: 1.if exist a entry; 2.if sent to ptw; 3.unset resp.valid
-    io.requestor(idx).req.ready := !req_out_v(idx) || io.requestor(idx).resp.fire()
+    io.requestor(idx).req.ready := !req_out_v(idx) || io.requestor(idx).resp.fire
     // req_out_v for if there is a request, may long latency, fixme
 
     // miss request entries
@@ -215,13 +212,13 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
     val new_coming = RegNext(req_in(idx).fire && !req_in(idx).bits.kill && !flush_pipe(idx), false.B)
     val miss_wire = new_coming && missVec(idx)
-    val miss_v = ValidHoldBypass(miss_wire, resp(idx).fire(), flush_pipe(idx))
+    val miss_v = ValidHoldBypass(miss_wire, resp(idx).fire, flush_pipe(idx))
     val miss_req_v = ValidHoldBypass(miss_wire || (miss_v && flush_mmu && !mmu_flush_pipe),
-      io.ptw.req(idx).fire() || resp(idx).fire(), flush_pipe(idx))
+      io.ptw.req(idx).fire || resp(idx).fire, flush_pipe(idx))
 
     // when ptw resp, check if hit, reset miss_v, resp to lsu/ifu
     resp(idx).valid := req_out_v(idx) && !(miss_v && portTranslateEnable(idx))
-    when (io.ptw.resp.fire() && hit && req_out_v(idx) && portTranslateEnable(idx)) {
+    when (io.ptw.resp.fire && hit && req_out_v(idx) && portTranslateEnable(idx)) {
       val pte = io.ptw.resp.bits
       resp(idx).valid := true.B
       resp(idx).bits.miss := false.B // for blocked tlb, this is useless
@@ -271,11 +268,11 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   }
 
   // perf event
-  val result_ok = req_in.map(a => RegNext(a.fire()))
+  val result_ok = req_in.map(a => RegNext(a.fire))
   val perfEvents =
     Seq(
-      ("access", PopCount((0 until Width).map{i => if (Block(i)) io.requestor(i).req.fire() else portTranslateEnable(i) && result_ok(i) })),
-      ("miss  ", PopCount((0 until Width).map{i => if (Block(i)) portTranslateEnable(i) && result_ok(i) && missVec(i) else ptw.req(i).fire() })),
+      ("access", PopCount((0 until Width).map{i => if (Block(i)) io.requestor(i).req.fire else portTranslateEnable(i) && result_ok(i) })),
+      ("miss  ", PopCount((0 until Width).map{i => if (Block(i)) portTranslateEnable(i) && result_ok(i) && missVec(i) else ptw.req(i).fire })),
     )
   generatePerfEvent()
 
@@ -291,8 +288,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       XSPerfAccumulate("miss" + Integer.toString(i, 10), result_ok(i) && portTranslateEnable(i) && missVec(i))
     }
   }
-  XSPerfAccumulate("ptw_resp_count", ptw.resp.fire())
-  XSPerfAccumulate("ptw_resp_pf_count", ptw.resp.fire() && ptw.resp.bits.pf)
+  XSPerfAccumulate("ptw_resp_count", ptw.resp.fire)
+  XSPerfAccumulate("ptw_resp_pf_count", ptw.resp.fire && ptw.resp.bits.pf)
 
   // Log
   for(i <- 0 until Width) {
@@ -303,7 +300,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   XSDebug(io.sfence.valid, p"Sfence: ${io.sfence}\n")
   XSDebug(ParallelOR(req_out_v) || ptw.resp.valid, p"vmEnable:${vmEnable} hit:${Binary(VecInit(hitVec).asUInt)} miss:${Binary(VecInit(missVec).asUInt)}\n")
   for (i <- ptw.req.indices) {
-    XSDebug(ptw.req(i).fire(), p"L2TLB req:${ptw.req(i).bits}\n")
+    XSDebug(ptw.req(i).fire, p"L2TLB req:${ptw.req(i).bits}\n")
   }
   XSDebug(ptw.resp.valid, p"L2TLB resp:${ptw.resp.bits} (v:${ptw.resp.valid}r:${ptw.resp.ready}) \n")
 

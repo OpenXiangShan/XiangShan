@@ -70,7 +70,7 @@ class TagArray(implicit p: Parameters) extends DCacheModule {
   tag_array.io.w.req.bits.apply(
     setIdx = waddr,
     data = wdata,
-    waymask = VecInit(wmask).asUInt()
+    waymask = VecInit(wmask).asUInt
   )
 
   val ecc_wen = rst || io.ecc_write.valid
@@ -81,18 +81,18 @@ class TagArray(implicit p: Parameters) extends DCacheModule {
   ecc_array.io.w.req.bits.apply(
     setIdx = ecc_waddr,
     data = ecc_wdata,
-    waymask = VecInit(ecc_wmask).asUInt()
+    waymask = VecInit(ecc_wmask).asUInt
   )
 
   // tag read
-  val ren = io.read.fire()
+  val ren = io.read.fire
 
   tag_array.io.r.req.valid := ren
   tag_array.io.r.req.bits.apply(setIdx = io.read.bits.idx)
   io.resp := tag_array.io.r.resp.data
   XSPerfAccumulate("part_tag_read_counter", tag_array.io.r.req.valid)
 
-  val ecc_ren = io.ecc_read.fire()
+  val ecc_ren = io.ecc_read.fire
   ecc_array.io.r.req.valid := ecc_ren
   ecc_array.io.r.req.bits.apply(setIdx = io.ecc_read.bits.idx)
   io.ecc_resp := ecc_array.io.r.resp.data

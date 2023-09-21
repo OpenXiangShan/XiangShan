@@ -16,7 +16,7 @@
 
 package xiangshan
 
-import Chisel.log2Ceil
+import chisel3.util.log2Ceil
 import chipsalliance.rocketchip.config.{Field, Parameters}
 import freechips.rocketchip.tile.XLen
 import system.SoCParamsKey

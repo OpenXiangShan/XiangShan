@@ -32,16 +32,16 @@ class DebugIdentityNode()(implicit p: Parameters) extends LazyModule  {
     )
   )))
 
-  lazy val module = new LazyModuleImp(this) with HasTLDump{
+  lazy val module = new LazyModuleImp(this) with HasTLDump {
     val (out, _) = node.out(0)
     val (in, _) = node.in(0)
 
     def debug(t: TLBundle, valid: Boolean = false): Unit ={
-      def fire[T <: Data](x: DecoupledIO[T]) = if(valid) x.valid else x.fire()
+      def fire[T <: Data](x: DecoupledIO[T]) = if(valid) x.valid else x.fire
       val channels = Seq(t.a, t.b, t.c, t.d, t.e)
       channels.foreach(c =>
         when(fire(c)){
-          XSDebug(" isFire:%d ",c.fire())
+          XSDebug(" isFire:%d ",c.fire)
           c.bits.dump
         }
       )

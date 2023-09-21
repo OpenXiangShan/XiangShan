@@ -251,7 +251,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     Cat(offect(OffsetWidth - 1, 3), 0.U(3.W))
 
   def isOneOf(key: UInt, seq: Seq[UInt]): Bool =
-    if(seq.isEmpty) false.B else Cat(seq.map(_===key)).orR()
+    if(seq.isEmpty) false.B else Cat(seq.map(_===key)).orR
 
   def widthMap[T <: Data](f: Int => T) = (0 until StoreBufferSize) map f
 
@@ -265,7 +265,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   val replaceAlgoIdx = plru.way(candidateVec.reverse)._2
   val replaceAlgoNotDcacheCandidate = !stateVec(replaceAlgoIdx).isDcacheReqCandidate()
 
-  assert(!(candidateVec.asUInt().orR && replaceAlgoNotDcacheCandidate), "we have way to select, but replace algo selects invalid way")
+  assert(!(candidateVec.asUInt.orR && replaceAlgoNotDcacheCandidate), "we have way to select, but replace algo selects invalid way")
 
   val replaceIdx = replaceAlgoIdx
   plru.access(accessIdx)
@@ -321,7 +321,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     mergeMask(i) := widthMap(j =>
       inptags(i) === ptag(j) && activeMask(j)
     )
-    assert(!(PopCount(mergeMask(i).asUInt) > 1.U && io.in(i).fire()))
+    assert(!(PopCount(mergeMask(i).asUInt) > 1.U && io.in(i).fire))
   }
 
   // insert condition
@@ -458,18 +458,18 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   }
 
   for(((in, vwordOffset), i) <- io.in.zip(Seq(firstWord, secondWord)).zipWithIndex){
-    writeReq(i).valid := in.fire()
+    writeReq(i).valid := in.fire
     writeReq(i).bits.vwordOffset := vwordOffset
     writeReq(i).bits.mask := in.bits.mask
     writeReq(i).bits.data := in.bits.data
     writeReq(i).bits.wline := in.bits.wline
     val debug_insertIdx = if(i == 0) firstInsertIdx else secondInsertIdx
     val insertVec = if(i == 0) firstInsertVec else secondInsertVec
-    assert(!((PopCount(insertVec) > 1.U) && in.fire()))
+    assert(!((PopCount(insertVec) > 1.U) && in.fire))
     val insertIdx = OHToUInt(insertVec)
-    accessIdx(i).valid := RegNext(in.fire())
+    accessIdx(i).valid := RegNext(in.fire)
     accessIdx(i).bits := RegNext(Mux(canMerge(i), mergeIdx(i), insertIdx))
-    when(in.fire()){
+    when(in.fire){
       when(canMerge(i)){
         writeReq(i).bits.wvec := mergeVec(i)
         mergeWordReq(in.bits, inptags(i), invtags(i), mergeIdx(i), mergeVec(i), vwordOffset)
@@ -491,7 +491,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   }
 
   for((req, i) <- io.in.zipWithIndex){
-    XSDebug(req.fire(),
+    XSDebug(req.fire,
       p"accept req [$i]: " +
         p"addr:${Hexadecimal(req.bits.addr)} " +
         p"mask:${Binary(shiftMaskToLow(req.bits.addr,req.bits.mask))} " +
@@ -507,8 +507,8 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
 
   // ---------------------- Send Dcache Req ---------------------
 
-  val sbuffer_empty = Cat(invalidMask).andR()
-  val sq_empty = !Cat(io.in.map(_.valid)).orR()
+  val sbuffer_empty = Cat(invalidMask).andR
+  val sq_empty = !Cat(io.in.map(_.valid)).orR
   val empty = sbuffer_empty && sq_empty
   val threshold = Wire(UInt(5.W)) // RegNext(io.csrCtrl.sbuffer_threshold +& 1.U)
   threshold := Constantin.createRecord("StoreBufferThreshold_"+p(XSCoreParamsKey).HartId.toString(), initValue = 7.U)
@@ -560,7 +560,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
 
   def noSameBlockInflight(idx: UInt): Bool = {
     // stateVec(idx) itself must not be s_inflight
-    !Cat(widthMap(i => inflightMask(i) && ptag(idx) === ptag(i))).orR()
+    !Cat(widthMap(i => inflightMask(i) && ptag(idx) === ptag(i))).orR
   }
 
   def genSameBlockInflightMask(ptag_in: UInt): UInt = {
@@ -633,7 +633,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
 
   val sbuffer_out_s1_valid = RegInit(false.B)
   sbuffer_out_s1_ready := io.dcache.req.ready && !blockDcacheWrite || !sbuffer_out_s1_valid
-  val sbuffer_out_s1_fire = io.dcache.req.fire()
+  val sbuffer_out_s1_fire = io.dcache.req.fire
 
   // when sbuffer_out_s1_fire, send dcache req stored in pipeline reg to dcache
   when(sbuffer_out_s1_fire){
@@ -659,9 +659,9 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   accessIdx(EnsbufferWidth).valid := invalidMask(replaceIdx) || (
     need_replace && !need_drain && !cohHasTimeOut && !missqReplayHasTimeOut && sbuffer_out_s0_cango && activeMask(replaceIdx))
   accessIdx(EnsbufferWidth).bits := replaceIdx
-  val sbuffer_out_s1_evictionIdx = RegEnable(sbuffer_out_s0_evictionIdx, enable = sbuffer_out_s0_fire)
-  val sbuffer_out_s1_evictionPTag = RegEnable(ptag(sbuffer_out_s0_evictionIdx), enable = sbuffer_out_s0_fire)
-  val sbuffer_out_s1_evictionVTag = RegEnable(vtag(sbuffer_out_s0_evictionIdx), enable = sbuffer_out_s0_fire)
+  val sbuffer_out_s1_evictionIdx = RegEnable(sbuffer_out_s0_evictionIdx, sbuffer_out_s0_fire)
+  val sbuffer_out_s1_evictionPTag = RegEnable(ptag(sbuffer_out_s0_evictionIdx), sbuffer_out_s0_fire)
+  val sbuffer_out_s1_evictionVTag = RegEnable(vtag(sbuffer_out_s0_evictionIdx), sbuffer_out_s0_fire)
 
   io.dcache.req.valid := sbuffer_out_s1_valid && !blockDcacheWrite
   io.dcache.req.bits := DontCare
@@ -691,7 +691,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   // hit resp
   io.dcache.hit_resps.map(resp => {
     val dcache_resp_id = resp.bits.id
-    when (resp.fire()) {
+    when (resp.fire) {
       stateVec(dcache_resp_id).state_inflight := false.B
       stateVec(dcache_resp_id).state_valid := false.B
       assert(!resp.bits.replay)
@@ -708,7 +708,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
       when(
         stateVec(i).w_sameblock_inflight &&
         stateVec(i).state_valid &&
-        RegNext(resp.fire()) &&
+        RegNext(resp.fire) &&
         waitInflightMask(i) === UIntToOH(RegNext(id_to_sbuffer_id(dcache_resp_id)))
       ){
         stateVec(i).w_sameblock_inflight := false.B
@@ -717,13 +717,13 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   })
 
   io.dcache.hit_resps.zip(dataModule.io.maskFlushReq).map{case (resp, maskFlush) => {
-    maskFlush.valid := resp.fire()
+    maskFlush.valid := resp.fire
     maskFlush.bits.wvec := UIntToOH(resp.bits.id)
   }}
 
   // replay resp
   val replay_resp_id = io.dcache.replay_resp.bits.id
-  when (io.dcache.replay_resp.fire()) {
+  when (io.dcache.replay_resp.fire) {
     missqReplayCount(replay_resp_id) := 0.U
     stateVec(replay_resp_id).w_timeout := true.B
     // waiting for timeout
@@ -748,7 +748,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
       val dcache_resp_id = resp.bits.id
       difftest.coreid := io.hartId
       difftest.index  := index.U
-      difftest.valid  := resp.fire()
+      difftest.valid  := resp.fire
       difftest.addr   := getAddr(ptag(dcache_resp_id))
       difftest.data   := data(dcache_resp_id).asTypeOf(Vec(CacheLineBytes, UInt(8.W)))
       difftest.mask   := mask(dcache_resp_id).asUInt
@@ -841,38 +841,38 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   val perf_valid_entry_count = RegNext(PopCount(VecInit(stateVec.map(s => !s.isInvalid())).asUInt))
   XSPerfHistogram("util", perf_valid_entry_count, true.B, 0, StoreBufferSize, 1)
   XSPerfAccumulate("sbuffer_req_valid", PopCount(VecInit(io.in.map(_.valid)).asUInt))
-  XSPerfAccumulate("sbuffer_req_fire", PopCount(VecInit(io.in.map(_.fire())).asUInt))
-  XSPerfAccumulate("sbuffer_merge", PopCount(VecInit(io.in.zipWithIndex.map({case (in, i) => in.fire() && canMerge(i)})).asUInt))
-  XSPerfAccumulate("sbuffer_newline", PopCount(VecInit(io.in.zipWithIndex.map({case (in, i) => in.fire() && !canMerge(i)})).asUInt))
+  XSPerfAccumulate("sbuffer_req_fire", PopCount(VecInit(io.in.map(_.fire)).asUInt))
+  XSPerfAccumulate("sbuffer_merge", PopCount(VecInit(io.in.zipWithIndex.map({case (in, i) => in.fire && canMerge(i)})).asUInt))
+  XSPerfAccumulate("sbuffer_newline", PopCount(VecInit(io.in.zipWithIndex.map({case (in, i) => in.fire && !canMerge(i)})).asUInt))
   XSPerfAccumulate("dcache_req_valid", io.dcache.req.valid)
-  XSPerfAccumulate("dcache_req_fire", io.dcache.req.fire())
+  XSPerfAccumulate("dcache_req_fire", io.dcache.req.fire)
   XSPerfAccumulate("sbuffer_idle", sbuffer_state === x_idle)
   XSPerfAccumulate("sbuffer_flush", sbuffer_state === x_drain_sbuffer)
   XSPerfAccumulate("sbuffer_replace", sbuffer_state === x_replace)
   XSPerfAccumulate("evenCanInsert", evenCanInsert)
   XSPerfAccumulate("oddCanInsert", oddCanInsert)
-  XSPerfAccumulate("mainpipe_resp_valid", io.dcache.main_pipe_hit_resp.fire())
-  XSPerfAccumulate("refill_resp_valid", io.dcache.refill_hit_resp.fire())
-  XSPerfAccumulate("replay_resp_valid", io.dcache.replay_resp.fire())
+  XSPerfAccumulate("mainpipe_resp_valid", io.dcache.main_pipe_hit_resp.fire)
+  XSPerfAccumulate("refill_resp_valid", io.dcache.refill_hit_resp.fire)
+  XSPerfAccumulate("replay_resp_valid", io.dcache.replay_resp.fire)
   XSPerfAccumulate("coh_timeout", cohHasTimeOut)
 
-  // val (store_latency_sample, store_latency) = TransactionLatencyCounter(io.lsu.req.fire(), io.lsu.resp.fire())
+  // val (store_latency_sample, store_latency) = TransactionLatencyCounter(io.lsu.req.fire, io.lsu.resp.fire)
   // XSPerfHistogram("store_latency", store_latency, store_latency_sample, 0, 100, 10)
-  // XSPerfAccumulate("store_req", io.lsu.req.fire())
+  // XSPerfAccumulate("store_req", io.lsu.req.fire)
 
   val perfEvents = Seq(
     ("sbuffer_req_valid ", PopCount(VecInit(io.in.map(_.valid)).asUInt)                                                                ),
-    ("sbuffer_req_fire  ", PopCount(VecInit(io.in.map(_.fire())).asUInt)                                                               ),
-    ("sbuffer_merge     ", PopCount(VecInit(io.in.zipWithIndex.map({case (in, i) => in.fire() && canMerge(i)})).asUInt)                ),
-    ("sbuffer_newline   ", PopCount(VecInit(io.in.zipWithIndex.map({case (in, i) => in.fire() && !canMerge(i)})).asUInt)               ),
+    ("sbuffer_req_fire  ", PopCount(VecInit(io.in.map(_.fire)).asUInt)                                                               ),
+    ("sbuffer_merge     ", PopCount(VecInit(io.in.zipWithIndex.map({case (in, i) => in.fire && canMerge(i)})).asUInt)                ),
+    ("sbuffer_newline   ", PopCount(VecInit(io.in.zipWithIndex.map({case (in, i) => in.fire && !canMerge(i)})).asUInt)               ),
     ("dcache_req_valid  ", io.dcache.req.valid                                                                                         ),
-    ("dcache_req_fire   ", io.dcache.req.fire()                                                                                        ),
+    ("dcache_req_fire   ", io.dcache.req.fire                                                                                        ),
     ("sbuffer_idle      ", sbuffer_state === x_idle                                                                                    ),
     ("sbuffer_flush     ", sbuffer_state === x_drain_sbuffer                                                                           ),
     ("sbuffer_replace   ", sbuffer_state === x_replace                                                                                 ),
-    ("mpipe_resp_valid  ", io.dcache.main_pipe_hit_resp.fire()                                                                         ),
-    ("refill_resp_valid ", io.dcache.refill_hit_resp.fire()                                                                            ),
-    ("replay_resp_valid ", io.dcache.replay_resp.fire()                                                                                ),
+    ("mpipe_resp_valid  ", io.dcache.main_pipe_hit_resp.fire                                                                         ),
+    ("refill_resp_valid ", io.dcache.refill_hit_resp.fire                                                                            ),
+    ("replay_resp_valid ", io.dcache.replay_resp.fire                                                                                ),
     ("coh_timeout       ", cohHasTimeOut                                                                                               ),
     ("sbuffer_1_4_valid ", (perf_valid_entry_count < (StoreBufferSize.U/4.U))                                                          ),
     ("sbuffer_2_4_valid ", (perf_valid_entry_count > (StoreBufferSize.U/4.U)) & (perf_valid_entry_count <= (StoreBufferSize.U/2.U))    ),

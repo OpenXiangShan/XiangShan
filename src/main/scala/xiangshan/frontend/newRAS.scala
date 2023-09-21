@@ -17,7 +17,6 @@ package xiangshan.frontend
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import chisel3.experimental.chiselName
 import chisel3.util._
 import utils._
 import utility._
@@ -73,7 +72,6 @@ class RASDebug(implicit p: Parameters) extends XSBundle {
   val commit_stack = Output(Vec(RasSize, new RASEntry))
 }
 
-@chiselName
 class RAS(implicit p: Parameters) extends BasePredictor {
   override val meta_size = WireInit(0.U.asTypeOf(new RASMeta)).getWidth
 
@@ -86,8 +84,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     }
   }
 
-  
-  @chiselName
+
   class RASStack(rasSize: Int, rasSpecSize: Int) extends XSModule with HasCircularQueuePtrHelper {
     val io = IO(new Bundle {
       val spec_push_valid = Input(Bool())

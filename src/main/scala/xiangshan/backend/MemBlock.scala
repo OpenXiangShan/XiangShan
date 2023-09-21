@@ -157,8 +157,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val vlsu2vec = new VLSU2VecIO
     val vlsu2int = new VLSU2IntIO
     val vlsu2ctrl = new VLSU2CtrlIO
-    // prefetch to l1 req
-    val prefetch_req = Flipped(DecoupledIO(new L1PrefetchReq))
     // misc
     val error = new L1CacheErrorInfo
     val memInfo = new Bundle {
@@ -167,7 +165,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       val dcacheMSHRFull = Output(Bool())
     }
     val debug_ls = new DebugLSIO
-    val lsTopdownInfo = Vec(exuParameters.LduCnt, Output(new LsTopdownInfo))
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val l2PfqBusy = Input(Bool())
 
@@ -181,7 +178,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   val redirect = RegNextWithEnable(io.redirect)
 
-  val dcache = outer.dcache.module
+  private val dcache = outer.dcache.module
   val uncache = outer.uncache.module
 
   val delayedDcacheRefill = RegNext(dcache.io.lsu.lsq)
@@ -359,8 +356,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // ptw
   val sfence = RegNext(RegNext(io.ooo_to_mem.sfence))
   val tlbcsr = RegNext(RegNext(io.ooo_to_mem.tlbCsr))
-  val ptw = outer.ptw.module
-  val ptw_to_l2_buffer = outer.ptw_to_l2_buffer.module
+  private val ptw = outer.ptw.module
+  private val ptw_to_l2_buffer = outer.ptw_to_l2_buffer.module
   ptw.io.sfence <> sfence
   ptw.io.csr.tlb <> tlbcsr
   ptw.io.csr.distribute_csr <> csrCtrl.distribute_csr
@@ -721,7 +718,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // -------------------------
     // Store Triggers
     // -------------------------
-    when(stOut(i).fire()){
+    when(stOut(i).fire){
       val hit = Wire(Vec(3, Bool()))
       for (j <- 0 until 3) {
          hit(j) := !tdata(sTriggerMapping(j)).select && TriggerCmp(

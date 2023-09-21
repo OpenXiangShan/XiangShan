@@ -81,14 +81,14 @@ class ProbeEntry(implicit p: Parameters) extends DCacheModule {
 
   when (state === s_invalid) {
     io.req.ready := true.B
-    when (io.req.fire()) {
+    when (io.req.fire) {
       req := io.req.bits
       state := s_pipe_req
     }
   }
 
   val lrsc_blocked = Mux(
-    io.req.fire(),
+    io.req.fire,
     io.lrsc_locked_block.valid && get_block(io.lrsc_locked_block.bits) === get_block(io.req.bits.addr),
     io.lrsc_locked_block.valid && get_block(io.lrsc_locked_block.bits) === get_block(req.addr)
   )
@@ -109,7 +109,7 @@ class ProbeEntry(implicit p: Parameters) extends DCacheModule {
     pipe_req.error := false.B
     pipe_req.id := io.id
 
-    when (io.pipe_req.fire()) {
+    when (io.pipe_req.fire) {
       state := s_wait_resp
     }
   }
@@ -121,7 +121,7 @@ class ProbeEntry(implicit p: Parameters) extends DCacheModule {
   }
 
   // perfoemance counters
-  XSPerfAccumulate("probe_req", state === s_invalid && io.req.fire())
+  XSPerfAccumulate("probe_req", state === s_invalid && io.req.fire)
   XSPerfAccumulate("probe_penalty", state =/= s_invalid)
   XSPerfAccumulate("probe_penalty_blocked_by_lrsc", state === s_pipe_req && io.lrsc_locked_block.valid && get_block(io.lrsc_locked_block.bits) === get_block(req.addr))
   XSPerfAccumulate("probe_penalty_blocked_by_pipeline", state === s_pipe_req && io.pipe_req.valid && !io.pipe_req.ready)
@@ -178,7 +178,7 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
     pipe_req_arb.io.in(i) <> entry.io.pipe_req
 
     // pipe_resp
-    entry.io.pipe_resp.valid := io.pipe_req.fire()
+    entry.io.pipe_resp.valid := io.pipe_req.fire
     entry.io.pipe_resp.bits.id := io.pipe_req.bits.id
 
     entry.io.lrsc_locked_block := io.lrsc_locked_block
@@ -188,9 +188,9 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
 
   // delay probe req for 1 cycle
   val selected_req_valid = RegInit(false.B) 
-  val selected_req_bits = RegEnable(pipe_req_arb.io.out.bits, pipe_req_arb.io.out.fire())
+  val selected_req_bits = RegEnable(pipe_req_arb.io.out.bits, pipe_req_arb.io.out.fire)
   val selected_lrsc_blocked = Mux(
-    pipe_req_arb.io.out.fire(),
+    pipe_req_arb.io.out.fire,
     io.lrsc_locked_block.valid && get_block(io.lrsc_locked_block.bits) === get_block(pipe_req_arb.io.out.bits.addr),
     io.lrsc_locked_block.valid && get_block(io.lrsc_locked_block.bits) === get_block(selected_req_bits.addr) && selected_req_valid
   )
@@ -198,13 +198,13 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
   // When we update update_resv_set, block all probe req in the next cycle
   // It should give Probe reservation set addr compare an independent cycle,
   // which will lead to better timing
-  pipe_req_arb.io.out.ready := !selected_req_valid || io.pipe_req.fire()
+  pipe_req_arb.io.out.ready := !selected_req_valid || io.pipe_req.fire
   io.pipe_req.valid := selected_req_valid && !resvsetProbeBlock
   io.pipe_req.bits := selected_req_bits
-  when(io.pipe_req.fire()){
+  when(io.pipe_req.fire){
     selected_req_valid := false.B
   }
-  when(pipe_req_arb.io.out.fire()){
+  when(pipe_req_arb.io.out.fire){
     selected_req_valid := true.B
   }
 
@@ -218,12 +218,12 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
   }
 
   // debug output
-  when (io.mem_probe.fire()) {
+  when (io.mem_probe.fire) {
     XSDebug("mem_probe: ")
     io.mem_probe.bits.dump
   }
 
-//  when (io.pipe_req.fire()) {
+//  when (io.pipe_req.fire) {
 //    io.pipe_req.bits.dump()
 //  }
 
@@ -234,7 +234,7 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
 
   val perfValidCount = RegNext(PopCount(entries.map(e => e.io.block_addr.valid)))
   val perfEvents = Seq(
-    ("dcache_probq_req      ", io.pipe_req.fire()),
+    ("dcache_probq_req      ", io.pipe_req.fire),
     ("dcache_probq_1_4_valid", (perfValidCount < (cfg.nProbeEntries.U/4.U))),
     ("dcache_probq_2_4_valid", (perfValidCount > (cfg.nProbeEntries.U/4.U)) & (perfValidCount <= (cfg.nProbeEntries.U/2.U))),
     ("dcache_probq_3_4_valid", (perfValidCount > (cfg.nProbeEntries.U/2.U)) & (perfValidCount <= (cfg.nProbeEntries.U*3.U/4.U))),

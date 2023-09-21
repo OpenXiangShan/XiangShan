@@ -59,7 +59,7 @@ class FPToFPDataModule(latency: Int)(implicit p: Parameters) extends FPUDataModu
     fcmp.io.a := src1
     fcmp.io.b := src2
     fcmp.io.signaling := !rmReg(1)
-    fcmp.io.lt || (fcmp.io.a.asSInt() < 0.S && fcmp.io.b.asSInt() >= 0.S)
+    fcmp.io.lt || (fcmp.io.a.asSInt < 0.S && fcmp.io.b.asSInt >= 0.S)
   })(inTag)
 
   val fminmax = FPU.ftypes map { t =>
@@ -83,7 +83,7 @@ class FPToFPDataModule(latency: Int)(implicit p: Parameters) extends FPUDataModu
     fsgnjMux.data := VecInit(fminmax_data)(inTag)
   }
 
-//  val lt = dcmp.io.lt || (dcmp.io.a.asSInt() < 0.S && dcmp.io.b.asSInt() >= 0.S)
+//  val lt = dcmp.io.lt || (dcmp.io.a.asSInt < 0.S && dcmp.io.b.asSInt >= 0.S)
 
   val mux = WireInit(fsgnjMux)
 

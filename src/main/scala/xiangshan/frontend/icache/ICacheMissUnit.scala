@@ -124,7 +124,7 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   //state change
   switch(state) {
     is(s_idle) {
-      when(io.req.fire()) {
+      when(io.req.fire) {
         readBeatCnt := 0.U
         state := s_send_mem_aquire
         req := io.req.bits
@@ -133,14 +133,14 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
 
     // memory request
     is(s_send_mem_aquire) {
-      when(io.mem_acquire.fire()) {
+      when(io.mem_acquire.fire) {
         state := s_wait_mem_grant
       }
     }
 
     is(s_wait_mem_grant) {
       when(edge.hasData(io.mem_grant.bits)) {
-        when(io.mem_grant.fire()) {
+        when(io.mem_grant.fire) {
           readBeatCnt := readBeatCnt + 1.U
           respDataReg(readBeatCnt) := io.mem_grant.bits.data
           req_corrupt := io.mem_grant.bits.corrupt // TODO: seems has bug
@@ -153,13 +153,13 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
     }
 
     is(s_write_back) {
-      state := Mux(io.meta_write.fire() && io.data_write.fire() || needflush, s_wait_resp, s_write_back)
+      state := Mux(io.meta_write.fire && io.data_write.fire || needflush, s_wait_resp, s_write_back)
     }
 
     is(s_wait_resp) {
       io.resp.bits.data := respDataReg.asUInt
       io.resp.bits.corrupt := req_corrupt
-      when(io.resp.fire()) {
+      when(io.resp.fire) {
         state := s_idle
       }
     }
@@ -194,11 +194,11 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   XSPerfAccumulate(
     "entryPenalty" + Integer.toString(id, 10),
     BoolStopWatch(
-      start = io.req.fire(),
+      start = io.req.fire,
       stop = io.resp.valid,
       startHighPriority = true)
   )
-  XSPerfAccumulate("entryReq" + Integer.toString(id, 10), io.req.fire())
+  XSPerfAccumulate("entryReq" + Integer.toString(id, 10), io.req.fire)
 }
 
 
@@ -256,11 +256,11 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
 //    XSPerfAccumulate(
 //      "entryPenalty" + Integer.toString(i, 10),
 //      BoolStopWatch(
-//        start = entry.io.req.fire(),
-//        stop = entry.io.resp.fire(),
+//        start = entry.io.req.fire,
+//        stop = entry.io.resp.fire,
 //        startHighPriority = true)
 //    )
-//    XSPerfAccumulate("entryReq" + Integer.toString(i, 10), entry.io.req.fire())
+//    XSPerfAccumulate("entryReq" + Integer.toString(i, 10), entry.io.req.fire)
 
     entry
   }
@@ -284,6 +284,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
     difftest.valid := refill_arb.io.out.valid
     difftest.addr := refill_arb.io.out.bits.paddr
     difftest.data := refill_arb.io.out.bits.data.asTypeOf(difftest.data)
+    difftest.idtfr := DontCare
   }
 
   (0 until nWays).map{ w =>

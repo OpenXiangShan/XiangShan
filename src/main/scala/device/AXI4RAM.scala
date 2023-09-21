@@ -57,20 +57,20 @@ class AXI4RAM
     require(address.length >= 1)
     val baseAddress = address(0).base
 
-    def index(addr: UInt) = ((addr - baseAddress.U)(offsetBits - 1, 0) >> log2Ceil(beatBytes)).asUInt()
+    def index(addr: UInt) = ((addr - baseAddress.U)(offsetBits - 1, 0) >> log2Ceil(beatBytes)).asUInt
 
     def inRange(idx: UInt) = idx < (memByte / beatBytes).U
 
     val wIdx = index(waddr) + writeBeatCnt
     val rIdx = index(raddr) + readBeatCnt
-    val wen = in.w.fire() && inRange(wIdx)
+    val wen = in.w.fire && inRange(wIdx)
     require(beatBytes >= 8)
 
     val rdata = if (useBlackBox) {
       val mems = (0 until split).map {_ => Module(new RAMHelper(bankByte))}
       mems.zipWithIndex map { case (mem, i) =>
         mem.clk   := clock
-        mem.en    := !reset.asBool() && ((state === s_rdata) || (state === s_wdata))
+        mem.en    := !reset.asBool && ((state === s_rdata) || (state === s_wdata))
         mem.rIdx  := (rIdx << log2Up(split)) + i.U
         mem.wIdx  := (wIdx << log2Up(split)) + i.U
         mem.wdata := in.w.bits.data((i + 1) * 64 - 1, i * 64)
@@ -84,7 +84,7 @@ class AXI4RAM
 
       val wdata = VecInit.tabulate(beatBytes) { i => in.w.bits.data(8 * (i + 1) - 1, 8 * i) }
       when(wen) {
-        mem.write(wIdx, wdata, in.w.bits.strb.asBools())
+        mem.write(wIdx, wdata, in.w.bits.strb.asBools)
       }
 
       Cat(mem.read(rIdx).reverse)
