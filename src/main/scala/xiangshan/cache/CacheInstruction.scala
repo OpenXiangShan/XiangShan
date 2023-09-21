@@ -19,7 +19,7 @@ object CacheOpMap{
 }
 
 object CacheRegMap{ 
-  def apply(offset: String,  width: String, authority: String, name: String ): Pair[String, Map[String, String]] = {
+  def apply(offset: String,  width: String, authority: String, name: String ): (String, Map[String, String]) = {
     name -> Map(
       "offset" -> offset,
       "width"  -> width,
@@ -207,7 +207,7 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   io.cache_req_dup.map( dup => dup.valid := RegNext(cache_op_start) )
   io.cache.req.bits := translated_cache_req
   io.cache_req_dup.map( dup => dup.bits := translated_cache_req )
-  when(io.cache.req.fire()){
+  when(io.cache.req.fire){
     wait_cache_op_resp := true.B
   }
 
@@ -215,7 +215,7 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
 
   // Receive cache op resp from cache
   val raw_cache_resp = Reg(new CacheCtrlRespInfo)
-  when(io.cache.resp.fire()){
+  when(io.cache.resp.fire){
     wait_cache_op_resp := false.B
     raw_cache_resp := io.cache.resp.bits
     when(CacheInstrucion.isReadOp(translated_cache_req.opCode)){
@@ -229,11 +229,11 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   }
 
   // Translate cache op resp to CSR write, send it back to CSR
-  when(io.csr.update.w.fire() && schedule_csr_op_resp_data && data_transfer_finished){
+  when(io.csr.update.w.fire && schedule_csr_op_resp_data && data_transfer_finished){
     schedule_csr_op_resp_data := false.B
     schedule_csr_op_resp_finish := true.B
   }
-  when(io.csr.update.w.fire() && schedule_csr_op_resp_finish){
+  when(io.csr.update.w.fire && schedule_csr_op_resp_finish){
     schedule_csr_op_resp_finish := false.B
     wait_csr_op_req := true.B
   }

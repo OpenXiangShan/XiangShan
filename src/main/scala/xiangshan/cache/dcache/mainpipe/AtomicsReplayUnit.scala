@@ -56,7 +56,7 @@ class AtomicsReplayEntry(implicit p: Parameters) extends DCacheModule
   // --------------------------------------------
   // s_invalid: receive requests
   when (state === s_invalid) {
-    when (io.lsu.req.fire()) {
+    when (io.lsu.req.fire) {
       req   := io.lsu.req.bits
       state := s_pipe_req
     }
@@ -84,7 +84,7 @@ class AtomicsReplayEntry(implicit p: Parameters) extends DCacheModule
     pipe_req.amo_data  := req.data
     pipe_req.amo_mask  := req.mask
 
-    when (io.pipe_req.fire()) {
+    when (io.pipe_req.fire) {
       state := s_pipe_resp
       assert(!io.pipe_req.bits.vaddr === 0.U)
     }
@@ -103,7 +103,7 @@ class AtomicsReplayEntry(implicit p: Parameters) extends DCacheModule
     // TODO: add assertions:
     // 1. add a replay delay counter?
     // 2. when req gets into MissQueue, it should not miss any more
-    when (io.pipe_resp.fire()) {
+    when (io.pipe_resp.fire) {
       when (io.pipe_resp.bits.miss) {
         when (io.pipe_resp.bits.replay) {
           state := s_pipe_req
@@ -125,25 +125,25 @@ class AtomicsReplayEntry(implicit p: Parameters) extends DCacheModule
     io.lsu.resp.bits.id    := resp_id
     io.lsu.resp.bits.error := resp_error
 
-    when (io.lsu.resp.fire()) {
+    when (io.lsu.resp.fire) {
       state := s_invalid
     }
   }
 
   // debug output
-  // when (io.lsu.req.fire()) {
+  // when (io.lsu.req.fire) {
   //   io.lsu.req.bits.dump()
   // }
 
-  // when (io.lsu.resp.fire()) {
+  // when (io.lsu.resp.fire) {
   //   io.lsu.resp.bits.dump()
   // }
 
-//  when (io.pipe_req.fire()) {
+//  when (io.pipe_req.fire) {
 //    io.pipe_req.bits.dump()
 //  }
 //
-//  when (io.pipe_resp.fire()) {
+//  when (io.pipe_resp.fire) {
 //    io.pipe_resp.bits.dump()
 //  }
 }

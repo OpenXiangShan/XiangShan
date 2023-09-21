@@ -131,8 +131,8 @@ class SRT16DividerDataModule(len: Int) extends Module {
   // Second cycle, state is pre_0
   // calculate lzc and move div* and lzc diff check if no_iter_needed
 
-  aLZC := PriorityEncoder(aAbsReg(len - 1, 0).asBools().reverse)
-  dLZC := PriorityEncoder(dAbsReg(len - 1, 0).asBools().reverse)
+  aLZC := PriorityEncoder(aAbsReg(len - 1, 0).asBools.reverse)
+  dLZC := PriorityEncoder(dAbsReg(len - 1, 0).asBools.reverse)
   val aLZCReg = RegEnable(aLZC, state(s_pre_0)) // 7, 0
   val dLZCReg = RegEnable(dLZC, state(s_pre_0))
 
@@ -143,8 +143,8 @@ class SRT16DividerDataModule(len: Int) extends Module {
   // special case:
   // divisor is 1 or -1; dividend has less bits than divisor; divisor is zero
   // s_pre_0:
-  val dIsOne = dLZC(lzc_width - 1, 0).andR()
-  val dIsZero = ~dNormReg.orR()
+  val dIsOne = dLZC(lzc_width - 1, 0).andR
+  val dIsZero = ~dNormReg.orR
   val aIsZero = RegEnable(aLZC(lzc_width), state(s_pre_0))
   val aTooSmall = RegEnable(aLZC(lzc_width) | lzcWireDiff(lzc_width), state(s_pre_0))
   special := dIsOne | dIsZero | aTooSmall
@@ -373,13 +373,13 @@ class SRT16DividerDataModule(len: Int) extends Module {
   // post_1
   val r = rNextReg
   val rPd = rNextPdReg
-  val rIsZero = ~(r.orR())
-  val needCorr = Mux(rSignReg, ~r(len) & r.orR(), r(len)) // when we get pos rem for a<0 or neg rem for a>0
+  val rIsZero = ~(r.orR)
+  val needCorr = Mux(rSignReg, ~r(len) & r.orR, r(len)) // when we get pos rem for a<0 or neg rem for a>0
   val rPreShifted = Mux(needCorr, rPd, r)
   val rightShifter = Module(new RightShifter(len, lzc_width))
   rightShifter.io.in := rPreShifted
   rightShifter.io.shiftNum := dLZCReg
-  rightShifter.io.msb := Mux(~(rPreShifted.orR()), 0.U, rSignReg)
+  rightShifter.io.msb := Mux(~(rPreShifted.orR), 0.U, rSignReg)
   val rShifted = rightShifter.io.out
   val rFinal = RegEnable(Mux(specialReg, remSpecialReg, rShifted), state(s_post_1))// right shifted remainder. shift by the number of bits divisor is shifted
   val qFinal = RegEnable(Mux(specialReg, quotSpecialReg, Mux(needCorr, quotM1IterReg, quotIterReg)), state(s_post_1))
@@ -441,7 +441,7 @@ object mLookUpTable2 {
 
 class SRT16Divider(len: Int)(implicit p: Parameters) extends AbstractDivider(len) {
 
-  val newReq = io.in.fire()
+  val newReq = io.in.fire
 
   val uop = io.in.bits.uop
   val uopReg = RegEnable(uop, newReq)

@@ -48,14 +48,15 @@ class DebugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
 //  debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl  =>
 //    l2xbar := TLBuffer() := TLWidthWidget(1) := sb2tl.node
 //  }
+  class DebugModuleIO extends Bundle {
+    val resetCtrl = new ResetCtrlIO(numCores)(p)
+    val debugIO = new DebugIO()(p)
+    val clock = Input(Bool())
+    val reset = Input(Reset())
+  }
 
-  lazy val module = new LazyRawModuleImp(this) {
-    val io = IO(new Bundle{
-      val resetCtrl = new ResetCtrlIO(numCores)(p)
-      val debugIO = new DebugIO()(p)
-      val clock = Input(Bool())
-      val reset = Input(Reset())
-    })
+  class DebugModuleImp(wrapper: LazyModule) extends LazyRawModuleImp(wrapper) {
+    val io = IO(new DebugModuleIO)
     debug.module.io.tl_reset := io.reset // this should be TL reset
     debug.module.io.tl_clock := io.clock.asClock // this should be TL clock
     debug.module.io.hartIsInReset := io.resetCtrl.hartIsInReset
@@ -91,6 +92,8 @@ class DebugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
       dtm
     }
   }
+
+  lazy val module = new DebugModuleImp(this)
 }
 
 object XSDebugModuleParams {
@@ -135,7 +138,7 @@ class SimJTAG(tickDelay: Int = 50)(implicit val p: Parameters) extends ExtModule
     tbsuccess := exit === 1.U
     when (exit >= 2.U) {
       printf("*** FAILED *** (exit code = %d)\n", exit >> 1.U)
-      stop(1)
+      stop()
     }
   }
 }

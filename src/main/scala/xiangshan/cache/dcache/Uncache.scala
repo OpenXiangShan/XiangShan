@@ -158,7 +158,7 @@ class MMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     io.resp.bits.tag_error := false.B
     io.resp.bits.error := false.B
 
-    when (io.resp.fire()) {
+    when (io.resp.fire) {
       state := s_invalid
     }
   }
@@ -391,16 +391,16 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
 
   // print all input/output requests for debug purpose
   // print req/resp
-  XSDebug(req.fire(), "req cmd: %x addr: %x data: %x mask: %x\n",
+  XSDebug(req.fire, "req cmd: %x addr: %x data: %x mask: %x\n",
     req.bits.cmd, req.bits.addr, req.bits.data, req.bits.mask)
-  XSDebug(resp.fire(), "data: %x\n", req.bits.data)
+  XSDebug(resp.fire, "data: %x\n", req.bits.data)
 
   // print tilelink messages
   when(mem_acquire.valid){
     XSDebug("mem_acquire valid, ready=%d ", mem_acquire.ready)
     mem_acquire.bits.dump
   }
-  when (mem_grant.fire()) {
+  when (mem_grant.fire) {
     XSDebug("mem_grant fire ")
     mem_grant.bits.dump
   }

@@ -40,7 +40,7 @@ abstract class XSModule(implicit val p: Parameters) extends Module
 //remove this trait after impl module logic
 trait NeedImpl {
   this: RawModule =>
-  override protected def IO[T <: Data](iodef: T): T = {
+  protected def IO[T <: Data](iodef: T): T = {
     println(s"[Warn]: (${this.name}) please reomve 'NeedImpl' after implement this module")
     val io = chisel3.experimental.IO(iodef)
     io <> DontCare
@@ -95,7 +95,7 @@ trait HasWritebackSink {
   }
 
   def writebackSinksParams: Seq[WritebackSourceParams] = {
-    writebackSinks.map{ case (s, i) => s.zip(i).map(x => x._1.writebackSourceParams(x._2)).reduce(_ ++ _) }
+    writebackSinks.map{ case (s, i) => s.zip(i).map(x => x._1.writebackSourceParams(x._2)).reduce(_ ++ _) }.toSeq
   }
   final def writebackSinksMod(
      thisMod: Option[HasWritebackSource] = None,
@@ -104,7 +104,7 @@ trait HasWritebackSink {
     require(thisMod.isDefined == thisModImp.isDefined)
     writebackSinks.map(_._1.map(source =>
       if (thisMod.isDefined && source == thisMod.get) thisModImp.get else source.writebackSourceImp)
-    )
+    ).toSeq
   }
   final def writebackSinksImp(
     thisMod: Option[HasWritebackSource] = None,
@@ -113,7 +113,7 @@ trait HasWritebackSink {
     val sourceMod = writebackSinksMod(thisMod, thisModImp)
     writebackSinks.zip(sourceMod).map{ case ((s, i), m) =>
       s.zip(i).zip(m).flatMap(x => x._1._1.writebackSource(x._2)(x._1._2))
-    }
+    }.toSeq
   }
   def selWritebackSinks(func: WritebackSourceParams => Int): Int = {
     writebackSinksParams.zipWithIndex.minBy(params => func(params._1))._2
@@ -252,11 +252,11 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
 
-  val frontend = outer.frontend.module
-  val ctrlBlock = outer.ctrlBlock.module
-  val wb2Ctrl = outer.wb2Ctrl.module
-  val memBlock = outer.memBlock.module
-  val exuBlocks = outer.exuBlocks.map(_.module)
+  private val frontend = outer.frontend.module
+  private val ctrlBlock = outer.ctrlBlock.module
+  private val wb2Ctrl = outer.wb2Ctrl.module
+  private val memBlock = outer.memBlock.module
+  private val exuBlocks = outer.exuBlocks.map(_.module)
 
   frontend.io.hartId  := io.hartId
   ctrlBlock.io.hartId := io.hartId
@@ -281,6 +281,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   io.beu_errors.icache <> frontend.io.error.toL1BusErrorUnitInfo()
   io.beu_errors.dcache <> memBlock.io.error.toL1BusErrorUnitInfo()
+  io.beu_errors.l2 <> DontCare
 
   require(exuBlocks.count(_.fuConfigs.map(_._1).contains(JumpCSRExeUnitCfg)) == 1)
   val csrFenceMod = exuBlocks.filter(_.fuConfigs.map(_._1).contains(JumpCSRExeUnitCfg)).head
@@ -442,6 +443,11 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.l2_hint.valid := io.l2_hint.valid
   memBlock.io.l2_hint.bits.sourceId := io.l2_hint.bits.sourceId
   memBlock.io.l2PfqBusy := io.l2PfqBusy
+  memBlock.io.int2vlsu <> DontCare
+  memBlock.io.vec2vlsu <> DontCare
+  memBlock.io.vlsu2vec <> DontCare
+  memBlock.io.vlsu2int <> DontCare
+  memBlock.io.vlsu2ctrl <> DontCare
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   io.l2_pf_enable := csrioIn.customCtrl.l2_pf_enable

@@ -95,7 +95,7 @@ class RefillPipe(implicit p: Parameters) extends DCacheModule {
   val req_dup_for_tag_w = io.req_dup_for_tag_w.bits
 
   io.req.ready := true.B
-  io.resp.valid := io.req.fire()
+  io.resp.valid := io.req.fire
   io.resp.bits := refill_w_req.miss_id
 
   val idx = refill_w_req.idx

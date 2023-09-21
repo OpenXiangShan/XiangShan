@@ -751,7 +751,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   // when mispredict branches writeback, stop commit in the next 2 cycles
   // TODO: don't check all exu write back
   val misPredWb = Cat(VecInit(exuWriteback.map(wb =>
-    wb.bits.redirect.cfiUpdate.isMisPred && wb.bits.redirectValid
+    wb.bits.redirect.cfiUpdate.isMisPred && wb.bits.redirectValid && wb.valid
   ))).orR
   val misPredBlockCounter = Reg(UInt(3.W))
   misPredBlockCounter := Mux(misPredWb,
@@ -779,8 +779,8 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     io.commits.info(i) := dispatchDataRead(i)
     io.commits.robIdx(i) := deqPtrVec(i)
 
+    io.commits.walkValid(i) := shouldWalkVec(i)
     when (state === s_walk) {
-      io.commits.walkValid(i) := shouldWalkVec(i)
       when (io.commits.isWalk && state === s_walk && shouldWalkVec(i)) {
         XSError(!walk_v(i), s"why not $i???\n")
       }

@@ -227,7 +227,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f0_ftq_req                           = fromFtq.req.bits
   val f0_doubleLine                        = fromFtq.req.bits.crossCacheline
   val f0_vSetIdx                           = VecInit(get_idx((f0_ftq_req.startAddr)), get_idx(f0_ftq_req.nextlineStart))
-  val f0_fire                              = fromFtq.req.fire()
+  val f0_fire                              = fromFtq.req.fire
 
   val f0_flush, f1_flush, f2_flush, f3_flush = WireInit(false.B)
   val from_bpu_f0_flush, from_bpu_f1_flush, from_bpu_f2_flush, from_bpu_f3_flush = WireInit(false.B)
@@ -447,35 +447,35 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_ftq_req        = RegEnable(f2_ftq_req,    f2_fire)
   // val f3_situation      = RegEnable(f2_situation,  f2_fire)
   val f3_doubleLine     = RegEnable(f2_doubleLine, f2_fire)
-  val f3_fire           = io.toIbuffer.fire()
+  val f3_fire           = io.toIbuffer.fire
 
   f3_ready := f3_fire || !f3_valid
 
-  val f3_cut_data       = RegEnable(next = f2_cut_data(f2_predecod_ptr), enable=f2_fire)
+  val f3_cut_data       = RegEnable(f2_cut_data(f2_predecod_ptr), f2_fire)
 
   val f3_except_pf      = RegEnable(f2_except_pf,  f2_fire)
   val f3_except_af      = RegEnable(f2_except_af,  f2_fire)
   val f3_mmio           = RegEnable(f2_mmio   ,  f2_fire)
 
-  //val f3_expd_instr     = RegEnable(next = f2_expd_instr,  enable = f2_fire)
-  val f3_instr          = RegEnable(next = f2_instr, enable = f2_fire)
+  //val f3_expd_instr     = RegEnable(f2_expd_instr,  f2_fire)
+  val f3_instr          = RegEnable(f2_instr, f2_fire)
   val f3_expd_instr     = VecInit((0 until PredictWidth).map{ i => 
     val expander       = Module(new RVCExpander)
     expander.io.in := f3_instr(i)
     expander.io.out.bits
   })
 
-  val f3_pd_wire        = RegEnable(next = f2_pd,          enable = f2_fire)
+  val f3_pd_wire        = RegEnable(f2_pd,          f2_fire)
   val f3_pd             = WireInit(f3_pd_wire)
-  val f3_jump_offset    = RegEnable(next = f2_jump_offset, enable = f2_fire)
-  val f3_af_vec         = RegEnable(next = f2_af_vec,      enable = f2_fire)
-  val f3_pf_vec         = RegEnable(next = f2_pf_vec ,     enable = f2_fire)
-  val f3_pc             = RegEnable(next = f2_pc,          enable = f2_fire)
-  val f3_half_snpc      = RegEnable(next = f2_half_snpc,   enable = f2_fire)
-  val f3_instr_range    = RegEnable(next = f2_instr_range, enable = f2_fire)
-  val f3_foldpc         = RegEnable(next = f2_foldpc,      enable = f2_fire)
-  val f3_crossPageFault = RegEnable(next = f2_crossPageFault,      enable = f2_fire)
-  val f3_hasHalfValid   = RegEnable(next = f2_hasHalfValid,      enable = f2_fire)
+  val f3_jump_offset    = RegEnable(f2_jump_offset, f2_fire)
+  val f3_af_vec         = RegEnable(f2_af_vec,      f2_fire)
+  val f3_pf_vec         = RegEnable(f2_pf_vec ,     f2_fire)
+  val f3_pc             = RegEnable(f2_pc,          f2_fire)
+  val f3_half_snpc      = RegEnable(f2_half_snpc,   f2_fire)
+  val f3_instr_range    = RegEnable(f2_instr_range, f2_fire)
+  val f3_foldpc         = RegEnable(f2_foldpc,      f2_fire)
+  val f3_crossPageFault = RegEnable(f2_crossPageFault,      f2_fire)
+  val f3_hasHalfValid   = RegEnable(f2_hasHalfValid,      f2_fire)
   val f3_except         = VecInit((0 until 2).map{i => f3_except_pf(i) || f3_except_af(i)})
   val f3_has_except     = f3_valid && (f3_except_af.reduce(_||_) || f3_except_pf.reduce(_||_))
   val f3_pAddrs   = RegEnable(f2_paddrs,  f2_fire)
@@ -538,7 +538,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   when(f3_flush && !f3_req_is_mmio)                                                 {f3_valid := false.B}
   .elsewhen(mmioF3Flush && f3_req_is_mmio && !f3_need_not_flush)                    {f3_valid := false.B}
   .elsewhen(f2_fire && !f2_flush )                                                  {f3_valid := true.B }
-  .elsewhen(io.toIbuffer.fire() && !f3_req_is_mmio)                                 {f3_valid := false.B}
+  .elsewhen(io.toIbuffer.fire && !f3_req_is_mmio)                                   {f3_valid := false.B}
   .elsewhen{f3_req_is_mmio && f3_mmio_req_commit}                                   {f3_valid := false.B}
 
   val f3_mmio_use_seq_pc = RegInit(false.B)
@@ -568,11 +568,11 @@ class NewIFU(implicit p: Parameters) extends XSModule
     }
 
     is(m_sendReq){
-      mmio_state :=  Mux(toUncache.fire(), m_waitResp, m_sendReq )
+      mmio_state :=  Mux(toUncache.fire, m_waitResp, m_sendReq )
     }
 
     is(m_waitResp){
-      when(fromUncache.fire()){
+      when(fromUncache.fire){
           val isRVC =  fromUncache.bits.data(1,0) =/= 3.U
           val needResend = !isRVC && f3_pAddrs(0)(2,1) === 3.U
           mmio_state :=  Mux(needResend, m_sendTLB , m_waitCommit)
@@ -605,11 +605,11 @@ class NewIFU(implicit p: Parameters) extends XSModule
     }
 
     is(m_resendReq){
-      mmio_state :=  Mux(toUncache.fire(), m_waitResendResp, m_resendReq )
+      mmio_state :=  Mux(toUncache.fire, m_waitResendResp, m_resendReq )
     }
 
     is(m_waitResendResp){
-      when(fromUncache.fire()){
+      when(fromUncache.fire){
           mmio_state :=  m_waitCommit
           f3_mmio_data(1)   :=  fromUncache.bits.data(15,0)
       }
@@ -687,7 +687,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_false_lastHalf      = hasLastHalf(f3_last_validIdx)
   val f3_false_snpc          = f3_half_snpc(f3_last_validIdx)
 
-  val f3_lastHalf_mask    = VecInit((0 until PredictWidth).map( i => if(i ==0) false.B else true.B )).asUInt()
+  val f3_lastHalf_mask    = VecInit((0 until PredictWidth).map( i => if(i ==0) false.B else true.B )).asUInt
   val f3_lastHalf_disable = RegInit(false.B)
 
   when(f3_flush || (f3_fire && f3_lastHalf_disable)){
@@ -745,7 +745,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   f3_mmio_missOffset.valid := f3_req_is_mmio
   f3_mmio_missOffset.bits  := 0.U
 
-  mmioFlushWb.valid           := (f3_req_is_mmio && mmio_state === m_waitCommit && RegNext(fromUncache.fire())  && f3_mmio_use_seq_pc)
+  mmioFlushWb.valid           := (f3_req_is_mmio && mmio_state === m_waitCommit && RegNext(fromUncache.fire)  && f3_mmio_use_seq_pc)
   mmioFlushWb.bits.pc         := f3_pc
   mmioFlushWb.bits.pd         := f3_pd
   mmioFlushWb.bits.pd.zipWithIndex.map{case(instr,i) => instr.valid :=  f3_mmio_range(i)}
@@ -788,7 +788,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     mmioFlushWb.bits.pd(0).isRet   := isRet
   }
 
-  mmio_redirect := (f3_req_is_mmio && mmio_state === m_waitCommit && RegNext(fromUncache.fire())  && f3_mmio_use_seq_pc)
+  mmio_redirect := (f3_req_is_mmio && mmio_state === m_waitCommit && RegNext(fromUncache.fire)  && f3_mmio_use_seq_pc)
 
   XSPerfAccumulate("fetch_bubble_ibuffer_not_ready",   io.toIbuffer.valid && !io.toIbuffer.ready )
 
@@ -888,44 +888,44 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   /** performance counter */
   val f3_perf_info     = RegEnable(f2_perf_info,  f2_fire)
-  val f3_req_0    = io.toIbuffer.fire()
-  val f3_req_1    = io.toIbuffer.fire() && f3_doubleLine
-  val f3_hit_0    = io.toIbuffer.fire() && f3_perf_info.bank_hit(0)
-  val f3_hit_1    = io.toIbuffer.fire() && f3_doubleLine & f3_perf_info.bank_hit(1)
+  val f3_req_0    = io.toIbuffer.fire
+  val f3_req_1    = io.toIbuffer.fire && f3_doubleLine
+  val f3_hit_0    = io.toIbuffer.fire && f3_perf_info.bank_hit(0)
+  val f3_hit_1    = io.toIbuffer.fire && f3_doubleLine & f3_perf_info.bank_hit(1)
   val f3_hit      = f3_perf_info.hit
   val perfEvents = Seq(
     ("frontendFlush                ", wb_redirect                                ),
-    ("ifu_req                      ", io.toIbuffer.fire()                        ),
-    ("ifu_miss                     ", io.toIbuffer.fire() && !f3_perf_info.hit   ),
+    ("ifu_req                      ", io.toIbuffer.fire                        ),
+    ("ifu_miss                     ", io.toIbuffer.fire && !f3_perf_info.hit   ),
     ("ifu_req_cacheline_0          ", f3_req_0                                   ),
     ("ifu_req_cacheline_1          ", f3_req_1                                   ),
     ("ifu_req_cacheline_0_hit      ", f3_hit_1                                   ),
     ("ifu_req_cacheline_1_hit      ", f3_hit_1                                   ),
-    ("only_0_hit                   ", f3_perf_info.only_0_hit       && io.toIbuffer.fire() ),
-    ("only_0_miss                  ", f3_perf_info.only_0_miss      && io.toIbuffer.fire() ),
-    ("hit_0_hit_1                  ", f3_perf_info.hit_0_hit_1      && io.toIbuffer.fire() ),
-    ("hit_0_miss_1                 ", f3_perf_info.hit_0_miss_1     && io.toIbuffer.fire() ),
-    ("miss_0_hit_1                 ", f3_perf_info.miss_0_hit_1     && io.toIbuffer.fire() ),
-    ("miss_0_miss_1                ", f3_perf_info.miss_0_miss_1    && io.toIbuffer.fire() ),
+    ("only_0_hit                   ", f3_perf_info.only_0_hit       && io.toIbuffer.fire ),
+    ("only_0_miss                  ", f3_perf_info.only_0_miss      && io.toIbuffer.fire ),
+    ("hit_0_hit_1                  ", f3_perf_info.hit_0_hit_1      && io.toIbuffer.fire ),
+    ("hit_0_miss_1                 ", f3_perf_info.hit_0_miss_1     && io.toIbuffer.fire ),
+    ("miss_0_hit_1                 ", f3_perf_info.miss_0_hit_1     && io.toIbuffer.fire ),
+    ("miss_0_miss_1                ", f3_perf_info.miss_0_miss_1    && io.toIbuffer.fire ),
   )
   generatePerfEvent()
 
-  XSPerfAccumulate("ifu_req",   io.toIbuffer.fire() )
-  XSPerfAccumulate("ifu_miss",  io.toIbuffer.fire() && !f3_hit )
+  XSPerfAccumulate("ifu_req",   io.toIbuffer.fire )
+  XSPerfAccumulate("ifu_miss",  io.toIbuffer.fire && !f3_hit )
   XSPerfAccumulate("ifu_req_cacheline_0", f3_req_0  )
   XSPerfAccumulate("ifu_req_cacheline_1", f3_req_1  )
   XSPerfAccumulate("ifu_req_cacheline_0_hit",   f3_hit_0 )
   XSPerfAccumulate("ifu_req_cacheline_1_hit",   f3_hit_1 )
   XSPerfAccumulate("frontendFlush",  wb_redirect )
-  XSPerfAccumulate("only_0_hit",      f3_perf_info.only_0_hit   && io.toIbuffer.fire()  )
-  XSPerfAccumulate("only_0_miss",     f3_perf_info.only_0_miss  && io.toIbuffer.fire()  )
-  XSPerfAccumulate("hit_0_hit_1",     f3_perf_info.hit_0_hit_1  && io.toIbuffer.fire()  )
-  XSPerfAccumulate("hit_0_miss_1",    f3_perf_info.hit_0_miss_1  && io.toIbuffer.fire()  )
-  XSPerfAccumulate("miss_0_hit_1",    f3_perf_info.miss_0_hit_1   && io.toIbuffer.fire() )
-  XSPerfAccumulate("miss_0_miss_1",   f3_perf_info.miss_0_miss_1 && io.toIbuffer.fire() )
-  XSPerfAccumulate("hit_0_except_1",   f3_perf_info.hit_0_except_1 && io.toIbuffer.fire() )
-  XSPerfAccumulate("miss_0_except_1",   f3_perf_info.miss_0_except_1 && io.toIbuffer.fire() )
-  XSPerfAccumulate("except_0",   f3_perf_info.except_0 && io.toIbuffer.fire() )
+  XSPerfAccumulate("only_0_hit",      f3_perf_info.only_0_hit   && io.toIbuffer.fire  )
+  XSPerfAccumulate("only_0_miss",     f3_perf_info.only_0_miss  && io.toIbuffer.fire  )
+  XSPerfAccumulate("hit_0_hit_1",     f3_perf_info.hit_0_hit_1  && io.toIbuffer.fire  )
+  XSPerfAccumulate("hit_0_miss_1",    f3_perf_info.hit_0_miss_1  && io.toIbuffer.fire  )
+  XSPerfAccumulate("miss_0_hit_1",    f3_perf_info.miss_0_hit_1   && io.toIbuffer.fire )
+  XSPerfAccumulate("miss_0_miss_1",   f3_perf_info.miss_0_miss_1 && io.toIbuffer.fire )
+  XSPerfAccumulate("hit_0_except_1",   f3_perf_info.hit_0_except_1 && io.toIbuffer.fire )
+  XSPerfAccumulate("miss_0_except_1",   f3_perf_info.miss_0_except_1 && io.toIbuffer.fire )
+  XSPerfAccumulate("except_0",   f3_perf_info.except_0 && io.toIbuffer.fire )
   XSPerfHistogram("ifu2ibuffer_validCnt", PopCount(io.toIbuffer.bits.valid & io.toIbuffer.bits.enqEnable), io.toIbuffer.fire, 0, PredictWidth + 1, 1)
 
   val isWriteFetchToIBufferTable = WireInit(Constantin.createRecord("isWriteFetchToIBufferTable" + p(XSCoreParamsKey).HartId.toString))
@@ -936,7 +936,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val fetchIBufferDumpData = Wire(new FetchToIBufferDB)
   fetchIBufferDumpData.start_addr := f3_ftq_req.startAddr
   fetchIBufferDumpData.instr_count := PopCount(io.toIbuffer.bits.enqEnable)
-  fetchIBufferDumpData.exception := (f3_perf_info.except_0 && io.toIbuffer.fire()) || (f3_perf_info.hit_0_except_1 && io.toIbuffer.fire()) || (f3_perf_info.miss_0_except_1 && io.toIbuffer.fire())
+  fetchIBufferDumpData.exception := (f3_perf_info.except_0 && io.toIbuffer.fire) || (f3_perf_info.hit_0_except_1 && io.toIbuffer.fire) || (f3_perf_info.miss_0_except_1 && io.toIbuffer.fire)
   fetchIBufferDumpData.is_cache_hit := f3_hit
 
   val ifuWbToFtqDumpData = Wire(new IfuWbToFtqDB)

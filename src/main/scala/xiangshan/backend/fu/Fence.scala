@@ -55,7 +55,7 @@ class Fence(implicit p: Parameters) extends FunctionUnit {
 
   val sbuffer = toSbuffer.flushSb
   val sbEmpty = toSbuffer.sbIsEmpty
-  val uop = RegEnable(io.in.bits.uop, io.in.fire())
+  val uop = RegEnable(io.in.bits.uop, io.in.fire)
   val func = uop.ctrl.fuOpType
 
   // NOTE: icache & tlb & sbuffer must receive flush signal at any time
@@ -67,8 +67,8 @@ class Fence(implicit p: Parameters) extends FunctionUnit {
   sfence.bits.flushPipe := uop.ctrl.flushPipe
   XSError(sfence.valid && uop.ctrl.lsrc(0) =/= uop.ctrl.imm(4, 0), "lsrc0 is passed by imm\n")
   XSError(sfence.valid && uop.ctrl.lsrc(1) =/= uop.ctrl.imm(9, 5), "lsrc1 is passed by imm\n")
-  sfence.bits.addr := RegEnable(io.in.bits.src(0), io.in.fire())
-  sfence.bits.asid := RegEnable(io.in.bits.src(1), io.in.fire())
+  sfence.bits.addr := RegEnable(io.in.bits.src(0), io.in.fire)
+  sfence.bits.asid := RegEnable(io.in.bits.src(1), io.in.fire)
 
   when (state === s_idle && io.in.valid) { state := s_wait }
   when (state === s_wait && func === FenceOpType.fencei && sbEmpty) { state := s_icache }

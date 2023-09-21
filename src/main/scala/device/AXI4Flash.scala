@@ -66,7 +66,7 @@ class AXI4Flash
 
     val flash = Module(new FlashHelper)
     flash.clk := clock
-    flash.ren := in.ar.fire()
+    flash.ren := in.ar.fire
     flash.addr := Cat(0.U(16.W), getOffset(raddr))
 
     in.r.bits.data := flash.data

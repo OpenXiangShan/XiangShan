@@ -98,10 +98,6 @@ class SimTop(implicit p: Parameters) extends Module {
   dontTouch(logEnable)
   dontTouch(clean)
   dontTouch(dump)
-
-  // Check and dispaly all source and sink connections
-  ExcitingUtils.fixConnections()
-  ExcitingUtils.checkAndDisplay()
 }
 
 object SimTop extends App {
