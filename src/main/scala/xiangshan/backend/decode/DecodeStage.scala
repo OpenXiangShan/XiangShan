@@ -134,7 +134,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   io.stallReason.out.reason.zip(io.stallReason.in.reason).zip(io.in.map(_.valid)).foreach { case ((out, in), valid) =>
     out := Mux(io.stallReason.out.backReason.valid,
                io.stallReason.out.backReason.bits,
-               Mux(valid, TopDownCounters.NoStall.id.U, in))
+               in)
   }
 
   XSPerfAccumulate("in_valid_count", PopCount(io.in.map(_.valid)))
