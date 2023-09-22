@@ -306,6 +306,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
       val fromRob = new RobCoreTopDownIO
       val fromCore = new CoreDispatchTopDownIO
     }
+    val debugRolling = new RobDebugRollingIO
   })
 
   override def writebackSource: Option[Seq[Seq[Valid[ExuOutput]]]] = {
@@ -675,6 +676,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   io.debugTopDown.fromRob := rob.io.debugTopDown.toCore
   dispatch.io.debugTopDown.fromRob := rob.io.debugTopDown.toDispatch
   dispatch.io.debugTopDown.fromCore := io.debugTopDown.fromCore
+  io.debugRolling := rob.io.debugRolling
 
   io.perfInfo.ctrlInfo.robFull := RegNext(rob.io.robFull)
   io.perfInfo.ctrlInfo.intdqFull := RegNext(intDq.io.dqFull)

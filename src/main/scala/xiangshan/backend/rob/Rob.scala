@@ -199,6 +199,10 @@ class RobDispatchTopDownIO extends Bundle {
   val robHeadLsIssue = Output(Bool())
 }
 
+class RobDebugRollingIO extends Bundle {
+  val robTrueCommit = Output(UInt(64.W))
+}
+
 class RobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
     // for commits/flush
@@ -443,6 +447,7 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
       val toDispatch = new RobDispatchTopDownIO
       val robHeadLqIdx = Valid(new LqPtr)
     }
+    val debugRolling = new RobDebugRollingIO
   })
 
   def selectWb(index: Int, func: Seq[ExuConfig] => Boolean): Seq[(Seq[ExuConfig], ValidIO[ExuOutput])] = {
@@ -1176,6 +1181,9 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
   io.debugTopDown.toDispatch.robHeadLsIssue := debug_lsIssue(deqPtr.value)
   io.debugTopDown.robHeadLqIdx.valid := debug_lqIdxValid(deqPtr.value)
   io.debugTopDown.robHeadLqIdx.bits  := debug_microOp(deqPtr.value).lqIdx
+  
+  // rolling
+  io.debugRolling.robTrueCommit := ifCommitReg(trueCommitCnt)
 
   /**
     * DataBase info:
