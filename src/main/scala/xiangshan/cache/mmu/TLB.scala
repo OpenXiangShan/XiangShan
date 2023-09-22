@@ -164,7 +164,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     }
 
     val hit = e_hit || p_hit
-    val miss = (!hit && enable) || !(hasGpf(i) && need_gpa_vpn_hit)
+    val miss = (!hit && enable) || hasGpf(i) && !(need_gpa && need_gpa_vpn_hit)
     hit.suggestName(s"hit_read_${i}")
     miss.suggestName(s"miss_read_${i}")
 
