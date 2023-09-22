@@ -143,10 +143,10 @@ idea:
 	mill -i mill.scalalib.GenIdea/idea
 
 # verilator simulation
-emu:
+emu: sim-verilog
 	$(MAKE) -C ./difftest emu SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
 
-emu-run:
+emu-run: emu
 	$(MAKE) -C ./difftest emu-run SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
 
 # vcs simulation

@@ -3,7 +3,7 @@ package xiangshan.backend.datapath
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import difftest.{DifftestFpWriteback, DifftestIntWriteback}
+import difftest._
 import utils.XSError
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles.{ExuOutput, WriteBackBundle}
@@ -210,23 +210,23 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
 
   if (env.EnableDifftest || env.AlwaysBasicDiff) {
     intWbArbiterOut.foreach(out => {
-      val difftest = Module(new DifftestIntWriteback)
-      difftest.io.clock := clock
-      difftest.io.coreid := io.fromTop.hartId
-      difftest.io.valid := out.fire && out.bits.rfWen
-      difftest.io.dest := out.bits.pdest
-      difftest.io.data := out.bits.data
+      val difftest = DifftestModule(new DiffIntWriteback(coreParams.NRPhyRegs))
+      difftest.clock   := clock
+      difftest.coreid  := io.fromTop.hartId
+      difftest.valid   := out.fire && out.bits.rfWen
+      difftest.address := out.bits.pdest
+      difftest.data    := out.bits.data
     })
   }
 
   if (env.EnableDifftest || env.AlwaysBasicDiff) {
     vfWbArbiterOut.foreach(out => {
-      val difftest = Module(new DifftestFpWriteback)
-      difftest.io.clock := clock
-      difftest.io.coreid := io.fromTop.hartId
-      difftest.io.valid := out.fire // all fp instr will write fp rf
-      difftest.io.dest := out.bits.pdest
-      difftest.io.data := out.bits.data
+      val difftest = DifftestModule(new DiffFpWriteback(coreParams.NRPhyRegs))
+      difftest.clock   := clock
+      difftest.coreid  := io.fromTop.hartId
+      difftest.valid   := out.fire // all fp instr will write fp rf
+      difftest.address := out.bits.pdest
+      difftest.data    := out.bits.data
     })
   }
 

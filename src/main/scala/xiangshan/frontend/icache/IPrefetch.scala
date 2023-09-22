@@ -19,7 +19,7 @@ package xiangshan.frontend.icache
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import difftest.DifftestRefillEvent
+import difftest._
 import freechips.rocketchip.tilelink._
 import utils._
 import xiangshan.cache.mmu._
@@ -418,13 +418,13 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
   }
 
   if (env.EnableDifftest) {
-    val difftest = Module(new DifftestRefillEvent)
-    difftest.io.clock := clock
-    difftest.io.coreid := io.hartId
-    difftest.io.cacheid := 6.U
-    difftest.io.valid := io.move.meta_write.fire
-    difftest.io.addr := s3_move_meta.paddr
-    difftest.io.data := s3_move_data.cachline.asTypeOf(difftest.io.data)
+    val difftest = DifftestModule(new DiffRefillEvent)
+    difftest.clock   := clock
+    difftest.coreid  := io.hartId
+    difftest.index   := 6.U
+    difftest.valid   := io.move.meta_write.fire
+    difftest.addr    := s3_move_meta.paddr
+    difftest.data    := s3_move_data.cachline.asTypeOf(difftest.data)
   }
 
   /** write logic */

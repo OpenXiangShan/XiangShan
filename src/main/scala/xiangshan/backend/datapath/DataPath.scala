@@ -3,7 +3,7 @@ package xiangshan.backend.datapath
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import difftest.{DifftestArchFpRegState, DifftestArchIntRegState, DifftestArchVecRegState}
+import difftest._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
 import utils.SeqUtils._
@@ -425,20 +425,20 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
 
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
     val delayedCnt = 2
-    val difftestArchIntRegState = Module(new DifftestArchIntRegState)
-    difftestArchIntRegState.io.clock := clock
-    difftestArchIntRegState.io.coreid := io.hartId
-    difftestArchIntRegState.io.gpr := DelayN(intDebugRead.get._2, delayedCnt)
+    val difftestArchIntRegState = DifftestModule(new DiffArchIntRegState, delay = 2)
+    difftestArchIntRegState.clock  := clock
+    difftestArchIntRegState.coreid := io.hartId
+    difftestArchIntRegState.value  := intDebugRead.get._2
 
-    val difftestArchFpRegState = Module(new DifftestArchFpRegState)
-    difftestArchFpRegState.io.clock := clock
-    difftestArchFpRegState.io.coreid := io.hartId
-    difftestArchFpRegState.io.fpr := DelayN(fpDebugReadData.get, delayedCnt)
+    val difftestArchFpRegState = DifftestModule(new DiffArchFpRegState, delay = 2)
+    difftestArchFpRegState.clock  := clock
+    difftestArchFpRegState.coreid := io.hartId
+    difftestArchFpRegState.value  := fpDebugReadData.get
 
-    val difftestArchVecRegState = Module(new DifftestArchVecRegState)
-    difftestArchVecRegState.io.clock := clock
-    difftestArchVecRegState.io.coreid := io.hartId
-    difftestArchVecRegState.io.vpr := DelayN(vecDebugReadData.get, delayedCnt)
+    val difftestArchVecRegState = DifftestModule(new DiffArchVecRegState, delay = 2)
+    difftestArchVecRegState.clock  := clock
+    difftestArchVecRegState.coreid := io.hartId
+    difftestArchVecRegState.value  := vecDebugReadData.get
   }
 }
 

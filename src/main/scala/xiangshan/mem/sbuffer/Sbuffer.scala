@@ -711,15 +711,15 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   if (env.EnableDifftest) {
     // hit resp
     io.dcache.hit_resps.zipWithIndex.map{case (resp, index) => {
-      val difftest = Module(new DifftestSbufferEvent)
+      val difftest = DifftestModule(new DiffSbufferEvent, delay = 1)
       val dcache_resp_id = resp.bits.id
-      difftest.io.clock := clock
-      difftest.io.coreid := io.hartId
-      difftest.io.index := index.U
-      difftest.io.sbufferResp := RegNext(resp.fire())
-      difftest.io.sbufferAddr := RegNext(getAddr(ptag(dcache_resp_id)))
-      difftest.io.sbufferData := RegNext(data(dcache_resp_id).asTypeOf(Vec(CacheLineBytes, UInt(8.W))))
-      difftest.io.sbufferMask := RegNext(mask(dcache_resp_id).asUInt)
+      difftest.clock  := clock
+      difftest.coreid := io.hartId
+      difftest.index  := index.U
+      difftest.valid  := resp.fire()
+      difftest.addr   := getAddr(ptag(dcache_resp_id))
+      difftest.data   := data(dcache_resp_id).asTypeOf(Vec(CacheLineBytes, UInt(8.W)))
+      difftest.mask   := mask(dcache_resp_id).asUInt
     }}
   }
 
