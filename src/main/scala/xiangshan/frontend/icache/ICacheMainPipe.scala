@@ -19,7 +19,7 @@ package xiangshan.frontend.icache
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import difftest.DifftestRefillEvent
+import difftest._
 import freechips.rocketchip.tilelink.ClientStates
 import xiangshan._
 import xiangshan.cache.mmu._
@@ -106,7 +106,7 @@ class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
   val errors      = Output(Vec(PortNumber, new L1CacheErrorInfo))
   /*** outside interface ***/
   //val fetch       = Vec(PortNumber, new ICacheMainPipeBundle)
-  /* when ftq.valid is high in T + 1 cycle 
+  /* when ftq.valid is high in T + 1 cycle
    * the ftq component must be valid in T cycle
    */
   val fetch       = new ICacheMainPipeBundle
@@ -143,7 +143,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   //Ftq RegNext Register
   val fromFtqReq = fromFtq.bits.pcMemRead
-  
+
   /** pipeline control signal */
   val s1_ready, s2_ready = Wire(Bool())
   val s0_fire,  s1_fire , s2_fire  = Wire(Bool())
@@ -189,7 +189,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val ftq_req_to_itlb_doubleline  = s0_double_line.last
   val ftq_req_to_itlb_vaddr       = s0_req_vaddr.last
   val ftq_req_to_itlb_vset_idx    = s0_req_vsetIdx.last
-
 
   for(i <- 0 until partWayNum) {
     toData.valid                  := ftq_req_to_data_valid(i) && !missSwitchBit
@@ -380,14 +379,14 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   if (env.EnableDifftest) {
     (0 until PortNumber).foreach { i =>
-      val diffPIQ = Module(new DifftestRefillEvent)
-      diffPIQ.io.clock := clock
-      diffPIQ.io.coreid := io.hartId
-      diffPIQ.io.cacheid := (i + 7).U
-      if (i == 0) diffPIQ.io.valid := s1_fire && !s1_port_hit(i) && !s1_ipf_hit_latch(i) && s1_PIQ_hit(i) && !tlbExcp(0)
-      else diffPIQ.io.valid := s1_fire && !s1_port_hit(i) && !s1_ipf_hit_latch(i) && s1_PIQ_hit(i) && s1_double_line && !tlbExcp(0) && !tlbExcp(1)
-      diffPIQ.io.addr := s1_req_paddr(i)
-      diffPIQ.io.data := s1_PIQ_data(i).asTypeOf(diffPIQ.io.data)
+      val diffPIQ = DifftestModule(new DiffRefillEvent)
+      diffPIQ.clock := clock
+      diffPIQ.coreid := io.hartId
+      diffPIQ.index := (i + 7).U
+      if (i == 0) diffPIQ.valid := s1_fire && !s1_port_hit(i) && !s1_ipf_hit_latch(i) && s1_PIQ_hit(i) && !tlbExcp(0)
+      else diffPIQ.valid := s1_fire && !s1_port_hit(i) && !s1_ipf_hit_latch(i) && s1_PIQ_hit(i) && s1_double_line && !tlbExcp(0) && !tlbExcp(1)
+      diffPIQ.addr := s1_req_paddr(i)
+      diffPIQ.data := s1_PIQ_data(i).asTypeOf(diffPIQ.data)
     }
   }
 
@@ -594,9 +593,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   def waitSecondComeIn(missState: UInt): Bool = (missState === m_wait_sec_miss)
 
   def getMissSituat(slotNum : Int, missNum : Int ) :Bool =  {
-    RegNext(s1_fire) && 
-    RegNext(missSlot(slotNum).m_vSetIdx === s1_req_vsetIdx(missNum)) && 
-    RegNext(missSlot(slotNum).m_pTag  === s1_req_ptags(missNum)) && 
+    RegNext(s1_fire) &&
+    RegNext(missSlot(slotNum).m_vSetIdx === s1_req_vsetIdx(missNum)) &&
+    RegNext(missSlot(slotNum).m_pTag  === s1_req_ptags(missNum)) &&
     !s2_port_hit(missNum) && !s2_prefetch_hit(missNum) &&
     waitSecondComeIn(missStateQueue(slotNum))
   }
@@ -762,9 +761,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
 
   val miss_all_fix       =  wait_state === wait_finish
-                              
+
   s2_fetch_finish        := ((s2_valid && s2_fixed_hit) || miss_all_fix || hit_0_except_1_latch || except_0_latch)
-  
+
   /** update replacement status register: 0 is hit access/ 1 is miss access */
   (touch_ways zip touch_sets).zipWithIndex.map{ case((t_w,t_s), i) =>
     t_s(0)         := s2_req_vsetIdx(i)(highestIdxBit, 1)
@@ -857,26 +856,26 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
       discard
     }
     (0 until PortNumber).map { i =>
-      val diffMainPipeOut = Module(new DifftestRefillEvent)
-      diffMainPipeOut.io.clock := clock
-      diffMainPipeOut.io.coreid := io.hartId
-      diffMainPipeOut.io.cacheid := (4 + i).U
-      if (i == 0) diffMainPipeOut.io.valid := s2_fire && !discards(0)
-      else        diffMainPipeOut.io.valid := s2_fire && s2_double_line && !discards(0) && !discards(1)
-      diffMainPipeOut.io.addr := s2_req_paddr(i)
+      val diffMainPipeOut = DifftestModule(new DiffRefillEvent)
+      diffMainPipeOut.clock := clock
+      diffMainPipeOut.coreid := io.hartId
+      diffMainPipeOut.index := (4 + i).U
+      if (i == 0) diffMainPipeOut.valid := s2_fire && !discards(0)
+      else        diffMainPipeOut.valid := s2_fire && s2_double_line && !discards(0) && !discards(1)
+      diffMainPipeOut.addr := s2_req_paddr(i)
       when (toIFU(i).bits.select.asBool) {
-        diffMainPipeOut.io.data := toIFU(i).bits.sramData.asTypeOf(diffMainPipeOut.io.data)
+        diffMainPipeOut.data := toIFU(i).bits.sramData.asTypeOf(diffMainPipeOut.data)
       } .otherwise {
-        diffMainPipeOut.io.data := toIFU(i).bits.registerData.asTypeOf(diffMainPipeOut.io.data)
+        diffMainPipeOut.data := toIFU(i).bits.registerData.asTypeOf(diffMainPipeOut.data)
       }
       // idtfr: 1 -> data from icache 2 -> data from ipf 3 -> data from piq 4 -> data from missUnit
-      when (s2_port_hit(i)) { diffMainPipeOut.io.idtfr := 1.U }
+      when (s2_port_hit(i)) { diffMainPipeOut.idtfr := 1.U }
         .elsewhen(s2_prefetch_hit(i)) {
-          when (s2_prefetch_hit_in_ipf(i)) { diffMainPipeOut.io.idtfr := 2.U  }
-            .elsewhen(s2_prefetch_hit_in_piq(i)) { diffMainPipeOut.io.idtfr := 3.U }
+          when (s2_prefetch_hit_in_ipf(i)) { diffMainPipeOut.idtfr := 2.U  }
+            .elsewhen(s2_prefetch_hit_in_piq(i)) { diffMainPipeOut.idtfr := 3.U }
             .otherwise { XSWarn(true.B, "should not in this situation\n")}
         }
-        .otherwise { diffMainPipeOut.io.idtfr := 4.U }
+        .otherwise { diffMainPipeOut.idtfr := 4.U }
       diffMainPipeOut
     }
   }
