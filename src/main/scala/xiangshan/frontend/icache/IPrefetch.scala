@@ -26,8 +26,8 @@ import xiangshan.cache.mmu._
 import xiangshan.frontend._
 import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
 import huancun.PreferCacheKey
-import utility.ReqSourceKey
-import xiangshan.{MemReqSource, XSCoreParamsKey}
+import utility.{MemReqSource, ReqSourceKey}
+import xiangshan.XSCoreParamsKey
 import utility._
 
 
