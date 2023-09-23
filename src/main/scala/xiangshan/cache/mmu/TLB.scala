@@ -209,7 +209,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     // dynamic: superpage (or full-connected reg entries) -> check pmp when translation done
     // static: 4K pages (or sram entries) -> check pmp with pre-checked results
     val hasS2xlate = s2xlate =/= noS2xlate
-    val onlyS2 = s2xlate === onlyS2xlate
+    val onlyS2 = s2xlate === onlyStage2
     val af = perm.af || (hasS2xlate && g_perm.af)
 
     // Stage 1 perm check
