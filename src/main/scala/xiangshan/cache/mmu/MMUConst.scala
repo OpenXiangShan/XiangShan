@@ -83,7 +83,7 @@ trait HasTlbConst extends HasXSParameter {
   val offLen  = 12
   val ppnLen  = PAddrBits - offLen
   val vpnnLen = 9
-  val extendVpnnBits = 2
+  val extendVpnnBits = if (HasHExtension) 2 else 0
   val vpnLen  = VAddrBits - offLen // when opening H extention, vpnlen broaden two bits
   val flagLen = 8
   val pteResLen = XLEN - 44 - 2 - flagLen
@@ -188,7 +188,7 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val bPtwWidth = log2Up(PtwWidth)
   val bSourceWidth = log2Up(sourceWidth)
   // ptwl1: fully-associated
-  val PtwL1TagLen = vpnnLen + (if (HasHExtension) extendVpnnBits else 0)
+  val PtwL1TagLen = vpnnLen + extendVpnnBits
 
   /* +-------+----------+-------------+
    * |  Tag  |  SetIdx  |  SectorIdx  |
@@ -201,7 +201,7 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val PtwL2IdxLen = log2Up(PtwL2SetNum * PtwL2SectorSize)
   val PtwL2SectorIdxLen = log2Up(PtwL2SectorSize)
   val PtwL2SetIdxLen = log2Up(PtwL2SetNum)
-  val PtwL2TagLen = vpnnLen * 2 - PtwL2IdxLen + (if (HasHExtension) extendVpnnBits else 0)
+  val PtwL2TagLen = vpnnLen * 2 - PtwL2IdxLen + extendVpnnBits
 
   // ptwl3: 16-way group-associated
   val l2tlbParams.l3nWays = l2tlbParams.l3nWays
@@ -210,10 +210,10 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val PtwL3IdxLen = log2Up(PtwL3SetNum * PtwL3SectorSize)
   val PtwL3SectorIdxLen = log2Up(PtwL3SectorSize)
   val PtwL3SetIdxLen = log2Up(PtwL3SetNum)
-  val PtwL3TagLen = vpnnLen * 3 - PtwL3IdxLen + (if (HasHExtension) extendVpnnBits else 0)
+  val PtwL3TagLen = vpnnLen * 3 - PtwL3IdxLen + extendVpnnBits
 
   // super page, including 1GB and 2MB page
-  val SPTagLen = vpnnLen * 2 + (if (HasHExtension) extendVpnnBits else 0)
+  val SPTagLen = vpnnLen * 2 + extendVpnnBits
 
   // miss queue
   val MissQueueSize = l2tlbParams.ifilterSize + l2tlbParams.dfilterSize
