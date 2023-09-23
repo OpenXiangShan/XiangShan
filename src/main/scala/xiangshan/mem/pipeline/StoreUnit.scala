@@ -105,7 +105,9 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   io.tlb.req.bits.debug.pc           := s0_pc
   io.tlb.req.bits.debug.isFirstIssue := s0_isFirstIssue
   io.tlb.req_kill                    := false.B
-
+  io.tlb.req.bits.hyperinst          := LSUOpType.isHsv(s0_in.uop.ctrl.fuOpType)
+  io.tlb.req.bits.hlvx               := false.B
+  
   // Dcache access here: not **real** dcache write
   // just read meta and tag in dcache, to find out the store will hit or miss
 
