@@ -92,6 +92,7 @@ class Fence(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.out.bits.ctrl.flushPipe.get := uop.ctrl.flushPipe.get
   io.out.bits.ctrl.exceptionVec.get := 0.U.asTypeOf(io.out.bits.ctrl.exceptionVec.get)
   io.out.bits.ctrl.exceptionVec.get(illegalInstr) := func === FenceOpType.sfence && disableSfence
+  io.out.bits.perfDebugInfo := io.in.bits.perfDebugInfo
 
   XSDebug(io.in.valid, p"In(${io.in.valid} ${io.in.ready}) state:${state} Inpc:0x${Hexadecimal(io.in.bits.data.pc.get)} InrobIdx:${io.in.bits.ctrl.robIdx}\n")
   XSDebug(state =/= s_idle, p"state:${state} sbuffer(flush:${sbuffer} empty:${sbEmpty}) fencei:${fencei} sfence:${sfence}\n")

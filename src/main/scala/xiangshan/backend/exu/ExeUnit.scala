@@ -141,6 +141,7 @@ class ExeUnitImp(
       sink.bits.ctrl.predictInfo .foreach(x => x := source.bits.predictInfo.get)
       sink.bits.ctrl.fpu         .foreach(x => x := source.bits.fpu.get)
       sink.bits.ctrl.vpu         .foreach(x => x := source.bits.vpu.get)
+      sink.bits.perfDebugInfo    := source.bits.perfDebugInfo
   }
 
   private val fuOutValidOH = funcUnits.map(_.io.out.valid)
@@ -184,7 +185,7 @@ class ExeUnitImp(
   // debug info
   io.out.bits.debug     := 0.U.asTypeOf(io.out.bits.debug)
   io.out.bits.debug.isPerfCnt := funcUnits.map(_.io.csrio.map(_.isPerfCnt)).map(_.getOrElse(false.B)).reduce(_ || _)
-  io.out.bits.debugInfo := 0.U.asTypeOf(io.out.bits.debugInfo)
+  io.out.bits.debugInfo := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.perfDebugInfo))
 }
 
 class DispatcherIO[T <: Data](private val gen: T, n: Int) extends Bundle {
@@ -230,6 +231,7 @@ class MemExeUnit(exuParams: ExeUnitParams)(implicit p: Parameters) extends XSMod
   fu.io.in.bits.ctrl.fuOpType  := io.in.bits.uop.fuOpType
   fu.io.in.bits.data.imm       := io.in.bits.uop.imm
   fu.io.in.bits.data.src.zip(io.in.bits.src).foreach(x => x._1 := x._2)
+  fu.io.in.bits.perfDebugInfo := io.in.bits.uop.debugInfo
 
   io.out.valid            := fu.io.out.valid
   fu.io.out.ready         := io.out.ready
@@ -241,6 +243,7 @@ class MemExeUnit(exuParams: ExeUnitParams)(implicit p: Parameters) extends XSMod
   io.out.bits.uop.fuType  := io.in.bits.uop.fuType
   io.out.bits.uop.fuOpType:= io.in.bits.uop.fuOpType
   io.out.bits.uop.sqIdx   := io.in.bits.uop.sqIdx
+  io.out.bits.uop.debugInfo := fu.io.out.bits.perfDebugInfo
 
   io.out.bits.debug       := 0.U.asTypeOf(io.out.bits.debug)
 }

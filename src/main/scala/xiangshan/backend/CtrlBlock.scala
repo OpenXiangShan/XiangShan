@@ -115,6 +115,7 @@ class CtrlBlockImp(
     val delayed = Wire(Valid(new ExuOutput(x.bits.params)))
     delayed.valid := RegNext(valid && !killedByOlder)
     delayed.bits := RegEnable(x.bits, x.valid)
+    delayed.bits.debugInfo.writebackTime := GTimer()
     delayed
   })
 

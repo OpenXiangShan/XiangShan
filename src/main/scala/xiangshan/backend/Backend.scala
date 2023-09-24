@@ -352,7 +352,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     sink.bits.flushPipe.foreach(_ := source.bits.uop.flushPipe)
     sink.bits.replay.foreach(_ := source.bits.uop.replayInst)
     sink.bits.debug := source.bits.debug
-    sink.bits.debugInfo := 0.U.asTypeOf(sink.bits.debugInfo)
+    sink.bits.debugInfo := source.bits.uop.debugInfo
     sink.bits.lqIdx.foreach(_ := source.bits.uop.lqIdx)
     sink.bits.sqIdx.foreach(_ := source.bits.uop.sqIdx)
     sink.bits.ftqIdx.foreach(_ := source.bits.uop.ftqPtr)
@@ -416,6 +416,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     sink.bits.uop.sqIdx     := source.bits.sqIdx.getOrElse(0.U.asTypeOf(new SqPtr))
     sink.bits.uop.ftqPtr    := source.bits.ftqIdx.getOrElse(0.U.asTypeOf(new FtqPtr))
     sink.bits.uop.ftqOffset := source.bits.ftqOffset.getOrElse(0.U)
+    sink.bits.uop.debugInfo := source.bits.perfDebugInfo
   }
   io.mem.loadFastMatch := memScheduler.io.toMem.get.loadFastMatch.map(_.fastMatch)
   io.mem.loadFastImm := memScheduler.io.toMem.get.loadFastMatch.map(_.fastImm)
