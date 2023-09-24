@@ -66,11 +66,13 @@ class FuncUnitDataOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle
 class FuncUnitInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val ctrl = new FuncUnitCtrlInput(cfg)
   val data = new FuncUnitDataInput(cfg)
+  val perfDebugInfo = new PerfDebugInfo()
 }
 
 class FuncUnitOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val ctrl = new FuncUnitCtrlOutput(cfg)
   val res = new FuncUnitDataOutput(cfg)
+  val perfDebugInfo = new PerfDebugInfo()
 }
 
 class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
@@ -96,6 +98,7 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
     io.out.bits.ctrl.preDecode.foreach(_ := DataHoldBypass(io.in.bits.ctrl.preDecode.get, io.in.fire))
     io.out.bits.ctrl.fpu      .foreach(_ := DataHoldBypass(io.in.bits.ctrl.fpu.get, io.in.fire))
     io.out.bits.ctrl.vpu      .foreach(_ := DataHoldBypass(io.in.bits.ctrl.vpu.get, io.in.fire))
+    io.out.bits.perfDebugInfo := DataHoldBypass(io.in.bits.perfDebugInfo, io.in.fire)
   }
 }
 
@@ -111,6 +114,7 @@ trait HasPipelineReg { this: FuncUnit =>
   val rdyVec = Seq.fill(latency)(Wire(Bool())) :+ io.out.ready
   val ctrlVec = io.in.bits.ctrl +: Seq.fill(latency)(Reg(chiselTypeOf(io.in.bits.ctrl)))
   val dataVec = io.in.bits.data +: Seq.fill(latency)(Reg(chiselTypeOf(io.in.bits.data)))
+  val perfVec = io.in.bits.perfDebugInfo +: Seq.fill(latency)(Reg(chiselTypeOf(io.in.bits.perfDebugInfo)))
 
   val robIdxVec = ctrlVec.map(_.robIdx)
   val pcVec = dataVec.map(_.pc)
@@ -127,6 +131,7 @@ trait HasPipelineReg { this: FuncUnit =>
       validVec(i) := validVec(i - 1)
       ctrlVec(i) := ctrlVec(i - 1)
       dataVec(i) := dataVec(i - 1)
+      perfVec(i) := perfVec(i - 1)
     }.elsewhen(flushVec(i) || rdyVec(i)) {
       validVec(i) := false.B
     }
@@ -143,6 +148,7 @@ trait HasPipelineReg { this: FuncUnit =>
   io.out.bits.ctrl.vecWen.foreach(_ := ctrlVec.last.vecWen.get)
   io.out.bits.ctrl.fpu.foreach(_ := ctrlVec.last.fpu.get)
   io.out.bits.ctrl.vpu.foreach(_ := ctrlVec.last.vpu.get)
+  io.out.bits.perfDebugInfo := perfVec.last
 
   // vstart illegal
   if (cfg.exceptionOut.nonEmpty) {

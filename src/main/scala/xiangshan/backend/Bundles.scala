@@ -458,6 +458,8 @@ object Bundles {
     val loadDependency = OptionWrapper(params.isIQWakeUpSink, Vec(LoadPipelineWidth, UInt(3.W)))
     val deqPortIdx = OptionWrapper(params.hasLoadFu, UInt(log2Ceil(LoadPipelineWidth).W))
 
+    val perfDebugInfo = new PerfDebugInfo()
+
     def exuIdx = this.params.exuIdx
 
     def needCancel(og0CancelVec: Vec[Bool], og1CancelVec: Vec[Bool]) : Bool = {

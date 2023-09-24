@@ -4,7 +4,7 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import utility.HasCircularQueuePtrHelper
+import utility.{GTimer, HasCircularQueuePtrHelper}
 import utils._
 import xiangshan._
 import xiangshan.backend.Bundles._
@@ -244,6 +244,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         enq.bits.status.psrc(j) := s0_enqBits(i).psrc(j)
         enq.bits.status.srcType(j) := s0_enqBits(i).srcType(j)
         enq.bits.status.dataSources(j).value := Mux(wakeupEnqSrcStateBypassFromIQ(i)(j).asBool, DataSource.forward, s0_enqBits(i).dataSource(j).value)
+        enq.bits.payload.debugInfo.enqRsTime := GTimer()
       }
       enq.bits.status.fuType := s0_enqBits(i).fuType
       enq.bits.status.robIdx := s0_enqBits(i).robIdx
@@ -540,6 +541,10 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     when (SrcType.isImm(deqEntryVec(i).bits.payload.srcType(0)) && deqEntryVec(i).bits.payload.fuType === FuType.ldu.U) {
       deq.bits.common.imm := Imm_LUI_LOAD().getLuiImm(deqEntryVec(i).bits.payload)
     }
+
+    deq.bits.common.perfDebugInfo := deqEntryVec(i).bits.payload.debugInfo
+    deq.bits.common.perfDebugInfo.selectTime := GTimer()
+    deq.bits.common.perfDebugInfo.issueTime := GTimer() + 1.U
   }
 
   private val ldCancels = io.fromCancelNetwork.map(in =>
