@@ -83,6 +83,7 @@ object FuType {
 
   val functionNameMap = Map(
     jmp -> "jmp",
+    brh -> "brh",
     i2f -> "int_to_float",
     csr -> "csr",
     alu -> "alu",
