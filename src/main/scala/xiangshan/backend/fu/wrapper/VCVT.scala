@@ -6,12 +6,8 @@ import chisel3.util._
 import chisel3.util.experimental.decode._
 import utils.XSError
 import xiangshan.backend.fu.FuConfig
-import xiangshan.backend.fu.vector.Bundles.{VSew, ma}
-import xiangshan.backend.fu.vector.utils.VecDataSplitModule
 import xiangshan.backend.fu.vector.{Mgu, VecPipedFuncUnit}
 import yunsuan.VfpuType
-import yunsuan.VfmaType
-import yunsuan.vector.VectorFloatFMA
 
 
 class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) {
@@ -27,9 +23,6 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   private val sew = vsew
   private val rm = frm
   private val lmul = vlmul // -3->3 => 1/8 ->8
-
-  private val needNoMask = outVecCtrl.fpu.isFpToVecInst
-  val maskToMgu = Mux(needNoMask, allMaskTrue, outSrcMask)
 
   val widen = opcode(4, 3) // 0->single 1->widen 2->norrow => width of result
   val isSingleCvt = !widen(1) & !widen(0)
@@ -59,7 +52,10 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   )
   dontTouch(output1H)
   val outputWidth1H = output1H
-  val outEew = Mux1H(output1H, Seq(0,1,2,3).map(i => i.U))
+
+  val outEew = RegNext(RegNext(Mux1H(output1H, Seq(0,1,2,3).map(i => i.U))))
+  private val needNoMask = outVecCtrl.fpu.isFpToVecInst
+  val maskToMgu = Mux(needNoMask, allMaskTrue, outSrcMask)
 
   // modules
   private val vfcvt = Module(new VectorCvtTop(dataWidth, dataWidthOfDataModule))
@@ -81,18 +77,20 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
 
   /** fflags:
    */
-  //uopidx：每一个uopidex对应的元素的个数以及对应的mask的位置
+  //uopidx：每一个uopidex:都有相应的元素个数以及对应的mask的位置
   //vl: 决定每个向量寄存器组里有多少个元素参与运算
-  //  // = 128/(sew+1)*8
-  //  val num = 8.U >> sew
-  //  val eNum = Mux(isWiden || isNorrow , num, num << 1).asUInt //每个uopidx的向量元素的个数
+  //  128/(sew+1)*8
+  //  val num = 16.U >> sew
+  //  val eNum = Mux(isWiden || isNorrow , num, num >> 1).asUInt //每个uopidx的向量元素的个数
   // num of vector element in each uopidx
+
   // 每个uopidx最大的元素个数，即一个向量寄存器所能容纳的Max(inwidth, outwidth)的元素的个数
   // single/narrow的话是一个向量寄存器所容纳输入元素的个数， widen的话是是一个向量寄存器输出元素的的个数
+  // todo: 为什么用4bit，虽然一个Vector reg中的元素个数至少是2，但是存在lmul=1/2时 64->64的single，方便下面计算eNum的max(可能为1)
   val eNum1H = chisel3.util.experimental.decode.decoder(sew ## (isWidenCvt || isNarrowCvt),
     TruthTable(
       Seq(                     // 8, 4, 2, 1
-        BitPat("b000") -> BitPat("b1000"), //8
+        BitPat("b000") -> BitPat("b1000"), //8,
         BitPat("b001") -> BitPat("b1000"), //8
         BitPat("b010") -> BitPat("b1000"), //8
         BitPat("b011") -> BitPat("b0100"), //4
@@ -105,7 +103,7 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
     )
   )
   val eNumMax1H = Mux(lmul.head(1).asBool, eNum1H >> ((~lmul.tail(1)).asUInt +1.U), eNum1H.tail(1) << lmul).asUInt(6, 0)
-  val eNumMax = Mux1H(eNumMax1H, Seq(1,2,4,8,16,32,64).map(i => i.U))
+  val eNumMax = Mux1H(eNumMax1H, Seq(1,2,4,8,16,32,64).map(i => i.U)) //only for cvt intr, don't exist 128 in cvt
   val eNumEffect = Mux(vl > eNumMax, eNumMax, vl)
   val fflagsAll = Vec(8, UInt(5.W))
   fflagsAll := vfcvtFflags.asTypeOf(fflagsAll)
@@ -139,11 +137,10 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   mgu.io.in.info.eew := outEew
   mgu.io.in.info.vsew := outVecCtrl.vsew
   mgu.io.in.info.vdIdx := outVecCtrl.vuopIdx
-  mgu.io.in.info.narrow := isNarrowCvt
+  mgu.io.in.info.narrow := RegNext(RegNext(isNarrowCvt))
   mgu.io.in.info.dstMask := outVecCtrl.isDstMask
 
-  io.out.bits.res.data := mgu.io.out.vd //最终结果
-
+  io.out.bits.res.data := mgu.io.out.vd
 }
 
 //according to uopindex, 1: high64 0:low64
@@ -183,17 +180,17 @@ class VectorCvtTop(vlen :Int, xlen: Int) extends Module{
   vectorCvt1.rm := rm
 
   val isNarrowCycle2 = RegNext(RegNext(isNarrow))
-  val outputWidth1H = RegNext(RegNext(outputWidth1H))
+  val outputWidth1HCycle2 = RegNext(RegNext(outputWidth1H))
 
   //cycle2
-  result := Mux(isNarrow,
+  result := Mux(isNarrowCycle2,
     vectorCvt1.io.result.tail(32) ## vectorCvt0.io.result.tail(32),
     vectorCvt1.io.result ## vectorCvt1.io.result)
 
-  fflags := Mux1H(outputWidth1H, Seq( // todo: map between fflags and result
+  fflags := Mux1H(outputWidth1HCycle2, Seq( // todo: map between fflags and result
     vectorCvt1.io.fflags ## vectorCvt0.io.fflags,
-    Mux(isNorrow, vectorCvt1.io.fflags.tail(10) ## vectorCvt0.io.fflags.tail(10), vectorCvt1.io.fflags ## vectorCvt0.io.fflags),
-    Mux(isNorrow, vectorCvt1.io.fflags(4,0) ## vectorCvt0.io.fflags(4,0), vectorCvt1.io.fflags.tail(10) ## vectorCvt0.io.fflags.tail(10)),
+    Mux(isNarrowCycle2, vectorCvt1.io.fflags.tail(10) ## vectorCvt0.io.fflags.tail(10), vectorCvt1.io.fflags ## vectorCvt0.io.fflags),
+    Mux(isNarrowCycle2, vectorCvt1.io.fflags(4,0) ## vectorCvt0.io.fflags(4,0), vectorCvt1.io.fflags.tail(10) ## vectorCvt0.io.fflags.tail(10)),
     vectorCvt1.io.fflags(4,0) ## vectorCvt0.io.fflags(4,0)
   ))
 }
