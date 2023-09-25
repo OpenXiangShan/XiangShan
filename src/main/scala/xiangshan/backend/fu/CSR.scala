@@ -1339,7 +1339,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   // Always instantiate basic difftest modules.
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
     val difftest = DifftestModule(new DiffArchEvent, delay = 3, dontCare = true)
-    difftest.clock       := clock
     difftest.coreid      := csrio.hartId
     difftest.valid       := csrio.exception.valid
     difftest.interrupt   := Mux(raiseIntr, causeNO, 0.U)
@@ -1353,7 +1352,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   // Always instantiate basic difftest modules.
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
     val difftest = DifftestModule(new DiffCSRState)
-    difftest.clock := clock
     difftest.coreid := csrio.hartId
     difftest.priviledgeMode := priviledgeMode
     difftest.mstatus := mstatus
@@ -1377,7 +1375,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   if(env.AlwaysBasicDiff || env.EnableDifftest) {
     val difftest = DifftestModule(new DiffDebugMode)
-    difftest.clock := clock
     difftest.coreid := csrio.hartId
     difftest.debugMode := debugMode
     difftest.dcsr := dcsr
@@ -1388,7 +1385,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
     val difftest = DifftestModule(new DiffVecCSRState)
-    difftest.clock := clock
     difftest.coreid := csrio.hartId
     difftest.vstart := vstart
     difftest.vxsat := vcsr.asTypeOf(new VcsrStruct).vxsat

@@ -418,8 +418,7 @@ class PrefetchBuffer(implicit p: Parameters) extends IPrefetchModule
   }
 
   if (env.EnableDifftest) {
-    val difftest = DifftestModule(new DiffRefillEvent)
-    difftest.clock   := clock
+    val difftest = DifftestModule(new DiffRefillEvent, dontCare = true)
     difftest.coreid  := io.hartId
     difftest.index   := 6.U
     difftest.valid   := io.move.meta_write.fire

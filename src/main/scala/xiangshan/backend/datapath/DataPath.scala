@@ -426,17 +426,14 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
     val delayedCnt = 2
     val difftestArchIntRegState = DifftestModule(new DiffArchIntRegState, delay = 2)
-    difftestArchIntRegState.clock  := clock
     difftestArchIntRegState.coreid := io.hartId
     difftestArchIntRegState.value  := intDebugRead.get._2
 
     val difftestArchFpRegState = DifftestModule(new DiffArchFpRegState, delay = 2)
-    difftestArchFpRegState.clock  := clock
     difftestArchFpRegState.coreid := io.hartId
     difftestArchFpRegState.value  := fpDebugReadData.get
 
     val difftestArchVecRegState = DifftestModule(new DiffArchVecRegState, delay = 2)
-    difftestArchVecRegState.clock  := clock
     difftestArchVecRegState.coreid := io.hartId
     difftestArchVecRegState.value  := vecDebugReadData.get
   }

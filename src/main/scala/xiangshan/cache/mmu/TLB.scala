@@ -323,7 +323,6 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       val pf = io.requestor(i).resp.bits.excp(0).pf.instr || io.requestor(i).resp.bits.excp(0).pf.st || io.requestor(i).resp.bits.excp(0).pf.ld
       val af = io.requestor(i).resp.bits.excp(0).af.instr || io.requestor(i).resp.bits.excp(0).af.st || io.requestor(i).resp.bits.excp(0).af.ld
       val difftest = DifftestModule(new DiffL1TLBEvent)
-      difftest.clock := clock
       difftest.coreid := p(XSCoreParamsKey).HartId.asUInt
       difftest.valid := RegNext(io.requestor(i).req.fire) && !RegNext(io.requestor(i).req_kill) && io.requestor(i).resp.fire && !io.requestor(i).resp.bits.miss && !pf && !af && portTranslateEnable(i)
       if (!Seq("itlb", "ldtlb", "sttlb").contains(q.name)) {

@@ -689,25 +689,6 @@ package object xiangshan {
       partialSelect(vec, fuConfig.exceptionOut)
   }
 
-  // indicates where the memory access request comes from
-  // a dupliacte of this is in HuanCun.common and CoupledL2.common
-  // TODO: consider moving it to Utility, so that they could share the same definition
-  object MemReqSource extends Enumeration {
-    val NoWhere = Value("NoWhere")
-
-    val CPUInst = Value("CPUInst")
-    val CPULoadData = Value("CPULoadData")
-    val CPUStoreData = Value("CPUStoreData")
-    val CPUAtomicData = Value("CPUAtomicData")
-    val L1InstPrefetch = Value("L1InstPrefetch")
-    val L1DataPrefetch = Value("L1DataPrefetch")
-    val PTW = Value("PTW")
-    val L2Prefetch = Value("L2Prefetch")
-    val ReqSourceCount = Value("ReqSourceCount")
-
-    val reqSourceBits = log2Ceil(ReqSourceCount.id)
-  }
-
   object TopDownCounters extends Enumeration {
     val NoStall = Value("NoStall") // Base
     // frontend

@@ -755,7 +755,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       val wdata = sbufferData & MaskExpand(sbufferMask)
 
       val difftest = DifftestModule(new DiffStoreEvent, delay = 2)
-      difftest.clock  := clock
       difftest.coreid := io.hartId
       difftest.index  := i.U
       difftest.valid  := storeCommit

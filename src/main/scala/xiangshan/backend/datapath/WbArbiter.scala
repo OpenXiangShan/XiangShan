@@ -211,7 +211,6 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
   if (env.EnableDifftest || env.AlwaysBasicDiff) {
     intWbArbiterOut.foreach(out => {
       val difftest = DifftestModule(new DiffIntWriteback(coreParams.NRPhyRegs))
-      difftest.clock   := clock
       difftest.coreid  := io.fromTop.hartId
       difftest.valid   := out.fire && out.bits.rfWen
       difftest.address := out.bits.pdest
@@ -222,7 +221,6 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
   if (env.EnableDifftest || env.AlwaysBasicDiff) {
     vfWbArbiterOut.foreach(out => {
       val difftest = DifftestModule(new DiffFpWriteback(coreParams.NRPhyRegs))
-      difftest.clock   := clock
       difftest.coreid  := io.fromTop.hartId
       difftest.valid   := out.fire // all fp instr will write fp rf
       difftest.address := out.bits.pdest
