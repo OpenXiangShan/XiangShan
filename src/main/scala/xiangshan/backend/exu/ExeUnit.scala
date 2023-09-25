@@ -125,7 +125,9 @@ object ExeUnitDef {
       case JumpExeUnitCfg => defMap.getOrElseUpdate(cfg, Definition(new JumpExeUnit))
       case AluExeUnitCfg => defMap.getOrElseUpdate(cfg, Definition(new AluExeUnit))
       case MulDivExeUnitCfg => defMap.getOrElseUpdate(cfg, Definition(new MulDivExeUnit))
-      case JumpCSRExeUnitCfg => defMap.getOrElseUpdate(cfg, Definition(new JumpCSRExeUnit))
+      // TODO: CSR should also use instance. We need to fix difftest.
+      // We should not call DifftestModule in Definition/Instance for now.
+      case JumpCSRExeUnitCfg => Definition(new JumpCSRExeUnit)
       case FmacExeUnitCfg => defMap.getOrElseUpdate(cfg, Definition(new FmacExeUnit))
       case FmiscExeUnitCfg => defMap.getOrElseUpdate(cfg, Definition(new FmiscExeUnit))
       case StdExeUnitCfg => defMap.getOrElseUpdate(cfg, Definition(new StdExeUnit))
@@ -136,4 +138,3 @@ object ExeUnitDef {
     }
   }
 }
-
