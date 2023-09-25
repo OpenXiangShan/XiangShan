@@ -82,16 +82,29 @@ object XSPerfHistogram extends HasRegularPerfName {
 
       val sum = RegInit(0.U(64.W)).suggestName(perfName + "Sum")
       val nSamples = RegInit(0.U(64.W)).suggestName(perfName + "NSamples")
+      val underflow = RegInit(0.U(64.W)).suggestName(perfName + "Underflow")
+      val overflow = RegInit(0.U(64.W)).suggestName(perfName + "Overflow")
       when (perfClean) {
         sum := 0.U
         nSamples := 0.U
+        underflow := 0.U
+        overflow := 0.U
       } .elsewhen (enable) {
         sum := sum + perfCnt
         nSamples := nSamples + 1.U
+        when (perfCnt < start.U) {
+          underflow := underflow + 1.U
+        }
+        when (perfCnt >= stop.U) {
+          overflow := overflow + 1.U
+        }
       }
 
       when (perfDump) {
         XSPerfPrint(p"${perfName}_mean, ${sum/nSamples}\n")(helper.io)
+        XSPerfPrint(p"${perfName}_sampled, ${nSamples}\n")(helper.io)
+        XSPerfPrint(p"${perfName}_underflow, ${underflow}\n")(helper.io)
+        XSPerfPrint(p"${perfName}_overflow, ${overflow}\n")(helper.io)
       }
       
       // drop each perfCnt value into a bin
