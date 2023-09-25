@@ -269,6 +269,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   io.cpu_halt := ctrlBlock.io.cpu_halt
 
   outer.wbArbiter.module.io.redirect <> ctrlBlock.io.redirect
+  // TODO
   val allWriteback = exuBlocks.flatMap(_.io.fuWriteback) ++ memBlock.io.mem_to_ooo.writeback ++ memBlock.io.mem_to_ooo.vecWriteback
   // TODO: Backend for VLSU, fix it
   // Now vector store insts have vecsta and vecstd, but will writeback vecsta and vecstd together

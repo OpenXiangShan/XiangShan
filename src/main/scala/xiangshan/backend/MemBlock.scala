@@ -91,7 +91,7 @@ class mem_to_ooo(implicit p: Parameters ) extends XSBundle{
   }
   val writeback = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, DecoupledIO(new ExuOutput))
   // TODO: VLSU, implement writeback and feedback
-  val vecWriteback = Vec(exuParameters.VlCnt + exuParameters.VsCnt, DecoupledIO(new ExuOutput(isVpu = true)))
+  val vecWriteback = Vec(exuParameters.VlCnt + exuParameters.VsCnt, DecoupledIO(new ExuOutput))
   val vecfeedback = Vec(exuParameters.VlCnt + exuParameters.VsCnt, ValidIO(Bool()))
 }
 
@@ -705,6 +705,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   lsq.io.rob.pendingst           := io.ooo_to_mem.lsqio.pendingst
   lsq.io.rob.commit              := io.ooo_to_mem.lsqio.commit
   lsq.io.rob.pendingPtr          := io.ooo_to_mem.lsqio.pendingPtr
+  lsq.io.rob.pendingPtrNext      := io.ooo_to_mem.lsqio.pendingPtrNext
 
 //  lsq.io.rob            <> io.lsqio.rob
   lsq.io.enq            <> io.ooo_to_mem.enqLsq

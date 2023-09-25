@@ -606,6 +606,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s1_fire       = s1_valid && !s1_kill && s1_can_go
   val s1_exp        = RegEnable(s0_out.exp, true.B, s0_fire)
   val s1_isvec      = RegEnable(s0_out.isvec, false.B, s0_fire)
+  val s1_vec_alignedType = RegEnable(io.vecldin.bits.alignedType, s0_fire)
 
   s1_ready := !s1_valid || s1_kill || s2_ready
   when (s0_fire) { s1_valid := true.B }
@@ -780,6 +781,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_fire   = s2_valid && !s2_kill && s2_can_go
   val s2_exp    = RegEnable(s1_out.exp, true.B, s1_fire)
   val s2_isvec  = RegEnable(s1_out.isvec, false.B, s1_fire)
+  val s2_vec_alignedType = RegEnable(s1_vec_alignedType, s1_fire)
 
   s2_kill := s2_in.uop.robIdx.needFlush(io.redirect)
   s2_ready := !s2_valid || s2_kill || s3_ready
@@ -1055,6 +1057,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_kill         = s3_in.uop.robIdx.needFlush(io.redirect)
   val s3_exp          = RegEnable(s2_out.exp, true.B, s2_fire)
   val s3_isvec        = RegEnable(s2_out.isvec, false.B, s2_fire)
+  val s3_vec_alignedType = RegEnable(s2_vec_alignedType, s2_fire)
   s3_ready := !s3_valid || s3_kill || io.ldout.ready
 
   // forwrad last beat
@@ -1141,7 +1144,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_vecout.exp               := s3_exp
   s3_vecout.is_first_ele      := s3_in.is_first_ele
   // TODO: VLSU, fix it!
-  // s3_vecout.uopQueuePtr       := s3_in.uopQueuePtr
+  s3_vecout.uopQueuePtr       := DontCare // uopQueuePtr is already saved in flow queue
   s3_vecout.flowPtr      := s3_in.flowPtr
   s3_vecout.exp_ele_index     := 0.U
 
@@ -1235,7 +1238,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   io.vecldout.bits.vec := s3_vecout
   // TODO: VLSU, uncache data logic
-  io.vecldout.bits.vec.vecdata := s3_merged_data_frm_cache
+  val vecdata = rdataVecHelper(s3_vec_alignedType, s3_picked_data_frm_cache)
+  io.vecldout.bits.vec.vecdata := vecdata
   io.vecldout.bits.data := 0.U
   io.vecldout.bits.fflags := s3_out.bits.fflags
   io.vecldout.bits.redirectValid := s3_out.bits.redirectValid

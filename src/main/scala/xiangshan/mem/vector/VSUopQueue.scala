@@ -36,6 +36,19 @@ object VsUopPtr {
   }
 }
 
+object GenVSData extends VLSUConstants {
+  def apply(data: UInt, elemIdx: UInt, alignedType: UInt): UInt = {
+    LookupTree(alignedType, List(
+      "b00".U -> ZeroExt(LookupTree(elemIdx(3, 0), List.tabulate(VLEN/8)(i => i.U -> getByte(data, i))), VLEN),
+      "b01".U -> ZeroExt(LookupTree(elemIdx(2, 0), List.tabulate(VLEN/16)(i => i.U -> getHalfWord(data, i))), VLEN),
+      "b10".U -> ZeroExt(LookupTree(elemIdx(1, 0), List.tabulate(VLEN/32)(i => i.U -> getWord(data, i))), VLEN),
+      "b11".U -> ZeroExt(LookupTree(elemIdx(0), List.tabulate(VLEN/64)(i => i.U -> getDoubleWord(data, i))), VLEN)
+    ))
+  }
+}
+
+class VsuopBundle(implicit p: Parameters) extends VecUopBundle
+
 class VsUopQueueIOBundle (implicit p: Parameters) extends XSBundle {
   val redirect = Flipped(ValidIO(new Redirect))
   val storeIn  = Flipped(Decoupled(new ExuInput(isVpu = true)))
@@ -43,110 +56,256 @@ class VsUopQueueIOBundle (implicit p: Parameters) extends XSBundle {
   val flowWriteback = Vec(VecStorePipelineWidth, Flipped(DecoupledIO(new VecStoreExuOutput())))
   val uopWriteback = DecoupledIO(new ExuOutput(isVpu = true))
 }
-class VsUopQueue(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
+class VsUopQueue(implicit p: Parameters) extends VLSUModule {
   val io = IO(new VsUopQueueIOBundle())
 
   println("StoreUopQueue: size:" + VsUopSize)
+  val flowIssueWidth = io.flowIssue.length
+  val flowWritebackWidth = io.flowWriteback.length
+
+  val uopq = Reg(Vec(VsUopSize, new VsuopBundle))
+  val valid = RegInit(VecInit(Seq.fill(VsUopSize)(false.B)))
+  val finish = RegInit(VecInit(Seq.fill(VsUopSize)(false.B)))
+  val exception = RegInit(VecInit(Seq.fill(VsUopSize)(false.B)))
+  val vstart = RegInit(VecInit(Seq.fill(VsUopSize)(0.U(elemIdxBits.W))))
+
+  val enqPtr = RegInit(0.U.asTypeOf(new VsUopPtr))
+  val deqPtr = RegInit(0.U.asTypeOf(new VsUopPtr))
+  val flowSplitPtr = RegInit(0.U.asTypeOf(new VsUopPtr))
+  val flowSplitIdx = RegInit(VecInit((0 until flowIssueWidth).map(_.U(flowIdxBits.W))))
+
+  val full = isFull(enqPtr, deqPtr)
 
   /**
-    * TODO @zlj
+    * Redirect
     */
-  io <> DontCare
+  val flushVec = valid.zip(uopq).map { case (v, entry) => v && entry.uop.robIdx.needFlush(io.redirect) }
+  val flushEnq = io.storeIn.fire() && io.storeIn.bits.uop.robIdx.needFlush(io.redirect)
+  val flushNumReg = RegNext(PopCount(flushEnq +: flushVec))
+  val redirectReg = RegNext(io.redirect)
 
-  // val valid = RegInit(VecInit(Seq.fill(VsUopSize)(false.B)))
-  // val vsUopEntry = Reg(Vec(VsUopSize,new Uop2Flow()))
+  /**
+    * Enqueue and decode logic
+    */
+  val decode = Wire(new VecDecode())
+  decode.apply(io.storeIn.bits.uop.cf.instr)
+  val vtype = io.storeIn.bits.uop.ctrl.vconfig.vtype
+  val sew = vtype.vsew
+  val eew = decode.uop_eew
+  val lmul = vtype.vlmul
+  val emul = EewLog2(eew) - sew + lmul
+  
+  when (io.storeIn.fire()) {
+    val id = enqPtr.value
+    val isSegment = decode.uop_segment_num =/= 0.U && !decode.uop_unit_stride_whole_reg
+    val instType = Cat(isSegment, decode.uop_type)
+    val uopIdx = io.storeIn.bits.uop.ctrl.uopIdx(uopIdxBits - 1, 0)
+    val flows = GenRealFlowNum(instType, emul, lmul, eew, sew)
+    val flowsLog2 = GenRealFlowLog2(instType, emul, lmul, eew, sew)
+    val flowsPrev = uopIdx << flowsLog2 // # of flow before this uop
+    val alignedType = Mux(isIndexed(instType), sew(1, 0), eew(1, 0))
+    val srcMask = Mux(decode.mask_en, -1.asSInt.asUInt, io.storeIn.bits.src_mask)
+    val flowMask = ((srcMask >> flowsPrev) &
+      ZeroExt(UIntToMask(flows, maxFlowNum), VLEN))(VLENB - 1, 0)
+    valid(id) := true.B
+    finish(id) := false.B
+    exception(id) := false.B
+    vstart(id) := 0.U
+    uopq(id) match { case x =>
+      x.uop := io.storeIn.bits.uop
+      x.flowMask := flowMask
+      x.byteMask := GenUopByteMask(flowMask, alignedType)(VLENB - 1, 0)
+      x.data := io.storeIn.bits.src_vs3
+      x.baseAddr := io.storeIn.bits.src_rs1
+      x.stride := io.storeIn.bits.src_stride
+      x.flow_counter := flows
+      x.flowNum := flows
+      x.nfields := decode.uop_segment_num + 1.U
+      x.vm := decode.mask_en
+      x.usWholeReg := decode.isUnitStride && decode.uop_unit_stride_whole_reg
+      x.eew := eew
+      x.sew := sew
+      x.emul := emul
+      x.lmul := lmul
+      x.vlmax := GenVLMAX(lmul, sew)
+      x.instType := instType
+    }
 
-  // val loadInstDec = Wire(Vec(VecStorePipelineWidth,new VecDecode()))
-  // val eew = Wire(Vec(VecStorePipelineWidth, UInt(3.W)))
-  // val sew = Wire(Vec(VecStorePipelineWidth, UInt(3.W)))
-  // val lmul = Wire(Vec(VecStorePipelineWidth, UInt(3.W)))
-  // val emul = Wire(Vec(VecStorePipelineWidth, UInt(3.W)))
-  // val isSegment = Wire(Vec(VecStorePipelineWidth, Bool()))
-  // val instType = Wire(Vec(VecStorePipelineWidth, UInt(3.W)))
-  // val storeInValid = WireInit(VecInit(Seq.fill(VecStorePipelineWidth)(false.B)))
-  // val needFlush = WireInit(VecInit(Seq.fill(VsUopSize)(false.B)))
-  // val free = WireInit(VecInit(Seq.fill(VecStorePipelineWidth)(0.U(VsUopSize.W))))
+    // Assertion
+    assert(PopCount(flows) <= 1.U, "flowNum should be the power of 2")
+  }
 
-  // def getRemBits(input: UInt)(rem: Int): UInt = {
-  //   VecInit((0 until VsUopSize / VecStorePipelineWidth).map(i => {input(VecStorePipelineWidth * i + rem)})).asUInt
-  // }
+  // update enqPtr
+  when (redirectReg.valid) {
+    enqPtr := enqPtr - flushNumReg
+  }.otherwise {
+    when (io.storeIn.fire()) {
+      enqPtr := enqPtr + 1.U
+    }
+  }
 
-  // val uopFreeList = Module(new VsUopFreeList(
-  //                           size = VsUopSize,
-  //                           allocWidth = VecStorePipelineWidth,
-  //                           freeWidth = 4,
-  //                           moduleName = "vsUopFreeList"))
+  /**
+    * Split uop into flows
+    */
+  val issueValid = valid(flowSplitPtr.value)
+  val issueEntry = uopq(flowSplitPtr.value)
+  val issueFlowNum = issueEntry.flowNum
+  val issueBaseAddr = issueEntry.baseAddr
+  val issueUop = issueEntry.uop
+  val issueUopIdx = issueUop.ctrl.uopIdx(uopIdxBits - 1, 0)
+  val issueInstType = issueEntry.instType
+  val issueEew = issueEntry.eew
+  val issueSew = issueEntry.sew
+  val issueAlignedType = Mux(isIndexed(issueInstType), issueSew(1, 0), issueEew(1, 0))
+  val issueVLMAXMask = issueEntry.vlmax - 1.U
+  val issueVLMAXLog2 = GenVLMAXLog2(issueEntry.lmul, issueEntry.sew)
+  val issueNFIELDS = issueEntry.nfields
+  val issueVstart = issueUop.ctrl.vconfig.vstart
+  val issueVl = issueUop.ctrl.vconfig.vl
+  assert(!issueValid || PopCount(issueEntry.vlmax) === 1.U, "VLMAX should be power of 2 and non-zero")
 
-  // for (i <- 0 until VecStorePipelineWidth) {
-  //   io.storeIn(i).ready :=  uopFreeList.io.accllReq(i).ready
-  // }
+  flowSplitIdx.zip(io.flowIssue).foreach { case (flowIdx, issuePort) =>
+    // AGU
+    // TODO: DONT use * to implement multiplication!!!
+    val elemIdx = GenElemIdx(issueAlignedType, issueUopIdx, flowIdx) // elemIdx inside an inst
+    val elemIdxInsideField = elemIdx & issueVLMAXMask
+    val nfIdx = elemIdx >> issueVLMAXLog2
+    val notIndexedStride = Mux(
+      isStrided(issueInstType),
+      issueEntry.stride(XLEN - 1, 0), // for strided store, stride = x[rs2]
+      issueNFIELDS << issueEew(1, 0) // for unit-stride store, stride = eew * NFIELDS
+    ) * elemIdxInsideField
+    val indexedStride = IndexAddr(
+      index = issueEntry.stride,
+      flow_inner_idx = (elemIdxInsideField << issueEew(1, 0))(vOffsetBits - 1, 0) >> issueEew(1, 0),
+      eew = issueEew
+    )
+    val stride = Mux(isIndexed(issueInstType), indexedStride, notIndexedStride)
+    val fieldOffset = nfIdx << issueAlignedType // field offset inside a segment
+    val vaddr = issueBaseAddr + stride + fieldOffset
+    val mask = genVWmask(vaddr, issueAlignedType)
+    val regOffset = (elemIdxInsideField << issueAlignedType)(vOffsetBits - 1, 0)
+    val exp = VLExpCtrl(
+      vstart = issueVstart,
+      vl = Mux(issueEntry.usWholeReg, GenUSWholeRegVL(issueNFIELDS, issueEew), issueVl),
+      eleIdx = elemIdxInsideField
+    )
 
-  // for (i <- 0 until VecStorePipelineWidth) {
-  //   storeInValid(i) := !io.storeIn(i).bits.uop.robIdx.needFlush(io.redirect) && io.storeIn(i).fire
-  // }
+    issuePort.valid := issueValid && flowIdx < issueFlowNum &&
+      !issueUop.robIdx.needFlush(io.redirect) &&
+      !issueUop.robIdx.needFlush(redirectReg)
+  
+    issuePort.bits match { case x =>
+      x.uop := issueUop
+      x.vaddr := vaddr
+      x.mask := mask
+      x.alignedType := issueAlignedType
+      x.exp := exp
+      x.flow_idx := elemIdx
+      x.is_first_ele := elemIdx === 0.U
+      x.data := GenVSData(
+        data = issueEntry.data.asUInt,
+        elemIdx = elemIdxInsideField,
+        alignedType = issueAlignedType
+      )
+      x.uopQueuePtr := flowSplitPtr
+    }
+  }
 
-  // /**
-  //   * Redirection occurred, flush VsUopQueue */
-  // for (entry <- 0 until VsUopSize) {
-  //   needFlush(entry) := vsUopEntry(entry).uop.robIdx.needFlush(io.redirect) && valid(entry)
-  //   when(needFlush(entry)) {
-  //     valid(entry) := false.B
-  //   }
-  // }
+  val numFlowIssue = PopCount(io.flowIssue.map(_.fire()))
+  val flowIssueFire = Cat(io.flowIssue.map(_.fire())).orR
 
-  // val lastRedriect = RegNext(io.redirect)
-  // when (lastRedriect.valid) {
-  //   uopFreeList.io.free := RegNext(needFlush.asUInt)
-  // }.otherwise {
-  //   uopFreeList.io.free := free.reduce(_|_)
-  // }
+  when (!RegNext(io.redirect.valid) || distanceBetween(enqPtr, flowSplitPtr) > flushNumReg) {
+    when (flowSplitIdx.last < (issueFlowNum - 1.U)) {
+      // The uop has not been entirly splited yet
+      flowSplitIdx.foreach(p => p := p + numFlowIssue)
+      assert(!flowIssueFire || numFlowIssue === flowIssueWidth.U, "both issue port should fire together")
+    }.otherwise {
+      when (flowIssueFire) {
+        // The uop is done spliting
+        flowSplitIdx := VecInit((0 until flowIssueWidth).map(_.U)) // initialize flowIdx
+        flowSplitPtr := flowSplitPtr + 1.U
+      }
+    }
+  }.otherwise {
+    // flowSplitPtr needs to be redirected
+    flowSplitPtr := enqPtr - flushNumReg
+    flowSplitIdx := VecInit((0 until flowIssueWidth).map(_.U)) // initialize flowIdx
+  }
 
-  // for (i <- 0 until VecStorePipelineWidth) {
-  //   loadInstDec(i).apply(io.storeIn(i).bits.uop.cf.instr)
-  //   eew(i)       := loadInstDec(i).uop_eew
-  //   sew(i)       := io.storeIn(i).bits.uop.ctrl.vconfig.vtype.vsew
-  //   lmul(i)      := io.storeIn(i).bits.uop.ctrl.vconfig.vtype.vlmul
-  //   emul(i)      := EewLog2(eew(i)) - sew(i) + lmul(i)
-  //   isSegment(i) := loadInstDec(i).uop_segment_num =/= "b000".U && !loadInstDec(i).uop_unit_stride_whole_reg
-  //   instType(i)  := Cat(isSegment(i),loadInstDec(i).uop_type)
-  // }
+  /**
+    * Write back flows from flow queue
+    */
+  val flowWbExcp = Wire(Vec(flowWritebackWidth, ExceptionVec()))
+  io.flowWriteback.zipWithIndex.foreach { case (wb, i) =>
+    val ptr = wb.bits.uopQueuePtr
+    val entry = uopq(ptr.value)
+    flowWbExcp(i) := wb.bits.uop.cf.exceptionVec
 
-  // //enqueue
-  // for (i <- 0 until VecStorePipelineWidth) {
-  //   uopFreeList.io.accllReq(i) := DontCare
-  //   when (storeInValid(i)) {
-  //     uopFreeList.io.accllReq(i).valid := true.B
-  //     val enqPtr = uopFreeList.io.idxValue(i)
-  //     vsUopEntry(enqPtr)          := DontCare
-  //     valid     (enqPtr)          := true.B
-  //     vsUopEntry(enqPtr).src      := io.storeIn(i).bits.src
-  //     vsUopEntry(enqPtr).uop      := io.storeIn(i).bits.uop
-  //     vsUopEntry(enqPtr).vstart   := io.vstart(i) //FIXME
-  //     vsUopEntry(enqPtr).mask     := GenVecStoreMask(instType = instType(i), eew = eew(i), sew = sew(i))
-  //     vsUopEntry(enqPtr).eew      := eew(i)
-  //     vsUopEntry(enqPtr).emul     := emul(i)
-  //     vsUopEntry(enqPtr).instType := instType(i)
-  //     vsUopEntry(enqPtr).uop_unit_stride_fof := loadInstDec(i).uop_unit_stride_fof
-  //     vsUopEntry(enqPtr).uop_unit_whole_reg := loadInstDec(i).uop_unit_stride_whole_reg
-  //     vsUopEntry(enqPtr).uop_segment_num := loadInstDec(i).uop_segment_num
-  //   }
-  // }
+    // handle the situation where multiple ports are going to write the same uop queue entry
+    val mergedByPrevPort = (i != 0).B && Cat((0 until i).map(j =>
+      io.flowWriteback(j).bits.uopQueuePtr === wb.bits.uopQueuePtr)).orR
+    val mergePortVec = (0 until flowWritebackWidth).map(j => (j == i).B ||
+      (j > i).B &&
+      io.flowWriteback(j).bits.uopQueuePtr === wb.bits.uopQueuePtr &&
+      io.flowWriteback(j).valid)
+    val nextFlowCnt = entry.flow_counter - PopCount(mergePortVec)
 
-  // //dequeue
-  // val UopQueueBank = VecInit(Seq.tabulate(VecStorePipelineWidth)(i => getRemBits(valid.asUInt)(i)))
-  // val deqPtr = VecInit(Seq.tabulate(VecStorePipelineWidth)(i => {
-  //   val value = PriorityEncoder(UopQueueBank(i))
-  //   Cat(value,i.U(log2Up(VecStorePipelineWidth).W))
-  // }))
+    // update data and decrease flow_counter when the writeback port is not merged
+    when (wb.valid && !mergedByPrevPort) {
+      entry.flow_counter := nextFlowCnt
+      finish(ptr.value) := nextFlowCnt === 0.U
+      when (!exception(ptr.value) && flowWbExcp(i).asUInt.orR) {
+        exception(ptr.value) := true.B
+        vstart(ptr.value) := wb.bits.exp_ele_index
+        entry.uop.cf.exceptionVec := flowWbExcp(i)
+      }
+    }
 
-  // for (i <- 0 until VecStorePipelineWidth) {
-  //   io.uop2Flow(i).bits  := DontCare
-  //   io.uop2Flow(i).valid := valid(deqPtr(i))//FIXME: performace, 1 interface may use incorrect valid
-  //   io.uop2Flow(i).bits  := vsUopEntry(deqPtr(i))
-  //   when (io.uop2Flow(i).fire) {
-  //     valid(deqPtr(i)) := false.B
-  //     free(i) := UIntToOH(deqPtr(i))
-  //   }
-  // }
+    assert(!(wb.valid && !valid(ptr.value)))
+  }
 
+  /**
+    * Dequeue according to finish bit pointer by deqPtr
+    */
+  when (io.uopWriteback.fire()) {
+    val id = deqPtr.value
+    valid(id) := false.B
+    finish(id) := false.B
+    exception(id) := false.B
+    vstart(id) := 0.U
+
+    uopq(id).flowMask := 0.U
+    uopq(id).byteMask := 0.U
+
+    deqPtr := deqPtr + 1.U
+  }
+  assert(!(finish(deqPtr.value) && !valid(deqPtr.value)))
+
+  /**
+    * IO assignments
+    */
+  io.storeIn.ready := !full
+
+  io.flowWriteback.foreach(_.ready := true.B)
+
+  io.uopWriteback.valid := finish(deqPtr.value) &&
+    !uopq(deqPtr.value).uop.robIdx.needFlush(io.redirect) &&
+    !uopq(deqPtr.value).uop.robIdx.needFlush(redirectReg)
+  io.uopWriteback.bits match { case x =>
+    val id = deqPtr.value
+    x.uop := uopq(id).uop
+    x.uop.cf.exceptionVec := uopq(id).uop.cf.exceptionVec
+    x.data := DontCare
+    x.mask.map(_ := DontCare)
+    x.fflags := DontCare
+    x.redirectValid := false.B
+    x.redirect := DontCare
+    x.debug := DontCare
+  }
+
+  for (i <- 1 until flowIssueWidth) {
+    assert(!(issueValid && !io.flowIssue(i-1).valid && io.flowIssue(i).valid),
+      "flow issue port_(i-1) should have higher priority than port_i")
+  }
 }

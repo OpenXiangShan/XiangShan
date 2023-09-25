@@ -368,7 +368,7 @@ class ExuOutput(isVpu: Boolean = false)(implicit p: Parameters) extends XSBundle
   val maskWidth = dataWidth / 8
 
   val data = UInt(dataWidth.W)
-  val mask = UInt(maskWidth.W)
+  val mask = if (isVpu) Some(UInt(maskWidth.W)) else None
   val fflags = UInt(5.W)
   val redirectValid = Bool()
   val redirect = new Redirect

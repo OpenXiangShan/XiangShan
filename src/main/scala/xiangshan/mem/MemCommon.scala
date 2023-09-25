@@ -171,6 +171,7 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     reg_offset := input.reg_offset
     // offset := input.offset
     fqIdx := input.fqIdx
+    flowPtr := input.flowPtr
     isFirstIssue := input.isFirstIssue
     dcacheRequireReplay := input.dcacheRequireReplay
 

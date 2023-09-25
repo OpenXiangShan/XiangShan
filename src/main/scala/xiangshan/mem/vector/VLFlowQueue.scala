@@ -72,6 +72,7 @@ class VlFlowQueueIOBundle(implicit p: Parameters) extends VLSUBundle {
 }
 
 class VlflowBundle(implicit p: Parameters) extends VecFlowBundle {
+  val reg_offset = UInt(vOffsetBits.W)
   val unit_stride_fof   = Bool()
   val uopQueuePtr = new VluopPtr
 }
@@ -217,6 +218,7 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
     val thisFlow = flowQueueBundles(issuePtr(i).value)
     // It works, but it's not elegant
     io.pipeIssue(i).bits match { case x =>
+      x.uop                 := thisFlow.uop
       x.vaddr               := thisFlow.vaddr
       x.mask                := thisFlow.mask
       x.uop_unit_stride_fof := thisFlow.unit_stride_fof
@@ -270,6 +272,9 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
     when (doResult(i)) {
       flowFinished(thisPtr) := true.B
       flowLoadResult(thisPtr) := io.pipeResult(i).bits
+
+      // TODO: DONT use pipeline result directly for many signals are assigned to DontCare in pipeline!!!
+      flowLoadResult(thisPtr).vec.uopQueuePtr := flowQueueBundles(thisPtr).uopQueuePtr
     }
   }
 

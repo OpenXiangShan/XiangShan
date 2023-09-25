@@ -28,7 +28,7 @@ import xiangshan.backend.rob.RobPtr
   * Common used parameters or functions in vlsu
   */
 trait VLSUConstants {
-  private val VLEN = 128
+  val VLEN = 128
   def VLENB = VLEN/8
   def vOffsetBits = log2Up(VLENB) // bits-width to index offset inside a vector reg
 
@@ -51,9 +51,75 @@ trait VLSUConstants {
   
   def ewBits = 3 // bits-width of EEW/SEW
   def mulBits = 3 // bits-width of emul/lmul
-  // TODO
+
+  def getSlice(data: UInt, i: Int, alignBits: Int): UInt = {
+    require(data.getWidth >= (i+1) * alignBits)
+    data((i+1) * alignBits - 1, i * alignBits)
+  }
+
+  def getByte(data: UInt, i: Int = 0) = getSlice(data, i, 8)
+  def getHalfWord(data: UInt, i: Int = 0) = getSlice(data, i, 16)
+  def getWord(data: UInt, i: Int = 0) = getSlice(data, i, 32)
+  def getDoubleWord(data: UInt, i: Int = 0) = getSlice(data, i, 64)
 }
-trait HasVLSUParameters extends HasXSParameter with VLSUConstants
+
+trait HasVLSUParameters extends HasXSParameter with VLSUConstants {
+  override val VLEN = coreParams.VLEN
+  def isUnitStride(instType: UInt) = instType(1, 0) === "b00".U
+  def isStrided(instType: UInt) = instType(1, 0) === "b10".U
+  def isIndexed(instType: UInt) = instType(0) === "b1".U
+  def isNotIndexed(instType: UInt) = instType(0) === "b0".U
+
+  def mergeDataWithMask(oldData: UInt, newData: UInt, mask: UInt): Vec[UInt] = {
+    require(oldData.getWidth == newData.getWidth)
+    require(oldData.getWidth == mask.getWidth * 8)
+    VecInit(mask.asBools.zipWithIndex.map { case (en, i) =>
+      Mux(en, getByte(newData, i), getByte(oldData, i))
+    })
+  }
+
+  // def asBytes(data: UInt) = {
+  //   require(data.getWidth % 8 == 0)
+  //   (0 until data.getWidth/8).map(i => getByte(data, i))
+  // }
+
+  def mergeDataWithElemIdx(
+    oldData: UInt,
+    newData: Seq[UInt],
+    alignedType: UInt,
+    elemIdx: Seq[UInt],
+    valids: Seq[Bool]
+  ): UInt = {
+    require(newData.length == elemIdx.length)
+    require(newData.length == valids.length)
+    LookupTree(alignedType, List(
+      "b00".U -> VecInit(elemIdx.map(e => UIntToOH(e(3, 0)).asBools).transpose.zipWithIndex.map { case (selVec, i) =>
+        ParallelPosteriorityMux(
+          true.B +: selVec.zip(valids).map(x => x._1 && x._2), 
+          getByte(oldData, i) +: newData.map(getByte(_))
+        )}).asUInt,
+      "b01".U -> VecInit(elemIdx.map(e => UIntToOH(e(2, 0)).asBools).transpose.zipWithIndex.map { case (selVec, i) =>
+        ParallelPosteriorityMux(
+          true.B +: selVec.zip(valids).map(x => x._1 && x._2), 
+          getHalfWord(oldData, i) +: newData.map(getHalfWord(_))
+        )}).asUInt,
+      "b10".U -> VecInit(elemIdx.map(e => UIntToOH(e(1, 0)).asBools).transpose.zipWithIndex.map { case (selVec, i) =>
+        ParallelPosteriorityMux(
+          true.B +: selVec.zip(valids).map(x => x._1 && x._2), 
+          getWord(oldData, i) +: newData.map(getWord(_))
+        )}).asUInt,
+      "b11".U -> VecInit(elemIdx.map(e => UIntToOH(e(0)).asBools).transpose.zipWithIndex.map { case (selVec, i) =>
+        ParallelPosteriorityMux(
+          true.B +: selVec.zip(valids).map(x => x._1 && x._2), 
+          getDoubleWord(oldData, i) +: newData.map(getDoubleWord(_))
+        )}).asUInt
+    ))
+  }
+
+  def mergeDataWithElemIdx(oldData: UInt, newData: UInt, alignedType: UInt, elemIdx: UInt): UInt = {
+    mergeDataWithElemIdx(oldData, Seq(newData), alignedType, Seq(elemIdx), Seq(true.B))
+  }
+}
 abstract class VLSUModule(implicit p: Parameters) extends XSModule
   with HasVLSUParameters
   with HasCircularQueuePtrHelper
@@ -131,26 +197,38 @@ class VecExuOutput(implicit p: Parameters) extends ExuOutput with HasVLSUParamet
 }
 
 class VecStoreExuOutput(implicit p: Parameters) extends ExuOutput with HasVLSUParameters {
+  val exp_ele_index = UInt(elemIdxBits.W)
   val uopQueuePtr = new VsUopPtr
 }
 
-// // Not used for now
-// class Uop2Flow(implicit p: Parameters) extends ExuInput(isVpu = true) with HasVLSUParameters {
-//   val vstart   = UInt(8.W)
-//   val mask     = UInt(16.W)
-//   val eew      = UInt(3.W)
-//   val emul     = UInt(3.W)
-//   val instType = UInt(3.W)
-//   val uop_unit_stride_fof = Bool()
-//   val uop_unit_whole_reg = Bool()
-//   val agnedType = UInt(2.W)
-//   val uop_segment_num = UInt(3.W)
-// }
+class VecUopBundle(implicit p: Parameters) extends VLSUBundleWithMicroOp {
+  val flowMask       = UInt(VLENB.W) // each bit for a flow
+  val byteMask       = UInt(VLENB.W) // each bit for a byte
+  val data           = UInt(VLEN.W)
+  // val fof            = Bool() // fof is only used for vector loads
+  val excp_eew_index = UInt(elemIdxBits.W)
+  // val exceptionVec   = ExceptionVec() // uop has exceptionVec
+  val baseAddr = UInt(VAddrBits.W)
+  val stride = UInt(VLEN.W)
+  val flow_counter = UInt(flowIdxBits.W)
+
+  // instruction decode result
+  val flowNum = UInt(flowIdxBits.W) // # of flows in a uop
+  // val flowNumLog2 = UInt(log2Up(flowIdxBits).W) // log2(flowNum), for better timing of multiplication
+  val nfields = UInt(fieldBits.W) // NFIELDS
+  val vm = Bool() // whether vector masking is enabled
+  val usWholeReg = Bool() // unit-stride, whole register load
+  val eew = UInt(ewBits.W) // size of memory elements
+  val sew = UInt(ewBits.W)
+  val emul = UInt(mulBits.W)
+  val lmul = UInt(mulBits.W)
+  val vlmax = UInt(elemIdxBits.W)
+  val instType = UInt(3.W)
+}
 
 class VecFlowBundle(implicit p: Parameters) extends VLSUBundleWithMicroOp {
   val vaddr             = UInt(VAddrBits.W)
   val mask              = UInt(VLENB.W)
-  val reg_offset        = UInt(vOffsetBits.W)
   val alignedType       = UInt(alignTypeBits.W)
   val exp               = Bool()
   val flow_idx          = UInt(elemIdxBits.W)
@@ -550,7 +628,7 @@ object GenFlowMaskInsideReg extends VLSUConstants {
 
 // TODO: delete this in vs flow queue
 object GenEleIdx {
-  def apply (instType: UInt, emul: UInt, lmul: UInt, eew: UInt, sew: UInt, uopIdx:UInt, flowIdx: UInt):UInt = {
+  def apply(instType: UInt, emul: UInt, lmul: UInt, eew: UInt, sew: UInt, uopIdx:UInt, flowIdx: UInt):UInt = {
     val eleIdx = Wire(UInt(7.W))
     when (instType(1,0) === "b00".U || instType(1,0) === "b10".U || emul.asSInt > lmul.asSInt) {
       eleIdx := (uopIdx << Log2Num((MulDataSize(emul) >> eew(1,0)).asUInt)).asUInt + flowIdx

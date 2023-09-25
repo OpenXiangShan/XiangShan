@@ -132,38 +132,38 @@ object GenVSMask {
   }
 }
 
-object GenVSData {
-    def apply(reg_offset: UInt, offset: UInt, data: UInt,  vstart: UInt, vl: UInt, eleIdx: UInt, vmask: UInt, vma: Bool, vta: Bool):UInt = {
-      val vtmpData = Wire(UInt(128.W))
-      val vData = Wire(UInt(128.W))
-      when (offset <= reg_offset) {
-        vtmpData := data >> ((reg_offset - offset) << 3.U)
-      }.otherwise {
-        vtmpData := data << ((offset - reg_offset) << 3.U)
-      }
+// object GenVSData {
+//     def apply(reg_offset: UInt, offset: UInt, data: UInt,  vstart: UInt, vl: UInt, eleIdx: UInt, vmask: UInt, vma: Bool, vta: Bool):UInt = {
+//       val vtmpData = Wire(UInt(128.W))
+//       val vData = Wire(UInt(128.W))
+//       when (offset <= reg_offset) {
+//         vtmpData := data >> ((reg_offset - offset) << 3.U)
+//       }.otherwise {
+//         vtmpData := data << ((offset - reg_offset) << 3.U)
+//       }
 
-      when( eleIdx >= vl) {
-        when(vta){
-          vData := "hfffffffff".U
-        }.otherwise{
-          vData := vtmpData
-        }
-      }.elsewhen(eleIdx >= vstart && eleIdx < vl) {
-        when(vmask(eleIdx)) {
-          vData := vtmpData
-        }.otherwise {
-          when(vma) {
-            vData := "hfffffffff".U
-          }.otherwise {
-            vData := vtmpData
-          }
-        }
-      }.otherwise{
-        vData := vtmpData
-      }
-      vData
-    }
-}
+//       when( eleIdx >= vl) {
+//         when(vta){
+//           vData := "hfffffffff".U
+//         }.otherwise{
+//           vData := vtmpData
+//         }
+//       }.elsewhen(eleIdx >= vstart && eleIdx < vl) {
+//         when(vmask(eleIdx)) {
+//           vData := vtmpData
+//         }.otherwise {
+//           when(vma) {
+//             vData := "hfffffffff".U
+//           }.otherwise {
+//             vData := vtmpData
+//           }
+//         }
+//       }.otherwise{
+//         vData := vtmpData
+//       }
+//       vData
+//     }
+// }
 
 object VSFQFeedbackType {
   val tlbMiss = 0.U(3.W)
@@ -214,6 +214,7 @@ class VecStorePipeBundle(implicit p: Parameters) extends ExuInput(isVpu = true) 
 
 class VsFlowBundle(implicit p: Parameters) extends VecFlowBundle {
   val data = UInt(VLEN.W)
+  val uopQueuePtr = new VsUopPtr
 }
 
 // class VsFlowQueueIOBundle (implicit p: Parameters) extends XSBundle {
