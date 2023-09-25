@@ -19,7 +19,7 @@ package xiangshan.backend.exu
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
-import chisel3.experimental.hierarchy.{Definition, instantiable, public}
+import chisel3.experimental.hierarchy.{Definition, instantiable}
 import chisel3.util._
 import utils._
 import utility._
@@ -118,15 +118,17 @@ class FmacExeUnit(implicit p: Parameters) extends ExeUnit(FmacExeUnitCfg)
 class FmiscExeUnit(implicit p: Parameters) extends ExeUnit(FmiscExeUnitCfg)
 
 object ExeUnitDef {
+  val defMap = new scala.collection.mutable.HashMap[ExuConfig, Definition[ExeUnit]]()
+
   def apply(cfg: ExuConfig)(implicit p: Parameters): Definition[ExeUnit] = {
     cfg match {
-      case JumpExeUnitCfg => Definition(new JumpExeUnit)
-      case AluExeUnitCfg => Definition(new AluExeUnit)
-      case MulDivExeUnitCfg => Definition(new MulDivExeUnit)
-      case JumpCSRExeUnitCfg => Definition(new JumpCSRExeUnit)
-      case FmacExeUnitCfg => Definition(new FmacExeUnit)
-      case FmiscExeUnitCfg => Definition(new FmiscExeUnit)
-      case StdExeUnitCfg => Definition(new StdExeUnit)
+      case JumpExeUnitCfg => defMap.getOrElseUpdate(cfg, Definition(new JumpExeUnit))
+      case AluExeUnitCfg => defMap.getOrElseUpdate(cfg, Definition(new AluExeUnit))
+      case MulDivExeUnitCfg => defMap.getOrElseUpdate(cfg, Definition(new MulDivExeUnit))
+      case JumpCSRExeUnitCfg => defMap.getOrElseUpdate(cfg, Definition(new JumpCSRExeUnit))
+      case FmacExeUnitCfg => defMap.getOrElseUpdate(cfg, Definition(new FmacExeUnit))
+      case FmiscExeUnitCfg => defMap.getOrElseUpdate(cfg, Definition(new FmiscExeUnit))
+      case StdExeUnitCfg => defMap.getOrElseUpdate(cfg, Definition(new StdExeUnit))
       case _ => {
         println(s"cannot generate exeUnit from $cfg")
         null
