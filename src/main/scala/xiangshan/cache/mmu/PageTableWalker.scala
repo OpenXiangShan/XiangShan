@@ -86,9 +86,9 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val sfence = io.sfence
   val mem = io.mem
   val req_s2xlate = Reg(UInt(2.W))
-  val enableS2xlate = io.req.bits.req_info.s2xlate =/= noS2xlate
-  val onlyS1xlate = io.req.bits.req_info.s2xlate === onlyStage1
-  val onlyS2xlate = io.req.bits.req_info.s2xlate === onlyStage2
+  val enableS2xlate = req_s2xlate =/= noS2xlate
+  val onlyS1xlate = req_s2xlate === onlyStage1
+  val onlyS2xlate = req_s2xlate === onlyStage2
 
   val satp = Mux(enableS2xlate, io.csr.vsatp, io.csr.satp)
   val hgatp = io.csr.hgatp
@@ -183,7 +183,6 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     vpn := io.req.bits.req_info.vpn
     l1Hit := req.l1Hit
     accessFault := false.B
-    s_pmp_check := false.B
     idle := false.B
     hptw_pageFault := false.B
     req_s2xlate := io.req.bits.req_info.s2xlate
@@ -666,8 +665,8 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val s_pmp_check = RegInit(true.B)
   val s_mem_req = RegInit(true.B)
   val w_mem_resp = RegInit(true.B)
-  val mem_addr_update = RegInit(true.B)
   val idle = RegInit(true.B)
+  val mem_addr_update = RegInit(false.B)
   val finish = WireInit(false.B)
 
   val sent_to_pmp = !idle && (!s_pmp_check || mem_addr_update) && !finish
