@@ -165,6 +165,7 @@ object Bundles {
     val pdest           = UInt(PhyRegIdxWidth.W)
     val robIdx          = new RobPtr
     val instrSize       = UInt(log2Ceil(RenameWidth + 1).W)
+    val dirtyFs         = Bool()
 
     val eliminatedMove  = Bool()
     // Take snapshot at this CFI inst

@@ -106,7 +106,8 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   val diffPtrOHVec = VecInit(Seq.tabulate(CommitWidth * MaxUopSize + 1)(_ % size).map(step => diffPtrOHShift.left(step)))
 
   // Regs
-  val renameBuffer = RegInit(VecInit(Seq.fill(size){0.U.asTypeOf(new RenameBufferEntry)}))
+  val renameBuffer = Mem(size, new RenameBufferEntry)
+  val renameBufferEntries = (0 until size) map (i => renameBuffer(i))
 
   val s_idle :: s_special_walk :: s_walk :: Nil = Enum(3)
   val state = RegInit(s_idle)
@@ -153,10 +154,10 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
 
   walkPtr := walkPtrNext
 
-  val walkCandidates   = VecInit(walkPtrOHVec.map(sel => Mux1H(sel, renameBuffer)))
-  val commitCandidates = VecInit(deqPtrOHVec.map(sel => Mux1H(sel, renameBuffer)))
-  val vcfgCandidates   = VecInit(vcfgPtrOHVec.map(sel => Mux1H(sel, renameBuffer)))
-  val diffCandidates   = VecInit(diffPtrOHVec.map(sel => Mux1H(sel, renameBuffer)))
+  val walkCandidates   = VecInit(walkPtrOHVec.map(sel => Mux1H(sel, renameBufferEntries)))
+  val commitCandidates = VecInit(deqPtrOHVec.map(sel => Mux1H(sel, renameBufferEntries)))
+  val vcfgCandidates   = VecInit(vcfgPtrOHVec.map(sel => Mux1H(sel, renameBufferEntries)))
+  val diffCandidates   = VecInit(diffPtrOHVec.map(sel => Mux1H(sel, renameBufferEntries)))
 
   // update diff pointer
   val diffPtrOHNext = Mux(state === s_idle, diffPtrOHVec(newCommitSize), diffPtrOH)
