@@ -1200,6 +1200,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // TODO: remove this
   XSError(do_commit && diff_commit_target =/= commit_target, "\ncommit target should be the same as update target\n")
 
+  // update latency stats
+  val update_latency = GTimer() - pred_s1_cycle.getOrElse(dummy_s1_pred_cycle_vec)(do_commit_ptr.value) + 1.U
+  XSPerfHistogram("bpu_update_latency", update_latency, io.toBpu.update.valid, 0, 64, 2)
+
   io.toBpu.update := DontCare
   io.toBpu.update.valid := commit_valid && do_commit
   val update = io.toBpu.update.bits
@@ -1383,6 +1387,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   XSPerfAccumulate("to_ifu_stall", io.toIfu.req.valid && !io.toIfu.req.ready)
   XSPerfAccumulate("from_bpu_real_bubble", !enq.valid && enq.ready && allowBpuIn)
   XSPerfAccumulate("bpu_to_ifu_bubble", bpuPtr === ifuPtr)
+  XSPerfAccumulate("bpu_to_ifu_bubble_when_ftq_full", (bpuPtr === ifuPtr) && isFull(bpuPtr, commPtr) && io.toIfu.req.ready)
 
   val from_bpu = io.fromBpu.resp.bits
   val to_ifu = io.toIfu.req.bits
