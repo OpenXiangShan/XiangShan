@@ -249,6 +249,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   hptw.io.req.bits.source := cache.io.resp.bits.req_info.source
   hptw.io.req.bits.l1Hit := cache.io.resp.bits.toHptw.l1Hit
   hptw.io.req.bits.l2Hit := cache.io.resp.bits.toHptw.l2Hit
+  hptw.io.req.bits.ppn := cache.io.resp.bits.toHptw.ppn
   hptw.io.sfence := sfence_dup(8)
   hptw.io.csr := csr_dup(7)
   // mem req
