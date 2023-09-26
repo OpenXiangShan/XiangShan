@@ -377,7 +377,8 @@ class DiffCommitIO(implicit p: Parameters) extends XSBundle {
 class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   val ldest = UInt(6.W)
   val rfWen = Bool()
-  val fpWen = Bool()
+  val fpWen = Bool() // for Rab only
+  def dirtyFs = fpWen // for Rob only
   val vecWen = Bool()
   def fpVecWen = fpWen || vecWen
   val wflags = Bool()

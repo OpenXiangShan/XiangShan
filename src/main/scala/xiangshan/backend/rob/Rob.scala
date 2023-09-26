@@ -745,17 +745,17 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   require(RenameWidth <= CommitWidth)
 
   // wiring to csr
-  val (wflags, fpWen) = (0 until CommitWidth).map(i => {
+  val (wflags, dirtyFs) = (0 until CommitWidth).map(i => {
     val v = io.commits.commitValid(i)
     val info = io.commits.info(i)
-    (v & info.wflags, v & info.fpWen)
+    (v & info.wflags, v & info.dirtyFs)
   }).unzip
   val fflags = Wire(Valid(UInt(5.W)))
   fflags.valid := io.commits.isCommit && VecInit(wflags).asUInt.orR
   fflags.bits := wflags.zip(fflagsDataRead).map({
     case (w, f) => Mux(w, f, 0.U)
   }).reduce(_|_)
-  val dirty_fs = io.commits.isCommit && VecInit(fpWen).asUInt.orR
+  val dirty_fs = io.commits.isCommit && VecInit(dirtyFs).asUInt.orR
 
   val vxsat = Wire(Valid(Bool()))
   vxsat.valid := io.commits.isCommit && vxsat.bits
@@ -1076,7 +1076,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   dispatchData.io.wdata.zip(io.enq.req.map(_.bits)).zipWithIndex.foreach { case ((wdata, req), portIdx) =>
     wdata.ldest := req.ldest
     wdata.rfWen := req.rfWen
-    wdata.fpWen := req.fpWen
+    wdata.dirtyFs := req.dirtyFs
     wdata.vecWen := req.vecWen
     wdata.wflags := req.wfflags
     wdata.commitType := req.commitType
@@ -1305,6 +1305,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       }
     }
     for (i <- 0 until CommitWidth) {
+      val uop = commitDebugUop(i)
       val commitInfo = io.commits.info(i)
       val ptr = deqPtrVec(i).value
       val exuOut = dt_exuDebug(ptr)
@@ -1318,7 +1319,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       difftest.skip    := Mux(eliminatedMove, false.B, exuOut.isMMIO || exuOut.isPerfCnt)
       difftest.isRVC   := isRVC
       difftest.rfwen   := io.commits.commitValid(i) && commitInfo.rfWen && commitInfo.ldest =/= 0.U
-      difftest.fpwen   := io.commits.commitValid(i) && commitInfo.fpWen
+      difftest.fpwen   := io.commits.commitValid(i) && uop.fpWen
       difftest.wpdest  := commitInfo.pdest
       difftest.wdest   := commitInfo.ldest
       difftest.nFused  := CommitType.isFused(commitInfo.commitType).asUInt + commitInfo.instrSize - 1.U
@@ -1327,7 +1328,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       }
 
       if (env.EnableDifftest) {
-        val uop = commitDebugUop(i)
         difftest.pc       := SignExt(uop.pc, XLEN)
         difftest.instr    := uop.instr
         difftest.robIdx   := ZeroExt(ptr, 10)
