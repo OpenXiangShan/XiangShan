@@ -144,7 +144,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.resp.bits.source := source
   io.resp.bits.resp.apply(pageFault && !accessFault && !ppn_af, accessFault || ppn_af, Mux(accessFault, af_level,level), pte, vpn, satp.asid, hgatp.asid, vpn(sectortlbwidth - 1, 0), not_super = false)
   io.resp.bits.h_resp := io.hptw.resp.bits.h_resp
-  io.resp.bits.s2xlate := s2xlate
+  io.resp.bits.s2xlate := req_s2xlate
 
   io.llptw.valid := s_llptw_req === false.B && to_find_pte && !accessFault
   io.llptw.bits.req_info.source := source
@@ -617,6 +617,7 @@ class HPTWIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst 
     val source = UInt(bSourceWidth.W)
     val id = UInt(log2Up(l2tlbParams.llptwsize).W)
     val gvpn = UInt(vpnLen.W)
+    val ppn = UInt(ppnLen.W)
     val l1Hit = Bool()
     val l2Hit = Bool()
   }))
@@ -654,10 +655,13 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val levelNext = level + 1.U
   val l1Hit = Reg(Bool())
   val l2Hit = Reg(Bool())
-  val pg_base = MakeGAddr(hgatp.ppn, getGVpnn(vpn, 2.U))
+  val pg_base = MakeGAddr(hgatp.ppn, getGVpnn(vpn, 2.U)) // for l0
 //  val pte = io.mem.resp.bits.MergeRespToPte()
   val pte = io.mem.resp.bits.asTypeOf(new PteBundle().cloneType)
-  val p_pte = MakeAddr(pte.ppn, getVpnn(vpn, 2.U - level))
+  val ppn_l1 = Mux(l1Hit, io.req.bits.ppn, pte.ppn)
+  val ppn_l2 = Mux(l2Hit, io.req.bits.ppn, pte.ppn)
+  val ppn = Mux(level === 1.U, ppn_l1, ppn_l2) //for l1 and l2
+  val p_pte = MakeAddr(ppn, getVpnn(vpn, 2.U - level))
   val mem_addr = Mux(level === 0.U, pg_base, p_pte)
 
   //s/w register
