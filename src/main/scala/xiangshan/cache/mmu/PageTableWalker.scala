@@ -654,11 +654,10 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val levelNext = level + 1.U
   val l1Hit = Reg(Bool())
   val l2Hit = Reg(Bool())
-  val ppn = Reg(UInt(ppnLen.W))
   val pg_base = MakeGAddr(hgatp.ppn, getGVpnn(vpn, 2.U))
 //  val pte = io.mem.resp.bits.MergeRespToPte()
   val pte = io.mem.resp.bits.asTypeOf(new PteBundle().cloneType)
-  val p_pte = MakeAddr(ppn, getVpnn(vpn, 2.U - level))
+  val p_pte = MakeAddr(pte.ppn, getVpnn(vpn, 2.U - level))
   val mem_addr = Mux(level === 0.U, pg_base, p_pte)
 
   //s/w register
@@ -732,7 +731,6 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   }
 
   when(io.mem.resp.fire() && !w_mem_resp){
-    ppn := pte.ppn
     w_mem_resp := true.B
     mem_addr_update := true.B
   }

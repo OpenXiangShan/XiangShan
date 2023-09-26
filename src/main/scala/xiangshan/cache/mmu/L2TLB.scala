@@ -141,10 +141,6 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   hptw_req_arb.io.in(InHptwArbLLPTWPort).bits.source := llptw.io.hptw.req.bits.source
   llptw.io.hptw.req.ready := hptw_req_arb.io.in(InHptwArbLLPTWPort).ready
 
-  val hptw_id = RegInit(0.U(log2Up(l2tlbParams.llptwsize).W))
-  when(hptw_req_arb.io.out.valid) {
-    hptw_id := hptw_req_arb.io.out.bits.id
-  }
   // arb2 input port
   val InArbPTWPort = 0
   val InArbMissQueuePort = 1
@@ -224,7 +220,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   cache.io.req.bits.req_info.source := arb2.io.out.bits.source
   cache.io.req.bits.isFirst := arb2.io.chosen =/= InArbMissQueuePort.U
   cache.io.req.bits.isHptw := arb2.io.chosen === InArbHPTWPort.U
-  cache.io.req.bits.hptwId := hptw_id
+  cache.io.req.bits.hptwId := hptw_req_arb.io.out.bits.id
   cache.io.req.bits.bypassed.map(_ := false.B)
   cache.io.sfence := sfence_dup(2)
   cache.io.csr := csr_dup(2)
