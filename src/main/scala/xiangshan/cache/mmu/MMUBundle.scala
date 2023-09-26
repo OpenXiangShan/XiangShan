@@ -613,6 +613,7 @@ class TlbRefilltoMemIO()(implicit p: Parameters) extends TlbBundle {
 
 class TlbIO(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parameters) extends
   MMUIOBaseBundle {
+  val hartId = Input(UInt(8.W))
   val requestor = Vec(Width, Flipped(new TlbRequestIO(nRespDups)))
   val flushPipe = Vec(Width, Input(Bool()))
   val ptw = new TlbPtwIOwithMemIdx(Width)
@@ -1019,6 +1020,7 @@ class PtwMergeResp(implicit p: Parameters) extends PtwBundle {
 }
 
 class L2TLBIO(implicit p: Parameters) extends PtwBundle {
+  val hartId = Input(UInt(8.W))
   val tlb = Vec(PtwWidth, Flipped(new TlbPtwIO))
   val sfence = Input(new SfenceBundle)
   val csr = new Bundle {
