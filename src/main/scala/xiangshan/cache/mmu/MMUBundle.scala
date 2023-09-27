@@ -389,6 +389,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
   }
 
   def apply(item: PtwRespS2): TlbSectorEntry = {
+    this.tag := {if (pageNormal) item.s1.entry.tag else item.s1.entry.tag(sectorvpnLen - 1, vpnnLen - sectortlbwidth)}
     this.asid := item.s1.entry.asid
     val inner_level = item.s1.entry.level.getOrElse(0.U) max item.s2.entry.level.getOrElse(0.U)
     this.level.map(_ := { if (pageNormal && pageSuper) MuxLookup(inner_level, 0.U)(Seq(
@@ -399,8 +400,8 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
                           else 0.U })
     this.perm.apply(item.s1)
 
-    this.pteidx := Mux(item.s2xlate === noS2xlate || item.s2xlate === onlyStage1, item.s1.pteidx, VecInit(UIntToOH(item.s2.entry.tag(sectortlbwidth - 1, 0)).asBools))
-    this.valididx := Mux(item.s2xlate === noS2xlate || item.s2xlate === onlyStage1, item.s1.valididx, item.s1.pteidx)
+    this.pteidx := Mux(item.s2xlate === onlyStage2, VecInit(UIntToOH(item.s2.entry.tag(sectortlbwidth - 1, 0)).asBools),  item.s1.pteidx)
+    this.valididx := Mux(item.s2xlate === onlyStage2, item.s1.pteidx, item.s1.valididx)
 
     val s1tag = {if (pageNormal) item.s1.entry.tag else item.s1.entry.tag(sectorvpnLen - 1, vpnnLen - sectortlbwidth)}
     val s2tag = {if (pageNormal) item.s2.entry.tag else item.s2.entry.tag(sectorvpnLen - 1, vpnnLen - sectortlbwidth)}

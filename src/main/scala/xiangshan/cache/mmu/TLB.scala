@@ -267,7 +267,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val req_need_gpa = hasGpf(idx)
     val req_s2xlate = Wire(UInt(2.W))
     req_s2xlate := MuxCase(noS2xlate, Seq(
-      (!(virt || req_in(idx).bits.hyperinst)) -> noS2xlate,
+      (!(virt || req_out(idx).hyperinst)) -> noS2xlate,
       (vsatp.mode =/= 0.U && hgatp.mode =/= 0.U) -> allStage,
       (vsatp.mode === 0.U) -> onlyStage2,
       (hgatp.mode === 0.U || req_need_gpa) -> onlyStage1
@@ -300,7 +300,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val miss_req_memidx = req_out(idx).memidx
     val miss_req_s2xlate = Wire(UInt(2.W))
     miss_req_s2xlate := MuxCase(noS2xlate, Seq(
-      (!(virt || req_in(idx).bits.hyperinst)) -> noS2xlate,
+      (!(virt || req_out(idx).hyperinst)) -> noS2xlate,
       (vsatp.mode =/= 0.U && hgatp.mode =/= 0.U) -> allStage,
       (vsatp.mode === 0.U) -> onlyStage2,
       (hgatp.mode === 0.U || req_need_gpa) -> onlyStage1

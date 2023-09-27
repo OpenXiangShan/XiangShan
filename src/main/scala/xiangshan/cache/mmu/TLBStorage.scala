@@ -115,7 +115,7 @@ class TLBFA(
     val hitVec = VecInit((entries.zipWithIndex).zip(v zip refill_mask.asBools).map{
       case (e, m) => {
         val s2xlate_hit = e._1.s2xlate === req.bits.s2xlate
-        val hit = e._1.hit(vpn, Mux(req.bits.s2xlate(0), io.csr.vsatp.asid, io.csr.satp.asid), vmid = io.csr.hgatp.asid, hasS2xlate = hasS2xlate, onlyS2 = OnlyS2)
+        val hit = e._1.hit(vpn, Mux(hasS2xlate, io.csr.vsatp.asid, io.csr.satp.asid), vmid = io.csr.hgatp.asid, hasS2xlate = hasS2xlate, onlyS2 = OnlyS2)
         s2xlate_hit && hit && m._1 && !m._2
       }
     })
@@ -152,7 +152,7 @@ class TLBFA(
 
   when (io.w.valid) {
     v(io.w.bits.wayIdx) := true.B
-    entries(io.w.bits.wayIdx).apply(io.w.bits.data, io.csr.satp.asid)
+    entries(io.w.bits.wayIdx).apply(io.w.bits.data)
   }
   // write assert, should not duplicate with the existing entries
   val w_hit_vec = VecInit(entries.zip(v).map{case (e, vi) => e.wbhit(io.w.bits.data.s1, io.csr.satp.asid) && vi })
