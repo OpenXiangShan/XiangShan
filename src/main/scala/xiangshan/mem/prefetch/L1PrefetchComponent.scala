@@ -512,7 +512,6 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     array(s1_pf_index).bit_vec := array(s1_pf_index).bit_vec & ~s1_pf_candidate_oh
   }
 
-  // FIXME: the logic is to long, add an extra pf pipe stage
   io.l1_req.valid := s1_pf_valid && !s1_pf_evict && !s1_pf_update && (s1_pf_bits.paddr >= 0x80000000L.U) && io.enable
   io.l1_req.bits := s1_pf_bits
 
