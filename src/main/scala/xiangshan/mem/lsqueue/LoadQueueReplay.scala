@@ -375,7 +375,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val s0_loadHintSelMask = s0_loadHintWakeMask & VecInit(dataInLastBeatReg.map(!_)).asUInt
   val s0_remLoadHintSelMask = VecInit((0 until LoadPipelineWidth).map(rem => getRemBits(s0_loadHintSelMask)(rem)))
   val s0_remHintSelValidVec = VecInit((0 until LoadPipelineWidth).map(rem => ParallelORR(s0_remLoadHintSelMask(rem))))
-  val s0_hintSelValid = s0_loadHintSelMask.orR
+  val s0_hintSelValid = ParallelORR(s0_loadHintSelMask)
 
   // wake up cache missed load
   (0 until LoadQueueReplaySize).foreach(i => {
