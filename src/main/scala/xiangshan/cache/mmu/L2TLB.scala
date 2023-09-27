@@ -193,7 +193,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val mq_arb = Module(new Arbiter(new L2TlbInnerBundle, 2))
   mq_arb.io.in(0).valid := cache.io.resp.valid && !cache.io.resp.bits.hit &&
     (!cache.io.resp.bits.toFsm.l2Hit || cache.io.resp.bits.bypassed) &&
-    !from_pre(cache.io.resp.bits.req_info.source) &&
+    !from_pre(cache.io.resp.bits.req_info.source) && !cache.io.resp.bits.isHptw &&
     (cache.io.resp.bits.bypassed || cache.io.resp.bits.isFirst || !ptw.io.req.ready)
   mq_arb.io.in(0).bits :=  cache.io.resp.bits.req_info
   mq_arb.io.in(1) <> llptw.io.cache
