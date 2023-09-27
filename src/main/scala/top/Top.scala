@@ -69,7 +69,10 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
   val l3cacheOpt = soc.L3CacheParamsOpt.map(l3param =>
     LazyModule(new HuanCun()(new Config((_, _, _) => {
-      case HCCacheParamsKey => l3param.copy(hartIds = tiles.map(_.HartId))
+      case HCCacheParamsKey => l3param.copy(
+        hartIds = tiles.map(_.HartId),
+        FPGAPlatform = debugOpts.FPGAPlatform
+      )
     })))
   )
 
