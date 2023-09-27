@@ -206,7 +206,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s0_high_conf_prf_valid = io.prefetch_req.valid && io.prefetch_req.bits.confidence > 0.U
   val s0_int_iss_valid       = io.ldin.valid // int flow first issue or software prefetch
   val s0_vec_iss_valid       = WireInit(false.B) // TODO
-  val s0_l2l_fwd_valid       = io.l2l_fwd_in.valid && io.ld_fast_match
+  val s0_l2l_fwd_valid       = io.l2l_fwd_in.valid
   val s0_low_conf_prf_valid  = io.prefetch_req.valid && io.prefetch_req.bits.confidence === 0.U
   dontTouch(s0_super_ld_rep_valid)
   dontTouch(s0_ld_fast_rep_valid)
@@ -657,6 +657,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s1_not_fast_match        = WireInit(false.B)
   val s1_addr_mismatch         = WireInit(false.B)
   val s1_addr_misaligned       = WireInit(false.B)
+  val s1_fast_mismatch         = WireInit(false.B)
   val s1_ptr_chasing_canceled  = WireInit(false.B)
   val s1_cancel_ptr_chasing    = WireInit(false.B)
 
@@ -679,9 +680,14 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                           ))
     // Case 2: this load-load uop is cancelled
     s1_ptr_chasing_canceled := !io.ldin.valid
+    // Case 3: fast mismatch
+    s1_fast_mismatch := RegEnable(!io.ld_fast_match, s0_do_try_ptr_chasing)
 
     when (s1_try_ptr_chasing) {
-      s1_cancel_ptr_chasing := s1_addr_mismatch || s1_addr_misaligned || s1_ptr_chasing_canceled
+      s1_cancel_ptr_chasing := s1_addr_mismatch ||
+                               s1_addr_misaligned ||
+                               s1_ptr_chasing_canceled ||
+                               s1_fast_mismatch
 
       s1_in.uop           := io.ldin.bits.uop
       s1_in.rsIdx         := io.rsIdx
@@ -844,9 +850,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // need allocate new entry
   val s2_can_query = !s2_mem_amb &&
-                     !s2_tlb_miss  &&
+                     !s2_tlb_miss &&
                      !s2_fwd_fail &&
-                     !s2_dcache_fast_rep &&
                      s2_troublem
 
   val s2_data_fwded = s2_dcache_miss && (s2_full_fwd || s2_cache_tag_error)
