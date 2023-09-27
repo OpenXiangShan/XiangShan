@@ -52,5 +52,5 @@ class VTypeGen(implicit p: Parameters) extends XSModule{
     vtypeSpecNext := vsetModule.io.out.vconfig.vtype
   }
 
-  io.vtype := vtypeSpec
+  io.vtype := vtypeSpecNext
 }
