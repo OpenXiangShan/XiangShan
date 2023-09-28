@@ -27,6 +27,7 @@ import xiangshan.backend.datapath.{WakeUpConfig, WbArbiterParams}
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.issue._
 import xiangshan.backend.regfile._
+import xiangshan.DebugOptionsKey
 
 import scala.reflect.{ClassTag, classTag}
 
@@ -38,6 +39,7 @@ case class BackendParams(
 
   configChecks
 
+  def debugEn(implicit p: Parameters): Boolean = p(DebugOptionsKey).AlwaysBasicDiff || p(DebugOptionsKey).EnableDifftest
   def intSchdParams = schdParams.get(IntScheduler())
   def vfSchdParams = schdParams.get(VfScheduler())
   def memSchdParams = schdParams.get(MemScheduler())

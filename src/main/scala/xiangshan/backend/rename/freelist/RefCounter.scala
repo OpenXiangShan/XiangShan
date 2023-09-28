@@ -33,7 +33,7 @@ class RefCounter(size: Int)(implicit p: Parameters) extends XSModule {
     val commit = Input(new RobCommitIO)
     val redirect = Input(Bool())
     // debug arch ports
-    val debug_int_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
+    val debug_int_rat = if(backendParams.debugEn) Some(Vec(32, Input(UInt(PhyRegIdxWidth.W)))) else None
   })
 
   val allocate = RegNext(io.allocate) // TODO: why no init value here?
@@ -117,12 +117,14 @@ class RefCounter(size: Int)(implicit p: Parameters) extends XSModule {
   }
 
   // assertion of consistancy between arch rename table and refCounter
-  val archRefCounterFromRAT = RegInit(VecInit.fill(size)(0.U(IntRefCounterWidth.W)))
-  archRefCounterFromRAT := (0 until size).map(i => PopCount((io.debug_int_rat).map(_ === i.U)))
-  (1 until size).foreach(i =>
-    XSError(archRefCounter(i) =/= archRefCounterFromRAT(i),
-            p"archRefCounter_$i: ${archRefCounter(i)} =/= archRefCounterFromRAT_$i: ${archRefCounterFromRAT(i)}\n")
-  )
+  if(backendParams.debugEn){
+    val archRefCounterFromRAT = RegInit(VecInit.fill(size)(0.U(IntRefCounterWidth.W)))
+    archRefCounterFromRAT := (0 until size).map(i => PopCount((io.debug_int_rat.get).map(_ === i.U)))
+    (1 until size).foreach(i =>
+      XSError(archRefCounter(i) =/= archRefCounterFromRAT(i),
+        p"archRefCounter_$i: ${archRefCounter(i)} =/= archRefCounterFromRAT_$i: ${archRefCounterFromRAT(i)}\n")
+    )
+  }
 
   for (i <- 0 until RobSize) {
     val numCounters = PopCount(refCounter.map(_ === i.U))
