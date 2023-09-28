@@ -136,7 +136,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   val hptw_resp = io.hptw.resp.bits.h_resp
   val gpaddr = Mux(onlyS2xlate, Cat(vpn, 0.U(offLen.W)), mem_addr)
-  val hpaddr = Cat(hptw_resp.entry.ppn, 0.U(offLen.W))
+  val hpaddr = Cat(hptw_resp.genPPNS2(), 0.U(offLen.W))
 
   io.req.ready := idle
 
