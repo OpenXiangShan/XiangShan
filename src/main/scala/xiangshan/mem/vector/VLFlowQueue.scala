@@ -52,6 +52,7 @@ class VecLoadPipeBundle(implicit p: Parameters) extends VLSUBundleWithMicroOp {
   val is_first_ele        = Bool()
   val flowIdx             = UInt(elemIdxBits.W)
   val flowPtr             = new VlflowPtr
+  val isFirstIssue        = Bool()
 }
 
 class VlFlowQueueIOBundle(implicit p: Parameters) extends VLSUBundle {
@@ -61,12 +62,12 @@ class VlFlowQueueIOBundle(implicit p: Parameters) extends VLSUBundle {
   // writeback 2 flows to uop queue each cycle at most
   val flowWriteback = Vec(VecLoadPipelineWidth, DecoupledIO(new VecExuOutput()))
 
-  // TODO: parameterize the flow-issue-with between uop queue and flow queue instead of 2
+  // TODO: parameterize the flow-issue-width between uop queue and flow queue instead of 2
 
   // each issue port corresponds to an ldu
   val pipeIssue = Vec(VecLoadPipelineWidth, Decoupled(new VecLoadPipeBundle()))
   // loads that fail and need to be replayed
-  val pipeReplay = Vec(VecLoadPipelineWidth, Flipped(DecoupledIO(new LqWriteBundle())))
+  val pipeReplay = Vec(VecLoadPipelineWidth, Flipped(DecoupledIO(new LsPipelineBundle())))
   // loads that succeed
   val pipeResult = Vec(VecLoadPipelineWidth, Flipped(DecoupledIO(new VecExuOutput())))
 }
@@ -98,6 +99,8 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
   val flowAllocated = RegInit(VecInit(List.fill(VlFlowSize)(false.B)))
   // loaded data from load unit
   val flowLoadResult = Reg(Vec(VlFlowSize, new VecExuOutput))
+  // issued is only used for debugging and perf counters, to indicate whether a valid flow is issued for the first time
+  val issued = RegInit(VecInit(Seq.fill(VlFlowSize)(false.B)))
 
 
   /* Queue Pointers */
@@ -139,6 +142,7 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
     when (doEnqueue(i)) {
       flowQueueBundles(enqPtr(i).value) := io.flowIn(i).bits
       flowAllocated(enqPtr(i).value) := true.B
+      issued(enqPtr(i).value) := false.B
     }
   }
 
@@ -175,6 +179,14 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
     doDequeue(i) := canDequeue(i) && allowDequeue(i)
     when (doDequeue(i)) {
       flowAllocated(deqPtr(i).value) := false.B
+      issued(deqPtr(i).value) := false.B
+    }
+  }
+  // flowAllocated.zip(flowNeedCancel).foreach { case (v, cancel) => when (cancel) { v := false.B } }
+  flowNeedCancel.zipWithIndex.foreach { case (cancel, i) =>
+    when (cancel) {
+      flowAllocated(i) := false.B
+      issued(i) := false.B
     }
   }
   // update deqPtr
@@ -211,6 +223,7 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
     }
     when (doIssue(i)) {
       flowFinished(issuePtr(i).value) := false.B
+      issued(issuePtr(i).value) := true.B
     }
   }
   // data
@@ -228,6 +241,7 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
       x.is_first_ele        := thisFlow.is_first_ele
       x.flowIdx             := thisFlow.flow_idx
       x.flowPtr             := issuePtr(i)
+      x.isFirstIssue        := !issued(issuePtr(i).value)
     }
   }
 

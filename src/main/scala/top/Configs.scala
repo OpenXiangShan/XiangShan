@@ -107,8 +107,8 @@ class MinimalConfig(n: Int = 1) extends Config(
           FmiscDivSqrtCnt = 0,
           LduCnt = 2,
           StuCnt = 2,
-          VlCnt = 2,
-          VsCnt = 2
+          VlCnt = 1,
+          VsCnt = 1
         ),
         icacheParameters = ICacheParameters(
           nSets = 64, // 16KB ICache

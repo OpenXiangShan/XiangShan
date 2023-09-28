@@ -183,13 +183,13 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
     val stride = Mux(isIndexed(issueInstType), indexedStride, notIndexedStride)
     val fieldOffset = nfIdx << issueAlignedType // field offset inside a segment
     val vaddr = issueBaseAddr + stride + fieldOffset
-    val mask = genVWmask(vaddr, issueAlignedType)
+    val mask = genVWmask(vaddr, issueAlignedType) & issueEntry.byteMask
     val regOffset = (elemIdxInsideField << issueAlignedType)(vOffsetBits - 1, 0)
     val exp = VLExpCtrl(
       vstart = issueVstart,
       vl = Mux(issueEntry.usWholeReg, GenUSWholeRegVL(issueNFIELDS, issueEew), issueVl),
       eleIdx = elemIdxInsideField
-    )
+    ) && mask.orR
 
     issuePort.valid := issueValid && flowIdx < issueFlowNum &&
       !issueUop.robIdx.needFlush(io.redirect) &&

@@ -129,7 +129,7 @@ case class XSCoreParameters
   DecodeWidth: Int = 6,
   RenameWidth: Int = 6,
   CommitWidth: Int = 6,
-  MaxUopSize: Int = 37,
+  MaxUopSize: Int = 65,
   EnableRenameSnapshot: Boolean = true,
   RenameSnapshotNum: Int = 4,
   FtqSize: Int = 64,
@@ -172,8 +172,8 @@ case class XSCoreParameters
     FmiscDivSqrtCnt = 0,
     LduCnt = 2,
     StuCnt = 2,
-    VlCnt = 2,
-    VsCnt = 2
+    VlCnt = 1,
+    VsCnt = 1
   ),
   prefetcher: Option[PrefetcherParams] = Some(SMSParams()),
   LoadPipelineWidth: Int = 2,

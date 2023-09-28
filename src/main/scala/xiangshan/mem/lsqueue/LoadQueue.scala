@@ -132,6 +132,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val lq_rep_full = Output(Bool())
     val tlbReplayDelayCycleCtrl = Vec(4, Input(UInt(ReSelectLen.W)))
     val l2_hint = Input(Valid(new L2ToL1Hint()))
+    val vecWriteback = Flipped(ValidIO(new ExuOutput(isVpu = true)))
   })
 
   val loadQueueRAR = Module(new LoadQueueRAR)  //  read-after-read violation
@@ -169,12 +170,13 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   /**
    * VirtualLoadQueue
    */
-  virtualLoadQueue.io.redirect    <> io.redirect
-  virtualLoadQueue.io.enq         <> io.enq
-  virtualLoadQueue.io.ldin        <> io.ldu.ldin // from load_s3
-  virtualLoadQueue.io.lqFull      <> io.lqFull
-  virtualLoadQueue.io.lqDeq       <> io.lqDeq
-  virtualLoadQueue.io.lqCancelCnt <> io.lqCancelCnt
+  virtualLoadQueue.io.redirect      <> io.redirect
+  virtualLoadQueue.io.enq           <> io.enq
+  virtualLoadQueue.io.ldin          <> io.ldu.ldin // from load_s3
+  virtualLoadQueue.io.lqFull        <> io.lqFull
+  virtualLoadQueue.io.lqDeq         <> io.lqDeq
+  virtualLoadQueue.io.lqCancelCnt   <> io.lqCancelCnt
+  virtualLoadQueue.io.vecWriteback  <> io.vecWriteback
 
   /**
    * Load queue exception buffer

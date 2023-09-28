@@ -270,7 +270,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   outer.wbArbiter.module.io.redirect <> ctrlBlock.io.redirect
   // TODO
-  val allWriteback = exuBlocks.flatMap(_.io.fuWriteback) ++ memBlock.io.mem_to_ooo.writeback ++ memBlock.io.mem_to_ooo.vecWriteback
+  val allWriteback = exuBlocks.flatMap(_.io.fuWriteback) ++ memBlock.io.mem_to_ooo.writeback// ++ memBlock.io.mem_to_ooo.vecWriteback // TODO
   // TODO: Backend for VLSU, fix it
   // Now vector store insts have vecsta and vecstd, but will writeback vecsta and vecstd together
   require(exuConfigs.length == allWriteback.length + exuParameters.VsCnt, s"${exuConfigs.length} != ${allWriteback.length}")
@@ -438,8 +438,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.l2_hint.valid := io.l2_hint.valid
   memBlock.io.l2_hint.bits.sourceId := io.l2_hint.bits.sourceId
   // TODO: Backend for VLSU, implement vector load & store in
-  memBlock.io.ooo_to_mem.VecloadRegIn := DontCare
-  memBlock.io.ooo_to_mem.vecStoreIn := DontCare
+  memBlock.io.ooo_to_mem.vecLoadRegIn <> DontCare
+  memBlock.io.ooo_to_mem.vecStoreIn <> DontCare
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   io.l2_pf_enable := csrioIn.customCtrl.l2_pf_enable

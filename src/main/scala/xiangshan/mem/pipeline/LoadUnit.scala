@@ -108,6 +108,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // vec issue path
     val vecldin = Flipped(Decoupled(new VecLoadPipeBundle))
     val vecldout = Decoupled(new VecExuOutput)
+    val vecReplay = Decoupled(new LsPipelineBundle)
 
     // data path
     val tlb           = new TlbRequestIO(2)
@@ -211,7 +212,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // src2: load replayed by LSQ (io.replay)
   // src3: hardware prefetch from prefetchor (high confidence) (io.prefetch)
   // src4: int read / software prefetch first issue from RS (io.in)
-  // src5: vec read first issue from RS (TODO)
+  // src5: vec read first issue from RS (io.vecldin)
   // src6: load try pointchaising when no issued or replayed load (io.fastpath)
   // src7: hardware prefetch from prefetchor (high confidence) (io.prefetch)
   // priority: high to low
@@ -450,14 +451,14 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s0_mask          := src.mask
     s0_uop           := src.uop
     s0_try_l2l       := false.B
-    s0_has_rob_entry := false.B
+    s0_has_rob_entry := true.B
     // TODO: VLSU, implement vector feedback
     s0_rsIdx         := 0.U
     // TODO: VLSU, implement replay carry
     s0_rep_carry     := 0.U.asTypeOf(s0_rep_carry.cloneType)
     s0_mshrid        := 0.U
     // TODO: VLSU, implement first issue
-    s0_isFirstIssue  := true.B
+    s0_isFirstIssue  := src.isFirstIssue
     s0_fast_rep      := false.B
     s0_ld_rep        := false.B
     s0_l2l_fwd       := false.B
@@ -467,8 +468,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s0_sched_idx     := 0.U
     // Vector load interface
     s0_isvec               := true.B
-    // TODO: VLSU, whether req is 128 bits should be separated
-    s0_is128bit            := true.B
+    // vector loads only access a single element at a time, so 128-bit path is not used for now
+    s0_is128bit            := false.B
     s0_uop_unit_stride_fof := src.uop_unit_stride_fof
     // s0_rob_idx_valid       := src.rob_idx_valid
     // s0_inner_idx           := src.inner_idx
@@ -477,7 +478,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // s0_offset              := src.offset
     s0_exp                 := src.exp
     s0_is_first_ele        := src.is_first_ele
-    s0_flowIdx            := src.flowIdx
+    s0_flowIdx             := src.flowIdx
     s0_flowPtr             := src.flowPtr
   }
 
@@ -995,7 +996,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                                             io.lq_rep_full &&           // LoadQueueReplay is full
                                             s2_out.rep_info.need_rep && // need replay
                                             !s2_exception &&            // no exception is triggered
-                                            !s2_hw_prf                  // not hardware prefetch
+                                            !s2_hw_prf &&               // not hardware prefetch
+                                            !s2_isvec                   // not vector
   io.feedback_fast.bits.hit              := false.B
   io.feedback_fast.bits.flushState       := s2_in.ptwBack
   io.feedback_fast.bits.rsIdx            := s2_in.rsIdx
@@ -1248,7 +1250,24 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.vecldout.bits.uop := s3_out.bits.uop
   io.vecldout.valid := s3_vecout.isvec &&
     (s3_out.valid && !s3_out.bits.uop.robIdx.needFlush(io.redirect) ||
-      io.lsq.uncache.valid && !io.lsq.uncache.bits.uop.robIdx.needFlush(io.redirect) && !s3_out.valid)
+      io.lsq.uncache.valid && !io.lsq.uncache.bits.uop.robIdx.needFlush(io.redirect) && !s3_out.valid) &&
+    !io.lsq.ldin.bits.rep_info.need_rep
+
+  io.vecReplay.valid := s3_vecout.isvec && s3_out.valid && !s3_out.bits.uop.robIdx.needFlush(io.redirect) &&
+    io.lsq.ldin.bits.rep_info.need_rep
+  io.vecReplay.bits := DontCare
+  io.vecReplay.bits.uop := s3_in.uop
+  io.vecReplay.bits.vaddr := s3_in.vaddr
+  io.vecReplay.bits.paddr := s3_in.paddr
+  io.vecReplay.bits.mask := s3_in.mask
+  io.vecReplay.bits.isvec := true.B
+  io.vecReplay.bits.uop_unit_stride_fof := s3_in.uop_unit_stride_fof
+  io.vecReplay.bits.reg_offset := s3_in.reg_offset
+  io.vecReplay.bits.exp := s3_in.exp
+  io.vecReplay.bits.is_first_ele := s3_in.is_first_ele
+  io.vecReplay.bits.flowIdx := s3_in.flowIdx
+  io.vecReplay.bits.flowPtr := s3_in.flowPtr
+  io.vecReplay.bits.fqIdx := s3_in.fqIdx
 
   // fast load to load forward
   io.l2l_fwd_out.valid      := s3_out.valid && !s3_in.lateKill

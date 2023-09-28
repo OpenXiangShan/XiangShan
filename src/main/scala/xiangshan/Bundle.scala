@@ -373,6 +373,34 @@ class ExuOutput(isVpu: Boolean = false)(implicit p: Parameters) extends XSBundle
   val redirectValid = Bool()
   val redirect = new Redirect
   val debug = new DebugBundle
+
+  def this(f: Parameters => Boolean)(implicit p: Parameters) = this(f(p))
+
+  final def := (that: ExuOutput): Unit = {
+    val thisIsVpu = isVpu
+    val thatIsVpu = !that.mask.isEmpty
+    this.uop := that.uop
+    this.fflags := that.fflags
+    this.redirectValid := that.redirectValid
+    this.redirect := that.redirect
+    this.debug := that.debug
+    // data
+    if (this.data.getWidth > that.data.getWidth) {
+      this.data := ZeroExt(that.data, this.data.getWidth)
+    } else {
+      this.data := that.data
+    }
+    // mask
+    if (thisIsVpu) {
+      if (thatIsVpu) {
+        this.mask.foreach(_ := that.mask.get)
+      } else {
+        this.mask.foreach(_ := -1.asSInt.asUInt)
+      }
+    }
+  }
+
+  final def <> (that: ExuOutput): Unit = this.:=(that)
 }
 
 class ExternalInterruptIO(implicit p: Parameters) extends XSBundle {

@@ -63,7 +63,7 @@ class ooo_to_mem(implicit p: Parameters) extends XSBundle{
   val flushSb = Input(Bool())
   val loadPc = Vec(exuParameters.LduCnt, Input(UInt(VAddrBits.W))) // for hw prefetch
   val issue = Vec(exuParameters.LsExuCnt + exuParameters.StuCnt, Flipped(DecoupledIO(new ExuInput)))
-  val VecloadRegIn = Vec(exuParameters.VlCnt, Flipped(Decoupled(new ExuInput(isVpu = true))))
+  val vecLoadRegIn = Vec(exuParameters.VlCnt, Flipped(Decoupled(new ExuInput(isVpu = true))))
   val vecStoreIn = Vec(exuParameters.VsCnt, Flipped(DecoupledIO(new ExuInput(isVpu = true))))
 }
 
@@ -238,6 +238,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   val ldExeWbReqs = ldout0 +: loadUnits.tail.map(_.io.ldout)
   io.mem_to_ooo.writeback <> ldExeWbReqs ++ VecInit(storeUnits.map(_.io.stout)) ++ VecInit(stdExeUnits.map(_.io.out))
+  val vecWritebacks = VecInit(Seq(vectorLoadWrapperModule.io.uopWriteback)) ++ VecInit(Seq(vsUopQueue.io.uopWriteback))
+  io.mem_to_ooo.vecWriteback.zipWithIndex.foreach { case (wb, i) =>
+    wb.valid := vecWritebacks(i).valid
+    wb.bits := vecWritebacks(i).bits
+    vecWritebacks(i).ready := wb.ready
+  }
   io.mem_to_ooo.otherFastWakeup := DontCare
   io.mem_to_ooo.otherFastWakeup.take(2).zip(loadUnits.map(_.io.fast_uop)).foreach{case(a,b)=> a := b}
   // TODO: VLSU, implement it
@@ -541,8 +547,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     // vector load resp
     vectorLoadWrapperModule.io.pipeResult(i) <> loadUnits(i).io.vecldout
-    // !!!!!!!!!!!!!!! TODO !!!!!!!!!!!!!!!
-    vectorLoadWrapperModule.io.pipeReplay(i) <> DontCare
+    vectorLoadWrapperModule.io.pipeReplay(i) <> loadUnits(i).io.vecReplay
 
     // --------------------------------
     // Load Triggers
@@ -573,23 +578,24 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // Prefetcher
   val PrefetcherDTLBPortIndex = exuParameters.LduCnt + exuParameters.StuCnt
   prefetcherOpt match {
-  case Some(pf) => dtlb_reqs(PrefetcherDTLBPortIndex) <> pf.io.tlb_req
-  case None =>
-    dtlb_reqs(PrefetcherDTLBPortIndex) := DontCare
-    dtlb_reqs(PrefetcherDTLBPortIndex).req.valid := false.B
-    dtlb_reqs(PrefetcherDTLBPortIndex).resp.ready := true.B
+    case Some(pf) => dtlb_reqs(PrefetcherDTLBPortIndex) <> pf.io.tlb_req
+    case None =>
+      dtlb_reqs(PrefetcherDTLBPortIndex) := DontCare
+      dtlb_reqs(PrefetcherDTLBPortIndex).req.valid := false.B
+      dtlb_reqs(PrefetcherDTLBPortIndex).resp.ready := true.B
   }
 
   // vector store
+  require(io.ooo_to_mem.vecStoreIn.length == 1)
   vsUopQueue.io.redirect <> redirect
+  vsUopQueue.io.storeIn <> io.ooo_to_mem.vecStoreIn.head
+
   vsFlowQueue.io.redirect <> redirect
-  vsUopQueue.io.storeIn <> DontCare
   for (i <- 0 until VecStorePipelineWidth) {
     // vsUopQueue.io.vstart(i) := DontCare
     vsFlowQueue.io.flowIn(i) <> vsUopQueue.io.flowIssue(i)
     vsUopQueue.io.flowWriteback(i) <> vsFlowQueue.io.flowWriteback(i)
   }
-  vsUopQueue.io.uopWriteback <> DontCare
   vsFlowQueue.io.rob.lcommit := io.ooo_to_mem.lsqio.lcommit
   vsFlowQueue.io.rob.scommit := io.ooo_to_mem.lsqio.scommit
   vsFlowQueue.io.rob.pendingld := io.ooo_to_mem.lsqio.pendingld
@@ -724,6 +730,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   lsq.io.lqDeq <> io.mem_to_ooo.lqDeq
   lsq.io.sqDeq <> io.mem_to_ooo.sqDeq
   lsq.io.tl_d_channel <> dcache.io.lsu.tl_d_channel
+  lsq.io.vecWriteback.valid := vectorLoadWrapperModule.io.uopWriteback.valid &&
+    vectorLoadWrapperModule.io.uopWriteback.bits.uop.ctrl.lastUop
+  lsq.io.vecWriteback.bits := vectorLoadWrapperModule.io.uopWriteback.bits
 
   // LSQ to store buffer
   // lsq.io.sbuffer        <> sbuffer.io.in
@@ -745,9 +754,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   /**
     * TODO @hx @zlj
     */
+  require(io.ooo_to_mem.vecLoadRegIn.length == 1)
   vectorLoadWrapperModule.io.redirect := redirect
-  vectorLoadWrapperModule.io.loadRegIn <> DontCare
-  vectorLoadWrapperModule.io.uopWriteback <> DontCare
+  vectorLoadWrapperModule.io.loadRegIn <> io.ooo_to_mem.vecLoadRegIn.head
 
   // Sbuffer
   sbuffer.io.csrCtrl    <> csrCtrl

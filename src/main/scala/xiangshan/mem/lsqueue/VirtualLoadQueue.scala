@@ -45,6 +45,8 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     // to dispatch
     val lqDeq       = Output(UInt(log2Up(CommitWidth + 1).W))
     val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize+1).W))
+    // vector load writeback
+    val vecWriteback = Flipped(ValidIO(new ExuOutput(isVpu = true)))
   })
 
   println("VirtualLoadQueue: size: " + VirtualLoadQueueSize)
@@ -245,6 +247,13 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
         )
       }
     }
+  }
+
+  when (io.vecWriteback.valid) {
+    val vecWbIndex = io.vecWriteback.bits.uop.lqIdx.value
+    assert(allocated(vecWbIndex))
+    addrvalid(vecWbIndex) := true.B
+    datavalid(vecWbIndex) := true.B
   }
 
   //  perf counter
