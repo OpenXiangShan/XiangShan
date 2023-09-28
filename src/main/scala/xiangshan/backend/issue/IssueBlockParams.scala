@@ -40,11 +40,21 @@ case class IssueBlockParams(
 
   def inVfSchd: Boolean = schdType == VfScheduler()
 
-  def isMemAddrIQ: Boolean = inMemSchd && StdCnt == 0
+  def isMemAddrIQ: Boolean = inMemSchd && (LduCnt > 0 || StaCnt > 0 || VlduCnt > 0 || VstaCnt > 0)
 
   def isLdAddrIQ: Boolean = inMemSchd && LduCnt > 0
 
   def isStAddrIQ: Boolean = inMemSchd && StaCnt > 0
+
+  def isVecMemAddrIQ: Boolean = inMemSchd && (VlduCnt > 0 || VstaCnt > 0)
+
+  def isVecLdAddrIQ: Boolean = inMemSchd && VlduCnt > 0
+
+  def isVecStAddrIQ: Boolean = inMemSchd && VstaCnt > 0
+
+  def isVecStDataIQ: Boolean = inMemSchd && VstdCnt > 0
+
+  def isVecMemIQ: Boolean = (isVecLdAddrIQ || isVecStAddrIQ || isVecStDataIQ)
 
   def numExu: Int = exuBlockParams.length
 
@@ -147,6 +157,10 @@ case class IssueBlockParams(
   def VlduCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vldu)).sum
 
   def VstuCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vstu)).sum
+
+  def VstaCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.name == "vsta")).sum
+
+  def VstdCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.name == "vstd")).sum
 
   def numRedirect: Int = exuBlockParams.count(_.hasRedirect)
 

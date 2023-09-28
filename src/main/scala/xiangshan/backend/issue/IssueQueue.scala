@@ -12,7 +12,8 @@ import xiangshan.backend.decode.{ImmUnion, Imm_LUI_LOAD}
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.{FuConfig, FuType}
-import xiangshan.mem.{MemWaitUpdateReq, SqPtr}
+import xiangshan.mem.{MemWaitUpdateReq, SqPtr, LqPtr}
+import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.datapath.NewPipelineConnect
 
 class IssueQueue(params: IssueBlockParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
@@ -22,7 +23,9 @@ class IssueQueue(params: IssueBlockParams)(implicit p: Parameters) extends LazyM
   lazy val module: IssueQueueImp = iqParams.schdType match {
     case IntScheduler() => new IssueQueueIntImp(this)
     case VfScheduler() => new IssueQueueVfImp(this)
-    case MemScheduler() => if (iqParams.StdCnt == 0) new IssueQueueMemAddrImp(this)
+    case MemScheduler() => 
+      if (iqParams.StdCnt == 0 && !iqParams.isVecMemIQ) new IssueQueueMemAddrImp(this)
+      else if (iqParams.isVecMemIQ) new IssueQueueVecMemImp(this)
       else new IssueQueueIntImp(this)
     case _ => null
   }
@@ -250,6 +253,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       }
       enq.bits.status.fuType := s0_enqBits(i).fuType
       enq.bits.status.robIdx := s0_enqBits(i).robIdx
+      enq.bits.status.uopIdx.foreach(_ := s0_enqBits(i).uopIdx)
       enq.bits.status.issueTimer := "b11".U
       enq.bits.status.deqPortIdx := 0.U
       enq.bits.status.issued := false.B
@@ -750,6 +754,7 @@ class IssueQueueVfImp(override val wrapper: IssueQueue)(implicit p: Parameters, 
     deq.bits.common.fpu.foreach(_ := deqEntryVec(i).bits.payload.fpu)
     deq.bits.common.vpu.foreach(_ := deqEntryVec(i).bits.payload.vpu)
     deq.bits.common.vpu.foreach(_.vuopIdx := deqEntryVec(i).bits.payload.uopIdx)
+    deq.bits.common.vpu.foreach(_.lastUop := deqEntryVec(i).bits.payload.lastUop)
   }}
 }
 
@@ -760,6 +765,10 @@ class IssueQueueMemBundle(implicit p: Parameters, params: IssueBlockParams) exte
     val memWaitUpdateReq = Flipped(new MemWaitUpdateReq)
   }
   val loadFastMatch = Output(Vec(params.LduCnt, new IssueQueueLoadBundle))
+
+  // vector
+  val sqDeqPtr = OptionWrapper(params.isVecMemIQ, Input(new SqPtr))
+  val lqDeqPtr = OptionWrapper(params.isVecMemIQ, Input(new LqPtr))
 }
 
 class IssueQueueMemIO(implicit p: Parameters, params: IssueBlockParams) extends IssueQueueIO {
@@ -769,7 +778,7 @@ class IssueQueueMemIO(implicit p: Parameters, params: IssueBlockParams) extends 
 class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Parameters, params: IssueBlockParams)
   extends IssueQueueImp(wrapper) with HasCircularQueuePtrHelper {
 
-  require(params.StdCnt == 0 && (params.LduCnt + params.StaCnt + params.VlduCnt) > 0, "IssueQueueMemAddrImp can only be instance of MemAddr IQ")
+  require(params.StdCnt == 0 && (params.LduCnt + params.StaCnt) > 0, "IssueQueueMemAddrImp can only be instance of MemAddr IQ")
 
   io.suggestName("none")
   override lazy val io = IO(new IssueQueueMemIO).suggestName("io")
@@ -828,5 +837,103 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
       deq.bits.common.vpu.foreach(_ := deqEntryVec(i).bits.payload.vpu)
       deq.bits.common.vpu.foreach(_.vuopIdx := deqEntryVec(i).bits.payload.uopIdx)
     }
+  }
+}
+
+class IssueQueueVecMemImp(override val wrapper: IssueQueue)(implicit p: Parameters, params: IssueBlockParams)
+  extends IssueQueueImp(wrapper) with HasCircularQueuePtrHelper {
+
+  require((params.VstdCnt + params.VlduCnt + params.VstaCnt) > 0, "IssueQueueVecMemImp can only be instance of VecMem IQ")
+
+  io.suggestName("none")
+  override lazy val io = IO(new IssueQueueMemIO).suggestName("io")
+  private val memIO = io.memIO.get
+
+  def selectOldUop(robIdx: Seq[RobPtr], uopIdx: Seq[UInt], valid: Seq[Bool]): Vec[Bool] = {
+    val compareVec = (0 until robIdx.length).map(i => (0 until i).map(j => isAfter(robIdx(j), robIdx(i)) || (robIdx(j).value === robIdx(i).value && uopIdx(i) < uopIdx(j))))
+    val resultOnehot = VecInit((0 until robIdx.length).map(i => Cat((0 until robIdx.length).map(j =>
+      (if (j < i) !valid(j) || compareVec(i)(j)
+      else if (j == i) valid(i)
+      else !valid(j) || !compareVec(j)(i))
+    )).andR))
+    resultOnehot
+  }
+
+  val robIdxVec = entries.io.robIdx.get
+  val uopIdxVec = entries.io.uopIdx.get
+  val allEntryOldestOH = selectOldUop(robIdxVec, uopIdxVec, validVec)
+
+  finalDeqSelValidVec.head := (allEntryOldestOH.asUInt & canIssueVec.asUInt).orR
+  finalDeqSelOHVec.head := allEntryOldestOH.asUInt & canIssueVec.asUInt
+
+  if (params.isVecMemAddrIQ) {
+    s0_enqBits.foreach{ x =>
+      x.srcType(3) := SrcType.vp // v0: mask src
+      x.srcType(4) := SrcType.vp // vl&vtype
+    }
+
+    for (i <- io.enq.indices) {
+      val blockNotReleased = isAfter(io.enq(i).bits.sqIdx, memIO.checkWait.stIssuePtr)
+      val storeAddrWaitForIsIssuing = VecInit((0 until StorePipelineWidth).map(i => {
+        memIO.checkWait.memWaitUpdateReq.staIssue(i).valid &&
+          memIO.checkWait.memWaitUpdateReq.staIssue(i).bits.uop.robIdx.value === io.enq(i).bits.waitForRobIdx.value
+      })).asUInt.orR && !io.enq(i).bits.loadWaitStrict // is waiting for store addr ready
+      s0_enqBits(i).loadWaitBit := io.enq(i).bits.loadWaitBit && !storeAddrWaitForIsIssuing && blockNotReleased
+    }
+
+    for (i <- entries.io.enq.indices) {
+      entries.io.enq(i).bits.status match { case enqData =>
+        enqData.blocked := false.B // s0_enqBits(i).loadWaitBit
+        enqData.mem.get.strictWait := s0_enqBits(i).loadWaitStrict
+        enqData.mem.get.waitForStd := false.B
+        enqData.mem.get.waitForRobIdx := s0_enqBits(i).waitForRobIdx
+        enqData.mem.get.waitForSqIdx := 0.U.asTypeOf(enqData.mem.get.waitForSqIdx) // generated by sq, will be updated later
+        enqData.mem.get.sqIdx := s0_enqBits(i).sqIdx
+      }
+
+      entries.io.fromMem.get.slowResp.zipWithIndex.foreach { case (slowResp, i) =>
+        slowResp.valid                 := memIO.feedbackIO(i).feedbackSlow.valid
+        slowResp.bits.robIdx           := memIO.feedbackIO(i).feedbackSlow.bits.robIdx
+        slowResp.bits.respType         := Mux(memIO.feedbackIO(i).feedbackSlow.bits.hit, RSFeedbackType.fuIdle, RSFeedbackType.feedbackInvalid)
+        slowResp.bits.dataInvalidSqIdx := memIO.feedbackIO(i).feedbackSlow.bits.dataInvalidSqIdx
+        slowResp.bits.rfWen := DontCare
+        slowResp.bits.fuType := DontCare
+      }
+
+      entries.io.fromMem.get.fastResp.zipWithIndex.foreach { case (fastResp, i) =>
+        fastResp.valid                 := memIO.feedbackIO(i).feedbackFast.valid
+        fastResp.bits.robIdx           := memIO.feedbackIO(i).feedbackFast.bits.robIdx
+        fastResp.bits.respType         := memIO.feedbackIO(i).feedbackFast.bits.sourceType
+        fastResp.bits.dataInvalidSqIdx := 0.U.asTypeOf(fastResp.bits.dataInvalidSqIdx)
+        fastResp.bits.rfWen := DontCare
+        fastResp.bits.fuType := DontCare
+      }
+
+      entries.io.fromMem.get.memWaitUpdateReq := memIO.checkWait.memWaitUpdateReq
+      entries.io.fromMem.get.stIssuePtr := memIO.checkWait.stIssuePtr
+    }
+  }
+
+  for (i <- entries.io.enq.indices) {
+    entries.io.enq(i).bits.status match { case enqData =>
+      enqData.vecMem.get.sqIdx := s0_enqBits(i).sqIdx
+      enqData.vecMem.get.lqIdx := s0_enqBits(i).lqIdx
+    }
+  }
+
+  entries.io.fromLsq.get.sqDeqPtr := memIO.sqDeqPtr.get
+  entries.io.fromLsq.get.lqDeqPtr := memIO.lqDeqPtr.get
+
+  io.deq.zipWithIndex.foreach { case (deq, i) =>
+    deq.bits.common.sqIdx.foreach(_ := deqEntryVec(i).bits.payload.sqIdx)
+    deq.bits.common.lqIdx.foreach(_ := deqEntryVec(i).bits.payload.lqIdx)
+    if (params.isVecLdAddrIQ) {
+      deq.bits.common.ftqIdx.get := deqEntryVec(i).bits.payload.ftqPtr
+      deq.bits.common.ftqOffset.get := deqEntryVec(i).bits.payload.ftqOffset
+    }
+    deq.bits.common.fpu.foreach(_ := deqEntryVec(i).bits.payload.fpu)
+    deq.bits.common.vpu.foreach(_ := deqEntryVec(i).bits.payload.vpu)
+    deq.bits.common.vpu.foreach(_.vuopIdx := deqEntryVec(i).bits.payload.uopIdx)
+    deq.bits.common.vpu.foreach(_.lastUop := deqEntryVec(i).bits.payload.lastUop)
   }
 }

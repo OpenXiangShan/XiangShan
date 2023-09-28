@@ -127,13 +127,15 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.lsqEnqIO <> memBlock.io.ooo_to_mem.enqLsq
   backend.io.mem.sqDeq := memBlock.io.mem_to_ooo.sqDeq
   backend.io.mem.lqDeq := memBlock.io.mem_to_ooo.lqDeq
+  backend.io.mem.sqDeqPtr := memBlock.io.sqDeqPtr
+  backend.io.mem.lqDeqPtr := memBlock.io.lqDeqPtr
   backend.io.mem.lqCancelCnt := memBlock.io.mem_to_ooo.lqCancelCnt
   backend.io.mem.sqCancelCnt := memBlock.io.mem_to_ooo.sqCancelCnt
   backend.io.mem.otherFastWakeup := memBlock.io.mem_to_ooo.otherFastWakeup
   backend.io.mem.stIssuePtr := memBlock.io.mem_to_ooo.stIssuePtr
-  backend.io.mem.ldaIqFeedback <> memBlock.io.ldaIqFeedback
-  backend.io.mem.staIqFeedback <> memBlock.io.staIqFeedback
-  backend.io.mem.ldCancel <> memBlock.io.ldCancel
+  backend.io.mem.ldaIqFeedback <> memBlock.io.mem_to_ooo.ldaIqFeedback
+  backend.io.mem.staIqFeedback <> memBlock.io.mem_to_ooo.staIqFeedback
+  backend.io.mem.ldCancel <> memBlock.io.mem_to_ooo.ldCancel
   backend.io.mem.writeBack.zip(memBlock.io.mem_to_ooo.writeback).foreach { case (back, mem) =>
     back <> mem
   }
