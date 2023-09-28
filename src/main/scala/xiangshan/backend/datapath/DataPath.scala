@@ -183,7 +183,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     .get._2(64)(63, 0)
   )
 
-  io.debugVconfig := vconfigDebugReadData.get
+  io.debugVconfig.foreach(_ := vconfigDebugReadData.get)
 
   IntRegFile("IntRegFile", intSchdParams.numPregs, intRfRaddr, intRfRdata, intRfWen, intRfWaddr, intRfWdata,
     debugReadAddr = intDebugRead.map(_._1),
@@ -218,11 +218,11 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   io.vconfigReadPort.data := vfRfRdata(VCONFIG_PORT)
 
   intDebugRead.foreach { case (addr, _) =>
-    addr := io.debugIntRat
+    addr := io.debugIntRat.get
   }
 
   vfDebugRead.foreach { case (addr, _) =>
-    addr := io.debugFpRat ++ io.debugVecRat :+ io.debugVconfigRat
+    addr := io.debugFpRat.get ++ io.debugVecRat.get :+ io.debugVconfigRat.get
   }
   println(s"[DataPath] " +
     s"has intDebugRead: ${intDebugRead.nonEmpty}, " +
@@ -493,10 +493,9 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
 
   val fromVfExus = Flipped(intSchdParams.genExuOutputValidBundle)
 
-  val debugIntRat = Input(Vec(32, UInt(intSchdParams.pregIdxWidth.W)))
-  val debugFpRat = Input(Vec(32, UInt(vfSchdParams.pregIdxWidth.W)))
-  val debugVecRat = Input(Vec(32, UInt(vfSchdParams.pregIdxWidth.W)))
-  val debugVconfigRat = Input(UInt(vfSchdParams.pregIdxWidth.W))
-  val debugVconfig = Output(UInt(XLEN.W))
-
+  val debugIntRat     = if (params.debugEn) Some(Input(Vec(32, UInt(intSchdParams.pregIdxWidth.W)))) else None
+  val debugFpRat      = if (params.debugEn) Some(Input(Vec(32, UInt(vfSchdParams.pregIdxWidth.W)))) else None
+  val debugVecRat     = if (params.debugEn) Some(Input(Vec(32, UInt(vfSchdParams.pregIdxWidth.W)))) else None
+  val debugVconfigRat = if (params.debugEn) Some(Input(UInt(vfSchdParams.pregIdxWidth.W))) else None
+  val debugVconfig    = if (params.debugEn) Some(Output(UInt(XLEN.W))) else None
 }

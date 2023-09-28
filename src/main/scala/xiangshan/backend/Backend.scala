@@ -249,10 +249,10 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   println(s"[Backend] wbDataPath.io.toVfPreg: ${wbDataPath.io.toVfPreg.size}, dataPath.io.fromFpWb: ${dataPath.io.fromVfWb.size}")
   dataPath.io.fromIntWb := wbDataPath.io.toIntPreg
   dataPath.io.fromVfWb := wbDataPath.io.toVfPreg
-  dataPath.io.debugIntRat := ctrlBlock.io.debug_int_rat
-  dataPath.io.debugFpRat := ctrlBlock.io.debug_fp_rat
-  dataPath.io.debugVecRat := ctrlBlock.io.debug_vec_rat
-  dataPath.io.debugVconfigRat := ctrlBlock.io.debug_vconfig_rat
+  dataPath.io.debugIntRat    .foreach(_ := ctrlBlock.io.debug_int_rat.get)
+  dataPath.io.debugFpRat     .foreach(_ := ctrlBlock.io.debug_fp_rat.get)
+  dataPath.io.debugVecRat    .foreach(_ := ctrlBlock.io.debug_vec_rat.get)
+  dataPath.io.debugVconfigRat.foreach(_ := ctrlBlock.io.debug_vconfig_rat.get)
 
   bypassNetwork.io.fromDataPath.int <> dataPath.io.toIntExu
   bypassNetwork.io.fromDataPath.vf <> dataPath.io.toFpExu
@@ -298,13 +298,14 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   csrio.fpu.dirty_fs := ctrlBlock.io.robio.csr.dirty_fs
   csrio.vpu <> 0.U.asTypeOf(csrio.vpu) // Todo
 
-  val debugVconfig = dataPath.io.debugVconfig.asTypeOf(new VConfig)
+  val debugVconfig = dataPath.io.debugVconfig.get.asTypeOf(new VConfig)
   val debugVtype = VType.toVtypeStruct(debugVconfig.vtype).asUInt
   val debugVl = debugVconfig.vl
   csrio.vpu.set_vxsat := ctrlBlock.io.robio.csr.vxsat
   csrio.vpu.set_vstart.valid := ctrlBlock.io.robio.csr.vcsrFlag
   csrio.vpu.set_vstart.bits := 0.U
   csrio.vpu.set_vtype.valid := ctrlBlock.io.robio.csr.vcsrFlag
+  //Todo here need change design
   csrio.vpu.set_vtype.bits := ZeroExt(debugVtype, XLEN)
   csrio.vpu.set_vl.valid := ctrlBlock.io.robio.csr.vcsrFlag
   csrio.vpu.set_vl.bits := ZeroExt(debugVl, XLEN)

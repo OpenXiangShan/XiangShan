@@ -82,13 +82,15 @@ class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) w
   val freeRegCntReg = RegNext(freeRegCnt)
   io.canAllocate := freeRegCntReg >= RenameWidth.U
 
-  val debugArchHeadPtr = RegNext(RegNext(archHeadPtr, FreeListPtr(false, 0)), FreeListPtr(false, 0)) // two-cycle delay from refCounter
-  val debugArchRAT = RegNext(RegNext(io.debug_rat, VecInit(Seq.fill(32)(0.U(PhyRegIdxWidth.W)))), VecInit(Seq.fill(32)(0.U(PhyRegIdxWidth.W))))
-  val debugUniqPR = Seq.tabulate(32)(i => i match {
-    case 0 => true.B
-    case _ => !debugArchRAT.take(i).map(_ === debugArchRAT(i)).reduce(_ || _)
-  })
-  XSError(distanceBetween(tailPtr, debugArchHeadPtr) +& PopCount(debugUniqPR) =/= size.U, "Integer physical register should be in either arch RAT or arch free list\n")
+  if(backendParams.debugEn){
+    val debugArchHeadPtr = RegNext(RegNext(archHeadPtr, FreeListPtr(false, 0)), FreeListPtr(false, 0)) // two-cycle delay from refCounter
+    val debugArchRAT = RegNext(RegNext(io.debug_rat.get, VecInit(Seq.fill(32)(0.U(PhyRegIdxWidth.W)))), VecInit(Seq.fill(32)(0.U(PhyRegIdxWidth.W))))
+    val debugUniqPR = Seq.tabulate(32)(i => i match {
+      case 0 => true.B
+      case _ => !debugArchRAT.take(i).map(_ === debugArchRAT(i)).reduce(_ || _)
+    })
+    XSError(distanceBetween(tailPtr, debugArchHeadPtr) +& PopCount(debugUniqPR) =/= size.U, "Integer physical register should be in either arch RAT or arch free list\n")
+  }
 
   QueuePerf(size = size, utilization = freeRegCntReg, full = freeRegCntReg === 0.U)
 

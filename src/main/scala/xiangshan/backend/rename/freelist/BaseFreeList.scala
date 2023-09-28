@@ -43,7 +43,7 @@ abstract class BaseFreeList(size: Int)(implicit p: Parameters) extends XSModule 
 
     val snpt = Input(new SnapshotPort)
 
-    val debug_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
+    val debug_rat = if(backendParams.debugEn) Some(Vec(32, Input(UInt(PhyRegIdxWidth.W)))) else None
   })
 
   class FreeListPtr extends CircularQueuePtr[FreeListPtr](size)

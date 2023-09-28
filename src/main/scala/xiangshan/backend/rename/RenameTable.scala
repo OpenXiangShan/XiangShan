@@ -61,16 +61,16 @@ class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule with 
     val need_free = Vec(CommitWidth, Output(Bool()))
     val snpt = Input(new SnapshotPort)
     val diffWritePorts = Vec(CommitWidth * MaxUopSize, Input(new RatWritePort))
-    val debug_rdata = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
-    val debug_vconfig = reg_t match { // vconfig is implemented as int reg[32]
-      case Reg_V => Some(Output(UInt(PhyRegIdxWidth.W)))
-      case _     => None
-    }
-    val diff_rdata = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
-    val diff_vconfig = reg_t match {
+    val debug_rdata = if (backendParams.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
+    val debug_vconfig = if (backendParams.debugEn) reg_t match { // vconfig is implemented as int reg[32]
       case Reg_V => Some(Output(UInt(PhyRegIdxWidth.W)))
       case _ => None
-    }
+    } else None
+    val diff_rdata = if (backendParams.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
+    val diff_vconfig = if (backendParams.debugEn) reg_t match {
+      case Reg_V => Some(Output(UInt(PhyRegIdxWidth.W)))
+      case _ => None
+    } else None
   })
 
   // speculative rename table
@@ -145,7 +145,7 @@ class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule with 
 
   io.old_pdest := old_pdest
   io.need_free := need_free
-  io.debug_rdata := arch_table.take(32)
+  io.debug_rdata.foreach(_ := arch_table.take(32))
   io.debug_vconfig match {
     case None => Unit
     case x => x.get := arch_table.last
@@ -161,14 +161,14 @@ class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule with 
     }
     difftest_table := difftest_table_next
 
-    io.diff_rdata := difftest_table.take(32)
+    io.diff_rdata.foreach(_ := difftest_table.take(32))
     io.diff_vconfig match {
       case None => Unit
       case x => x.get := difftest_table(VCONFIG_IDX)
     }
   }
   else {
-    io.diff_rdata := 0.U.asTypeOf(io.debug_rdata)
+    io.diff_rdata.foreach(_ := 0.U.asTypeOf(io.debug_rdata.get))
     io.diff_vconfig match {
       case None => Unit
       case x => x.get := 0.U
@@ -200,23 +200,23 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     val snpt = Input(new SnapshotPort)
 
     // for debug printing
-    val debug_int_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
-    val debug_fp_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
-    val debug_vec_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
-    val debug_vconfig_rat = Output(UInt(PhyRegIdxWidth.W))
+    val debug_int_rat     = if (backendParams.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
+    val debug_fp_rat      = if (backendParams.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
+    val debug_vec_rat     = if (backendParams.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
+    val debug_vconfig_rat = if (backendParams.debugEn) Some(Output(UInt(PhyRegIdxWidth.W))) else None
 
-    val diff_int_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
-    val diff_fp_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
-    val diff_vec_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
-    val diff_vconfig_rat = Output(UInt(PhyRegIdxWidth.W))
+    val diff_int_rat     = if (backendParams.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
+    val diff_fp_rat      = if (backendParams.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
+    val diff_vec_rat     = if (backendParams.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
+    val diff_vconfig_rat = if (backendParams.debugEn) Some(Output(UInt(PhyRegIdxWidth.W))) else None
   })
 
   val intRat = Module(new RenameTable(Reg_I))
   val fpRat  = Module(new RenameTable(Reg_F))
   val vecRat = Module(new RenameTable(Reg_V))
 
-  io.debug_int_rat := intRat.io.debug_rdata
-  io.diff_int_rat := intRat.io.diff_rdata
+  io.debug_int_rat .foreach(_ := intRat.io.debug_rdata.get)
+  io.diff_int_rat  .foreach(_ := intRat.io.diff_rdata.get)
   intRat.io.readPorts <> io.intReadPorts.flatten
   intRat.io.redirect := io.redirect
   intRat.io.snpt := io.snpt
@@ -249,8 +249,8 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   }
 
   // debug read ports for difftest
-  io.debug_fp_rat := fpRat.io.debug_rdata
-  io.diff_fp_rat := fpRat.io.diff_rdata
+  io.debug_fp_rat.foreach(_ := fpRat.io.debug_rdata.get)
+  io.diff_fp_rat .foreach(_ := fpRat.io.diff_rdata.get)
   fpRat.io.readPorts <> io.fpReadPorts.flatten
   fpRat.io.redirect := io.redirect
   fpRat.io.snpt := io.snpt
@@ -280,10 +280,10 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   }
 
   // debug read ports for difftest
-  io.debug_vec_rat := vecRat.io.debug_rdata
-  io.debug_vconfig_rat := vecRat.io.debug_vconfig.get
-  io.diff_vec_rat := vecRat.io.diff_rdata
-  io.diff_vconfig_rat := vecRat.io.diff_vconfig.get
+  io.debug_vec_rat    .foreach(_ := vecRat.io.debug_rdata.get)
+  io.debug_vconfig_rat.foreach(_ := vecRat.io.debug_vconfig.get)
+  io.diff_vec_rat     .foreach(_ := vecRat.io.diff_rdata.get)
+  io.diff_vconfig_rat .foreach(_ := vecRat.io.diff_vconfig.get)
   vecRat.io.readPorts <> io.vecReadPorts.flatten
   vecRat.io.redirect := io.redirect
   vecRat.io.snpt := io.snpt

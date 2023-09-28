@@ -334,10 +334,10 @@ class CtrlBlockImp(
   rename.io.int_old_pdest := rat.io.int_old_pdest
   rename.io.fp_old_pdest := rat.io.fp_old_pdest
   rename.io.vec_old_pdest := rat.io.vec_old_pdest
-  rename.io.debug_int_rat := rat.io.debug_int_rat
-  rename.io.debug_fp_rat := rat.io.debug_fp_rat
-  rename.io.debug_vec_rat := rat.io.debug_vec_rat
-  rename.io.debug_vconfig_rat := rat.io.debug_vconfig_rat
+  rename.io.debug_int_rat.foreach(_ := rat.io.debug_int_rat.get)
+  rename.io.debug_fp_rat.foreach(_ := rat.io.debug_fp_rat.get)
+  rename.io.debug_vec_rat.foreach(_ := rat.io.debug_vec_rat.get)
+  rename.io.debug_vconfig_rat.foreach(_ := rat.io.debug_vconfig_rat.get)
   rename.io.stallReason.in <> decode.io.stallReason.out
   rename.io.snpt.snptEnq := DontCare
   rename.io.snpt.snptDeq := snpt.io.deq
@@ -350,6 +350,7 @@ class CtrlBlockImp(
   when(isFull(snpt.io.enqPtr, snpt.io.deqPtr)) {
     renameOut.head.bits.snapshot := false.B
   }
+
 
   // pipeline between rename and dispatch
   for (i <- 0 until RenameWidth) {
@@ -428,10 +429,10 @@ class CtrlBlockImp(
   // rob to mem block
   io.robio.lsq <> rob.io.lsq
 
-  io.debug_int_rat := rat.io.diff_int_rat
-  io.debug_fp_rat := rat.io.diff_fp_rat
-  io.debug_vec_rat := rat.io.diff_vec_rat
-  io.debug_vconfig_rat := rat.io.diff_vconfig_rat
+  io.debug_int_rat    .foreach(_ := rat.io.diff_int_rat.get)
+  io.debug_fp_rat     .foreach(_ := rat.io.diff_fp_rat.get)
+  io.debug_vec_rat    .foreach(_ := rat.io.diff_vec_rat.get)
+  io.debug_vconfig_rat.foreach(_ := rat.io.diff_vconfig_rat.get)
 
   rob.io.debug_ls := io.robio.debug_ls
   rob.io.debugHeadLsIssue := io.robio.robHeadLsIssue
@@ -517,10 +518,10 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
       val lsdqFull  = Bool()
     }
   })
-  val debug_int_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
-  val debug_fp_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
-  val debug_vec_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
-  val debug_vconfig_rat = Output(UInt(PhyRegIdxWidth.W)) // TODO: use me
+  val debug_int_rat     = if (params.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
+  val debug_fp_rat      = if (params.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
+  val debug_vec_rat     = if (params.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
+  val debug_vconfig_rat = if (params.debugEn) Some(Output(UInt(PhyRegIdxWidth.W))) else None // TODO: use me
 
   val debugTopDown = new Bundle {
     val fromRob = new RobCoreTopDownIO
