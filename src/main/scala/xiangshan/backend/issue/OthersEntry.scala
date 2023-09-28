@@ -10,7 +10,7 @@ import xiangshan.backend.Bundles._
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.rob.RobPtr
-import xiangshan.mem.{MemWaitUpdateReq, SqPtr}
+import xiangshan.mem.{MemWaitUpdateReq, SqPtr, LqPtr}
 
 
 class OthersEntryIO(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
@@ -37,6 +37,7 @@ class OthersEntryIO(implicit p: Parameters, params: IssueBlockParams) extends XS
   val isFirstIssue = Output(Bool())
   val entry = ValidIO(new EntryBundle)
   val robIdx = Output(new RobPtr)
+  val uopIdx = OptionWrapper(params.isVecMemIQ, Output(UopIdx()))
   val deqPortIdxRead = Output(UInt(1.W))
   val issueTimerRead = Output(UInt(2.W))
   // mem only
@@ -44,6 +45,11 @@ class OthersEntryIO(implicit p: Parameters, params: IssueBlockParams) extends XS
     val stIssuePtr = Input(new SqPtr)
     val memWaitUpdateReq = Flipped(new MemWaitUpdateReq)
   }) else None
+  // vector mem only
+  val fromLsq = OptionWrapper(params.isVecMemIQ, new Bundle {
+    val sqDeqPtr = Input(new SqPtr)
+    val lqDeqPtr = Input(new LqPtr)
+  })
   // debug
   val cancel = OptionWrapper(params.hasIQWakeUp, Output(Bool()))
 
@@ -191,6 +197,7 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
     entryRegNext.status.srcType := entryReg.status.srcType
     entryRegNext.status.fuType := entryReg.status.fuType
     entryRegNext.status.robIdx := entryReg.status.robIdx
+    entryRegNext.status.uopIdx.foreach(_ := entryReg.status.uopIdx.get)
     entryRegNext.status.issued := entryReg.status.issued // otherwise
     when(!entryReg.status.srcReady) {
       entryRegNext.status.issued := false.B
@@ -225,6 +232,7 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
   io.entry.valid := validReg
   io.entry.bits := entryReg
   io.robIdx := entryReg.status.robIdx
+  io.uopIdx.foreach(_ := entryReg.status.uopIdx.get)
   io.issueTimerRead := Mux(io.deqSel, 0.U, entryReg.status.issueTimer)
   io.deqPortIdxRead := Mux(io.deqSel, io.deqPortIdxWrite, entryReg.status.deqPortIdx)
   io.cancel.foreach(_ := cancelVec.get.asUInt.orR)
@@ -279,12 +287,60 @@ class OthersEntryMem()(implicit p: Parameters, params: IssueBlockParams) extends
   entryRegNext.status.blocked := shouldBlock && blockNotReleased && blockedByOlderStore || respBlock
 }
 
+class OthersEntryVecMemAddr()(implicit p: Parameters, params: IssueBlockParams) extends OthersEntryMem {
+
+  require(params.isVecMemAddrIQ, "OthersEntryVecMemAddr can only be instance of VecMemAddr IQ")
+
+  val vecMemStatus = entryReg.status.vecMem.get
+  val vecMemStatusNext = entryRegNext.status.vecMem.get
+  val fromLsq = io.fromLsq.get
+
+  when(io.enq.valid && io.transSel) {
+    vecMemStatusNext.sqIdx := io.enq.bits.status.vecMem.get.sqIdx
+    vecMemStatusNext.lqIdx := io.enq.bits.status.vecMem.get.lqIdx
+  }.otherwise {
+    vecMemStatusNext := vecMemStatus
+  }
+
+  val isLsqHead = {
+    if (params.isVecLdAddrIQ)
+      entryRegNext.status.vecMem.get.lqIdx.value === fromLsq.lqDeqPtr.value
+    else
+      entryRegNext.status.vecMem.get.sqIdx.value === fromLsq.sqDeqPtr.value
+  }
+
+  entryRegNext.status.blocked := shouldBlock && blockNotReleased && blockedByOlderStore || respBlock || !isLsqHead
+}
+
+class OthersEntryVecMemData()(implicit p: Parameters, params: IssueBlockParams) extends OthersEntry
+  with HasCircularQueuePtrHelper {
+
+  require(params.isVecStDataIQ, "OthersEntryVecMemData can only be instance of VecMemData IQ")
+
+  val vecMemStatus = entryReg.status.vecMem.get
+  val vecMemStatusNext = entryRegNext.status.vecMem.get
+  val fromLsq = io.fromLsq.get
+
+  when(io.enq.valid && io.transSel) {
+    vecMemStatusNext.sqIdx := io.enq.bits.status.vecMem.get.sqIdx
+    vecMemStatusNext.lqIdx := io.enq.bits.status.vecMem.get.lqIdx
+  }.otherwise {
+    vecMemStatusNext := vecMemStatus
+  }
+
+  val isLsqHead = entryRegNext.status.vecMem.get.sqIdx.value === fromLsq.sqDeqPtr.value
+
+  entryRegNext.status.blocked := !isLsqHead
+}
+
 object OthersEntry {
   def apply(implicit p: Parameters, iqParams: IssueBlockParams): OthersEntry = {
     iqParams.schdType match {
       case IntScheduler() => new OthersEntry()
       case MemScheduler() =>
-        if (iqParams.StdCnt == 0) new OthersEntryMem()
+        if (iqParams.isLdAddrIQ || iqParams.isStAddrIQ) new OthersEntryMem()
+        else if (iqParams.isVecMemAddrIQ) new OthersEntryVecMemAddr()
+        else if (iqParams.isVecStDataIQ) new OthersEntryVecMemData()
         else new OthersEntry()
       case VfScheduler() => new OthersEntry()
       case _ => null

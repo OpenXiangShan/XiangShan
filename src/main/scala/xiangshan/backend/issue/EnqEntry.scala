@@ -10,7 +10,7 @@ import xiangshan.backend.Bundles._
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.rob.RobPtr
-import xiangshan.mem.{MemWaitUpdateReq, SqPtr}
+import xiangshan.mem.{MemWaitUpdateReq, SqPtr, LqPtr}
 
 
 class EnqEntryIO(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
@@ -38,6 +38,7 @@ class EnqEntryIO(implicit p: Parameters, params: IssueBlockParams) extends XSBun
   val isFirstIssue = Output(Bool())
   val entry = ValidIO(new EntryBundle)
   val robIdx = Output(new RobPtr)
+  val uopIdx = OptionWrapper(params.isVecMemIQ, Output(UopIdx()))
   val deqPortIdxRead = Output(UInt(1.W))
   val issueTimerRead = Output(UInt(2.W))
   // mem only
@@ -45,6 +46,11 @@ class EnqEntryIO(implicit p: Parameters, params: IssueBlockParams) extends XSBun
     val stIssuePtr = Input(new SqPtr)
     val memWaitUpdateReq = Flipped(new MemWaitUpdateReq)
   }) else None
+  // vector mem only
+  val fromLsq = OptionWrapper(params.isVecMemIQ, new Bundle {
+    val sqDeqPtr = Input(new SqPtr)
+    val lqDeqPtr = Input(new LqPtr)
+  })
   // debug
   val cancel = OptionWrapper(params.hasIQWakeUp, Output(Bool()))
 
@@ -197,6 +203,7 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
   entryUpdate.status.srcType := entryReg.status.srcType
   entryUpdate.status.fuType := entryReg.status.fuType
   entryUpdate.status.robIdx := entryReg.status.robIdx
+  entryUpdate.status.uopIdx.foreach(_ := entryReg.status.uopIdx.get)
   entryUpdate.status.issued := entryReg.status.issued // otherwise
   when(!entryReg.status.srcReady){
     entryUpdate.status.issued := false.B
@@ -232,6 +239,7 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
   io.entry.valid := validReg
   io.entry.bits := entryReg
   io.robIdx := entryReg.status.robIdx
+  io.uopIdx.foreach(_ := entryReg.status.uopIdx.get)
   io.issueTimerRead := Mux(io.deqSel, 0.U, entryReg.status.issueTimer)
   io.deqPortIdxRead := Mux(io.deqSel, io.deqPortIdxWrite, entryReg.status.deqPortIdx)
   io.cancel.foreach(_ := cancelVec.get.asUInt.orR)
@@ -293,12 +301,66 @@ class EnqEntryMem()(implicit p: Parameters, params: IssueBlockParams) extends En
 
 }
 
+class EnqEntryVecMemAddr()(implicit p: Parameters, params: IssueBlockParams) extends EnqEntryMem {
+
+  require(params.isVecMemAddrIQ, "EnqEntryVecMemAddr can only be instance of VecMemAddr IQ")
+
+  val vecMemStatus = entryReg.status.vecMem.get
+  val vecMemStatusNext = entryRegNext.status.vecMem.get
+  val vecMemStatusUpdate = entryUpdate.status.vecMem.get
+  val fromLsq = io.fromLsq.get
+
+  when (io.enq.valid && enqReady) {
+    vecMemStatusNext.sqIdx := io.enq.bits.status.vecMem.get.sqIdx
+    vecMemStatusNext.lqIdx := io.enq.bits.status.vecMem.get.lqIdx
+  }.otherwise {
+    vecMemStatusNext := vecMemStatusUpdate
+  }
+  vecMemStatusUpdate := vecMemStatus
+
+  val isLsqHead = {
+    if (params.isVecLdAddrIQ)
+      entryRegNext.status.vecMem.get.lqIdx.value === fromLsq.lqDeqPtr.value
+    else
+      entryRegNext.status.vecMem.get.sqIdx.value === fromLsq.sqDeqPtr.value
+  }
+
+  entryRegNext.status.blocked := shouldBlock && blockNotReleased && blockedByOlderStore || respBlock || !isLsqHead
+  entryUpdate.status.blocked := shouldBlock && blockNotReleased && blockedByOlderStore || respBlock || !isLsqHead
+}
+
+class EnqEntryVecMemData()(implicit p: Parameters, params: IssueBlockParams) extends EnqEntry
+  with HasCircularQueuePtrHelper {
+
+  require(params.isVecStDataIQ, "EnqEntryVecMemData can only be instance of VecMemData IQ")
+
+  val vecMemStatus = entryReg.status.vecMem.get
+  val vecMemStatusNext = entryRegNext.status.vecMem.get
+  val vecMemStatusUpdate = entryUpdate.status.vecMem.get
+  val fromLsq = io.fromLsq.get
+
+  when (io.enq.valid && enqReady) {
+    vecMemStatusNext.sqIdx := io.enq.bits.status.vecMem.get.sqIdx
+    vecMemStatusNext.lqIdx := io.enq.bits.status.vecMem.get.lqIdx
+  }.otherwise {
+    vecMemStatusNext := vecMemStatusUpdate
+  }
+  vecMemStatusUpdate := vecMemStatus
+
+  val isLsqHead = entryRegNext.status.vecMem.get.sqIdx.value === fromLsq.sqDeqPtr.value
+
+  entryRegNext.status.blocked := !isLsqHead
+  entryUpdate.status.blocked := !isLsqHead
+}
+
 object EnqEntry {
   def apply(implicit p: Parameters, iqParams: IssueBlockParams): EnqEntry = {
     iqParams.schdType match {
       case IntScheduler() => new EnqEntry()
       case MemScheduler() =>
-        if (iqParams.StdCnt == 0) new EnqEntryMem()
+        if (iqParams.isLdAddrIQ || iqParams.isStAddrIQ) new EnqEntryMem()
+        else if (iqParams.isVecMemAddrIQ) new EnqEntryVecMemAddr()
+        else if (iqParams.isVecStDataIQ) new EnqEntryVecMemData()
         else new EnqEntry()
       case VfScheduler() => new EnqEntry()
       case _ => null

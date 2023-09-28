@@ -11,7 +11,7 @@ import xiangshan.backend.datapath.WbConfig.{IntWB, VfWB}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.regfile.RfWritePortWithConfig
 import xiangshan.backend.rename.BusyTable
-import xiangshan.mem.{LsqEnqCtrl, LsqEnqIO, MemWaitUpdateReq, SqPtr}
+import xiangshan.mem.{LsqEnqCtrl, LsqEnqIO, MemWaitUpdateReq, SqPtr, LqPtr}
 
 sealed trait SchedulerType
 
@@ -98,6 +98,8 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
     val stIssuePtr = Input(new SqPtr())
     val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
     val scommit = Input(UInt(log2Ceil(EnsbufferWidth + 1).W)) // connected to `memBlock.io.sqDeq` instead of ROB
+    val lqDeqPtr = Input(new LqPtr)
+    val sqDeqPtr = Input(new SqPtr)
     // from lsq
     val lqCancelCnt = Input(UInt(log2Up(LoadQueueSize + 1).W))
     val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))
@@ -276,10 +278,11 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
     s"has intBusyTable: ${intBusyTable.nonEmpty}, " +
     s"has vfBusyTable: ${vfBusyTable.nonEmpty}")
 
-  val memAddrIQs = issueQueues.filter(iq => iq.params.StdCnt == 0)
-  val stAddrIQs = issueQueues.filter(iq => iq.params.StaCnt > 0) // included in memAddrIQs
-  val ldAddrIQs = issueQueues.filter(iq => iq.params.LduCnt > 0)
-  val stDataIQs = issueQueues.filter(iq => iq.params.StdCnt > 0)
+  val memAddrIQs = issueQueues.filter(iq => iq.params.isMemAddrIQ)
+  val stAddrIQs = issueQueues.filter(iq => iq.params.StaCnt > 0 || iq.params.VstaCnt > 0) // included in memAddrIQs
+  val ldAddrIQs = issueQueues.filter(iq => iq.params.LduCnt > 0 || iq.params.VlduCnt > 0)
+  val stDataIQs = issueQueues.filter(iq => iq.params.StdCnt > 0 || iq.params.VstdCnt > 0)
+  val vecMemIQs = issueQueues.filter(iq => iq.params.isVecMemIQ)
   val hyuIQs = issueQueues.filter(iq => iq.params.HyuCnt > 0)
 
   println(s"[SchedulerMemImp] memAddrIQs.size: ${memAddrIQs.size}, enq.size: ${memAddrIQs.map(_.io.enq.size).sum}")
@@ -389,12 +392,20 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
     //                        ---src*(1)--> [stdIQ]
     // Since the src(1) of sta is easier to get, stdIQEnq.bits.src*(0) is assigned to staIQEnq.bits.src*(1)
     // instead of dispatch2Iq.io.out(x).bits.src*(1)
-    stdIQEnq.bits.srcState(0) := staIQEnq.bits.srcState(1)
-    stdIQEnq.bits.srcType(0) := staIQEnq.bits.srcType(1)
-    stdIQEnq.bits.dataSource(0) := staIQEnq.bits.dataSource(1)
-    stdIQEnq.bits.l1ExuOH(0) := staIQEnq.bits.l1ExuOH(1)
-    stdIQEnq.bits.psrc(0) := staIQEnq.bits.psrc(1)
+    val stdIdx = if (stdIQ.params.isVecMemIQ) 2 else 1
+    stdIQEnq.bits.srcState(0) := staIQEnq.bits.srcState(stdIdx)
+    stdIQEnq.bits.srcType(0) := staIQEnq.bits.srcType(stdIdx)
+    stdIQEnq.bits.dataSource(0) := staIQEnq.bits.dataSource(stdIdx)
+    stdIQEnq.bits.l1ExuOH(0) := staIQEnq.bits.l1ExuOH(stdIdx)
+    stdIQEnq.bits.psrc(0) := staIQEnq.bits.psrc(stdIdx)
     stdIQEnq.bits.sqIdx := staIQEnq.bits.sqIdx
+  }
+
+  vecMemIQs.foreach {
+    case imp: IssueQueueVecMemImp =>
+      imp.io.memIO.get.sqDeqPtr.foreach(_ := io.fromMem.get.sqDeqPtr)
+      imp.io.memIO.get.lqDeqPtr.foreach(_ := io.fromMem.get.lqDeqPtr)
+    case _ =>
   }
 
   val lsqEnqCtrl = Module(new LsqEnqCtrl)

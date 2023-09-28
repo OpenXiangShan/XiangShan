@@ -31,7 +31,7 @@ class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyMod
    *
    * Also note that we filter out the 'stData issue-queues' when counting
    */
-  for ((ibp, idx) <- params.memSchdParams.get.issueBlockParams.filter(iq => iq.StdCnt == 0).zipWithIndex) {
+  for ((ibp, idx) <- params.memSchdParams.get.issueBlockParams.filter(iq => iq.StdCnt == 0 && iq.VstdCnt == 0).zipWithIndex) {
     ibp.updateIdx(idx)
   }
 
@@ -208,6 +208,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   memScheduler.io.vfWriteBack := wbDataPath.io.toVfPreg
   memScheduler.io.fromMem.get.scommit := io.mem.sqDeq
   memScheduler.io.fromMem.get.lcommit := io.mem.lqDeq
+  memScheduler.io.fromMem.get.sqDeqPtr := io.mem.sqDeqPtr
+  memScheduler.io.fromMem.get.lqDeqPtr := io.mem.lqDeqPtr
   memScheduler.io.fromMem.get.sqCancelCnt := io.mem.sqCancelCnt
   memScheduler.io.fromMem.get.lqCancelCnt := io.mem.lqCancelCnt
   memScheduler.io.fromMem.get.stIssuePtr := io.mem.stIssuePtr
@@ -548,6 +550,8 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val exceptionVAddr = Input(UInt(VAddrBits.W))
   val sqDeq = Input(UInt(log2Ceil(EnsbufferWidth + 1).W))
   val lqDeq = Input(UInt(log2Up(CommitWidth + 1).W))
+  val sqDeqPtr = Input(new SqPtr)
+  val lqDeqPtr = Input(new LqPtr)
 
   val lqCancelCnt = Input(UInt(log2Up(VirtualLoadQueueSize + 1).W))
   val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))
