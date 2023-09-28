@@ -3,6 +3,7 @@ package xiangshan.backend.fu.vector
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import xiangshan.backend.fu.FuConfig.VialuCfg
 import xiangshan.backend.fu.vector.Bundles.VConfig
 import xiangshan.backend.fu.vector.utils.ScalaDupToVector
 import xiangshan.backend.fu.{FuConfig, FuncUnit, HasPipelineReg}
@@ -37,7 +38,7 @@ trait VecFuncUnitAlias { this: FuncUnit =>
   protected val allMaskFalse = VecInit(Seq.fill(VLEN)(false.B)).asUInt
 
   // vadc.vv, vsbc.vv need this
-  protected val needClearMask: Bool = VialuFixType.needClearMask(inCtrl.fuOpType)
+  protected val needClearMask: Bool = if(cfg == VialuCfg) VialuFixType.needClearMask(inCtrl.fuOpType) else false.B
 
   // There is no difference between control-dependency or data-dependency for function unit,
   // but spliting these in ctrl or data bundles is easy to coding.
@@ -88,8 +89,7 @@ class VecPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(c
   protected val outVm       = outVecCtrl.vm
 
   // vadc.vv, vsbc.vv need this
-  protected val outNeedClearMask: Bool = VialuFixType.needClearMask(outCtrl.fuOpType)
-
+  protected val outNeedClearMask: Bool = if(cfg == VialuCfg) VialuFixType.needClearMask(outCtrl.fuOpType) else false.B
   protected val outVConfig  = if(!cfg.vconfigWakeUp) outCtrl.vpu.get.vconfig else outData.getSrcVConfig.asTypeOf(new VConfig)
   protected val outVl       = outVConfig.vl
   protected val outOldVd    = outData.src(2)

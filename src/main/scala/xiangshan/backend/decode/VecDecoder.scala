@@ -470,11 +470,11 @@ object VecDecoder extends DecodeConstants {
     // 13.8. Vector Floating-Point Square-Root Instruction
     VFSQRT_V           -> OPFVV(SrcType.X , SrcType.vp , FuType.vfdiv, VfdivType.vfsqrt, F, T, F, UopSplitType.VEC_VVV),
 
-    // 13.9. Vector Floating-Point Reciprocal Square-Root Estimate Instruction
-    VFRSQRT7_V         -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfrsqrt7, F, T, F),
+    // 13.9. Vector Floating-Point Reciprocal Square-Root Estimate Instruction 1src->1dest
+    VFRSQRT7_V         -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfrsqrt7, F, T, F, UopSplitType.VEC_VVV),
 
-    // 13.10. Vector Floating-Point Reciprocal Estimate Instruction
-    VFREC7_V           -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfrec7, F, T, F),
+    // 13.10. Vector Floating-Point Reciprocal Estimate Instruction 1src->1dest
+    VFREC7_V           -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfrec7, F, T, F, UopSplitType.VEC_VVV),
 
     // 13.11. Vector Floating-Point MIN/MAX Instructions
     VFMIN_VV           -> OPFVV(SrcType.vp, SrcType.vp , FuType.vfalu, VfaluType.vfmin, F, T, F, UopSplitType.VEC_VVV),
@@ -494,33 +494,33 @@ object VecDecoder extends DecodeConstants {
     // 13.14. Vector Floating-Point Classify Instruction
     VFCLASS_V          -> OPFVV(SrcType.X , SrcType.X , FuType.vfalu, VfaluType.vfclass, F, T, F, UopSplitType.VEC_VVV),
 
-    // 13.17. Single-Width Floating-Point/Integer Type-Convert Instructions
-    VFCVT_XU_F_V       -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfcvt_xufv, F, T, F),
-    VFCVT_X_F_V        -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfcvt_xfv, F, T, F),
-    VFCVT_RTZ_XU_F_V   -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfcvt_rtz_xufv, F, T, F),
-    VFCVT_RTZ_X_F_V    -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfcvt_rtz_xfv, F, T, F),
-    VFCVT_F_XU_V       -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfcvt_fxuv, F, T, F),
-    VFCVT_F_X_V        -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfcvt_fxv, F, T, F),
+    // 13.17. Single-Width Floating-Point/Integer Type-Convert Instructions :1src -> 1dest
+    VFCVT_XU_F_V       -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfcvt_xufv, F, T, F, UopSplitType.VEC_VVV),
+    VFCVT_X_F_V        -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfcvt_xfv, F, T, F, UopSplitType.VEC_VVV),
+    VFCVT_RTZ_XU_F_V   -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfcvt_rtz_xufv, F, T, F, UopSplitType.VEC_VVV),
+    VFCVT_RTZ_X_F_V    -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfcvt_rtz_xfv, F, T, F, UopSplitType.VEC_VVV),
+    VFCVT_F_XU_V       -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfcvt_fxuv, F, T, F, UopSplitType.VEC_VVV),
+    VFCVT_F_X_V        -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfcvt_fxv, F, T, F, UopSplitType.VEC_VVV),
 
-    // 13.18. Widening Floating-Point/Integer Type-Convert Instructions
-    VFWCVT_XU_F_V      -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfwcvt_xufv, F, T, F),
-    VFWCVT_X_F_V       -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfwcvt_xfv, F, T, F),
-    VFWCVT_RTZ_XU_F_V  -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfwcvt_rtz_xufv, F, T, F),
-    VFWCVT_RTZ_X_F_V   -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfwcvt_rtz_xfv, F, T, F),
-    VFWCVT_F_XU_V      -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfwcvt_fxuv, F, T, F),
-    VFWCVT_F_X_V       -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfwcvt_fxv, F, T, F),
-    VFWCVT_F_F_V       -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfwcvt_ffv, F, T, F),
+    // 13.18. Widening Floating-Point/Integer Type-Convert Instructions :1src -> 2dest
+    VFWCVT_XU_F_V      -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfwcvt_xufv, F, T, F, UopSplitType.VEC_VVW),
+    VFWCVT_X_F_V       -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfwcvt_xfv, F, T, F, UopSplitType.VEC_VVW),
+    VFWCVT_RTZ_XU_F_V  -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfwcvt_rtz_xufv, F, T, F, UopSplitType.VEC_VVW),
+    VFWCVT_RTZ_X_F_V   -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfwcvt_rtz_xfv, F, T, F, UopSplitType.VEC_VVW),
+    VFWCVT_F_XU_V      -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfwcvt_fxuv, F, T, F, UopSplitType.VEC_VVW),
+    VFWCVT_F_X_V       -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfwcvt_fxv, F, T, F, UopSplitType.VEC_VVW),
+    VFWCVT_F_F_V       -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfwcvt_ffv, F, T, F, UopSplitType.VEC_VVW),
 
     // !
-    // 13.19. Narrowing Floating-Point/Integer Type-Convert Instructions
-    VFNCVT_XU_F_W      -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfnvct_xufw, F, T, F),
-    VFNCVT_X_F_W       -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfnvct_xfw, F, T, F),
-    VFNCVT_RTZ_XU_F_W  -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfwcvt_rtz_xufv, F, T, F),
-    VFNCVT_RTZ_X_F_W   -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfnvct_rtz_xfw, F, T, F),
-    VFNCVT_F_XU_W      -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfnvct_fxuw, F, T, F),
-    VFNCVT_F_X_W       -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfnvct_fxw, F, T, F),
-    VFNCVT_F_F_W       -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfnvct_ffw, F, T, F),
-    VFNCVT_ROD_F_F_W   -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfnvct_rod_ffw, F, T, F),
+    // 13.19. Narrowing Floating-Point/Integer Type-Convert Instructions :2src -> 1dest
+    VFNCVT_XU_F_W      -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfnvct_xufw, F, T, F, UopSplitType.VEC_WVV),
+    VFNCVT_X_F_W       -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfnvct_xfw, F, T, F, UopSplitType.VEC_WVV),
+    VFNCVT_RTZ_XU_F_W  -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfwcvt_rtz_xufv, F, T, F, UopSplitType.VEC_WVV),
+    VFNCVT_RTZ_X_F_W   -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfnvct_rtz_xfw, F, T, F, UopSplitType.VEC_WVV),
+    VFNCVT_F_XU_W      -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfnvct_fxuw, F, T, F, UopSplitType.VEC_WVV),
+    VFNCVT_F_X_W       -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfnvct_fxw, F, T, F, UopSplitType.VEC_WVV),
+    VFNCVT_F_F_W       -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfnvct_ffw, F, T, F, UopSplitType.VEC_WVV),
+    VFNCVT_ROD_F_F_W   -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfnvct_rod_ffw, F, T, F, UopSplitType.VEC_WVV),
     // 14.3. Vector Single-Width Floating-Point Reduction Instructions
     VFREDOSUM_VS -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfalu, VfaluType.vfredosum, F, T, F, UopSplitType.VEC_VFREDOSUM),
     VFREDUSUM_VS -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfalu, VfaluType.vfredusum, F, T, F, UopSplitType.VEC_VFRED),
