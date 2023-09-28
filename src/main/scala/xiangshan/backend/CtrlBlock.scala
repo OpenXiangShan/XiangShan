@@ -330,10 +330,10 @@ class CtrlBlockImp(
   rename.io.intReadPorts := VecInit(rat.io.intReadPorts.map(x => VecInit(x.map(_.data))))
   rename.io.fpReadPorts := VecInit(rat.io.fpReadPorts.map(x => VecInit(x.map(_.data))))
   rename.io.vecReadPorts := VecInit(rat.io.vecReadPorts.map(x => VecInit(x.map(_.data))))
-  rename.io.debug_int_rat := rat.io.debug_int_rat
-  rename.io.debug_fp_rat := rat.io.debug_fp_rat
-  rename.io.debug_vec_rat := rat.io.debug_vec_rat
-  rename.io.debug_vconfig_rat := rat.io.debug_vconfig_rat
+  rename.io.debug_int_rat    .foreach(_ := rat.io.debug_int_rat.get)
+  rename.io.debug_fp_rat     .foreach(_ := rat.io.debug_fp_rat.get)
+  rename.io.debug_vec_rat    .foreach(_ := rat.io.debug_vec_rat.get)
+  rename.io.debug_vconfig_rat.foreach(_ := rat.io.debug_vconfig_rat.get)
 
   // pipeline between rename and dispatch
   for (i <- 0 until RenameWidth) {
@@ -406,10 +406,10 @@ class CtrlBlockImp(
   // rob to mem block
   io.robio.lsq <> rob.io.lsq
 
-  io.debug_int_rat := rat.io.diff_int_rat
-  io.debug_fp_rat := rat.io.diff_fp_rat
-  io.debug_vec_rat := rat.io.diff_vec_rat
-  io.debug_vconfig_rat := rat.io.diff_vconfig_rat
+  io.debug_int_rat    .foreach(_ := rat.io.diff_int_rat.get)
+  io.debug_fp_rat     .foreach(_ := rat.io.diff_fp_rat.get)
+  io.debug_vec_rat    .foreach(_ := rat.io.diff_vec_rat.get)
+  io.debug_vconfig_rat.foreach(_ := rat.io.diff_vconfig_rat.get)
 
   io.perfInfo.ctrlInfo.robFull := RegNext(rob.io.robFull)
   io.perfInfo.ctrlInfo.intdqFull := RegNext(intDq.io.dqFull)
@@ -482,10 +482,10 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
       val lsdqFull  = Bool()
     }
   })
-  val debug_int_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
-  val debug_fp_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
-  val debug_vec_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
-  val debug_vconfig_rat = Output(UInt(PhyRegIdxWidth.W)) // TODO: use me
+  val debug_int_rat     = if (params.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
+  val debug_fp_rat      = if (params.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
+  val debug_vec_rat     = if (params.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
+  val debug_vconfig_rat = if (params.debugEn) Some(Output(UInt(PhyRegIdxWidth.W))) else None // TODO: use me
 
 }
 

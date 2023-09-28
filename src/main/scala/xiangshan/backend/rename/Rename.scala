@@ -58,10 +58,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // to dispatch1
     val out = Vec(RenameWidth, DecoupledIO(new DynInst))
     // debug arch ports
-    val debug_int_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
-    val debug_vconfig_rat = Input(UInt(PhyRegIdxWidth.W))
-    val debug_fp_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
-    val debug_vec_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
+    val debug_int_rat     = if (backendParams.debugEn) Some(Vec(32, Input(UInt(PhyRegIdxWidth.W)))) else None
+    val debug_vconfig_rat = if (backendParams.debugEn) Some(Input(UInt(PhyRegIdxWidth.W))) else None
+    val debug_fp_rat      = if (backendParams.debugEn) Some(Vec(32, Input(UInt(PhyRegIdxWidth.W)))) else None
+    val debug_vec_rat     = if (backendParams.debugEn) Some(Vec(32, Input(UInt(PhyRegIdxWidth.W)))) else None
   })
 
   val compressUnit = Module(new CompressUnit())
@@ -72,11 +72,11 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   intRefCounter.io.commit        <> io.robCommits
   intRefCounter.io.redirect      := io.redirect.valid
-  intRefCounter.io.debug_int_rat <> io.debug_int_rat
+  intRefCounter.io.debug_int_rat.foreach(_ <> io.debug_int_rat.get)
   intFreeList.io.commit    <> io.robCommits
-  intFreeList.io.debug_rat <> io.debug_int_rat
+  intFreeList.io.debug_rat.foreach(_ <> io.debug_int_rat.get)
   fpFreeList.io.commit     <> io.robCommits
-  fpFreeList.io.debug_rat  <> io.debug_fp_rat
+  fpFreeList.io.debug_rat.foreach(_ <> io.debug_fp_rat.get)
 
   // decide if given instruction needs allocating a new physical register (CfCtrl: from decode; RobCommitInfo: from rob)
   // fp and vec share `fpFreeList`

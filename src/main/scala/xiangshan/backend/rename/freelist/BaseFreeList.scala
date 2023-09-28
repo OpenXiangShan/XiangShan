@@ -39,7 +39,7 @@ abstract class BaseFreeList(size: Int)(implicit p: Parameters) extends XSModule 
 
     val commit = Input(new RobCommitIO)
 
-    val debug_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
+    val debug_rat = if(backendParams.debugEn) Some(Vec(32, Input(UInt(PhyRegIdxWidth.W)))) else None
   })
 
   class FreeListPtr extends CircularQueuePtr[FreeListPtr](size)
