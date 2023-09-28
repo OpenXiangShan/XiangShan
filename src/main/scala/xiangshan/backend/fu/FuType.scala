@@ -40,7 +40,7 @@ object FuType {
 
   def X = BitPat.N(num) // Todo: Don't Care
 
-  def num = 28
+  def num = 29
 
   def width = num
 
@@ -66,7 +66,7 @@ object FuType {
 
   def isFence(fuType: UInt): Bool = fuType(7)
 
-  def isVpu(fuType: UInt): Bool = fuType(18, 16).orR || fuType(21) || fuType(24)
+  def isVpu(fuType: UInt): Bool = fuType(18, 16).orR || fuType(21) || fuType(24) || fuType(28)
 
   def isVls(fuType: UInt): Bool = fuType(20, 19).orR
 

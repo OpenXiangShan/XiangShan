@@ -339,6 +339,9 @@ case class XSCoreParameters
       IssueBlockParams(Seq(
         ExeUnitParams("VEX3", Seq(VfdivCfg), Seq(VfWB(port = 5, 0)), Seq(Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(VfRD(9, 0)), Seq(VfRD(10, 0)), Seq(VfRD(11, 0)))),
       ), numEntries = IssueQueueSize, numEnq = 2),
+      IssueBlockParams(Seq(
+        ExeUnitParams("VEX4", Seq(VfcvtCfg), Seq(VfWB(port = 8, 0)), Seq(Seq(VfRD(7, 1)), Seq(VfRD(8, 1)), Seq(VfRD(9, 1)), Seq(VfRD(10, 1)), Seq(VfRD(11, 1)))),
+      ), numEntries = IssueQueueSize, numEnq = 2),
     ),
       numPregs = vfPreg.numEntries,
       numDeqOutside = 0,
