@@ -68,7 +68,7 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
 
   // modules
   private val vfcvt = Module(new VectorCvtTop(dataWidth, dataWidthOfDataModule))
-  private val mgu = Module(new Mgu(dataWidth)) //看看那mgu里干了什么活
+  private val mgu = Module(new Mgu(dataWidth))
 
   val vs2Vec = Wire(Vec(numVecModule, UInt(dataWidthOfDataModule.W)))
   vs2Vec := vs2.asTypeOf(vs2Vec)
@@ -89,16 +89,6 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
 
   /** fflags:
    */
-  //uopidx：每一个uopidex:都有相应的元素个数以及对应的mask的位置
-  //vl: 决定每个向量寄存器组里有多少个元素参与运算
-  //  128/(sew+1)*8
-  //  val num = 16.U >> sew
-  //  val eNum = Mux(isWiden || isNorrow , num, num >> 1).asUInt //每个uopidx的向量元素的个数
-  // num of vector element in each uopidx
-
-  // 每个uopidx最大的元素个数，即一个向量寄存器所能容纳的Max(inwidth, outwidth)的元素的个数
-  // single/narrow的话是一个向量寄存器所容纳输入元素的个数， widen的话是是一个向量寄存器输出元素的的个数
-  // todo: 为什么用4bit，虽然一个Vector reg中的元素个数至少是2，但是存在lmul=1/2时 64->64的single，方便下面计算eNum的max(可能为1)
   val eNum1H = chisel3.util.experimental.decode.decoder(sew ## (isWidenCvt || isNarrowCvt),
     TruthTable(
       Seq(                     // 8, 4, 2, 1
@@ -116,20 +106,13 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   val eNumMax = Mux1H(eNumMax1H, Seq(1,2,4,8,16,32,64).map(i => i.U)) //only for cvt intr, don't exist 128 in cvt
   val eNumEffectIdx = Mux(vl > eNumMax, eNumMax, vl)
 
-  //  mask，vl和lmul => 某个输入的向量元素是否有效
-  //  val numGrounp = lmul * 128/eew
-  // val mask = Mux1H(eNum1H, Seq(1, 2, 4, 8).map(num => (srcMask >> vuopIdx * num.U)(num-1, 0))) //mask是从每个uop的最大元素个数来的
   val eNum = Mux1H(eNum1H, Seq(1, 2, 4, 8).map(num =>num.U))
   val eStart = vuopIdx * eNum
   val maskPart = srcMask >> eStart
   val mask =  Mux1H(eNum1H, Seq(1, 2, 4, 8).map(num => maskPart(num-1, 0)))
   val fflagsEn = Wire(Vec(4 * numVecModule, Bool()))
 
-  //  fflagsEn := mask.asBools.zipWithIndex.map { case (mask, i) =>
-  //    mask & (eNumEffect > Mux1H(eNum1H, Seq(1, 2, 4, 8).map(num => vuopIdx * num.U + i.U)))
-  //  }
-  //  vl: [0, vl)  eNumMax: [0, eNumMax) => eNumEffect为索引加1即length, 其右边的都为索引即length-1，所以 >
-  fflagsEn := mask.asBools.zipWithIndex.map{case(mask, i) => mask & (eNumEffectIdx > eStart + i.U) } //被vl和lmul所约束
+  fflagsEn := mask.asBools.zipWithIndex.map{case(mask, i) => mask & (eNumEffectIdx > eStart + i.U) }
 
   val fflagsEnCycle2 = RegNext(RegNext(fflagsEn))
   val fflagsAll = Wire(Vec(8, UInt(5.W)))
@@ -139,9 +122,9 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
 
 
   /**
-   * [[mgu]]'s in connection 后面看看是否必须要这个mgu
+   * [[mgu]]'s in connection
    */
-  val resultDataUInt = Wire(UInt(dataWidth.W)) //todo: from vfcvt
+  val resultDataUInt = Wire(UInt(dataWidth.W))
   resultDataUInt := vfcvtResult
 
   mgu.io.in.vd := resultDataUInt
@@ -162,7 +145,7 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   io.out.bits.res.data := mgu.io.out.vd
 }
 
-class VectorCvtTopIO(vlen :Int, xlen: Int) extends Bundle{
+class VectorCvtTopIO(vlen: Int, xlen: Int) extends Bundle{
   val uopIdx = Input(Bool())
   val src = Input(Vec(vlen / xlen, UInt(xlen.W)))
   val opType = Input(UInt(8.W))
@@ -179,7 +162,7 @@ class VectorCvtTopIO(vlen :Int, xlen: Int) extends Bundle{
 
 
 //according to uopindex, 1: high64 0:low64
-class VectorCvtTop(vlen :Int, xlen: Int) extends Module{
+class VectorCvtTop(vlen: Int, xlen: Int) extends Module{
   val io = IO(new VectorCvtTopIO(vlen, xlen))
 
   val (uopIdx, src, opType, sew, rm, outputWidth1H, isWiden, isNarrow) = (
@@ -216,7 +199,7 @@ class VectorCvtTop(vlen :Int, xlen: Int) extends Module{
     vectorCvt1.io.result.tail(32) ## vectorCvt0.io.result.tail(32),
     vectorCvt1.io.result ## vectorCvt0.io.result)
 
-  io.fflags := Mux1H(outputWidth1HCycle2, Seq( // todo: map between fflags and result
+  io.fflags := Mux1H(outputWidth1HCycle2, Seq(
     vectorCvt1.io.fflags ## vectorCvt0.io.fflags,
     Mux(isNarrowCycle2, vectorCvt1.io.fflags.tail(10) ## vectorCvt0.io.fflags.tail(10), vectorCvt1.io.fflags ## vectorCvt0.io.fflags),
     Mux(isNarrowCycle2, vectorCvt1.io.fflags(4,0) ## vectorCvt0.io.fflags(4,0), vectorCvt1.io.fflags.tail(10) ## vectorCvt0.io.fflags.tail(10)),
