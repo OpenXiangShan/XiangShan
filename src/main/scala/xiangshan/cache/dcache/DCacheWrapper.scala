@@ -24,6 +24,7 @@ import xiangshan._
 import utils._
 import utility._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
+import xiangshan.backend.rob.RobDebugRollingIO
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{BundleFieldBase, UIntToOH1}
 import device.RAMHelper
@@ -752,6 +753,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val pf_ctrl = Output(new PrefetchControlBundle)
   val force_write = Input(Bool())
   val debugTopDown = new DCacheTopDownIO
+  val debugRolling = Flipped(new RobDebugRollingIO)
 }
 
 class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
@@ -1329,6 +1331,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   }
   for (w <- 0 until LoadPipelineWidth)  { fdpMonitor.io.pollution.cache_pollution(w) :=  ldu(w).io.prefetch_info.fdp.pollution }
   for (w <- 0 until LoadPipelineWidth)  { fdpMonitor.io.pollution.demand_miss(w) :=  ldu(w).io.prefetch_info.fdp.demand_miss }
+  fdpMonitor.io.debugRolling := io.debugRolling
 
   //----------------------------------------
   // Bloom Filter

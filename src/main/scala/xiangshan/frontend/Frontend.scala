@@ -113,6 +113,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     Seq(false, false) ++ Seq.fill(prefetchPipeNum)(false) ++ Seq(true), itlbParams))
   itlb.io.requestor.take(2 + prefetchPipeNum) zip icache.io.itlb foreach {case (a,b) => a <> b}
   itlb.io.requestor.last <> ifu.io.iTLBInter // mmio may need re-tlb, blocked
+  itlb.io.hartId := io.hartId
   itlb.io.base_connect(sfence, tlbCsr)
   itlb.io.flushPipe.map(_ := needFlush)
 

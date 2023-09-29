@@ -36,13 +36,14 @@ object XSLogLevel extends Enumeration {
 
 object XSLog {
   val MagicStr = "9527"
-  def apply(debugLevel: XSLogLevel)(ctrlInfo: LogPerfIO)
+  def apply(debugLevel: XSLogLevel, ctrlInfoOpt: Option[LogPerfIO] = None)
            (prefix: Boolean, cond: Bool, pable: Printable)(implicit p: Parameters): Any =
   {
     val debugOpts = p(DebugOptionsKey)
     val enableDebug = debugOpts.EnableDebug && debugLevel != XSLogLevel.PERF
     val enablePerf = debugOpts.EnablePerfDebug && debugLevel == XSLogLevel.PERF
     if (!debugOpts.FPGAPlatform && (enableDebug || enablePerf || debugLevel == XSLogLevel.ERROR)) {
+      val ctrlInfo = ctrlInfoOpt.getOrElse(Module(new LogPerfHelper).io)
       val logEnable = ctrlInfo.logEnable
       val logTimestamp = ctrlInfo.timer
       val check_cond = (if (debugLevel == XSLogLevel.ERROR) true.B else logEnable) && cond && RegNext(true.B, false.B)
@@ -54,6 +55,10 @@ object XSLog {
         }
       }
     }
+  }
+  def apply(debugLevel: XSLogLevel, ctrlInfo: LogPerfIO)
+           (prefix: Boolean, cond: Bool, pable: Printable)(implicit p: Parameters): Any = {
+    apply(debugLevel, Some(ctrlInfo))(prefix, cond, pable)
   }
 }
 
@@ -68,7 +73,7 @@ sealed abstract class LogHelper(val logLevel: XSLogLevel){
   def apply(prefix: Boolean, cond: Bool, fmt: String, data: Bits*)(implicit p: Parameters): Any =
     apply(prefix, cond, Printable.pack(fmt, data:_*))
   def apply(prefix: Boolean, cond: Bool, pable: Printable)(implicit p: Parameters): Any ={
-    XSLog(logLevel)(Module(new LogPerfHelper).io)(prefix, cond, pable)
+    XSLog(logLevel)(prefix, cond, pable)
   }
 }
 

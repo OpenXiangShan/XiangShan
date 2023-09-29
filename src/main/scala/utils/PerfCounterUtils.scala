@@ -82,16 +82,29 @@ object XSPerfHistogram extends HasRegularPerfName {
 
       val sum = RegInit(0.U(64.W)).suggestName(perfName + "Sum")
       val nSamples = RegInit(0.U(64.W)).suggestName(perfName + "NSamples")
+      val underflow = RegInit(0.U(64.W)).suggestName(perfName + "Underflow")
+      val overflow = RegInit(0.U(64.W)).suggestName(perfName + "Overflow")
       when (perfClean) {
         sum := 0.U
         nSamples := 0.U
+        underflow := 0.U
+        overflow := 0.U
       } .elsewhen (enable) {
         sum := sum + perfCnt
         nSamples := nSamples + 1.U
+        when (perfCnt < start.U) {
+          underflow := underflow + 1.U
+        }
+        when (perfCnt >= stop.U) {
+          overflow := overflow + 1.U
+        }
       }
 
       when (perfDump) {
         XSPerfPrint(p"${perfName}_mean, ${sum/nSamples}\n")(helper.io)
+        XSPerfPrint(p"${perfName}_sampled, ${nSamples}\n")(helper.io)
+        XSPerfPrint(p"${perfName}_underflow, ${underflow}\n")(helper.io)
+        XSPerfPrint(p"${perfName}_overflow, ${overflow}\n")(helper.io)
       }
       
       // drop each perfCnt value into a bin
@@ -255,11 +268,45 @@ object XSPerfRolling extends HasRegularPerfName {
       rollingTable.log(rollingPt, triggerDB, "", clock, reset)
     }
   }
+  
+  // event interval based mode
+  def apply(
+    perfName: String,
+    perfCntX: UInt,
+    perfCntY: UInt,
+    granularity: Int,
+    eventTrigger: UInt,
+    clock: Clock,
+    reset: Reset
+  )(implicit p: Parameters) = {
+    judgeName(perfName)
+    val env = p(DebugOptionsKey)
+    if (env.EnableRollingDB && !env.FPGAPlatform) {
+      val tableName = perfName + "_rolling_" + p(XSCoreParamsKey).HartId.toString
+      val rollingTable = ChiselDB.createTable(tableName, new RollingEntry(), basicDB=true)
+
+      val xAxisCnt = RegInit(0.U(64.W))
+      val yAxisCnt = RegInit(0.U(64.W))
+      val eventCnt = RegInit(0.U(64.W))
+      xAxisCnt := xAxisCnt + perfCntX
+      yAxisCnt := yAxisCnt + perfCntY
+      eventCnt := eventCnt + eventTrigger
+
+      val triggerDB = eventCnt >= granularity.U
+      when(triggerDB) {
+        eventCnt := eventTrigger
+        xAxisCnt := perfCntX
+        yAxisCnt := perfCntY
+      }
+      val rollingPt = new RollingEntry().apply(xAxisCnt, yAxisCnt)
+      rollingTable.log(rollingPt, triggerDB, "", clock, reset)
+    }
+  }
 }
 
 object XSPerfPrint {
   def apply(pable: Printable)(ctrlInfo: LogPerfIO)(implicit p: Parameters): Any = {
-    XSLog(XSLogLevel.PERF)(ctrlInfo)(true, true.B, pable)
+    XSLog(XSLogLevel.PERF, ctrlInfo)(true, true.B, pable)
   }
 }
 

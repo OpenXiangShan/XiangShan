@@ -23,6 +23,7 @@ import freechips.rocketchip.tilelink.ClientStates._
 import freechips.rocketchip.tilelink.MemoryOpCategories._
 import freechips.rocketchip.tilelink.TLPermissions._
 import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLPermissions}
+import xiangshan.backend.rob.RobDebugRollingIO
 import utils._
 import utility._
 import xiangshan.{L1CacheErrorInfo, XSCoreParamsKey}
@@ -206,6 +207,7 @@ class FDPrefetcherMonitorBundle()(implicit p: Parameters) extends XSBundle {
   }
 
   val pf_ctrl = Output(new PrefetchControlBundle)
+  val debugRolling = Flipped(new RobDebugRollingIO)
 }
 
 class FDPrefetcherMonitor()(implicit p: Parameters) extends XSModule {
@@ -251,6 +253,31 @@ class FDPrefetcherMonitor()(implicit p: Parameters) extends XSModule {
       interval := 0.U
     }
   }
+
+  // rolling by instr
+  XSPerfRolling(
+    "L1PrefetchAccuracyIns",
+    PopCount(io.accuracy.useful_prefetch), PopCount(io.accuracy.total_prefetch),
+    1000, io.debugRolling.robTrueCommit, clock, reset
+  )
+
+  XSPerfRolling(
+    "L1PrefetchLatenessIns",
+    PopCount(io.timely.late_prefetch), PopCount(io.accuracy.total_prefetch),
+    1000, io.debugRolling.robTrueCommit, clock, reset
+  )
+
+  XSPerfRolling(
+    "L1PrefetchPollutionIns",
+    PopCount(io.pollution.cache_pollution), PopCount(io.pollution.demand_miss),
+    1000, io.debugRolling.robTrueCommit, clock, reset
+  )
+
+  XSPerfRolling(
+    "IPCIns",
+    io.debugRolling.robTrueCommit, 1.U,
+    1000, io.debugRolling.robTrueCommit, clock, reset
+  )
 
   XSPerfAccumulate("io_refill", io.refill)
   XSPerfAccumulate("total_prefetch_en", io.accuracy.total_prefetch)

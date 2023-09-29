@@ -412,6 +412,17 @@ trait BasicPrediction extends HasXSParameter {
   def fallThruError: Bool
 }
 
+// selectByTaken selects some data according to takenMask
+// allTargets should be in flattened 2-dim Vec, like [taken, not taken, not hit, taken, ...]
+object selectByTaken {
+  def apply[T <: Data](takenMask: Vec[Bool], hit: Bool, allTargets: Vec[T]): T = {
+    val selVecOH =
+      takenMask.zipWithIndex.map { case (t, i) => !takenMask.take(i).fold(false.B)(_ || _) && t && hit } :+
+        (!takenMask.asUInt.orR && hit) :+ !hit
+    Mux1H(selVecOH, allTargets)
+  }
+}
+
 class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUConst with BasicPrediction {
   val br_taken_mask = Vec(numBr, Bool())
 
@@ -455,7 +466,7 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
   def real_slot_taken_mask(): Vec[Bool] = {
     VecInit(taken_mask_on_slot.map(_ && hit))
   }
-  
+
   // len numBr
   def real_br_taken_mask(): Vec[Bool] = {
     VecInit(
@@ -482,12 +493,17 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
   def brTaken = (br_valids zip br_taken_mask).map{ case (a, b) => a && b && hit}.reduce(_||_)
 
   def target(pc: UInt): UInt = {
-    val targetVec = targets :+ fallThroughAddr :+ (pc + (FetchWidth * 4).U)
-    val tm = taken_mask_on_slot
-    val selVecOH =
-      tm.zipWithIndex.map{ case (t, i) => !tm.take(i).fold(false.B)(_||_) && t && hit} :+
-      (!tm.asUInt.orR && hit) :+ !hit
-    Mux1H(selVecOH, targetVec)
+    selectByTaken(taken_mask_on_slot, hit, allTarget(pc))
+  }
+
+  // allTarget return a flattened 2-dim Vec of all possible target of a BP stage
+  // in the following order: [0:totalSlot][taken_targets, fallThroughAddr, not hit (plus fetch width)]
+  // after flatten looks like [t0, f0, n0, t1, f1, n0, ...] (t,f,n stands for taken, fallthrough, not hit)
+  //
+  // This exposes internal targets for timing optimization,
+  // since usually targets are generated quicker than taken
+  def allTarget(pc: UInt): Vec[UInt] = {
+    VecInit(targets :+ fallThroughAddr :+ (pc + (FetchWidth * 4).U))
   }
 
   def fallThruError: Bool = hit && fallThroughErr
@@ -564,7 +580,8 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
 
 
   def target(pc: UInt) = VecInit(full_pred.map(_.target(pc)))
-  def targets(pc: Vec[UInt]) = VecInit(pc.zipWithIndex.map{case (a, i) => full_pred(i).target(a)})
+  def targets(pc: Vec[UInt]) = VecInit(pc.zipWithIndex.map{case (pc, idx) => full_pred(idx).target(pc)})
+  def allTargets(pc: Vec[UInt]) = VecInit(pc.zipWithIndex.map{case (pc, idx) => full_pred(idx).allTarget(pc)})
   def cfiIndex         = VecInit(full_pred.map(_.cfiIndex))
   def lastBrPosOH      = VecInit(full_pred.map(_.lastBrPosOH))
   def brTaken          = VecInit(full_pred.map(_.brTaken))
@@ -574,6 +591,7 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
   def taken = VecInit(cfiIndex.map(_.valid))
 
   def getTarget = targets(pc)
+  def getAllTargets = allTargets(pc)
 
   def display(cond: Bool): Unit = {
     XSDebug(cond, p"[pc] ${Hexadecimal(pc(0))}\n")

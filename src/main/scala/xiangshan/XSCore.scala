@@ -459,6 +459,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   ctrlBlock.io.debugTopDown.fromCore.l2MissMatch := io.debugTopDown.l2MissMatch
   ctrlBlock.io.debugTopDown.fromCore.l3MissMatch := io.debugTopDown.l3MissMatch
   ctrlBlock.io.debugTopDown.fromCore.fromMem := memBlock.io.debugTopDown.toCore
+  memBlock.io.debugRolling := ctrlBlock.io.debugRolling
 
   // Modules are reset one by one
   val resetTree = ResetGenNode(

@@ -18,6 +18,7 @@ package xiangshan.backend
 
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
+import chisel3.experimental.hierarchy.core.Instance
 import chisel3.util._
 import utils._
 import utility._
@@ -61,7 +62,8 @@ class FUBlock(configs: Seq[(ExuConfig, Int)])(implicit p: Parameters) extends XS
     val fmaMid = if (numFma > 0) Some(Vec(numFma, new FMAMidResultIO)) else None
   })
 
-  val exeUnits = configs.map(x => Seq.fill(x._2)(ExeUnitInstantiate(x._1))).reduce(_ ++ _)
+  val exuDefs = configs.map(_._1).map(ExeUnitDef(_))
+  val exeUnits = configs.zip(exuDefs).map(x => Seq.fill(x._1._2)(Instance(x._2))).reduce(_ ++ _)
   val intExeUnits = exeUnits.filter(_.config.readIntRf)
   // TODO: deal with Std units
   val fpExeUnits = exeUnits.filterNot(_.config.readIntRf)
