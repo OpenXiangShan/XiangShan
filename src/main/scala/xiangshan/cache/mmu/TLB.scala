@@ -445,14 +445,15 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       difftest.satp := Cat(io.csr.satp.mode, io.csr.satp.asid, io.csr.satp.ppn)
       difftest.vsatp := Cat(io.csr.vsatp.mode, io.csr.vsatp.asid, io.csr.vsatp.ppn)
       difftest.hgatp := Cat(io.csr.hgatp.mode, io.csr.hgatp.asid, io.csr.hgatp.ppn)
-      val s2xlate = Wire(UInt(2.W))
-      s2xlate := MuxCase(noS2xlate, Seq(
-        (!(virt || req_in(i).bits.hyperinst)) -> noS2xlate,
+      val req_need_gpa = gpf
+      val req_s2xlate = Wire(UInt(2.W))
+      req_s2xlate := MuxCase(noS2xlate, Seq(
+        (!(virt || RegNext(req_in(i).bits.hyperinst))) -> noS2xlate,
         (vsatp.mode =/= 0.U && hgatp.mode =/= 0.U) -> allStage,
         (vsatp.mode === 0.U) -> onlyStage2,
-        (hgatp.mode === 0.U) -> onlyStage1
+        (hgatp.mode === 0.U || req_need_gpa) -> onlyStage1
       ))
-      difftest.s2xlate := s2xlate
+      difftest.s2xlate := req_s2xlate
     }
   }
 }
