@@ -209,6 +209,7 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
     module.io.fastUopsIn(fastWakeupIdx) := uop
     module.io.fastDatas(fastWakeupIdx).valid := valid
     module.io.fastDatas(fastWakeupIdx).bits := data
+    fastWakeupIdx += 1
   }
   def connectFastWakeup(uop: Seq[ValidIO[MicroOp]], data: Seq[UInt], valid: Seq[Bool]): Unit = {
     for ((u, (d, v)) <- uop.zip(data.zip(valid))) {
@@ -767,7 +768,6 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
       bypassNetwork.io.hold := !s2_deq(i).ready || !s1_out(i).valid
       bypassNetwork.io.source := s1_out(i).bits.src.take(params.numSrc)
       bypassNetwork.io.bypass.zip(wakeupBypassMask.zip(io.fastDatas)).foreach { case (by, (m, d)) =>
-//        by.valid := m
         by.valid.zipWithIndex.foreach{
             case(v,i) => v := m(i) && d.valid
         }
