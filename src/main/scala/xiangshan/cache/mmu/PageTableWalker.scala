@@ -134,9 +134,9 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val l2addr = MakeAddr(Mux(l1Hit, ppn, pte.ppn), getVpnn(vpn, 1))
   val mem_addr = Mux(af_level === 0.U, l1addr, l2addr)
 
-  val hptw_resp = io.hptw.resp.bits.h_resp
+  val hptw_resp = RegEnable(io.hptw.resp.bits.h_resp, io.hptw.resp.fire())
   val gpaddr = Mux(onlyS2xlate, Cat(vpn, 0.U(offLen.W)), mem_addr)
-  val hpaddr = Cat(hptw_resp.genPPNS2(), getGVpnn(get_pn(gpaddr), hptw_resp.entry.level.getOrElse(0.U)))
+  val hpaddr = Cat(hptw_resp.genPPNS2(), get_off(gpaddr))
 
   io.req.ready := idle
 
@@ -469,7 +469,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val enq_ptr_reg = RegNext(enq_ptr)
   val need_addr_check = RegNext(enq_state === state_addr_check && (io.in.fire() || io.hptw.resp.fire()) && !flush)
 
-  val gpaddr = MakeGAddr(io.in.bits.ppn, getVpnn(io.in.bits.req_info.vpn, 0))
+  val gpaddr = MakeGPAddr(io.in.bits.ppn, getVpnn(io.in.bits.req_info.vpn, 0))
   val hpaddr = Cat(io.in.bits.ppn, gpaddr(offLen-1, 0))
 
   val addr = Mux(enableS2xlate, hpaddr, MakeAddr(io.in.bits.ppn, getVpnn(io.in.bits.req_info.vpn, 0)))
@@ -655,7 +655,7 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val levelNext = level + 1.U
   val l1Hit = Reg(Bool())
   val l2Hit = Reg(Bool())
-  val pg_base = MakeGAddr(hgatp.ppn, getGVpnn(vpn, 2.U)) // for l0
+  val pg_base = MakeGPAddr(hgatp.ppn, getGVpnn(vpn, 2.U)) // for l0
 //  val pte = io.mem.resp.bits.MergeRespToPte()
   val pte = io.mem.resp.bits.asTypeOf(new PteBundle().cloneType)
   val ppn_l1 = Mux(l1Hit, io.req.bits.ppn, pte.ppn)
