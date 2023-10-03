@@ -89,8 +89,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     // cover auipc (a fake branch)
     !req.bits.preDecodeInfo.notCFI || FuType.isJump(req.bits.fuType)
   ))
-  val isFp     = VecInit(io.fromRename.map(req => FuType.isFp (req.bits.fuType) ||
-                                                  FuType.isVpu (req.bits.fuType)))
+  val isFp     = VecInit(io.fromRename.map(req => FuType.isFArith (req.bits.fuType) ||
+                                                  FuType.isVArith (req.bits.fuType)))
   val isMem    = VecInit(io.fromRename.map(req => FuType.isMem(req.bits.fuType) ||
                                                   FuType.isVls (req.bits.fuType)))
   val isLs     = VecInit(io.fromRename.map(req => FuType.isLoadStore(req.bits.fuType)))
@@ -317,7 +317,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   io.stallReason.backReason.bits := TopDownCounters.OtherCoreStall.id.U
   stallReason.zip(io.stallReason.reason).zip(io.recv).zip(realFired).zipWithIndex.map { case ((((update, in), recv), fire), idx) =>
     val headIsInt = FuType.isInt(io.robHead.fuType)  && io.robHeadNotReady
-    val headIsFp  = FuType.isFp(io.robHead.fuType)   && io.robHeadNotReady
+    val headIsFp  = FuType.isFArith(io.robHead.fuType)   && io.robHeadNotReady
     val headIsDiv = FuType.isDivSqrt(io.robHead.fuType) && io.robHeadNotReady
     val headIsLd  = io.robHead.fuType === FuType.ldu.U && io.robHeadNotReady || !io.lqCanAccept
     val headIsSt  = io.robHead.fuType === FuType.stu.U && io.robHeadNotReady || !io.sqCanAccept

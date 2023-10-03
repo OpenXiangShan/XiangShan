@@ -83,9 +83,9 @@ case class ExeUnitParams(
     * Get mapping from FuType to Latency value.
     * If both [[latencyCertain]] and [[hasUncertainLatencyVal]] are false, get empty [[Map]]
     *
-    * @return Map[FuType, Latency]
+    * @return Map[ [[BigInt]], Latency]
     */
-  def fuLatencyMap: Map[Int, Int] = {
+  def fuLatencyMap: Map[FuType.OHType, Int] = {
     if (latencyCertain)
       fuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
     else if (hasUncertainLatencyVal)
@@ -104,7 +104,7 @@ case class ExeUnitParams(
 
   def latencyValMax: Int = fuLatancySet.fold(0)(_ max _)
 
-  def intFuLatencyMap: Map[Int, Int] = {
+  def intFuLatencyMap: Map[FuType.OHType, Int] = {
     if (intLatencyCertain)
       writeIntFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
     else
@@ -113,7 +113,7 @@ case class ExeUnitParams(
 
   def intLatencyValMax: Int = intFuLatencyMap.values.fold(0)(_ max _)
 
-  def vfFuLatencyMap: Map[Int, Int] = {
+  def vfFuLatencyMap: Map[FuType.OHType, Int] = {
     if (vfLatencyCertain)
       writeVfFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
     else

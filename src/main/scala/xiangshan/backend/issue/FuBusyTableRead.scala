@@ -5,7 +5,7 @@ import chisel3.util._
 import utils.MapUtils
 import xiangshan.backend.fu.FuType
 
-class FuBusyTableRead(fuLatencyMap: Map[Int, Int])(implicit iqParams: IssueBlockParams) extends Module {
+class FuBusyTableRead(fuLatencyMap: Map[FuType.OHType, Int])(implicit iqParams: IssueBlockParams) extends Module {
   private val numEntries = iqParams.numEntries
   private val latMax = fuLatencyMap.values.fold(0)(_ max _)
 
@@ -17,7 +17,7 @@ class FuBusyTableRead(fuLatencyMap: Map[Int, Int])(implicit iqParams: IssueBlock
   /**
     * Map[latency, Set[fuType]]
     */
-  private val latMappedFuTypeSet: Map[Int, Set[Int]] = MapUtils.groupByValueUnique(fuLatencyMap)
+  private val latMappedFuTypeSet: Map[Int, Set[FuType.OHType]] = MapUtils.groupByValueUnique(fuLatencyMap)
 
   val readMaskVec = fuBusyVec.zipWithIndex.map { case (busy, lat) =>
     val latencyHitVec = WireInit(0.U(numEntries.W))
