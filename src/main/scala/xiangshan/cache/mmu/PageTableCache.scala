@@ -102,6 +102,7 @@ class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCo
       val l1Hit = Bool()
       val l2Hit = Bool()
       val ppn = if(HasHExtension) UInt((vpnLen.max(ppnLen)).W) else UInt(ppnLen.W)
+      val stage1Hit = Bool() // find stage 1 pte in cache, but need to search stage 2 pte in cache at PTW
     }
     val toTlb = new PtwMergeResp()
     val isHptw = Bool()
@@ -438,14 +439,16 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
         OneCycleValid(stageCheck(1).fire, false.B) || io.refill.valid)
   )
 
+  val isAllStage = stageResp.bits.req_info.s2xlate === allStage
   io.resp.bits.req_info   := stageResp.bits.req_info
   io.resp.bits.isFirst  := stageResp.bits.isFirst
-  io.resp.bits.hit      := resp_res.l3.hit || resp_res.sp.hit
+  io.resp.bits.hit      := (resp_res.l3.hit || resp_res.sp.hit) && !isAllStage
   io.resp.bits.bypassed := bypassed(2) || (bypassed(1) && !resp_res.l2.hit) || (bypassed(0) && !resp_res.l1.hit)
   io.resp.bits.prefetch := resp_res.l3.pre && resp_res.l3.hit || resp_res.sp.pre && resp_res.sp.hit
   io.resp.bits.toFsm.l1Hit := resp_res.l1.hit
   io.resp.bits.toFsm.l2Hit := resp_res.l2.hit
   io.resp.bits.toFsm.ppn   := Mux(resp_res.l2.hit, resp_res.l2.ppn, resp_res.l1.ppn)
+  io.resp.bits.toFsm.stage1Hit := (resp_res.l3.hit || resp_res.sp.hit) && isAllStage
 
   io.resp.bits.isHptw := stageResp.bits.isHptw
   io.resp.bits.toHptw.id := stageResp.bits.hptwId

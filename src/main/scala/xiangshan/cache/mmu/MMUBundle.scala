@@ -1176,6 +1176,15 @@ class PtwMergeResp(implicit p: Parameters) extends PtwBundle {
       this.entry(i) := ptw_resp
     }
   }
+  
+  def genPPN(): UInt = {
+    val idx = OHToUInt(pteidx)
+    MuxLookup(entry(idx).level.get, 0.U, Seq(
+      0.U -> Cat(entry(idx).ppn(entry(idx).ppn.getWidth - 1, vpnnLen * 2 - sectortlbwidth), entry(idx).tag(vpnnLen * 2 - 1, 0)),
+      1.U -> Cat(entry(idx).ppn(entry(idx).ppn.getWidth - 1, vpnnLen - sectortlbwidth), entry(idx).tag(vpnnLen - 1, 0)),
+      2.U -> Cat(entry(idx).ppn(entry(idx).ppn.getWidth - 1, 0), entry(idx).ppn_low))
+    )
+  }
 }
 
 class HptwMergeResp(implicit p: Parameters) extends PtwBundle {
