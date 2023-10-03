@@ -443,13 +443,17 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val to_wait = Cat(dup_vec_wait).orR || dup_req_fire
   val to_mem_out = dup_wait_resp
   val to_cache = Cat(dup_vec_having).orR
+  val to_hptw = io.in.bits.req_info.s2xlate =/= noS2xlate
   XSError(RegNext(dup_req_fire && Cat(dup_vec_wait).orR, init = false.B), "mem req but some entries already waiting, should not happed")
 
   XSError(io.in.fire && ((to_mem_out && to_cache) || (to_wait && to_cache)), "llptw enq, to cache conflict with to mem")
   val mem_resp_hit = RegInit(VecInit(Seq.fill(l2tlbParams.llptwsize)(false.B)))
-  val enq_state_normal = Mux(to_mem_out, state_mem_out, // same to the blew, but the mem resp now
-    Mux(to_wait, state_mem_waiting,
-    Mux(to_cache, state_cache, state_addr_check)))
+  val enq_state_normal = MuxCase(state_addr_check, Seq(
+    to_mem_out -> state_mem_out, // same to the blew, but the mem resp now
+    to_wait -> state_mem_waiting,
+    to_cache -> state_cache,
+    to_hptw -> state_hptw_req
+  ))
   val enq_state = Mux(from_pre(io.in.bits.req_info.source) && enq_state_normal =/= state_addr_check, state_idle, enq_state_normal)
   when (io.in.fire) {
     // if prefetch req does not need mem access, just give it up.
@@ -467,24 +471,30 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   }
 
   val enq_ptr_reg = RegNext(enq_ptr)
-  val need_addr_check = RegNext(enq_state === state_addr_check && (io.in.fire() || io.hptw.resp.fire()) && !flush)
+  val need_addr_check = RegNext(enq_state === state_addr_check && io.in.fire() && !flush)
+    
+  val hasHptwResp = ParallelOR(state.map(_ === state_hptw_resp)).asBool()
+  val hptw_resp_ptr_reg = RegNext(io.hptw.resp.bits.id)
+  val hptw_need_addr_check = RegNext(hasHptwResp && io.hptw.resp.fire() && !flush)
 
   val gpaddr = MakeGPAddr(io.in.bits.ppn, getVpnn(io.in.bits.req_info.vpn, 0))
-  val hpaddr = Cat(io.in.bits.ppn, gpaddr(offLen-1, 0))
-
-  val addr = Mux(enableS2xlate, hpaddr, MakeAddr(io.in.bits.ppn, getVpnn(io.in.bits.req_info.vpn, 0)))
-
-  io.pmp.req.valid := need_addr_check
-  io.pmp.req.bits.addr := RegEnable(addr, io.in.fire)
+  val hptw_resp = io.hptw.resp.bits.h_resp
+  val hpaddr = Cat(hptw_resp.genPPNS2(), get_off(gpaddr))
+  val hpaddr_reg = RegEnable(hpaddr, hasHptwResp && io.hptw.resp.fire())
+  val addr = MakeAddr(io.in.bits.ppn, getVpnn(io.in.bits.req_info.vpn, 0))
+  val addr_reg = RegEnable(addr, io.in.fire())
+  io.pmp.req.valid := need_addr_check || hptw_need_addr_check
+  io.pmp.req.bits.addr := Mux(enableS2xlate, hpaddr, addr)
   io.pmp.req.bits.cmd := TlbCmd.read
   io.pmp.req.bits.size := 3.U // TODO: fix it
   val pmp_resp_valid = io.pmp.req.valid // same cycle
   when (pmp_resp_valid) {
     // NOTE: when pmp resp but state is not addr check, then the entry is dup with other entry, the state was changed before
     //       when dup with the req-ing entry, set to mem_waiting (above codes), and the ld must be false, so dontcare
+    val ptr = Mux(hptw_need_addr_check, hptw_resp_ptr_reg, enq_ptr_reg);
     val accessFault = io.pmp.resp.ld || io.pmp.resp.mmio
-    entries(enq_ptr_reg).af := accessFault
-    state(enq_ptr_reg) := Mux(accessFault, state_mem_out, state_mem_req)
+    entries(ptr).af := accessFault
+    state(ptr) := Mux(accessFault, state_mem_out, state_mem_req)
   }
 
   when (mem_arb.io.out.fire) {
