@@ -11,7 +11,6 @@ import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.rename.BusyTableReadIO
 import xiangshan.mem.LsqEnqIO
 import xiangshan.backend.Bundles.{DynInst, ExuVec}
-import xiangshan.backend._
 import xiangshan.backend.datapath.DataSource
 
 import scala.collection._
@@ -120,11 +119,11 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
     res
   }
 
-  def canAccept(acceptVec: Seq[Int], fuType: UInt): Bool = {
+  def canAccept(acceptVec: Seq[BigInt], fuType: UInt): Bool = {
     (acceptVec.reduce(_ | _).U & fuType).orR
   }
 
-  def canAccept(acceptVec: Seq[Seq[Int]], fuType: UInt): Vec[Bool] = {
+  def canAccept(acceptVec: Seq[Seq[BigInt]], fuType: UInt): Vec[Bool] = {
     VecInit(acceptVec.map(x => canAccept(x, fuType)))
   }
 
@@ -145,17 +144,17 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
   private val numEnq = io.in.size
 
   val portFuSets = params.issueBlockParams.map(_.exuBlockParams.flatMap(_.fuConfigs).map(_.fuType).toSet)
-  println(s"portFuSets: $portFuSets")
+  println(s"[IssueQueueImp] portFuSets: $portFuSets")
   val fuDeqMap = getFuDeqMap(portFuSets)
-  println(s"fuDeqMap: $fuDeqMap")
+  println(s"[IssueQueueImp] fuDeqMap: $fuDeqMap")
   val mergedFuDeqMap = mergeFuDeqMap(fuDeqMap)
-  println(s"mergedFuDeqMap: $mergedFuDeqMap")
+  println(s"[IssueQueueImp] mergedFuDeqMap: $mergedFuDeqMap")
   val expendedFuDeqMap = expendFuDeqMap(mergedFuDeqMap, params.issueBlockParams.map(_.numEnq))
-  println(s"expendedFuDeqMap: $expendedFuDeqMap")
+  println(s"[IssueQueueImp] expendedFuDeqMap: $expendedFuDeqMap")
 
   // sort by count of port. Port less, priority higher.
   val finalFuDeqMap = expendedFuDeqMap.toSeq.sortBy(_._2.length)
-  println(s"finalFuDeqMap: $finalFuDeqMap")
+  println(s"[IssueQueueImp] finalFuDeqMap: $finalFuDeqMap")
 
   val uopsIn = Wire(Vec(wrapper.numIn, DecoupledIO(new DynInst)))
   val numInPorts = io.in.size
@@ -169,7 +168,7 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
     val maxSelNum = wrapper.numIn
     val selNum = deqPortIdSeq.length
     val portReadyVec = deqPortIdSeq.map(x => outs(x).ready)
-    val canAcc = uopsIn.map(in => canAccept(fuTypeSeq, in.bits.fuType) && in.valid)
+    val canAcc = uopsIn.map(in => canAccept(fuTypeSeq.map(x => x.ohid), in.bits.fuType) && in.valid)
     if(selNum <= maxSelNum) {
       val select = SelectOne("naive", canAcc, selNum)
       for ((portId, j) <- deqPortIdSeq.zipWithIndex) {
@@ -194,9 +193,9 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
   }
 
   val portSelIdxOH = finalFuDeqMap.zip(selIdxOH).map{ case ((fuTypeSeq, deqPortIdSeq), selIdxOHSeq) => (deqPortIdSeq, selIdxOHSeq)}.toMap
-  println(s"protSelIdxOH: $portSelIdxOH")
+  println(s"[Dispatch2IQ] portSelIdxOH: $portSelIdxOH")
   val finalportSelIdxOH: mutable.Map[Int, Seq[ValidIO[UInt]]] = expendPortSel(portSelIdxOH)
-  println(s"finalportSelIdxOH: $finalportSelIdxOH")
+  println(s"[Dispatch2IQ] finalportSelIdxOH: $finalportSelIdxOH")
   finalportSelIdxOH.foreach{ case (portId, selSeq) =>
     val finalSelIdxOH: UInt = PriorityMux(selSeq.map(_.valid), selSeq.map(_.bits))
     outs(portId).valid := selSeq.map(_.valid).reduce(_ | _)
@@ -295,7 +294,7 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
   * @param numIn
   * @param dispatchCfg Seq[Seq[FuType], dispatch limits]
   */
-class Dispatch2IqSelect(numIn: Int, dispatchCfg: Seq[(Seq[Int], Int)])(implicit p: Parameters) extends Module {
+class Dispatch2IqSelect(numIn: Int, dispatchCfg: Seq[(Seq[BigInt], Int)])(implicit p: Parameters) extends Module {
 
   val io = IO(new Bundle {
     val in = Flipped(Vec(numIn, ValidIO(new DynInst)))
@@ -303,7 +302,7 @@ class Dispatch2IqSelect(numIn: Int, dispatchCfg: Seq[(Seq[Int], Int)])(implicit 
     val mapIdxOH = Output(MixedVec(dispatchCfg.map(x => Vec(x._2, UInt(in.size.W))))) // OH mapping of in ports to out ports
   })
 
-  val issuePortFuType: Seq[Seq[Int]] = dispatchCfg.map(_._1)
+  val issuePortFuType: Seq[Seq[BigInt]] = dispatchCfg.map(_._1)
 
   val numOutKinds = io.out.size
   val numInPorts = io.in.size
@@ -327,11 +326,11 @@ class Dispatch2IqSelect(numIn: Int, dispatchCfg: Seq[(Seq[Int], Int)])(implicit 
     }
   }
 
-  def canAccept(acceptVec: Seq[Int], fuType: UInt): Bool = {
+  def canAccept(acceptVec: Seq[BigInt], fuType: UInt): Bool = {
     (acceptVec.reduce(_ | _).U & fuType).orR
   }
 
-  def canAccept(acceptVec: Seq[Seq[Int]], fuType: UInt): Vec[Bool] = {
+  def canAccept(acceptVec: Seq[Seq[BigInt]], fuType: UInt): Vec[Bool] = {
     VecInit(acceptVec.map(x => canAccept(x, fuType)))
   }
 }
@@ -344,10 +343,10 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     with HasXSParameter {
 
   import FuType._
-  private val dispatchCfg: Seq[(Seq[Int], Int)] = Seq(
-    (Seq(ldu), 2),
-    (Seq(stu, mou), 2),
-    (Seq(vldu), 2),
+  private val dispatchCfg: Seq[(Seq[BigInt], Int)] = Seq(
+    (Seq(ldu.ohid), 2),
+    (Seq(stu.ohid, mou.ohid), 2),
+    (Seq(vldu.ohid), 2),
   )
 
   private val enqLsqIO = io.enqLsqIO.get

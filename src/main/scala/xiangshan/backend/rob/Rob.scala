@@ -591,7 +591,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val enq0            = io.enq.req(0)
   val enq0IsVset      = enq0.bits.isVset && enq0.bits.lastUop && canEnqueue(0)
   val enq0IsVsetFlush = enq0IsVset && enq0.bits.flushPipe
-  val enqIsVInstrVec = io.enq.req.zip(canEnqueue).map{case (req, fire) => FuType.isVpu(req.bits.fuType) && fire}
+  val enqIsVInstrVec = io.enq.req.zip(canEnqueue).map{case (req, fire) => FuType.isVArith(req.bits.fuType) && fire}
   // for vs_idle
   val firstVInstrIdle = PriorityMux(enqIsVInstrVec.zip(io.enq.req).drop(1) :+ (true.B, 0.U.asTypeOf(io.enq.req(0).cloneType)))
   // for vs_waitVinstr
@@ -1208,6 +1208,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   private val deqUopNotWritebacked = valid(deqPtr.value) && !isUopWritebacked(deqPtr.value)
   private val deqHeadInfo = debug_microOp(deqPtr.value)
   val deqUopCommitType = io.commits.info(0).commitType
+
   XSPerfAccumulate("waitAluCycle", deqNotWritebacked && deqHeadInfo.fuType === FuType.alu.U)
   XSPerfAccumulate("waitMulCycle", deqNotWritebacked && deqHeadInfo.fuType === FuType.mul.U)
   XSPerfAccumulate("waitDivCycle", deqNotWritebacked && deqHeadInfo.fuType === FuType.div.U)

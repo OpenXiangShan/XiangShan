@@ -2,6 +2,7 @@ package xiangshan.backend.fu
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
+import utils.EnumUtils.OHEnumeration
 import xiangshan.ExceptionNO._
 import xiangshan.SelImm
 import xiangshan.backend.Std
@@ -40,7 +41,7 @@ import xiangshan.backend.datapath.DataConfig._
   */
 case class FuConfig (
   name          : String,
-  fuType        : Int,
+  fuType        : FuType.OHType,
   fuGen         : (Parameters, FuConfig) => FuncUnit,
   srcData       : Seq[Seq[DataConfig]],
   piped         : Boolean,
@@ -139,12 +140,12 @@ case class FuConfig (
 
   def needFPUCtrl: Boolean = {
     import FuType._
-    Set(fmac, fDivSqrt, fmisc, i2f).contains(fuType)
+    Seq(fmac, fDivSqrt, fmisc, i2f).contains(fuType)
   }
 
   def needVecCtrl: Boolean = {
     import FuType._
-    Set(vipu, vialuF, vimac, vfpu, vppu, vfalu, vfma, vfdiv).contains(fuType)
+    Seq(vipu, vialuF, vimac, vfpu, vppu, vfalu, vfma, vfdiv).contains(fuType)
   }
 
   def isMul: Boolean = fuType == FuType.mul
