@@ -141,7 +141,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   val hptw_resp = RegEnable(io.hptw.resp.bits.h_resp, io.hptw.resp.fire())
   val gpaddr = Mux(stage1Hit, Cat(stage1.genPPN(), 0.U(offLen.W)), Mux(onlyS2xlate, Cat(vpn, 0.U(offLen.W)), mem_addr))
-  val hpaddr = Cat(hptw_resp.genPPNS2(), get_off(gpaddr))
+  val hpaddr = Cat(hptw_resp.genPPNS2(get_pn(gpaddr)), get_off(gpaddr))
 
   io.req.ready := idle
   val ptw_resp = Wire(new PtwMergeResp)
@@ -497,7 +497,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   val gpaddr = MakeGPAddr(io.in.bits.ppn, getVpnn(io.in.bits.req_info.vpn, 0))
   val hptw_resp = io.hptw.resp.bits.h_resp
-  val hpaddr = Cat(hptw_resp.genPPNS2(), get_off(gpaddr))
+  val hpaddr = Cat(hptw_resp.genPPNS2(get_pn(gpaddr)), get_off(gpaddr))
   val hpaddr_reg = RegEnable(hpaddr, hasHptwResp && io.hptw.resp.fire())
   val addr = MakeAddr(io.in.bits.ppn, getVpnn(io.in.bits.req_info.vpn, 0))
   val addr_reg = RegEnable(addr, io.in.fire())
@@ -599,7 +599,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   io.mem.req.valid := mem_arb.io.out.valid && !flush
   val mem_paddr = MakeAddr(mem_arb.io.out.bits.ppn, getVpnn(mem_arb.io.out.bits.req_info.vpn, 0))
-  val mem_hpaddr = MakeAddr(mem_arb.io.out.bits.hptw_resp.genPPNS2(), getVpnn(mem_arb.io.out.bits.req_info.vpn, 0))
+  val mem_hpaddr = MakeAddr(mem_arb.io.out.bits.hptw_resp.genPPNS2(get_pn(mem_paddr)), getVpnn(mem_arb.io.out.bits.req_info.vpn, 0))
   io.mem.req.bits.addr := Mux(mem_arb.io.out.bits.s2xlate, mem_hpaddr, mem_paddr)
   io.mem.req.bits.id := mem_arb.io.chosen
   mem_arb.io.out.ready := io.mem.req.ready

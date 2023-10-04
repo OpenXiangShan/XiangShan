@@ -391,7 +391,12 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
   def apply(item: PtwRespS2): TlbSectorEntry = {
     this.tag := {if (pageNormal) item.s1.entry.tag else item.s1.entry.tag(sectorvpnLen - 1, vpnnLen - sectortlbwidth)}
     this.asid := item.s1.entry.asid
-    val inner_level = item.s1.entry.level.getOrElse(0.U) max item.s2.entry.level.getOrElse(0.U)
+    val inner_level = MuxLookup(item.s2xlate, 2.U, Seq(
+      onlyStage1 -> item.s1.entry.level.getOrElse(0.U),
+      onlyStage2 -> item.s2.entry.level.getOrElse(0.U),
+      allStage -> (item.s1.entry.level.getOrElse(0.U) max item.s2.entry.level.getOrElse(0.U)),
+      noS2xlate -> item.s1.entry.level.getOrElse(0.U)
+    ))
     this.level.map(_ := { if (pageNormal && pageSuper) MuxLookup(inner_level, 0.U)(Seq(
                                                         0.U -> 3.U,
                                                         1.U -> 1.U,
@@ -1061,10 +1066,18 @@ class HptwResp(implicit p: Parameters) extends PtwBundle {
     this.gaf := gaf
   }
 
-  def genPPNS2(): UInt = {
+  // def genPPNS2(): UInt = {
+  //   MuxLookup(entry.level.get, 0.U, Seq(
+  //     0.U -> Cat(entry.ppn(entry.ppn.getWidth - 1, vpnnLen * 2), entry.tag(vpnnLen * 2 - 1, 0)),
+  //     1.U -> Cat(entry.ppn(entry.ppn.getWidth - 1, vpnnLen), entry.tag(vpnnLen - 1, 0)),
+  //     2.U -> Cat(entry.ppn(entry.ppn.getWidth - 1, 0))
+  //   ))
+  // }
+
+  def genPPNS2(vpn: UInt): UInt = {
     MuxLookup(entry.level.get, 0.U, Seq(
-      0.U -> Cat(entry.ppn(entry.ppn.getWidth - 1, vpnnLen * 2), entry.tag(vpnnLen * 2 - 1, 0)),
-      1.U -> Cat(entry.ppn(entry.ppn.getWidth - 1, vpnnLen), entry.tag(vpnnLen - 1, 0)),
+      0.U -> Cat(entry.ppn(entry.ppn.getWidth - 1, vpnnLen * 2), vpn(vpnnLen * 2 - 1, 0)),
+      1.U -> Cat(entry.ppn(entry.ppn.getWidth - 1, vpnnLen), vpn(vpnnLen - 1, 0)),
       2.U -> Cat(entry.ppn(entry.ppn.getWidth - 1, 0))
     ))
   }
@@ -1250,11 +1263,6 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
   val s2 = new HptwResp()
   def getVpn: UInt = {
     Cat(s1.entry.tag, s1.ppn_low(OHToUInt(s1.pteidx)))
-  }
-  def genPPNS2(i: Int):UInt = {
-    val s1ppn = Cat(this.s1.entry.ppn, this.s1.ppn_low(i), 0.U(12.W)).asUInt
-    val s2ppn = this.s2.entry.ppn
-    Mux(s2xlate =/= noS2xlate, s2ppn, s1ppn)
   }
 }
 
