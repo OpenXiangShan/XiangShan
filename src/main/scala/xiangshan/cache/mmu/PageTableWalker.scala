@@ -128,6 +128,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val last_s2xlate = RegInit(false.B)
   val stage1Hit = RegEnable(io.req.bits.stage1Hit, io.req.fire())
   val stage1 = RegEnable(io.req.bits.stage1, io.req.fire())
+  val hptw_resp_stage2 = Reg(Bool()) 
 
   val ppn_af = pte.isAf()
   val find_pte = pte.isLeaf() || ppn_af || pageFault
@@ -139,14 +140,16 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val mem_addr = Mux(af_level === 0.U, l1addr, l2addr)
 
   val hptw_resp = RegEnable(io.hptw.resp.bits.h_resp, io.hptw.resp.fire())
-  val gpaddr = Mux(stage1Hit, stage1.genPPN(), Mux(onlyS2xlate, Cat(vpn, 0.U(offLen.W)), mem_addr))
+  val gpaddr = Mux(stage1Hit, Cat(stage1.genPPN(), 0.U(offLen.W)), Mux(onlyS2xlate, Cat(vpn, 0.U(offLen.W)), mem_addr))
   val hpaddr = Cat(hptw_resp.genPPNS2(), get_off(gpaddr))
 
   io.req.ready := idle
   val ptw_resp = Wire(new PtwMergeResp)
   ptw_resp.apply(pageFault && !accessFault && !ppn_af, accessFault || ppn_af, Mux(accessFault, af_level,level), pte, vpn, satp.asid, hgatp.asid, vpn(sectortlbwidth - 1, 0), not_super = false)
 
-  io.resp.valid := idle === false.B && mem_addr_update && !last_s2xlate && ((w_mem_resp && find_pte) || (s_pmp_check && accessFault) || onlyS2xlate)
+  val normal_resp = idle === false.B && mem_addr_update && !last_s2xlate && ((w_mem_resp && find_pte) || (s_pmp_check && accessFault) || onlyS2xlate)
+  val stageHit_resp = idle === false.B && hptw_resp_stage2 
+  io.resp.valid := Mux(stage1Hit, stageHit_resp, normal_resp)
   io.resp.bits.source := source
   io.resp.bits.resp := Mux(stage1Hit, stage1, ptw_resp)
   io.resp.bits.h_resp := io.hptw.resp.bits.h_resp
@@ -180,10 +183,12 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   when (io.req.fire() && io.req.bits.stage1Hit){
     idle := false.B
     s_hptw_req := false.B
+    hptw_resp_stage2 := false.B
   }
 
   when (io.hptw.resp.fire() && w_hptw_resp === false.B && stage1Hit){
     w_hptw_resp := true.B
+    hptw_resp_stage2 := true.B
   }
 
   when (io.resp.fire() && stage1Hit){

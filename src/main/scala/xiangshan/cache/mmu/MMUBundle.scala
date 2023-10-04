@@ -842,7 +842,7 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
       asid_hit && vmid_hit && Mux(level.getOrElse(0.U) === 2.U, hit2 && hit1 && hit0, Mux(level.getOrElse(0.U) === 1.U, hit1 && hit0, hit0))
     } else if (hasLevel) {
       val hit0 = tag(tagLen - 1, tagLen - vpnnLen - extendVpnnBits) === vpn(vpnLen - 1, vpnLen - vpnnLen - extendVpnnBits)
-      val hit1 = tag(tagLen - vpnnLen - extendVpnnBits - 1, tagLen - vpnnLen * 2 - extendVpnnBits) === vpn(vpnLen - vpnnLen - extendVpnnBits - 1, vpnLen - vpnnLen * 2)
+      val hit1 = tag(tagLen - vpnnLen - extendVpnnBits - 1, tagLen - vpnnLen * 2 - extendVpnnBits) === vpn(vpnLen - vpnnLen - extendVpnnBits - 1, vpnLen - vpnnLen * 2 - extendVpnnBits)
 
       asid_hit && vmid_hit && Mux(level.getOrElse(0.U) === 0.U, hit0, hit0 && hit1)
     } else {
@@ -1179,9 +1179,10 @@ class PtwMergeResp(implicit p: Parameters) extends PtwBundle {
   
   def genPPN(): UInt = {
     val idx = OHToUInt(pteidx)
+    val tag = Cat(entry(idx).tag, idx(sectortlbwidth - 1, 0))
     MuxLookup(entry(idx).level.get, 0.U, Seq(
-      0.U -> Cat(entry(idx).ppn(entry(idx).ppn.getWidth - 1, vpnnLen * 2 - sectortlbwidth), entry(idx).tag(vpnnLen * 2 - 1, 0)),
-      1.U -> Cat(entry(idx).ppn(entry(idx).ppn.getWidth - 1, vpnnLen - sectortlbwidth), entry(idx).tag(vpnnLen - 1, 0)),
+      0.U -> Cat(entry(idx).ppn(entry(idx).ppn.getWidth - 1, vpnnLen * 2 - sectortlbwidth), tag(vpnnLen * 2 - 1, 0)),
+      1.U -> Cat(entry(idx).ppn(entry(idx).ppn.getWidth - 1, vpnnLen - sectortlbwidth), tag(vpnnLen - 1, 0)),
       2.U -> Cat(entry(idx).ppn(entry(idx).ppn.getWidth - 1, 0), entry(idx).ppn_low))
     )
   }

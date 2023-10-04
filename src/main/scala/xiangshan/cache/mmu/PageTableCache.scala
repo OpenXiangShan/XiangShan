@@ -263,7 +263,11 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   }
 
   val vpn_search = stageReq.bits.req_info.vpn
-  val h_search = stageReq.bits.req_info.s2xlate
+  val h_search = MuxLookup(stageReq.bits.req_info.s2xlate, noS2xlate, Seq(
+    allStage -> onlyStage1,
+    onlyStage1 -> onlyStage1,
+    onlyStage2 -> onlyStage2
+  ))
   // l1
   val ptwl1replace = ReplacementPolicy.fromString(l2tlbParams.l1Replacer, l2tlbParams.l1Size)
   val (l1Hit, l1HitPPN, l1Pre) = {
@@ -435,7 +439,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val bypassed = Wire(Vec(3, Bool()))
   bypassed.indices.foreach(i =>
     bypassed(i) := stageResp.bits.bypassed(i) ||
-      ValidHoldBypass(refill_bypass(vpn_search, i, h_search),
+      ValidHoldBypass(refill_bypass(vpn_search, i, stageResp.bits.req_info.s2xlate),
         OneCycleValid(stageCheck(1).fire, false.B) || io.refill.valid)
   )
 
