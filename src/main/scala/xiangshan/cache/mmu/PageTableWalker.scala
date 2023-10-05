@@ -152,7 +152,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.resp.valid := Mux(stage1Hit, stageHit_resp, normal_resp)
   io.resp.bits.source := source
   io.resp.bits.resp := Mux(stage1Hit, stage1, ptw_resp)
-  io.resp.bits.h_resp := io.hptw.resp.bits.h_resp
+  io.resp.bits.h_resp := hptw_resp
   io.resp.bits.s2xlate := req_s2xlate
 
   io.llptw.valid := s_llptw_req === false.B && to_find_pte && !accessFault
