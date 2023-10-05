@@ -258,8 +258,13 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   }
   // NOTE: not actually bypassed, just check if hit, re-access the page cache
   def refill_bypass(vpn: UInt, level: Int, h_search: UInt) = {
+    val change_h = MuxLookup(h_search, noS2xlate, Seq(
+      allStage -> onlyStage1,
+      onlyStage1 -> onlyStage1,
+      onlyStage2 -> onlyStage2
+    ))
     val refill_vpn = io.refill.bits.req_info_dup(0).vpn
-    io.refill.valid && (level.U === io.refill.bits.level_dup(0)) && vpn_match(refill_vpn, vpn, level) && h_search === io.refill.bits.req_info_dup(0).s2xlate
+    io.refill.valid && (level.U === io.refill.bits.level_dup(0)) && vpn_match(refill_vpn, vpn, level) && change_h === io.refill.bits.req_info_dup(0).s2xlate
   }
 
   val vpn_search = stageReq.bits.req_info.vpn
@@ -311,7 +316,11 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
     // delay one cycle after sram read
     val delay_vpn = stageDelay(0).bits.req_info.vpn
-    val delay_h = stageDelay(0).bits.req_info.s2xlate
+    val delay_h = MuxLookup(stageDelay(0).bits.req_info.s2xlate, noS2xlate, Seq(
+      allStage -> onlyStage1,
+      onlyStage1 -> onlyStage1,
+      onlyStage2 -> onlyStage2
+    ))
     val data_resp = DataHoldBypass(l2.io.r.resp.data, stageDelay_valid_1cycle)
     val vVec_delay = RegEnable(vVec_req, stageReq.fire)
     val hVec_delay = RegEnable(hVec_req, stageReq.fire)
@@ -359,7 +368,11 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
     // delay one cycle after sram read
     val delay_vpn = stageDelay(0).bits.req_info.vpn
-    val delay_h = stageDelay(0).bits.req_info.s2xlate
+    val delay_h = MuxLookup(stageDelay(0).bits.req_info.s2xlate, noS2xlate, Seq(
+      allStage -> onlyStage1,
+      onlyStage1 -> onlyStage1,
+      onlyStage2 -> onlyStage2
+    ))
     val data_resp = DataHoldBypass(l3.io.r.resp.data, stageDelay_valid_1cycle)
     val vVec_delay = RegEnable(vVec_req, stageReq.fire)
     val hVec_delay = RegEnable(hVec_req, stageReq.fire)
@@ -444,15 +457,16 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   )
 
   val isAllStage = stageResp.bits.req_info.s2xlate === allStage
+  val stage1Hit = (resp_res.l3.hit || resp_res.sp.hit) && isAllStage
   io.resp.bits.req_info   := stageResp.bits.req_info
   io.resp.bits.isFirst  := stageResp.bits.isFirst
   io.resp.bits.hit      := (resp_res.l3.hit || resp_res.sp.hit) && !isAllStage
   io.resp.bits.bypassed := bypassed(2) || (bypassed(1) && !resp_res.l2.hit) || (bypassed(0) && !resp_res.l1.hit)
   io.resp.bits.prefetch := resp_res.l3.pre && resp_res.l3.hit || resp_res.sp.pre && resp_res.sp.hit
-  io.resp.bits.toFsm.l1Hit := resp_res.l1.hit
-  io.resp.bits.toFsm.l2Hit := resp_res.l2.hit
+  io.resp.bits.toFsm.l1Hit := resp_res.l1.hit && !stage1Hit
+  io.resp.bits.toFsm.l2Hit := resp_res.l2.hit && !stage1Hit
   io.resp.bits.toFsm.ppn   := Mux(resp_res.l2.hit, resp_res.l2.ppn, resp_res.l1.ppn)
-  io.resp.bits.toFsm.stage1Hit := (resp_res.l3.hit || resp_res.sp.hit) && isAllStage
+  io.resp.bits.toFsm.stage1Hit := stage1Hit
 
   io.resp.bits.isHptw := stageResp.bits.isHptw
   io.resp.bits.toHptw.id := stageResp.bits.hptwId
@@ -519,7 +533,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val rfOH = UIntToOH(refillIdx)
     l1(refillIdx).refill(
       refill.req_info_dup(0).vpn,
-      Mux(refill.req_info_dup(0).s2xlate(0).asBool(), io.csr_dup(0).vsatp.asid, io.csr_dup(0).satp.asid),
+      Mux(refill.req_info_dup(0).s2xlate =/= noS2xlate, io.csr_dup(0).vsatp.asid, io.csr_dup(0).satp.asid),
       io.csr_dup(0).hgatp.asid,
       memSelData(0),
       0.U,
@@ -564,7 +578,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     ptwl2replace.access(refillIdx, victimWay)
     l2v := l2v | rfvOH
     l2g := l2g & ~rfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, rfvOH, 0.U)
-    l2h(refillIdx)(victimWay) := refill.req_info_dup(0).s2xlate
+    l2h(refillIdx)(victimWay) := refill.req_info_dup(1).s2xlate
 
     for (i <- 0 until l2tlbParams.l2nWays) {
       l2RefillPerf(i) := i.U === victimWay
