@@ -182,6 +182,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   when (io.req.fire() && io.req.bits.stage1Hit){
     idle := false.B
+    req_s2xlate := io.req.bits.req_info.s2xlate
     s_hptw_req := false.B
     hptw_resp_stage2 := false.B
   }
