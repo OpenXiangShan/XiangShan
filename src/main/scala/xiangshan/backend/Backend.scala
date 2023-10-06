@@ -350,8 +350,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     sink.bits.debugInfo := 0.U.asTypeOf(sink.bits.debugInfo)
     sink.bits.lqIdx.foreach(_ := source.bits.uop.lqIdx)
     sink.bits.sqIdx.foreach(_ := source.bits.uop.sqIdx)
-    sink.bits.ftqIdx.foreach(_ := source.bits.uop.ftqPtr)
-    sink.bits.ftqOffset.foreach(_ := source.bits.uop.ftqOffset)
   }
 
   // to mem
