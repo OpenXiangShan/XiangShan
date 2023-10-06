@@ -36,7 +36,6 @@ class RfWritePort(dataWidth: Int, addrWidth: Int) extends Bundle {
 
 class RfReadPortWithConfig(val rfReadDataCfg: DataConfig, addrWidth: Int) extends Bundle {
   val addr: UInt = Input(UInt(addrWidth.W))
-  val data: UInt = Output(UInt(rfReadDataCfg.dataWidth.W))
   val srcType: UInt = Input(UInt(3.W))
 
   def readInt: Boolean = IntRegSrcDataSet.contains(rfReadDataCfg)
