@@ -532,10 +532,6 @@ object Bundles {
     val lqIdx        = if (params.hasLoadFu)    Some(new LqPtr())             else None
     val sqIdx        = if (params.hasStoreAddrFu || params.hasStdFu)
                                                 Some(new SqPtr())             else None
-    val ftqIdx       = if (params.needPc || params.replayInst)
-                                                Some(new FtqPtr)                    else None
-    val ftqOffset    = if (params.needPc || params.replayInst)
-                                                Some(UInt(log2Up(PredictWidth).W))  else None
     // uop info
     val predecodeInfo = if(params.hasPredecode) Some(new PreDecodeInfo) else None
     val debug = new DebugBundle
