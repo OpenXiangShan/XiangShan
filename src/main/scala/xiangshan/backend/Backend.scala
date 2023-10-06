@@ -235,6 +235,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   vfScheduler.io.fromCancelNetwork <> cancelNetwork.io.out.vf
   memScheduler.io.fromCancelNetwork <> cancelNetwork.io.out.mem
 
+  dataPath.io.hartId := io.fromTop.hartId
   dataPath.io.flush := ctrlBlock.io.toDataPath.flush
   dataPath.io.vconfigReadPort.addr := ctrlBlock.io.toDataPath.vtypeAddr
 
