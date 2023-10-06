@@ -67,7 +67,6 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val flush_pipe = io.flushPipe
 
   val isHyperInst = (0 until Width).map(i => ValidHold(req(i).fire && !req(i).bits.kill && req(i).bits.hyperinst, resp(i).fire, flush_pipe(i)))
-  val onlyS2xlate = vsatp.mode === 0.U && hgatp.mode === 8.U
 
   // ATTENTION: csr and flush from backend are delayed. csr should not be later than flush.
   // because, csr will influence tlb behavior.
@@ -77,6 +76,12 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val virt = csr.priv.virt
   val sum = (0 until Width).map(i => Mux(virt || isHyperInst(i), io.csr.priv.vsum, io.csr.priv.sum))
   val mxr = (0 until Width).map(i => Mux(virt || isHyperInst(i), io.csr.priv.vmxr || io.csr.priv.mxr, io.csr.priv.mxr))
+  val s2xlate = (0 until Width).map(i => MuxCase(noS2xlate, Seq(
+    (!(virt || isHyperInst(i))) -> noS2xlate,
+    (vsatp.mode =/= 0.U && hgatp.mode =/= 0.U) -> allStage,
+    (vsatp.mode === 0.U) -> onlyStage2,
+    (hgatp.mode === 0.U) -> onlyStage1
+  )))
 
   // val vmEnable = satp.mode === 8.U // && (mode < ModeM) // FIXME: fix me when boot xv6/linux...
   val vmEnable = (0 until Width).map(i => if (EnbaleTlbDebug) (satp.mode === 8.U)
@@ -116,8 +121,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val missVec = readResult.map(_._2)
   val pmp_addr = readResult.map(_._3)
   val perm = readResult.map(_._4)
-  val g_perm = readResult.map(_._7)
-  val s2xlate = readResult.map(_._8)
+  val g_perm = readResult.map(_._5)
   // check pmp use paddr (for timing optization, use pmp_addr here)
   // check permisson
   (0 until Width).foreach{i =>
@@ -151,20 +155,24 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val (p_hit, p_ppn, p_perm, p_gvpn, p_g_perm, p_s2xlate) = ptw_resp_bypass(get_pn(req_in(i).bits.vaddr), s2xlate)
     val enable = portTranslateEnable(i)
 
-    val need_gpa_vpn_hit = RegNext(need_gpa_vpn === get_pn(req_in(i).bits.vaddr))
-    when (ptw.resp.fire && need_gpa_vpn === ptw.resp.bits.getVpn) {
-      need_gpa_gvpn := p_gvpn
-    }
-    when (hasGpf(i) && need_gpa === false.B) {
+    val resp_gpa_refill = RegInit(false.B)
+    val need_gpa_vpn_hit = RegEnable(need_gpa_vpn === get_pn(req_in(i).bits.vaddr), req_in(i).fire())
+    when (io.requestor(i).resp.valid && hasGpf(i) && need_gpa === false.B && !need_gpa_vpn_hit) {
       need_gpa := true.B
-      need_gpa_vpn := get_pn(req_in(i).bits.vaddr)
+      need_gpa_vpn := get_pn(req_out(i).vaddr)
+      resp_gpa_refill := false.B
     }
-    when (e_hit && need_gpa && need_gpa_vpn === get_pn(req_in(i).bits.vaddr)){
-      need_gpa := false.B
+    when (ptw.resp.fire && need_gpa && need_gpa_vpn === ptw.resp.bits.getVpn) {
+      need_gpa_gvpn := Mux(ptw.resp.bits.s2xlate === onlyStage2, Cat(ptw.resp.bits.s1.entry.tag, ptw.resp.bits.s1.ppn_low(OHToUInt(ptw.resp.bits.s1.pteidx))), ptw.resp.bits.s2.entry.tag)
+      resp_gpa_refill := true.B
     }
 
+    when (hasGpf(i) && resp_gpa_refill && need_gpa_vpn === get_pn(req_in(i).bits.vaddr)){
+      need_gpa := false.B
+    }
+    
     val hit = e_hit || p_hit
-    val miss = (!hit && enable) || hasGpf(i) && !(need_gpa && need_gpa_vpn_hit)
+    val miss = (!hit && enable) || hasGpf(i) && !(resp_gpa_refill && need_gpa_vpn_hit)
     hit.suggestName(s"hit_read_${i}")
     miss.suggestName(s"miss_read_${i}")
 
@@ -194,7 +202,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
     val pmp_paddr = resp(i).bits.paddr(0)
 
-    (hit, miss, pmp_paddr, perm, g_perm, s2xlate)
+    (hit, miss, pmp_paddr, perm, g_perm)
   }
 
   def pmp_check(addr: UInt, size: UInt, cmd: UInt, idx: Int): Unit = {
