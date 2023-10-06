@@ -101,6 +101,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val ptw_to_l2_buffer = if (!coreParams.softPTW) outer.ptw_to_l2_buffer.module else null
 
   val fenceio = backend.io.fenceio
+  fenceio.disableSfence := DontCare
 
   frontend.io.hartId  := io.hartId
   frontend.io.backend <> backend.io.frontend
@@ -168,6 +169,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.perf.perfEventsFrontend := frontend.getPerf
   backend.io.perf.perfEventsLsu := memBlock.getPerf
   backend.io.perf.perfEventsHc := io.perfEvents
+  backend.io.perf.perfEventsCtrl := DontCare
+  backend.io.perf.retiredInstr := DontCare
+  backend.io.perf.ctrlInfo := DontCare
 
   //  XSPerfHistogram("fastIn_count", PopCount(allFastUop1.map(_.valid)), true.B, 0, allFastUop1.length, 1)
 //  XSPerfHistogram("wakeup_count", PopCount(rfWriteback.map(_.valid)), true.B, 0, rfWriteback.length, 1)
