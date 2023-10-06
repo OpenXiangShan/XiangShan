@@ -186,7 +186,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 //  ctrlBlock.perfinfo.perfEventsRs  := outer.exuBlocks.flatMap(b => b.module.getPerf.takeRight(b.scheduler.numRs))
 
   memBlock.io.sfence <> backend.io.mem.sfence
-  memBlock.io.fenceToSbuffer <> backend.io.mem.toSbuffer
+  memBlock.io.fenceToSbuffer <> backend.io.fenceio.sbuffer
 
   memBlock.io.redirect <> backend.io.mem.redirect
   memBlock.io.csrCtrl <> backend.io.mem.csrCtrl
