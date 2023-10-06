@@ -590,6 +590,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     io.status.leftVec(i + 1) := othersValidCnt === (params.numEntries - params.numEnq - (i + 1)).U
   }
   io.enq.foreach(_.ready := !Cat(io.status.leftVec).orR || !enqHasValid) // Todo: more efficient implementation
+  io.status.empty := !Cat(validVec).orR
+  io.status.full := Cat(io.status.leftVec).orR
 
   protected def getDeqLat(deqPortIdx: Int, fuType: UInt) : UInt = {
     val fuLatUIntMaps: Map[UInt, UInt] = fuLatencyMaps(deqPortIdx).map { case (k, v) => (k.U, v.U) }
