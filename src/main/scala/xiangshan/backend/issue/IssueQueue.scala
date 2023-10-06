@@ -821,9 +821,7 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
   io.deq.zipWithIndex.foreach { case (deq, i) =>
     deq.bits.common.sqIdx.get := deqEntryVec(i).bits.payload.sqIdx
     deq.bits.common.lqIdx.get := deqEntryVec(i).bits.payload.lqIdx
-    if (params.isLdAddrIQ) {
-      deq.bits.common.ftqIdx.get := deqEntryVec(i).bits.payload.ftqPtr
-      deq.bits.common.ftqOffset.get := deqEntryVec(i).bits.payload.ftqOffset
-    }
+    deq.bits.common.ftqIdx.foreach(_ := deqEntryVec(i).bits.payload.ftqPtr)
+    deq.bits.common.ftqOffset.foreach(_ := deqEntryVec(i).bits.payload.ftqOffset)
   }
 }
