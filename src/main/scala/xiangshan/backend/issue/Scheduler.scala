@@ -302,6 +302,24 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
     case _ =>
   }
 
+  // TODO: Implement vstu
+  issueQueues.filter(iq => iq.params.VstuCnt > 0).foreach {
+    case imp: IssueQueueMemAddrImp =>
+      imp.io.memIO.get.feedbackIO <> DontCare
+      imp.io.memIO.get.checkWait.stIssuePtr := DontCare
+      imp.io.memIO.get.checkWait.memWaitUpdateReq := DontCare
+    case _ =>
+  }
+
+  // TODO: Implement vldu
+  issueQueues.filter(iq => iq.params.VlduCnt > 0).foreach {
+    case imp: IssueQueueMemAddrImp =>
+      imp.io.memIO.get.feedbackIO <> DontCare
+      imp.io.memIO.get.checkWait.stIssuePtr := DontCare
+      imp.io.memIO.get.checkWait.memWaitUpdateReq := DontCare
+    case _ =>
+  }
+
   private val staIdxSeq = issueQueues.filter(iq => iq.params.StaCnt > 0).map(iq => iq.params.idxInSchBlk)
 
   for ((idxInSchBlk, i) <- staIdxSeq.zipWithIndex) {
