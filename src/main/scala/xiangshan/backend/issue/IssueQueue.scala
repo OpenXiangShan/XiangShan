@@ -55,7 +55,7 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val deq: MixedVec[DecoupledIO[IssueQueueIssueBundle]] = params.genIssueDecoupledBundle
   val wakeupToIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = params.genIQWakeUpSourceValidBundle
   val status = Output(new IssueQueueStatusBundle(params.numEnq))
-  val statusNext = Output(new IssueQueueStatusBundle(params.numEnq))
+  // val statusNext = Output(new IssueQueueStatusBundle(params.numEnq))
 
   val fromCancelNetwork = Flipped(params.genIssueDecoupledBundle)
   val deqDelay: MixedVec[DecoupledIO[IssueQueueIssueBundle]] = params.genIssueDecoupledBundle// = deq.cloneType
