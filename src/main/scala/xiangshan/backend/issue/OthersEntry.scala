@@ -243,10 +243,10 @@ class OthersEntryMem()(implicit p: Parameters, params: IssueBlockParams) extends
   val deqFailedForStdInvalid = io.issueResp.valid && io.issueResp.bits.respType === RSFeedbackType.dataInvalid
 
   val staWaitedReleased = Cat(
-    fromMem.memWaitUpdateReq.staIssue.map(x => x.valid && x.bits.uop.robIdx.value === memStatusNext.waitForRobIdx.value)
+    fromMem.memWaitUpdateReq.robIdx.map(x => x.valid && x.bits.value === memStatusNext.waitForRobIdx.value)
   ).orR
   val stdWaitedReleased = Cat(
-    fromMem.memWaitUpdateReq.stdIssue.map(x => x.valid && x.bits.uop.sqIdx.value === memStatusNext.waitForSqIdx.value)
+    fromMem.memWaitUpdateReq.sqIdx.map(x => x.valid && x.bits.value === memStatusNext.waitForSqIdx.value)
   ).orR
   val olderStaNotViolate = staWaitedReleased && !memStatusNext.strictWait
   val olderStdReady = stdWaitedReleased && memStatusNext.waitForStd
