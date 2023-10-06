@@ -115,15 +115,6 @@ class PerfCounterIO(implicit p: Parameters) extends XSBundle {
     val lqFull = Bool()
     val dcacheMSHRFull = Bool()
   }
-
-  val cacheInfo = new Bundle {
-    val l2MSHRFull = Bool()
-    val l3MSHRFull = Bool()
-    val l2nAcquire = UInt(XLEN.W)
-    val l2nAcquireMiss = UInt(XLEN.W)
-    val l3nAcquire = UInt(XLEN.W)
-    val l3nAcquireMiss = UInt(XLEN.W)
-  }
 }
 
 class CSRFileIO(implicit p: Parameters) extends XSBundle {
