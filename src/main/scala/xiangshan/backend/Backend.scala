@@ -458,6 +458,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
 
   io.csrCustomCtrl := csrio.customCtrl
 
+  io.toTop.cpuHalted := false.B // TODO: implement cpu halt
+
   io.debugTopDown <> ctrlBlock.io.debugTopDown
 
   dontTouch(memScheduler.io)
