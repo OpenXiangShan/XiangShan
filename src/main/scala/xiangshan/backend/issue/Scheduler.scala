@@ -253,16 +253,6 @@ class SchedulerArithImp(override val wrapper: Scheduler)(implicit params: SchdBl
     iq.io.enq <> dispatch2Iq.io.out(i)
     iq.io.wakeupFromWB := wakeupFromWBVec
   }
-
-  val iqJumpBundleVec: Seq[IssueQueueJumpBundle] = issueQueues.map {
-    case imp: IssueQueueIntImp => imp.io.enqJmp
-    case _ => None
-  }.filter(_.nonEmpty).flatMap(_.get)
-  println(s"[Scheduler] iqJumpBundleVec: ${iqJumpBundleVec}")
-
-  iqJumpBundleVec.zip(io.fromCtrlBlock.pcVec).foreach { case (iqJmp, pc) =>
-    iqJmp.pc := pc
-  }
 }
 
 // FIXME: Vector mem instructions may not be handled properly!
