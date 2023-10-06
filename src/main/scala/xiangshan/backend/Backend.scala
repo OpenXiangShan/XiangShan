@@ -437,7 +437,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   // mem io
   io.mem.lsqEnqIO <> memScheduler.io.memIO.get.lsqEnqIO
   io.mem.robLsqIO <> ctrlBlock.io.robio.lsq
-  io.mem.toSbuffer <> fenceio.sbuffer
 
   private val intFinalIssueBlock = intExuBlock.io.in.flatten.map(_ => false.B)
   private val vfFinalIssueBlock = vfExuBlock.io.in.flatten.map(_ => false.B)
@@ -472,7 +471,6 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   // In/Out // Todo: split it into one-direction bundle
   val lsqEnqIO = Flipped(new LsqEnqIO)
   val robLsqIO = new RobLsqIO
-  val toSbuffer = new FenceToSbuffer
   val ldaIqFeedback = Vec(params.LduCnt, Flipped(new MemRSFeedbackIO))
   val staIqFeedback = Vec(params.StaCnt, Flipped(new MemRSFeedbackIO))
   val ldCancel = Vec(params.LduCnt, Flipped(new LoadCancelIO))

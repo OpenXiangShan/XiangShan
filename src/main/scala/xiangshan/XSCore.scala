@@ -174,7 +174,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.perf.ctrlInfo := DontCare
 
   memBlock.io.sfence <> backend.io.mem.sfence
-  memBlock.io.fenceToSbuffer <> backend.io.mem.toSbuffer
+  memBlock.io.fenceToSbuffer <> backend.io.fenceio.sbuffer
 
   memBlock.io.redirect <> backend.io.mem.redirect
   memBlock.io.csrCtrl <> backend.io.mem.csrCtrl
