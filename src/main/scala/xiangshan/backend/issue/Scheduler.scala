@@ -209,6 +209,29 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
     toDpDy <> issueQueues(i).io.deqDelay
   }
 
+  // Response
+  issueQueues.zipWithIndex.foreach { case (iq, i) =>
+    iq.io.deqResp.zipWithIndex.foreach { case (deqResp, j) =>
+      deqResp.valid := iq.io.deq(j).valid && io.toDataPath(i)(j).ready
+      deqResp.bits.respType := RSFeedbackType.issueSuccess
+      deqResp.bits.robIdx := iq.io.deq(j).bits.common.robIdx
+      deqResp.bits.dataInvalidSqIdx := DontCare
+      deqResp.bits.rfWen := iq.io.deq(j).bits.common.rfWen.getOrElse(false.B)
+      deqResp.bits.fuType := iq.io.deq(j).bits.common.fuType
+    }
+    iq.io.og0Resp.zipWithIndex.foreach { case (og0Resp, j) =>
+      og0Resp := io.fromDataPath(i)(j).og0resp
+    }
+    iq.io.og1Resp.zipWithIndex.foreach { case (og1Resp, j) =>
+      og1Resp := io.fromDataPath(i)(j).og1resp
+    }
+    iq.io.finalIssueResp.foreach(_.zipWithIndex.foreach { case (finalIssueResp, j) =>
+      finalIssueResp := io.loadFinalIssueResp(i)(j)
+    })
+    iq.io.wbBusyTableRead := io.fromWbFuBusyTable.fuBusyTableRead(i)
+    io.wbFuBusyTable(i) := iq.io.wbBusyTableWrite
+  }
+
   println(s"[Scheduler] io.fromSchedulers.wakeupVec: ${io.fromSchedulers.wakeupVec.map(x => backendParams.getExuName(x.bits.exuIdx))}")
   println(s"[Scheduler] iqWakeUpInKeys: ${iqWakeUpInMap.keys}")
 
@@ -229,33 +252,6 @@ class SchedulerArithImp(override val wrapper: Scheduler)(implicit params: SchdBl
     iq.io.flush <> io.fromCtrlBlock.flush
     iq.io.enq <> dispatch2Iq.io.out(i)
     iq.io.wakeupFromWB := wakeupFromWBVec
-    iq.io.deqResp.zipWithIndex.foreach { case (deqResp, j) =>
-      deqResp.valid := iq.io.deq(j).valid && io.toDataPath(i)(j).ready
-      deqResp.bits.respType := RSFeedbackType.issueSuccess
-      deqResp.bits.robIdx := iq.io.deq(j).bits.common.robIdx
-      deqResp.bits.rfWen := iq.io.deq(j).bits.common.rfWen.getOrElse(false.B)
-      deqResp.bits.fuType := iq.io.deq(j).bits.common.fuType
-
-    }
-    iq.io.og0Resp.zipWithIndex.foreach { case (og0Resp, j) =>
-      og0Resp.valid := io.fromDataPath(i)(j).og0resp.valid
-      og0Resp.bits.respType := io.fromDataPath(i)(j).og0resp.bits.respType
-      og0Resp.bits.robIdx := io.fromDataPath(i)(j).og0resp.bits.robIdx
-      og0Resp.bits.rfWen := io.fromDataPath(i)(j).og0resp.bits.rfWen
-      og0Resp.bits.fuType := io.fromDataPath(i)(j).og0resp.bits.fuType
-
-    }
-    iq.io.og1Resp.zipWithIndex.foreach { case (og1Resp, j) =>
-      og1Resp.valid := io.fromDataPath(i)(j).og1resp.valid
-      og1Resp.bits.respType := io.fromDataPath(i)(j).og1resp.bits.respType
-      og1Resp.bits.robIdx := io.fromDataPath(i)(j).og1resp.bits.robIdx
-      og1Resp.bits.rfWen := io.fromDataPath(i)(j).og1resp.bits.rfWen
-      og1Resp.bits.fuType := io.fromDataPath(i)(j).og1resp.bits.fuType
-
-    }
-
-    iq.io.wbBusyTableRead := io.fromWbFuBusyTable.fuBusyTableRead(i)
-    io.wbFuBusyTable(i) := iq.io.wbBusyTableWrite
   }
 
   val iqJumpBundleVec: Seq[IssueQueueJumpBundle] = issueQueues.map {
@@ -269,6 +265,7 @@ class SchedulerArithImp(override val wrapper: Scheduler)(implicit params: SchdBl
   }
 }
 
+// FIXME: Vector mem instructions may not be handled properly!
 class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBlockParams, p: Parameters)
   extends SchedulerImpBase(wrapper)
     with HasXSParameter
@@ -282,38 +279,6 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
   val ldAddrIQs = issueQueues.filter(iq => iq.params.LduCnt > 0)
   val stDataIQs = issueQueues.filter(iq => iq.params.StdCnt > 0)
   require(memAddrIQs.nonEmpty && stDataIQs.nonEmpty)
-
-  issueQueues.zipWithIndex.foreach { case (iq, i) =>
-    iq.io.deqResp.zipWithIndex.foreach { case (deqResp, j) =>
-      deqResp.valid := iq.io.deq(j).valid && io.toDataPath(i)(j).ready
-      deqResp.bits.respType := RSFeedbackType.issueSuccess
-      deqResp.bits.robIdx := iq.io.deq(j).bits.common.robIdx
-      deqResp.bits.rfWen := iq.io.deq(j).bits.common.rfWen.getOrElse(false.B)
-      deqResp.bits.fuType := iq.io.deq(j).bits.common.fuType
-
-    }
-    iq.io.og0Resp.zipWithIndex.foreach { case (og0Resp, j) =>
-      og0Resp.valid := io.fromDataPath(i)(j).og0resp.valid
-      og0Resp.bits.respType := io.fromDataPath(i)(j).og0resp.bits.respType
-      og0Resp.bits.robIdx := io.fromDataPath(i)(j).og0resp.bits.robIdx
-      og0Resp.bits.rfWen := io.fromDataPath(i)(j).og0resp.bits.rfWen
-      og0Resp.bits.fuType := io.fromDataPath(i)(j).og0resp.bits.fuType
-
-    }
-    iq.io.og1Resp.zipWithIndex.foreach { case (og1Resp, j) =>
-      og1Resp.valid := io.fromDataPath(i)(j).og1resp.valid
-      og1Resp.bits.respType := io.fromDataPath(i)(j).og1resp.bits.respType
-      og1Resp.bits.robIdx := io.fromDataPath(i)(j).og1resp.bits.robIdx
-      og1Resp.bits.rfWen := io.fromDataPath(i)(j).og1resp.bits.rfWen
-      og1Resp.bits.fuType := io.fromDataPath(i)(j).og1resp.bits.fuType
-
-    }
-    iq.io.finalIssueResp.foreach(_.zipWithIndex.foreach { case (finalIssueResp, j) =>
-      finalIssueResp := io.loadFinalIssueResp(i)(j)
-    })
-    iq.io.wbBusyTableRead := io.fromWbFuBusyTable.fuBusyTableRead(i)
-    io.wbFuBusyTable(i) := iq.io.wbBusyTableWrite
-  }
 
   memAddrIQs.zipWithIndex.foreach { case (iq, i) =>
     iq.io.flush <> io.fromCtrlBlock.flush
