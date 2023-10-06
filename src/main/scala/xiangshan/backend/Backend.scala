@@ -289,9 +289,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
 
   private val csrio = intExuBlock.io.csrio.get
   csrio.hartId := io.fromTop.hartId
-  csrio.perf.retiredInstr <> ctrlBlock.io.robio.csr.perfinfo.retiredInstr
-  csrio.perf.ctrlInfo <> ctrlBlock.io.perfInfo.ctrlInfo
-  csrio.perf.perfEventsCtrl <> ctrlBlock.getPerf
   csrio.fpu.fflags := ctrlBlock.io.robio.csr.fflags
   csrio.fpu.isIllegal := false.B // Todo: remove it
   csrio.fpu.dirty_fs := ctrlBlock.io.robio.csr.dirty_fs
@@ -314,6 +311,9 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   csrio.distributedUpdate(0) := io.mem.csrDistributedUpdate
   csrio.distributedUpdate(1) := io.frontendCsrDistributedUpdate
   csrio.perf <> io.perf
+  csrio.perf.retiredInstr <> ctrlBlock.io.robio.csr.perfinfo.retiredInstr
+  csrio.perf.ctrlInfo <> ctrlBlock.io.perfInfo.ctrlInfo
+  csrio.perf.perfEventsCtrl <> ctrlBlock.getPerf
   private val fenceio = intExuBlock.io.fenceio.get
   fenceio.disableSfence := csrio.disableSfence
   io.fenceio <> fenceio
