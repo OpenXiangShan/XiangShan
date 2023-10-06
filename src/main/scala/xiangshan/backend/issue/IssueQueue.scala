@@ -709,9 +709,7 @@ class IssueQueueLoadBundle(implicit p: Parameters) extends XSBundle {
   val fastImm = UInt(12.W)
 }
 
-class IssueQueueIntIO()(implicit p: Parameters, params: IssueBlockParams) extends IssueQueueIO {
-  val enqJmp = if(params.numPcReadPort > 0) Some(Input(Vec(params.numPcReadPort, new IssueQueueJumpBundle))) else None
-}
+class IssueQueueIntIO()(implicit p: Parameters, params: IssueBlockParams) extends IssueQueueIO
 
 class IssueQueueIntImp(override val wrapper: IssueQueue)(implicit p: Parameters, iqParams: IssueBlockParams)
   extends IssueQueueImp(wrapper)
