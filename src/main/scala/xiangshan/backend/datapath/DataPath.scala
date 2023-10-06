@@ -306,7 +306,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
         }
         if (s1_data.params.hasJmpFu) {
           when(SrcType.isPc(s0.bits.srcType(0))) {
-            s1_data.src(0) := SignExt(s0.bits.jmp.get.pc, XLEN)
+            s1_data.src(0) := SignExt(s0.bits.common.pc.get, XLEN)
           }
         } else if (s1_data.params.hasVecFu) {
           // Fuck off riscv vector imm!!! Why not src1???
