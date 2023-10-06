@@ -90,6 +90,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val memBlock = outer.memBlock.module
 
   val fenceio = backend.io.fenceio
+  fenceio.disableSfence := DontCare
 
   frontend.io.hartId  := io.hartId
   frontend.io.backend <> backend.io.frontend
@@ -161,6 +162,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.perf.perfEventsFrontend := frontend.getPerf
   backend.io.perf.perfEventsLsu := memBlock.getPerf
   backend.io.perf.perfEventsHc := io.perfEvents
+  backend.io.perf.perfEventsCtrl := DontCare
+  backend.io.perf.retiredInstr := DontCare
+  backend.io.perf.ctrlInfo := DontCare
 
   memBlock.io.sfence <> backend.io.mem.sfence
   memBlock.io.fenceToSbuffer <> backend.io.mem.toSbuffer
