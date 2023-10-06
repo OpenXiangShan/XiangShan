@@ -133,9 +133,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.ldaIqFeedback <> memBlock.io.ldaIqFeedback
   backend.io.mem.staIqFeedback <> memBlock.io.staIqFeedback
   backend.io.mem.ldCancel <> memBlock.io.ldCancel
-  backend.io.mem.writeBack.zip(memBlock.io.writeback).foreach { case(back, mem) =>
+  backend.io.mem.writeBack.zipAll(memBlock.io.writeback, DontCare, DontCare).foreach { case (back, mem) =>
     back <> mem
-  }
+  } // TODO: replace zipAll with zip when vls is fully implemented
 
   frontend.io.reset_vector := io.reset_vector
 
@@ -148,9 +148,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   io.beu_errors.dcache <> memBlock.io.error.toL1BusErrorUnitInfo()
 
   memBlock.io.hartId := io.hartId
-  memBlock.io.issue.zip(backend.io.mem.issueUops).foreach { case(memIssue, backIssue) =>
-    memIssue <> backIssue
-  }
+  memBlock.io.issue.zipAll(backend.io.mem.issueUops, DontCare, DontCare).foreach { case(memIssue, backIssue) =>
+    backIssue <> memIssue
+  } // TODO: replace zipAll with zip when vls is fully implemented
   // By default, instructions do not have exceptions when they enter the function units.
   memBlock.io.issue.map(_.bits.uop.clearExceptions())
   memBlock.io.loadPc := backend.io.mem.loadPcRead
@@ -180,6 +180,13 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.itlb <> frontend.io.ptw
   memBlock.io.l2_hint.valid := io.l2_hint.valid
   memBlock.io.l2_hint.bits.sourceId := io.l2_hint.bits.sourceId
+
+  // TODO: Connect us when implemented
+  memBlock.io.int2vlsu  <> DontCare
+  memBlock.io.vec2vlsu  <> DontCare
+  memBlock.io.vlsu2vec  <> DontCare
+  memBlock.io.vlsu2int  <> DontCare
+  memBlock.io.vlsu2ctrl <> DontCare
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   io.l2_pf_enable := backend.io.csrCustomCtrl.l2_pf_enable
