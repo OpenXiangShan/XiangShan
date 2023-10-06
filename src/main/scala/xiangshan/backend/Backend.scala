@@ -173,6 +173,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   ctrlBlock.io.robio.lsTopdownInfo <> io.mem.lsTopdownInfo
   ctrlBlock.io.robio.debug_ls <> io.mem.debugLS
   ctrlBlock.io.fromDataPath.vtype := vconfig(7, 0).asTypeOf(new VType)
+  ctrlBlock.perfinfo := DontCare // TODO: Implement backend hpm
 
   intScheduler.io.fromTop.hartId := io.fromTop.hartId
   intScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
