@@ -310,8 +310,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   csrio.perf.ctrlInfo <> ctrlBlock.io.perfInfo.ctrlInfo
   csrio.perf.perfEventsCtrl <> ctrlBlock.getPerf
   private val fenceio = intExuBlock.io.fenceio.get
-  fenceio.disableSfence := csrio.disableSfence
   io.fenceio <> fenceio
+  fenceio.disableSfence := csrio.disableSfence
 
   vfExuBlock.io.flush := ctrlBlock.io.toExuBlock.flush
   for (i <- 0 until vfExuBlock.io.in.size) {
