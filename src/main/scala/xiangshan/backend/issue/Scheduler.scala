@@ -270,6 +270,8 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
   val stDataIQs = issueQueues.filter(iq => iq.params.StdCnt > 0)
   require(memAddrIQs.nonEmpty && stDataIQs.nonEmpty)
 
+  io.toMem.get.loadFastMatch := 0.U.asTypeOf(io.toMem.get.loadFastMatch) // TODO: is still needed?
+
   memAddrIQs.zipWithIndex.foreach { case (iq, i) =>
     iq.io.flush <> io.fromCtrlBlock.flush
     iq.io.enq <> dispatch2Iq.io.out(i)
