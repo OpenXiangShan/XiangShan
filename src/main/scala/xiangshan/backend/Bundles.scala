@@ -352,7 +352,6 @@ object Bundles {
     val srcType = Vec(exuParams.numRegSrc, SrcType()) // used to select imm or reg data
     val immType = SelImm()                         // used to select imm extractor
     val common = new ExuInput(exuParams)
-    val jmp = if (exuParams.needPc) Some(Flipped(new IssueQueueJumpBundle)) else None
     val addrOH = UInt(iqParams.numEntries.W)
 
     def exuIdx = exuParams.exuIdx
@@ -498,7 +497,7 @@ object Bundles {
       this.fpu           .foreach(_ := source.common.fpu.get)
       this.vpu           .foreach(_ := source.common.vpu.get)
       this.flushPipe     .foreach(_ := source.common.flushPipe.get)
-      this.pc            .foreach(_ := source.jmp.get.pc)
+      this.pc            .foreach(_ := source.common.pc.get)
       this.preDecode     .foreach(_ := source.common.preDecode.get)
       this.ftqIdx        .foreach(_ := source.common.ftqIdx.get)
       this.ftqOffset     .foreach(_ := source.common.ftqOffset.get)

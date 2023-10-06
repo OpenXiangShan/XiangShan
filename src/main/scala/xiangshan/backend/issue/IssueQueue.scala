@@ -705,9 +705,7 @@ class IssueQueueIntImp(override val wrapper: IssueQueue)(implicit p: Parameters,
   }
 
   io.deq.zipWithIndex.foreach{ case (deq, i) => {
-    deq.bits.jmp.foreach((deqJmp: IssueQueueJumpBundle) => {
-      deqJmp.pc := deqEntryVec(i).bits.status.pc.get
-    })
+    deq.bits.common.pc.foreach(_ := deqEntryVec(i).bits.status.pc.get)
     deq.bits.common.preDecode.foreach(_ := deqEntryVec(i).bits.payload.preDecodeInfo)
     deq.bits.common.ftqIdx.foreach(_ := deqEntryVec(i).bits.payload.ftqPtr)
     deq.bits.common.ftqOffset.foreach(_ := deqEntryVec(i).bits.payload.ftqOffset)
