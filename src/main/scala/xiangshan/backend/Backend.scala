@@ -420,9 +420,10 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   io.mem.isStoreException := CommitType.lsInstIsStore(ctrlBlock.io.robio.exception.bits.commitType)
   require(io.mem.loadPcRead.size == params.LduCnt)
   io.mem.loadPcRead.zipWithIndex.foreach { case (loadPcRead, i) =>
-    loadPcRead.data := ctrlBlock.io.memLdPcRead(i).data
-    ctrlBlock.io.memLdPcRead(i).ptr := loadPcRead.ptr
-    ctrlBlock.io.memLdPcRead(i).offset := loadPcRead.offset
+    loadPcRead := ctrlBlock.io.memLdPcRead(i).data
+    ctrlBlock.io.memLdPcRead(i).ptr := io.mem.issueUops(i).bits.uop.ftqPtr
+    ctrlBlock.io.memLdPcRead(i).offset := io.mem.issueUops(i).bits.uop.ftqOffset
+    require(toMem.head(i).bits.ftqIdx.isDefined && toMem.head(i).bits.ftqOffset.isDefined)
   }
   // mem io
   io.mem.lsqEnqIO <> memScheduler.io.memIO.get.lsqEnqIO
@@ -462,7 +463,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val ldaIqFeedback = Vec(params.LduCnt, Flipped(new MemRSFeedbackIO))
   val staIqFeedback = Vec(params.StaCnt, Flipped(new MemRSFeedbackIO))
   val ldCancel = Vec(params.LduCnt, Flipped(new LoadCancelIO))
-  val loadPcRead = Vec(params.LduCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
+  val loadPcRead = Vec(params.LduCnt, Output(UInt(VAddrBits.W)))
 
   // Input
   val writeBack = MixedVec(Seq.fill(params.LduCnt + params.StaCnt * 2)(Flipped(DecoupledIO(new MemExuOutput()))) ++ Seq.fill(params.VlduCnt)(Flipped(DecoupledIO(new MemExuOutput(true)))))
