@@ -362,8 +362,8 @@ class LoadDataFromLQBundle(implicit p: Parameters) extends XSBundle {
 
 // Bundle for load / store wait waking up
 class MemWaitUpdateReq(implicit p: Parameters) extends XSBundle {
-  val staIssue = Vec(backendParams.StaCnt, ValidIO(new MemExuInput))
-  val stdIssue = Vec(backendParams.StdCnt, ValidIO(new MemExuInput))
+  val robIdx = Vec(backendParams.StaCnt, ValidIO(new RobPtr))
+  val sqIdx = Vec(backendParams.StdCnt, ValidIO(new SqPtr))
 }
 
 object AddPipelineReg {
