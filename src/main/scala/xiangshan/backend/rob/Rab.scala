@@ -33,7 +33,6 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
     }))
 
     val req = Vec(RenameWidth, Flipped(ValidIO(new DynInst)))
-
     val fromRob = new Bundle {
       val walkSize = Input(UInt(log2Up(size).W))
       val walkEnd = Input(Bool())
@@ -52,6 +51,9 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
       val walkEnd = Bool()
     })
   })
+
+  // alias
+  private val snptSelect = io.snpt.snptSelect
 
   // pointer
   private val enqPtrVec = RegInit(VecInit.tabulate(RenameWidth)(idx => RenameBufferPtr(flag = false, idx)))
@@ -77,6 +79,19 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
 
   private val snptEnq = io.canEnq && io.req.head.valid && io.req.head.bits.snapshot
   private val walkPtrSnapshots = SnapshotGenerator(enqPtr, snptEnq, io.snpt.snptDeq, io.redirect.valid)
+
+  // We should extra walk these preg pairs which compressed in rob enq entry at last cycle after restored snapshots.
+  // enq firstuop: b010100 --invert--> b101011 --keep only continuous 1s from head--> b000011
+  // enq firstuop: b111101 --invert--> b000010 --keep only continuous 1s from head--> b000000
+  private val enqCompressedLastCycleMask: UInt = VecInit(io.req.indices.map(i => io.req.slice(0, i + 1).map(!_.bits.firstUop).reduce(_ && _))).asUInt
+  private val compressedLastRobEntryMaskSnapshots = SnapshotGenerator(enqCompressedLastCycleMask, snptEnq, io.snpt.snptDeq, io.redirect.valid)
+  private val compressedExtraWalkMask = compressedLastRobEntryMaskSnapshots(snptSelect)
+  // b111111 --Cat(x,1)--> b1111111 --Reverse--> b1111111 --PriorityEncoder--> 6.U
+  // b001111 --Cat(x,1)--> b0011111 --Reverse--> b1111100 --PriorityEncoder--> 4.U
+  // b000011 --Cat(x,1)--> b0000111 --Reverse--> b1110000 --PriorityEncoder--> 2.U
+  // b000000 --Cat(x,1)--> b0000001 --Reverse--> b1000000 --PriorityEncoder--> 0.U
+  private val compressedExtraWalkSize = PriorityMux(Reverse(Cat(compressedExtraWalkMask, 1.U(1.W))), (0 to RenameWidth).map(i => (RenameWidth - i).U))
+
   // may shift [0, CommitWidth] steps
   val headPtrOHVec2 = VecInit(Seq.tabulate(CommitWidth * MaxUopSize + 1)(_ % size).map(step => deqPtrOHShift.left(step)))
 
@@ -128,10 +143,10 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
 
   commitSize := Mux(io.redirect.valid && !io.snpt.useSnpt, 0.U, commitSizeNxt)
   specialWalkSize := specialWalkSizeNext
-  walkSize := Mux(io.redirect.valid, 0.U, walkSizeNxt)
+  walkSize := Mux(io.redirect.valid, Mux(io.snpt.useSnpt, compressedExtraWalkSize, 0.U), walkSizeNxt)
 
   walkPtrNext := MuxCase(walkPtr, Seq(
-    (state === s_idle && stateNext === s_walk) -> walkPtrSnapshots(io.snpt.snptSelect),
+    (state === s_idle && stateNext === s_walk) -> walkPtrSnapshots(snptSelect),
     (state === s_special_walk && stateNext === s_walk) -> deqPtrVecNext.head,
     (state === s_walk) -> (walkPtr + walkCount),
   ))
