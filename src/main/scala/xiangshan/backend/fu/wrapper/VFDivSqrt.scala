@@ -66,7 +66,7 @@ class VFDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends VecNonPipedFuncUn
       mod.io.is_frs2_i      := false.B // already vf -> vv
       mod.io.is_frs1_i      := false.B // already vf -> vv
       mod.io.is_sqrt_i      := opcode
-      mod.io.rm_i           := frm
+      mod.io.rm_i           := rmValue
       mod.io.is_vec_i       := true.B // Todo
       resultData(i) := mod.io.fpdiv_res_o
       fflagsData(i) := mod.io.fflags_o

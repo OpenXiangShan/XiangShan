@@ -3,7 +3,7 @@ package xiangshan.backend.fu.vector
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import xiangshan.backend.fu.FuConfig.VialuCfg
+import xiangshan.backend.fu.FuConfig.{VfcvtCfg, VialuCfg}
 import xiangshan.backend.fu.vector.Bundles.VConfig
 import xiangshan.backend.fu.vector.utils.ScalaDupToVector
 import xiangshan.backend.fu.{FuConfig, FuncUnit, HasPipelineReg}
@@ -65,7 +65,7 @@ class VecPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(c
   scalaDupToVector.io.in.vsew := vsew
   extedVs1 := scalaDupToVector.io.out.vecData
 
-  private val src0 = Mux(vecCtrl.needScalaSrc, extedVs1, inData.src(0)) // vs1, rs1, fs1, imm
+  private val src0 = if(cfg == VfcvtCfg) inData.src(0) else Mux(vecCtrl.needScalaSrc, extedVs1, inData.src(0)) // vs1, rs1, fs1, imm
   private val src1 = WireInit(inData.src(1)) // vs2 only
   if(cfg == FuConfig.VfaluCfg){
     val vs2Fold = Wire(UInt(VLEN.W))
@@ -81,6 +81,8 @@ class VecPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(c
   protected val vs2 = Mux(isReverse, src0, src1)
   protected val vs1 = Mux(isReverse, src1, src0)
   protected val oldVd = inData.src(2)
+
+  protected val rmValue = Mux(vecCtrl.fpu.isFpToVecInst && !(vecCtrl.fpu.rmInst === 7.U), vecCtrl.fpu.rmInst, frm)
 
   protected val outCtrl     = ctrlVec.last
   protected val outData     = dataVec.last

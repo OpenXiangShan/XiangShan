@@ -29,6 +29,8 @@ class VecNonPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUni
   protected val vs1 = Mux(isReverse, src1, src0)
   protected val oldVd = inData.src(2)
 
+  protected val rmValue = Mux(vecCtrl.fpu.isFpToVecInst && !(vecCtrl.fpu.rmInst === 7.U), vecCtrl.fpu.rmInst, frm)
+
   protected val outCtrl     = DataHoldBypass(io.in.bits.ctrl, io.in.fire)
   protected val outData     = DataHoldBypass(io.in.bits.data, io.in.fire)
 

@@ -172,7 +172,7 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
       mod.io.maskForReduction := genMaskForReduction(inmask = srcMaskRShiftForReduction, sew = vsew, i = i)
       mod.io.uop_idx          := Mux(fuOpType === VfaluType.vfwredosum, 0.U, vuopIdx(0))
       mod.io.is_vec           := true.B // Todo
-      mod.io.round_mode       := frm
+      mod.io.round_mode       := rmValue
       mod.io.fp_format        := Mux(resWiden, vsew + 1.U, vsew)
       mod.io.opb_widening     := opbWiden || (fuOpType === VfaluType.vfwredosum)
       mod.io.res_widening     := resWiden
