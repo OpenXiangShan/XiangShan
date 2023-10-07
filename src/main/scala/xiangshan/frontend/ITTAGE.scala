@@ -16,7 +16,7 @@
 
 package xiangshan.frontend
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -213,7 +213,7 @@ class ITTageTable
   val (s1_idx, s1_tag) = (RegEnable(s0_idx, io.req.fire), RegEnable(s0_tag, io.req.fire))
   val s0_bank_req_1h = get_bank_mask(s0_idx)
   val s1_bank_req_1h = RegEnable(s0_bank_req_1h, io.req.fire)
-  
+
   val us = Module(new Folded1WDataModuleTemplate(Bool(), nRows, 1, isSync=true, width=uFoldedWidth))
   // val table  = Module(new SRAMTemplate(new ITTageEntry, set=nRows, way=1, shouldReset=true, holdRead=true, singlePort=false))
   val table_banks = Seq.fill(nBanks)(
@@ -279,7 +279,7 @@ class ITTageTable
   update_wdata.tag   := update_tag
   // only when ctr is null
   update_wdata.target := Mux(io.update.alloc || ctr_null(old_ctr), update_target, io.update.old_target)
-  
+
   val newValidArray = VecInit(validArray.asBools)
   when (io.update.valid) {
     newValidArray(update_idx) := true.B
@@ -457,10 +457,10 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val providerInfo = selectedInfo.first
   val altProviderInfo = selectedInfo.second
   val providerNull = providerInfo.ctr === 0.U
-  
+
   val basePred   = true.B
   val baseTarget = io.in.bits.resp_in(0).s2.full_pred(3).jalr_target // use ftb pred as base target
-  
+
   s2_tageTaken := Mux1H(Seq(
     (provided && !(providerNull && altProvided), true.B),
     (altProvided && providerNull, true.B),

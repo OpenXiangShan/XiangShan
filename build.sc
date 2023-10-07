@@ -20,7 +20,7 @@ import scalalib._
 import publish._
 import coursier.maven.MavenRepository
 import $file.`rocket-chip`.common
-import $file.`rocket-chip`.`api-config-chipsalliance`.`build-rules`.mill.build
+import $file.`rocket-chip`.cde.common
 import $file.`rocket-chip`.hardfloat.build
 
 object ivys {
@@ -67,16 +67,16 @@ object rocketchip extends `rocket-chip`.common.CommonRocketChip {
 
   val rcPath = os.pwd / "rocket-chip"
 
-  override def scalaVersion = ivys.sv
+  def scalaVersion = ivys.sv
 
   override def scalacOptions = Seq("-Xsource:2.11")
 
   override def millSourcePath = rcPath
 
-  object configRocket extends `rocket-chip`.`api-config-chipsalliance`.`build-rules`.mill.build.config with PublishModule {
-    override def millSourcePath = rcPath / "api-config-chipsalliance" / "design" / "craft"
+  object cdeRocket extends `rocket-chip`.cde.common.CDEModule with PublishModule {
+    override def millSourcePath = rcPath / "cde" / "cde"
 
-    override def scalaVersion = T {
+    def scalaVersion = T {
       rocketchip.scalaVersion()
     }
 
@@ -97,15 +97,15 @@ object rocketchip extends `rocket-chip`.common.CommonRocketChip {
     }
 
     def chisel3IvyDeps = if(chisel3Module.isEmpty) Agg(
-      common.getVersion("chisel3")
+      `rocket-chip`.common.getVersion("chisel3")
     ) else Agg.empty[Dep]
 
-    def chisel3PluginIvyDeps = Agg(common.getVersion("chisel3-plugin", cross=true))
+    def chisel3PluginIvyDeps = Agg(`rocket-chip`.common.getVersion("chisel3-plugin", cross=true))
   }
 
   def hardfloatModule = hardfloatRocket
 
-  def configModule = configRocket
+  def cdeModule = cdeRocket
 
 }
 

@@ -16,7 +16,7 @@
 
 package xiangshan.frontend
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -34,7 +34,7 @@ trait FTBParams extends HasXSParameter with HasBPUConst {
   val numSets    = numEntries/numWays // 512
   val tagSize    = 20
 
-  
+
 
   val TAR_STAT_SZ = 2
   def TAR_FIT = 0.U(TAR_STAT_SZ.W)
@@ -126,12 +126,12 @@ class FtbSlot(val offsetLen: Int, val subOffsetLen: Option[Int] = None)(implicit
     this.valid := that.valid
     this.lower := ZeroExt(that.lower, this.offsetLen)
   }
-  
+
 }
 
 class FTBEntry(implicit p: Parameters) extends XSBundle with FTBParams with BPUUtils {
-  
-  
+
+
   val valid       = Bool()
 
   val brSlots = Vec(numBrSlot, new FtbSlot(BR_OFFSET_LEN))
@@ -190,14 +190,14 @@ class FTBEntry(implicit p: Parameters) extends XSBundle with FTBParams with BPUU
   def getBrMaskByOffset(offset: UInt) =
     brSlots.map{ s => s.valid && s.offset <= offset } :+
     (tailSlot.valid && tailSlot.offset <= offset && tailSlot.sharing)
-    
+
   def getBrRecordedVec(offset: UInt) = {
     VecInit(
       brSlots.map(s => s.valid && s.offset === offset) :+
       (tailSlot.valid && tailSlot.offset === offset && tailSlot.sharing)
     )
   }
-    
+
   def brIsSaved(offset: UInt) = getBrRecordedVec(offset).reduce(_||_)
 
   def brValids = {
@@ -429,7 +429,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   val btb_enable_dup = dup(RegNext(io.ctrl.btb_enable))
   val s2_ftb_entry_dup = io.s1_fire.map(f => RegEnable(ftbBank.io.read_resp, f))
   val s3_ftb_entry_dup = io.s2_fire.zip(s2_ftb_entry_dup).map {case (f, e) => RegEnable(e, f)}
-  
+
   val s1_hit = ftbBank.io.read_hits.valid && io.ctrl.btb_enable
   val s2_hit_dup = io.s1_fire.map(f => RegEnable(s1_hit, 0.B, f))
   val s3_hit_dup = io.s2_fire.zip(s2_hit_dup).map {case (f, h) => RegEnable(h, 0.B, f)}
@@ -478,7 +478,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   val delay2_pc = DelayN(update.pc, 2)
   val delay2_entry = DelayN(update.ftb_entry, 2)
 
-  
+
   val update_now = u_valid && u_meta.hit
   val update_need_read = u_valid && !u_meta.hit
   // stall one more cycle because we use a whole cycle to do update read tag hit

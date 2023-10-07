@@ -16,7 +16,7 @@
 
 package xiangshan.frontend
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.rocket.{RVCDecoder, ExpandedInstruction}
 import chisel3.{util, _}
 import chisel3.util._
