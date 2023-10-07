@@ -16,7 +16,7 @@
 
 package xiangshan.cache
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.TLPermissions._
@@ -177,9 +177,9 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
   // pending data write
   // !s_data_override means there is an in-progress data write
-  val s_data_override = RegInit(true.B) 
+  val s_data_override = RegInit(true.B)
   // !s_data_merge means there is an in-progress data merge
-  val s_data_merge = RegInit(true.B) 
+  val s_data_merge = RegInit(true.B)
 
   // there are valid request that can be sent to release bus
   val busy = remain.orR && s_data_override && s_data_merge // have remain beats and data write finished

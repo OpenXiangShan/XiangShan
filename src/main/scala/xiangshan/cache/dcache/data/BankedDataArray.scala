@@ -16,7 +16,7 @@
 
 package xiangshan.cache
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import utils._
 import utility._
@@ -473,7 +473,7 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       }
     }
   }
-  
+
   val data_read_oh = WireInit(VecInit(Seq.fill(DCacheSetDiv * DCacheBanks * DCacheWays)(0.U(1.W))))
   for(div_index <- 0 until DCacheSetDiv){
     for (bank_index <- 0 until DCacheBanks) {

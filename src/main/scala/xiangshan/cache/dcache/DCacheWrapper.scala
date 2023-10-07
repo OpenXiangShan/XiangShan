@@ -16,7 +16,7 @@
 
 package xiangshan.cache
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.experimental.ExtModule
 import chisel3.util._
@@ -398,7 +398,7 @@ class DCacheWordReqWithVaddrAndPfFlag(implicit p: Parameters) extends DCacheWord
     res.replayCarry := replayCarry
     res.isFirstIssue := isFirstIssue
     res.debug_robIdx := debug_robIdx
-    
+
     res
   }
 }

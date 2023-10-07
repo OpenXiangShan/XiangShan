@@ -1,6 +1,6 @@
 package xiangshan.mem.prefetch
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -26,7 +26,7 @@ trait HasStridePrefetchHelper extends HasL1PrefetchHelper {
   val LOOK_UP_STREAM = false // if true, avoid collision with stream
 
   val STRIDE_WIDTH_BLOCKS = if(AGGRESIVE_POLICY) STRIDE_LOOK_AHEAD_BLOCKS else 1
-  
+
   def MAX_CONF = (1 << STRIDE_CONF_BITS) - 1
 }
 
@@ -192,8 +192,8 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     XSPerfAccumulate(s"entry_${i}_update", i.U === s1_index && s1_update)
     for(j <- 0 until 4) {
       XSPerfAccumulate(s"entry_${i}_disturb_${j}", i.U === s1_index && s1_update &&
-                                                   j.U === s1_new_stride && 
-                                                   array(s1_index).confidence === MAX_CONF.U && 
+                                                   j.U === s1_new_stride &&
+                                                   array(s1_index).confidence === MAX_CONF.U &&
                                                    array(s1_index).stride =/= s1_new_stride
       )
     }

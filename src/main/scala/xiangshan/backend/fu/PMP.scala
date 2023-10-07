@@ -18,7 +18,7 @@
 
 package xiangshan.backend.fu
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utility.MaskedRegMap.WritableMask
@@ -389,7 +389,7 @@ class PMPRespBundle(implicit p: Parameters) extends PMPBundle {
     res.st := this.st || resp.st
     res.instr := this.instr || resp.instr
     res.mmio := this.mmio || resp.mmio
-    res.atomic := this.atomic || resp.atomic    
+    res.atomic := this.atomic || resp.atomic
     res
   }
 }

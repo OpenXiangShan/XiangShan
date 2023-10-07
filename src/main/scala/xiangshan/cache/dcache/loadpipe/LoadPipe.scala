@@ -16,7 +16,7 @@
 
 package xiangshan.cache
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.ClientMetadata
@@ -125,7 +125,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.lsu.req.ready := (!io.nack && not_nacked_ready) || (io.nack && nacked_ready)
   io.meta_read.valid := io.lsu.req.fire && !io.nack
   io.tag_read.valid := io.lsu.req.fire && !io.nack
-  
+
   val s0_valid = io.lsu.req.fire
   val s0_req = io.lsu.req.bits
   val s0_fire = s0_valid && s1_ready
@@ -418,7 +418,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   resp.bits.miss := real_miss
   io.lsu.s2_first_hit := s2_req.isFirstIssue && s2_hit
   // load pipe need replay when there is a bank conflict or wpu predict fail
-  resp.bits.replay := DontCare 
+  resp.bits.replay := DontCare
   resp.bits.replayCarry.valid := (resp.bits.miss && (!io.miss_req.fire || s2_nack || io.mq_enq_cancel)) || io.bank_conflict_slow || s2_wpu_pred_fail
   resp.bits.replayCarry.real_way_en := s2_real_way_en
   resp.bits.meta_prefetch := s2_hit_prefetch
@@ -455,7 +455,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val useful_prefetch = s2_valid && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U) && resp.bits.handled && !io.miss_resp.merged
 
   val prefetch_hit = s2_valid && (s2_req.instrtype =/= DCACHE_PREFETCH_SOURCE.U) && s2_hit && isFromL1Prefetch(s2_hit_prefetch) && s2_req.isFirstIssue
-  
+
   io.prefetch_info.naive.total_prefetch := total_prefetch
   io.prefetch_info.naive.late_hit_prefetch := late_hit_prefetch
   io.prefetch_info.naive.late_load_hit := late_load_hit
@@ -478,7 +478,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.lsu.debug_s1_hit_way := s1_tag_match_way_dup_dc
   io.lsu.s1_disable_fast_wakeup := io.disable_ld_fast_wakeup
   io.lsu.s2_bank_conflict := io.bank_conflict_slow
-  io.lsu.s2_wpu_pred_fail := s2_wpu_pred_fail_and_real_hit 
+  io.lsu.s2_wpu_pred_fail := s2_wpu_pred_fail_and_real_hit
   io.lsu.s2_mq_nack       := (resp.bits.miss && (!io.miss_req.fire || s2_nack || io.mq_enq_cancel))
   assert(RegNext(s1_ready && s2_ready), "load pipeline should never be blocked")
 
@@ -583,7 +583,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.counter_filter_enq.bits.way := OHToUInt(s3_tag_match_way)
 
   io.prefetch_info.fdp.useful_prefetch := s3_clear_pf_flag_en && !io.counter_filter_query.resp
-  
+
   XSPerfAccumulate("s3_pf_hit", s3_clear_pf_flag_en)
   XSPerfAccumulate("s3_pf_hit_filter", s3_clear_pf_flag_en && !io.counter_filter_query.resp)
 

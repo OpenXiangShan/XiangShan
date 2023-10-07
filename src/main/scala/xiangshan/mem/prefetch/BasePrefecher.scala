@@ -18,7 +18,7 @@ package xiangshan.mem.prefetch
 
 import chisel3._
 import chisel3.util._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import utility.MemReqSource
 import xiangshan._
 import xiangshan.cache.mmu.TlbRequestIO

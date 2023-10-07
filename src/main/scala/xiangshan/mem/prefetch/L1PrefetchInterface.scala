@@ -16,7 +16,7 @@
 
 package xiangshan.mem
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
@@ -57,7 +57,7 @@ class L1PrefetchReq(implicit p: Parameters) extends XSBundle with HasDCacheParam
   }
 
   // when l1 cache prefetch req arrives at load unit:
-  // if (confidence == 1) 
+  // if (confidence == 1)
   //   override load unit 2 load req
   // else if (load unit 1/2 is available)
   //   send prefetch req

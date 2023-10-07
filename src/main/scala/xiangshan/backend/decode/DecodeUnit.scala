@@ -16,7 +16,7 @@
 
 package xiangshan.backend.decode
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.rocket.Instructions
@@ -400,19 +400,19 @@ object SvinvalDecode extends DecodeConstants {
    * must assure it is the ONLY instrucion executing in backend.
    */
   SINVAL_VMA        ->List(SrcType.reg, SrcType.reg, SrcType.X, FuType.fence, FenceOpType.sfence, N, N, N, N, N, N, SelImm.X),
-  /* sfecne.w.inval is the begin instrucion of a TLB flush which set *noSpecExec* and *blockBackward* signals 
-   * so when it comes to dispatch , it will block all instruction after itself until all instrucions ahead of it in rob commit 
+  /* sfecne.w.inval is the begin instrucion of a TLB flush which set *noSpecExec* and *blockBackward* signals
+   * so when it comes to dispatch , it will block all instruction after itself until all instrucions ahead of it in rob commit
    * then dispatch and issue this instrucion to flush sbuffer to dcache
    * after this instrucion commits , issue following sinval_vma instructions (out of order) to flush TLB
    */
   SFENCE_W_INVAL    ->List(SrcType.DC, SrcType.DC, SrcType.X, FuType.fence, FenceOpType.nofence, N, N, N, Y, Y, N, SelImm.X),
-  /* sfecne.inval.ir is the end instrucion of a TLB flush which set *noSpecExec* *blockBackward* and *flushPipe* signals 
-   * so when it comes to dispatch , it will wait until all sinval_vma ahead of it in rob commit 
+  /* sfecne.inval.ir is the end instrucion of a TLB flush which set *noSpecExec* *blockBackward* and *flushPipe* signals
+   * so when it comes to dispatch , it will wait until all sinval_vma ahead of it in rob commit
    * then dispatch and issue this instrucion
    * when it commit at the head of rob , flush the pipeline since some instrucions have been fetched to ibuffer using old TLB map
    */
   SFENCE_INVAL_IR   ->List(SrcType.DC, SrcType.DC, SrcType.X, FuType.fence, FenceOpType.nofence, N, N, N, Y, Y, Y, SelImm.X)
-  /* what is Svinval extension ? 
+  /* what is Svinval extension ?
    *                       ----->             sfecne.w.inval
    * sfence.vma   vpn1     ----->             sinval_vma   vpn1
    * sfence.vma   vpn2     ----->             sinval_vma   vpn2

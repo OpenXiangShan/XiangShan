@@ -17,7 +17,7 @@ package xiangshan.mem
 
 import chisel3._
 import chisel3.util._
-import chipsalliance.rocketchip.config._
+import org.chipsalliance.cde.config._
 import xiangshan._
 import xiangshan.backend.rob.{RobPtr, RobLsqIO}
 import xiangshan.ExceptionNO._

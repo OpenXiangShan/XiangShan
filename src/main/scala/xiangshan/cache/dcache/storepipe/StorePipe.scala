@@ -16,7 +16,7 @@
 
 package xiangshan.cache
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.ClientMetadata
@@ -120,7 +120,7 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
 
   val s1_paddr = io.lsu.s1_paddr
 
-  /** 
+  /**
     * get hit meta
     */
   val s1_tag_match = Wire(UInt(nWays.W))
@@ -133,7 +133,7 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
   val (s1_has_permission, _, s1_new_hit_coh) = s1_hit_coh.onAccess(s1_req.cmd)
   val s1_hit = s1_has_permission && s1_new_hit_coh === s1_hit_coh && s1_tag_match.orR
 
-  /** 
+  /**
     * query replacer to choose a way to replace
     */
   io.replace_way.set.valid := s1_valid
@@ -171,7 +171,7 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
   io.lsu.resp.bits.tag_error := false.B
 
 
-  /** 
+  /**
     * send req to Dcache MissQueue
     */
   if(EnableStorePrefetchAtIssue) {
@@ -196,7 +196,7 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
   io.miss_req.bits.cancel := io.lsu.s2_kill
   io.miss_req.bits.pc := io.lsu.s2_pc
 
-  /** 
+  /**
     * update replacer, for now, disable this
     */
   io.replace_access.valid := false.B

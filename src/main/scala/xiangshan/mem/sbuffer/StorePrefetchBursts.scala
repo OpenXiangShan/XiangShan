@@ -16,7 +16,7 @@
 
 package xiangshan.mem
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -162,7 +162,7 @@ class StorePrefetchBursts(implicit p: Parameters) extends DCacheModule with HasS
   })
   require(EnsbufferWidth == 2)
 
-  // meta for SPB 
+  // meta for SPB
   val N = SPB_N
   val last_st_block_addr = RegInit(0.U(VAddrBits.W))
   val saturate_counter = RegInit(0.S(SATURATE_COUNTER_BITS.W))
@@ -194,7 +194,7 @@ class StorePrefetchBursts(implicit p: Parameters) extends DCacheModule with HasS
   burst_engine.io.vaddr := get_block_addr(io.sbuffer_enq.bits.vaddr)
   burst_engine.io.prefetch_req <> io.prefetch_req
 
-  // perf 
+  // perf
   XSPerfAccumulate("trigger_burst", burst && io.enable)
   XSPerfAccumulate("trigger_check", check && io.enable)
 }

@@ -17,7 +17,7 @@
 package xiangshan
 
 import chisel3._
-import chipsalliance.rocketchip.config.{Config, Parameters}
+import org.chipsalliance.cde.config.{Config, Parameters}
 import chisel3.util.{Valid, ValidIO}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
@@ -136,7 +136,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   misc.misc_l2_pmu := TLLogger(s"L2_L1I_${coreParams.HartId}", !debugOpts.FPGAPlatform && debugOpts.AlwaysBasicDB) := core.frontend.icache.clientNode
   if (!coreParams.softPTW) {
     misc.misc_l2_pmu := TLLogger(s"L2_PTW_${coreParams.HartId}", !debugOpts.FPGAPlatform && debugOpts.AlwaysBasicDB) := core.memBlock.ptw_to_l2_buffer.node
-  } 
+  }
 
   l2cache match {
     case Some(l2) =>
