@@ -1323,7 +1323,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(lmul).lsrc(0) := FP_TMP_REG_MV.U
       csBundle(lmul).lsrc(1) := 0.U
       csBundle(lmul).ldest := dest
-      csBundle(lmul).fuType := FuType.fmisc.U
+      csBundle(lmul).fuType := FuType.vfcvt.U
       csBundle(lmul).rfWen := true.B
       csBundle(lmul).fpWen := false.B
       csBundle(lmul).vecWen := false.B
@@ -1371,7 +1371,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(1).lsrc(0) := FP_TMP_REG_MV.U
       csBundle(1).lsrc(1) := 0.U
       csBundle(1).ldest := dest
-      csBundle(1).fuType := FuType.fmisc.U
+      csBundle(1).fuType := FuType.vfcvt.U
       csBundle(1).rfWen := true.B
       csBundle(1).fpWen := false.B
       csBundle(1).vecWen := false.B
