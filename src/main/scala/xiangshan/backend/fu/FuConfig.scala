@@ -599,13 +599,15 @@ object FuConfig {
     ),
     piped = true,
     writeVecRf = true,
-    writeFpRf = false,
+    writeFpRf = true,
+    writeIntRf = true,
     writeFflags = true,
     latency = CertainLatency(2),
     vconfigWakeUp = true,
     maskWakeUp = true,
     dataBits = 128,
     exceptionOut = Seq(illegalInstr),
+    needSrcFrm = true,//todo：for scalar2vector
   )
 
 

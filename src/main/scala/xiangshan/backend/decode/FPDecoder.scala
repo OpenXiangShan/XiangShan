@@ -42,6 +42,10 @@ class FPToVecDecoder(implicit p: Parameters) extends XSModule {
     FDIV_S, FDIV_D, FSQRT_S, FSQRT_D,
     FMADD_S, FMSUB_S, FNMADD_S, FNMSUB_S, FMADD_D, FMSUB_D, FNMADD_D, FNMSUB_D,
     FCLASS_S, FCLASS_D, FSGNJ_S, FSGNJ_D, FSGNJX_S, FSGNJX_D, FSGNJN_S, FSGNJN_D,
+
+    // scalar cvt inst
+    FCVT_W_S, FCVT_WU_S, FCVT_L_S, FCVT_LU_S,
+    FCVT_W_D, FCVT_WU_D, FCVT_L_D, FCVT_LU_D, FCVT_S_D, FCVT_D_S,
   )
   val isFpToVecInst = fpToVecInsts.map(io.instr === _).reduce(_ || _)
   val isFP32Instrs = Seq(
@@ -58,17 +62,42 @@ class FPToVecDecoder(implicit p: Parameters) extends XSModule {
     FCLASS_D, FSGNJ_D, FSGNJX_D, FSGNJN_D,
   )
   val isFP64Instr = isFP64Instrs.map(io.instr === _).reduce(_ || _)
+
+  // scalar cvt inst
+  val isSew2Cvts = Seq(
+    FCVT_W_S, FCVT_WU_S, FCVT_L_S, FCVT_LU_S,
+    FCVT_W_D, FCVT_WU_D, FCVT_S_D, FCVT_D_S,
+  )
+  val isSew2Cvt = isSew2Cvts.map(io.instr === _).reduce(_ || _)
+
+  val isSew3Cvts = Seq(
+    FCVT_L_D, FCVT_LU_D,
+  )
+  val isSew3Cvt = isSew3Cvts.map(io.instr === _).reduce(_ || _)
+
+  val isLmulMf4Cvts = Seq(
+    FCVT_W_S, FCVT_WU_S,
+  )
+  val isLmulMf4Cvt = isLmulMf4Cvts.map(io.instr === _).reduce(_ || _)
+
+  val isLmulMf2Cvts = Seq(
+    FCVT_L_S, FCVT_LU_S,
+    FCVT_W_D, FCVT_WU_D, FCVT_L_D, FCVT_LU_D, FCVT_S_D, FCVT_D_S,
+  )
+  val isLmulMf2Cvt = isLmulMf2Cvts.map(io.instr === _).reduce(_ || _)
+
   val needReverseInsts = fpToVecInsts
   val needReverseInst = needReverseInsts.map(_ === inst.ALL).reduce(_ || _)
   io.vpuCtrl := 0.U.asTypeOf(io.vpuCtrl)
   io.vpuCtrl.fpu.isFpToVecInst := isFpToVecInst
   io.vpuCtrl.fpu.isFP32Instr   := isFP32Instr
   io.vpuCtrl.fpu.isFP64Instr   := isFP64Instr
+  io.vpuCtrl.fpu.rmInst := inst.RM
   io.vpuCtrl.vill  := false.B
   io.vpuCtrl.vma   := true.B
   io.vpuCtrl.vta   := true.B
-  io.vpuCtrl.vsew  := Mux(isFP32Instr, VSew.e32, VSew.e64)
-  io.vpuCtrl.vlmul := Mux(isFP32Instr, VLmul.mf4, VLmul.mf2)
+  io.vpuCtrl.vsew  := Mux(isFP32Instr || isSew2Cvt, VSew.e32, VSew.e64)
+  io.vpuCtrl.vlmul := Mux(isFP32Instr || isLmulMf4Cvt, VLmul.mf4, VLmul.mf2)
   io.vpuCtrl.vm    := inst.VM
   io.vpuCtrl.nf    := inst.NF
   io.vpuCtrl.needScalaSrc := Category.needScalaSrc(inst.VCATEGORY)

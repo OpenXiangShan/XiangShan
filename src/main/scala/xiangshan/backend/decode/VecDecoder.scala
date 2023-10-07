@@ -405,6 +405,21 @@ object VecDecoder extends DecodeConstants {
     FMIN_D -> OPFFF(SrcType.fp, SrcType.X, FuType.vfalu, VfaluType.vfmin, F, T, F, UopSplitType.SCA_SIM),
     FMAX_S -> OPFFF(SrcType.fp, SrcType.X, FuType.vfalu, VfaluType.vfmax, F, T, F, UopSplitType.SCA_SIM),
     FMAX_D -> OPFFF(SrcType.fp, SrcType.X, FuType.vfalu, VfaluType.vfmax, F, T, F, UopSplitType.SCA_SIM),
+
+    // Scalar Float Point Convert Inst.
+    FCVT_W_S    -> OPFFF(SrcType.fp, SrcType.X, FuType.vfcvt, VfcvtType.vfcvt_xfv,     T, F, F, UopSplitType.SCA_SIM),
+    FCVT_WU_S   -> OPFFF(SrcType.fp, SrcType.X, FuType.vfcvt, VfcvtType.vfcvt_xufv,    T, F, F, UopSplitType.SCA_SIM),
+    FCVT_L_S    -> OPFFF(SrcType.fp, SrcType.X, FuType.vfcvt, VfcvtType.vfwcvt_xfv,    T, F, F, UopSplitType.SCA_SIM),
+    FCVT_LU_S   -> OPFFF(SrcType.fp, SrcType.X, FuType.vfcvt, VfcvtType.vfwcvt_xufv,   T, F, F, UopSplitType.SCA_SIM),
+
+    FCVT_W_D    -> OPFFF(SrcType.fp, SrcType.X, FuType.vfcvt, VfcvtType.vfncvt_xfw,    T, F, F, UopSplitType.SCA_SIM),
+    FCVT_WU_D   -> OPFFF(SrcType.fp, SrcType.X, FuType.vfcvt, VfcvtType.vfncvt_xufw,   T, F, F, UopSplitType.SCA_SIM),
+    FCVT_L_D    -> OPFFF(SrcType.fp, SrcType.X, FuType.vfcvt, VfcvtType.vfcvt_xfv,     T, F, F, UopSplitType.SCA_SIM),
+    FCVT_LU_D   -> OPFFF(SrcType.fp, SrcType.X, FuType.vfcvt, VfcvtType.vfcvt_xufv,    T, F, F, UopSplitType.SCA_SIM),
+
+    FCVT_S_D    -> OPFFF(SrcType.fp, SrcType.X, FuType.vfcvt, VfcvtType.vfncvt_ffw,    F, T, F, UopSplitType.SCA_SIM),
+    FCVT_D_S    -> OPFFF(SrcType.fp, SrcType.X, FuType.vfcvt, VfcvtType.vfwcvt_ffv,    F, T, F, UopSplitType.SCA_SIM),
+
     // donot wflags
     FCLASS_S -> OPFFF(SrcType.fp, SrcType.X, FuType.vfalu, VfaluType.vfclass, T, F, F, UopSplitType.SCA_SIM),
     FCLASS_D -> OPFFF(SrcType.fp, SrcType.X, FuType.vfalu, VfaluType.vfclass, T, F, F, UopSplitType.SCA_SIM),
