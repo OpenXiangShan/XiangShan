@@ -19,7 +19,7 @@ object FuType {
   val bku = OHInt(8)
   val vsetiwi = OHInt(9) // vset read rs write rd
   val fmac = OHInt(10)
-  val fmisc = OHInt(11)
+  val fmisc = OHInt(11) // being delated
   val fDivSqrt = OHInt(12)
   val ldu = OHInt(13)
   val stu = OHInt(14)
@@ -90,7 +90,7 @@ object FuType {
     fence -> "fence",
     bku -> "bku",
     fmac -> "fmac",
-    fmisc -> "fmisc",
+    fmisc -> "fmisc", // being delated
     fDivSqrt -> "fdiv_fsqrt",
     ldu -> "load",
     stu -> "store",

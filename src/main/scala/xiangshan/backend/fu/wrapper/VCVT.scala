@@ -20,11 +20,9 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   private val numVecModule = dataWidth / dataWidthOfDataModule
 
   // io alias
-  private val opcode = fuOpType(7, 0)
+  private val opcode = fuOpType(8, 0)
   private val sew = vsew
 
-  private val hasSign = opcode(0)
-  private val isFpOut = opcode(6)
   private val isRtz = opcode(2) & opcode(1)
   private val isRod = opcode(2) & !opcode(1) & opcode(0)
   private val isRm = !isRtz && !isRod
@@ -64,6 +62,10 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   dontTouch(output1H)
   val outputWidth1H = output1H
 
+  val outIs32bits = RegNext(RegNext(outputWidth1H(2)))
+  val outIsInt = !outCtrl.fuOpType(6)
+  val outIsMvInst = outCtrl.fuOpType(8)
+
   val outEew = RegNext(RegNext(Mux1H(output1H, Seq(0,1,2,3).map(i => i.U))))
   private val needNoMask = outVecCtrl.fpu.isFpToVecInst
   val maskToMgu = Mux(needNoMask, allMaskTrue, outSrcMask)
@@ -80,7 +82,7 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
    */
   vfcvt.uopIdx := vuopIdx(0)
   vfcvt.src := vs2Vec
-  vfcvt.opType := opcode
+  vfcvt.opType := opcode(7,0)
   vfcvt.sew := sew
   vfcvt.rm := rm
   vfcvt.outputWidth1H := outputWidth1H
@@ -122,7 +124,7 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   val fflagsAll = Wire(Vec(8, UInt(5.W)))
   fflagsAll := vfcvtFflags.asTypeOf(fflagsAll)
   val fflags = fflagsEnCycle2.zip(fflagsAll).map{case(en, fflag) => Mux(en, fflag, 0.U(5.W))}.reduce(_ | _)
-  io.out.bits.res.fflags.get := fflags
+  io.out.bits.res.fflags.get := Mux(outIsMvInst, 0.U, fflags)
 
 
   /**
@@ -146,11 +148,14 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   mgu.io.in.info.narrow := RegNext(RegNext(isNarrowCvt))
   mgu.io.in.info.dstMask := outVecCtrl.isDstMask
 
-  val hasSignCycles = RegNext(RegNext(hasSign))
-  val isFp2VecForInt = outVecCtrl.fpu.isFpToVecInst && RegNext(RegNext(outputWidth1H(2))) && RegNext(RegNext(!isFpOut))
+  // for scalar f2i cvt inst
+  val isFp2VecForInt = outVecCtrl.fpu.isFpToVecInst && outIs32bits && outIsInt
+  // for f2i mv inst
+  val result = Mux(outIsMvInst, RegNext(RegNext(vs2.tail(64))), mgu.io.out.vd)
+
   io.out.bits.res.data := Mux(isFp2VecForInt,
-      Fill(32, mgu.io.out.vd(31)) ## mgu.io.out.vd(31, 0),
-      mgu.io.out.vd
+      Fill(32, result(31)) ## result(31, 0),
+      result
   )
 }
 

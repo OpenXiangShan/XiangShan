@@ -61,7 +61,8 @@ package object xiangshan {
   def FuOpTypeWidth = 9
   object FuOpType {
     def apply() = UInt(FuOpTypeWidth.W)
-    def X = BitPat("b00000000")
+    def X     = BitPat("b0_0000_0000")
+    def FMVXF = BitPat("b1_1000_0000") //for fmv_x_d & fmv_x_w
   }
 
   object VlduType {
