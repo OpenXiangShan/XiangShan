@@ -170,7 +170,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   mem.req.bits.addr := Mux(s2xlate, hpaddr, mem_addr)
   mem.req.bits.id := FsmReqID.U(bMemID.W)
 
-  io.refill.req_info.s2xlate := onlyStage1 // ptw refill the pte of stage 1
+  io.refill.req_info.s2xlate := Mux(enableS2xlate, onlyStage1, req_s2xlate) // ptw refill the pte of stage 1 when s2xlate is enabled
   io.refill.req_info.vpn := vpn
   io.refill.level := level
   io.refill.req_info.source := source
@@ -604,8 +604,9 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.mem.req.bits.addr := Mux(mem_arb.io.out.bits.s2xlate, mem_hpaddr, mem_paddr)
   io.mem.req.bits.id := mem_arb.io.chosen
   mem_arb.io.out.ready := io.mem.req.ready
-  io.mem.refill := entries(RegNext(io.mem.resp.bits.id(log2Up(l2tlbParams.llptwsize)-1, 0))).req_info
-  io.mem.refill.s2xlate := onlyStage1 // llptw refill the pte of stage 1 
+  val mem_refill_id = RegNext(io.mem.resp.bits.id(log2Up(l2tlbParams.llptwsize)-1, 0))
+  io.mem.refill := entries(mem_refill_id).req_info
+  io.mem.refill.s2xlate := Mux(entries(mem_refill_id).req_info.s2xlate === noS2xlate, noS2xlate, onlyStage1) // llptw refill the pte of stage 1 
   io.mem.buffer_it := mem_resp_hit
   io.mem.enq_ptr := enq_ptr
 

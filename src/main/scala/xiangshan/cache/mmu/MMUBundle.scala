@@ -349,12 +349,17 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     }
   }
 
-  def wbhit(data: PtwSectorResp, asid: UInt, nSets: Int = 1, ignoreAsid: Boolean = false): Bool = {
-    val vpn = Cat(data.entry.tag, 0.U(sectortlbwidth.W))
+  def wbhit(data: PtwRespS2, asid: UInt, nSets: Int = 1, ignoreAsid: Boolean = false, s2xlate: UInt): Bool = {
+    val s1vpn = data.s1.entry.tag
+    val s2vpn = data.s2.entry.tag(sectorvpnLen - 1, vpnnLen - sectortlbwidth)
+    val wb_vpn = Mux(s2xlate === onlyStage2, s2vpn, s1vpn) 
+    val vpn = Cat(wb_vpn, 0.U(sectortlbwidth.W))
     val asid_hit = if (ignoreAsid) true.B else (this.asid === asid)
     val vpn_hit = Wire(Bool())
     val index_hit = Wire(Vec(tlbcontiguous, Bool()))
-
+    val wb_valididx = Wire(Vec(tlbcontiguous, Bool()))
+    wb_valididx := Mux(s2xlate === onlyStage2, VecInit(UIntToOH(data.s2.entry.tag(sectortlbwidth - 1, 0)).asBools), data.s1.valididx)
+    val s2xlate_hit = s2xlate === this.s2xlate
     // NOTE: for timing, dont care low set index bits at hit check
     //       do not need store the low bits actually
     if (!pageSuper) {
@@ -376,7 +381,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     }
 
     for (i <- 0 until tlbcontiguous) {
-      index_hit(i) := data.valididx(i) && valididx(i)
+      index_hit(i) := wb_valididx(i) && valididx(i)
     }
 
     // For example, tlb req to page cache with vpn 0x10
@@ -385,11 +390,10 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     // Now 0x10 and 0x13 are both valid in page cache
     // However, when 0x13 refill to tlb, will trigger multi hit
     // So will only trigger multi-hit when PopCount(data.valididx) = 1
-    vpn_hit && index_hit.reduce(_ || _) && PopCount(data.valididx) === 1.U
+    vpn_hit && index_hit.reduce(_ || _) && PopCount(wb_valididx) === 1.U && s2xlate_hit
   }
 
   def apply(item: PtwRespS2): TlbSectorEntry = {
-    this.tag := {if (pageNormal) item.s1.entry.tag else item.s1.entry.tag(sectorvpnLen - 1, vpnnLen - sectortlbwidth)}
     this.asid := item.s1.entry.asid
     val inner_level = MuxLookup(item.s2xlate, 2.U, Seq(
       onlyStage1 -> item.s1.entry.level.getOrElse(0.U),
@@ -406,7 +410,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     this.perm.apply(item.s1)
 
     this.pteidx := Mux(item.s2xlate === onlyStage2, VecInit(UIntToOH(item.s2.entry.tag(sectortlbwidth - 1, 0)).asBools),  item.s1.pteidx)
-    this.valididx := Mux(item.s2xlate === onlyStage2, item.s1.pteidx, item.s1.valididx)
+    this.valididx := Mux(item.s2xlate === onlyStage2, VecInit(UIntToOH(item.s2.entry.tag(sectortlbwidth - 1, 0)).asBools), item.s1.valididx)
 
     val s1tag = {if (pageNormal) item.s1.entry.tag else item.s1.entry.tag(sectorvpnLen - 1, vpnnLen - sectortlbwidth)}
     val s2tag = {if (pageNormal) item.s2.entry.tag else item.s2.entry.tag(sectorvpnLen - 1, vpnnLen - sectortlbwidth)}

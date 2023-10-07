@@ -167,7 +167,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       resp_gpa_refill := true.B
     }
 
-    when (hasGpf(i) && resp_gpa_refill && need_gpa_vpn === get_pn(req_in(i).bits.vaddr)){
+    when (hasGpf(i) && resp_gpa_refill && need_gpa_vpn_hit){
       need_gpa := false.B
     }
     
@@ -280,9 +280,10 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       (vsatp.mode === 0.U) -> onlyStage2,
       (hgatp.mode === 0.U || req_need_gpa) -> onlyStage1
     ))
-    val ptw_s2xlate = ptw.resp.bits.s2xlate =/= noS2xlate
+    val ptw_s2xlate = ptw.resp.bits.s2xlate
+    val has_s2xlate = ptw_s2xlate =/= noS2xlate
     val onlyS2 = ptw_s2xlate === onlyStage2
-    val ptw_s1_hit = ptw.resp.bits.s1.hit(get_pn(req_out(idx).vaddr), Mux(ptw_s2xlate, io.csr.vsatp.asid, io.csr.satp.asid), io.csr.hgatp.asid, true, false, ptw_s2xlate)
+    val ptw_s1_hit = ptw.resp.bits.s1.hit(get_pn(req_out(idx).vaddr), Mux(has_s2xlate, io.csr.vsatp.asid, io.csr.satp.asid), io.csr.hgatp.asid, true, false, has_s2xlate)
     val ptw_s2_hit = ptw.resp.bits.s2.hit(get_pn(req_out(idx).vaddr), io.csr.hgatp.asid)
     val ptw_just_back = ptw.resp.fire && req_s2xlate === ptw_s2xlate && Mux(onlyS2, ptw_s2_hit, ptw_s1_hit)
     val ptw_already_back = RegNext(ptw.resp.fire) && RegNext(ptw.resp.bits).hit(get_pn(req_out(idx).vaddr), asid = io.csr.satp.asid, allType = true)
