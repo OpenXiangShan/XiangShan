@@ -17,28 +17,16 @@
 package top
 
 import chipsalliance.rocketchip.config.Parameters
-import freechips.rocketchip.diplomacy.{AdapterNode, LazyModule, LazyModuleImp}
-import freechips.rocketchip.tilelink._
 import chisel3._
 import chisel3.util._
-import utils.{XSPerfAccumulate, XSPerfPrint}
+import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink.TLMessages._
-import freechips.rocketchip.tilelink.TLPermissions._
-import utility.{MemReqSource, ReqSourceField, ReqSourceKey, GTimer}
+import freechips.rocketchip.tilelink._
+import utility.{GTimer, MemReqSource, ReqSourceKey}
+import utils.XSPerfAccumulate
 
-class BusPerfMonitor(name: String, stat_latency: Boolean, add_reqkey: Boolean)(implicit p: Parameters) extends LazyModule {
-  val node = if (add_reqkey) TLAdapterNode(managerFn = { m =>
-    TLSlavePortParameters.v1(
-      m.managers.map { m =>
-        m.v2copy()
-      },
-      requestKeys = Seq(ReqSourceKey),
-      beatBytes = 32,
-      endSinkId = m.endSinkId
-    )
-  }) else {
-    TLAdapterNode()
-  }
+class BusPerfMonitor(name: String, stat_latency: Boolean)(implicit p: Parameters) extends LazyModule {
+  val node = TLAdapterNode()
   lazy val module = new BusPerfMonitorImp(this, name, stat_latency)
 }
 
@@ -179,7 +167,7 @@ object BusPerfMonitor {
      add_reqkey: Boolean = false)(implicit p: Parameters) =
   {
     if(enable){
-      val busPMU = LazyModule(new BusPerfMonitor(name, stat_latency, add_reqkey))
+      val busPMU = LazyModule(new BusPerfMonitor(name, stat_latency))
       busPMU.node
     } else {
       TLTempNode()
