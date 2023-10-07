@@ -42,9 +42,14 @@ trait VectorConstants {
 }
 
 class DecodeUnitCompIO(implicit p: Parameters) extends XSBundle {
-  val enq = new Bundle { val staticInst = Input(new StaticInst) }
+  val simple = new Bundle {
+    val decodedInst = Input(new DecodedInst)
+    val isComplex = Input(Bool())
+    val uopInfo = Input(new UopInfo)
+  }
   val vtype = Input(new VType)
-  val isComplex = Input(Vec(DecodeWidth - 1, Bool()))
+  val in0pc = Input(UInt(VAddrBits.W))
+  val isComplex = Input(Vec(DecodeWidth, Bool()))
   val validFromIBuf = Input(Vec(DecodeWidth, Bool()))
   val readyFromRename = Input(Vec(RenameWidth, Bool()))
   val deq = new Bundle {
@@ -65,11 +70,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
 
   val maxUopSize = MaxUopSize
   //input bits
-  val staticInst = Wire(new StaticInst)
-
-
-  staticInst := io.enq.staticInst
-  private val inst: XSInstBitFields = staticInst.instr.asTypeOf(new XSInstBitFields)
+  private val inst: XSInstBitFields = io.simple.decodedInst.instr.asTypeOf(new XSInstBitFields)
 
   val src1 = Cat(0.U(1.W), inst.RS1)
   val src2 = Cat(0.U(1.W), inst.RS2)
@@ -89,18 +90,16 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   val isVsetSimple = Wire(Bool())
 
   //pre decode
-  val simple = Module(new DecodeUnit)
-  simple.io.enq.ctrlFlow := staticInst
-  simple.io.enq.vtype := io.vtype
-  simple.io.csrCtrl := io.csrCtrl
-  decodedInstsSimple := simple.io.deq.decodedInst
-  lmul := simple.io.deq.uopInfo.lmul
-  isVsetSimple := simple.io.deq.decodedInst.isVset
+  decodedInstsSimple := io.simple.decodedInst
+  lmul := io.simple.uopInfo.lmul
+  isVsetSimple := io.simple.decodedInst.isVset
+  val vlmulReg = io.simple.decodedInst.vpu.vlmul
+  val vsewReg = io.simple.decodedInst.vpu.vsew
   when(isVsetSimple) {
     when(dest === 0.U && src1 === 0.U) {
-      decodedInstsSimple.fuOpType := VSETOpType.keepVl(simple.io.deq.decodedInst.fuOpType)
+      decodedInstsSimple.fuOpType := VSETOpType.keepVl(io.simple.decodedInst.fuOpType)
     }.elsewhen(src1 === 0.U) {
-      decodedInstsSimple.fuOpType := VSETOpType.setVlmax(simple.io.deq.decodedInst.fuOpType)
+      decodedInstsSimple.fuOpType := VSETOpType.setVlmax(io.simple.decodedInst.fuOpType)
     }
     when(io.vtype.illegal){
       decodedInstsSimple.flushPipe := true.B
@@ -114,7 +113,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       Mux(src1 =/= 0.U, 1.U,
         Mux(VSETOpType.isVsetvl(decodedInstsSimple.fuOpType), 2.U, 1.U)))
   } .otherwise {
-    numOfUop := simple.io.deq.uopInfo.numOfUop
+    numOfUop := io.simple.uopInfo.numOfUop
   }
 
 
@@ -665,14 +664,14 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(numOfUop - 1.U).ldest := dest + lmul - 1.U
     }
     is(UopSplitType.VEC_VRED) {
-      when(simple.io.enq.vtype.vlmul === "b001".U) {
+      when(vlmulReg === "b001".U) {
         csBundle(0).srcType(2) := SrcType.DC
         csBundle(0).lsrc(0) := src2 + 1.U
         csBundle(0).lsrc(1) := src2
         csBundle(0).ldest := VECTOR_TMP_REG_LMUL.U
         csBundle(0).uopIdx := 0.U
       }
-      when(simple.io.enq.vtype.vlmul === "b010".U) {
+      when(vlmulReg === "b010".U) {
         csBundle(0).srcType(2) := SrcType.DC
         csBundle(0).lsrc(0) := src2 + 1.U
         csBundle(0).lsrc(1) := src2
@@ -691,7 +690,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(2).ldest := (VECTOR_TMP_REG_LMUL + 2).U
         csBundle(2).uopIdx := 2.U
       }
-      when(simple.io.enq.vtype.vlmul === "b011".U) {
+      when(vlmulReg === "b011".U) {
         for (i <- 0 until MAX_VLMUL) {
           if (i < MAX_VLMUL - MAX_VLMUL / 2) {
             csBundle(i).lsrc(0) := src2 + (i * 2 + 1).U
@@ -710,7 +709,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           csBundle(i).uopIdx := i.U
         }
       }
-      when(simple.io.enq.vtype.vlmul.orR()) {
+      when(vlmulReg.orR) {
         csBundle(numOfUop - 1.U).srcType(2) := SrcType.vp
         csBundle(numOfUop - 1.U).lsrc(0) := src1
         csBundle(numOfUop - 1.U).lsrc(1) := VECTOR_TMP_REG_LMUL.U + numOfUop - 2.U
@@ -720,8 +719,8 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       }
     }
     is(UopSplitType.VEC_VFRED) {
-      val vlmul = simple.io.enq.vtype.vlmul
-      val vsew = simple.io.enq.vtype.vsew
+      val vlmul = vlmulReg
+      val vsew = vsewReg
       when(vlmul === VLmul.m8){
         for (i <- 0 until 4) {
           csBundle(i).lsrc(0) := src2 + (i * 2 + 1).U
@@ -998,8 +997,8 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
 
     is(UopSplitType.VEC_VFREDOSUM) {
       import yunsuan.VfaluType
-      val vlmul = simple.io.enq.vtype.vlmul
-      val vsew = simple.io.enq.vtype.vsew
+      val vlmul = vlmulReg
+      val vsew = vsewReg
       val isWiden = decodedInstsSimple.fuOpType === VfaluType.vfwredosum
       when(vlmul === VLmul.m8) {
         when(vsew === VSew.e64) {
@@ -1425,7 +1424,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
             csBundle(i * len + j).uopIdx := (i * len + j).U
           }
       }
-      switch(simple.io.enq.vtype.vlmul) {
+      switch(vlmulReg) {
         is("b001".U ){
           genCsBundle_VEC_RGATHER(2)
         }
@@ -1471,7 +1470,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).fpu.div := false.B
       csBundle(0).fpu.sqrt := false.B
       csBundle(0).fpu.fcvt := false.B
-      switch(simple.io.enq.vtype.vlmul) {
+      switch(vlmulReg) {
         is("b000".U ){
           genCsBundle_RGATHER_VX(1)
         }
@@ -1524,23 +1523,23 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
             csBundle(i * len + j).uopIdx := (i * len + j).U
           }
       }
-      switch(simple.io.enq.vtype.vlmul) {
+      switch(vlmulReg) {
         is("b000".U ){
-          when(!simple.io.enq.vtype.vsew.orR){
+          when(!vsewReg.orR){
             genCsBundle_VEC_RGATHEREI16_SEW8(1)
           } .otherwise{
             genCsBundle_VEC_RGATHEREI16(1)
           }
         }
         is("b001".U) {
-          when(!simple.io.enq.vtype.vsew.orR) {
+          when(!vsewReg.orR) {
             genCsBundle_VEC_RGATHEREI16_SEW8(2)
           }.otherwise {
             genCsBundle_VEC_RGATHEREI16(2)
           }
         }
         is("b010".U) {
-          when(!simple.io.enq.vtype.vsew.orR) {
+          when(!vsewReg.orR) {
             genCsBundle_VEC_RGATHEREI16_SEW8(4)
           }.otherwise {
             genCsBundle_VEC_RGATHEREI16(4)
@@ -1573,7 +1572,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           }
         }
       }
-      switch(simple.io.enq.vtype.vlmul) {
+      switch(vlmulReg) {
         is("b001".U ){
           genCsBundle_VEC_COMPRESS(2)
         }
@@ -1649,32 +1648,33 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
     ))
   }
 
-
-  val validSimple = Wire(Vec(DecodeWidth - 1, Bool()))
-  validSimple.zip(io.validFromIBuf.drop(1).zip(io.isComplex)).map{ case (dst, (src1, src2)) => dst := src1 && !src2 }
-  val notInf = Wire(Vec(DecodeWidth - 1, Bool()))
-  notInf.zip(io.validFromIBuf.drop(1).zip(validSimple)).map{ case (dst, (src1, src2)) => dst := !src1 || src2 }
+  val validSimple = Wire(Vec(DecodeWidth, Bool()))
+  validSimple.zip(io.validFromIBuf.zip(io.isComplex)).map{ case (dst, (src1, src2)) => dst := src1 && !src2 }
+  val notInf = Wire(Vec(DecodeWidth, Bool()))
+  notInf.drop(1).zip(io.validFromIBuf.drop(1).zip(validSimple.drop(1))).map{ case (dst, (src1, src2)) => dst := !src1 || src2 }
+  notInf(0) := !io.validFromIBuf(0) || validSimple(0) || (io.isComplex(0) && io.in0pc === io.simple.decodedInst.pc)
   val notInfVec = Wire(Vec(DecodeWidth, Bool()))
-  notInfVec.drop(1).zip(0 until DecodeWidth - 1).map{ case (dst, i) => dst := Cat(notInf.take(i + 1)).andR}
-  notInfVec(0) := true.B
+  notInfVec.zipWithIndex.map{ case (dst, i) => dst := Cat(notInf.take(i + 1)).andR}
 
   complexNum := Mux(io.validFromIBuf(0) && readyCounter.orR ,
     Mux(uopRes0 > readyCounter, readyCounter, uopRes0),
-    1.U)
+    0.U)
   validToRename.zipWithIndex.foreach{
     case(dst, i) =>
+      val validFix = Mux(complexNum.orR, validSimple((i+1).U - complexNum), validSimple(i))
       dst := MuxCase(false.B, Seq(
-        (io.validFromIBuf(0) && uopRes0 > readyCounter   ) -> Mux(readyCounter > i.U, true.B, false.B),
-        (io.validFromIBuf(0) && !(uopRes0 > readyCounter)) -> Mux(complexNum > i.U, true.B, validSimple(i.U - complexNum) && notInfVec(i.U - complexNum) && io.readyFromRename(i)),
-      ))
+        (io.validFromIBuf(0) && readyCounter.orR && uopRes0 > readyCounter) -> Mux(readyCounter > i.U, true.B, false.B),
+        (io.validFromIBuf(0) && readyCounter.orR && !(uopRes0 > readyCounter)) -> Mux(complexNum > i.U, true.B, validFix && notInfVec(i.U - complexNum) && io.readyFromRename(i)),
+      ).toSeq)
   }
 
   readyToIBuf.zipWithIndex.foreach {
     case (dst, i) =>
+      val readyToIBuf0 = Mux(io.isComplex(0), io.in0pc === io.simple.decodedInst.pc, true.B)
       dst := MuxCase(true.B, Seq(
-        (io.validFromIBuf(0) && uopRes0 > readyCounter) -> false.B,
-        (io.validFromIBuf(0) && !(uopRes0 > readyCounter)) -> (if (i==0) true.B else Mux(RenameWidth.U - complexNum >= i.U, notInfVec(i - 1) && validSimple(i - 1) && io.readyFromRename(i), false.B)),
-      ))
+        (io.validFromIBuf(0) && uopRes0 > readyCounter || !readyCounter.orR) -> false.B,
+        (io.validFromIBuf(0) && !(uopRes0 > readyCounter) && readyCounter.orR) -> (if (i==0) readyToIBuf0 else Mux(RenameWidth.U - complexNum >= i.U, notInfVec(i) && validSimple(i) && io.readyFromRename(i), false.B))
+      ).toSeq)
   }
 
   io.deq.decodedInsts := decodedInsts
