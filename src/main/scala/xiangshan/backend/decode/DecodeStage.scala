@@ -56,21 +56,27 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   private val vconfigIdx = VCONFIG_IDX
 
   val decoderComp = Module(new DecodeUnitComp)
-  val decoders = Seq.fill(DecodeWidth - 1)(Module(new DecodeUnit))
+  val decoders = Seq.fill(DecodeWidth)(Module(new DecodeUnit))
   val vtypeGen = Module(new VTypeGen)
   val debug_globalCounter = RegInit(0.U(XLEN.W))
 
-  val isComplex = Wire(Vec(DecodeWidth - 1, Bool()))
+  val isComplex = Wire(Vec(DecodeWidth, Bool()))
   val uopComplex = Wire(Vec(DecodeWidth, new DecodedInst))
   val isFirstVset = Wire(Bool())
   val complexNum = Wire(UInt(3.W))
 
-  val uopSimple = Wire(Vec(DecodeWidth - 1, new DecodedInst))
-
+  val uopSimple = Wire(Vec(DecodeWidth, new DecodedInst))
+  val isComplexValid = VecInit(isComplex.zipWithIndex.map{
+    case(iscomplex,i) => iscomplex && io.in(i).valid && !io.in(i).ready && (if (i==0) true.B else io.out(i).ready)
+  })
+  val oldComplex = Wire(new DecodeUnitDeqIO)
+  oldComplex := PriorityMuxDefault(isComplexValid.zip(decoders.map(_.io.deq)), 0.U.asTypeOf(oldComplex))
+  val oldComplexReg = RegNext(oldComplex)
   //Comp 1
-  decoderComp.io.enq.staticInst := io.in(0).bits
+  decoderComp.io.simple := oldComplexReg
   decoderComp.io.csrCtrl := io.csrCtrl
   decoderComp.io.vtype := vtypeGen.io.vtype
+  decoderComp.io.in0pc := io.in(0).bits.pc
   decoderComp.io.isComplex := isComplex
   decoderComp.io.validFromIBuf.zip(io.in).map { case (dst, src) => dst := src.valid }
   decoderComp.io.readyFromRename.zip(io.out).map { case (dst, src) => dst := src.ready }
@@ -80,8 +86,8 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   isFirstVset := decoderComp.io.deq.isVset
   complexNum := decoderComp.io.deq.complexNum
 
-  //Simple 5
-  decoders.zip(io.in.drop(1)).map { case (dst, src) => dst.io.enq.ctrlFlow := src.bits }
+  //Simple 6
+  decoders.zip(io.in).map { case (dst, src) => dst.io.enq.ctrlFlow := src.bits }
   decoders.map { case dst => dst.io.csrCtrl := io.csrCtrl }
   decoders.map { case dst => dst.io.enq.vtype := vtypeGen.io.vtype }
   isComplex.zip(decoders.map(_.io.deq.isComplex)).map { case (dst, src) => dst := src }
@@ -94,7 +100,10 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   vtypeGen.io.commitVType := io.commitVType
   vtypeGen.io.walkVType := io.walkVType
 
-  io.out.zip(0 until RenameWidth).map { case (dst, i) => dst.bits := Mux(complexNum > i.U, uopComplex(i), uopSimple(i.U - complexNum)) }
+  io.out.zip(0 until RenameWidth).map { case (dst, i) =>
+    val uopSimpleFix = Mux(complexNum.orR, uopSimple((i + 1).U - complexNum), uopSimple(i))
+    dst.bits := Mux(complexNum > i.U, uopComplex(i), uopSimpleFix)
+  }
 
   for (i <- 0 until DecodeWidth) {
 
