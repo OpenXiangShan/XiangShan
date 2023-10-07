@@ -620,17 +620,18 @@ case class Imm_LUI_LOAD() {
 /**
  * IO bundle for the Decode unit
  */
+class DecodeUnitDeqIO(implicit p: Parameters) extends XSBundle {
+  val decodedInst = Output(new DecodedInst)
+  val isComplex = Output(Bool())
+  val uopInfo = Output(new UopInfo)
+}
 class DecodeUnitIO(implicit p: Parameters) extends XSBundle {
   val enq = new Bundle {
     val ctrlFlow = Input(new StaticInst)
     val vtype = Input(new VType)
   }
 //  val vconfig = Input(UInt(XLEN.W))
-  val deq = new Bundle {
-    val decodedInst = Output(new DecodedInst)
-    val isComplex = Output(Bool())
-    val uopInfo = Output(new UopInfo)
-  }
+    val deq = new DecodeUnitDeqIO
   val csrCtrl = Input(new CustomCSRCtrlIO)
 }
 
