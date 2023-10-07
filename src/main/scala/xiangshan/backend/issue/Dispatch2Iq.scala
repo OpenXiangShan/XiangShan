@@ -170,12 +170,14 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
     val portReadyVec = deqPortIdSeq.map(x => outs(x).ready)
     val canAcc = uopsIn.map(in => canAccept(fuTypeSeq.map(x => x.ohid), in.bits.fuType) && in.valid)
     if(selNum <= maxSelNum) {
+      val selPort = SelectOne("naive", portReadyVec, selNum)
       val select = SelectOne("naive", canAcc, selNum)
       for ((portId, j) <- deqPortIdSeq.zipWithIndex) {
+        val (selPortReady, selPortIdxOH) = selPort.getNthOH(j + 1)
         val (selectValid, selectIdxOH) = select.getNthOH(j + 1)
-        when(selectValid) {
-          selIdxOH(i)(j).valid := selectValid
-          selIdxOH(i)(j).bits := selectIdxOH.asUInt
+        when(selPortReady && selectValid) {
+          selIdxOH(i)(OHToUInt(selPortIdxOH)).valid := selectValid
+          selIdxOH(i)(OHToUInt(selPortIdxOH)).bits := selectIdxOH.asUInt
         }
       }
     } else {
