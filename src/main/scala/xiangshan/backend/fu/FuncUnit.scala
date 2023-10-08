@@ -28,7 +28,8 @@ class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
     val target    = UInt(VAddrData().dataWidth.W)
     val taken     = Bool()
   })
-  val fpu         = OptionWrapper(cfg.writeFflags, new FPUCtrlSignals)
+  val rmInst         = OptionWrapper(cfg.needFPUCtrl, UInt(3.W))
+  val fpu         = OptionWrapper(cfg.needFPUCtrl, new FPUCtrlSignals)
   val vpu         = OptionWrapper(cfg.needVecCtrl, new VPUCtrlSignals)
 }
 
@@ -42,7 +43,8 @@ class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle
   val flushPipe     = OptionWrapper(cfg.flushPipe,  Bool())
   val replay        = OptionWrapper(cfg.replayInst, Bool())
   val preDecode     = OptionWrapper(cfg.hasPredecode, new PreDecodeInfo)
-  val fpu           = OptionWrapper(cfg.writeFflags, new FPUCtrlSignals)
+  val rmInst            = OptionWrapper(cfg.needFPUCtrl, UInt(3.W))
+  val fpu           = OptionWrapper(cfg.needFPUCtrl, new FPUCtrlSignals)
   val vpu           = OptionWrapper(cfg.needVecCtrl, new VPUCtrlSignals)
 }
 
@@ -94,6 +96,7 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
     io.out.bits.ctrl.vecWen .foreach(_ := DataHoldBypass(io.in.bits.ctrl.vecWen.get, io.in.fire))
     // io.out.bits.ctrl.flushPipe should be connected in fu
     io.out.bits.ctrl.preDecode.foreach(_ := DataHoldBypass(io.in.bits.ctrl.preDecode.get, io.in.fire))
+    io.out.bits.ctrl.rmInst      .foreach(_ := DataHoldBypass(io.in.bits.ctrl.rmInst.get, io.in.fire))
     io.out.bits.ctrl.fpu      .foreach(_ := DataHoldBypass(io.in.bits.ctrl.fpu.get, io.in.fire))
     io.out.bits.ctrl.vpu      .foreach(_ := DataHoldBypass(io.in.bits.ctrl.vpu.get, io.in.fire))
   }
@@ -141,6 +144,7 @@ trait HasPipelineReg { this: FuncUnit =>
   io.out.bits.ctrl.rfWen.foreach(_ := ctrlVec.last.rfWen.get)
   io.out.bits.ctrl.fpWen.foreach(_ := ctrlVec.last.fpWen.get)
   io.out.bits.ctrl.vecWen.foreach(_ := ctrlVec.last.vecWen.get)
+  io.out.bits.ctrl.rmInst.foreach(_ := ctrlVec.last.rmInst.get)
   io.out.bits.ctrl.fpu.foreach(_ := ctrlVec.last.fpu.get)
   io.out.bits.ctrl.vpu.foreach(_ := ctrlVec.last.vpu.get)
 
