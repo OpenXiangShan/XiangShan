@@ -50,7 +50,7 @@ class SimTop(implicit p: Parameters) extends Module {
     dynamicLatency = debugOpts.UseDRAMSim
   )
   val simAXIMem = Module(l_simAXIMem.module)
-  l_simAXIMem.io_axi4 <> soc.memory
+  l_simAXIMem.io_axi4.getWrappedValue :<>= soc.memory.waiveAll
 
   soc.io.clock := clock.asBool
   soc.io.reset := reset.asAsyncReset
