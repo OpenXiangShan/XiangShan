@@ -351,7 +351,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
 
   def wbhit(data: PtwRespS2, asid: UInt, nSets: Int = 1, ignoreAsid: Boolean = false, s2xlate: UInt): Bool = {
     val s1vpn = data.s1.entry.tag
-    val s2vpn = data.s2.entry.tag(sectorvpnLen - 1, vpnnLen - sectortlbwidth)
+    val s2vpn = data.s2.entry.tag(vpnLen - 1, sectortlbwidth)
     val wb_vpn = Mux(s2xlate === onlyStage2, s2vpn, s1vpn) 
     val vpn = Cat(wb_vpn, 0.U(sectortlbwidth.W))
     val asid_hit = if (ignoreAsid) true.B else (this.asid === asid)
@@ -413,7 +413,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     this.valididx := Mux(item.s2xlate === onlyStage2, VecInit(UIntToOH(item.s2.entry.tag(sectortlbwidth - 1, 0)).asBools), item.s1.valididx)
 
     val s1tag = {if (pageNormal) item.s1.entry.tag else item.s1.entry.tag(sectorvpnLen - 1, vpnnLen - sectortlbwidth)}
-    val s2tag = {if (pageNormal) item.s2.entry.tag else item.s2.entry.tag(sectorvpnLen - 1, vpnnLen - sectortlbwidth)}
+    val s2tag = {if (pageNormal) item.s2.entry.tag(vpnLen - 1, sectortlbwidth) else item.s2.entry.tag(vpnLen - 1, vpnnLen)}
     this.tag := Mux(item.s2xlate === onlyStage2, s2tag, s1tag)
 
     val s1ppn = {
@@ -1266,7 +1266,9 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
   val s1 = new PtwSectorResp()
   val s2 = new HptwResp()
   def getVpn: UInt = {
-    Cat(s1.entry.tag, s1.ppn_low(OHToUInt(s1.pteidx)))
+   val s1_tag = Cat(s1.entry.tag, s1.ppn_low(OHToUInt(s1.pteidx)))
+   val s2_tag = s2.entry.tag
+   Mux(s2xlate === onlyStage2, s2_tag, s1_tag)
   }
 }
 
