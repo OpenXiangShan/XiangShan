@@ -231,7 +231,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
   // load prefetch to l1 Dcache
   l1PrefetcherOpt match {
-    case Some(pf) => l1_pf_req <> Pipeline(in = pf.io.l1_req, depth = 1, pipe = true, name = Some("pf_queue_to_ldu_reg"))
+    case Some(pf) => l1_pf_req <> pf.io.l1_req
     case None =>
       l1_pf_req.valid := false.B
       l1_pf_req.bits := DontCare
