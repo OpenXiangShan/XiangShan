@@ -247,9 +247,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
         uops(i).psrc(1) := 0.U
       }
     }
-    uops(i).psrc(2) := io.fpReadPorts(i)(2)
-    // Todo
-    // uops(i).old_pdest := Mux(uops(i).ctrl.rfWen, io.intReadPorts(i).last, io.fpReadPorts(i).last)
     uops(i).eliminatedMove := isMove(i)
 
     // update pdest

@@ -30,6 +30,7 @@ package object xiangshan {
     def xp  = "b001".U
     def fp  = "b010".U
     def vp  = "b100".U
+    def no  = "b000".U // this src read no reg but cannot be Any value
 
     // alias
     def reg = this.xp

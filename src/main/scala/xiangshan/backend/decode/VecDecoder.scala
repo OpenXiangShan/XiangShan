@@ -24,45 +24,106 @@ abstract class VecDecode extends XSDecodeBase {
   }
 }
 
-case class OPIVV(fu: FuType.OHType, fuOp: BitPat, vWen: Boolean, mWen: Boolean, vxsatWen: Boolean, uopSplitType: BitPat = UopSplitType.VEC_VVV, src3: BitPat = SrcType.vp) extends XSDecodeBase {
+case class OPIVV(
+  fu: FuType.OHType,
+  fuOp: BitPat,
+  vWen: Boolean,
+  mWen: Boolean,
+  vxsatWen: Boolean,
+  uopSplitType: BitPat = UopSplitType.VEC_VVV,
+  src1: BitPat = SrcType.vp,
+  src2: BitPat = SrcType.vp,
+  src3: BitPat = SrcType.vp
+) extends XSDecodeBase {
   def generate() : List[BitPat] = {
-    XSDecode(SrcType.vp, SrcType.vp, src3, fu, fuOp, SelImm.X, uopSplitType,
+    XSDecode(src1, src2, src3, fu, fuOp, SelImm.X, uopSplitType,
       xWen = F, fWen = F, vWen = vWen, mWen = mWen, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
 
-case class OPIVX(fu: FuType.OHType, fuOp: BitPat, vWen: Boolean, mWen: Boolean, vxsatWen: Boolean, uopSplitType: BitPat = UopSplitType.VEC_VXV, src3: BitPat = SrcType.vp) extends XSDecodeBase {
+case class OPIVX(
+  fu: FuType.OHType,
+  fuOp: BitPat,
+  vWen: Boolean,
+  mWen: Boolean,
+  vxsatWen: Boolean,
+  uopSplitType: BitPat = UopSplitType.VEC_VXV,
+  src1: BitPat = SrcType.xp,
+  src2: BitPat = SrcType.vp,
+  src3: BitPat = SrcType.vp
+) extends XSDecodeBase {
   def generate() : List[BitPat] = {
-    XSDecode(SrcType.xp, SrcType.vp, src3, fu, fuOp, SelImm.X, uopSplitType,
+    XSDecode(src1, src2, src3, fu, fuOp, SelImm.X, uopSplitType,
       xWen = F, fWen = F, vWen = vWen, mWen = mWen, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
 
-case class OPIVI(fu: FuType.OHType, fuOp: BitPat, vWen: Boolean, mWen: Boolean, vxsatWen: Boolean, selImm: BitPat = SelImm.IMM_OPIVIS, uopSplitType: BitPat = UopSplitType.VEC_VVV, src3: BitPat = SrcType.vp) extends XSDecodeBase {
+case class OPIVI(
+  fu: FuType.OHType,
+  fuOp: BitPat,
+  vWen: Boolean,
+  mWen: Boolean,
+  vxsatWen: Boolean,
+  selImm: BitPat = SelImm.IMM_OPIVIS,
+  uopSplitType: BitPat = UopSplitType.VEC_VVV,
+  src1: BitPat = SrcType.imm,
+  src2: BitPat = SrcType.vp,
+  src3: BitPat = SrcType.vp
+) extends XSDecodeBase {
   def generate() : List[BitPat] = {
-    XSDecode(SrcType.imm, SrcType.vp, src3, fu, fuOp, selImm, uopSplitType,
+    XSDecode(src1, src2, src3, fu, fuOp, selImm, uopSplitType,
       xWen = F, fWen = F, vWen = vWen, mWen = mWen, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
 
-case class OPMVV(vdRen: Boolean, fu: FuType.OHType, fuOp: BitPat, xWen: Boolean, vWen: Boolean, mWen: Boolean, uopSplitType: BitPat = UopSplitType.dummy) extends XSDecodeBase {
+case class OPMVV(
+  vdRen: Boolean,
+  fu: FuType.OHType,
+  fuOp: BitPat,
+  xWen: Boolean,
+  vWen: Boolean,
+  mWen: Boolean,
+  uopSplitType: BitPat = UopSplitType.dummy,
+  src1: BitPat = SrcType.vp,
+  src2: BitPat = SrcType.vp
+) extends XSDecodeBase {
   private def src3: BitPat = if (vdRen) SrcType.vp else SrcType.X
   def generate() : List[BitPat] = {
-    XSDecode(SrcType.vp, SrcType.vp, src3, fu, fuOp, SelImm.X, uopSplitType, xWen, F, vWen, mWen, F, F, F, F).generate()
+    XSDecode(src1, src2, src3, fu, fuOp, SelImm.X, uopSplitType, xWen, F, vWen, mWen, F, F, F, F).generate()
   }
 }
 
-case class OPMVX(vdRen: Boolean, fu: FuType.OHType, fuOp: BitPat, xWen: Boolean, vWen: Boolean, mWen: Boolean, uopSplitType: BitPat = UopSplitType.dummy) extends XSDecodeBase {
+case class OPMVX(
+  vdRen: Boolean,
+  fu: FuType.OHType,
+  fuOp: BitPat,
+  xWen: Boolean,
+  vWen: Boolean,
+  mWen: Boolean,
+  uopSplitType: BitPat = UopSplitType.dummy,
+  src1: BitPat = SrcType.xp,
+  src2: BitPat = SrcType.vp
+) extends XSDecodeBase {
   private def src3: BitPat = if (vdRen) SrcType.vp else SrcType.X
   def generate() : List[BitPat] = {
-    XSDecode(SrcType.xp, SrcType.vp, src3, fu, fuOp, SelImm.X, uopSplitType,
+    XSDecode(src1, src2, src3, fu, fuOp, SelImm.X, uopSplitType,
       xWen = xWen, fWen = F, vWen = vWen, mWen = mWen, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
 
-case class OPFVV(src1: BitPat, src3: BitPat, fu: FuType.OHType, fuOp: BitPat, fWen: Boolean, vWen: Boolean, mWen: Boolean, uopSplitType: BitPat = UopSplitType.dummy) extends XSDecodeBase {
+case class OPFVV(
+  src1: BitPat,
+  src3: BitPat,
+  fu: FuType.OHType,
+  fuOp: BitPat,
+  fWen: Boolean,
+  vWen: Boolean,
+  mWen: Boolean,
+  uopSplitType: BitPat = UopSplitType.dummy,
+  src2: BitPat = SrcType.vp
+) extends XSDecodeBase {
   def generate() : List[BitPat] = {
-    XSDecode(src1, SrcType.vp, src3, fu, fuOp, SelImm.X, uopSplitType,
+    XSDecode(src1, src2, src3, fu, fuOp, SelImm.X, uopSplitType,
       xWen = F, fWen = fWen, vWen = vWen, mWen = mWen, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
   }
 }
@@ -74,7 +135,17 @@ case class OPFFF(src1: BitPat, src3: BitPat, fu: FuType.OHType, fuOp: BitPat, xW
   }
 }
 
-case class OPFVF(src1: BitPat, src3: BitPat, fu: FuType.OHType, fuOp: BitPat, fWen: Boolean, vWen: Boolean, mWen: Boolean, uopSplitType: BitPat = UopSplitType.dummy, src2: BitPat = SrcType.vp) extends XSDecodeBase {
+case class OPFVF(
+  src1: BitPat,
+  src3: BitPat,
+  fu: FuType.OHType,
+  fuOp: BitPat,
+  fWen: Boolean,
+  vWen: Boolean,
+  mWen: Boolean,
+  uopSplitType: BitPat = UopSplitType.dummy,
+  src2: BitPat = SrcType.vp
+) extends XSDecodeBase {
   def generate() : List[BitPat] = {
     XSDecode(src1, src2, src3, fu, fuOp, SelImm.X, uopSplitType,
       xWen = F, fWen = fWen, vWen = vWen, mWen = mWen, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
@@ -139,7 +210,7 @@ object VecDecoder extends DecodeConstants {
 
     VMERGE_VVM      -> OPIVV(FuType.vialuF, VialuFixType.vmerge_vvm, T, F, F),
 
-    VMV_V_V      -> OPIVV(FuType.vialuF, VialuFixType.vmv_v_v, T, F, F),
+    VMV_V_V         -> OPIVV(FuType.vialuF, VialuFixType.vmv_v_v, T, F, F, src2 = SrcType.no), // vd[i] = vs1[i], vs2=v0
 
     VMSEQ_VV        -> OPIVV(FuType.vialuF, VialuFixType.vmseq_vv, F, T, F, UopSplitType.VEC_VVM),
     VMSNE_VV        -> OPIVV(FuType.vialuF, VialuFixType.vmsne_vv, F, T, F, UopSplitType.VEC_VVM),
@@ -199,7 +270,7 @@ object VecDecoder extends DecodeConstants {
 
     VMERGE_VXM    -> OPIVX(FuType.vialuF, VialuFixType.vmerge_vvm, T, F, F),
 
-    VMV_V_X    -> OPIVX(FuType.vialuF, VialuFixType.vmv_v_v, T, F, F),
+    VMV_V_X    -> OPIVX(FuType.vialuF, VialuFixType.vmv_v_v, T, F, F, src2 = SrcType.no), // vd[i] = x[rs1], vs2 = v0
 
     VMSEQ_VX      -> OPIVX(FuType.vialuF, VialuFixType.vmseq_vv, F, T, F, UopSplitType.VEC_VXM),
     VMSNE_VX      -> OPIVX(FuType.vialuF, VialuFixType.vmsne_vv, F, T, F, UopSplitType.VEC_VXM),
@@ -249,7 +320,7 @@ object VecDecoder extends DecodeConstants {
 
     VMERGE_VIM    -> OPIVI(FuType.vialuF, VialuFixType.vmerge_vvm, T, F, F),
 
-    VMV_V_I    -> OPIVI(FuType.vialuF, VialuFixType.vmv_v_v, T, F, F),
+    VMV_V_I       -> OPIVI(FuType.vialuF, VialuFixType.vmv_v_v, T, F, F, src2 = SrcType.no), // vd[i] = imm, vs2 = v0
 
     VMSEQ_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmseq_vv, F, T, F, uopSplitType = UopSplitType.VEC_VVM),
     VMSNE_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmsne_vv, F, T, F, uopSplitType = UopSplitType.VEC_VVM),
@@ -273,10 +344,10 @@ object VecDecoder extends DecodeConstants {
     VNCLIPU_WI    -> OPIVI(FuType.vialuF, VialuFixType.vnclipu_wv, T, F, T, selImm = SelImm.IMM_OPIVIU, uopSplitType = UopSplitType.VEC_WVV),
     VNCLIP_WI     -> OPIVI(FuType.vialuF, VialuFixType.vnclip_wv, T, F, T, uopSplitType = UopSplitType.VEC_WVV),
 
-    VMV1R_V       -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F),
-    VMV2R_V       -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F),
-    VMV4R_V       -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F),
-    VMV8R_V       -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F),
+    VMV1R_V       -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F, src1 = SrcType.no), // vmv1r.v vd, vs2
+    VMV2R_V       -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F, src1 = SrcType.no), // vmv2r.v vd, vs2
+    VMV4R_V       -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F, src1 = SrcType.no), // vmv4r.v vd, vs2
+    VMV8R_V       -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F, src1 = SrcType.no), // vmv8r.v vd, vs2
   )
 
   val opmvv: Array[(BitPat, XSDecodeBase)] = Array(
@@ -285,15 +356,14 @@ object VecDecoder extends DecodeConstants {
     VASUB_VV     -> OPMVV(T, FuType.vialuF, VialuFixType.vasub_vv, F, T, F, UopSplitType.VEC_VVV),
     VASUBU_VV    -> OPMVV(T, FuType.vialuF, VialuFixType.vasubu_vv, F, T, F, UopSplitType.VEC_VVV),
     VCOMPRESS_VM -> OPMVV(T, FuType.vppu, VpermType.vcompress, F, T, F, UopSplitType.VEC_COMPRESS),
-    VCPOP_M      -> OPMVV(T, FuType.vipu, VipuType.vcpop_m, T, F, F, UopSplitType.VEC_M0X),
+    VCPOP_M      -> OPMVV(T, FuType.vipu, VipuType.vcpop_m, T, F, F, UopSplitType.VEC_M0X, src1 = SrcType.no), // vcpop.m rd, vs2, vm
     VDIV_VV      -> OPMVV(T, FuType.vipu, VipuType.dummy, F, T, F),
     VDIVU_VV     -> OPMVV(T, FuType.vipu, VipuType.dummy, F, T, F),
-    VFIRST_M     -> OPMVV(T, FuType.vipu, VipuType.vfirst_m, T, F, F, UopSplitType.VEC_M0X_VFIRST),
-    VID_V        -> OPMVV(T, FuType.vipu, VipuType.vid_v, F, T, F, UopSplitType.VEC_MVV),
-    VIOTA_M      -> OPMVV(T, FuType.vipu, VipuType.viota_m, F, T, F, UopSplitType.VEC_MVV),
+    VFIRST_M     -> OPMVV(T, FuType.vipu, VipuType.vfirst_m, T, F, F, UopSplitType.VEC_M0X_VFIRST, src1 = SrcType.no), // vfirst.m rd, vs2, vm
+    VID_V        -> OPMVV(T, FuType.vipu, VipuType.vid_v, F, T, F, UopSplitType.VEC_MVV, src1 = SrcType.no, src2 = SrcType.no), // vid.v vd, vm
+    VIOTA_M      -> OPMVV(T, FuType.vipu, VipuType.viota_m, F, T, F, UopSplitType.VEC_MVV, src1 = SrcType.no), // viota.m vd, vs2, vm
 
     VMACC_VV     -> OPMVV(T, FuType.vimac, VimacType.vmacc, F, T, F, UopSplitType.VEC_VVV),
-
     VMADD_VV     -> OPMVV(T, FuType.vimac, VimacType.vmadd, F, T, F, UopSplitType.VEC_VVV),
     VMAND_MM     -> OPMVV(T, FuType.vialuF, VialuFixType.vmand_mm, F, T, F, UopSplitType.VEC_MMM),
     VMANDN_MM    -> OPMVV(T, FuType.vialuF, VialuFixType.vmandn_mm, F, T, F, UopSplitType.VEC_MMM),
@@ -303,15 +373,15 @@ object VecDecoder extends DecodeConstants {
     VMORN_MM     -> OPMVV(T, FuType.vialuF, VialuFixType.vmorn_mm, F, T, F, UopSplitType.VEC_MMM),
     VMXNOR_MM    -> OPMVV(T, FuType.vialuF, VialuFixType.vmxnor_mm, F, T, F, UopSplitType.VEC_MMM),
     VMXOR_MM     -> OPMVV(T, FuType.vialuF, VialuFixType.vmxor_mm, F, T, F, UopSplitType.VEC_MMM),
-    VMSBF_M      -> OPMVV(T, FuType.vipu, VipuType.vmsbf_m, F, T, F, UopSplitType.VEC_M0M),
-    VMSIF_M      -> OPMVV(T, FuType.vipu, VipuType.vmsif_m, F, T, F, UopSplitType.VEC_M0M),
-    VMSOF_M      -> OPMVV(T, FuType.vipu, VipuType.vmsof_m, F, T, F, UopSplitType.VEC_M0M),
+    VMSBF_M      -> OPMVV(T, FuType.vipu, VipuType.vmsbf_m, F, T, F, UopSplitType.VEC_M0M, src1 = SrcType.no), // vmsbf.m vd, vs2, vm
+    VMSIF_M      -> OPMVV(T, FuType.vipu, VipuType.vmsif_m, F, T, F, UopSplitType.VEC_M0M, src1 = SrcType.no), // vmsif.m vd, vs2, vm
+    VMSOF_M      -> OPMVV(T, FuType.vipu, VipuType.vmsof_m, F, T, F, UopSplitType.VEC_M0M, src1 = SrcType.no), // vmsof.m vd, vs2, vm
     VMUL_VV      -> OPMVV(T, FuType.vimac, VimacType.vmul, F, T, F, UopSplitType.VEC_VVV),
     VMULH_VV     -> OPMVV(T, FuType.vimac, VimacType.vmulh, F, T, F, UopSplitType.VEC_VVV),
     VMULHSU_VV   -> OPMVV(T, FuType.vimac, VimacType.vmulhsu, F, T, F, UopSplitType.VEC_VVV),
     VMULHU_VV    -> OPMVV(T, FuType.vimac, VimacType.vmulhu, F, T, F, UopSplitType.VEC_VVV),
 
-    VMV_X_S      -> OPMVV(T, FuType.vipu, VipuType.dummy, T, F, F),
+    VMV_X_S      -> OPMVV(T, FuType.vipu, VipuType.dummy, T, F, F, src1 = SrcType.no), // vmv.x.s rd, vs2 # x[rd] = vs2[0]
     VNMSAC_VV    -> OPMVV(T, FuType.vimac, VimacType.vnmsac, F, T, F, UopSplitType.VEC_VVV),
     VNMSUB_VV    -> OPMVV(T, FuType.vimac, VimacType.vnmsub, F, T, F, UopSplitType.VEC_VVV),
     VREDAND_VS   -> OPMVV(T, FuType.vipu, VipuType.vredand_vs, F, T, F, UopSplitType.VEC_VRED),
@@ -324,12 +394,12 @@ object VecDecoder extends DecodeConstants {
     VREDXOR_VS   -> OPMVV(T, FuType.vipu, VipuType.vredxor_vs, F, T, F, UopSplitType.VEC_VRED),
     VREM_VV      -> OPMVV(T, FuType.vipu, VipuType.dummy, F, T, F),
     VREMU_VV     -> OPMVV(T, FuType.vipu, VipuType.dummy, F, T, F),
-    VSEXT_VF2    -> OPMVV(T, FuType.vialuF, VialuFixType.vsext_vf2, F, T, F, UopSplitType.VEC_EXT2),
-    VSEXT_VF4    -> OPMVV(T, FuType.vialuF, VialuFixType.vsext_vf4, F, T, F, UopSplitType.VEC_EXT4),
-    VSEXT_VF8    -> OPMVV(T, FuType.vialuF, VialuFixType.vsext_vf8, F, T, F, UopSplitType.VEC_EXT8),
-    VZEXT_VF2    -> OPMVV(T, FuType.vialuF, VialuFixType.vzext_vf2, F, T, F, UopSplitType.VEC_EXT2),
-    VZEXT_VF4    -> OPMVV(T, FuType.vialuF, VialuFixType.vzext_vf4, F, T, F, UopSplitType.VEC_EXT4),
-    VZEXT_VF8    -> OPMVV(T, FuType.vialuF, VialuFixType.vzext_vf8, F, T, F, UopSplitType.VEC_EXT8),
+    VSEXT_VF2    -> OPMVV(T, FuType.vialuF, VialuFixType.vsext_vf2, F, T, F, UopSplitType.VEC_EXT2, src1 = SrcType.no), // vsext.vf2 vd, vs2, vm
+    VSEXT_VF4    -> OPMVV(T, FuType.vialuF, VialuFixType.vsext_vf4, F, T, F, UopSplitType.VEC_EXT4, src1 = SrcType.no), // vsext.vf4 vd, vs2, vm
+    VSEXT_VF8    -> OPMVV(T, FuType.vialuF, VialuFixType.vsext_vf8, F, T, F, UopSplitType.VEC_EXT8, src1 = SrcType.no), // vsext.vf8 vd, vs2, vm
+    VZEXT_VF2    -> OPMVV(T, FuType.vialuF, VialuFixType.vzext_vf2, F, T, F, UopSplitType.VEC_EXT2, src1 = SrcType.no), // vzext.vf2 vd, vs2, vm
+    VZEXT_VF4    -> OPMVV(T, FuType.vialuF, VialuFixType.vzext_vf4, F, T, F, UopSplitType.VEC_EXT4, src1 = SrcType.no), // vzext.vf4 vd, vs2, vm
+    VZEXT_VF8    -> OPMVV(T, FuType.vialuF, VialuFixType.vzext_vf8, F, T, F, UopSplitType.VEC_EXT8, src1 = SrcType.no), // vzext.vf8 vd, vs2, vm
     VWADD_VV     -> OPMVV(T, FuType.vialuF, VialuFixType.vwadd_vv, F, T, F, UopSplitType.VEC_VVW),
     VWADD_WV     -> OPMVV(T, FuType.vialuF, VialuFixType.vwadd_wv, F, T, F, UopSplitType.VEC_WVW),
     VWADDU_VV    -> OPMVV(T, FuType.vialuF, VialuFixType.vwaddu_vv, F, T, F, UopSplitType.VEC_VVW),
@@ -359,7 +429,7 @@ object VecDecoder extends DecodeConstants {
     VMULH_VX       -> OPMVX(T, FuType.vimac, VimacType.vmulh, F, T, F, UopSplitType.VEC_VXV),
     VMULHSU_VX     -> OPMVX(T, FuType.vimac, VimacType.vmulhsu, F, T, F, UopSplitType.VEC_VXV),
     VMULHU_VX      -> OPMVX(T, FuType.vimac, VimacType.vmulhu, F, T, F, UopSplitType.VEC_VXV),
-    VMV_S_X        -> OPMVX(T, FuType.vipu, VipuType.vmv_s_x, F, T, F, UopSplitType.VEC_0XV),
+    VMV_S_X        -> OPMVX(T, FuType.vipu, VipuType.vmv_s_x, F, T, F, UopSplitType.VEC_0XV, src2 = SrcType.no), // vmv.s.x vd, rs1 # vd[0] = x[rs1] (vs2=0)
 
     VNMSAC_VX      -> OPMVX(T, FuType.vimac, VimacType.vnmsac, F, T, F, UopSplitType.VEC_VXV),
     VNMSUB_VX      -> OPMVX(T, FuType.vimac, VimacType.vnmsub, F, T, F, UopSplitType.VEC_VXV),
@@ -468,13 +538,13 @@ object VecDecoder extends DecodeConstants {
     VFWNMSAC_VV        -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfma, VfmaType.vfnmsac_w, F, T, F, UopSplitType.VEC_VVW),
 
     // 13.8. Vector Floating-Point Square-Root Instruction
-    VFSQRT_V           -> OPFVV(SrcType.X , SrcType.vp , FuType.vfdiv, VfdivType.vfsqrt, F, T, F, UopSplitType.VEC_VVV),
+    VFSQRT_V           -> OPFVV(SrcType.X , SrcType.vp , FuType.vfdiv, VfdivType.vfsqrt, F, T, F, UopSplitType.VEC_VVV), // vfsqrt.v vd, vs2, vm
 
     // 13.9. Vector Floating-Point Reciprocal Square-Root Estimate Instruction
-    VFRSQRT7_V         -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfrsqrt7, F, T, F, UopSplitType.VEC_VVV),
+    VFRSQRT7_V         -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfrsqrt7, F, T, F, UopSplitType.VEC_VVV), // vfrsqrt7.v vd, vs2, vm
 
     // 13.10. Vector Floating-Point Reciprocal Estimate Instruction
-    VFREC7_V           -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfrec7, F, T, F, UopSplitType.VEC_VVV),
+    VFREC7_V           -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfrec7, F, T, F, UopSplitType.VEC_VVV), // vfrec7.v vd, vs2, vm
 
     // 13.11. Vector Floating-Point MIN/MAX Instructions
     VFMIN_VV           -> OPFVV(SrcType.vp, SrcType.vp , FuType.vfalu, VfaluType.vfmin, F, T, F, UopSplitType.VEC_VVV),
@@ -590,11 +660,11 @@ object VecDecoder extends DecodeConstants {
     VFMERGE_VFM        -> OPFVF(SrcType.fp, SrcType.vp , FuType.vfalu, VfaluType.vfmerge, F, T, F, UopSplitType.VEC_VFV),
 
     // 13.16. Vector Floating-Point Move Instruction
-    VFMV_V_F           -> OPFVF(SrcType.fp, SrcType.vp , FuType.vfalu, VfaluType.vfmv, F, T, F),// src2=SrcType.X
+    VFMV_V_F           -> OPFVF(SrcType.fp, SrcType.vp , FuType.vfalu, VfaluType.vfmv, F, T, F, src2 = SrcType.X), // vfmv.v.f vd, rs1 # vd[i] = f[rs1]
 
     // 16.2. Floating-Point Scalar Move Instructions
     VFMV_F_S           -> OPFVF(SrcType.X, SrcType.X, FuType.vfalu, VfaluType.vfmv_f_s, T, F, F, UopSplitType.SCA_SIM), // f[rd] = vs2[0] (rs1=0)
-    VFMV_S_F           -> OPFVF(SrcType.fp, SrcType.X, FuType.vfalu, VfaluType.vfmv_s_f, F, T, F, UopSplitType.VEC_VFV, src2 = SrcType.X),
+    VFMV_S_F           -> OPFVF(SrcType.fp, SrcType.X, FuType.vfalu, VfaluType.vfmv_s_f, F, T, F, UopSplitType.VEC_VFV, src2 = SrcType.X), // vd[0] = f[rs1] (vs2=0)
     // 16.3.3. Vector Slide1up
     VFSLIDE1UP_VF      -> OPFVF(SrcType.fp, SrcType.vp , FuType.vppu, VpermType.vfslide1up, F, T, F, UopSplitType.VEC_FSLIDE1UP),// vd[0]=f[rs1], vd[i+1] = vs2[i]
 
