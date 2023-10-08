@@ -139,6 +139,7 @@ class ExeUnitImp(
       sink.bits.ctrl.ftqIdx      .foreach(x => x := source.bits.ftqIdx.get)
       sink.bits.ctrl.ftqOffset   .foreach(x => x := source.bits.ftqOffset.get)
       sink.bits.ctrl.predictInfo .foreach(x => x := source.bits.predictInfo.get)
+      sink.bits.ctrl.rmInst      .foreach(x => x := source.bits.rmInst.get)
       sink.bits.ctrl.fpu         .foreach(x => x := source.bits.fpu.get)
       sink.bits.ctrl.vpu         .foreach(x => x := source.bits.vpu.get)
   }

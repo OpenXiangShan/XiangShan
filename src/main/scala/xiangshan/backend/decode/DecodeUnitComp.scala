@@ -27,6 +27,7 @@ import xiangshan.ExceptionNO.illegalInstr
 import xiangshan._
 import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.fu.FuType
+import xiangshan.backend.fu.fpu._
 import freechips.rocketchip.rocket.Instructions._
 import xiangshan.backend.Bundles.{DecodedInst, StaticInst}
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
@@ -153,18 +154,10 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           csBundle(0).lsrc(1) := 0.U
           csBundle(0).ldest := FP_TMP_REG_MV.U
           csBundle(0).fuType := FuType.i2f.U
+          csBundle(0).fuOpType := I2fType.fcvt_d_l
           csBundle(0).rfWen := false.B
           csBundle(0).fpWen := true.B
           csBundle(0).vecWen := false.B
-          csBundle(0).fpu.isAddSub := false.B
-          csBundle(0).fpu.typeTagIn := FPU.D
-          csBundle(0).fpu.typeTagOut := FPU.D
-          csBundle(0).fpu.fromInt := true.B
-          csBundle(0).fpu.wflags := false.B
-          csBundle(0).fpu.fpWen := true.B
-          csBundle(0).fpu.div := false.B
-          csBundle(0).fpu.sqrt := false.B
-          csBundle(0).fpu.fcvt := false.B
           csBundle(0).flushPipe := false.B
           csBundle(1).fuType := FuType.vsetfwf.U
           csBundle(1).srcType(0) := SrcType.vp
@@ -241,18 +234,10 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).lsrc(1) := 0.U
       csBundle(0).ldest := FP_TMP_REG_MV.U
       csBundle(0).fuType := FuType.i2f.U
+      csBundle(0).fuOpType := I2fType.fcvt_d_l
       csBundle(0).rfWen := false.B
       csBundle(0).fpWen := true.B
       csBundle(0).vecWen := false.B
-      csBundle(0).fpu.isAddSub := false.B
-      csBundle(0).fpu.typeTagIn := FPU.D
-      csBundle(0).fpu.typeTagOut := FPU.D
-      csBundle(0).fpu.fromInt := true.B
-      csBundle(0).fpu.wflags := false.B
-      csBundle(0).fpu.fpWen := true.B
-      csBundle(0).fpu.div := false.B
-      csBundle(0).fpu.sqrt := false.B
-      csBundle(0).fpu.fcvt := false.B
       /*
       vfmv.s.f
        */
@@ -278,18 +263,10 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).lsrc(1) := 0.U
       csBundle(0).ldest := FP_TMP_REG_MV.U
       csBundle(0).fuType := FuType.i2f.U
+      csBundle(0).fuOpType := I2fType.fcvt_d_l
       csBundle(0).rfWen := false.B
       csBundle(0).fpWen := true.B
       csBundle(0).vecWen := false.B
-      csBundle(0).fpu.isAddSub := false.B
-      csBundle(0).fpu.typeTagIn := FPU.D
-      csBundle(0).fpu.typeTagOut := FPU.D
-      csBundle(0).fpu.fromInt := true.B
-      csBundle(0).fpu.wflags := false.B
-      csBundle(0).fpu.fpWen := true.B
-      csBundle(0).fpu.div := false.B
-      csBundle(0).fpu.sqrt := false.B
-      csBundle(0).fpu.fcvt := false.B
       /*
       LMUL
        */
@@ -353,18 +330,10 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).lsrc(1) := 0.U
       csBundle(0).ldest := FP_TMP_REG_MV.U
       csBundle(0).fuType := FuType.i2f.U
+      csBundle(0).fuOpType := I2fType.fcvt_d_l
       csBundle(0).rfWen := false.B
       csBundle(0).fpWen := true.B
       csBundle(0).vecWen := false.B
-      csBundle(0).fpu.isAddSub := false.B
-      csBundle(0).fpu.typeTagIn := FPU.D
-      csBundle(0).fpu.typeTagOut := FPU.D
-      csBundle(0).fpu.fromInt := true.B
-      csBundle(0).fpu.wflags := false.B
-      csBundle(0).fpu.fpWen := true.B
-      csBundle(0).fpu.div := false.B
-      csBundle(0).fpu.sqrt := false.B
-      csBundle(0).fpu.fcvt := false.B
 
       for (i <- 0 until MAX_VLMUL / 2) {
         csBundle(2 * i + 1).srcType(0) := SrcType.fp
@@ -390,18 +359,10 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).lsrc(1) := 0.U
       csBundle(0).ldest := FP_TMP_REG_MV.U
       csBundle(0).fuType := FuType.i2f.U
+      csBundle(0).fuOpType := I2fType.fcvt_d_l
       csBundle(0).rfWen := false.B
       csBundle(0).fpWen := true.B
       csBundle(0).vecWen := false.B
-      csBundle(0).fpu.isAddSub := false.B
-      csBundle(0).fpu.typeTagIn := FPU.D
-      csBundle(0).fpu.typeTagOut := FPU.D
-      csBundle(0).fpu.fromInt := true.B
-      csBundle(0).fpu.wflags := false.B
-      csBundle(0).fpu.fpWen := true.B
-      csBundle(0).fpu.div := false.B
-      csBundle(0).fpu.sqrt := false.B
-      csBundle(0).fpu.fcvt := false.B
 
       for (i <- 0 until MAX_VLMUL / 2) {
         csBundle(2 * i + 1).srcType(0) := SrcType.fp
@@ -456,18 +417,10 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).lsrc(1) := 0.U
       csBundle(0).ldest := FP_TMP_REG_MV.U
       csBundle(0).fuType := FuType.i2f.U
+      csBundle(0).fuOpType := I2fType.fcvt_d_l
       csBundle(0).rfWen := false.B
       csBundle(0).fpWen := true.B
       csBundle(0).vecWen := false.B
-      csBundle(0).fpu.isAddSub := false.B
-      csBundle(0).fpu.typeTagIn := FPU.D
-      csBundle(0).fpu.typeTagOut := FPU.D
-      csBundle(0).fpu.fromInt := true.B
-      csBundle(0).fpu.wflags := false.B
-      csBundle(0).fpu.fpWen := true.B
-      csBundle(0).fpu.div := false.B
-      csBundle(0).fpu.sqrt := false.B
-      csBundle(0).fpu.fcvt := false.B
 
       for (i <- 0 until MAX_VLMUL / 2) {
         csBundle(2 * i + 1).srcType(0) := SrcType.fp
@@ -519,18 +472,11 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).lsrc(1) := 0.U
       csBundle(0).ldest := FP_TMP_REG_MV.U
       csBundle(0).fuType := FuType.i2f.U
+      csBundle(0).fuOpType := I2fType.fcvt_d_l
       csBundle(0).rfWen := false.B
       csBundle(0).fpWen := true.B
       csBundle(0).vecWen := false.B
-      csBundle(0).fpu.isAddSub := false.B
-      csBundle(0).fpu.typeTagIn := FPU.D
-      csBundle(0).fpu.typeTagOut := FPU.D
-      csBundle(0).fpu.fromInt := true.B
-      csBundle(0).fpu.wflags := false.B
-      csBundle(0).fpu.fpWen := true.B
-      csBundle(0).fpu.div := false.B
-      csBundle(0).fpu.sqrt := false.B
-      csBundle(0).fpu.fcvt := false.B
+
       //LMUL
       csBundle(1).srcType(0) := SrcType.fp
       csBundle(1).lsrc(0) := FP_TMP_REG_MV.U
@@ -556,18 +502,10 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).lsrc(1) := 0.U
       csBundle(0).ldest := FP_TMP_REG_MV.U
       csBundle(0).fuType := FuType.i2f.U
+      csBundle(0).fuOpType := I2fType.fcvt_d_l
       csBundle(0).rfWen := false.B
       csBundle(0).fpWen := true.B
       csBundle(0).vecWen := false.B
-      csBundle(0).fpu.isAddSub := false.B
-      csBundle(0).fpu.typeTagIn := FPU.D
-      csBundle(0).fpu.typeTagOut := FPU.D
-      csBundle(0).fpu.fromInt := true.B
-      csBundle(0).fpu.wflags := false.B
-      csBundle(0).fpu.fpWen := true.B
-      csBundle(0).fpu.div := false.B
-      csBundle(0).fpu.sqrt := false.B
-      csBundle(0).fpu.fcvt := false.B
       //LMUL
       csBundle(1).srcType(0) := SrcType.fp
       csBundle(1).lsrc(0) := FP_TMP_REG_MV.U
@@ -609,18 +547,11 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).lsrc(1) := 0.U
       csBundle(0).ldest := FP_TMP_REG_MV.U
       csBundle(0).fuType := FuType.i2f.U
+      csBundle(0).fuOpType := I2fType.fcvt_d_l
       csBundle(0).rfWen := false.B
       csBundle(0).fpWen := true.B
       csBundle(0).vecWen := false.B
-      csBundle(0).fpu.isAddSub := false.B
-      csBundle(0).fpu.typeTagIn := FPU.D
-      csBundle(0).fpu.typeTagOut := FPU.D
-      csBundle(0).fpu.fromInt := true.B
-      csBundle(0).fpu.wflags := false.B
-      csBundle(0).fpu.fpWen := true.B
-      csBundle(0).fpu.div := false.B
-      csBundle(0).fpu.sqrt := false.B
-      csBundle(0).fpu.fcvt := false.B
+
       //LMUL
       for (i <- 0 until MAX_VLMUL) {
         csBundle(2 * i + 1).srcType(0) := SrcType.vp
@@ -1194,18 +1125,11 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).lsrc(1) := 0.U
       csBundle(0).ldest := FP_TMP_REG_MV.U
       csBundle(0).fuType := FuType.i2f.U
+      csBundle(0).fuOpType := I2fType.fcvt_d_l
       csBundle(0).rfWen := false.B
       csBundle(0).fpWen := true.B
       csBundle(0).vecWen := false.B
-      csBundle(0).fpu.isAddSub := false.B
-      csBundle(0).fpu.typeTagIn := FPU.D
-      csBundle(0).fpu.typeTagOut := FPU.D
-      csBundle(0).fpu.fromInt := true.B
-      csBundle(0).fpu.wflags := false.B
-      csBundle(0).fpu.fpWen := true.B
-      csBundle(0).fpu.div := false.B
-      csBundle(0).fpu.sqrt := false.B
-      csBundle(0).fpu.fcvt := false.B
+
       // LMUL
       for (i <- 0 until MAX_VLMUL)
         for (j <- 0 to i) {
@@ -1248,18 +1172,11 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).lsrc(1) := 0.U
       csBundle(0).ldest := FP_TMP_REG_MV.U
       csBundle(0).fuType := FuType.i2f.U
+      csBundle(0).fuOpType := I2fType.fcvt_d_l
       csBundle(0).rfWen := false.B
       csBundle(0).fpWen := true.B
       csBundle(0).vecWen := false.B
-      csBundle(0).fpu.isAddSub := false.B
-      csBundle(0).fpu.typeTagIn := FPU.D
-      csBundle(0).fpu.typeTagOut := FPU.D
-      csBundle(0).fpu.fromInt := true.B
-      csBundle(0).fpu.wflags := false.B
-      csBundle(0).fpu.fpWen := true.B
-      csBundle(0).fpu.div := false.B
-      csBundle(0).fpu.sqrt := false.B
-      csBundle(0).fpu.fcvt := false.B
+
       // LMUL
       for (i <- 0 until MAX_VLMUL)
         for (j <- (0 to i).reverse) {
@@ -1442,18 +1359,10 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).lsrc(1) := 0.U
       csBundle(0).ldest := FP_TMP_REG_MV.U
       csBundle(0).fuType := FuType.i2f.U
+      csBundle(0).fuOpType := I2fType.fcvt_d_l
       csBundle(0).rfWen := false.B
       csBundle(0).fpWen := true.B
       csBundle(0).vecWen := false.B
-      csBundle(0).fpu.isAddSub := false.B
-      csBundle(0).fpu.typeTagIn := FPU.D
-      csBundle(0).fpu.typeTagOut := FPU.D
-      csBundle(0).fpu.fromInt := true.B
-      csBundle(0).fpu.wflags := false.B
-      csBundle(0).fpu.fpWen := true.B
-      csBundle(0).fpu.div := false.B
-      csBundle(0).fpu.sqrt := false.B
-      csBundle(0).fpu.fcvt := false.B
       switch(vlmulReg) {
         is("b000".U ){
           genCsBundle_RGATHER_VX(1)
@@ -1577,18 +1486,10 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).lsrc(1) := 0.U
       csBundle(0).ldest := FP_TMP_REG_MV.U
       csBundle(0).fuType := FuType.i2f.U
+      csBundle(0).fuOpType := I2fType.fcvt_d_l
       csBundle(0).rfWen := false.B
       csBundle(0).fpWen := true.B
       csBundle(0).vecWen := false.B
-      csBundle(0).fpu.isAddSub := false.B
-      csBundle(0).fpu.typeTagIn := FPU.D
-      csBundle(0).fpu.typeTagOut := FPU.D
-      csBundle(0).fpu.fromInt := true.B
-      csBundle(0).fpu.wflags := false.B
-      csBundle(0).fpu.fpWen := true.B
-      csBundle(0).fpu.div := false.B
-      csBundle(0).fpu.sqrt := false.B
-      csBundle(0).fpu.fcvt := false.B
       //LMUL
       for (i <- 0 until MAX_VLMUL) {
         csBundle(i + 1).srcType(0) := SrcType.fp
