@@ -65,6 +65,7 @@ class RobCSRIO(implicit p: Parameters) extends XSBundle {
 
   val fflags     = Output(Valid(UInt(5.W)))
   val vxsat      = Output(Valid(Bool()))
+  val vstart     = Output(Valid(UInt(XLEN.W)))
   val dirty_fs   = Output(Bool())
   val perfinfo   = new Bundle {
     val retiredInstr = Output(UInt(3.W))
@@ -200,6 +201,8 @@ class RobExceptionInfo(implicit p: Parameters) extends XSBundle {
   val singleStep = Bool() // TODO add frontend hit beneath
   val crossPageIPFFix = Bool()
   val trigger = new TriggerCf
+  val vstartEn = Bool()
+  val vstart = UInt(XLEN.W)
 
 //  def trigger_before = !trigger.getTimingBackend && trigger.getHitBackend
 //  def trigger_after = trigger.getTimingBackend && trigger.getHitBackend
@@ -214,7 +217,7 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
     val redirect = Input(Valid(new Redirect))
     val flush = Input(Bool())
     val enq = Vec(RenameWidth, Flipped(ValidIO(new RobExceptionInfo)))
-    // csr + load + store
+    // csr + load + store + varith + vload + vstore
     val wb = Vec(params.numException, Flipped(ValidIO(new RobExceptionInfo)))
     val out = ValidIO(new RobExceptionInfo)
     val state = ValidIO(new RobExceptionInfo)
@@ -252,14 +255,15 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
   val lastCycleFlush = RegNext(io.flush)
   val in_enq_valid = VecInit(io.enq.map(e => e.valid && e.bits.has_exception && !lastCycleFlush))
 
-  // s0: compare wb in 4 groups
-  val csrvldu_wb = io.wb.zip(wbExuParams).filter(_._2.fuConfigs.filter(t => t.isCsr || t.fuType == FuType.vldu).nonEmpty).map(_._1)
+  // s0: compare wb in 6 groups
+  val csr_wb = io.wb.zip(wbExuParams).filter(_._2.fuConfigs.filter(t => t.isCsr).nonEmpty).map(_._1)
   val load_wb = io.wb.zip(wbExuParams).filter(_._2.fuConfigs.filter(_.fuType == FuType.ldu).nonEmpty).map(_._1)
   val store_wb = io.wb.zip(wbExuParams).filter(_._2.fuConfigs.filter(t => t.isSta || t.fuType == FuType.mou).nonEmpty).map(_._1)
   val varith_wb = io.wb.zip(wbExuParams).filter(_._2.fuConfigs.filter(_.isVecArith).nonEmpty).map(_._1)
-  // TODO: vsta_wb = ???
+  val vload_wb = io.wb.zip(wbExuParams).filter(_._2.fuConfigs.filter(_.fuType == FuType.vldu).nonEmpty).map(_._1)
+  val vstore_wb = io.wb.zip(wbExuParams).filter(_._2.fuConfigs.filter(_.fuType == FuType.vstu).nonEmpty).map(_._1)
 
-  val writebacks = Seq(csrvldu_wb, load_wb, store_wb, varith_wb)
+  val writebacks = Seq(csr_wb, load_wb, store_wb, varith_wb, vload_wb, vstore_wb)
   val in_wb_valids = writebacks.map(_.map(w => w.valid && w.bits.has_exception && !lastCycleFlush))
   val wb_valid = in_wb_valids.zip(writebacks).map { case (valid, wb) =>
     valid.zip(wb.map(_.bits)).map { case (v, bits) => v && !(bits.robIdx.needFlush(io.redirect) || io.flush) }.reduce(_ || _)
@@ -269,7 +273,7 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
   val s0_out_valid = wb_valid.map(x => RegNext(x))
   val s0_out_bits = wb_bits.map(x => RegNext(x))
 
-  // s1: compare last four and current flush
+  // s1: compare last six and current flush
   val s1_valid = VecInit(s0_out_valid.zip(s0_out_bits).map{ case (v, b) => v && !(b.robIdx.needFlush(io.redirect) || io.flush) })
   val s1_out_bits = RegNext(getOldest(s0_out_valid, s0_out_bits))
   val s1_out_valid = RegNext(s1_valid.asUInt.orR)
@@ -737,6 +741,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.exception.bits.singleStep      := RegEnable(exceptionDataRead.bits.singleStep, exceptionHappen)
   io.exception.bits.crossPageIPFFix := RegEnable(exceptionDataRead.bits.crossPageIPFFix, exceptionHappen)
   io.exception.bits.isInterrupt     := RegEnable(intrEnable, exceptionHappen)
+  io.csr.vstart.valid               := RegEnable(exceptionDataRead.bits.vstartEn, exceptionHappen)
+  io.csr.vstart.bits                := RegEnable(exceptionDataRead.bits.vstart, exceptionHappen)
 //  io.exception.bits.trigger := RegEnable(exceptionDataRead.bits.trigger, exceptionHappen)
 
   XSDebug(io.flushOut.valid,
@@ -1121,6 +1127,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     exceptionGen.io.enq(i).bits.crossPageIPFFix := io.enq.req(i).bits.crossPageIPFFix
     exceptionGen.io.enq(i).bits.trigger.clear()
     exceptionGen.io.enq(i).bits.trigger.frontendHit := io.enq.req(i).bits.trigger.frontendHit
+    exceptionGen.io.enq(i).bits.vstartEn := false.B //DontCare
+    exceptionGen.io.enq(i).bits.vstart := 0.U //DontCare
   }
 
   println(s"ExceptionGen:")
@@ -1138,6 +1146,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     exc_wb.bits.singleStep      := false.B
     exc_wb.bits.crossPageIPFFix := false.B
     exc_wb.bits.trigger         := 0.U.asTypeOf(exc_wb.bits.trigger) // Todo
+    exc_wb.bits.vstartEn := false.B //wb.bits.vstartEn.getOrElse(false.B) // todo need add vstart in ExuOutput
+    exc_wb.bits.vstart := 0.U //wb.bits.vstart.getOrElse(0.U)
 //    println(s"  [$i] ${configs.map(_.name)}: exception ${exceptionCases(i)}, " +
 //      s"flushPipe ${configs.exists(_.flushPipe)}, " +
 //      s"replayInst ${configs.exists(_.replayInst)}")

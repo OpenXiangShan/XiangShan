@@ -32,6 +32,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   extends LazyModuleImp(wrapper) with HasXSParameter {
 
   private val VCONFIG_PORT = params.vconfigPort
+  private val VLD_PORT = params.vldPort
 
   val io = IO(new DataPathIO())
 
@@ -217,6 +218,8 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
 
   vfRfRaddr(VCONFIG_PORT) := io.vconfigReadPort.addr
   io.vconfigReadPort.data := vfRfRdata(VCONFIG_PORT)
+  vfRfRaddr(VLD_PORT) := io.vldReadPort.addr
+  io.vldReadPort.data := vfRfRdata(VLD_PORT)
 
   intDebugRead.foreach { case (addr, _) =>
     addr := io.debugIntRat.get
@@ -460,6 +463,8 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
 
   // Todo: check if this can be removed
   val vconfigReadPort = new RfReadPort(XLEN, PhyRegIdxWidth)
+
+  val vldReadPort = new RfReadPort(VLEN, PhyRegIdxWidth)
 
   val wbConfictRead = Input(MixedVec(params.allSchdParams.map(x => MixedVec(x.issueBlockParams.map(x => x.genWbConflictBundle())))))
 

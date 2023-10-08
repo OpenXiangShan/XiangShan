@@ -23,7 +23,7 @@ class IssueQueue(params: IssueBlockParams)(implicit p: Parameters) extends LazyM
   lazy val module: IssueQueueImp = iqParams.schdType match {
     case IntScheduler() => new IssueQueueIntImp(this)
     case VfScheduler() => new IssueQueueVfImp(this)
-    case MemScheduler() => 
+    case MemScheduler() =>
       if (iqParams.StdCnt == 0 && !iqParams.isVecMemIQ) new IssueQueueMemAddrImp(this)
       else if (iqParams.isVecMemIQ) new IssueQueueVecMemImp(this)
       else new IssueQueueIntImp(this)

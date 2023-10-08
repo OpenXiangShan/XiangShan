@@ -249,6 +249,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   dataPath.io.hartId := io.fromTop.hartId
   dataPath.io.flush := ctrlBlock.io.toDataPath.flush
   dataPath.io.vconfigReadPort.addr := ctrlBlock.io.toDataPath.vtypeAddr
+  dataPath.io.vldReadPort.addr := wbDataPath.io.oldVdAddrToDataPath
 
   dataPath.io.fromIntIQ <> intScheduler.io.toDataPathAfterDelay
   dataPath.io.fromVfIQ <> vfScheduler.io.toDataPathAfterDelay
@@ -310,8 +311,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   val debugVtype = VType.toVtypeStruct(debugVconfig.vtype).asUInt
   val debugVl = debugVconfig.vl
   csrio.vpu.set_vxsat := ctrlBlock.io.robio.csr.vxsat
-  csrio.vpu.set_vstart.valid := ctrlBlock.io.robio.csr.vcsrFlag
-  csrio.vpu.set_vstart.bits := 0.U
+  csrio.vpu.set_vstart.valid := ctrlBlock.io.robio.csr.vstart.valid
+  csrio.vpu.set_vstart.bits := ctrlBlock.io.robio.csr.vstart.bits
   csrio.vpu.set_vtype.valid := ctrlBlock.io.robio.csr.vcsrFlag
   //Todo here need change design
   csrio.vpu.set_vtype.bits := ZeroExt(debugVtype, XLEN)
@@ -351,6 +352,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   vfExuBlock.io.frm.foreach(_ := csrio.fpu.frm)
 
   wbDataPath.io.flush := ctrlBlock.io.redirect
+  wbDataPath.io.oldVdDataFromDataPath := dataPath.io.vldReadPort.data
   wbDataPath.io.fromTop.hartId := io.fromTop.hartId
   wbDataPath.io.fromIntExu <> intExuBlock.io.out
   wbDataPath.io.fromVfExu <> vfExuBlock.io.out
@@ -504,7 +506,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val writeBack = MixedVec(
     Seq.fill(params.LduCnt + params.StaCnt * 2)(Flipped(DecoupledIO(new MemExuOutput()))) ++
     Seq.fill(params.VlduCnt)(Flipped(DecoupledIO(new MemExuOutput(true)))) ++
-    Seq.fill(params.VstuCnt)(Flipped(DecoupledIO(new MemExuOutput(true))))
+    Seq.fill(params.VstuCnt)(Flipped(DecoupledIO(new MemExuOutput(true)))) ++
   )
 
   val s3_delayed_load_error = Input(Vec(LoadPipelineWidth, Bool()))
