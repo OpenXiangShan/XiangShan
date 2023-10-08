@@ -64,7 +64,7 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
   val u_valid = RegNext(io.update.valid)
   val update = RegNext(io.update.bits)
   val u_idx = bimAddr.getIdx(update.pc)
-  
+
   val update_mask = LowerMask(PriorityEncoderOH(update.br_taken_mask.asUInt))
   val newCtrs = Wire(Vec(numBr, UInt(2.W)))
   val need_to_update = VecInit((0 until numBr).map(i => u_valid && update.ftb_entry.brValids(i) && update_mask(i)))
@@ -77,7 +77,7 @@ class BIM(implicit p: Parameters) extends BasePredictor with BimParams with BPUU
   wrbypass.io.write_data := newCtrs
   wrbypass.io.write_way_mask.map(_ := need_to_update)
 
-  val oldCtrs = 
+  val oldCtrs =
     VecInit((0 until numBr).map(i =>
       Mux(wrbypass.io.hit && wrbypass.io.hit_data(i).valid,
         wrbypass.io.hit_data(i).bits,

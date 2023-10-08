@@ -398,7 +398,7 @@ class DCacheWordReqWithVaddrAndPfFlag(implicit p: Parameters) extends DCacheWord
     res.replayCarry := replayCarry
     res.isFirstIssue := isFirstIssue
     res.debug_robIdx := debug_robIdx
-    
+
     res
   }
 }

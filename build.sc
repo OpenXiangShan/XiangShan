@@ -99,9 +99,7 @@ trait RocketChip
 
   object cde extends CDE
 
-  trait CDE
-    extends millbuild.`rocket-chip`.cde.common.CDEModule
-      with ScalaModule {
+  trait CDE extends millbuild.`rocket-chip`.cde.common.CDEModule with ScalaModule {
 
     def scalaVersion: T[String] = T(defaultScalaVersion)
 
@@ -162,7 +160,7 @@ object XiangShan extends SbtModule with ScalafmtModule with CommonModule {
 
   override def millSourcePath = millOuterCtx.millSourcePath
 
-  override def forkArgs = Seq("-Xmx32G", "-Xss256m")
+  override def forkArgs = Seq("-Xmx20G", "-Xss256m")
 
   override def ivyDeps = super.ivyDeps() ++ Agg(
     defaultVersions("chisel"),

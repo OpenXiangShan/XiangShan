@@ -389,7 +389,7 @@ class PMPRespBundle(implicit p: Parameters) extends PMPBundle {
     res.st := this.st || resp.st
     res.instr := this.instr || resp.instr
     res.mmio := this.mmio || resp.mmio
-    res.atomic := this.atomic || resp.atomic    
+    res.atomic := this.atomic || resp.atomic
     res
   }
 }

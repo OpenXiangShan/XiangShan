@@ -115,7 +115,7 @@ class StreamPrefetchReqBundle(implicit p: Parameters) extends XSBundle with HasS
     res.region := get_region_tag(vaddr)
     res.sink := sink
     res.source.value := source
-    
+
     val region_bits = get_region_bits(vaddr)
     val region_bit_vec = UIntToOH(region_bits)
     res.bit_vec := Mux(
@@ -297,7 +297,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
     decr_mode = s2_decr_mode,
     sink = SINK_L3,
     source = L1_HW_PREFETCH_STREAM)
-  
+
   XSPerfAccumulate("s2_valid", s2_valid)
   XSPerfAccumulate("s2_will_not_send_pf", s2_valid && !s2_will_send_pf)
   XSPerfAccumulate("s2_will_send_decr_pf", s2_valid && s2_will_send_pf && s2_decr_mode)

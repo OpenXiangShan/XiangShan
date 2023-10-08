@@ -352,11 +352,11 @@ class Wb2Ctrl(configs: Seq[ExuConfig])(implicit p: Parameters) extends LazyModul
     val sourceMod = writebackSinksMod(thisMod, thisModImp).head
     module.io.in := sink._1.zip(sink._2).zip(sourceMod).flatMap(x => x._1._1.writebackSource1(x._2)(x._1._2))
   }
-  
+
 
   class Wb2CtrlImp(wrapper: LazyModule) extends LazyModuleImp(wrapper)
     with HasWritebackSourceImp
-    with HasXSParameter 
+    with HasXSParameter
   {
     val io = IO(new Bundle {
       val redirect = Flipped(ValidIO(new Redirect))

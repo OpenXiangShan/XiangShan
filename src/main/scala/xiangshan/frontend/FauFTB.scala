@@ -76,7 +76,7 @@ class FauFTBWay(implicit p: Parameters) extends XSModule with FauFTBParams {
 
 
 class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
-  
+
   class FauFTBMeta(implicit p: Parameters) extends XSBundle with FauFTBParams {
     val pred_way = UInt(log2Ceil(numWays).W)
     val hit = Bool()
@@ -102,7 +102,7 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   val s1_hit = s1_hit_oh.orR
   val s1_hit_way = OHToUInt(s1_hit_oh)
   val s1_possible_full_preds = Wire(Vec(numWays, new FullBranchPrediction))
-  
+
   val s1_all_entries = VecInit(ways.map(_.io.resp))
   for (c & fp & e <- ctrs zip s1_possible_full_preds zip s1_all_entries) {
     fp.hit := DontCare
@@ -114,7 +114,7 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   val s1_hit_full_pred = Mux1H(s1_hit_oh, s1_possible_full_preds)
   XSError(PopCount(s1_hit_oh) > 1.U, "fauftb has multiple hits!\n")
   val fauftb_enable = RegNext(io.ctrl.ubtb_enable)
-  io.out.s1.full_pred.map(_ := s1_hit_full_pred) 
+  io.out.s1.full_pred.map(_ := s1_hit_full_pred)
   io.out.s1.full_pred.map(_ .hit := s1_hit && fauftb_enable)
 
   // assign metas
@@ -199,5 +199,5 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
     ("fauftb_commit_miss      ", u.valid && !u_meta.hit),
   )
   generatePerfEvent()
-  
+
 }

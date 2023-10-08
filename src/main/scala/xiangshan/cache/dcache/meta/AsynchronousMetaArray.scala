@@ -108,7 +108,7 @@ class L1FlagMetaArray(readPorts: Int, writePorts: Int)(implicit p: Parameters) e
     val read = Vec(readPorts, Flipped(DecoupledIO(new MetaReadReq)))
     val resp = Output(Vec(readPorts, Vec(nWays, Bool())))
     val write = Vec(writePorts, Flipped(DecoupledIO(new FlagMetaWriteReq)))
-    // customized cache op port 
+    // customized cache op port
     // val cacheOp = Flipped(new L1CacheInnerOpIO)
   })
 

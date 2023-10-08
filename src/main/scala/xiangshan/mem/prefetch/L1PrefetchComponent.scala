@@ -169,7 +169,7 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
   val enqLen = exuParameters.LduCnt
   val enqPtrExt = RegInit(VecInit((0 until enqLen).map(_.U.asTypeOf(new Ptr))))
   val deqPtrExt = RegInit(0.U.asTypeOf(new Ptr))
-  
+
   val deqPtr = WireInit(deqPtrExt.value)
 
   require(size >= enqLen)
@@ -320,7 +320,7 @@ class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1Pref
 
     res
   }
-  
+
   def invalidate() = {
     // disable sending pf req
     when(sink === SINK_L1) {
@@ -489,7 +489,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   }
 
   assert(PopCount(s0_pf_fire_vec) <= 1.U, "s0_pf_fire_vec should be one-hot or empty")
-  
+
   // s1: send out to dcache
   val s1_pf_valid = Reg(Bool())
   val s1_pf_bits = RegEnable(l1_pf_req_arb.io.out.bits, l1_pf_req_arb.io.out.fire)
@@ -622,12 +622,12 @@ class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamP
   stride_meta_array.io.train_req <> stride_train_filter.io.train_req
   stride_meta_array.io.stream_lookup_req <> stream_bit_vec_array.io.stream_lookup_req
   stride_meta_array.io.stream_lookup_resp <> stream_bit_vec_array.io.stream_lookup_resp
-  
+
   // stream has higher priority than stride
   pf_queue_filter.io.prefetch_req.valid := stream_bit_vec_array.io.prefetch_req.valid || stride_meta_array.io.prefetch_req.valid
   pf_queue_filter.io.prefetch_req.bits := Mux(
-    stream_bit_vec_array.io.prefetch_req.valid, 
-    stream_bit_vec_array.io.prefetch_req.bits, 
+    stream_bit_vec_array.io.prefetch_req.valid,
+    stream_bit_vec_array.io.prefetch_req.bits,
     stride_meta_array.io.prefetch_req.bits
   )
 

@@ -465,12 +465,14 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val innerFpUop = outer.innerFpFastSources(i).map(_._2).map(rs_all(_).module.io.fastWakeup.get).fold(Seq())(_ ++ _)
     val innerUop = innerIntUop ++ innerFpUop
     val innerData = outer.innerFastPorts(i).map(io.writeback(_).bits.data)
-    node.connectFastWakeup(innerUop, innerData)
+    val innerDataValid = outer.innerFastPorts(i).map(io.writeback(_).valid)
+    node.connectFastWakeup(innerUop, innerData, innerDataValid)
     require(innerUop.length == innerData.length)
 
     val outerUop = outer.outFastPorts(i).map(io.fastUopIn(_))
     val outerData = outer.outFastPorts(i).map(io.writeback(_).bits.data)
-    node.connectFastWakeup(outerUop, outerData)
+    val outerDataValid = outer.outFastPorts(i).map(io.writeback(_).valid)
+    node.connectFastWakeup(outerUop, outerData, outerDataValid)
     require(outerUop.length == outerData.length)
   }
   require(issueIdx == io.issue.length)

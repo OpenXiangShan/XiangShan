@@ -982,7 +982,7 @@ class SMSTrainFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   val enqLen = exuParameters.LduCnt + exuParameters.StuCnt
   val enqPtrExt = RegInit(VecInit((0 until enqLen).map(_.U.asTypeOf(new Ptr))))
   val deqPtrExt = RegInit(0.U.asTypeOf(new Ptr))
-  
+
   val deqPtr = WireInit(deqPtrExt.value)
 
   require(smsParams.train_filter_size >= enqLen)
@@ -1162,7 +1162,7 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   pf_filter.io.gen_req.bits := pf_gen_req
   io.tlb_req <> pf_filter.io.tlb_req
   val is_valid_address = pf_filter.io.l2_pf_addr.bits > 0x80000000L.U
-  
+
   io.l2_req.valid := pf_filter.io.l2_pf_addr.valid && io.enable && is_valid_address
   io.l2_req.bits.addr := pf_filter.io.l2_pf_addr.bits
   io.l2_req.bits.source := MemReqSource.Prefetch2L2SMS.id.U
