@@ -16,7 +16,7 @@
 
 package utils
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utility.{ChiselDB, LogPerfHelper, LogPerfIO}
@@ -63,12 +63,12 @@ object XSPerfHistogram extends HasRegularPerfName {
   // this function draws a histogram
   def apply
   (
-    perfName: String, 
-    perfCnt: UInt, 
-    enable: Bool, 
-    start: Int, 
-    stop: Int, 
-    step: Int, 
+    perfName: String,
+    perfCnt: UInt,
+    enable: Bool,
+    start: Int,
+    stop: Int,
+    step: Int,
     left_strict: Boolean = false,
     right_strict: Boolean = false
   )
@@ -106,7 +106,7 @@ object XSPerfHistogram extends HasRegularPerfName {
         XSPerfPrint(p"${perfName}_underflow, ${underflow}\n")(helper.io)
         XSPerfPrint(p"${perfName}_overflow, ${overflow}\n")(helper.io)
       }
-      
+
       // drop each perfCnt value into a bin
       val nBins = (stop - start) / step
       require(start >= 0)
@@ -121,12 +121,12 @@ object XSPerfHistogram extends HasRegularPerfName {
         // if perfCnt < start, it will go to the first bin
         val leftOutOfRange = if(left_strict)
           false.B
-        else 
+        else
           perfCnt < start.U && i.U === 0.U
         // if perfCnt >= stop, it will go to the last bin
         val rightOutOfRange = if(right_strict)
           false.B
-        else 
+        else
           perfCnt >= stop.U && i.U === (nBins - 1).U
         val inc = inRange || leftOutOfRange || rightOutOfRange
 
@@ -268,7 +268,7 @@ object XSPerfRolling extends HasRegularPerfName {
       rollingTable.log(rollingPt, triggerDB, "", clock, reset)
     }
   }
-  
+
   // event interval based mode
   def apply(
     perfName: String,

@@ -16,7 +16,7 @@
 
 package xiangshan.cache
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.ClientStates._
@@ -398,7 +398,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   val s2_req_replace_dup_1,
       s2_req_replace_dup_2 = RegEnable(s1_req.replace, s1_fire)
-  
+
   val s2_can_go_to_mq_dup = (0 until 3).map(_ => RegEnable(s1_pregen_can_go_to_mq, s1_fire))
 
   val s2_way_en = RegEnable(s1_way_en, s1_fire)
@@ -489,7 +489,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   // data_error will be reported by data array 1 cycle after data read resp
   val s3_data_error = Wire(Bool())
   s3_data_error := Mux(RegNext(RegNext(s1_fire)), // ecc check result is generated 2 cycle after read req
-    io.readline_error_delayed && RegNext(s2_may_report_data_error), 
+    io.readline_error_delayed && RegNext(s2_may_report_data_error),
     RegNext(s3_data_error) // do not update s3_data_error if !s1_fire
   )
   // error signal for amo inst
@@ -509,10 +509,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   val s3_req_vaddr_dup_for_wb,
       s3_req_vaddr_dup_for_data_write = RegEnable(s2_req.vaddr, s2_fire_to_s3)
-  
+
   val s3_idx_dup = (0 until 6).map(_ => RegEnable(get_idx(s2_req.vaddr), s2_fire_to_s3))
 
-  val s3_req_replace_dup = (0 until 8).map(_ => RegEnable(s2_req.replace, s2_fire_to_s3))    
+  val s3_req_replace_dup = (0 until 8).map(_ => RegEnable(s2_req.replace, s2_fire_to_s3))
   val s3_req_cmd_dup = (0 until 6).map(_ => RegEnable(s2_req.cmd, s2_fire_to_s3))
   val s3_req_source_dup_1, s3_req_source_dup_2 = RegEnable(s2_req.source, s2_fire_to_s3)
   val s3_req_addr_dup = (0 until 5).map(_ => RegEnable(s2_req.addr, s2_fire_to_s3))
@@ -718,7 +718,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_req_replace_dup_for_meta_w_valid = RegEnable(s2_req.replace, s2_fire_to_s3)
   val s3_hit_coh_dup_for_meta_w_valid = RegEnable(s2_hit_coh, s2_fire_to_s3)
   val s3_new_hit_coh_dup_for_meta_w_valid = RegEnable(s2_new_hit_coh, s2_fire_to_s3)
-  
+
   val miss_update_meta_dup_for_meta_w_valid = s3_req_miss_dup_for_meta_w_valid
   val probe_update_meta_dup_for_meta_w_valid = WireInit(s3_req_probe_dup_for_meta_w_valid && s3_tag_match_dup_for_meta_w_valid && s3_coh_dup_for_meta_w_valid =/= probe_new_coh_dup_for_meta_w_valid)
   val store_update_meta_dup_for_meta_w_valid = s3_req_source_dup_for_meta_w_valid === STORE_SOURCE.U &&
@@ -801,8 +801,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   // fix probe meta change
   val s3_probe_ttob_override = s3_valid &&
-    // s3_probe_ttob_check_resp.valid && 
-    s3_probe_ttob_check_resp.bits.toN && 
+    // s3_probe_ttob_check_resp.valid &&
+    s3_probe_ttob_check_resp.bits.toN &&
     s3_coh_dup_for_meta_w_valid === Trunk
   val s3_probe_new_coh = Mux(
     s3_probe_ttob_override,
@@ -843,7 +843,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_req_replace_dup_for_err_w_valid = RegEnable(s2_req.replace, s2_fire_to_s3)
   val s3_hit_coh_dup_for_err_w_valid = RegEnable(s2_hit_coh, s2_fire_to_s3)
   val s3_new_hit_coh_dup_for_err_w_valid = RegEnable(s2_new_hit_coh, s2_fire_to_s3)
-  
+
   val miss_update_meta_dup_for_err_w_valid = s3_req_miss_dup_for_err_w_valid
   val probe_update_meta_dup_for_err_w_valid = s3_req_probe_dup_for_err_w_valid && s3_tag_match_dup_for_err_w_valid && s3_coh_dup_for_err_w_valid =/= probe_new_coh_dup_for_err_w_valid
   val store_update_meta_dup_for_err_w_valid = s3_req_source_dup_for_err_w_valid === STORE_SOURCE.U &&
@@ -939,7 +939,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_req_replace_dup_for_tag_w_valid = RegEnable(s2_req.replace, s2_fire_to_s3)
   val s3_hit_coh_dup_for_tag_w_valid = RegEnable(s2_hit_coh, s2_fire_to_s3)
   val s3_new_hit_coh_dup_for_tag_w_valid = RegEnable(s2_new_hit_coh, s2_fire_to_s3)
-  
+
   val miss_update_meta_dup_for_tag_w_valid = s3_req_miss_dup_for_tag_w_valid
   val probe_update_meta_dup_for_tag_w_valid = s3_req_probe_dup_for_tag_w_valid && s3_tag_match_dup_for_tag_w_valid && s3_coh_dup_for_tag_w_valid =/= probe_new_coh_dup_for_tag_w_valid
   val store_update_meta_dup_for_tag_w_valid = s3_req_source_dup_for_tag_w_valid === STORE_SOURCE.U &&
@@ -1035,7 +1035,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_req_replace_dup_for_data_w_valid = RegEnable(s2_req.replace, s2_fire_to_s3)
   val s3_hit_coh_dup_for_data_w_valid = RegEnable(s2_hit_coh, s2_fire_to_s3)
   val s3_new_hit_coh_dup_for_data_w_valid = RegEnable(s2_new_hit_coh, s2_fire_to_s3)
-  
+
   val miss_update_meta_dup_for_data_w_valid = s3_req_miss_dup_for_data_w_valid
   val probe_update_meta_dup_for_data_w_valid = s3_req_probe_dup_for_data_w_valid && s3_tag_match_dup_for_data_w_valid && s3_coh_dup_for_data_w_valid =/= probe_new_coh_dup_for_data_w_valid
   val store_update_meta_dup_for_data_w_valid = s3_req_source_dup_for_data_w_valid === STORE_SOURCE.U &&
@@ -1167,7 +1167,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val s3_req_replace_dup_for_data_w_bank = RegEnable(s2_req.replace, s2_fire_to_s3)
     val s3_hit_coh_dup_for_data_w_bank = RegEnable(s2_hit_coh, s2_fire_to_s3)
     val s3_new_hit_coh_dup_for_data_w_bank = RegEnable(s2_new_hit_coh, s2_fire_to_s3)
-    
+
     val miss_update_meta_dup_for_data_w_bank = s3_req_miss_dup_for_data_w_bank
     val probe_update_meta_dup_for_data_w_bank = s3_req_probe_dup_for_data_w_bank && s3_tag_match_dup_for_data_w_bank && s3_coh_dup_for_data_w_bank =/= probe_new_coh_dup_for_data_w_bank
     val store_update_meta_dup_for_data_w_bank = s3_req_source_dup_for_data_w_bank === STORE_SOURCE.U &&
@@ -1270,7 +1270,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_req_replace_dup_for_wb_valid = RegEnable(s2_req.replace, s2_fire_to_s3)
   val s3_hit_coh_dup_for_wb_valid = RegEnable(s2_hit_coh, s2_fire_to_s3)
   val s3_new_hit_coh_dup_for_wb_valid = RegEnable(s2_new_hit_coh, s2_fire_to_s3)
-  
+
   val miss_update_meta_dup_for_wb_valid = s3_req_miss_dup_for_wb_valid
   val probe_update_meta_dup_for_wb_valid = s3_req_probe_dup_for_wb_valid && s3_tag_match_dup_for_wb_valid && s3_coh_dup_for_wb_valid =/= probe_new_coh_dup_for_wb_valid
   val store_update_meta_dup_for_wb_valid = s3_req_source_dup_for_wb_valid === STORE_SOURCE.U &&
@@ -1393,7 +1393,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   when (s2_fire_to_s3) { s3_valid_dup_for_wb_valid := true.B }
   .elsewhen (s3_fire_dup_for_wb_valid) { s3_valid_dup_for_wb_valid := false.B }
-  
+
   // -------------------------------------------------------------------------------------
 
   val s3_fire = s3_valid_dup(4) && s3_can_go
@@ -1470,8 +1470,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.release_update.bits.addr := s3_req_addr_dup(3)
   io.release_update.bits.mask := Mux(s3_store_hit_dup(1), s3_banked_store_wmask, banked_amo_wmask)
   io.release_update.bits.data := Mux(
-    amo_wait_amoalu, 
-    s3_amo_data_merged_reg, 
+    amo_wait_amoalu,
+    s3_amo_data_merged_reg,
     Mux(
       s3_sc,
       s3_sc_data_merged,
@@ -1545,8 +1545,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.data_write.bits.addr := s3_req_vaddr_dup_for_data_write
   io.data_write.bits.wmask := banked_wmask
   io.data_write.bits.data := Mux(
-    amo_wait_amoalu_dup_for_data_w_valid, 
-    s3_amo_data_merged_reg, 
+    amo_wait_amoalu_dup_for_data_w_valid,
+    s3_amo_data_merged_reg,
     Mux(
       s3_sc_dup_for_data_w_valid,
       s3_sc_data_merged_dup_for_data_w_valid,
@@ -1587,7 +1587,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
       RegNext(s1_fire && (s1_req.isAMO || s1_req.isStore) && !s1_req.probe) &&
       // generated in mainpipe s2
       Mux(
-        io.miss_req.valid, 
+        io.miss_req.valid,
         !io.miss_resp.merged && io.miss_req.ready, // if store miss, only update plru for the first miss
         true.B // normal store access
       )
@@ -1602,7 +1602,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
       RegNext(s1_fire && (s1_req.isAMO || s1_req.isStore) && !s1_req.probe) &&
       // generated in mainpipe s2
       Mux(
-        io.miss_req.valid, 
+        io.miss_req.valid,
         io.miss_req.ready, // if store miss, do not update plru if that req needs to be replayed
         true.B // normal store access
       )
@@ -1654,7 +1654,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   // report error, update error csr
   io.error.valid := s3_error && RegNext(s2_fire)
   // only tag_error and data_error will be reported to beu
-  // l2_error should not be reported (l2 will report that) 
+  // l2_error should not be reported (l2 will report that)
   io.error.report_to_beu := (RegEnable(s2_tag_error, s2_fire) || s3_data_error) && RegNext(s2_fire)
   io.error.paddr := RegEnable(s2_req.addr, s2_fire)
   io.error.source.tag := RegEnable(s2_tag_error, s2_fire)

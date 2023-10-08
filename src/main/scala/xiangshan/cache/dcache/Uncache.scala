@@ -18,7 +18,7 @@ package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import utils._
 import utility._
 import xiangshan._
@@ -110,7 +110,7 @@ class MMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     8.U -> 3.U
   ).map(m => (size===m._1) -> m._2))
   assert(!(io.mem_acquire.valid && !legal))
-  
+
   val load = edge.Get(
     fromSource      = io.hartId,
     toAddress       = req.addr,
@@ -262,14 +262,14 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   when (io.enableOutstanding) {
     //  Uncache Buffer is a circular queue, which contains UncacheBufferSize entries.
     //  Description:
-    //    enqPtr: Point to an invalid (means that the entry is free) entry. 
-    //    issPtr: Point to a ready entry, the entry is ready to issue. 
+    //    enqPtr: Point to an invalid (means that the entry is free) entry.
+    //    issPtr: Point to a ready entry, the entry is ready to issue.
     //    deqPtr: Point to the oldest entry, which was issued but has not accepted response (used to keep order with the program order).
     //
     //  When outstanding disabled, only one read/write request can be accepted at a time.
     //
-    //  Example (Enable outstanding): 
-    //    1. enqPtr: 
+    //  Example (Enable outstanding):
+    //    1. enqPtr:
     //       1) Before enqueue
     //          enqPtr --
     //                  |
@@ -292,7 +292,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     //          |  |  |  |  |
     //          +--+--+--+--+
     //
-    //    2. issPtr: 
+    //    2. issPtr:
     //      1) Before issue
     //          issPtr --
     //                  |
@@ -315,7 +315,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     //          |  |  |  |  |
     //          +--+--+--+--+
     //
-    //   3. deqPtr: 
+    //   3. deqPtr:
     //      1) Before dequeue
     //          deqPtr --
     //                  |
@@ -351,7 +351,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     //          +--+--+--+--+               +--+--+--+--+
     //              (load)                     (store)
     //
-    
+
     //  Enqueue
     when (req.fire) {
       enqPtr := enqPtr + 1.U
