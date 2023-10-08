@@ -686,14 +686,14 @@ object FuConfig {
     dataBits = 128,
   )
 
-  def VstuCfg: FuConfig = FuConfig (
+  val VstuCfg: FuConfig = FuConfig (
     name = "vstu",
     fuType = FuType.vstu,
     fuGen = null,
     srcData = Seq(
       Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()),  //vs1, vs2, vd_old, v0, vconfig
     ),
-    piped = false, // Todo: check it
+    piped = false,
     writeVecRf = true,
     latency = UncertainLatency(),
     exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault),
@@ -707,8 +707,8 @@ object FuConfig {
 
   def allConfigs = Seq(
     JmpCfg, BrhCfg, I2fCfg, I2vCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg, VSetRvfWvfCfg, VSetRiWvfCfg, VSetRiWiCfg,
-    FmacCfg, F2iCfg, F2fCfg, FDivSqrtCfg, LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg, VialuCfg, VipuCfg, VlduCfg,
-    VfaluCfg, VfmaCfg, HyldaCfg, HystaCfg
+    FmacCfg, F2iCfg, F2fCfg, FDivSqrtCfg, LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg, VialuCfg, VipuCfg, VlduCfg, VstuCfg,
+    VfaluCfg, VfmaCfg, VfcvtCfg, HyldaCfg, HystaCfg
   )
 
   def VecArithFuConfigs = Seq(
