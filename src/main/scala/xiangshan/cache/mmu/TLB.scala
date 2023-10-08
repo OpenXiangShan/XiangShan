@@ -66,7 +66,11 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val mmu_flush_pipe = DelayN(sfence.valid && sfence.bits.flushPipe, q.fenceDelay) // for svinval, won't flush pipe
   val flush_pipe = io.flushPipe
 
-  val isHyperInst = (0 until Width).map(i => ValidHold(req(i).fire && !req(i).bits.kill && req(i).bits.hyperinst, resp(i).fire, flush_pipe(i)))
+  val req_in = req
+  val req_out = req.map(a => RegEnable(a.bits, a.fire()))
+  val req_out_v = (0 until Width).map(i => ValidHold(req_in(i).fire && !req_in(i).bits.kill, resp(i).fire, flush_pipe(i)))
+
+  val isHyperInst = (0 until Width).map(i => req_out_v(i) && req_out(i).hyperinst)
 
   // ATTENTION: csr and flush from backend are delayed. csr should not be later than flush.
   // because, csr will influence tlb behavior.
@@ -76,7 +80,13 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val virt = csr.priv.virt
   val sum = (0 until Width).map(i => Mux(virt || isHyperInst(i), io.csr.priv.vsum, io.csr.priv.sum))
   val mxr = (0 until Width).map(i => Mux(virt || isHyperInst(i), io.csr.priv.vmxr || io.csr.priv.mxr, io.csr.priv.mxr))
-  val s2xlate = (0 until Width).map(i => MuxCase(noS2xlate, Seq(
+  val req_in_s2xlate = (0 until Width).map(i => MuxCase(noS2xlate, Seq(
+      (!(virt || req_in(i).bits.hyperinst)) -> noS2xlate,
+      (vsatp.mode =/= 0.U && hgatp.mode =/= 0.U) -> allStage,
+      (vsatp.mode === 0.U) -> onlyStage2,
+      (hgatp.mode === 0.U) -> onlyStage1
+    )))
+  val req_out_s2xlate = (0 until Width).map(i => MuxCase(noS2xlate, Seq(
     (!(virt || isHyperInst(i))) -> noS2xlate,
     (vsatp.mode =/= 0.U && hgatp.mode =/= 0.U) -> allStage,
     (vsatp.mode === 0.U) -> onlyStage2,
@@ -89,9 +99,6 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val s2xlateEnable = (0 until Width).map(i => (isHyperInst(i) || virt) && (vsatp.mode === 8.U || hgatp.mode === 8.U) && (mode(i) < ModeM))
   val portTranslateEnable = (0 until Width).map(i => (vmEnable(i) || s2xlateEnable(i)) && RegNext(!req(i).bits.no_translate))
 
-  val req_in = req
-  val req_out = req.map(a => RegEnable(a.bits, a.fire))
-  val req_out_v = (0 until Width).map(i => ValidHold(req_in(i).fire && !req_in(i).bits.kill, resp(i).fire, flush_pipe(i)))
 
   val refill = (0 until Width).map(i => ptw.resp.fire && !flush_mmu && (vmEnable(i) || ptw.resp.bits.s2xlate =/= noS2xlate))
   refill_to_mem := DontCare
@@ -99,14 +106,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   entries.io.base_connect(sfence, csr, satp)
   if (q.outReplace) { io.replace <> entries.io.replace }
   for (i <- 0 until Width) {
-    val s2xlate = Wire(UInt(2.W))
-    s2xlate := MuxCase(noS2xlate, Seq(
-      (!(virt || req_in(i).bits.hyperinst)) -> noS2xlate,
-      (vsatp.mode =/= 0.U && hgatp.mode =/= 0.U) -> allStage,
-      (vsatp.mode === 0.U) -> onlyStage2,
-      (hgatp.mode === 0.U) -> onlyStage1
-    ))
-    entries.io.r_req_apply(io.requestor(i).req.valid, get_pn(req_in(i).bits.vaddr), i, s2xlate)
+    entries.io.r_req_apply(io.requestor(i).req.valid, get_pn(req_in(i).bits.vaddr), i, req_in_s2xlate(i))
     entries.io.w_apply(refill(i), ptw.resp.bits)
     resp(i).bits.debug.isFirstIssue := RegNext(req(i).bits.debug.isFirstIssue)
     resp(i).bits.debug.robIdx := RegNext(req(i).bits.debug.robIdx)
@@ -127,7 +127,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   (0 until Width).foreach{i =>
     pmp_check(pmp_addr(i), req_out(i).size, req_out(i).cmd, i)
     for (d <- 0 until nRespDups) {
-      perm_check(perm(i)(d), req_out(i).cmd, i, d, g_perm(i)(d), req_out(i).hlvx, s2xlate(i))
+      perm_check(perm(i)(d), req_out(i).cmd, i, d, g_perm(i)(d), req_out(i).hlvx, req_out_s2xlate(i))
     }
     hasGpf(i) := resp(i).bits.excp(0).gpf.ld || resp(i).bits.excp(0).gpf.st || resp(i).bits.excp(0).gpf.instr
   }
@@ -144,15 +144,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
   /************************  main body above | method/log/perf below ****************************/
   def TLBRead(i: Int) = {
-    val s2xlate = Wire(UInt(2.W))
-    s2xlate := MuxCase(noS2xlate, Seq(
-      (!(virt || req_in(i).bits.hyperinst)) -> noS2xlate,
-      (vsatp.mode =/= 0.U && hgatp.mode =/= 0.U) -> allStage,
-      (vsatp.mode === 0.U) -> onlyStage2,
-      (hgatp.mode === 0.U) -> onlyStage1
-    ))
-    val (e_hit, e_ppn, e_perm, e_super_hit, e_super_ppn, static_pm, e_g_perm, e_s2xlate) = entries.io.r_resp_apply(i)
-    val (p_hit, p_ppn, p_perm, p_gvpn, p_g_perm, p_s2xlate) = ptw_resp_bypass(get_pn(req_in(i).bits.vaddr), s2xlate)
+    val (e_hit, e_ppn, e_perm, e_g_perm, e_s2xlate) = entries.io.r_resp_apply(i)
+    val (p_hit, p_ppn, p_perm, p_gvpn, p_g_perm, p_s2xlate) = ptw_resp_bypass(get_pn(req_in(i).bits.vaddr), req_in_s2xlate(i))
     val enable = portTranslateEnable(i)
 
     val resp_gpa_refill = RegInit(false.B)
