@@ -147,10 +147,10 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val (e_hit, e_ppn, e_perm, e_g_perm, e_s2xlate) = entries.io.r_resp_apply(i)
     val (p_hit, p_ppn, p_perm, p_gvpn, p_g_perm, p_s2xlate) = ptw_resp_bypass(get_pn(req_in(i).bits.vaddr), req_in_s2xlate(i))
     val enable = portTranslateEnable(i)
-
+    val isOnlys2xlate = req_out_s2xlate(i) === onlyStage2
     val resp_gpa_refill = RegInit(false.B)
     val need_gpa_vpn_hit = RegEnable(need_gpa_vpn === get_pn(req_in(i).bits.vaddr), req_in(i).fire())
-    when (io.requestor(i).resp.valid && hasGpf(i) && need_gpa === false.B && !need_gpa_vpn_hit) {
+    when (io.requestor(i).resp.valid && hasGpf(i) && need_gpa === false.B && !need_gpa_vpn_hit && !isOnlys2xlate) {
       need_gpa := true.B
       need_gpa_vpn := get_pn(req_out(i).vaddr)
       resp_gpa_refill := false.B
@@ -165,7 +165,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     }
     
     val hit = e_hit || p_hit
-    val miss = (!hit && enable) || hasGpf(i) && !(resp_gpa_refill && need_gpa_vpn_hit)
+    val miss = (!hit && enable) || hasGpf(i) && !(resp_gpa_refill && need_gpa_vpn_hit) && !isOnlys2xlate
     hit.suggestName(s"hit_read_${i}")
     miss.suggestName(s"miss_read_${i}")
 
