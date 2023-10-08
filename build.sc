@@ -30,7 +30,6 @@ val defaultVersions = Map(
   "chisel" -> ivy"edu.berkeley.cs::chisel3:3.6.0",
   "chisel-plugin" -> ivy"edu.berkeley.cs:::chisel3-plugin:3.6.0",
   "chiseltest" -> ivy"edu.berkeley.cs::chiseltest:0.6.2",
-  "scalatest" -> ivy"org.scalatest::scalatest:3.2.7",
 )
 
 trait CommonModule extends ScalaModule {
@@ -164,7 +163,6 @@ object XiangShan extends SbtModule with ScalafmtModule with CommonModule {
 
   override def ivyDeps = super.ivyDeps() ++ Agg(
     defaultVersions("chisel"),
-    defaultVersions("chiseltest"),
   )
 
   override def moduleDeps = super.moduleDeps ++ Seq(
@@ -177,13 +175,10 @@ object XiangShan extends SbtModule with ScalafmtModule with CommonModule {
   )
 
   object test extends SbtModuleTests with TestModule.ScalaTest {
-
     override def forkArgs = XiangShan.forkArgs
 
     override def ivyDeps = super.ivyDeps() ++ Agg(
-      defaultVersions("scalatest")
+      defaultVersions("chiseltest"),
     )
-
-    def testFramework = "org.scalatest.tools.Framework"
   }
 }

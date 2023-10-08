@@ -27,7 +27,6 @@ import utils._
 import utility._
 import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
 import xiangshan.frontend.{FtqICacheInfo, FtqToICacheRequestBundle}
-import org.scalatest.tools.SuiteResultHolder
 
 class ICacheMainPipeReq(implicit p: Parameters) extends ICacheBundle
 {
