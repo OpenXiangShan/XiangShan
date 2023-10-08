@@ -1324,18 +1324,10 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(lmul).lsrc(1) := 0.U
       csBundle(lmul).ldest := dest
       csBundle(lmul).fuType := FuType.vfcvt.U
+      csBundle(lmul).fuOpType := FuOpType.FMVXF.value.asUInt
       csBundle(lmul).rfWen := true.B
       csBundle(lmul).fpWen := false.B
       csBundle(lmul).vecWen := false.B
-      csBundle(lmul).fpu.isAddSub := false.B
-      csBundle(lmul).fpu.typeTagIn := FPU.D
-      csBundle(lmul).fpu.typeTagOut := FPU.D
-      csBundle(lmul).fpu.fromInt := false.B
-      csBundle(lmul).fpu.wflags := false.B
-      csBundle(lmul).fpu.fpWen := false.B
-      csBundle(lmul).fpu.div := false.B
-      csBundle(lmul).fpu.sqrt := false.B
-      csBundle(lmul).fpu.fcvt := false.B
     }
 
     is(UopSplitType.VEC_MVV) {
@@ -1372,18 +1364,10 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(1).lsrc(1) := 0.U
       csBundle(1).ldest := dest
       csBundle(1).fuType := FuType.vfcvt.U
+      csBundle(1).fuOpType := FuOpType.FMVXF.value.asUInt
       csBundle(1).rfWen := true.B
       csBundle(1).fpWen := false.B
       csBundle(1).vecWen := false.B
-      csBundle(1).fpu.isAddSub := false.B
-      csBundle(1).fpu.typeTagIn := FPU.D
-      csBundle(1).fpu.typeTagOut := FPU.D
-      csBundle(1).fpu.fromInt := false.B
-      csBundle(1).fpu.wflags := false.B
-      csBundle(1).fpu.fpWen := false.B
-      csBundle(1).fpu.div := false.B
-      csBundle(1).fpu.sqrt := false.B
-      csBundle(1).fpu.fcvt := false.B
     }
     is(UopSplitType.VEC_VWW) {
       for (i <- 0 until MAX_VLMUL*2) {
