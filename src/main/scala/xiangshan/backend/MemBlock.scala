@@ -363,7 +363,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   ptw.io.sfence <> sfence
   ptw.io.csr.tlb <> tlbcsr
   ptw.io.csr.distribute_csr <> csrCtrl.distribute_csr
-  ptw.io.tlb(0) <> io.fetch_to_mem.itlb
 
   val perfEventsPTW = Wire(Vec(19, new PerfEvent))
   if (!coreParams.softPTW) {
@@ -386,7 +385,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     tlb_prefetch.io // let the module have name in waveform
   })
   val dtlb = dtlb_ld ++ dtlb_st ++ dtlb_prefetch
-  val ptwio = Wire(new VectorTlbPtwIO(exuParameters.LduCnt + exuParameters.StuCnt + 2)) // load + store + hw prefetch
+  val ptwio = Wire(new VectorTlbPtwIO(exuParameters.LduCnt + 1 + exuParameters.StuCnt + 1)) // load + store + hw prefetch
   val dtlb_reqs = dtlb.map(_.requestor).flatten
   val dtlb_pmps = dtlb.map(_.pmp).flatten
   dtlb.map(_.hartId := io.hartId)
@@ -398,11 +397,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     require(ldtlbParams.outReplace == pftlbParams.outReplace)
     require(ldtlbParams.outReplace)
 
-    val replace = Module(new TlbReplace(exuParameters.LduCnt + exuParameters.StuCnt + 2, ldtlbParams))
+    val replace = Module(new TlbReplace(exuParameters.LduCnt + 1 + exuParameters.StuCnt + 1, ldtlbParams))
     replace.io.apply_sep(dtlb_ld.map(_.replace) ++ dtlb_st.map(_.replace) ++ dtlb_prefetch.map(_.replace), ptwio.resp.bits.data.entry.tag)
   } else {
     if (ldtlbParams.outReplace) {
-      val replace_ld = Module(new TlbReplace(exuParameters.LduCnt, ldtlbParams))
+      val replace_ld = Module(new TlbReplace(exuParameters.LduCnt + 1, ldtlbParams))
       replace_ld.io.apply_sep(dtlb_ld.map(_.replace), ptwio.resp.bits.data.entry.tag)
     }
     if (sttlbParams.outReplace) {
@@ -426,8 +425,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       ptwio.req(i).bits := tlb.bits
     val vector_hit = if (refillBothTlb) Cat(ptw_resp_next.vector).orR
       else if (i < (exuParameters.LduCnt + 1)) Cat(ptw_resp_next.vector.take(exuParameters.LduCnt + 1)).orR
-      else if (i < (exuParameters.LduCnt + 1 + exuParameters.StuCnt)) Cat(ptw_resp_next.vector.drop(exuParameters.LduCnt + 1)).orR
-      else Cat(ptw_resp_next.vector.drop(exuParameters.LduCnt + exuParameters.StuCnt + 1)).orR
+      else if (i < (exuParameters.LduCnt + 1 + exuParameters.StuCnt)) Cat(ptw_resp_next.vector.drop(exuParameters.LduCnt + 1).take(exuParameters.StuCnt)).orR
+      else Cat(ptw_resp_next.vector.drop(exuParameters.LduCnt + 1 + exuParameters.StuCnt)).orR
     ptwio.req(i).valid := tlb.valid && !(ptw_resp_v && vector_hit &&
       ptw_resp_next.data.hit(tlb.bits.vpn, tlbcsr.satp.asid, allType = true, ignoreAsid = true))
   }
@@ -440,11 +439,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     dtlb_prefetch.foreach(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector.drop(exuParameters.LduCnt + exuParameters.StuCnt + 1)).orR)
   }
 
-  val dtlbRepeater1  = PTWFilter(ldtlbParams.fenceDelay, ptwio, sfence, tlbcsr, l2tlbParams.dfilterSize)
-  val dtlbRepeater2  = PTWRepeaterNB(passReady = false, ldtlbParams.fenceDelay, dtlbRepeater1.io.ptw, ptw.io.tlb(1), sfence, tlbcsr)
+  val dtlbRepeater  = PTWNewFilter(ldtlbParams.fenceDelay, ptwio, ptw.io.tlb(1), sfence, tlbcsr, l2tlbParams.dfilterSize)
   val itlbRepeater2 = PTWRepeaterNB(passReady = false, itlbParams.fenceDelay, io.fetch_to_mem.itlb, ptw.io.tlb(0), sfence, tlbcsr)
 
-  lsq.io.debugTopDown.robHeadMissInDTlb := dtlbRepeater1.io.rob_head_miss_in_tlb
+  lsq.io.debugTopDown.robHeadMissInDTlb := dtlbRepeater.io.rob_head_miss_in_tlb
 
   // pmp
   val pmp = Module(new PMP())
@@ -916,7 +914,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   // top-down info
   dcache.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr
-  dtlbRepeater1.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr
+  dtlbRepeater.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr
   lsq.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr
   io.debugTopDown.toCore.robHeadMissInDCache := dcache.io.debugTopDown.robHeadMissInDCache
   io.debugTopDown.toCore.robHeadTlbReplay := lsq.io.debugTopDown.robHeadTlbReplay

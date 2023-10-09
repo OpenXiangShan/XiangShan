@@ -93,6 +93,10 @@ trait HasTlbConst extends HasXSParameter {
   val sectorppnLen = ppnLen - sectortlbwidth
   val sectorvpnLen = vpnLen - sectortlbwidth
 
+  val loadfiltersize = 16
+  val storefiltersize = 8
+  val prefetchfiltersize = 8
+
   val sramSinglePort = true
 
   val timeOutThreshold = 10000

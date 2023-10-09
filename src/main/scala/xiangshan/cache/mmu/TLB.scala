@@ -192,12 +192,12 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     XSError(!io.requestor(idx).resp.ready, s"${q.name} port ${idx} is non-block, resp.ready must be true.B")
 
     val ptw_just_back = ptw.resp.fire && ptw.resp.bits.hit(get_pn(req_out(idx).vaddr), asid = io.csr.satp.asid, allType = true)
-    io.ptw.req(idx).valid :=  RegNext(req_out_v(idx) && missVec(idx) && !ptw_just_back, false.B) // TODO: remove the regnext, timing
-    when (RegEnable(io.requestor(idx).req_kill, RegNext(io.requestor(idx).req.fire))) {
+    io.ptw.req(idx).valid := req_out_v(idx) && missVec(idx) && !ptw_just_back // TODO: remove the regnext, timing
+    when (io.requestor(idx).req_kill && RegNext(io.requestor(idx).req.fire)) {
       io.ptw.req(idx).valid := false.B
     }
-    io.ptw.req(idx).bits.vpn := RegNext(get_pn(req_out(idx).vaddr))
-    io.ptw.req(idx).bits.memidx := RegNext(req_out(idx).memidx)
+    io.ptw.req(idx).bits.vpn := get_pn(req_out(idx).vaddr)
+    io.ptw.req(idx).bits.memidx := req_out(idx).memidx
   }
 
   def handle_block(idx: Int): Unit = {
@@ -312,7 +312,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       val af = io.requestor(i).resp.bits.excp(0).af.instr || io.requestor(i).resp.bits.excp(0).af.st || io.requestor(i).resp.bits.excp(0).af.ld
       val difftest = DifftestModule(new DiffL1TLBEvent)
       difftest.coreid := io.hartId
-      difftest.valid := RegNext(io.requestor(i).req.fire) && !RegNext(io.requestor(i).req_kill) && io.requestor(i).resp.fire && !io.requestor(i).resp.bits.miss && !pf && !af && portTranslateEnable(i)
+      difftest.valid := RegNext(io.requestor(i).req.fire) && !io.requestor(i).req_kill && io.requestor(i).resp.fire && !io.requestor(i).resp.bits.miss && !pf && !af && portTranslateEnable(i)
       if (!Seq("itlb", "ldtlb", "sttlb").contains(q.name)) {
         difftest.valid := false.B
       }
