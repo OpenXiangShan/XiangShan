@@ -19,8 +19,8 @@ import scalalib._
 import $file.`rocket-chip`.common
 import $file.`rocket-chip`.cde.common
 import $file.`rocket-chip`.hardfloat.build
-import $file.huancun.build
-import $file.coupledL2.build
+import $file.huancun.common
+import $file.coupledL2.common
 
 val defaultScalaVersion = "2.13.10"
 
@@ -110,7 +110,7 @@ object utility extends SbtModule with HasChisel {
 
 }
 
-object huancun extends millbuild.huancun.build.HuanCunModule with SbtModule with HasChisel {
+object huancun extends millbuild.huancun.common.HuanCunModule with SbtModule with HasChisel {
 
   override def millSourcePath = os.pwd / "huancun"
 
@@ -120,7 +120,7 @@ object huancun extends millbuild.huancun.build.HuanCunModule with SbtModule with
 
 }
 
-object coupledL2 extends millbuild.coupledL2.build.CoupledL2Module with SbtModule with HasChisel {
+object coupledL2 extends millbuild.coupledL2.common.CoupledL2Module with SbtModule with HasChisel {
 
   override def millSourcePath = os.pwd / "coupledL2"
 
