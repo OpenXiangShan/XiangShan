@@ -680,19 +680,25 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   val isMove = BitPat("b000000000000_?????_000_?????_0010011") === ctrl_flow.instr
   decodedInst.isMove := isMove && inst.RD =/= 0.U
 
+  // fmadd - b1000011
+  // fmsub - b1000111
+  // fnmsub- b1001011
+  // fnmadd- b1001111
+  private val isFMA = inst.OPCODE === BitPat("b100??11")
+
   private val v0Idx = 0
   private val vconfigIdx = VCONFIG_IDX
 
   // read src1~3 location
   decodedInst.lsrc(0) := inst.RS1
   decodedInst.lsrc(1) := inst.RS2
-  decodedInst.lsrc(2) := Mux(FuType.isVArithMem(decodedInst.fuType), inst.RD, inst.FS3)
+  // src(2) of fma is fs3, src(2) of vector inst is old vd
+  decodedInst.lsrc(2) := Mux(isFMA, inst.FS3, inst.VD)
   decodedInst.lsrc(3) := v0Idx.U
   decodedInst.lsrc(4) := vconfigIdx.U
   decodedInst.srcType(3) := Mux(inst.VM.asBool, SrcType.DC, SrcType.vp) // mask src
   decodedInst.srcType(4) := SrcType.vp // vconfig
 
-  // cs.lsrc(2) := Mux(FuType.isVecExu(cs.fuType), ctrl_flow.instr(RD_MSB, RD_LSB), ctrl_flow.instr(RS3_MSB, RS3_LSB))
   // read dest location
   decodedInst.ldest := inst.RD
 
