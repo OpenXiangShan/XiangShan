@@ -39,6 +39,7 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
   val vsew = Cat(0.U(1.W), io.in.preInfo.vsew)
   val veew = Cat(0.U(1.W), io.in.preInfo.vwidth(1, 0))
   val vlmul = io.in.preInfo.vlmul
+  val nf = io.in.preInfo.nf
   val isComplex = io.out.isComplex
 
   val lmul = MuxLookup(vlmul, 1.U(4.W), Array(
@@ -101,6 +102,20 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     vlMax := Mux(vlmul(2), uvlMax >> (-vlmul)(1,0), uvlMax << vlmul(1,0)).asUInt
     vlMax
   }
+  var combVlmulNf : List[(Int, Int, Int)] = List()
+  for (i <- 0 until 4) {        // lmul: m1, m2, m4, m8
+    for (j <- 0 until 8) {      // nf: 1, 2, 3, 4, 5, 6, 7, 8
+      if ((2 << i) * (j + 1) <= 8)      // lmul * nf <= 8
+        combVlmulNf :+= (i, j, ((2 << i) * (j + 1)))  // uopNum = lmul * nf
+    }
+  }
+  for (i <- 5 until 8) {        // lmul: mf2, mf4, mf8
+    for (j <- 0 until 8) {      // nf: 1, 2, 3, 4, 5, 6, 7, 8
+      combVlmulNf :+= (i, j, j + 1)
+    }
+  }
+  val combVlmulNfUopNum = combVlmulNf.map(x => (((x._1.U(3.W) << 3.U) | x._2.U(3.W)) -> x._3.U(4.W)))
+  val numOfUopVLoadStoreStrided = MuxLookup(Cat(vlmul, nf), 1.U(4.W), combVlmulNfUopNum)
 
   //number of uop
   val numOfUop = MuxLookup(typeOfSplit, 1.U(log2Up(MaxUopSize + 1).W), Array(
@@ -140,7 +155,9 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     UopSplitType.VEC_RGATHER -> numOfUopVrgather,
     UopSplitType.VEC_RGATHER_VX -> (numOfUopVrgather +& 1.U),
     UopSplitType.VEC_RGATHEREI16 -> numOfUopVrgatherei16,
-    UopSplitType.VEC_US_LD -> (emul +& 1.U),
+    UopSplitType.VEC_US_LDST -> (numOfUopVLoadStoreStrided +& 1.U),   // with one move instruction
+    UopSplitType.VEC_S_LDST -> (numOfUopVLoadStoreStrided +& 2.U),    // with two move instructions
+    UopSplitType.VEC_I_LDST -> (emul +& 1.U),
   ))
 
   isComplex := (numOfUop > 1.U) || (typeOfSplit === UopSplitType.DIR)
@@ -164,6 +181,7 @@ class PreInfo(implicit p: Parameters) extends XSBundle {
   val vsew = VSew()          //2 bit
   val vlmul = VLmul()
   val vwidth = UInt(3.W)     //eew
+  val nf = UInt(3.W)
 }
 
 class UopInfo(implicit p: Parameters) extends XSBundle {

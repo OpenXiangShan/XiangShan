@@ -91,7 +91,7 @@ case class VSET(vli: Boolean, vtypei: Boolean, fuOp: BitPat, flushPipe: Boolean,
 }
 
 case class VLD(src2: BitPat, fuOp: BitPat, strided: Boolean = false, indexed: Boolean = false, ff: Boolean = false,
-  mask: Boolean = false, whole: Boolean = false, ordered: Boolean = false, uopSplitType: BitPat = UopSplitType.VEC_US_LD) extends XSDecodeBase {
+  mask: Boolean = false, whole: Boolean = false, ordered: Boolean = false, uopSplitType: BitPat = UopSplitType.VEC_US_LDST) extends XSDecodeBase {
   def generate() : List[BitPat] = {
     val fu = FuType.vldu
     val src1 = SrcType.xp
@@ -102,7 +102,7 @@ case class VLD(src2: BitPat, fuOp: BitPat, strided: Boolean = false, indexed: Bo
 }
 
 case class VST(src2: BitPat, fuOp: BitPat, strided: Boolean = false, indexed: Boolean = false,
-  mask: Boolean = false, whole: Boolean = false, ordered: Boolean = false, uopSplitType: BitPat = UopSplitType.dummy) extends XSDecodeBase {
+  mask: Boolean = false, whole: Boolean = false, ordered: Boolean = false, uopSplitType: BitPat = UopSplitType.VEC_US_LDST) extends XSDecodeBase {
   def generate() : List[BitPat] = {
     val fu = FuType.vstu
     val src1 = SrcType.xp
@@ -622,31 +622,31 @@ object VecDecoder extends DecodeConstants {
     VLM_V         -> VLD(SrcType.X,   VlduType.dummy, mask = T),
     VSM_V         -> VST(SrcType.X,   VstuType.dummy, mask = T),
     // 7.5. Vector Strided Instructions
-    VLSE8_V       -> VLD(SrcType.xp,  VlduType.dummy, strided = T),
-    VLSE16_V      -> VLD(SrcType.xp,  VlduType.dummy, strided = T),
-    VLSE32_V      -> VLD(SrcType.xp,  VlduType.dummy, strided = T),
-    VLSE64_V      -> VLD(SrcType.xp,  VlduType.dummy, strided = T),
-    VSSE8_V       -> VST(SrcType.xp,  VstuType.dummy, strided = T),
-    VSSE16_V      -> VST(SrcType.xp,  VstuType.dummy, strided = T),
-    VSSE32_V      -> VST(SrcType.xp,  VstuType.dummy, strided = T),
-    VSSE64_V      -> VST(SrcType.xp,  VstuType.dummy, strided = T),
+    VLSE8_V       -> VLD(SrcType.xp,  VlduType.dummy, uopSplitType = UopSplitType.VEC_S_LDST, strided = T),
+    VLSE16_V      -> VLD(SrcType.xp,  VlduType.dummy, uopSplitType = UopSplitType.VEC_S_LDST, strided = T),
+    VLSE32_V      -> VLD(SrcType.xp,  VlduType.dummy, uopSplitType = UopSplitType.VEC_S_LDST, strided = T),
+    VLSE64_V      -> VLD(SrcType.xp,  VlduType.dummy, uopSplitType = UopSplitType.VEC_S_LDST, strided = T),
+    VSSE8_V       -> VST(SrcType.xp,  VstuType.dummy, uopSplitType = UopSplitType.VEC_S_LDST, strided = T),
+    VSSE16_V      -> VST(SrcType.xp,  VstuType.dummy, uopSplitType = UopSplitType.VEC_S_LDST, strided = T),
+    VSSE32_V      -> VST(SrcType.xp,  VstuType.dummy, uopSplitType = UopSplitType.VEC_S_LDST, strided = T),
+    VSSE64_V      -> VST(SrcType.xp,  VstuType.dummy, uopSplitType = UopSplitType.VEC_S_LDST, strided = T),
     // 7.6. Vector Indexed Instructions
-    VLUXEI8_V     -> VLD(SrcType.vp,  VlduType.dummy, indexed = T, ordered = F),
-    VLUXEI16_V    -> VLD(SrcType.vp,  VlduType.dummy, indexed = T, ordered = F),
-    VLUXEI32_V    -> VLD(SrcType.vp,  VlduType.dummy, indexed = T, ordered = F),
-    VLUXEI64_V    -> VLD(SrcType.vp,  VlduType.dummy, indexed = T, ordered = F),
-    VLOXEI8_V     -> VLD(SrcType.vp,  VlduType.dummy, indexed = T, ordered = T),
-    VLOXEI16_V    -> VLD(SrcType.vp,  VlduType.dummy, indexed = T, ordered = T),
-    VLOXEI32_V    -> VLD(SrcType.vp,  VlduType.dummy, indexed = T, ordered = T),
-    VLOXEI64_V    -> VLD(SrcType.vp,  VlduType.dummy, indexed = T, ordered = T),
-    VSUXEI8_V     -> VLD(SrcType.vp,  VstuType.dummy, indexed = T, ordered = F),
-    VSUXEI16_V    -> VST(SrcType.vp,  VstuType.dummy, indexed = T, ordered = F),
-    VSUXEI32_V    -> VST(SrcType.vp,  VstuType.dummy, indexed = T, ordered = F),
-    VSUXEI64_V    -> VST(SrcType.vp,  VstuType.dummy, indexed = T, ordered = F),
-    VSOXEI8_V     -> VST(SrcType.vp,  VstuType.dummy, indexed = T, ordered = T),
-    VSOXEI16_V    -> VST(SrcType.vp,  VstuType.dummy, indexed = T, ordered = T),
-    VSOXEI32_V    -> VST(SrcType.vp,  VstuType.dummy, indexed = T, ordered = T),
-    VSOXEI64_V    -> VST(SrcType.vp,  VstuType.dummy, indexed = T, ordered = T),
+    VLUXEI8_V     -> VLD(SrcType.vp,  VlduType.dummy, uopSplitType = UopSplitType.VEC_I_LDST, indexed = T, ordered = F),
+    VLUXEI16_V    -> VLD(SrcType.vp,  VlduType.dummy, uopSplitType = UopSplitType.VEC_I_LDST, indexed = T, ordered = F),
+    VLUXEI32_V    -> VLD(SrcType.vp,  VlduType.dummy, uopSplitType = UopSplitType.VEC_I_LDST, indexed = T, ordered = F),
+    VLUXEI64_V    -> VLD(SrcType.vp,  VlduType.dummy, uopSplitType = UopSplitType.VEC_I_LDST, indexed = T, ordered = F),
+    VLOXEI8_V     -> VLD(SrcType.vp,  VlduType.dummy, uopSplitType = UopSplitType.VEC_I_LDST, indexed = T, ordered = T),
+    VLOXEI16_V    -> VLD(SrcType.vp,  VlduType.dummy, uopSplitType = UopSplitType.VEC_I_LDST, indexed = T, ordered = T),
+    VLOXEI32_V    -> VLD(SrcType.vp,  VlduType.dummy, uopSplitType = UopSplitType.VEC_I_LDST, indexed = T, ordered = T),
+    VLOXEI64_V    -> VLD(SrcType.vp,  VlduType.dummy, uopSplitType = UopSplitType.VEC_I_LDST, indexed = T, ordered = T),
+    VSUXEI8_V     -> VLD(SrcType.vp,  VstuType.dummy, uopSplitType = UopSplitType.VEC_I_LDST, indexed = T, ordered = F),
+    VSUXEI16_V    -> VST(SrcType.vp,  VstuType.dummy, uopSplitType = UopSplitType.VEC_I_LDST, indexed = T, ordered = F),
+    VSUXEI32_V    -> VST(SrcType.vp,  VstuType.dummy, uopSplitType = UopSplitType.VEC_I_LDST, indexed = T, ordered = F),
+    VSUXEI64_V    -> VST(SrcType.vp,  VstuType.dummy, uopSplitType = UopSplitType.VEC_I_LDST, indexed = T, ordered = F),
+    VSOXEI8_V     -> VST(SrcType.vp,  VstuType.dummy, uopSplitType = UopSplitType.VEC_I_LDST, indexed = T, ordered = T),
+    VSOXEI16_V    -> VST(SrcType.vp,  VstuType.dummy, uopSplitType = UopSplitType.VEC_I_LDST, indexed = T, ordered = T),
+    VSOXEI32_V    -> VST(SrcType.vp,  VstuType.dummy, uopSplitType = UopSplitType.VEC_I_LDST, indexed = T, ordered = T),
+    VSOXEI64_V    -> VST(SrcType.vp,  VstuType.dummy, uopSplitType = UopSplitType.VEC_I_LDST, indexed = T, ordered = T),
     // 7.7. Unit-stride Fault-Only-First Loads
     VLE8FF_V      -> VLD(SrcType.X,   VlduType.dummy, ff = T),
     VLE16FF_V     -> VLD(SrcType.X,   VlduType.dummy, ff = T),
