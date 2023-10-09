@@ -627,7 +627,9 @@ package object xiangshan {
     def VEC_RGATHER_VX   = "b101110".U // vrgather.vx
     def VEC_RGATHEREI16  = "b101111".U // vrgatherei16.vv
     def VEC_COMPRESS     = "b110000".U // vcompress.vm
-    def VEC_US_LD        = "b110001".U // vector unit strided load
+    def VEC_US_LDST      = "b110001".U // vector unit-strided load/store
+    def VEC_S_LDST       = "b110010".U // vector strided load/store
+    def VEC_I_LDST       = "b110011".U // vector indexed load/store
     def VEC_VFV          = "b111000".U // VEC_VFV
     def VEC_VFW          = "b111001".U // VEC_VFW
     def VEC_WFW          = "b111010".U // VEC_WVW
