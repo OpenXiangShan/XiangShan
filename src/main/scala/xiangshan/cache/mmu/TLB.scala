@@ -215,12 +215,12 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val af = perm.af || (hasS2xlate && g_perm.af)
 
     // Stage 1 perm check
-    val pf = perm.pf || (hlvx && !perm.x)
+    val pf = perm.pf
     val ldUpdate = !perm.a && TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd) // update A/D through exception
     val stUpdate = (!perm.a || !perm.d) && (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd)) // update A/D through exception
     val instrUpdate = !perm.a && TlbCmd.isExec(cmd) // update A/D through exception
     val modeCheck = !(mode(idx) === ModeU && !perm.u || mode(idx) === ModeS && perm.u && (!sum(idx) || ifecth))
-    val ldPermFail = !(modeCheck && (perm.r || mxr(idx) && perm.x))
+    val ldPermFail = !(modeCheck && Mux(hlvx, perm.x, perm.r || mxr(idx) && perm.x))
     val stPermFail = !(modeCheck && perm.w)
     val instrPermFail = !(modeCheck && perm.x)
     val ldPf = (ldPermFail || pf) && (TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd))
@@ -229,11 +229,11 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val s1_valid = portTranslateEnable(idx) && !onlyS2
 
     // Stage 2 perm check
-    val gpf = g_perm.pf || (hlvx && !g_perm.x)
+    val gpf = g_perm.pf
     val g_ldUpdate = !g_perm.a && TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd)
     val g_stUpdate = (!g_perm.a || !g_perm.d) && (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd))
     val g_instrUpdate = !g_perm.a && TlbCmd.isExec(cmd)
-    val g_ldPermFail = !(g_perm.r || io.csr.priv.mxr && g_perm.x)
+    val g_ldPermFail = !Mux(hlvx, g_perm.x, (g_perm.r || io.csr.priv.mxr && g_perm.x))
     val g_stPermFail = !g_perm.w
     val g_instrPermFail = !g_perm.x
     val ldGpf = (g_ldPermFail || gpf) && (TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd))
