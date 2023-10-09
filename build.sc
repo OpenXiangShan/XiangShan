@@ -144,20 +144,49 @@ object fudian extends SbtModule with HasChisel {
 
 }
 
-object XiangShan extends SbtModule with HasChisel {
+// extends this trait to use XiangShan in other projects
+trait XiangShanModule extends ScalaModule {
+
+  def rocketModule: ScalaModule
+
+  def difftestModule: ScalaModule
+
+  def huancunModule: ScalaModule
+
+  def coupledL2Module: ScalaModule
+
+  def fudianModule: ScalaModule
+
+  def utilityModule: ScalaModule
+
+  override def moduleDeps = super.moduleDeps ++ Seq(
+    rocketModule,
+    difftestModule,
+    huancunModule,
+    coupledL2Module,
+    fudianModule,
+    utilityModule,
+  )
+
+}
+
+object XiangShan extends XiangShanModule with SbtModule with HasChisel {
 
   override def millSourcePath = millOuterCtx.millSourcePath
 
-  override def forkArgs = Seq("-Xmx20G", "-Xss256m")
+  def rocketModule = rocketchip
 
-  override def moduleDeps = super.moduleDeps ++ Seq(
-    rocketchip,
-    utility,
-    huancun,
-    difftest,
-    coupledL2,
-    fudian
-  )
+  def difftestModule = difftest
+
+  def huancunModule = huancun
+
+  def coupledL2Module = coupledL2
+
+  def fudianModule = fudian
+
+  def utilityModule = utility
+
+  override def forkArgs = Seq("-Xmx20G", "-Xss256m")
 
   object test extends SbtModuleTests with TestModule.ScalaTest {
     override def forkArgs = XiangShan.forkArgs
