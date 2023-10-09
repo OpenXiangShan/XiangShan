@@ -72,7 +72,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   val s0_isvec        = WireInit(false.B)
   val s0_is128bit     = WireInit(false.B)
   val s0_exp          = WireInit(true.B)
-  val s0_fqidx        = WireInit(0.U(log2Ceil(VsFlowSize).W))
+  // val s0_fqidx        = WireInit(0.U(log2Ceil(VsFlowSize).W))
+  val s0_flowPtr      = WireInit(0.U.asTypeOf(new VsFlowPtr))
 
   val s0_int_iss_valid = io.stin.valid
   val s0_vec_iss_valid = io.vecstin.valid
@@ -125,7 +126,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
     // TODO: VLSU, Store do not use 128 bits now?
     s0_is128bit     := false.B
     s0_exp          := src.exp
-    s0_fqidx        := src.fqIdx
+    // s0_fqidx        := src.fqIdx
+    s0_flowPtr        := src.flowPtr
   }
 
   s0_uop := DontCare
@@ -159,7 +161,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   s0_out.isvec        := s0_isvec
   s0_out.is128bit     := s0_is128bit
   s0_out.exp          := s0_exp
-  s0_out.fqIdx        := s0_fqidx
+  // s0_out.fqIdx        := s0_fqidx
+  s0_out.flowPtr      := s0_flowPtr
   when(s0_valid && s0_isFirstIssue) {
     s0_out.uop.debugInfo.tlbFirstReqTime := GTimer()
   }
@@ -251,13 +254,15 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   // TODO: VLSU, implement vector feedback
   val s1_vec_feedback = Wire(Valid(new VSFQFeedback))
   s1_vec_feedback.valid                 := s1_valid && !s1_in.isHWPrefetch && s1_isvec
-  s1_vec_feedback.bits.fqIdx            := s1_out.fqIdx
+  // s1_vec_feedback.bits.fqIdx            := s1_out.fqIdx
+  s1_vec_feedback.bits.flowPtr          := s1_out.flowPtr
   s1_vec_feedback.bits.hit              := !s1_tlb_miss
   s1_vec_feedback.bits.sourceType       := RSFeedbackType.tlbMiss
+  s1_vec_feedback.bits.paddr            := s1_paddr
   XSDebug(s1_vec_feedback.valid,
     "Vector S1 Store: tlbHit: %d fqIdx: %d\n",
     s1_vec_feedback.bits.hit,
-    s1_vec_feedback.bits.fqIdx
+    s1_vec_feedback.bits.flowPtr.value
   )
 
   // get paddr from dtlb, check if rollback is needed

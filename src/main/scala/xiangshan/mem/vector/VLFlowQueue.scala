@@ -91,7 +91,7 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
   /* Storage */
 
   // circuit queue for flows
-  val flowQueueBundles = Reg(Vec(VlFlowSize, new VlflowBundle))
+  val flowQueueEntries = Reg(Vec(VlFlowSize, new VlflowBundle))
   // mark whether a flow is finished
   //   1: finished and can be dequeued
   //   2: issued but not finished
@@ -117,7 +117,7 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
   val flowNeedCancel = Wire(Vec(VlFlowSize, Bool()))
   val flowCancelCount = PopCount(flowNeedCancel)
 
-  flowNeedFlush := flowQueueBundles.map(_.uop.robIdx.needFlush(io.redirect))
+  flowNeedFlush := flowQueueEntries.map(_.uop.robIdx.needFlush(io.redirect))
   flowNeedCancel := (flowNeedFlush zip flowAllocated).map { case(flush, alloc) => flush && alloc}
 
   /* Enqueue logic */
@@ -140,14 +140,13 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
     doEnqueue(i) := allowEnqueue && canEnqueue(i) && !enqueueCancel(i)
     // Assuming that if io.flowIn(i).valid then io.flowIn(i-1).valid
     when (doEnqueue(i)) {
-      flowQueueBundles(enqPtr(i).value) := io.flowIn(i).bits
+      flowQueueEntries(enqPtr(i).value) := io.flowIn(i).bits
       flowAllocated(enqPtr(i).value) := true.B
       issued(enqPtr(i).value) := false.B
     }
   }
 
   // update enqPtr
-  // TODO: when redirect happens, need to subtract flushed flows
   for (i <- 0 until VecLoadPipelineWidth) {
     when (io.redirect.valid) {
       enqPtr(i) := enqPtr(i) - flowCancelCount
@@ -210,11 +209,13 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
   // handshake
   for (i <- 0 until VecLoadPipelineWidth) {
     val thisPtr = issuePtr(i).value
+    // Assuming that if io.flowIn(i).ready then io.flowIn(i-1).ready
     canIssue(i) := !flowNeedCancel(thisPtr) && issuePtr(i) < enqPtr(0)
     io.pipeIssue(i).valid := canIssue(i)
     doIssue(i) := canIssue(i) && allowIssue(i)
   }
-  // update IssuePtr and finished
+  
+  // update IssuePtr
   for (i <- 0 until VecLoadPipelineWidth) {
     when (io.redirect.valid && flowCancelCount > distanceBetween(enqPtr(0), issuePtr(0))) {
       issuePtr(i) := enqPtr(i) - flowCancelCount
@@ -228,7 +229,7 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
   }
   // data
   for (i <- 0 until VecLoadPipelineWidth) {
-    val thisFlow = flowQueueBundles(issuePtr(i).value)
+    val thisFlow = flowQueueEntries(issuePtr(i).value)
     // It works, but it's not elegant
     io.pipeIssue(i).bits match { case x =>
       x.uop                 := thisFlow.uop
@@ -256,6 +257,7 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
     doReplay(i) := requireReplay(i) && allowReplay(i)
   }
   // get the oldest flow ptr
+  // TODO: functionalize this
   val oldestReplayFlowPtr = (doReplay zip io.pipeReplay.map(_.bits.flowPtr)).reduce { (a, b) => (
     a._1 || b._1,
     Mux(

@@ -134,7 +134,7 @@ class VLSUBundleWithMicroOp(implicit p: Parameters) extends VLSUBundle {
 class VecOperand(implicit p: Parameters) extends VLSUBundleWithMicroOp {
   val vmask = UInt(VLEN.W) // the mask of inst which is readed from reg
   val vecData = UInt(VLEN.W)
-  val baseaddr = UInt(VAddrBits.W) // base address from rs1
+  val baseAddr = UInt(VAddrBits.W) // base address from rs1
   val stride = UInt(XLEN.W) // stride from rs2
   val index = UInt(VLEN.W) // index from vs2
   val pvd = UInt(5.W) // physical vector register destination
