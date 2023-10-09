@@ -242,18 +242,16 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 }
 
 object TopMain extends App {
-  override def main(args: Array[String]): Unit = {
-    val (config, firrtlOpts, firrtlComplier, firtoolOpts) = ArgParser.parse(args)
+  val (config, firrtlOpts, firrtlComplier, firtoolOpts) = ArgParser.parse(args)
 
-    // tools: init to close dpi-c when in fpga
-    val envInFPGA = config(DebugOptionsKey).FPGAPlatform
-    val enableChiselDB = config(DebugOptionsKey).EnableChiselDB
-    val enableConstantin = config(DebugOptionsKey).EnableConstantin
-    Constantin.init(enableConstantin && !envInFPGA)
-    ChiselDB.init(enableChiselDB && !envInFPGA)
+  // tools: init to close dpi-c when in fpga
+  val envInFPGA = config(DebugOptionsKey).FPGAPlatform
+  val enableChiselDB = config(DebugOptionsKey).EnableChiselDB
+  val enableConstantin = config(DebugOptionsKey).EnableConstantin
+  Constantin.init(enableConstantin && !envInFPGA)
+  ChiselDB.init(enableChiselDB && !envInFPGA)
 
-    val soc = DisableMonitors(p => LazyModule(new XSTop()(p)))(config)
-    Generator.execute(firrtlOpts, soc.module, firrtlComplier, firtoolOpts)
-    FileRegisters.write(fileDir = "./build", filePrefix = "XSTop.")
-  }
+  val soc = DisableMonitors(p => LazyModule(new XSTop()(p)))(config)
+  Generator.execute(firrtlOpts, soc.module, firrtlComplier, firtoolOpts)
+  FileRegisters.write(fileDir = "./build", filePrefix = "XSTop.")
 }

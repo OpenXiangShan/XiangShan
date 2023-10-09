@@ -1,7 +1,6 @@
 package xiangshan
 
 import chisel3._
-import org.chipsalliance.cde.config.Config
 import chiseltest._
 import chiseltest.{VerilatorBackendAnnotation, WriteVcdAnnotation}
 import chiseltest.simulator.{VerilatorCFlags, VerilatorFlags}
