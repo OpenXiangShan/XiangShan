@@ -16,12 +16,11 @@
 
 package xiangshan.cache
 
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.TLPermissions._
 import freechips.rocketchip.tilelink.{TLArbiter, TLBundleC, TLBundleD, TLEdgeOut}
-import coupledL2.DirtyKey
+import org.chipsalliance.cde.config.Parameters
 import utils.{HasPerfEvents, HasTLDump, XSDebug, XSPerfAccumulate}
 
 class WritebackReqCtrl(implicit p: Parameters) extends DCacheBundle {

@@ -16,21 +16,22 @@
 
 package xiangshan.cache
 
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import xiangshan._
-import utils._
-import utility._
-import freechips.rocketchip.tilelink._
+import coupledL2.VaddrKey
+import difftest._
 import freechips.rocketchip.tilelink.ClientStates._
 import freechips.rocketchip.tilelink.MemoryOpCategories._
 import freechips.rocketchip.tilelink.TLPermissions._
-import difftest._
-import coupledL2.{AliasKey, VaddrKey, DirtyKey, PrefetchKey}
-import mem.AddPipelineReg
-import mem.trace._
+import freechips.rocketchip.tilelink._
+import huancun.{AliasKey, DirtyKey, PrefetchKey}
+import org.chipsalliance.cde.config.Parameters
+import utility._
+import utils._
+import xiangshan._
+import xiangshan.mem.AddPipelineReg
 import xiangshan.mem.prefetch._
+import xiangshan.mem.trace._
 
 class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   val source = UInt(sourceTypeWidth.W)

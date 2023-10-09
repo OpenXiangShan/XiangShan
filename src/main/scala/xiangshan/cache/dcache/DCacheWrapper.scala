@@ -16,27 +16,22 @@
 
 package xiangshan.cache
 
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.experimental.ExtModule
 import chisel3.util._
-import xiangshan._
-import utils._
-import utility._
+import coupledL2.VaddrField
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
-import xiangshan.backend.rob.RobDebugRollingIO
 import freechips.rocketchip.tilelink._
-import freechips.rocketchip.util.{BundleFieldBase, UIntToOH1}
-import device.RAMHelper
-import coupledL2.{AliasField, VaddrField, PrefetchField}
-import utility.ReqSourceField
-import utility.FastArbiter
-import mem.AddPipelineReg
+import freechips.rocketchip.util.BundleFieldBase
+import huancun.{AliasField, PrefetchField}
+import org.chipsalliance.cde.config.Parameters
+import utility._
+import utils._
+import xiangshan._
+import xiangshan.backend.rob.RobDebugRollingIO
 import xiangshan.cache.wpu._
-import xiangshan.mem.HasL1PrefetchSourceParameter
+import xiangshan.mem.{AddPipelineReg, HasL1PrefetchSourceParameter}
 import xiangshan.mem.prefetch._
-
-import scala.math.max
 
 // DCache specific parameters
 case class DCacheParameters

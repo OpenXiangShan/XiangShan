@@ -18,7 +18,7 @@ package xiangshan.backend.fu.fpu
 
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
-import chisel3.experimental.hierarchy.{instantiable, Instantiate, public}
+import chisel3.experimental.hierarchy.{Definition, Instance, instantiable, public}
 import chisel3.util._
 import fudian.FDIV
 import utility.MaskExpand
@@ -29,6 +29,14 @@ import scala.collection.mutable
     Because fdiv use the decoder and decoder has 'Dedup' bug now,
     we use hierarchy API to force FDIV be deduped to avoid the bug.
  */
+object FDivGen {
+  val defMap = new mutable.HashMap[FPU.FType, Definition[InstantiableFDIV]]()
+  def apply(t: FPU.FType) = {
+    val divDef = defMap.getOrElseUpdate(t, Definition(new InstantiableFDIV(t)))
+    Instance(divDef)
+  }
+}
+
 @instantiable
 class InstantiableFDIV(t: FPU.FType) extends Module {
 
@@ -59,7 +67,7 @@ class FDivSqrtDataModule(implicit p: Parameters) extends FPUDataModule {
   val outDataSel = RegEnable(MaskExpand(typeSel, 64), in_fire)
 
   val divSqrt = FPU.ftypes.map{ t =>
-    val fdiv = Instantiate(new InstantiableFDIV(t))
+    val fdiv = FDivGen(t)
     fdiv.io.a := src1
     fdiv.io.b := src2
     fdiv.io.rm := rm

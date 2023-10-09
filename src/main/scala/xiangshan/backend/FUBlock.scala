@@ -18,7 +18,7 @@ package xiangshan.backend
 
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
-import chisel3.experimental.hierarchy.core.Instance
+import chisel3.experimental.hierarchy.Instance
 import chisel3.util._
 import utils._
 import utility._

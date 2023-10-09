@@ -16,21 +16,19 @@
 
 package  xiangshan.frontend.icache
 
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
-import chisel3.util.{DecoupledIO, _}
-import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
+import chisel3.util._
+import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.BundleFieldBase
-import coupledL2.{AliasField, DirtyField, PrefetchField}
-import xiangshan._
-import xiangshan.frontend._
-import xiangshan.cache._
-import utils._
+import huancun.{AliasField, PrefetchField}
+import org.chipsalliance.cde.config.Parameters
 import utility._
-import xiangshan.backend.fu.PMPReqBundle
-import xiangshan.cache.mmu.{TlbRequestIO, TlbReq}
-import difftest._
+import utils._
+import xiangshan._
+import xiangshan.cache._
+import xiangshan.cache.mmu.TlbRequestIO
+import xiangshan.frontend._
 
 case class ICacheParameters(
     nSets: Int = 256,

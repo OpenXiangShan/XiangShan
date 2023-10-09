@@ -16,14 +16,12 @@
 
 import mill._
 import scalalib._
-import scalafmt._
-import os.Path
-import publish._
 import $file.`rocket-chip`.common
 import $file.`rocket-chip`.cde.common
 import $file.`rocket-chip`.hardfloat.build
+import $file.huancun.build
+import $file.coupledL2.build
 
-val validChiselVersion = List("chisel3", "chisel")
 val defaultScalaVersion = "2.13.10"
 
 val defaultVersions = Map(
@@ -32,30 +30,33 @@ val defaultVersions = Map(
   "chiseltest" -> ivy"edu.berkeley.cs::chiseltest:0.6.2",
 )
 
-trait CommonModule extends ScalaModule {
+trait HasChisel extends ScalaModule {
+  def chiselModule: Option[ScalaModule] = None
+
+  def chiselPluginJar: T[Option[PathRef]] = None
+
+  def chiselIvy: Option[Dep] = Some(defaultVersions("chisel"))
+
+  def chiselPluginIvy: Option[Dep] = Some(defaultVersions("chisel-plugin"))
+
   override def scalaVersion = defaultScalaVersion
 
-  override def scalacPluginIvyDeps = Agg(defaultVersions("chisel-plugin"))
+  override def scalacOptions = super.scalacOptions() ++
+    Agg("-language:reflectiveCalls", "-Ymacro-annotations", "-Ytasty-reader")
 
-  override def scalacOptions = super.scalacOptions() ++ Agg("-language:reflectiveCalls", "-Ymacro-annotations", "-Ytasty-reader")
+  override def ivyDeps = super.ivyDeps() ++ Agg(chiselIvy.get)
+
+  override def scalacPluginIvyDeps = super.scalacPluginIvyDeps() ++ Agg(chiselPluginIvy.get)
 }
 
 object rocketchip extends RocketChip
 
 trait RocketChip
   extends millbuild.`rocket-chip`.common.RocketChipModule
-    with SbtModule {
+    with SbtModule with HasChisel {
   def scalaVersion: T[String] = T(defaultScalaVersion)
 
   override def millSourcePath = os.pwd / "rocket-chip"
-
-  def chiselModule = None
-
-  def chiselPluginJar = None
-
-  def chiselIvy = Some(defaultVersions("chisel"))
-
-  def chiselPluginIvy = Some(defaultVersions("chisel-plugin"))
 
   def macrosModule = macros
 
@@ -81,19 +82,12 @@ trait RocketChip
   object hardfloat extends Hardfloat
 
   trait Hardfloat
-    extends millbuild.`rocket-chip`.hardfloat.common.HardfloatModule {
+    extends millbuild.`rocket-chip`.hardfloat.common.HardfloatModule with HasChisel {
 
     def scalaVersion: T[String] = T(defaultScalaVersion)
 
     override def millSourcePath = os.pwd / "rocket-chip" / "hardfloat" / "hardfloat"
 
-    def chiselModule = None
-
-    def chiselPluginJar = None
-
-    def chiselIvy = Some(defaultVersions("chisel"))
-
-    def chiselPluginIvy = Some(defaultVersions("chisel-plugin"))
   }
 
   object cde extends CDE
@@ -106,64 +100,55 @@ trait RocketChip
   }
 }
 
-object huancun extends SbtModule with ScalafmtModule with CommonModule {
-
-  override def ivyDeps = Agg(defaultVersions("chisel"))
-
-  override def millSourcePath = os.pwd / "huancun"
-
-  override def moduleDeps = super.moduleDeps ++ Seq(
-    rocketchip, utility
-  )
-}
-
-object coupledL2 extends SbtModule with ScalafmtModule with CommonModule {
-
-  override def ivyDeps = Agg(defaultVersions("chisel"))
-
-  override def millSourcePath = os.pwd / "coupledL2"
-
-  override def moduleDeps = super.moduleDeps ++ Seq(
-    rocketchip,
-    huancun,
-    utility
-  )
-}
-
-object difftest extends SbtModule with ScalafmtModule with CommonModule {
-
-  override def ivyDeps = Agg(defaultVersions("chisel"))
-
-  override def millSourcePath = os.pwd / "difftest"
-}
-
-object fudian extends SbtModule with ScalafmtModule with CommonModule {
-
-  override def ivyDeps = Agg(defaultVersions("chisel"))
-
-  override def millSourcePath = os.pwd / "fudian"
-}
-
-object utility extends SbtModule with ScalafmtModule with CommonModule {
-
-  override def ivyDeps = Agg(defaultVersions("chisel"))
+object utility extends SbtModule with HasChisel {
 
   override def millSourcePath = os.pwd / "utility"
 
   override def moduleDeps = super.moduleDeps ++ Seq(
     rocketchip
   )
+
 }
 
-object XiangShan extends SbtModule with ScalafmtModule with CommonModule {
+object huancun extends millbuild.huancun.build.HuanCunModule with SbtModule with HasChisel {
+
+  override def millSourcePath = os.pwd / "huancun"
+
+  def rocketModule: ScalaModule = rocketchip
+
+  def utilityModule: ScalaModule = utility
+
+}
+
+object coupledL2 extends millbuild.coupledL2.build.CoupledL2Module with SbtModule with HasChisel {
+
+  override def millSourcePath = os.pwd / "coupledL2"
+
+  def rocketModule: ScalaModule = rocketchip
+
+  def utilityModule: ScalaModule = utility
+
+  def huancunModule: ScalaModule = huancun
+
+}
+
+object difftest extends SbtModule with HasChisel {
+
+  override def millSourcePath = os.pwd / "difftest"
+
+}
+
+object fudian extends SbtModule with HasChisel {
+
+  override def millSourcePath = os.pwd / "fudian"
+
+}
+
+object XiangShan extends SbtModule with HasChisel {
 
   override def millSourcePath = millOuterCtx.millSourcePath
 
   override def forkArgs = Seq("-Xmx20G", "-Xss256m")
-
-  override def ivyDeps = super.ivyDeps() ++ Agg(
-    defaultVersions("chisel"),
-  )
 
   override def moduleDeps = super.moduleDeps ++ Seq(
     rocketchip,
@@ -181,4 +166,5 @@ object XiangShan extends SbtModule with ScalafmtModule with CommonModule {
       defaultVersions("chiseltest"),
     )
   }
+
 }
