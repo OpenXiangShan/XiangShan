@@ -16,21 +16,21 @@
 
 package system
 
-import chipsalliance.rocketchip.config.{Field, Parameters}
+import org.chipsalliance.cde.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
 import device.{DebugModule, TLPMA, TLPMAIO}
-import freechips.rocketchip.devices.tilelink.{CLINT, CLINTParams, DevNullParams, PLICParams, TLError, TLPLIC}
+import freechips.rocketchip.amba.axi4._
+import freechips.rocketchip.devices.tilelink._
 import freechips.rocketchip.diplomacy.{AddressSet, IdRange, InModuleBody, LazyModule, LazyModuleImp, MemoryDevice, RegionType, SimpleDevice, TransferSizes}
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
-import freechips.rocketchip.regmapper.{RegField, RegFieldAccessType, RegFieldDesc, RegFieldGroup}
-import utility.{BinaryArbiter, TLClientsMerger, TLEdgeBuffer, TLLogger}
-import xiangshan.{DebugOptionsKey, HasXSParameter, XSBundle, XSCore, XSCoreParameters, XSTileKey}
-import freechips.rocketchip.amba.axi4._
+import freechips.rocketchip.regmapper.{RegField, RegFieldDesc, RegFieldGroup}
 import freechips.rocketchip.tilelink._
-import top.BusPerfMonitor
-import xiangshan.backend.fu.PMAConst
 import huancun._
+import top.BusPerfMonitor
+import utility.{ReqSourceKey, TLClientsMerger, TLEdgeBuffer, TLLogger}
+import xiangshan.backend.fu.PMAConst
+import xiangshan.{DebugOptionsKey, XSTileKey}
 
 case object SoCParamsKey extends Field[SoCParameters]
 
@@ -142,12 +142,13 @@ trait HaveAXI4MemPort {
           resources = device.reg("mem")
         )
       ),
-      beatBytes = L3OuterBusWidth / 8
+      beatBytes = L3OuterBusWidth / 8,
+      requestKeys = if (debugOpts.FPGAPlatform) Seq() else Seq(ReqSourceKey),
     )
   ))
 
   val mem_xbar = TLXbar()
-  val l3_mem_pmu = BusPerfMonitor(name = "L3_Mem", enable = !debugOpts.FPGAPlatform, stat_latency = true, add_reqkey = true)
+  val l3_mem_pmu = BusPerfMonitor(name = "L3_Mem", enable = !debugOpts.FPGAPlatform, stat_latency = true)
   mem_xbar :=*
     TLBuffer.chainNode(2) :=
     TLCacheCork() :=

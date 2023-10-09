@@ -16,7 +16,7 @@
 
 package xiangshan.mem.prefetch
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.ClientStates._
@@ -77,7 +77,7 @@ class CounterFilter()(implicit p: Parameters) extends DCacheModule {
   val deqLen = exuParameters.LduCnt
   val enqPtrExt = RegInit(VecInit((0 until enqLen).map(_.U.asTypeOf(new Ptr))))
   val deqPtrExt = RegInit(VecInit((0 until deqLen).map(_.U.asTypeOf(new Ptr))))
-  
+
   val deqPtr = WireInit(deqPtrExt(0).value)
 
   val reqs_l = io.ld_in.map(_.bits)
@@ -113,7 +113,7 @@ class CounterFilter()(implicit p: Parameters) extends DCacheModule {
       valids(deqPtrExt(i).value) := false.B
     }
   }
-  
+
   deqPtrExt.foreach{case x => x := x + last3CycleAlloc}
 
   // query
@@ -196,7 +196,7 @@ class FDPrefetcherMonitorBundle()(implicit p: Parameters) extends XSBundle {
     val total_prefetch = Input(Bool()) // from mshr enq, fire, alloc, prefetch
     val useful_prefetch = Vec(LoadPipelineWidth, Input(Bool())) // from load pipeline, prefetch hit
   }
-    
+
   val timely = new XSBundle {
     val late_prefetch = Input(Bool()) // from mshr enq, a load matches a mshr caused by prefetch
   }

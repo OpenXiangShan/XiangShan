@@ -1,6 +1,6 @@
 package xiangshan.cache.wpu
 
-import chipsalliance.rocketchip.config.{Field, Parameters}
+import org.chipsalliance.cde.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
 import utils.XSPerfAccumulate
@@ -154,7 +154,7 @@ class UtagWPU(wpuParam: WPUParameters, nPorts: Int)(implicit p:Parameters) exten
 
     /* old */
     vtag(utagBits * 2 - 1, utagBits) ^ vtag(utagBits - 1, 0)
-    
+
     /* new */
     // val tmp = vtag(utagQuotient * utagBits - 1, 0).asTypeOf(Vec(utagQuotient, UInt(utagBits.W)))
     // val res1 = tmp.reduce(_ ^ _)

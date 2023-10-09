@@ -16,7 +16,7 @@
 
 package xiangshan.frontend
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.rocket.{RVCDecoder, ExpandedInstruction}
 import chisel3.{util, _}
 import chisel3.util._
@@ -103,7 +103,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
 
   val validStart_half, validEnd_half = Wire(Vec(PredictWidth, Bool()))
   val h_validStart_half, h_validEnd_half = Wire(Vec(PredictWidth, Bool()))
-  
+
   val validStart_halfPlus1, validEnd_halfPlus1 = Wire(Vec(PredictWidth, Bool()))
   val h_validStart_halfPlus1, h_validEnd_halfPlus1 = Wire(Vec(PredictWidth, Bool()))
 
@@ -160,7 +160,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
 
     io.out.pd(i).valid         := validStart(i)
     io.out.pd(i).isRVC         := currentIsRVC(i)
-    
+
     // for diff purpose only
     io.out.pd(i).brType        := brType
     io.out.pd(i).isCall        := isCall
@@ -219,7 +219,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   }
   validStart_halfPlus1(PredictWidth / 2) := false.B // could be true but when true we select half, not halfPlus1
   validEnd_halfPlus1(PredictWidth / 2) := true.B
-  
+
   // assume h_PredictWidth / 2 is an end
   h_validStart_halfPlus1(PredictWidth / 2) := false.B // could be true but when true we select half, not halfPlus1
   h_validEnd_halfPlus1(PredictWidth / 2) := true.B
@@ -274,7 +274,7 @@ class F3Predecoder(implicit p: Parameters) extends XSModule with HasPdConst {
     val in = Input(new IfuToF3PreDecode)
     val out = Output(new F3PreDecodeResp)
   })
-  io.out.pd.zipWithIndex.map{ case (pd,i) => 
+  io.out.pd.zipWithIndex.map{ case (pd,i) =>
     pd.valid := DontCare
     pd.isRVC := DontCare
     pd.brType := brInfo(io.in.instr(i))(0)
@@ -291,9 +291,9 @@ class RVCExpander(implicit p: Parameters) extends XSModule {
   })
 
   if (HasCExtension) {
-    io.out := new RVCDecoder(io.in, XLEN).decode
+    io.out := new RVCDecoder(io.in, XLEN, useAddiForMv = true).decode
   } else {
-    io.out := new RVCDecoder(io.in, XLEN).passthrough
+    io.out := new RVCDecoder(io.in, XLEN, useAddiForMv = true).passthrough
   }
 }
 
@@ -333,7 +333,7 @@ class PredCheckerResp(implicit p: Parameters) extends XSBundle with HasPdConst {
     val fixedTarget = Vec(PredictWidth, UInt(VAddrBits.W))
     val jalTarget = Vec(PredictWidth, UInt(VAddrBits.W))
     val fixedMissPred = Vec(PredictWidth,  Bool())
-    val faultType   = Vec(PredictWidth, new CheckInfo) 
+    val faultType   = Vec(PredictWidth, new CheckInfo)
   }
 }
 
@@ -396,8 +396,8 @@ class PredChecker(implicit p: Parameters) extends XSModule with HasPdConst {
 
   io.out.stage2Out.faultType.zipWithIndex.map{case(faultType, i) => faultType.value := Mux(jalFaultVecNext(i) , FaultType.jalFault ,
                                                                              Mux(retFaultVecNext(i), FaultType.retFault ,
-                                                                             Mux(targetFault(i), FaultType.targetFault , 
-                                                                             Mux(notCFITakenNext(i) , FaultType.notCFIFault, 
+                                                                             Mux(targetFault(i), FaultType.targetFault ,
+                                                                             Mux(notCFITakenNext(i) , FaultType.notCFIFault,
                                                                              Mux(invalidTakenNext(i), FaultType.invalidTaken,  FaultType.noFault)))))}
 
   io.out.stage2Out.fixedMissPred.zipWithIndex.map{case(missPred, i ) => missPred := jalFaultVecNext(i) || retFaultVecNext(i) || notCFITakenNext(i) || invalidTakenNext(i) || targetFault(i)}
@@ -414,7 +414,7 @@ class FrontendTrigger(implicit p: Parameters) extends XSModule {
 
     val pds           = Input(Vec(PredictWidth, new PreDecodeInfo))
     val pc            = Input(Vec(PredictWidth, UInt(VAddrBits.W)))
-    val data          = if(HasCExtension) Input(Vec(PredictWidth + 1, UInt(16.W))) 
+    val data          = if(HasCExtension) Input(Vec(PredictWidth + 1, UInt(16.W)))
                         else Input(Vec(PredictWidth, UInt(32.W)))
   })
 
@@ -458,5 +458,5 @@ class FrontendTrigger(implicit p: Parameters) extends XSModule {
     }
     XSDebug(io.triggered(i).getHitFrontend, p"Debug Mode: Predecode Inst No. ${i} has trigger hit vec ${io.triggered(i).frontendHit}" +
       p"and backend en ${io.triggered(i).backendEn}\n")
-  }  
+  }
 }

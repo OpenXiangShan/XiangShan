@@ -2,7 +2,7 @@ package xiangshan.mem.prefetch
 
 import chisel3._
 import chisel3.util._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import xiangshan._
 import xiangshan.mem.{LdPrefetchTrainBundle, StPrefetchTrainBundle, L1PrefetchReq}
 import utils._
@@ -37,7 +37,7 @@ class PrefetcherMonitorBundle()(implicit p: Parameters) extends XSBundle {
     val late_miss_prefetch = Input(Bool())
     val prefetch_hit = Input(UInt(2.W))
   }
-    
+
   val validity = new XSBundle {
     val good_prefetch = Input(Bool())
     val bad_prefetch = Input(Bool())
@@ -53,10 +53,10 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasPrefe
   val flush = RegInit(false.B)
   val enable = RegInit(true.B)
   val confidence = RegInit(1.U(1.W))
-  
+
   // TODO: mshr number
   // mshr full && load miss && load send mshr req && !load match,  -> decr nmax prefetch
-  // mshr free 
+  // mshr free
 
   io.pf_ctrl.dynamic_depth := depth
   io.pf_ctrl.flush := flush
