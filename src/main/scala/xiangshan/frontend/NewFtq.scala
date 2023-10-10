@@ -1251,7 +1251,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // ****************************************************************
 
   ftq_pc_mem.io.other_raddrs(0) := DontCare
-  if(cacheParams.hasPrefetch){
+  if(cacheParams.enableICachePrefetch){
     val prefetchPtr = RegInit(FtqPtr(false.B, 0.U))
     val diff_prefetch_addr = WireInit(update_target(prefetchPtr.value)) //TODO: remove this
     // TODO : MUST WIDER

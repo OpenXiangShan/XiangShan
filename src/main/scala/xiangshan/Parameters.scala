@@ -250,7 +250,6 @@ case class XSCoreParameters
     nProbeEntries = 2,
     nPrefetchEntries = 12,
     nPrefBufferEntries = 32,
-    hasPrefetch = true,
   ),
   dcacheParametersOpt: Option[DCacheParameters] = Some(DCacheParameters(
     tagECC = Some("secded"),
