@@ -333,17 +333,29 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
     // Assuming that if io.flowIn(i).valid then io.flowIn(i-1).valid
     when (doEnqueue(i)) {
       flowAllocated(enqPtr(i).value) := true.B
-      flowQueueEntries(enqPtr(i).value) := io.flowIn(i).bits
+
+      val thisFlowIn = io.flowIn(i).bits
+      flowQueueEntries(enqPtr(i).value) match { case x =>
+        x.uopQueuePtr := thisFlowIn.uopQueuePtr
+        // ! This is so inelegant
+        x.vaddr := thisFlowIn.vaddr
+        x.mask := thisFlowIn.mask
+        x.alignedType := thisFlowIn.alignedType
+        x.exp := thisFlowIn.exp
+        x.flow_idx := thisFlowIn.flow_idx
+        x.is_first_ele := thisFlowIn.is_first_ele
+        x.uop := thisFlowIn.uop
+      }
 
       // ? Is there a more elegant way?
       when (io.flowIn(i).bits.alignedType === 0.U || io.flowIn(i).bits.alignedType === 1.U) {
         doDataSecondEnqueue(i) := false.B
         flowSecondAccess(enqPtr(i).value) := false.B
-        dataFirstQueue(enqPtr(i).value) := io.flowIn(i).bits.data
+        dataFirstQueue(enqPtr(i).value).data := io.flowIn(i).bits.data
       } .otherwise {
         doDataSecondEnqueue(i) := true.B
         flowSecondAccess(enqPtr(i).value) := true.B
-        dataFirstQueue(enqPtr(i).value) := dataSecondPtr(i).value
+        dataFirstQueue(enqPtr(i).value).data := dataSecondPtr(i).value
         dataSecondQueue(dataSecondPtr(i).value) := io.flowIn(i).bits.data
       }
     }
@@ -517,7 +529,7 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
       // x.isFirstIssue := false.B  // ! Not Sure
       // x.replayCarry :=           // ! Not Sure
       // is28bit :=                 // ! Not Sure
-      x.debug_robIdx := thisEntry.uop.robIdx
+      x.debug_robIdx := thisEntry.uop.robIdx.value
     }
   }
 

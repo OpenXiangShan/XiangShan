@@ -290,7 +290,7 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
       flowLoadResult(thisPtr) := io.pipeResult(i).bits
 
       // TODO: DONT use pipeline result directly for many signals are assigned to DontCare in pipeline!!!
-      flowLoadResult(thisPtr).vec.uopQueuePtr := flowQueueBundles(thisPtr).uopQueuePtr
+      flowLoadResult(thisPtr).vec.uopQueuePtr := flowQueueEntries(thisPtr).uopQueuePtr
     }
   }
 
