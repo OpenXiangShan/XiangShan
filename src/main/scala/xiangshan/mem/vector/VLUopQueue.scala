@@ -116,7 +116,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
   val s_merge :: s_wb :: Nil = Enum(2)
   val vdState = RegInit(s_merge)
   val vdException = RegInit(0.U.asTypeOf(Valid(ExceptionVec())))
-  val vdUop = Reg(new MicroOp)
+  val vdUop = RegInit(0.U.asTypeOf(new MicroOp))
   val vdMask = RegInit(0.U(VLENB.W))
   val vdVl = RegInit(0.U.asTypeOf(Valid(UInt(elemIdxBits.W))))
 
@@ -347,6 +347,10 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
     )
     val nextFlowCnt = entry.flow_counter - PopCount(mergePortVec)
 
+    // handle the situation when the writebacked flows nuke and the vector ld needs to replay from fronend
+    val replayInst = Cat((0 until flowWritebackWidth).map(j =>
+      mergeExpPortVec(j) && io.flowWriteback(j).bits.uop.ctrl.replayInst)).orR
+
     // update data and decrease flow_counter when the writeback port is not merged
     when (wb.valid && !mergedByPrevPort) {
       entry.data := mergedData
@@ -367,6 +371,8 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
           }
         }
       }
+      // mark the uops that need to be replayed from frontend
+      entry.uop.ctrl.replayInst := entry.uop.ctrl.replayInst || replayInst
     }
 
     assert(!(wb.valid && !valid(ptr.value)), "flow queue is trying to write back an empty entry")
@@ -407,6 +413,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
       vdResult := mergeDataWithMask(vdResult, data.asUInt, byteMask).asUInt
       vdMask := vdMask | byteMask
       vdUop := uopq(id).uop
+      vdUop.ctrl.replayInst := vdUop.ctrl.replayInst || uopq(id).uop.ctrl.replayInst
 
       when (!vdException.valid && exception(id)) {
         vdException.valid := true.B
@@ -435,6 +442,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
       vdException := 0.U.asTypeOf(vdException)
       vdMask := 0.U
       vdVl.valid := false.B
+      vdUop.ctrl.replayInst := false.B
 
       vdState := s_merge
     }
