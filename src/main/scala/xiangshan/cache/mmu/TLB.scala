@@ -82,15 +82,15 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val mxr = (0 until Width).map(i => Mux(virt || isHyperInst(i), io.csr.priv.vmxr || io.csr.priv.mxr, io.csr.priv.mxr))
   val req_in_s2xlate = (0 until Width).map(i => MuxCase(noS2xlate, Seq(
       (!(virt || req_in(i).bits.hyperinst)) -> noS2xlate,
-      (vsatp.mode =/= 0.U && hgatp.mode =/= 0.U) -> allStage,
-      (vsatp.mode === 0.U) -> onlyStage2,
-      (hgatp.mode === 0.U) -> onlyStage1
+      (csr.vsatp.mode =/= 0.U && csr.hgatp.mode =/= 0.U) -> allStage,
+      (csr.vsatp.mode === 0.U) -> onlyStage2,
+      (csr.hgatp.mode === 0.U) -> onlyStage1
     )))
   val req_out_s2xlate = (0 until Width).map(i => MuxCase(noS2xlate, Seq(
     (!(virt || isHyperInst(i))) -> noS2xlate,
-    (vsatp.mode =/= 0.U && hgatp.mode =/= 0.U) -> allStage,
-    (vsatp.mode === 0.U) -> onlyStage2,
-    (hgatp.mode === 0.U) -> onlyStage1
+    (csr.vsatp.mode =/= 0.U && csr.hgatp.mode =/= 0.U) -> allStage,
+    (csr.vsatp.mode === 0.U) -> onlyStage2,
+    (csr.hgatp.mode === 0.U) -> onlyStage1
   )))
   val need_gpa = RegInit(false.B)
   val need_gpa_vpn = Reg(UInt(vpnLen.W))
