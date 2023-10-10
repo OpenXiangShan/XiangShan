@@ -209,7 +209,6 @@ class VecStorePipeBundle(implicit p: Parameters) extends ExuInput(isVpu = true) 
   val exp                 = Bool()
   // val fqIdx               = UInt(log2Ceil(VsFlowSize).W)
   val flowPtr             = new VsFlowPtr
-
 }
 
 class VsFlowBundle(implicit p: Parameters) extends VecFlowBundle {
@@ -221,6 +220,7 @@ class VsFlowBundle(implicit p: Parameters) extends VecFlowBundle {
 class VecStoreFlowEntry (implicit p: Parameters) extends VecFlowBundle {
   val uopQueuePtr = new VsUopPtr
   val paddr = UInt(AddrBits.W)
+  val isLastElem = Bool()
 
   def toPipeBundle(thisPtr: VsFlowPtr): VecStorePipeBundle = {
     val result = Wire(new VecStorePipeBundle())
@@ -348,6 +348,7 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
         x.flow_idx := thisFlowIn.flow_idx
         x.is_first_ele := thisFlowIn.is_first_ele
         x.uop := thisFlowIn.uop
+        x.isLastElem := thisFlowIn.isLastElem
       }
 
       // ? Is there a more elegant way?
@@ -536,6 +537,15 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
     }
   }
 
+  // Inform scalar sq
+  io.sqRelease.valid := false.B
+
+  for (i <- 0 until EnsbufferWidth) {
+    when (doDequeue(i) && flowQueueEntries(deqPtr(i).value).isLastElem) {
+      io.sqRelease.valid := true.B
+      io.sqRelease.bits := flowQueueEntries(deqPtr(i).value).uop.sqIdx
+    }
+  }
 
 
 //   val valid        = RegInit(VecInit(Seq.fill(VecStorePipelineWidth)(VecInit(Seq.fill(VsFlowSize)(false.B)))))
