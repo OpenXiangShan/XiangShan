@@ -6,7 +6,6 @@ import chisel3.util._
 import xiangshan.XSCoreParamsKey
 import xiangshan.backend.decode.isa.bitfield.InstVType
 import xiangshan.backend.fu.VtypeStruct
-import xiangshan.backend.fu.fpu.Bundles.Frm
 import _root_.utils.NamedUInt
 
 object Bundles {
@@ -131,7 +130,7 @@ object Bundles {
     val isFoldTo1_4   = Bool()
     val isFoldTo1_8   = Bool()
     // rm of inst, for scalar float rounding modle
-    val rmInst = Frm()
+    val rmInst        = UInt(3.W)
   }
   object Fpu {
     def apply() = new Fpu

@@ -693,7 +693,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
       x._1 -> minBits
     }
   ))
-  decodedInst.fpu := 0.U.asTypeOf(decodedInst.fpu)
+  decodedInst.fpu := (~0.U).asTypeOf(decodedInst.fpu)
   decodedInst.commitType := 0.U // Todo: remove it
 
   decodedInst.isVset := FuType.isVset(decodedInst.fuType)

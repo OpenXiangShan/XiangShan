@@ -25,7 +25,6 @@ import utils._
 import utility._
 import xiangshan.ExceptionNO.illegalInstr
 import xiangshan._
-import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.fu.FuType
 import freechips.rocketchip.rocket.Instructions._
 import xiangshan.backend.Bundles.{DecodedInst, StaticInst}

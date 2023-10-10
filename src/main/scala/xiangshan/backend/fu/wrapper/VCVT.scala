@@ -19,6 +19,8 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   private val dataWidthOfDataModule = 64
   private val numVecModule = dataWidth / dataWidthOfDataModule
 
+  override protected lazy val src0 = inData.src(0)
+
   // io alias
   private val opcode = fuOpType(8, 0)
   private val sew = vsew
@@ -108,7 +110,7 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   )
   val eNumMax1H = Mux(lmul.head(1).asBool, eNum1H >> ((~lmul.tail(1)).asUInt +1.U), eNum1H << lmul.tail(1)).asUInt(6, 0)
   val eNumMax = Mux1H(eNumMax1H, Seq(1,2,4,8,16,32,64).map(i => i.U)) //only for cvt intr, don't exist 128 in cvt
-  val vlForFflags = Mux(vecCtrl.fpu.isFpToVecInst, 1.U, vl) //todo: 不应该在这儿
+  val vlForFflags = Mux(vecCtrl.fpu.isFpToVecInst, 1.U, vl)
   val eNumEffectIdx = Mux(vlForFflags > eNumMax, eNumMax, vlForFflags)
 
   val eNum = Mux1H(eNum1H, Seq(1, 2, 4, 8).map(num =>num.U))

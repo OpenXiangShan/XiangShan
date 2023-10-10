@@ -28,8 +28,8 @@ class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
     val target    = UInt(VAddrData().dataWidth.W)
     val taken     = Bool()
   })
-  val rmInst         = OptionWrapper(cfg.needFPUCtrl, UInt(3.W))
-  val fpu         = OptionWrapper(cfg.needFPUCtrl, new FPUCtrlSignals)
+  val rmInst      = OptionWrapper(cfg.needFPUCtrl, UInt(3.W))
+  val fpu         = OptionWrapper(cfg.writeFflags, new FPUCtrlSignals)
   val vpu         = OptionWrapper(cfg.needVecCtrl, new VPUCtrlSignals)
 }
 
@@ -43,8 +43,8 @@ class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle
   val flushPipe     = OptionWrapper(cfg.flushPipe,  Bool())
   val replay        = OptionWrapper(cfg.replayInst, Bool())
   val preDecode     = OptionWrapper(cfg.hasPredecode, new PreDecodeInfo)
-  val rmInst            = OptionWrapper(cfg.needFPUCtrl, UInt(3.W))
-  val fpu           = OptionWrapper(cfg.needFPUCtrl, new FPUCtrlSignals)
+  val rmInst        = OptionWrapper(cfg.needFPUCtrl, UInt(3.W))
+  val fpu           = OptionWrapper(cfg.writeFflags, new FPUCtrlSignals) // todo： delete
   val vpu           = OptionWrapper(cfg.needVecCtrl, new VPUCtrlSignals)
 }
 
