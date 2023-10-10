@@ -107,6 +107,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
     val srcMask = Mux(decode.mask_en, -1.asSInt.asUInt, io.storeIn.bits.src_mask)
     val flowMask = ((srcMask >> flowsPrev) &
       ZeroExt(UIntToMask(flows, maxFlowNum), VLEN))(VLENB - 1, 0)
+    val vlmax = GenVLMAX(lmul, sew)
     valid(id) := true.B
     finish(id) := false.B
     exception(id) := false.B
@@ -127,7 +128,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
       x.sew := sew
       x.emul := emul
       x.lmul := lmul
-      x.vlmax := GenVLMAX(lmul, sew)
+      x.vlmax := vlmax
       x.instType := instType
     }
 
@@ -209,6 +210,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
         alignedType = issueAlignedType
       )
       x.uopQueuePtr := flowSplitPtr
+      x.isLastElem := (elemIdx + 1.U) === (issueNFIELDS << issueVLMAXLog2)
     }
   }
 

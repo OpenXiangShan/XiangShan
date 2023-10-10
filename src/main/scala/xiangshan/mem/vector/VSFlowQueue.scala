@@ -215,6 +215,7 @@ class VecStorePipeBundle(implicit p: Parameters) extends ExuInput(isVpu = true) 
 class VsFlowBundle(implicit p: Parameters) extends VecFlowBundle {
   val data = UInt(VLEN.W)
   val uopQueuePtr = new VsUopPtr
+  val isLastElem = Bool()
 }
 
 class VecStoreFlowEntry (implicit p: Parameters) extends VecFlowBundle {
@@ -266,6 +267,8 @@ class VsFlowQueueIOBundle(implicit p: Parameters) extends VLSUBundle {
   val rob = Flipped(new RobLsqIO)
   // write committed stores to sbuffer
   val sbuffer = Vec(EnsbufferWidth, DecoupledIO(new DCacheWordReqWithVaddr))
+  // inform scalar sq to release the entry when a vector store finishes writing to sbuffer
+  val sqRelease = ValidIO(new SqPtr)
 }
 class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper
 {
