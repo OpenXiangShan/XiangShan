@@ -65,7 +65,7 @@ class VecPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(c
   scalaDupToVector.io.in.vsew := vsew
   extedVs1 := scalaDupToVector.io.out.vecData
 
-  private val src0 = if(cfg == VfcvtCfg) inData.src(0) else Mux(vecCtrl.needScalaSrc, extedVs1, inData.src(0)) // vs1, rs1, fs1, imm
+  protected lazy val src0 = Mux(vecCtrl.needScalaSrc, extedVs1, inData.src(0)) // vs1, rs1, fs1, imm
   private val src1 = WireInit(inData.src(1)) // vs2 only
   if(cfg == FuConfig.VfaluCfg){
     val vs2Fold = Wire(UInt(VLEN.W))

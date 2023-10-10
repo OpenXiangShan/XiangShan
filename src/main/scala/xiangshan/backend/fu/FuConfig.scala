@@ -201,20 +201,6 @@ object FuConfig {
     immType = Set(SelImm.IMM_SB),
   )
 
-//  val I2fCfg: FuConfig = FuConfig (
-//    name = "i2f",
-//    FuType.i2f,
-//    fuGen = (p: Parameters, cfg: FuConfig) => Module(new IntToFP(cfg)(p).suggestName("i2f")),
-//    srcData = Seq(
-//      Seq(IntData()),
-//    ),
-//    piped = true,
-//    writeFpRf = true,
-//    writeFflags = true,
-//    latency = CertainLatency(2),
-//    needSrcFrm = true,
-//  )
-
   val I2fCfg: FuConfig = FuConfig(
     name = "i2f",
     FuType.i2f,
@@ -498,6 +484,7 @@ object FuConfig {
     maskWakeUp = true,
     dataBits = 128,
     exceptionOut = Seq(illegalInstr),
+    needSrcFrm = true,  //for scalar2vector
   )
 
   val VfmaCfg = FuConfig (
@@ -516,6 +503,7 @@ object FuConfig {
     maskWakeUp = true,
     dataBits = 128,
     exceptionOut = Seq(illegalInstr),
+    needSrcFrm = true,  //for scalar2vector
   )
 
   val VfdivCfg = FuConfig(
@@ -534,6 +522,7 @@ object FuConfig {
     maskWakeUp = true,
     dataBits = 128,
     exceptionOut = Seq(illegalInstr),
+    needSrcFrm = true,  //for scalar2vector
   )
 
   val VfcvtCfg = FuConfig(
@@ -553,7 +542,7 @@ object FuConfig {
     maskWakeUp = true,
     dataBits = 128,
     exceptionOut = Seq(illegalInstr),
-    needSrcFrm = true,//todo：for scalar2vector
+    needSrcFrm = true,  //for scalar2vector
   )
 
 

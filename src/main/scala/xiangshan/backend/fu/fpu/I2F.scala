@@ -11,12 +11,9 @@ import yunsuan.vector.VectorConvert.RoundingModle._
 import yunsuan.vector.VectorConvert.{FloatFormat, f32, f64}
 import yunsuan.vector.VectorConvert.util._
 
-// todo: refactor scalar i2f fu to rm fpctrlsign
-// TODO: 看这里的dyinst的字段是怎么给到功能单元的
-
 object I2fType {
   def width = 4
-  // todo:  move/cvt ## i64/i32(input) ## f64/f32(output) ## hassign
+  //code: move/cvt ## i64/i32(input) ## f64/f32(output) ## hassign
   def fcvt_s_wu       = "b0000".U(4.W)
   def fcvt_s_w        = "b0001".U(4.W)
   def fcvt_s_lu       = "b0100".U(4.W)
@@ -58,124 +55,118 @@ class Int2FP extends Module{
    */
 
   //parameter
-  val fpParamMap = Seq(f32, f64)
+  val fpParamMap: Seq[FloatFormat] = Seq(f32, f64)
   val widthExpAdder = 13 // 13bits is enough
 
   //input
   val io = IO(new I2fCvtIO)
-  val (src, opType, rmNext) = (io.src, io.opType, io.rm)
+  val (src, opType, rm) = (io.src, io.opType, io.rm)
 
   //cycle0
   val hasSignInt = opType(0).asBool
-  val hasSignOut = RegNext(RegNext(hasSignInt))
 
   val inputWidth = opType(2)
   val outputWidth = opType(1)
   val isMvInst = opType(3)
-  val isMvInstOut = RegNext(RegNext(isMvInst))
-  val is32BitsOut = RegNext(RegNext(!outputWidth))
-  val srcOut = RegNext(RegNext(src))
+  val s2_isMvInst = RegNext(RegNext(isMvInst))
+  val s2_is32Bits = RegNext(RegNext(!outputWidth))
+  val s2_src = RegNext(RegNext(src))
 
-  val float1HOutNext = opType(1) ## !opType(1)
-  val float1HOut = RegNext(float1HOutNext, 0.U)
+  val s0_float1HOut = opType(1) ## !opType(1)
+  val s1_float1HOut = RegNext(s0_float1HOut, 0.U)
 
-  val srcMap = Seq(src.tail(32), src)
-  val intMap = srcMap.map(int => intExtend(int, hasSignInt && int.head(1).asBool))
+  val srcMap: Seq[UInt] = Seq(src.tail(32), src)
+  val intMap: Seq[Bits] = srcMap.map((int: UInt) => intExtend(int, hasSignInt && int.head(1).asBool))
 
   val input = Mux(inputWidth,
     intMap(1),
     intMap(0)
   )
 
-  val signSrcNext = input.head(1).asBool
+  val s0_signSrc = input.head(1).asBool
 
   val absIntSrc = Wire(UInt(64.W)) //cycle0
-  absIntSrc := Mux(signSrcNext, (~input.tail(1)).asUInt + 1.U, input.tail(1))
-  val isZeroIntSrcNext = !absIntSrc.orR
+  absIntSrc := Mux(s0_signSrc, (~input.tail(1)).asUInt + 1.U, input.tail(1))
+  val s0_isZeroIntSrc = !absIntSrc.orR
 
-  val signSrc = RegNext(signSrcNext, false.B)
-  val rm = RegNext(rmNext, false.B)
+  val s1_signSrc = RegNext(s0_signSrc, false.B)
+  val s1_rm = RegNext(rm, false.B)
   
-  val isZeroIntSrc = RegNext(isZeroIntSrcNext, false.B)
+  val s1_isZeroIntSrc = RegNext(s0_isZeroIntSrc, false.B)
 
 
-  val expNext = Wire(UInt(widthExpAdder.W))
-  val expReg = RegNext(expNext, 0.U(widthExpAdder.W))
-  val exp = Wire(UInt(widthExpAdder.W))
-  exp := expReg
+  val s0_exp = Wire(UInt(widthExpAdder.W))
+  val expReg = RegNext(s0_exp, 0.U(widthExpAdder.W))
+  val s1_exp = Wire(UInt(widthExpAdder.W))
+  s1_exp := expReg
 
 
   //for cycle2 -> output
   val nv, dz, of, uf, nx = Wire(Bool()) //cycle1
-  val fflagsNext = Wire(UInt(5.W))
-  fflagsNext := Cat(nv, dz, of, uf, nx)
-  val fflags = RegNext(fflagsNext, 0.U(5.W))
-  val resultNext = Wire(UInt(64.W))
-  val result = RegNext(resultNext, 0.U(64.W))
+  val s1_fflags = Wire(UInt(5.W))
+  s1_fflags := Cat(nv, dz, of, uf, nx)
+  val s2_fflags = RegNext(s1_fflags, 0.U(5.W))
+  val s1_result = Wire(UInt(64.W))
+  val s2_result = RegNext(s1_result, 0.U(64.W))
 
   val leadZeros = CLZ(absIntSrc)
-  expNext := Mux1H(float1HOutNext, fpParamMap.map(fp => (fp.bias + 63).U)) - leadZeros
+  s0_exp := Mux1H(s0_float1HOut, fpParamMap.map(fp => (fp.bias + 63).U)) - leadZeros
 
   val shiftLeft = Wire(UInt(64.W))
   shiftLeft := absIntSrc.asUInt << 1 << leadZeros //cycle0
 
-  val rounderMapInNext = Wire(UInt(64.W))
-  val rounderMapInReg = RegNext(rounderMapInNext, 0.U(64.W))
-  rounderMapInNext := shiftLeft
+  val s0_rounderMapIn = Wire(UInt(64.W))
+  s0_rounderMapIn := shiftLeft
+  val rounderMapInReg = RegNext(s0_rounderMapIn, 0.U(64.W))
 
-  val rounderMapIn = Wire(UInt(64.W))
-  rounderMapIn := rounderMapInReg
+  val s1_rounderMapIn = Wire(UInt(64.W))
+  s1_rounderMapIn := rounderMapInReg
 
   val rounderMap =
     fpParamMap.map(fp => Seq(
-      rounderMapIn.head(fp.fracWidth),
-      rounderMapIn.tail(fp.fracWidth).head(1),
-      rounderMapIn.tail(fp.fracWidth + 1).orR,
-      rounderMapIn.head(fp.fracWidth).andR
-    )
-    ).transpose
+      s1_rounderMapIn.head(fp.fracWidth),
+      s1_rounderMapIn.tail(fp.fracWidth).head(1),
+      s1_rounderMapIn.tail(fp.fracWidth + 1).orR,
+      s1_rounderMapIn.head(fp.fracWidth).andR
+    )).transpose
 
   val (rounderInputMap, rounerInMap, rounderStikyMap, isOnesRounderInputMap) = {
     (rounderMap(0), rounderMap(1), rounderMap(2), rounderMap(3))
   }
 
-  val rounderInput = Mux1H(float1HOut, rounderInputMap)
+  val rounderInput = Mux1H(s1_float1HOut, rounderInputMap)
 
 
   val rounder = Module(new RoundingUnit(64))
   rounder.io.in := rounderInput
-  rounder.io.roundIn := Mux1H(float1HOut, rounerInMap)
-  rounder.io.stickyIn := Mux1H(float1HOut, rounderStikyMap)
-  rounder.io.signIn := signSrc
-  rounder.io.rm := rm
+  rounder.io.roundIn := Mux1H(s1_float1HOut, rounerInMap)
+  rounder.io.stickyIn := Mux1H(s1_float1HOut, rounderStikyMap)
+  rounder.io.signIn := s1_signSrc
+  rounder.io.rm := s1_rm
 
   // from rounder
   val nxRounded = rounder.io.inexact
   val upRounded = rounder.io.r_up
 
-  /** after rounding
-   *  for all exclude estimate7 & fp->fp widen
-   *  cycle: 1
-   */
-  val expIncrease = exp + 1.U
+  val expIncrease = s1_exp + 1.U
   val rounderInputIncrease = rounderInput + 1.U
 
   val cout = upRounded &&
-    Mux1H(float1HOut, isOnesRounderInputMap).asBool
+    Mux1H(s1_float1HOut, isOnesRounderInputMap).asBool
 
   val expRounded = Wire(UInt(f64.expWidth.W))
-  expRounded := Mux(cout, expIncrease, exp)
+  expRounded := Mux(cout, expIncrease, s1_exp)
   val fracRounded = Mux(upRounded, rounderInputIncrease, rounderInput)
 
   val rmin =
-    rm === RTZ || (signSrc && rm === RUP) || (!signSrc && rm === RDN) //cycle1
+    s1_rm === RTZ || (s1_signSrc && s1_rm === RUP) || (!s1_signSrc && s1_rm === RDN) //cycle1
 
 
   // Mux(cout, exp > FP.maxExp -1, exp > FP.maxExp)
-  val ofRounded = !exp.head(1).asBool && Mux1H(float1HOut,
+  val ofRounded = !s1_exp.head(1).asBool && Mux1H(s1_float1HOut,
     fpParamMap.map(fp => Mux(cout,
-      exp(fp.expWidth - 1, 1).andR || exp(exp.getWidth - 2, fp.expWidth).orR,
-      exp(fp.expWidth - 1, 0).andR || exp(exp.getWidth - 2, fp.expWidth).orR)
+      s1_exp(fp.expWidth - 1, 1).andR || s1_exp(s1_exp.getWidth - 2, fp.expWidth).orR,
+      s1_exp(fp.expWidth - 1, 0).andR || s1_exp(s1_exp.getWidth - 2, fp.expWidth).orR)
     )
   )
 
@@ -188,30 +179,24 @@ class Int2FP extends Module{
   val result1H = Cat(
     ofRounded && rmin,
     ofRounded && !rmin,
-    isZeroIntSrc,
-    !ofRounded && !isZeroIntSrc
+    s1_isZeroIntSrc,
+    !ofRounded && !s1_isZeroIntSrc
   )
 
   def int2FpResultMapGen(fp: FloatFormat): Seq[UInt] = {
     VecInit((0 to 3).map {
-      case 0 => signSrc ## fp.maxExp.U(fp.expWidth.W) ## ~0.U(fp.fracWidth.W) //GNF
-      case 1 => signSrc ## ~0.U(fp.expWidth.W) ## 0.U(fp.fracWidth.W) // INF
-      case 2 => signSrc ## 0.U((fp.width - 1).W) // 0
-      case 3 => signSrc ## expRounded(fp.expWidth-1, 0) ## fracRounded(fp.fracWidth-1, 0) // normal
+      case 0 => s1_signSrc ## fp.maxExp.U(fp.expWidth.W) ## ~0.U(fp.fracWidth.W) //GNF
+      case 1 => s1_signSrc ## ~0.U(fp.expWidth.W) ## 0.U(fp.fracWidth.W) // INF
+      case 2 => s1_signSrc ## 0.U((fp.width - 1).W) // 0
+      case 3 => s1_signSrc ## expRounded(fp.expWidth-1, 0) ## fracRounded(fp.fracWidth-1, 0) // normal
     })
   }
 
   val int2FpResultMap: Seq[UInt] = fpParamMap.map(fp => Mux1H(result1H.asBools.reverse, int2FpResultMapGen(fp)))
-  resultNext := Mux1H(float1HOut, int2FpResultMap)
+  s1_result := Mux1H(s1_float1HOut, int2FpResultMap)
 
-  val cvtResult = Mux(is32BitsOut && hasSignOut,
-    Fill(32, result(31)) ## result(31, 0),
-    result
-  )
-  
-  val mvResult = Mux(is32BitsOut, ~0.U(32.W) ## srcOut.tail(32), srcOut)
-
-  io.result :=  Mux(isMvInstOut, mvResult, cvtResult)
-  io.fflags :=  Mux(isMvInstOut, 0.U, fflags)
+  val dest = Mux(s2_isMvInst, s2_src, s2_result)
+  io.result := Mux(s2_is32Bits, ~0.U(32.W) ## dest.tail(32), dest)
+  io.fflags :=  Mux(s2_isMvInst, 0.U, s2_fflags)
 }
 

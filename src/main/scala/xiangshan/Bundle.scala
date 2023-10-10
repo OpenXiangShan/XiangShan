@@ -153,16 +153,8 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
 }
 
 
-class FPUCtrlSignals(implicit p: Parameters) extends XSBundle {
-  val isAddSub = Bool() // swap23
-  val typeTagIn = UInt(1.W)
-  val typeTagOut = UInt(1.W)
-  val fromInt = Bool()
+class FPUCtrlSignals(implicit p: Parameters) extends XSBundle { //todo: delete, but wflags need to be preserved
   val wflags = Bool()
-  val fpWen = Bool()
-  val typ = UInt(2.W)
-  val fmt = UInt(2.W)
-  val rm = UInt(3.W)
 }
 
 // Decode DecodeWidth insts at Decode Stage

@@ -534,7 +534,7 @@ object VecDecoder extends DecodeConstants {
     // 13.19. Narrowing Floating-Point/Integer Type-Convert Instructions
     VFNCVT_XU_F_W      -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfncvt_xufw, F, T, F, UopSplitType.VEC_WVV),
     VFNCVT_X_F_W       -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfncvt_xfw, F, T, F, UopSplitType.VEC_WVV),
-    VFNCVT_RTZ_XU_F_W  -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfwcvt_rtz_xufv, F, T, F, UopSplitType.VEC_WVV),
+    VFNCVT_RTZ_XU_F_W  -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfncvt_rtz_xufw, F, T, F, UopSplitType.VEC_WVV),
     VFNCVT_RTZ_X_F_W   -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfncvt_rtz_xfw, F, T, F, UopSplitType.VEC_WVV),
     VFNCVT_F_XU_W      -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfncvt_fxuw, F, T, F, UopSplitType.VEC_WVV),
     VFNCVT_F_X_W       -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfncvt_fxw, F, T, F, UopSplitType.VEC_WVV),

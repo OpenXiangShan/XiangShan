@@ -438,7 +438,7 @@ object Bundles {
     val fpWen         = if (params.writeFpRf)     Some(Bool())                        else None
     val vecWen        = if (params.writeVecRf)    Some(Bool())                        else None
     val rmInst        = if (params.needFPUCtrl)   Some(UInt(3.W))                     else None
-    val fpu           = if (params.needFPUCtrl)   Some(new FPUCtrlSignals)            else None
+    val fpu           = if (params.writeFflags)   Some(new FPUCtrlSignals)            else None
     val vpu           = if (params.needVPUCtrl)   Some(new VPUCtrlSignals)            else None
     val flushPipe     = if (params.flushPipe)     Some(Bool())                        else None
     val pc            = if (params.needPc)        Some(UInt(VAddrData().dataWidth.W)) else None
