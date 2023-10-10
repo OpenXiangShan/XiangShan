@@ -35,9 +35,10 @@ import xiangshan.backend.exu.ExuConfig
 import xiangshan.mem.{LsqEnqCtrl, LsqEnqIO}
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
-  def numRedirect = exuParameters.JmpCnt + exuParameters.AluCnt
   val rob_commits = Vec(CommitWidth, Valid(new RobCommitInfo))
   val redirect = Valid(new Redirect)
+  val ftqIdxAhead = Vec(BackendRedirectNum, Valid(new FtqPtr))
+  val ftqIdxSelOH = Valid(UInt((BackendRedirectNum).W))
 }
 
 class SnapshotPtr(implicit p: Parameters) extends CircularQueuePtr[SnapshotPtr](
@@ -102,9 +103,8 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper {
 
   class RedirectGeneratorIO(implicit p: Parameters) extends XSBundle {
-    def numRedirect = exuParameters.JmpCnt + exuParameters.AluCnt
     val hartId = Input(UInt(8.W))
-    val exuMispredict = Vec(numRedirect, Flipped(ValidIO(new ExuOutput)))
+    val exuMispredict = Vec(NumRedirect, Flipped(ValidIO(new ExuOutput)))
     val loadReplay = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
     val redirectPcRead = new FtqRead(UInt(VAddrBits.W))
@@ -113,6 +113,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
     val memPredUpdate = Output(new MemPredUpdateReq)
     val memPredPcRead = new FtqRead(UInt(VAddrBits.W)) // read req send form stage 2
     val isMisspreRedirect = Output(Bool())
+    val stage2oldestOH = Output(UInt((NumRedirect + 1).W))
   }
   val io = IO(new RedirectGeneratorIO)
   /*
@@ -171,6 +172,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   // stage1 -> stage2
   io.stage2Redirect.valid := s1_redirect_valid_reg && !io.flush
   io.stage2Redirect.bits := s1_redirect_bits_reg
+  io.stage2oldestOH := s1_redirect_onehot.asUInt
 
   val s1_isReplay = s1_redirect_onehot.last
   val s1_isJump = s1_redirect_onehot.head
@@ -390,7 +392,8 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   redirectGen.io.loadReplay <> loadReplay
   redirectGen.io.flush := flushRedirect.valid
 
-  val frontendFlushValid = DelayN(flushRedirect.valid, 5)
+  val frontendFlushValidAhead = DelayN(flushRedirect.valid, 4)
+  val frontendFlushValid = RegNext(frontendFlushValidAhead)
   val frontendFlushBits = RegEnable(flushRedirect.bits, flushRedirect.valid)
   // When ROB commits an instruction with a flush, we notify the frontend of the flush without the commit.
   // Flushes to frontend may be delayed by some cycles and commit before flush causes errors.
@@ -404,6 +407,21 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   }
   io.frontend.toFtq.redirect.valid := frontendFlushValid || redirectGen.io.stage2Redirect.valid
   io.frontend.toFtq.redirect.bits := Mux(frontendFlushValid, frontendFlushBits, redirectGen.io.stage2Redirect.bits)
+  io.frontend.toFtq.ftqIdxSelOH.valid := frontendFlushValid || redirectGen.io.stage2Redirect.valid
+  io.frontend.toFtq.ftqIdxSelOH.bits := Cat(frontendFlushValid, redirectGen.io.stage2oldestOH & Fill(NumRedirect + 1, !frontendFlushValid))
+
+  //jmp/brh
+  for (i <- 0 until NumRedirect) {
+    io.frontend.toFtq.ftqIdxAhead(i).valid := exuRedirect(i).valid && exuRedirect(i).bits.redirect.cfiUpdate.isMisPred && !flushRedirect.valid && !frontendFlushValidAhead
+    io.frontend.toFtq.ftqIdxAhead(i).bits := exuRedirect(i).bits.redirect.ftqIdx
+  }
+  //loadreplay
+  io.frontend.toFtq.ftqIdxAhead(NumRedirect).valid := loadReplay.valid && !flushRedirect.valid && !frontendFlushValidAhead
+  io.frontend.toFtq.ftqIdxAhead(NumRedirect).bits := loadReplay.bits.ftqIdx
+  //exception
+  io.frontend.toFtq.ftqIdxAhead.last.valid := frontendFlushValidAhead
+  io.frontend.toFtq.ftqIdxAhead.last.bits := frontendFlushBits.ftqIdx
+
   // Be careful here:
   // T0: flushRedirect.valid, exception.valid
   // T1: csr.redirect.valid

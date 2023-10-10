@@ -430,6 +430,8 @@ trait HasXSParameter {
   val NRIntWritePorts = exuParameters.AluCnt + exuParameters.MduCnt + exuParameters.LduCnt
   val NRFpReadPorts = 3 * exuParameters.FmacCnt + exuParameters.StuCnt
   val NRFpWritePorts = exuParameters.FpExuCnt + exuParameters.LduCnt
+  val NumRedirect = exuParameters.JmpCnt + exuParameters.AluCnt
+  val BackendRedirectNum = NumRedirect + 2 //2: ldReplay + Exception
   val LoadPipelineWidth = coreParams.LoadPipelineWidth
   val StorePipelineWidth = coreParams.StorePipelineWidth
   val VecMemSrcInWidth = coreParams.VecMemSrcInWidth
