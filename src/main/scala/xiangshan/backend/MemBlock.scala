@@ -216,6 +216,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       val l1Prefetcher = Module(new L1Prefetcher())
       l1Prefetcher.io.enable := WireInit(Constantin.createRecord("enableL1StreamPrefetcher" + p(XSCoreParamsKey).HartId.toString, initValue = 1.U)) === 1.U
       l1Prefetcher.pf_ctrl <> dcache.io.pf_ctrl
+      l1Prefetcher.stride_ctrl <> dcache.io.stride_ctrl
       l1Prefetcher.l2PfqBusy := io.l2PfqBusy
 
       // stride will train on miss or prefetch hit

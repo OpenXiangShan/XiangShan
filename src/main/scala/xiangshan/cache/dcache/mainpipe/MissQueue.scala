@@ -163,9 +163,12 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
     block_match && reg_valid() && !(req.isFromPrefetch)
   }
 
-  def prefetch_late_en(new_req: MissReqWoStoreData, new_req_valid: Bool): Bool = {
+  def prefetch_late_en(new_req: MissReqWoStoreData, new_req_valid: Bool): Tuple2[Bool, Bool] = {
     val block_match = get_block(req.addr) === get_block(new_req.addr)
-    new_req_valid && alloc && block_match && (req.isFromPrefetch) && !(new_req.isFromPrefetch)
+    (
+      new_req_valid && alloc && block_match && (req.isFromPrefetch) && isFromStream(req.pf_source) && !(new_req.isFromPrefetch), // stream late
+      new_req_valid && alloc && block_match && (req.isFromPrefetch) && isFromStride(req.pf_source) && !(new_req.isFromPrefetch)  // stride late
+    )
   }
 
   def reject_req(new_req: MissReq): Bool = {
@@ -325,7 +328,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     }
 
     val prefetch_info = new DCacheBundle {
-      val late_prefetch = Output(Bool())
+      val late_prefetch_stride = Output(Bool())
+      val late_prefetch_stream = Output(Bool())
     }
     val nMaxPrefetchEntry = Input(UInt(64.W))
     val matched = Output(Bool())
@@ -440,7 +444,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
     should_refill_data_reg := miss_req_pipe_reg_bits.isFromLoad
     error := false.B
-    prefetch := input_req_is_prefetch && !io.miss_req_pipe_reg.prefetch_late_en(io.req.bits, io.req.valid)
+    // clear prefetch flag if detect late prefetch
+    prefetch := input_req_is_prefetch && !io.miss_req_pipe_reg.prefetch_late_en(io.req.bits, io.req.valid)._1 && !io.miss_req_pipe_reg.prefetch_late_en(io.req.bits, io.req.valid)._2
     access := false.B
     secondary_fired := false.B
   }
@@ -747,9 +752,11 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   io.forwardInfo.apply(req_valid, req.addr, refill_and_store_data, w_grantfirst, w_grantlast)
 
   io.matched := req_valid && (get_block(req.addr) === get_block(io.req.bits.addr)) && !prefetch
-  io.prefetch_info.late_prefetch := io.req.valid && !(io.req.bits.isFromPrefetch) && req_valid && (get_block(req.addr) === get_block(io.req.bits.addr)) && prefetch
+  io.prefetch_info.late_prefetch_stride := io.req.valid && !io.req.bits.isFromPrefetch && req_valid && (get_block(req.addr) === get_block(io.req.bits.addr)) && prefetch && isFromStride(req.pf_source)
+  io.prefetch_info.late_prefetch_stream := io.req.valid && !io.req.bits.isFromPrefetch && req_valid && (get_block(req.addr) === get_block(io.req.bits.addr)) && prefetch && isFromStream(req.pf_source)
 
-  when(io.prefetch_info.late_prefetch) {
+  // clear prefetch flag if detect late prefetch
+  when(io.prefetch_info.late_prefetch_stride || io.prefetch_info.late_prefetch_stream) {
     prefetch := false.B
   }
 
@@ -839,9 +846,11 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
       }
 
       val fdp = new Bundle {
-        val late_miss_prefetch = Output(Bool())
+        val late_miss_prefetch_stride = Output(Bool())
+        val late_miss_prefetch_stream = Output(Bool())
         val prefetch_monitor_cnt = Output(Bool())
-        val total_prefetch = Output(Bool())
+        val total_prefetch_stride = Output(Bool())
+        val total_prefetch_stream = Output(Bool())
       }
     }
 
@@ -1031,14 +1040,17 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   // prefetch related
   io.prefetch_info.naive.late_miss_prefetch := io.req.valid && io.req.bits.isPrefetchRead && (miss_req_pipe_reg.matched(io.req.bits) || Cat(entries.map(_.io.matched)).orR)
 
-  io.prefetch_info.fdp.late_miss_prefetch := (miss_req_pipe_reg.prefetch_late_en(io.req.bits.toMissReqWoStoreData(), io.req.valid) || Cat(entries.map(_.io.prefetch_info.late_prefetch)).orR)
+  val pipeRegLate = miss_req_pipe_reg.prefetch_late_en(io.req.bits.toMissReqWoStoreData(), io.req.valid)
+  io.prefetch_info.fdp.late_miss_prefetch_stream := (pipeRegLate._1 || Cat(entries.map(_.io.prefetch_info.late_prefetch_stream)).orR)
+  io.prefetch_info.fdp.late_miss_prefetch_stride := (pipeRegLate._2 || Cat(entries.map(_.io.prefetch_info.late_prefetch_stride)).orR)
   io.prefetch_info.fdp.prefetch_monitor_cnt := io.refill_pipe_req.fire
-  io.prefetch_info.fdp.total_prefetch := alloc && io.req.valid && !io.req.bits.cancel && isFromL1Prefetch(io.req.bits.pf_source)
+  io.prefetch_info.fdp.total_prefetch_stride := alloc && io.req.valid && !io.req.bits.cancel && isFromStride(io.req.bits.pf_source)
+  io.prefetch_info.fdp.total_prefetch_stream := alloc && io.req.valid && !io.req.bits.cancel && isFromStream(io.req.bits.pf_source)
 
   io.bloom_filter_query.set.valid := alloc && io.req.valid && !io.req.bits.cancel && !isFromL1Prefetch(io.req.bits.replace_pf) && io.req.bits.replace_coh.isValid() && isFromL1Prefetch(io.req.bits.pf_source)
   io.bloom_filter_query.set.bits.addr := io.bloom_filter_query.set.bits.get_addr(Cat(io.req.bits.replace_tag, get_untag(io.req.bits.vaddr))) // the evict block address
 
-  io.bloom_filter_query.clr.valid := io.refill_pipe_req.fire && isFromL1Prefetch(io.refill_pipe_req.bits.prefetch)
+  io.bloom_filter_query.clr.valid := io.refill_pipe_req.fire
   io.bloom_filter_query.clr.bits.addr := io.bloom_filter_query.clr.bits.get_addr(io.refill_pipe_req.bits.addr)
 
   // L1MissTrace Chisel DB

@@ -88,7 +88,10 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
       }
 
       val fdp = new Bundle {
-        val useful_prefetch = Output(Bool())
+        val demand_access = Output(Bool())
+        val prefetch_hit = Output(Bool())
+        val useful_prefetch_stream = Output(Bool())
+        val useful_prefetch_stride = Output(Bool())
         val demand_miss = Output(Bool())
         val pollution = Output(Bool())
       }
@@ -495,6 +498,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s3_tag_match_way = RegEnable(s2_tag_match_way, s2_fire)
   val s3_req_instrtype = RegEnable(s2_req.instrtype, s2_fire)
   val s3_is_prefetch = s3_req_instrtype === DCACHE_PREFETCH_SOURCE.U
+  val s3_isFirstIssue = RegEnable(s2_req.isFirstIssue, s2_fire)
 
   val s3_data128bit = Cat(io.banked_data_resp(1).raw_data, io.banked_data_resp(0).raw_data)
   val s3_data64bit = Fill(2, io.banked_data_resp(0).raw_data)
@@ -572,7 +576,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.prefetch_flag_write.valid := s3_clear_pf_flag_en && !io.counter_filter_query.resp
   io.prefetch_flag_write.bits.idx := get_idx(s3_vaddr)
   io.prefetch_flag_write.bits.way_en := s3_tag_match_way
-  io.prefetch_flag_write.bits.source := L1_HW_PREFETCH_NULL
+  io.prefetch_flag_write.bits.source := L1_HW_PREFETCH_CLEAR
 
   io.counter_filter_query.req.valid := s3_clear_pf_flag_en
   io.counter_filter_query.req.bits.idx := get_idx(s3_vaddr)
@@ -582,8 +586,12 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.counter_filter_enq.bits.idx := get_idx(s3_vaddr)
   io.counter_filter_enq.bits.way := OHToUInt(s3_tag_match_way)
 
-  io.prefetch_info.fdp.useful_prefetch := s3_clear_pf_flag_en && !io.counter_filter_query.resp
+  io.prefetch_info.fdp.useful_prefetch_stream := s3_clear_pf_flag_en && !io.counter_filter_query.resp && isFromStream(s3_hit_prefetch)
+  io.prefetch_info.fdp.useful_prefetch_stride := s3_clear_pf_flag_en && !io.counter_filter_query.resp && isFromStride(s3_hit_prefetch)
 
+  io.prefetch_info.fdp.demand_access := s3_valid && !s3_is_prefetch && s3_isFirstIssue
+  io.prefetch_info.fdp.prefetch_hit  := s3_valid && !s3_is_prefetch && s3_isFirstIssue && s3_hit && isPrefetchRelated(s3_hit_prefetch)
+  
   XSPerfAccumulate("s3_pf_hit", s3_clear_pf_flag_en)
   XSPerfAccumulate("s3_pf_hit_filter", s3_clear_pf_flag_en && !io.counter_filter_query.resp)
 

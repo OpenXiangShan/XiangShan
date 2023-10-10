@@ -580,6 +580,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
 
 class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamPrefetchHelper with HasStridePrefetchHelper {
   val pf_ctrl = IO(Input(new PrefetchControlBundle))
+  val stride_ctrl = IO(Input(new PrefetchControlBundle))
   val stride_train = IO(Flipped(Vec(exuParameters.LduCnt, ValidIO(new LdPrefetchTrainBundle()))))
   val l2PfqBusy = IO(Input(Bool()))
 
@@ -618,7 +619,7 @@ class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamP
 
   stride_meta_array.io.enable := enable
   stride_meta_array.io.flush := flush
-  stride_meta_array.io.dynamic_depth := 0.U
+  stride_meta_array.io.dynamic_depth := stride_ctrl.dynamic_depth
   stride_meta_array.io.train_req <> stride_train_filter.io.train_req
   stride_meta_array.io.stream_lookup_req <> stream_bit_vec_array.io.stream_lookup_req
   stride_meta_array.io.stream_lookup_resp <> stream_bit_vec_array.io.stream_lookup_resp

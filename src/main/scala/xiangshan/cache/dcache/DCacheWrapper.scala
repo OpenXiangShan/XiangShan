@@ -746,6 +746,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val memSetPattenDetected = Output(Bool())
   val lqEmpty = Input(Bool())
   val pf_ctrl = Output(new PrefetchControlBundle)
+  val stride_ctrl = Output(new PrefetchControlBundle)
   val force_write = Input(Bool())
   val debugTopDown = new DCacheTopDownIO
   val debugRolling = Flipped(new RobDebugRollingIO)
@@ -903,8 +904,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     val extra_flag_prefetch = Mux1H(extra_flag_way_en, prefetchArray.io.resp.last)
     val extra_flag_access = Mux1H(extra_flag_way_en, accessArray.io.resp.last)
 
-    prefetcherMonitor.io.validity.good_prefetch := extra_flag_valid && isFromL1Prefetch(extra_flag_prefetch) && extra_flag_access
-    prefetcherMonitor.io.validity.bad_prefetch := extra_flag_valid && isFromL1Prefetch(extra_flag_prefetch) && !extra_flag_access
+    prefetcherMonitor.io.validity.good_prefetch := extra_flag_valid && isPrefetchRelated(extra_flag_prefetch) && extra_flag_access
+    prefetcherMonitor.io.validity.bad_prefetch := extra_flag_valid && isPrefetchRelated(extra_flag_prefetch) && !extra_flag_access
   }
 
   // write extra meta
@@ -920,7 +921,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   )
   prefetch_flag_write_ports.zip(prefetchArray.io.write).foreach { case (p, w) => w <> p }
 
-  val same_cycle_update_pf_flag = ldu(0).io.prefetch_flag_write.valid && ldu(1).io.prefetch_flag_write.valid && (ldu(0).io.prefetch_flag_write.bits.idx === ldu(1).io.prefetch_flag_write.bits.idx) && (ldu(0).io.prefetch_flag_write.bits.way_en === ldu(1).io.prefetch_flag_write.bits.way_en)
+  val same_cycle_update_pf_flag = ldu(0).io.prefetch_flag_write.valid && ldu(1).io.prefetch_flag_write.valid && 
+                                 (ldu(0).io.prefetch_flag_write.bits.idx === ldu(1).io.prefetch_flag_write.bits.idx) && 
+                                 (ldu(0).io.prefetch_flag_write.bits.way_en === ldu(1).io.prefetch_flag_write.bits.way_en)
   XSPerfAccumulate("same_cycle_update_pf_flag", same_cycle_update_pf_flag)
 
   val access_flag_write_ports = ldu.map(_.io.access_flag_write) ++ Seq(
@@ -1315,17 +1318,25 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // Feedback Direct Prefetch Monitor
   fdpMonitor.io.refill := missQueue.io.prefetch_info.fdp.prefetch_monitor_cnt
-  fdpMonitor.io.timely.late_prefetch := missQueue.io.prefetch_info.fdp.late_miss_prefetch
-  fdpMonitor.io.accuracy.total_prefetch := missQueue.io.prefetch_info.fdp.total_prefetch
+  fdpMonitor.io.timely.stride.late_prefetch := missQueue.io.prefetch_info.fdp.late_miss_prefetch_stride
+  fdpMonitor.io.timely.stream.late_prefetch := missQueue.io.prefetch_info.fdp.late_miss_prefetch_stream
+  fdpMonitor.io.accuracy.stride.total_prefetch := missQueue.io.prefetch_info.fdp.total_prefetch_stride
+  fdpMonitor.io.accuracy.stream.total_prefetch := missQueue.io.prefetch_info.fdp.total_prefetch_stream
   for (w <- 0 until LoadPipelineWidth)  {
     if(w == 0) {
-      fdpMonitor.io.accuracy.useful_prefetch(w) := ldu(w).io.prefetch_info.fdp.useful_prefetch
+      fdpMonitor.io.accuracy.stream.useful_prefetch(w) := ldu(w).io.prefetch_info.fdp.useful_prefetch_stream
+      fdpMonitor.io.accuracy.stride.useful_prefetch(w) := ldu(w).io.prefetch_info.fdp.useful_prefetch_stride
     }else {
-      fdpMonitor.io.accuracy.useful_prefetch(w) := Mux(same_cycle_update_pf_flag, false.B, ldu(w).io.prefetch_info.fdp.useful_prefetch)
+      fdpMonitor.io.accuracy.stream.useful_prefetch(w) := Mux(same_cycle_update_pf_flag, false.B, ldu(w).io.prefetch_info.fdp.useful_prefetch_stream)
+      fdpMonitor.io.accuracy.stride.useful_prefetch(w) := Mux(same_cycle_update_pf_flag, false.B, ldu(w).io.prefetch_info.fdp.useful_prefetch_stride)
     }
   }
   for (w <- 0 until LoadPipelineWidth)  { fdpMonitor.io.pollution.cache_pollution(w) :=  ldu(w).io.prefetch_info.fdp.pollution }
   for (w <- 0 until LoadPipelineWidth)  { fdpMonitor.io.pollution.demand_miss(w) :=  ldu(w).io.prefetch_info.fdp.demand_miss }
+  for (w <- 0 until LoadPipelineWidth)  { fdpMonitor.io.coverage.demand_access(w) :=  ldu(w).io.prefetch_info.fdp.demand_access }
+  for (w <- 0 until LoadPipelineWidth)  { fdpMonitor.io.coverage.prefetch_hit(w) :=  ldu(w).io.prefetch_info.fdp.prefetch_hit }
+
+  io.stride_ctrl <> fdpMonitor.io.pf_ctrl_stride
   fdpMonitor.io.debugRolling := io.debugRolling
 
   //----------------------------------------
