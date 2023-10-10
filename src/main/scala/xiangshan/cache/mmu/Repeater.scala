@@ -237,7 +237,7 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
     if (i > 0) {
       for (j <- 0 until i) {
         val newIsMatch = io.tlb.req(i).bits.vpn === io.tlb.req(j).bits.vpn
-        when (newIsMatch) {
+        when (newIsMatch && io.tlb.req(j).valid) {
           enqidx(i) := enqidx(j)
           enqvalid(i) := false.B
         }
@@ -385,7 +385,7 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
   for (i <- 0 until exuParameters.LduCnt) {
     hintIO.req(i) := RegNext(load_hintIO.req(i))
   }
-  hintIO.resp := load_hintIO.resp
+  hintIO.resp := RegNext(load_hintIO.resp)
 
   when (load_filter(0).refill) {
     io.tlb.resp.bits.vector(0) := true.B

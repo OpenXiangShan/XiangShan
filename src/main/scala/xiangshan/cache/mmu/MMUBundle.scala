@@ -640,7 +640,7 @@ class TlbIO(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parame
   val refill_to_mem = Output(new TlbRefilltoMemIO())
   val replace = if (q.outReplace) Flipped(new TlbReplaceIO(Width, q)) else null
   val pmp = Vec(Width, ValidIO(new PMPReqBundle()))
-
+  val tlbreplay = Vec(Width, Output(Bool()))
 }
 
 class VectorTlbPtwIO(Width: Int)(implicit p: Parameters) extends TlbBundle {

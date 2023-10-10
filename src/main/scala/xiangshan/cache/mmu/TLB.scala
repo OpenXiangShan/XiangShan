@@ -191,10 +191,12 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     io.requestor(idx).req.ready := io.requestor(idx).resp.ready // should always be true
     XSError(!io.requestor(idx).resp.ready, s"${q.name} port ${idx} is non-block, resp.ready must be true.B")
 
-    val ptw_just_back = ptw.resp.fire && ptw.resp.bits.hit(get_pn(req_out(idx).vaddr), asid = io.csr.satp.asid, allType = true)
+    val ptw_just_back = RegNext(ptw.resp.fire && ptw.resp.bits.hit(get_pn(req_out(idx).vaddr), asid = io.csr.satp.asid, allType = true))
     io.ptw.req(idx).valid := req_out_v(idx) && missVec(idx) && !ptw_just_back // TODO: remove the regnext, timing
+    io.tlbreplay(idx) := req_out_v(idx) && missVec(idx) && ptw_just_back
     when (io.requestor(idx).req_kill && RegNext(io.requestor(idx).req.fire)) {
       io.ptw.req(idx).valid := false.B
+      io.tlbreplay(idx) := true.B
     }
     io.ptw.req(idx).bits.vpn := get_pn(req_out(idx).vaddr)
     io.ptw.req(idx).bits.memidx := req_out(idx).memidx
@@ -237,6 +239,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     ptw_req.valid := miss_req_v
     ptw_req.bits.vpn := miss_req_vpn
     ptw_req.bits.memidx := miss_req_memidx
+
+    io.tlbreplay(idx) := false.B
 
     // NOTE: when flush pipe, tlb should abandon last req
     // however, some outside modules like icache, dont care flushPipe, and still waiting for tlb resp
