@@ -126,12 +126,6 @@ case class IssueBlockParams(
 
   def VsetCnt: Int = exuBlockParams.map(_.fuConfigs.count(x => x.fuType == FuType.vsetiwi || x.fuType == FuType.vsetiwf || x.fuType == FuType.vsetfwf)).sum
 
-  def FmacCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.fmac)).sum
-
-  def FmiscCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.fmisc)).sum
-
-  def fDivSqrtCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.fDivSqrt)).sum
-
   def LduCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.name == "ldu")).sum
 
   def StaCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.name == "sta")).sum
@@ -141,8 +135,6 @@ case class IssueBlockParams(
   def StdCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.name == "std")).sum
 
   def VipuCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vipu)).sum
-
-  def VfpuCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vfpu)).sum
 
   def VlduCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vldu)).sum
 

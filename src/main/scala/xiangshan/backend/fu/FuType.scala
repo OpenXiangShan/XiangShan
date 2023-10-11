@@ -18,67 +18,64 @@ object FuType {
   val fence = OHInt(7)
   val bku = OHInt(8)
   val vsetiwi = OHInt(9) // vset read rs write rd
-  val fmac = OHInt(10)  // being deleted
-  val fmisc = OHInt(11) // being deleted
-  val fDivSqrt = OHInt(12) // being deleted
-  val ldu = OHInt(13)
-  val stu = OHInt(14)
-  val mou = OHInt(15)
-  val vipu = OHInt(16)
-  val vialuF = OHInt(17)
-  val vfpu = OHInt(18) // will be deleted
-  val vldu = OHInt(19)
-  val vstu = OHInt(20)
-  val vppu = OHInt(21)
-  val vsetiwf = OHInt(22) // vset read rs write vconfig
-  val vsetfwf = OHInt(23) // vset read old vl write vconfig
-  val vimac = OHInt(24)
-  val vfalu = OHInt(25)
-  val vfma  = OHInt(26)
-  val vfdiv = OHInt(27)
-  val vfcvt = OHInt(28)// Todo
+  val vsetiwf = OHInt(10) // vset read rs write vconfig
+  val vsetfwf = OHInt(11) // vset read old vl write vconfig
+  val ldu = OHInt(12)
+  val stu = OHInt(13)
+  val mou = OHInt(14)
+
+  val vipu = OHInt(15)
+  val vialuF = OHInt(16)
+  val vimac = OHInt(17)
+  val vldu = OHInt(18)
+  val vstu = OHInt(19)
+  val vppu = OHInt(20)
+  val vfalu = OHInt(21)
+  val vfma  = OHInt(22)
+  val vfdiv = OHInt(23)
+  val vfcvt = OHInt(24)
 
   def X = BitPat.N(num) // Todo: Don't Care
 
-  def num = 29
+  def num = 25
 
   def width = num
 
   def apply() = UInt(num.W)
 
-  def isInt(fuType: UInt): Bool = fuType(9, 0).orR || fuType(22)// from jmp to vset
+  def isInt(fuType: UInt): Bool = fuType(10, 0).orR // from jmp to vset
 
-  def isVset(fuType: UInt): Bool = fuType(9) || fuType(22) || fuType(23)
+  def isVset(fuType: UInt): Bool = fuType(11, 9).orR
 
   def isJump(fuType: UInt): Bool = fuType(0)
 
-  def isFp(fuType: UInt): Bool = fuType(12, 10).orR || fuType(25) || fuType(26) || fuType(27)
+  def isFp(fuType: UInt): Bool = fuType(24, 21).orR
 
-  def isMem(fuType: UInt): Bool = fuType(15, 13).orR
+  def isMem(fuType: UInt): Bool = fuType(14, 12).orR
 
-  def isLoadStore(fuType: UInt): Bool = fuType(14, 13).orR
+  def isLoadStore(fuType: UInt): Bool = fuType(13, 12).orR
 
-  def isLoad(fuType: UInt): Bool = fuType(13)
+  def isLoad(fuType: UInt): Bool = fuType(12)
 
-  def isStore(fuType: UInt): Bool = fuType(14).orR
+  def isStore(fuType: UInt): Bool = fuType(13).orR
 
-  def isAMO(fuType: UInt): Bool = fuType(15).orR
+  def isAMO(fuType: UInt): Bool = fuType(14).orR
 
   def isFence(fuType: UInt): Bool = fuType(7)
 
-  def isVpu(fuType: UInt): Bool = fuType(18, 16).orR || fuType(21) || fuType(24) || fuType(28)
+  def isVpu(fuType: UInt): Bool = fuType(17, 15).orR || fuType(20)
 
-  def isVls(fuType: UInt): Bool = fuType(20, 19).orR
+  def isVls(fuType: UInt): Bool = fuType(19, 18).orR
 
-  def isVLoad(fuType: UInt): Bool = fuType(19)
+  def isVLoad(fuType: UInt): Bool = fuType(18)
 
-  def isVStore(fuType: UInt): Bool = fuType(20)
+  def isVStore(fuType: UInt): Bool = fuType(19)
 
-  def isVfp(fuType: UInt): Bool = fuType(18) || fuType(27, 25).orR
+  def isVfp(fuType: UInt): Bool = fuType(24, 21).orR // scalar & vector float
 
-  def isVector(fuType: UInt): Bool = fuType(27, 24).orR || fuType(21, 16).orR // except vset
+  def isVector(fuType: UInt): Bool = fuType(24, 15).orR
 
-  def storeIsAMO(fuType: UInt): Bool = fuType(15)
+  def storeIsAMO(fuType: UInt): Bool = fuType(14)
 
   val functionNameMap = Map(
     jmp -> "jmp",
@@ -89,9 +86,6 @@ object FuType {
     div -> "div",
     fence -> "fence",
     bku -> "bku",
-    fmac -> "fmac", // being deleted
-    fmisc -> "fmisc", // being deleted
-    fDivSqrt -> "fdiv_fsqrt", // being deleted
     ldu -> "load",
     stu -> "store",
     mou -> "mou",
@@ -100,7 +94,6 @@ object FuType {
     vsetfwf -> "vsetfwf",
     vipu -> "vipu",
     vialuF -> "vialuF",
-    vfpu -> "vfpu",
     vldu -> "vldu",
     vstu -> "vstu",
     vppu -> "vppu",

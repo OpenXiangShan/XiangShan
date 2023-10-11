@@ -135,7 +135,7 @@ case class FuConfig (
 
   def needVecCtrl: Boolean = {
     import FuType._
-    Set(vipu, vialuF, vimac, vfpu, vppu, vfalu, vfma, vfdiv, vfcvt).contains(fuType)
+    Set(vipu, vialuF, vimac, vppu, vfalu, vfma, vfdiv, vfcvt).contains(fuType)
   }
 
   def isMul: Boolean = fuType == FuType.mul
@@ -570,11 +570,11 @@ object FuConfig {
   def allConfigs = Seq(
     JmpCfg, BrhCfg, I2fCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg, VSetRvfWvfCfg, VSetRiWvfCfg, VSetRiWiCfg,
     LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg, VialuCfg, VipuCfg, VlduCfg,
-    VfaluCfg, VfmaCfg, VfcvtCfg
+    VfaluCfg, VfmaCfg, VfdivCfg, VfcvtCfg
   )
 
   def VecArithFuConfigs = Seq(
-    VialuCfg, VimacCfg, VppuCfg, VipuCfg, VfaluCfg, VfmaCfg, VfcvtCfg
+    VialuCfg, VimacCfg, VppuCfg, VipuCfg, VfaluCfg, VfmaCfg, VfdivCfg, VfcvtCfg
   )
 }
 

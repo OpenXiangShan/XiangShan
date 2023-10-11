@@ -44,12 +44,6 @@ case class SchdBlockParams(
 
   def VsetCnt: Int = issueBlockParams.map(_.VsetCnt).sum
 
-  def FmacCnt: Int = issueBlockParams.map(_.FmacCnt).sum
-
-  def FmiscCnt: Int = issueBlockParams.map(_.FmiscCnt).sum
-
-  def FDivSqrtCnt: Int = issueBlockParams.map(_.fDivSqrtCnt).sum
-
   def LduCnt: Int = issueBlockParams.map(_.LduCnt).sum
 
   def StaCnt: Int = issueBlockParams.map(_.StaCnt).sum
@@ -59,8 +53,6 @@ case class SchdBlockParams(
   def MouCnt: Int = issueBlockParams.map(_.MouCnt).sum
 
   def VipuCnt: Int = issueBlockParams.map(_.VipuCnt).sum
-
-  def VfpuCnt: Int = issueBlockParams.map(_.VfpuCnt).sum
 
   def VlduCnt: Int = issueBlockParams.map(_.VlduCnt).sum
 
