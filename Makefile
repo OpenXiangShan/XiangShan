@@ -48,6 +48,16 @@ endif
 override SIM_ARGS += --with-dramsim3
 endif
 
+# run emu with chisel-db
+ifeq ($(WITH_CHISELDB),1)
+override SIM_ARGS += --with-chiseldb
+endif
+
+# run emu with chisel-db
+ifeq ($(WITH_ROLLINGDB),1)
+override SIM_ARGS += --with-rollingdb
+endif
+
 # dynamic switch CONSTANTIN
 ifeq ($(WITH_CONSTANTIN),0)
 $(info disable WITH_CONSTANTIN)
@@ -131,7 +141,7 @@ clean:
 
 init:
 	git submodule update --init
-	cd rocket-chip && git submodule update --init api-config-chipsalliance hardfloat
+	cd rocket-chip && git submodule update --init cde hardfloat
 
 bump:
 	git submodule foreach "git fetch origin&&git checkout master&&git reset --hard origin/master"
@@ -143,10 +153,10 @@ idea:
 	mill -i mill.scalalib.GenIdea/idea
 
 # verilator simulation
-emu:
+emu: sim-verilog
 	$(MAKE) -C ./difftest emu SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
 
-emu-run:
+emu-run: emu
 	$(MAKE) -C ./difftest emu-run SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
 
 # vcs simulation

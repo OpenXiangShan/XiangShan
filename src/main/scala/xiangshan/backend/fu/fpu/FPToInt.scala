@@ -19,7 +19,7 @@
 
 package xiangshan.backend.fu.fpu
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import fudian.FCMP
@@ -88,7 +88,7 @@ class FPToIntDataModule(latency: Int)(implicit p: Parameters) extends FPUDataMod
     dcmp.io.eq
   )
 
-  val cmp_out = ((~rm_reg).asUInt() & Cat(lt, eq)).orR()
+  val cmp_out = ((~rm_reg).asUInt & Cat(lt, eq)).orR
   val cmp_exc = Mux(ctrl_reg.typeTagIn === FPU.S,
     scmp.io.fflags,
     dcmp.io.fflags

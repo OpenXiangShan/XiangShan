@@ -16,10 +16,9 @@
 
 package xiangshan.cache.mmu
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import chisel3.internal.naming.chiselName
 import xiangshan._
 import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
 import utils._
@@ -128,7 +127,6 @@ class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCo
   val csr_dup = Vec(3, Input(new TlbCsrBundle()))
 }
 
-@chiselName
 class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPerfEvents {
   val io = IO(new PtwCacheIO)
 
@@ -244,7 +242,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   }
   // NOTE: not actually bypassed, just check if hit, re-access the page cache
   def refill_bypass(vpn: UInt, level: Int) = {
-    io.refill.valid && (level.U === io.refill.bits.level_dup(0)) && vpn_match(io.refill.bits.req_info_dup(0).vpn, vpn, level),
+    io.refill.valid && (level.U === io.refill.bits.level_dup(0)) && vpn_match(io.refill.bits.req_info_dup(0).vpn, vpn, level)
   }
 
   // l1
@@ -294,7 +292,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     // check hit and ecc
     val check_vpn = stageCheck(0).bits.req_info.vpn
     val ramDatas = RegEnable(data_resp, stageDelay(1).fire)
-    val vVec = RegEnable(vVec_delay, stageDelay(1).fire).asBools()
+    val vVec = RegEnable(vVec_delay, stageDelay(1).fire).asBools
 
     val hitVec = RegEnable(hitVec_delay, stageDelay(1).fire)
     val hitWayEntry = ParallelPriorityMux(hitVec zip ramDatas)
@@ -339,7 +337,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     // check hit and ecc
     val check_vpn = stageCheck(0).bits.req_info.vpn
     val ramDatas = RegEnable(data_resp, stageDelay(1).fire)
-    val vVec = RegEnable(vVec_delay, stageDelay(1).fire).asBools()
+    val vVec = RegEnable(vVec_delay, stageDelay(1).fire).asBools
 
     val hitVec = RegEnable(hitVec_delay, stageDelay(1).fire)
     val hitWayEntry = ParallelPriorityMux(hitVec zip ramDatas)
@@ -391,7 +389,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     (RegEnable(hit, stageDelay(1).fire),
      RegEnable(hitData, stageDelay(1).fire),
      RegEnable(hitData.prefetch, stageDelay(1).fire),
-     RegEnable(hitData.v, stageDelay(1).fire()))
+     RegEnable(hitData.v, stageDelay(1).fire))
   }
   val spHitPerm = spHitData.perm.getOrElse(0.U.asTypeOf(new PtePermBundle))
   val spHitLevel = spHitData.level.getOrElse(0.U)
@@ -699,7 +697,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val resp_l2_pre = resp_res.l2.pre
   val resp_l3_pre = resp_res.l3.pre
   val resp_sp_pre = resp_res.sp.pre
-  val base_valid_access_0 = !from_pre(io.resp.bits.req_info.source) && io.resp.fire()
+  val base_valid_access_0 = !from_pre(io.resp.bits.req_info.source) && io.resp.fire
   XSPerfAccumulate("access", base_valid_access_0)
   XSPerfAccumulate("l1_hit", base_valid_access_0 && io.resp.bits.toFsm.l1Hit && !io.resp.bits.toFsm.l2Hit && !io.resp.bits.hit)
   XSPerfAccumulate("l2_hit", base_valid_access_0 && io.resp.bits.toFsm.l2Hit && !io.resp.bits.hit)
@@ -713,7 +711,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   XSPerfAccumulate("sp_hit_pre", base_valid_access_0 && resp_sp_pre && resp_sp)
   XSPerfAccumulate("pte_hit_pre",base_valid_access_0 && (resp_l3_pre && resp_l3 || resp_sp_pre && resp_sp) && io.resp.bits.hit)
 
-  val base_valid_access_1 = from_pre(io.resp.bits.req_info.source) && io.resp.fire()
+  val base_valid_access_1 = from_pre(io.resp.bits.req_info.source) && io.resp.fire
   XSPerfAccumulate("pre_access", base_valid_access_1)
   XSPerfAccumulate("pre_l1_hit", base_valid_access_1 && io.resp.bits.toFsm.l1Hit && !io.resp.bits.toFsm.l2Hit && !io.resp.bits.hit)
   XSPerfAccumulate("pre_l2_hit", base_valid_access_1 && io.resp.bits.toFsm.l2Hit && !io.resp.bits.hit)
@@ -727,7 +725,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   XSPerfAccumulate("pre_sp_hit_pre", base_valid_access_1 && resp_sp_pre && resp_sp)
   XSPerfAccumulate("pre_pte_hit_pre",base_valid_access_1 && (resp_l3_pre && resp_l3 || resp_sp_pre && resp_sp) && io.resp.bits.hit)
 
-  val base_valid_access_2 = stageResp.bits.isFirst && !from_pre(io.resp.bits.req_info.source) && io.resp.fire()
+  val base_valid_access_2 = stageResp.bits.isFirst && !from_pre(io.resp.bits.req_info.source) && io.resp.fire
   XSPerfAccumulate("access_first", base_valid_access_2)
   XSPerfAccumulate("l1_hit_first", base_valid_access_2 && io.resp.bits.toFsm.l1Hit && !io.resp.bits.toFsm.l2Hit && !io.resp.bits.hit)
   XSPerfAccumulate("l2_hit_first", base_valid_access_2 && io.resp.bits.toFsm.l2Hit && !io.resp.bits.hit)
@@ -741,7 +739,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   XSPerfAccumulate("sp_hit_pre_first", base_valid_access_2 && resp_sp_pre && resp_sp)
   XSPerfAccumulate("pte_hit_pre_first",base_valid_access_2 && (resp_l3_pre && resp_l3 || resp_sp_pre && resp_sp) && io.resp.bits.hit)
 
-  val base_valid_access_3 = stageResp.bits.isFirst && from_pre(io.resp.bits.req_info.source) && io.resp.fire()
+  val base_valid_access_3 = stageResp.bits.isFirst && from_pre(io.resp.bits.req_info.source) && io.resp.fire
   XSPerfAccumulate("pre_access_first", base_valid_access_3)
   XSPerfAccumulate("pre_l1_hit_first", base_valid_access_3 && io.resp.bits.toFsm.l1Hit && !io.resp.bits.toFsm.l2Hit && !io.resp.bits.hit)
   XSPerfAccumulate("pre_l2_hit_first", base_valid_access_3 && io.resp.bits.toFsm.l2Hit && !io.resp.bits.hit)

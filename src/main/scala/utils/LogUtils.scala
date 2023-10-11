@@ -16,11 +16,11 @@
 
 package utils
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import xiangshan.DebugOptionsKey
 import utils.XSLogLevel.XSLogLevel
-import utility.GTimer
+import utility.{GTimer, LogPerfHelper, LogPerfIO}
 
 object XSLogLevel extends Enumeration {
   type XSLogLevel = Value
@@ -36,17 +36,16 @@ object XSLogLevel extends Enumeration {
 
 object XSLog {
   val MagicStr = "9527"
-  def apply(debugLevel: XSLogLevel)
+  def apply(debugLevel: XSLogLevel, ctrlInfoOpt: Option[LogPerfIO] = None)
            (prefix: Boolean, cond: Bool, pable: Printable)(implicit p: Parameters): Any =
   {
     val debugOpts = p(DebugOptionsKey)
-    val logEnable = WireInit(false.B)
-    val logTimestamp = WireInit(0.U(64.W))
     val enableDebug = debugOpts.EnableDebug && debugLevel != XSLogLevel.PERF
     val enablePerf = debugOpts.EnablePerfDebug && debugLevel == XSLogLevel.PERF
     if (!debugOpts.FPGAPlatform && (enableDebug || enablePerf || debugLevel == XSLogLevel.ERROR)) {
-      ExcitingUtils.addSink(logEnable, "DISPLAY_LOG_ENABLE")
-      ExcitingUtils.addSink(logTimestamp, "logTimestamp")
+      val ctrlInfo = ctrlInfoOpt.getOrElse(Module(new LogPerfHelper).io)
+      val logEnable = ctrlInfo.logEnable
+      val logTimestamp = ctrlInfo.timer
       val check_cond = (if (debugLevel == XSLogLevel.ERROR) true.B else logEnable) && cond && RegNext(true.B, false.B)
       when (check_cond) {
         val commonInfo = p"[$debugLevel][time=$logTimestamp] $MagicStr: "
@@ -57,16 +56,9 @@ object XSLog {
       }
     }
   }
-
-  def displayLog(implicit p: Parameters): Bool = {
-    val debugOpts = p(DebugOptionsKey)
-    val ret = WireInit(false.B)
-    if (!debugOpts.FPGAPlatform && debugOpts.EnableDebug) {
-      val logEnable = WireInit(false.B)
-      ExcitingUtils.addSink(logEnable, "DISPLAY_LOG_ENABLE")
-      ret := logEnable
-    }
-    ret
+  def apply(debugLevel: XSLogLevel, ctrlInfo: LogPerfIO)
+           (prefix: Boolean, cond: Bool, pable: Printable)(implicit p: Parameters): Any = {
+    apply(debugLevel, Some(ctrlInfo))(prefix, cond, pable)
   }
 }
 
@@ -80,36 +72,8 @@ sealed abstract class LogHelper(val logLevel: XSLogLevel){
   def apply(pable: Printable)(implicit p: Parameters): Any = apply(true.B, pable)
   def apply(prefix: Boolean, cond: Bool, fmt: String, data: Bits*)(implicit p: Parameters): Any =
     apply(prefix, cond, Printable.pack(fmt, data:_*))
-  def apply(prefix: Boolean, cond: Bool, pable: Printable)(implicit p: Parameters): Any =
+  def apply(prefix: Boolean, cond: Bool, pable: Printable)(implicit p: Parameters): Any ={
     XSLog(logLevel)(prefix, cond, pable)
-
-  // trigger log or not
-  // used when user what to fine-control their printf output
-  def trigger(implicit p: Parameters): Bool = {
-    XSLog.displayLog
-  }
-
-  def printPrefix()(implicit p: Parameters): Unit = {
-    val commonInfo = p"[$logLevel][time=${GTimer()}] ${XSLog.MagicStr}: "
-    when (trigger) {
-      printf(commonInfo)
-    }
-  }
-
-  // dump under with certain prefix
-  def exec(dump: () => Unit)(implicit p: Parameters): Unit = {
-    when (trigger) {
-      printPrefix
-      dump
-    }
-  }
-
-  // dump under certain condition and with certain prefix
-  def exec(cond: Bool, dump: () => Unit)(implicit p: Parameters): Unit = {
-    when (trigger && cond) {
-      printPrefix
-      dump
-    }
   }
 }
 

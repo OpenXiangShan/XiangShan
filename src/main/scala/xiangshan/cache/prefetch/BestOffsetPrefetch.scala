@@ -16,7 +16,7 @@
 
 package xiangshan.cache.prefetch
 
-import chipsalliance.rocketchip.config.{Parameters, Field}
+import org.chipsalliance.cde.config.{Parameters, Field}
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -176,11 +176,11 @@ class RecentRequestTable(implicit p: Parameters) extends PrefetchModule {
 
   val rAddr = io.r.req.bits.addr - (io.r.req.bits.testOffset << log2Up(blockBytes))
   val rData = Wire(rrTableEntry())
-  rrTable.io.r.req.valid := io.r.req.fire()
+  rrTable.io.r.req.valid := io.r.req.fire
   rrTable.io.r.req.bits.setIdx := idx(rAddr)
   rData := rrTable.io.r.resp.data(0)
 
-  val rwConflict = io.w.fire() && io.r.req.fire()// && idx(wAddr) === idx(rAddr)
+  val rwConflict = io.w.fire && io.r.req.fire// && idx(wAddr) === idx(rAddr)
   // when (rwConflict) {
   //   rrTable.io.r.req.valid := false.B
   // }
@@ -191,7 +191,7 @@ class RecentRequestTable(implicit p: Parameters) extends PrefetchModule {
 
   io.w.ready := rrTable.io.w.req.ready && !io.r.req.valid
   io.r.req.ready := true.B
-  io.r.resp.valid := RegNext(rrTable.io.r.req.fire())
+  io.r.resp.valid := RegNext(rrTable.io.r.req.fire)
   io.r.resp.bits.testOffset := RegNext(io.r.req.bits.testOffset)
   io.r.resp.bits.ptr := RegNext(io.r.req.bits.ptr)
   io.r.resp.bits.hit := rData.valid && rData.tag === RegNext(tag(rAddr))
@@ -199,10 +199,10 @@ class RecentRequestTable(implicit p: Parameters) extends PrefetchModule {
   assert(!RegNext(rwConflict), "single port SRAM should not read and write at the same time")
 
   // debug info
-  XSDebug(io.w.fire(), p"io.write: v=${io.w.valid} addr=0x${Hexadecimal(io.w.bits)}\n")
+  XSDebug(io.w.fire, p"io.write: v=${io.w.valid} addr=0x${Hexadecimal(io.w.bits)}\n")
   XSDebug(p"io.read: ${io.r}\n")
-  XSDebug(io.w.fire(), p"wAddr=0x${Hexadecimal(wAddr)} idx=${Hexadecimal(idx(wAddr))} tag=${Hexadecimal(tag(wAddr))}\n")
-  XSDebug(io.r.req.fire(), p"rAddr=0x${Hexadecimal(rAddr)} idx=${Hexadecimal(idx(rAddr))} rData=${rData}\n")
+  XSDebug(io.w.fire, p"wAddr=0x${Hexadecimal(wAddr)} idx=${Hexadecimal(idx(wAddr))} tag=${Hexadecimal(tag(wAddr))}\n")
+  XSDebug(io.r.req.fire, p"rAddr=0x${Hexadecimal(rAddr)} idx=${Hexadecimal(idx(rAddr))} rData=${rData}\n")
 
 }
 
@@ -258,7 +258,7 @@ class OffsetScoreTable(implicit p: Parameters) extends PrefetchModule {
   // (1) one of the score equals SCOREMAX, or
   // (2) the number of rounds equals ROUNDMAX.
   when (state === s_learn) {
-    when (io.test.req.fire()) {
+    when (io.test.req.fire) {
       val roundFinish = ptr === (scores - 1).U
       ptr := Mux(roundFinish, 0.U, ptr + 1.U)
       round := Mux(roundFinish, round + 1.U, round)
@@ -272,7 +272,7 @@ class OffsetScoreTable(implicit p: Parameters) extends PrefetchModule {
       XSDebug(p"round reaches roundMax(${roundMax.U})\n")
     }
 
-    when (io.test.resp.fire() && io.test.resp.bits.hit) {
+    when (io.test.resp.fire && io.test.resp.bits.hit) {
       val oldEntry = st(io.test.resp.bits.ptr)
       val oldScore = oldEntry.score
       val newScore = oldScore + 1.U
@@ -291,7 +291,7 @@ class OffsetScoreTable(implicit p: Parameters) extends PrefetchModule {
 
   io.req.ready := true.B
   io.prefetchOffset := prefetchOffset
-  io.test.req.valid := state === s_learn && io.req.fire()
+  io.test.req.valid := state === s_learn && io.req.fire
   io.test.req.bits.addr := io.req.bits
   io.test.req.bits.testOffset := testOffset
   io.test.req.bits.ptr := ptr
@@ -305,7 +305,7 @@ class OffsetScoreTable(implicit p: Parameters) extends PrefetchModule {
     else if (i % 8 == 7 || i == scores - 1) { XSDebug(false, true.B, p"${i.U}:${st(i)}\n") }
     else { XSDebug(false, true.B, p"${i.U}:${st(i)}\t") }
   }
-  XSDebug(io.req.fire(), p"receive req from L1. io.req.bits=0x${Hexadecimal(io.req.bits)}\n")
+  XSDebug(io.req.fire, p"receive req from L1. io.req.bits=0x${Hexadecimal(io.req.bits)}\n")
 }
 
 class BestOffsetPrefetchEntry(implicit p: Parameters) extends PrefetchModule with HasTlbConst {
@@ -343,25 +343,25 @@ class BestOffsetPrefetchEntry(implicit p: Parameters) extends PrefetchModule wit
   }
 
   when (state === s_req) {
-    when (io.pft.req.fire()) {
+    when (io.pft.req.fire) {
       state := s_resp
     }
   }
 
   when (state === s_resp) {
-    when (io.pft.resp.fire()) {
+    when (io.pft.resp.fire) {
       state := s_write_recent_req
     }
   }
 
   when (state === s_write_recent_req) {
-    when (io.writeRRTable.fire()) {
+    when (io.writeRRTable.fire) {
       state := s_finish
     }
   }
 
   when (state === s_finish) {
-    when (io.pft.finish.fire()) {
+    when (io.pft.finish.fire) {
       state := s_idle
     }
   }

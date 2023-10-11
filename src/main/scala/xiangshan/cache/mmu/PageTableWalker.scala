@@ -16,10 +16,9 @@
 
 package xiangshan.cache.mmu
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import chisel3.internal.naming.chiselName
 import xiangshan._
 import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
 import utils._
@@ -70,7 +69,6 @@ class PTWIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
   })
 }
 
-@chiselName
 class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPerfEvents {
   val io = IO(new PTWIO)
   val sfence = io.sfence
@@ -104,7 +102,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val ppn_af = memPte.isAf()
   val find_pte = memPte.isLeaf() || ppn_af || pageFault
   val to_find_pte = level === 1.U && find_pte === false.B
-  val source = RegEnable(io.req.bits.req_info.source, io.req.fire())
+  val source = RegEnable(io.req.bits.req_info.source, io.req.fire)
 
   val l1addr = MakeAddr(satp.ppn, getVpnn(vpn, 2))
   val l2addr = MakeAddr(Mux(l1Hit, ppn, memPte.ppn), getVpnn(vpn, 1))
@@ -134,7 +132,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.refill.level := level
   io.refill.req_info.source := source
 
-  when (io.req.fire()){
+  when (io.req.fire){
     val req = io.req.bits
     level := Mux(req.l1Hit, 1.U, 0.U)
     af_level := Mux(req.l1Hit, 1.U, 0.U)
@@ -159,12 +157,12 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     mem_addr_update := true.B
   }
 
-  when (mem.req.fire()){
+  when (mem.req.fire){
     s_mem_req := true.B
     w_mem_resp := false.B
   }
 
-  when(mem.resp.fire() && w_mem_resp === false.B){
+  when(mem.resp.fire && w_mem_resp === false.B){
     w_mem_resp := true.B
     af_level := af_level + 1.U
     s_llptw_req := false.B
@@ -178,14 +176,14 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       s_llptw_req := true.B
       mem_addr_update := false.B
     }.elsewhen(io.llptw.valid){
-      when(io.llptw.fire()) {
+      when(io.llptw.fire) {
         idle := true.B
         s_llptw_req := true.B
         mem_addr_update := false.B
       }
       finish := true.B
     }.elsewhen(io.resp.valid){
-      when(io.resp.fire()) {
+      when(io.resp.fire) {
         idle := true.B
         s_llptw_req := true.B
         mem_addr_update := false.B
@@ -210,27 +208,27 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   XSDebug(p"[ptw] level:${level} notFound:${pageFault}\n")
 
   // perf
-  XSPerfAccumulate("fsm_count", io.req.fire())
+  XSPerfAccumulate("fsm_count", io.req.fire)
   for (i <- 0 until PtwWidth) {
-    XSPerfAccumulate(s"fsm_count_source${i}", io.req.fire() && io.req.bits.req_info.source === i.U)
+    XSPerfAccumulate(s"fsm_count_source${i}", io.req.fire && io.req.bits.req_info.source === i.U)
   }
   XSPerfAccumulate("fsm_busy", !idle)
   XSPerfAccumulate("fsm_idle", idle)
   XSPerfAccumulate("resp_blocked", io.resp.valid && !io.resp.ready)
   XSPerfAccumulate("ptw_ppn_af", io.resp.fire && ppn_af)
-  XSPerfAccumulate("mem_count", mem.req.fire())
-  XSPerfAccumulate("mem_cycle", BoolStopWatch(mem.req.fire, mem.resp.fire(), true))
+  XSPerfAccumulate("mem_count", mem.req.fire)
+  XSPerfAccumulate("mem_cycle", BoolStopWatch(mem.req.fire, mem.resp.fire, true))
   XSPerfAccumulate("mem_blocked", mem.req.valid && !mem.req.ready)
 
   TimeOutAssert(!idle, timeOutThreshold, "page table walker time out")
 
   val perfEvents = Seq(
-    ("fsm_count         ", io.req.fire()                                     ),
+    ("fsm_count         ", io.req.fire                                     ),
     ("fsm_busy          ", !idle                                             ),
     ("fsm_idle          ", idle                                              ),
     ("resp_blocked      ", io.resp.valid && !io.resp.ready                   ),
-    ("mem_count         ", mem.req.fire()                                    ),
-    ("mem_cycle         ", BoolStopWatch(mem.req.fire, mem.resp.fire(), true)),
+    ("mem_count         ", mem.req.fire                                    ),
+    ("mem_cycle         ", BoolStopWatch(mem.req.fire, mem.resp.fire, true)),
     ("mem_blocked       ", mem.req.valid && !mem.req.ready                   ),
   )
   generatePerfEvent()
@@ -279,7 +277,6 @@ class LLPTWEntry(implicit p: Parameters) extends XSBundle with HasPtwConst {
 }
 
 
-@chiselName
 class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPerfEvents {
   val io = IO(new LLPTWIO())
 
@@ -294,7 +291,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val is_having = state.map(_ === state_mem_out)
   val is_cache = state.map(_ === state_cache)
 
-  val full = !ParallelOR(is_emptys).asBool()
+  val full = !ParallelOR(is_emptys).asBool
   val enq_ptr = ParallelPriorityEncoder(is_emptys)
 
   val mem_ptr = ParallelPriorityEncoder(is_having) // TODO: optimize timing, bad: entries -> ptr -> entry
@@ -312,23 +309,23 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val dup_vec = state.indices.map(i =>
     dup(io.in.bits.req_info.vpn, entries(i).req_info.vpn)
   )
-  val dup_req_fire = mem_arb.io.out.fire() && dup(io.in.bits.req_info.vpn, mem_arb.io.out.bits.req_info.vpn) // dup with the req fire entry
+  val dup_req_fire = mem_arb.io.out.fire && dup(io.in.bits.req_info.vpn, mem_arb.io.out.bits.req_info.vpn) // dup with the req fire entry
   val dup_vec_wait = dup_vec.zip(is_waiting).map{case (d, w) => d && w} // dup with "mem_waiting" entres, sending mem req already
   val dup_vec_having = dup_vec.zipWithIndex.map{case (d, i) => d && is_having(i)} // dup with the "mem_out" entry recv the data just now
   val wait_id = Mux(dup_req_fire, mem_arb.io.chosen, ParallelMux(dup_vec_wait zip entries.map(_.wait_id)))
-  val dup_wait_resp = io.mem.resp.fire() && VecInit(dup_vec_wait)(io.mem.resp.bits.id) // dup with the entry that data coming next cycle
+  val dup_wait_resp = io.mem.resp.fire && VecInit(dup_vec_wait)(io.mem.resp.bits.id) // dup with the entry that data coming next cycle
   val to_wait = Cat(dup_vec_wait).orR || dup_req_fire
   val to_mem_out = dup_wait_resp
   val to_cache = Cat(dup_vec_having).orR
   XSError(RegNext(dup_req_fire && Cat(dup_vec_wait).orR, init = false.B), "mem req but some entries already waiting, should not happed")
 
-  XSError(io.in.fire() && ((to_mem_out && to_cache) || (to_wait && to_cache)), "llptw enq, to cache conflict with to mem")
+  XSError(io.in.fire && ((to_mem_out && to_cache) || (to_wait && to_cache)), "llptw enq, to cache conflict with to mem")
   val mem_resp_hit = RegInit(VecInit(Seq.fill(l2tlbParams.llptwsize)(false.B)))
   val enq_state_normal = Mux(to_mem_out, state_mem_out, // same to the blew, but the mem resp now
     Mux(to_wait, state_mem_waiting,
     Mux(to_cache, state_cache, state_addr_check)))
   val enq_state = Mux(from_pre(io.in.bits.req_info.source) && enq_state_normal =/= state_addr_check, state_idle, enq_state_normal)
-  when (io.in.fire()) {
+  when (io.in.fire) {
     // if prefetch req does not need mem access, just give it up.
     // so there will be at most 1 + FilterSize entries that needs re-access page cache
     // so 2 + FilterSize is enough to avoid dead-lock
@@ -341,11 +338,11 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   }
 
   val enq_ptr_reg = RegNext(enq_ptr)
-  val need_addr_check = RegNext(enq_state === state_addr_check && io.in.fire() && !flush)
-  val last_enq_vpn = RegEnable(io.in.bits.req_info.vpn, io.in.fire())
+  val need_addr_check = RegNext(enq_state === state_addr_check && io.in.fire && !flush)
+  val last_enq_vpn = RegEnable(io.in.bits.req_info.vpn, io.in.fire)
 
   io.pmp.req.valid := need_addr_check
-  io.pmp.req.bits.addr := RegEnable(MakeAddr(io.in.bits.ppn, getVpnn(io.in.bits.req_info.vpn, 0)), io.in.fire())
+  io.pmp.req.bits.addr := RegEnable(MakeAddr(io.in.bits.ppn, getVpnn(io.in.bits.req_info.vpn, 0)), io.in.fire)
   io.pmp.req.bits.cmd := TlbCmd.read
   io.pmp.req.bits.size := 3.U // TODO: fix it
   val pmp_resp_valid = io.pmp.req.valid // same cycle
@@ -357,7 +354,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     state(enq_ptr_reg) := Mux(accessFault, state_mem_out, state_mem_req)
   }
 
-  when (mem_arb.io.out.fire()) {
+  when (mem_arb.io.out.fire) {
     for (i <- state.indices) {
       when (state(i) =/= state_idle && dup(entries(i).req_info.vpn, mem_arb.io.out.bits.req_info.vpn)) {
         // NOTE: "dup enq set state to mem_wait" -> "sending req set other dup entries to mem_wait"
@@ -366,7 +363,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       }
     }
   }
-  when (io.mem.resp.fire()) {
+  when (io.mem.resp.fire) {
     state.indices.map{i =>
       when (state(i) === state_mem_waiting && io.mem.resp.bits.id === entries(i).wait_id) {
         state(i) := state_mem_out
@@ -374,7 +371,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       }
     }
   }
-  when (io.out.fire()) {
+  when (io.out.fire) {
     assert(state(mem_ptr) === state_mem_out)
     state(mem_ptr) := state_idle
   }
@@ -391,7 +388,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   io.in.ready := !full
 
-  io.out.valid := ParallelOR(is_having).asBool()
+  io.out.valid := ParallelOR(is_having).asBool
   io.out.bits.req_info := entries(mem_ptr).req_info
   io.out.bits.id := mem_ptr
   io.out.bits.af := entries(mem_ptr).af
@@ -407,17 +404,17 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.cache.valid := Cat(is_cache).orR
   io.cache.bits := ParallelMux(is_cache, entries.map(_.req_info))
 
-  XSPerfAccumulate("llptw_in_count", io.in.fire())
+  XSPerfAccumulate("llptw_in_count", io.in.fire)
   XSPerfAccumulate("llptw_in_block", io.in.valid && !io.in.ready)
   for (i <- 0 until 7) {
-    XSPerfAccumulate(s"enq_state${i}", io.in.fire() && enq_state === i.U)
+    XSPerfAccumulate(s"enq_state${i}", io.in.fire && enq_state === i.U)
   }
   for (i <- 0 until (l2tlbParams.llptwsize + 1)) {
     XSPerfAccumulate(s"util${i}", PopCount(is_emptys.map(!_)) === i.U)
     XSPerfAccumulate(s"mem_util${i}", PopCount(is_mems) === i.U)
     XSPerfAccumulate(s"waiting_util${i}", PopCount(is_waiting) === i.U)
   }
-  XSPerfAccumulate("mem_count", io.mem.req.fire())
+  XSPerfAccumulate("mem_count", io.mem.req.fire)
   XSPerfAccumulate("mem_cycle", PopCount(is_waiting) =/= 0.U)
   XSPerfAccumulate("blocked_in", io.in.valid && !io.in.ready)
 
@@ -426,9 +423,9 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   }
 
   val perfEvents = Seq(
-    ("tlbllptw_incount           ", io.in.fire()               ),
+    ("tlbllptw_incount           ", io.in.fire               ),
     ("tlbllptw_inblock           ", io.in.valid && !io.in.ready),
-    ("tlbllptw_memcount          ", io.mem.req.fire()          ),
+    ("tlbllptw_memcount          ", io.mem.req.fire          ),
     ("tlbllptw_memcycle          ", PopCount(is_waiting)       ),
   )
   generatePerfEvent()

@@ -16,16 +16,16 @@
 
 package xiangshan
 
-import chipsalliance.rocketchip.config
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
 import system.HasSoCParameter
-import utility._
 import utils._
+import utility._
 import xiangshan.backend._
 import xiangshan.cache.mmu._
 import xiangshan.frontend._
@@ -38,7 +38,7 @@ abstract class XSModule(implicit val p: Parameters) extends Module
 //remove this trait after impl module logic
 trait NeedImpl {
   this: RawModule =>
-  override protected def IO[T <: Data](iodef: T): T = {
+  protected def IO[T <: Data](iodef: T): T = {
     println(s"[Warn]: (${this.name}) please reomve 'NeedImpl' after implement this module")
     val io = chisel3.experimental.IO(iodef)
     io <> DontCare
@@ -52,6 +52,7 @@ abstract class XSBundle(implicit val p: Parameters) extends Bundle
 abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   with HasXSParameter
 {
+  override def shouldBeInlined: Boolean = false
   // interrupt sinks
   val clint_int_sink = IntSinkNode(IntSinkPortSimple(1, 2))
   val debug_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
@@ -81,6 +82,12 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
     val beu_errors = Output(new XSL1BusErrors())
     val l2_hint = Input(Valid(new L2ToL1Hint()))
+    val l2PfqBusy = Input(Bool())
+    val debugTopDown = new Bundle {
+      val robHeadPaddr = Valid(UInt(PAddrBits.W))
+      val l2MissMatch = Input(Bool())
+      val l3MissMatch = Input(Bool())
+    }
   })
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
@@ -140,6 +147,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   io.beu_errors.icache <> frontend.io.error.toL1BusErrorUnitInfo()
   io.beu_errors.dcache <> memBlock.io.error.toL1BusErrorUnitInfo()
+  io.beu_errors.l2 <> DontCare
 
   memBlock.io.hartId := io.hartId
   memBlock.io.issue.zipAll(backend.io.mem.issueUops, DontCare, DontCare).foreach { case(memIssue, backIssue) =>
@@ -177,6 +185,12 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.itlb <> frontend.io.ptw
   memBlock.io.l2_hint.valid := io.l2_hint.valid
   memBlock.io.l2_hint.bits.sourceId := io.l2_hint.bits.sourceId
+  memBlock.io.l2PfqBusy := io.l2PfqBusy
+  memBlock.io.int2vlsu <> DontCare
+  memBlock.io.vec2vlsu <> DontCare
+  memBlock.io.vlsu2vec <> DontCare
+  memBlock.io.vlsu2int <> DontCare
+  memBlock.io.vlsu2ctrl <> DontCare
 
   // TODO: Connect us when implemented
   memBlock.io.int2vlsu  <> DontCare
@@ -187,6 +201,15 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   io.l2_pf_enable := backend.io.csrCustomCtrl.l2_pf_enable
+
+  // top-down info
+  memBlock.io.debugTopDown.robHeadVaddr := ctrlBlock.io.debugTopDown.fromRob.robHeadVaddr
+  frontend.io.debugTopDown.robHeadVaddr := ctrlBlock.io.debugTopDown.fromRob.robHeadVaddr
+  io.debugTopDown.robHeadPaddr := ctrlBlock.io.debugTopDown.fromRob.robHeadPaddr
+  ctrlBlock.io.debugTopDown.fromCore.l2MissMatch := io.debugTopDown.l2MissMatch
+  ctrlBlock.io.debugTopDown.fromCore.l3MissMatch := io.debugTopDown.l3MissMatch
+  ctrlBlock.io.debugTopDown.fromCore.fromMem := memBlock.io.debugTopDown.toCore
+  memBlock.io.debugRolling := ctrlBlock.io.debugRolling
 
   // Modules are reset one by one
   val resetTree = ResetGenNode(

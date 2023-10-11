@@ -17,7 +17,7 @@
 package xiangshan.mem
 
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utility._
@@ -28,6 +28,7 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.cache._
 import xiangshan.backend.fu.FenceToSbuffer
 import xiangshan.cache.wpu.ReplayCarry
+import xiangshan.mem.prefetch.PrefetchReqBundle
 
 object genWmask {
   def apply(addr: UInt, sizeEncode: UInt): UInt = {
@@ -36,7 +37,7 @@ object genWmask {
       "b01".U -> 0x3.U, //0011
       "b10".U -> 0xf.U, //1111
       "b11".U -> 0xff.U //11111111
-    )) << addr(2, 0)).asUInt()
+    )) << addr(2, 0)).asUInt
   }
 }
 
@@ -47,7 +48,7 @@ object genVWmask {
       "b01".U -> 0x3.U, //0011
       "b10".U -> 0xf.U, //1111
       "b11".U -> 0xff.U //11111111
-    )) << addr(3, 0)).asUInt()
+    )) << addr(3, 0)).asUInt
   }
 }
 
@@ -111,6 +112,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle with HasDCachePa
   val mshrid = UInt(log2Up(cfg.nMissEntries).W)
   val handledByMSHR = Bool()
   val replacementUpdated = Bool()
+  val missDbUpdated = Bool()
 
   val forward_tlDchannel = Bool()
   val dcacheRequireReplay = Bool()
@@ -126,7 +128,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle with HasDCachePa
 }
 
 class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
-  val meta_prefetch = Bool()
+  val meta_prefetch = UInt(L1PfSourceBits.W)
   val meta_access = Bool()
 
   def fromLsPipelineBundle(input: LsPipelineBundle) = {
@@ -161,13 +163,25 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     isFastReplay := DontCare
     handledByMSHR := DontCare
     replacementUpdated := DontCare
+    missDbUpdated := DontCare
     delayedLoadError := DontCare
     lateKill := DontCare
     feedbacked := DontCare
     deqPortIdx := DontCare
     ldCancel := DontCare
   }
+
+  def asPrefetchReqBundle(): PrefetchReqBundle = {
+    val res = Wire(new PrefetchReqBundle)
+    res.vaddr := this.vaddr
+    res.paddr := this.paddr
+    res.pc    := this.uop.cf.pc
+
+    res
+  }
 }
+
+class StPrefetchTrainBundle(implicit p: Parameters) extends LdPrefetchTrainBundle {}
 
 class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
   // load inst replay informations
@@ -206,6 +220,7 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     schedIndex := input.schedIndex
     handledByMSHR := input.handledByMSHR
     replacementUpdated := input.replacementUpdated
+    missDbUpdated := input.missDbUpdated
     delayedLoadError := input.delayedLoadError
     lateKill := input.lateKill
     feedbacked := input.feedbacked
@@ -376,12 +391,12 @@ object AddPipelineReg {
 
     val valid = RegInit(false.B)
     valid.suggestName("pipeline_reg_valid")
-    when (io.out.fire()) { valid := false.B }
-    when (io.in.fire()) { valid := true.B }
+    when (io.out.fire) { valid := false.B }
+    when (io.in.fire) { valid := true.B }
     when (io.isFlush) { valid := false.B }
 
     io.in.ready := !valid || io.out.ready
-    io.out.bits := RegEnable(io.in.bits, io.in.fire())
+    io.out.bits := RegEnable(io.in.bits, io.in.fire)
     io.out.valid := valid //&& !isFlush
   }
 

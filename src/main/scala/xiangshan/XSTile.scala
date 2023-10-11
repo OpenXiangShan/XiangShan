@@ -16,7 +16,7 @@
 
 package xiangshan
 
-import chipsalliance.rocketchip.config.{Config, Parameters}
+import org.chipsalliance.cde.config.{Config, Parameters}
 import chisel3._
 import chisel3.util.{Valid, ValidIO}
 import freechips.rocketchip.diplomacy._
@@ -52,6 +52,7 @@ class XSTileMisc()(implicit p: Parameters) extends LazyModule
   with HasXSParameter
   with HasSoCParameter
 {
+  override def shouldBeInlined: Boolean = false
   val l1_xbar = TLXbar()
   val mmio_xbar = TLXbar()
   val mmio_port = TLIdentityNode() // to L3
@@ -82,25 +83,32 @@ class XSTileMisc()(implicit p: Parameters) extends LazyModule
   beu.node := TLBuffer.chainNode(1) := mmio_xbar
   mmio_port := TLBuffer() := mmio_xbar
 
-  lazy val module = new LazyModuleImp(this){
+  class XSTileMiscImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
     val beu_errors = IO(Input(chiselTypeOf(beu.module.io.errors)))
     beu.module.io.errors <> beu_errors
   }
+
+  lazy val module = new XSTileMiscImp(this)
 }
 
 class XSTile()(implicit p: Parameters) extends LazyModule
   with HasXSParameter
   with HasSoCParameter
 {
-  val core = LazyModule(new XSCore())
+  override def shouldBeInlined: Boolean = false
+  private val core = LazyModule(new XSCore())
   private val misc = LazyModule(new XSTileMisc())
   private val l2cache = coreParams.L2CacheParamsOpt.map(l2param =>
     LazyModule(new CoupledL2()(new Config((_, _, _) => {
-      case L2ParamKey => l2param.copy(hartIds = Seq(p(XSCoreParamsKey).HartId))
+      case L2ParamKey => l2param.copy(
+        hartIds = Seq(p(XSCoreParamsKey).HartId),
+        FPGAPlatform = debugOpts.FPGAPlatform
+      )
     })))
   )
 
   // public ports
+  val core_l3_pf_port = core.memBlock.l3_pf_sender_opt
   val memory_port = misc.memory_port
   val uncache = misc.mmio_port
   val clint_int_sink = core.clint_int_sink
@@ -128,28 +136,30 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   misc.misc_l2_pmu := TLLogger(s"L2_L1I_${coreParams.HartId}", !debugOpts.FPGAPlatform && debugOpts.AlwaysBasicDB) := core.frontend.icache.clientNode
   if (!coreParams.softPTW) {
     misc.misc_l2_pmu := TLLogger(s"L2_PTW_${coreParams.HartId}", !debugOpts.FPGAPlatform && debugOpts.AlwaysBasicDB) := core.memBlock.ptw_to_l2_buffer.node
-  } 
+  }
 
   l2cache match {
     case Some(l2) =>
       misc.l2_binder.get :*= l2.node :*= misc.l1_xbar
       l2.pf_recv_node.map(recv => {
         println("Connecting L1 prefetcher to L2!")
-        recv := core.memBlock.pf_sender_opt.get
+        recv := core.memBlock.l2_pf_sender_opt.get
       })
     case None =>
-      val dummyMatch = WireDefault(false.B)
-      ExcitingUtils.addSource(dummyMatch, s"L2MissMatch_${p(XSCoreParamsKey).HartId}", ExcitingUtils.Perf, true)
   }
 
   misc.i_mmio_port := core.frontend.instrUncache.clientNode
   misc.d_mmio_port := core.memBlock.uncache.clientNode
 
-  lazy val module = new LazyModuleImp(this){
+  class XSTileImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
     val io = IO(new Bundle {
       val hartId = Input(UInt(64.W))
       val reset_vector = Input(UInt(PAddrBits.W))
       val cpu_halt = Output(Bool())
+      val debugTopDown = new Bundle {
+        val robHeadPaddr = Valid(UInt(PAddrBits.W))
+        val l3MissMatch = Input(Bool())
+      }
     })
 
     dontTouch(io.hartId)
@@ -162,6 +172,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     if (l2cache.isDefined) {
       // TODO: add perfEvents of L2
       // core.module.io.perfEvents.zip(l2cache.get.module.io.perfEvents.flatten).foreach(x => x._1.value := x._2)
+      core.module.io.perfEvents <> DontCare
     }
     else {
       core.module.io.perfEvents <> DontCare
@@ -176,11 +187,19 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       misc.module.beu_errors.l2 <> 0.U.asTypeOf(misc.module.beu_errors.l2)
       core.module.io.l2_hint.bits.sourceId := l2cache.get.module.io.l2_hint.bits
       core.module.io.l2_hint.valid := l2cache.get.module.io.l2_hint.valid
+      core.module.io.l2PfqBusy := false.B
+      core.module.io.debugTopDown.l2MissMatch := l2cache.get.module.io.debugTopDown.l2MissMatch.head
+      l2cache.get.module.io.debugTopDown.robHeadPaddr.head := core.module.io.debugTopDown.robHeadPaddr
     } else {
       misc.module.beu_errors.l2 <> 0.U.asTypeOf(misc.module.beu_errors.l2)
       core.module.io.l2_hint.bits.sourceId := DontCare
       core.module.io.l2_hint.valid := false.B
+      core.module.io.l2PfqBusy := false.B
+      core.module.io.debugTopDown.l2MissMatch := false.B
     }
+
+    io.debugTopDown.robHeadPaddr := core.module.io.debugTopDown.robHeadPaddr
+    core.module.io.debugTopDown.l3MissMatch := io.debugTopDown.l3MissMatch
 
     // Modules are reset one by one
     // io_reset ----
@@ -194,4 +213,6 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     )
     ResetGen(resetChain, reset, !debugOpts.FPGAPlatform)
   }
+
+  lazy val module = new XSTileImp(this)
 }

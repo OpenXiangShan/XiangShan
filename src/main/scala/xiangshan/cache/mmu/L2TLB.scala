@@ -16,11 +16,10 @@
 
 package xiangshan.cache.mmu
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.experimental.ExtModule
 import chisel3.util._
-import chisel3.internal.naming.chiselName
 import xiangshan._
 import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
 import utils._
@@ -32,6 +31,7 @@ import xiangshan.backend.fu.util.HasCSRConst
 import difftest._
 
 class L2TLB()(implicit p: Parameters) extends LazyModule with HasPtwConst {
+  override def shouldBeInlined: Boolean = false
 
   val node = TLClientNode(Seq(TLMasterPortParameters.v1(
     clients = Seq(TLMasterParameters.v1(
@@ -44,7 +44,6 @@ class L2TLB()(implicit p: Parameters) extends LazyModule with HasPtwConst {
   lazy val module = new L2TLBImp(this)
 }
 
-@chiselName
 class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) with HasCSRConst with HasPerfEvents {
 
   val (mem, edge) = outer.node.out.head
@@ -129,7 +128,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     val recv = cache.io.resp
     // NOTE: 1. prefetch doesn't gen prefetch 2. req from mq doesn't gen prefetch
     // NOTE: 1. miss req gen prefetch 2. hit but prefetched gen prefetch
-    prefetch.io.in.valid := recv.fire() && !from_pre(recv.bits.req_info.source) && (!recv.bits.hit  ||
+    prefetch.io.in.valid := recv.fire && !from_pre(recv.bits.req_info.source) && (!recv.bits.hit  ||
       recv.bits.prefetch) && recv.bits.isFirst
     prefetch.io.in.bits.vpn := recv.bits.req_info.vpn
     prefetch.io.sfence := sfence_dup(0)
@@ -157,7 +156,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   missQueue.io.csr := csr_dup(5)
 
   blockmq.io.start := missQueue.io.out.fire
-  blockmq.io.enable := ptw.io.req.fire()
+  blockmq.io.enable := ptw.io.req.fire
 
   llptw.io.in.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && cache.io.resp.bits.toFsm.l2Hit && !cache.io.resp.bits.bypassed
   llptw.io.in.bits.req_info := cache.io.resp.bits.req_info
@@ -236,11 +235,11 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   val req_addr_low = Reg(Vec(MemReqWidth, UInt((log2Up(l2tlbParams.blockBytes)-log2Up(XLEN/8)).W)))
 
-  when (llptw.io.in.fire()) {
+  when (llptw.io.in.fire) {
     // when enq miss queue, set the req_addr_low to receive the mem resp data part
     req_addr_low(llptw_mem.enq_ptr) := addr_low_from_vpn(llptw.io.in.bits.req_info.vpn)
   }
-  when (mem_arb.io.out.fire()) {
+  when (mem_arb.io.out.fire) {
     req_addr_low(mem_arb.io.out.bits.id) := addr_low_from_paddr(mem_arb.io.out.bits.addr)
     waiting_resp(mem_arb.io.out.bits.id) := true.B
   }
@@ -257,7 +256,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   mem.d.ready := true.B
   // mem -> data buffer
   val refill_data = Reg(Vec(blockBits / l1BusDataWidth, UInt(l1BusDataWidth.W)))
-  val refill_helper = edge.firstlastHelper(mem.d.bits, mem.d.fire())
+  val refill_helper = edge.firstlastHelper(mem.d.bits, mem.d.fire)
   val mem_resp_done = refill_helper._3
   val mem_resp_from_mq = from_missqueue(mem.d.bits.source)
   when (mem.d.valid) {
@@ -293,7 +292,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   ptw.io.mem.resp.bits := resp_pte.last
   // mem -> cache
   val refill_from_mq = mem_resp_from_mq
-  val refill_level = Mux(refill_from_mq, 2.U, RegEnable(ptw.io.refill.level, init = 0.U, ptw.io.mem.req.fire()))
+  val refill_level = Mux(refill_from_mq, 2.U, RegEnable(ptw.io.refill.level, 0.U, ptw.io.mem.req.fire))
   val refill_valid = mem_resp_done && !flush && !flush_latch(mem.d.bits.source)
 
   cache.io.refill.valid := RegNext(refill_valid, false.B)
@@ -309,31 +308,30 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       difftest_ptw_addr(mem.a.bits.source) := mem.a.bits.address
     }
 
-    val difftest = Module(new DifftestRefillEvent)
-    difftest.io.clock := clock
-    difftest.io.coreid := p(XSCoreParamsKey).HartId.asUInt
-    difftest.io.cacheid := 2.U
-    difftest.io.valid := cache.io.refill.valid
-    difftest.io.addr := difftest_ptw_addr(RegNext(mem.d.bits.source))
-    difftest.io.data := refill_data.asTypeOf(difftest.io.data)
+    val difftest = DifftestModule(new DiffRefillEvent, dontCare = true)
+    difftest.coreid := io.hartId
+    difftest.index := 2.U
+    difftest.valid := cache.io.refill.valid
+    difftest.addr := difftest_ptw_addr(RegNext(mem.d.bits.source))
+    difftest.data := refill_data.asTypeOf(difftest.data)
+    difftest.idtfr := DontCare
   }
 
   if (env.EnableDifftest) {
     for (i <- 0 until PtwWidth) {
-      val difftest = Module(new DifftestL2TLBEvent)
-      difftest.io.clock := clock
-      difftest.io.coreid := p(XSCoreParamsKey).HartId.asUInt
-      difftest.io.valid := io.tlb(i).resp.fire && !io.tlb(i).resp.bits.af
-      difftest.io.index := i.U
-      difftest.io.satp := io.csr.tlb.satp.ppn
-      difftest.io.vpn := Cat(io.tlb(i).resp.bits.entry.tag, 0.U(sectortlbwidth.W))
+      val difftest = DifftestModule(new DiffL2TLBEvent)
+      difftest.coreid := io.hartId
+      difftest.valid := io.tlb(i).resp.fire && !io.tlb(i).resp.bits.af
+      difftest.index := i.U
+      difftest.satp := io.csr.tlb.satp.ppn
+      difftest.vpn := Cat(io.tlb(i).resp.bits.entry.tag, 0.U(sectortlbwidth.W))
       for (j <- 0 until tlbcontiguous) {
-        difftest.io.ppn(j) := Cat(io.tlb(i).resp.bits.entry.ppn, io.tlb(i).resp.bits.ppn_low(j))
-        difftest.io.valididx(j) := io.tlb(i).resp.bits.valididx(j)
+        difftest.ppn(j) := Cat(io.tlb(i).resp.bits.entry.ppn, io.tlb(i).resp.bits.ppn_low(j))
+        difftest.valididx(j) := io.tlb(i).resp.bits.valididx(j)
       }
-      difftest.io.perm := io.tlb(i).resp.bits.entry.perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt
-      difftest.io.level := io.tlb(i).resp.bits.entry.level.getOrElse(0.U.asUInt)
-      difftest.io.pf := io.tlb(i).resp.bits.pf
+      difftest.perm := io.tlb(i).resp.bits.entry.perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt
+      difftest.level := io.tlb(i).resp.bits.entry.level.getOrElse(0.U.asUInt)
+      difftest.pf := io.tlb(i).resp.bits.pf
     }
   }
 
@@ -472,7 +470,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   XSDebug(p"[io.csr.tlb] ${io.csr.tlb}\n")
 
   for (i <- 0 until PtwWidth) {
-    XSPerfAccumulate(s"req_count${i}", io.tlb(i).req(0).fire())
+    XSPerfAccumulate(s"req_count${i}", io.tlb(i).req(0).fire)
     XSPerfAccumulate(s"req_blocked_count_${i}", io.tlb(i).req(0).valid && !io.tlb(i).req(0).ready)
   }
   XSPerfAccumulate(s"req_blocked_by_mq", arb1.io.out.valid && missQueue.io.out.valid)
@@ -480,7 +478,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     XSPerfAccumulate(s"mem_req_util${i}", PopCount(waiting_resp) === i.U)
   }
   XSPerfAccumulate("mem_cycle", PopCount(waiting_resp) =/= 0.U)
-  XSPerfAccumulate("mem_count", mem.a.fire())
+  XSPerfAccumulate("mem_count", mem.a.fire)
   for (i <- 0 until PtwWidth) {
     XSPerfAccumulate(s"llptw_ppn_af${i}", mergeArb(i).in(outArbMqPort).valid && mergeArb(i).in(outArbMqPort).bits.entry(OHToUInt(mergeArb(i).in(outArbMqPort).bits.pteidx)).af && !llptw_out.bits.af)
     XSPerfAccumulate(s"access_fault${i}", io.tlb(i).resp.fire && io.tlb(i).resp.bits.af)
@@ -670,6 +668,7 @@ class FakePTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
 }
 
 class L2TLBWrapper()(implicit p: Parameters) extends LazyModule with HasXSParameter {
+  override def shouldBeInlined: Boolean = false
   val useSoftPTW = coreParams.softPTW
   val node = if (!useSoftPTW) TLIdentityNode() else null
   val ptw = if (!useSoftPTW) LazyModule(new L2TLB()) else null
@@ -677,7 +676,7 @@ class L2TLBWrapper()(implicit p: Parameters) extends LazyModule with HasXSParame
     node := ptw.node
   }
 
-  lazy val module = new LazyModuleImp(this) with HasPerfEvents {
+  class L2TLBWrapperImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) with HasPerfEvents {
     val io = IO(new L2TLBIO)
     val perfEvents = if (useSoftPTW) {
       val fake_ptw = Module(new FakePTW())
@@ -690,4 +689,6 @@ class L2TLBWrapper()(implicit p: Parameters) extends LazyModule with HasXSParame
     }
     generatePerfEvent()
   }
+
+  lazy val module = new L2TLBWrapperImp(this)
 }

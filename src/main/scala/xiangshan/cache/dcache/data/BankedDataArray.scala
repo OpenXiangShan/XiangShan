@@ -16,7 +16,7 @@
 
 package xiangshan.cache
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import utils._
 import utility._
@@ -198,7 +198,7 @@ class DataSRAMBank(index: Int)(implicit p: Parameters) extends DCacheModule {
   val data_left = Mux1H(r_way_en_reg.tail(half), data_read.take(half))
   val data_right = Mux1H(r_way_en_reg.head(half), data_read.drop(half))
 
-  val sel_low = r_way_en_reg.tail(half).orR()
+  val sel_low = r_way_en_reg.tail(half).orR
   val row_data = Mux(sel_low, data_left, data_right)
 
   io.r.data := row_data
@@ -367,7 +367,7 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     bank_addrs(rport_index)(1) := bank_addrs(rport_index)(0) + 1.U
 
     // use way_en to select a way after data read out
-    assert(!(RegNext(io.read(rport_index).fire() && PopCount(io.read(rport_index).bits.way_en) > 1.U)))
+    assert(!(RegNext(io.read(rport_index).fire && PopCount(io.read(rport_index).bits.way_en) > 1.U)))
     way_en(rport_index) := io.read(rport_index).bits.way_en
   })
 
@@ -473,7 +473,7 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       }
     }
   }
-  
+
   val data_read_oh = WireInit(VecInit(Seq.fill(DCacheSetDiv * DCacheBanks * DCacheWays)(0.U(1.W))))
   for(div_index <- 0 until DCacheSetDiv){
     for (bank_index <- 0 until DCacheBanks) {
@@ -504,8 +504,8 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   (0 until DCacheBanks).map(i => {
     io.readline_resp(i) := read_result(RegNext(line_div_addr))(i)(RegNext(OHToUInt(io.readline.bits.way_en)))
   })
-  io.readline_error_delayed := RegNext(RegNext(io.readline.fire())) &&
-    VecInit((0 until DCacheBanks).map(i => io.readline_resp(i).error_delayed)).asUInt().orR
+  io.readline_error_delayed := RegNext(RegNext(io.readline.fire)) &&
+    VecInit((0 until DCacheBanks).map(i => io.readline_resp(i).error_delayed)).asUInt.orR
 
   // write data_banks & ecc_banks
   for (div_index <- 0 until DCacheSetDiv) {
@@ -709,7 +709,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     set_addrs_reg(rport_index) := RegNext(addr_to_dcache_div_set(io.read(rport_index).bits.addr))
 
     // use way_en to select a way after data read out
-    assert(!(RegNext(io.read(rport_index).fire() && PopCount(io.read(rport_index).bits.way_en) > 1.U)))
+    assert(!(RegNext(io.read(rport_index).fire && PopCount(io.read(rport_index).bits.way_en) > 1.U)))
     way_en(rport_index) := io.read(rport_index).bits.way_en
     way_en_reg(rport_index) := RegNext(io.read(rport_index).bits.way_en)
   })
@@ -858,8 +858,8 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
   // read result: expose banked read result
   io.readline_resp := bank_result(RegNext(line_div_addr))
-  io.readline_error_delayed := RegNext(RegNext(io.readline.fire())) &&
-    VecInit((0 until DCacheBanks).map(i => io.readline_resp(i).error_delayed)).asUInt().orR
+  io.readline_error_delayed := RegNext(RegNext(io.readline.fire)) &&
+    VecInit((0 until DCacheBanks).map(i => io.readline_resp(i).error_delayed)).asUInt.orR
 
   // write data_banks & ecc_banks
   for (div_index <- 0 until DCacheSetDiv) {

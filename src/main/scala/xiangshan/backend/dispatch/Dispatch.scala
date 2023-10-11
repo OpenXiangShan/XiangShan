@@ -16,15 +16,16 @@
 
 package xiangshan.backend.dispatch
 
-import chipsalliance.rocketchip.config.Parameters
-import chisel3.util._
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
+import chisel3.util._
 import difftest._
-import utility._
 import utils._
+import utility._
 import xiangshan.ExceptionNO._
 import xiangshan._
-import xiangshan.backend.rob.RobEnqIO
+import xiangshan.backend.MemCoreTopDownIO
+import xiangshan.backend.rob.{RobDispatchTopDownIO, RobEnqIO}
 import xiangshan.mem.mdp._
 import xiangshan.backend.Bundles.DynInst
 import xiangshan.backend.fu.FuType
@@ -38,6 +39,12 @@ case class DispatchParameters
   FpDqDeqWidth: Int,
   LsDqDeqWidth: Int
 )
+
+class CoreDispatchTopDownIO extends Bundle {
+  val l2MissMatch = Input(Bool())
+  val l3MissMatch = Input(Bool())
+  val fromMem = Flipped(new MemCoreTopDownIO)
+}
 
 // read rob and enqueue
 class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
@@ -78,6 +85,10 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     val sqCanAccept = Input(Bool())
     val robHeadNotReady = Input(Bool())
     val robFull = Input(Bool())
+    val debugTopDown = new Bundle {
+      val fromRob = Flipped(new RobDispatchTopDownIO)
+      val fromCore = new CoreDispatchTopDownIO
+    }
   })
 
   /**
@@ -104,7 +115,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val singleStepStatus = RegInit(false.B)
   when (io.redirect.valid) {
     singleStepStatus := false.B
-  }.elsewhen (io.singleStep && io.fromRename(0).fire()) {
+  }.elsewhen (io.singleStep && io.fromRename(0).fire) {
     singleStepStatus := true.B
   }
   XSDebug(singleStepStatus, "Debug Mode: Singlestep status is asserted\n")
@@ -159,7 +170,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
         debug_runahead_checkpoint_id := checkpoint_id
       } else {
         debug_runahead_checkpoint_id := checkpoint_id + PopCount((0 until i).map(i =>
-          io.fromRename(i).fire()
+          io.fromRename(i).fire
         ))
       }
     }
@@ -167,16 +178,16 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
   // store set perf count
   XSPerfAccumulate("waittable_load_wait", PopCount((0 until RenameWidth).map(i =>
-    io.fromRename(i).fire() && io.fromRename(i).bits.loadWaitBit && !isStore(i) && isLs(i)
+    io.fromRename(i).fire && io.fromRename(i).bits.loadWaitBit && !isStore(i) && isLs(i)
   )))
   XSPerfAccumulate("storeset_load_wait", PopCount((0 until RenameWidth).map(i =>
-    io.fromRename(i).fire() && updatedUop(i).loadWaitBit && !isStore(i) && isLs(i)
+    io.fromRename(i).fire && updatedUop(i).loadWaitBit && !isStore(i) && isLs(i)
   )))
   XSPerfAccumulate("storeset_load_strict_wait", PopCount((0 until RenameWidth).map(i =>
-    io.fromRename(i).fire() && updatedUop(i).loadWaitBit && updatedUop(i).loadWaitStrict && !isStore(i) && isLs(i)
+    io.fromRename(i).fire && updatedUop(i).loadWaitBit && updatedUop(i).loadWaitStrict && !isStore(i) && isLs(i)
   )))
   XSPerfAccumulate("storeset_store_wait", PopCount((0 until RenameWidth).map(i =>
-    io.fromRename(i).fire() && updatedUop(i).loadWaitBit && isStore(i)
+    io.fromRename(i).fire && updatedUop(i).loadWaitBit && isStore(i)
   )))
 
   /**
@@ -287,16 +298,14 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   XSPerfAccumulate("stall_cycle_fp_dq", stall_fp_dq)
   XSPerfAccumulate("stall_cycle_ls_dq", stall_ls_dq)
 
-  val Seq(notIssue, tlbReplay, tlbMiss, vioReplay, mshrReplay, l1Miss, l2Miss, l3Miss) =
-    Seq.fill(8)(WireDefault(false.B))
-  ExcitingUtils.addSink(notIssue, s"rob_head_ls_issue_${coreParams.HartId}", ExcitingUtils.Perf)
-  ExcitingUtils.addSink(tlbReplay, s"load_tlb_replay_stall_${coreParams.HartId}", ExcitingUtils.Perf)
-  ExcitingUtils.addSink(tlbMiss, s"load_tlb_miss_stall_${coreParams.HartId}", ExcitingUtils.Perf)
-  ExcitingUtils.addSink(vioReplay, s"load_vio_replay_stall_${coreParams.HartId}", ExcitingUtils.Perf)
-  ExcitingUtils.addSink(mshrReplay, s"load_mshr_replay_stall_${coreParams.HartId}", ExcitingUtils.Perf)
-  ExcitingUtils.addSink(l1Miss, s"load_l1_miss_${coreParams.HartId}", ExcitingUtils.Perf)
-  ExcitingUtils.addSink(l2Miss, s"L2MissMatch_${coreParams.HartId}", ExcitingUtils.Perf)
-  ExcitingUtils.addSink(l3Miss, s"L3MissMatch_${coreParams.HartId}", ExcitingUtils.Perf)
+  val notIssue = io.debugTopDown.fromRob.robHeadLsIssue
+  val tlbReplay = io.debugTopDown.fromCore.fromMem.robHeadTlbReplay
+  val tlbMiss = io.debugTopDown.fromCore.fromMem.robHeadTlbMiss
+  val vioReplay = io.debugTopDown.fromCore.fromMem.robHeadLoadVio
+  val mshrReplay = io.debugTopDown.fromCore.fromMem.robHeadLoadMSHR
+  val l1Miss = io.debugTopDown.fromCore.fromMem.robHeadMissInDCache
+  val l2Miss = io.debugTopDown.fromCore.l2MissMatch
+  val l3Miss = io.debugTopDown.fromCore.l3MissMatch
 
   val ldReason = Mux(l3Miss, TopDownCounters.LoadMemStall.id.U,
   Mux(l2Miss, TopDownCounters.LoadL3Stall.id.U,
@@ -348,6 +357,10 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   }
 
   TopDownCounters.values.foreach(ctr => XSPerfAccumulate(ctr.toString(), PopCount(stallReason.map(_ === ctr.id.U))))
+
+  val robTrueCommit = io.debugTopDown.fromRob.robTrueCommit
+  TopDownCounters.values.foreach(ctr => XSPerfRolling("td_"+ctr.toString(), PopCount(stallReason.map(_ === ctr.id.U)),
+                                                      robTrueCommit, 1000, clock, reset))
 
   XSPerfHistogram("slots_fire", PopCount(thisActualOut), true.B, 0, RenameWidth+1, 1)
   // Explaination: when out(0) not fire, PopCount(valid) is not meaningfull

@@ -18,7 +18,7 @@
 
 package xiangshan.cache
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan.{HasXSParameter, XSBundle, XSModule}
@@ -77,7 +77,7 @@ trait HasL1CacheParameters extends HasXSParameter
   def blockWords = blockBytes / wordBytes
   def refillWords = refillBytes / wordBytes
 
-  def get_phy_tag(paddr: UInt) = (paddr >> pgUntagBits).asUInt()
+  def get_phy_tag(paddr: UInt) = (paddr >> pgUntagBits).asUInt
   def get_vir_tag(vaddr: UInt) = (vaddr >> untagBits).asUInt
   def get_tag(addr: UInt) = get_phy_tag(addr)
   def get_idx(addr: UInt) = addr(untagBits-1, blockOffBits)

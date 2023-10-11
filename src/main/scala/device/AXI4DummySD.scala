@@ -16,7 +16,7 @@
 
 package device
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.experimental.ExtModule
 import chisel3.util._
@@ -122,7 +122,7 @@ class AXI4DummySD
 
     val sdHelper = Module(new SDHelper)
     sdHelper.clk := clock
-    sdHelper.ren := (getOffset(raddr) === 0x40.U && in.ar.fire())
+    sdHelper.ren := (getOffset(raddr) === 0x40.U && in.ar.fire)
     sdHelper.setAddr := setAddr
     sdHelper.addr := regs(sdarg)
 
@@ -148,7 +148,7 @@ class AXI4DummySD
     val strb = Mux(waddr(2), in.w.bits.strb(7, 4), in.w.bits.strb(3, 0))
     val rdata = Wire(UInt(32.W))
     RegMap.generate(mapping, getOffset(raddr), rdata,
-      getOffset(waddr), in.w.fire(), in.w.bits.data(31, 0), MaskExpand(strb))
+      getOffset(waddr), in.w.fire, in.w.bits.data(31, 0), MaskExpand(strb))
 
     in.r.bits.data := Fill(2, rdata)
   }

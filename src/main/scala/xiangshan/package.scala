@@ -16,6 +16,8 @@
 
 import chisel3._
 import chisel3.util._
+import org.chipsalliance.cde.config.Parameters
+import freechips.rocketchip.tile.XLen
 import xiangshan.ExceptionNO._
 import xiangshan.backend.fu._
 import xiangshan.backend.fu.fpu._
@@ -689,25 +691,6 @@ package object xiangshan {
     def selectAll(vec: Vec[Bool]): Vec[Bool] = partialSelect(vec, ExceptionNO.all)
     def selectByFu(vec:Vec[Bool], fuConfig: FuConfig): Vec[Bool] =
       partialSelect(vec, fuConfig.exceptionOut)
-  }
-
-  // indicates where the memory access request comes from
-  // a dupliacte of this is in HuanCun.common and CoupledL2.common
-  // TODO: consider moving it to Utility, so that they could share the same definition
-  object MemReqSource extends Enumeration {
-    val NoWhere = Value("NoWhere")
-
-    val CPUInst = Value("CPUInst")
-    val CPULoadData = Value("CPULoadData")
-    val CPUStoreData = Value("CPUStoreData")
-    val CPUAtomicData = Value("CPUAtomicData")
-    val L1InstPrefetch = Value("L1InstPrefetch")
-    val L1DataPrefetch = Value("L1DataPrefetch")
-    val PTW = Value("PTW")
-    val L2Prefetch = Value("L2Prefetch")
-    val ReqSourceCount = Value("ReqSourceCount")
-
-    val reqSourceBits = log2Ceil(ReqSourceCount.id)
   }
 
   object TopDownCounters extends Enumeration {

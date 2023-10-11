@@ -18,7 +18,7 @@ package device
 
 import chisel3._
 import chisel3.util._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3.experimental.ExtModule
 import freechips.rocketchip.amba.axi4.{AXI4AdapterNode, AXI4IdentityNode, AXI4Parameters, AXI4SlaveNode, AXI4SlaveParameters, AXI4SlavePortParameters, AXI4Xbar}
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp, RegionType}
@@ -78,7 +78,7 @@ class VGACtrl
   override lazy val module = new AXI4SlaveModuleImp[VGACtrlBundle](this) {
 
     val fbSizeReg = Cat(FBWidth.U(16.W), FBHeight.U(16.W))
-    val sync = in.aw.fire()
+    val sync = in.aw.fire
 
     val mapping = Map(
       RegMap(0x0, fbSizeReg, RegMap.Unwritable),
@@ -86,7 +86,7 @@ class VGACtrl
     )
 
     RegMap.generate(mapping, raddr(3, 0), in.r.bits.data,
-      waddr(3, 0), in.w.fire(), in.w.bits.data, MaskExpand(in.w.bits.strb))
+      waddr(3, 0), in.w.fire, in.w.bits.data, MaskExpand(in.w.bits.strb))
 
     io.extra.get.sync := sync
   }
@@ -155,7 +155,7 @@ class AXI4VGA
     in_fb.ar.ready := true.B
     in_fb.r.bits.data := 0.U
     in_fb.r.bits.resp := AXI4Parameters.RESP_OKAY
-    in_fb.r.valid := BoolStopWatch(in_fb.ar.fire(), in_fb.r.fire(), startHighPriority = true)
+    in_fb.r.valid := BoolStopWatch(in_fb.ar.fire, in_fb.r.fire, startHighPriority = true)
 
     def inRange(x: UInt, start: Int, end: Int) = (x >= start.U) && (x < end.U)
 
@@ -183,7 +183,7 @@ class AXI4VGA
     out_fb.ar.valid := RegNext(nextPixel) && hCounterIs2
 
     out_fb.r.ready := true.B
-    val data = HoldUnless(out_fb.r.bits.data, out_fb.r.fire())
+    val data = HoldUnless(out_fb.r.bits.data, out_fb.r.fire)
     val color = Mux(hCounter(1), data(63, 32), data(31, 0))
     io.vga.rgb := Mux(io.vga.valid, color(23, 0), 0.U)
 
@@ -217,7 +217,7 @@ class AXI4VGA
   //  io.in.fb.ar.ready := true.B
   //  io.in.fb.r.bits.data := 0.U
   //  io.in.fb.r.bits.resp := AXI4Parameters.RESP_OKAY
-  //  io.in.fb.r.valid := BoolStopWatch(io.in.fb.ar.fire(), io.in.fb.r.fire(), startHighPriority = true)
+  //  io.in.fb.r.valid := BoolStopWatch(io.in.fb.ar.fire, io.in.fb.r.fire, startHighPriority = true)
   //
   //  def inRange(x: UInt, start: Int, end: Int) = (x >= start.U) && (x < end.U)
   //
@@ -246,7 +246,7 @@ class AXI4VGA
   //  fb.io.in.ar.valid := RegNext(nextPixel) && hCounterIs2
   //
   //  fb.io.in.r.ready := true.B
-  //  val data = HoldUnless(fb.io.in.r.bits.data, fb.io.in.r.fire())
+  //  val data = HoldUnless(fb.io.in.r.bits.data, fb.io.in.r.fire)
   //  val color = Mux(hCounter(1), data(63, 32), data(31, 0))
   //  io.vga.rgb := Mux(io.vga.valid, color(23, 0), 0.U)
   //

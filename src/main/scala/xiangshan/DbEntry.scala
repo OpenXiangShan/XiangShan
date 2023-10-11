@@ -1,6 +1,6 @@
 package xiangshan
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util.log2Ceil
 import xiangshan.backend.ctrlblock.{DebugLsInfo, DebugMdpInfo}
@@ -39,4 +39,13 @@ class InstInfoEntry(implicit p: Parameters) extends XSBundle{
   val mdpInfo = new DebugMdpInfo
   val issueTime = UInt(XLEN.W)
   val writebackTime = UInt(XLEN.W)
+}
+
+class LoadInfoEntry(implicit p: Parameters) extends XSBundle{
+  val pc = UInt(VAddrBits.W)
+  val vaddr = UInt(VAddrBits.W)
+  val paddr = UInt(PAddrBits.W)
+  val cacheMiss = Bool()
+  val tlbQueryLatency = UInt(64.W)
+  val exeLatency = UInt(64.W)
 }

@@ -16,7 +16,7 @@
 
 package xiangshan.cache.mmu
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -81,9 +81,7 @@ class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
   val w = Bool()
   val r = Bool()
 
-  val pm = new TlbPMBundle
-
-  def apply(item: PtwSectorResp, pm: PMPConfig) = {
+  def apply(item: PtwSectorResp) = {
     val ptePerm = item.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
     this.pf := item.pf
     this.af := item.af
@@ -95,12 +93,10 @@ class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
     this.w := ptePerm.w
     this.r := ptePerm.r
 
-    this.pm.assign_ap(pm)
     this
   }
   override def toPrintable: Printable = {
-    p"pf:${pf} af:${af} d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r} " +
-    p"pm:${pm}"
+    p"pf:${pf} af:${af} d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r} "
   }
 }
 
@@ -116,11 +112,7 @@ class TlbSectorPermBundle(implicit p: Parameters) extends TlbBundle {
   val w = Bool()
   val r = Bool()
 
-  // static pmp & pma check has a minimum grain size of 4K
-  // So sector tlb will use eight static pm entries
-  val pm = Vec(tlbcontiguous, new TlbPMBundle)
-
-  def apply(item: PtwSectorResp, pm: Seq[PMPConfig]) = {
+  def apply(item: PtwSectorResp) = {
     val ptePerm = item.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
     this.pf := item.pf
     this.af := item.af
@@ -132,14 +124,10 @@ class TlbSectorPermBundle(implicit p: Parameters) extends TlbBundle {
     this.w := ptePerm.w
     this.r := ptePerm.r
 
-    for (i <- 0 until tlbcontiguous) {
-      this.pm(i).assign_ap(pm(i))
-    }
     this
   }
   override def toPrintable: Printable = {
-    p"pf:${pf} af:${af} d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r} " +
-    p"pm:${pm}"
+    p"pf:${pf} af:${af} d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r} "
   }
 }
 
@@ -204,7 +192,7 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
     else if (!pageNormal) {
       val tag_match_hi = tag(vpnnLen*2-1, vpnnLen) === vpn(vpnnLen*3-1, vpnnLen*2)
       val tag_match_mi = tag(vpnnLen-1, 0) === vpn(vpnnLen*2-1, vpnnLen)
-      val tag_match = tag_match_hi && (level.get.asBool() || tag_match_mi)
+      val tag_match = tag_match_hi && (level.get.asBool || tag_match_mi)
       asid_hit && tag_match
     }
     else {
@@ -229,7 +217,7 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
     else 0.U })
     this.ppn := { if (!pageNormal) item.entry.ppn(sectorppnLen - 1, vpnnLen - sectortlbwidth)
                   else Cat(item.entry.ppn, item.ppn_low(OHToUInt(item.pteidx))) }
-    this.perm.apply(item, pm)
+    this.perm.apply(item)
     this
   }
 
@@ -297,7 +285,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     else if (!pageNormal) {
       val tag_match_hi = tag(vpnnLen * 2 - 1, vpnnLen) === vpn(vpnnLen * 3 - 1, vpnnLen * 2)
       val tag_match_mi = tag(vpnnLen - 1, 0) === vpn(vpnnLen * 2 - 1, vpnnLen)
-      val tag_match = tag_match_hi && (level.get.asBool() || tag_match_mi)
+      val tag_match = tag_match_hi && (level.get.asBool || tag_match_mi)
       asid_hit && tag_match && addr_low_hit
     }
     else {
@@ -324,7 +312,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     else if (!pageNormal) {
       val tag_match_hi = tag(vpnnLen * 2 - 1, vpnnLen - sectortlbwidth) === vpn(vpnnLen * 3 - 1, vpnnLen * 2)
       val tag_match_mi = tag(vpnnLen - 1, 0) === vpn(vpnnLen * 2 - 1, vpnnLen)
-      val tag_match = tag_match_hi && (level.get.asBool() || tag_match_mi)
+      val tag_match = tag_match_hi && (level.get.asBool || tag_match_mi)
       vpn_hit := asid_hit && tag_match
     }
     else {
@@ -349,7 +337,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     vpn_hit && index_hit.reduce(_ || _) && PopCount(data.valididx) === 1.U
   }
 
-  def apply(item: PtwSectorResp, asid: UInt, pm: Seq[PMPConfig]): TlbSectorEntry = {
+  def apply(item: PtwSectorResp, asid: UInt): TlbSectorEntry = {
     this.tag := {if (pageNormal) item.entry.tag else item.entry.tag(sectorvpnLen - 1, vpnnLen - sectortlbwidth)}
     this.asid := asid
     val inner_level = item.entry.level.getOrElse(0.U)
@@ -361,7 +349,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
                           else 0.U })
     this.ppn := { if (!pageNormal) item.entry.ppn(sectorppnLen - 1, vpnnLen - sectortlbwidth)
                   else item.entry.ppn }
-    this.perm.apply(item, pm)
+    this.perm.apply(item)
     this.ppn_low := item.ppn_low
     this.valididx := item.valididx
     this.pteidx := item.pteidx
@@ -434,16 +422,7 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit 
   val w = Flipped(ValidIO(new Bundle {
     val wayIdx = Output(UInt(log2Up(nWays).W))
     val data = Output(new PtwSectorResp)
-    val data_replenish = Vec(tlbcontiguous, Output(new PMPConfig))
   }))
-  val victim = new Bundle {
-    val out = ValidIO(Output(new Bundle {
-      val entry = new TlbEntry(pageNormal = true, pageSuper = false)
-    }))
-    val in = Flipped(ValidIO(Output(new Bundle {
-      val entry = new TlbEntry(pageNormal = true, pageSuper = false)
-    })))
-  }
   val access = Vec(ports, new ReplaceAccessBundle(nSets, nWays))
 
   def r_req_apply(valid: Bool, vpn: UInt, i: Int): Unit = {
@@ -455,11 +434,10 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit 
     (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm)
   }
 
-  def w_apply(valid: Bool, wayIdx: UInt, data: PtwSectorResp, data_replenish: Seq[PMPConfig]): Unit = {
+  def w_apply(valid: Bool, wayIdx: UInt, data: PtwSectorResp): Unit = {
     this.w.valid := valid
     this.w.bits.wayIdx := wayIdx
     this.w.bits.data := data
-    this.w.bits.data_replenish := data_replenish
   }
 
 }
@@ -473,15 +451,10 @@ class TlbStorageWrapperIO(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit
       val hit = Output(Bool())
       val ppn = Vec(nDups, Output(UInt(ppnLen.W)))
       val perm = Vec(nDups, Output(new TlbPermBundle()))
-      // below are dirty code for timing optimization
-      val super_hit = Output(Bool())
-      val super_ppn = Output(UInt(ppnLen.W))
-      val spm = Output(new TlbPMBundle)
     }))
   }
   val w = Flipped(ValidIO(new Bundle {
     val data = Output(new PtwSectorResp)
-    val data_replenish = Vec(tlbcontiguous, Output(new PMPConfig))
   }))
   val replace = if (q.outReplace) Flipped(new TlbReplaceIO(ports, q)) else null
 
@@ -491,14 +464,12 @@ class TlbStorageWrapperIO(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit
   }
 
   def r_resp_apply(i: Int) = {
-    (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm,
-    this.r.resp(i).bits.super_hit, this.r.resp(i).bits.super_ppn, this.r.resp(i).bits.spm)
+    (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm)
   }
 
-  def w_apply(valid: Bool, data: PtwSectorResp, data_replenish: Seq[PMPConfig]): Unit = {
+  def w_apply(valid: Bool, data: PtwSectorResp): Unit = {
     this.w.valid := valid
     this.w.bits.data := data
-    this.w.bits.data_replenish := data_replenish
   }
 }
 
@@ -524,12 +495,10 @@ class ReplaceIO(Width: Int, nSets: Int, nWays: Int)(implicit p: Parameters) exte
 
 class TlbReplaceIO(Width: Int, q: TLBParameters)(implicit p: Parameters) extends
   TlbBundle {
-  val normalPage = new ReplaceIO(Width, q.normalNSets, q.normalNWays)
-  val superPage = new ReplaceIO(Width, q.superNSets, q.superNWays)
+  val page = new ReplaceIO(Width, q.NSets, q.NWays)
 
   def apply_sep(in: Seq[TlbReplaceIO], vpn: UInt) = {
-    this.normalPage.apply_sep(in.map(_.normalPage), vpn)
-    this.superPage.apply_sep(in.map(_.superPage), vpn)
+    this.page.apply_sep(in.map(_.page), vpn)
   }
 
 }
@@ -576,12 +545,10 @@ class TlbExceptionBundle(implicit p: Parameters) extends TlbBundle {
 class TlbResp(nDups: Int = 1)(implicit p: Parameters) extends TlbBundle {
   val paddr = Vec(nDups, Output(UInt(PAddrBits.W)))
   val miss = Output(Bool())
-  val fast_miss = Output(Bool()) // without sram part for timing optimization
   val excp = Vec(nDups, new Bundle {
     val pf = new TlbExceptionBundle()
     val af = new TlbExceptionBundle()
   })
-  val static_pm = Output(Valid(Bool())) // valid for static, bits for mmio result from normal entries
   val ptwBack = Output(Bool()) // when ptw back, wake up replay rs's state
   val memidx = Output(new MemBlockidxBundle)
 
@@ -646,11 +613,11 @@ class TlbRefilltoMemIO()(implicit p: Parameters) extends TlbBundle {
 
 class TlbIO(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parameters) extends
   MMUIOBaseBundle {
+  val hartId = Input(UInt(8.W))
   val requestor = Vec(Width, Flipped(new TlbRequestIO(nRespDups)))
   val flushPipe = Vec(Width, Input(Bool()))
   val ptw = new TlbPtwIOwithMemIdx(Width)
   val refill_to_mem = Output(new TlbRefilltoMemIO())
-  val ptw_replenish = Vec(tlbcontiguous, Input(new PMPConfig()))
   val replace = if (q.outReplace) Flipped(new TlbReplaceIO(Width, q)) else null
   val pmp = Vec(Width, ValidIO(new PMPReqBundle()))
 
@@ -892,19 +859,19 @@ class PTWEntriesWithEcc(eccCode: Code, num: Int, tagLen: Int, level: Int, hasPer
   }
 
   def encode() = {
-    val data = entries.asUInt()
+    val data = entries.asUInt
     val ecc_slices = Wire(Vec(ecc_info._3, UInt(ecc_info._2.W)))
     for (i <- 0 until ecc_info._3) {
       ecc_slices(i) := eccCode.encode(data((i+1)*ecc_block-1, i*ecc_block)) >> ecc_block
     }
     if (ecc_info._4 != 0) {
       val ecc_unaligned = eccCode.encode(data(data.getWidth-1, ecc_info._3*ecc_block)) >> ecc_info._4
-      ecc := Cat(ecc_unaligned, ecc_slices.asUInt())
-    } else { ecc := ecc_slices.asUInt() }
+      ecc := Cat(ecc_unaligned, ecc_slices.asUInt)
+    } else { ecc := ecc_slices.asUInt }
   }
 
   def decode(): Bool = {
-    val data = entries.asUInt()
+    val data = entries.asUInt
     val res = Wire(Vec(ecc_info._3 + 1, Bool()))
     for (i <- 0 until ecc_info._3) {
       res(i) := {if (ecc_info._2 != 0) eccCode.decode(Cat(ecc((i+1)*ecc_info._2-1, i*ecc_info._2), data((i+1)*ecc_block-1, i*ecc_block))).error else false.B}
@@ -1053,6 +1020,7 @@ class PtwMergeResp(implicit p: Parameters) extends PtwBundle {
 }
 
 class L2TLBIO(implicit p: Parameters) extends PtwBundle {
+  val hartId = Input(UInt(8.W))
   val tlb = Vec(PtwWidth, Flipped(new TlbPtwIO))
   val sfence = Input(new SfenceBundle)
   val csr = new Bundle {

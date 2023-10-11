@@ -16,7 +16,7 @@
 
 package xiangshan.backend.dispatch
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -83,13 +83,13 @@ object PriorityGen {
     for (i <- numExist.indices) {
       sortedIndex(i) := PriorityEncoder(numExist.indices.map(each => {
         // itself should not be found yet
-        val equalPrevious = (if (i == 0) false.B else Cat((0 until i).map(l => each.U === sortedIndex(l))).orR())
+        val equalPrevious = (if (i == 0) false.B else Cat((0 until i).map(l => each.U === sortedIndex(l))).orR)
         val largerThanAnyOther = Cat(numExist.indices.map(another => {
           // no need to be compared with the larger ones
-          val anotherEqualPrevious = (if (i == 0) false.B else Cat((0 until i).map(l => another.U === sortedIndex(l))).orR())
+          val anotherEqualPrevious = (if (i == 0) false.B else Cat((0 until i).map(l => another.U === sortedIndex(l))).orR)
           // need to be no smaller than any other numbers except the previoud found larger ones
           (numExist(each) <= numExist(another)) || anotherEqualPrevious
-        })).andR()
+        })).andR
         largerThanAnyOther && !equalPrevious
       }))
       priority(sortedIndex(i)) := i.U
@@ -105,7 +105,7 @@ object RegfileReadPortGen {
     var hasAssigned = (0 until choiceCount).map(_ => false.B)
     for (i <- staticMappedValid.indices) {
       val valid = staticMappedValid(i) +: dynamicMappedValid
-      val wantReadPort = (0 until choiceCount).map(j => valid(j) && ((j == 0).asBool() || !hasAssigned(j)))
+      val wantReadPort = (0 until choiceCount).map(j => valid(j) && ((j == 0).asBool || !hasAssigned(j)))
       readPortSrc(i) := PriorityEncoder(wantReadPort)
       val onehot = UIntToOH(readPortSrc(i))
       hasAssigned = (0 until choiceCount).map(i => hasAssigned(i) || onehot(i))

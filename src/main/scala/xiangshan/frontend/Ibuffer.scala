@@ -16,7 +16,7 @@
 
 package xiangshan.frontend
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -121,8 +121,8 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
       topdown_stage.reasons(TopDownCounters.OtherRedirectBubble.id) := true.B
     }
   }
-  
-  
+
+
   val dequeueInsufficient = Wire(Bool())
   val matchBubble = Wire(UInt(log2Up(TopDownCounters.NumStallReasons.id).W))
 
@@ -283,7 +283,7 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   XSPerfAccumulate("OverrideBubble", Mux(matchBubbleVec(TopDownCounters.OverrideBubble.id), deqWasteCount, 0.U))
   XSPerfAccumulate("FtqUpdateBubble", Mux(matchBubbleVec(TopDownCounters.FtqUpdateBubble.id), deqWasteCount, 0.U))
   XSPerfAccumulate("FtqFullStall", Mux(matchBubbleVec(TopDownCounters.FtqFullStall.id), deqWasteCount, 0.U))
-  XSPerfAccumulate("FetchFragmentBubble", 
+  XSPerfAccumulate("FetchFragmentBubble",
   Mux(deqWasteCount === DecodeWidth.U || topdown_stage.reasons.asUInt.orR, 0.U, deqWasteCount))
   XSPerfAccumulate("TAGEMissBubble", Mux(matchBubbleVec(TopDownCounters.TAGEMissBubble.id), deqWasteCount, 0.U))
   XSPerfAccumulate("SCMissBubble", Mux(matchBubbleVec(TopDownCounters.SCMissBubble.id), deqWasteCount, 0.U))

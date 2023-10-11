@@ -16,7 +16,7 @@
 
 package xiangshan.cache.mmu
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -56,11 +56,11 @@ class PTWRepeater(Width: Int = 1, FenceDelay: Int)(implicit p: Parameters) exten
     arb.io.out
   }
   val (tlb, ptw, flush) = (io.tlb, io.ptw, DelayN(io.sfence.valid || io.csr.satp.changed, FenceDelay))
-  val req = RegEnable(req_in.bits, req_in.fire())
-  val resp = RegEnable(ptw.resp.bits, ptw.resp.fire())
-  val haveOne = BoolStopWatch(req_in.fire(), tlb.resp.fire() || flush)
-  val sent = BoolStopWatch(ptw.req(0).fire(), req_in.fire() || flush)
-  val recv = BoolStopWatch(ptw.resp.fire() && haveOne, req_in.fire() || flush)
+  val req = RegEnable(req_in.bits, req_in.fire)
+  val resp = RegEnable(ptw.resp.bits, ptw.resp.fire)
+  val haveOne = BoolStopWatch(req_in.fire, tlb.resp.fire || flush)
+  val sent = BoolStopWatch(ptw.req(0).fire, req_in.fire || flush)
+  val recv = BoolStopWatch(ptw.resp.fire && haveOne, req_in.fire || flush)
 
   req_in.ready := !haveOne
   ptw.req(0).valid := haveOne && !sent
@@ -70,9 +70,9 @@ class PTWRepeater(Width: Int = 1, FenceDelay: Int)(implicit p: Parameters) exten
   tlb.resp.valid := haveOne && recv
   ptw.resp.ready := !recv
 
-  XSPerfAccumulate("req_count", ptw.req(0).fire())
-  XSPerfAccumulate("tlb_req_cycle", BoolStopWatch(req_in.fire(), tlb.resp.fire() || flush))
-  XSPerfAccumulate("ptw_req_cycle", BoolStopWatch(ptw.req(0).fire(), ptw.resp.fire() || flush))
+  XSPerfAccumulate("req_count", ptw.req(0).fire)
+  XSPerfAccumulate("tlb_req_cycle", BoolStopWatch(req_in.fire, tlb.resp.fire || flush))
+  XSPerfAccumulate("ptw_req_cycle", BoolStopWatch(ptw.req(0).fire, ptw.resp.fire || flush))
 
   XSDebug(haveOne, p"haveOne:${haveOne} sent:${sent} recv:${recv} sfence:${flush} req:${req} resp:${resp}")
   XSDebug(req_in.valid || io.tlb.resp.valid, p"tlb: ${tlb}\n")
@@ -105,21 +105,21 @@ class PTWRepeaterNB(Width: Int = 1, passReady: Boolean = false, FenceDelay: Int)
    */
 
   // tlb -> repeater -> ptw
-  val req = RegEnable(req_in.bits, req_in.fire())
-  val sent = BoolStopWatch(req_in.fire(), ptw.req(0).fire() || flush)
+  val req = RegEnable(req_in.bits, req_in.fire)
+  val sent = BoolStopWatch(req_in.fire, ptw.req(0).fire || flush)
   req_in.ready := !sent || { if (passReady) ptw.req(0).ready else false.B }
   ptw.req(0).valid := sent
   ptw.req(0).bits := req
 
   // ptw -> repeater -> tlb
-  val resp = RegEnable(ptw.resp.bits, ptw.resp.fire())
-  val recv = BoolStopWatch(ptw.resp.fire(), tlb.resp.fire() || flush)
+  val resp = RegEnable(ptw.resp.bits, ptw.resp.fire)
+  val recv = BoolStopWatch(ptw.resp.fire, tlb.resp.fire || flush)
   ptw.resp.ready := !recv || { if (passReady) tlb.resp.ready else false.B }
   tlb.resp.valid := recv
   tlb.resp.bits := resp
 
-  XSPerfAccumulate("req", req_in.fire())
-  XSPerfAccumulate("resp", tlb.resp.fire())
+  XSPerfAccumulate("req", req_in.fire)
+  XSPerfAccumulate("resp", tlb.resp.fire)
   if (!passReady) {
     XSPerfAccumulate("req_blank", req_in.valid && sent && ptw.req(0).ready)
     XSPerfAccumulate("resp_blank", ptw.resp.valid && recv && tlb.resp.ready)
@@ -134,6 +134,9 @@ class PTWFilterIO(Width: Int)(implicit p: Parameters) extends MMUIOBaseBundle {
   val tlb = Flipped(new VectorTlbPtwIO(Width))
   val ptw = new TlbPtwIO()
   val rob_head_miss_in_tlb = Output(Bool())
+  val debugTopDown = new Bundle {
+    val robHeadVaddr = Flipped(Valid(UInt(VAddrBits.W)))
+  }
 
   def apply(tlb: VectorTlbPtwIO, ptw: TlbPtwIO, sfence: SfenceBundle, csr: TlbCsrBundle): Unit = {
     this.tlb <> tlb
@@ -172,15 +175,15 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
 
   val inflight_counter = RegInit(0.U(log2Up(Size + 1).W))
   val inflight_full = inflight_counter === Size.U
-  when (io.ptw.req(0).fire() =/= io.ptw.resp.fire()) {
-    inflight_counter := Mux(io.ptw.req(0).fire(), inflight_counter + 1.U, inflight_counter - 1.U)
+  when (io.ptw.req(0).fire =/= io.ptw.resp.fire) {
+    inflight_counter := Mux(io.ptw.req(0).fire, inflight_counter + 1.U, inflight_counter - 1.U)
   }
 
   val canEnqueue = Wire(Bool()) // NOTE: actually enqueue
-  val ptwResp = RegEnable(io.ptw.resp.bits, io.ptw.resp.fire())
+  val ptwResp = RegEnable(io.ptw.resp.bits, io.ptw.resp.fire)
   val ptwResp_OldMatchVec = vpn.zip(v).map{ case (pi, vi) =>
     vi && io.ptw.resp.bits.hit(pi, io.csr.satp.asid, true, true)}
-  val ptwResp_valid = RegNext(io.ptw.resp.fire() && Cat(ptwResp_OldMatchVec).orR, init = false.B)
+  val ptwResp_valid = RegNext(io.ptw.resp.fire && Cat(ptwResp_OldMatchVec).orR, init = false.B)
   // May send repeated requests to L2 tlb with same vpn(26, 3) when sector tlb
   val oldMatchVec_early = io.tlb.req.map(a => vpn.zip(v).map{ case (pi, vi) => vi && pi === a.bits.vpn})
   val lastReqMatchVec_early = io.tlb.req.map(a => tlb_req.map{ b => b.valid && b.bits.vpn === a.bits.vpn && canEnqueue})
@@ -205,7 +208,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   val update_ports = v.indices.map(i => oldMatchVec2.map(j => j(i)))
   val ports_init = (0 until Width).map(i => (1 << i).U(Width.W))
   val filter_ports = (0 until Width).map(i => ParallelMux(newMatchVec(i).zip(ports_init).drop(i)))
-  val resp_vector = RegEnable(ParallelMux(ptwResp_OldMatchVec zip ports), io.ptw.resp.fire())
+  val resp_vector = RegEnable(ParallelMux(ptwResp_OldMatchVec zip ports), io.ptw.resp.fire)
 
   def canMerge(index: Int) : Bool = {
     ptwResp_newMatchVec(index) || oldMatchVec(index) ||
@@ -298,7 +301,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
     mayFullIss := do_enq
   }
 
-  when (io.ptw.resp.fire()) {
+  when (io.ptw.resp.fire) {
     v.zip(ptwResp_OldMatchVec).map{ case (vi, mi) => when (mi) { vi := false.B }}
   }
 
@@ -306,7 +309,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   assert(counter <= Size.U, "counter should be no more than Size")
   assert(inflight_counter <= Size.U, "inflight should be no more than Size")
   when (counter === 0.U) {
-    assert(!io.ptw.req(0).fire(), "when counter is 0, should not req")
+    assert(!io.ptw.req(0).fire, "when counter is 0, should not req")
     assert(isEmptyDeq && isEmptyIss, "when counter is 0, should be empty")
   }
   when (counter === Size.U) {
@@ -325,21 +328,18 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
     inflight_counter := 0.U
   }
 
-  val sourceVaddr = WireInit(0.U.asTypeOf(new Valid(UInt(VAddrBits.W))))
-
-  ExcitingUtils.addSink(sourceVaddr, s"rob_head_vaddr_${coreParams.HartId}", ExcitingUtils.Perf)
-
+  val robHeadVaddr = io.debugTopDown.robHeadVaddr
   io.rob_head_miss_in_tlb := VecInit(v.zip(vpn).map{case (vi, vpni) => {
-    vi && sourceVaddr.valid && vpni === get_pn(sourceVaddr.bits)
+    vi && robHeadVaddr.valid && vpni === get_pn(robHeadVaddr.bits)
   }}).asUInt.orR
 
   // perf
   XSPerfAccumulate("tlb_req_count", PopCount(Cat(io.tlb.req.map(_.valid))))
   XSPerfAccumulate("tlb_req_count_filtered", Mux(do_enq, accumEnqNum(Width - 1), 0.U))
-  XSPerfAccumulate("ptw_req_count", io.ptw.req(0).fire())
+  XSPerfAccumulate("ptw_req_count", io.ptw.req(0).fire)
   XSPerfAccumulate("ptw_req_cycle", inflight_counter)
-  XSPerfAccumulate("tlb_resp_count", io.tlb.resp.fire())
-  XSPerfAccumulate("ptw_resp_count", io.ptw.resp.fire())
+  XSPerfAccumulate("tlb_resp_count", io.tlb.resp.fire)
+  XSPerfAccumulate("ptw_resp_count", io.ptw.resp.fire)
   XSPerfAccumulate("inflight_cycle", !isEmptyDeq)
   for (i <- 0 until Size + 1) {
     XSPerfAccumulate(s"counter${i}", counter === i.U)

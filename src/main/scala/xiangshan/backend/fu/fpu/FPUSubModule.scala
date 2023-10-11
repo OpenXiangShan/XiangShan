@@ -16,7 +16,7 @@
 
 package xiangshan.backend.fu.fpu
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan.backend.fu.{FuncUnit, HasPipelineReg}
@@ -25,7 +25,7 @@ import xiangshan.{FPUCtrlSignals, XSModule}
 
 trait HasUIntToSIntHelper {
   implicit class UIntToSIntHelper(x: UInt){
-    def toSInt: SInt = Cat(0.U(1.W), x).asSInt()
+    def toSInt: SInt = Cat(0.U(1.W), x).asSInt
   }
 }
 

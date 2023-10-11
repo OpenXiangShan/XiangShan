@@ -16,9 +16,8 @@
 
 package xiangshan.cache.mmu
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
-import chisel3.internal.naming.chiselName
 import chisel3.util._
 import difftest._
 import freechips.rocketchip.util.SRAMAnnotation
@@ -28,7 +27,6 @@ import utility._
 import xiangshan.backend.fu.{PMPChecker, PMPReqBundle, PMPConfig => XSPMPConfig}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.util.HasCSRConst
-import firrtl.FirrtlProtos.Firrtl.Module.ExternalModule.Parameter
 import freechips.rocketchip.rocket.PMPConfig
 
 /** TLB module
@@ -40,7 +38,6 @@ import freechips.rocketchip.rocket.PMPConfig
   * @param p: XiangShan Paramemters, like XLEN
   */
 
-@chiselName
 class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)(implicit p: Parameters) extends TlbModule
   with HasCSRConst
   with HasPerfEvents
@@ -76,10 +73,10 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val portTranslateEnable = (0 until Width).map(i => vmEnable && RegNext(!req(i).bits.no_translate))
 
   val req_in = req
-  val req_out = req.map(a => RegEnable(a.bits, a.fire()))
+  val req_out = req.map(a => RegEnable(a.bits, a.fire))
   val req_out_v = (0 until Width).map(i => ValidHold(req_in(i).fire && !req_in(i).bits.kill, resp(i).fire, flush_pipe(i)))
 
-  val refill = ptw.resp.fire() && !flush_mmu && vmEnable
+  val refill = ptw.resp.fire && !flush_mmu && vmEnable
   refill_to_mem.valid := refill
   refill_to_mem.memidx := ptw.resp.bits.memidx
 
@@ -88,7 +85,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   if (q.outReplace) { io.replace <> entries.io.replace }
   for (i <- 0 until Width) {
     entries.io.r_req_apply(io.requestor(i).req.valid, get_pn(req_in(i).bits.vaddr), i)
-    entries.io.w_apply(refill, ptw.resp.bits, io.ptw_replenish)
+    entries.io.w_apply(refill, ptw.resp.bits)
     resp(i).bits.debug.isFirstIssue := RegNext(req(i).bits.debug.isFirstIssue)
     resp(i).bits.debug.robIdx := RegNext(req(i).bits.debug.robIdx)
   }
@@ -98,16 +95,14 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val hitVec = readResult.map(_._1)
   val missVec = readResult.map(_._2)
   val pmp_addr = readResult.map(_._3)
-  val static_pm = readResult.map(_._4)
-  val static_pm_v = readResult.map(_._5)
-  val perm = readResult.map(_._6)
+  val perm = readResult.map(_._4)
 
   // check pmp use paddr (for timing optization, use pmp_addr here)
   // check permisson
   (0 until Width).foreach{i =>
     pmp_check(pmp_addr(i), req_out(i).size, req_out(i).cmd, i)
     for (d <- 0 until nRespDups) {
-      perm_check(perm(i)(d), req_out(i).cmd, static_pm(i), static_pm_v(i), i, d)
+      perm_check(perm(i)(d), req_out(i).cmd, i, d)
     }
   }
 
@@ -123,20 +118,18 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
   /************************  main body above | method/log/perf below ****************************/
   def TLBRead(i: Int) = {
-    val (e_hit, e_ppn, e_perm, e_super_hit, e_super_ppn, static_pm) = entries.io.r_resp_apply(i)
+    val (e_hit, e_ppn, e_perm) = entries.io.r_resp_apply(i)
     val (p_hit, p_ppn, p_perm) = ptw_resp_bypass(get_pn(req_in(i).bits.vaddr))
     val enable = portTranslateEnable(i)
 
     val hit = e_hit || p_hit
     val miss = !hit && enable
-    val fast_miss = !(e_super_hit || p_hit) && enable
     hit.suggestName(s"hit_read_${i}")
     miss.suggestName(s"miss_read_${i}")
 
     val vaddr = SignExt(req_out(i).vaddr, PAddrBits)
     resp(i).bits.miss := miss
-    resp(i).bits.fast_miss := fast_miss
-    resp(i).bits.ptwBack := ptw.resp.fire()
+    resp(i).bits.ptwBack := ptw.resp.fire
     resp(i).bits.memidx := RegNext(req_in(i).bits.memidx)
 
     val ppn = WireInit(VecInit(Seq.fill(nRespDups)(0.U(ppnLen.W))))
@@ -152,12 +145,9 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
     XSDebug(req_out_v(i), p"(${i.U}) hit:${hit} miss:${miss} ppn:${Hexadecimal(ppn(0))} perm:${perm(0)}\n")
 
-    val pmp_paddr = Mux(enable, Cat(Mux(p_hit, p_ppn, e_super_ppn), get_off(req_out(i).vaddr)), vaddr)
-    // pmp_paddr seems same to paddr functionally. It abandons normal_ppn for timing optimization.
-    // val pmp_paddr = Mux(enable, paddr, vaddr)
-    val static_pm_valid = !(e_super_hit || p_hit) && enable && q.partialStaticPMP.B
+    val pmp_paddr = resp(i).bits.paddr(0)
 
-    (hit, miss, pmp_paddr, static_pm, static_pm_valid, perm)
+    (hit, miss, pmp_paddr, perm)
   }
 
   def pmp_check(addr: UInt, size: UInt, cmd: UInt, idx: Int): Unit = {
@@ -167,7 +157,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     pmp(idx).bits.cmd := cmd
   }
 
-  def perm_check(perm: TlbPermBundle, cmd: UInt, spm: TlbPMBundle, spm_v: Bool, idx: Int, nDups: Int) = {
+  def perm_check(perm: TlbPermBundle, cmd: UInt, idx: Int, nDups: Int) = {
     // for timing optimization, pmp check is divided into dynamic and static
     // dynamic: superpage (or full-connected reg entries) -> check pmp when translation done
     // static: 4K pages (or sram entries) -> check pmp with pre-checked results
@@ -191,11 +181,9 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     // but ptw may also have access fault, then af happens, the translation is wrong.
     // In this case, pf has lower priority than af
 
-    resp(idx).bits.excp(nDups).af.ld    := (af || (spm_v && !spm.r)) && TlbCmd.isRead(cmd) && fault_valid
-    resp(idx).bits.excp(nDups).af.st    := (af || (spm_v && !spm.w)) && TlbCmd.isWrite(cmd) && fault_valid
-    resp(idx).bits.excp(nDups).af.instr := (af || (spm_v && !spm.x)) && TlbCmd.isExec(cmd) && fault_valid
-    resp(idx).bits.static_pm.valid := spm_v && fault_valid // ls/st unit should use this mmio, not the result from pmp
-    resp(idx).bits.static_pm.bits := !spm.c
+    resp(idx).bits.excp(nDups).af.ld    := af && TlbCmd.isRead(cmd) && fault_valid
+    resp(idx).bits.excp(nDups).af.st    := af && TlbCmd.isWrite(cmd) && fault_valid
+    resp(idx).bits.excp(nDups).af.instr := af && TlbCmd.isExec(cmd) && fault_valid
   }
 
   def handle_nonblock(idx: Int): Unit = {
@@ -214,7 +202,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
   def handle_block(idx: Int): Unit = {
     // three valid: 1.if exist a entry; 2.if sent to ptw; 3.unset resp.valid
-    io.requestor(idx).req.ready := !req_out_v(idx) || io.requestor(idx).resp.fire()
+    io.requestor(idx).req.ready := !req_out_v(idx) || io.requestor(idx).resp.fire
     // req_out_v for if there is a request, may long latency, fixme
 
     // miss request entries
@@ -224,19 +212,19 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
     val new_coming = RegNext(req_in(idx).fire && !req_in(idx).bits.kill && !flush_pipe(idx), false.B)
     val miss_wire = new_coming && missVec(idx)
-    val miss_v = ValidHoldBypass(miss_wire, resp(idx).fire(), flush_pipe(idx))
+    val miss_v = ValidHoldBypass(miss_wire, resp(idx).fire, flush_pipe(idx))
     val miss_req_v = ValidHoldBypass(miss_wire || (miss_v && flush_mmu && !mmu_flush_pipe),
-      io.ptw.req(idx).fire() || resp(idx).fire(), flush_pipe(idx))
+      io.ptw.req(idx).fire || resp(idx).fire, flush_pipe(idx))
 
     // when ptw resp, check if hit, reset miss_v, resp to lsu/ifu
     resp(idx).valid := req_out_v(idx) && !(miss_v && portTranslateEnable(idx))
-    when (io.ptw.resp.fire() && hit && req_out_v(idx) && portTranslateEnable(idx)) {
+    when (io.ptw.resp.fire && hit && req_out_v(idx) && portTranslateEnable(idx)) {
       val pte = io.ptw.resp.bits
       resp(idx).valid := true.B
       resp(idx).bits.miss := false.B // for blocked tlb, this is useless
       for (d <- 0 until nRespDups) {
         resp(idx).bits.paddr(d) := Cat(pte.genPPN(get_pn(req_out(idx).vaddr)), get_off(req_out(idx).vaddr))
-        perm_check(pte, req_out(idx).cmd, 0.U.asTypeOf(new TlbPMBundle), false.B, idx, d)
+        perm_check(pte, req_out(idx).cmd, idx, d)
       }
       pmp_check(resp(idx).bits.paddr(0), req_out(idx).size, req_out(idx).cmd, idx)
 
@@ -280,11 +268,11 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   }
 
   // perf event
-  val result_ok = req_in.map(a => RegNext(a.fire()))
+  val result_ok = req_in.map(a => RegNext(a.fire))
   val perfEvents =
     Seq(
-      ("access", PopCount((0 until Width).map{i => if (Block(i)) io.requestor(i).req.fire() else portTranslateEnable(i) && result_ok(i) })),
-      ("miss  ", PopCount((0 until Width).map{i => if (Block(i)) portTranslateEnable(i) && result_ok(i) && missVec(i) else ptw.req(i).fire() })),
+      ("access", PopCount((0 until Width).map{i => if (Block(i)) io.requestor(i).req.fire else portTranslateEnable(i) && result_ok(i) })),
+      ("miss  ", PopCount((0 until Width).map{i => if (Block(i)) portTranslateEnable(i) && result_ok(i) && missVec(i) else ptw.req(i).fire })),
     )
   generatePerfEvent()
 
@@ -300,8 +288,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       XSPerfAccumulate("miss" + Integer.toString(i, 10), result_ok(i) && portTranslateEnable(i) && missVec(i))
     }
   }
-  XSPerfAccumulate("ptw_resp_count", ptw.resp.fire())
-  XSPerfAccumulate("ptw_resp_pf_count", ptw.resp.fire() && ptw.resp.bits.pf)
+  XSPerfAccumulate("ptw_resp_count", ptw.resp.fire)
+  XSPerfAccumulate("ptw_resp_pf_count", ptw.resp.fire && ptw.resp.bits.pf)
 
   // Log
   for(i <- 0 until Width) {
@@ -312,39 +300,41 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   XSDebug(io.sfence.valid, p"Sfence: ${io.sfence}\n")
   XSDebug(ParallelOR(req_out_v) || ptw.resp.valid, p"vmEnable:${vmEnable} hit:${Binary(VecInit(hitVec).asUInt)} miss:${Binary(VecInit(missVec).asUInt)}\n")
   for (i <- ptw.req.indices) {
-    XSDebug(ptw.req(i).fire(), p"L2TLB req:${ptw.req(i).bits}\n")
+    XSDebug(ptw.req(i).fire, p"L2TLB req:${ptw.req(i).bits}\n")
   }
   XSDebug(ptw.resp.valid, p"L2TLB resp:${ptw.resp.bits} (v:${ptw.resp.valid}r:${ptw.resp.ready}) \n")
 
-  println(s"${q.name}: normal page: ${q.normalNWays} ${q.normalAssociative} ${q.normalReplacer.get} super page: ${q.superNWays} ${q.superAssociative} ${q.superReplacer.get}")
+  println(s"${q.name}: page: ${q.NWays} ${q.Associative} ${q.Replacer.get}")
 
   if (env.EnableDifftest) {
-    val l1tlbid = Wire(UInt(2.W))
-    if (q.name == "itlb") {
-      l1tlbid := 0.U
-    } else if (q.name == "ldtlb") {
-      l1tlbid := 1.U
-    } else if (q.name == "sttlb") {
-      l1tlbid := 2.U
-    } else {
-      l1tlbid := 3.U
-    }
-
     for (i <- 0 until Width) {
       val pf = io.requestor(i).resp.bits.excp(0).pf.instr || io.requestor(i).resp.bits.excp(0).pf.st || io.requestor(i).resp.bits.excp(0).pf.ld
       val af = io.requestor(i).resp.bits.excp(0).af.instr || io.requestor(i).resp.bits.excp(0).af.st || io.requestor(i).resp.bits.excp(0).af.ld
-      val difftest = Module(new DifftestL1TLBEvent)
-      difftest.io.clock := clock
-      difftest.io.coreid := p(XSCoreParamsKey).HartId.asUInt
-      difftest.io.valid := l1tlbid =/= 3.U && RegNext(io.requestor(i).req.fire) && !RegNext(io.requestor(i).req_kill) && io.requestor(i).resp.fire && !io.requestor(i).resp.bits.miss && !pf && !af && portTranslateEnable(i)
-      difftest.io.index := i.U
-      difftest.io.l1tlbid := l1tlbid
-      difftest.io.satp := io.csr.satp.ppn
-      difftest.io.vpn := RegNext(get_pn(req_in(i).bits.vaddr))
-      difftest.io.ppn := get_pn(io.requestor(i).resp.bits.paddr(0))
+      val difftest = DifftestModule(new DiffL1TLBEvent)
+      difftest.coreid := io.hartId
+      difftest.valid := RegNext(io.requestor(i).req.fire) && !RegNext(io.requestor(i).req_kill) && io.requestor(i).resp.fire && !io.requestor(i).resp.bits.miss && !pf && !af && portTranslateEnable(i)
+      if (!Seq("itlb", "ldtlb", "sttlb").contains(q.name)) {
+        difftest.valid := false.B
+      }
+      difftest.index := TLBDiffId(p(XSCoreParamsKey).HartId).U
+      difftest.satp := io.csr.satp.ppn
+      difftest.vpn := RegNext(get_pn(req_in(i).bits.vaddr))
+      difftest.ppn := get_pn(io.requestor(i).resp.bits.paddr(0))
     }
   }
+}
 
+object TLBDiffId {
+  var i: Int = 0
+  var lastHartId: Int = -1
+  def apply(hartId: Int): Int = {
+    if (lastHartId != hartId) {
+      i = 0
+      lastHartId = hartId
+    }
+    i += 1
+    i - 1
+  }
 }
 
 class TLBNonBlock(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parameters) extends TLB(Width, nRespDups, Seq.fill(Width)(false), q)
@@ -353,23 +343,13 @@ class TLBBLock(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Par
 class TlbReplace(Width: Int, q: TLBParameters)(implicit p: Parameters) extends TlbModule {
   val io = IO(new TlbReplaceIO(Width, q))
 
-  if (q.normalAssociative == "fa") {
-    val re = ReplacementPolicy.fromString(q.normalReplacer, q.normalNWays)
-    re.access(io.normalPage.access.map(_.touch_ways))
-    io.normalPage.refillIdx := re.way
+  if (q.Associative == "fa") {
+    val re = ReplacementPolicy.fromString(q.Replacer, q.NWays)
+    re.access(io.page.access.map(_.touch_ways))
+    io.page.refillIdx := re.way
   } else { // set-acco && plru
-    val re = ReplacementPolicy.fromString(q.normalReplacer, q.normalNSets, q.normalNWays)
-    re.access(io.normalPage.access.map(_.sets), io.normalPage.access.map(_.touch_ways))
-    io.normalPage.refillIdx := { if (q.normalNWays == 1) 0.U else re.way(io.normalPage.chosen_set) }
-  }
-
-  if (q.superAssociative == "fa") {
-    val re = ReplacementPolicy.fromString(q.superReplacer, q.superNWays)
-    re.access(io.superPage.access.map(_.touch_ways))
-    io.superPage.refillIdx := re.way
-  } else { // set-acco && plru
-    val re = ReplacementPolicy.fromString(q.superReplacer, q.superNSets, q.superNWays)
-    re.access(io.superPage.access.map(_.sets), io.superPage.access.map(_.touch_ways))
-    io.superPage.refillIdx := { if (q.superNWays == 1) 0.U else re.way(io.superPage.chosen_set) }
+    val re = ReplacementPolicy.fromString(q.Replacer, q.NSets, q.NWays)
+    re.access(io.page.access.map(_.sets), io.page.access.map(_.touch_ways))
+    io.page.refillIdx := { if (q.NWays == 1) 0.U else re.way(io.page.chosen_set) }
   }
 }

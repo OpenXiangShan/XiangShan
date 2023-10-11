@@ -15,7 +15,7 @@
 ***************************************************************************************/
 package xiangshan.mem
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
@@ -55,15 +55,15 @@ class FreeList(size: Int, allocWidth: Int, freeWidth: Int, enablePreAlloc: Boole
     }
   }
 
-  val headPtr  = RegInit(FreeListPtr(false, 0)) 
+  val headPtr  = RegInit(FreeListPtr(false, 0))
   val headPtrNext = Wire(new FreeListPtr)
-  val tailPtr = RegInit(FreeListPtr(true, 0)) 
+  val tailPtr = RegInit(FreeListPtr(true, 0))
   val tailPtrNext = Wire(new FreeListPtr)
 
   // legality check
   def getRemBits(input: UInt)(rem: Int): UInt = {
     VecInit((0 until size / freeWidth).map(i => { input(freeWidth * i + rem) })).asUInt
-  }  
+  }
 
   // free logic
   val freeMask = RegInit(0.U(size.W))
@@ -104,9 +104,9 @@ class FreeList(size: Int, allocWidth: Int, freeWidth: Int, enablePreAlloc: Boole
   tailPtrNext := tailPtr + PopCount(freeReq)
   tailPtr := Mux(doFree, tailPtrNext, tailPtr)
 
-  // allocate 
+  // allocate
   val doAllocate = io.doAllocate.asUInt.orR
-  val numAllocate = PopCount(io.doAllocate) 
+  val numAllocate = PopCount(io.doAllocate)
   val freeSlotCnt = RegInit(size.U(log2Up(size + 1).W))
 
   for (i <- 0 until allocWidth) {
@@ -114,7 +114,7 @@ class FreeList(size: Int, allocWidth: Int, freeWidth: Int, enablePreAlloc: Boole
 
     if (enablePreAlloc) {
       val deqPtr = headPtr + numAllocate + offset
-      io.canAllocate(i) := RegNext(isBefore(deqPtr, tailPtrNext))
+      io.canAllocate(i) := RegNext(isBefore(deqPtr, tailPtr))
       io.allocateSlot(i) := RegNext(freeList(deqPtr.value))
     } else {
       val deqPtr = headPtr + offset
@@ -143,7 +143,7 @@ class FreeList(size: Int, allocWidth: Int, freeWidth: Int, enablePreAlloc: Boole
     val differentFlag = tailPtr.flag ^ headPtr.flag
     val headMask = UIntToMask(headPtr.value, size)
     val tailMask = UIntToMask(tailPtr.value, size)
-    val validMask1 = Mux(differentFlag, ~tailMask, tailMask ^ headMask) 
+    val validMask1 = Mux(differentFlag, ~tailMask, tailMask ^ headMask)
     val validMask2 = Mux(differentFlag, headMask, 0.U(size.W))
     val validMask = ~(validMask1 | validMask2)
     for (i <- 0 until size) {
@@ -152,7 +152,7 @@ class FreeList(size: Int, allocWidth: Int, freeWidth: Int, enablePreAlloc: Boole
           XSError(validMask(i) && validMask(j) && freeList(i) === freeList(j),s"Found same entry in free list! (i=$i j=$j)\n")
         }
       }
-    } 
+    }
   }
 
   // end

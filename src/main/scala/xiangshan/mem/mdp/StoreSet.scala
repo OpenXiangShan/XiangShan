@@ -16,7 +16,7 @@
 
 package xiangshan.mem.mdp
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -191,8 +191,8 @@ class SSIT(implicit p: Parameters) extends XSModule {
 
   val s2_ssidIsSame = s2_loadOldSSID === s2_storeOldSSID
   // for now we just use lowest bits of ldpc as store set id
-  val s2_ldSsidAllocate = XORFold(s1_mempred_update_req.ldpc, SSIDWidth)
-  val s2_stSsidAllocate = XORFold(s1_mempred_update_req.stpc, SSIDWidth)
+  val s2_ldSsidAllocate = XORFold(s2_mempred_update_req.ldpc, SSIDWidth)
+  val s2_stSsidAllocate = XORFold(s2_mempred_update_req.stpc, SSIDWidth)
   // both the load and the store have already been assigned store sets
   // but load's store set ID is smaller
   val s2_winnerSSID = Mux(s2_loadOldSSID < s2_storeOldSSID, s2_loadOldSSID, s2_storeOldSSID)
@@ -369,7 +369,7 @@ class LFST(implicit p: Parameters) extends XSModule {
     val hitInDispatchBundle = hitInDispatchBundleVec.asUInt.orR
     // Check if store set is valid in LFST
     io.dispatch.resp(i).bits.shouldWait := (
-        (valid(io.dispatch.req(i).bits.ssid) || hitInDispatchBundle) && 
+        (valid(io.dispatch.req(i).bits.ssid) || hitInDispatchBundle) &&
         io.dispatch.req(i).valid &&
         (!io.dispatch.req(i).bits.isstore || io.csrCtrl.storeset_wait_store)
       ) && !io.csrCtrl.lvpred_disable || io.csrCtrl.no_spec_load
@@ -414,8 +414,8 @@ class LFST(implicit p: Parameters) extends XSModule {
   })
 
   // recover robIdx after squash
-  // behavior model, to be refactored later 
-  when(RegNext(io.redirect.fire())) {
+  // behavior model, to be refactored later
+  when(RegNext(io.redirect.fire)) {
     (0 until LFSTSize).map(i => {
       (0 until LFSTWidth).map(j => {
         val check_position = WireInit(allocPtr(i) + (j+1).U)

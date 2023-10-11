@@ -1,6 +1,6 @@
 package xiangshan.mem.prefetch
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -8,8 +8,9 @@ import utils._
 import utility._
 import xiangshan.cache.HasDCacheParameters
 import xiangshan.cache.mmu._
-import xiangshan.mem.L1PrefetchReq
+import xiangshan.mem.{LdPrefetchTrainBundle, StPrefetchTrainBundle, L1PrefetchReq}
 import xiangshan.mem.trace._
+import xiangshan.mem.HasL1PrefetchSourceParameter
 
 case class SMSParams
 (
@@ -25,7 +26,8 @@ case class SMSParams
   pht_hist_bits: Int = 2,
   pht_tag_bits: Int = 13,
   pht_lookup_queue_size: Int = 4,
-  pf_filter_size: Int = 16
+  pf_filter_size: Int = 16,
+  train_filter_size: Int = 8
 ) extends PrefetcherParams
 
 trait HasSMSModuleHelper extends HasCircularQueuePtrHelper with HasDCacheParameters
@@ -453,7 +455,7 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   val s2_pht_lookup_valid = RegNext(s1_pht_lookup_valid, false.B) && !io.s2_stride_hit
   val s2_pht_lookup = RegEnable(s1_pht_lookup, s1_pht_lookup_valid)
 
-  io.s2_evict.valid := s2_evict_valid
+  io.s2_evict.valid := s2_evict_valid && (s2_evict_entry.access_cnt > 1.U)
   io.s2_evict.bits := s2_evict_entry
 
   io.s2_pf_gen_req.bits.region_tag := s2_pf_gen_region_tag
@@ -462,7 +464,7 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   io.s2_pf_gen_req.bits.region_bits := s2_pf_gen_region_bits
   io.s2_pf_gen_req.bits.paddr_valid := s2_paddr_valid
   io.s2_pf_gen_req.bits.decr_mode := s2_pf_gen_decr_mode
-  io.s2_pf_gen_req.valid := s2_pf_gen_valid
+  io.s2_pf_gen_req.valid := false.B
   io.s2_pf_gen_req.bits.debug_source_type := HW_PREFETCH_AGT.U
 
   io.s2_pht_lookup.valid := s2_pht_lookup_valid
@@ -483,7 +485,8 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
       s1_alloc && s1_replace_mask(i) || s1_update && s1_update_mask(i)
     )
   }
-
+  XSPerfAccumulate("sms_agt_evict", s2_evict_valid)
+  XSPerfAccumulate("sms_agt_evict_one_hot_pattern", s2_evict_valid && (s2_evict_entry.access_cnt === 1.U))
 }
 
 class PhtLookup()(implicit p: Parameters) extends XSBundle with HasSMSModuleHelper {
@@ -623,6 +626,8 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   val s2_pht_hit = Cat(s2_hit_vec).orR
   val s2_hist = Mux(s2_pht_hit, Mux1H(s2_hit_vec, s2_hist_update), s2_new_hist)
   val s2_repl_way_mask = UIntToOH(s2_replace_way)
+  val s2_incr_region_vaddr = s2_region_vaddr + 1.U
+  val s2_decr_region_vaddr = s2_region_vaddr - 1.U
 
   // pipe s3: send addr/data to ram, gen pf_req
   val s3_valid = RegNext(s2_valid, false.B)
@@ -643,6 +648,8 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   val s3_repl_way_mask = RegEnable(s2_repl_way_mask, s2_valid)
   val s3_repl_update_mask = RegEnable(VecInit((0 until PHT_SETS).map(i => i.U === s2_ram_waddr)), s2_valid)
   val s3_ram_waddr = RegEnable(s2_ram_waddr, s2_valid)
+  val s3_incr_region_vaddr = RegEnable(s2_incr_region_vaddr, s2_valid)
+  val s3_decr_region_vaddr = RegEnable(s2_decr_region_vaddr, s2_valid)
   s3_ram_en := s3_valid && s3_evict
   val s3_ram_wdata = Wire(new PhtEntry())
   s3_ram_wdata.hist := s3_hist
@@ -699,9 +706,7 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   val s3_cur_region_valid =  s3_pf_gen_valid && (s3_hist_pf_gen & s3_hist_update_mask).orR
   val s3_incr_region_valid = s3_pf_gen_valid && (s3_hist_hi & (~s3_hist_update_mask.head(REGION_BLKS - 1)).asUInt).orR
   val s3_decr_region_valid = s3_pf_gen_valid && (s3_hist_lo & (~s3_hist_update_mask.tail(REGION_BLKS - 1)).asUInt).orR
-  val s3_incr_region_vaddr = s3_region_vaddr + 1.U
   val s3_incr_alias_bits = get_alias_bits(s3_incr_region_vaddr)
-  val s3_decr_region_vaddr = s3_region_vaddr - 1.U
   val s3_decr_alias_bits = get_alias_bits(s3_decr_region_vaddr)
   val s3_incr_region_paddr = Cat(
     s3_region_paddr(REGION_ADDR_BITS - 1, REGION_ADDR_PAGE_BIT),
@@ -947,7 +952,109 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   XSPerfAccumulate("sms_pf_filter_l2_req", io.l2_pf_addr.valid)
 }
 
-class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSModuleHelper {
+class SMSTrainFilter()(implicit p: Parameters) extends XSModule with HasSMSModuleHelper with HasTrainFilterHelper {
+  val io = IO(new Bundle() {
+    // train input
+    // hybrid load store
+    val ld_in = Flipped(Vec(backendParams.LduCnt, ValidIO(new LdPrefetchTrainBundle())))
+    val st_in = Flipped(Vec(backendParams.StuCnt, ValidIO(new StPrefetchTrainBundle())))
+    // filter out
+    val train_req = ValidIO(new PrefetchReqBundle())
+  })
+
+  class Ptr(implicit p: Parameters) extends CircularQueuePtr[Ptr](
+    p => smsParams.train_filter_size
+  ){
+  }
+
+  object Ptr {
+    def apply(f: Bool, v: UInt)(implicit p: Parameters): Ptr = {
+      val ptr = Wire(new Ptr)
+      ptr.flag := f
+      ptr.value := v
+      ptr
+    }
+  }
+
+  val entries = RegInit(VecInit(Seq.fill(smsParams.train_filter_size){ (0.U.asTypeOf(new PrefetchReqBundle())) }))
+  val valids = RegInit(VecInit(Seq.fill(smsParams.train_filter_size){ (false.B) }))
+
+  val enqLen = backendParams.LduCnt + backendParams.StuCnt
+  val enqPtrExt = RegInit(VecInit((0 until enqLen).map(_.U.asTypeOf(new Ptr))))
+  val deqPtrExt = RegInit(0.U.asTypeOf(new Ptr))
+
+  val deqPtr = WireInit(deqPtrExt.value)
+
+  require(smsParams.train_filter_size >= enqLen)
+
+  val ld_reorder = reorder(io.ld_in)
+  val st_reorder = reorder(io.st_in)
+  val reqs_ls = ld_reorder.map(_.bits.asPrefetchReqBundle()) ++ st_reorder.map(_.bits.asPrefetchReqBundle())
+  val reqs_vls = ld_reorder.map(_.valid) ++ st_reorder.map(_.valid)
+  val needAlloc = Wire(Vec(enqLen, Bool()))
+  val canAlloc = Wire(Vec(enqLen, Bool()))
+
+  for(i <- (0 until enqLen)) {
+    val req = reqs_ls(i)
+    val req_v = reqs_vls(i)
+    val index = PopCount(needAlloc.take(i))
+    val allocPtr = enqPtrExt(index)
+    val entry_match = Cat(entries.zip(valids).map {
+      case(e, v) => v && block_hash_tag(e.vaddr) === block_hash_tag(req.vaddr)
+    }).orR
+    val prev_enq_match = if(i == 0) false.B else Cat(reqs_ls.zip(reqs_vls).take(i).map {
+      case(pre, pre_v) => pre_v && block_hash_tag(pre.vaddr) === block_hash_tag(req.vaddr)
+    }).orR
+
+    needAlloc(i) := req_v && !entry_match && !prev_enq_match
+    canAlloc(i) := needAlloc(i) && allocPtr >= deqPtrExt
+
+    when(canAlloc(i)) {
+      valids(allocPtr.value) := true.B
+      entries(allocPtr.value) := req
+    }
+  }
+  val allocNum = PopCount(canAlloc)
+
+  enqPtrExt.foreach{case x => x := x + allocNum}
+
+  io.train_req.valid := false.B
+  io.train_req.bits := DontCare
+  valids.zip(entries).zipWithIndex.foreach {
+    case((valid, entry), i) => {
+      when(deqPtr === i.U) {
+        io.train_req.valid := valid
+        io.train_req.bits := entry
+      }
+    }
+  }
+
+  when(io.train_req.valid) {
+    valids(deqPtr) := false.B
+    deqPtrExt := deqPtrExt + 1.U
+  }
+
+  XSPerfAccumulate("sms_train_filter_full", PopCount(valids) === (smsParams.train_filter_size).U)
+  XSPerfAccumulate("sms_train_filter_half", PopCount(valids) >= (smsParams.train_filter_size / 2).U)
+  XSPerfAccumulate("sms_train_filter_empty", PopCount(valids) === 0.U)
+
+  val raw_enq_pattern = Cat(reqs_vls)
+  val filtered_enq_pattern = Cat(needAlloc)
+  val actual_enq_pattern = Cat(canAlloc)
+  XSPerfAccumulate("sms_train_filter_enq", allocNum > 0.U)
+  XSPerfAccumulate("sms_train_filter_deq", io.train_req.fire)
+  def toBinary(n: Int): String = n match {
+    case 0|1 => s"$n"
+    case _   => s"${toBinary(n/2)}${n%2}"
+  }
+  for(i <- 0 until (1 << enqLen)) {
+    XSPerfAccumulate(s"sms_train_filter_raw_enq_pattern_${toBinary(i)}", raw_enq_pattern === i.U)
+    XSPerfAccumulate(s"sms_train_filter_filtered_enq_pattern_${toBinary(i)}", filtered_enq_pattern === i.U)
+    XSPerfAccumulate(s"sms_train_filter_actual_enq_pattern_${toBinary(i)}", actual_enq_pattern === i.U)
+  }
+}
+
+class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSModuleHelper with HasL1PrefetchSourceParameter {
 
   require(backendParams.LduCnt == 2)
 
@@ -957,37 +1064,12 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   val io_act_threshold = IO(Input(UInt(REGION_OFFSET.W)))
   val io_act_stride = IO(Input(UInt(6.W)))
 
-  val ld_curr = io.ld_in.map(_.bits)
-  val ld_curr_block_tag = ld_curr.map(x => block_hash_tag(x.vaddr))
+  val train_filter = Module(new SMSTrainFilter)
 
-  // block filter
-  val ld_prev = io.ld_in.map(ld => RegEnable(ld.bits, ld.valid))
-  val ld_prev_block_tag = ld_curr_block_tag.zip(io.ld_in.map(_.valid)).map({
-    case (tag, v) => RegEnable(tag, v)
-  })
-  val ld_prev_vld = io.ld_in.map(ld => RegNext(ld.valid, false.B))
+  train_filter.io.ld_in <> io.ld_in
+  train_filter.io.st_in <> io.st_in
 
-  val ld_curr_match_prev = ld_curr_block_tag.map(cur_tag =>
-    Cat(ld_prev_block_tag.zip(ld_prev_vld).map({
-      case (prev_tag, prev_vld) => prev_vld && prev_tag === cur_tag
-    })).orR
-  )
-  val ld0_match_ld1 = io.ld_in.head.valid && io.ld_in.last.valid && ld_curr_block_tag.head === ld_curr_block_tag.last
-  val ld_curr_vld = Seq(
-    io.ld_in.head.valid && !ld_curr_match_prev.head,
-    io.ld_in.last.valid && !ld_curr_match_prev.last && !ld0_match_ld1
-  )
-  val ld0_older_than_ld1 = Cat(ld_curr_vld).andR && isBefore(ld_curr.head.uop.robIdx, ld_curr.last.uop.robIdx)
-  val pending_vld = RegNext(Cat(ld_curr_vld).andR, false.B)
-  val pending_sel_ld0 = RegNext(Mux(pending_vld, ld0_older_than_ld1, !ld0_older_than_ld1))
-  val pending_ld = Mux(pending_sel_ld0, ld_prev.head, ld_prev.last)
-  val pending_ld_block_tag = Mux(pending_sel_ld0, ld_prev_block_tag.head, ld_prev_block_tag.last)
-  val oldest_ld = Mux(pending_vld,
-    pending_ld,
-    Mux(ld0_older_than_ld1 || !ld_curr_vld.last, ld_curr.head, ld_curr.last)
-  )
-
-  val train_ld = RegEnable(oldest_ld, pending_vld || Cat(ld_curr_vld).orR)
+  val train_ld = train_filter.io.train_req.bits
 
   val train_block_tag = block_hash_tag(train_ld.vaddr)
   val train_region_tag = train_block_tag.head(REGION_TAG_WIDTH)
@@ -1008,7 +1090,8 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   val train_region_paddr = region_addr(train_ld.paddr)
   val train_region_vaddr = region_addr(train_ld.vaddr)
   val train_region_offset = train_block_tag(REGION_OFFSET - 1, 0)
-  val train_vld = RegNext(pending_vld || Cat(ld_curr_vld).orR, false.B)
+  // val train_vld = RegNext(pending_vld || Cat(ld_curr_vld).orR, false.B)
+  val train_vld = train_filter.io.train_req.valid
 
 
   // prefetch stage0
@@ -1024,8 +1107,8 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   val train_region_m1_tag_s0 = RegEnable(train_region_m1_tag, train_vld)
   val train_allow_cross_region_p1_s0 = RegEnable(train_allow_cross_region_p1, train_vld)
   val train_allow_cross_region_m1_s0 = RegEnable(train_allow_cross_region_m1, train_vld)
-  val train_pht_tag_s0 = RegEnable(pht_tag(train_ld.uop.pc), train_vld)
-  val train_pht_index_s0 = RegEnable(pht_index(train_ld.uop.pc), train_vld)
+  val train_pht_tag_s0 = RegEnable(pht_tag(train_ld.pc), train_vld)
+  val train_pht_index_s0 = RegEnable(pht_index(train_ld.pc), train_vld)
   val train_region_offset_s0 = RegEnable(train_region_offset, train_vld)
   val train_region_p1_cross_page_s0 = RegEnable(train_region_p1_cross_page, train_vld)
   val train_region_m1_cross_page_s0 = RegEnable(train_region_m1_cross_page, train_vld)
@@ -1052,7 +1135,7 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
 
   stride.io.stride_en := io_stride_en
   stride.io.s0_lookup.valid := train_vld_s0
-  stride.io.s0_lookup.bits.pc := train_s0.uop.pc(STRIDE_PC_BITS - 1, 0)
+  stride.io.s0_lookup.bits.pc := train_s0.pc(STRIDE_PC_BITS - 1, 0)
   stride.io.s0_lookup.bits.vaddr := Cat(
     train_region_vaddr_s0, train_region_offset_s0, 0.U(log2Up(dcacheParameters.blockBytes).W)
   )
@@ -1079,32 +1162,37 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   pf_filter.io.gen_req.bits := pf_gen_req
   io.tlb_req <> pf_filter.io.tlb_req
   val is_valid_address = pf_filter.io.l2_pf_addr.bits > 0x80000000L.U
-  io.pf_addr.valid := pf_filter.io.l2_pf_addr.valid && io.enable && is_valid_address
-  io.pf_addr.bits := pf_filter.io.l2_pf_addr.bits
+
+  io.l2_req.valid := pf_filter.io.l2_pf_addr.valid && io.enable && is_valid_address
+  io.l2_req.bits.addr := pf_filter.io.l2_pf_addr.bits
+  io.l2_req.bits.source := MemReqSource.Prefetch2L2SMS.id.U
+
+  // for now, sms will not send l1 prefetch requests
   io.l1_req.bits.paddr := pf_filter.io.l2_pf_addr.bits
   io.l1_req.bits.alias := pf_filter.io.pf_alias_bits
   io.l1_req.bits.is_store := true.B
   io.l1_req.bits.confidence := 1.U
+  io.l1_req.bits.pf_source.value := L1_HW_PREFETCH_NULL
   io.l1_req.valid := false.B
 
   for((train, i) <- io.ld_in.zipWithIndex){
     XSPerfAccumulate(s"pf_train_miss_${i}", train.valid && train.bits.miss)
-    XSPerfAccumulate(s"pf_train_prefetched_${i}", train.valid && train.bits.meta_prefetch)
+    XSPerfAccumulate(s"pf_train_prefetched_${i}", train.valid && isFromL1Prefetch(train.bits.meta_prefetch))
   }
   val trace = Wire(new L1MissTrace)
   trace.vaddr := 0.U
   trace.pc := 0.U
-  trace.paddr := io.pf_addr.bits
+  trace.paddr := io.l2_req.bits.addr
   trace.source := pf_filter.io.debug_source_type
   val table = ChiselDB.createTable("L1SMSMissTrace_hart"+ p(XSCoreParamsKey).HartId.toString, new L1MissTrace)
-  table.log(trace, io.pf_addr.fire, "SMSPrefetcher", clock, reset)
+  table.log(trace, io.l2_req.fire, "SMSPrefetcher", clock, reset)
 
   XSPerfAccumulate("sms_pf_gen_conflict",
     pht_gen_valid && agt_gen_valid
   )
   XSPerfAccumulate("sms_pht_disabled", pht.io.pf_gen_req.valid && !io_pht_en)
   XSPerfAccumulate("sms_agt_disabled", active_gen_table.io.s2_pf_gen_req.valid && !io_agt_en)
-  XSPerfAccumulate("sms_pf_real_issued", io.pf_addr.valid)
+  XSPerfAccumulate("sms_pf_real_issued", io.l2_req.valid)
   XSPerfAccumulate("sms_l1_req_valid", io.l1_req.valid)
   XSPerfAccumulate("sms_l1_req_fire", io.l1_req.fire)
 }

@@ -16,7 +16,7 @@
 
 package xiangshan.cache
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
@@ -83,28 +83,28 @@ class L1MetadataArray(onReset: () => L1Metadata)(implicit p: Parameters) extends
     waymask = VecInit(wmask).asUInt)
 
   // tag read
-  val ren = io.read.fire()
+  val ren = io.read.fire
   tag_array.io.r.req.valid := ren
   tag_array.io.r.req.bits.apply(setIdx = io.read.bits.idx)
   io.resp := tag_array.io.r.resp.data
   val ecc_errors = tag_array.io.r.resp.data.zipWithIndex.map({ case (d, w) =>
     cacheParams.tagCode.decode(d).error && RegNext(io.read.bits.way_en(w))
   })
-  io.error.report_to_beu := RegNext(io.read.fire()) && Cat(ecc_errors).orR()
+  io.error.report_to_beu := RegNext(io.read.fire) && Cat(ecc_errors).orR
   io.error.paddr := Cat(io.read.bits.idx, 0.U(pgUntagBits.W))
 
   io.write.ready := !rst
   io.read.ready := !wen
 
   def dumpRead() = {
-    when(io.read.fire()) {
+    when(io.read.fire) {
       XSDebug("MetaArray Read: idx: %d way_en: %x tag: %x\n",
         io.read.bits.idx, io.read.bits.way_en, io.read.bits.tag)
     }
   }
 
   def dumpWrite() = {
-    when(io.write.fire()) {
+    when(io.write.fire) {
       XSDebug("MetaArray Write: idx: %d way_en: %x tag: %x new_tag: %x new_coh: %x\n",
         io.write.bits.idx, io.write.bits.way_en, io.write.bits.tag, io.write.bits.data.tag, io.write.bits.data.coh.state)
     }
@@ -153,7 +153,7 @@ class DuplicatedMetaArray(numReadPorts: Int)(implicit p: Parameters) extends DCa
 
   def dumpRead() = {
     (0 until numReadPorts) map { w =>
-      when(io.read(w).fire()) {
+      when(io.read(w).fire) {
         XSDebug(s"MetaArray Read channel: $w idx: %d way_en: %x tag: %x\n",
           io.read(w).bits.idx, io.read(w).bits.way_en, io.read(w).bits.tag)
       }
@@ -161,7 +161,7 @@ class DuplicatedMetaArray(numReadPorts: Int)(implicit p: Parameters) extends DCa
   }
 
   def dumpWrite() = {
-    when(io.write.fire()) {
+    when(io.write.fire) {
       XSDebug("MetaArray Write: idx: %d way_en: %x tag: %x new_tag: %x new_coh: %x\n",
         io.write.bits.idx, io.write.bits.way_en, io.write.bits.tag, io.write.bits.data.tag, io.write.bits.data.coh.state)
     }

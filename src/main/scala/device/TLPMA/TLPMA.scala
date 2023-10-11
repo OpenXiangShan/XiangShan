@@ -1,7 +1,7 @@
 package device
 
 import freechips.rocketchip.diplomacy.{AddressSet, LazyModule, LazyModuleImp, SimpleDevice}
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
@@ -24,7 +24,7 @@ class TLPMA(implicit p: Parameters) extends LazyModule with PMAConst with MMPMAM
     beatBytes = 8
   )
 
-  lazy val module = new LazyModuleImp(this) {
+  class TLPMAImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
 
     val io = IO(new TLPMAIO)
     val req = io.req
@@ -56,4 +56,5 @@ class TLPMA(implicit p: Parameters) extends LazyModule with PMAConst with MMPMAM
     }
   }
 
+  lazy val module = new TLPMAImp(this)
 }

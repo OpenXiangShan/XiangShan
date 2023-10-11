@@ -21,7 +21,7 @@ object FPU {
 
   def unbox(x: UInt, typeTag: UInt): UInt = {
     require(x.getWidth == 64)
-    val isBoxed = x.head(32).andR()
+    val isBoxed = x.head(32).andR
     Mux(typeTag === D,
       x,
       Mux(isBoxed,

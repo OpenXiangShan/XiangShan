@@ -5,7 +5,7 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.frontend.icache._
 import utility._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import xiangshan.backend.fu.util.HasCSRConst
 
 object CacheOpMap{
@@ -18,8 +18,8 @@ object CacheOpMap{
   }
 }
 
-object CacheRegMap{ 
-  def apply(offset: String,  width: String, authority: String, name: String ): Pair[String, Map[String, String]] = {
+object CacheRegMap{
+  def apply(offset: String,  width: String, authority: String, name: String ): (String, Map[String, String]) = {
     name -> Map(
       "offset" -> offset,
       "width"  -> width,
@@ -28,7 +28,7 @@ object CacheRegMap{
   }
 }
 
-trait CacheControlConst{ 
+trait CacheControlConst{
   def maxDataRowSupport = 8
 }
 
@@ -147,10 +147,10 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   })
 
   // CSRCacheOpDecoder state
-  val wait_csr_op_req = RegInit(true.B) // waiting for csr "CACHE_OP" being write  
+  val wait_csr_op_req = RegInit(true.B) // waiting for csr "CACHE_OP" being write
   val wait_cache_op_resp = RegInit(false.B) // waiting for dcache to finish dcache op
-  val schedule_csr_op_resp_data = RegInit(false.B) // ready to write data readed from cache back to csr  
-  val schedule_csr_op_resp_finish = RegInit(false.B) // ready to write "OP_FINISH" csr 
+  val schedule_csr_op_resp_data = RegInit(false.B) // ready to write data readed from cache back to csr
+  val schedule_csr_op_resp_finish = RegInit(false.B) // ready to write "OP_FINISH" csr
   // val cache_op_resp_timer = RegInit(0.U(4.W))
   val data_transfer_finished = WireInit(false.B)
   val data_transfer_cnt = RegInit(0.U(log2Up(maxDataRowSupport).W))
@@ -207,7 +207,7 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   io.cache_req_dup.map( dup => dup.valid := RegNext(cache_op_start) )
   io.cache.req.bits := translated_cache_req
   io.cache_req_dup.map( dup => dup.bits := translated_cache_req )
-  when(io.cache.req.fire()){
+  when(io.cache.req.fire){
     wait_cache_op_resp := true.B
   }
 
@@ -215,7 +215,7 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
 
   // Receive cache op resp from cache
   val raw_cache_resp = Reg(new CacheCtrlRespInfo)
-  when(io.cache.resp.fire()){
+  when(io.cache.resp.fire){
     wait_cache_op_resp := false.B
     raw_cache_resp := io.cache.resp.bits
     when(CacheInstrucion.isReadOp(translated_cache_req.opCode)){
@@ -229,11 +229,11 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   }
 
   // Translate cache op resp to CSR write, send it back to CSR
-  when(io.csr.update.w.fire() && schedule_csr_op_resp_data && data_transfer_finished){
+  when(io.csr.update.w.fire && schedule_csr_op_resp_data && data_transfer_finished){
     schedule_csr_op_resp_data := false.B
     schedule_csr_op_resp_finish := true.B
   }
-  when(io.csr.update.w.fire() && schedule_csr_op_resp_finish){
+  when(io.csr.update.w.fire && schedule_csr_op_resp_finish){
     schedule_csr_op_resp_finish := false.B
     wait_csr_op_req := true.B
   }
@@ -251,7 +251,7 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
       isReadTagECC -> (CacheInstrucion.CacheInsRegisterList("CACHE_TAG_ECC")("offset").toInt + Scachebase).U,
       isReadDataECC -> (CacheInstrucion.CacheInsRegisterList("CACHE_DATA_ECC")("offset").toInt + Scachebase).U,
       isReadTag -> ((CacheInstrucion.CacheInsRegisterList("CACHE_TAG_LOW")("offset").toInt + Scachebase).U + data_transfer_cnt),
-      isReadData -> ((CacheInstrucion.CacheInsRegisterList("CACHE_DATA_0")("offset").toInt + Scachebase).U + data_transfer_cnt), 
+      isReadData -> ((CacheInstrucion.CacheInsRegisterList("CACHE_DATA_0")("offset").toInt + Scachebase).U + data_transfer_cnt),
     ))
     io.csr.update.w.bits.data := Mux1H(List(
       isReadTagECC -> raw_cache_resp.read_tag_ecc,

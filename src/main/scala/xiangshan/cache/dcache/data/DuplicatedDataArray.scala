@@ -16,7 +16,7 @@
 
 package xiangshan.cache
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
@@ -42,7 +42,7 @@ class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray {
     })
   }
 
-  val waddr = (io.write.bits.addr >> blockOffBits).asUInt()
+  val waddr = (io.write.bits.addr >> blockOffBits).asUInt
   val raddrs = io.read.map(r => (r.bits.addr >> blockOffBits).asUInt)
   io.write.ready := (if (readHighPriority) {
     if (singlePort) {
@@ -93,7 +93,7 @@ class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray {
     val data_left = Mux1H(r_way_en_reg.tail(half), data_read.take(half))
     val data_right = Mux1H(r_way_en_reg.head(half), data_read.drop(half))
 
-    val sel_low = r_way_en_reg.tail(half).orR()
+    val sel_low = r_way_en_reg.tail(half).orR
     val row_data = Mux(sel_low, data_left, data_right)
 
     io.rdata := row_data
@@ -109,7 +109,7 @@ class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray {
     io.read(j).ready := (if (readHighPriority) true.B else !rwhazard)
 
     // use way_en to select a way after data read out
-    assert(!(RegNext(io.read(j).fire() && PopCount(io.read(j).bits.way_en) > 1.U)))
+    assert(!(RegNext(io.read(j).fire && PopCount(io.read(j).bits.way_en) > 1.U)))
     val way_en = RegNext(io.read(j).bits.way_en)
 
     val row_error = Wire(Vec(blockRows, Vec(rowWords, Bool())))
@@ -162,7 +162,7 @@ class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray {
           data
         }
       })
-      io.errors(j).report_to_beu := RegNext(io.read(j).fire()) && Cat(row_error.flatten).orR()
+      io.errors(j).report_to_beu := RegNext(io.read(j).fire) && Cat(row_error.flatten).orR
       io.errors(j).paddr := RegNext(io.read(j).bits.addr)
     }
 

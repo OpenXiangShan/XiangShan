@@ -18,7 +18,7 @@ package device
 
 import chisel3._
 import chisel3.util._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3.experimental.ExtModule
 import freechips.rocketchip.diplomacy.AddressSet
 import utils._
@@ -66,7 +66,7 @@ class AXI4Flash
 
     val flash = Module(new FlashHelper)
     flash.clk := clock
-    flash.ren := in.ar.fire()
+    flash.ren := in.ar.fire
     flash.addr := Cat(0.U(16.W), getOffset(raddr))
 
     in.r.bits.data := flash.data

@@ -16,7 +16,7 @@
 
 package xiangshan.backend
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
@@ -64,6 +64,7 @@ class CtrlBlockImp(
     "memPred"   -> 1,
     "robFlush"  -> 1,
     "load"      -> params.LduCnt,
+    "store"     -> if(EnableStorePrefetchSMS) params.StaCnt else 0
   ))
 
   private val numPcMemReadForExu = params.numPcReadPort
@@ -153,9 +154,18 @@ class CtrlBlockImp(
     io.memLdPcRead(i).data := pcMem.io.rdata(pcMemIdx).getPc(RegNext(io.memLdPcRead(i).offset))
   }
 
+  if (EnableStorePrefetchSMS) {
+    for ((pcMemIdx, i) <- pcMemRdIndexes("store").zipWithIndex) {
+      pcMem.io.raddr(pcMemIdx) := io.memStPcRead(i).ptr.value
+      io.memStPcRead(i).data := pcMem.io.rdata(pcMemIdx).getPc(RegNext(io.memStPcRead(i).offset))
+    }
+  } else {
+    io.memStPcRead(i).data := 0.U
+  }
+
   redirectGen.io.hartId := io.fromTop.hartId
   redirectGen.io.exuRedirect := exuRedirects
-  redirectGen.io.exuOutPredecode := exuPredecode // garded by exuRedirect.valid
+  redirectGen.io.exuOutPredecode := exuPredecode // guarded by exuRedirect.valid
   redirectGen.io.loadReplay <> loadReplay
 
   redirectGen.io.robFlush := s1_robFlushRedirect.valid
@@ -439,6 +449,11 @@ class CtrlBlockImp(
   rob.io.lsTopdownInfo := io.robio.lsTopdownInfo
   io.robio.robDeqPtr := rob.io.robDeqPtr
 
+  io.debugTopDown.fromRob := rob.io.debugTopDown.toCore
+  dispatch.io.debugTopDown.fromRob := rob.io.debugTopDown.toDispatch
+  dispatch.io.debugTopDown.fromCore := io.debugTopDown.fromCore
+  io.debugRolling := rob.io.debugRolling
+
   io.perfInfo.ctrlInfo.robFull := RegNext(rob.io.robFull)
   io.perfInfo.ctrlInfo.intdqFull := RegNext(intDq.io.dqFull)
   io.perfInfo.ctrlInfo.fpdqFull := RegNext(fpDq.io.dqFull)
@@ -495,6 +510,8 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val violation = Flipped(ValidIO(new Redirect))
   }
   val memLdPcRead = Vec(params.LduCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
+  val memStPcRead = Vec(exuParameters.StuCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
+
   val csrCtrl = Input(new CustomCSRCtrlIO)
   val robio = new Bundle {
     val csr = new RobCSRIO
@@ -521,6 +538,12 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
 
   val sqCanAccept = Input(Bool())
   val lqCanAccept = Input(Bool())
+
+  val debugTopDown = new Bundle {
+    val fromRob = new RobCoreTopDownIO
+    val fromCore = new CoreDispatchTopDownIO
+  }
+  val debugRolling = new RobDebugRollingIO
 }
 
 class NamedIndexes(namedCnt: Seq[(String, Int)]) {

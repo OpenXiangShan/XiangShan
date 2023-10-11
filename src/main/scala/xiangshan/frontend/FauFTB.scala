@@ -16,13 +16,12 @@
 
 package xiangshan.frontend
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
 import utility._
 import xiangshan._
-import chisel3.experimental.chiselName
 import scala.{Tuple2 => &}
 
 trait FauFTBParams extends HasXSParameter with HasBPUConst {
@@ -77,7 +76,7 @@ class FauFTBWay(implicit p: Parameters) extends XSModule with FauFTBParams {
 
 
 class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
-  
+
   class FauFTBMeta(implicit p: Parameters) extends XSBundle with FauFTBParams {
     val pred_way = UInt(log2Ceil(numWays).W)
     val hit = Bool()
@@ -96,18 +95,18 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
 
 
   // pred req
-  ways.foreach(_.io.req_tag := getTag(s1_pc))
+  ways.foreach(_.io.req_tag := getTag(s1_pc_dup(0)))
 
   // pred resp
   val s1_hit_oh = VecInit(ways.map(_.io.resp_hit)).asUInt
   val s1_hit = s1_hit_oh.orR
   val s1_hit_way = OHToUInt(s1_hit_oh)
   val s1_possible_full_preds = Wire(Vec(numWays, new FullBranchPrediction))
-  
+
   val s1_all_entries = VecInit(ways.map(_.io.resp))
   for (c & fp & e <- ctrs zip s1_possible_full_preds zip s1_all_entries) {
     fp.hit := DontCare
-    fp.fromFtbEntry(e, s1_pc)
+    fp.fromFtbEntry(e, s1_pc_dup(0))
     for (i <- 0 until numBr) {
       fp.br_taken_mask(i) := c(i)(1) || e.always_taken(i)
     }
@@ -115,18 +114,18 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   val s1_hit_full_pred = Mux1H(s1_hit_oh, s1_possible_full_preds)
   XSError(PopCount(s1_hit_oh) > 1.U, "fauftb has multiple hits!\n")
   val fauftb_enable = RegNext(io.ctrl.ubtb_enable)
-  io.out.s1.full_pred := s1_hit_full_pred
-  io.out.s1.full_pred.hit := s1_hit && fauftb_enable
+  io.out.s1.full_pred.map(_ := s1_hit_full_pred)
+  io.out.s1.full_pred.map(_ .hit := s1_hit && fauftb_enable)
 
   // assign metas
   io.out.last_stage_meta := resp_meta.asUInt
-  resp_meta.hit := RegEnable(RegEnable(s1_hit, io.s1_fire), io.s2_fire)
-  resp_meta.pred_way := RegEnable(RegEnable(s1_hit_way, io.s1_fire), io.s2_fire)
+  resp_meta.hit := RegEnable(RegEnable(s1_hit, io.s1_fire(0)), io.s2_fire(0))
+  resp_meta.pred_way := RegEnable(RegEnable(s1_hit_way, io.s1_fire(0)), io.s2_fire(0))
 
   // pred update replacer state
-  val s1_fire = io.s1_fire
-  replacer_touch_ways(0).valid := RegNext(s1_fire && s1_hit)
-  replacer_touch_ways(0).bits  := RegEnable(s1_hit_way, s1_fire && s1_hit)
+  val s1_fire = io.s1_fire(0)
+  replacer_touch_ways(0).valid := RegNext(s1_fire(0) && s1_hit)
+  replacer_touch_ways(0).bits  := RegEnable(s1_hit_way, s1_fire(0) && s1_hit)
 
   /********************** update ***********************/
   // s0: update_valid, read and tag comparison
@@ -181,7 +180,7 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
 
 
   /********************** perf counters **********************/
-  val s0_fire_next_cycle = RegNext(io.s0_fire)
+  val s0_fire_next_cycle = RegNext(io.s0_fire(0))
   val u_pred_hit_way_map   = (0 until numWays).map(w => s0_fire_next_cycle && s1_hit && s1_hit_way === w.U)
   val u_commit_hit_way_map = (0 until numWays).map(w => u.valid && u_meta.hit && u_meta.pred_way === w.U)
   XSPerfAccumulate("uftb_read_hits",   s0_fire_next_cycle &&  s1_hit)
@@ -200,5 +199,5 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
     ("fauftb_commit_miss      ", u.valid && !u_meta.hit),
   )
   generatePerfEvent()
-  
+
 }

@@ -17,7 +17,7 @@ package xiangshan.cache.mmu
 
 import chisel3._
 import chisel3.util._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import xiangshan.{SfenceBundle, XSModule}
 import utils._
 import utility._
@@ -48,7 +48,7 @@ class L2TlbPrefetch(implicit p: Parameters) extends XSModule with HasPtwConst {
   val next_line = get_next_line(io.in.bits.vpn)
   val next_req = RegEnable(next_line, io.in.valid)
   val input_valid = io.in.valid && !flush && !already_have(next_line)
-  val v = ValidHold(input_valid, io.out.fire(), flush)
+  val v = ValidHold(input_valid, io.out.fire, flush)
 
   io.out.valid := v
   io.out.bits.vpn := next_req
@@ -66,5 +66,5 @@ class L2TlbPrefetch(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   XSPerfAccumulate("l2tlb_prefetch_input_count", io.in.valid)
   XSPerfAccumulate("l2tlb_prefetch_valid_count", input_valid)
-  XSPerfAccumulate("l2tlb_prefetch_output_count", io.out.fire())
+  XSPerfAccumulate("l2tlb_prefetch_output_count", io.out.fire)
 }

@@ -16,7 +16,7 @@
 
 package xiangshan.mem
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils.{XSDebug, XSInfo}
@@ -59,7 +59,7 @@ class FakeSbuffer(implicit p: Parameters) extends XSModule {
   // --------------------------------------------
   // s_invalid: receive requests
   when (state === s_invalid) {
-    when (io.in(0).fire()) {
+    when (io.in(0).fire) {
       req   := io.in(0).bits
       state := s_req
     }
@@ -79,14 +79,14 @@ class FakeSbuffer(implicit p: Parameters) extends XSModule {
     dcache_req.bits.mask := wmaskVec.asUInt
     dcache_req.bits.id   := DontCare
 
-    when (dcache_req.fire()) {
+    when (dcache_req.fire) {
       state := s_resp
     }
   }
 
   when (state === s_resp) {
     io.dcache.resp.ready := true.B
-    when (io.dcache.resp.fire()) {
+    when (io.dcache.resp.fire) {
       state := s_invalid
     }
   }
@@ -103,7 +103,7 @@ class FakeSbuffer(implicit p: Parameters) extends XSModule {
     io.forward(i).forwardData := VecInit((0 until 8) map {i => req.data((i + 1) * 8 - 1, i * 8)})
   }
 
-  XSInfo(io.in(0).fire(), "ensbuffer addr 0x%x wdata 0x%x mask %b\n", io.in(0).bits.addr, io.in(0).bits.data, io.in(0).bits.mask)
-  XSInfo(io.in(1).fire(), "ensbuffer addr 0x%x wdata 0x%x mask %b\n", io.in(1).bits.addr, io.in(1).bits.data, io.in(0).bits.mask)
-  XSInfo(io.dcache.req.fire(), "desbuffer addr 0x%x wdata 0x%x mask %b\n", io.dcache.req.bits.addr, io.dcache.req.bits.data, io.dcache.req.bits.mask)
+  XSInfo(io.in(0).fire, "ensbuffer addr 0x%x wdata 0x%x mask %b\n", io.in(0).bits.addr, io.in(0).bits.data, io.in(0).bits.mask)
+  XSInfo(io.in(1).fire, "ensbuffer addr 0x%x wdata 0x%x mask %b\n", io.in(1).bits.addr, io.in(1).bits.data, io.in(0).bits.mask)
+  XSInfo(io.dcache.req.fire, "desbuffer addr 0x%x wdata 0x%x mask %b\n", io.dcache.req.bits.addr, io.dcache.req.bits.data, io.dcache.req.bits.mask)
 }

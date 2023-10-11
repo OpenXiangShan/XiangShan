@@ -16,7 +16,7 @@
 
 package xiangshan.backend.fu
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utils._
@@ -73,8 +73,8 @@ class Fence(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   sfence.bits.flushPipe := uop.ctrl.flushPipe.get
 //  XSError(sfence.valid && uop.lsrc(0) =/= uop.imm(4, 0), "lsrc0 is passed by imm\n")
 //  XSError(sfence.valid && uop.lsrc(1) =/= uop.imm(9, 5), "lsrc1 is passed by imm\n")
-  sfence.bits.addr := RegEnable(io.in.bits.data.src(0), io.in.fire())
-  sfence.bits.asid := RegEnable(io.in.bits.data.src(1), io.in.fire())
+  sfence.bits.addr := RegEnable(io.in.bits.data.src(0), io.in.fire)
+  sfence.bits.asid := RegEnable(io.in.bits.data.src(1), io.in.fire)
 
   when (state === s_idle && io.in.valid) { state := s_wait }
   when (state === s_wait && func === FenceOpType.fencei && sbEmpty) { state := s_icache }
@@ -98,6 +98,6 @@ class Fence(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   XSDebug(state =/= s_idle, p"state:${state} sbuffer(flush:${sbuffer} empty:${sbEmpty}) fencei:${fencei} sfence:${sfence}\n")
   XSDebug(io.out.valid, p" Out(${io.out.valid} ${io.out.ready}) state:${state} Outpc:0x${Hexadecimal(io.out.bits.res.pc.get)} OutrobIdx:${io.out.bits.ctrl.robIdx}\n")
 
-  // assert(!(io.out.valid && io.out.bits.uop.ctrl.rfWen))
+  assert(!(io.out.valid && io.out.bits.ctrl.rfWen))
   assert(!io.out.valid || io.out.ready, "when fence is out valid, out ready should always be true")
 }
