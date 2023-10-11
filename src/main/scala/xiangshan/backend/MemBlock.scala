@@ -608,9 +608,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.replay <> lsq.io.replay(i)
 
     loadUnits(i).io.l2_hint <> io.l2_hint
-    loadUnits(i).io.tlb_hint.id := dtlbRepeater.io.hint.get.req(i).id
-    loadUnits(i).io.tlb_hint.full := dtlbRepeater.io.hint.get.req(i).full ||
-      RegNext(tlbreplay(i)) || RegNext(dtlb_ld(0).tlbreplay(i))
+    loadUnits(i).io.tlb_hint.req := dtlbRepeater.io.hint.get.req(i)
+    loadUnits(i).io.tlb_hint.resp <> dtlbRepeater.io.hint.get.resp
 
     // passdown to lsq (load s2)
     lsq.io.ldu.ldin(i) <> loadUnits(i).io.lsq.ldin
