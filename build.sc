@@ -24,20 +24,18 @@ import $file.coupledL2.common
 
 val defaultScalaVersion = "2.13.10"
 
-def defaultVersions(chiselVersion: String) = Map(
-  "chisel" -> (chiselVersion match {
-    case "chisel"  => ivy"org.chipsalliance::chisel:6.0.0-M3"
-    case "chisel3" => ivy"edu.berkeley.cs::chisel3:3.6.0"
-  }),
-  "chisel-plugin" -> (chiselVersion match {
-    case "chisel"  => ivy"org.chipsalliance:::chisel-plugin:6.0.0-M3"
-    case "chisel3" => ivy"edu.berkeley.cs:::chisel3-plugin:3.6.0"
-  }),
-  "chiseltest" -> (chiselVersion match {
-    case "chisel"  => ivy"edu.berkeley.cs::chiseltest:5.0.2"
-    case "chisel3" => ivy"edu.berkeley.cs::chiseltest:0.6.2"
-  })
-)
+def defaultVersions(chiselVersion: String) = chiselVersion match {
+  case "chisel" => Map(
+    "chisel"        -> ivy"org.chipsalliance::chisel:6.0.0-M3",
+    "chisel-plugin" -> ivy"org.chipsalliance:::chisel-plugin:6.0.0-M3",
+    "chiseltest"    -> ivy"edu.berkeley.cs::chiseltest:5.0.2"
+  )
+  case "chisel3" => Map(
+    "chisel"        -> ivy"edu.berkeley.cs::chisel3:3.6.0",
+    "chisel-plugin" -> ivy"edu.berkeley.cs:::chisel3-plugin:3.6.0",
+    "chiseltest"    -> ivy"edu.berkeley.cs::chiseltest:0.6.2"
+  )
+}
 
 trait HasChisel extends SbtModule with Cross.Module[String] {
   def chiselModule: Option[ScalaModule] = None
