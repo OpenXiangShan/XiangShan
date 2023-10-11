@@ -1,6 +1,6 @@
 package xiangshan.backend.ctrlblock
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan.XSBundle
@@ -85,6 +85,8 @@ class LsTopdownInfo(implicit p: Parameters) extends XSBundle {
     val robIdx = UInt(log2Ceil(RobSize).W)
     val paddr_valid = Bool()
     val paddr_bits = UInt(PAddrBits.W)
+    val cache_miss_en = Bool()
+    val first_real_miss = Bool()
   }
 
   def s1SignalEnable(ena: LsTopdownInfo) = {
@@ -98,6 +100,9 @@ class LsTopdownInfo(implicit p: Parameters) extends XSBundle {
     when(ena.s2.paddr_valid) {
       s2.paddr_valid := true.B
       s2.paddr_bits := ena.s2.paddr_bits
+    }
+    when(ena.s2.cache_miss_en) {
+      s2.first_real_miss := ena.s2.first_real_miss
     }
   }
 }

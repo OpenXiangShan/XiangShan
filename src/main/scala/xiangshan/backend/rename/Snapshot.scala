@@ -1,6 +1,6 @@
 package xiangshan.backend.rename
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import utility.{CircularQueuePtr, HasCircularQueuePtrHelper}
 import utils.XSError

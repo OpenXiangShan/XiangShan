@@ -33,41 +33,6 @@ import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput}
 import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfo, LsTopdownInfo}
 import xiangshan.backend.rename.SnapshotGenerator
 
-class LsTopdownInfo(implicit p: Parameters) extends XSBundle {
-  val s1 = new Bundle {
-    val robIdx = UInt(log2Ceil(RobSize).W)
-    val vaddr_valid = Bool()
-    val vaddr_bits = UInt(VAddrBits.W)
-  }
-  val s2 = new Bundle {
-    val robIdx = UInt(log2Ceil(RobSize).W)
-    val paddr_valid = Bool()
-    val paddr_bits = UInt(PAddrBits.W)
-    val cache_miss_en = Bool()
-    val first_real_miss = Bool()
-  }
-
-  def s1SignalEnable(ena: LsTopdownInfo) = {
-    when(ena.s1.vaddr_valid) {
-      s1.vaddr_valid := true.B
-      s1.vaddr_bits := ena.s1.vaddr_bits
-    }
-  }
-
-  def s2SignalEnable(ena: LsTopdownInfo) = {
-    when(ena.s2.paddr_valid) {
-      s2.paddr_valid := true.B
-      s2.paddr_bits := ena.s2.paddr_bits
-    }
-    when(ena.s2.cache_miss_en) {
-      s2.first_real_miss := ena.s2.first_real_miss
-    }
-  }
-}
-
-object LsTopdownInfo {
-  def init(implicit p: Parameters): LsTopdownInfo = 0.U.asTypeOf(new LsTopdownInfo)
-}
 
 class RobPtr(entries: Int) extends CircularQueuePtr[RobPtr](
   entries
@@ -357,8 +322,6 @@ class RobFlushInfo(implicit p: Parameters) extends XSBundle {
 class Rob(params: BackendParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
 
-  lazy val module = new RobImp(this)
-
   lazy val module = new RobImp(this)(p, params)
 }
 
@@ -403,8 +366,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val debugRolling = new RobDebugRollingIO
   })
 
-  val exuWBs: Seq[ValidIO[ExuOutput]] = io.writeback.filter(!_.bits.params.hasStdFu)
-  val stdWBs: Seq[ValidIO[ExuOutput]] = io.writeback.filter(_.bits.params.hasStdFu)
+  val exuWBs: Seq[ValidIO[ExuOutput]] = io.writeback.filter(!_.bits.params.hasStdFu).toSeq
+  val stdWBs: Seq[ValidIO[ExuOutput]] = io.writeback.filter(_.bits.params.hasStdFu).toSeq
   val fflagsWBs = io.writeback.filter(x => x.bits.fflags.nonEmpty)
   val exceptionWBs = io.writeback.filter(x => x.bits.exceptionVec.nonEmpty)
   val redirectWBs = io.writeback.filter(x => x.bits.redirect.nonEmpty)
@@ -812,7 +775,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // TODO: don't check all exu write back
   val misPredWb = Cat(VecInit(redirectWBs.map(wb =>
     wb.bits.redirect.get.bits.cfiUpdate.isMisPred && wb.bits.redirect.get.valid && wb.valid
-  ))).orR
+  ).toSeq)).orR
   val misPredBlockCounter = Reg(UInt(3.W))
   misPredBlockCounter := Mux(misPredWb,
     "b111".U,
@@ -1365,7 +1328,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val eliminatedMove = dt_eliminatedMove(ptr)
       val isRVC = dt_isRVC(ptr)
 
-      val difftest = DifftestModule(new DiffInstrCommit(NRPhyRegs), delay = 3, dontCare = true)
+      val difftest = DifftestModule(new DiffInstrCommit(MaxPhyPregs), delay = 3, dontCare = true)
       difftest.coreid  := io.hartId
       difftest.index   := i.U
       difftest.valid   := io.commits.commitValid(i) && io.commits.isCommit
@@ -1379,8 +1342,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
       if (env.EnableDifftest) {
         val uop = commitDebugUop(i)
-        difftest.pc       := SignExt(uop.cf.pc, XLEN)
-        difftest.instr    := uop.cf.instr
+        difftest.pc       := SignExt(uop.pc, XLEN)
+        difftest.instr    := uop.instr
         difftest.robIdx   := ZeroExt(ptr, 10)
         difftest.lqIdx    := ZeroExt(uop.lqIdx.value, 7)
         difftest.sqIdx    := ZeroExt(uop.sqIdx.value, 7)

@@ -98,6 +98,5 @@ class Fence(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   XSDebug(state =/= s_idle, p"state:${state} sbuffer(flush:${sbuffer} empty:${sbEmpty}) fencei:${fencei} sfence:${sfence}\n")
   XSDebug(io.out.valid, p" Out(${io.out.valid} ${io.out.ready}) state:${state} Outpc:0x${Hexadecimal(io.out.bits.res.pc.get)} OutrobIdx:${io.out.bits.ctrl.robIdx}\n")
 
-  assert(!(io.out.valid && io.out.bits.ctrl.rfWen))
   assert(!io.out.valid || io.out.ready, "when fence is out valid, out ready should always be true")
 }

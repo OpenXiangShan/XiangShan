@@ -1,6 +1,6 @@
 package xiangshan.backend.issue
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utility.HasCircularQueuePtrHelper
@@ -57,7 +57,11 @@ class Status(implicit p:Parameters, params: IssueBlockParams) extends XSBundle {
     srcReady && !issued && !blocked
   }
 
-  def mergedLoadDependency = srcLoadDependency.map(_.map(_.toSeq).reduce(_ zip _ map(x => x._1 | x._2)))
+  def mergedLoadDependency = {
+    srcLoadDependency.map(_.map(_.toSeq).reduce({
+      case (l: Vec[UInt], r: Vec[UInt]) => VecInit(l.zip(r).map(x => x._1 | x._2))
+    }: (Vec[UInt], Vec[UInt]) => Vec[UInt]))
+  }
 }
 
 class EntryDeqRespBundle(implicit p:Parameters, params: IssueBlockParams) extends Bundle {

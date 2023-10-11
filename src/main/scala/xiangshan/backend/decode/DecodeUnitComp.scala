@@ -16,7 +16,7 @@
 
 package xiangshan.backend.decode
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.rocket.Instructions
@@ -1645,7 +1645,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
     decodedInsts(i) := MuxCase(csBundle(i), Seq(
       (state === s_normal) -> csBundle(i),
       (state === s_ext) -> Mux((i.U + numOfUop -uopRes) < maxUopSize.U, csBundle(i.U + numOfUop - uopRes), csBundle(maxUopSize - 1))
-    ))
+    ).toSeq)
   }
 
   val validSimple = Wire(Vec(DecodeWidth, Bool()))

@@ -1,6 +1,6 @@
 package xiangshan.backend.issue
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
@@ -17,7 +17,7 @@ import xiangshan.backend.datapath.NewPipelineConnect
 
 class IssueQueue(params: IssueBlockParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
   implicit val iqParams = params
-  lazy val module = iqParams.schdType match {
+  lazy val module: IssueQueueImp = iqParams.schdType match {
     case IntScheduler() => new IssueQueueIntImp(this)
     case VfScheduler() => new IssueQueueVfImp(this)
     case MemScheduler() => if (iqParams.StdCnt == 0) new IssueQueueMemAddrImp(this)
@@ -180,7 +180,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     case ((deps, originalDeps), name) => deps.zip(originalDeps).zipWithIndex.foreach {
       case ((dep, originalDep), deqPortIdx) =>
         if (name.contains("LDU") && name.replace("LDU", "").toInt == deqPortIdx)
-          dep := originalDep << 1 | 1.U
+          dep := (originalDep << 1).asUInt | 1.U
         else
           dep := originalDep << 1
     }
@@ -189,7 +189,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   for (i <- io.enq.indices) {
     for (j <- s0_enqBits(i).srcType.indices) {
       wakeupEnqSrcStateBypassFromWB(i)(j) := Cat(
-        io.wakeupFromWB.map(x => x.bits.wakeUp(Seq((s0_enqBits(i).psrc(j), s0_enqBits(i).srcType(j))), x.valid).head)
+        io.wakeupFromWB.map(x => x.bits.wakeUp(Seq((s0_enqBits(i).psrc(j), s0_enqBits(i).srcType(j))), x.valid).head).toSeq
       ).orR
     }
   }
@@ -199,11 +199,11 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     for (j <- s0_enqBits(i).srcType.indices) {
       val ldTransCancel = if (params.numWakeupFromIQ > 0 && j < numLsrc) Mux(
         srcWakeUpEnqByIQMatrix(i)(j).asUInt.orR,
-        Mux1H(srcWakeUpEnqByIQMatrix(i)(j), io.wakeupFromIQ.map(_.bits.loadDependency).map(dep => LoadShouldCancel(Some(dep), io.ldCancel))),
+        Mux1H(srcWakeUpEnqByIQMatrix(i)(j), io.wakeupFromIQ.map(_.bits.loadDependency).map(dep => LoadShouldCancel(Some(dep), io.ldCancel)).toSeq),
         false.B
       ) else false.B
       wakeupEnqSrcStateBypassFromIQ(i)(j) := Cat(
-        io.wakeupFromIQ.map(x => x.bits.wakeUp(Seq((s0_enqBits(i).psrc(j), s0_enqBits(i).srcType(j))), x.valid).head)
+        io.wakeupFromIQ.map(x => x.bits.wakeUp(Seq((s0_enqBits(i).psrc(j), s0_enqBits(i).srcType(j))), x.valid).head).toSeq
       ).orR && !ldTransCancel
     }
   }
@@ -214,7 +214,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     } else {
       val wakeupVec: IndexedSeq[IndexedSeq[Bool]] = io.wakeupFromIQ.map((bundle: ValidIO[IssueQueueIQWakeUpBundle]) =>
         bundle.bits.wakeUp(s0_enqBits(i).psrc.take(params.numRegSrc) zip s0_enqBits(i).srcType.take(params.numRegSrc), bundle.valid)
-      ).transpose
+      ).toIndexedSeq.transpose
       wakeups := wakeupVec.map(x => VecInit(x))
     }
   }
@@ -257,7 +257,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         case Some(value) => value.zip(srcWakeUpEnqByIQMatrix(i)).zipWithIndex.foreach {
           case ((exuOH, wakeUpByIQOH), srcIdx) =>
             when(wakeUpByIQOH.asUInt.orR) {
-              exuOH := Mux1H(wakeUpByIQOH, io.wakeupFromIQ.map(x => MathUtils.IntToOH(x.bits.exuIdx).U(backendParams.numExu.W))).asBools
+              exuOH := Mux1H(wakeUpByIQOH, io.wakeupFromIQ.map(x => MathUtils.IntToOH(x.bits.exuIdx).U(backendParams.numExu.W)).toSeq).asBools
             }.otherwise {
               exuOH := s0_enqBits(i).l1ExuOH(srcIdx)
             }

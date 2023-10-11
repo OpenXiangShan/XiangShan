@@ -68,8 +68,8 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
   val wbMask = reqVecToMask(io.wbPregs)
   val allocMask = reqVecToMask(io.allocPregs)
   val wakeUpMask = pregWB match {
-    case _: IntWB => ParallelOR(wakeUpFilterLS.map(x => Mux(x.valid && x.bits.rfWen && !x.bits.loadDependency.asUInt.orR, UIntToOH(x.bits.pdest), 0.U))) //TODO: dont implement "load -> wakeUp other -> wakeUp BusyTable" now
-    case _: VfWB => ParallelOR(wakeUpFilterLS.map(x => Mux(x.valid && (x.bits.fpWen || x.bits.vecWen) && !x.bits.loadDependency.asUInt.orR, UIntToOH(x.bits.pdest), 0.U)))
+    case _: IntWB => ParallelOR(wakeUpFilterLS.map(x => Mux(x.valid && x.bits.rfWen && !x.bits.loadDependency.asUInt.orR, UIntToOH(x.bits.pdest), 0.U)).toSeq) //TODO: dont implement "load -> wakeUp other -> wakeUp BusyTable" now
+    case _: VfWB => ParallelOR(wakeUpFilterLS.map(x => Mux(x.valid && (x.bits.fpWen || x.bits.vecWen) && !x.bits.loadDependency.asUInt.orR, UIntToOH(x.bits.pdest), 0.U)).toSeq)
   }
   val cancelMask = pregWB match {
     case _: IntWB => ParallelOR(io.cancel.map(x => Mux(x.valid && x.bits.rfWen, UIntToOH(x.bits.pdest), 0.U)))
@@ -111,7 +111,7 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
       val isBypass = table(res.req) === DataSource.bypass
       Mux(v && pdestHit && isBypass, MathUtils.IntToOH(x.bits.exuIdx).U(backendParams.numExu.W), 0.U)
     }
-    res.l1ExuOH := Mux(table(res.req) === DataSource.bypass, ParallelOR(wakeUpExuOHVec), 0.U).asBools
+    res.l1ExuOH := Mux(table(res.req) === DataSource.bypass, ParallelOR(wakeUpExuOHVec.toSeq), 0.U).asBools
   }
 
   table := tableUpdate

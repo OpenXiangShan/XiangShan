@@ -175,7 +175,7 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     val res = Wire(new PrefetchReqBundle)
     res.vaddr := this.vaddr
     res.paddr := this.paddr
-    res.pc    := this.uop.cf.pc
+    res.pc    := this.uop.pc
 
     res
   }

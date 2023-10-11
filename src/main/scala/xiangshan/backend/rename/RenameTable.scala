@@ -147,7 +147,7 @@ class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule with 
   io.need_free := need_free
   io.debug_rdata.foreach(_ := arch_table.take(32))
   io.debug_vconfig match {
-    case None => Unit
+    case None =>
     case x => x.get := arch_table.last
   }
   if (env.EnableDifftest || env.AlwaysBasicDiff) {
@@ -163,14 +163,14 @@ class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule with 
 
     io.diff_rdata.foreach(_ := difftest_table.take(32))
     io.diff_vconfig match {
-      case None => Unit
+      case None =>
       case x => x.get := difftest_table(VCONFIG_IDX)
     }
   }
   else {
     io.diff_rdata.foreach(_ := 0.U.asTypeOf(io.debug_rdata.get))
     io.diff_vconfig match {
-      case None => Unit
+      case None =>
       case x => x.get := 0.U
     }
   }

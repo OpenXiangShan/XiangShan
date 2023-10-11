@@ -1,6 +1,6 @@
 package xiangshan.backend.fu.wrapper
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3.{VecInit, _}
 import chisel3.util._
 import chisel3.util.experimental.decode.{QMCMinimizer, TruthTable, decoder}

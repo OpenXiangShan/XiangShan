@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan.backend.fu.wrapper.{VSetRiWi, VSetRiWvf, VSetRvfWvf}
 import xiangshan._
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import xiangshan.backend.fu.vector.Bundles.{VConfig, VType, Vl}
 
 class VsetTop(implicit p: Parameters) extends XSModule {

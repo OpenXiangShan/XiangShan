@@ -1,6 +1,6 @@
 package xiangshan.backend.issue
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utility.HasCircularQueuePtrHelper
@@ -95,7 +95,7 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
   clear := flushed || io.transSel || deqSuccess
   flushed := entryReg.status.robIdx.needFlush(io.flush)
   deqSuccess := io.issueResp.valid && io.issueResp.bits.respType === RSFeedbackType.fuIdle && !srcLoadCancelVec.map(_.reduce(_ || _)).getOrElse(false.B)
-  srcWakeUp := io.wakeup.map(bundle => bundle.bits.wakeUp(entryReg.status.psrc zip entryReg.status.srcType, bundle.valid)).transpose.map(VecInit(_).asUInt.orR)
+  srcWakeUp := io.wakeup.map(bundle => bundle.bits.wakeUp(entryReg.status.psrc zip entryReg.status.srcType, bundle.valid)).transpose.map(x => VecInit(x.toSeq).asUInt.orR).toSeq
 
   shiftedWakeupLoadDependencyByIQVec
     .zip(wakeupLoadDependencyByIQVec)
@@ -103,7 +103,7 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
     case ((deps, originalDeps), name) => deps.zip(originalDeps).zipWithIndex.foreach {
       case ((dep, originalDep), deqPortIdx) =>
         if (name.contains("LDU") && name.replace("LDU", "").toInt == deqPortIdx)
-          dep := originalDep << 1 | 1.U
+          dep := (originalDep << 1).asUInt | 1.U
         else
           dep := originalDep << 1
     }
@@ -130,9 +130,9 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
   } else {
     val wakeupVec: IndexedSeq[IndexedSeq[Bool]] = io.wakeUpFromIQ.map((bundle: ValidIO[IssueQueueIQWakeUpBundle]) =>
       bundle.bits.wakeUp(entryReg.status.psrc zip entryReg.status.srcType, bundle.valid)
-    ).transpose
+    ).toIndexedSeq.transpose
     srcWakeUpByIQVec := wakeupVec.map(x => VecInit(x))
-    wakeupLoadDependencyByIQVec := io.wakeUpFromIQ.map(_.bits.loadDependency)
+    wakeupLoadDependencyByIQVec := io.wakeUpFromIQ.map(_.bits.loadDependency).toSeq
   }
 
   //entryUpdate
@@ -157,7 +157,7 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
     entryUpdate.status.srcWakeUpL1ExuOH.get.zip(srcWakeUpByIQVec).zip(srcWakeUp).zipWithIndex.foreach {
       case (((exuOH: Vec[Bool], wakeUpByIQOH: Vec[Bool]), wakeUp: Bool), srcIdx) =>
         when(wakeUpByIQOH.asUInt.orR) {
-          exuOH := Mux1H(wakeUpByIQOH, io.wakeUpFromIQ.map(x => MathUtils.IntToOH(x.bits.exuIdx).U(backendParams.numExu.W))).asBools
+          exuOH := Mux1H(wakeUpByIQOH, io.wakeUpFromIQ.map(x => MathUtils.IntToOH(x.bits.exuIdx).U(backendParams.numExu.W)).toSeq).asBools
         }.elsewhen(wakeUp) {
           exuOH := 0.U.asTypeOf(exuOH)
         }.otherwise {

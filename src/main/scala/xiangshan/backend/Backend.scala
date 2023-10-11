@@ -1,22 +1,23 @@
 package xiangshan.backend
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility.ZeroExt
 import xiangshan._
-import xiangshan.backend.Bundles.{DynInst, IssueQueueIQWakeUpBundle, MemExuInput, MemExuOutput, LoadShouldCancel}
+import xiangshan.backend.Bundles.{DynInst, IssueQueueIQWakeUpBundle, LoadShouldCancel, MemExuInput, MemExuOutput}
 import xiangshan.backend.ctrlblock.{DebugLSIO, LsTopdownInfo}
 import xiangshan.backend.datapath.DataConfig.{IntData, VecData}
 import xiangshan.backend.datapath.RdConfig.{IntRD, VfRD}
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.datapath._
+import xiangshan.backend.dispatch.CoreDispatchTopDownIO
 import xiangshan.backend.exu.ExuBlock
 import xiangshan.backend.fu.vector.Bundles.{VConfig, VType}
 import xiangshan.backend.fu.{FenceIO, FenceToSbuffer, FuConfig, PerfCounterIO}
-import xiangshan.backend.issue.{CancelNetwork, Scheduler}
-import xiangshan.backend.rob.RobLsqIO
+import xiangshan.backend.issue.{CancelNetwork, Scheduler, SchedulerImpBase}
+import xiangshan.backend.rob.{RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO}
 import xiangshan.frontend.{FtqPtr, FtqRead}
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 
@@ -120,7 +121,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
 
   private val ctrlBlock = wrapper.ctrlBlock.module
   private val pcTargetMem = wrapper.pcTargetMem.module
-  private val intScheduler = wrapper.intScheduler.get.module
+  private val intScheduler: SchedulerImpBase = wrapper.intScheduler.get.module
   private val vfScheduler = wrapper.vfScheduler.get.module
   private val memScheduler = wrapper.memScheduler.get.module
   private val cancelNetwork = wrapper.cancelNetwork.module
@@ -283,7 +284,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   }
 
   pcTargetMem.io.fromFrontendFtq := io.frontend.fromFtq
-  pcTargetMem.io.fromDataPathFtq := bypassNetwork.io.toExus.int.flatten.filter(_.bits.params.hasPredecode).map(_.bits.ftqIdx.get)
+  pcTargetMem.io.fromDataPathFtq := bypassNetwork.io.toExus.int.flatten.filter(_.bits.params.hasPredecode).map(_.bits.ftqIdx.get).toSeq
   intExuBlock.io.in.flatten.filter(_.bits.params.hasPredecode).map(_.bits.predictInfo.get.target).zipWithIndex.foreach {
     case (sink, i) =>
       sink := pcTargetMem.io.toExus(i)
@@ -448,8 +449,9 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
       if (isLdu) RegNext(out.valid && !out.ready, false.B)
       else false.B
   }
-  og0CancelVecFromFinalIssue := intFinalIssueBlock ++ vfFinalIssueBlock ++ memFinalIssueBlock
+  og0CancelVecFromFinalIssue := (intFinalIssueBlock ++ vfFinalIssueBlock ++ memFinalIssueBlock).toSeq
 
+  IndexedSeq
   io.frontendSfence := fenceio.sfence
   io.frontendTlbCsr := csrio.tlb
   io.frontendCsrCtrl := csrio.customCtrl
@@ -539,4 +541,10 @@ class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle 
   val tlb = Output(new TlbCsrBundle)
 
   val csrCustomCtrl = Output(new CustomCSRCtrlIO)
+
+  val debugTopDown = new Bundle {
+    val fromRob = new RobCoreTopDownIO
+    val fromCore = new CoreDispatchTopDownIO
+  }
+  val debugRolling = new RobDebugRollingIO
 }

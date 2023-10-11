@@ -18,7 +18,7 @@
 //
 //package xiangshan.backend.fu.vector
 //
-//import chipsalliance.rocketchip.config.Parameters
+//import org.chipsalliance.cde.config.Parameters
 //import chisel3._
 //import utils._
 //import yunsuan.vector.alu.VIntFixpAlu

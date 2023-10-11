@@ -110,7 +110,7 @@ object utility extends SbtModule with HasChisel {
 
 }
 
-object yunsuan extends XSModule with SbtModule {
+object yunsuan extends SbtModule with HasChisel {
 
   override def millSourcePath = os.pwd / "yunsuan"
 
@@ -165,7 +165,7 @@ trait XiangShanModule extends ScalaModule {
 
   def utilityModule: ScalaModule
 
-  def yunsuanModule: PublishModule
+  def yunsuanModule: ScalaModule
 
   override def moduleDeps = super.moduleDeps ++ Seq(
     rocketModule,
@@ -181,8 +181,6 @@ trait XiangShanModule extends ScalaModule {
   val envPATH = sys.env("PATH") + ":" + resourcesPATH
 
   override def forkEnv = Map("PATH" -> envPATH)
-
-  override def ivyDeps = super.ivyDeps() ++ Seq(ivys.chiseltest)
 }
 
 object XiangShan extends XiangShanModule with SbtModule with HasChisel {
@@ -201,12 +199,18 @@ object XiangShan extends XiangShanModule with SbtModule with HasChisel {
 
   def utilityModule = utility
 
+  def yunsuanModule = yunsuan
+
   override def forkArgs = Seq("-Xmx20G", "-Xss256m")
+
+  override def ivyDeps = super.ivyDeps() ++ Agg(
+    defaultVersions("chiseltest"),
+  )
 
   object test extends SbtModuleTests with TestModule.ScalaTest {
     override def forkArgs = XiangShan.forkArgs
 
-    override def forkEnv = m.forkEnv
+    override def forkEnv = XiangShan.forkEnv
 
     override def ivyDeps = super.ivyDeps() ++ Agg(
       defaultVersions("chiseltest"),

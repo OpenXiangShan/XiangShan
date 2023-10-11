@@ -1,6 +1,6 @@
 package xiangshan.backend.fu.wrapper
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import utility.SignExt
 import xiangshan.backend.decode.ImmUnion

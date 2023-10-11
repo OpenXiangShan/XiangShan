@@ -1,6 +1,6 @@
 package xiangshan.backend.exu
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
@@ -25,8 +25,8 @@ class ExuBlockImp(
 
   private val exus = wrapper.exus.map(_.module)
 
-  private val ins: IndexedSeq[DecoupledIO[ExuInput]] = io.in.flatten
-  private val outs: IndexedSeq[DecoupledIO[ExuOutput]] = io.out.flatten
+  private val ins: collection.IndexedSeq[DecoupledIO[ExuInput]] = io.in.flatten
+  private val outs: collection.IndexedSeq[DecoupledIO[ExuOutput]] = io.out.flatten
 
   (ins zip exus zip outs).foreach { case ((input, exu), output) =>
     exu.io.flush <> io.flush

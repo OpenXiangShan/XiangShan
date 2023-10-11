@@ -1,6 +1,6 @@
 package xiangshan.backend.issue
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
@@ -26,7 +26,7 @@ class Scheduler(val params: SchdBlockParams)(implicit p: Parameters) extends Laz
   val dispatch2Iq = LazyModule(new Dispatch2Iq(params))
   val issueQueue = params.issueBlockParams.map(x => LazyModule(new IssueQueue(x).suggestName(x.getIQName)))
 
-  lazy val module = params.schdType match {
+  lazy val module: SchedulerImpBase = params.schdType match {
     case IntScheduler() => new SchedulerArithImp(this)(params, p)
     case MemScheduler() => new SchedulerMemImp(this)(params, p)
     case VfScheduler() => new SchedulerArithImp(this)(params, p)

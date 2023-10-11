@@ -147,7 +147,7 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
     val enable = Input(Bool())
     val flush = Input(Bool())
     // train input, only from load for now
-    val ld_in = Flipped(Vec(exuParameters.LduCnt, ValidIO(new LdPrefetchTrainBundle())))
+    val ld_in = Flipped(Vec(backendParams.LduCnt, ValidIO(new LdPrefetchTrainBundle())))
     // filter out
     val train_req = DecoupledIO(new PrefetchReqBundle())
   })
@@ -166,7 +166,7 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
   val valids = RegInit(VecInit(Seq.fill(size){ (false.B) }))
 
   // enq
-  val enqLen = exuParameters.LduCnt
+  val enqLen = backendParams.LduCnt
   val enqPtrExt = RegInit(VecInit((0 until enqLen).map(_.U.asTypeOf(new Ptr))))
   val deqPtrExt = RegInit(0.U.asTypeOf(new Ptr))
 
@@ -580,7 +580,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
 
 class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamPrefetchHelper with HasStridePrefetchHelper {
   val pf_ctrl = IO(Input(new PrefetchControlBundle))
-  val stride_train = IO(Flipped(Vec(exuParameters.LduCnt, ValidIO(new LdPrefetchTrainBundle()))))
+  val stride_train = IO(Flipped(Vec(backendParams.LduCnt, ValidIO(new LdPrefetchTrainBundle()))))
   val l2PfqBusy = IO(Input(Bool()))
 
   val stride_train_filter = Module(new TrainFilter(STRIDE_FILTER_SIZE, "stride"))

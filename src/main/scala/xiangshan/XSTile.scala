@@ -96,9 +96,9 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   with HasSoCParameter
 {
   override def shouldBeInlined: Boolean = false
-  private val core = LazyModule(new XSCore())
-  private val misc = LazyModule(new XSTileMisc())
-  private val l2cache = coreParams.L2CacheParamsOpt.map(l2param =>
+  val core = LazyModule(new XSCore())
+  val misc = LazyModule(new XSTileMisc())
+  val l2cache = coreParams.L2CacheParamsOpt.map(l2param =>
     LazyModule(new CoupledL2()(new Config((_, _, _) => {
       case L2ParamKey => l2param.copy(
         hartIds = Seq(p(XSCoreParamsKey).HartId),

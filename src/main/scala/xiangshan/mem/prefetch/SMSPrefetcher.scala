@@ -957,7 +957,7 @@ class SMSTrainFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
     // train input
     // hybrid load store
     val ld_in = Flipped(Vec(backendParams.LduCnt, ValidIO(new LdPrefetchTrainBundle())))
-    val st_in = Flipped(Vec(backendParams.StuCnt, ValidIO(new StPrefetchTrainBundle())))
+    val st_in = Flipped(Vec(backendParams.StaCnt, ValidIO(new StPrefetchTrainBundle())))
     // filter out
     val train_req = ValidIO(new PrefetchReqBundle())
   })
@@ -979,7 +979,7 @@ class SMSTrainFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   val entries = RegInit(VecInit(Seq.fill(smsParams.train_filter_size){ (0.U.asTypeOf(new PrefetchReqBundle())) }))
   val valids = RegInit(VecInit(Seq.fill(smsParams.train_filter_size){ (false.B) }))
 
-  val enqLen = backendParams.LduCnt + backendParams.StuCnt
+  val enqLen = backendParams.LduCnt + backendParams.StaCnt
   val enqPtrExt = RegInit(VecInit((0 until enqLen).map(_.U.asTypeOf(new Ptr))))
   val deqPtrExt = RegInit(0.U.asTypeOf(new Ptr))
 

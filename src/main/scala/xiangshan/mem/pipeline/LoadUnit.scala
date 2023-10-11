@@ -1065,7 +1065,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_rep_frm_fetch = s3_vp_match_fail || s3_ldld_rep_inst
   val s3_sel_rep_cause = PriorityEncoderOH(s3_rep_info.cause.asUInt)
   val s3_force_rep     = s3_sel_rep_cause(LoadReplayCauses.C_TM) &&
-                         !s3_in.uop.cf.exceptionVec(loadAddrMisaligned) &&
+                         !s3_in.uop.exceptionVec(loadAddrMisaligned) &&
                          s3_troublem
 
   val s3_exception = ExceptionNO.selectByFu(s3_in.uop.exceptionVec, LduCfg).asUInt.orR

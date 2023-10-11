@@ -1,9 +1,9 @@
 package xiangshan.backend.datapath
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import difftest.{DifftestFpWriteback, DifftestIntWriteback}
+import difftest.{DiffFpWriteback, DiffIntWriteback, DifftestModule}
 import utils.XSError
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles.{ExuOutput, WriteBackBundle}
@@ -40,13 +40,13 @@ class WbArbiterIO()(implicit p: Parameters, params: WbArbiterParams) extends XSB
   val in: MixedVec[DecoupledIO[WriteBackBundle]] = Flipped(params.genInput)
   val out: MixedVec[ValidIO[WriteBackBundle]] = params.genOutput
 
-  def inGroup: Map[Int, IndexedSeq[DecoupledIO[WriteBackBundle]]] = in.groupBy(_.bits.params.port).map(x => (x._1, x._2.sortBy(_.bits.params.priority)))
+  def inGroup: Map[Int, Seq[DecoupledIO[WriteBackBundle]]] = in.groupBy(_.bits.params.port).map(x => (x._1, x._2.sortBy(_.bits.params.priority).toSeq))
 }
 
 class WbArbiter(params: WbArbiterParams)(implicit p: Parameters) extends XSModule {
   val io = IO(new WbArbiterIO()(p, params))
 
-  private val inGroup: Map[Int, IndexedSeq[DecoupledIO[WriteBackBundle]]] = io.inGroup
+  private val inGroup: Map[Int, Seq[DecoupledIO[WriteBackBundle]]] = io.inGroup
 
   private val arbiters: Seq[Option[Arbiter[WriteBackBundle]]] = Seq.tabulate(params.numOut) { x => {
     if (inGroup.contains(x)) {
@@ -108,7 +108,7 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
   val io = IO(new WbDataPathIO()(p, params))
 
   // alias
-  val fromExu = (io.fromIntExu ++ io.fromVfExu ++ io.fromMemExu).flatten
+  val fromExu = (io.fromIntExu ++ io.fromVfExu ++ io.fromMemExu).flatten.toSeq
   val intArbiterInputsWire = WireInit(MixedVecInit(fromExu))
   val intArbiterInputsWireY = intArbiterInputsWire.filter(_.bits.params.writeIntRf)
   val intArbiterInputsWireN = intArbiterInputsWire.filterNot(_.bits.params.writeIntRf)
@@ -176,12 +176,12 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
 
   private val vfWbArbiterOut = vfWbArbiter.io.out
 
-  private val intExuInputs = io.fromIntExu.flatten
-  private val intExuWBs = WireInit(MixedVecInit(io.fromIntExu.flatten))
-  private val vfExuInputs = io.fromVfExu.flatten
-  private val vfExuWBs = WireInit(MixedVecInit(io.fromVfExu.flatten))
-  private val memExuInputs = io.fromMemExu.flatten
-  private val memExuWBs = WireInit(MixedVecInit(io.fromMemExu.flatten))
+  private val intExuInputs = io.fromIntExu.flatten.toSeq
+  private val intExuWBs = WireInit(MixedVecInit(intExuInputs))
+  private val vfExuInputs = io.fromVfExu.flatten.toSeq
+  private val vfExuWBs = WireInit(MixedVecInit(vfExuInputs))
+  private val memExuInputs = io.fromMemExu.flatten.toSeq
+  private val memExuWBs = WireInit(MixedVecInit(memExuInputs))
 
   // only fired port can write back to ctrl block
   (intExuWBs zip intExuInputs).foreach { case (wb, input) => wb.valid := input.fire }
@@ -195,8 +195,8 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
   )
 
   // io assign
-  private val toIntPreg: MixedVec[RfWritePortWithConfig] = MixedVecInit(intWbArbiterOut.map(x => x.bits.asIntRfWriteBundle(x.fire)))
-  private val toVfPreg: MixedVec[RfWritePortWithConfig] = MixedVecInit(vfWbArbiterOut.map(x => x.bits.asVfRfWriteBundle(x.fire)))
+  private val toIntPreg: MixedVec[RfWritePortWithConfig] = MixedVecInit(intWbArbiterOut.map(x => x.bits.asIntRfWriteBundle(x.fire)).toSeq)
+  private val toVfPreg: MixedVec[RfWritePortWithConfig] = MixedVecInit(vfWbArbiterOut.map(x => x.bits.asVfRfWriteBundle(x.fire)).toSeq)
 
   private val wb2Ctrl = intExuWBs ++ vfExuWBs ++ memExuWBs
 
@@ -210,23 +210,21 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
 
   if (env.EnableDifftest || env.AlwaysBasicDiff) {
     intWbArbiterOut.foreach(out => {
-      val difftest = Module(new DifftestIntWriteback)
-      difftest.io.clock := clock
-      difftest.io.coreid := io.fromTop.hartId
-      difftest.io.valid := out.fire && out.bits.rfWen
-      difftest.io.dest := out.bits.pdest
-      difftest.io.data := out.bits.data
+      val difftest = DifftestModule(new DiffIntWriteback)
+      difftest.coreid := io.fromTop.hartId
+      difftest.valid := out.fire && out.bits.rfWen
+      difftest.address := out.bits.pdest
+      difftest.data := out.bits.data
     })
   }
 
   if (env.EnableDifftest || env.AlwaysBasicDiff) {
     vfWbArbiterOut.foreach(out => {
-      val difftest = Module(new DifftestFpWriteback)
-      difftest.io.clock := clock
-      difftest.io.coreid := io.fromTop.hartId
-      difftest.io.valid := out.fire // all fp instr will write fp rf
-      difftest.io.dest := out.bits.pdest
-      difftest.io.data := out.bits.data
+      val difftest = DifftestModule(new DiffFpWriteback)
+      difftest.coreid := io.fromTop.hartId
+      difftest.valid := out.fire // all fp instr will write fp rf
+      difftest.address := out.bits.pdest
+      difftest.data := out.bits.data
     })
   }
 

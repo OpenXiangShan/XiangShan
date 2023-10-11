@@ -115,7 +115,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   backend.io.frontendCsrDistributedUpdate := frontend.io.csrUpdate
 
-  backend.io.mem.stIn.zip(memBlock.io.stIn).foreach { case (sink, source) =>
+  backend.io.mem.stIn.zip(memBlock.io.mem_to_ooo.stIn).foreach { case (sink, source) =>
     sink.valid := source.valid
     sink.bits := 0.U.asTypeOf(sink.bits)
     sink.bits.robIdx := source.bits.uop.robIdx
@@ -123,18 +123,18 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     sink.bits.storeSetHit := source.bits.uop.storeSetHit
     // The other signals have not been used
   }
-  backend.io.mem.memoryViolation <> memBlock.io.memoryViolation
-  backend.io.mem.lsqEnqIO <> memBlock.io.enqLsq
-  backend.io.mem.sqDeq := memBlock.io.sqDeq
-  backend.io.mem.lqDeq := memBlock.io.lqDeq
-  backend.io.mem.lqCancelCnt := memBlock.io.lqCancelCnt
-  backend.io.mem.sqCancelCnt := memBlock.io.sqCancelCnt
-  backend.io.mem.otherFastWakeup := memBlock.io.otherFastWakeup
-  backend.io.mem.stIssuePtr := memBlock.io.stIssuePtr
+  backend.io.mem.memoryViolation <> memBlock.io.mem_to_ooo.memoryViolation
+  backend.io.mem.lsqEnqIO <> memBlock.io.ooo_to_mem.enqLsq
+  backend.io.mem.sqDeq := memBlock.io.mem_to_ooo.sqDeq
+  backend.io.mem.lqDeq := memBlock.io.mem_to_ooo.lqDeq
+  backend.io.mem.lqCancelCnt := memBlock.io.mem_to_ooo.lqCancelCnt
+  backend.io.mem.sqCancelCnt := memBlock.io.mem_to_ooo.sqCancelCnt
+  backend.io.mem.otherFastWakeup := memBlock.io.mem_to_ooo.otherFastWakeup
+  backend.io.mem.stIssuePtr := memBlock.io.mem_to_ooo.stIssuePtr
   backend.io.mem.ldaIqFeedback <> memBlock.io.ldaIqFeedback
   backend.io.mem.staIqFeedback <> memBlock.io.staIqFeedback
   backend.io.mem.ldCancel <> memBlock.io.ldCancel
-  backend.io.mem.writeBack.zipAll(memBlock.io.writeback, DontCare, DontCare).foreach { case (back, mem) =>
+  backend.io.mem.writeBack.zipAll(memBlock.io.mem_to_ooo.writeback, DontCare, DontCare).foreach { case (back, mem) =>
     back <> mem
   } // TODO: replace zipAll with zip when vls is fully implemented
 
@@ -150,20 +150,21 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   io.beu_errors.l2 <> DontCare
 
   memBlock.io.hartId := io.hartId
-  memBlock.io.issue.zipAll(backend.io.mem.issueUops, DontCare, DontCare).foreach { case(memIssue, backIssue) =>
+  memBlock.io.ooo_to_mem.issue.zipAll(backend.io.mem.issueUops, DontCare, DontCare).foreach { case(memIssue, backIssue) =>
     backIssue <> memIssue
   } // TODO: replace zipAll with zip when vls is fully implemented
   // By default, instructions do not have exceptions when they enter the function units.
-  memBlock.io.issue.map(_.bits.uop.clearExceptions())
-  memBlock.io.loadPc := backend.io.mem.loadPcRead
-  backend.io.mem.loadFastMatch <> memBlock.io.loadFastMatch
-  backend.io.mem.loadFastImm <> memBlock.io.loadFastImm
-  backend.io.mem.exceptionVAddr := memBlock.io.lsqio.exceptionAddr.vaddr
-  backend.io.mem.csrDistributedUpdate := memBlock.io.csrUpdate
+  memBlock.io.ooo_to_mem.issue.map(_.bits.uop.clearExceptions())
+  memBlock.io.ooo_to_mem.loadPc := backend.io.mem.loadPcRead
+  backend.io.mem.loadFastMatch <> memBlock.io.ooo_to_mem.loadFastMatch
+  backend.io.mem.loadFastImm <> memBlock.io.ooo_to_mem.loadFastImm
+  backend.io.mem.exceptionVAddr := memBlock.io.mem_to_ooo.lsqio.vaddr
+  backend.io.mem.csrDistributedUpdate := memBlock.io.mem_to_ooo.csrUpdate
   backend.io.mem.debugLS := memBlock.io.debug_ls
-  backend.io.mem.lsTopdownInfo := memBlock.io.lsTopdownInfo
-  backend.io.mem.lqCanAccept := memBlock.io.lsqio.lqCanAccept
-  backend.io.mem.sqCanAccept := memBlock.io.lsqio.sqCanAccept
+  backend.io.mem.lsTopdownInfo := memBlock.io.mem_to_ooo.lsTopdownInfo
+  backend.io.mem.lqCanAccept := memBlock.io.mem_to_ooo.lsqio.lqCanAccept
+  backend.io.mem.sqCanAccept := memBlock.io.mem_to_ooo.lsqio.sqCanAccept
+  backend.io.fenceio.sbuffer.sbIsEmpty := memBlock.io.mem_to_ooo.sbIsEmpty
 
   backend.io.perf.frontendInfo := frontend.io.frontendInfo
   backend.io.perf.memInfo := memBlock.io.memInfo
@@ -174,15 +175,21 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.perf.retiredInstr := DontCare
   backend.io.perf.ctrlInfo := DontCare
 
-  memBlock.io.sfence <> backend.io.mem.sfence
-  memBlock.io.fenceToSbuffer <> backend.io.fenceio.sbuffer
+
+  memBlock.io.ooo_to_mem.sfence <> backend.io.mem.sfence
 
   memBlock.io.redirect <> backend.io.mem.redirect
-  memBlock.io.csrCtrl <> backend.io.mem.csrCtrl
-  memBlock.io.tlbCsr <> backend.io.mem.tlbCsr
-  memBlock.io.lsqio.rob <> backend.io.mem.robLsqIO
-  memBlock.io.lsqio.exceptionAddr.isStore := backend.io.mem.isStoreException
-  memBlock.io.itlb <> frontend.io.ptw
+  memBlock.io.ooo_to_mem.csrCtrl <> backend.io.mem.csrCtrl
+  memBlock.io.ooo_to_mem.tlbCsr <> backend.io.mem.tlbCsr
+  memBlock.io.ooo_to_mem.lsqio.lcommit    := backend.io.mem.robLsqIO.lcommit
+  memBlock.io.ooo_to_mem.lsqio.scommit    := backend.io.mem.robLsqIO.scommit
+  memBlock.io.ooo_to_mem.lsqio.pendingld  := backend.io.mem.robLsqIO.pendingld
+  memBlock.io.ooo_to_mem.lsqio.pendingst  := backend.io.mem.robLsqIO.pendingst
+  memBlock.io.ooo_to_mem.lsqio.commit     := backend.io.mem.robLsqIO.commit
+  memBlock.io.ooo_to_mem.lsqio.pendingPtr := backend.io.mem.robLsqIO.pendingPtr
+  memBlock.io.ooo_to_mem.isStore          := backend.io.mem.isStoreException
+
+  memBlock.io.fetch_to_mem.itlb <> frontend.io.ptw
   memBlock.io.l2_hint.valid := io.l2_hint.valid
   memBlock.io.l2_hint.bits.sourceId := io.l2_hint.bits.sourceId
   memBlock.io.l2PfqBusy := io.l2PfqBusy
@@ -203,13 +210,13 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   io.l2_pf_enable := backend.io.csrCustomCtrl.l2_pf_enable
 
   // top-down info
-  memBlock.io.debugTopDown.robHeadVaddr := ctrlBlock.io.debugTopDown.fromRob.robHeadVaddr
-  frontend.io.debugTopDown.robHeadVaddr := ctrlBlock.io.debugTopDown.fromRob.robHeadVaddr
-  io.debugTopDown.robHeadPaddr := ctrlBlock.io.debugTopDown.fromRob.robHeadPaddr
-  ctrlBlock.io.debugTopDown.fromCore.l2MissMatch := io.debugTopDown.l2MissMatch
-  ctrlBlock.io.debugTopDown.fromCore.l3MissMatch := io.debugTopDown.l3MissMatch
-  ctrlBlock.io.debugTopDown.fromCore.fromMem := memBlock.io.debugTopDown.toCore
-  memBlock.io.debugRolling := ctrlBlock.io.debugRolling
+  memBlock.io.debugTopDown.robHeadVaddr := backend.io.debugTopDown.fromRob.robHeadVaddr
+  frontend.io.debugTopDown.robHeadVaddr := backend.io.debugTopDown.fromRob.robHeadVaddr
+  io.debugTopDown.robHeadPaddr := backend.io.debugTopDown.fromRob.robHeadPaddr
+  backend.io.debugTopDown.fromCore.l2MissMatch := io.debugTopDown.l2MissMatch
+  backend.io.debugTopDown.fromCore.l3MissMatch := io.debugTopDown.l3MissMatch
+  backend.io.debugTopDown.fromCore.fromMem := memBlock.io.debugTopDown.toCore
+  memBlock.io.debugRolling := backend.io.debugRolling
 
   // Modules are reset one by one
   val resetTree = ResetGenNode(

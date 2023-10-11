@@ -28,11 +28,11 @@ import xiangshan.backend.Bundles.{DecodedInst, DynInst, ExceptionInfo, ExuOutput
 import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfoBundle, LsTopdownInfo, MemCtrl, RedirectGenerator}
 import xiangshan.backend.datapath.DataConfig.VAddrData
 import xiangshan.backend.decode.{DecodeStage, FusionDecoder}
-import xiangshan.backend.dispatch.{Dispatch, DispatchQueue}
+import xiangshan.backend.dispatch.{CoreDispatchTopDownIO, Dispatch, DispatchQueue}
 import xiangshan.backend.fu.PFEvent
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.rename.{Rename, RenameTableWrapper, SnapshotGenerator}
-import xiangshan.backend.rob.{Rob, RobCSRIO, RobLsqIO, RobPtr}
+import xiangshan.backend.rob.{Rob, RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.frontend.{FtqRead, Ftq_RF_Components}
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
@@ -64,7 +64,7 @@ class CtrlBlockImp(
     "memPred"   -> 1,
     "robFlush"  -> 1,
     "load"      -> params.LduCnt,
-    "store"     -> if(EnableStorePrefetchSMS) params.StaCnt else 0
+    "store"     -> (if(EnableStorePrefetchSMS) params.StaCnt else 0)
   ))
 
   private val numPcMemReadForExu = params.numPcReadPort
@@ -118,20 +118,20 @@ class CtrlBlockImp(
     delayed.bits := RegEnable(x.bits, x.valid)
     delayed.bits.debugInfo.writebackTime := GTimer()
     delayed
-  })
+  }).toSeq
 
   private val exuPredecode = VecInit(
-    delayedNotFlushedWriteBack.filter(_.bits.redirect.nonEmpty).map(x => x.bits.predecodeInfo.get)
+    delayedNotFlushedWriteBack.filter(_.bits.redirect.nonEmpty).map(x => x.bits.predecodeInfo.get).toSeq
   )
 
-  private val exuRedirects: IndexedSeq[ValidIO[Redirect]] = delayedNotFlushedWriteBack.filter(_.bits.redirect.nonEmpty).map(x => {
+  private val exuRedirects: Seq[ValidIO[Redirect]] = delayedNotFlushedWriteBack.filter(_.bits.redirect.nonEmpty).map(x => {
     val out = Wire(Valid(new Redirect()))
     out.valid := x.valid && x.bits.redirect.get.valid && x.bits.redirect.get.bits.cfiUpdate.isMisPred
     out.bits := x.bits.redirect.get.bits
     out.bits.debugIsCtrl := true.B
     out.bits.debugIsMemVio := false.B
     out
-  })
+  }).toSeq
 
   private val memViolation = io.fromMem.violation
   val loadReplay = Wire(ValidIO(new Redirect))
@@ -160,11 +160,11 @@ class CtrlBlockImp(
       io.memStPcRead(i).data := pcMem.io.rdata(pcMemIdx).getPc(RegNext(io.memStPcRead(i).offset))
     }
   } else {
-    io.memStPcRead(i).data := 0.U
+    io.memStPcRead.foreach(_.data := 0.U)
   }
 
   redirectGen.io.hartId := io.fromTop.hartId
-  redirectGen.io.exuRedirect := exuRedirects
+  redirectGen.io.exuRedirect := exuRedirects.toSeq
   redirectGen.io.exuOutPredecode := exuPredecode // guarded by exuRedirect.valid
   redirectGen.io.loadReplay <> loadReplay
 
@@ -510,7 +510,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val violation = Flipped(ValidIO(new Redirect))
   }
   val memLdPcRead = Vec(params.LduCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
-  val memStPcRead = Vec(exuParameters.StuCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
+  val memStPcRead = Vec(params.StaCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
 
   val csrCtrl = Input(new CustomCSRCtrlIO)
   val robio = new Bundle {

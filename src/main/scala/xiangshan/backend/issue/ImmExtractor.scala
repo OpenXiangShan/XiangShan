@@ -7,6 +7,8 @@ import xiangshan.SelImm
 import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.datapath.DataConfig._
 
+import scala.collection.MapView
+
 class ImmExtractorIO(dataBits: Int) extends Bundle {
   val in = Input(new Bundle {
     val imm = UInt(64.W)
@@ -35,10 +37,10 @@ class ImmExtractor(dataBits: Int, immTypeSet: Set[BigInt]) extends Module {
     SelImm.IMM_LUI32    .litValue -> SignExt(ImmUnion.LUI32   .toImm32(io.in.imm), IntData().dataWidth),
   )
 
-  val usedMap: Map[BigInt, UInt] = extractMap.filterKeys(x => immTypeSet.contains(x))
+  val usedMap: Map[BigInt, UInt] = extractMap.view.filterKeys(x => immTypeSet.contains(x)).toMap
   println(usedMap)
 
-  io.out.imm := MuxLookup(io.in.immType, 0.U, usedMap.map { case (k, v) => (k.U, v) }.toSeq )
+  io.out.imm := MuxLookup(io.in.immType, 0.U)(usedMap.map { case (k, v) => (k.U, v) }.toSeq)
 }
 
 object ImmExtractor {

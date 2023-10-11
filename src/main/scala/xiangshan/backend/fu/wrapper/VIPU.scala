@@ -18,7 +18,7 @@
 
 package xiangshan.backend.fu.wrapper
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utility._
@@ -64,26 +64,26 @@ class VIAluDecoder (implicit p: Parameters) extends XSModule {
 
   val out = LookupTree(io.in.fuOpType, List(
     // --------------------- opcode     srcType2 1 vdType
-    VipuType.vredsum_vs   -> Cat(VAluOpcode.vredsum, uSew, uSew, uSew).asUInt(),
-    VipuType.vredmaxu_vs  -> Cat(VAluOpcode.vredmax, uSew, uSew, uSew).asUInt(),
-    VipuType.vredmax_vs   -> Cat(VAluOpcode.vredmax, sSew, sSew, sSew).asUInt(),
-    VipuType.vredminu_vs  -> Cat(VAluOpcode.vredmin, uSew, uSew, uSew).asUInt(),
-    VipuType.vredmin_vs   -> Cat(VAluOpcode.vredmin, sSew, sSew, sSew).asUInt(),
-    VipuType.vredand_vs   -> Cat(VAluOpcode.vredand, uSew, uSew, uSew).asUInt(),
-    VipuType.vredor_vs    -> Cat(VAluOpcode.vredor, uSew, uSew, uSew).asUInt(),
-    VipuType.vredxor_vs   -> Cat(VAluOpcode.vredxor, uSew, uSew, uSew).asUInt(),
+    VipuType.vredsum_vs   -> Cat(VAluOpcode.vredsum, uSew, uSew, uSew).asUInt,
+    VipuType.vredmaxu_vs  -> Cat(VAluOpcode.vredmax, uSew, uSew, uSew).asUInt,
+    VipuType.vredmax_vs   -> Cat(VAluOpcode.vredmax, sSew, sSew, sSew).asUInt,
+    VipuType.vredminu_vs  -> Cat(VAluOpcode.vredmin, uSew, uSew, uSew).asUInt,
+    VipuType.vredmin_vs   -> Cat(VAluOpcode.vredmin, sSew, sSew, sSew).asUInt,
+    VipuType.vredand_vs   -> Cat(VAluOpcode.vredand, uSew, uSew, uSew).asUInt,
+    VipuType.vredor_vs    -> Cat(VAluOpcode.vredor, uSew, uSew, uSew).asUInt,
+    VipuType.vredxor_vs   -> Cat(VAluOpcode.vredxor, uSew, uSew, uSew).asUInt,
 
-    VipuType.vwredsumu_vs -> Cat(VAluOpcode.vredsum, uSew, uSew, uSew2).asUInt(),
-    VipuType.vwredsum_vs  -> Cat(VAluOpcode.vredsum, sSew, sSew, sSew2).asUInt(),
+    VipuType.vwredsumu_vs -> Cat(VAluOpcode.vredsum, uSew, uSew, uSew2).asUInt,
+    VipuType.vwredsum_vs  -> Cat(VAluOpcode.vredsum, sSew, sSew, sSew2).asUInt,
 
-    VipuType.vcpop_m      -> Cat(VAluOpcode.vcpop, mask, mask, uSew).asUInt(),
-    VipuType.vfirst_m     -> Cat(VAluOpcode.vfirst, mask, mask, uSew).asUInt(),
-    VipuType.vmsbf_m      -> Cat(VAluOpcode.vmsbf, mask, mask, mask).asUInt(),
-    VipuType.vmsif_m      -> Cat(VAluOpcode.vmsif, mask, mask, mask).asUInt(),
-    VipuType.vmsof_m      -> Cat(VAluOpcode.vmsof, mask, mask, mask).asUInt(),
+    VipuType.vcpop_m      -> Cat(VAluOpcode.vcpop, mask, mask, uSew).asUInt,
+    VipuType.vfirst_m     -> Cat(VAluOpcode.vfirst, mask, mask, uSew).asUInt,
+    VipuType.vmsbf_m      -> Cat(VAluOpcode.vmsbf, mask, mask, mask).asUInt,
+    VipuType.vmsif_m      -> Cat(VAluOpcode.vmsif, mask, mask, mask).asUInt,
+    VipuType.vmsof_m      -> Cat(VAluOpcode.vmsof, mask, mask, mask).asUInt,
 
-    VipuType.viota_m      -> Cat(VAluOpcode.viota, uSew, uSew, uSew).asUInt(),
-    VipuType.vid_v        -> Cat(VAluOpcode.vid, uSew, uSew, uSew).asUInt()
+    VipuType.viota_m      -> Cat(VAluOpcode.viota, uSew, uSew, uSew).asUInt,
+    VipuType.vid_v        -> Cat(VAluOpcode.vid, uSew, uSew, uSew).asUInt
 
    )).asTypeOf(new VIAluDecodeResultBundle)
 

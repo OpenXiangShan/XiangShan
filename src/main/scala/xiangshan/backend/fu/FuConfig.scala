@@ -1,6 +1,6 @@
 package xiangshan.backend.fu
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import utils.EnumUtils.OHEnumeration
 import xiangshan.ExceptionNO._

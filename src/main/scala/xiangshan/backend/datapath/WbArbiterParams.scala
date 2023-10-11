@@ -1,6 +1,6 @@
 package xiangshan.backend.datapath
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3.Output
 import chisel3.util.{DecoupledIO, MixedVec, ValidIO, log2Up}
 import xiangshan.backend.BackendParams

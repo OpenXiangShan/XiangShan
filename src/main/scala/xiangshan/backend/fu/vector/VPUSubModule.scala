@@ -16,7 +16,7 @@
 //
 //package xiangshan.backend.fu.vector
 //
-//import chipsalliance.rocketchip.config.Parameters
+//import org.chipsalliance.cde.config.Parameters
 //import chisel3._
 //import chisel3.util.{Mux1H, _}
 //import xiangshan.backend.fu.FunctionUnit
@@ -86,11 +86,11 @@
 //    val outFire = dataModule.map(_.io.out.fire()).reduce(_||_)
 //  // reg input signal
 //    val s0_uopReg = Reg(io.in.bits.uop.cloneType)
-//    val s0_selectReg = Reg(VecInit(select).asUInt().cloneType)
+//    val s0_selectReg = Reg(VecInit(select).asUInt.cloneType)
 //    val inHs = io.in.fire()
 //    when(inHs && state === s_idle){
 //        s0_uopReg := io.in.bits.uop
-//        s0_selectReg := VecInit(select).asUInt()
+//        s0_selectReg := VecInit(select).asUInt
 //      }
 //    dataReg := Mux(outValid, dataWire, dataReg)
 //

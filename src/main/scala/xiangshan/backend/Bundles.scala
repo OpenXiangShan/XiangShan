@@ -1,6 +1,6 @@
 package xiangshan.backend
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util._
@@ -360,8 +360,8 @@ object Bundles {
     def getSource: SchedulerType = exuParams.getWBSource
     def getIntWbBusyBundle = common.rfWen.toSeq
     def getVfWbBusyBundle = common.getVfWen.toSeq
-    def getIntRfReadBundle: Seq[RfReadPortWithConfig] = rf.flatten.filter(_.readInt)
-    def getVfRfReadBundle: Seq[RfReadPortWithConfig] = rf.flatten.filter(_.readVf)
+    def getIntRfReadBundle: Seq[RfReadPortWithConfig] = rf.flatten.filter(_.readInt).toSeq
+    def getVfRfReadBundle: Seq[RfReadPortWithConfig] = rf.flatten.filter(_.readVf).toSeq
 
     def getIntRfReadValidBundle(issueValid: Bool): Seq[ValidIO[RfReadPortWithConfig]] = {
       getIntRfReadBundle.zip(srcType).map {

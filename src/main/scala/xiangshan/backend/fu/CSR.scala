@@ -1370,16 +1370,15 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   }
 
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
-    val difftest = Module(new DifftestVectorState)
-    difftest.io.clock := clock
-    difftest.io.coreid := csrio.hartId
-    difftest.io.vstart := vstart
-    difftest.io.vxsat := vcsr.asTypeOf(new VcsrStruct).vxsat
-    difftest.io.vxrm := vcsr.asTypeOf(new VcsrStruct).vxrm
-    difftest.io.vcsr := vcsr
-    difftest.io.vl := vl
-    difftest.io.vtype := vtype
-    difftest.io.vlenb := vlenb
+    val difftest = DifftestModule(new DiffVecCSRState)
+    difftest.coreid := csrio.hartId
+    difftest.vstart := vstart
+    difftest.vxsat := vcsr.asTypeOf(new VcsrStruct).vxsat
+    difftest.vxrm := vcsr.asTypeOf(new VcsrStruct).vxrm
+    difftest.vcsr := vcsr
+    difftest.vl := vl
+    difftest.vtype := vtype
+    difftest.vlenb := vlenb
   }
 }
 

@@ -1,6 +1,6 @@
 package xiangshan.backend.issue
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utility.HasCircularQueuePtrHelper
@@ -77,7 +77,7 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
   flushed := entryReg.status.robIdx.needFlush(io.flush)
   clear := flushed || deqSuccess
   deqSuccess := io.issueResp.valid && io.issueResp.bits.respType === RSFeedbackType.fuIdle && !srcLoadCancelVec.map(_.reduce(_ || _)).getOrElse(false.B)
-  srcWakeUp := io.wakeup.map(bundle => bundle.bits.wakeUp(entryReg.status.psrc zip entryReg.status.srcType, bundle.valid)).transpose.map(VecInit(_).asUInt.orR)
+  srcWakeUp := io.wakeup.map(bundle => bundle.bits.wakeUp(entryReg.status.psrc zip entryReg.status.srcType, bundle.valid)).transpose.map(x => VecInit(x.toSeq).asUInt.orR).toSeq
 
   shiftedWakeupLoadDependencyByIQVec
     .zip(wakeupLoadDependencyByIQVec)
@@ -119,11 +119,11 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
     srcWakeUpByIQVec := 0.U.asTypeOf(srcWakeUpByIQVec)
     wakeupLoadDependencyByIQVec := 0.U.asTypeOf(wakeupLoadDependencyByIQVec)
   } else {
-    val wakeupVec: IndexedSeq[IndexedSeq[Bool]] = io.wakeUpFromIQ.map((bundle: ValidIO[IssueQueueIQWakeUpBundle]) =>
+    val wakeupVec: Seq[Seq[Bool]] = io.wakeUpFromIQ.map((bundle: ValidIO[IssueQueueIQWakeUpBundle]) =>
       bundle.bits.wakeUp(entryReg.status.psrc zip entryReg.status.srcType, bundle.valid)
-    ).transpose
+    ).toSeq.transpose
     srcWakeUpByIQVec := wakeupVec.map(x => VecInit(x))
-    wakeupLoadDependencyByIQVec := io.wakeUpFromIQ.map(_.bits.loadDependency)
+    wakeupLoadDependencyByIQVec := io.wakeUpFromIQ.map(_.bits.loadDependency).toSeq
   }
 
   when(io.enq.valid && io.transSel) {
@@ -151,7 +151,7 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
       entryRegNext.status.srcWakeUpL1ExuOH.get.zip(srcWakeUpByIQVec).zip(srcWakeUp).zipWithIndex.foreach {
         case (((exuOH: Vec[Bool], wakeUpByIQOH: Vec[Bool]), wakeUp: Bool), srcIdx) =>
           when(wakeUpByIQOH.asUInt.orR) {
-            exuOH := Mux1H(wakeUpByIQOH, io.wakeUpFromIQ.map(x => MathUtils.IntToOH(x.bits.exuIdx).U(backendParams.numExu.W))).asBools
+            exuOH := Mux1H(wakeUpByIQOH, io.wakeUpFromIQ.map(x => MathUtils.IntToOH(x.bits.exuIdx).U(backendParams.numExu.W)).toSeq).asBools
           }.elsewhen(wakeUp) {
             exuOH := 0.U.asTypeOf(exuOH)
           }.otherwise {

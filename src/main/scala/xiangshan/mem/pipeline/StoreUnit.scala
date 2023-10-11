@@ -66,7 +66,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   val s0_in           = Mux(s0_use_flow_rs, io.stin.bits, 0.U.asTypeOf(io.stin.bits))
   val s0_isFirstIssue = Mux(s0_use_flow_rs, io.stin.bits.isFirstIssue, false.B)
   val s0_rsIdx        = Mux(s0_use_flow_rs, io.stin.bits.iqIdx, 0.U)
-  val s0_size         = Mux(s0_use_flow_rs, LSUOpType.size(s0_in.uop.ctrl.fuOpType), 3.U)
+  val s0_size         = Mux(s0_use_flow_rs, LSUOpType.size(s0_in.uop.fuOpType), 3.U)
   val s0_mem_idx      = Mux(s0_use_flow_rs, s0_in.uop.sqIdx.value, 0.U)
   val s0_rob_idx      = Mux(s0_use_flow_rs, s0_in.uop.robIdx, 0.U.asTypeOf(s0_in.uop.robIdx))
   val s0_pc           = Mux(s0_use_flow_rs, s0_in.uop.pc, 0.U)
@@ -87,7 +87,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   )
   val s0_saddr = Cat(saddr_hi, saddr_lo(11,0))
   val s0_vaddr = Mux(s0_use_flow_rs, s0_saddr, io.prefetch_req.bits.vaddr)
-  val s0_mask  = Mux(s0_use_flow_rs, genVWmask(s0_saddr, s0_in.uop.ctrl.fuOpType(1,0)), 3.U)
+  val s0_mask  = Mux(s0_use_flow_rs, genVWmask(s0_saddr, s0_in.uop.fuOpType(1,0)), 3.U)
 
   io.tlb.req.valid                   := s0_valid
   io.tlb.req.bits.vaddr              := s0_vaddr
@@ -259,7 +259,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
 
   // kill dcache write intent request when mmio or exception
   io.dcache.s2_kill := (s2_mmio || s2_exception || s2_in.uop.robIdx.needFlush(io.redirect))
-  io.dcache.s2_pc   := s2_out.uop.cf.pc
+  io.dcache.s2_pc   := s2_out.uop.pc
   // TODO: dcache resp
   io.dcache.resp.ready := true.B
 
@@ -350,7 +350,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
 
   io.stout.valid := sx_last_valid && !sx_last_in.uop.robIdx.needFlush(io.redirect)
   io.stout.bits := sx_last_in
-  io.stout.bits.redirectValid := false.B
 
   io.debug_ls := DontCare
   io.debug_ls.s1.isTlbFirstMiss := io.tlb.resp.valid && io.tlb.resp.bits.miss && io.tlb.resp.bits.debug.isFirstIssue && !s1_in.isHWPrefetch

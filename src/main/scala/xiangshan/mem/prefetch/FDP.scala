@@ -51,14 +51,16 @@ class CounterFilterQueryBundle(implicit p: Parameters) extends DCacheBundle {
 // they think they all prefetch hit, increment useful prefetch counter 3 times
 // so when load arrives at s3, save it's set&way to an FIFO, all loads will search this FIFO to avoid this case
 class CounterFilter()(implicit p: Parameters) extends DCacheModule {
+  private val LduCnt = backendParams.LduCnt
+
   val io = IO(new Bundle() {
     // input, only from load for now
-    val ld_in = Flipped(Vec(exuParameters.LduCnt, ValidIO(new CounterFilterDataBundle())))
-    val query = Flipped(Vec(exuParameters.LduCnt, new CounterFilterQueryBundle()))
+    val ld_in = Flipped(Vec(LduCnt, ValidIO(new CounterFilterDataBundle())))
+    val query = Flipped(Vec(LduCnt, new CounterFilterQueryBundle()))
   })
 
   val LduStages = 4
-  val SIZE = (LduStages) * exuParameters.LduCnt
+  val SIZE = (LduStages) * LduCnt
   class Ptr(implicit p: Parameters) extends CircularQueuePtr[Ptr]( p => SIZE ){}
   object Ptr {
     def apply(f: Bool, v: UInt)(implicit p: Parameters): Ptr = {
@@ -73,8 +75,8 @@ class CounterFilter()(implicit p: Parameters) extends DCacheModule {
   val valids = RegInit(VecInit(Seq.fill(SIZE){ (false.B) }))
 
   // enq
-  val enqLen = exuParameters.LduCnt
-  val deqLen = exuParameters.LduCnt
+  val enqLen = LduCnt
+  val deqLen = LduCnt
   val enqPtrExt = RegInit(VecInit((0 until enqLen).map(_.U.asTypeOf(new Ptr))))
   val deqPtrExt = RegInit(VecInit((0 until deqLen).map(_.U.asTypeOf(new Ptr))))
 
@@ -84,7 +86,7 @@ class CounterFilter()(implicit p: Parameters) extends DCacheModule {
   val reqs_vl = io.ld_in.map(_.valid)
   val needAlloc = Wire(Vec(enqLen, Bool()))
   val canAlloc = Wire(Vec(enqLen, Bool()))
-  val last3CycleAlloc = RegInit(0.U(log2Ceil(exuParameters.LduCnt + 1).W))
+  val last3CycleAlloc = RegInit(0.U(log2Ceil(LduCnt + 1).W))
 
   for(i <- (0 until enqLen)) {
     val req = reqs_l(i)
@@ -119,7 +121,7 @@ class CounterFilter()(implicit p: Parameters) extends DCacheModule {
   // query
   val querys_l = io.query.map(_.req.bits)
   val querys_vl = io.query.map(_.req.valid)
-  for(i <- (0 until exuParameters.LduCnt)) {
+  for(i <- (0 until LduCnt)) {
     val q = querys_l(i)
     val q_v = querys_vl(i)
 

@@ -18,7 +18,7 @@
 //
 //package xiangshan.backend.fu.vector
 //
-//import chipsalliance.rocketchip.config.Parameters
+//import org.chipsalliance.cde.config.Parameters
 //import chisel3.{Mux, _}
 //import chisel3.util._
 //import utils._
@@ -77,7 +77,7 @@
 //    vfdiv(i).io.flush_i := false.B  // TODO
 //  }
 //
-//  val s4_fflagsVec = VecInit(vfdiv.map(_.io.fflags_o)).asUInt()
+//  val s4_fflagsVec = VecInit(vfdiv.map(_.io.fflags_o)).asUInt
 //  val s4_fflags16vl = fflagsGen(s0_mask, s4_fflagsVec, List.range(0, 8))
 //  val s4_fflags32vl = fflagsGen(s0_mask, s4_fflagsVec, List(0, 1, 4, 5))
 //  val s4_fflags64vl = fflagsGen(s0_mask, s4_fflagsVec, List(0, 4))
@@ -86,12 +86,12 @@
 //    "b10".U -> Mux(s0_vl.orR, s4_fflags32vl(s0_vl - 1.U), 0.U(5.W)),
 //    "b11".U -> Mux(s0_vl.orR, s4_fflags64vl(s0_vl - 1.U), 0.U(5.W)),
 //  ))
-//  val s4_result = VecInit(vfdiv.map(_.io.fpdiv_res_o)).asUInt()
+//  val s4_result = VecInit(vfdiv.map(_.io.fpdiv_res_o)).asUInt
 //
 //  io.out.bits.data := s4_result
 //  fflags := s4_fflags
-//  io.in.ready := VecInit(vfdiv.map(_.io.start_ready_o)).asUInt().andR()
-//  io.out.valid := VecInit(vfdiv.map(_.io.finish_valid_o)).asUInt().andR()
+//  io.in.ready := VecInit(vfdiv.map(_.io.start_ready_o)).asUInt.andR()
+//  io.out.valid := VecInit(vfdiv.map(_.io.finish_valid_o)).asUInt.andR()
 //}
 //
 //class VfmaccWrapper(implicit p: Parameters)  extends VPUDataModule{
@@ -133,7 +133,7 @@
 //  }
 //
 //  // output signal generation
-//  val s2_fflagsVec = VecInit(vfmacc.map(_.io.fflags)).asUInt()
+//  val s2_fflagsVec = VecInit(vfmacc.map(_.io.fflags)).asUInt
 //  val s2_fflags16vl = fflagsGen(s0_mask, s2_fflagsVec, List.range(0, 8))
 //  val s2_fflags32vl = fflagsGen(s0_mask, s2_fflagsVec, List(0, 1, 4, 5))
 //  val s2_fflags64vl = fflagsGen(s0_mask, s2_fflagsVec, List(0, 4))
@@ -143,7 +143,7 @@
 //    "b11".U -> Mux(s0_vl.orR, s2_fflags64vl(s0_vl - 1.U), 0.U(5.W)),
 //  ))
 //
-//  val s2_result = VecInit(vfmacc.map(_.io.fp_result)).asUInt()
+//  val s2_result = VecInit(vfmacc.map(_.io.fp_result)).asUInt
 //
 //  io.out.bits.data := s2_result
 //  fflags := s2_fflags
@@ -194,7 +194,7 @@
 //  }
 //
 //  // output signal generation
-//  val s0_fflagsVec = VecInit(vfalu.map(_.io.fflags)).asUInt()
+//  val s0_fflagsVec = VecInit(vfalu.map(_.io.fflags)).asUInt
 //  val s0_fflags16vl = fflagsGen(s0_mask, s0_fflagsVec, List.range(0, 8))
 //  val s0_fflags32vl = fflagsGen(s0_mask, s0_fflagsVec, List(0, 1, 4, 5))
 //  val s0_fflags64vl = fflagsGen(s0_mask, s0_fflagsVec, List(0, 4))
@@ -204,7 +204,7 @@
 //    "b11".U -> Mux(s0_vl.orR, s0_fflags64vl(s0_vl - 1.U), 0.U(5.W)),
 //  ))
 //  val s1_fflags = RegEnable(s0_fflags, validPipe(Latency-2))
-//  val s0_result = VecInit(vfalu.map(_.io.fp_result)).asUInt()
+//  val s0_result = VecInit(vfalu.map(_.io.fp_result)).asUInt
 //  val s1_result = RegEnable(s0_result, validPipe(Latency-2))
 //
 //  fflags := s1_fflags

@@ -538,6 +538,7 @@ trait HasXSParameter {
   val VCONFIG_IDX = coreParams.VCONFIG_IDX
   val IntPhyRegs = coreParams.intPreg.numEntries
   val VfPhyRegs = coreParams.vfPreg.numEntries
+  val MaxPhyPregs = IntPhyRegs max VfPhyRegs
   val PhyRegIdxWidth = log2Up(IntPhyRegs) max log2Up(VfPhyRegs)
   val RobSize = coreParams.RobSize
   val RabSize = coreParams.RabSize

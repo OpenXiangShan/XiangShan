@@ -1,9 +1,9 @@
 package xiangshan.backend.datapath
 
-import chipsalliance.rocketchip.config.Parameters
+import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import difftest.{DifftestArchFpRegState, DifftestArchIntRegState, DifftestArchVecRegState}
+import difftest.{DiffArchFpRegState, DiffArchIntRegState, DiffArchVecRegState, DifftestModule}
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
 import utils.SeqUtils._
@@ -14,6 +14,7 @@ import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.issue.{ImmExtractor, IntScheduler, MemScheduler, VfScheduler}
+import xiangshan.backend.implicitCast._
 import xiangshan.backend.regfile._
 
 class DataPath(params: BackendParams)(implicit p: Parameters) extends LazyModule {
@@ -40,13 +41,13 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   println(s"[DataPath] IntExu(${fromIntIQ.map(_.size).sum}), MemExu(${fromMemIQ.map(_.size).sum})")
 
   // just refences for convience
-  private val fromIQ = fromIntIQ ++ fromVfIQ ++ fromMemIQ
+  private val fromIQ: Seq[MixedVec[DecoupledIO[IssueQueueIssueBundle]]] = fromIntIQ ++ fromVfIQ ++ fromMemIQ
 
   private val toIQs = toIntIQ ++ toVfIQ ++ toMemIQ
 
-  private val toExu = toIntExu ++ toVfExu ++ toMemExu
+  private val toExu: Seq[MixedVec[DecoupledIO[ExuInput]]] = toIntExu ++ toVfExu ++ toMemExu
 
-  private val fromFlattenIQ: Seq[DecoupledIO[IssueQueueIssueBundle]] = fromIQ.flatten.toSeq
+  private val fromFlattenIQ: Seq[DecoupledIO[IssueQueueIssueBundle]] = fromIQ.flatten
 
   private val toFlattenExu: Seq[DecoupledIO[ExuInput]] = toExu.flatten
 
@@ -55,19 +56,19 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   private val intRFReadArbiter = Module(new IntRFReadArbiter(backendParams))
   private val vfRFReadArbiter = Module(new VfRFReadArbiter(backendParams))
 
-  private val og0FailedVec2: MixedVec[Vec[Bool]] = Wire(MixedVec(fromIQ.map(x => Vec(x.size, Bool()))))
-  private val og1FailedVec2: MixedVec[Vec[Bool]] = Wire(MixedVec(fromIQ.map(x => Vec(x.size, Bool()))))
+  private val og0FailedVec2: MixedVec[Vec[Bool]] = Wire(MixedVec(fromIQ.map(x => Vec(x.size, Bool())).toSeq))
+  private val og1FailedVec2: MixedVec[Vec[Bool]] = Wire(MixedVec(fromIQ.map(x => Vec(x.size, Bool())).toSeq))
 
   // port -> win
-  private val intRdArbWinner: Seq2[MixedVec[Bool]] = intRFReadArbiter.io.in.map(_.map(x => MixedVecInit(x.map(_.ready))))
-  private val vfRdArbWinner: Seq2[MixedVec[Bool]] = vfRFReadArbiter.io.in.map(_.map(x => MixedVecInit(x.map(_.ready))))
-  private val intWbNotBlock: Seq[MixedVec[Bool]] = intWbBusyArbiter.io.in.map(x => MixedVecInit(x.map(_.ready)))
-  private val vfWbNotBlock: Seq[MixedVec[Bool]] = vfWbBusyArbiter.io.in.map(x => MixedVecInit(x.map(_.ready)))
+  private val intRdArbWinner: Seq2[MixedVec[Bool]] = intRFReadArbiter.io.in.map(_.map(x => MixedVecInit(x.map(_.ready).toSeq)).toSeq).toSeq
+  private val vfRdArbWinner: Seq2[MixedVec[Bool]] = vfRFReadArbiter.io.in.map(_.map(x => MixedVecInit(x.map(_.ready).toSeq)).toSeq).toSeq
+  private val intWbNotBlock: Seq[MixedVec[Bool]] = intWbBusyArbiter.io.in.map(x => MixedVecInit(x.map(_.ready).toSeq)).toSeq
+  private val vfWbNotBlock: Seq[MixedVec[Bool]] = vfWbBusyArbiter.io.in.map(x => MixedVecInit(x.map(_.ready).toSeq)).toSeq
 
   private val intRdNotBlock: Seq2[Bool] = intRdArbWinner.map(_.map(_.asUInt.andR))
   private val vfRdNotBlock: Seq2[Bool] = vfRdArbWinner.map(_.map(_.asUInt.andR))
 
-  private val intRFReadReq: Seq3[ValidIO[RfReadPortWithConfig]] = fromIQ.map(x => x.map(xx => xx.bits.getIntRfReadValidBundle(xx.valid)))
+  private val intRFReadReq: Seq3[ValidIO[RfReadPortWithConfig]] = fromIQ.map(x => x.map(xx => xx.bits.getIntRfReadValidBundle(xx.valid)).toSeq).toSeq
 
   intRFReadArbiter.io.in.zip(intRFReadReq).zipWithIndex.foreach { case ((arbInSeq2, inRFReadReqSeq2), iqIdx) =>
     arbInSeq2.zip(inRFReadReqSeq2).zipWithIndex.foreach { case ((arbInSeq, inRFReadReqSeq), exuIdx) =>
@@ -84,7 +85,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     }
   }
 
-  private val vfRFReadReq: Seq3[ValidIO[RfReadPortWithConfig]] = fromIQ.map(x => x.map(xx => xx.bits.getVfRfReadValidBundle(xx.valid)))
+  private val vfRFReadReq: Seq3[ValidIO[RfReadPortWithConfig]] = fromIQ.map(x => x.map(xx => xx.bits.getVfRfReadValidBundle(xx.valid)).toSeq).toSeq
 
   vfRFReadArbiter.io.in.zip(vfRFReadReq).zipWithIndex.foreach { case ((arbInSeq2, inRFReadReqSeq2), iqIdx) =>
     arbInSeq2.zip(inRFReadReqSeq2).zipWithIndex.foreach { case ((arbInSeq, inRFReadReqSeq), exuIdx) =>
@@ -101,8 +102,8 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     }
   }
 
-  private val intRFWriteReq: Seq2[Bool] = fromIQ.map(x => x.map(xx => xx.valid && xx.bits.common.rfWen.getOrElse(false.B)))
-  private val vfRFWriteReq: Seq2[Bool] = fromIQ.map(x => x.map(xx => xx.valid && xx.bits.common.getVfWen.getOrElse(false.B)))
+  private val intRFWriteReq: Seq2[Bool] = fromIQ.map(x => x.map(xx => xx.valid && xx.bits.common.rfWen.getOrElse(false.B)).toSeq).toSeq
+  private val vfRFWriteReq: Seq2[Bool] = fromIQ.map(x => x.map(xx => xx.valid && xx.bits.common.getVfWen.getOrElse(false.B)).toSeq).toSeq
 
   intWbBusyArbiter.io.in.zip(intRFWriteReq).foreach { case (arbInSeq, inRFWriteReqSeq) =>
     arbInSeq.zip(inRFWriteReqSeq).foreach { case (arbIn, inRFWriteReq) =>
@@ -189,9 +190,9 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     debugReadAddr = vfDebugRead.map(_._1),
     debugReadData = vfDebugRead.map(_._2))
 
-  intRfWaddr := io.fromIntWb.map(_.addr)
-  intRfWdata := io.fromIntWb.map(_.data)
-  intRfWen := io.fromIntWb.map(_.wen)
+  intRfWaddr := io.fromIntWb.map(_.addr).toSeq
+  intRfWdata := io.fromIntWb.map(_.data).toSeq
+  intRfWen := io.fromIntWb.map(_.wen).toSeq
 
   for (portIdx <- intRfRaddr.indices) {
     if (intRFReadArbiter.io.out.isDefinedAt(portIdx))
@@ -200,8 +201,8 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       intRfRaddr(portIdx) := 0.U
   }
 
-  vfRfWaddr := io.fromVfWb.map(_.addr)
-  vfRfWdata := io.fromVfWb.map(_.data)
+  vfRfWaddr := io.fromVfWb.map(_.addr).toSeq
+  vfRfWdata := io.fromVfWb.map(_.data).toSeq
   vfRfWen.foreach(_.zip(io.fromVfWb.map(_.wen)).foreach { case (wenSink, wenSource) => wenSink := wenSource } )// Todo: support fp multi-write
 
   for (portIdx <- vfRfRaddr.indices) {
@@ -226,12 +227,12 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     s"has vfDebugRead: ${vfDebugRead.nonEmpty}")
 
   val s1_addrOHs = Reg(MixedVec(
-    fromIQ.map(x => MixedVec(x.map(_.bits.addrOH.cloneType)))
+    fromIQ.map(x => MixedVec(x.map(_.bits.addrOH.cloneType).toSeq)).toSeq
   ))
   val s1_toExuValid: MixedVec[MixedVec[Bool]] = Reg(MixedVec(
-    toExu.map(x => MixedVec(x.map(_.valid.cloneType)))
+    toExu.map(x => MixedVec(x.map(_.valid.cloneType).toSeq)).toSeq
   ))
-  val s1_toExuData: MixedVec[MixedVec[ExuInput]] = Reg(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.cloneType)))))
+  val s1_toExuData: MixedVec[MixedVec[ExuInput]] = Reg(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.cloneType).toSeq)).toSeq))
   val s1_toExuReady = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.ready.cloneType))))) // Todo
   val s1_srcType: MixedVec[MixedVec[Vec[UInt]]] = MixedVecInit(fromIQ.map(x => MixedVecInit(x.map(xx => RegEnable(xx.bits.srcType, xx.fire)))))
 
@@ -426,20 +427,17 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
 
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
     val delayedCnt = 2
-    val difftestArchIntRegState = Module(new DifftestArchIntRegState)
-    difftestArchIntRegState.io.clock := clock
-    difftestArchIntRegState.io.coreid := io.hartId
-    difftestArchIntRegState.io.gpr := DelayN(intDebugRead.get._2, delayedCnt)
+    val difftestArchIntRegState = DifftestModule(new DiffArchIntRegState, delay = delayedCnt)
+    difftestArchIntRegState.coreid := io.hartId
+    difftestArchIntRegState.value := intDebugRead.get._2
 
-    val difftestArchFpRegState = Module(new DifftestArchFpRegState)
-    difftestArchFpRegState.io.clock := clock
-    difftestArchFpRegState.io.coreid := io.hartId
-    difftestArchFpRegState.io.fpr := DelayN(fpDebugReadData.get, delayedCnt)
+    val difftestArchFpRegState = DifftestModule(new DiffArchFpRegState, delay = delayedCnt)
+    difftestArchFpRegState.coreid := io.hartId
+    difftestArchFpRegState.value := fpDebugReadData.get
 
-    val difftestArchVecRegState = Module(new DifftestArchVecRegState)
-    difftestArchVecRegState.io.clock := clock
-    difftestArchVecRegState.io.coreid := io.hartId
-    difftestArchVecRegState.io.vpr := DelayN(vecDebugReadData.get, delayedCnt)
+    val difftestArchVecRegState = DifftestModule(new DiffArchVecRegState, delay = delayedCnt)
+    difftestArchVecRegState.coreid := io.hartId
+    difftestArchVecRegState.value := vecDebugReadData.get
   }
 }
 
