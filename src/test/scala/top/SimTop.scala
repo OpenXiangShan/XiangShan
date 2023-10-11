@@ -26,8 +26,9 @@ import xiangshan.{DebugOptions, DebugOptionsKey}
 import chipsalliance.rocketchip.config._
 import freechips.rocketchip.devices.debug._
 import difftest._
-import freechips.rocketchip.util.ElaborationArtefacts
-import top.TopMain.writeOutputFile
+import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule}
+import utility.{ChiselDB, Constantin, FileRegisters, GTimer}
+import xiangshan.DebugOptionsKey
 
 class SimTop(implicit p: Parameters) extends Module {
   val debugOpts = p(DebugOptionsKey)
@@ -116,21 +117,21 @@ class SimTop(implicit p: Parameters) extends Module {
 }
 
 object SimTop extends App {
-  override def main(args: Array[String]): Unit = {
-    // Keep this the same as TopMain except that SimTop is used here instead of XSTop
-    val (config, firrtlOpts, firrtlComplier, firtoolOpts) = ArgParser.parse(args)
+  // Keep this the same as TopMain except that SimTop is used here instead of XSTop
+  val (config, firrtlOpts, firtoolOpts) = ArgParser.parse(args)
 
     // tools: init to close dpi-c when in fpga
     val envInFPGA = config(DebugOptionsKey).FPGAPlatform
 
-    Generator.execute(
-      firrtlOpts,
-      DisableMonitors(p => new SimTop()(p))(config),
-      firrtlComplier,
-      firtoolOpts
-    )
-    ElaborationArtefacts.files.foreach{ case (extension, contents) =>
-      writeOutputFile("./build", s"XSTop.${extension}", contents())
-    }
-  }
+  Generator.execute(
+    firrtlOpts,
+    DisableMonitors(p => new SimTop()(p))(config),
+    firtoolOpts
+  )
+
+  // tools: write cpp files
+  ChiselDB.addToFileRegisters
+  Constantin.addToFileRegisters
+  FileRegisters.write(fileDir = "./build")
+  DifftestModule.finish("XiangShan")
 }

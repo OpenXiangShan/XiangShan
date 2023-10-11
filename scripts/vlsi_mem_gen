@@ -41,6 +41,11 @@ class VerilogModuleGenerator(object):
   def add_decl_reg(self, width, name, depth=1):
     self.add_decl("reg", width, name, depth)
 
+  def add_decl_ram(self, width, name, depth=1):
+    width_str = self.__format_width(width)
+    depth_str = " [{}:0]".format(depth-1)
+    self.decl.append(f"reg {width_str}{name}{depth_str};")
+
   def add_decl_wire(self, width, name, depth=1):
     self.add_decl("wire", width, name, depth)
 
@@ -268,7 +273,7 @@ class SRAM(object):
       mem.add_combinational('  if (%sclk && latch_%sen)' % (prefix, prefix))
       mem.add_combinational('    ram[latch_%saddr] <= latch_%sdata;' % (prefix, prefix))
 
-    mem.add_decl_reg(width, "ram", depth)
+    mem.add_decl_ram(width, "ram", depth)
     mem.add_decl_line('`ifdef RANDOMIZE_MEM_INIT')
     mem.add_decl_line('  integer initvar;')
     mem.add_decl_line('  initial begin')

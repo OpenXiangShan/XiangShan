@@ -23,47 +23,95 @@ import $file.`rocket-chip`.common
 import $file.`rocket-chip`.`api-config-chipsalliance`.`build-rules`.mill.build
 import $file.`rocket-chip`.hardfloat.build
 
-object ivys {
-  val sv = "2.12.13"
-  val chisel3 = ivy"edu.berkeley.cs::chisel3:3.5.0"
-  val chisel3Plugin = ivy"edu.berkeley.cs:::chisel3-plugin:3.5.0"
-  val chiseltest = ivy"edu.berkeley.cs::chiseltest:0.3.2"
-  val chiselCirct = ivy"com.sifive::chisel-circt:0.6.0"
-  val scalatest = ivy"org.scalatest::scalatest:3.2.2"
-  val macroParadise = ivy"org.scalamacros:::paradise:2.1.1"
+val defaultScalaVersion = "2.13.10"
+
+def defaultVersions(chiselVersion: String) = Map(
+  "chisel" -> (chiselVersion match {
+    case "chisel"  => ivy"org.chipsalliance::chisel:6.0.0-M3"
+    case "chisel3" => ivy"edu.berkeley.cs::chisel3:3.6.0"
+  }),
+  "chisel-plugin" -> (chiselVersion match {
+    case "chisel"  => ivy"org.chipsalliance:::chisel-plugin:6.0.0-M3"
+    case "chisel3" => ivy"edu.berkeley.cs:::chisel3-plugin:3.6.0"
+  }),
+  "chiseltest" -> (chiselVersion match {
+    case "chisel"  => ivy"edu.berkeley.cs::chiseltest:5.0.2"
+    case "chisel3" => ivy"edu.berkeley.cs::chiseltest:0.6.2"
+  })
+)
+
+trait HasChisel extends SbtModule with Cross.Module[String] {
+  def chiselModule: Option[ScalaModule] = None
+
+  def chiselPluginJar: T[Option[PathRef]] = None
+
+  def chiselIvy: Option[Dep] = Some(defaultVersions(crossValue)("chisel"))
+
+  def chiselPluginIvy: Option[Dep] = Some(defaultVersions(crossValue)("chisel-plugin"))
+
+  override def scalaVersion = defaultScalaVersion
+
+  override def scalacOptions = super.scalacOptions() ++
+    Agg("-language:reflectiveCalls", "-Ymacro-annotations", "-Ytasty-reader")
+
+  override def ivyDeps = super.ivyDeps() ++ Agg(chiselIvy.get)
+
+  override def scalacPluginIvyDeps = super.scalacPluginIvyDeps() ++ Agg(chiselPluginIvy.get)
 }
 
-trait XSModule extends ScalaModule with PublishModule {
+object rocketchip extends Cross[RocketChip]("chisel", "chisel3")
 
-  // override this to use chisel from source
-  def chiselOpt: Option[PublishModule] = None
+trait RocketChip
+  extends millbuild.`rocket-chip`.common.RocketChipModule
+    with HasChisel {
+  def scalaVersion: T[String] = T(defaultScalaVersion)
 
   override def scalaVersion = ivys.sv
 
   override def compileIvyDeps = Agg(ivys.macroParadise)
 
-  override def scalacPluginIvyDeps = Agg(ivys.macroParadise, ivys.chisel3Plugin)
+  def hardfloatModule = hardfloat(crossValue)
 
   override def scalacOptions = Seq("-Xsource:2.11")
 
-  override def ivyDeps = (if(chiselOpt.isEmpty) Agg(ivys.chisel3) else Agg.empty[Dep]) ++ Agg(ivys.chiselCirct)
+  def mainargsIvy = ivy"com.lihaoyi::mainargs:0.5.4"
 
-  override def moduleDeps = Seq() ++ chiselOpt
+  def json4sJacksonIvy = ivy"org.json4s::json4s-jackson:4.0.6"
 
   def publishVersion = "0.0.1"
 
-  // TODO: fix this
-  def pomSettings = PomSettings(
-    description = "XiangShan",
-    organization = "",
-    url = "https://github.com/OpenXiangShan/XiangShan",
-    licenses = Seq(License.`Apache-2.0`),
-    versionControl = VersionControl.github("OpenXiangShan", "XiangShan"),
-    developers = Seq.empty
-  )
+  trait Macros
+    extends millbuild.`rocket-chip`.common.MacrosModule
+      with SbtModule {
+
+    def scalaVersion: T[String] = T(defaultScalaVersion)
+
+    def scalaReflectIvy = ivy"org.scala-lang:scala-reflect:${defaultScalaVersion}"
+  }
+
+  object hardfloat extends Cross[Hardfloat](crossValue)
+
+  trait Hardfloat
+    extends millbuild.`rocket-chip`.hardfloat.common.HardfloatModule with HasChisel {
+
+    def scalaVersion: T[String] = T(defaultScalaVersion)
+
+    override def millSourcePath = os.pwd / "rocket-chip" / "hardfloat" / "hardfloat"
+
+  }
+
+  object cde extends CDE
+
+  trait CDE extends millbuild.`rocket-chip`.cde.common.CDEModule with ScalaModule {
+
+    def scalaVersion: T[String] = T(defaultScalaVersion)
+
+    override def millSourcePath = os.pwd / "rocket-chip" / "cde" / "cde"
+  }
 }
 
-object rocketchip extends `rocket-chip`.common.CommonRocketChip {
+object utility extends Cross[Utility]("chisel", "chisel3")
+trait Utility extends HasChisel {
 
   val rcPath = os.pwd / "rocket-chip"
 
@@ -114,15 +162,46 @@ object huancun extends XSModule with SbtModule {
   override def millSourcePath = os.pwd / "huancun"
 
   override def moduleDeps = super.moduleDeps ++ Seq(
-    rocketchip
+    rocketchip(crossValue)
   )
 }
 
-object difftest extends XSModule with SbtModule {
+object huancun extends Cross[HuanCun]("chisel", "chisel3")
+trait HuanCun extends millbuild.huancun.common.HuanCunModule with HasChisel {
+
+  override def millSourcePath = os.pwd / "huancun"
+
+  def rocketModule: ScalaModule = rocketchip(crossValue)
+
+  def utilityModule: ScalaModule = utility(crossValue)
+
+}
+
+object coupledL2 extends Cross[CoupledL2]("chisel", "chisel3")
+trait CoupledL2 extends millbuild.coupledL2.common.CoupledL2Module with HasChisel {
+
+  override def millSourcePath = os.pwd / "coupledL2"
+
+  def rocketModule: ScalaModule = rocketchip(crossValue)
+
+  def utilityModule: ScalaModule = utility(crossValue)
+
+  def huancunModule: ScalaModule = huancun(crossValue)
+
+}
+
+object difftest extends Cross[Difftest]("chisel", "chisel3")
+trait Difftest extends HasChisel {
+
   override def millSourcePath = os.pwd / "difftest"
 }
 
-object fudian extends XSModule with SbtModule
+object fudian extends Cross[FuDian]("chisel", "chisel3")
+trait FuDian extends HasChisel {
+
+  override def millSourcePath = os.pwd / "fudian"
+
+}
 
 // extends this trait to use XiangShan in other projects
 trait CommonXiangShan extends XSModule with SbtModule { m =>
@@ -148,14 +227,40 @@ trait CommonXiangShan extends XSModule with SbtModule { m =>
 
   object test extends Tests with TestModule.ScalaTest {
 
-    override def forkArgs = m.forkArgs
+object xiangshan extends Cross[XiangShan]("chisel", "chisel3")
+trait XiangShan extends XiangShanModule with HasChisel {
 
-    override def ivyDeps = super.ivyDeps() ++ Agg(
-      ivys.scalatest
-    )
+  override def millSourcePath = os.pwd
 
+  def rocketModule = rocketchip(crossValue)
+
+  def difftestModule = difftest(crossValue)
+
+  def huancunModule = huancun(crossValue)
+
+  def coupledL2Module = coupledL2(crossValue)
+
+  def fudianModule = fudian(crossValue)
+
+  def utilityModule = utility(crossValue)
+
+  override def forkArgs = Seq("-Xmx20G", "-Xss256m")
+
+  override def sources = T.sources {
+    super.sources() ++ Seq(PathRef(millSourcePath / s"src-${crossValue}" / "main" / "scala"))
   }
 
+  object test extends SbtModuleTests with TestModule.ScalaTest {
+    override def forkArgs = Seq("-Xmx20G", "-Xss256m")
+
+    override def sources = T.sources {
+      super.sources() ++ Seq(PathRef(millSourcePath / s"src-${crossValue}" / "test" / "scala"))
+    }
+
+    override def ivyDeps = super.ivyDeps() ++ Agg(
+      defaultVersions(crossValue)("chiseltest")
+    )
+  }
 }
 
 object XiangShan extends CommonXiangShan {
