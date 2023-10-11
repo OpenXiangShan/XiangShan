@@ -52,7 +52,7 @@ class LoadToLsqReplayIO(implicit p: Parameters) extends XSBundle
   val debug           = new PerfDebugInfo
   // tlb hint
   val tlb_id          = UInt(log2Up(loadfiltersize).W)
-  val tlb_ready        = Bool()
+  val tlb_full        = Bool()
 
   // alias
   def mem_amb       = cause(LoadReplayCauses.C_MA)
@@ -93,11 +93,6 @@ class LoadUnitTriggerIO(implicit p: Parameters) extends XSBundle {
   val lastDataHit = Output(Bool())
 }
 
-class LoadTlbHintIO(implicit p: Parameters) extends XSBundle {
-  val req = new TlbHintReq
-  val resp = ValidIO(new TLBHintResp)
-}
-
 class LoadUnit(implicit p: Parameters) extends XSModule
   with HasLoadHelper
   with HasPerfEvents
@@ -125,7 +120,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val forward_mshr  = Flipped(new LduToMissqueueForwardIO)
     val refill        = Flipped(ValidIO(new Refill))
     val l2_hint       = Input(Valid(new L2ToL1Hint))
-    val tlb_hint      = Flipped(new LoadTlbHintIO)
+    val tlb_hint      = Flipped(new TlbHintReq)
     // fast wakeup
     val fast_uop = ValidIO(new MicroOp) // early wakeup signal generated in load_s1, send to RS in load_s2
 
@@ -893,16 +888,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s2_in.forwardData.asUInt, s2_in.forwardMask.asUInt
   )
 
-  val s2_last_tlb_hint = RegNext(io.tlb_hint)
-  val s2_last_last_tlb_hint = RegNext(RegNext(io.tlb_hint))
-  val s2_tlb_hint_hit = (io.tlb_hint.resp.valid &&
-                         io.tlb_hint.resp.bits.id === io.tlb_hint.req.id) ||
-                        (s2_last_tlb_hint.resp.valid &&
-                         s2_last_tlb_hint.resp.bits.id === io.tlb_hint.req.id) ||
-                        (s2_last_last_tlb_hint.resp.valid &&
-                         s2_last_last_tlb_hint.resp.bits.id === io.tlb_hint.req.id)
-
-
   //
   s2_out                     := s2_in
   s2_out.data                := 0.U // data will be generated in load s3
@@ -939,8 +924,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s2_out.rep_info.mshr_id         := io.dcache.resp.bits.mshr_id
   s2_out.rep_info.last_beat       := s2_in.paddr(log2Up(refillBytes))
   s2_out.rep_info.debug           := s2_in.uop.debugInfo
-  s2_out.rep_info.tlb_id          := io.tlb_hint.req.id
-  s2_out.rep_info.tlb_ready       := io.tlb_hint.req.full || s2_tlb_hint_hit
+  s2_out.rep_info.tlb_id          := io.tlb_hint.id
+  s2_out.rep_info.tlb_full        := io.tlb_hint.full
 
   // if forward fail, replay this inst from fetch
   val debug_fwd_fail_rep = s2_fwd_fail && !s2_troublem && !s2_in.tlbMiss
