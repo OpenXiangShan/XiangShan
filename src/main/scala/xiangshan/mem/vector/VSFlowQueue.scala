@@ -269,6 +269,9 @@ class VsFlowQueueIOBundle(implicit p: Parameters) extends VLSUBundle {
   val sbuffer = Vec(EnsbufferWidth, DecoupledIO(new DCacheWordReqWithVaddr))
   // inform scalar sq to release the entry when a vector store finishes writing to sbuffer
   val sqRelease = ValidIO(new SqPtr)
+
+  // store-to-load forward
+  val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
 }
 class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper
 {

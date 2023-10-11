@@ -485,6 +485,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // forward
     loadUnits(i).io.lsq.forward <> lsq.io.forward(i)
     loadUnits(i).io.sbuffer <> sbuffer.io.forward(i)
+    loadUnits(i).io.vec_forward <> vsFlowQueue.io.forward(i)
     loadUnits(i).io.tl_d_channel := dcache.io.lsu.forward_D(i)
     loadUnits(i).io.forward_mshr <> dcache.io.lsu.forward_mshr(i)
     // ld-ld violation check

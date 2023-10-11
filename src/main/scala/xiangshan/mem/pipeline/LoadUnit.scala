@@ -115,6 +115,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val pmp           = Flipped(new PMPRespBundle()) // arrive same to tlb now
     val dcache        = new DCacheLoadIO
     val sbuffer       = new LoadForwardQueryIO
+    val vec_forward   = new LoadForwardQueryIO // forward from vec store flow queue
     val lsq           = new LoadToLsqIO
     val tl_d_channel  = Input(new DcacheToLduForwardIO)
     val forward_mshr  = Flipped(new LduToMissqueueForwardIO)
@@ -659,6 +660,14 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.sbuffer.mask  := s1_in.mask
   io.sbuffer.pc    := s1_in.uop.cf.pc // FIXME: remove it
 
+  io.vec_forward.valid := s1_valid && !(s1_exception || s1_tlb_miss || s1_kill || s1_prf)
+  io.vec_forward.vaddr := s1_vaddr
+  io.vec_forward.paddr := s1_paddr_dup_lsu
+  io.vec_forward.uop   := s1_in.uop
+  io.vec_forward.sqIdx := s1_in.uop.sqIdx
+  io.vec_forward.mask  := s1_in.mask
+  io.vec_forward.pc    := s1_in.uop.cf.pc // FIXME: remove it
+
   io.lsq.forward.valid     := s1_valid && !(s1_exception || s1_tlb_miss || s1_kill || s1_prf)
   io.lsq.forward.vaddr     := s1_vaddr
   io.lsq.forward.paddr     := s1_paddr_dup_lsu
@@ -833,7 +842,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                          io.lsq.forward.addrInvalid
 
   val s2_tlb_miss      = s2_in.tlbMiss
-  val s2_fwd_fail      = io.lsq.forward.dataInvalid
+  val s2_fwd_fail      = io.lsq.forward.dataInvalid || io.vec_forward.dataInvalid
   val s2_dcache_miss   = io.dcache.resp.bits.miss &&
                          !s2_fwd_frm_d_chan_or_mshr &&
                          !s2_full_fwd
@@ -934,11 +943,19 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // lsq has higher priority than sbuffer
   val s2_fwd_mask = Wire(Vec((VLEN/8), Bool()))
   val s2_fwd_data = Wire(Vec((VLEN/8), UInt(8.W)))
-  s2_full_fwd := ((~s2_fwd_mask.asUInt).asUInt & s2_in.mask) === 0.U && !io.lsq.forward.dataInvalid
+  s2_full_fwd := ((~s2_fwd_mask.asUInt).asUInt & s2_in.mask) === 0.U && !io.lsq.forward.dataInvalid && !io.vec_forward.dataInvalid
   // generate XLEN/8 Muxs
   for (i <- 0 until VLEN / 8) {
-    s2_fwd_mask(i) := io.lsq.forward.forwardMask(i) || io.sbuffer.forwardMask(i)
-    s2_fwd_data(i) := Mux(io.lsq.forward.forwardMask(i), io.lsq.forward.forwardData(i), io.sbuffer.forwardData(i))
+    s2_fwd_mask(i) := io.lsq.forward.forwardMask(i) || io.sbuffer.forwardMask(i) || io.vec_forward.forwardMask(i)
+    s2_fwd_data(i) := Mux(
+      io.lsq.forward.forwardMask(i),
+      io.lsq.forward.forwardData(i),
+      Mux(
+        io.vec_forward.forwardMask(i),
+        io.vec_forward.forwardData(i),
+        io.sbuffer.forwardData(i)
+      )
+    )
   }
 
   XSDebug(s2_fire, "[FWD LOAD RESP] pc %x fwd %x(%b) + %x(%b)\n",
@@ -977,8 +994,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s2_out.rep_info.raw_nack        := s2_raw_nack && s2_troublem
   s2_out.rep_info.nuke            := s2_nuke && s2_troublem
   s2_out.rep_info.full_fwd        := s2_data_fwded
-  s2_out.rep_info.data_inv_sq_idx := io.lsq.forward.dataInvalidSqIdx
-  s2_out.rep_info.addr_inv_sq_idx := io.lsq.forward.addrInvalidSqIdx
+  s2_out.rep_info.data_inv_sq_idx := Mux(io.vec_forward.dataInvalid, s2_out.uop.sqIdx, io.lsq.forward.dataInvalidSqIdx)
+  s2_out.rep_info.addr_inv_sq_idx := Mux(io.vec_forward.addrInvalid, s2_out.uop.sqIdx, io.lsq.forward.addrInvalidSqIdx)
   s2_out.rep_info.rep_carry       := io.dcache.resp.bits.replayCarry
   s2_out.rep_info.mshr_id         := io.dcache.resp.bits.mshr_id
   s2_out.rep_info.last_beat       := s2_in.paddr(log2Up(refillBytes))
