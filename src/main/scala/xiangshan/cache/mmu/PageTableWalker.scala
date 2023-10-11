@@ -500,6 +500,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val hptw_resp_ptr_reg = RegNext(io.hptw.resp.bits.id)
   val hptw_need_addr_check = RegNext(hasHptwResp && io.hptw.resp.fire() && !flush)
 
+  val pte = io.mem.resp.bits.value.asTypeOf(new PteBundle().cloneType)
   val gpaddr = MakeGPAddr(io.in.bits.ppn, getVpnn(io.in.bits.req_info.vpn, 0))
   val hptw_resp = io.hptw.resp.bits.h_resp
   val hpaddr = Cat(hptw_resp.genPPNS2(get_pn(gpaddr)), get_off(gpaddr))
@@ -534,6 +535,15 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       when (state(i) === state_mem_waiting && io.mem.resp.bits.id === entries(i).wait_id) {
         state(i) := Mux(entries(i).s2xlate, state_last_hptw_req, state_mem_out)
         mem_resp_hit(i) := true.B
+        entries(i).ppn := pte.ppn // for last stage 2 translation
+      }
+    }
+  }
+
+  when (DelayN(io.mem.resp.fire(), 1)) {
+    state.indices.map{i =>
+      when (state(i) === state_last_hptw_req && io.mem.resp.bits.id === entries(i).wait_id) {
+        entries(i).ppn := pte.ppn // for last stage 2 translation
       }
     }
   }
@@ -592,9 +602,8 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.out.bits.af := entries(mem_ptr).af
   io.out.bits.h_resp := entries(mem_ptr).hptw_resp
 
-  val pte = io.mem.resp.bits.value.asTypeOf(new PteBundle().cloneType)
   val hptw_req_gvpn_1 = hyper_arb1.io.out.bits.ppn // first stage 2 translation
-  val hptw_req_gvpn_2 = pte.ppn // last stage 2 translation
+  val hptw_req_gvpn_2 = hyper_arb2.io.out.bits.ppn // last stage 2 translation
   io.hptw.req.valid := (hyper_arb1.io.out.valid || hyper_arb2.io.out.valid) && !flush
   io.hptw.req.bits.gvpn := Mux(hyper_arb1.io.out.valid, hptw_req_gvpn_1, hptw_req_gvpn_2)
   io.hptw.req.bits.id := Mux(hyper_arb1.io.out.valid, hyper_arb1.io.chosen, hyper_arb2.io.chosen)

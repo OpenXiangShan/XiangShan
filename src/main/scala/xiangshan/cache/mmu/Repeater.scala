@@ -468,7 +468,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
 
   def ptwResp_hit(vpn: UInt, s2xlate: UInt, resp: PtwRespS2): Bool = {
     val enableS2xlate = resp.s2xlate =/= noS2xlate
-    val onlyS2 = resp.s2xlate === onlyStage1
+    val onlyS2 = resp.s2xlate === onlyStage2
     val s1hit = resp.s1.hit(vpn, 0.U, io.csr.hgatp.asid, true, true, enableS2xlate)
     val s2hit = resp.s2.hit(vpn, io.csr.hgatp.asid)
     s2xlate === resp.s2xlate && Mux(enableS2xlate && onlyS2, s2hit, s1hit)
