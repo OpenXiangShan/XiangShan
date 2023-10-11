@@ -89,6 +89,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
     val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
     val force_write = Output(Bool())
+    val vecStoreRetire = Flipped(ValidIO(new SqPtr))
   })
 
   println("StoreQueue: size:" + StoreQueueSize)
@@ -133,6 +134,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val pending = Reg(Vec(StoreQueueSize, Bool())) // mmio pending: inst is an mmio inst, it will not be executed until it reachs the end of rob
   val mmio = Reg(Vec(StoreQueueSize, Bool())) // mmio: inst is an mmio inst
   val atomic = Reg(Vec(StoreQueueSize, Bool()))
+  val vec = Reg(Vec(StoreQueueSize, Bool()))
 
   // ptr
   val enqPtrExt = RegInit(VecInit((0 until io.enq.req.length).map(_.U.asTypeOf(new SqPtr))))
@@ -221,6 +223,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       committed(index) := false.B
       pending(index) := false.B
       mmio(index) := false.B
+      vec(index) := io.enq.req(i).bits.cf.instr(6, 0) === "b0100111".U // TODO
 
       XSError(!io.enq.canAccept || !io.enq.lqCanAccept, s"must accept $i\n")
       XSError(index =/= sqIdx.value, s"must be the same entry $i\n")
@@ -694,10 +697,18 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // As store queue grows larger and larger, time needed to read data from data
   // module keeps growing higher. Now we give data read a whole cycle.
 
+  // Vector stores are written to sbuffer by vector store flow queue rather than sq
+  when (io.vecStoreRetire.valid) {
+    assert(io.vecStoreRetire.bits === rdataPtrExt(0))
+    assert(vec(rdataPtrExt(0).value), "Vector store flow queue is trying to retire a scalar store")
+    vec(rdataPtrExt(0).value) := false.B
+  }
+
   val mmioStall = mmio(rdataPtrExt(0).value)
+  val vecStall = vec(rdataPtrExt(0).value)
   for (i <- 0 until EnsbufferWidth) {
     val ptr = rdataPtrExt(i).value
-    dataBuffer.io.enq(i).valid := allocated(ptr) && committed(ptr) && !mmioStall
+    dataBuffer.io.enq(i).valid := allocated(ptr) && committed(ptr) && !mmioStall && !vecStall
     // Note that store data/addr should both be valid after store's commit
     assert(!dataBuffer.io.enq(i).valid || allvalid(ptr))
     dataBuffer.io.enq(i).bits.addr  := paddrModule.io.rdata(i)
