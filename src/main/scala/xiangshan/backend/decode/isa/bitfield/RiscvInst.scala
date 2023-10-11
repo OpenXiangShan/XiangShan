@@ -8,7 +8,7 @@ abstract class RiscvInst(bitWidth: Int) extends Bundle {
 
 class Riscv32BitInst extends RiscvInst(32) {
   def ALL     : UInt  = inst
-  def OPCODE  : UInt  = inst( 6,  2)
+  def OPCODE  : UInt  = inst( 6,  0)
   def RD      : UInt  = inst(11,  7)
   def FUNCT3  : UInt  = inst(14, 12)
   def RS1     : UInt  = inst(19, 15)
