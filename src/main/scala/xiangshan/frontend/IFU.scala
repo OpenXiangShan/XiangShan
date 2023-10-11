@@ -766,7 +766,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     val jalOffset = jal_offset(inst, currentIsRVC)
     val brOffset  = br_offset(inst, currentIsRVC)
 
-    io.toIbuffer.bits.instrs (0) := new RVCDecoder(inst, XLEN).decode.bits
+    io.toIbuffer.bits.instrs (0) := new RVCDecoder(inst, XLEN, true).decode.bits
 
 
     io.toIbuffer.bits.pd(0).valid   := true.B

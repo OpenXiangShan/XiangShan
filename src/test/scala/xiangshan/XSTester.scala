@@ -4,11 +4,9 @@ import chisel3._
 import chiseltest._
 import chiseltest.{VerilatorBackendAnnotation, WriteVcdAnnotation}
 import chiseltest.simulator.{VerilatorCFlags, VerilatorFlags}
-import firrtl.AnnotationSeq
-import firrtl.stage.RunFirrtlTransformAnnotation
+import test.types.AnnotationSeq
 import org.scalatest.flatspec._
 import org.scalatest.matchers.should._
-
 import top.{ArgParser, DefaultConfig}
 
 abstract class XSTester extends AnyFlatSpec with ChiselScalatestTester with Matchers with HasTestAnnos {
@@ -32,5 +30,5 @@ trait DumpVCD { this: HasTestAnnos =>
 }
 
 trait UseVerilatorBackend { this: HasTestAnnos =>
-  testAnnos = testAnnos ++ Seq(VerilatorBackendAnnotation)
+  testAnnos = testAnnos :+ VerilatorBackendAnnotation
 }
