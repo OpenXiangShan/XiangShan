@@ -627,6 +627,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     stu.io.lsq           <> lsq.io.sta.storeAddrIn(i)
     stu.io.lsq_replenish <> lsq.io.sta.storeAddrInRe(i)
+    stu.io.lsq_vec       <> lsq.io.sta.vecStoreAddrIn(i)
     // dtlb
     stu.io.tlb          <> dtlb_reqs.drop(exuParameters.LduCnt)(i)
     stu.io.pmp          <> pmp_check(i+exuParameters.LduCnt).resp
@@ -749,7 +750,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
   lsq.io.sqEmpty        <> sbuffer.io.sqempty
   dcache.io.force_write := lsq.io.force_write
-  lsq.io.vecStoreRetire <> vsFlowQueue.sqRelease
+  lsq.io.vecStoreRetire <> vsFlowQueue.io.sqRelease
 
   // vector loadqueue wrapper
   /**

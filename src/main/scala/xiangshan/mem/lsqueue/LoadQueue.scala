@@ -103,6 +103,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     }
     val sta = new Bundle() {
       val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // from store_s1
+      val vecStoreAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // from store_s1
     }
     val std = new Bundle() {
       val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new ExuOutput))) // from store_s0, store data, send to sq from rs
@@ -159,6 +160,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
    */
   loadQueueRAW.io.redirect         <> io.redirect
   loadQueueRAW.io.storeIn          <> io.sta.storeAddrIn
+  loadQueueRAW.io.vecStoreIn       <> io.sta.vecStoreAddrIn
   loadQueueRAW.io.stAddrReadySqPtr <> io.sq.stAddrReadySqPtr
   loadQueueRAW.io.stIssuePtr       <> io.sq.stIssuePtr
   for (w <- 0 until LoadPipelineWidth) {

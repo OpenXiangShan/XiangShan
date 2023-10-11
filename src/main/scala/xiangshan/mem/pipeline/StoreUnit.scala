@@ -39,6 +39,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
     val isFirstIssue      = Input(Bool())
     val vec_isFirstIssue  = Input(Bool())
     val lsq               = ValidIO(new LsPipelineBundle)
+    // lsq_vec is only used for nuke check between vector stores and scalar loads
+    val lsq_vec           = ValidIO(new LsPipelineBundle)
     val lsq_replenish     = Output(new LsPipelineBundle())
     val feedback_slow     = ValidIO(new RSFeedback)
     val vec_feedback_slow = ValidIO(new VSFQFeedback)
@@ -275,10 +277,14 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   s1_out.uop.cf.exceptionVec(storePageFault)   := io.tlb.resp.bits.excp(0).pf.st && s1_exp
   s1_out.uop.cf.exceptionVec(storeAccessFault) := io.tlb.resp.bits.excp(0).af.st && s1_exp
 
-  // TODO: VLSU, implement vector store queue
+  // scalar store and scalar load nuke check, and also other purposes
   io.lsq.valid     := s1_valid && !s1_isvec
   io.lsq.bits      := s1_out
   io.lsq.bits.miss := s1_tlb_miss
+  // vector store and scalar load nuke check
+  io.lsq_vec.valid := s1_valid && s1_isvec
+  io.lsq_vec.bits  := s1_out
+  io.lsq_vec.bits.miss := s1_tlb_miss
 
   // write below io.out.bits assign sentence to prevent overwriting values
   val s1_tlb_memidx = io.tlb.resp.bits.memidx
