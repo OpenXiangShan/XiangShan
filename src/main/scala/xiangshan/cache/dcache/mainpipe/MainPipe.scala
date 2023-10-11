@@ -803,7 +803,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_probe_ttob_override = s3_valid &&
     // s3_probe_ttob_check_resp.valid &&
     s3_probe_ttob_check_resp.bits.toN &&
-    s3_coh_dup_for_meta_w_valid === Trunk
+    (s3_coh_dup_for_meta_w_valid === Trunk || s3_coh_dup_for_meta_w_valid === Dirty)
   val s3_probe_new_coh = Mux(
     s3_probe_ttob_override,
     ClientMetadata(Nothing),
