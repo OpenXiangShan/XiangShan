@@ -243,7 +243,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
     val beu_errors = Output(new XSL1BusErrors())
     val l2_hint = Input(Valid(new L2ToL1Hint()))
-    val l2_tlb_req = Flipped(new TlbRequestIO(nRespDups = 1))
+    val l2_tlb_req = Flipped(new TlbRequestIO(nRespDups = 2))
     val l2PfqBusy = Input(Bool())
     val debugTopDown = new Bundle {
       val robHeadPaddr = Valid(UInt(PAddrBits.W))

@@ -203,9 +203,9 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       
       l2cache.get.module.io.l2_tlb_req.resp.valid := core.module.io.l2_tlb_req.resp.valid
       l2cache.get.module.io.l2_tlb_req.req.ready := core.module.io.l2_tlb_req.req.ready
-      l2cache.get.module.io.l2_tlb_req.resp.bits.paddr := core.module.io.l2_tlb_req.resp.bits.paddr
+      l2cache.get.module.io.l2_tlb_req.resp.bits.paddr.head := core.module.io.l2_tlb_req.resp.bits.paddr.head
       l2cache.get.module.io.l2_tlb_req.resp.bits.miss := core.module.io.l2_tlb_req.resp.bits.miss
-      l2cache.get.module.io.l2_tlb_req.resp.bits.excp <> core.module.io.l2_tlb_req.resp.bits.excp
+      l2cache.get.module.io.l2_tlb_req.resp.bits.excp.head <> core.module.io.l2_tlb_req.resp.bits.excp.head
     } else {
       misc.module.beu_errors.l2 <> 0.U.asTypeOf(misc.module.beu_errors.l2)
       core.module.io.l2_hint.bits.sourceId := DontCare
