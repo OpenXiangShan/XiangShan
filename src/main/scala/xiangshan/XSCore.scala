@@ -32,6 +32,7 @@ import xiangshan.frontend._
 import xiangshan.mem.L1PrefetchFuzzer
 
 import scala.collection.mutable.ListBuffer
+import xiangshan.cache.mmu.TlbRequestIO
 
 abstract class XSModule(implicit val p: Parameters) extends Module
   with HasXSParameter
@@ -242,6 +243,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
     val beu_errors = Output(new XSL1BusErrors())
     val l2_hint = Input(Valid(new L2ToL1Hint()))
+    val l2_tlb_req = Flipped(new TlbRequestIO(nRespDups = 1))
     val l2PfqBusy = Input(Bool())
     val debugTopDown = new Bundle {
       val robHeadPaddr = Valid(UInt(PAddrBits.W))
@@ -442,6 +444,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.mem_to_ooo.lsTopdownInfo <> ctrlBlock.io.robio.lsTopdownInfo
   memBlock.io.l2_hint.valid := io.l2_hint.valid
   memBlock.io.l2_hint.bits.sourceId := io.l2_hint.bits.sourceId
+  memBlock.io.l2_tlb_req <> io.l2_tlb_req
   memBlock.io.l2PfqBusy := io.l2PfqBusy
   memBlock.io.int2vlsu <> DontCare
   memBlock.io.vec2vlsu <> DontCare
