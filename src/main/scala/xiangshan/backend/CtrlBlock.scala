@@ -36,9 +36,10 @@ import xiangshan.backend.rob.{Rob, RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO
 import xiangshan.frontend.{FtqRead, Ftq_RF_Components}
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
-  def numRedirect = backendParams.numRedirect
   val rob_commits = Vec(CommitWidth, Valid(new RobCommitInfo))
   val redirect = Valid(new Redirect)
+  val ftqIdxAhead = Vec(BackendRedirectNum, Valid(new FtqPtr))
+  val ftqIdxSelOH = Valid(UInt((BackendRedirectNum).W))
 }
 
 class CtrlBlock(params: BackendParams)(implicit p: Parameters) extends LazyModule {
@@ -170,7 +171,8 @@ class CtrlBlockImp(
 
   redirectGen.io.robFlush := s1_robFlushRedirect.valid
 
-  val s6_frontendFlushValid = DelayN(s1_robFlushRedirect.valid, 5)
+  val frontendFlushValidAhead = DelayN(s1_robFlushRedirect.valid, 5)
+  val s6_frontendFlushValid = RegNext(frontendFlushValidAhead)
   val frontendFlushBits = RegEnable(s1_robFlushRedirect.bits, s1_robFlushRedirect.valid) // ??
   // When ROB commits an instruction with a flush, we notify the frontend of the flush without the commit.
   // Flushes to frontend may be delayed by some cycles and commit before flush causes errors.
@@ -184,6 +186,20 @@ class CtrlBlockImp(
   }
   io.frontend.toFtq.redirect.valid := s6_frontendFlushValid || s3_redirectGen.valid
   io.frontend.toFtq.redirect.bits := Mux(s6_frontendFlushValid, frontendFlushBits, s3_redirectGen.bits)
+  io.frontend.toFtq.ftqIdxSelOH.valid := frontendFlushValid || redirectGen.io.stage2Redirect.valid
+  io.frontend.toFtq.ftqIdxSelOH.bits := Cat(frontendFlushValid, redirectGen.io.stage2oldestOH & Fill(NumRedirect + 1, !frontendFlushValid))
+
+  //jmp/brh
+  for (i <- 0 until NumRedirect) {
+    io.frontend.toFtq.ftqIdxAhead(i).valid := exuRedirect(i).valid && exuRedirect(i).bits.redirect.cfiUpdate.isMisPred && !flushRedirect.valid && !frontendFlushValidAhead
+    io.frontend.toFtq.ftqIdxAhead(i).bits := exuRedirect(i).bits.redirect.ftqIdx
+  }
+  //loadreplay
+  io.frontend.toFtq.ftqIdxAhead(NumRedirect).valid := loadReplay.valid && !flushRedirect.valid && !frontendFlushValidAhead
+  io.frontend.toFtq.ftqIdxAhead(NumRedirect).bits := loadReplay.bits.ftqIdx
+  //exception
+  io.frontend.toFtq.ftqIdxAhead.last.valid := frontendFlushValidAhead
+  io.frontend.toFtq.ftqIdxAhead.last.bits := frontendFlushBits.ftqIdx
   // Be careful here:
   // T0: rob.io.flushOut, s0_robFlushRedirect
   // T1: s1_robFlushRedirect, rob.io.exception.valid

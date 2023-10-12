@@ -40,7 +40,7 @@ trait NeedImpl {
   this: RawModule =>
   protected def IO[T <: Data](iodef: T): T = {
     println(s"[Warn]: (${this.name}) please reomve 'NeedImpl' after implement this module")
-    val io = chisel3.experimental.IO(iodef)
+    val io = chisel3.IO(iodef)
     io <> DontCare
     io
   }

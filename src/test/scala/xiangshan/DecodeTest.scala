@@ -1,23 +1,19 @@
 package xiangshan
 
 import chisel3._
-import chisel3.stage._
+import chisel3.stage.ChiselGeneratorAnnotation
 import chiseltest._
-import chiseltest.ChiselScalatestTester
 import chiseltest.VerilatorBackendAnnotation
-import chiseltest.simulator.{VerilatorFlags, VerilatorCFlags}
-import org.scalatest.flatspec.AnyFlatSpec
-import org.scalatest.matchers.must.Matchers
-import firrtl.stage.RunFirrtlTransformAnnotation
-import xstransforms.PrintModuleName
-import firrtl.options.TargetDirAnnotation
+import chiseltest.simulator.VerilatorFlags
 import top.ArgParser
-import utility.FileRegisters
 import xiangshan.backend.decode.DecodeUnit
 import xiangshan.backend.regfile.IntPregParams
+import types.ChiselStage
+import xiangshan.test.types._
+import xiangshan.types.PrintModuleName
 
 object DecodeMain extends App {
-  val (config, firrtlOpts, firrtlComplier, firtoolOpts) = ArgParser.parse(args)
+  val (config, firrtlOpts, firtoolOpts) = ArgParser.parse(args)
   // //val soc = DisableMonitors(p => LazyModule(new XSTop()(p)))(config)
   // If Complex Params are needed, wrap it with a Top Module to do dirty works,
   // and use "chisel3.aop.Select.collectDeep[ModuleWanted](WrapperModule){case a: ModuleWanted => a}.head.Params"
@@ -42,13 +38,17 @@ object DecodeMain extends App {
 class DecodeUnitTest extends XSTester {
   behavior of "DecodeUnit"
   it should "pass" in {
+    val printModuleNameAnno = chisel3.BuildInfo.version match {
+      case "3.6.0" => Seq(RunFirrtlTransformAnnotation(new PrintModuleName))
+      case _ => Seq()
+    }
+
     test(new DecodeUnit()(config)).withAnnotations(Seq(
       VerilatorBackendAnnotation,
       VerilatorFlags(Seq()),
       WriteVcdAnnotation,
-      TargetDirAnnotation("./build"),
-      RunFirrtlTransformAnnotation(new PrintModuleName)
-    )){ dut =>
+      TargetDirAnnotation("./build")
+    ) ++ printModuleNameAnno){ dut =>
       dut.clock.step(10)
     }
   }

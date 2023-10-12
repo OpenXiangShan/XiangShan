@@ -269,7 +269,6 @@ case class XSCoreParameters
     nProbeEntries = 2,
     nPrefetchEntries = 12,
     nPrefBufferEntries = 32,
-    hasPrefetch = true,
   ),
   dcacheParametersOpt: Option[DCacheParameters] = Some(DCacheParameters(
     tagECC = Some("secded"),
@@ -559,6 +558,9 @@ trait HasXSParameter {
   def backendParams: BackendParams = coreParams.backendParams
   def MemIQSizeMax = backendParams.memSchdParams.get.issueBlockParams.map(_.numEntries).max
   def IQSizeMax = backendParams.allSchdParams.map(_.issueBlockParams.map(_.numEntries).max).max
+
+  val NumRedirect = backendParams.JmpCnt + exuParameters.BrhCnt
+  val BackendRedirectNum = NumRedirect + 2 //2: ldReplay + Exception
   val LoadPipelineWidth = coreParams.LoadPipelineWidth
   val StorePipelineWidth = coreParams.StorePipelineWidth
   val VecMemSrcInWidth = coreParams.VecMemSrcInWidth
