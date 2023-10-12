@@ -25,6 +25,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
     val memPredUpdate = Output(new MemPredUpdateReq)
     val memPredPcRead = new FtqRead(UInt(VAddrBits.W)) // read req send form stage 2
     val isMisspreRedirect = Output(Bool())
+    val stage2oldestOH = Output(UInt((NumRedirect + 1).W))
   }
 
   val io = IO(new RedirectGeneratorIO)
@@ -86,6 +87,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   // stage1 -> stage2
   io.stage2Redirect.valid := s1_redirect_valid_reg && !robFlush
   io.stage2Redirect.bits := s1_redirect_bits_reg
+  io.stage2oldestOH := s1_redirect_onehot.asUInt
 
   val s1_isReplay = s1_redirect_onehot.last
   val s1_isJump = s1_redirect_onehot.head

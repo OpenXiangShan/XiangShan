@@ -33,7 +33,8 @@ import xiangshan.backend.fu.PFEvent
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.rename.{Rename, RenameTableWrapper, SnapshotGenerator}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
-import xiangshan.frontend.{FtqRead, Ftq_RF_Components}
+import xiangshan.frontend.{FtqPtr, FtqRead, Ftq_RF_Components}
+import xiangshan.mem.{LqPtr, LsqEnqIO}
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   val rob_commits = Vec(CommitWidth, Valid(new RobCommitInfo))
@@ -186,16 +187,16 @@ class CtrlBlockImp(
   }
   io.frontend.toFtq.redirect.valid := s6_frontendFlushValid || s3_redirectGen.valid
   io.frontend.toFtq.redirect.bits := Mux(s6_frontendFlushValid, frontendFlushBits, s3_redirectGen.bits)
-  io.frontend.toFtq.ftqIdxSelOH.valid := frontendFlushValid || redirectGen.io.stage2Redirect.valid
-  io.frontend.toFtq.ftqIdxSelOH.bits := Cat(frontendFlushValid, redirectGen.io.stage2oldestOH & Fill(NumRedirect + 1, !frontendFlushValid))
+  io.frontend.toFtq.ftqIdxSelOH.valid := s6_frontendFlushValid || redirectGen.io.stage2Redirect.valid
+  io.frontend.toFtq.ftqIdxSelOH.bits := Cat(s6_frontendFlushValid, redirectGen.io.stage2oldestOH & Fill(NumRedirect + 1, !s6_frontendFlushValid))
 
   //jmp/brh
   for (i <- 0 until NumRedirect) {
-    io.frontend.toFtq.ftqIdxAhead(i).valid := exuRedirect(i).valid && exuRedirect(i).bits.redirect.cfiUpdate.isMisPred && !flushRedirect.valid && !frontendFlushValidAhead
-    io.frontend.toFtq.ftqIdxAhead(i).bits := exuRedirect(i).bits.redirect.ftqIdx
+    io.frontend.toFtq.ftqIdxAhead(i).valid := exuRedirects(i).valid && exuRedirects(i).bits.cfiUpdate.isMisPred && !s1_robFlushRedirect.valid && !frontendFlushValidAhead
+    io.frontend.toFtq.ftqIdxAhead(i).bits := exuRedirects(i).bits.ftqIdx
   }
   //loadreplay
-  io.frontend.toFtq.ftqIdxAhead(NumRedirect).valid := loadReplay.valid && !flushRedirect.valid && !frontendFlushValidAhead
+  io.frontend.toFtq.ftqIdxAhead(NumRedirect).valid := loadReplay.valid && !s1_robFlushRedirect.valid && !frontendFlushValidAhead
   io.frontend.toFtq.ftqIdxAhead(NumRedirect).bits := loadReplay.bits.ftqIdx
   //exception
   io.frontend.toFtq.ftqIdxAhead.last.valid := frontendFlushValidAhead
@@ -463,6 +464,8 @@ class CtrlBlockImp(
   rob.io.debug_ls := io.robio.debug_ls
   rob.io.debugHeadLsIssue := io.robio.robHeadLsIssue
   rob.io.lsTopdownInfo := io.robio.lsTopdownInfo
+  rob.io.debugEnqLsq := io.debugEnqLsq
+
   io.robio.robDeqPtr := rob.io.robDeqPtr
 
   io.debugTopDown.fromRob := rob.io.debugTopDown.toCore
@@ -560,6 +563,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val fromCore = new CoreDispatchTopDownIO
   }
   val debugRolling = new RobDebugRollingIO
+  val debugEnqLsq = Input(new LsqEnqIO)
 }
 
 class NamedIndexes(namedCnt: Seq[(String, Int)]) {

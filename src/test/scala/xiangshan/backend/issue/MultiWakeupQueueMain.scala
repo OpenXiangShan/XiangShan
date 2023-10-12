@@ -7,7 +7,7 @@ import xiangshan.backend.Bundles.DynInst
 import xiangshan.{Redirect, XSCoreParameters, XSCoreParamsKey}
 
 object MultiWakeupQueueMain extends App {
-  val (config, firrtlOpts, firrtlComplier, firtoolOpts) = ArgParser.parse(args)
+  val (config, firrtlOpts, firtoolOpts) = ArgParser.parse(args)
 
   val p = config.alterPartial({ case XSCoreParamsKey => XSCoreParameters() })
 

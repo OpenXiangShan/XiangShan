@@ -120,7 +120,8 @@ trait Utility extends HasChisel {
 
 }
 
-object yunsuan extends SbtModule with HasChisel {
+object yunsuan extends Cross[YunSuan]("chisel", "chisel3")
+trait YunSuan extends HasChisel {
 
   override def millSourcePath = os.pwd / "yunsuan"
 
@@ -214,7 +215,7 @@ trait XiangShan extends XiangShanModule with HasChisel {
 
   def utilityModule = utility(crossValue)
 
-  def yunsuanModule = yunsuan
+  def yunsuanModule = yunsuan(crossValue)
 
   override def forkArgs = Seq("-Xmx20G", "-Xss256m")
 
@@ -223,7 +224,7 @@ trait XiangShan extends XiangShanModule with HasChisel {
   }
 
   override def ivyDeps = super.ivyDeps() ++ Agg(
-    defaultVersions("chiseltest"),
+    defaultVersions(crossValue)("chiseltest"),
   )
 
   object test extends SbtModuleTests with TestModule.ScalaTest {
@@ -232,8 +233,6 @@ trait XiangShan extends XiangShanModule with HasChisel {
     override def sources = T.sources {
       super.sources() ++ Seq(PathRef(millSourcePath / s"src-${crossValue}" / "test" / "scala"))
     }
-
-    override def forkEnv = XiangShan.forkEnv
 
     override def ivyDeps = super.ivyDeps() ++ Agg(
       defaultVersions(crossValue)("chiseltest")

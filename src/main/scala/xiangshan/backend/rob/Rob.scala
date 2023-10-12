@@ -82,6 +82,7 @@ class RobLsqIO(implicit p: Parameters) extends XSBundle {
   val pendingPtr = Output(new RobPtr)
 
   val mmio = Input(Vec(LoadPipelineWidth, Bool()))
+  // Todo: what's this?
   val uop = Input(Vec(LoadPipelineWidth, new DynInst))
 }
 
@@ -427,6 +428,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // For enqueue ptr, we don't duplicate it since only enqueue needs it.
   val enqPtrVec = Wire(Vec(RenameWidth, new RobPtr))
   val deqPtrVec = Wire(Vec(CommitWidth, new RobPtr))
+
+  dontTouch(enqPtrVec)
+  dontTouch(deqPtrVec)
 
   val walkPtrVec = Reg(Vec(CommitWidth, new RobPtr))
   val lastWalkPtr = Reg(new RobPtr)
@@ -1338,8 +1342,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       difftest.fpwen   := io.commits.commitValid(i) && uop.fpWen
       difftest.wpdest  := commitInfo.pdest
       difftest.wdest   := commitInfo.ldest
-      difftest.nFused  := Mux(CommitType.isFused(commitInfo.commitType), 1.U, 0.U)
-
+      difftest.nFused  := CommitType.isFused(commitInfo.commitType).asUInt + commitInfo.instrSize - 1.U
+      when(difftest.valid) {
+        assert(CommitType.isFused(commitInfo.commitType).asUInt + commitInfo.instrSize >= 1.U)
+      }
       if (env.EnableDifftest) {
         val uop = commitDebugUop(i)
         difftest.pc       := SignExt(uop.pc, XLEN)

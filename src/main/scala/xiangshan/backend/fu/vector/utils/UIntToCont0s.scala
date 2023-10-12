@@ -3,7 +3,6 @@ package xiangshan.backend.fu.vector.utils
 import chisel3._
 import chisel3.util._
 import chiseltest._
-import firrtl.FirrtlProtos.Firrtl.Width
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
 import xiangshan.backend.fu.vector.Utils.{NOnes, NZeros}

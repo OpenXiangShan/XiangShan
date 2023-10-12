@@ -138,6 +138,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     back <> mem
   } // TODO: replace zipAll with zip when vls is fully implemented
 
+  backend.io.mem.robLsqIO.mmio := memBlock.io.mem_to_ooo.lsqio.mmio
+  backend.io.mem.robLsqIO.uop := memBlock.io.mem_to_ooo.lsqio.uop
+
   frontend.io.reset_vector := io.reset_vector
 
   io.cpu_halt := backend.io.toTop.cpuHalted
@@ -156,8 +159,12 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   // By default, instructions do not have exceptions when they enter the function units.
   memBlock.io.ooo_to_mem.issue.map(_.bits.uop.clearExceptions())
   memBlock.io.ooo_to_mem.loadPc := backend.io.mem.loadPcRead
-  backend.io.mem.loadFastMatch <> memBlock.io.ooo_to_mem.loadFastMatch
-  backend.io.mem.loadFastImm <> memBlock.io.ooo_to_mem.loadFastImm
+  memBlock.io.ooo_to_mem.storePc := backend.io.mem.storePcRead
+  memBlock.io.ooo_to_mem.flushSb := backend.io.fenceio.sbuffer.flushSb
+  memBlock.io.ooo_to_mem.loadFastMatch := 0.U.asTypeOf(memBlock.io.ooo_to_mem.loadFastMatch)
+  memBlock.io.ooo_to_mem.loadFastImm := 0.U.asTypeOf(memBlock.io.ooo_to_mem.loadFastImm)
+  memBlock.io.ooo_to_mem.loadFastFuOpType := 0.U.asTypeOf(memBlock.io.ooo_to_mem.loadFastFuOpType)
+
   backend.io.mem.exceptionVAddr := memBlock.io.mem_to_ooo.lsqio.vaddr
   backend.io.mem.csrDistributedUpdate := memBlock.io.mem_to_ooo.csrUpdate
   backend.io.mem.debugLS := memBlock.io.debug_ls

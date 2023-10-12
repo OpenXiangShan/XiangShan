@@ -175,6 +175,11 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   ctrlBlock.io.robio.debug_ls <> io.mem.debugLS
   ctrlBlock.io.fromDataPath.vtype := vconfig(7, 0).asTypeOf(new VType)
   ctrlBlock.perfinfo := DontCare // TODO: Implement backend hpm
+  ctrlBlock.io.debugEnqLsq.canAccept := io.mem.lsqEnqIO.canAccept
+  ctrlBlock.io.debugEnqLsq.resp := io.mem.lsqEnqIO.resp
+  ctrlBlock.io.debugEnqLsq.req := memScheduler.io.memIO.get.lsqEnqIO.req
+  ctrlBlock.io.debugEnqLsq.needAlloc := memScheduler.io.memIO.get.lsqEnqIO.needAlloc
+
 
   intScheduler.io.fromTop.hartId := io.fromTop.hartId
   intScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
@@ -436,6 +441,13 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     require(toMem.head(i).bits.ftqIdx.isDefined && toMem.head(i).bits.ftqOffset.isDefined)
   }
 
+  io.mem.storePcRead.zipWithIndex.foreach { case (storePcRead, i) =>
+    storePcRead := ctrlBlock.io.memStPcRead(i).data
+    ctrlBlock.io.memStPcRead(i).ptr := io.mem.issueUops(i + params.LduCnt).bits.uop.ftqPtr
+    ctrlBlock.io.memStPcRead(i).offset := io.mem.issueUops(i + params.LduCnt).bits.uop.ftqOffset
+    require(toMem(1)(i).bits.ftqIdx.isDefined && toMem(1)(i).bits.ftqOffset.isDefined)
+  }
+
   ctrlBlock.io.robio.robHeadLsIssue := io.mem.issueUops.map(deq => deq.fire && deq.bits.uop.robIdx === ctrlBlock.io.robio.robDeqPtr).reduce(_ || _)
 
   // mem io
@@ -451,7 +463,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   }
   og0CancelVecFromFinalIssue := (intFinalIssueBlock ++ vfFinalIssueBlock ++ memFinalIssueBlock).toSeq
 
-  IndexedSeq
   io.frontendSfence := fenceio.sfence
   io.frontendTlbCsr := csrio.tlb
   io.frontendCsrCtrl := csrio.customCtrl
@@ -462,8 +473,12 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
 
   io.toTop.cpuHalted := false.B // TODO: implement cpu halt
 
+  io.debugTopDown.fromRob := ctrlBlock.io.debugTopDown.fromRob
+  ctrlBlock.io.debugTopDown.fromCore := io.debugTopDown.fromCore
+
+  io.debugRolling := ctrlBlock.io.debugRolling
+
   dontTouch(memScheduler.io)
-  dontTouch(io.mem)
   dontTouch(dataPath.io.toMemExu)
   dontTouch(wbDataPath.io.fromMemExu)
 }
@@ -478,6 +493,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val staIqFeedback = Vec(params.StaCnt, Flipped(new MemRSFeedbackIO))
   val ldCancel = Vec(params.LduCnt, Flipped(new LoadCancelIO))
   val loadPcRead = Vec(params.LduCnt, Output(UInt(VAddrBits.W)))
+  val storePcRead = Vec(params.StaCnt, Output(UInt(VAddrBits.W)))
 
   // Input
   val writeBack = MixedVec(Seq.fill(params.LduCnt + params.StaCnt * 2)(Flipped(DecoupledIO(new MemExuOutput()))) ++ Seq.fill(params.VlduCnt)(Flipped(DecoupledIO(new MemExuOutput(true)))))

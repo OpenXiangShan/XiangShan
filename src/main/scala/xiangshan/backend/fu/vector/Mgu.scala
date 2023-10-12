@@ -181,7 +181,7 @@ class VecInfo(implicit p: Parameters) extends Bundle {
 
 object VerilogMgu extends App {
   println("Generating the Mgu hardware")
-  val (config, firrtlOpts, firrtlComplier, firtoolOpts) = ArgParser.parse(args)
+  val (config, firrtlOpts, firtoolOpts) = ArgParser.parse(args)
   val p = config.alterPartial({case XSCoreParamsKey => config(XSTileKey).head})
 
   emitVerilog(new Mgu(128)(p), Array("--target-dir", "build/vifu", "--full-stacktrace"))

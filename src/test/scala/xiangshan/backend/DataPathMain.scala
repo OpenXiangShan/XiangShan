@@ -7,7 +7,7 @@ import xiangshan.{XSCoreParameters, XSCoreParamsKey}
 
 
 object DataPathMain extends App {
-  val (config, firrtlOpts, firrtlComplier, firtoolOpts) = ArgParser.parse(args)
+  val (config, firrtlOpts, firtoolOpts) = ArgParser.parse(args)
 
   val backendParams = config(XSCoreParamsKey).backendParams
   val dataPath = LazyModule(new DataPath(backendParams)(config))
@@ -15,7 +15,6 @@ object DataPathMain extends App {
   Generator.execute(
     firrtlOpts,
     dataPath.module,
-    firrtlComplier,
     firtoolOpts
   )
 }

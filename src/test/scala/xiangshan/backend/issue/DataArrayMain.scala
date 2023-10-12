@@ -6,7 +6,7 @@ import top.{ArgParser, BaseConfig, Generator}
 import xiangshan.{XSCoreParameters, XSCoreParamsKey}
 
 object DataArrayMain extends App {
-  val (config, firrtlOpts, firrtlComplier, firtoolOpts) = ArgParser.parse(args)
+  val (config, firrtlOpts, firtoolOpts) = ArgParser.parse(args)
 
   val backendParams = config(XSCoreParamsKey).backendParams
 
@@ -17,7 +17,6 @@ object DataArrayMain extends App {
     // DataArray
     DisableMonitors(p =>
       new DataArray(Vec(iqParams.dataBitsMax, Bool()), iqParams.numDeq, iqParams.numEnq, iqParams.numEntries)(p))(config),
-    firrtlComplier,
     firtoolOpts
   )
 }

@@ -559,7 +559,7 @@ trait HasXSParameter {
   def MemIQSizeMax = backendParams.memSchdParams.get.issueBlockParams.map(_.numEntries).max
   def IQSizeMax = backendParams.allSchdParams.map(_.issueBlockParams.map(_.numEntries).max).max
 
-  val NumRedirect = backendParams.JmpCnt + exuParameters.BrhCnt
+  val NumRedirect = backendParams.numRedirect
   val BackendRedirectNum = NumRedirect + 2 //2: ldReplay + Exception
   val LoadPipelineWidth = coreParams.LoadPipelineWidth
   val StorePipelineWidth = coreParams.StorePipelineWidth

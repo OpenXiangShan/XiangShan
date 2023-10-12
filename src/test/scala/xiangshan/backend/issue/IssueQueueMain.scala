@@ -5,7 +5,7 @@ import top.{ArgParser, BaseConfig, Generator}
 import xiangshan.{XSCoreParameters, XSCoreParamsKey}
 
 object IssueQueueMain extends App {
-  val (config, firrtlOpts, firrtlComplier, firtoolOpts) = ArgParser.parse(args)
+  val (config, firrtlOpts, firtoolOpts) = ArgParser.parse(args)
 
   val backendParams = config(XSCoreParamsKey).backendParams
 
@@ -15,7 +15,6 @@ object IssueQueueMain extends App {
   Generator.execute(
     firrtlOpts,
     iq.module,
-    firrtlComplier,
     firtoolOpts
   )
 }

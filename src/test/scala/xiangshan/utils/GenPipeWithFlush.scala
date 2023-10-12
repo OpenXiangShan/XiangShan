@@ -9,7 +9,7 @@ import xiangshan.backend.Bundles.DynInst
 
 object GenPipeWithFlush extends App {
   println("Generating the VerilogPipeWithFlush hardware")
-  val (config, firrtlOpts, firrtlComplier, firtoolOpts) = ArgParser.parse(args)
+  val (config, firrtlOpts, firtoolOpts) = ArgParser.parse(args)
   val p = config.alterPartial({ case XSCoreParamsKey => config(XSTileKey).head })
 
   emitVerilog(
