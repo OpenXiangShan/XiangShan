@@ -73,7 +73,7 @@ case class XSCoreParameters
   UbtbSize: Int = 256,
   FtbSize: Int = 2048,
   RasSize: Int = 32,
-  RasSpecSize: Int = 64,
+  RasSpecSize: Int = 32,
   RasCtrSize: Int = 8,
   CacheLineSize: Int = 512,
   FtbWays: Int = 4,
