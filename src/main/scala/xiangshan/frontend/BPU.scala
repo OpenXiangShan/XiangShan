@@ -536,12 +536,12 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     // Usually target is generated quicker than taken, so do target compare before select can help timing
     val targetDiffVec: IndexedSeq[Vec[Bool]] =
       x.target.zip(y.getAllTargets).map {
-        case (t1, t2) => VecInit(t2.map(_ =/= t1))
-      } // [0:numDup][flattened all Target comparison]
+        case (xTarget, yAllTarget) => VecInit(yAllTarget.map(_ =/= xTarget))
+      } // [numDup][all Target comparison]
     val targetDiff   : IndexedSeq[Bool]      =
       targetDiffVec.zip(x.hit).zip(x.takenMask).map {
         case ((diff, hit), takenMask) => selectByTaken(takenMask, hit, diff)
-      }
+      } // [numDup]
 
     val lastBrPosOHDiff: IndexedSeq[Bool]      = x.lastBrPosOH.zip(y.lastBrPosOH).map { case (oh1, oh2) => oh1.asUInt =/= oh2.asUInt }
     val takenDiff      : IndexedSeq[Bool]      = x.taken.zip(y.taken).map { case (t1, t2) => t1 =/= t2 }
