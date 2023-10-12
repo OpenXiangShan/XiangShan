@@ -149,7 +149,20 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
 
   val bimAddr = new TableAddr(log2Up(BtSize), instOffsetBits)
 
-  val bt = Module(new SRAMTemplate(UInt(2.W), set = BtSize, way=numBr, shouldReset = true, holdRead = true, bypassWrite = true))
+  // Physical SRAM Size
+  val SRAMSize = 512
+  val foldWidth = BtSize / SRAMSize
+
+  val bt = Module(
+    new FoldedSRAMTemplate(
+      UInt(2.W),
+      set = BtSize,
+      width = foldWidth,
+      way = numBr,
+      shouldReset = true,
+      holdRead = true,
+      singlePort = true
+    ))
 
   val doing_reset = RegInit(true.B)
   val resetRow = RegInit(0.U(log2Ceil(BtSize).W))
@@ -239,17 +252,17 @@ class TageTable
   }
 
 
-  val SRAM_SIZE = 256 // physical size
-  require(nRows % SRAM_SIZE == 0)
+  // Physical SRAM size
+  val bankSRAMSize = 512
+  val uSRAMSize = 256
+  require(nRows % bankSRAMSize == 0)
   require(isPow2(numBr))
   val nRowsPerBr = nRows / numBr
-  val nBanks = 8
+  val nBanks = 4 // Tage banks
   val bankSize = nRowsPerBr / nBanks
-  val bankFoldWidth = if (bankSize >= SRAM_SIZE) bankSize / SRAM_SIZE else 1
-  val uFoldedWidth = nRowsPerBr / SRAM_SIZE
-  val uWays = uFoldedWidth * numBr
-  val uRows = SRAM_SIZE
-  if (bankSize < SRAM_SIZE) {
+  val bankFoldWidth = if (bankSize >= bankSRAMSize) bankSize / bankSRAMSize else 1
+  val uFoldedWidth = nRowsPerBr / uSRAMSize
+  if (bankSize < bankSRAMSize) {
     println(f"warning: tage table $tableIdx has small sram depth of $bankSize")
   }
   val bankIdxWidth = log2Ceil(nBanks)
