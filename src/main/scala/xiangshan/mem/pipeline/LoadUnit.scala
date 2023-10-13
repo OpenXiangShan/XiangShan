@@ -290,7 +290,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // which is S0's out is ready and dcache is ready
   val s0_try_ptr_chasing      = s0_l2l_fwd_select
   val s0_do_try_ptr_chasing   = s0_try_ptr_chasing && s0_can_go && io.dcache.req.ready
-  val s0_ptr_chasing_vaddr    = io.l2l_fwd_in.data(5, 0) +& io.ld_fast_imm(5, 0)
+  val s0_ptr_chasing_vaddr    = io.l2l_fwd_in.data + SignExt(io.ld_fast_imm(11, 0), VAddrBits)
   val s0_ptr_chasing_canceled = WireInit(false.B)
   s0_kill := s0_ptr_chasing_canceled || (s0_out.uop.robIdx.needFlush(io.redirect) && !s0_try_ptr_chasing)
 
@@ -452,7 +452,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   }
 
   def fromLoadToLoadSource(src: LoadToLoadIO) = {
-    s0_vaddr              := Cat(src.data(XLEN-1, 6), s0_ptr_chasing_vaddr(5,0))
+    s0_vaddr              := s0_ptr_chasing_vaddr
     s0_mask               := genVWmask(s0_vaddr, io.ld_fast_fuOpType(1, 0))
     // When there's no valid instruction from RS and LSQ, we try the load-to-load forwarding.
     // Assume the pointer chasing is always ld.
@@ -573,8 +573,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s1_l2l_fwd_dly_err  = RegNext(io.l2l_fwd_in.dly_ld_err)
   val s1_l2l_fwd_kill     = s1_l2l_fwd_dly_err && s1_in.isFastPath
   val s1_late_kill        = s1_fast_rep_kill || s1_l2l_fwd_kill
-  val s1_vaddr_hi         = Wire(UInt())
-  val s1_vaddr_lo         = Wire(UInt())
   val s1_vaddr            = Wire(UInt())
   val s1_paddr_dup_lsu    = Wire(UInt())
   val s1_paddr_dup_dcache = Wire(UInt())
@@ -585,9 +583,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s1_sw_prf           = s1_prf && !s1_hw_prf
   val s1_tlb_memidx       = io.tlb.resp.bits.memidx
 
-  s1_vaddr_hi         := s1_in.vaddr(VAddrBits - 1, 6)
-  s1_vaddr_lo         := s1_in.vaddr(5, 0)
-  s1_vaddr            := Cat(s1_vaddr_hi, s1_vaddr_lo)
+  s1_vaddr            := s1_in.vaddr
   s1_paddr_dup_lsu    := io.tlb.resp.bits.paddr(0)
   s1_paddr_dup_dcache := io.tlb.resp.bits.paddr(1)
 
@@ -686,7 +682,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       s1_in.uop           := io.ldin.bits.uop
       s1_in.rsIdx         := io.rsIdx
       s1_in.isFirstIssue  := io.isFirstIssue
-      s1_vaddr_lo         := s1_ptr_chasing_vaddr(5, 0)
+      s1_vaddr            := s1_ptr_chasing_vaddr
       s1_paddr_dup_lsu    := Cat(io.tlb.resp.bits.paddr(0)(PAddrBits - 1, 6), s1_vaddr_lo)
       s1_paddr_dup_dcache := Cat(io.tlb.resp.bits.paddr(0)(PAddrBits - 1, 6), s1_vaddr_lo)
 
