@@ -144,7 +144,8 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
   val sew = vtype.vsew
   val eew = decode.uop_eew
   val lmul = vtype.vlmul
-  val emul = EewLog2(eew) - sew + lmul
+  // when load whole register or unit-stride masked , emul should be 1
+  val emul = Mux(decode.uop_unit_stride_whole_reg || decode.uop_unit_stride_mask, 0.U(mulBits.W), EewLog2(eew) - sew + lmul)
   val lmulLog2 = Mux(lmul.asSInt >= 0.S, 0.U, lmul)
   val emulLog2 = Mux(emul.asSInt >= 0.S, 0.U, emul)
   val numEewLog2 = emulLog2 - EewLog2(eew)
@@ -188,6 +189,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
       x.nfields := decode.uop_segment_num + 1.U
       x.vm := decode.mask_en
       x.usWholeReg := decode.isUnitStride && decode.uop_unit_stride_whole_reg
+      x.usMaskReg := decode.isUnitStride && decode.uop_unit_stride_mask
       x.eew := eew
       x.sew := sew
       x.emul := emul
@@ -272,7 +274,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
     val regOffset = (elemIdxInsideField << issueAlignedType)(vOffsetBits - 1, 0)
     val exp = VLExpCtrl(
       vstart = issueVstart,
-      vl = Mux(issueEntry.usWholeReg, GenUSWholeRegVL(issueNFIELDS, issueEew), issueVl),
+      vl = Mux(issueEntry.usWholeReg, GenUSWholeRegVL(issueNFIELDS, issueEew), Mux(issueEntry.usMaskReg, GenUSMaskRegVL(issueVl), issueVl)),
       eleIdx = elemIdxInsideField
     ) && mask.orR
 
