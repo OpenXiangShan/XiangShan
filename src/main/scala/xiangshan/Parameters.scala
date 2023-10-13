@@ -72,7 +72,7 @@ case class XSCoreParameters
   EnableCommitGHistDiff: Boolean = true,
   UbtbSize: Int = 256,
   FtbSize: Int = 2048,
-  RasSize: Int = 32,
+  RasSize: Int = 16,
   RasSpecSize: Int = 32,
   RasCtrSize: Int = 8,
   CacheLineSize: Int = 512,
