@@ -218,6 +218,7 @@ class VecUopBundle(implicit p: Parameters) extends VLSUBundleWithMicroOp {
   val nfields = UInt(fieldBits.W) // NFIELDS
   val vm = Bool() // whether vector masking is enabled
   val usWholeReg = Bool() // unit-stride, whole register load
+  val usMaskReg = Bool() // unit-stride, masked store/load
   val eew = UInt(ewBits.W) // size of memory elements
   val sew = UInt(ewBits.W)
   val emul = UInt(mulBits.W)
@@ -596,11 +597,16 @@ object GenVLMAX {
 object GenUSWholeRegVL extends VLSUConstants {
   def apply(nfields: UInt, eew: UInt): UInt = {
     LookupTree(eew(1, 0), List(
-      "b000".U -> (nfields << (log2Up(VLENB) - 0)),
-      "b101".U -> (nfields << (log2Up(VLENB) - 1)),
-      "b110".U -> (nfields << (log2Up(VLENB) - 2)),
-      "b111".U -> (nfields << (log2Up(VLENB) - 3))
+      "b00".U -> (nfields << (log2Up(VLENB) - 0)),
+      "b01".U -> (nfields << (log2Up(VLENB) - 1)),
+      "b10".U -> (nfields << (log2Up(VLENB) - 2)),
+      "b11".U -> (nfields << (log2Up(VLENB) - 3))
     ))
+  }
+}
+object GenUSMaskRegVL extends VLSUConstants {
+  def apply(vl: UInt): UInt = {
+    (vl >> 3.U)
   }
 }
 
