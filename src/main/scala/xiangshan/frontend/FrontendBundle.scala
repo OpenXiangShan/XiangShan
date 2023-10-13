@@ -413,7 +413,7 @@ trait BasicPrediction extends HasXSParameter {
 }
 
 // selectByTaken selects some data according to takenMask
-// allTargets should be in flattened 2-dim Vec, like [taken, not taken, not hit, taken, ...]
+// allTargets should be in a Vec, like [taken0, taken1, ..., not taken, not hit]
 object selectByTaken {
   def apply[T <: Data](takenMask: Vec[Bool], hit: Bool, allTargets: Vec[T]): T = {
     val selVecOH =
@@ -496,9 +496,8 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
     selectByTaken(taken_mask_on_slot, hit, allTarget(pc))
   }
 
-  // allTarget return a flattened 2-dim Vec of all possible target of a BP stage
-  // in the following order: [0:totalSlot][taken_targets, fallThroughAddr, not hit (plus fetch width)]
-  // after flatten looks like [t0, f0, n0, t1, f1, n0, ...] (t,f,n stands for taken, fallthrough, not hit)
+  // allTarget return a Vec of all possible target of a BP stage
+  // in the following order: [taken_target0, taken_target1, ..., fallThroughAddr, not hit (plus fetch width)]
   //
   // This exposes internal targets for timing optimization,
   // since usually targets are generated quicker than taken
