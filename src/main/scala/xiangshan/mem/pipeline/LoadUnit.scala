@@ -683,8 +683,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       s1_in.rsIdx         := io.rsIdx
       s1_in.isFirstIssue  := io.isFirstIssue
       s1_vaddr            := s1_ptr_chasing_vaddr
-      s1_paddr_dup_lsu    := Cat(io.tlb.resp.bits.paddr(0)(PAddrBits - 1, 6), s1_vaddr_lo)
-      s1_paddr_dup_dcache := Cat(io.tlb.resp.bits.paddr(0)(PAddrBits - 1, 6), s1_vaddr_lo)
+      s1_paddr_dup_lsu    := io.tlb.resp.bits.paddr(0)(PAddrBits - 1, 0)
+      s1_paddr_dup_dcache := io.tlb.resp.bits.paddr(0)(PAddrBits - 1, 0)
 
       // recored tlb time when get the data to ensure the correctness of the latency calculation (although it should not record in here, because it does not use tlb)
       s1_in.uop.debugInfo.tlbFirstReqTime := GTimer()
