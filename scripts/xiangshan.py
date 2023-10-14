@@ -256,7 +256,7 @@ class XiangShan(object):
         fork_args = "--enable-fork" if self.args.fork else ""
         diff_args = "--no-diff" if self.args.disable_diff else ""
         chiseldb_args = "--dump-db" if not self.args.disable_db else ""
-        return_code = self.__exec_cmd(f'{numa_args} $NOOP_HOME/build/emu -i {workload} {emu_args} {fork_args} {diff_args} {chiseldb_args}')
+        return_code = self.__exec_cmd(f'ulimit -s {32 * 1024}; {numa_args} $NOOP_HOME/build/emu -i {workload} {emu_args} {fork_args} {diff_args} {chiseldb_args}')
         return return_code
 
     def run_simv(self, workload):
