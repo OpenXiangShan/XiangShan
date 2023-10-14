@@ -655,8 +655,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
   // Prefetcher
   val StreamDTLBPortIndex = TlbStartVec(dtlb_ld_idx) + exuParameters.LduCnt
-  val PrefetcherDTLBPortIndex = 5
-  val L2toL1DLBPortIndex = 6
+  val PrefetcherDTLBPortIndex = TlbStartVec(dtlb_pf_idx)
+  val L2toL1DLBPortIndex = TlbStartVec(dtlb_pf_idx) + 1
   prefetcherOpt match {
   case Some(pf) => dtlb_reqs(PrefetcherDTLBPortIndex) <> pf.io.tlb_req
   case None =>
