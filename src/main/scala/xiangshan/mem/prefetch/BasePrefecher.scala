@@ -22,11 +22,16 @@ import org.chipsalliance.cde.config.Parameters
 import utility.MemReqSource
 import xiangshan._
 import xiangshan.cache.mmu.TlbRequestIO
-import xiangshan.mem.{LdPrefetchTrainBundle, StPrefetchTrainBundle, L1PrefetchReq}
+import xiangshan.mem.{L1PrefetchReq, L2PrefetchTrainBundle, LdPrefetchTrainBundle, StPrefetchTrainBundle}
 
 class L2PrefetchReq(implicit p: Parameters) extends XSBundle {
   val addr = UInt(PAddrBits.W)
   val source = UInt(MemReqSource.reqSourceBits.W)
+  val needT = Bool()
+}
+
+class L2PrefetchConnectIO(implicit p:Parameters) extends XSBundle{
+  val train = Flipped(ValidIO(new L2PrefetchTrainBundle()))
 }
 
 class PrefetcherIO()(implicit p: Parameters) extends XSBundle {
@@ -43,6 +48,7 @@ class PrefetchReqBundle()(implicit p: Parameters) extends XSBundle {
   val vaddr = UInt(VAddrBits.W)
   val paddr = UInt(PAddrBits.W)
   val pc    = UInt(VAddrBits.W)
+  val needT = Bool()
 }
 
 trait PrefetcherParams

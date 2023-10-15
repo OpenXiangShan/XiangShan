@@ -1166,6 +1166,7 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   io.l2_req.valid := pf_filter.io.l2_pf_addr.valid && io.enable && is_valid_address
   io.l2_req.bits.addr := pf_filter.io.l2_pf_addr.bits
   io.l2_req.bits.source := MemReqSource.Prefetch2L2SMS.id.U
+  io.l2_req.bits.needT := false.B
 
   // for now, sms will not send l1 prefetch requests
   io.l1_req.bits.paddr := pf_filter.io.l2_pf_addr.bits

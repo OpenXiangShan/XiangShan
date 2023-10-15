@@ -190,9 +190,15 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       core.module.io.l2PfqBusy := false.B
       core.module.io.debugTopDown.l2MissMatch := l2cache.get.module.io.debugTopDown.l2MissMatch.head
       l2cache.get.module.io.debugTopDown.robHeadPaddr.head := core.module.io.debugTopDown.robHeadPaddr
+
+      core.module.io.l2PfConn.train.valid := l2cache.get.module.io.l2toL1PfConn.train.valid
+      core.module.io.l2PfConn.train.bits.vaddr := l2cache.get.module.io.l2toL1PfConn.train.bits.vaddr
+      core.module.io.l2PfConn.train.bits.paddr := l2cache.get.module.io.l2toL1PfConn.train.bits.addr // FIXME lyq: it is no need paddr in bop, you can delete it to save the bandwidth
+      core.module.io.l2PfConn.train.bits.needT := l2cache.get.module.io.l2toL1PfConn.train.bits.needT
     } else {
       misc.module.beu_errors.l2 <> 0.U.asTypeOf(misc.module.beu_errors.l2)
       core.module.io.l2_hint.bits.sourceId := DontCare
+      core.module.io.l2PfConn := DontCare
       core.module.io.l2_hint.valid := false.B
       core.module.io.l2PfqBusy := false.B
       core.module.io.debugTopDown.l2MissMatch := false.B

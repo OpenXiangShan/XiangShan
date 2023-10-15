@@ -169,12 +169,29 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     res.vaddr := this.vaddr
     res.paddr := this.paddr
     res.pc    := this.uop.cf.pc
+    res.needT := false.B
 
     res
   }
 }
 
 class StPrefetchTrainBundle(implicit p: Parameters) extends LdPrefetchTrainBundle {}
+
+class L2PrefetchTrainBundle(implicit p: Parameters) extends XSBundle with HasDCacheParameters {
+  val vaddr = UInt(VAddrBits.W)
+  val paddr = UInt(PAddrBits.W)
+  val needT = Bool()
+  
+  def asPrefetchReqBundle(): PrefetchReqBundle = {
+    val res = Wire(new PrefetchReqBundle)
+    res.vaddr := this.vaddr
+    res.paddr := this.paddr
+    res.pc    := 0.U
+    res.needT := false.B
+
+    res
+  }
+}
 
 class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
   // load inst replay informations

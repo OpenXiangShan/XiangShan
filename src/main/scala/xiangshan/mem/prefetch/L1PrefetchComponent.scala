@@ -541,6 +541,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
       L1_HW_PREFETCH_STRIDE -> MemReqSource.Prefetch2L2Stride.id.U,
       L1_HW_PREFETCH_STREAM -> MemReqSource.Prefetch2L2Stream.id.U
     ))
+    l2_pf_req_arb.io.in(i).bits.needT := false.B
   }
 
   when(l2_pf_req_arb.io.out.valid) {

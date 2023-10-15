@@ -30,6 +30,7 @@ import xiangshan.backend._
 import xiangshan.backend.exu.{ExuConfig, Wb2Ctrl, WbArbiterWrapper}
 import xiangshan.frontend._
 import xiangshan.mem.L1PrefetchFuzzer
+import xiangshan.mem.prefetch.L2PrefetchConnectIO
 
 import scala.collection.mutable.ListBuffer
 
@@ -243,6 +244,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val beu_errors = Output(new XSL1BusErrors())
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val l2PfqBusy = Input(Bool())
+    val l2PfConn = new L2PrefetchConnectIO()
     val debugTopDown = new Bundle {
       val robHeadPaddr = Valid(UInt(PAddrBits.W))
       val l2MissMatch = Input(Bool())
@@ -443,6 +445,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.l2_hint.valid := io.l2_hint.valid
   memBlock.io.l2_hint.bits.sourceId := io.l2_hint.bits.sourceId
   memBlock.io.l2PfqBusy := io.l2PfqBusy
+  memBlock.io.l2PfConn <> io.l2PfConn
   memBlock.io.int2vlsu <> DontCare
   memBlock.io.vec2vlsu <> DontCare
   memBlock.io.vlsu2vec <> DontCare

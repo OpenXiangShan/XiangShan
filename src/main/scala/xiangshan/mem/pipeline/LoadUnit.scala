@@ -123,7 +123,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
     // prefetch
     val prefetch_train            = ValidIO(new LdPrefetchTrainBundle()) // provide prefetch info to sms
-    val prefetch_train_l1         = ValidIO(new LdPrefetchTrainBundle()) // provide prefetch info to stream & stride
+    val prefetch_train_l1         = ValidIO(new LdPrefetchTrainBundle()) // provide prefetch info to stream & stride & bop in l1
     val prefetch_req              = Flipped(ValidIO(new L1PrefetchReq)) // hardware prefetch to l1 cache req
     val canAcceptLowConfPrefetch  = Output(Bool())
     val canAcceptHighConfPrefetch = Output(Bool())
@@ -948,7 +948,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   ) && (s2_valid && !s2_out.rep_info.need_rep && !s2_mmio)
   io.fast_uop.bits := RegNext(s1_out.uop)
 
-  //
   io.s2_ptr_chasing                    := RegEnable(s1_try_ptr_chasing && !s1_cancel_ptr_chasing, false.B, s1_fire)
 
   io.prefetch_train.valid              := s2_valid && !s2_actually_mmio && !s2_in.tlbMiss
