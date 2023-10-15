@@ -14,6 +14,7 @@ import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.implicitCast._
 
 class WbFuBusyTable(bp: BackendParams)(implicit  p: Parameters) extends LazyModule {
+  override def shouldBeInlined: Boolean = false
   implicit val params: BackendParams = bp
   lazy val module = new WbFuBusyTableImp(this)
 }

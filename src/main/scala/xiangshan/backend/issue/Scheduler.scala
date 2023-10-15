@@ -20,6 +20,8 @@ case class VfScheduler() extends SchedulerType
 case class NoScheduler() extends SchedulerType
 
 class Scheduler(val params: SchdBlockParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
+  override def shouldBeInlined: Boolean = false
+
   val numIntStateWrite = backendParams.numPregWb(IntData())
   val numVfStateWrite = backendParams.numPregWb(VecData())
 

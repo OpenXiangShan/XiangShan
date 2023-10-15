@@ -30,6 +30,8 @@ class CancelNetworkIO(backendParams: BackendParams)(implicit p: Parameters) exte
 }
 
 class CancelNetwork(backendParams: BackendParams)(implicit p: Parameters) extends LazyModule {
+  override def shouldBeInlined: Boolean = false
+
   lazy val module = new CancelNetworkImp(backendParams, this)
 }
 

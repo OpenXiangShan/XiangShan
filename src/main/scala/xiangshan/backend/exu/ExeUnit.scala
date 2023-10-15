@@ -38,6 +38,8 @@ class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle 
 }
 
 class ExeUnit(exuParams: ExeUnitParams)(implicit p: Parameters) extends LazyModule {
+  override def shouldBeInlined: Boolean = false
+
   lazy val module = new ExeUnitImp(this)(p, exuParams)
 }
 

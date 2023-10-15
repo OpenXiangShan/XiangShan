@@ -9,6 +9,8 @@ import xiangshan.backend.datapath.DataConfig.VAddrData
 import xiangshan.frontend.{FtqPtr, FtqToCtrlIO, Ftq_RF_Components}
 
 class PcTargetMem(params: BackendParams)(implicit p: Parameters) extends LazyModule {
+  override def shouldBeInlined: Boolean = false
+
   lazy val module = new PcTargetMemImp(this)(p, params)
 }
 

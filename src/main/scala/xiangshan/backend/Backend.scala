@@ -24,6 +24,8 @@ import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyModule
   with HasXSParameter {
 
+  override def shouldBeInlined: Boolean = false
+
   /* Only update the idx in mem-scheduler here
    * Idx in other schedulers can be updated the same way if needed
    *

@@ -16,6 +16,8 @@ import xiangshan.backend.datapath.DataSource
 import scala.collection._
 
 class Dispatch2Iq(val schdBlockParams : SchdBlockParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
+  override def shouldBeInlined: Boolean = false
+
   val issueBlockParams = schdBlockParams.issueBlockParams
 
   val numIn = schdBlockParams.numUopIn

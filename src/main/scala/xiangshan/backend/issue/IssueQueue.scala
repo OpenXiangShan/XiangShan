@@ -16,6 +16,8 @@ import xiangshan.mem.{MemWaitUpdateReq, SqPtr}
 import xiangshan.backend.datapath.NewPipelineConnect
 
 class IssueQueue(params: IssueBlockParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
+  override def shouldBeInlined: Boolean = false
+
   implicit val iqParams = params
   lazy val module: IssueQueueImp = iqParams.schdType match {
     case IntScheduler() => new IssueQueueIntImp(this)
