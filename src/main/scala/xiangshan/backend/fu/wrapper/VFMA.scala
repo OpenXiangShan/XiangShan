@@ -8,6 +8,7 @@ import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.backend.fu.vector.utils.VecDataSplitModule
 import xiangshan.backend.fu.vector.{Mgu, VecPipedFuncUnit}
+import xiangshan.ExceptionNO
 import yunsuan.VfpuType
 import yunsuan.VfmaType
 import yunsuan.vector.VectorFloatFMA
@@ -146,5 +147,5 @@ class VFMA(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   mgu.io.in.info.narrow := outVecCtrl.isNarrow
   mgu.io.in.info.dstMask := outVecCtrl.isDstMask
   io.out.bits.res.data := mgu.io.out.vd
-
+  io.out.bits.ctrl.exceptionVec.get(ExceptionNO.illegalInstr) := mgu.io.out.illegal
 }

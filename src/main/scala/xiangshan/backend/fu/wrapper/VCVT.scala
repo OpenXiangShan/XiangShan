@@ -7,6 +7,7 @@ import chisel3.util.experimental.decode._
 import utils.XSError
 import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.vector.{Mgu, VecPipedFuncUnit}
+import xiangshan.ExceptionNO
 import yunsuan.VfpuType
 import yunsuan.vector.VectorConvert.VectorCvt
 
@@ -143,6 +144,7 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   mgu.io.in.info.dstMask := outVecCtrl.isDstMask
 
   io.out.bits.res.data := mgu.io.out.vd
+  io.out.bits.ctrl.exceptionVec.get(ExceptionNO.illegalInstr) := mgu.io.out.illegal
 }
 
 class VectorCvtTopIO(vlen: Int, xlen: Int) extends Bundle{

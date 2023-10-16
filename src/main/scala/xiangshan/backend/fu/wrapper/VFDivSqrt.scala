@@ -9,6 +9,7 @@ import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.backend.fu.vector.utils.VecDataSplitModule
 import xiangshan.backend.fu.vector.{Mgu, VecNonPipedFuncUnit}
 import xiangshan.backend.rob.RobPtr
+import xiangshan.ExceptionNO
 import yunsuan.VfpuType
 import yunsuan.vector.VectorFloatDivider
 
@@ -143,5 +144,5 @@ class VFDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends VecNonPipedFuncUn
   mgu.io.in.info.narrow := outVecCtrl.isNarrow
   mgu.io.in.info.dstMask := outVecCtrl.isDstMask
   io.out.bits.res.data := mgu.io.out.vd
-
+  io.out.bits.ctrl.exceptionVec.get(ExceptionNO.illegalInstr) := mgu.io.out.illegal
 }

@@ -8,6 +8,7 @@ import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.vector.Bundles.{VLmul, VSew, ma}
 import xiangshan.backend.fu.vector.utils.VecDataSplitModule
 import xiangshan.backend.fu.vector.{Mgu, VecInfo, VecPipedFuncUnit}
+import xiangshan.ExceptionNO
 import yunsuan.{VfaluType, VfpuType}
 import yunsuan.vector.VectorFloatAdder
 
@@ -362,6 +363,7 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   val isCmp = outVecCtrl.fpu.isFpToVecInst && (fpCmpFuOpType.map(_ === outCtrl.fuOpType).reduce(_|_))
   resultFpMask := Mux(isFclass || isCmp, Fill(16, 1.U(1.W)), Fill(VLEN, 1.U(1.W)))
   io.out.bits.res.data := mgu.io.out.vd & resultFpMask
+  io.out.bits.ctrl.exceptionVec.get(ExceptionNO.illegalInstr) := mgu.io.out.illegal
 
 }
 

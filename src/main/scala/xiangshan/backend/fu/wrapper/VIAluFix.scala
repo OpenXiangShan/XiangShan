@@ -12,6 +12,7 @@ import xiangshan.backend.fu.vector.{Mgu, Mgtu, VecPipedFuncUnit}
 import xiangshan.backend.fu.vector.Utils.VecDataToMaskDataVec
 import xiangshan.backend.fu.vector.utils.VecDataSplitModule
 import xiangshan.backend.fu.{FuConfig, FuType}
+import xiangshan.ExceptionNO
 import yunsuan.{OpType, VialuFixType}
 import yunsuan.vector.alu.{VIntFixpAlu64b, VIntFixpDecode, VIntFixpTable}
 import yunsuan.encoding.{VdType, Vs1IntType, Vs2IntType}
@@ -296,6 +297,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
 
   io.out.bits.res.data := Mux(outVecCtrl.isOpMask, mgtu.io.out.vd, mgu.io.out.vd)
   io.out.bits.res.vxsat.get := (Cat(vIntFixpAlus.map(_.io.vxsat)) & mgu.io.out.asUInt).orR
+  io.out.bits.ctrl.exceptionVec.get(ExceptionNO.illegalInstr) := mgu.io.out.illegal
 
   // util function
   def splitMask(maskIn: UInt, sew: SewOH): Vec[UInt] = {

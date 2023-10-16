@@ -8,6 +8,7 @@ import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.backend.fu.vector.utils.VecDataSplitModule
 import xiangshan.backend.fu.vector.{Mgu, Utils, VecPipedFuncUnit, VecSrcTypeModule}
+import xiangshan.ExceptionNO
 import yunsuan.VialuFixType
 import yunsuan.encoding.Opcode.VimacOpcode
 import yunsuan.encoding.{VdType, Vs1IntType, Vs2IntType}
@@ -143,4 +144,5 @@ class VIMacU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg
 
   io.out.bits.res.data := mgu.io.out.vd
   io.out.bits.res.vxsat.get := (Cat(vimacs.map(_.io.vxsat)) & mgu.io.out.keep).orR
+  io.out.bits.ctrl.exceptionVec.get(ExceptionNO.illegalInstr) := mgu.io.out.illegal
 }

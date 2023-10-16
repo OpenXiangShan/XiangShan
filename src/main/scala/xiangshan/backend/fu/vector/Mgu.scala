@@ -55,9 +55,7 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
   private val uvlMax = numBytes.U >> info.eew
   private val uvlMaxForAssert = numBytes.U >> info.vsew
   private val vlMaxForAssert = Mux(io.in.info.vlmul(2), uvlMaxForAssert >> (-io.in.info.vlmul), uvlMaxForAssert << io.in.info.vlmul).asUInt
-  when(info.valid){
-    assert(info.vl <= vlMaxForAssert, "mgu's vl must <= vlmax")
-  }
+
   private val maskDataVec: Vec[UInt] = VecDataToMaskDataVec(in.mask, info.eew)
   private val maskUsed = maskDataVec(vdIdx)
 
@@ -125,6 +123,7 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
     narrowNeedCat -> narrowResCat,
   ))
   io.out.keep := keepEn
+  io.out.illegal := (info.vl > vlMaxForAssert) && info.valid
 
   io.debugOnly.vstartMapVdIdx := vstartMapVdIdx
   io.debugOnly.vlMapVdIdx := vlMapVdIdx
@@ -154,6 +153,7 @@ class MguIO(vlen: Int)(implicit p: Parameters) extends Bundle {
   val out = new Bundle {
     val vd = Output(UInt(vlen.W))
     val keep = Output(UInt((vlen / 8).W))
+    val illegal = Output(Bool())
   }
   val debugOnly = Output(new Bundle {
     val vstartMapVdIdx = UInt()
