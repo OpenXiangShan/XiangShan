@@ -1002,7 +1002,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val wen = valid && CSROpType.needAccess(func) && ((addr=/=Satp.U && addr =/= Vsatp.U) || satpLegalMode)
   val dcsrPermitted = dcsrPermissionCheck(addr, false.B, debugMode)
   val triggerPermitted = triggerPermissionCheck(addr, true.B, debugMode) // todo dmode
-  val HasH = (HasHExtension == true).asBool()
+  val HasH = (HasHExtension == true).asBool
   val csrAccess = csrAccessPermissionCheck(addr, false.B, privilegeMode, virtMode, HasH)
   val modePermitted = csrAccess === 0.U && dcsrPermitted && triggerPermitted  
   val perfcntPermitted = perfcntPermissionCheck(addr, privilegeMode, mcounteren, scounteren)
@@ -1428,10 +1428,10 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
       virtMode := true.B
       privilegeMode := ModeS
     }.elsewhen (delegS) {
-      val virt = Mux(mstatusOld.mprv.asBool(), mstatusOld.mpv, virtMode)
+      val virt = Mux(mstatusOld.mprv.asBool, mstatusOld.mpv, virtMode)
       // to do hld st
       hstatusNew.gva := (hasInstGuestPageFault || hasLoadGuestPageFault || hasStoreGuestPageFault ||
-                      ((virt.asBool() || isHyperInst) && ((raiseException && 0.U <= exceptionNO && exceptionNO <= 7.U && exceptionNO =/= 2.U)
+                      ((virt.asBool || isHyperInst) && ((raiseException && 0.U <= exceptionNO && exceptionNO <= 7.U && exceptionNO =/= 2.U)
                       || hasInstrPageFault || hasLoadPageFault || hasStorePageFault)))
       hstatusNew.spv := virtMode
       when(virtMode){
@@ -1447,10 +1447,10 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
       when (clearTval) { stval := 0.U }
       when (clearTval_h) {htval := 0.U}
     }.otherwise {
-      val virt = Mux(mstatusOld.mprv.asBool(), mstatusOld.mpv, virtMode)
+      val virt = Mux(mstatusOld.mprv.asBool, mstatusOld.mpv, virtMode)
       // to do hld st
       mstatusNew.gva := (hasInstGuestPageFault || hasLoadGuestPageFault || hasStoreGuestPageFault ||
-      ((virt.asBool() || isHyperInst) && ((raiseException && 0.U <= exceptionNO && exceptionNO <= 7.U && exceptionNO =/= 2.U)
+      ((virt.asBool || isHyperInst) && ((raiseException && 0.U <= exceptionNO && exceptionNO <= 7.U && exceptionNO =/= 2.U)
         || hasInstrPageFault || hasLoadPageFault || hasStorePageFault)))
       mstatusNew.mpv := virtMode
       virtMode := false.B
@@ -1555,7 +1555,6 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
     val difftest = DifftestModule(new DiffHCSRState)
-    difftest.clock := clock
     difftest.coreid := csrio.hartId
     difftest.virtMode := virtMode
     difftest.mtval2 := mtval2

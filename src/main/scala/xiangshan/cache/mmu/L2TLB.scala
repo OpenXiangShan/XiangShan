@@ -378,7 +378,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val refill_from_llptw = mem_resp_from_llptw
   val refill_from_ptw = mem_resp_from_ptw
   val refill_from_hptw = mem_resp_from_hptw
-  val refill_level = Mux(refill_from_llptw, 2.U, Mux(refill_from_ptw, RegEnable(ptw.io.refill.level, init = 0.U, ptw.io.mem.req.fire()), RegEnable(hptw.io.refill.level, init = 0.U, hptw.io.mem.req.fire())))
+  val refill_level = Mux(refill_from_llptw, 2.U, Mux(refill_from_ptw, RegEnable(ptw.io.refill.level, 0.U, ptw.io.mem.req.fire), RegEnable(hptw.io.refill.level, 0.U, hptw.io.mem.req.fire)))
   val refill_valid = mem_resp_done && !flush && !flush_latch(mem.d.bits.source)
 
   cache.io.refill.valid := RegNext(refill_valid, false.B)

@@ -747,13 +747,13 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
       when (sfence_dup(0).bits.rs2) {
         // all va && all asid
         l2v := l2v & ~l2hhit
-        l1v := l1v & ~(l1hhit & VecInit(UIntToOH(l1vmidhit).asBools().map{a => io.csr_dup(0).priv.virt && a || !io.csr_dup(0).priv.virt}).asUInt())
-        spv := spv & ~(l2hhit & VecInit(UIntToOH(spvmidhit).asBools().map{a => io.csr_dup(0).priv.virt && a || !io.csr_dup(0).priv.virt}).asUInt())
+        l1v := l1v & ~(l1hhit & VecInit(UIntToOH(l1vmidhit).asBools.map{a => io.csr_dup(0).priv.virt && a || !io.csr_dup(0).priv.virt}).asUInt)
+        spv := spv & ~(l2hhit & VecInit(UIntToOH(spvmidhit).asBools.map{a => io.csr_dup(0).priv.virt && a || !io.csr_dup(0).priv.virt}).asUInt)
       } .otherwise {
         // all va && specific asid except global
         l2v := l2v & (l2g | ~l2hhit)
-        l1v := l1v & ~(~l1g & l1hhit & l1asidhit & VecInit(UIntToOH(l1vmidhit).asBools().map{a => io.csr_dup(0).priv.virt && a || !io.csr_dup(0).priv.virt}).asUInt())
-        spv := spv & ~(~spg & sphhit & spasidhit & VecInit(UIntToOH(spvmidhit).asBools().map{a => io.csr_dup(0).priv.virt && a || !io.csr_dup(0).priv.virt}).asUInt())
+        l1v := l1v & ~(~l1g & l1hhit & l1asidhit & VecInit(UIntToOH(l1vmidhit).asBools.map{a => io.csr_dup(0).priv.virt && a || !io.csr_dup(0).priv.virt}).asUInt)
+        spv := spv & ~(~spg & sphhit & spasidhit & VecInit(UIntToOH(spvmidhit).asBools.map{a => io.csr_dup(0).priv.virt && a || !io.csr_dup(0).priv.virt}).asUInt)
       }
     } .otherwise {
       when (sfence_dup(0).bits.rs2) {
