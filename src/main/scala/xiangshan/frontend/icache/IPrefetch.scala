@@ -267,8 +267,8 @@ class IPredfetchIO(implicit p: Parameters) extends IPrefetchBundle {
   val ftqReq              = Flipped(new FtqPrefechBundle)
   val iTLBInter           = new TlbRequestIO
   val pmp                 = new ICachePMPBundle
-  val metaReadReq         = Decoupled(new ICacheMetaReadReqBundle)
-  val metaReadResp        = Input(new ICacheMetaReadRespBundle)
+  val metaReadReq         = Decoupled(new PrefetchMetaReadBundle)
+  val metaReadResp        = Input(new PrefetchMetaRespBundle)
   val prefetchReq         = DecoupledIO(new PrefetchReq)
 
   val IPFFilterRead       = Flipped(new IPFBufferFilterRead)
@@ -822,8 +822,8 @@ class FDIPPrefetchIO(edge: TLEdgeOut)(implicit p: Parameters) extends IPrefetchB
   val ftqReq              = Flipped(new FtqPrefechBundle)
   val iTLBInter           = new TlbRequestIO
   val pmp                 = new ICachePMPBundle
-  val metaReadReq         = Decoupled(new ICacheMetaReadReqBundle)
-  val metaReadResp        = Input(new ICacheMetaReadRespBundle)
+  val metaReadReq         = Decoupled(new PrefetchMetaReadBundle)
+  val metaReadResp        = Input(new PrefetchMetaRespBundle)
 
   val ICacheMissUnitInfo  = Flipped(new ICacheMissUnitInfo)
   val ICacheMainPipeInfo  = Flipped(new ICacheMainPipeInfo)

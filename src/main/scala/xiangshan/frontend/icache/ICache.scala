@@ -548,7 +548,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   val metaArray         = Module(new ICacheMetaArray)
   val dataArray         = Module(new ICacheDataArray)
-  val prefetchMetaArray = Module(new ICacheBankedMetaArray(prefetchPipeNum)) // need add 1 port for IPF filter
+  val prefetchMetaArray = Module(new ICacheMetaArrayNoBanked)
   val mainPipe          = Module(new ICacheMainPipe)
   val missUnit          = Module(new ICacheMissUnit(edge))
   val fdipPrefetch      = Module(new FDIPPrefetch(edge))
@@ -556,8 +556,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   fdipPrefetch.io.hartId              := io.hartId
   fdipPrefetch.io.fencei              := io.fencei
   fdipPrefetch.io.ftqReq              <> io.prefetch
-  fdipPrefetch.io.metaReadReq         <> prefetchMetaArray.io.read(0)
-  fdipPrefetch.io.metaReadResp        <> prefetchMetaArray.io.readResp(0)
+  fdipPrefetch.io.metaReadReq         <> prefetchMetaArray.io.read
+  fdipPrefetch.io.metaReadResp        <> prefetchMetaArray.io.readResp
   fdipPrefetch.io.ICacheMissUnitInfo  <> missUnit.io.ICacheMissUnitInfo
   fdipPrefetch.io.ICacheMainPipeInfo  <> mainPipe.io.ICacheMainPipeInfo
   fdipPrefetch.io.IPFBufferRead       <> mainPipe.io.IPFBufferRead
