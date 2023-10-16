@@ -198,7 +198,7 @@ class VSFQFeedback (implicit p: Parameters) extends XSBundle {
   //val flushState = Bool()
   val sourceType = VSFQFeedbackType()
   //val dataInvalidSqIdx = new SqPtr
-  val paddr = UInt(AddrBits.W)
+  val paddr = UInt(PAddrBits.W)
 }
 
 class VecStorePipeBundle(implicit p: Parameters) extends ExuInput(isVpu = true) {
@@ -219,7 +219,7 @@ class VsFlowBundle(implicit p: Parameters) extends VecFlowBundle {
 
 class VecStoreFlowEntry (implicit p: Parameters) extends VecFlowBundle {
   val uopQueuePtr = new VsUopPtr
-  val paddr = UInt(AddrBits.W)
+  val paddr = UInt(PAddrBits.W)
   val isLastElem = Bool()
 
   def toPipeBundle(thisPtr: VsFlowPtr): VecStorePipeBundle = {
@@ -232,6 +232,14 @@ class VecStoreFlowEntry (implicit p: Parameters) extends VecFlowBundle {
     // result.fqIdx                := thisPtr.value
     result.flowPtr              := thisPtr
     result
+  }
+
+  def needForward(forward: LoadForwardQueryIO): Bool = {
+    // ! MAGIC NUM
+    val vaddrMatch = this.vaddr(VAddrBits - 1, 4) === forward.vaddr(VAddrBits - 1, 4)
+    val paddrMatch = this.paddr(PAddrBits - 1, 4) === forward.paddr(PAddrBits - 1, 4)
+    val maskMatch = (this.mask & forward.mask) =/= 0.U
+    vaddrMatch && paddrMatch && maskMatch
   }
 }
 
@@ -311,8 +319,8 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
   val dataSecondPtr = RegInit(VecInit((0 until VecStorePipelineWidth).map(_.U.asTypeOf(new VsFlowDataPtr))))
 
   /* Redirect */
-  val flowNeedFlush = Wire(Vec(VlFlowSize, Bool()))
-  val flowNeedCancel = Wire(Vec(VlFlowSize, Bool()))
+  val flowNeedFlush = Wire(Vec(VsFlowSize, Bool()))
+  val flowNeedCancel = Wire(Vec(VsFlowSize, Bool()))
   val flowCancelCount = PopCount(flowNeedCancel)
 
   /* Enqueue logic */
@@ -548,6 +556,37 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
       io.sqRelease.valid := true.B
       io.sqRelease.bits := flowQueueEntries(deqPtr(i).value).uop.sqIdx
     }
+  }
+
+  // Forward
+  for (thisForward <- io.forward) {
+    // for every forward query
+    // val flowNeedForward = Wire(Vec(VsFlowSize, Bool()))
+    val flowNeedForward = flowQueueEntries.map(_.needForward(thisForward))
+    val flowForwardMask = flowQueueEntries.map(_.mask & thisForward.mask)
+    val doForward = flowNeedForward.reduce(_ || _)
+    
+    val forwardMask = MuxCase(0.U, (flowNeedForward zip flowForwardMask))
+
+    val dataInvalid = Wire(Bool())
+    val matchInvalid = Wire(Bool())
+    val addrInvalid = Wire(Bool())
+
+    when (doForward) {
+      dataInvalid := true.B
+      matchInvalid := false.B
+      addrInvalid := false.B
+    } .otherwise {
+      dataInvalid := false.B
+      matchInvalid := false.B
+      addrInvalid := false.B
+    }
+
+    thisForward.forwardMaskFast := forwardMask.asBools
+    thisForward.forwardMask := RegNext(thisForward.forwardMaskFast)
+    thisForward.dataInvalid := RegNext(dataInvalid)
+    thisForward.matchInvalid := RegNext(matchInvalid)
+    thisForward.addrInvalid := RegNext(addrInvalid)
   }
 
 
