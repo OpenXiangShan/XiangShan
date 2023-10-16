@@ -21,7 +21,7 @@ class Dispatch2Iq(val schdBlockParams : SchdBlockParams)(implicit p: Parameters)
   val issueBlockParams = schdBlockParams.issueBlockParams
 
   val numIn = schdBlockParams.numUopIn
-  require(issueBlockParams.size > 0 && issueBlockParams.forall(_.numEnq == issueBlockParams.head.numEnq), "issueBlock is null or the enq size of all issueBlock not be the same all\n")
+  require(issueBlockParams.size > 0, "issueBlock is null or the enq size of all issueBlock not be the same all\n")
   val numOut = issueBlockParams.head.numEnq
 
   // Deq for std's IQ is not assigned in Dispatch2Iq, so add one more src for it.

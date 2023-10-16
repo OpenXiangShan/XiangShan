@@ -2,7 +2,7 @@ package xiangshan.backend.datapath
 
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
-import chisel3.util.{Arbiter, DecoupledIO, Valid}
+import chisel3.util.{Arbiter, DecoupledIO, RRArbiter, Valid}
 import utils.SeqUtils.{MixedVec3, Seq3}
 import utils.{OptionWrapper, SeqUtils}
 import xiangshan.backend.BackendParams
@@ -52,10 +52,10 @@ abstract class RFReadArbiterBase(val params: RFRdArbParams)(implicit p: Paramete
     .groupBy(_.bits.rdCfg.get.port)
     .map(x => (x._1, x._2.sortBy(_.bits.rdCfg.get.priority).toSeq))
 
-  protected val arbiters: Seq[Option[Arbiter[RFArbiterBundle]]] = portRange.map { portIdx =>
+  protected val arbiters: Seq[Option[RRArbiter[RFArbiterBundle]]] = portRange.map { portIdx =>
     OptionWrapper(
       inGroup.isDefinedAt(portIdx),
-      Module(new Arbiter(
+      Module(new RRArbiter(
         new RFArbiterBundle(pregWidth),
         inGroup(portIdx).size
       ))
