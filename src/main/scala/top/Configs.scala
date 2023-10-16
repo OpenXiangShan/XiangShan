@@ -248,7 +248,9 @@ class WithNKBL2
         )),
         reqField = Seq(utility.ReqSourceField()),
         echoField = Seq(huancun.DirtyField()),
-        prefetch = Some(coupledL2.prefetch.PrefetchReceiverParams())
+        prefetch = Some(coupledL2.prefetch.PrefetchReceiverParams()),
+        enablePerf = !site(DebugOptionsKey).FPGAPlatform,
+        elaboratedTopDown = !site(DebugOptionsKey).FPGAPlatform
       )),
       L2NBanks = banks
     ))
