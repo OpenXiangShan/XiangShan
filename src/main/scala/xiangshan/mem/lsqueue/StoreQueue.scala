@@ -16,17 +16,16 @@
 
 package xiangshan.mem
 
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils._
-import utility._
-import xiangshan._
-import xiangshan.cache._
-import xiangshan.cache.{DCacheWordIO, DCacheLineIO, MemoryOpConstants}
-import xiangshan.backend.rob.{RobLsqIO, RobPtr}
 import difftest._
-import device.RAMHelper
+import difftest.common.DifftestMem
+import org.chipsalliance.cde.config.Parameters
+import utility._
+import utils._
+import xiangshan._
+import xiangshan.backend.rob.RobLsqIO
+import xiangshan.cache._
 
 class SqPtr(implicit p: Parameters) extends CircularQueuePtr[SqPtr](
   p => p(XSCoreParamsKey).StoreQueueSize
@@ -746,14 +745,14 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   if (coreParams.dcacheParametersOpt.isEmpty) {
     for (i <- 0 until EnsbufferWidth) {
       val ptr = deqPtrExt(i).value
-      val fakeRAM = Module(new RAMHelper(64L * 1024 * 1024 * 1024))
-      fakeRAM.clk   := clock
-      fakeRAM.en    := allocated(ptr) && committed(ptr) && !mmio(ptr)
-      fakeRAM.rIdx  := 0.U
-      fakeRAM.wIdx  := (paddrModule.io.rdata(i) - "h80000000".U) >> 3
-      fakeRAM.wdata := Mux(paddrModule.io.rdata(i)(3), dataModule.io.rdata(i).data(127,64), dataModule.io.rdata(i).data(63,0))
-      fakeRAM.wmask := Mux(paddrModule.io.rdata(i)(3), MaskExpand(dataModule.io.rdata(i).mask(15,8)), MaskExpand(dataModule.io.rdata(i).mask(7,0)))
-      fakeRAM.wen   := allocated(ptr) && committed(ptr) && !mmio(ptr)
+      val ram = DifftestMem(64L * 1024 * 1024 * 1024, 8)
+      val wen = allocated(ptr) && committed(ptr) && !mmio(ptr)
+      val waddr = ((paddrModule.io.rdata(i) - "h80000000".U) >> 3).asUInt
+      val wdata = Mux(paddrModule.io.rdata(i)(3), dataModule.io.rdata(i).data(127, 64), dataModule.io.rdata(i).data(63, 0))
+      val wmask = Mux(paddrModule.io.rdata(i)(3), dataModule.io.rdata(i).mask(15, 8), dataModule.io.rdata(i).mask(7, 0))
+      when (wen) {
+        ram.write(waddr, wdata.asTypeOf(Vec(8, UInt(8.W))), wmask.asBools)
+      }
     }
   }
 
