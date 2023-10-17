@@ -608,7 +608,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   XSPerfAccumulate("enq_fire_cnt", PopCount(io.enq.map(_.fire)))
   // valid count
   XSPerfHistogram("enq_entry_valid_cnt", enqEntryValidCnt, true.B, 0, params.numEnq + 1)
-  XSPerfHistogram("other_entry_valid_cnt", othersValidCnt, true.B, 0, params.numEntries - params.numEnq + 1, step = params.numEntries / 8)
+  XSPerfHistogram("other_entry_valid_cnt", othersValidCnt, true.B, 0, params.numEntries - params.numEnq + 1)
   XSPerfHistogram("valid_cnt", PopCount(validVec), true.B, 0, params.numEntries + 1)
   // ready instr count
   private val readyEntriesCnt = PopCount(validVec.zip(canIssueVec).map(x => x._1 && x._2))

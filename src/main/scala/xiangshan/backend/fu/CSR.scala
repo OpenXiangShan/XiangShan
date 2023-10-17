@@ -29,6 +29,8 @@ import xiangshan._
 import xiangshan.backend.fu.util._
 import xiangshan.cache._
 import xiangshan.backend.Bundles.ExceptionInfo
+import xiangshan.backend.fu.util.CSR.CSRNamedConstant.ContextStatus
+import utils.MathUtils.{BigIntGenMask, BigIntNot}
 
 // Trigger Tdata1 bundles
 trait HasTriggerConst {
@@ -409,11 +411,11 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     mhartid := csrio.hartId
   }
   val mconfigptr = RegInit(UInt(XLEN.W), 0.U) // the read-only pointer pointing to the platform config structure, 0 for not supported.
-  val mstatus = RegInit("ha00002000".U(XLEN.W))
+  val mstatus = RegInit("ha00002200".U(XLEN.W))
 
   // mstatus Value Table
-  // | sd   |
-  // | pad1 |
+  // | sd   | Read Only
+  // | pad1 | WPRI
   // | sxl  | hardlinked to 10, use 00 to pass xv6 test
   // | uxl  | hardlinked to 10
   // | pad0 |
@@ -426,7 +428,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   // | xs   | 00 |
   // | fs   | 01 |
   // | mpp  | 00 |
-  // | vs  | 00 |
+  // | vs   | 01 |
   // | spp  | 0 |
   // | pie  | 0000 | pie.h is used as UBE
   // | ie   | 0000 | uie hardlinked to 0, as N ext is not implemented
@@ -434,16 +436,20 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val mstatusStruct = mstatus.asTypeOf(new MstatusStruct)
   def mstatusUpdateSideEffect(mstatus: UInt): UInt = {
     val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
-    val mstatusNew = Cat(mstatusOld.xs === "b11".U || mstatusOld.fs === "b11".U, mstatus(XLEN-2, 0))
+    // Cat(sd, other)
+    val mstatusNew = Cat(
+      mstatusOld.xs === ContextStatus.dirty || mstatusOld.fs === ContextStatus.dirty || mstatusOld.vs === ContextStatus.dirty,
+      mstatus(XLEN-2, 0)
+    )
     mstatusNew
   }
 
   val mstatusWMask = (~ZeroExt((
-    GenMask(XLEN - 2, 36) | // WPRI
+    GenMask(63)           | // SD is read-only
+    GenMask(62, 36)       | // WPRI
     GenMask(35, 32)       | // SXL and UXL cannot be changed
     GenMask(31, 23)       | // WPRI
     GenMask(16, 15)       | // XS is read-only
-    GenMask(10, 9)        | // VS, not supported yet
     GenMask(6)            | // UBE, always little-endian (0)
     GenMask(4)            | // WPRI
     GenMask(2)            | // WPRI
@@ -462,16 +468,39 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   // Superviser-Level CSRs
 
-  // val sstatus = RegInit(UInt(XLEN.W), "h00000000".U)
-  val sstatusWmask = "hc6122".U(XLEN.W)
-  // Sstatus Write Mask
-  // -------------------------------------------------------
-  //    19           9   5     2
-  // 0  1100 0000 0001 0010 0010
-  // 0  c    0    1    2    2
-  // -------------------------------------------------------
-  val sstatusRmask = sstatusWmask | "h8000000300018000".U
-  // Sstatus Read Mask = (SSTATUS_WMASK | (0xf << 13) | (1ull << 63) | (3ull << 32))
+  val sstatusWNmask: BigInt = (
+    BigIntGenMask(63)     | // SD is read-only
+    BigIntGenMask(62, 34) | // WPRI
+    BigIntGenMask(33, 32) | // UXL is hard-wired to 64(b10)
+    BigIntGenMask(31, 20) | // WPRI
+    BigIntGenMask(17)     | // WPRI
+    BigIntGenMask(16, 15) | // XS is read-only to zero
+    BigIntGenMask(12, 11) | // WPRI
+    BigIntGenMask(7)      | // WPRI
+    BigIntGenMask(6)      | // UBE is always little-endian (0)
+    BigIntGenMask(4, 2)   | // WPRI
+    BigIntGenMask(0)        // WPRI
+  )
+
+  val sstatusWmask = BigIntNot(sstatusWNmask).U(XLEN.W)
+  val sstatusRmask = (
+    BigIntGenMask(63)     | // SD
+    BigIntGenMask(33, 32) | // UXL
+    BigIntGenMask(19)     | // MXR
+    BigIntGenMask(18)     | // SUM
+    BigIntGenMask(16, 15) | // XS
+    BigIntGenMask(14, 13) | // FS
+    BigIntGenMask(10, 9 ) | // VS
+    BigIntGenMask(8)      | // SPP
+    BigIntGenMask(6)      | // UBE: hard wired to 0
+    BigIntGenMask(5)      | // SPIE
+    BigIntGenMask(1)
+  ).U(XLEN.W)
+
+  println(s"sstatusWNmask: 0x${sstatusWNmask.toString(16)}")
+  println(s"sstatusWmask: 0x${sstatusWmask.litValue.toString(16)}")
+  println(s"sstatusRmask: 0x${sstatusRmask.litValue.toString(16)}")
+
   // stvec: {BASE (WARL), MODE (WARL)} where mode is 0 or 1
   val stvecMask = ~(0x2.U(XLEN.W))
   val stvec = RegInit(UInt(XLEN.W), 0.U)
@@ -945,12 +974,12 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     vl := RegNext(csrio.vpu.set_vl.bits)
   }
   // set vs and sd in mstatus
-  // when (csrw_dirty_vs_state || RegNext(csrio.vpu.dirty_vs)) {
-  //   val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
-  //   mstatusNew.vs := "b11".U
-  //   mstatusNew.sd := true.B
-  //   mstatus := mstatusNew.asUInt
-  // }
+  when(csrw_dirty_vs_state || RegNext(csrio.vpu.dirty_vs)) {
+    val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
+    mstatusNew.vs := ContextStatus.dirty
+    mstatusNew.sd := true.B
+    mstatus := mstatusNew.asUInt
+  }
 
   csrio.vpu.vstart := vstart
   csrio.vpu.vxrm := vcsr.asTypeOf(new VcsrStruct).vxrm
