@@ -33,9 +33,11 @@ class SbufferFlushBundle extends Bundle {
 
 trait HasSbufferConst extends HasXSParameter {
   val EvictCycles = 1 << 20
+  val TimeOutCycles = 1 << 10
   val SbufferReplayDelayCycles = 16
   require(isPow2(EvictCycles))
   val EvictCountBits = log2Up(EvictCycles+1)
+  val TimeOutCountBits = log2Up(TimeOutCycles+1)
   val MissqReplayCountBits = log2Up(SbufferReplayDelayCycles) + 1
 
   // dcache write hit resp has 2 sources
@@ -63,12 +65,13 @@ class SbufferEntryState (implicit p: Parameters) extends SbufferBundle {
   val state_inflight = Bool() // sbuffer is trying to write this entry to dcache
   val w_timeout = Bool() // with timeout resp, waiting for resend store pipeline req timeout
   val w_sameblock_inflight = Bool() // same cache block dcache req is inflight
+  val w_data_all_valid = Bool() // wait until all data in block is valid, set when memset is detected
 
   def isInvalid(): Bool = !state_valid
   def isValid(): Bool = state_valid
   def isActive(): Bool = state_valid && !state_inflight
   def isInflight(): Bool = state_inflight
-  def isDcacheReqCandidate(): Bool = state_valid && !state_inflight && !w_sameblock_inflight
+  def isDcacheReqCandidate(data_all_valid: Bool): Bool = state_valid && !state_inflight && !w_sameblock_inflight && (!w_data_all_valid || data_all_valid)
 }
 
 class SbufferBundle(implicit p: Parameters) extends XSBundle with HasSbufferConst
@@ -96,6 +99,7 @@ class SbufferData(implicit p: Parameters) extends XSModule with HasSbufferConst 
     val maskFlushReq = Vec(NumDcacheWriteResp, Flipped(ValidIO(new MaskFlushReq)))
     val dataOut = Output(Vec(StoreBufferSize, Vec(CacheLineVWords, Vec(VDataBytes, UInt(8.W)))))
     val maskOut = Output(Vec(StoreBufferSize, Vec(CacheLineVWords, Vec(VDataBytes, Bool()))))
+    val wholeBlockValidOut = Output(Vec(StoreBufferSize, Bool()))
   })
 
   val data = Reg(Vec(StoreBufferSize, Vec(CacheLineVWords, Vec(VDataBytes, UInt(8.W)))))
@@ -121,6 +125,7 @@ class SbufferData(implicit p: Parameters) extends XSModule with HasSbufferConst 
         }
       }
     }
+    io.wholeBlockValidOut(line) := mask(line).asUInt.andR
   }
 
   // 2 cycle data / mask update
@@ -200,6 +205,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   dataModule.io.writeReq <> DontCare
   val prefetcher = Module(new StorePfWrapper())
   val writeReq = dataModule.io.writeReq
+  val wholeBlockValidVec = dataModule.io.wholeBlockValidOut
 
   val ptag = Reg(Vec(StoreBufferSize, UInt(PTagWidth.W)))
   val vtag = Reg(Vec(StoreBufferSize, UInt(VTagWidth.W)))
@@ -209,6 +215,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   val mask = dataModule.io.maskOut
   val stateVec = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U.asTypeOf(new SbufferEntryState))))
   val cohCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(EvictCountBits.W))))
+  val timeOutCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(TimeOutCountBits.W))))
   val missqReplayCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(MissqReplayCountBits.W))))
 
   val sbuffer_out_s0_fire = Wire(Bool())
@@ -260,10 +267,10 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   val plru = new ValidPseudoLRU(StoreBufferSize)
   val accessIdx = Wire(Vec(EnsbufferWidth + 1, Valid(UInt(SbufferIndexWidth.W))))
 
-  val candidateVec = VecInit(stateVec.map(s => s.isDcacheReqCandidate()))
+  val candidateVec = VecInit(stateVec.zipWithIndex.map{case (s, i) => s.isDcacheReqCandidate(wholeBlockValidVec(i))})
 
   val replaceAlgoIdx = plru.way(candidateVec.reverse)._2
-  val replaceAlgoNotDcacheCandidate = !stateVec(replaceAlgoIdx).isDcacheReqCandidate()
+  val replaceAlgoNotDcacheCandidate = !stateVec(replaceAlgoIdx).isDcacheReqCandidate(wholeBlockValidVec(replaceAlgoIdx))
 
   assert(!(candidateVec.asUInt.orR && replaceAlgoNotDcacheCandidate), "we have way to select, but replace algo selects invalid way")
 
@@ -419,6 +426,8 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
       when(insertVec(entryIdx)){
         stateVec(entryIdx).state_valid := true.B
         stateVec(entryIdx).w_sameblock_inflight := sameBlockInflightMask.orR // set w_sameblock_inflight when a line is first allocated
+        stateVec(entryIdx).w_data_all_valid := io.memSetPattenDetected // set w_data_all_valid when memset is detected
+        timeOutCount(entryIdx) := Mux(io.memSetPattenDetected, TimeOutCycles.U, 0.U)
         when(sameBlockInflightMask.orR){
           waitInflightMask(entryIdx) := sameBlockInflightMask
         }
@@ -618,10 +627,10 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   // If there is a inflight dcache req which has same ptag with sbuffer_out_s0_evictionIdx's ptag,
   // current eviction should be blocked.
   val sbuffer_out_s0_valid = missqReplayHasTimeOut ||
-    stateVec(sbuffer_out_s0_evictionIdx).isDcacheReqCandidate() &&
+    stateVec(sbuffer_out_s0_evictionIdx).isDcacheReqCandidate(wholeBlockValidVec(sbuffer_out_s0_evictionIdx)) &&
     (need_drain || cohHasTimeOut || need_replace)
   assert(!(
-    stateVec(sbuffer_out_s0_evictionIdx).isDcacheReqCandidate &&
+    stateVec(sbuffer_out_s0_evictionIdx).isDcacheReqCandidate(wholeBlockValidVec(sbuffer_out_s0_evictionIdx)) &&
     !noSameBlockInflight(sbuffer_out_s0_evictionIdx)
   ))
   val sbuffer_out_s0_cango = sbuffer_out_s1_ready
@@ -694,6 +703,20 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   def id_to_sbuffer_id(id: UInt): UInt = {
     require(id.getWidth >= log2Up(StoreBufferSize))
     id(log2Up(StoreBufferSize)-1, 0)
+  }
+
+  // clear w_data_all_valid flag
+  // case1: all bytes in the block are ready
+  // case2: `TimeOutCycles` cycles time out
+  // case3: drain all out
+  for (i <- 0 until StoreBufferSize) {
+    val timeOutFlush = timeOutCount(i) === 0.U
+    when(stateVec(i).w_data_all_valid && stateVec(i).state_valid) {
+      timeOutCount(i) := Mux(timeOutFlush, 0.U, timeOutCount(i) - 1.U)
+    }
+    when((wholeBlockValidVec(i) || timeOutFlush || need_drain) && stateVec(i).state_valid && stateVec(i).w_data_all_valid) {
+      stateVec(i).w_data_all_valid := false.B
+    }
   }
 
   // hit resp
