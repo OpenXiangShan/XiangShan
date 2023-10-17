@@ -130,12 +130,26 @@ class TageMeta(implicit p: Parameters)
   def allocateValid = allocates.map(_.orR)
 }
 
+//
+// Helper functions
+//
+
+// Check silent updates
+// No real update to the value happened
+// Reduce update amount
+private object silentUpdate {
+  def apply(ctr: UInt, taken: Bool): Bool = {
+    ctr.andR && taken || !ctr.orR && !taken
+  }
+}
+
+
 trait TBTParams extends HasXSParameter with TageParams {
   val BtSize = 2048
   val bypassEntries = 8
 }
 
-class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
+class TageBTable(implicit p: Parameters) extends TageModule with TBTParams{
   val io = IO(new Bundle {
     val s0_fire = Input(Bool())
     val s0_pc   = Input(UInt(VAddrBits.W))
@@ -150,86 +164,99 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
   val bimAddr = new TableAddr(log2Up(BtSize), instOffsetBits)
 
   // Physical SRAM Size
-  val SRAMSize = 512
-  val foldWidth = BtSize / SRAMSize
+  private val SRAMSize = 256
+  private val nBanks = 4
+  private val bankSize = BtSize / nBanks
+  private val bankFoldWidth = if (bankSize >= SRAMSize) bankSize / SRAMSize else 1
+  private val bankIdxWidth = log2Ceil(nBanks)
 
-  val bt = Module(
+  private def get_bank_mask(idx: UInt): Vec[Bool]
+    = VecInit((0 until nBanks).map(idx(bankIdxWidth - 1, 0) === _.U))
+
+  private def get_bank_idx(idx: UInt): UInt = (idx >> bankIdxWidth).asUInt
+
+  val baseTableBanks = Seq.fill(nBanks)(Module(
     new FoldedSRAMTemplate(
       UInt(2.W),
-      set = BtSize,
-      width = foldWidth,
+      set = bankSize,
+      width = bankFoldWidth,
       way = numBr,
       shouldReset = true,
       holdRead = true,
       singlePort = true
-    ))
-
-  val doing_reset = RegInit(true.B)
-  val resetRow = RegInit(0.U(log2Ceil(BtSize).W))
-  resetRow := resetRow + doing_reset
-  when (resetRow === (BtSize-1).U) { doing_reset := false.B }
+    )))
 
   val s0_idx = bimAddr.getIdx(io.s0_pc)
-  bt.io.r.req.valid := io.s0_fire
-  bt.io.r.req.bits.setIdx := s0_idx
+  val s0_bank_req_1h = get_bank_mask(s0_idx)
+  for (b <- 0 until nBanks) {
+    baseTableBanks(b).io.r.req.valid := io.s0_fire && s0_bank_req_1h(b)
+    baseTableBanks(b).io.r.req.bits.setIdx := get_bank_idx(s0_idx)
+  }
 
-  val s1_read = bt.io.r.resp.data
+
+  // S1
+  val s1_bank_req_1h = RegEnable(s0_bank_req_1h, io.s0_fire)
+  val s1_read = baseTableBanks.map(_.io.r.resp.data)
   val s1_idx = RegEnable(s0_idx, io.s0_fire)
 
-
-  val per_br_ctr = VecInit((0 until numBr).map(i => Mux1H(UIntToOH(get_phy_br_idx(s1_idx, i), numBr), s1_read)))
+  val per_br_ctr = VecInit((0 until numBr).map(i => Mux1H(UIntToOH(get_phy_br_idx(s1_idx, i), numBr),
+    Mux1H(s1_bank_req_1h, s1_read)))
+  )
   io.s1_cnt := per_br_ctr
 
+
+
   // Update logic
+  val update_idx = bimAddr.getIdx(io.update_pc)
+  val update_reqBankOH = get_bank_mask(update_idx)
+  val update_idxInBank = get_bank_idx(update_idx)
 
-  val u_idx = bimAddr.getIdx(io.update_pc)
-
-  val newCtrs = Wire(Vec(numBr, UInt(2.W))) // physical bridx
-
-  val wrbypass = Module(new WrBypass(UInt(2.W), bypassEntries, log2Up(BtSize), numWays = numBr)) // logical bridx
-  wrbypass.io.wen := io.update_mask.reduce(_||_)
-  wrbypass.io.write_idx := u_idx
-  wrbypass.io.write_way_mask.map(_ := io.update_mask)
-  for (li <- 0 until numBr) {
-    val br_pidx = get_phy_br_idx(u_idx, li)
-    wrbypass.io.write_data(li) := newCtrs(br_pidx)
-  }
-
-
-  val oldCtrs =
+  val update_phyOldCtrs =
     VecInit((0 until numBr).map(pi => {
-      val br_lidx = get_lgc_br_idx(u_idx, pi.U(log2Ceil(numBr).W))
-      Mux(wrbypass.io.hit && wrbypass.io.hit_data(br_lidx).valid,
-        wrbypass.io.hit_data(br_lidx).bits,
-        io.update_cnt(br_lidx))
+      val brLogicalIdx = get_lgc_br_idx(update_idx, pi.U(log2Ceil(numBr).W))
+        io.update_cnt(brLogicalIdx)
     }))
 
-  def satUpdate(old: UInt, len: Int, taken: Bool): UInt = {
-    val oldSatTaken = old === ((1 << len)-1).U
-    val oldSatNotTaken = old === 0.U
-    Mux(oldSatTaken && taken, ((1 << len)-1).U,
-      Mux(oldSatNotTaken && !taken, 0.U,
-        Mux(taken, old + 1.U, old - 1.U)))
-  }
-
-  val newTakens = io.update_takens
-  newCtrs := VecInit((0 until numBr).map(pi => {
-    val br_lidx = get_lgc_br_idx(u_idx, pi.U(log2Ceil(numBr).W))
-    satUpdate(oldCtrs(pi), 2, newTakens(br_lidx))
+  val update_newTakens: Vec[Bool] = io.update_takens
+  val update_phyNewCtrs = VecInit((0 until numBr).map(pi => {
+    val br_lidx = get_lgc_br_idx(update_idx, pi.U(log2Ceil(numBr).W))
+    satUpdate(update_phyOldCtrs(pi), 2, update_newTakens(br_lidx))
   }))
+  val update_phySilentUpdate: Seq[Bool] = update_phyOldCtrs.zip(update_newTakens).map{
+    case (ctr, taken) => silentUpdate(ctr, taken)
+  }
 
   val updateWayMask = VecInit((0 until numBr).map(pi =>
     (0 until numBr).map(li =>
-      io.update_mask(li) && get_phy_br_idx(u_idx, li) === pi.U
+      io.update_mask(li) && get_phy_br_idx(update_idx, li) === pi.U
     ).reduce(_||_)
   )).asUInt
 
-  bt.io.w.apply(
-    valid = io.update_mask.reduce(_||_) || doing_reset,
-    data = Mux(doing_reset, VecInit(Seq.fill(numBr)(2.U(2.W))), newCtrs),
-    setIdx = Mux(doing_reset, resetRow, u_idx),
-    waymask = Mux(doing_reset, Fill(numBr, 1.U(1.W)).asUInt, updateWayMask)
-  )
+  val update_phyWayMask =
+    VecInit((0 until nBanks).map(b =>
+      VecInit((0 until numBr).map(pi => {
+        // whether any of the logical branches updates on each slot
+        Seq.tabulate(numBr)(li =>
+          get_phy_br_idx(update_idx, li) === pi.U &&
+            io.update_mask(li)).reduce(_ || _) && update_phySilentUpdate(pi)
+      })).asUInt
+    ))
+
+  baseTableBanks.zipWithIndex.map { case (b, bankIdx) => {
+    b.io.w.apply(
+      valid = update_phyWayMask.asUInt.orR && update_reqBankOH(bankIdx),
+      data = update_phyNewCtrs,
+      setIdx = update_idxInBank,
+      waymask = update_phyWayMask(bankIdx)
+    )}
+  }
+
+
+  // Performance counter
+  val perf_bankConflict = baseTableBanks.map(t =>
+    t.io.w.req.valid && t.io.r.req.valid
+  ).reduce(_||_)
+  XSPerfAccumulate(f"bank_conflict", perf_bankConflict)
 
 }
 
@@ -268,13 +295,6 @@ class TageTable
   val bankIdxWidth = log2Ceil(nBanks)
   def get_bank_mask(idx: UInt) = VecInit((0 until nBanks).map(idx(bankIdxWidth-1, 0) === _.U))
   def get_bank_idx(idx: UInt) = idx >> bankIdxWidth
-  def get_way_in_bank(idx: UInt) =
-    if (log2Ceil(bankFoldWidth) > 0)
-      (idx >> bankIdxWidth)(log2Ceil(bankFoldWidth)-1, 0)
-    else
-      0.U(1.W)
-
-
 
   // bypass entries for tage update
   val perBankWrbypassEntries = 8
@@ -401,8 +421,6 @@ class TageTable
 
   val bank_conflict = (0 until nBanks).map(b => table_banks(b).io.w.req.valid && s0_bank_req_1h(b)).reduce(_||_)
   io.req.ready := true.B
-  // io.req.ready := !(io.update.mask && not_silent_update)
-  // io.req.ready := !bank_conflict
   XSPerfAccumulate(f"tage_table_bank_conflict", bank_conflict)
 
   val update_u_idx = update_idx
@@ -421,10 +439,6 @@ class TageTable
 
   us.io.w.apply(io.update.uMask.reduce(_||_), update_u_wdata, update_u_idx, update_u_way_mask)
 
-  // remove silent updates
-  def silentUpdate(ctr: UInt, taken: Bool) = {
-    ctr.andR && taken || !ctr.orR && !taken
-  }
 
   val bank_wrbypasses = Seq.fill(nBanks)(Seq.fill(numBr)(
     Module(new WrBypass(UInt(TageCtrBits.W), perBankWrbypassEntries, log2Ceil(bankSize)))
