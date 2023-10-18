@@ -79,8 +79,15 @@ class EntryBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBu
 }
 
 class DeqBundle(implicit p:Parameters, params: IssueBlockParams) extends XSBundle {
+  //input
+  val enqEntryOldestSel = Flipped(ValidIO(UInt(params.numEnq.W)))
+  val othersEntryOldestSel = Flipped(ValidIO(UInt((params.numEntries - params.numEnq).W)))
+  val subDeqPolicyRequest = Input(UInt(params.numEntries.W))
+  val subDeqSelOH = Vec(params.numDeq, Input(UInt(params.numEntries.W)))
+  val finalDeqSelOH = Flipped(ValidIO(UInt(params.numEntries.W)))
+  //output
   val isFirstIssue = Output(Bool())
-  val deqSelOH = Flipped(ValidIO(UInt(params.numEntries.W)))
+  val deqEntry = ValidIO(new EntryBundle)
 }
 
 class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
@@ -108,7 +115,6 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val og1Resp = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
   val finalIssueResp = OptionWrapper(params.LduCnt > 0, Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle))))
   val transEntryDeqVec = Vec(params.numEnq, ValidIO(new EntryBundle))
-  val deqEntry = Vec(params.numDeq, ValidIO(new EntryBundle))
   val transSelVec = Output(Vec(params.numEnq, UInt((params.numEntries-params.numEnq).W)))
 
 
@@ -239,7 +245,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
 
 
   deqSelVec.zip(deqPortIdxWriteVec).zipWithIndex.foreach { case ((deqSel, deqPortIdxWrite), i) =>
-    val deqVec = io.deq.map(x => x.deqSelOH.valid && x.deqSelOH.bits(i))
+    val deqVec = io.deq.map(x => x.finalDeqSelOH.valid && x.finalDeqSelOH.bits(i))
     deqPortIdxWrite := OHToUInt(deqVec)
     deqSel := deqVec.reduce(_ | _)
   }
@@ -275,6 +281,53 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     }
   }
 
+  //deq
+  val subDeqPolicyEntryVec = Wire(Vec(params.numDeq, Vec(params.numDeq, ValidIO(new EntryBundle))))
+  val subDeqPolicyValidVec = Wire(Vec(params.numDeq, Vec(params.numDeq, Bool())))
+  val deqSelEntryVec = Wire(Vec(params.numDeq, ValidIO(new EntryBundle)))
+
+  val enqEntryOldest = io.deq.map { deq =>
+    Mux1H(deq.enqEntryOldestSel.bits, entries.take(EnqEntryNum))
+  }
+  val othersEntryOldest = io.deq.map { deq =>
+    Mux1H(deq.othersEntryOldestSel.bits, entries.drop(EnqEntryNum))
+  }
+  subDeqPolicyEntryVec.zip(subDeqPolicyValidVec).zipWithIndex.foreach { case ((entry, valid), i) => 
+    entry(0) := PriorityMux(io.deq(i).subDeqPolicyRequest, entries)
+    valid(0) := PopCount(io.deq(i).subDeqPolicyRequest) >= 1.U
+    if (params.numDeq == 2) {
+      entry(1) := PriorityMux(Reverse(io.deq(i).subDeqPolicyRequest), entries.reverse)
+      valid(1) := PopCount(io.deq(i).subDeqPolicyRequest) >= 2.U
+    }
+  }
+
+  deqSelEntryVec(0) := Mux(io.deq(0).othersEntryOldestSel.valid, othersEntryOldest(0), 
+                       Mux(io.deq(0).enqEntryOldestSel.valid, enqEntryOldest(0), subDeqPolicyEntryVec(0)(0)))
+  io.deq(0).deqEntry.valid := (io.deq(0).othersEntryOldestSel.valid || io.deq(0).enqEntryOldestSel.valid || subDeqPolicyValidVec(0)(0)) && deqSelEntryVec(0).valid
+  io.deq(0).deqEntry.bits := deqSelEntryVec(0).bits
+
+  if (params.numDeq == 2) {
+    val chooseOthersOldest = io.deq(1).othersEntryOldestSel.valid && Cat(io.deq(1).othersEntryOldestSel.bits, 0.U((params.numEnq).W)) =/= io.deq(0).finalDeqSelOH.bits
+    val chooseEnqOldest = io.deq(1).enqEntryOldestSel.valid && Cat(0.U((params.numEntries-params.numEnq).W), io.deq(1).enqEntryOldestSel.bits) =/= io.deq(0).finalDeqSelOH.bits
+    val choose1stSub = io.deq(1).subDeqSelOH(0) =/= io.deq(0).finalDeqSelOH.bits
+
+    when (subDeqPolicyValidVec(0)(0)) {
+      assert(Mux1H(io.deq(0).subDeqSelOH(0), entries).bits.status.robIdx === subDeqPolicyEntryVec(0)(0).bits.status.robIdx, "subDeqSelOH isnot the same 0 0\n")
+    }
+    when (subDeqPolicyValidVec(1)(0)) {
+      assert(Mux1H(io.deq(1).subDeqSelOH(0), entries).bits.status.robIdx === subDeqPolicyEntryVec(1)(0).bits.status.robIdx, "subDeqSelOH isnot the same 1 0\n")
+    }
+    when (subDeqPolicyValidVec(1)(1)) {
+      assert(Mux1H(io.deq(1).subDeqSelOH(1), entries).bits.status.robIdx === subDeqPolicyEntryVec(1)(1).bits.status.robIdx, "subDeqSelOH isnot the same 1 1\n")
+    }
+
+    deqSelEntryVec(1) := Mux(chooseOthersOldest, othersEntryOldest(1), 
+                         Mux(chooseEnqOldest, enqEntryOldest(1), 
+                         Mux(choose1stSub, subDeqPolicyEntryVec(1)(0), subDeqPolicyEntryVec(1)(1))))
+    io.deq(1).deqEntry.valid := io.deq(1).finalDeqSelOH.valid && deqSelEntryVec(1).valid
+    io.deq(1).deqEntry.bits := deqSelEntryVec(1).bits
+  }
+
   io.valid := validVec.asUInt
   io.canIssue := canIssueVec.asUInt
   io.clear := clearVec.asUInt
@@ -285,13 +338,9 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   io.cancel.foreach(_ := cancelVec.get)
   io.rsFeedback := 0.U.asTypeOf(io.rsFeedback) //todo
   io.deq.foreach{ x =>
-    x.isFirstIssue := Mux(x.deqSelOH.valid, Mux1H(x.deqSelOH.bits, isFirstIssueVec), false.B)
+    x.isFirstIssue := x.finalDeqSelOH.valid && Mux1H(x.finalDeqSelOH.bits, isFirstIssueVec)
   }
   dontTouch(io.deq)
-  io.deqEntry.zip(io.deq.map(_.deqSelOH)).foreach{ case (deqEntry, deqSelOH) =>
-    deqEntry.valid := deqSelOH.valid && entries(OHToUInt(deqSelOH.bits)).valid
-    deqEntry.bits := entries(OHToUInt(deqSelOH.bits)).bits
-  }
   io.transSelVec.zip(transSelVec).foreach { case (sink, source) =>
     sink := source.asUInt
   }
