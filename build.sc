@@ -237,5 +237,10 @@ trait XiangShan extends XiangShanModule with HasChisel {
     override def ivyDeps = super.ivyDeps() ++ Agg(
       defaultVersions(crossValue)("chiseltest")
     )
+
+    val resourcesPATH = os.pwd.toString() + "/src/main/resources"
+    val envPATH = sys.env("PATH") + ":" + resourcesPATH
+
+    override def forkEnv = Map("PATH" -> envPATH)
   }
 }
