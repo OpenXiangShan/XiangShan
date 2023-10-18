@@ -70,6 +70,7 @@ class XSArgs(object):
         # Chisel arguments
         self.enable_log = args.enable_log
         self.num_cores = args.num_cores
+        self.firtool = args.firtool if args.mfc else None
         # Makefile arguments
         self.threads = args.threads
         self.with_dramsim3 = 1 if args.with_dramsim3 else None
@@ -78,6 +79,7 @@ class XSArgs(object):
         self.trace = 1 if args.trace or not args.disable_fork and not args.trace_fst else None
         self.trace_fst = "fst" if args.trace_fst else None
         self.config = args.config
+        self.is_mfc = 1 if args.mfc else None
         # emu arguments
         self.max_instr = args.max_instr
         self.ram_size = args.ram_size
@@ -107,10 +109,15 @@ class XSArgs(object):
         return all_env
 
     def get_chisel_args(self, prefix=None):
-        chisel_args = [
+        chisel_bool_args = [
             (self.enable_log, "enable-log")
         ]
-        args = map(lambda x: x[1], filter(lambda arg: arg[0], chisel_args))
+        chisel_str_args = [
+            (self.firtool, "firtool-binary-path")
+        ]
+        chisel_bool_args = map(lambda x: x[1], filter(lambda arg: arg[0], chisel_bool_args))
+        chisel_str_args = map(lambda arg: f"{arg[1]}={arg[0]}", filter(lambda arg: arg[0] is not None, chisel_str_args))
+        args = list(chisel_bool_args) + list(chisel_str_args)
         if prefix is not None:
             args = map(lambda x: prefix + x, args)
         return args
@@ -124,7 +131,8 @@ class XSArgs(object):
             (self.trace,         "EMU_TRACE"),
             (self.trace_fst,     "EMU_TRACE"),
             (self.config,        "CONFIG"),
-            (self.num_cores,     "NUM_CORES")
+            (self.num_cores,     "NUM_CORES"),
+            (self.is_mfc,        "MFC")
         ]
         args = filter(lambda arg: arg[0] is not None, makefile_args)
         return args
@@ -248,7 +256,7 @@ class XiangShan(object):
         fork_args = "--enable-fork" if self.args.fork else ""
         diff_args = "--no-diff" if self.args.disable_diff else ""
         chiseldb_args = "--dump-db" if not self.args.disable_db else ""
-        return_code = self.__exec_cmd(f'{numa_args} $NOOP_HOME/build/emu -i {workload} {emu_args} {fork_args} {diff_args} {chiseldb_args}')
+        return_code = self.__exec_cmd(f'ulimit -s {32 * 1024}; {numa_args} $NOOP_HOME/build/emu -i {workload} {emu_args} {fork_args} {diff_args} {chiseldb_args}')
         return return_code
 
     def run_simv(self, workload):
@@ -477,6 +485,7 @@ if __name__ == "__main__":
     # chisel arguments
     parser.add_argument('--enable-log', action='store_true', help='enable log')
     parser.add_argument('--num-cores', type=int, help='number of cores')
+    parser.add_argument('--firtool', nargs='?', type=str, help='firtool binary path')
     # makefile arguments
     parser.add_argument('--release', action='store_true', help='enable release')
     parser.add_argument('--spike', action='store_true', help='enable spike diff')
@@ -485,6 +494,7 @@ if __name__ == "__main__":
     parser.add_argument('--trace', action='store_true', help='enable vcd waveform')
     parser.add_argument('--trace-fst', action='store_true', help='enable fst waveform')
     parser.add_argument('--config', nargs='?', type=str, help='config')
+    parser.add_argument('--mfc', action='store_true', help='use mfc')
     # emu arguments
     parser.add_argument('--numa', action='store_true', help='use numactl')
     parser.add_argument('--diff', nargs='?', default="./ready-to-run/riscv64-nemu-interpreter-so", type=str, help='nemu so')

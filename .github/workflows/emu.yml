@@ -48,6 +48,9 @@ jobs:
     continue-on-error: false
     timeout-minutes: 900
     name: EMU - Basics
+    strategy:
+      matrix:
+        mfc-arg: ["", "--mfc"]
     steps:
       - uses: actions/checkout@v2
         with:
@@ -60,6 +63,7 @@ jobs:
           echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
           echo "PERF_HOME=/nfs/home/ci-runner/xs-perf/${HEAD_SHA}" >> $GITHUB_ENV
           echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
+          echo "FIRTOOL_BIN=/nfs/home/share/firtool/bin/firtool" >> $GITHUB_ENV
           mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
       - name: clean up
@@ -67,7 +71,7 @@ jobs:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
       - name: Build EMU
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --build --threads 8
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --build --threads 8 --firtool $FIRTOOL_BIN ${{ matrix.mfc-arg }}
       - name: Basic Test - cputest
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --ci cputest 2> /dev/zero
