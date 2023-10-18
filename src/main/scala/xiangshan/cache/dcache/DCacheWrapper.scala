@@ -747,6 +747,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val lqEmpty = Input(Bool())
   val pf_ctrl = Output(new PrefetchControlBundle)
   val force_write = Input(Bool())
+  val seqStoreDetected = Input(Bool())
   val debugTopDown = new DCacheTopDownIO
   val debugRolling = Flipped(new RobDebugRollingIO)
 }
@@ -838,6 +839,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   missQueue.io.hartId := io.hartId
   missQueue.io.l2_pf_store_only := RegNext(io.l2_pf_store_only, false.B)
   missQueue.io.debugTopDown <> io.debugTopDown
+  missQueue.io.seqStoreDetected <> io.seqStoreDetected
   io.memSetPattenDetected := missQueue.io.memSetPattenDetected
 
   val errors = ldu.map(_.io.error) ++ // load error

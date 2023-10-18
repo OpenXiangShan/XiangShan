@@ -90,6 +90,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
     val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
     val force_write = Output(Bool())
+    val seqStoreDetected = Output(Bool())
   })
 
   println("StoreQueue: size:" + StoreQueueSize)
@@ -742,6 +743,56 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       XSDebug("sbuffer "+i+" fire: ptr %d\n", ptr)
     }
   }
+
+  // sequential store detection
+  // store D, (A); store D, (A + 8), store D, (A + 16) ...
+  val DATAHASHBITS = 16
+  val SEQTHRESHOLD = 64
+  val seqStoreDetected = WireInit(false.B)
+  val prevCycleVaddr = RegInit(0.U(VAddrBits.W))
+  val prevCycleDataHash = RegInit(0.U(DATAHASHBITS.W))
+  val seqPatternVec = WireInit(VecInit(List.fill(EnsbufferWidth)(false.B)))
+  val seqPatternCnt = RegInit(0.U(log2Up(SEQTHRESHOLD+1).W))
+  val sbufferFire = Cat(VecInit((0 until EnsbufferWidth).map(i => io.sbuffer(i).fire))).orR
+
+  for (i <- 0 until EnsbufferWidth) {
+    when(io.sbuffer(i).fire) {
+      val thisCycleVaddr    = io.sbuffer(i).bits.vaddr
+      val thisCycleDataHash = io.sbuffer(i).bits.data.asTypeOf(Vec(VLEN / DATAHASHBITS, UInt(DATAHASHBITS.W))).fold(0.U)(_ ^ _)
+      prevCycleVaddr    := thisCycleVaddr
+      prevCycleDataHash := thisCycleDataHash
+
+      if(i == 0) {
+        seqPatternVec(i) := ((prevCycleVaddr + 8.U) === thisCycleVaddr) &&
+                            (prevCycleDataHash === thisCycleDataHash)
+      }else {
+        val lastLoopVaddr    = io.sbuffer(i - 1).bits.vaddr
+        val lastLoopDataHash = io.sbuffer(i - 1).bits.data.asTypeOf(Vec(VLEN / DATAHASHBITS, UInt(DATAHASHBITS.W))).fold(0.U)(_ ^ _)
+        seqPatternVec(i) := ((lastLoopVaddr + 8.U) === thisCycleVaddr) &&
+                            (lastLoopDataHash === thisCycleDataHash)
+      }
+    }.otherwise {
+      seqPatternVec(i) := true.B
+    }
+  }
+
+  when(sbufferFire) {
+    when(Cat(seqPatternVec).andR) {
+      seqPatternCnt := Mux(seqPatternCnt === SEQTHRESHOLD.U, seqPatternCnt, seqPatternCnt + 1.U)
+    }.otherwise {
+      seqPatternCnt := 0.U
+    }
+  }
+  when(seqPatternCnt === SEQTHRESHOLD.U) {
+    seqStoreDetected := true.B
+  }.otherwise {
+    seqStoreDetected := false.B
+  }
+  when(io.sqEmpty) {
+    seqStoreDetected := false.B
+  }
+  io.seqStoreDetected := seqStoreDetected
+
   (1 until EnsbufferWidth).foreach(i => when(io.sbuffer(i).fire) { assert(io.sbuffer(i - 1).fire) })
   if (coreParams.dcacheParametersOpt.isEmpty) {
     for (i <- 0 until EnsbufferWidth) {
