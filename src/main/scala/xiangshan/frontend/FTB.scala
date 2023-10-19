@@ -55,8 +55,6 @@ class FtbSlot(val offsetLen: Int, val subOffsetLen: Option[Int] = None)(implicit
   val sharing = Bool()
   val valid   = Bool()
 
-  val sc      = Bool() // set by sc in s3, perf use only
-
   def setLowerStatByTarget(pc: UInt, target: UInt, isShare: Boolean) = {
     def getTargetStatByHigher(pc_higher: UInt, target_higher: UInt) =
       Mux(target_higher > pc_higher, TAR_OVF,
