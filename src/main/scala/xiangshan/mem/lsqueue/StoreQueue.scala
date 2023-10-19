@@ -745,15 +745,17 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   }
 
   // sequential store detection
-  // store D, (A); store D, (A + 8), store D, (A + 16) ...
+  // store D, (A); store D, (A + K), store D, (A + 2K) ...
   val DATAHASHBITS = 16
   val SEQTHRESHOLD = 64
   val seqStoreDetected = WireInit(false.B)
   val prevCycleVaddr = RegInit(0.U(VAddrBits.W))
   val prevCycleDataHash = RegInit(0.U(DATAHASHBITS.W))
+  val seqKStride = RegInit(0.U(6.W))
   val seqPatternVec = WireInit(VecInit(List.fill(EnsbufferWidth)(false.B)))
   val seqPatternCnt = RegInit(0.U(log2Up(SEQTHRESHOLD+1).W))
   val sbufferFire = Cat(VecInit((0 until EnsbufferWidth).map(i => io.sbuffer(i).fire))).orR
+  val validKStride = (seqKStride === 1.U || seqKStride === 2.U || seqKStride === 4.U || seqKStride === 8.U)
 
   for (i <- 0 until EnsbufferWidth) {
     when(io.sbuffer(i).fire) {
@@ -763,12 +765,14 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       prevCycleDataHash := thisCycleDataHash
 
       if(i == 0) {
-        seqPatternVec(i) := ((prevCycleVaddr + 8.U) === thisCycleVaddr) &&
+        seqKStride := thisCycleVaddr - prevCycleVaddr
+        seqPatternVec(i) := ((thisCycleVaddr - prevCycleVaddr) === seqKStride) &&
                             (prevCycleDataHash === thisCycleDataHash)
       }else {
         val lastLoopVaddr    = io.sbuffer(i - 1).bits.vaddr
         val lastLoopDataHash = io.sbuffer(i - 1).bits.data.asTypeOf(Vec(VLEN / DATAHASHBITS, UInt(DATAHASHBITS.W))).fold(0.U)(_ ^ _)
-        seqPatternVec(i) := ((lastLoopVaddr + 8.U) === thisCycleVaddr) &&
+        seqKStride := thisCycleVaddr - lastLoopVaddr
+        seqPatternVec(i) := ((thisCycleVaddr - lastLoopVaddr) === seqKStride) &&
                             (lastLoopDataHash === thisCycleDataHash)
       }
     }.otherwise {
@@ -783,7 +787,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       seqPatternCnt := 0.U
     }
   }
-  when(seqPatternCnt === SEQTHRESHOLD.U) {
+  when(seqPatternCnt === SEQTHRESHOLD.U && validKStride) {
     seqStoreDetected := true.B
   }.otherwise {
     seqStoreDetected := false.B
