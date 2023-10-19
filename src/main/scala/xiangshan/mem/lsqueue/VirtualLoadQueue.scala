@@ -24,7 +24,7 @@ import xiangshan.ExceptionNO._
 import xiangshan.cache._
 import utils._
 import utility._
-import xiangshan.backend.Bundles.DynInst
+import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
 import xiangshan.backend.fu.FuConfig.LduCfg
 
 class VirtualLoadQueue(implicit p: Parameters) extends XSModule
@@ -48,6 +48,8 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     // to dispatch
     val lqDeq       = Output(UInt(log2Up(CommitWidth + 1).W))
     val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize+1).W))
+    // vector load writeback
+    val vecWriteback = Flipped(ValidIO(new MemExuOutput(isVector = true)))
   })
 
   println("VirtualLoadQueue: size: " + VirtualLoadQueueSize)
@@ -243,6 +245,13 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
         )
       }
     }
+  }
+
+  when (io.vecWriteback.valid) {
+    val vecWbIndex = io.vecWriteback.bits.uop.lqIdx.value
+    assert(allocated(vecWbIndex))
+    addrvalid(vecWbIndex) := true.B
+    datavalid(vecWbIndex) := true.B
   }
 
   //  perf counter

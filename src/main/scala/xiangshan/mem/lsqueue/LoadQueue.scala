@@ -63,6 +63,15 @@ trait HasLoadHelper { this: XSModule =>
       LSUOpType.lwu  -> ZeroExt(rdata(31, 0), XLEN),
     ))
   }
+
+  def rdataVecHelper(alignedType: UInt, rdata: UInt): UInt = {
+    LookupTree(alignedType, List(
+      "b00".U -> ZeroExt(rdata(7, 0), VLEN),
+      "b01".U -> ZeroExt(rdata(15, 0), VLEN),
+      "b10".U -> ZeroExt(rdata(31, 0), VLEN),
+      "b11".U -> ZeroExt(rdata(63, 0), VLEN)
+    ))
+  }
 }
 
 class LqEnqIO(implicit p: Parameters) extends XSBundle {
@@ -105,6 +114,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     }
     val sta = new Bundle() {
       val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // from store_s1
+      val vecStoreAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // from store_s1
     }
     val std = new Bundle() {
       val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new MemExuOutput))) // from store_s0, store data, send to sq from rs
@@ -135,6 +145,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val tlbReplayDelayCycleCtrl = Vec(4, Input(UInt(ReSelectLen.W)))
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val lqEmpty = Output(Bool())
+
+    val vecWriteback = Flipped(ValidIO(new MemExuOutput(isVector = true)))
+
     val debugTopDown = new LoadQueueTopDownIO
   })
 
@@ -162,6 +175,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
    */
   loadQueueRAW.io.redirect         <> io.redirect
   loadQueueRAW.io.storeIn          <> io.sta.storeAddrIn
+  loadQueueRAW.io.vecStoreIn       <> io.sta.vecStoreAddrIn
   loadQueueRAW.io.stAddrReadySqPtr <> io.sq.stAddrReadySqPtr
   loadQueueRAW.io.stIssuePtr       <> io.sq.stIssuePtr
   for (w <- 0 until LoadPipelineWidth) {
@@ -173,13 +187,14 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   /**
    * VirtualLoadQueue
    */
-  virtualLoadQueue.io.redirect    <> io.redirect
-  virtualLoadQueue.io.enq         <> io.enq
-  virtualLoadQueue.io.ldin        <> io.ldu.ldin // from load_s3
-  virtualLoadQueue.io.lqFull      <> io.lqFull
-  virtualLoadQueue.io.lqDeq       <> io.lqDeq
-  virtualLoadQueue.io.lqCancelCnt <> io.lqCancelCnt
-  virtualLoadQueue.io.lqEmpty <> io.lqEmpty
+  virtualLoadQueue.io.redirect      <> io.redirect
+  virtualLoadQueue.io.enq           <> io.enq
+  virtualLoadQueue.io.ldin          <> io.ldu.ldin // from load_s3
+  virtualLoadQueue.io.lqFull        <> io.lqFull
+  virtualLoadQueue.io.lqDeq         <> io.lqDeq
+  virtualLoadQueue.io.lqCancelCnt   <> io.lqCancelCnt
+  virtualLoadQueue.io.lqEmpty       <> io.lqEmpty
+  virtualLoadQueue.io.vecWriteback  <> io.vecWriteback
 
   /**
    * Load queue exception buffer

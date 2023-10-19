@@ -190,12 +190,21 @@ case class XSCoreParameters
   prefetcher: Option[PrefetcherParams] = Some(SMSParams()),
   LoadPipelineWidth: Int = 2,
   StorePipelineWidth: Int = 2,
+  VecLoadPipelineWidth: Int = 2,
+  VecStorePipelineWidth: Int = 2,
   VecMemSrcInWidth: Int = 2,
   VecMemInstWbWidth: Int = 1,
   VecMemDispatchWidth: Int = 1,
   StoreBufferSize: Int = 16,
   StoreBufferThreshold: Int = 7,
   EnsbufferWidth: Int = 2,
+  // ============ VLSU ============
+  UsQueueSize: Int = 8,
+  VlFlowSize: Int = 32,
+  VlUopSize: Int = 32,
+  VsFlowSize: Int = 32,
+  VsUopSize: Int = 32,
+  // ==============================
   UncacheBufferSize: Int = 4,
   EnableLoadToLoadForward: Boolean = true,
   EnableFastForward: Boolean = true,
@@ -372,8 +381,8 @@ case class XSCoreParameters
         ExeUnitParams("STD1", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(5, 1), VfRD(10, Int.MaxValue)))),
       ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams("VLDU0", Seq(VlduCfg), Seq(VfWB(6, 1)), Seq(Seq(VfRD(0, 0)), Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)))),
-        ExeUnitParams("VLDU1", Seq(VlduCfg), Seq(VfWB(7, 1)), Seq(Seq(VfRD(5, 0)), Seq(VfRD(6, 0)), Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(VfRD(9, 0)))),
+        ExeUnitParams("VLSU0", Seq(VlduCfg), Seq(VfWB(6, 1)), Seq(Seq(VfRD(0, 0)), Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)))),
+        ExeUnitParams("VLSU1", Seq(VstuCfg), Seq(VfWB(7, 1)), Seq(Seq(VfRD(5, 0)), Seq(VfRD(6, 0)), Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(VfRD(9, 0)))),
       ), numEntries = IssueQueueSize, numEnq = 2),
     ),
       numPregs = intPreg.numEntries max vfPreg.numEntries,
@@ -564,12 +573,19 @@ trait HasXSParameter {
   val BackendRedirectNum = NumRedirect + 2 //2: ldReplay + Exception
   val LoadPipelineWidth = coreParams.LoadPipelineWidth
   val StorePipelineWidth = coreParams.StorePipelineWidth
+  val VecLoadPipelineWidth = coreParams.VecLoadPipelineWidth
+  val VecStorePipelineWidth = coreParams.VecStorePipelineWidth
   val VecMemSrcInWidth = coreParams.VecMemSrcInWidth
   val VecMemInstWbWidth = coreParams.VecMemInstWbWidth
   val VecMemDispatchWidth = coreParams.VecMemDispatchWidth
   val StoreBufferSize = coreParams.StoreBufferSize
   val StoreBufferThreshold = coreParams.StoreBufferThreshold
   val EnsbufferWidth = coreParams.EnsbufferWidth
+  val UsQueueSize = coreParams.UsQueueSize
+  val VlFlowSize = coreParams.VlFlowSize
+  val VlUopSize = coreParams.VlUopSize
+  val VsFlowSize = coreParams.VsFlowSize
+  val VsUopSize = coreParams.VsUopSize
   val UncacheBufferSize = coreParams.UncacheBufferSize
   val EnableLoadToLoadForward = coreParams.EnableLoadToLoadForward
   val EnableFastForward = coreParams.EnableFastForward

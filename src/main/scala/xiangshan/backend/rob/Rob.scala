@@ -80,6 +80,7 @@ class RobLsqIO(implicit p: Parameters) extends XSBundle {
   val pendingst = Output(Bool())
   val commit = Output(Bool())
   val pendingPtr = Output(new RobPtr)
+  val pendingPtrNext = Output(new RobPtr)
 
   val mmio = Input(Vec(LoadPipelineWidth, Bool()))
   // Todo: what's this?
@@ -850,6 +851,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // commit load/store to lsq
   val ldCommitVec = VecInit((0 until CommitWidth).map(i => io.commits.commitValid(i) && io.commits.info(i).commitType === CommitType.LOAD))
   val stCommitVec = VecInit((0 until CommitWidth).map(i => io.commits.commitValid(i) && io.commits.info(i).commitType === CommitType.STORE))
+  val deqPtrVec_next = Wire(Vec(CommitWidth, Output(new RobPtr)))
   io.lsq.lcommit := RegNext(Mux(io.commits.isCommit, PopCount(ldCommitVec), 0.U))
   io.lsq.scommit := RegNext(Mux(io.commits.isCommit, PopCount(stCommitVec), 0.U))
   // indicate a pending load or store
@@ -857,6 +859,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.lsq.pendingst := RegNext(io.commits.isCommit && io.commits.info(0).commitType === CommitType.STORE && valid(deqPtr.value))
   io.lsq.commit := RegNext(io.commits.isCommit && io.commits.commitValid(0))
   io.lsq.pendingPtr := RegNext(deqPtr)
+  io.lsq.pendingPtrNext := RegNext(deqPtrVec_next.head)
 
   /**
     * state changes
@@ -883,7 +886,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   deqPtrGenModule.io.interrupt_safe := interrupt_safe(deqPtr.value)
   deqPtrGenModule.io.blockCommit := blockCommit
   deqPtrVec := deqPtrGenModule.io.out
-  val deqPtrVec_next = deqPtrGenModule.io.next_out
+  deqPtrVec_next := deqPtrGenModule.io.next_out
 
   val enqPtrGenModule = Module(new RobEnqPtrWrapper)
   enqPtrGenModule.io.redirect := io.redirect

@@ -143,11 +143,13 @@ case class ExeUnitParams(
 
   def hasVLoadFu = fuConfigs.map(_.fuType == FuType.vldu).reduce(_ || _)
 
+  def hasVStoreFu = fuConfigs.map(_.fuType == FuType.vstu).reduce(_ || _)
+
   def hasStoreAddrFu = fuConfigs.map(_.name == "sta").reduce(_ || _)
 
   def hasStdFu = fuConfigs.map(_.name == "std").reduce(_ || _)
 
-  def hasMemAddrFu = hasLoadFu || hasStoreAddrFu || hasVLoadFu
+  def hasMemAddrFu = hasLoadFu || hasStoreAddrFu || hasVLoadFu || hasVStoreFu
 
   def hasVecFu = fuConfigs.map(x => FuConfig.VecArithFuConfigs.contains(x)).reduce(_ || _)
 

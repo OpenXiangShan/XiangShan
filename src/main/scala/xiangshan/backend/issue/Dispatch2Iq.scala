@@ -351,6 +351,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     (Seq(ldu.ohid), 2),
     (Seq(stu.ohid, mou.ohid), 2),
     (Seq(vldu.ohid), 2),
+    (Seq(vstu.ohid), 2),
   )
 
   private val enqLsqIO = io.enqLsqIO.get
