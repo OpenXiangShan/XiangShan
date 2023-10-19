@@ -14,22 +14,17 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
-package top
+package xiangshan
 
-import circt.stage._
-import chisel3.stage.ChiselGeneratorAnnotation
-import xiangshan.types._
+object types {
+  case class DummyAnnotation(any: Any*) extends firrtl.annotations.NoTargetAnnotation
 
-object Generator {
-  def execute(args: Array[String], mod: => chisel3.RawModule, firtoolOpts: Array[String]) = {
-    val annotations = chisel3.BuildInfo.version match {
-      case "3.6.0" => Seq(
-        RunFirrtlTransformAnnotation(new PrintControl),
-        RunFirrtlTransformAnnotation(new PrintModuleName)
-      )
-      case _ => Seq(CIRCTTargetAnnotation(CIRCTTarget.Verilog)) ++ firtoolOpts.map(FirtoolOption.apply)
-    }
+  type ChiselStage = circt.stage.ChiselStage
+  type XiangShanStage = circt.stage.ChiselStage
 
-    (new XiangShanStage).execute(args, ChiselGeneratorAnnotation(mod _) +: annotations)
-  }
+  type RunFirrtlTransformAnnotation = DummyAnnotation
+  val RunFirrtlTransformAnnotation = DummyAnnotation
+
+  class PrintControl
+  class PrintModuleName
 }

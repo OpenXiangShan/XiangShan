@@ -105,9 +105,9 @@ class MinimalConfig(n: Int = 1) extends Config(
           nMissEntries = 2,
           nReleaseEntries = 1,
           nProbeEntries = 2,
-          nPrefetchEntries = 2,
-          nPrefBufferEntries = 32,
-          hasPrefetch = true
+          // fdip
+          enableICachePrefetch = true,
+          prefetchToL1 = false,
         ),
         dcacheParametersOpt = Some(DCacheParameters(
           nSets = 64, // 32KB DCache
@@ -248,7 +248,9 @@ class WithNKBL2
         )),
         reqField = Seq(utility.ReqSourceField()),
         echoField = Seq(huancun.DirtyField()),
-        prefetch = Some(coupledL2.prefetch.PrefetchReceiverParams())
+        prefetch = Some(coupledL2.prefetch.PrefetchReceiverParams()),
+        enablePerf = !site(DebugOptionsKey).FPGAPlatform,
+        elaboratedTopDown = !site(DebugOptionsKey).FPGAPlatform
       )),
       L2NBanks = banks
     ))
@@ -341,6 +343,6 @@ class FuzzConfig(dummy: Int = 0) extends Config(
 class DefaultConfig(n: Int = 1) extends Config(
   new WithNKBL3(6 * 1024, inclusive = false, banks = 4, ways = 6)
     ++ new WithNKBL2(2 * 512, inclusive = false, banks = 4)
-    ++ new WithNKBL1D(128)
+    ++ new WithNKBL1D(64, ways = 4)
     ++ new BaseConfig(n)
 )

@@ -22,11 +22,8 @@ import chisel3.util._
 import device.{AXI4MemorySlave, SimJTAG}
 import difftest._
 import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule}
-import utility.FileRegisters
-import utility.ChiselDB
-import utility.GTimer
+import utility.{ChiselDB, Constantin, FileRegisters, GTimer}
 import xiangshan.DebugOptionsKey
-import utility.Constantin
 
 class SimTop(implicit p: Parameters) extends Module {
   val debugOpts = p(DebugOptionsKey)
@@ -98,11 +95,13 @@ class SimTop(implicit p: Parameters) extends Module {
   dontTouch(logEnable)
   dontTouch(clean)
   dontTouch(dump)
+
+  DifftestModule.finish("XiangShan")
 }
 
 object SimTop extends App {
   // Keep this the same as TopMain except that SimTop is used here instead of XSTop
-  val (config, firrtlOpts, firrtlComplier, firtoolOpts) = ArgParser.parse(args)
+  val (config, firrtlOpts, firtoolOpts) = ArgParser.parse(args)
 
   // tools: init to close dpi-c when in fpga
   val envInFPGA = config(DebugOptionsKey).FPGAPlatform
@@ -114,7 +113,6 @@ object SimTop extends App {
   Generator.execute(
     firrtlOpts,
     DisableMonitors(p => new SimTop()(p))(config),
-    firrtlComplier,
     firtoolOpts
   )
 
@@ -122,5 +120,4 @@ object SimTop extends App {
   ChiselDB.addToFileRegisters
   Constantin.addToFileRegisters
   FileRegisters.write(fileDir = "./build")
-  DifftestModule.finish("XiangShan")
 }

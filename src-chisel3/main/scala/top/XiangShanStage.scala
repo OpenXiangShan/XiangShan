@@ -16,20 +16,22 @@
 
 package top
 
-import circt.stage._
-import chisel3.stage.ChiselGeneratorAnnotation
-import xiangshan.types._
+import chisel3.stage._
+import firrtl.stage._
+import firrtl.options.Shell
+import xstransforms._
 
-object Generator {
-  def execute(args: Array[String], mod: => chisel3.RawModule, firtoolOpts: Array[String]) = {
-    val annotations = chisel3.BuildInfo.version match {
-      case "3.6.0" => Seq(
-        RunFirrtlTransformAnnotation(new PrintControl),
-        RunFirrtlTransformAnnotation(new PrintModuleName)
-      )
-      case _ => Seq(CIRCTTargetAnnotation(CIRCTTarget.Verilog)) ++ firtoolOpts.map(FirtoolOption.apply)
-    }
+class XiangShanStage extends ChiselStage {
+  override val shell: Shell = new Shell("xiangshan")
+    with XiangShanCli
+    with ChiselCli
+    with FirrtlCli
 
-    (new XiangShanStage).execute(args, ChiselGeneratorAnnotation(mod _) +: annotations)
+  trait XiangShanCli { this: Shell =>
+    parser.note("XiangShan Options")
+    DisablePrintfAnnotation.addOptions(parser)
+    EnablePrintfAnnotation.addOptions(parser)
+    DisableAllPrintAnnotation.addOptions(parser)
+    RemoveAssertAnnotation.addOptions(parser)
   }
 }

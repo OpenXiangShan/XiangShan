@@ -41,10 +41,14 @@ case class ICacheParameters(
     nMissEntries: Int = 2,
     nReleaseEntries: Int = 1,
     nProbeEntries: Int = 2,
+    // fdip default config
+    enableICachePrefetch: Boolean = true,
+    prefetchToL1: Boolean = false,
+    prefetchPipeNum: Int = 1,
     nPrefetchEntries: Int = 12,
     nPrefBufferEntries: Int = 32,
-    hasPrefetch: Boolean = true,
-    prefetchPipeNum: Int = 1,
+    maxIPFMoveConf: Int = 1, // temporary use small value to cause more "move" operation
+    
     nMMIOs: Int = 1,
     blockBytes: Int = 64
 )extends L1CacheParameters {
@@ -87,11 +91,12 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
   def partWayNum = 2
   def pWay = nWays/partWayNum
 
-  def nPrefetchEntries = cacheParams.nPrefetchEntries
-  def totalMSHRNum = PortNumber + nPrefetchEntries
-  def nIPFBufferSize   = cacheParams.nPrefBufferEntries
-  def maxIPFMoveConf   = 1 // temporary use small value to cause more "move" operation
-  def prefetchPipeNum = ICacheParameters().prefetchPipeNum
+  def enableICachePrefetch      = cacheParams.enableICachePrefetch
+  def prefetchToL1        = cacheParams.prefetchToL1
+  def prefetchPipeNum     = cacheParams.prefetchPipeNum
+  def nPrefetchEntries    = cacheParams.nPrefetchEntries
+  def nPrefBufferEntries  = cacheParams.nPrefBufferEntries
+  def maxIPFMoveConf      = cacheParams.maxIPFMoveConf
 
   def getBits(num: Int) = log2Ceil(num).W
 
@@ -122,6 +127,12 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
     when (flush) { counter := 0.U}
     counter > threshold.U
   }
+
+  def InitQueue[T <: Data](entry: T, size: Int): Vec[T] ={
+    return RegInit(VecInit(Seq.fill(size)(0.U.asTypeOf(entry.cloneType))))
+  }
+
+  def getBlkPaddr(addr: UInt) = addr(PAddrBits-1, log2Ceil(blockBytes))
 
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
   require(isPow2(nWays), s"nWays($nWays) must be pow2")
@@ -507,7 +518,7 @@ class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParamete
   val clientParameters = TLMasterPortParameters.v1(
     Seq(TLMasterParameters.v1(
       name = "icache",
-      sourceId = IdRange(0, cacheParams.nMissEntries + cacheParams.nPrefetchEntries),
+      sourceId = IdRange(0, cacheParams.nMissEntries + 1),
     )),
     requestFields = cacheParams.reqFields,
     echoFields = cacheParams.echoFields
@@ -525,47 +536,60 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   println("  ICacheSets: "          + cacheParams.nSets)
   println("  ICacheWays: "          + cacheParams.nWays)
   println("  ICacheBanks: "         + PortNumber)
-  println("  hasPrefetch: "         + cacheParams.hasPrefetch)
-  if(cacheParams.hasPrefetch){
-    println("  nPrefetchEntries: "         + cacheParams.nPrefetchEntries)
-    println("  nPrefetchBufferEntries: " + cacheParams.nPrefBufferEntries)
-    println("  prefetchPipeNum: " + cacheParams.prefetchPipeNum)
-  }
+
+  println("  enableICachePrefetch:     " + cacheParams.enableICachePrefetch)
+  println("  prefetchToL1:       " + cacheParams.prefetchToL1)
+  println("  prefetchPipeNum:    " + cacheParams.prefetchPipeNum)
+  println("  nPrefetchEntries:   " + cacheParams.nPrefetchEntries)
+  println("  nPrefBufferEntries: " + cacheParams.nPrefBufferEntries)
+  println("  maxIPFMoveConf:     " + cacheParams.maxIPFMoveConf)
 
   val (bus, edge) = outer.clientNode.out.head
 
   val metaArray         = Module(new ICacheMetaArray)
   val dataArray         = Module(new ICacheDataArray)
-  val prefetchMetaArray = Module(new ICacheBankedMetaArray(prefetchPipeNum)) // need add 1 port for IPF filter
+  val prefetchMetaArray = Module(new ICacheMetaArrayNoBanked)
   val mainPipe          = Module(new ICacheMainPipe)
   val missUnit          = Module(new ICacheMissUnit(edge))
   val fdipPrefetch      = Module(new FDIPPrefetch(edge))
 
-  fdipPrefetch.io.hartId            := io.hartId
-  fdipPrefetch.io.fencei            := io.fencei
-  fdipPrefetch.io.ftqReq            <> io.prefetch
-  fdipPrefetch.io.metaReadReq       <> prefetchMetaArray.io.read(0)
-  fdipPrefetch.io.metaReadResp      <> prefetchMetaArray.io.readResp(0)
-  fdipPrefetch.io.mshrInfo          <> missUnit.io.mshrInfo
-  fdipPrefetch.io.mainPipeMissInfo  <> mainPipe.io.mainPipeMissInfo
-  fdipPrefetch.io.IPFBufferRead     <> mainPipe.io.IPFBufferRead
-  fdipPrefetch.io.IPFReplacer       <> mainPipe.io.IPFReplacer
-  fdipPrefetch.io.PIQRead           <> mainPipe.io.PIQRead
+  fdipPrefetch.io.hartId              := io.hartId
+  fdipPrefetch.io.fencei              := io.fencei
+  fdipPrefetch.io.ftqReq              <> io.prefetch
+  fdipPrefetch.io.metaReadReq         <> prefetchMetaArray.io.read
+  fdipPrefetch.io.metaReadResp        <> prefetchMetaArray.io.readResp
+  fdipPrefetch.io.ICacheMissUnitInfo  <> missUnit.io.ICacheMissUnitInfo
+  fdipPrefetch.io.ICacheMainPipeInfo  <> mainPipe.io.ICacheMainPipeInfo
+  fdipPrefetch.io.IPFBufferRead       <> mainPipe.io.IPFBufferRead
+  fdipPrefetch.io.IPFReplacer         <> mainPipe.io.IPFReplacer
+  fdipPrefetch.io.PIQRead             <> mainPipe.io.PIQRead
+  fdipPrefetch.io.metaWrite           <> DontCare
+  fdipPrefetch.io.dataWrite           <> DontCare
 
   // Meta Array. Priority: missUnit > fdipPrefetch
-  val meta_write_arb  = Module(new Arbiter(new ICacheMetaWriteBundle(),  2))
-  meta_write_arb.io.in(0)     <> missUnit.io.meta_write
-  meta_write_arb.io.in(1)     <> fdipPrefetch.io.metaWrite
-  meta_write_arb.io.out       <> metaArray.io.write
+  if (prefetchToL1) {
+    val meta_write_arb  = Module(new Arbiter(new ICacheMetaWriteBundle(),  2))
+    meta_write_arb.io.in(0)     <> missUnit.io.meta_write
+    meta_write_arb.io.in(1)     <> fdipPrefetch.io.metaWrite
+    meta_write_arb.io.out       <> metaArray.io.write
+    // prefetch Meta Array. Connect meta_write_arb to ensure the data is same as metaArray
+    prefetchMetaArray.io.write <> meta_write_arb.io.out
+  } else {
+    missUnit.io.meta_write <> metaArray.io.write
+    missUnit.io.meta_write <> prefetchMetaArray.io.write
+    // ensure together wirte to metaArray and prefetchMetaArray
+    missUnit.io.meta_write.ready := metaArray.io.write.ready && prefetchMetaArray.io.write.ready
+  }
 
   // Data Array. Priority: missUnit > fdipPrefetch
-  val data_write_arb = Module(new Arbiter(new ICacheDataWriteBundle(), 2))
-  data_write_arb.io.in(0)     <> missUnit.io.data_write
-  data_write_arb.io.in(1)     <> fdipPrefetch.io.dataWrite
-  data_write_arb.io.out       <> dataArray.io.write
-
-  // prefetch Meta Array. Connect meta_write_arb to ensure the data is same as metaArray
-  prefetchMetaArray.io.write <> meta_write_arb.io.out
+  if (prefetchToL1) {
+    val data_write_arb = Module(new Arbiter(new ICacheDataWriteBundle(), 2))
+    data_write_arb.io.in(0)     <> missUnit.io.data_write
+    data_write_arb.io.in(1)     <> fdipPrefetch.io.dataWrite
+    data_write_arb.io.out       <> dataArray.io.write
+  } else {
+    missUnit.io.data_write <> dataArray.io.write
+  }
 
   mainPipe.io.dataArray.toIData     <> dataArray.io.read
   mainPipe.io.dataArray.fromIData   <> dataArray.io.readResp
@@ -578,15 +602,11 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   io.pmp(0) <> mainPipe.io.pmp(0)
   io.pmp(1) <> mainPipe.io.pmp(1)
-  if(cacheParams.hasPrefetch) {
-    io.pmp(2) <> fdipPrefetch.io.pmp
-  }
+  io.pmp(2) <> fdipPrefetch.io.pmp
 
-  io.itlb(0)        <>    mainPipe.io.itlb(0)
-  io.itlb(1)        <>    mainPipe.io.itlb(1)
-  if(cacheParams.hasPrefetch) {
-    io.itlb(2) <> fdipPrefetch.io.iTLBInter
-  }
+  io.itlb(0) <> mainPipe.io.itlb(0)
+  io.itlb(1) <> mainPipe.io.itlb(1)
+  io.itlb(2) <> fdipPrefetch.io.iTLBInter
 
   //notify IFU that Icache pipeline is available
   io.toIFU := mainPipe.io.fetch.req.ready

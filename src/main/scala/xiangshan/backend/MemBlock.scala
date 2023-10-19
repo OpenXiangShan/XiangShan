@@ -20,8 +20,9 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
+import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
-import freechips.rocketchip.tilelink.TLBuffer
+import freechips.rocketchip.tilelink.{TLBuffer, TLIdentityNode}
 import coupledL2.PrefetchRecv
 import utils._
 import utility._
@@ -103,6 +104,23 @@ class fetch_to_mem(implicit p: Parameters) extends XSBundle{
   val itlb = Flipped(new TlbPtwIO())
 }
 
+// Frontend bus goes through MemBlock
+class FrontendBridge()(implicit p: Parameters) extends LazyModule {
+  val icache_node = TLIdentityNode()
+  val instr_uncache_node = TLIdentityNode()
+  lazy val module = new LazyModuleImp(this) {
+    icache_node.in.zip(icache_node.out).foreach{ x =>
+      x._2._1 <> x._1._1
+      dontTouch(x._1._1)
+      dontTouch(x._2._1)
+    }
+    instr_uncache_node.in.zip(instr_uncache_node.out).foreach{ x =>
+      x._2._1 <> x._1._1
+      dontTouch(x._1._1)
+      dontTouch(x._2._1)
+    }
+  }
+}
 
 class MemBlock()(implicit p: Parameters) extends LazyModule
   with HasXSParameter with HasWritebackSource {
@@ -118,6 +136,11 @@ class MemBlock()(implicit p: Parameters) extends LazyModule
   val l3_pf_sender_opt = coreParams.prefetcher.map(_ =>
     BundleBridgeSource(() => new huancun.PrefetchRecv)
   )
+  val frontendBridge = LazyModule(new FrontendBridge)
+  // interrupt sinks
+  val clint_int_sink = IntSinkNode(IntSinkPortSimple(1, 2))
+  val debug_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
+  val plic_int_sink = IntSinkNode(IntSinkPortSimple(2, 1))
 
   if (!coreParams.softPTW) {
     ptw_to_l2_buffer.node := ptw.node
@@ -173,7 +196,38 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       val toCore = new MemCoreTopDownIO
     }
     val debugRolling = Flipped(new RobDebugRollingIO)
+
+    // All the signals from/to frontend/backend to/from bus will go through MemBlock
+    val externalInterrupt = Flipped(new ExternalInterruptIO)
+    val inner_hartId = Output(UInt(64.W))
+    val inner_reset_vector = Output(UInt(PAddrBits.W))
+    val outer_reset_vector = Input(UInt(PAddrBits.W))
+    val inner_cpu_halt = Input(Bool())
+    val outer_cpu_halt = Output(Bool())
+    val inner_beu_errors_icache = Input(new L1BusErrorUnitInfo)
+    val outer_beu_errors_icache = Output(new L1BusErrorUnitInfo)
+    val inner_l2_pf_enable = Input(Bool())
+    val outer_l2_pf_enable = Output(Bool())
+    // val inner_hc_perfEvents = Output(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
+    // val outer_hc_perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
   })
+
+  // reset signals of frontend & backend are generated in memblock
+  val reset_io_frontend = IO(Output(Reset()))
+  val reset_io_backend = IO(Output(Reset()))
+
+  dontTouch(io.externalInterrupt)
+  dontTouch(io.inner_hartId)
+  dontTouch(io.inner_reset_vector)
+  dontTouch(io.outer_reset_vector)
+  dontTouch(io.inner_cpu_halt)
+  dontTouch(io.outer_cpu_halt)
+  dontTouch(io.inner_beu_errors_icache)
+  dontTouch(io.outer_beu_errors_icache)
+  dontTouch(io.inner_l2_pf_enable)
+  dontTouch(io.outer_l2_pf_enable)
+  // dontTouch(io.inner_hc_perfEvents)
+  // dontTouch(io.outer_hc_perfEvents)
 
   override def writebackSource1: Option[Seq[Seq[DecoupledIO[ExuOutput]]]] = Some(Seq(io.mem_to_ooo.writeback))
 
@@ -242,21 +296,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   storeUnits.zipWithIndex.map(x => x._1.suggestName("StoreUnit_"+x._2))
   val atomicsUnit = Module(new AtomicsUnit)
 
-  // Atom inst comes from sta / std, then its result
-  // will be writebacked using load writeback port
-  //
-  // However, atom exception will be writebacked to rob
-  // using store writeback port
-
   val loadWritebackOverride  = Mux(atomicsUnit.io.out.valid, atomicsUnit.io.out.bits, loadUnits.head.io.ldout.bits)
   val ldout0 = Wire(Decoupled(new ExuOutput))
   ldout0.valid := atomicsUnit.io.out.valid || loadUnits.head.io.ldout.valid
   ldout0.bits  := loadWritebackOverride
   atomicsUnit.io.out.ready := ldout0.ready
   loadUnits.head.io.ldout.ready := ldout0.ready
-  when(atomicsUnit.io.out.valid){
-    ldout0.bits.uop.cf.exceptionVec := 0.U(16.W).asBools // exception will be writebacked via store wb port
-  }
 
   val ldExeWbReqs = ldout0 +: loadUnits.tail.map(_.io.ldout)
   io.mem_to_ooo.writeback <> ldExeWbReqs ++ VecInit(storeUnits.map(_.io.stout)) ++ VecInit(stdExeUnits.map(_.io.out))
@@ -762,13 +807,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     lsq.io.mmioStout.ready := true.B
   }
 
-  // atomic exception / trigger writeback
   when (atomicsUnit.io.out.valid) {
-    // atom inst will use store writeback port 0 to writeback exception info
-    stOut(0).valid := true.B
-    stOut(0).bits  := atomicsUnit.io.out.bits
-    assert(!lsq.io.mmioStout.valid && !storeUnits(0).io.stout.valid)
-
     // when atom inst writeback, surpress normal load trigger
     (0 until exuParameters.LduCnt).map(i => {
       io.mem_to_ooo.writeback(i).bits.uop.cf.trigger.backendHit := VecInit(Seq.fill(6)(false.B))
@@ -923,6 +962,35 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.memInfo.sqFull := RegNext(lsq.io.sqFull)
   io.memInfo.lqFull := RegNext(lsq.io.lqFull)
   io.memInfo.dcacheMSHRFull := RegNext(dcache.io.mshrFull)
+
+  io.externalInterrupt.msip := outer.clint_int_sink.in.head._1(0)
+  io.externalInterrupt.mtip := outer.clint_int_sink.in.head._1(1)
+  io.externalInterrupt.meip := outer.plic_int_sink.in.head._1(0)
+  io.externalInterrupt.seip := outer.plic_int_sink.in.last._1(0)
+  io.externalInterrupt.debug := outer.debug_int_sink.in.head._1(0)
+  io.inner_hartId := io.hartId
+  io.inner_reset_vector := io.outer_reset_vector
+  io.outer_cpu_halt := io.inner_cpu_halt
+  io.outer_beu_errors_icache := io.inner_beu_errors_icache
+  io.outer_l2_pf_enable := io.inner_l2_pf_enable
+  // io.inner_hc_perfEvents <> io.outer_hc_perfEvents
+
+  if (p(DebugOptionsKey).FPGAPlatform) {
+    val resetTree = ResetGenNode(
+      Seq(
+        ResetGenNode(Seq(ResetGenNode(Seq(CellNode(reset_io_frontend))))),
+        CellNode(reset_io_backend),
+        ModuleNode(itlbRepeater2),
+        ModuleNode(dtlbRepeater2),
+        ModuleNode(ptw),
+        ModuleNode(ptw_to_l2_buffer)
+      )
+    )
+    ResetGen(resetTree, reset, !p(DebugOptionsKey).FPGAPlatform)
+  } else {
+    reset_io_frontend := DontCare
+    reset_io_backend := DontCare
+  }
 
   // top-down info
   dcache.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr
