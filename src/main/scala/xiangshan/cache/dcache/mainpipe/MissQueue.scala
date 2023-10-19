@@ -667,7 +667,9 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   }
   require(nSets <= 256)
 
-  io.mem_grant.ready := !w_grantlast && s_acquire
+  // io.mem_grant.ready := !w_grantlast && s_acquire
+  io.mem_grant.ready := true.B
+  assert(!(io.mem_grant.valid && !(!w_grantlast && s_acquire)), "dcache should always be ready for mem_grant now")
 
   val grantack = RegEnable(edge.GrantAck(io.mem_grant.bits), io.mem_grant.fire)
   assert(RegNext(!io.mem_grant.fire || edge.isRequest(io.mem_grant.bits)))
