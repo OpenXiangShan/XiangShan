@@ -78,7 +78,7 @@ class MinimalConfig(n: Int = 1) extends Config(
         StoreQueueNWriteBanks = 4, // NOTE: make sure that StoreQueueSize is divided by StoreQueueNWriteBanks
         StoreQueueForwardWithMask = true,
         RobSize = 32,
-        RabSize = 32,
+        RabSize = 96,
         FtqSize = 8,
         IBufSize = 16,
         StoreBufferSize = 4,
@@ -99,7 +99,7 @@ class MinimalConfig(n: Int = 1) extends Config(
         ),
         vfPreg = VfPregParams(
           numEntries = 192,
-          numRead = None,
+          numRead = Some(14),
           numWrite = None,
         ),
         icacheParameters = ICacheParameters(

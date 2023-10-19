@@ -69,6 +69,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
       val storeMaskIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreMaskBundle))) // from store_s0, store mask, send to sq from rs
       val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // from store_s1
       val storeAddrInRe = Vec(StorePipelineWidth, Input(new LsPipelineBundle())) // from store_s2
+      val vecStoreAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
     }
     val std = new Bundle() {
       val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new MemExuOutput))) // from store_s0, store data, send to sq from rs
@@ -102,6 +103,12 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val force_write = Output(Bool())
     val lqEmpty = Output(Bool())
+
+    // vector
+    val vecWriteback = Flipped(ValidIO(new MemExuOutput(isVector = true)))
+    val vecStoreRetire = Flipped(ValidIO(new SqPtr))
+
+    // top-down
     val debugTopDown = new LoadQueueTopDownIO
   })
 
@@ -157,6 +164,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   storeQueue.io.sqFull      <> io.sqFull
   storeQueue.io.forward     <> io.forward // overlap forwardMask & forwardData, DO NOT CHANGE SEQUENCE
   storeQueue.io.force_write <> io.force_write
+  storeQueue.io.vecStoreRetire <> io.vecStoreRetire
 
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
 
@@ -181,12 +189,14 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   loadQueue.io.sq.stIssuePtr       <> storeQueue.io.stIssuePtr
   loadQueue.io.sq.sqEmpty          <> storeQueue.io.sqEmpty
   loadQueue.io.sta.storeAddrIn     <> io.sta.storeAddrIn // store_s1
+  loadQueue.io.sta.vecStoreAddrIn  <> io.sta.vecStoreAddrIn // store_s1
   loadQueue.io.std.storeDataIn     <> io.std.storeDataIn // store_s0
   loadQueue.io.lqFull              <> io.lqFull
   loadQueue.io.lq_rep_full         <> io.lq_rep_full
   loadQueue.io.lqDeq               <> io.lqDeq
   loadQueue.io.l2_hint             <> io.l2_hint
   loadQueue.io.lqEmpty             <> io.lqEmpty
+  loadQueue.io.vecWriteback        <> io.vecWriteback
 
   // rob commits for lsq is delayed for two cycles, which causes the delayed update for deqPtr in lq/sq
   // s0: commit

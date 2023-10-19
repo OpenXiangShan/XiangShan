@@ -539,7 +539,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val writebackStd = Vec(params.StdCnt, Flipped(DecoupledIO(new MemExuOutput)))
   val writebackHyuLda = Vec(params.HyuCnt, Flipped(DecoupledIO(new MemExuOutput)))
   val writebackHyuSta = Vec(params.HyuCnt, Flipped(DecoupledIO(new MemExuOutput)))
-  val writebackVlda = Vec(params.VlduCnt, Flipped(DecoupledIO(new MemExuOutput(true))))
+  val writebackVldu = Vec(params.VlduCnt, Flipped(DecoupledIO(new MemExuOutput(true))))
 
   val s3_delayed_load_error = Input(Vec(LoadPipelineWidth, Bool()))
   val stIn = Input(Vec(params.StaCnt, ValidIO(new DynInst())))
@@ -569,8 +569,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val issueStd = MixedVec(Seq.fill(params.StdCnt)(DecoupledIO(new MemExuInput())))
   val issueHylda = MixedVec(Seq.fill(params.HyuCnt)(DecoupledIO(new MemExuInput())))
   val issueHysta = MixedVec(Seq.fill(params.HyuCnt)(DecoupledIO(new MemExuInput())))
-  // hybrid unit store data use this
-  val issueVldu = MixedVec(Seq.fill(params.VlduCnt)(DecoupledIO(new MemExuInput(isVector = true))))
+  val issueVldu = MixedVec(Seq.fill(params.VlduCnt)(DecoupledIO(new MemExuInput(true))))
 
   val loadFastMatch = Vec(params.LduCnt, Output(UInt(params.LduCnt.W)))
   val loadFastImm   = Vec(params.LduCnt, Output(UInt(12.W))) // Imm_I
@@ -594,7 +593,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
     Seq(writebackLda(0)) ++ Seq(writebackSta(0)) ++
       writebackHyuLda ++ writebackHyuSta ++
       Seq(writebackLda(1)) ++
-      writebackVlda ++
+      writebackVldu ++
       writebackStd
   }
 }

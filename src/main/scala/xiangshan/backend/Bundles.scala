@@ -667,11 +667,18 @@ object Bundles {
     val iqIdx = UInt(log2Up(MemIQSizeMax).W)
     val isFirstIssue = Bool()
     val deqPortIdx = UInt(log2Ceil(LoadPipelineWidth).W)
+
+    def src_rs1 = src(0)
+    def src_stride = src(1)
+    def src_vs3 = src(2)
+    def src_mask = if (isVector) src(3) else 0.U
+    def src_vl = if (isVector) src(4) else 0.U
   }
 
   class MemExuOutput(isVector: Boolean = false)(implicit p: Parameters) extends XSBundle {
     val uop = new DynInst
     val data = if (isVector) UInt(VLEN.W) else UInt(XLEN.W)
+    val mask = if (isVector) Some(UInt((VLEN/8).W)) else None
     val debug = new DebugBundle
   }
 

@@ -140,7 +140,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.writebackHyuLda <> memBlock.io.mem_to_ooo.writebackHyuLda
   backend.io.mem.writebackHyuSta <> memBlock.io.mem_to_ooo.writebackHyuSta
   backend.io.mem.writebackStd <> memBlock.io.mem_to_ooo.writebackStd
-  backend.io.mem.writebackVlda <> memBlock.io.mem_to_ooo.writebackVlda
+  backend.io.mem.writebackVldu <> memBlock.io.mem_to_ooo.writebackVldu
   backend.io.mem.robLsqIO.mmio := memBlock.io.mem_to_ooo.lsqio.mmio
   backend.io.mem.robLsqIO.uop := memBlock.io.mem_to_ooo.lsqio.uop
 
@@ -196,30 +196,19 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.redirect <> backend.io.mem.redirect
   memBlock.io.ooo_to_mem.csrCtrl <> backend.io.mem.csrCtrl
   memBlock.io.ooo_to_mem.tlbCsr <> backend.io.mem.tlbCsr
-  memBlock.io.ooo_to_mem.lsqio.lcommit    := backend.io.mem.robLsqIO.lcommit
-  memBlock.io.ooo_to_mem.lsqio.scommit    := backend.io.mem.robLsqIO.scommit
-  memBlock.io.ooo_to_mem.lsqio.pendingld  := backend.io.mem.robLsqIO.pendingld
-  memBlock.io.ooo_to_mem.lsqio.pendingst  := backend.io.mem.robLsqIO.pendingst
-  memBlock.io.ooo_to_mem.lsqio.commit     := backend.io.mem.robLsqIO.commit
-  memBlock.io.ooo_to_mem.lsqio.pendingPtr := backend.io.mem.robLsqIO.pendingPtr
-  memBlock.io.ooo_to_mem.isStore          := backend.io.mem.isStoreException
+  memBlock.io.ooo_to_mem.lsqio.lcommit        := backend.io.mem.robLsqIO.lcommit
+  memBlock.io.ooo_to_mem.lsqio.scommit        := backend.io.mem.robLsqIO.scommit
+  memBlock.io.ooo_to_mem.lsqio.pendingld      := backend.io.mem.robLsqIO.pendingld
+  memBlock.io.ooo_to_mem.lsqio.pendingst      := backend.io.mem.robLsqIO.pendingst
+  memBlock.io.ooo_to_mem.lsqio.commit         := backend.io.mem.robLsqIO.commit
+  memBlock.io.ooo_to_mem.lsqio.pendingPtr     := backend.io.mem.robLsqIO.pendingPtr
+  memBlock.io.ooo_to_mem.lsqio.pendingPtrNext := backend.io.mem.robLsqIO.pendingPtrNext
+  memBlock.io.ooo_to_mem.isStore              := backend.io.mem.isStoreException
 
   memBlock.io.fetch_to_mem.itlb <> frontend.io.ptw
   memBlock.io.l2_hint.valid := io.l2_hint.valid
   memBlock.io.l2_hint.bits.sourceId := io.l2_hint.bits.sourceId
   memBlock.io.l2PfqBusy := io.l2PfqBusy
-  memBlock.io.int2vlsu <> DontCare
-  memBlock.io.vec2vlsu <> DontCare
-  memBlock.io.vlsu2vec <> DontCare
-  memBlock.io.vlsu2int <> DontCare
-  memBlock.io.vlsu2ctrl <> DontCare
-
-  // TODO: Connect us when implemented
-  memBlock.io.int2vlsu  <> DontCare
-  memBlock.io.vec2vlsu  <> DontCare
-  memBlock.io.vlsu2vec  <> DontCare
-  memBlock.io.vlsu2int  <> DontCare
-  memBlock.io.vlsu2ctrl <> DontCare
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   io.l2_pf_enable := backend.io.csrCustomCtrl.l2_pf_enable
