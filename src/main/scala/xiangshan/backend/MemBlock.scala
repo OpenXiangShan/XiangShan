@@ -981,7 +981,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
         ResetGenNode(Seq(ResetGenNode(Seq(CellNode(reset_io_frontend))))),
         CellNode(reset_io_backend),
         ModuleNode(itlbRepeater2),
-        ModuleNode(dtlbRepeater2),
+        ModuleNode(dtlbRepeater),
         ModuleNode(ptw),
         ModuleNode(ptw_to_l2_buffer)
       )
