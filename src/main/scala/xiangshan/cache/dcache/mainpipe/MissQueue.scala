@@ -172,8 +172,6 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
     val block_match = get_block(req.addr) === get_block(new_req.addr)
     val alias_match = is_alias_match(req.vaddr, new_req.vaddr)
     val merge_load = (req.isFromLoad || req.isFromStore || req.isFromPrefetch) && new_req.isFromLoad
-    // store merge to a store is disabled, sbuffer should avoid this situation, as store to same address should preserver their program order to match memory model
-    val merge_store = (req.isFromLoad || req.isFromPrefetch) && new_req.isFromStore
 
     val set_match = addr_to_dcache_set(req.vaddr) === addr_to_dcache_set(new_req.vaddr)
     val way_match = req.way_en === new_req.way_en
@@ -181,7 +179,7 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
         alloc,
         Mux(
             block_match,
-            !alias_match || !(merge_load || merge_store),
+            !alias_match || !merge_load,
             set_match && way_match
           ),
         false.B
@@ -192,20 +190,15 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
     val block_match = get_block(req.addr) === get_block(new_req.addr)
     val alias_match = is_alias_match(req.vaddr, new_req.vaddr)
     val merge_load = (req.isFromLoad || req.isFromStore || req.isFromPrefetch) && new_req.isFromLoad
-    // store merge to a store is disabled, sbuffer should avoid this situation, as store to same address should preserver their program order to match memory model
-    val merge_store = (req.isFromLoad || req.isFromPrefetch) && new_req.isFromStore
     Mux(
         alloc,
-        block_match && alias_match && (merge_load || merge_store),
+        block_match && alias_match && merge_load,
         false.B
       )
   }
 
   // send out acquire as soon as possible
-  // if a new store miss req is about to merge into this pipe reg, don't send acquire now
-  def can_send_acquire(valid: Bool, new_req: MissReq): Bool = {
-    alloc && !(valid && merge_req(new_req) && new_req.isFromStore)
-  }
+  def can_send_acquire(): Bool = alloc
 
   def get_acquire(l2_pf_store_only: Bool): TLBundleA = {
     val acquire = Wire(new TLBundleA(edge.bundle))
@@ -1004,7 +997,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   io.refill_to_ldq.valid := Cat(entries.map(_.io.refill_to_ldq.valid)).orR
   io.refill_to_ldq.bits := ParallelMux(entries.map(_.io.refill_to_ldq.valid) zip entries.map(_.io.refill_to_ldq.bits))
 
-  acquire_from_pipereg.valid := miss_req_pipe_reg.can_send_acquire(io.req.valid, io.req.bits)
+  acquire_from_pipereg.valid := miss_req_pipe_reg.can_send_acquire()
   acquire_from_pipereg.bits := miss_req_pipe_reg.get_acquire(io.l2_pf_store_only)
 
   XSPerfAccumulate("acquire_fire_from_pipereg", acquire_from_pipereg.fire)
