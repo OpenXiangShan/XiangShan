@@ -36,6 +36,23 @@ import xiangshan.cache.mmu._
 import xiangshan.mem._
 import xiangshan.mem.prefetch.{BasePrefecher, L1Prefetcher, SMSParams, SMSPrefetcher}
 
+trait HasMemBlockParameters extends HasXSParameter {
+  // number of memory units
+  val LduCnt = backendParams.LduCnt
+  val StaCnt = backendParams.StaCnt
+  val StdCnt = backendParams.StdCnt
+  val HyuCnt = bankendParams.HyuCnt
+
+  val LdExeCnt  = LduCnt + HyuCnt
+  val StAddrCnt = StaCnt + HyuCnt
+  val StDataCnt = StdCnt
+  val MemExuCnt = LdExeCnt + StaCnt + StdCnt + HyuCnt
+  val MemAddrExtCnt = LdExeCnt + StaCnt
+}
+
+abstract class MemBlockBundle(implicit p: Parameters) extends Bundle with HasMemBlockParameters
+abstract class MemBlockModule(implicit p: Parameters) extends Module with HasMemBlockParameters
+
 class Std(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.in.ready := io.out.ready
   io.out.valid := io.in.valid
@@ -44,10 +61,10 @@ class Std(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.out.bits.ctrl.robIdx := io.in.bits.ctrl.robIdx
 }
 
-class ooo_to_mem(implicit p: Parameters) extends XSBundle {
-  val loadFastMatch = Vec(backendParams.LduCnt, Input(UInt(backendParams.LduCnt.W)))
-  val loadFastFuOpType = Vec(backendParams.LduCnt, Input(FuOpType()))
-  val loadFastImm = Vec(backendParams.LduCnt, Input(UInt(12.W)))
+class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
+  val loadFastMatch = Vec(LdExeCnt, Input(UInt(LdExeCnt.W)))
+  val loadFastFuOpType = Vec(LdExeCnt, Input(FuOpType()))
+  val loadFastImm = Vec(LdExeCnt, Input(UInt(12.W)))
   val sfence = Input(new SfenceBundle)
   val tlbCsr = Input(new TlbCsrBundle)
   val lsqio = new Bundle {
@@ -63,25 +80,26 @@ class ooo_to_mem(implicit p: Parameters) extends XSBundle {
   val csrCtrl = Flipped(new CustomCSRCtrlIO)
   val enqLsq = new LsqEnqIO
   val flushSb = Input(Bool())
-  val loadPc = Vec(backendParams.LduCnt, Input(UInt(VAddrBits.W))) // for hw prefetch
-  val storePc = Vec(backendParams.StaCnt, Input(UInt(VAddrBits.W))) // for hw prefetch
-  val issue = Vec(backendParams.LsExuCnt + backendParams.StaCnt, Flipped(DecoupledIO(new MemExuInput)))
+  val loadPc = Vec(LduCnt, Input(UInt(VAddrBits.W))) // for hw prefetch
+  val storePc = Vec(StaCnt, Input(UInt(VAddrBits.W))) // for hw prefetch
+  val hybridPc = Vec(HyuCnt, Input(UInt(VAddrBits.W))) // for hw prefetch
+  val issue = Vec(MemExuCnt, Flipped(DecoupledIO(new MemExuInput)))
 }
 
-class mem_to_ooo(implicit p: Parameters ) extends XSBundle {
-  val otherFastWakeup = Vec(backendParams.LduCnt + 2 * backendParams.StaCnt, ValidIO(new DynInst))
+class mem_to_ooo(implicit p: Parameters ) extends MemBlockBundle {
+  val otherFastWakeup = Vec(LdExeCnt, ValidIO(new DynInst))
   val csrUpdate = new DistributedCSRUpdateReq
   val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize + 1).W))
   val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
   val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
   val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
-  val stIn = Vec(backendParams.StaCnt, ValidIO(new MemExuInput))
+  val stIn = Vec(StAddrCnt, ValidIO(new MemExuInput))
   val stIssuePtr = Output(new SqPtr())
 
   val memoryViolation = ValidIO(new Redirect)
   val sbIsEmpty = Output(Bool())
 
-  val lsTopdownInfo = Vec(backendParams.LduCnt, Output(new LsTopdownInfo))
+  val lsTopdownInfo = Vec(LdExeCnt, Output(new LsTopdownInfo))
 
   val lsqio = new Bundle {
     val vaddr = Output(UInt(VAddrBits.W))
@@ -90,7 +108,8 @@ class mem_to_ooo(implicit p: Parameters ) extends XSBundle {
     val lqCanAccept = Output(Bool())
     val sqCanAccept = Output(Bool())
   }
-  val writeback = Vec(backendParams.LsExuCnt + backendParams.StaCnt, DecoupledIO(new MemExuOutput))
+  val writeback = Vec(MemExuCnt, DecoupledIO(new MemExuOutput))
+  val rfWriteback = Vec(LdExeCnt, DecoupledIO(new MemExuOutput))
 }
 
 class MemCoreTopDownIO extends Bundle {
@@ -134,13 +153,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   with HasFPUParameters
   with HasPerfEvents
   with HasL1PrefetchSourceParameter
+  with HasMemBlockParameters
 {
-  private val LduCnt = backendParams.LduCnt
-  private val StaCnt = backendParams.StaCnt
-  private val StdCnt = backendParams.StdCnt
-  private val MemExuCnt = LduCnt + StaCnt + StdCnt
-  private val MemAddrExtCnt = LduCnt + StaCnt
-
   val io = IO(new Bundle {
     val hartId = Input(UInt(8.W))
     val redirect = Flipped(ValidIO(new Redirect))
@@ -152,10 +166,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val int2vlsu = Flipped(new Int2VLSUIO)
     val vec2vlsu = Flipped(new Vec2VLSUIO)
     // out
-    val s3_delayed_load_error = Vec(LduCnt, Output(Bool()))
-    val ldaIqFeedback = Vec(LduCnt, new MemRSFeedbackIO)
-    val staIqFeedback = Vec(StaCnt, new MemRSFeedbackIO)
-    val ldCancel = Vec(LduCnt, new LoadCancelIO)
+    val s3_delayed_load_error = Vec(LdExeCnt, Output(Bool()))
+    val ldaIqFeedback = Vec(LdExeCnt, new MemRSFeedbackIO)
+    val staIqFeedback = Vec(StAddrCnt, new MemRSFeedbackIO)
+    val ldCancel = Vec(LdExeCnt, new LoadCancelIO)
     val vlsu2vec = new VLSU2VecIO
     val vlsu2int = new VLSU2IntIO
     val vlsu2ctrl = new VLSU2CtrlIO
@@ -197,8 +211,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val loadUnits = Seq.fill(LduCnt)(Module(new LoadUnit))
   val storeUnits = Seq.fill(StaCnt)(Module(new StoreUnit))
   val stdExeUnits = Seq.fill(StdCnt)(Module(new MemExeUnit(backendParams.memSchdParams.get.issueBlockParams(2).exuBlockParams.head)))
+  val hybridUnits = Seq.fill(HyuCnt)(Module(new HybridUnit))
   val stData = stdExeUnits.map(_.io.out)
-  val exeUnits = loadUnits ++ storeUnits
+  val exeUnits = loadUnits ++ storeUnits ++ hybridUnits
   val l1_pf_req = Wire(Decoupled(new L1PrefetchReq()))
   val prefetcherOpt: Option[BasePrefecher] = coreParams.prefetcher.map {
     case _: SMSParams =>

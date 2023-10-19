@@ -526,7 +526,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val lqCanAccept = Input(Bool())
   val sqCanAccept = Input(Bool())
 
-  val otherFastWakeup = Flipped(Vec(params.LduCnt + 2 * params.StaCnt, ValidIO(new DynInst)))
+  val otherFastWakeup = Flipped(Vec(params.LduCnt + params.HyuCnt, ValidIO(new DynInst)))
   val stIssuePtr = Input(new SqPtr())
 
   val csrDistributedUpdate = Flipped(new DistributedCSRUpdateReq)
