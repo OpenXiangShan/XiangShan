@@ -412,12 +412,12 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   for (i <- enqLsqIO.req.indices) {
     when (!io.in(i).valid) {
       enqLsqIO.needAlloc(i) := 0.U
-    }.elsewhen(isStoreAMOVec(i) || isVStoreVec(i)) {
-      enqLsqIO.needAlloc(i) := 2.U // store | amo | vstore
+    }.elsewhen(isStoreVec(i) || isVStoreVec(i)) {
+      enqLsqIO.needAlloc(i) := 2.U // store | vstore
     }.otherwise {
-      enqLsqIO.needAlloc(i) := 1.U // load | vload
+      enqLsqIO.needAlloc(i) := 1.U // load | amo | vload
     }
-    enqLsqIO.req(i).valid := io.in(i).valid && !s0_blockedVec(i) && !iqNotAllReady && !lsqCannotAccept && !FuType.isAMO(io.in(i).bits.fuType)
+    enqLsqIO.req(i).valid := io.in(i).fire
     enqLsqIO.req(i).bits := io.in(i).bits
     s0_enqLsq_resp(i) := enqLsqIO.resp(i)
   }
@@ -493,6 +493,9 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   // outToInMap(inIdx)(outIdx): the inst numbered inIdx will be accepted by port numbered outIdx
   val outToInMap: Vec[Vec[Bool]] = VecInit(selectIdxOH.flatten.map(x => x.asBools).transpose.map(x => VecInit(x.toSeq)).toSeq)
   val outReadyVec: Vec[Bool] = VecInit(s0_out.map(_.map(_.ready)).flatten.toSeq)
+  dontTouch(outToInMap)
+  dontTouch(outReadyVec)
+
   s0_in.zipWithIndex.zip(outToInMap).foreach { case ((in, inIdx), outVec) =>
     when (iqNotAllReady || lsqCannotAccept) {
       in.ready := false.B
