@@ -70,7 +70,6 @@ class XSArgs(object):
         # Chisel arguments
         self.enable_log = args.enable_log
         self.num_cores = args.num_cores
-        self.firtool = args.firtool if args.mfc else None
         # Makefile arguments
         self.threads = args.threads
         self.with_dramsim3 = 1 if args.with_dramsim3 else None
@@ -109,15 +108,10 @@ class XSArgs(object):
         return all_env
 
     def get_chisel_args(self, prefix=None):
-        chisel_bool_args = [
+        chisel_args = [
             (self.enable_log, "enable-log")
         ]
-        chisel_str_args = [
-            (self.firtool, "firtool-binary-path")
-        ]
-        chisel_bool_args = map(lambda x: x[1], filter(lambda arg: arg[0], chisel_bool_args))
-        chisel_str_args = map(lambda arg: f"{arg[1]}={arg[0]}", filter(lambda arg: arg[0] is not None, chisel_str_args))
-        args = list(chisel_bool_args) + list(chisel_str_args)
+        args = map(lambda x: x[1], filter(lambda arg: arg[0], chisel_args))
         if prefix is not None:
             args = map(lambda x: prefix + x, args)
         return args
@@ -485,7 +479,6 @@ if __name__ == "__main__":
     # chisel arguments
     parser.add_argument('--enable-log', action='store_true', help='enable log')
     parser.add_argument('--num-cores', type=int, help='number of cores')
-    parser.add_argument('--firtool', nargs='?', type=str, help='firtool binary path')
     # makefile arguments
     parser.add_argument('--release', action='store_true', help='enable release')
     parser.add_argument('--spike', action='store_true', help='enable spike diff')

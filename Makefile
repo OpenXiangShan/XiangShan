@@ -37,14 +37,34 @@ CONFIG ?= DefaultConfig
 NUM_CORES ?= 1
 MFC ?= 0
 
+# firtool check and download
+FIRTOOL_VERSION = 1.57.1
+FIRTOOL_URL = https://github.com/llvm/circt/releases/download/firtool-$(FIRTOOL_VERSION)/firrtl-bin-linux-x64.tar.gz
+FIRTOOL_PATH = $(shell which firtool 2>/dev/null)
+CACHE_FIRTOOL_PATH = $(HOME)/.cache/xiangshan/firtool-$(FIRTOOL_VERSION)/bin/firtool
 ifeq ($(MFC),1)
-ChiselVersion=chisel
+ifeq ($(FIRTOOL_PATH),)
+ifeq ($(wildcard $(CACHE_FIRTOOL_PATH)),)
+$(info [INFO] Firtool not found in your PATH.)
+$(info [INFO] Downloading from $(FIRTOOL_URL))
+$(shell mkdir -p $(HOME)/.cache/xiangshan && curl -L $(FIRTOOL_URL) | tar -xzC $(HOME)/.cache/xiangshan)
+endif
+FIRTOOL_PATH = $(CACHE_FIRTOOL_PATH)
+endif
+endif
+
+# common chisel args
+ifeq ($(MFC),1)
+ChiselVersion = chisel
 FPGA_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(TOP).v.conf"
 SIM_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(SIM_TOP).v.conf"
-RELEASE_ARGS += --dump-fir --firtool-opt "-O=release --disable-annotation-unknown --lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing"
-DEBUG_ARGS += --dump-fir --firtool-opt "-O=release --disable-annotation-unknown --lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing"
+MFC_ARGS = --dump-fir \
+           --firtool-binary-path $(FIRTOOL_PATH) \
+           --firtool-opt "-O=release --disable-annotation-unknown --lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing"
+RELEASE_ARGS += $(MFC_ARGS)
+DEBUG_ARGS += $(MFC_ARGS)
 else
-ChiselVersion=chisel3
+ChiselVersion = chisel3
 FPGA_MEM_ARGS = --infer-rw --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf --gen-mem-verilog full
 SIM_MEM_ARGS = --infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf --gen-mem-verilog full
 endif
