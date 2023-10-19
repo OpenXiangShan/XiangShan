@@ -194,7 +194,26 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
   }
   // write back results
   for (i <- 0 until VecLoadPipelineWidth) {
-    io.flowWriteback(i).bits := flowLoadResult(deqPtr(i).value)
+    val thisLoadResult = flowLoadResult(deqPtr(i).value)
+    io.flowWriteback(i).bits match { case x =>
+      // From VecExuOutput
+      x.vec.isvec         := thisLoadResult.vec.isvec   // ?  Can this be false ?
+      x.vec.vecdata       := thisLoadResult.vec.vecdata
+      x.vec.mask          := thisLoadResult.vec.mask
+      x.vec.reg_offset    := thisLoadResult.vec.reg_offset
+      x.vec.exp           := thisLoadResult.vec.exp
+      x.vec.is_first_ele  := thisLoadResult.vec.is_first_ele
+      x.vec.exp_ele_index := thisLoadResult.vec.exp_ele_index
+      x.vec.uopQueuePtr   := thisLoadResult.vec.uopQueuePtr
+      x.vec.flowPtr       := deqPtr(i)
+      // From ExuOutput
+      x.data              := DontCare
+      x.fflags            := thisLoadResult.fflags
+      x.redirectValid     := thisLoadResult.redirectValid
+      x.redirect          := thisLoadResult.redirect
+      x.debug             := thisLoadResult.debug
+      x.uop               := thisLoadResult.uop
+    }
   }
 
 
@@ -284,13 +303,29 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
   }
   // update data and finished
   for (i <- 0 until VecLoadPipelineWidth) {
-    val thisPtr = io.pipeResult(i).bits.vec.flowPtr.value
+    val thisPipeResult = io.pipeResult(i).bits
+    val thisPtr = thisPipeResult.vec.flowPtr.value
     when (doResult(i)) {
       flowFinished(thisPtr) := true.B
-      flowLoadResult(thisPtr) := io.pipeResult(i).bits
-
-      // TODO: DONT use pipeline result directly for many signals are assigned to DontCare in pipeline!!!
-      flowLoadResult(thisPtr).vec.uopQueuePtr := flowQueueEntries(thisPtr).uopQueuePtr
+      flowLoadResult(thisPtr) match { case x =>
+        // From VecExuOutput
+        x.vec.isvec         := thisPipeResult.vec.isvec   // ?  Can this be false ?
+        x.vec.vecdata       := thisPipeResult.vec.vecdata
+        x.vec.mask          := thisPipeResult.vec.mask
+        x.vec.reg_offset    := thisPipeResult.vec.reg_offset
+        x.vec.exp           := thisPipeResult.vec.exp
+        x.vec.is_first_ele  := thisPipeResult.vec.is_first_ele
+        x.vec.exp_ele_index := thisPipeResult.vec.exp_ele_index
+        x.vec.uopQueuePtr   := flowQueueEntries(thisPtr).uopQueuePtr
+        x.vec.flowPtr       := DontCare
+        // From ExuOutput
+        x.data              := DontCare
+        x.fflags            := thisPipeResult.fflags
+        x.redirectValid     := thisPipeResult.redirectValid
+        x.redirect          := thisPipeResult.redirect
+        x.debug             := thisPipeResult.debug
+        x.uop               := thisPipeResult.uop
+      }
     }
   }
 
