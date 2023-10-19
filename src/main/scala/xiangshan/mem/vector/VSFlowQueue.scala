@@ -223,15 +223,17 @@ class VecStoreFlowEntry (implicit p: Parameters) extends VecFlowBundle {
   val isLastElem = Bool()
 
   def toPipeBundle(thisPtr: VsFlowPtr): VecStorePipeBundle = {
-    val result = Wire(new VecStorePipeBundle())
-    result.vaddr                := this.vaddr
-    result.mask                 := this.mask
-    result.uop_unit_stride_fof  := false.B
-    result.alignedType          := this.alignedType
-    result.exp                  := this.exp
+    val pipeBundle = Wire(new VecStorePipeBundle())
+    pipeBundle.uop                  := this.uop
+    pipeBundle.src                  := DontCare
+    pipeBundle.vaddr                := this.vaddr
+    pipeBundle.mask                 := this.mask
+    pipeBundle.uop_unit_stride_fof  := false.B
+    pipeBundle.alignedType          := this.alignedType
+    pipeBundle.exp                  := this.exp
     // result.fqIdx                := thisPtr.value
-    result.flowPtr              := thisPtr
-    result
+    pipeBundle.flowPtr              := thisPtr
+    pipeBundle
   }
 
   def needForward(forward: LoadForwardQueryIO): Bool = {
@@ -288,7 +290,7 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
   /**
     * TODO @xzf
     */
-  io <> DontCare
+  // io <> DontCare
 
   /* Storage */
 
@@ -323,6 +325,9 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
   val flowNeedCancel = Wire(Vec(VsFlowSize, Bool()))
   val flowCancelCount = PopCount(flowNeedCancel)
 
+  flowNeedFlush := flowQueueEntries.map(_.uop.robIdx.needFlush(io.redirect))
+  flowNeedCancel := (flowNeedFlush zip flowAllocated).map { case(flush, alloc) => flush && alloc}
+
   /* Enqueue logic */
 
   // only allow enqueue when free queue terms >= VecStorePipelineWidth(=2)
@@ -342,7 +347,7 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
   val dataSecondEnqueueCount = PopCount(doDataSecondEnqueue)
 
   // handshake and do enqueue
-  for (i <- 0 until VecStorePipelineWidth) {
+  for (i <- 0 until VecStorePipelineWidth) {  
     doEnqueue(i) := allowEnqueue && canEnqueue(i) && !enqueueCancel(i)
     // Assuming that if io.flowIn(i).valid then io.flowIn(i-1).valid
     when (doEnqueue(i)) {
@@ -466,6 +471,7 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
     } else {
       canWriteback(i) := flowFinished(thisPtr) && writebackPtr(i) < issuePtr(0) && canWriteback(i - 1)
     }
+    io.flowWriteback(i).valid := canWriteback(i)
   }
   
   // handshake
@@ -480,14 +486,25 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
 
   for (i <- 0 until VecStorePipelineWidth) {
     val thisPtr = writebackPtr(i).value
+    val thisEntry = flowQueueEntries(thisPtr)
     io.flowWriteback(i).bits match { case x =>
-      x.uopQueuePtr := flowQueueEntries(thisPtr).uopQueuePtr
-      // No need to write back data
-      // TODO: some other signals about exception
+      // From XSBundleWithMicroOp
+      x.uop           := thisEntry.uop
+      // From ExuOutput
+      x.data          := DontCare                 // No need to write back data
+      x.fflags        := DontCare
+      x.redirectValid := false.B
+      x.redirect      := DontCare
+      x.debug         := DontCare
+      // From VecStoreExuOutput
+      x.exp_ele_index := thisEntry.flow_idx       // ?
+      x.uopQueuePtr   := thisEntry.uopQueuePtr
     }
   }
 
   /* Commit */
+  io.rob.mmio := DontCare
+  io.rob.uop := DontCare
   for (i <- 0 until VsFlowSize) {
     val thisRobIdx = flowQueueEntries(i).uop.robIdx
     when (flowAllocated(i)) {
@@ -512,6 +529,7 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
     } else {
       canDequeue(i) := flowCommitted(thisPtr) && canDequeue(i - 1)
     }
+    io.sbuffer(i).valid := canDequeue(i)
     doDequeue(i) := canDequeue(i) && allowDequeue(i)
   }
 
@@ -533,18 +551,20 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
     }
 
     io.sbuffer(i).bits match { case x => 
-      x.addr  := thisEntry.paddr
-      // x.wline := false.B         // ! Not Sure
+      // From DCacheWordReq
       x.cmd   := MemoryOpConstants.M_XWR
       x.vaddr := thisEntry.vaddr
       x.data  := thisData
       x.mask  := thisEntry.mask
-      // x.id    := 0.U             // ! Not Sure
-      // x.instrtype := 1.U         // ! Not Sure MAGIC NUM
-      // x.isFirstIssue := false.B  // ! Not Sure
-      // x.replayCarry :=           // ! Not Sure
-      // is28bit :=                 // ! Not Sure
+      x.id    := 0.U                // ! Not Sure
+      x.instrtype := 1.U            // ! Not Sure MAGIC NUM
+      x.isFirstIssue := false.B     // ! Not Sure
+      x.replayCarry := DontCare     // ! Not Sure
+      x.is128bit := false.B         // ! Not Sure
       x.debug_robIdx := thisEntry.uop.robIdx.value
+      // From DCacheWordReqWithVaddr
+      x.addr  := thisEntry.paddr
+      x.wline := false.B            // ! Not Sure
     }
   }
 
@@ -554,8 +574,8 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
   for (i <- 0 until EnsbufferWidth) {
     when (doDequeue(i) && flowQueueEntries(deqPtr(i).value).isLastElem) {
       io.sqRelease.valid := true.B
-      io.sqRelease.bits := flowQueueEntries(deqPtr(i).value).uop.sqIdx
-    }
+    }  
+    io.sqRelease.bits := flowQueueEntries(deqPtr(i).value).uop.sqIdx
   }
 
   // Forward
@@ -584,6 +604,7 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
 
     thisForward.forwardMaskFast := forwardMask.asBools
     thisForward.forwardMask := RegNext(thisForward.forwardMaskFast)
+    thisForward.forwardData.map(_ := 0.U)
     thisForward.dataInvalid := RegNext(dataInvalid)
     thisForward.matchInvalid := RegNext(matchInvalid)
     thisForward.addrInvalid := RegNext(addrInvalid)
