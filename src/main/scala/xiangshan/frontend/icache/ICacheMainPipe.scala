@@ -490,8 +490,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     io.errors(i).opType           := DontCare
     io.errors(i).opType.fetch     := true.B
   }
-  XSError(s2_parity_error.reduce(_||_) && RegNext(RegNext(s1_fire)), "ICache has parity error in MainPaipe!")
-
+  if (!ICacheECCForceError) {
+    XSError(s2_parity_error.reduce(_||_) && RegNext(RegNext(s1_fire)), "ICache has parity error in MainPaipe!")
+  }
 
   /** exception and pmp logic **/
   val s2_tlb_valid = VecInit((0 until PortNumber).map(i => ValidHold(s1_tlb_valid(i) && s1_fire, s2_fire, false.B)))

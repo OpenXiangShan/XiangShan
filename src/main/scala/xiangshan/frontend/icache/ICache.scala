@@ -439,6 +439,10 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
     read_codes(i) := codeArray.io.r.resp.asTypeOf(Vec(nWays,UInt(dataCodeEntryBits.W)))
   }
 
+  if (ICacheECCForceError) {
+    read_codes.foreach(_.foreach(_ := 0.U)) // force ecc to fail
+  }
+
   //Parity Encode
   val write = io.write.bits
   val write_data = WireInit(write.data)
