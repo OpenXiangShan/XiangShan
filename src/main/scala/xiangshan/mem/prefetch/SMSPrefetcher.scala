@@ -455,7 +455,7 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   val s2_pht_lookup_valid = RegNext(s1_pht_lookup_valid, false.B) && !io.s2_stride_hit
   val s2_pht_lookup = RegEnable(s1_pht_lookup, s1_pht_lookup_valid)
 
-  io.s2_evict.valid := s2_evict_valid
+  io.s2_evict.valid := s2_evict_valid && (s2_evict_entry.access_cnt > 1.U)
   io.s2_evict.bits := s2_evict_entry
 
   io.s2_pf_gen_req.bits.region_tag := s2_pf_gen_region_tag
@@ -556,7 +556,6 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   val s0_region_paddr = lookup.bits.region_paddr
   val s0_region_vaddr = lookup.bits.region_vaddr
   val s0_region_bits = evict.bits.region_bits
-  val s0_access_cnt = evict.bits.access_cnt
   val s0_decr_mode = evict.bits.decr_mode
   val s0_evict = evict.valid
 
@@ -568,7 +567,6 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   val s1_ram_raddr = RegEnable(s0_ram_raddr, s1_reg_en)
   val s1_tag = RegEnable(s0_tag, s1_reg_en)
   val s1_region_bits = RegEnable(s0_region_bits, s1_reg_en)
-  val s1_access_cnt = RegEnable(s0_access_cnt, s1_reg_en)
   val s1_decr_mode = RegEnable(s0_decr_mode, s1_reg_en)
   val s1_region_paddr = RegEnable(s0_region_paddr, s1_reg_en)
   val s1_region_vaddr = RegEnable(s0_region_vaddr, s1_reg_en)
@@ -603,7 +601,6 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   val s2_region_paddr = RegEnable(s1_region_paddr, s2_reg_en)
   val s2_region_vaddr = RegEnable(s1_region_vaddr, s2_reg_en)
   val s2_region_offset = RegEnable(s1_region_offset, s2_reg_en)
-  val s2_access_cnt_valid = RegEnable(s1_access_cnt > 0.U, s2_reg_en)
   val s2_region_offset_mask = region_offset_to_bits(s2_region_offset)
   val s2_evict = RegEnable(s1_evict, s2_reg_en)
   val s2_pht_valids = s1_pht_valids.map(v => RegEnable(v, s2_reg_en))
@@ -640,7 +637,6 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   val s3_hist_update_mask = RegEnable(s2_hist_update_mask.asUInt, s2_valid)
   val s3_region_offset = RegEnable(s2_region_offset, s2_valid)
   val s3_region_offset_mask = RegEnable(s2_region_offset_mask, s2_valid)
-  val s3_access_cnt_valid = RegEnable(s2_access_cnt_valid, s2_valid)
   val s3_decr_mode = RegEnable(s2_decr_mode, s2_valid)
   val s3_region_paddr = RegEnable(s2_region_paddr, s2_valid)
   val s3_region_vaddr = RegEnable(s2_region_vaddr, s2_valid)
@@ -654,7 +650,7 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   val s3_ram_waddr = RegEnable(s2_ram_waddr, s2_valid)
   val s3_incr_region_vaddr = RegEnable(s2_incr_region_vaddr, s2_valid)
   val s3_decr_region_vaddr = RegEnable(s2_decr_region_vaddr, s2_valid)
-  s3_ram_en := s3_valid && s3_evict && s3_access_cnt_valid
+  s3_ram_en := s3_valid && s3_evict
   val s3_ram_wdata = Wire(new PhtEntry())
   s3_ram_wdata.hist := s3_hist
   s3_ram_wdata.tag := s3_pht_tag
