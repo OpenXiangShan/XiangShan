@@ -850,7 +850,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
   bt.io.update_takens := RegNext(bUpdateTakens)
 
   // all should be ready for req
-  io.s1_ready := tables.map(_.io.req.ready).reduce(_&&_)
+  io.s1_ready := tables.map(_.io.req.ready).reduce(_&&_) && bt.io.req.ready
   XSPerfAccumulate(f"tage_write_blocks_read", !io.s1_ready)
 
   def pred_perf(name: String, cnt: UInt)   = XSPerfAccumulate(s"${name}_at_pred", cnt)
