@@ -444,7 +444,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val isReplaying = io.redirect.valid && RedirectLevel.flushItself(io.redirect.bits.level)
 
   val snptEnq = io.enq.canAccept && io.enq.req.head.valid && io.enq.req.head.bits.snapshot
-  val snapshots = SnapshotGenerator(enqPtrVec, snptEnq, io.snpt.snptDeq, io.redirect.valid)
+  val snapshots = SnapshotGenerator(enqPtrVec, snptEnq, io.snpt.snptDeq, io.redirect.valid, io.snpt.flushVec)
   val debug_lsIssue = WireDefault(debug_lsIssued)
   debug_lsIssue(deqPtr.value) := io.debugHeadLsIssue
 
@@ -497,10 +497,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   rab.io.fromRob.commitSize := commitSizeSum
   rab.io.fromRob.walkSize := walkSizeSum
-  rab.io.snpt.snptEnq := false.B
-  rab.io.snpt.snptDeq := io.snpt.snptDeq
-  rab.io.snpt.snptSelect := io.snpt.snptSelect
-  rab.io.snpt.useSnpt := io.snpt.useSnpt
+  rab.io.snpt := io.snpt
+  rab.io.snpt.snptEnq := DontCare
 
   io.rabCommits := rab.io.commits
   io.diffCommits := rab.io.diffCommits
@@ -786,7 +784,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     misPredBlockCounter >> 1.U
   )
   val misPredBlock = misPredBlockCounter(0)
-  val blockCommit = misPredBlock || isReplaying || lastCycleFlush || hasWFI
+  val blockCommit = misPredBlock || isReplaying || lastCycleFlush || hasWFI || io.redirect.valid
 
   io.commits.isWalk := state === s_walk
   io.commits.isCommit := state === s_idle && !blockCommit

@@ -64,6 +64,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val out = Vec(RenameWidth, DecoupledIO(new DynInst))
     // for snapshots
     val snpt = Input(new SnapshotPort)
+    val snptLastEnq = Flipped(ValidIO(new RobPtr))
     // debug arch ports
     val debug_int_rat = if (backendParams.debugEn) Some(Vec(32, Input(UInt(PhyRegIdxWidth.W)))) else None
     val debug_vconfig_rat = if (backendParams.debugEn) Some(Input(UInt(PhyRegIdxWidth.W))) else None
@@ -386,11 +387,12 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   }
 
-  val hasCFI = VecInit(io.in.map(in => (!in.bits.preDecodeInfo.notCFI || FuType.isJump(in.bits.fuType)) && in.fire)).asUInt.orR
+  val genSnapshot = Cat(io.out.map(out => out.fire && out.bits.snapshot)).orR
   val snapshotCtr = RegInit((4 * CommitWidth).U)
-  val allowSnpt = if (EnableRenameSnapshot) !snapshotCtr.orR else false.B
-  io.out.head.bits.snapshot := hasCFI && allowSnpt
-  when(io.out.head.fire && io.out.head.bits.snapshot) {
+  val notInSameSnpt = RegNext(distanceBetween(robIdxHeadNext, io.snptLastEnq.bits) >= CommitWidth.U || !io.snptLastEnq.valid)
+  val allowSnpt = if (EnableRenameSnapshot) !snapshotCtr.orR && notInSameSnpt else false.B
+  io.out.zip(io.in).foreach{ case (out, in) => out.bits.snapshot := allowSnpt && (!in.bits.preDecodeInfo.notCFI || FuType.isJump(in.bits.fuType)) && in.fire }
+  when(genSnapshot) {
     snapshotCtr := (4 * CommitWidth).U - PopCount(io.out.map(_.fire))
   }.elsewhen(io.out.head.fire) {
     snapshotCtr := Mux(snapshotCtr < PopCount(io.out.map(_.fire)), 0.U, snapshotCtr - PopCount(io.out.map(_.fire)))
@@ -398,8 +400,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   intFreeList.io.snpt := io.snpt
   fpFreeList.io.snpt := io.snpt
-  intFreeList.io.snpt.snptEnq := io.out.head.fire && io.out.head.bits.snapshot
-  fpFreeList.io.snpt.snptEnq := io.out.head.fire && io.out.head.bits.snapshot
+  intFreeList.io.snpt.snptEnq := genSnapshot
+  fpFreeList.io.snpt.snptEnq := genSnapshot
 
   /**
     * Instructions commit: update freelist and rename table

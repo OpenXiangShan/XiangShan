@@ -101,7 +101,7 @@ class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule with 
 
   val t1_snpt = RegNext(io.snpt, 0.U.asTypeOf(io.snpt))
 
-  val snapshots = SnapshotGenerator(spec_table, t1_snpt.snptEnq, t1_snpt.snptDeq, t1_redirect)
+  val snapshots = SnapshotGenerator(spec_table, t1_snpt.snptEnq, t1_snpt.snptDeq, t1_redirect, t1_snpt.flushVec)
 
   // WRITE: when instruction commits or walking
   val t1_wSpec_addr = t1_wSpec.map(w => Mux(w.wen, UIntToOH(w.addr), 0.U))
