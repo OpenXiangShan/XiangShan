@@ -412,10 +412,10 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   for (i <- enqLsqIO.req.indices) {
     when (!io.in(i).valid) {
       enqLsqIO.needAlloc(i) := 0.U
-    }.elsewhen(isStoreVec(i) || isVStoreVec(i)) {
-      enqLsqIO.needAlloc(i) := 2.U // store | vstore
+    }.elsewhen(isStoreAMOVec(i) || isVStoreVec(i)) {
+      enqLsqIO.needAlloc(i) := 2.U // store | amo | vstore
     }.otherwise {
-      enqLsqIO.needAlloc(i) := 1.U // load | amo | vload
+      enqLsqIO.needAlloc(i) := 1.U // load | vload
     }
     enqLsqIO.req(i).valid := io.in(i).fire
     enqLsqIO.req(i).bits := io.in(i).bits
