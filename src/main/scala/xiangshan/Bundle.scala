@@ -425,6 +425,7 @@ class SnapshotPort(implicit p: Parameters) extends XSBundle {
   val snptDeq = Bool()
   val useSnpt = Bool()
   val snptSelect = UInt(log2Ceil(RenameSnapshotNum).W)
+  val flushVec = Vec(RenameSnapshotNum, Bool())
 }
 
 class RSFeedback(implicit p: Parameters) extends XSBundle {

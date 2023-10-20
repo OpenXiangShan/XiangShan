@@ -68,7 +68,7 @@ abstract class BaseFreeList(size: Int)(implicit p: Parameters) extends XSModule 
   // may shift [0, RenameWidth] steps
   val headPtrOHVec = VecInit.tabulate(RenameWidth + 1)(headPtrOHShift.left)
 
-  val snapshots = SnapshotGenerator(headPtr, io.snpt.snptEnq, io.snpt.snptDeq, io.redirect)
+  val snapshots = SnapshotGenerator(headPtr, io.snpt.snptEnq, io.snpt.snptDeq, io.redirect, io.snpt.flushVec)
 
   val redirectedHeadPtr = Mux(
     lastCycleSnpt.useSnpt,

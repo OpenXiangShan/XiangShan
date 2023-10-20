@@ -254,20 +254,33 @@ class CtrlBlockImp(
   decode.io.stallReason.in <> io.frontend.stallReason
 
   // snapshot check
-  val snpt = Module(new SnapshotGenerator(rename.io.out.head.bits.robIdx))
-  snpt.io.enq := rename.io.out.head.bits.snapshot && rename.io.out.head.fire
-  snpt.io.enqData.head := rename.io.out.head.bits.robIdx
+  class CFIRobIdx extends Bundle {
+    val robIdx = Vec(RenameWidth, new RobPtr)
+    val isCFI = Vec(RenameWidth, Bool())
+  }
+  val genSnapshot = Cat(rename.io.out.map(out => out.fire && out.bits.snapshot)).orR
+  val snpt = Module(new SnapshotGenerator(0.U.asTypeOf(new CFIRobIdx)))
+  snpt.io.enq := genSnapshot
+  snpt.io.enqData.robIdx := rename.io.out.map(_.bits.robIdx)
+  snpt.io.enqData.isCFI := rename.io.out.map(_.bits.snapshot)
   snpt.io.deq := snpt.io.valids(snpt.io.deqPtr.value) && rob.io.commits.isCommit &&
-    Cat(rob.io.commits.commitValid.zip(rob.io.commits.robIdx).map(x => x._1 && x._2 === snpt.io.snapshots(snpt.io.deqPtr.value))).orR
-  snpt.io.flush := s1_s3_redirect.valid
+    Cat(rob.io.commits.commitValid.zip(rob.io.commits.robIdx).map(x => x._1 && x._2 === snpt.io.snapshots(snpt.io.deqPtr.value).robIdx.head)).orR
+  snpt.io.redirect := s1_s3_redirect.valid
+  val flushVec = VecInit(snpt.io.snapshots.map { snapshot =>
+    val notCFIMask = snapshot.isCFI.map(~_)
+    val shouldFlushMask = snapshot.robIdx.map(_ >= s1_s3_redirect.bits.robIdx)
+    s1_s3_redirect.valid && Cat(shouldFlushMask.zip(notCFIMask).map(x => x._1 | x._2)).andR
+  })
+  val flushVecNext = RegNext(flushVec, 0.U.asTypeOf(flushVec))
+  snpt.io.flushVec := flushVecNext
 
   val useSnpt = VecInit.tabulate(RenameSnapshotNum)(idx =>
-    snpt.io.valids(idx) && s1_s3_redirect.bits.robIdx >= snpt.io.snapshots(idx)
+    snpt.io.valids(idx) && s1_s3_redirect.bits.robIdx >= snpt.io.snapshots(idx).robIdx.head
   ).reduceTree(_ || _)
   val snptSelect = MuxCase(
     0.U(log2Ceil(RenameSnapshotNum).W),
     (1 to RenameSnapshotNum).map(i => (snpt.io.enqPtr - i.U).value).map(idx =>
-      (snpt.io.valids(idx) && s1_s3_redirect.bits.robIdx >= snpt.io.snapshots(idx), idx)
+      (snpt.io.valids(idx) && s1_s3_redirect.bits.robIdx >= snpt.io.snapshots(idx).robIdx.head, idx)
     )
   )
 
@@ -275,10 +288,12 @@ class CtrlBlockImp(
   rob.io.snpt.snptDeq := snpt.io.deq
   rob.io.snpt.useSnpt := useSnpt
   rob.io.snpt.snptSelect := snptSelect
-  rat.io.snpt.snptEnq := rename.io.out.head.bits.snapshot && rename.io.out.head.fire
+  rob.io.snpt.flushVec := flushVecNext
+  rat.io.snpt.snptEnq := genSnapshot
   rat.io.snpt.snptDeq := snpt.io.deq
   rat.io.snpt.useSnpt := useSnpt
   rat.io.snpt.snptSelect := snptSelect
+  rat.io.snpt.flushVec := flushVec
 
   val decodeHasException = decode.io.out.map(x => x.bits.exceptionVec(instrPageFault) || x.bits.exceptionVec(instrAccessFault))
   // fusion decoder
@@ -372,13 +387,19 @@ class CtrlBlockImp(
   rename.io.snpt.snptDeq := snpt.io.deq
   rename.io.snpt.useSnpt := useSnpt
   rename.io.snpt.snptSelect := snptSelect
+  rename.io.snpt.flushVec := flushVecNext
+  rename.io.snptLastEnq.valid := !isEmpty(snpt.io.enqPtr, snpt.io.deqPtr)
+  rename.io.snptLastEnq.bits := snpt.io.snapshots((snpt.io.enqPtr - 1.U).value).robIdx.head
 
   // prevent rob from generating snapshot when full here
   val renameOut = Wire(chiselTypeOf(rename.io.out))
   renameOut <> rename.io.out
-  when(isFull(snpt.io.enqPtr, snpt.io.deqPtr)) {
-    renameOut.head.bits.snapshot := false.B
-  }
+  // pass all snapshot in the first element for correctness of blockBackward
+  renameOut.tail.foreach(_.bits.snapshot := false.B)
+  renameOut.head.bits.snapshot := Mux(isFull(snpt.io.enqPtr, snpt.io.deqPtr),
+    false.B,
+    Cat(rename.io.out.map(out => out.valid && out.bits.snapshot)).orR
+  )
 
 
   // pipeline between rename and dispatch
