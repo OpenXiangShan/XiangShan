@@ -130,7 +130,7 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   dontTouch(matchBubble)
   val matchBubbleVec = WireInit(VecInit(topdown_stage.reasons.zipWithIndex.map{case (r, i) => matchBubble === i.U}))
 
-  val ibuf = Module(new SyncDataModuleTemplate(new IBufEntry, IBufSize, 2 * DecodeWidth, PredictWidth))
+  val ibuf = Module(new SyncDataModuleTemplate(new IBufEntry, IBufSize, 2 * DecodeWidth, PredictWidth, perReadPortBypassEnable = Some(Seq.fill(2 * DecodeWidth)(false))))
 
   val deqPtrVec = RegInit(VecInit.tabulate(2 * DecodeWidth)(_.U.asTypeOf(new IbufPtr)))
   val deqPtrVecNext = Wire(Vec(2 * DecodeWidth, new IbufPtr))
