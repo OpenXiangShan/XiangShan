@@ -157,13 +157,21 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
       set = BtSize,
       width = foldWidth,
       way = numBr,
-      shouldReset = true,
+      shouldReset = false,
       holdRead = true,
       bypassWrite = true
     ))
 
+  // Reset state
+  val doing_reset = RegInit(true.B)
+  val resetRow = RegInit(0.U(log2Ceil(BtSize).W))
+  resetRow := resetRow + doing_reset
+  when(resetRow === (BtSize - 1).U) {
+    doing_reset := false.B
+  }
+
   // Require SRAM reset done before ready for req
-  io.req.ready := bt.io.r.req.ready
+  io.req.ready := bt.io.r.req.ready && !doing_reset
 
   val s0_pc = io.req.bits
   val s0_fire = io.req.valid
@@ -179,7 +187,6 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
   io.s1_cnt := per_br_ctr
 
   // Update logic
-
   val u_idx = bimAddr.getIdx(io.update_pc)
 
   val newCtrs = Wire(Vec(numBr, UInt(2.W))) // physical bridx
@@ -223,10 +230,10 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
   )).asUInt
 
   bt.io.w.apply(
-    valid = io.update_mask.reduce(_ || _),
-    data = newCtrs,
-    setIdx = u_idx,
-    waymask = updateWayMask
+    valid = io.update_mask.reduce(_ || _) || doing_reset,
+    data = Mux(doing_reset, VecInit(Seq.fill(numBr)(2.U(2.W))), newCtrs), // Reset to weak taken
+    setIdx = Mux(doing_reset, resetRow, u_idx),
+    waymask = Mux(doing_reset, Fill(numBr, 1.U(1.W)).asUInt, updateWayMask)
   )
 
 }
