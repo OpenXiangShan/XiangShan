@@ -161,7 +161,7 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
       way = numBr,
       shouldReset = true,
       holdRead = true,
-      singlePort = true
+      bypassWrite = true
     ))
 
   val doing_reset = RegInit(true.B)
