@@ -144,7 +144,9 @@ class Ftq_pd_Entry(implicit p: Parameters) extends XSBundle {
 
 
 
-class Ftq_Redirect_SRAMEntry(implicit p: Parameters) extends SpeculativeInfo {}
+class Ftq_Redirect_SRAMEntry(implicit p: Parameters) extends SpeculativeInfo {
+  val sc_disagree = Vec(numBr, Bool())
+}
 
 class Ftq_1R_SRAMEntry(implicit p: Parameters) extends XSBundle with HasBPUConst {
   val meta = UInt(MaxMetaLength.W)
@@ -915,8 +917,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   backendRedirectCfi.br_hit := r_ftb_entry.brIsSaved(r_ftqOffset)
   backendRedirectCfi.jr_hit := r_ftb_entry.isJalr && r_ftb_entry.tailSlot.offset === r_ftqOffset
+  // FIXME: not portable
   backendRedirectCfi.sc_hit := backendRedirectCfi.br_hit && Mux(r_ftb_entry.brSlots(0).offset === r_ftqOffset,
-      r_ftb_entry.brSlots(0).sc, r_ftb_entry.tailSlot.sc)
+    stage3CfiInfo.sc_disagree(0), stage3CfiInfo.sc_disagree(1))
 
   when (entry_hit_status(fromBackendRedirect.bits.ftqIdx.value) === h_hit) {
     backendRedirectCfi.shift := PopCount(r_ftb_entry.getBrMaskByOffset(r_ftqOffset)) +&
