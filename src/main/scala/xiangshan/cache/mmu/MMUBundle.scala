@@ -325,11 +325,12 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
    *  bits1  0: need mid 9bits
    */
 
-  def hit(vpn: UInt, asid: UInt, nSets: Int = 1, ignoreAsid: Boolean = false, vmid: UInt, hasS2xlate: Bool, onlyS2: Bool): Bool = {
+  def hit(vpn: UInt, asid: UInt, nSets: Int = 1, ignoreAsid: Boolean = false, vmid: UInt, hasS2xlate: Bool, onlyS2: Bool = false.B, onlyS1: Bool = false.B): Bool = {
     val asid_hit = Mux(hasS2xlate && onlyS2, true.B, if (ignoreAsid) true.B else (this.asid === asid))
     val addr_low_hit = valididx(vpn(2, 0))
     val vmid_hit = Mux(hasS2xlate, this.vmid === vmid, true.B)
-    val pteidx_hit = Mux(hasS2xlate, pteidx(vpn(2, 0)), true.B)
+    val isPageSuper = !(level.getOrElse(0.U) === 0.U)
+    val pteidx_hit = Mux(hasS2xlate && !isPageSuper && !onlyS1, pteidx(vpn(2, 0)), true.B)
     // NOTE: for timing, dont care low set index bits at hit check
     //       do not need store the low bits actually
     if (!pageSuper) asid_hit && drop_set_equal(vpn(vpn.getWidth - 1, sectortlbwidth), tag, nSets) && addr_low_hit && vmid_hit && pteidx_hit 
@@ -358,6 +359,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     val vpn_hit = Wire(Bool())
     val index_hit = Wire(Vec(tlbcontiguous, Bool()))
     val wb_valididx = Wire(Vec(tlbcontiguous, Bool()))
+    //for onlystage2 entry, every valididx is true
     wb_valididx := Mux(s2xlate === onlyStage2, VecInit(UIntToOH(data.s2.entry.tag(sectortlbwidth - 1, 0)).asBools), data.s1.valididx)
     val s2xlate_hit = s2xlate === this.s2xlate
     // NOTE: for timing, dont care low set index bits at hit check
@@ -409,8 +411,10 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
                           else 0.U })
     this.perm.apply(item.s1)
 
+    val s2page_pageSuper = item.s2.entry.level.getOrElse(0.U) =/= 2.U
     this.pteidx := Mux(item.s2xlate === onlyStage2, VecInit(UIntToOH(item.s2.entry.tag(sectortlbwidth - 1, 0)).asBools),  item.s1.pteidx)
-    this.valididx := Mux(item.s2xlate === onlyStage2, VecInit(UIntToOH(item.s2.entry.tag(sectortlbwidth - 1, 0)).asBools), item.s1.valididx)
+    val s2_valid = Mux(s2page_pageSuper, VecInit(Seq.fill(tlbcontiguous)(true.B)), VecInit(UIntToOH(item.s2.entry.tag(sectortlbwidth - 1, 0)).asBools))
+    this.valididx := Mux(item.s2xlate === onlyStage2, s2_valid, item.s1.valididx)
 
     val s1tag = {if (pageNormal) item.s1.entry.tag else item.s1.entry.tag(sectorvpnLen - 1, vpnnLen - sectortlbwidth)}
     val s2tag = {if (pageNormal) item.s2.entry.tag(vpnLen - 1, sectortlbwidth) else item.s2.entry.tag(vpnLen - 1, vpnnLen)}
@@ -1017,9 +1021,12 @@ class PTWEntriesWithEcc(eccCode: Code, num: Int, tagLen: Int, level: Int, hasPer
 
 class PtwReq(implicit p: Parameters) extends PtwBundle {
   val vpn = UInt(vpnLen.W) //vpn or gvpn
-  val s2xlate = UInt(2.W) // 0 bit: s2xlate, 1 bit: stage 1 or stage 2
+  val s2xlate = UInt(2.W) 
   def hasS2xlate(): Bool = {
     this.s2xlate =/= noS2xlate
+  }
+  def isOnlyStage2(): Bool = {
+    this.s2xlate === onlyStage2
   }
   override def toPrintable: Printable = {
     p"vpn:0x${Hexadecimal(vpn)}"
@@ -1265,6 +1272,15 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
   val s2xlate = UInt(2.W)
   val s1 = new PtwSectorResp()
   val s2 = new HptwResp()
+  
+  def hasS2xlate(): Bool = {
+    this.s2xlate =/= noS2xlate
+  }
+
+  def isOnlyStage2(): Bool = {
+    this.s2xlate === onlyStage2
+  }
+  
   def getVpn: UInt = {
    val s1_tag = Cat(s1.entry.tag, s1.ppn_low(OHToUInt(s1.pteidx)))
    val s2_tag = s2.entry.tag

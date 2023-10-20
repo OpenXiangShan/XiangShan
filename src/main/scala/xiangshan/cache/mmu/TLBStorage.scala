@@ -111,11 +111,12 @@ class TLBFA(
     val vpn_gen_ppn = if(saveLevel) vpn else vpn_reg
     val hasS2xlate = req.bits.s2xlate =/= noS2xlate
     val OnlyS2 = req.bits.s2xlate === onlyStage2
+    val OnlyS1 = req.bits.s2xlate === onlyStage1
     val refill_mask = Mux(io.w.valid, UIntToOH(io.w.bits.wayIdx), 0.U(nWays.W))
     val hitVec = VecInit((entries.zipWithIndex).zip(v zip refill_mask.asBools).map{
       case (e, m) => {
         val s2xlate_hit = e._1.s2xlate === req.bits.s2xlate
-        val hit = e._1.hit(vpn, Mux(hasS2xlate, io.csr.vsatp.asid, io.csr.satp.asid), vmid = io.csr.hgatp.asid, hasS2xlate = hasS2xlate, onlyS2 = OnlyS2)
+        val hit = e._1.hit(vpn, Mux(hasS2xlate, io.csr.vsatp.asid, io.csr.satp.asid), vmid = io.csr.hgatp.asid, hasS2xlate = hasS2xlate, onlyS2 = OnlyS2, onlyS1 = OnlyS1)
         s2xlate_hit && hit && m._1 && !m._2
       }
     })
@@ -171,8 +172,8 @@ class TLBFA(
   val sfence = io.sfence
   val sfence_valid = sfence.valid && !sfence.bits.hg && !sfence.bits.hv
   val sfence_vpn = sfence.bits.addr(VAddrBits - 1, offLen)
-  val sfenceHit = entries.map(_.hit(sfence_vpn, sfence.bits.id, vmid = io.csr.hgatp.asid, hasS2xlate = io.csr.priv.virt, onlyS2 = false.B))
-  val sfenceHit_noasid = entries.map(_.hit(sfence_vpn, sfence.bits.id, ignoreAsid = true, vmid = io.csr.hgatp.asid, hasS2xlate = io.csr.priv.virt, onlyS2 = false.B))
+  val sfenceHit = entries.map(_.hit(sfence_vpn, sfence.bits.id, vmid = io.csr.hgatp.asid, hasS2xlate = io.csr.priv.virt))
+  val sfenceHit_noasid = entries.map(_.hit(sfence_vpn, sfence.bits.id, ignoreAsid = true, vmid = io.csr.hgatp.asid, hasS2xlate = io.csr.priv.virt))
   // Sfence will flush all sectors of an entry when hit
   when (sfence_valid) {
     when (sfence.bits.rs1) { // virtual address *.rs1 <- (rs1===0.U)
@@ -200,8 +201,8 @@ class TLBFA(
   val hfenceg_valid = sfence.valid && sfence.bits.hg
   val hfencev = io.sfence
   val hfencev_vpn = sfence_vpn
-  val hfencevHit = entries.map(_.hit(hfencev_vpn, hfencev.bits.id, vmid = io.csr.hgatp.asid, hasS2xlate = true.B, onlyS2 = false.B))
-  val hfencevHit_noasid = entries.map(_.hit(hfencev_vpn, 0.U, ignoreAsid = true, vmid = io.csr.hgatp.asid, hasS2xlate = true.B, onlyS2 = false.B))
+  val hfencevHit = entries.map(_.hit(hfencev_vpn, hfencev.bits.id, vmid = io.csr.hgatp.asid, hasS2xlate = true.B))
+  val hfencevHit_noasid = entries.map(_.hit(hfencev_vpn, 0.U, ignoreAsid = true, vmid = io.csr.hgatp.asid, hasS2xlate = true.B))
   when (hfencev_valid) {
     when (hfencev.bits.rs1) {
       when (hfencev.bits.rs2) {

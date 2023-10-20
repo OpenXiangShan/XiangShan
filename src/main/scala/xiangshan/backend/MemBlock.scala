@@ -518,8 +518,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       else if (i < (exuParameters.LduCnt + 1 + exuParameters.StuCnt)) Cat(ptw_resp_next.vector.drop(exuParameters.LduCnt + 1).take(exuParameters.StuCnt)).orR
       else Cat(ptw_resp_next.vector.drop(exuParameters.LduCnt + 1 + exuParameters.StuCnt)).orR
     val hasS2xlate = tlb.bits.hasS2xlate()
-    ptwio.req(i).valid := tlb.valid && !(ptw_resp_v && vector_hit &&
-      ptw_resp_next.data.s1.hit(tlb.bits.vpn, Mux(hasS2xlate, tlbcsr.vsatp.asid, tlbcsr.satp.asid), tlbcsr.hgatp.asid, allType = true, ignoreAsid = true, hasS2xlate))
+    val isOnlyStage2 = tlb.bits.isOnlyStage2() && ptw_resp_next.data.isOnlyStage2()
+    val s1_hit = ptw_resp_next.data.s1.hit(tlb.bits.vpn, Mux(hasS2xlate, tlbcsr.vsatp.asid, tlbcsr.satp.asid), tlbcsr.hgatp.asid, allType = true, ignoreAsid = true, hasS2xlate)
+    val s2_hit = ptw_resp_next.data.s2.hit(tlb.bits.vpn, tlbcsr.hgatp.asid)
+    ptwio.req(i).valid := tlb.valid && !(ptw_resp_v && vector_hit && Mux(isOnlyStage2, s2_hit, s1_hit))
   }
   dtlb.foreach(_.ptw.resp.bits := ptw_resp_next.data)
   if (refillBothTlb) {
