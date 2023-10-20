@@ -94,7 +94,10 @@ override SIM_ARGS += --with-constantin
 endif
 
 # emu for the release version
-RELEASE_ARGS += --disable-all --remove-assert --fpga-platform
+ifneq ($(MFC),1)
+RELEASE_ARGS += --disable-all --remove-assert 
+endif
+RELEASE_ARGS += --fpga-platform
 DEBUG_ARGS   += --enable-difftest
 ifeq ($(RELEASE),1)
 override SIM_ARGS += $(RELEASE_ARGS)
