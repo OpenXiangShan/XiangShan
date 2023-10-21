@@ -224,6 +224,15 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
     require(data.getWidth >= (bank+1)*DCacheSRAMRowBytes)
     data(DCacheSRAMRowBytes * (bank + 1) - 1, DCacheSRAMRowBytes * bank)
   }
+  
+  def get_alias(vaddr: UInt): UInt ={
+    require(blockOffBits + idxBits > pgIdxBits)
+    if(blockOffBits + idxBits > pgIdxBits){
+      vaddr(blockOffBits + idxBits - 1, pgIdxBits)
+    }else{
+      0.U
+    }
+  }
 
   def is_alias_match(vaddr0: UInt, vaddr1: UInt): Bool = {
     require(vaddr0.getWidth == VAddrBits && vaddr1.getWidth == VAddrBits)
