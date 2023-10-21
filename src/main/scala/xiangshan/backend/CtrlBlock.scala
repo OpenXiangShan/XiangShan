@@ -68,6 +68,7 @@ class CtrlBlockImp(
     "memPred"   -> 1,
     "robFlush"  -> 1,
     "load"      -> params.LduCnt,
+    "hybrid"    -> params.HyuCnt,
     "store"     -> (if(EnableStorePrefetchSMS) params.StaCnt else 0)
   ))
 
@@ -156,6 +157,11 @@ class CtrlBlockImp(
   for ((pcMemIdx, i) <- pcMemRdIndexes("load").zipWithIndex) {
     pcMem.io.raddr(pcMemIdx) := io.memLdPcRead(i).ptr.value
     io.memLdPcRead(i).data := pcMem.io.rdata(pcMemIdx).getPc(RegNext(io.memLdPcRead(i).offset))
+  }
+
+  for ((pcMemIdx, i) <- pcMemRdIndexes("hybrid").zipWithIndex) {
+    pcMem.io.raddr(pcMemIdx) := io.memHyPcRead(i).ptr.value
+    io.memHyPcRead(i).data := pcMem.io.rdata(pcMemIdx).getPc(RegNext(io.memHyPcRead(i).offset))
   }
 
   if (EnableStorePrefetchSMS) {
@@ -554,6 +560,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   }
   val memLdPcRead = Vec(params.LduCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
   val memStPcRead = Vec(params.StaCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
+  val memHyPcRead = Vec(params.HyuCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
 
   val csrCtrl = Input(new CustomCSRCtrlIO)
   val robio = new Bundle {

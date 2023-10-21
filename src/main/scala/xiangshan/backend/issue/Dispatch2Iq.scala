@@ -146,17 +146,17 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
   private val numEnq = io.in.size
 
   val portFuSets = params.issueBlockParams.map(_.exuBlockParams.flatMap(_.fuConfigs).map(_.fuType).toSet)
-  println(s"[IssueQueueImp] portFuSets: $portFuSets")
+  println(s"[Dispatch2IqArithImp] portFuSets: $portFuSets")
   val fuDeqMap = getFuDeqMap(portFuSets)
-  println(s"[IssueQueueImp] fuDeqMap: $fuDeqMap")
+  println(s"[Dispatch2IqArithImp] fuDeqMap: $fuDeqMap")
   val mergedFuDeqMap = mergeFuDeqMap(fuDeqMap)
-  println(s"[IssueQueueImp] mergedFuDeqMap: $mergedFuDeqMap")
+  println(s"[Dispatch2IqArithImp] mergedFuDeqMap: $mergedFuDeqMap")
   val expendedFuDeqMap = expendFuDeqMap(mergedFuDeqMap, params.issueBlockParams.map(_.numEnq))
-  println(s"[IssueQueueImp] expendedFuDeqMap: $expendedFuDeqMap")
+  println(s"[Dispatch2IqArithImp] expendedFuDeqMap: $expendedFuDeqMap")
 
   // sort by count of port. Port less, priority higher.
   val finalFuDeqMap = expendedFuDeqMap.toSeq.sortBy(_._2.length)
-  println(s"[IssueQueueImp] finalFuDeqMap: $finalFuDeqMap")
+  println(s"[Dispatch2IqArithImp] finalFuDeqMap: $finalFuDeqMap")
 
   val uopsIn = Wire(Vec(wrapper.numIn, DecoupledIO(new DynInst)))
   val numInPorts = io.in.size
@@ -347,11 +347,16 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     with HasXSParameter {
 
   import FuType._
-  private val dispatchCfg: Seq[(Seq[BigInt], Int)] = Seq(
-    (Seq(ldu.ohid), 2),
-    (Seq(stu.ohid, mou.ohid), 2),
-    (Seq(vldu.ohid), 2),
+  private val dispatchCfgRaw: Seq[(Seq[OHType], Int)] = Seq(
+    (Seq(ldu), 2),
+    (Seq(stu, mou), 1),
+    (Seq(stu, mou), 1),
+    (Seq(vldu), 2),
   )
+
+  private val dispatchCfg: Seq[(Seq[BigInt], Int)] = dispatchCfgRaw.map(x => (x._1.map(_.ohid), x._2))
+
+  println(s"[Dispatch2IqMemImp] $dispatchCfgRaw")
 
   private val enqLsqIO = io.enqLsqIO.get
 
@@ -417,7 +422,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     }.otherwise {
       enqLsqIO.needAlloc(i) := 1.U // load | vload
     }
-    enqLsqIO.req(i).valid := io.in(i).fire && !FuType.isAMO(io.in(i).bits.fuType)
+    enqLsqIO.req(i).valid := io.in(i).fire && !isAMOVec(i)
     enqLsqIO.req(i).bits := io.in(i).bits
     s0_enqLsq_resp(i) := enqLsqIO.resp(i)
   }
@@ -469,8 +474,6 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
         SrcType.isNotReg(srcType) -> 0.U,
       ))
   }
-
-  val a: IndexedSeq[Vec[DataSource]] = s0_in.map(_.bits.dataSource)
 
   for ((iqPorts, iqIdx) <- s0_out.zipWithIndex) {
     for ((port, portIdx) <- iqPorts.zipWithIndex) {

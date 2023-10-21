@@ -132,13 +132,15 @@ case class IssueBlockParams(
 
   def fDivSqrtCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.fDivSqrt)).sum
 
-  def LduCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.name == "ldu")).sum
+  def LduCnt: Int = exuBlockParams.count(x => x.hasLoadFu && !x.hasStoreAddrFu)
 
-  def StaCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.name == "sta")).sum
+  def StaCnt: Int = exuBlockParams.count(x => !x.hasLoadFu && x.hasStoreAddrFu)
 
   def MouCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.mou)).sum
 
   def StdCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.name == "std")).sum
+
+  def HyuCnt: Int = exuBlockParams.count(_.hasHybridAddrFu)
 
   def VipuCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vipu)).sum
 
