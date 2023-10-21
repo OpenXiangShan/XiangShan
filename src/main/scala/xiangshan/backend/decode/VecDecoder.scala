@@ -752,6 +752,6 @@ object VecDecoder extends DecodeConstants {
     VS8R_V        -> VST(SrcType.X,   VlduType.dummy, whole = T),
   )
 
-  override val decodeArray: Array[(BitPat, XSDecodeBase)] = vset ++ vls ++
+  override val decodeArray: Array[(BitPat, XSDecodeBase)] = vset ++
     opivv ++ opivx ++ opivi ++ opmvv ++ opmvx ++ opfvv ++ opfvf ++ opfff
 }
