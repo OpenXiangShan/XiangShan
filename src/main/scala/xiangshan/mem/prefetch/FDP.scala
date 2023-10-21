@@ -55,8 +55,8 @@ class CounterFilter()(implicit p: Parameters) extends DCacheModule {
 
   val io = IO(new Bundle() {
     // input, only from load for now
-    val ld_in = Flipped(Vec(LduCnt, ValidIO(new CounterFilterDataBundle())))
-    val query = Flipped(Vec(LduCnt, new CounterFilterQueryBundle()))
+    val ld_in = Flipped(Vec(LoadPipelineWidth, ValidIO(new CounterFilterDataBundle())))
+    val query = Flipped(Vec(LoadPipelineWidth, new CounterFilterQueryBundle()))
   })
 
   val LduStages = 4

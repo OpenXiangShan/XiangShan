@@ -46,9 +46,9 @@ class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyMod
   }
 
   for ((exuCfg, i) <- params.allExuParams.zipWithIndex) {
+    exuCfg.bindBackendParam(params)
     exuCfg.updateIQWakeUpConfigs(params.iqWakeUpParams)
     exuCfg.updateExuIdx(i)
-    exuCfg.bindBackendParam(params)
   }
 
   println("[Backend] ExuConfigs:")
@@ -373,6 +373,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   // to mem
   private val memIssueParams = params.memSchdParams.get.issueBlockParams
   private val memExuBlocksHasLDU = memIssueParams.map(_.exuBlockParams.map(_.fuConfigs.contains(FuConfig.LduCfg)))
+  println(s"[Backend] memExuBlocksHasLDU: $memExuBlocksHasLDU")
+
   private val toMem = Wire(bypassNetwork.io.toExus.mem.cloneType)
   for (i <- toMem.indices) {
     for (j <- toMem(i).indices) {
@@ -413,7 +415,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   }
 
   io.mem.redirect := ctrlBlock.io.redirect
-  io.mem.issueUops.zip(toMem.flatten).foreach { case (sink, source) =>
+  private val memIssueUops = io.mem.issueLda ++ io.mem.issueHya ++ io.mem.issueSta ++ io.mem.issueStd ++ io.mem.issueHyd ++ io.mem.issueVldu
+  memIssueUops.zip(toMem.flatten).foreach { case (sink, source) =>
     sink.valid := source.valid
     source.ready := sink.ready
     sink.bits.iqIdx         := source.bits.iqIdx
@@ -447,17 +450,24 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   require(io.mem.loadPcRead.size == params.LduCnt)
   io.mem.loadPcRead.zipWithIndex.foreach { case (loadPcRead, i) =>
     loadPcRead := ctrlBlock.io.memLdPcRead(i).data
-    ctrlBlock.io.memLdPcRead(i).ptr := io.mem.issueUops(i).bits.uop.ftqPtr
-    ctrlBlock.io.memLdPcRead(i).offset := io.mem.issueUops(i).bits.uop.ftqOffset
+    ctrlBlock.io.memLdPcRead(i).ptr := io.mem.issueLda(i).bits.uop.ftqPtr
+    ctrlBlock.io.memLdPcRead(i).offset := io.mem.issueLda(i).bits.uop.ftqOffset
     require(toMem.head(i).bits.ftqIdx.isDefined && toMem.head(i).bits.ftqOffset.isDefined)
   }
 
   io.mem.storePcRead.zipWithIndex.foreach { case (storePcRead, i) =>
     storePcRead := ctrlBlock.io.memStPcRead(i).data
-    ctrlBlock.io.memStPcRead(i).ptr := io.mem.issueUops(i + params.LduCnt).bits.uop.ftqPtr
-    ctrlBlock.io.memStPcRead(i).offset := io.mem.issueUops(i + params.LduCnt).bits.uop.ftqOffset
+    ctrlBlock.io.memStPcRead(i).ptr := io.mem.issueSta(i).bits.uop.ftqPtr
+    ctrlBlock.io.memStPcRead(i).offset := io.mem.issueSta(i).bits.uop.ftqOffset
     require(toMem(1)(i).bits.ftqIdx.isDefined && toMem(1)(i).bits.ftqOffset.isDefined)
   }
+
+  io.mem.hyuPcRead.zipWithIndex.foreach( { case (hyuPcRead, i) =>
+    hyuPcRead := ctrlBlock.io.memHyPcRead(i).data
+    ctrlBlock.io.memHyPcRead(i).ptr := io.mem.issueHya(i).bits.uop.ftqPtr
+    ctrlBlock.io.memHyPcRead(i).offset := io.mem.issueHya(i).bits.uop.ftqOffset
+    require(toMem(2)(i).bits.ftqIdx.isDefined && toMem(2)(i).bits.ftqOffset.isDefined)
+  })
 
   ctrlBlock.io.robio.robHeadLsIssue := io.mem.issueUops.map(deq => deq.fire && deq.bits.uop.robIdx === ctrlBlock.io.robio.robDeqPtr).reduce(_ || _)
 
@@ -471,6 +481,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     case (out, true) => RegNext(out.valid && !out.ready, false.B)
     case (_, false) => false.B
   }
+  println(s"[backend]: width of [int|vf|mem]FinalIssueBlock: ${intFinalIssueBlock.size}|${vfFinalIssueBlock.size}|${memFinalIssueBlock.size}")
   og0CancelOHFromFinalIssue := VecInit(intFinalIssueBlock ++ vfFinalIssueBlock ++ memFinalIssueBlock).asUInt
 
   io.frontendSfence := fenceio.sfence
@@ -506,7 +517,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val ldCancel = Vec(params.LduCnt, Flipped(new LoadCancelIO))
   val loadPcRead = Vec(params.LduCnt, Output(UInt(VAddrBits.W)))
   val storePcRead = Vec(params.StaCnt, Output(UInt(VAddrBits.W)))
-
+  val hyuPcRead = Vec(params.HyuCnt, Output(UInt(VAddrBits.W)))
   // Input
   val writebackLdas = MixedVec(Seq.fill(params.LduCnt)(Flipped(DecoupledIO(new MemExuOutput()))))
   val writebackStas = MixedVec(Seq.fill(params.StaCnt)(Flipped(DecoupledIO(new MemExuOutput()))))
@@ -536,10 +547,13 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val lsTopdownInfo = Vec(params.LduCnt, Flipped(Output(new LsTopdownInfo)))
   // Output
   val redirect = ValidIO(new Redirect)   // rob flush MemBlock
-  val issueLdas = MixedVec(Seq.fill(params.LduCnt)(DecoupledIO(new MemExuInput())))
-  val issueStas = MixedVec(Seq.fill(params.StaCnt)(DecoupledIO(new MemExuInput())))
-  val issueStds = MixedVec(Seq.fill(params.StdCnt)(DecoupledIO(new MemExuInput())))
-  val issueVldus = MixedVec(Seq.fill(params.VlduCnt)(DecoupledIO(new MemExuInput(true))))
+  val issueLda = MixedVec(Seq.fill(params.LduCnt)(DecoupledIO(new MemExuInput())))
+  val issueSta = MixedVec(Seq.fill(params.StaCnt)(DecoupledIO(new MemExuInput())))
+  val issueStd = MixedVec(Seq.fill(params.StaCnt)(DecoupledIO(new MemExuInput())))
+  val issueHya = MixedVec(Seq.fill(params.HyuCnt)(DecoupledIO(new MemExuInput())))
+  val issueHyd = MixedVec(Seq.fill(params.HyuCnt)(DecoupledIO(new MemExuInput())))
+  val issueVldu = MixedVec(Seq.fill(params.VlduCnt)(DecoupledIO(new MemExuInput(isVector = true))))
+  def issueUops = issueLda ++ issueSta ++ issueStd ++ issueHya ++ issueHyd ++ issueVldu
 
   val loadFastMatch = Vec(params.LduCnt, Output(UInt(params.LduCnt.W)))
   val loadFastImm   = Vec(params.LduCnt, Output(UInt(12.W))) // Imm_I

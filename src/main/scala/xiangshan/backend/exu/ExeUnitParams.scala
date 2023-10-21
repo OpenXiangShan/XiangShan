@@ -149,6 +149,8 @@ case class ExeUnitParams(
 
   def hasMemAddrFu = hasLoadFu || hasStoreAddrFu || hasVLoadFu
 
+  def hasHybridAddrFu = hasLoadFu && hasStoreAddrFu
+
   def hasVecFu = fuConfigs.map(x => FuConfig.VecArithFuConfigs.contains(x)).reduce(_ || _)
 
   def getSrcDataType(srcIdx: Int): Set[DataConfig] = {
@@ -182,8 +184,9 @@ case class ExeUnitParams(
   def updateIQWakeUpConfigs(cfgs: Seq[WakeUpConfig]) = {
     this.iqWakeUpSourcePairs = cfgs.filter(_.source.name == this.name)
     this.iqWakeUpSinkPairs = cfgs.filter(_.sink.name == this.name)
-    if (this.isIQWakeUpSource)
+    if (this.isIQWakeUpSource) {
       require(!this.hasUncertainLatency || hasLoadFu, s"${this.name} is a not-LDU IQ wake up source , but has UncertainLatency")
+    }
   }
 
   def updateExuIdx(idx: Int): Unit = {

@@ -76,9 +76,9 @@ class ExeUnitImp(
 
   exuParams.wbPortConfigs.map{
     x => x match {
-      case IntWB(port, priority) => assert((priority == 0) || (priority == 1),
+      case IntWB(port, priority) => assert(priority >= 0 && priority <= 2,
         s"${exuParams.name}: WbPort must priority=0 or priority=1")
-      case VfWB (port, priority) => assert((priority == 0) || (priority == 1),
+      case VfWB (port, priority) => assert(priority >= 0 && priority <= 2,
         s"${exuParams.name}: WbPort must priority=0 or priority=1")
       case _ =>
     }

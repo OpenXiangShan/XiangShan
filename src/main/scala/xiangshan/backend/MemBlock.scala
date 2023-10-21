@@ -41,17 +41,16 @@ trait HasMemBlockParameters extends HasXSParameter {
   val LduCnt = backendParams.LduCnt
   val StaCnt = backendParams.StaCnt
   val StdCnt = backendParams.StdCnt
-  val HyuCnt = bankendParams.HyuCnt
+  val HyuCnt = backendParams.HyuCnt
 
   val LdExeCnt  = LduCnt + HyuCnt
   val StAddrCnt = StaCnt + HyuCnt
   val StDataCnt = StdCnt
-  val MemExuCnt = LdExeCnt + StaCnt + StdCnt + HyuCnt
+  val MemExuCnt = LduCnt + StaCnt + StdCnt + HyuCnt
   val MemAddrExtCnt = LdExeCnt + StaCnt
 }
 
-abstract class MemBlockBundle(implicit p: Parameters) extends Bundle with HasMemBlockParameters
-abstract class MemBlockModule(implicit p: Parameters) extends Module with HasMemBlockParameters
+abstract class MemBlockBundle extends Bundle with HasMemBlockParameters
 
 class Std(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.in.ready := io.out.ready
@@ -61,7 +60,7 @@ class Std(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.out.bits.ctrl.robIdx := io.in.bits.ctrl.robIdx
 }
 
-class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
+class ooo_to_mem(implicit val p: Parameters) extends MemBlockBundle {
   val loadFastMatch = Vec(LdExeCnt, Input(UInt(LdExeCnt.W)))
   val loadFastFuOpType = Vec(LdExeCnt, Input(FuOpType()))
   val loadFastImm = Vec(LdExeCnt, Input(UInt(12.W)))
@@ -86,7 +85,7 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
   val issue = Vec(MemExuCnt, Flipped(DecoupledIO(new MemExuInput)))
 }
 
-class mem_to_ooo(implicit p: Parameters ) extends MemBlockBundle {
+class mem_to_ooo(implicit val p: Parameters) extends MemBlockBundle {
   val otherFastWakeup = Vec(LdExeCnt, ValidIO(new DynInst))
   val csrUpdate = new DistributedCSRUpdateReq
   val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize + 1).W))
@@ -210,8 +209,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   val loadUnits = Seq.fill(LduCnt)(Module(new LoadUnit))
   val storeUnits = Seq.fill(StaCnt)(Module(new StoreUnit))
-  val stdExeUnits = Seq.fill(StdCnt)(Module(new MemExeUnit(backendParams.memSchdParams.get.issueBlockParams(2).exuBlockParams.head)))
-  val hybridUnits = Seq.fill(HyuCnt)(Module(new HybridUnit))
+  val stdExeUnits = Seq.fill(StdCnt)(Module(new MemExeUnit(backendParams.memSchdParams.get.issueBlockParams(3).exuBlockParams.head)))
+  val hybridUnits = Seq.fill(HyuCnt)(Module(new StoreUnit)) // Todo: replace it with HybridUnit
   val stData = stdExeUnits.map(_.io.out)
   val exeUnits = loadUnits ++ storeUnits ++ hybridUnits
   val l1_pf_req = Wire(Decoupled(new L1PrefetchReq()))
@@ -257,7 +256,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   storeUnits.zipWithIndex.map(x => x._1.suggestName("StoreUnit_"+x._2))
   val atomicsUnit = Module(new AtomicsUnit)
 
-  io.mem_to_ooo.writeback <> loadUnits.map(_.io.ldout) ++ storeUnits.map(_.io.stout) ++ stdExeUnits.map(_.io.out)
+  io.mem_to_ooo.writeback <> loadUnits.map(_.io.ldout) ++ storeUnits.map(_.io.stout) ++ stdExeUnits.map(_.io.out) ++ hybridUnits.map(_.io.stout) // Todo: replace it with HybridUnit
   io.mem_to_ooo.otherFastWakeup := DontCare
   io.mem_to_ooo.otherFastWakeup.take(2).zip(loadUnits.map(_.io.fast_uop)).foreach{case(a,b)=> a := b}
   val stOut = io.mem_to_ooo.writeback.drop(LduCnt).dropRight(StdCnt)
