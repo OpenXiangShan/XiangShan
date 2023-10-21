@@ -286,7 +286,8 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
         tagECC = Some("secded"),
         dataECC = Some("secded"),
         simulation = !site(DebugOptionsKey).FPGAPlatform,
-        prefetch = Some(huancun.prefetch.L3PrefetchReceiverParams())
+        prefetch = Some(huancun.prefetch.L3PrefetchReceiverParams()),
+        tpmeta = Some(huancun.prefetch.DefaultTPmetaParameters())
       ))
     )
 })
