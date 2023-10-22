@@ -232,6 +232,7 @@ class WithNKBL2
   banks: Int = 1
 ) extends Config((site, here, up) => {
   case XSTileKey =>
+    require(inclusive, "L2 must be inclusive")
     val upParams = up(XSTileKey)
     val l2sets = n * 1024 / banks / ways / 64
     upParams.map(p => p.copy(
@@ -324,14 +325,14 @@ class WithFuzzer extends Config((site, here, up) => {
 
 class MinimalAliasDebugConfig(n: Int = 1) extends Config(
   new WithNKBL3(512, inclusive = false) ++
-    new WithNKBL2(256, inclusive = false) ++
+    new WithNKBL2(256, inclusive = true) ++
     new WithNKBL1D(128) ++
     new MinimalConfig(n)
 )
 
 class MediumConfig(n: Int = 1) extends Config(
   new WithNKBL3(4096, inclusive = false, banks = 4)
-    ++ new WithNKBL2(512, inclusive = false)
+    ++ new WithNKBL2(512, inclusive = true)
     ++ new WithNKBL1D(128)
     ++ new BaseConfig(n)
 )
@@ -343,7 +344,7 @@ class FuzzConfig(dummy: Int = 0) extends Config(
 
 class DefaultConfig(n: Int = 1) extends Config(
   new WithNKBL3(6 * 1024, inclusive = false, banks = 4, ways = 6)
-    ++ new WithNKBL2(2 * 512, inclusive = false, banks = 4)
+    ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4)
     ++ new WithNKBL1D(64, ways = 4)
     ++ new BaseConfig(n)
 )
