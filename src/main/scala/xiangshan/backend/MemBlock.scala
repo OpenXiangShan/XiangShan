@@ -230,13 +230,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       }
       l1Prefetcher
   }
-  // load prefetch to l1 Dcache
-  l1PrefetcherOpt match {
-    case Some(pf) => l1_pf_req <> pf.io.l1_req
-    case None =>
-      l1_pf_req.valid := false.B
-      l1_pf_req.bits := DontCare
-  }
   val bopOpt: Option[BasePrefecher] = coreParams.prefetcher.map {
     case _ =>
       val l2bop = Module(new L2BestOffsetPrefetch()(p.alterPartial({
@@ -245,7 +238,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       l2bop.io.enable := WireInit(Constantin.createRecord("enableL2BOP" + p(XSCoreParamsKey).HartId.toString, initValue = 1.U))
       l2bop.io.st_in <> DontCare
       l2bop.io_l2PfConn <> io.l2PfConn
-      l2bop.io.l1_req.ready := false.B
       l2bop
   }
 
@@ -326,6 +318,13 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   prefetcherOpt.foreach(sms_pf => {
     l1PrefetcherOpt.foreach(l1_pf => {
       bopOpt.foreach(bop => {
+      val l1_pf_to_l1 = l1_pf.io.l1_req
+      val bop_to_l1 = bop.io.l1_req
+      l1_pf_req.valid := l1_pf_to_l1.valid || bop_to_l1.valid
+      l1_pf_req.bits := Mux(l1_pf_to_l1.valid, l1_pf_to_l1.bits, bop_to_l1.bits)
+      l1_pf_to_l1.ready := l1_pf_req.ready
+      bop_to_l1.ready := l1_pf_req.ready && !l1_pf_to_l1.valid
+
       val sms_pf_to_l2 = ValidIODelay(sms_pf.io.l2_req, 2)
       val l1_pf_to_l2 = ValidIODelay(l1_pf.io.l2_req, 2)
       val bop_to_l2 = ValidIODelay(bop.io.l2_req, 2)

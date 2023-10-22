@@ -34,7 +34,7 @@ case class BOPParameters(
   rrTagBits:      Int = 12,
   scoreBits:      Int = 5,
   roundMax:       Int = 50,
-  scoreBad:       Int = 1,
+  scoreBad:       Int = 2,
   dQEntries: Int = 16,
   dQLatency: Int = 175,
   dQMaxLatency: Int = 256,
@@ -270,12 +270,14 @@ class OffsetScoreTable(implicit p: Parameters) extends BOPModule {
     val req = Flipped(DecoupledIO(UInt(fullAddrBits.W)))
     val prefetchOffset = Output(UInt(offsetWidth.W))
     val prefetchDisable = Output(Bool())
+    val prefetchHighConfidence = Output(Bool())
     val test = new TestOffsetBundle
   })
 
   val prefetchOffset = RegInit(2.U(offsetWidth.W))
   val prefetchScore = RegInit(scoreInit.U(scoreBits.W))
   val disable = RegInit(false.B)
+  val highConfidence = RegInit(false.B)
   // score table
   // val st = RegInit(VecInit(offsetList.map(off => (new ScoreTableEntry).apply(off.U, 0.U))))
   val st = RegInit(VecInit(Seq.fill(scores)((new ScoreTableEntry).apply(0.U))))
@@ -308,9 +310,11 @@ class OffsetScoreTable(implicit p: Parameters) extends BOPModule {
     state := s_learn
     // updating disable when a learning phase ends
     disable := bestScore < scoreBad.U
+    highConfidence := bestScore === scoreMax.U
   }
-  XSPerfAccumulate("bop_enable", !disable)
-  XSPerfAccumulate("bop_disable", disable)
+  XSPerfAccumulate("total_learn_phase", state === s_idle)
+  XSPerfAccumulate("total_bop_disable", state === s_idle && bestScore < scoreBad.U)
+  XSPerfAccumulate("total_bop_high_confidence", state === s_idle && bestScore === scoreMax.U)
 
   // 2. During a learning phase
   // On every eligible L2 read access (miss or prefetched hit), we test an offset d_i from the list.
@@ -351,6 +355,7 @@ class OffsetScoreTable(implicit p: Parameters) extends BOPModule {
   io.req.ready := state === s_learn
   io.prefetchOffset := prefetchOffset
   io.prefetchDisable := disable
+  io.prefetchHighConfidence := highConfidence
   io.test.req.valid := state === s_learn && io.req.valid
   io.test.req.bits.addr := io.req.bits
   io.test.req.bits.testOffset := testOffset
@@ -724,9 +729,10 @@ class BopReqBufferEntry(implicit p: Parameters) extends BOPBundle {
       source === req.source
   }
 
-  def toPrefetchReq(): L2PrefetchReq = {
-    val req = Wire(new L2PrefetchReq)
+  def toPrefetchReqInner(): L2PrefetchReqInner = {
+    val req = Wire(new L2PrefetchReqInner)
     req.addr := get_pf_paddr()
+    req.alias := get_alias(get_tlb_vaddr())
     req.source := source
     req.needT := needT
     req
@@ -764,7 +770,7 @@ class PrefetchReqBuffer(implicit p: Parameters) extends BOPModule{
   val io = IO(new Bundle() {
     val in_req = Flipped(DecoupledIO(new BopReqBundle))
     val tlb_req = new TlbRequestIO(nRespDups = 2)
-    val out_req = DecoupledIO(new L2PrefetchReq)
+    val out_req = DecoupledIO(new L2PrefetchReqInner)
   })
 
   def wayMap[T <: Data](f: Int => T) = VecInit((0 until REQ_FILTER_SIZE).map(f))
@@ -774,7 +780,7 @@ class PrefetchReqBuffer(implicit p: Parameters) extends BOPModule{
   val entries = Seq.fill(REQ_FILTER_SIZE)(Reg(new BopReqBufferEntry))
   //val replacement = ReplacementPolicy.fromString("plru", REQ_FILTER_SIZE)
   val tlb_req_arb = Module(new RRArbiterInit(new TlbReq, REQ_FILTER_SIZE))
-  val pf_req_arb = Module(new RRArbiterInit(new L2PrefetchReq, REQ_FILTER_SIZE))
+  val pf_req_arb = Module(new RRArbiterInit(new L2PrefetchReqInner, REQ_FILTER_SIZE))
 
   io.tlb_req.req <> tlb_req_arb.io.out
   io.tlb_req.req_kill := false.B
@@ -882,7 +888,7 @@ class PrefetchReqBuffer(implicit p: Parameters) extends BOPModule{
     tlb_req_arb.io.in(i).bits.debug := DontCare
 
     pf_req_arb.io.in(i).valid := e.can_send_pf()
-    pf_req_arb.io.in(i).bits := e.toPrefetchReq()
+    pf_req_arb.io.in(i).bits := e.toPrefetchReqInner()
   }
 
   // reset meta to avoid muti-hit problem
@@ -1086,7 +1092,10 @@ class BOPTrainFilter()(implicit p: Parameters) extends XSModule with HasBOPParam
   XSPerfAccumulate("train_filter_full", PopCount(valids) === (TRAIN_FILTER_SIZE).U)
   XSPerfAccumulate("train_filter_half", PopCount(valids) >= (TRAIN_FILTER_SIZE / 2).U)
   XSPerfAccumulate("train_filter_empty", PopCount(valids) === 0.U)
-
+  XSPerfAccumulate("train_ld_in", PopCount(io.ld_in.map(_.valid)))
+  XSPerfAccumulate("train_l2_in", PopCount(io.l2_in.map(_.valid)))
+  XSPerfAccumulate("train_total_out", io.trainReq.fire)
+/*
   val raw_enq_pattern = Cat(reqsV)
   val filtered_enq_pattern = Cat(needAlloc)
   val actual_enq_pattern = Cat(canAlloc)
@@ -1101,6 +1110,7 @@ class BOPTrainFilter()(implicit p: Parameters) extends XSModule with HasBOPParam
     XSPerfAccumulate(s"train_filter_filtered_enq_pattern_${toBinary(i)}", filtered_enq_pattern === i.U)
     XSPerfAccumulate(s"train_filter_actual_enq_pattern_${toBinary(i)}", actual_enq_pattern === i.U)
   }
+*/
 }
 
 class L2BestOffsetPrefetch(implicit p: Parameters) extends BasePrefecher with HasBOPParams with HasL1PrefetchSourceParameter{
@@ -1173,12 +1183,23 @@ class L2BestOffsetPrefetch(implicit p: Parameters) extends BasePrefecher with Ha
     reqFilter.io.in_req.bits.source := MemReqSource.Prefetch2L2BOP.id.U
   }
 
-  io.tlb_req <> reqFilter.io.tlb_req
-  io.l1_req <> DontCare
-  io.l2_req.valid := reqFilter.io.out_req.valid
-  io.l2_req.bits := reqFilter.io.out_req.bits
-  io.l3_req <> DontCare
+  when(scoreTable.io.prefetchHighConfidence){
+    // not handle with `ready`, so if it conflicts with l1_pf, it will be dropped.
+    io.l1_req.valid := reqFilter.io.out_req.valid
+    io.l1_req.bits.paddr :=  reqFilter.io.out_req.bits.addr
+    io.l1_req.bits.alias :=  reqFilter.io.out_req.bits.alias
+    io.l1_req.bits.confidence := 1.U
+    io.l1_req.bits.is_store := reqFilter.io.out_req.bits.needT
+    io.l1_req.bits.pf_source.value := L1_HW_PREFETCH_BOP
+  }.otherwise{
+    io.l1_req.valid := false.B
+    io.l1_req.bits := DontCare
+  }
 
+  io.tlb_req <> reqFilter.io.tlb_req
+  io.l2_req.valid := reqFilter.io.out_req.valid
+  io.l2_req.bits := reqFilter.io.out_req.bits.toL2PrefetchReq()
+  io.l3_req <> DontCare
 
   for (off <- offsetList) {
     if (off < 0) {
@@ -1188,7 +1209,6 @@ class L2BestOffsetPrefetch(implicit p: Parameters) extends BasePrefecher with Ha
     }
   }
   XSPerfAccumulate("l2_req", io.l2_req.fire)
-  XSPerfAccumulate("train", trainFilter.io.trainReq.fire)
   XSPerfAccumulate("bop_train_stall_for_st_not_ready", trainFilter.io.trainReq.valid && !scoreTable.io.req.ready)
   XSPerfAccumulate("bop_train_stall_for_tlb_not_ready", trainFilter.io.trainReq.valid && !io.tlb_req.req.ready)
 }

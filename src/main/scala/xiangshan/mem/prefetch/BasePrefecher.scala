@@ -30,6 +30,18 @@ class L2PrefetchReq(implicit p: Parameters) extends XSBundle {
   val needT = Bool()
 }
 
+class L2PrefetchReqInner(implicit p: Parameters) extends L2PrefetchReq {
+  val alias = UInt(2.W)
+
+  def toL2PrefetchReq(): L2PrefetchReq = {
+    val res = Wire(new L2PrefetchReq)
+    res.addr := addr
+    res.source := source
+    res.needT := needT
+    res
+  }
+}
+
 class L2PrefetchConnectIO(implicit p:Parameters) extends XSBundle{
   val train = Flipped(ValidIO(new L2PrefetchTrainBundle()))
 }
