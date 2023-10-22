@@ -178,7 +178,7 @@ case class XSCoreParameters
     LsDqDeqWidth = 6,
   ),
   intPreg: PregParams = IntPregParams(
-    numEntries = 192,
+    numEntries = 224,
     numRead = None,
     numWrite = None,
   ),
