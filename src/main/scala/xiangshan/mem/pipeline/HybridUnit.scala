@@ -51,8 +51,8 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     val isFirstIssue  = Input(Bool())
 
     // flow out
-    val out_to_iq     = DecoupledIO(new MemExuOutput)
-    val out_to_rob    = DecoupledIO(new MemExuOutput)
+    val ldout = DecoupledIO(new MemExuOutput)
+    val stout = DecoupledIO(new MemExuOutput)
 
     val ldu_io = new Bundle() {
       // data path
@@ -1074,8 +1074,6 @@ class HybridUnit(implicit p: Parameters) extends XSModule
       RegNext(io.csrCtrl.ldld_vio_check_enable)
 
   val s3_rep_info = WireInit(s3_in.rep_info)
-  s3_rep_info.wpu_fail      := s3_in.rep_info.wpu_fail && !s3_fwd_frm_d_chan_valid && s3_troublem
-  s3_rep_info.bank_conflict := s3_in.rep_info.bank_conflict && !s3_fwd_frm_d_chan_valid && s3_troublem
   s3_rep_info.dcache_miss   := s3_in.rep_info.dcache_miss && !s3_fwd_frm_d_chan_valid && s3_troublem
   val s3_rep_frm_fetch = s3_vp_match_fail || s3_ldld_rep_inst
   val s3_sel_rep_cause = PriorityEncoderOH(s3_rep_info.cause.asUInt)
@@ -1096,7 +1094,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   s3_out.valid                := s3_valid &&
                                 (!s3_ld_flow || !io.ldu_io.lsq.ldin.bits.rep_info.need_rep && !s3_in.mmio)
   s3_out.bits.uop             := s3_in.uop
-  s3_out.bits.uop.exceptionVec(loadAccessFault) := s3_dly_ld_err  || s3_in.uop.exceptionVec(loadAccessFault)
+  s3_out.bits.uop.exceptionVec(loadAccessFault) := (s3_dly_ld_err  || s3_in.uop.exceptionVec(loadAccessFault)) && s3_ld_flow
   s3_out.bits.uop.replayInst := s3_rep_frm_fetch
   s3_out.bits.data            := s3_in.data
   s3_out.bits.debug.isMMIO    := s3_in.mmio
@@ -1173,9 +1171,9 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val s3_ld_data_frm_cache = rdataHelper(s3_ld_raw_data_frm_cache.uop, s3_picked_data_frm_cache)
 
   // FIXME: add 1 cycle delay ?
-  io.out_to_iq.bits      := s3_out.bits
-  io.out_to_iq.bits.data := s3_ld_data_frm_cache
-  io.out_to_iq.valid     := s3_out.valid && !s3_out.bits.uop.robIdx.needFlush(io.redirect)
+  io.ldout.bits      := s3_out.bits
+  io.ldout.bits.data := s3_ld_data_frm_cache
+  io.ldout.valid     := s3_out.valid && !s3_out.bits.uop.robIdx.needFlush(io.redirect) && s3_ld_flow
 
   // fast load to load forward
   io.ldu_io.l2l_fwd_out.valid      := s3_out.valid && !s3_in.lateKill && s3_ld_flow
@@ -1197,16 +1195,16 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   sx_can_go := sx_ready.head
   for (i <- 0 until TotalDelayCycles + 1) {
     if (i == 0) {
-      sx_valid(i) := s3_valid
+      sx_valid(i) := s3_valid && !s3_ld_flow
       sx_in(i)    := s3_out.bits
-      sx_ready(i) := !s3_valid(i) || sx_in(i).uop.robIdx.needFlush(io.redirect) || (if (TotalDelayCycles == 0) io.out_to_rob.ready else sx_ready(i+1))
+      sx_ready(i) := !s3_valid(i) || sx_in(i).uop.robIdx.needFlush(io.redirect) || (if (TotalDelayCycles == 0) io.stout.ready else sx_ready(i+1))
     } else {
       val cur_kill   = sx_in(i).uop.robIdx.needFlush(io.redirect)
-      val cur_can_go = (if (i == TotalDelayCycles) io.out_to_rob.ready else sx_ready(i+1))
+      val cur_can_go = (if (i == TotalDelayCycles) io.stout.ready else sx_ready(i+1))
       val cur_fire   = sx_valid(i) && !cur_kill && cur_can_go
       val prev_fire  = sx_valid(i-1) && !sx_in(i-1).uop.robIdx.needFlush(io.redirect) && sx_ready(i)
 
-      sx_ready(i) := !sx_valid(i) || cur_kill || (if (i == TotalDelayCycles) io.out_to_rob.ready else sx_ready(i+1))
+      sx_ready(i) := !sx_valid(i) || cur_kill || (if (i == TotalDelayCycles) io.stout.ready else sx_ready(i+1))
       val sx_valid_can_go = prev_fire || cur_fire || cur_kill
       sx_valid(i) := RegEnable(Mux(prev_fire, true.B, false.B), sx_valid_can_go)
       sx_in(i) := RegEnable(sx_in(i-1), prev_fire)
@@ -1217,13 +1215,13 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val sx_last_ready = sx_ready.takeRight(1).head
   val sx_last_in    = sx_in.takeRight(1).head
 
-  sx_last_ready       := !sx_last_valid || sx_last_in.uop.robIdx.needFlush(io.redirect) || io.out_to_rob.ready
-  io.out_to_rob.valid := sx_last_valid && !sx_last_in.uop.robIdx.needFlush(io.redirect)
-  io.out_to_rob.bits  := sx_last_in
+  sx_last_ready  := !sx_last_valid || sx_last_in.uop.robIdx.needFlush(io.redirect) || io.stout.ready
+  io.stout.valid := sx_last_valid && !sx_last_in.uop.robIdx.needFlush(io.redirect)
+  io.stout.bits  := sx_last_in
 
    // trigger
-  val ld_trigger = FuType.isLoad(io.out_to_rob.bits.uop.fuType)
-  val last_valid_data = RegEnable(io.out_to_rob.bits.data, io.out_to_rob.fire)
+  val ld_trigger = FuType.isLoad(io.stout.bits.uop.fuType)
+  val last_valid_data = RegEnable(io.stout.bits.data, io.stout.fire)
   val hit_ld_addr_trig_hit_vec = Wire(Vec(3, Bool()))
   val lq_ld_addr_trig_hit_vec = RegNext(io.ldu_io.lsq.trigger.lqLoadAddrTriggerHitVec)
   (0 until 3).map{i => {
@@ -1232,7 +1230,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     val tEnable   = RegNext(RegNext(io.ldu_io.trigger(i).tEnable))
 
     hit_ld_addr_trig_hit_vec(i)        := TriggerCmp(RegNext(s3_in.vaddr), tdata2, matchType, tEnable)
-    io.ldu_io.trigger(i).addrHit       := Mux(io.out_to_rob.valid && ld_trigger, hit_ld_addr_trig_hit_vec(i), lq_ld_addr_trig_hit_vec(i))
+    io.ldu_io.trigger(i).addrHit       := Mux(io.stout.valid && ld_trigger, hit_ld_addr_trig_hit_vec(i), lq_ld_addr_trig_hit_vec(i))
     io.ldu_io.trigger(i).lastDataHit   := TriggerCmp(last_valid_data, tdata2, matchType, tEnable)
   }}
   io.ldu_io.lsq.trigger.hitLoadAddrTriggerHitVec := hit_ld_addr_trig_hit_vec
