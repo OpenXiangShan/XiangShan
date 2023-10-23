@@ -81,7 +81,7 @@ class ooo_to_mem(implicit val p: Parameters) extends MemBlockBundle {
   val flushSb = Input(Bool())
 
   val loadPc = Vec(LduCnt, Input(UInt(VAddrBits.W))) // for hw prefetch
-  val ldIssue = Vec(LduCnt, Flipped(DecoupledIO(new MemExuInput)))
+  val ldaIssue = Vec(LduCnt, Flipped(DecoupledIO(new MemExuInput)))
   val storePc = Vec(StaCnt, Input(UInt(VAddrBits.W))) // for hw prefetch
   val staIssue = Vec(StaCnt, Flipped(DecoupledIO(new MemExuInput)))
   val stdIssue = Vec(StdCnt, Flipped(DecoupledIO(new MemExuInput)))
@@ -111,7 +111,7 @@ class mem_to_ooo(implicit val p: Parameters) extends MemBlockBundle {
     val lqCanAccept = Output(Bool())
     val sqCanAccept = Output(Bool())
   }
-  val ldWriteback = Vec(LduCnt, DecoupledIO(new MemExuOutput))
+  val ldaWriteback = Vec(LduCnt, DecoupledIO(new MemExuOutput))
   val staWriteback = Vec(StaCnt, DecoupledIO(new MemExuOutput))
   val stdWriteback = Vec(StdCnt, DecoupledIO(new MemExuOutput))
   val hyuWriteback = Vec(HyuCnt, Vec(2, DecoupledIO(new MemExuOutput)))
@@ -272,7 +272,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   hybridUnits.zipWithIndex.map(x => x._1.suggestName("HybridUnit_"+x._2))
   val atomicsUnit = Module(new AtomicsUnit)
 
-  io.mem_to_ooo.ldWriteback <> loadUnits.map(_.io.ldout)
+  io.mem_to_ooo.ldaWriteback <> loadUnits.map(_.io.ldout)
   io.mem_to_ooo.staWriteback <> storeUnits.map(_.io.stout)
   io.mem_to_ooo.stdWriteback <> stdExeUnits.map(_.io.out)
   io.mem_to_ooo.hyuWriteback(0) <> hybridUnits.map(_.io.ldout)
@@ -584,7 +584,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.redirect <> redirect
 
     // get input form dispatch
-    loadUnits(i).io.ldin <> io.ooo_to_mem.ldIssue(i)
+    loadUnits(i).io.ldin <> io.ooo_to_mem.ldaIssue(i)
     loadUnits(i).io.feedback_slow <> io.ldaIqFeedback(i).feedbackSlow
     loadUnits(i).io.feedback_fast <> io.ldaIqFeedback(i).feedbackFast
     loadUnits(i).io.correctMissTrain := correctMissTrain
@@ -688,20 +688,20 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       loadUnits(i).io.trigger(j).tEnable := tEnable(lTriggerMapping(j))
       // Just let load triggers that match data unavailable
       hit(j) := loadUnits(i).io.trigger(j).addrHit && !tdata(lTriggerMapping(j)).select // Mux(tdata(j + 3).select, loadUnits(i).io.trigger(j).lastDataHit, loadUnits(i).io.trigger(j).addrHit)
-      io.mem_to_ooo.ldWriteback(i).bits.uop.trigger.backendHit(lTriggerMapping(j)) := hit(j)
+      io.mem_to_ooo.ldaWriteback(i).bits.uop.trigger.backendHit(lTriggerMapping(j)) := hit(j)
 //      io.writeback(i).bits.uop.cf.trigger.backendTiming(lTriggerMapping(j)) := tdata(lTriggerMapping(j)).timing
       //      if (lChainMapping.contains(j)) io.writeback(i).bits.uop.cf.trigger.triggerChainVec(lChainMapping(j)) := hit && tdata(j+3).chain
     }
     when(tdata(2).chain) {
-      io.mem_to_ooo.ldWriteback(i).bits.uop.trigger.backendHit(2) := hit(0) && hit(1)
-      io.mem_to_ooo.ldWriteback(i).bits.uop.trigger.backendHit(3) := hit(0) && hit(1)
+      io.mem_to_ooo.ldaWriteback(i).bits.uop.trigger.backendHit(2) := hit(0) && hit(1)
+      io.mem_to_ooo.ldaWriteback(i).bits.uop.trigger.backendHit(3) := hit(0) && hit(1)
     }
-    when(!io.mem_to_ooo.ldWriteback(i).bits.uop.trigger.backendEn(1)) {
-      io.mem_to_ooo.ldWriteback(i).bits.uop.trigger.backendHit(5) := false.B
+    when(!io.mem_to_ooo.ldaWriteback(i).bits.uop.trigger.backendEn(1)) {
+      io.mem_to_ooo.ldaWriteback(i).bits.uop.trigger.backendHit(5) := false.B
     }
 
-    XSDebug(io.mem_to_ooo.ldWriteback(i).bits.uop.trigger.getHitBackend && io.mem_to_ooo.ldWriteback(i).valid, p"Debug Mode: Load Inst No.${i}" +
-    p"has trigger hit vec ${io.mem_to_ooo.ldWriteback(i).bits.uop.trigger.backendHit}\n")
+    XSDebug(io.mem_to_ooo.ldaWriteback(i).bits.uop.trigger.getHitBackend && io.mem_to_ooo.ldaWriteback(i).valid, p"Debug Mode: Load Inst No.${i}" +
+    p"has trigger hit vec ${io.mem_to_ooo.ldaWriteback(i).bits.uop.trigger.backendHit}\n")
 
   }
 
@@ -971,7 +971,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     // when atom inst writeback, surpress normal load trigger
     (0 until LduCnt).map(i => {
-      io.mem_to_ooo.ldWriteback(i).bits.uop.trigger.backendHit := VecInit(Seq.fill(6)(false.B))
+      io.mem_to_ooo.ldaWriteback(i).bits.uop.trigger.backendHit := VecInit(Seq.fill(6)(false.B))
     })
     (0 until HyuCnt).map(i => {
       io.mem_to_ooo.hyuWriteback(i)(0).bits.uop.trigger.backendHit := VecInit(Seq.fill(6)(false.B))
@@ -1139,7 +1139,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   dcache.io.debugTopDown.robHeadOtherReplay := lsq.io.debugTopDown.robHeadOtherReplay
   dcache.io.debugRolling := io.debugRolling
 
-  val ldDeqCount = PopCount(io.ooo_to_mem.ldIssue.map(_.valid))
+  val ldDeqCount = PopCount(io.ooo_to_mem.ldaIssue.map(_.valid))
   val stDeqCount = PopCount(io.ooo_to_mem.staIssue.map(_.valid))
   val rsDeqCount = ldDeqCount + stDeqCount
   XSPerfAccumulate("load_rs_deq_count", ldDeqCount)
