@@ -135,9 +135,11 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.staIqFeedback <> memBlock.io.mem_to_ooo.staIqFeedback
   backend.io.mem.hyuIqFeedback <> memBlock.io.mem_to_ooo.hyuIqFeedback
   backend.io.mem.ldCancel <> memBlock.io.mem_to_ooo.ldCancel
-  backend.io.mem.writeBack.zipAll(memBlock.io.mem_to_ooo.writeback, DontCare, DontCare).foreach { case (back, mem) =>
-    back <> mem
-  } // TODO: replace zipAll with zip when vls is fully implemented
+  backend.io.mem.writebackLda <> memBlock.io.mem_to_ooo.writebackLda
+  backend.io.mem.writebackSta <> memBlock.io.mem_to_ooo.writebackSta
+  backend.io.mem.writebackHyu <> memBlock.io.mem_to_ooo.writebackHyu
+  backend.io.mem.writebackStd <> memBlock.io.mem_to_ooo.writebackStd
+  backend.io.mem.writebackVlda <> memBlock.io.mem_to_ooo.writebackVlda
   backend.io.mem.robLsqIO.mmio := memBlock.io.mem_to_ooo.lsqio.mmio
   backend.io.mem.robLsqIO.uop := memBlock.io.mem_to_ooo.lsqio.uop
 
@@ -155,12 +157,12 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.hartId := io.hartId
   memBlock.io.ooo_to_mem.issueLda <> backend.io.mem.issueLda
   memBlock.io.ooo_to_mem.issueSta <> backend.io.mem.issueSta
-  memBlock.io.ooo_to_mem.issueStd <> backend.io.mem.issueStd ++ backend.io.mem.issueHyd
+  memBlock.io.ooo_to_mem.issueStd <> backend.io.mem.issueStd
   memBlock.io.ooo_to_mem.issueHya <> backend.io.mem.issueHya
   memBlock.io.ooo_to_mem.issueVldu <> backend.io.mem.issueVldu
 
   // By default, instructions do not have exceptions when they enter the function units.
-  memBlock.io.ooo_to_mem.issue.map(_.bits.uop.clearExceptions())
+  memBlock.io.ooo_to_mem.issueUops.map(_.bits.uop.clearExceptions())
   memBlock.io.ooo_to_mem.loadPc := backend.io.mem.loadPcRead
   memBlock.io.ooo_to_mem.storePc := backend.io.mem.storePcRead
   memBlock.io.ooo_to_mem.flushSb := backend.io.fenceio.sbuffer.flushSb
