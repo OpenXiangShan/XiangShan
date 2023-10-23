@@ -1318,9 +1318,4 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     ("load_s2_dcache_miss     ", s2_fire && io.dcache.resp.bits.miss                            ),
   )
   generatePerfEvent()
-
-  when(io.out_to_iq.fire){
-    XSDebug("out_to_iq %x\n", io.out_to_iq.bits.uop.pc)
-  }
-  // end
 }

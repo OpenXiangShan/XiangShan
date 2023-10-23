@@ -349,8 +349,8 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   import FuType._
   private val dispatchCfgRaw: Seq[(Seq[OHType], Int)] = Seq(
     (Seq(ldu), 2),
-    (Seq(stu, mou), 1),
-    (Seq(stu, mou), 1),
+    (Seq(stu), 2),
+    (Seq(ldu, stu), 2),
     (Seq(vldu), 2),
   )
 

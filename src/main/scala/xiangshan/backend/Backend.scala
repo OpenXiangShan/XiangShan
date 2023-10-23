@@ -269,7 +269,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   bypassNetwork.io.fromDataPath.mem <> dataPath.io.toMemExu
   bypassNetwork.io.fromExus.connectExuOutput(_.int)(intExuBlock.io.out)
   bypassNetwork.io.fromExus.connectExuOutput(_.vf)(vfExuBlock.io.out)
-  bypassNetwork.io.fromExus.mem.flatten.zip(io.mem.writeBack).foreach { case (sink, source) =>
+
+  bypassNetwork.io.fromExus.mem.flatten.zip(io.mem.writeback).foreach { case (sink, source) =>
     sink.valid := source.valid
     sink.bits.pdest := source.bits.uop.pdest
     sink.bits.data := source.bits.data
@@ -353,7 +354,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   wbDataPath.io.fromTop.hartId := io.fromTop.hartId
   wbDataPath.io.fromIntExu <> intExuBlock.io.out
   wbDataPath.io.fromVfExu <> vfExuBlock.io.out
-  wbDataPath.io.fromMemExu.flatten.zip(io.mem.writeBack).foreach { case (sink, source) =>
+  wbDataPath.io.fromMemExu.flatten.zip(io.mem.writeback).foreach { case (sink, source) =>
     sink.valid := source.valid
     source.ready := sink.ready
     sink.bits.data   := source.bits.data
@@ -416,7 +417,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   }
 
   io.mem.redirect := ctrlBlock.io.redirect
-  private val memIssueUops = io.mem.issueLda ++ io.mem.issueHya ++ io.mem.issueSta ++ io.mem.issueStd ++ io.mem.issueHyd ++ io.mem.issueVldu
+  private val memIssueUops = io.mem.issueLda ++ io.mem.issueHya ++ io.mem.issueSta ++ io.mem.issueStd ++ io.mem.issueVldu
   memIssueUops.zip(toMem.flatten).foreach { case (sink, source) =>
     sink.valid := source.valid
     source.ready := sink.ready
@@ -521,7 +522,12 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val storePcRead = Vec(params.StaCnt, Output(UInt(VAddrBits.W)))
   val hyuPcRead = Vec(params.HyuCnt, Output(UInt(VAddrBits.W)))
   // Input
-  val writeBack = MixedVec(Seq.fill(params.LduCnt + params.StaCnt + params.StdCnt + 2*params.HyuCnt)(Flipped(DecoupledIO(new MemExuOutput()))) ++ Seq.fill(params.VlduCnt)(Flipped(DecoupledIO(new MemExuOutput(true)))))
+  val writebackLda = Vec(params.LduCnt, Flipped(DecoupledIO(new MemExuOutput)))
+  val writebackSta = Vec(params.StaCnt, Flipped(DecoupledIO(new MemExuOutput)))
+  val writebackStd = Vec(params.StdCnt, Flipped(DecoupledIO(new MemExuOutput)))
+  // 0: Hybrid load, 1: Hybrid store
+  val writebackHyu = Vec(params.HyuCnt, Flipped(Vec(2, DecoupledIO(new MemExuOutput))))
+  val writebackVlda = Vec(params.VlduCnt, Flipped(DecoupledIO(new MemExuOutput(true))))
 
   val s3_delayed_load_error = Input(Vec(LoadPipelineWidth, Bool()))
   val stIn = Input(Vec(params.StaCnt, ValidIO(new DynInst())))
@@ -548,11 +554,10 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val redirect = ValidIO(new Redirect)   // rob flush MemBlock
   val issueLda = MixedVec(Seq.fill(params.LduCnt)(DecoupledIO(new MemExuInput())))
   val issueSta = MixedVec(Seq.fill(params.StaCnt)(DecoupledIO(new MemExuInput())))
-  val issueStd = MixedVec(Seq.fill(params.StaCnt)(DecoupledIO(new MemExuInput())))
+  val issueStd = MixedVec(Seq.fill(params.StdCnt)(DecoupledIO(new MemExuInput())))
   val issueHya = MixedVec(Seq.fill(params.HyuCnt)(DecoupledIO(new MemExuInput())))
-  val issueHyd = MixedVec(Seq.fill(params.HyuCnt)(DecoupledIO(new MemExuInput())))
+  // hybrid unit store data use this
   val issueVldu = MixedVec(Seq.fill(params.VlduCnt)(DecoupledIO(new MemExuInput(isVector = true))))
-  def issueUops = issueLda ++ issueSta ++ issueStd ++ issueHya ++ issueHyd ++ issueVldu
 
   val loadFastMatch = Vec(params.LduCnt, Output(UInt(params.LduCnt.W)))
   val loadFastImm   = Vec(params.LduCnt, Output(UInt(12.W))) // Imm_I
@@ -561,6 +566,10 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val csrCtrl = Output(new CustomCSRCtrlIO)
   val sfence = Output(new SfenceBundle)
   val isStoreException = Output(Bool())
+
+  def issueUops = issueLda ++ issueSta ++ issueStd ++ issueHya ++ issueVldu
+
+  def writeback = writebackLda ++ writebackSta ++ writebackHyu.map(_(0)) ++ writebackStd ++ writebackVlda
 
   // make this function private to avoid flip twice, both in Backend and XSCore
   private [backend] def issueUops: Seq[DecoupledIO[MemExuInput]] = {
