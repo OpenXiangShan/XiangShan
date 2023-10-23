@@ -142,7 +142,10 @@ class Ftq_pd_Entry(implicit p: Parameters) extends XSBundle {
   }
 }
 
-
+class PrefetchPtrDB(implicit p: Parameters) extends Bundle {
+  val fromFtqPtr  = UInt(log2Up(p(XSCoreParamsKey).FtqSize).W)
+  val fromIfuPtr  = UInt(log2Up(p(XSCoreParamsKey).FtqSize).W)
+}
 
 class Ftq_Redirect_SRAMEntry(implicit p: Parameters) extends SpeculativeInfo {
   val sc_disagree = Vec(numBr, Bool())
@@ -1261,65 +1264,58 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // ****************************************************************
   // *********************** to prefetch ****************************
   // ****************************************************************
+  /**
+    ******************************************************************************
+    * prefetchPtr control
+    * - 1. prefetchPtr plus 1 when toPrefetch fire and keep distance from bpuPtr more than 2
+    * - 2. limit range of prefetchPtr is in [ifuPtr + minRange, ifuPtr + maxRange]
+    * - 3. flush prefetchPtr when receive redirect from ifu or backend
+    ******************************************************************************
+    */
+  val prefetchPtr = RegInit(FtqPtr(false.B, 0.U))
+  val nextPrefetchPtr = WireInit(prefetchPtr)
 
-  ftq_pc_mem.io.other_raddrs(0) := DontCare
-  if(cacheParams.enableICachePrefetch){
-    val prefetchPtr = RegInit(FtqPtr(false.B, 0.U))
-    val diff_prefetch_addr = WireInit(update_target(prefetchPtr.value)) //TODO: remove this
-    // TODO : MUST WIDER
-    prefetchPtr := prefetchPtr + io.toPrefetch.req.fire
+  prefetchPtr := nextPrefetchPtr
 
-    val prefetch_too_late = (isBefore(prefetchPtr, ifuPtr) && !isFull(ifuPtr, prefetchPtr)) || (prefetchPtr === ifuPtr)
-    when(prefetch_too_late){
-      when(prefetchPtr =/= bpuPtr){
-        prefetchPtr := bpuPtr - 1.U
-      }.otherwise{
-        prefetchPtr := ifuPtr
-      }
+  // TODO: consider req which cross cacheline
+  when(io.toPrefetch.req.fire) {
+    when(prefetchPtr < bpuPtr - 2.U) {
+      nextPrefetchPtr := prefetchPtr + 1.U
     }
-
-    ftq_pc_mem.io.other_raddrs(0) := prefetchPtr.value
-
-    when (bpu_s2_redirect && !isBefore(prefetchPtr, bpu_s2_resp.ftq_idx)) {
-      prefetchPtr := bpu_s2_resp.ftq_idx
-    }
-
-    when (bpu_s3_redirect && !isBefore(prefetchPtr, bpu_s3_resp.ftq_idx)) {
-      prefetchPtr := bpu_s3_resp.ftq_idx
-      // XSError(true.B, "\ns3_redirect mechanism not implemented!\n")
-    }
-
-
-    val prefetch_is_to_send = WireInit(entry_fetch_status(prefetchPtr.value) === f_to_send)
-    val prefetch_addr = Wire(UInt(VAddrBits.W))
-
-    when (last_cycle_bpu_in && bpu_in_bypass_ptr === prefetchPtr) {
-      prefetch_is_to_send := true.B
-      prefetch_addr := last_cycle_bpu_target
-      diff_prefetch_addr := last_cycle_bpu_target // TODO: remove this
-    }.otherwise{
-      prefetch_addr := RegNext( ftq_pc_mem.io.other_rdatas(0).startAddr)
-    }
-    io.toPrefetch.req.valid := prefetchPtr =/= bpuPtr && prefetch_is_to_send
-    io.toPrefetch.req.bits.target := prefetch_addr
-
-    when(redirectVec.map(r => r.valid).reduce(_||_)){
-      val r = PriorityMux(redirectVec.map(r => (r.valid -> r.bits)))
-      val next = r.ftqIdx + 1.U
-      prefetchPtr := next
-    }
-
-    // TODO: remove this
-    // XSError(io.toPrefetch.req.valid && diff_prefetch_addr =/= prefetch_addr,
-    //         f"\nprefetch_req_target wrong! prefetchPtr: ${prefetchPtr}, prefetch_addr: ${Hexadecimal(prefetch_addr)} diff_prefetch_addr: ${Hexadecimal(diff_prefetch_addr)}\n")
-
-
-    XSError(isBefore(bpuPtr, prefetchPtr) && !isFull(bpuPtr, prefetchPtr), "\nprefetchPtr is before bpuPtr!\n")
-//    XSError(isBefore(prefetchPtr, ifuPtr) && !isFull(ifuPtr, prefetchPtr), "\nifuPtr is before prefetchPtr!\n")
   }
-  else {
-    io.toPrefetch.req <> DontCare
+
+  when(prefetchPtr < ifuPtr + minRangeFromIFUptr.U) {
+    nextPrefetchPtr := ifuPtr + minRangeFromIFUptr.U
+  }.elsewhen(prefetchPtr > ifuPtr + maxRangeFromIFUptr.U) {
+    nextPrefetchPtr := ifuPtr + maxRangeFromIFUptr.U
   }
+
+  when(redirectVec.map(r => r.valid).reduce(_||_)){
+    val r = PriorityMux(redirectVec.map(r => (r.valid -> r.bits)))
+    val next = r.ftqIdx + minRangeFromIFUptr.U
+    nextPrefetchPtr := next
+  }
+
+  // data from ftq_pc_mem has 1 cycle delay
+  io.toPrefetch.req.valid := RegNext(entry_fetch_status(nextPrefetchPtr.value) === f_to_send)
+  ftq_pc_mem.io.other_raddrs(0) := nextPrefetchPtr.value
+  io.toPrefetch.req.bits.target := RegNext(ftq_pc_mem.io.other_rdatas(0).startAddr)
+
+  // record position relationship between ifuPtr, pfPtr and bpuPtr
+  val isWritePrefetchPtrTable = WireInit(Constantin.createRecord("isWritePrefetchPtrTable" + p(XSCoreParamsKey).HartId.toString))
+  val prefetchPtrTable = ChiselDB.createTable("PrefetchPtrTable" + p(XSCoreParamsKey).HartId.toString, new PrefetchPtrDB)
+  val prefetchPtrDumpData = Wire(new PrefetchPtrDB)
+  prefetchPtrDumpData.fromFtqPtr  := distanceBetween(bpuPtr, prefetchPtr)
+  prefetchPtrDumpData.fromIfuPtr  := distanceBetween(prefetchPtr, ifuPtr)
+
+  prefetchPtrTable.log(
+    data = prefetchPtrDumpData,
+    en = isWritePrefetchPtrTable.orR && io.toPrefetch.req.fire,
+    site = "FTQ" + p(XSCoreParamsKey).HartId.toString,
+    clock = clock,
+    reset = reset
+  )
+
 
   // ******************************************************************************
   // **************************** commit perf counters ****************************

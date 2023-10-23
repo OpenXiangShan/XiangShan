@@ -101,6 +101,7 @@ object XSPerfHistogram extends HasRegularPerfName {
       }
 
       when (perfDump) {
+        XSPerfPrint(p"${perfName}_sum, ${sum}\n")(helper.io)
         XSPerfPrint(p"${perfName}_mean, ${sum/nSamples}\n")(helper.io)
         XSPerfPrint(p"${perfName}_sampled, ${nSamples}\n")(helper.io)
         XSPerfPrint(p"${perfName}_underflow, ${underflow}\n")(helper.io)
