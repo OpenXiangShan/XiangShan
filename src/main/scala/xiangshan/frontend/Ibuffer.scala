@@ -97,10 +97,8 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
 
 class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
   val io = IO(new IBufferIO)
-  dontTouch(io.stallReason)
 
   val topdown_stage = RegInit(0.U.asTypeOf(new FrontendTopDownBundle))
-  dontTouch(topdown_stage)
   topdown_stage := io.in.bits.topdown_info
   when (io.flush) {
     when (io.ControlRedirect) {
@@ -127,7 +125,6 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   val matchBubble = Wire(UInt(log2Up(TopDownCounters.NumStallReasons.id).W))
 
   matchBubble := (TopDownCounters.NumStallReasons.id - 1).U - PriorityEncoder(topdown_stage.reasons.reverse)
-  dontTouch(matchBubble)
   val matchBubbleVec = WireInit(VecInit(topdown_stage.reasons.zipWithIndex.map{case (r, i) => matchBubble === i.U}))
 
   val ibuf = Module(new SyncDataModuleTemplate(new IBufEntry, IBufSize, 2 * DecodeWidth, PredictWidth))
