@@ -122,23 +122,6 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   h_validStart_halfPlus1.map(_ := false.B)
   h_validEnd_halfPlus1.map(_ := false.B)
 
-  dontTouch(validStart_half)
-  dontTouch(validEnd_half)
-  dontTouch(h_validStart_half)
-  dontTouch(h_validEnd_half)
-  dontTouch(validStart_halfPlus1)
-  dontTouch(validEnd_halfPlus1)
-  dontTouch(h_validStart_halfPlus1)
-  dontTouch(h_validEnd_halfPlus1)
-  dontTouch(validStart_diff)
-  dontTouch(validEnd_diff)
-  dontTouch(h_validStart_diff)
-  dontTouch(h_validEnd_diff)
-  dontTouch(validStart)
-  dontTouch(validEnd)
-  dontTouch(h_validStart)
-  dontTouch(h_validEnd)
-
   val rawInsts = if (HasCExtension) VecInit((0 until PredictWidth).map(i => Cat(data(i+1), data(i))))
   else         VecInit((0 until PredictWidth).map(i => data(i)))
 

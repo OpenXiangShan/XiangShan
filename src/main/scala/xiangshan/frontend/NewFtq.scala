@@ -475,7 +475,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   io.bpuInfo := DontCare
 
   val topdown_stage = RegInit(0.U.asTypeOf(new FrontendTopDownBundle))
-  dontTouch(topdown_stage)
   // only driven by clock, not valid-ready
   topdown_stage := io.fromBpu.resp.bits.topdown_info
   io.toIfu.req.bits.topdown_info := topdown_stage
