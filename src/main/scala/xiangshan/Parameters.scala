@@ -246,6 +246,13 @@ case class XSCoreParameters
     outsideRecvFlush = true,
     saveLevel = true
   ),
+  hytlbParameters: TLBParameters = TLBParameters(
+    name = "hytlb",
+    NWays = 4,
+    partialStaticPMP = true,
+    outsideRecvFlush = true,
+    outReplace = false
+  ),
   pftlbParameters: TLBParameters = TLBParameters(
     name = "pftlb",
     NWays = 48,
@@ -356,10 +363,10 @@ case class XSCoreParameters
       ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
         ExeUnitParams("STA0", Seq(StaCfg), Seq(), Seq(Seq(IntRD(3, 1)))),
-      ), numEntries = IssueQueueSize, numEnq = 1),
+      ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
         ExeUnitParams("HYU0", Seq(LduCfg, StaCfg, MouCfg), Seq(IntWB(5, 0), VfWB(5, 0)), Seq(Seq(IntRD(6, 0)))),
-      ), numEntries = IssueQueueSize, numEnq = 1),
+      ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
         ExeUnitParams("STD0", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(13, 1), VfRD(12, Int.MaxValue)))),
         ExeUnitParams("STD1", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(5, 1), VfRD(10, Int.MaxValue)))),
@@ -382,8 +389,8 @@ case class XSCoreParameters
   def iqWakeUpParams = {
     Seq(
       WakeUpConfig(
-        Seq("ALU0", "ALU1", "MUL0", "MUL1", "BJU0", "LDU0", "LDU1") ->
-        Seq("ALU0", "ALU1", "MUL0", "MUL1", "BJU0", "BJU1", "BJU2", "LDU0", "LDU1", "STA0", "HYU0", "STD0", "STD1")
+        Seq("ALU0", "ALU1", "MUL0", "MUL1", "BJU0", "LDU0", "LDU1", "HYU0") ->
+        Seq("ALU0", "ALU1", "MUL0", "MUL1", "BJU0", "BJU1", "BJU2", "LDU0", "LDU1", "STA0", "STD0", "STD1", "HYU0")
       ),
       WakeUpConfig(Seq("IMISC0") -> Seq("VFEX0")),
     ).flatten
@@ -584,6 +591,7 @@ trait HasXSParameter {
   val itlbParams = coreParams.itlbParameters
   val ldtlbParams = coreParams.ldtlbParameters
   val sttlbParams = coreParams.sttlbParameters
+  val hytlbParams = coreParams.hytlbParameters
   val pftlbParams = coreParams.pftlbParameters
   val btlbParams = coreParams.btlbParameters
   val l2tlbParams = coreParams.l2tlbParameters

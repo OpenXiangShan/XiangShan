@@ -147,6 +147,13 @@ class MinimalConfig(n: Int = 1) extends Config(
           outsideRecvFlush = true,
           outReplace = false
         ),
+        hytlbParameters = TLBParameters(
+          name = "hytlb",
+          NWays = 4,
+          partialStaticPMP = true,
+          outsideRecvFlush = true,
+          outReplace = false
+        ),
         pftlbParameters = TLBParameters(
           name = "pftlb",
           NWays = 4,
