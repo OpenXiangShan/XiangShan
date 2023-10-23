@@ -93,6 +93,7 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
   val fromMem = if (params.isMemSchd) Some(new Bundle {
     val ldaFeedback = Flipped(Vec(params.LduCnt, new MemRSFeedbackIO))
     val staFeedback = Flipped(Vec(params.StaCnt, new MemRSFeedbackIO))
+    val hyuFeedback = Flipped(Vec(params.HyuCnt, new MemRSFeedbackIO))
     val stIssuePtr = Input(new SqPtr())
     val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
     val scommit = Input(UInt(log2Ceil(EnsbufferWidth + 1).W)) // connected to `memBlock.io.sqDeq` instead of ROB
@@ -274,6 +275,7 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
   val stAddrIQs = issueQueues.filter(iq => iq.params.StaCnt > 0) // included in memAddrIQs
   val ldAddrIQs = issueQueues.filter(iq => iq.params.LduCnt > 0)
   val stDataIQs = issueQueues.filter(iq => iq.params.StdCnt > 0)
+  val hyuIQs = issueQueues.filter(iq => iq.params.HyuCnt > 0)
   require(memAddrIQs.nonEmpty && stDataIQs.nonEmpty)
 
   io.toMem.get.loadFastMatch := 0.U.asTypeOf(io.toMem.get.loadFastMatch) // TODO: is still needed?
@@ -295,6 +297,14 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
   stAddrIQs.foreach {
     case imp: IssueQueueMemAddrImp =>
       imp.io.memIO.get.feedbackIO <> io.fromMem.get.staFeedback
+      imp.io.memIO.get.checkWait.stIssuePtr := io.fromMem.get.stIssuePtr
+      imp.io.memIO.get.checkWait.memWaitUpdateReq := io.fromMem.get.memWaitUpdateReq
+    case _ =>
+  }
+
+  hyuIQs.foreach {
+    case imp: IssueQueueMemAddrImp =>
+      imp.io.memIO.get.feedbackIO <> io.fromMem.get.hyuFeedback
       imp.io.memIO.get.checkWait.stIssuePtr := io.fromMem.get.stIssuePtr
       imp.io.memIO.get.checkWait.memWaitUpdateReq := io.fromMem.get.memWaitUpdateReq
     case _ =>

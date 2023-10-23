@@ -78,6 +78,7 @@ class XSArgs(object):
         self.trace = 1 if args.trace or not args.disable_fork and not args.trace_fst else None
         self.trace_fst = "fst" if args.trace_fst else None
         self.config = args.config
+        self.mfc = 1 if args.mfc else None
         # emu arguments
         self.max_instr = args.max_instr
         self.ram_size = args.ram_size
@@ -124,7 +125,8 @@ class XSArgs(object):
             (self.trace,         "EMU_TRACE"),
             (self.trace_fst,     "EMU_TRACE"),
             (self.config,        "CONFIG"),
-            (self.num_cores,     "NUM_CORES")
+            (self.num_cores,     "NUM_CORES"),
+            (self.mfc,           "MFC")
         ]
         args = filter(lambda arg: arg[0] is not None, makefile_args)
         return args
@@ -493,6 +495,7 @@ if __name__ == "__main__":
     parser.add_argument('--no-diff', action='store_true', help='disable difftest')
     parser.add_argument('--ram-size', nargs='?', type=str, help='manually set simulation memory size (8GB by default)')
     parser.add_argument('--no-db', action='store_true', help='disable chiseldb dump')
+    parser.add_argument('--mfc', action='store_true', help='enable MFC')
 
     args = parser.parse_args()
 
