@@ -1153,14 +1153,16 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   dcache.io.debugTopDown.robHeadOtherReplay := lsq.io.debugTopDown.robHeadOtherReplay
   dcache.io.debugRolling := io.debugRolling
 
-  val ldDeqCount = PopCount(io.ooo_to_mem.lduIssue.map(_.valid))
-  val stDeqCount = PopCount(io.ooo_to_mem.staIssue.map(_.valid))
-  val rsDeqCount = ldDeqCount + stDeqCount
-  XSPerfAccumulate("load_rs_deq_count", ldDeqCount)
-  XSPerfHistogram("load_rs_deq_count", ldDeqCount, true.B, 0, LduCnt, 1)
-  XSPerfAccumulate("store_rs_deq_count", stDeqCount)
-  XSPerfHistogram("store_rs_deq_count", stDeqCount, true.B, 0, StaCnt, 1)
-  XSPerfAccumulate("ls_rs_deq_count", rsDeqCount)
+  val hyLdDeqCount = PopCount(io.ooo_to_mem.hyuIssue.map(x => x.valid && FuType.isLoad(x.bits.uop.fuType)))
+  val hyStDeqCount = PopCount(io.ooo_to_mem.hyuIssue.map(x => x.valid && FuType.isStore(x.bits.uop.fuType)))
+  val ldDeqCount = PopCount(io.ooo_to_mem.lduIssue.map(_.valid)) + hyLdDeqCount
+  val stDeqCount = PopCount(io.ooo_to_mem.staIssue.map(_.valid)) + hyStDeqCount
+  val iqDeqCount = ldDeqCount + stDeqCount
+  XSPerfAccumulate("load_iq_deq_count", ldDeqCount)
+  XSPerfHistogram("load_iq_deq_count", ldDeqCount, true.B, 0, LduCnt, 1)
+  XSPerfAccumulate("store_iq_deq_count", stDeqCount)
+  XSPerfHistogram("store_iq_deq_count", stDeqCount, true.B, 0, StaCnt, 1)
+  XSPerfAccumulate("ls_iq_deq_count", iqDeqCount)
 
   val pfevent = Module(new PFEvent)
   pfevent.io.distribute_csr := csrCtrl.distribute_csr
