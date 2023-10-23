@@ -118,6 +118,12 @@ class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
   val csr_parity_enable = Input(Bool())
 }
 
+class ICacheDB(implicit p: Parameters) extends ICacheBundle {
+  val blk_vaddr   = UInt((VAddrBits - blockOffBits).W)
+  val blk_paddr   = UInt((PAddrBits - blockOffBits).W)
+  val hit         = Bool()
+}
+
 class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 {
   val io = IO(new ICacheMainPipeInterface)
@@ -373,6 +379,32 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
       diffPIQ.idtfr := DontCare
     }
   }
+
+  // record cacheline log
+  val isWriteICacheTable = WireInit(Constantin.createRecord("isWriteICacheTable" + p(XSCoreParamsKey).HartId.toString))
+  val ICacheTable = ChiselDB.createTable("ICacheTable" + p(XSCoreParamsKey).HartId.toString, new ICacheDB)
+
+  val ICacheDumpData_req0 = Wire(new ICacheDB)
+  ICacheDumpData_req0.blk_paddr := getBlkAddr(s1_req_paddr(0))
+  ICacheDumpData_req0.blk_vaddr := getBlkAddr(s1_req_vaddr(0))
+  ICacheDumpData_req0.hit       := s1_port_hit(0) || s1_prefetch_hit(0)
+  ICacheTable.log(
+    data = ICacheDumpData_req0,
+    en = isWriteICacheTable.orR && s1_fire,
+    clock = clock,
+    reset = reset
+  )
+
+  val ICacheDumpData_req1 = Wire(new ICacheDB)
+  ICacheDumpData_req1.blk_paddr := getBlkAddr(s1_req_paddr(1))
+  ICacheDumpData_req1.blk_vaddr := getBlkAddr(s1_req_vaddr(1))
+  ICacheDumpData_req1.hit       := s1_port_hit(1) || s1_prefetch_hit(1)
+  ICacheTable.log(
+    data = ICacheDumpData_req1,
+    en = isWriteICacheTable.orR && s1_fire && s1_double_line,
+    clock = clock,
+    reset = reset
+  )
 
   /** <PERF> replace victim way number */
 
