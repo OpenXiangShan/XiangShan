@@ -350,8 +350,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   private val dispatchCfg: Seq[(Seq[BigInt], Int)] = Seq(
     (Seq(ldu.ohid), 2),
     (Seq(stu.ohid, mou.ohid), 2),
-    (Seq(vldu.ohid), 2),
-    (Seq(vstu.ohid), 2),
+    (Seq(vldu.ohid, vstu.ohid), 2),
   )
 
   private val enqLsqIO = io.enqLsqIO.get
@@ -494,6 +493,10 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   // outToInMap(inIdx)(outIdx): the inst numbered inIdx will be accepted by port numbered outIdx
   val outToInMap: Vec[Vec[Bool]] = VecInit(selectIdxOH.flatten.map(x => x.asBools).transpose.map(x => VecInit(x.toSeq)).toSeq)
   val outReadyVec: Vec[Bool] = VecInit(s0_out.map(_.map(_.ready)).flatten.toSeq)
+  require(outToInMap.size == io.in.size, "[Dispatch2IQ] outToInMap's first demention should be equal to io.in.size")
+  require(outToInMap.head.size == io.out.flatten.size, s"[Dispatch2IQ] outToInMap's second " +
+    s"demention(${outToInMap.head.size}) should be equal to io.out.size(${io.out.flatten.size})")
+
   dontTouch(outToInMap)
   dontTouch(outReadyVec)
 
@@ -501,7 +504,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     when (iqNotAllReady || lsqCannotAccept) {
       in.ready := false.B
     }.otherwise {
-      in.ready := (Cat(outVec) & Cat(outReadyVec)).orR && !s0_blockedVec(inIdx)
+      in.ready := (Cat(outVec.reverse) & Cat(outReadyVec.reverse)).orR && !s0_blockedVec(inIdx)
     }
   }
 
