@@ -24,7 +24,7 @@ class FuBusyTableRead(fuLatencyMap: Map[FuType.OHType, Int])(implicit iqParams: 
     when(busy) {
       latencyHitVec := VecInit(fuTypeVec.map { fuType =>
         val latencyHitFuType = latMappedFuTypeSet.getOrElse(lat, Set()).toSeq
-        val isLatencyNum = Cat(latencyHitFuType.map(_.U === fuType)).orR
+        val isLatencyNum = FuType.FuTypeOrR(fuType, latencyHitFuType)
         isLatencyNum
       }).asUInt
     }

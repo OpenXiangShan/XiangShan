@@ -346,17 +346,19 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   s0_enqSelValidVec := s0_enqValidVec.zip(io.enq).map{ case (enqValid, enq) => enqValid && enq.ready}
 
   protected val commonAccept: UInt = Cat(fuTypeVec.map(fuType =>
-    Cat(commonFuCfgs.map(_.fuType.U === fuType)).orR
+    FuType.FuTypeOrR(fuType, commonFuCfgs.map(_.fuType))
   ).reverse)
 
   // if deq port can accept the uop
   protected val canAcceptVec: Seq[UInt] = deqFuCfgs.map { fuCfgs: Seq[FuConfig] =>
-    Cat(fuTypeVec.map(fuType => Cat(fuCfgs.map(_.fuType.U === fuType)).orR).reverse).asUInt
+    Cat(fuTypeVec.map(fuType =>
+      FuType.FuTypeOrR(fuType, fuCfgs.map(_.fuType))
+    ).reverse)
   }
 
   protected val deqCanAcceptVec: Seq[IndexedSeq[Bool]] = deqFuCfgs.map { fuCfgs: Seq[FuConfig] =>
     fuTypeVec.map(fuType =>
-      Cat(fuCfgs.map(_.fuType.U === fuType)).asUInt.orR) // C+E0    C+E1
+      FuType.FuTypeOrR(fuType, fuCfgs.map(_.fuType))) // C+E0    C+E1
   }
 
   canIssueMergeAllBusy.zipWithIndex.foreach { case (merge, i) =>
@@ -390,12 +392,12 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
 
   protected val enqCanAcceptVec: Seq[IndexedSeq[Bool]] = deqFuCfgs.map { fuCfgs: Seq[FuConfig] =>
     io.enq.map(_.bits.fuType).map(fuType =>
-      Cat(fuCfgs.map(_.fuType.U === fuType)).asUInt.orR) // C+E0    C+E1
+      FuType.FuTypeOrR(fuType, fuCfgs.map(_.fuType))) // C+E0    C+E1
   }
 
   protected val transCanAcceptVec: Seq[IndexedSeq[Bool]] = deqFuCfgs.map { fuCfgs: Seq[FuConfig] =>
     transEntryDeqVec.map(_.bits.status.fuType).zip(transEntryDeqVec.map(_.valid)).map{ case (fuType, valid) =>
-      Cat(fuCfgs.map(_.fuType.U === fuType)).asUInt.orR && valid }
+      FuType.FuTypeOrR(fuType, fuCfgs.map(_.fuType)) && valid }
   }
 
   enqEntryOldestSel.zipWithIndex.foreach { case (sel, deqIdx) =>
@@ -648,7 +650,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   io.status.validCnt := PopCount(validVec)
 
   protected def getDeqLat(deqPortIdx: Int, fuType: UInt) : UInt = {
-    Mux1H(fuLatencyMaps(deqPortIdx) map { case (k, v) => (k.U === fuType, v.U) })
+    Mux1H(fuLatencyMaps(deqPortIdx) map { case (k, v) => (fuType(k.id), v.U) })
   }
 
   // issue perf counter
