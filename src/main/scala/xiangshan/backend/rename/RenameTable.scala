@@ -290,7 +290,9 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   io.vec_old_pdest := vecRat.io.old_pdest
 
   //TODO: RM the donTouch
-  dontTouch(vecRat.io)
+  if(backendParams.debugEn) {
+    dontTouch(vecRat.io)
+  }
   for ((arch, i) <- vecRat.io.archWritePorts.zipWithIndex) {
     arch.wen  := io.robCommits.isCommit && io.robCommits.commitValid(i) && io.robCommits.info(i).vecWen
     arch.addr := io.robCommits.info(i).ldest

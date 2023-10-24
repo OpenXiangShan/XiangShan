@@ -83,8 +83,10 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   println(s"[IssueQueueImp] ${params.getIQName} fuLatencyMaps: ${fuLatencyMaps}")
   println(s"[IssueQueueImp] ${params.getIQName} commonFuCfgs: ${commonFuCfgs.map(_.name)}")
   lazy val io = IO(new IssueQueueIO())
-  dontTouch(io.deq)
-  dontTouch(io.deqResp)
+  if(backendParams.debugEn) {
+    dontTouch(io.deq)
+    dontTouch(io.deqResp)
+  }
   // Modules
 
   val entries = Module(new Entries)
@@ -600,7 +602,9 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       Option("Scheduler2DataPathPipe")
     )
   }
-  dontTouch(io.deqDelay)
+  if(backendParams.debugEn) {
+    dontTouch(io.deqDelay)
+  }
   io.wakeupToIQ.zipWithIndex.foreach { case (wakeup, i) =>
     if (wakeUpQueues(i).nonEmpty && finalWakeUpL1ExuOH.nonEmpty) {
       wakeup.valid := wakeUpQueues(i).get.io.deq.valid

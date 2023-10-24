@@ -46,7 +46,9 @@ class CancelNetworkImp(backendParams: BackendParams, override val wrapper: LazyM
   private val transferredCancelVec = RegInit(VecInit(Seq.fill(numExu)(false.B)))
 
   private val isInferWakeUpVec = WireInit(VecInit(allExuParams.map(_.isIQWakeUpSink.B)))
-  dontTouch(isInferWakeUpVec)
+  if(backendParams.debugEn) {
+    dontTouch(isInferWakeUpVec)
+  }
 
   og0CancelVec.zipWithIndex.foreach { case (og0Cancel, i) =>
     og0Cancel := io.in.og0CancelVec(i) || transferredCancelVec(i)

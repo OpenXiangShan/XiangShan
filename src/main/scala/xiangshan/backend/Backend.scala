@@ -480,9 +480,11 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
 
   io.debugRolling := ctrlBlock.io.debugRolling
 
-  dontTouch(memScheduler.io)
-  dontTouch(dataPath.io.toMemExu)
-  dontTouch(wbDataPath.io.fromMemExu)
+  if(backendParams.debugEn) {
+    dontTouch(memScheduler.io)
+    dontTouch(dataPath.io.toMemExu)
+    dontTouch(wbDataPath.io.fromMemExu)
+  }
 }
 
 class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBundle {

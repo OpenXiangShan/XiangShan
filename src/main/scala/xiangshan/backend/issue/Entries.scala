@@ -264,7 +264,9 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     val transEnqHit = transSelVec.map(x => x(othersIdx))
     transEntryEnq := Mux1H(transEnqHit, transEntryDeqVec)
   }
-  dontTouch(transEntryEnqVec)
+  if(backendParams.debugEn) {
+    dontTouch(transEntryEnqVec)
+  }
 
   //issueRespVec
   if(params.isMemAddrIQ){
@@ -340,7 +342,9 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   io.deq.foreach{ x =>
     x.isFirstIssue := x.finalDeqSelOH.valid && Mux1H(x.finalDeqSelOH.bits, isFirstIssueVec)
   }
-  dontTouch(io.deq)
+  if(backendParams.debugEn) {
+    dontTouch(io.deq)
+  }
   io.transSelVec.zip(transSelVec).foreach { case (sink, source) =>
     sink := source.asUInt
   }

@@ -389,13 +389,15 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   val storeAMOBlockVec = VecInit(storeAMOCntVec.map(_ > numStoreAMODeq.U))
   val vloadBlockVec = VecInit(vloadCntVec.map(_ > numVLoadDeq.U))
   val lsStructBlockVec = VecInit((loadBlockVec.zip(storeAMOBlockVec)).zip(vloadBlockVec).map(x => x._1._1 || x._1._2 || x._2))
-  dontTouch(loadBlockVec)
-  dontTouch(storeAMOBlockVec)
-  dontTouch(lsStructBlockVec)
-  dontTouch(vloadBlockVec)
-  dontTouch(isLoadVec)
-  dontTouch(isVLoadVec)
-  dontTouch(loadCntVec)
+  if(backendParams.debugEn) {
+    dontTouch(loadBlockVec)
+    dontTouch(storeAMOBlockVec)
+    dontTouch(lsStructBlockVec)
+    dontTouch(vloadBlockVec)
+    dontTouch(isLoadVec)
+    dontTouch(isVLoadVec)
+    dontTouch(loadCntVec)
+  }
 
   s0_in <> io.in
 
@@ -493,8 +495,10 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   // outToInMap(inIdx)(outIdx): the inst numbered inIdx will be accepted by port numbered outIdx
   val outToInMap: Vec[Vec[Bool]] = VecInit(selectIdxOH.flatten.map(x => x.asBools).transpose.map(x => VecInit(x.toSeq)).toSeq)
   val outReadyVec: Vec[Bool] = VecInit(s0_out.map(_.map(_.ready)).flatten.toSeq)
-  dontTouch(outToInMap)
-  dontTouch(outReadyVec)
+  if(backendParams.debugEn) {
+    dontTouch(outToInMap)
+    dontTouch(outReadyVec)
+  }
 
   s0_in.zipWithIndex.zip(outToInMap).foreach { case ((in, inIdx), outVec) =>
     when (iqNotAllReady || lsqCannotAccept) {
