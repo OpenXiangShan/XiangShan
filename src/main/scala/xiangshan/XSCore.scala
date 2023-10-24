@@ -131,14 +131,13 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.sqCancelCnt := memBlock.io.mem_to_ooo.sqCancelCnt
   backend.io.mem.otherFastWakeup := memBlock.io.mem_to_ooo.otherFastWakeup
   backend.io.mem.stIssuePtr := memBlock.io.mem_to_ooo.stIssuePtr
-  backend.io.mem.ldaIqFeedback <> memBlock.io.ldaIqFeedback
-  backend.io.mem.staIqFeedback <> memBlock.io.staIqFeedback
-  backend.io.mem.hyuIqFeedback <> memBlock.io.hyuIqFeedback
-  backend.io.mem.ldCancel <> memBlock.io.ldCancel
-  backend.io.mem.writeBackToBackend.zipAll(memBlock.io.mem_to_ooo.writeback, DontCare, DontCare).foreach { case (back, mem) =>
+  backend.io.mem.ldaIqFeedback <> memBlock.io.mem_to_ooo.ldaIqFeedback
+  backend.io.mem.staIqFeedback <> memBlock.io.mem_to_ooo.staIqFeedback
+  backend.io.mem.hyuIqFeedback <> memBlock.io.mem_to_ooo.hyuIqFeedback
+  backend.io.mem.ldCancel <> memBlock.io.mem_to_ooo.ldCancel
+  backend.io.mem.writeBack.zipAll(memBlock.io.mem_to_ooo.writeback, DontCare, DontCare).foreach { case (back, mem) =>
     back <> mem
   } // TODO: replace zipAll with zip when vls is fully implemented
-
   backend.io.mem.robLsqIO.mmio := memBlock.io.mem_to_ooo.lsqio.mmio
   backend.io.mem.robLsqIO.uop := memBlock.io.mem_to_ooo.lsqio.uop
 
@@ -147,16 +146,19 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   io.cpu_halt := backend.io.toTop.cpuHalted
 
   // memblock error exception writeback, 1 cycle after normal writeback
-  backend.io.mem.s3_delayed_load_error <> memBlock.io.s3_delayed_load_error
+  backend.io.mem.s3_delayed_load_error <> memBlock.io.mem_to_ooo.s3_delayed_load_error
 
   io.beu_errors.icache <> frontend.io.error.toL1BusErrorUnitInfo()
   io.beu_errors.dcache <> memBlock.io.error.toL1BusErrorUnitInfo()
   io.beu_errors.l2 <> DontCare
 
   memBlock.io.hartId := io.hartId
-  memBlock.io.ooo_to_mem.issue.zipAll(backend.io.mem.issueUopsToMem, DontCare, DontCare).foreach { case(memIssue, backIssue) =>
-    backIssue <> memIssue
-  } // TODO: replace zipAll with zip when vls is fully implemented
+  memBlock.io.ooo_to_mem.issueLda <> backend.io.mem.issueLda
+  memBlock.io.ooo_to_mem.issueSta <> backend.io.mem.issueSta
+  memBlock.io.ooo_to_mem.issueStd <> backend.io.mem.issueStd ++ backend.io.mem.issueHyd
+  memBlock.io.ooo_to_mem.issueHya <> backend.io.mem.issueHya
+  memBlock.io.ooo_to_mem.issueVldu <> backend.io.mem.issueVldu
+
   // By default, instructions do not have exceptions when they enter the function units.
   memBlock.io.ooo_to_mem.issue.map(_.bits.uop.clearExceptions())
   memBlock.io.ooo_to_mem.loadPc := backend.io.mem.loadPcRead
