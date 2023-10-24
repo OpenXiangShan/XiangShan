@@ -148,8 +148,22 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
 
   val bimAddr = new TableAddr(log2Up(BtSize), instOffsetBits)
 
-  val bt = Module(new SRAMTemplate(UInt(2.W), set = BtSize, way=numBr, shouldReset = true, holdRead = true, bypassWrite = true))
+  // Physical SRAM Size
+  val SRAMSize = 512
+  val foldWidth = BtSize / SRAMSize
 
+  val bt = Module(
+    new FoldedSRAMTemplate(
+      UInt(2.W),
+      set = BtSize,
+      width = foldWidth,
+      way = numBr,
+      shouldReset = false,
+      holdRead = true,
+      bypassWrite = true
+    ))
+
+  // Power-on reset to weak taken
   val doing_reset = RegInit(true.B)
   val resetRow = RegInit(0.U(log2Ceil(BtSize).W))
   resetRow := resetRow + doing_reset
@@ -216,7 +230,7 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
 
   bt.io.w.apply(
     valid = io.update_mask.reduce(_||_) || doing_reset,
-    data = Mux(doing_reset, VecInit(Seq.fill(numBr)(2.U(2.W))), newCtrs),
+    data = Mux(doing_reset, VecInit(Seq.fill(numBr)(2.U(2.W))), newCtrs), // Weak taken
     setIdx = Mux(doing_reset, resetRow, u_idx),
     waymask = Mux(doing_reset, Fill(numBr, 1.U(1.W)).asUInt, updateWayMask)
   )
