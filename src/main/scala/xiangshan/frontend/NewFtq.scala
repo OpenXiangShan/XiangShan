@@ -481,12 +481,19 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   val ifuRedirected = RegInit(VecInit(Seq.fill(FtqSize)(false.B)))
 
+  
+  // io.fromBackend.ftqIdxAhead: jmp + alu(aluCnt) + ldReplay + exception
+  val aluAheadStart = 1
+  val ftqIdxAhead = VecInit(Seq.tabulate(FtqRedirectAheadNum)(i => io.fromBackend.ftqIdxAhead(i + aluAheadStart))) // only alu
+  val ftqIdxSelOH = io.fromBackend.ftqIdxSelOH.bits(FtqRedirectAheadNum, 1)
+  
+  val aheadValid   = ftqIdxAhead.map(_.valid).reduce(_|_) && !io.fromBackend.redirect.valid
+  val realAhdValid = io.fromBackend.redirect.valid && (ftqIdxSelOH > 0.U) && RegNext(aheadValid)
   val backendRedirect = Wire(Valid(new BranchPredictionRedirect))
-  when(io.fromBackend.redirect.valid) {
-    assert(RegNext(io.fromBackend.ftqIdxAhead.map(_.valid).reduce(_|_)))
-    assert(io.fromBackend.ftqIdxSelOH.valid)
-    assert(PopCount(io.fromBackend.ftqIdxSelOH.bits) === 1.U)
-  }
+  val backendRedirectReg = RegNext(backendRedirect)
+  backendRedirectReg.valid := Mux(realAhdValid, 0.B, backendRedirect.valid)
+  val fromBackendRedirect = Wire(Valid(new BranchPredictionRedirect))
+  fromBackendRedirect := Mux(realAhdValid, backendRedirect, backendRedirectReg)
 
   val stage2Flush = backendRedirect.valid
   val backendFlush = stage2Flush || RegNext(stage2Flush)
@@ -496,8 +503,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   val allowBpuIn, allowToIfu = WireInit(false.B)
   val flushToIfu = !allowToIfu
-  allowBpuIn := !ifuFlush && !backendRedirect.valid
-  allowToIfu := !ifuFlush && !backendRedirect.valid
+  allowBpuIn := !ifuFlush && !backendRedirect.valid && !backendRedirectReg.valid
+  allowToIfu := !ifuFlush && !backendRedirect.valid && !backendRedirectReg.valid
 
   def copyNum = 5
   val bpuPtr, ifuPtr, ifuWbPtr, commPtr = RegInit(FtqPtr(false.B, 0.U))
@@ -554,7 +561,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_pc_mem.io.wdata.fromBranchPrediction(bpu_in_resp)
 
   //                                                            ifuRedirect + backendRedirect + commit
-  val ftq_redirect_sram = Module(new FtqNRSRAM(new Ftq_Redirect_SRAMEntry, 1+BackendRedirectNum+1))
+  val ftq_redirect_sram = Module(new FtqNRSRAM(new Ftq_Redirect_SRAMEntry, 1+FtqRedirectAheadNum+1))
   // these info is intended to enq at the last stage of bpu
   ftq_redirect_sram.io.wen := io.fromBpu.resp.bits.lastStage.valid(3)
   ftq_redirect_sram.io.waddr := io.fromBpu.resp.bits.lastStage.ftq_idx.value
@@ -568,7 +575,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_meta_1r_sram.io.waddr := io.fromBpu.resp.bits.lastStage.ftq_idx.value
   ftq_meta_1r_sram.io.wdata.meta := io.fromBpu.resp.bits.last_stage_meta
   //                                                            ifuRedirect + backendRedirect + commit
-  val ftb_entry_mem = Module(new SyncDataModuleTemplate(new FTBEntry, FtqSize, 1+BackendRedirectNum+1, 1))
+  val ftb_entry_mem = Module(new SyncDataModuleTemplate(new FTBEntry, FtqSize, 1+FtqRedirectAheadNum+1, 1))
   ftb_entry_mem.io.wen(0) := io.fromBpu.resp.bits.lastStage.valid(3)
   ftb_entry_mem.io.waddr(0) := io.fromBpu.resp.bits.lastStage.ftq_idx.value
   ftb_entry_mem.io.wdata(0) := io.fromBpu.resp.bits.last_stage_ftb_entry
@@ -898,23 +905,28 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // *******************************************************************************
 
   // redirect read cfiInfo, couples to redirectGen s2
-  val ftq_redirect_rdata = Wire(Vec(BackendRedirectNum, new Ftq_Redirect_SRAMEntry))
-  val ftb_redirect_rdata = Wire(Vec(BackendRedirectNum, new FTBEntry))
-  for (i <- 0 until BackendRedirectNum) {
-    ftq_redirect_sram.io.ren(i + 1) := io.fromBackend.ftqIdxAhead(i).valid
-    ftq_redirect_sram.io.raddr(i + 1) := io.fromBackend.ftqIdxAhead(i).bits.value
-    ftb_entry_mem.io.raddr(i + 1)     := io.fromBackend.ftqIdxAhead(i).bits.value
-
-    ftq_redirect_rdata(i) := ftq_redirect_sram.io.rdata(i + 1)
-    ftb_redirect_rdata(i) := ftb_entry_mem.io.rdata(i + 1)
+  val redirectReadStart = 1 // 0 for ifuRedirect
+  val ftq_redirect_rdata = Wire(Vec(FtqRedirectAheadNum, new Ftq_Redirect_SRAMEntry))
+  val ftb_redirect_rdata = Wire(Vec(FtqRedirectAheadNum, new FTBEntry))
+  for (i <- redirectReadStart until FtqRedirectAheadNum) {
+    ftq_redirect_sram.io.ren(i + redirectReadStart)   := ftqIdxAhead(i).valid
+    ftq_redirect_sram.io.raddr(i + redirectReadStart) := ftqIdxAhead(i).bits.value
+    ftb_entry_mem.io.raddr(i + redirectReadStart)     := ftqIdxAhead(i).bits.value
   }
-  val stage3CfiInfo = Mux1H(io.fromBackend.ftqIdxSelOH.bits, ftq_redirect_rdata)
-  val fromBackendRedirect = WireInit(backendRedirect)
+  ftq_redirect_sram.io.ren(redirectReadStart)   := Mux(aheadValid, ftqIdxAhead(0).valid,      backendRedirect.valid)
+  ftq_redirect_sram.io.raddr(redirectReadStart) := Mux(aheadValid, ftqIdxAhead(0).bits.value, backendRedirect.bits.ftqIdx.value)
+  ftb_entry_mem.io.raddr(redirectReadStart)     := Mux(aheadValid, ftqIdxAhead(0).bits.value, backendRedirect.bits.ftqIdx.value)
+
+  for (i <- 0 until FtqRedirectAheadNum) {
+    ftq_redirect_rdata(i) := ftq_redirect_sram.io.rdata(i + redirectReadStart)
+    ftb_redirect_rdata(i) := ftb_entry_mem.io.rdata(i + redirectReadStart)
+  }
+  val stage3CfiInfo = Mux(realAhdValid, Mux1H(ftqIdxSelOH, ftq_redirect_rdata), ftq_redirect_sram.io.rdata(redirectReadStart))
   val backendRedirectCfi = fromBackendRedirect.bits.cfiUpdate
   backendRedirectCfi.fromFtqRedirectSram(stage3CfiInfo)
 
 
-  val r_ftb_entry = Mux1H(io.fromBackend.ftqIdxSelOH.bits, ftb_redirect_rdata)
+  val r_ftb_entry = Mux(realAhdValid, Mux1H(ftqIdxSelOH, ftb_redirect_rdata), ftb_entry_mem.io.rdata(redirectReadStart))
   val r_ftqOffset = fromBackendRedirect.bits.ftqOffset
 
   backendRedirectCfi.br_hit := r_ftb_entry.brIsSaved(r_ftqOffset)
@@ -1021,14 +1033,14 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     }
   }
   
-  when(backendRedirect.valid) {
-    updateCfiInfo(backendRedirect)
+  when(fromBackendRedirect.valid) {
+    updateCfiInfo(fromBackendRedirect)
   }.elsewhen (ifuRedirectToBpu.valid) {
     updateCfiInfo(ifuRedirectToBpu, isBackend=false)
   }
 
-  when (backendRedirect.valid) {
-    when (backendRedirect.bits.ControlRedirectBubble) {
+  when (fromBackendRedirect.valid) {
+    when (fromBackendRedirect.bits.ControlRedirectBubble) {
       when (fromBackendRedirect.bits.ControlBTBMissBubble) {
         topdown_stage.reasons(TopDownCounters.BTBMissBubble.id) := true.B
         io.toIfu.req.bits.topdown_info.reasons(TopDownCounters.BTBMissBubble.id) := true.B
@@ -1396,7 +1408,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   XSPerfAccumulate("bpu_to_ifu_bubble", bpuPtr === ifuPtr)
   XSPerfAccumulate("bpu_to_ifu_bubble_when_ftq_full", (bpuPtr === ifuPtr) && isFull(bpuPtr, commPtr) && io.toIfu.req.ready)
 
-  XSPerfAccumulate("redirectAhead_ValidNum", io.fromBackend.ftqIdxAhead.map(_.valid).reduce(_|_))
+  XSPerfAccumulate("redirectAhead_ValidNum", ftqIdxAhead.map(_.valid).reduce(_|_))
   XSPerfAccumulate("fromBackendRedirect_ValidNum", io.fromBackend.redirect.valid)
   XSPerfAccumulate("toBpuRedirect_ValidNum", io.toBpu.redirect.valid)
 
