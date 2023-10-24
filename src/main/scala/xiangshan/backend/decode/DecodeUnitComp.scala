@@ -32,13 +32,59 @@ import xiangshan.backend.Bundles.{DecodedInst, StaticInst}
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 import xiangshan.backend.fu.vector.Bundles.{VSew, VType, VLmul}
 import yunsuan.VpermType
-
 import scala.collection.Seq
+import chisel3.util.experimental.decode.{QMCMinimizer, TruthTable, decoder}
+
+class indexedLSUopTable(uopIdx:Int) extends Module {
+  val src = IO(Input(UInt(7.W)))
+  val outOffsetVs2 = IO(Output(UInt(3.W)))
+  val outOffsetVd = IO(Output(UInt(3.W)))
+  def genCsBundle_VEC_INDEXED_LDST(lmul:Int, emul:Int, nfields:Int, uopIdx:Int): (Int, Int) ={
+    if (lmul * nfields <= 8) {
+      for (k <-0 until nfields) {
+        if (lmul < emul) {    // lmul < emul, uop num is depend on emul * nf
+          var offset = 1 << (emul - lmul)
+          for (i <- 0 until emul) {
+            if (uopIdx == k * (1 << emul) + (1 << i)) {
+              return ((1 << i), (1 << i) / offset + k * (1 << lmul))
+            }
+          }
+        } else {              // lmul < emul, uop num is depend on lmul * nf
+          var offset = 1 << (lmul - emul)
+          for (i <- 0 until lmul) {
+            if (uopIdx == k * (1 << lmul) + (1 << i)) {
+              return ((1 << i) / offset, (1 << i) + k * (1 << lmul))
+            }
+          }
+        }
+      }
+    }
+    return (0, 0)
+  }
+  // strided load/store
+  var combVemulNf : Seq[(Int, Int, Int, Int, Int)] = Seq()
+  for (emul <- 0 until 4) {
+    for (lmul <- 0 until 4) {
+      for (nf <- 0 until 8) {
+        var offset = genCsBundle_VEC_INDEXED_LDST(lmul, emul, nf, uopIdx)
+        var offsetVs2 = offset._1
+        var offsetVd = offset._2
+        combVemulNf :+= (emul, lmul, nf, offsetVs2, offsetVd)
+      }
+    }
+  }
+  val out = decoder(QMCMinimizer, src, TruthTable(combVemulNf.map {
+    case (emul, lmul, nf, offsetVs2, offsetVd) => (BitPat((emul << 5 | lmul << 3 | nf).U(7.W)), BitPat((offsetVs2 << 3 | offsetVd).U(6.W)))
+  }, BitPat.N(6)))
+  outOffsetVs2 := out(5, 3)
+  outOffsetVd := out(2, 0)
+}
 
 trait VectorConstants {
   val MAX_VLMUL = 8
   val FP_TMP_REG_MV = 32
   val VECTOR_TMP_REG_LMUL = 33 // 33~47  ->  15
+  val MAX_INDEXED_LS_UOPNUM = 64
 }
 
 class DecodeUnitCompIO(implicit p: Parameters) extends XSBundle {
@@ -90,6 +136,9 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   val numOfUop = Wire(UInt(log2Up(maxUopSize+1).W))
   val lmul = Wire(UInt(4.W))
   val isVsetSimple = Wire(Bool())
+
+  val indexedLSRegOffset = Seq.tabulate(MAX_INDEXED_LS_UOPNUM)(i => Module(new indexedLSUopTable(i)))
+  indexedLSRegOffset.map(_.src := 0.U)
 
   //pre decode
   decodedInstsSimple := io.simple.decodedInst
@@ -1672,6 +1721,16 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       val vsew = vsewReg
       val veew = Cat(0.U(1.W), width)
       val vemul: UInt = veew.asUInt + 1.U + vlmul.asUInt + ~vsew.asUInt
+      val simple_lmul = MuxLookup(vlmul, 0.U(2.W), Array(
+        "b001".U -> 1.U,
+        "b010".U -> 2.U,
+        "b011".U -> 3.U
+      ))
+      val simple_emul = MuxLookup(vemul, 0.U(2.W), Array(
+        "b001".U -> 1.U,
+        "b010".U -> 2.U,
+        "b011".U -> 3.U
+      ))
       csBundle(0).srcType(0) := SrcType.reg
       csBundle(0).srcType(1) := SrcType.imm
       csBundle(0).lsrc(1) := 0.U
@@ -1691,11 +1750,14 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).fpu.fcvt := false.B
 
       //LMUL
-      for (i <- 0 until MAX_VLMUL) {
+      for (i <- 0 until MAX_INDEXED_LS_UOPNUM) {
+        indexedLSRegOffset(i).src := Cat(simple_emul, simple_lmul, nf)
+        val offsetVs2 = indexedLSRegOffset(i).outOffsetVs2
+        val offsetVd = indexedLSRegOffset(i).outOffsetVd
         csBundle(i + 1).srcType(0) := SrcType.fp
         csBundle(i + 1).lsrc(0) := FP_TMP_REG_MV.U
-        csBundle(i + 1).lsrc(1) := src2 + i.U
-        csBundle(i + 1).ldest := dest + i.U
+        csBundle(i + 1).lsrc(1) := Mux1H(UIntToOH(offsetVs2, MAX_VLMUL), (0 until MAX_VLMUL).map(j => src2 + j.U))
+        csBundle(i + 1).ldest := Mux1H(UIntToOH(offsetVd, MAX_VLMUL), (0 until MAX_VLMUL).map(j => dest + j.U))
         csBundle(i + 1).uopIdx := i.U
       }
     }
