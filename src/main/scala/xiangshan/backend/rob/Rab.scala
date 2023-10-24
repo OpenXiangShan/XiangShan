@@ -45,7 +45,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
     val enqPtrVec = Output(Vec(RenameWidth, new RenameBufferPtr))
     val vconfigPdest = Output(UInt(PhyRegIdxWidth.W))
     val commits = Output(new RobCommitIO)
-    val diffCommits = Output(new DiffCommitIO)
+    val diffCommits = if (backendParams.debugEn) Some(Output(new DiffCommitIO)) else None
 
     val status = Output(new Bundle {
       val walkEnd = Bool()
@@ -223,7 +223,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
 
   private val walkEndNext = walkSizeNxt === 0.U
   private val specialWalkEndNext = specialWalkSizeNext === 0.U
-
+  assert(state != s_special_walk, "s_special_walk")
   // change state
   state := stateNext
   when(io.redirect.valid) {
@@ -260,14 +260,15 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
 
   io.status.walkEnd := walkEndNext
 
-  io.vconfigPdest := Mux(vcfgCandidates(0).ldest === VCONFIG_IDX.U && vcfgCandidates(0).vecWen, vcfgCandidates(0).pdest, vcfgCandidates(1).pdest)
+//  io.vconfigPdest := Mux(vcfgCandidates(0).ldest === VCONFIG_IDX.U && vcfgCandidates(0).vecWen, vcfgCandidates(0).pdest, vcfgCandidates(1).pdest)
+  io.vconfigPdest := 0.U
 
   // for difftest
-  io.diffCommits := 0.U.asTypeOf(new DiffCommitIO)
-  io.diffCommits.isCommit := state === s_idle || state === s_special_walk
+  io.diffCommits.foreach(_ := 0.U.asTypeOf(new DiffCommitIO))
+  io.diffCommits.foreach(_.isCommit := state === s_idle || state === s_special_walk)
   for(i <- 0 until CommitWidth * MaxUopSize) {
-    io.diffCommits.commitValid(i) := (state === s_idle || state === s_special_walk) && i.U < newCommitSize
-    io.diffCommits.info(i) := diffCandidates(i)
+    io.diffCommits.foreach(_.commitValid(i) := (state === s_idle || state === s_special_walk) && i.U < newCommitSize)
+    io.diffCommits.foreach(_.info(i) := diffCandidates(i))
   }
 
   XSError(isBefore(enqPtr, deqPtr) && !isFull(enqPtr, deqPtr), "\ndeqPtr is older than enqPtr!\n")

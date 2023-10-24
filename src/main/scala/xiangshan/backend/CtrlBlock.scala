@@ -360,7 +360,7 @@ class CtrlBlockImp(
 
   rat.io.redirect := s1_s3_redirect.valid
   rat.io.robCommits := rob.io.rabCommits
-  rat.io.diffCommits := rob.io.diffCommits
+  rat.io.diffCommits.foreach(_ := rob.io.diffCommits.get)
   rat.io.intRenamePorts := rename.io.intRenamePorts
   rat.io.fpRenamePorts := rename.io.fpRenamePorts
   rat.io.vecRenamePorts := rename.io.vecRenamePorts
