@@ -429,8 +429,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val enqPtrVec = Wire(Vec(RenameWidth, new RobPtr))
   val deqPtrVec = Wire(Vec(CommitWidth, new RobPtr))
 
-  dontTouch(enqPtrVec)
-  dontTouch(deqPtrVec)
+  if(backendParams.debugEn) {
+    dontTouch(enqPtrVec)
+    dontTouch(deqPtrVec)
+  }
 
   val walkPtrVec = Reg(Vec(CommitWidth, new RobPtr))
   val lastWalkPtr = Reg(new RobPtr)

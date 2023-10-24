@@ -60,7 +60,9 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
       BitPat.N(4)
     )
   )
-  dontTouch(output1H)
+  if(backendParams.debugEn) {
+    dontTouch(output1H)
+  }
   val outputWidth1H = output1H
 
   val outEew = RegNext(RegNext(Mux1H(output1H, Seq(0,1,2,3).map(i => i.U))))
