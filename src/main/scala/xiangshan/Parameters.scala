@@ -172,7 +172,7 @@ case class XSCoreParameters
   dpParams: DispatchParameters = DispatchParameters(
     IntDqSize = 16,
     FpDqSize = 16,
-    LsDqSize = 16,
+    LsDqSize = 18,
     IntDqDeqWidth = 6,
     FpDqDeqWidth = 6,
     LsDqDeqWidth = 6,
