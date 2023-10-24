@@ -24,7 +24,7 @@ import chiseltest.simulator.VerilatorFlags
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
 import xiangshan.test.types._
-import xiangshan.types.PrintModuleName
+import xstransforms.PrintModuleName
 
 import xiangshan.backend.fu._
 
