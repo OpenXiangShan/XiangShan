@@ -126,6 +126,9 @@ class RobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircular
     // output: the CommitWidth deqPtr
     val out = Vec(CommitWidth, Output(new RobPtr))
     val next_out = Vec(CommitWidth, Output(new RobPtr))
+    val commitCnt = Output(UInt(log2Up(CommitWidth+1).W))
+    val canCommitPriorityCond = Output(Vec(CommitWidth+1,Bool()))
+    val commitEn = Output(Bool())
   })
 
   val deqPtrVec = RegInit(VecInit((0 until CommitWidth).map(_.U.asTypeOf(new RobPtr))))
@@ -145,14 +148,23 @@ class RobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircular
   // only one instruction is allowed to commit
   val allowOnlyOne = commit_exception || io.intrBitSetReg
   val commitCnt = Mux(allowOnlyOne, canCommit(0), normalCommitCnt)
+  val allowOnlyOneCond = Wire(chiselTypeOf(io.canCommitPriorityCond))
+  allowOnlyOneCond.zipWithIndex.map{ case (value,i) => value := (if (i==0) !canCommit(0) else true.B)}
+  io.canCommitPriorityCond := Mux(allowOnlyOne, allowOnlyOneCond, VecInit(canCommit.map(c => !c) :+ true.B))
 
-  val commitDeqPtrVec = VecInit(deqPtrVec.map(_ + commitCnt))
+  val commitDeqPtrAll = VecInit((0 until 2*CommitWidth).map{case i => deqPtrVec(0) + i.U})
+  val commitDeqPtrVec = Wire(chiselTypeOf(deqPtrVec))
+  for (i <- 0 until CommitWidth){
+    commitDeqPtrVec(i) := PriorityMuxDefault(io.canCommitPriorityCond.zip(commitDeqPtrAll.drop(i).take(CommitWidth+1)), deqPtrVec(i))
+  }
   val deqPtrVec_next = Mux(io.state === 0.U && !redirectOutValid && !io.blockCommit, commitDeqPtrVec, deqPtrVec)
 
   deqPtrVec := deqPtrVec_next
 
   io.next_out := deqPtrVec_next
   io.out      := deqPtrVec
+  io.commitCnt := commitCnt
+  io.commitEn := io.state === 0.U && !redirectOutValid && !io.blockCommit
 
   when (io.state === 0.U) {
     XSInfo(io.state === 0.U && commitCnt > 0.U, "retired %d insts\n", commitCnt)
@@ -342,7 +354,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val writeback: MixedVec[ValidIO[ExuOutput]] = Flipped(params.genWrite2CtrlBundles)
     val commits = Output(new RobCommitIO)
     val rabCommits = Output(new RobCommitIO)
-    val diffCommits = Output(new DiffCommitIO)
+    val diffCommits = if (backendParams.debugEn) Some(Output(new DiffCommitIO)) else None
     val isVsetFlushPipe = Output(Bool())
     val vconfigPdest = Output(UInt(PhyRegIdxWidth.W))
     val lsq = new RobLsqIO
@@ -372,20 +384,16 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val fflagsWBs = io.writeback.filter(x => x.bits.fflags.nonEmpty)
   val exceptionWBs = io.writeback.filter(x => x.bits.exceptionVec.nonEmpty)
   val redirectWBs = io.writeback.filter(x => x.bits.redirect.nonEmpty)
+  val vxsatWBs = io.writeback.filter(x => x.bits.vxsat.nonEmpty)
 
-  val exuWbPorts = io.writeback.filter(!_.bits.params.hasStdFu)
-  val stdWbPorts = io.writeback.filter(_.bits.params.hasStdFu)
-  val fflagsPorts = io.writeback.filter(x => x.bits.fflags.nonEmpty)
-  val vxsatPorts = io.writeback.filter(x => x.bits.vxsat.nonEmpty)
-  val exceptionPorts = io.writeback.filter(x => x.bits.exceptionVec.nonEmpty)
   val numExuWbPorts = exuWBs.length
   val numStdWbPorts = stdWBs.length
 
 
   println(s"Rob: size $RobSize, numExuWbPorts: $numExuWbPorts, numStdWbPorts: $numStdWbPorts, commitwidth: $CommitWidth")
-//  println(s"exuPorts: ${exuWbPorts.map(_._1.map(_.name))}")
-//  println(s"stdPorts: ${stdWbPorts.map(_._1.map(_.name))}")
-//  println(s"fflags: ${fflagsPorts.map(_._1.map(_.name))}")
+//  println(s"exuPorts: ${exuWbs.map(_._1.map(_.name))}")
+//  println(s"stdPorts: ${stdWbs.map(_._1.map(_.name))}")
+//  println(s"fflagsPorts: ${fflagsWBs.map(_._1.map(_.name))}")
 
 
   // instvalid field
@@ -398,6 +406,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val fflagsDataModule   = RegInit(VecInit(Seq.fill(RobSize)(0.U(5.W))))
   val vxsatDataModule    = RegInit(VecInit(Seq.fill(RobSize)(false.B)))
 
+  val stdWritebackedDeqGroup   = Reg(Vec(CommitWidth, Bool()))
+  val uopNumVecDeqGroup        = RegInit(VecInit(Seq.fill(CommitWidth)(0.U(log2Up(MaxUopSize + 1).W))))
+  val realDestSizeDeqGroup     = RegInit(VecInit(Seq.fill(CommitWidth)(0.U(log2Up(MaxUopSize + 1).W))))
+  val fflagsDataModuleDeqGroup = RegInit(VecInit(Seq.fill(CommitWidth)(0.U(5.W))))
+  val vxsatDataModuleDeqGroup  = RegInit(VecInit(Seq.fill(CommitWidth)(false.B)))
   def isWritebacked(ptr: UInt): Bool = {
     !uopNumVec(ptr).orR && stdWritebacked(ptr)
   }
@@ -413,6 +426,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // some instructions are not allowed to trigger interrupts
   // They have side effects on the states of the processor before they write back
   val interrupt_safe = Mem(RobSize, Bool())
+  val interrupt_safeDeqGroup = Reg(Vec(CommitWidth, Bool()))
 
   // data for debug
   // Warn: debug_* prefix should not exist in generated verilog.
@@ -490,12 +504,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val commitDestSizeSeq = (0 until CommitWidth).map(i => realDestSize(deqPtrVec(i).value))
   val walkDestSizeSeq = (0 until CommitWidth).map(i => realDestSize(walkPtrVec(i).value))
 
-  val commitSizeSum = io.commits.commitValid.zip(commitDestSizeSeq).map { case (commitValid, destSize) =>
-    Mux(io.commits.isCommit && commitValid, destSize, 0.U)
-  }.reduce(_ +& _)
-  val walkSizeSum = io.commits.walkValid.zip(walkDestSizeSeq).map { case (walkValid, destSize) =>
-    Mux(io.commits.isWalk && walkValid, destSize, 0.U)
-  }.reduce(_ +& _)
+  val walkDestSizeDeqGroup = RegInit(VecInit(Seq.fill(CommitWidth)(0.U(log2Up(MaxUopSize + 1).W))))
+  val commitSizeSumSeq = (0 until CommitWidth).map(i => realDestSizeDeqGroup.take(i+1).reduce(_ +& _))
+  val walkSizeSumSeq = (0 until CommitWidth).map(i => walkDestSizeDeqGroup.take(i+1).reduce(_ +& _))
+  val commitSizeSumCond = io.commits.commitValid.map(_ && io.commits.isCommit)
+  val walkSizeSumCond = io.commits.walkValid.map(_ && io.commits.isWalk)
+  val commitSizeSum = PriorityMuxDefault(commitSizeSumCond.reverse.zip(commitSizeSumSeq.reverse), 0.U)
+  val walkSizeSum = PriorityMuxDefault(walkSizeSumCond.reverse.zip(walkSizeSumSeq.reverse), 0.U)
 
   rab.io.fromRob.commitSize := commitSizeSum
   rab.io.fromRob.walkSize := walkSizeSum
@@ -503,7 +518,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   rab.io.snpt.snptEnq := DontCare
 
   io.rabCommits := rab.io.commits
-  io.diffCommits := rab.io.diffCommits
+  io.diffCommits.foreach(_ := rab.io.diffCommits.get)
 
   /**
     * Enqueue (from dispatch)
@@ -693,7 +708,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val debug_deqUop = debug_microOp(deqPtr.value)
 
   val intrBitSetReg = RegNext(io.csr.intrBitSet)
-  val intrEnable = intrBitSetReg && !hasWaitForward && interrupt_safe(deqPtr.value)
+  val intrEnable = intrBitSetReg && !hasWaitForward && interrupt_safeDeqGroup(0)
   val deqHasExceptionOrFlush = exceptionDataRead.valid && exceptionDataRead.bits.robIdx === deqPtr
   val deqHasException = deqHasExceptionOrFlush && (exceptionDataRead.bits.exceptionVec.asUInt.orR ||
     exceptionDataRead.bits.singleStep || exceptionDataRead.bits.trigger.hit)
@@ -792,17 +807,20 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.commits.isCommit := state === s_idle && !blockCommit
   val walk_v = VecInit(walkPtrVec.map(ptr => valid(ptr.value)))
   val commit_v = VecInit(deqPtrVec.map(ptr => valid(ptr.value)))
+  dontTouch(commit_v)
+  val commit_vDeqGroup = Reg(chiselTypeOf(walk_v))
   // store will be commited iff both sta & std have been writebacked
   val commit_w = VecInit(deqPtrVec.map(ptr => isWritebacked(ptr.value)))
+  val commit_wDeqGroup = Reg(chiselTypeOf(walk_v))
   val commit_exception = exceptionDataRead.valid && !isAfter(exceptionDataRead.bits.robIdx, deqPtrVec.last)
-  val commit_block = VecInit((0 until CommitWidth).map(i => !commit_w(i)))
+  val commit_block = VecInit((0 until CommitWidth).map(i => !commit_wDeqGroup(i)))
   val allowOnlyOneCommit = commit_exception || intrBitSetReg
   // for instructions that may block others, we don't allow them to commit
   for (i <- 0 until CommitWidth) {
     // defaults: state === s_idle and instructions commit
     // when intrBitSetReg, allow only one instruction to commit at each clock cycle
     val isBlocked = if (i != 0) Cat(commit_block.take(i)).orR || allowOnlyOneCommit else intrEnable || deqHasException || deqHasReplayInst
-    io.commits.commitValid(i) := commit_v(i) && commit_w(i) && !isBlocked
+    io.commits.commitValid(i) := commit_vDeqGroup(i) && commit_wDeqGroup(i) && !isBlocked
     io.commits.info(i) := dispatchDataRead(i)
     io.commits.robIdx(i) := deqPtrVec(i)
 
@@ -842,8 +860,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // sync v csr to csr
   // for difftest
   if(env.AlwaysBasicDiff || env.EnableDifftest) {
-    val isDiffWriteVconfigVec = io.diffCommits.commitValid.zip(io.diffCommits.info).map { case (valid, info) => valid && info.ldest === VCONFIG_IDX.U && info.vecWen }.reverse
-    io.csr.vcsrFlag := RegNext(io.diffCommits.isCommit && Cat(isDiffWriteVconfigVec).orR)
+    val isDiffWriteVconfigVec = io.diffCommits.get.commitValid.zip(io.diffCommits.get.info).map { case (valid, info) => valid && info.ldest === VCONFIG_IDX.U && info.vecWen }.reverse
+    io.csr.vcsrFlag := RegNext(io.diffCommits.get.isCommit && Cat(isDiffWriteVconfigVec).orR)
   }
   else{
     io.csr.vcsrFlag := false.B
@@ -877,12 +895,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     */
   val deqPtrGenModule = Module(new RobDeqPtrWrapper)
   deqPtrGenModule.io.state := state
-  deqPtrGenModule.io.deq_v := commit_v
-  deqPtrGenModule.io.deq_w := commit_w
+  deqPtrGenModule.io.deq_v := commit_vDeqGroup
+  deqPtrGenModule.io.deq_w := commit_wDeqGroup
   deqPtrGenModule.io.exception_state := exceptionDataRead
   deqPtrGenModule.io.intrBitSetReg := intrBitSetReg
   deqPtrGenModule.io.hasNoSpecExec := hasWaitForward
-  deqPtrGenModule.io.interrupt_safe := interrupt_safe(deqPtr.value)
+  deqPtrGenModule.io.interrupt_safe := interrupt_safeDeqGroup(0)
   deqPtrGenModule.io.blockCommit := blockCommit
   deqPtrVec := deqPtrGenModule.io.out
   val deqPtrVec_next = deqPtrGenModule.io.next_out
@@ -902,7 +920,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     Mux(state === s_walk, VecInit(walkPtrVec.map(_ + CommitWidth.U)), walkPtrVec)
   )
   walkPtrVec := walkPtrVec_next
-
+  walkDestSizeDeqGroup.zip(walkPtrVec_next).map{
+    case (reg, ptrNext) => reg := realDestSize(ptrNext.value)
+  }
   val numValidEntries = distanceBetween(enqPtr, deqPtr)
   val commitCnt = PopCount(io.commits.commitValid)
 
@@ -921,6 +941,49 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     * All events: (1) enqueue (dispatch); (2) writeback; (3) cancel; (4) dequeue (commit);
     * All states: (1) valid; (2) writebacked; (3) flagBkup
     */
+
+  // update commit_vDeqGroup
+  val deqPtrValue = Wire(Vec(2 * CommitWidth, new RobPtr))
+  deqPtrValue.zipWithIndex.map{case (deq, i) => deq := deqPtrVec(0) + i.U}
+  val commit_vReadVec = Wire(Vec(2 * CommitWidth, chiselTypeOf(commit_v(0))))
+  val commit_vNextVec = Wire(Vec(2 * CommitWidth, chiselTypeOf(commit_v(0))))
+  dontTouch(commit_vDeqGroup)
+  dontTouch(commit_vReadVec)
+  dontTouch(commit_vNextVec)
+  dontTouch(deqPtrValue)
+  for (i <- 0 until 2 * CommitWidth) {
+    commit_vReadVec(i) := valid(deqPtrValue(i).value)
+    commit_vNextVec(i) := commit_vReadVec(i)
+  }
+  (0 until CommitWidth).map { case i =>
+    val nextVec = commit_vNextVec
+    val commitEn = deqPtrGenModule.io.commitEn
+    val canCommitPriorityCond = deqPtrGenModule.io.canCommitPriorityCond
+    val commit_wNextThis = nextVec.drop(i).take(CommitWidth+1)
+    val originValue = nextVec(i)
+    val ifCommitEnValue = PriorityMuxDefault(canCommitPriorityCond.zip(commit_wNextThis), originValue)
+    commit_vDeqGroup(i) := Mux(commitEn, ifCommitEnValue, originValue)
+  }
+  // update commit_wDeqGroup
+  val commit_wReadVec = Wire(Vec(2 * CommitWidth, chiselTypeOf(commit_w(0))))
+  val commit_wNextVec = Wire(Vec(2 * CommitWidth, chiselTypeOf(commit_w(0))))
+  dontTouch(commit_wDeqGroup)
+  dontTouch(commit_wReadVec)
+  dontTouch(commit_wNextVec)
+  dontTouch(commit_w)
+  for (i <- 0 until 2 * CommitWidth) {
+    commit_wReadVec(i) := isWritebacked(deqPtrValue(i).value)
+    commit_wNextVec(i) := commit_vReadVec(i)
+  }
+  (0 until CommitWidth).map { case i =>
+    val nextVec = commit_wNextVec
+    val commitEn = deqPtrGenModule.io.commitEn
+    val canCommitPriorityCond = deqPtrGenModule.io.canCommitPriorityCond
+    val commit_wNextThis = nextVec.drop(i).take(CommitWidth+1)
+    val originValue = nextVec(i)
+    val ifCommitEnValue = PriorityMuxDefault(canCommitPriorityCond.zip(commit_wNextThis),originValue)
+    commit_wDeqGroup(i) := Mux(commitEn, ifCommitEnValue, originValue)
+  }
   val commitReadAddr = Mux(state === s_idle, VecInit(deqPtrVec.map(_.value)), VecInit(walkPtrVec.map(_.value)))
 
   // redirect logic writes 6 valid
@@ -934,6 +997,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     redirectHeadVec zip invMask foreach {
       case (redirectHead, inv) => when(inv) {
         valid(redirectHead.value) := false.B
+        for (j <- 0 until 2 * CommitWidth) {
+          when(redirectHead.value === deqPtrValue(j).value) {
+            commit_vNextVec(j) := false.B
+          }
+        }
       }
     }
     when(!invMask.last) {
@@ -953,6 +1021,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   for (i <- 0 until RenameWidth) {
     when (canEnqueue(i) && !io.redirect.valid) {
       valid(allocatePtrVec(i).value) := true.B
+      for (j <- 0 until 2*CommitWidth) {
+        when(allocatePtrVec(i).value === deqPtrValue(j).value){
+          commit_vNextVec(j) := true.B
+        }
+      }
     }
   }
   // dequeue logic writes 6 valid
@@ -960,6 +1033,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val commitValid = io.commits.isCommit && io.commits.commitValid(i)
     when (commitValid) {
       valid(commitReadAddr(i)) := false.B
+      for (j <- 0 until 2 * CommitWidth) {
+        when(commitReadAddr(i) === deqPtrValue(j).value) {
+          commit_vNextVec(j) := false.B
+        }
+      }
     }
   }
 
@@ -997,8 +1075,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   private val enqWriteStdVec: Vec[Bool] = VecInit(io.enq.req.map {
     req => FuType.isAMO(req.bits.fuType) || FuType.isStore(req.bits.fuType)
   })
-  val fflags_wb = fflagsPorts
-  val vxsat_wb = vxsatPorts
+  val fflags_wb = fflagsWBs
+  val vxsat_wb = vxsatWBs
   for(i <- 0 until RobSize){
 
     val robIdxMatchSeq = io.enq.req.map(_.bits.robIdx.value === i.U)
@@ -1029,18 +1107,43 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       // exception flush
       uopNumVec(i) := 0.U
       stdWritebacked(i) := true.B
+      for (j <- 0 until 2 * CommitWidth) {
+        when(i.U === deqPtrValue(j).value) {
+          commit_wNextVec(j) := true.B
+        }
+      }
     }.elsewhen(!valid(i) && instCanEnqFlag) {
       // enq set num of uops
       uopNumVec(i) := enqUopNum
       stdWritebacked(i) := Mux(enqWriteStd, false.B, true.B)
+      for (j <- 0 until 2 * CommitWidth) {
+        when(i.U === deqPtrValue(j).value) {
+          commit_wNextVec(j) := !enqUopNum.orR && Mux(enqWriteStd, false.B, true.B)
+        }
+      }
     }.elsewhen(valid(i)) {
       // update by writing back
       uopNumVec(i) := uopNumVec(i) - wbCnt
+      for (j <- 0 until 2 * CommitWidth) {
+        when(i.U === deqPtrValue(j).value) {
+          commit_wNextVec(j) := (uopNumVec(i) === wbCnt) && stdWritebacked(i)
+        }
+      }
       when (canStdWbSeq.asUInt.orR) {
         stdWritebacked(i) := true.B
+        for (j <- 0 until 2 * CommitWidth) {
+          when(i.U === deqPtrValue(j).value) {
+            commit_wNextVec(j) := uopNumVec(i) === wbCnt
+          }
+        }
       }
     }.otherwise {
       uopNumVec(i) := 0.U
+      for (j <- 0 until 2 * CommitWidth) {
+        when(i.U === deqPtrValue(j).value) {
+          commit_wNextVec(j) := stdWritebacked(i)
+        }
+      }
     }
 
     val fflagsCanWbSeq = fflags_wb.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U && writeback.bits.wflags.getOrElse(false.B))
@@ -1051,7 +1154,26 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val vxsatRes = vxsatCanWbSeq.zip(vxsat_wb).map { case (canWb, wb) => Mux(canWb, wb.bits.vxsat.get, 0.U) }.fold(false.B)(_ | _)
     vxsatDataModule(i) := Mux(!valid(i) && instCanEnqFlag, 0.U, vxsatDataModule(i) | vxsatRes)
   }
-
+  // update uopNumVecDeqGroup
+  val realDestSizeReadVec = Wire(Vec(2*CommitWidth, chiselTypeOf(realDestSize(0))))
+  val realDestSizeNextVec = Wire(Vec(2*CommitWidth, chiselTypeOf(realDestSize(0))))
+  for(i <- 0 until 2*CommitWidth) {
+    val robIdxMatchSeq = io.enq.req.map(_.bits.robIdx.value === deqPtrValue(i).value)
+    val uopCanEnqSeq = uopEnqValidSeq.zip(robIdxMatchSeq).map { case (valid, isMatch) => valid && isMatch }
+    val instCanEnqSeq = instEnqValidSeq.zip(robIdxMatchSeq).map { case (valid, isMatch) => valid && isMatch }
+    val instCanEnqFlag = Cat(instCanEnqSeq).orR
+    realDestSizeReadVec(i) := realDestSize(deqPtrValue(i).value)
+    realDestSizeNextVec(i) := Mux(valid(deqPtrValue(i).value) || instCanEnqFlag, realDestSizeReadVec(i) + PopCount(enqNeedWriteRFSeq.zip(uopCanEnqSeq).map { case (writeFlag, valid) => writeFlag && valid }), 0.U)
+  }
+  (0 until CommitWidth).map{ case i =>
+    val nextVec = realDestSizeNextVec
+    val commitEn = deqPtrGenModule.io.commitEn
+    val canCommitPriorityCond = deqPtrGenModule.io.canCommitPriorityCond
+    val commit_wNextThis = nextVec.drop(i).take(CommitWidth+1)
+    val originValue = nextVec(i)
+    val ifCommitEnValue = PriorityMuxDefault(canCommitPriorityCond.zip(commit_wNextThis), originValue)
+    realDestSizeDeqGroup(i) := Mux(commitEn, ifCommitEnValue, originValue)
+  }
   // flagBkup
   // enqueue logic set 6 flagBkup at most
   for (i <- 0 until RenameWidth) {
@@ -1061,6 +1183,25 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
 
   // interrupt_safe
+
+  val interrupt_safeReadVec = Wire(Vec(2 * CommitWidth, chiselTypeOf(interrupt_safe(0))))
+  val interrupt_safeNextVec = Wire(Vec(2 * CommitWidth, chiselTypeOf(interrupt_safe(0))))
+  dontTouch(interrupt_safeDeqGroup)
+  dontTouch(interrupt_safeReadVec)
+  dontTouch(interrupt_safeNextVec)
+  for (i <- 0 until 2 * CommitWidth) {
+    interrupt_safeReadVec(i) := interrupt_safe(deqPtrValue(i).value)
+    interrupt_safeNextVec(i) := interrupt_safeReadVec(i)
+  }
+  (0 until CommitWidth).map { case i =>
+    val nextVec = interrupt_safeNextVec
+    val commitEn = deqPtrGenModule.io.commitEn
+    val canCommitPriorityCond = deqPtrGenModule.io.canCommitPriorityCond
+    val commit_wNextThis = nextVec.drop(i).take(CommitWidth+1)
+    val originValue = nextVec(i)
+    val ifCommitEnValue = PriorityMuxDefault(canCommitPriorityCond.zip(commit_wNextThis), originValue)
+    interrupt_safeDeqGroup(i) := Mux(commitEn, ifCommitEnValue, originValue)
+  }
   for (i <- 0 until RenameWidth) {
     // We RegNext the updates for better timing.
     // Note that instructions won't change the system's states in this cycle.
@@ -1073,6 +1214,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       // TODO: support non-MMIO load-store instructions to trigger interrupts
       val allow_interrupts = !CommitType.isLoadStore(io.enq.req(i).bits.commitType)
       interrupt_safe(RegNext(allocatePtrVec(i).value)) := RegNext(allow_interrupts)
+      for (j <- 0 until 2 * CommitWidth) {
+        when(RegNext(allocatePtrVec(i).value) === deqPtrValue(j).value) {
+          interrupt_safeNextVec(j) := RegNext(allow_interrupts)
+        }
+      }
     }
   }
 
@@ -1153,7 +1299,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   instrCntReg := instrCnt
   io.csr.perfinfo.retiredInstr := retireCounter
   io.robFull := !allowEnqueue
-  io.headNotReady := commit_v.head && !commit_w.head
+  io.headNotReady := commit_vDeqGroup.head && !commit_wDeqGroup.head
 
   /**
     * debug info
