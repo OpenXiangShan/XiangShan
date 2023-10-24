@@ -24,6 +24,7 @@ import utility._
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.{DCacheLineIO, DCacheWordIO, MemoryOpConstants}
+import xiangshan.backend._
 import xiangshan.backend.rob.{RobLsqIO, RobPtr}
 import difftest._
 import device.RAMHelper
@@ -43,12 +44,12 @@ object SqPtr {
   }
 }
 
-class SqEnqIO(implicit p: Parameters) extends XSBundle {
+class SqEnqIO(implicit p: Parameters) extends MemBlockBundle {
   val canAccept = Output(Bool())
   val lqCanAccept = Input(Bool())
-  val needAlloc = Vec(backendParams.LsExuCnt, Input(Bool()))
-  val req = Vec(backendParams.LsExuCnt, Flipped(ValidIO(new DynInst)))
-  val resp = Vec(backendParams.LsExuCnt, Output(new SqPtr))
+  val needAlloc = Vec(MemPipelineWidth, Input(Bool()))
+  val req = Vec(MemPipelineWidth, Flipped(ValidIO(new DynInst)))
+  val resp = Vec(MemPipelineWidth, Output(new SqPtr))
 }
 
 class DataBufferEntry (implicit p: Parameters)  extends DCacheBundle {
@@ -102,7 +103,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     numEntries = StoreQueueSize,
     numRead = EnsbufferWidth,
     numWrite = StorePipelineWidth,
-    numForward = StorePipelineWidth
+    numForward = LoadPipelineWidth
   ))
   dataModule.io := DontCare
   val paddrModule = Module(new SQAddrModule(
@@ -110,7 +111,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     numEntries = StoreQueueSize,
     numRead = EnsbufferWidth,
     numWrite = StorePipelineWidth,
-    numForward = StorePipelineWidth
+    numForward = LoadPipelineWidth
   ))
   paddrModule.io := DontCare
   val vaddrModule = Module(new SQAddrModule(
@@ -118,7 +119,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     numEntries = StoreQueueSize,
     numRead = EnsbufferWidth + 1, // sbuffer + badvaddr 1 (TODO)
     numWrite = StorePipelineWidth,
-    numForward = StorePipelineWidth
+    numForward = LoadPipelineWidth
   ))
   vaddrModule.io := DontCare
   val dataBuffer = Module(new DatamoduleResultBuffer(new DataBufferEntry))

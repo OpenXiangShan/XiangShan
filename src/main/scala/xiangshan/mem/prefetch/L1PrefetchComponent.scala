@@ -580,7 +580,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
 
 class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamPrefetchHelper with HasStridePrefetchHelper {
   val pf_ctrl = IO(Input(new PrefetchControlBundle))
-  val stride_train = IO(Flipped(Vec(backendParams.LduCnt, ValidIO(new LdPrefetchTrainBundle()))))
+  val stride_train = IO(Flipped(Vec(backendParams.LduCnt + backendParams.HyuCnt, ValidIO(new LdPrefetchTrainBundle()))))
   val l2PfqBusy = IO(Input(Bool()))
 
   val stride_train_filter = Module(new TrainFilter(STRIDE_FILTER_SIZE, "stride"))

@@ -51,9 +51,11 @@ trait HasMemBlockParameters extends HasXSParameter {
   val MemExuCnt = LduCnt + StaCnt + StdCnt + HyuCnt
   val MemAddrExtCnt = LdExeCnt + StaCnt
   val MemVExuCnt = VlduCnt + VstuCnt
+
+  val MemPipelineWidth = LoadPipelineWidth + StorePipelineWidth
 }
 
-abstract class MemBlockBundle extends Bundle with HasMemBlockParameters
+abstract class MemBlockBundle(implicit val p: Parameters) extends Bundle with HasMemBlockParameters
 
 class Std(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.in.ready := io.out.ready
@@ -63,7 +65,7 @@ class Std(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.out.bits.ctrl.robIdx := io.in.bits.ctrl.robIdx
 }
 
-class ooo_to_mem(implicit val p: Parameters) extends MemBlockBundle {
+class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
   val loadFastMatch = Vec(LdExeCnt, Input(UInt(LdExeCnt.W)))
   val loadFastFuOpType = Vec(LdExeCnt, Input(FuOpType()))
   val loadFastImm = Vec(LdExeCnt, Input(UInt(12.W)))
@@ -97,7 +99,7 @@ class ooo_to_mem(implicit val p: Parameters) extends MemBlockBundle {
   def issueUops = issueLda ++ issueSta ++ issueStd ++ issueVldu
 }
 
-class mem_to_ooo(implicit val p: Parameters) extends MemBlockBundle {
+class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
   val otherFastWakeup = Vec(LdExeCnt, ValidIO(new DynInst))
   val csrUpdate = new DistributedCSRUpdateReq
   val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize + 1).W))

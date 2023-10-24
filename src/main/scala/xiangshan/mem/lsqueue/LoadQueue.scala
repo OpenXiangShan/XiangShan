@@ -22,7 +22,8 @@ import chisel3.util._
 import utils._
 import utility._
 import xiangshan._
-import xiangshan.backend.fu.fpu.FPU
+import xiangshan.backend._
+import xiangshan.backend.fu.fpu._
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
 import xiangshan.frontend.FtqPtr
@@ -65,13 +66,12 @@ trait HasLoadHelper { this: XSModule =>
   }
 }
 
-class LqEnqIO(implicit p: Parameters) extends XSBundle {
-  private val LsExuCnt = backendParams.StaCnt + backendParams.LduCnt
+class LqEnqIO(implicit p: Parameters) extends MemBlockBundle {
   val canAccept = Output(Bool())
   val sqCanAccept = Input(Bool())
-  val needAlloc = Vec(LsExuCnt, Input(Bool()))
-  val req = Vec(LsExuCnt, Flipped(ValidIO(new DynInst)))
-  val resp = Vec(LsExuCnt, Output(new LqPtr))
+  val needAlloc = Vec(MemPipelineWidth, Input(Bool()))
+  val req = Vec(MemPipelineWidth, Flipped(ValidIO(new DynInst)))
+  val resp = Vec(MemPipelineWidth, Output(new LqPtr))
 }
 
 class LqTriggerIO(implicit p: Parameters) extends XSBundle {

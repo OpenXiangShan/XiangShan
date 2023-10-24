@@ -27,6 +27,7 @@ import xiangshan.cache._
 import xiangshan.cache.{DCacheLineIO, DCacheWordIO, MemoryOpConstants}
 import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.mem._
+import xiangshan.backend._
 import xiangshan.backend.rob.RobLsqIO
 
 class ExceptionAddrIO(implicit p: Parameters) extends XSBundle {
@@ -46,11 +47,11 @@ class InflightBlockInfo(implicit p: Parameters) extends XSBundle {
   val valid = Bool()
 }
 
-class LsqEnqIO(implicit p: Parameters) extends XSBundle {
+class LsqEnqIO(implicit p: Parameters) extends MemBlockBundle {
   val canAccept = Output(Bool())
-  val needAlloc = Vec(backendParams.LsExuCnt, Input(UInt(2.W)))
-  val req       = Vec(backendParams.LsExuCnt, Flipped(ValidIO(new DynInst)))
-  val resp      = Vec(backendParams.LsExuCnt, Output(new LSIdx))
+  val needAlloc = Vec(MemPipelineWidth, Input(UInt(2.W)))
+  val req       = Vec(MemPipelineWidth, Flipped(ValidIO(new DynInst)))
+  val resp      = Vec(MemPipelineWidth, Output(new LSIdx))
 }
 
 // Load / Store Queue Wrapper for XiangShan Out of Order LSU
