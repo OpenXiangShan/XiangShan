@@ -54,10 +54,12 @@ class FuBusyTableWrite(fuLatencyMap: Map[FuType.OHType, Int]) (implicit p: Param
   private val og1RespClearShift = Mux(og1RespFail, og1RespMatchVec.asUInt >> 3, Utils.NZeros(tableSize))
 
   // Just for more readable verilog
-  dontTouch(fuBusyTableShift)
-  dontTouch(deqRespSetShift)
-  dontTouch(og0RespClearShift)
-  dontTouch(og1RespClearShift)
+  if(backendParams.debugEn) {
+    dontTouch(fuBusyTableShift)
+    dontTouch(deqRespSetShift)
+    dontTouch(og0RespClearShift)
+    dontTouch(og1RespClearShift)
+  }
 
   fuBusyTableNext := fuBusyTableShift & (~og0RespClearShift).asUInt & (~og1RespClearShift).asUInt | deqRespSetShift.asUInt
 

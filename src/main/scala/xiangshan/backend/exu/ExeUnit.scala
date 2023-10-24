@@ -177,7 +177,9 @@ class ExeUnitImp(
       )
     )
   }
-  dontTouch(io.out.ready)
+  if(backendParams.debugEn) {
+    dontTouch(io.out.ready)
+  }
   // rob flush --> funcUnits
   funcUnits.zipWithIndex.foreach { case (fu, i) =>
     fu.io.flush <> io.flush
