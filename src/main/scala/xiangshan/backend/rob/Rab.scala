@@ -77,7 +77,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   private val walkPtrOHVec = VecInit.tabulate(CommitWidth + 1)(CircularShift(walkPtrOH).left)
   private val walkPtrNext = Wire(new RenameBufferPtr)
 
-  private val snptEnq = io.canEnq && io.req.head.valid && io.req.head.bits.snapshot
+  private val snptEnq = io.req.head.valid && io.req.head.bits.snapshot
   private val walkPtrSnapshots = SnapshotGenerator(enqPtr, snptEnq, io.snpt.snptDeq, io.redirect.valid, io.snpt.flushVec)
 
   // We should extra walk these preg pairs which compressed in rob enq entry at last cycle after restored snapshots.
@@ -91,9 +91,6 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   // b000011 --Cat(x,1)--> b0000111 --Reverse--> b1110000 --PriorityEncoder--> 2.U
   // b000000 --Cat(x,1)--> b0000001 --Reverse--> b1000000 --PriorityEncoder--> 0.U
   private val compressedExtraWalkSize = PriorityMux(Reverse(Cat(compressedExtraWalkMask, 1.U(1.W))), (0 to RenameWidth).map(i => (RenameWidth - i).U))
-
-  // may shift [0, CommitWidth] steps
-  val headPtrOHVec2 = VecInit(Seq.tabulate(CommitWidth * MaxUopSize + 1)(_ % size).map(step => deqPtrOHShift.left(step)))
 
   val vcfgPtrOH = RegInit(1.U(size.W))
   val vcfgPtrOHShift = CircularShift(vcfgPtrOH)
