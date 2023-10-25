@@ -455,7 +455,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
   /**
     * IO assignments
     */
-  io.loadRegIn.ready := !full && preAlloc(enqPtr.value) || distanceBetween(enqPtr, deqPtr) >= numUopsSameVd
+  io.loadRegIn.ready := !full && preAlloc(enqPtr.value) || hasFreeEntries(enqPtr, deqPtr) >= numUopsSameVd
 
   io.flowWriteback.foreach(_.ready := true.B)
 
