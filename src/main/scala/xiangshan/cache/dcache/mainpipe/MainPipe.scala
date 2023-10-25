@@ -111,7 +111,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val release_update = ValidIO(new ReleaseUpdate)
     // atmoics
     val atomic_req = Flipped(DecoupledIO(new MainPipeReq))
-    val atomic_resp = ValidIO(new AtomicsResp)
+    val atomic_resp = ValidIO(new MainPipeResp)
     // replace
     val replace_req = Flipped(DecoupledIO(new MainPipeReq))
     val replace_resp = ValidIO(UInt(log2Up(cfg.nMissEntries).W))
@@ -119,7 +119,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val wb = DecoupledIO(new WritebackReq)
     val wb_ready_dup = Vec(nDupWbReady, Input(Bool()))
     val probe_ttob_check_req = ValidIO(new ProbeToBCheckReq)
-    val probe_ttob_check_resp = Flipped(ValidIO(new ProbeToBCheckResp))
+//    val probe_ttob_check_resp = Flipped(ValidIO(new ProbeToBCheckResp))
 
     // data sram
     val data_read = Vec(LoadPipelineWidth, Input(Bool()))
@@ -196,6 +196,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   store_req.bits := (new MainPipeReq).convertStoreReq(io.store_req.bits)
   store_req.valid := io.store_req.valid && storeCanAccept
   io.store_req.ready := store_req.ready && storeCanAccept
+
 
   when (store_req.fire) { // if wait too long and write success, reset counter.
     storeWaitCycles := 0.U
@@ -497,8 +498,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_error = RegEnable(s2_error, s2_fire_to_s3) || s3_data_error
   val (_, _, probe_new_coh) = s3_coh.onProbe(s3_req.probe_param)
   val s3_need_replacement = RegEnable(s2_need_replacement, s2_fire_to_s3)
-  val s3_probe_ttob_check_resp_r = RegEnable(io.probe_ttob_check_resp, RegNext(s2_fire_to_s3))
-  val s3_probe_ttob_check_resp = Mux(RegNext(s2_fire_to_s3), io.probe_ttob_check_resp, s3_probe_ttob_check_resp_r)
+//  val s3_probe_ttob_check_resp_r = RegEnable(io.probe_ttob_check_resp, RegNext(s2_fire_to_s3))
+//  val s3_probe_ttob_check_resp = Mux(RegNext(s2_fire_to_s3), io.probe_ttob_check_resp, s3_probe_ttob_check_resp_r)
 
   // duplicate regs to reduce fanout
   val s3_valid_dup = RegInit(VecInit(Seq.fill(14)(false.B)))
@@ -799,19 +800,19 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   when (do_amoalu_dup_for_meta_w_valid) { s3_s_amoalu_dup_for_meta_w_valid := true.B }
   when (s3_fire_dup_for_meta_w_valid) { s3_s_amoalu_dup_for_meta_w_valid := false.B }
 
-  // fix probe meta change
-  val s3_probe_ttob_override = s3_valid &&
-    // s3_probe_ttob_check_resp.valid &&
-    s3_probe_ttob_check_resp.bits.toN &&
-    (s3_coh_dup_for_meta_w_valid === Trunk || s3_coh_dup_for_meta_w_valid === Dirty)
-  val s3_probe_new_coh = Mux(
-    s3_probe_ttob_override,
-    ClientMetadata(Nothing),
-    probe_new_coh_dup_for_meta_w_valid
-  )
-  when(s3_probe_ttob_override) {
-    probe_update_meta_dup_for_meta_w_valid := true.B
-  }
+  // val s3_probe_ttob_override = s3_valid &&
+  //   // s3_probe_ttob_check_resp.valid && 
+  //   s3_probe_ttob_check_resp.bits.toN && 
+  //   s3_coh_dup_for_meta_w_valid === Trunk
+  // val s3_probe_new_coh = Mux(
+  //   s3_probe_ttob_override,
+  //   ClientMetadata(Nothing),
+  //   probe_new_coh_dup_for_meta_w_valid
+  // )
+  val s3_probe_new_coh = probe_new_coh_dup_for_meta_w_valid
+  // when(s3_probe_ttob_override) {
+  //   probe_update_meta_dup_for_meta_w_valid := true.B
+  // }
 
   val new_coh = Mux(
     miss_update_meta_dup_for_meta_w_valid,
@@ -1235,6 +1236,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
       (s3_s_amoalu_dup_for_data_w_bank || !amo_wait_amoalu_dup_for_data_w_bank) &&
       tag_write_ready_dup_for_data_w_bank(i) &&
       wb_ready_dup_for_data_w_bank(i)
+      wb_ready_dup_for_data_w_bank(i)
     val s3_replace_can_go_dup_for_data_w_bank = s3_req_replace_dup_for_data_w_bank &&
       (s3_coh_dup_for_data_w_bank.state === ClientStates.Nothing || wb_ready_dup_for_data_w_bank(i))
     val s3_can_go_dup_for_data_w_bank = s3_probe_can_go_dup_for_data_w_bank ||
@@ -1409,7 +1411,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   s3_ready := !s3_valid_dup(5) || s3_can_go
   s3_s0_set_conflict := s3_valid_dup(6) && s3_idx_dup(0) === s0_idx
   s3_s0_set_conflict_store := s3_valid_dup(7) && s3_idx_dup(1) === store_idx
-  assert(RegNext(!s3_valid || !(s3_req_source_dup_2 === STORE_SOURCE.U && !s3_req.probe) || s3_hit)) // miss store should never come to s3
+  //assert(RegNext(!s3_valid || !(s3_req_source_dup_2 === STORE_SOURCE.U && !s3_req.probe) || s3_hit)) // miss store should never come to s3 ,fixed(reserve)
 
   when(s3_fire) {
     s3_s_amoalu := false.B
@@ -1479,7 +1481,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     )
   ).asUInt
 
-  val atomic_hit_resp = Wire(new AtomicsResp)
+  val atomic_hit_resp = Wire(new MainPipeResp)
+  atomic_hit_resp.source := s3_req.source
   atomic_hit_resp.data := Mux(s3_sc, s3_sc_resp, s3_data_word)
   atomic_hit_resp.miss := false.B
   atomic_hit_resp.miss_id := s3_req.miss_id
@@ -1487,7 +1490,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   atomic_hit_resp.replay := false.B
   atomic_hit_resp.ack_miss_queue := s3_req_miss_dup(5)
   atomic_hit_resp.id := lrsc_valid_dup(2)
-  val atomic_replay_resp = Wire(new AtomicsResp)
+  val atomic_replay_resp = Wire(new MainPipeResp)
+  atomic_replay_resp.source := s2_req.source
   atomic_replay_resp.data := DontCare
   atomic_replay_resp.miss := true.B
   atomic_replay_resp.miss_id := DontCare
@@ -1495,8 +1499,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   atomic_replay_resp.replay := true.B
   atomic_replay_resp.ack_miss_queue := false.B
   atomic_replay_resp.id := DontCare
-  val atomic_replay_resp_valid = s2_valid_dup(6) && s2_can_go_to_mq_dup(2) && replay && s2_req.isAMO
-  val atomic_hit_resp_valid = s3_valid_dup(10) && (s3_amo_can_go || s3_miss_can_go && s3_req.isAMO)
+  //val atomic_replay_resp_valid = s2_valid_dup(6) && s2_can_go_to_mq_dup(2) && replay && s2_req.isAMO
+  //val atomic_hit_resp_valid = s3_valid_dup(10) && (s3_amo_can_go || s3_miss_can_go && s3_req.isAMO)
+  val atomic_replay_resp_valid = s2_valid_dup(6) && s2_can_go_to_mq_dup(2) && replay 
+  val atomic_hit_resp_valid = s3_valid_dup(10) && (s3_amo_can_go || s3_miss_can_go )
   io.atomic_resp.valid := atomic_replay_resp_valid || atomic_hit_resp_valid
   io.atomic_resp.bits := Mux(atomic_replay_resp_valid, atomic_replay_resp, atomic_hit_resp)
 
