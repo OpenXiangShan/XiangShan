@@ -481,7 +481,7 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
 
   val og1CancelOH = Output(ExuOH(backendParams.numExu))
 
-  val ldCancel = Vec(backendParams.LduCnt, Flipped(new LoadCancelIO))
+  val ldCancel = Vec(backendParams.LduCnt + backendParams.HyuCnt, Flipped(new LoadCancelIO))
 
   val cancelToBusyTable = Vec(backendParams.numExu, ValidIO(new CancelSignal))
 

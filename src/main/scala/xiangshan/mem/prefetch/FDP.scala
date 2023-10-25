@@ -121,7 +121,7 @@ class CounterFilter()(implicit p: Parameters) extends DCacheModule {
   // query
   val querys_l = io.query.map(_.req.bits)
   val querys_vl = io.query.map(_.req.valid)
-  for(i <- (0 until LduCnt)) {
+  for(i <- (0 until LduCnt + HyuCnt)) {
     val q = querys_l(i)
     val q_v = querys_vl(i)
 

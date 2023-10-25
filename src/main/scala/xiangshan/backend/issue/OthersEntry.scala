@@ -21,7 +21,7 @@ class OthersEntryIO(implicit p: Parameters, params: IssueBlockParams) extends XS
   val wakeUpFromIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
   val og0Cancel = Input(ExuOH(backendParams.numExu))
   val og1Cancel = Input(ExuOH(backendParams.numExu))
-  val ldCancel = Vec(backendParams.LduCnt, Flipped(new LoadCancelIO))
+  val ldCancel = Vec(backendParams.LduCnt + backendParams.HyuCnt, Flipped(new LoadCancelIO))
   val deqSel = Input(Bool())
   val transSel = Input(Bool())
   val issueResp = Flipped(ValidIO(new EntryDeqRespBundle))
