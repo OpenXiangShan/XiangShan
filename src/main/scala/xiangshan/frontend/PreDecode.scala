@@ -424,8 +424,8 @@ class FrontendTrigger(implicit p: Parameters) extends XSModule {
     val triggerHitVec = Wire(Vec(4, Bool()))
 
     for (j <- 0 until 4) {
-      triggerHitVec(j) := Mux(tdata(j).select, TriggerCmp(Mux(currentIsRVC, inst(15, 0), inst), tdata(j).tdata2, tdata(j).matchType, triggerEnable(j)),
-        TriggerCmp(currentPC, tdata(j).tdata2, tdata(j).matchType, triggerEnable(j)))
+      triggerHitVec(j) :=  TriggerCmp(Mux(tdata(j).select, Mux(currentIsRVC, inst(15, 0), inst), currentPC), 
+                                      tdata(j).tdata2, tdata(j).matchType, triggerEnable(j))
     }
 
     // fix chains this could be moved further into the pipeline
