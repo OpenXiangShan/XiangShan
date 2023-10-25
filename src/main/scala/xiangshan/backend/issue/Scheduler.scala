@@ -276,6 +276,12 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
   val ldAddrIQs = issueQueues.filter(iq => iq.params.LduCnt > 0)
   val stDataIQs = issueQueues.filter(iq => iq.params.StdCnt > 0)
   val hyuIQs = issueQueues.filter(iq => iq.params.HyuCnt > 0)
+
+  println(s"[SchedulerMemImp] memAddrIQs.size: ${memAddrIQs.size}, enq.size: ${memAddrIQs.map(_.io.enq.size).sum}")
+  println(s"[SchedulerMemImp] stAddrIQs.size:  ${stAddrIQs.size},  enq.size: ${stAddrIQs.map(_.io.enq.size).sum}")
+  println(s"[SchedulerMemImp] ldAddrIQs.size:  ${ldAddrIQs.size},  enq.size: ${ldAddrIQs.map(_.io.enq.size).sum}")
+  println(s"[SchedulerMemImp] stDataIQs.size:  ${stDataIQs.size},  enq.size: ${stDataIQs.map(_.io.enq.size).sum}")
+  println(s"[SchedulerMemImp] hyuIQs.size:     ${hyuIQs.size},     enq.size: ${hyuIQs.map(_.io.enq.size).sum}")
   require(memAddrIQs.nonEmpty && stDataIQs.nonEmpty)
 
   io.toMem.get.loadFastMatch := 0.U.asTypeOf(io.toMem.get.loadFastMatch) // TODO: is still needed?
