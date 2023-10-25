@@ -74,7 +74,7 @@ case class XSCoreParameters
   FtbSize: Int = 2048,
   RasSize: Int = 16,
   RasSpecSize: Int = 32,
-  RasCtrSize: Int = 8,
+  RasCtrSize: Int = 3,
   CacheLineSize: Int = 512,
   FtbWays: Int = 4,
   TageTableInfos: Seq[Tuple3[Int,Int,Int]] =
