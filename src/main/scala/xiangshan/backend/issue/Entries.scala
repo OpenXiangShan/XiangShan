@@ -100,7 +100,7 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val wakeUpFromIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
   val og0Cancel = Input(ExuOH(backendParams.numExu))
   val og1Cancel = Input(ExuOH(backendParams.numExu))
-  val ldCancel = Vec(backendParams.LduCnt, Flipped(new LoadCancelIO))
+  val ldCancel = Vec(backendParams.LduCnt + backendParams.HyuCnt, Flipped(new LoadCancelIO))
   //deq
   val deq = Vec(params.numDeq, new DeqBundle)
   val deqResp = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))

@@ -517,7 +517,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val ldaIqFeedback = Vec(params.LduCnt, Flipped(new MemRSFeedbackIO))
   val staIqFeedback = Vec(params.StaCnt, Flipped(new MemRSFeedbackIO))
   val hyuIqFeedback = Vec(params.HyuCnt, Flipped(new MemRSFeedbackIO))
-  val ldCancel = Vec(params.LduCnt, Flipped(new LoadCancelIO))
+  val ldCancel = Vec(params.LduCnt + params.HyuCnt, Flipped(new LoadCancelIO))
   val loadPcRead = Vec(params.LduCnt, Output(UInt(VAddrBits.W)))
   val storePcRead = Vec(params.StaCnt, Output(UInt(VAddrBits.W)))
   val hyuPcRead = Vec(params.HyuCnt, Output(UInt(VAddrBits.W)))
@@ -549,7 +549,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
 
   val debugLS = Flipped(Output(new DebugLSIO))
 
-  val lsTopdownInfo = Vec(params.LduCnt, Flipped(Output(new LsTopdownInfo)))
+  val lsTopdownInfo = Vec(params.LduCnt + params.HyuCnt, Flipped(Output(new LsTopdownInfo)))
   // Output
   val redirect = ValidIO(new Redirect)   // rob flush MemBlock
   val issueLda = MixedVec(Seq.fill(params.LduCnt)(DecoupledIO(new MemExuInput())))

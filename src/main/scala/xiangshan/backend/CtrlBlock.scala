@@ -567,7 +567,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val csr = new RobCSRIO
     val exception = ValidIO(new ExceptionInfo)
     val lsq = new RobLsqIO
-    val lsTopdownInfo = Vec(params.LduCnt, Input(new LsTopdownInfo))
+    val lsTopdownInfo = Vec(params.LduCnt + params.HyuCnt, Input(new LsTopdownInfo))
     val debug_ls = Input(new DebugLSIO())
     val robHeadLsIssue = Input(Bool())
     val robDeqPtr = Output(new RobPtr)

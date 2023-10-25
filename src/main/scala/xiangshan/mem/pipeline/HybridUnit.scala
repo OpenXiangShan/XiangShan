@@ -47,8 +47,6 @@ class HybridUnit(implicit p: Parameters) extends XSModule
 
     // flow in
     val lsin          = Flipped(Decoupled(new MemExuInput))
-    val rsIdx         = Input(UInt())
-    val isFirstIssue  = Input(Bool())
 
     // flow out
     val ldout = DecoupledIO(new MemExuOutput)
@@ -68,13 +66,6 @@ class HybridUnit(implicit p: Parameters) extends XSModule
 
       // trigger
       val trigger = Vec(3, new LoadUnitTriggerIO)
-
-      // prefetch
-      val prefetch_train            = ValidIO(new LdPrefetchTrainBundle()) // provide prefetch info to sms
-      val prefetch_train_l1         = ValidIO(new LdPrefetchTrainBundle()) // provide prefetch info to stream & stride
-      val prefetch_req              = Flipped(ValidIO(new L1PrefetchReq)) // hardware prefetch to l1 cache req
-      val canAcceptLowConfPrefetch  = Output(Bool())
-      val canAcceptHighConfPrefetch = Output(Bool())
 
       // load to load fast path
       val l2l_fwd_in    = Input(new LoadToLoadIO)
@@ -107,7 +98,6 @@ class HybridUnit(implicit p: Parameters) extends XSModule
       // perf
       val debug_ls         = Output(new DebugLsInfoBundle)
       val lsTopdownInfo    = Output(new LsTopdownInfo)
-      val correctMissTrain = Input(Bool())
     }
 
     val stu_io = new Bundle() {
@@ -118,6 +108,14 @@ class HybridUnit(implicit p: Parameters) extends XSModule
       val st_mask_out     = Valid(new StoreMaskBundle)
       val debug_ls        = Output(new DebugLsInfoBundle)
     }
+
+    // prefetch
+    val prefetch_train            = ValidIO(new LdPrefetchTrainBundle()) // provide prefetch info to sms
+    val prefetch_train_l1         = ValidIO(new LdPrefetchTrainBundle()) // provide prefetch info to stream & stride
+    val prefetch_req              = Flipped(ValidIO(new L1PrefetchReq)) // hardware prefetch to l1 cache req
+    val canAcceptLowConfPrefetch  = Output(Bool())
+    val canAcceptHighConfPrefetch = Output(Bool())
+    val correctMissTrain          = Input(Bool())
 
     // data path
     val tlb           = new TlbRequestIO(2)
@@ -170,11 +168,11 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val s0_super_ld_rep_valid  = io.ldu_io.replay.valid && io.ldu_io.replay.bits.forward_tlDchannel
   val s0_ld_fast_rep_valid   = io.ldu_io.fast_rep_in.valid
   val s0_ld_rep_valid        = io.ldu_io.replay.valid && !io.ldu_io.replay.bits.forward_tlDchannel && !s0_rep_stall
-  val s0_high_conf_prf_valid = io.ldu_io.prefetch_req.valid && io.ldu_io.prefetch_req.bits.confidence > 0.U
+  val s0_high_conf_prf_valid = io.prefetch_req.valid && io.prefetch_req.bits.confidence > 0.U
   val s0_int_iss_valid       = io.lsin.valid // int flow first issue or software prefetch
   val s0_vec_iss_valid       = WireInit(false.B) // TODO
   val s0_l2l_fwd_valid       = io.ldu_io.l2l_fwd_in.valid && io.ldu_io.ld_fast_match
-  val s0_low_conf_prf_valid  = io.ldu_io.prefetch_req.valid && io.ldu_io.prefetch_req.bits.confidence === 0.U
+  val s0_low_conf_prf_valid  = io.prefetch_req.valid && io.prefetch_req.bits.confidence === 0.U
   dontTouch(s0_super_ld_rep_valid)
   dontTouch(s0_ld_fast_rep_valid)
   dontTouch(s0_ld_rep_valid)
@@ -267,8 +265,8 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val s0_prf_wr = Wire(Bool())
   val s0_hw_prf = s0_hw_prf_select
 
-  io.ldu_io.canAcceptLowConfPrefetch  := s0_low_conf_prf_ready
-  io.ldu_io.canAcceptHighConfPrefetch := s0_high_conf_prf_ready
+  io.canAcceptLowConfPrefetch  := s0_low_conf_prf_ready
+  io.canAcceptHighConfPrefetch := s0_high_conf_prf_ready
 
   // query DTLB
   io.tlb.req.valid                   := s0_valid
@@ -276,7 +274,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
                                          Mux(s0_prf_wr, TlbCmd.write, TlbCmd.read),
                                          Mux(s0_ld_flow, TlbCmd.read, TlbCmd.write)
                                        )
-  io.tlb.req.bits.vaddr              := Mux(s0_hw_prf_select, io.ldu_io.prefetch_req.bits.paddr, s0_vaddr)
+  io.tlb.req.bits.vaddr              := Mux(s0_hw_prf_select, io.prefetch_req.bits.paddr, s0_vaddr)
   io.tlb.req.bits.size               := LSUOpType.size(s0_uop.fuOpType)
   io.tlb.req.bits.kill               := s0_kill
   io.tlb.req.bits.memidx.is_ld       := s0_ld_flow
@@ -303,7 +301,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.dcache.req.bits.debug_robIdx := s0_uop.robIdx.value
   io.dcache.req.bits.replayCarry  := s0_rep_carry
   io.dcache.req.bits.id           := DontCare // TODO: update cache meta
-  io.dcache.pf_source             := Mux(s0_hw_prf_select, io.ldu_io.prefetch_req.bits.pf_source.value, L1_HW_PREFETCH_NULL)
+  io.dcache.pf_source             := Mux(s0_hw_prf_select, io.prefetch_req.bits.pf_source.value, L1_HW_PREFETCH_NULL)
 
   // load flow priority mux
   def fromNullSource() = {
@@ -388,7 +386,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     s0_uop           := src.uop
     s0_try_l2l       := false.B
     s0_has_rob_entry := true.B
-    s0_rsIdx         := io.rsIdx
+    s0_rsIdx         := src.iqIdx
     s0_rep_carry     := 0.U.asTypeOf(s0_rep_carry.cloneType)
     s0_mshrid        := 0.U
     s0_isFirstIssue  := true.B
@@ -448,7 +446,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   when (s0_super_ld_rep_select)      { fromNormalReplaySource(io.ldu_io.replay.bits)     }
   .elsewhen (s0_ld_fast_rep_select)  { fromFastReplaySource(io.ldu_io.fast_rep_in.bits)  }
   .elsewhen (s0_ld_rep_select)       { fromNormalReplaySource(io.ldu_io.replay.bits)     }
-  .elsewhen (s0_hw_prf_select)       { fromPrefetchSource(io.ldu_io.prefetch_req.bits)   }
+  .elsewhen (s0_hw_prf_select)       { fromPrefetchSource(io.prefetch_req.bits)   }
   .elsewhen (s0_int_iss_select)      { fromIntIssueSource(io.lsin.bits)           }
   .elsewhen (s0_vec_iss_select)      { fromVecIssueSource()                       }
   .otherwise {
@@ -682,8 +680,8 @@ class HybridUnit(implicit p: Parameters) extends XSModule
       s1_cancel_ptr_chasing := s1_addr_mismatch || s1_addr_misaligned || s1_ptr_chasing_canceled
 
       s1_in.uop           := io.lsin.bits.uop
-      s1_in.rsIdx         := io.rsIdx
-      s1_in.isFirstIssue  := io.isFirstIssue
+      s1_in.rsIdx         := io.lsin.bits.iqIdx
+      s1_in.isFirstIssue  := io.lsin.bits.isFirstIssue
       s1_vaddr_lo         := s1_ptr_chasing_vaddr(5, 0)
       s1_paddr_dup_lsu    := Cat(io.tlb.resp.bits.paddr(0)(PAddrBits - 1, 6), s1_vaddr_lo)
       s1_paddr_dup_dcache := Cat(io.tlb.resp.bits.paddr(0)(PAddrBits - 1, 6), s1_vaddr_lo)
@@ -986,17 +984,17 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.ldu_io.s2_ptr_chasing                    := RegEnable(s1_try_ptr_chasing && !s1_cancel_ptr_chasing, false.B, s1_fire)
 
   // prefetch train
-  io.ldu_io.prefetch_train.valid              := s2_valid && !s2_actually_mmio && !s2_in.tlbMiss
-  io.ldu_io.prefetch_train.bits.fromLsPipelineBundle(s2_in)
-  io.ldu_io.prefetch_train.bits.miss          := io.dcache.resp.bits.miss // TODO: use trace with bank conflict?
-  io.ldu_io.prefetch_train.bits.meta_prefetch := io.dcache.resp.bits.meta_prefetch
-  io.ldu_io.prefetch_train.bits.meta_access   := io.dcache.resp.bits.meta_access
+  io.prefetch_train.valid              := s2_valid && !s2_actually_mmio && !s2_in.tlbMiss
+  io.prefetch_train.bits.fromLsPipelineBundle(s2_in)
+  io.prefetch_train.bits.miss          := io.dcache.resp.bits.miss // TODO: use trace with bank conflict?
+  io.prefetch_train.bits.meta_prefetch := io.dcache.resp.bits.meta_prefetch
+  io.prefetch_train.bits.meta_access   := io.dcache.resp.bits.meta_access
 
-  io.ldu_io.prefetch_train_l1.valid              := s2_valid && !s2_actually_mmio
-  io.ldu_io.prefetch_train_l1.bits.fromLsPipelineBundle(s2_in)
-  io.ldu_io.prefetch_train_l1.bits.miss          := io.dcache.resp.bits.miss
-  io.ldu_io.prefetch_train_l1.bits.meta_prefetch := io.dcache.resp.bits.meta_prefetch
-  io.ldu_io.prefetch_train_l1.bits.meta_access   := io.dcache.resp.bits.meta_access
+  io.prefetch_train_l1.valid              := s2_valid && !s2_actually_mmio
+  io.prefetch_train_l1.bits.fromLsPipelineBundle(s2_in)
+  io.prefetch_train_l1.bits.miss          := io.dcache.resp.bits.miss
+  io.prefetch_train_l1.bits.meta_prefetch := io.dcache.resp.bits.meta_prefetch
+  io.prefetch_train_l1.bits.meta_access   := io.dcache.resp.bits.meta_access
   if (env.FPGAPlatform){
     io.dcache.s0_pc := DontCare
     io.dcache.s1_pc := DontCare
@@ -1264,8 +1262,8 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("s0_forward_tl_d_channel",      s0_out.forward_tlDchannel)
   XSPerfAccumulate("s0_hardware_prefetch_fire",    s0_fire && s0_hw_prf_select)
   XSPerfAccumulate("s0_software_prefetch_fire",    s0_fire && s0_prf && s0_int_iss_select)
-  XSPerfAccumulate("s0_hardware_prefetch_blocked", io.ldu_io.prefetch_req.valid && !s0_hw_prf_select)
-  XSPerfAccumulate("s0_hardware_prefetch_total",   io.ldu_io.prefetch_req.valid)
+  XSPerfAccumulate("s0_hardware_prefetch_blocked", io.prefetch_req.valid && !s0_hw_prf_select)
+  XSPerfAccumulate("s0_hardware_prefetch_total",   io.prefetch_req.valid)
 
   XSPerfAccumulate("s1_in_valid",                  s1_valid)
   XSPerfAccumulate("s1_in_fire",                   s1_fire)

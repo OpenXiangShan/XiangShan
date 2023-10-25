@@ -85,7 +85,7 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
   val loadFinalIssueResp = MixedVec(params.issueBlockParams.map(x => MixedVec(Vec(x.LduCnt, Flipped(ValidIO(new IssueQueueDeqRespBundle()(p, x)))))))
   val memAddrIssueResp = MixedVec(params.issueBlockParams.map(x => MixedVec(Vec(x.LduCnt, Flipped(ValidIO(new IssueQueueDeqRespBundle()(p, x)))))))
 
-  val ldCancel = Vec(backendParams.LduCnt, Flipped(new LoadCancelIO))
+  val ldCancel = Vec(backendParams.LduCnt + backendParams.HyuCnt, Flipped(new LoadCancelIO))
 
   val memIO = if (params.isMemSchd) Some(new Bundle {
     val lsqEnqIO = Flipped(new LsqEnqIO)
