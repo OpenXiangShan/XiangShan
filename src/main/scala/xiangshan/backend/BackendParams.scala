@@ -52,6 +52,10 @@ case class BackendParams(
   def allExuParams: Seq[ExeUnitParams] =
     allIssueParams.map(_.exuBlockParams).flatten
 
+  // filter not fake exu unit
+  def allRealExuParams =
+    allExuParams.filterNot(_.fakeUnit)
+
   def intPregParams: IntPregParams = pregParams.collectFirst { case x: IntPregParams => x }.get
   def vfPregParams: VfPregParams = pregParams.collectFirst { case x: VfPregParams => x }.get
   def getPregParams: Map[DataConfig, PregParams] = {
@@ -79,7 +83,7 @@ case class BackendParams(
   def IqCnt = allSchdParams.map(_.issueBlockParams.length).sum
 
   def numPcReadPort = allSchdParams.map(_.numPcReadPort).sum
-  def numTargetReadPort = allExuParams.count(x => x.needTarget)
+  def numTargetReadPort = allRealExuParams.count(x => x.needTarget)
 
   def numPregRd(dataCfg: DataConfig) = this.getRfReadSize(dataCfg)
   def numPregWb(dataCfg: DataConfig) = this.getRfWriteSize(dataCfg)
@@ -88,7 +92,7 @@ case class BackendParams(
   def numExu = allSchdParams.map(_.numExu).sum
   def vconfigPort = 0 // Todo: remove it
 
-  def numException = allExuParams.count(_.exceptionOut.nonEmpty)
+  def numException = allRealExuParams.count(_.exceptionOut.nonEmpty)
 
   def numRedirect = allSchdParams.map(_.numRedirect).sum
 
@@ -126,7 +130,7 @@ case class BackendParams(
     */
   def getRdPortParams(dataCfg: DataConfig) = {
     // port -> Seq[exuIdx, priority]
-    val cfgs: Seq[(Int, Seq[(Int, Int)])] = allExuParams
+    val cfgs: Seq[(Int, Seq[(Int, Int)])] = allRealExuParams
       .flatMap(x => x.rfrPortConfigs.flatten.map(xx => (xx, x.exuIdx)))
       .filter { x => x._1.getDataConfig == dataCfg }
       .map(x => (x._1.port, (x._2, x._1.priority)))
@@ -144,7 +148,7 @@ case class BackendParams(
     * @return Seq[port->Seq[(exuIdx, priority)]
     */
   def getWbPortParams(dataCfg: DataConfig) = {
-    val cfgs: Seq[(Int, Seq[(Int, Int)])] = allExuParams
+    val cfgs: Seq[(Int, Seq[(Int, Int)])] = allRealExuParams
       .flatMap(x => x.wbPortConfigs.map(xx => (xx, x.exuIdx)))
       .filter { x => x._1.dataCfg == dataCfg }
       .map(x => (x._1.port, (x._2, x._1.priority)))
@@ -229,7 +233,7 @@ case class BackendParams(
   }
 
   def getExuIdx(name: String): Int = {
-    val exuParams = allExuParams
+    val exuParams = allRealExuParams
     if (name != "WB") {
       val foundExu = exuParams.find(_.name == name)
       require(foundExu.nonEmpty, s"exu $name not find")
@@ -239,12 +243,12 @@ case class BackendParams(
   }
 
   def getExuName(idx: Int): String = {
-    val exuParams = allExuParams
+    val exuParams = allRealExuParams
     exuParams(idx).name
   }
 
-  def getIntWBExeGroup: Map[Int, Seq[ExeUnitParams]] = allExuParams.groupBy(x => x.getIntWBPort.getOrElse(IntWB(port = -1)).port).filter(_._1 != -1)
-  def getVfWBExeGroup: Map[Int, Seq[ExeUnitParams]] = allExuParams.groupBy(x => x.getVfWBPort.getOrElse(VfWB(port = -1)).port).filter(_._1 != -1)
+  def getIntWBExeGroup: Map[Int, Seq[ExeUnitParams]] = allRealExuParams.groupBy(x => x.getIntWBPort.getOrElse(IntWB(port = -1)).port).filter(_._1 != -1)
+  def getVfWBExeGroup: Map[Int, Seq[ExeUnitParams]] = allRealExuParams.groupBy(x => x.getVfWBPort.getOrElse(VfWB(port = -1)).port).filter(_._1 != -1)
 
   private def isContinuous(portIndices: Seq[Int]): Boolean = {
     val portIndicesSet = portIndices.toSet
@@ -285,12 +289,12 @@ case class BackendParams(
     // check 0
     val maxPortSource = 4
 
-    allExuParams.map {
+    allRealExuParams.map {
       case exuParam => exuParam.wbPortConfigs.collectFirst { case x: IntWB => x }
     }.filter(_.isDefined).groupBy(_.get.port).foreach {
       case (wbPort, priorities) => assert(priorities.size <= maxPortSource, "There has " + priorities.size + " exu's " + "Int WBport is " + wbPort + ", but the maximum is " + maxPortSource + ".")
     }
-    allExuParams.map {
+    allRealExuParams.map {
       case exuParam => exuParam.wbPortConfigs.collectFirst { case x: VfWB => x }
     }.filter(_.isDefined).groupBy(_.get.port).foreach {
       case (wbPort, priorities) => assert(priorities.size <= maxPortSource, "There has " + priorities.size + " exu's " + "Vf  WBport is " + wbPort + ", but the maximum is " + maxPortSource + ".")
@@ -301,7 +305,7 @@ case class BackendParams(
     val rdTypes = Seq(IntRD(), VfRD())
     for(wbType <- wbTypes){
       for(rdType <- rdTypes){
-        allExuParams.map {
+        allRealExuParams.map {
           case exuParam =>
             val wbPortConfigs = exuParam.wbPortConfigs
             val wbConfigs = wbType match{

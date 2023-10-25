@@ -279,7 +279,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       val s0 = fromIQ(i)(j) // s0
       val srcNotBlock = s0.bits.common.dataSources.zip(intRdArbWinner(i)(j) zip vfRdArbWinner(i)(j)).map { case (source, win) =>
         !source.readReg || win._1 && win._2
-      }.reduce(_ && _)
+      }.fold(true.B)(_ && _)
       val notBlock = srcNotBlock && intWbNotBlock(i)(j) && vfWbNotBlock(i)(j)
       val s1_flush = s0.bits.common.robIdx.needFlush(Seq(io.flush, RegNextWithEnable(io.flush)))
       val s1_cancel = og1FailedVec2(i)(j)
@@ -452,7 +452,6 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
   private val intSchdParams = params.schdParams(IntScheduler())
   private val vfSchdParams = params.schdParams(VfScheduler())
   private val memSchdParams = params.schdParams(MemScheduler())
-  private val exuParams = params.allExuParams
   // bundles
   val hartId = Input(UInt(8.W))
 

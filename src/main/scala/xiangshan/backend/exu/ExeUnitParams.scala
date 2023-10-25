@@ -17,6 +17,7 @@ case class ExeUnitParams(
   fuConfigs     : Seq[FuConfig],
   wbPortConfigs : Seq[PregWB],
   rfrPortConfigs: Seq[Seq[RdConfig]],
+  fakeUnit      : Boolean = false,
 )(
   implicit
   val schdType: SchedulerType,
@@ -140,7 +141,7 @@ case class ExeUnitParams(
 
   def hasJmpFu = fuConfigs.map(_.fuType == FuType.jmp).reduce(_ || _)
 
-  def hasLoadFu = fuConfigs.map(_.fuType == FuType.ldu).reduce(_ || _)
+  def hasLoadFu = fuConfigs.map(_.name == "ldu").reduce(_ || _)
 
   def hasVLoadFu = fuConfigs.map(_.fuType == FuType.vldu).reduce(_ || _)
 
@@ -148,9 +149,11 @@ case class ExeUnitParams(
 
   def hasStdFu = fuConfigs.map(_.name == "std").reduce(_ || _)
 
-  def hasMemAddrFu = hasLoadFu || hasStoreAddrFu || hasVLoadFu
+  def hasMemAddrFu = hasLoadFu || hasStoreAddrFu || hasVLoadFu || hasHyldaFu || hasHystaFu
 
-  def hasHybridAddrFu = hasLoadFu && hasStoreAddrFu
+  def hasHyldaFu = fuConfigs.map(_.name == "hylda").reduce(_ || _)
+
+  def hasHystaFu = fuConfigs.map(_.name == "hysta").reduce(_ || _)
 
   def hasVecFu = fuConfigs.map(x => FuConfig.VecArithFuConfigs.contains(x)).reduce(_ || _)
 
@@ -186,7 +189,7 @@ case class ExeUnitParams(
     this.iqWakeUpSourcePairs = cfgs.filter(_.source.name == this.name)
     this.iqWakeUpSinkPairs = cfgs.filter(_.sink.name == this.name)
     if (this.isIQWakeUpSource) {
-      require(!this.hasUncertainLatency || hasLoadFu, s"${this.name} is a not-LDU IQ wake up source , but has UncertainLatency")
+      require(!this.hasUncertainLatency || hasLoadFu || hasHyldaFu, s"${this.name} is a not-LDU IQ wake up source , but has UncertainLatency")
     }
   }
 

@@ -59,10 +59,12 @@ class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyMod
 
     println("[Backend]   " +
       s"${exuCfg.name}: " +
+      (if (exuCfg.fakeUnit) "fake, " else "") +
       s"${fuConfigs.map(_.name).mkString("fu(s): {", ",", "}")}, " +
       s"${wbPortConfigs.mkString("wb: {", ",", "}")}, " +
       s"${immType.map(SelImm.mkString(_)).mkString("imm: {", ",", "}")}, " +
-      s"latMax(${exuCfg.latencyValMax}), ${exuCfg.fuLatancySet.mkString("lat: {", ",", "}")}, "
+      s"latMax(${exuCfg.latencyValMax}), ${exuCfg.fuLatancySet.mkString("lat: {", ",", "}")}, " +
+      s"srcReg(${exuCfg.numRegSrc})"
     )
     require(
       wbPortConfigs.collectFirst { case x: IntWB => x }.nonEmpty ==
@@ -270,6 +272,10 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   bypassNetwork.io.fromExus.connectExuOutput(_.int)(intExuBlock.io.out)
   bypassNetwork.io.fromExus.connectExuOutput(_.vf)(vfExuBlock.io.out)
 
+  require(bypassNetwork.io.fromExus.mem.flatten.size == io.mem.writeback.size,
+    s"bypassNetwork.io.fromExus.mem.flatten.size(${bypassNetwork.io.fromExus.mem.flatten.size}: ${bypassNetwork.io.fromExus.mem.map(_.size)}, " +
+    s"io.mem.writeback(${io.mem.writeback.size})"
+  )
   bypassNetwork.io.fromExus.mem.flatten.zip(io.mem.writeback).foreach { case (sink, source) =>
     sink.valid := source.valid
     sink.bits.pdest := source.bits.uop.pdest
@@ -417,7 +423,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   }
 
   io.mem.redirect := ctrlBlock.io.redirect
-  private val memIssueUops = io.mem.issueLda ++ io.mem.issueHya ++ io.mem.issueSta ++ io.mem.issueStd ++ io.mem.issueVldu
+  private val memIssueUops = io.mem.issueLda ++ io.mem.issueHylda ++ io.mem.issueHysta ++ io.mem.issueSta ++ io.mem.issueStd ++ io.mem.issueVldu
   memIssueUops.zip(toMem.flatten).foreach { case (sink, source) =>
     sink.valid := source.valid
     source.ready := sink.ready
@@ -466,8 +472,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
 
   io.mem.hyuPcRead.zipWithIndex.foreach( { case (hyuPcRead, i) =>
     hyuPcRead := ctrlBlock.io.memHyPcRead(i).data
-    ctrlBlock.io.memHyPcRead(i).ptr := io.mem.issueHya(i).bits.uop.ftqPtr
-    ctrlBlock.io.memHyPcRead(i).offset := io.mem.issueHya(i).bits.uop.ftqOffset
+    ctrlBlock.io.memHyPcRead(i).ptr := io.mem.issueHylda(i).bits.uop.ftqPtr
+    ctrlBlock.io.memHyPcRead(i).offset := io.mem.issueHylda(i).bits.uop.ftqOffset
     require(toMem(2)(i).bits.ftqIdx.isDefined && toMem(2)(i).bits.ftqOffset.isDefined)
   })
 
@@ -555,7 +561,8 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val issueLda = MixedVec(Seq.fill(params.LduCnt)(DecoupledIO(new MemExuInput())))
   val issueSta = MixedVec(Seq.fill(params.StaCnt)(DecoupledIO(new MemExuInput())))
   val issueStd = MixedVec(Seq.fill(params.StdCnt)(DecoupledIO(new MemExuInput())))
-  val issueHya = MixedVec(Seq.fill(params.HyuCnt)(DecoupledIO(new MemExuInput())))
+  val issueHylda = MixedVec(Seq.fill(params.HyuCnt)(DecoupledIO(new MemExuInput())))
+  val issueHysta = MixedVec(Seq.fill(params.HyuCnt)(DecoupledIO(new MemExuInput())))
   // hybrid unit store data use this
   val issueVldu = MixedVec(Seq.fill(params.VlduCnt)(DecoupledIO(new MemExuInput(isVector = true))))
 
@@ -567,7 +574,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val sfence = Output(new SfenceBundle)
   val isStoreException = Output(Bool())
 
-  def issueUops = issueLda ++ issueSta ++ issueStd ++ issueHya ++ issueVldu
+  def issueUops = issueLda ++ issueSta ++ issueStd ++ issueHylda ++ issueHysta ++ issueVldu
 
   def writeback = writebackLda ++ writebackSta ++ writebackHyuLda ++ writebackHyuSta ++ writebackStd ++ writebackVlda
 

@@ -159,13 +159,15 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.ooo_to_mem.issueLda <> backend.io.mem.issueLda
   memBlock.io.ooo_to_mem.issueSta <> backend.io.mem.issueSta
   memBlock.io.ooo_to_mem.issueStd <> backend.io.mem.issueStd
-  memBlock.io.ooo_to_mem.issueHya <> backend.io.mem.issueHya
+  memBlock.io.ooo_to_mem.issueHya <> backend.io.mem.issueHylda
+  backend.io.mem.issueHysta.map(_.ready := false.B)
   memBlock.io.ooo_to_mem.issueVldu <> backend.io.mem.issueVldu
 
   // By default, instructions do not have exceptions when they enter the function units.
   memBlock.io.ooo_to_mem.issueUops.map(_.bits.uop.clearExceptions())
   memBlock.io.ooo_to_mem.loadPc := backend.io.mem.loadPcRead
   memBlock.io.ooo_to_mem.storePc := backend.io.mem.storePcRead
+  memBlock.io.ooo_to_mem.hybridPc := backend.io.mem.hyuPcRead
   memBlock.io.ooo_to_mem.flushSb := backend.io.fenceio.sbuffer.flushSb
   memBlock.io.ooo_to_mem.loadFastMatch := 0.U.asTypeOf(memBlock.io.ooo_to_mem.loadFastMatch)
   memBlock.io.ooo_to_mem.loadFastImm := 0.U.asTypeOf(memBlock.io.ooo_to_mem.loadFastImm)

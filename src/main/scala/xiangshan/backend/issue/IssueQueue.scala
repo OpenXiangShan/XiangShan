@@ -516,10 +516,12 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
           source.value
         )
     }
-    if(params.hasIQWakeUp) {
-      deq.bits.common.l1ExuOH := finalWakeUpL1ExuOH.get(i)
-    } else {
-      deq.bits.common.l1ExuOH := deqEntryVec(i).bits.payload.l1ExuOH.take(deq.bits.common.l1ExuOH.length)
+    if (deq.bits.common.l1ExuOH.size > 0) {
+      if (params.hasIQWakeUp) {
+        deq.bits.common.l1ExuOH := finalWakeUpL1ExuOH.get(i)
+      } else {
+        deq.bits.common.l1ExuOH := deqEntryVec(i).bits.payload.l1ExuOH.take(deq.bits.common.l1ExuOH.length)
+      }
     }
     deq.bits.common.srcTimer.foreach(_ := finalSrcTimer.get(i))
     deq.bits.common.loadDependency.foreach(_ := deqEntryVec(i).bits.status.mergedLoadDependency.get)
