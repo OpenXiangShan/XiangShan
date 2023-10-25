@@ -100,6 +100,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val force_write = Output(Bool())
     val lqEmpty = Output(Bool())
+    val seqStoreDetected = Output(Bool())
     val debugTopDown = new LoadQueueTopDownIO
   })
 
@@ -154,6 +155,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   storeQueue.io.sqFull      <> io.sqFull
   storeQueue.io.forward     <> io.forward // overlap forwardMask & forwardData, DO NOT CHANGE SEQUENCE
   storeQueue.io.force_write <> io.force_write
+  storeQueue.io.seqStoreDetected <> io.seqStoreDetected
 
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
 

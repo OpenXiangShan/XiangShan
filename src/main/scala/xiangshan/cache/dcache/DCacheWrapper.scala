@@ -756,6 +756,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val lqEmpty = Input(Bool())
   val pf_ctrl = Output(new PrefetchControlBundle)
   val force_write = Input(Bool())
+  val seqStoreDetected = Input(Bool())
   val debugTopDown = new DCacheTopDownIO
   val debugRolling = Flipped(new RobDebugRollingIO)
 }
@@ -822,7 +823,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // core data structures
   val bankedDataArray = if(dwpuParam.enWPU) Module(new SramedDataArray) else Module(new BankedDataArray)
-  val metaArray = Module(new L1CohMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 2))
+  val metaArray = Module(new L1CohMetaArray(readPorts = MetaReadPort, writePorts = 2))
   val errorArray = Module(new L1FlagMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 2))
   val prefetchArray = Module(new L1PrefetchSourceArray(readPorts = PrefetchArrayReadPort, writePorts = 2 + LoadPipelineWidth)) // prefetch flag array
   val accessArray = Module(new L1FlagMetaArray(readPorts = AccessArrayReadPort, writePorts = LoadPipelineWidth + 2))
@@ -847,6 +848,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   missQueue.io.hartId := io.hartId
   missQueue.io.l2_pf_store_only := RegNext(io.l2_pf_store_only, false.B)
   missQueue.io.debugTopDown <> io.debugTopDown
+  missQueue.io.seqStoreDetected <> io.seqStoreDetected
   io.memSetPattenDetected := missQueue.io.memSetPattenDetected
 
   val errors = ldu.map(_.io.error) ++ // load error
