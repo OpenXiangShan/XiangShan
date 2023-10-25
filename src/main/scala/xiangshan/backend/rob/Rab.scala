@@ -77,14 +77,13 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   private val walkPtrOHVec = VecInit.tabulate(CommitWidth + 1)(CircularShift(walkPtrOH).left)
   private val walkPtrNext = Wire(new RenameBufferPtr)
 
-  private val snptEnq = io.canEnq && io.req.head.valid && io.req.head.bits.snapshot
-  private val walkPtrSnapshots = SnapshotGenerator(enqPtr, snptEnq, io.snpt.snptDeq, io.redirect.valid, io.snpt.flushVec)
+  private val walkPtrSnapshots = SnapshotGenerator(enqPtr, io.snpt.snptEnq, io.snpt.snptDeq, io.redirect.valid, io.snpt.flushVec)
 
   // We should extra walk these preg pairs which compressed in rob enq entry at last cycle after restored snapshots.
   // enq firstuop: b010100 --invert--> b101011 --keep only continuous 1s from head--> b000011
   // enq firstuop: b111101 --invert--> b000010 --keep only continuous 1s from head--> b000000
   private val enqCompressedLastCycleMask: UInt = VecInit(io.req.indices.map(i => io.req.slice(0, i + 1).map(!_.bits.firstUop).reduce(_ && _))).asUInt
-  private val compressedLastRobEntryMaskSnapshots = SnapshotGenerator(enqCompressedLastCycleMask, snptEnq, io.snpt.snptDeq, io.redirect.valid, io.snpt.flushVec)
+  private val compressedLastRobEntryMaskSnapshots = SnapshotGenerator(enqCompressedLastCycleMask, io.snpt.snptEnq, io.snpt.snptDeq, io.redirect.valid, io.snpt.flushVec)
   private val compressedExtraWalkMask = compressedLastRobEntryMaskSnapshots(snptSelect)
   // b111111 --Cat(x,1)--> b1111111 --Reverse--> b1111111 --PriorityEncoder--> 6.U
   // b001111 --Cat(x,1)--> b0011111 --Reverse--> b1111100 --PriorityEncoder--> 4.U

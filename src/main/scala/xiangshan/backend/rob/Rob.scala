@@ -498,7 +498,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   rab.io.fromRob.commitSize := commitSizeSum
   rab.io.fromRob.walkSize := walkSizeSum
   rab.io.snpt := io.snpt
-  rab.io.snpt.snptEnq := DontCare
+  rab.io.snpt.snptEnq := snptEnq
 
   io.rabCommits := rab.io.commits
   io.diffCommits := rab.io.diffCommits
