@@ -315,7 +315,7 @@ case class XSCoreParameters
         ExeUnitParams("BJU2", Seq(BrhCfg), Seq(), Seq(Seq(IntRD(11, 0)), Seq(IntRD(7, 1)))),
       ), numEntries = IssueQueueSize / 2, numEnq = 1),
       IssueBlockParams(Seq(
-        ExeUnitParams("IMISC0", Seq(VSetRiWiCfg, I2fCfg, VSetRiWvfCfg, JmpCfg, CsrCfg, FenceCfg), Seq(IntWB(port = 5, 0), VfWB(2, 0)), Seq(Seq(IntRD(5, 1)), Seq(IntRD(3, 1)))),
+        ExeUnitParams("IMISC0", Seq(VSetRiWiCfg, I2fCfg, I2vCfg, VSetRiWvfCfg, JmpCfg, CsrCfg, FenceCfg), Seq(IntWB(port = 5, 0), VfWB(2, 0)), Seq(Seq(IntRD(5, 1)), Seq(IntRD(3, 1)))),
         ExeUnitParams("IDIV0", Seq(DivCfg), Seq(IntWB(port = 7, 1)), Seq(Seq(IntRD(1, Int.MaxValue)), Seq(IntRD(9, Int.MaxValue)))),
       ), numEntries = IssueQueueSize, numEnq = 2),
     ),
