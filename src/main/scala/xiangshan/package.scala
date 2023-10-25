@@ -68,11 +68,25 @@ package object xiangshan {
   }
 
   object VlduType {
-    def dummy = 0.U
+    def dummy     = "b0000".U
+    def vle       = "b0001".U
+    def vlse      = "b0010".U
+    def vluxe     = "b0011".U
+    def vloxe     = "b0100".U
+    def vleff     = "b0101".U
+    def vlm       = "b0110".U
+    def vlr       = "b0111".U
   }
 
   object VstuType {
-    def dummy = 0.U
+    def dummy     = "b0000".U
+    def vse       = "b1001".U
+    def vsse      = "b1010".U
+    def vsuxe     = "b1011".U
+    def vsoxe     = "b1100".U
+    def vseff     = "b1101".U
+    def vsm       = "b1110".U
+    def vsr       = "b1111".U
   }
 
   object CommitType {
