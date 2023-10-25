@@ -83,6 +83,7 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
   }
 
   val loadFinalIssueResp = MixedVec(params.issueBlockParams.map(x => MixedVec(Vec(x.LduCnt, Flipped(ValidIO(new IssueQueueDeqRespBundle()(p, x)))))))
+  val memAddrIssueResp = MixedVec(params.issueBlockParams.map(x => MixedVec(Vec(x.LduCnt, Flipped(ValidIO(new IssueQueueDeqRespBundle()(p, x)))))))
 
   val ldCancel = Vec(backendParams.LduCnt, Flipped(new LoadCancelIO))
 
@@ -229,6 +230,9 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
     }
     iq.io.finalIssueResp.foreach(_.zipWithIndex.foreach { case (finalIssueResp, j) =>
       finalIssueResp := io.loadFinalIssueResp(i)(j)
+    })
+    iq.io.memAddrIssueResp.foreach(_.zipWithIndex.foreach { case (memAddrIssueResp, j) =>
+      memAddrIssueResp := io.memAddrIssueResp(i)(j)
     })
     iq.io.wbBusyTableRead := io.fromWbFuBusyTable.fuBusyTableRead(i)
     io.wbFuBusyTable(i) := iq.io.wbBusyTableWrite

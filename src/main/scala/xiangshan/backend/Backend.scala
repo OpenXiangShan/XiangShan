@@ -400,6 +400,15 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
           toMem(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush) || issueTimeout
         )
       )
+
+      if (memScheduler.io.memAddrIssueResp(i).nonEmpty) {
+        memScheduler.io.memAddrIssueResp(i)(j).valid := toMem(i)(j).fire
+        memScheduler.io.memAddrIssueResp(i)(j).bits.dataInvalidSqIdx := DontCare
+        memScheduler.io.memAddrIssueResp(i)(j).bits.fuType := toMem(i)(j).bits.fuType
+        memScheduler.io.memAddrIssueResp(i)(j).bits.respType := RSFeedbackType.fuIdle
+        memScheduler.io.memAddrIssueResp(i)(j).bits.rfWen := toMem(i)(j).bits.rfWen.getOrElse(false.B)
+        memScheduler.io.memAddrIssueResp(i)(j).bits.robIdx := toMem(i)(j).bits.robIdx
+      }
     }
   }
 

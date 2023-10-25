@@ -45,6 +45,7 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val og0Resp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
   val og1Resp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
   val finalIssueResp = OptionWrapper(params.LduCnt > 0, Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle))))
+  val memAddrIssueResp = OptionWrapper(params.LduCnt > 0, Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle))))
   val wbBusyTableRead = Input(params.genWbFuBusyTableReadBundle())
   val wbBusyTableWrite = Output(params.genWbFuBusyTableWriteBundle())
   val wakeupFromWB: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
@@ -314,6 +315,9 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     }
     entriesIO.finalIssueResp.foreach(_.zipWithIndex.foreach { case (finalIssueResp, i) =>
       finalIssueResp := io.finalIssueResp.get(i)
+    })
+    entriesIO.memAddrIssueResp.foreach(_.zipWithIndex.foreach { case (memAddrIssueResp, i) =>
+      memAddrIssueResp := io.memAddrIssueResp.get(i)
     })
     transEntryDeqVec := entriesIO.transEntryDeqVec
     deqEntryVec := entriesIO.deqEntry
