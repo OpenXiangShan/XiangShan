@@ -8,6 +8,7 @@ import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.DataConfig.{IntData, VAddrData, VecData}
 import xiangshan.backend.datapath.WbConfig.{IntWB, VfWB}
+import xiangshan.backend.fu.FuType
 import xiangshan.backend.regfile.RfWritePortWithConfig
 import xiangshan.backend.rename.BusyTable
 import xiangshan.mem.{LsqEnqCtrl, LsqEnqIO, MemWaitUpdateReq, SqPtr}
@@ -278,10 +279,10 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
   val hyuIQs = issueQueues.filter(iq => iq.params.HyuCnt > 0)
 
   println(s"[SchedulerMemImp] memAddrIQs.size: ${memAddrIQs.size}, enq.size: ${memAddrIQs.map(_.io.enq.size).sum}")
-  println(s"[SchedulerMemImp] stAddrIQs.size:  ${stAddrIQs.size},  enq.size: ${stAddrIQs.map(_.io.enq.size).sum}")
-  println(s"[SchedulerMemImp] ldAddrIQs.size:  ${ldAddrIQs.size},  enq.size: ${ldAddrIQs.map(_.io.enq.size).sum}")
-  println(s"[SchedulerMemImp] stDataIQs.size:  ${stDataIQs.size},  enq.size: ${stDataIQs.map(_.io.enq.size).sum}")
-  println(s"[SchedulerMemImp] hyuIQs.size:     ${hyuIQs.size},     enq.size: ${hyuIQs.map(_.io.enq.size).sum}")
+  println(s"[SchedulerMemImp] stAddrIQs.size:  ${stAddrIQs.size }, enq.size: ${stAddrIQs.map(_.io.enq.size).sum}")
+  println(s"[SchedulerMemImp] ldAddrIQs.size:  ${ldAddrIQs.size }, enq.size: ${ldAddrIQs.map(_.io.enq.size).sum}")
+  println(s"[SchedulerMemImp] stDataIQs.size:  ${stDataIQs.size }, enq.size: ${stDataIQs.map(_.io.enq.size).sum}")
+  println(s"[SchedulerMemImp] hyuIQs.size:     ${hyuIQs.size    }, enq.size: ${hyuIQs.map(_.io.enq.size).sum}")
   require(memAddrIQs.nonEmpty && stDataIQs.nonEmpty)
 
   io.toMem.get.loadFastMatch := 0.U.asTypeOf(io.toMem.get.loadFastMatch) // TODO: is still needed?
@@ -334,38 +335,60 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
     case _ =>
   }
 
-  private val staIdxSeq = issueQueues.filter(iq => iq.params.StaCnt > 0).map(iq => iq.params.idxInSchBlk)
+  private val staIdxSeq = (stAddrIQs).map(iq => iq.params.idxInSchBlk)
+  private val hyaIdxSeq = (hyuIQs).map(iq => iq.params.idxInSchBlk)
+
+  println(s"[SchedulerMemImp] sta iq idx in memSchdBlock: $staIdxSeq")
+  println(s"[SchedulerMemImp] hya iq idx in memSchdBlock: $hyaIdxSeq")
+
+  private val staEnqs = stAddrIQs.map(_.io.enq).flatten
+  private val stdEnqs = stDataIQs.map(_.io.enq).flatten.take(staEnqs.size)
+  private val hyaEnqs = hyuIQs.map(_.io.enq).flatten
+  private val hydEnqs = stDataIQs.map(_.io.enq).flatten.drop(staEnqs.size)
+
+  require(staEnqs.size == stdEnqs.size, s"number of enq ports of store address IQs(${staEnqs.size}) " +
+  s"should be equal to number of enq ports of store data IQs(${stdEnqs.size})")
+
+  require(hyaEnqs.size == hydEnqs.size, s"number of enq ports of hybrid address IQs(${hyaEnqs.size}) " +
+  s"should be equal to number of enq ports of hybrid data IQs(${hydEnqs.size})")
 
   for ((idxInSchBlk, i) <- staIdxSeq.zipWithIndex) {
-    dispatch2Iq.io.out(idxInSchBlk).zip(stAddrIQs(i).io.enq).zip(stDataIQs(i).io.enq).foreach{ case((di, staIQ), stdIQ) =>
+    dispatch2Iq.io.out(idxInSchBlk).zip(staEnqs).zip(stdEnqs).foreach{ case((dp, staIQ), stdIQ) =>
       val isAllReady = staIQ.ready && stdIQ.ready
-      di.ready := isAllReady
-      staIQ.valid := di.valid && isAllReady
-      stdIQ.valid := di.valid && isAllReady
+      dp.ready := isAllReady
+      staIQ.valid := dp.valid && isAllReady
+      stdIQ.valid := dp.valid && isAllReady
     }
   }
 
-  require(stAddrIQs.size == stDataIQs.size, s"number of store address IQs(${stAddrIQs.size}) " +
-    s"should be equal to number of data IQs(${stDataIQs})")
-  stDataIQs.zip(stAddrIQs).zipWithIndex.foreach { case ((stdIQ, staIQ), i) =>
-    stdIQ.io.flush <> io.fromCtrlBlock.flush
-
-    stdIQ.io.enq.zip(staIQ.io.enq).foreach { case (stdIQEnq, staIQEnq) =>
-      stdIQEnq.bits  := staIQEnq.bits
-      // Store data reuses store addr src(1) in dispatch2iq
-      // [dispatch2iq] --src*------src*(0)--> [staIQ]
-      //                       \
-      //                        ---src*(1)--> [stdIQ]
-      // Since the src(1) of sta is easier to get, stdIQEnq.bits.src*(0) is assigned to staIQEnq.bits.src*(1)
-      // instead of dispatch2Iq.io.out(x).bits.src*(1)
-      stdIQEnq.bits.srcState(0) := staIQEnq.bits.srcState(1)
-      stdIQEnq.bits.srcType(0) := staIQEnq.bits.srcType(1)
-      stdIQEnq.bits.dataSource(0) := staIQEnq.bits.dataSource(1)
-      stdIQEnq.bits.l1ExuOH(0) := staIQEnq.bits.l1ExuOH(1)
-      stdIQEnq.bits.psrc(0) := staIQEnq.bits.psrc(1)
-      stdIQEnq.bits.sqIdx := staIQEnq.bits.sqIdx
+  for ((idxInSchBlk, i) <- hyaIdxSeq.zipWithIndex) {
+    dispatch2Iq.io.out(idxInSchBlk).zip(hyaEnqs).zip(hydEnqs).foreach{ case((dp, hyaIQ), hydIQ) =>
+      val isAllReady = hyaIQ.ready && hydIQ.ready
+      dp.ready := isAllReady
+      hyaIQ.valid := dp.valid && isAllReady
+      hydIQ.valid := dp.valid && isAllReady && FuType.isStore(dp.bits.fuType)
     }
-    stdIQ.io.wakeupFromWB := wakeupFromWBVec
+  }
+
+  stDataIQs.zipWithIndex.foreach { case (iq, i) =>
+    iq.io.flush <> io.fromCtrlBlock.flush
+    iq.io.wakeupFromWB := wakeupFromWBVec
+  }
+
+  (stdEnqs ++ hydEnqs).zip(staEnqs ++ hyaEnqs).zipWithIndex.foreach { case ((stdIQEnq, staIQEnq), i) =>
+    stdIQEnq.bits  := staIQEnq.bits
+    // Store data reuses store addr src(1) in dispatch2iq
+    // [dispatch2iq] --src*------src*(0)--> [staIQ|hyaIQ]
+    //                       \
+    //                        ---src*(1)--> [stdIQ]
+    // Since the src(1) of sta is easier to get, stdIQEnq.bits.src*(0) is assigned to staIQEnq.bits.src*(1)
+    // instead of dispatch2Iq.io.out(x).bits.src*(1)
+    stdIQEnq.bits.srcState(0) := staIQEnq.bits.srcState(1)
+    stdIQEnq.bits.srcType(0) := staIQEnq.bits.srcType(1)
+    stdIQEnq.bits.dataSource(0) := staIQEnq.bits.dataSource(1)
+    stdIQEnq.bits.l1ExuOH(0) := staIQEnq.bits.l1ExuOH(1)
+    stdIQEnq.bits.psrc(0) := staIQEnq.bits.psrc(1)
+    stdIQEnq.bits.sqIdx := staIQEnq.bits.sqIdx
   }
 
   val lsqEnqCtrl = Module(new LsqEnqCtrl)
