@@ -68,11 +68,25 @@ package object xiangshan {
   }
 
   object VlduType {
-    def dummy = 0.U
+    def dummy     = "b0000".U
+    def vle       = "b0001".U
+    def vlse      = "b0010".U
+    def vluxe     = "b0011".U
+    def vloxe     = "b0100".U
+    def vleff     = "b0101".U
+    def vlm       = "b0110".U
+    def vlr       = "b0111".U
   }
 
   object VstuType {
-    def dummy = 0.U
+    def dummy     = "b0000".U
+    def vse       = "b1001".U
+    def vsse      = "b1010".U
+    def vsuxe     = "b1011".U
+    def vsoxe     = "b1100".U
+    def vseff     = "b1101".U
+    def vsm       = "b1110".U
+    def vsr       = "b1111".U
   }
 
   object CommitType {
@@ -627,7 +641,9 @@ package object xiangshan {
     def VEC_RGATHER_VX   = "b101110".U // vrgather.vx
     def VEC_RGATHEREI16  = "b101111".U // vrgatherei16.vv
     def VEC_COMPRESS     = "b110000".U // vcompress.vm
-    def VEC_US_LD        = "b110001".U // vector unit strided load
+    def VEC_US_LDST      = "b110001".U // vector unit-strided load/store
+    def VEC_S_LDST       = "b110010".U // vector strided load/store
+    def VEC_I_LDST       = "b110011".U // vector indexed load/store
     def VEC_VFV          = "b111000".U // VEC_VFV
     def VEC_VFW          = "b111001".U // VEC_VFW
     def VEC_WFW          = "b111010".U // VEC_WVW

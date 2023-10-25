@@ -31,20 +31,71 @@ import freechips.rocketchip.rocket.Instructions._
 import xiangshan.backend.Bundles.{DecodedInst, StaticInst}
 import xiangshan.backend.fu.vector.Bundles.{VType, VLmul, VSew}
 import yunsuan.VpermType
+import chisel3.util.experimental.decode.{QMCMinimizer, TruthTable, decoder}
+
+class strdiedLSNumOfUopTable() extends Module {
+  val src = IO(Input(UInt(5.W)))
+  val out = IO(Output(UInt(4.W)))
+  // strided load/store
+  var combVemulNf : Seq[(Int, Int, Int)] = Seq()
+  for (emul <- 0 until 4) {
+    for (nf <- 0 until 8) {
+      if ((1 << emul) * (nf + 1) <= 8) {
+        combVemulNf :+= (emul, nf, (1 << emul) * (nf + 1))
+      } else {
+        combVemulNf :+= (emul, nf, 0)
+      }
+    }
+  }
+  out := decoder(QMCMinimizer, src, TruthTable(combVemulNf.map {
+    case (emul, nf, uopNum) => (BitPat((emul << 3 | nf).U(5.W)), BitPat(uopNum.U(4.W)))
+  }, BitPat.N(4)))
+}
+
+class indexedLSNumOfUopTable() extends Module {
+  val src = IO(Input(UInt(7.W)))
+  val out = IO(Output(UInt(7.W)))
+  // strided load/store
+  var combVemulNf : Seq[(Int, Int, Int, Int)] = Seq()
+  for (emul <- 0 until 4) {
+    for (lmul <- 0 until 4) {
+      var max_mul = if (lmul > emul) lmul else emul
+      for (nf <- 0 until 8) {
+        if ((1 << lmul) * (nf + 1) <= 8) {    // indexed load/store must ensure that the lmul * nf is less or equal to 8
+          combVemulNf :+= (emul, lmul, nf, (1 << max_mul) * (nf + 1))
+        } else {
+          combVemulNf :+= (emul, lmul, nf, 0)
+        }
+      }
+    }
+  }
+  out := decoder(QMCMinimizer, src, TruthTable(combVemulNf.map {
+    case (emul, lmul, nf, uopNum) => (BitPat((emul << 5 | lmul << 3 | nf).U(7.W)), BitPat(uopNum.U(7.W)))
+  }, BitPat.N(7)))
+}
 
 class UopInfoGen (implicit p: Parameters) extends XSModule {
   val io = IO(new UopInfoGenIO)
+
+  val stridedLSTable = Module(new strdiedLSNumOfUopTable)     // decoder for strided load/store
+  val indexedLSTable = Module(new indexedLSNumOfUopTable)     // decoder for indexed load/store
 
   val typeOfSplit = io.in.preInfo.typeOfSplit
   val vsew = Cat(0.U(1.W), io.in.preInfo.vsew)
   val veew = Cat(0.U(1.W), io.in.preInfo.vwidth(1, 0))
   val vlmul = io.in.preInfo.vlmul
+  val nf = io.in.preInfo.nf
   val isComplex = io.out.isComplex
 
   val lmul = MuxLookup(vlmul, 1.U(4.W), Array(
     "b001".U -> 2.U,
     "b010".U -> 4.U,
     "b011".U -> 8.U
+  ))
+  val simple_lmul = MuxLookup(vlmul, 0.U(2.W), Array(
+    "b001".U -> 1.U,
+    "b010".U -> 2.U,
+    "b011".U -> 3.U
   ))
 
   val vemul: UInt = veew.asUInt + 1.U + vlmul.asUInt + ~vsew.asUInt
@@ -54,6 +105,11 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     "b010".U -> 4.U,
     "b011".U -> 8.U
   ))                                                              //TODO : eew and emul illegal exception need to be handled
+  val simple_emul = MuxLookup(vemul, 0.U(2.W), Array(
+    "b001".U -> 1.U,
+    "b010".U -> 2.U,
+    "b011".U -> 3.U
+  ))
 
   val numOfUopVslide = MuxLookup(vlmul, 1.U(log2Up(MaxUopSize + 1).W), Array(
     "b001".U -> 3.U,
@@ -102,6 +158,11 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     vlMax
   }
 
+  stridedLSTable.src := Cat(simple_emul, nf)
+  val numOfUopVLoadStoreStrided = stridedLSTable.out
+  indexedLSTable.src := Cat(simple_emul, simple_lmul, nf)
+  val numOfUopVLoadStoreIndexed = indexedLSTable.out
+
   //number of uop
   val numOfUop = MuxLookup(typeOfSplit, 1.U(log2Up(MaxUopSize + 1).W), Array(
     UopSplitType.VEC_0XV -> 2.U,
@@ -140,7 +201,9 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     UopSplitType.VEC_RGATHER -> numOfUopVrgather,
     UopSplitType.VEC_RGATHER_VX -> (numOfUopVrgather +& 1.U),
     UopSplitType.VEC_RGATHEREI16 -> numOfUopVrgatherei16,
-    UopSplitType.VEC_US_LD -> (emul +& 1.U),
+    UopSplitType.VEC_US_LDST -> (numOfUopVLoadStoreStrided +& 1.U),   // with one move instruction
+    UopSplitType.VEC_S_LDST -> (numOfUopVLoadStoreStrided +& 2.U),    // with two move instructions
+    UopSplitType.VEC_I_LDST -> (numOfUopVLoadStoreIndexed +& 1.U),
   ))
 
   isComplex := (numOfUop > 1.U) || (typeOfSplit === UopSplitType.DIR)
@@ -164,6 +227,7 @@ class PreInfo(implicit p: Parameters) extends XSBundle {
   val vsew = VSew()          //2 bit
   val vlmul = VLmul()
   val vwidth = UInt(3.W)     //eew
+  val nf = UInt(3.W)
 }
 
 class UopInfo(implicit p: Parameters) extends XSBundle {
