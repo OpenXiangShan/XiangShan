@@ -907,18 +907,17 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   )
 
   //
-  s2_out                     := s2_in
-  s2_out.data                := 0.U // data will be generated in load s3
-  s2_out.uop.fpWen      := s2_in.uop.fpWen && !s2_exception && s2_ld_flow
-  s2_out.mmio                := s2_mmio
-  s2_out.atomic              := s2_pmp.atomic && !s2_ld_flow
-  s2_out.uop.flushPipe  := false.B
+  s2_out                  := s2_in
+  s2_out.data             := 0.U // data will be generated in load s3
+  s2_out.uop.fpWen        := s2_in.uop.fpWen && !s2_exception && s2_ld_flow
+  s2_out.mmio             := s2_mmio
+  s2_out.atomic           := s2_pmp.atomic && !s2_ld_flow
+  s2_out.uop.flushPipe    := false.B
   s2_out.uop.exceptionVec := s2_exception_vec
-  s2_out.forwardMask         := s2_fwd_mask
-  s2_out.forwardData         := s2_fwd_data
-  s2_out.handledByMSHR       := s2_cache_handled
-  s2_out.miss                := s2_dcache_miss && s2_troublem
-  s2_out.uop.fpWen      := s2_in.uop.fpWen && !s2_exception && s2_ld_flow
+  s2_out.forwardMask      := s2_fwd_mask
+  s2_out.forwardData      := s2_fwd_data
+  s2_out.handledByMSHR    := s2_cache_handled
+  s2_out.miss             := s2_dcache_miss && s2_troublem
 
   // Generate replay signal caused by:
   // * st-ld violation check
@@ -963,6 +962,9 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.feedback_fast.bits.robIdx           := s2_in.uop.robIdx
   io.feedback_fast.bits.sourceType       := Mux(s2_ld_flow, RSFeedbackType.lrqFull, RSFeedbackType.tlbMiss)
   io.feedback_fast.bits.dataInvalidSqIdx := DontCare
+
+  io.stu_io.lsq_replenish := s2_out
+  io.stu_io.lsq_replenish.miss := io.dcache.resp.fire && io.dcache.resp.bits.miss
 
   io.ldu_io.ldCancel.ld1Cancel.valid := s2_valid && (
     (s2_out.rep_info.need_rep && s2_out.isFirstIssue) ||                // exe fail and issued from IQ
@@ -1235,6 +1237,9 @@ class HybridUnit(implicit p: Parameters) extends XSModule
 
   // FIXME: please move this part to LoadQueueReplay
   io.ldu_io.debug_ls := DontCare
+  io.stu_io.debug_ls := DontCare
+  io.stu_io.debug_ls.s1.isTlbFirstMiss := io.tlb.resp.valid && io.tlb.resp.bits.miss && io.tlb.resp.bits.debug.isFirstIssue && !s1_in.isHWPrefetch && !s1_ld_flow
+  io.stu_io.debug_ls.s1_robIdx := s1_in.uop.robIdx.value
 
  // Topdown
   io.ldu_io.lsTopdownInfo.s1.robIdx          := s1_in.uop.robIdx.value
