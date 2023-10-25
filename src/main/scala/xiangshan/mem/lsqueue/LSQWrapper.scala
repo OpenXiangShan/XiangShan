@@ -49,9 +49,9 @@ class InflightBlockInfo(implicit p: Parameters) extends XSBundle {
 
 class LsqEnqIO(implicit p: Parameters) extends MemBlockBundle {
   val canAccept = Output(Bool())
-  val needAlloc = Vec(MemPipelineWidth, Input(UInt(2.W)))
-  val req       = Vec(MemPipelineWidth, Flipped(ValidIO(new DynInst)))
-  val resp      = Vec(MemPipelineWidth, Output(new LSIdx))
+  val needAlloc = Vec(LSQEnqWidth, Input(UInt(2.W)))
+  val req       = Vec(LSQEnqWidth, Flipped(ValidIO(new DynInst)))
+  val resp      = Vec(LSQEnqWidth, Output(new LSIdx))
 }
 
 // Load / Store Queue Wrapper for XiangShan Out of Order LSU
