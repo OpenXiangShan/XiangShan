@@ -753,5 +753,5 @@ object VecDecoder extends DecodeConstants {
   )
 
   override val decodeArray: Array[(BitPat, XSDecodeBase)] = vset ++
-    opivv ++ opivx ++ opivi ++ opmvv ++ opmvx ++ opfvv ++ opfvf ++ opfff
+    opivv ++ opivx ++ opivi ++ opmvv ++ opmvx ++ opfvv ++ opfvf ++ opfff ++ vls
 }
