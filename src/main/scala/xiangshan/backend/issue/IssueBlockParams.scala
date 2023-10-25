@@ -217,6 +217,14 @@ case class IssueBlockParams(
 
   def getFuCfgs: Seq[FuConfig] = exuBlockParams.flatMap(_.fuConfigs).distinct
 
+  def deqFuCfgs: Seq[Seq[FuConfig]] = exuBlockParams.map(_.fuConfigs)
+
+  def deqFuInterSect: Seq[FuConfig] = if (numDeq == 2) deqFuCfgs(0).intersect(deqFuCfgs(1)) else Seq()
+
+  def deqFuSame: Boolean = (numDeq == 2) && deqFuInterSect.length == deqFuCfgs(0).length && deqFuCfgs(0).length == deqFuCfgs(1).length
+
+  def deqFuDiff: Boolean = (numDeq == 2) && deqFuInterSect.length == 0
+
   // cfgs(exuIdx)(set of exu's wb)
 
   /**
