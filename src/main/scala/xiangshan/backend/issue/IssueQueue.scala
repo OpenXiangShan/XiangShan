@@ -597,9 +597,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   io.status.full := Cat(io.status.leftVec).orR
 
   protected def getDeqLat(deqPortIdx: Int, fuType: UInt) : UInt = {
-    val fuLatUIntMaps: Map[UInt, UInt] = fuLatencyMaps(deqPortIdx).map { case (k, v) => (k.U, v.U) }
-    val lat = WireInit(Mux1H(fuLatUIntMaps.keys.map(_ === fuType).toSeq, fuLatUIntMaps.values.toSeq))
-    dontTouch(lat)
+    Mux1H(fuLatencyMaps(deqPortIdx) map { case (k, v) => (k.U === fuType, v.U) })
   }
 
   // issue perf counter
