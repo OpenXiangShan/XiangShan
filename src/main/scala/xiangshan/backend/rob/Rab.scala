@@ -77,7 +77,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   private val walkPtrOHVec = VecInit.tabulate(CommitWidth + 1)(CircularShift(walkPtrOH).left)
   private val walkPtrNext = Wire(new RenameBufferPtr)
 
-  private val snptEnq = io.req.head.valid && io.req.head.bits.snapshot
+  private val snptEnq = io.canEnq && io.req.head.valid && io.req.head.bits.snapshot
   private val walkPtrSnapshots = SnapshotGenerator(enqPtr, snptEnq, io.snpt.snptDeq, io.redirect.valid, io.snpt.flushVec)
 
   // We should extra walk these preg pairs which compressed in rob enq entry at last cycle after restored snapshots.
