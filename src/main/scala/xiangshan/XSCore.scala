@@ -137,7 +137,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.ldCancel <> memBlock.io.mem_to_ooo.ldCancel
   backend.io.mem.writebackLda <> memBlock.io.mem_to_ooo.writebackLda
   backend.io.mem.writebackSta <> memBlock.io.mem_to_ooo.writebackSta
-  backend.io.mem.writebackHyu <> memBlock.io.mem_to_ooo.writebackHyu
+  backend.io.mem.writebackHyuLda <> memBlock.io.mem_to_ooo.writebackHyuLda
+  backend.io.mem.writebackHyuSta <> memBlock.io.mem_to_ooo.writebackHyuSta
   backend.io.mem.writebackStd <> memBlock.io.mem_to_ooo.writebackStd
   backend.io.mem.writebackVlda <> memBlock.io.mem_to_ooo.writebackVlda
   backend.io.mem.robLsqIO.mmio := memBlock.io.mem_to_ooo.lsqio.mmio
