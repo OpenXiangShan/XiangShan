@@ -18,32 +18,39 @@ package xstransforms
 
 import firrtl._
 import firrtl.ir._
+import firrtl.options.Phase
+import firrtl.stage.FirrtlCircuitAnnotation
 
 import scala.collection.mutable
 
-class PrintControl extends Transform with DependencyAPIMigration {
+class PrintControl extends Phase {
 
-  override def optionalPrerequisiteOf = firrtl.stage.Forms.MinimalHighForm
-  override def invalidates(a: Transform) = true
+  override def invalidates(a: Phase) = false
 
-  override protected def execute(state: CircuitState): CircuitState = {
+  override def transform(annotations: AnnotationSeq): AnnotationSeq = {
 
-    val disableList = state.annotations.collect {
+    import xstransforms.Helpers._
+
+    val disableList = annotations.collect {
       case DisablePrintfAnnotation(m) => m
     }
-    val enableList = state.annotations.collect {
+    val enableList = annotations.collect {
       case EnablePrintfAnnotation(m) => m
     }
-    val disableAll = state.annotations.collectFirst {
+    val disableAll = annotations.collectFirst {
       case DisableAllPrintAnnotation() => true
     }.nonEmpty
-    val removeAssert = state.annotations.collectFirst{
+    val removeAssert = annotations.collectFirst{
       case RemoveAssertAnnotation() => true
     }.nonEmpty
 
     assert(!(enableList.nonEmpty && (disableAll || disableList.nonEmpty)))
 
-    val c = state.circuit
+    val (Seq(circuitAnno: FirrtlCircuitAnnotation), otherAnnos) = annotations.partition {
+      case _: FirrtlCircuitAnnotation => true
+      case _ => false
+    }
+    val c = circuitAnno.circuit
 
     val top = c.main
     val queue = new mutable.Queue[String]()
@@ -86,6 +93,7 @@ class PrintControl extends Transform with DependencyAPIMigration {
         }
         m.mapStmt(onStmt)
     }
-    state.copy(circuit = c.mapModule(onModule))
+
+    FirrtlCircuitAnnotation(c.mapModule(onModule)) +: otherAnnos
   }
 }

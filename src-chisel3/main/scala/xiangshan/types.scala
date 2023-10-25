@@ -18,11 +18,7 @@ package xiangshan
 
 object types {
   type ChiselStage = chisel3.stage.ChiselStage
-  type XiangShanStage = top.XiangShanStage
 
   type RunFirrtlTransformAnnotation = firrtl.stage.RunFirrtlTransformAnnotation
   val RunFirrtlTransformAnnotation = firrtl.stage.RunFirrtlTransformAnnotation
-
-  type PrintControl = xstransforms.PrintControl
-  type PrintModuleName = xstransforms.PrintModuleName
 }

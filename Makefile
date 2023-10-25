@@ -94,10 +94,7 @@ override SIM_ARGS += --with-constantin
 endif
 
 # emu for the release version
-ifneq ($(MFC),1)
-RELEASE_ARGS += --disable-all --remove-assert 
-endif
-RELEASE_ARGS += --fpga-platform
+RELEASE_ARGS += --disable-all --remove-assert --fpga-platform
 DEBUG_ARGS   += --enable-difftest
 ifeq ($(RELEASE),1)
 override SIM_ARGS += $(RELEASE_ARGS)
@@ -156,7 +153,6 @@ endif
 	@rm .__head__ .__diff__
 	sed -i -e 's/$$fatal/xs_assert(`__LINE__)/g' $(SIM_TOP_V)
 ifeq ($(MFC),1)
-	sed -i -e 's/__PERCENTAGE_M__/%m/g' $(SIM_TOP_V)
 	sed -i -e "s/\$$error(/\$$fwrite(32\'h80000002, /g" $(SIM_TOP_V)
 endif
 
