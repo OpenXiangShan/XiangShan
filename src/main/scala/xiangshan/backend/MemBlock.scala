@@ -94,7 +94,7 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
   val issueVldu = MixedVec(Seq.fill(VlduCnt)(Flipped(DecoupledIO(new MemExuInput(isVector=true)))))
   val issueVstu = MixedVec(Seq.fill(VstuCnt)(Flipped(DecoupledIO(new MemExuInput(isVector=true)))))
 
-  def issueUops = issueLda ++ issueSta ++ issueStd ++ issueVldu
+  def issueUops = issueLda ++ issueSta ++ issueStd ++ issueHya ++ issueVldu ++ issueVstu
 }
 
 class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {

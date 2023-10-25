@@ -14,21 +14,25 @@ import xiangshan.backend.fu.{FuConfig, FuType}
 
 case class IssueBlockParams(
   // top down
-  exuBlockParams     : Seq[ExeUnitParams],
-  numEntries         : Int,
-  numEnq             : Int,
-  numDeqOutside      : Int = 0,
-  numWakeupFromOthers: Int = 0,
-  XLEN               : Int = 64,
-  VLEN               : Int = 128,
-  vaddrBits          : Int = 39,
+  private val exuParams: Seq[ExeUnitParams],
+  numEntries           : Int,
+  numEnq               : Int,
+  numDeqOutside        : Int = 0,
+  numWakeupFromOthers  : Int = 0,
+  XLEN                 : Int = 64,
+  VLEN                 : Int = 128,
+  vaddrBits            : Int = 39,
   // calculate in scheduler
-  var idxInSchBlk    : Int = 0,
+  var idxInSchBlk      : Int = 0,
 )(
   implicit
   val schdType: SchedulerType,
 ) {
   var backendParam: BackendParams = null
+
+  val exuBlockParams: Seq[ExeUnitParams] = exuParams.filterNot(_.fakeUnit)
+
+  val allExuParams = exuParams
 
   def updateIdx(idx: Int): Unit = {
     this.idxInSchBlk = idx
@@ -46,7 +50,7 @@ case class IssueBlockParams(
 
   def isStAddrIQ: Boolean = inMemSchd && StaCnt > 0
 
-  def numExu: Int = exuBlockParams.length
+  def numExu: Int = exuBlockParams.count(!_.fakeUnit)
 
   def numIntSrc: Int = exuBlockParams.map(_.numIntSrc).max
 
@@ -140,7 +144,7 @@ case class IssueBlockParams(
 
   def StdCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.name == "std")).sum
 
-  def HyuCnt: Int = exuBlockParams.count(_.hasHybridAddrFu)
+  def HyuCnt: Int = exuBlockParams.count(_.hasHyldaFu) // only count hylda, since it equals to hysta
 
   def VipuCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vipu)).sum
 
@@ -215,7 +219,7 @@ case class IssueBlockParams(
     pregSet.map(cfg => backendParam.getRfWriteSize(cfg)).sum
   }
 
-  def hasIQWakeUp: Boolean = numWakeupFromIQ > 0
+  def hasIQWakeUp: Boolean = numWakeupFromIQ > 0 && numRegSrc > 0
 
   def getFuCfgs: Seq[FuConfig] = exuBlockParams.flatMap(_.fuConfigs).distinct
 
@@ -242,19 +246,19 @@ case class IssueBlockParams(
   }
 
   def genExuOutputDecoupledBundle(implicit p: Parameters): MixedVec[DecoupledIO[ExuOutput]] = {
-    MixedVec(this.exuBlockParams.map(x => DecoupledIO(x.genExuOutputBundle)))
+    MixedVec(this.exuParams.map(x => DecoupledIO(x.genExuOutputBundle)))
   }
 
   def genExuOutputValidBundle(implicit p: Parameters): MixedVec[ValidIO[ExuOutput]] = {
-    MixedVec(this.exuBlockParams.map(x => ValidIO(x.genExuOutputBundle)))
+    MixedVec(this.exuParams.map(x => ValidIO(x.genExuOutputBundle)))
   }
 
   def genExuBypassValidBundle(implicit p: Parameters): MixedVec[ValidIO[ExuBypassBundle]] = {
-    MixedVec(this.exuBlockParams.map(x => ValidIO(x.genExuBypassBundle)))
+    MixedVec(this.exuParams.filterNot(_.fakeUnit).map(x => ValidIO(x.genExuBypassBundle)))
   }
 
   def genIssueDecoupledBundle(implicit p: Parameters): MixedVec[DecoupledIO[IssueQueueIssueBundle]] = {
-    MixedVec(exuBlockParams.map(x => DecoupledIO(new IssueQueueIssueBundle(this, x))))
+    MixedVec(exuBlockParams.filterNot(_.fakeUnit).map(x => DecoupledIO(new IssueQueueIssueBundle(this, x))))
   }
 
   def genWBWakeUpSinkValidBundle: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = {

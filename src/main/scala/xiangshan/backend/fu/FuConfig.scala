@@ -78,12 +78,12 @@ case class FuConfig (
   require(!vconfigWakeUp || vconfigWakeUp && vconfigIdx >= 0, "The index of vl src must be set when vlWakeUp is enable")
   require(!maskWakeUp || maskWakeUp && maskSrcIdx >= 0, "The index of mask src must be set when vlWakeUp is enable")
 
-  def numIntSrc : Int = srcData.map(_.count(x => IntRegSrcDataSet.contains(x))).max
-  def numFpSrc  : Int = srcData.map(_.count(x => FpRegSrcDataSet.contains(x))).max
-  def numVecSrc : Int = srcData.map(_.count(x => VecRegSrcDataSet.contains(x))).max
-  def numVfSrc  : Int = srcData.map(_.count(x => VfRegSrcDataSet.contains(x))).max
-  def numRegSrc : Int = srcData.map(_.count(x => RegSrcDataSet.contains(x))).max
-  def numSrc    : Int = srcData.map(_.length).max
+  def numIntSrc : Int = srcData.map(_.count(x => IntRegSrcDataSet.contains(x))).fold(0)(_ max _)
+  def numFpSrc  : Int = srcData.map(_.count(x => FpRegSrcDataSet.contains(x))).fold(0)(_ max _)
+  def numVecSrc : Int = srcData.map(_.count(x => VecRegSrcDataSet.contains(x))).fold(0)(_ max _)
+  def numVfSrc  : Int = srcData.map(_.count(x => VfRegSrcDataSet.contains(x))).fold(0)(_ max _)
+  def numRegSrc : Int = srcData.map(_.count(x => RegSrcDataSet.contains(x))).fold(0)(_ max _)
+  def numSrc    : Int = srcData.map(_.length).fold(0)(_ max _)
 
   def readFp: Boolean = numFpSrc > 0
 
@@ -105,7 +105,7 @@ case class FuConfig (
     * @return
     */
   def getRfReadDataCfgSet: Seq[Set[DataConfig]] = {
-    val numSrcMax = srcData.map(_.length).max
+    val numSrcMax = srcData.map(_.length).fold(0)(_ max _)
     // make srcData is uniform sized to avoid exception when transpose
     val alignedSrcData: Seq[Seq[DataConfig]] = srcData.map(x => x ++ Seq.fill(numSrcMax - x.length)(null))
     alignedSrcData.transpose.map(_.toSet.intersect(RegSrcDataSet))
@@ -183,6 +183,7 @@ case class FuConfig (
     if (vconfigWakeUp) str += s"vconfigIdx($vconfigIdx), "
     if (maskWakeUp) str += s"maskSrcIdx($maskSrcIdx), "
     str += s"latency($latency)"
+    str += s"src($srcData)"
     str
   }
 }
@@ -457,6 +458,48 @@ object FuConfig {
     latency = CertainLatency(0)
   )
 
+  val HyldaCfg = FuConfig (
+    name = "hylda",
+    fuType = FuType.ldu,
+    fuGen = null, // Todo
+    srcData = Seq(
+      Seq(IntData()),
+    ),
+    piped = false, // Todo: check it
+    writeIntRf = true,
+    writeFpRf = true,
+    latency = UncertainLatency(3),
+    exceptionOut = Seq(loadAddrMisaligned, loadAccessFault, loadPageFault),
+    flushPipe = true,
+    replayInst = true,
+    hasLoadError = true,
+    immType = Set(SelImm.IMM_I),
+  )
+
+  val HystaCfg = FuConfig (
+    name = "hysta",
+    fuType = FuType.stu,
+    fuGen = null, // Todo
+    srcData = Seq(
+      Seq(IntData()),
+    ),
+    piped = false,
+    latency = UncertainLatency(),
+    exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault),
+    immType = Set(SelImm.IMM_S),
+  )
+
+  val FakeHystaCfg = FuConfig (
+    name = "hysta",
+    fuType = FuType.stu,
+    fuGen = null, // Todo
+    srcData = Seq(),
+    piped = false,
+    latency = UncertainLatency(),
+    exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault),
+    immType = Set(),
+  )
+
   val MouCfg: FuConfig = FuConfig (
     name = "mou",
     fuType = FuType.mou,
@@ -648,7 +691,7 @@ object FuConfig {
   def allConfigs = Seq(
     JmpCfg, BrhCfg, I2fCfg, I2vCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg, VSetRvfWvfCfg, VSetRiWvfCfg, VSetRiWiCfg,
     FmacCfg, F2iCfg, F2fCfg, FDivSqrtCfg, LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg, VialuCfg, VipuCfg, VlduCfg,
-    VfaluCfg, VfmaCfg
+    VfaluCfg, VfmaCfg, HyldaCfg, HystaCfg
   )
 
   def VecArithFuConfigs = Seq(
