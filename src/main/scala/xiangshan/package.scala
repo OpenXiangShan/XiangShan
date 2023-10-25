@@ -598,6 +598,7 @@ package object xiangshan {
     def DIR              = "b010001".U // dirty: vset
     def VEC_VVV          = "b010010".U // VEC_VVV
     def VEC_VXV          = "b010011".U // VEC_VXV
+    def VEC_VIV          = "b000011".U // VEC_VXV
     def VEC_0XV          = "b010100".U // VEC_0XV
     def VEC_VVW          = "b010101".U // VEC_VVW
     def VEC_WVW          = "b010110".U // VEC_WVW
