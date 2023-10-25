@@ -47,9 +47,9 @@ object SqPtr {
 class SqEnqIO(implicit p: Parameters) extends MemBlockBundle {
   val canAccept = Output(Bool())
   val lqCanAccept = Input(Bool())
-  val needAlloc = Vec(MemPipelineWidth, Input(Bool()))
-  val req = Vec(MemPipelineWidth, Flipped(ValidIO(new DynInst)))
-  val resp = Vec(MemPipelineWidth, Output(new SqPtr))
+  val needAlloc = Vec(LSQEnqWidth, Input(Bool()))
+  val req = Vec(LSQEnqWidth, Flipped(ValidIO(new DynInst)))
+  val resp = Vec(LSQEnqWidth, Output(new SqPtr))
 }
 
 class DataBufferEntry (implicit p: Parameters)  extends DCacheBundle {

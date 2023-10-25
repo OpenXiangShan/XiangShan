@@ -69,9 +69,9 @@ trait HasLoadHelper { this: XSModule =>
 class LqEnqIO(implicit p: Parameters) extends MemBlockBundle {
   val canAccept = Output(Bool())
   val sqCanAccept = Input(Bool())
-  val needAlloc = Vec(MemPipelineWidth, Input(Bool()))
-  val req = Vec(MemPipelineWidth, Flipped(ValidIO(new DynInst)))
-  val resp = Vec(MemPipelineWidth, Output(new LqPtr))
+  val needAlloc = Vec(LSQEnqWidth, Input(Bool()))
+  val req = Vec(LSQEnqWidth, Flipped(ValidIO(new DynInst)))
+  val resp = Vec(LSQEnqWidth, Output(new LqPtr))
 }
 
 class LqTriggerIO(implicit p: Parameters) extends XSBundle {

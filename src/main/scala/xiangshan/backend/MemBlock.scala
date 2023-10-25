@@ -51,8 +51,6 @@ trait HasMemBlockParameters extends HasXSParameter {
   val MemExuCnt = LduCnt + StaCnt + StdCnt + HyuCnt
   val MemAddrExtCnt = LdExeCnt + StaCnt
   val MemVExuCnt = VlduCnt + VstuCnt
-
-  val MemPipelineWidth = LoadPipelineWidth + StorePipelineWidth
 }
 
 abstract class MemBlockBundle(implicit val p: Parameters) extends Bundle with HasMemBlockParameters
