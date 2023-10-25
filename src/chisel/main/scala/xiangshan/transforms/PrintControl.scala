@@ -14,7 +14,7 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
-package xstransforms
+package xiangshan.transforms
 
 import firrtl._
 import firrtl.ir._
@@ -29,7 +29,7 @@ class PrintControl extends Phase {
 
   override def transform(annotations: AnnotationSeq): AnnotationSeq = {
 
-    import xstransforms.Helpers._
+    import xiangshan.transforms.Helpers._
 
     val disableList = annotations.collect {
       case DisablePrintfAnnotation(m) => m
