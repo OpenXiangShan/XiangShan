@@ -122,7 +122,8 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
   val writebackLda = Vec(LduCnt, DecoupledIO(new MemExuOutput))
   val writebackSta = Vec(StaCnt, DecoupledIO(new MemExuOutput))
   val writebackStd = Vec(StdCnt, DecoupledIO(new MemExuOutput))
-  val writebackHyu = Vec(HyuCnt, Vec(2, DecoupledIO(new MemExuOutput)))
+  val writebackHyuLda = Vec(HyuCnt, DecoupledIO(new MemExuOutput))
+  val writebackHyuSta = Vec(HyuCnt, DecoupledIO(new MemExuOutput))
   val writebackVlda = Vec(VlduCnt, DecoupledIO(new MemExuOutput(isVector = true)))
   val writebackVStu = Vec(VstuCnt, DecoupledIO(new MemExuOutput(isVector = true)))
 
@@ -286,12 +287,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.mem_to_ooo.writebackLda <> loadUnits.map(_.io.ldout)
   io.mem_to_ooo.writebackSta <> storeUnits.map(_.io.stout)
   io.mem_to_ooo.writebackStd <> stdExeUnits.map(_.io.out)
-  io.mem_to_ooo.writebackHyu.head(0) <> hybridUnits.head.io.ldout
-  io.mem_to_ooo.writebackHyu.head(1) <> hybridUnits.head.io.stout
+  io.mem_to_ooo.writebackHyuLda <> hybridUnits.map(_.io.ldout)
+  io.mem_to_ooo.writebackHyuSta <> hybridUnits.map(_.io.stout)
   io.mem_to_ooo.otherFastWakeup := DontCare
   io.mem_to_ooo.otherFastWakeup.take(LduCnt).zip(loadUnits.map(_.io.fast_uop)).foreach{case(a,b)=> a := b}
   io.mem_to_ooo.otherFastWakeup.drop(LduCnt).take(HyuCnt).zip(hybridUnits.map(_.io.ldu_io.fast_uop)).foreach{case(a,b)=> a:=b}
-  val stOut = io.mem_to_ooo.writebackSta ++ io.mem_to_ooo.writebackHyu.map(_(1))
+  val stOut = io.mem_to_ooo.writebackSta ++ io.mem_to_ooo.writebackHyuSta
 
   // prefetch to l1 req
   // Stream's confidence is always 1
@@ -821,17 +822,17 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       hybridUnits(i).io.ldu_io.trigger(j).tEnable := tEnable(lTriggerMapping(j))
       // Just let load triggers that match data unavailable
       hit(j) := hybridUnits(i).io.ldu_io.trigger(j).addrHit && !tdata(lTriggerMapping(j)).select
-      io.mem_to_ooo.writebackHyu(i)(0).bits.uop.trigger.backendHit(lTriggerMapping(j)) := hit(j)
+      io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger.backendHit(lTriggerMapping(j)) := hit(j)
     }
     when (tdata(2).chain) {
-      io.mem_to_ooo.writebackHyu(i)(0).bits.uop.trigger.backendHit(2) := hit(0) && hit(1)
-      io.mem_to_ooo.writebackHyu(i)(0).bits.uop.trigger.backendHit(3) := hit(0) && hit(1)
+      io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger.backendHit(2) := hit(0) && hit(1)
+      io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger.backendHit(3) := hit(0) && hit(1)
     }
-    when (!io.mem_to_ooo.writebackHyu(i)(0).bits.uop.trigger.backendEn(1)) {
-      io.mem_to_ooo.writebackHyu(i)(0).bits.uop.trigger.backendHit(5) := false.B
+    when (!io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger.backendEn(1)) {
+      io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger.backendHit(5) := false.B
     }
-    XSDebug(io.mem_to_ooo.writebackHyu(i)(0).bits.uop.trigger.getHitBackend && io.mem_to_ooo.writebackHyu(i)(0).valid, p"Debug Mode: Hybrid Inst No.${i}" +
-    p"has trigger hit vec ${io.mem_to_ooo.writebackHyu(i)(0).bits.uop.trigger.backendHit}\n")
+    XSDebug(io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger.getHitBackend && io.mem_to_ooo.writebackHyuLda(i).valid, p"Debug Mode: Hybrid Inst No.${i}" +
+    p"has trigger hit vec ${io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger.backendHit}\n")
 
     // ------------------------------------
     //  Store Port
@@ -846,7 +847,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // -------------------------
     // Store Triggers
     // -------------------------
-    val hyuOut = io.mem_to_ooo.writebackHyu(i)(1)
+    val hyuOut = io.mem_to_ooo.writebackHyuSta(i)
     when (hybridUnits(i).io.stout.fire &&
           FuType.isStore(hybridUnits(i).io.stout.bits.uop.fuType)) {
       val hit = Wire(Vec(3, Bool()))
@@ -861,8 +862,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       }
 
       when (tdata(0).chain) {
-        io.mem_to_ooo.writebackHyu(i)(1).bits.uop.trigger.backendHit(0) := hit(0) && hit(1)
-        io.mem_to_ooo.writebackHyu(i)(1).bits.uop.trigger.backendHit(1) := hit(0) && hit(1)
+        io.mem_to_ooo.writebackHyuSta(i).bits.uop.trigger.backendHit(0) := hit(0) && hit(1)
+        io.mem_to_ooo.writebackHyuSta(i).bits.uop.trigger.backendHit(1) := hit(0) && hit(1)
       }
 
       when (!hyuOut.bits.uop.trigger.backendEn(0)) {
@@ -989,7 +990,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       io.mem_to_ooo.writebackLda(i).bits.uop.trigger.backendHit := VecInit(Seq.fill(6)(false.B))
     })
     (0 until HyuCnt).map(i => {
-      io.mem_to_ooo.writebackHyu(i)(0).bits.uop.trigger.backendHit := VecInit(Seq.fill(6)(false.B))
+      io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger.backendHit := VecInit(Seq.fill(6)(false.B))
     })
   }
   atomicsUnit.io.out.ready := stOut(0).ready
