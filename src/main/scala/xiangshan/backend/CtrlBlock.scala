@@ -269,7 +269,8 @@ class CtrlBlockImp(
   val flushVec = VecInit(snpt.io.snapshots.map { snapshot =>
     val notCFIMask = snapshot.isCFI.map(~_)
     val shouldFlushMask = snapshot.robIdx.map(snptRobIdx => snptRobIdx >= s1_s3_redirect.bits.robIdx || isFull(snptRobIdx, s1_s3_redirect.bits.robIdx))
-    s1_s3_redirect.valid && Cat(shouldFlushMask.zip(notCFIMask).map(x => x._1 | x._2)).andR
+    val realShouldFlush = (1 to RenameWidth).map(i => Cat(shouldFlushMask.take(i)).orR)
+    s1_s3_redirect.valid && Cat(realShouldFlush.zip(notCFIMask).map(x => x._1 | x._2)).andR
   })
   val flushVecNext = RegNext(flushVec, 0.U.asTypeOf(flushVec))
   snpt.io.flushVec := flushVecNext
