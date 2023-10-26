@@ -307,6 +307,7 @@ object Bundles {
 
     // vector load/store
     val nf        = Nf()
+    val veew      = VEew()
 
     val needScalaSrc       = Bool()
     val permImmTruncate    = Bool() // opivi
