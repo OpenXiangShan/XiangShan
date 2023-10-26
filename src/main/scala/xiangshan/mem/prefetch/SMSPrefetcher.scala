@@ -6,7 +6,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import utility._
-import xiangshan.cache.HasDCacheParameters
+import xiangshan.cache.{HasDCacheParameters, DCacheBundle}
 import xiangshan.cache.mmu._
 import xiangshan.mem.{LdPrefetchTrainBundle, StPrefetchTrainBundle, L1PrefetchReq}
 import xiangshan.mem.trace._
@@ -250,6 +250,10 @@ class PfGenReq()(implicit p: Parameters) extends XSBundle with HasSMSModuleHelpe
   val debug_source_type = UInt(log2Up(nSourceType).W)
 }
 
+class AGTEvictReq()(implicit p: Parameters) extends XSBundle {
+  val vaddr = UInt(VAddrBits.W)
+}
+
 class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasSMSModuleHelper {
   val io = IO(new Bundle() {
     val agt_en = Input(Bool())
@@ -267,6 +271,8 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
       val region_paddr = UInt(REGION_ADDR_BITS.W)
       val region_vaddr = UInt(REGION_ADDR_BITS.W)
     }))
+    // dcache has released a block, evict it from agt
+    val s0_dcache_evict = Flipped(DecoupledIO(new AGTEvictReq))
     val s1_sel_stride = Output(Bool())
     val s2_stride_hit = Input(Bool())
     // if agt/stride missed, try lookup pht
@@ -287,6 +293,10 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   val s0_lookup = io.s0_lookup.bits
   val s0_lookup_valid = io.s0_lookup.valid
 
+  val s0_dcache_evict = io.s0_dcache_evict.bits
+  val s0_dcache_evict_valid = io.s0_dcache_evict.valid
+  val s0_dcache_evict_tag = block_hash_tag(s0_dcache_evict.vaddr).head(REGION_TAG_WIDTH)
+
   val prev_lookup = RegEnable(s0_lookup, s0_lookup_valid)
   val prev_lookup_valid = RegNext(s0_lookup_valid, false.B)
 
@@ -305,6 +315,13 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   val any_region_match = Cat(region_match_vec_s0).orR
   val any_region_p1_match = Cat(region_p1_match_vec_s0).orR && s0_lookup.allow_cross_region_p1
   val any_region_m1_match = Cat(region_m1_match_vec_s0).orR && s0_lookup.allow_cross_region_m1
+
+  val region_match_vec_dcache_evict_s0 = gen_match_vec(s0_dcache_evict_tag)
+  // s0 dcache evict a entry that may be replaced in s1
+  val s0_dcache_evict_conflict = Cat(VecInit(region_match_vec_dcache_evict_s0).asUInt & s1_replace_mask_w).orR
+  val s0_do_dcache_evict = io.s0_dcache_evict.fire
+
+  io.s0_dcache_evict.ready := !s0_lookup_valid && !s0_dcache_evict_conflict
 
   val s0_region_hit = any_region_match
   val s0_cross_region_hit = any_region_m1_match || any_region_p1_match
@@ -350,8 +367,13 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   val s1_cross_region_match = RegNext(s0_lookup_valid && s0_cross_region_hit, false.B)
   val s1_alloc = RegNext(s0_alloc, false.B)
   val s1_alloc_entry = s1_agt_entry
-  val s1_replace_mask = RegEnable(s0_replace_mask, s0_lookup_valid)
-  s1_replace_mask_w := s1_replace_mask & Fill(smsParams.active_gen_table_size, s1_alloc)
+  val s1_do_dcache_evict = RegNext(s0_do_dcache_evict, false.B)
+  val s1_replace_mask = Mux(
+    s1_do_dcache_evict,
+    RegEnable(VecInit(region_match_vec_dcache_evict_s0).asUInt, s0_do_dcache_evict),
+    RegEnable(s0_replace_mask, s0_lookup_valid)
+  )
+  s1_replace_mask_w := s1_replace_mask & Fill(smsParams.active_gen_table_size, s1_alloc || s1_do_dcache_evict)
   val s1_evict_entry = Mux1H(s1_replace_mask, entries)
   val s1_evict_valid = Mux1H(s1_replace_mask, valids)
   // pf gen
@@ -446,8 +468,9 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   io.s1_sel_stride := prev_lookup_valid && (s1_alloc && s1_cross_region_match || s1_update) && !s1_in_active_page
 
   // stage2: gen pf reg / evict entry to pht
-  val s2_evict_entry = RegEnable(s1_evict_entry, s1_alloc)
-  val s2_evict_valid = RegNext(s1_alloc && s1_evict_valid, false.B)
+  val s2_do_dcache_evict = RegNext(s1_do_dcache_evict, false.B)
+  val s2_evict_entry = RegEnable(s1_evict_entry, s1_alloc || s1_do_dcache_evict)
+  val s2_evict_valid = RegNext((s1_alloc || s1_do_dcache_evict) && s1_evict_valid, false.B)
   val s2_paddr_valid = RegEnable(s1_pf_gen_paddr_valid, s1_pf_gen_valid)
   val s2_pf_gen_region_tag = RegEnable(s1_pf_gen_region_tag, s1_pf_gen_valid)
   val s2_pf_gen_decr_mode = RegEnable(s1_pf_gen_decr_mode, s1_pf_gen_valid)
@@ -489,6 +512,8 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
     )
   }
   XSPerfAccumulate("sms_agt_evict", s2_evict_valid)
+  XSPerfAccumulate("sms_agt_evict_by_plru", s2_evict_valid && !s2_do_dcache_evict)
+  XSPerfAccumulate("sms_agt_evict_by_dcache", s2_evict_valid && s2_do_dcache_evict)
   XSPerfAccumulate("sms_agt_evict_one_hot_pattern", s2_evict_valid && (s2_evict_entry.access_cnt === 1.U))
 }
 
@@ -1066,6 +1091,7 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   val io_pht_en = IO(Input(Bool()))
   val io_act_threshold = IO(Input(UInt(REGION_OFFSET.W)))
   val io_act_stride = IO(Input(UInt(6.W)))
+  val io_dcache_evict = IO(Flipped(DecoupledIO(new AGTEvictReq)))
 
   val train_filter = Module(new SMSTrainFilter)
 
