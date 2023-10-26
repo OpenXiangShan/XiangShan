@@ -71,7 +71,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
 
   val uopSimple = Wire(Vec(DecodeWidth, new DecodedInst))
   val isComplexValid = VecInit(isComplex.zipWithIndex.map{
-    case(iscomplex,i) => iscomplex && io.in(i).valid && !io.in(i).ready && (if (i==0) true.B else io.out(i).ready)
+    case(iscomplex,i) => !io.isRedirect && iscomplex && io.in(i).valid && !io.in(i).ready && (if (i==0) true.B else io.out(i).ready)
   })
   val oldComplex = Wire(new DecodeUnitDeqIO)
   oldComplex := PriorityMuxDefault(isComplexValid.zip(decoders.map(_.io.deq)), 0.U.asTypeOf(oldComplex))
