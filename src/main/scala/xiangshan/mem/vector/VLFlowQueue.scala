@@ -123,7 +123,7 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
   /* Enqueue logic */
 
   // only allow enqueue when free queue terms >= VecLoadPipelineWidth(=2)
-  val freeCount = distanceBetween(deqPtr(0), enqPtr(0))
+  val freeCount = hasFreeEntries(enqPtr(0), deqPtr(0))
   val allowEnqueue = !io.redirect.valid && freeCount >= VecLoadPipelineWidth.U
   for (i <- 0 until VecLoadPipelineWidth) {
     io.flowIn(i).ready := allowEnqueue
