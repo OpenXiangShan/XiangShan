@@ -88,25 +88,31 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
   /**
     * Enqueue and decode logic
     */
-  val decode = Wire(new VecDecode())
-  decode.apply(io.storeIn.bits.uop.instr)
+  // val decode = Wire(new VecDecode())
+  // decode.apply(io.storeIn.bits.uop.instr)
+  def us_whole_reg(fuOpType: UInt) = fuOpType === VstuType.vsr
+  def us_mask(fuOpType: UInt) = fuOpType === VstuType.vsm
   val vtype = io.storeIn.bits.uop.vpu.vtype
   val sew = vtype.vsew
-  val eew = decode.uop_eew
+  val eew = io.storeIn.bits.uop.vpu.veew
   val lmul = vtype.vlmul
   // when store whole register or unit-stride masked , emul should be 1
-  val emul = Mux(decode.uop_unit_stride_whole_reg || decode.uop_unit_stride_mask, 0.U(mulBits.W), EewLog2(eew) - sew + lmul)
+  val fuOpType = io.storeIn.bits.uop.fuOpType
+  val mop = fuOpType(6, 5)
+  val nf = io.storeIn.bits.uop.vpu.nf
+  val vm = io.storeIn.bits.uop.vpu.vm
+  val emul = Mux(us_whole_reg(fuOpType) || us_mask(fuOpType), 0.U(mulBits.W), EewLog2(eew) - sew + lmul)
   
   when (io.storeIn.fire) {
     val id = enqPtr.value
-    val isSegment = decode.uop_segment_num =/= 0.U && !decode.uop_unit_stride_whole_reg
-    val instType = Cat(isSegment, decode.uop_type)
+    val isSegment = nf =/= 0.U && !us_whole_reg(fuOpType)
+    val instType = Cat(isSegment, mop)
     val uopIdx = io.storeIn.bits.uop.vpu.vuopIdx
     val flows = GenRealFlowNum(instType, emul, lmul, eew, sew)
     val flowsLog2 = GenRealFlowLog2(instType, emul, lmul, eew, sew)
     val flowsPrev = uopIdx << flowsLog2 // # of flow before this uop
     val alignedType = Mux(isIndexed(instType), sew(1, 0), eew(1, 0))
-    val srcMask = Mux(decode.mask_en, -1.asSInt.asUInt, io.storeIn.bits.src_mask)
+    val srcMask = Mux(vm, -1.asSInt.asUInt, io.storeIn.bits.src_mask)
     val flowMask = ((srcMask >> flowsPrev) &
       ZeroExt(UIntToMask(flows, maxFlowNum), VLEN))(VLENB - 1, 0)
     val vlmax = GenVLMAX(lmul, sew)
@@ -124,10 +130,10 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
       x.stride := io.storeIn.bits.src_stride
       x.flow_counter := flows
       x.flowNum := flows
-      x.nfields := decode.uop_segment_num + 1.U
-      x.vm := decode.mask_en
-      x.usWholeReg := decode.isUnitStride && decode.uop_unit_stride_whole_reg
-      x.usMaskReg := decode.isUnitStride && decode.uop_unit_stride_mask
+      x.nfields := nf + 1.U
+      x.vm := vm
+      x.usWholeReg := isUnitStride(mop) && us_whole_reg(fuOpType)
+      x.usMaskReg := isUnitStride(mop) && us_mask(fuOpType)
       x.eew := eew
       x.sew := sew
       x.emul := emul

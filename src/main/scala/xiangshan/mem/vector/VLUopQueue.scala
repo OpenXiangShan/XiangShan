@@ -139,20 +139,27 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
     * 
     * TODO: decode logic is too long for timing.
     */
-  val decode = Wire(new VecDecode())
-  decode.apply(io.loadRegIn.bits.uop.instr)
+  // val decode = Wire(new VecDecode())
+  // decode.apply(io.loadRegIn.bits.uop.instr)
+  def us_whole_reg(fuOpType: UInt) = fuOpType === VlduType.vlr
+  def us_mask(fuOpType: UInt) = fuOpType === VlduType.vlm
+  def us_fof(fuOpType: UInt) = fuOpType === VlduType.vleff
   val vtype = io.loadRegIn.bits.uop.vpu.vtype
   val sew = vtype.vsew
-  val eew = decode.uop_eew
+  val eew = io.loadRegIn.bits.uop.vpu.veew
   val lmul = vtype.vlmul
   // when load whole register or unit-stride masked , emul should be 1
-  val emul = Mux(decode.uop_unit_stride_whole_reg || decode.uop_unit_stride_mask, 0.U(mulBits.W), EewLog2(eew) - sew + lmul)
+  val fuOpType = io.loadRegIn.bits.uop.fuOpType
+  val mop = fuOpType(6, 5)
+  val nf = io.loadRegIn.bits.uop.vpu.nf
+  val vm = io.loadRegIn.bits.uop.vpu.vm
+  val emul = Mux(us_whole_reg(fuOpType) || us_mask(fuOpType), 0.U(mulBits.W), EewLog2(eew) - sew + lmul)
   val lmulLog2 = Mux(lmul.asSInt >= 0.S, 0.U, lmul)
   val emulLog2 = Mux(emul.asSInt >= 0.S, 0.U, emul)
   val numEewLog2 = emulLog2 - EewLog2(eew)
   val numSewLog2 = lmulLog2 - sew
   val numUopsSameVd = Mux(
-    decode.isIndexed && numSewLog2.asSInt > numEewLog2.asSInt,
+    isIndexed(mop) && numSewLog2.asSInt > numEewLog2.asSInt,
     // If this is an index load, and multiple index regs are mapped into a data reg:
     // (*.asUInt - *.asUInt) should be equal to (*.asSInt - *.asSInt) 
     1.U << (numSewLog2 - numEewLog2),
@@ -163,14 +170,14 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
   when (io.loadRegIn.fire) {
     val id = enqPtr.value
     val preAllocated = preAlloc(id)
-    val isSegment = decode.uop_segment_num =/= 0.U && !decode.uop_unit_stride_whole_reg
-    val instType = Cat(isSegment, decode.uop_type)
+    val isSegment = nf =/= 0.U && !us_whole_reg(fuOpType)
+    val instType = Cat(isSegment, mop)
     val uopIdx = io.loadRegIn.bits.uop.vpu.vuopIdx
     val flows = GenRealFlowNum(instType, emul, lmul, eew, sew)
     val flowsLog2 = GenRealFlowLog2(instType, emul, lmul, eew, sew)
     val flowsPrev = uopIdx << flowsLog2 // # of flow before this uop
     val alignedType = Mux(isIndexed(instType), sew(1, 0), eew(1, 0))
-    val srcMask = Mux(decode.mask_en, -1.asSInt.asUInt, io.loadRegIn.bits.src_mask)
+    val srcMask = Mux(vm, -1.asSInt.asUInt, io.loadRegIn.bits.src_mask)
     val flowMask = ((srcMask >> flowsPrev) &
       ZeroExt(UIntToMask(flows, maxFlowNum), VLEN))(VLENB - 1, 0)
     valid(id) := true.B
@@ -183,15 +190,15 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
       x.uop.vpu.vl := io.loadRegIn.bits.src_vl
       x.flowMask := flowMask
       x.byteMask := GenUopByteMask(flowMask, alignedType)(VLENB - 1, 0)
-      x.fof := decode.isUnitStride && decode.uop_unit_stride_fof
+      x.fof := isUnitStride(mop) && us_fof(fuOpType)
       x.baseAddr := io.loadRegIn.bits.src_rs1
       x.stride := io.loadRegIn.bits.src_stride
       x.flow_counter := flows
       x.flowNum := flows
-      x.nfields := decode.uop_segment_num + 1.U
-      x.vm := decode.mask_en
-      x.usWholeReg := decode.isUnitStride && decode.uop_unit_stride_whole_reg
-      x.usMaskReg := decode.isUnitStride && decode.uop_unit_stride_mask
+      x.nfields := nf + 1.U
+      x.vm := vm
+      x.usWholeReg := isUnitStride(mop) && us_whole_reg(fuOpType)
+      x.usMaskReg := isUnitStride(mop) && us_mask(fuOpType)
       x.eew := eew
       x.sew := sew
       x.emul := emul
