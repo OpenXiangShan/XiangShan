@@ -873,12 +873,7 @@ class IssueQueueVecMemImp(override val wrapper: IssueQueue)(implicit p: Paramete
     }
 
     for (i <- io.enq.indices) {
-      val blockNotReleased = isAfter(io.enq(i).bits.sqIdx, memIO.checkWait.stIssuePtr)
-      val storeAddrWaitForIsIssuing = VecInit((0 until StorePipelineWidth).map(i => {
-        memIO.checkWait.memWaitUpdateReq.staIssue(i).valid &&
-          memIO.checkWait.memWaitUpdateReq.staIssue(i).bits.uop.robIdx.value === io.enq(i).bits.waitForRobIdx.value
-      })).asUInt.orR && !io.enq(i).bits.loadWaitStrict // is waiting for store addr ready
-      s0_enqBits(i).loadWaitBit := io.enq(i).bits.loadWaitBit && !storeAddrWaitForIsIssuing && blockNotReleased
+      s0_enqBits(i).loadWaitBit := false.B
     }
 
     for (i <- entries.io.enq.indices) {

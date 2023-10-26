@@ -506,7 +506,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val writeBack = MixedVec(
     Seq.fill(params.LduCnt + params.StaCnt * 2)(Flipped(DecoupledIO(new MemExuOutput()))) ++
     Seq.fill(params.VlduCnt)(Flipped(DecoupledIO(new MemExuOutput(true)))) ++
-    Seq.fill(params.VstuCnt)(Flipped(DecoupledIO(new MemExuOutput(true)))) ++
+    Seq.fill(params.VstuCnt)(Flipped(DecoupledIO(new MemExuOutput(true))))
   )
 
   val s3_delayed_load_error = Input(Vec(LoadPipelineWidth, Bool()))

@@ -113,7 +113,7 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
 
   // split
   val fromExuPre = (io.fromIntExu ++ io.fromVfExu ++ io.fromMemExu).flatten
-  val fromExuVld: IndexedSeq[DecoupledIO[ExuOutput]] = fromExuPre.filter(_.bits.params.hasVLoadFu)
+  val fromExuVld: Seq[DecoupledIO[ExuOutput]] = fromExuPre.filter(_.bits.params.hasVLoadFu).toSeq
   require(fromExuVld.size == 1, "vldCnt should be 1")
   val vldMgu = Module(new VldMergeUnit(fromExuVld.head.bits.params))
   vldMgu.io.flush := io.flush
@@ -123,8 +123,8 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
   val fromExuVldAfterMerge: MixedVec[DecoupledIO[ExuOutput]] = WireInit(MixedVecInit(vldMgu.io.writebackAfterMerge))
   fromExuVldAfterMerge.head <> vldMgu.io.writebackAfterMerge
   // alias
-  val fromExu = (io.fromIntExu ++ io.fromVfExu ++ io.fromMemExu).flatten.toSeq
-  val fromExu = fromExuPre.dropRight(params.VlduCnt + params.VstuCnt) ++ fromExuVldAfterMerge ++ fromExuPre.takeRight(params.VstuCnt) //TODO: better implementation
+  // replace vldu write bundle with vldMdu output bundle
+  val fromExu = (fromExuPre.dropRight(params.VlduCnt + params.VstuCnt) ++ fromExuVldAfterMerge ++ fromExuPre.takeRight(params.VstuCnt)).toSeq //TODO: better implementation
   val intArbiterInputsWire = WireInit(MixedVecInit(fromExu))
   val intArbiterInputsWireY = intArbiterInputsWire.filter(_.bits.params.writeIntRf)
   val intArbiterInputsWireN = intArbiterInputsWire.filterNot(_.bits.params.writeIntRf)
