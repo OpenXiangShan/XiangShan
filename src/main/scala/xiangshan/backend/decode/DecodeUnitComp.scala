@@ -49,7 +49,7 @@ class indexedLSUopTable(uopIdx:Int) extends Module {
               return ((1 << i), (1 << i) / offset + k * (1 << lmul))
             }
           }
-        } else {              // lmul < emul, uop num is depend on lmul * nf
+        } else {              // lmul > emul, uop num is depend on lmul * nf
           var offset = 1 << (lmul - emul)
           for (i <- 0 until lmul) {
             if (uopIdx == k * (1 << lmul) + (1 << i)) {
