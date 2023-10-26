@@ -309,14 +309,14 @@ case class XSCoreParameters
       ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
         ExeUnitParams("BJU0", Seq(BrhCfg), Seq(), Seq(Seq(IntRD(8, 0)), Seq(IntRD(9, 0)))),
-        ExeUnitParams("BJU1", Seq(BrhCfg), Seq(), Seq(Seq(IntRD(10, 0)), Seq(IntRD(12, 1)))),
+        ExeUnitParams("BJU1", Seq(BrhCfg), Seq(), Seq(Seq(IntRD(10, 0)), Seq(IntRD(14, 0)))),
       ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams("BJU2", Seq(BrhCfg), Seq(), Seq(Seq(IntRD(11, 0)), Seq(IntRD(7, 1)))),
+        ExeUnitParams("BJU2", Seq(BrhCfg), Seq(), Seq(Seq(IntRD(11, 0)), Seq(IntRD(15, 0)))),
       ), numEntries = IssueQueueSize / 2, numEnq = 1),
       IssueBlockParams(Seq(
-        ExeUnitParams("IMISC0", Seq(VSetRiWiCfg, I2fCfg, I2vCfg, VSetRiWvfCfg, JmpCfg, CsrCfg, FenceCfg), Seq(IntWB(port = 5, 0), VfWB(2, 0)), Seq(Seq(IntRD(5, 1)), Seq(IntRD(3, 1)))),
-        ExeUnitParams("IDIV0", Seq(DivCfg), Seq(IntWB(port = 7, 1)), Seq(Seq(IntRD(1, Int.MaxValue)), Seq(IntRD(9, Int.MaxValue)))),
+        ExeUnitParams("IMISC0", Seq(VSetRiWiCfg, I2fCfg, I2vCfg, VSetRiWvfCfg, JmpCfg, CsrCfg, FenceCfg), Seq(IntWB(port = 5, 0), VfWB(2, 0)), Seq(Seq(IntRD(16, 0)), Seq(IntRD(17, 0)))),
+        ExeUnitParams("IDIV0", Seq(DivCfg), Seq(IntWB(port = 7, 1)), Seq(Seq(IntRD(18, 0)), Seq(IntRD(19, 0)))),
       ), numEntries = IssueQueueSize, numEnq = 2),
     ),
       numPregs = intPreg.numEntries,
@@ -355,12 +355,12 @@ case class XSCoreParameters
         ExeUnitParams("LDU1", Seq(LduCfg), Seq(IntWB(7, 0), VfWB(4, 0)), Seq(Seq(IntRD(13, 0)))),
       ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams("STA0", Seq(StaCfg, MouCfg), Seq(IntWB(9, 0)), Seq(Seq(IntRD(3, 1)))),
-        ExeUnitParams("STA1", Seq(StaCfg, MouCfg), Seq(IntWB(10, 0)), Seq(Seq(IntRD(1, 1)))),
+        ExeUnitParams("STA0", Seq(StaCfg, MouCfg), Seq(IntWB(9, 0)), Seq(Seq(IntRD(20, 0)))),
+        ExeUnitParams("STA1", Seq(StaCfg, MouCfg), Seq(IntWB(10, 0)), Seq(Seq(IntRD(21, 0)))),
       ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams("STD0", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(13, 1), VfRD(12, Int.MaxValue)))),
-        ExeUnitParams("STD1", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(5, 1), VfRD(10, Int.MaxValue)))),
+        ExeUnitParams("STD0", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(22, 0), VfRD(12, Int.MaxValue)))),
+        ExeUnitParams("STD1", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(23, 0), VfRD(10, Int.MaxValue)))),
       ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
         ExeUnitParams("VLDU0", Seq(VlduCfg), Seq(VfWB(3, 1)), Seq(Seq(VfRD(0, 0)), Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)))),
