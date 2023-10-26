@@ -121,6 +121,8 @@ object Bundles {
 
   object Nf extends NamedUInt(3)
 
+  object VEew extends NamedUInt(3)
+
   class Fpu extends Bundle{
     val isFpToVecInst = Bool()
     val isFP32Instr   = Bool()

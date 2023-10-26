@@ -71,6 +71,7 @@ class FPToVecDecoder(implicit p: Parameters) extends XSModule {
   io.vpuCtrl.vlmul := Mux(isFP32Instr, VLmul.mf4, VLmul.mf2)
   io.vpuCtrl.vm    := inst.VM
   io.vpuCtrl.nf    := inst.NF
+  io.vpuCtrl.veew := inst.WIDTH
   io.vpuCtrl.needScalaSrc := Category.needScalaSrc(inst.VCATEGORY)
   io.vpuCtrl.permImmTruncate := Category.permImmTruncate(inst.VCATEGORY)
   io.vpuCtrl.isReverse := needReverseInst
