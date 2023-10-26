@@ -1161,6 +1161,7 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   active_gen_table.io.s0_lookup.bits.region_paddr := train_region_paddr_s0
   active_gen_table.io.s0_lookup.bits.region_vaddr := train_region_vaddr_s0
   active_gen_table.io.s2_stride_hit := stride.io.s2_gen_req.valid
+  active_gen_table.io.s0_dcache_evict <> io_dcache_evict
 
   stride.io.stride_en := io_stride_en
   stride.io.s0_lookup.valid := train_vld_s0
