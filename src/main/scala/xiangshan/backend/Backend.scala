@@ -494,6 +494,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
 }
 
 class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBundle {
+  // Since fast load replay always use load unit 0, Backend flips two load port to avoid conflicts
+  val flippedLda = true
   // params alias
   private val LoadQueueSize = VirtualLoadQueueSize
   // In/Out // Todo: split it into one-direction bundle
@@ -506,7 +508,10 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val storePcRead = Vec(params.StaCnt, Output(UInt(VAddrBits.W)))
 
   // Input
-  val writeBack = MixedVec(Seq.fill(params.LduCnt + params.StaCnt * 2)(Flipped(DecoupledIO(new MemExuOutput()))) ++ Seq.fill(params.VlduCnt)(Flipped(DecoupledIO(new MemExuOutput(true)))))
+  val writebackLdas = MixedVec(Seq.fill(params.LduCnt)(Flipped(DecoupledIO(new MemExuOutput()))))
+  val writebackStas = MixedVec(Seq.fill(params.StaCnt)(Flipped(DecoupledIO(new MemExuOutput()))))
+  val writebackStds = MixedVec(Seq.fill(params.StdCnt)(Flipped(DecoupledIO(new MemExuOutput()))))
+  val writebackVldus = MixedVec(Seq.fill(params.VlduCnt)(Flipped(DecoupledIO(new MemExuOutput(true)))))
 
   val s3_delayed_load_error = Input(Vec(LoadPipelineWidth, Bool()))
   val stIn = Input(Vec(params.StaCnt, ValidIO(new DynInst())))
@@ -531,7 +536,11 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val lsTopdownInfo = Vec(params.LduCnt, Flipped(Output(new LsTopdownInfo)))
   // Output
   val redirect = ValidIO(new Redirect)   // rob flush MemBlock
-  val issueUops = MixedVec(Seq.fill(params.LduCnt + params.StaCnt + params.StdCnt)(DecoupledIO(new MemExuInput())) ++ Seq.fill(params.VlduCnt)(DecoupledIO(new MemExuInput(true))))
+  val issueLdas = MixedVec(Seq.fill(params.LduCnt)(DecoupledIO(new MemExuInput())))
+  val issueStas = MixedVec(Seq.fill(params.StaCnt)(DecoupledIO(new MemExuInput())))
+  val issueStds = MixedVec(Seq.fill(params.StdCnt)(DecoupledIO(new MemExuInput())))
+  val issueVldus = MixedVec(Seq.fill(params.VlduCnt)(DecoupledIO(new MemExuInput(true))))
+
   val loadFastMatch = Vec(params.LduCnt, Output(UInt(params.LduCnt.W)))
   val loadFastImm   = Vec(params.LduCnt, Output(UInt(12.W))) // Imm_I
 
@@ -539,6 +548,26 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val csrCtrl = Output(new CustomCSRCtrlIO)
   val sfence = Output(new SfenceBundle)
   val isStoreException = Output(Bool())
+
+  // make this function private to avoid flip twice, both in Backend and XSCore
+  private [backend] def issueUops: Seq[DecoupledIO[MemExuInput]] = {
+    val issLdas = if (flippedLda) Seq(issueLdas(1), issueLdas(0)) else issueLdas
+    (issLdas ++ issueStas ++ issueStds ++ issueVldus).toSeq
+  }
+
+  // make this function private to avoid flip twice, both in Backend and XSCore
+  private [backend] def writeBack: Seq[DecoupledIO[MemExuOutput]] = {
+    val wbLdas = if (flippedLda) Seq(writebackLdas(1), writebackLdas(0)) else writebackLdas
+    (wbLdas ++ writebackStas ++ writebackStds ++ writebackVldus).toSeq
+  }
+
+  def issueUopsToMem: Seq[DecoupledIO[MemExuInput]] = {
+    (issueLdas ++ issueStas ++ issueStds ++ issueVldus).toSeq
+  }
+
+  def writeBackToBackend: Seq[DecoupledIO[MemExuOutput]] = {
+    (writebackLdas ++ writebackStas ++ writebackStds ++ writebackVldus).toSeq
+  }
 }
 
 class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle {

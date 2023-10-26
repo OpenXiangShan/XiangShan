@@ -134,7 +134,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.ldaIqFeedback <> memBlock.io.ldaIqFeedback
   backend.io.mem.staIqFeedback <> memBlock.io.staIqFeedback
   backend.io.mem.ldCancel <> memBlock.io.ldCancel
-  backend.io.mem.writeBack.zipAll(memBlock.io.mem_to_ooo.writeback, DontCare, DontCare).foreach { case (back, mem) =>
+  backend.io.mem.writeBackToBackend.zipAll(memBlock.io.mem_to_ooo.writeback, DontCare, DontCare).foreach { case (back, mem) =>
     back <> mem
   } // TODO: replace zipAll with zip when vls is fully implemented
 
@@ -153,7 +153,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   io.beu_errors.l2 <> DontCare
 
   memBlock.io.hartId := io.hartId
-  memBlock.io.ooo_to_mem.issue.zipAll(backend.io.mem.issueUops, DontCare, DontCare).foreach { case(memIssue, backIssue) =>
+  memBlock.io.ooo_to_mem.issue.zipAll(backend.io.mem.issueUopsToMem, DontCare, DontCare).foreach { case(memIssue, backIssue) =>
     backIssue <> memIssue
   } // TODO: replace zipAll with zip when vls is fully implemented
   // By default, instructions do not have exceptions when they enter the function units.
