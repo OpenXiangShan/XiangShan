@@ -269,7 +269,7 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
   /* Enqueue logic */
 
   // only allow enqueue when free queue terms >= VecStorePipelineWidth(=2)
-  val freeCount = distanceBetween(deqPtr(0), enqPtr(0))
+  val freeCount = hasFreeEntries(enqPtr(0), deqPtr(0))
   val allowEnqueue = !io.redirect.valid && freeCount >= VecStorePipelineWidth.U
   for (i <- 0 until VecStorePipelineWidth) {
     io.flowIn(i).ready := allowEnqueue
