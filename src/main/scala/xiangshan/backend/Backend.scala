@@ -6,7 +6,7 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility.ZeroExt
 import xiangshan._
-import xiangshan.backend.Bundles.{DynInst, IssueQueueIQWakeUpBundle, LoadShouldCancel, MemExuInput, MemExuOutput}
+import xiangshan.backend.Bundles.{DynInst, IssueQueueIQWakeUpBundle, LoadShouldCancel, MemExuInput, MemExuOutput, VPUCtrlSignals}
 import xiangshan.backend.ctrlblock.{DebugLSIO, LsTopdownInfo}
 import xiangshan.backend.datapath.DataConfig.{IntData, VecData}
 import xiangshan.backend.datapath.RdConfig.{IntRD, VfRD}
@@ -454,6 +454,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     sink.bits.uop.ftqPtr    := source.bits.ftqIdx.getOrElse(0.U.asTypeOf(new FtqPtr))
     sink.bits.uop.ftqOffset := source.bits.ftqOffset.getOrElse(0.U)
     sink.bits.uop.debugInfo := source.bits.perfDebugInfo
+    sink.bits.uop.vpu       := source.bits.vpu.getOrElse(0.U.asTypeOf(new VPUCtrlSignals))
   }
   io.mem.loadFastMatch := memScheduler.io.toMem.get.loadFastMatch.map(_.fastMatch)
   io.mem.loadFastImm := memScheduler.io.toMem.get.loadFastMatch.map(_.fastImm)
