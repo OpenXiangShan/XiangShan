@@ -122,7 +122,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
     Mux(
       s0_use_flow_vec,
       s0_vecstin.mask,
-      -1.asSInt.asUInt
+      // -1.asSInt.asUInt
+      Fill(VLEN/8, 1.U(1.W))
     )
   )
 

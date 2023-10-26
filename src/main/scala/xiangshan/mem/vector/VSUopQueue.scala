@@ -112,7 +112,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
     val flowsLog2 = GenRealFlowLog2(instType, emul, lmul, eew, sew)
     val flowsPrev = uopIdx << flowsLog2 // # of flow before this uop
     val alignedType = Mux(isIndexed(instType), sew(1, 0), eew(1, 0))
-    val srcMask = Mux(vm, -1.asSInt.asUInt, io.storeIn.bits.src_mask)
+    val srcMask = Mux(vm, Fill(VLEN, 1.U(1.W)), io.storeIn.bits.src_mask)
     val flowMask = ((srcMask >> flowsPrev) &
       ZeroExt(UIntToMask(flows, maxFlowNum), VLEN))(VLENB - 1, 0)
     val vlmax = GenVLMAX(lmul, sew)
