@@ -68,25 +68,45 @@ package object xiangshan {
   }
 
   object VlduType {
-    def dummy     = "b0000".U
-    def vle       = "b0001".U
-    def vlse      = "b0010".U
-    def vluxe     = "b0011".U
-    def vloxe     = "b0100".U
-    def vleff     = "b0101".U
-    def vlm       = "b0110".U
-    def vlr       = "b0111".U
+    // bit encoding: | padding (2bit) || mop (2bit) | lumop(5bit) |
+    // only unit-stride use lumop
+    // mop [1:0]
+    // 0 0 : unit-stride
+    // 0 1 : indexed-unordered
+    // 1 0 : strided
+    // 1 1 : indexed-ordered
+    // lumop[4:0]
+    // 0 0 0 0 0 : unit-stride load
+    // 0 1 0 0 0 : unit-stride, whole register load
+    // 0 1 0 1 1 : unit-stride, mask load, EEW=8
+    // 1 0 0 0 0 : unit-stride fault-only-first
+    def vle       = "b00_00_00000".U
+    def vlr       = "b00_00_01000".U
+    def vlm       = "b00_00_01011".U
+    def vleff     = "b00_00_10000".U
+    def vluxe     = "b00_01_00000".U
+    def vlse      = "b00_10_00000".U
+    def vloxe     = "b00_11_00000".U
   }
 
   object VstuType {
-    def dummy     = "b0000".U
-    def vse       = "b1001".U
-    def vsse      = "b1010".U
-    def vsuxe     = "b1011".U
-    def vsoxe     = "b1100".U
-    def vseff     = "b1101".U
-    def vsm       = "b1110".U
-    def vsr       = "b1111".U
+    // bit encoding: | padding (2bit) || mop (2bit) | sumop(5bit) |
+    // only unit-stride use sumop
+    // mop [1:0]
+    // 0 0 : unit-stride
+    // 0 1 : indexed-unordered
+    // 1 0 : strided
+    // 1 1 : indexed-ordered
+    // sumop[4:0]
+    // 0 0 0 0 0 : unit-stride load
+    // 0 1 0 0 0 : unit-stride, whole register load
+    // 0 1 0 1 1 : unit-stride, mask load, EEW=8
+    def vse       = "b00_00_00000".U
+    def vsr       = "b00_00_01000".U
+    def vsm       = "b00_00_01011".U
+    def vsuxe     = "b00_01_00000".U
+    def vsse      = "b00_10_00000".U
+    def vsoxe     = "b00_11_00000".U
   }
 
   object CommitType {

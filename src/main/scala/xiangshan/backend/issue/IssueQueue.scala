@@ -780,6 +780,11 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
 
   for (i <- io.enq.indices) {
     s0_enqBits(i).loadWaitBit := false.B
+    // when have vpu
+    if (params.VlduCnt > 0 || params.VstuCnt > 0) {
+      s0_enqBits(i).srcType(3) := SrcType.vp // v0: mask src
+      s0_enqBits(i).srcType(4) := SrcType.vp // vl&vtype
+    }
   }
 
   for (i <- entries.io.enq.indices) {
@@ -819,5 +824,10 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
     deq.bits.common.lqIdx.get := deqEntryVec(i).bits.payload.lqIdx
     deq.bits.common.ftqIdx.foreach(_ := deqEntryVec(i).bits.payload.ftqPtr)
     deq.bits.common.ftqOffset.foreach(_ := deqEntryVec(i).bits.payload.ftqOffset)
+    // when have vpu
+    if (params.VlduCnt > 0 || params.VstuCnt > 0) {
+      deq.bits.common.vpu.foreach(_ := deqEntryVec(i).bits.payload.vpu)
+      deq.bits.common.vpu.foreach(_.vuopIdx := deqEntryVec(i).bits.payload.uopIdx)
+    }
   }
 }
