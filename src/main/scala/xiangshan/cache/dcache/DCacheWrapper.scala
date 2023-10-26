@@ -607,11 +607,12 @@ class DCacheToSbufferIO(implicit p: Parameters) extends DCacheBundle {
   val req = Flipped(Decoupled(new DCacheLineReq))
 
   val main_pipe_hit_resp = ValidIO(new DCacheLineResp)
-  val refill_hit_resp = ValidIO(new DCacheLineResp)
+  //val refill_hit_resp = ValidIO(new DCacheLineResp)
 
   val replay_resp = ValidIO(new DCacheLineResp)
 
-  def hit_resps: Seq[ValidIO[DCacheLineResp]] = Seq(main_pipe_hit_resp, refill_hit_resp)
+  //def hit_resps: Seq[ValidIO[DCacheLineResp]] = Seq(main_pipe_hit_resp, refill_hit_resp)
+  def hit_resps: Seq[ValidIO[DCacheLineResp]] = Seq(main_pipe_hit_resp)
 }
 
 // forward tilelink channel D's data to ldu
@@ -1152,9 +1153,12 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // atomics
   // atomics not finished yet
   // io.lsu.atomic <> atomicsReplayUnit.io.lsu
-val atomicResp = mainPipe.io.atomic_resp.bits
+  val atomicResp = mainPipe.io.atomic_resp.bits
   when(atomicResp.isAMO){
     io.lsu.atomics.resp := RegNext(mainPipe.io.atomic_resp)
+  }.otherwise{
+    io.lsu.atomics.resp.valid := RegNext(false.B)
+    io.lsu.atomics.resp.bits := RegNext(mainPipe.io.atomic_resp.bits)
   }
   io.lsu.atomics.block_lr := mainPipe.io.block_lr
   // atomicsReplayUnit.io.pipe_resp := RegNext(mainPipe.io.atomic_resp)
