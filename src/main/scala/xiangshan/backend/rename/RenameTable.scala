@@ -95,8 +95,8 @@ class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule with 
   // (3) RAddr at T0 will be used to access the table and get data at T0.
   // (4) WData at T0 is bypassed to RData at T1.
   val t1_redirect = RegNext(io.redirect, false.B)
-  val t1_rdata = io.readPorts.map(p => RegNext(Mux(p.hold, p.data, spec_table_next(p.addr))))
   val t1_raddr = io.readPorts.map(p => RegEnable(p.addr, !p.hold))
+  val t1_rdata_use_t1_raddr = VecInit(t1_raddr.map(spec_table_next(_)))
   val t1_wSpec = RegNext(Mux(io.redirect, 0.U.asTypeOf(io.specWritePorts), io.specWritePorts))
 
   val t1_snpt = RegNext(io.snpt, 0.U.asTypeOf(io.snpt))
@@ -118,12 +118,9 @@ class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule with 
   spec_table := spec_table_next
 
   // READ: decode-rename stage
+  val a = io.specWritePorts.dropWhile(_ == io.specWritePorts(0))
   for ((r, i) <- io.readPorts.zipWithIndex) {
-    // We use two comparisons here because r.hold has bad timing but addrs have better timing.
-    val t0_bypass = io.specWritePorts.map(w => w.wen && Mux(r.hold, w.addr === t1_raddr(i), w.addr === r.addr))
-    val t1_bypass = RegNext(Mux(io.redirect, 0.U.asTypeOf(VecInit(t0_bypass)), VecInit(t0_bypass)))
-    val bypass_data = ParallelPriorityMux(t1_bypass.reverse, t1_wSpec.map(_.data).reverse)
-    r.data := Mux(t1_bypass.asUInt.orR, bypass_data, t1_rdata(i))
+    r.data := t1_rdata_use_t1_raddr(i)
   }
 
   for ((w, i) <- io.archWritePorts.zipWithIndex) {

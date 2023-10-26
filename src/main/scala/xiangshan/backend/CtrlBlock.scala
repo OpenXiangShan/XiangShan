@@ -236,8 +236,8 @@ class CtrlBlockImp(
   val walkVTypeReverse = rob.io.commits.info.map(info => info.vtype).reverse
   val walkVType = PriorityMux(isVsetSeq, walkVTypeReverse)
 
-  decode.io.walkVType.bits := walkVType.asTypeOf(new VType)
-  decode.io.walkVType.valid := rob.io.commits.isWalk && isVsetSeq.reduce(_ || _)
+  decode.io.walkVType.bits := RegNext(walkVType.asTypeOf(new VType))
+  decode.io.walkVType.valid := RegNext(rob.io.commits.isWalk && isVsetSeq.reduce(_ || _))
 
   decode.io.isRedirect := s1_s3_redirect.valid
 
