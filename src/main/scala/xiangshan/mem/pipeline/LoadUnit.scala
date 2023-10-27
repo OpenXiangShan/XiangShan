@@ -1110,10 +1110,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
 
   // s3 load fast replay
-  io.fast_rep_out.valid := s3_valid && s3_fast_rep && !s3_in.uop.robIdx.needFlush(io.redirect)
+  io.fast_rep_out.valid := s3_valid && s3_fast_rep && !s3_in.uop.robIdx.needFlush(io.redirect) && !s3_isvec
   io.fast_rep_out.bits := s3_in
 
-  io.lsq.ldin.valid := s3_valid && (!s3_fast_rep || !io.fast_rep_out.ready) && !s3_in.feedbacked && !s3_in.lateKill
+  io.lsq.ldin.valid := s3_valid && (!s3_fast_rep || !io.fast_rep_out.ready) && !s3_in.feedbacked && !s3_in.lateKill && !s3_isvec
   io.lsq.ldin.bits := s3_in
   io.lsq.ldin.bits.miss := s3_in.miss && !s3_fwd_frm_d_chan_valid
 
