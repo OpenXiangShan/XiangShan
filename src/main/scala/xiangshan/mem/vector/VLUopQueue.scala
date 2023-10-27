@@ -342,8 +342,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
 
     // handle the situation where multiple ports are going to write the same uop queue entry
     val mergedByPrevPort = (i != 0).B && Cat((0 until i).map(j =>
-      io.flowWriteback(j).bits.vec.uopQueuePtr === wb.bits.vec.uopQueuePtr &&
-      flowWbExp(j))).orR
+      io.flowWriteback(j).bits.vec.uopQueuePtr === wb.bits.vec.uopQueuePtr)).orR
     val mergePortVec = (0 until flowWritebackWidth).map(j => (j == i).B ||
       (j > i).B &&
       io.flowWriteback(j).bits.vec.uopQueuePtr === wb.bits.vec.uopQueuePtr &&
