@@ -96,14 +96,11 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   // may shift [0, 2) steps
   val vcfgPtrOHVec = VecInit.tabulate(2)(vcfgPtrOHShift.left)
 
-  val diffPtrOH = RegInit(1.U(size.W))
-  val diffPtrOHShift = CircularShift(diffPtrOH)
-  // may shift [0, CommitWidth * MaxUopSize] steps
-  val diffPtrOHVec = VecInit(Seq.tabulate(CommitWidth * MaxUopSize + 1)(_ % size).map(step => diffPtrOHShift.left(step)))
-
+  val diffPtr = RegInit(0.U.asTypeOf(new RenameBufferPtr))
+  val diffPtrNext = Wire(new RenameBufferPtr)
   // Regs
   val renameBuffer = Mem(size, new RenameBufferEntry)
-  val renameBufferEntries = (0 until size) map (i => renameBuffer(i))
+  val renameBufferEntries = VecInit((0 until size) map (i => renameBuffer(i)))
 
   val s_idle :: s_special_walk :: s_walk :: Nil = Enum(3)
   val state = RegInit(s_idle)
@@ -154,14 +151,14 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   val walkCandidates   = VecInit(walkPtrOHVec.map(sel => Mux1H(sel, renameBufferEntries)))
   val commitCandidates = VecInit(deqPtrOHVec.map(sel => Mux1H(sel, renameBufferEntries)))
   val vcfgCandidates   = VecInit(vcfgPtrOHVec.map(sel => Mux1H(sel, renameBufferEntries)))
-  val diffCandidates   = VecInit(diffPtrOHVec.map(sel => Mux1H(sel, renameBufferEntries)))
 
   // update diff pointer
-  val diffPtrOHNext = Mux(state === s_idle, diffPtrOHVec(newCommitSize), diffPtrOH)
-  diffPtrOH := diffPtrOHNext
+  diffPtrNext := Mux(state === s_idle, diffPtr + newCommitSize, diffPtr)
+  diffPtr := diffPtrNext
 
   // update vcfg pointer
-  vcfgPtrOH := diffPtrOHNext
+  // TODO: do not use diffPtrNext here
+  vcfgPtrOH := diffPtrNext.toOH
 
   // update enq pointer
   val enqPtrNext = Mux(
@@ -263,7 +260,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   io.diffCommits.isCommit := state === s_idle || state === s_special_walk
   for(i <- 0 until CommitWidth * MaxUopSize) {
     io.diffCommits.commitValid(i) := (state === s_idle || state === s_special_walk) && i.U < newCommitSize
-    io.diffCommits.info(i) := diffCandidates(i)
+    io.diffCommits.info(i) := renameBufferEntries((diffPtr + i.U).value)
   }
 
   XSError(isBefore(enqPtr, deqPtr) && !isFull(enqPtr, deqPtr), "\ndeqPtr is older than enqPtr!\n")
