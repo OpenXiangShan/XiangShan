@@ -6,7 +6,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import utility._
-import xiangshan.cache.{HasDCacheParameters, DCacheBundle}
+import xiangshan.cache.HasDCacheParameters
 import xiangshan.cache.mmu._
 import xiangshan.mem.{LdPrefetchTrainBundle, StPrefetchTrainBundle, L1PrefetchReq}
 import xiangshan.mem.trace._
@@ -317,9 +317,10 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   val any_region_m1_match = Cat(region_m1_match_vec_s0).orR && s0_lookup.allow_cross_region_m1
 
   val region_match_vec_dcache_evict_s0 = gen_match_vec(s0_dcache_evict_tag)
+  val any_region_dcache_evict_match = Cat(region_match_vec_dcache_evict_s0).orR
   // s0 dcache evict a entry that may be replaced in s1
   val s0_dcache_evict_conflict = Cat(VecInit(region_match_vec_dcache_evict_s0).asUInt & s1_replace_mask_w).orR
-  val s0_do_dcache_evict = io.s0_dcache_evict.fire
+  val s0_do_dcache_evict = io.s0_dcache_evict.fire && any_region_dcache_evict_match
 
   io.s0_dcache_evict.ready := !s0_lookup_valid && !s0_dcache_evict_conflict
 
