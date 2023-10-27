@@ -479,10 +479,9 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         flush.og1Fail := io.og1Resp(i).valid && RSFeedbackType.isBlocked(io.og1Resp(i).bits.respType)
         wakeUpQueue.io.flush := flush
         wakeUpQueue.io.enq.valid := io.deq(i).fire && !io.deq(i).bits.common.needCancel(io.og0Cancel, io.og1Cancel) && {
-          if (io.deq(i).bits.common.rfWen.isDefined)
-            io.deq(i).bits.common.rfWen.get && io.deq(i).bits.common.pdest =/= 0.U
-          else
-            true.B
+          io.deq(i).bits.common.rfWen.getOrElse(false.B) && io.deq(i).bits.common.pdest =/= 0.U ||
+          io.deq(i).bits.common.fpWen.getOrElse(false.B) ||
+          io.deq(i).bits.common.vecWen.getOrElse(false.B)
         }
         wakeUpQueue.io.enq.bits.uop := io.deq(i).bits.common
         wakeUpQueue.io.enq.bits.lat := getDeqLat(i, io.deq(i).bits.common.fuType)
