@@ -1285,11 +1285,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.vecldout.bits.debug := s3_out.bits.debug
   io.vecldout.bits.uop := s3_out.bits.uop
   io.vecldout.valid := s3_vecout.isvec &&
-    (s3_out.valid && !s3_out.bits.uop.robIdx.needFlush(io.redirect) ||
+    (s3_valid && !s3_out.bits.uop.robIdx.needFlush(io.redirect) ||
       io.lsq.uncache.valid && !io.lsq.uncache.bits.uop.robIdx.needFlush(io.redirect) && !s3_out.valid) &&
     !io.lsq.ldin.bits.rep_info.need_rep
 
-  io.vecReplay.valid := s3_vecout.isvec && s3_out.valid && !s3_out.bits.uop.robIdx.needFlush(io.redirect) &&
+  io.vecReplay.valid := s3_vecout.isvec && s3_valid && !s3_out.bits.uop.robIdx.needFlush(io.redirect) &&
     io.lsq.ldin.bits.rep_info.need_rep
   io.vecReplay.bits := DontCare
   io.vecReplay.bits.uop := s3_in.uop
