@@ -348,15 +348,6 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
     doIssue(i) := canIssue(i) && allowIssue(i)
   }
 
-  // update IssuePtr
-  for (i <- 0 until VecStorePipelineWidth) {
-    when (io.redirect.valid && flowCancelCount > distanceBetween(enqPtr(0), issuePtr(0))) {
-      issuePtr(i) := enqPtr(i) - flowCancelCount
-    } .otherwise {
-      issuePtr(i) := issuePtr(i) + issueCount
-    }
-  }
-
   // control signals
   for (i <- 0 until VecStorePipelineWidth) {
     io.pipeIssue(i).bits := flowQueueEntries(issuePtr(i).value).toPipeBundle(issuePtr(i))
@@ -389,10 +380,18 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
       a._2, b._2
     )
   )}
-  // update IssuePtr, this will overlap updating above
+  // update IssuePtr
   for (i <- 0 until VecStorePipelineWidth) {
-    when (oldestReplayFlowPtr._1) {
-      issuePtr(i) := oldestReplayFlowPtr._2 + i.U
+    when (io.redirect.valid && flowCancelCount > distanceBetween(enqPtr(0), issuePtr(0))) {
+      issuePtr(i) := enqPtr(i) - flowCancelCount
+    } .otherwise {
+      val issuePtrAfterIssue = issuePtr(i) + issueCount
+      val issuePtrAfterReplay = oldestReplayFlowPtr._2 + i.U
+      when (oldestReplayFlowPtr._1 && issuePtrAfterReplay < issuePtrAfterIssue) {
+        issuePtr(i) := issuePtrAfterReplay
+      }.otherwise {
+        issuePtr(i) := issuePtrAfterIssue
+      }
     }
   }
 

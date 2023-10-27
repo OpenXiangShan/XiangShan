@@ -233,14 +233,8 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
     io.pipeIssue(i).valid := canIssue(i)
     doIssue(i) := canIssue(i) && allowIssue(i)
   }
-  
-  // update IssuePtr
+
   for (i <- 0 until VecLoadPipelineWidth) {
-    when (io.redirect.valid && flowCancelCount > distanceBetween(enqPtr(0), issuePtr(0))) {
-      issuePtr(i) := enqPtr(i) - flowCancelCount
-    } .otherwise {
-      issuePtr(i) := issuePtr(i) + issueCount
-    }
     when (doIssue(i)) {
       flowFinished(issuePtr(i).value) := false.B
       issued(issuePtr(i).value) := true.B
@@ -284,10 +278,18 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
       a._2, b._2
     )
   )}
-  // update IssuePtr, this will overlap updating above
+  // update IssuePtr
   for (i <- 0 until VecLoadPipelineWidth) {
-    when (oldestReplayFlowPtr._1) {
-      issuePtr(i) := oldestReplayFlowPtr._2 + i.U
+    when (io.redirect.valid && flowCancelCount > distanceBetween(enqPtr(0), issuePtr(0))) {
+      issuePtr(i) := enqPtr(i) - flowCancelCount
+    } .otherwise {
+      val issuePtrAfterIssue = issuePtr(i) + issueCount
+      val issuePtrAfterReplay = oldestReplayFlowPtr._2 + i.U
+      when (oldestReplayFlowPtr._1 && issuePtrAfterReplay < issuePtrAfterIssue) {
+        issuePtr(i) := issuePtrAfterReplay
+      }.otherwise {
+        issuePtr(i) := issuePtrAfterIssue
+      }
     }
   }
 
