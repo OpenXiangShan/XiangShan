@@ -265,7 +265,7 @@ trait HasCSRConst {
   def IRQ_DEBUG = 13
 
   val Hgatp_Mode_len = 4
-  val Hgatp_Vmid_len = 14
+  val Hgatp_Vmid_len = 16
   val Hgatp_Addr_len = 44
 
   val Satp_Mode_len = 4

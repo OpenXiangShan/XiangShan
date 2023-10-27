@@ -900,7 +900,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Henvcfg, henvcfg),
 
     //--- Hypervisor Protection and Translation ---
-    MaskedRegMap(Hgatp, hgatp),
+    MaskedRegMap(Hgatp, hgatp, hgatpMask, MaskedRegMap.NoSideEffect, hgatpMask),
 
     //--- Hypervisor Counter/Timer Virtualization Registers ---
     MaskedRegMap(Htimedelta, htimedelta),
@@ -985,8 +985,17 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     CSROpType.clri -> (rdata & (~csri).asUInt)
   ))
   val is_vsip_ie = addr === Vsip.U || addr === Vsie.U
-  val wdata = Mux(is_vsip_ie, ZeroExt(wdata_tmp << 1, XLEN), wdata_tmp)
-
+  // for the difftest with NEMU(stay consistent with Spike)
+  val is_satp  = addr === Satp.U 
+  val is_vsatp = addr === Vsatp.U 
+  val is_hgatp = addr === Hgatp.U
+  val check_apt_mode = wdata_tmp(wdata_tmp.getWidth-1, 64-Satp_Mode_len) === 8.U || wdata_tmp(wdata_tmp.getWidth-1, 64-Satp_Mode_len) === 0.U
+  val wdata = MuxCase(wdata_tmp, Seq(
+    is_vsip_ie -> ZeroExt(wdata_tmp << 1, XLEN),
+    (is_satp && !check_apt_mode) -> satp,
+    (is_vsatp && !check_apt_mode) -> vsatp,
+    (is_hgatp && !check_apt_mode) -> hgatp
+  ))
   val addrInPerfCnt = (addr >= Mcycle.U) && (addr <= Mhpmcounter31.U) ||
     (addr >= Mcountinhibit.U) && (addr <= Mhpmevent31.U) ||
     addr === Mip.U
