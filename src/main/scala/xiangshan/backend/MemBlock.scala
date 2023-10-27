@@ -104,6 +104,9 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
   val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
   val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
   val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
+  // used by VLSU issue queue, the vector store would wait all store before it, and the vector load would wait all load
+  val sqDeqPtr = Output(new SqPtr)
+  val lqDeqPtr = Output(new LqPtr)
   val stIn = Vec(StAddrCnt, ValidIO(new MemExuInput))
   val stIssuePtr = Output(new SqPtr())
 
@@ -1058,6 +1061,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   lsq.io.sqCancelCnt <> io.mem_to_ooo.sqCancelCnt
   lsq.io.lqDeq <> io.mem_to_ooo.lqDeq
   lsq.io.sqDeq <> io.mem_to_ooo.sqDeq
+  // Todo: assign these
+  io.mem_to_ooo.sqDeqPtr := ???
+  io.mem_to_ooo.lqDeqPtr := ???
   lsq.io.tl_d_channel <> dcache.io.lsu.tl_d_channel
 
   // LSQ to store buffer
