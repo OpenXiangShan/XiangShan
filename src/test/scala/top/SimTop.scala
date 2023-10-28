@@ -95,6 +95,8 @@ class SimTop(implicit p: Parameters) extends Module {
   dontTouch(logEnable)
   dontTouch(clean)
   dontTouch(dump)
+
+  DifftestModule.finish("XiangShan")
 }
 
 object SimTop extends App {
@@ -118,5 +120,4 @@ object SimTop extends App {
   ChiselDB.addToFileRegisters
   Constantin.addToFileRegisters
   FileRegisters.write(fileDir = "./build")
-  DifftestModule.finish("XiangShan")
 }

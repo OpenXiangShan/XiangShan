@@ -641,7 +641,8 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       // update blocking pointer
       when (replayInfo.cause(LoadReplayCauses.C_BC) ||
             replayInfo.cause(LoadReplayCauses.C_NK) ||
-            replayInfo.cause(LoadReplayCauses.C_DR)) {
+            replayInfo.cause(LoadReplayCauses.C_DR) ||
+            replayInfo.cause(LoadReplayCauses.C_WF)) {
         // normal case: bank conflict or schedule error or dcache replay
         // can replay next cycle
         blocking(enqIndex) := false.B

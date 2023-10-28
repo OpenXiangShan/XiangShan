@@ -137,8 +137,7 @@ trait TBTParams extends HasXSParameter with TageParams {
 
 class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
   val io = IO(new Bundle {
-    val s0_fire = Input(Bool())
-    val s0_pc   = Input(UInt(VAddrBits.W))
+    val req = Flipped(DecoupledIO(UInt(VAddrBits.W))) // s0_pc
     val s1_cnt     = Output(Vec(numBr,UInt(2.W)))
     val update_mask = Input(Vec(TageBanks, Bool()))
     val update_pc = Input(UInt(VAddrBits.W))
@@ -149,26 +148,44 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
 
   val bimAddr = new TableAddr(log2Up(BtSize), instOffsetBits)
 
-  val bt = Module(new SRAMTemplate(UInt(2.W), set = BtSize, way=numBr, shouldReset = true, holdRead = true, bypassWrite = true))
+  // Physical SRAM Size
+  val SRAMSize = 512
+  val foldWidth = BtSize / SRAMSize
 
+  val bt = Module(
+    new FoldedSRAMTemplate(
+      UInt(2.W),
+      set = BtSize,
+      width = foldWidth,
+      way = numBr,
+      shouldReset = false,
+      holdRead = true,
+      bypassWrite = true
+    ))
+
+  // Power-on reset to weak taken
   val doing_reset = RegInit(true.B)
   val resetRow = RegInit(0.U(log2Ceil(BtSize).W))
   resetRow := resetRow + doing_reset
   when (resetRow === (BtSize-1).U) { doing_reset := false.B }
 
-  val s0_idx = bimAddr.getIdx(io.s0_pc)
-  bt.io.r.req.valid := io.s0_fire
+  // Require power-on reset done before handling any request
+  io.req.ready := !doing_reset
+
+  val s0_pc = io.req.bits
+  val s0_fire = io.req.valid
+  val s0_idx = bimAddr.getIdx(s0_pc)
+  bt.io.r.req.valid := s0_fire
   bt.io.r.req.bits.setIdx := s0_idx
 
   val s1_read = bt.io.r.resp.data
-  val s1_idx = RegEnable(s0_idx, io.s0_fire)
+  val s1_idx = RegEnable(s0_idx, s0_fire)
 
 
   val per_br_ctr = VecInit((0 until numBr).map(i => Mux1H(UIntToOH(get_phy_br_idx(s1_idx, i), numBr), s1_read)))
   io.s1_cnt := per_br_ctr
 
   // Update logic
-
   val u_idx = bimAddr.getIdx(io.update_pc)
 
   val newCtrs = Wire(Vec(numBr, UInt(2.W))) // physical bridx
@@ -213,7 +230,7 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
 
   bt.io.w.apply(
     valid = io.update_mask.reduce(_||_) || doing_reset,
-    data = Mux(doing_reset, VecInit(Seq.fill(numBr)(2.U(2.W))), newCtrs),
+    data = Mux(doing_reset, VecInit(Seq.fill(numBr)(2.U(2.W))), newCtrs), // Weak taken
     setIdx = Mux(doing_reset, resetRow, u_idx),
     waymask = Mux(doing_reset, Fill(numBr, 1.U(1.W)).asUInt, updateWayMask)
   )
@@ -239,28 +256,22 @@ class TageTable
   }
 
 
-  val SRAM_SIZE = 256 // physical size
-  require(nRows % SRAM_SIZE == 0)
+  // Physical SRAM size
+  val bankSRAMSize = 512
+  val uSRAMSize = 256
+  require(nRows % bankSRAMSize == 0)
   require(isPow2(numBr))
   val nRowsPerBr = nRows / numBr
-  val nBanks = 8
+  val nBanks = 4 // Tage banks
   val bankSize = nRowsPerBr / nBanks
-  val bankFoldWidth = if (bankSize >= SRAM_SIZE) bankSize / SRAM_SIZE else 1
-  val uFoldedWidth = nRowsPerBr / SRAM_SIZE
-  val uWays = uFoldedWidth * numBr
-  val uRows = SRAM_SIZE
-  if (bankSize < SRAM_SIZE) {
+  val bankFoldWidth = if (bankSize >= bankSRAMSize) bankSize / bankSRAMSize else 1
+  val uFoldedWidth = nRowsPerBr / uSRAMSize
+  if (bankSize < bankSRAMSize) {
     println(f"warning: tage table $tableIdx has small sram depth of $bankSize")
   }
   val bankIdxWidth = log2Ceil(nBanks)
   def get_bank_mask(idx: UInt) = VecInit((0 until nBanks).map(idx(bankIdxWidth-1, 0) === _.U))
   def get_bank_idx(idx: UInt) = idx >> bankIdxWidth
-  def get_way_in_bank(idx: UInt) =
-    if (log2Ceil(bankFoldWidth) > 0)
-      (idx >> bankIdxWidth)(log2Ceil(bankFoldWidth)-1, 0)
-    else
-      0.U(1.W)
-
 
 
   // bypass entries for tage update
@@ -385,11 +396,18 @@ class TageTable
     )
   }
 
+  // Power-on reset
+  val powerOnResetState = RegInit(true.B)
+  when(us.io.r.req.ready && table_banks.map(_.io.r.req.ready).reduce(_ && _)) {
+    // When all the SRAM first reach ready state, we consider power-on reset is done
+    powerOnResetState := false.B
+  }
+  // Do not use table banks io.r.req.ready directly
+  // All the us & table_banks are single port SRAM, ready := !wen
+  // We do not want write request block the whole BPU pipeline
+  io.req.ready := !powerOnResetState
 
   val bank_conflict = (0 until nBanks).map(b => table_banks(b).io.w.req.valid && s0_bank_req_1h(b)).reduce(_||_)
-  io.req.ready := true.B
-  // io.req.ready := !(io.update.mask && not_silent_update)
-  // io.req.ready := !bank_conflict
   XSPerfAccumulate(f"tage_table_bank_conflict", bank_conflict)
 
   val update_u_idx = update_idx
@@ -538,8 +556,8 @@ class Tage(implicit p: Parameters) extends BaseTage {
     }
   }
   val bt = Module (new TageBTable)
-  bt.io.s0_fire := io.s0_fire(1)
-  bt.io.s0_pc   := s0_pc_dup(1)
+  bt.io.req.valid := io.s0_fire(1)
+  bt.io.req.bits := s0_pc_dup(1)
 
   val bankTickCtrDistanceToTops = Seq.fill(numBr)(RegInit((1 << (TickWidth-1)).U(TickWidth.W)))
   val bankTickCtrs = Seq.fill(numBr)(RegInit(0.U(TickWidth.W)))
@@ -833,7 +851,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
   bt.io.update_takens := RegNext(bUpdateTakens)
 
   // all should be ready for req
-  io.s1_ready := tables.map(_.io.req.ready).reduce(_&&_)
+  io.s1_ready := tables.map(_.io.req.ready).reduce(_ && _) && bt.io.req.ready
   XSPerfAccumulate(f"tage_write_blocks_read", !io.s1_ready)
 
   def pred_perf(name: String, cnt: UInt)   = XSPerfAccumulate(s"${name}_at_pred", cnt)

@@ -48,6 +48,9 @@ jobs:
     continue-on-error: false
     timeout-minutes: 900
     name: EMU - Basics
+    strategy:
+      matrix:
+        mfc-arg: ["", "--mfc"]
     steps:
       - uses: actions/checkout@v2
         with:
@@ -67,7 +70,7 @@ jobs:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
       - name: Build EMU
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --build --threads 8
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --build --threads 8 ${{ matrix.mfc-arg }}
       - name: Basic Test - cputest
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --ci cputest 2> /dev/zero

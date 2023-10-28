@@ -9,7 +9,7 @@ import top.ArgParser
 import xiangshan.backend.decode.DecodeUnit
 import types.ChiselStage
 import xiangshan.test.types._
-import xiangshan.types.PrintModuleName
+import xiangshan.transforms.PrintModuleName
 
 object DecodeMain extends App {
   val (config, firrtlOpts, firtoolOpts) = ArgParser.parse(args)

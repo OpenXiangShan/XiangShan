@@ -136,7 +136,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
   def numOfStage = 3
   require(numOfStage > 1, "BPU numOfStage must be greater than 1")
   val topdown_stages = RegInit(VecInit(Seq.fill(numOfStage)(0.U.asTypeOf(new FrontendTopDownBundle))))
-  dontTouch(topdown_stages)
   // bubble events in IFU, only happen in stage 1
   val icacheMissBubble = Wire(Bool())
   val itlbMissBubble =Wire(Bool())
@@ -766,7 +765,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     val jalOffset = jal_offset(inst, currentIsRVC)
     val brOffset  = br_offset(inst, currentIsRVC)
 
-    io.toIbuffer.bits.instrs (0) := new RVCDecoder(inst, XLEN, true).decode.bits
+    io.toIbuffer.bits.instrs(0) := new RVCDecoder(inst, XLEN, useAddiForMv = true).decode.bits
 
 
     io.toIbuffer.bits.pd(0).valid   := true.B

@@ -103,7 +103,10 @@ trait HasSMSModuleHelper extends HasCircularQueuePtrHelper with HasDCacheParamet
     pc(PHT_INDEX_BITS + 2 + PHT_TAG_BITS - 1, PHT_INDEX_BITS + 2)
   }
 
-  def get_alias_bits(region_vaddr: UInt): UInt = region_vaddr(7, 6)
+  def get_alias_bits(region_vaddr: UInt): UInt = {
+    val offset = log2Up(REGION_SIZE)
+    get_alias(Cat(region_vaddr, 0.U(offset.W)))
+  }
 }
 
 class StridePF()(implicit p: Parameters) extends XSModule with HasSMSModuleHelper {

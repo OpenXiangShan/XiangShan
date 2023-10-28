@@ -323,7 +323,6 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   io.backend.cfVec <> ibuffer.io.out
   io.backend.stallReason <> ibuffer.io.stallReason
-  dontTouch(io.backend.stallReason)
 
   instrUncache.io.req   <> ifu.io.uncacheInter.toUncache
   ifu.io.uncacheInter.fromUncache <> instrUncache.io.resp

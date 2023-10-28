@@ -72,9 +72,9 @@ case class XSCoreParameters
   EnableCommitGHistDiff: Boolean = true,
   UbtbSize: Int = 256,
   FtbSize: Int = 2048,
-  RasSize: Int = 32,
-  RasSpecSize: Int = 64,
-  RasCtrSize: Int = 8,
+  RasSize: Int = 16,
+  RasSpecSize: Int = 32,
+  RasCtrSize: Int = 3,
   CacheLineSize: Int = 512,
   FtbWays: Int = 4,
   TageTableInfos: Seq[Tuple3[Int,Int,Int]] =
@@ -127,6 +127,7 @@ case class XSCoreParameters
 
       (preds, ras.io.out)
     }),
+  ICacheECCForceError: Boolean = false,
   IBufSize: Int = 48,
   DecodeWidth: Int = 6,
   RenameWidth: Int = 6,
@@ -406,6 +407,7 @@ trait HasXSParameter {
   val CacheLineSize = coreParams.CacheLineSize
   val CacheLineHalfWord = CacheLineSize / 16
   val ExtHistoryLength = HistoryLength + 64
+  val ICacheECCForceError = coreParams.ICacheECCForceError
   val IBufSize = coreParams.IBufSize
   val DecodeWidth = coreParams.DecodeWidth
   val RenameWidth = coreParams.RenameWidth
