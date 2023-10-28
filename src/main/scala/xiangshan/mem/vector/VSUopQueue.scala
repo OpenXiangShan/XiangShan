@@ -102,6 +102,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
   val nf = io.storeIn.bits.uop.vpu.nf
   val vm = io.storeIn.bits.uop.vpu.vm
   val emul = Mux(us_whole_reg(fuOpType) || us_mask(fuOpType), 0.U(mulBits.W), EewLog2(eew) - sew + lmul)
+  val numUops = Mux(lmul.asSInt > emul.asSInt, MulNum(lmul), MulNum(emul))
   
   when (io.storeIn.fire) {
     val id = enqPtr.value
@@ -123,6 +124,8 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
     uopq(id) match { case x =>
       x.uop := io.storeIn.bits.uop
       x.uop.vpu.vl := io.storeIn.bits.src_vl
+      x.uop.numUops := numUops
+      x.uop.lastUop := (io.storeIn.bits.uop.uopIdx + 1.U) === numUops
       x.flowMask := flowMask
       x.byteMask := GenUopByteMask(flowMask, alignedType)(VLENB - 1, 0)
       x.data := io.storeIn.bits.src_vs3
