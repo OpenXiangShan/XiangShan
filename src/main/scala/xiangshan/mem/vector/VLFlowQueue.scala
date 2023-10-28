@@ -317,7 +317,7 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
         x.vec.reg_offset    := thisPipeResult.vec.reg_offset
         x.vec.exp           := thisPipeResult.vec.exp
         x.vec.is_first_ele  := thisPipeResult.vec.is_first_ele
-        x.vec.exp_ele_index := thisPipeResult.vec.exp_ele_index
+        x.vec.exp_ele_index := flowQueueEntries(thisPtr).flow_idx
         x.vec.uopQueuePtr   := flowQueueEntries(thisPtr).uopQueuePtr
         x.vec.flowPtr       := DontCare
         // From ExuOutput
