@@ -61,7 +61,8 @@ class DataBufferEntry (implicit p: Parameters)  extends DCacheBundle {
 
 // Store Queue
 class StoreQueue(implicit p: Parameters) extends XSModule
-  with HasDCacheParameters with HasCircularQueuePtrHelper with HasPerfEvents {
+  with HasDCacheParameters with HasCircularQueuePtrHelper with HasPerfEvents
+  with HasSbufferConst {
   val io = IO(new Bundle() {
     val hartId = Input(UInt(8.W))
     val enq = new SqEnqIO
@@ -87,7 +88,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val sqDeqPtr = Output(new SqPtr)
     val sqFull = Output(Bool())
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
-    val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
+    val sqDeq = Output(UInt(log2Ceil(CommitWidth + 1).W))
     val force_write = Output(Bool())
   })
 
@@ -98,7 +99,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // val data = Reg(Vec(StoreQueueSize, new LsqEntry))
   val dataModule = Module(new SQDataModule(
     numEntries = StoreQueueSize,
-    numRead = EnsbufferWidth,
+    numRead = CommitWidth,
     numWrite = StorePipelineWidth,
     numForward = StorePipelineWidth
   ))
@@ -106,7 +107,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val paddrModule = Module(new SQAddrModule(
     dataWidth = PAddrBits,
     numEntries = StoreQueueSize,
-    numRead = EnsbufferWidth,
+    numRead = CommitWidth,
     numWrite = StorePipelineWidth,
     numForward = StorePipelineWidth
   ))
@@ -114,12 +115,11 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val vaddrModule = Module(new SQAddrModule(
     dataWidth = VAddrBits,
     numEntries = StoreQueueSize,
-    numRead = EnsbufferWidth + 1, // sbuffer + badvaddr 1 (TODO)
+    numRead = CommitWidth + 1, // sbuffer + badvaddr 1 (TODO)
     numWrite = StorePipelineWidth,
     numForward = StorePipelineWidth
   ))
   vaddrModule.io := DontCare
-  val dataBuffer = Module(new DatamoduleResultBuffer(new DataBufferEntry))
   val debug_paddr = Reg(Vec(StoreQueueSize, UInt((PAddrBits).W)))
   val debug_vaddr = Reg(Vec(StoreQueueSize, UInt((VAddrBits).W)))
   val debug_data = Reg(Vec(StoreQueueSize, UInt((XLEN).W)))
@@ -137,8 +137,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   // ptr
   val enqPtrExt = RegInit(VecInit((0 until io.enq.req.length).map(_.U.asTypeOf(new SqPtr))))
-  val rdataPtrExt = RegInit(VecInit((0 until EnsbufferWidth).map(_.U.asTypeOf(new SqPtr))))
-  val deqPtrExt = RegInit(VecInit((0 until EnsbufferWidth).map(_.U.asTypeOf(new SqPtr))))
+  val rdataPtrExt = RegInit(VecInit((0 until CommitWidth).map(_.U.asTypeOf(new SqPtr))))
+  val deqPtrExt = RegInit(VecInit((0 until CommitWidth).map(_.U.asTypeOf(new SqPtr))))
   val cmtPtrExt = RegInit(VecInit((0 until CommitWidth).map(_.U.asTypeOf(new SqPtr))))
   val addrReadyPtrExt = RegInit(0.U.asTypeOf(new SqPtr))
   val dataReadyPtrExt = RegInit(0.U.asTypeOf(new SqPtr))
@@ -162,13 +162,11 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   // Read dataModule
   assert(EnsbufferWidth <= 2)
+  val totalSbufferCount = Wire(UInt(3.W))
   // rdataPtrExtNext and rdataPtrExtNext+1 entry will be read from dataModule
-  val rdataPtrExtNext = WireInit(Mux(dataBuffer.io.enq(1).fire,
-    VecInit(rdataPtrExt.map(_ + 2.U)),
-    Mux(dataBuffer.io.enq(0).fire || io.mmioStout.fire,
-      VecInit(rdataPtrExt.map(_ + 1.U)),
-      rdataPtrExt
-    )
+  val rdataPtrExtNext = WireInit(Mux(io.sbuffer(1).fire || io.sbuffer(0).fire,
+    VecInit(rdataPtrExt.map(_ + totalSbufferCount)),
+    Mux(io.mmioStout.fire, VecInit(rdataPtrExt.map(_ + 1.U)), rdataPtrExt)
   ))
 
   // deqPtrExtNext traces which inst is about to leave store queue
@@ -179,26 +177,17 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // is delayed so that load can get the right data from store queue.
   //
   // Modify deqPtrExtNext and io.sqDeq with care!
-  val deqPtrExtNext = Mux(RegNext(io.sbuffer(1).fire),
-    VecInit(deqPtrExt.map(_ + 2.U)),
-    Mux(RegNext(io.sbuffer(0).fire) || io.mmioStout.fire,
-      VecInit(deqPtrExt.map(_ + 1.U)),
-      deqPtrExt
-    )
-  )
-  io.sqDeq := RegNext(Mux(RegNext(io.sbuffer(1).fire), 2.U,
-    Mux(RegNext(io.sbuffer(0).fire) || io.mmioStout.fire, 1.U, 0.U)
+  val deqPtrExtNext = WireInit(Mux(RegNext(io.sbuffer(1).fire || io.sbuffer(0).fire),
+    VecInit(deqPtrExt.map(_ + RegNext(totalSbufferCount))),
+    Mux(io.mmioStout.fire, VecInit(deqPtrExt.map(_ + 1.U)), deqPtrExt)
+  ))
+  io.sqDeq := RegNext(Mux(RegNext(io.sbuffer(1).fire || io.sbuffer(0).fire), RegNext(totalSbufferCount),
+    Mux(io.mmioStout.fire, 1.U, 0.U)
   ))
   assert(!RegNext(RegNext(io.sbuffer(0).fire) && io.mmioStout.fire))
 
-  for (i <- 0 until EnsbufferWidth) {
-    dataModule.io.raddr(i) := rdataPtrExtNext(i).value
-    paddrModule.io.raddr(i) := rdataPtrExtNext(i).value
-    vaddrModule.io.raddr(i) := rdataPtrExtNext(i).value
-  }
-
   // no inst will be committed 1 cycle before tval update
-  vaddrModule.io.raddr(EnsbufferWidth) := (cmtPtrExt(0) + commitCount).value
+  vaddrModule.io.raddr(CommitWidth) := (cmtPtrExt(0) + commitCount).value
 
   /**
     * Enqueue at dispatch
@@ -679,7 +668,21 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     */
   XSError(uncacheState =/= s_idle && uncacheState =/= s_wait && commitCount > 0.U,
    "should not commit instruction when MMIO has not been finished\n")
+  val mergeAllocated = Wire(Vec(CommitWidth, Bool()))
+  val mergeCommitted = Wire(Vec(CommitWidth, Bool()))
+  val mergeMmioStall = Wire(Vec(CommitWidth, Bool()))
+  val mergePrefetch = Wire(Vec(CommitWidth, Bool()))
   for (i <- 0 until CommitWidth) {
+    val ptr = rdataPtrExtNext(i).value
+    paddrModule.io.raddr(i) := ptr
+    vaddrModule.io.raddr(i) := ptr
+    dataModule.io.raddr(i)  := ptr
+
+    mergeAllocated(i) := RegNext(allocated(ptr))
+    mergeCommitted(i) := RegNext(committed(ptr))
+    mergeMmioStall(i) := RegNext(mmio(ptr))
+    mergePrefetch(i)  := RegNext(prefetch(ptr))
+
     when (commitCount > i.U) { // MMIO inst is not in progress
       if(i == 0){
         // MMIO inst should not update committed flag
@@ -694,53 +697,96 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   }
   cmtPtrExt := cmtPtrExt.map(_ + commitCount)
 
-  // committed stores will not be cancelled and can be sent to lower level.
-  // remove retired insts from sq, add retired store to sbuffer
+  val mergePAddr = paddrModule.io.rdata
+  val mergeVAddr = vaddrModule.io.rdata
+  val mergeData  = VecInit(dataModule.io.rdata.map(_.data))
+  val mergeMask  = VecInit(dataModule.io.rdata.map(_.mask))
+  val mergeWline = paddrModule.io.rlineflag
 
-  // Read data from data module
-  // As store queue grows larger and larger, time needed to read data from data
-  // module keeps growing higher. Now we give data read a whole cycle.
-
-  val mmioStall = mmio(rdataPtrExt(0).value)
-  for (i <- 0 until EnsbufferWidth) {
-    val ptr = rdataPtrExt(i).value
-    dataBuffer.io.enq(i).valid := allocated(ptr) && committed(ptr) && !mmioStall
-    // Note that store data/addr should both be valid after store's commit
-    assert(!dataBuffer.io.enq(i).valid || allvalid(ptr))
-    dataBuffer.io.enq(i).bits.addr     := paddrModule.io.rdata(i)
-    dataBuffer.io.enq(i).bits.vaddr    := vaddrModule.io.rdata(i)
-    dataBuffer.io.enq(i).bits.data     := dataModule.io.rdata(i).data
-    dataBuffer.io.enq(i).bits.mask     := dataModule.io.rdata(i).mask
-    dataBuffer.io.enq(i).bits.wline    := paddrModule.io.rlineflag(i)
-    dataBuffer.io.enq(i).bits.sqPtr    := rdataPtrExt(i)
-    dataBuffer.io.enq(i).bits.prefetch := prefetch(ptr)
+  val mergePTag = mergePAddr.map(_(PAddrBits-1, OffsetWidth))
+  val mergePTagMatch = false.B +: (1 until CommitWidth).map(i => mergePTag(i-1) === mergePTag(i))
+  mergePTagMatch.zipWithIndex.map { case (x, i) => x.suggestName("mergePTagMatch_" + i) }
+  val mergeVWordOffset = mergeVAddr.map(_(5, 4))
+  val mergeVWordOffsetMatch = false.B +: (1 until CommitWidth).map(i => mergeVWordOffset(i-1) === mergeVWordOffset(i))
+  mergeVWordOffsetMatch.zipWithIndex.map { case (x, i) => x.suggestName("mergeVWordOffsetMatch_"+i) }
+  val mergeMaskMatch = false.B +: (1 until CommitWidth).map(i => (mergeMask(i-1) | mergeMask(i)) === "hffff".U)
+  mergeMaskMatch.zipWithIndex.map { case (x, i) => x.suggestName("mergeMaskMatch_" + i) }
+  val merged = Wire(Vec(CommitWidth, Bool()))
+  merged.zipWithIndex.map {
+    case (merge, i) =>
+      if (i == 0) {
+        merge := false.B
+      } else {
+        merge := mergeAllocated(i) &&
+                 mergeCommitted(i) &&
+                 !mergeMmioStall(i) && mergePTagMatch(i) && mergeVWordOffsetMatch(i) && mergeMaskMatch(i) && !mergeWline(i-1) && !merged(i-1)
+      }
   }
+  val mergeTailMask = merged.asUInt
+  val mergeHeadMask = ~merged.asUInt
+  val mergeHeadMaskFromOne = ~VecInit(true.B +: merged.drop(1)).asUInt
+  val mergeSel0 = 0.U
+  val mergeSel1 = PriorityEncoder(mergeHeadMaskFromOne)
+  val mergeSel = Seq(mergeSel0, mergeSel1)
+
+  val mergeReqs = Wire(Vec(EnsbufferWidth, ValidIO(new DCacheWordReqWithVaddrAndPfFlag)))
+
+  require(EnsbufferWidth == 2)
+  require(XLEN == 64)
+  val mergeDataSel0 = Wire(Vec(2, UInt(XLEN.W)))
+  val mergeDataSel1 = Wire(Vec(2, UInt(XLEN.W)))
+
+  val mergeSel0Inc = mergeVAddr(1)(3) > mergeVAddr(0)(3)
+  mergeDataSel0(0) := Mux(mergeSel0Inc, mergeData(0)(63, 0), mergeData(1)(63, 0))
+  mergeDataSel0(1) := Mux(mergeSel0Inc, mergeData(1)(63, 0), mergeData(0)(63, 0))
+
+
+  mergeReqs(0).valid := mergeAllocated(0) && mergeCommitted(0) && !mergeMmioStall(0)
+  mergeReqs(0).bits := DontCare
+  mergeReqs(0).bits.cmd := MemoryOpConstants.M_XWR
+  mergeReqs(0).bits.addr := mergePAddr(0)
+  mergeReqs(0).bits.vaddr := mergeVAddr(0)
+  mergeReqs(0).bits.data := Mux(mergeTailMask(1), mergeDataSel0.asUInt, mergeData(0))
+  mergeReqs(0).bits.mask := Mux(mergeTailMask(1), mergeMask(0) | mergeMask(1), mergeMask(0))
+  mergeReqs(0).bits.wline := mergeWline(0)
+  mergeReqs(0).bits.prefetch := mergePrefetch(0)
+
+  val mergeNextSel1 = Mux(mergeSel1 === (CommitWidth-1).U, 0.U, mergeSel1 + 1.U)
+  val mergeSel1Inc = mergeVAddr(mergeNextSel1)(3) > mergeVAddr(mergeSel1)(3)
+  mergeDataSel1(0) := Mux(mergeSel1Inc, mergeData(mergeSel1)(63, 0), mergeData(mergeNextSel1)(63, 0))
+  mergeDataSel1(1) := Mux(mergeSel1Inc, mergeData(mergeNextSel1)(63, 0), mergeData(mergeSel1)(63, 0))
+
+
+  mergeReqs(1).valid := mergeAllocated(mergeSel1) && mergeCommitted(mergeSel1) && !mergeMmioStall(mergeSel1)
+  mergeReqs(1).bits := DontCare
+  mergeReqs(1).bits.cmd := MemoryOpConstants.M_XWR
+  mergeReqs(1).bits.addr := mergePAddr(mergeSel1)
+  mergeReqs(1).bits.vaddr := mergeVAddr(mergeSel1)
+  mergeReqs(1).bits.data := Mux(mergeTailMask(mergeNextSel1), mergeDataSel1.asUInt, mergeData(mergeSel1))
+  mergeReqs(1).bits.mask := Mux(mergeTailMask(mergeNextSel1), mergeMask(mergeNextSel1) | mergeMask(mergeSel1), mergeMask(mergeSel1))
+  mergeReqs(1).bits.wline := mergeWline(mergeSel1)
+  mergeReqs(1).bits.prefetch := mergePrefetch(mergeSel1)
+
+  totalSbufferCount := Mux(io.sbuffer(0).fire, Mux(mergeTailMask(1), 2.U(3.W), 1.U(3.W)), 0.U(3.W)) +
+                       Mux(io.sbuffer(1).fire, Mux(mergeTailMask(mergeNextSel1), 2.U(3.W), 1.U(3.W)), 0.U(3.W))
 
   // Send data stored in sbufferReqBitsReg to sbuffer
   for (i <- 0 until EnsbufferWidth) {
-    io.sbuffer(i).valid := dataBuffer.io.deq(i).valid
-    dataBuffer.io.deq(i).ready := io.sbuffer(i).ready
+    io.sbuffer(i).valid := mergeReqs(i).valid
+    io.sbuffer(i).bits  := mergeReqs(i).bits
     // Write line request should have all 1 mask
     assert(!(io.sbuffer(i).valid && io.sbuffer(i).bits.wline && !io.sbuffer(i).bits.mask.andR))
-    io.sbuffer(i).bits := DontCare
-    io.sbuffer(i).bits.cmd   := MemoryOpConstants.M_XWR
-    io.sbuffer(i).bits.addr  := dataBuffer.io.deq(i).bits.addr
-    io.sbuffer(i).bits.vaddr := dataBuffer.io.deq(i).bits.vaddr
-    io.sbuffer(i).bits.data  := dataBuffer.io.deq(i).bits.data
-    io.sbuffer(i).bits.mask  := dataBuffer.io.deq(i).bits.mask
-    io.sbuffer(i).bits.wline := dataBuffer.io.deq(i).bits.wline
-    io.sbuffer(i).bits.prefetch := dataBuffer.io.deq(i).bits.prefetch
-
     // io.sbuffer(i).fire is RegNexted, as sbuffer data write takes 2 cycles.
     // Before data write finish, sbuffer is unable to provide store to load
     // forward data. As an workaround, deqPtrExt and allocated flag update
     // is delayed so that load can get the right data from store queue.
-    val ptr = dataBuffer.io.deq(i).bits.sqPtr.value
-    when (RegNext(io.sbuffer(i).fire)) {
-      allocated(RegEnable(ptr, io.sbuffer(i).fire)) := false.B
-      XSDebug("sbuffer "+i+" fire: ptr %d\n", ptr)
+  }
+  for (i <- 0 until CommitWidth) {
+    when (i.U < RegNext(totalSbufferCount)) {
+      allocated(deqPtrExt(i).value) := false.B
     }
   }
+
   (1 until EnsbufferWidth).foreach(i => when(io.sbuffer(i).fire) { assert(io.sbuffer(i - 1).fire) })
   if (coreParams.dcacheParametersOpt.isEmpty) {
     for (i <- 0 until EnsbufferWidth) {
@@ -757,18 +803,19 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   }
 
   if (env.EnableDifftest) {
-    for (i <- 0 until EnsbufferWidth) {
-      val storeCommit = io.sbuffer(i).fire
-      val waddr = ZeroExt(Cat(io.sbuffer(i).bits.addr(PAddrBits - 1, 3), 0.U(3.W)), 64)
-      val sbufferMask = shiftMaskToLow(io.sbuffer(i).bits.addr, io.sbuffer(i).bits.mask)
-      val sbufferData = shiftDataToLow(io.sbuffer(i).bits.addr, io.sbuffer(i).bits.data)
+    for (i <- 0 until CommitWidth) {
+      val storeCommit = io.sbuffer.map(_.fire).reduce(_|_)
+      val storeCommitCount = totalSbufferCount
+      val waddr = ZeroExt(Cat(mergePAddr(i)(PAddrBits - 1, 3), 0.U(3.W)), 64)
+      val sbufferMask = shiftMaskToLow(mergePAddr(i), mergeMask(i))
+      val sbufferData = shiftDataToLow(mergePAddr(i), mergeData(i))
       val wmask = sbufferMask
       val wdata = sbufferData & MaskExpand(sbufferMask)
 
       val difftest = DifftestModule(new DiffStoreEvent, delay = 2)
       difftest.coreid := io.hartId
       difftest.index  := i.U
-      difftest.valid  := storeCommit
+      difftest.valid  := storeCommit && (i.U < storeCommitCount)
       difftest.addr   := waddr
       difftest.data   := wdata
       difftest.mask   := wmask
@@ -776,7 +823,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   }
 
   // Read vaddr for mem exception
-  io.exceptionAddr.vaddr := vaddrModule.io.rdata(EnsbufferWidth)
+  io.exceptionAddr.vaddr := vaddrModule.io.rdata(CommitWidth)
 
   // misprediction recovery / exception redirect
   // invalidate sq term using robIdx

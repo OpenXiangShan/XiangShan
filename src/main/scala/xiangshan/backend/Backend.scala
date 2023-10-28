@@ -54,7 +54,7 @@ class FakeMemBlockWbSourceImp(outer: FakeMemBlockWbSource) extends LazyModuleImp
 }
 
 // Merge CtrlBlock, exuBlocks, wbArbiter, wb2Ctrl, etc into 1 module
-class Backend(memWbSource: HasWritebackSource)(implicit p: Parameters) extends LazyModule 
+class Backend(memWbSource: HasWritebackSource)(implicit p: Parameters) extends LazyModule
   with HasXSParameter
   with HasExuWbHelper
 {
@@ -182,7 +182,7 @@ class BackendImp(outer: Backend)(implicit p: Parameters) extends LazyModuleImp(o
       val csrCtrl = new CustomCSRCtrlIO
       val lqCancelCnt = Input(UInt(log2Up(VirtualLoadQueueSize + 1).W))
       val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))
-      val scommit = Input(UInt(log2Ceil(EnsbufferWidth + 1).W))
+      val scommit = Input(UInt(log2Ceil(CommitWidth + 1).W))
       val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
       val debug_ls = Flipped(new DebugLSIO)
       val lsTopdownInfo = Vec(exuParameters.LduCnt, Input(new LsTopdownInfo))

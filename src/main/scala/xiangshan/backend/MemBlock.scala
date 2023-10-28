@@ -72,7 +72,7 @@ class mem_to_ooo(implicit p: Parameters ) extends XSBundle {
   val csrUpdate = new DistributedCSRUpdateReq
   val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize + 1).W))
   val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
-  val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
+  val sqDeq = Output(UInt(log2Ceil(CommitWidth + 1).W))
   val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
   val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
   val stIssuePtr = Output(new SqPtr())

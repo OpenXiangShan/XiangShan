@@ -79,6 +79,7 @@ class DataWriteReq(implicit p: Parameters) extends SbufferBundle {
   // 2 cycle update
   val mask = UInt((VLEN/8).W)
   val data = UInt(VLEN.W)
+  val size = UInt(log2Up(CommitWidth+1).W)
   val vwordOffset = UInt(VWordOffsetWidth.W)
   val wline = Bool() // write full cacheline
 }
@@ -132,13 +133,19 @@ class SbufferData(implicit p: Parameters) extends XSModule with HasSbufferConst 
       val line_write_buffer_data = RegEnable(req.bits.data, sbuffer_in_s1_line_wen)
       val line_write_buffer_wline = RegEnable(req.bits.wline, sbuffer_in_s1_line_wen)
       val line_write_buffer_mask = RegEnable(req.bits.mask, sbuffer_in_s1_line_wen)
+      val line_write_buffer_size = RegEnable(req.bits.size, sbuffer_in_s1_line_wen)
       val line_write_buffer_offset = RegEnable(req.bits.vwordOffset(VWordsWidth-1, 0), sbuffer_in_s1_line_wen)
+      val line_write_buffer_low_word = line_write_buffer_offset
+      val line_write_buffer_high_word = line_write_buffer_low_word +& line_write_buffer_size
       sbuffer_in_s1_line_wen.suggestName("sbuffer_in_s1_line_wen_"+line)
       sbuffer_in_s2_line_wen.suggestName("sbuffer_in_s2_line_wen_"+line)
       line_write_buffer_data.suggestName("line_write_buffer_data_"+line)
       line_write_buffer_wline.suggestName("line_write_buffer_wline_"+line)
       line_write_buffer_mask.suggestName("line_write_buffer_mask_"+line)
       line_write_buffer_offset.suggestName("line_write_buffer_offset_"+line)
+      line_write_buffer_size.suggestName("line_write_buffer_size_"+line)
+      line_write_buffer_low_word.suggestName("line_write_buffer_low_word_"+line)
+      line_write_buffer_high_word.suggestName("line_write_buffer_high_word_"+line)
       for(word <- 0 until CacheLineVWords){
         for(byte <- 0 until VDataBytes){
           val write_byte = sbuffer_in_s2_line_wen && (
@@ -462,6 +469,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     writeReq(i).bits.vwordOffset := vwordOffset
     writeReq(i).bits.mask := in.bits.mask
     writeReq(i).bits.data := in.bits.data
+    writeReq(i).bits.size := in.bits.size
     writeReq(i).bits.wline := in.bits.wline
     val debug_insertIdx = if(i == 0) firstInsertIdx else secondInsertIdx
     val insertVec = if(i == 0) firstInsertVec else secondInsertVec

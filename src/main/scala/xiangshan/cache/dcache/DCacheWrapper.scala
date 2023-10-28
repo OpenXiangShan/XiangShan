@@ -224,7 +224,7 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
     require(data.getWidth >= (bank+1)*DCacheSRAMRowBytes)
     data(DCacheSRAMRowBytes * (bank + 1) - 1, DCacheSRAMRowBytes * bank)
   }
-  
+
   def get_alias(vaddr: UInt): UInt ={
     require(blockOffBits + idxBits > pgIdxBits)
     if(blockOffBits + idxBits > pgIdxBits){
@@ -388,6 +388,7 @@ class DCacheWordReqWithVaddr(implicit p: Parameters) extends DCacheWordReq {
 
 class DCacheWordReqWithVaddrAndPfFlag(implicit p: Parameters) extends DCacheWordReqWithVaddr {
   val prefetch = Bool()
+  val size = UInt(log2Up(CommitWidth+1).W)
 
   def toDCacheWordReqWithVaddr() = {
     val res = Wire(new DCacheWordReqWithVaddr)
