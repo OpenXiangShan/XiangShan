@@ -23,10 +23,11 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors}
 import freechips.rocketchip.tilelink._
-import coupledL2.{L2ParamKey, CoupledL2}
+import coupledL2.{CoupledL2, L2ParamKey}
 import system.HasSoCParameter
 import top.BusPerfMonitor
 import utility.{DelayN, ResetGen, TLClientsMerger, TLEdgeBuffer, TLLogger}
+import xiangshan.cache.mmu.TlbRequestIO
 
 class L1BusErrorUnitInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
   val ecc_error = Valid(UInt(soc.PAddrBits.W))
@@ -128,6 +129,7 @@ class L2Top()(implicit p: Parameters) extends LazyModule
       val robHeadPaddr = Flipped(Valid(UInt(36.W)))
       val l2MissMatch = Output(Bool())
     })
+    val l2_tlb_req = IO(new TlbRequestIO(nRespDups = 2))
 
     val resetDelayN = Module(new DelayN(UInt(PAddrBits.W), 5))
 
@@ -146,9 +148,33 @@ class L2Top()(implicit p: Parameters) extends LazyModule
       l2cache.get.module.io.debugTopDown.robHeadPaddr := DontCare
       l2cache.get.module.io.debugTopDown.robHeadPaddr.head := debugTopDown.robHeadPaddr
       debugTopDown.l2MissMatch := l2cache.get.module.io.debugTopDown.l2MissMatch.head
+      
+      /* l2 tlb */
+      l2_tlb_req.req.bits := DontCare
+      l2_tlb_req.req.valid := l2cache.get.module.io.l2_tlb_req.req.valid
+      l2_tlb_req.resp.ready := l2cache.get.module.io.l2_tlb_req.resp.ready
+      l2_tlb_req.req.bits.vaddr := l2cache.get.module.io.l2_tlb_req.req.bits.vaddr
+      l2_tlb_req.req.bits.cmd := l2cache.get.module.io.l2_tlb_req.req.bits.cmd
+      l2_tlb_req.req.bits.size := l2cache.get.module.io.l2_tlb_req.req.bits.size
+      l2_tlb_req.req.bits.kill := l2cache.get.module.io.l2_tlb_req.req.bits.kill
+      l2_tlb_req.req.bits.no_translate := l2cache.get.module.io.l2_tlb_req.req.bits.no_translate
+      l2_tlb_req.req_kill := l2cache.get.module.io.l2_tlb_req.req_kill
+      l2cache.get.module.io.l2_tlb_req.resp.valid := l2_tlb_req.resp.valid
+      l2cache.get.module.io.l2_tlb_req.req.ready := l2_tlb_req.req.ready
+      l2cache.get.module.io.l2_tlb_req.resp.bits.paddr.head := l2_tlb_req.resp.bits.paddr.head
+      l2cache.get.module.io.l2_tlb_req.resp.bits.miss := l2_tlb_req.resp.bits.miss
+      l2cache.get.module.io.l2_tlb_req.resp.bits.excp.head <> l2_tlb_req.resp.bits.excp.head
     } else {
       l2_hint := 0.U.asTypeOf(l2_hint)
       debugTopDown <> DontCare
+
+      l2_tlb_req.req.valid := false.B
+      l2_tlb_req.req.bits := DontCare
+      l2_tlb_req.req_kill := DontCare
+      l2_tlb_req.resp.ready := true.B
+      l2cache.get.module.io.l2_tlb_req.req.ready := true.B
+      l2cache.get.module.io.l2_tlb_req.resp.valid := false.B
+      l2cache.get.module.io.l2_tlb_req.resp.bits := DontCare
     }
   }
 

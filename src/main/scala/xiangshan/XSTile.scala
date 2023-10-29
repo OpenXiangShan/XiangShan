@@ -127,26 +127,9 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       core.module.io.l2_hint.bits.sourceId := l2top.module.l2_hint.bits
       core.module.io.l2_hint.valid := l2top.module.l2_hint.valid
       core.module.io.l2PfqBusy := false.B
-      core.module.io.debugTopDown.l2MissMatch := l2cache.get.module.io.debugTopDown.l2MissMatch.head
-      l2cache.get.module.io.debugTopDown.robHeadPaddr.head := core.module.io.debugTopDown.robHeadPaddr
       core.module.io.debugTopDown.l2MissMatch := l2top.module.debugTopDown.l2MissMatch
       l2top.module.debugTopDown.robHeadPaddr := core.module.io.debugTopDown.robHeadPaddr
-
-      core.module.io.l2_tlb_req.req.bits := DontCare
-      core.module.io.l2_tlb_req.req.valid := l2cache.get.module.io.l2_tlb_req.req.valid
-      core.module.io.l2_tlb_req.resp.ready := l2cache.get.module.io.l2_tlb_req.resp.ready
-      core.module.io.l2_tlb_req.req.bits.vaddr := l2cache.get.module.io.l2_tlb_req.req.bits.vaddr
-      core.module.io.l2_tlb_req.req.bits.cmd := l2cache.get.module.io.l2_tlb_req.req.bits.cmd
-      core.module.io.l2_tlb_req.req.bits.size := l2cache.get.module.io.l2_tlb_req.req.bits.size
-      core.module.io.l2_tlb_req.req.bits.kill := l2cache.get.module.io.l2_tlb_req.req.bits.kill
-      core.module.io.l2_tlb_req.req.bits.no_translate := l2cache.get.module.io.l2_tlb_req.req.bits.no_translate
-      core.module.io.l2_tlb_req.req_kill := l2cache.get.module.io.l2_tlb_req.req_kill
-      
-      l2cache.get.module.io.l2_tlb_req.resp.valid := core.module.io.l2_tlb_req.resp.valid
-      l2cache.get.module.io.l2_tlb_req.req.ready := core.module.io.l2_tlb_req.req.ready
-      l2cache.get.module.io.l2_tlb_req.resp.bits.paddr.head := core.module.io.l2_tlb_req.resp.bits.paddr.head
-      l2cache.get.module.io.l2_tlb_req.resp.bits.miss := core.module.io.l2_tlb_req.resp.bits.miss
-      l2cache.get.module.io.l2_tlb_req.resp.bits.excp.head <> core.module.io.l2_tlb_req.resp.bits.excp.head
+      core.module.io.l2_tlb_req <> l2top.module.l2_tlb_req
     } else {
       l2top.module.beu_errors.l2 <> 0.U.asTypeOf(l2top.module.beu_errors.l2)
       core.module.io.l2_hint.bits.sourceId := l2top.module.l2_hint.bits
@@ -158,9 +141,6 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       core.module.io.l2_tlb_req.req.bits := DontCare
       core.module.io.l2_tlb_req.req_kill := DontCare
       core.module.io.l2_tlb_req.resp.ready := true.B
-      l2cache.get.module.io.l2_tlb_req.req.ready := true.B
-      l2cache.get.module.io.l2_tlb_req.resp.valid := false.B
-      l2cache.get.module.io.l2_tlb_req.resp.bits := DontCare
     }
 
     io.debugTopDown.robHeadPaddr := core.module.io.debugTopDown.robHeadPaddr
