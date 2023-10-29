@@ -24,9 +24,19 @@ import utils._
 import utility._
 import xiangshan.ExceptionNO._
 
-class IbufPtr(implicit p: Parameters) extends CircularQueuePtr[IbufPtr](
+class IBufPtr(implicit p: Parameters) extends CircularQueuePtr[IBufPtr](
   p => p(XSCoreParamsKey).IBufSize
-){
+) {
+}
+
+class IBufInBankPtr(implicit p: Parameters) extends CircularQueuePtr[IBufInBankPtr](
+  p => p(XSCoreParamsKey).IBufSize / p(XSCoreParamsKey).IBufNBank
+) {
+}
+
+class IBufBankPtr(implicit p: Parameters) extends CircularQueuePtr[IBufBankPtr](
+  p => p(XSCoreParamsKey).IBufNBank
+) {
 }
 
 class IBufferIO(implicit p: Parameters) extends XSBundle {
@@ -95,46 +105,42 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
   }
 }
 
-class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
+class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
   val io = IO(new IBufferIO)
 
-  val topdown_stage = RegInit(0.U.asTypeOf(new FrontendTopDownBundle))
-  topdown_stage := io.in.bits.topdown_info
-  when (io.flush) {
-    when (io.ControlRedirect) {
-      when (io.ControlBTBMissBubble) {
-        topdown_stage.reasons(TopDownCounters.BTBMissBubble.id) := true.B
-      } .elsewhen (io.TAGEMissBubble) {
-        topdown_stage.reasons(TopDownCounters.TAGEMissBubble.id) := true.B
-      } .elsewhen (io.SCMissBubble) {
-        topdown_stage.reasons(TopDownCounters.SCMissBubble.id) := true.B
-      } .elsewhen (io.ITTAGEMissBubble) {
-        topdown_stage.reasons(TopDownCounters.ITTAGEMissBubble.id) := true.B
-      } .elsewhen (io.RASMissBubble) {
-        topdown_stage.reasons(TopDownCounters.RASMissBubble.id) := true.B
-      }
-    } .elsewhen (io.MemVioRedirect) {
-      topdown_stage.reasons(TopDownCounters.MemVioRedirectBubble.id) := true.B
-    } .otherwise {
-      topdown_stage.reasons(TopDownCounters.OtherRedirectBubble.id) := true.B
-    }
-  }
+  // Parameter Check
+  private val bankSize = IBufSize / IBufNBank
+  require(IBufSize % IBufNBank == 0, s"IBufNBank should divide IBufSize, IBufNBank: $IBufNBank, IBufSize: $IBufSize")
+  require(IBufNBank >= DecodeWidth,
+    s"IBufNBank should be equal or larger than DecodeWidth, IBufNBank: $IBufNBank, DecodeWidth: $DecodeWidth")
 
+  // IBuffer is organized as raw registers
+  // This is due to IBuffer is a huge queue, read & write port logic should be precisely controlled
+  //                             . + + E E E - .
+  //                             . + + E E E - .
+  //                             . . + E E E - .
+  //                             . . + E E E E -
+  // As shown above, + means enqueue, - means dequeue, E is current content
+  // When dequeue, read port is organized like a banked FIFO
+  // Dequeue reads no more than 1 entry from each bank sequentially, this can be exploit to reduce area
+  // Enqueue writes cannot benefit from this characteristic unless use a SRAM
+  // For detail see Enqueue and Dequeue below
+  private val ibuf: Vec[IBufEntry] = RegInit(VecInit.fill(IBufSize)(0.U.asTypeOf(new IBufEntry)))
+  private val bankedIBufView: Vec[Vec[IBufEntry]] = VecInit.tabulate(IBufNBank)(
+    bankID => VecInit.tabulate(bankSize)(
+      inBankOffset => ibuf(bankID + inBankOffset * IBufNBank)
+    )
+  )
 
-  val dequeueInsufficient = Wire(Bool())
-  val matchBubble = Wire(UInt(log2Up(TopDownCounters.NumStallReasons.id).W))
+  // Between Bank
+  private val deqBankPtrVec: Vec[IBufBankPtr] = RegInit(VecInit.tabulate(DecodeWidth)(_.U.asTypeOf(new IBufBankPtr)))
+  private val deqBankPtr: IBufBankPtr = deqBankPtrVec(0)
+  // Inside Bank
+  private val deqInBankPtr: Vec[IBufInBankPtr] = RegInit(VecInit.fill(IBufNBank)(0.U.asTypeOf(new IBufInBankPtr)))
 
-  matchBubble := (TopDownCounters.NumStallReasons.id - 1).U - PriorityEncoder(topdown_stage.reasons.reverse)
-  val matchBubbleVec = WireInit(VecInit(topdown_stage.reasons.zipWithIndex.map{case (r, i) => matchBubble === i.U}))
+  val deqPtr = RegInit(0.U.asTypeOf(new IBufPtr))
 
-  val ibuf = Module(new SyncDataModuleTemplate(new IBufEntry, IBufSize, 2 * DecodeWidth, PredictWidth))
-
-  val deqPtrVec = RegInit(VecInit.tabulate(2 * DecodeWidth)(_.U.asTypeOf(new IbufPtr)))
-  val deqPtrVecNext = Wire(Vec(2 * DecodeWidth, new IbufPtr))
-  deqPtrVec := deqPtrVecNext
-  val deqPtr = deqPtrVec(0)
-
-  val enqPtrVec = RegInit(VecInit.tabulate(PredictWidth)(_.U.asTypeOf(new IbufPtr)))
+  val enqPtrVec = RegInit(VecInit.tabulate(PredictWidth)(_.U.asTypeOf(new IBufPtr)))
   val enqPtr = enqPtrVec(0)
 
   val validEntries = distanceBetween(enqPtr, deqPtr)
@@ -143,95 +149,146 @@ class Ibuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   val numEnq = Mux(io.in.fire, PopCount(io.in.bits.valid), 0.U)
   val numTryDeq = Mux(validEntries >= DecodeWidth.U, DecodeWidth.U, validEntries)
   val numDeq = Mux(io.out.head.ready, numTryDeq, 0.U)
-  deqPtrVecNext := Mux(io.out.head.ready, VecInit(deqPtrVec.map(_ + numTryDeq)), deqPtrVec)
 
   val numAfterEnq = validEntries +& numEnq
   val nextValidEntries = Mux(io.out(0).ready, numAfterEnq - numTryDeq, numAfterEnq)
-  allowEnq := (IBufSize - PredictWidth).U >= nextValidEntries
+  allowEnq := (IBufSize - PredictWidth).U >= nextValidEntries // Disable when almost full
 
-  // Enque
+  /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  // Enqueue
+  /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   io.in.ready := allowEnq
+  // Data
+  val enqOffset = VecInit.tabulate(PredictWidth)(i => PopCount(io.in.bits.valid.asBools.take(i)))
+  val enqData = VecInit.tabulate(PredictWidth)(i => Wire(new IBufEntry).fromFetch(io.in.bits, i))
+  ibuf.zipWithIndex.foreach {
+    case (entry, idx) => {
+      // Select
+      val validOH = Range(0, PredictWidth).map {
+        i => io.in.bits.valid(i) &&
+          io.in.bits.enqEnable(i) &&
+          enqPtrVec(enqOffset(i)).value === idx.asUInt
+      } // Should be OneHot
+      val wen = validOH.reduce(_ || _) && io.in.fire && !io.flush
 
-  val enqOffset = Seq.tabulate(PredictWidth)(i => PopCount(io.in.bits.valid.asBools.take(i)))
-  val enqData = Seq.tabulate(PredictWidth)(i => Wire(new IBufEntry).fromFetch(io.in.bits, i))
-  for (i <- 0 until PredictWidth) {
-    ibuf.io.waddr(i) := enqPtrVec(enqOffset(i)).value
-    ibuf.io.wdata(i) := enqData(i)
-    ibuf.io.wen(i)   := io.in.bits.enqEnable(i) && io.in.fire && !io.flush
+      // Write port
+      // Each IBuffer entry has a PredictWidth -> 1 Mux
+      val writeEntry = Mux1H(validOH, enqData)
+      entry := Mux(wen, writeEntry, entry)
+
+      // Debug Assertion
+      XSError(PopCount(validOH) > 1.asUInt, "validOH is not OneHot")
+    }
   }
-
+  // Pointer maintenance
   when (io.in.fire && !io.flush) {
     enqPtrVec := VecInit(enqPtrVec.map(_ + PopCount(io.in.bits.enqEnable)))
   }
 
+  /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   // Dequeue
+  /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   val validVec = Mux(validEntries >= DecodeWidth.U,
     ((1 << DecodeWidth) - 1).U,
     UIntToMask(validEntries(log2Ceil(DecodeWidth) - 1, 0), DecodeWidth)
   )
-  val deqValidCount = PopCount(validVec.asBools)
-  val deqWasteCount = DecodeWidth.U - deqValidCount
-  dequeueInsufficient := deqValidCount < DecodeWidth.U
-
-  io.stallReason.reason.map(_ := 0.U)
-  for (i <- 0 until DecodeWidth) {
-    when (i.U < deqWasteCount) {
-      io.stallReason.reason(DecodeWidth - i - 1) := matchBubble
-    }
-  }
-
-  when (!(deqWasteCount === DecodeWidth.U || topdown_stage.reasons.asUInt.orR)) {
-        // should set reason for FetchFragmentationStall
-        // topdown_stage.reasons(TopDownCounters.FetchFragmentationStall.id) := true.B
-        for (i <- 0 until DecodeWidth) {
-          when (i.U < deqWasteCount) {
-            io.stallReason.reason(DecodeWidth - i - 1) := TopDownCounters.FetchFragBubble.id.U
-          }
-        }
-  }
-
-  when (io.stallReason.backReason.valid) {
-    io.stallReason.reason.map(_ := io.stallReason.backReason.bits)
-  }
-
-
-  val deqData = Reg(Vec(DecodeWidth, new IBufEntry))
+  // Data
   for (i <- 0 until DecodeWidth) {
     io.out(i).valid := validVec(i)
-    // by default, all bits are from the data module (slow path)
-    io.out(i).bits := ibuf.io.rdata(i).toCtrlFlow
-    // some critical bits are from the fast path
-    val fastData = deqData(i).toCtrlFlow
-    io.out(i).bits.instr := fastData.instr
-    io.out(i).bits.exceptionVec := fastData.exceptionVec
-    io.out(i).bits.foldpc := fastData.foldpc
-    XSError(io.out(i).fire && fastData.instr =/= ibuf.io.rdata(i).toCtrlFlow.instr, "fast data error\n")
+
+    // Read port
+    // 2-stage, IBufNBank * (bankSize -> 1) + IBufNBank -> 1
+    // Should be better than IBufSize -> 1 in area, with no significant latency increase
+    io.out(i).bits := bankedIBufView(deqBankPtrVec(i).value)(deqInBankPtr(deqBankPtrVec(i).value).value).toCtrlFlow
   }
-  val nextStepData = Wire(Vec(2 * DecodeWidth, new IBufEntry))
-  val ptrMatch = new QPtrMatchMatrix(deqPtrVec, enqPtrVec)
-  for (i <- 0 until 2 * DecodeWidth) {
-    val enqMatchVec = VecInit(ptrMatch(i))
-    val enqBypassEnVec = io.in.bits.valid.asBools.zip(enqOffset).map{ case (v, o) => v && enqMatchVec(o) }
-    val enqBypassEn = io.in.fire && VecInit(enqBypassEnVec).asUInt.orR
-    val enqBypassData = Mux1H(enqBypassEnVec, enqData)
-    val readData = if (i < DecodeWidth) deqData(i) else ibuf.io.rdata(i)
-    nextStepData(i) := Mux(enqBypassEn, enqBypassData, readData)
+  // Pointer maintenance
+  deqBankPtrVec := Mux(io.out.head.ready, VecInit(deqBankPtrVec.map(_ + numTryDeq)), deqBankPtrVec)
+  deqPtr := Mux(io.out.head.ready, deqPtr + numTryDeq, deqPtr)
+  deqInBankPtr.zipWithIndex.foreach {
+    case (ptr, idx) => {
+      // validVec[k] == bankValid[deqBankPtr + k]
+      // So bankValid[n] == validVec[n - deqBankPtr]
+      val validIdx = Mux(idx.asUInt >= deqBankPtr.value,
+        idx.asUInt - deqBankPtr.value,
+        ((idx + IBufNBank).asUInt - deqBankPtr.value)(log2Ceil(IBufNBank) - 1, 0)
+      )
+      val bankAdvance = Mux(validIdx >= DecodeWidth.U,
+        false.B,
+        validVec(validIdx(log2Ceil(DecodeWidth) - 1, 0))
+      ) && io.out.head.ready
+      ptr := Mux(bankAdvance , ptr + 1.U, ptr)
+    }
   }
-  val deqEnable_n = io.out.map(o => !o.fire) :+ true.B
-  for (i <- 0 until DecodeWidth) {
-    deqData(i) := ParallelPriorityMux(deqEnable_n, nextStepData.drop(i).take(DecodeWidth + 1))
-  }
-  ibuf.io.raddr := VecInit(deqPtrVecNext.map(_.value))
 
   // Flush
   when (io.flush) {
     allowEnq := true.B
-    deqPtrVec := deqPtrVec.indices.map(_.U.asTypeOf(new IbufPtr))
-    enqPtrVec := enqPtrVec.indices.map(_.U.asTypeOf(new IbufPtr))
+    enqPtrVec := enqPtrVec.indices.map(_.U.asTypeOf(new IBufPtr))
+    deqBankPtrVec := deqBankPtrVec.indices.map(_.U.asTypeOf(new IBufBankPtr))
+    deqInBankPtr := VecInit.fill(IBufNBank)(0.U.asTypeOf(new IBufInBankPtr))
+    deqPtr := 0.U.asTypeOf(new IBufPtr())
   }
   io.full := !allowEnq
 
+  /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  // TopDown
+  /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  val topdown_stage = RegInit(0.U.asTypeOf(new FrontendTopDownBundle))
+  topdown_stage := io.in.bits.topdown_info
+  when(io.flush) {
+    when(io.ControlRedirect) {
+      when(io.ControlBTBMissBubble) {
+        topdown_stage.reasons(TopDownCounters.BTBMissBubble.id) := true.B
+      }.elsewhen(io.TAGEMissBubble) {
+        topdown_stage.reasons(TopDownCounters.TAGEMissBubble.id) := true.B
+      }.elsewhen(io.SCMissBubble) {
+        topdown_stage.reasons(TopDownCounters.SCMissBubble.id) := true.B
+      }.elsewhen(io.ITTAGEMissBubble) {
+        topdown_stage.reasons(TopDownCounters.ITTAGEMissBubble.id) := true.B
+      }.elsewhen(io.RASMissBubble) {
+        topdown_stage.reasons(TopDownCounters.RASMissBubble.id) := true.B
+      }
+    }.elsewhen(io.MemVioRedirect) {
+      topdown_stage.reasons(TopDownCounters.MemVioRedirectBubble.id) := true.B
+    }.otherwise {
+      topdown_stage.reasons(TopDownCounters.OtherRedirectBubble.id) := true.B
+    }
+  }
+
+
+  val dequeueInsufficient = Wire(Bool())
+  val matchBubble = Wire(UInt(log2Up(TopDownCounters.NumStallReasons.id).W))
+  val deqValidCount = PopCount(validVec.asBools)
+  val deqWasteCount = DecodeWidth.U - deqValidCount
+  dequeueInsufficient := deqValidCount < DecodeWidth.U
+  matchBubble := (TopDownCounters.NumStallReasons.id - 1).U - PriorityEncoder(topdown_stage.reasons.reverse)
+
+  io.stallReason.reason.map(_ := 0.U)
+  for (i <- 0 until DecodeWidth) {
+    when(i.U < deqWasteCount) {
+      io.stallReason.reason(DecodeWidth - i - 1) := matchBubble
+    }
+  }
+
+  when(!(deqWasteCount === DecodeWidth.U || topdown_stage.reasons.asUInt.orR)) {
+    // should set reason for FetchFragmentationStall
+    // topdown_stage.reasons(TopDownCounters.FetchFragmentationStall.id) := true.B
+    for (i <- 0 until DecodeWidth) {
+      when(i.U < deqWasteCount) {
+        io.stallReason.reason(DecodeWidth - i - 1) := TopDownCounters.FetchFragBubble.id.U
+      }
+    }
+  }
+
+  when(io.stallReason.backReason.valid) {
+    io.stallReason.reason.map(_ := io.stallReason.backReason.bits)
+  }
+
   // Debug info
+  XSError(
+    deqPtr.value =/= deqBankPtr.value + deqInBankPtr(deqBankPtr.value).value * IBufNBank.asUInt,
+    "Dequeue PTR mismatch"
+  )
   XSDebug(io.flush, "IBuffer Flushed\n")
 
   when(io.in.fire) {
