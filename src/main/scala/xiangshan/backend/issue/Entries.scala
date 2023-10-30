@@ -94,6 +94,7 @@ class DeqBundle(implicit p:Parameters, params: IssueBlockParams) extends XSBundl
   val othersEntryOldestSel = Flipped(ValidIO(UInt((params.numEntries - params.numEnq).W)))
   val subDeqPolicyRequest = Input(UInt(params.numEntries.W))
   val subDeqSelOH = Vec(params.numDeq, Input(UInt(params.numEntries.W)))
+  val deqReady = Input(Bool())
   val deqSelOH = Flipped(ValidIO(UInt(params.numEntries.W)))
   val finalDeqSelOH = Flipped(ValidIO(UInt(params.numEntries.W)))
   //output
@@ -123,7 +124,6 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val ldCancel = Vec(backendParams.LduCnt + backendParams.HyuCnt, Flipped(new LoadCancelIO))
   //deq
   val deq = Vec(params.numDeq, new DeqBundle)
-  val deqResp = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
   val og0Resp = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
   val og1Resp = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
   val finalIssueResp = OptionWrapper(params.LdExuCnt > 0, Vec(params.LdExuCnt, Flipped(ValidIO(new EntryDeqRespBundle))))
@@ -161,15 +161,15 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   // only memAddrIQ use it
   val memEtyResps: MixedVec[ValidIO[EntryDeqRespBundle]] = {
     if (params.isLdAddrIQ && !params.isStAddrIQ)
-      MixedVecInit(io.deqResp ++ io.og0Resp ++ io.og1Resp ++ io.memAddrIssueResp.get ++ io.finalIssueResp.get)
+      MixedVecInit(io.og0Resp ++ io.og1Resp ++ io.memAddrIssueResp.get ++ io.finalIssueResp.get)
     else if (params.isLdAddrIQ && params.isStAddrIQ || params.isHyAddrIQ)
-      MixedVecInit(io.deqResp ++ io.og0Resp ++ io.og1Resp ++ io.memAddrIssueResp.get ++ io.finalIssueResp.get ++ io.fromMem.get.fastResp ++ io.fromMem.get.slowResp)
+      MixedVecInit(io.og0Resp ++ io.og1Resp ++ io.memAddrIssueResp.get ++ io.finalIssueResp.get ++ io.fromMem.get.fastResp ++ io.fromMem.get.slowResp)
     else if (params.isMemAddrIQ)
-      MixedVecInit(io.deqResp ++ io.og0Resp ++ io.og1Resp ++ io.fromMem.get.fastResp ++ io.fromMem.get.slowResp)
+      MixedVecInit(io.og0Resp ++ io.og1Resp ++ io.fromMem.get.fastResp ++ io.fromMem.get.slowResp)
     else MixedVecInit(Seq())
   }
 
-  val resps: Vec[Vec[ValidIO[EntryDeqRespBundle]]] = VecInit(io.deqResp, io.og0Resp, io.og1Resp, 0.U.asTypeOf(io.deqResp))
+  val resps: Vec[Vec[ValidIO[EntryDeqRespBundle]]] = VecInit(io.og0Resp, io.og1Resp, 0.U.asTypeOf(io.og0Resp), 0.U.asTypeOf(io.og0Resp))
 
   //Module
   val enqEntries = Seq.fill(EnqEntryNum)(Module(EnqEntry(p, params)))
@@ -283,7 +283,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
 
 
   deqSelVec.zip(deqPortIdxWriteVec).zipWithIndex.foreach { case ((deqSel, deqPortIdxWrite), i) =>
-    val deqVec = io.deq.map(x => x.deqSelOH.valid && x.deqSelOH.bits(i))
+    val deqVec = io.deq.map(x => x.deqSelOH.valid && x.deqSelOH.bits(i) && x.deqReady)
     deqPortIdxWrite := OHToUInt(deqVec)
     deqSel := deqVec.reduce(_ | _)
   }
