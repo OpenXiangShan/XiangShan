@@ -384,7 +384,7 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
   // uncache RAW data
   // FIXME: remove it?
   io.ld_raw_data(0) := RegEnable(ld_raw_data, ldout.fire)
-  io.trigger(0).lqLoadAddrTriggerHitVec := RegNext(lqLoadAddrTriggerHitVec)
+  io.trigger(0).lqLoadAddrTriggerHitVec := RegEnable(lqLoadAddrTriggerHitVec, ldout.fire)
 
   for (i <- 0 until LoadPipelineWidth) {
     io.rob.mmio(i) := RegNext(s1_valid(i) && s1_req(i).mmio)
