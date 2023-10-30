@@ -381,7 +381,9 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
   // uncache Writeback
   AddPipelineReg(ldout, io.ldout(0), false.B)
 
-  io.ld_raw_data(0)      := RegNext(ld_raw_data)
+  // uncache RAW data
+  // FIXME: remove it?
+  io.ld_raw_data(0) := RegEnable(ld_raw_data, ldout.fire)
   io.trigger(0).lqLoadAddrTriggerHitVec := RegNext(lqLoadAddrTriggerHitVec)
 
   for (i <- 0 until LoadPipelineWidth) {
