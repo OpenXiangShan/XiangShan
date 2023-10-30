@@ -24,6 +24,7 @@ import utility._
 import xiangshan._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.Bundles._
+import xiangshan.backend.fu.vector.Bundles._
 
 class VluopPtr(implicit p: Parameters) extends CircularQueuePtr[VluopPtr](
   p => p(XSCoreParamsKey).VlUopSize
@@ -188,7 +189,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
     vl(id).valid := false.B
     uopq(id) match { case x =>
       x.uop := io.loadRegIn.bits.uop
-      x.uop.vpu.vl := io.loadRegIn.bits.src_vl
+      x.uop.vpu.vl := io.loadRegIn.bits.src_vl.asTypeOf(VConfig()).vl
       x.uop.numUops := numUops
       x.uop.lastUop := (io.loadRegIn.bits.uop.uopIdx + 1.U) === numUops
       x.flowMask := flowMask
