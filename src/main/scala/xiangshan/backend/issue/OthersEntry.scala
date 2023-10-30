@@ -178,11 +178,11 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
             )
       }
     }
-    entryRegNext.status.issueTimer := "b11".U //otherwise
+    entryRegNext.status.issueTimer := "b10".U //otherwise
     entryRegNext.status.deqPortIdx := 0.U //otherwise
     when(io.deqSel){
-      entryRegNext.status.issueTimer := 1.U
-      entryRegNext.status.deqPortIdx := io.deqPortIdxRead
+      entryRegNext.status.issueTimer := 0.U
+      entryRegNext.status.deqPortIdx := io.deqPortIdxWrite
     }.elsewhen(entryReg.status.issued){
       entryRegNext.status.issueTimer := entryReg.status.issueTimer + 1.U
       entryRegNext.status.deqPortIdx := entryReg.status.deqPortIdx
@@ -196,12 +196,10 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
       entryRegNext.status.issued := false.B
     }.elsewhen(srcLoadCancelVec.map(_.reduce(_ || _)).getOrElse(false.B)) {
       entryRegNext.status.issued := false.B
-    }.elsewhen(io.issueResp.valid) {
-      when(RSFeedbackType.isStageSuccess(io.issueResp.bits.respType)) {
-        entryRegNext.status.issued := true.B
-      }.elsewhen(RSFeedbackType.isBlocked(io.issueResp.bits.respType)) {
-        entryRegNext.status.issued := false.B
-      }
+    }.elsewhen(io.deqSel) {
+      entryRegNext.status.issued := true.B
+    }.elsewhen(io.issueResp.valid && RSFeedbackType.isBlocked(io.issueResp.bits.respType)) {
+      entryRegNext.status.issued := false.B
     }
     entryRegNext.status.firstIssue := io.deqSel || entryReg.status.firstIssue
     entryRegNext.status.blocked := false.B //todo
@@ -225,8 +223,8 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
   io.entry.valid := validReg
   io.entry.bits := entryReg
   io.robIdx := entryReg.status.robIdx
-  io.issueTimerRead := Mux(io.deqSel, 0.U, entryReg.status.issueTimer)
-  io.deqPortIdxRead := Mux(io.deqSel, io.deqPortIdxWrite, entryReg.status.deqPortIdx)
+  io.issueTimerRead := entryReg.status.issueTimer
+  io.deqPortIdxRead := entryReg.status.deqPortIdx
   io.cancel.foreach(_ := cancelVec.get.asUInt.orR)
 }
 
