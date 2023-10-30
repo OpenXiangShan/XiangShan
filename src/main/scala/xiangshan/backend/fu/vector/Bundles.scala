@@ -58,8 +58,8 @@ object Bundles {
   }
 
   class VConfig(implicit p: Parameters) extends Bundle {
-    val vl    = Vl()
     val vtype = new VType
+    val vl    = Vl()
   }
 
   object VConfig {
