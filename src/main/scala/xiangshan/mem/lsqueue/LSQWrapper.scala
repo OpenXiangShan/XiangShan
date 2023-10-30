@@ -97,6 +97,8 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
     val lqCanAccept = Output(Bool())
     val sqCanAccept = Output(Bool())
+    val lqDeqPtr = Output(new LqPtr)
+    val sqDeqPtr = Output(new SqPtr)
     val exceptionAddr = new ExceptionAddrIO
     val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
     val issuePtrExt = Output(new SqPtr)
@@ -132,6 +134,8 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   io.sqCanAccept := storeQueue.io.enq.canAccept
   loadQueue.io.enq.sqCanAccept := storeQueue.io.enq.canAccept
   storeQueue.io.enq.lqCanAccept := loadQueue.io.enq.canAccept
+  io.lqDeqPtr := loadQueue.io.lqDeqPtr
+  io.sqDeqPtr := storeQueue.io.sqDeqPtr
   for (i <- io.enq.req.indices) {
     loadQueue.io.enq.needAlloc(i)      := io.enq.needAlloc(i)(0)
     loadQueue.io.enq.req(i).valid      := io.enq.needAlloc(i)(0) && io.enq.req(i).valid
