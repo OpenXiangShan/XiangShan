@@ -45,11 +45,11 @@ trait HasMemBlockParameters extends HasXSParameter {
   val VlduCnt = backendParams.VlduCnt
   val VstuCnt = backendParams.VstuCnt
 
-  val LdExeCnt  = LduCnt + HyuCnt
+  val LdExuCnt  = LduCnt + HyuCnt
   val StAddrCnt = StaCnt + HyuCnt
   val StDataCnt = StdCnt
   val MemExuCnt = LduCnt + StaCnt + StdCnt + HyuCnt
-  val MemAddrExtCnt = LdExeCnt + StaCnt
+  val MemAddrExtCnt = LdExuCnt + StaCnt
   val MemVExuCnt = VlduCnt + VstuCnt
 }
 
@@ -64,9 +64,9 @@ class Std(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
 }
 
 class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
-  val loadFastMatch = Vec(LdExeCnt, Input(UInt(LdExeCnt.W)))
-  val loadFastFuOpType = Vec(LdExeCnt, Input(FuOpType()))
-  val loadFastImm = Vec(LdExeCnt, Input(UInt(12.W)))
+  val loadFastMatch = Vec(LdExuCnt, Input(UInt(LdExuCnt.W)))
+  val loadFastFuOpType = Vec(LdExuCnt, Input(FuOpType()))
+  val loadFastImm = Vec(LdExuCnt, Input(UInt(12.W)))
   val sfence = Input(new SfenceBundle)
   val tlbCsr = Input(new TlbCsrBundle)
   val lsqio = new Bundle {
@@ -98,7 +98,7 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
 }
 
 class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
-  val otherFastWakeup = Vec(LdExeCnt, ValidIO(new DynInst))
+  val otherFastWakeup = Vec(LdExuCnt, ValidIO(new DynInst))
   val csrUpdate = new DistributedCSRUpdateReq
   val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize + 1).W))
   val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
@@ -110,7 +110,7 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
   val memoryViolation = ValidIO(new Redirect)
   val sbIsEmpty = Output(Bool())
 
-  val lsTopdownInfo = Vec(LdExeCnt, Output(new LsTopdownInfo))
+  val lsTopdownInfo = Vec(LdExuCnt, Output(new LsTopdownInfo))
 
   val lsqio = new Bundle {
     val vaddr = Output(UInt(VAddrBits.W))
@@ -130,9 +130,9 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
   val ldaIqFeedback = Vec(LduCnt, new MemRSFeedbackIO)
   val staIqFeedback = Vec(StaCnt, new MemRSFeedbackIO)
   val hyuIqFeedback = Vec(HyuCnt, new MemRSFeedbackIO)
-  val ldCancel = Vec(LdExeCnt, new LoadCancelIO)
+  val ldCancel = Vec(LdExuCnt, new LoadCancelIO)
 
-  val s3_delayed_load_error = Vec(LdExeCnt, Output(Bool()))
+  val s3_delayed_load_error = Vec(LdExuCnt, Output(Bool()))
 }
 
 class MemCoreTopDownIO extends Bundle {
@@ -302,8 +302,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     load_unit.io.prefetch_req.bits <> l1_pf_req.bits
   })
   hybridUnits.foreach(hybrid_unit => {
-    hybrid_unit.io.prefetch_req.valid <> l1_pf_req.valid
-    hybrid_unit.io.prefetch_req.bits <> l1_pf_req.bits
+    hybrid_unit.io.ldu_io.prefetch_req.valid <> l1_pf_req.valid
+    hybrid_unit.io.ldu_io.prefetch_req.bits <> l1_pf_req.bits
   })
   // NOTE: loadUnits(0) has higher bank conflict and miss queue arb priority than loadUnits(1)
   // when loadUnits(0) stage 0 is busy, hw prefetch will never use that pipeline
@@ -340,8 +340,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     // override hybrid_unit prefetch_req
     hybridUnits.foreach(hybrid_unit => {
-      hybrid_unit.io.prefetch_req.valid <> fuzzer.io.req.valid
-      hybrid_unit.io.prefetch_req.bits <> fuzzer.io.req.bits
+      hybrid_unit.io.ldu_io.prefetch_req.valid <> fuzzer.io.req.valid
+      hybrid_unit.io.ldu_io.prefetch_req.bits <> fuzzer.io.req.bits
     })
 
     fuzzer.io.req.ready := l1_pf_req.ready
@@ -778,6 +778,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       pf.io.ld_in(LduCnt + i).valid := source.valid && source.bits.isFirstIssue &&
                                        FuType.isLoad(source.bits.uop.fuType)
       pf.io.ld_in(LduCnt + i).bits := source.bits
+      pf.io.st_in(StaCnt + i).valid := false.B
+      pf.io.st_in(StaCnt + i).bits := DontCare
     })
     prefetcherOpt.foreach(pf => {
       val source = hybridUnits(i).io.prefetch_train
@@ -785,8 +787,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
         source.valid,
         source.valid && source.bits.isFirstIssue && source.bits.miss
       ) && FuType.isStore(source.bits.uop.fuType)
-      pf.io.st_in(i).bits := source.bits
-      pf.io.st_in(i).bits.uop.pc := RegNext(io.ooo_to_mem.hybridPc(i))
+      pf.io.st_in(StaCnt + i).bits := source.bits
+      pf.io.st_in(StaCnt + i).bits.uop.pc := RegNext(io.ooo_to_mem.hybridPc(i))
     })
 
     // load to load fast forward: load(i) prefers data(i)
@@ -806,9 +808,21 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     hybridUnits(i).io.ldu_io.replay <> lsq.io.replay(LduCnt + i)
     hybridUnits(i).io.ldu_io.l2_hint <> io.l2_hint
 
+    // uncache
+    lsq.io.ldout.drop(LduCnt)(i) <> hybridUnits(i).io.ldu_io.lsq.uncache
+    lsq.io.ld_raw_data.drop(LduCnt)(i) <> hybridUnits(i).io.ldu_io.lsq.ld_raw_data
+
+
     // passdown to lsq (load s2)
     lsq.io.ldu.ldin(LduCnt + i) <> hybridUnits(i).io.ldu_io.lsq.ldin
     lsq.io.trigger(LduCnt + i) <> hybridUnits(i).io.ldu_io.lsq.trigger
+    // Lsq to sta unit
+    lsq.io.sta.storeMaskIn(StaCnt + i) <> hybridUnits(i).io.stu_io.st_mask_out
+
+    // Lsq to std unit's rs
+    lsq.io.std.storeDataIn(StaCnt + i) := stData(StaCnt + i)
+    // prefetch
+    hybridUnits(i).io.stu_io.prefetch_req <> sbuffer.io.store_prefetch(StaCnt + i)
 
     io.mem_to_ooo.s3_delayed_load_error(LduCnt + i) := hybridUnits(i).io.ldu_io.s3_dly_ld_err
 
@@ -924,6 +938,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     lsq.io.std.storeDataIn(i) := stData(i)
 
     // store prefetch train
+    l1PrefetcherOpt.foreach(pf => {
+      // stream will train on all load sources
+      pf.io.st_in(i).valid := false.B
+      pf.io.st_in(i).bits := DontCare
+    })
+
     prefetcherOpt.foreach(pf => {
       pf.io.st_in(i).valid := Mux(pf_train_on_hit,
         stu.io.prefetch_train.valid,
@@ -1052,8 +1072,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // TODO: for vector lsu
   io.ooo_to_mem.issueVldu.map(x => x.ready := true.B)
   io.ooo_to_mem.issueVstu.map(x => x.ready := true.B)
-  io.mem_to_ooo.writebackVlda.map(x => x.valid := false.B)
-  io.mem_to_ooo.writebackVStu.map(x => x.valid := false.B)
+  io.mem_to_ooo.writebackVlda.map(x => {x.valid := false.B; x.bits := DontCare })
+  io.mem_to_ooo.writebackVStu.map(x => {x.valid := false.B; x.bits := DontCare })
 
   // Vector Load/Store Queue
   vlsq.io.int2vlsu <> io.int2vlsu

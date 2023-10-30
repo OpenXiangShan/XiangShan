@@ -719,8 +719,8 @@ class StorePrefetchReq(implicit p: Parameters) extends DCacheBundle {
 }
 
 class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
-  val load  = Vec(LoadPipelineWidth, Flipped(new DCacheLoadIO)) // for speculative load
-  val sta   = Vec(StorePipelineWidth, Flipped(new DCacheStoreIO)) // for non-blocking store
+  val load  = Vec(backendParams.LdExuCnt, Flipped(new DCacheLoadIO)) // for speculative load
+  val sta   = Vec(backendParams.StaCnt, Flipped(new DCacheStoreIO)) // for non-blocking store
   val lsq = ValidIO(new Refill)  // refill to load queue, wake up load misses
   val tl_d_channel = Output(new DcacheToLduForwardIO)
   val store = new DCacheToSbufferIO // for sbuffer
@@ -802,8 +802,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   // Enable L1 Store prefetch
   val StorePrefetchL1Enabled = EnableStorePrefetchAtCommit || EnableStorePrefetchAtIssue || EnableStorePrefetchSPB
-  val MetaReadPort = if(StorePrefetchL1Enabled) LoadPipelineWidth + 1 + StorePipelineWidth else LoadPipelineWidth + 1
-  val TagReadPort = if(StorePrefetchL1Enabled) LoadPipelineWidth + 1 + StorePipelineWidth else LoadPipelineWidth + 1
+  val MetaReadPort = if(StorePrefetchL1Enabled) backendParams.LdExuCnt + 1 + backendParams.StaCnt else backendParams.LdExuCnt + 1
+  val TagReadPort = if(StorePrefetchL1Enabled) backendParams.LdExuCnt + 1 + backendParams.StaCnt else backendParams.LdExuCnt + 1
 
   // Enable L1 Load prefetch
   val LoadPrefetchL1Enabled = true
@@ -826,8 +826,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // core modules
-  val ldu = Seq.tabulate(LoadPipelineWidth)({ i => Module(new LoadPipe(i))})
-  val stu = Seq.tabulate(StorePipelineWidth)({ i => Module(new StorePipe(i))})
+  val ldu = Seq.tabulate(backendParams.LdExuCnt)({ i => Module(new LoadPipe(i))})
+  val stu = Seq.tabulate(backendParams.StaCnt)({ i => Module(new StorePipe(i))})
   val mainPipe     = Module(new MainPipe)
   val refillPipe   = Module(new RefillPipe)
   val missQueue    = Module(new MissQueue(edge))
@@ -1122,7 +1122,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // Sta pipe
-  for (w <- 0 until StorePipelineWidth) {
+  for (w <- 0 until backendParams.StaCnt) {
     stu(w).io.lsu <> io.lsu.sta(w)
   }
 
@@ -1140,7 +1140,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // missReqArb port:
   // enableStorePrefetch: main pipe * 1 + load pipe * 2 + store pipe * 2; disable: main pipe * 1 + load pipe * 2
   // higher priority is given to lower indices
-  val MissReqPortCount = if(StorePrefetchL1Enabled) LoadPipelineWidth + 1 + StorePipelineWidth else LoadPipelineWidth + 1
+  val MissReqPortCount = if(StorePrefetchL1Enabled) backendParams.LdExuCnt + 1 + backendParams.StaCnt else backendParams.LdExuCnt + 1
   val MainPipeMissReqPort = 0
 
   // Request
@@ -1153,9 +1153,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   mainPipe.io.miss_resp := missQueue.io.resp
 
   if(StorePrefetchL1Enabled) {
-    for (w <- 0 until StorePipelineWidth) { missReqArb.io.in(w + 1 + LoadPipelineWidth) <> stu(w).io.miss_req }
+    for (w <- 0 until backendParams.StaCnt) { missReqArb.io.in(w + 1 + backendParams.LdExuCnt) <> stu(w).io.miss_req }
   }else {
-    for (w <- 0 until StorePipelineWidth) { stu(w).io.miss_req.ready := false.B }
+    for (w <- 0 until backendParams.StaCnt) { stu(w).io.miss_req.ready := false.B }
   }
 
   wb.io.miss_req.valid := missReqArb.io.out.valid
