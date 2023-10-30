@@ -147,6 +147,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val lqEmpty = Output(Bool())
 
     val vecWriteback = Flipped(ValidIO(new MemExuOutput(isVector = true)))
+    val lqDeqPtr = Output(new LqPtr)
 
     val debugTopDown = new LoadQueueTopDownIO
   })
@@ -195,6 +196,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   virtualLoadQueue.io.lqCancelCnt   <> io.lqCancelCnt
   virtualLoadQueue.io.lqEmpty       <> io.lqEmpty
   virtualLoadQueue.io.vecWriteback  <> io.vecWriteback
+  virtualLoadQueue.io.ldWbPtr       <> io.lqDeqPtr
 
   /**
    * Load queue exception buffer
