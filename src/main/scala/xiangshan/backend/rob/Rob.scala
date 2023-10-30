@@ -741,7 +741,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.exception.bits.singleStep      := RegEnable(exceptionDataRead.bits.singleStep, exceptionHappen)
   io.exception.bits.crossPageIPFFix := RegEnable(exceptionDataRead.bits.crossPageIPFFix, exceptionHappen)
   io.exception.bits.isInterrupt     := RegEnable(intrEnable, exceptionHappen)
-  io.csr.vstart.valid               := RegEnable(exceptionDataRead.bits.vstartEn, exceptionHappen)
+  io.csr.vstart.valid               := RegEnable(exceptionDataRead.bits.vstartEn, false.B, exceptionHappen)
   io.csr.vstart.bits                := RegEnable(exceptionDataRead.bits.vstart, exceptionHappen)
 //  io.exception.bits.trigger := RegEnable(exceptionDataRead.bits.trigger, exceptionHappen)
 
