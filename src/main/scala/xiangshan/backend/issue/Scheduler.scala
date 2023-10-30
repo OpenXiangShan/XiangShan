@@ -213,14 +213,6 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
 
   // Response
   issueQueues.zipWithIndex.foreach { case (iq, i) =>
-    iq.io.deqResp.zipWithIndex.foreach { case (deqResp, j) =>
-      deqResp.valid := iq.io.deq(j).valid && io.toDataPath(i)(j).ready
-      deqResp.bits.respType := RSFeedbackType.issueSuccess
-      deqResp.bits.robIdx := iq.io.deq(j).bits.common.robIdx
-      deqResp.bits.dataInvalidSqIdx := DontCare
-      deqResp.bits.rfWen := iq.io.deq(j).bits.common.rfWen.getOrElse(false.B)
-      deqResp.bits.fuType := iq.io.deq(j).bits.common.fuType
-    }
     iq.io.og0Resp.zipWithIndex.foreach { case (og0Resp, j) =>
       og0Resp := io.fromDataPath(i)(j).og0resp
     }

@@ -41,7 +41,6 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val flush = Flipped(ValidIO(new Redirect))
   val enq = Vec(params.numEnq, Flipped(DecoupledIO(new DynInst)))
 
-  val deqResp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
   val og0Resp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
   val og1Resp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
   val finalIssueResp = OptionWrapper(params.LduCnt > 0, Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle))))
@@ -85,7 +84,6 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   lazy val io = IO(new IssueQueueIO())
   if(backendParams.debugEn) {
     dontTouch(io.deq)
-    dontTouch(io.deqResp)
   }
   // Modules
 
@@ -155,8 +153,6 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     Mux(valid, oh, 0.U)
   }
   val finalDeqMask: UInt = finalDeqOH.reduce(_ | _)
-
-  val deqRespVec = io.deqResp
 
   val validVec = VecInit(entries.io.valid.asBools)
   val canIssueVec = VecInit(entries.io.canIssue.asBools)
@@ -260,7 +256,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       }
       enq.bits.status.fuType := s0_enqBits(i).fuType
       enq.bits.status.robIdx := s0_enqBits(i).robIdx
-      enq.bits.status.issueTimer := "b11".U
+      enq.bits.status.issueTimer := "b10".U
       enq.bits.status.deqPortIdx := 0.U
       enq.bits.status.issued := false.B
       enq.bits.status.firstIssue := false.B
@@ -299,18 +295,11 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       deq.othersEntryOldestSel := othersEntryOldestSel(i)
       deq.subDeqPolicyRequest := { if (subDeqPolicies(i).nonEmpty) subDeqPolicyRequest(i) else 0.U }
       deq.subDeqSelOH := subDeqSelOHVec(i).getOrElse(Seq(0.U, 0.U))
+      deq.deqReady := io.deq(i).ready
       deq.deqSelOH.valid := deqSelValidVec(i)
       deq.deqSelOH.bits := deqSelOHVec(i)
       deq.finalDeqSelOH.valid := finalDeqSelValidVec(i)
       deq.finalDeqSelOH.bits := finalDeqSelOHVec(i)
-    }
-    entriesIO.deqResp.zipWithIndex.foreach { case (deqResp, i) =>
-      deqResp.valid := io.deqResp(i).valid
-      deqResp.bits.robIdx := io.deqResp(i).bits.robIdx
-      deqResp.bits.dataInvalidSqIdx := io.deqResp(i).bits.dataInvalidSqIdx
-      deqResp.bits.respType := io.deqResp(i).bits.respType
-      deqResp.bits.rfWen := io.deqResp(i).bits.rfWen
-      deqResp.bits.fuType := io.deqResp(i).bits.fuType
     }
     entriesIO.og0Resp.zipWithIndex.foreach { case (og0Resp, i) =>
       og0Resp.valid := io.og0Resp(i).valid
@@ -412,7 +401,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     deqSelOHVec(1) := PriorityMux(deqRequestVec.reverse, deqOHVec.map(_ & canIssueMergeAllBusy(1)).reverse)
 
     finalDeqSelValidVec.zip(finalDeqSelOHVec).zip(deqSelValidVec).zip(deqSelOHVec).zipWithIndex.foreach { case ((((selValid, selOH), deqValid), deqOH), i) =>
-      selValid := deqValid && deqOH.orR
+      selValid := deqValid && deqOH.orR && io.deq(i).ready
       selOH := deqOH
     }
   }
@@ -447,15 +436,28 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         )
     }
 
-    deqSelValidVec := finalDeqSelValidVec
-    deqSelOHVec := finalDeqSelOHVec
-
-    finalDeqSelValidVec.zip(finalDeqSelOHVec).zipWithIndex.foreach { case ((selValid, selOH), i) =>
+    deqSelValidVec.zip(deqSelOHVec).zipWithIndex.foreach { case ((selValid, selOH), i) =>
       selValid := othersEntryOldestSel(i).valid || enqEntryOldestSel(i).valid || subDeqSelValidVec(i).getOrElse(Seq(false.B)).head
       selOH := Mux(othersEntryOldestSel(i).valid, Cat(othersEntryOldestSel(i).bits, 0.U((params.numEnq).W)),
                Mux(enqEntryOldestSel(i).valid, Cat(0.U((params.numEntries-params.numEnq).W), enqEntryOldestSel(i).bits),
                    subDeqSelOHVec(i).getOrElse(Seq(0.U)).head))
     }
+
+    finalDeqSelValidVec.zip(finalDeqSelOHVec).zip(deqSelValidVec).zip(deqSelOHVec).zipWithIndex.foreach { case ((((selValid, selOH), deqValid), deqOH), i) =>
+      selValid := deqValid && io.deq(i).ready
+      selOH := deqOH
+    }
+  }
+
+  val toBusyTableDeqResp = Wire(Vec(params.numDeq, ValidIO(new IssueQueueDeqRespBundle)))
+
+  toBusyTableDeqResp.zipWithIndex.foreach { case (deqResp, i) =>
+    deqResp.valid := finalDeqSelValidVec(i)
+    deqResp.bits.respType := RSFeedbackType.issueSuccess
+    deqResp.bits.robIdx := DontCare
+    deqResp.bits.dataInvalidSqIdx := DontCare
+    deqResp.bits.rfWen := DontCare
+    deqResp.bits.fuType := io.deq(i).bits.common.fuType
   }
 
   //fuBusyTable
@@ -463,7 +465,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     if(busyTableWrite.nonEmpty) {
       val btwr = busyTableWrite.get
       val btrd = busyTableRead.get
-      btwr.io.in.deqResp := io.deqResp(i)
+      btwr.io.in.deqResp := toBusyTableDeqResp(i)
       btwr.io.in.og0Resp := io.og0Resp(i)
       btwr.io.in.og1Resp := io.og1Resp(i)
       btrd.io.in.fuBusyTable := btwr.io.out.fuBusyTable
@@ -481,7 +483,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       val btwr = busyTableWrite.get
       val bt = busyTable.get
       val dq = deqResp.get
-      btwr.io.in.deqResp := io.deqResp(i)
+      btwr.io.in.deqResp := toBusyTableDeqResp(i)
       btwr.io.in.og0Resp := io.og0Resp(i)
       btwr.io.in.og1Resp := io.og1Resp(i)
       bt := btwr.io.out.fuBusyTable
@@ -494,7 +496,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       val btwr = busyTableWrite.get
       val bt = busyTable.get
       val dq = deqResp.get
-      btwr.io.in.deqResp := io.deqResp(i)
+      btwr.io.in.deqResp := toBusyTableDeqResp(i)
       btwr.io.in.og0Resp := io.og0Resp(i)
       btwr.io.in.og1Resp := io.og1Resp(i)
       bt := btwr.io.out.fuBusyTable

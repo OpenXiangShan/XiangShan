@@ -184,10 +184,10 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
           )
     }
   }
-  entryUpdate.status.issueTimer := "b11".U //otherwise
+  entryUpdate.status.issueTimer := "b10".U //otherwise
   entryUpdate.status.deqPortIdx := 0.U //otherwise
   when(io.deqSel) {
-    entryUpdate.status.issueTimer := 1.U
+    entryUpdate.status.issueTimer := 0.U
     entryUpdate.status.deqPortIdx := io.deqPortIdxWrite
   }.elsewhen(entryReg.status.issued){
     entryUpdate.status.issueTimer := entryReg.status.issueTimer + 1.U
@@ -202,12 +202,10 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
     entryUpdate.status.issued := false.B
   }.elsewhen(srcLoadCancelVec.map(_.reduce(_ || _)).getOrElse(false.B)) {
     entryUpdate.status.issued := false.B
-  }.elsewhen(io.issueResp.valid) {
-    when(RSFeedbackType.isStageSuccess(io.issueResp.bits.respType)) {
-      entryUpdate.status.issued := true.B
-    }.elsewhen(RSFeedbackType.isBlocked(io.issueResp.bits.respType)) {
-      entryUpdate.status.issued := false.B
-    }
+  }.elsewhen(io.deqSel) {
+    entryUpdate.status.issued := true.B
+  }.elsewhen(io.issueResp.valid && RSFeedbackType.isBlocked(io.issueResp.bits.respType)) {
+    entryUpdate.status.issued := false.B
   }
   entryUpdate.status.firstIssue := io.deqSel || entryReg.status.firstIssue
   entryUpdate.status.blocked := false.B //todo
@@ -232,8 +230,8 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
   io.entry.valid := validReg
   io.entry.bits := entryReg
   io.robIdx := entryReg.status.robIdx
-  io.issueTimerRead := Mux(io.deqSel, 0.U, entryReg.status.issueTimer)
-  io.deqPortIdxRead := Mux(io.deqSel, io.deqPortIdxWrite, entryReg.status.deqPortIdx)
+  io.issueTimerRead := entryReg.status.issueTimer
+  io.deqPortIdxRead := entryReg.status.deqPortIdx
   io.cancel.foreach(_ := cancelVec.get.asUInt.orR)
 }
 

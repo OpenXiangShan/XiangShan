@@ -29,7 +29,7 @@ class FuBusyTableWrite(fuLatencyMap: Map[FuType.OHType, Int]) (implicit p: Param
     */
   private val latMappedFuTypeSet: Map[Int, Set[FuType.OHType]] = MapUtils.groupByValueUnique(fuLatencyMap)
 
-  private val deqRespSuccess = deqResp.valid && deqResp.bits.respType === RSFeedbackType.issueSuccess
+  private val deqRespSuccess = deqResp.valid
   private val og0RespFail = og0Resp.valid && og0Resp.bits.respType === RSFeedbackType.rfArbitFail
   private val og1RespFail = og1Resp.valid && og1Resp.bits.respType === RSFeedbackType.fuBusy
 
