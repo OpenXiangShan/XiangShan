@@ -1049,7 +1049,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_out.valid                := s3_valid && !io.lsq.ldin.bits.rep_info.need_rep && !s3_in.mmio
   s3_out.bits.uop             := s3_in.uop
   s3_out.bits.uop.cf.exceptionVec(loadAccessFault) := s3_dly_ld_err  || s3_in.uop.cf.exceptionVec(loadAccessFault)
-  s3_out.bits.uop.ctrl.replayInst := s3_rep_frm_fetch
+  s3_out.bits.uop.ctrl.flushPipe := s3_rep_frm_fetch
   s3_out.bits.data            := s3_in.data
   s3_out.bits.redirectValid   := false.B
   s3_out.bits.redirect        := DontCare
