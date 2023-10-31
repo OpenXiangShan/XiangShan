@@ -196,7 +196,7 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
     }
   }
 
-  val portSelIdxOH = finalFuDeqMap.zip(selIdxOH).map{ case ((fuTypeSeq, deqPortIdSeq), selIdxOHSeq) => (deqPortIdSeq, selIdxOHSeq)}.toMap
+  val portSelIdxOH: Map[Seq[Int], Vec[ValidIO[UInt]]] = finalFuDeqMap.zip(selIdxOH).map{ case ((fuTypeSeq, deqPortIdSeq), selIdxOHSeq) => (deqPortIdSeq, selIdxOHSeq)}.toMap
   println(s"[Dispatch2IQ] portSelIdxOH: $portSelIdxOH")
   val finalportSelIdxOH: mutable.Map[Int, Seq[ValidIO[UInt]]] = expendPortSel(portSelIdxOH)
   println(s"[Dispatch2IQ] finalportSelIdxOH: $finalportSelIdxOH")
@@ -347,16 +347,6 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     with HasXSParameter {
 
   import FuType._
-  private val dispatchCfgRaw: Seq[(Seq[OHType], Int)] = Seq(
-    (Seq(ldu), 2),
-    (Seq(stu), 2),
-    (Seq(ldu, stu), 2),
-    (Seq(vldu), 2),
-  )
-
-  private val dispatchCfg: Seq[(Seq[BigInt], Int)] = dispatchCfgRaw.map(x => (x._1.map(_.ohid), x._2))
-
-  println(s"[Dispatch2IqMemImp] $dispatchCfgRaw")
 
   private val enqLsqIO = io.enqLsqIO.get
 
@@ -365,19 +355,8 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   private val numVLoadDeq = LoadPipelineWidth
   private val numDeq = enqLsqIO.req.size
   private val numEnq = io.in.size
-
-  val dispatchSelect = Module(new Dispatch2IqSelect(numIn = io.in.size, dispatchCfg = dispatchCfg))
-  dispatchSelect.io.in := io.in
-  private val selectOut = dispatchSelect.io.out
-  private val selectIdxOH = dispatchSelect.io.mapIdxOH
-
-  private val s0_in = Wire(io.in.cloneType)
-  private val s0_enqLsq_resp = Wire(enqLsqIO.resp.cloneType)
-  private val s0_out = Wire(io.out.cloneType)
-  private val s0_blockedVec = Wire(Vec(io.in.size, Bool()))
-
-  val iqNotAllReady = !Cat(s0_out.map(_.map(_.ready)).flatten.toSeq).andR
-  val lsqCannotAccept = !enqLsqIO.canAccept
+  private val iqAllReady = Cat(io.out.map(_.map(_.ready)).flatten.toSeq).andR
+  private val lsqCanAccept = enqLsqIO.canAccept
 
   private val isLoadVec = VecInit(io.in.map(x => x.valid && FuType.isLoad(x.bits.fuType)))
   private val isStoreVec = VecInit(io.in.map(x => x.valid && FuType.isStore(x.bits.fuType)))
@@ -390,10 +369,14 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   private val storeAMOCntVec = VecInit(isStoreAMOVec.indices.map(x => PopCount(isStoreAMOVec.slice(0, x + 1))))
   private val vloadCntVec = VecInit(isVLoadVec.indices.map(x => PopCount(isVLoadVec.slice(0, x + 1))))
 
+  private val s0_enqLsq_resp = Wire(enqLsqIO.resp.cloneType)
+  private val s0_blockedVec = Wire(Vec(io.in.size, Bool()))
+
   val loadBlockVec = VecInit(loadCntVec.map(_ > numLoadDeq.U))
   val storeAMOBlockVec = VecInit(storeAMOCntVec.map(_ > numStoreAMODeq.U))
   val vloadBlockVec = VecInit(vloadCntVec.map(_ > numVLoadDeq.U))
   val lsStructBlockVec = VecInit((loadBlockVec.zip(storeAMOBlockVec)).zip(vloadBlockVec).map(x => x._1._1 || x._1._2 || x._2))
+  val lsIQEnqBlockVec = Wire(Vec(io.in.size, Bool()))
   dontTouch(loadBlockVec)
   dontTouch(storeAMOBlockVec)
   dontTouch(lsStructBlockVec)
@@ -401,21 +384,20 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   dontTouch(isLoadVec)
   dontTouch(isVLoadVec)
   dontTouch(loadCntVec)
-
-  s0_in <> io.in
+  dontTouch(lsIQEnqBlockVec)
 
   for (i <- 0 until numEnq) {
     if (i >= numDeq) {
       s0_blockedVec(i) := true.B
     } else {
-      s0_blockedVec(i) := lsStructBlockVec(i)
+      s0_blockedVec(i) := lsStructBlockVec(i) || lsIQEnqBlockVec(i)
     }
   }
 
   // enqLsq io
   require(enqLsqIO.req.size == enqLsqIO.resp.size)
   for (i <- enqLsqIO.req.indices) {
-    when (!io.in(i).fire) {
+    when(!io.in(i).fire) {
       enqLsqIO.needAlloc(i) := 0.U
     }.elsewhen(isStoreVec(i) || isVStoreVec(i)) {
       enqLsqIO.needAlloc(i) := 2.U // store | vstore
@@ -425,6 +407,78 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     enqLsqIO.req(i).valid := io.in(i).fire && !isAMOVec(i)
     enqLsqIO.req(i).bits := io.in(i).bits
     s0_enqLsq_resp(i) := enqLsqIO.resp(i)
+  }
+
+  val portFuSets = params.issueBlockParams.map(_.exuBlockParams.filterNot(_.hasStdFu).flatMap(_.fuConfigs).map(_.fuType).toSet)
+  println(s"[Dispatch2IqMemImp] portFuSets: $portFuSets")
+  val fuDeqMap = getFuDeqMap(portFuSets)
+  println(s"[Dispatch2IqMemImp] fuDeqMap: $fuDeqMap")
+  val mergedFuDeqMap = mergeFuDeqMap(fuDeqMap)
+  println(s"[Dispatch2IqMemImp] mergedFuDeqMap: $mergedFuDeqMap")
+  val expendedFuDeqMap = expendFuDeqMap(mergedFuDeqMap, params.issueBlockParams.map(_.numEnq))
+  println(s"[Dispatch2IqMemImp] expendedFuDeqMap: $expendedFuDeqMap")
+
+  // sort by count of port. Port less, priority higher.
+  val finalFuDeqMap = expendedFuDeqMap.toSeq.sortBy(_._2.length)
+  println(s"[Dispatch2IqMemImp] finalFuDeqMap: $finalFuDeqMap")
+
+  val uopsIn = Wire(Vec(wrapper.numIn, DecoupledIO(new DynInst)))
+  val numInPorts = io.in.size
+  val outs = io.out.flatten
+  val outReadyMatrix = Wire(Vec(outs.size, Vec(numInPorts, Bool())))
+  outReadyMatrix.foreach(_.foreach(_ := false.B))
+  val selIdxOH = Wire(MixedVec(finalFuDeqMap.map(x => Vec(x._2.size, ValidIO(UInt(uopsIn.size.W))))))
+  selIdxOH.foreach(_.foreach(_ := 0.U.asTypeOf(ValidIO(UInt(uopsIn.size.W)))))
+
+  dontTouch(outReadyMatrix)
+  dontTouch(selIdxOH)
+
+  finalFuDeqMap.zipWithIndex.foreach { case ((fuTypeSeq, deqPortIdSeq), i) =>
+    val maxSelNum = wrapper.numIn
+    val selNum = deqPortIdSeq.length
+    val portReadyVec = deqPortIdSeq.map(x => outs(x).ready)
+    val canAcc = uopsIn.map(in => canAccept(fuTypeSeq.map(x => x.ohid), in.bits.fuType) && in.valid)
+    val selPort = SelectOne("circ", portReadyVec.toSeq, selNum)
+    val select = SelectOne("naive", canAcc, selNum)
+    for ((portId, j) <- deqPortIdSeq.zipWithIndex) {
+      val (selPortReady, selPortIdxOH) = selPort.getNthOH(j + 1)
+      val (selectValid, selectIdxOH) = select.getNthOH(j + 1)
+      when(selPortReady && selectValid) {
+        selIdxOH(i)(OHToUInt(selPortIdxOH)).valid := selectValid
+        selIdxOH(i)(OHToUInt(selPortIdxOH)).bits := selectIdxOH.asUInt
+      }
+    }
+  }
+
+  val portSelIdxOH: Map[Seq[Int], Vec[ValidIO[UInt]]] = finalFuDeqMap.zip(selIdxOH).map { case ((fuTypeSeq, deqPortIdSeq), selIdxOHSeq) => (deqPortIdSeq, selIdxOHSeq) }.toMap
+  println(s"[Dispatch2IQ] portSelIdxOH: $portSelIdxOH")
+  val finalportSelIdxOH: mutable.Map[Int, Seq[ValidIO[UInt]]] = expendPortSel(portSelIdxOH)
+  println(s"[Dispatch2IQ] finalportSelIdxOH: $finalportSelIdxOH")
+  finalportSelIdxOH.foreach { case (portId, selSeq) =>
+    val finalSelIdxOH: UInt = PriorityMux(selSeq.map(_.valid).toSeq, selSeq.map(_.bits).toSeq)
+    outs(portId).valid := selSeq.map(_.valid).reduce(_ | _)
+    outs(portId).bits := Mux1H(finalSelIdxOH, uopsIn.map(_.bits))
+    when(outs(portId).valid) {
+      outReadyMatrix(portId).zipWithIndex.foreach { case (inReady, i) =>
+        when(finalSelIdxOH(i)) {
+          inReady := outs(portId).ready
+        }
+      }
+    }
+  }
+
+  private val uopCanEnqIQVec: Vec[Bool] = VecInit((0 until numEnq).map(i => outReadyMatrix.map(_(i)).reduce(_ | _)))
+  lsIQEnqBlockVec.zipWithIndex.foreach { case (iqEnqBlock, i) =>
+    iqEnqBlock := !uopCanEnqIQVec.slice(0, i).fold(true.B)(_ && _)
+  }
+  dontTouch(uopCanEnqIQVec)
+
+  uopsIn <> io.in
+  uopsIn.foreach(_.ready := false.B)
+  uopsIn.zipWithIndex.foreach { case (uopIn, idx) =>
+    uopIn.ready := uopCanEnqIQVec(idx) && !s0_blockedVec(idx) && iqAllReady && lsqCanAccept
+    uopIn.bits.lqIdx := s0_enqLsq_resp(idx).lqIdx
+    uopIn.bits.sqIdx := s0_enqLsq_resp(idx).sqIdx
   }
 
   // We always read physical register states when in gives the instructions.
@@ -450,7 +504,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   io.readIntState.get.map(_.l1ExuOH).zip(intL1ExuOHVec.flatten).foreach(x => x._2 := x._1)
   io.readVfState.get.map(_.l1ExuOH).zip(vfL1ExuOHVec.flatten).foreach(x => x._2 := x._1)
 
-  s0_in.flatMap(x => x.bits.srcState.take(numRegSrc) zip x.bits.srcType.take(numRegSrc)).zip(intSrcStateVec.flatten zip vfSrcStateVec.flatten).foreach {
+  uopsIn.flatMap(x => x.bits.srcState.take(numRegSrc) zip x.bits.srcType.take(numRegSrc)).zip(intSrcStateVec.flatten zip vfSrcStateVec.flatten).foreach {
     case ((state: UInt, srcType), (intState, vfState)) =>
       state := Mux1H(Seq(
         SrcType.isXp(srcType) -> intState,
@@ -458,7 +512,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
         SrcType.isNotReg(srcType) -> true.B,
       ))
   }
-  s0_in.flatMap(x => x.bits.dataSource.take(numRegSrc) zip x.bits.srcType.take(numRegSrc)).zip(intDataSourceVec.flatten zip vfDataSourceVec.flatten).foreach {
+  uopsIn.flatMap(x => x.bits.dataSource.take(numRegSrc) zip x.bits.srcType.take(numRegSrc)).zip(intDataSourceVec.flatten zip vfDataSourceVec.flatten).foreach {
     case ((dataSource, srcType), (intSource, vfSource)) =>
       dataSource.value := Mux1H(Seq(
         SrcType.isXp(srcType) -> intSource.value,
@@ -466,7 +520,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
         SrcType.isNotReg(srcType) -> 0.U,
       ))
   }
-  s0_in.flatMap(x => x.bits.l1ExuOH.take(numRegSrc) zip x.bits.srcType.take(numRegSrc)).zip(intL1ExuOHVec.flatten zip vfL1ExuOHVec.flatten).foreach {
+  uopsIn.flatMap(x => x.bits.l1ExuOH.take(numRegSrc) zip x.bits.srcType.take(numRegSrc)).zip(intL1ExuOHVec.flatten zip vfL1ExuOHVec.flatten).foreach {
     case ((l1ExuOH, srcType), (intL1ExuOH, vfL1ExuOH)) =>
       l1ExuOH := Mux1H(Seq(
         SrcType.isXp(srcType) -> intL1ExuOH,
@@ -474,38 +528,4 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
         SrcType.isNotReg(srcType) -> 0.U,
       ))
   }
-
-  for ((iqPorts, iqIdx) <- s0_out.zipWithIndex) {
-    for ((port, portIdx) <- iqPorts.zipWithIndex) {
-      println(s"[Dispatch2MemIQ] (iqIdx, portIdx): ($iqIdx, $portIdx)")
-      when (iqNotAllReady || lsqCannotAccept) {
-        s0_out.foreach(_.foreach(_.valid := false.B))
-        s0_out.foreach(_.foreach(x => x.bits := 0.U.asTypeOf(x.bits)))
-      }.otherwise {
-        s0_out(iqIdx)(portIdx).valid := selectOut(iqIdx)(portIdx).valid && !Mux1H(selectIdxOH(iqIdx)(portIdx), s0_blockedVec)
-        s0_out(iqIdx)(portIdx).bits := selectOut(iqIdx)(portIdx).bits // the same as Mux1H(selectIdxOH(iqIdx)(portIdx), s0_in.map(_.bits))
-        s0_out(iqIdx)(portIdx).bits.srcState := Mux1H(selectIdxOH(iqIdx)(portIdx), s0_in.map(_.bits.srcState))
-        s0_out(iqIdx)(portIdx).bits.dataSource := Mux1H(selectIdxOH(iqIdx)(portIdx), s0_in.map(_.bits.dataSource))
-        s0_out(iqIdx)(portIdx).bits.l1ExuOH := Mux1H(selectIdxOH(iqIdx)(portIdx), s0_in.map(_.bits.l1ExuOH))
-        s0_out(iqIdx)(portIdx).bits.lqIdx := Mux1H(selectIdxOH(iqIdx)(portIdx), s0_enqLsq_resp.map(_.lqIdx))
-        s0_out(iqIdx)(portIdx).bits.sqIdx := Mux1H(selectIdxOH(iqIdx)(portIdx), s0_enqLsq_resp.map(_.sqIdx))
-      }
-    }
-  }
-
-  // outToInMap(inIdx)(outIdx): the inst numbered inIdx will be accepted by port numbered outIdx
-  val outToInMap: Vec[Vec[Bool]] = VecInit(selectIdxOH.flatten.map(x => x.asBools).transpose.map(x => VecInit(x.toSeq)).toSeq)
-  val outReadyVec: Vec[Bool] = VecInit(s0_out.map(_.map(_.ready)).flatten.toSeq)
-  dontTouch(outToInMap)
-  dontTouch(outReadyVec)
-
-  s0_in.zipWithIndex.zip(outToInMap).foreach { case ((in, inIdx), outVec) =>
-    when (iqNotAllReady || lsqCannotAccept) {
-      in.ready := false.B
-    }.otherwise {
-      in.ready := (Cat(outVec) & Cat(outReadyVec)).orR && !s0_blockedVec(inIdx)
-    }
-  }
-
-  io.out <> s0_out
 }

@@ -359,9 +359,6 @@ case class XSCoreParameters
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
         ExeUnitParams("LDU0", Seq(LduCfg), Seq(IntWB(6, 0), VfWB(3, 0)), Seq(Seq(IntRD(12, 0)))),
-        ExeUnitParams("LDU1", Seq(LduCfg), Seq(IntWB(7, 0), VfWB(4, 0)), Seq(Seq(IntRD(13, 0)))),
-      ), numEntries = IssueQueueSize, numEnq = 2),
-      IssueBlockParams(Seq(
         ExeUnitParams("STA0", Seq(StaCfg), Seq(), Seq(Seq(IntRD(3, 1)))),
       ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
@@ -369,13 +366,16 @@ case class XSCoreParameters
         ExeUnitParams("HYU1", Seq(FakeHystaCfg), Seq(), Seq()), // fake unit, used to create a new writeback port
       ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams("STD0", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(13, 1), VfRD(12, Int.MaxValue)))),
-        ExeUnitParams("STD1", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(5, 1), VfRD(10, Int.MaxValue)))),
-      ), numEntries = IssueQueueSize, numEnq = 4),
+        ExeUnitParams("LDU1", Seq(LduCfg), Seq(IntWB(7, 0), VfWB(4, 0)), Seq(Seq(IntRD(13, 0)))),
+      ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
         ExeUnitParams("VLDU0", Seq(VlduCfg), Seq(VfWB(3, 1)), Seq(Seq(VfRD(0, 0)), Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)))),
         ExeUnitParams("VLDU1", Seq(VlduCfg), Seq(VfWB(4, 1)), Seq(Seq(VfRD(5, 0)), Seq(VfRD(6, 0)), Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(VfRD(9, 0)))),
       ), numEntries = IssueQueueSize, numEnq = 2),
+      IssueBlockParams(Seq(
+        ExeUnitParams("STD0", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(13, 1), VfRD(12, Int.MaxValue)))),
+        ExeUnitParams("STD1", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(5, 1), VfRD(10, Int.MaxValue)))),
+      ), numEntries = IssueQueueSize, numEnq = 4),
     ),
       numPregs = intPreg.numEntries max vfPreg.numEntries,
       numDeqOutside = 0,

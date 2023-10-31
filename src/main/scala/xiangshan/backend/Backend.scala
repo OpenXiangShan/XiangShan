@@ -393,7 +393,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
         else
           false.B
 
-      if (memScheduler.io.loadFinalIssueResp(i).nonEmpty) {
+      if (memScheduler.io.loadFinalIssueResp(i).nonEmpty && memExuBlocksHasLDU(i)(j)) {
         memScheduler.io.loadFinalIssueResp(i)(j).valid := issueTimeout
         memScheduler.io.loadFinalIssueResp(i)(j).bits.dataInvalidSqIdx := DontCare
         memScheduler.io.loadFinalIssueResp(i)(j).bits.fuType := toMem(i)(j).bits.fuType
