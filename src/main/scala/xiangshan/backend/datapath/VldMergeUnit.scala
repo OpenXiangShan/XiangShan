@@ -18,7 +18,7 @@ class VldMergeUnit(val params: ExeUnitParams)(implicit p: Parameters) extends XS
   val vdAfterMerge = Wire(UInt(VLEN.W))
 
   wbReg.bits := io.writeback.bits
-  wbReg.valid := !io.writeback.bits.robIdx.needFlush(io.flush) && io.writeback.valid
+  wbReg.valid := !io.writeback.bits.robIdx.needFlush(io.flush) && io.writeback.fire
   mgu.io.in.vd := wbReg.bits.data
   mgu.io.in.oldVd := io.oldVdReadData
   mgu.io.in.mask := 0.U // wbReg.bits.mask   todo add this in ExuOutput
