@@ -1141,7 +1141,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.ldu_io.ldCancel.ld2Cancel.valid := s3_valid && (
     (io.ldu_io.lsq.ldin.bits.rep_info.need_rep && s3_in.isFirstIssue) ||
     s3_in.mmio
-  )
+  ) && s3_ld_flow
   io.ldu_io.ldCancel.ld2Cancel.bits := s3_in.deqPortIdx
 
   // data from dcache hit
