@@ -977,7 +977,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.ldu_io.ldCancel.ld1Cancel.valid := s2_valid && (
     (s2_out.rep_info.need_rep && s2_out.isFirstIssue) ||                // exe fail and issued from IQ
     s2_mmio                                                             // is mmio
-  )
+  ) && s2_ld_flow
   io.ldu_io.ldCancel.ld1Cancel.bits := s2_out.deqPortIdx
 
   // fast wakeup
