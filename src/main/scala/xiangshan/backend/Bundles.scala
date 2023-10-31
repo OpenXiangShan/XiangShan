@@ -544,6 +544,12 @@ object Bundles {
                                                 Some(new SqPtr())             else None
     // uop info
     val predecodeInfo = if(params.hasPredecode) Some(new PreDecodeInfo) else None
+    // vldu used only
+    val vls = OptionWrapper(params.hasVLoadFu, new Bundle {
+      val vpu = new VPUCtrlSignals
+      val oldVdPsrc = UInt(PhyRegIdxWidth.W)
+      val vdIdx = UInt(3.W)
+    })
     val debug = new DebugBundle
     val debugInfo = new PerfDebugInfo
   }
@@ -680,7 +686,7 @@ object Bundles {
   class MemExuOutput(isVector: Boolean = false)(implicit p: Parameters) extends XSBundle {
     val uop = new DynInst
     val data = if (isVector) UInt(VLEN.W) else UInt(XLEN.W)
-    val mask = if (isVector) Some(UInt((VLEN/8).W)) else None
+    val mask = if (isVector) Some(UInt(VLEN.W)) else None
     val debug = new DebugBundle
   }
 
