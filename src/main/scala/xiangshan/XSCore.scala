@@ -142,7 +142,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
 
   val backend = LazyModule(new Backend(memBlock)(p))
 
-  memBlock.frontendBridge.icache_node := frontend.icache.clientNode
+  memBlock.frontendBridge.icache_node_in := frontend.icache.clientNode
   memBlock.frontendBridge.instr_uncache_node := frontend.instrUncache.clientNode
 }
 
