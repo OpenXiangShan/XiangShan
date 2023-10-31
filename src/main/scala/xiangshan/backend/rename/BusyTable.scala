@@ -68,13 +68,13 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
   val wbMask = reqVecToMask(io.wbPregs)
   val allocMask = reqVecToMask(io.allocPregs)
   val wakeUpMask = pregWB match {
-    case _: IntWB => ParallelOR(wakeUpFilterLS.map(x => Mux(x.valid && x.bits.rfWen && !x.bits.loadDependency.asUInt.orR, UIntToOH(x.bits.pdest), 0.U)).toSeq) //TODO: dont implement "load -> wakeUp other -> wakeUp BusyTable" now
-    case _: VfWB => ParallelOR(wakeUpFilterLS.map(x => Mux(x.valid && (x.bits.fpWen || x.bits.vecWen) && !x.bits.loadDependency.asUInt.orR, UIntToOH(x.bits.pdest), 0.U)).toSeq)
+    case _: IntWB => wakeUpFilterLS.map(x => Mux(x.valid && x.bits.rfWen && !x.bits.loadDependency.asUInt.orR, UIntToOH(x.bits.pdest), 0.U)).toSeq.fold(0.U)(_ | _) //TODO: dont implement "load -> wakeUp other -> wakeUp BusyTable" now
+    case _: VfWB => wakeUpFilterLS.map(x => Mux(x.valid && (x.bits.fpWen || x.bits.vecWen) && !x.bits.loadDependency.asUInt.orR, UIntToOH(x.bits.pdest), 0.U)).toSeq.fold(0.U)(_ | _)
     case _: NoWB => throw new IllegalArgumentException("NoWB is not permitted")
   }
   val cancelMask = pregWB match {
-    case _: IntWB => ParallelOR(io.cancel.map(x => Mux(x.valid && x.bits.rfWen, UIntToOH(x.bits.pdest), 0.U)))
-    case _: VfWB => ParallelOR(io.cancel.map(x => Mux(x.valid && (x.bits.fpWen || x.bits.vecWen), UIntToOH(x.bits.pdest), 0.U)))
+    case _: IntWB => io.cancel.map(x => Mux(x.valid && x.bits.rfWen, UIntToOH(x.bits.pdest), 0.U)).fold(0.U)(_ | _)
+    case _: VfWB => io.cancel.map(x => Mux(x.valid && (x.bits.fpWen || x.bits.vecWen), UIntToOH(x.bits.pdest), 0.U)).fold(0.U)(_ | _)
     case _: NoWB => throw new IllegalArgumentException("NoWB is not permitted")
   }
 
