@@ -184,7 +184,7 @@ case class XSCoreParameters
   ),
   vfPreg: VfPregParams = VfPregParams(
     numEntries = 192,
-    numRead = None,
+    numRead = Some(14),
     numWrite = None,
   ),
   prefetcher: Option[PrefetcherParams] = Some(SMSParams()),
@@ -377,12 +377,12 @@ case class XSCoreParameters
         ExeUnitParams("STA1", Seq(StaCfg, MouCfg), Seq(IntWB(11, 0)), Seq(Seq(IntRD(1, 1)))),
       ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams("STD0", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(13, 1), VfRD(12, Int.MaxValue)))),
+        ExeUnitParams("STD0", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(13, 1), VfRD(6, 0)))),
         ExeUnitParams("STD1", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(5, 1), VfRD(10, Int.MaxValue)))),
       ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams("VLDU0", Seq(VlduCfg), Seq(VfWB(6, 1)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(0, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)))),
-        ExeUnitParams("VLSU0", Seq(VstuCfg), Seq(VfWB(7, 1)), Seq(Seq(VfRD(5, 0)), Seq(VfRD(6, 0)), Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(VfRD(9, 0)))),
+        ExeUnitParams("VLDU0", Seq(VlduCfg), Seq(VfWB(6, 1)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
+        ExeUnitParams("VLSU0", Seq(VstuCfg), Seq(VfWB(7, 1)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
       ), numEntries = IssueQueueSize, numEnq = 2),
     ),
       numPregs = intPreg.numEntries max vfPreg.numEntries,

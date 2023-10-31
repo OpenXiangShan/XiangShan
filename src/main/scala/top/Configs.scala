@@ -99,7 +99,7 @@ class MinimalConfig(n: Int = 1) extends Config(
         ),
         vfPreg = VfPregParams(
           numEntries = 192,
-          numRead = None,
+          numRead = Some(14),
           numWrite = None,
         ),
         icacheParameters = ICacheParameters(
