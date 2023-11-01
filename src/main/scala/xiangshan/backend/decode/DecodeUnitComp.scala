@@ -593,8 +593,8 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           csBundle(2 * i + 2).uopIdx := (2 * i + 1).U
         }
       }
-      csBundle(numOfUop - 1.U).srcType(0) := SrcType.fp
-      csBundle(numOfUop - 1.U).lsrc(0) := FP_TMP_REG_MV.U
+      csBundle(numOfUop - 1.U).srcType(0) := SrcType.vp
+      csBundle(numOfUop - 1.U).lsrc(0) := VECTOR_TMP_REG_LMUL.U
       csBundle(numOfUop - 1.U).ldest := dest + lmul - 1.U
     }
     is(UopSplitType.VEC_FSLIDE1DOWN) {
