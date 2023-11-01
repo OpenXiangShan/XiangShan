@@ -313,7 +313,8 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
     x.uop := uopq(id).uop
     x.uop.exceptionVec := uopq(id).uop.exceptionVec
     x.data := DontCare
-    x.mask.map(_ := DontCare)
+    x.mask.foreach(_ := DontCare)
+    x.vdIdx.foreach(_ := DontCare)
     x.debug := DontCare
   }
 

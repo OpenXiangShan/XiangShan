@@ -687,6 +687,7 @@ object Bundles {
     val uop = new DynInst
     val data = if (isVector) UInt(VLEN.W) else UInt(XLEN.W)
     val mask = if (isVector) Some(UInt(VLEN.W)) else None
+    val vdIdx = if (isVector) Some(UInt(3.W)) else None // TODO: parameterize width
     val debug = new DebugBundle
   }
 
