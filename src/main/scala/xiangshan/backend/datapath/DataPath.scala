@@ -355,8 +355,12 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
           val og1resp = toIU.og1resp
           og1FailedVec2(iqIdx)(iuIdx) := s1_toExuValid(iqIdx)(iuIdx) && !toExuFire(iqIdx)(iuIdx)
           og1resp.valid := s1_toExuValid(iqIdx)(iuIdx)
+          // respType:  fuIdle      ->IQ entry clear
+          //            fuUncertain ->IQ entry no action
+          //            fuBusy      ->IQ entry issued set false, then re-issue
+          // Only lda and sta is fuUncertain at OG1 stage
           og1resp.bits.respType := Mux(!og1FailedVec2(iqIdx)(iuIdx),
-            if (toIU.issueQueueParams.isMemAddrIQ) RSFeedbackType.fuUncertain else RSFeedbackType.fuIdle,
+            if (toIU.issueQueueParams.isLdAddrIQ || toIU.issueQueueParams.isStAddrIQ) RSFeedbackType.fuUncertain else RSFeedbackType.fuIdle,
             RSFeedbackType.fuBusy)
           og1resp.bits.dataInvalidSqIdx := DontCare
           og1resp.bits.robIdx := s1_toExuData(iqIdx)(iuIdx).robIdx
