@@ -197,10 +197,12 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
   ): Seq[Int] = {
     if (iqSeq.isEmpty) Seq()
     else {
-      val entry0 = iqSeq.map(iqPortMap(_)(0))
-      val entry1 = iqSeq.map(iqPortMap(_)(1))
-      if (lowFirst) entry0 ++ entry1
-      else entry1 ++ entry0
+      val entrySeqSeq = (0 until iqPortMap.values.map(_.size).max).map(i =>
+        iqSeq.filter(iqPortMap(_).size > i).map(iqPortMap(_)(i))
+      ).toSeq
+
+      if (lowFirst) entrySeqSeq.flatten
+      else entrySeqSeq.reverse.flatten
     }
   }
 
