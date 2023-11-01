@@ -441,8 +441,8 @@ class CtrlBlockImp(
   io.toIssueBlock.flush   <> s2_s4_redirect
 
   pcMem.io.wen.head   := RegNext(io.frontend.fromFtq.pc_mem_wen)
-  pcMem.io.waddr.head := RegNext(io.frontend.fromFtq.pc_mem_waddr)
-  pcMem.io.wdata.head := RegNext(io.frontend.fromFtq.pc_mem_wdata)
+  pcMem.io.waddr.head := RegEnable(io.frontend.fromFtq.pc_mem_waddr, io.frontend.fromFtq.pc_mem_wen)
+  pcMem.io.wdata.head := RegEnable(io.frontend.fromFtq.pc_mem_wdata, io.frontend.fromFtq.pc_mem_wen)
 
   private val jumpPcVec         : Vec[UInt] = Wire(Vec(params.numPcReadPort, UInt(VAddrData().dataWidth.W)))
   io.toIssueBlock.pcVec := jumpPcVec
