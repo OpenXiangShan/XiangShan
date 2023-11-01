@@ -1032,7 +1032,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   val s3_rep_info = WireInit(s3_in.rep_info)
   s3_rep_info.dcache_miss   := s3_in.rep_info.dcache_miss && !s3_fwd_frm_d_chan_valid && s3_troublem
-  val s3_rep_frm_fetch = s3_vp_match_fail || s3_ldld_rep_inst
+  val s3_flushPipe = s3_ldld_rep_inst
+  val s3_rep_frm_fetch = s3_vp_match_fail
   val s3_sel_rep_cause = PriorityEncoderOH(s3_rep_info.cause.asUInt)
   val s3_force_rep     = s3_sel_rep_cause(LoadReplayCauses.C_TM) &&
                          !s3_in.uop.cf.exceptionVec(loadAddrMisaligned) &&
@@ -1049,7 +1050,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_out.valid                := s3_valid && !io.lsq.ldin.bits.rep_info.need_rep && !s3_in.mmio
   s3_out.bits.uop             := s3_in.uop
   s3_out.bits.uop.cf.exceptionVec(loadAccessFault) := s3_dly_ld_err  || s3_in.uop.cf.exceptionVec(loadAccessFault)
-  s3_out.bits.uop.ctrl.flushPipe := s3_rep_frm_fetch
+  s3_out.bits.uop.ctrl.flushPipe := s3_flushPipe
+  s3_out.bits.uop.ctrl.replayInst := s3_rep_frm_fetch
   s3_out.bits.data            := s3_in.data
   s3_out.bits.redirectValid   := false.B
   s3_out.bits.redirect        := DontCare
