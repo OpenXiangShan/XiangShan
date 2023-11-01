@@ -4,7 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import utility.SelectOne
+import utility._
 import utils._
 import xiangshan._
 import xiangshan.backend.fu.{FuConfig, FuType}
@@ -97,7 +97,7 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
     res.map(x => (x._2, x._1))
   }
 
-  def getIQ2PortMap(numEnqs: Seq[Int]) = {
+  def getIQ2PortMap(numEnqs: Seq[Int]): Map[Int, Seq[Int]] = {
     val res: mutable.Map[Int, Seq[Int]] = mutable.Map()
     val portSum: Seq[Int] = numEnqs.indices.map(x => numEnqs.slice(0, x).sum)
     for ((numEnq, i) <- numEnqs.zipWithIndex) {
@@ -126,12 +126,7 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
     for ((fuType, iqIdxSeq) <- map) {
       val portIdxSeq = iqIdxSeq.flatMap(x => iqPortMap(x)).sorted
       res += (fuType -> (portIdxSeq))
-      // println(s"expended processing fuType:$fuType iqIdxSeq:$iqIdxSeq portIdxSeq:$portIdxSeq")
-      // println(s"expended processing res:$res")
     }
-    // println(s"expended map: $map")
-    // println(s"expended iqPortMap: $map")
-    // println(s"expended res: $res")
     res.toSeq
       .zip(map.map(_._2/*iqIdxSeq*/))
       .map{ case ((fuTypeSeq, deqPortIdSeq), iqIdxSeq) => DpFuIQPortMap(fuTypeSeq, iqIdxSeq, deqPortIdSeq) }
@@ -162,19 +157,176 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
     res
   }
 
-  def getRoundRobinChoices(numEnqs: Seq[Int], numOut: Int): Seq[Seq[Int]] = {
-    val res: mutable.Map[Int, Seq[Int]] = mutable.Map()
-    val portSum: Seq[Int] = numEnqs.indices.map(x => numEnqs.slice(0, x).sum)
-    for ((numEnq, i) <- numEnqs.zipWithIndex) {
-      val portIdxSeq = (portSum(i) until (portSum(i) + numEnq)).toList
-      res += (i -> portIdxSeq)
+  def reverseDpIqMap[T](map: Seq[DpFuIQPortPrioMap[T]], num: Int): Seq[Seq[Boolean]] = {
+    (0 until num).map( iqPortIdx =>
+      map.map(_.me.deqPortId).map(_.contains(iqPortIdx))
+    )
+  }
+
+  def OHFromInt(idx: Int, width: Int): UInt = {
+    require(width > 0)
+    require(idx < width)
+    VecInit((Seq.fill(idx)(false.B) ++ Seq(true.B) ++ Seq.fill(width-idx-1)(false.B)).toSeq).asUInt
+  }
+
+  def isOH(oh: UInt): Bool = {
+    // naive implementation
+    val ohSeq = oh.asBools.indices.map(OHFromInt(_, oh.getWidth))
+    ParallelOR(ohSeq.map(_ === oh)).asBool
+  }
+  def noMoreThanOH(oh: UInt): Bool = {
+    isOH(oh) | (oh === 0.U(oh.getWidth.W))
+  }
+
+  // circularRotation(Seq(0, 1, 2, 3), 2) = Seq(2, 3, 0, 1)
+  def circularRotation(seq: Seq[Int], offset: Int): Seq[Int] = {
+    val res = mutable.ArrayBuffer[Int]()
+    for (i <- 0 until seq.length) {
+      res += seq((i + offset) % seq.length)
     }
-    val choices = res.toSeq.sortBy(_._2.length).map(_._2)
-    val resChoices = mutable.ArrayBuffer[Seq[Int]]()
-    for (i <- 0 until numOut) {
-      resChoices += choices(i % choices.length)
+    res.toSeq
+  }
+
+  // e.g.
+  // Input: iqPort: Seq(A, B)
+  // Output: Seq(A.0, B.0, A.1, B.1)
+  def getNaiveChoice(
+    iqSeq: Seq[Int],
+    iqPortMap: Map[Int, Seq[Int]],
+    lowFirst: Boolean = true
+  ): Seq[Int] = {
+    if (iqSeq.isEmpty) Seq()
+    else {
+      val entry0 = iqSeq.map(iqPortMap(_)(0))
+      val entry1 = iqSeq.map(iqPortMap(_)(1))
+      if (lowFirst) entry0 ++ entry1
+      else entry1 ++ entry0
     }
-    resChoices.toSeq
+  }
+
+  // Round-Robin choices:
+  // e.g. For Issue Queue A/B with 2 entry port
+  // Seq(
+  //   A.0-B.0-A.1-B.1,
+  //   B.0-A.0-B.1-A.1
+  // )
+  // @lowFirst: High priority from the low index; low priority from the high index
+  def getRoundRobinChoices[T](
+    map: DpFuIQPortMap[T],
+    iqPortMap: Map[Int, Seq[Int]],
+    lowFirst: Boolean = true
+  ): Seq[Seq[Int]] = {
+    val (fuTypeSeq, iqIdxSeq, deqPortIdSeq) = (map.fuType, map.iqIdx, map.deqPortId)
+    iqIdxSeq.indices.map{i =>
+      getNaiveChoice(circularRotation(iqIdxSeq, i), iqPortMap, lowFirst)
+    }
+  }
+
+  // Prefer choices:
+  // e.g. For Issue Queue A/B with 2 entry port
+  // Seq(
+  //   A.0-A.1-B.0-C.0-B.1-C.1,
+  //   B.0-B.1-C.0-A.0-C.1-A.1, // still keep the circular order
+  //   C.0-C.1-A.0-B.0-A.1-B.1
+  // )
+  def getPreferChoices[T](
+    map: DpFuIQPortMap[T],
+    iqPortMap: Map[Int, Seq[Int]],
+    lowFirst: Boolean = true
+  ): Seq[Seq[Int]] = {
+    val (fuTypeSeq, iqIdxSeq, deqPortIdSeq) = (map.fuType, map.iqIdx, map.deqPortId)
+
+    if (iqIdxSeq.size < 2) Seq(Seq())
+    else {
+      iqIdxSeq.indices.map{i =>
+        iqPortMap(iqIdxSeq(i)) ++ getNaiveChoice(circularRotation(iqIdxSeq, i+1).init, iqPortMap, lowFirst)
+      }
+    }
+  }
+
+  // combine Round-Robin and Prefer
+  // def getRRPreferChoices[T](
+  //   map: DpFuIQPortMap[T],
+  //   iqPortMap: Map[Int, Seq[Int]],
+  //   lowFirst: Boolean = true
+  // ): Seq[Seq[Int]] = {
+
+  // }
+
+  // PreferNot choices:
+  // e.g. For Issue Queue A/B with 2 entry port
+  // Seq(
+  //   B.0-C.0-B.1-C.1-A.0-A.1,
+  //   C.0-A.0-C.1-A.1-B.0-B.1,
+  //   A.0-B.0-A.1-B.1-C.0-C.1
+  // )
+  def getPreferNotChoices[T](
+    map: DpFuIQPortMap[T],
+    iqPortMap: Map[Int, Seq[Int]],
+    lowFirst: Boolean = true
+  ): Seq[Seq[Int]] = {
+    val (fuTypeSeq, iqIdxSeq, deqPortIdSeq) = (map.fuType, map.iqIdx, map.deqPortId)
+    if (iqIdxSeq.size < 2) Seq(Seq())
+    else {
+      iqIdxSeq.indices.map{i =>
+        getNaiveChoice(circularRotation(iqIdxSeq, i+1).init, iqPortMap, lowFirst) ++ iqPortMap(iqIdxSeq(i))
+      }
+    }
+  }
+
+  // NOTE: instruction type conflict may be simpiled modled by RR or Prefer
+  // def getConflictChoices[T](){}
+  case class DpChoicesVec(
+    rr: Seq[Seq[Int]],
+    prefer: Seq[Seq[Int]],
+    preferNot: Seq[Seq[Int]]
+    // conflict: Seq[Seq[Int]]
+  )
+
+  def getChoices[T](
+    map: DpFuIQPortPrioMap[T],
+    iqPortMap: Map[Int, Seq[Int]]
+  ): DpChoicesVec = {
+    val rr = getRoundRobinChoices(map.me, iqPortMap, map.hiPrio.isEmpty)
+    val prefer = getPreferChoices(map.me, iqPortMap, map.hiPrio.isEmpty)
+    val preferNot = getPreferNotChoices(map.me, iqPortMap, map.hiPrio.isEmpty)
+    DpChoicesVec(rr, prefer, preferNot)
+  }
+
+  def getChoices[T](
+    map: Seq[DpFuIQPortPrioMap[T]],
+    iqPortMap: Map[Int, Seq[Int]]
+  ): Seq[DpChoicesVec] = {
+    map.map(getChoices(_, iqPortMap))
+  }
+
+  def getOrder(seq: Seq[Bool]): Seq[Seq[Bool]] = {
+    val maxNum = seq.size
+    def onesNum(seq: Seq[Bool]): UInt = {
+      if (seq.isEmpty) 0.U
+      else PopCount(seq)
+    }
+    (0 until maxNum).map{ uop_idx =>
+      (0 until maxNum).map{ order_idx =>
+        // TODO: optimize PopCount: more faster or logic reuse
+        // itself valid && there are order_idx uops before it
+        if (uop_idx < order_idx) false.B
+        else seq(uop_idx) && (onesNum(seq.take(uop_idx)) === order_idx.U)
+      }.toSeq
+    }.toSeq
+  }
+
+  def getInstrTypeOrder[T](
+    map: Seq[DpFuIQPortMap[T]],
+    accInfo: Seq[Seq[Bool]]
+  ): Seq[Seq[Seq[Bool]]] = {
+    // val dpWidth = accInfo(0).size
+    (map zip accInfo).map{ case (m,a) =>
+      // TODO: explicitly drop useless order info: the i-th uop could not be i+1-th instr
+      // val typeAcceptWidth = m.deqPortId.size
+      // val maxNum = math.min(typeAcceptWidth, dpWidth)
+      getOrder(a)
+    }
   }
 
   def expendPortSel(map: Map[Seq[Int], Vec[ValidIO[UInt]]]) = {
@@ -191,8 +343,8 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
     res
   }
 
-  def canAccept(acceptVec: Seq[BigInt], fuType: UInt): Bool = {
-    (acceptVec.reduce(_ | _).U & fuType).orR
+  def canAccept(fuTypeList: Seq[BigInt], fuType: UInt): Bool = {
+    (fuTypeList.reduce(_ | _).U & fuType).orR
   }
 
   def canAccept(acceptVec: Seq[Seq[BigInt]], fuType: UInt): Vec[Bool] = {
@@ -206,6 +358,12 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
     else{
       Mux(fuType === FuType.alu.U, false.B, Cat(fuConfigs.map(_.fuType.U === fuType).toSeq).orR)
     }
+  }
+
+  class DpIqConectBundle extends XSBundle {
+    val valid = Bool()
+    val dpUopId = UInt(io.in.size.W)
+    val deqPortId = UInt(io.out.flatten.size.W)
   }
 
   // Add SelIdxOH's re-map for round-robin
@@ -252,6 +410,11 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
     with HasXSParameter {
 
   private val numEnq = io.in.size
+  val uopsIn = Wire(Vec(wrapper.numIn, DecoupledIO(new DynInst)))
+  val numInPorts = io.in.size
+  val outs = io.out.flatten
+  // val outReadyMatrix = Wire(Vec(outs.size, Vec(numInPorts, Bool())))
+  // outReadyMatrix.foreach(_.foreach(_ := false.B))
 
   val portFuSets = params.issueBlockParams.map(_.exuBlockParams.flatMap(_.fuConfigs).map(_.fuType).toSet)
   println(s"[IssueQueueImp] portFuSets: $portFuSets")
@@ -268,90 +431,198 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
   println(s"[IssueQueueImp] expendedFuDeqMap: $expendedFuDeqMap")
 
   // sort by count of port. Port less, priority higher.
-  // val finalFuDeqMap = expendedFuDeqMap.toSeq.sortBy(_._2.length)
-  // println(s"[IssueQueueImp] finalFuDeqMap: $finalFuDeqMap")
-  // add higher priority into the DeqMap for instr type conflict check
   val finalFuDeqMap = addHigherPriority(expendedFuDeqMap, params.issueBlockParams.map(_.numEnq))
-  println(s"[IssueQueueImp] finalPrioFuDeqpMap: $finalFuDeqMap")
+  println(s"[IssueQueueImp] finalFuDeqpMap: $finalFuDeqMap")
+  // each iq port can accept which instr type bundle
+  val iqDpTypeMap = reverseDpIqMap(finalFuDeqMap, io.out.flatten.size)
+  println(s"[IssueQueueImp] iqDpMap: $iqDpTypeMap")
 
-  val uopsIn = Wire(Vec(wrapper.numIn, DecoupledIO(new DynInst)))
-  val numInPorts = io.in.size
-  val outs = io.out.flatten
-  val outReadyMatrix = Wire(Vec(outs.size, Vec(numInPorts, Bool())))
-  outReadyMatrix.foreach(_.foreach(_ := false.B))
-  val selIdxOH = Wire(MixedVec(finalFuDeqMap.map(x =>
-    Vec(x.me.deqPortId.length, ValidIO(UInt(uopsIn.size.W)))
-  ).toSeq))
-  selIdxOH.foreach(_.foreach(_ := 0.U.asTypeOf(ValidIO(UInt(uopsIn.size.W)))))
 
-  finalFuDeqMap.zipWithIndex.foreach { case (dp, i) =>
-    // println("Dispatch Select Arith:")
-    // println(s"i: ${i} fuTypeSeq: ${fuTypeSeq} deqPortIdSeq: ${deqPortIdSeq}")
-    // println(s"maxSelNum: ${wrapper.numIn} selNum: ${deqPortIdSeq.length}")
-    val maxSelNum = wrapper.numIn
-    val selNum = dp.me.deqPortId.length
-    val portReadyVec = dp.me.deqPortId.map(x => outs(x).ready)
-    val canAcc = uopsIn.map(in => canAccept(dp.me.fuType.map(x => x.ohid), in.bits.fuType) && in.valid)
-    if(selNum <= maxSelNum) {
-      val selPort = SelectOne("circ", portReadyVec.toSeq, selNum)
-      val select = SelectOne("naive", canAcc, selNum)
-      for ((portId, j) <- dp.me.deqPortId.zipWithIndex) {
-        // select jth 'ready' issue queue port from the issue queue 'set'
-        val (selPortReady, selPortIdxOH) = selPort.getNthOH(j + 1)
-        // select jth 'valid' uop that can go to the issue queue 'set'
-        val (selectValid, selectIdxOH) = select.getNthOH(j + 1)
-        // connnect the dispatch uop with issue queue port
-        when(selPortReady && selectValid) {
-          // TODO: remote OHToUInt
-          selIdxOH(i)(OHToUInt(selPortIdxOH)).valid := selectValid
-          selIdxOH(i)(OHToUInt(selPortIdxOH)).bits := selectIdxOH.asUInt
-        }
-      }
-    } else {
-      val selPort = SelectOne("circ", portReadyVec.toSeq, maxSelNum)
-      val select = SelectOne("naive", canAcc, maxSelNum)
-      for(j <- 0 until maxSelNum) {
-        val (selPortReady, selPortIdxOH) = selPort.getNthOH(j + 1)
-        val (selectValid, selectIdxOH) = select.getNthOH(j + 1)
-        when(selPortReady && selectValid) {
-          selIdxOH(i)(OHToUInt(selPortIdxOH)).valid := selectValid
-          selIdxOH(i)(OHToUInt(selPortIdxOH)).bits := selectIdxOH.asUInt
-        }
+  val dpChoices: Seq[DpChoicesVec] = getChoices(finalFuDeqMap, iqPortIdxMap)
+  println(s"[IssueQueueImp] dpChoices: $dpChoices")
+
+  // Level1-Seq: lists divided by finalFuDeqMap
+  // Level2-Seq: lists of Bool of uopsIn that canAccepted by fuTypeList
+  val typeAcceptInfo = finalFuDeqMap.map(_.me.fuType).map(fuTypeList => uopsIn.map(uop =>
+    canAccept(fuTypeList.map(_.ohid), uop.bits.fuType) && uop.valid).toSeq)
+  // Level1-Seq: fuType lists divided by finalFuDeqMap(i)
+  // Level2-Seq: lists of dispatch uop(j)
+  // Level3-Seq: order info(k)
+  //   The j-th dp-uop is k-th fuType(i) uop
+  //   Start from 0. Valid is concerned
+  val typeOrderInfo = getInstrTypeOrder(finalFuDeqMap.map(_.me), typeAcceptInfo)
+
+  // generate
+  val selectMatrix = Wire(MixedVec(finalFuDeqMap.map{x =>
+    Vec(math.min(io.in.size, x.me.deqPortId.size), new Bundle{
+      // if this connection is valid
+      val valid = Bool()
+      // issue queu port id(among the issue queues side)
+      val deqPortId = UInt(outs.size.W)
+      // uop id(among the dispatch side)
+      val dpUopId = UInt(io.in.size.W)
+    })
+  }.toSeq))
+
+  finalFuDeqMap.zip(dpChoices).zip(typeOrderInfo).zipWithIndex.foreach {
+    case (((dpTypeInfo, choices), orders), dpTypeIdx) =>
+    // generate final Choice for later use
+    def chooseFromChoice(ch: DpChoicesVec): Seq[Int] = ch.rr.head
+    val finalChoice = chooseFromChoice(choices).map(x => UIntToOH(x.U)) // Just run, change it for better policy
+    // TODO: remote UIntToOH
+
+    selectMatrix(dpTypeIdx).zipWithIndex.foreach { case (con, con_idx) =>
+      con.valid := orders.map(_(con_idx)).reduce(_ | _)
+      // NOTE: deqPortId use OH, not UInt, in order to ParallelMux(outs.ready)
+      con.deqPortId := finalChoice(con_idx)
+      // NOTE: dpUopId use OH, not UInt, in order to ParallelMux(uopsIn)
+      con.dpUopId := ParallelMux(orders.map(_(con_idx)).toSeq, VecInit(uopsIn.indices.map(OHFromInt(_, uopsIn.size))))
+    }
+  }
+
+  // DontTouch for debug
+  dontTouch(selectMatrix)
+  // dontTouch(typeOrderInfo)
+
+  //============================================
+
+  // for each issue port: each dp-type-bundle can give a uop to this issue port
+  // dp-issue-bundle has priority, the high priority override low priority
+  val iqPortSelectVecMid = Wire(Vec(outs.size, Vec(finalFuDeqMap.size, Valid(UInt(io.in.size.W)))))
+  // select result from the issue queue view, used to generate valid
+  val iqPortSelectVec = Wire(Vec(outs.size, Vec(io.in.size, Bool())))
+  iqPortSelectVec.map(_.map(_ := false.B))
+  // dontTouch for debug
+  dontTouch(iqPortSelectVecMid)
+  dontTouch(iqPortSelectVec)
+
+  // for each issue queue, check the uop of each dp-type-bundle
+  iqDpTypeMap.zipWithIndex.foreach{ case (dpTypeMask, iqPortIdx) =>
+    // finalDepMap is sort by the priority(deqPortId.size).
+    // so first check low priority, then check high priority.
+    // let the high priority override low priority.
+    require(dpTypeMask.filter(_ == true).size <= 2, "Only 2 dpTypeBundle can be accepted by one issue queue")
+    dpTypeMask.indices.foreach{ dpTypeIdx =>
+      if (dpTypeMask(dpTypeIdx)) {
+      // the dpType Bundle can be accepted by this issue queue
+        val selectValidVec = selectMatrix(dpTypeIdx).map(con =>
+          con.valid && (con.deqPortId === OHFromInt(iqPortIdx, outs.size)))
+        iqPortSelectVecMid(iqPortIdx)(dpTypeIdx).valid := selectValidVec.reduce(_ | _)
+        iqPortSelectVecMid(iqPortIdx)(dpTypeIdx).bits  := ParallelMux(selectValidVec, selectMatrix(dpTypeIdx).map(_.dpUopId))
+
+        assert(PopCount(selectValidVec) <= 1.U, "one dpTypeBundle can only give one uop to one issue queue")
+      } else {
+        iqPortSelectVecMid(iqPortIdx)(dpTypeIdx) := DontCare
+        iqPortSelectVecMid(iqPortIdx)(dpTypeIdx).valid := false.B
+        // just set false, do not care the bits. No Mux needed
       }
     }
   }
 
-  val portSelIdxOH = finalFuDeqMap.zip(selIdxOH).map{ case (deqMap, selIdxOHSeq) =>
-    (deqMap.me.deqPortId, selIdxOHSeq)
-  }.toMap
-  println(s"[Dispatch2IQ] portSelIdxOH: $portSelIdxOH")
-  val finalportSelIdxOH: mutable.Map[Int, Seq[ValidIO[UInt]]] = expendPortSel(portSelIdxOH)
-  println(s"[Dispatch2IQ] finalportSelIdxOH: $finalportSelIdxOH")
-  println(s"outs size ${outs.size}")
-  finalportSelIdxOH.foreach{ case (portId, selSeq) =>
-    // the portId is issue queue port id: from 0 to numIQ*IQWidth
-    // if a issue queue port is select by multiple dispatch ports, select one from them
-    val finalSelIdxOH: UInt = PriorityMux(selSeq.map(_.valid).toSeq, selSeq.map(_.bits).toSeq)
-    outs(portId).valid := selSeq.map(_.valid).reduce(_ | _)
-    outs(portId).bits := Mux1H(finalSelIdxOH, uopsIn.map(_.bits))
-    // One Mux
-    when(outs(portId).valid) {
-      outReadyMatrix(portId).zipWithIndex.foreach { case (inReady, i) =>
-        // i from 0 to dpWidth
-        // One Mux
-        when(finalSelIdxOH(i)) {
-          // for the in Ready, there are outs.size*numInPorts Mux, which is 6*8 = 48
-          // horrible
-          inReady := outs(portId).ready
-        }
-      }
+  // for higher priorty, just ignore conflict(PopCount > 1)
+  // for lower  prioryt, stall by conflict(PopCount > 1)
+  iqPortSelectVec.zip(iqPortSelectVecMid).foreach{
+    case (res, mid) => {
+      // Actually, at most 2 for PriorityMux, others would be hard-written to false
+      assert(PopCount(mid.map(_.valid)) <= 2.U, "one dpTypeBundle can only be assigned to one issue queue")
+      res := ParallelPriorityMux(mid.map(_.valid), mid.map(_.bits)).asBools
+    }
+  }
+  // Multiple dispatch uop may be assigned to one issue port,
+  // use Priority to choose a higher priority one
+
+  // ===============================
+  // almost the same logic, but from the dispatch view
+  // Process in Parallel for better latency
+
+  // select result from the dp view, used to generate ready
+  // each dpUOp have 'finalPrioFuDeqpMap.size' dispatch result, but only one is Valid(OneHot)
+  // If multiply dpUops have the same result(iqPort), the low-priority is false
+  // NOTE: as we all know, the best choices is that the higher-index has the low-priority
+  //   But, for issue queue view, it causes worse latency to compare dpUop index
+  //   So, just use dpType for priority compare(which only needs a Mux)
+  //   And, issue queue ready is ignored at select stage
+  val dpUopSelectVecMid = Wire(Vec(io.in.size, Vec(finalFuDeqMap.size, Valid(UInt(outs.size.W)))))
+  val dpUopSelectVec = Wire(Vec(io.in.size, Vec(outs.size, Bool())))
+  dpUopSelectVec.map(_.map(_ := false.B))
+  dontTouch(dpUopSelectVecMid)
+  dontTouch(dpUopSelectVec)
+
+  dpUopSelectVecMid.indices.foreach{ case uopIdx =>
+    finalFuDeqMap.indices.foreach{ case dpTypeIdx =>
+      val selectValidVec = selectMatrix(dpTypeIdx).map(con =>
+        con.valid && (con.dpUopId === OHFromInt(uopIdx, io.in.size)))
+      dpUopSelectVecMid(uopIdx)(dpTypeIdx).valid := selectValidVec.reduce(_ | _)
+      dpUopSelectVecMid(uopIdx)(dpTypeIdx).bits  := ParallelMux(selectValidVec, selectMatrix(dpTypeIdx).map(_.deqPortId))
     }
   }
 
+  // TODO: only a few dpTypeBundle and at most 2-level conflicts
+  // Use it to remove use-less Mux(Only One-level + ParallelOR is OK)
+  // divide the dpType into multi List by Priority(actually two level)
+  // Use ParallelMux inside each level for latency
+  dpUopSelectVec.zip(dpUopSelectVecMid).foreach{
+    case (res, mid) => {
+      assert(PopCount(mid.map(_.valid)) <= 1.U, "one dpUop can only be assigned to one issue queue")
+      res := ParallelMux(mid.map(_.valid), mid.map(_.bits)).asBools
+    }
+  }
+  val dpUopIqPortReady = VecInit(dpUopSelectVec.map{ case iqPortOH =>
+    ParallelOR(iqPortOH.zip(outs.map(_.ready)).map{
+        case (chosen, ready) => chosen && ready
+    })
+  })
+  val dpUopBlockByIqPortReady = VecInit(dpUopIqPortReady.map(!_))
+  dontTouch(dpUopIqPortReady)
+  dontTouch(dpUopBlockByIqPortReady)
+
+  // second-low-priority handling
+  // Add a dpType-oritented Vec for conflict-checking
+  // Vec(dpType/dpTypePrioLevel, Vec(in.size, Vec(out.size, Bool)))
+  // Vec(dpUop.size, Valid(dpTypeIdx/dpTypeLevel/OH))
+  // dp_stall = is_low_level & low_level_valid & high_level_valid &  conflict
+  // Or Just a conflict Matrix( result is equal)
+  // when dpUops' iqIdx is the same, the high-prio is ok, the low-prio is stall
+  // Because dpUops can dequeue seperately, so this is OK
+  // when not seperately, need better choices generated to avoid dead-clock
+  val dpTypeConflictVecMid: Vec[Vec[Bool]] = Wire(Vec(outs.size, Vec(io.in.size, Bool())))
+  dpTypeConflictVecMid.map(_.map(_ := false.B))
+  val dpTypeConflictVec: Vec[Vec[Bool]] = Wire(Vec(outs.size, Vec(io.in.size, Bool())))
+  dontTouch(dpTypeConflictVecMid)
+  dontTouch(dpTypeConflictVec)
+
+  dpTypeConflictVecMid.zip(iqPortSelectVecMid).foreach{
+    case (conflict, mid) =>
+      // actually, at most 2 for ParallelMux, others would be hard-written to false
+      // TODO: check it at verilog result for Mux depth
+      conflict := ParallelMux(mid.map(_.valid), mid.map(_.bits)).asBools
+  }
+  dpTypeConflictVec.zip(dpTypeConflictVecMid).foreach {
+    case (con, mid) =>
+      // TODO: OneHot.checkOneHot use PopCount, may not optimal latency
+      // mid.map(_.valid) has a implicit feature that no more than 2 bits are 1
+      // Try to use the feature to optimize latency
+      val valid = !noMoreThanOH(mid.asUInt)
+      con := Mux(valid, ParallelPosteriorityMux(mid, mid.indices.map(OHFromInt(_, mid.size))),
+                     0.U(mid.size.W)).asBools
+  }
+  // each bit for dpUop, true for block
+  val dpUopBlockByConflict = ParallelOR(dpTypeConflictVec)
+  val dpUopBlockVec = VecInit(dpUopBlockByIqPortReady.zip(dpUopBlockByConflict).map(x => x._1 | x._2))
+  dontTouch(dpUopBlockVec)
+  dontTouch(dpUopBlockByConflict)
+
+  // use dispatch result for in-out connect
+  // connect out.ready to in.ready
   uopsIn <> io.in
-  uopsIn.foreach(_.ready := false.B)
-  uopsIn.zipWithIndex.foreach{ case (uopIn, idx) => uopIn.ready := outReadyMatrix.map(_(idx)).reduce(_ | _) }
+  uopsIn.zip(dpUopBlockVec).foreach{ x => x._1.ready := !x._2 }
+  // connect in.valid & bits to out.valid & bits
+  outs.zip(iqPortSelectVec).foreach{ case (out, select) =>
+    out.valid := ParallelOR(select)
+    out.bits := ParallelMux(select, uopsIn.map(_.bits))
+  }
 
+  // Read BusyTable from the dispatch side
   private val reqPsrcVec: IndexedSeq[UInt] = uopsIn.flatMap(in => in.bits.psrc.take(numRegSrc))
 
   private val intSrcStateVec = if (io.readIntState.isDefined) Some(Wire(Vec(numEnq * numRegSrc, SrcState()))) else None
@@ -364,6 +635,7 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
   // We always read physical register states when in gives the instructions.
   // This usually brings better timing.
   if (io.readIntState.isDefined) {
+    dontTouch(io.readIntState.get)
     require(io.readIntState.get.size >= reqPsrcVec.size,
       s"[Dispatch2IqArithImp] io.readIntState.get.size: ${io.readIntState.get.size}, psrc size: ${reqPsrcVec.size}")
     io.readIntState.get.map(_.req).zip(reqPsrcVec).foreach(x => x._1 := x._2)
@@ -373,6 +645,7 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
   }
 
   if (io.readVfState.isDefined) {
+    dontTouch(io.readVfState.get)
     require(io.readVfState.get.size >= reqPsrcVec.size,
       s"[Dispatch2IqArithImp] io.readVfState.get.size: ${io.readVfState.get.size}, psrc size: ${reqPsrcVec.size}")
     io.readVfState.get.map(_.req).zip(reqPsrcVec).foreach(x => x._1 := x._2)
@@ -382,9 +655,12 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
   }
 
   uopsIn
-    .flatMap(x => x.bits.srcState.take(numRegSrc) zip x.bits.srcType.take(numRegSrc))
+    .flatMap(x =>
+      x.bits.srcState.take(numRegSrc) zip
+      x.bits.srcType.take(numRegSrc))
     .zip(
-      intSrcStateVec.getOrElse(VecInit(Seq.fill(numEnq * numRegSrc)(SrcState.busy).toSeq)) zip vfSrcStateVec.getOrElse(VecInit(Seq.fill(numEnq * numRegSrc)(SrcState.busy).toSeq))
+      intSrcStateVec.getOrElse(VecInit(Seq.fill(numEnq * numRegSrc)(SrcState.busy).toSeq)) zip
+      vfSrcStateVec.getOrElse(VecInit(Seq.fill(numEnq * numRegSrc)(SrcState.busy).toSeq))
     )
     .foreach {
       case ((state: UInt, srcType), (intState, vfState)) =>
@@ -395,9 +671,12 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
         ))
   }
   uopsIn
-    .flatMap(x => x.bits.dataSource.take(numRegSrc) zip x.bits.srcType.take(numRegSrc))
+    .flatMap(x =>
+      x.bits.dataSource.take(numRegSrc) zip
+      x.bits.srcType.take(numRegSrc))
     .zip(
-      intDataSourceVec.getOrElse(VecInit(Seq.fill(numEnq * numRegSrc)(0.U.asTypeOf(DataSource())).toSeq)) zip vfDataSourceVec.getOrElse(VecInit(Seq.fill(numEnq * numRegSrc)(0.U.asTypeOf(DataSource())).toSeq))
+      intDataSourceVec.getOrElse(VecInit(Seq.fill(numEnq * numRegSrc)(0.U.asTypeOf(DataSource())).toSeq)) zip
+      vfDataSourceVec.getOrElse(VecInit(Seq.fill(numEnq * numRegSrc)(0.U.asTypeOf(DataSource())).toSeq))
     )
     .foreach {
       case ((dataSource, srcType), (intSource, vfSource)) =>
@@ -408,9 +687,12 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
         ))
     }
   uopsIn
-    .flatMap(x => x.bits.l1ExuOH.take(numRegSrc) zip x.bits.srcType.take(numRegSrc))
+    .flatMap(x =>
+      x.bits.l1ExuOH.take(numRegSrc) zip
+      x.bits.srcType.take(numRegSrc))
     .zip(
-      intL1ExuOHVec.getOrElse(VecInit.fill(numEnq * numRegSrc)(0.U.asTypeOf(ExuOH()))) zip vfL1ExuOHVec.getOrElse(VecInit.fill(numEnq * numRegSrc)(0.U.asTypeOf(ExuOH())))
+      intL1ExuOHVec.getOrElse(VecInit.fill(numEnq * numRegSrc)(0.U.asTypeOf(ExuOH()))) zip
+      vfL1ExuOHVec.getOrElse(VecInit.fill(numEnq * numRegSrc)(0.U.asTypeOf(ExuOH())))
     )
     .foreach {
       case ((l1ExuOH: UInt, srcType), (intL1ExuOH, vfL1ExuOH)) =>
