@@ -88,7 +88,6 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   // Modules
 
   val entries = Module(new Entries)
-  val subDeqPolicies  = deqFuCfgs.map(x => if (x.nonEmpty) Some(Module(new DeqPolicy())) else None)
   val fuBusyTableWrite = params.exuBlockParams.map { case x => OptionWrapper(x.latencyValMax > 0, Module(new FuBusyTableWrite(x.fuLatencyMap))) }
   val fuBusyTableRead = params.exuBlockParams.map { case x => OptionWrapper(x.latencyValMax > 0, Module(new FuBusyTableRead(x.fuLatencyMap))) }
   val intWbBusyTableWrite = params.exuBlockParams.map { case x => OptionWrapper(x.intLatencyCertain, Module(new FuBusyTableWrite(x.intFuLatencyMap))) }
@@ -143,16 +142,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val s0_doEnqSelValidVec = s0_enqSelValidVec.map(_ && s0_enqNotFlush) //enqValid && notFlush && enqReady
 
 
-  // One deq port only need one special deq policy
-  val subDeqSelValidVec: Seq[Option[Vec[Bool]]] = subDeqPolicies.map(_.map(_ => Wire(Vec(params.numDeq, Bool()))))
-  val subDeqSelOHVec: Seq[Option[Vec[UInt]]] = subDeqPolicies.map(_.map(_ => Wire(Vec(params.numDeq, UInt(params.numEntries.W)))))
-
   val finalDeqSelValidVec = Wire(Vec(params.numDeq, Bool()))
   val finalDeqSelOHVec    = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
-  val finalDeqOH: IndexedSeq[UInt] = (finalDeqSelValidVec zip finalDeqSelOHVec).map { case (valid, oh) =>
-    Mux(valid, oh, 0.U)
-  }
-  val finalDeqMask: UInt = finalDeqOH.reduce(_ | _)
 
   val validVec = VecInit(entries.io.valid.asBools)
   val canIssueVec = VecInit(entries.io.canIssue.asBools)
@@ -160,14 +151,14 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val deqFirstIssueVec = VecInit(entries.io.deq.map(_.isFirstIssue))
 
   val dataSources: Vec[Vec[DataSource]] = entries.io.dataSources
-  val finalDataSources: Vec[Vec[DataSource]] = VecInit(finalDeqOH.map(oh => Mux1H(oh, dataSources)))
+  val finalDataSources: Vec[Vec[DataSource]] = VecInit(finalDeqSelOHVec.map(oh => Mux1H(oh, dataSources)))
   // (entryIdx)(srcIdx)(exuIdx)
   val wakeUpL1ExuOH: Option[Vec[Vec[Vec[Bool]]]] = entries.io.srcWakeUpL1ExuOH
   val srcTimer: Option[Vec[Vec[UInt]]] = entries.io.srcTimer
 
   // (deqIdx)(srcIdx)(exuIdx)
-  val finalWakeUpL1ExuOH: Option[Vec[Vec[Vec[Bool]]]] = wakeUpL1ExuOH.map(x => VecInit(finalDeqOH.map(oh => Mux1H(oh, x))))
-  val finalSrcTimer = srcTimer.map(x => VecInit(finalDeqOH.map(oh => Mux1H(oh, x))))
+  val finalWakeUpL1ExuOH: Option[Vec[Vec[Vec[Bool]]]] = wakeUpL1ExuOH.map(x => VecInit(finalDeqSelOHVec.map(oh => Mux1H(oh, x))))
+  val finalSrcTimer = srcTimer.map(x => VecInit(finalDeqSelOHVec.map(oh => Mux1H(oh, x))))
 
   val wakeupEnqSrcStateBypassFromWB: Vec[Vec[UInt]] = Wire(Vec(io.enq.size, Vec(io.enq.head.bits.srcType.size, SrcState())))
   val wakeupEnqSrcStateBypassFromIQ: Vec[Vec[UInt]] = Wire(Vec(io.enq.size, Vec(io.enq.head.bits.srcType.size, SrcState())))
@@ -223,14 +214,17 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val transEntryDeqVec = Wire(Vec(params.numEnq, ValidIO(new EntryBundle)))
   val deqEntryVec = Wire(Vec(params.numDeq, ValidIO(new EntryBundle)))
   val transSelVec = Wire(Vec(params.numEnq, UInt((params.numEntries-params.numEnq).W)))
+  val canIssueMergeAllBusy = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
+  val deqCanIssue = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
 
   val enqEntryOldestSel = Wire(Vec(params.numDeq, ValidIO(UInt(params.numEnq.W))))
   val othersEntryOldestSel = Wire(Vec(params.numDeq, ValidIO(UInt((params.numEntries - params.numEnq).W))))
-  val subDeqPolicyRequest = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
-  val canIssueMergeAllBusy = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
-
   val deqSelValidVec = Wire(Vec(params.numDeq, Bool()))
   val deqSelOHVec    = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
+
+  val subDeqSelValidVec = OptionWrapper(params.deqFuSame, Wire(Vec(params.numDeq, Bool())))
+  val subDeqSelOHVec = OptionWrapper(params.deqFuSame, Wire(Vec(params.numDeq, UInt(params.numEntries.W))))
+  val subDeqRequest = OptionWrapper(params.deqFuSame, Wire(UInt(params.numEntries.W)))
 
   /**
     * Connection of [[entries]]
@@ -293,13 +287,11 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     entriesIO.deq.zipWithIndex.foreach { case (deq, i) =>
       deq.enqEntryOldestSel := enqEntryOldestSel(i)
       deq.othersEntryOldestSel := othersEntryOldestSel(i)
-      deq.subDeqPolicyRequest := { if (subDeqPolicies(i).nonEmpty) subDeqPolicyRequest(i) else 0.U }
-      deq.subDeqSelOH := subDeqSelOHVec(i).getOrElse(Seq(0.U, 0.U))
+      deq.subDeqRequest.foreach(_ := subDeqRequest.get)
+      deq.subDeqSelOH.foreach(_ := subDeqSelOHVec.get(i))
       deq.deqReady := io.deq(i).ready
       deq.deqSelOH.valid := deqSelValidVec(i)
       deq.deqSelOH.bits := deqSelOHVec(i)
-      deq.finalDeqSelOH.valid := finalDeqSelValidVec(i)
-      deq.finalDeqSelOH.bits := finalDeqSelOHVec(i)
     }
     entriesIO.og0Resp.zipWithIndex.foreach { case (og0Resp, i) =>
       og0Resp.valid := io.og0Resp(i).valid
@@ -342,7 +334,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
 
   protected val deqCanAcceptVec: Seq[IndexedSeq[Bool]] = deqFuCfgs.map { fuCfgs: Seq[FuConfig] =>
     fuTypeVec.map(fuType =>
-      FuType.FuTypeOrR(fuType, fuCfgs.map(_.fuType))) // C+E0    C+E1
+      FuType.FuTypeOrR(fuType, fuCfgs.map(_.fuType)))
   }
 
   canIssueMergeAllBusy.zipWithIndex.foreach { case (merge, i) => 
@@ -361,13 +353,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     merge := mergeVfWbBusy
   }
 
-  subDeqPolicies.zipWithIndex.foreach { case (dpOption: Option[DeqPolicy], i) =>
-    if (dpOption.nonEmpty) {
-      val dp = dpOption.get
-      dp.io.request             := subDeqPolicyRequest(i)
-      subDeqSelValidVec(i).get  := dp.io.deqSelOHVec.map(oh => oh.valid)
-      subDeqSelOHVec(i).get     := dp.io.deqSelOHVec.map(oh => oh.bits)
-    }
+  deqCanIssue.zipWithIndex.foreach { case (req, i) =>
+    req := canIssueMergeAllBusy(i) & VecInit(deqCanAcceptVec(i)).asUInt
   }
 
   if (params.numDeq == 2) {
@@ -375,30 +362,27 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   }
 
   if (params.numDeq == 2 && params.deqFuSame) {
-    enqEntryOldestSel(0) := NewAgeDetector(numEntries = params.numEnq,
-      enq = VecInit(s0_doEnqSelValidVec),
-      clear = VecInit(clearVec.take(params.numEnq)),
-      canIssue = canIssueVec.asUInt(params.numEnq-1, 0)
-    )
-    enqEntryOldestSel(1) := DontCare
+    enqEntryOldestSel := DontCare
 
     othersEntryOldestSel(0) := AgeDetector(numEntries = params.numEntries - params.numEnq,
       enq = VecInit(transEntryDeqVec.zip(transSelVec).map{ case (transEntry, transSel) => Fill(params.numEntries-params.numEnq, transEntry.valid) & transSel }),
-      deq = VecInit(clearVec.drop(params.numEnq)).asUInt,
       canIssue = canIssueVec.asUInt(params.numEntries-1, params.numEnq)
     )
     othersEntryOldestSel(1) := DontCare
 
-    subDeqPolicyRequest.zipWithIndex.foreach { case (req, i) =>
-      req := canIssueVec.asUInt & ~Cat(othersEntryOldestSel(0).bits, enqEntryOldestSel(0).bits)
-    }
+    subDeqRequest.get := canIssueVec.asUInt & ~Cat(othersEntryOldestSel(0).bits, 0.U((params.numEnq).W))
 
-    val deqRequestVec = VecInit(othersEntryOldestSel(0).valid, subDeqSelValidVec(0).getOrElse(Seq(false.B)).head, subDeqSelValidVec(0).getOrElse(Seq(false.B)).last, enqEntryOldestSel(0).valid)
-    val deqOHVec      = VecInit(Cat(othersEntryOldestSel(0).bits, 0.U((params.numEnq).W)), subDeqSelOHVec(0).getOrElse(Seq(0.U)).head, subDeqSelOHVec(0).getOrElse(Seq(0.U)).last, Cat(0.U((params.numEntries-params.numEnq).W), enqEntryOldestSel(0).bits))
+    val subDeqPolicy = Module(new DeqPolicy())
+    subDeqPolicy.io.request := subDeqRequest.get
+    subDeqSelValidVec.get := subDeqPolicy.io.deqSelOHVec.map(oh => oh.valid)
+    subDeqSelOHVec.get := subDeqPolicy.io.deqSelOHVec.map(oh => oh.bits)
 
-    deqSelValidVec.zipWithIndex.foreach { case(deqValid, i) => deqValid := SelectOne("circ", deqRequestVec, params.numDeq).getNthOH(i + 1)._1 }
-    deqSelOHVec(0) := PriorityMux(deqRequestVec, deqOHVec.map(_ & canIssueMergeAllBusy(0)))
-    deqSelOHVec(1) := PriorityMux(deqRequestVec.reverse, deqOHVec.map(_ & canIssueMergeAllBusy(1)).reverse)
+    deqSelValidVec(0) := othersEntryOldestSel(0).valid || subDeqSelValidVec.get(0)
+    deqSelValidVec(1) := subDeqSelValidVec.get(1)
+    deqSelOHVec(0) := Mux(othersEntryOldestSel(0).valid, 
+                          Cat(othersEntryOldestSel(0).bits, 0.U((params.numEnq).W)), 
+                          subDeqSelOHVec.get(0)) & canIssueMergeAllBusy(0)
+    deqSelOHVec(1) := subDeqSelOHVec.get(1) & canIssueMergeAllBusy(1)
 
     finalDeqSelValidVec.zip(finalDeqSelOHVec).zip(deqSelValidVec).zip(deqSelOHVec).zipWithIndex.foreach { case ((((selValid, selOH), deqValid), deqOH), i) =>
       selValid := deqValid && deqOH.orR && io.deq(i).ready
@@ -406,10 +390,6 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     }
   }
   else {
-    subDeqPolicyRequest.zipWithIndex.foreach { case (req, i) =>
-      req := canIssueMergeAllBusy(i) & VecInit(deqCanAcceptVec(i)).asUInt
-    }
-
     val enqCanAcceptVec: Seq[IndexedSeq[Bool]] = deqFuCfgs.map { fuCfgs: Seq[FuConfig] =>
       io.enq.map(_.bits.fuType).map(fuType =>
         FuType.FuTypeOrR(fuType, fuCfgs.map(_.fuType))) // C+E0    C+E1
@@ -423,24 +403,20 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     enqEntryOldestSel.zipWithIndex.foreach { case (sel, deqIdx) =>
       sel := NewAgeDetector(numEntries = params.numEnq,
           enq = VecInit(enqCanAcceptVec(deqIdx).zip(s0_doEnqSelValidVec).map{ case (doCanAccept, valid) => doCanAccept && valid }),
-          clear = VecInit(clearVec.take(params.numEnq)),
-          canIssue = canIssueMergeAllBusy(deqIdx)(params.numEnq-1, 0)
+          canIssue = deqCanIssue(deqIdx)(params.numEnq-1, 0)
         )
     }
 
     othersEntryOldestSel.zipWithIndex.foreach { case (sel, deqIdx) =>
       sel := AgeDetector(numEntries = params.numEntries - params.numEnq,
           enq = VecInit(transCanAcceptVec(deqIdx).zip(transSelVec).map{ case (doCanAccept, transSel) => Fill(params.numEntries-params.numEnq, doCanAccept) & transSel }),
-          deq = VecInit(clearVec.drop(params.numEnq)).asUInt,
-          canIssue = canIssueMergeAllBusy(deqIdx)(params.numEntries-1, params.numEnq)
+          canIssue = deqCanIssue(deqIdx)(params.numEntries-1, params.numEnq)
         )
     }
 
     deqSelValidVec.zip(deqSelOHVec).zipWithIndex.foreach { case ((selValid, selOH), i) =>
-      selValid := othersEntryOldestSel(i).valid || enqEntryOldestSel(i).valid || subDeqSelValidVec(i).getOrElse(Seq(false.B)).head
-      selOH := Mux(othersEntryOldestSel(i).valid, Cat(othersEntryOldestSel(i).bits, 0.U((params.numEnq).W)),
-               Mux(enqEntryOldestSel(i).valid, Cat(0.U((params.numEntries-params.numEnq).W), enqEntryOldestSel(i).bits),
-                   subDeqSelOHVec(i).getOrElse(Seq(0.U)).head))
+      selValid := othersEntryOldestSel(i).valid || enqEntryOldestSel(i).valid
+      selOH := Cat(othersEntryOldestSel(i).bits, Fill(params.numEnq, enqEntryOldestSel(i).valid && !othersEntryOldestSel(i).valid) & enqEntryOldestSel(i).bits)
     }
 
     finalDeqSelValidVec.zip(finalDeqSelOHVec).zip(deqSelValidVec).zip(deqSelOHVec).zipWithIndex.foreach { case ((((selValid, selOH), deqValid), deqOH), i) =>

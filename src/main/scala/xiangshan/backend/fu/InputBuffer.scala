@@ -98,7 +98,7 @@ class InputBuffer(numEntries: Int, enableBypass: Boolean)(implicit p: Parameters
   }
 
   val flushDeq = VecInit(flushVec).asUInt
-  age.io.deq := Mux(doDequeue, age.io.out, 0.U) | flushDeq
+  //age.io.deq := Mux(doDequeue, age.io.out, 0.U) | flushDeq
 
   val numValid = PopCount(emptyVec.map(e => !e))
   XSPerfHistogram("num_valid", numValid, true.B, 0, numEntries, 1)
