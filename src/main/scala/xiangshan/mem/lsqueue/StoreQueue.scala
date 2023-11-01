@@ -829,7 +829,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   }
 
   // Read vaddr for mem exception
-  io.exceptionAddr.vaddr := vaddrModule.io.rdata(CommitWidth)
+  io.exceptionAddr.vaddr := vaddrModule.io.rdata(MaxStoreCommitWidth)
 
   // misprediction recovery / exception redirect
   // invalidate sq term using robIdx
