@@ -193,13 +193,15 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     UIntToMask(validEntries(log2Ceil(DecodeWidth) - 1, 0), DecodeWidth)
   )
   // Data
+  // Read port
+  // 2-stage, IBufNBank * (bankSize -> 1) + IBufNBank -> 1
+  // Should be better than IBufSize -> 1 in area, with no significant latency increase
+  private val readStage1: Vec[IBufEntry] = VecInit.tabulate(IBufNBank)(
+    bankID => Mux1H(UIntToOH(deqInBankPtr(bankID).value), bankedIBufView(bankID))
+  )
   for (i <- 0 until DecodeWidth) {
     io.out(i).valid := validVec(i)
-
-    // Read port
-    // 2-stage, IBufNBank * (bankSize -> 1) + IBufNBank -> 1
-    // Should be better than IBufSize -> 1 in area, with no significant latency increase
-    io.out(i).bits := bankedIBufView(deqBankPtrVec(i).value)(deqInBankPtr(deqBankPtrVec(i).value).value).toCtrlFlow
+    io.out(i).bits := Mux1H(UIntToOH(deqBankPtrVec(i).value), readStage1).toCtrlFlow
   }
   // Pointer maintenance
   deqBankPtrVec := Mux(io.out.head.ready, VecInit(deqBankPtrVec.map(_ + numTryDeq)), deqBankPtrVec)
