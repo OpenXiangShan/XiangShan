@@ -49,8 +49,8 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val wbBusyTableWrite = Output(params.genWbFuBusyTableWriteBundle())
   val wakeupFromWB: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
   val wakeupFromIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
-  val og0Cancel = Input(ExuVec(backendParams.numExu))
-  val og1Cancel = Input(ExuVec(backendParams.numExu))
+  val og0Cancel = Input(ExuOH(backendParams.numExu))
+  val og1Cancel = Input(ExuOH(backendParams.numExu))
   val ldCancel = Vec(backendParams.LduCnt, Flipped(new LoadCancelIO))
 
   // Outputs
@@ -164,11 +164,11 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val dataSources: Vec[Vec[DataSource]] = entries.io.dataSources
   val finalDataSources: Vec[Vec[DataSource]] = VecInit(finalDeqOH.map(oh => Mux1H(oh, dataSources)))
   // (entryIdx)(srcIdx)(exuIdx)
-  val wakeUpL1ExuOH: Option[Vec[Vec[Vec[Bool]]]] = entries.io.srcWakeUpL1ExuOH
+  val wakeUpL1ExuOH: Option[Vec[Vec[UInt]]] = entries.io.srcWakeUpL1ExuOH
   val srcTimer: Option[Vec[Vec[UInt]]] = entries.io.srcTimer
 
   // (deqIdx)(srcIdx)(exuIdx)
-  val finalWakeUpL1ExuOH: Option[Vec[Vec[Vec[Bool]]]] = wakeUpL1ExuOH.map(x => VecInit(finalDeqOH.map(oh => Mux1H(oh, x))))
+  val finalWakeUpL1ExuOH: Option[Vec[Vec[UInt]]] = wakeUpL1ExuOH.map(x => VecInit(finalDeqOH.map(oh => Mux1H(oh, x))))
   val finalSrcTimer = srcTimer.map(x => VecInit(finalDeqOH.map(oh => Mux1H(oh, x))))
 
   val wakeupEnqSrcStateBypassFromWB: Vec[Vec[UInt]] = Wire(Vec(io.enq.size, Vec(io.enq.head.bits.srcType.size, SrcState())))
@@ -259,7 +259,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         case Some(value) => value.zip(srcWakeUpEnqByIQMatrix(i)).zipWithIndex.foreach {
           case ((exuOH, wakeUpByIQOH), srcIdx) =>
             when(wakeUpByIQOH.asUInt.orR) {
-              exuOH := Mux1H(wakeUpByIQOH, io.wakeupFromIQ.map(x => MathUtils.IntToOH(x.bits.exuIdx).U(backendParams.numExu.W)).toSeq).asBools
+              exuOH := Mux1H(wakeUpByIQOH, io.wakeupFromIQ.toSeq.map(x => MathUtils.IntToOH(x.bits.exuIdx).U(backendParams.numExu.W)))
             }.otherwise {
               exuOH := s0_enqBits(i).l1ExuOH(srcIdx)
             }
@@ -513,9 +513,9 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         )
     }
     if(params.hasIQWakeUp) {
-      deq.bits.common.l1ExuVec := finalWakeUpL1ExuOH.get(i)
+      deq.bits.common.l1ExuOH := finalWakeUpL1ExuOH.get(i)
     } else {
-      deq.bits.common.l1ExuVec := deqEntryVec(i).bits.payload.l1ExuOH.take(deq.bits.common.l1ExuVec.length)
+      deq.bits.common.l1ExuOH := deqEntryVec(i).bits.payload.l1ExuOH.take(deq.bits.common.l1ExuOH.length)
     }
     deq.bits.common.srcTimer.foreach(_ := finalSrcTimer.get(i))
     deq.bits.common.loadDependency.foreach(_ := deqEntryVec(i).bits.status.mergedLoadDependency.get)

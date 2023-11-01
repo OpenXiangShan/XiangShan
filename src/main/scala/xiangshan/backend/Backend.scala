@@ -153,11 +153,11 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   wbDataPath.io.fromIntExu.flatten.filter(x => x.bits.params.writeIntRf)
 
   private val vconfig = dataPath.io.vconfigReadPort.data
-  private val og1CancelVec: Vec[Bool] = dataPath.io.og1CancelVec
-  private val og0CancelVecFromDataPath: Vec[Bool] = dataPath.io.og0CancelVec
-  private val og0CancelVecFromCancelNet: Vec[Bool] = cancelNetwork.io.out.og0CancelVec
-  private val og0CancelVecFromFinalIssue: Vec[Bool] = Wire(chiselTypeOf(dataPath.io.og0CancelVec))
-  private val og0CancelVec: Seq[Bool] = og0CancelVecFromDataPath.zip(og0CancelVecFromCancelNet).zip(og0CancelVecFromFinalIssue).map(x => x._1._1 | x._1._2 | x._2)
+  private val og1CancelOH: UInt = dataPath.io.og1CancelOH
+  private val og0CancelOHFromDataPath: UInt = dataPath.io.og0CancelOH
+  private val og0CancelOHFromCancelNet: UInt = cancelNetwork.io.out.og0CancelOH
+  private val og0CancelOHFromFinalIssue: UInt = Wire(chiselTypeOf(dataPath.io.og0CancelOH))
+  private val og0CancelOH: UInt = og0CancelOHFromDataPath | og0CancelOHFromCancelNet | og0CancelOHFromFinalIssue
   private val cancelToBusyTable = dataPath.io.cancelToBusyTable
 
   ctrlBlock.io.fromTop.hartId := io.fromTop.hartId
@@ -192,8 +192,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   intScheduler.io.vfWriteBack := 0.U.asTypeOf(intScheduler.io.vfWriteBack)
   intScheduler.io.fromDataPath.resp := dataPath.io.toIntIQ
   intScheduler.io.fromSchedulers.wakeupVec.foreach { wakeup => wakeup := iqWakeUpMappedBundle(wakeup.bits.exuIdx) }
-  intScheduler.io.fromDataPath.og0Cancel := og0CancelVec
-  intScheduler.io.fromDataPath.og1Cancel := og1CancelVec
+  intScheduler.io.fromDataPath.og0Cancel := og0CancelOH
+  intScheduler.io.fromDataPath.og1Cancel := og1CancelOH
   intScheduler.io.ldCancel := io.mem.ldCancel
   intScheduler.io.fromDataPath.cancelToBusyTable := cancelToBusyTable
 
@@ -217,8 +217,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   memScheduler.io.fromMem.get.ldaFeedback := io.mem.ldaIqFeedback
   memScheduler.io.fromMem.get.staFeedback := io.mem.staIqFeedback
   memScheduler.io.fromSchedulers.wakeupVec.foreach { wakeup => wakeup := iqWakeUpMappedBundle(wakeup.bits.exuIdx) }
-  memScheduler.io.fromDataPath.og0Cancel := og0CancelVec
-  memScheduler.io.fromDataPath.og1Cancel := og1CancelVec
+  memScheduler.io.fromDataPath.og0Cancel := og0CancelOH
+  memScheduler.io.fromDataPath.og1Cancel := og1CancelOH
   memScheduler.io.ldCancel := io.mem.ldCancel
   memScheduler.io.fromDataPath.cancelToBusyTable := cancelToBusyTable
 
@@ -230,16 +230,16 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   vfScheduler.io.vfWriteBack := wbDataPath.io.toVfPreg
   vfScheduler.io.fromDataPath.resp := dataPath.io.toVfIQ
   vfScheduler.io.fromSchedulers.wakeupVec.foreach { wakeup => wakeup := iqWakeUpMappedBundle(wakeup.bits.exuIdx) }
-  vfScheduler.io.fromDataPath.og0Cancel := og0CancelVec
-  vfScheduler.io.fromDataPath.og1Cancel := og1CancelVec
+  vfScheduler.io.fromDataPath.og0Cancel := og0CancelOH
+  vfScheduler.io.fromDataPath.og1Cancel := og1CancelOH
   vfScheduler.io.ldCancel := io.mem.ldCancel
   vfScheduler.io.fromDataPath.cancelToBusyTable := cancelToBusyTable
 
   cancelNetwork.io.in.int <> intScheduler.io.toDataPath
   cancelNetwork.io.in.vf  <> vfScheduler.io.toDataPath
   cancelNetwork.io.in.mem <> memScheduler.io.toDataPath
-  cancelNetwork.io.in.og0CancelVec := og0CancelVecFromDataPath.zip(og0CancelVecFromFinalIssue).map(x => x._1 || x._2)
-  cancelNetwork.io.in.og1CancelVec := og1CancelVec
+  cancelNetwork.io.in.og0CancelOH := og0CancelOHFromDataPath | og0CancelOHFromFinalIssue
+  cancelNetwork.io.in.og1CancelOH := og1CancelOH
   intScheduler.io.fromCancelNetwork <> cancelNetwork.io.out.int
   vfScheduler.io.fromCancelNetwork <> cancelNetwork.io.out.vf
   memScheduler.io.fromCancelNetwork <> cancelNetwork.io.out.mem
@@ -456,14 +456,13 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   io.mem.lsqEnqIO <> memScheduler.io.memIO.get.lsqEnqIO
   io.mem.robLsqIO <> ctrlBlock.io.robio.lsq
 
-  private val intFinalIssueBlock = intExuBlock.io.in.flatten.map(_ => false.B)
-  private val vfFinalIssueBlock = vfExuBlock.io.in.flatten.map(_ => false.B)
-  private val memFinalIssueBlock = io.mem.issueUops zip memExuBlocksHasLDU.flatten map {
-    case (out, isLdu) =>
-      if (isLdu) RegNext(out.valid && !out.ready, false.B)
-      else false.B
+  private val intFinalIssueBlock = intExuBlock.io.in.flatten.toSeq.map(_ => false.B)
+  private val vfFinalIssueBlock = vfExuBlock.io.in.flatten.toSeq.map(_ => false.B)
+  private val memFinalIssueBlock = io.mem.issueUops.toSeq zip memExuBlocksHasLDU.flatten.toSeq map {
+    case (out, true) => RegNext(out.valid && !out.ready, false.B)
+    case (_, false) => false.B
   }
-  og0CancelVecFromFinalIssue := (intFinalIssueBlock ++ vfFinalIssueBlock ++ memFinalIssueBlock).toSeq
+  og0CancelOHFromFinalIssue := VecInit(intFinalIssueBlock ++ vfFinalIssueBlock ++ memFinalIssueBlock).asUInt
 
   io.frontendSfence := fenceio.sfence
   io.frontendTlbCsr := csrio.tlb

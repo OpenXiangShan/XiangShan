@@ -6,7 +6,7 @@ import chisel3.util._
 import utility.ZeroExt
 import xiangshan.XSBundle
 import xiangshan.backend.BackendParams
-import xiangshan.backend.Bundles.{ExuBypassBundle, ExuInput, ExuVec, ExuOutput}
+import xiangshan.backend.Bundles.{ExuBypassBundle, ExuInput, ExuOH, ExuOutput}
 import xiangshan.backend.issue.{IntScheduler, MemScheduler, VfScheduler}
 import xiangshan.backend.datapath.DataConfig.RegDataMaxWidth
 
@@ -61,8 +61,8 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends Mod
   private val toExus: Seq[DecoupledIO[ExuInput]] = (io.toExus.int ++ io.toExus.vf ++ io.toExus.mem).flatten.toSeq
 
   // (exuIdx, srcIdx, bypassExuIdx)
-  private val forwardOrBypassValidVec3: MixedVec[Vec[Vec[Bool]]] = MixedVecInit(
-    fromDPs.map(x => x.bits.l1ExuVec)
+  private val forwardOrBypassValidVec3: MixedVec[Vec[UInt]] = MixedVecInit(
+    fromDPs.map(x => x.bits.l1ExuOH)
   )
 
   private val forwardDataVec: Vec[UInt] = VecInit(

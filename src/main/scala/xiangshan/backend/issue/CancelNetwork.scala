@@ -5,7 +5,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import xiangshan.backend.BackendParams
-import xiangshan.backend.Bundles.{ExuVec, IssueQueueIssueBundle}
+import xiangshan.backend.Bundles.{ExuOH, IssueQueueIssueBundle}
 
 class CancelNetworkIO(backendParams: BackendParams)(implicit p: Parameters) extends Bundle {
   private val numExu = backendParams.numExu
@@ -14,9 +14,9 @@ class CancelNetworkIO(backendParams: BackendParams)(implicit p: Parameters) exte
     val int = Flipped(MixedVec(backendParams.intSchdParams.get.issueBlockParams.map(_.genIssueDecoupledBundle)))
     val vf  = Flipped(MixedVec(backendParams.vfSchdParams.get.issueBlockParams.map(_.genIssueDecoupledBundle)))
     val mem = Flipped(MixedVec(backendParams.memSchdParams.get.issueBlockParams.map(_.genIssueDecoupledBundle)))
-    val og0CancelVec = Input(ExuVec(numExu))
+    val og0CancelOH = Input(ExuOH(numExu))
     // Todo: remove this when no uop would be canceled at og1
-    val og1CancelVec = Input(ExuVec(numExu))
+    val og1CancelOH = Input(ExuOH(numExu))
 
     def allIssue: Seq[DecoupledIO[IssueQueueIssueBundle]] = (Seq() :+ int :+ vf :+ mem).flatten.flatten
   }
@@ -24,7 +24,7 @@ class CancelNetworkIO(backendParams: BackendParams)(implicit p: Parameters) exte
     val int = MixedVec(backendParams.intSchdParams.get.issueBlockParams.map(_.genIssueDecoupledBundle))
     val vf  = MixedVec(backendParams.vfSchdParams.get.issueBlockParams.map(_.genIssueDecoupledBundle))
     val mem = MixedVec(backendParams.memSchdParams.get.issueBlockParams.map(_.genIssueDecoupledBundle))
-    val og0CancelVec = Output(ExuVec(numExu))
+    val og0CancelOH = Output(ExuOH(numExu))
     def allIssue: Seq[DecoupledIO[IssueQueueIssueBundle]] = (Seq() :+ int :+ vf :+ mem).flatten.flatten
   }
 }
@@ -41,26 +41,22 @@ class CancelNetworkImp(backendParams: BackendParams, override val wrapper: LazyM
 
   val io = IO(new CancelNetworkIO(backendParams))
 
-  private val og0CancelVec = Wire(ExuVec(numExu))
-  private val og1CancelVec = WireInit(io.in.og1CancelVec)
-  private val transferredCancelVec = RegInit(VecInit(Seq.fill(numExu)(false.B)))
+  private val og0CancelOH = Wire(ExuOH(numExu))
+  private val og1CancelOH = WireInit(io.in.og1CancelOH)
+  private val transferredCancelOH = RegInit(0.U(numExu.W))
 
   private val isInferWakeUpVec = WireInit(VecInit(allExuParams.map(_.isIQWakeUpSink.B)))
   dontTouch(isInferWakeUpVec)
 
-  og0CancelVec.zipWithIndex.foreach { case (og0Cancel, i) =>
-    og0Cancel := io.in.og0CancelVec(i) || transferredCancelVec(i)
-  }
+  og0CancelOH := io.in.og0CancelOH | transferredCancelOH
 
-  transferredCancelVec.zipWithIndex.foreach { case (transferredCancel, i) =>
-    transferredCancel := io.in.allIssue(i).fire && !io.out.allIssue(i).fire
-  }
+  transferredCancelOH := VecInit(io.in.allIssue.zip(io.out.allIssue).map(x => x._1.fire && !x._2.fire)).asUInt
 
   io.out.allIssue.zip(io.in.allIssue).zipWithIndex.foreach { case ((out, in), i) =>
-    out.valid := in.valid && !in.bits.common.needCancel(og0CancelVec, og1CancelVec)
+    out.valid := in.valid && !in.bits.common.needCancel(og0CancelOH, og1CancelOH)
     out.bits := in.bits
     in.ready := out.ready
   }
 
-  io.out.og0CancelVec := transferredCancelVec
+  io.out.og0CancelOH := transferredCancelOH
 }

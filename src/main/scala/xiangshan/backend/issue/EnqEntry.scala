@@ -19,8 +19,8 @@ class EnqEntryIO(implicit p: Parameters, params: IssueBlockParams) extends XSBun
   val flush = Flipped(ValidIO(new Redirect))
   val wakeUpFromWB: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
   val wakeUpFromIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
-  val og0Cancel = Input(ExuVec(backendParams.numExu))
-  val og1Cancel = Input(ExuVec(backendParams.numExu))
+  val og0Cancel = Input(ExuOH(backendParams.numExu))
+  val og1Cancel = Input(ExuOH(backendParams.numExu))
   val ldCancel = Vec(backendParams.LduCnt, Flipped(new LoadCancelIO))
   val deqSel = Input(Bool())
   val deqPortIdxWrite = Input(UInt(1.W))
@@ -32,7 +32,7 @@ class EnqEntryIO(implicit p: Parameters, params: IssueBlockParams) extends XSBun
   val clear = Output(Bool())
   val fuType = Output(FuType())
   val dataSource = Output(Vec(params.numRegSrc, DataSource()))
-  val srcWakeUpL1ExuOH = OptionWrapper(params.hasIQWakeUp, Output(Vec(params.numRegSrc, ExuVec())))
+  val srcWakeUpL1ExuOH = OptionWrapper(params.hasIQWakeUp, Output(Vec(params.numRegSrc, ExuOH())))
   val srcTimer = OptionWrapper(params.hasIQWakeUp, Output(Vec(params.numRegSrc, UInt(3.W))))
   val transEntry =  ValidIO(new EntryBundle)
   val isFirstIssue = Output(Bool())
@@ -155,9 +155,9 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
   }
   if (params.hasIQWakeUp) {
     entryUpdate.status.srcWakeUpL1ExuOH.get.zip(srcWakeUpByIQVec).zip(srcWakeUp).zipWithIndex.foreach {
-      case (((exuOH: Vec[Bool], wakeUpByIQOH: Vec[Bool]), wakeUp: Bool), srcIdx) =>
+      case (((exuOH: UInt, wakeUpByIQOH: Vec[Bool]), wakeUp: Bool), srcIdx) =>
         when(wakeUpByIQOH.asUInt.orR) {
-          exuOH := Mux1H(wakeUpByIQOH, io.wakeUpFromIQ.map(x => MathUtils.IntToOH(x.bits.exuIdx).U(backendParams.numExu.W)).toSeq).asBools
+          exuOH := Mux1H(wakeUpByIQOH, io.wakeUpFromIQ.toSeq.map(x => MathUtils.IntToOH(x.bits.exuIdx).U(backendParams.numExu.W)))
         }.elsewhen(wakeUp) {
           exuOH := 0.U.asTypeOf(exuOH)
         }.otherwise {
