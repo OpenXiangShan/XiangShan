@@ -373,7 +373,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     sink.bits.lqIdx.foreach(_ := source.bits.uop.lqIdx)
     sink.bits.sqIdx.foreach(_ := source.bits.uop.sqIdx)
     sink.bits.vls.foreach(x => {
-      x.vdIdx := source.bits.uop.uopIdx    // Todo: assign it in memblock
+      x.vdIdx := source.bits.vdIdx.get
       x.vpu   := source.bits.uop.vpu
       x.oldVdPsrc := source.bits.uop.psrc(2)
     })

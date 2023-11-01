@@ -103,6 +103,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
   val exception = RegInit(VecInit(Seq.fill(VlUopSize)(false.B)))
   val vstart = RegInit(VecInit(Seq.fill(VlUopSize)(0.U(elemIdxBits.W)))) // index of the exception element
   val vl = RegInit(VecInit(Seq.fill(VlUopSize)(0.U.asTypeOf(Valid(UInt(elemIdxBits.W)))))) // only for fof instructions that modify vl
+  val srcMaskVec = Reg(Vec(VlUopSize, UInt(VLEN.W)))
 
   val enqPtrExt = RegInit(VecInit((0 until maxMUL).map(_.U.asTypeOf(new VluopPtr))))
   val enqPtr = enqPtrExt(0)
@@ -120,7 +121,9 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
   val vdException = RegInit(0.U.asTypeOf(Valid(ExceptionVec())))
   val vdUop = RegInit(0.U.asTypeOf(new DynInst))
   val vdMask = RegInit(0.U(VLENB.W))
+  val vdSrcMask = RegInit(0.U(VLEN.W))
   val vdVl = RegInit(0.U.asTypeOf(Valid(UInt(elemIdxBits.W))))
+  val vdIdx = RegInit(0.U(3.W)) // TODO: parameterize width
 
   val full = isFull(enqPtr, deqPtr)
 
@@ -187,6 +190,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
     exception(id) := false.B
     vstart(id) := 0.U
     vl(id).valid := false.B
+    srcMaskVec(id) := srcMask
     uopq(id) match { case x =>
       x.uop := io.loadRegIn.bits.uop
       x.uop.vpu.vl := io.loadRegIn.bits.src_vl.asTypeOf(VConfig()).vl
@@ -426,6 +430,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
       val data = uopq(id).data
       vdResult := mergeDataWithMask(vdResult, data.asUInt, byteMask).asUInt
       vdMask := vdMask | byteMask
+      vdSrcMask := srcMaskVec(id)
       vdUop := uopq(id).uop
       vdUop.replayInst := vdUop.replayInst || uopq(id).uop.replayInst
 
@@ -458,6 +463,13 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
       vdVl.valid := false.B
       vdUop.replayInst := false.B
 
+      when (vdUop.lastUop) {
+        vdIdx := 0.U
+      }.otherwise {
+        vdIdx := vdIdx + 1.U
+        assert(vdIdx + 1.U =/= 0.U, "Overflow! The number of vd should be less than 8")
+      }
+
       vdState := s_merge
     }
   }
@@ -473,8 +485,10 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
   io.uopWriteback.bits.uop := vdUop
   io.uopWriteback.bits.uop.exceptionVec := vdException.bits
   when (vdVl.valid) { io.uopWriteback.bits.uop.vpu.vl := vdVl.bits }
+  io.uopWriteback.bits.uop.vpu.vmask := vdSrcMask
   io.uopWriteback.bits.data := vdResult
-  io.uopWriteback.bits.mask.foreach(_ := vdMask)
+  io.uopWriteback.bits.mask.foreach(_ := vdSrcMask) // TODO: delete vdMask
+  io.uopWriteback.bits.vdIdx.foreach(_ := vdIdx)
   io.uopWriteback.bits.debug := DontCare
 
   assert(!(issueValid && !io.flowIssue(0).valid && io.flowIssue(1).valid), "flow issue port 0 should have higher priority")
