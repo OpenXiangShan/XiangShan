@@ -88,18 +88,19 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val sqDeqPtr = Output(new SqPtr)
     val sqFull = Output(Bool())
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
-    val sqDeq = Output(UInt(log2Ceil(CommitWidth + 1).W))
+    val sqDeq = Output(UInt(log2Ceil(MaxStoreCommitWidth + 1).W))
     val force_write = Output(Bool())
   })
 
   println("StoreQueue: size:" + StoreQueueSize)
+  println("StoreQueue Commit Width: " + MaxStoreCommitWidth)
 
   // data modules
   val uop = Reg(Vec(StoreQueueSize, new MicroOp))
   // val data = Reg(Vec(StoreQueueSize, new LsqEntry))
   val dataModule = Module(new SQDataModule(
     numEntries = StoreQueueSize,
-    numRead = CommitWidth,
+    numRead = MaxStoreCommitWidth,
     numWrite = StorePipelineWidth,
     numForward = StorePipelineWidth
   ))
@@ -107,7 +108,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val paddrModule = Module(new SQAddrModule(
     dataWidth = PAddrBits,
     numEntries = StoreQueueSize,
-    numRead = CommitWidth,
+    numRead = MaxStoreCommitWidth,
     numWrite = StorePipelineWidth,
     numForward = StorePipelineWidth
   ))
@@ -115,7 +116,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val vaddrModule = Module(new SQAddrModule(
     dataWidth = VAddrBits,
     numEntries = StoreQueueSize,
-    numRead = CommitWidth + 1, // sbuffer + badvaddr 1 (TODO)
+    numRead = MaxStoreCommitWidth + 1, // sbuffer + badvaddr 1 (TODO)
     numWrite = StorePipelineWidth,
     numForward = StorePipelineWidth
   ))
@@ -137,8 +138,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   // ptr
   val enqPtrExt = RegInit(VecInit((0 until io.enq.req.length).map(_.U.asTypeOf(new SqPtr))))
-  val rdataPtrExt = RegInit(VecInit((0 until CommitWidth).map(_.U.asTypeOf(new SqPtr))))
-  val deqPtrExt = RegInit(VecInit((0 until CommitWidth).map(_.U.asTypeOf(new SqPtr))))
+  val rdataPtrExt = RegInit(VecInit((0 until MaxStoreCommitWidth).map(_.U.asTypeOf(new SqPtr))))
+  val deqPtrExt = RegInit(VecInit((0 until MaxStoreCommitWidth).map(_.U.asTypeOf(new SqPtr))))
   val cmtPtrExt = RegInit(VecInit((0 until CommitWidth).map(_.U.asTypeOf(new SqPtr))))
   val addrReadyPtrExt = RegInit(0.U.asTypeOf(new SqPtr))
   val dataReadyPtrExt = RegInit(0.U.asTypeOf(new SqPtr))
@@ -162,10 +163,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   // Read dataModule
   assert(EnsbufferWidth <= 2)
-  val totalSbufferCount = Wire(UInt(3.W))
+  val realStoreCommit = Wire(UInt(log2Up(MaxStoreCommitWidth+1).W))
   // rdataPtrExtNext and rdataPtrExtNext+1 entry will be read from dataModule
   val rdataPtrExtNext = WireInit(Mux(io.sbuffer(1).fire || io.sbuffer(0).fire,
-    VecInit(rdataPtrExt.map(_ + totalSbufferCount)),
+    VecInit(rdataPtrExt.map(_ + realStoreCommit)),
     Mux(io.mmioStout.fire, VecInit(rdataPtrExt.map(_ + 1.U)), rdataPtrExt)
   ))
 
@@ -178,16 +179,16 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   //
   // Modify deqPtrExtNext and io.sqDeq with care!
   val deqPtrExtNext = WireInit(Mux(RegNext(io.sbuffer(1).fire || io.sbuffer(0).fire),
-    VecInit(deqPtrExt.map(_ + RegNext(totalSbufferCount))),
+    VecInit(deqPtrExt.map(_ + RegNext(realStoreCommit))),
     Mux(io.mmioStout.fire, VecInit(deqPtrExt.map(_ + 1.U)), deqPtrExt)
   ))
-  io.sqDeq := RegNext(Mux(RegNext(io.sbuffer(1).fire || io.sbuffer(0).fire), RegNext(totalSbufferCount),
+  io.sqDeq := RegNext(Mux(RegNext(io.sbuffer(1).fire || io.sbuffer(0).fire), RegNext(realStoreCommit),
     Mux(io.mmioStout.fire, 1.U, 0.U)
   ))
   assert(!RegNext(RegNext(io.sbuffer(0).fire) && io.mmioStout.fire))
 
   // no inst will be committed 1 cycle before tval update
-  vaddrModule.io.raddr(CommitWidth) := (cmtPtrExt(0) + commitCount).value
+  vaddrModule.io.raddr(MaxStoreCommitWidth) := (cmtPtrExt(0) + commitCount).value
 
   /**
     * Enqueue at dispatch
@@ -668,21 +669,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     */
   XSError(uncacheState =/= s_idle && uncacheState =/= s_wait && commitCount > 0.U,
    "should not commit instruction when MMIO has not been finished\n")
-  val mergeAllocated = Wire(Vec(CommitWidth, Bool()))
-  val mergeCommitted = Wire(Vec(CommitWidth, Bool()))
-  val mergeMmioStall = Wire(Vec(CommitWidth, Bool()))
-  val mergePrefetch = Wire(Vec(CommitWidth, Bool()))
+
   for (i <- 0 until CommitWidth) {
-    val ptr = rdataPtrExtNext(i).value
-    paddrModule.io.raddr(i) := ptr
-    vaddrModule.io.raddr(i) := ptr
-    dataModule.io.raddr(i)  := ptr
-
-    mergeAllocated(i) := RegNext(allocated(ptr))
-    mergeCommitted(i) := RegNext(committed(ptr))
-    mergeMmioStall(i) := RegNext(mmio(ptr))
-    mergePrefetch(i)  := RegNext(prefetch(ptr))
-
     when (commitCount > i.U) { // MMIO inst is not in progress
       if(i == 0){
         // MMIO inst should not update committed flag
@@ -697,6 +685,25 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   }
   cmtPtrExt := cmtPtrExt.map(_ + commitCount)
 
+
+  // Store merge commit
+  val mergeAllocated = Wire(Vec(MaxStoreCommitWidth, Bool()))
+  val mergeCommitted = Wire(Vec(MaxStoreCommitWidth, Bool()))
+  val mergeMmioStall = Wire(Vec(MaxStoreCommitWidth, Bool()))
+  val mergePrefetch = Wire(Vec(MaxStoreCommitWidth, Bool()))
+
+  for (i <- 0 until MaxStoreCommitWidth) {
+    val ptr = rdataPtrExtNext(i).value
+    paddrModule.io.raddr(i) := ptr
+    vaddrModule.io.raddr(i) := ptr
+    dataModule.io.raddr(i)  := ptr
+
+    mergeAllocated(i) := RegNext(allocated(ptr))
+    mergeCommitted(i) := RegNext(committed(ptr))
+    mergeMmioStall(i) := RegNext(mmio(ptr))
+    mergePrefetch(i)  := RegNext(prefetch(ptr))
+  }
+
   val mergePAddr = paddrModule.io.rdata
   val mergeVAddr = vaddrModule.io.rdata
   val mergeData  = VecInit(dataModule.io.rdata.map(_.data))
@@ -704,14 +711,14 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val mergeWline = paddrModule.io.rlineflag
 
   val mergePTag = mergePAddr.map(_(PAddrBits-1, OffsetWidth))
-  val mergePTagMatch = false.B +: (1 until CommitWidth).map(i => mergePTag(i-1) === mergePTag(i))
+  val mergePTagMatch = false.B +: (1 until MaxStoreCommitWidth).map(i => mergePTag(i-1) === mergePTag(i))
   mergePTagMatch.zipWithIndex.map { case (x, i) => x.suggestName("mergePTagMatch_" + i) }
   val mergeVWordOffset = mergeVAddr.map(_(5, 4))
-  val mergeVWordOffsetMatch = false.B +: (1 until CommitWidth).map(i => mergeVWordOffset(i-1) === mergeVWordOffset(i))
+  val mergeVWordOffsetMatch = false.B +: (1 until MaxStoreCommitWidth).map(i => mergeVWordOffset(i-1) === mergeVWordOffset(i))
   mergeVWordOffsetMatch.zipWithIndex.map { case (x, i) => x.suggestName("mergeVWordOffsetMatch_"+i) }
-  val mergeMaskMatch = false.B +: (1 until CommitWidth).map(i => (mergeMask(i-1) | mergeMask(i)) === "hffff".U)
+  val mergeMaskMatch = false.B +: (1 until MaxStoreCommitWidth).map(i => (mergeMask(i-1) | mergeMask(i)) === "hffff".U)
   mergeMaskMatch.zipWithIndex.map { case (x, i) => x.suggestName("mergeMaskMatch_" + i) }
-  val merged = Wire(Vec(CommitWidth, Bool()))
+  val merged = Wire(Vec(MaxStoreCommitWidth, Bool()))
   merged.zipWithIndex.map {
     case (merge, i) =>
       if (i == 0) {
@@ -740,7 +747,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   mergeDataSel0(0) := Mux(mergeSel0Inc, mergeData(0)(63, 0), mergeData(1)(63, 0))
   mergeDataSel0(1) := Mux(mergeSel0Inc, mergeData(1)(63, 0), mergeData(0)(63, 0))
 
-
   mergeReqs(0).valid := mergeAllocated(0) && mergeCommitted(0) && !mergeMmioStall(0)
   mergeReqs(0).bits := DontCare
   mergeReqs(0).bits.cmd := MemoryOpConstants.M_XWR
@@ -767,7 +773,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   mergeReqs(1).bits.wline := mergeWline(mergeSel1)
   mergeReqs(1).bits.prefetch := mergePrefetch(mergeSel1)
 
-  totalSbufferCount := Mux(io.sbuffer(0).fire, Mux(mergeTailMask(1), 2.U(3.W), 1.U(3.W)), 0.U(3.W)) +
+  realStoreCommit := Mux(io.sbuffer(0).fire, Mux(mergeTailMask(1), 2.U(3.W), 1.U(3.W)), 0.U(3.W)) +
                        Mux(io.sbuffer(1).fire, Mux(mergeTailMask(mergeNextSel1), 2.U(3.W), 1.U(3.W)), 0.U(3.W))
 
   // Send data stored in sbufferReqBitsReg to sbuffer
@@ -781,8 +787,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     // forward data. As an workaround, deqPtrExt and allocated flag update
     // is delayed so that load can get the right data from store queue.
   }
-  for (i <- 0 until CommitWidth) {
-    when (i.U < RegNext(totalSbufferCount)) {
+  for (i <- 0 until MaxStoreCommitWidth) {
+    when (i.U < RegNext(realStoreCommit)) {
       allocated(deqPtrExt(i).value) := false.B
     }
   }
@@ -803,9 +809,9 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   }
 
   if (env.EnableDifftest) {
-    for (i <- 0 until CommitWidth) {
+    for (i <- 0 until MaxStoreCommitWidth) {
       val storeCommit = io.sbuffer.map(_.fire).reduce(_|_)
-      val storeCommitCount = totalSbufferCount
+      val storeCommitCount = realStoreCommit
       val waddr = ZeroExt(Cat(mergePAddr(i)(PAddrBits - 1, 3), 0.U(3.W)), 64)
       val sbufferMask = shiftMaskToLow(mergePAddr(i), mergeMask(i))
       val sbufferData = shiftDataToLow(mergePAddr(i), mergeData(i))
@@ -836,8 +842,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   }
 
  /**
-* update pointers
-**/
+  * update pointers
+  **/
   val lastEnqCancel = PopCount(RegNext(VecInit(canEnqueue.zip(enqCancel).map(x => x._1 && x._2)))) // 1 cycle after redirect
   val lastCycleCancelCount = PopCount(RegNext(needCancel)) // 1 cycle after redirect
   val lastCycleRedirect = RegNext(io.brqRedirect.valid) // 1 cycle after redirect

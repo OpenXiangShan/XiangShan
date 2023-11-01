@@ -263,7 +263,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     // special ports for load / store rs
     val enqLsq = if (outer.numLsqReplayPorts > 0) Some(Flipped(new LsqEnqIO)) else None
     val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
-    val scommit = Input(UInt(log2Ceil(CommitWidth + 1).W)) // connected to `memBlock.io.sqDeq` instead of ROB
+    val scommit = Input(UInt(log2Ceil(MaxStoreCommitWidth + 1).W)) // connected to `memBlock.io.sqDeq` instead of ROB
     // from lsq
     val lqCancelCnt = Input(UInt(log2Up(VirtualLoadQueueSize + 1).W))
     val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))

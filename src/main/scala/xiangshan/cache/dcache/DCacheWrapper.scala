@@ -388,7 +388,6 @@ class DCacheWordReqWithVaddr(implicit p: Parameters) extends DCacheWordReq {
 
 class DCacheWordReqWithVaddrAndPfFlag(implicit p: Parameters) extends DCacheWordReqWithVaddr {
   val prefetch = Bool()
-  val size = UInt(log2Up(CommitWidth+1).W)
 
   def toDCacheWordReqWithVaddr() = {
     val res = Wire(new DCacheWordReqWithVaddr)

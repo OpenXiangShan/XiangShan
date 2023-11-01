@@ -148,6 +148,7 @@ case class XSCoreParameters
   StoreQueueSize: Int = 64,
   StoreQueueNWriteBanks: Int = 8, // NOTE: make sure that StoreQueueSize is divided by StoreQueueNWriteBanks
   StoreQueueForwardWithMask: Boolean = true,
+  MaxStoreCommitWidth: Int = 4,
   VlsQueueSize: Int = 8,
   RobSize: Int = 256,
   dpParams: DispatchParameters = DispatchParameters(
@@ -423,6 +424,7 @@ trait HasXSParameter {
   val StoreQueueSize = coreParams.StoreQueueSize
   val StoreQueueNWriteBanks = coreParams.StoreQueueNWriteBanks
   val StoreQueueForwardWithMask = coreParams.StoreQueueForwardWithMask
+  val MaxStoreCommitWidth = coreParams.MaxStoreCommitWidth
   val VlsQueueSize = coreParams.VlsQueueSize
   val dpParams = coreParams.dpParams
   val exuParameters = coreParams.exuParameters

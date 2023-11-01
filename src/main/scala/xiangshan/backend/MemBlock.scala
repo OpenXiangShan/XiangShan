@@ -51,7 +51,7 @@ class ooo_to_mem(implicit p: Parameters) extends XSBundle {
   val tlbCsr = Input(new TlbCsrBundle)
   val lsqio = new Bundle {
    val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
-   val scommit = Input(UInt(log2Up(CommitWidth + 1).W))
+   val scommit = Input(UInt(log2Up(MaxStoreCommitWidth + 1).W))
    val pendingld = Input(Bool())
    val pendingst = Input(Bool())
    val commit = Input(Bool())
@@ -72,7 +72,7 @@ class mem_to_ooo(implicit p: Parameters ) extends XSBundle {
   val csrUpdate = new DistributedCSRUpdateReq
   val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize + 1).W))
   val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
-  val sqDeq = Output(UInt(log2Ceil(CommitWidth + 1).W))
+  val sqDeq = Output(UInt(log2Ceil(MaxStoreCommitWidth + 1).W))
   val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
   val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
   val stIssuePtr = Output(new SqPtr())

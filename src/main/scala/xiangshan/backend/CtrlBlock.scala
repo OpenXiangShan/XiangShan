@@ -266,7 +266,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     val lqCancelCnt = Input(UInt(log2Up(VirtualLoadQueueSize + 1).W))
     val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))
     val lqDeq = Input(UInt(log2Up(CommitWidth + 1).W))
-    val sqDeq = Input(UInt(log2Ceil(CommitWidth + 1).W))
+    val sqDeq = Input(UInt(log2Ceil(MaxStoreCommitWidth + 1).W))
     val sqCanAccept = Input(Bool())
     val lqCanAccept = Input(Bool())
     val ld_pc_read = Vec(exuParameters.LduCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))

@@ -182,7 +182,7 @@ class BackendImp(outer: Backend)(implicit p: Parameters) extends LazyModuleImp(o
       val csrCtrl = new CustomCSRCtrlIO
       val lqCancelCnt = Input(UInt(log2Up(VirtualLoadQueueSize + 1).W))
       val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))
-      val scommit = Input(UInt(log2Ceil(CommitWidth + 1).W))
+      val scommit = Input(UInt(log2Ceil(MaxStoreCommitWidth + 1).W))
       val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
       val debug_ls = Flipped(new DebugLSIO)
       val lsTopdownInfo = Vec(exuParameters.LduCnt, Input(new LsTopdownInfo))
