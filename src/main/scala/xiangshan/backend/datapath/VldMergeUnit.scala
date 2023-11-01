@@ -23,16 +23,16 @@ class VldMergeUnit(val params: ExeUnitParams)(implicit p: Parameters) extends XS
   wbReg.valid := wbFire
   mgu.io.in.vd := wbReg.bits.data
   mgu.io.in.oldVd := io.oldVdReadData
-  mgu.io.in.mask := io.writeback.bits.vls.get.vpu.vmask
-  mgu.io.in.info.valid := io.writeback.valid
-  mgu.io.in.info.ta := io.writeback.bits.vls.get.vpu.vta
-  mgu.io.in.info.ma := io.writeback.bits.vls.get.vpu.vma
-  mgu.io.in.info.vl := io.writeback.bits.vls.get.vpu.vl
-  mgu.io.in.info.vstart := io.writeback.bits.vls.get.vpu.vstart
-  mgu.io.in.info.eew := io.writeback.bits.vls.get.vpu.veew
-  mgu.io.in.info.vsew := io.writeback.bits.vls.get.vpu.vsew
-  mgu.io.in.info.vdIdx := io.writeback.bits.vls.get.vdIdx
-  mgu.io.in.info.vlmul := io.writeback.bits.vls.get.vpu.vlmul
+  mgu.io.in.mask := wbReg.bits.vls.get.vpu.vmask
+  mgu.io.in.info.valid := wbReg.valid
+  mgu.io.in.info.ta := wbReg.bits.vls.get.vpu.vta
+  mgu.io.in.info.ma := wbReg.bits.vls.get.vpu.vma
+  mgu.io.in.info.vl := wbReg.bits.vls.get.vpu.vl
+  mgu.io.in.info.vstart := wbReg.bits.vls.get.vpu.vstart
+  mgu.io.in.info.eew := wbReg.bits.vls.get.vpu.veew
+  mgu.io.in.info.vsew := wbReg.bits.vls.get.vpu.vsew
+  mgu.io.in.info.vdIdx := wbReg.bits.vls.get.vdIdx
+  mgu.io.in.info.vlmul := wbReg.bits.vls.get.vpu.vlmul
   mgu.io.in.info.narrow := false.B  // never narrow
   mgu.io.in.info.dstMask := false.B // vlm need not mask
 
@@ -40,6 +40,7 @@ class VldMergeUnit(val params: ExeUnitParams)(implicit p: Parameters) extends XS
 
   io.writebackAfterMerge.valid := wbReg.valid
   io.writebackAfterMerge.bits := wbReg.bits
+  io.writebackAfterMerge.bits.data := vdAfterMerge
 }
 
 class VldMergeUnitIO(param: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
