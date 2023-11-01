@@ -264,15 +264,15 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
   val wb_bits = in_wb_valids.zip(writebacks).map { case (valid, wb) => getOldest(valid, wb.map(_.bits))}
 
   val s0_out_valid = wb_valid.map(x => RegNext(x))
-  val s0_out_bits = wb_bits.map(x => RegNext(x))
+  val s0_out_bits = wb_bits.zip(wb_valid).map{ case(b, v) => RegEnable(b, v)}
 
   // s1: compare last four and current flush
   val s1_valid = VecInit(s0_out_valid.zip(s0_out_bits).map{ case (v, b) => v && !(b.robIdx.needFlush(io.redirect) || io.flush) })
-  val s1_out_bits = RegNext(getOldest(s0_out_valid, s0_out_bits))
+  val s1_out_bits = RegEnable(getOldest(s0_out_valid, s0_out_bits), s1_valid.asUInt.orR)
   val s1_out_valid = RegNext(s1_valid.asUInt.orR)
 
   val enq_valid = RegNext(in_enq_valid.asUInt.orR && !io.redirect.valid && !io.flush)
-  val enq_bits = RegNext(ParallelPriorityMux(in_enq_valid, io.enq.map(_.bits)))
+  val enq_bits = RegEnable(ParallelPriorityMux(in_enq_valid, io.enq.map(_.bits)), in_enq_valid.asUInt.orR && !io.redirect.valid && !io.flush)
 
   // s2: compare the input exception with the current one
   // priorities:
