@@ -344,9 +344,14 @@ object Bundles {
     p: Parameters
   ) extends Bundle {
     private val rfReadDataCfgSet: Seq[Set[DataConfig]] = exuParams.getRfReadDataCfgSet
+    // check which set both have fp and vec and remove fp
+    private val rfReadDataCfgSetFilterFp = rfReadDataCfgSet.map((set: Set[DataConfig]) =>
+      if (set.contains(FpData()) && set.contains(VecData())) set.filter(_ != FpData())
+      else set
+    )
 
     val rf: MixedVec[MixedVec[RfReadPortWithConfig]] = Flipped(MixedVec(
-      rfReadDataCfgSet.map((set: Set[DataConfig]) =>
+      rfReadDataCfgSetFilterFp.map((set: Set[DataConfig]) =>
         MixedVec(set.map((x: DataConfig) => new RfReadPortWithConfig(x, exuParams.rdPregIdxWidth)).toSeq)
       )
     ))
