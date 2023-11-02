@@ -301,6 +301,7 @@ class MicroOpRbExt(implicit p: Parameters) extends XSBundleWithMicroOp {
 
 class Redirect(implicit p: Parameters) extends XSBundle {
   val isRVC = Bool()
+  val rawNuke = Bool()
   val robIdx = new RobPtr
   val ftqIdx = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)

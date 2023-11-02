@@ -458,6 +458,8 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
 
   val (rollbackValid, rollbackUop) = detectRollback()
   io.rollback.bits           := DontCare
+  io.rollback.bits.rawNuke   := false.B
+  io.rollback.bits.isRVC     := rollbackUop.cf.isRVC
   io.rollback.bits.robIdx    := rollbackUop.robIdx
   io.rollback.bits.ftqIdx    := rollbackUop.cf.ftqPtr
   io.rollback.bits.ftqOffset := rollbackUop.cf.ftqOffset
