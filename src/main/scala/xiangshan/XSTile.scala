@@ -66,7 +66,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   // l1_xbar to l2
   l2cache match {
     case Some(l2) =>
-      l2.node :*= l2top.l1_xbar
+      l2.node :*= l2top.xbar_l2_buffer :*= l2top.l1_xbar
       l2.pf_recv_node.map(recv => {
         println("Connecting L1 prefetcher to L2!")
         recv := core.memBlock.l2_pf_sender_opt.get

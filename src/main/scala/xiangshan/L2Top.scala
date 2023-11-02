@@ -74,6 +74,7 @@ class L2Top()(implicit p: Parameters) extends LazyModule
 
   val misc_l2_pmu = BusPerfMonitor(name = "Misc_L2", enable = !debugOpts.FPGAPlatform) // l1D & l1I & PTW
   val l2_l3_pmu = BusPerfMonitor(name = "L2_L3", enable = !debugOpts.FPGAPlatform, stat_latency = true)
+  val xbar_l2_buffer = TLBuffer()
 
   val enbale_tllog = !debugOpts.FPGAPlatform && debugOpts.AlwaysBasicDB
   val l1d_logger = TLLogger(s"L2_L1D_${coreParams.HartId}", enbale_tllog)
