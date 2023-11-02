@@ -272,11 +272,11 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   bypassNetwork.io.fromExus.connectExuOutput(_.int)(intExuBlock.io.out)
   bypassNetwork.io.fromExus.connectExuOutput(_.vf)(vfExuBlock.io.out)
 
-  require(bypassNetwork.io.fromExus.mem.flatten.size == io.mem.writeback.size,
+  require(bypassNetwork.io.fromExus.mem.flatten.size == io.mem.writeBack.size,
     s"bypassNetwork.io.fromExus.mem.flatten.size(${bypassNetwork.io.fromExus.mem.flatten.size}: ${bypassNetwork.io.fromExus.mem.map(_.size)}, " +
-    s"io.mem.writeback(${io.mem.writeback.size})"
+    s"io.mem.writeback(${io.mem.writeBack.size})"
   )
-  bypassNetwork.io.fromExus.mem.flatten.zip(io.mem.writeback).foreach { case (sink, source) =>
+  bypassNetwork.io.fromExus.mem.flatten.zip(io.mem.writeBack).foreach { case (sink, source) =>
     sink.valid := source.valid
     sink.bits.pdest := source.bits.uop.pdest
     sink.bits.data := source.bits.data
@@ -360,7 +360,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   wbDataPath.io.fromTop.hartId := io.fromTop.hartId
   wbDataPath.io.fromIntExu <> intExuBlock.io.out
   wbDataPath.io.fromVfExu <> vfExuBlock.io.out
-  wbDataPath.io.fromMemExu.flatten.zip(io.mem.writeback).foreach { case (sink, source) =>
+  wbDataPath.io.fromMemExu.flatten.zip(io.mem.writeBack).foreach { case (sink, source) =>
     sink.valid := source.valid
     source.ready := sink.ready
     sink.bits.data   := source.bits.data
@@ -411,7 +411,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
         )
       )
 
-      if (memScheduler.io.memAddrIssueResp(i).nonEmpty) {
+      if (memScheduler.io.memAddrIssueResp(i).nonEmpty && memExuBlocksHasLDU(i)(j)) {
         memScheduler.io.memAddrIssueResp(i)(j).valid := toMem(i)(j).fire
         memScheduler.io.memAddrIssueResp(i)(j).bits.dataInvalidSqIdx := DontCare
         memScheduler.io.memAddrIssueResp(i)(j).bits.fuType := toMem(i)(j).bits.fuType
@@ -429,7 +429,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
       Seq(io.mem.issueLda(1)) ++
       io.mem.issueVldu ++
       io.mem.issueStd
-  memIssueUops.zip(toMem.flatten).foreach { case (sink, source) =>
+  io.mem.issueUops.zip(toMem.flatten).foreach { case (sink, source) =>
     sink.valid := source.valid
     source.ready := sink.ready
     sink.bits.iqIdx         := source.bits.iqIdx
@@ -579,40 +579,22 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val sfence = Output(new SfenceBundle)
   val isStoreException = Output(Bool())
 
-  def issueUops =
+  // ATTENTION: The issue ports' sequence order should be the same as IQs' deq config
+  private [backend] def issueUops: Seq[DecoupledIO[MemExuInput]] = {
     Seq(issueLda(0)) ++ Seq(issueSta(0)) ++
       issueHylda ++ issueHysta ++
       Seq(issueLda(1)) ++
       issueVldu ++
       issueStd
+  }
 
-  def writeback =
+  // ATTENTION: The writeback ports' sequence order should be the same as IQs' deq config
+  private [backend] def writeBack: Seq[DecoupledIO[MemExuOutput]] = {
     Seq(writebackLda(0)) ++ Seq(writebackSta(0)) ++
       writebackHyuLda ++ writebackHyuSta ++
       Seq(writebackLda(1)) ++
       writebackVlda ++
       writebackStd
-
-  def writeback = writebackLda ++ writebackSta ++ writebackHyuLda ++ writebackHyuSta ++ writebackStd ++ writebackVlda
-
-  // make this function private to avoid flip twice, both in Backend and XSCore
-  private [backend] def issueUops: Seq[DecoupledIO[MemExuInput]] = {
-    val issLdas = if (flippedLda) Seq(issueLdas(1), issueLdas(0)) else issueLdas
-    (issLdas ++ issueStas ++ issueStds ++ issueVldus).toSeq
-  }
-
-  // make this function private to avoid flip twice, both in Backend and XSCore
-  private [backend] def writeBack: Seq[DecoupledIO[MemExuOutput]] = {
-    val wbLdas = if (flippedLda) Seq(writebackLdas(1), writebackLdas(0)) else writebackLdas
-    (wbLdas ++ writebackStas ++ writebackStds ++ writebackVldus).toSeq
-  }
-
-  def issueUopsToMem: Seq[DecoupledIO[MemExuInput]] = {
-    (issueLdas ++ issueStas ++ issueStds ++ issueVldus).toSeq
-  }
-
-  def writeBackToBackend: Seq[DecoupledIO[MemExuOutput]] = {
-    (writebackLdas ++ writebackStas ++ writebackStds ++ writebackVldus).toSeq
   }
 }
 

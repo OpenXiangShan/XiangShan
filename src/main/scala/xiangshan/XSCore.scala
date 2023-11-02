@@ -160,7 +160,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.ooo_to_mem.issueSta <> backend.io.mem.issueSta
   memBlock.io.ooo_to_mem.issueStd <> backend.io.mem.issueStd
   memBlock.io.ooo_to_mem.issueHya <> backend.io.mem.issueHylda
-  backend.io.mem.issueHysta.map(_.ready := false.B)
+  backend.io.mem.issueHysta.map(_.ready := false.B) // this fake port should not be used
   memBlock.io.ooo_to_mem.issueVldu <> backend.io.mem.issueVldu
 
   // By default, instructions do not have exceptions when they enter the function units.
