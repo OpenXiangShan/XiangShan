@@ -292,8 +292,17 @@ class NewIFU(implicit p: Parameters) extends XSModule
   .elsewhen(f0_fire && !f0_flush) {f1_valid  := true.B}
   .elsewhen(f1_fire)              {f1_valid  := false.B}
 
-  val f1_pc                 = VecInit((0 until PredictWidth).map(i => f1_ftq_req.startAddr + (i * 2).U))
-  val f1_half_snpc          = VecInit((0 until PredictWidth).map(i => f1_ftq_req.startAddr + ((i+2) * 2).U))
+  val f1_pc_adder_cut_point = (VAddrBits/2) - 1
+  val f1_pc_high            = WireInit(f1_ftq_req.startAddr(VAddrBits-1,f1_pc_adder_cut_point))
+  val f1_pc_high_plus1      = WireInit(f1_pc_high + 1.U)
+  val f1_pc                 = VecInit((0 until PredictWidth).map{i => 
+    val lower_result        = Cat(0.U(1.W), f1_ftq_req.startAddr(f1_pc_adder_cut_point-1, 0)) + (i * 2).U
+    Mux(lower_result(f1_pc_adder_cut_point), Cat(f1_pc_high_plus1,lower_result(f1_pc_adder_cut_point,0)), Cat(f1_pc_high,lower_result(f1_pc_adder_cut_point,0)))
+  })
+  val f1_half_snpc     = VecInit((0 until PredictWidth).map{i => 
+    val lower_result        = Cat(0.U(1.W), f1_ftq_req.startAddr(f1_pc_adder_cut_point-1, 0)) + ((i+2) * 2).U
+    Mux(lower_result(f1_pc_adder_cut_point), Cat(f1_pc_high_plus1,lower_result(f1_pc_adder_cut_point,0)), Cat(f1_pc_high,lower_result(f1_pc_adder_cut_point,0)))
+  })
   val f1_cut_ptr            = if(HasCExtension)  VecInit((0 until PredictWidth + 1).map(i =>  Cat(0.U(1.W), f1_ftq_req.startAddr(blockOffBits-1, 1)) + i.U ))
                                   else           VecInit((0 until PredictWidth).map(i =>     Cat(0.U(1.W), f1_ftq_req.startAddr(blockOffBits-1, 2)) + i.U ))
 
