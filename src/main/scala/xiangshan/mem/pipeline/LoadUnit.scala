@@ -796,7 +796,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   val s2_rar_nack      =
     if (EnableRARCheck) {
-      io.lsq.ldld_nuke_query.req.valid && !io.lsq.ldld_nuke_query.req.ready
+      io.lsq.ldld_nuke_query.get.req.valid && !io.lsq.ldld_nuke_query.get.req.ready
     } else {
       false.B
     }
@@ -854,12 +854,14 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   val s2_data_fwded = s2_dcache_miss && (s2_full_fwd || s2_cache_tag_error)
 
-  // ld-ld violation require
-  io.lsq.ldld_nuke_query.req.valid           := s2_valid && s2_can_query
-  io.lsq.ldld_nuke_query.req.bits.uop        := s2_in.uop
-  io.lsq.ldld_nuke_query.req.bits.mask       := s2_in.mask
-  io.lsq.ldld_nuke_query.req.bits.paddr      := s2_in.paddr
-  io.lsq.ldld_nuke_query.req.bits.data_valid := Mux(s2_full_fwd || s2_fwd_data_valid, true.B, !s2_dcache_miss)
+  if (EnableRARCheck) {
+    // ld-ld violation require
+    io.lsq.ldld_nuke_query.get.req.valid           := s2_valid && s2_can_query
+    io.lsq.ldld_nuke_query.get.req.bits.uop        := s2_in.uop
+    io.lsq.ldld_nuke_query.get.req.bits.mask       := s2_in.mask
+    io.lsq.ldld_nuke_query.get.req.bits.paddr      := s2_in.paddr
+    io.lsq.ldld_nuke_query.get.req.bits.data_valid := Mux(s2_full_fwd || s2_fwd_data_valid, true.B, !s2_dcache_miss)
+  }
 
   // st-ld violation require
   io.lsq.stld_nuke_query.req.valid           := s2_valid && s2_can_query
@@ -1029,10 +1031,13 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   val s3_vp_match_fail = RegNext(io.lsq.forward.matchInvalid || io.sbuffer.matchInvalid) && s3_troublem
   val s3_ldld_rep_inst =
-      io.lsq.ldld_nuke_query.resp.valid &&
-      io.lsq.ldld_nuke_query.resp.bits.rep_frm_fetch &&
+    if (EnableRARCheck) {
+      io.lsq.ldld_nuke_query.get.resp.valid &&
+      io.lsq.ldld_nuke_query.get.resp.bits.rep_frm_fetch &&
       RegNext(io.csrCtrl.ldld_vio_check_enable)
-
+    } else {
+      false.B
+    }
   val s3_rep_info = WireInit(s3_in.rep_info)
   s3_rep_info.dcache_miss   := s3_in.rep_info.dcache_miss && !s3_fwd_frm_d_chan_valid && s3_troublem
   val s3_rep_frm_fetch = s3_vp_match_fail || s3_ldld_rep_inst
@@ -1071,7 +1076,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.lsq.ldin.bits.uop := s3_out.bits.uop
 
   val s3_revoke = s3_exception || io.lsq.ldin.bits.rep_info.need_rep
-  io.lsq.ldld_nuke_query.revoke := s3_revoke
+  if (EnableRARCheck) {
+    io.lsq.ldld_nuke_query.get.revoke := s3_revoke
+  }
   io.lsq.stld_nuke_query.revoke := s3_revoke
 
   // feedback slow

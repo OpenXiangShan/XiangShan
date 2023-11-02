@@ -151,13 +151,13 @@ class LoadQueue(implicit p: Parameters) extends XSModule
    * LoadQueueRAR
    */
   if (EnableRARCheck) {
-    loadQueueRAR.io.redirect <> io.redirect
-    loadQueueRAR.io.release  <> io.release
-    loadQueueRAR.io.ldWbPtr  <> virtualLoadQueue.io.ldWbPtr
+    loadQueueRAR.get.io.redirect <> io.redirect
+    loadQueueRAR.get.io.release  <> io.release
+    loadQueueRAR.get.io.ldWbPtr  <> virtualLoadQueue.io.ldWbPtr
     for (w <- 0 until LoadPipelineWidth) {
-      loadQueueRAR.io.query(w).req    <> io.ldu.get.ldld_nuke_query(w).req // from load_s1
-      loadQueueRAR.io.query(w).resp   <> io.ldu.get.ldld_nuke_query(w).resp // to load_s2
-      loadQueueRAR.io.query(w).revoke := io.ldu.get.ldld_nuke_query(w).revoke // from load_s3
+      loadQueueRAR.get.io.query(w).req    <> io.ldu.get.ldld_nuke_query(w).req // from load_s1
+      loadQueueRAR.get.io.query(w).resp   <> io.ldu.get.ldld_nuke_query(w).resp // to load_s2
+      loadQueueRAR.get.io.query(w).revoke := io.ldu.get.ldld_nuke_query(w).revoke // from load_s3
     }
   }
   /**
@@ -253,9 +253,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueReplay.io.stDataReadyVec   <> io.sq.stDataReadyVec
   loadQueueReplay.io.sqEmpty          <> io.sq.sqEmpty
   loadQueueReplay.io.lqFull           <> io.lq_rep_full
-  loadQueueReplay.io.ldWbPtr          <> virtualLoadQueue.io.ldWbPtr
   if (EnableRARCheck) {
-    loadQueueReplay.io.rarFull          <> loadQueueRAR.io.lqFull
+    loadQueueReplay.io.ldWbPtr.get          <> virtualLoadQueue.io.ldWbPtr
+    loadQueueReplay.get.io.rarFull          <> loadQueueRAR.get.io.lqFull
   }
   loadQueueReplay.io.rawFull          <> loadQueueRAW.io.lqFull
   loadQueueReplay.io.l2_hint          <> io.l2_hint
@@ -265,7 +265,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
   val full_mask =
     if (EnableRARCheck) {
-      Cat(loadQueueRAR.io.lqFull, loadQueueRAW.io.lqFull, loadQueueReplay.io.lqFull)
+      Cat(loadQueueRAR.get.io.lqFull, loadQueueRAW.io.lqFull, loadQueueReplay.io.lqFull)
     } else {
       Cat(false.B, loadQueueRAW.io.lqFull, loadQueueReplay.io.lqFull)
     }
