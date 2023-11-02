@@ -386,7 +386,7 @@ case class XSCoreParameters
       ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
         ExeUnitParams("VLDU0", Seq(VlduCfg), Seq(VfWB(3, 1)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
-        ExeUnitParams("VLSU0", Seq(VstuCfg), Seq(VfWB(4, 1)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
+        ExeUnitParams("VSTU0", Seq(VstuCfg), Seq(VfWB(4, 1)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
       ), numEntries = IssueQueueSize, numEnq = 2),
     ),
       numPregs = intPreg.numEntries max vfPreg.numEntries,
