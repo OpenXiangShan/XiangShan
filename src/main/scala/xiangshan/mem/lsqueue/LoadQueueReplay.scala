@@ -178,8 +178,8 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     //
     val sqEmpty = Input(Bool())
     val lqFull  = Output(Bool())
-    val ldWbPtr = Input(new LqPtr)
-    val rarFull = Input(Bool())
+    val ldWbPtr = if (EnableRARCheck) Input(new LqPtr) else None
+    val rarFull = if (EnableRARCheck) Input(Bool()) else None
     val rawFull = Input(Bool())
     val l2_hint  = Input(Valid(new L2ToL1Hint()))
     val tlbReplayDelayCycleCtrl = Vec(4, Input(UInt(ReSelectLen.W)))
@@ -333,9 +333,11 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     when (cause(i)(LoadReplayCauses.C_DM)) {
       blocking(i) := Mux(io.tl_d_channel.valid && io.tl_d_channel.mshrid === missMSHRId(i), false.B, blocking(i))
     }
-    // case C_RAR
-    when (cause(i)(LoadReplayCauses.C_RAR)) {
-      blocking(i) := Mux((!io.rarFull || !isAfter(uop(i).lqIdx, io.ldWbPtr)), false.B, blocking(i))
+    if (EnableRARCheck) {
+      // case C_RAR
+      when (cause(i)(LoadReplayCauses.C_RAR)) {
+        blocking(i) := Mux((!io.rarFull || !isAfter(uop(i).lqIdx, io.ldWbPtr)), false.B, blocking(i))
+      }
     }
     // case C_RAW
     when (cause(i)(LoadReplayCauses.C_RAW)) {

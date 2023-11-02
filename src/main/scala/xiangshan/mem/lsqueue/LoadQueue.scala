@@ -98,7 +98,11 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val enq = new LqEnqIO
     val ldu = new Bundle() {
         val stld_nuke_query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO)) // from load_s2
-        val ldld_nuke_query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO)) // from load_s2
+        val ldld_nuke_query =
+          if (EnableRARCheck)
+            Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO)) // from load_s2
+          else
+            None
         val ldin         = Vec(LoadPipelineWidth, Flipped(Decoupled(new LqWriteBundle))) // from load_s3
     }
     val sta = new Bundle() {
@@ -126,7 +130,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val uncache = new UncacheWordIO
     val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
     val exceptionAddr = new ExceptionAddrIO
-    val lqFull = Output(Bool())
+    val lqFull = if (EnableRARCheck) Output(Bool()) else None
     val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
     val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize+1).W))
     val lq_rep_full = Output(Bool())
@@ -136,7 +140,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val debugTopDown = new LoadQueueTopDownIO
   })
 
-  val loadQueueRAR = Module(new LoadQueueRAR)  //  read-after-read violation
+  val loadQueueRAR = if (EnableRARCheck) Module(new LoadQueueRAR) else None  //  read-after-read violation
   val loadQueueRAW = Module(new LoadQueueRAW)  //  read-after-write violation
   val loadQueueReplay = Module(new LoadQueueReplay)  //  enqueue if need replay
   val virtualLoadQueue = Module(new VirtualLoadQueue)  //  control state
@@ -146,15 +150,16 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   /**
    * LoadQueueRAR
    */
-  loadQueueRAR.io.redirect <> io.redirect
-  loadQueueRAR.io.release  <> io.release
-  loadQueueRAR.io.ldWbPtr  <> virtualLoadQueue.io.ldWbPtr
-  for (w <- 0 until LoadPipelineWidth) {
-    loadQueueRAR.io.query(w).req    <> io.ldu.ldld_nuke_query(w).req // from load_s1
-    loadQueueRAR.io.query(w).resp   <> io.ldu.ldld_nuke_query(w).resp // to load_s2
-    loadQueueRAR.io.query(w).revoke := io.ldu.ldld_nuke_query(w).revoke // from load_s3
+  if (EnableRARCheck) {
+    loadQueueRAR.io.redirect <> io.redirect
+    loadQueueRAR.io.release  <> io.release
+    loadQueueRAR.io.ldWbPtr  <> virtualLoadQueue.io.ldWbPtr
+    for (w <- 0 until LoadPipelineWidth) {
+      loadQueueRAR.io.query(w).req    <> io.ldu.get.ldld_nuke_query(w).req // from load_s1
+      loadQueueRAR.io.query(w).resp   <> io.ldu.get.ldld_nuke_query(w).resp // to load_s2
+      loadQueueRAR.io.query(w).revoke := io.ldu.get.ldld_nuke_query(w).revoke // from load_s3
+    }
   }
-
   /**
    * LoadQueueRAW
    */
@@ -249,14 +254,21 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueReplay.io.sqEmpty          <> io.sq.sqEmpty
   loadQueueReplay.io.lqFull           <> io.lq_rep_full
   loadQueueReplay.io.ldWbPtr          <> virtualLoadQueue.io.ldWbPtr
-  loadQueueReplay.io.rarFull          <> loadQueueRAR.io.lqFull
+  if (EnableRARCheck) {
+    loadQueueReplay.io.rarFull          <> loadQueueRAR.io.lqFull
+  }
   loadQueueReplay.io.rawFull          <> loadQueueRAW.io.lqFull
   loadQueueReplay.io.l2_hint          <> io.l2_hint
   loadQueueReplay.io.tlbReplayDelayCycleCtrl <> io.tlbReplayDelayCycleCtrl
 
   loadQueueReplay.io.debugTopDown <> io.debugTopDown
 
-  val full_mask = Cat(loadQueueRAR.io.lqFull, loadQueueRAW.io.lqFull, loadQueueReplay.io.lqFull)
+  val full_mask =
+    if (EnableRARCheck) {
+      Cat(loadQueueRAR.io.lqFull, loadQueueRAW.io.lqFull, loadQueueReplay.io.lqFull)
+    } else {
+      Cat(false.B, loadQueueRAW.io.lqFull, loadQueueReplay.io.lqFull)
+    }
   XSPerfAccumulate("full_mask_000", full_mask === 0.U)
   XSPerfAccumulate("full_mask_001", full_mask === 1.U)
   XSPerfAccumulate("full_mask_010", full_mask === 2.U)
@@ -268,7 +280,12 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("rollback", io.rollback.valid)
 
   // perf cnt
-  val perfEvents = Seq(virtualLoadQueue, loadQueueRAR, loadQueueRAW, loadQueueReplay).flatMap(_.getPerfEvents) ++
+  val perfEvents =
+    (if (EnableRARCheck) {
+      Seq(virtualLoadQueue, loadQueueRAR, loadQueueRAW, loadQueueReplay).flatMap(_.getPerfEvents)
+    } else {
+      Seq(virtualLoadQueue, loadQueueRAW, loadQueueReplay).flatMap(_.getPerfEvents)
+    }) ++
   Seq(
     ("full_mask_000", full_mask === 0.U),
     ("full_mask_001", full_mask === 1.U),

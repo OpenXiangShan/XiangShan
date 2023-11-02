@@ -794,9 +794,12 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                         !s2_fwd_frm_d_chan_or_mshr &&
                         !s2_full_fwd
 
-  val s2_rar_nack      = io.lsq.ldld_nuke_query.req.valid &&
-                         !io.lsq.ldld_nuke_query.req.ready
-
+  val s2_rar_nack      =
+    if (EnableRARCheck) {
+      io.lsq.ldld_nuke_query.req.valid && !io.lsq.ldld_nuke_query.req.ready
+    } else {
+      false.B
+    }
   val s2_raw_nack      = io.lsq.stld_nuke_query.req.valid &&
                          !io.lsq.stld_nuke_query.req.ready
   // st-ld violation query
