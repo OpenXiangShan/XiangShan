@@ -637,7 +637,7 @@ object FuConfig {
       Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()),  //vs1, vs2, vd_old, v0, vconfig
     ),
     piped = false,
-    writeVecRf = true,
+    writeVecRf = false,
     latency = UncertainLatency(),
     exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault),
     flushPipe = true,
