@@ -1018,7 +1018,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.inner_hartId := io.hartId
   io.inner_reset_vector := io.outer_reset_vector
   io.outer_cpu_halt := io.inner_cpu_halt
-  io.outer_beu_errors_icache := io.inner_beu_errors_icache
+  io.outer_beu_errors_icache := RegNext(io.inner_beu_errors_icache)
   io.outer_l2_pf_enable := io.inner_l2_pf_enable
   // io.inner_hc_perfEvents <> io.outer_hc_perfEvents
 
