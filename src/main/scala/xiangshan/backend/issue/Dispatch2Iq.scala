@@ -168,6 +168,11 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
     require(idx < width)
     VecInit((Seq.fill(idx)(false.B) ++ Seq(true.B) ++ Seq.fill(width-idx-1)(false.B)).toSeq).asUInt
   }
+  def OHFromInt(enable: Bool, idx: Int, width: Int): UInt = {
+    require(width > 0)
+    require(idx < width)
+    VecInit((Seq.fill(idx)(false.B) ++ Seq(enable) ++ Seq.fill(width-idx-1)(false.B)).toSeq).asUInt
+  }
 
   def isOH(oh: UInt): Bool = {
     // naive implementation
@@ -534,11 +539,24 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
 
   // for higher priorty, just ignore conflict(PopCount > 1)
   // for lower  prioryt, stall by conflict(PopCount > 1)
-  iqPortSelectVec.zip(iqPortSelectVecMid).foreach{
-    case (res, mid) => {
+  val dpTypeConflictVecMid: Vec[Vec[Bool]] = Wire(Vec(outs.size, Vec(io.in.size, Bool())))
+  dpTypeConflictVecMid.map(_.map(_ := false.B))
+  val dpTypeConflictVec: Vec[Vec[Bool]] = Wire(Vec(outs.size, Vec(io.in.size, Bool())))
+  dontTouch(dpTypeConflictVecMid)
+  dontTouch(dpTypeConflictVec)
+
+  (iqPortSelectVec.zip(iqPortSelectVecMid)).zip(dpTypeConflictVec.zip(dpTypeConflictVecMid)).foreach{
+    case ((iq, iqMid), (dp, dpMid)) => {
       // Actually, at most 2 for PriorityMux, others would be hard-written to false
-      assert(PopCount(mid.map(_.valid)) <= 2.U, "one dpTypeBundle can only be assigned to one issue queue")
-      res := ParallelPriorityMux(mid.map(_.valid), mid.map(_.bits)).asBools
+      assert(PopCount(iqMid.map(_.valid)) <= 2.U, "one dpTypeBundle can only be assigned to one issue queue")
+      // res := ParallelPriorityMux(mid.map(_.valid), mid.map(_.bits)).asBools
+      dpMid := ParallelMux(iqMid.map(_.valid), iqMid.map(_.bits)).asBools
+      // Take the lowest-index dpUop, not the highest-dpType-Priority instr
+      iq := ParallelPriorityMux(dpMid, io.in.indices.map(i => OHFromInt(dpMid(i), i, io.in.size))).asBools
+      dp := Mux(!noMoreThanOH(dpMid.asUInt),
+              ParallelPosteriorityMux(dpMid, io.in.indices.map(OHFromInt(_, io.in.size))),
+              0.U(io.in.size.W)
+            ).asBools
     }
   }
   // Multiple dispatch uop may be assigned to one issue port,
@@ -598,27 +616,6 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
   // when dpUops' iqIdx is the same, the high-prio is ok, the low-prio is stall
   // Because dpUops can dequeue seperately, so this is OK
   // when not seperately, need better choices generated to avoid dead-clock
-  val dpTypeConflictVecMid: Vec[Vec[Bool]] = Wire(Vec(outs.size, Vec(io.in.size, Bool())))
-  dpTypeConflictVecMid.map(_.map(_ := false.B))
-  val dpTypeConflictVec: Vec[Vec[Bool]] = Wire(Vec(outs.size, Vec(io.in.size, Bool())))
-  dontTouch(dpTypeConflictVecMid)
-  dontTouch(dpTypeConflictVec)
-
-  dpTypeConflictVecMid.zip(iqPortSelectVecMid).foreach{
-    case (conflict, mid) =>
-      // actually, at most 2 for ParallelMux, others would be hard-written to false
-      // TODO: check it at verilog result for Mux depth
-      conflict := ParallelMux(mid.map(_.valid), mid.map(_.bits)).asBools
-  }
-  dpTypeConflictVec.zip(dpTypeConflictVecMid).foreach {
-    case (con, mid) =>
-      // TODO: OneHot.checkOneHot use PopCount, may not optimal latency
-      // mid.map(_.valid) has a implicit feature that no more than 2 bits are 1
-      // Try to use the feature to optimize latency
-      val valid = !noMoreThanOH(mid.asUInt)
-      con := Mux(valid, ParallelPosteriorityMux(mid, mid.indices.map(OHFromInt(_, mid.size))),
-                     0.U(mid.size.W)).asBools
-  }
   // each bit for dpUop, true for block
   val dpUopBlockByConflict = ParallelOR(dpTypeConflictVec)
   val dpUopBlockVec = VecInit(dpUopBlockByIqPortReady.zip(dpUopBlockByConflict).map(x => x._1 | x._2))
