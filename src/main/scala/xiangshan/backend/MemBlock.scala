@@ -162,6 +162,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   with HasWritebackSourceImp
   with HasPerfEvents
   with HasL1PrefetchSourceParameter
+  with HasCircularQueuePtrHelper
 {
 
   val io = IO(new Bundle {

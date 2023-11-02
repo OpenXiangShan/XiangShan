@@ -1070,14 +1070,14 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   io.rollback.valid := s3_out.valid && !s3_rep_frm_fetch && s3_flushPipe
   io.rollback.bits             := DontCare
-  io.rollback.bits.isRVC       := s3_out.uop.cf.pd.isRVC
+  io.rollback.bits.isRVC       := s3_out.bits.uop.cf.pd.isRVC
   io.rollback.bits.rawNuke     := false.B
-  io.rollback.bits.robIdx      := s3_out.uop.robIdx
-  io.rollback.bits.ftqIdx      := s3_out.uop.cf.ftqPtr
-  io.rollback.bits.ftqOffset   := s3_out.uop.cf.ftqOffset
+  io.rollback.bits.robIdx      := s3_out.bits.uop.robIdx
+  io.rollback.bits.ftqIdx      := s3_out.bits.uop.cf.ftqPtr
+  io.rollback.bits.ftqOffset   := s3_out.bits.uop.cf.ftqOffset
   io.rollback.bits.level       := RedirectLevel.flushAfter
-  io.rollback.bits.cfiUpdate.target := s3_out.uop.cf.pc
-  io.rollback.bits.debug_runahead_checkpoint_id := s3_out.uop.debugInfo.runahead_checkpoint_id
+  io.rollback.bits.cfiUpdate.target := s3_out.bits.uop.cf.pc
+  io.rollback.bits.debug_runahead_checkpoint_id := s3_out.bits.uop.debugInfo.runahead_checkpoint_id
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
 
   io.lsq.ldin.bits.uop := s3_out.bits.uop
