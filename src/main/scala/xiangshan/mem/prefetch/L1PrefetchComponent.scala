@@ -471,7 +471,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   val s1_pf_fire_vec = RegNext(s0_pf_fire_vec)
 
   val s0_pf_fire = l1_pf_req_arb.io.out.fire
-  val s0_pf_index = OHToUInt(s0_pf_fire_vec.asUInt)
+  val s0_pf_index = l1_pf_req_arb.io.chosen
   val s0_pf_candidate_oh = get_candidate_oh(l1_pf_req_arb.io.out.bits.paddr)
 
   for(i <- 0 until MLP_SIZE) {
