@@ -194,11 +194,11 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
     iqSeq: Seq[Int],
     iqPortMap: Map[Int, Seq[Int]],
     lowFirst: Boolean = true
-  ): Seq[Int] = {
+  ): Seq[UInt] = {
     if (iqSeq.isEmpty) Seq()
     else {
       val entrySeqSeq = (0 until iqPortMap.values.map(_.size).max).map(i =>
-        iqSeq.filter(iqPortMap(_).size > i).map(iqPortMap(_)(i))
+        iqSeq.filter(iqPortMap(_).size > i).map(iqPortMap(_)(i).U)
       ).toSeq
 
       if (lowFirst) entrySeqSeq.flatten
@@ -217,11 +217,11 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
     map: DpFuIQPortMap[T],
     iqPortMap: Map[Int, Seq[Int]],
     lowFirst: Boolean = true
-  ): Seq[Seq[Int]] = {
+  ): Vec[Vec[UInt]] = {
     val (fuTypeSeq, iqIdxSeq, deqPortIdSeq) = (map.fuType, map.iqIdx, map.deqPortId)
-    iqIdxSeq.indices.map{i =>
-      getNaiveChoice(circularRotation(iqIdxSeq, i), iqPortMap, lowFirst)
-    }
+    VecInit(iqIdxSeq.indices.map{i =>
+      VecInit(getNaiveChoice(circularRotation(iqIdxSeq, i), iqPortMap, lowFirst).toSeq)
+    })
   }
 
   // Prefer choices:
@@ -235,15 +235,15 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
     map: DpFuIQPortMap[T],
     iqPortMap: Map[Int, Seq[Int]],
     lowFirst: Boolean = true
-  ): Seq[Seq[Int]] = {
+  ): Vec[Vec[UInt]] = {
     val (fuTypeSeq, iqIdxSeq, deqPortIdSeq) = (map.fuType, map.iqIdx, map.deqPortId)
 
-    if (iqIdxSeq.size < 2) Seq(Seq())
-    else {
-      iqIdxSeq.indices.map{i =>
-        iqPortMap(iqIdxSeq(i)) ++ getNaiveChoice(circularRotation(iqIdxSeq, i+1).init, iqPortMap, lowFirst)
-      }
-    }
+    // if (iqIdxSeq.size < 2) Seq(Seq())
+    // else {
+      VecInit(iqIdxSeq.indices.map{i =>
+        VecInit((iqPortMap(iqIdxSeq(i)).map(_.U) ++ getNaiveChoice(circularRotation(iqIdxSeq, i+1).init, iqPortMap, lowFirst)).toSeq)
+      })
+    // }
   }
 
   // combine Round-Robin and Prefer
@@ -266,22 +266,22 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
     map: DpFuIQPortMap[T],
     iqPortMap: Map[Int, Seq[Int]],
     lowFirst: Boolean = true
-  ): Seq[Seq[Int]] = {
+  ): Vec[Vec[UInt]] = {
     val (fuTypeSeq, iqIdxSeq, deqPortIdSeq) = (map.fuType, map.iqIdx, map.deqPortId)
-    if (iqIdxSeq.size < 2) Seq(Seq())
-    else {
-      iqIdxSeq.indices.map{i =>
-        getNaiveChoice(circularRotation(iqIdxSeq, i+1).init, iqPortMap, lowFirst) ++ iqPortMap(iqIdxSeq(i))
-      }
-    }
+    // if (iqIdxSeq.size < 2) Seq(Seq())
+    // else {
+      VecInit(iqIdxSeq.indices.map{i =>
+        VecInit((getNaiveChoice(circularRotation(iqIdxSeq, i+1).init, iqPortMap, lowFirst) ++ iqPortMap(iqIdxSeq(i)).map(_.U)).toSeq)
+      })
+    // }
   }
 
   // NOTE: instruction type conflict may be simpiled modled by RR or Prefer
   // def getConflictChoices[T](){}
   case class DpChoicesVec(
-    rr: Seq[Seq[Int]],
-    prefer: Seq[Seq[Int]],
-    preferNot: Seq[Seq[Int]]
+    rr: Vec[Vec[UInt]],
+    prefer: Vec[Vec[UInt]],
+    preferNot: Vec[Vec[UInt]]
     // conflict: Seq[Seq[Int]]
   )
 
@@ -466,11 +466,22 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
     })
   }.toSeq))
 
+  val rrCounterSeq = finalFuDeqMap.map(_.me).map{
+    me =>
+      if (me.iqIdx.size == 1) 1.U(1.W)
+      else {
+        val update = VecInit((me.deqPortId.map(a => outs(a).fire)).toSeq).asUInt.orR
+        Counter(update, me.iqIdx.size)._1
+      }
+  }
+
   finalFuDeqMap.zip(dpChoices).zip(typeOrderInfo).zipWithIndex.foreach {
     case (((dpTypeInfo, choices), orders), dpTypeIdx) =>
     // generate final Choice for later use
-    def chooseFromChoice(ch: DpChoicesVec): Seq[Int] = ch.rr.head
-    val finalChoice = chooseFromChoice(choices).map(x => UIntToOH(x.U)) // Just run, change it for better policy
+    def chooseFromChoice(ch: DpChoicesVec): Seq[UInt] =
+      if (ch.rr.size > 1) ch.rr(rrCounterSeq(dpTypeIdx))
+      else ch.rr.head
+    val finalChoice = chooseFromChoice(choices).map(x => UIntToOH(x)) // Just run, change it for better policy
     // TODO: remote UIntToOH
 
     selectMatrix(dpTypeIdx).zipWithIndex.foreach { case (con, con_idx) =>
