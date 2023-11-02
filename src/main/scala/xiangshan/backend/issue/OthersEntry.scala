@@ -303,11 +303,22 @@ class OthersEntryVecMemAddr()(implicit p: Parameters, params: IssueBlockParams) 
   }
 
   val isLsqHead = {
-    if (params.isVecLdAddrIQ)
-      entryRegNext.status.vecMem.get.lqIdx.value === fromLsq.lqDeqPtr.value
-    else
+    // if (params.isVecLdAddrIQ)
+      entryRegNext.status.vecMem.get.lqIdx.value === fromLsq.lqDeqPtr.value &&
+    // else
       entryRegNext.status.vecMem.get.sqIdx.value === fromLsq.sqDeqPtr.value
   }
+  dontTouch(shouldBlock)
+  dontTouch(blockNotReleased)
+  dontTouch(blockedByOlderStore)
+  dontTouch(respBlock)
+  dontTouch(isLsqHead)
+  dontTouch(waitStd)
+  dontTouch(waitSta)
+  dontTouch(memStatusNext)
+  dontTouch(fromMem)
+  dontTouch(io.issueResp)
+  dontTouch(isLsqHead)
 
   entryRegNext.status.blocked := shouldBlock && blockNotReleased && blockedByOlderStore || respBlock || !isLsqHead
 }

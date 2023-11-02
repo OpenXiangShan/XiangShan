@@ -319,9 +319,9 @@ class EnqEntryVecMemAddr()(implicit p: Parameters, params: IssueBlockParams) ext
   vecMemStatusUpdate := vecMemStatus
 
   val isLsqHead = {
-    if (params.isVecLdAddrIQ)
-      entryRegNext.status.vecMem.get.lqIdx.value === fromLsq.lqDeqPtr.value
-    else
+    // if (params.isVecLdAddrIQ)
+      entryRegNext.status.vecMem.get.lqIdx.value === fromLsq.lqDeqPtr.value &&
+    // else
       entryRegNext.status.vecMem.get.sqIdx.value === fromLsq.sqDeqPtr.value
   }
 
