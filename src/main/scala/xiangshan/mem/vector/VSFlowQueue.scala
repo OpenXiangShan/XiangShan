@@ -468,6 +468,11 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
     }
     io.sbuffer(i).valid := canDequeue(i)
     doDequeue(i) := canDequeue(i) && allowDequeue(i)
+    when (doDequeue(i)) {
+      flowAllocated(thisPtr) := false.B
+      flowFinished(thisPtr) := false.B
+      flowCommitted(thisPtr) := false.B
+    }
   }
 
   // update DequeuePtr
