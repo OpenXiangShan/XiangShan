@@ -181,7 +181,7 @@ case class XSCoreParameters
   UncacheBufferSize: Int = 4,
   EnableLoadToLoadForward: Boolean = true,
   EnableFastForward: Boolean = true,
-  EnableLdVioCheckAfterReset: Boolean = true,
+  EnableLdVioCheckAfterReset: Boolean = false, // disable for single core
   EnableSoftPrefetchAfterReset: Boolean = true,
   EnableCacheErrorAfterReset: Boolean = true,
   EnableAccurateLoadError: Boolean = true,
