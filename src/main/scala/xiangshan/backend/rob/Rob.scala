@@ -1044,6 +1044,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }.elsewhen(valid(i)) {
       // update by writing back
       uopNumVec(i) := uopNumVec(i) - wbCnt
+      assert(!(uopNumVec(i) - wbCnt > uopNumVec(i)), "Overflow!")
       when (canStdWbSeq.asUInt.orR) {
         stdWritebacked(i) := true.B
       }
