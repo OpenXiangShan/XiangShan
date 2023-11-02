@@ -30,6 +30,7 @@ import xiangshan.backend.Bundles.{DynInst, MemExuInput, MemExuOutput}
 import xiangshan.backend.ctrlblock.{DebugLSIO, LsTopdownInfo}
 import xiangshan.backend.exu.MemExeUnit
 import xiangshan.backend.fu._
+import xiangshan.backend.fu.FuType._
 import xiangshan.backend.rob.{RobDebugRollingIO, RobPtr}
 import xiangshan.cache._
 import xiangshan.cache.mmu._
@@ -844,8 +845,17 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   vlWrapper.io.redirect <> redirect
   vsUopQueue.io.redirect <> redirect
   vsFlowQueue.io.redirect <> redirect
-  vlWrapper.io.loadRegIn <> io.ooo_to_mem.issue.drop(MemExuCnt).head
-  vsUopQueue.io.storeIn <> io.ooo_to_mem.issue.drop(MemExuCnt + VlduCnt).head
+  // Vector loads/stores are only issued from port 0, and port 1 is idle.
+  // However, we still need two ports because loads and stores must writeback
+  // via different ports.
+  val vecIssuePort = io.ooo_to_mem.issue.drop(MemExuCnt).head
+  vlWrapper.io.loadRegIn.valid := vecIssuePort.valid && isVLoad(vecIssuePort.bits.uop.fuType)
+  vlWrapper.io.loadRegIn.bits := vecIssuePort.bits
+  vsUopQueue.io.storeIn.valid := vecIssuePort.valid && isVStore(vecIssuePort.bits.uop.fuType)
+  vsUopQueue.io.storeIn.bits := vecIssuePort.bits
+  vecIssuePort.ready := vlWrapper.io.loadRegIn.ready && isVLoad(vecIssuePort.bits.uop.fuType) ||
+    vsUopQueue.io.storeIn.ready && isVStore(vecIssuePort.bits.uop.fuType)
+  io.ooo_to_mem.issue.drop(MemExuCnt + VlduCnt).foreach(_.ready := false.B) // idle issue ports
   vsFlowQueue.io.flowIn <> vsUopQueue.io.flowIssue
   vsUopQueue.io.flowWriteback <> vsFlowQueue.io.flowWriteback
   vsFlowQueue.io.rob.lcommit := io.ooo_to_mem.lsqio.lcommit
