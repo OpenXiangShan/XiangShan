@@ -52,8 +52,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   // =========== Components' Connection ============
   // L1 to l1_xbar
   coreParams.dcacheParametersOpt.map { _ =>
-    l2top.misc_l2_pmu := l2top.l1d_logger := core.memBlock.l1d_to_l2_buffer.node :=
-      core.memBlock.dcache.clientNode
+    l2top.misc_l2_pmu := l2top.l1d_logger := core.memBlock.dcache_port :=
+      core.memBlock.l1d_to_l2_buffer.node := core.memBlock.dcache.clientNode
   }
 
   l2top.misc_l2_pmu := l2top.l1i_logger := core.memBlock.frontendBridge.icache_node_out
