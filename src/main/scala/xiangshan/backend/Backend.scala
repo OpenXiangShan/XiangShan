@@ -576,6 +576,12 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
 
   def issueUops = issueLda ++ issueSta ++ issueStd ++ issueHylda ++ issueHysta ++ issueVldu
 
+  def writeback =
+    Seq(writebackLda(0)) ++ Seq(writebackSta(0)) ++
+      writebackHyuLda ++ writebackHyuSta ++
+      Seq(writebackLda(1)) ++ writebackVlda ++
+      writebackStd
+
   def writeback = writebackLda ++ writebackSta ++ writebackHyuLda ++ writebackHyuSta ++ writebackStd ++ writebackVlda
 
   // make this function private to avoid flip twice, both in Backend and XSCore
