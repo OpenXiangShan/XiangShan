@@ -186,7 +186,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // Modify deqPtrExtNext and io.sqDeq with care!
   val deqPtrExtNext = Mux(RegNext(io.sbuffer(1).fire),
     VecInit(deqPtrExt.map(_ + 2.U)),
-    Mux(RegNext(io.sbuffer(0).fire) || io.mmioStout.fire,
+    Mux(RegNext(io.sbuffer(0).fire) || io.mmioStout.fire || io.vecStoreRetire.valid,
       VecInit(deqPtrExt.map(_ + 1.U)),
       deqPtrExt
     )
@@ -708,7 +708,9 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   when (io.vecStoreRetire.valid) {
     assert(io.vecStoreRetire.bits === rdataPtrExt(0))
     assert(vec(rdataPtrExt(0).value), "Vector store flow queue is trying to retire a scalar store")
+    assert(allocated(rdataPtrExt(0).value), "Vector store flow queue is trying to retire an invalid entry")
     vec(rdataPtrExt(0).value) := false.B
+    allocated(rdataPtrExt(0).value) := false.B
   }
 
   val mmioStall = mmio(rdataPtrExt(0).value)
