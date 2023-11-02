@@ -19,10 +19,11 @@ package xiangshan.backend
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
-import freechips.rocketchip.tilelink.{TLBuffer, TLIdentityNode}
+import freechips.rocketchip.tilelink._
 import coupledL2.PrefetchRecv
 import utils._
 import utility._
@@ -104,6 +105,26 @@ class fetch_to_mem(implicit p: Parameters) extends XSBundle{
   val itlb = Flipped(new TlbPtwIO())
 }
 
+class InstrUncacheBuffer()(implicit p: Parameters) extends LazyModule {
+  val node = new TLBufferNode(BufferParams.default, BufferParams.default, BufferParams.default, BufferParams.default, BufferParams.default)
+  lazy val module = new InstrUncacheBufferImpl
+
+  class InstrUncacheBufferImpl extends LazyModuleImp(this) {
+    (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
+      out.a <> BufferParams.default(in.a)
+      in.d <> BufferParams.default(out.d)
+
+      // only a.valid, a.ready, a.address are used, so we assign 0 to the following
+      // hoping that them would be optimized to keep MemBlock port unchanged after adding buffer
+      out.a.bits.data := 0.U
+      out.a.bits.mask := 0.U
+      out.a.bits.opcode := 0.U
+      out.a.bits.size := 0.U
+      out.a.bits.source := 0.U
+    }
+  }
+}
+
 // Frontend bus goes through MemBlock
 class FrontendBridge()(implicit p: Parameters) extends LazyModule {
   val icache_node_in = LazyModule(new TLBuffer()).suggestName("icache_1").node
@@ -113,7 +134,7 @@ class FrontendBridge()(implicit p: Parameters) extends LazyModule {
   // node_out must be named as "icache" to keep MemBlock outer port name unchanged
   icache_node_out := icache_node_in
 
-  val instr_uncache_node = LazyModule(new TLBuffer()).suggestName("instr_uncache").node
+  val instr_uncache_node = LazyModule(new InstrUncacheBuffer()).suggestName("instr_uncache").node
   lazy val module = new LazyModuleImp(this) {
   }
 }
