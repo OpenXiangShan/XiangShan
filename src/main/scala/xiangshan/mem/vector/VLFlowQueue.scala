@@ -178,6 +178,7 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
     doDequeue(i) := canDequeue(i) && allowDequeue(i)
     when (doDequeue(i)) {
       flowAllocated(deqPtr(i).value) := false.B
+      flowFinished(deqPtr(i).value) := false.B
       issued(deqPtr(i).value) := false.B
     }
   }
@@ -185,6 +186,7 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
   flowNeedCancel.zipWithIndex.foreach { case (cancel, i) =>
     when (cancel) {
       flowAllocated(i) := false.B
+      flowFinished(i) := false.B
       issued(i) := false.B
     }
   }
