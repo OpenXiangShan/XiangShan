@@ -837,7 +837,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
         res(i).valid := valid(i)
         res(i).bits := bits(i)
       }
-      val oldest = Mux(valid(0) && valid(1), Mux(isAfter(bits(0).uop.obIdx, bits(1).uop.robIdx), res(1), res(0)), Mux(valid(0) && !valid(1), res(0), res(1)))
+      val oldest = Mux(valid(0) && valid(1), Mux(isAfter(bits(0).robIdx, bits(1).robIdx), res(1), res(0)), Mux(valid(0) && !valid(1), res(0), res(1)))
       (Seq(oldest.valid), Seq(oldest.bits))
     } else {
       val left = selectOldest(valid.take(valid.length / 2), bits.take(bits.length / 2))
