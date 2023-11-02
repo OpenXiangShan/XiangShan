@@ -423,7 +423,12 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   }
 
   io.mem.redirect := ctrlBlock.io.redirect
-  private val memIssueUops = io.mem.issueLda ++ io.mem.issueHylda ++ io.mem.issueHysta ++ io.mem.issueSta ++ io.mem.issueStd ++ io.mem.issueVldu
+  private val memIssueUops =
+    Seq(io.mem.issueLda(0)) ++ Seq(io.mem.issueSta(0)) ++
+      io.mem.issueHylda ++ io.mem.issueHysta ++
+      Seq(io.mem.issueLda(1)) ++
+      io.mem.issueVldu ++
+      io.mem.issueStd
   memIssueUops.zip(toMem.flatten).foreach { case (sink, source) =>
     sink.valid := source.valid
     source.ready := sink.ready
@@ -574,12 +579,18 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val sfence = Output(new SfenceBundle)
   val isStoreException = Output(Bool())
 
-  def issueUops = issueLda ++ issueSta ++ issueStd ++ issueHylda ++ issueHysta ++ issueVldu
+  def issueUops =
+    Seq(issueLda(0)) ++ Seq(issueSta(0)) ++
+      issueHylda ++ issueHysta ++
+      Seq(issueLda(1)) ++
+      issueVldu ++
+      issueStd
 
   def writeback =
     Seq(writebackLda(0)) ++ Seq(writebackSta(0)) ++
       writebackHyuLda ++ writebackHyuSta ++
-      Seq(writebackLda(1)) ++ writebackVlda ++
+      Seq(writebackLda(1)) ++
+      writebackVlda ++
       writebackStd
 
   def writeback = writebackLda ++ writebackSta ++ writebackHyuLda ++ writebackHyuSta ++ writebackStd ++ writebackVlda
