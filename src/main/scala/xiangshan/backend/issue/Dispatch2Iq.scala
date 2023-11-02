@@ -476,7 +476,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   uopsIn <> io.in
   uopsIn.foreach(_.ready := false.B)
   uopsIn.zipWithIndex.foreach { case (uopIn, idx) =>
-    uopIn.ready := uopCanEnqIQVec(idx) && !s0_blockedVec(idx) && iqAllReady && lsqCanAccept
+    uopIn.ready := uopCanEnqIQVec(idx) && !s0_blockedVec(idx) && lsqCanAccept
     uopIn.bits.lqIdx := s0_enqLsq_resp(idx).lqIdx
     uopIn.bits.sqIdx := s0_enqLsq_resp(idx).sqIdx
   }
