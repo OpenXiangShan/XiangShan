@@ -451,36 +451,6 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     oldest
   }))
 
-
-  // Replay port reorder
-  class BalanceEntry extends XSBundle {
-    val balance = Bool()
-    val index   = UInt(log2Up(LoadQueueReplaySize).W)
-    val port    = UInt(log2Up(LoadPipelineWidth).W)
-  }
-
-  def balanceReOrder(sel: Seq[ValidIO[BalanceEntry]]): Seq[ValidIO[BalanceEntry]] = {
-    require(sel.length > 0)
-    val balancePick = ParallelPriorityMux(sel.map(x => (x.valid && x.bits.balance) -> x))
-    val reorderSel = Wire(Vec(sel.length, ValidIO(new BalanceEntry)))
-    (0 until sel.length).map(i =>
-      if (i == 0) {
-        when (balancePick.valid && balancePick.bits.balance) {
-          reorderSel(i) := balancePick
-        } .otherwise {
-          reorderSel(i) := sel(i)
-        }
-      } else {
-        when (balancePick.valid && balancePick.bits.balance && i.U === balancePick.bits.port) {
-          reorderSel(i) := sel(0)
-        } .otherwise {
-          reorderSel(i) := sel(i)
-        }
-      }
-    )
-    reorderSel
-  }
-
   // stage2: send replay request to load unit
   // replay cold down
   val ColdDownCycles = 16
@@ -492,18 +462,8 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   def replayCanFire(i: Int) = coldCounter(i) >= 0.U && coldCounter(i) < ColdDownThreshold
   def coldDownNow(i: Int) = coldCounter(i) >= ColdDownThreshold
 
-  val s1_balanceOldestSelExt = (0 until LoadPipelineWidth).map(i => {
-    val wrapper = Wire(Valid(new BalanceEntry))
-    wrapper.valid        := s1_oldestSel(i).valid
-    wrapper.bits.balance := cause(s1_oldestSel(i).bits)(LoadReplayCauses.C_BC)
-    wrapper.bits.index   := s1_oldestSel(i).bits
-    wrapper.bits.port    := i.U
-    wrapper
-  })
-
-  val s1_balanceOldestSel = VecInit(balanceReOrder(s1_balanceOldestSelExt))
   for (i <- 0 until LoadPipelineWidth) {
-    val s0_can_go = s1_can_go(s1_balanceOldestSel(i).bits.port) || uop(s1_oldestSel(i).bits).robIdx.needFlush(io.redirect)
+    val s0_can_go = s1_can_go(s1_oldestSel(i).bits.port) || uop(s1_oldestSel(i).bits).robIdx.needFlush(io.redirect)
     val s0_oldestSelIndexOH = s0_oldestSel(i).bits // one-hot
     s1_oldestSel(i).valid := RegEnable(s0_oldestSel(i).valid, s0_can_go)
     s1_oldestSel(i).bits := RegEnable(OHToUInt(s0_oldestSel(i).bits), s0_can_go)
@@ -516,18 +476,18 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   }
   val s2_cancelReplay = Wire(Vec(LoadPipelineWidth, Bool()))
   for (i <- 0 until LoadPipelineWidth) {
-    val s1_cancel = uop(s1_balanceOldestSel(i).bits.index).robIdx.needFlush(io.redirect)
-    val s1_oldestSelV = s1_balanceOldestSel(i).valid && !s1_cancel
+    val s1_cancel = uop(s1_oldestSel(i).bits.index).robIdx.needFlush(io.redirect)
+    val s1_oldestSelV = s1_oldestSel(i).valid && !s1_cancel
     s1_can_go(i)          := Mux(s2_oldestSel(i).valid && !s2_cancelReplay(i), io.replay(i).ready && replayCanFire(i), true.B)
     s2_oldestSel(i).valid := RegEnable(s1_oldestSelV, s1_can_go(i))
-    s2_oldestSel(i).bits  := RegEnable(s1_balanceOldestSel(i).bits.index, s1_can_go(i))
+    s2_oldestSel(i).bits  := RegEnable(s1_oldestSel(i).bits.index, s1_can_go(i))
 
-    vaddrModule.io.ren(i) := s1_balanceOldestSel(i).valid && s1_can_go(i)
-    vaddrModule.io.raddr(i) := s1_balanceOldestSel(i).bits.index
+    vaddrModule.io.ren(i) := s1_oldestSel(i).valid && s1_can_go(i)
+    vaddrModule.io.raddr(i) := s1_oldestSel(i).bits.index
   }
 
   for (i <- 0 until LoadPipelineWidth) {
-    val s1_replayIdx = s1_balanceOldestSel(i).bits.index
+    val s1_replayIdx = s1_oldestSel(i).bits.index
     val s2_replayUop = RegEnable(uop(s1_replayIdx), s1_can_go(i))
     val s2_replayMSHRId = RegEnable(missMSHRId(s1_replayIdx), s1_can_go(i))
     val s2_replacementUpdated = RegEnable(replacementUpdated(s1_replayIdx), s1_can_go(i))

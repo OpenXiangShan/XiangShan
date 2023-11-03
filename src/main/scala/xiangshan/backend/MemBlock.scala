@@ -549,44 +549,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     PrintTriggerInfo(tEnable(j), tdata(j))
 
   // LoadUnit
-  class BalanceEntry extends XSBundle {
-    val balance = Bool()
-    val req = new LqWriteBundle
-    val port = UInt(log2Up(LoadPipelineWidth).W)
-  }
-
-  def balanceReOrder(sel: Seq[ValidIO[BalanceEntry]]): Seq[ValidIO[BalanceEntry]] = {
-    require(sel.length > 0)
-    val balancePick = ParallelPriorityMux(sel.map(x => (x.valid && x.bits.balance) -> x))
-    val reorderSel = Wire(Vec(sel.length, ValidIO(new BalanceEntry)))
-    (0 until sel.length).map(i =>
-      if (i == 0) {
-        when (balancePick.valid && balancePick.bits.balance) {
-          reorderSel(i) := balancePick
-        } .otherwise {
-          reorderSel(i) := sel(i)
-        }
-      } else {
-        when (balancePick.valid && balancePick.bits.balance && i.U === balancePick.bits.port) {
-          reorderSel(i) := sel(0)
-        } .otherwise {
-          reorderSel(i) := sel(i)
-        }
-      }
-    )
-    reorderSel
-  }
-
-  val fastReplaySel = loadUnits.zipWithIndex.map { case (ldu, i) => {
-    val wrapper = Wire(Valid(new BalanceEntry))
-    wrapper.valid        := ldu.io.fast_rep_out.valid
-    wrapper.bits.req     := ldu.io.fast_rep_out.bits
-    wrapper.bits.balance := ldu.io.fast_rep_out.bits.rep_info.bank_conflict
-    wrapper.bits.port    := i.U
-    wrapper
-  }}
-  val balanceFastReplaySel = balanceReOrder(fastReplaySel)
-
   val correctMissTrain = WireInit(Constantin.createRecord("CorrectMissTrain" + p(XSCoreParamsKey).HartId.toString, initValue = 0.U)) === 1.U
 
   for (i <- 0 until exuParameters.LduCnt) {
@@ -601,15 +563,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.correctMissTrain := correctMissTrain
 
     // fast replay
-    loadUnits(i).io.fast_rep_in.valid := balanceFastReplaySel(i).valid
-    loadUnits(i).io.fast_rep_in.bits := balanceFastReplaySel(i).bits.req
-
-    loadUnits(i).io.fast_rep_out.ready := false.B
-    for (j <- 0 until exuParameters.LduCnt) {
-      when (balanceFastReplaySel(j).valid && balanceFastReplaySel(j).bits.port === i.U) {
-        loadUnits(i).io.fast_rep_out.ready := loadUnits(j).io.fast_rep_in.ready
-      }
-    }
+    loadUnits(i).io.fast_rep_in <> loadUnits(i).io.fast_rep_out
 
     // get input form dispatch
     loadUnits(i).io.ldin <> io.ooo_to_mem.issue(i)
