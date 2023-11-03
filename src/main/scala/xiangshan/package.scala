@@ -637,6 +637,7 @@ package object xiangshan {
     def VEC_VFREDOSUM    = "b111101".U // VEC_VFREDOSUM
     def VEC_M0M          = "b000000".U // VEC_M0M
     def VEC_MMM          = "b000000".U // VEC_MMM
+    def VEC_MVNR         = "b000100".U // vmvnr
     def dummy     = "b111111".U
 
     def X = BitPat("b000000")
