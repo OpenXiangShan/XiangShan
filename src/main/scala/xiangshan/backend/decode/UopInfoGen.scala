@@ -38,6 +38,7 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
   val typeOfSplit = io.in.preInfo.typeOfSplit
   val vsew = Cat(0.U(1.W), io.in.preInfo.vsew)
   val veew = Cat(0.U(1.W), io.in.preInfo.vwidth(1, 0))
+  val vmvn = io.in.preInfo.vmvn
   val vlmul = io.in.preInfo.vlmul
   val isComplex = io.out.isComplex
 
@@ -142,6 +143,7 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     UopSplitType.VEC_RGATHER_VX -> (numOfUopVrgather +& 1.U),
     UopSplitType.VEC_RGATHEREI16 -> numOfUopVrgatherei16,
     UopSplitType.VEC_US_LD -> (emul +& 1.U),
+    UopSplitType.VEC_MVNR -> (vmvn +& 1.U),
   ))
 
   isComplex := (numOfUop > 1.U) || (typeOfSplit === UopSplitType.DIR)
@@ -165,6 +167,7 @@ class PreInfo(implicit p: Parameters) extends XSBundle {
   val vsew = VSew()          //2 bit
   val vlmul = VLmul()
   val vwidth = UInt(3.W)     //eew
+  val vmvn = UInt(3.W)       // vmvnr
 }
 
 class UopInfo(implicit p: Parameters) extends XSBundle {

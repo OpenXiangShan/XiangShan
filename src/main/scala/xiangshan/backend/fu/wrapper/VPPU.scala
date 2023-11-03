@@ -36,6 +36,8 @@ class VPPU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   private val numVecModule = dataWidth / dataWidthOfDataModule
   private val vppuNeedClearMask = (VpermType.vcompress === io.in.bits.ctrl.fuOpType) && (vuopIdx(log2Up(MaxUopSize)-1,1) === 0.U)
   private val mask = Mux(vppuNeedClearMask, 0.U, srcMask)
+  // mvnr (whole rigister move) instruction no need to use permutation module
+  private val isMvnr = (VpermType.vmvnr === io.in.bits.ctrl.fuOpType)
 
   // io alias
   private val opcode  = VpermType.getOpcode(fuOpType)
@@ -59,7 +61,7 @@ class VPPU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
     */
   vperms.io match {
     case subIO =>
-      subIO.in.valid            := io.in.valid
+      subIO.in.valid            := io.in.valid && !isMvnr
       subIO.in.bits.opcode.op   := opcode
       subIO.in.bits.info.vm     := vm
       subIO.in.bits.info.ma     := vma
@@ -78,6 +80,6 @@ class VPPU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
       subIO.in.bits.mask        := mask
   }
 
-  io.out.bits.res.data := vperms.io.out.vd
+  io.out.bits.res.data := Mux(isMvnr, RegEnable(vs2, io.in.valid), vperms.io.out.vd)
   io.out.bits.res.vxsat.foreach(_ := vperms.io.out.vxsat)
 }
