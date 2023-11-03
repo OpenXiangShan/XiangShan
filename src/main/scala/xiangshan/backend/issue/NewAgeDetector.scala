@@ -23,11 +23,11 @@ import xiangshan._
 import utils._
 import utility._
 
-class NewAgeDetector(numEntries: Int, numEnq: Int)(implicit p: Parameters) extends XSModule {
+class NewAgeDetector(numEntries: Int, numEnq: Int, numDeq: Int)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
     val enq = Vec(numEnq, Input(Bool()))
-    val canIssue = Input(UInt(numEntries.W))
-    val out = Output(UInt(numEntries.W))
+    val canIssue = Vec(numDeq, Input(UInt(numEntries.W)))
+    val out = Vec(numDeq, Output(UInt(numEntries.W)))
   })
 
   // age(i)(j): entry i enters queue before entry j
@@ -47,10 +47,9 @@ class NewAgeDetector(numEntries: Int, numEnq: Int)(implicit p: Parameters) exten
       }
       else if (i < j) {
         when (io.enq(j)) {
-          // (1) enq entries are put in order
-          // (1.1) when entry j enqueues from port k,
-          // (1.2) entry i (<j) must enqueues from previous ports,
-          // (1.3) and older than entry j
+          // (1) when entry j enqueues from port k,
+          // (1.1) if entry i (<j) enqueues from previous ports, it is older than entry j
+          // (1.2) if entry i does not enqueue, set col(j) older than entry j
           elem := true.B
         }.elsewhen (io.enq(i)) {
           // (2) when entry i enqueues, set row(i) to false
@@ -73,20 +72,24 @@ class NewAgeDetector(numEntries: Int, numEnq: Int)(implicit p: Parameters) exten
     })).asUInt
   }
 
-  io.out := getOldestCanIssue(get_age, io.canIssue)
+  io.out.zip(io.canIssue).foreach { case (out, canIssue) =>
+    out := getOldestCanIssue(get_age, canIssue)
+  }
 }
 
 object NewAgeDetector {
-  def apply(numEntries: Int, enq: Vec[Bool], canIssue: UInt)(implicit p: Parameters): Valid[UInt] = {
-    val age = Module(new NewAgeDetector(numEntries, enq.length))
+  def apply(numEntries: Int, enq: Vec[Bool], canIssue: Vec[UInt])(implicit p: Parameters): Vec[Valid[UInt]] = {
+    val age = Module(new NewAgeDetector(numEntries, enq.length, canIssue.length))
     age.io.enq := enq
     age.io.canIssue := canIssue
-    val out = Wire(Valid(UInt(numEntries.W)))
-    out.valid := canIssue.orR
-    out.bits := age.io.out
-    when (out.valid) {
-      assert(PopCount(out.bits) === 1.U, "out is not ont-hot when there is at least one entry can be issued\n")
+    val outVec = Wire(Vec(canIssue.length, Valid(UInt(numEntries.W))))
+    outVec.zipWithIndex.foreach { case (out, i) =>
+      out.valid := canIssue(i).orR
+      out.bits := age.io.out(i)
+      when (out.valid) {
+        assert(PopCount(out.bits) === 1.U, s"out ($i) is not ont-hot when there is at least one entry can be issued\n")
+      }
     }
-    out
+    outVec
   }
 }
