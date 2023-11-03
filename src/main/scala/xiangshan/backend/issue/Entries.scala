@@ -135,8 +135,12 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
 
   // only memAddrIQ use it
   val memEtyResps: MixedVec[ValidIO[EntryDeqRespBundle]] = {
-    if (params.isLdAddrIQ) MixedVecInit(io.deqResp ++ io.og0Resp ++ io.og1Resp ++ io.memAddrIssueResp.get ++ io.finalIssueResp.get)
-    else if (params.isMemAddrIQ) MixedVecInit(io.deqResp ++ io.og0Resp ++ io.og1Resp ++ io.fromMem.get.fastResp ++ io.fromMem.get.slowResp)
+    if (params.isLdAddrIQ && !params.isStAddrIQ)
+      MixedVecInit(io.deqResp ++ io.og0Resp ++ io.og1Resp ++ io.memAddrIssueResp.get ++ io.finalIssueResp.get)
+    else if (params.isLdAddrIQ && params.isStAddrIQ || params.isHyAddrIQ)
+      MixedVecInit(io.deqResp ++ io.og0Resp ++ io.og1Resp ++ io.memAddrIssueResp.get ++ io.finalIssueResp.get ++ io.fromMem.get.fastResp ++ io.fromMem.get.slowResp)
+    else if (params.isMemAddrIQ)
+      MixedVecInit(io.deqResp ++ io.og0Resp ++ io.og1Resp ++ io.fromMem.get.fastResp ++ io.fromMem.get.slowResp)
     else MixedVecInit(Seq())
   }
 

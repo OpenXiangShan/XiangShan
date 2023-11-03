@@ -50,6 +50,8 @@ case class IssueBlockParams(
 
   def isStAddrIQ: Boolean = inMemSchd && StaCnt > 0
 
+  def isHyAddrIQ: Boolean = inMemSchd && HyuCnt > 0
+
   def numExu: Int = exuBlockParams.count(!_.fakeUnit)
 
   def numIntSrc: Int = exuBlockParams.map(_.numIntSrc).max
