@@ -525,7 +525,10 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
   for (thisForward <- io.forward) {
     // for every forward query
     // val flowNeedForward = Wire(Vec(VsFlowSize, Bool()))
-    val flowNeedForward = flowQueueEntries.map(_.needForward(thisForward))
+    val flowNeedForward = (flowQueueEntries.zipWithIndex).map{
+      case (entry,i) => 
+        entry.needForward(thisForward) && flowAllocated(i)
+    }
     val flowForwardMask = flowQueueEntries.map(_.mask & thisForward.mask)
     val doForward = flowNeedForward.reduce(_ || _)
     
