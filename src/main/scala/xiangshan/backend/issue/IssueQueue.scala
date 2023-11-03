@@ -390,29 +390,15 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     }
   }
   else {
-    val enqCanAcceptVec: Seq[IndexedSeq[Bool]] = deqFuCfgs.map { fuCfgs: Seq[FuConfig] =>
-      io.enq.map(_.bits.fuType).map(fuType =>
-        FuType.FuTypeOrR(fuType, fuCfgs.map(_.fuType))) // C+E0    C+E1
-    }
+    enqEntryOldestSel := NewAgeDetector(numEntries = params.numEnq,
+      enq = VecInit(s0_doEnqSelValidVec),
+      canIssue = VecInit(deqCanIssue.map(_(params.numEnq-1, 0)))
+    )
 
-    val transCanAcceptVec: Seq[IndexedSeq[Bool]] = deqFuCfgs.map { fuCfgs: Seq[FuConfig] =>
-      transEntryDeqVec.map(_.bits.status.fuType).zip(transEntryDeqVec.map(_.valid)).map{ case (fuType, valid) =>
-        FuType.FuTypeOrR(fuType, fuCfgs.map(_.fuType)) && valid }
-    }
-
-    enqEntryOldestSel.zipWithIndex.foreach { case (sel, deqIdx) =>
-      sel := NewAgeDetector(numEntries = params.numEnq,
-          enq = VecInit(enqCanAcceptVec(deqIdx).zip(s0_doEnqSelValidVec).map{ case (doCanAccept, valid) => doCanAccept && valid }),
-          canIssue = deqCanIssue(deqIdx)(params.numEnq-1, 0)
-        )
-    }
-
-    othersEntryOldestSel.zipWithIndex.foreach { case (sel, deqIdx) =>
-      sel := AgeDetector(numEntries = params.numEntries - params.numEnq,
-          enq = VecInit(transCanAcceptVec(deqIdx).zip(transSelVec).map{ case (doCanAccept, transSel) => Fill(params.numEntries-params.numEnq, doCanAccept) & transSel }),
-          canIssue = deqCanIssue(deqIdx)(params.numEntries-1, params.numEnq)
-        )
-    }
+    othersEntryOldestSel := AgeDetector(numEntries = params.numEntries - params.numEnq,
+      enq = VecInit(transEntryDeqVec.zip(transSelVec).map{ case (transEntry, transSel) => Fill(params.numEntries-params.numEnq, transEntry.valid) & transSel }),
+      canIssue = VecInit(deqCanIssue.map(_(params.numEntries-1, params.numEnq)))
+    )
 
     deqSelValidVec.zip(deqSelOHVec).zipWithIndex.foreach { case ((selValid, selOH), i) =>
       selValid := othersEntryOldestSel(i).valid || enqEntryOldestSel(i).valid
