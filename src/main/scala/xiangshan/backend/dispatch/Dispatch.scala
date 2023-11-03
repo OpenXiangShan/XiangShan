@@ -121,7 +121,6 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   XSDebug(singleStepStatus, "Debug Mode: Singlestep status is asserted\n")
 
   val updatedUop = Wire(Vec(RenameWidth, new DynInst))
-  val updatedCommitType = Wire(Vec(RenameWidth, CommitType()))
   val checkpoint_id = RegInit(0.U(64.W))
   checkpoint_id := checkpoint_id + PopCount((0 until RenameWidth).map(i =>
     io.fromRename(i).fire
@@ -129,16 +128,9 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
 
   for (i <- 0 until RenameWidth) {
-    updatedCommitType(i) := Cat(isLs(i) | isVls(i), (isStore(i) && !isAMO(i)) | isVStore(i) | isBranch(i))
 
     updatedUop(i) := io.fromRename(i).bits
     updatedUop(i).debugInfo.eliminatedMove := io.fromRename(i).bits.eliminatedMove
-    // update commitType
-    when (!CommitType.isFused(io.fromRename(i).bits.commitType)) {
-      updatedUop(i).commitType := updatedCommitType(i)
-    }.otherwise {
-      XSError(io.fromRename(i).valid && updatedCommitType(i) =/= CommitType.NORMAL, "why fused?\n")
-    }
     // For the LUI instruction: psrc(0) is from register file and should always be zero.
     when (io.fromRename(i).bits.isLUI) {
       updatedUop(i).psrc(0) := 0.U
