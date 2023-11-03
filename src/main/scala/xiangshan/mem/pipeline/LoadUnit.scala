@@ -1175,11 +1175,12 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // fast load to load forward
   if (EnableLoadToLoadForward) {
     io.l2l_fwd_out.valid      := s3_out.valid && !s3_in.lateKill
-    io.l2l_fwd_out.data       := Mux(s3_in.vaddr(3), s3_picked_data_frm_cache(127, 64), s3_picked_data_frm_cache(63, 0))
+    io.l2l_fwd_out.data       := Mux(s3_in.vaddr(3), s3_merged_data_frm_cache(127, 64), s3_merged_data_frm_cache(63, 0))
     io.l2l_fwd_out.dly_ld_err := s3_dly_ld_err // ecc delayed error
   } else {
     io.l2l_fwd_out.valid := false.B
-    io.l2l_fwd_out.bits := DontCare
+    io.l2l_fwd_out.data := DontCare
+    io.l2l_fwd_out.dly_ld_err := DontCare
   }
    // trigger
   val last_valid_data = RegNext(RegEnable(io.ldout.bits.data, io.ldout.fire))
