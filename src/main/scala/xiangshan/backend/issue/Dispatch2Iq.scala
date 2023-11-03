@@ -453,13 +453,13 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   // Todo: split this matrix into more deq parts
   // deqSelIdxVec(deqIdx)(enqIdx): enqIdx uop can be accepted by deqIdx
   val deqSelIdxVec: Vec[UInt] = VecInit(deqSelIdxOHSeq.map {
-    case (deqIdx, seq) => Mux1H(seq.map(x => (x.valid, x.bits)))
+    case (deqIdx, seq) => PriorityEncoderOH(Mux1H(seq.map(x => (x.valid, x.bits))))
   }.toSeq)
 
   // enqSelIdxVec(enqIdx)(deqIdx): enqIdx uop can be accepted by deqIdx
   // Maybe one port has been dispatched more than 1 uop.
   // Select the oldest one
-  val enqSelIdxOHVec: Vec[Vec[Bool]] = VecInit(deqSelIdxVec.map(_.asBools).transpose.map(x => VecInit(PriorityEncoderOH(x.toSeq))).toSeq)
+  val enqSelIdxOHVec: Vec[Vec[Bool]] = VecInit(deqSelIdxVec.map(_.asBools).transpose.map(VecInit(_)))
   // Check if enq uops have deq port can accept
   val enqAcceptedVec = VecInit(enqSelIdxOHVec.map(_.asUInt.orR))
   // Check if uop will be blocked by the uops before it
@@ -469,7 +469,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     case (enqSelOH, idx) => VecInit(enqSelOH.map(_ && continousNotBlockVec(idx) && !lsStructBlockVec(idx)))
   })
 
-  val deqMapEnqMatrix: Vec[Vec[Bool]] = VecInit(enqSelIdxOHVec.transpose.map(VecInit(_)))
+  val deqMapEnqMatrix: Vec[Vec[Bool]] = VecInit(enqMapDeqMatrix.transpose.map(VecInit(_)))
 
   dontTouch(deqSelIdxVec)
   dontTouch(enqSelIdxOHVec)

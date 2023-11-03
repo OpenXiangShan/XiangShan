@@ -148,6 +148,8 @@ case class IssueBlockParams(
 
   def HyuCnt: Int = exuBlockParams.count(_.hasHyldaFu) // only count hylda, since it equals to hysta
 
+  def LdExuCnt = LduCnt + HyuCnt
+
   def VipuCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vipu)).sum
 
   def VfpuCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vfpu)).sum
