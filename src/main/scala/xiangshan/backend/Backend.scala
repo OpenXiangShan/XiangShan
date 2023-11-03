@@ -380,7 +380,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
 
   // to mem
   private val memIssueParams = params.memSchdParams.get.issueBlockParams
-  private val memExuBlocksHasLDU = memIssueParams.map(_.exuBlockParams.map(_.fuConfigs.contains(FuConfig.LduCfg)))
+  private val memExuBlocksHasLDU = memIssueParams.map(_.exuBlockParams.map(x => x.hasLoadFu || x.hasHyldaFu))
   println(s"[Backend] memExuBlocksHasLDU: $memExuBlocksHasLDU")
 
   private val toMem = Wire(bypassNetwork.io.toExus.mem.cloneType)

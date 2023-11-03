@@ -44,8 +44,8 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val deqResp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
   val og0Resp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
   val og1Resp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
-  val finalIssueResp = OptionWrapper(params.LduCnt > 0, Vec(params.LduCnt, Flipped(ValidIO(new IssueQueueDeqRespBundle))))
-  val memAddrIssueResp = OptionWrapper(params.LduCnt > 0, Vec(params.LduCnt, Flipped(ValidIO(new IssueQueueDeqRespBundle))))
+  val finalIssueResp = OptionWrapper(params.LdExuCnt > 0, Vec(params.LdExuCnt, Flipped(ValidIO(new IssueQueueDeqRespBundle))))
+  val memAddrIssueResp = OptionWrapper(params.LdExuCnt > 0, Vec(params.LdExuCnt, Flipped(ValidIO(new IssueQueueDeqRespBundle))))
   val wbBusyTableRead = Input(params.genWbFuBusyTableReadBundle())
   val wbBusyTableWrite = Output(params.genWbFuBusyTableWriteBundle())
   val wakeupFromWB: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
@@ -777,6 +777,7 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
 
   require(params.StdCnt == 0 && (params.LduCnt + params.StaCnt + params.HyuCnt + params.VlduCnt) > 0, "IssueQueueMemAddrImp can only be instance of MemAddr IQ, " +
     s"StdCnt: ${params.StdCnt}, LduCnt: ${params.LduCnt}, StaCnt: ${params.StaCnt}, HyuCnt: ${params.HyuCnt}")
+  println(s"[IssueQueueMemAddrImp] StdCnt: ${params.StdCnt}, LduCnt: ${params.LduCnt}, StaCnt: ${params.StaCnt}, HyuCnt: ${params.HyuCnt}")
 
   io.suggestName("none")
   override lazy val io = IO(new IssueQueueMemIO).suggestName("io")
