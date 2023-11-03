@@ -622,9 +622,16 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   for (i <- 0 until params.numEnq) {
     io.status.leftVec(i + 1) := othersValidCnt === (params.numEntries - params.numEnq - (i + 1)).U
   }
-  io.enq.foreach(_.ready := !Cat(io.status.leftVec).orR || !enqHasValid) // Todo: more efficient implementation
+  private val othersLeftOneCaseVec = Wire(Vec(params.numEntries - params.numEnq, UInt((params.numEntries - params.numEnq).W)))
+  othersLeftOneCaseVec.zipWithIndex.foreach { case (leftone, i) =>
+    leftone := ~(1.U((params.numEntries - params.numEnq).W) << i)
+  }
+  private val othersLeftOne = othersLeftOneCaseVec.map(_ === VecInit(validVec.drop(params.numEnq)).asUInt).reduce(_ | _)
+  private val othersCanotIn = othersLeftOne || validVec.drop(params.numEnq).reduce(_ & _)
+
+  io.enq.foreach(_.ready := !othersCanotIn || !enqHasValid)
   io.status.empty := !Cat(validVec).orR
-  io.status.full := Cat(io.status.leftVec).orR
+  io.status.full := othersCanotIn
 
   protected def getDeqLat(deqPortIdx: Int, fuType: UInt) : UInt = {
     val fuLatUIntMaps: Map[Int, UInt] = fuLatencyMaps(deqPortIdx).map { case (k, v) => (k.id, v.U) }
