@@ -377,12 +377,12 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     subDeqSelValidVec.get := subDeqPolicy.io.deqSelOHVec.map(oh => oh.valid)
     subDeqSelOHVec.get := subDeqPolicy.io.deqSelOHVec.map(oh => oh.bits)
 
-    deqSelValidVec(0) := othersEntryOldestSel(0).valid || subDeqSelValidVec.get(0)
-    deqSelValidVec(1) := subDeqSelValidVec.get(1)
+    deqSelValidVec(0) := othersEntryOldestSel(0).valid || subDeqSelValidVec.get(1)
+    deqSelValidVec(1) := subDeqSelValidVec.get(0)
     deqSelOHVec(0) := Mux(othersEntryOldestSel(0).valid, 
                           Cat(othersEntryOldestSel(0).bits, 0.U((params.numEnq).W)), 
-                          subDeqSelOHVec.get(0)) & canIssueMergeAllBusy(0)
-    deqSelOHVec(1) := subDeqSelOHVec.get(1) & canIssueMergeAllBusy(1)
+                          subDeqSelOHVec.get(1)) & canIssueMergeAllBusy(0)
+    deqSelOHVec(1) := subDeqSelOHVec.get(0) & canIssueMergeAllBusy(1)
 
     finalDeqSelValidVec.zip(finalDeqSelOHVec).zip(deqSelValidVec).zip(deqSelOHVec).zipWithIndex.foreach { case ((((selValid, selOH), deqValid), deqOH), i) =>
       selValid := deqValid && deqOH.orR && io.deq(i).ready
