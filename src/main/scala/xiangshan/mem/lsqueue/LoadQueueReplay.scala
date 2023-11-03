@@ -463,7 +463,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   def coldDownNow(i: Int) = coldCounter(i) >= ColdDownThreshold
 
   for (i <- 0 until LoadPipelineWidth) {
-    val s0_can_go = s1_can_go(s1_oldestSel(i).bits.port) || uop(s1_oldestSel(i).bits).robIdx.needFlush(io.redirect)
+    val s0_can_go = s1_can_go(i) || uop(s1_oldestSel(i).bits).robIdx.needFlush(io.redirect)
     val s0_oldestSelIndexOH = s0_oldestSel(i).bits // one-hot
     s1_oldestSel(i).valid := RegEnable(s0_oldestSel(i).valid, s0_can_go)
     s1_oldestSel(i).bits := RegEnable(OHToUInt(s0_oldestSel(i).bits), s0_can_go)
@@ -476,18 +476,18 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   }
   val s2_cancelReplay = Wire(Vec(LoadPipelineWidth, Bool()))
   for (i <- 0 until LoadPipelineWidth) {
-    val s1_cancel = uop(s1_oldestSel(i).bits.index).robIdx.needFlush(io.redirect)
+    val s1_cancel = uop(s1_oldestSel(i).bits).robIdx.needFlush(io.redirect)
     val s1_oldestSelV = s1_oldestSel(i).valid && !s1_cancel
     s1_can_go(i)          := Mux(s2_oldestSel(i).valid && !s2_cancelReplay(i), io.replay(i).ready && replayCanFire(i), true.B)
     s2_oldestSel(i).valid := RegEnable(s1_oldestSelV, s1_can_go(i))
-    s2_oldestSel(i).bits  := RegEnable(s1_oldestSel(i).bits.index, s1_can_go(i))
+    s2_oldestSel(i).bits  := RegEnable(s1_oldestSel(i).bits, s1_can_go(i))
 
     vaddrModule.io.ren(i) := s1_oldestSel(i).valid && s1_can_go(i)
-    vaddrModule.io.raddr(i) := s1_oldestSel(i).bits.index
+    vaddrModule.io.raddr(i) := s1_oldestSel(i).bits
   }
 
   for (i <- 0 until LoadPipelineWidth) {
-    val s1_replayIdx = s1_oldestSel(i).bits.index
+    val s1_replayIdx = s1_oldestSel(i).bits
     val s2_replayUop = RegEnable(uop(s1_replayIdx), s1_can_go(i))
     val s2_replayMSHRId = RegEnable(missMSHRId(s1_replayIdx), s1_can_go(i))
     val s2_replacementUpdated = RegEnable(replacementUpdated(s1_replayIdx), s1_can_go(i))
