@@ -23,14 +23,14 @@ import xiangshan._
 import utils._
 import utility._
 
-class AgeDetector(numEntries: Int, numEnq: Int)(implicit p: Parameters) extends XSModule {
+class AgeDetector(numEntries: Int, numEnq: Int, numDeq: Int)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
     // NOTE: now we do not consider deq.
     //       keeping these old invalid entries
     //       does not affect the selection of the oldest entry that can be issued.
     val enq = Vec(numEnq, Input(UInt(numEntries.W)))
-    val canIssue = Input(UInt(numEntries.W))
-    val out = Output(UInt(numEntries.W))
+    val canIssue = Vec(numDeq, Input(UInt(numEntries.W)))
+    val out = Vec(numDeq, Output(UInt(numEntries.W)))
   })
 
   // age(i)(j): entry i enters queue before entry j
@@ -88,7 +88,9 @@ class AgeDetector(numEntries: Int, numEnq: Int)(implicit p: Parameters) extends 
     })).asUInt
   }
 
-  io.out := getOldestCanIssue(get_age, io.canIssue)
+  io.out.zip(io.canIssue).foreach { case (out, canIssue) =>
+    out := getOldestCanIssue(get_age, canIssue)
+  }
 
   for (i <- 0 until numEnq) {
     assert(PopCount(io.enq(i)) <= 1.U, s"enq port ($i) is not ont-hot\n")
@@ -96,13 +98,27 @@ class AgeDetector(numEntries: Int, numEnq: Int)(implicit p: Parameters) extends 
 }
 
 object AgeDetector {
-  def apply(numEntries: Int, enq: Vec[UInt], canIssue: UInt)(implicit p: Parameters): Valid[UInt] = {
-    val age = Module(new AgeDetector(numEntries, enq.length))
+  def apply(numEntries: Int, enq: Vec[UInt], canIssue: Vec[UInt])(implicit p: Parameters): Vec[Valid[UInt]] = {
+    val age = Module(new AgeDetector(numEntries, enq.length, canIssue.length))
     age.io.enq := enq
     age.io.canIssue := canIssue
+    val outVec = Wire(Vec(canIssue.length, Valid(UInt(numEntries.W))))
+    outVec.zipWithIndex.foreach { case (out, i) =>
+      out.valid := canIssue(i).orR
+      out.bits := age.io.out(i)
+      when (out.valid) {
+        assert(PopCount(out.bits) === 1.U, s"out ($i) is not ont-hot when there is at least one entry can be issued\n")
+      }
+    }
+    outVec
+  }
+  def apply(numEntries: Int, enq: Vec[UInt], canIssue: UInt)(implicit p: Parameters): Valid[UInt] = {
+    val age = Module(new AgeDetector(numEntries, enq.length, 1))
+    age.io.enq := enq
+    age.io.canIssue(0) := canIssue
     val out = Wire(Valid(UInt(numEntries.W)))
     out.valid := canIssue.orR
-    out.bits := age.io.out
+    out.bits := age.io.out(0)
     when (out.valid) {
       assert(PopCount(out.bits) === 1.U, "out is not ont-hot when there is at least one entry can be issued\n")
     }
