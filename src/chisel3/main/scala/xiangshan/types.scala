@@ -14,24 +14,11 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
-package top
+package xiangshan
 
-import chisel3.stage._
-import firrtl.stage._
-import firrtl.options.Shell
-import xstransforms._
+object types {
+  type ChiselStage = chisel3.stage.ChiselStage
 
-class XiangShanStage extends ChiselStage {
-  override val shell: Shell = new Shell("xiangshan")
-    with XiangShanCli
-    with ChiselCli
-    with FirrtlCli
-
-  trait XiangShanCli { this: Shell =>
-    parser.note("XiangShan Options")
-    DisablePrintfAnnotation.addOptions(parser)
-    EnablePrintfAnnotation.addOptions(parser)
-    DisableAllPrintAnnotation.addOptions(parser)
-    RemoveAssertAnnotation.addOptions(parser)
-  }
+  type RunFirrtlTransformAnnotation = firrtl.stage.RunFirrtlTransformAnnotation
+  val RunFirrtlTransformAnnotation = firrtl.stage.RunFirrtlTransformAnnotation
 }

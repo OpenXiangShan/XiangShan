@@ -298,6 +298,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     val forwardInfo = Output(new MissEntryForwardIO)
     val l2_pf_store_only = Input(Bool())
 
+    val sms_agt_evict_req = ValidIO(new AGTEvictReq)
+
     // whether the pipeline reg has send out an acquire
     val acquire_fired_by_pipe_reg = Input(Bool())
     val memSetPattenDetected = Input(Bool())
@@ -367,6 +369,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   val should_refill_data_reg =  Reg(Bool())
   val should_refill_data = WireInit(should_refill_data_reg)
 
+  val should_replace = RegInit(false.B)
+
   // val full_overwrite = req.isFromStore && req_store_mask.andR
   val full_overwrite = Reg(Bool())
 
@@ -431,6 +435,9 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     when (!miss_req_pipe_reg_bits.hit && miss_req_pipe_reg_bits.replace_coh.isValid() && !miss_req_pipe_reg_bits.isFromAMO) {
       s_replace_req := false.B
       w_replace_resp := false.B
+      should_replace := true.B
+    }.otherwise {
+      should_replace := false.B
     }
 
     when (miss_req_pipe_reg_bits.isFromAMO) {
@@ -717,6 +724,9 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   refill.alias := req.vaddr(13, 12) // TODO
   assert(!io.refill_pipe_req.valid || (refill.meta.coh =/= ClientMetadata(Nothing)), "refill modifies meta to Nothing, should not happen")
 
+  io.sms_agt_evict_req.valid := io.refill_pipe_req.fire && should_replace && req_valid
+  io.sms_agt_evict_req.bits.vaddr := Cat(req.replace_tag(tagBits - 1, 2), req.vaddr(13, 12), 0.U((VAddrBits - tagBits).W))
+
   io.main_pipe_req.valid := !s_mainpipe_req && w_grantlast
   io.main_pipe_req.bits := DontCare
   io.main_pipe_req.bits.miss := true.B
@@ -825,6 +835,8 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
       val idx = UInt(idxBits.W) // vaddr
       val tag = UInt(tagBits.W) // paddr
     }))
+
+    val sms_agt_evict_req = DecoupledIO(new AGTEvictReq)
 
     // forward missqueue
     val forward = Vec(LoadPipelineWidth, new LduToMissqueueForwardIO)
@@ -1023,6 +1035,18 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   io.main_pipe_req.valid := VecInit(main_pipe_req_vec.map(_.valid)).asUInt.orR
   io.main_pipe_req.bits := Mux1H(main_pipe_req_vec.map(_.valid), main_pipe_req_vec.map(_.bits))
   assert(PopCount(VecInit(main_pipe_req_vec.map(_.valid))) <= 1.U, "multi main pipe req")
+
+  // send evict hint to sms
+  val sms_agt_evict_valid = Cat(entries.map(_.io.sms_agt_evict_req.valid)).orR
+  val sms_agt_evict_valid_reg = RegInit(false.B)
+  io.sms_agt_evict_req.valid := sms_agt_evict_valid_reg
+  io.sms_agt_evict_req.bits := RegEnable(Mux1H(entries.map(_.io.sms_agt_evict_req.valid), entries.map(_.io.sms_agt_evict_req.bits)), sms_agt_evict_valid)
+  when(sms_agt_evict_valid) {
+    sms_agt_evict_valid_reg := true.B
+  }.elsewhen(io.sms_agt_evict_req.fire) {
+    sms_agt_evict_valid_reg := false.B
+  }
+  assert(PopCount(VecInit(entries.map(_.io.sms_agt_evict_req.valid))) <= 1.U, "multi sms_agt_evict req")
 
   io.probe_block := Cat(probe_block_vec).orR
 

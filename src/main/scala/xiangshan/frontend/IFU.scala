@@ -136,7 +136,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
   def numOfStage = 3
   require(numOfStage > 1, "BPU numOfStage must be greater than 1")
   val topdown_stages = RegInit(VecInit(Seq.fill(numOfStage)(0.U.asTypeOf(new FrontendTopDownBundle))))
-  dontTouch(topdown_stages)
   // bubble events in IFU, only happen in stage 1
   val icacheMissBubble = Wire(Bool())
   val itlbMissBubble =Wire(Bool())

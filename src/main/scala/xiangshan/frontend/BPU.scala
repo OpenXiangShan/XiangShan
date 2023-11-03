@@ -227,7 +227,6 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   def numOfStage = 3
   require(numOfStage > 1, "BPU numOfStage must be greater than 1")
   val topdown_stages = RegInit(VecInit(Seq.fill(numOfStage)(0.U.asTypeOf(new FrontendTopDownBundle))))
-  dontTouch(topdown_stages)
 
   // following can only happen on s1
   val controlRedirectBubble = Wire(Bool())
@@ -428,9 +427,6 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   val full_pred_diff = WireInit(false.B)
   val full_pred_diff_stage = WireInit(0.U)
   val full_pred_diff_offset = WireInit(0.U)
-  dontTouch(full_pred_diff)
-  dontTouch(full_pred_diff_stage)
-  dontTouch(full_pred_diff_offset)
   for (i <- 0 until numDup - 1) {
     when (io.bpu_to_ftq.resp.valid &&
       ((io.bpu_to_ftq.resp.bits.s1.full_pred(i).asTypeOf(UInt()) =/= io.bpu_to_ftq.resp.bits.s1.full_pred(i+1).asTypeOf(UInt()) && io.bpu_to_ftq.resp.bits.s1.full_pred(i).hit) ||
@@ -806,12 +802,6 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
       branchCommittedMask.asUInt
     val updateShift    : UInt   =
       Mux(updateValid && branchValidMask.orR, PopCount(branchValidMask & shouldShiftMask), 0.U)
-    dontTouch(updateShift)
-    dontTouch(commitGHist)
-    dontTouch(commitGHistPtr)
-    dontTouch(takenMask)
-    dontTouch(branchValidMask)
-    dontTouch(branchCommittedMask)
 
     // Maintain the commitGHist
     for (i <- 0 until numBr) {

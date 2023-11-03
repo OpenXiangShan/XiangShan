@@ -439,22 +439,22 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   /** 5. Prefetch Buffer Recently write chcek */
   val p2_check_ipf_info = VecInit(fromIPFInfo.map(info =>
-        info.valid && getBlkPaddr(info.paddr) === getBlkPaddr(p2_paddr))).reduce(_||_)
+        info.valid && getBlkAddr(info.paddr) === getBlkAddr(p2_paddr))).reduce(_||_)
 
   /** 6. MainPipeInfo chcek */
   val check_mp_s1 = VecInit(fromMainPipeInfo.s1Info.map(info =>
-        info.valid && getBlkPaddr(info.paddr) === getBlkPaddr(p2_paddr))).reduce(_||_)
+        info.valid && getBlkAddr(info.paddr) === getBlkAddr(p2_paddr))).reduce(_||_)
   val check_mp_s2 = VecInit(fromMainPipeInfo.s2Info.map(info =>
-        info.valid && getBlkPaddr(info.paddr) === getBlkPaddr(p2_paddr))).reduce(_||_)
+        info.valid && getBlkAddr(info.paddr) === getBlkAddr(p2_paddr))).reduce(_||_)
   val check_mp_missSlot = VecInit(fromMainPipeInfo.missSlot.map(info =>
         info.valid && info.ptag === get_phy_tag(p2_paddr) && info.vSetIdx === p2_vidx)).reduce(_||_)
   val p2_check_mp_info = check_mp_s1 || check_mp_s2 || check_mp_missSlot
 
   /** 7. MissUnitInfo chcek */
   val check_mu_mshr = VecInit(fromMissUnitInfo.mshr.map(info =>
-        info.valid && getBlkPaddr(info.paddr) === getBlkPaddr(p2_paddr))).reduce(_||_)
+        info.valid && getBlkAddr(info.paddr) === getBlkAddr(p2_paddr))).reduce(_||_)
   val check_mu_recent_write = VecInit(fromMissUnitInfo.recentWrite.map(info =>
-        info.valid && getBlkPaddr(info.paddr) === getBlkPaddr(p2_paddr))).reduce(_||_)
+        info.valid && getBlkAddr(info.paddr) === getBlkAddr(p2_paddr))).reduce(_||_)
   val p2_check_mu_info = check_mu_mshr || check_mu_recent_write
 
   /** 8. send req to piq */
@@ -542,7 +542,7 @@ class PrefetchQueueIO(edge: TLEdgeOut)(implicit p: Parameters) extends IPrefetch
 
 class PrefetchQueue(edge: TLEdgeOut)(implicit p: Parameters) extends IPrefetchModule with HasCircularQueuePtrHelper {
   val io = IO(new PrefetchQueueIO(edge))
-
+  
   val enqueReq          = io.prefetchReq
   val fromIPrefetch     = io.PIQFilterRead.req
   val toIPrefetch       = io.PIQFilterRead.resp
