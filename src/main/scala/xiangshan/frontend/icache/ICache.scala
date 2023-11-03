@@ -48,6 +48,8 @@ case class ICacheParameters(
     nPrefetchEntries: Int = 12,
     nPrefBufferEntries: Int = 32,
     maxIPFMoveConf: Int = 1, // temporary use small value to cause more "move" operation
+    minRangeFromIFUptr: Int = 2,
+    maxRangeFromIFUptr: Int = 32,
     
     nMMIOs: Int = 1,
     blockBytes: Int = 64
@@ -97,6 +99,8 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
   def nPrefetchEntries    = cacheParams.nPrefetchEntries
   def nPrefBufferEntries  = cacheParams.nPrefBufferEntries
   def maxIPFMoveConf      = cacheParams.maxIPFMoveConf
+  def minRangeFromIFUptr  = cacheParams.minRangeFromIFUptr
+  def maxRangeFromIFUptr  = cacheParams.maxRangeFromIFUptr
 
   def getBits(num: Int) = log2Ceil(num).W
 
@@ -132,7 +136,7 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
     return RegInit(VecInit(Seq.fill(size)(0.U.asTypeOf(entry.cloneType))))
   }
 
-  def getBlkPaddr(addr: UInt) = addr(PAddrBits-1, log2Ceil(blockBytes))
+  def getBlkAddr(addr: UInt) = addr >> log2Ceil(blockBytes)
 
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
   require(isPow2(nWays), s"nWays($nWays) must be pow2")
@@ -437,6 +441,10 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
   val read_codes = Wire(Vec(2,Vec(nWays,UInt(dataCodeEntryBits.W) )))
   for(((dataArray,codeArray),i) <- dataArrays.zip(codeArrays).zipWithIndex){
     read_codes(i) := codeArray.io.r.resp.asTypeOf(Vec(nWays,UInt(dataCodeEntryBits.W)))
+  }
+
+  if (ICacheECCForceError) {
+    read_codes.foreach(_.foreach(_ := 0.U)) // force ecc to fail
   }
 
   //Parity Encode

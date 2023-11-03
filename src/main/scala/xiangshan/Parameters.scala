@@ -74,7 +74,7 @@ case class XSCoreParameters
   FtbSize: Int = 2048,
   RasSize: Int = 16,
   RasSpecSize: Int = 32,
-  RasCtrSize: Int = 8,
+  RasCtrSize: Int = 3,
   CacheLineSize: Int = 512,
   FtbWays: Int = 4,
   TageTableInfos: Seq[Tuple3[Int,Int,Int]] =
@@ -127,6 +127,7 @@ case class XSCoreParameters
 
       (preds, ras.io.out)
     }),
+  ICacheECCForceError: Boolean = false,
   IBufSize: Int = 48,
   DecodeWidth: Int = 6,
   RenameWidth: Int = 6,
@@ -398,6 +399,7 @@ trait HasXSParameter {
   val CacheLineSize = coreParams.CacheLineSize
   val CacheLineHalfWord = CacheLineSize / 16
   val ExtHistoryLength = HistoryLength + 64
+  val ICacheECCForceError = coreParams.ICacheECCForceError
   val IBufSize = coreParams.IBufSize
   val DecodeWidth = coreParams.DecodeWidth
   val RenameWidth = coreParams.RenameWidth
@@ -431,6 +433,7 @@ trait HasXSParameter {
   val NRFpWritePorts = exuParameters.FpExuCnt + exuParameters.LduCnt
   val NumRedirect = exuParameters.JmpCnt + exuParameters.AluCnt
   val BackendRedirectNum = NumRedirect + 2 //2: ldReplay + Exception
+  val FtqRedirectAheadNum = exuParameters.AluCnt
   val LoadPipelineWidth = coreParams.LoadPipelineWidth
   val StorePipelineWidth = coreParams.StorePipelineWidth
   val VecMemSrcInWidth = coreParams.VecMemSrcInWidth

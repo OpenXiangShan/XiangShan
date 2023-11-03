@@ -162,6 +162,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   with HasWritebackSourceImp
   with HasPerfEvents
   with HasL1PrefetchSourceParameter
+  with HasCircularQueuePtrHelper
 {
 
   val io = IO(new Bundle {
@@ -254,6 +255,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val stData = stdExeUnits.map(_.io.out)
   val exeUnits = loadUnits ++ storeUnits
   val l1_pf_req = Wire(Decoupled(new L1PrefetchReq()))
+  dcache.io.sms_agt_evict_req.ready := false.B
   val prefetcherOpt: Option[BasePrefecher] = coreParams.prefetcher.map {
     case _: SMSParams =>
       val sms = Module(new SMSPrefetcher())
@@ -262,6 +264,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       sms.io_act_threshold := RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_active_threshold, 2, Some(12.U))
       sms.io_act_stride := RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_active_stride, 2, Some(30.U))
       sms.io_stride_en := false.B
+      sms.io_dcache_evict <> dcache.io.sms_agt_evict_req
       sms
   }
   prefetcherOpt.foreach{ pf => pf.io.l1_req.ready := false.B }
@@ -819,12 +822,36 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   lsq.io.rob.commit              := io.ooo_to_mem.lsqio.commit
   lsq.io.rob.pendingPtr          := io.ooo_to_mem.lsqio.pendingPtr
 
-//  lsq.io.rob            <> io.lsqio.rob
+  //  lsq.io.rob            <> io.lsqio.rob
   lsq.io.enq            <> io.ooo_to_mem.enqLsq
   lsq.io.brqRedirect    <> redirect
-  io.mem_to_ooo.memoryViolation    <> lsq.io.rollback
+
+  //  violation rollback
+  def selectOldest[T <: Redirect](valid: Seq[Bool], bits: Seq[T]): (Seq[Bool], Seq[T]) = {
+    assert(valid.length == bits.length)
+    if (valid.length == 0 || valid.length == 1) {
+      (valid, bits)
+    } else if (valid.length == 2) {
+      val res = Seq.fill(2)(Wire(ValidIO(chiselTypeOf(bits(0)))))
+      for (i <- res.indices) {
+        res(i).valid := valid(i)
+        res(i).bits := bits(i)
+      }
+      val oldest = Mux(valid(0) && valid(1), Mux(isAfter(bits(0).robIdx, bits(1).robIdx), res(1), res(0)), Mux(valid(0) && !valid(1), res(0), res(1)))
+      (Seq(oldest.valid), Seq(oldest.bits))
+    } else {
+      val left = selectOldest(valid.take(valid.length / 2), bits.take(bits.length / 2))
+      val right = selectOldest(valid.takeRight(valid.length - (valid.length / 2)), bits.takeRight(bits.length - (bits.length / 2)))
+      selectOldest(left._1 ++ right._1, left._2 ++ right._2)
+    }
+  }
+  val rollback = lsq.io.rollback +: loadUnits.map(_.io.rollback)
+  val rollbackSel = selectOldest(rollback.map(_.valid), rollback.map(_.bits))
+  io.mem_to_ooo.memoryViolation.valid := rollbackSel._1(0)
+  io.mem_to_ooo.memoryViolation.bits  := rollbackSel._2(0)
   io.mem_to_ooo.lsqio.lqCanAccept  := lsq.io.lqCanAccept
   io.mem_to_ooo.lsqio.sqCanAccept  := lsq.io.sqCanAccept
+
   // lsq.io.uncache        <> uncache.io.lsq
   AddPipelineReg(lsq.io.uncache.req, uncache.io.lsq.req, false.B)
   AddPipelineReg(uncache.io.lsq.resp, lsq.io.uncache.resp, false.B)

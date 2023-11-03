@@ -375,6 +375,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
   // check if rollback request is still valid in parallel
   io.rollback.bits             := DontCare
+  io.rollback.bits.isRVC       := rollbackUop.cf.pd.isRVC
+  io.rollback.bits.rawNuke     := true.B
   io.rollback.bits.robIdx      := rollbackUop.robIdx
   io.rollback.bits.ftqIdx      := rollbackUop.cf.ftqPtr
   io.rollback.bits.stFtqIdx    := rollbackStFtqIdx
