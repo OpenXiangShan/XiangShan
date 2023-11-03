@@ -300,8 +300,8 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     subDeqPolicyValidVec(0) := PopCount(io.deq(0).subDeqRequest.get) >= 1.U
     subDeqPolicyValidVec(1) := PopCount(io.deq(0).subDeqRequest.get) >= 2.U
 
-    io.deq(0).deqEntry := Mux(io.deq(0).othersEntryOldestSel.valid, othersEntryOldest(0), subDeqPolicyEntryVec(0))
-    io.deq(1).deqEntry := subDeqPolicyEntryVec(1)
+    io.deq(0).deqEntry := Mux(io.deq(0).othersEntryOldestSel.valid, othersEntryOldest(0), subDeqPolicyEntryVec(1))
+    io.deq(1).deqEntry := subDeqPolicyEntryVec(0)
 
     when (subDeqPolicyValidVec(0)) {
       assert(Mux1H(io.deq(0).subDeqSelOH.get, entries).bits.status.robIdx === subDeqPolicyEntryVec(0).bits.status.robIdx, "subDeqSelOH(0) is not the same\n")
