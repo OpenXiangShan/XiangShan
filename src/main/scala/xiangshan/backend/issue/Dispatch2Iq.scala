@@ -376,7 +376,6 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   val storeAMOBlockVec = VecInit(storeAMOCntVec.map(_ > numStoreAMODeq.U))
   val vloadBlockVec = VecInit(vloadCntVec.map(_ > numVLoadDeq.U))
   val lsStructBlockVec = VecInit((loadBlockVec.zip(storeAMOBlockVec)).zip(vloadBlockVec).map(x => x._1._1 || x._1._2 || x._2))
-  val lsIQEnqBlockVec = Wire(Vec(io.in.size, Bool()))
   dontTouch(loadBlockVec)
   dontTouch(storeAMOBlockVec)
   dontTouch(lsStructBlockVec)
@@ -384,13 +383,12 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   dontTouch(isLoadVec)
   dontTouch(isVLoadVec)
   dontTouch(loadCntVec)
-  dontTouch(lsIQEnqBlockVec)
 
   for (i <- 0 until numEnq) {
     if (i >= numDeq) {
       s0_blockedVec(i) := true.B
     } else {
-      s0_blockedVec(i) := lsStructBlockVec(i) || lsIQEnqBlockVec(i)
+      s0_blockedVec(i) := lsStructBlockVec(i)
     }
   }
 
@@ -425,12 +423,9 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   val uopsIn = Wire(Vec(wrapper.numIn, DecoupledIO(new DynInst)))
   val numInPorts = io.in.size
   val outs = io.out.flatten
-  val outReadyMatrix = Wire(Vec(outs.size, Vec(numInPorts, Bool())))
-  outReadyMatrix.foreach(_.foreach(_ := false.B))
   val selIdxOH = Wire(MixedVec(finalFuDeqMap.map(x => Vec(x._2.size, ValidIO(UInt(uopsIn.size.W))))))
   selIdxOH.foreach(_.foreach(_ := 0.U.asTypeOf(ValidIO(UInt(uopsIn.size.W)))))
 
-  dontTouch(outReadyMatrix)
   dontTouch(selIdxOH)
 
   finalFuDeqMap.zipWithIndex.foreach { case ((fuTypeSeq, deqPortIdSeq), i) =>
@@ -452,31 +447,46 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
 
   val portSelIdxOH: Map[Seq[Int], Vec[ValidIO[UInt]]] = finalFuDeqMap.zip(selIdxOH).map { case ((fuTypeSeq, deqPortIdSeq), selIdxOHSeq) => (deqPortIdSeq, selIdxOHSeq) }.toMap
   println(s"[Dispatch2IQ] portSelIdxOH: $portSelIdxOH")
-  val finalportSelIdxOH: mutable.Map[Int, Seq[ValidIO[UInt]]] = expendPortSel(portSelIdxOH)
-  println(s"[Dispatch2IQ] finalportSelIdxOH: $finalportSelIdxOH")
-  finalportSelIdxOH.foreach { case (portId, selSeq) =>
-    val finalSelIdxOH: UInt = PriorityMux(selSeq.map(_.valid).toSeq, selSeq.map(_.bits).toSeq)
-    outs(portId).valid := selSeq.map(_.valid).reduce(_ | _)
-    outs(portId).bits := Mux1H(finalSelIdxOH, uopsIn.map(_.bits))
-    when(outs(portId).valid) {
-      outReadyMatrix(portId).zipWithIndex.foreach { case (inReady, i) =>
-        when(finalSelIdxOH(i)) {
-          inReady := outs(portId).ready
-        }
-      }
-    }
-  }
+  val deqSelIdxOHSeq: mutable.Map[Int, Seq[ValidIO[UInt]]] = expendPortSel(portSelIdxOH)
+  println(s"[Dispatch2IQ] finalportSelIdxOH: $deqSelIdxOHSeq")
 
-  private val uopCanEnqIQVec: Vec[Bool] = VecInit((0 until numEnq).map(i => outReadyMatrix.map(_(i)).reduce(_ | _)))
-  lsIQEnqBlockVec.zipWithIndex.foreach { case (iqEnqBlock, i) =>
-    iqEnqBlock := !uopCanEnqIQVec.slice(0, i).fold(true.B)(_ && _)
+  // Todo: split this matrix into more deq parts
+  // deqSelIdxVec(deqIdx)(enqIdx): enqIdx uop can be accepted by deqIdx
+  val deqSelIdxVec: Vec[UInt] = VecInit(deqSelIdxOHSeq.map {
+    case (deqIdx, seq) => Mux1H(seq.map(x => (x.valid, x.bits)))
+  }.toSeq)
+
+  // enqSelIdxVec(enqIdx)(deqIdx): enqIdx uop can be accepted by deqIdx
+  // Maybe one port has been dispatched more than 1 uop.
+  // Select the oldest one
+  val enqSelIdxOHVec: Vec[Vec[Bool]] = VecInit(deqSelIdxVec.map(_.asBools).transpose.map(x => VecInit(PriorityEncoderOH(x.toSeq))).toSeq)
+  // Check if enq uops have deq port can accept
+  val enqAcceptedVec = VecInit(enqSelIdxOHVec.map(_.asUInt.orR))
+  // Check if uop will be blocked by the uops before it
+  val continousNotBlockVec = VecInit((0 until numEnq).map(enqIdx => enqAcceptedVec.slice(0, enqIdx).fold(true.B)(_ && _)))
+  // mask off not continous uops
+  val enqMapDeqMatrix: Vec[Vec[Bool]] = VecInit(enqSelIdxOHVec.zipWithIndex.map {
+    case (enqSelOH, idx) => VecInit(enqSelOH.map(_ && continousNotBlockVec(idx) && !lsStructBlockVec(idx)))
+  })
+
+  val deqMapEnqMatrix: Vec[Vec[Bool]] = VecInit(enqSelIdxOHVec.transpose.map(VecInit(_)))
+
+  dontTouch(deqSelIdxVec)
+  dontTouch(enqSelIdxOHVec)
+  dontTouch(enqAcceptedVec)
+  dontTouch(continousNotBlockVec)
+  dontTouch(enqMapDeqMatrix)
+  dontTouch(deqMapEnqMatrix)
+
+  deqMapEnqMatrix.zipWithIndex.foreach { case (deqOH, deqIdx) =>
+    outs(deqIdx).valid := deqOH.asUInt.orR && lsqCanAccept
+    outs(deqIdx).bits := Mux1H(deqOH, uopsIn.map(_.bits))
   }
-  dontTouch(uopCanEnqIQVec)
 
   uopsIn <> io.in
   uopsIn.foreach(_.ready := false.B)
   uopsIn.zipWithIndex.foreach { case (uopIn, idx) =>
-    uopIn.ready := uopCanEnqIQVec(idx) && !s0_blockedVec(idx) && lsqCanAccept
+    uopIn.ready := enqMapDeqMatrix(idx).asUInt.orR && lsqCanAccept
     uopIn.bits.lqIdx := s0_enqLsq_resp(idx).lqIdx
     uopIn.bits.sqIdx := s0_enqLsq_resp(idx).sqIdx
   }
