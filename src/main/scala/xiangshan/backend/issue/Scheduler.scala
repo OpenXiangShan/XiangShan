@@ -219,6 +219,7 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
       deqResp.valid := iq.io.deq(j).valid && io.toDataPath(i)(j).ready
       deqResp.bits.respType := RSFeedbackType.issueSuccess
       deqResp.bits.robIdx := iq.io.deq(j).bits.common.robIdx
+      deqResp.bits.uopIdx := iq.io.deq(j).bits.common.vpu.getOrElse(0.U.asTypeOf(new VPUCtrlSignals)).vuopIdx
       deqResp.bits.dataInvalidSqIdx := DontCare
       deqResp.bits.rfWen := iq.io.deq(j).bits.common.rfWen.getOrElse(false.B)
       deqResp.bits.fuType := iq.io.deq(j).bits.common.fuType
