@@ -288,8 +288,13 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule {
   val sqCounter = RegInit(StoreQueueSize.U(log2Up(StoreQueueSize + 1).W))
   val canAccept = RegInit(false.B)
 
-  val loadEnqNumber = PopCount(io.enq.req.zip(io.enq.needAlloc).map(x => x._1.valid && x._2(0)))
-  val storeEnqNumber = PopCount(io.enq.req.zip(io.enq.needAlloc).map(x => x._1.valid && x._2(1)))
+  val loadEnqVec = io.enq.req.zip(io.enq.needAlloc).map(x => x._1.valid && x._2(0))
+  val storeEnqVec = io.enq.req.zip(io.enq.needAlloc).map(x => x._1.valid && x._2(1))
+  val loadEnqNumber = PopCount(loadEnqVec)
+  val storeEnqNumber = PopCount(storeEnqVec)
+  val isLastUopVec = io.enq.req.map(_.bits.lastUop)
+  val lqAllocNumber = PopCount(loadEnqVec.zip(isLastUopVec).map(x => x._1 && x._2))
+  val sqAllocNumber = PopCount(storeEnqVec.zip(isLastUopVec).map(x => x._1 && x._2))
 
   // How to update ptr and counter:
   // (1) by default, updated according to enq/commit
@@ -306,10 +311,10 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule {
     sqPtr := sqPtr - t3_sqCancelCnt
     sqCounter := sqCounter + io.scommit + t3_sqCancelCnt
   }.elsewhen (!io.redirect.valid && io.enq.canAccept) {
-    lqPtr := lqPtr + loadEnqNumber
-    lqCounter := lqCounter + io.lcommit - loadEnqNumber
-    sqPtr := sqPtr + storeEnqNumber
-    sqCounter := sqCounter + io.scommit - storeEnqNumber
+    lqPtr := lqPtr + lqAllocNumber
+    lqCounter := lqCounter + io.lcommit - lqAllocNumber
+    sqPtr := sqPtr + sqAllocNumber
+    sqCounter := sqCounter + io.scommit - sqAllocNumber
   }.otherwise {
     lqCounter := lqCounter + io.lcommit
     sqCounter := sqCounter + io.scommit
@@ -317,8 +322,8 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule {
 
 
   val maxAllocate = Seq(backendParams.LduCnt, backendParams.StaCnt).max
-  val ldCanAccept = lqCounter >= loadEnqNumber +& maxAllocate.U
-  val sqCanAccept = sqCounter >= storeEnqNumber +& maxAllocate.U
+  val ldCanAccept = lqCounter >= lqAllocNumber +& maxAllocate.U
+  val sqCanAccept = sqCounter >= sqAllocNumber +& maxAllocate.U
   // It is possible that t3_update and enq are true at the same clock cycle.
   // For example, if redirect.valid lasts more than one clock cycle,
   // after the last redirect, new instructions may enter but previously redirect
@@ -328,15 +333,15 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule {
   val lqOffset = Wire(Vec(io.enq.resp.length, UInt(log2Up(maxAllocate + 1).W)))
   val sqOffset = Wire(Vec(io.enq.resp.length, UInt(log2Up(maxAllocate + 1).W)))
   for ((resp, i) <- io.enq.resp.zipWithIndex) {
-    lqOffset(i) := PopCount(io.enq.needAlloc.take(i).map(a => a(0)))
+    lqOffset(i) := PopCount(io.enq.needAlloc.zip(isLastUopVec).take(i).map(x => x._1(0) && x._2))
     resp.lqIdx := lqPtr + lqOffset(i)
-    sqOffset(i) := PopCount(io.enq.needAlloc.take(i).map(a => a(1)))
+    sqOffset(i) := PopCount(io.enq.needAlloc.zip(isLastUopVec).take(i).map(x => x._1(1) && x._2))
     resp.sqIdx := sqPtr + sqOffset(i)
   }
 
-  io.enqLsq.needAlloc := RegNext(io.enq.needAlloc)
+  io.enqLsq.needAlloc := RegNext(VecInit(io.enq.needAlloc.zip(io.enq.req).map(x => x._1 & Fill(2, x._2.bits.lastUop))))
   io.enqLsq.req.zip(io.enq.req).zip(io.enq.resp).foreach{ case ((toLsq, enq), resp) =>
-    val do_enq = enq.valid && !io.redirect.valid && io.enq.canAccept
+    val do_enq = enq.valid && !io.redirect.valid && io.enq.canAccept && enq.bits.lastUop
     toLsq.valid := RegNext(do_enq)
     toLsq.bits := RegEnable(enq.bits, do_enq)
     toLsq.bits.lqIdx := RegEnable(resp.lqIdx, do_enq)
