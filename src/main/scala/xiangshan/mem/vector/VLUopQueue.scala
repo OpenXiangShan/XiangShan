@@ -195,7 +195,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
       x.uop := io.loadRegIn.bits.uop
       x.uop.vpu.vl := io.loadRegIn.bits.src_vl.asTypeOf(VConfig()).vl
       x.uop.numUops := numUops
-      x.uop.lastUop := (io.loadRegIn.bits.uop.uopIdx + 1.U) === numUops
+      x.uop.lastUop := (uopIdx + 1.U) === numUops
       x.flowMask := flowMask
       x.byteMask := GenUopByteMask(flowMask, alignedType)(VLENB - 1, 0)
       x.fof := isUnitStride(mop) && us_fof(fuOpType)

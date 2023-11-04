@@ -838,7 +838,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   dcache.io.force_write := lsq.io.force_write
   lsq.io.vecStoreRetire <> vsFlowQueue.io.sqRelease
   lsq.io.vecWriteback.valid := vlWrapper.io.uopWriteback.fire &&
-    vlWrapper.io.uopWriteback.bits.uop.lastUop
+    vlWrapper.io.uopWriteback.bits.uop.vpu.lastUop
   lsq.io.vecWriteback.bits := vlWrapper.io.uopWriteback.bits
 
   // vector
