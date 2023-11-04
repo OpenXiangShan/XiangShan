@@ -75,6 +75,7 @@ class Status(implicit p:Parameters, params: IssueBlockParams) extends XSBundle {
 
 class EntryDeqRespBundle(implicit p:Parameters, params: IssueBlockParams) extends Bundle {
   val robIdx = new RobPtr
+  val uopIdx = UopIdx()
   val respType = RSFeedbackType()   // update credit if needs replay
   val dataInvalidSqIdx = new SqPtr
   val rfWen = Bool()
@@ -297,7 +298,17 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   dontTouch(transEntryEnqVec)
 
   //issueRespVec
-  if(params.isMemAddrIQ){
+  if (params.isVecMemIQ) {
+    // vector memory IQ
+    issueRespVec.zip(robIdxVec).zip(uopIdxVec.get).foreach { case ((issueResp, robIdx), uopIdx) =>
+      val hitRespsVec = VecInit(resps.flatten.map(x =>
+        x.valid && x.bits.robIdx === robIdx && x.bits.uopIdx === uopIdx
+      ))
+      issueResp.valid := hitRespsVec.reduce(_ | _)
+      issueResp.bits := Mux1H(hitRespsVec, resps.flatten.map(_.bits))
+    }
+  } else if (params.isMemAddrIQ) {
+    // scalar memory IQ
     issueRespVec.zip(robIdxVec).foreach { case (issueResp, robIdx) =>
       val hitRespsVec = VecInit(memEtyResps.map(x => x.valid && (x.bits.robIdx === robIdx)).toSeq)
       issueResp.valid := hitRespsVec.reduce(_ | _)

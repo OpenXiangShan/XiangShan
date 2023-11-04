@@ -296,6 +296,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     entriesIO.deqResp.zipWithIndex.foreach { case (deqResp, i) =>
       deqResp.valid := io.deqResp(i).valid
       deqResp.bits.robIdx := io.deqResp(i).bits.robIdx
+      deqResp.bits.uopIdx := io.deqResp(i).bits.uopIdx
       deqResp.bits.dataInvalidSqIdx := io.deqResp(i).bits.dataInvalidSqIdx
       deqResp.bits.respType := io.deqResp(i).bits.respType
       deqResp.bits.rfWen := io.deqResp(i).bits.rfWen
@@ -304,6 +305,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     entriesIO.og0Resp.zipWithIndex.foreach { case (og0Resp, i) =>
       og0Resp.valid := io.og0Resp(i).valid
       og0Resp.bits.robIdx := io.og0Resp(i).bits.robIdx
+      og0Resp.bits.uopIdx := io.og0Resp(i).bits.uopIdx
       og0Resp.bits.dataInvalidSqIdx := io.og0Resp(i).bits.dataInvalidSqIdx
       og0Resp.bits.respType := io.og0Resp(i).bits.respType
       og0Resp.bits.rfWen := io.og0Resp(i).bits.rfWen
@@ -312,6 +314,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     entriesIO.og1Resp.zipWithIndex.foreach { case (og1Resp, i) =>
       og1Resp.valid := io.og1Resp(i).valid
       og1Resp.bits.robIdx := io.og1Resp(i).bits.robIdx
+      og1Resp.bits.uopIdx := io.og1Resp(i).bits.uopIdx
       og1Resp.bits.dataInvalidSqIdx := io.og1Resp(i).bits.dataInvalidSqIdx
       og1Resp.bits.respType := io.og1Resp(i).bits.respType
       og1Resp.bits.rfWen := io.og1Resp(i).bits.rfWen
@@ -822,6 +825,7 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
     entries.io.fromMem.get.slowResp.zipWithIndex.foreach { case (slowResp, i) =>
       slowResp.valid                 := memIO.feedbackIO(i).feedbackSlow.valid
       slowResp.bits.robIdx           := memIO.feedbackIO(i).feedbackSlow.bits.robIdx
+      slowResp.bits.uopIdx           := DontCare
       slowResp.bits.respType         := Mux(memIO.feedbackIO(i).feedbackSlow.bits.hit, RSFeedbackType.fuIdle, RSFeedbackType.feedbackInvalid)
       slowResp.bits.dataInvalidSqIdx := memIO.feedbackIO(i).feedbackSlow.bits.dataInvalidSqIdx
       slowResp.bits.rfWen := DontCare
@@ -831,6 +835,7 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
     entries.io.fromMem.get.fastResp.zipWithIndex.foreach { case (fastResp, i) =>
       fastResp.valid                 := memIO.feedbackIO(i).feedbackFast.valid
       fastResp.bits.robIdx           := memIO.feedbackIO(i).feedbackFast.bits.robIdx
+      fastResp.bits.uopIdx           := DontCare
       fastResp.bits.respType         := Mux(memIO.feedbackIO(i).feedbackFast.bits.hit, RSFeedbackType.fuIdle, memIO.feedbackIO(i).feedbackFast.bits.sourceType)
       fastResp.bits.dataInvalidSqIdx := 0.U.asTypeOf(fastResp.bits.dataInvalidSqIdx)
       fastResp.bits.rfWen := DontCare
@@ -903,6 +908,7 @@ class IssueQueueVecMemImp(override val wrapper: IssueQueue)(implicit p: Paramete
       entries.io.fromMem.get.slowResp.zipWithIndex.foreach { case (slowResp, i) =>
         slowResp.valid                 := memIO.feedbackIO(i).feedbackSlow.valid
         slowResp.bits.robIdx           := memIO.feedbackIO(i).feedbackSlow.bits.robIdx
+        slowResp.bits.uopIdx           := DontCare
         slowResp.bits.respType         := Mux(memIO.feedbackIO(i).feedbackSlow.bits.hit, RSFeedbackType.fuIdle, RSFeedbackType.feedbackInvalid)
         slowResp.bits.dataInvalidSqIdx := memIO.feedbackIO(i).feedbackSlow.bits.dataInvalidSqIdx
         slowResp.bits.rfWen := DontCare
@@ -912,6 +918,7 @@ class IssueQueueVecMemImp(override val wrapper: IssueQueue)(implicit p: Paramete
       entries.io.fromMem.get.fastResp.zipWithIndex.foreach { case (fastResp, i) =>
         fastResp.valid                 := memIO.feedbackIO(i).feedbackFast.valid
         fastResp.bits.robIdx           := memIO.feedbackIO(i).feedbackFast.bits.robIdx
+        fastResp.bits.uopIdx           := DontCare
         fastResp.bits.respType         := memIO.feedbackIO(i).feedbackFast.bits.sourceType
         fastResp.bits.dataInvalidSqIdx := 0.U.asTypeOf(fastResp.bits.dataInvalidSqIdx)
         fastResp.bits.rfWen := DontCare

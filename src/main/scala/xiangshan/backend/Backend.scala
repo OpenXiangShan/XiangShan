@@ -410,6 +410,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
         memScheduler.io.loadFinalIssueResp(i)(j).bits.respType := RSFeedbackType.fuBusy
         memScheduler.io.loadFinalIssueResp(i)(j).bits.rfWen := toMem(i)(j).bits.rfWen.getOrElse(false.B)
         memScheduler.io.loadFinalIssueResp(i)(j).bits.robIdx := toMem(i)(j).bits.robIdx
+        memScheduler.io.loadFinalIssueResp(i)(j).bits.uopIdx := toMem(i)(j).bits.vpu.getOrElse(0.U.asTypeOf(new VPUCtrlSignals)).vuopIdx
       }
 
       NewPipelineConnect(
