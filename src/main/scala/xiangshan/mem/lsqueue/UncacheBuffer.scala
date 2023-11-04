@@ -381,8 +381,10 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
   // uncache Writeback
   AddPipelineReg(ldout, io.ldout(0), false.B)
 
-  io.ld_raw_data(0)      := RegNext(ld_raw_data)
-  io.trigger(0).lqLoadAddrTriggerHitVec := RegNext(lqLoadAddrTriggerHitVec)
+  // uncache RAW data
+  // FIXME: remove it?
+  io.ld_raw_data(0) := RegEnable(ld_raw_data, ldout.fire)
+  io.trigger(0).lqLoadAddrTriggerHitVec := RegEnable(lqLoadAddrTriggerHitVec, ldout.fire)
 
   for (i <- 0 until LoadPipelineWidth) {
     io.rob.mmio(i) := RegNext(s1_valid(i) && s1_req(i).mmio)
@@ -456,6 +458,8 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
 
   val (rollbackValid, rollbackUop) = detectRollback()
   io.rollback.bits           := DontCare
+  io.rollback.bits.rawNuke   := false.B
+  io.rollback.bits.isRVC     := rollbackUop.cf.pd.isRVC
   io.rollback.bits.robIdx    := rollbackUop.robIdx
   io.rollback.bits.ftqIdx    := rollbackUop.cf.ftqPtr
   io.rollback.bits.ftqOffset := rollbackUop.cf.ftqOffset

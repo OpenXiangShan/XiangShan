@@ -68,7 +68,7 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst wi
   io.s1_ready := components.map(_.io.s1_ready).reduce(_ && _)
   io.s2_ready := components.map(_.io.s2_ready).reduce(_ && _)
 
-  require(meta_sz < MaxMetaLength)
+  require(meta_sz <= MaxMetaLength)
   io.out.last_stage_meta := metas
 
   var update_meta = io.update.bits.meta
