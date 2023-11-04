@@ -312,6 +312,14 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
       x.uopQueuePtr := flowSplitPtr
     }
   }
+  // unset the byteMask if `exp` of the element is false
+  when (issueValid) {
+    issueEntry.byteMask := issueEntry.byteMask & ~(
+      io.flowIssue.zipWithIndex.map { case (issuePort, i) =>
+        issuePort.bits.mask & Fill(VLENB, issuePort.fire && !issuePort.bits.exp)
+      }.fold(0.U(VLENB.W))(_ | _)
+    )
+  }
 
   val numFlowIssue = PopCount(io.flowIssue.map(_.fire))
   val flowIssueFire = Cat(io.flowIssue.map(_.fire)).orR
