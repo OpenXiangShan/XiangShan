@@ -248,6 +248,11 @@ case class BackendParams(
     exuParams(idx).name
   }
 
+  def getLdExuIdx(exu: ExeUnitParams): Int = {
+    val ldExuParams = allRealExuParams.filter(x => x.hasHyldaFu || x.hasLoadFu)
+    ldExuParams.indexOf(exu)
+  }
+
   def getIntWBExeGroup: Map[Int, Seq[ExeUnitParams]] = allRealExuParams.groupBy(x => x.getIntWBPort.getOrElse(IntWB(port = -1)).port).filter(_._1 != -1)
   def getVfWBExeGroup: Map[Int, Seq[ExeUnitParams]] = allRealExuParams.groupBy(x => x.getVfWBPort.getOrElse(VfWB(port = -1)).port).filter(_._1 != -1)
 

@@ -525,7 +525,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     }
     deq.bits.common.srcTimer.foreach(_ := finalSrcTimer.get(i))
     deq.bits.common.loadDependency.foreach(_ := deqEntryVec(i).bits.status.mergedLoadDependency.get)
-    deq.bits.common.deqPortIdx.foreach(_ := i.U)
+    deq.bits.common.deqLdExuIdx.foreach(_ := params.backendParam.getLdExuIdx(deq.bits.exuParams).U)
     deq.bits.common.src := DontCare
 
     deq.bits.rf.zip(deqEntryVec(i).bits.payload.psrc).foreach { case (rf, psrc) =>

@@ -460,7 +460,7 @@ object Bundles {
     val l1ExuOH = Vec(params.numRegSrc, ExuOH())
     val srcTimer = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, UInt(3.W)))
     val loadDependency = OptionWrapper(params.isIQWakeUpSink, Vec(LoadPipelineWidth, UInt(3.W)))
-    val deqPortIdx = OptionWrapper(params.hasLoadFu, UInt(log2Ceil(LoadPipelineWidth).W))
+    val deqLdExuIdx = OptionWrapper(params.hasLoadFu || params.hasHyldaFu, UInt(log2Ceil(LoadPipelineWidth).W))
 
     val perfDebugInfo = new PerfDebugInfo()
 
@@ -514,7 +514,7 @@ object Bundles {
       this.sqIdx         .foreach(_ := source.common.sqIdx.get)
       this.srcTimer      .foreach(_ := source.common.srcTimer.get)
       this.loadDependency.foreach(_ := source.common.loadDependency.get.map(_ << 1))
-      this.deqPortIdx    .foreach(_ := source.common.deqPortIdx.get)
+      this.deqLdExuIdx    .foreach(_ := source.common.deqLdExuIdx.get)
     }
   }
 
