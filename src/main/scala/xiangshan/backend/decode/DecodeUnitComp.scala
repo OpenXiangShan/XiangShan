@@ -1660,6 +1660,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       for (i <- 0 until MAX_VLMUL) {
         csBundle(i + 1).srcType(0) := SrcType.fp
         csBundle(i + 1).lsrc(0) := FP_TMP_REG_MV.U
+        csBundle(i + 1).lsrc(2) := dest + i.U // old vd
         csBundle(i + 1).ldest := dest + i.U
         csBundle(i + 1).uopIdx := i.U
       }
@@ -1709,6 +1710,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(i + 2).srcType(0) := SrcType.fp
         csBundle(i + 2).lsrc(0) := FP_TMP_REG_MV.U
         csBundle(i + 2).lsrc(1) := VECTOR_TMP_REG_LMUL.U
+        csBundle(i + 2).lsrc(2) := dest + i.U // old vd
         csBundle(i + 2).ldest := dest + i.U
         csBundle(i + 2).uopIdx := i.U
       }
@@ -1757,6 +1759,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(i + 1).srcType(0) := SrcType.fp
         csBundle(i + 1).lsrc(0) := FP_TMP_REG_MV.U
         csBundle(i + 1).lsrc(1) := Mux1H(UIntToOH(offsetVs2, MAX_VLMUL), (0 until MAX_VLMUL).map(j => src2 + j.U))
+        csBundle(i + 1).lsrc(2) := Mux1H(UIntToOH(offsetVd, MAX_VLMUL), (0 until MAX_VLMUL).map(j => dest + j.U))
         csBundle(i + 1).ldest := Mux1H(UIntToOH(offsetVd, MAX_VLMUL), (0 until MAX_VLMUL).map(j => dest + j.U))
         csBundle(i + 1).uopIdx := i.U
       }
