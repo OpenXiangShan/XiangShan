@@ -70,7 +70,7 @@ class ooo_to_mem(implicit p: Parameters) extends XSBundle {
   // val issue = Vec(backendParams.LsExuCnt + backendParams.StaCnt, Flipped(DecoupledIO(new MemExuInput)))
   val issue = MixedVec(
     Seq.fill(backendParams.LsExuCnt + backendParams.StdCnt)(Flipped(DecoupledIO(new MemExuInput(false)))) ++ // scalar
-    Seq.fill(backendParams.VlduCnt + backendParams.VstuCnt)(Flipped(DecoupledIO(new MemExuInput(true)))) // vector
+    Seq.fill(backendParams.VlduCnt)(Flipped(DecoupledIO(new MemExuInput(true)))) // vector
   )
 }
 
@@ -101,7 +101,7 @@ class mem_to_ooo(implicit p: Parameters ) extends XSBundle {
   }
   val writeback = MixedVec(
     Seq.fill(backendParams.LsExuCnt + backendParams.StaCnt)(DecoupledIO(new MemExuOutput(false))) ++ // scalar
-    Seq.fill(backendParams.VlduCnt + backendParams.VstuCnt)(DecoupledIO(new MemExuOutput(true))) // vector
+    Seq.fill(backendParams.VlduCnt)(DecoupledIO(new MemExuOutput(true))) // vector
   )
 }
 
@@ -865,8 +865,14 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   vsFlowQueue.io.rob.commit := io.ooo_to_mem.lsqio.commit
   vsFlowQueue.io.rob.pendingPtr := io.ooo_to_mem.lsqio.pendingPtr
   vsFlowQueue.io.rob.pendingPtrNext := io.ooo_to_mem.lsqio.pendingPtrNext
-  io.mem_to_ooo.writeback(MemExuCnt) <> vlWrapper.io.uopWriteback
-  io.mem_to_ooo.writeback(MemExuCnt + VlduCnt) <> vsUopQueue.io.uopWriteback
+  // Since we can only execute one vector mem inst at the same time, only one writeback port is need here.
+  io.mem_to_ooo.writeback(MemExuCnt).valid := vlWrapper.io.uopWriteback.valid || vsUopQueue.io.uopWriteback.valid
+  io.mem_to_ooo.writeback(MemExuCnt).bits := Mux1H(Seq(
+    vlWrapper.io.uopWriteback.valid -> vlWrapper.io.uopWriteback.bits,
+    vsUopQueue.io.uopWriteback.valid -> vsUopQueue.io.uopWriteback.bits,
+  ))
+  vlWrapper.io.uopWriteback.ready := io.mem_to_ooo.writeback(MemExuCnt).ready
+  vsUopQueue.io.uopWriteback.ready := io.mem_to_ooo.writeback(MemExuCnt).ready
 
   // Sbuffer
   sbuffer.io.csrCtrl    <> csrCtrl
