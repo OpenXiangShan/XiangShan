@@ -53,6 +53,9 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     val stout = DecoupledIO(new MemExuOutput)
 
     val ldu_io = new Bundle() {
+      // dcache
+      val dcache        = new DCacheLoadIO
+
       // data path
       val sbuffer       = new LoadForwardQueryIO
       val lsq           = new LoadToLsqIO
@@ -104,6 +107,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     }
 
     val stu_io = new Bundle() {
+      val dcache          = new DCacheStoreIO
       val prefetch_req    = Flipped(DecoupledIO(new StorePrefetchReq))
       val issue           = Valid(new MemExuInput)
       val lsq             = ValidIO(new LsPipelineBundle)
@@ -123,13 +127,14 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     // data path
     val tlb           = new TlbRequestIO(2)
     val pmp           = Flipped(new PMPRespBundle()) // arrive same to tlb now
-    val dcache        = new DCacheLoadIO
+
 
     // rs feedback
     val feedback_fast = ValidIO(new RSFeedback) // stage 2
     val feedback_slow = ValidIO(new RSFeedback) // stage 3
   })
 
+  val StorePrefetchL1Enabled = EnableStorePrefetchAtCommit || EnableStorePrefetchAtIssue || EnableStorePrefetchSPB
   val s1_ready, s2_ready, s3_ready, sx_can_go = WireInit(false.B)
 
   // Pipeline
@@ -138,6 +143,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   // --------------------------------------------------------------------------------
   // generate addr, use addr to query DCache and DTLB
   val s0_valid         = Wire(Bool())
+  val s0_dcache_ready  = Wire(Bool())
   val s0_kill          = Wire(Bool())
   val s0_vaddr         = Wire(UInt(VAddrBits.W))
   val s0_mask          = Wire(UInt((VLEN/8).W))
@@ -153,7 +159,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val s0_l2l_fwd       = Wire(Bool())
   val s0_sched_idx     = Wire(UInt())
   val s0_can_go        = s1_ready
-  val s0_fire          = s0_valid && s0_can_go
+  val s0_fire          = s0_valid && s0_dcache_ready && s0_can_go
   val s0_out           = Wire(new LqWriteBundle)
 
   // load flow select/gen
@@ -253,11 +259,11 @@ class HybridUnit(implicit p: Parameters) extends XSModule
                s0_int_iss_valid ||
                s0_vec_iss_valid ||
                s0_l2l_fwd_valid ||
-               s0_low_conf_prf_valid) && io.dcache.req.ready && !s0_kill
+               s0_low_conf_prf_valid) && !s0_kill
 
   // which is S0's out is ready and dcache is ready
   val s0_try_ptr_chasing      = s0_l2l_fwd_select
-  val s0_do_try_ptr_chasing   = s0_try_ptr_chasing && s0_can_go && io.dcache.req.ready
+  val s0_do_try_ptr_chasing   = s0_try_ptr_chasing && s0_can_go && io.ldu_io.dcache.req.ready
   val s0_ptr_chasing_vaddr    = io.ldu_io.l2l_fwd_in.data(5, 0) +& io.ldu_io.ld_fast_imm(5, 0)
   val s0_ptr_chasing_canceled = WireInit(false.B)
   s0_kill := s0_ptr_chasing_canceled || (s0_out.uop.robIdx.needFlush(io.redirect) && !s0_try_ptr_chasing)
@@ -271,8 +277,13 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.canAcceptLowConfPrefetch  := s0_low_conf_prf_ready
   io.canAcceptHighConfPrefetch := s0_high_conf_prf_ready
 
+  if (StorePrefetchL1Enabled) {
+    s0_dcache_ready := Mux(s0_ld_flow, io.ldu_io.dcache.req.ready, io.stu_io.dcache.req.ready)
+  } else {
+    s0_dcache_ready := io.ldu_io.dcache.req.ready
+  }
   // query DTLB
-  io.tlb.req.valid                   := s0_valid
+  io.tlb.req.valid                   := s0_valid && s0_dcache_ready
   io.tlb.req.bits.cmd                := Mux(s0_prf,
                                          Mux(s0_prf_wr, TlbCmd.write, TlbCmd.read),
                                          Mux(s0_ld_flow, TlbCmd.read, TlbCmd.write)
@@ -289,22 +300,25 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.tlb.req.bits.debug.isFirstIssue := s0_isFirstIssue
 
   // query DCache
-  io.dcache.req.valid             := s0_valid
-  io.dcache.req.bits.cmd          :=  Mux(s0_prf_rd,
-                                      MemoryOpConstants.M_PFR,
-                                      Mux(s0_prf_wr, MemoryOpConstants.M_PFW,
-                                        Mux(s0_ld_flow, MemoryOpConstants.M_XRD, MemoryOpConstants.M_XWR))
-                                    )
-  io.dcache.req.bits.vaddr        := s0_vaddr
-  io.dcache.req.bits.mask         := s0_mask
-  io.dcache.req.bits.data         := DontCare
-  io.dcache.req.bits.isFirstIssue := s0_isFirstIssue
-  io.dcache.req.bits.instrtype    := Mux(s0_prf, DCACHE_PREFETCH_SOURCE.U,
-                                     Mux(s0_ld_flow, LOAD_SOURCE.U, STORE_SOURCE.U))
-  io.dcache.req.bits.debug_robIdx := s0_uop.robIdx.value
-  io.dcache.req.bits.replayCarry  := s0_rep_carry
-  io.dcache.req.bits.id           := DontCare // TODO: update cache meta
-  io.dcache.pf_source             := Mux(s0_hw_prf_select, io.ldu_io.prefetch_req.bits.pf_source.value, L1_HW_PREFETCH_NULL)
+  // for load
+  io.ldu_io.dcache.req.valid             := s0_valid && s0_dcache_ready && s0_ld_flow
+  io.ldu_io.dcache.req.bits.cmd          :=  Mux(s0_prf_rd, MemoryOpConstants.M_PFR,
+                                              Mux(s0_prf_wr, MemoryOpConstants.M_PFW, MemoryOpConstants.M_XRD))
+  io.ldu_io.dcache.req.bits.vaddr        := s0_vaddr
+  io.ldu_io.dcache.req.bits.mask         := s0_mask
+  io.ldu_io.dcache.req.bits.data         := DontCare
+  io.ldu_io.dcache.req.bits.isFirstIssue := s0_isFirstIssue
+  io.ldu_io.dcache.req.bits.instrtype    := Mux(s0_prf, DCACHE_PREFETCH_SOURCE.U, LOAD_SOURCE.U)
+  io.ldu_io.dcache.req.bits.debug_robIdx := s0_uop.robIdx.value
+  io.ldu_io.dcache.req.bits.replayCarry  := s0_rep_carry
+  io.ldu_io.dcache.req.bits.id           := DontCare // TODO: update cache meta
+  io.ldu_io.dcache.pf_source             := Mux(s0_hw_prf_select, io.ldu_io.prefetch_req.bits.pf_source.value, L1_HW_PREFETCH_NULL)
+
+  // for store
+  io.stu_io.dcache.req.valid             := s0_valid && s0_dcache_ready && !s0_ld_flow && !s0_prf
+  io.stu_io.dcache.req.bits.cmd          := MemoryOpConstants.M_PFW
+  io.stu_io.dcache.req.bits.vaddr        := s0_vaddr
+  io.stu_io.dcache.req.bits.instrtype    := Mux(s0_prf, DCACHE_PREFETCH_SOURCE.U, STORE_SOURCE.U)
 
   // load flow priority mux
   def fromNullSource() = {
@@ -494,35 +508,38 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   s0_out.schedIndex     := s0_sched_idx
 
   // load fast replay
-  io.ldu_io.fast_rep_in.ready := (s0_can_go && io.dcache.req.ready && s0_ld_fast_rep_ready)
+  io.ldu_io.fast_rep_in.ready := (s0_can_go && io.ldu_io.dcache.req.ready && s0_ld_fast_rep_ready)
 
   // load flow source ready
   // cache missed load has highest priority
   // always accept cache missed load flow from load replay queue
-  io.ldu_io.replay.ready := (s0_can_go && io.dcache.req.ready && (s0_ld_rep_ready && !s0_rep_stall || s0_super_ld_rep_select))
+  io.ldu_io.replay.ready := (s0_can_go && io.ldu_io.dcache.req.ready && (s0_ld_rep_ready && !s0_rep_stall || s0_super_ld_rep_select))
 
   // accept load flow from rs when:
   // 1) there is no lsq-replayed load
   // 2) there is no fast replayed load
   // 3) there is no high confidence prefetch request
-  io.lsin.ready := (s0_can_go && (io.dcache.req.ready || !s0_ld_flow) && s0_int_iss_ready)
+  if (StorePrefetchL1Enabled) {
+    io.lsin.ready := (s0_can_go && Mux(FuType.isLoad(io.lsin.bits.uop.fuType), io.ldu_io.dcache.req.ready, io.stu_io.dcache.req.ready) && s0_int_iss_ready)
+  } else {
+    io.lsin.ready := (s0_can_go && Mux(FuType.isLoad(io.lsin.bits.uop.fuType), io.ldu_io.dcache.req.ready, true.B) && s0_int_iss_ready)
+  }
 
   // for hw prefetch load flow feedback, to be added later
   // io.prefetch_in.ready := s0_hw_prf_select
 
   // dcache replacement extra info
   // TODO: should prefetch load update replacement?
-  io.dcache.replacementUpdated := Mux(s0_ld_rep_select || s0_super_ld_rep_select, io.ldu_io.replay.bits.replacementUpdated, false.B)
+  io.ldu_io.dcache.replacementUpdated := Mux(s0_ld_rep_select || s0_super_ld_rep_select, io.ldu_io.replay.bits.replacementUpdated, false.B)
 
-  io.stu_io.prefetch_req.ready := true.B
-
+  io.stu_io.prefetch_req.ready := s1_ready && io.stu_io.dcache.req.ready && !io.lsin.valid
 
   io.stu_io.st_mask_out.valid       := s0_valid && !s0_ld_flow
   io.stu_io.st_mask_out.bits.mask   := s0_out.mask
   io.stu_io.st_mask_out.bits.sqIdx  := s0_out.uop.sqIdx
 
   // load debug
-  XSDebug(io.dcache.req.fire && s0_ld_flow,
+  XSDebug(io.ldu_io.dcache.req.fire && s0_ld_flow,
     p"[DCACHE LOAD REQ] pc ${Hexadecimal(s0_uop.pc)}, vaddr ${Hexadecimal(s0_vaddr)}\n"
   )
   XSDebug(s0_valid && s0_ld_flow,
@@ -530,7 +547,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     p"vaddr ${Hexadecimal(s0_out.vaddr)}, mask ${Hexadecimal(s0_out.mask)}\n")
 
   // store debug
-  XSDebug(io.dcache.req.fire && !s0_ld_flow,
+  XSDebug(io.stu_io.dcache.req.fire && !s0_ld_flow,
     p"[DCACHE STORE REQ] pc ${Hexadecimal(s0_uop.pc)}, vaddr ${Hexadecimal(s0_vaddr)}\n"
   )
   XSDebug(s0_valid && !s0_ld_flow,
@@ -576,6 +593,12 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val s1_sw_prf           = s1_prf && !s1_hw_prf
   val s1_tlb_memidx       = io.tlb.resp.bits.memidx
 
+  // mmio cbo decoder
+  val s1_mmio_cbo  = (s1_in.uop.fuOpType === LSUOpType.cbo_clean ||
+                      s1_in.uop.fuOpType === LSUOpType.cbo_flush ||
+                      s1_in.uop.fuOpType === LSUOpType.cbo_inval) && !s1_ld_flow
+  val s1_mmio = s1_mmio_cbo
+
   s1_vaddr_hi         := s1_in.vaddr(VAddrBits - 1, 6)
   s1_vaddr_lo         := s1_in.vaddr(5, 0)
   s1_vaddr            := Cat(s1_vaddr_hi, s1_vaddr_lo)
@@ -595,9 +618,9 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.tlb.req_kill   := s1_kill
   io.tlb.resp.ready := true.B
 
-  io.dcache.s1_paddr_dup_lsu    <> s1_paddr_dup_lsu
-  io.dcache.s1_paddr_dup_dcache <> s1_paddr_dup_dcache
-  io.dcache.s1_kill             := s1_kill || s1_tlb_miss || s1_exception || !s1_ld_flow
+  io.ldu_io.dcache.s1_paddr_dup_lsu    <> s1_paddr_dup_lsu
+  io.ldu_io.dcache.s1_paddr_dup_dcache <> s1_paddr_dup_dcache
+  io.ldu_io.dcache.s1_kill             := s1_kill || s1_tlb_miss || s1_exception
 
   // store to load forwarding
   io.ldu_io.sbuffer.valid := s1_valid && !(s1_exception || s1_tlb_miss || s1_kill || s1_fast_rep_kill || s1_prf || !s1_ld_flow)
@@ -673,7 +696,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     s1_addr_mismatch      := s1_ptr_chasing_vaddr(6) || RegEnable(io.ldu_io.ld_fast_imm(11, 6).orR, s0_do_try_ptr_chasing)
     // Case 1: the address is misaligned, kill s1
     s1_addr_misaligned    := LookupTree(s1_in.uop.fuOpType(1, 0), List(
-                             "b00".U   -> false.B,                   //b
+                             "b00".U   -> false.B,                  //b
                              "b01".U   -> (s1_vaddr(0)    =/= 0.U), //h
                              "b10".U   -> (s1_vaddr(1, 0) =/= 0.U), //w
                              "b11".U   -> (s1_vaddr(2, 0) =/= 0.U)  //d
@@ -718,6 +741,9 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.ldu_io.forward_mshr.valid  := s1_valid && s1_out.forward_tlDchannel && s1_ld_flow
   io.ldu_io.forward_mshr.mshrid := s1_out.mshrid
   io.ldu_io.forward_mshr.paddr  := s1_out.paddr
+
+  io.stu_io.dcache.s1_kill := s1_tlb_miss || s1_exception || s1_mmio || s1_in.uop.robIdx.needFlush(io.redirect)
+  io.stu_io.dcache.s1_paddr := s1_paddr_dup_dcache
 
 
   // load debug
@@ -809,19 +835,19 @@ class HybridUnit(implicit p: Parameters) extends XSModule
 
   val s2_tlb_miss      = s2_in.tlbMiss
   val s2_fwd_fail      = io.ldu_io.lsq.forward.dataInvalid
-  val s2_dcache_miss   = io.dcache.resp.bits.miss &&
+  val s2_dcache_miss   = io.ldu_io.dcache.resp.bits.miss &&
                          !s2_fwd_frm_d_chan_or_mshr &&
                          !s2_full_fwd
 
-  val s2_mq_nack       = io.dcache.s2_mq_nack &&
+  val s2_mq_nack       = io.ldu_io.dcache.s2_mq_nack &&
                          !s2_fwd_frm_d_chan_or_mshr &&
                          !s2_full_fwd
 
-  val s2_bank_conflict = io.dcache.s2_bank_conflict &&
+  val s2_bank_conflict = io.ldu_io.dcache.s2_bank_conflict &&
                          !s2_fwd_frm_d_chan_or_mshr &&
                          !s2_full_fwd
 
-  val s2_wpu_pred_fail = io.dcache.s2_wpu_pred_fail &&
+  val s2_wpu_pred_fail = io.ldu_io.dcache.s2_wpu_pred_fail &&
                         !s2_fwd_frm_d_chan_or_mshr &&
                         !s2_full_fwd
 
@@ -845,18 +871,19 @@ class HybridUnit(implicit p: Parameters) extends XSModule
                         (s2_in.mask & io.ldu_io.stld_nuke_query(w).bits.mask).orR // data mask contain
                       })).asUInt.orR && s2_ld_flow || s2_in.rep_info.nuke
 
-  val s2_cache_handled   = io.dcache.resp.bits.handled
+  val s2_cache_handled   = io.ldu_io.dcache.resp.bits.handled
   val s2_cache_tag_error = RegNext(io.csrCtrl.cache_error_enable) &&
-                           io.dcache.resp.bits.tag_error
+                           io.ldu_io.dcache.resp.bits.tag_error
 
   val s2_troublem        = !s2_exception &&
                            !s2_mmio &&
                            !s2_prf &&
                            !s2_in.lateKill
 
-  io.dcache.resp.ready  := true.B
+  io.ldu_io.dcache.resp.ready := true.B
+  io.stu_io.dcache.resp.ready := true.B
   val s2_dcache_should_resp = !(s2_in.tlbMiss || s2_exception || s2_mmio || s2_prf || s2_in.lateKill) && s2_ld_flow
-  assert(!(s2_valid && (s2_dcache_should_resp && !io.dcache.resp.valid)), "DCache response got lost")
+  assert(!(s2_valid && (s2_dcache_should_resp && !io.ldu_io.dcache.resp.valid)), "DCache response got lost")
 
   // fast replay require
   val s2_dcache_fast_rep = (s2_mq_nack || !s2_dcache_miss && (s2_bank_conflict || s2_wpu_pred_fail))
@@ -946,8 +973,8 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   s2_out.rep_info.full_fwd        := s2_data_fwded
   s2_out.rep_info.data_inv_sq_idx := io.ldu_io.lsq.forward.dataInvalidSqIdx
   s2_out.rep_info.addr_inv_sq_idx := io.ldu_io.lsq.forward.addrInvalidSqIdx
-  s2_out.rep_info.rep_carry       := io.dcache.resp.bits.replayCarry
-  s2_out.rep_info.mshr_id         := io.dcache.resp.bits.mshr_id
+  s2_out.rep_info.rep_carry       := io.ldu_io.dcache.resp.bits.replayCarry
+  s2_out.rep_info.mshr_id         := io.ldu_io.dcache.resp.bits.mshr_id
   s2_out.rep_info.last_beat       := s2_in.paddr(log2Up(refillBytes))
   s2_out.rep_info.debug           := s2_in.uop.debugInfo
 
@@ -972,7 +999,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.feedback_fast.bits.dataInvalidSqIdx := DontCare
 
   io.stu_io.lsq_replenish := s2_out
-  io.stu_io.lsq_replenish.miss := io.dcache.resp.fire && io.dcache.resp.bits.miss
+  io.stu_io.lsq_replenish.miss := io.ldu_io.dcache.resp.fire && io.ldu_io.dcache.resp.bits.miss
 
   io.ldu_io.ldCancel.ld1Cancel.valid := s2_valid && (
     (s2_out.rep_info.need_rep && s2_out.isFirstIssue) ||                // exe fail and issued from IQ
@@ -982,7 +1009,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
 
   // fast wakeup
   io.ldu_io.fast_uop.valid := RegNext(
-    !io.dcache.s1_disable_fast_wakeup &&
+    !io.ldu_io.dcache.s1_disable_fast_wakeup &&
     s1_valid &&
     !s1_kill &&
     !io.tlb.resp.bits.miss &&
@@ -996,32 +1023,34 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   // prefetch train
   io.prefetch_train.valid              := s2_valid && !s2_actually_mmio && !s2_in.tlbMiss
   io.prefetch_train.bits.fromLsPipelineBundle(s2_in)
-  io.prefetch_train.bits.miss          := io.dcache.resp.bits.miss // TODO: use trace with bank conflict?
-  io.prefetch_train.bits.meta_prefetch := io.dcache.resp.bits.meta_prefetch
-  io.prefetch_train.bits.meta_access   := io.dcache.resp.bits.meta_access
+  io.prefetch_train.bits.miss          := Mux(s2_ld_flow, io.ldu_io.dcache.resp.bits.miss, io.stu_io.dcache.resp.bits.miss) // TODO: use trace with bank conflict?
+  io.prefetch_train.bits.meta_prefetch := Mux(s2_ld_flow, io.ldu_io.dcache.resp.bits.meta_prefetch, false.B)
+  io.prefetch_train.bits.meta_access   := Mux(s2_ld_flow, io.ldu_io.dcache.resp.bits.meta_access, false.B)
 
-  io.prefetch_train_l1.valid              := s2_valid && !s2_actually_mmio
+  io.prefetch_train_l1.valid              := s2_valid && !s2_actually_mmio && s2_ld_flow
   io.prefetch_train_l1.bits.fromLsPipelineBundle(s2_in)
-  io.prefetch_train_l1.bits.miss          := io.dcache.resp.bits.miss
-  io.prefetch_train_l1.bits.meta_prefetch := io.dcache.resp.bits.meta_prefetch
-  io.prefetch_train_l1.bits.meta_access   := io.dcache.resp.bits.meta_access
+  io.prefetch_train_l1.bits.miss          := io.ldu_io.dcache.resp.bits.miss
+  io.prefetch_train_l1.bits.meta_prefetch := io.ldu_io.dcache.resp.bits.meta_prefetch
+  io.prefetch_train_l1.bits.meta_access   := io.ldu_io.dcache.resp.bits.meta_access
   if (env.FPGAPlatform){
-    io.dcache.s0_pc := DontCare
-    io.dcache.s1_pc := DontCare
-    io.dcache.s2_pc := DontCare
+    io.ldu_io.dcache.s0_pc := DontCare
+    io.ldu_io.dcache.s1_pc := DontCare
+    io.ldu_io.dcache.s2_pc := DontCare
   }else{
-    io.dcache.s0_pc := s0_out.uop.pc
-    io.dcache.s1_pc := s1_out.uop.pc
-    io.dcache.s2_pc := s2_out.uop.pc
+    io.ldu_io.dcache.s0_pc := s0_out.uop.pc
+    io.ldu_io.dcache.s1_pc := s1_out.uop.pc
+    io.ldu_io.dcache.s2_pc := s2_out.uop.pc
   }
-  io.dcache.s2_kill := s2_pmp.ld || s2_pmp.st || s2_actually_mmio || s2_kill || !s2_ld_flow
+  io.ldu_io.dcache.s2_kill := s2_pmp.ld  || s2_actually_mmio || s2_kill
+  io.stu_io.dcache.s2_kill := s2_pmp.st || s2_actually_mmio || s2_kill
+  io.stu_io.dcache.s2_pc := s2_out.uop.pc
 
   val s1_ld_left_fire = s1_valid && !s1_kill && s2_ready && s1_ld_flow
   val s2_ld_valid_dup = RegInit(0.U(6.W))
   s2_ld_valid_dup := 0x0.U(6.W)
-  when (s1_ld_left_fire && !s1_out.isHWPrefetch) { s2_ld_valid_dup := 0x3f.U(6.W) }
-  when (s1_kill || s1_out.isHWPrefetch) { s2_ld_valid_dup := 0x0.U(6.W) }
-  assert(RegNext((s2_valid === s2_ld_valid_dup(0)) || RegNext(s1_out.isHWPrefetch)))
+  when (s1_ld_left_fire && !s1_out.isHWPrefetch && s1_ld_flow) { s2_ld_valid_dup := 0x3f.U(6.W) }
+  when (s1_kill || s1_out.isHWPrefetch || !s1_ld_flow) { s2_ld_valid_dup := 0x0.U(6.W) }
+  assert(RegNext((s2_valid === s2_ld_valid_dup(0)) || RegNext(s1_out.isHWPrefetch) || RegNext(!s1_ld_flow)))
 
   // Pipeline
   // --------------------------------------------------------------------------------
@@ -1062,12 +1091,12 @@ class HybridUnit(implicit p: Parameters) extends XSModule
 
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
   io.ldu_io.lsq.ldin.bits.data_wen_dup := s3_ld_valid_dup.asBools
-  io.ldu_io.lsq.ldin.bits.replacementUpdated := io.dcache.resp.bits.replacementUpdated
+  io.ldu_io.lsq.ldin.bits.replacementUpdated := io.ldu_io.dcache.resp.bits.replacementUpdated
   io.ldu_io.lsq.ldin.bits.missDbUpdated := RegNext(s2_fire && s2_in.hasROBEntry && !s2_in.tlbMiss && !s2_in.missDbUpdated)
 
   val s3_dly_ld_err =
     if (EnableAccurateLoadError) {
-      (s3_in.lateKill || io.dcache.resp.bits.error_delayed) && RegNext(io.csrCtrl.cache_error_enable)
+      (s3_in.lateKill || io.ldu_io.dcache.resp.bits.error_delayed) && RegNext(io.csrCtrl.cache_error_enable)
     } else {
       WireInit(false.B)
     }
@@ -1146,7 +1175,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
 
   // data from dcache hit
   val s3_ld_raw_data_frm_cache = Wire(new LoadDataFromDcacheBundle)
-  s3_ld_raw_data_frm_cache.respDcacheData       := io.dcache.resp.bits.data_delayed
+  s3_ld_raw_data_frm_cache.respDcacheData       := io.ldu_io.dcache.resp.bits.data_delayed
   s3_ld_raw_data_frm_cache.forwardMask          := RegEnable(s2_fwd_mask, s2_valid)
   s3_ld_raw_data_frm_cache.forwardData          := RegEnable(s2_fwd_data, s2_valid)
   s3_ld_raw_data_frm_cache.uop                  := RegEnable(s2_out.uop, s2_valid)
@@ -1259,7 +1288,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.ldu_io.lsTopdownInfo.s2.robIdx          := s2_in.uop.robIdx.value
   io.ldu_io.lsTopdownInfo.s2.paddr_valid     := s2_fire && s2_in.hasROBEntry && !s2_in.tlbMiss
   io.ldu_io.lsTopdownInfo.s2.paddr_bits      := s2_in.paddr
-  io.ldu_io.lsTopdownInfo.s2.first_real_miss := io.dcache.resp.bits.real_miss
+  io.ldu_io.lsTopdownInfo.s2.first_real_miss := io.ldu_io.dcache.resp.bits.real_miss
   io.ldu_io.lsTopdownInfo.s2.cache_miss_en   := s2_fire && s2_in.hasROBEntry && !s2_in.tlbMiss && !s2_in.missDbUpdated
 
   // perf cnt
@@ -1270,7 +1299,8 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("s0_ldu_fire_first_issue",      io.lsin.fire && s0_isFirstIssue)
   XSPerfAccumulate("s0_fast_replay_issue",         io.ldu_io.fast_rep_in.fire)
   XSPerfAccumulate("s0_stall_out",                 s0_valid && !s0_can_go)
-  XSPerfAccumulate("s0_stall_dcache",              s0_valid && !io.dcache.req.ready)
+  XSPerfAccumulate("s0_stall_ld_dcache",           s0_valid && !io.ldu_io.dcache.req.ready)
+  XSPerfAccumulate("s0_stall_st_dcache",           s0_valid && !io.stu_io.dcache.req.ready)
   XSPerfAccumulate("s0_addr_spec_success",         s0_fire && s0_vaddr(VAddrBits-1, 12) === io.lsin.bits.src(0)(VAddrBits-1, 12))
   XSPerfAccumulate("s0_addr_spec_failed",          s0_fire && s0_vaddr(VAddrBits-1, 12) =/= io.lsin.bits.src(0)(VAddrBits-1, 12))
   XSPerfAccumulate("s0_addr_spec_success_once",    s0_fire && s0_vaddr(VAddrBits-1, 12) === io.lsin.bits.src(0)(VAddrBits-1, 12) && s0_isFirstIssue)
@@ -1292,9 +1322,9 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("s2_in_valid",                  s2_valid)
   XSPerfAccumulate("s2_in_fire",                   s2_fire)
   XSPerfAccumulate("s2_in_fire_first_issue",       s2_fire && s2_in.isFirstIssue)
-  XSPerfAccumulate("s2_dcache_miss",               s2_fire && io.dcache.resp.bits.miss)
-  XSPerfAccumulate("s2_dcache_miss_first_issue",   s2_fire && io.dcache.resp.bits.miss && s2_in.isFirstIssue)
-  XSPerfAccumulate("s2_dcache_real_miss_first_issue",   s2_fire && io.dcache.resp.bits.miss && s2_in.isFirstIssue)
+  XSPerfAccumulate("s2_dcache_miss",               s2_fire && io.ldu_io.dcache.resp.bits.miss)
+  XSPerfAccumulate("s2_dcache_miss_first_issue",   s2_fire && io.ldu_io.dcache.resp.bits.miss && s2_in.isFirstIssue)
+  XSPerfAccumulate("s2_dcache_real_miss_first_issue",   s2_fire && io.ldu_io.dcache.resp.bits.miss && s2_in.isFirstIssue)
   XSPerfAccumulate("s2_full_forward",              s2_fire && s2_full_fwd)
   XSPerfAccumulate("s2_dcache_miss_full_forward",  s2_fire && s2_dcache_miss)
   XSPerfAccumulate("s2_fwd_frm_d_can",             s2_valid && s2_fwd_frm_d_chan)
@@ -1302,9 +1332,9 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("s2_stall_out",                 s2_fire && !s2_can_go)
   XSPerfAccumulate("s2_prefetch",                  s2_fire && s2_prf)
   XSPerfAccumulate("s2_prefetch_ignored",          s2_fire && s2_prf && s2_mq_nack) // ignore prefetch for mshr full / miss req port conflict
-  XSPerfAccumulate("s2_prefetch_miss",             s2_fire && s2_prf && io.dcache.resp.bits.miss) // prefetch req miss in l1
-  XSPerfAccumulate("s2_prefetch_hit",              s2_fire && s2_prf && !io.dcache.resp.bits.miss) // prefetch req hit in l1
-  XSPerfAccumulate("s2_prefetch_accept",           s2_fire && s2_prf && io.dcache.resp.bits.miss && !s2_mq_nack) // prefetch a missed line in l1, and l1 accepted it
+  XSPerfAccumulate("s2_prefetch_miss",             s2_fire && s2_prf && io.ldu_io.dcache.resp.bits.miss) // prefetch req miss in l1
+  XSPerfAccumulate("s2_prefetch_hit",              s2_fire && s2_prf && !io.ldu_io.dcache.resp.bits.miss) // prefetch req hit in l1
+  XSPerfAccumulate("s2_prefetch_accept",           s2_fire && s2_prf && io.ldu_io.dcache.resp.bits.miss && !s2_mq_nack) // prefetch a missed line in l1, and l1 accepted it
   XSPerfAccumulate("s2_forward_req",               s2_fire && s2_in.forward_tlDchannel)
   XSPerfAccumulate("s2_successfully_forward_channel_D", s2_fire && s2_fwd_frm_d_chan && s2_fwd_data_valid)
   XSPerfAccumulate("s2_successfully_forward_mshr",      s2_fire && s2_fwd_frm_mshr && s2_fwd_data_valid)
@@ -1325,11 +1355,11 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val perfEvents = Seq(
     ("load_s0_in_fire         ", s0_fire                                                        ),
     ("load_to_load_forward    ", s1_fire && s1_try_ptr_chasing && !s1_ptr_chasing_canceled      ),
-    ("stall_dcache            ", s0_valid && s0_can_go && !io.dcache.req.ready                  ),
+    ("stall_dcache            ", s0_valid && s0_can_go && !io.ldu_io.dcache.req.ready           ),
     ("load_s1_in_fire         ", s0_fire                                                        ),
     ("load_s1_tlb_miss        ", s1_fire && io.tlb.resp.bits.miss                               ),
     ("load_s2_in_fire         ", s1_fire                                                        ),
-    ("load_s2_dcache_miss     ", s2_fire && io.dcache.resp.bits.miss                            ),
+    ("load_s2_dcache_miss     ", s2_fire && io.ldu_io.dcache.resp.bits.miss                     ),
   )
   generatePerfEvent()
 }

@@ -741,7 +741,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     }
 
     // get input from dispatch
-    hybridUnits(i).io.dcache <> dcache.io.lsu.load(LduCnt + i)
+    hybridUnits(i).io.ldu_io.dcache <> dcache.io.lsu.load(LduCnt + i)
+    hybridUnits(i).io.stu_io.dcache <> dcache.io.lsu.sta(StaCnt + i)
+
     // dcache access
     hybridUnits(i).io.ldu_io.lsq.forward <> lsq.io.forward(LduCnt + i)
     // forward
