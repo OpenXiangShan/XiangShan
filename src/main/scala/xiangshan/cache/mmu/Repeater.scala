@@ -215,13 +215,13 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
     enqidx(1) := firstValidIndex(v.drop(Size/2), false.B) + (Size/2).U
   } else if (Width == 3) {
     require(Size == 16, s"load filter Size ($Size) should be 16")
-    canenq(0) := !(Cat(v.take(4)).andR)
-    enqidx(0) := firstValidIndex(v.take(4), false.B)
-    canenq(1) := !(Cat(v.drop(4).take(4)).andR)
-    enqidx(1) := firstValidIndex(v.drop(4).take(4), false.B) + 4.U
-    // eight entries for prefetch
-    canenq(2) := !(Cat(v.drop(8)).andR)
-    enqidx(2) := firstValidIndex(v.drop(8), false.B) + 8.U
+    canenq(0) := !(Cat(v.take(8)).andR)
+    enqidx(0) := firstValidIndex(v.take(8), false.B)
+    canenq(1) := !(Cat(v.drop(8).take(4)).andR)
+    enqidx(1) := firstValidIndex(v.drop(8).take(4), false.B) + 8.U
+    // four entries for prefetch
+    canenq(2) := !(Cat(v.drop(12)).andR)
+    enqidx(2) := firstValidIndex(v.drop(12), false.B) + 12.U
   }
 
   for (i <- 0 until Width) {
@@ -239,6 +239,7 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
         val newIsMatch = io.tlb.req(i).bits.vpn === io.tlb.req(j).bits.vpn
         when (newIsMatch && io.tlb.req(j).valid) {
           enqidx(i) := enqidx(j)
+          canenq(i) := canenq(j)
           enqvalid(i) := false.B
         }
       }
@@ -276,7 +277,7 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
     val hintIO = io.hint.getOrElse(new TlbHintIO)
     for (i <- 0 until exuParameters.LduCnt) {
       hintIO.req(i).id := enqidx(i)
-      hintIO.req(i).full := ptwResp_ReqMatchVec(i) || (!canenq(i) && !ptwResp_ReqMatchVec(i))
+      hintIO.req(i).full := !canenq(i) || ptwResp_ReqMatchVec(i)
     }
     hintIO.resp.valid := io.refill
     hintIO.resp.bits.id := ptwResp_EntryMatchFirst
