@@ -124,7 +124,7 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
   fromExuVldAfterMerge.head <> vldMgu.io.writebackAfterMerge
   // alias
   // replace vldu write bundle with vldMdu output bundle
-  val fromExu = (fromExuPre.dropRight(params.VlduCnt + params.VstuCnt) ++ fromExuVldAfterMerge ++ fromExuPre.takeRight(params.VstuCnt)).toSeq //TODO: better implementation
+  val fromExu = (fromExuPre.dropRight(params.VlduCnt) ++ fromExuVldAfterMerge).toSeq //TODO: better implementation
   val intArbiterInputsWire = WireInit(MixedVecInit(fromExu))
   val intArbiterInputsWireY = intArbiterInputsWire.filter(_.bits.params.writeIntRf)
   val intArbiterInputsWireN = intArbiterInputsWire.filterNot(_.bits.params.writeIntRf)
