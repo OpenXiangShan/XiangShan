@@ -60,6 +60,7 @@ class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyMod
     println("[Backend]   " +
       s"${exuCfg.name}: " +
       (if (exuCfg.fakeUnit) "fake, " else "") +
+      (if (exuCfg.hasLoadFu || exuCfg.hasHyldaFu) s"LdExuIdx(${backendParams.getLdExuIdx(exuCfg)})" else "") +
       s"${fuConfigs.map(_.name).mkString("fu(s): {", ",", "}")}, " +
       s"${wbPortConfigs.mkString("wb: {", ",", "}")}, " +
       s"${immType.map(SelImm.mkString(_)).mkString("imm: {", ",", "}")}, " +
@@ -437,7 +438,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     sink.bits.uop           := 0.U.asTypeOf(sink.bits.uop)
     sink.bits.src           := 0.U.asTypeOf(sink.bits.src)
     sink.bits.src.zip(source.bits.src).foreach { case (l, r) => l := r}
-    sink.bits.deqPortIdx    := source.bits.deqPortIdx.getOrElse(0.U)
+    sink.bits.deqPortIdx    := source.bits.deqLdExuIdx.getOrElse(0.U)
     sink.bits.uop.fuType    := source.bits.fuType
     sink.bits.uop.fuOpType  := source.bits.fuOpType
     sink.bits.uop.imm       := source.bits.imm
