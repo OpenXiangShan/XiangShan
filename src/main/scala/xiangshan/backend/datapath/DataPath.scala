@@ -218,8 +218,8 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
 
   vfRfRaddr(VCONFIG_PORT) := io.vconfigReadPort.addr
   io.vconfigReadPort.data := vfRfRdata(VCONFIG_PORT)
-  vfRfRaddr(VLD_PORT) := io.vldReadPort.addr
-  io.vldReadPort.data := vfRfRdata(VLD_PORT)
+  // vfRfRaddr(VLD_PORT) := io.vldReadPort.addr
+  io.vldReadPort.data := DontCare
 
   intDebugRead.foreach { case (addr, _) =>
     addr := io.debugIntRat.get

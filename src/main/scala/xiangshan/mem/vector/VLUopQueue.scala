@@ -61,6 +61,7 @@ class VluopBundle(implicit p: Parameters) extends VecUopBundle {
 
   // vd_last_uop is only used for loads to joint uops that write the same vd
   val vd_last_uop = Bool()
+  val vd_first_uop = Bool()
 }
 
 class VlUopQueueIOBundle(implicit p: Parameters) extends VLSUBundle {
@@ -213,6 +214,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
       x.lmul := lmul
       x.vlmax := GenVLMAX(lmul, sew)
       x.instType := instType
+      x.data := io.loadRegIn.bits.src_vs3
     }
 
     // Assertion
@@ -229,6 +231,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
 
           preAlloc(ptr.value) := true.B
           uopq(ptr.value).vd_last_uop := (i + 1).U === numUopsSameVd
+          uopq(ptr.value).vd_first_uop := (i == 0).B
         }
       }
     }.otherwise {
@@ -436,7 +439,16 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
       val id = deqPtr.value
       val byteMask = uopq(id).byteMask
       val data = uopq(id).data
-      vdResult := mergeDataWithMask(vdResult, data.asUInt, byteMask).asUInt
+      vdResult := mergeDataWithMask(
+        oldData = vdResult,
+        newData = data.asUInt,
+        /**
+          * 1. If this is the first uop of a vd, all the bytes should be written into vdResult,
+          *    because the old vd needs to be transfered to backend.
+          * 2. Otherwise, only the masked bytes are needed.
+          */
+        mask = Mux(uopq(id).vd_first_uop, Fill(VLENB, 1.U(1.W)), byteMask)
+      ).asUInt
       vdMask := vdMask | byteMask
       vdSrcMask := srcMaskVec(id)
       vdUop := uopq(id).uop

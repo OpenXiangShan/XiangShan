@@ -166,7 +166,7 @@ case class VLD(src2: BitPat, fuOp: BitPat, strided: Boolean = false, indexed: Bo
   def generate() : List[BitPat] = {
     val fu = FuType.vldu
     val src1 = SrcType.xp
-    val src3 = SrcType.X
+    val src3 = SrcType.vp
     XSDecode(src1, src2, src3, fu, fuOp, SelImm.X, uopSplitType,
       xWen = F, fWen = F, vWen = T, mWen = F, xsTrap = F, noSpec = F, blockBack = F, flushPipe = F).generate()
   }

@@ -13,6 +13,7 @@ class VldMergeUnit(val params: ExeUnitParams)(implicit p: Parameters) extends XS
   val io = IO(new VldMergeUnitIO(params))
 
   io.writeback.ready := io.writebackAfterMerge.ready
+  // [WARNING] MemBlock cannot provide oldVdPsrc!!!
   io.oldVdReadAddr := io.writeback.bits.vls.get.oldVdPsrc
   val wbReg = Reg(Valid(new ExuOutput(params)))
   val mgu = Module(new Mgu(VLEN))
@@ -22,7 +23,8 @@ class VldMergeUnit(val params: ExeUnitParams)(implicit p: Parameters) extends XS
   wbReg.bits := Mux(wbFire, io.writeback.bits, wbReg.bits)
   wbReg.valid := wbFire
   mgu.io.in.vd := wbReg.bits.data
-  mgu.io.in.oldVd := io.oldVdReadData
+  // oldVd is contained in data and is already masked with new data
+  mgu.io.in.oldVd := wbReg.bits.data
   mgu.io.in.mask := wbReg.bits.vls.get.vpu.vmask
   mgu.io.in.info.valid := wbReg.valid
   mgu.io.in.info.ta := wbReg.bits.vls.get.vpu.vta
