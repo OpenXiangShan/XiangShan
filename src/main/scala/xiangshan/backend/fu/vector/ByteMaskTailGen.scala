@@ -64,8 +64,8 @@ class ByteMaskTailGen(vlen: Int)(implicit p: Parameters) extends Module {
 
   private val tailAgnosticEn = Mux(io.in.vta, tailEn, 0.U)
 
-  private val keepEn = Mux(io.in.begin >= io.in.end, Fill(numBytes, 1.U(1.W)), activeEn & maskEn)
-  private val agnosticEn = maskAgnosticEn | tailAgnosticEn
+  private val keepEn = Mux(io.in.begin >= io.in.end, 0.U(numBytes.W), activeEn & maskEn)
+  private val agnosticEn = Mux(io.in.begin >= io.in.end, 0.U(numBytes.W), maskAgnosticEn | tailAgnosticEn)
 
   io.out.keepEn := keepEn
   io.out.agnosticEn := agnosticEn
