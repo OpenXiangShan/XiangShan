@@ -909,8 +909,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
    meta_read_ports.takeRight(backendParams.HyuCnt)).zip(prefetchArray.io.read).foreach { case (p, r) => r <> p }
   (meta_read_ports.take(HybridLoadReadBase + 1) ++
    meta_read_ports.takeRight(backendParams.HyuCnt)).zip(accessArray.io.read).foreach { case (p, r) => r <> p }
-  val extra_meta_resp_ports = ldu.map(_.io.extra_meta_resp) ++
-    Seq(mainPipe.io.extra_meta_resp)
+  val extra_meta_resp_ports = ldu.map(_.io.extra_meta_resp).take(HybridLoadReadBase) ++
+    Seq(mainPipe.io.extra_meta_resp) ++
+    ldu.map(_.io.extra_meta_resp).takeRight(backendParams.HyuCnt)
   extra_meta_resp_ports.zip(errorArray.io.resp).foreach { case (p, r) => {
     (0 until nWays).map(i => { p(i).error := r(i) })
   }}
