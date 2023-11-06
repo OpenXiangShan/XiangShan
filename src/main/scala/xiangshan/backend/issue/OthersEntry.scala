@@ -304,9 +304,9 @@ class OthersEntryVecMemAddr()(implicit p: Parameters, params: IssueBlockParams) 
 
   val isLsqHead = {
     // if (params.isVecLdAddrIQ)
-      entryRegNext.status.vecMem.get.lqIdx.value === fromLsq.lqDeqPtr.value &&
+      entryRegNext.status.vecMem.get.lqIdx <= fromLsq.lqDeqPtr &&
     // else
-      entryRegNext.status.vecMem.get.sqIdx.value === fromLsq.sqDeqPtr.value
+      entryRegNext.status.vecMem.get.sqIdx <= fromLsq.sqDeqPtr
   }
   dontTouch(shouldBlock)
   dontTouch(blockNotReleased)
