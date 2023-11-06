@@ -120,15 +120,20 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
   vldMgu.io.writeback <> fromExuVld.head
   vldMgu.io.oldVdReadData := io.oldVdDataFromDataPath
   io.oldVdAddrToDataPath := vldMgu.io.oldVdReadAddr
-  val fromExuVldAfterMerge: MixedVec[DecoupledIO[ExuOutput]] = WireInit(MixedVecInit(vldMgu.io.writebackAfterMerge))
-  fromExuVldAfterMerge.head <> vldMgu.io.writebackAfterMerge
+  val wbReplaceVld: Seq[DecoupledIO[ExuOutput]] = fromExuPre.updated(fromExuPre.indexWhere(_.bits.params.hasVLoadFu), vldMgu.io.writebackAfterMerge).toSeq
+  val fromExu: MixedVec[DecoupledIO[ExuOutput]] = MixedVecInit(wbReplaceVld)
+
+  // io.fromExuPre ------------------------------------------------------------> fromExu
+  //               \                                                         /
+  //                -> vldMgu.io.writeback -> vldMgu.io.writebackAfterMerge /
+  (fromExu zip wbReplaceVld).foreach { case (sink, source) => source.ready := sink.ready }
+
   // alias
   // replace vldu write bundle with vldMdu output bundle
-  val fromExu = (fromExuPre.dropRight(params.VlduCnt) ++ fromExuVldAfterMerge).toSeq //TODO: better implementation
-  val intArbiterInputsWire = WireInit(MixedVecInit(fromExu))
+  val intArbiterInputsWire = WireInit(fromExu)
   val intArbiterInputsWireY = intArbiterInputsWire.filter(_.bits.params.writeIntRf)
   val intArbiterInputsWireN = intArbiterInputsWire.filterNot(_.bits.params.writeIntRf)
-  val vfArbiterInputsWire = WireInit(MixedVecInit(fromExu))
+  val vfArbiterInputsWire = WireInit(fromExu)
   val vfArbiterInputsWireY = vfArbiterInputsWire.filter(_.bits.params.writeVfRf)
   val vfArbiterInputsWireN = vfArbiterInputsWire.filterNot(_.bits.params.writeVfRf)
 
@@ -206,7 +211,7 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
 
   // the ports not writting back pregs are always ready
   // the ports set highest priority are always ready
-  (intExuInputs ++ vfExuInputs ++ memExuInputs).foreach( x =>
+  (fromExu).foreach( x =>
     if (x.bits.params.hasNoDataWB || x.bits.params.isHighestWBPriority) x.ready := true.B
   )
 

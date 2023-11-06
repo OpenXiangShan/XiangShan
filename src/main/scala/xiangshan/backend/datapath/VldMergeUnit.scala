@@ -42,7 +42,7 @@ class VldMergeUnit(val params: ExeUnitParams)(implicit p: Parameters) extends XS
 
   io.writebackAfterMerge.valid := wbReg.valid
   io.writebackAfterMerge.bits := wbReg.bits
-  io.writebackAfterMerge.bits.vecWen.foreach(_ := true.B)
+  io.writebackAfterMerge.bits.vecWen.foreach(_ := wbReg.bits.vecWen.get)
   io.writebackAfterMerge.bits.data := vdAfterMerge
 }
 
