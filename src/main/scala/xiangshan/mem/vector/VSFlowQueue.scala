@@ -27,7 +27,7 @@ import xiangshan.backend.rob.RobLsqIO
 import xiangshan.backend.Bundles._
 
 class VsFlowPtr (implicit p: Parameters) extends CircularQueuePtr[VsFlowPtr](
-  p => p(XSCoreParamsKey).VsFlowSize
+  p => p(XSCoreParamsKey).VsFlowL1Size
 ){
 }
 
@@ -41,7 +41,7 @@ object VsFlowPtr {
 }
 
 class VsFlowDataPtr (implicit p: Parameters) extends CircularQueuePtr[VsFlowDataPtr](
-  p => 32 // ! MAGIC NUM: number of second data queue entries
+  p => p(XSCoreParamsKey).VsFlowL2Size
 ){
 }
 
@@ -226,6 +226,7 @@ class VsFlowQueueIOBundle(implicit p: Parameters) extends VLSUBundle {
   // store-to-load forward
   val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
 }
+
 class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper
 {
   val io = IO(new VsFlowQueueIOBundle())
@@ -233,16 +234,16 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
   /* Storage */
 
   // circuit queue for flows
-  val flowQueueEntries = Reg(Vec(VsFlowSize, new VecStoreFlowEntry))
+  val flowQueueEntries = Reg(Vec(VsFlowL1Size, new VecStoreFlowEntry))
   // Markers
-  val flowAllocated = RegInit(VecInit(List.fill(VsFlowSize)(false.B)))
-  val flowFinished = RegInit(VecInit(List.fill(VsFlowSize)(false.B)))
-  val flowCommitted = RegInit(VecInit(List.fill(VsFlowSize)(false.B)))
-  val flowSecondAccess = RegInit(VecInit(List.fill(VsFlowSize)(false.B)))
+  val flowAllocated = RegInit(VecInit(List.fill(VsFlowL1Size)(false.B)))
+  val flowFinished = RegInit(VecInit(List.fill(VsFlowL1Size)(false.B)))
+  val flowCommitted = RegInit(VecInit(List.fill(VsFlowL1Size)(false.B)))
+  val flowSecondAccess = RegInit(VecInit(List.fill(VsFlowL1Size)(false.B)))
 
   // 2-level queue for data
-  val dataFirstQueue = Reg(Vec(VsFlowSize, new VecStoreFlowDataFirst))
-  val dataSecondQueue = Reg(Vec(32, UInt(64.W)))  // ! MAGIC NUM
+  val dataFirstQueue = Reg(Vec(VsFlowL1Size, new VecStoreFlowDataFirst))
+  val dataSecondQueue = Reg(Vec(VsFlowL2Size, UInt(64.W)))
 
   /* Queue Pointers */
 
@@ -259,8 +260,8 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
   val dataSecondPtr = RegInit(VecInit((0 until VecStorePipelineWidth).map(_.U.asTypeOf(new VsFlowDataPtr))))
 
   /* Redirect */
-  val flowNeedFlush = Wire(Vec(VsFlowSize, Bool()))
-  val flowNeedCancel = Wire(Vec(VsFlowSize, Bool()))
+  val flowNeedFlush = Wire(Vec(VsFlowL1Size, Bool()))
+  val flowNeedCancel = Wire(Vec(VsFlowL1Size, Bool()))
   val flowCancelCount = PopCount(flowNeedCancel)
 
   flowNeedFlush := flowQueueEntries.map(_.uop.robIdx.needFlush(io.redirect))
@@ -442,7 +443,7 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
   /* Commit */
   io.rob.mmio := DontCare
   io.rob.uop := DontCare
-  for (i <- 0 until VsFlowSize) {
+  for (i <- 0 until VsFlowL1Size) {
     val thisRobIdx = flowQueueEntries(i).uop.robIdx
     when (flowAllocated(i)) {
       when (isNotAfter(io.rob.pendingPtr, thisRobIdx) && isBefore(thisRobIdx, io.rob.pendingPtrNext)) {
