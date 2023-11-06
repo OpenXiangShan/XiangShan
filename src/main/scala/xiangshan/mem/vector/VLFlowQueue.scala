@@ -232,8 +232,13 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
     val thisPtr = issuePtr(i).value
     // Assuming that if io.flowIn(i).ready then io.flowIn(i-1).ready
     canIssue(i) := !flowNeedCancel(thisPtr) && issuePtr(i) < enqPtr(0)
-    io.pipeIssue(i).valid := canIssue(i)
-    doIssue(i) := canIssue(i) && allowIssue(i)
+    if (i == 0) {
+      doIssue(i) := canIssue(i) && allowIssue(i)
+      io.pipeIssue(i).valid := canIssue(i)
+    } else {
+      doIssue(i) := canIssue(i) && allowIssue(i) && allowIssue(i-1)
+      io.pipeIssue(i).valid := canIssue(i) && allowIssue(i-1)
+    }
   }
 
   for (i <- 0 until VecLoadPipelineWidth) {

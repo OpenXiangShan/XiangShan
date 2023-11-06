@@ -345,8 +345,13 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
   for (i <- 0 until VecStorePipelineWidth) {
     val thisPtr = issuePtr(i).value
     canIssue(i) := !flowNeedCancel(thisPtr) && issuePtr(i) < enqPtr(0)
-    io.pipeIssue(i).valid := canIssue(i)
-    doIssue(i) := canIssue(i) && allowIssue(i)
+    if (i == 0) {
+      doIssue(i) := canIssue(i) && allowIssue(i)
+      io.pipeIssue(i).valid := canIssue(i)
+    } else {
+      doIssue(i) := canIssue(i) && allowIssue(i) && allowIssue(i-1)
+      io.pipeIssue(i).valid := canIssue(i) && allowIssue(i-1)
+    }
   }
 
   // control signals
