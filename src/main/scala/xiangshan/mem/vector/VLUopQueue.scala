@@ -242,7 +242,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
   }
 
   // update enqPtrExt
-  when (redirectReg.valid) {
+  when (redirectReg.valid && flushNumReg =/= 0.U) {
     enqPtrExt.foreach(ptr => ptr := ptr - flushNumReg)
   }.otherwise {
     when (io.loadRegIn.fire) {
