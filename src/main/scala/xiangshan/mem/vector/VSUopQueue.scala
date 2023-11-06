@@ -224,7 +224,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
         alignedType = issueAlignedType
       )
       x.uopQueuePtr := flowSplitPtr
-      x.isLastElem := (elemIdx + 1.U) === (issueNFIELDS << issueVLMAXLog2)
+      x.isLastElem := (elemIdx +& 1.U) === (issueNFIELDS << issueVLMAXLog2)
     }
   }
 
