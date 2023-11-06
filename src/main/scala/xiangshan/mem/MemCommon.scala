@@ -112,8 +112,9 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   val exp = Bool()
   val is_first_ele = Bool()
   val flowIdx = UInt(8.W)
-  val flowPtr = new VlflowPtr()
-  val fqIdx = UInt(log2Ceil(VsFlowSize).W)
+  val flowPtr = new VlflowPtr() // VLFlowQueue ptr
+  val sflowPtr = new VsFlowPtr() // VSFlowQueue ptr
+  val fqIdx = UInt(log2Ceil(VsFlowL1Size).W)
 
   // For debug usage
   val isFirstIssue = Bool()
@@ -179,6 +180,7 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     // offset := input.offset
     fqIdx := input.fqIdx
     flowPtr := input.flowPtr
+    sflowPtr := input.sflowPtr
     isFirstIssue := input.isFirstIssue
     dcacheRequireReplay := input.dcacheRequireReplay
 

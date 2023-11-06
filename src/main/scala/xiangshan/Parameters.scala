@@ -202,7 +202,8 @@ case class XSCoreParameters
   UsQueueSize: Int = 8,
   VlFlowSize: Int = 32,
   VlUopSize: Int = 32,
-  VsFlowSize: Int = 32,
+  VsFlowL1Size: Int = 128,
+  VsFlowL2Size: Int = 32,
   VsUopSize: Int = 32,
   // ==============================
   UncacheBufferSize: Int = 4,
@@ -583,7 +584,8 @@ trait HasXSParameter {
   val UsQueueSize = coreParams.UsQueueSize
   val VlFlowSize = coreParams.VlFlowSize
   val VlUopSize = coreParams.VlUopSize
-  val VsFlowSize = coreParams.VsFlowSize
+  val VsFlowL1Size = coreParams.VsFlowL1Size
+  val VsFlowL2Size = coreParams.VsFlowL2Size
   val VsUopSize = coreParams.VsUopSize
   val UncacheBufferSize = coreParams.UncacheBufferSize
   val EnableLoadToLoadForward = coreParams.EnableLoadToLoadForward
