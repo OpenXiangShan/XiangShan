@@ -84,7 +84,7 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
     .zip(params.wakeUpInExuSources.map(_.name)).foreach {
     case ((deps, originalDeps), name) => deps.zip(originalDeps).zipWithIndex.foreach {
       case ((dep, originalDep), deqPortIdx) =>
-        if (name.contains("LDU") && name.replace("LDU", "").toInt == deqPortIdx)
+        if (params.backendParam.getLdExuIdx(params.backendParam.allExuParams.find(_.name == name).get) == deqPortIdx)
           dep := originalDep << 1 | 1.U
         else
           dep := originalDep << 1
