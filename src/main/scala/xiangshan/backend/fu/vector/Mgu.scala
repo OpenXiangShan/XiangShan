@@ -59,20 +59,21 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
   private val maskDataVec: Vec[UInt] = VecDataToMaskDataVec(in.mask, info.eew)
   private val maskUsed = maskDataVec(vdIdx)
 
-  maskTailGen.io.in.begin := Mux1H(Seq(
+  maskTailGen.io.in.begin := info.vstart /*Mux1H(Seq(
     (vstartMapVdIdx < vdIdx) -> 0.U,
     (vstartMapVdIdx === vdIdx) -> elemIdxMapUElemIdx(info.vstart),
     (vstartMapVdIdx > vdIdx) -> uvlMax,
-  ))
-  maskTailGen.io.in.end := Mux1H(Seq(
+  ))*/
+  maskTailGen.io.in.end := info.vl /*Mux1H(Seq(
     (vlMapVdIdx < vdIdx) -> 0.U,
     (vlMapVdIdx === vdIdx) -> elemIdxMapUElemIdx(info.vl),
     (vlMapVdIdx > vdIdx) -> uvlMax,
-  ))
+  ))*/
   maskTailGen.io.in.vma := info.ma
   maskTailGen.io.in.vta := info.ta
   maskTailGen.io.in.vsew := info.eew
   maskTailGen.io.in.maskUsed := maskUsed
+  maskTailGen.io.in.vdIdx := info.vdIdx
 
   private val keepEn = maskTailGen.io.out.keepEn
   private val agnosticEn = maskTailGen.io.out.agnosticEn
