@@ -151,7 +151,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
   }
 
   // update enqPtr
-  when (redirectReg.valid) {
+  when (redirectReg.valid && flushNumReg =/= 0.U) {
     enqPtr := enqPtr - flushNumReg
   }.otherwise {
     when (io.storeIn.fire) {
