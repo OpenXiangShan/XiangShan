@@ -1071,7 +1071,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.rollback.valid := s3_out.valid && !s3_rep_frm_fetch && s3_flushPipe
   io.rollback.bits             := DontCare
   io.rollback.bits.isRVC       := s3_out.bits.uop.cf.pd.isRVC
-  io.rollback.bits.rawNuke     := false.B
   io.rollback.bits.robIdx      := s3_out.bits.uop.robIdx
   io.rollback.bits.ftqIdx      := s3_out.bits.uop.cf.ftqPtr
   io.rollback.bits.ftqOffset   := s3_out.bits.uop.cf.ftqOffset
