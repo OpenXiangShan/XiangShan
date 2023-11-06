@@ -253,6 +253,11 @@ case class BackendParams(
     exuParams(idx).name
   }
 
+  def getExuParamByName(name: String): ExeUnitParams = {
+    val exuParams = allExuParams
+    exuParams.find(_.name == name).get
+  }
+
   def getLdExuIdx(exu: ExeUnitParams): Int = {
     val ldExuParams = allRealExuParams.filter(x => x.hasHyldaFu || x.hasLoadFu)
     ldExuParams.indexOf(exu)
