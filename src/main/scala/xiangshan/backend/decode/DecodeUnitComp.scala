@@ -1562,9 +1562,10 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).fpu.sqrt := false.B
       csBundle(0).fpu.fcvt := false.B
 
-      csBundle(1).srcType(0) := SrcType.imm
-      csBundle(1).srcType(1) := SrcType.reg
-      csBundle(1).lsrc(0) := 0.U
+      csBundle(1).srcType(0) := SrcType.reg
+      csBundle(1).srcType(1) := SrcType.imm
+      csBundle(1).lsrc(0) := decodedInstsSimple.lsrc(1)
+      csBundle(1).lsrc(1) := 0.U
       csBundle(1).ldest := VECTOR_TMP_REG_LMUL.U
       csBundle(1).fuType := FuType.i2f.U
       csBundle(1).rfWen := false.B
@@ -1583,6 +1584,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       //LMUL
       for (i <- 0 until MAX_VLMUL) {
         csBundle(i + 2).srcType(0) := SrcType.fp
+        csBundle(i + 2).srcType(1) := SrcType.fp
         csBundle(i + 2).lsrc(0) := FP_TMP_REG_MV.U
         csBundle(i + 2).lsrc(1) := VECTOR_TMP_REG_LMUL.U
         csBundle(i + 2).lsrc(2) := dest + i.U // old vd
