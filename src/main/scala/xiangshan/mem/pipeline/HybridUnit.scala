@@ -280,8 +280,9 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   if (StorePrefetchL1Enabled) {
     s0_dcache_ready := Mux(s0_ld_flow, io.ldu_io.dcache.req.ready, io.stu_io.dcache.req.ready)
   } else {
-    s0_dcache_ready := io.ldu_io.dcache.req.ready
+    s0_dcache_ready := Mux(s0_ld_flow, io.ldu_io.dcache.req.ready, true.B)
   }
+
   // query DTLB
   io.tlb.req.valid                   := s0_valid && s0_dcache_ready
   io.tlb.req.bits.cmd                := Mux(s0_prf,
@@ -519,11 +520,10 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   // 1) there is no lsq-replayed load
   // 2) there is no fast replayed load
   // 3) there is no high confidence prefetch request
-  if (StorePrefetchL1Enabled) {
-    io.lsin.ready := (s0_can_go && Mux(FuType.isLoad(io.lsin.bits.uop.fuType), io.ldu_io.dcache.req.ready, io.stu_io.dcache.req.ready) && s0_int_iss_ready)
-  } else {
-    io.lsin.ready := (s0_can_go && Mux(FuType.isLoad(io.lsin.bits.uop.fuType), io.ldu_io.dcache.req.ready, true.B) && s0_int_iss_ready)
-  }
+  io.lsin.ready := (s0_can_go &&
+                    Mux(FuType.isLoad(io.lsin.bits.uop.fuType), io.ldu_io.dcache.req.ready,
+                    (if (StorePrefetchL1Enabled) io.stu_io.dcache.req.ready else true.B)) && s0_int_iss_ready)
+
 
   // for hw prefetch load flow feedback, to be added later
   // io.prefetch_in.ready := s0_hw_prf_select

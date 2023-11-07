@@ -584,7 +584,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     wrapper.valid        := ldu.fast_rep_out.valid
     wrapper.bits.req     := ldu.fast_rep_out.bits
     wrapper.bits.balance := ldu.fast_rep_out.bits.rep_info.bank_conflict
-    wrapper.bits.port    := i.U
+    wrapper.bits.port    := (LduCnt + i).U
     wrapper
   }}
   val fastReplaySel = lduFastReplaySel ++ hyuFastReplaySel
@@ -1116,8 +1116,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     assert(!st_atomics.zipWithIndex.filterNot(_._2 == StaCnt + i).unzip._1.reduce(_ || _))
   }
   when (atomicsUnit.io.out.valid) {
-    assert((0 until StaCnt).map(state === s_atomics(_)).reduce(_ || _))
-    assert((0 until HyuCnt).map(i => state === s_atomics(StaCnt + i)).reduce(_ || _))
+    assert((0 until StaCnt + HyuCnt).map(state === s_atomics(_)).reduce(_ || _))
     state := s_normal
   }
 
