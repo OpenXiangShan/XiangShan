@@ -641,8 +641,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     lsq.io.ldout(i) <> loadUnits(i).io.lsq.uncache
     lsq.io.ld_raw_data(i) <> loadUnits(i).io.lsq.ld_raw_data
 
+
     lsq.io.l2_hint.valid := l2_hint.valid
     lsq.io.l2_hint.bits.sourceId := l2_hint.bits.sourceId
+    lsq.io.l2_hint.bits.isKeyword := l2_hint.bits.isKeyword
+
 
     lsq.io.tlb_hint <> dtlbRepeater.io.hint.get
 
