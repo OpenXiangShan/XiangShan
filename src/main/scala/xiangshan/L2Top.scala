@@ -142,7 +142,7 @@ class L2Top()(implicit p: Parameters) extends LazyModule
 
     val l2_hint = IO(ValidIO(UInt(32.W))) // TODO: parameterize this
     if (l2cache.isDefined) {
-      l2_hint := RegNext(l2cache.get.module.io.l2_hint)
+      l2_hint := l2cache.get.module.io.l2_hint
       // debugTopDown <> l2cache.get.module.io.debugTopDown
       l2cache.get.module.io.debugTopDown.robHeadPaddr := DontCare
       l2cache.get.module.io.debugTopDown.robHeadPaddr.head := debugTopDown.robHeadPaddr
