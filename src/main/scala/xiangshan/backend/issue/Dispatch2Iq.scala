@@ -10,7 +10,7 @@ import xiangshan._
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.rename.BusyTableReadIO
 import xiangshan.mem.LsqEnqIO
-import xiangshan.backend.Bundles.{DynInst, ExuVec}
+import xiangshan.backend.Bundles.{DynInst, ExuOH}
 import xiangshan.backend.datapath.DataSource
 
 import scala.collection._
@@ -223,8 +223,8 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
   private val vfSrcStateVec  = if (io.readVfState.isDefined)  Some(Wire(Vec(numEnq * numRegSrc, SrcState()))) else None
   private val intDataSourceVec = if (io.readIntState.isDefined) Some(Wire(Vec(numEnq * numRegSrc, DataSource()))) else None
   private val vfDataSourceVec = if (io.readVfState.isDefined) Some(Wire(Vec(numEnq * numRegSrc, DataSource()))) else None
-  private val intL1ExuOHVec = if (io.readIntState.isDefined) Some(Wire(Vec(numEnq * numRegSrc, ExuVec()))) else None
-  private val vfL1ExuOHVec = if (io.readVfState.isDefined) Some(Wire(Vec(numEnq * numRegSrc, ExuVec()))) else None
+  private val intL1ExuOHVec = if (io.readIntState.isDefined) Some(Wire(Vec(numEnq * numRegSrc, ExuOH()))) else None
+  private val vfL1ExuOHVec = if (io.readVfState.isDefined) Some(Wire(Vec(numEnq * numRegSrc, ExuOH()))) else None
 
   // We always read physical register states when in gives the instructions.
   // This usually brings better timing.
@@ -275,15 +275,15 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
   uopsIn
     .flatMap(x => x.bits.l1ExuOH.take(numRegSrc) zip x.bits.srcType.take(numRegSrc))
     .zip(
-      intL1ExuOHVec.getOrElse(VecInit(Seq.fill(numEnq * numRegSrc)(0.U.asTypeOf(ExuVec())).toSeq)) zip vfL1ExuOHVec.getOrElse(VecInit(Seq.fill(numEnq * numRegSrc)(0.U.asTypeOf(ExuVec())).toSeq))
+      intL1ExuOHVec.getOrElse(VecInit.fill(numEnq * numRegSrc)(0.U.asTypeOf(ExuOH()))) zip vfL1ExuOHVec.getOrElse(VecInit.fill(numEnq * numRegSrc)(0.U.asTypeOf(ExuOH())))
     )
     .foreach {
-      case ((l1ExuOH: Vec[Bool], srcType), (intL1ExuOH, vfL1ExuOH)) =>
+      case ((l1ExuOH: UInt, srcType), (intL1ExuOH, vfL1ExuOH)) =>
         l1ExuOH := Mux1H(Seq(
-          SrcType.isXp(srcType) -> intL1ExuOH.asUInt,
-          SrcType.isVfp(srcType) -> vfL1ExuOH.asUInt,
+          SrcType.isXp(srcType) -> intL1ExuOH,
+          SrcType.isVfp(srcType) -> vfL1ExuOH,
           SrcType.isNotReg(srcType) -> 0.U,
-        )).asBools
+        ))
     }
 
 
@@ -434,8 +434,8 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   val vfSrcStateVec = Wire(Vec(numEnq, Vec(numRegSrc, SrcState())))
   val intDataSourceVec = Wire(Vec(numEnq, Vec(numRegSrc, DataSource())))
   val vfDataSourceVec = Wire(Vec(numEnq, Vec(numRegSrc, DataSource())))
-  val intL1ExuOHVec = Wire(Vec(numEnq, Vec(numRegSrc, ExuVec())))
-  val vfL1ExuOHVec = Wire(Vec(numEnq, Vec(numRegSrc, ExuVec())))
+  val intL1ExuOHVec = Wire(Vec(numEnq, Vec(numRegSrc, ExuOH())))
+  val vfL1ExuOHVec = Wire(Vec(numEnq, Vec(numRegSrc, ExuOH())))
 
   // srcState is read from outside and connected directly
   io.readIntState.get.map(_.resp).zip(intSrcStateVec.flatten).foreach(x => x._2 := x._1)
@@ -464,10 +464,10 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   s0_in.flatMap(x => x.bits.l1ExuOH.take(numRegSrc) zip x.bits.srcType.take(numRegSrc)).zip(intL1ExuOHVec.flatten zip vfL1ExuOHVec.flatten).foreach {
     case ((l1ExuOH, srcType), (intL1ExuOH, vfL1ExuOH)) =>
       l1ExuOH := Mux1H(Seq(
-        SrcType.isXp(srcType) -> intL1ExuOH.asUInt,
-        SrcType.isVfp(srcType) -> vfL1ExuOH.asUInt,
+        SrcType.isXp(srcType) -> intL1ExuOH,
+        SrcType.isVfp(srcType) -> vfL1ExuOH,
         SrcType.isNotReg(srcType) -> 0.U,
-      )).asBools
+      ))
   }
 
   val a: IndexedSeq[Vec[DataSource]] = s0_in.map(_.bits.dataSource)

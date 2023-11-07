@@ -344,10 +344,10 @@ object VecDecoder extends DecodeConstants {
     VNCLIPU_WI    -> OPIVI(FuType.vialuF, VialuFixType.vnclipu_wv, T, F, T, selImm = SelImm.IMM_OPIVIU, uopSplitType = UopSplitType.VEC_WVV),
     VNCLIP_WI     -> OPIVI(FuType.vialuF, VialuFixType.vnclip_wv, T, F, T, uopSplitType = UopSplitType.VEC_WVV),
 
-    VMV1R_V       -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F, src1 = SrcType.no), // vmv1r.v vd, vs2
-    VMV2R_V       -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F, src1 = SrcType.no), // vmv2r.v vd, vs2
-    VMV4R_V       -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F, src1 = SrcType.no), // vmv4r.v vd, vs2
-    VMV8R_V       -> OPIVI(FuType.vipu, VipuType.dummy, T, F, F, src1 = SrcType.no), // vmv8r.v vd, vs2
+    VMV1R_V       -> OPIVI(FuType.vppu, VpermType.vmvnr, T, F, F, uopSplitType = UopSplitType.VEC_MVNR, src1 = SrcType.no), // vmv1r.v vd, vs2
+    VMV2R_V       -> OPIVI(FuType.vppu, VpermType.vmvnr, T, F, F, uopSplitType = UopSplitType.VEC_MVNR, src1 = SrcType.no), // vmv2r.v vd, vs2
+    VMV4R_V       -> OPIVI(FuType.vppu, VpermType.vmvnr, T, F, F, uopSplitType = UopSplitType.VEC_MVNR, src1 = SrcType.no), // vmv4r.v vd, vs2
+    VMV8R_V       -> OPIVI(FuType.vppu, VpermType.vmvnr, T, F, F, uopSplitType = UopSplitType.VEC_MVNR, src1 = SrcType.no), // vmv8r.v vd, vs2
   )
 
   val opmvv: Array[(BitPat, XSDecodeBase)] = Array(

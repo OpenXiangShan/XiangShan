@@ -160,7 +160,7 @@ object Bundles {
     // rename
     val srcState        = Vec(numSrc, SrcState())
     val dataSource      = Vec(numSrc, DataSource())
-    val l1ExuOH         = Vec(numSrc, ExuVec())
+    val l1ExuOH         = Vec(numSrc, ExuOH())
     val psrc            = Vec(numSrc, UInt(PhyRegIdxWidth.W))
     val pdest           = UInt(PhyRegIdxWidth.W)
     val robIdx          = new RobPtr
@@ -267,7 +267,7 @@ object Bundles {
 
   class IssueQueueIQWakeUpBundle(exuIdx: Int, backendParams: BackendParams) extends IssueQueueWakeUpBaseBundle(backendParams.pregIdxWidth, Seq(exuIdx)) {
     val loadDependency = Vec(backendParams.LduCnt, UInt(3.W))
-    def fromExuInput(exuInput: ExuInput, l2ExuVecs: Vec[Vec[Bool]]): Unit = {
+    def fromExuInput(exuInput: ExuInput, l2ExuOHs: Vec[UInt]): Unit = {
       this.rfWen := exuInput.rfWen.getOrElse(false.B)
       this.fpWen := exuInput.fpWen.getOrElse(false.B)
       this.vecWen := exuInput.vecWen.getOrElse(false.B)
@@ -346,9 +346,14 @@ object Bundles {
     p: Parameters
   ) extends Bundle {
     private val rfReadDataCfgSet: Seq[Set[DataConfig]] = exuParams.getRfReadDataCfgSet
+    // check which set both have fp and vec and remove fp
+    private val rfReadDataCfgSetFilterFp = rfReadDataCfgSet.map((set: Set[DataConfig]) =>
+      if (set.contains(FpData()) && set.contains(VecData())) set.filter(_ != FpData())
+      else set
+    )
 
     val rf: MixedVec[MixedVec[RfReadPortWithConfig]] = Flipped(MixedVec(
-      rfReadDataCfgSet.map((set: Set[DataConfig]) =>
+      rfReadDataCfgSetFilterFp.map((set: Set[DataConfig]) =>
         MixedVec(set.map((x: DataConfig) => new RfReadPortWithConfig(x, exuParams.rdPregIdxWidth)).toSeq)
       )
     ))
@@ -455,7 +460,7 @@ object Bundles {
     val sqIdx = if (params.hasMemAddrFu || params.hasStdFu) Some(new SqPtr) else None
     val lqIdx = if (params.hasMemAddrFu) Some(new LqPtr) else None
     val dataSources = Vec(params.numRegSrc, DataSource())
-    val l1ExuVec = Vec(params.numRegSrc, ExuVec())
+    val l1ExuOH = Vec(params.numRegSrc, ExuOH())
     val srcTimer = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, UInt(3.W)))
     val loadDependency = OptionWrapper(params.isIQWakeUpSink, Vec(LoadPipelineWidth, UInt(3.W)))
     val deqPortIdx = OptionWrapper(params.hasLoadFu, UInt(log2Ceil(LoadPipelineWidth).W))
@@ -464,15 +469,15 @@ object Bundles {
 
     def exuIdx = this.params.exuIdx
 
-    def needCancel(og0CancelVec: Vec[Bool], og1CancelVec: Vec[Bool]) : Bool = {
+    def needCancel(og0CancelOH: UInt, og1CancelOH: UInt) : Bool = {
       if (params.isIQWakeUpSink) {
         require(
-          og0CancelVec.size == l1ExuVec.head.size,
-          s"cancelVecSize: {og0: ${og0CancelVec.size}, og1: ${og1CancelVec.size}}"
+          og0CancelOH.getWidth == l1ExuOH.head.getWidth,
+          s"cancelVecSize: {og0: ${og0CancelOH.getWidth}, og1: ${og1CancelOH.getWidth}}"
         )
-        val l1Cancel: Bool = l1ExuVec.zip(srcTimer.get).map {
-          case(exuOH: Vec[Bool], srcTimer: UInt) =>
-            (exuOH.asUInt & og0CancelVec.asUInt).orR && srcTimer === 1.U
+        val l1Cancel: Bool = l1ExuOH.zip(srcTimer.get).map {
+          case(exuOH: UInt, srcTimer: UInt) =>
+            (exuOH & og0CancelOH).orR && srcTimer === 1.U
         }.reduce(_ | _)
         l1Cancel
       } else {
@@ -496,7 +501,7 @@ object Bundles {
       this.isFirstIssue  := source.common.isFirstIssue // Only used by mem debug log
       this.iqIdx         := source.common.iqIdx        // Only used by mem feedback
       this.dataSources   := source.common.dataSources
-      this.l1ExuVec     := source.common.l1ExuVec
+      this.l1ExuOH       := source.common.l1ExuOH
       this.rfWen         .foreach(_ := source.common.rfWen.get)
       this.fpWen         .foreach(_ := source.common.fpWen.get)
       this.vecWen        .foreach(_ := source.common.vecWen.get)
@@ -641,10 +646,10 @@ object Bundles {
     def width = 4 // 0~15 // Todo: assosiate it with FuConfig
   }
 
-  object ExuVec {
-    def apply(exuNum: Int): Vec[Bool] = Vec(exuNum, Bool())
+  object ExuOH {
+    def apply(exuNum: Int): UInt = UInt(exuNum.W)
 
-    def apply()(implicit p: Parameters): Vec[Bool] = Vec(width, Bool())
+    def apply()(implicit p: Parameters): UInt = UInt(width.W)
 
     def width(implicit p: Parameters): Int = p(XSCoreParamsKey).backendParams.numExu
   }

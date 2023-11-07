@@ -83,6 +83,7 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
   val typeOfSplit = io.in.preInfo.typeOfSplit
   val vsew = Cat(0.U(1.W), io.in.preInfo.vsew)
   val veew = Cat(0.U(1.W), io.in.preInfo.vwidth(1, 0))
+  val vmvn = io.in.preInfo.vmvn
   val vlmul = io.in.preInfo.vlmul
   val nf = io.in.preInfo.nf
   val isComplex = io.out.isComplex
@@ -177,6 +178,7 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     UopSplitType.VEC_VFREDOSUM -> numOfUopVFREDOSUM,
     UopSplitType.VEC_VXM -> (lmul +& 1.U),
     UopSplitType.VEC_VXV -> (lmul +& 1.U),
+    UopSplitType.VEC_VIV -> (lmul +& 1.U),
     UopSplitType.VEC_VFW -> Cat(lmul, 0.U(1.W)), // lmul <= 4
     UopSplitType.VEC_WFW -> Cat(lmul, 0.U(1.W)), // lmul <= 4
     UopSplitType.VEC_VVW -> Cat(lmul, 0.U(1.W)), // lmul <= 4
@@ -204,6 +206,7 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     UopSplitType.VEC_US_LDST -> (numOfUopVLoadStoreStrided +& 1.U),   // with one move instruction
     UopSplitType.VEC_S_LDST -> (numOfUopVLoadStoreStrided +& 2.U),    // with two move instructions
     UopSplitType.VEC_I_LDST -> (numOfUopVLoadStoreIndexed +& 1.U),
+    UopSplitType.VEC_MVNR -> (vmvn +& 1.U),
   ))
 
   isComplex := (numOfUop > 1.U) || (typeOfSplit === UopSplitType.DIR)
@@ -228,6 +231,7 @@ class PreInfo(implicit p: Parameters) extends XSBundle {
   val vlmul = VLmul()
   val vwidth = UInt(3.W)     //eew
   val nf = UInt(3.W)
+  val vmvn = UInt(3.W)       // vmvnr
 }
 
 class UopInfo(implicit p: Parameters) extends XSBundle {

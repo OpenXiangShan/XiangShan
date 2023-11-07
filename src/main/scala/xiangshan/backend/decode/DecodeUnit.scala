@@ -831,6 +831,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   uopInfoGen.io.in.preInfo.vlmul := decodedInst.vpu.vlmul
   uopInfoGen.io.in.preInfo.vwidth := inst.RM
   uopInfoGen.io.in.preInfo.nf := inst.NF
+  uopInfoGen.io.in.preInfo.vmvn := inst.IMM5_OPIVI(2, 0)
   io.deq.isComplex := uopInfoGen.io.out.isComplex
   io.deq.uopInfo.numOfUop := uopInfoGen.io.out.uopInfo.numOfUop
   io.deq.uopInfo.lmul := uopInfoGen.io.out.uopInfo.lmul

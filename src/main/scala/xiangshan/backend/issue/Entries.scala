@@ -41,7 +41,7 @@ class Status(implicit p:Parameters, params: IssueBlockParams) extends XSBundle {
   // read reg or get data from bypass network
   val dataSources = Vec(params.numRegSrc, DataSource())
   // if waked up by iq, set when waked up by iq
-  val srcWakeUpL1ExuOH = OptionWrapper(params.hasIQWakeUp, Vec(params.numRegSrc, ExuVec()))
+  val srcWakeUpL1ExuOH = OptionWrapper(params.hasIQWakeUp, Vec(params.numRegSrc, ExuOH()))
   // src timer, used by cancel signal. It increases every cycle after wakeup src inst issued.
   val srcTimer = OptionWrapper(params.hasIQWakeUp, Vec(params.numRegSrc, UInt(3.W)))
   val issueTimer = UInt(2.W)
@@ -101,7 +101,7 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val clear = Output(UInt(params.numEntries.W))
   val fuType = Output(Vec(params.numEntries, FuType()))
   val dataSources = Output(Vec(params.numEntries, Vec(params.numRegSrc, DataSource())))
-  val srcWakeUpL1ExuOH = OptionWrapper(params.hasIQWakeUp, Output(Vec(params.numEntries, Vec(params.numRegSrc, ExuVec()))))
+  val srcWakeUpL1ExuOH = OptionWrapper(params.hasIQWakeUp, Output(Vec(params.numEntries, Vec(params.numRegSrc, ExuOH()))))
   val srcTimer = OptionWrapper(params.hasIQWakeUp, Output(Vec(params.numEntries, Vec(params.numRegSrc, UInt(3.W)))))
   val robIdx = OptionWrapper(params.isVecMemIQ, Output(Vec(params.numEntries, new RobPtr)))
   val uopIdx = OptionWrapper(params.isVecMemIQ, Output(Vec(params.numEntries, UopIdx())))
@@ -110,8 +110,8 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   // wakeup
   val wakeUpFromWB: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
   val wakeUpFromIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
-  val og0Cancel = Input(ExuVec(backendParams.numExu))
-  val og1Cancel = Input(ExuVec(backendParams.numExu))
+  val og0Cancel = Input(ExuOH(backendParams.numExu))
+  val og1Cancel = Input(ExuOH(backendParams.numExu))
   val ldCancel = Vec(backendParams.LduCnt, Flipped(new LoadCancelIO))
   //deq
   val deq = Vec(params.numDeq, new DeqBundle)
@@ -172,7 +172,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val clearVec = Wire(Vec(params.numEntries, Bool()))
   val fuTypeVec = Wire(Vec(params.numEntries, FuType()))
   val dataSourceVec = Wire(Vec(params.numEntries, Vec(params.numRegSrc, DataSource())))
-  val srcWakeUpL1ExuOHVec = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Vec(params.numRegSrc, ExuVec()))))
+  val srcWakeUpL1ExuOHVec = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Vec(params.numRegSrc, ExuOH()))))
   val srcTimerVec = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Vec(params.numRegSrc, UInt(3.W)))))
   val isFirstIssueVec = Wire(Vec(params.numEntries, Bool()))
   val robIdxVec = Wire(Vec(params.numEntries, new RobPtr))

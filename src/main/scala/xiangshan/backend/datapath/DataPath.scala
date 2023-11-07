@@ -371,10 +371,8 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       }
   }
 
-  io.og0CancelVec.zip(io.og1CancelVec).zipWithIndex.foreach { case ((og0Cancel, og1Cancel), i) =>
-    og0Cancel := fromFlattenIQ(i).valid && !fromFlattenIQ(i).fire
-    og1Cancel := toFlattenExu(i).valid && !toFlattenExu(i).fire
-  }
+  io.og0CancelOH := VecInit(fromFlattenIQ.map(x => x.valid && !x.fire)).asUInt
+  io.og1CancelOH := VecInit(toFlattenExu.map(x => x.valid && !x.fire)).asUInt
 
   io.cancelToBusyTable.zipWithIndex.foreach { case (cancel, i) =>
     cancel.valid := fromFlattenIQ(i).valid && !fromFlattenIQ(i).fire && {
@@ -488,9 +486,9 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
 
   val toVfIQ = MixedVec(vfSchdParams.issueBlockParams.map(_.genOGRespBundle))
 
-  val og0CancelVec = Output(ExuVec(backendParams.numExu))
+  val og0CancelOH = Output(ExuOH(backendParams.numExu))
 
-  val og1CancelVec = Output(ExuVec(backendParams.numExu))
+  val og1CancelOH = Output(ExuOH(backendParams.numExu))
 
   val ldCancel = Vec(backendParams.LduCnt, Flipped(new LoadCancelIO))
 
