@@ -107,6 +107,8 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   }
   //Type of uop Div
   val typeOfSplit = decodedInstsSimple.uopSplitType
+  val src1Type = decodedInstsSimple.srcType(0)
+  val src1IsImm = src1Type === SrcType.imm
 
   when(typeOfSplit === UopSplitType.DIR) {
     numOfUop := Mux(dest =/= 0.U, 2.U,
@@ -271,38 +273,14 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
     }
     is(UopSplitType.VEC_VXV) {
       /*
-      FMV.D.X
+      i to vector move
        */
       csBundle(0).srcType(0) := SrcType.reg
       csBundle(0).srcType(1) := SrcType.imm
       csBundle(0).lsrc(1) := 0.U
       csBundle(0).ldest := VECTOR_TMP_REG_LMUL.U
       csBundle(0).fuType := FuType.i2v.U
-      csBundle(0).fuOpType := vsewReg
-      csBundle(0).vecWen := true.B
-      /*
-      LMUL
-       */
-      for (i <- 0 until MAX_VLMUL) {
-        csBundle(i + 1).srcType(0) := SrcType.vp
-        csBundle(i + 1).lsrc(0) := VECTOR_TMP_REG_LMUL.U
-        csBundle(i + 1).lsrc(1) := src2 + i.U
-        csBundle(i + 1).lsrc(2) := dest + i.U
-        csBundle(i + 1).ldest := dest + i.U
-        csBundle(i + 1).uopIdx := i.U
-      }
-    }
-    is(UopSplitType.VEC_VIV) {
-      /*
-      FMV.D.X
-       */
-      csBundle(0).srcType(0) := SrcType.imm
-      csBundle(0).srcType(1) := SrcType.imm
-      csBundle(0).lsrc(0) := 0.U
-      csBundle(0).lsrc(1) := 0.U
-      csBundle(0).ldest := VECTOR_TMP_REG_LMUL.U
-      csBundle(0).fuType := FuType.i2v.U
-      csBundle(0).fuOpType := vsewReg
+      csBundle(0).fuOpType := Cat(Mux(src1IsImm, IF2VectorType.imm2vector(2, 0), IF2VectorType.i2vector(2, 0)), vsewReg)
       csBundle(0).vecWen := true.B
       /*
       LMUL
@@ -360,7 +338,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
     }
     is(UopSplitType.VEC_VXW) {
       /*
-      FMV.D.X
+      i to vector move
        */
       csBundle(0).srcType(0) := SrcType.reg
       csBundle(0).srcType(1) := SrcType.imm
@@ -387,7 +365,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
     }
     is(UopSplitType.VEC_WXW) {
       /*
-      FMV.D.X
+      i to vector move
        */
       csBundle(0).srcType(0) := SrcType.reg
       csBundle(0).srcType(1) := SrcType.imm
@@ -443,14 +421,14 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
     }
     is(UopSplitType.VEC_WXV) {
       /*
-      FMV.D.X
+      i to vector move
        */
       csBundle(0).srcType(0) := SrcType.reg
       csBundle(0).srcType(1) := SrcType.imm
       csBundle(0).lsrc(1) := 0.U
       csBundle(0).ldest := VECTOR_TMP_REG_LMUL.U
       csBundle(0).fuType := FuType.i2v.U
-      csBundle(0).fuOpType := vsewReg
+      csBundle(0).fuOpType := Cat(Mux(src1IsImm, IF2VectorType.imm2vector(2, 0), IF2VectorType.i2vector(2, 0)), vsewReg)
       csBundle(0).vecWen := true.B
 
       for (i <- 0 until MAX_VLMUL / 2) {
@@ -479,7 +457,6 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(i).ldest := dest
         csBundle(i).uopIdx := i.U
       }
-      csBundle(numOfUop - 1.U).ldest := dest
     }
     is(UopSplitType.VEC_VFM) {
       csBundle(0).lsrc(2) := dest
@@ -496,14 +473,14 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
     }
     is(UopSplitType.VEC_VXM) {
       /*
-      FMV.D.X
+      i to vector move
        */
       csBundle(0).srcType(0) := SrcType.reg
       csBundle(0).srcType(1) := SrcType.imm
       csBundle(0).lsrc(1) := 0.U
       csBundle(0).ldest := VECTOR_TMP_REG_LMUL.U
       csBundle(0).fuType := FuType.i2v.U
-      csBundle(0).fuOpType := vsewReg
+      csBundle(0).fuOpType := Cat(Mux(src1IsImm, IF2VectorType.imm2vector(2, 0), IF2VectorType.i2vector(2, 0)), vsewReg)
       csBundle(0).vecWen := true.B
       //LMUL
       csBundle(1).srcType(0) := SrcType.vp
@@ -523,7 +500,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
     }
     is(UopSplitType.VEC_SLIDE1UP) {
       /*
-      FMV.D.X
+      i to vector move
        */
       csBundle(0).srcType(0) := SrcType.reg
       csBundle(0).srcType(1) := SrcType.imm
@@ -566,7 +543,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
     }
     is(UopSplitType.VEC_SLIDE1DOWN) { // lmul+lmul = 16
       /*
-      FMV.D.X
+      i to vector move
        */
       csBundle(0).srcType(0) := SrcType.reg
       csBundle(0).srcType(1) := SrcType.imm
@@ -1141,14 +1118,15 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         }
       }
     }
+
     is(UopSplitType.VEC_SLIDEUP) {
-      // FMV.D.X
+      // i to vector move
       csBundle(0).srcType(0) := SrcType.reg
       csBundle(0).srcType(1) := SrcType.imm
       csBundle(0).lsrc(1) := 0.U
       csBundle(0).ldest := VECTOR_TMP_REG_LMUL.U
       csBundle(0).fuType := FuType.i2v.U
-      csBundle(0).fuOpType := vsewReg
+      csBundle(0).fuOpType := Cat(Mux(src1IsImm, IF2VectorType.permImm2vector(2, 0), IF2VectorType.i2vector(2, 0)), vsewReg)
       csBundle(0).vecWen := true.B
       // LMUL
       for (i <- 0 until MAX_VLMUL)
@@ -1168,31 +1146,14 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         }
     }
 
-    is(UopSplitType.VEC_ISLIDEUP) {
-      // LMUL
-      for (i <- 0 until MAX_VLMUL)
-        for (j <- 0 to i) {
-          val old_vd = if (j == 0) {
-            dest + i.U
-          } else (VECTOR_TMP_REG_LMUL + j - 1).U
-          val vd = if (j == i) {
-            dest + i.U
-          } else (VECTOR_TMP_REG_LMUL + j).U
-          csBundle(i * (i + 1) / 2 + j).lsrc(1) := src2 + j.U
-          csBundle(i * (i + 1) / 2 + j).lsrc(2) := old_vd
-          csBundle(i * (i + 1) / 2 + j).ldest := vd
-          csBundle(i * (i + 1) / 2 + j).uopIdx := (i * (i + 1) / 2 + j).U
-        }
-    }
-
     is(UopSplitType.VEC_SLIDEDOWN) {
-      // FMV.D.X
+      // i to vector move
       csBundle(0).srcType(0) := SrcType.reg
       csBundle(0).srcType(1) := SrcType.imm
       csBundle(0).lsrc(1) := 0.U
       csBundle(0).ldest := VECTOR_TMP_REG_LMUL.U
       csBundle(0).fuType := FuType.i2v.U
-      csBundle(0).fuOpType := vsewReg
+      csBundle(0).fuOpType := Cat(Mux(src1IsImm, IF2VectorType.permImm2vector(2, 0), IF2VectorType.i2vector(2, 0)), vsewReg)
       csBundle(0).vecWen := true.B
       // LMUL
       for (i <- 0 until MAX_VLMUL)
@@ -1210,25 +1171,6 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
             csBundle(numOfUop - (i * (i + 1) / 2 + i - j + 1).U).lsrc(2) := old_vd
             csBundle(numOfUop - (i * (i + 1) / 2 + i - j + 1).U).ldest := vd
             csBundle(numOfUop - (i * (i + 1) / 2 + i - j + 1).U).uopIdx := numOfUop - (i * (i + 1) / 2 + i - j + 2).U
-          }
-        }
-    }
-
-    is(UopSplitType.VEC_ISLIDEDOWN) {
-      // LMUL
-      for (i <- 0 until MAX_VLMUL)
-        for (j <- (0 to i).reverse) {
-          when(i.U < lmul) {
-            val old_vd = if (j == 0) {
-              dest + lmul - 1.U - i.U
-            } else (VECTOR_TMP_REG_LMUL + j - 1).U
-            val vd = if (j == i) {
-              dest + lmul - 1.U - i.U
-            } else (VECTOR_TMP_REG_LMUL + j).U
-            csBundle(numOfUop - (i * (i + 1) / 2 + i - j + 1).U).lsrc(1) := src2 + lmul - 1.U - j.U
-            csBundle(numOfUop - (i * (i + 1) / 2 + i - j + 1).U).lsrc(2) := old_vd
-            csBundle(numOfUop - (i * (i + 1) / 2 + i - j + 1).U).ldest := vd
-            csBundle(numOfUop - (i * (i + 1) / 2 + i - j + 1).U).uopIdx := numOfUop - (i * (i + 1) / 2 + i - j + 1).U
           }
         }
     }
@@ -1386,13 +1328,13 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
             csBundle(i * len + j + 1).uopIdx := (i * len + j).U
           }
       }
-      // FMV.D.X
+      // i to vector move
       csBundle(0).srcType(0) := SrcType.reg
       csBundle(0).srcType(1) := SrcType.imm
       csBundle(0).lsrc(1) := 0.U
       csBundle(0).ldest := VECTOR_TMP_REG_LMUL.U
       csBundle(0).fuType := FuType.i2v.U
-      csBundle(0).fuOpType := vsewReg
+      csBundle(0).fuOpType := Cat(Mux(src1IsImm, IF2VectorType.permImm2vector(2, 0), IF2VectorType.i2vector(2, 0)), vsewReg)
       csBundle(0).vecWen := true.B
       switch(vlmulReg) {
         is("b000".U ){

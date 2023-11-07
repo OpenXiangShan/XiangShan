@@ -309,7 +309,6 @@ object Bundles {
     val nf        = Nf()
 
     val needScalaSrc       = Bool()
-    val permImmTruncate    = Bool() // opivi
 
     val isReverse = Bool() // vrsub, vrdiv
     val isExt     = Bool()

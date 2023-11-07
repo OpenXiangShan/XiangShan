@@ -144,10 +144,7 @@ object Bundles {
     def OPMVX : UInt = "b110".U(width.W)
     def OPCFG : UInt = "b111".U(width.W)
     def needScalaSrc(category: UInt) : Bool = {
-      Seq(OPIVI, OPFVF).map(_ === category).reduce(_ || _)
-    }
-    def permImmTruncate(category: UInt) : Bool = {
-      Seq(OPIVI).map(_ === category).reduce(_ || _)
+      Seq(OPFVF).map(_ === category).reduce(_ || _)
     }
   }
 }
