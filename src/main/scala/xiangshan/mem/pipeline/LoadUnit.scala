@@ -343,7 +343,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.dcache.req.bits.replayCarry  := s0_sel_src.rep_carry
   io.dcache.req.bits.id           := DontCare // TODO: update cache meta
   io.dcache.pf_source             := Mux(s0_hw_prf_select, io.prefetch_req.bits.pf_source.value, L1_HW_PREFETCH_NULL)
-
+  io.dcache.req.bits.lqIdx        := s0_uop.lqIdx
   // load flow priority mux
   def fromNullSource(): FlowSource = {
     val out = WireInit(0.U.asTypeOf(new FlowSource))
