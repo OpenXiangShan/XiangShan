@@ -75,6 +75,14 @@ package object xiangshan {
     def dummy = 0.U
   }
 
+  object IF2VectorType {
+    // use last 3 bits for vsew
+    def i2vector       = "b00_00".U
+    def f2vector       = "b00_01".U
+    def imm2vector     = "b00_10".U
+    def permImm2vector = "b00_11".U
+  }
+
   object CommitType {
     def NORMAL = "b000".U  // int/fp
     def BRANCH = "b001".U  // branch
@@ -598,7 +606,6 @@ package object xiangshan {
     def DIR              = "b010001".U // dirty: vset
     def VEC_VVV          = "b010010".U // VEC_VVV
     def VEC_VXV          = "b010011".U // VEC_VXV
-    def VEC_VIV          = "b000011".U // VEC_VXV
     def VEC_0XV          = "b010100".U // VEC_0XV
     def VEC_VVW          = "b010101".U // VEC_VVW
     def VEC_WVW          = "b010110".U // VEC_WVW
@@ -617,9 +624,7 @@ package object xiangshan {
     def VEC_FSLIDE1DOWN  = "b100011".U // vfslide1down.vf
     def VEC_VRED         = "b100100".U // VEC_VRED
     def VEC_SLIDEUP      = "b100101".U // VEC_SLIDEUP
-    def VEC_ISLIDEUP     = "b100110".U // VEC_ISLIDEUP
     def VEC_SLIDEDOWN    = "b100111".U // VEC_SLIDEDOWN
-    def VEC_ISLIDEDOWN   = "b101000".U // VEC_ISLIDEDOWN
     def VEC_M0X          = "b101001".U // VEC_M0X  0MV
     def VEC_MVV          = "b101010".U // VEC_MVV  VMV
     def VEC_M0X_VFIRST   = "b101011".U //

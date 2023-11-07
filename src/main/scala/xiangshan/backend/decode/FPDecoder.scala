@@ -72,7 +72,6 @@ class FPToVecDecoder(implicit p: Parameters) extends XSModule {
   io.vpuCtrl.vm    := inst.VM
   io.vpuCtrl.nf    := inst.NF
   io.vpuCtrl.needScalaSrc := Category.needScalaSrc(inst.VCATEGORY)
-  io.vpuCtrl.permImmTruncate := Category.permImmTruncate(inst.VCATEGORY)
   io.vpuCtrl.isReverse := needReverseInst
   io.vpuCtrl.isExt     := false.B
   io.vpuCtrl.isNarrow  := false.B

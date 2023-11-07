@@ -65,7 +65,7 @@ case class OPIVI(
   mWen: Boolean,
   vxsatWen: Boolean,
   selImm: BitPat = SelImm.IMM_OPIVIS,
-  uopSplitType: BitPat = UopSplitType.VEC_VVV,
+  uopSplitType: BitPat = UopSplitType.VEC_VXV,
   src1: BitPat = SrcType.imm,
   src2: BitPat = SrcType.vp,
   src3: BitPat = SrcType.vp
@@ -230,7 +230,7 @@ object VecDecoder extends DecodeConstants {
     VSSUBU_VV       -> OPIVV(FuType.vialuF, VialuFixType.vssubu_vv, T, F, T),
     VSSUB_VV        -> OPIVV(FuType.vialuF, VialuFixType.vssub_vv, T, F, T),
 
-    VSMUL_VV        -> OPIVV(FuType.vimac, VimacType.vsmul, T, F, T, UopSplitType.VEC_VVV),
+    VSMUL_VV        -> OPIVV(FuType.vimac, VimacType.vsmul, T, F, T),
 
     VSSRL_VV        -> OPIVV(FuType.vialuF, VialuFixType.vssrl_vv, T, F, F),
     VSSRA_VV        -> OPIVV(FuType.vialuF, VialuFixType.vssra_vv, T, F, F),
@@ -309,31 +309,31 @@ object VecDecoder extends DecodeConstants {
     VOR_VI        -> OPIVI(FuType.vialuF, VialuFixType.vor_vv, T, F, F),
     VXOR_VI       -> OPIVI(FuType.vialuF, VialuFixType.vxor_vv, T, F, F),
 
-    VRGATHER_VI   -> OPIVI(FuType.vppu, VpermType.vrgather, T, F, F, selImm = SelImm.IMM_OPIVIU, uopSplitType = UopSplitType.VEC_RGATHER),
+    VRGATHER_VI   -> OPIVI(FuType.vppu, VpermType.vrgather, T, F, F, selImm = SelImm.IMM_OPIVIU, uopSplitType = UopSplitType.VEC_RGATHER_VX),
 
-    VSLIDEUP_VI   -> OPIVI(FuType.vppu, VpermType.vslideup, T, F, F, selImm = SelImm.IMM_OPIVIU, uopSplitType = UopSplitType.VEC_ISLIDEUP),
-    VSLIDEDOWN_VI -> OPIVI(FuType.vppu, VpermType.vslidedown, T, F, F, selImm = SelImm.IMM_OPIVIU, uopSplitType = UopSplitType.VEC_ISLIDEDOWN),
+    VSLIDEUP_VI   -> OPIVI(FuType.vppu, VpermType.vslideup, T, F, F, selImm = SelImm.IMM_OPIVIU, uopSplitType = UopSplitType.VEC_SLIDEUP),
+    VSLIDEDOWN_VI -> OPIVI(FuType.vppu, VpermType.vslidedown, T, F, F, selImm = SelImm.IMM_OPIVIU, uopSplitType = UopSplitType.VEC_SLIDEDOWN),
 
     VADC_VIM      -> OPIVI(FuType.vialuF, VialuFixType.vadc_vvm, T, F, F),
-    VMADC_VIM     -> OPIVI(FuType.vialuF, VialuFixType.vmadc_vvm, T, F, F, uopSplitType = UopSplitType.VEC_VVM),
-    VMADC_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmadc_vv, T, F, F, uopSplitType = UopSplitType.VEC_VVM),
+    VMADC_VIM     -> OPIVI(FuType.vialuF, VialuFixType.vmadc_vvm, T, F, F, uopSplitType = UopSplitType.VEC_VXM),
+    VMADC_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmadc_vv, T, F, F, uopSplitType = UopSplitType.VEC_VXM),
 
     VMERGE_VIM    -> OPIVI(FuType.vialuF, VialuFixType.vmerge_vvm, T, F, F),
 
     VMV_V_I       -> OPIVI(FuType.vialuF, VialuFixType.vmv_v_v, T, F, F, src2 = SrcType.no), // vd[i] = imm, vs2 = v0
 
-    VMSEQ_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmseq_vv, F, T, F, uopSplitType = UopSplitType.VEC_VVM),
-    VMSNE_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmsne_vv, F, T, F, uopSplitType = UopSplitType.VEC_VVM),
-    VMSLEU_VI     -> OPIVI(FuType.vialuF, VialuFixType.vmsleu_vv, F, T, F, selImm = SelImm.IMM_OPIVIU, uopSplitType = UopSplitType.VEC_VVM),
-    VMSLE_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmsle_vv, F, T, F, uopSplitType = UopSplitType.VEC_VVM),
-    VMSGTU_VI     -> OPIVI(FuType.vialuF, VialuFixType.vmsgtu_vv, F, T, F, selImm = SelImm.IMM_OPIVIU, uopSplitType = UopSplitType.VEC_VVM),
-    VMSGT_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmsgt_vv, F, T, F, uopSplitType = UopSplitType.VEC_VVM),
+    VMSEQ_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmseq_vv, F, T, F, uopSplitType = UopSplitType.VEC_VXM),
+    VMSNE_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmsne_vv, F, T, F, uopSplitType = UopSplitType.VEC_VXM),
+    VMSLEU_VI     -> OPIVI(FuType.vialuF, VialuFixType.vmsleu_vv, F, T, F, selImm = SelImm.IMM_OPIVIU, uopSplitType = UopSplitType.VEC_VXM),
+    VMSLE_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmsle_vv, F, T, F, uopSplitType = UopSplitType.VEC_VXM),
+    VMSGTU_VI     -> OPIVI(FuType.vialuF, VialuFixType.vmsgtu_vv, F, T, F, selImm = SelImm.IMM_OPIVIU, uopSplitType = UopSplitType.VEC_VXM),
+    VMSGT_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmsgt_vv, F, T, F, uopSplitType = UopSplitType.VEC_VXM),
 
     VSLL_VI       -> OPIVI(FuType.vialuF, VialuFixType.vsll_vv, T, F, F, selImm = SelImm.IMM_OPIVIU),
     VSRL_VI       -> OPIVI(FuType.vialuF, VialuFixType.vsrl_vv, T, F, F, selImm = SelImm.IMM_OPIVIU),
     VSRA_VI       -> OPIVI(FuType.vialuF, VialuFixType.vsra_vv, T, F, F, selImm = SelImm.IMM_OPIVIU),
-    VNSRL_WI      -> OPIVI(FuType.vialuF, VialuFixType.vnsrl_wv, T, F, F, selImm = SelImm.IMM_OPIVIU, uopSplitType = UopSplitType.VEC_WVV),
-    VNSRA_WI      -> OPIVI(FuType.vialuF, VialuFixType.vnsra_wv, T, F, F, selImm = SelImm.IMM_OPIVIU, uopSplitType = UopSplitType.VEC_WVV),
+    VNSRL_WI      -> OPIVI(FuType.vialuF, VialuFixType.vnsrl_wv, T, F, F, selImm = SelImm.IMM_OPIVIU, uopSplitType = UopSplitType.VEC_WXV),
+    VNSRA_WI      -> OPIVI(FuType.vialuF, VialuFixType.vnsra_wv, T, F, F, selImm = SelImm.IMM_OPIVIU, uopSplitType = UopSplitType.VEC_WXV),
 
     VSADDU_VI     -> OPIVI(FuType.vialuF, VialuFixType.vsaddu_vv, T, F, T, selImm = SelImm.IMM_OPIVIU),
     VSADD_VI      -> OPIVI(FuType.vialuF, VialuFixType.vsadd_vv, T, F, T),
@@ -341,8 +341,8 @@ object VecDecoder extends DecodeConstants {
     VSSRL_VI      -> OPIVI(FuType.vialuF, VialuFixType.vssrl_vv, T, F, F, selImm = SelImm.IMM_OPIVIU),
     VSSRA_VI      -> OPIVI(FuType.vialuF, VialuFixType.vssra_vv, T, F, F, selImm = SelImm.IMM_OPIVIU),
 
-    VNCLIPU_WI    -> OPIVI(FuType.vialuF, VialuFixType.vnclipu_wv, T, F, T, selImm = SelImm.IMM_OPIVIU, uopSplitType = UopSplitType.VEC_WVV),
-    VNCLIP_WI     -> OPIVI(FuType.vialuF, VialuFixType.vnclip_wv, T, F, T, uopSplitType = UopSplitType.VEC_WVV),
+    VNCLIPU_WI    -> OPIVI(FuType.vialuF, VialuFixType.vnclipu_wv, T, F, T, selImm = SelImm.IMM_OPIVIU, uopSplitType = UopSplitType.VEC_WXV),
+    VNCLIP_WI     -> OPIVI(FuType.vialuF, VialuFixType.vnclip_wv, T, F, T, uopSplitType = UopSplitType.VEC_WXV),
 
     VMV1R_V       -> OPIVI(FuType.vppu, VpermType.vmvnr, T, F, F, uopSplitType = UopSplitType.VEC_MVNR, src1 = SrcType.no), // vmv1r.v vd, vs2
     VMV2R_V       -> OPIVI(FuType.vppu, VpermType.vmvnr, T, F, F, uopSplitType = UopSplitType.VEC_MVNR, src1 = SrcType.no), // vmv2r.v vd, vs2

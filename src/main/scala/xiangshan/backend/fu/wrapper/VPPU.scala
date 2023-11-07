@@ -74,7 +74,7 @@ class VPPU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
       subIO.in.bits.srcType(0)  := typeMod.io.out.vs2Type
       subIO.in.bits.srcType(1)  := typeMod.io.out.vs1Type
       subIO.in.bits.vdType      := typeMod.io.out.vdType
-      subIO.in.bits.vs1         := Mux(vecCtrl.permImmTruncate, vs1(4,0), vs1)
+      subIO.in.bits.vs1         := vs1
       subIO.in.bits.vs2         := vs2
       subIO.in.bits.old_vd      := oldVd
       subIO.in.bits.mask        := mask
