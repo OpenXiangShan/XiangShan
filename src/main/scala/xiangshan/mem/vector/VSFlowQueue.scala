@@ -467,13 +467,14 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
   // handshake
   for (i <- 0 until EnsbufferWidth) {
     val thisPtr = deqPtr(i).value
+    val exp = flowQueueEntries(thisPtr).exp
     if (i == 0) {
       canDequeue(i) := flowCommitted(thisPtr)
     } else {
-      canDequeue(i) := flowCommitted(thisPtr) && canDequeue(i - 1)
+      canDequeue(i) := flowCommitted(thisPtr) && doDequeue(i - 1)
     }
-    io.sbuffer(i).valid := canDequeue(i)
-    doDequeue(i) := canDequeue(i) && allowDequeue(i)
+    io.sbuffer(i).valid := canDequeue(i) && exp
+    doDequeue(i) := canDequeue(i) && (allowDequeue(i) || !exp)
     when (doDequeue(i)) {
       flowAllocated(thisPtr) := false.B
       flowFinished(thisPtr) := false.B
