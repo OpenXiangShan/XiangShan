@@ -141,6 +141,7 @@ class VIMacU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg
   mgu.io.in.info.vdIdx := outVecCtrl.vuopIdx
   mgu.io.in.info.narrow := 0.B
   mgu.io.in.info.dstMask := 0.B
+  mgu.io.in.isIndexedVls := false.B
 
   io.out.bits.res.data := mgu.io.out.vd
   io.out.bits.res.vxsat.get := (Cat(vimacs.map(_.io.vxsat)) & mgu.io.out.keep).orR

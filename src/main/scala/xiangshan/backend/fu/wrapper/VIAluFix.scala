@@ -288,6 +288,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   mgu.io.in.info.vdIdx := outVecCtrl.vuopIdx
   mgu.io.in.info.narrow := narrow
   mgu.io.in.info.dstMask := dstMask
+  mgu.io.in.isIndexedVls := false.B
 
   /**
    * [[mgtu]]'s in connection, for vmask instructions

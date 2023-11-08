@@ -87,6 +87,9 @@ package object xiangshan {
     def vluxe     = "b00_01_00000".U
     def vlse      = "b00_10_00000".U
     def vloxe     = "b00_11_00000".U
+
+    def isStrided(fuOpType: UInt): Bool = fuOpType === vlse
+    def isIndexed(fuOpType: UInt): Bool = fuOpType === vluxe || fuOpType === vloxe
   }
 
   object VstuType {
@@ -107,6 +110,9 @@ package object xiangshan {
     def vsuxe     = "b00_01_00000".U
     def vsse      = "b00_10_00000".U
     def vsoxe     = "b00_11_00000".U
+
+    def isStrided(fuOpType: UInt): Bool = fuOpType === vsse
+    def isIndexed(fuOpType: UInt): Bool = fuOpType === vsuxe || fuOpType === vsoxe
   }
 
   object CommitType {

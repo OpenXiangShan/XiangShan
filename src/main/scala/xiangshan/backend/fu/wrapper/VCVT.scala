@@ -142,6 +142,7 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   mgu.io.in.info.vdIdx := outVecCtrl.vuopIdx
   mgu.io.in.info.narrow := RegNext(RegNext(isNarrowCvt))
   mgu.io.in.info.dstMask := outVecCtrl.isDstMask
+  mgu.io.in.isIndexedVls := false.B
 
   io.out.bits.res.data := mgu.io.out.vd
   io.out.bits.ctrl.exceptionVec.get(ExceptionNO.illegalInstr) := mgu.io.out.illegal

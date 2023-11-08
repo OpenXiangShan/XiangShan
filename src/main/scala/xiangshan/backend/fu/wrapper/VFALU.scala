@@ -357,6 +357,7 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   mgu.io.in.info.vdIdx := Mux(outIsResuction, 0.U, outVecCtrl.vuopIdx)
   mgu.io.in.info.narrow := outVecCtrl.isNarrow
   mgu.io.in.info.dstMask := outVecCtrl.isDstMask
+  mgu.io.in.isIndexedVls := false.B
   val resultFpMask = Wire(UInt(VLEN.W))
   val isFclass = outVecCtrl.fpu.isFpToVecInst && (outCtrl.fuOpType === VfaluType.vfclass)
   val fpCmpFuOpType = Seq(VfaluType.vfeq, VfaluType.vflt, VfaluType.vfle)
