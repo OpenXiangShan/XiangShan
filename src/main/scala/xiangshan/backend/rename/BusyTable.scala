@@ -59,7 +59,9 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
   val wakeUpReg = Reg(params.genIQWakeUpInValidBundle)
   val table = RegInit(VecInit(Seq.fill(numPhyPregs)(0.U(2.W))))
   val tableUpdate = Wire(Vec(numPhyPregs, RegStatus()))
-  val wakeUpFilterLS = io.wakeUp.filter(x => (x.bits.exuIdx != backendParams.getExuIdx("LDU0")) && (x.bits.exuIdx != backendParams.getExuIdx("LDU1")) ) //TODO
+  val wakeUpFilterLS = io.wakeUp.filter(x =>
+    Seq("LDU0", "LDU1", "HYU0").map(x.bits.exuIdx != backendParams.getExuIdx(_)).reduce(_ && _)
+  ) // TODO
 
   def reqVecToMask(rVec: Vec[Valid[UInt]]): UInt = {
     ParallelOR(rVec.map(v => Mux(v.valid, UIntToOH(v.bits), 0.U)))
