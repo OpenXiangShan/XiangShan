@@ -158,6 +158,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val s0_ld_rep        = Wire(Bool())
   val s0_l2l_fwd       = Wire(Bool())
   val s0_sched_idx     = Wire(UInt())
+  val s0_deqPortIdx    = Wire(UInt(log2Ceil(LoadPipelineWidth).W))
   val s0_can_go        = s1_ready
   val s0_fire          = s0_valid && s0_dcache_ready && s0_can_go
   val s0_out           = Wire(new LqWriteBundle)
@@ -339,6 +340,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     s0_prf_rd        := false.B
     s0_prf_wr        := false.B
     s0_sched_idx     := 0.U
+    s0_deqPortIdx    := 0.U
   }
 
   def fromFastReplaySource(src: LqWriteBundle) = {
@@ -358,6 +360,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     s0_prf_rd        := src.uop.fuOpType === LSUOpType.prefetch_r
     s0_prf_wr        := src.uop.fuOpType === LSUOpType.prefetch_w
     s0_sched_idx     := src.schedIndex
+    s0_deqPortIdx    := src.deqPortIdx
   }
 
   def fromNormalReplaySource(src: LsPipelineBundle) = {
@@ -377,6 +380,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     s0_prf_rd        := src.uop.fuOpType === LSUOpType.prefetch_r
     s0_prf_wr        := src.uop.fuOpType === LSUOpType.prefetch_w
     s0_sched_idx     := src.schedIndex
+    s0_deqPortIdx    := src.deqPortIdx
   }
 
   def fromPrefetchSource(src: L1PrefetchReq) = {
@@ -396,6 +400,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     s0_prf_rd        := !src.is_store
     s0_prf_wr        := src.is_store
     s0_sched_idx     := 0.U
+    s0_deqPortIdx    := 0.U
   }
 
   def fromIntIssueSource(src: MemExuInput) = {
@@ -415,6 +420,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     s0_prf_rd        := src.uop.fuOpType === LSUOpType.prefetch_r
     s0_prf_wr        := src.uop.fuOpType === LSUOpType.prefetch_w
     s0_sched_idx     := 0.U
+    s0_deqPortIdx    := src.deqPortIdx
   }
 
   def fromVecIssueSource() = {
@@ -434,6 +440,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     s0_prf_rd        := false.B
     s0_prf_wr        := false.B
     s0_sched_idx     := 0.U
+    s0_deqPortIdx    := 0.U
   }
 
   def fromLoadToLoadSource(src: LoadToLoadIO) = {
@@ -443,7 +450,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     // Assume the pointer chasing is always ld.
     s0_uop.fuOpType  := io.ldu_io.ld_fast_fuOpType
     s0_try_l2l            := true.B
-    // we dont care s0_isFirstIssue and s0_rsIdx and s0_sqIdx in S0 when trying pointchasing
+    // we dont care s0_isFirstIssue and s0_rsIdx and s0_sqIdx and s0_deqPortIdx in S0 when trying pointchasing
     // because these signals will be updated in S1
     s0_has_rob_entry      := false.B
     s0_rsIdx              := 0.U
@@ -457,6 +464,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     s0_prf_rd             := false.B
     s0_prf_wr             := false.B
     s0_sched_idx          := 0.U
+    s0_deqPortIdx         := 0.U
   }
 
   // set default
@@ -507,6 +515,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     s0_out.uop.debugInfo.tlbFirstReqTime := s0_uop.debugInfo.tlbFirstReqTime
   }
   s0_out.schedIndex     := s0_sched_idx
+  s0_out.deqPortIdx     := s0_deqPortIdx
 
   // load fast replay
   io.ldu_io.fast_rep_in.ready := (s0_can_go && io.ldu_io.dcache.req.ready && s0_ld_fast_rep_ready)
