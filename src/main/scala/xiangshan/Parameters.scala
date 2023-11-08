@@ -151,7 +151,7 @@ case class XSCoreParameters
   FtqSize: Int = 64,
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
   IntLogicRegs: Int = 32,
-  FpLogicRegs: Int = 33,
+  FpLogicRegs: Int = 32 + 1 + 1, // 1: I2F, 1: stride
   VecLogicRegs: Int = 32 + 1 + 15, // 15: tmp, 1: vconfig
   VCONFIG_IDX: Int = 32,
   NRPhyRegs: Int = 192,
