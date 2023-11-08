@@ -1206,6 +1206,17 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // FIXME: please move this part to LoadQueueReplay
   io.debug_ls := DontCare
 
+
+  // Topdown
+  io.lsTopdownInfo.s1.robIdx          := s1_in.uop.robIdx.value
+  io.lsTopdownInfo.s1.vaddr_valid     := s1_valid && s1_in.hasROBEntry
+  io.lsTopdownInfo.s1.vaddr_bits      := s1_vaddr
+  io.lsTopdownInfo.s2.robIdx          := s2_in.uop.robIdx.value
+  io.lsTopdownInfo.s2.paddr_valid     := s2_fire && s2_in.hasROBEntry && !s2_in.tlbMiss
+  io.lsTopdownInfo.s2.paddr_bits      := s2_in.paddr
+  io.lsTopdownInfo.s2.first_real_miss := io.dcache.resp.bits.real_miss
+  io.lsTopdownInfo.s2.cache_miss_en   := s2_fire && s2_in.hasROBEntry && !s2_in.tlbMiss && !s2_in.missDbUpdated
+
   // perf cnt
   XSPerfAccumulate("s0_in_valid",                  io.ldin.valid)
   XSPerfAccumulate("s0_in_block",                  io.ldin.valid && !io.ldin.fire)
