@@ -130,9 +130,10 @@ class PTWRepeaterNB(Width: Int = 1, passReady: Boolean = false, FenceDelay: Int)
   XSDebug(io.ptw.req(0).valid || io.ptw.resp.valid, p"ptw: ${ptw}\n")
 }
 
-class PTWFilterIO(Width: Int)(implicit p: Parameters) extends MMUIOBaseBundle {
+class PTWFilterIO(Width: Int, hasHint: Boolean = false)(implicit p: Parameters) extends MMUIOBaseBundle {
   val tlb = Flipped(new VectorTlbPtwIO(Width))
   val ptw = new TlbPtwIO()
+  val hint = if (hasHint) Some(new TlbHintIO) else None
   val rob_head_miss_in_tlb = Output(Bool())
   val debugTopDown = new Bundle {
     val robHeadVaddr = Flipped(Valid(UInt(VAddrBits.W)))
@@ -151,6 +152,267 @@ class PTWFilterIO(Width: Int)(implicit p: Parameters) extends MMUIOBaseBundle {
     this.csr <> csr
   }
 
+}
+
+class PTWFilterEntryIO(Width: Int, hasHint: Boolean = false)(implicit p: Parameters) extends PTWFilterIO(Width, hasHint){
+  val flush = Input(Bool())
+  val refill = Output(Bool())
+  val memidx = Output(new MemBlockidxBundle)
+}
+
+class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p: Parameters) extends XSModule with HasPtwConst {
+
+  val io = IO(new PTWFilterEntryIO(Width, hasHint))
+  require(isPow2(Size), s"Filter Size ($Size) must be a power of 2")
+
+  def firstValidIndex(v: Seq[Bool], valid: Bool): UInt = {
+    val index = WireInit(0.U(log2Up(Size).W))
+    for (i <- 0 until v.size) {
+      when (v(i) === valid) {
+        index := i.U
+      }
+    }
+    index
+  }
+
+  val v = RegInit(VecInit(Seq.fill(Size)(false.B)))
+  val sent = RegInit(VecInit(Seq.fill(Size)(false.B)))
+  val vpn = Reg(Vec(Size, UInt(vpnLen.W)))
+  val memidx = Reg(Vec(Size, new MemBlockidxBundle))
+
+  val enqvalid = WireInit(VecInit(Seq.fill(Width)(false.B)))
+  val canenq = WireInit(VecInit(Seq.fill(Width)(false.B)))
+  val enqidx = WireInit(VecInit(Seq.fill(Width)(0.U(log2Up(Size).W))))
+
+  //val selectCount = RegInit(0.U(log2Up(Width).W))
+
+  val entryIsMatchVec = WireInit(VecInit(Seq.fill(Width)(false.B)))
+  val entryMatchIndexVec = WireInit(VecInit(Seq.fill(Width)(0.U(log2Up(Size).W))))
+  val ptwResp_EntryMatchVec = vpn.zip(v).map{ case (pi, vi) => vi && io.ptw.resp.bits.hit(pi, io.csr.satp.asid, true, true)}
+  val ptwResp_EntryMatchFirst = firstValidIndex(ptwResp_EntryMatchVec, true.B)
+  val ptwResp_ReqMatchVec = io.tlb.req.map(a => io.ptw.resp.valid && io.ptw.resp.bits.hit(a.bits.vpn, 0.U, allType = true, true))
+
+  io.refill := Cat(ptwResp_EntryMatchVec).orR && io.ptw.resp.fire
+  io.ptw.resp.ready := true.B
+  // DontCare
+  io.tlb.req.map(_.ready := true.B)
+  io.tlb.resp.valid := false.B
+  io.tlb.resp.bits.data := 0.U.asTypeOf(new PtwSectorRespwithMemIdx)
+  io.tlb.resp.bits.vector := 0.U.asTypeOf(Vec(Width, Bool()))
+  io.memidx := 0.U.asTypeOf(new MemBlockidxBundle)
+
+  // ugly code, should be optimized later
+  require(Width <= 3, s"DTLB Filter Width ($Width) must equal or less than 3")
+  if (Width == 1) {
+    require(Size == 8, s"prefetch filter Size ($Size) should be 8")
+    canenq(0) := !(Cat(v).andR)
+    enqidx(0) := firstValidIndex(v, false.B)
+  } else if (Width == 2) {
+    require(Size == 8, s"store filter Size ($Size) should be 8")
+    canenq(0) := !(Cat(v.take(Size/2)).andR)
+    enqidx(0) := firstValidIndex(v.take(Size/2), false.B)
+    canenq(1) := !(Cat(v.drop(Size/2)).andR)
+    enqidx(1) := firstValidIndex(v.drop(Size/2), false.B) + (Size/2).U
+  } else if (Width == 3) {
+    require(Size == 16, s"load filter Size ($Size) should be 16")
+    canenq(0) := !(Cat(v.take(8)).andR)
+    enqidx(0) := firstValidIndex(v.take(8), false.B)
+    canenq(1) := !(Cat(v.drop(8).take(4)).andR)
+    enqidx(1) := firstValidIndex(v.drop(8).take(4), false.B) + 8.U
+    // four entries for prefetch
+    canenq(2) := !(Cat(v.drop(12)).andR)
+    enqidx(2) := firstValidIndex(v.drop(12), false.B) + 12.U
+  }
+
+  for (i <- 0 until Width) {
+    enqvalid(i) := io.tlb.req(i).valid && !ptwResp_ReqMatchVec(i) && !entryIsMatchVec(i) && canenq(i)
+    when (!enqvalid(i)) {
+      enqidx(i) := entryMatchIndexVec(i)
+    }
+
+    val entryIsMatch = vpn.zip(v).map{ case (pi, vi) => vi && pi === io.tlb.req(i).bits.vpn}
+    entryIsMatchVec(i) := Cat(entryIsMatch).orR
+    entryMatchIndexVec(i) := firstValidIndex(entryIsMatch, true.B)
+
+    if (i > 0) {
+      for (j <- 0 until i) {
+        val newIsMatch = io.tlb.req(i).bits.vpn === io.tlb.req(j).bits.vpn
+        when (newIsMatch && io.tlb.req(j).valid) {
+          enqidx(i) := enqidx(j)
+          canenq(i) := canenq(j)
+          enqvalid(i) := false.B
+        }
+      }
+    }
+
+    when (enqvalid(i)) {
+      v(enqidx(i)) := true.B
+      sent(enqidx(i)) := false.B
+      vpn(enqidx(i)) := io.tlb.req(i).bits.vpn
+      memidx(enqidx(i)) := io.tlb.req(i).bits.memidx
+    }
+  }
+
+  val issuevec = v.zip(sent).map{ case (v, s) => v && !s}
+  val issueindex = firstValidIndex(issuevec, true.B)
+  val canissue = Cat(issuevec).orR
+  for (i <- 0 until Size) {
+    io.ptw.req(0).valid := canissue
+    io.ptw.req(0).bits.vpn := vpn(issueindex)
+  }
+  when (io.ptw.req(0).fire) {
+    sent(issueindex) := true.B
+  }
+
+  when (io.ptw.resp.fire) {
+    v.zip(ptwResp_EntryMatchVec).map{ case (vi, mi) => when (mi) { vi := false.B }}
+    io.memidx := memidx(ptwResp_EntryMatchFirst)
+  }
+
+  when (io.flush) {
+    v.map(_ := false.B)
+  }
+
+  if (hasHint) {
+    val hintIO = io.hint.getOrElse(new TlbHintIO)
+    for (i <- 0 until exuParameters.LduCnt) {
+      hintIO.req(i).id := enqidx(i)
+      hintIO.req(i).full := !canenq(i) || ptwResp_ReqMatchVec(i)
+    }
+    hintIO.resp.valid := io.refill
+    hintIO.resp.bits.id := ptwResp_EntryMatchFirst
+    hintIO.resp.bits.replay_all := PopCount(ptwResp_EntryMatchVec) > 1.U
+  }
+
+  io.rob_head_miss_in_tlb := VecInit(v.zip(vpn).map{case (vi, vpni) => {
+    vi && io.debugTopDown.robHeadVaddr.valid && vpni === get_pn(io.debugTopDown.robHeadVaddr.bits)
+  }}).asUInt.orR
+
+
+  // Perf Counter
+  val counter = PopCount(v)
+  val inflight_counter = RegInit(0.U(log2Up(Size).W))
+  val inflight_full = inflight_counter === Size.U
+  when (io.ptw.req(0).fire =/= io.ptw.resp.fire) {
+    inflight_counter := Mux(io.ptw.req(0).fire, inflight_counter + 1.U, inflight_counter - 1.U)
+  }
+
+  assert(inflight_counter <= Size.U, "inflight should be no more than Size")
+  when (counter === 0.U) {
+    assert(!io.ptw.req(0).fire, "when counter is 0, should not req")
+  }
+
+  when (io.flush) {
+    inflight_counter := 0.U
+  }
+
+  XSPerfAccumulate("tlb_req_count", PopCount(Cat(io.tlb.req.map(_.valid))))
+  XSPerfAccumulate("tlb_req_count_filtered", PopCount(enqvalid))
+  XSPerfAccumulate("ptw_req_count", io.ptw.req(0).fire)
+  XSPerfAccumulate("ptw_req_cycle", inflight_counter)
+  XSPerfAccumulate("tlb_resp_count", io.tlb.resp.fire)
+  XSPerfAccumulate("ptw_resp_count", io.ptw.resp.fire)
+  XSPerfAccumulate("inflight_cycle", Cat(sent).orR)
+
+  for (i <- 0 until Size + 1) {
+    XSPerfAccumulate(s"counter${i}", counter === i.U)
+  }
+
+  for (i <- 0 until Size) {
+    TimeOutAssert(v(i), timeOutThreshold, s"Filter ${i} doesn't recv resp in time")
+  }
+
+}
+
+class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) extends XSModule with HasPtwConst {
+  require(Size >= Width)
+
+  val io = IO(new PTWFilterIO(Width, hasHint = true))
+
+  val load_filter = VecInit(Seq.fill(1) {
+    val load_entry = Module(new PTWFilterEntry(Width = exuParameters.LduCnt + 1, Size = loadfiltersize, hasHint = true))
+    load_entry.io
+  })
+
+  val store_filter = VecInit(Seq.fill(1) {
+    val store_entry = Module(new PTWFilterEntry(Width = exuParameters.StuCnt, Size = storefiltersize))
+    store_entry.io
+  })
+
+  val prefetch_filter = VecInit(Seq.fill(1) {
+    val prefetch_entry = Module(new PTWFilterEntry(Width = 1, Size = prefetchfiltersize))
+    prefetch_entry.io
+  })
+
+  val filter = load_filter ++ store_filter ++ prefetch_filter
+
+  load_filter.map(_.tlb.req := io.tlb.req.take(exuParameters.LduCnt + 1))
+  store_filter.map(_.tlb.req := io.tlb.req.drop(exuParameters.LduCnt + 1).take(exuParameters.StuCnt))
+  prefetch_filter.map(_.tlb.req := io.tlb.req.drop(exuParameters.LduCnt + 1 + exuParameters.StuCnt))
+
+  val flush = DelayN(io.sfence.valid || io.csr.satp.changed, FenceDelay)
+  val ptwResp = RegEnable(io.ptw.resp.bits, io.ptw.resp.fire)
+  val ptwResp_valid = Cat(filter.map(_.refill)).orR
+  filter.map(_.tlb.resp.ready := true.B)
+  filter.map(_.ptw.resp.valid := RegNext(io.ptw.resp.fire, init = false.B))
+  filter.map(_.ptw.resp.bits := ptwResp)
+  filter.map(_.flush := flush)
+  filter.map(_.sfence := io.sfence)
+  filter.map(_.csr := io.csr)
+  filter.map(_.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr)
+
+  io.tlb.req.map(_.ready := true.B)
+  io.tlb.resp.valid := ptwResp_valid
+  io.tlb.resp.bits.data.entry := ptwResp.entry
+  io.tlb.resp.bits.data.addr_low := ptwResp.addr_low
+  io.tlb.resp.bits.data.ppn_low := ptwResp.ppn_low
+  io.tlb.resp.bits.data.valididx := ptwResp.valididx
+  io.tlb.resp.bits.data.pteidx := ptwResp.pteidx
+  io.tlb.resp.bits.data.pf := ptwResp.pf
+  io.tlb.resp.bits.data.af := ptwResp.af
+  io.tlb.resp.bits.data.memidx := 0.U.asTypeOf(new MemBlockidxBundle)
+  // vector used to represent different requestors of DTLB
+  // (e.g. the store DTLB has StuCnt requestors)
+  // However, it is only necessary to distinguish between different DTLB now
+  for (i <- 0 until Width) {
+    io.tlb.resp.bits.vector(i) := false.B
+  }
+  io.tlb.resp.bits.vector(0) := load_filter(0).refill
+  io.tlb.resp.bits.vector(exuParameters.LduCnt + 1) := store_filter(0).refill
+  io.tlb.resp.bits.vector(exuParameters.LduCnt + 1 + exuParameters.StuCnt) := prefetch_filter(0).refill
+
+  val hintIO = io.hint.getOrElse(new TlbHintIO)
+  val load_hintIO = load_filter(0).hint.getOrElse(new TlbHintIO)
+  for (i <- 0 until exuParameters.LduCnt) {
+    hintIO.req(i) := RegNext(load_hintIO.req(i))
+  }
+  hintIO.resp := RegNext(load_hintIO.resp)
+
+  when (load_filter(0).refill) {
+    io.tlb.resp.bits.vector(0) := true.B
+    io.tlb.resp.bits.data.memidx := load_filter(0).memidx
+  }
+  when (store_filter(0).refill) {
+    io.tlb.resp.bits.vector(exuParameters.LduCnt + 1) := true.B
+    io.tlb.resp.bits.data.memidx := store_filter(0).memidx
+  }
+  when (prefetch_filter(0).refill) {
+    io.tlb.resp.bits.vector(exuParameters.LduCnt + 1 + exuParameters.StuCnt) := true.B
+    io.tlb.resp.bits.data.memidx := 0.U.asTypeOf(new MemBlockidxBundle)
+  }
+
+  val ptw_arb = Module(new RRArbiterInit(new PtwReq, 3))
+  for (i <- 0 until 3) {
+    ptw_arb.io.in(i).valid := filter(i).ptw.req(0).valid
+    ptw_arb.io.in(i).bits.vpn := filter(i).ptw.req(0).bits.vpn
+    filter(i).ptw.req(0).ready := ptw_arb.io.in(i).ready
+  }
+  ptw_arb.io.out.ready := io.ptw.req(0).ready
+  io.ptw.req(0).valid := ptw_arb.io.out.valid
+  io.ptw.req(0).bits.vpn := ptw_arb.io.out.bits.vpn
+  io.ptw.resp.ready := true.B
+
+  io.rob_head_miss_in_tlb := Cat(filter.map(_.rob_head_miss_in_tlb)).orR
 }
 
 class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) extends XSModule with HasPtwConst {
@@ -425,5 +687,31 @@ object PTWFilter {
     filter.io.apply(tlb, sfence, csr)
     filter
   }
+}
 
+object PTWNewFilter {
+  def apply(fenceDelay: Int,
+            tlb: VectorTlbPtwIO,
+            ptw: TlbPtwIO,
+            sfence: SfenceBundle,
+            csr: TlbCsrBundle,
+            size: Int
+           )(implicit p: Parameters) = {
+    val width = tlb.req.size
+    val filter = Module(new PTWNewFilter(width, size, fenceDelay))
+    filter.io.apply(tlb, ptw, sfence, csr)
+    filter
+  }
+
+  def apply(fenceDelay: Int,
+            tlb: VectorTlbPtwIO,
+            sfence: SfenceBundle,
+            csr: TlbCsrBundle,
+            size: Int
+           )(implicit p: Parameters) = {
+    val width = tlb.req.size
+    val filter = Module(new PTWNewFilter(width, size, fenceDelay))
+    filter.io.apply(tlb, sfence, csr)
+    filter
+  }
 }

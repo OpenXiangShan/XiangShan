@@ -24,7 +24,7 @@ import utility._
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.{DCacheWordIO, DCacheLineIO, MemoryOpConstants}
-import xiangshan.cache.mmu.{TlbRequestIO}
+import xiangshan.cache.mmu.{TlbRequestIO, TlbHintIO}
 import xiangshan.mem._
 import xiangshan.backend.rob.RobLsqIO
 
@@ -98,6 +98,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
     val issuePtrExt = Output(new SqPtr)
     val l2_hint = Input(Valid(new L2ToL1Hint()))
+    val tlb_hint = Flipped(new TlbHintIO)
     val force_write = Output(Bool())
     val lqEmpty = Output(Bool())
     val debugTopDown = new LoadQueueTopDownIO
@@ -183,6 +184,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   loadQueue.io.lq_rep_full         <> io.lq_rep_full
   loadQueue.io.lqDeq               <> io.lqDeq
   loadQueue.io.l2_hint             <> io.l2_hint
+  loadQueue.io.tlb_hint            <> io.tlb_hint
   loadQueue.io.lqEmpty             <> io.lqEmpty
 
   // rob commits for lsq is delayed for two cycles, which causes the delayed update for deqPtr in lq/sq
