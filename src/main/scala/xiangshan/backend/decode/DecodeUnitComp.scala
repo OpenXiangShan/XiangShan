@@ -66,7 +66,7 @@ class indexedLSUopTable(uopIdx:Int) extends Module {
   for (emul <- 0 until 4) {
     for (lmul <- 0 until 4) {
       for (nf <- 0 until 8) {
-        var offset = genCsBundle_VEC_INDEXED_LDST(lmul, emul, nf, uopIdx)
+        var offset = genCsBundle_VEC_INDEXED_LDST(lmul, emul, nf+1, uopIdx)
         var offsetVs2 = offset._1
         var offsetVd = offset._2
         combVemulNf :+= (emul, lmul, nf, offsetVs2, offsetVd)
@@ -1655,7 +1655,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       FMV.D.X
        */
       val vlmul = vlmulReg
-      val vsew = vsewReg
+      val vsew = Cat(0.U(1.W), vsewReg)
       val veew = Cat(0.U(1.W), width)
       val vemul: UInt = veew.asUInt + 1.U + vlmul.asUInt + ~vsew.asUInt
       val simple_lmul = MuxLookup(vlmul, 0.U(2.W), Array(
