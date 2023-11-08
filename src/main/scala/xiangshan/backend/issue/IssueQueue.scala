@@ -385,20 +385,26 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
                               subDeqSelOHVec.head.getOrElse(Seq(0.U)).head))
 
   if (params.numDeq == 2) {
-    val chooseOthersOldest = othersEntryOldest(1).valid && Cat(othersEntryOldest(1).bits, 0.U((params.numEnq).W)) =/= finalDeqSelOHVec.head
-    val chooseEnqOldest = enqEntryOldest(1).valid && Cat(0.U((params.numEntries-params.numEnq).W), enqEntryOldest(1).bits) =/= finalDeqSelOHVec.head
-    val choose1stSub = subDeqSelOHVec(1).getOrElse(Seq(0.U)).head =/= finalDeqSelOHVec.head
+    params.getFuCfgs.contains(FuConfig.FakeHystaCfg) match {
+      case true =>
+        finalDeqSelValidVec(1) := false.B
+        finalDeqSelOHVec(1) := 0.U.asTypeOf(finalDeqSelOHVec(1))
+      case false =>
+        val chooseOthersOldest = othersEntryOldest(1).valid && Cat(othersEntryOldest(1).bits, 0.U((params.numEnq).W)) =/= finalDeqSelOHVec.head
+        val chooseEnqOldest = enqEntryOldest(1).valid && Cat(0.U((params.numEntries-params.numEnq).W), enqEntryOldest(1).bits) =/= finalDeqSelOHVec.head
+        val choose1stSub = subDeqSelOHVec(1).getOrElse(Seq(0.U)).head =/= finalDeqSelOHVec.head
 
-    finalDeqSelValidVec(1) := MuxCase(subDeqSelValidVec(1).getOrElse(Seq(false.B)).last, Seq(
-      (chooseOthersOldest) -> othersEntryOldest(1).valid,
-      (chooseEnqOldest) -> enqEntryOldest(1).valid,
-      (choose1stSub) -> subDeqSelValidVec(1).getOrElse(Seq(false.B)).head)
-    )
-    finalDeqSelOHVec(1) := MuxCase(subDeqSelOHVec(1).getOrElse(Seq(0.U)).last, Seq(
-      (chooseOthersOldest) -> Cat(othersEntryOldest(1).bits, 0.U((params.numEnq).W)),
-      (chooseEnqOldest) -> Cat(0.U((params.numEntries-params.numEnq).W), enqEntryOldest(1).bits),
-      (choose1stSub) -> subDeqSelOHVec(1).getOrElse(Seq(0.U)).head)
-    )
+        finalDeqSelValidVec(1) := MuxCase(subDeqSelValidVec(1).getOrElse(Seq(false.B)).last, Seq(
+          (chooseOthersOldest) -> othersEntryOldest(1).valid,
+          (chooseEnqOldest) -> enqEntryOldest(1).valid,
+          (choose1stSub) -> subDeqSelValidVec(1).getOrElse(Seq(false.B)).head)
+        )
+        finalDeqSelOHVec(1) := MuxCase(subDeqSelOHVec(1).getOrElse(Seq(0.U)).last, Seq(
+          (chooseOthersOldest) -> Cat(othersEntryOldest(1).bits, 0.U((params.numEnq).W)),
+          (chooseEnqOldest) -> Cat(0.U((params.numEntries-params.numEnq).W), enqEntryOldest(1).bits),
+          (choose1stSub) -> subDeqSelOHVec(1).getOrElse(Seq(0.U)).head)
+        )
+    }
   }
 
   //fuBusyTable
