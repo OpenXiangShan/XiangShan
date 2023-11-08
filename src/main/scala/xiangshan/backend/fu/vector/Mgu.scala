@@ -56,10 +56,9 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
   private val uvlMaxForAssert = numBytes.U >> info.vsew
   private val vlMaxForAssert = Mux(io.in.info.vlmul(2), uvlMaxForAssert >> (-io.in.info.vlmul), uvlMaxForAssert << io.in.info.vlmul).asUInt
 
-  private val maskDataVec: Vec[UInt] = VecDataToMaskDataVec(in.mask, info.eew)
-  private val maskUsed = maskDataVec(vdIdx)
-
   private val realEw = Mux(in.isIndexedVls, info.vsew, info.eew)
+  private val maskDataVec: Vec[UInt] = VecDataToMaskDataVec(in.mask, realEw)
+  private val maskUsed = maskDataVec(vdIdx)
 
   maskTailGen.io.in.begin := info.vstart /*Mux1H(Seq(
     (vstartMapVdIdx < vdIdx) -> 0.U,
