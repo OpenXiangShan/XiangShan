@@ -549,6 +549,7 @@ object Bundles {
       val vpu = new VPUCtrlSignals
       val oldVdPsrc = UInt(PhyRegIdxWidth.W)
       val vdIdx = UInt(3.W)
+      val isIndexed = Bool()
     })
     val debug = new DebugBundle
     val debugInfo = new PerfDebugInfo

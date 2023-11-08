@@ -59,6 +59,8 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
   private val maskDataVec: Vec[UInt] = VecDataToMaskDataVec(in.mask, info.eew)
   private val maskUsed = maskDataVec(vdIdx)
 
+  private val realEw = Mux(in.isIndexedVls, info.vsew, info.eew)
+
   maskTailGen.io.in.begin := info.vstart /*Mux1H(Seq(
     (vstartMapVdIdx < vdIdx) -> 0.U,
     (vstartMapVdIdx === vdIdx) -> elemIdxMapUElemIdx(info.vstart),
@@ -71,7 +73,7 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
   ))*/
   maskTailGen.io.in.vma := info.ma
   maskTailGen.io.in.vta := info.ta
-  maskTailGen.io.in.vsew := info.eew
+  maskTailGen.io.in.vsew := realEw
   maskTailGen.io.in.maskUsed := maskUsed
   maskTailGen.io.in.vdIdx := info.vdIdx
 
@@ -150,6 +152,7 @@ class MguIO(vlen: Int)(implicit p: Parameters) extends Bundle {
     val oldVd = Input(UInt(vlen.W))
     val mask = Input(UInt(vlen.W))
     val info = Input(new VecInfo)
+    val isIndexedVls = Input(Bool())
   }
   val out = new Bundle {
     val vd = Output(UInt(vlen.W))
