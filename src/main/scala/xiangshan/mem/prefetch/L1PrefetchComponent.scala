@@ -425,6 +425,8 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     tlb_req_arb.io.in(i).bits.no_translate := false.B
     tlb_req_arb.io.in(i).bits.memidx := DontCare
     tlb_req_arb.io.in(i).bits.debug := DontCare
+    tlb_req_arb.io.in(i).bits.hlvx := DontCare
+    tlb_req_arb.io.in(i).bits.hyperinst := DontCare
   }
 
   assert(PopCount(s0_tlb_fire_vec) <= 1.U, "s0_tlb_fire_vec should be one-hot or empty")
