@@ -817,7 +817,7 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
     entries.io.fromMem.get.fastResp.zipWithIndex.foreach { case (fastResp, i) =>
       fastResp.valid                 := memIO.feedbackIO(i).feedbackFast.valid
       fastResp.bits.robIdx           := memIO.feedbackIO(i).feedbackFast.bits.robIdx
-      fastResp.bits.respType         := memIO.feedbackIO(i).feedbackFast.bits.sourceType
+      fastResp.bits.respType         := Mux(memIO.feedbackIO(i).feedbackFast.bits.hit, RSFeedbackType.fuIdle, memIO.feedbackIO(i).feedbackFast.bits.sourceType)
       fastResp.bits.dataInvalidSqIdx := 0.U.asTypeOf(fastResp.bits.dataInvalidSqIdx)
       fastResp.bits.rfWen := DontCare
       fastResp.bits.fuType := DontCare
