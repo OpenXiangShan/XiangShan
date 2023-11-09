@@ -39,45 +39,49 @@ class indexedLSUopTable(uopIdx:Int) extends Module {
   val src = IO(Input(UInt(7.W)))
   val outOffsetVs2 = IO(Output(UInt(3.W)))
   val outOffsetVd = IO(Output(UInt(3.W)))
-  def genCsBundle_VEC_INDEXED_LDST(lmul:Int, emul:Int, nfields:Int, uopIdx:Int): (Int, Int) ={
+  val outIsFirstUopInVd = IO(Output(Bool()))
+  def genCsBundle_VEC_INDEXED_LDST(lmul:Int, emul:Int, nfields:Int, uopIdx:Int): (Int, Int, Int) ={
     if (lmul * nfields <= 8) {
       for (k <-0 until nfields) {
         if (lmul < emul) {    // lmul < emul, uop num is depend on emul * nf
           var offset = 1 << (emul - lmul)
           for (i <- 0 until (1 << emul)) {
             if (uopIdx == k * (1 << emul) + i) {
-              return (i, i / offset + k * (1 << lmul))
+              return (i, i / offset + k * (1 << lmul), if (i % offset == 0) 1 else 0)
             }
           }
         } else {              // lmul > emul, uop num is depend on lmul * nf
           var offset = 1 << (lmul - emul)
           for (i <- 0 until (1 << lmul)) {
             if (uopIdx == k * (1 << lmul) + i) {
-              return (i / offset, i + k * (1 << lmul))
+              return (i / offset, i + k * (1 << lmul), 1)
             }
           }
         }
       }
     }
-    return (0, 0)
+    return (0, 0, 1)
   }
   // strided load/store
-  var combVemulNf : Seq[(Int, Int, Int, Int, Int)] = Seq()
+  var combVemulNf : Seq[(Int, Int, Int, Int, Int, Int)] = Seq()
   for (emul <- 0 until 4) {
     for (lmul <- 0 until 4) {
       for (nf <- 0 until 8) {
         var offset = genCsBundle_VEC_INDEXED_LDST(lmul, emul, nf+1, uopIdx)
         var offsetVs2 = offset._1
         var offsetVd = offset._2
-        combVemulNf :+= (emul, lmul, nf, offsetVs2, offsetVd)
+        var isFirstUopInVd = offset._3
+        combVemulNf :+= (emul, lmul, nf, isFirstUopInVd, offsetVs2, offsetVd)
       }
     }
   }
   val out = decoder(QMCMinimizer, src, TruthTable(combVemulNf.map {
-    case (emul, lmul, nf, offsetVs2, offsetVd) => (BitPat((emul << 5 | lmul << 3 | nf).U(7.W)), BitPat((offsetVs2 << 3 | offsetVd).U(6.W)))
-  }, BitPat.N(6)))
+    case (emul, lmul, nf, isFirstUopInVd, offsetVs2, offsetVd) =>
+      (BitPat((emul << 5 | lmul << 3 | nf).U(7.W)), BitPat((isFirstUopInVd << 6 | offsetVs2 << 3 | offsetVd).U(7.W)))
+  }, BitPat.N(7)))
   outOffsetVs2 := out(5, 3)
   outOffsetVd := out(2, 0)
+  outIsFirstUopInVd := out(6).asBool
 }
 
 trait VectorConstants {
@@ -1633,10 +1637,25 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         indexedLSRegOffset(i).src := Cat(simple_emul, simple_lmul, nf)
         val offsetVs2 = indexedLSRegOffset(i).outOffsetVs2
         val offsetVd = indexedLSRegOffset(i).outOffsetVd
+        val isFirstUopInVd = indexedLSRegOffset(i).outIsFirstUopInVd
         csBundle(i + 1).srcType(0) := SrcType.fp
         csBundle(i + 1).lsrc(0) := FP_TMP_REG_MV.U
         csBundle(i + 1).lsrc(1) := Mux1H(UIntToOH(offsetVs2, MAX_VLMUL), (0 until MAX_VLMUL).map(j => src2 + j.U))
-        csBundle(i + 1).lsrc(2) := Mux1H(UIntToOH(offsetVd, MAX_VLMUL), (0 until MAX_VLMUL).map(j => dest + j.U))
+        /**
+          * For indexed instructions, VLSU will concatenate all the uops that write the same logic vd register and
+          * writeback only once for all these uops. However, these uops share the same lsrc(2)/old vd and the same
+          * ldest/vd that is equal to old vd, which leads to data dependence between the uops. Therefore there will be
+          * deadlock for indexed instructions with emul > lmul.
+          * 
+          * Assume N = emul/lmul. To break the deadlock, only the first uop will read old vd as lsrc(2), and the rest
+          * N-1 uops will read temporary vector register.
+          */
+        // csBundle(i + 1).lsrc(2) := Mux1H(UIntToOH(offsetVd, MAX_VLMUL), (0 until MAX_VLMUL).map(j => dest + j.U))
+        csBundle(i + 1).lsrc(2) := Mux(
+          isFirstUopInVd,
+          Mux1H(UIntToOH(offsetVd, MAX_VLMUL), (0 until MAX_VLMUL).map(j => dest + j.U)),
+          VECTOR_TMP_REG_LMUL.U
+        )
         csBundle(i + 1).ldest := Mux1H(UIntToOH(offsetVd, MAX_VLMUL), (0 until MAX_VLMUL).map(j => dest + j.U))
         csBundle(i + 1).uopIdx := i.U
       }
