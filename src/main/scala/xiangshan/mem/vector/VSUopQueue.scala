@@ -177,6 +177,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
   val issueNFIELDS = issueEntry.nfields
   val issueVstart = issueUop.vpu.vstart
   val issueVl = issueUop.vpu.vl
+  val issueFlowMask = issueEntry.flowMask
   assert(!issueValid || PopCount(issueEntry.vlmax) === 1.U, "VLMAX should be power of 2 and non-zero")
 
   flowSplitIdx.zip(io.flowIssue).foreach { case (flowIdx, issuePort) =>
@@ -200,11 +201,12 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
     val vaddr = issueBaseAddr + stride + fieldOffset
     val mask = issueEntry.byteMask
     val regOffset = (elemIdxInsideField << issueAlignedType)(vOffsetBits - 1, 0)
+    val enable = (issueFlowMask & VecInit(Seq.tabulate(VLENB){ i => flowIdx === i.U }).asUInt).orR
     val exp = VLExpCtrl(
       vstart = issueVstart,
       vl = Mux(issueEntry.usWholeReg, GenUSWholeRegVL(issueNFIELDS, issueEew), Mux(issueEntry.usMaskReg, GenUSMaskRegVL(issueVl), issueVl)),
       eleIdx = elemIdxInsideField
-    ) && mask.orR
+    ) && enable
 
     issuePort.valid := issueValid && flowIdx < issueFlowNum &&
       !issueUop.robIdx.needFlush(io.redirect) &&
