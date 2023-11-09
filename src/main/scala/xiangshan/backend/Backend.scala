@@ -15,7 +15,7 @@ import xiangshan.backend.datapath._
 import xiangshan.backend.dispatch.CoreDispatchTopDownIO
 import xiangshan.backend.exu.ExuBlock
 import xiangshan.backend.fu.vector.Bundles.{VConfig, VType}
-import xiangshan.backend.fu.{FenceIO, FenceToSbuffer, FuConfig, PerfCounterIO}
+import xiangshan.backend.fu.{FenceIO, FenceToSbuffer, FuConfig, FuType, PerfCounterIO}
 import xiangshan.backend.issue.{CancelNetwork, Scheduler, SchedulerImpBase}
 import xiangshan.backend.rob.{RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO}
 import xiangshan.frontend.{FtqPtr, FtqRead}
@@ -413,7 +413,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
       )
 
       if (memScheduler.io.memAddrIssueResp(i).nonEmpty && memExuBlocksHasLDU(i)(j)) {
-        memScheduler.io.memAddrIssueResp(i)(j).valid := toMem(i)(j).fire
+        memScheduler.io.memAddrIssueResp(i)(j).valid := toMem(i)(j).fire && FuType.isLoad(toMem(i)(j).bits.fuType)
         memScheduler.io.memAddrIssueResp(i)(j).bits.dataInvalidSqIdx := DontCare
         memScheduler.io.memAddrIssueResp(i)(j).bits.fuType := toMem(i)(j).bits.fuType
         memScheduler.io.memAddrIssueResp(i)(j).bits.respType := RSFeedbackType.fuIdle
