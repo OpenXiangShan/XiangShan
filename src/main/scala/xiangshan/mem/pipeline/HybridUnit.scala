@@ -887,7 +887,8 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val s2_troublem        = !s2_exception &&
                            !s2_mmio &&
                            !s2_prf &&
-                           !s2_in.lateKill
+                           !s2_in.lateKill &&
+                           s2_ld_flow
 
   io.ldu_io.dcache.resp.ready := true.B
   io.stu_io.dcache.resp.ready := true.B
@@ -962,6 +963,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   s2_out.forwardData      := s2_fwd_data
   s2_out.handledByMSHR    := s2_cache_handled
   s2_out.miss             := s2_dcache_miss && s2_troublem
+  s2_out.feedbacked       := io.feedback_fast.valid && !io.feedback_fast.bits.hit
 
   // Generate replay signal caused by:
   // * st-ld violation check
@@ -1001,7 +1003,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
                       !s2_hw_prf                  // not hardware prefetch
   val s2_st_need_fb = !s2_ld_flow
   io.feedback_fast.valid                 := s2_valid && (s2_ld_need_fb || s2_st_need_fb)
-  io.feedback_fast.bits.hit              := false.B
+  io.feedback_fast.bits.hit              := Mux(s2_ld_flow, false.B, !s2_tlb_miss)
   io.feedback_fast.bits.flushState       := s2_in.ptwBack
   io.feedback_fast.bits.robIdx           := s2_in.uop.robIdx
   io.feedback_fast.bits.sourceType       := Mux(s2_ld_flow, RSFeedbackType.lrqFull, RSFeedbackType.tlbMiss)
@@ -1138,7 +1140,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
 
   // Int flow, if hit, will be writebacked at s3
   s3_out.valid                := s3_valid &&
-                                (!s3_ld_flow || !io.ldu_io.lsq.ldin.bits.rep_info.need_rep && !s3_in.mmio)
+                                (!s3_ld_flow && !s3_in.feedbacked || !io.ldu_io.lsq.ldin.bits.rep_info.need_rep && !s3_in.mmio)
   s3_out.bits.uop             := s3_in.uop
   s3_out.bits.uop.exceptionVec(loadAccessFault) := (s3_dly_ld_err  || s3_in.uop.exceptionVec(loadAccessFault)) && s3_ld_flow
   s3_out.bits.uop.replayInst := s3_rep_frm_fetch
@@ -1244,7 +1246,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   sx_can_go := sx_ready.head
   for (i <- 0 until TotalDelayCycles + 1) {
     if (i == 0) {
-      sx_valid(i) := s3_valid && !s3_ld_flow
+      sx_valid(i) := s3_valid && !s3_ld_flow && !s3_in.feedbacked
       sx_in(i)    := s3_out.bits
       sx_ready(i) := !s3_valid(i) || sx_in(i).uop.robIdx.needFlush(io.redirect) || (if (TotalDelayCycles == 0) io.stout.ready else sx_ready(i+1))
     } else {
@@ -1269,8 +1271,8 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.stout.bits  := sx_last_in
 
    // trigger
-  val ld_trigger = FuType.isLoad(io.stout.bits.uop.fuType)
-  val last_valid_data = RegEnable(io.stout.bits.data, io.stout.fire)
+  val ld_trigger = FuType.isLoad(io.ldout.bits.uop.fuType)
+  val last_valid_data = RegEnable(io.ldout.bits.data, io.stout.fire)
   val hit_ld_addr_trig_hit_vec = Wire(Vec(3, Bool()))
   val lq_ld_addr_trig_hit_vec = RegNext(io.ldu_io.lsq.trigger.lqLoadAddrTriggerHitVec)
   (0 until 3).map{i => {
@@ -1279,7 +1281,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     val tEnable   = RegNext(RegNext(io.ldu_io.trigger(i).tEnable))
 
     hit_ld_addr_trig_hit_vec(i)        := TriggerCmp(RegNext(s3_in.vaddr), tdata2, matchType, tEnable)
-    io.ldu_io.trigger(i).addrHit       := Mux(io.stout.valid && ld_trigger, hit_ld_addr_trig_hit_vec(i), lq_ld_addr_trig_hit_vec(i))
+    io.ldu_io.trigger(i).addrHit       := Mux(io.ldout.valid && ld_trigger, hit_ld_addr_trig_hit_vec(i), lq_ld_addr_trig_hit_vec(i))
     io.ldu_io.trigger(i).lastDataHit   := TriggerCmp(last_valid_data, tdata2, matchType, tEnable)
   }}
   io.ldu_io.lsq.trigger.hitLoadAddrTriggerHitVec := hit_ld_addr_trig_hit_vec
