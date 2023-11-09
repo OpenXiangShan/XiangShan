@@ -460,6 +460,7 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
 
   /* Dequeue */   
   val canDequeue = Wire(Vec(EnsbufferWidth, Bool()))
+  // val allowDequeue = Wire(Vec(EnsbufferWidth, Bool()))
   val allowDequeue = io.sbuffer.map(_.ready)
   val doDequeue = Wire(Vec(EnsbufferWidth, Bool()))
   val dequeueCount = PopCount(doDequeue)
@@ -467,14 +468,22 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
   // handshake
   for (i <- 0 until EnsbufferWidth) {
     val thisPtr = deqPtr(i).value
-    val exp = flowQueueEntries(thisPtr).exp
-    if (i == 0) {
-      canDequeue(i) := flowCommitted(thisPtr)
-    } else {
-      canDequeue(i) := flowCommitted(thisPtr) && doDequeue(i - 1)
+    val thisExp = flowQueueEntries(thisPtr).exp
+    io.sbuffer(i).valid := canDequeue(i)
+
+    canDequeue(i) := false.B
+    doDequeue(i) := false.B
+    when (flowCommitted(thisPtr)) {
+      if (i == 0) {
+        canDequeue(i) := thisExp
+        doDequeue(i) := (canDequeue(i) && allowDequeue(i)) || !thisExp
+      } else {
+        canDequeue(i) := thisExp && canDequeue(i - 1)
+        doDequeue(i) := (canDequeue(i) && allowDequeue(i)) || (!thisExp && doDequeue(i - 1))
+      }
     }
-    io.sbuffer(i).valid := canDequeue(i) && exp
-    doDequeue(i) := canDequeue(i) && (allowDequeue(i) || !exp)
+    // Assuming that if !io.sbuffer(i).ready then !io.sbuffer(i + 1).ready
+
     when (doDequeue(i)) {
       flowAllocated(thisPtr) := false.B
       flowFinished(thisPtr) := false.B
@@ -520,12 +529,12 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
 
   // Inform scalar sq
   io.sqRelease.valid := false.B
-
+  io.sqRelease.bits := 0.U.asTypeOf(new SqPtr)
   for (i <- 0 until EnsbufferWidth) {
     when (doDequeue(i) && flowQueueEntries(deqPtr(i).value).isLastElem) {
       io.sqRelease.valid := true.B
+      io.sqRelease.bits := flowQueueEntries(deqPtr(i).value).uop.sqIdx
     }
-    io.sqRelease.bits := flowQueueEntries(deqPtr(i).value).uop.sqIdx
   }
 
   // Forward
