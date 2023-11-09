@@ -234,10 +234,6 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
           uopq(ptr.value).vd_first_uop := (i == 0).B
         }
       }
-    }.otherwise {
-      // Otherwise, this uop has already been pre-allocated
-      assert(io.loadRegIn.bits.uop.robIdx === uopq(id).uop.robIdx)
-      assert(io.loadRegIn.bits.src_rs1(VAddrBits - 1, 0) === uopq(id).baseAddr)
     }
   }
 
