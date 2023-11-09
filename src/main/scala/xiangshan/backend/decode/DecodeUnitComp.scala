@@ -44,16 +44,16 @@ class indexedLSUopTable(uopIdx:Int) extends Module {
       for (k <-0 until nfields) {
         if (lmul < emul) {    // lmul < emul, uop num is depend on emul * nf
           var offset = 1 << (emul - lmul)
-          for (i <- 0 until emul) {
-            if (uopIdx == k * (1 << emul) + (1 << i)) {
-              return ((1 << i), (1 << i) / offset + k * (1 << lmul))
+          for (i <- 0 until (1 << emul)) {
+            if (uopIdx == k * (1 << emul) + i) {
+              return (i, i / offset + k * (1 << lmul))
             }
           }
         } else {              // lmul > emul, uop num is depend on lmul * nf
           var offset = 1 << (lmul - emul)
-          for (i <- 0 until lmul) {
-            if (uopIdx == k * (1 << lmul) + (1 << i)) {
-              return ((1 << i) / offset, (1 << i) + k * (1 << lmul))
+          for (i <- 0 until (1 << lmul)) {
+            if (uopIdx == k * (1 << lmul) + i) {
+              return (i / offset, i + k * (1 << lmul))
             }
           }
         }
