@@ -45,6 +45,7 @@ abstract class BaseFusionCase(pair: Seq[Valid[UInt]])(implicit p: Parameters)
   protected def withSameDest: Bool = instr1Rd === instr2Rd
   def destToRs1: Bool = instr1Rd === instr2Rs1
   protected def destToRs2: Bool = instr1Rd === instr2Rs2
+  protected def instr2Rs1ToRs2: Bool = instr2Rs1 === instr2Rs2
 
   protected def getInstrTable(pat: BitPat): List[BitPat] = {
     // Only these instructions can be fused now
@@ -151,7 +152,7 @@ class FusedSexth(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFus
 // Target: `sh1add r1, r0, r2`
 class FusedSh1add(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFusionCase(pair) {
   def inst1Cond = instr(0) === Instructions.SLLI && inst1.SHAMT6 === 1.U
-  def inst2Cond = instr(1) === Instructions.ADD
+  def inst2Cond = instr(1) === Instructions.ADD && !instr2Rs1ToRs2
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
   override def thisInstr: Option[BitPat] = Some(Instructions.SLLI)
@@ -166,7 +167,7 @@ class FusedSh1add(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFu
 // Target: `sh2add r1, r0, r2`
 class FusedSh2add(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFusionCase(pair) {
   def inst1Cond = instr(0) === Instructions.SLLI && inst1.SHAMT6 === 2.U
-  def inst2Cond = instr(1) === Instructions.ADD
+  def inst2Cond = instr(1) === Instructions.ADD && !instr2Rs1ToRs2
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
   override def thisInstr: Option[BitPat] = Some(Instructions.SLLI)
@@ -181,7 +182,7 @@ class FusedSh2add(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFu
 // Target: `sh3add r1, r0, r2`
 class FusedSh3add(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFusionCase(pair) {
   def inst1Cond = instr(0) === Instructions.SLLI && inst1.SHAMT6 === 3.U
-  def inst2Cond = instr(1) === Instructions.ADD
+  def inst2Cond = instr(1) === Instructions.ADD && !instr2Rs1ToRs2
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
   override def thisInstr: Option[BitPat] = Some(Instructions.SLLI)
@@ -248,7 +249,7 @@ class FusedByte2(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFus
 // Target: `sh4add r1, r0, r2` (customized internal opcode)
 class FusedSh4add(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFusionCase(pair) {
   def inst1Cond = instr(0) === Instructions.SLLI && inst1.SHAMT6 === 4.U
-  def inst2Cond = instr(1) === Instructions.ADD
+  def inst2Cond = instr(1) === Instructions.ADD && !instr2Rs1ToRs2
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
   override def thisInstr: Option[BitPat] = Some(Instructions.SLLI)
@@ -264,7 +265,7 @@ class FusedSh4add(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFu
 // Target: `sr29add r1, r0, r2` (customized internal opcode)
 class FusedSr29add(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFusionCase(pair) {
   def inst1Cond = instr(0) === Instructions.SRLI && inst1.SHAMT6 === 29.U
-  def inst2Cond = instr(1) === Instructions.ADD
+  def inst2Cond = instr(1) === Instructions.ADD && !instr2Rs1ToRs2
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
   override def thisInstr: Option[BitPat] = Some(Instructions.SRLI)
@@ -280,7 +281,7 @@ class FusedSr29add(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseF
 // Target: `sr30add r1, r0, r2` (customized internal opcode)
 class FusedSr30add(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFusionCase(pair) {
   def inst1Cond = instr(0) === Instructions.SRLI && inst1.SHAMT6 === 30.U
-  def inst2Cond = instr(1) === Instructions.ADD
+  def inst2Cond = instr(1) === Instructions.ADD && !instr2Rs1ToRs2
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
   override def thisInstr: Option[BitPat] = Some(Instructions.SRLI)
@@ -296,7 +297,7 @@ class FusedSr30add(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseF
 // Target: `sr31add r1, r0, r2` (customized internal opcode)
 class FusedSr31add(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFusionCase(pair) {
   def inst1Cond = instr(0) === Instructions.SRLI && inst1.SHAMT6 === 31.U
-  def inst2Cond = instr(1) === Instructions.ADD
+  def inst2Cond = instr(1) === Instructions.ADD && !instr2Rs1ToRs2
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
   override def thisInstr: Option[BitPat] = Some(Instructions.SRLI)
@@ -312,7 +313,7 @@ class FusedSr31add(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseF
 // Target: `sr32add r1, r0, r2` (customized internal opcode)
 class FusedSr32add(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFusionCase(pair) {
   def inst1Cond = instr(0) === Instructions.SRLI && inst1.SHAMT6 === 32.U
-  def inst2Cond = instr(1) === Instructions.ADD
+  def inst2Cond = instr(1) === Instructions.ADD && !instr2Rs1ToRs2
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
   override def thisInstr: Option[BitPat] = Some(Instructions.SRLI)
@@ -328,7 +329,7 @@ class FusedSr32add(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseF
 // Target: `oddadd r1, r0, r2` (customized internal opcode)
 class FusedOddadd(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFusionCase(pair) {
   def inst1Cond = instr(0) === Instructions.ANDI && inst1.IMM12 === 1.U
-  def inst2Cond = instr(1) === Instructions.ADD
+  def inst2Cond = instr(1) === Instructions.ADD && !instr2Rs1ToRs2
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
   override def thisInstr: Option[BitPat] = Some(Instructions.ANDI)
@@ -344,7 +345,7 @@ class FusedOddadd(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFu
 // Target: `oddaddw r1, r0, r2` (customized internal opcode)
 class FusedOddaddw(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFusionCase(pair) {
   def inst1Cond = instr(0) === Instructions.ANDI && inst1.IMM12 === 1.U
-  def inst2Cond = instr(1) === Instructions.ADDW
+  def inst2Cond = instr(1) === Instructions.ADDW && !instr2Rs1ToRs2
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
   override def thisInstr: Option[BitPat] = Some(Instructions.ANDI)
@@ -438,7 +439,7 @@ class FusedLogicZexth(pair: Seq[Valid[UInt]])(implicit p: Parameters)
 // Source: `andi r1, r0, -256`` + `or r1, r1, r2`
 class FusedOrh48(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFusionCase(pair) {
   def inst1Cond = instr(0) === Instructions.ANDI && inst1.IMM12 === 0xf00.U
-  def inst2Cond = instr(1) === Instructions.OR
+  def inst2Cond = instr(1) === Instructions.OR && !instr2Rs1ToRs2
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
   override def thisInstr: Option[BitPat] = Some(Instructions.ANDI)
@@ -455,7 +456,7 @@ class FusedOrh48(pair: Seq[Valid[UInt]])(implicit p: Parameters) extends BaseFus
 class FusedMulw7(pair: Seq[Valid[UInt]])(implicit p: Parameters)
   extends BaseFusionCase(pair) {
   def inst1Cond = instr(0) === Instructions.ANDI && inst1.IMM12 === 127.U
-  def inst2Cond = instr(1) === Instructions.MULW
+  def inst2Cond = instr(1) === Instructions.MULW && !instr2Rs1ToRs2
 
   def isValid: Bool = inst1Cond && inst2Cond && withSameDest && (destToRs1 || destToRs2)
   override def thisInstr: Option[BitPat] = Some(Instructions.ANDI)
