@@ -504,7 +504,7 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
       x.cmd   := MemoryOpConstants.M_XWR
       x.vaddr := thisEntry.vaddr
       x.data  := genWdata(thisData, thisEntry.alignedType)
-      x.mask  := thisEntry.mask
+      x.mask  := genVWmask(thisEntry.paddr, thisEntry.alignedType)
       x.id    := 0.U                // ! Not Sure
       x.instrtype := 1.U            // ! Not Sure MAGIC NUM
       x.isFirstIssue := false.B     // ! Not Sure
