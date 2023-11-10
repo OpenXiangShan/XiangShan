@@ -220,6 +220,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).instrSize := instrSizesVec(i)
     when(isMove(i)) {
       uops(i).numUops := 0.U
+      uops(i).numWB := 0.U
     }
     if (i > 0) {
       when(!needRobFlags(i - 1)) {
@@ -227,11 +228,13 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
         uops(i).ftqPtr := uops(i - 1).ftqPtr
         uops(i).ftqOffset := uops(i - 1).ftqOffset
         uops(i).numUops := instrSizesVec(i) - PopCount(compressMasksVec(i) & Cat(isMove.reverse))
+        uops(i).numWB := instrSizesVec(i) - PopCount(compressMasksVec(i) & Cat(isMove.reverse))
       }
     }
     when(!needRobFlags(i)) {
       uops(i).lastUop := false.B
       uops(i).numUops := instrSizesVec(i) - PopCount(compressMasksVec(i) & Cat(isMove.reverse))
+      uops(i).numWB := instrSizesVec(i) - PopCount(compressMasksVec(i) & Cat(isMove.reverse))
     }
     uops(i).wfflags := (compressMasksVec(i) & Cat(io.in.map(_.bits.wfflags).reverse)).orR
     uops(i).dirtyFs := (compressMasksVec(i) & Cat(io.in.map(_.bits.fpWen).reverse)).orR

@@ -676,6 +676,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   decodedInst.firstUop := true.B
   decodedInst.lastUop := true.B
   decodedInst.numUops := 1.U
+  decodedInst.numWB   := 1.U
 
   val isMove = BitPat("b000000000000_?????_000_?????_0010011") === ctrl_flow.instr
   decodedInst.isMove := isMove && inst.RD =/= 0.U
@@ -834,6 +835,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   uopInfoGen.io.in.preInfo.vmvn := inst.IMM5_OPIVI(2, 0)
   io.deq.isComplex := uopInfoGen.io.out.isComplex
   io.deq.uopInfo.numOfUop := uopInfoGen.io.out.uopInfo.numOfUop
+  io.deq.uopInfo.numOfWB := uopInfoGen.io.out.uopInfo.numOfWB
   io.deq.uopInfo.lmul := uopInfoGen.io.out.uopInfo.lmul
 
   io.deq.decodedInst := decodedInst
