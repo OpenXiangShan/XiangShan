@@ -317,7 +317,11 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
   when (issueValid) {
     issueEntry.byteMask := issueEntry.byteMask & ~(
       io.flowIssue.zipWithIndex.map { case (issuePort, i) =>
-        issuePort.bits.mask & Fill(VLENB, issuePort.fire && !issuePort.bits.exp)
+        val unsetFlowMask = VecInit(Seq.tabulate(VLENB){ j =>
+          flowSplitIdx(i) === j.U && issuePort.fire && !issuePort.bits.exp
+        }).asUInt
+        val unsetByteMask = GenUopByteMask(unsetFlowMask, issueAlignedType)(VLENB - 1, 0)
+        unsetByteMask
       }.fold(0.U(VLENB.W))(_ | _)
     )
   }
