@@ -138,6 +138,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   //output of DecodeUnit
   val decodedInstsSimple = Wire(new DecodedInst)
   val numOfUop = Wire(UInt(log2Up(maxUopSize+1).W))
+  val numOfWB = Wire(UInt(log2Up(maxUopSize+1).W))
   val lmul = Wire(UInt(4.W))
   val isVsetSimple = Wire(Bool())
 
@@ -169,10 +170,13 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
     numOfUop := Mux(dest =/= 0.U, 2.U,
       Mux(src1 =/= 0.U, 1.U,
         Mux(VSETOpType.isVsetvl(decodedInstsSimple.fuOpType), 2.U, 1.U)))
+    numOfWB := Mux(dest =/= 0.U, 2.U,
+      Mux(src1 =/= 0.U, 1.U,
+        Mux(VSETOpType.isVsetvl(decodedInstsSimple.fuOpType), 2.U, 1.U)))
   } .otherwise {
     numOfUop := io.simple.uopInfo.numOfUop
+    numOfWB := io.simple.uopInfo.numOfWB
   }
-
 
   //uop div up to maxUopSize
   val csBundle = Wire(Vec(maxUopSize, new DecodedInst))
@@ -183,6 +187,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   }
 
   csBundle(0).numUops := numOfUop
+  csBundle(0).numWB := numOfWB
   csBundle(0).firstUop := true.B
   csBundle(numOfUop - 1.U).lastUop := true.B
 
