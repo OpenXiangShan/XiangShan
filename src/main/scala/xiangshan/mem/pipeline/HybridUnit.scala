@@ -1001,7 +1001,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
                       s2_out.rep_info.need_rep && // need replay
                       !s2_exception &&            // no exception is triggered
                       !s2_hw_prf                  // not hardware prefetch
-  val s2_st_need_fb = !s2_ld_flow
+  val s2_st_need_fb = !s2_ld_flow && !s2_hw_prf
   io.feedback_fast.valid                 := s2_valid && (s2_ld_need_fb || s2_st_need_fb)
   io.feedback_fast.bits.hit              := Mux(s2_ld_flow, false.B, !s2_tlb_miss)
   io.feedback_fast.bits.flushState       := s2_in.ptwBack
