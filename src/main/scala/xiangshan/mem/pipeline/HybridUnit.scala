@@ -834,10 +834,21 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   // * ecc data error is slow to generate, so we will not use it until load stage 3
   // * in load stage 3, an extra signal io.load_error will be used to
   val s2_actually_mmio = s2_pmp.mmio
-  val s2_mmio          = !s2_prf &&
+  val s2_ld_mmio       = !s2_prf &&
                           s2_actually_mmio &&
                          !s2_exception &&
-                         !s2_in.tlbMiss
+                         !s2_in.tlbMiss &&
+                         s2_ld_flow
+  val s2_st_mmio       = !s2_prf &&
+                          (RegNext(s1_mmio) || s2_pmp.mmio) &&
+                         !s2_exception &&
+                         !s2_in.tlbMiss &&
+                         !s2_ld_flow
+  val s2_st_atomic     = !s2_prf &&
+                          (RegNext(s1_mmio) || s2_pmp.atomic) &&
+                         !s2_exception &&
+                         !s2_in.tlbMiss &&
+                         !s2_ld_flow
   val s2_full_fwd      = Wire(Bool())
   val s2_mem_amb       = s2_in.uop.storeSetHit &&
                          io.ldu_io.lsq.forward.addrInvalid
@@ -885,14 +896,14 @@ class HybridUnit(implicit p: Parameters) extends XSModule
                            io.ldu_io.dcache.resp.bits.tag_error
 
   val s2_troublem        = !s2_exception &&
-                           !s2_mmio &&
+                           !s2_ld_mmio &&
                            !s2_prf &&
                            !s2_in.lateKill &&
                            s2_ld_flow
 
   io.ldu_io.dcache.resp.ready := true.B
   io.stu_io.dcache.resp.ready := true.B
-  val s2_dcache_should_resp = !(s2_in.tlbMiss || s2_exception || s2_mmio || s2_prf || s2_in.lateKill) && s2_ld_flow
+  val s2_dcache_should_resp = !(s2_in.tlbMiss || s2_exception || s2_ld_mmio || s2_prf || s2_in.lateKill) && s2_ld_flow
   assert(!(s2_valid && (s2_dcache_should_resp && !io.ldu_io.dcache.resp.valid)), "DCache response got lost")
 
   // fast replay require
@@ -955,8 +966,8 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   s2_out                  := s2_in
   s2_out.data             := 0.U // data will be generated in load s3
   s2_out.uop.fpWen        := s2_in.uop.fpWen && !s2_exception && s2_ld_flow
-  s2_out.mmio             := s2_mmio
-  s2_out.atomic           := s2_pmp.atomic && !s2_ld_flow
+  s2_out.mmio             := s2_ld_mmio || s2_st_mmio
+  s2_out.atomic           := s2_st_atomic
   s2_out.uop.flushPipe    := false.B
   s2_out.uop.exceptionVec := s2_exception_vec
   s2_out.forwardMask      := s2_fwd_mask
@@ -992,7 +1003,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   // if forward fail, replay this inst from fetch
   val debug_fwd_fail_rep = s2_fwd_fail && !s2_troublem && !s2_in.tlbMiss
   // if ld-ld violation is detected, replay from this inst from fetch
-  val debug_ldld_nuke_rep = false.B // s2_ldld_violation && !s2_mmio && !s2_is_prefetch && !s2_in.tlbMiss
+  val debug_ldld_nuke_rep = false.B // s2_ldld_violation && !s2_ld_mmio && !s2_is_prefetch && !s2_in.tlbMiss
   // io.out.bits.uop.replayInst := false.B
 
   // to be removed
@@ -1014,7 +1025,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
 
   io.ldu_io.ldCancel.ld1Cancel.valid := s2_valid && (
     (s2_out.rep_info.need_rep && s2_out.isFirstIssue) ||                // exe fail and issued from IQ
-    s2_mmio                                                             // is mmio
+    s2_ld_mmio                                                             // is mmio
   ) && s2_ld_flow
   io.ldu_io.ldCancel.ld1Cancel.bits := s2_out.deqPortIdx
 
@@ -1025,7 +1036,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     !s1_kill &&
     !io.tlb.resp.bits.miss &&
     !io.ldu_io.lsq.forward.dataInvalidFast
-  ) && (s2_valid && !s2_out.rep_info.need_rep && !s2_mmio && s2_ld_flow)
+  ) && (s2_valid && !s2_out.rep_info.need_rep && !s2_ld_mmio && s2_ld_flow)
   io.ldu_io.fast_uop.bits := RegNext(s1_out.uop)
 
   //
@@ -1140,7 +1151,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
 
   // Int flow, if hit, will be writebacked at s3
   s3_out.valid                := s3_valid &&
-                                (!s3_ld_flow && !s3_in.feedbacked || !io.ldu_io.lsq.ldin.bits.rep_info.need_rep && !s3_in.mmio)
+                                (!s3_ld_flow && !s3_in.feedbacked || !io.ldu_io.lsq.ldin.bits.rep_info.need_rep) && !s3_in.mmio
   s3_out.bits.uop             := s3_in.uop
   s3_out.bits.uop.exceptionVec(loadAccessFault) := (s3_dly_ld_err  || s3_in.uop.exceptionVec(loadAccessFault)) && s3_ld_flow
   s3_out.bits.uop.replayInst := s3_rep_frm_fetch
@@ -1246,7 +1257,10 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   sx_can_go := sx_ready.head
   for (i <- 0 until TotalDelayCycles + 1) {
     if (i == 0) {
-      sx_valid(i) := s3_valid && !s3_ld_flow && !s3_in.feedbacked
+      sx_valid(i) := s3_valid &&
+                    !s3_ld_flow &&
+                    !s3_in.feedbacked &&
+                    !s3_in.mmio
       sx_in(i)    := s3_out.bits
       sx_ready(i) := !s3_valid(i) || sx_in(i).uop.robIdx.needFlush(io.redirect) || (if (TotalDelayCycles == 0) io.stout.ready else sx_ready(i+1))
     } else {
