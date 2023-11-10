@@ -999,6 +999,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val enqNeedWriteRFSeq = io.enq.req.map(_.bits.needWriteRf)
   val enqRobIdxSeq = io.enq.req.map(req => req.bits.robIdx.value)
   val enqUopNumVec = VecInit(io.enq.req.map(req => req.bits.numUops))
+  val enqWBNumVec = VecInit(io.enq.req.map(req => req.bits.numWB))
   val enqEliminatedMoveVec = VecInit(io.enq.req.map(req => req.bits.eliminatedMove))
 
   private val enqWriteStdVec: Vec[Bool] = VecInit(io.enq.req.map {
@@ -1016,6 +1017,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     realDestSize(i) := Mux(!valid(i) && instCanEnqFlag || valid(i), realDestSize(i) + PopCount(enqNeedWriteRFSeq.zip(uopCanEnqSeq).map{ case(writeFlag, valid) => writeFlag && valid }), 0.U)
 
     val enqUopNum = PriorityMux(instCanEnqSeq, enqUopNumVec)
+    val enqWBNum = PriorityMux(instCanEnqSeq, enqWBNumVec)
     val enqEliminatedMove = PriorityMux(instCanEnqSeq, enqEliminatedMoveVec)
     val enqWriteStd = PriorityMux(instCanEnqSeq, enqWriteStdVec)
 
@@ -1038,7 +1040,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       stdWritebacked(i) := true.B
     }.elsewhen(!valid(i) && instCanEnqFlag) {
       // enq set num of uops
-      uopNumVec(i) := enqUopNum
+      uopNumVec(i) := enqWBNum
       stdWritebacked(i) := Mux(enqWriteStd, false.B, true.B)
     }.elsewhen(valid(i)) {
       // update by writing back
