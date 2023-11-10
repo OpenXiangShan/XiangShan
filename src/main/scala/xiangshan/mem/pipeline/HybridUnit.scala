@@ -543,10 +543,6 @@ class HybridUnit(implicit p: Parameters) extends XSModule
 
   io.stu_io.prefetch_req.ready := s1_ready && io.stu_io.dcache.req.ready && !io.lsin.valid
 
-  io.stu_io.st_mask_out.valid       := s0_valid && !s0_ld_flow
-  io.stu_io.st_mask_out.bits.mask   := s0_out.mask
-  io.stu_io.st_mask_out.bits.sqIdx  := s0_out.uop.sqIdx
-
   // load debug
   XSDebug(io.ldu_io.dcache.req.fire && s0_ld_flow,
     p"[DCACHE LOAD REQ] pc ${Hexadecimal(s0_uop.pc)}, vaddr ${Hexadecimal(s0_vaddr)}\n"
@@ -605,7 +601,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   // mmio cbo decoder
   val s1_mmio_cbo  = (s1_in.uop.fuOpType === LSUOpType.cbo_clean ||
                       s1_in.uop.fuOpType === LSUOpType.cbo_flush ||
-                      s1_in.uop.fuOpType === LSUOpType.cbo_inval) && !s1_ld_flow
+                      s1_in.uop.fuOpType === LSUOpType.cbo_inval) && !s1_ld_flow && !s1_prf
   val s1_mmio = s1_mmio_cbo
 
   s1_vaddr_hi         := s1_in.vaddr(VAddrBits - 1, 6)
@@ -711,7 +707,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
                              "b11".U   -> (s1_vaddr(2, 0) =/= 0.U)  //d
                           ))
     // Case 2: this load-load uop is cancelled
-    s1_ptr_chasing_canceled := !io.lsin.valid
+    s1_ptr_chasing_canceled := !io.lsin.valid || FuType.isStore(io.lsin.bits.uop.fuType)
 
     when (s1_try_ptr_chasing) {
       s1_cancel_ptr_chasing := s1_addr_mismatch || s1_addr_misaligned || s1_ptr_chasing_canceled
@@ -766,15 +762,19 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     p"paddr ${Hexadecimal(s1_out.paddr)}, mmio ${s1_out.mmio}\n")
 
   // store out
-  io.stu_io.lsq.valid         := s1_valid && !s1_ld_flow
+  io.stu_io.lsq.valid         := s1_valid && !s1_ld_flow && !s1_prf
   io.stu_io.lsq.bits          := s1_out
   io.stu_io.lsq.bits.miss     := s1_tlb_miss
 
-  io.stu_io.issue.valid       := s1_valid && !s1_tlb_miss && !s1_ld_flow
+  io.stu_io.st_mask_out.valid       := s1_valid && !s1_ld_flow && !s1_prf
+  io.stu_io.st_mask_out.bits.mask   := s1_out.mask
+  io.stu_io.st_mask_out.bits.sqIdx  := s1_out.uop.sqIdx
+
+  io.stu_io.issue.valid       := s1_valid && !s1_tlb_miss && !s1_ld_flow && !s1_prf
   io.stu_io.issue.bits        := RegEnable(io.lsin.bits, io.lsin.fire)
 
   // st-ld violation dectect request
-  io.stu_io.stld_nuke_query.valid       := s1_valid && !s1_tlb_miss && !s1_ld_flow
+  io.stu_io.stld_nuke_query.valid       := s1_valid && !s1_tlb_miss && !s1_ld_flow && !s1_prf
   io.stu_io.stld_nuke_query.bits.robIdx := s1_in.uop.robIdx
   io.stu_io.stld_nuke_query.bits.paddr  := s1_paddr_dup_lsu
   io.stu_io.stld_nuke_query.bits.mask   := s1_in.mask
