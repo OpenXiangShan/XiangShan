@@ -111,8 +111,8 @@ class InstrUncacheBuffer()(implicit p: Parameters) extends LazyModule {
 
   class InstrUncacheBufferImpl extends LazyModuleImp(this) {
     (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
-      out.a <> BufferParams.default(in.a)
-      in.d <> BufferParams.default(out.d)
+      out.a <> BufferParams.default(BufferParams.default(in.a))
+      in.d <> BufferParams.default(BufferParams.default(out.d))
 
       // only a.valid, a.ready, a.address are used, so we assign 0 to the following
       // hoping that them would be optimized to keep MemBlock port unchanged after adding buffer
