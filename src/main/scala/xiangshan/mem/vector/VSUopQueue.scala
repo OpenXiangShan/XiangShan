@@ -178,12 +178,21 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
   val issueVstart = issueUop.vpu.vstart
   val issueVl = issueUop.vpu.vl
   val issueFlowMask = issueEntry.flowMask
+  val issueLmulGreaterThanEmul = issueEntry.lmul.asSInt > issueEntry.emul.asSInt
   assert(!issueValid || PopCount(issueEntry.vlmax) === 1.U, "VLMAX should be power of 2 and non-zero")
 
   flowSplitIdx.zip(io.flowIssue).foreach { case (flowIdx, issuePort) =>
     // AGU
     // TODO: DONT use * to implement multiplication!!!
-    val elemIdx = GenElemIdx(issueAlignedType, issueUopIdx, flowIdx) // elemIdx inside an inst
+    val elemIdx = GenElemIdx(
+      alignedType = Mux(
+        isIndexed(issueInstType) && issueLmulGreaterThanEmul,
+        issueSew(1, 0),
+        issueEew(1, 0)
+      ),
+      uopIdx = issueUopIdx,
+      flowIdx = flowIdx
+    ) // elemIdx inside an inst
     val elemIdxInsideField = elemIdx & issueVLMAXMask
     val nfIdx = elemIdx >> issueVLMAXLog2
     val notIndexedStride = Mux(
