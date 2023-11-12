@@ -635,7 +635,7 @@ object GenFlowMaskInsideReg extends VLSUConstants {
 
 // TODO: delete this in vs flow queue
 object GenEleIdx {
-  def apply(instType: UInt, emul: UInt, lmul: UInt, eew: UInt, sew: UInt, uopIdx:UInt, flowIdx: UInt):UInt = {
+  def apply(instType: UInt, emul: UInt, lmul: UInt, eew: UInt, sew: UInt, uopIdx: UInt, flowIdx: UInt): UInt = {
     val eleIdx = Wire(UInt(7.W))
     when (instType(1,0) === "b00".U || instType(1,0) === "b10".U || emul.asSInt > lmul.asSInt) {
       eleIdx := (uopIdx << Log2Num((MulDataSize(emul) >> eew(1,0)).asUInt)).asUInt + flowIdx
@@ -643,5 +643,26 @@ object GenEleIdx {
       eleIdx := (uopIdx << Log2Num((MulDataSize(lmul) >> sew(1,0)).asUInt)).asUInt + flowIdx
     }
     eleIdx
+  }
+}
+
+object GenVdIdx extends VLSUConstants {
+  def apply(instType: UInt, emul: UInt, lmul: UInt, uopIdx: UInt): UInt = {
+    val vdIdx = Wire(UInt(log2Up(maxMUL).W))
+    when (instType(1,0) === "b00".U || instType(1,0) === "b10".U || lmul.asSInt > emul.asSInt) {
+      // Unit-stride or Strided, or indexed with lmul >= emul
+      vdIdx := uopIdx
+    }.otherwise {
+      // Indexed with lmul <= emul
+      val multiple = emul - lmul
+      val uopIdxWidth = uopIdx.getWidth
+      vdIdx := LookupTree(multiple, List(
+        0.U -> uopIdx,
+        1.U -> uopIdx(uopIdxWidth - 1, 1),
+        2.U -> uopIdx(uopIdxWidth - 1, 2),
+        3.U -> uopIdx(uopIdxWidth - 1, 3)
+      ))
+    }
+    vdIdx
   }
 }
