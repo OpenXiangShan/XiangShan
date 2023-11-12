@@ -261,7 +261,7 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
     acquire.user.lift(VaddrKey).foreach(_ := req.vaddr(VAddrBits - 1, blockOffBits))
 
     // miss req pipe reg pass keyword to L2, is priority
-    acquire.user.lift(IsKeywordKey).foreach(_ := isKeyword())
+    acquire.echo.lift(IsKeywordKey).foreach(_ := isKeyword())
 
     // trigger prefetch
     acquire.user.lift(PrefetchKey).foreach(_ := Mux(l2_pf_store_only, req.isFromStore, true.B))
@@ -718,7 +718,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   // pass vaddr to l2
   io.mem_acquire.bits.user.lift(VaddrKey).foreach( _ := req.vaddr(VAddrBits-1, blockOffBits))
   // pass keyword to L2
-  io.mem_acquire.bits.user.lift(IsKeywordKey).foreach(_ := isKeyword)
+  io.mem_acquire.bits.echo.lift(IsKeywordKey).foreach(_ := isKeyword)
   // trigger prefetch
   io.mem_acquire.bits.user.lift(PrefetchKey).foreach(_ := Mux(io.l2_pf_store_only, req.isFromStore, true.B))
   // req source
