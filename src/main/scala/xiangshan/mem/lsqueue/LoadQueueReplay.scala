@@ -372,7 +372,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     allocated(i) && !scheduled(i) && cause(i)(LoadReplayCauses.C_DM) && blocking(i) && missMSHRId(i) === io.l2_hint.bits.sourceId && io.l2_hint.valid
   })).asUInt
   // l2 will send 2 beats data in 2 cycles, so if data needed by this load is in first beat, select it this cycle, otherwise next cycle
-  // when iskeyword = 1, s0_loadHintSelMask need overturn
+  // when isKeyword = 1, s0_loadHintSelMask need overturn
     val s0_loadHintSelMask = Mux(
      io.l2_hint.bits.isKeyword,
      s0_loadHintWakeMask & dataInLastBeatReg.asUInt,

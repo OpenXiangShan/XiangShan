@@ -21,6 +21,7 @@ import chisel3.experimental.ExtModule
 import chisel3.util._
 import coupledL2.VaddrField
 import coupledL2.IsKeywordField
+import coupledL2.IsKeywordKey
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.BundleFieldBase
@@ -773,9 +774,11 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
     PrefetchField(),
     ReqSourceField(),
     VaddrField(VAddrBits - blockOffBits),
-    IsKeywordField()
+  //  IsKeywordField()
   ) ++ cacheParams.aliasBitsOpt.map(AliasField)
-  val echoFields: Seq[BundleFieldBase] = Nil
+  val echoFields: Seq[BundleFieldBase] = Seq(
+    IsKeywordField()
+  )
 
   val clientParameters = TLMasterPortParameters.v1(
     Seq(TLMasterParameters.v1(
@@ -1025,11 +1028,12 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
     ldu(i).io.bank_conflict_slow := bankedDataArray.io.bank_conflict_slow(i)
   })
-
+val isKeyword = bus.d.bits.echo.lift(IsKeywordKey).getOrElse(false.B)
   (0 until LoadPipelineWidth).map(i => {
     val (_, _, done, _) = edge.count(bus.d)
     when(bus.d.bits.opcode === TLMessages.GrantData) {
-      io.lsu.forward_D(i).apply(bus.d.valid, bus.d.bits.data, bus.d.bits.source, done)
+      io.lsu.forward_D(i).apply(bus.d.valid, bus.d.bits.data, bus.d.bits.source, !bus.d.bits.echo.lift(IsKeywordKey).getOrElse(false.B))
+   //   io.lsu.forward_D(i).apply(bus.d.valid, bus.d.bits.data, bus.d.bits.source,done)
     }.otherwise {
       io.lsu.forward_D(i).dontCare()
     }
