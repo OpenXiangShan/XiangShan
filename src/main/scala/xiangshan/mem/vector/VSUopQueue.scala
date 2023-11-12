@@ -110,13 +110,23 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
     val isSegment = nf =/= 0.U && !us_whole_reg(fuOpType)
     val instType = Cat(isSegment, mop)
     val uopIdx = io.storeIn.bits.uop.vpu.vuopIdx
+    val vdIdx = GenVdIdx(instType, emul, lmul, uopIdx)
+    val numFlowsSameVdLog2 = Mux(
+      isIndexed(instType),
+      log2Up(VLENB).U - sew(1,0),
+      log2Up(VLENB).U - eew(1,0)
+    )
     val flows = GenRealFlowNum(instType, emul, lmul, eew, sew)
     val flowsLog2 = GenRealFlowLog2(instType, emul, lmul, eew, sew)
-    val flowsPrev = uopIdx << flowsLog2 // # of flow before this uop
+    val flowsPrevThisUop = uopIdx << flowsLog2 // # of flows before this uop
+    val flowsPrevThisVd = vdIdx << numFlowsSameVdLog2 // # of flows before this vd
+    val flowsIncludeThisUop = (uopIdx +& 1.U) << flowsLog2 // # of flows before this uop besides this uop
     val alignedType = Mux(isIndexed(instType), sew(1, 0), eew(1, 0))
     val srcMask = Mux(vm, Fill(VLEN, 1.U(1.W)), io.storeIn.bits.src_mask)
-    val flowMask = ((srcMask >> flowsPrev) &
-      ZeroExt(UIntToMask(flows, maxFlowNum), VLEN))(VLENB - 1, 0)
+    val flowMask = ((srcMask &
+      UIntToMask(flowsIncludeThisUop, VLEN + 1) &
+      ~UIntToMask(flowsPrevThisUop, VLEN)
+    ) >> flowsPrevThisVd)(VLENB - 1, 0)
     val vlmax = GenVLMAX(lmul, sew)
     valid(id) := true.B
     finish(id) := false.B
@@ -174,6 +184,12 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
   val issueAlignedType = Mux(isIndexed(issueInstType), issueSew(1, 0), issueEew(1, 0))
   val issueVLMAXMask = issueEntry.vlmax - 1.U
   val issueVLMAXLog2 = GenVLMAXLog2(issueEntry.lmul, issueEntry.sew)
+  val issueMULMask = LookupTree(issueAlignedType, List(
+    "b00".U -> "b01111".U,
+    "b01".U -> "b00111".U,
+    "b10".U -> "b00011".U,
+    "b11".U -> "b00001".U
+  ))
   val issueNFIELDS = issueEntry.nfields
   val issueVstart = issueUop.vpu.vstart
   val issueVl = issueUop.vpu.vl
@@ -181,7 +197,8 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
   val issueLmulGreaterThanEmul = issueEntry.lmul.asSInt > issueEntry.emul.asSInt
   assert(!issueValid || PopCount(issueEntry.vlmax) === 1.U, "VLMAX should be power of 2 and non-zero")
 
-  flowSplitIdx.zip(io.flowIssue).foreach { case (flowIdx, issuePort) =>
+  val elemIdxInsideVd = Wire(Vec(flowIssueWidth, UInt(flowIdxBits.W)))
+  flowSplitIdx.zip(io.flowIssue).zipWithIndex.foreach { case ((flowIdx, issuePort), portIdx) =>
     // AGU
     // TODO: DONT use * to implement multiplication!!!
     val elemIdx = GenElemIdx(
@@ -194,6 +211,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
       flowIdx = flowIdx
     ) // elemIdx inside an inst
     val elemIdxInsideField = elemIdx & issueVLMAXMask
+    elemIdxInsideVd(portIdx) := elemIdx & issueMULMask // elemIdx inside a vd
     val nfIdx = elemIdx >> issueVLMAXLog2
     val notIndexedStride = Mux(
       isStrided(issueInstType),
@@ -210,7 +228,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
     val vaddr = issueBaseAddr + stride + fieldOffset
     val mask = issueEntry.byteMask
     val regOffset = (elemIdxInsideField << issueAlignedType)(vOffsetBits - 1, 0)
-    val enable = (issueFlowMask & VecInit(Seq.tabulate(VLENB){ i => flowIdx === i.U }).asUInt).orR
+    val enable = (issueFlowMask & UIntToOH(elemIdxInsideVd(portIdx))).orR
     val exp = VLExpCtrl(
       vstart = issueVstart,
       vl = Mux(issueEntry.usWholeReg, GenUSWholeRegVL(issueNFIELDS, issueEew), Mux(issueEntry.usMaskReg, GenUSMaskRegVL(issueVl), issueVl)),
