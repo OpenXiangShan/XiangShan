@@ -372,7 +372,7 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
       val isAllReady = hyaIQ.ready && hydIQ.ready
       dp.ready := isAllReady
       hyaIQ.valid := dp.valid && isAllReady
-      hydIQ.valid := dp.valid && isAllReady && FuType.isStore(dp.bits.fuType)
+      hydIQ.valid := dp.valid && isAllReady && FuType.FuTypeOrR(dp.bits.fuType, FuType.stu, FuType.mou)
     }
   }
 
