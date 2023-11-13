@@ -284,10 +284,18 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   hybridUnits.zipWithIndex.map(x => x._1.suggestName("HybridUnit_"+x._2))
   val atomicsUnit = Module(new AtomicsUnit)
 
+  val hyuLdaWritebackOverride  = Mux(atomicsUnit.io.out.valid, atomicsUnit.io.out.bits, hybridUnits.head.io.ldout.bits)
+  val hyuLdOut = Wire(Decoupled(new MemExuOutput))
+  hyuLdOut.valid := atomicsUnit.io.out.valid || hybridUnits.head.io.ldout.valid
+  hyuLdOut.bits  := hyuLdaWritebackOverride
+  atomicsUnit.io.out.ready := hyuLdOut.ready
+  hybridUnits.head.io.ldout.ready := hyuLdOut.ready
+
+  val hyuLdExeWbReqs = hyuLdOut +: hybridUnits.tail.map(_.io.ldout)
   io.mem_to_ooo.writebackLda <> loadUnits.map(_.io.ldout)
   io.mem_to_ooo.writebackSta <> storeUnits.map(_.io.stout)
   io.mem_to_ooo.writebackStd <> stdExeUnits.map(_.io.out)
-  io.mem_to_ooo.writebackHyuLda <> hybridUnits.map(_.io.ldout)
+  io.mem_to_ooo.writebackHyuLda <> hyuLdExeWbReqs
   io.mem_to_ooo.writebackHyuSta <> hybridUnits.map(_.io.stout)
   io.mem_to_ooo.otherFastWakeup := DontCare
   io.mem_to_ooo.otherFastWakeup.take(LduCnt).zip(loadUnits.map(_.io.fast_uop)).foreach{case(a,b)=> a := b}
@@ -1000,13 +1008,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     lsq.io.mmioStout.ready := true.B
   }
 
-  // atomic exception / trigger writeback
   when (atomicsUnit.io.out.valid) {
-    // atom inst will use store writeback port 0 to writeback exception info
-    stOut(0).valid := true.B
-    stOut(0).bits  := atomicsUnit.io.out.bits
-    assert(!lsq.io.mmioStout.valid && !storeUnits(0).io.stout.valid)
-
     // when atom inst writeback, surpress normal load trigger
     (0 until LduCnt).map(i => {
       io.mem_to_ooo.writebackLda(i).bits.uop.trigger.backendHit := VecInit(Seq.fill(6)(false.B))
@@ -1015,7 +1017,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger.backendHit := VecInit(Seq.fill(6)(false.B))
     })
   }
-  atomicsUnit.io.out.ready := stOut(0).ready
 
   // Uncahce
   uncache.io.enableOutstanding := io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable
