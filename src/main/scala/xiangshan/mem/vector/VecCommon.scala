@@ -226,6 +226,8 @@ class VecUopBundle(implicit p: Parameters) extends VLSUBundleWithMicroOp {
   val lmul = UInt(mulBits.W)
   val vlmax = UInt(elemIdxBits.W)
   val instType = UInt(3.W)
+  val vd_last_uop = Bool()
+  val vd_first_uop = Bool()
 }
 
 class VecFlowBundle(implicit p: Parameters) extends VLSUBundleWithMicroOp {

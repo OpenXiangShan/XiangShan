@@ -58,10 +58,6 @@ object VLExpCtrl {
 
 class VluopBundle(implicit p: Parameters) extends VecUopBundle {
   val fof            = Bool()
-
-  // vd_last_uop is only used for loads to joint uops that write the same vd
-  val vd_last_uop = Bool()
-  val vd_first_uop = Bool()
 }
 
 class VlUopQueueIOBundle(implicit p: Parameters) extends VLSUBundle {
