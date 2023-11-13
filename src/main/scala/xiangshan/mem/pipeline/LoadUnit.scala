@@ -83,6 +83,7 @@ class LoadToLoadIO(implicit p: Parameters) extends XSBundle {
   val valid      = Bool()
   val data       = UInt(XLEN.W) // load to load fast path is limited to ld (64 bit) used as vaddr src1 only
   val dly_ld_err = Bool()
+  val dly_ld_rep = Bool()
 }
 
 class LoadUnitTriggerIO(implicit p: Parameters) extends XSBundle {
@@ -585,8 +586,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   val s1_fast_rep_dly_err = RegNext(io.fast_rep_in.bits.delayedLoadError)
   val s1_fast_rep_kill    = s1_fast_rep_dly_err && s1_in.isFastReplay
-  val s1_l2l_fwd_dly_err  = RegNext(io.l2l_fwd_in.dly_ld_err)
-  val s1_l2l_fwd_kill     = s1_l2l_fwd_dly_err && s1_in.isFastPath
+  val s1_l2l_fwd_dly_err  = RegNext(io.l2l_fwd_in.dly_ld_err) && s1_in.isFastPath
+  val s1_l2l_fwd_dly_rep  = RegNext(io.l2l_fwd_in.dly_ld_rep) && s1_in.isFastPath
+  val s1_l2l_fwd_kill     = (s1_l2l_fwd_dly_err || s1_l2l_fwd_dly_rep)
   val s1_late_kill        = s1_fast_rep_kill || s1_l2l_fwd_kill
   val s1_vaddr_hi         = Wire(UInt())
   val s1_vaddr_lo         = Wire(UInt())
@@ -653,7 +655,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s1_out.rsIdx             := s1_in.rsIdx
   s1_out.rep_info.debug    := s1_in.uop.debugInfo
   s1_out.rep_info.nuke     := s1_nuke && !s1_sw_prf
-  s1_out.lateKill          := s1_late_kill
 
   when (!s1_late_kill) {
     // current ori test will cause the case of ldest == 0, below will be modifeid in the future.
@@ -838,11 +839,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   val s2_troublem        = !s2_exception &&
                            !s2_mmio &&
-                           !s2_prf &&
-                           !s2_in.lateKill
+                           !s2_prf
 
   io.dcache.resp.ready  := true.B
-  val s2_dcache_should_resp = !(s2_in.tlbMiss || s2_exception || s2_mmio || s2_prf || s2_in.lateKill)
+  val s2_dcache_should_resp = !(s2_in.tlbMiss || s2_exception || s2_mmio || s2_prf)
   assert(!(s2_valid && (s2_dcache_should_resp && !io.dcache.resp.valid)), "DCache response got lost")
 
   // fast replay require
@@ -1025,7 +1025,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.fast_rep_out.valid := s3_valid && s3_fast_rep && !s3_in.uop.robIdx.needFlush(io.redirect)
   io.fast_rep_out.bits := s3_in
 
-  io.lsq.ldin.valid := s3_valid && (!s3_fast_rep || !io.fast_rep_out.ready) && !s3_in.feedbacked && !s3_in.lateKill
+  io.lsq.ldin.valid := s3_valid && (!s3_fast_rep || !io.fast_rep_out.ready) && !s3_in.feedbacked
   io.lsq.ldin.bits := s3_in
   io.lsq.ldin.bits.miss := s3_in.miss && !s3_fwd_frm_d_chan_valid
 
@@ -1036,7 +1036,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   val s3_dly_ld_err =
     if (EnableAccurateLoadError) {
-      (s3_in.lateKill || io.dcache.resp.bits.error_delayed) && RegNext(io.csrCtrl.cache_error_enable)
+      io.dcache.resp.bits.error_delayed && RegNext(io.csrCtrl.cache_error_enable)
     } else {
       WireInit(false.B)
     }
@@ -1180,14 +1180,17 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // fast load to load forward
   if (EnableLoadToLoadForward) {
-    io.l2l_fwd_out.valid      := s3_out.valid && !s3_in.lateKill
+    io.l2l_fwd_out.valid      := s3_valid && !s3_in.mmio
     io.l2l_fwd_out.data       := Mux(s3_in.vaddr(3), s3_merged_data_frm_cache(127, 64), s3_merged_data_frm_cache(63, 0))
     io.l2l_fwd_out.dly_ld_err := s3_dly_ld_err // ecc delayed error
+    io.l2l_fwd_out.dly_ld_rep := io.lsq.ldin.bits.rep_info.need_rep // delayed replay
   } else {
     io.l2l_fwd_out.valid := false.B
     io.l2l_fwd_out.data := DontCare
     io.l2l_fwd_out.dly_ld_err := DontCare
+    io.l2l_fwd_out.dly_ld_rep := DontCare
   }
+
    // trigger
   val last_valid_data = RegNext(RegEnable(io.ldout.bits.data, io.ldout.fire))
   val hit_ld_addr_trig_hit_vec = Wire(Vec(3, Bool()))

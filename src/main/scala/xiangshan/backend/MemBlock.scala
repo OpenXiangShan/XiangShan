@@ -614,10 +614,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val fastValidVec = fastPriority.map(j => loadUnits(j).io.l2l_fwd_out.valid)
     val fastDataVec = fastPriority.map(j => loadUnits(j).io.l2l_fwd_out.data)
     val fastErrorVec = fastPriority.map(j => loadUnits(j).io.l2l_fwd_out.dly_ld_err)
+    val fastReplayVec = fastPriority.map(j => loadUnits(j).io.l2l_fwd_out.dly_ld_rep)
     val fastMatchVec = fastPriority.map(j => io.ooo_to_mem.loadFastMatch(i)(j))
     loadUnits(i).io.l2l_fwd_in.valid := VecInit(fastValidVec).asUInt.orR
     loadUnits(i).io.l2l_fwd_in.data := ParallelPriorityMux(fastValidVec, fastDataVec)
     loadUnits(i).io.l2l_fwd_in.dly_ld_err := ParallelPriorityMux(fastValidVec, fastErrorVec)
+    loadUnits(i).io.l2l_fwd_in.dly_ld_rep := ParallelPriorityMux(fastValidVec, fastReplayVec)
     val fastMatch = ParallelPriorityMux(fastValidVec, fastMatchVec)
     loadUnits(i).io.ld_fast_match := fastMatch
     loadUnits(i).io.ld_fast_imm := io.ooo_to_mem.loadFastImm(i)
