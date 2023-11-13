@@ -828,7 +828,10 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   val uopInfoGen = Module(new UopInfoGen)
   uopInfoGen.io.in.preInfo.typeOfSplit := decodedInst.uopSplitType
   uopInfoGen.io.in.preInfo.vsew := decodedInst.vpu.vsew
-  uopInfoGen.io.in.preInfo.vlmul := decodedInst.vpu.vlmul
+  //------------------------------------------------------
+  //when unit-stride instruction is load/store whole register, numOfUop should not use vtype.vlmul and should be 0
+  uopInfoGen.io.in.preInfo.vlmul := Mux(decodedInst.fuOpType === VlduType.vlr || decodedInst.fuOpType === VstuType.vsr,
+                                    0.U,decodedInst.vpu.vlmul)
   uopInfoGen.io.in.preInfo.vwidth := inst.RM
   uopInfoGen.io.in.preInfo.vmvn := inst.IMM5_OPIVI(2, 0)
   uopInfoGen.io.in.preInfo.nf := inst.NF
