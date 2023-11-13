@@ -709,7 +709,7 @@ object VecDecoder extends DecodeConstants {
     VLOXEI16_V    -> VLD(SrcType.vp,  VlduType.vloxe, uopSplitType = UopSplitType.VEC_I_LDST, indexed = T, ordered = T),
     VLOXEI32_V    -> VLD(SrcType.vp,  VlduType.vloxe, uopSplitType = UopSplitType.VEC_I_LDST, indexed = T, ordered = T),
     VLOXEI64_V    -> VLD(SrcType.vp,  VlduType.vloxe, uopSplitType = UopSplitType.VEC_I_LDST, indexed = T, ordered = T),
-    VSUXEI8_V     -> VLD(SrcType.vp,  VstuType.vsuxe, uopSplitType = UopSplitType.VEC_I_LDST, indexed = T, ordered = F),
+    VSUXEI8_V     -> VST(SrcType.vp,  VstuType.vsuxe, uopSplitType = UopSplitType.VEC_I_LDST, indexed = T, ordered = F),
     VSUXEI16_V    -> VST(SrcType.vp,  VstuType.vsuxe, uopSplitType = UopSplitType.VEC_I_LDST, indexed = T, ordered = F),
     VSUXEI32_V    -> VST(SrcType.vp,  VstuType.vsuxe, uopSplitType = UopSplitType.VEC_I_LDST, indexed = T, ordered = F),
     VSUXEI64_V    -> VST(SrcType.vp,  VstuType.vsuxe, uopSplitType = UopSplitType.VEC_I_LDST, indexed = T, ordered = F),
