@@ -167,7 +167,10 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
     // otherwise:
     1.U
   )
-  val numUops = Mux(lmul.asSInt > emul.asSInt, MulNum(lmul), MulNum(emul))
+  val lmulLog2Pos = Mux(lmul.asSInt < 0.S, 0.U, lmul)
+  val emulLog2Pos = Mux(emul.asSInt < 0.S, 0.U, emul)
+  // numUops = nf * max(lmul, emul)
+  val numUops = (nf + 1.U) << Mux(lmul.asSInt > emul.asSInt, lmulLog2Pos, emulLog2Pos)
 
   when (io.loadRegIn.fire) {
     val id = enqPtr.value
