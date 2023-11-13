@@ -68,13 +68,20 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
   val uopq = Reg(Vec(VsUopSize, new VsuopBundle))
   val valid = RegInit(VecInit(Seq.fill(VsUopSize)(false.B)))
   val finish = RegInit(VecInit(Seq.fill(VsUopSize)(false.B)))
+  val preAlloc = RegInit(VecInit(Seq.fill(VsUopSize)(false.B)))
   val exception = RegInit(VecInit(Seq.fill(VsUopSize)(false.B)))
   val vstart = RegInit(VecInit(Seq.fill(VsUopSize)(0.U(elemIdxBits.W))))
 
-  val enqPtr = RegInit(0.U.asTypeOf(new VsUopPtr))
+  val enqPtrExt = RegInit(VecInit((0 until maxMUL).map(_.U.asTypeOf(new VsUopPtr))))
+  val enqPtr = enqPtrExt(0)
   val deqPtr = RegInit(0.U.asTypeOf(new VsUopPtr))
   val flowSplitPtr = RegInit(0.U.asTypeOf(new VsUopPtr))
   val flowSplitIdx = RegInit(VecInit((0 until flowIssueWidth).map(_.U(flowIdxBits.W))))
+
+  val s_merge :: s_wb :: Nil = Enum(2)
+  val vdState = RegInit(s_merge)
+  val vdException = RegInit(0.U.asTypeOf(Valid(ExceptionVec())))
+  val vdUop = RegInit(0.U.asTypeOf(new DynInst))
 
   val full = isFull(enqPtr, deqPtr)
 
@@ -136,6 +143,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
   
   when (io.storeIn.fire) {
     val id = enqPtr.value
+    val preAllocated = preAlloc(id)
     val isSegment = nf =/= 0.U && !us_whole_reg(fuOpType)
     val instType = Cat(isSegment, mop)
     val uopIdx = io.storeIn.bits.uop.vpu.vuopIdx
@@ -187,14 +195,26 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
 
     // Assertion
     assert(PopCount(flows) <= 1.U, "flowNum should be the power of 2")
+
+    // Pre-allocate
+    when (!preAllocated) {
+      // This is the first uop mapped into the same vd
+      enqPtrExt.zipWithIndex.foreach { case (ptr, i) =>
+        when (i.U < numUopsSameVd) {
+          preAlloc(ptr.value) := true.B
+          uopq(ptr.value).vd_last_uop := (i + 1).U === numUopsSameVd
+          uopq(ptr.value).vd_first_uop := (i == 0).B
+        }
+      }
+    }
   }
 
   // update enqPtr
   when (redirectReg.valid && flushNumReg =/= 0.U) {
-    enqPtr := enqPtr - flushNumReg
+    enqPtrExt.foreach(ptr => ptr := ptr - flushNumReg)
   }.otherwise {
     when (io.storeIn.fire) {
-      enqPtr := enqPtr + 1.U
+      enqPtrExt.foreach(ptr => ptr := ptr + 1.U)
     }
   }
 
@@ -342,10 +362,16 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
   /**
     * Dequeue according to finish bit pointer by deqPtr
     */
-  when (io.uopWriteback.fire) {
+  val deqValid = finish(deqPtr.value) &&
+    !uopq(deqPtr.value).uop.robIdx.needFlush(io.redirect) &&
+    !uopq(deqPtr.value).uop.robIdx.needFlush(redirectReg)
+  val deqReady = vdState === s_merge
+
+  when (deqValid && deqReady) {
     val id = deqPtr.value
     valid(id) := false.B
     finish(id) := false.B
+    preAlloc(id) := false.B
     exception(id) := false.B
     vstart(id) := 0.U
 
@@ -356,20 +382,48 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
   }
   assert(!(finish(deqPtr.value) && !valid(deqPtr.value)))
 
+  when (vdState === s_merge) {
+    when (deqValid) {
+      val id = deqPtr.value
+      vdUop := uopq(id).uop
+      vdUop.replayInst := vdUop.replayInst || uopq(id).uop.replayInst
+
+      when (!vdException.valid && exception(id)) {
+        vdException.valid := true.B
+        vdException.bits := uopq(id).uop.exceptionVec
+        vdUop.vpu.vstart := vstart(id)
+      }
+
+      when (uopq(id).vd_last_uop) {
+        vdState := s_wb
+      }
+    }
+
+    when (vdUop.robIdx.needFlush(io.redirect)) {
+      vdException := 0.U.asTypeOf(vdException)
+    }
+  }
+
+  when (vdState === s_wb) {
+    when (io.uopWriteback.ready || vdUop.robIdx.needFlush(io.redirect)) {
+      vdException := 0.U.asTypeOf(vdException)
+      vdUop.replayInst := false.B
+
+      vdState := s_merge
+    }
+  }
+
   /**
     * IO assignments
     */
-  io.storeIn.ready := !full
+  io.storeIn.ready := !full && preAlloc(enqPtr.value) || hasFreeEntries(enqPtr, deqPtr) >= numUopsSameVd
 
   io.flowWriteback.foreach(_.ready := true.B)
 
-  io.uopWriteback.valid := finish(deqPtr.value) &&
-    !uopq(deqPtr.value).uop.robIdx.needFlush(io.redirect) &&
-    !uopq(deqPtr.value).uop.robIdx.needFlush(redirectReg)
+  io.uopWriteback.valid := vdState === s_wb && !vdUop.robIdx.needFlush(io.redirect)
   io.uopWriteback.bits match { case x =>
-    val id = deqPtr.value
-    x.uop := uopq(id).uop
-    x.uop.exceptionVec := uopq(id).uop.exceptionVec
+    x.uop := vdUop
+    x.uop.exceptionVec := vdException.bits
     x.data := DontCare
     x.mask.foreach(_ := DontCare)
     x.vdIdx.foreach(_ := DontCare)
