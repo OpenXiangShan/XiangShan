@@ -103,7 +103,36 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
   val nf = io.storeIn.bits.uop.vpu.nf
   val vm = io.storeIn.bits.uop.vpu.vm
   val emul = Mux(us_whole_reg(fuOpType) || us_mask(fuOpType), 0.U(mulBits.W), EewLog2(eew) - sew + lmul)
+  val lmulLog2 = Mux(lmul.asSInt >= 0.S, 0.U, lmul)
+  val emulLog2 = Mux(emul.asSInt >= 0.S, 0.U, emul)
+  val numEewLog2 = emulLog2 - EewLog2(eew)
+  val numSewLog2 = lmulLog2 - sew
+  val numUopsSameVd = Mux(
+    isIndexed(mop) && numSewLog2.asSInt > numEewLog2.asSInt,
+    // If this is an index load, and multiple index regs are mapped into a data reg:
+    // (*.asUInt - *.asUInt) should be equal to (*.asSInt - *.asSInt) 
+    1.U << (numSewLog2 - numEewLog2),
+    // otherwise:
+    1.U
+  )
   val numUops = Mux(lmul.asSInt > emul.asSInt, MulNum(lmul), MulNum(emul))
+
+  /**
+    * For uops that store the same vd data, only the first one among these uops contain effective data/src_vs3.
+    * Therefore the first uop in a vd should reserve src_vs3 for the incoming uops.
+    */
+  val vs3Reg = Reg(UInt(VLEN.W))
+  val numUopsSameVdLeft = RegInit(0.U(log2Up(maxMUL + 1).W))
+  val isNewVd = numUopsSameVdLeft === 0.U
+  when (io.storeIn.fire) {
+    when (isNewVd) {
+      numUopsSameVdLeft := numUopsSameVd - 1.U
+      vs3Reg := io.storeIn.bits.src_vs3
+    }.otherwise {
+      numUopsSameVdLeft := numUopsSameVdLeft - 1.U
+      assert(!(numUopsSameVdLeft - 1.U > numUopsSameVdLeft), "Overflow!")
+    }
+  }
   
   when (io.storeIn.fire) {
     val id = enqPtr.value
@@ -139,7 +168,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
       x.uop.lastUop := (io.storeIn.bits.uop.uopIdx + 1.U) === numUops
       x.flowMask := flowMask
       x.byteMask := GenUopByteMask(flowMask, alignedType)(VLENB - 1, 0)
-      x.data := io.storeIn.bits.src_vs3
+      x.data := Mux(isNewVd, io.storeIn.bits.src_vs3, vs3Reg)
       x.baseAddr := io.storeIn.bits.src_rs1
       x.stride := io.storeIn.bits.src_stride
       x.flow_counter := flows
