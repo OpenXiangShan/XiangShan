@@ -304,7 +304,11 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
     ) // elemIdx inside an inst
     val elemIdxInsideField = elemIdx & issueVLMAXMask // elemIdx inside a field, equals elemIdx when nf = 1
     elemIdxInsideVd(portIdx) := elemIdx & issueMULMask // elemIdx inside a vd
-    val nfIdx = elemIdx >> issueVLMAXLog2
+    val nfIdx = Mux(
+      isIndexed(issueInstType),
+      GenSegNfIdx(Mux(issueLmulGreaterThanEmul, issueEntry.lmul, issueEntry.emul), issueUopIdx),
+      GenSegNfIdx(issueEntry.emul, issueUopIdx)
+    )
     val notIndexedStride = Mux( // stride for strided/unit-stride instruction
       isStrided(issueInstType),
       issueEntry.stride(XLEN - 1, 0), // for strided load, stride = x[rs2]

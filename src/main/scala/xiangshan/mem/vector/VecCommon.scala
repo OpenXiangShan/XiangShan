@@ -471,18 +471,18 @@ object Log2Num {
 }
 
 /**
-  * when emul is less than or equal to 1, the nf is equal to uop_inner_idx;
-  * when emul is equal to 2, the nf is equal to uop_inner_idx(2,1), and so on*/
+  * when emul is less than or equal to 1, the nf is equal to uopIdx;
+  * when emul is equal to 2, the nf is equal to uopIdx >> 1, and so on*/
 object GenSegNfIdx {
   def apply (mul: UInt, uopIdx: UInt):UInt = { // mul means lmul or emul
     (LookupTree(mul,List(
-      "b101".U -> uopIdx     , // 1/8
-      "b110".U -> uopIdx     , // 1/4
-      "b111".U -> uopIdx     , // 1/2
-      "b000".U -> uopIdx     , // 1
-      "b001".U -> uopIdx(2,1), // 2
-      "b010".U -> uopIdx(2)  , // 4
-      "b011".U -> 0.U          //8
+      "b101".U -> uopIdx,           // 1/8
+      "b110".U -> uopIdx,           // 1/4
+      "b111".U -> uopIdx,           // 1/2
+      "b000".U -> uopIdx,           // 1
+      "b001".U -> (uopIdx >> 1.U),  // 2
+      "b010".U -> (uopIdx >> 2.U),  // 4
+      "b011".U -> (uopIdx >> 3.U),  // 8
     )))}
 }
 
