@@ -125,7 +125,11 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
   val lmulLog2Pos = Mux(lmul.asSInt < 0.S, 0.U, lmul)
   val emulLog2Pos = Mux(emul.asSInt < 0.S, 0.U, emul)
   // numUops = nf * max(lmul, emul)
-  val numUops = (nf + 1.U) << Mux(lmul.asSInt > emul.asSInt, lmulLog2Pos, emulLog2Pos)
+  val numUops = Mux(
+    isIndexed(mop) && lmul.asSInt > emul.asSInt,
+    (nf + 1.U) << lmulLog2Pos,
+    (nf + 1.U) << emulLog2Pos
+  )
 
   /**
     * For uops that store the same vd data, only the first one among these uops contain effective data/src_vs3.
