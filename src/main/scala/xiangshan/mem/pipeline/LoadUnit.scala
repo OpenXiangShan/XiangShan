@@ -83,7 +83,6 @@ class LoadToLoadIO(implicit p: Parameters) extends XSBundle {
   val valid      = Bool()
   val data       = UInt(XLEN.W) // load to load fast path is limited to ld (64 bit) used as vaddr src1 only
   val dly_ld_err = Bool()
-  val dly_ld_rep = Bool()
 }
 
 class LoadUnitTriggerIO(implicit p: Parameters) extends XSBundle {
@@ -586,9 +585,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   val s1_fast_rep_dly_err = RegNext(io.fast_rep_in.bits.delayedLoadError)
   val s1_fast_rep_kill    = s1_fast_rep_dly_err && s1_in.isFastReplay
-  val s1_l2l_fwd_dly_err  = RegNext(io.l2l_fwd_in.dly_ld_err) && s1_in.isFastPath
-  val s1_l2l_fwd_dly_rep  = RegNext(io.l2l_fwd_in.dly_ld_rep) && s1_in.isFastPath
-  val s1_l2l_fwd_kill     = (s1_l2l_fwd_dly_err || s1_l2l_fwd_dly_rep)
+  val s1_l2l_fwd_kill  = RegNext(io.l2l_fwd_in.dly_ld_err) && s1_in.isFastPath
   val s1_late_kill        = s1_fast_rep_kill || s1_l2l_fwd_kill
   val s1_vaddr_hi         = Wire(UInt())
   val s1_vaddr_lo         = Wire(UInt())
@@ -1039,7 +1036,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       WireInit(false.B)
     }
   io.s3_dly_ld_err := false.B // s3_dly_ld_err && s3_valid
-  io.fast_rep_out.bits.delayedLoadError := s3_dly_ld_err
   io.lsq.ldin.bits.dcacheRequireReplay  := s3_dcache_rep
 
   val s3_vp_match_fail = RegNext(io.lsq.forward.matchInvalid || io.sbuffer.matchInvalid) && s3_troublem
@@ -1047,6 +1043,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       io.lsq.ldld_nuke_query.resp.valid &&
       io.lsq.ldld_nuke_query.resp.bits.rep_frm_fetch &&
       RegNext(io.csrCtrl.ldld_vio_check_enable)
+
+  io.fast_rep_out.bits.delayedLoadError := s3_dly_ld_err || s3_ldld_rep_inst || s3_vp_match_fail
 
   val s3_rep_info = WireInit(s3_in.rep_info)
   s3_rep_info.dcache_miss   := s3_in.rep_info.dcache_miss && !s3_fwd_frm_d_chan_valid && s3_troublem
@@ -1179,13 +1177,12 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   if (EnableLoadToLoadForward) {
     io.l2l_fwd_out.valid      := s3_valid && !s3_in.mmio
     io.l2l_fwd_out.data       := Mux(s3_in.vaddr(3), s3_merged_data_frm_cache(127, 64), s3_merged_data_frm_cache(63, 0))
-    io.l2l_fwd_out.dly_ld_err := s3_dly_ld_err // ecc delayed error
-    io.l2l_fwd_out.dly_ld_rep := io.lsq.ldin.bits.rep_info.need_rep // delayed replay
+    io.l2l_fwd_out.dly_ld_err := s3_dly_ld_err || // ecc delayed error
+                                 io.lsq.ldin.bits.rep_info.need_rep// delayed replay
   } else {
     io.l2l_fwd_out.valid := false.B
     io.l2l_fwd_out.data := DontCare
     io.l2l_fwd_out.dly_ld_err := DontCare
-    io.l2l_fwd_out.dly_ld_rep := DontCare
   }
 
    // trigger
