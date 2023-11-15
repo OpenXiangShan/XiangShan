@@ -200,6 +200,9 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
       UIntToMask(flowsIncludeThisUop, VLEN + 1) &
       ~UIntToMask(flowsPrevThisUop, VLEN)
     ) >> flowsPrevThisVd)(VLENB - 1, 0)
+    dontTouch(flowsPrevThisUop)
+    dontTouch(flowsPrevThisVd)
+    dontTouch(flowsIncludeThisUop)
     valid(id) := true.B
     finish(id) := false.B
     exception(id) := false.B
@@ -290,6 +293,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
   assert(!issueValid || PopCount(issueEntry.vlmax) === 1.U, "VLMAX should be power of 2 and non-zero")
 
   val elemIdxInsideVd = Wire(Vec(flowIssueWidth, UInt(flowIdxBits.W)))
+  dontTouch(elemIdxInsideVd)
   flowSplitIdx.zip(io.flowIssue).zipWithIndex.foreach { case ((flowIdx, issuePort), portIdx) =>
     // AGU
     // TODO: DONT use * to implement multiplication!!!
@@ -325,11 +329,16 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
     val mask = issueEntry.byteMask
     val regOffset = (elemIdxInsideField << issueAlignedType)(vOffsetBits - 1, 0)
     val enable = (issueFlowMask & UIntToOH(elemIdxInsideVd(portIdx))).orR
+    val ttttvl = Mux(issueEntry.usWholeReg, GenUSWholeRegVL(issueNFIELDS, issueEew), Mux(issueEntry.usMaskReg, GenUSMaskRegVL(issueVl), issueVl))
     val exp = VLExpCtrl(
       vstart = issueVstart,
-      vl = Mux(issueEntry.usWholeReg, GenUSWholeRegVL(issueNFIELDS, issueEew), Mux(issueEntry.usMaskReg, GenUSMaskRegVL(issueVl), issueVl)),
+      vl = ttttvl,
       eleIdx = elemIdxInsideField
     ) && enable
+    dontTouch(ttttvl)
+    dontTouch(vstart)
+    dontTouch(elemIdxInsideField)
+    dontTouch(enable)
 
     issuePort.valid := issueValid && flowIdx < issueFlowNum &&
       !issueUop.robIdx.needFlush(io.redirect) &&
@@ -343,7 +352,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
       x.reg_offset := regOffset
       x.alignedType := issueAlignedType
       x.exp := exp
-      x.flow_idx := elemIdx
+      x.elemIdx := elemIdx
       x.is_first_ele := elemIdx === 0.U
       x.uopQueuePtr := flowSplitPtr
     }
@@ -392,7 +401,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
     val ptr = wb.bits.vec.uopQueuePtr
     val entry = uopq(ptr.value)
     val alignedType = Mux(isIndexed(entry.instType), entry.sew(1, 0), entry.eew(1, 0))
-    flowWbElemIdx(i) := wb.bits.vec.exp_ele_index
+    flowWbElemIdx(i) := wb.bits.vec.elemIdx
     flowWbExcp(i) := wb.bits.uop.exceptionVec
     flowWbExp(i) := wb.bits.vec.exp
 
@@ -423,17 +432,17 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
       entry.flow_counter := nextFlowCnt
       finish(ptr.value) := nextFlowCnt === 0.U
       when (!exception(ptr.value) && flowWbExcp(i).asUInt.orR) {
-        when (!entry.fof || wb.bits.vec.exp_ele_index === 0.U) {
+        when (!entry.fof || wb.bits.vec.elemIdx === 0.U) {
           // For fof loads, if element 0 raises an exception, vl is not modified, and the trap is taken.
           exception(ptr.value) := true.B
-          vstart(ptr.value) := wb.bits.vec.exp_ele_index
+          vstart(ptr.value) := wb.bits.vec.elemIdx
           entry.uop.exceptionVec := flowWbExcp(i)
         }.otherwise {
           // If an element > 0 raises an exception, the corresponding trap is not taken, and the vector longth vl is
           // reduced to the index of the element that would have raised an exception.
           when (!vl(ptr.value).valid) {
             vl(ptr.value).valid := true.B
-            vl(ptr.value).bits := wb.bits.vec.exp_ele_index
+            vl(ptr.value).bits := wb.bits.vec.elemIdx
           }
         }
       }

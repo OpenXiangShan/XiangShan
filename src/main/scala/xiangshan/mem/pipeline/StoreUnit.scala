@@ -168,7 +168,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   s0_out.isvec        := s0_use_flow_vec
   s0_out.is128bit     := false.B
   s0_out.exp          := s0_exp
-  // s0_out.fqIdx        := s0_fqidx
   s0_out.sflowPtr      := s0_flowPtr
   when(s0_valid && s0_isFirstIssue) {
     s0_out.uop.debugInfo.tlbFirstReqTime := GTimer()
@@ -250,13 +249,12 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
 
   val s1_vec_feedback = Wire(Valid(new VSFQFeedback))
   s1_vec_feedback.valid                 := s1_valid && !s1_in.isHWPrefetch && s1_isvec
-  // s1_vec_feedback.bits.fqIdx            := s1_out.fqIdx
   s1_vec_feedback.bits.flowPtr          := s1_out.sflowPtr
   s1_vec_feedback.bits.hit              := !s1_tlb_miss
   s1_vec_feedback.bits.sourceType       := RSFeedbackType.tlbMiss
   s1_vec_feedback.bits.paddr            := s1_paddr
   XSDebug(s1_vec_feedback.valid,
-    "Vector S1 Store: tlbHit: %d fqIdx: %d\n",
+    "Vector S1 Store: tlbHit: %d flowPtr: %d\n",
     s1_vec_feedback.bits.hit,
     s1_vec_feedback.bits.flowPtr.value
   )
