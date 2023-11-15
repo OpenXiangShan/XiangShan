@@ -58,6 +58,7 @@ object VLExpCtrl {
 
 class VluopBundle(implicit p: Parameters) extends VecUopBundle {
   val fof            = Bool()
+  val vdIdxInField = UInt(log2Up(maxMUL).W)
 }
 
 class VlUopQueueIOBundle(implicit p: Parameters) extends VLSUBundle {
@@ -121,6 +122,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
   val vdSrcMask = RegInit(0.U(VLEN.W))
   val vdVl = RegInit(0.U.asTypeOf(Valid(UInt(elemIdxBits.W))))
   val vdIdx = RegInit(0.U(3.W)) // TODO: parameterize width
+  val vdIdxInField = RegInit(0.U(log2Up(maxMUL).W))
 
   val full = isFull(enqPtr, deqPtr)
 
@@ -233,6 +235,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
       x.vlmax := GenVLMAX(lmul, sew)
       x.instType := instType
       x.data := io.loadRegIn.bits.src_vs3
+      x.vdIdxInField := vdIdxInField
     }
 
     // Assertion
@@ -512,6 +515,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
       vdSrcMask := srcMaskVec(id)
       vdUop := uopq(id).uop
       vdUop.replayInst := vdUop.replayInst || uopq(id).uop.replayInst
+      vdIdxInField := uopq(id).vdIdxInField
 
       when (!vdException.valid && exception(id)) {
         vdException.valid := true.B
@@ -568,6 +572,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
   io.uopWriteback.bits.data := vdResult
   io.uopWriteback.bits.mask.foreach(_ := vdSrcMask) // TODO: delete vdMask
   io.uopWriteback.bits.vdIdx.foreach(_ := vdIdx)
+  io.uopWriteback.bits.vdIdxInField.foreach(_ := vdIdxInField)
   io.uopWriteback.bits.debug := DontCare
 
   assert(!(issueValid && !io.flowIssue(0).valid && io.flowIssue(1).valid), "flow issue port 0 should have higher priority")
