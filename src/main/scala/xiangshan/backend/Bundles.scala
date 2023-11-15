@@ -552,6 +552,7 @@ object Bundles {
       val vpu = new VPUCtrlSignals
       val oldVdPsrc = UInt(PhyRegIdxWidth.W)
       val vdIdx = UInt(3.W)
+      val vdIdxInField = UInt(3.W)
       val isIndexed = Bool()
     })
     val debug = new DebugBundle
@@ -692,6 +693,7 @@ object Bundles {
     val data = if (isVector) UInt(VLEN.W) else UInt(XLEN.W)
     val mask = if (isVector) Some(UInt(VLEN.W)) else None
     val vdIdx = if (isVector) Some(UInt(3.W)) else None // TODO: parameterize width
+    val vdIdxInField = if (isVector) Some(UInt(3.W)) else None
     val debug = new DebugBundle
   }
 

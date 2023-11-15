@@ -452,6 +452,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
     x.data := DontCare
     x.mask.foreach(_ := DontCare)
     x.vdIdx.foreach(_ := DontCare)
+    x.vdIdxInField.foreach(_ := DontCare)
     x.debug := DontCare
   }
 

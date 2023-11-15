@@ -33,7 +33,7 @@ class VldMergeUnit(val params: ExeUnitParams)(implicit p: Parameters) extends XS
   mgu.io.in.info.vstart := wbReg.bits.vls.get.vpu.vstart
   mgu.io.in.info.eew := wbReg.bits.vls.get.vpu.veew
   mgu.io.in.info.vsew := wbReg.bits.vls.get.vpu.vsew
-  mgu.io.in.info.vdIdx := wbReg.bits.vls.get.vdIdx
+  mgu.io.in.info.vdIdx := wbReg.bits.vls.get.vdIdxInField
   mgu.io.in.info.vlmul := wbReg.bits.vls.get.vpu.vlmul
   mgu.io.in.info.narrow := false.B  // never narrow
   mgu.io.in.info.dstMask := false.B // vlm need not mask
