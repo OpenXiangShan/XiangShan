@@ -116,6 +116,7 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val finalIssueResp = OptionWrapper(params.LduCnt > 0, Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle))))
   val transEntryDeqVec = Vec(params.numEnq, ValidIO(new EntryBundle))
   val transSelVec = Output(Vec(params.numEnq, UInt((params.numEntries-params.numEnq).W)))
+  val cancelDeqVec = Output(Vec(params.numDeq, Bool()))
 
 
   val rsFeedback = Output(Vec(5, Bool()))
@@ -162,6 +163,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val dataSourceVec = Wire(Vec(params.numEntries, Vec(params.numRegSrc, DataSource())))
   val srcWakeUpL1ExuOHVec = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Vec(params.numRegSrc, ExuVec()))))
   val srcTimerVec = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Vec(params.numRegSrc, UInt(3.W)))))
+  val cancelByOg0Vec = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Bool())))
   val isFirstIssueVec = Wire(Vec(params.numEntries, Bool()))
   val robIdxVec = Wire(Vec(params.numEntries, new RobPtr))
   val issueTimerVec = Wire(Vec(params.numEntries, UInt(2.W)))
@@ -287,21 +289,32 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val enqEntryOldest = io.deq.map { deq =>
     Mux1H(deq.enqEntryOldestSel.bits, entries.take(EnqEntryNum))
   }
+  val enqEntryOldestCancel = io.deq.map { deq =>
+    Mux1H(deq.enqEntryOldestSel.bits, cancelByOg0Vec.getOrElse(VecInit(Seq.fill(params.numEntries)(false.B))).take(EnqEntryNum))
+  }
   val othersEntryOldest = io.deq.map { deq =>
     Mux1H(deq.othersEntryOldestSel.bits, entries.drop(EnqEntryNum))
+  }
+  val othersEntryOldestCancel = io.deq.map { deq =>
+    Mux1H(deq.othersEntryOldestSel.bits, cancelByOg0Vec.getOrElse(VecInit(Seq.fill(params.numEntries)(false.B))).drop(EnqEntryNum))
   }
 
   if (params.deqFuSame) {
     val subDeqPolicyEntryVec = Wire(Vec(params.numDeq, ValidIO(new EntryBundle)))
     val subDeqPolicyValidVec = Wire(Vec(params.numDeq, Bool()))
+    val subDeqPolicyCancelByOg0Vec = Wire(Vec(params.numDeq, Bool()))
 
     subDeqPolicyEntryVec(0) := PriorityMux(io.deq(0).subDeqRequest.get, entries)
     subDeqPolicyEntryVec(1) := PriorityMux(Reverse(io.deq(0).subDeqRequest.get), entries.reverse)
     subDeqPolicyValidVec(0) := PopCount(io.deq(0).subDeqRequest.get) >= 1.U
     subDeqPolicyValidVec(1) := PopCount(io.deq(0).subDeqRequest.get) >= 2.U
+    subDeqPolicyCancelByOg0Vec(0) := PriorityMux(io.deq(0).subDeqRequest.get, cancelByOg0Vec.getOrElse(VecInit(Seq.fill(params.numEntries)(false.B))))
+    subDeqPolicyCancelByOg0Vec(1) := PriorityMux(Reverse(io.deq(0).subDeqRequest.get), cancelByOg0Vec.getOrElse(VecInit(Seq.fill(params.numEntries)(false.B))).reverse)
 
     io.deq(0).deqEntry := Mux(io.deq(0).othersEntryOldestSel.valid, othersEntryOldest(0), subDeqPolicyEntryVec(1))
     io.deq(1).deqEntry := subDeqPolicyEntryVec(0)
+    io.cancelDeqVec(0) := Mux(io.deq(0).othersEntryOldestSel.valid, othersEntryOldestCancel(0), subDeqPolicyCancelByOg0Vec(1))
+    io.cancelDeqVec(1) := subDeqPolicyCancelByOg0Vec(0)
 
     when (subDeqPolicyValidVec(0)) {
       assert(Mux1H(io.deq(0).subDeqSelOH.get, entries).bits.status.robIdx === subDeqPolicyEntryVec(0).bits.status.robIdx, "subDeqSelOH(0) is not the same\n")
@@ -313,6 +326,16 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   else {
     io.deq.zipWithIndex.foreach { case (x, i) =>
       x.deqEntry := Mux(io.deq(i).othersEntryOldestSel.valid, othersEntryOldest(i), enqEntryOldest(i))
+      io.cancelDeqVec(i) := Mux(io.deq(i).othersEntryOldestSel.valid, othersEntryOldestCancel(i), enqEntryOldestCancel(i))
+    }
+  }
+
+  if (params.hasIQWakeUp) {
+    cancelByOg0Vec.get.zip(srcWakeUpL1ExuOHVec.get).zip(srcTimerVec.get).foreach{ case ((cancelByOg0: Bool, l1ExuOH: Vec[Vec[Bool]]), srcTimer: Vec[UInt]) =>
+      cancelByOg0 := l1ExuOH.zip(srcTimer).map {
+        case(exuOH, srcTimer) =>
+          (exuOH.asUInt & io.og0Cancel.asUInt).orR && srcTimer === 1.U
+      }.reduce(_ | _)
     }
   }
 

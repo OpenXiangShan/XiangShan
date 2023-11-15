@@ -171,7 +171,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     case ((deps, originalDeps), name) => deps.zip(originalDeps).zipWithIndex.foreach {
       case ((dep, originalDep), deqPortIdx) =>
         if (name.contains("LDU") && name.replace("LDU", "").toInt == deqPortIdx)
-          dep := (originalDep << 1).asUInt | 1.U
+          dep := (originalDep << 2).asUInt | 2.U
         else
           dep := originalDep << 1
     }
@@ -193,9 +193,11 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         Mux1H(srcWakeUpEnqByIQMatrix(i)(j), io.wakeupFromIQ.map(_.bits.loadDependency).map(dep => LoadShouldCancel(Some(dep), io.ldCancel)).toSeq),
         false.B
       ) else false.B
-      wakeupEnqSrcStateBypassFromIQ(i)(j) := Cat(
-        io.wakeupFromIQ.map(x => x.bits.wakeUp(Seq((s0_enqBits(i).psrc(j), s0_enqBits(i).srcType(j))), x.valid).head).toSeq
-      ).orR && !ldTransCancel
+      if (params.numWakeupFromIQ > 0 && j < numLsrc) {
+        wakeupEnqSrcStateBypassFromIQ(i)(j) := srcWakeUpEnqByIQMatrix(i)(j).asUInt.orR && !ldTransCancel
+      } else {
+        wakeupEnqSrcStateBypassFromIQ(i)(j) := false.B
+      }
     }
   }
 
@@ -206,7 +208,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       val wakeupVec: IndexedSeq[IndexedSeq[Bool]] = io.wakeupFromIQ.map((bundle: ValidIO[IssueQueueIQWakeUpBundle]) =>
         bundle.bits.wakeUp(s0_enqBits(i).psrc.take(params.numRegSrc) zip s0_enqBits(i).srcType.take(params.numRegSrc), bundle.valid)
       ).toIndexedSeq.transpose
-      wakeups := wakeupVec.map(x => VecInit(x))
+      val cancelSel = io.wakeupFromIQ.map(x => x.bits.exuIdx).map(x => io.og0Cancel(x))
+      wakeups := wakeupVec.map(x => VecInit(x.zip(cancelSel).map { case (wakeup, cancel) => wakeup && !cancel }))
     }
   }
 
@@ -221,6 +224,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val othersEntryOldestSel = Wire(Vec(params.numDeq, ValidIO(UInt((params.numEntries - params.numEnq).W))))
   val deqSelValidVec = Wire(Vec(params.numDeq, Bool()))
   val deqSelOHVec    = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
+  val cancelDeqVec = Wire(Vec(params.numDeq, Bool()))
 
   val subDeqSelValidVec = OptionWrapper(params.deqFuSame, Wire(Vec(params.numDeq, Bool())))
   val subDeqSelOHVec = OptionWrapper(params.deqFuSame, Wire(Vec(params.numDeq, UInt(params.numEntries.W))))
@@ -245,7 +249,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
                                        wakeupEnqSrcStateBypassFromIQ(i)(j)
         enq.bits.status.psrc(j) := s0_enqBits(i).psrc(j)
         enq.bits.status.srcType(j) := s0_enqBits(i).srcType(j)
-        enq.bits.status.dataSources(j).value := Mux(wakeupEnqSrcStateBypassFromIQ(i)(j).asBool, DataSource.forward, s0_enqBits(i).dataSource(j).value)
+        enq.bits.status.dataSources(j).value := Mux(wakeupEnqSrcStateBypassFromIQ(i)(j).asBool, DataSource.bypass, s0_enqBits(i).dataSource(j).value)
         enq.bits.payload.debugInfo.enqRsTime := GTimer()
       }
       enq.bits.status.fuType := s0_enqBits(i).fuType
@@ -270,9 +274,9 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         case Some(value) => value.zip(srcWakeUpEnqByIQMatrix(i)).zipWithIndex.foreach {
           case ((timer, wakeUpByIQOH), srcIdx) =>
             when(wakeUpByIQOH.asUInt.orR) {
-              timer := 1.U.asTypeOf(timer)
+              timer := 2.U.asTypeOf(timer)
             }.otherwise {
-              timer := Mux(s0_enqBits(i).dataSource(srcIdx).value === DataSource.bypass, 2.U.asTypeOf(timer), 0.U.asTypeOf(timer))
+              timer := Mux(s0_enqBits(i).dataSource(srcIdx).value === DataSource.bypass, 2.U.asTypeOf(timer), 3.U.asTypeOf(timer))
             }
         }
         case None =>
@@ -315,6 +319,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     transEntryDeqVec := entriesIO.transEntryDeqVec
     deqEntryVec := entriesIO.deq.map(_.deqEntry)
     fuTypeVec := entriesIO.fuType
+    cancelDeqVec := entriesIO.cancelDeqVec
     transSelVec := entriesIO.transSelVec
   }
 
@@ -503,7 +508,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         flush.og0Fail := io.og0Resp(i).valid && RSFeedbackType.isBlocked(io.og0Resp(i).bits.respType)
         flush.og1Fail := io.og1Resp(i).valid && RSFeedbackType.isBlocked(io.og1Resp(i).bits.respType)
         wakeUpQueue.io.flush := flush
-        wakeUpQueue.io.enq.valid := io.deq(i).fire && !io.deq(i).bits.common.needCancel(io.og0Cancel, io.og1Cancel) && {
+        wakeUpQueue.io.enq.valid := io.deq(i).fire && {
           if (io.deq(i).bits.common.rfWen.isDefined)
             io.deq(i).bits.common.rfWen.get && io.deq(i).bits.common.pdest =/= 0.U
           else
@@ -517,7 +522,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   }
 
   io.deq.zipWithIndex.foreach { case (deq, i) =>
-    deq.valid                := finalDeqSelValidVec(i)
+    deq.valid                := finalDeqSelValidVec(i) && !cancelDeqVec(i)
     deq.bits.addrOH          := finalDeqSelOHVec(i)
     deq.bits.common.isFirstIssue := deqFirstIssueVec(i)
     deq.bits.common.iqIdx    := OHToUInt(finalDeqSelOHVec(i))

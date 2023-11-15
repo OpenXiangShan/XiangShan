@@ -65,11 +65,17 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
   val flushed = Wire(Bool())
   val deqSuccess = Wire(Bool())
   val srcWakeUp = Wire(Vec(params.numRegSrc, Bool()))
+  val srcWakeUpByWB = Wire(Vec(params.numRegSrc, Bool()))
   val srcCancelVec = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numRegSrc, Bool())))
   val srcLoadCancelVec = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numRegSrc, Bool())))
   val srcWakeUpByIQVec = Wire(Vec(params.numRegSrc, Vec(params.numWakeupFromIQ, Bool())))
+  val srcWakeUpByIQWithoutCancel = Wire(Vec(params.numRegSrc, Vec(params.numWakeupFromIQ, Bool())))
+  val srcWakeUpButCancel = Wire(Vec(params.numRegSrc, Vec(params.numWakeupFromIQ, Bool())))
+  val srcWakeUpL1ExuOHOut = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numRegSrc, ExuVec())))
+  val srcLoadDependencyOut = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numRegSrc, Vec(LoadPipelineWidth, UInt(3.W)))))
   val wakeupLoadDependencyByIQVec = Wire(Vec(params.numWakeupFromIQ, Vec(LoadPipelineWidth, UInt(3.W))))
   val shiftedWakeupLoadDependencyByIQVec = Wire(Vec(params.numWakeupFromIQ, Vec(LoadPipelineWidth, UInt(3.W))))
+  val shiftedWakeupLoadDependencyByIQBypassVec = Wire(Vec(params.numWakeupFromIQ, Vec(LoadPipelineWidth, UInt(3.W))))
   val cancelVec = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numRegSrc, Bool())))
 
   //Reg
@@ -95,7 +101,8 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
   clear := flushed || io.transSel || deqSuccess
   flushed := entryReg.status.robIdx.needFlush(io.flush)
   deqSuccess := io.issueResp.valid && io.issueResp.bits.respType === RSFeedbackType.fuIdle && !srcLoadCancelVec.map(_.reduce(_ || _)).getOrElse(false.B)
-  srcWakeUp := io.wakeup.map(bundle => bundle.bits.wakeUp(entryReg.status.psrc zip entryReg.status.srcType, bundle.valid)).transpose.map(x => VecInit(x.toSeq).asUInt.orR).toSeq
+  srcWakeUpByWB := io.wakeUpFromWB.map(bundle => bundle.bits.wakeUp(entryReg.status.psrc zip entryReg.status.srcType, bundle.valid)).transpose.map(x => VecInit(x.toSeq).asUInt.orR).toSeq
+  srcWakeUp := srcWakeUpByWB.zip(srcWakeUpByIQVec).map { case (x, y) => x || y.asUInt.orR }
 
   shiftedWakeupLoadDependencyByIQVec
     .zip(wakeupLoadDependencyByIQVec)
@@ -103,24 +110,32 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
     case ((deps, originalDeps), name) => deps.zip(originalDeps).zipWithIndex.foreach {
       case ((dep, originalDep), deqPortIdx) =>
         if (name.contains("LDU") && name.replace("LDU", "").toInt == deqPortIdx)
-          dep := (originalDep << 1).asUInt | 1.U
+          dep := (originalDep << 2).asUInt | 2.U
         else
           dep := originalDep << 1
+    }
+  }
+  shiftedWakeupLoadDependencyByIQBypassVec
+    .zip(wakeupLoadDependencyByIQVec)
+    .zip(params.wakeUpInExuSources.map(_.name)).foreach {
+    case ((deps, originalDeps), name) => deps.zip(originalDeps).zipWithIndex.foreach {
+      case ((dep, originalDep), deqPortIdx) =>
+        if (name.contains("LDU") && name.replace("LDU", "").toInt == deqPortIdx)
+          dep := (originalDep << 1).asUInt | 1.U
+        else
+          dep := originalDep
     }
   }
 
   if (params.hasIQWakeUp) {
     srcCancelVec.get.zip(srcLoadCancelVec.get).zip(srcWakeUpByIQVec).zipWithIndex.foreach { case (((srcCancel, srcLoadCancel), wakeUpByIQVec), srcIdx) =>
-      // level1 cancel: A(s)->C, A(s) are the level1 cancel
-      val l1Cancel = (io.og0Cancel.asUInt & entryReg.status.srcWakeUpL1ExuOH.get(srcIdx).asUInt).orR &&
-        entryReg.status.srcTimer.get(srcIdx) === 1.U
       val ldTransCancel = Mux(
         wakeUpByIQVec.asUInt.orR,
         Mux1H(wakeUpByIQVec, wakeupLoadDependencyByIQVec.map(dep => LoadShouldCancel(Some(dep), io.ldCancel))),
         false.B
       )
       srcLoadCancel := LoadShouldCancel(entryReg.status.srcLoadDependency.map(_(srcIdx)), io.ldCancel)
-      srcCancel := l1Cancel || srcLoadCancel || ldTransCancel
+      srcCancel := srcLoadCancel || ldTransCancel
     }
   }
 
@@ -131,7 +146,10 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
     val wakeupVec: IndexedSeq[IndexedSeq[Bool]] = io.wakeUpFromIQ.map((bundle: ValidIO[IssueQueueIQWakeUpBundle]) =>
       bundle.bits.wakeUp(entryReg.status.psrc zip entryReg.status.srcType, bundle.valid)
     ).toIndexedSeq.transpose
-    srcWakeUpByIQVec := wakeupVec.map(x => VecInit(x))
+    val cancelSel = io.wakeUpFromIQ.map(x => x.bits.exuIdx).map(x => io.og0Cancel(x))
+    srcWakeUpByIQVec := wakeupVec.map(x => VecInit(x.zip(cancelSel).map { case (wakeup, cancel) => wakeup && !cancel }))
+    srcWakeUpButCancel := wakeupVec.map(x => VecInit(x.zip(cancelSel).map { case (wakeup, cancel) => wakeup && cancel }))
+    srcWakeUpByIQWithoutCancel := wakeupVec.map(x => VecInit(x))
     wakeupLoadDependencyByIQVec := io.wakeUpFromIQ.map(_.bits.loadDependency).toSeq
   }
 
@@ -146,8 +164,6 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
   entryUpdate.status.dataSources.zip(entryReg.status.dataSources).zip(srcWakeUpByIQVec).foreach {
     case ((dataSourceNext: DataSource, dataSource: DataSource), wakeUpByIQOH: Vec[Bool]) =>
       when(wakeUpByIQOH.asUInt.orR) {
-        dataSourceNext.value := DataSource.forward
-      }.elsewhen(dataSource.value === DataSource.forward) {
         dataSourceNext.value := DataSource.bypass
       }.otherwise {
         dataSourceNext.value := DataSource.reg
@@ -164,11 +180,21 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
           exuOH := entryReg.status.srcWakeUpL1ExuOH.get(srcIdx)
         }
     }
+    srcWakeUpL1ExuOHOut.get.zip(srcWakeUpByIQWithoutCancel).zip(srcWakeUp).zipWithIndex.foreach {
+      case (((exuOH: Vec[Bool], wakeUpByIQOH: Vec[Bool]), wakeUp: Bool), srcIdx) =>
+        when(wakeUpByIQOH.asUInt.orR) {
+          exuOH := Mux1H(wakeUpByIQOH, io.wakeUpFromIQ.map(x => MathUtils.IntToOH(x.bits.exuIdx).U(backendParams.numExu.W)).toSeq).asBools
+        }.elsewhen(wakeUp) {
+          exuOH := 0.U.asTypeOf(exuOH)
+        }.otherwise {
+          exuOH := entryReg.status.srcWakeUpL1ExuOH.get(srcIdx)
+        }
+    }
     entryUpdate.status.srcTimer.get.zip(entryReg.status.srcTimer.get).zip(srcWakeUpByIQVec).zipWithIndex.foreach {
       case (((srcIssuedTimerNext, srcIssuedTimer), wakeUpByIQOH: Vec[Bool]), srcIdx) =>
-        srcIssuedTimerNext := MuxCase(0.U, Seq(
+        srcIssuedTimerNext := MuxCase(3.U, Seq(
           // T0: waked up by IQ, T1: reset timer as 1
-          wakeUpByIQOH.asUInt.orR -> 1.U,
+          wakeUpByIQOH.asUInt.orR -> 2.U,
           // do not overflow
           srcIssuedTimer.andR -> srcIssuedTimer,
           // T2+: increase if the entry is valid, the src is ready, and the src is woken up by iq
@@ -181,6 +207,14 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
           Mux(wakeup,
             Mux(wakeUpByIQVec.asUInt.orR, Mux1H(wakeUpByIQVec, shiftedWakeupLoadDependencyByIQVec), 0.U.asTypeOf(loadDependency)),
             Mux(validReg && loadDependency.asUInt.orR, VecInit(loadDependency.map(i => i(i.getWidth - 2, 0) << 1)), loadDependency)
+          )
+    }
+    srcLoadDependencyOut.get.zip(entryReg.status.srcLoadDependency.get).zip(srcWakeUpByIQVec).zip(srcWakeUp).foreach {
+      case (((loadDependencyOut, loadDependency), wakeUpByIQVec), wakeup) =>
+        loadDependencyOut :=
+          Mux(wakeup,
+            Mux(wakeUpByIQVec.asUInt.orR, Mux1H(wakeUpByIQVec, shiftedWakeupLoadDependencyByIQBypassVec), 0.U.asTypeOf(loadDependency)),
+            loadDependency
           )
     }
   }
@@ -198,13 +232,13 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
   entryUpdate.status.fuType := entryReg.status.fuType
   entryUpdate.status.robIdx := entryReg.status.robIdx
   entryUpdate.status.issued := entryReg.status.issued // otherwise
-  when(!entryReg.status.srcReady){
-    entryUpdate.status.issued := false.B
-  }.elsewhen(srcLoadCancelVec.map(_.reduce(_ || _)).getOrElse(false.B)) {
+  when(srcLoadCancelVec.map(_.reduce(_ || _)).getOrElse(false.B) || srcWakeUpButCancel.map(_.fold(false.B)(_ || _)).fold(false.B)(_ || _)) {
     entryUpdate.status.issued := false.B
   }.elsewhen(io.deqSel) {
     entryUpdate.status.issued := true.B
   }.elsewhen(io.issueResp.valid && RSFeedbackType.isBlocked(io.issueResp.bits.respType)) {
+    entryUpdate.status.issued := false.B
+  }.elsewhen(!entryReg.status.srcReady) {
     entryUpdate.status.issued := false.B
   }
   entryUpdate.status.firstIssue := io.deqSel || entryReg.status.firstIssue
@@ -215,20 +249,45 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
   if(params.needPc) {
     entryUpdate.status.pc.get := entryReg.status.pc.get
   }
+  val canIssue = entryReg.status.canIssue && validReg && !srcCancelVec.getOrElse(false.B).asUInt.orR
+  val canIssueBypass = validReg && !entryReg.status.issued && !entryReg.status.blocked &&
+    VecInit(entryReg.status.srcState.zip(srcWakeUpByIQWithoutCancel).zipWithIndex.map { case ((state, wakeupVec), srcIdx) =>
+      val cancel = srcCancelVec.map(_ (srcIdx)).getOrElse(false.B)
+      Mux(cancel, false.B, wakeupVec.asUInt.orR | state)
+    }).asUInt.andR
+  io.dataSource.zip(entryReg.status.dataSources).zip(srcWakeUpByIQVec).zip(srcWakeUp).foreach {
+    case (((dataSourceOut: DataSource, dataSource: DataSource), wakeUpByIQOH: Vec[Bool]), wakeUpAll) =>
+      when(wakeUpByIQOH.asUInt.orR) {
+        dataSourceOut.value := DataSource.forward
+      }.elsewhen(wakeUpAll) {
+        dataSourceOut.value := DataSource.reg
+      }.otherwise {
+        dataSourceOut.value := dataSource.value
+      }
+  }
+  if (params.hasIQWakeUp) {
+    io.srcTimer.get.zip(entryReg.status.srcTimer.get).zip(srcWakeUpByIQWithoutCancel).zip(srcWakeUp).foreach {
+      case (((srcTimerOut, srcTimer), wakeUpByIQOH: Vec[Bool]), wakeUpAll) =>
+        when(wakeUpByIQOH.asUInt.orR) {
+          srcTimerOut := 1.U
+        }.otherwise {
+          srcTimerOut := srcTimer
+        }
+    }
+  }
 
   //output
   io.transEntry.valid := validReg && io.transSel && !flushed && !deqSuccess
   io.transEntry.bits := entryUpdate
-  io.canIssue := entryReg.status.canIssue && validReg
+  io.canIssue := canIssue || canIssueBypass
   io.clear := clear
   io.fuType := entryReg.status.fuType
-  io.dataSource := entryReg.status.dataSources
-  io.srcWakeUpL1ExuOH.foreach(_ := entryReg.status.srcWakeUpL1ExuOH.get)
-  io.srcTimer.foreach(_ := entryReg.status.srcTimer.get)
+  io.srcWakeUpL1ExuOH.foreach(_ := Mux(canIssueBypass && !canIssue, srcWakeUpL1ExuOHOut.get, entryReg.status.srcWakeUpL1ExuOH.get))
   io.valid := validReg
   io.isFirstIssue := !entryReg.status.firstIssue
   io.entry.valid := validReg
   io.entry.bits := entryReg
+  io.entry.bits.status.srcLoadDependency.foreach(_ := Mux(canIssueBypass && !canIssue, srcLoadDependencyOut.get, entryReg.status.srcLoadDependency.get))
   io.robIdx := entryReg.status.robIdx
   io.issueTimerRead := entryReg.status.issueTimer
   io.deqPortIdxRead := entryReg.status.deqPortIdx
