@@ -88,10 +88,10 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
   tableUpdate.zipWithIndex.foreach{ case (update, idx) =>
     when(allocMask(idx)) {
       update := RegStatus.busy
-    }.elsewhen(wakeUpMask(idx)) {
-      update := RegStatus.bypass
     }.elsewhen(cancelMask(idx)) {
       update := RegStatus.busy
+    }.elsewhen(wakeUpMask(idx)) {
+      update := RegStatus.bypass
     }.elsewhen((table(idx) === RegStatus.bypass) || wbMask(idx)) {
       update := RegStatus.regFile
     }.otherwise {
@@ -101,7 +101,7 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
 
   io.read.foreach{ case res =>
     res.resp := Mux(!cancelMask(res.req), !table(res.req).andR, false.B)
-    res.dataSource.value := Mux(table(res.req) === DataSource.bypass, DataSource.bypass, DataSource.reg)
+    res.dataSource.value := DataSource.reg
     val wakeUpExuOHVec = wakeUpReg.map{ case x =>
       val v: Bool = pregWB match {
         case _: IntWB => x.valid && x.bits.rfWen
