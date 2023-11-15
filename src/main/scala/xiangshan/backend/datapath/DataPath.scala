@@ -322,7 +322,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
               s1_data.params.immType.map(_.litValue)
             )
           }
-        } else if (s1_data.params.hasLoadFu) {
+        } else if (s1_data.params.hasLoadFu || s1_data.params.hasHyldaFu) {
           // dirty code for fused_lui_load
           when(SrcType.isImm(s0.bits.srcType(0))) {
             s1_data.src(0) := SignExt(ImmUnion.U.toImm32(s0.bits.common.imm(s0.bits.common.imm.getWidth - 1, ImmUnion.I.len)), XLEN)
@@ -422,7 +422,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
         when(SrcType.isImm(s1_srcType(i)(j)(0))) {
           sinkData.src(0) := s1_toExuData(i)(j).src(0)
         }
-      } else if (sinkData.params.hasLoadFu) {
+      } else if (sinkData.params.hasLoadFu || sinkData.params.hasHyldaFu) {
         when(SrcType.isImm(s1_srcType(i)(j)(0))) {
           sinkData.src(0) := s1_toExuData(i)(j).src(0)
         }
