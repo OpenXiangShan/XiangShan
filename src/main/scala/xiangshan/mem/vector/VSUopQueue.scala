@@ -305,7 +305,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
       x.mask := mask
       x.alignedType := issueAlignedType
       x.exp := exp
-      x.flow_idx := elemIdx
+      x.elemIdx := elemIdx
       x.is_first_ele := elemIdx === 0.U
       x.data := GenVSData(
         data = issueEntry.data.asUInt,
@@ -362,7 +362,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
       finish(ptr.value) := nextFlowCnt === 0.U
       when (!exception(ptr.value) && flowWbExcp(i).asUInt.orR) {
         exception(ptr.value) := true.B
-        vstart(ptr.value) := wb.bits.exp_ele_index
+        vstart(ptr.value) := wb.bits.elemIdx
         entry.uop.exceptionVec := flowWbExcp(i)
       }
     }

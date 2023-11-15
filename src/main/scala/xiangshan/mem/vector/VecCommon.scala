@@ -188,7 +188,7 @@ class OnlyVecExuOutput(implicit p: Parameters) extends VLSUBundle {
   val reg_offset = UInt(vOffsetBits.W)
   val exp = Bool()
   val is_first_ele = Bool()
-  val exp_ele_index = UInt(elemIdxBits.W) // element index
+  val elemIdx = UInt(elemIdxBits.W) // element index
   val uopQueuePtr = new VluopPtr
   val flowPtr = new VlflowPtr
 }
@@ -198,7 +198,7 @@ class VecExuOutput(implicit p: Parameters) extends MemExuOutput with HasVLSUPara
 }
 
 class VecStoreExuOutput(implicit p: Parameters) extends MemExuOutput with HasVLSUParameters {
-  val exp_ele_index = UInt(elemIdxBits.W)
+  val elemIdx = UInt(elemIdxBits.W)
   val uopQueuePtr = new VsUopPtr
 }
 
@@ -235,7 +235,7 @@ class VecFlowBundle(implicit p: Parameters) extends VLSUBundleWithMicroOp {
   val mask              = UInt(VLENB.W)
   val alignedType       = UInt(alignTypeBits.W)
   val exp               = Bool()
-  val flow_idx          = UInt(elemIdxBits.W)
+  val elemIdx           = UInt(elemIdxBits.W)
   val is_first_ele      = Bool()
 }
 

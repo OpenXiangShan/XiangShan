@@ -50,7 +50,6 @@ class VecLoadPipeBundle(implicit p: Parameters) extends VLSUBundleWithMicroOp {
   val alignedType         = UInt(alignTypeBits.W)
   val exp                 = Bool()
   val is_first_ele        = Bool()
-  val flowIdx             = UInt(elemIdxBits.W)
   val flowPtr             = new VlflowPtr
   val isFirstIssue        = Bool()
 }
@@ -205,7 +204,7 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
       x.vec.reg_offset    := thisLoadResult.vec.reg_offset
       x.vec.exp           := thisLoadResult.vec.exp
       x.vec.is_first_ele  := thisLoadResult.vec.is_first_ele
-      x.vec.exp_ele_index := thisLoadResult.vec.exp_ele_index
+      x.vec.elemIdx       := thisLoadResult.vec.elemIdx
       x.vec.uopQueuePtr   := thisLoadResult.vec.uopQueuePtr
       x.vec.flowPtr       := deqPtr(i)
       // From ExuOutput
@@ -260,7 +259,6 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
       x.alignedType         := thisFlow.alignedType
       x.exp                 := thisFlow.exp
       x.is_first_ele        := thisFlow.is_first_ele
-      x.flowIdx             := thisFlow.flow_idx
       x.flowPtr             := issuePtr(i)
       x.isFirstIssue        := !issued(issuePtr(i).value)
     }
@@ -324,7 +322,7 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
         x.vec.reg_offset    := thisPipeResult.vec.reg_offset
         x.vec.exp           := thisPipeResult.vec.exp
         x.vec.is_first_ele  := thisPipeResult.vec.is_first_ele
-        x.vec.exp_ele_index := flowQueueEntries(thisPtr).flow_idx
+        x.vec.elemIdx       := flowQueueEntries(thisPtr).elemIdx
         x.vec.uopQueuePtr   := flowQueueEntries(thisPtr).uopQueuePtr
         x.vec.flowPtr       := DontCare
         // From ExuOutput

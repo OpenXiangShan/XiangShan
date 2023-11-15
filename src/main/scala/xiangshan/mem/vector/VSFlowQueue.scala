@@ -145,7 +145,6 @@ object VSFQFeedbackType {
 }
 
 class VSFQFeedback (implicit p: Parameters) extends XSBundle {
-  // val fqIdx = UInt(log2Up(VsFlowSize).W)
   val flowPtr = new VsFlowPtr
   val hit   = Bool()
   //val flushState = Bool()
@@ -160,7 +159,6 @@ class VecStorePipeBundle(implicit p: Parameters) extends MemExuInput(isVector = 
   val uop_unit_stride_fof = Bool()
   val alignedType         = UInt(2.W) // ! MAGIC NUM: VLSUConstants.alignTypeBits
   val exp                 = Bool()
-  // val fqIdx               = UInt(log2Ceil(VsFlowSize).W)
   val flowPtr             = new VsFlowPtr
 }
 
@@ -185,7 +183,6 @@ class VecStoreFlowEntry (implicit p: Parameters) extends VecFlowBundle {
     pipeBundle.uop_unit_stride_fof  := false.B
     pipeBundle.alignedType          := this.alignedType
     pipeBundle.exp                  := this.exp
-    // result.fqIdx                := thisPtr.value
     pipeBundle.flowPtr              := thisPtr
     pipeBundle
   }
@@ -300,7 +297,7 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
         x.mask := thisFlowIn.mask
         x.alignedType := thisFlowIn.alignedType
         x.exp := thisFlowIn.exp
-        x.flow_idx := thisFlowIn.flow_idx
+        x.elemIdx := thisFlowIn.elemIdx
         x.is_first_ele := thisFlowIn.is_first_ele
         x.uop := thisFlowIn.uop
         x.isLastElem := thisFlowIn.isLastElem
@@ -440,7 +437,7 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
       // x.redirect      := DontCare
       x.debug         := DontCare
       // From VecStoreExuOutput
-      x.exp_ele_index := thisEntry.flow_idx       // ?
+      x.elemIdx := thisEntry.elemIdx
       x.uopQueuePtr   := thisEntry.uopQueuePtr
     }
   }

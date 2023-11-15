@@ -111,10 +111,8 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   // val offset = Vec(2,UInt(4.W))
   val exp = Bool()
   val is_first_ele = Bool()
-  val flowIdx = UInt(8.W)
   val flowPtr = new VlflowPtr() // VLFlowQueue ptr
   val sflowPtr = new VsFlowPtr() // VSFlowQueue ptr
-  val fqIdx = UInt(log2Ceil(VsFlowL1Size).W)
 
   // For debug usage
   val isFirstIssue = Bool()
@@ -170,7 +168,6 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     isvec := input.isvec
     is128bit := input.is128bit
     exp := input.exp
-    flowIdx := input.flowIdx
     is_first_ele := input.is_first_ele
     uop_unit_stride_fof := input.uop_unit_stride_fof
     // rob_idx_valid := input.rob_idx_valid
@@ -178,7 +175,6 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     // inner_idx := input.inner_idx
     reg_offset := input.reg_offset
     // offset := input.offset
-    fqIdx := input.fqIdx
     flowPtr := input.flowPtr
     sflowPtr := input.sflowPtr
     isFirstIssue := input.isFirstIssue
@@ -256,7 +252,6 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     // inner_idx := input.inner_idx
     reg_offset := input.reg_offset
     // offset := input.offset
-    fqIdx := input.fqIdx
 
     isFirstIssue := input.isFirstIssue
     hasROBEntry := input.hasROBEntry

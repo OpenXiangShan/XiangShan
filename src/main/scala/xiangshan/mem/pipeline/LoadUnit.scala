@@ -212,8 +212,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // val s0_offset              = WireInit(VecInit(Seq.fill(2)(0.U(4.W))))
   val s0_exp                 = WireInit(true.B)
   val s0_is_first_ele        = WireInit(false.B)
-  val s0_flowIdx            = WireInit(0.U(elemIdxBits.W))
-  val s0_flowPtr             = WireInit(0.U.asTypeOf(new VlflowPtr))
+  val s0_flowPtr        = WireInit(0.U.asTypeOf(new VlflowPtr))
 
   // load flow select/gen
   // src0: super load replayed by LSQ (cache miss replay) (io.replay)
@@ -495,7 +494,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // s0_offset              := src.offset
     s0_exp                 := src.exp
     s0_is_first_ele        := src.is_first_ele
-    s0_flowIdx             := src.flowIdx
     s0_flowPtr             := src.flowPtr
     s0_deqPortIdx          := 0.U
   }
@@ -573,7 +571,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // s0_out.offset          := s0_offset
   s0_out.exp             := s0_exp
   s0_out.is_first_ele    := s0_is_first_ele
-  s0_out.flowIdx         := s0_flowIdx
   s0_out.flowPtr         := s0_flowPtr
   s0_out.uop.exceptionVec(loadAddrMisaligned) := !s0_addr_aligned && s0_exp
   s0_out.forward_tlDchannel := s0_super_ld_rep_select
@@ -1177,10 +1174,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_vecout.reg_offset        := s3_in.reg_offset
   s3_vecout.exp               := s3_exp
   s3_vecout.is_first_ele      := s3_in.is_first_ele
-  // TODO: VLSU, fix it!
   s3_vecout.uopQueuePtr       := DontCare // uopQueuePtr is already saved in flow queue
-  s3_vecout.flowPtr      := s3_in.flowPtr
-  s3_vecout.exp_ele_index     := 0.U
+  s3_vecout.flowPtr           := s3_in.flowPtr
+  s3_vecout.elemIdx           := DontCare // elemIdx is already saved in flow queue
 
   when (s3_force_rep) {
     s3_out.bits.uop.exceptionVec := 0.U.asTypeOf(s3_in.uop.exceptionVec.cloneType)
@@ -1304,9 +1300,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.vecReplay.bits.reg_offset := s3_in.reg_offset
   io.vecReplay.bits.exp := s3_in.exp
   io.vecReplay.bits.is_first_ele := s3_in.is_first_ele
-  io.vecReplay.bits.flowIdx := s3_in.flowIdx
   io.vecReplay.bits.flowPtr := s3_in.flowPtr
-  io.vecReplay.bits.fqIdx := s3_in.fqIdx
 
   // fast load to load forward
   io.l2l_fwd_out.valid      := s3_out.valid && !s3_in.lateKill
