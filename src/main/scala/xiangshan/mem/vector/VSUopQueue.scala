@@ -313,7 +313,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
         alignedType = issueAlignedType
       )
       x.uopQueuePtr := flowSplitPtr
-      x.isLastElem := (elemIdx +& 1.U) === (issueNFIELDS << issueVLMAXLog2)
+      x.isLastElem := (elemIdx +& 1.U) === Mux(issueEntry.usWholeReg, (issueNFIELDS << log2Up(VLENB)),(issueNFIELDS << issueVLMAXLog2))
     }
   }
 
