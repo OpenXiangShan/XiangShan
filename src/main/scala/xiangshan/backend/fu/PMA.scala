@@ -70,7 +70,7 @@ trait MMPMAMethod extends PMAConst with PMAMethod with PMPReadWriteMethodBare {
         if (notempty) { (r_ready, o_valid, pmaCfgMerged(pmaCfgIndex(i))) }
         else { (r_ready, o_valid, 0.U) }
       }, w = RegWriteFn((valid, data) => {
-        if (notempty) { when (valid) { pmaCfgMerged(pmaCfgIndex(i)) := write_cfg_vec(mask, addr, i)(data) } }
+        if (notempty) { when (valid) { pmaCfgMerged(pmaCfgIndex(i)) := write_cfg_vec(mask, addr, i, pmaCfgMerged(pmaCfgIndex(i)))(data) } }
         true.B
       }), desc = RegFieldDesc(s"MMPMA_config_${i}", s"pma config register #${i}"))
     }}
