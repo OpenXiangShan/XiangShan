@@ -460,7 +460,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     replace.io.apply_sep(dtlb_ld.map(_.replace) ++ dtlb_st.map(_.replace) ++ dtlb_hy.map(_.replace) ++ dtlb_prefetch.map(_.replace), ptwio.resp.bits.data.entry.tag)
   } else {
     if (ldtlbParams.outReplace) {
-      val replace_ld = Module(new TlbReplace(LduCnt, ldtlbParams))
+      val replace_ld = Module(new TlbReplace(LduCnt + 1, ldtlbParams))
       replace_ld.io.apply_sep(dtlb_ld.map(_.replace), ptwio.resp.bits.data.entry.tag)
     }
     if (sttlbParams.outReplace) {
@@ -767,7 +767,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // dtlb
     hybridUnits(i).io.tlb <> dtlb_reqs.drop(LduCnt + StaCnt + 1)(i)
     // pmp
-    hybridUnits(i).io.pmp <> pmp_check.drop(LduCnt + HyuCnt + 1)(i).resp
+    hybridUnits(i).io.pmp <> pmp_check.drop(LduCnt + StaCnt + 1)(i).resp
     // st-ld violation query
     val stld_nuke_query = VecInit(storeUnits.map(_.io.stld_nuke_query) ++ hybridUnits.map(_.io.stu_io.stld_nuke_query))
     hybridUnits(i).io.ldu_io.stld_nuke_query := stld_nuke_query
