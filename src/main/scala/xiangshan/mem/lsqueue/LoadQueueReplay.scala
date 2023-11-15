@@ -363,13 +363,13 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val s0_remEnqSelVec = Seq.tabulate(LoadPipelineWidth)(w => VecInit(s0_remLoadEnqFireVec.map(x => x(w))))
 
   // generate free mask
-  val s0_loadFreeSelMask = needCancel.asUInt
+  val s0_loadFreeSelMask = RegNext(needCancel.asUInt)
   val s0_remFreeSelVec = VecInit(Seq.tabulate(LoadPipelineWidth)(rem => getRemBits(s0_loadFreeSelMask)(rem)))
 
   // l2 hint wakes up cache missed load
   // l2 will send GrantData in next 2/3 cycle, wake up the missed load early and sent them to load pipe, so them will hit the data in D channel or mshr in load S1
   val s0_loadHintWakeMask = VecInit((0 until LoadQueueReplaySize).map(i => {
-    allocated(i) && !scheduled(i) && cause(i)(LoadReplayCauses.C_DM) && blocking(i) && missMSHRId(i) === io.l2_hint.bits.sourceId && io.l2_hint.valid && !needCancel(i)
+    allocated(i) && !scheduled(i) && cause(i)(LoadReplayCauses.C_DM) && blocking(i) && missMSHRId(i) === io.l2_hint.bits.sourceId && io.l2_hint.valid
   })).asUInt
   // l2 will send 2 beats data in 2 cycles, so if data needed by this load is in first beat, select it this cycle, otherwise next cycle
   val s0_loadHintSelMask = s0_loadHintWakeMask & VecInit(dataInLastBeatReg.map(!_)).asUInt
@@ -391,12 +391,12 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   // 3. lower priority load
   val s0_loadHigherPriorityReplaySelMask = VecInit((0 until LoadQueueReplaySize).map(i => {
     val hasHigherPriority = cause(i)(LoadReplayCauses.C_DM) || cause(i)(LoadReplayCauses.C_FF)
-    allocated(i) && !scheduled(i) && !blocking(i) && hasHigherPriority && !needCancel(i)
+    allocated(i) && !scheduled(i) && !blocking(i) && hasHigherPriority
   })).asUInt // use uint instead vec to reduce verilog lines
   val s0_remLoadHigherPriorityReplaySelMask = VecInit((0 until LoadPipelineWidth).map(rem => getRemBits(s0_loadHigherPriorityReplaySelMask)(rem)))
   val s0_loadLowerPriorityReplaySelMask = VecInit((0 until LoadQueueReplaySize).map(i => {
     val hasLowerPriority = !cause(i)(LoadReplayCauses.C_DM) && !cause(i)(LoadReplayCauses.C_FF)
-    allocated(i) && !scheduled(i) && !blocking(i) && hasLowerPriority && !needCancel(i)
+    allocated(i) && !scheduled(i) && !blocking(i) && hasLowerPriority
   })).asUInt // use uint instead vec to reduce verilog lines
   val s0_remLoadLowerPriorityReplaySelMask = VecInit((0 until LoadPipelineWidth).map(rem => getRemBits(s0_loadLowerPriorityReplaySelMask)(rem)))
   val s0_loadNormalReplaySelMask = s0_loadLowerPriorityReplaySelMask | s0_loadHigherPriorityReplaySelMask | s0_loadHintSelMask
@@ -463,7 +463,9 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   def coldDownNow(i: Int) = coldCounter(i) >= ColdDownThreshold
 
   for (i <- 0 until LoadPipelineWidth) {
-    val s0_can_go = s1_can_go(i) || uop(s1_oldestSel(i).bits).robIdx.needFlush(io.redirect)
+    val s0_can_go = s1_can_go(i) ||
+                    uop(s1_oldestSel(i).bits).robIdx.needFlush(io.redirect) ||
+                    uop(s1_oldestSel(i).bits).robIdx.needFlush(RegNext(io.redirect))
     val s0_oldestSelIndexOH = s0_oldestSel(i).bits // one-hot
     s1_oldestSel(i).valid := RegEnable(s0_oldestSel(i).valid, s0_can_go)
     s1_oldestSel(i).bits := RegEnable(OHToUInt(s0_oldestSel(i).bits), s0_can_go)
@@ -476,7 +478,8 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   }
   val s2_cancelReplay = Wire(Vec(LoadPipelineWidth, Bool()))
   for (i <- 0 until LoadPipelineWidth) {
-    val s1_cancel = uop(s1_oldestSel(i).bits).robIdx.needFlush(io.redirect)
+    val s1_cancel = uop(s1_oldestSel(i).bits).robIdx.needFlush(io.redirect) ||
+                    uop(s1_oldestSel(i).bits).robIdx.needFlush(RegNext(io.redirect))
     val s1_oldestSelV = s1_oldestSel(i).valid && !s1_cancel
     s1_can_go(i)          := replayCanFire(i) && (!s2_oldestSel(i).valid || io.replay(i).fire)
     s2_oldestSel(i).valid := RegEnable(Mux(s1_can_go(i), s1_oldestSelV, false.B), (s1_can_go(i) || io.replay(i).fire))
