@@ -154,7 +154,8 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
     val isSegment = nf =/= 0.U && !us_whole_reg(fuOpType)
     val instType = Cat(isSegment, mop)
     val uopIdx = io.storeIn.bits.uop.vpu.vuopIdx
-    val vdIdx = GenVdIdx(instType, emul, lmul, uopIdx)
+    val uopIdxInField = GenUopIdxInField(instType, emul, lmul, uopIdx)
+    val vdIdxInField = GenVdIdxInField(instType, emul, lmul, uopIdxInField)
     val numFlowsSameVdLog2 = Mux(
       isIndexed(instType),
       log2Up(VLENB).U - sew(1,0),
@@ -162,9 +163,9 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
     )
     val flows = GenRealFlowNum(instType, emul, lmul, eew, sew)
     val flowsLog2 = GenRealFlowLog2(instType, emul, lmul, eew, sew)
-    val flowsPrevThisUop = uopIdx << flowsLog2 // # of flows before this uop
-    val flowsPrevThisVd = vdIdx << numFlowsSameVdLog2 // # of flows before this vd
-    val flowsIncludeThisUop = (uopIdx +& 1.U) << flowsLog2 // # of flows before this uop besides this uop
+    val flowsPrevThisUop = uopIdxInField << flowsLog2 // # of flows before this uop in a field
+    val flowsPrevThisVd = vdIdxInField << numFlowsSameVdLog2 // # of flows before this vd in a field
+    val flowsIncludeThisUop = (uopIdxInField +& 1.U) << flowsLog2 // # of flows before this uop besides this uop
     val alignedType = Mux(isIndexed(instType), sew(1, 0), eew(1, 0))
     val srcMask = Mux(vm, Fill(VLEN, 1.U(1.W)), io.storeIn.bits.src_mask)
     val flowMask = ((srcMask &
@@ -238,6 +239,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
   val issueEew = issueEntry.eew
   val issueSew = issueEntry.sew
   val issueAlignedType = Mux(isIndexed(issueInstType), issueSew(1, 0), issueEew(1, 0))
+  val issueMUL = Mux(isIndexed(issueInstType), issueEntry.lmul, issueEntry.emul)
   val issueVLMAXMask = issueEntry.vlmax - 1.U
   val issueVLMAXLog2 = GenVLMAXLog2(issueEntry.lmul, issueEntry.sew)
   val issueMULMask = LookupTree(issueAlignedType, List(
@@ -246,6 +248,11 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
     "b10".U -> "b00011".U,
     "b11".U -> "b00001".U
   ))
+  val issueFieldMask = Mux(
+    !isSegment(issueInstType) || issueMUL.asSInt >= 0.S,
+    issueVLMAXMask,
+    issueMULMask
+  )
   val issueNFIELDS = issueEntry.nfields
   val issueVstart = issueUop.vpu.vstart
   val issueVl = issueUop.vpu.vl
@@ -266,7 +273,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
       uopIdx = issueUopIdx,
       flowIdx = flowIdx
     ) // elemIdx inside an inst
-    val elemIdxInsideField = elemIdx & issueVLMAXMask
+    val elemIdxInsideField = elemIdx & issueFieldMask
     elemIdxInsideVd(portIdx) := elemIdx & issueMULMask // elemIdx inside a vd
     val nfIdx = Mux(
       isIndexed(issueInstType),
@@ -346,6 +353,13 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
     val ptr = wb.bits.uopQueuePtr
     val entry = uopq(ptr.value)
     flowWbExcp(i) := wb.bits.uop.exceptionVec
+    val flowWbElemIdxInField = wb.bits.elemIdx & GenFieldMask(
+      instType = entry.instType,
+      emul = entry.emul,
+      lmul = entry.lmul,
+      eew = entry.eew,
+      sew = entry.sew
+    )
 
     // handle the situation where multiple ports are going to write the same uop queue entry
     val mergedByPrevPort = (i != 0).B && Cat((0 until i).map(j =>
@@ -362,7 +376,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
       finish(ptr.value) := nextFlowCnt === 0.U
       when (!exception(ptr.value) && flowWbExcp(i).asUInt.orR) {
         exception(ptr.value) := true.B
-        vstart(ptr.value) := wb.bits.elemIdx
+        vstart(ptr.value) := flowWbElemIdxInField
         entry.uop.exceptionVec := flowWbExcp(i)
       }
     }

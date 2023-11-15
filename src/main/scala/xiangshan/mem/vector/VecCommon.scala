@@ -70,6 +70,7 @@ trait HasVLSUParameters extends HasXSParameter with VLSUConstants {
   def isStrided(instType: UInt) = instType(1, 0) === "b10".U
   def isIndexed(instType: UInt) = instType(0) === "b1".U
   def isNotIndexed(instType: UInt) = instType(0) === "b0".U
+  def isSegment(instType: UInt) = instType(2) === "b1".U
 
   def mergeDataWithMask(oldData: UInt, newData: UInt, mask: UInt): Vec[UInt] = {
     require(oldData.getWidth == newData.getWidth)
@@ -486,6 +487,26 @@ object GenSegNfIdx {
     )))}
 }
 
+object GenUopIdxInField {
+  def apply (instType: UInt, emul: UInt, lmul: UInt, uopIdx: UInt): UInt = {
+    val isIndexed = instType(0)
+    val mulInField = Mux(
+      isIndexed,
+      Mux(lmul.asSInt > emul.asSInt, lmul, emul),
+      emul
+    )
+    LookupTree(mulInField, List(
+      "b101".U -> 0.U,
+      "b110".U -> 0.U,
+      "b111".U -> 0.U,
+      "b000".U -> 0.U,
+      "b001".U -> uopIdx(0),
+      "b010".U -> uopIdx(1, 0),
+      "b011".U -> uopIdx(2, 0)
+    ))
+  }
+}
+
 object GenSegNfIdxMul {
   def apply (emul: UInt, lmul: UInt, uopIdx: UInt):UInt = {
     (LookupTree(Cat(emul,lmul),List(
@@ -648,7 +669,7 @@ object GenEleIdx {
   }
 }
 
-object GenVdIdx extends VLSUConstants {
+object GenVdIdxInField extends VLSUConstants {
   def apply(instType: UInt, emul: UInt, lmul: UInt, uopIdx: UInt): UInt = {
     val vdIdx = Wire(UInt(log2Up(maxMUL).W))
     when (instType(1,0) === "b00".U || instType(1,0) === "b10".U || lmul.asSInt > emul.asSInt) {
@@ -660,11 +681,32 @@ object GenVdIdx extends VLSUConstants {
       val uopIdxWidth = uopIdx.getWidth
       vdIdx := LookupTree(multiple, List(
         0.U -> uopIdx,
-        1.U -> uopIdx(uopIdxWidth - 1, 1),
-        2.U -> uopIdx(uopIdxWidth - 1, 2),
-        3.U -> uopIdx(uopIdxWidth - 1, 3)
+        1.U -> (uopIdx >> 1),
+        2.U -> (uopIdx >> 2),
+        3.U -> (uopIdx >> 3)
       ))
     }
     vdIdx
+  }
+}
+
+object GenFieldMask {
+  def apply(instType: UInt, emul: UInt, lmul: UInt, eew: UInt, sew: UInt): UInt = {
+    val isSegment = instType(2)
+    val isIndexed = instType(0)
+    val alignedType = Mux(isIndexed, sew(1, 0), eew(1, 0))
+    val mul = Mux(isIndexed, lmul, emul)
+    val vlmaxMask = GenVLMAX(lmul, sew) - 1.U
+    val mulMask = LookupTree(alignedType, List(
+      "b00".U -> "b01111".U,
+      "b01".U -> "b00111".U,
+      "b10".U -> "b00011".U,
+      "b11".U -> "b00001".U
+    ))
+    Mux(
+      !isSegment || mul.asSInt >= 0.S,
+      vlmaxMask,
+      mulMask
+    )
   }
 }
