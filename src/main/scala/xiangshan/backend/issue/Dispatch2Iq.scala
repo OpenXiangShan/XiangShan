@@ -3,6 +3,7 @@ package xiangshan.backend.issue
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.decode._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility.SelectOne
 import utils._
@@ -428,21 +429,145 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
 
   dontTouch(selIdxOH)
 
-  finalFuDeqMap.zipWithIndex.foreach { case ((fuTypeSeq, deqPortIdSeq), i) =>
-    val maxSelNum = wrapper.numIn
-    val selNum = deqPortIdSeq.length
-    val portReadyVec = deqPortIdSeq.map(x => outs(x).ready)
-    val canAcc = uopsIn.map(in => canAccept(fuTypeSeq.map(x => x.ohid), in.bits.fuType) && in.valid)
-    val selPort = SelectOne("circ", portReadyVec.toSeq, selNum)
-    val select = SelectOne("naive", canAcc, selNum)
-    for ((portId, j) <- deqPortIdSeq.zipWithIndex) {
-      val (selPortReady, selPortIdxOH) = selPort.getNthOH(j + 1)
-      val (selectValid, selectIdxOH) = select.getNthOH(j + 1)
-      when(selPortReady && selectValid) {
-        selIdxOH(i)(OHToUInt(selPortIdxOH)).valid := selectValid
-        selIdxOH(i)(OHToUInt(selPortIdxOH)).bits := selectIdxOH.asUInt
+  def loadDeqSeq(storeCnt: Int): Seq[Int] = Map(
+    0 -> Seq(4, 0, 1, 5, 2, 3),
+    1 -> Seq(1, 4, 5, 2, 3, 0),
+    2 -> Seq(4, 1, 2, 5, 0, 3),
+    3 -> Seq(5, 2, 4, 0, 3, 1),
+    4 -> Seq(4, 5, 1, 2, 3, 0),
+    5 -> Seq(4, 5, 1, 2, 3, 0),
+    6 -> Seq(4, 5, 1, 2, 3, 0)
+  )(storeCnt)
+
+  def storeDeqSeq(storeCnt: Int): Seq[Int] = loadDeqSeq(storeCnt).filter(_ < 4).reverse
+
+  private abstract class LoadOrStore(val isStore: Boolean) { def isLoad = !isStore }
+  private case class Load() extends LoadOrStore(false)
+  private case class Store() extends LoadOrStore(true)
+
+  private val allLSPatern = Seq.tabulate(7)(i => (Seq.fill(i)(Load()) ++ Seq.fill(6 - i)(Store())).toSeq.permutations).flatten.zipWithIndex.toSeq
+  // println(allLSPatern.mkString("\n"))
+
+  // val deqPortReadyVec = outs.map(_.ready)
+  // val (loadSwapMapSeq, loadSwappedReadyVecSeq) = allLSPatern.map { case (lsPattern, _) =>
+  //   val loadDeqIter = loadDeqSeq(lsPattern.count(_ == Store())).iterator
+  //   val swapMap = lsPattern.map {
+  //     case _: Load if (loadDeqIter.hasNext) => Some(loadDeqIter.next())
+  //     case _ => None
+  //   }
+  //   println(lsPattern, swapMap)
+  //   (swapMap, VecInit(swapMap.map(_.map(deqPortReadyVec(_)).getOrElse(false.B))))
+  // }.unzip
+  // println("------------------------------------------------------------")
+  // val (storeSwapMapSeq, storeSwappedReadyVecSeq) = allLSPatern.map { case (lsPattern, _) =>
+  //   val storeDeqIter = storeDeqSeq(lsPattern.count(_ == Store())).iterator
+  //   val swapMap = lsPattern.map {
+  //     case _: Store if (storeDeqIter.hasNext) => Some(storeDeqIter.next())
+  //     case _ => None
+  //   }
+  //   println(lsPattern, swapMap)
+  //   (swapMap, VecInit(swapMap.map(_.map(deqPortReadyVec(_)).getOrElse(false.B))))
+  // }.unzip
+  val inIsStoreVec = Cat(uopsIn.map(in => in.valid && FuType.isStore(in.bits.fuType)))
+  // object LSPatternTable {
+  //   val default = BitPat(0.U(allLSPatern.length.W))
+  //   val table = allLSPatern.map { case (pattern, index) =>
+  //     BitPat(pattern.map(s => if (s.isStore) "1" else "0").mkString("b", "", "")) ->
+  //     BitPat((BigInt(1) << index).U(allLSPatern.length.W))
+  //   }
+  //   val truthTable = TruthTable(table, default)
+  // }
+  object LoadValidTable {
+    val default = BitPat("b" + "0" * 6)
+    val table = allLSPatern.map { case (pattern, index) =>
+      pattern.zipWithIndex.filter(_._1.isLoad).map(x => BitPat((1 << x._2).U(6.W))) ++
+      pattern.filterNot(_.isLoad).map(_ => BitPat("b" + "0" * 6)) map
+      (BitPat(pattern.map(s => if (s.isStore) "1" else "0").mkString("b", "", "")) -> _)
+    }.transpose
+    val truthTable = table.map(TruthTable(_, default))
+    println(truthTable)
+  }
+  object StoreValidTable {
+    val default = BitPat("b" + "0" * 6)
+    val table = allLSPatern.map { case (pattern, index) =>
+      pattern.zipWithIndex.filter(_._1.isStore).map(x => BitPat((1 << x._2).U(6.W))) ++
+      pattern.filterNot(_.isStore).map(_ => BitPat("b" + "0" * 6)) map
+      (BitPat(pattern.map(s => if (s.isStore) "1" else "0").mkString("b", "", "")) -> _)
+    }.transpose
+    val truthTable = table.map(TruthTable(_, default))
+    println(truthTable)
+  }
+  object LoadReadyTable {
+    val default = BitPat("b" + "0" * 6)
+    val table = allLSPatern.map { case (pattern, index) =>
+      loadDeqSeq(pattern.count(_.isStore)).map(x => BitPat((1 << x).U(6.W))) map
+      (BitPat(pattern.map(s => if (s.isStore) "1" else "0").mkString("b", "", "")) -> _)
+    }.transpose
+    val truthTable = table.map(TruthTable(_, default))
+    println(truthTable)
+  }
+  object StoreReadyTable {
+    val default = BitPat("b" + "0" * 4)
+    val table = allLSPatern.map { case (pattern, index) =>
+      storeDeqSeq(pattern.count(_.isStore)).map(x => BitPat((1 << x).U(4.W))) map
+      (BitPat(pattern.map(s => if (s.isStore) "1" else "0").mkString("b", "", "")) -> _)
+    }.transpose
+    val truthTable = table.map(TruthTable(_, default))
+    println(truthTable)
+  }
+  // val lsPatternEncodedOH = decoder(QMCMinimizer, inIsStoreVec, LSPatternTable.truthTable)
+  val loadValidDecoder = LoadValidTable.truthTable.map(decoder(EspressoMinimizer, inIsStoreVec, _))
+  val storeValidDecoder = StoreValidTable.truthTable.map(decoder(EspressoMinimizer, inIsStoreVec, _))
+  val loadReadyDecoder = LoadReadyTable.truthTable.map(decoder(EspressoMinimizer, inIsStoreVec, _))
+  val storeReadyDecoder = StoreReadyTable.truthTable.map(decoder(EspressoMinimizer, inIsStoreVec, _))
+  // println(LSPatternTable.truthTable)
+
+  finalFuDeqMap.zipWithIndex.foreach {
+    case ((Seq(FuType.ldu), deqPortIdSeq), i) =>
+      val maxSelNum = wrapper.numIn
+      val selNum = deqPortIdSeq.length
+      val portReadyVec = loadReadyDecoder.map(Mux1H(_, deqPortIdSeq.map(outs(_).ready).toSeq))
+      val canAcc = loadValidDecoder.map(Mux1H(_, uopsIn.map(_.valid)))
+      val selPort = SelectOne("naive", portReadyVec.toSeq, selNum)
+      val select = SelectOne("naive", canAcc, selNum)
+      for ((portId, j) <- deqPortIdSeq.zipWithIndex) {
+        val (selPortReady, selPortIdxOH) = selPort.getNthOH(j + 1)
+        val (selectValid, selectIdxOH) = select.getNthOH(j + 1)
+        when(selPortReady && selectValid) {
+          selIdxOH(i)(OHToUInt(Mux1H(selPortIdxOH, loadReadyDecoder))).valid := selectValid
+          selIdxOH(i)(OHToUInt(Mux1H(selPortIdxOH, loadReadyDecoder))).bits := Mux1H(selectIdxOH, loadValidDecoder)
+        }
       }
-    }
+    case ((Seq(FuType.stu), deqPortIdSeq), i) =>
+      val maxSelNum = wrapper.numIn
+      val selNum = deqPortIdSeq.length
+      val portReadyVec = storeReadyDecoder.map(Mux1H(_, deqPortIdSeq.map(outs(_).ready).toSeq))
+      val canAcc = storeValidDecoder.map(Mux1H(_, uopsIn.map(_.valid)))
+      val selPort = SelectOne("naive", portReadyVec.toSeq, selNum)
+      val select = SelectOne("naive", canAcc, selNum)
+      for ((portId, j) <- deqPortIdSeq.zipWithIndex) {
+        val (selPortReady, selPortIdxOH) = selPort.getNthOH(j + 1)
+        val (selectValid, selectIdxOH) = select.getNthOH(j + 1)
+        when(selPortReady && selectValid) {
+          selIdxOH(i)(OHToUInt(Mux1H(selPortIdxOH, storeReadyDecoder))).valid := selectValid
+          selIdxOH(i)(OHToUInt(Mux1H(selPortIdxOH, storeReadyDecoder))).bits := Mux1H(selectIdxOH, storeValidDecoder)
+        }
+      }
+    case ((fuTypeSeq, deqPortIdSeq), i) =>
+      val maxSelNum = wrapper.numIn
+      val selNum = deqPortIdSeq.length
+      val portReadyVec = deqPortIdSeq.map(x => outs(x).ready)
+      val canAcc = uopsIn.map(in => canAccept(fuTypeSeq.map(x => x.ohid), in.bits.fuType) && in.valid)
+      val selPort = SelectOne("circ", portReadyVec.toSeq, selNum)
+      val select = SelectOne("naive", canAcc, selNum)
+      for ((portId, j) <- deqPortIdSeq.zipWithIndex) {
+        val (selPortReady, selPortIdxOH) = selPort.getNthOH(j + 1)
+        val (selectValid, selectIdxOH) = select.getNthOH(j + 1)
+        when(selPortReady && selectValid) {
+          selIdxOH(i)(OHToUInt(selPortIdxOH)).valid := selectValid
+          selIdxOH(i)(OHToUInt(selPortIdxOH)).bits := selectIdxOH.asUInt
+        }
+      }
   }
 
   val portSelIdxOH: Map[Seq[Int], Vec[ValidIO[UInt]]] = finalFuDeqMap.zip(selIdxOH).map { case ((fuTypeSeq, deqPortIdSeq), selIdxOHSeq) => (deqPortIdSeq, selIdxOHSeq) }.toMap
@@ -455,6 +580,10 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   val deqSelIdxVec: Vec[UInt] = VecInit(deqSelIdxOHSeq.map {
     case (deqIdx, seq) => PriorityEncoderOH(Mux1H(seq.map(x => (x.valid, x.bits))))
   }.toSeq)
+  deqSelIdxOHSeq.foreach { case (deqIdx, seq) =>
+    val block_by_conflict = (PopCount(Mux1H(seq.map(x => (x.valid, x.bits)))) > 1.U).asUInt
+    XSPerfAccumulate(s"block_by_conflict_${deqIdx}", block_by_conflict)
+  }
 
   // enqSelIdxVec(enqIdx)(deqIdx): enqIdx uop can be accepted by deqIdx
   // Maybe one port has been dispatched more than 1 uop.
