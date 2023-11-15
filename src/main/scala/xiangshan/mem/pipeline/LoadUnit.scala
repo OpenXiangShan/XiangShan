@@ -941,12 +941,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // io.out.bits.uop.ctrl.replayInst := false.B
 
   // to be removed
-  io.feedback_fast.valid                 := s2_valid &&                 // inst is valid
-                                            !s2_in.isLoadReplay &&      // already feedbacked
-                                            io.lq_rep_full &&           // LoadQueueReplay is full
-                                            s2_out.rep_info.need_rep && // need replay
-                                            !s2_exception &&            // no exception is triggered
-                                            !s2_hw_prf                  // not hardware prefetch
+  io.feedback_fast.valid                 := false.B
   io.feedback_fast.bits.hit              := false.B
   io.feedback_fast.bits.flushState       := s2_in.ptwBack
   io.feedback_fast.bits.rsIdx            := s2_in.rsIdx
