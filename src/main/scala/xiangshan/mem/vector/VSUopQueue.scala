@@ -189,7 +189,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
       x.stride := io.storeIn.bits.src_stride
       x.flow_counter := flows
       x.flowNum := flows
-      x.nfields := nf + 1.U
+      x.nfields := nf +& 1.U
       x.vm := vm
       x.usWholeReg := isUnitStride(mop) && us_whole_reg(fuOpType)
       x.usMaskReg := isUnitStride(mop) && us_mask(fuOpType)
@@ -320,7 +320,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
         alignedType = issueAlignedType
       )
       x.uopQueuePtr := flowSplitPtr
-      x.isLastElem := (elemIdx +& 1.U) === (issueNFIELDS << issueVLMAXLog2)
+      x.isLastElem := (elemIdx +& 1.U) === Mux(issueEntry.usWholeReg, (issueNFIELDS << log2Up(VLENB)),(issueNFIELDS << issueVLMAXLog2))
     }
   }
 
