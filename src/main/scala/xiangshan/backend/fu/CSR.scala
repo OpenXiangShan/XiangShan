@@ -673,6 +673,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val hgatpMask = Cat("h8".U(Hgatp_Mode_len.W), satp_part_wmask(Hgatp_Vmid_len, VmidLength), satp_part_wmask(Hgatp_Addr_len, PAddrBits-12))
   val htimedelta = RegInit(UInt(XLEN.W), 0.U)
   val hcounteren = RegInit(UInt(XLEN.W), 0.U)
+  val hcounterenMask = 0.U(XLEN.W) //will be used by ZICNTR or ZIHPM
 
   val vsstatus = RegInit("ha00002000".U(XLEN.W))
   val vsstatusStruct = vsstatus.asTypeOf(new MstatusStruct)
@@ -886,7 +887,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Hedeleg, hedeleg),
     MaskedRegMap(Hideleg, hideleg, hidelegWMask, MaskedRegMap.NoSideEffect, hidelegRMask),
     MaskedRegMap(Hie, mie, hieMask, MaskedRegMap.NoSideEffect, hieMask),
-    MaskedRegMap(Hcounteren, hcounteren),
+    MaskedRegMap(Hcounteren, hcounteren, hcounterenMask),
     MaskedRegMap(Hgeie, hgeie),
 
     //--- Hypervisor Trap Handling ---
