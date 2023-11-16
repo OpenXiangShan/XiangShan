@@ -61,9 +61,7 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
     new RfWritePortWithConfig(backendParams.intPregParams.dataCfg, backendParams.intPregParams.addrWidth)))
   val vfWriteBack = MixedVec(Vec(backendParams.numPregWb(VecData()),
     new RfWritePortWithConfig(backendParams.vfPregParams.dataCfg, backendParams.vfPregParams.addrWidth)))
-  val toDataPath: MixedVec[MixedVec[DecoupledIO[IssueQueueIssueBundle]]] = MixedVec(params.issueBlockParams.map(_.genIssueDecoupledBundle))
   val toDataPathAfterDelay: MixedVec[MixedVec[DecoupledIO[IssueQueueIssueBundle]]] = MixedVec(params.issueBlockParams.map(_.genIssueDecoupledBundle))
-  val fromCancelNetwork = Flipped(MixedVec(params.issueBlockParams.map(_.genIssueDecoupledBundle)))
 
   val fromSchedulers = new Bundle {
     val wakeupVec: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpInValidBundle)
@@ -199,7 +197,6 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
     iq.io.og0Cancel := io.fromDataPath.og0Cancel
     iq.io.og1Cancel := io.fromDataPath.og1Cancel
     iq.io.ldCancel := io.ldCancel
-    iq.io.fromCancelNetwork <> io.fromCancelNetwork(i)
   }
 
   private val iqWakeUpOutMap: Map[Int, ValidIO[IssueQueueIQWakeUpBundle]] =
@@ -212,9 +209,6 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
     wakeUp := iqWakeUpOutMap(wakeUp.bits.exuIdx)
   }
 
-  io.toDataPath.zipWithIndex.foreach { case (toDp, i) =>
-    toDp <> issueQueues(i).io.deq
-  }
   io.toDataPathAfterDelay.zipWithIndex.foreach { case (toDpDy, i) =>
     toDpDy <> issueQueues(i).io.deqDelay
   }
@@ -318,11 +312,8 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
       imp.io.memIO.get.checkWait.stIssuePtr := io.fromMem.get.stIssuePtr
       imp.io.memIO.get.checkWait.memWaitUpdateReq := io.fromMem.get.memWaitUpdateReq
       // TODO: refactor ditry code
-      imp.io.deq(1).ready := false.B
       imp.io.deqDelay(1).ready := false.B
-      io.toDataPath(idx)(1).valid := false.B
       io.toDataPathAfterDelay(idx)(1).valid := false.B
-      io.toDataPath(idx)(1).bits := 0.U.asTypeOf(io.toDataPath(idx)(1).bits)
       io.toDataPathAfterDelay(idx)(1).bits := 0.U.asTypeOf(io.toDataPathAfterDelay(idx)(1).bits)
     case _ =>
   }
