@@ -181,7 +181,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
       x.uop := io.storeIn.bits.uop
       x.uop.vpu.vl := io.storeIn.bits.src_vl.asTypeOf(VConfig()).vl
       x.uop.numUops := numUops
-      x.uop.lastUop := (io.storeIn.bits.uop.uopIdx +& 1.U) === numUops
+      x.uop.lastUop := (uopIdx +& 1.U) === numUops
       x.flowMask := flowMask
       x.byteMask := GenUopByteMask(flowMask, alignedType)(VLENB - 1, 0)
       x.data := Mux(isNewVd, io.storeIn.bits.src_vs3, vs3Reg)
@@ -320,7 +320,12 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
         alignedType = issueAlignedType
       )
       x.uopQueuePtr := flowSplitPtr
-      x.isLastElem := (elemIdx +& 1.U) === Mux(issueEntry.usWholeReg, (issueNFIELDS << log2Up(VLENB)),(issueNFIELDS << issueVLMAXLog2))
+      // x.isLastElem := (elemIdx +& 1.U) === Mux(issueEntry.usWholeReg, (issueNFIELDS << log2Up(VLENB)),(issueNFIELDS << issueVLMAXLog2))
+      x.isLastElem := Mux(
+        issueEntry.usWholeReg,
+        (elemIdx +& 1.U) === (issueNFIELDS << log2Up(VLENB)),
+        issueUop.lastUop && (flowIdx +& 1.U) === issueFlowNum // the last element in the last uop
+      )
     }
   }
 
