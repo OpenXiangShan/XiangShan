@@ -628,6 +628,18 @@ object GenUSWholeRegVL extends VLSUConstants {
     ))
   }
 }
+object GenUSWholeEmul extends VLSUConstants{
+  def apply(nf: UInt): UInt={
+    LookupTree(nf,List(
+      "b000".U -> "b000".U(mulBits.W),
+      "b001".U -> "b001".U(mulBits.W),
+      "b011".U -> "b010".U(mulBits.W),
+      "b111".U -> "b011".U(mulBits.W)
+    ))
+  }
+}
+
+
 object GenUSMaskRegVL extends VLSUConstants {
   def apply(vl: UInt): UInt = {
     (vl >> 3.U)
