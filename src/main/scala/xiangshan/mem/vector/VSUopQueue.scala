@@ -326,6 +326,10 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
         (elemIdx +& 1.U) === (issueNFIELDS << log2Up(VLENB)),
         issueUop.lastUop && (flowIdx +& 1.U) === issueFlowNum // the last element in the last uop
       )
+      x.nfields := issueNFIELDS
+      x.nSegments := issueEntry.vlmax
+      x.fieldIdx := nfIdx
+      x.segmentIdx := elemIdxInsideField
     }
   }
 
