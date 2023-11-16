@@ -100,7 +100,7 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
   }
 
   io.read.foreach{ case res =>
-    res.resp := Mux(!cancelMask(res.req), !table(res.req).andR, false.B)
+    res.resp := !table(res.req).andR
     res.dataSource.value := DataSource.reg
     val wakeUpExuOHVec = wakeUpReg.map{ case x =>
       val v: Bool = pregWB match {
