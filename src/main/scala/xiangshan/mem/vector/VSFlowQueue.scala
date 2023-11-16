@@ -166,6 +166,10 @@ class VsFlowBundle(implicit p: Parameters) extends VecFlowBundle {
   val data = UInt(VLEN.W)
   val uopQueuePtr = new VsUopPtr
   val isLastElem = Bool()
+  val nfields = UInt(fieldBits.W)
+  val nSegments = UInt(elemIdxBits.W)
+  val fieldIdx = UInt(fieldBits.W)
+  val segmentIdx = UInt(elemIdxBits.W)
 }
 
 class VecStoreFlowEntry (implicit p: Parameters) extends VecFlowBundle {
