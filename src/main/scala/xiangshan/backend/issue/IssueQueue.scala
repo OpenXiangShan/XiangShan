@@ -53,12 +53,10 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val ldCancel = Vec(backendParams.LduCnt, Flipped(new LoadCancelIO))
 
   // Outputs
-  val deq: MixedVec[DecoupledIO[IssueQueueIssueBundle]] = params.genIssueDecoupledBundle
   val wakeupToIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = params.genIQWakeUpSourceValidBundle
   val status = Output(new IssueQueueStatusBundle(params.numEnq))
   // val statusNext = Output(new IssueQueueStatusBundle(params.numEnq))
 
-  val fromCancelNetwork = Flipped(params.genIssueDecoupledBundle)
   val deqDelay: MixedVec[DecoupledIO[IssueQueueIssueBundle]] = params.genIssueDecoupledBundle// = deq.cloneType
   def allWakeUp = wakeupFromWB ++ wakeupFromIQ
 }
@@ -82,9 +80,6 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   println(s"[IssueQueueImp] ${params.getIQName} fuLatencyMaps: ${fuLatencyMaps}")
   println(s"[IssueQueueImp] ${params.getIQName} commonFuCfgs: ${commonFuCfgs.map(_.name)}")
   lazy val io = IO(new IssueQueueIO())
-  if(backendParams.debugEn) {
-    dontTouch(io.deq)
-  }
   // Modules
 
   val entries = Module(new Entries)
@@ -125,6 +120,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val wakeUpQueues: Seq[Option[MultiWakeupQueue[ExuInput, WakeupQueueFlush]]] = params.exuBlockParams.map { x => OptionWrapper(x.isIQWakeUpSource, Module(
     new MultiWakeupQueue(new ExuInput(x), new WakeupQueueFlush, x.fuLatancySet, flushFunc, modificationFunc)
   ))}
+  val deqBeforeDly = Wire(params.genIssueDecoupledBundle)
 
   val intWbBusyTableIn = io.wbBusyTableRead.map(_.intWbBusyTable)
   val vfWbBusyTableIn = io.wbBusyTableRead.map(_.vfWbBusyTable)
@@ -293,7 +289,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       deq.othersEntryOldestSel := othersEntryOldestSel(i)
       deq.subDeqRequest.foreach(_ := subDeqRequest.get)
       deq.subDeqSelOH.foreach(_ := subDeqSelOHVec.get(i))
-      deq.deqReady := io.deq(i).ready
+      deq.deqReady := deqBeforeDly(i).ready
       deq.deqSelOH.valid := deqSelValidVec(i)
       deq.deqSelOH.bits := deqSelOHVec(i)
     }
@@ -390,7 +386,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     deqSelOHVec(1) := subDeqSelOHVec.get(0) & canIssueMergeAllBusy(1)
 
     finalDeqSelValidVec.zip(finalDeqSelOHVec).zip(deqSelValidVec).zip(deqSelOHVec).zipWithIndex.foreach { case ((((selValid, selOH), deqValid), deqOH), i) =>
-      selValid := deqValid && deqOH.orR && io.deq(i).ready
+      selValid := deqValid && deqOH.orR && deqBeforeDly(i).ready
       selOH := deqOH
     }
   }
@@ -411,7 +407,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     }
 
     finalDeqSelValidVec.zip(finalDeqSelOHVec).zip(deqSelValidVec).zip(deqSelOHVec).zipWithIndex.foreach { case ((((selValid, selOH), deqValid), deqOH), i) =>
-      selValid := deqValid && io.deq(i).ready
+      selValid := deqValid && deqBeforeDly(i).ready
       selOH := deqOH
     }
   }
@@ -424,7 +420,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     deqResp.bits.robIdx := DontCare
     deqResp.bits.dataInvalidSqIdx := DontCare
     deqResp.bits.rfWen := DontCare
-    deqResp.bits.fuType := io.deq(i).bits.common.fuType
+    deqResp.bits.fuType := deqBeforeDly(i).bits.common.fuType
   }
 
   //fuBusyTable
@@ -508,20 +504,20 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         flush.og0Fail := io.og0Resp(i).valid && RSFeedbackType.isBlocked(io.og0Resp(i).bits.respType)
         flush.og1Fail := io.og1Resp(i).valid && RSFeedbackType.isBlocked(io.og1Resp(i).bits.respType)
         wakeUpQueue.io.flush := flush
-        wakeUpQueue.io.enq.valid := io.deq(i).fire && {
-          if (io.deq(i).bits.common.rfWen.isDefined)
-            io.deq(i).bits.common.rfWen.get && io.deq(i).bits.common.pdest =/= 0.U
+        wakeUpQueue.io.enq.valid := deqBeforeDly(i).fire && {
+          if (deqBeforeDly(i).bits.common.rfWen.isDefined)
+            deqBeforeDly(i).bits.common.rfWen.get && deqBeforeDly(i).bits.common.pdest =/= 0.U
           else
             true.B
         }
-        wakeUpQueue.io.enq.bits.uop := io.deq(i).bits.common
-        wakeUpQueue.io.enq.bits.lat := getDeqLat(i, io.deq(i).bits.common.fuType)
+        wakeUpQueue.io.enq.bits.uop := deqBeforeDly(i).bits.common
+        wakeUpQueue.io.enq.bits.lat := getDeqLat(i, deqBeforeDly(i).bits.common.fuType)
         wakeUpQueue.io.og0IssueFail := flush.og0Fail
         wakeUpQueue.io.og1IssueFail := flush.og1Fail
     }
   }
 
-  io.deq.zipWithIndex.foreach { case (deq, i) =>
+  deqBeforeDly.zipWithIndex.foreach { case (deq, i) =>
     deq.valid                := finalDeqSelValidVec(i) && !cancelDeqVec(i)
     deq.bits.addrOH          := finalDeqSelOHVec(i)
     deq.bits.common.isFirstIssue := deqFirstIssueVec(i)
@@ -583,18 +579,18 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     deq.bits.common.perfDebugInfo.issueTime := GTimer() + 1.U
   }
 
-  private val ldCancels = io.fromCancelNetwork.map(in =>
+  private val ldCancels = deqBeforeDly.map(in =>
     LoadShouldCancel(in.bits.common.loadDependency, io.ldCancel)
   )
-  private val fromCancelNetworkShift = WireDefault(io.fromCancelNetwork)
-  fromCancelNetworkShift.zip(io.fromCancelNetwork).foreach {
+  private val deqShift = WireDefault(deqBeforeDly)
+  deqShift.zip(deqBeforeDly).foreach {
     case (shifted, original) =>
       original.ready := shifted.ready // this will not cause combinational loop
       shifted.bits.common.loadDependency.foreach(
         _ := original.bits.common.loadDependency.get.map(_ << 1)
       )
   }
-  io.deqDelay.zip(fromCancelNetworkShift).zip(ldCancels).foreach { case ((deqDly, deq), ldCancel) =>
+  io.deqDelay.zip(deqShift).zip(ldCancels).foreach { case ((deqDly, deq), ldCancel) =>
     NewPipelineConnect(
       deq, deqDly, deqDly.valid,
       deq.bits.common.robIdx.needFlush(io.flush) || ldCancel,
@@ -666,35 +662,35 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   }
 
   // deq instr count
-  XSPerfAccumulate("issue_instr_pre_count", PopCount(io.deq.map(_.valid)))
-  XSPerfHistogram("issue_instr_pre_count_hist", PopCount(io.deq.map(_.valid)), true.B, 0, params.numDeq + 1, 1)
+  XSPerfAccumulate("issue_instr_pre_count", PopCount(deqBeforeDly.map(_.valid)))
+  XSPerfHistogram("issue_instr_pre_count_hist", PopCount(deqBeforeDly.map(_.valid)), true.B, 0, params.numDeq + 1, 1)
   XSPerfAccumulate("issue_instr_count", PopCount(io.deqDelay.map(_.valid)))
   XSPerfHistogram("issue_instr_count_hist", PopCount(io.deqDelay.map(_.valid)), true.B, 0, params.numDeq + 1, 1)
 
   // deq instr data source count
-  XSPerfAccumulate("issue_datasource_reg", io.deq.map{ deq => 
+  XSPerfAccumulate("issue_datasource_reg", deqBeforeDly.map{ deq =>
     PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && ds.value === DataSource.reg && !SrcType.isNotReg(deq.bits.srcType(j)) }) 
   }.reduce(_ +& _))
-  XSPerfAccumulate("issue_datasource_bypass", io.deq.map{ deq => 
+  XSPerfAccumulate("issue_datasource_bypass", deqBeforeDly.map{ deq =>
     PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && ds.value === DataSource.bypass && !SrcType.isNotReg(deq.bits.srcType(j)) }) 
   }.reduce(_ +& _))
-  XSPerfAccumulate("issue_datasource_forward", io.deq.map{ deq => 
+  XSPerfAccumulate("issue_datasource_forward", deqBeforeDly.map{ deq =>
     PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && ds.value === DataSource.forward && !SrcType.isNotReg(deq.bits.srcType(j)) }) 
   }.reduce(_ +& _))
-  XSPerfAccumulate("issue_datasource_noreg", io.deq.map{ deq => 
+  XSPerfAccumulate("issue_datasource_noreg", deqBeforeDly.map{ deq =>
     PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && SrcType.isNotReg(deq.bits.srcType(j)) }) 
   }.reduce(_ +& _))
 
-  XSPerfHistogram("issue_datasource_reg_hist", io.deq.map{ deq => 
+  XSPerfHistogram("issue_datasource_reg_hist", deqBeforeDly.map{ deq =>
     PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && ds.value === DataSource.reg && !SrcType.isNotReg(deq.bits.srcType(j)) })
   }.reduce(_ +& _), true.B, 0, params.numDeq * params.numRegSrc + 1, 1)
-  XSPerfHistogram("issue_datasource_bypass_hist", io.deq.map{ deq => 
+  XSPerfHistogram("issue_datasource_bypass_hist", deqBeforeDly.map{ deq =>
     PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && ds.value === DataSource.bypass && !SrcType.isNotReg(deq.bits.srcType(j)) }) 
   }.reduce(_ +& _), true.B, 0, params.numDeq * params.numRegSrc + 1, 1)
-  XSPerfHistogram("issue_datasource_forward_hist", io.deq.map{ deq => 
+  XSPerfHistogram("issue_datasource_forward_hist", deqBeforeDly.map{ deq =>
     PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && ds.value === DataSource.forward && !SrcType.isNotReg(deq.bits.srcType(j)) }) 
   }.reduce(_ +& _), true.B, 0, params.numDeq * params.numRegSrc + 1, 1)
-  XSPerfHistogram("issue_datasource_noreg_hist", io.deq.map{ deq => 
+  XSPerfHistogram("issue_datasource_noreg_hist", deqBeforeDly.map{ deq =>
     PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && SrcType.isNotReg(deq.bits.srcType(j)) }) 
   }.reduce(_ +& _), true.B, 0, params.numDeq * params.numRegSrc + 1, 1)
 
@@ -702,29 +698,29 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   for (t <- FuType.functionNameMap.keys) {
     val fuName = FuType.functionNameMap(t)
     if (params.getFuCfgs.map(_.fuType == t).reduce(_ | _)) {
-      XSPerfAccumulate(s"issue_datasource_reg_futype_${fuName}", io.deq.map{ deq =>
+      XSPerfAccumulate(s"issue_datasource_reg_futype_${fuName}", deqBeforeDly.map{ deq =>
         PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && ds.value === DataSource.reg && !SrcType.isNotReg(deq.bits.srcType(j)) && deq.bits.common.fuType === t.U }) 
       }.reduce(_ +& _))
-      XSPerfAccumulate(s"issue_datasource_bypass_futype_${fuName}", io.deq.map{ deq =>
+      XSPerfAccumulate(s"issue_datasource_bypass_futype_${fuName}", deqBeforeDly.map{ deq =>
         PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && ds.value === DataSource.bypass && !SrcType.isNotReg(deq.bits.srcType(j)) && deq.bits.common.fuType === t.U }) 
       }.reduce(_ +& _))
-      XSPerfAccumulate(s"issue_datasource_forward_futype_${fuName}", io.deq.map{ deq =>
+      XSPerfAccumulate(s"issue_datasource_forward_futype_${fuName}", deqBeforeDly.map{ deq =>
         PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && ds.value === DataSource.forward && !SrcType.isNotReg(deq.bits.srcType(j)) && deq.bits.common.fuType === t.U }) 
       }.reduce(_ +& _))
-      XSPerfAccumulate(s"issue_datasource_noreg_futype_${fuName}", io.deq.map{ deq => 
+      XSPerfAccumulate(s"issue_datasource_noreg_futype_${fuName}", deqBeforeDly.map{ deq =>
         PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && SrcType.isNotReg(deq.bits.srcType(j)) && deq.bits.common.fuType === t.U }) 
       }.reduce(_ +& _))
 
-      XSPerfHistogram(s"issue_datasource_reg_hist_futype_${fuName}", io.deq.map{ deq => 
+      XSPerfHistogram(s"issue_datasource_reg_hist_futype_${fuName}", deqBeforeDly.map{ deq =>
         PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && ds.value === DataSource.reg && !SrcType.isNotReg(deq.bits.srcType(j)) && deq.bits.common.fuType === t.U }) 
       }.reduce(_ +& _), true.B, 0, params.numDeq * params.numRegSrc + 1, 1)
-      XSPerfHistogram(s"issue_datasource_bypass_hist_futype_${fuName}", io.deq.map{ deq => 
+      XSPerfHistogram(s"issue_datasource_bypass_hist_futype_${fuName}", deqBeforeDly.map{ deq =>
         PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && ds.value === DataSource.bypass && !SrcType.isNotReg(deq.bits.srcType(j)) && deq.bits.common.fuType === t.U }) 
       }.reduce(_ +& _), true.B, 0, params.numDeq * params.numRegSrc + 1, 1)
-      XSPerfHistogram(s"issue_datasource_forward_hist_futype_${fuName}", io.deq.map{ deq => 
+      XSPerfHistogram(s"issue_datasource_forward_hist_futype_${fuName}", deqBeforeDly.map{ deq =>
         PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && ds.value === DataSource.forward && !SrcType.isNotReg(deq.bits.srcType(j)) && deq.bits.common.fuType === t.U }) 
       }.reduce(_ +& _), true.B, 0, params.numDeq * params.numRegSrc + 1, 1)
-      XSPerfHistogram(s"issue_datasource_noreg_hist_futype_${fuName}", io.deq.map{ deq => 
+      XSPerfHistogram(s"issue_datasource_noreg_hist_futype_${fuName}", deqBeforeDly.map{ deq =>
         PopCount(deq.bits.common.dataSources.zipWithIndex.map{ case (ds, j) => deq.valid && SrcType.isNotReg(deq.bits.srcType(j)) && deq.bits.common.fuType === t.U }) 
       }.reduce(_ +& _), true.B, 0, params.numDeq * params.numRegSrc + 1, 1)
     }
@@ -768,7 +764,7 @@ class IssueQueueIntImp(override val wrapper: IssueQueue)(implicit p: Parameters,
     }
   }
 
-  io.deq.zipWithIndex.foreach{ case (deq, i) => {
+  deqBeforeDly.zipWithIndex.foreach{ case (deq, i) => {
     deq.bits.common.pc.foreach(_ := deqEntryVec(i).bits.status.pc.get)
     deq.bits.common.preDecode.foreach(_ := deqEntryVec(i).bits.payload.preDecodeInfo)
     deq.bits.common.ftqIdx.foreach(_ := deqEntryVec(i).bits.payload.ftqPtr)
@@ -791,7 +787,7 @@ class IssueQueueVfImp(override val wrapper: IssueQueue)(implicit p: Parameters, 
     x.srcType(3) := SrcType.vp // v0: mask src
     x.srcType(4) := SrcType.vp // vl&vtype
   }
-  io.deq.zipWithIndex.foreach{ case (deq, i) => {
+  deqBeforeDly.zipWithIndex.foreach{ case (deq, i) => {
     deq.bits.common.fpu.foreach(_ := deqEntryVec(i).bits.payload.fpu)
     deq.bits.common.vpu.foreach(_ := deqEntryVec(i).bits.payload.vpu)
     deq.bits.common.vpu.foreach(_.vuopIdx := deqEntryVec(i).bits.payload.uopIdx)
@@ -858,7 +854,7 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
     entries.io.fromMem.get.stIssuePtr := memIO.checkWait.stIssuePtr
   }
 
-  io.deq.zipWithIndex.foreach { case (deq, i) =>
+  deqBeforeDly.zipWithIndex.foreach { case (deq, i) =>
     deq.bits.common.sqIdx.get := deqEntryVec(i).bits.payload.sqIdx
     deq.bits.common.lqIdx.get := deqEntryVec(i).bits.payload.lqIdx
     deq.bits.common.ftqIdx.foreach(_ := deqEntryVec(i).bits.payload.ftqPtr)
