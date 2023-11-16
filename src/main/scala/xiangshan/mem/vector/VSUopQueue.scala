@@ -127,8 +127,8 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
   // numUops = nf * max(lmul, emul)
   val numUops = Mux(
     isIndexed(mop) && lmul.asSInt > emul.asSInt,
-    (nf + 1.U) << lmulLog2Pos,
-    (nf + 1.U) << emulLog2Pos
+    (nf +& 1.U) << lmulLog2Pos,
+    (nf +& 1.U) << emulLog2Pos
   )
 
   /**
@@ -181,7 +181,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
       x.uop := io.storeIn.bits.uop
       x.uop.vpu.vl := io.storeIn.bits.src_vl.asTypeOf(VConfig()).vl
       x.uop.numUops := numUops
-      x.uop.lastUop := (io.storeIn.bits.uop.uopIdx + 1.U) === numUops
+      x.uop.lastUop := (io.storeIn.bits.uop.uopIdx +& 1.U) === numUops
       x.flowMask := flowMask
       x.byteMask := GenUopByteMask(flowMask, alignedType)(VLENB - 1, 0)
       x.data := Mux(isNewVd, io.storeIn.bits.src_vs3, vs3Reg)
