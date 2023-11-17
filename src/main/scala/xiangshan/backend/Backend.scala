@@ -159,10 +159,9 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
 
   private val vconfig = dataPath.io.vconfigReadPort.data
   private val og1CancelOH: UInt = dataPath.io.og1CancelOH
-  private val og0CancelOHFromDataPath: UInt = dataPath.io.og0CancelOH
-  private val og0CancelOHFromFinalIssue: UInt = Wire(chiselTypeOf(dataPath.io.og0CancelOH))
-  private val og0CancelOH: UInt = og0CancelOHFromDataPath | og0CancelOHFromFinalIssue
+  private val og0CancelOH: UInt = dataPath.io.og0CancelOH
   private val cancelToBusyTable = dataPath.io.cancelToBusyTable
+  private val finalBlockMem = Wire(Vec(params.memSchdParams.get.numExu, Bool()))
 
   ctrlBlock.io.fromTop.hartId := io.fromTop.hartId
   ctrlBlock.io.frontend <> io.frontend
@@ -207,6 +206,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   memScheduler.io.fromDispatch.uops <> ctrlBlock.io.toIssueBlock.memUops
   memScheduler.io.intWriteBack := wbDataPath.io.toIntPreg
   memScheduler.io.vfWriteBack := wbDataPath.io.toVfPreg
+  memScheduler.io.finalBlockMem.get.flatten.zip(finalBlockMem).foreach(x => x._1 := x._2)
   memScheduler.io.fromMem.get.scommit := io.mem.sqDeq
   memScheduler.io.fromMem.get.lcommit := io.mem.lqDeq
   memScheduler.io.fromMem.get.sqDeqPtr := io.mem.sqDeqPtr
@@ -497,15 +497,13 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   io.mem.lsqEnqIO <> memScheduler.io.memIO.get.lsqEnqIO
   io.mem.robLsqIO <> ctrlBlock.io.robio.lsq
 
-  private val intFinalIssueBlock = intExuBlock.io.in.flatten.map(_ => false.B)
-  private val vfFinalIssueBlock = vfExuBlock.io.in.flatten.map(_ => false.B)
   private val memFinalIssueBlock = io.mem.issueUops zip memExuBlocksHasLDU.flatten map {
     case (out, isLdu) =>
-      if (isLdu) RegNext(out.valid && !out.ready, false.B)
+      if (isLdu) out.valid && !out.ready
       else false.B
   }
-  println(s"[backend]: width of [int|vf|mem]FinalIssueBlock: ${intFinalIssueBlock.size}|${vfFinalIssueBlock.size}|${memFinalIssueBlock.size}")
-  og0CancelOHFromFinalIssue := VecInit((intFinalIssueBlock ++ vfFinalIssueBlock ++ memFinalIssueBlock).toSeq).asUInt
+  println(s"[backend]: width of memFinalIssueBlock: ${memFinalIssueBlock.size}")
+  finalBlockMem.zip(memFinalIssueBlock).foreach(x => x._1 := x._2)
 
   io.frontendSfence := fenceio.sfence
   io.frontendTlbCsr := csrio.tlb
