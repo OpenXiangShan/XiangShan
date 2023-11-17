@@ -31,6 +31,7 @@ import xiangshan.backend.ctrlblock.{DebugLSIO, LsTopdownInfo}
 import xiangshan.backend.exu.MemExeUnit
 import xiangshan.backend.fu._
 import xiangshan.backend.rob.{RobDebugRollingIO, RobPtr}
+import xiangshan.backend.fu.util.SdtrigExt
 import xiangshan.cache._
 import xiangshan.cache.mmu._
 import xiangshan.mem._
@@ -177,6 +178,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   with HasPerfEvents
   with HasL1PrefetchSourceParameter
   with HasMemBlockParameters
+  with SdtrigExt
 {
   val io = IO(new Bundle {
     val hartId = Input(UInt(8.W))
@@ -535,19 +537,19 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   io.mem_to_ooo.lsTopdownInfo := loadUnits.map(_.io.lsTopdownInfo) ++ hybridUnits.map(_.io.ldu_io.lsTopdownInfo)
 
-  val tdata = RegInit(VecInit(Seq.fill(6)(0.U.asTypeOf(new MatchTriggerIO))))
-  val tEnable = RegInit(VecInit(Seq.fill(6)(false.B)))
-  val en = csrCtrl.trigger_enable
-  tEnable := VecInit(en(2), en (3), en(4), en(5), en(7), en(9))
-  when(csrCtrl.mem_trigger.t.valid) {
-    tdata(csrCtrl.mem_trigger.t.bits.addr) := csrCtrl.mem_trigger.t.bits.tdata
+  // trigger
+  val tdata = RegInit(VecInit(Seq.fill(TriggerNum)(0.U.asTypeOf(new MatchTriggerIO))))
+  val tEnable = RegInit(VecInit(Seq.fill(TriggerNum)(false.B)))
+  tEnable := csrCtrl.mem_trigger.tEnableVec
+  when(csrCtrl.mem_trigger.tUpdate.valid) {
+    tdata(csrCtrl.mem_trigger.tUpdate.bits.addr) := csrCtrl.mem_trigger.tUpdate.bits.tdata
   }
-  val lTriggerMapping = Map(0 -> 2, 1 -> 3, 2 -> 5)
-  val sTriggerMapping = Map(0 -> 0, 1 -> 1, 2 -> 4)
-  val lChainMapping = Map(0 -> 2)
-  val sChainMapping = Map(0 -> 1)
+
+  val backendTriggerTimingVec = tdata.map(_.timing)
+  val backendTriggerChainVec = tdata.map(_.chain)
+
   XSDebug(tEnable.asUInt.orR, "Debug Mode: At least one store trigger is enabled\n")
-  for(j <- 0 until 3)
+  for (j <- 0 until TriggerNum)
     PrintTriggerInfo(tEnable(j), tdata(j))
 
   // LoadUnit
@@ -699,28 +701,30 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // --------------------------------
     // Load Triggers
     // --------------------------------
-    val hit = Wire(Vec(3, Bool()))
-    for (j <- 0 until 3) {
-      loadUnits(i).io.trigger(j).tdata2 := tdata(lTriggerMapping(j)).tdata2
-      loadUnits(i).io.trigger(j).matchType := tdata(lTriggerMapping(j)).matchType
-      loadUnits(i).io.trigger(j).tEnable := tEnable(lTriggerMapping(j))
+    val frontendTriggerTimingVec = io.mem_to_ooo.writebackLda(i).bits.uop.trigger.frontendTiming
+    val frontendTriggerChainVec = io.mem_to_ooo.writebackLda(i).bits.uop.trigger.frontendChain
+    val frontendTriggerHitVec = io.mem_to_ooo.writebackLda(i).bits.uop.trigger.frontendHit
+    val loadTriggerHitVec = Wire(Vec(TriggerNum, Bool()))
+
+    val triggerTimingVec = VecInit(backendTriggerTimingVec.zip(frontendTriggerTimingVec).map { case (b, f) => b || f })
+    val triggerChainVec = VecInit(backendTriggerChainVec.zip(frontendTriggerChainVec).map { case (b, f) => b || f })
+    val triggerHitVec = VecInit(loadTriggerHitVec.zip(frontendTriggerHitVec).map { case (b, f) => b || f })
+
+    val triggerCanFireVec = Wire(Vec(TriggerNum, Bool()))
+
+    for (j <- 0 until TriggerNum) {
+      loadUnits(i).io.trigger(j).tdata2 := tdata(j).tdata2
+      loadUnits(i).io.trigger(j).matchType := tdata(j).matchType
+      loadUnits(i).io.trigger(j).tEnable := tEnable(j) && tdata(j).load
       // Just let load triggers that match data unavailable
-      hit(j) := loadUnits(i).io.trigger(j).addrHit && !tdata(lTriggerMapping(j)).select // Mux(tdata(j + 3).select, loadUnits(i).io.trigger(j).lastDataHit, loadUnits(i).io.trigger(j).addrHit)
-      io.mem_to_ooo.writebackLda(i).bits.uop.trigger.backendHit(lTriggerMapping(j)) := hit(j)
-//      io.writeback(i).bits.uop.cf.trigger.backendTiming(lTriggerMapping(j)) := tdata(lTriggerMapping(j)).timing
-      //      if (lChainMapping.contains(j)) io.writeback(i).bits.uop.cf.trigger.triggerChainVec(lChainMapping(j)) := hit && tdata(j+3).chain
+      loadTriggerHitVec(j) := loadUnits(i).io.trigger(j).addrHit && !tdata(j).select
     }
-    when(tdata(2).chain) {
-      io.mem_to_ooo.writebackLda(i).bits.uop.trigger.backendHit(2) := hit(0) && hit(1)
-      io.mem_to_ooo.writebackLda(i).bits.uop.trigger.backendHit(3) := hit(0) && hit(1)
-    }
-    when(!io.mem_to_ooo.writebackLda(i).bits.uop.trigger.backendEn(1)) {
-      io.mem_to_ooo.writebackLda(i).bits.uop.trigger.backendHit(5) := false.B
-    }
+    TriggerCheckCanFire(TriggerNum, triggerCanFireVec, triggerHitVec, triggerTimingVec, triggerChainVec)
 
-    XSDebug(io.mem_to_ooo.writebackLda(i).bits.uop.trigger.getHitBackend && io.mem_to_ooo.writebackLda(i).valid, p"Debug Mode: Load Inst No.${i}" +
-    p"has trigger hit vec ${io.mem_to_ooo.writebackLda(i).bits.uop.trigger.backendHit}\n")
-
+    io.mem_to_ooo.writebackLda(i).bits.uop.trigger.backendHit := triggerHitVec
+    io.mem_to_ooo.writebackLda(i).bits.uop.trigger.backendCanFire := triggerCanFireVec
+    XSDebug(io.mem_to_ooo.writebackLda(i).bits.uop.trigger.getBackendCanFire && io.mem_to_ooo.writebackLda(i).valid, p"Debug Mode: Load Inst No.${i}" +
+      p"has trigger fire vec ${io.mem_to_ooo.writebackLda(i).bits.uop.trigger.backendCanFire}\n")
   }
 
   for (i <- 0 until HyuCnt) {
@@ -839,24 +843,30 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // --------------------------------
     // Load Triggers
     // --------------------------------
-    val hit = Wire(Vec(3, Bool()))
-    for (j <- 0 until 3) {
-      hybridUnits(i).io.ldu_io.trigger(j).tdata2 := tdata(lTriggerMapping(j)).tdata2
-      hybridUnits(i).io.ldu_io.trigger(j).matchType := tdata(lTriggerMapping(j)).matchType
-      hybridUnits(i).io.ldu_io.trigger(j).tEnable := tEnable(lTriggerMapping(j))
+    val frontendTriggerTimingVec = io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger.frontendTiming
+    val frontendTriggerChainVec = io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger.frontendChain
+    val frontendTriggerHitVec = io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger.frontendHit
+    val loadTriggerHitVec = Wire(Vec(TriggerNum, Bool()))
+
+    val triggerTimingVec = VecInit(backendTriggerTimingVec.zip(frontendTriggerTimingVec).map { case (b, f) => b || f })
+    val triggerChainVec = VecInit(backendTriggerChainVec.zip(frontendTriggerChainVec).map { case (b, f) => b || f })
+    val triggerHitVec = VecInit(loadTriggerHitVec.zip(frontendTriggerHitVec).map { case (b, f) => b || f })
+
+    val triggerCanFireVec = Wire(Vec(TriggerNum, Bool()))
+
+    for (j <- 0 until TriggerNum) {
+      hybridUnits(i).io.ldu_io.trigger(j).tdata2 := tdata(j).tdata2
+      hybridUnits(i).io.ldu_io.trigger(j).matchType := tdata(j).matchType
+      hybridUnits(i).io.ldu_io.trigger(j).tEnable := tEnable(j) && tdata(j).load
       // Just let load triggers that match data unavailable
-      hit(j) := hybridUnits(i).io.ldu_io.trigger(j).addrHit && !tdata(lTriggerMapping(j)).select
-      io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger.backendHit(lTriggerMapping(j)) := hit(j)
+      loadTriggerHitVec(j) := hybridUnits(i).io.ldu_io.trigger(j).addrHit && !tdata(j).select
     }
-    when (tdata(2).chain) {
-      io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger.backendHit(2) := hit(0) && hit(1)
-      io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger.backendHit(3) := hit(0) && hit(1)
-    }
-    when (!io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger.backendEn(1)) {
-      io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger.backendHit(5) := false.B
-    }
-    XSDebug(io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger.getHitBackend && io.mem_to_ooo.writebackHyuLda(i).valid, p"Debug Mode: Hybrid Inst No.${i}" +
-    p"has trigger hit vec ${io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger.backendHit}\n")
+    TriggerCheckCanFire(TriggerNum, triggerCanFireVec, triggerHitVec, triggerTimingVec, triggerChainVec)
+
+    io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger.backendHit := triggerHitVec
+    io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger.backendCanFire := triggerCanFireVec
+    XSDebug(io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger.getBackendCanFire && io.mem_to_ooo.writebackHyuLda(i).valid, p"Debug Mode: Hybrid Inst No.${i}" +
+      p"has trigger fire vec ${io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger.backendCanFire}\n")
 
     // ------------------------------------
     //  Store Port
@@ -872,28 +882,34 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // Store Triggers
     // -------------------------
     val hyuOut = io.mem_to_ooo.writebackHyuSta(i)
-    when (hybridUnits(i).io.stout.fire &&
-          FuType.isStore(hybridUnits(i).io.stout.bits.uop.fuType)) {
-      val hit = Wire(Vec(3, Bool()))
-      for (j <- 0 until 3) {
-        hit(j) := !tdata(sTriggerMapping(j)).select && TriggerCmp(
+
+    val stFrontendTriggerTimingVec = hyuOut.bits.uop.trigger.frontendTiming
+    val stFrontendTriggerChainVec = hyuOut.bits.uop.trigger.frontendChain
+    val stFrontendTriggerHitVec = hyuOut.bits.uop.trigger.frontendHit
+    val storeTriggerHitVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
+
+    val stTriggerTimingVec = VecInit(backendTriggerTimingVec.zip(stFrontendTriggerTimingVec).map { case (b, f) => b || f })
+    val stTriggerChainVec = VecInit(backendTriggerChainVec.zip(stFrontendTriggerChainVec).map { case (b, f) => b || f })
+    val stTriggerHitVec = VecInit(storeTriggerHitVec.zip(stFrontendTriggerHitVec).map { case (b, f) => b || f })
+
+    val stTriggerCanFireVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
+
+    when(hybridUnits(i).io.stout.fire &&
+      FuType.isStore(hybridUnits(i).io.stout.bits.uop.fuType)) {
+      for (j <- 0 until TriggerNum) {
+        storeTriggerHitVec(j) := !tdata(j).select && TriggerCmp(
           hyuOut.bits.debug.vaddr,
-          tdata(sTriggerMapping(j)).tdata2,
-          tdata(sTriggerMapping(j)).matchType,
-          tEnable(sTriggerMapping(j))
+          tdata(j).tdata2,
+          tdata(j).matchType,
+          tEnable(j) && tdata(j).store
         )
-        hyuOut.bits.uop.trigger.backendHit(sTriggerMapping(j)) := hit(j)
       }
+      TriggerCheckCanFire(TriggerNum, stTriggerCanFireVec, stTriggerHitVec, stTriggerTimingVec, stTriggerChainVec)
 
-      when (tdata(0).chain) {
-        io.mem_to_ooo.writebackHyuSta(i).bits.uop.trigger.backendHit(0) := hit(0) && hit(1)
-        io.mem_to_ooo.writebackHyuSta(i).bits.uop.trigger.backendHit(1) := hit(0) && hit(1)
-      }
-
-      when (!hyuOut.bits.uop.trigger.backendEn(0)) {
-        hyuOut.bits.uop.trigger.backendHit(4) := false.B
-      }
+      hyuOut.bits.uop.trigger.backendHit := stTriggerHitVec
+      hyuOut.bits.uop.trigger.backendCanFire := stTriggerCanFireVec
     }
+
   }
 
   // Prefetcher
@@ -977,27 +993,31 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // -------------------------
     // Store Triggers
     // -------------------------
-    when(stOut(i).fire){
-      val hit = Wire(Vec(3, Bool()))
-      for (j <- 0 until 3) {
-         hit(j) := !tdata(sTriggerMapping(j)).select && TriggerCmp(
-           stOut(i).bits.debug.vaddr,
-           tdata(sTriggerMapping(j)).tdata2,
-           tdata(sTriggerMapping(j)).matchType,
-           tEnable(sTriggerMapping(j))
-         )
-       stOut(i).bits.uop.trigger.backendHit(sTriggerMapping(j)) := hit(j)
-     }
+    val frontendTriggerTimingVec = stOut(i).bits.uop.trigger.frontendTiming
+    val frontendTriggerChainVec = stOut(i).bits.uop.trigger.frontendChain
+    val frontendTriggerHitVec = stOut(i).bits.uop.trigger.frontendHit
+    val storeTriggerHitVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
 
-     when(tdata(0).chain) {
-       io.mem_to_ooo.writebackSta(i).bits.uop.trigger.backendHit(0) := hit(0) && hit(1)
-       io.mem_to_ooo.writebackSta(i).bits.uop.trigger.backendHit(1) := hit(0) && hit(1)
-     }
+    val triggerTimingVec = VecInit(backendTriggerTimingVec.zip(frontendTriggerTimingVec).map { case (b, f) => b || f })
+    val triggerChainVec = VecInit(backendTriggerChainVec.zip(frontendTriggerChainVec).map { case (b, f) => b || f })
+    val triggerHitVec = VecInit(storeTriggerHitVec.zip(frontendTriggerHitVec).map { case (b, f) => b || f })
 
-     when(!stOut(i).bits.uop.trigger.backendEn(0)) {
-       stOut(i).bits.uop.trigger.backendHit(4) := false.B
-     }
-   }
+    val triggerCanFireVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
+
+    when(stOut(i).fire) {
+      for (j <- 0 until TriggerNum) {
+        storeTriggerHitVec(j) := !tdata(j).select && TriggerCmp(
+          stOut(i).bits.debug.vaddr,
+          tdata(j).tdata2,
+          tdata(j).matchType,
+          tEnable(j) && tdata(j).store
+        )
+      }
+      TriggerCheckCanFire(TriggerNum, triggerCanFireVec, triggerHitVec, triggerTimingVec, triggerChainVec)
+
+      stOut(i).bits.uop.trigger.backendHit := triggerHitVec
+      stOut(i).bits.uop.trigger.backendCanFire := triggerCanFireVec
+    }
   }
 
   // mmio store writeback will use store writeback port 0
@@ -1011,10 +1031,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   when (atomicsUnit.io.out.valid) {
     // when atom inst writeback, surpress normal load trigger
     (0 until LduCnt).map(i => {
-      io.mem_to_ooo.writebackLda(i).bits.uop.trigger.backendHit := VecInit(Seq.fill(6)(false.B))
+      io.mem_to_ooo.writebackLda(i).bits.uop.trigger.backendHit := VecInit(Seq.fill(TriggerNum)(false.B))
     })
     (0 until HyuCnt).map(i => {
-      io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger.backendHit := VecInit(Seq.fill(6)(false.B))
+      io.mem_to_ooo.writebackHyuLda(i).bits.uop.trigger.backendHit := VecInit(Seq.fill(TriggerNum)(false.B))
     })
   }
 

@@ -55,6 +55,35 @@ trait HasCSRConst {
   val Cycle         = 0xC00
   val Time          = 0xC01
   val Instret       = 0xC02
+  val Hpmcounter3   = 0xC03
+  val Hpmcounter4   = 0xC04
+  val Hpmcounter5   = 0xC05
+  val Hpmcounter6   = 0xC06
+  val Hpmcounter7   = 0xC07
+  val Hpmcounter8   = 0xC08
+  val Hpmcounter9   = 0xC09
+  val Hpmcounter10  = 0xC0A
+  val Hpmcounter11  = 0xC0B
+  val Hpmcounter12  = 0xC0C
+  val Hpmcounter13  = 0xC0D
+  val Hpmcounter14  = 0xC0E
+  val Hpmcounter15  = 0xC0F
+  val Hpmcounter16  = 0xC10
+  val Hpmcounter17  = 0xC11
+  val Hpmcounter18  = 0xC12
+  val Hpmcounter19  = 0xC13
+  val Hpmcounter20  = 0xC14
+  val Hpmcounter21  = 0xC15
+  val Hpmcounter22  = 0xC16
+  val Hpmcounter23  = 0xC17
+  val Hpmcounter24  = 0xC18
+  val Hpmcounter25  = 0xC19
+  val Hpmcounter26  = 0xC1A
+  val Hpmcounter27  = 0xC1B
+  val Hpmcounter28  = 0xC1C
+  val Hpmcounter29  = 0xC1D
+  val Hpmcounter30  = 0xC1E
+  val Hpmcounter31  = 0xC1F
 
   // Supervisor Trap Setup
   val Sstatus       = 0x100
@@ -197,7 +226,7 @@ trait HasCSRConst {
   // Debug Mode Registers
   val Dcsr          = 0x7B0
   val Dpc           = 0x7B1
-  val Dscratch      = 0x7B2
+  val Dscratch0     = 0x7B2
   val Dscratch1     = 0x7B3
 
   def privEcall  = 0x000.U
@@ -263,3 +292,4 @@ trait HasCSRConst {
     Mux(!mModeCanWrite && isTriggerReg, debug, true.B)
   }
 }
+object CSRConst extends HasCSRConst

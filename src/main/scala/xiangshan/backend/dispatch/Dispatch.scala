@@ -113,9 +113,10 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val isWaitForward    = VecInit(io.fromRename.map(_.bits.waitForward))
 
   val singleStepStatus = RegInit(false.B)
-  when (io.redirect.valid) {
+  val inst0actualOut = io.enqRob.req(0).valid
+  when(io.redirect.valid) {
     singleStepStatus := false.B
-  }.elsewhen (io.singleStep && io.fromRename(0).fire) {
+  }.elsewhen(io.singleStep && io.fromRename(0).fire && inst0actualOut) {
     singleStepStatus := true.B
   }
   XSDebug(singleStepStatus, "Debug Mode: Singlestep status is asserted\n")
@@ -160,7 +161,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     // update singleStep
     updatedUop(i).singleStep := io.singleStep && (if (i == 0) singleStepStatus else true.B)
     when (io.fromRename(i).fire) {
-      XSDebug(updatedUop(i).trigger.getHitFrontend, s"Debug Mode: inst ${i} has frontend trigger exception\n")
+      XSDebug(updatedUop(i).trigger.getFrontendCanFire, s"Debug Mode: inst ${i} has frontend trigger exception\n")
       XSDebug(updatedUop(i).singleStep, s"Debug Mode: inst ${i} has single step exception\n")
     }
     if (env.EnableDifftest) {
@@ -201,8 +202,10 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   // thisIsBlocked: this instruction is blocked by itself (based on noSpecExec)
   // nextCanOut: next instructions can out (based on blockBackward)
   // notBlockedByPrevious: previous instructions can enqueue
-  val hasException = VecInit(io.fromRename.map(
-    r => selectFrontend(r.bits.exceptionVec).asUInt.orR || r.bits.singleStep || r.bits.trigger.getHitFrontend))
+  val hasException = VecInit(io.fromRename.zip(updatedUop).map {
+    case (fromRename: DecoupledIO[DynInst], uop: DynInst) =>
+      selectFrontend(fromRename.bits.exceptionVec).asUInt.orR || uop.singleStep || fromRename.bits.trigger.getFrontendCanFire
+  })
   val thisIsBlocked = VecInit((0 until RenameWidth).map(i => {
     // for i > 0, when Rob is empty but dispatch1 have valid instructions to enqueue, it's blocked
     if (i > 0) isWaitForward(i) && (!io.enqRob.isEmpty || Cat(io.fromRename.take(i).map(_.valid)).orR)

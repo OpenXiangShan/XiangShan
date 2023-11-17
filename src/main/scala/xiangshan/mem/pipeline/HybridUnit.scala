@@ -29,6 +29,7 @@ import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.ctrlblock.{DebugLsInfoBundle, LsTopdownInfo}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu._
+import xiangshan.backend.fu.util.SdtrigExt
 import xiangshan.cache._
 import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
@@ -39,6 +40,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   with HasPerfEvents
   with HasDCacheParameters
   with HasCircularQueuePtrHelper
+  with SdtrigExt
 {
   val io = IO(new Bundle() {
     // control
@@ -68,7 +70,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
       val fast_uop = ValidIO(new DynInst) // early wakeup signal generated in load_s1, send to RS in load_s2
 
       // trigger
-      val trigger = Vec(3, new LoadUnitTriggerIO)
+      val trigger = Vec(TriggerNum, new LoadUnitTriggerIO)
 
       // load to load fast path
       val l2l_fwd_in    = Input(new LoadToLoadIO)
@@ -1287,9 +1289,9 @@ class HybridUnit(implicit p: Parameters) extends XSModule
    // trigger
   val ld_trigger = FuType.isLoad(io.ldout.bits.uop.fuType)
   val last_valid_data = RegEnable(io.ldout.bits.data, io.stout.fire)
-  val hit_ld_addr_trig_hit_vec = Wire(Vec(3, Bool()))
+  val hit_ld_addr_trig_hit_vec = Wire(Vec(TriggerNum, Bool()))
   val lq_ld_addr_trig_hit_vec = RegNext(io.ldu_io.lsq.trigger.lqLoadAddrTriggerHitVec)
-  (0 until 3).map{i => {
+  (0 until TriggerNum).map{i => {
     val tdata2    = RegNext(RegNext(io.ldu_io.trigger(i).tdata2))
     val matchType = RegNext(RegNext(io.ldu_io.trigger(i).matchType))
     val tEnable   = RegNext(RegNext(io.ldu_io.trigger(i).tEnable))

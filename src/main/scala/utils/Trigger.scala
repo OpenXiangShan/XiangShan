@@ -21,20 +21,6 @@ import chisel3.util._
 import xiangshan.MatchTriggerIO
 import org.chipsalliance.cde.config.Parameters
 
-
-object TriggerCmp {
-  def apply(actual: UInt, tdata: UInt, matchType: UInt, enable: Bool) = {
-    val equal = actual === tdata
-    val greater = actual >= tdata
-    val less = actual <= tdata
-    val res = MuxLookup(matchType, false.B,
-      Array(0.U -> equal,
-          2.U -> greater,
-          3.U -> less))
-    res && enable
-  }
-}
-
 object ChainCheck {
   def TimingCheck(prevTiming: Bool, thisTiming: Bool, chain: Bool) = !((prevTiming ^ thisTiming) && chain)
   def HitCheck(prevHit: Bool, chain: Bool) = prevHit || !chain

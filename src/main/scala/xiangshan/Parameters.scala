@@ -637,4 +637,8 @@ trait HasXSParameter {
   val numCSRPCntCtrl     = 8
   val numCSRPCntLsu      = 8
   val numCSRPCntHc       = 5
+
+  // Parameters for Sdtrig extension
+  protected val TriggerNum = 4
+  protected val TriggerChainMaxLength = 2
 }

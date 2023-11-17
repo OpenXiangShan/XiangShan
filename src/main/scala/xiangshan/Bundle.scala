@@ -562,7 +562,6 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val singlestep = Output(Bool())
   val frontend_trigger = new FrontendTdataDistributeIO()
   val mem_trigger = new MemTdataDistributeIO()
-  val trigger_enable = Output(Vec(10, Bool()))
 }
 
 class DistributedCSRIO(implicit p: Parameters) extends XSBundle {
@@ -653,43 +652,46 @@ xret csr to pc + 4/ + 2
 
 class TriggerCf(implicit p: Parameters) extends XSBundle {
   // frontend
-  val frontendHit = Vec(4, Bool())
-//  val frontendTiming = Vec(4, Bool())
-//  val frontendHitNext = Vec(4, Bool())
-
-//  val frontendException = Bool()
+  val frontendHit       = Vec(TriggerNum, Bool()) // en && hit
+  val frontendTiming    = Vec(TriggerNum, Bool()) // en && timing
+  val frontendChain     = Vec(TriggerNum, Bool()) // en && chain
+  val frontendCanFire   = Vec(TriggerNum, Bool())
   // backend
-  val backendEn = Vec(2, Bool()) // Hit(6) && chain(4) , Hit(8) && chain(4)
-  val backendHit = Vec(6, Bool())
-//  val backendTiming = Vec(6, Bool()) // trigger enable fro chain
+  val backendHit        = Vec(TriggerNum, Bool())
+  val backendCanFire    = Vec(TriggerNum, Bool())
 
   // Two situations not allowed:
   // 1. load data comparison
   // 2. store chaining with store
-  def getHitFrontend = frontendHit.reduce(_ || _)
-  def getHitBackend = backendHit.reduce(_ || _)
-  def hit = getHitFrontend || getHitBackend
+  def getFrontendCanFire = frontendCanFire.reduce(_ || _)
+  def getBackendCanFire = backendCanFire.reduce(_ || _)
+  def canFire = getFrontendCanFire || getBackendCanFire
   def clear(): Unit = {
     frontendHit.foreach(_ := false.B)
-    backendEn.foreach(_ := false.B)
+    frontendCanFire.foreach(_ := false.B)
     backendHit.foreach(_ := false.B)
+    backendCanFire.foreach(_ := false.B)
+    frontendTiming.foreach(_ := false.B)
+    frontendChain.foreach(_ := false.B)
   }
 }
 
 // these 3 bundles help distribute trigger control signals from CSR
 // to Frontend, Load and Store.
-class FrontendTdataDistributeIO(implicit p: Parameters)  extends XSBundle {
-    val t = Valid(new Bundle {
-      val addr = Output(UInt(2.W))
-      val tdata = new MatchTriggerIO
-    })
-  }
-
-class MemTdataDistributeIO(implicit p: Parameters)  extends XSBundle {
-  val t = Valid(new Bundle {
-    val addr = Output(UInt(3.W))
+class FrontendTdataDistributeIO(implicit p: Parameters) extends XSBundle {
+  val tUpdate = ValidIO(new Bundle {
+    val addr = Output(UInt(log2Up(TriggerNum).W))
     val tdata = new MatchTriggerIO
   })
+  val tEnableVec: Vec[Bool] = Output(Vec(TriggerNum, Bool()))
+}
+
+class MemTdataDistributeIO(implicit p: Parameters) extends XSBundle {
+  val tUpdate = ValidIO(new Bundle {
+    val addr = Output(UInt(log2Up(TriggerNum).W))
+    val tdata = new MatchTriggerIO
+  })
+  val tEnableVec: Vec[Bool] = Output(Vec(TriggerNum, Bool()))
 }
 
 class MatchTriggerIO(implicit p: Parameters) extends XSBundle {
@@ -698,6 +700,9 @@ class MatchTriggerIO(implicit p: Parameters) extends XSBundle {
   val timing = Output(Bool())
   val action = Output(Bool())
   val chain = Output(Bool())
+  val execute = Output(Bool())
+  val store = Output(Bool())
+  val load = Output(Bool())
   val tdata2 = Output(UInt(64.W))
 }
 
@@ -710,3 +715,4 @@ class StallReasonIO(width: Int) extends Bundle {
 class L2ToL1Hint(implicit p: Parameters) extends XSBundle with HasDCacheParameters {
   val sourceId = UInt(log2Up(cfg.nMissEntries).W)    // tilelink sourceID -> mshr id
 }
+
