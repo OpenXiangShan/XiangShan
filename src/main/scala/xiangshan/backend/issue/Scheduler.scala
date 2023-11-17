@@ -89,6 +89,8 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
 
   val finalBlockMem = OptionWrapper(params.isMemSchd, MixedVec(params.issueBlockParams.map(x => MixedVec(Vec(x.numExu, Input(Bool()))))))
 
+  val finalBlockMem = OptionWrapper(params.isMemSchd, MixedVec(params.issueBlockParams.map(x => MixedVec(Vec(x.numExu, Input(Bool()))))))
+
   val memIO = if (params.isMemSchd) Some(new Bundle {
     val lsqEnqIO = Flipped(new LsqEnqIO)
   }) else None
