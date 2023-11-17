@@ -75,8 +75,8 @@ class LqEnqIO(implicit p: Parameters) extends MemBlockBundle {
 }
 
 class LqTriggerIO(implicit p: Parameters) extends XSBundle {
-  val hitLoadAddrTriggerHitVec = Input(Vec(3, Bool()))
-  val lqLoadAddrTriggerHitVec = Output(Vec(3, Bool()))
+  val hitLoadAddrTriggerHitVec = Input(Vec(TriggerNum, Bool()))
+  val lqLoadAddrTriggerHitVec = Output(Vec(TriggerNum, Bool()))
 }
 
 class LoadQueueTopDownIO(implicit p: Parameters) extends XSBundle {

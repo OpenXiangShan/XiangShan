@@ -19,7 +19,6 @@ package top
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import utils._
 import huancun.PrefetchRecv
 import utility._
 import system._

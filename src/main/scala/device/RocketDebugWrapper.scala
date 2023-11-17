@@ -59,7 +59,9 @@ class DebugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
     val io = IO(new DebugModuleIO)
     debug.module.io.tl_reset := io.reset // this should be TL reset
     debug.module.io.tl_clock := io.clock.asClock // this should be TL clock
-    debug.module.io.hartIsInReset := io.resetCtrl.hartIsInReset
+    withClock(io.clock.asClock) {
+      debug.module.io.hartIsInReset := RegNext(io.resetCtrl.hartIsInReset)
+    }
     io.resetCtrl.hartResetReq.foreach { rcio => debug.module.io.hartResetReq.foreach { rcdm => rcio := rcdm }}
 
     io.debugIO.clockeddmi.foreach { dbg => debug.module.io.dmi.get <> dbg } // not connected in current case since we use dtm
@@ -104,7 +106,9 @@ object XSDebugModuleParams {
       maxSupportedSBAccess = xlen,
       hasBusMaster = true,
       baseAddress = BigInt(0x38020000),
-      nScratch = 2
+      nScratch = 2,
+      crossingHasSafeReset = false,
+      hasHartResets = true,
     )
   }
 }
@@ -122,6 +126,9 @@ class SimJTAG(tickDelay: Int = 50)(implicit val p: Parameters) extends ExtModule
   val exit = IO(Output(UInt(32.W)))
 
   def connect(dutio: JTAGIO, tbclock: Clock, tbreset: Reset, done: Bool, tbsuccess: Bool) = {
+    if (!dutio.TRSTn.isEmpty) {
+      dutio.TRSTn.get := jtag.TRSTn.getOrElse(false.B) || !tbreset.asBool
+    }
     dutio.TCK := jtag.TCK
     dutio.TMS := jtag.TMS
     dutio.TDI := jtag.TDI

@@ -377,6 +377,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     sink.bits.debugInfo := source.bits.uop.debugInfo
     sink.bits.lqIdx.foreach(_ := source.bits.uop.lqIdx)
     sink.bits.sqIdx.foreach(_ := source.bits.uop.sqIdx)
+    sink.bits.trigger.foreach(_ := source.bits.uop.trigger)
   }
 
   // to mem

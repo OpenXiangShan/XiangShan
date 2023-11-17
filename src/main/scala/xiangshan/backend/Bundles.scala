@@ -540,6 +540,7 @@ object Bundles {
     val lqIdx        = if (params.hasLoadFu)    Some(new LqPtr())             else None
     val sqIdx        = if (params.hasStoreAddrFu || params.hasStdFu)
                                                 Some(new SqPtr())             else None
+    val trigger      = if (params.trigger)      Some(new TriggerCf)           else None
     // uop info
     val predecodeInfo = if(params.hasPredecode) Some(new PreDecodeInfo) else None
     val debug = new DebugBundle
@@ -617,7 +618,7 @@ object Bundles {
     val pdest = UInt(params.wbPregIdxWidth.W)
   }
 
-  class ExceptionInfo extends Bundle {
+  class ExceptionInfo(implicit p: Parameters) extends Bundle {
     val pc = UInt(VAddrData().dataWidth.W)
     val instr = UInt(32.W)
     val commitType = CommitType()
@@ -625,6 +626,7 @@ object Bundles {
     val singleStep = Bool()
     val crossPageIPFFix = Bool()
     val isInterrupt = Bool()
+    val trigger  = new TriggerCf
   }
 
   object UopIdx {

@@ -28,8 +28,12 @@ import difftest._
 import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.Bundles.{MemExuInput, MemExuOutput}
+import xiangshan.backend.fu.util.SdtrigExt
 
-class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstants with HasDCacheParameters{
+class AtomicsUnit(implicit p: Parameters) extends XSModule
+  with MemoryOpConstants
+  with HasDCacheParameters
+  with SdtrigExt{
   val io = IO(new Bundle() {
     val hartId = Input(UInt(8.W))
     val in            = Flipped(Decoupled(new MemExuInput))
@@ -359,78 +363,58 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
 
   // atomic trigger
   val csrCtrl = io.csrCtrl
-  val tdata = Reg(Vec(6, new MatchTriggerIO))
-  val tEnable = RegInit(VecInit(Seq.fill(6)(false.B)))
-  val en = csrCtrl.trigger_enable
-  tEnable := VecInit(en(2), en (3), en(7), en(4), en(5), en(9))
-  when(csrCtrl.mem_trigger.t.valid) {
-    tdata(csrCtrl.mem_trigger.t.bits.addr) := csrCtrl.mem_trigger.t.bits.tdata
+  val tdata = Reg(Vec(TriggerNum, new MatchTriggerIO))
+  val tEnableVec = RegInit(VecInit(Seq.fill(TriggerNum)(false.B)))
+  tEnableVec := csrCtrl.mem_trigger.tEnableVec
+  when(csrCtrl.mem_trigger.tUpdate.valid) {
+    tdata(csrCtrl.mem_trigger.tUpdate.bits.addr) := csrCtrl.mem_trigger.tUpdate.bits.tdata
   }
-  val lTriggerMapping = Map(0 -> 2, 1 -> 3, 2 -> 5)
-  val sTriggerMapping = Map(0 -> 0, 1 -> 1, 2 -> 4)
 
-  val backendTriggerHitReg = Reg(Vec(6, Bool()))
-  backendTriggerHitReg := VecInit(Seq.fill(6)(false.B))
+  val frontendTriggerTimingVec = in.uop.trigger.frontendTiming
+  val frontendTriggerChainVec = in.uop.trigger.frontendChain
+  val frontendTriggerHitVec = in.uop.trigger.frontendHit
 
-  when(state === s_cache_req){
+  val backendTriggerTimingVec = tdata.map(_.timing)
+  val backendTriggerChainVec = tdata.map(_.chain)
+  val backendTriggerHitVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
+
+  val triggerTimingVec = VecInit(backendTriggerTimingVec.zip(frontendTriggerTimingVec).map { case (b, f) => b || f })
+  val triggerChainVec = VecInit(backendTriggerChainVec.zip(frontendTriggerChainVec).map { case (b, f) => b || f })
+  val triggerHitVec = Reg(Vec(TriggerNum, Bool()))
+  triggerHitVec := VecInit(backendTriggerHitVec.zip(frontendTriggerHitVec).map { case (b, f) => b || f })
+
+  val triggerCanFireVec = RegInit(VecInit(Seq.fill(TriggerNum)(false.B)))
+  when(state === s_cache_req) {
     // store trigger
-    val store_hit = Wire(Vec(3, Bool()))
-    for (j <- 0 until 3) {
-        store_hit(j) := !tdata(sTriggerMapping(j)).select && TriggerCmp(
-          vaddr,
-          tdata(sTriggerMapping(j)).tdata2,
-          tdata(sTriggerMapping(j)).matchType,
-          tEnable(sTriggerMapping(j))
-        )
-       backendTriggerHitReg(sTriggerMapping(j)) := store_hit(j)
-     }
-
-    when(tdata(0).chain) {
-      backendTriggerHitReg(0) := store_hit(0) && store_hit(1)
-      backendTriggerHitReg(1) := store_hit(0) && store_hit(1)
-    }
-
-    when(!in.uop.trigger.backendEn(0)) {
-      backendTriggerHitReg(4) := false.B
-    }
-
-    // load trigger
-    val load_hit = Wire(Vec(3, Bool()))
-    for (j <- 0 until 3) {
-
-      val addrHit = TriggerCmp(
+    val store_hit = Wire(Vec(TriggerNum, Bool()))
+    for (j <- 0 until TriggerNum) {
+      store_hit(j) := !tdata(j).select && TriggerCmp(
         vaddr,
-        tdata(lTriggerMapping(j)).tdata2,
-        tdata(lTriggerMapping(j)).matchType,
-        tEnable(lTriggerMapping(j))
+        tdata(j).tdata2,
+        tdata(j).matchType,
+        tEnableVec(j) && tdata(j).store
       )
-      load_hit(j) := addrHit && !tdata(lTriggerMapping(j)).select
-      backendTriggerHitReg(lTriggerMapping(j)) := load_hit(j)
     }
-    when(tdata(2).chain) {
-      backendTriggerHitReg(2) := load_hit(0) && load_hit(1)
-      backendTriggerHitReg(3) := load_hit(0) && load_hit(1)
+    // load trigger
+    val load_hit = Wire(Vec(TriggerNum, Bool()))
+    for (j <- 0 until TriggerNum) {
+      load_hit(j) := !tdata(j).select && TriggerCmp(
+        vaddr,
+        tdata(j).tdata2,
+        tdata(j).matchType,
+        tEnableVec(j) && tdata(j).load
+      )
     }
-    when(!in.uop.trigger.backendEn(1)) {
-      backendTriggerHitReg(5) := false.B
-    }
+    backendTriggerHitVec := store_hit.zip(load_hit).map { case (sh, lh) => sh || lh }
+    // triggerCanFireVec will update at T+1
+    TriggerCheckCanFire(TriggerNum, triggerCanFireVec, triggerHitVec, triggerTimingVec, triggerChainVec)
   }
 
   // addr trigger do cmp at s_cache_req
   // trigger result is used at s_finish
   // thus we can delay it safely
-  io.out.bits.uop.trigger.backendHit := VecInit(Seq.fill(6)(false.B))
-  when(isLr){
-    // enable load trigger
-    io.out.bits.uop.trigger.backendHit(2) := backendTriggerHitReg(2)
-    io.out.bits.uop.trigger.backendHit(3) := backendTriggerHitReg(3)
-    io.out.bits.uop.trigger.backendHit(5) := backendTriggerHitReg(5)
-  }.otherwise{
-    // enable store trigger
-    io.out.bits.uop.trigger.backendHit(0) := backendTriggerHitReg(0)
-    io.out.bits.uop.trigger.backendHit(1) := backendTriggerHitReg(1)
-    io.out.bits.uop.trigger.backendHit(4) := backendTriggerHitReg(4)
-  }
+  io.out.bits.uop.trigger.backendHit := triggerHitVec
+  io.out.bits.uop.trigger.backendCanFire := triggerCanFireVec
 
   if (env.EnableDifftest) {
     val difftest = DifftestModule(new DiffAtomicEvent)

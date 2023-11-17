@@ -200,12 +200,10 @@ class RobExceptionInfo(implicit p: Parameters) extends XSBundle {
   val crossPageIPFFix = Bool()
   val trigger = new TriggerCf
 
-//  def trigger_before = !trigger.getTimingBackend && trigger.getHitBackend
-//  def trigger_after = trigger.getTimingBackend && trigger.getHitBackend
-  def has_exception = exceptionVec.asUInt.orR || flushPipe || singleStep || replayInst || trigger.hit
-  def not_commit = exceptionVec.asUInt.orR || singleStep || replayInst || trigger.hit
+  def has_exception = exceptionVec.asUInt.orR || flushPipe || singleStep || replayInst || trigger.canFire
+  def not_commit = exceptionVec.asUInt.orR || singleStep || replayInst || trigger.canFire
   // only exceptions are allowed to writeback when enqueue
-  def can_writeback = exceptionVec.asUInt.orR || singleStep || trigger.hit
+  def can_writeback = exceptionVec.asUInt.orR || singleStep || trigger.canFire
 }
 
 class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
@@ -394,6 +392,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // writeback status
 
   val stdWritebacked = Reg(Vec(RobSize, Bool()))
+  val commitTrigger = Mem(RobSize, Bool())
   val uopNumVec          = RegInit(VecInit(Seq.fill(RobSize)(0.U(log2Up(MaxUopSize + 1).W))))
   val realDestSize       = RegInit(VecInit(Seq.fill(RobSize)(0.U(log2Up(MaxUopSize + 1).W))))
   val fflagsDataModule   = RegInit(VecInit(Seq.fill(RobSize)(0.U(5.W))))
@@ -413,7 +412,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val flagBkup = Mem(RobSize, Bool())
   // some instructions are not allowed to trigger interrupts
   // They have side effects on the states of the processor before they write back
-  val interrupt_safe = Mem(RobSize, Bool())
+  val interrupt_safe = RegInit(VecInit(Seq.fill(RobSize)(true.B)))
 
   // data for debug
   // Warn: debug_* prefix should not exist in generated verilog.
@@ -564,21 +563,21 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       when (enqUop.waitForward) {
         hasWaitForward := true.B
       }
-      val enqHasTriggerHit = false.B // io.enq.req(i).bits.cf.trigger.getHitFrontend
+      val enqHasTriggerCanFire = io.enq.req(i).bits.trigger.getFrontendCanFire
       val enqHasException = ExceptionNO.selectFrontend(enqUop.exceptionVec).asUInt.orR
       // the begin instruction of Svinval enqs so mark doingSvinval as true to indicate this process
-      when(!enqHasTriggerHit && !enqHasException && enqUop.isSvinvalBegin(enqUop.flushPipe))
+      when(!enqHasTriggerCanFire && !enqHasException && enqUop.isSvinvalBegin(enqUop.flushPipe))
       {
         doingSvinval := true.B
       }
       // the end instruction of Svinval enqs so clear doingSvinval
-      when(!enqHasTriggerHit && !enqHasException && enqUop.isSvinvalEnd(enqUop.flushPipe))
+      when(!enqHasTriggerCanFire && !enqHasException && enqUop.isSvinvalEnd(enqUop.flushPipe))
       {
         doingSvinval := false.B
       }
       // when we are in the process of Svinval software code area , only Svinval.vma and end instruction of Svinval can appear
       assert(!doingSvinval || (enqUop.isSvinval(enqUop.flushPipe) || enqUop.isSvinvalEnd(enqUop.flushPipe)))
-      when (enqUop.isWFI && !enqHasException && !enqHasTriggerHit) {
+      when (enqUop.isWFI && !enqHasException && !enqHasTriggerCanFire) {
         hasWFI := true.B
       }
 
@@ -695,14 +694,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val intrEnable = intrBitSetReg && !hasWaitForward && interrupt_safe(deqPtr.value)
   val deqHasExceptionOrFlush = exceptionDataRead.valid && exceptionDataRead.bits.robIdx === deqPtr
   val deqHasException = deqHasExceptionOrFlush && (exceptionDataRead.bits.exceptionVec.asUInt.orR ||
-    exceptionDataRead.bits.singleStep || exceptionDataRead.bits.trigger.hit)
+    exceptionDataRead.bits.singleStep || exceptionDataRead.bits.trigger.canFire)
   val deqHasFlushPipe = deqHasExceptionOrFlush && exceptionDataRead.bits.flushPipe
   val deqHasReplayInst = deqHasExceptionOrFlush && exceptionDataRead.bits.replayInst
   val exceptionEnable = isWritebacked(deqPtr.value) && deqHasException
 
   XSDebug(deqHasException && exceptionDataRead.bits.singleStep, "Debug Mode: Deq has singlestep exception\n")
-  XSDebug(deqHasException && exceptionDataRead.bits.trigger.getHitFrontend, "Debug Mode: Deq has frontend trigger exception\n")
-  XSDebug(deqHasException && exceptionDataRead.bits.trigger.getHitBackend, "Debug Mode: Deq has backend trigger exception\n")
+  XSDebug(deqHasException && exceptionDataRead.bits.trigger.getFrontendCanFire, "Debug Mode: Deq has frontend trigger exception\n")
+  XSDebug(deqHasException && exceptionDataRead.bits.trigger.getBackendCanFire, "Debug Mode: Deq has backend trigger exception\n")
 
   val isFlushPipe = isWritebacked(deqPtr.value) && (deqHasFlushPipe || deqHasReplayInst)
 
@@ -737,7 +736,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.exception.bits.singleStep      := RegEnable(exceptionDataRead.bits.singleStep, exceptionHappen)
   io.exception.bits.crossPageIPFFix := RegEnable(exceptionDataRead.bits.crossPageIPFFix, exceptionHappen)
   io.exception.bits.isInterrupt     := RegEnable(intrEnable, exceptionHappen)
-//  io.exception.bits.trigger := RegEnable(exceptionDataRead.bits.trigger, exceptionHappen)
+  io.exception.bits.trigger         := RegEnable(exceptionDataRead.bits.trigger, exceptionHappen)
 
   XSDebug(io.flushOut.valid,
     p"generate redirect: pc 0x${Hexadecimal(io.exception.bits.pc)} intr $intrEnable " +
@@ -792,7 +791,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val walk_v = VecInit(walkPtrVec.map(ptr => valid(ptr.value)))
   val commit_v = VecInit(deqPtrVec.map(ptr => valid(ptr.value)))
   // store will be commited iff both sta & std have been writebacked
-  val commit_w = VecInit(deqPtrVec.map(ptr => isWritebacked(ptr.value)))
+  val commit_w = VecInit(deqPtrVec.map(ptr => isWritebacked(ptr.value) && commitTrigger(ptr.value)))
   val commit_exception = exceptionDataRead.valid && !isAfter(exceptionDataRead.bits.robIdx, deqPtrVec.last)
   val commit_block = VecInit((0 until CommitWidth).map(i => !commit_w(i)))
   val allowOnlyOneCommit = commit_exception || intrBitSetReg
@@ -972,16 +971,34 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     debug_lsTopdownInfo(io.lsTopdownInfo(i).s2.robIdx).s2SignalEnable(io.lsTopdownInfo(i))
   }
 
+  // status field: writebacked
+  // enqueue logic set 6 writebacked to false
+  for (i <- 0 until RenameWidth) {
+    when(canEnqueue(i)) {
+      val enqHasException = ExceptionNO.selectFrontend(io.enq.req(i).bits.exceptionVec).asUInt.orR
+      val enqHasTriggerCanFire = io.enq.req(i).bits.trigger.getFrontendCanFire
+      val enqIsWritebacked = io.enq.req(i).bits.eliminatedMove
+      val isStu = FuType.isStore(io.enq.req(i).bits.fuType)
+      commitTrigger(allocatePtrVec(i).value) := enqIsWritebacked && !enqHasException && !enqHasTriggerCanFire && !isStu
+    }
+  }
+  when(exceptionGen.io.out.valid) {
+    val wbIdx = exceptionGen.io.out.bits.robIdx.value
+    commitTrigger(wbIdx) := true.B
+  }
+
   // writeback logic set numWbPorts writebacked to true
   val blockWbSeq = Wire(Vec(exuWBs.length, Bool()))
   blockWbSeq.map(_ := false.B)
   for ((wb, blockWb) <- exuWBs.zip(blockWbSeq)) {
     when(wb.valid) {
+      val wbIdx = wb.bits.robIdx.value
       val wbHasException = wb.bits.exceptionVec.getOrElse(0.U).asUInt.orR
-      val wbHasTriggerHit = false.B //Todo: wb.bits.trigger.getHitBackend
+      val wbHasTriggerCanFire = wb.bits.trigger.getOrElse(0.U).asTypeOf(io.enq.req(0).bits.trigger).getBackendCanFire //Todo: wb.bits.trigger.getHitBackend
       val wbHasFlushPipe = wb.bits.flushPipe.getOrElse(false.B)
       val wbHasReplayInst = wb.bits.replay.getOrElse(false.B) //Todo: && wb.bits.replayInst
-      blockWb := wbHasException || wbHasFlushPipe || wbHasReplayInst || wbHasTriggerHit
+      blockWb := wbHasException || wbHasFlushPipe || wbHasReplayInst || wbHasTriggerCanFire
+      commitTrigger(wbIdx) := !blockWb
     }
   }
 
@@ -1119,6 +1136,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     exceptionGen.io.enq(i).bits.crossPageIPFFix := io.enq.req(i).bits.crossPageIPFFix
     exceptionGen.io.enq(i).bits.trigger.clear()
     exceptionGen.io.enq(i).bits.trigger.frontendHit := io.enq.req(i).bits.trigger.frontendHit
+    exceptionGen.io.enq(i).bits.trigger.frontendCanFire := io.enq.req(i).bits.trigger.frontendCanFire
   }
 
   println(s"ExceptionGen:")
@@ -1135,7 +1153,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     exc_wb.bits.replayInst      := wb.bits.replay.getOrElse(false.B)
     exc_wb.bits.singleStep      := false.B
     exc_wb.bits.crossPageIPFFix := false.B
-    exc_wb.bits.trigger         := 0.U.asTypeOf(exc_wb.bits.trigger) // Todo
+    // TODO: make trigger configurable
+    val trigger = wb.bits.trigger.getOrElse(0.U).asTypeOf(exc_wb.bits.trigger)
+    exc_wb.bits.trigger.clear() // Don't care frontend timing, chain, hit and canFire
+    exc_wb.bits.trigger.backendHit := trigger.backendHit
+    exc_wb.bits.trigger.backendCanFire := trigger.backendCanFire
 //    println(s"  [$i] ${configs.map(_.name)}: exception ${exceptionCases(i)}, " +
 //      s"flushPipe ${configs.exists(_.flushPipe)}, " +
 //      s"replayInst ${configs.exists(_.replayInst)}")
