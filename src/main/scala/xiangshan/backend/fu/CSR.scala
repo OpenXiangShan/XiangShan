@@ -681,7 +681,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val vcsr = RegInit(0.U(XLEN.W))
   val vl = Reg(UInt(XLEN.W))
   val vtype = Reg(UInt(XLEN.W))
-  val vlenb = RegInit(0.U(XLEN.W))
+  val vlenb = RegInit((VLEN / 8).U(XLEN.W))
 
   // set mstatus->sd and mstatus->vs when true
   val csrw_dirty_vs_state = WireInit(false.B)
