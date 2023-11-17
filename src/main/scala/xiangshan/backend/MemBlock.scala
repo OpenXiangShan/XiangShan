@@ -36,6 +36,7 @@ import xiangshan.cache.mmu._
 import xiangshan.mem._
 import xiangshan.mem.mdp._
 import xiangshan.mem.prefetch.{BasePrefecher, SMSParams, SMSPrefetcher, L1Prefetcher}
+import xiangshan.frontend.HasInstrMMIOConst
 
 class Std(implicit p: Parameters) extends FunctionUnit {
   io.in.ready := true.B
@@ -105,7 +106,8 @@ class fetch_to_mem(implicit p: Parameters) extends XSBundle{
   val itlb = Flipped(new TlbPtwIO())
 }
 
-class InstrUncacheBuffer()(implicit p: Parameters) extends LazyModule {
+// triple buffer applied in i-mmio path (two at MemBlock, one at L2Top)
+class InstrUncacheBuffer()(implicit p: Parameters) extends LazyModule with HasInstrMMIOConst{
   val node = new TLBufferNode(BufferParams.default, BufferParams.default, BufferParams.default, BufferParams.default, BufferParams.default)
   lazy val module = new InstrUncacheBufferImpl
 
@@ -114,12 +116,12 @@ class InstrUncacheBuffer()(implicit p: Parameters) extends LazyModule {
       out.a <> BufferParams.default(BufferParams.default(in.a))
       in.d <> BufferParams.default(BufferParams.default(out.d))
 
-      // only a.valid, a.ready, a.address are used, so we assign 0 to the following
-      // hoping that them would be optimized to keep MemBlock port unchanged after adding buffer
+      // only a.valid, a.ready, a.address can change
+      // hoping that the rest would be optimized to keep MemBlock port unchanged after adding buffer
       out.a.bits.data := 0.U
-      out.a.bits.mask := 0.U
-      out.a.bits.opcode := 0.U
-      out.a.bits.size := 0.U
+      out.a.bits.mask := Fill(mmioBusBytes, 1.U(1.W))
+      out.a.bits.opcode := 4.U // Get
+      out.a.bits.size := log2Ceil(mmioBusBytes).U
       out.a.bits.source := 0.U
     }
   }
