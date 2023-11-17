@@ -152,10 +152,9 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
 
   private val vconfig = dataPath.io.vconfigReadPort.data
   private val og1CancelVec: Vec[Bool] = dataPath.io.og1CancelVec
-  private val og0CancelVecFromDataPath: Vec[Bool] = dataPath.io.og0CancelVec
-  private val og0CancelVecFromFinalIssue: Vec[Bool] = Wire(chiselTypeOf(dataPath.io.og0CancelVec))
-  private val og0CancelVec: Seq[Bool] = og0CancelVecFromDataPath.zip(og0CancelVecFromFinalIssue).map(x => x._1 | x._2)
+  private val og0CancelVec: Seq[Bool] = dataPath.io.og0CancelVec
   private val cancelToBusyTable = dataPath.io.cancelToBusyTable
+  private val finalBlockMem = Wire(Vec(params.memSchdParams.get.numExu, Bool()))
 
   ctrlBlock.io.fromTop.hartId := io.fromTop.hartId
   ctrlBlock.io.frontend <> io.frontend
@@ -200,6 +199,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   memScheduler.io.fromDispatch.uops <> ctrlBlock.io.toIssueBlock.memUops
   memScheduler.io.intWriteBack := wbDataPath.io.toIntPreg
   memScheduler.io.vfWriteBack := wbDataPath.io.toVfPreg
+  memScheduler.io.finalBlockMem.get.flatten.zip(finalBlockMem).foreach(x => x._1 := x._2)
   memScheduler.io.fromMem.get.scommit := io.mem.sqDeq
   memScheduler.io.fromMem.get.lcommit := io.mem.lqDeq
   memScheduler.io.fromMem.get.sqCancelCnt := io.mem.sqCancelCnt
@@ -444,14 +444,12 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   io.mem.lsqEnqIO <> memScheduler.io.memIO.get.lsqEnqIO
   io.mem.robLsqIO <> ctrlBlock.io.robio.lsq
 
-  private val intFinalIssueBlock = intExuBlock.io.in.flatten.map(_ => false.B)
-  private val vfFinalIssueBlock = vfExuBlock.io.in.flatten.map(_ => false.B)
   private val memFinalIssueBlock = io.mem.issueUops zip memExuBlocksHasLDU.flatten map {
     case (out, isLdu) =>
-      if (isLdu) RegNext(out.valid && !out.ready, false.B)
+      if (isLdu) out.valid && !out.ready
       else false.B
   }
-  og0CancelVecFromFinalIssue := (intFinalIssueBlock ++ vfFinalIssueBlock ++ memFinalIssueBlock).toSeq
+  finalBlockMem.zip(memFinalIssueBlock).foreach(x => x._1 := x._2)
 
   io.frontendSfence := fenceio.sfence
   io.frontendTlbCsr := csrio.tlb

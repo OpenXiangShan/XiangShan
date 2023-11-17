@@ -51,6 +51,7 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val og0Cancel = Input(ExuVec(backendParams.numExu))
   val og1Cancel = Input(ExuVec(backendParams.numExu))
   val ldCancel = Vec(backendParams.LduCnt, Flipped(new LoadCancelIO))
+  val finalBlock = Vec(params.numExu, Input(Bool()))
 
   // Outputs
   val wakeupToIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = params.genIQWakeUpSourceValidBundle
@@ -95,6 +96,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     val ldCancel = Vec(backendParams.LduCnt, new LoadCancelIO)
     val og0Fail = Output(Bool())
     val og1Fail = Output(Bool())
+    val finalFail = Output(Bool())
   }
 
   private def flushFunc(exuInput: ExuInput, flush: WakeupQueueFlush, stage: Int): Bool = {
@@ -103,6 +105,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     val ogFailFlush = stage match {
       case 1 => flush.og0Fail
       case 2 => flush.og1Fail
+      case 3 => flush.finalFail
       case _ => false.B
     }
     redirectFlush || loadDependencyFlush || ogFailFlush
@@ -503,6 +506,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         flush.ldCancel := io.ldCancel
         flush.og0Fail := io.og0Resp(i).valid && RSFeedbackType.isBlocked(io.og0Resp(i).bits.respType)
         flush.og1Fail := io.og1Resp(i).valid && RSFeedbackType.isBlocked(io.og1Resp(i).bits.respType)
+        flush.finalFail := io.finalBlock(i)
         wakeUpQueue.io.flush := flush
         wakeUpQueue.io.enq.valid := deqBeforeDly(i).fire && {
           if (deqBeforeDly(i).bits.common.rfWen.isDefined)

@@ -4,6 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import utils.OptionWrapper
 import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.DataConfig.{IntData, VAddrData, VecData}
@@ -83,6 +84,8 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
   val loadFinalIssueResp = MixedVec(params.issueBlockParams.map(x => MixedVec(Vec(x.LduCnt, Flipped(ValidIO(new IssueQueueDeqRespBundle()(p, x)))))))
 
   val ldCancel = Vec(backendParams.LduCnt, Flipped(new LoadCancelIO))
+
+  val finalBlockMem = OptionWrapper(params.isMemSchd, MixedVec(params.issueBlockParams.map(x => MixedVec(Vec(x.numExu, Input(Bool()))))))
 
   val memIO = if (params.isMemSchd) Some(new Bundle {
     val lsqEnqIO = Flipped(new LsqEnqIO)
@@ -189,6 +192,11 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
     iq.io.og0Cancel := io.fromDataPath.og0Cancel
     iq.io.og1Cancel := io.fromDataPath.og1Cancel
     iq.io.ldCancel := io.ldCancel
+    if(params.isMemSchd) {
+      iq.io.finalBlock.zip(io.finalBlockMem.get(i)).foreach(x => x._1 := x._2)
+    } else {
+      iq.io.finalBlock.foreach(_ := false.B)
+    }
   }
 
   private val iqWakeUpOutMap: Map[Int, ValidIO[IssueQueueIQWakeUpBundle]] =
