@@ -154,9 +154,9 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
   // when load whole register or unit-stride masked , emul should be 1
   val fuOpType = io.loadRegIn.bits.uop.fuOpType
   val mop = fuOpType(6, 5)
-  val nf = io.loadRegIn.bits.uop.vpu.nf
+  val nf = Mux(us_whole_reg(fuOpType), 0.U, io.loadRegIn.bits.uop.vpu.nf)
   val vm = io.loadRegIn.bits.uop.vpu.vm
-  val emul = Mux(us_whole_reg(fuOpType) || us_mask(fuOpType), 0.U(mulBits.W), EewLog2(eew) - sew + lmul)
+  val emul = Mux(us_whole_reg(fuOpType) ,GenUSWholeEmul(io.loadRegIn.bits.uop.vpu.nf), Mux(us_mask(fuOpType), 0.U(mulBits.W), EewLog2(eew) - sew + lmul))
   val lmulLog2 = Mux(lmul.asSInt >= 0.S, 0.U, lmul)
   val emulLog2 = Mux(emul.asSInt >= 0.S, 0.U, emul)
   val numEewLog2 = emulLog2 - EewLog2(eew)
@@ -203,6 +203,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
       UIntToMask(flowsIncludeThisUop, VLEN + 1) &
       ~UIntToMask(flowsPrevThisUop, VLEN)
     ) >> flowsPrevThisVd)(VLENB - 1, 0)
+    val isUsWholeReg = isUnitStride(mop) && us_whole_reg(fuOpType)
     dontTouch(flowsPrevThisUop)
     dontTouch(flowsPrevThisVd)
     dontTouch(flowsIncludeThisUop)
@@ -214,7 +215,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
     srcMaskVec(id) := srcMask
     uopq(id) match { case x =>
       x.uop := io.loadRegIn.bits.uop
-      x.uop.vpu.vl := io.loadRegIn.bits.src_vl.asTypeOf(VConfig()).vl
+      x.uop.vpu.vl := Mux(isUsWholeReg, GenUSWholeRegVL(io.loadRegIn.bits.uop.vpu.nf +& 1.U,eew), io.loadRegIn.bits.src_vl.asTypeOf(VConfig()).vl)
       x.uop.numUops := numUops
       x.uop.lastUop := (uopIdx +& 1.U) === numUops
       x.flowMask := flowMask
@@ -226,7 +227,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
       x.flowNum := flows
       x.nfields := nf +& 1.U
       x.vm := vm
-      x.usWholeReg := isUnitStride(mop) && us_whole_reg(fuOpType)
+      x.usWholeReg := isUsWholeReg
       x.usMaskReg := isUnitStride(mop) && us_mask(fuOpType)
       x.eew := eew
       x.sew := sew
@@ -338,7 +339,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
     val mask = issueEntry.byteMask
     val regOffset = (elemIdxInsideField << issueAlignedType)(vOffsetBits - 1, 0)
     val enable = (issueFlowMask & UIntToOH(elemIdxInsideVd(portIdx))).orR
-    val ttttvl = Mux(issueEntry.usWholeReg, GenUSWholeRegVL(issueNFIELDS, issueEew), Mux(issueEntry.usMaskReg, GenUSMaskRegVL(issueVl), issueVl))
+    val ttttvl = Mux(issueEntry.usMaskReg, GenUSMaskRegVL(issueVl), issueVl)
     val exp = VLExpCtrl(
       vstart = issueVstart,
       vl = ttttvl,

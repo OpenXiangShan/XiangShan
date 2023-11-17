@@ -107,9 +107,9 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
   // when store whole register or unit-stride masked , emul should be 1
   val fuOpType = io.storeIn.bits.uop.fuOpType
   val mop = fuOpType(6, 5)
-  val nf = io.storeIn.bits.uop.vpu.nf
+  val nf =  Mux(us_whole_reg(fuOpType), 0.U, io.storeIn.bits.uop.vpu.nf)
   val vm = io.storeIn.bits.uop.vpu.vm
-  val emul = Mux(us_whole_reg(fuOpType) || us_mask(fuOpType), 0.U(mulBits.W), EewLog2(eew) - sew + lmul)
+  val emul = Mux(us_whole_reg(fuOpType), GenUSWholeEmul(io.storeIn.bits.uop.vpu.nf), Mux(us_mask(fuOpType), 0.U(mulBits.W), EewLog2(eew) - sew + lmul))
   val lmulLog2 = Mux(lmul.asSInt >= 0.S, 0.U, lmul)
   val emulLog2 = Mux(emul.asSInt >= 0.S, 0.U, emul)
   val numEewLog2 = emulLog2 - EewLog2(eew)
@@ -173,13 +173,14 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
       ~UIntToMask(flowsPrevThisUop, VLEN)
     ) >> flowsPrevThisVd)(VLENB - 1, 0)
     val vlmax = GenVLMAX(lmul, sew)
+    val isUsWholeReg = isUnitStride(mop) && us_whole_reg(fuOpType)
     valid(id) := true.B
     finish(id) := false.B
     exception(id) := false.B
     vstart(id) := 0.U
     uopq(id) match { case x =>
       x.uop := io.storeIn.bits.uop
-      x.uop.vpu.vl := io.storeIn.bits.src_vl.asTypeOf(VConfig()).vl
+      x.uop.vpu.vl := Mux(isUsWholeReg, GenUSWholeRegVL(io.storeIn.bits.uop.vpu.nf +& 1.U,eew), io.storeIn.bits.src_vl.asTypeOf(VConfig()).vl)
       x.uop.numUops := numUops
       x.uop.lastUop := (uopIdx +& 1.U) === numUops
       x.flowMask := flowMask
@@ -191,7 +192,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
       x.flowNum := flows
       x.nfields := nf +& 1.U
       x.vm := vm
-      x.usWholeReg := isUnitStride(mop) && us_whole_reg(fuOpType)
+      x.usWholeReg := isUsWholeReg
       x.usMaskReg := isUnitStride(mop) && us_mask(fuOpType)
       x.eew := eew
       x.sew := sew
@@ -298,7 +299,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
     val enable = (issueFlowMask & UIntToOH(elemIdxInsideVd(portIdx))).orR
     val exp = VLExpCtrl(
       vstart = issueVstart,
-      vl = Mux(issueEntry.usWholeReg, GenUSWholeRegVL(issueNFIELDS, issueEew), Mux(issueEntry.usMaskReg, GenUSMaskRegVL(issueVl), issueVl)),
+      vl = Mux(issueEntry.usMaskReg, GenUSMaskRegVL(issueVl), issueVl),
       eleIdx = elemIdxInsideField
     ) && enable
 
