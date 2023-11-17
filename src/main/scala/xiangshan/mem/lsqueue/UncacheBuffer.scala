@@ -63,7 +63,7 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
 
   val req_valid = RegInit(false.B)
   val req = Reg(new LqWriteBundle)
-  val triggerResult = RegInit(VecInit(Seq.fill(3)(false.B)))
+  val triggerResult = RegInit(VecInit(Seq.fill(TriggerNum)(false.B)))
 
   //
   val s_idle :: s_req :: s_resp :: s_wait :: Nil = Enum(4)
@@ -90,7 +90,7 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
   io.trigger.lqLoadAddrTriggerHitVec := Mux(
     io.ldout.valid,
     RegNext(triggerResult),
-    VecInit(Seq.fill(3)(false.B))
+    VecInit(Seq.fill(TriggerNum)(false.B))
   )
 
   io.flush := req_valid && req.uop.robIdx.needFlush(io.redirect)
@@ -275,13 +275,13 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
 
   // set trigger default
   entries.foreach {
-    case (e) =>
-      e.io.trigger.hitLoadAddrTriggerHitVec := VecInit(Seq.fill(3)(false.B))
+    case (e) => 
+      e.io.trigger.hitLoadAddrTriggerHitVec := VecInit(Seq.fill(TriggerNum)(false.B))
   }
 
   io.trigger.foreach {
-    case (t) =>
-      t.lqLoadAddrTriggerHitVec := VecInit(Seq.fill(3)(false.B))
+    case (t) => 
+      t.lqLoadAddrTriggerHitVec := VecInit(Seq.fill(TriggerNum)(false.B))
   }
 
   // enqueue

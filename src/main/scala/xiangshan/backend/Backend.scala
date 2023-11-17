@@ -388,6 +388,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
       x.oldVdPsrc := source.bits.uop.psrc(2)
       x.isIndexed := VlduType.isIndexed(source.bits.uop.fuOpType)
     })
+    sink.bits.trigger.foreach(_ := source.bits.uop.trigger)
   }
 
   // to mem

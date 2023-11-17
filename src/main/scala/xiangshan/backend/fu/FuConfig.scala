@@ -430,6 +430,7 @@ object FuConfig {
     flushPipe = true,
     replayInst = true,
     hasLoadError = true,
+    trigger = true,
     immType = Set(SelImm.IMM_I),
   )
 
@@ -443,6 +444,7 @@ object FuConfig {
     piped = false,
     latency = UncertainLatency(),
     exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault),
+    trigger = true,
     immType = Set(SelImm.IMM_S),
   )
 
@@ -510,7 +512,8 @@ object FuConfig {
     piped = false, // Todo: check it
     writeIntRf = true,
     latency = UncertainLatency(),
-    exceptionOut = (LduCfg.exceptionOut ++ StaCfg.exceptionOut ++ StdCfg.exceptionOut).distinct
+    exceptionOut = (LduCfg.exceptionOut ++ StaCfg.exceptionOut ++ StdCfg.exceptionOut).distinct,
+    trigger = true,
   )
 
   val MoudCfg: FuConfig = FuConfig (

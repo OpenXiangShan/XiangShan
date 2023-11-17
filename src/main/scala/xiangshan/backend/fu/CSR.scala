@@ -40,28 +40,6 @@ trait HasTriggerConst {
   def GenESL(triggerType: UInt) = Cat((triggerType === I_Trigger), (triggerType === S_Trigger), (triggerType === L_Trigger))
 }
 
-class TdataBundle extends Bundle {
-  val ttype = UInt(4.W)
-  val dmode = Bool()
-  val maskmax = UInt(6.W)
-  val zero1 = UInt(30.W)
-  val sizehi = UInt(2.W)
-  val hit = Bool()
-  val select = Bool()
-  val timing = Bool()
-  val sizelo = UInt(2.W)
-  val action = UInt(4.W)
-  val chain = Bool()
-  val matchType = UInt(4.W)
-  val m = Bool()
-  val zero2 = Bool()
-  val s = Bool()
-  val u = Bool()
-  val execute = Bool()
-  val store = Bool()
-  val load = Bool()
-}
-
 class FpuCsrIO extends Bundle {
   val fflags = Output(Valid(UInt(5.W)))
   val isIllegal = Output(Bool())
@@ -167,6 +145,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   with PMAMethod
   with HasTriggerConst
   with HasXSParameter
+  with SdtrigExt
+  with DebugCSR
 {
   val csrio = io.csrio.get
 
@@ -186,25 +166,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     val h = Output(Bool())
     val s = Output(Bool())
     val u = Output(Bool())
-  }
-
-  class DcsrStruct extends Bundle {
-    val xdebugver = Output(UInt(2.W))
-    val zero4 = Output(UInt(2.W))
-    val zero3 = Output(UInt(12.W))
-    val ebreakm = Output(Bool())
-    val ebreakh = Output(Bool())
-    val ebreaks = Output(Bool())
-    val ebreaku = Output(Bool())
-    val stepie = Output(Bool()) // 0
-    val stopcycle = Output(Bool())
-    val stoptime = Output(Bool())
-    val cause = Output(UInt(3.W))
-    val v = Output(Bool()) // 0
-    val mprven = Output(Bool())
-    val nmip = Output(Bool())
-    val step = Output(Bool())
-    val prv = Output(UInt(2.W))
   }
 
   class MstatusStruct extends Bundle {
@@ -245,36 +206,19 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     val s = new Priv
   }
 
+  val csrNotImplemented = RegInit(UInt(XLEN.W), 0.U)
+
   // Debug CSRs
-  val dcsr = RegInit(UInt(32.W), 0x4000b000.U)
+  val dcsr = RegInit(UInt(32.W), DcsrStruct.init)
   val dpc = Reg(UInt(64.W))
-  val dscratch = Reg(UInt(64.W))
+  val dscratch0 = Reg(UInt(64.W))
   val dscratch1 = Reg(UInt(64.W))
   val debugMode = RegInit(false.B)
-  val debugIntrEnable = RegInit(true.B)
+  val debugIntrEnable = RegInit(true.B) // debug interrupt will be handle only when debugIntrEnable
   csrio.debugMode := debugMode
 
   val dpcPrev = RegNext(dpc)
   XSDebug(dpcPrev =/= dpc, "Debug Mode: dpc is altered! Current is %x, previous is %x\n", dpc, dpcPrev)
-
-  // dcsr value table
-  // | debugver | 0100
-  // | zero     | 10 bits of 0
-  // | ebreakvs | 0
-  // | ebreakvu | 0
-  // | ebreakm  | 1 if ebreak enters debug
-  // | zero     | 0
-  // | ebreaks  |
-  // | ebreaku  |
-  // | stepie   | disable interrupts in singlestep
-  // | stopcount| stop counter, 0
-  // | stoptime | stop time, 0
-  // | cause    | 3 bits read only
-  // | v        | 0
-  // | mprven   | 1
-  // | nmip     | read only
-  // | step     |
-  // | prv      | 2 bits
 
   val dcsrData = Wire(new DcsrStruct)
   dcsrData := dcsr.asTypeOf(new DcsrStruct)
@@ -288,90 +232,43 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrio.customCtrl.singlestep := dcsrData.step && !debugMode
 
   // Trigger CSRs
+  private val tselectPhy = RegInit(0.U(log2Up(TriggerNum).W))
 
-  val type_config = Array(
-    0.U -> I_Trigger, 1.U -> I_Trigger,
-    2.U -> S_Trigger, 3.U -> S_Trigger,
-    4.U -> L_Trigger, 5.U -> L_Trigger, // No.5 Load Trigger
-    6.U -> I_Trigger, 7.U -> S_Trigger,
-    8.U -> I_Trigger, 9.U -> L_Trigger
-  )
-  def TypeLookup(select: UInt) = MuxLookup(select, I_Trigger, type_config)
+  private val tdata1RegVec = RegInit(VecInit(Seq.fill(TriggerNum)(Tdata1Bundle.default)))
+  private val tdata2RegVec = RegInit(VecInit(Seq.fill(TriggerNum)(0.U(64.W))))
+  private val tdata1WireVec = tdata1RegVec.map(_.asTypeOf(new Tdata1Bundle))
+  private val tdata2WireVec = tdata2RegVec
+  private val tdata1Selected = tdata1RegVec(tselectPhy).asTypeOf(new Tdata1Bundle)
+  private val tdata2Selected = tdata2RegVec(tselectPhy)
+  private val newTriggerChainVec = UIntToOH(tselectPhy, TriggerNum).asBools | tdata1WireVec.map(_.data.asTypeOf(new MControlData).chain)
+  private val newTriggerChainIsLegal = TriggerCheckChainLegal(newTriggerChainVec, TriggerChainMaxLength)
+  val tinfo = RegInit((BigInt(1) << TrigTypeEnum.MCONTROL.litValue.toInt).U(XLEN.W)) // This value should be 4.U
 
-  val tdata1Phy = RegInit(VecInit(List.fill(10) {(2L << 60L).U(64.W)})) // init ttype 2
-  val tdata2Phy = Reg(Vec(10, UInt(64.W)))
-  val tselectPhy = RegInit(0.U(4.W))
-  val tinfo = RegInit(2.U(64.W))
-  val tControlPhy = RegInit(0.U(64.W))
-  val triggerAction = RegInit(false.B)
-
-  def ReadTdata1(rdata: UInt) = rdata | Cat(triggerAction, 0.U(12.W)) // fix action
-  def WriteTdata1(wdata: UInt): UInt = {
-    val tdata1 = WireInit(tdata1Phy(tselectPhy).asTypeOf(new TdataBundle))
-    val wdata_wire = WireInit(wdata.asTypeOf(new TdataBundle))
-    val tdata1_new = WireInit(wdata.asTypeOf(new TdataBundle))
-    XSDebug(src2(11, 0) === Tdata1.U && valid && func =/= CSROpType.jmp, p"Debug Mode: tdata1(${tselectPhy})is written, the actual value is ${wdata}\n")
-//    tdata1_new.hit := wdata(20)
-    tdata1_new.ttype := tdata1.ttype
-    tdata1_new.dmode := 0.U // Mux(debugMode, wdata_wire.dmode, tdata1.dmode)
-    tdata1_new.maskmax := 0.U
-    tdata1_new.hit := 0.U
-    tdata1_new.select := (TypeLookup(tselectPhy) === I_Trigger) && wdata_wire.select
-    when(wdata_wire.action <= 1.U){
-      triggerAction := tdata1_new.action(0)
-    } .otherwise{
-      tdata1_new.action := tdata1.action
-    }
-    tdata1_new.timing := false.B // hardwire this because we have singlestep
-    tdata1_new.zero1 := 0.U
-    tdata1_new.zero2 := 0.U
-    tdata1_new.chain := !tselectPhy(0) && wdata_wire.chain
-    when(wdata_wire.matchType =/= 0.U && wdata_wire.matchType =/= 2.U && wdata_wire.matchType =/= 3.U) {
-      tdata1_new.matchType := tdata1.matchType
-    }
-    tdata1_new.sizehi := Mux(wdata_wire.select && TypeLookup(tselectPhy) === I_Trigger, 0.U, 1.U)
-    tdata1_new.sizelo:= Mux(wdata_wire.select && TypeLookup(tselectPhy) === I_Trigger, 3.U, 1.U)
-    tdata1_new.execute := TypeLookup(tselectPhy) === I_Trigger
-    tdata1_new.store := TypeLookup(tselectPhy) === S_Trigger
-    tdata1_new.load := TypeLookup(tselectPhy) === L_Trigger
-    tdata1_new.asUInt
-  }
 
   def WriteTselect(wdata: UInt) = {
-    Mux(wdata < 10.U, wdata(3, 0), tselectPhy)
+    Mux(wdata < TriggerNum.U, wdata(3, 0), tselectPhy)
   }
 
-  val tcontrolWriteMask = ZeroExt(GenMask(3) | GenMask(7), XLEN)
-
-
-  def GenTdataDistribute(tdata1: TdataBundle, tdata2: UInt): MatchTriggerIO = {
+  def GenTdataDistribute(tdata1: Tdata1Bundle, tdata2: UInt): MatchTriggerIO = {
     val res = Wire(new MatchTriggerIO)
-    res.matchType := tdata1.matchType
-    res.select := tdata1.select
-    res.timing := tdata1.timing
-    res.action := triggerAction
-    res.chain := tdata1.chain
-    res.tdata2 := tdata2
+    val mcontrol: MControlData = WireInit(tdata1.data.asTypeOf(new MControlData))
+    res.matchType := mcontrol.match_.asUInt
+    res.select    := mcontrol.select
+    res.timing    := mcontrol.timing
+    res.action    := mcontrol.action.asUInt
+    res.chain     := mcontrol.chain
+    res.execute   := mcontrol.execute
+    res.load      := mcontrol.load
+    res.store     := mcontrol.store
+    res.tdata2    := tdata2
     res
   }
 
-  csrio.customCtrl.frontend_trigger.t.bits.addr := MuxLookup(tselectPhy, 0.U, Seq(
-    0.U -> 0.U,
-    1.U -> 1.U,
-    6.U -> 2.U,
-    8.U -> 3.U
-  ))
-  csrio.customCtrl.mem_trigger.t.bits.addr := MuxLookup(tselectPhy, 0.U, Seq(
-    2.U -> 0.U,
-    3.U -> 1.U,
-    4.U -> 2.U,
-    5.U -> 3.U,
-    7.U -> 4.U,
-    9.U -> 5.U
-  ))
-  csrio.customCtrl.frontend_trigger.t.bits.tdata := GenTdataDistribute(tdata1Phy(tselectPhy).asTypeOf(new TdataBundle), tdata2Phy(tselectPhy))
-  csrio.customCtrl.mem_trigger.t.bits.tdata := GenTdataDistribute(tdata1Phy(tselectPhy).asTypeOf(new TdataBundle), tdata2Phy(tselectPhy))
-
+  csrio.customCtrl.frontend_trigger.tUpdate.bits.addr := tselectPhy
+  csrio.customCtrl.mem_trigger.tUpdate.bits.addr := tselectPhy
+  csrio.customCtrl.frontend_trigger.tUpdate.bits.tdata := GenTdataDistribute(tdata1Selected, tdata2Selected)
+  csrio.customCtrl.mem_trigger.tUpdate.bits.tdata := GenTdataDistribute(tdata1Selected, tdata2Selected)
+  
   // Machine-Level CSRs
   // mtvec: {BASE (WARL), MODE (WARL)} where mode is 0 or 1
   val mtvecMask = ~(0x2.U(XLEN.W))
@@ -773,22 +670,14 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   // CSR reg map
   val basicPrivMapping = Map(
 
-    //--- User Trap Setup ---
-    // MaskedRegMap(Ustatus, ustatus),
-    // MaskedRegMap(Uie, uie, 0.U, MaskedRegMap.Unwritable),
-    // MaskedRegMap(Utvec, utvec),
+    // Unprivileged Floating-Point CSRs
+    // Has been mapped above
 
-    //--- User Trap Handling ---
-    // MaskedRegMap(Uscratch, uscratch),
-    // MaskedRegMap(Uepc, uepc),
-    // MaskedRegMap(Ucause, ucause),
-    // MaskedRegMap(Utval, utval),
-    // MaskedRegMap(Uip, uip),
-
-    //--- User Counter/Timers ---
-    // MaskedRegMap(Cycle, cycle),
-    // MaskedRegMap(Time, time),
-    // MaskedRegMap(Instret, instret),
+    // Unprivileged Counter/Timers
+    MaskedRegMap(Cycle, mcycle),
+    // We don't support read time CSR.
+    // MaskedRegMap(Time, mtime),
+    MaskedRegMap(Instret, minstret),
 
     //--- Supervisor Trap Setup ---
     MaskedRegMap(Sstatus, mstatus, sstatusWmask, mstatusUpdateSideEffect, sstatusRmask),
@@ -827,7 +716,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     //--- Machine Trap Setup ---
     MaskedRegMap(Mstatus, mstatus, mstatusWMask, mstatusUpdateSideEffect),
     MaskedRegMap(Misa, misa, 0.U, MaskedRegMap.Unwritable), // now whole misa is unchangeable
-    MaskedRegMap(Medeleg, medeleg, "hb3ff".U(XLEN.W)),
+    MaskedRegMap(Medeleg, medeleg, "hf3ff".U(XLEN.W)),
     MaskedRegMap(Mideleg, mideleg, "h222".U(XLEN.W)),
     MaskedRegMap(Mie, mie, "haaa".U(XLEN.W)),
     MaskedRegMap(Mtvec, mtvec, mtvecMask, MaskedRegMap.NoSideEffect, mtvecMask),
@@ -842,15 +731,19 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
     //--- Trigger ---
     MaskedRegMap(Tselect, tselectPhy, WritableMask, WriteTselect),
-    MaskedRegMap(Tdata1, tdata1Phy(tselectPhy), WritableMask, WriteTdata1, WritableMask, ReadTdata1),
-    MaskedRegMap(Tdata2, tdata2Phy(tselectPhy)),
+    // Todo: support chain length = 2
+    MaskedRegMap(Tdata1, tdata1RegVec(tselectPhy),
+      WritableMask,
+      x => Tdata1Bundle.Write(x, tdata1RegVec(tselectPhy), newTriggerChainIsLegal, debug_mode = debugMode),
+      WritableMask,
+      x => Tdata1Bundle.Read(x)),
+    MaskedRegMap(Tdata2, tdata2RegVec(tselectPhy)),
     MaskedRegMap(Tinfo, tinfo, 0.U(XLEN.W), MaskedRegMap.Unwritable),
-    MaskedRegMap(Tcontrol, tControlPhy, tcontrolWriteMask),
 
     //--- Debug Mode ---
     MaskedRegMap(Dcsr, dcsr, dcsrMask, dcsrUpdateSideEffect),
     MaskedRegMap(Dpc, dpc),
-    MaskedRegMap(Dscratch, dscratch),
+    MaskedRegMap(Dscratch0, dscratch0),
     MaskedRegMap(Dscratch1, dscratch1),
     MaskedRegMap(Mcountinhibit, mcountinhibit),
     MaskedRegMap(Mcycle, mcycle),
@@ -862,6 +755,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
                  reg  = perfEvents(i),
                  wmask = "hf87fff3fcff3fcff".U(XLEN.W)),
     MaskedRegMap(addr = Mhpmcounter3 +i,
+                 reg = perfCnts(i)),
+    MaskedRegMap(addr = Hpmcounter3 + i,
                  reg  = perfCnts(i))
   )}).fold(Map())((a,b) => a ++ b)
   // TODO: mechanism should be implemented later
@@ -890,6 +785,13 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
                 (if (HasVPU) vcsrMapping else Nil) ++
                 (if (HasCustomCSRCacheOp) cacheopMapping else Nil)
 
+
+  println("XiangShan CSR Lists")
+
+  for (addr <- mapping.keys.toSeq.sorted) {
+    println(f"$addr%#03x ${mapping(addr)._1}")
+  }
+
   val addr = src2(11, 0)
   val csri = ZeroExt(src2(16, 12), XLEN)
   val rdata = Wire(UInt(XLEN.W))
@@ -904,6 +806,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   val addrInPerfCnt = (addr >= Mcycle.U) && (addr <= Mhpmcounter31.U) ||
     (addr >= Mcountinhibit.U) && (addr <= Mhpmevent31.U) ||
+    (addr >= Cycle.U) && (addr <= Hpmcounter31.U) ||
     addr === Mip.U
   csrio.isPerfCnt := addrInPerfCnt && valid && func =/= CSROpType.jmp
 
@@ -995,15 +898,38 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrio.vpu.vlmul := vtype.asTypeOf(new VtypeStruct).vlmul
 
   // Trigger Ctrl
-  csrio.customCtrl.trigger_enable := tdata1Phy.map{t =>
-    def tdata1 = t.asTypeOf(new TdataBundle)
-    tdata1.m && priviledgeMode === ModeM ||
-    tdata1.s && priviledgeMode === ModeS || tdata1.u && priviledgeMode === ModeU
+  val triggerEnableVec = tdata1RegVec.map { tdata1 =>
+    val mcontrolData = tdata1.asTypeOf(new Tdata1Bundle).data.asTypeOf(new MControlData)
+    tdata1.asTypeOf(new Tdata1Bundle).type_.asUInt === TrigTypeEnum.MCONTROL && (
+      mcontrolData.m && priviledgeMode === ModeM ||
+        mcontrolData.s && priviledgeMode === ModeS ||
+        mcontrolData.u && priviledgeMode === ModeU)
   }
-  csrio.customCtrl.frontend_trigger.t.valid := RegNext(wen && (addr === Tdata1.U || addr === Tdata2.U) && TypeLookup(tselectPhy) === I_Trigger)
-  csrio.customCtrl.mem_trigger.t.valid := RegNext(wen && (addr === Tdata1.U || addr === Tdata2.U) && TypeLookup(tselectPhy) =/= I_Trigger)
-  XSDebug(csrio.customCtrl.trigger_enable.asUInt.orR, p"Debug Mode: At least 1 trigger is enabled," +
-    p"trigger enable is ${Binary(csrio.customCtrl.trigger_enable.asUInt)}\n")
+  val fetchTriggerEnableVec = triggerEnableVec.zip(tdata1WireVec).map {
+    case (tEnable, tdata1) => tEnable && tdata1.asTypeOf(new Tdata1Bundle).data.asTypeOf(new MControlData).isFetchTrigger
+  }
+  val memAccTriggerEnableVec = triggerEnableVec.zip(tdata1WireVec).map {
+    case (tEnable, tdata1) => tEnable && tdata1.asTypeOf(new Tdata1Bundle).data.asTypeOf(new MControlData).isMemAccTrigger
+  }
+  csrio.customCtrl.frontend_trigger.tEnableVec := fetchTriggerEnableVec
+  csrio.customCtrl.mem_trigger.tEnableVec := memAccTriggerEnableVec
+
+  val tdata1Update = wen && (addr === Tdata1.U)
+  val tdata2Update = wen && (addr === Tdata2.U)
+  val triggerUpdate = wen && (addr === Tdata1.U || addr === Tdata2.U)
+  val frontendTriggerUpdate =
+    tdata1Update && wdata.asTypeOf(new Tdata1Bundle).type_.asUInt === TrigTypeEnum.MCONTROL &&
+      wdata.asTypeOf(new Tdata1Bundle).data.asTypeOf(new MControlData).isFetchTrigger ||
+      tdata1Selected.data.asTypeOf(new MControlData).isFetchTrigger && triggerUpdate
+  val memTriggerUpdate =
+    tdata1Update && wdata.asTypeOf(new Tdata1Bundle).type_.asUInt === TrigTypeEnum.MCONTROL &&
+      wdata.asTypeOf(new Tdata1Bundle).data.asTypeOf(new MControlData).isMemAccTrigger ||
+      tdata1Selected.data.asTypeOf(new MControlData).isMemAccTrigger && triggerUpdate
+
+  csrio.customCtrl.frontend_trigger.tUpdate.valid := RegNext(RegNext(frontendTriggerUpdate))
+  csrio.customCtrl.mem_trigger.tUpdate.valid := RegNext(RegNext(memTriggerUpdate))
+  XSDebug(triggerEnableVec.reduce(_ || _), p"Debug Mode: At least 1 trigger is enabled," +
+    p"trigger enable is ${Binary(triggerEnableVec.asUInt)}\n")
 
   // CSR inst decode
   val isEbreak = addr === privEbreak && func === CSROpType.jmp
@@ -1040,72 +966,98 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   tlbBundle.priv.dmode := Mux(debugMode && dcsr.asTypeOf(new DcsrStruct).mprven, ModeM, Mux(mstatusStruct.mprv.asBool, mstatusStruct.mpp, priviledgeMode))
 
   // Branch control
-  val retTarget = Wire(UInt(VAddrBits.W))
+  val retTarget = WireInit(0.U)
   val resetSatp = addr === Satp.U && wen // write to satp will cause the pipeline be flushed
-  flushPipe := resetSatp || (valid && func === CSROpType.jmp && !isEcall && !isEbreak)
 
-  retTarget := DontCare
-  // val illegalEret = TODO
+  val w_fcsr_change_rm = wen && addr === Fcsr.U && wdata(7, 5) =/= fcsr(7, 5)
+  val w_frm_change_rm = wen && addr === Frm.U && wdata(2, 0) =/= fcsr(7, 5)
+  val frm_change = w_fcsr_change_rm || w_frm_change_rm
+  val isXRet = valid && func === CSROpType.jmp && !isEcall && !isEbreak
+  flushPipe := resetSatp || frm_change || isXRet || frontendTriggerUpdate
 
-  when (valid && isDret) {
-    val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
-    val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
-    val dcsrNew = WireInit(dcsr.asTypeOf(new DcsrStruct))
-    val debugModeNew = WireInit(debugMode)
-    when (dcsr.asTypeOf(new DcsrStruct).prv =/= ModeM) {mstatusNew.mprv := 0.U} //If the new privilege mode is less privileged than M-mode, MPRV in mstatus is cleared.
-    mstatus := mstatusNew.asUInt
-    priviledgeMode := dcsrNew.prv
-    retTarget := dpc(VAddrBits-1, 0)
-    debugModeNew := false.B
-    debugIntrEnable := true.B
-    debugMode := debugModeNew
-    XSDebug("Debug Mode: Dret executed, returning to %x.", retTarget)
+
+  private val illegalRetTarget = WireInit(false.B)
+
+  // Mux tree for wires
+  when(valid) {
+    when(isDret) {
+      retTarget := dpc(VAddrBits - 1, 0)
+    }.elsewhen(isMret && !illegalMret) {
+      retTarget := mepc(VAddrBits - 1, 0)
+    }.elsewhen(isSret && !illegalSret && !illegalSModeSret) {
+      retTarget := sepc(VAddrBits - 1, 0)
+    }.elsewhen(isUret) {
+      retTarget := uepc(VAddrBits - 1, 0)
+    }.otherwise {
+      illegalRetTarget := true.B
+    }
+  }.otherwise {
+    illegalRetTarget := true.B // when illegalRetTarget setted, retTarget should never be used
   }
 
-  when (valid && isMret && !illegalMret) {
-    val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
-    val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
-    mstatusNew.ie.m := mstatusOld.pie.m
-    priviledgeMode := mstatusOld.mpp
-    mstatusNew.pie.m := true.B
-    mstatusNew.mpp := ModeU
-    when (mstatusOld.mpp =/= ModeM) { mstatusNew.mprv := 0.U }
-    mstatus := mstatusNew.asUInt
-    // lr := false.B
-    retTarget := mepc(VAddrBits-1, 0)
-  }
-
-  when (valid && isSret && !illegalSret && !illegalSModeSret) {
-    val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
-    val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
-    mstatusNew.ie.s := mstatusOld.pie.s
-    priviledgeMode := Cat(0.U(1.W), mstatusOld.spp)
-    mstatusNew.pie.s := true.B
-    mstatusNew.spp := ModeU
-    mstatus := mstatusNew.asUInt
-    when (mstatusOld.spp =/= ModeM) { mstatusNew.mprv := 0.U }
-    // lr := false.B
-    retTarget := sepc(VAddrBits-1, 0)
-  }
-
-  when (valid && isUret) {
-    val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
-    val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
-    // mstatusNew.mpp.m := ModeU //TODO: add mode U
-    mstatusNew.ie.u := mstatusOld.pie.u
-    priviledgeMode := ModeU
-    mstatusNew.pie.u := true.B
-    mstatus := mstatusNew.asUInt
-    retTarget := uepc(VAddrBits-1, 0)
+  // Mux tree for regs
+  when(valid) {
+    when(isDret) {
+      val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
+      val debugModeNew = WireInit(debugMode)
+      when(dcsr.asTypeOf(new DcsrStruct).prv =/= ModeM) {
+        mstatusNew.mprv := 0.U
+      } //If the new privilege mode is less privileged than M-mode, MPRV in mstatus is cleared.
+      mstatus := mstatusNew.asUInt
+      priviledgeMode := dcsr.asTypeOf(new DcsrStruct).prv
+      debugModeNew := false.B
+      debugIntrEnable := true.B
+      debugMode := debugModeNew
+      XSDebug("Debug Mode: Dret executed, returning to %x.", retTarget)
+    }.elsewhen(isMret && !illegalMret) {
+      val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
+      val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
+      mstatusNew.ie.m := mstatusOld.pie.m
+      priviledgeMode := mstatusOld.mpp
+      mstatusNew.pie.m := true.B
+      mstatusNew.mpp := ModeU
+      when(mstatusOld.mpp =/= ModeM) {
+        mstatusNew.mprv := 0.U
+      }
+      mstatus := mstatusNew.asUInt
+    }.elsewhen(isSret && !illegalSret && !illegalSModeSret) {
+      val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
+      val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
+      mstatusNew.ie.s := mstatusOld.pie.s
+      priviledgeMode := Cat(0.U(1.W), mstatusOld.spp)
+      mstatusNew.pie.s := true.B
+      mstatusNew.spp := ModeU
+      mstatus := mstatusNew.asUInt
+      when(mstatusOld.spp =/= ModeM) {
+        mstatusNew.mprv := 0.U
+      }
+    }.elsewhen(isUret) {
+      val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
+      val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
+      // mstatusNew.mpp.m := ModeU //TODO: add mode U
+      mstatusNew.ie.u := mstatusOld.pie.u
+      priviledgeMode := ModeU
+      mstatusNew.pie.u := true.B
+      mstatus := mstatusNew.asUInt
+    }
   }
 
   io.in.ready := true.B
   io.out.valid := valid
 
-  val ebreakCauseException = (priviledgeMode === ModeM && dcsrData.ebreakm) || (priviledgeMode === ModeS && dcsrData.ebreaks) || (priviledgeMode === ModeU && dcsrData.ebreaku)
+  // In this situation, hart will enter debug mode instead of handling a breakpoint exception simply.
+  // Ebreak block instructions backwards, so it's ok to not keep extra info to distinguish between breakpoint
+  // exception and enter-debug-mode exception.
+  val ebreakEnterDebugMode =
+    (priviledgeMode === ModeM && dcsrData.ebreakm) ||
+    (priviledgeMode === ModeS && dcsrData.ebreaks) ||
+    (priviledgeMode === ModeU && dcsrData.ebreaku)
+
+  // raise a debug exception waiting to enter debug mode, instead of a breakpoint exception
+  val raiseDebugException = !debugMode && isEbreak && ebreakEnterDebugMode
 
   val csrExceptionVec = WireInit(0.U.asTypeOf(ExceptionVec()))
-  csrExceptionVec(breakPoint) := io.in.valid && isEbreak && (ebreakCauseException || debugMode)
+  csrExceptionVec(breakPoint) := io.in.valid && isEbreak
   csrExceptionVec(ecallM) := priviledgeMode === ModeM && io.in.valid && isEcall
   csrExceptionVec(ecallS) := priviledgeMode === ModeS && io.in.valid && isEcall
   csrExceptionVec(ecallU) := priviledgeMode === ModeU && io.in.valid && isEcall
@@ -1115,7 +1067,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrExceptionVec(illegalInstr) := isIllegalAddr || isIllegalAccess || isIllegalPrivOp
   io.out.bits.ctrl.exceptionVec.get := csrExceptionVec
 
-  XSDebug(io.in.valid && isEbreak, s"Debug Mode: an Ebreak is executed, ebreak cause exception ? ${ebreakCauseException}\n")
+  XSDebug(io.in.valid, s"Debug Mode: an Ebreak is executed, ebreak cause enter-debug-mode exception ? ${raiseDebugException}\n")
 
   /**
     * Exception and Intr
@@ -1145,46 +1097,60 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   // interrupts
   val intrNO = IntPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(intrVec(i), i.U, sum))
-  val raiseIntr = csrio.exception.valid && csrio.exception.bits.isInterrupt
+  val hasIntr = csrio.exception.valid && csrio.exception.bits.isInterrupt
   val ivmEnable = tlbBundle.priv.imode < ModeM && satp.asTypeOf(new SatpStruct).mode === 8.U
   val iexceptionPC = Mux(ivmEnable, SignExt(csrio.exception.bits.pc, XLEN), csrio.exception.bits.pc)
   val dvmEnable = tlbBundle.priv.dmode < ModeM && satp.asTypeOf(new SatpStruct).mode === 8.U
   val dexceptionPC = Mux(dvmEnable, SignExt(csrio.exception.bits.pc, XLEN), csrio.exception.bits.pc)
-  XSDebug(raiseIntr, "interrupt: pc=0x%x, %d\n", dexceptionPC, intrNO)
-  val raiseDebugIntr = intrNO === IRQ_DEBUG.U && raiseIntr
+  XSDebug(hasIntr, "interrupt: pc=0x%x, %d\n", dexceptionPC, intrNO)
+  val hasDebugIntr = intrNO === IRQ_DEBUG.U && hasIntr
 
-  // exceptions
-  val raiseException = csrio.exception.valid && !csrio.exception.bits.isInterrupt
-  val hasInstrPageFault = csrio.exception.bits.exceptionVec(instrPageFault) && raiseException
-  val hasLoadPageFault = csrio.exception.bits.exceptionVec(loadPageFault) && raiseException
-  val hasStorePageFault = csrio.exception.bits.exceptionVec(storePageFault) && raiseException
-  val hasStoreAddrMisaligned = csrio.exception.bits.exceptionVec(storeAddrMisaligned) && raiseException
-  val hasLoadAddrMisaligned = csrio.exception.bits.exceptionVec(loadAddrMisaligned) && raiseException
-  val hasInstrAccessFault = csrio.exception.bits.exceptionVec(instrAccessFault) && raiseException
-  val hasLoadAccessFault = csrio.exception.bits.exceptionVec(loadAccessFault) && raiseException
-  val hasStoreAccessFault = csrio.exception.bits.exceptionVec(storeAccessFault) && raiseException
-  val hasbreakPoint = csrio.exception.bits.exceptionVec(breakPoint) && raiseException
-  val hasSingleStep = csrio.exception.bits.singleStep && raiseException
-//  val hasTriggerHit = (csrio.exception.bits.trigger.hit) && raiseException
+  // exceptions from rob need to handle
+  val exceptionVecFromRob = csrio.exception.bits.exceptionVec
+  val hasException = csrio.exception.valid && !csrio.exception.bits.isInterrupt
+  val hasInstrPageFault = hasException && exceptionVecFromRob(instrPageFault)
+  val hasLoadPageFault = hasException && exceptionVecFromRob(loadPageFault)
+  val hasStorePageFault = hasException && exceptionVecFromRob(storePageFault)
+  val hasStoreAddrMisalign = hasException && exceptionVecFromRob(storeAddrMisaligned)
+  val hasLoadAddrMisalign = hasException && exceptionVecFromRob(loadAddrMisaligned)
+  val hasInstrAccessFault = hasException && exceptionVecFromRob(instrAccessFault)
+  val hasLoadAccessFault = hasException && exceptionVecFromRob(loadAccessFault)
+  val hasStoreAccessFault = hasException && exceptionVecFromRob(storeAccessFault)
+  val hasBreakPoint = hasException && exceptionVecFromRob(breakPoint)
+  val hasSingleStep = hasException && csrio.exception.bits.singleStep
+  val hasTriggerFire = hasException && csrio.exception.bits.trigger.canFire
+  val triggerFrontendHitVec = csrio.exception.bits.trigger.frontendHit
+  val triggerMemHitVec = csrio.exception.bits.trigger.backendHit
+  val triggerHitVec = triggerFrontendHitVec | triggerMemHitVec // Todo: update mcontrol.hit
+  val triggerCanFireVec = csrio.exception.bits.trigger.frontendCanFire | csrio.exception.bits.trigger.backendCanFire
+  // More than one triggers can hit at the same time, but only fire one
+  // We select the first hit trigger to fire
+  val triggerFireOH = PriorityEncoderOH(triggerCanFireVec)
+  val triggerFireAction = PriorityMux(triggerFireOH, tdata1WireVec.map(_.getTriggerAction)).asUInt
+
 
   XSDebug(hasSingleStep, "Debug Mode: single step exception\n")
-//  XSDebug(hasTriggerHit, p"Debug Mode: trigger hit, is frontend? ${Binary(csrio.exception.bits.trigger.frontendHit.asUInt)} " +
-//    p"backend hit vec ${Binary(csrio.exception.bits.trigger.backendHit.asUInt)}\n")
+  XSDebug(hasTriggerFire, p"Debug Mode: trigger fire, frontend hit vec ${Binary(csrio.exception.bits.trigger.frontendHit.asUInt)} " +
+    p"backend hit vec ${Binary(csrio.exception.bits.trigger.backendHit.asUInt)}\n")
 
-  val raiseExceptionVec = csrio.exception.bits.exceptionVec
-  val regularExceptionNO = ExceptionNO.priorities.foldRight(0.U)((i: Int, sum: UInt) => Mux(raiseExceptionVec(i), i.U, sum))
-  val exceptionNO = Mux(hasSingleStep, 3.U, regularExceptionNO) // Todo: Trigger
-  val causeNO = (raiseIntr << (XLEN-1)).asUInt | Mux(raiseIntr, intrNO, exceptionNO)
+  val hasExceptionVec = csrio.exception.bits.exceptionVec
+  val regularExceptionNO = ExceptionNO.priorities.foldRight(0.U)((i: Int, sum: UInt) => Mux(hasExceptionVec(i), i.U, sum))
+  val exceptionNO = Mux(hasSingleStep || hasTriggerFire, 3.U, regularExceptionNO)
+  val causeNO = (hasIntr << (XLEN - 1)).asUInt | Mux(hasIntr, intrNO, exceptionNO)
 
-  val raiseExceptionIntr = csrio.exception.valid
 
-  val raiseDebugExceptionIntr = !debugMode && (hasbreakPoint || raiseDebugIntr || hasSingleStep) // TODO
-  val ebreakEnterParkLoop = debugMode && raiseExceptionIntr
+  val hasExceptionIntr = csrio.exception.valid
 
-  XSDebug(raiseExceptionIntr, "int/exc: pc %x int (%d):%x exc: (%d):%x\n",
-    dexceptionPC, intrNO, intrVec, exceptionNO, raiseExceptionVec.asUInt
+  val hasDebugEbreakException = hasBreakPoint && ebreakEnterDebugMode
+  val hasDebugTriggerException = hasTriggerFire && triggerFireAction === TrigActionEnum.DEBUG_MODE
+  val hasDebugException = hasDebugEbreakException || hasDebugTriggerException || hasSingleStep
+  val hasDebugTrap = hasDebugException || hasDebugIntr
+  val ebreakEnterParkLoop = debugMode && hasExceptionIntr
+
+  XSDebug(hasExceptionIntr, "int/exc: pc %x int (%d):%x exc: (%d):%x\n",
+    dexceptionPC, intrNO, intrVec, exceptionNO, hasExceptionVec.asUInt
   )
-  XSDebug(raiseExceptionIntr,
+  XSDebug(hasExceptionIntr,
     "pc %x mstatus %x mideleg %x medeleg %x mode %x\n",
     dexceptionPC,
     mstatus,
@@ -1203,8 +1169,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     hasInstrAccessFault,
     hasLoadAccessFault,
     hasStoreAccessFault,
-    hasLoadAddrMisaligned,
-    hasStoreAddrMisaligned
+    hasLoadAddrMisalign,
+    hasStoreAddrMisalign
   )).asUInt.orR
   when (RegNext(RegNext(updateTval))) {
       val tval = Mux(
@@ -1224,11 +1190,10 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   }
 
   val debugTrapTarget = Mux(!isEbreak && debugMode, 0x38020808.U, 0x38020800.U) // 0x808 is when an exception occurs in debug mode prog buf exec
-  val deleg = Mux(raiseIntr, mideleg , medeleg)
+  val deleg = Mux(hasIntr, mideleg , medeleg)
   // val delegS = ((deleg & (1 << (causeNO & 0xf))) != 0) && (priviledgeMode < ModeM);
   val delegS = deleg(causeNO(3,0)) && (priviledgeMode < ModeM)
-  val clearTval = !updateTval || raiseIntr
-  val isXRet = io.in.valid && func === CSROpType.jmp && !isEcall && !isEbreak
+  val clearTval = !updateTval || hasIntr
 
   // ctrl block will use theses later for flush
   val isXRetFlag = RegInit(false.B)
@@ -1238,46 +1203,48 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     isXRetFlag := true.B
   }
   csrio.isXRet := isXRetFlag
-  val retTargetReg = RegEnable(retTarget, isXRet)
+  private val retTargetReg = RegEnable(retTarget, isXRet && !illegalRetTarget)
+  private val illegalXret = RegEnable(illegalMret || illegalSret || illegalSModeSret, isXRet)
 
-  val tvec = Mux(delegS, stvec, mtvec)
-  val tvecBase = tvec(VAddrBits - 1, 2)
+  private val xtvec = Mux(delegS, stvec, mtvec)
+  private val xtvecBase = xtvec(VAddrBits - 1, 2)
+  // When MODE=Vectored, all synchronous exceptions into M/S mode
+  // cause the pc to be set to the address in the BASE field, whereas
+  // interrupts cause the pc to be set to the address in the BASE field
+  // plus four times the interrupt cause number.
+  private val pcFromXtvec = Cat(xtvecBase + Mux(xtvec(0) && hasIntr, causeNO(3, 0), 0.U), 0.U(2.W))
+
   // XRet sends redirect instead of Flush and isXRetFlag is true.B before redirect.valid.
   // ROB sends exception at T0 while CSR receives at T2.
   // We add a RegNext here and trapTarget is valid at T3.
-  csrio.trapTarget := RegEnable(Mux(isXRetFlag,
-    retTargetReg,
-    Mux(raiseDebugExceptionIntr || ebreakEnterParkLoop, debugTrapTarget,
-      // When MODE=Vectored, all synchronous exceptions into M/S mode
-      // cause the pc to be set to the address in the BASE field, whereas
-      // interrupts cause the pc to be set to the address in the BASE field
-      // plus four times the interrupt cause number.
-      Cat(tvecBase + Mux(tvec(0) && raiseIntr, causeNO(3, 0), 0.U), 0.U(2.W))
-  )), isXRetFlag || csrio.exception.valid)
+  csrio.trapTarget := RegEnable(
+    MuxCase(pcFromXtvec, Seq(
+      (isXRetFlag && !illegalXret) -> retTargetReg,
+      ((hasDebugTrap && !debugMode) || ebreakEnterParkLoop) -> debugTrapTarget
+    )),
+    isXRetFlag || csrio.exception.valid)
 
-  when (raiseExceptionIntr) {
+  when(hasExceptionIntr) {
     val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
     val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
     val dcsrNew = WireInit(dcsr.asTypeOf(new DcsrStruct))
     val debugModeNew = WireInit(debugMode)
-
-    when (raiseDebugExceptionIntr) {
-      when (raiseDebugIntr) {
-        debugModeNew := true.B
-        mstatusNew.mprv := false.B
+    when(hasDebugTrap && !debugMode) {
+      import DcsrStruct._
+      debugModeNew := true.B
+      dcsrNew.prv := priviledgeMode
+      priviledgeMode := ModeM
+      when(hasDebugIntr) {
         dpc := iexceptionPC
-        dcsrNew.cause := 3.U
-        dcsrNew.prv := priviledgeMode
-        priviledgeMode := ModeM
-        XSDebug(raiseDebugIntr, "Debug Mode: Trap to %x at pc %x\n", debugTrapTarget, dpc)
-      }.elsewhen ((hasbreakPoint || hasSingleStep) && !debugMode) {
-        // ebreak or ss in running hart
-        debugModeNew := true.B
-        dpc := iexceptionPC
-        dcsrNew.cause := 0.U // Todo
-        dcsrNew.prv := priviledgeMode // TODO
-        priviledgeMode := ModeM
-        mstatusNew.mprv := false.B
+        dcsrNew.cause := CAUSE_HALTREQ
+        XSDebug(hasDebugIntr, "Debug Mode: Trap to %x at pc %x\n", debugTrapTarget, dpc)
+      }.otherwise { // hasDebugException
+        dpc := iexceptionPC // TODO: check it when hasSingleStep
+        dcsrNew.cause := MuxCase(0.U, Seq(
+          hasTriggerFire -> CAUSE_TRIGGER,
+          hasBreakPoint -> CAUSE_HALTREQ,
+          hasSingleStep -> CAUSE_STEP
+        ))
       }
       dcsr := dcsrNew.asUInt
       debugIntrEnable := false.B
@@ -1304,7 +1271,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     debugMode := debugModeNew
   }
 
-  XSDebug(raiseExceptionIntr && delegS, "sepc is written!!! pc:%x\n", io.in.bits.data.pc.get)
+  XSDebug(hasExceptionIntr && delegS, "sepc is written!!! pc:%x\n", io.in.bits.data.pc.get)
 
   // Distributed CSR update req
   //
@@ -1349,15 +1316,15 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   def readWithScala(addr: Int): UInt = mapping(addr)._1
 
-  val difftestIntrNO = Mux(raiseIntr, causeNO, 0.U)
+  val difftestIntrNO = Mux(hasIntr, causeNO, 0.U)
 
   // Always instantiate basic difftest modules.
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
     val difftest = DifftestModule(new DiffArchEvent, delay = 3, dontCare = true)
     difftest.coreid      := csrio.hartId
     difftest.valid       := csrio.exception.valid
-    difftest.interrupt   := Mux(raiseIntr, causeNO, 0.U)
-    difftest.exception   := Mux(raiseException, causeNO, 0.U)
+    difftest.interrupt   := Mux(hasIntr, causeNO, 0.U)
+    difftest.exception   := Mux(hasException, causeNO, 0.U)
     difftest.exceptionPC := dexceptionPC
     if (env.EnableDifftest) {
       difftest.exceptionInst := csrio.exception.bits.instr
@@ -1394,7 +1361,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     difftest.debugMode := debugMode
     difftest.dcsr := dcsr
     difftest.dpc := dpc
-    difftest.dscratch0 := dscratch
+    difftest.dscratch0 := dscratch0
     difftest.dscratch1 := dscratch1
   }
 
