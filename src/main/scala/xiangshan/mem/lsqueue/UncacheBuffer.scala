@@ -460,9 +460,9 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
   val lastCycleRedirect = RegNext(io.redirect)
   val lastLastCycleRedirect = RegNext(lastCycleRedirect)
   io.rollback.valid := oldestRedirect.valid &&
-                      !oldestRedirect.robIdx.needFlush(io.redirect) &&
-                      !oldestRedirect.robIdx.needFlush(lastCycleRedirect) &&
-                      !oldestRedirect.robIdx.needFlush(lastLastCycleRedirect)
+                      !oldestRedirect.bits.robIdx.needFlush(io.redirect) &&
+                      !oldestRedirect.bits.robIdx.needFlush(lastCycleRedirect) &&
+                      !oldestRedirect.bits.robIdx.needFlush(lastLastCycleRedirect)
   io.rollback.bits := oldestRedirect.bits
 
   //  perf counter
