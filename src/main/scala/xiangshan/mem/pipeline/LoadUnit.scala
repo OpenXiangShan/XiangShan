@@ -309,7 +309,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s0_do_try_ptr_chasing   = s0_try_ptr_chasing && s0_can_go && io.dcache.req.ready
   val s0_ptr_chasing_vaddr    = io.l2l_fwd_in.data(5, 0) +& io.ld_fast_imm(5, 0)
   val s0_ptr_chasing_canceled = WireInit(false.B)
-  s0_kill := s0_ptr_chasing_canceled || (s0_sel_src.uop.robIdx.needFlush(io.redirect) && !s0_try_ptr_chasing)
+  s0_kill := s0_ptr_chasing_canceled || !s0_try_ptr_chasing
 
   // prefetch related ctrl signal
   io.canAcceptLowConfPrefetch  := s0_low_conf_prf_ready
@@ -677,6 +677,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s1_kill := s1_late_kill ||
              s1_cancel_ptr_chasing ||
              s1_in.uop.robIdx.needFlush(io.redirect) ||
+             s1_in.uop.robIdx.needFlush(RegNext(io.redirect)) ||
              RegEnable(s0_kill, false.B, io.ldin.valid || io.replay.valid || io.l2l_fwd_in.valid || io.fast_rep_in.valid)
 
   if (EnableLoadToLoadForward) {
