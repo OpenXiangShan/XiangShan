@@ -1016,7 +1016,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.fast_rep_out.valid := s3_valid && s3_fast_rep && !s3_in.uop.robIdx.needFlush(io.redirect)
   io.fast_rep_out.bits := s3_in
 
-  io.lsq.ldin.valid := s3_valid && (!s3_fast_rep || !io.fast_rep_out.ready) && !s3_in.feedbacked
+  val s3_fast_rep_canceled = io.replay.valid && io.replay.bits.forward_tlDchannel
+  io.lsq.ldin.valid := s3_valid && (!s3_fast_rep || s3_fast_rep_canceled) && !s3_in.feedbacked
   io.lsq.ldin.bits := s3_in
   io.lsq.ldin.bits.miss := s3_in.miss && !s3_fwd_frm_d_chan_valid
 
@@ -1100,10 +1101,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                  !s3_rep_frm_fetch &&
                  !s3_exception
 
-  val s3_fb_no_waiting = !s3_in.isLoadReplay && !(s3_fast_rep && io.fast_rep_out.ready) && !s3_in.feedbacked
+  val s3_fb_no_waiting = !s3_in.isLoadReplay && !(s3_fast_rep && !s3_fast_rep_canceled) && !s3_in.feedbacked
 
   //
-  io.feedback_slow.valid                 := s3_valid && !s3_in.uop.robIdx.needFlush(io.redirect) && s3_fb_no_waiting
+  io.feedback_slow.valid                 := s3_valid && s3_fb_no_waiting
   io.feedback_slow.bits.hit              := !io.lsq.ldin.bits.rep_info.need_rep || io.lsq.ldin.ready
   io.feedback_slow.bits.flushState       := s3_in.ptwBack
   io.feedback_slow.bits.rsIdx            := s3_in.rsIdx
