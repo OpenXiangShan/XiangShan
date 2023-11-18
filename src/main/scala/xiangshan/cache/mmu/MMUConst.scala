@@ -63,7 +63,7 @@ case class L2TLBParameters
   spReplacer: Option[String] = Some("plru"),
   // filter
   ifilterSize: Int = 8,
-  dfilterSize: Int = 32,
+  dfilterSize: Int = 18,
   // miss queue, add more entries than 'must require'
   // 0 for easier bug trigger, please set as big as u can, 8 maybe
   missqueueExtendSize: Int = 0,
@@ -93,9 +93,9 @@ trait HasTlbConst extends HasXSParameter {
   val sectorppnLen = ppnLen - sectortlbwidth
   val sectorvpnLen = vpnLen - sectortlbwidth
 
-  val loadfiltersize = 16
-  val storefiltersize = 8
-  val prefetchfiltersize = 8
+  val loadfiltersize = 10
+  val storefiltersize = 4
+  val prefetchfiltersize = 4
 
   val sramSinglePort = true
 

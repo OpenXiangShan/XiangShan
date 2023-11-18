@@ -163,7 +163,6 @@ class PTWFilterEntryIO(Width: Int, hasHint: Boolean = false)(implicit p: Paramet
 class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   val io = IO(new PTWFilterEntryIO(Width, hasHint))
-  require(isPow2(Size), s"Filter Size ($Size) must be a power of 2")
 
   def firstValidIndex(v: Seq[Bool], valid: Bool): UInt = {
     val index = WireInit(0.U(log2Up(Size).W))
@@ -184,8 +183,6 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
   val canenq = WireInit(VecInit(Seq.fill(Width)(false.B)))
   val enqidx = WireInit(VecInit(Seq.fill(Width)(0.U(log2Up(Size).W))))
 
-  //val selectCount = RegInit(0.U(log2Up(Width).W))
-
   val entryIsMatchVec = WireInit(VecInit(Seq.fill(Width)(false.B)))
   val entryMatchIndexVec = WireInit(VecInit(Seq.fill(Width)(0.U(log2Up(Size).W))))
   val ptwResp_EntryMatchVec = vpn.zip(v).map{ case (pi, vi) => vi && io.ptw.resp.bits.hit(pi, io.csr.satp.asid, true, true)}
@@ -204,24 +201,24 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
   // ugly code, should be optimized later
   require(Width <= 3, s"DTLB Filter Width ($Width) must equal or less than 3")
   if (Width == 1) {
-    require(Size == 8, s"prefetch filter Size ($Size) should be 8")
+    require(Size == 4, s"prefetch filter Size ($Size) should be 4")
     canenq(0) := !(Cat(v).andR)
     enqidx(0) := firstValidIndex(v, false.B)
   } else if (Width == 2) {
-    require(Size == 8, s"store filter Size ($Size) should be 8")
+    require(Size == 4, s"store filter Size ($Size) should be 4")
     canenq(0) := !(Cat(v.take(Size/2)).andR)
     enqidx(0) := firstValidIndex(v.take(Size/2), false.B)
     canenq(1) := !(Cat(v.drop(Size/2)).andR)
     enqidx(1) := firstValidIndex(v.drop(Size/2), false.B) + (Size/2).U
   } else if (Width == 3) {
-    require(Size == 16, s"load filter Size ($Size) should be 16")
-    canenq(0) := !(Cat(v.take(8)).andR)
-    enqidx(0) := firstValidIndex(v.take(8), false.B)
-    canenq(1) := !(Cat(v.drop(8).take(4)).andR)
-    enqidx(1) := firstValidIndex(v.drop(8).take(4), false.B) + 8.U
-    // four entries for prefetch
-    canenq(2) := !(Cat(v.drop(12)).andR)
-    enqidx(2) := firstValidIndex(v.drop(12), false.B) + 12.U
+    require(Size == 10, s"load filter Size ($Size) should be 10")
+    canenq(0) := !(Cat(v.take(4)).andR)
+    enqidx(0) := firstValidIndex(v.take(4), false.B)
+    canenq(1) := !(Cat(v.drop(4).take(4)).andR)
+    enqidx(1) := firstValidIndex(v.drop(4).take(4), false.B) + 4.U
+    // two entries for prefetch
+    canenq(2) := !(Cat(v.drop(8)).andR)
+    enqidx(2) := firstValidIndex(v.drop(8), false.B) + 8.U
   }
 
   for (i <- 0 until Width) {
@@ -291,25 +288,14 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
 
   // Perf Counter
   val counter = PopCount(v)
-  val inflight_counter = RegInit(0.U(log2Up(Size).W))
-  val inflight_full = inflight_counter === Size.U
-  when (io.ptw.req(0).fire =/= io.ptw.resp.fire) {
-    inflight_counter := Mux(io.ptw.req(0).fire, inflight_counter + 1.U, inflight_counter - 1.U)
-  }
 
-  assert(inflight_counter <= Size.U, "inflight should be no more than Size")
   when (counter === 0.U) {
     assert(!io.ptw.req(0).fire, "when counter is 0, should not req")
-  }
-
-  when (io.flush) {
-    inflight_counter := 0.U
   }
 
   XSPerfAccumulate("tlb_req_count", PopCount(Cat(io.tlb.req.map(_.valid))))
   XSPerfAccumulate("tlb_req_count_filtered", PopCount(enqvalid))
   XSPerfAccumulate("ptw_req_count", io.ptw.req(0).fire)
-  XSPerfAccumulate("ptw_req_cycle", inflight_counter)
   XSPerfAccumulate("tlb_resp_count", io.tlb.resp.fire)
   XSPerfAccumulate("ptw_resp_count", io.ptw.resp.fire)
   XSPerfAccumulate("inflight_cycle", Cat(sent).orR)
@@ -321,7 +307,6 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
   for (i <- 0 until Size) {
     TimeOutAssert(v(i), timeOutThreshold, s"Filter ${i} doesn't recv resp in time")
   }
-
 }
 
 class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) extends XSModule with HasPtwConst {
@@ -407,12 +392,48 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
     ptw_arb.io.in(i).bits.vpn := filter(i).ptw.req(0).bits.vpn
     filter(i).ptw.req(0).ready := ptw_arb.io.in(i).ready
   }
+
+  val sent_vpns = RegInit(VecInit(Seq.fill(8)(0.U(vpnLen.W))))
+  val sent_valid = RegInit(VecInit(Seq.fill(8)(false.B)))
+  val reqPtr = RegInit(0.U(log2Up(8).W))
+  val already_sent = Cat(sent_vpns.zip(sent_valid).map{ case (pi, vi) => vi && pi === ptw_arb.io.out.bits.vpn}).orR
+  val respMatch = sent_vpns.zip(sent_valid).map{ case (pi, vi) => vi && io.ptw.resp.bits.hit(pi, io.csr.satp.asid, true, true)}
+
+  // For timing, we will not record reqs when resp fire
+  when (io.ptw.resp.fire) {
+    sent_valid.zip(respMatch).map{ case (vi, mi) => when (mi) { vi := false.B }}
+  } .elsewhen (io.ptw.req(0).fire) {
+    sent_vpns(reqPtr) := io.ptw.req(0).bits.vpn
+    sent_valid(reqPtr) := true.B
+    reqPtr := reqPtr + 1.U
+  }
+
+  when (flush) {
+    sent_valid.map(_ := false.B)
+    reqPtr := 0.U
+  }
+
   ptw_arb.io.out.ready := io.ptw.req(0).ready
-  io.ptw.req(0).valid := ptw_arb.io.out.valid
+  io.ptw.req(0).valid := ptw_arb.io.out.valid && !already_sent
   io.ptw.req(0).bits.vpn := ptw_arb.io.out.bits.vpn
   io.ptw.resp.ready := true.B
 
   io.rob_head_miss_in_tlb := Cat(filter.map(_.rob_head_miss_in_tlb)).orR
+
+  // Perf Counter
+  val inflight_counter = RegInit(0.U(log2Up(loadfiltersize + storefiltersize + prefetchfiltersize).W))
+  when (io.ptw.req(0).fire =/= io.ptw.resp.fire) {
+    inflight_counter := Mux(io.ptw.req(0).fire, inflight_counter + 1.U, inflight_counter - 1.U)
+  }
+
+  assert(inflight_counter <= Size.U, "inflight should be no more than Size")
+
+  when (flush) {
+    inflight_counter := 0.U
+  }
+
+  XSPerfAccumulate("ptw_req_count", io.ptw.req(0).fire)
+  XSPerfAccumulate("ptw_req_cycle", inflight_counter)
 }
 
 class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) extends XSModule with HasPtwConst {
