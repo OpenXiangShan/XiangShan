@@ -807,26 +807,18 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   lsq.io.brqRedirect    <> redirect
 
   //  violation rollback
-  def selectOldest[T <: Redirect](valid: Seq[Bool], bits: Seq[T]): (Seq[Bool], Seq[T]) = {
-    assert(valid.length == bits.length)
-    if (valid.length == 0 || valid.length == 1) {
-      (valid, bits)
-    } else if (valid.length == 2) {
-      val res = Seq.fill(2)(Wire(ValidIO(chiselTypeOf(bits(0)))))
-      for (i <- res.indices) {
-        res(i).valid := valid(i)
-        res(i).bits := bits(i)
-      }
-      val oldest = Mux(valid(0) && valid(1), Mux(isAfter(bits(0).robIdx, bits(1).robIdx), res(1), res(0)), Mux(valid(0) && !valid(1), res(0), res(1)))
-      (Seq(oldest.valid), Seq(oldest.bits))
-    } else {
-      val left = selectOldest(valid.take(valid.length / 2), bits.take(bits.length / 2))
-      val right = selectOldest(valid.takeRight(valid.length - (valid.length / 2)), bits.takeRight(bits.length - (bits.length / 2)))
-      selectOldest(left._1 ++ right._1, left._2 ++ right._2)
-    }
+  def selectOldestRedirect(xs: Seq[Valid[Redirect]]): Vec[Bool] = {
+    val compareVec = (0 until xs.length).map(i => (0 until i).map(j => isAfter(xs(j).bits.robIdx, xs(i).bits.robIdx)))
+    val resultOnehot = VecInit((0 until xs.length).map(i => Cat((0 until xs.length).map(j =>
+      (if (j < i) !xs(j).valid || compareVec(i)(j)
+      else if (j == i) xs(i).valid
+      else !xs(j).valid || !compareVec(j)(i))
+    )).andR))
+    resultOnehot
   }
-  val rollback = lsq.io.rollback +: loadUnits.map(_.io.rollback)
-  val rollbackSel = selectOldest(rollback.map(_.valid), rollback.map(_.bits))
+  val allRedirect = Seq(lsq.io.nuke_rollback, lsq.io.nack_rollback) ++ loadUnits.map(_.io.rollback)
+  val oldestOneHot = selectOldestRedirect(allRedirect)
+  val oldestRedirect = Mux1H(oldestOneHot, allRedirect)
   io.mem_to_ooo.memoryViolation.valid := rollbackSel._1(0)
   io.mem_to_ooo.memoryViolation.bits  := rollbackSel._2(0)
   io.mem_to_ooo.lsqio.lqCanAccept  := lsq.io.lqCanAccept
