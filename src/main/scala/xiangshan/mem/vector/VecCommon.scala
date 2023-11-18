@@ -190,6 +190,7 @@ class OnlyVecExuOutput(implicit p: Parameters) extends VLSUBundle {
   val exp = Bool()
   val is_first_ele = Bool()
   val elemIdx = UInt(elemIdxBits.W) // element index
+  val elemIdxInsideVd = UInt(elemIdxBits.W) // element index in scope of vd
   val uopQueuePtr = new VluopPtr
   val flowPtr = new VlflowPtr
 }
@@ -591,20 +592,33 @@ object GenRealFlowLog2 extends VLSUConstants {
 /**
   * GenElemIdx generals an element index within an instruction, given a certain uopIdx and a known flowIdx
   * inside the uop.
-  * 
-  * eew = 0, elemIdx = uopIdx ## flowIdx(3, 0)
-  * eew = 1, elemIdx = uopIdx ## flowIdx(2, 0)
-  * eew = 2, elemIdx = uopIdx ## flowIdx(1, 0)
-  * eew = 3, elemIdx = uopIdx ## flowIdx(0)
   */
 object GenElemIdx extends VLSUConstants {
-  def apply(alignedType: UInt, uopIdx: UInt, flowIdx: UInt): UInt = {
-    LookupTree(
-      alignedType,
-      (0 until alignTypes).map(i =>
-        i.U -> ((uopIdx ## flowIdx(log2Up(VLENB) - i - 1, 0))(log2Up(maxElemNum) - 1, 0))
-      )
+  // def apply(alignedType: UInt, uopIdx: UInt, flowIdx: UInt): UInt = {
+  //   LookupTree(
+  //     alignedType,
+  //     (0 until alignTypes).map(i =>
+  //       i.U -> ((uopIdx ## flowIdx(log2Up(VLENB) - i - 1, 0))(log2Up(maxElemNum) - 1, 0))
+  //     )
+  //   )
+  // }
+  def apply(instType: UInt, emul: UInt, lmul: UInt, eew: UInt, sew: UInt,
+    uopIdx: UInt, flowIdx: UInt): UInt = {
+    val isIndexed = instType(0).asBool
+    val eewUopFlowsLog2 = Mux(emul.asSInt > 0.S, 0.U, emul) + log2Up(VLENB).U - eew(1, 0)
+    val sewUopFlowsLog2 = Mux(lmul.asSInt > 0.S, 0.U, lmul) + log2Up(VLENB).U - sew(1, 0)
+    val uopFlowsLog2 = Mux(
+      isIndexed,
+      Mux(emul.asSInt > lmul.asSInt, eewUopFlowsLog2, sewUopFlowsLog2),
+      eewUopFlowsLog2
     )
+    LookupTree(uopFlowsLog2, List(
+      0.U -> uopIdx,
+      1.U -> uopIdx ## flowIdx(0),
+      2.U -> uopIdx ## flowIdx(1, 0),
+      3.U -> uopIdx ## flowIdx(2, 0),
+      4.U -> uopIdx ## flowIdx(3, 0)
+    ))
   }
 }
 
@@ -702,23 +716,23 @@ object GenVdIdxInField extends VLSUConstants {
   }
 }
 
-object GenFieldMask {
-  def apply(instType: UInt, emul: UInt, lmul: UInt, eew: UInt, sew: UInt): UInt = {
-    val isSegment = instType(2)
-    val isIndexed = instType(0)
-    val alignedType = Mux(isIndexed, sew(1, 0), eew(1, 0))
-    val mul = Mux(isIndexed, lmul, emul)
-    val vlmaxMask = GenVLMAX(lmul, sew) - 1.U
-    val mulMask = LookupTree(alignedType, List(
-      "b00".U -> "b01111".U,
-      "b01".U -> "b00111".U,
-      "b10".U -> "b00011".U,
-      "b11".U -> "b00001".U
-    ))
-    Mux(
-      !isSegment || mul.asSInt >= 0.S,
-      vlmaxMask,
-      mulMask
-    )
-  }
-}
+// object GenFieldMask {
+//   def apply(instType: UInt, emul: UInt, lmul: UInt, eew: UInt, sew: UInt): UInt = {
+//     val isSegment = instType(2)
+//     val isIndexed = instType(0)
+//     val alignedType = Mux(isIndexed, sew(1, 0), eew(1, 0))
+//     val mul = Mux(isIndexed, lmul, emul)
+//     val vlmaxMask = GenVLMAX(lmul, sew) - 1.U
+//     val mulMask = LookupTree(alignedType, List(
+//       "b00".U -> "b01111".U,
+//       "b01".U -> "b00111".U,
+//       "b10".U -> "b00011".U,
+//       "b11".U -> "b00001".U
+//     ))
+//     Mux(
+//       !isSegment || mul.asSInt >= 0.S,
+//       vlmaxMask,
+//       mulMask
+//     )
+//   }
+// }

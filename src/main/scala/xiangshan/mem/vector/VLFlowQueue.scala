@@ -75,6 +75,7 @@ class VlflowBundle(implicit p: Parameters) extends VecFlowBundle {
   val reg_offset = UInt(vOffsetBits.W)
   val unit_stride_fof   = Bool()
   val uopQueuePtr = new VluopPtr
+  val elemIdxInsideVd = UInt(elemIdxBits.W)
 }
 
 class unitStrideBundle(implicit p: Parameters) extends VLSUBundle {
@@ -205,6 +206,7 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
       x.vec.exp           := thisLoadResult.vec.exp
       x.vec.is_first_ele  := thisLoadResult.vec.is_first_ele
       x.vec.elemIdx       := thisLoadResult.vec.elemIdx
+      x.vec.elemIdxInsideVd := flowQueueEntries(deqPtr(i).value).elemIdxInsideVd
       x.vec.uopQueuePtr   := thisLoadResult.vec.uopQueuePtr
       x.vec.flowPtr       := deqPtr(i)
       // From ExuOutput

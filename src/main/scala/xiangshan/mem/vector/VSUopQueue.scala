@@ -249,11 +249,11 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
     "b10".U -> "b00011".U,
     "b11".U -> "b00001".U
   ))
-  val issueFieldMask = Mux(
-    !isSegment(issueInstType) || issueMUL.asSInt >= 0.S,
-    issueVLMAXMask,
-    issueMULMask
-  )
+  // val issueFieldMask = Mux(
+  //   !isSegment(issueInstType) || issueMUL.asSInt >= 0.S,
+  //   issueVLMAXMask,
+  //   issueMULMask
+  // )
   val issueNFIELDS = issueEntry.nfields
   val issueVstart = issueUop.vpu.vstart
   val issueVl = issueUop.vpu.vl
@@ -266,21 +266,26 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
     // AGU
     // TODO: DONT use * to implement multiplication!!!
     val elemIdx = GenElemIdx(
-      alignedType = Mux(
-        isIndexed(issueInstType) && issueLmulGreaterThanEmul,
-        issueSew(1, 0),
-        issueEew(1, 0)
-      ),
+      instType = issueInstType,
+      emul = issueEntry.emul,
+      lmul = issueEntry.lmul,
+      eew = issueEew,
+      sew = issueSew,
       uopIdx = issueUopIdx,
       flowIdx = flowIdx
     ) // elemIdx inside an inst
-    val elemIdxInsideField = elemIdx & issueFieldMask
-    elemIdxInsideVd(portIdx) := elemIdx & issueMULMask // elemIdx inside a vd
-    val nfIdx = Mux(
-      isIndexed(issueInstType),
-      GenSegNfIdx(Mux(issueLmulGreaterThanEmul, issueEntry.lmul, issueEntry.emul), issueUopIdx),
-      GenSegNfIdx(issueEntry.emul, issueUopIdx)
-    )
+    val elemIdxInsideField = elemIdx & issueVLMAXMask
+    elemIdxInsideVd(portIdx) := elemIdx & Mux(
+      issueMUL.asSInt < 0.S,
+      issueVLMAXMask,
+      issueMULMask
+    )// elemIdx inside a vd
+    // val nfIdx = Mux(
+    //   isIndexed(issueInstType),
+    //   GenSegNfIdx(Mux(issueLmulGreaterThanEmul, issueEntry.lmul, issueEntry.emul), issueUopIdx),
+    //   GenSegNfIdx(issueEntry.emul, issueUopIdx)
+    // )
+    val nfIdx = elemIdx >> issueVLMAXLog2
     val notIndexedStride = Mux(
       isStrided(issueInstType),
       issueEntry.stride(XLEN - 1, 0), // for strided store, stride = x[rs2]
@@ -297,11 +302,21 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
     val mask = issueEntry.byteMask
     val regOffset = (elemIdxInsideField << issueAlignedType)(vOffsetBits - 1, 0)
     val enable = (issueFlowMask & UIntToOH(elemIdxInsideVd(portIdx))).orR
+    val ttttvl = Mux(issueEntry.usMaskReg, GenUSMaskRegVL(issueVl), issueVl)
     val exp = VLExpCtrl(
       vstart = issueVstart,
-      vl = Mux(issueEntry.usMaskReg, GenUSMaskRegVL(issueVl), issueVl),
+      vl = ttttvl,
       eleIdx = elemIdxInsideField
     ) && enable
+    // TODO: delete me later
+    dontTouch(ttttvl)
+    dontTouch(elemIdxInsideField)
+    dontTouch(enable)
+    dontTouch(nfIdx)
+    dontTouch(notIndexedStride)
+    dontTouch(indexedStride)
+    dontTouch(stride)
+    dontTouch(fieldOffset)
 
     issuePort.valid := issueValid && flowIdx < issueFlowNum &&
       !issueUop.robIdx.needFlush(io.redirect) &&
@@ -363,13 +378,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
     val ptr = wb.bits.uopQueuePtr
     val entry = uopq(ptr.value)
     flowWbExcp(i) := wb.bits.uop.exceptionVec
-    val flowWbElemIdxInField = wb.bits.elemIdx & GenFieldMask(
-      instType = entry.instType,
-      emul = entry.emul,
-      lmul = entry.lmul,
-      eew = entry.eew,
-      sew = entry.sew
-    )
+    val flowWbElemIdxInField = wb.bits.elemIdx & (entry.vlmax - 1.U)
 
     // handle the situation where multiple ports are going to write the same uop queue entry
     val mergedByPrevPort = (i != 0).B && Cat((0 until i).map(j =>

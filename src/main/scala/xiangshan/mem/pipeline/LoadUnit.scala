@@ -1174,6 +1174,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_vecout.uopQueuePtr       := DontCare // uopQueuePtr is already saved in flow queue
   s3_vecout.flowPtr           := s3_in.flowPtr
   s3_vecout.elemIdx           := DontCare // elemIdx is already saved in flow queue
+  s3_vecout.elemIdxInsideVd   := DontCare
 
   when (s3_force_rep) {
     s3_out.bits.uop.exceptionVec := 0.U.asTypeOf(s3_in.uop.exceptionVec.cloneType)
