@@ -963,18 +963,19 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   //
   io.s2_ptr_chasing                    := RegEnable(s1_try_ptr_chasing && !s1_cancel_ptr_chasing, false.B, s1_fire)
 
-  io.prefetch_train.valid              := s2_valid && !s2_actually_mmio && !s2_in.tlbMiss
-  io.prefetch_train.bits.fromLsPipelineBundle(s2_in)
-  io.prefetch_train.bits.miss          := io.dcache.resp.bits.miss // TODO: use trace with bank conflict?
-  io.prefetch_train.bits.meta_prefetch := io.dcache.resp.bits.meta_prefetch
-  io.prefetch_train.bits.meta_access   := io.dcache.resp.bits.meta_access
+  // RegNext prefetch train for better timing
+  // ** Now, prefetch train is valid at load s3 **
+  io.prefetch_train.valid              := RegNext(s2_valid && !s2_actually_mmio && !s2_in.tlbMiss)
+  io.prefetch_train.bits.fromLsPipelineBundle(s2_in, latch = true)
+  io.prefetch_train.bits.miss          := RegNext(io.dcache.resp.bits.miss) // TODO: use trace with bank conflict?
+  io.prefetch_train.bits.meta_prefetch := RegNext(io.dcache.resp.bits.meta_prefetch)
+  io.prefetch_train.bits.meta_access   := RegNext(io.dcache.resp.bits.meta_access)
 
-
-  io.prefetch_train_l1.valid              := s2_valid && !s2_actually_mmio
-  io.prefetch_train_l1.bits.fromLsPipelineBundle(s2_in)
-  io.prefetch_train_l1.bits.miss          := io.dcache.resp.bits.miss
-  io.prefetch_train_l1.bits.meta_prefetch := io.dcache.resp.bits.meta_prefetch
-  io.prefetch_train_l1.bits.meta_access   := io.dcache.resp.bits.meta_access
+  io.prefetch_train_l1.valid              := RegNext(s2_valid && !s2_actually_mmio)
+  io.prefetch_train_l1.bits.fromLsPipelineBundle(s2_in, latch = true)
+  io.prefetch_train_l1.bits.miss          := RegNext(io.dcache.resp.bits.miss)
+  io.prefetch_train_l1.bits.meta_prefetch := RegNext(io.dcache.resp.bits.meta_prefetch)
+  io.prefetch_train_l1.bits.meta_access   := RegNext(io.dcache.resp.bits.meta_access)
   if (env.FPGAPlatform){
     io.dcache.s0_pc := DontCare
     io.dcache.s1_pc := DontCare
