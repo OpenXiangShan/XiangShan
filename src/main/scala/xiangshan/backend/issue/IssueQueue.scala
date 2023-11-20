@@ -159,59 +159,6 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val finalWakeUpL1ExuOH: Option[Vec[Vec[Vec[Bool]]]] = wakeUpL1ExuOH.map(x => VecInit(finalDeqSelOHVec.map(oh => Mux1H(oh, x))))
   val finalSrcTimer = srcTimer.map(x => VecInit(finalDeqSelOHVec.map(oh => Mux1H(oh, x))))
 
-  val wakeupEnqSrcStateBypassFromWB: Vec[Vec[UInt]] = Wire(Vec(io.enq.size, Vec(io.enq.head.bits.srcType.size, SrcState())))
-  val wakeupEnqSrcStateBypassFromIQ: Vec[Vec[UInt]] = Wire(Vec(io.enq.size, Vec(io.enq.head.bits.srcType.size, SrcState())))
-  val srcWakeUpEnqByIQMatrix = Wire(Vec(params.numEnq, Vec(params.numRegSrc, Vec(params.numWakeupFromIQ, Bool()))))
-
-  val shiftedWakeupLoadDependencyByIQVec = Wire(Vec(params.numWakeupFromIQ, Vec(LoadPipelineWidth, UInt(3.W))))
-  shiftedWakeupLoadDependencyByIQVec
-    .zip(io.wakeupFromIQ.map(_.bits.loadDependency))
-    .zip(params.wakeUpInExuSources.map(_.name)).foreach {
-    case ((deps, originalDeps), name) => deps.zip(originalDeps).zipWithIndex.foreach {
-      case ((dep, originalDep), deqPortIdx) =>
-        if (name.contains("LDU") && name.replace("LDU", "").toInt == deqPortIdx)
-          dep := (originalDep << 2).asUInt | 2.U
-        else
-          dep := originalDep << 1
-    }
-  }
-
-  for (i <- io.enq.indices) {
-    for (j <- s0_enqBits(i).srcType.indices) {
-      wakeupEnqSrcStateBypassFromWB(i)(j) := Cat(
-        io.wakeupFromWB.map(x => x.bits.wakeUp(Seq((s0_enqBits(i).psrc(j), s0_enqBits(i).srcType(j))), x.valid).head).toSeq
-      ).orR
-    }
-  }
-
-  for (i <- io.enq.indices) {
-    val numLsrc = s0_enqBits(i).srcType.size.min(entries.io.enq(i).bits.status.srcType.size)
-    for (j <- s0_enqBits(i).srcType.indices) {
-      val ldTransCancel = if (params.numWakeupFromIQ > 0 && j < numLsrc) Mux(
-        srcWakeUpEnqByIQMatrix(i)(j).asUInt.orR,
-        Mux1H(srcWakeUpEnqByIQMatrix(i)(j), io.wakeupFromIQ.map(_.bits.loadDependency).map(dep => LoadShouldCancel(Some(dep), io.ldCancel)).toSeq),
-        false.B
-      ) else false.B
-      if (params.numWakeupFromIQ > 0 && j < numLsrc) {
-        wakeupEnqSrcStateBypassFromIQ(i)(j) := srcWakeUpEnqByIQMatrix(i)(j).asUInt.orR && !ldTransCancel
-      } else {
-        wakeupEnqSrcStateBypassFromIQ(i)(j) := false.B
-      }
-    }
-  }
-
-  srcWakeUpEnqByIQMatrix.zipWithIndex.foreach { case (wakeups: Vec[Vec[Bool]], i) =>
-    if (io.wakeupFromIQ.isEmpty) {
-      wakeups := 0.U.asTypeOf(wakeups)
-    } else {
-      val wakeupVec: IndexedSeq[IndexedSeq[Bool]] = io.wakeupFromIQ.map((bundle: ValidIO[IssueQueueIQWakeUpBundle]) =>
-        bundle.bits.wakeUp(s0_enqBits(i).psrc.take(params.numRegSrc) zip s0_enqBits(i).srcType.take(params.numRegSrc), bundle.valid)
-      ).toIndexedSeq.transpose
-      val cancelSel = io.wakeupFromIQ.map(x => x.bits.exuIdx).map(x => io.og0Cancel(x))
-      wakeups := wakeupVec.map(x => VecInit(x.zip(cancelSel).map { case (wakeup, cancel) => wakeup && !cancel }))
-    }
-  }
-
   val fuTypeVec = Wire(Vec(params.numEntries, FuType()))
   val transEntryDeqVec = Wire(Vec(params.numEnq, ValidIO(new EntryBundle)))
   val deqEntryVec = Wire(Vec(params.numDeq, ValidIO(new EntryBundle)))
@@ -242,13 +189,11 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     entriesIO.enq.zipWithIndex.foreach { case (enq: ValidIO[EntryBundle], i) =>
       enq.valid := s0_doEnqSelValidVec(i)
       val numLsrc = s0_enqBits(i).srcType.size.min(enq.bits.status.srcType.size)
-      for(j <- 0 until numLsrc) {
-        enq.bits.status.srcState(j) := s0_enqBits(i).srcState(j) |
-                                       wakeupEnqSrcStateBypassFromWB(i)(j) |
-                                       wakeupEnqSrcStateBypassFromIQ(i)(j)
+      for (j <- 0 until numLsrc) {
+        enq.bits.status.srcState(j) := s0_enqBits(i).srcState(j)
         enq.bits.status.psrc(j) := s0_enqBits(i).psrc(j)
         enq.bits.status.srcType(j) := s0_enqBits(i).srcType(j)
-        enq.bits.status.dataSources(j).value := Mux(wakeupEnqSrcStateBypassFromIQ(i)(j).asBool, DataSource.bypass, DataSource.reg)
+        enq.bits.status.dataSources(j).value := DataSource.reg
         enq.bits.payload.debugInfo.enqRsTime := GTimer()
       }
       enq.bits.status.fuType := s0_enqBits(i).fuType
@@ -258,32 +203,12 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       enq.bits.status.issued := false.B
       enq.bits.status.firstIssue := false.B
       enq.bits.status.blocked := false.B
-      enq.bits.status.srcWakeUpL1ExuOH match {
-        case Some(value) => value.zip(srcWakeUpEnqByIQMatrix(i)).zipWithIndex.foreach {
-          case ((exuOH, wakeUpByIQOH), srcIdx) =>
-            when(wakeUpByIQOH.asUInt.orR) {
-              exuOH := Mux1H(wakeUpByIQOH, io.wakeupFromIQ.map(x => MathUtils.IntToOH(x.bits.exuIdx).U(backendParams.numExu.W)).toSeq).asBools
-            }.otherwise {
-              exuOH := 0.U.asTypeOf(exuOH)
-            }
-        }
-        case None =>
+
+      if (params.hasIQWakeUp) {
+        enq.bits.status.srcWakeUpL1ExuOH.get := 0.U.asTypeOf(enq.bits.status.srcWakeUpL1ExuOH.get)
+        enq.bits.status.srcTimer.get := 0.U.asTypeOf(enq.bits.status.srcTimer.get)
+        enq.bits.status.srcLoadDependency.get := 0.U.asTypeOf(enq.bits.status.srcLoadDependency.get)
       }
-      enq.bits.status.srcTimer match {
-        case Some(value) => value.zip(srcWakeUpEnqByIQMatrix(i)).zipWithIndex.foreach {
-          case ((timer, wakeUpByIQOH), srcIdx) =>
-            when(wakeUpByIQOH.asUInt.orR) {
-              timer := 2.U.asTypeOf(timer)
-            }.otherwise {
-              timer := 3.U.asTypeOf(timer)
-            }
-        }
-        case None =>
-      }
-      enq.bits.status.srcLoadDependency.foreach(_.zip(srcWakeUpEnqByIQMatrix(i)).zipWithIndex.foreach {
-        case ((dep, wakeUpByIQOH), srcIdx) =>
-          dep := Mux(wakeUpByIQOH.asUInt.orR, Mux1H(wakeUpByIQOH, shiftedWakeupLoadDependencyByIQVec), 0.U.asTypeOf(dep))
-      })
       enq.bits.imm := s0_enqBits(i).imm
       enq.bits.payload := s0_enqBits(i)
     }
