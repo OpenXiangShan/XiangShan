@@ -349,7 +349,7 @@ object OthersEntry {
     iqParams.schdType match {
       case IntScheduler() => new OthersEntry()
       case MemScheduler() =>
-        if (iqParams.isLdAddrIQ || iqParams.isStAddrIQ) new OthersEntryMem()
+        if (iqParams.isLdAddrIQ || iqParams.isStAddrIQ || iqParams.isHyAddrIQ) new OthersEntryMem()
         else if (iqParams.isVecMemAddrIQ) new OthersEntryVecMemAddr()
         else if (iqParams.isVecStDataIQ) new OthersEntryVecMemData()
         else new OthersEntry()

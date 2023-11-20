@@ -430,6 +430,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
         memScheduler.io.memAddrIssueResp(i)(j).bits.respType := RSFeedbackType.fuIdle
         memScheduler.io.memAddrIssueResp(i)(j).bits.rfWen := toMem(i)(j).bits.rfWen.getOrElse(false.B)
         memScheduler.io.memAddrIssueResp(i)(j).bits.robIdx := toMem(i)(j).bits.robIdx
+        memScheduler.io.memAddrIssueResp(i)(j).bits.uopIdx := 0.U
       }
     }
   }
@@ -509,7 +510,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
       else false.B
   }
   println(s"[backend]: width of [int|vf|mem]FinalIssueBlock: ${intFinalIssueBlock.size}|${vfFinalIssueBlock.size}|${memFinalIssueBlock.size}")
-  og0CancelOHFromFinalIssue := VecInit(intFinalIssueBlock ++ vfFinalIssueBlock ++ memFinalIssueBlock).asUInt
+  og0CancelOHFromFinalIssue := VecInit((intFinalIssueBlock ++ vfFinalIssueBlock ++ memFinalIssueBlock).toSeq).asUInt
 
   io.frontendSfence := fenceio.sfence
   io.frontendTlbCsr := csrio.tlb

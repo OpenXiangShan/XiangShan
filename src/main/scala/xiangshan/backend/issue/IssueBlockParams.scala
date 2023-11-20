@@ -44,7 +44,7 @@ case class IssueBlockParams(
 
   def inVfSchd: Boolean = schdType == VfScheduler()
 
-  def isMemAddrIQ: Boolean = inMemSchd && (LduCnt > 0 || StaCnt > 0 || VlduCnt > 0 || VstaCnt > 0)
+  def isMemAddrIQ: Boolean = inMemSchd && (LduCnt > 0 || StaCnt > 0 || VlduCnt > 0 || VstaCnt > 0 || HyuCnt > 0)
 
   def isLdAddrIQ: Boolean = inMemSchd && LduCnt > 0
 

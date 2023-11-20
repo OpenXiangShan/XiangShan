@@ -358,7 +358,7 @@ object EnqEntry {
     iqParams.schdType match {
       case IntScheduler() => new EnqEntry()
       case MemScheduler() =>
-        if (iqParams.isLdAddrIQ || iqParams.isStAddrIQ) new EnqEntryMem()
+        if (iqParams.isLdAddrIQ || iqParams.isStAddrIQ || iqParams.isHyAddrIQ) new EnqEntryMem()
         else if (iqParams.isVecMemAddrIQ) new EnqEntryVecMemAddr()
         else if (iqParams.isVecStDataIQ) new EnqEntryVecMemData()
         else new EnqEntry()

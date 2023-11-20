@@ -375,7 +375,7 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
     //                        ---src*(1)--> [stdIQ]
     // Since the src(1) of sta is easier to get, stdIQEnq.bits.src*(0) is assigned to staIQEnq.bits.src*(1)
     // instead of dispatch2Iq.io.out(x).bits.src*(1)
-    val stdIdx = if (stdIQ.params.isVecMemIQ) 2 else 1
+    val stdIdx = 1
     stdIQEnq.bits.srcState(0) := staIQEnq.bits.srcState(stdIdx)
     stdIQEnq.bits.srcType(0) := staIQEnq.bits.srcType(stdIdx)
     stdIQEnq.bits.dataSource(0) := staIQEnq.bits.dataSource(stdIdx)
