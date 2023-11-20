@@ -89,8 +89,6 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
 
   val finalBlockMem = OptionWrapper(params.isMemSchd, MixedVec(params.issueBlockParams.map(x => MixedVec(Vec(x.numExu, Input(Bool()))))))
 
-  val finalBlockMem = OptionWrapper(params.isMemSchd, MixedVec(params.issueBlockParams.map(x => MixedVec(Vec(x.numExu, Input(Bool()))))))
-
   val memIO = if (params.isMemSchd) Some(new Bundle {
     val lsqEnqIO = Flipped(new LsqEnqIO)
   }) else None
@@ -379,8 +377,6 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
     val stdIdx = 1
     stdIQEnq.bits.srcState(0) := staIQEnq.bits.srcState(stdIdx)
     stdIQEnq.bits.srcType(0) := staIQEnq.bits.srcType(stdIdx)
-    stdIQEnq.bits.dataSource(0) := staIQEnq.bits.dataSource(stdIdx)
-    stdIQEnq.bits.l1ExuOH(0) := staIQEnq.bits.l1ExuOH(stdIdx)
     stdIQEnq.bits.psrc(0) := staIQEnq.bits.psrc(stdIdx)
     stdIQEnq.bits.sqIdx := staIQEnq.bits.sqIdx
   }

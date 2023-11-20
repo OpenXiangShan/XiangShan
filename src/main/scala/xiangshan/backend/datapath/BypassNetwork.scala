@@ -62,7 +62,13 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends Mod
 
   // (exuIdx, srcIdx, bypassExuIdx)
   private val forwardOrBypassValidVec3: MixedVec[Vec[UInt]] = MixedVecInit(
-    fromDPs.map(x => x.bits.l1ExuOH)
+    fromDPs.map { (x: DecoupledIO[ExuInput]) =>
+      println(s"[tmp-BypassNetwork] ${x.bits.params.name} numRegSrc: ${x.bits.params.numRegSrc}")
+      x.bits.l1ExuOH.getOrElse(
+        // TODO: remove tmp max 1 for fake HYU1
+        VecInit(Seq.fill(x.bits.params.numRegSrc max 1)(0.U(ExuOH.width.W)))
+      )
+    }
   )
 
   private val forwardDataVec: Vec[UInt] = VecInit(

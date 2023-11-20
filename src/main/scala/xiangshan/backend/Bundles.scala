@@ -163,8 +163,6 @@ object Bundles {
     val commitType      = CommitType()
     // rename
     val srcState        = Vec(numSrc, SrcState())
-    val dataSource      = Vec(numSrc, DataSource())
-    val l1ExuOH         = Vec(numSrc, ExuOH())
     val psrc            = Vec(numSrc, UInt(PhyRegIdxWidth.W))
     val pdest           = UInt(PhyRegIdxWidth.W)
     val robIdx          = new RobPtr
@@ -474,7 +472,7 @@ object Bundles {
     val sqIdx = if (params.hasMemAddrFu || params.hasStdFu) Some(new SqPtr) else None
     val lqIdx = if (params.hasMemAddrFu) Some(new LqPtr) else None
     val dataSources = Vec(params.numRegSrc, DataSource())
-    val l1ExuOH = Vec(params.numRegSrc, ExuOH())
+    val l1ExuOH = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, ExuOH()))
     val srcTimer = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, UInt(3.W)))
     val loadDependency = OptionWrapper(params.isIQWakeUpSink, Vec(LoadPipelineWidth, UInt(3.W)))
     val deqLdExuIdx = OptionWrapper(params.hasLoadFu || params.hasHyldaFu, UInt(log2Ceil(LoadPipelineWidth).W))
@@ -486,10 +484,10 @@ object Bundles {
     def needCancel(og0CancelOH: UInt, og1CancelOH: UInt) : Bool = {
       if (params.isIQWakeUpSink) {
         require(
-          og0CancelOH.getWidth == l1ExuOH.head.getWidth,
+          og0CancelOH.getWidth == l1ExuOH.get.head.getWidth,
           s"cancelVecSize: {og0: ${og0CancelOH.getWidth}, og1: ${og1CancelOH.getWidth}}"
         )
-        val l1Cancel: Bool = l1ExuOH.zip(srcTimer.get).map {
+        val l1Cancel: Bool = l1ExuOH.get.zip(srcTimer.get).map {
           case(exuOH: UInt, srcTimer: UInt) =>
             (exuOH & og0CancelOH).orR && srcTimer === 1.U
         }.reduce(_ | _)
@@ -515,7 +513,7 @@ object Bundles {
       this.isFirstIssue  := source.common.isFirstIssue // Only used by mem debug log
       this.iqIdx         := source.common.iqIdx        // Only used by mem feedback
       this.dataSources   := source.common.dataSources
-      this.l1ExuOH       := source.common.l1ExuOH
+      this.l1ExuOH       .foreach(_ := source.common.l1ExuOH.get)
       this.rfWen         .foreach(_ := source.common.rfWen.get)
       this.fpWen         .foreach(_ := source.common.fpWen.get)
       this.vecWen        .foreach(_ := source.common.vecWen.get)
