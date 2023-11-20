@@ -334,8 +334,6 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
       // instead of dispatch2Iq.io.out(x).bits.src*(1)
       stdIQEnq.bits.srcState(0) := staIQEnq.bits.srcState(1)
       stdIQEnq.bits.srcType(0) := staIQEnq.bits.srcType(1)
-      stdIQEnq.bits.dataSource(0) := staIQEnq.bits.dataSource(1)
-      stdIQEnq.bits.l1ExuOH(0) := staIQEnq.bits.l1ExuOH(1)
       stdIQEnq.bits.psrc(0) := staIQEnq.bits.psrc(1)
       stdIQEnq.bits.sqIdx := staIQEnq.bits.sqIdx
     }
