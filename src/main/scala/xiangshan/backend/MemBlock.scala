@@ -19,10 +19,11 @@ package xiangshan.backend
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
-import freechips.rocketchip.tilelink.{TLBuffer, TLIdentityNode}
+import freechips.rocketchip.tilelink._
 import coupledL2.PrefetchRecv
 import utils._
 import utility._
@@ -35,6 +36,7 @@ import xiangshan.cache.mmu._
 import xiangshan.mem._
 import xiangshan.mem.mdp._
 import xiangshan.mem.prefetch.{BasePrefecher, SMSParams, SMSPrefetcher, L1Prefetcher}
+import xiangshan.frontend.HasInstrMMIOConst
 
 class Std(implicit p: Parameters) extends FunctionUnit {
   io.in.ready := true.B
@@ -104,21 +106,32 @@ class fetch_to_mem(implicit p: Parameters) extends XSBundle{
   val itlb = Flipped(new TlbPtwIO())
 }
 
+// triple buffer applied in i-mmio path (two at MemBlock, one at L2Top)
+class InstrUncacheBuffer()(implicit p: Parameters) extends LazyModule with HasInstrMMIOConst{
+  val node = new TLBufferNode(BufferParams.default, BufferParams.default, BufferParams.default, BufferParams.default, BufferParams.default)
+  lazy val module = new InstrUncacheBufferImpl
+
+  class InstrUncacheBufferImpl extends LazyModuleImp(this) {
+    (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
+      out.a <> BufferParams.default(BufferParams.default(in.a))
+      in.d <> BufferParams.default(BufferParams.default(out.d))
+
+      // only a.valid, a.ready, a.address can change
+      // hoping that the rest would be optimized to keep MemBlock port unchanged after adding buffer
+      out.a.bits.data := 0.U
+      out.a.bits.mask := Fill(mmioBusBytes, 1.U(1.W))
+      out.a.bits.opcode := 4.U // Get
+      out.a.bits.size := log2Ceil(mmioBusBytes).U
+      out.a.bits.source := 0.U
+    }
+  }
+}
+
 // Frontend bus goes through MemBlock
 class FrontendBridge()(implicit p: Parameters) extends LazyModule {
-  val icache_node = TLIdentityNode()
-  val instr_uncache_node = TLIdentityNode()
+  val icache_node = LazyModule(new TLBuffer()).suggestName("icache").node// to keep IO port name
+  val instr_uncache_node = LazyModule(new InstrUncacheBuffer()).suggestName("instr_uncache").node
   lazy val module = new LazyModuleImp(this) {
-    icache_node.in.zip(icache_node.out).foreach{ x =>
-      x._2._1 <> x._1._1
-      dontTouch(x._1._1)
-      dontTouch(x._2._1)
-    }
-    instr_uncache_node.in.zip(instr_uncache_node.out).foreach{ x =>
-      x._2._1 <> x._1._1
-      dontTouch(x._1._1)
-      dontTouch(x._2._1)
-    }
   }
 }
 
@@ -130,6 +143,8 @@ class MemBlock()(implicit p: Parameters) extends LazyModule
   val uncache = LazyModule(new Uncache())
   val ptw = LazyModule(new L2TLBWrapper())
   val ptw_to_l2_buffer = if (!coreParams.softPTW) LazyModule(new TLBuffer) else null
+  val l1d_to_l2_buffer = if (coreParams.dcacheParametersOpt.nonEmpty) LazyModule(new TLBuffer) else null
+  val dcache_port = TLNameNode("dcache_client") // to keep dcache-L2 port name
   val l2_pf_sender_opt = coreParams.prefetcher.map(_ =>
     BundleBridgeSource(() => new PrefetchRecv)
   )
@@ -655,7 +670,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.ld_fast_fuOpType := io.ooo_to_mem.loadFastFuOpType(i)
     loadUnits(i).io.replay <> lsq.io.replay(i)
 
-    loadUnits(i).io.l2_hint <> io.l2_hint
+    val l2_hint = RegNext(io.l2_hint)
+    loadUnits(i).io.l2_hint <> l2_hint
     loadUnits(i).io.tlb_hint.id := dtlbRepeater.io.hint.get.req(i).id
     loadUnits(i).io.tlb_hint.full := dtlbRepeater.io.hint.get.req(i).full ||
       RegNext(tlbreplay(i)) || RegNext(dtlb_ld(0).tlbreplay(i))
@@ -666,8 +682,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     lsq.io.ld_raw_data(i) <> loadUnits(i).io.lsq.ld_raw_data
     lsq.io.trigger(i) <> loadUnits(i).io.lsq.trigger
 
-    lsq.io.l2_hint.valid := io.l2_hint.valid
-    lsq.io.l2_hint.bits.sourceId := io.l2_hint.bits.sourceId
+    lsq.io.l2_hint.valid := l2_hint.valid
+    lsq.io.l2_hint.bits.sourceId := l2_hint.bits.sourceId
 
     lsq.io.tlb_hint <> dtlbRepeater.io.hint.get
 
@@ -998,7 +1014,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.inner_hartId := io.hartId
   io.inner_reset_vector := io.outer_reset_vector
   io.outer_cpu_halt := io.inner_cpu_halt
-  io.outer_beu_errors_icache := io.inner_beu_errors_icache
+  io.outer_beu_errors_icache := RegNext(io.inner_beu_errors_icache)
   io.outer_l2_pf_enable := io.inner_l2_pf_enable
   // io.inner_hc_perfEvents <> io.outer_hc_perfEvents
 

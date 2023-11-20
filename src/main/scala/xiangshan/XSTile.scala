@@ -50,15 +50,15 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   core.memBlock.debug_int_sink := debug_int_node
 
   // =========== Components' Connection ============
-  // L1 to l1_xbar (same as before)
+  // L1 to l1_xbar
   coreParams.dcacheParametersOpt.map { _ =>
-    l2top.misc_l2_pmu := l2top.l1d_logger := l2top.l1d_l2_bufferOpt.get.node :=
-      l2top.l1d_l2_pmu := core.memBlock.dcache.clientNode
+    l2top.misc_l2_pmu := l2top.l1d_logger := core.memBlock.dcache_port :=
+      core.memBlock.l1d_to_l2_buffer.node := core.memBlock.dcache.clientNode
   }
 
-  l2top.misc_l2_pmu := l2top.l1i_logger := core.memBlock.frontendBridge.icache_node
+  l2top.misc_l2_pmu := l2top.l1i_logger := l2top.l1i_to_l2_buffer.node := core.memBlock.frontendBridge.icache_node
   if (!coreParams.softPTW) {
-    l2top.misc_l2_pmu := l2top.ptw_logger := core.memBlock.ptw_to_l2_buffer.node
+    l2top.misc_l2_pmu := l2top.ptw_logger := l2top.ptw_to_l2_buffer.node := core.memBlock.ptw_to_l2_buffer.node
   }
   l2top.l1_xbar :=* l2top.misc_l2_pmu
 
@@ -66,7 +66,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   // l1_xbar to l2
   l2cache match {
     case Some(l2) =>
-      l2.node :*= l2top.l1_xbar
+      l2.node :*= l2top.xbar_l2_buffer :*= l2top.l1_xbar
       l2.pf_recv_node.map(recv => {
         println("Connecting L1 prefetcher to L2!")
         recv := core.memBlock.l2_pf_sender_opt.get
@@ -84,7 +84,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   }
 
   // mmio
-  l2top.i_mmio_port := core.memBlock.frontendBridge.instr_uncache_node
+  l2top.i_mmio_port := l2top.i_mmio_buffer.node := core.memBlock.frontendBridge.instr_uncache_node
   l2top.d_mmio_port := core.memBlock.uncache.clientNode
 
   // =========== IO Connection ============

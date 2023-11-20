@@ -72,15 +72,17 @@ class L2Top()(implicit p: Parameters) extends LazyModule
   val i_mmio_port = TLTempNode()
   val d_mmio_port = TLTempNode()
 
-  val l1d_l2_bufferOpt = coreParams.dcacheParametersOpt.map(_ => LazyModule(new TLBuffer))
-  val l1d_l2_pmu = BusPerfMonitor(name = "L1d_L2", enable = !debugOpts.FPGAPlatform, stat_latency = true)
   val misc_l2_pmu = BusPerfMonitor(name = "Misc_L2", enable = !debugOpts.FPGAPlatform) // l1D & l1I & PTW
   val l2_l3_pmu = BusPerfMonitor(name = "L2_L3", enable = !debugOpts.FPGAPlatform, stat_latency = true)
+  val xbar_l2_buffer = TLBuffer()
 
   val enbale_tllog = !debugOpts.FPGAPlatform && debugOpts.AlwaysBasicDB
   val l1d_logger = TLLogger(s"L2_L1D_${coreParams.HartId}", enbale_tllog)
   val l1i_logger = TLLogger(s"L2_L1I_${coreParams.HartId}", enbale_tllog)
   val ptw_logger = TLLogger(s"L2_PTW_${coreParams.HartId}", enbale_tllog)
+  val l1i_to_l2_buffer = LazyModule(new TLBuffer)
+  val ptw_to_l2_buffer = LazyModule(new TLBuffer)
+  val i_mmio_buffer = LazyModule(new TLBuffer)
 
   val clint_int_node = IntIdentityNode()
   val debug_int_node = IntIdentityNode()
