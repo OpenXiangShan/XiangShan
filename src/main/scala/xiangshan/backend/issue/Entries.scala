@@ -182,6 +182,10 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     enqEntry.io.og0Cancel := io.og0Cancel
     enqEntry.io.og1Cancel := io.og1Cancel
     enqEntry.io.ldCancel := io.ldCancel
+    enqEntry.io.enqDelayWakeUpFromWB := RegNext(io.wakeUpFromWB)
+    enqEntry.io.enqDelayWakeUpFromIQ := RegNext(io.wakeUpFromIQ)
+    enqEntry.io.enqDelayOg0Cancel := RegNext(io.og0Cancel)
+    enqEntry.io.enqDelayLdCancel := RegNext(io.ldCancel)
     enqEntry.io.deqSel := deqSelVec(entryIdx)
     enqEntry.io.deqPortIdxWrite := deqPortIdxWriteVec(entryIdx)
     enqEntry.io.transSel := transSelVec(entryIdx).asUInt.orR
