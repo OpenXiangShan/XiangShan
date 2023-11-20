@@ -27,19 +27,9 @@ import xiangshan.backend.datapath.WbConfig.{IntWB, VfWB, PregWB}
 import xiangshan.backend.issue.SchdBlockParams
 import xiangshan.backend.datapath.{DataSource}
 
-object RegStatus {
-  val busy = "b11".U
-  val bypass = "b10".U
-  val regFile = "b00".U
-
-  def apply() = UInt(2.W)
-}
-
 class BusyTableReadIO(implicit p: Parameters) extends XSBundle {
   val req = Input(UInt(PhyRegIdxWidth.W))
   val resp = Output(Bool())
-  val dataSource = Output(DataSource())
-  val l1ExuOH = Output(ExuVec())
 }
 
 class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB: PregWB)(implicit p: Parameters, params: SchdBlockParams) extends XSModule with HasPerfEvents {
@@ -57,8 +47,8 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
   })
 
   val wakeUpReg = Reg(params.genIQWakeUpInValidBundle)
-  val table = RegInit(VecInit(Seq.fill(numPhyPregs)(0.U(2.W))))
-  val tableUpdate = Wire(Vec(numPhyPregs, RegStatus()))
+  val table = RegInit(0.U(numPhyPregs.W))
+  val tableUpdate = Wire(Vec(numPhyPregs, Bool()))
   val wakeUpFilterLS = io.wakeUp.filter(x => (x.bits.exuIdx != backendParams.getExuIdx("LDU0")) && (x.bits.exuIdx != backendParams.getExuIdx("LDU1")) ) //TODO
 
   def reqVecToMask(rVec: Vec[Valid[UInt]]): UInt = {
@@ -78,50 +68,35 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
 
   /*
   we can ensure that the following conditions are mutually exclusive
-  wakeUp and cancel (same pdest) would not arrive at the same cycle
+  wakeUp and cancel (same pdest) may arrive at the same cycle
   for a pdest:
-    rename alloc => wakeUp => cancel => ... => wakeUp => cancel => wakeUp
+    rename alloc => wakeUp / cancel => ... => wakeUp / cancel => wakeUp
   or
     rename alloc => wbMask  //TODO we still need wbMask because wakeUp signal is partial now
   the bypass state lasts for a maximum of one cycle, cancel(=> busy) or else(=> regFile)
    */
   tableUpdate.zipWithIndex.foreach{ case (update, idx) =>
-    when(allocMask(idx)) {
-      update := RegStatus.busy
-    }.elsewhen(cancelMask(idx)) {
-      update := RegStatus.busy
-    }.elsewhen(wakeUpMask(idx)) {
-      update := RegStatus.bypass
-    }.elsewhen((table(idx) === RegStatus.bypass) || wbMask(idx)) {
-      update := RegStatus.regFile
+    when(allocMask(idx) || cancelMask(idx)) {
+      update := true.B
+    }.elsewhen(wakeUpMask(idx) || wbMask(idx)) {
+      update := false.B
     }.otherwise {
       update := table(idx)
     }
   }
 
   io.read.foreach{ case res =>
-    res.resp := !table(res.req).andR
-    res.dataSource.value := DataSource.reg
-    val wakeUpExuOHVec = wakeUpReg.map{ case x =>
-      val v: Bool = pregWB match {
-        case _: IntWB => x.valid && x.bits.rfWen
-        case _: VfWB => x.valid && (x.bits.fpWen || x.bits.vecWen)
-      }
-      val pdestHit = res.req === x.bits.pdest
-      val isBypass = table(res.req) === DataSource.bypass
-      Mux(v && pdestHit && isBypass, MathUtils.IntToOH(x.bits.exuIdx).U(backendParams.numExu.W), 0.U)
-    }
-    res.l1ExuOH := Mux(table(res.req) === DataSource.bypass, ParallelOR(wakeUpExuOHVec.toSeq), 0.U).asBools
+    res.resp := !table(res.req)
   }
 
-  table := tableUpdate
+  table := tableUpdate.asUInt
   wakeUpReg := io.wakeUp
 
-  val oddTable = table.zipWithIndex.filter(_._2 % 2 == 1).map(!_._1.orR)
-  val evenTable = table.zipWithIndex.filter(_._2 % 2 == 0).map(!_._1.orR)
+  val oddTable = table.asBools.zipWithIndex.filter(_._2 % 2 == 1).map(_._1)
+  val evenTable = table.asBools.zipWithIndex.filter(_._2 % 2 == 0).map(_._1)
   val busyCount = RegNext(RegNext(PopCount(oddTable)) + RegNext(PopCount(evenTable)))
 
-  XSPerfAccumulate("busy_count", PopCount(table.map(_.andR)))
+  XSPerfAccumulate("busy_count", PopCount(table))
 
   val perfEvents = Seq(
     ("std_freelist_1_4_valid", busyCount < (numPhyPregs / 4).U                                      ),
