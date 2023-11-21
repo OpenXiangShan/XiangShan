@@ -120,7 +120,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val itlb_ptw = Wire(new VectorTlbPtwIO(coreParams.itlbPortNum))
   itlb_ptw.connect(itlb.io.ptw)
   val itlbRepeater1 = PTWFilter(itlbParams.fenceDelay, itlb_ptw, sfence, tlbCsr, l2tlbParams.ifilterSize)
-  io.ptw <> itlbRepeater1.io.ptw
+  val itlbRepeater2 = PTWRepeaterNB(passReady = false, itlbParams.fenceDelay, itlbRepeater1.io.ptw, io.ptw, sfence, tlbCsr)
 
   icache.io.prefetch <> ftq.io.toPrefetch
 

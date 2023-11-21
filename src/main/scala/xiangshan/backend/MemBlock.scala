@@ -510,7 +510,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
 
   val dtlbRepeater  = PTWNewFilter(ldtlbParams.fenceDelay, ptwio, ptw.io.tlb(1), sfence, tlbcsr, l2tlbParams.dfilterSize)
-  val itlbRepeater2 = PTWRepeaterNB(passReady = false, itlbParams.fenceDelay, io.fetch_to_mem.itlb, ptw.io.tlb(0), sfence, tlbcsr)
+  val itlbRepeater3 = PTWRepeaterNB(passReady = false, itlbParams.fenceDelay, io.fetch_to_mem.itlb, ptw.io.tlb(0), sfence, tlbcsr)
 
   lsq.io.debugTopDown.robHeadMissInDTlb := dtlbRepeater.io.rob_head_miss_in_tlb
 
@@ -1023,7 +1023,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       Seq(
         ResetGenNode(Seq(ResetGenNode(Seq(CellNode(reset_io_frontend))))),
         CellNode(reset_io_backend),
-        ModuleNode(itlbRepeater2),
+        ModuleNode(itlbRepeater3),
         ModuleNode(dtlbRepeater),
         ModuleNode(ptw),
         ModuleNode(ptw_to_l2_buffer)
