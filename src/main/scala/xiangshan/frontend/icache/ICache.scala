@@ -90,7 +90,7 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
 
   def PortNumber = 2
 
-  def partWayNum = 2
+  def partWayNum = 4
   def pWay = nWays/partWayNum
 
   def enableICachePrefetch      = cacheParams.enableICachePrefetch
@@ -711,30 +711,45 @@ class ICachePartWayArray[T <: Data](gen: T, pWay: Int)(implicit p: Parameters) e
     val write     = Flipped(ValidIO(new ICacheWriteBundle(gen, pWay)))
   }}
 
-  io.read.req.map(_.ready := !io.write.valid)
+  // Further split the cacheline if necessary
+  val splitNum = 2
+  val wordWidth = gen.getWidth
+  assert(wordWidth % splitNum == 0)
+  val splitedWidth = gen.getWidth / splitNum
 
   val srams = (0 until PortNumber) map { bank =>
-    val sramBank = Module(new SRAMTemplate(
-      gen,
-      set=nSets/2,
-      way=pWay,
-      shouldReset = true,
-      holdRead = true,
-      singlePort = true
-    ))
-
-    sramBank.io.r.req.valid := io.read.req(bank).valid
-    sramBank.io.r.req.bits.apply(setIdx= io.read.req(bank).bits.ridx)
-
-    if(bank == 0) sramBank.io.w.req.valid := io.write.valid && !io.write.bits.wbankidx
-    else sramBank.io.w.req.valid := io.write.valid && io.write.bits.wbankidx
-    sramBank.io.w.req.bits.apply(data=io.write.bits.wdata, setIdx=io.write.bits.widx, waymask=io.write.bits.wmask.asUInt)
-
-    sramBank
+    // Split a cacheline in half for physical synthesis
+    val sramsBanks = (0 until splitNum) map { i =>
+      val sramBank = Module(new SRAMTemplate(
+        UInt(splitedWidth.W),
+        set=nSets/2,
+        way=pWay,
+        shouldReset = true,
+        holdRead = true,
+        singlePort = true
+      ))
+      sramBank.io.r.req.valid := io.read.req(bank).valid
+      sramBank.io.r.req.bits.apply(setIdx= io.read.req(bank).bits.ridx)
+      if(bank == 0)
+        sramBank.io.w.req.valid := io.write.valid && !io.write.bits.wbankidx && io.write.bits.wmask.asUInt.orR
+      else
+        sramBank.io.w.req.valid := io.write.valid && io.write.bits.wbankidx && io.write.bits.wmask.asUInt.orR
+      sramBank.io.w.req.bits.apply(data=io.write.bits.wdata.asTypeOf(UInt(wordWidth.W))(splitedWidth*(i+1)-1, splitedWidth*i),
+                                   setIdx=io.write.bits.widx,
+                                   waymask=io.write.bits.wmask.asUInt)
+      sramBank
+    }
+    sramsBanks
   }
 
-  io.read.req.map(_.ready := !io.write.valid && srams.map(_.io.r.req.ready).reduce(_&&_))
+  val srams_ready = srams.map(sramsBanks => sramsBanks.map(_.io.r.req.ready).reduce(_&&_)).reduce(_&&_)
+  io.read.req.map(_.ready := !io.write.valid && srams_ready)
 
-  io.read.resp.rdata := VecInit(srams.map(bank => bank.io.r.resp.asTypeOf(Vec(pWay,gen))))
-
+  io.read.resp.rdata := VecInit(srams.map { sramsBanks =>
+    val composeData = sramsBanks.map(_.io.r.resp.asTypeOf(Vec(pWay, UInt(splitedWidth.W))))
+    val data = (0 until pWay).map{i =>
+      (0 until splitNum).map(composeData(_)(i)).reverse.reduce(Cat(_,_))
+    }
+    VecInit(data)
+  })
 }
