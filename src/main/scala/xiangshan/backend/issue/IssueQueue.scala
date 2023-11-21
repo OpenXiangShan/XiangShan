@@ -579,9 +579,6 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     deq.bits.common.perfDebugInfo.issueTime := GTimer() + 1.U
   }
 
-  private val ldCancels = deqBeforeDly.map(in =>
-    LoadShouldCancel(in.bits.common.loadDependency, io.ldCancel)
-  )
   private val deqShift = WireDefault(deqBeforeDly)
   deqShift.zip(deqBeforeDly).foreach {
     case (shifted, original) =>
@@ -590,10 +587,10 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         _ := original.bits.common.loadDependency.get.map(_ << 1)
       )
   }
-  io.deqDelay.zip(deqShift).zip(ldCancels).foreach { case ((deqDly, deq), ldCancel) =>
+  io.deqDelay.zip(deqShift).foreach { case (deqDly, deq) =>
     NewPipelineConnect(
       deq, deqDly, deqDly.valid,
-      deq.bits.common.robIdx.needFlush(io.flush) || ldCancel,
+      false.B,
       Option("Scheduler2DataPathPipe")
     )
   }

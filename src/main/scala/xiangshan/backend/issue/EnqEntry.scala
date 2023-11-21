@@ -279,7 +279,7 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
   //output
   io.transEntry.valid := validReg && io.transSel && !flushed && !deqSuccess
   io.transEntry.bits := entryUpdate
-  io.canIssue := canIssue || canIssueBypass
+  io.canIssue := (canIssue || canIssueBypass) && !flushed
   io.clear := clear
   io.fuType := entryReg.status.fuType
   io.srcWakeUpL1ExuOH.foreach(_ := Mux(canIssueBypass && !canIssue, srcWakeUpL1ExuOHOut.get, entryReg.status.srcWakeUpL1ExuOH.get))

@@ -274,7 +274,7 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
   }
 
   //output
-  io.canIssue := canIssue || canIssueBypass
+  io.canIssue := (canIssue || canIssueBypass) && !flushed
   io.clear := clear
   io.fuType := entryReg.status.fuType
   io.srcWakeUpL1ExuOH.foreach(_ := Mux(canIssueBypass && !canIssue, srcWakeUpL1ExuOHOut.get, entryReg.status.srcWakeUpL1ExuOH.get))
