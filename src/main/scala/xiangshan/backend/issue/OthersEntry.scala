@@ -119,11 +119,7 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
 
   if (params.hasIQWakeUp) {
     srcCancelVec.get.zip(srcLoadCancelVec.get).zip(srcWakeUpByIQVec).zipWithIndex.foreach { case (((srcCancel, srcLoadCancel), wakeUpByIQVec), srcIdx) =>
-      val ldTransCancel = Mux(
-        wakeUpByIQVec.asUInt.orR,
-        Mux1H(wakeUpByIQVec, wakeupLoadDependencyByIQVec.map(dep => LoadShouldCancel(Some(dep), io.ldCancel))),
-        false.B
-      )
+      val ldTransCancel = Mux1H(wakeUpByIQVec, wakeupLoadDependencyByIQVec.map(dep => LoadShouldCancel(Some(dep), io.ldCancel)))
       srcLoadCancel := LoadShouldCancel(entryReg.status.srcLoadDependency.map(_(srcIdx)), io.ldCancel)
       srcCancel := srcLoadCancel || ldTransCancel
     }
@@ -189,7 +185,7 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
         case (((loadDependencyNext, loadDependency), wakeUpByIQVec), wakeup) =>
           loadDependencyNext :=
             Mux(wakeup,
-              Mux(wakeUpByIQVec.asUInt.orR, Mux1H(wakeUpByIQVec, shiftedWakeupLoadDependencyByIQVec), 0.U.asTypeOf(loadDependency)),
+              Mux1H(wakeUpByIQVec, shiftedWakeupLoadDependencyByIQVec),
               Mux(validReg && loadDependency.asUInt.orR, VecInit(loadDependency.map(i => i(i.getWidth - 2, 0) << 1)), loadDependency)
             )
       }
@@ -202,12 +198,14 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
     }.elsewhen(entryReg.status.issued){
       entryRegNext.status.issueTimer := entryReg.status.issueTimer + 1.U
       entryRegNext.status.deqPortIdx := entryReg.status.deqPortIdx
+    }.otherwise {
+      entryRegNext.status.issueTimer := "b10".U
+      entryRegNext.status.deqPortIdx := 0.U
     }
     entryRegNext.status.psrc := entryReg.status.psrc
     entryRegNext.status.srcType := entryReg.status.srcType
     entryRegNext.status.fuType := entryReg.status.fuType
     entryRegNext.status.robIdx := entryReg.status.robIdx
-    entryRegNext.status.issued := entryReg.status.issued // otherwise
     when(srcLoadCancelVec.map(_.reduce(_ || _)).getOrElse(false.B) || srcWakeUpButCancel.map(_.fold(false.B)(_ || _)).fold(false.B)(_ || _)) {
       entryRegNext.status.issued := false.B
     }.elsewhen(io.deqSel) {
@@ -216,6 +214,8 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
       entryRegNext.status.issued := false.B
     }.elsewhen(!entryReg.status.srcReady) {
       entryRegNext.status.issued := false.B
+    }.otherwise {
+      entryRegNext.status.issued := entryReg.status.issued
     }
     entryRegNext.status.firstIssue := io.deqSel || entryReg.status.firstIssue
     entryRegNext.status.blocked := false.B //todo
@@ -226,26 +226,8 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
       entryRegNext.status.pc.get := entryReg.status.pc.get
     }
   }
-  if(params.hasIQWakeUp) {
-    srcWakeUpL1ExuOHOut.get.zip(srcWakeUpByIQWithoutCancel).zip(srcWakeUp).zipWithIndex.foreach {
-      case (((exuOH: Vec[Bool], wakeUpByIQOH: Vec[Bool]), wakeUp: Bool), srcIdx) =>
-        when(wakeUpByIQOH.asUInt.orR) {
-          exuOH := Mux1H(wakeUpByIQOH, io.wakeUpFromIQ.map(x => MathUtils.IntToOH(x.bits.exuIdx).U(backendParams.numExu.W)).toSeq).asBools
-        }.elsewhen(wakeUp) {
-          exuOH := 0.U.asTypeOf(exuOH)
-        }.otherwise {
-          exuOH := entryReg.status.srcWakeUpL1ExuOH.get(srcIdx)
-        }
-    }
-    srcLoadDependencyOut.get.zip(entryReg.status.srcLoadDependency.get).zip(srcWakeUpByIQVec).zip(srcWakeUp).foreach {
-      case (((loadDependencyOut, loadDependency), wakeUpByIQVec), wakeup) =>
-        loadDependencyOut :=
-          Mux(wakeup,
-            Mux(wakeUpByIQVec.asUInt.orR, Mux1H(wakeUpByIQVec, shiftedWakeupLoadDependencyByIQBypassVec), 0.U.asTypeOf(loadDependency)),
-            loadDependency
-          )
-    }
-  }
+
+  //output
   val canIssue = entryReg.status.canIssue && validReg && !srcCancelVec.getOrElse(false.B).asUInt.orR
   val canIssueBypass = validReg && !entryReg.status.issued && !entryReg.status.blocked &&
     VecInit(entryReg.status.srcState.zip(srcWakeUpByIQWithoutCancel).zipWithIndex.map { case ((state, wakeupVec), srcIdx) =>
@@ -263,6 +245,24 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
       }
   }
   if (params.hasIQWakeUp) {
+    srcWakeUpL1ExuOHOut.get.zip(srcWakeUpByIQWithoutCancel).zip(srcWakeUp).zipWithIndex.foreach {
+      case (((exuOH: Vec[Bool], wakeUpByIQOH: Vec[Bool]), wakeUp: Bool), srcIdx) =>
+        when(wakeUpByIQOH.asUInt.orR) {
+          exuOH := Mux1H(wakeUpByIQOH, io.wakeUpFromIQ.map(x => MathUtils.IntToOH(x.bits.exuIdx).U(backendParams.numExu.W)).toSeq).asBools
+        }.elsewhen(wakeUp) {
+          exuOH := 0.U.asTypeOf(exuOH)
+        }.otherwise {
+          exuOH := entryReg.status.srcWakeUpL1ExuOH.get(srcIdx)
+        }
+    }
+    srcLoadDependencyOut.get.zip(entryReg.status.srcLoadDependency.get).zip(srcWakeUpByIQVec).zip(srcWakeUp).foreach {
+      case (((loadDependencyOut, loadDependency), wakeUpByIQVec), wakeup) =>
+        loadDependencyOut :=
+          Mux(wakeup,
+            Mux1H(wakeUpByIQVec, shiftedWakeupLoadDependencyByIQBypassVec),
+            loadDependency
+          )
+    }
     io.srcTimer.get.zip(entryReg.status.srcTimer.get).zip(srcWakeUpByIQWithoutCancel).zip(srcWakeUp).foreach {
       case (((srcTimerOut, srcTimer), wakeUpByIQOH: Vec[Bool]), wakeUpAll) =>
         when(wakeUpByIQOH.asUInt.orR) {
@@ -271,13 +271,11 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
           srcTimerOut := srcTimer
         }
     }
+    io.srcWakeUpL1ExuOH.get := Mux(canIssueBypass && !canIssue, srcWakeUpL1ExuOHOut.get, entryReg.status.srcWakeUpL1ExuOH.get)
   }
-
-  //output
   io.canIssue := (canIssue || canIssueBypass) && !flushed
   io.clear := clear
   io.fuType := entryReg.status.fuType
-  io.srcWakeUpL1ExuOH.foreach(_ := Mux(canIssueBypass && !canIssue, srcWakeUpL1ExuOHOut.get, entryReg.status.srcWakeUpL1ExuOH.get))
   io.valid := validReg
   io.isFirstIssue := !entryReg.status.firstIssue
   io.entry.valid := validReg
