@@ -721,7 +721,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   s1_kill := s1_late_kill ||
              s1_cancel_ptr_chasing ||
              s1_in.uop.robIdx.needFlush(io.redirect) ||
-             RegEnable(s0_kill, false.B, io.lsin.valid || io.ldu_io.replay.valid || io.ldu_io.l2l_fwd_in.valid || io.ldu_io.fast_rep_in.valid)
+             RegEnable(s0_kill, false.B, io.lsin.valid || io.ldu_io.replay.valid || io.ldu_io.l2l_fwd_in.valid || io.ldu_io.fast_rep_in.valid || io.vec_stu_io.in.valid)
 
   if (EnableLoadToLoadForward) {
     // Sometimes, we need to cancel the load-load forwarding.
