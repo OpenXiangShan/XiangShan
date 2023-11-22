@@ -589,6 +589,7 @@ object ImmUnion {
   val VSETIVLI = Imm_VSETIVLI()
   val LUI32 = Imm_LUI32()
 
+  // do not add special type lui32 to this, keep ImmUnion max len being 20.
   val imms = Seq(I, S, B, U, J, Z, B6, OPIVIS, OPIVIU, VSETVLI, VSETIVLI)
   val maxLen = imms.maxBy(_.len).len
   val immSelMap = Seq(

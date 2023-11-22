@@ -11,7 +11,7 @@ import scala.collection.MapView
 
 class ImmExtractorIO(dataBits: Int) extends Bundle {
   val in = Input(new Bundle {
-    val imm = UInt(64.W)
+    val imm = UInt(32.W)
     val immType = SelImm()
   })
   val out = Output(new Bundle {

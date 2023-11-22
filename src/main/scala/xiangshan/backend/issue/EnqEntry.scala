@@ -326,7 +326,7 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
   entryUpdate.status.firstIssue := io.deqSel || entryReg.status.firstIssue
   entryUpdate.status.blocked := false.B //todo
   //remain imm and payload
-  entryUpdate.imm := entryReg.imm
+  entryUpdate.imm.foreach(_ := entryReg.imm.get)
   entryUpdate.payload := entryReg.payload
   if(params.needPc) {
     entryUpdate.status.pc.get := entryReg.status.pc.get

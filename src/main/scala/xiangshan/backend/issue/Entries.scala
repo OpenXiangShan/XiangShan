@@ -74,7 +74,7 @@ class EntryDeqRespBundle(implicit p:Parameters, params: IssueBlockParams) extend
 
 class EntryBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
   val status = new Status()
-  val imm = UInt(XLEN.W)
+  val imm = OptionWrapper(params.needImm, UInt((params.deqImmTypesMaxLen).W))
   val payload = new DynInst()
 }
 

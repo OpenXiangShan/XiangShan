@@ -11,6 +11,7 @@ import xiangshan.backend.datapath.WbConfig.PregWB
 import xiangshan.backend.datapath.{WakeUpConfig, WakeUpSource}
 import xiangshan.backend.exu.{ExeUnit, ExeUnitParams}
 import xiangshan.backend.fu.{FuConfig, FuType}
+import xiangshan.SelImm
 
 case class IssueBlockParams(
   // top down
@@ -224,6 +225,13 @@ case class IssueBlockParams(
   def deqFuSame: Boolean = (numDeq == 2) && deqFuInterSect.length == deqFuCfgs(0).length && deqFuCfgs(0).length == deqFuCfgs(1).length
 
   def deqFuDiff: Boolean = (numDeq == 2) && deqFuInterSect.length == 0
+
+  def deqImmTypes: Seq[UInt] = getFuCfgs.flatMap(_.immType).distinct
+
+  // set load imm to 32-bit for fused_lui_load
+  def deqImmTypesMaxLen: Int = if (isLdAddrIQ) 32 else deqImmTypes.map(SelImm.getImmUnion(_)).maxBy(_.len).len
+
+  def needImm: Boolean = deqImmTypes.nonEmpty
 
   // cfgs(exuIdx)(set of exu's wb)
 
