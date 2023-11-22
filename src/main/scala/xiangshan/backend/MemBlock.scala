@@ -537,21 +537,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   io.mem_to_ooo.lsTopdownInfo := loadUnits.map(_.io.lsTopdownInfo)
 
-  val tdata = RegInit(VecInit(Seq.fill(6)(0.U.asTypeOf(new MatchTriggerIO))))
-  val tEnable = RegInit(VecInit(Seq.fill(6)(false.B)))
-  val en = csrCtrl.trigger_enable
-  tEnable := VecInit(en(2), en (3), en(4), en(5), en(7), en(9))
-  when(csrCtrl.mem_trigger.t.valid) {
-    tdata(csrCtrl.mem_trigger.t.bits.addr) := csrCtrl.mem_trigger.t.bits.tdata
-  }
-  val lTriggerMapping = Map(0 -> 2, 1 -> 3, 2 -> 5)
-  val sTriggerMapping = Map(0 -> 0, 1 -> 1, 2 -> 4)
-  val lChainMapping = Map(0 -> 2)
-  val sChainMapping = Map(0 -> 1)
-  XSDebug(tEnable.asUInt.orR, "Debug Mode: At least one store trigger is enabled\n")
-  for(j <- 0 until 3)
-    PrintTriggerInfo(tEnable(j), tdata(j))
-
   // LoadUnit
   val correctMissTrain = WireInit(Constantin.createRecord("CorrectMissTrain" + p(XSCoreParamsKey).HartId.toString, initValue = 0.U)) === 1.U
 
@@ -642,7 +627,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     lsq.io.ldu.ldin(i) <> loadUnits(i).io.lsq.ldin
     lsq.io.ldout(i) <> loadUnits(i).io.lsq.uncache
     lsq.io.ld_raw_data(i) <> loadUnits(i).io.lsq.ld_raw_data
-    lsq.io.trigger(i) <> loadUnits(i).io.lsq.trigger
 
     lsq.io.l2_hint.valid := l2_hint.valid
     lsq.io.l2_hint.bits.sourceId := l2_hint.bits.sourceId
@@ -651,35 +635,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     // alter writeback exception info
     io.s3_delayed_load_error(i) := loadUnits(i).io.s3_dly_ld_err
-
-    // update mem dependency predictor
-    // io.memPredUpdate(i) := DontCare
-
-    // --------------------------------
-    // Load Triggers
-    // --------------------------------
-    val hit = Wire(Vec(3, Bool()))
-    for (j <- 0 until 3) {
-      loadUnits(i).io.trigger(j).tdata2 := tdata(lTriggerMapping(j)).tdata2
-      loadUnits(i).io.trigger(j).matchType := tdata(lTriggerMapping(j)).matchType
-      loadUnits(i).io.trigger(j).tEnable := tEnable(lTriggerMapping(j))
-      // Just let load triggers that match data unavailable
-      hit(j) := loadUnits(i).io.trigger(j).addrHit && !tdata(lTriggerMapping(j)).select // Mux(tdata(j + 3).select, loadUnits(i).io.trigger(j).lastDataHit, loadUnits(i).io.trigger(j).addrHit)
-      io.mem_to_ooo.writeback(i).bits.uop.cf.trigger.backendHit(lTriggerMapping(j)) := hit(j)
-//      io.writeback(i).bits.uop.cf.trigger.backendTiming(lTriggerMapping(j)) := tdata(lTriggerMapping(j)).timing
-      //      if (lChainMapping.contains(j)) io.writeback(i).bits.uop.cf.trigger.triggerChainVec(lChainMapping(j)) := hit && tdata(j+3).chain
-    }
-    when(tdata(2).chain) {
-      io.mem_to_ooo.writeback(i).bits.uop.cf.trigger.backendHit(2) := hit(0) && hit(1)
-      io.mem_to_ooo.writeback(i).bits.uop.cf.trigger.backendHit(3) := hit(0) && hit(1)
-    }
-    when(!io.mem_to_ooo.writeback(i).bits.uop.cf.trigger.backendEn(1)) {
-      io.mem_to_ooo.writeback(i).bits.uop.cf.trigger.backendHit(5) := false.B
-    }
-
-    XSDebug(io.mem_to_ooo.writeback(i).bits.uop.cf.trigger.getHitBackend && io.mem_to_ooo.writeback(i).valid, p"Debug Mode: Load Inst No.${i}" +
-    p"has trigger hit vec ${io.mem_to_ooo.writeback(i).bits.uop.cf.trigger.backendHit}\n")
-
   }
   // Prefetcher
   val StreamDTLBPortIndex = exuParameters.LduCnt
@@ -753,31 +708,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     io.mem_to_ooo.stIn(i).bits := stu.io.issue.bits
 
     stu.io.stout.ready := true.B
-
-    // -------------------------
-    // Store Triggers
-    // -------------------------
-    when(stOut(i).fire){
-      val hit = Wire(Vec(3, Bool()))
-      for (j <- 0 until 3) {
-         hit(j) := !tdata(sTriggerMapping(j)).select && TriggerCmp(
-           stOut(i).bits.debug.vaddr,
-           tdata(sTriggerMapping(j)).tdata2,
-           tdata(sTriggerMapping(j)).matchType,
-           tEnable(sTriggerMapping(j))
-         )
-       stOut(i).bits.uop.cf.trigger.backendHit(sTriggerMapping(j)) := hit(j)
-     }
-
-     when(tdata(0).chain) {
-       io.mem_to_ooo.writeback(i).bits.uop.cf.trigger.backendHit(0) := hit(0) && hit(1)
-       io.mem_to_ooo.writeback(i).bits.uop.cf.trigger.backendHit(1) := hit(0) && hit(1)
-     }
-
-     when(!stOut(i).bits.uop.cf.trigger.backendEn(0)) {
-       stOut(i).bits.uop.cf.trigger.backendHit(4) := false.B
-     }
-   }
   }
 
   // mmio store writeback will use store writeback port 0
@@ -786,13 +716,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stOut(0).valid := true.B
     stOut(0).bits  := lsq.io.mmioStout.bits
     lsq.io.mmioStout.ready := true.B
-  }
-
-  when (atomicsUnit.io.out.valid) {
-    // when atom inst writeback, surpress normal load trigger
-    (0 until exuParameters.LduCnt).map(i => {
-      io.mem_to_ooo.writeback(i).bits.uop.cf.trigger.backendHit := VecInit(Seq.fill(6)(false.B))
-    })
   }
 
   // Uncahce
@@ -953,7 +876,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
   val atomicsExceptionAddress = RegEnable(atomicsUnit.io.exceptionAddr.bits, atomicsUnit.io.exceptionAddr.valid)
   io.mem_to_ooo.lsqio.vaddr := RegNext(Mux(atomicsException, atomicsExceptionAddress, lsq.io.exceptionAddr.vaddr))
-  XSError(atomicsException && atomicsUnit.io.in.valid, "new instruction before exception triggers\n")
 
   io.memInfo.sqFull := RegNext(lsq.io.sqFull)
   io.memInfo.lqFull := RegNext(lsq.io.lqFull)

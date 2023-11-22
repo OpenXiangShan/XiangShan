@@ -124,9 +124,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // fast wakeup
     val fast_uop = ValidIO(new MicroOp) // early wakeup signal generated in load_s1, send to RS in load_s2
 
-    // trigger
-    val trigger = Vec(3, new LoadUnitTriggerIO)
-
     // prefetch
     val prefetch_train            = ValidIO(new LdPrefetchTrainBundle()) // provide prefetch info to sms
     val prefetch_train_l1         = ValidIO(new LdPrefetchTrainBundle()) // provide prefetch info to stream & stride
@@ -1184,19 +1181,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   }
 
    // trigger
-  val last_valid_data = RegNext(RegEnable(io.ldout.bits.data, io.ldout.fire))
-  val hit_ld_addr_trig_hit_vec = Wire(Vec(3, Bool()))
-  val lq_ld_addr_trig_hit_vec = io.lsq.trigger.lqLoadAddrTriggerHitVec
-  (0 until 3).map{i => {
-    val tdata2    = RegNext(io.trigger(i).tdata2)
-    val matchType = RegNext(io.trigger(i).matchType)
-    val tEnable   = RegNext(io.trigger(i).tEnable)
-
-    hit_ld_addr_trig_hit_vec(i) := TriggerCmp(RegNext(s2_out.vaddr), tdata2, matchType, tEnable)
-    io.trigger(i).addrHit       := Mux(s3_out.valid, hit_ld_addr_trig_hit_vec(i), lq_ld_addr_trig_hit_vec(i))
-    io.trigger(i).lastDataHit   := TriggerCmp(last_valid_data, tdata2, matchType, tEnable)
-  }}
-  io.lsq.trigger.hitLoadAddrTriggerHitVec := hit_ld_addr_trig_hit_vec
+  io.lsq.trigger := DontCare
 
   // FIXME: please move this part to LoadQueueReplay
   io.debug_ls := DontCare

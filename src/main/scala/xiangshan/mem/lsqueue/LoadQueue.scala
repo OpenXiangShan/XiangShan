@@ -126,7 +126,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val nack_rollback = Output(Valid(new Redirect))
     val rob = Flipped(new RobLsqIO)
     val uncache = new UncacheWordIO
-    val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
     val exceptionAddr = new ExceptionAddrIO
     val lqFull = Output(Bool())
     val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
@@ -200,7 +199,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   uncacheBuffer.io.ld_raw_data  <> io.ld_raw_data
   uncacheBuffer.io.rob        <> io.rob
   uncacheBuffer.io.uncache    <> io.uncache
-  uncacheBuffer.io.trigger    <> io.trigger
   for ((buff, w) <- uncacheBuffer.io.req.zipWithIndex) {
     buff.valid := io.ldu.ldin(w).valid // from load_s3
     buff.bits := io.ldu.ldin(w).bits // from load_s3
