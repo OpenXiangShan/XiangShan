@@ -763,6 +763,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     hybridUnits(i).io.ldu_io.lsq.forward <> lsq.io.forward(LduCnt + i)
     // forward
     hybridUnits(i).io.ldu_io.sbuffer <> sbuffer.io.forward(LduCnt + i)
+    hybridUnits(i).io.ldu_io.vec_forward <> vsFlowQueue.io.forward(LduCnt + i)
     hybridUnits(i).io.ldu_io.tl_d_channel := dcache.io.lsu.forward_D(LduCnt + i)
     hybridUnits(i).io.ldu_io.forward_mshr <> dcache.io.lsu.forward_mshr(LduCnt + i)
     // ld-ld violation check
@@ -874,6 +875,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     lsq.io.sta.storeMaskIn.takeRight(HyuCnt)(i) <> hybridUnits(i).io.stu_io.st_mask_out
     io.mem_to_ooo.stIn.takeRight(HyuCnt)(i).valid := hybridUnits(i).io.stu_io.issue.valid
     io.mem_to_ooo.stIn.takeRight(HyuCnt)(i).bits := hybridUnits(i).io.stu_io.issue.bits
+
+    // ------------------------------------
+    //  Vector Store Port
+    // ------------------------------------
+    hybridUnits(i).io.vec_stu_io.isFirstIssue := true.B
+    lsq.io.sta.vecStoreAddrIn(i + StaCnt) <> hybridUnits(i).io.vec_stu_io.lsq
 
     // -------------------------
     // Store Triggers
@@ -1102,6 +1109,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   vecIssuePort.ready := vlWrapper.io.loadRegIn.ready && vsUopQueue.io.storeIn.ready
   vsFlowQueue.io.flowIn <> vsUopQueue.io.flowIssue
   vsUopQueue.io.flowWriteback <> vsFlowQueue.io.flowWriteback
+  vsFlowQueue.io.pipeIssue.drop(StaCnt).zip(hybridUnits.map(_.io.vec_stu_io.in)).foreach { case (a, b) => a <> b }
+  vsFlowQueue.io.pipeFeedback.drop(StaCnt).zip(hybridUnits.map(_.io.vec_stu_io.feedbackSlow)).foreach { case (a, b) => a <> b }
   vsFlowQueue.io.rob.lcommit := io.ooo_to_mem.lsqio.lcommit
   vsFlowQueue.io.rob.scommit := io.ooo_to_mem.lsqio.scommit
   vsFlowQueue.io.rob.pendingld := io.ooo_to_mem.lsqio.pendingld
