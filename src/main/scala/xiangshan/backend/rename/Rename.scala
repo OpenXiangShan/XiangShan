@@ -26,7 +26,7 @@ import xiangshan.backend.Bundles.{DecodedInst, DynInst}
 import xiangshan.backend.decode.{FusionDecodeInfo, ImmUnion, Imm_I, Imm_LUI_LOAD, Imm_U}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.rename.freelist._
-import xiangshan.backend.rob.RobPtr
+import xiangshan.backend.rob.{RobEnqIO, RobPtr}
 import xiangshan.mem.mdp._
 
 class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
@@ -65,6 +65,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // for snapshots
     val snpt = Input(new SnapshotPort)
     val snptLastEnq = Flipped(ValidIO(new RobPtr))
+    val robIsEmpty = Input(Bool())
+    val toDispatchIsFp = Output(Vec(RenameWidth,Bool()))
+    val toDispatchIsInt = Output(Vec(RenameWidth,Bool()))
     // debug arch ports
     val debug_int_rat = if (backendParams.debugEn) Some(Vec(32, Input(UInt(PhyRegIdxWidth.W)))) else None
     val debug_vconfig_rat = if (backendParams.debugEn) Some(Input(UInt(PhyRegIdxWidth.W))) else None
@@ -116,8 +119,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   }
   // only when both fp and int free list and dispatch1 has enough space can we do allocation
   // when isWalk, freelist can definitely allocate
-  intFreeList.io.doAllocate := fpFreeList.io.canAllocate && io.out(0).ready || io.robCommits.isWalk
-  fpFreeList.io.doAllocate := intFreeList.io.canAllocate && io.out(0).ready || io.robCommits.isWalk
+  intFreeList.io.doAllocate := fpFreeList.io.canAllocate && io.out.map(_.ready).reduce(_ || _) || io.robCommits.isWalk
+  fpFreeList.io.doAllocate := intFreeList.io.canAllocate && io.out.map(_.ready).reduce(_ || _) || io.robCommits.isWalk
 
   //           dispatch1 ready ++ float point free list ready ++ int free list ready      ++ not walk
   val canOut = io.out(0).ready && fpFreeList.io.canAllocate && intFreeList.io.canAllocate && !io.robCommits.isWalk
@@ -136,7 +139,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val lastCycleMisprediction = RegNext(io.redirect.valid && !io.redirect.bits.flushItself())
   val robIdxHeadNext = Mux(io.redirect.valid, io.redirect.bits.robIdx, // redirect: move ptr to given rob index
          Mux(lastCycleMisprediction, robIdxHead + 1.U, // mis-predict: not flush robIdx itself
-                         Mux(canOut, robIdxHead + validCount, // instructions successfully entered next stage: increase robIdx
+                         Mux(canOut && io.in(0).fire, robIdxHead + validCount, // instructions successfully entered next stage: increase robIdx
                       /* default */  robIdxHead))) // no instructions passed by this cycle: stick to old value
   robIdxHead := robIdxHeadNext
 
@@ -181,6 +184,19 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   val walkPdest = Wire(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
 
+  val hasInstr = RegInit(false.B)
+  hasInstr := io.in.head.valid && !io.in.head.ready
+  val outFireNum = RegInit(0.U(RenameWidth.U.getWidth.W))
+  val outFireNumNext = Mux(io.in.head.fire || io.redirect.valid, 0.U, outFireNum + PopCount(io.out.map(_.fire)))
+  outFireNum := outFireNumNext
+  val inValidNum = PopCount(io.in.map(_.valid))
+  val allOut = inValidNum === outFireNum + PopCount(io.out.map(_.fire))
+  val outValidMask = Wire(Vec(RenameWidth, Bool()))
+  outValidMask.zipWithIndex.map{ case(m,i) =>
+    m := Mux(hasInstr, Mux(outFireNum > PopCount(io.in.map(_.valid).take(i)), false.B, true.B), true.B)
+  }
+  val validWaitForward = io.in.map(_.bits.waitForward).zip(outValidMask).map(x => x._1 && x._2)
+  val isWaitForward = VecInit((0 until RenameWidth).map(i => validWaitForward.take(i).fold(false.B)(_ || _)))
   // uop calculation
   for (i <- 0 until RenameWidth) {
     for ((name, data) <- uops(i).elements) {
@@ -199,9 +215,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
     uops(i).replayInst := false.B // set by IQ or MemQ
     // alloc a new phy reg, fp and vec share the `fpFreeList`
-    needVecDest   (i) := io.in(i).valid && needDestReg(Reg_V,       io.in(i).bits)
-    needFpDest    (i) := io.in(i).valid && needDestReg(Reg_F,       io.in(i).bits)
-    needIntDest   (i) := io.in(i).valid && needDestReg(Reg_I,       io.in(i).bits)
+    needVecDest   (i) := io.in(i).valid && io.out(i).fire && needDestReg(Reg_V,io.in(i).bits) && outValidMask(i) && fpFreeList.io.canAllocate && fpFreeList.io.doAllocate && !io.robCommits.isWalk && !io.redirect.valid
+    needFpDest    (i) := io.in(i).valid && io.out(i).fire && needDestReg(Reg_F,io.in(i).bits) && outValidMask(i) && fpFreeList.io.canAllocate && fpFreeList.io.doAllocate && !io.robCommits.isWalk && !io.redirect.valid
+    needIntDest   (i) := io.in(i).valid && io.out(i).fire && needDestReg(Reg_I,io.in(i).bits) && outValidMask(i) && intFreeList.io.canAllocate && intFreeList.io.doAllocate && !io.robCommits.isWalk && !io.redirect.valid
     if (i < CommitWidth) {
       walkNeedIntDest(i) := io.robCommits.walkValid(i) && needDestRegWalk(Reg_I, io.robCommits.info(i))
       walkNeedFpDest(i) := io.robCommits.walkValid(i) && needDestRegWalk(Reg_F, io.robCommits.info(i))
@@ -214,7 +230,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     intFreeList.io.walkReq(i) := walkNeedIntDest(i) && !walkIsMove(i)
 
     // no valid instruction from decode stage || all resources (dispatch1 + both free lists) ready
-    io.in(i).ready := !hasValid || canOut
+    io.in(i).ready := !hasValid || (canOut && allOut)
 
     uops(i).robIdx := robIdxHead + PopCount(io.in.zip(needRobFlags).take(i).map{ case(in, needRobFlag) => in.valid && in.bits.lastUop && needRobFlag})
     uops(i).instrSize := instrSizesVec(i)
@@ -257,14 +273,15 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
     // update pdest
     uops(i).pdest := MuxCase(0.U, Seq(
-      needIntDest(i)                    -> intFreeList.io.allocatePhyReg(i),
+      (needIntDest(i) && !isMove(i))    -> intFreeList.io.allocatePhyReg(i),
       (needFpDest(i) || needVecDest(i)) -> fpFreeList.io.allocatePhyReg(i),
     ))
 
     // Assign performance counters
     uops(i).debugInfo.renameTime := GTimer()
 
-    io.out(i).valid := io.in(i).valid && intFreeList.io.canAllocate && fpFreeList.io.canAllocate && !io.robCommits.isWalk
+    dontTouch(isWaitForward)
+    io.out(i).valid := !isWaitForward(i) && (!io.in(i).bits.waitForward || (io.in(i).bits.waitForward && io.robIsEmpty) ) && outValidMask(i) && io.in(i).valid && io.out(i).ready && intFreeList.io.canAllocate && fpFreeList.io.canAllocate && !io.robCommits.isWalk
     io.out(i).bits := uops(i)
     // Todo: move these shit in decode stage
     // dirty code for fence. The lsrc is passed by imm.
@@ -301,6 +318,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     intSpecWen(i) := needIntDest(i) && intFreeList.io.canAllocate && intFreeList.io.doAllocate && !io.robCommits.isWalk && !io.redirect.valid
     fpSpecWen(i) := needFpDest(i) && fpFreeList.io.canAllocate && fpFreeList.io.doAllocate && !io.robCommits.isWalk && !io.redirect.valid
     vecSpecWen(i) := needVecDest(i) && fpFreeList.io.canAllocate && fpFreeList.io.doAllocate && !io.robCommits.isWalk && !io.redirect.valid
+    io.toDispatchIsFp := fpSpecWen
+    io.toDispatchIsInt := intSpecWen
 
     if (i < CommitWidth) {
       walkIntSpecWen(i) := walkNeedIntDest(i) && !io.redirect.valid
