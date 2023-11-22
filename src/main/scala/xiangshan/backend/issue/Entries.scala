@@ -42,12 +42,9 @@ class Status(implicit p:Parameters, params: IssueBlockParams) extends XSBundle {
   val deqPortIdx = UInt(1.W)
   val srcLoadDependency = OptionWrapper(params.hasIQWakeUp, Vec(params.numRegSrc, Vec(LoadPipelineWidth, UInt(3.W))))
 
-
   // mem only
   val mem = if (params.isMemAddrIQ) Some(new StatusMemPart) else None
 
-  // need pc
-  val pc = if (params.needPc) Some(UInt(VAddrData().dataWidth.W)) else None
 
   def srcReady: Bool = {
     VecInit(srcState.map(SrcState.isReady)).asUInt.andR

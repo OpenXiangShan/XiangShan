@@ -328,9 +328,6 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
   //remain imm and payload
   entryUpdate.imm.foreach(_ := entryReg.imm.get)
   entryUpdate.payload := entryReg.payload
-  if(params.needPc) {
-    entryUpdate.status.pc.get := entryReg.status.pc.get
-  }
 
   //output
   val canIssue = currentStatus.canIssue && validReg && !srcCancelVec.getOrElse(false.B).asUInt.orR
