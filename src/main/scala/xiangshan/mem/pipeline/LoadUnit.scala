@@ -653,8 +653,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   when (!s1_late_kill) {
     // current ori test will cause the case of ldest == 0, below will be modifeid in the future.
     // af & pf exception were modified
-    s1_out.uop.cf.exceptionVec(loadPageFault)   := io.tlb.resp.bits.excp(0).pf.ld
-    s1_out.uop.cf.exceptionVec(loadAccessFault) := io.tlb.resp.bits.excp(0).af.ld
+    s1_out.uop.cf.exceptionVec(loadPageFault)   := io.tlb.resp.bits.excp(0).pf.ld && !s1_tlb_miss
+    s1_out.uop.cf.exceptionVec(loadAccessFault) := io.tlb.resp.bits.excp(0).af.ld && !s1_tlb_miss
   } .otherwise {
     s1_out.uop.cf.exceptionVec(loadAddrMisaligned) := false.B
     s1_out.uop.cf.exceptionVec(loadAccessFault)    := s1_late_kill
@@ -1047,12 +1047,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_flushPipe = s3_ldld_rep_inst
   val s3_rep_frm_fetch = s3_vp_match_fail
   val s3_sel_rep_cause = PriorityEncoderOH(s3_rep_info.cause.asUInt)
-  val s3_force_rep     = s3_sel_rep_cause(LoadReplayCauses.C_TM) &&
-                         !s3_in.uop.cf.exceptionVec(loadAddrMisaligned) &&
-                         s3_troublem
 
   val s3_exception = ExceptionNO.selectByFu(s3_in.uop.cf.exceptionVec, lduCfg).asUInt.orR
-  when ((s3_exception || s3_dly_ld_err || s3_rep_frm_fetch) && !s3_force_rep) {
+  when (s3_exception || s3_dly_ld_err || s3_rep_frm_fetch) {
     io.lsq.ldin.bits.rep_info.cause := 0.U.asTypeOf(s3_rep_info.cause.cloneType)
   } .otherwise {
     io.lsq.ldin.bits.rep_info.cause := VecInit(s3_sel_rep_cause.asBools)
@@ -1073,10 +1070,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_out.bits.debug.vaddr     := s3_in.vaddr
   s3_out.bits.fflags          := DontCare
 
-  when (s3_force_rep) {
-    s3_out.bits.uop.cf.exceptionVec := 0.U.asTypeOf(s3_in.uop.cf.exceptionVec.cloneType)
-  }
-
   io.rollback.valid := s3_out.valid && !s3_rep_frm_fetch && s3_flushPipe
   io.rollback.bits             := DontCare
   io.rollback.bits.isRVC       := s3_out.bits.uop.cf.pd.isRVC
@@ -1095,16 +1088,13 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.lsq.stld_nuke_query.revoke := s3_revoke
 
   // feedback slow
-  s3_fast_rep := RegNext(s2_fast_rep) &&
-                 !s3_in.feedbacked &&
-                 !s3_rep_frm_fetch &&
-                 !s3_exception
+  s3_fast_rep := RegNext(s2_fast_rep)
 
   val s3_fb_no_waiting = !s3_in.isLoadReplay && !(s3_fast_rep && !s3_fast_rep_canceled) && !s3_in.feedbacked
 
   //
   io.feedback_slow.valid                 := s3_valid && s3_fb_no_waiting
-  io.feedback_slow.bits.hit              := !io.lsq.ldin.bits.rep_info.need_rep || io.lsq.ldin.ready
+  io.feedback_slow.bits.hit              := !s3_rep_info.need_rep || io.lsq.ldin.ready
   io.feedback_slow.bits.flushState       := s3_in.ptwBack
   io.feedback_slow.bits.rsIdx            := s3_in.rsIdx
   io.feedback_slow.bits.sourceType       := RSFeedbackType.lrqFull
