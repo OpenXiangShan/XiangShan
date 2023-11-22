@@ -107,7 +107,7 @@ class fetch_to_mem(implicit p: Parameters) extends XSBundle{
 }
 
 // triple buffer applied in i-mmio path (two at MemBlock, one at L2Top)
-class InstrUncacheBuffer()(implicit p: Parameters) extends LazyModule with HasInstrMMIOConst{
+class InstrUncacheBuffer()(implicit p: Parameters) extends LazyModule with HasInstrMMIOConst {
   val node = new TLBufferNode(BufferParams.default, BufferParams.default, BufferParams.default, BufferParams.default, BufferParams.default)
   lazy val module = new InstrUncacheBufferImpl
 
@@ -127,9 +127,22 @@ class InstrUncacheBuffer()(implicit p: Parameters) extends LazyModule with HasIn
   }
 }
 
+// triple buffer applied in L1I$-L2 path (two at MemBlock, one at L2Top)
+class ICacheBuffer()(implicit p: Parameters) extends LazyModule {
+  val node = new TLBufferNode(BufferParams.default, BufferParams.default, BufferParams.default, BufferParams.default, BufferParams.default)
+  lazy val module = new ICacheBufferImpl
+
+  class ICacheBufferImpl extends LazyModuleImp(this) {
+    (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
+      out.a <> BufferParams.default(BufferParams.default(in.a))
+      in.d <> BufferParams.default(BufferParams.default(out.d))
+    }
+  }
+}
+
 // Frontend bus goes through MemBlock
 class FrontendBridge()(implicit p: Parameters) extends LazyModule {
-  val icache_node = LazyModule(new TLBuffer()).suggestName("icache").node// to keep IO port name
+  val icache_node = LazyModule(new ICacheBuffer()).suggestName("icache").node// to keep IO port name
   val instr_uncache_node = LazyModule(new InstrUncacheBuffer()).suggestName("instr_uncache").node
   lazy val module = new LazyModuleImp(this) {
   }
