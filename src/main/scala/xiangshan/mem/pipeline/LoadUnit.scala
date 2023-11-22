@@ -76,7 +76,6 @@ class LoadToLsqIO(implicit p: Parameters) extends XSBundle {
   val forward         = new PipeLoadForwardQueryIO
   val stld_nuke_query = new LoadNukeQueryIO
   val ldld_nuke_query = new LoadNukeQueryIO
-  val trigger         = Flipped(new LqTriggerIO)
 }
 
 class LoadToLoadIO(implicit p: Parameters) extends XSBundle {
@@ -1170,8 +1169,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     io.l2l_fwd_out.dly_ld_err := DontCare
   }
 
-   // trigger
-  io.lsq.trigger := DontCare
 
   // FIXME: please move this part to LoadQueueReplay
   io.debug_ls := DontCare
