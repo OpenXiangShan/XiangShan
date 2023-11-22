@@ -359,14 +359,14 @@ class CtrlBlockImp(
   memCtrl.io.dispatchLFSTio <> dispatch.io.lfst
 
   rat.io.redirect := s1_s3_redirect.valid
-  rat.io.robCommits := rob.io.rabCommits
+  rat.io.rabCommits := rob.io.rabCommits
   rat.io.diffCommits.foreach(_ := rob.io.diffCommits.get)
   rat.io.intRenamePorts := rename.io.intRenamePorts
   rat.io.fpRenamePorts := rename.io.fpRenamePorts
   rat.io.vecRenamePorts := rename.io.vecRenamePorts
 
   rename.io.redirect := s1_s3_redirect
-  rename.io.robCommits <> rob.io.rabCommits
+  rename.io.rabCommits := rob.io.rabCommits
   rename.io.waittable := (memCtrl.io.waitTable2Rename zip decode.io.out).map{ case(waittable2rename, decodeOut) =>
     RegEnable(waittable2rename, decodeOut.fire)
   }

@@ -23,8 +23,9 @@ object RenameBufferPtr {
   }
 }
 
-class RenameBufferEntry(implicit p: Parameters) extends RobCommitInfo {
-  val robIdx = new RobPtr
+class RenameBufferEntry(implicit p: Parameters) extends XSBundle {
+  val info = new RabCommitInfo
+  val robIdx = OptionWrapper(!env.FPGAPlatform, new RobPtr)
 }
 
 class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
@@ -44,7 +45,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
     val canEnq = Output(Bool())
     val enqPtrVec = Output(Vec(RenameWidth, new RenameBufferPtr))
     val vconfigPdest = Output(UInt(PhyRegIdxWidth.W))
-    val commits = Output(new RobCommitIO)
+    val commits = Output(new RabCommitIO)
     val diffCommits = if (backendParams.debugEn) Some(Output(new DiffCommitIO)) else None
 
     val status = Output(new Bundle {
@@ -199,13 +200,8 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   val allocatePtrVec = VecInit((0 until RenameWidth).map(i => enqPtrVec(PopCount(realNeedAlloc.take(i))).value))
   allocatePtrVec.zip(io.req).zip(realNeedAlloc).map{ case((allocatePtr, req), realNeedAlloc) =>
     when(realNeedAlloc){
-      renameBuffer(allocatePtr).ldest := req.bits.ldest
-      renameBuffer(allocatePtr).pdest := req.bits.pdest
-      renameBuffer(allocatePtr).rfWen := req.bits.rfWen
-      renameBuffer(allocatePtr).fpWen := req.bits.fpWen
-      renameBuffer(allocatePtr).vecWen := req.bits.vecWen
-      renameBuffer(allocatePtr).isMove := req.bits.eliminatedMove
-      renameBuffer(allocatePtr).robIdx := req.bits.robIdx
+      renameBuffer(allocatePtr).info := req.bits
+      renameBuffer(allocatePtr).robIdx.foreach(_ := req.bits.robIdx)
     }
   }
 
@@ -216,9 +212,8 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
     io.commits.commitValid(i) := state === s_idle && i.U < commitSize || state === s_special_walk && i.U < specialWalkSize
     io.commits.walkValid(i) := state === s_walk && i.U < walkSize || state === s_special_walk && i.U < specialWalkSize
     // special walk use commitPtr
-    io.commits.info(i) := Mux(state === s_idle || state === s_special_walk, commitCandidates(i), walkCandidates(i))
-    // Todo: remove this
-    io.commits.robIdx(i) := Mux(state === s_idle || state === s_special_walk, commitCandidates(i).robIdx, walkCandidates(i).robIdx)
+    io.commits.info(i) := Mux(state === s_idle || state === s_special_walk, commitCandidates(i).info, walkCandidates(i).info)
+    io.commits.robIdx.foreach(_(i) := Mux(state === s_idle || state === s_special_walk, commitCandidates(i).robIdx.get, walkCandidates(i).robIdx.get))
   }
 
   private val walkEndNext = walkSizeNxt === 0.U
@@ -260,7 +255,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
 
   io.status.walkEnd := walkEndNext
 
-//  io.vconfigPdest := Mux(vcfgCandidates(0).ldest === VCONFIG_IDX.U && vcfgCandidates(0).vecWen, vcfgCandidates(0).pdest, vcfgCandidates(1).pdest)
+//  io.vconfigPdest := Mux(vcfgCandidates(0).info.ldest === VCONFIG_IDX.U && vcfgCandidates(0).info.vecWen, vcfgCandidates(0).info.pdest, vcfgCandidates(1).info.pdest)
   io.vconfigPdest := 0.U
 
   // for difftest
@@ -268,7 +263,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   io.diffCommits.foreach(_.isCommit := state === s_idle || state === s_special_walk)
   for(i <- 0 until CommitWidth * MaxUopSize) {
     io.diffCommits.foreach(_.commitValid(i) := (state === s_idle || state === s_special_walk) && i.U < newCommitSize)
-    io.diffCommits.foreach(_.info(i) := diffCandidates(i))
+    io.diffCommits.foreach(_.info(i) := diffCandidates(i).info)
   }
 
   XSError(isBefore(enqPtr, deqPtr) && !isFull(enqPtr, deqPtr), "\ndeqPtr is older than enqPtr!\n")
