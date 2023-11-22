@@ -394,6 +394,7 @@ class CtrlBlockImp(
   rename.io.snpt.snptDeq := snpt.io.deq
   rename.io.snpt.useSnpt := useSnpt
   rename.io.snpt.snptSelect := snptSelect
+  rename.io.robIsEmpty := rob.io.enq.isEmpty
   rename.io.snpt.flushVec := flushVecNext
   rename.io.snptLastEnq.valid := !isEmpty(snpt.io.enqPtr, snpt.io.deqPtr)
   rename.io.snptLastEnq.bits := snpt.io.snapshots((snpt.io.enqPtr - 1.U).value).robIdx.head
@@ -410,10 +411,13 @@ class CtrlBlockImp(
 
 
   // pipeline between rename and dispatch
-  for (i <- 0 until RenameWidth) {
-    PipelineConnect(renameOut(i), dispatch.io.fromRename(i), dispatch.io.recv(i), s1_s3_redirect.valid)
-  }
-
+  // for (i <- 0 until RenameWidth) {
+  //   PipelineConnect(renameOut(i), dispatch.io.fromRename(i), dispatch.io.recv(i), s1_s3_redirect.valid)
+  // }
+  renameOut <> dispatch.io.fromRename
+  renameOut.zip(dispatch.io.recv).map{case (rename,recv) => rename.ready := recv}
+  dispatch.io.fromRenameIsFp := rename.io.toDispatchIsFp
+  dispatch.io.fromRenameIsInt := rename.io.toDispatchIsInt
   dispatch.io.hartId := io.fromTop.hartId
   dispatch.io.redirect := s1_s3_redirect
   dispatch.io.enqRob <> rob.io.enq
