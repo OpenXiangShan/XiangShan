@@ -220,7 +220,7 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
     entryRegNext.status.firstIssue := io.deqSel || entryReg.status.firstIssue
     entryRegNext.status.blocked := false.B //todo
     //remain imm and payload
-    entryRegNext.imm := entryReg.imm
+    entryRegNext.imm.foreach(_ := entryReg.imm.get)
     entryRegNext.payload := entryReg.payload
     if (params.needPc) {
       entryRegNext.status.pc.get := entryReg.status.pc.get

@@ -24,6 +24,7 @@ import xiangshan.backend.fu.fpu._
 import xiangshan.backend.fu.vector._
 import xiangshan.backend.issue._
 import xiangshan.backend.fu.FuConfig
+import xiangshan.backend.decode.{Imm, ImmUnion}
 
 package object xiangshan {
   object SrcType {
@@ -590,6 +591,24 @@ package object xiangshan {
         INVALID_INSTR.litValue -> "INVALID",
       )
       strMap(immType.litValue)
+    }
+
+    def getImmUnion(immType: UInt) : Imm = {
+      val iuMap = Map(
+        IMM_S.litValue         -> ImmUnion.S,
+        IMM_SB.litValue        -> ImmUnion.B,
+        IMM_U.litValue         -> ImmUnion.U,
+        IMM_UJ.litValue        -> ImmUnion.J,
+        IMM_I.litValue         -> ImmUnion.I,
+        IMM_Z.litValue         -> ImmUnion.Z,
+        IMM_B6.litValue        -> ImmUnion.B6,
+        IMM_OPIVIS.litValue    -> ImmUnion.OPIVIS,
+        IMM_OPIVIU.litValue    -> ImmUnion.OPIVIU,
+        IMM_VSETVLI.litValue   -> ImmUnion.VSETVLI,
+        IMM_VSETIVLI.litValue  -> ImmUnion.VSETIVLI,
+        IMM_LUI32.litValue     -> ImmUnion.LUI32,
+      )
+      iuMap(immType.litValue)
     }
   }
 

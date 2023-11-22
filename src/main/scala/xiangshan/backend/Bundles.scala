@@ -146,7 +146,7 @@ object Bundles {
     val flushPipe       = Bool() // This inst will flush all the pipe when commit, like exception but can commit
     val canRobCompress  = Bool()
     val selImm          = SelImm()
-    val imm             = UInt(XLEN.W) // Todo: check if it need minimized
+    val imm             = UInt(32.W)
     val fpu             = new FPUCtrlSignals
     val vpu             = new VPUCtrlSignals
     val wfflags         = Bool()
@@ -427,7 +427,7 @@ object Bundles {
     val fuType        = FuType()
     val fuOpType      = FuOpType()
     val src           = Vec(params.numRegSrc, UInt(params.dataBitsMax.W))
-    val imm           = UInt(XLEN.W)
+    val imm           = UInt(32.W)
     val robIdx        = new RobPtr
     val iqIdx         = UInt(log2Up(MemIQSizeMax).W)// Only used by store yet
     val isFirstIssue  = Bool()                      // Only used by store yet

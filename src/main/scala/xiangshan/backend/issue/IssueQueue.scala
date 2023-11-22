@@ -209,7 +209,20 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         enq.bits.status.srcTimer.get := 0.U.asTypeOf(enq.bits.status.srcTimer.get)
         enq.bits.status.srcLoadDependency.get := 0.U.asTypeOf(enq.bits.status.srcLoadDependency.get)
       }
-      enq.bits.imm := s0_enqBits(i).imm
+      if (params.inIntSchd && params.AluCnt > 0) {
+        // dirty code for lui+addi(w) fusion
+        val isLuiAddiFusion = s0_enqBits(i).isLUI32
+        val luiImm = Cat(s0_enqBits(i).lsrc(1), s0_enqBits(i).lsrc(0), s0_enqBits(i).imm(ImmUnion.maxLen - 1, 0))
+        enq.bits.imm.foreach(_ := Mux(isLuiAddiFusion, ImmUnion.LUI32.toImm32(luiImm), s0_enqBits(i).imm))
+      }
+      else if (params.inMemSchd && params.LduCnt > 0) {
+        // dirty code for fused_lui_load
+        val isLuiLoadFusion = SrcType.isNotReg(s0_enqBits(i).srcType(0)) && FuType.isLoad(s0_enqBits(i).fuType)
+        enq.bits.imm.foreach(_ := Mux(isLuiLoadFusion, Imm_LUI_LOAD().getLuiImm(s0_enqBits(i)), s0_enqBits(i).imm))
+      }
+      else {
+        enq.bits.imm.foreach(_ := s0_enqBits(i).imm)
+      }
       enq.bits.payload := s0_enqBits(i)
     }
     entriesIO.deq.zipWithIndex.foreach { case (deq, i) =>
@@ -483,21 +496,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       sink := source
     }
     deq.bits.immType := deqEntryVec(i).bits.payload.selImm
-
-    if (params.inIntSchd && params.AluCnt > 0) {
-      // dirty code for lui+addi(w) fusion
-      val isLuiAddiFusion = deqEntryVec(i).bits.payload.isLUI32
-      val luiImm = Cat(deqEntryVec(i).bits.payload.lsrc(1), deqEntryVec(i).bits.payload.lsrc(0), deqEntryVec(i).bits.imm(ImmUnion.maxLen - 1, 0))
-      deq.bits.common.imm := Mux(isLuiAddiFusion, ImmUnion.LUI32.toImm32(luiImm), deqEntryVec(i).bits.imm)
-    }
-    else if (params.inMemSchd && params.LduCnt > 0) {
-      // dirty code for fused_lui_load
-      val isLuiLoadFusion = SrcType.isNotReg(deqEntryVec(i).bits.payload.srcType(0)) && FuType.isLoad(deqEntryVec(i).bits.payload.fuType)
-      deq.bits.common.imm := Mux(isLuiLoadFusion, Imm_LUI_LOAD().getLuiImm(deqEntryVec(i).bits.payload), deqEntryVec(i).bits.imm)
-    }
-    else {
-      deq.bits.common.imm := deqEntryVec(i).bits.imm
-    }
+    deq.bits.common.imm := deqEntryVec(i).bits.imm.getOrElse(0.U)
 
     deq.bits.common.perfDebugInfo := deqEntryVec(i).bits.payload.debugInfo
     deq.bits.common.perfDebugInfo.selectTime := GTimer()
