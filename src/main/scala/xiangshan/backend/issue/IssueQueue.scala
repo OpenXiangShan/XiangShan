@@ -464,18 +464,18 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     deq.bits.addrOH          := finalDeqSelOHVec(i)
     deq.bits.common.isFirstIssue := deqFirstIssueVec(i)
     deq.bits.common.iqIdx    := OHToUInt(finalDeqSelOHVec(i))
-    deq.bits.common.fuType   := deqEntryVec(i).bits.payload.fuType
+    deq.bits.common.fuType   := deqEntryVec(i).bits.status.fuType
     deq.bits.common.fuOpType := deqEntryVec(i).bits.payload.fuOpType
     deq.bits.common.rfWen.foreach(_ := deqEntryVec(i).bits.payload.rfWen)
     deq.bits.common.fpWen.foreach(_ := deqEntryVec(i).bits.payload.fpWen)
     deq.bits.common.vecWen.foreach(_ := deqEntryVec(i).bits.payload.vecWen)
     deq.bits.common.flushPipe.foreach(_ := deqEntryVec(i).bits.payload.flushPipe)
     deq.bits.common.pdest := deqEntryVec(i).bits.payload.pdest
-    deq.bits.common.robIdx := deqEntryVec(i).bits.payload.robIdx
+    deq.bits.common.robIdx := deqEntryVec(i).bits.status.robIdx
     deq.bits.common.dataSources.zip(finalDataSources(i)).zipWithIndex.foreach {
       case ((sink, source), srcIdx) =>
         sink.value := Mux(
-          SrcType.isXp(deqEntryVec(i).bits.payload.srcType(srcIdx)) && deqEntryVec(i).bits.payload.psrc(srcIdx) === 0.U,
+          SrcType.isXp(deqEntryVec(i).bits.status.srcType(srcIdx)) && deqEntryVec(i).bits.status.psrc(srcIdx) === 0.U,
           DataSource.none,
           source.value
         )
@@ -486,13 +486,12 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     deq.bits.common.deqPortIdx.foreach(_ := i.U)
     deq.bits.common.src := DontCare
 
-    deq.bits.rf.zip(deqEntryVec(i).bits.payload.psrc).foreach { case (rf, psrc) =>
-      rf.foreach(_.addr := psrc) // psrc in payload array can be pregIdx of IntRegFile or VfRegFile
+    deq.bits.rf.zip(deqEntryVec(i).bits.status.psrc).zip(deqEntryVec(i).bits.status.srcType).foreach { case ((rf, psrc), srcType) =>
+      // psrc in status array can be pregIdx of IntRegFile or VfRegFile
+      rf.foreach(_.addr := psrc)
+      rf.foreach(_.srcType := srcType)
     }
-    deq.bits.rf.zip(deqEntryVec(i).bits.payload.srcType).foreach { case (rf, srcType) =>
-      rf.foreach(_.srcType := srcType) // psrc in payload array can be pregIdx of IntRegFile or VfRegFile
-    }
-    deq.bits.srcType.zip(deqEntryVec(i).bits.payload.srcType).foreach { case (sink, source) =>
+    deq.bits.srcType.zip(deqEntryVec(i).bits.status.srcType).foreach { case (sink, source) =>
       sink := source
     }
     deq.bits.immType := deqEntryVec(i).bits.payload.selImm
@@ -679,14 +678,8 @@ class IssueQueueIntImp(override val wrapper: IssueQueue)(implicit p: Parameters,
   io.suggestName("none")
   override lazy val io = IO(new IssueQueueIntIO).suggestName("io")
 
-  if(params.needPc) {
-    entries.io.enq.zipWithIndex.foreach { case (entriesEnq, i) =>
-      entriesEnq.bits.status.pc.foreach(_ := io.enq(i).bits.pc)
-    }
-  }
-
   deqBeforeDly.zipWithIndex.foreach{ case (deq, i) => {
-    deq.bits.common.pc.foreach(_ := deqEntryVec(i).bits.status.pc.get)
+    deq.bits.common.pc.foreach(_ := deqEntryVec(i).bits.payload.pc)
     deq.bits.common.preDecode.foreach(_ := deqEntryVec(i).bits.payload.preDecodeInfo)
     deq.bits.common.ftqIdx.foreach(_ := deqEntryVec(i).bits.payload.ftqPtr)
     deq.bits.common.ftqOffset.foreach(_ := deqEntryVec(i).bits.payload.ftqOffset)

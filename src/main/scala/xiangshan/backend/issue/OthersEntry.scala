@@ -222,9 +222,6 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
     //remain imm and payload
     entryRegNext.imm.foreach(_ := entryReg.imm.get)
     entryRegNext.payload := entryReg.payload
-    if (params.needPc) {
-      entryRegNext.status.pc.get := entryReg.status.pc.get
-    }
   }
 
   //output
