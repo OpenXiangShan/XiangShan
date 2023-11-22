@@ -142,8 +142,6 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
     * 
     * TODO: decode logic is too long for timing.
     */
-  // val decode = Wire(new VecDecode())
-  // decode.apply(io.loadRegIn.bits.uop.instr)
   def us_whole_reg(fuOpType: UInt) = fuOpType === VlduType.vlr
   def us_mask(fuOpType: UInt) = fuOpType === VlduType.vlm
   def us_fof(fuOpType: UInt) = fuOpType === VlduType.vleff
@@ -323,11 +321,6 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
       issueVLMAXMask,
       issueMULMask
     )// elemIdx inside a vd
-    // val nfIdx = Mux(
-    //   isIndexed(issueInstType), 
-    //   GenSegNfIdx(Mux(issueLmulGreaterThanEmul, issueEntry.lmul, issueEntry.emul), issueUopIdx),
-    //   GenSegNfIdx(issueEntry.emul, issueUopIdx)
-    // )
     val nfIdx = elemIdx >> issueVLMAXLog2
     val notIndexedStride = Mux( // stride for strided/unit-stride instruction
       isStrided(issueInstType),

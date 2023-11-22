@@ -58,6 +58,7 @@ class VsUopQueueIOBundle (implicit p: Parameters) extends XSBundle {
   val flowWriteback = Vec(VecStorePipelineWidth, Flipped(DecoupledIO(new VecStoreExuOutput())))
   val uopWriteback = DecoupledIO(new MemExuOutput(isVector = true))
 }
+
 class VsUopQueue(implicit p: Parameters) extends VLSUModule {
   val io = IO(new VsUopQueueIOBundle())
 
@@ -96,8 +97,6 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
   /**
     * Enqueue and decode logic
     */
-  // val decode = Wire(new VecDecode())
-  // decode.apply(io.storeIn.bits.uop.instr)
   def us_whole_reg(fuOpType: UInt) = fuOpType === VstuType.vsr
   def us_mask(fuOpType: UInt) = fuOpType === VstuType.vsm
   val vtype = io.storeIn.bits.uop.vpu.vtype
@@ -280,11 +279,6 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
       issueVLMAXMask,
       issueMULMask
     )// elemIdx inside a vd
-    // val nfIdx = Mux(
-    //   isIndexed(issueInstType),
-    //   GenSegNfIdx(Mux(issueLmulGreaterThanEmul, issueEntry.lmul, issueEntry.emul), issueUopIdx),
-    //   GenSegNfIdx(issueEntry.emul, issueUopIdx)
-    // )
     val nfIdx = elemIdx >> issueVLMAXLog2
     val notIndexedStride = Mux(
       isStrided(issueInstType),

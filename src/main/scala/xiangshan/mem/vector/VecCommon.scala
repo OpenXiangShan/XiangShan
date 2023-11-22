@@ -132,52 +132,6 @@ class VLSUBundleWithMicroOp(implicit p: Parameters) extends VLSUBundle {
   val uop = new DynInst
 }
 
-// Where is VecOperand used?
-class VecOperand(implicit p: Parameters) extends VLSUBundleWithMicroOp {
-  val vmask = UInt(VLEN.W) // the mask of inst which is readed from reg
-  val vecData = UInt(VLEN.W)
-  val baseAddr = UInt(VAddrBits.W) // base address from rs1
-  val stride = UInt(XLEN.W) // stride from rs2
-  val index = UInt(VLEN.W) // index from vs2
-  val pvd = UInt(5.W) // physical vector register destination
-  val lmul = UInt(3.W)
-  val sew = UInt(2.W)
-  val vma = Bool()
-  val vta = Bool()
-  val inner_idx = UInt(3.W) // the number index among 8 uop
-  val vl = UInt(8.W)
-  // TODO: How will OOO calculatr vector register numbers?
-  //  (EEW / SEW) * LMUL or (vl * EEW) / VLEN ?
-  //  So OOO will always use eew ?
-  // val eew = UInt(3.W)
-  val total_num = UInt(3.W) // An inst to how many uops
-}
-
-class VecDecode(implicit p: Parameters) extends VLSUBundle {
-  val uop_segment_num = UInt(3.W)
-  val uop_type = UInt(2.W)
-  val mask_en = Bool()
-  val uop_unit_stride_whole_reg = Bool()
-  val uop_unit_stride_mask = Bool()
-  val uop_unit_stride_fof = Bool()
-  val uop_eew = UInt(ewBits.W) // this is also the index width when the inst is a index load
-
-  def apply(inst: UInt) = {
-    this.uop_segment_num := inst(31, 29)
-    this.uop_type := inst(27, 26)
-    this.mask_en := inst(25)
-    this.uop_unit_stride_whole_reg := (inst(24,20) === "b01000".U)
-    this.uop_unit_stride_mask := (inst(24,20) === "b01011".U)
-    this.uop_unit_stride_fof := (inst(24,20) === "b10000".U)
-    this.uop_eew := inst(12 + ewBits - 1, 12)
-    this
-  }
-
-  def isUnitStride = uop_type === "b00".U
-  def isStrided = uop_type === "b10".U
-  def isIndexed = uop_type(0) === "b1".U
-}
-
 class OnlyVecExuOutput(implicit p: Parameters) extends VLSUBundle {
   val isvec = Bool()
   val vecdata = UInt(VLEN.W)
@@ -315,17 +269,6 @@ object loadDataSize {
     )))}
 }
 
-// object GenVecLoadMask extends VLSUConstants {
-//   def apply(alignedType: UInt, vaddr: UInt): UInt = {
-//     LookupTree(alignedType, List(
-//       "b00".U -> 0x1.U, // b1
-//       "b01".U -> 0x3.U, // b11
-//       "b10".U -> 0xf.U, // b1111
-//       "b11".U -> 0xff.U // b11111111
-//     )) << vaddr(vOffsetBits - 1, 0)
-//   }
-// }
-
 object storeDataSize {
   def apply (instType: UInt, eew: UInt, sew: UInt): UInt = {
     (LookupTree(instType,List(
@@ -413,53 +356,6 @@ object IndexAddr {
       "b111".U -> EewEq64(index = index, flow_inner_idx = flow_inner_idx )  // Imm is 8 Byte
     )))}
 }
-/*
-object RegFLowCnt {
-  def apply (emul: UInt, lmul:UInt, eew: UInt, uopIdx: UInt, flowIdx: UInt): UInt = {
-
-    (LookupTree(Cat(emul,lmul),List(
-      "b001000".U -> ((uopIdx(0  ) << Log2Num((16.U >> eew(1,0)).asUInt)).asUInt + flowIdx),//emul = 2,lmul = 1
-      "b010000".U -> ((uopIdx(1,0) << Log2Num((16.U >> eew(1,0)).asUInt)).asUInt + flowIdx),//emul = 4,lmul = 1
-      "b011000".U -> ((uopIdx(2,0) << Log2Num((16.U >> eew(1,0)).asUInt)).asUInt + flowIdx),//emul = 8,lmul = 1
-      "b010001".U -> ((uopIdx(0  ) << Log2Num((16.U >> eew(1,0)).asUInt)).asUInt + flowIdx),//emul = 4,lmul = 2
-      "b011001".U -> ((uopIdx(1,0) << Log2Num((16.U >> eew(1,0)).asUInt)).asUInt + flowIdx),//emul = 8,lmul = 2
-      "b011010".U -> ((uopIdx(0  ) << Log2Num((16.U >> eew(1,0)).asUInt)).asUInt + flowIdx) //emul = 8,lmul = 4
-    )))}
-}
-
-object AddrFLowCnt {
-  def apply (emul: UInt, lmul:UInt, sew:UInt, uopIdx: UInt, flowIdx: UInt):UInt = {
-    (LookupTree(Cat(lmul,emul),List(
-      "b001000".U -> ((uopIdx(0  ) << Log2Num((MulDataSize(lmul) >> sew(1,0)).asUInt)).asUInt + flowIdx),//lmul = 2, emul = 1
-      "b010000".U -> ((uopIdx(1,0) << Log2Num((MulDataSize(lmul) >> sew(1,0)).asUInt)).asUInt + flowIdx),//lmul = 4, emul = 1
-      "b011000".U -> ((uopIdx(2,0) << Log2Num((MulDataSize(lmul) >> sew(1,0)).asUInt)).asUInt + flowIdx),//lmul = 8, emul = 1
-      "b010001".U -> ((uopIdx(0  ) << Log2Num((MulDataSize(lmul) >> sew(1,0)).asUInt)).asUInt + flowIdx),//lmul = 4, emul = 2
-      "b011001".U -> ((uopIdx(1,0) << Log2Num((MulDataSize(lmul) >> sew(1,0)).asUInt)).asUInt + flowIdx),//lmul = 8, emul = 2
-      "b011011".U -> ((uopIdx(0  ) << Log2Num((MulDataSize(lmul) >> sew(1,0)).asUInt)).asUInt + flowIdx) //lmul = 8, emul = 4
-    )))}
-}
-*/
-
-object RegFLowCnt {
-  def apply (emulNum: UInt, lmulNum:UInt, eew: UInt, uopIdx: UInt, flowIdx: UInt):UInt = {
-    (LookupTree(emulNum/lmulNum,List(
-      //"d1".U -> flowIdx,
-      "d2".U -> ((uopIdx(0  ) << Log2Num((16.U >> eew(1,0)).asUInt)).asUInt + flowIdx),
-      "d4".U -> ((uopIdx(1,0) << Log2Num((16.U >> eew(1,0)).asUInt)).asUInt + flowIdx),
-      "d8".U -> ((uopIdx(2,0) << Log2Num((16.U >> eew(1,0)).asUInt)).asUInt + flowIdx)
-    )))}
-}
-
-object AddrFLowCnt {
-  def apply (emulNum: UInt, lmulNum:UInt, sew:UInt, uopIdx: UInt, flowIdx: UInt):UInt = {
-    (LookupTree(lmulNum/emulNum,List(
-      "d1".U -> flowIdx,
-      "d2".U -> ((uopIdx(0  ) << Log2Num((16.U >> sew(1,0)).asUInt)).asUInt + flowIdx),
-      "d4".U -> ((uopIdx(1,0) << Log2Num((16.U >> sew(1,0)).asUInt)).asUInt + flowIdx),
-      "d8".U -> ((uopIdx(2,0) << Log2Num((16.U >> sew(1,0)).asUInt)).asUInt + flowIdx)
-    )))}
-}
-
 
 object Log2Num {
   def apply (num: UInt): UInt = {
@@ -469,22 +365,6 @@ object Log2Num {
       4.U  -> 2.U,
       2.U  -> 1.U,
       1.U  -> 0.U
-    )))}
-}
-
-/**
-  * when emul is less than or equal to 1, the nf is equal to uopIdx;
-  * when emul is equal to 2, the nf is equal to uopIdx >> 1, and so on*/
-object GenSegNfIdx {
-  def apply (mul: UInt, uopIdx: UInt):UInt = { // mul means lmul or emul
-    (LookupTree(mul,List(
-      "b101".U -> uopIdx,           // 1/8
-      "b110".U -> uopIdx,           // 1/4
-      "b111".U -> uopIdx,           // 1/2
-      "b000".U -> uopIdx,           // 1
-      "b001".U -> (uopIdx >> 1.U),  // 2
-      "b010".U -> (uopIdx >> 2.U),  // 4
-      "b011".U -> (uopIdx >> 3.U),  // 8
     )))}
 }
 
@@ -506,34 +386,6 @@ object GenUopIdxInField {
       "b011".U -> uopIdx(2, 0)
     ))
   }
-}
-
-object GenSegNfIdxMul {
-  def apply (emul: UInt, lmul: UInt, uopIdx: UInt):UInt = {
-    (LookupTree(Cat(emul,lmul),List(
-      "b001000".U -> uopIdx(5,1), //emul = 2,lmul = 1
-      "b010000".U -> uopIdx(5,2), //emul = 4,lmul = 1
-      "b011000".U -> uopIdx(5,3), //emul = 8,lmul = 1
-      "b010001".U -> uopIdx(5,3), //emul = 4,lmul = 2
-      "b011001".U -> uopIdx(5,4), //emul = 8,lmul = 2
-      "b011010".U -> uopIdx(5,5)  //emul = 8,lmul = 4
-    )))}
-}
-
-/**
-  * when emul is less than or equal to 1, only one segEmulIdx, so the segEmulIdx is 0.U;
-  * when emul is equal to 2, the segEmulIdx is equal to uopIdx(0), and so on*/
-object GenSegMulIdx {
-  def apply (mul: UInt, uopIdx: UInt): UInt = { //mul means emul or lmul
-    (LookupTree(mul,List(
-      "b101".U -> 0.U        , // 1/8
-      "b110".U -> 0.U        , // 1/4
-      "b111".U -> 0.U        , // 1/2
-      "b000".U -> 0.U        , // 1
-      "b001".U -> uopIdx(0)  , // 2
-      "b010".U -> uopIdx(1,0), // 4
-      "b011".U -> uopIdx(2,0)  //8
-    )))}
 }
 
 //eew decode
@@ -594,14 +446,6 @@ object GenRealFlowLog2 extends VLSUConstants {
   * inside the uop.
   */
 object GenElemIdx extends VLSUConstants {
-  // def apply(alignedType: UInt, uopIdx: UInt, flowIdx: UInt): UInt = {
-  //   LookupTree(
-  //     alignedType,
-  //     (0 until alignTypes).map(i =>
-  //       i.U -> ((uopIdx ## flowIdx(log2Up(VLENB) - i - 1, 0))(log2Up(maxElemNum) - 1, 0))
-  //     )
-  //   )
-  // }
   def apply(instType: UInt, emul: UInt, lmul: UInt, eew: UInt, sew: UInt,
     uopIdx: UInt, flowIdx: UInt): UInt = {
     val isIndexed = instType(0).asBool
@@ -671,30 +515,6 @@ object GenUopByteMask {
   }
 }
 
-object GenFlowMaskInsideReg extends VLSUConstants {
-  def apply(alignedType: UInt, elemIdx: UInt): UInt = {
-    LookupTree(alignedType, List(
-      "b00".U -> UIntToOH(elemIdx(3, 0)),
-      "b01".U -> FillInterleaved(2, UIntToOH(elemIdx(2, 0))),
-      "b10".U -> FillInterleaved(4, UIntToOH(elemIdx(1, 0))),
-      "b11".U -> FillInterleaved(8, UIntToOH(elemIdx(0)))
-    ))
-  }
-}
-
-// TODO: delete this in vs flow queue
-object GenEleIdx {
-  def apply(instType: UInt, emul: UInt, lmul: UInt, eew: UInt, sew: UInt, uopIdx: UInt, flowIdx: UInt): UInt = {
-    val eleIdx = Wire(UInt(7.W))
-    when (instType(1,0) === "b00".U || instType(1,0) === "b10".U || emul.asSInt > lmul.asSInt) {
-      eleIdx := (uopIdx << Log2Num((MulDataSize(emul) >> eew(1,0)).asUInt)).asUInt + flowIdx
-    }.otherwise {
-      eleIdx := (uopIdx << Log2Num((MulDataSize(lmul) >> sew(1,0)).asUInt)).asUInt + flowIdx
-    }
-    eleIdx
-  }
-}
-
 object GenVdIdxInField extends VLSUConstants {
   def apply(instType: UInt, emul: UInt, lmul: UInt, uopIdx: UInt): UInt = {
     val vdIdx = Wire(UInt(log2Up(maxMUL).W))
@@ -715,24 +535,3 @@ object GenVdIdxInField extends VLSUConstants {
     vdIdx
   }
 }
-
-// object GenFieldMask {
-//   def apply(instType: UInt, emul: UInt, lmul: UInt, eew: UInt, sew: UInt): UInt = {
-//     val isSegment = instType(2)
-//     val isIndexed = instType(0)
-//     val alignedType = Mux(isIndexed, sew(1, 0), eew(1, 0))
-//     val mul = Mux(isIndexed, lmul, emul)
-//     val vlmaxMask = GenVLMAX(lmul, sew) - 1.U
-//     val mulMask = LookupTree(alignedType, List(
-//       "b00".U -> "b01111".U,
-//       "b01".U -> "b00111".U,
-//       "b10".U -> "b00011".U,
-//       "b11".U -> "b00001".U
-//     ))
-//     Mux(
-//       !isSegment || mul.asSInt >= 0.S,
-//       vlmaxMask,
-//       mulMask
-//     )
-//   }
-// }

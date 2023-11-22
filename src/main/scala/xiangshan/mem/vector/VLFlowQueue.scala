@@ -78,11 +78,6 @@ class VlflowBundle(implicit p: Parameters) extends VecFlowBundle {
   val elemIdxInsideVd = UInt(elemIdxBits.W)
 }
 
-class unitStrideBundle(implicit p: Parameters) extends VLSUBundle {
-  val robIdx = new RobPtr
-  val counter = UInt(4.W)
-}
-
 class VlFlowQueue(implicit p: Parameters) extends VLSUModule
 {
   val io = IO(new VlFlowQueueIOBundle())
