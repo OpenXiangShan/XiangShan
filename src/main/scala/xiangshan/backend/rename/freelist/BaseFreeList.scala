@@ -39,7 +39,7 @@ abstract class BaseFreeList(size: Int)(implicit p: Parameters) extends XSModule 
     val freeReq = Input(Vec(CommitWidth, Bool()))
     val freePhyReg = Input(Vec(CommitWidth, UInt(PhyRegIdxWidth.W)))
 
-    val commit = Input(new RobCommitIO)
+    val commit = Input(new RabCommitIO)
 
     val snpt = Input(new SnapshotPort)
 

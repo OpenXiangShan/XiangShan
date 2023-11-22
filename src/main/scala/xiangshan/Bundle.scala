@@ -357,29 +357,11 @@ class CSRSpecialIO(implicit p: Parameters) extends XSBundle {
   val interrupt = Output(Bool())
 }
 
-class RabCommitInfo(implicit p: Parameters) extends XSBundle {
-  val ldest = UInt(6.W)
-  val pdest = UInt(PhyRegIdxWidth.W)
-  val old_pdest = UInt(PhyRegIdxWidth.W)
-  val rfWen = Bool()
-  val fpWen = Bool()
-  val vecWen = Bool()
-  val isMove = Bool()
-}
-
-class RabCommitIO(implicit p: Parameters) extends XSBundle {
-  val isCommit = Bool()
-  val commitValid = Vec(CommitWidth, Bool())
-  val isWalk = Bool()
-  val walkValid = Vec(CommitWidth, Bool())
-  val info = Vec(CommitWidth, new RabCommitInfo)
-}
-
 class DiffCommitIO(implicit p: Parameters) extends XSBundle {
   val isCommit = Bool()
   val commitValid = Vec(CommitWidth * MaxUopSize, Bool())
 
-  val info = Vec(CommitWidth * MaxUopSize, new RobCommitInfo)
+  val info = Vec(CommitWidth * MaxUopSize, new RabCommitInfo)
 }
 
 class RobCommitInfo(implicit p: Parameters) extends XSBundle {
@@ -415,6 +397,30 @@ class RobCommitIO(implicit p: Parameters) extends XSBundle {
 
   val info = Vec(CommitWidth, new RobCommitInfo)
   val robIdx = Vec(CommitWidth, new RobPtr)
+
+  def hasWalkInstr: Bool = isWalk && walkValid.asUInt.orR
+  def hasCommitInstr: Bool = isCommit && commitValid.asUInt.orR
+}
+
+class RabCommitInfo(implicit p: Parameters) extends XSBundle {
+  val ldest = UInt(6.W)
+  val pdest = UInt(PhyRegIdxWidth.W)
+  val rfWen = Bool()
+  val fpWen = Bool()
+  val vecWen = Bool()
+  val isMove = Bool()
+}
+
+class RabCommitIO(implicit p: Parameters) extends XSBundle {
+  val isCommit = Bool()
+  val commitValid = Vec(CommitWidth, Bool())
+
+  val isWalk = Bool()
+  // valid bits optimized for walk
+  val walkValid = Vec(CommitWidth, Bool())
+
+  val info = Vec(CommitWidth, new RabCommitInfo)
+  val robIdx = OptionWrapper(!env.FPGAPlatform, Vec(CommitWidth, new RobPtr))
 
   def hasWalkInstr: Bool = isWalk && walkValid.asUInt.orR
   def hasCommitInstr: Bool = isCommit && commitValid.asUInt.orR

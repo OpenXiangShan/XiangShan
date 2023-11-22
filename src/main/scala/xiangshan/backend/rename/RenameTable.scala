@@ -181,7 +181,7 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
 
   val io = IO(new Bundle() {
     val redirect = Input(Bool())
-    val robCommits = Input(new RobCommitIO)
+    val rabCommits = Input(new RabCommitIO)
     val diffCommits = if (backendParams.debugEn) Some(Input(new DiffCommitIO)) else None
     val intReadPorts = Vec(RenameWidth, Vec(3, new RatReadPort))
     val intRenamePorts = Vec(RenameWidth, Input(new RatWritePort))
@@ -219,17 +219,17 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   intRat.io.snpt := io.snpt
   io.int_old_pdest := intRat.io.old_pdest
   io.int_need_free := intRat.io.need_free
-  val intDestValid = io.robCommits.info.map(_.rfWen)
+  val intDestValid = io.rabCommits.info.map(_.rfWen)
   for ((arch, i) <- intRat.io.archWritePorts.zipWithIndex) {
-    arch.wen  := io.robCommits.isCommit && io.robCommits.commitValid(i) && intDestValid(i)
-    arch.addr := io.robCommits.info(i).ldest
-    arch.data := io.robCommits.info(i).pdest
+    arch.wen  := io.rabCommits.isCommit && io.rabCommits.commitValid(i) && intDestValid(i)
+    arch.addr := io.rabCommits.info(i).ldest
+    arch.data := io.rabCommits.info(i).pdest
     XSError(arch.wen && arch.addr === 0.U && arch.data =/= 0.U, "pdest for $0 should be 0\n")
   }
   for ((spec, i) <- intRat.io.specWritePorts.zipWithIndex) {
-    spec.wen  := io.robCommits.isWalk && io.robCommits.walkValid(i) && intDestValid(i)
-    spec.addr := io.robCommits.info(i).ldest
-    spec.data := io.robCommits.info(i).pdest
+    spec.wen  := io.rabCommits.isWalk && io.rabCommits.walkValid(i) && intDestValid(i)
+    spec.addr := io.rabCommits.info(i).ldest
+    spec.data := io.rabCommits.info(i).pdest
     XSError(spec.wen && spec.addr === 0.U && spec.data =/= 0.U, "pdest for $0 should be 0\n")
   }
   for ((spec, rename) <- intRat.io.specWritePorts.zip(io.intRenamePorts)) {
@@ -256,14 +256,14 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   io.fp_old_pdest := fpRat.io.old_pdest
 
   for ((arch, i) <- fpRat.io.archWritePorts.zipWithIndex) {
-    arch.wen  := io.robCommits.isCommit && io.robCommits.commitValid(i) && io.robCommits.info(i).fpWen
-    arch.addr := io.robCommits.info(i).ldest
-    arch.data := io.robCommits.info(i).pdest
+    arch.wen  := io.rabCommits.isCommit && io.rabCommits.commitValid(i) && io.rabCommits.info(i).fpWen
+    arch.addr := io.rabCommits.info(i).ldest
+    arch.data := io.rabCommits.info(i).pdest
   }
   for ((spec, i) <- fpRat.io.specWritePorts.zipWithIndex) {
-    spec.wen  := io.robCommits.isWalk && io.robCommits.walkValid(i) && io.robCommits.info(i).fpWen
-    spec.addr := io.robCommits.info(i).ldest
-    spec.data := io.robCommits.info(i).pdest
+    spec.wen  := io.rabCommits.isWalk && io.rabCommits.walkValid(i) && io.rabCommits.info(i).fpWen
+    spec.addr := io.rabCommits.info(i).ldest
+    spec.data := io.rabCommits.info(i).pdest
   }
   for ((spec, rename) <- fpRat.io.specWritePorts.zip(io.fpRenamePorts)) {
     when (rename.wen) {
@@ -294,14 +294,14 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     dontTouch(vecRat.io)
   }
   for ((arch, i) <- vecRat.io.archWritePorts.zipWithIndex) {
-    arch.wen  := io.robCommits.isCommit && io.robCommits.commitValid(i) && io.robCommits.info(i).vecWen
-    arch.addr := io.robCommits.info(i).ldest
-    arch.data := io.robCommits.info(i).pdest
+    arch.wen  := io.rabCommits.isCommit && io.rabCommits.commitValid(i) && io.rabCommits.info(i).vecWen
+    arch.addr := io.rabCommits.info(i).ldest
+    arch.data := io.rabCommits.info(i).pdest
   }
   for ((spec, i) <- vecRat.io.specWritePorts.zipWithIndex) {
-    spec.wen  := io.robCommits.isWalk && io.robCommits.walkValid(i) && io.robCommits.info(i).vecWen
-    spec.addr := io.robCommits.info(i).ldest
-    spec.data := io.robCommits.info(i).pdest
+    spec.wen  := io.rabCommits.isWalk && io.rabCommits.walkValid(i) && io.rabCommits.info(i).vecWen
+    spec.addr := io.rabCommits.info(i).ldest
+    spec.data := io.rabCommits.info(i).pdest
   }
   for ((spec, rename) <- vecRat.io.specWritePorts.zip(io.vecRenamePorts)) {
     when (rename.wen) {

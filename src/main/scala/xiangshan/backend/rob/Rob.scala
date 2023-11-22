@@ -358,7 +358,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     // exu + brq
     val writeback: MixedVec[ValidIO[ExuOutput]] = Flipped(params.genWrite2CtrlBundles)
     val commits = Output(new RobCommitIO)
-    val rabCommits = Output(new RobCommitIO)
+    val rabCommits = Output(new RabCommitIO)
     val diffCommits = if (backendParams.debugEn) Some(Output(new DiffCommitIO)) else None
     val isVsetFlushPipe = Output(Bool())
     val vconfigPdest = Output(UInt(PhyRegIdxWidth.W))
