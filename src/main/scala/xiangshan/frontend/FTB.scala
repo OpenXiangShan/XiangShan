@@ -308,18 +308,30 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
       val update_write_alloc = Input(Bool())
     })
 
-    // Extract holdRead logic to fix bug that update read override predict read result
-    val ftb = Module(new SRAMTemplate(new FTBEntryWithTag, set = numSets, way = numWays, shouldReset = true, holdRead = false, singlePort = true))
-    val ftb_r_entries = ftb.io.r.resp.data.map(_.entry)
 
-    val pred_rdata   = HoldUnless(ftb.io.r.resp.data, RegNext(io.req_pc.valid && !io.update_access))
-    ftb.io.r.req.valid := io.req_pc.valid || io.u_req_pc.valid // io.s0_fire
-    ftb.io.r.req.bits.setIdx := Mux(io.u_req_pc.valid, ftbAddr.getIdx(io.u_req_pc.bits), ftbAddr.getIdx(io.req_pc.bits)) // s0_idx
+    // FTB is FTBEntryWithTag x numWays width, which is 80 x 4 = 320 in KunMingHu
+    // 320 is too large for timing, so use numWays 80-width SRAM instead
+    val ftb = Seq.fill(numWays)(
+      Module(new SRAMTemplate(new FTBEntryWithTag,
+        set = numSets,
+        way = 1,
+        shouldReset = true,
+        holdRead = false, // Extract holdRead logic to fix bug that update read override predict read result
+        singlePort = true)
+      ))
+    val ftb_r_entries = ftb.map(_.io.r.resp.data(0).entry)
+
+    val pred_rdata =
+      HoldUnless(VecInit(ftb.map(_.io.r.resp.data(0))), RegNext(io.req_pc.valid && !io.update_access))
+    ftb.foreach(_.io.r.req.valid := io.req_pc.valid || io.u_req_pc.valid) // io.s0_fire
+    ftb.foreach(
+      _.io.r.req.bits.setIdx := Mux(io.u_req_pc.valid, ftbAddr.getIdx(io.u_req_pc.bits), ftbAddr.getIdx(io.req_pc.bits))
+    ) // s0_idx
 
     assert(!(io.req_pc.valid && io.u_req_pc.valid))
 
-    io.req_pc.ready := ftb.io.r.req.ready
-    io.u_req_pc.ready := ftb.io.r.req.ready
+    io.req_pc.ready := ftb.map(_.io.r.req.ready).reduce(_&&_)
+    io.u_req_pc.ready := ftb.map(_.io.r.req.ready).reduce(_&&_)
 
     val req_tag = RegEnable(ftbAddr.getTag(io.req_pc.bits)(tagSize-1, 0), io.req_pc.valid)
     val req_idx = RegEnable(ftbAddr.getIdx(io.req_pc.bits), io.req_pc.valid)
@@ -335,7 +347,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     val hit_way = OHToUInt(total_hits)
 
     val u_total_hits = VecInit((0 until numWays).map(b =>
-        ftb.io.r.resp.data(b).tag === u_req_tag && ftb.io.r.resp.data(b).entry.valid && RegNext(io.update_access)))
+        ftb(b).io.r.resp.data(0).tag === u_req_tag && ftb(b).io.r.resp.data(0).entry.valid && RegNext(io.update_access)))
     val u_hit = u_total_hits.reduce(_||_)
     // val hit_way_1h = VecInit(PriorityEncoderOH(total_hits))
     val u_hit_way = OHToUInt(u_total_hits)
@@ -408,7 +420,9 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
       XSPerfAccumulate(f"ftb_hit_way$i", hit && !io.update_access && hit_way === i.U)
     }
 
-    ftb.io.w.apply(u_valid, u_data, u_idx, u_mask)
+    ftb.zipWithIndex.map{
+      case (bank, idx) => bank.io.w.apply(u_valid && u_mask(idx), u_data, u_idx, u_mask(idx))
+    }
 
     // for replacer
     write_set := u_idx
@@ -416,7 +430,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     write_way.bits := Mux(io.update_write_alloc, allocWriteWay, io.update_write_way)
 
     // print hit entry info
-    Mux1H(total_hits, ftb.io.r.resp.data).display(true.B)
+    Mux1H(total_hits, ftb.map(_.io.r.resp.data(0))).display(true.B)
   } // FTBBank
 
   val ftbBank = Module(new FTBBank(numSets, numWays))
