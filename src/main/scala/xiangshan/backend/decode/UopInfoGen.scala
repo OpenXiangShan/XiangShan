@@ -170,6 +170,7 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
 
   //number of uop
   val numOfUop = MuxLookup(typeOfSplit, 1.U(log2Up(MaxUopSize + 1).W), Array(
+    UopSplitType.VSET -> 2.U,
     UopSplitType.VEC_0XV -> 2.U,
     UopSplitType.VEC_VVV -> lmul,
     UopSplitType.VEC_VFV -> lmul,
@@ -212,6 +213,7 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
 
   // number of writeback num
   val numOfWB = MuxLookup(typeOfSplit, 1.U(log2Up(MaxUopSize + 1).W), Array(
+    UopSplitType.VSET -> 2.U,
     UopSplitType.VEC_0XV -> 2.U,
     UopSplitType.VEC_VVV -> lmul,
     UopSplitType.VEC_VFV -> lmul,
@@ -252,7 +254,7 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     UopSplitType.VEC_MVNR -> (vmvn +& 1.U),
   ))
 
-  isComplex := (numOfUop > 1.U) || (typeOfSplit === UopSplitType.DIR)
+  isComplex := typeOfSplit =/= UopSplitType.SCA_SIM
   io.out.uopInfo.numOfUop := numOfUop
   io.out.uopInfo.numOfWB := numOfWB
   io.out.uopInfo.lmul := lmul

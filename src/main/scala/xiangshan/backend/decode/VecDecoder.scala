@@ -152,7 +152,7 @@ case class OPFVF(
   }
 }
 
-case class VSET(vli: Boolean, vtypei: Boolean, fuOp: BitPat, flushPipe: Boolean, selImm: BitPat, uopSplitType: BitPat = UopSplitType.DIR) extends XSDecodeBase {
+case class VSET(vli: Boolean, vtypei: Boolean, fuOp: BitPat, flushPipe: Boolean, selImm: BitPat, uopSplitType: BitPat = UopSplitType.VSET) extends XSDecodeBase {
   def generate() : List[BitPat] = {
     val src1 = if (vli) SrcType.imm else SrcType.xp
     val src2 = if (vtypei) SrcType.imm else SrcType.xp

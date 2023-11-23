@@ -633,7 +633,7 @@ class DecodeUnitIO(implicit p: Parameters) extends XSBundle {
     val vtype = Input(new VType)
   }
 //  val vconfig = Input(UInt(XLEN.W))
-    val deq = new DecodeUnitDeqIO
+  val deq = new DecodeUnitDeqIO
   val csrCtrl = Input(new CustomCSRCtrlIO)
 }
 

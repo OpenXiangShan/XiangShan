@@ -643,7 +643,7 @@ package object xiangshan {
 
   object UopSplitType {
     def SCA_SIM          = "b000000".U //
-    def DIR              = "b010001".U // dirty: vset
+    def VSET             = "b010001".U // dirty: vset
     def VEC_VVV          = "b010010".U // VEC_VVV
     def VEC_VXV          = "b010011".U // VEC_VXV
     def VEC_0XV          = "b010100".U // VEC_0XV

@@ -92,24 +92,17 @@ trait VectorConstants {
 }
 
 class DecodeUnitCompIO(implicit p: Parameters) extends XSBundle {
-  val simple = new Bundle {
-    val decodedInst = Input(new DecodedInst)
-    val isComplex = Input(Bool())
-    val uopInfo = Input(new UopInfo)
-  }
-  val vtype = Input(new VType)
-  val in0pc = Input(UInt(VAddrBits.W))
-  val isComplex = Input(Vec(DecodeWidth, Bool()))
-  val validFromIBuf = Input(Vec(DecodeWidth, Bool()))
-  val readyFromRename = Input(Vec(RenameWidth, Bool()))
-  val deq = new Bundle {
-    val decodedInsts = Output(Vec(RenameWidth, new DecodedInst))
-    val isVset = Output(Bool())
-    val readyToIBuf = Output(Vec(DecodeWidth, Bool()))
-    val validToRename = Output(Vec(RenameWidth, Bool()))
-    val complexNum = Output(UInt(3.W))
-  }
+  val redirect = Input(Bool())
   val csrCtrl = Input(new CustomCSRCtrlIO)
+  // When the first inst in decode vector is complex inst, pass it in
+  val in = Flipped(DecoupledIO(new Bundle {
+    val simpleDecodedInst = new DecodedInst
+    val uopInfo = new UopInfo
+  }))
+  val out = new Bundle {
+    val complexDecodedInsts = Vec(RenameWidth, DecoupledIO(new DecodedInst))
+  }
+  val complexNum = Output(UInt(3.W))
 }
 
 /**
@@ -118,27 +111,32 @@ class DecodeUnitCompIO(implicit p: Parameters) extends XSBundle {
 class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnitConstants with VectorConstants {
   val io = IO(new DecodeUnitCompIO)
 
+  // alias
+  private val inReady = io.in.ready
+  private val inValid = io.in.valid
+  private val inDecodedInst = WireInit(io.in.bits.simpleDecodedInst)
+  private val inUopInfo = io.in.bits.uopInfo
+  private val outValids = io.out.complexDecodedInsts.map(_.valid)
+  private val outReadys = io.out.complexDecodedInsts.map(_.ready)
+  private val outDecodedInsts = io.out.complexDecodedInsts.map(_.bits)
+  private val outComplexNum = io.complexNum
+
   val maxUopSize = MaxUopSize
+  val latchedInst = RegEnable(inDecodedInst, inValid && inReady)
+  val latchedUopInfo = RegEnable(inUopInfo, inValid && inReady)
   //input bits
-  private val inst: XSInstBitFields = io.simple.decodedInst.instr.asTypeOf(new XSInstBitFields)
+  private val instFields: XSInstBitFields = latchedInst.instr.asTypeOf(new XSInstBitFields)
 
-  val src1 = Cat(0.U(1.W), inst.RS1)
-  val src2 = Cat(0.U(1.W), inst.RS2)
-  val dest = Cat(0.U(1.W), inst.RD)
+  val src1 = Cat(0.U(1.W), instFields.RS1)
+  val src2 = Cat(0.U(1.W), instFields.RS2)
+  val dest = Cat(0.U(1.W), instFields.RD)
 
-  val nf    = inst.NF
-  val width = inst.WIDTH(1, 0)
-
-  //output bits
-  val decodedInsts = Wire(Vec(RenameWidth, new DecodedInst))
-  val validToRename = Wire(Vec(RenameWidth, Bool()))
-  val readyToIBuf = Wire(Vec(DecodeWidth, Bool()))
-  val complexNum = Wire(UInt(3.W))
+  val nf    = instFields.NF
+  val width = instFields.WIDTH(1, 0)
 
   //output of DecodeUnit
-  val decodedInstsSimple = Wire(new DecodedInst)
-  val numOfUop = Wire(UInt(log2Up(maxUopSize+1).W))
-  val numOfWB = Wire(UInt(log2Up(maxUopSize+1).W))
+  val numOfUop = Wire(UInt(log2Up(maxUopSize).W))
+  val numOfWB = Wire(UInt(log2Up(maxUopSize).W))
   val lmul = Wire(UInt(4.W))
   val isVsetSimple = Wire(Bool())
 
@@ -146,57 +144,55 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   indexedLSRegOffset.map(_.src := 0.U)
 
   //pre decode
-  decodedInstsSimple := io.simple.decodedInst
-  lmul := io.simple.uopInfo.lmul
-  isVsetSimple := io.simple.decodedInst.isVset
-  val vlmulReg = io.simple.decodedInst.vpu.vlmul
-  val vsewReg = io.simple.decodedInst.vpu.vsew
+  lmul := latchedUopInfo.lmul
+  isVsetSimple := latchedInst.isVset
+  val vlmulReg = latchedInst.vpu.vlmul
+  val vsewReg = latchedInst.vpu.vsew
   when(isVsetSimple) {
     when(dest === 0.U && src1 === 0.U) {
-      decodedInstsSimple.fuOpType := VSETOpType.keepVl(io.simple.decodedInst.fuOpType)
+      latchedInst.fuOpType := VSETOpType.keepVl(inDecodedInst.fuOpType)
     }.elsewhen(src1 === 0.U) {
-      decodedInstsSimple.fuOpType := VSETOpType.setVlmax(io.simple.decodedInst.fuOpType)
+      latchedInst.fuOpType := VSETOpType.setVlmax(inDecodedInst.fuOpType)
     }
-    when(io.vtype.illegal){
-      decodedInstsSimple.flushPipe := true.B
+    when(inDecodedInst.vpu.vill) {
+      latchedInst.exceptionVec(ExceptionNO.illegalInstr) := true.B
     }
   }
   //Type of uop Div
-  val typeOfSplit = decodedInstsSimple.uopSplitType
-  val src1Type = decodedInstsSimple.srcType(0)
+  val typeOfSplit = latchedInst.uopSplitType
+  val src1Type = latchedInst.srcType(0)
   val src1IsImm = src1Type === SrcType.imm
 
-  when(typeOfSplit === UopSplitType.DIR) {
-    numOfUop := Mux(dest =/= 0.U, 2.U,
-      Mux(src1 =/= 0.U, 1.U,
-        Mux(VSETOpType.isVsetvl(decodedInstsSimple.fuOpType), 2.U, 1.U)))
-    numOfWB := Mux(dest =/= 0.U, 2.U,
-      Mux(src1 =/= 0.U, 1.U,
-        Mux(VSETOpType.isVsetvl(decodedInstsSimple.fuOpType), 2.U, 1.U)))
-  } .otherwise {
-    numOfUop := io.simple.uopInfo.numOfUop
-    numOfWB := io.simple.uopInfo.numOfWB
-  }
+  numOfUop := latchedUopInfo.numOfUop
+  numOfWB := latchedUopInfo.numOfWB
+
+  //uops dispatch
+  val s_idle :: s_active :: Nil = Enum(2)
+  val state = RegInit(s_idle)
+  val stateNext = WireDefault(state)
+  val numDecodedUop = RegInit(0.U(log2Up(maxUopSize).W))
+  val uopRes = RegInit(0.U(log2Up(maxUopSize).W))
+  val uopResNext = WireInit(uopRes)
 
   //uop div up to maxUopSize
   val csBundle = Wire(Vec(maxUopSize, new DecodedInst))
-  csBundle.map { case dst =>
-    dst := decodedInstsSimple
+  csBundle.foreach { case dst =>
+    dst := latchedInst
+    dst.numUops := latchedUopInfo.numOfUop
+    dst.numWB := latchedUopInfo.numOfWB
     dst.firstUop := false.B
     dst.lastUop := false.B
   }
 
-  csBundle(0).numUops := numOfUop
-  csBundle(0).numWB := numOfWB
   csBundle(0).firstUop := true.B
   csBundle(numOfUop - 1.U).lastUop := true.B
 
   switch(typeOfSplit) {
-    is(UopSplitType.DIR) {
+    is(UopSplitType.VSET) {
       when(isVsetSimple) {
         when(dest =/= 0.U) {
           csBundle(0).fuType := FuType.vsetiwi.U
-          csBundle(0).fuOpType := VSETOpType.switchDest(decodedInstsSimple.fuOpType)
+          csBundle(0).fuOpType := VSETOpType.switchDest(latchedInst.fuOpType)
           csBundle(0).flushPipe := false.B
           csBundle(0).rfWen := true.B
           csBundle(0).vecWen := false.B
@@ -205,11 +201,11 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           csBundle(1).vecWen := true.B
         }.elsewhen(src1 =/= 0.U) {
           csBundle(0).ldest := VCONFIG_IDX.U
-        }.elsewhen(VSETOpType.isVsetvli(decodedInstsSimple.fuOpType)) {
+        }.elsewhen(VSETOpType.isVsetvli(latchedInst.fuOpType)) {
           csBundle(0).fuType := FuType.vsetfwf.U
           csBundle(0).srcType(0) := SrcType.vp
           csBundle(0).lsrc(0) := VCONFIG_IDX.U
-        }.elsewhen(VSETOpType.isVsetvl(decodedInstsSimple.fuOpType)) {
+        }.elsewhen(VSETOpType.isVsetvl(latchedInst.fuOpType)) {
           csBundle(0).srcType(0) := SrcType.reg
           csBundle(0).srcType(1) := SrcType.imm
           csBundle(0).lsrc(1) := 0.U
@@ -990,7 +986,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       import yunsuan.VfaluType
       val vlmul = vlmulReg
       val vsew = vsewReg
-      val isWiden = decodedInstsSimple.fuOpType === VfaluType.vfwredosum
+      val isWiden = latchedInst.fuOpType === VfaluType.vfwredosum
       when(vlmul === VLmul.m8) {
         when(vsew === VSew.e64) {
           val vlmax = 16
@@ -1573,7 +1569,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
 
       csBundle(1).srcType(0) := SrcType.reg
       csBundle(1).srcType(1) := SrcType.imm
-      csBundle(1).lsrc(0) := decodedInstsSimple.lsrc(1)
+      csBundle(1).lsrc(0) := latchedInst.lsrc(1)
       csBundle(1).lsrc(1) := 0.U
       csBundle(1).ldest := VECTOR_TMP_REG_LMUL.U
       csBundle(1).fuType := FuType.i2f.U
@@ -1651,7 +1647,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           * writeback only once for all these uops. However, these uops share the same lsrc(2)/old vd and the same
           * ldest/vd that is equal to old vd, which leads to data dependence between the uops. Therefore there will be
           * deadlock for indexed instructions with emul > lmul.
-          * 
+          *
           * Assume N = emul/lmul. To break the deadlock, only the first uop will read old vd as lsrc(2), and the rest
           * N-1 uops will read temporary vector register.
           */
@@ -1667,72 +1663,79 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
     }
   }
 
-  //uops dispatch
-  val s_normal :: s_ext :: Nil = Enum(2)
-  val state = RegInit(s_normal)
-  val state_next = WireDefault(state)
-  val uopRes = RegInit(0.U)
-
   //readyFromRename Counter
-  val readyCounter = PriorityMuxDefault(io.readyFromRename.map(x => !x).zip((0 to (RenameWidth - 1)).map(_.U)), RenameWidth.U)
+  val readyCounter = PriorityMuxDefault(outReadys.map(x => !x).zip((0 until RenameWidth).map(_.U)), RenameWidth.U)
+
+  // The left uops of the complex inst in ComplexDecoder can be send out this cycle
+  val thisAllOut = uopRes <= readyCounter
 
   switch(state) {
-    is(s_normal) {
-      state_next := Mux(io.validFromIBuf(0) && (numOfUop > readyCounter) && (readyCounter =/= 0.U), s_ext, s_normal)
+    is(s_idle) {
+      when (inValid) {
+        stateNext := s_active
+        uopResNext := inUopInfo.numOfUop
+      }
     }
-    is(s_ext) {
-      state_next := Mux(io.validFromIBuf(0) && (uopRes > readyCounter), s_ext, s_normal)
+    is(s_active) {
+      when (thisAllOut) {
+        when (inValid) {
+          stateNext := s_active
+          uopResNext := inUopInfo.numOfUop
+        }.otherwise {
+          stateNext := s_idle
+          uopResNext := 0.U
+        }
+      }.otherwise {
+        stateNext := s_active
+        uopResNext := uopRes - readyCounter
+      }
     }
   }
 
-  state := state_next
+  state := Mux(io.redirect, s_idle, stateNext)
+  uopRes := Mux(io.redirect, 0.U, uopResNext)
 
-  val uopRes0 = Mux(state === s_normal, numOfUop, uopRes)
-  val uopResJudge = Mux(state === s_normal,
-    io.validFromIBuf(0) && (readyCounter =/= 0.U) && (uopRes0 > readyCounter),
-    io.validFromIBuf(0) && (uopRes0 > readyCounter))
-  uopRes := Mux(uopResJudge, uopRes0 - readyCounter, 0.U)
+  val complexNum = Mux(uopRes > readyCounter, readyCounter, uopRes)
 
   for(i <- 0 until RenameWidth) {
-    decodedInsts(i) := MuxCase(csBundle(i), Seq(
-      (state === s_normal) -> csBundle(i),
-      (state === s_ext) -> Mux((i.U + numOfUop -uopRes) < maxUopSize.U, csBundle(i.U + numOfUop - uopRes), csBundle(maxUopSize - 1))
-    ).toSeq)
+    outValids(i) := complexNum > i.U
+    outDecodedInsts(i) := Mux((i.U + numOfUop - uopRes) < maxUopSize.U, csBundle(i.U + numOfUop - uopRes), csBundle(maxUopSize - 1))
   }
 
-  val validSimple = Wire(Vec(DecodeWidth, Bool()))
-  validSimple.zip(io.validFromIBuf.zip(io.isComplex)).map{ case (dst, (src1, src2)) => dst := src1 && !src2 }
-  val notInf = Wire(Vec(DecodeWidth, Bool()))
-  notInf.drop(1).zip(io.validFromIBuf.drop(1).zip(validSimple.drop(1))).map{ case (dst, (src1, src2)) => dst := !src1 || src2 }
-  notInf(0) := !io.validFromIBuf(0) || validSimple(0) || (io.isComplex(0) && io.in0pc === io.simple.decodedInst.pc)
-  val notInfVec = Wire(Vec(DecodeWidth, Bool()))
-  notInfVec.zipWithIndex.map{ case (dst, i) => dst := Cat(notInf.take(i + 1)).andR}
+  outComplexNum := Mux(state === s_active, complexNum, 0.U)
+  inReady := state === s_idle || state === s_active && thisAllOut
 
-  complexNum := Mux(io.validFromIBuf(0) && readyCounter.orR ,
-    Mux(uopRes0 > readyCounter, readyCounter, uopRes0),
-    0.U)
-  validToRename.zipWithIndex.foreach{
-    case(dst, i) =>
-      val validFix = Mux(complexNum.orR, validSimple((i+1).U - complexNum), validSimple(i))
-      dst := MuxCase(false.B, Seq(
-        (io.validFromIBuf(0) && readyCounter.orR && uopRes0 > readyCounter) -> Mux(readyCounter > i.U, true.B, false.B),
-        (io.validFromIBuf(0) && readyCounter.orR && !(uopRes0 > readyCounter)) -> Mux(complexNum > i.U, true.B, validFix && notInfVec(i.U - complexNum) && io.readyFromRename(i)),
-      ).toSeq)
-  }
-
-  readyToIBuf.zipWithIndex.foreach {
-    case (dst, i) =>
-      val readyToIBuf0 = Mux(io.isComplex(0), io.in0pc === io.simple.decodedInst.pc, true.B)
-      dst := MuxCase(true.B, Seq(
-        (io.validFromIBuf(0) && uopRes0 > readyCounter || !readyCounter.orR) -> false.B,
-        (io.validFromIBuf(0) && !(uopRes0 > readyCounter) && readyCounter.orR) -> (if (i==0) readyToIBuf0 else Mux(RenameWidth.U - complexNum >= i.U, notInfVec(i) && validSimple(i) && io.readyFromRename(i), false.B))
-      ).toSeq)
-  }
-
-  io.deq.decodedInsts := decodedInsts
-  io.deq.isVset := isVsetSimple
-  io.deq.complexNum := complexNum
-  io.deq.validToRename := validToRename
-  io.deq.readyToIBuf := readyToIBuf
-
+//  val validSimple = Wire(Vec(DecodeWidth, Bool()))
+//  validSimple.zip(io.validFromIBuf.zip(io.isComplex)).map{ case (dst, (src1, src2)) => dst := src1 && !src2 }
+//  val notInf = Wire(Vec(DecodeWidth, Bool()))
+//  notInf.drop(1).zip(io.validFromIBuf.drop(1).zip(validSimple.drop(1))).map{ case (dst, (src1, src2)) => dst := !src1 || src2 }
+//  notInf(0) := !io.validFromIBuf(0) || validSimple(0) || (io.isComplex(0) && io.in0pc === io.simple.decodedInst.pc)
+//  val notInfVec = Wire(Vec(DecodeWidth, Bool()))
+//  notInfVec.zipWithIndex.map{ case (dst, i) => dst := Cat(notInf.take(i + 1)).andR}
+//
+//  complexNum := Mux(io.validFromIBuf(0) && readyCounter.orR ,
+//    Mux(uopRes0 > readyCounter, readyCounter, uopRes0),
+//    0.U)
+//  validToRename.zipWithIndex.foreach{
+//    case(dst, i) =>
+//      val validFix = Mux(complexNum.orR, validSimple((i+1).U - complexNum), validSimple(i))
+//      dst := MuxCase(false.B, Seq(
+//        (io.validFromIBuf(0) && readyCounter.orR && uopRes0 > readyCounter) -> Mux(readyCounter > i.U, true.B, false.B),
+//        (io.validFromIBuf(0) && readyCounter.orR && !(uopRes0 > readyCounter)) -> Mux(complexNum > i.U, true.B, validFix && notInfVec(i.U - complexNum) && io.readyFromRename(i)),
+//      ).toSeq)
+//  }
+//
+//  readyToIBuf.zipWithIndex.foreach {
+//    case (dst, i) =>
+//      val readyToIBuf0 = Mux(io.isComplex(0), io.in0pc === io.simple.decodedInst.pc, true.B)
+//      dst := MuxCase(true.B, Seq(
+//        (io.validFromIBuf(0) && uopRes0 > readyCounter || !readyCounter.orR) -> false.B,
+//        (io.validFromIBuf(0) && !(uopRes0 > readyCounter) && readyCounter.orR) -> (if (i==0) readyToIBuf0 else Mux(RenameWidth.U - complexNum >= i.U, notInfVec(i) && validSimple(i) && io.readyFromRename(i), false.B))
+//      ).toSeq)
+//  }
+//
+//  io.deq.decodedInsts := decodedInsts
+//  io.deq.complexNum := complexNum
+//  io.deq.validToRename := validToRename
+//  io.deq.readyToIBuf := readyToIBuf
 }

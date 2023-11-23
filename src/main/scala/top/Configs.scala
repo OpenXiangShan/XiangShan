@@ -98,7 +98,7 @@ class MinimalConfig(n: Int = 1) extends Config(
           numWrite = None,
         ),
         vfPreg = VfPregParams(
-          numEntries = 192,
+          numEntries = 160,
           numRead = Some(14),
           numWrite = None,
         ),

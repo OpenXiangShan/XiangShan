@@ -245,7 +245,7 @@ class CtrlBlockImp(
   decode.io.walkVType.bits := walkVType.asTypeOf(new VType)
   decode.io.walkVType.valid := rob.io.commits.isWalk && isVsetSeq.reduce(_ || _)
 
-  decode.io.isRedirect := s1_s3_redirect.valid
+  decode.io.redirect := s1_s3_redirect.valid || s2_s4_pendingRedirectValid
 
   decode.io.in.zip(io.frontend.cfVec).foreach { case (decodeIn, frontendCf) =>
     decodeIn.valid := frontendCf.valid

@@ -5,23 +5,31 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.backend.fu.vector.Bundles.VType
-import xiangshan.backend.decode.isa.bitfield.InstVType
+import xiangshan.backend.decode.isa.bitfield.{InstVType, Riscv32BitInst, XSInstBitFields}
 import xiangshan.backend.fu.VsetModule
 
 class VTypeGen(implicit p: Parameters) extends XSModule{
-  val io = IO(new Bundle(){
-    val firstInstr = Flipped(Valid(new Bundle() {
-      val instr = UInt(32.W)
-      val isVset = Bool()
-    }))
-    val isRedirect = Input(Bool())
+  val io = IO(new Bundle {
+    val insts = Flipped(Vec(DecodeWidth, ValidIO(UInt(32.W))))
+    val redirect = Input(Bool())
     val commitVType = Flipped(Valid(new VType))
     val walkVType   = Flipped(Valid(new VType))
-
+    val canUpdateVType = Input(Bool())
     val vtype = Output(new VType)
   })
-  private val VTYPE_IMM_MSB = 27
-  private val VTYPE_IMM_LSB = 20
+  private val instValidVec = io.insts.map(_.valid)
+  private val instFieldVec = io.insts.map(_.bits.asTypeOf(new XSInstBitFields))
+  // Only check vsetvli and vsetivli here.
+  // vsetvl will flush pipe, need not to generate new vtype in decode stage.
+  private val isVsetVec = VecInit(instFieldVec.map(fields =>
+    (fields.OPCODE === "b1010111".U) && (fields.WIDTH === "b111".U) && (
+      fields.ALL(31) === "b0".U ||
+      fields.ALL(31, 30) === "b11".U
+    )
+  ).zip(instValidVec).map { case (isVset, valid) => valid && isVset})
+
+  private val firstVsetOH: Vec[Bool] = VecInit(PriorityEncoderOH(isVsetVec))
+  private val firstVsetInstField: XSInstBitFields = PriorityMux(firstVsetOH, instFieldVec)
 
   private val vtypeArch = RegInit(0.U.asTypeOf(new VType))
   private val vtypeSpec = RegInit(0.U.asTypeOf(new VType))
@@ -32,25 +40,32 @@ class VTypeGen(implicit p: Parameters) extends XSModule{
   vtypeArch := vtypeArchNext
   vtypeSpec := vtypeSpecNext
 
-  private val instVType: InstVType = io.firstInstr.bits.instr(VTYPE_IMM_MSB, VTYPE_IMM_LSB).asTypeOf(new InstVType)
-  private val vtype: VType = VType.fromInstVType(instVType)
+  private val instVType: InstVType = firstVsetInstField.ZIMM_VTYPE.asTypeOf(new InstVType)
+  private val vtypei: VType = VType.fromInstVType(instVType)
 
   private val vsetModule = Module(new VsetModule)
   vsetModule.io.in.avl := 0.U
-  vsetModule.io.in.vtype := vtype
+  vsetModule.io.in.vtype := vtypei
   vsetModule.io.in.func := VSETOpType.uvsetvcfg_xi
+
+  private val vtypeNew = vsetModule.io.out.vconfig.vtype
 
   when(io.commitVType.valid) {
     vtypeArchNext := io.commitVType.bits
   }
 
-  when(io.isRedirect) {
+  private val inHasVset = isVsetVec.asUInt.orR
+
+  when(io.redirect) {
     vtypeSpecNext := vtypeArch
   }.elsewhen(io.walkVType.valid) {
     vtypeSpecNext := io.walkVType.bits
-  }.elsewhen(io.firstInstr.valid && io.firstInstr.bits.isVset) {
-    vtypeSpecNext := vsetModule.io.out.vconfig.vtype
+  }.elsewhen(inHasVset && io.canUpdateVType) {
+    vtypeSpecNext := vtypeNew
   }
 
-  io.vtype := vtypeSpecNext
+  io.vtype := vtypeSpec
+
+  // just make verilog more readable
+  dontTouch(isVsetVec)
 }

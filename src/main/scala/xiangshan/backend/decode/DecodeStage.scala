@@ -33,8 +33,11 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   // params alias
   private val numVecRegSrc = backendParams.numVecRegSrc
   private val numVecRatPorts = numVecRegSrc + 1 // +1 dst
+  private val v0Idx = 0
+  private val vconfigIdx = VCONFIG_IDX
 
   val io = IO(new Bundle() {
+    val redirect = Input(Bool())
     // from Ibuffer
     val in = Vec(DecodeWidth, Flipped(DecoupledIO(new StaticInst)))
     // to Rename
@@ -47,7 +50,6 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     val csrCtrl = Input(new CustomCSRCtrlIO)
     val fusion = Vec(DecodeWidth - 1, Input(Bool()))
     // vtype update
-    val isRedirect = Input(Bool())
     val commitVType = Flipped(Valid(new VType))
     val walkVType = Flipped(Valid(new VType))
     val stallReason = new Bundle {
@@ -56,57 +58,83 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     }
   })
 
-  private val v0Idx = 0
-  private val vconfigIdx = VCONFIG_IDX
+  // io alias
+  private val outReadys = io.out.map(_.ready)
+  private val inValids = io.in.map(_.valid)
+  private val inValid = VecInit(inValids).asUInt.orR
+  private val outValids = io.out.map(_.valid)
+  private val outValid = VecInit(outValids).asUInt.orR
+  //readyFromRename Counter
+  val readyCounter = PriorityMuxDefault(outReadys.map(x => !x).zip((0 until RenameWidth).map(_.U)), RenameWidth.U)
 
   val decoderComp = Module(new DecodeUnitComp)
   val decoders = Seq.fill(DecodeWidth)(Module(new DecodeUnit))
   val vtypeGen = Module(new VTypeGen)
+
   val debug_globalCounter = RegInit(0.U(XLEN.W))
 
-  val isComplex = Wire(Vec(DecodeWidth, Bool()))
-  val uopComplex = Wire(Vec(DecodeWidth, new DecodedInst))
-  val isFirstVset = Wire(Bool())
-  val complexNum = Wire(UInt(3.W))
-
-  val uopSimple = Wire(Vec(DecodeWidth, new DecodedInst))
-  val isComplexValid = VecInit(isComplex.zipWithIndex.map{
-    case(iscomplex,i) => iscomplex && io.in(i).valid && !io.in(i).ready && (if (i==0) true.B else io.out(i).ready)
-  })
-  val oldComplex = Wire(new DecodeUnitDeqIO)
-  oldComplex := PriorityMuxDefault(isComplexValid.zip(decoders.map(_.io.deq)), 0.U.asTypeOf(oldComplex))
-  val oldComplexReg = RegNext(oldComplex)
-  //Comp 1
-  decoderComp.io.simple := oldComplexReg
-  decoderComp.io.csrCtrl := io.csrCtrl
-  decoderComp.io.vtype := vtypeGen.io.vtype
-  decoderComp.io.in0pc := io.in(0).bits.pc
-  decoderComp.io.isComplex := isComplex
-  decoderComp.io.validFromIBuf.zip(io.in).map { case (dst, src) => dst := src.valid }
-  decoderComp.io.readyFromRename.zip(io.out).map { case (dst, src) => dst := src.ready }
-  uopComplex := decoderComp.io.deq.decodedInsts
-  io.out.zip(decoderComp.io.deq.validToRename).map { case (dst, src) => dst.valid := src }
-  io.in.zip(decoderComp.io.deq.readyToIBuf).map { case (dst, src) => dst.ready := src }
-  isFirstVset := decoderComp.io.deq.isVset
-  complexNum := decoderComp.io.deq.complexNum
-
   //Simple 6
-  decoders.zip(io.in).map { case (dst, src) => dst.io.enq.ctrlFlow := src.bits }
-  decoders.map { case dst => dst.io.csrCtrl := io.csrCtrl }
-  decoders.map { case dst => dst.io.enq.vtype := vtypeGen.io.vtype }
-  isComplex.zip(decoders.map(_.io.deq.isComplex)).map { case (dst, src) => dst := src }
-  uopSimple.zip(decoders.map(_.io.deq.decodedInst)).map { case (dst, src) => dst := src }
+  decoders.zip(io.in).foreach { case (dst, src) => dst.io.enq.ctrlFlow := src.bits }
+  decoders.foreach { case dst => dst.io.csrCtrl := io.csrCtrl }
+  decoders.foreach { case dst => dst.io.enq.vtype := vtypeGen.io.vtype }
+  val isComplexVec = VecInit(inValids.zip(decoders.map(_.io.deq.isComplex)).map { case (valid, isComplex) => valid && isComplex })
+  val isSimpleVec = VecInit(inValids.zip(decoders.map(_.io.deq.isComplex)).map { case (valid, isComplex) => valid && !isComplex })
+  val simpleDecodedInst = VecInit(decoders.map(_.io.deq.decodedInst))
 
-  vtypeGen.io.firstInstr.valid :=  io.in(0).valid
-  vtypeGen.io.firstInstr.bits.instr := io.in(0).bits.instr
-  vtypeGen.io.firstInstr.bits.isVset := decoderComp.io.deq.isVset
-  vtypeGen.io.isRedirect := io.isRedirect
+  val complexNum = Wire(UInt(3.W))
+  // (0, 1, 2, 3, 4, 5) + complexNum
+  val complexNumAddLocation: Vec[UInt] = VecInit((0 until DecodeWidth).map(x => (x.U +& complexNum)))
+  val noMoreThanRenameReady: Vec[Bool] = VecInit(complexNumAddLocation.map(x => x <= readyCounter))
+  val complexValid = VecInit((isComplexVec zip noMoreThanRenameReady).map(x => x._1 & x._2)).asUInt.orR
+  val complexInst = PriorityMuxDefault(isComplexVec.zip(decoders.map(_.io.deq.decodedInst)), 0.U.asTypeOf(new DecodedInst))
+  val complexUopInfo = PriorityMuxDefault(isComplexVec.zip(decoders.map(_.io.deq.uopInfo)), 0.U.asTypeOf(new UopInfo))
+
+  vtypeGen.io.insts.zipWithIndex.foreach { case (inst, i) =>
+    inst.valid := io.in(i).valid
+    inst.bits := io.in(i).bits.instr
+  }
+  vtypeGen.io.canUpdateVType := decoderComp.io.in.fire && decoderComp.io.in.bits.simpleDecodedInst.isVset
+  vtypeGen.io.redirect := io.redirect
   vtypeGen.io.commitVType := io.commitVType
   vtypeGen.io.walkVType := io.walkVType
 
-  io.out.zip(0 until RenameWidth).map { case (dst, i) =>
-    val uopSimpleFix = Mux(complexNum.orR, uopSimple((i + 1).U - complexNum), uopSimple(i))
-    dst.bits := Mux(complexNum > i.U, uopComplex(i), uopSimpleFix)
+  //Comp 1
+  decoderComp.io.redirect := io.redirect
+  decoderComp.io.csrCtrl := io.csrCtrl
+  // The input inst of decoderComp is latched last cycle.
+  // Set input empty, if there is no complex inst latched last cycle.
+  decoderComp.io.in.valid := complexValid
+  decoderComp.io.in.bits.simpleDecodedInst := complexInst
+  decoderComp.io.in.bits.uopInfo := complexUopInfo
+  decoderComp.io.out.complexDecodedInsts.zipWithIndex.foreach { case (out, i) => out.ready := io.out(i).ready }
+
+  val complexDecodedInst = VecInit(decoderComp.io.out.complexDecodedInsts.map(_.bits))
+  val complexDecodedInstValid = VecInit(decoderComp.io.out.complexDecodedInsts.map(_.valid))
+  complexNum := decoderComp.io.complexNum
+
+  // Vec(S,S,S,C,S,S) -> Vec(0,0,0,0,1,1)
+  val simplePrefixVec = VecInit((0 until DecodeWidth).map(i => VecInit(isSimpleVec.take(i + 1)).asUInt.andR))
+  // Vec(S,S,S,C,S,S) -> Vec(0,0,0,1,0,0)
+  val firstComplexOH: Vec[Bool] = VecInit(PriorityEncoderOH(isComplexVec))
+
+  io.in.zipWithIndex.foreach { case (in, i) =>
+    in.ready := !io.redirect && (
+      simplePrefixVec(i) && (i.U +& complexNum) < readyCounter ||
+      firstComplexOH(i) && (i.U +& complexNum) <= readyCounter && decoderComp.io.in.ready
+    )
+  }
+
+  val finalDecodedInst = Wire(Vec(DecodeWidth, new DecodedInst))
+  val finalDecodedInstValid = Wire(Vec(DecodeWidth, Bool()))
+
+  for (i <- 0 until DecodeWidth) {
+    finalDecodedInst(i) := Mux(complexNum > i.U, complexDecodedInst(i), simpleDecodedInst(i.U - complexNum))
+    finalDecodedInstValid(i) := Mux(complexNum > i.U, complexDecodedInstValid(i), simplePrefixVec(i.U - complexNum))
+  }
+
+  io.out.zipWithIndex.foreach { case (inst, i) =>
+    inst.valid := finalDecodedInstValid(i)
+    inst.bits := finalDecodedInst(i)
   }
 
   for (i <- 0 until DecodeWidth) {
@@ -158,12 +186,21 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   XSPerfHistogram("out_fire_range", PopCount(io.out.map(_.fire)), true.B, 0, DecodeWidth + 1, 1)
 
   val fusionValid = RegNext(io.fusion)
-  val inFire = io.in.map(in => RegNext(in.valid && !in.ready))
+  val inValidNotReady = io.in.map(in => RegNext(in.valid && !in.ready))
   val perfEvents = Seq(
     ("decoder_fused_instr", PopCount(fusionValid)       ),
-    ("decoder_waitInstr",   PopCount(inFire)            ),
+    ("decoder_waitInstr",   PopCount(inValidNotReady)            ),
     ("decoder_stall_cycle", hasValid && !io.out(0).ready),
     ("decoder_utilization", PopCount(io.in.map(_.valid))),
   )
   generatePerfEvent()
+
+  // for more readable verilog
+  dontTouch(isSimpleVec)
+  dontTouch(isComplexVec)
+  dontTouch(simplePrefixVec)
+  dontTouch(complexValid)
+  dontTouch(complexNum)
+  dontTouch(readyCounter)
+  dontTouch(firstComplexOH)
 }
