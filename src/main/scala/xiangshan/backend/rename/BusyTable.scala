@@ -1,18 +1,18 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
-* Copyright (c) 2020-2021 Peng Cheng Laboratory
-*
-* XiangShan is licensed under Mulan PSL v2.
-* You can use this software according to the terms and conditions of the Mulan PSL v2.
-* You may obtain a copy of Mulan PSL v2 at:
-*          http://license.coscl.org.cn/MulanPSL2
-*
-* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-*
-* See the Mulan PSL v2 for more details.
-***************************************************************************************/
+ * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+ * Copyright (c) 2020-2021 Peng Cheng Laboratory
+ *
+ * XiangShan is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *          http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ *
+ * See the Mulan PSL v2 for more details.
+ ***************************************************************************************/
 
 package xiangshan.backend.rename
 
@@ -30,6 +30,7 @@ import xiangshan.backend.datapath.{DataSource}
 class BusyTableReadIO(implicit p: Parameters) extends XSBundle {
   val req = Input(UInt(PhyRegIdxWidth.W))
   val resp = Output(Bool())
+  val loadDependency = Vec(LoadPipelineWidth, Output(UInt(3.W)))
 }
 
 class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB: PregWB)(implicit p: Parameters, params: SchdBlockParams) extends XSModule with HasPerfEvents {
@@ -42,28 +43,56 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
     val wakeUp: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpInValidBundle)
     // cancelFromDatapath
     val cancel = Vec(backendParams.numExu, Flipped(ValidIO(new CancelSignal)))
+    // cancelFromMem
+    val ldCancel = Vec(backendParams.LduCnt, Flipped(new LoadCancelIO))
     // read preg state
     val read = Vec(numReadPorts, new BusyTableReadIO)
   })
 
-  val wakeUpReg = Reg(params.genIQWakeUpInValidBundle)
+  val loadDependency = RegInit(0.U.asTypeOf(Vec(numPhyPregs, Vec(LoadPipelineWidth, UInt(3.W)))))
+  val shiftLoadDependency = Wire(Vec(io.wakeUp.size, Vec(LoadPipelineWidth, UInt(3.W))))
   val table = RegInit(0.U(numPhyPregs.W))
   val tableUpdate = Wire(Vec(numPhyPregs, Bool()))
-  val wakeUpFilterLS = io.wakeUp.filter(x => (x.bits.exuIdx != backendParams.getExuIdx("LDU0")) && (x.bits.exuIdx != backendParams.getExuIdx("LDU1")) ) //TODO
+  val wakeupOHVec = Wire(Vec(numPhyPregs, UInt(io.wakeUp.size.W)))
 
   def reqVecToMask(rVec: Vec[Valid[UInt]]): UInt = {
     ParallelOR(rVec.map(v => Mux(v.valid, UIntToOH(v.bits), 0.U)))
   }
 
+  shiftLoadDependency.zip(io.wakeUp.map(_.bits.loadDependency)).zip(params.wakeUpInExuSources.map(_.name)).foreach {
+    case ((deps, originalDeps), name) => deps.zip(originalDeps).zipWithIndex.foreach {
+      case ((dep, originalDep), deqPortIdx) =>
+        if (name.contains("LDU") && name.replace("LDU", "").toInt == deqPortIdx)
+          dep := (originalDep << 2).asUInt | 2.U
+        else
+          dep := originalDep << 1
+    }
+  }
+
+  wakeupOHVec.zipWithIndex.foreach{ case (wakeupOH, idx) =>
+    val tmp = pregWB match {
+      case _: IntWB => io.wakeUp.map(x => x.valid && x.bits.rfWen && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), io.ldCancel))
+      case _: VfWB => io.wakeUp.map(x => x.valid && (x.bits.fpWen || x.bits.vecWen) && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), io.ldCancel))
+    }
+    wakeupOH := VecInit(tmp.toSeq).asUInt
+  }
   val wbMask = reqVecToMask(io.wbPregs)
   val allocMask = reqVecToMask(io.allocPregs)
-  val wakeUpMask = pregWB match {
-    case _: IntWB => ParallelOR(wakeUpFilterLS.map(x => Mux(x.valid && x.bits.rfWen && !x.bits.loadDependency.asUInt.orR, UIntToOH(x.bits.pdest), 0.U)).toSeq) //TODO: dont implement "load -> wakeUp other -> wakeUp BusyTable" now
-    case _: VfWB => ParallelOR(wakeUpFilterLS.map(x => Mux(x.valid && (x.bits.fpWen || x.bits.vecWen) && !x.bits.loadDependency.asUInt.orR, UIntToOH(x.bits.pdest), 0.U)).toSeq)
-  }
+  val wakeUpMask = VecInit(wakeupOHVec.map(_.orR).toSeq).asUInt
   val cancelMask = pregWB match {
     case _: IntWB => ParallelOR(io.cancel.map(x => Mux(x.valid && x.bits.rfWen, UIntToOH(x.bits.pdest), 0.U)))
     case _: VfWB => ParallelOR(io.cancel.map(x => Mux(x.valid && (x.bits.fpWen || x.bits.vecWen), UIntToOH(x.bits.pdest), 0.U)))
+  }
+  val ldCancelMask = loadDependency.map(x => LoadShouldCancel(Some(x), io.ldCancel))
+
+  loadDependency.zipWithIndex.foreach{ case (ldDp, idx) =>
+    when(allocMask(idx) || cancelMask(idx) || wbMask(idx) || ldCancelMask(idx)) {
+      ldDp := 0.U.asTypeOf(ldDp)
+    }.elsewhen(wakeUpMask(idx)) {
+      ldDp := Mux1H(wakeupOHVec(idx), shiftLoadDependency)
+    }.otherwise {
+      ldDp := VecInit(ldDp.map(x => x(x.getWidth - 2, 0) << 1))
+    }
   }
 
   /*
@@ -76,10 +105,10 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
   the bypass state lasts for a maximum of one cycle, cancel(=> busy) or else(=> regFile)
    */
   tableUpdate.zipWithIndex.foreach{ case (update, idx) =>
-    when(allocMask(idx) || cancelMask(idx)) {
-      update := true.B
+    when(allocMask(idx) || cancelMask(idx) || ldCancelMask(idx)) {
+      update := true.B                                    //busy
     }.elsewhen(wakeUpMask(idx) || wbMask(idx)) {
-      update := false.B
+      update := false.B                                   //ready
     }.otherwise {
       update := table(idx)
     }
@@ -87,10 +116,10 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
 
   io.read.foreach{ case res =>
     res.resp := !table(res.req)
+    res.loadDependency := loadDependency(res.req)
   }
 
   table := tableUpdate.asUInt
-  wakeUpReg := io.wakeUp
 
   val oddTable = table.asBools.zipWithIndex.filter(_._2 % 2 == 1).map(_._1)
   val evenTable = table.asBools.zipWithIndex.filter(_._2 % 2 == 0).map(_._1)

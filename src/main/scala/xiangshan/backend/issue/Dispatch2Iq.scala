@@ -221,6 +221,8 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
 
   private val intSrcStateVec = if (io.readIntState.isDefined) Some(Wire(Vec(numEnq * numRegSrc, SrcState()))) else None
   private val vfSrcStateVec  = if (io.readVfState.isDefined)  Some(Wire(Vec(numEnq * numRegSrc, SrcState()))) else None
+  private val intSrcLoadDependency = OptionWrapper(io.readIntState.isDefined, Wire(Vec(numEnq * numRegSrc, Vec(LoadPipelineWidth, UInt(3.W)))))
+  private val vfSrcLoadDependency = OptionWrapper(io.readVfState.isDefined, Wire(Vec(numEnq * numRegSrc, Vec(LoadPipelineWidth, UInt(3.W)))))
 
   // We always read physical register states when in gives the instructions.
   // This usually brings better timing.
@@ -229,6 +231,7 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
       s"[Dispatch2IqArithImp] io.readIntState.get.size: ${io.readIntState.get.size}, psrc size: ${reqPsrcVec.size}")
     io.readIntState.get.map(_.req).zip(reqPsrcVec).foreach(x => x._1 := x._2)
     io.readIntState.get.map(_.resp).zip(intSrcStateVec.get).foreach(x => x._2 := x._1)
+    io.readIntState.get.map(_.loadDependency).zip(intSrcLoadDependency.get).foreach(x => x._2 := x._1)
   }
 
   if (io.readVfState.isDefined) {
@@ -236,6 +239,7 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
       s"[Dispatch2IqArithImp] io.readVfState.get.size: ${io.readVfState.get.size}, psrc size: ${reqPsrcVec.size}")
     io.readVfState.get.map(_.req).zip(reqPsrcVec).foreach(x => x._1 := x._2)
     io.readVfState.get.map(_.resp).zip(vfSrcStateVec.get).foreach(x => x._2 := x._1)
+    io.readVfState.get.map(_.loadDependency).zip(vfSrcLoadDependency.get).foreach(x => x._2 := x._1)
   }
 
   uopsIn
@@ -251,6 +255,21 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
           SrcType.isNotReg(srcType) -> true.B,
         ))
   }
+  uopsIn
+    .flatMap(x => x.bits.srcLoadDependency.take(numRegSrc) zip x.bits.srcType.take(numRegSrc))
+    .zip(
+      intSrcLoadDependency.getOrElse(VecInit(Seq.fill(numEnq * numRegSrc)(0.U.asTypeOf(Vec(LoadPipelineWidth, UInt(3.W)))).toSeq)) zip vfSrcLoadDependency.getOrElse(VecInit(Seq.fill(numEnq * numRegSrc)(0.U.asTypeOf(Vec(LoadPipelineWidth, UInt(3.W)))).toSeq))
+    )
+    .foreach {
+      case ((ldp, srcType), (intLdp, vfLdp)) =>
+        when(SrcType.isXp(srcType)) {
+          ldp := intLdp
+        }.elsewhen(SrcType.isVfp(srcType)) {
+          ldp := vfLdp
+        }.otherwise {
+          ldp := 0.U.asTypeOf(ldp)
+        }
+    }
 
 
   XSPerfAccumulate("in_valid", PopCount(io.in.map(_.valid)))
@@ -400,10 +419,14 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
 
   val intSrcStateVec = Wire(Vec(numEnq, Vec(numRegSrc, SrcState())))
   val vfSrcStateVec = Wire(Vec(numEnq, Vec(numRegSrc, SrcState())))
+  val intSrcLoadDependency = Wire(Vec(numEnq, Vec(numRegSrc, Vec(LoadPipelineWidth, UInt(3.W)))))
+  val vfSrcLoadDependency = Wire(Vec(numEnq, Vec(numRegSrc, Vec(LoadPipelineWidth, UInt(3.W)))))
 
   // srcState is read from outside and connected directly
   io.readIntState.get.map(_.resp).zip(intSrcStateVec.flatten).foreach(x => x._2 := x._1)
   io.readVfState.get.map(_.resp).zip(vfSrcStateVec.flatten).foreach(x => x._2 := x._1)
+  io.readIntState.get.map(_.loadDependency).zip(intSrcLoadDependency.flatten).foreach(x => x._2 := x._1)
+  io.readVfState.get.map(_.loadDependency).zip(vfSrcLoadDependency.flatten).foreach(x => x._2 := x._1)
 
   s0_in.flatMap(x => x.bits.srcState.take(numRegSrc) zip x.bits.srcType.take(numRegSrc)).zip(intSrcStateVec.flatten zip vfSrcStateVec.flatten).foreach {
     case ((state: UInt, srcType), (intState, vfState)) =>
@@ -412,6 +435,16 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
         SrcType.isVfp(srcType) -> vfState,
         SrcType.isNotReg(srcType) -> true.B,
       ))
+  }
+  s0_in.flatMap(x => x.bits.srcLoadDependency.take(numRegSrc) zip x.bits.srcType.take(numRegSrc)).zip(intSrcLoadDependency.flatten zip vfSrcLoadDependency.flatten).foreach {
+    case ((ldp, srcType), (intLdp, vfLdp)) =>
+      when(SrcType.isXp(srcType)) {
+        ldp := intLdp
+      }.elsewhen(SrcType.isVfp(srcType)) {
+        ldp := vfLdp
+      }.otherwise {
+        ldp := 0.U.asTypeOf(ldp)
+      }
   }
 
   for ((iqPorts, iqIdx) <- s0_out.zipWithIndex) {
@@ -424,6 +457,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
         s0_out(iqIdx)(portIdx).valid := selectOut(iqIdx)(portIdx).valid && !Mux1H(selectIdxOH(iqIdx)(portIdx), s0_blockedVec)
         s0_out(iqIdx)(portIdx).bits := selectOut(iqIdx)(portIdx).bits // the same as Mux1H(selectIdxOH(iqIdx)(portIdx), s0_in.map(_.bits))
         s0_out(iqIdx)(portIdx).bits.srcState := Mux1H(selectIdxOH(iqIdx)(portIdx), s0_in.map(_.bits.srcState))
+        s0_out(iqIdx)(portIdx).bits.srcLoadDependency := Mux1H(selectIdxOH(iqIdx)(portIdx), s0_in.map(_.bits.srcLoadDependency))
         s0_out(iqIdx)(portIdx).bits.lqIdx := Mux1H(selectIdxOH(iqIdx)(portIdx), s0_enqLsq_resp.map(_.lqIdx))
         s0_out(iqIdx)(portIdx).bits.sqIdx := Mux1H(selectIdxOH(iqIdx)(portIdx), s0_enqLsq_resp.map(_.sqIdx))
       }
