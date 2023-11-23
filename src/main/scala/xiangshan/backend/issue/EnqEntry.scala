@@ -220,7 +220,7 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
       val wakeUpOH = enqDelaySrcWakeUpByIQVec(i)
       enqDelaySrcWakeUpL1ExuOH.get(i) := Mux1H(wakeUpOH, io.enqDelayWakeUpFromIQ.map(x => MathUtils.IntToOH(x.bits.exuIdx).U(backendParams.numExu.W)).toSeq).asBools
       enqDelaySrcTimer.get(i) := Mux(wakeUpValid, 2.U, 3.U)
-      enqDelaySrcLoadDependency.get(i) := Mux1H(wakeUpOH, enqDelayShiftedWakeupLoadDependencyByIQVec)
+      enqDelaySrcLoadDependency.get(i) := Mux(wakeUpValid, Mux1H(wakeUpOH, enqDelayShiftedWakeupLoadDependencyByIQVec), entryReg.status.srcLoadDependency.get(i))
     }
   }
   currentStatus := entryReg.status
