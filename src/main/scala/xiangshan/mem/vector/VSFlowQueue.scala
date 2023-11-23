@@ -65,6 +65,38 @@ object VSFQFeedbackType {
   def apply() = UInt(3.W)
 }
 
+object GenNextSegmentFieldIdx extends VLSUConstants {
+  def apply(fieldIdx: UInt, segmentIdx: UInt, nfields: UInt, offset: UInt): (UInt, UInt) = {
+    assert(offset <= 2.U, "not support offset > 2 in GenNextSegmentFieldIdx")
+    val newFieldIdx = Wire(UInt(fieldBits.W))
+    val newSegmentIdx = Wire(UInt(elemIdxBits.W))
+    
+    when (nfields === 0.U) {
+      newFieldIdx := fieldIdx
+      newSegmentIdx := segmentIdx
+    } .elsewhen (nfields === 1.U) {
+      newFieldIdx := 0.U
+      newSegmentIdx := segmentIdx + offset
+    } .otherwise {
+      val value = fieldIdx +& offset
+      when (value >= nfields) {
+        newFieldIdx := value - nfields
+        newSegmentIdx := segmentIdx + 1.U
+      } .otherwise {
+        newFieldIdx := value
+        newSegmentIdx := segmentIdx
+      }
+    }
+    (newFieldIdx, newSegmentIdx)
+  }
+}
+
+object GenFieldSegmentOffset extends VLSUConstants {
+  def apply(fieldIdx: UInt, segmentIdx: UInt, nSegments: UInt): UInt = {
+    (fieldIdx << OHToUInt(nSegments)) | segmentIdx
+  }
+}
+
 class VSFQFeedback (implicit p: Parameters) extends XSBundle {
   val flowPtr = new VsFlowPtr
   val hit   = Bool()
@@ -97,6 +129,18 @@ class VecStoreFlowEntry (implicit p: Parameters) extends VecFlowBundle {
   val uopQueuePtr = new VsUopPtr
   val paddr = UInt(PAddrBits.W)
   val isLastElem = Bool()
+  val nfields = UInt(fieldBits.W)
+  val nSegments = UInt(elemIdxBits.W)
+  val fieldIdx = UInt(fieldBits.W)
+  val segmentIdx = UInt(elemIdxBits.W)
+
+  def isFirstElem(): Bool = {
+    this.fieldIdx === 0.U && this.segmentIdx === 0.U
+  }
+
+  def isInOrder(fieldIdx: UInt, segmentIdx: UInt): Bool = {
+    this.fieldIdx === fieldIdx && this.segmentIdx === segmentIdx
+  }
 
   def toPipeBundle(thisPtr: VsFlowPtr): VecStorePipeBundle = {
     val pipeBundle = Wire(new VecStorePipeBundle())
@@ -149,7 +193,7 @@ class VsFlowQueueIOBundle(implicit p: Parameters) extends VLSUBundle {
   val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
 }
 
-class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper
+class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQueuePtrHelper
 {
   val io = IO(new VsFlowQueueIOBundle())
 
@@ -175,8 +219,13 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
   val issuePtr = RegInit(VecInit((0 until VecStorePipelineWidth).map(_.U.asTypeOf(new VsFlowPtr))))
   // issue pointers, issuePtr(0) is the exact one
   val writebackPtr = RegInit(VecInit((0 until VecStorePipelineWidth).map(_.U.asTypeOf(new VsFlowPtr))))
+  // retire first pointer
+  val retireFirstPtr = RegInit(0.U.asTypeOf(new VsFlowPtr))
+  // retire pointers, write to sbuffer (if exp) or do nothing (if !exp)
+  // this is not in queue order
+  val retirePtr = RegInit(VecInit((0 until EnsbufferWidth).map(_.U.asTypeOf(new VsFlowPtr))))
   // dequeue pointers, deqPtr(0) is the exact one
-  val deqPtr = RegInit(VecInit((0 until EnsbufferWidth).map(_.U.asTypeOf(new VsFlowPtr))))
+  // val deqPtr = RegInit(VecInit((0 until EnsbufferWidth).map(_.U.asTypeOf(new VsFlowPtr))))
 
   // Data second queue enqueue pointers
   val dataSecondPtr = RegInit(VecInit((0 until VecStorePipelineWidth).map(_.U.asTypeOf(new VsFlowDataPtr))))
@@ -192,11 +241,9 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
   /* Enqueue logic */
 
   // only allow enqueue when free queue terms >= VecStorePipelineWidth(=2)
-  val freeCount = hasFreeEntries(enqPtr(0), deqPtr(0))
+  val freeCount = hasFreeEntries(enqPtr(0), retireFirstPtr)
   val allowEnqueue = !io.redirect.valid && freeCount >= VecStorePipelineWidth.U
-  for (i <- 0 until VecStorePipelineWidth) {
-    io.flowIn(i).ready := allowEnqueue
-  }
+  io.flowIn.foreach(_.ready := allowEnqueue)
 
   val canEnqueue = io.flowIn.map(_.valid)
   val enqueueCancel = io.flowIn.map(_.bits.uop.robIdx.needFlush(io.redirect))
@@ -217,7 +264,6 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
       val thisFlowIn = io.flowIn(i).bits
       flowQueueEntries(enqPtr(i).value) match { case x =>
         x.uopQueuePtr := thisFlowIn.uopQueuePtr
-        // ! This is so inelegant
         x.vaddr := thisFlowIn.vaddr
         x.mask := thisFlowIn.mask
         x.alignedType := thisFlowIn.alignedType
@@ -226,6 +272,10 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
         x.is_first_ele := thisFlowIn.is_first_ele
         x.uop := thisFlowIn.uop
         x.isLastElem := thisFlowIn.isLastElem
+        x.nfields := thisFlowIn.nfields
+        x.nSegments := thisFlowIn.nSegments
+        x.fieldIdx := thisFlowIn.fieldIdx
+        x.segmentIdx := thisFlowIn.segmentIdx
       }
 
       // ? Is there a more elegant way?
@@ -380,50 +430,103 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
   }
   // This part only change false to true.
 
-  /* Dequeue */   
-  val canDequeue = Wire(Vec(EnsbufferWidth, Bool()))
-  // val allowDequeue = Wire(Vec(EnsbufferWidth, Bool()))
-  val allowDequeue = io.sbuffer.map(_.ready)
-  val doDequeue = Wire(Vec(EnsbufferWidth, Bool()))
-  val dequeueCount = PopCount(doDequeue)
+  /* Write to Sbuffer */
+  val canEnsbuffer = Wire(Vec(EnsbufferWidth, Bool()))
+  val allowEnsbuffer = io.sbuffer.map(_.ready)
+  val doEnsbuffer = Wire(Vec(EnsbufferWidth, Bool()))
+  val doRetire = Wire(Vec(EnsbufferWidth, Bool()))
+  val retireCount = PopCount(doRetire)
+
+  val nfields = RegInit(0.U(fieldBits.W))
+  val nSegments = RegInit(0.U(elemIdxBits.W))
+  
+  // this three cur ptr/idx have multiple copies according to ensbufferWidth
+  
+  val curFieldIdx = RegInit(VecInit(List.fill(EnsbufferWidth)(0.U(fieldBits.W))))
+  val curSegmentIdx = RegInit(VecInit(List.fill(EnsbufferWidth)(0.U(elemIdxBits.W))))
+
+  val sIdle :: sDoing :: Nil = Enum(2)
+  val ensbufferState = RegInit(sIdle)
 
   // handshake
   for (i <- 0 until EnsbufferWidth) {
-    val thisPtr = deqPtr(i).value
-    val thisExp = flowQueueEntries(thisPtr).exp
-    io.sbuffer(i).valid := canDequeue(i)
+    val thisPtr = retirePtr(i).value
+    val thisEntry = flowQueueEntries(thisPtr)
+    val thisExp = thisEntry.exp
+    val thisInOrder = 
+      thisEntry.isInOrder(curFieldIdx(i), curSegmentIdx(i)) &&
+      curFieldIdx(i) < nfields && curSegmentIdx(i) < nSegments
+    io.sbuffer(i).valid := canEnsbuffer(i)
 
-    canDequeue(i) := false.B
-    doDequeue(i) := false.B
-    when (flowCommitted(thisPtr)) {
+    canEnsbuffer(i) := false.B
+    doEnsbuffer(i) := false.B
+    doRetire(i) := false.B
+    when (ensbufferState === sDoing && flowCommitted(thisPtr) && thisInOrder) {
       if (i == 0) {
-        canDequeue(i) := thisExp
-        doDequeue(i) := (canDequeue(i) && allowDequeue(i)) || !thisExp
+        canEnsbuffer(i) := thisExp
+        doEnsbuffer(i) := canEnsbuffer(i) && allowEnsbuffer(i)
+        doRetire(i) := doEnsbuffer(i) || !thisExp
       } else {
-        canDequeue(i) := thisExp && canDequeue(i - 1)
-        doDequeue(i) := (canDequeue(i) && allowDequeue(i)) || (!thisExp && doDequeue(i - 1))
+        canEnsbuffer(i) := thisExp && canEnsbuffer(i - 1)
+        doEnsbuffer(i) := canEnsbuffer(i) && allowEnsbuffer(i)
+        doRetire(i) := doEnsbuffer(i) || (!thisExp && doRetire(i - 1))
       }
     }
     // Assuming that if !io.sbuffer(i).ready then !io.sbuffer(i + 1).ready
 
-    when (doDequeue(i)) {
+    when (doRetire(i)) {
       flowAllocated(thisPtr) := false.B
       flowFinished(thisPtr) := false.B
       flowCommitted(thisPtr) := false.B
     }
   }
 
-  // update DequeuePtr
+  // update retirePtr
   for (i <- 0 until EnsbufferWidth) {
-    deqPtr(i) := deqPtr(i) + dequeueCount
+    val (newFieldIdx, newSegmentIdx) = 
+      GenNextSegmentFieldIdx(curFieldIdx(i), curSegmentIdx(i), nfields, retireCount)
+    val nextOffset = GenFieldSegmentOffset(newFieldIdx, newSegmentIdx, nSegments)
+    curFieldIdx(i) := newFieldIdx
+    curSegmentIdx(i) := newSegmentIdx
+    retirePtr(i) := retireFirstPtr + nextOffset
   }
 
+  // Update ensbuffer state
+  // From idle to doing
+  when (ensbufferState === sIdle) {
+    val thisEntry = flowQueueEntries(retireFirstPtr.value)
+    when (flowAllocated(retireFirstPtr.value) && thisEntry.isFirstElem) {
+      ensbufferState := sDoing
+      nfields := thisEntry.nfields
+      nSegments := thisEntry.nSegments
+      for (i <- 0 until EnsbufferWidth) {
+        val (initFieldIdx, initSegmentIdx) = 
+          GenNextSegmentFieldIdx(0.U, 0.U, thisEntry.nfields, i.U)
+        val nextOffset = GenFieldSegmentOffset(initFieldIdx, initSegmentIdx, thisEntry.nSegments)
+        curFieldIdx(i) := initFieldIdx
+        curSegmentIdx(i) := initSegmentIdx
+        retirePtr(i) := retireFirstPtr + nextOffset
+      }
+    }
+  }
+  // From doing to idle
+  when (ensbufferState === sDoing) {
+    for (i <- 0 until EnsbufferWidth) {
+      val thisPtr = retirePtr(i).value
+      val thisEntry = flowQueueEntries(thisPtr)
+      when (doRetire(i) && thisEntry.isLastElem) {
+        ensbufferState := sIdle
+        retireFirstPtr := retirePtr(i) + 1.U
+      }
+    }
+  }
+
+  // ensbuffer data
   for (i <- 0 until EnsbufferWidth) {
-    val thisPtr = deqPtr(i).value
+    val thisPtr = retirePtr(i).value
     val thisEntry = flowQueueEntries(thisPtr)
 
     val thisData = Wire(UInt(VLEN.W))
-    // ! Need some movement in VLEN?
     when (flowSecondAccess(thisPtr)) {
       thisData := dataSecondQueue(dataFirstQueue(thisPtr).data)
     } .otherwise {
@@ -453,9 +556,9 @@ class VsFlowQueue(implicit p: Parameters) extends XSModule with HasCircularQueue
   io.sqRelease.valid := false.B
   io.sqRelease.bits := 0.U.asTypeOf(new SqPtr)
   for (i <- 0 until EnsbufferWidth) {
-    when (doDequeue(i) && flowQueueEntries(deqPtr(i).value).isLastElem) {
+    when (doRetire(i) && flowQueueEntries(retirePtr(i).value).isLastElem) {
       io.sqRelease.valid := true.B
-      io.sqRelease.bits := flowQueueEntries(deqPtr(i).value).uop.sqIdx
+      io.sqRelease.bits := flowQueueEntries(retirePtr(i).value).uop.sqIdx
     }
   }
 
