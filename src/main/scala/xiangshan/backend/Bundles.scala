@@ -163,6 +163,7 @@ object Bundles {
     val commitType      = CommitType()
     // rename
     val srcState        = Vec(numSrc, SrcState())
+    val srcLoadDependency  = Vec(numSrc, Vec(LoadPipelineWidth, UInt(3.W)))
     val psrc            = Vec(numSrc, UInt(PhyRegIdxWidth.W))
     val pdest           = UInt(PhyRegIdxWidth.W)
     val robIdx          = new RobPtr

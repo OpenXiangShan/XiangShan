@@ -195,7 +195,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       enq.valid := s0_doEnqSelValidVec(i)
       val numLsrc = s0_enqBits(i).srcType.size.min(enq.bits.status.srcType.size)
       for (j <- 0 until numLsrc) {
-        enq.bits.status.srcState(j) := s0_enqBits(i).srcState(j)
+        enq.bits.status.srcState(j) := s0_enqBits(i).srcState(j) & !LoadShouldCancel(Some(s0_enqBits(i).srcLoadDependency(j)), io.ldCancel)
         enq.bits.status.psrc(j) := s0_enqBits(i).psrc(j)
         enq.bits.status.srcType(j) := s0_enqBits(i).srcType(j)
         enq.bits.status.dataSources(j).value := DataSource.reg
@@ -213,7 +213,10 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       if (params.hasIQWakeUp) {
         enq.bits.status.srcWakeUpL1ExuOH.get := 0.U.asTypeOf(enq.bits.status.srcWakeUpL1ExuOH.get)
         enq.bits.status.srcTimer.get := 0.U.asTypeOf(enq.bits.status.srcTimer.get)
-        enq.bits.status.srcLoadDependency.get := 0.U.asTypeOf(enq.bits.status.srcLoadDependency.get)
+        enq.bits.status.srcLoadDependency.foreach(_.zipWithIndex.foreach {
+          case (dep, srcIdx) =>
+            dep := VecInit(s0_enqBits(i).srcLoadDependency(srcIdx).map(x => x(x.getWidth - 2, 0) << 1))
+        })
       }
       if (params.inIntSchd && params.AluCnt > 0) {
         // dirty code for lui+addi(w) fusion

@@ -159,6 +159,7 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
       }
       bt.io.wakeUp := io.fromSchedulers.wakeupVec
       bt.io.cancel := io.fromDataPath.cancelToBusyTable
+      bt.io.ldCancel := io.ldCancel
     case None =>
   }
 
@@ -174,6 +175,7 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
       }
       bt.io.wakeUp := io.fromSchedulers.wakeupVec
       bt.io.cancel := io.fromDataPath.cancelToBusyTable
+      bt.io.ldCancel := io.ldCancel
     case None =>
   }
 
@@ -376,7 +378,8 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
     // instead of dispatch2Iq.io.out(x).bits.src*(1)
     val stdIdx = 1
     stdIQEnq.bits.srcState(0) := staIQEnq.bits.srcState(stdIdx)
-    stdIQEnq.bits.srcType(0) := staIQEnq.bits.srcType(stdIdx)
+    stdIQEnq.bits.srcLoadDependency(0) := staIQEnq.bits.srcLoadDependency(1)
+      stdIQEnq.bits.srcType(0) := staIQEnq.bits.srcType(stdIdx)
     stdIQEnq.bits.psrc(0) := staIQEnq.bits.psrc(stdIdx)
     stdIQEnq.bits.sqIdx := staIQEnq.bits.sqIdx
   }
