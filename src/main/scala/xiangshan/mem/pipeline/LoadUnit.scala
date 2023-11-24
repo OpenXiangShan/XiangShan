@@ -573,7 +573,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s1_can_go     = s2_ready
   val s1_fire       = s1_valid && !s1_kill && s1_can_go
 
-  s1_ready := !s1_valid || s1_kill || s2_ready
+  s1_ready := true.B
+  assert(!s0_valid || !(s1_kill || s2_ready), "LoadUnit s0 never stall!")
   when (s0_fire) { s1_valid := true.B }
   .elsewhen (s1_fire) { s1_valid := false.B }
   .elsewhen (s1_kill) { s1_valid := false.B }
@@ -751,7 +752,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_fire   = s2_valid && !s2_kill && s2_can_go
 
   s2_kill := s2_in.uop.robIdx.needFlush(io.redirect)
-  s2_ready := !s2_valid || s2_kill || s3_ready
+  s2_ready := true.B
+  assert(!s1_valid || !(s2_kill || s3_ready), "LoadUnit s1 never stall!")
   when (s1_fire) { s2_valid := true.B }
   .elsewhen (s2_fire) { s2_valid := false.B }
   .elsewhen (s2_kill) { s2_valid := false.B }
@@ -1010,8 +1012,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_fast_rep     = Wire(Bool())
   val s3_troublem     = RegNext(s2_troublem)
   val s3_kill         = s3_in.uop.robIdx.needFlush(io.redirect)
-  s3_ready := !s3_valid || s3_kill || io.ldout.ready
 
+  s3_ready := true.B
+  assert(!s2_valid || !(s3_kill || io.ldout.ready), "LoadUnit s2 never stall!")
   // forwrad last beat
   val (s3_fwd_frm_d_chan, s3_fwd_data_frm_d_chan) = io.tl_d_channel.forward(s2_valid && s2_out.forward_tlDchannel, s2_out.mshrid, s2_out.paddr)
   val s3_fwd_data_valid = RegEnable(s2_fwd_data_valid, false.B, s2_valid)
@@ -1165,6 +1168,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.fast_rep_out.bits := s3_in
   io.fast_rep_out.bits.lateKill := s3_rep_frm_fetch
 
+  assert(!io.ldout.valid || !(io.ldout.bits.uop.robIdx.needFlush(io.redirect) || io.ldout.ready), "LoadUnit writeback never stall!")
 
   // fast load to load forward
   if (EnableLoadToLoadForward) {
