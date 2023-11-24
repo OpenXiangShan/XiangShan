@@ -482,13 +482,14 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // set default
   val s0_src_selector = Seq(
-    s0_super_ld_rep_select,
-    s0_ld_fast_rep_select,
-    s0_ld_rep_select,
-    s0_hw_prf_select,
-    s0_int_iss_select,
-    s0_vec_iss_select,
-    (if (EnableLoadToLoadForward) s0_l2l_fwd_select else true.B)
+    s0_super_ld_rep_valid,
+    s0_ld_fast_rep_valid,
+    s0_ld_rep_valid,
+    s0_high_conf_prf_valid,
+    s0_int_iss_valid,
+    s0_vec_iss_valid,
+    s0_low_conf_prf_valid,
+    (if (EnableLoadToLoadForward) s0_l2l_fwd_valid else true.B)
   )
   val s0_src_format = Seq(
     fromNormalReplaySource(io.replay.bits),
@@ -497,6 +498,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     fromPrefetchSource(io.prefetch_req.bits),
     fromIntIssueSource(io.ldin.bits),
     fromVecIssueSource(),
+    fromPrefetchSource(io.prefetch_req.bits),
     (if (EnableLoadToLoadForward) fromLoadToLoadSource(io.l2l_fwd_in) else fromNullSource())
   )
   s0_sel_src := ParallelPriorityMux(s0_src_selector, s0_src_format)
