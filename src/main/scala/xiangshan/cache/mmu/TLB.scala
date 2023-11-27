@@ -67,7 +67,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val flush_pipe = io.flushPipe
 
   val req_in = req
-  val req_out = req.map(a => RegEnable(a.bits, a.fire()))
+  val req_out = req.map(a => RegEnable(a.bits, a.fire))
   val req_out_v = (0 until Width).map(i => ValidHold(req_in(i).fire && !req_in(i).bits.kill, resp(i).fire, flush_pipe(i)))
 
   val isHyperInst = (0 until Width).map(i => req_out_v(i) && req_out(i).hyperinst)
@@ -150,7 +150,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val enable = portTranslateEnable(i)
     val isOnlys2xlate = req_out_s2xlate(i) === onlyStage2
     val resp_gpa_refill = RegInit(false.B)
-    val need_gpa_vpn_hit = RegEnable(need_gpa_vpn === get_pn(req_in(i).bits.vaddr), req_in(i).fire())
+    val need_gpa_vpn_hit = RegEnable(need_gpa_vpn === get_pn(req_in(i).bits.vaddr), req_in(i).fire)
     when (io.requestor(i).resp.valid && hasGpf(i) && need_gpa === false.B && !need_gpa_vpn_hit && !isOnlys2xlate) {
       need_gpa := true.B
       need_gpa_vpn := get_pn(req_out(i).vaddr)
@@ -310,7 +310,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       (vsatp.mode === 0.U) -> onlyStage2,
       (hgatp.mode === 0.U || req_need_gpa) -> onlyStage1
     ))
-    val miss_req_s2xlate_reg = RegEnable(miss_req_s2xlate, io.ptw.req(idx).fire())
+    val miss_req_s2xlate_reg = RegEnable(miss_req_s2xlate, io.ptw.req(idx).fire)
     val hasS2xlate = miss_req_s2xlate_reg =/= noS2xlate
     val onlyS2 = miss_req_s2xlate_reg === onlyStage2
     val hit_s1 = io.ptw.resp.bits.s1.hit(miss_req_vpn, Mux(hasS2xlate, io.csr.vsatp.asid, io.csr.satp.asid), io.csr.hgatp.asid, allType = true, false, hasS2xlate)
