@@ -156,7 +156,7 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
   }
 
   if (params.hasIQWakeUp) {
-    srcCancelVec.get.zip(srcLoadCancelVec.get).zip(srcWakeUpByIQVec).zipWithIndex.foreach { case (((srcCancel, srcLoadCancel), wakeUpByIQVec), srcIdx) =>
+    srcCancelVec.get.zip(srcLoadCancelVec.get).zip(srcWakeUpByIQWithoutCancel).zipWithIndex.foreach { case (((srcCancel, srcLoadCancel), wakeUpByIQVec), srcIdx) =>
       val ldTransCancel = Mux1H(wakeUpByIQVec, wakeupLoadDependencyByIQVec.map(dep => LoadShouldCancel(Some(dep), io.ldCancel)))
       srcLoadCancel := LoadShouldCancel(currentStatus.srcLoadDependency.map(_(srcIdx)), io.ldCancel)
       srcCancel := srcLoadCancel || ldTransCancel
@@ -263,8 +263,6 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
       case (((exuOH: Vec[Bool], wakeUpByIQOH: Vec[Bool]), wakeUp: Bool), srcIdx) =>
         when(wakeUpByIQOH.asUInt.orR) {
           exuOH := Mux1H(wakeUpByIQOH, io.wakeUpFromIQ.map(x => MathUtils.IntToOH(x.bits.exuIdx).U(backendParams.numExu.W)).toSeq).asBools
-        }.elsewhen(wakeUp) {
-          exuOH := 0.U.asTypeOf(exuOH)
         }.otherwise {
           exuOH := currentStatus.srcWakeUpL1ExuOH.get(srcIdx)
         }
@@ -290,11 +288,7 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
     }
     srcLoadDependencyOut.get.zip(currentStatus.srcLoadDependency.get).zip(srcWakeUpByIQVec).zip(srcWakeUp).foreach {
       case (((loadDependencyOut, loadDependency), wakeUpByIQVec), wakeup) =>
-        loadDependencyOut :=
-          Mux(wakeup,
-            Mux1H(wakeUpByIQVec, shiftedWakeupLoadDependencyByIQBypassVec),
-            loadDependency
-          )
+        loadDependencyOut := Mux1H(wakeUpByIQVec, shiftedWakeupLoadDependencyByIQBypassVec)
     }
   }
 
@@ -340,8 +334,6 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
     case (((dataSourceOut: DataSource, dataSource: DataSource), wakeUpByIQOH: Vec[Bool]), wakeUpAll) =>
       when(wakeUpByIQOH.asUInt.orR) {
         dataSourceOut.value := DataSource.forward
-      }.elsewhen(wakeUpAll) {
-        dataSourceOut.value := DataSource.reg
       }.otherwise {
         dataSourceOut.value := dataSource.value
       }
