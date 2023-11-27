@@ -124,7 +124,7 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
   }
 
   if (params.hasIQWakeUp) {
-    srcCancelVec.get.zip(srcLoadCancelVec.get).zip(srcWakeUpByIQVec).zipWithIndex.foreach { case (((srcCancel, srcLoadCancel), wakeUpByIQVec), srcIdx) =>
+    srcCancelVec.get.zip(srcLoadCancelVec.get).zip(srcWakeUpByIQWithoutCancel).zipWithIndex.foreach { case (((srcCancel, srcLoadCancel), wakeUpByIQVec), srcIdx) =>
       val ldTransCancel = Mux1H(wakeUpByIQVec, wakeupLoadDependencyByIQVec.map(dep => LoadShouldCancel(Some(dep), io.ldCancel)))
       srcLoadCancel := LoadShouldCancel(entryReg.status.srcLoadDependency.map(_(srcIdx)), io.ldCancel)
       srcCancel := srcLoadCancel || ldTransCancel
@@ -242,8 +242,6 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
     case (((dataSourceOut: DataSource, dataSource: DataSource), wakeUpByIQOH: Vec[Bool]), wakeUpAll) =>
       when(wakeUpByIQOH.asUInt.orR) {
         dataSourceOut.value := DataSource.forward
-      }.elsewhen(wakeUpAll) {
-        dataSourceOut.value := DataSource.reg
       }.otherwise {
         dataSourceOut.value := dataSource.value
       }
@@ -253,19 +251,13 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
       case (((exuOH: UInt, wakeUpByIQOH: Vec[Bool]), wakeUp: Bool), srcIdx) =>
         when(wakeUpByIQOH.asUInt.orR) {
           exuOH := Mux1H(wakeUpByIQOH, io.wakeUpFromIQ.map(x => MathUtils.IntToOH(x.bits.exuIdx).U(backendParams.numExu.W)).toSeq)
-        }.elsewhen(wakeUp) {
-          exuOH := 0.U.asTypeOf(exuOH)
         }.otherwise {
           exuOH := entryReg.status.srcWakeUpL1ExuOH.get(srcIdx)
         }
     }
     srcLoadDependencyOut.get.zip(entryReg.status.srcLoadDependency.get).zip(srcWakeUpByIQVec).zip(srcWakeUp).foreach {
       case (((loadDependencyOut, loadDependency), wakeUpByIQVec), wakeup) =>
-        loadDependencyOut :=
-          Mux(wakeup,
-            Mux1H(wakeUpByIQVec, shiftedWakeupLoadDependencyByIQBypassVec),
-            loadDependency
-          )
+        loadDependencyOut := Mux1H(wakeUpByIQVec, shiftedWakeupLoadDependencyByIQBypassVec)
     }
     io.srcTimer.get.zip(entryReg.status.srcTimer.get).zip(srcWakeUpByIQWithoutCancel).zip(srcWakeUp).foreach {
       case (((srcTimerOut, srcTimer), wakeUpByIQOH: Vec[Bool]), wakeUpAll) =>
