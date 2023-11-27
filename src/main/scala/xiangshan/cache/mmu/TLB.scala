@@ -449,7 +449,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       val req_need_gpa = gpf
       val req_s2xlate = Wire(UInt(2.W))
       req_s2xlate := MuxCase(noS2xlate, Seq(
-        (!(virt || RegNext(req_in(i).bits.hyperinst))) -> noS2xlate,
+        (!RegNext(virt || req_in(i).bits.hyperinst)) -> noS2xlate,
         (vsatp.mode =/= 0.U && hgatp.mode =/= 0.U) -> allStage,
         (vsatp.mode === 0.U) -> onlyStage2,
         (hgatp.mode === 0.U || req_need_gpa) -> onlyStage1
