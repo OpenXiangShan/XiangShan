@@ -244,7 +244,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
     array(s1_index).alloc(
       alloc_tag = s1_region_tag,
       alloc_bit_vec = UIntToOH(s1_region_bits),
-      alloc_active = s1_plus_one_hit || s1_minus_one_hit,
+      alloc_active = if(ENABLE_DECR_MODE) s1_plus_one_hit || s1_minus_one_hit else s1_minus_one_hit,
       alloc_decr_mode = RegEnable(s0_plus_one_hit, s0_valid))
 
   }.elsewhen(s1_update) {
@@ -252,7 +252,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
     assert(array(s1_index).cnt =/= 0.U || array(s1_index).tag === s1_index, "entry should have been allocated before")
     array(s1_index).update(
       update_bit_vec = UIntToOH(s1_region_bits),
-      update_active = s1_plus_one_hit || s1_minus_one_hit)
+      update_active = if(ENABLE_DECR_MODE) s1_plus_one_hit || s1_minus_one_hit else s1_minus_one_hit)
   }
 
   XSPerfAccumulate("s1_alloc", s1_alloc)
