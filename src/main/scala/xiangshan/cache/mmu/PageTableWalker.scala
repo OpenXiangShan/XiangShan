@@ -280,7 +280,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   }
 
   when(mem_addr_update){
-    when(level === 0.U && !(find_pte || accessFault)){
+    when(level === 0.U && !onlyS2xlate && !(find_pte || accessFault)){
       level := levelNext
       when(s2xlate){
         s_hptw_req := false.B
