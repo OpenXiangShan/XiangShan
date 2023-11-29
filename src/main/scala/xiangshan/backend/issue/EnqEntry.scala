@@ -170,7 +170,7 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
     val wakeupVec: IndexedSeq[IndexedSeq[Bool]] = io.wakeUpFromIQ.map((bundle: ValidIO[IssueQueueIQWakeUpBundle]) =>
       bundle.bits.wakeUp(entryReg.status.psrc zip entryReg.status.srcType, bundle.valid)
     ).toIndexedSeq.transpose
-    val cancelSel = io.wakeUpFromIQ.map(x => x.bits.exuIdx).map(x => io.og0Cancel(x))
+    val cancelSel = params.wakeUpSourceExuIdx.map(io.og0Cancel(_))
     srcWakeUpByIQVec := wakeupVec.map(x => VecInit(x.zip(cancelSel).map { case (wakeup, cancel) => wakeup && !cancel }))
     srcWakeUpButCancel := wakeupVec.map(x => VecInit(x.zip(cancelSel).map { case (wakeup, cancel) => wakeup && cancel }))
     srcWakeUpByIQWithoutCancel := wakeupVec.map(x => VecInit(x))
@@ -187,7 +187,7 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
     val wakeupVec: IndexedSeq[IndexedSeq[Bool]] = io.enqDelayWakeUpFromIQ.map( x =>
       x.bits.wakeUp(entryReg.status.psrc.zip(entryReg.status.srcType), x.valid)
     ).toIndexedSeq.transpose
-    val cancelSel = io.enqDelayWakeUpFromIQ.map(x => x.bits.exuIdx).map(io.enqDelayOg0Cancel(_))
+    val cancelSel = params.wakeUpSourceExuIdx.map(io.enqDelayOg0Cancel(_))
     enqDelaySrcWakeUpByIQVec := wakeupVec.map(x => VecInit(x.zip(cancelSel).map { case (wakeup, cancel) => wakeup && !cancel }))
   } else {
     enqDelaySrcWakeUpByIQVec := 0.U.asTypeOf(enqDelaySrcWakeUpByIQVec)
@@ -212,13 +212,13 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
     }
   }
 
-  for(i <- 0 until params.numRegSrc) {
+  for (i <- 0 until params.numRegSrc) {
     enqDelaySrcState(i) := entryReg.status.srcState(i) | enqDelaySrcWakeUpByWB(i) | enqDelaySrcWakeUpByIQ(i)
     enqDelayDataSources(i).value := Mux(enqDelaySrcWakeUpByIQ(i).asBool, DataSource.bypass, DataSource.reg)
     if (params.hasIQWakeUp) {
       val wakeUpValid = enqDelaySrcWakeUpByIQVec(i).asUInt.orR
       val wakeUpOH = enqDelaySrcWakeUpByIQVec(i)
-      enqDelaySrcWakeUpL1ExuOH.get(i) := Mux1H(wakeUpOH, io.enqDelayWakeUpFromIQ.map(x => MathUtils.IntToOH(x.bits.exuIdx).U(backendParams.numExu.W)).toSeq).asBools
+      enqDelaySrcWakeUpL1ExuOH.get(i) := Mux1H(wakeUpOH, params.wakeUpSourceExuIdx.map(x => MathUtils.IntToOH(x).U(backendParams.numExu.W)).toSeq).asBools
       enqDelaySrcTimer.get(i) := Mux(wakeUpValid, 2.U, 3.U)
       enqDelaySrcLoadDependency.get(i) := Mux(wakeUpValid, Mux1H(wakeUpOH, enqDelayShiftedWakeupLoadDependencyByIQVec), entryReg.status.srcLoadDependency.get(i))
     }
@@ -227,9 +227,16 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
   when (enqDelayValidReg) {
     currentStatus.srcState := enqDelaySrcState
     currentStatus.dataSources := enqDelayDataSources
-    currentStatus.srcWakeUpL1ExuOH.foreach(_ := enqDelaySrcWakeUpL1ExuOH.get)
     currentStatus.srcTimer.foreach(_ := enqDelaySrcTimer.get)
     currentStatus.srcLoadDependency.foreach(_ := enqDelaySrcLoadDependency.get)
+  }
+
+  if (params.hasIQWakeUp) {
+    currentStatus.srcWakeUpL1ExuOH.get.zip(entryReg.status.srcWakeUpL1ExuOH.get).zip(enqDelaySrcWakeUpL1ExuOH.get).foreach {
+      case ((currExuOH, regExuOH), enqDelayExuOH) =>
+        currExuOH := 0.U.asTypeOf(currExuOH)
+        params.wakeUpSourceExuIdx.foreach(x => currExuOH(x) := Mux(enqDelayValidReg, enqDelayExuOH(x), regExuOH(x)))
+    }
   }
 
   //entryUpdate
@@ -251,21 +258,27 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
   if (params.hasIQWakeUp) {
     entryUpdate.status.srcWakeUpL1ExuOH.get.zip(srcWakeUpByIQVec).zip(srcWakeUp).zipWithIndex.foreach {
       case (((exuOH: Vec[Bool], wakeUpByIQOH: Vec[Bool]), wakeUp: Bool), srcIdx) =>
+        val origExuOH = 0.U.asTypeOf(exuOH)
         when(wakeUpByIQOH.asUInt.orR) {
-          exuOH := Mux1H(wakeUpByIQOH, io.wakeUpFromIQ.map(x => MathUtils.IntToOH(x.bits.exuIdx).U(backendParams.numExu.W)).toSeq).asBools
+          origExuOH := Mux1H(wakeUpByIQOH, params.wakeUpSourceExuIdx.map(x => MathUtils.IntToOH(x).U(backendParams.numExu.W)).toSeq).asBools
         }.elsewhen(wakeUp) {
-          exuOH := 0.U.asTypeOf(exuOH)
+          origExuOH := 0.U.asTypeOf(origExuOH)
         }.otherwise {
-          exuOH := currentStatus.srcWakeUpL1ExuOH.get(srcIdx)
+          origExuOH := currentStatus.srcWakeUpL1ExuOH.get(srcIdx)
         }
+        exuOH := 0.U.asTypeOf(exuOH)
+        params.wakeUpSourceExuIdx.foreach(x => exuOH(x) := origExuOH(x))
     }
     srcWakeUpL1ExuOHOut.get.zip(srcWakeUpByIQWithoutCancel).zip(srcWakeUp).zipWithIndex.foreach {
       case (((exuOH: Vec[Bool], wakeUpByIQOH: Vec[Bool]), wakeUp: Bool), srcIdx) =>
+        val origExuOH = 0.U.asTypeOf(exuOH)
         when(wakeUpByIQOH.asUInt.orR) {
-          exuOH := Mux1H(wakeUpByIQOH, io.wakeUpFromIQ.map(x => MathUtils.IntToOH(x.bits.exuIdx).U(backendParams.numExu.W)).toSeq).asBools
+          origExuOH := Mux1H(wakeUpByIQOH, params.wakeUpSourceExuIdx.map(x => MathUtils.IntToOH(x).U(backendParams.numExu.W)).toSeq).asBools
         }.otherwise {
-          exuOH := currentStatus.srcWakeUpL1ExuOH.get(srcIdx)
+          origExuOH := currentStatus.srcWakeUpL1ExuOH.get(srcIdx)
         }
+        exuOH := 0.U.asTypeOf(exuOH)
+        params.wakeUpSourceExuIdx.foreach(x => exuOH(x) := origExuOH(x))
     }
     entryUpdate.status.srcTimer.get.zip(currentStatus.srcTimer.get).zip(srcWakeUpByIQVec).zipWithIndex.foreach {
       case (((srcIssuedTimerNext, srcIssuedTimer), wakeUpByIQOH: Vec[Bool]), srcIdx) =>
