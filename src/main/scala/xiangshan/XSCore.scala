@@ -216,6 +216,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.ooo_to_mem.loadFastMatch <> backend.io.memBlock.loadFastMatch
   memBlock.io.ooo_to_mem.loadFastFuOpType <> backend.io.memBlock.loadFastFuOpType
   memBlock.io.ooo_to_mem.loadFastImm <> backend.io.memBlock.loadFastImm
+  memBlock.io.ooo_to_mem.loadSignExtImm <> backend.io.memBlock.loadSignExtImm
   memBlock.io.ooo_to_mem.loadPc <> backend.io.memBlock.loadPc
   memBlock.io.ooo_to_mem.storePc <> backend.io.memBlock.storePc
 

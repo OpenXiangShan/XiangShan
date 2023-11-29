@@ -256,6 +256,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     val loadFastMatch = if (numLoadPorts > 0) Some(Vec(numLoadPorts, Output(UInt(exuParameters.LduCnt.W)))) else None
     val loadFastFuOpType = if (numLoadPorts > 0) Some(Vec(numLoadPorts, Output(FuOpType()))) else None
     val loadFastImm = if (numLoadPorts > 0) Some(Vec(numLoadPorts, Output(UInt(12.W)))) else None
+    val loadSignExtImm = if (numLoadPorts > 0) Some(Vec(numLoadPorts, Output(UInt(VAddrBits.W)))) else None
     // misc
     val jumpPc = Input(UInt(VAddrBits.W))
     val jalr_target = Input(UInt(VAddrBits.W))
@@ -481,6 +482,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
     io.extra.loadFastMatch.get := allLoadRS.map(_.get.map(_.fastMatch)).fold(Seq())(_ ++ _)
     io.extra.loadFastFuOpType.get := allLoadRS.map(_.get.map(_.fastFuOpType)).fold(Seq())(_ ++ _)
     io.extra.loadFastImm.get := allLoadRS.map(_.get.map(_.fastImm)).fold(Seq())(_ ++ _)
+    io.extra.loadSignExtImm.get := allLoadRS.map(_.get.map(_.signExtImm)).fold(Seq())(_ ++ _)
   }
 
   var intReadPort = 0

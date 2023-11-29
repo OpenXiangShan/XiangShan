@@ -254,6 +254,7 @@ class ReservationStationIO(params: RSParams)(implicit p: Parameters) extends XSB
     val fastMatch = Output(UInt(exuParameters.LduCnt.W))
     val fastFuOpType = Output(FuOpType())
     val fastImm = Output(UInt(12.W))
+    val signExtImm = Output(UInt(VAddrBits.W))
   })) else None
   val fmaMid = if (params.exuCfg.get == FmacExeUnitCfg) Some(Vec(params.numDeq, Flipped(new FMAMidResultIO))) else None
   val full = Output(Bool())
@@ -793,6 +794,9 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
         ).asUInt, 0.U)
         io.load.get(i).fastFuOpType := s1_out(i).bits.uop.ctrl.fuOpType
         io.load.get(i).fastImm := s1_out(i).bits.uop.ctrl.imm
+        val s2_signExtImm = Reg(UInt(VAddrBits.W))
+        when (s1_out(i).valid && s2_deq(i).ready) { s2_signExtImm := SignExt(s1_out(i).bits.uop.ctrl.imm(11, 0), VAddrBits) }
+        io.load.get(i).signExtImm := s2_signExtImm
       }
 
       for (j <- 0 until params.numFastWakeup) {
