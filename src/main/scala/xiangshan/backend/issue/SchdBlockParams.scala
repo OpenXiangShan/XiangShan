@@ -157,6 +157,14 @@ case class SchdBlockParams(
     MixedVec(intBundle ++ vfBundle)
   }
 
+  def genIntWBWakeUpSinkValidBundle: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = {
+    MixedVec(backendParam.getIntWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq)
+  }
+
+  def genVfWBWakeUpSinkValidBundle: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = {
+    MixedVec(backendParam.getVfWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq)
+  }
+
   // cfgs(issueIdx)(exuIdx)(set of exu's wb)
   def getWbCfgs: Seq[Seq[Set[PregWB]]] = {
     this.issueBlockParams.map(_.getWbCfgs)
