@@ -38,7 +38,14 @@ class AgeDetector(numEntries: Int, numEnq: Int, numDeq: Int)(implicit p: Paramet
   val nextAge = Seq.fill(numEntries)(Seq.fill(numEntries)(Wire(Bool())))
 
   // to reduce reg usage, only use upper matrix
-  def get_age(row: Int, col: Int): Bool = if (row <= col) age(row)(col) else !age(col)(row)
+  def get_age(row: Int, col: Int): Bool = {
+    if (row < col)
+      age(row)(col)
+    else if (row == col)
+      true.B
+    else
+      !age(col)(row)
+  }
   def get_next_age(row: Int, col: Int): Bool = if (row <= col) nextAge(row)(col) else !nextAge(col)(row)
   def isEnq(i: Int): Bool = {
     VecInit(io.enq.map(_(i))).asUInt.orR
