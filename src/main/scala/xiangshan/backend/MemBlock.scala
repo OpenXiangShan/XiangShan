@@ -49,6 +49,7 @@ class ooo_to_mem(implicit p: Parameters) extends XSBundle {
   val loadFastMatch = Vec(exuParameters.LduCnt, Input(UInt(exuParameters.LduCnt.W)))
   val loadFastFuOpType = Vec(exuParameters.LduCnt, Input(FuOpType()))
   val loadFastImm = Vec(exuParameters.LduCnt, Input(UInt(12.W)))
+  val loadSignExtImm = Vec(exuParameters.LduCnt, Input(UInt(VAddrBits.W)))
   val sfence = Input(new SfenceBundle)
   val tlbCsr = Input(new TlbCsrBundle)
   val lsqio = new Bundle {
@@ -630,6 +631,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.ld_fast_match := fastMatch
     loadUnits(i).io.ld_fast_imm := io.ooo_to_mem.loadFastImm(i)
     loadUnits(i).io.ld_fast_fuOpType := io.ooo_to_mem.loadFastFuOpType(i)
+    loadUnits(i).io.ld_sign_ext_imm := io.ooo_to_mem.loadSignExtImm(i)
     loadUnits(i).io.replay <> lsq.io.replay(i)
 
     val l2_hint = RegNext(io.l2_hint)
