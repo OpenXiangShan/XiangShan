@@ -128,9 +128,10 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasPrefe
     enable := true.B
     confidence := 1.U
   }.otherwise {
-    // for now, only dynamically disable prefetcher, without depth and flush
+    // for now, only dynamically disable prefetcher, without depth flush and confidence
     depth := depth_const
     flush := false.B
+    confidence := 1.U
   }
 
   when(reset.asBool) {
