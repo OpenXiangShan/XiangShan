@@ -137,6 +137,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val ld_fast_match    = Input(Bool())
     val ld_fast_fuOpType = Input(UInt())
     val ld_fast_imm      = Input(UInt(12.W))
+    val ld_sign_ext_imm  = Input(UInt(VAddrBits.W))
 
     // rs feedback
     val feedback_fast = ValidIO(new RSFeedback) // stage 2
@@ -498,7 +499,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s0_sel_src := ParallelPriorityMux(s0_src_selector, s0_src_format)
 
   // select vaddr
-  val s0_int_iss_vaddr  = io.ldin.bits.src(0) + SignExt(io.ldin.bits.uop.ctrl.imm(11, 0), VAddrBits)
+  val s0_int_iss_vaddr  = io.ldin.bits.src(0) + io.ld_sign_ext_imm
   val s0_vec_iss_vaddr  = WireInit(0.U(VAddrBits.W))
   val s0_rep_vaddr      = io.replay.bits.vaddr
 
