@@ -559,7 +559,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
   bt.io.req.valid := io.s0_fire(1)
   bt.io.req.bits := s0_pc_dup(1)
 
-  val bankTickCtrDistanceToTops = Seq.fill(numBr)(RegInit((1 << (TickWidth-1)).U(TickWidth.W)))
+  val bankTickCtrDistanceToTops = Seq.fill(numBr)(RegInit(((1 << TickWidth) - 1).U(TickWidth.W)))
   val bankTickCtrs = Seq.fill(numBr)(RegInit(0.U(TickWidth.W)))
   val useAltOnNaCtrs = RegInit(
     VecInit(Seq.fill(numBr)(
@@ -698,7 +698,8 @@ class Tage(implicit p: Parameters) extends BaseTage {
     s1_useAltOnNa(i)    := providerInfo.use_alt_on_unconf
 
     resp_meta.altUsed(i)    := RegEnable(s2_altUsed(i), io.s2_fire(1))
-    resp_meta.altDiffers(i) := RegEnable(s2_finalAltPreds(i) =/= s2_tageTakens_dup(0)(i), io.s2_fire(1))
+    resp_meta.altDiffers(i) := RegEnable(
+      s2_finalAltPreds(i) =/= s2_providerResps(i).ctr(TageCtrBits - 1), io.s2_fire(1)) // alt != provider
     resp_meta.takens(i)     := RegEnable(s2_tageTakens_dup(0)(i), io.s2_fire(1))
     resp_meta.basecnts(i)   := RegEnable(s2_basecnts(i), io.s2_fire(1))
 

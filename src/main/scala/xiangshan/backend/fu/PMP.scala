@@ -85,12 +85,14 @@ trait PMPReadWriteMethodBare extends PMPConst {
     Cat(match_mask_c_addr & ~(match_mask_c_addr + 1.U), ((1 << PMPOffBits) - 1).U(PMPOffBits.W))
   }
 
-  def write_cfg_vec(mask: Vec[UInt], addr: Vec[UInt], index: Int)(cfgs: UInt): UInt = {
+  def write_cfg_vec(mask: Vec[UInt], addr: Vec[UInt], index: Int, oldcfg: UInt)(cfgs: UInt): UInt = {
     val cfgVec = Wire(Vec(cfgs.getWidth/8, new PMPConfig))
     for (i <- cfgVec.indices) {
       val cfg_w_m_tmp = cfgs((i+1)*8-1, i*8).asUInt.asTypeOf(new PMPConfig)
-      cfgVec(i) := cfg_w_m_tmp
-      when (!cfg_w_m_tmp.l) {
+      val cfg_old_tmp = oldcfg((i+1)*8-1, i*8).asUInt.asTypeOf(new PMPConfig)
+      cfgVec(i) := cfg_old_tmp
+      when (!cfg_old_tmp.l) {
+        cfgVec(i) := cfg_w_m_tmp
         cfgVec(i).w := cfg_w_m_tmp.w && cfg_w_m_tmp.r
         if (CoarserGrain) { cfgVec(i).a := Cat(cfg_w_m_tmp.a(1), cfg_w_m_tmp.a.orR) }
         when (cfgVec(i).na4_napot) {
@@ -134,12 +136,14 @@ trait PMPReadWriteMethodBare extends PMPConst {
 }
 
 trait PMPReadWriteMethod extends PMPReadWriteMethodBare  { this: PMPBase =>
-  def write_cfg_vec(cfgs: UInt): UInt = {
+  def write_cfg_vec(oldcfg: UInt)(cfgs: UInt): UInt = {
     val cfgVec = Wire(Vec(cfgs.getWidth/8, new PMPConfig))
     for (i <- cfgVec.indices) {
       val cfg_w_tmp = cfgs((i+1)*8-1, i*8).asUInt.asTypeOf(new PMPConfig)
-      cfgVec(i) := cfg_w_tmp
-      when (!cfg_w_tmp.l) {
+      val cfg_old_tmp = oldcfg((i+1)*8-1, i*8).asUInt.asTypeOf(new PMPConfig)
+      cfgVec(i) := cfg_old_tmp
+      when (!cfg_old_tmp.l) {
+        cfgVec(i) := cfg_w_tmp
         cfgVec(i).w := cfg_w_tmp.w && cfg_w_tmp.r
         if (CoarserGrain) { cfgVec(i).a := Cat(cfg_w_tmp.a(1), cfg_w_tmp.a.orR) }
       }
@@ -317,7 +321,7 @@ trait PMPMethod extends PMPConst {
         addr = cfgBase + pmpCfgIndex(i),
         reg = cfgMerged(i/pmpCfgPerCSR),
         wmask = WritableMask,
-        wfn = new PMPBase().write_cfg_vec(mask, addr, i)
+        wfn = new PMPBase().write_cfg_vec(mask, addr, i, cfgMerged(i/pmpCfgPerCSR))
       ))
     }).fold(Map())((a, b) => a ++ b) // ugly code, hit me if u have better codes
 

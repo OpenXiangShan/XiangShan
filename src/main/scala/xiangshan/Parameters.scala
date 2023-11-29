@@ -129,6 +129,7 @@ case class XSCoreParameters
     }),
   ICacheECCForceError: Boolean = false,
   IBufSize: Int = 48,
+  IBufNBank: Int = 6, // IBuffer bank amount, should divide IBufSize
   DecodeWidth: Int = 6,
   RenameWidth: Int = 6,
   CommitWidth: Int = 6,
@@ -409,6 +410,7 @@ trait HasXSParameter {
   val ExtHistoryLength = HistoryLength + 64
   val ICacheECCForceError = coreParams.ICacheECCForceError
   val IBufSize = coreParams.IBufSize
+  val IBufNBank = coreParams.IBufNBank
   val DecodeWidth = coreParams.DecodeWidth
   val RenameWidth = coreParams.RenameWidth
   val CommitWidth = coreParams.CommitWidth
@@ -528,4 +530,5 @@ trait HasXSParameter {
   val numCSRPCntCtrl     = 8
   val numCSRPCntLsu      = 8
   val numCSRPCntHc       = 5
+  val printEventCoding   = true
 }

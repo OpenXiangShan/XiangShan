@@ -76,6 +76,7 @@ class MinimalConfig(n: Int = 1) extends Config(
         RobSize = 32,
         FtqSize = 8,
         IBufSize = 16,
+        IBufNBank = 2,
         StoreBufferSize = 4,
         StoreBufferThreshold = 3,
         dpParams = DispatchParameters(

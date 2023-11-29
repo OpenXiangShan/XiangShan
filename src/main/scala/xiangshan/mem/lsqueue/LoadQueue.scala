@@ -25,6 +25,7 @@ import xiangshan._
 import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
+import xiangshan.cache.mmu._
 import xiangshan.frontend.FtqPtr
 import xiangshan.ExceptionNO._
 import xiangshan.mem.mdp._
@@ -132,6 +133,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val lq_rep_full = Output(Bool())
     val tlbReplayDelayCycleCtrl = Vec(4, Input(UInt(ReSelectLen.W)))
     val l2_hint = Input(Valid(new L2ToL1Hint()))
+    val tlb_hint = Flipped(new TlbHintIO)
     val lqEmpty = Output(Bool())
     val debugTopDown = new LoadQueueTopDownIO
   })
@@ -252,6 +254,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueReplay.io.rarFull          <> loadQueueRAR.io.lqFull
   loadQueueReplay.io.rawFull          <> loadQueueRAW.io.lqFull
   loadQueueReplay.io.l2_hint          <> io.l2_hint
+  loadQueueReplay.io.tlb_hint         <> io.tlb_hint
   loadQueueReplay.io.tlbReplayDelayCycleCtrl <> io.tlbReplayDelayCycleCtrl
 
   loadQueueReplay.io.debugTopDown <> io.debugTopDown

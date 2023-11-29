@@ -180,7 +180,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   val brTarget = real_pc + SignExt(ImmUnion.B.toImm32(s1_imm12_reg), XLEN)
   val snpc = real_pc + Mux(s1_pd.isRVC, 2.U, 4.U)
   val target = Mux(s1_isReplay,
-    Mux(s1_redirect_bits_reg.rawNuke, real_pc, real_pc + Mux(s1_redirect_bits_reg.isRVC, 2.U, 4.U)),
+    Mux(s1_redirect_bits_reg.flushItself(), real_pc, real_pc + Mux(s1_redirect_bits_reg.isRVC, 2.U, 4.U)),
     Mux(s1_redirect_bits_reg.cfiUpdate.taken,
       Mux(s1_isJump, s1_jumpTarget, brTarget),
       snpc
@@ -209,7 +209,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   val store_pc = io.memPredPcRead(s1_redirect_bits_reg.stFtqIdx, s1_redirect_bits_reg.stFtqOffset)
 
   // update load violation predictor if load violation redirect triggered
-  io.memPredUpdate.valid := RegNext(s1_isReplay && s1_redirect_valid_reg && s2_redirect_bits_reg.rawNuke, init = false.B)
+  io.memPredUpdate.valid := RegNext(s1_isReplay && s1_redirect_valid_reg && s2_redirect_bits_reg.flushItself(), init = false.B)
   // update wait table
   io.memPredUpdate.waddr := RegNext(XORFold(real_pc(VAddrBits-1, 1), MemPredPCWidth))
   io.memPredUpdate.wdata := true.B
@@ -711,8 +711,21 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     val perfEventsEu1     = Input(Vec(6, new PerfEvent))
   })
 
-  val allPerfEvents = Seq(decode, rename, dispatch, intDq, fpDq, lsDq, rob).flatMap(_.getPerf)
-  val hpmEvents = allPerfEvents ++ perfinfo.perfEventsEu0 ++ perfinfo.perfEventsEu1 ++ perfinfo.perfEventsRs
-  val perfEvents = HPerfMonitor(csrevents, hpmEvents).getPerfEvents
+  val perfFromUnits = Seq(decode, rename, dispatch, intDq, fpDq, lsDq, rob).flatMap(_.getPerfEvents)
+  val perfFromIO    = perfinfo.perfEventsEu0.map(x => ("perfEventsEu0", x.value)) ++
+                        perfinfo.perfEventsEu1.map(x => ("perfEventsEu1", x.value)) ++
+                        perfinfo.perfEventsRs.map(x => ("perfEventsRs", x.value))
+  val perfBlock     = Seq()
+  // let index = 0 be no event
+  val allPerfEvents = Seq(("noEvent", 0.U)) ++ perfFromUnits ++ perfFromIO ++ perfBlock
+
+  if (printEventCoding) {
+    for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
+      println("CtrlBlock perfEvents Set", name, inc, i)
+    }
+  }
+
+  val allPerfInc = allPerfEvents.map(_._2.asTypeOf(new PerfEvent))
+  val perfEvents = HPerfMonitor(csrevents, allPerfInc).getPerfEvents
   generatePerfEvent()
 }
