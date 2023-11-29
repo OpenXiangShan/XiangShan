@@ -279,6 +279,10 @@ case class IssueBlockParams(
     backendParam = param
   }
 
+  def wakeUpSourceExuIdx: Seq[Int] = {
+    wakeUpInExuSources.map(x => backendParam.getExuIdx(x.name))
+  }
+
   def genExuInputDecoupledBundle(implicit p: Parameters): MixedVec[DecoupledIO[ExuInput]] = {
     MixedVec(this.exuBlockParams.map(x => DecoupledIO(x.genExuInputBundle)))
   }
