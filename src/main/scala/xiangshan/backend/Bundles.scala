@@ -677,6 +677,14 @@ object Bundles {
     def width(implicit p: Parameters): Int = p(XSCoreParamsKey).backendParams.numExu
   }
 
+  object ExuVec {
+    def apply(exuNum: Int): Vec[Bool] = Vec(exuNum, Bool())
+
+    def apply()(implicit p: Parameters): Vec[Bool] = Vec(width, Bool())
+
+    def width(implicit p: Parameters): Int = p(XSCoreParamsKey).backendParams.numExu
+  }
+
   class CancelSignal(implicit p: Parameters) extends XSBundle {
     val rfWen = Bool()
     val fpWen = Bool()

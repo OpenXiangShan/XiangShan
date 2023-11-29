@@ -290,7 +290,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
           bypassNetwork.io.toExus.int(i)(j).fire,
           bypassNetwork.io.toExus.int(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush) || shouldLdCancel,
           intExuBlock.io.in(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush)
-        )
+        ),
+        Option("intExuBlock2bypassNetwork")
       )
     }
   }
@@ -343,7 +344,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
           bypassNetwork.io.toExus.vf(i)(j).fire,
           bypassNetwork.io.toExus.vf(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush) || shouldLdCancel,
           vfExuBlock.io.in(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush)
-        )
+        ),
+        Option("vfExuBlock2bypassNetwork")
       )
 
       vfExuBlock.io.in(i)(j).bits.vpu.foreach(_.vstart := csrio.vpu.vstart)
@@ -416,7 +418,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
           bypassNetwork.io.toExus.mem(i)(j).fire,
           bypassNetwork.io.toExus.mem(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush) || shouldLdCancel,
           toMem(i)(j).bits.robIdx.needFlush(ctrlBlock.io.toExuBlock.flush) || issueTimeout
-        )
+        ),
+        Option("bypassNetwork2toMemExus")
       )
 
       if (memScheduler.io.memAddrIssueResp(i).nonEmpty && memExuBlocksHasLDU(i)(j)) {

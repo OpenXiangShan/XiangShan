@@ -41,7 +41,7 @@ class Status(implicit p:Parameters, params: IssueBlockParams) extends XSBundle {
   // read reg or get data from bypass network
   val dataSources = Vec(params.numRegSrc, DataSource())
   // if waked up by iq, set when waked up by iq
-  val srcWakeUpL1ExuOH = OptionWrapper(params.hasIQWakeUp, Vec(params.numRegSrc, ExuOH()))
+  val srcWakeUpL1ExuOH = OptionWrapper(params.hasIQWakeUp, Vec(params.numRegSrc, ExuVec()))
   // src timer, used by cancel signal. It increases every cycle after wakeup src inst issued.
   val srcTimer = OptionWrapper(params.hasIQWakeUp, Vec(params.numRegSrc, UInt(3.W)))
   val issueTimer = UInt(2.W)
