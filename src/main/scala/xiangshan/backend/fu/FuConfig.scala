@@ -163,6 +163,10 @@ case class FuConfig (
 
   def isSta: Boolean = name.contains("sta")
 
+  def ckAlwaysEn: Boolean = isCsr || isFence || fuType == FuType.vfalu ||
+                            fuType == FuType.fmisc || fuType == FuType.div ||
+                            fuType == FuType.vfdiv
+
   /**
     * Get index of special src data, like [[VConfigData]], [[MaskSrcData]]
     * @param data [[DataConfig]]
