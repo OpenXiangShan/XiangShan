@@ -956,9 +956,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.feedback_fast.bits.sourceType       := RSFeedbackType.lrqFull
   io.feedback_fast.bits.dataInvalidSqIdx := DontCare
 
-  io.ldCancel.ld1Cancel.valid := s2_valid && (
-    (s2_out.rep_info.need_rep && s2_out.isFirstIssue) ||                // exe fail and issued from IQ
-    s2_mmio                                                             // is mmio
+  io.ldCancel.ld1Cancel.valid := s2_valid && s2_out.isFirstIssue && ( // issued from IQ
+    s2_out.rep_info.need_rep || s2_mmio                               // exe fail or is mmio
   )
   io.ldCancel.ld1Cancel.bits := s2_out.deqPortIdx
 
@@ -1117,9 +1116,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.feedback_slow.bits.sourceType       := RSFeedbackType.lrqFull
   io.feedback_slow.bits.dataInvalidSqIdx := DontCare
 
-  io.ldCancel.ld2Cancel.valid := s3_valid && (
-    (io.lsq.ldin.bits.rep_info.need_rep && s3_in.isFirstIssue) ||
-    s3_in.mmio
+  io.ldCancel.ld2Cancel.valid := s3_valid && s3_in.isFirstIssue && ( // issued from IQ
+    io.lsq.ldin.bits.rep_info.need_rep || s3_in.mmio                 // exe fail or is mmio
   )
   io.ldCancel.ld2Cancel.bits := s3_in.deqPortIdx
 
