@@ -545,13 +545,16 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       wakeup.valid := wakeUpQueues(i).get.io.deq.valid
       wakeup.bits.fromExuInput(wakeUpQueues(i).get.io.deq.bits, finalWakeUpL1ExuOH.get(i))
       wakeup.bits.loadDependency := wakeUpQueues(i).get.io.deq.bits.loadDependency.getOrElse(0.U.asTypeOf(wakeup.bits.loadDependency))
+      wakeup.bits.is0Lat := getDeqLat(i, wakeUpQueues(i).get.io.deq.bits.fuType) === 0.U
     } else if (wakeUpQueues(i).nonEmpty) {
       wakeup.valid := wakeUpQueues(i).get.io.deq.valid
       wakeup.bits.fromExuInput(wakeUpQueues(i).get.io.deq.bits)
       wakeup.bits.loadDependency := wakeUpQueues(i).get.io.deq.bits.loadDependency.getOrElse(0.U.asTypeOf(wakeup.bits.loadDependency))
+      wakeup.bits.is0Lat := getDeqLat(i, wakeUpQueues(i).get.io.deq.bits.fuType) === 0.U
     } else {
       wakeup.valid := false.B
       wakeup.bits := 0.U.asTypeOf(wakeup.bits)
+      wakeup.bits.is0Lat :=  0.U
     }
   }
 

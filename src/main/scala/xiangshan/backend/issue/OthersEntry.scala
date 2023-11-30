@@ -139,7 +139,7 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
     val wakeupVec: Seq[Seq[Bool]] = io.wakeUpFromIQ.map((bundle: ValidIO[IssueQueueIQWakeUpBundle]) =>
       bundle.bits.wakeUp(entryReg.status.psrc zip entryReg.status.srcType, bundle.valid)
     ).toSeq.transpose
-    val cancelSel = params.wakeUpSourceExuIdx.map(io.og0Cancel(_))
+    val cancelSel = io.wakeUpFromIQ.map(x => io.og0Cancel(x.bits.exuIdx) && x.bits.is0Lat)
     srcWakeUpByIQVec := wakeupVec.map(x => VecInit(x.zip(cancelSel).map { case (wakeup, cancel) => wakeup && !cancel }))
     srcWakeUpButCancel := wakeupVec.map(x => VecInit(x.zip(cancelSel).map { case (wakeup, cancel) => wakeup && cancel }))
     srcWakeUpByIQWithoutCancel := wakeupVec.map(x => VecInit(x))
@@ -275,7 +275,7 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
     io.srcTimer.get.zip(entryReg.status.srcTimer.get).zip(srcWakeUpByIQWithoutCancel).zip(srcWakeUp).foreach {
       case (((srcTimerOut, srcTimer), wakeUpByIQOH: Vec[Bool]), wakeUpAll) =>
         when(wakeUpByIQOH.asUInt.orR) {
-          srcTimerOut := 1.U
+          srcTimerOut := Mux1H(wakeUpByIQOH, io.wakeUpFromIQ.map(_.bits.is0Lat).toSeq).asUInt
         }.otherwise {
           srcTimerOut := srcTimer
         }
