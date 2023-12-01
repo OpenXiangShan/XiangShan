@@ -68,8 +68,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   val s0_prf_valid    = io.prefetch_req.valid && io.dcache.req.ready
   val s0_vec_valid    = io.vecstin.valid
   val s0_valid        = s0_iss_valid || s0_prf_valid || s0_vec_valid
-  val s0_use_flow_rs  = s0_iss_valid
   val s0_use_flow_vec = s0_vec_valid
+  val s0_use_flow_rs  = s0_iss_valid && !s0_vec_valid
   val s0_use_flow_prf = !s0_iss_valid && !s0_vec_valid && s0_prf_valid
   val s0_stin         = Mux(s0_use_flow_rs, io.stin.bits, 0.U.asTypeOf(io.stin.bits))
   val s0_vecstin      = Mux(s0_use_flow_vec, io.vecstin.bits, 0.U.asTypeOf(io.vecstin.bits))
@@ -97,7 +97,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   // vector
   val s0_exp          = !s0_use_flow_vec || s0_vecstin.exp
   val s0_flowPtr      = s0_vecstin.flowPtr
-  assert(!(s0_iss_valid && s0_vec_valid))
 
   // generate addr
   // val saddr = s0_in.bits.src(0) + SignExt(s0_in.bits.uop.imm(11,0), VAddrBits)
@@ -186,8 +185,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   io.st_mask_out.bits.mask   := s0_out.mask
   io.st_mask_out.bits.sqIdx  := s0_out.uop.sqIdx
 
-  io.stin.ready := s1_ready
-  io.vecstin.ready := s1_ready
+  io.stin.ready := s1_ready && s0_use_flow_rs
+  io.vecstin.ready := s1_ready && s0_use_flow_vec
   io.prefetch_req.ready := s1_ready && io.dcache.req.ready && !s0_iss_valid && !s0_vec_valid
 
   // Pipeline
