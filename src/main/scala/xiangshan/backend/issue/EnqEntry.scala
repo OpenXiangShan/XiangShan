@@ -175,7 +175,7 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
     val wakeupVec: IndexedSeq[IndexedSeq[Bool]] = io.wakeUpFromIQ.map((bundle: ValidIO[IssueQueueIQWakeUpBundle]) =>
       bundle.bits.wakeUp(entryReg.status.psrc zip entryReg.status.srcType, bundle.valid)
     ).toIndexedSeq.transpose
-    val cancelSel = io.wakeUpFromIQ.map(x => io.og0Cancel(x.bits.exuIdx) && x.bits.is0Lat)
+    val cancelSel = params.wakeUpSourceExuIdx.zip(io.wakeUpFromIQ).map{ case (x, y) => io.og0Cancel(x) && y.bits.is0Lat}
     srcWakeUpByIQVec := wakeupVec.map(x => VecInit(x.zip(cancelSel).map { case (wakeup, cancel) => wakeup && !cancel }))
     srcWakeUpButCancel := wakeupVec.map(x => VecInit(x.zip(cancelSel).map { case (wakeup, cancel) => wakeup && cancel }))
     srcWakeUpByIQWithoutCancel := wakeupVec.map(x => VecInit(x))
@@ -192,7 +192,7 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
     val wakeupVec: IndexedSeq[IndexedSeq[Bool]] = io.enqDelayWakeUpFromIQ.map( x =>
       x.bits.wakeUp(entryReg.status.psrc.zip(entryReg.status.srcType), x.valid)
     ).toIndexedSeq.transpose
-    val cancelSel = io.enqDelayWakeUpFromIQ.map(x => io.enqDelayOg0Cancel(x.bits.exuIdx) && x.bits.is0Lat)
+    val cancelSel = params.wakeUpSourceExuIdx.zip(io.enqDelayWakeUpFromIQ).map{ case (x, y) => io.enqDelayOg0Cancel(x) && y.bits.is0Lat}
     enqDelaySrcWakeUpByIQVec := wakeupVec.map(x => VecInit(x.zip(cancelSel).map { case (wakeup, cancel) => wakeup && !cancel }))
   } else {
     enqDelaySrcWakeUpByIQVec := 0.U.asTypeOf(enqDelaySrcWakeUpByIQVec)
@@ -293,7 +293,7 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
           // do not overflow
           srcIssuedTimer.andR -> srcIssuedTimer,
           // T2+: increase if the entry is valid, the src is ready, and the src is woken up by iq
-          (validReg && SrcState.isReady(currentStatus.srcState(srcIdx)) && currentStatus.srcWakeUpL1ExuOH.get.asUInt.orR) -> (srcIssuedTimer + 1.U)
+          (validReg && SrcState.isReady(currentStatus.srcState(srcIdx)) && currentStatus.srcWakeUpL1ExuOH.get(srcIdx).asUInt.orR) -> (srcIssuedTimer + 1.U)
         ))
     }
     entryUpdate.status.srcLoadDependency.get.zip(currentStatus.srcLoadDependency.get).zip(srcWakeUpByIQVec).zip(srcWakeUp).foreach {
