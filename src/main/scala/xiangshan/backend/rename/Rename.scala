@@ -197,6 +197,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   }
   val validWaitForward = io.in.map(_.bits.waitForward).zip(outValidMask).map(x => x._1 && x._2)
   val isWaitForward = VecInit((0 until RenameWidth).map(i => validWaitForward.take(i).fold(false.B)(_ || _)))
+  val pdestReg = Reg(Vec(RenameWidth, chiselTypeOf(uops.head.pdest)))
   // uop calculation
   for (i <- 0 until RenameWidth) {
     for ((name, data) <- uops(i).elements) {
@@ -269,10 +270,12 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).eliminatedMove := isMove(i)
 
     // update pdest
-    uops(i).pdest := MuxCase(0.U, Seq(
-      (needIntDest(i) && !isMove(i))    -> intFreeList.io.allocatePhyReg(i),
+    val pdestWire = MuxCase(0.U, Seq(
+      (needIntDest(i) && !isMove(i)) -> intFreeList.io.allocatePhyReg(i),
       (needFpDest(i) || needVecDest(i)) -> fpFreeList.io.allocatePhyReg(i),
     ))
+    pdestReg(i) := Mux(io.out(i).fire, pdestWire, pdestReg(i))
+    uops(i).pdest := Mux(io.out(i).fire, pdestWire, pdestReg(i))
 
     // Assign performance counters
     uops(i).debugInfo.renameTime := GTimer()
@@ -409,7 +412,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val genSnapshot = Cat(io.out.map(out => out.fire && out.bits.snapshot)).orR
   val snapshotCtr = RegInit((4 * CommitWidth).U)
   val notInSameSnpt = RegNext(distanceBetween(robIdxHeadNext, io.snptLastEnq.bits) >= CommitWidth.U || !io.snptLastEnq.valid)
-  val allowSnpt = if (EnableRenameSnapshot) !snapshotCtr.orR && notInSameSnpt else false.B
+  val allowSnpt = if (EnableRenameSnapshot) !hasInstr && !snapshotCtr.orR && notInSameSnpt else false.B
   io.out.zip(io.in).foreach{ case (out, in) => out.bits.snapshot := allowSnpt && (!in.bits.preDecodeInfo.notCFI || FuType.isJump(in.bits.fuType)) && in.fire }
   when(genSnapshot) {
     snapshotCtr := (4 * CommitWidth).U - PopCount(io.out.map(_.fire))
