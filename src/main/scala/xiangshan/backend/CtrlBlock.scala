@@ -399,22 +399,9 @@ class CtrlBlockImp(
   rename.io.snptLastEnq.valid := !isEmpty(snpt.io.enqPtr, snpt.io.deqPtr)
   rename.io.snptLastEnq.bits := snpt.io.snapshots((snpt.io.enqPtr - 1.U).value).robIdx.head
 
-  // prevent rob from generating snapshot when full here
   val renameOut = Wire(chiselTypeOf(rename.io.out))
   renameOut <> rename.io.out
-  // pass all snapshot in the first element for correctness of blockBackward
-  renameOut.tail.foreach(_.bits.snapshot := false.B)
-  renameOut.head.bits.snapshot := Mux(isFull(snpt.io.enqPtr, snpt.io.deqPtr),
-    false.B,
-    Cat(rename.io.out.map(out => out.valid && out.bits.snapshot)).orR
-  )
-
-
-  // pipeline between rename and dispatch
-  // for (i <- 0 until RenameWidth) {
-  //   PipelineConnect(renameOut(i), dispatch.io.fromRename(i), dispatch.io.recv(i), s1_s3_redirect.valid)
-  // }
-  renameOut <> dispatch.io.fromRename
+  dispatch.io.fromRename <> renameOut
   renameOut.zip(dispatch.io.recv).map{case (rename,recv) => rename.ready := recv}
   dispatch.io.fromRenameIsFp := rename.io.toDispatchIsFp
   dispatch.io.fromRenameIsInt := rename.io.toDispatchIsInt
