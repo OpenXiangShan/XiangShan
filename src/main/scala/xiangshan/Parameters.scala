@@ -400,7 +400,7 @@ case class XSCoreParameters
   def iqWakeUpParams = {
     Seq(
       WakeUpConfig(
-        Seq("ALU0", "ALU1", "MUL0", "MUL1", "BJU0", "LDU0", "LDU1", "HYU0") ->
+        Seq("ALU0", "ALU1", "MUL0", "MUL1", "LDU0", "LDU1", "HYU0") ->
         Seq("ALU0", "ALU1", "MUL0", "MUL1", "BJU0", "BJU1", "BJU2", "LDU0", "LDU1", "STA0", "STD0", "STD1", "HYU0")
       ),
       WakeUpConfig(Seq("IMISC0") -> Seq("VFEX0")),

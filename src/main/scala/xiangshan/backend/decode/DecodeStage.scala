@@ -143,14 +143,14 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     io.intRat(i)(0).addr := io.out(i).bits.lsrc(0)
     io.intRat(i)(1).addr := io.out(i).bits.lsrc(1)
     io.intRat(i)(2).addr := io.out(i).bits.ldest
-    io.intRat(i).foreach(_.hold := false.B)
+    io.intRat(i).foreach(_.hold := !io.out(i).ready)
 
     // Floating-point instructions can not be fused now.
     io.fpRat(i)(0).addr := io.out(i).bits.lsrc(0)
     io.fpRat(i)(1).addr := io.out(i).bits.lsrc(1)
     io.fpRat(i)(2).addr := io.out(i).bits.lsrc(2)
     io.fpRat(i)(3).addr := io.out(i).bits.ldest
-    io.fpRat(i).foreach(_.hold := false.B)
+    io.fpRat(i).foreach(_.hold := !io.out(i).ready)
 
     // Vec instructions
     // TODO: vec uop dividers need change this
@@ -160,7 +160,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     io.vecRat(i)(3).addr := v0Idx.U                // v0
     io.vecRat(i)(4).addr := vconfigIdx.U           // vtype
     io.vecRat(i)(5).addr := io.out(i).bits.ldest   // vd
-    io.vecRat(i).foreach(_.hold := false.B)
+    io.vecRat(i).foreach(_.hold := !io.out(i).ready)
   }
 
   val hasValid = VecInit(io.in.map(_.valid)).asUInt.orR

@@ -837,6 +837,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   io.deq.uopInfo.lmul := uopInfoGen.io.out.uopInfo.lmul
 
   io.deq.decodedInst := decodedInst
+  io.deq.decodedInst.rfWen := (decodedInst.ldest =/= 0.U) && decodedInst.rfWen
 
   //-------------------------------------------------------------
   // Debug Info
