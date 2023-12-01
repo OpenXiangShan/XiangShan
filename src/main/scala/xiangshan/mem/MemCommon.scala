@@ -126,26 +126,26 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
   val meta_prefetch = UInt(L1PfSourceBits.W)
   val meta_access = Bool()
 
-  def fromLsPipelineBundle(input: LsPipelineBundle) = {
-    vaddr := input.vaddr
-    paddr := input.paddr
-    mask := input.mask
-    data := input.data
-    uop := input.uop
-    wlineflag := input.wlineflag
-    miss := input.miss
-    tlbMiss := input.tlbMiss
-    ptwBack := input.ptwBack
-    mmio := input.mmio
-    rsIdx := input.rsIdx
-    forwardMask := input.forwardMask
-    forwardData := input.forwardData
-    isPrefetch := input.isPrefetch
-    isHWPrefetch := input.isHWPrefetch
-    isFirstIssue := input.isFirstIssue
-    hasROBEntry := input.hasROBEntry
-    dcacheRequireReplay := input.dcacheRequireReplay
-    schedIndex := input.schedIndex
+  def fromLsPipelineBundle(input: LsPipelineBundle, latch: Boolean = false) = {
+    if (latch) vaddr := RegNext(input.vaddr) else vaddr := input.vaddr
+    if (latch) paddr := RegNext(input.paddr) else paddr := input.paddr
+    if (latch) mask := RegNext(input.mask) else mask := input.mask
+    if (latch) data := RegNext(input.data) else data := input.data
+    if (latch) uop := RegNext(input.uop) else uop := input.uop
+    if (latch) wlineflag := RegNext(input.wlineflag) else wlineflag := input.wlineflag
+    if (latch) miss := RegNext(input.miss) else miss := input.miss
+    if (latch) tlbMiss := RegNext(input.tlbMiss) else tlbMiss := input.tlbMiss
+    if (latch) ptwBack := RegNext(input.ptwBack) else ptwBack := input.ptwBack
+    if (latch) mmio := RegNext(input.mmio) else mmio := input.mmio
+    if (latch) rsIdx := RegNext(input.rsIdx) else rsIdx := input.rsIdx
+    if (latch) forwardMask := RegNext(input.forwardMask) else forwardMask := input.forwardMask
+    if (latch) forwardData := RegNext(input.forwardData) else forwardData := input.forwardData
+    if (latch) isPrefetch := RegNext(input.isPrefetch) else isPrefetch := input.isPrefetch
+    if (latch) isHWPrefetch := RegNext(input.isHWPrefetch) else isHWPrefetch := input.isHWPrefetch
+    if (latch) isFirstIssue := RegNext(input.isFirstIssue) else isFirstIssue := input.isFirstIssue
+    if (latch) hasROBEntry := RegNext(input.hasROBEntry) else hasROBEntry := input.hasROBEntry
+    if (latch) dcacheRequireReplay := RegNext(input.dcacheRequireReplay) else dcacheRequireReplay := input.dcacheRequireReplay
+    if (latch) schedIndex := RegNext(input.schedIndex) else schedIndex := input.schedIndex
 
     meta_prefetch := DontCare
     meta_access := DontCare
@@ -184,39 +184,39 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
   val data_wen_dup = Vec(6, Bool()) // dirty reg dup
 
 
-  def fromLsPipelineBundle(input: LsPipelineBundle) = {
-    vaddr := input.vaddr
-    paddr := input.paddr
-    mask := input.mask
-    data := input.data
-    uop := input.uop
-    wlineflag := input.wlineflag
-    miss := input.miss
-    tlbMiss := input.tlbMiss
-    ptwBack := input.ptwBack
-    mmio := input.mmio
-    atomic := input.atomic
-    rsIdx := input.rsIdx
-    forwardMask := input.forwardMask
-    forwardData := input.forwardData
-    isPrefetch := input.isPrefetch
-    isHWPrefetch := input.isHWPrefetch
-    isFirstIssue := input.isFirstIssue
-    hasROBEntry := input.hasROBEntry
-    isLoadReplay := input.isLoadReplay
-    isFastPath := input.isFastPath
-    isFastReplay := input.isFastReplay
-    mshrid := input.mshrid
-    forward_tlDchannel := input.forward_tlDchannel
-    replayCarry := input.replayCarry
-    dcacheRequireReplay := input.dcacheRequireReplay
-    schedIndex := input.schedIndex
-    handledByMSHR := input.handledByMSHR
-    replacementUpdated := input.replacementUpdated
-    missDbUpdated := input.missDbUpdated
-    delayedLoadError := input.delayedLoadError
-    lateKill := input.lateKill
-    feedbacked := input.feedbacked
+  def fromLsPipelineBundle(input: LsPipelineBundle, latch: Boolean = false) = {
+    if(latch) vaddr := RegNext(input.vaddr) else vaddr := input.vaddr
+    if(latch) paddr := RegNext(input.paddr) else paddr := input.paddr
+    if(latch) mask := RegNext(input.mask) else mask := input.mask
+    if(latch) data := RegNext(input.data) else data := input.data
+    if(latch) uop := RegNext(input.uop) else uop := input.uop
+    if(latch) wlineflag := RegNext(input.wlineflag) else wlineflag := input.wlineflag
+    if(latch) miss := RegNext(input.miss) else miss := input.miss
+    if(latch) tlbMiss := RegNext(input.tlbMiss) else tlbMiss := input.tlbMiss
+    if(latch) ptwBack := RegNext(input.ptwBack) else ptwBack := input.ptwBack
+    if(latch) mmio := RegNext(input.mmio) else mmio := input.mmio
+    if(latch) atomic := RegNext(input.atomic) else atomic := input.atomic
+    if(latch) rsIdx := RegNext(input.rsIdx) else rsIdx := input.rsIdx
+    if(latch) forwardMask := RegNext(input.forwardMask) else forwardMask := input.forwardMask
+    if(latch) forwardData := RegNext(input.forwardData) else forwardData := input.forwardData
+    if(latch) isPrefetch := RegNext(input.isPrefetch) else isPrefetch := input.isPrefetch
+    if(latch) isHWPrefetch := RegNext(input.isHWPrefetch) else isHWPrefetch := input.isHWPrefetch
+    if(latch) isFirstIssue := RegNext(input.isFirstIssue) else isFirstIssue := input.isFirstIssue
+    if(latch) hasROBEntry := RegNext(input.hasROBEntry) else hasROBEntry := input.hasROBEntry
+    if(latch) isLoadReplay := RegNext(input.isLoadReplay) else isLoadReplay := input.isLoadReplay
+    if(latch) isFastPath := RegNext(input.isFastPath) else isFastPath := input.isFastPath
+    if(latch) isFastReplay := RegNext(input.isFastReplay) else isFastReplay := input.isFastReplay
+    if(latch) mshrid := RegNext(input.mshrid) else mshrid := input.mshrid
+    if(latch) forward_tlDchannel := RegNext(input.forward_tlDchannel) else forward_tlDchannel := input.forward_tlDchannel
+    if(latch) replayCarry := RegNext(input.replayCarry) else replayCarry := input.replayCarry
+    if(latch) dcacheRequireReplay := RegNext(input.dcacheRequireReplay) else dcacheRequireReplay := input.dcacheRequireReplay
+    if(latch) schedIndex := RegNext(input.schedIndex) else schedIndex := input.schedIndex
+    if(latch) handledByMSHR := RegNext(input.handledByMSHR) else handledByMSHR := input.handledByMSHR
+    if(latch) replacementUpdated := RegNext(input.replacementUpdated) else replacementUpdated := input.replacementUpdated
+    if(latch) missDbUpdated := RegNext(input.missDbUpdated) else missDbUpdated := input.missDbUpdated
+    if(latch) delayedLoadError := RegNext(input.delayedLoadError) else delayedLoadError := input.delayedLoadError
+    if(latch) lateKill := RegNext(input.lateKill) else lateKill := input.lateKill
+    if(latch) feedbacked := RegNext(input.feedbacked) else feedbacked := input.feedbacked
 
     rep_info := DontCare
     data_wen_dup := DontCare
