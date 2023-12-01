@@ -1047,6 +1047,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_vp_match_fail = RegNext(io.lsq.forward.matchInvalid || io.sbuffer.matchInvalid) && s3_troublem
   s3_rep_frm_fetch := s3_vp_match_fail
   val s3_ldld_rep_inst =
+      !s3_in.miss &&
       io.lsq.ldld_nuke_query.resp.valid &&
       io.lsq.ldld_nuke_query.resp.bits.rep_frm_fetch &&
       RegNext(io.csrCtrl.ldld_vio_check_enable)
@@ -1084,7 +1085,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.rollback.bits.robIdx      := s3_out.bits.uop.robIdx
   io.rollback.bits.ftqIdx      := s3_out.bits.uop.cf.ftqPtr
   io.rollback.bits.ftqOffset   := s3_out.bits.uop.cf.ftqOffset
-  io.rollback.bits.level       := RedirectLevel.flush
+  io.rollback.bits.level       := Mux(s3_rep_frm_fetch, RedirectLevel.flush, RedirectLevel.flushAfter)
   io.rollback.bits.cfiUpdate.target := s3_out.bits.uop.cf.pc
   io.rollback.bits.debug_runahead_checkpoint_id := s3_out.bits.uop.debugInfo.runahead_checkpoint_id
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
