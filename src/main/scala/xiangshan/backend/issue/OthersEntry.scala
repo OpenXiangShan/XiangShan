@@ -133,7 +133,7 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
     val wakeupVec: Seq[Seq[Bool]] = io.wakeUpFromIQ.map((bundle: ValidIO[IssueQueueIQWakeUpBundle]) =>
       bundle.bits.wakeUp(entryReg.status.psrc zip entryReg.status.srcType, bundle.valid)
     ).toSeq.transpose
-    val cancelSel = io.wakeUpFromIQ.map(x => io.og0Cancel(x.bits.exuIdx) && x.bits.is0Lat)
+    val cancelSel = params.wakeUpSourceExuIdx.zip(io.wakeUpFromIQ).map{ case (x, y) => io.og0Cancel(x) && y.bits.is0Lat}
     srcWakeUpByIQVec := wakeupVec.map(x => VecInit(x.zip(cancelSel).map { case (wakeup, cancel) => wakeup && !cancel }))
     srcWakeUpButCancel := wakeupVec.map(x => VecInit(x.zip(cancelSel).map { case (wakeup, cancel) => wakeup && cancel }))
     srcWakeUpByIQWithoutCancel := wakeupVec.map(x => VecInit(x))
@@ -190,7 +190,7 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
             // do not overflow
             srcIssuedTimer.andR -> srcIssuedTimer,
             // T2+: increase if the entry is valid, the src is ready, and the src is woken up by iq
-            (validReg && SrcState.isReady(entryReg.status.srcState(srcIdx)) && regSrcWakeUpL1ExuOH.get.asUInt.orR) -> (srcIssuedTimer + 1.U)
+            (validReg && SrcState.isReady(entryReg.status.srcState(srcIdx)) && regSrcWakeUpL1ExuOH.get(srcIdx).asUInt.orR) -> (srcIssuedTimer + 1.U)
           ))
       }
       entryRegNext.status.srcLoadDependency.get.zip(entryReg.status.srcLoadDependency.get).zip(srcWakeUpByIQVec).zip(srcWakeUp).foreach {
