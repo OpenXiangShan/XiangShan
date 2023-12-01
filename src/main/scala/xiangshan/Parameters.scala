@@ -248,10 +248,11 @@ case class XSCoreParameters
   ),
   hytlbParameters: TLBParameters = TLBParameters(
     name = "hytlb",
-    NWays = 4,
+    NWays = 48,
+    outReplace = false,
     partialStaticPMP = true,
     outsideRecvFlush = true,
-    outReplace = false
+    saveLevel = true
   ),
   pftlbParameters: TLBParameters = TLBParameters(
     name = "pftlb",
