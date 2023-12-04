@@ -22,7 +22,19 @@ import xiangshan.frontend._
 import xiangshan.mem.{LqPtr, SqPtr}
 
 object Bundles {
-
+  /**
+   * Connect Same Name Port like bundleSource := bundleSinkBudle.
+   *
+   * There is no limit to the number of ports on both sides.
+   *
+   * Don't forget to connect the remaining ports!
+   */
+  def connectSamePort (bundleSource: Bundle, bundleSink: Bundle):Unit = {
+    bundleSource.elements.foreach { case (name, data) =>
+      if (bundleSink.elements.contains(name))
+        data := bundleSink.elements(name)
+    }
+  }
   // frontend -> backend
   class StaticInst(implicit p: Parameters) extends XSBundle {
     val instr           = UInt(32.W)
@@ -268,9 +280,15 @@ object Bundles {
 
   }
 
-  class IssueQueueIQWakeUpBundle(exuIdx: Int, backendParams: BackendParams) extends IssueQueueWakeUpBaseBundle(backendParams.pregIdxWidth, Seq(exuIdx)) {
+class IssueQueueIQWakeUpBundle(
+  exuIdx: Int,
+  backendParams: BackendParams,
+  copyPdest: Boolean = false,
+  copyNum: Int = 0
+) extends IssueQueueWakeUpBaseBundle(backendParams.pregIdxWidth, Seq(exuIdx)) {
     val loadDependency = Vec(backendParams.LduCnt + backendParams.HyuCnt, UInt(3.W))
     val is0Lat = Bool()
+    val pdestCopy = if (copyPdest) Some(Vec(copyNum, UInt(this.pdest.getWidth.W))) else None
     def fromExuInput(exuInput: ExuInput, l2ExuVecs: Vec[UInt]): Unit = {
       this.rfWen := exuInput.rfWen.getOrElse(false.B)
       this.fpWen := exuInput.fpWen.getOrElse(false.B)
@@ -441,7 +459,7 @@ object Bundles {
   }
 
   // DataPath --[ExuInput]--> Exu
-  class ExuInput(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
+  class ExuInput(val params: ExeUnitParams, copyPdest:Boolean = false, copyNum:Int = 0)(implicit p: Parameters) extends XSBundle {
     val fuType        = FuType()
     val fuOpType      = FuOpType()
     val src           = Vec(params.numRegSrc, UInt(params.dataBitsMax.W))
@@ -450,6 +468,7 @@ object Bundles {
     val iqIdx         = UInt(log2Up(MemIQSizeMax).W)// Only used by store yet
     val isFirstIssue  = Bool()                      // Only used by store yet
     val pdest         = UInt(params.wbPregIdxWidth.W)
+    val pdestCopy     = if (copyPdest) Some(Vec(copyNum, UInt(this.pdest.getWidth.W)))else None
     val rfWen         = if (params.writeIntRf)    Some(Bool())                        else None
     val fpWen         = if (params.writeFpRf)     Some(Bool())                        else None
     val vecWen        = if (params.writeVecRf)    Some(Bool())                        else None

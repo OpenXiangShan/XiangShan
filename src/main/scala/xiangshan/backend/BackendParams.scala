@@ -29,6 +29,7 @@ import xiangshan.backend.issue._
 import xiangshan.backend.regfile._
 import xiangshan.{DebugOptionsKey, XSCoreParamsKey}
 
+import scala.collection.mutable
 import scala.reflect.{ClassTag, classTag}
 
 case class BackendParams(
@@ -40,6 +41,28 @@ case class BackendParams(
   configChecks
 
   def debugEn(implicit p: Parameters): Boolean = p(DebugOptionsKey).AlwaysBasicDiff || p(DebugOptionsKey).EnableDifftest
+
+  val copyPdestInfo = mutable.HashMap[Int, (Int, Int)]()
+
+  def updateCopyPdestInfo: Unit = allExuParams.filter(_.copyPdest).map(x => getExuIdx(x.name) -> (x.copyDistance, -1)).foreach { x =>
+    copyPdestInfo.addOne(x)
+  }
+  def isCopyPdest(exuIdx: Int): Boolean = {
+    copyPdestInfo.contains(exuIdx)
+  }
+  def connectWakeup(exuIdx: Int): Unit = {
+    println(s"[Backend] copyPdestInfo ${copyPdestInfo}")
+    if (copyPdestInfo.contains(exuIdx)) {
+      println(s"[Backend] exuIdx ${exuIdx} be connected, old info ${copyPdestInfo(exuIdx)}")
+      val newInfo = exuIdx -> (copyPdestInfo(exuIdx)._1, copyPdestInfo(exuIdx)._2 + 1)
+      copyPdestInfo.remove(exuIdx)
+      copyPdestInfo += newInfo
+      println(s"[Backend] exuIdx ${exuIdx} be connected, new info ${copyPdestInfo(exuIdx)}")
+    }
+  }
+  def getCopyPdestIndex(exuIdx: Int): Int = {
+    copyPdestInfo(exuIdx)._2 / copyPdestInfo(exuIdx)._1
+  }
   def intSchdParams = schdParams.get(IntScheduler())
   def vfSchdParams = schdParams.get(VfScheduler())
   def memSchdParams = schdParams.get(MemScheduler())

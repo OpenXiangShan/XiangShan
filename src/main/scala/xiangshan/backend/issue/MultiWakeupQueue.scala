@@ -3,9 +3,12 @@ package xiangshan.backend.issue
 import chisel3._
 import chisel3.util._
 import utils.PipeWithFlush
+import xiangshan.backend.Bundles.ExuInput
+import xiangshan.backend.exu.ExeUnitParams
 
 class MultiWakeupQueueIO[T <: Data, TFlush <: Data](
   gen       : T,
+  lastGen   : T,
   flushGen  : TFlush,
   latWidth  : Int,
 ) extends Bundle {
@@ -18,21 +21,22 @@ class MultiWakeupQueueIO[T <: Data, TFlush <: Data](
   val enq = Flipped(Valid(new EnqBundle))
   val og0IssueFail = Input(Bool())
   val og1IssueFail = Input(Bool())
-  val deq = Output(Valid(gen))
+  val deq = Output(Valid(lastGen))
 }
 
 class MultiWakeupQueue[T <: Data, TFlush <: Data](
   val gen       : T,
+  val lastGen   : T,
   val flushGen  : TFlush,
   val latencySet: Set[Int],
   flushFunc : (T, TFlush, Int) => Bool,
-  modificationFunc: T => T = { x: T => x }
+  modificationFunc: (T, T) => T
 ) extends Module {
   require(latencySet.min >= 0)
 
-  val io = IO(new MultiWakeupQueueIO(gen, flushGen, log2Up(latencySet.max + 1) + 1))
+  val io = IO(new MultiWakeupQueueIO(gen, lastGen, flushGen, log2Up(latencySet.max + 1) + 1))
 
-  val pipes = latencySet.map(x => Module(new PipeWithFlush[T, TFlush](gen, flushGen, x + 1, flushFunc, modificationFunc))).toSeq
+  val pipes = latencySet.map(x => Module(new PipeWithFlush[T, TFlush](gen, lastGen, flushGen, x + 1, flushFunc, modificationFunc))).toSeq
 
   pipes.zip(latencySet).foreach {
     case (pipe, lat) =>

@@ -116,17 +116,26 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     redirectFlush || loadDependencyFlush || ogFailFlush
   }
 
-  private def modificationFunc(exuInput: ExuInput): ExuInput = {
-    val newExuInput = WireDefault(exuInput)
+  private def modificationFunc(exuInput: ExuInput, newInput: ExuInput): ExuInput = {
+    val lastExuInput = WireDefault(exuInput)
+    val newExuInput = WireDefault(newInput)
+    newExuInput.elements.foreach{ case (name, data) =>
+      if (lastExuInput.elements.contains(name)){
+        data := lastExuInput.elements(name)
+      }
+    }
     newExuInput.loadDependency match {
       case Some(deps) => deps.zip(exuInput.loadDependency.get).foreach(x => x._1 := x._2 << 1)
       case None =>
+    }
+    if (newExuInput.pdestCopy.nonEmpty && !lastExuInput.pdestCopy.nonEmpty) {
+      newExuInput.pdestCopy.get.foreach(_ := lastExuInput.pdest)
     }
     newExuInput
   }
 
   val wakeUpQueues: Seq[Option[MultiWakeupQueue[ExuInput, WakeupQueueFlush]]] = params.exuBlockParams.map { x => OptionWrapper(x.isIQWakeUpSource, Module(
-    new MultiWakeupQueue(new ExuInput(x), new WakeupQueueFlush, x.fuLatancySet, flushFunc, modificationFunc)
+    new MultiWakeupQueue(new ExuInput(x), new ExuInput(x, x.copyPdest, x.iqWakeUpSourcePairs.size / x.copyDistance), new WakeupQueueFlush, x.fuLatancySet, flushFunc, modificationFunc)
   ))}
   val deqBeforeDly = Wire(params.genIssueDecoupledBundle)
 
@@ -471,7 +480,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
           deqBeforeDly(i).bits.common.fpWen.getOrElse(false.B) ||
           deqBeforeDly(i).bits.common.vecWen.getOrElse(false.B)
         }
-        wakeUpQueue.io.enq.bits.uop := deqBeforeDly(i).bits.common
+        wakeUpQueue.io.enq.bits.uop :<= deqBeforeDly(i).bits.common
+        wakeUpQueue.io.enq.bits.uop.pdestCopy.foreach(_ := 0.U)
         wakeUpQueue.io.enq.bits.lat := getDeqLat(i, deqBeforeDly(i).bits.common.fuType)
         wakeUpQueue.io.og0IssueFail := flush.og0Fail
         wakeUpQueue.io.og1IssueFail := flush.og1Fail
@@ -555,6 +565,9 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       wakeup.valid := false.B
       wakeup.bits := 0.U.asTypeOf(wakeup.bits)
       wakeup.bits.is0Lat :=  0.U
+    }
+    if(wakeup.bits.pdestCopy.nonEmpty){
+      wakeup.bits.pdestCopy.get := wakeUpQueues(i).get.io.deq.bits.pdestCopy.get
     }
   }
 

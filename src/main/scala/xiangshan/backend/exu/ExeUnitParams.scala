@@ -17,6 +17,8 @@ case class ExeUnitParams(
   fuConfigs     : Seq[FuConfig],
   wbPortConfigs : Seq[PregWB],
   rfrPortConfigs: Seq[Seq[RdConfig]],
+  copyPdest: Boolean = false,
+  copyDistance: Int = 1,
   fakeUnit      : Boolean = false,
 )(
   implicit

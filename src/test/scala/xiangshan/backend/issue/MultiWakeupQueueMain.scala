@@ -11,13 +11,13 @@ object MultiWakeupQueueMain extends App {
 
   val p = config.alterPartial({ case XSCoreParamsKey => XSCoreParameters() })
 
-  emitVerilog(
-    new MultiWakeupQueue[DynInst, ValidIO[Redirect]](
-      new DynInst()(p),
-      ValidIO(new Redirect()(p)),
-      Set(2, 4),
-      (dynInst: DynInst, flush: ValidIO[Redirect], stage: Int) => dynInst.robIdx.needFlush(flush)
-    ),
-    Array("--full-stacktrace", "--target-dir", "build/issue")
-  )
+//  emitVerilog(
+//    new MultiWakeupQueue[DynInst, ValidIO[Redirect]](
+//      new DynInst()(p),
+//      ValidIO(new Redirect()(p)),
+//      Set(2, 4),
+//      (dynInst: DynInst, flush: ValidIO[Redirect], stage: Int) => dynInst.robIdx.needFlush(flush)
+//    ),
+//    Array("--full-stacktrace", "--target-dir", "build/issue")
+//  )
 }
