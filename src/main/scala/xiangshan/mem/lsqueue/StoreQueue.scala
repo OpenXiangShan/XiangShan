@@ -769,25 +769,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     }
   }
 
-  if (env.EnableDifftest) {
-    for (i <- 0 until EnsbufferWidth) {
-      val storeCommit = io.sbuffer(i).fire
-      val waddr = ZeroExt(Cat(io.sbuffer(i).bits.addr(PAddrBits - 1, 3), 0.U(3.W)), 64)
-      val sbufferMask = shiftMaskToLow(io.sbuffer(i).bits.addr, io.sbuffer(i).bits.mask)
-      val sbufferData = shiftDataToLow(io.sbuffer(i).bits.addr, io.sbuffer(i).bits.data)
-      val wmask = sbufferMask
-      val wdata = sbufferData & MaskExpand(sbufferMask)
-
-      val difftest = DifftestModule(new DiffStoreEvent, delay = 2)
-      difftest.coreid := io.hartId
-      difftest.index  := i.U
-      difftest.valid  := storeCommit
-      difftest.addr   := waddr
-      difftest.data   := wdata
-      difftest.mask   := wmask
-    }
-  }
-
   // Read vaddr for mem exception
   io.exceptionAddr.vaddr := vaddrModule.io.rdata(EnsbufferWidth)
 

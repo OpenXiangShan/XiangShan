@@ -838,6 +838,25 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     )
   }
 
+  if (env.EnableDifftest) {
+    for (i <- 0 until EnsbufferWidth) {
+      val storeCommit = io.in(i).fire
+      val waddr = ZeroExt(Cat(io.in(i).bits.addr(PAddrBits - 1, 3), 0.U(3.W)), 64)
+      val sbufferMask = shiftMaskToLow(io.in(i).bits.addr, io.in(i).bits.mask)
+      val sbufferData = shiftDataToLow(io.in(i).bits.addr, io.in(i).bits.data)
+      val wmask = sbufferMask
+      val wdata = sbufferData & MaskExpand(sbufferMask)
+
+      val difftest = DifftestModule(new DiffStoreEvent, delay = 2)
+      difftest.coreid := io.hartId
+      difftest.index  := i.U
+      difftest.valid  := storeCommit
+      difftest.addr   := waddr
+      difftest.data   := wdata
+      difftest.mask   := wmask
+    }
+  }
+
   val perf_valid_entry_count = RegNext(PopCount(VecInit(stateVec.map(s => !s.isInvalid())).asUInt))
   XSPerfHistogram("util", perf_valid_entry_count, true.B, 0, StoreBufferSize, 1)
   XSPerfAccumulate("sbuffer_req_valid", PopCount(VecInit(io.in.map(_.valid)).asUInt))
