@@ -15,24 +15,26 @@ import xiangshan._
   */
 class PipeWithFlush[T <: Data, TFlush <: Data] (
   gen: T,
+  lastGen: T,
   flushGen: TFlush,
   latency: Int,
   flushFunc: (T, TFlush, Int) => Bool,
-  modificationFunc: T => T = { x: T => x }
+  modificationFunc: (T, T) => T
 ) extends Module {
   require(latency >= 0, "Pipe latency must be greater than or equal to zero!")
 
   class PipeIO extends Bundle {
     val flush = Input(flushGen)
     val enq = Input(Valid(gen))
-    val deq = Output(Valid(gen))
+    val deq = Output(Valid(lastGen))
   }
 
   val io = IO(new PipeIO)
 
   val valids: Seq[Bool] = io.enq.valid +: Seq.fill(latency)(RegInit(false.B))
-  val bits: Seq[T] = io.enq.bits +: Seq.fill(latency)(Reg(gen))
-  val modifiedBits: Seq[T] = bits.map(modificationFunc)
+  val bits: Seq[T] = io.enq.bits +: Seq.fill(latency-1)(Reg(gen)) ++: Seq.fill(1)(Reg(lastGen))
+  val nextBits: Seq[T] = bits.tail :+ bits.last
+  val modifiedBits: Seq[T] = bits.zip(nextBits).map{case (last, next) => modificationFunc(last, next)}
 
   for (i <- 0 until latency) {
     valids(i + 1) := valids(i) && !flushFunc(bits(i), io.flush, i)

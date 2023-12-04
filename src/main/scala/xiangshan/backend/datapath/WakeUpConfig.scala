@@ -12,8 +12,8 @@ trait WakeUpPoint {
 
   def getExuParam(exus: Seq[ExeUnitParams]) : ExeUnitParams = {
     val filteredExus = exus.filter(_.name == this.name)
-    require(filteredExus.isEmpty, s"No exu named $name")
-    require(filteredExus.size > 1, s"Exu $name should be unique")
+    require(filteredExus.nonEmpty, s"No exu named $name")
+    require(filteredExus.size == 1, s"Exu $name should be unique")
     filteredExus.head
   }
 }

@@ -300,12 +300,12 @@ case class XSCoreParameters
     implicit val schdType: SchedulerType = IntScheduler()
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams("ALU0", Seq(AluCfg), Seq(IntWB(port = 0, 0)), Seq(Seq(IntRD(0, 0)), Seq(IntRD(1, 0)))),
-        ExeUnitParams("ALU1", Seq(AluCfg), Seq(IntWB(port = 1, 0)), Seq(Seq(IntRD(2, 0)), Seq(IntRD(3, 0)))),
+        ExeUnitParams("ALU0", Seq(AluCfg), Seq(IntWB(port = 0, 0)), Seq(Seq(IntRD(0, 0)), Seq(IntRD(1, 0))), true, 1),
+        ExeUnitParams("ALU1", Seq(AluCfg), Seq(IntWB(port = 1, 0)), Seq(Seq(IntRD(2, 0)), Seq(IntRD(3, 0))), true, 1),
       ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams("MUL0", Seq(AluCfg, MulCfg, BkuCfg), Seq(IntWB(port = 2, 0)), Seq(Seq(IntRD(4, 0)), Seq(IntRD(5, 0)))),
-        ExeUnitParams("MUL1", Seq(AluCfg, MulCfg, BkuCfg), Seq(IntWB(port = 3, 0)), Seq(Seq(IntRD(6, 0)), Seq(IntRD(7, 0)))),
+        ExeUnitParams("MUL0", Seq(AluCfg, MulCfg, BkuCfg), Seq(IntWB(port = 2, 0)), Seq(Seq(IntRD(4, 0)), Seq(IntRD(5, 0))), true, 1),
+        ExeUnitParams("MUL1", Seq(AluCfg, MulCfg, BkuCfg), Seq(IntWB(port = 3, 0)), Seq(Seq(IntRD(6, 0)), Seq(IntRD(7, 0))), true, 1),
       ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
         ExeUnitParams("BJU0", Seq(BrhCfg), Seq(), Seq(Seq(IntRD(8, 0)), Seq(IntRD(9, 0)))),
@@ -351,8 +351,8 @@ case class XSCoreParameters
 
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams("LDU0", Seq(LduCfg), Seq(IntWB(6, 0), VfWB(6, 0)), Seq(Seq(IntRD(12, 0)))),
-        ExeUnitParams("LDU1", Seq(LduCfg), Seq(IntWB(7, 0), VfWB(7, 0)), Seq(Seq(IntRD(13, 0)))),
+        ExeUnitParams("LDU0", Seq(LduCfg), Seq(IntWB(6, 0), VfWB(6, 0)), Seq(Seq(IntRD(12, 0))), true, 1),
+        ExeUnitParams("LDU1", Seq(LduCfg), Seq(IntWB(7, 0), VfWB(7, 0)), Seq(Seq(IntRD(13, 0))), true, 1),
       ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
         ExeUnitParams("STA0", Seq(StaCfg, MouCfg), Seq(IntWB(4, 1)), Seq(Seq(IntRD(3, 1)))),
@@ -380,14 +380,14 @@ case class XSCoreParameters
   def iqWakeUpParams = {
     Seq(
       WakeUpConfig(
-        Seq("ALU0", "ALU1", "MUL0", "MUL1", "BJU0", "LDU0", "LDU1") ->
+        Seq("ALU0", "ALU1", "MUL0", "MUL1", "LDU0", "LDU1") ->
         Seq("ALU0", "ALU1", "MUL0", "MUL1", "BJU0", "BJU1", "BJU2", "LDU0", "LDU1", "STA0", "STA1", "STD0", "STD1")
       ),
       WakeUpConfig(Seq("IMISC0") -> Seq("VFEX0","VFEX1")),
     ).flatten
   }
 
-  def backendParams: BackendParams = backend.BackendParams(
+  val backendParams: BackendParams = backend.BackendParams(
     Map(
       IntScheduler() -> intSchdParams,
       VfScheduler() -> vfSchdParams,
@@ -547,7 +547,7 @@ trait HasXSParameter {
   val VlsQueueSize = coreParams.VlsQueueSize
   val dpParams = coreParams.dpParams
 
-  def backendParams: BackendParams = coreParams.backendParams
+  val backendParams: BackendParams = coreParams.backendParams
   def MemIQSizeMax = backendParams.memSchdParams.get.issueBlockParams.map(_.numEntries).max
   def IQSizeMax = backendParams.allSchdParams.map(_.issueBlockParams.map(_.numEntries).max).max
 
