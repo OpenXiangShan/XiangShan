@@ -1020,9 +1020,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // s3 load fast replay
   val s3_flushPipe     = Wire(Bool())
   val s3_rep_frm_fetch = Wire(Bool())
+  val s3_dly_ld_err    = Wire(Bool())
   io.fast_rep_out.valid := s3_valid && s3_fast_rep
   io.fast_rep_out.bits := s3_in
-  io.fast_rep_out.bits.lateKill := s3_flushPipe || s3_rep_frm_fetch
+  io.fast_rep_out.bits.lateKill := s3_rep_frm_fetch
+  io.fast_rep_out.bits.delayedLoadError := s3_dly_ld_err
 
   val s3_fast_rep_canceled = io.replay.valid && io.replay.bits.forward_tlDchannel || !io.dcache.req.ready
   io.lsq.ldin.valid := s3_valid && (!s3_fast_rep || s3_fast_rep_canceled) && !s3_in.feedbacked
@@ -1034,7 +1036,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.lsq.ldin.bits.replacementUpdated := io.dcache.resp.bits.replacementUpdated
   io.lsq.ldin.bits.missDbUpdated := RegNext(s2_fire && s2_in.hasROBEntry && !s2_in.tlbMiss && !s2_in.missDbUpdated)
 
-  val s3_dly_ld_err =
+  s3_dly_ld_err :=
     if (EnableAccurateLoadError) {
       io.dcache.resp.bits.error_delayed && RegNext(io.csrCtrl.cache_error_enable) && s3_troublem
     } else {
