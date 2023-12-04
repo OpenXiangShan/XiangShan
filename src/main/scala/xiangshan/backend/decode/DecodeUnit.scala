@@ -840,7 +840,6 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   io.deq.decodedInst := decodedInst
   io.deq.decodedInst.rfWen := (decodedInst.ldest =/= 0.U) && decodedInst.rfWen
-
   //-------------------------------------------------------------
   // Debug Info
 //  XSDebug("in:  instr=%x pc=%x excepVec=%b crossPageIPFFix=%d\n",
