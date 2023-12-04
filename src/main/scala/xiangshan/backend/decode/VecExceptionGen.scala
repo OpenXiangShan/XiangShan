@@ -279,4 +279,11 @@ class VecExceptionGen(implicit p: Parameters) extends XSModule{
   private val regOverlapIllegal = v0Overlap || vs1vdOverlap || vs2vdOverlap
 
   io.illegalInst := instIllegal || villIllegal || eewIllegal || emulIllegal || regNumIllegal || regOverlapIllegal
+  dontTouch(instIllegal)
+  dontTouch(villIllegal)
+  dontTouch(eewIllegal)
+  dontTouch(emulIllegal)
+  dontTouch(regNumIllegal)
+  dontTouch(regOverlapIllegal)
+  dontTouch(notDependVtypeInst)
 }
