@@ -100,6 +100,10 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
       params.lsqFeedback = true
       params.hasFeedback = true
       params.checkWaitBit = false
+      params.numDeq = 3
+    }
+    if (cfg == StdExeUnitCfg) {
+      params.numDeq = 3
     }
     if (cfg.hasCertainLatency) {
       params.fixedLatency = if (cfg == MulDivExeUnitCfg) mulCfg.latency.latencyVal.get else cfg.latency.latencyVal.get
@@ -135,8 +139,9 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
 
   override def toString: String = params.toString
   // for better timing, we limits the size of RS to 2-deq
-  val maxRsDeq = 2
+  val maxRsDeq = 4
   def numRS = (params.numDeq + (maxRsDeq - 1)) / maxRsDeq
+  println("=============================== " + numRS)
 
   class RSWrapperImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) with HasPerfEvents {
     require(params.numEnq < params.numDeq || params.numEnq % params.numDeq == 0)

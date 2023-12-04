@@ -54,7 +54,7 @@ class FakeMemBlockWbSourceImp(outer: FakeMemBlockWbSource) extends LazyModuleImp
 }
 
 // Merge CtrlBlock, exuBlocks, wbArbiter, wb2Ctrl, etc into 1 module
-class Backend(memWbSource: HasWritebackSource)(implicit p: Parameters) extends LazyModule 
+class Backend(memWbSource: HasWritebackSource)(implicit p: Parameters) extends LazyModule
   with HasXSParameter
   with HasExuWbHelper
 {
@@ -337,7 +337,7 @@ class BackendImp(outer: Backend)(implicit p: Parameters) extends LazyModuleImp(o
 
   ctrlBlock.perfinfo.perfEventsEu0 := exuBlocks(0).getPerf.dropRight(outer.exuBlocks(0).scheduler.numRs)
   ctrlBlock.perfinfo.perfEventsEu1 := exuBlocks(1).getPerf.dropRight(outer.exuBlocks(1).scheduler.numRs)
-  ctrlBlock.perfinfo.perfEventsRs  := outer.exuBlocks.flatMap(b => b.module.getPerf.takeRight(b.scheduler.numRs))
+  ctrlBlock.perfinfo.perfEventsRs  := DontCare // outer.exuBlocks.flatMap(b => b.module.getPerf.takeRight(b.scheduler.numRs))
 
   csrioIn.hartId <> io.hartId
 

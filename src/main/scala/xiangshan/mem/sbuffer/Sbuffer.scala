@@ -403,6 +403,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
       io.store_prefetch(i) <> prefetcher.io.prefetch_req(i)
     }
   }
+  io.store_prefetch(2) <> prefetcher.io.prefetch_req(2)
   prefetcher.io.memSetPattenDetected := io.memSetPattenDetected
 
   def wordReqToBufLine( // allocate a new line in sbuffer
@@ -502,8 +503,6 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     )
   }
 
-  // for now, when enq, trigger a prefetch (if EnableAtCommitMissTrigger)
-  require(EnsbufferWidth == StorePipelineWidth)
 
   // ---------------------- Send Dcache Req ---------------------
 
