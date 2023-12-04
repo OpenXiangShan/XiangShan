@@ -20,6 +20,7 @@ import xiangshan.backend.issue.{CancelNetwork, Scheduler, SchedulerImpBase}
 import xiangshan.backend.rob.{RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO}
 import xiangshan.frontend.{FtqPtr, FtqRead}
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
+import scala.collection.mutable
 
 class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyModule
   with HasXSParameter {
@@ -101,6 +102,8 @@ class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyMod
     println(s"[Backend]   port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
   }
 
+  params.updateCopyPdestInfo
+  println(s"[Backend] copyPdestInfo ${params.copyPdestInfo}")
   val ctrlBlock = LazyModule(new CtrlBlock(params))
   val pcTargetMem = LazyModule(new PcTargetMem(params))
   val intScheduler = params.intSchdParams.map(x => LazyModule(new Scheduler(x)))

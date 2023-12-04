@@ -193,7 +193,15 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
   // Connect bundles having the same wakeup source
   issueQueues.zipWithIndex.foreach { case(iq, i) =>
     iq.io.wakeupFromIQ.foreach { wakeUp =>
-      wakeUp := iqWakeUpInMap(wakeUp.bits.exuIdx)
+      val wakeUpIn = iqWakeUpInMap(wakeUp.bits.exuIdx)
+      val exuIdx = wakeUp.bits.exuIdx
+      println(s"[Backend] Connect wakeup exuIdx ${exuIdx}")
+      connectSamePort(wakeUp,wakeUpIn)
+      backendParams.connectWakeup(exuIdx)
+      if (backendParams.isCopyPdest(exuIdx)) {
+        println(s"[Backend] exuIdx ${exuIdx} use pdestCopy ${backendParams.getCopyPdestIndex(exuIdx)}")
+        wakeUp.bits.pdest := wakeUpIn.bits.pdestCopy.get(backendParams.getCopyPdestIndex(exuIdx))
+      }
     }
     iq.io.og0Cancel := io.fromDataPath.og0Cancel
     iq.io.og1Cancel := io.fromDataPath.og1Cancel
