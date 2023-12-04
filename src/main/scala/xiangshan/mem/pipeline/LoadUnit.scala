@@ -1017,15 +1017,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_fwd_data_valid = RegEnable(s2_fwd_data_valid, false.B, s2_valid)
   val s3_fwd_frm_d_chan_valid = (s3_fwd_frm_d_chan && s3_fwd_data_valid)
 
-  // s3 load fast replay
-  val s3_flushPipe     = Wire(Bool())
-  val s3_rep_frm_fetch = Wire(Bool())
-  val s3_dly_ld_err    = Wire(Bool())
-  io.fast_rep_out.valid := s3_valid && s3_fast_rep
-  io.fast_rep_out.bits := s3_in
-  io.fast_rep_out.bits.lateKill := s3_rep_frm_fetch
-  io.fast_rep_out.bits.delayedLoadError := s3_dly_ld_err
-
   val s3_fast_rep_canceled = io.replay.valid && io.replay.bits.forward_tlDchannel || !io.dcache.req.ready
   io.lsq.ldin.valid := s3_valid && (!s3_fast_rep || s3_fast_rep_canceled) && !s3_in.feedbacked
   io.lsq.ldin.bits := s3_in
@@ -1036,7 +1027,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.lsq.ldin.bits.replacementUpdated := io.dcache.resp.bits.replacementUpdated
   io.lsq.ldin.bits.missDbUpdated := RegNext(s2_fire && s2_in.hasROBEntry && !s2_in.tlbMiss && !s2_in.missDbUpdated)
 
-  s3_dly_ld_err :=
+  val s3_dly_ld_err =
     if (EnableAccurateLoadError) {
       io.dcache.resp.bits.error_delayed && RegNext(io.csrCtrl.cache_error_enable) && s3_troublem
     } else {
@@ -1047,12 +1038,12 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.fast_rep_out.bits.delayedLoadError := s3_dly_ld_err
 
   val s3_vp_match_fail = RegNext(io.lsq.forward.matchInvalid || io.sbuffer.matchInvalid) && s3_troublem
-  s3_rep_frm_fetch := s3_vp_match_fail
+  val s3_rep_frm_fetch = s3_vp_match_fail
   val s3_ldld_rep_inst =
       io.lsq.ldld_nuke_query.resp.valid &&
       io.lsq.ldld_nuke_query.resp.bits.rep_frm_fetch &&
       RegNext(io.csrCtrl.ldld_vio_check_enable)
-  s3_flushPipe     := s3_ldld_rep_inst
+  val s3_flushPipe = s3_ldld_rep_inst
 
   val s3_rep_info = WireInit(s3_in.rep_info)
   s3_rep_info.dcache_miss   := s3_in.rep_info.dcache_miss && !s3_fwd_frm_d_chan_valid
@@ -1169,6 +1160,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.ldout.bits        := s3_ld_wb_meta
   io.ldout.bits.data   := Mux(s3_valid, s3_ld_data_frm_cache, s3_ld_data_frm_uncache)
   io.ldout.valid       := s3_out.valid || (io.lsq.uncache.valid && !s3_valid)
+
+  // s3 load fast replay
+  io.fast_rep_out.valid := s3_valid && s3_fast_rep
+  io.fast_rep_out.bits := s3_in
+  io.fast_rep_out.bits.lateKill := s3_rep_frm_fetch
 
 
   // fast load to load forward
