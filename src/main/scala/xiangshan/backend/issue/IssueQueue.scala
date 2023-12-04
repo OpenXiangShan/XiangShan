@@ -485,14 +485,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     deq.bits.common.flushPipe.foreach(_ := deqEntryVec(i).bits.payload.flushPipe)
     deq.bits.common.pdest := deqEntryVec(i).bits.payload.pdest
     deq.bits.common.robIdx := deqEntryVec(i).bits.status.robIdx
-    deq.bits.common.dataSources.zip(finalDataSources(i)).zipWithIndex.foreach {
-      case ((sink, source), srcIdx) =>
-        sink.value := Mux(
-          SrcType.isXp(deqEntryVec(i).bits.status.srcType(srcIdx)) && deqEntryVec(i).bits.status.psrc(srcIdx) === 0.U,
-          DataSource.none,
-          source.value
-        )
-    }
+    deq.bits.common.dataSources := finalDataSources(i)
     deq.bits.common.l1ExuVec.foreach(_ := finalWakeUpL1ExuOH.get(i))
     deq.bits.common.srcTimer.foreach(_ := finalSrcTimer.get(i))
     deq.bits.common.loadDependency.foreach(_ := deqEntryVec(i).bits.status.mergedLoadDependency.get)
