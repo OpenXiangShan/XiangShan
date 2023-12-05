@@ -27,7 +27,7 @@ import xiangshan.backend.fu.FuType
 import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend._
 import xiangshan.mem.{LqPtr, SqPtr}
-import xiangshan.backend.Bundles.DynInst
+import xiangshan.backend.Bundles.{DynInst, UopIdx}
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.HasBPUParameter
@@ -203,7 +203,7 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val imm = UInt(ImmUnion.maxLen.W)
   val commitType = CommitType()
   val fpu = new FPUCtrlSignals
-  val uopIdx = UInt(5.W)
+  val uopIdx = UopIdx()
   val isMove = Bool()
   val vm = Bool()
   val singleStep = Bool()
