@@ -115,6 +115,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   private val inReady = io.in.ready
   private val inValid = io.in.valid
   private val inDecodedInst = WireInit(io.in.bits.simpleDecodedInst)
+  private val inInstFields = io.in.bits.simpleDecodedInst.instr.asTypeOf(new XSInstBitFields)
   private val inUopInfo = io.in.bits.uopInfo
   private val outValids = io.out.complexDecodedInsts.map(_.valid)
   private val outReadys = io.out.complexDecodedInsts.map(_.ready)
@@ -122,6 +123,14 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   private val outComplexNum = io.complexNum
 
   val maxUopSize = MaxUopSize
+  when (io.in.fire && io.in.bits.simpleDecodedInst.isVset) {
+    when(inInstFields.RD === 0.U && inInstFields.RS1 === 0.U) {
+      inDecodedInst.fuOpType := VSETOpType.keepVl(io.in.bits.simpleDecodedInst.fuOpType)
+    }.elsewhen(inInstFields.RS1 === 0.U) {
+      inDecodedInst.fuOpType := VSETOpType.setVlmax(io.in.bits.simpleDecodedInst.fuOpType)
+    }
+  }
+
   val latchedInst = RegEnable(inDecodedInst, inValid && inReady)
   val latchedUopInfo = RegEnable(inUopInfo, inValid && inReady)
   //input bits
@@ -148,16 +157,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   isVsetSimple := latchedInst.isVset
   val vlmulReg = latchedInst.vpu.vlmul
   val vsewReg = latchedInst.vpu.vsew
-  when(isVsetSimple) {
-    when(dest === 0.U && src1 === 0.U) {
-      latchedInst.fuOpType := VSETOpType.keepVl(inDecodedInst.fuOpType)
-    }.elsewhen(src1 === 0.U) {
-      latchedInst.fuOpType := VSETOpType.setVlmax(inDecodedInst.fuOpType)
-    }
-    when(inDecodedInst.vpu.vill) {
-      latchedInst.exceptionVec(ExceptionNO.illegalInstr) := true.B
-    }
-  }
+
   //Type of uop Div
   val typeOfSplit = latchedInst.uopSplitType
   val src1Type = latchedInst.srcType(0)
