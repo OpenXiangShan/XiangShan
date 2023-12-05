@@ -189,31 +189,28 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
 
   switch(typeOfSplit) {
     is(UopSplitType.VSET) {
+      // In simple decoder, rfWen and vecWen are not set
       when(isVsetSimple) {
-        when(dest =/= 0.U) {
-          csBundle(0).fuType := FuType.vsetiwi.U
-          csBundle(0).fuOpType := VSETOpType.switchDest(latchedInst.fuOpType)
-          csBundle(0).flushPipe := false.B
-          csBundle(0).rfWen := true.B
-          csBundle(0).vecWen := false.B
-          csBundle(1).ldest := VCONFIG_IDX.U
-          csBundle(1).rfWen := false.B
-          csBundle(1).vecWen := true.B
-        }.elsewhen(src1 =/= 0.U) {
-          csBundle(0).ldest := VCONFIG_IDX.U
-        }.elsewhen(VSETOpType.isVsetvli(latchedInst.fuOpType)) {
-          csBundle(0).fuType := FuType.vsetfwf.U
-          csBundle(0).srcType(0) := SrcType.vp
-          csBundle(0).lsrc(0) := VCONFIG_IDX.U
-        }.elsewhen(VSETOpType.isVsetvl(latchedInst.fuOpType)) {
-          csBundle(0).srcType(0) := SrcType.reg
-          csBundle(0).srcType(1) := SrcType.imm
+        // Default
+        // uop0 set rd, never flushPipe
+        csBundle(0).fuType := FuType.vsetiwi.U
+        csBundle(0).flushPipe := false.B
+        csBundle(0).rfWen := true.B
+        // uop1 set vl, vsetvl will flushPipe
+        csBundle(1).ldest := VCONFIG_IDX.U
+        csBundle(1).vecWen := true.B
+        when(VSETOpType.isVsetvli(latchedInst.fuOpType) && dest === 0.U && src1 === 0.U) {
+          csBundle(1).fuType := FuType.vsetfwf.U
+          csBundle(1).srcType(0) := SrcType.vp
+          csBundle(1).lsrc(0) := VCONFIG_IDX.U
+        }.elsewhen(VSETOpType.isVsetvl(latchedInst.fuOpType) && dest === 0.U && src1 === 0.U) {
+          // uop0: mv vtype gpr to vector region
+          csBundle(0).srcType(0) := SrcType.xp
+          csBundle(0).srcType(1) := SrcType.no
           csBundle(0).lsrc(1) := 0.U
           csBundle(0).ldest := FP_TMP_REG_MV.U
           csBundle(0).fuType := FuType.i2f.U
-          csBundle(0).rfWen := false.B
           csBundle(0).fpWen := true.B
-          csBundle(0).vecWen := false.B
           csBundle(0).fpu.isAddSub := false.B
           csBundle(0).fpu.typeTagIn := FPU.D
           csBundle(0).fpu.typeTagOut := FPU.D
@@ -224,11 +221,15 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           csBundle(0).fpu.sqrt := false.B
           csBundle(0).fpu.fcvt := false.B
           csBundle(0).flushPipe := false.B
+          // uop1: uvsetvcfg_vv
           csBundle(1).fuType := FuType.vsetfwf.U
+          // vl
           csBundle(1).srcType(0) := SrcType.vp
           csBundle(1).lsrc(0) := VCONFIG_IDX.U
+          // vtype
           csBundle(1).srcType(1) := SrcType.fp
           csBundle(1).lsrc(1) := FP_TMP_REG_MV.U
+          csBundle(1).vecWen := true.B
           csBundle(1).ldest := VCONFIG_IDX.U
         }
       }

@@ -386,7 +386,6 @@ package object xiangshan {
     def readIntRG (func: UInt)  = !func(4)
     def readVecRG (func: UInt)  = func(4)
     // modify fuOpType
-    def switchDest(func: UInt)  = func ^ (1 << destTypeBit).U
     def keepVl(func: UInt)      = func | (1 << keepVlBit).U
     def setVlmax(func: UInt)    = func | (1 << setVlmaxBit).U
   }

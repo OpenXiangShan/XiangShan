@@ -157,7 +157,7 @@ case class VSET(vli: Boolean, vtypei: Boolean, fuOp: BitPat, flushPipe: Boolean,
     val src1 = if (vli) SrcType.imm else SrcType.xp
     val src2 = if (vtypei) SrcType.imm else SrcType.xp
     XSDecode(src1, src2, SrcType.X, FuType.vsetiwf, fuOp, selImm, uopSplitType,
-      xWen = F, fWen = F, vWen = T, mWen = F, xsTrap = F, noSpec = F, blockBack = F, flushPipe = flushPipe).generate()
+      xWen = F, fWen = F, vWen = F, mWen = F, xsTrap = F, noSpec = F, blockBack = F, flushPipe = flushPipe).generate()
   }
 }
 
@@ -674,9 +674,9 @@ object VecDecoder extends DecodeConstants {
   )
 
   val vset: Array[(BitPat, XSDecodeBase)] = Array(
-    VSETVLI   -> VSET(vli = F, vtypei = T, VSETOpType.uvsetvcfg_xi, F, SelImm.IMM_VSETVLI),
-    VSETIVLI  -> VSET(vli = T, vtypei = T, VSETOpType.uvsetvcfg_ii, F, SelImm.IMM_VSETIVLI),
-    VSETVL    -> VSET(vli = F, vtypei = F, VSETOpType.uvsetvcfg_xx, T, SelImm.X), // flush pipe
+    VSETVLI   -> VSET(vli = F, vtypei = T, VSETOpType.uvsetvcfg_xi, flushPipe = F, SelImm.IMM_VSETVLI),
+    VSETIVLI  -> VSET(vli = T, vtypei = T, VSETOpType.uvsetvcfg_ii, flushPipe = F, SelImm.IMM_VSETIVLI),
+    VSETVL    -> VSET(vli = F, vtypei = F, VSETOpType.uvsetvcfg_xx, flushPipe = T, SelImm.X), // flush pipe
   )
 
   val vls: Array[(BitPat, XSDecodeBase)] = Array(
