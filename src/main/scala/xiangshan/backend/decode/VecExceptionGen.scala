@@ -48,7 +48,8 @@ class VecExceptionGen(implicit p: Parameters) extends XSModule{
   })
 
   private val inst: XSInstBitFields = io.inst.asTypeOf(new XSInstBitFields)
-  private val isVector = FuType.isVArithMem(io.decodedInst.fuType)
+  private val isVArithMem = FuType.isVArithMem(io.decodedInst.fuType)
+  private val isVset = FuType.isVset(io.decodedInst.fuType)
 
   private val SEW = io.vtype.vsew(1, 0)
   private val LMUL = Cat(~io.vtype.vlmul(2), io.vtype.vlmul(1, 0))
@@ -169,7 +170,7 @@ class VecExceptionGen(implicit p: Parameters) extends XSModule{
   private val instIllegal = maskLogicalInst && inst.VM === 0.U
 
   // 2. vill Illegal
-  private val villIllegal = io.vtype.illegal && isVector && !notDependVtypeInst
+  private val villIllegal = io.vtype.illegal && isVArithMem && !notDependVtypeInst
 
   // 3. EEW Illegal
   private val doubleFpInst = Seq(
@@ -244,11 +245,11 @@ class VecExceptionGen(implicit p: Parameters) extends XSModule{
   ))
   private val vdNotAlign = (SrcType.isVp(io.decodedInst.srcType(2)) || io.decodedInst.vecWen) && RegNumNotAlign(inst.VD, vdEmul)
 
-  private val regNumIllegal = isVector && (vs1NotAlign || vs2NotAlign || vdNotAlign)
+  private val regNumIllegal = isVArithMem && (vs1NotAlign || vs2NotAlign || vdNotAlign)
 
   // 6. v0 Overlap
   private val v0AllowOverlap = (vdIsMask || vdIsSingleElem) && !Seq(VMSBF_M, VMSIF_M, VMSOF_M).map(_ === inst.ALL).reduce(_ || _)
-  private val v0Overlap = io.decodedInst.vecWen && inst.VM === 0.U && inst.VD === 0.U && !v0AllowOverlap
+  private val v0Overlap = isVArithMem && io.decodedInst.vecWen && inst.VM === 0.U && inst.VD === 0.U && !v0AllowOverlap
 
   // 7. Src Reg Overlap
   private val vs1RegLo = inst.VS1
