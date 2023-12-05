@@ -32,11 +32,13 @@ class IntToVec(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   protected val out = io.out.bits
 
   // vsew is the lowest 2 bits of fuOpType
-  private val isImm = in.ctrl.fuOpType(3) === IF2VectorType.imm2vector(1)
-  // imm for perm is the lowest 5 bits of src(1)
-  private val isPermImm = in.ctrl.fuOpType(3, 2) === IF2VectorType.permImm2vector(1, 0)
+  private val isImm = IF2VectorType.isImm(in.ctrl.fuOpType(4, 2))
+  // when needDup is true, the scalar data is duplicated in vector register
+  private val needDup = IF2VectorType.needDup(in.ctrl.fuOpType(4, 2))
 
+  // imm use src(1), scalar use src(0)
   private val scalaData = Mux(isImm, in.data.src(1), in.data.src(0))
+  // vsew is the lowest 2 bits of fuOpType
   private val vsew = in.ctrl.fuOpType(1, 0)
   private val dataWidth = cfg.dataBits
 
@@ -48,12 +50,12 @@ class IntToVec(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   vecE8Data   := VecInit(Seq.fill(dataWidth /  8)(scalaData( 7, 0)))
   vecE16Data  := VecInit(Seq.fill(dataWidth / 16)(scalaData(15, 0)))
   vecE32Data  := VecInit(Seq.fill(dataWidth / 32)(scalaData(31, 0)))
-  vecE64Data  := VecInit(Seq.fill(dataWidth  / 64)(scalaData(63, 0)))
+  vecE64Data  := VecInit(Seq.fill(dataWidth / 64)(scalaData(63, 0)))
 
-  out.res.data := Mux(isPermImm, scalaData(4,0), Mux1H(Seq(
+  out.res.data := Mux(needDup, Mux1H(Seq(
     (vsew === VSew.e8)  -> vecE8Data.asUInt,
     (vsew === VSew.e16) -> vecE16Data.asUInt,
     (vsew === VSew.e32) -> vecE32Data.asUInt,
     (vsew === VSew.e64) -> vecE64Data.asUInt,
-  )))
+  )), scalaData)
 }
