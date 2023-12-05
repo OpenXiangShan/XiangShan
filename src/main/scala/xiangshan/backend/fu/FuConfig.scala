@@ -322,7 +322,7 @@ object FuConfig {
 
   val VSetRvfWvfCfg: FuConfig = FuConfig(
     name = "vsetrvfwvf",
-    fuType = FuType.vsetiwf,
+    fuType = FuType.vsetfwf,
     fuGen = (p: Parameters, cfg: FuConfig) => Module(new VSetRvfWvf(cfg)(p).suggestName("VSetRvfWvf")),
     srcData = Seq(
       Seq(FpData(), FpData()),

@@ -208,7 +208,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
     vs2VecUsed := vs2Split.io.outVec64b
   }
 
-  private val vs2Adder = Mux(widen, vs2GroupedVec32b, vs2Split.io.outVec64b)
+  private val vs2Adder = Mux(widen_vs2, vs2GroupedVec32b, vs2Split.io.outVec64b)
 
   // mask
   private val maskDataVec: Vec[UInt] = VecDataToMaskDataVec(srcMask, vsew)

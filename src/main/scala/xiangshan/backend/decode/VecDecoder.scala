@@ -309,7 +309,7 @@ object VecDecoder extends DecodeConstants {
     VOR_VI        -> OPIVI(FuType.vialuF, VialuFixType.vor_vv, T, F, F),
     VXOR_VI       -> OPIVI(FuType.vialuF, VialuFixType.vxor_vv, T, F, F),
 
-    VRGATHER_VI   -> OPIVI(FuType.vppu, VpermType.vrgather, T, F, F, selImm = SelImm.IMM_OPIVIU, uopSplitType = UopSplitType.VEC_RGATHER_VX),
+    VRGATHER_VI   -> OPIVI(FuType.vppu, VpermType.vrgather_vx, T, F, F, selImm = SelImm.IMM_OPIVIU, uopSplitType = UopSplitType.VEC_RGATHER_VX),
 
     VSLIDEUP_VI   -> OPIVI(FuType.vppu, VpermType.vslideup, T, F, F, selImm = SelImm.IMM_OPIVIU, uopSplitType = UopSplitType.VEC_SLIDEUP),
     VSLIDEDOWN_VI -> OPIVI(FuType.vppu, VpermType.vslidedown, T, F, F, selImm = SelImm.IMM_OPIVIU, uopSplitType = UopSplitType.VEC_SLIDEDOWN),
