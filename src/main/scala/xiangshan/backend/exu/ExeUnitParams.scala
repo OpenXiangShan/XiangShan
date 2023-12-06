@@ -73,7 +73,7 @@ case class ExeUnitParams(
       }
     }
     println(s"[Backend] exuIdx ${exuIdx} numWakeupIQ ${setIQ.size}")
-    setIQ.size / copyDistance
+    1 + setIQ.size / copyDistance
   }
   def rdPregIdxWidth: Int = {
     this.pregRdDataCfgSet.map(dataCfg => backendParam.getPregParams(dataCfg).addrWidth).fold(0)(_ max _)
