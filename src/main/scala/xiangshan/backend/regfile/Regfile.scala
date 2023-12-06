@@ -74,14 +74,21 @@ class Regfile
 
   println(name + ": size:" + numPregs + " read: " + numReadPorts + " write: " + numWritePorts)
 
-  val mem = Reg(Vec(numPregs, UInt(len.W)))
+  private val enVec = WireInit(VecInit(Seq.fill(numPregs)(false.B)))
+  private val dataVec = WireInit(VecInit(Seq.fill(numPregs)(0.U(len.W))))
+
+  val mem = VecInit(enVec.zip(dataVec).map{ case(en, data) =>
+    RegEnable(data, en)
+  })
+
   for (r <- io.readPorts) {
     val rdata = if (hasZero) Mux(r.addr === 0.U, 0.U, mem(r.addr)) else mem(r.addr)
     r.data := RegNext(rdata)
   }
   for (w <- io.writePorts) {
     when(w.wen) {
-      mem(w.addr) := w.data
+      enVec(w.addr) := w.wen
+      dataVec(w.addr) := w.data
     }
   }
 
