@@ -220,7 +220,7 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
     }
     entryRegNext.status.psrc := entryReg.status.psrc
     entryRegNext.status.srcType := entryReg.status.srcType
-    entryRegNext.status.fuType := entryReg.status.fuType
+    entryRegNext.status.fuType := IQFuType.readFuType(entryReg.status.fuType, params.getFuCfgs.map(_.fuType))
     entryRegNext.status.robIdx := entryReg.status.robIdx
     entryRegNext.status.uopIdx.foreach(_ := entryReg.status.uopIdx.get)
     when(srcLoadCancelVec.map(_.reduce(_ || _)).getOrElse(false.B) || srcWakeUpButCancel.map(_.fold(false.B)(_ || _)).fold(false.B)(_ || _)) {
@@ -284,7 +284,7 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
   }
   io.canIssue := (canIssue || canIssueBypass) && !flushed
   io.clear := clear
-  io.fuType := entryReg.status.fuType
+  io.fuType := IQFuType.readFuType(entryReg.status.fuType, params.getFuCfgs.map(_.fuType)).asUInt
   io.valid := validReg
   io.isFirstIssue := !entryReg.status.firstIssue
   io.entry.valid := validReg

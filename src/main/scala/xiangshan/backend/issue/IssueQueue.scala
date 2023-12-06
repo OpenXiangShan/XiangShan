@@ -215,7 +215,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         enq.bits.status.dataSources(j).value := DataSource.reg
         enq.bits.payload.debugInfo.enqRsTime := GTimer()
       }
-      enq.bits.status.fuType := s0_enqBits(i).fuType
+      enq.bits.status.fuType := IQFuType.readFuType(VecInit(s0_enqBits(i).fuType.asBools), params.getFuCfgs.map(_.fuType))
       enq.bits.status.robIdx := s0_enqBits(i).robIdx
       enq.bits.status.uopIdx.foreach(_ := s0_enqBits(i).uopIdx)
       enq.bits.status.issueTimer := "b10".U
@@ -490,7 +490,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     deq.bits.addrOH          := finalDeqSelOHVec(i)
     deq.bits.common.isFirstIssue := deqFirstIssueVec(i)
     deq.bits.common.iqIdx    := OHToUInt(finalDeqSelOHVec(i))
-    deq.bits.common.fuType   := deqEntryVec(i).bits.status.fuType
+    deq.bits.common.fuType   := IQFuType.readFuType(deqEntryVec(i).bits.status.fuType, params.getFuCfgs.map(_.fuType)).asUInt
     deq.bits.common.fuOpType := deqEntryVec(i).bits.payload.fuOpType
     deq.bits.common.rfWen.foreach(_ := deqEntryVec(i).bits.payload.rfWen)
     deq.bits.common.fpWen.foreach(_ := deqEntryVec(i).bits.payload.fpWen)
