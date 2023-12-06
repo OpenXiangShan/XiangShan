@@ -1183,6 +1183,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(i).srcType(0) := srcType0
         csBundle(i).srcType(1) := SrcType.vp
         csBundle(i).rfWen := false.B
+        csBundle(i).fpWen := false.B
         csBundle(i).vecWen := true.B
         csBundle(i).lsrc(0) := (VECTOR_TMP_REG_LMUL + i - 1).U
         csBundle(i).lsrc(1) := src2
@@ -1190,28 +1191,10 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(i).ldest := ldest
         csBundle(i).uopIdx := i.U
       }
+      csBundle(lmul - 1.U).rfWen := true.B
+      csBundle(lmul - 1.U).fpWen := false.B
       csBundle(lmul - 1.U).vecWen := false.B
-      csBundle(lmul - 1.U).fpWen := true.B
-      csBundle(lmul - 1.U).ldest := FP_TMP_REG_MV.U
-      // FMV_X_D
-      csBundle(lmul).srcType(0) := SrcType.fp
-      csBundle(lmul).srcType(1) := SrcType.imm
-      csBundle(lmul).lsrc(0) := FP_TMP_REG_MV.U
-      csBundle(lmul).lsrc(1) := 0.U
-      csBundle(lmul).ldest := dest
-      csBundle(lmul).fuType := FuType.fmisc.U
-      csBundle(lmul).rfWen := true.B
-      csBundle(lmul).fpWen := false.B
-      csBundle(lmul).vecWen := false.B
-      csBundle(lmul).fpu.isAddSub := false.B
-      csBundle(lmul).fpu.typeTagIn := FPU.D
-      csBundle(lmul).fpu.typeTagOut := FPU.D
-      csBundle(lmul).fpu.fromInt := false.B
-      csBundle(lmul).fpu.wflags := false.B
-      csBundle(lmul).fpu.fpWen := false.B
-      csBundle(lmul).fpu.div := false.B
-      csBundle(lmul).fpu.sqrt := false.B
-      csBundle(lmul).fpu.fcvt := false.B
+      csBundle(lmul - 1.U).ldest := dest
     }
 
     is(UopSplitType.VEC_MVV) {
@@ -1238,28 +1221,10 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
 
     is(UopSplitType.VEC_M0X_VFIRST) {
       // LMUL
-      csBundle(0).rfWen := false.B
-      csBundle(0).fpWen := true.B
-      csBundle(0).ldest := FP_TMP_REG_MV.U
-      // FMV_X_D
-      csBundle(1).srcType(0) := SrcType.fp
-      csBundle(1).srcType(1) := SrcType.imm
-      csBundle(1).lsrc(0) := FP_TMP_REG_MV.U
-      csBundle(1).lsrc(1) := 0.U
-      csBundle(1).ldest := dest
-      csBundle(1).fuType := FuType.fmisc.U
-      csBundle(1).rfWen := true.B
-      csBundle(1).fpWen := false.B
-      csBundle(1).vecWen := false.B
-      csBundle(1).fpu.isAddSub := false.B
-      csBundle(1).fpu.typeTagIn := FPU.D
-      csBundle(1).fpu.typeTagOut := FPU.D
-      csBundle(1).fpu.fromInt := false.B
-      csBundle(1).fpu.wflags := false.B
-      csBundle(1).fpu.fpWen := false.B
-      csBundle(1).fpu.div := false.B
-      csBundle(1).fpu.sqrt := false.B
-      csBundle(1).fpu.fcvt := false.B
+      csBundle(0).rfWen := true.B
+      csBundle(0).fpWen := false.B
+      csBundle(0).vecWen := false.B
+      csBundle(0).ldest := dest
     }
     is(UopSplitType.VEC_VWW) {
       for (i <- 0 until MAX_VLMUL*2) {
