@@ -317,7 +317,7 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
   }
   entryUpdate.status.psrc := entryReg.status.psrc
   entryUpdate.status.srcType := entryReg.status.srcType
-  entryUpdate.status.fuType := entryReg.status.fuType
+  entryUpdate.status.fuType := IQFuType.readFuType(entryReg.status.fuType, params.getFuCfgs.map(_.fuType))
   entryUpdate.status.robIdx := entryReg.status.robIdx
   when(srcLoadCancelVec.map(_.reduce(_ || _)).getOrElse(false.B) || srcWakeUpButCancel.map(_.fold(false.B)(_ || _)).fold(false.B)(_ || _)) {
     entryUpdate.status.issued := false.B
@@ -366,7 +366,7 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
   io.transEntry.bits := entryUpdate
   io.canIssue := (canIssue || canIssueBypass) && !flushed
   io.clear := clear
-  io.fuType := entryReg.status.fuType
+  io.fuType := IQFuType.readFuType(entryReg.status.fuType, params.getFuCfgs.map(_.fuType)).asUInt
   io.valid := validReg
   io.isFirstIssue := !entryReg.status.firstIssue
   io.entry.valid := validReg
