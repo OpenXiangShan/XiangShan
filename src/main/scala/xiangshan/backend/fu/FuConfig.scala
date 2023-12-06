@@ -592,6 +592,7 @@ object FuConfig {
       Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()),  // vs1, vs2, vd_old, v0
     ),
     piped = true,
+    writeIntRf = true,
     writeVecRf = true,
     latency = CertainLatency(1),
     vconfigWakeUp = true,
