@@ -82,6 +82,9 @@ class L2Top()(implicit p: Parameters) extends LazyModule
   val ptw_logger = TLLogger(s"L2_PTW_${coreParams.HartId}", enbale_tllog)
   val ptw_to_l2_buffer = LazyModule(new TLBuffer)
   val i_mmio_buffer = LazyModule(new TLBuffer)
+  // channel C alone requires another buffer
+  val noBufParam = BufferParams.none
+  val chnC_buffer = LazyModule(new TLBuffer(noBufParam, noBufParam, BufferParams.default, noBufParam, noBufParam))
 
   val clint_int_node = IntIdentityNode()
   val debug_int_node = IntIdentityNode()
