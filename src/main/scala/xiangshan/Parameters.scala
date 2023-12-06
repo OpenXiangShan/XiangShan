@@ -553,6 +553,7 @@ trait HasXSParameter {
 
   val NumRedirect = backendParams.numRedirect
   val BackendRedirectNum = NumRedirect + 2 //2: ldReplay + Exception
+  // Todo change LoadPipelineWidth
   val LoadPipelineWidth = coreParams.LoadPipelineWidth
   val StorePipelineWidth = coreParams.StorePipelineWidth
   val VecMemSrcInWidth = coreParams.VecMemSrcInWidth

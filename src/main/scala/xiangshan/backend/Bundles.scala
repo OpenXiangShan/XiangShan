@@ -279,12 +279,17 @@ object Bundles {
   class IssueQueueIQWakeUpBundle(
                                   exuIdx: Int,
                                   backendParams: BackendParams,
-                                  copyPdest: Boolean = false,
+                                  copyWakeupOut: Boolean = false,
                                   copyNum: Int = 0
                                 ) extends IssueQueueWakeUpBaseBundle(backendParams.pregIdxWidth, Seq(exuIdx)) {
     val loadDependency = Vec(backendParams.LduCnt, UInt(3.W))
     val is0Lat = Bool()
-    val pdestCopy = if (copyPdest) Some(Vec(copyNum, UInt(this.pdest.getWidth.W))) else None
+    val params = backendParams.allExuParams.filter(_.exuIdx == exuIdx).head
+    val pdestCopy  = OptionWrapper(copyWakeupOut, Vec(copyNum, UInt(params.wbPregIdxWidth.W)))
+    val rfWenCopy  = OptionWrapper(copyWakeupOut && params.writeIntRf, Vec(copyNum, Bool()))
+    val fpWenCopy  = OptionWrapper(copyWakeupOut && params.writeFpRf, Vec(copyNum, Bool()))
+    val vecWenCopy = OptionWrapper(copyWakeupOut && params.writeVecRf, Vec(copyNum, Bool()))
+    val loadDependencyCopy = OptionWrapper(copyWakeupOut && params.isIQWakeUpSink, Vec(copyNum,Vec(backendParams.LduCnt, UInt(3.W))))
     def fromExuInput(exuInput: ExuInput, l2ExuVecs: Vec[Vec[Bool]]): Unit = {
       this.rfWen := exuInput.rfWen.getOrElse(false.B)
       this.fpWen := exuInput.fpWen.getOrElse(false.B)
@@ -443,7 +448,7 @@ object Bundles {
   }
 
   // DataPath --[ExuInput]--> Exu
-  class ExuInput(val params: ExeUnitParams, copyPdest:Boolean = false, copyNum:Int = 0)(implicit p: Parameters) extends XSBundle {
+  class ExuInput(val params: ExeUnitParams, copyWakeupOut:Boolean = false, copyNum:Int = 0)(implicit p: Parameters) extends XSBundle {
     val fuType        = FuType()
     val fuOpType      = FuOpType()
     val src           = Vec(params.numRegSrc, UInt(params.dataBitsMax.W))
@@ -451,8 +456,12 @@ object Bundles {
     val robIdx        = new RobPtr
     val iqIdx         = UInt(log2Up(MemIQSizeMax).W)// Only used by store yet
     val isFirstIssue  = Bool()                      // Only used by store yet
+    val pdestCopy  = OptionWrapper(copyWakeupOut, Vec(copyNum, UInt(params.wbPregIdxWidth.W)))
+    val rfWenCopy  = OptionWrapper(copyWakeupOut && params.writeIntRf, Vec(copyNum, Bool()))
+    val fpWenCopy  = OptionWrapper(copyWakeupOut && params.writeFpRf, Vec(copyNum, Bool()))
+    val vecWenCopy = OptionWrapper(copyWakeupOut && params.writeVecRf, Vec(copyNum, Bool()))
+    val loadDependencyCopy = OptionWrapper(copyWakeupOut && params.isIQWakeUpSink, Vec(copyNum,Vec(LoadPipelineWidth, UInt(3.W))))
     val pdest         = UInt(params.wbPregIdxWidth.W)
-    val pdestCopy     = if (copyPdest) Some(Vec(copyNum, UInt(this.pdest.getWidth.W)))else None
     val rfWen         = if (params.writeIntRf)    Some(Bool())                        else None
     val fpWen         = if (params.writeFpRf)     Some(Bool())                        else None
     val vecWen        = if (params.writeVecRf)    Some(Bool())                        else None
