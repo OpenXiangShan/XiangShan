@@ -109,13 +109,14 @@ class fetch_to_mem(implicit p: Parameters) extends XSBundle{
 
 // triple buffer applied in i-mmio path (two at MemBlock, one at L2Top)
 class InstrUncacheBuffer()(implicit p: Parameters) extends LazyModule with HasInstrMMIOConst {
-  val node = new TLBufferNode(BufferParams.default, BufferParams.default, BufferParams.default, BufferParams.default, BufferParams.default)
+  val bufParam = BufferParams.default
+  val node = new TLBufferNode(bufParam, bufParam, bufParam, bufParam, bufParam)
   lazy val module = new InstrUncacheBufferImpl
 
   class InstrUncacheBufferImpl extends LazyModuleImp(this) {
     (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
-      out.a <> BufferParams.default(BufferParams.default(in.a))
-      in.d <> BufferParams.default(BufferParams.default(out.d))
+      out.a <> bufParam(bufParam(in.a))
+      in.d <> bufParam(bufParam(out.d))
 
       // only a.valid, a.ready, a.address can change
       // hoping that the rest would be optimized to keep MemBlock port unchanged after adding buffer
