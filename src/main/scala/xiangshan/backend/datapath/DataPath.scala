@@ -359,10 +359,10 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
           // respType:  fuIdle      ->IQ entry clear
           //            fuUncertain ->IQ entry no action
           //            fuBusy      ->IQ entry issued set false, then re-issue
-          // Only lda and sta is fuUncertain at OG1 stage
+          // Only hyu, lda and sta are fuUncertain at OG1 stage
           og1resp.bits.respType := Mux(
             !og1FailedVec2(iqIdx)(iuIdx),
-            if (toIU.issueQueueParams.isLdAddrIQ || toIU.issueQueueParams.isStAddrIQ) RSFeedbackType.fuUncertain else RSFeedbackType.fuIdle,
+            if (toIU.issueQueueParams match { case x => x.isHyAddrIQ || x.isLdAddrIQ || x.isStAddrIQ } ) RSFeedbackType.fuUncertain else RSFeedbackType.fuIdle,
             RSFeedbackType.fuBusy
           )
           og1resp.bits.dataInvalidSqIdx := DontCare
