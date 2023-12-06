@@ -250,6 +250,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
 
   dataPath.io.hartId := io.fromTop.hartId
   dataPath.io.flush := ctrlBlock.io.toDataPath.flush
+  dataPath.io.vconfigReadPort.ren := ctrlBlock.io.toDataPath.vtypeRen
   dataPath.io.vconfigReadPort.addr := ctrlBlock.io.toDataPath.vtypeAddr
 
   dataPath.io.fromIntIQ <> intScheduler.io.toDataPathAfterDelay

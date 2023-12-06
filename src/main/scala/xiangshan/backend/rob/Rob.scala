@@ -343,6 +343,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val rabCommits = Output(new RobCommitIO)
     val diffCommits = Output(new DiffCommitIO)
     val isVsetFlushPipe = Output(Bool())
+    val vconfigValid = Output(Bool())
     val vconfigPdest = Output(UInt(PhyRegIdxWidth.W))
     val lsq = new RobLsqIO
     val robDeqPtr = Output(new RobPtr)
@@ -714,6 +715,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 //  val needModifyFtqIdxOffset = isVsetFlushPipe && (vsetvlState === vs_waitFlush)
   val needModifyFtqIdxOffset = false.B
   io.isVsetFlushPipe := isVsetFlushPipe
+  io.vconfigValid := rab.io.vconfigValid
   io.vconfigPdest := rab.io.vconfigPdest
   // io.flushOut will trigger redirect at the next cycle.
   // Block any redirect or commit at the next cycle.

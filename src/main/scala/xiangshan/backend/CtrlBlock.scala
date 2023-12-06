@@ -235,6 +235,7 @@ class CtrlBlockImp(
   decode.io.commitVType.bits := io.fromDataPath.vtype
   decode.io.commitVType.valid := RegNext(rob.io.isVsetFlushPipe)
 
+  io.toDataPath.vtypeRen := rob.io.vconfigValid
   io.toDataPath.vtypeAddr := rob.io.vconfigPdest
 
   // vtype walk
@@ -535,6 +536,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val vtype = Input(new VType)
   }
   val toDataPath = new Bundle {
+    val vtypeRen = Output(Bool())
     val vtypeAddr = Output(UInt(PhyRegIdxWidth.W))
     val flush = ValidIO(new Redirect)
   }
