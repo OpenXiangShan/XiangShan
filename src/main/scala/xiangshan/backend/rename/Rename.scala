@@ -318,7 +318,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     intSpecWen(i) := needIntDest(i) && intFreeList.io.canAllocate && intFreeList.io.doAllocate && !io.robCommits.isWalk && !io.redirect.valid
     fpSpecWen(i) := needFpDest(i) && fpFreeList.io.canAllocate && fpFreeList.io.doAllocate && !io.robCommits.isWalk && !io.redirect.valid
     vecSpecWen(i) := needVecDest(i) && fpFreeList.io.canAllocate && fpFreeList.io.doAllocate && !io.robCommits.isWalk && !io.redirect.valid
-    io.toDispatchIsFp := fpSpecWen
+    io.toDispatchIsFp := fpSpecWen.zip(vecSpecWen).map{ case(fp, vec) => fp || vec }
     io.toDispatchIsInt := intSpecWen
 
     if (i < CommitWidth) {
