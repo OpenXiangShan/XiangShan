@@ -136,11 +136,23 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     if (newExuInput.pdestCopy.nonEmpty && !lastExuInput.pdestCopy.nonEmpty) {
       newExuInput.pdestCopy.get.foreach(_ := lastExuInput.pdest)
     }
+    if (newExuInput.rfWenCopy.nonEmpty && !lastExuInput.rfWenCopy.nonEmpty) {
+      newExuInput.rfWenCopy.get.foreach(_ := lastExuInput.rfWen.get)
+    }
+    if (newExuInput.fpWenCopy.nonEmpty && !lastExuInput.fpWenCopy.nonEmpty) {
+      newExuInput.fpWenCopy.get.foreach(_ := lastExuInput.fpWen.get)
+    }
+    if (newExuInput.vecWenCopy.nonEmpty && !lastExuInput.vecWenCopy.nonEmpty) {
+      newExuInput.vecWenCopy.get.foreach(_ := lastExuInput.rfWen.get)
+    }
+    if (newExuInput.loadDependencyCopy.nonEmpty && !lastExuInput.loadDependencyCopy.nonEmpty) {
+      newExuInput.loadDependencyCopy.get.foreach(_ := lastExuInput.loadDependency.get)
+    }
     newExuInput
   }
 
   val wakeUpQueues: Seq[Option[MultiWakeupQueue[ExuInput, WakeupQueueFlush]]] = params.exuBlockParams.map { x => OptionWrapper(x.isIQWakeUpSource, Module(
-    new MultiWakeupQueue(new ExuInput(x), new ExuInput(x, x.copyPdest, x.iqWakeUpSourcePairs.size / x.copyDistance), new WakeupQueueFlush, x.fuLatancySet, flushFunc, modificationFunc, lastConnectFunc)
+    new MultiWakeupQueue(new ExuInput(x), new ExuInput(x, x.copyWakeupOut, x.copyNum), new WakeupQueueFlush, x.fuLatancySet, flushFunc, modificationFunc, lastConnectFunc)
   ))}
   val deqBeforeDly = Wire(params.genIssueDecoupledBundle)
 
@@ -558,8 +570,26 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       wakeup.bits := 0.U.asTypeOf(wakeup.bits)
       wakeup.bits.is0Lat :=  0.U
     }
-    if(wakeup.bits.pdestCopy.nonEmpty){
+    if (wakeUpQueues(i).nonEmpty) {
+      wakeup.bits.rfWen  := (if (wakeUpQueues(i).get.io.deq.bits.rfWen .nonEmpty) wakeUpQueues(i).get.io.deq.valid && wakeUpQueues(i).get.io.deq.bits.rfWen .get else false.B)
+      wakeup.bits.fpWen  := (if (wakeUpQueues(i).get.io.deq.bits.fpWen .nonEmpty) wakeUpQueues(i).get.io.deq.valid && wakeUpQueues(i).get.io.deq.bits.fpWen .get else false.B)
+      wakeup.bits.vecWen := (if (wakeUpQueues(i).get.io.deq.bits.vecWen.nonEmpty) wakeUpQueues(i).get.io.deq.valid && wakeUpQueues(i).get.io.deq.bits.vecWen.get else false.B)
+    }
+
+    if(wakeUpQueues(i).nonEmpty && wakeup.bits.pdestCopy.nonEmpty){
       wakeup.bits.pdestCopy.get := wakeUpQueues(i).get.io.deq.bits.pdestCopy.get
+    }
+    if (wakeUpQueues(i).nonEmpty && wakeup.bits.rfWenCopy.nonEmpty) {
+      wakeup.bits.rfWenCopy.get := wakeUpQueues(i).get.io.deq.bits.rfWenCopy.get
+    }
+    if (wakeUpQueues(i).nonEmpty && wakeup.bits.fpWenCopy.nonEmpty) {
+      wakeup.bits.fpWenCopy.get := wakeUpQueues(i).get.io.deq.bits.fpWenCopy.get
+    }
+    if (wakeUpQueues(i).nonEmpty && wakeup.bits.vecWenCopy.nonEmpty) {
+      wakeup.bits.vecWenCopy.get := wakeUpQueues(i).get.io.deq.bits.vecWenCopy.get
+    }
+    if (wakeUpQueues(i).nonEmpty && wakeup.bits.loadDependencyCopy.nonEmpty) {
+      wakeup.bits.loadDependencyCopy.get := wakeUpQueues(i).get.io.deq.bits.loadDependencyCopy.get
     }
   }
 

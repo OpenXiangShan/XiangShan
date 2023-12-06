@@ -318,7 +318,7 @@ case class IssueBlockParams(
   }
 
   def genIQWakeUpSourceValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = {
-    MixedVec(exuBlockParams.map(x => ValidIO(new IssueQueueIQWakeUpBundle(x.exuIdx, backendParam, x.copyPdest, x.iqWakeUpSourcePairs.size / x.copyDistance))))
+    MixedVec(exuBlockParams.map(x => ValidIO(new IssueQueueIQWakeUpBundle(x.exuIdx, backendParam, x.copyWakeupOut, x.copyNum))))
   }
 
   def genIQWakeUpSinkValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = {

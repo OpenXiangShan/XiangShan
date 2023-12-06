@@ -44,7 +44,7 @@ case class BackendParams(
 
   val copyPdestInfo = mutable.HashMap[Int, (Int, Int)]()
 
-  def updateCopyPdestInfo: Unit = allExuParams.filter(_.copyPdest).map(x => getExuIdx(x.name) -> (x.copyDistance, -1)).foreach { x =>
+  def updateCopyPdestInfo: Unit = allExuParams.filter(_.copyWakeupOut).map(x => getExuIdx(x.name) -> (x.copyDistance, -1)).foreach { x =>
     copyPdestInfo.addOne(x)
   }
   def isCopyPdest(exuIdx: Int): Boolean = {

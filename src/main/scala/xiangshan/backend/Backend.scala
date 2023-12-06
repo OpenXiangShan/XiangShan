@@ -111,7 +111,7 @@ class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyMod
 
   params.updateCopyPdestInfo
   println(s"[Backend] copyPdestInfo ${params.copyPdestInfo}")
-
+  params.allExuParams.map(_.copyNum)
   val ctrlBlock = LazyModule(new CtrlBlock(params))
   val pcTargetMem = LazyModule(new PcTargetMem(params))
   val intScheduler = params.intSchdParams.map(x => LazyModule(new Scheduler(x)))

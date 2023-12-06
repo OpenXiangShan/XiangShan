@@ -142,8 +142,8 @@ case class SchdBlockParams(
   def genIQWakeUpInValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = {
     MixedVec(this.wakeUpInExuSources.map(x => {
       val param = x.getExuParam(backendParam.allExuParams)
-      val isCopyPdest = param.copyPdest
-      val copyNum = param.iqWakeUpSourcePairs.size / param.copyDistance
+      val isCopyPdest = param.copyWakeupOut
+      val copyNum = param.copyNum
       ValidIO(new IssueQueueIQWakeUpBundle(backendParam.getExuIdx(x.name), backendParam, isCopyPdest, copyNum))
       })
     )
@@ -152,8 +152,8 @@ case class SchdBlockParams(
   def genIQWakeUpOutValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = {
     MixedVec(this.wakeUpOutExuSources.map(x => {
       val param = x.getExuParam(backendParam.allExuParams)
-      val isCopyPdest = param.copyPdest
-      val copyNum = param.iqWakeUpSourcePairs.size / param.copyDistance
+      val isCopyPdest = param.copyWakeupOut
+      val copyNum = param.copyNum
       ValidIO(new IssueQueueIQWakeUpBundle(backendParam.getExuIdx(x.name), backendParam, isCopyPdest, copyNum))
       })
     )
