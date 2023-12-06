@@ -1028,11 +1028,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
     ldu(i).io.bank_conflict_slow := bankedDataArray.io.bank_conflict_slow(i)
   })
-val isKeyword = bus.d.bits.echo.lift(IsKeywordKey).getOrElse(false.B)
+ val isKeyword = bus.d.bits.echo.lift(IsKeywordKey).getOrElse(false.B)
   (0 until LoadPipelineWidth).map(i => {
     val (_, _, done, _) = edge.count(bus.d)
     when(bus.d.bits.opcode === TLMessages.GrantData) {
-      io.lsu.forward_D(i).apply(bus.d.valid, bus.d.bits.data, bus.d.bits.source, !bus.d.bits.echo.lift(IsKeywordKey).getOrElse(false.B))
+      io.lsu.forward_D(i).apply(bus.d.valid, bus.d.bits.data, bus.d.bits.source, isKeyword ^ done)
    //   io.lsu.forward_D(i).apply(bus.d.valid, bus.d.bits.data, bus.d.bits.source,done)
     }.otherwise {
       io.lsu.forward_D(i).dontCare()
