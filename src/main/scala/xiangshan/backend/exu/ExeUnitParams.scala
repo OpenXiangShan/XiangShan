@@ -10,14 +10,15 @@ import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.datapath.WbConfig.{IntWB, PregWB, VfWB}
 import xiangshan.backend.datapath.{DataConfig, WakeUpConfig}
 import xiangshan.backend.fu.{FuConfig, FuType}
-import xiangshan.backend.issue.{IntScheduler, SchedulerType, VfScheduler}
+import xiangshan.backend.issue.{IntScheduler, IssueBlockParams, SchedulerType, VfScheduler}
+import scala.collection.mutable
 
 case class ExeUnitParams(
   name          : String,
   fuConfigs     : Seq[FuConfig],
   wbPortConfigs : Seq[PregWB],
   rfrPortConfigs: Seq[Seq[RdConfig]],
-  copyPdest: Boolean = false,
+  copyWakeupOut: Boolean = false,
   copyDistance: Int = 1
 )(
   implicit
@@ -62,6 +63,18 @@ case class ExeUnitParams(
   val needVPUCtrl: Boolean = fuConfigs.map(_.needVecCtrl).reduce(_ || _)
   val isHighestWBPriority: Boolean = wbPortConfigs.forall(_.priority == 0)
 
+  def copyNum: Int = {
+    val setIQ = mutable.Set[IssueBlockParams]()
+    iqWakeUpSourcePairs.map(_.sink).foreach{ wakeupSink =>
+      backendParam.allIssueParams.map{ issueParams =>
+        if (issueParams.exuBlockParams.contains(wakeupSink.getExuParam(backendParam.allExuParams))) {
+          setIQ.add(issueParams)
+        }
+      }
+    }
+    println(s"[Backend] exuIdx ${exuIdx} numWakeupIQ ${setIQ.size}")
+    setIQ.size / copyDistance
+  }
   def rdPregIdxWidth: Int = {
     this.pregRdDataCfgSet.map(dataCfg => backendParam.getPregParams(dataCfg).addrWidth).fold(0)(_ max _)
   }
