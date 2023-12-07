@@ -19,7 +19,7 @@ package top
 import chisel3.stage._
 import firrtl.stage._
 import firrtl.options.Shell
-import xstransforms._
+import xiangshan.transforms._
 
 class XiangShanStage extends ChiselStage {
   override val shell: Shell = new Shell("xiangshan")

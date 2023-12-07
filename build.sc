@@ -202,14 +202,14 @@ trait XiangShan extends XiangShanModule with HasChisel {
   override def forkArgs = Seq("-Xmx20G", "-Xss256m")
 
   override def sources = T.sources {
-    super.sources() ++ Seq(PathRef(millSourcePath / s"src-${crossValue}" / "main" / "scala"))
+    super.sources() ++ Seq(PathRef(millSourcePath / "src" / crossValue / "main" / "scala"))
   }
 
   object test extends SbtModuleTests with TestModule.ScalaTest {
     override def forkArgs = Seq("-Xmx20G", "-Xss256m")
 
     override def sources = T.sources {
-      super.sources() ++ Seq(PathRef(millSourcePath / s"src-${crossValue}" / "test" / "scala"))
+      super.sources() ++ Seq(PathRef(millSourcePath / "src" / crossValue / "test" / "scala"))
     }
 
     override def ivyDeps = super.ivyDeps() ++ Agg(

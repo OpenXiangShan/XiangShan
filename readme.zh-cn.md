@@ -63,8 +63,8 @@ Weibo/微博：[香山开源处理器](https://weibo.com/u/7706264932)
 │       ├── system         # SoC 封装
 │       ├── top            # 顶层模块
 │       ├── utils          # 复用封装
-│       ├── xiangshan      # 主体设计代码
-│       └── xstransforms   # 一些实用的 firrtl 变换代码
+│       └── xiangshan      # 主体设计代码
+│           └── transforms # 一些实用的 firrtl 变换代码
 ├── scripts                # 用于敏捷开发的脚本文件
 ├── fudian                 # 香山浮点子模块
 ├── huancun                # 香山 L2/L3 缓存子模块

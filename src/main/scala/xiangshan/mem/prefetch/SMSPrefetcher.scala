@@ -250,6 +250,10 @@ class PfGenReq()(implicit p: Parameters) extends XSBundle with HasSMSModuleHelpe
   val debug_source_type = UInt(log2Up(nSourceType).W)
 }
 
+class AGTEvictReq()(implicit p: Parameters) extends XSBundle {
+  val vaddr = UInt(VAddrBits.W)
+}
+
 class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasSMSModuleHelper {
   val io = IO(new Bundle() {
     val agt_en = Input(Bool())
@@ -267,6 +271,8 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
       val region_paddr = UInt(REGION_ADDR_BITS.W)
       val region_vaddr = UInt(REGION_ADDR_BITS.W)
     }))
+    // dcache has released a block, evict it from agt
+    val s0_dcache_evict = Flipped(DecoupledIO(new AGTEvictReq))
     val s1_sel_stride = Output(Bool())
     val s2_stride_hit = Input(Bool())
     // if agt/stride missed, try lookup pht
@@ -287,6 +293,10 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   val s0_lookup = io.s0_lookup.bits
   val s0_lookup_valid = io.s0_lookup.valid
 
+  val s0_dcache_evict = io.s0_dcache_evict.bits
+  val s0_dcache_evict_valid = io.s0_dcache_evict.valid
+  val s0_dcache_evict_tag = block_hash_tag(s0_dcache_evict.vaddr).head(REGION_TAG_WIDTH)
+
   val prev_lookup = RegEnable(s0_lookup, s0_lookup_valid)
   val prev_lookup_valid = RegNext(s0_lookup_valid, false.B)
 
@@ -305,6 +315,14 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   val any_region_match = Cat(region_match_vec_s0).orR
   val any_region_p1_match = Cat(region_p1_match_vec_s0).orR && s0_lookup.allow_cross_region_p1
   val any_region_m1_match = Cat(region_m1_match_vec_s0).orR && s0_lookup.allow_cross_region_m1
+
+  val region_match_vec_dcache_evict_s0 = gen_match_vec(s0_dcache_evict_tag)
+  val any_region_dcache_evict_match = Cat(region_match_vec_dcache_evict_s0).orR
+  // s0 dcache evict a entry that may be replaced in s1
+  val s0_dcache_evict_conflict = Cat(VecInit(region_match_vec_dcache_evict_s0).asUInt & s1_replace_mask_w).orR
+  val s0_do_dcache_evict = io.s0_dcache_evict.fire && any_region_dcache_evict_match
+
+  io.s0_dcache_evict.ready := !s0_lookup_valid && !s0_dcache_evict_conflict
 
   val s0_region_hit = any_region_match
   val s0_cross_region_hit = any_region_m1_match || any_region_p1_match
@@ -350,8 +368,13 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   val s1_cross_region_match = RegNext(s0_lookup_valid && s0_cross_region_hit, false.B)
   val s1_alloc = RegNext(s0_alloc, false.B)
   val s1_alloc_entry = s1_agt_entry
-  val s1_replace_mask = RegEnable(s0_replace_mask, s0_lookup_valid)
-  s1_replace_mask_w := s1_replace_mask & Fill(smsParams.active_gen_table_size, s1_alloc)
+  val s1_do_dcache_evict = RegNext(s0_do_dcache_evict, false.B)
+  val s1_replace_mask = Mux(
+    s1_do_dcache_evict,
+    RegEnable(VecInit(region_match_vec_dcache_evict_s0).asUInt, s0_do_dcache_evict),
+    RegEnable(s0_replace_mask, s0_lookup_valid)
+  )
+  s1_replace_mask_w := s1_replace_mask & Fill(smsParams.active_gen_table_size, s1_alloc || s1_do_dcache_evict)
   val s1_evict_entry = Mux1H(s1_replace_mask, entries)
   val s1_evict_valid = Mux1H(s1_replace_mask, valids)
   // pf gen
@@ -446,8 +469,9 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   io.s1_sel_stride := prev_lookup_valid && (s1_alloc && s1_cross_region_match || s1_update) && !s1_in_active_page
 
   // stage2: gen pf reg / evict entry to pht
-  val s2_evict_entry = RegEnable(s1_evict_entry, s1_alloc)
-  val s2_evict_valid = RegNext(s1_alloc && s1_evict_valid, false.B)
+  val s2_do_dcache_evict = RegNext(s1_do_dcache_evict, false.B)
+  val s2_evict_entry = RegEnable(s1_evict_entry, s1_alloc || s1_do_dcache_evict)
+  val s2_evict_valid = RegNext((s1_alloc || s1_do_dcache_evict) && s1_evict_valid, false.B)
   val s2_paddr_valid = RegEnable(s1_pf_gen_paddr_valid, s1_pf_gen_valid)
   val s2_pf_gen_region_tag = RegEnable(s1_pf_gen_region_tag, s1_pf_gen_valid)
   val s2_pf_gen_decr_mode = RegEnable(s1_pf_gen_decr_mode, s1_pf_gen_valid)
@@ -489,6 +513,8 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
     )
   }
   XSPerfAccumulate("sms_agt_evict", s2_evict_valid)
+  XSPerfAccumulate("sms_agt_evict_by_plru", s2_evict_valid && !s2_do_dcache_evict)
+  XSPerfAccumulate("sms_agt_evict_by_dcache", s2_evict_valid && s2_do_dcache_evict)
   XSPerfAccumulate("sms_agt_evict_one_hot_pattern", s2_evict_valid && (s2_evict_entry.access_cnt === 1.U))
 }
 
@@ -819,9 +845,6 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   val tlb_req_arb = Module(new RRArbiterInit(new TlbReq, smsParams.pf_filter_size))
   val pf_req_arb = Module(new RRArbiterInit(UInt(PAddrBits.W), smsParams.pf_filter_size))
 
-  io.tlb_req.req <> tlb_req_arb.io.out
-  io.tlb_req.resp.ready := true.B
-  io.tlb_req.req_kill := false.B
   io.l2_pf_addr.valid := pf_req_arb.io.out.valid
   io.l2_pf_addr.bits := pf_req_arb.io.out.bits
   io.pf_alias_bits := Mux1H(entries.zipWithIndex.map({
@@ -835,8 +858,6 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   val s1_hit = Wire(Bool())
   val s1_replace_vec = Wire(UInt(smsParams.pf_filter_size.W))
   val s1_tlb_fire_vec = Wire(UInt(smsParams.pf_filter_size.W))
-  val s2_valid = Wire(Bool())
-  val s2_replace_vec = Wire(UInt(smsParams.pf_filter_size.W))
   val s2_tlb_fire_vec = Wire(UInt(smsParams.pf_filter_size.W))
 
   // s0: entries lookup
@@ -896,6 +917,9 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   val s1_replace_vec_r = RegEnable(s0_replace_vec, s0_gen_req_valid && !s0_hit)
   val s1_update_vec = RegEnable(VecInit(s0_match_vec).asUInt, s0_gen_req_valid && s0_hit)
   val s1_tlb_fire_vec_r = RegNext(s0_tlb_fire_vec, 0.U.asTypeOf(s0_tlb_fire_vec))
+  // tlb req will latch one cycle after tlb_arb
+  val s1_tlb_req_valid = RegNext(tlb_req_arb.io.out.fire)
+  val s1_tlb_req_bits  = RegEnable(tlb_req_arb.io.out.bits, tlb_req_arb.io.out.fire)
   val s1_alloc_entry = Wire(new PrefetchFilterEntry())
   s1_valid := s1_valid_r
   s1_hit := s1_hit_r
@@ -909,13 +933,13 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   s1_alloc_entry.filter_bits := 0.U
   s1_alloc_entry.alias_bits := s1_gen_req.alias_bits
   s1_alloc_entry.debug_source_type := s1_gen_req.debug_source_type
+  io.tlb_req.req.valid := s1_tlb_req_valid && !((s1_tlb_fire_vec & s1_replace_vec).orR && s1_valid && !s1_hit)
+  io.tlb_req.req.bits := s1_tlb_req_bits
+  io.tlb_req.resp.ready := true.B
+  io.tlb_req.req_kill := false.B
+  tlb_req_arb.io.out.ready := true.B
 
-  // s2: tlb req will latch one cycle after tlb_arb
-  val s2_valid_r = RegNext(s1_valid, false.B)
-  val s2_replace_vec_r = RegNext(s1_replace_vec, 0.U.asTypeOf((s1_replace_vec)))
   val s2_tlb_fire_vec_r = RegNext(s1_tlb_fire_vec, 0.U.asTypeOf(s1_tlb_fire_vec))
-  s2_valid := s2_valid_r
-  s2_replace_vec := s2_replace_vec_r
   s2_tlb_fire_vec := s2_tlb_fire_vec_r.asUInt
 
   for(((v, ent), i) <- valids.zip(entries).zipWithIndex){
@@ -923,8 +947,7 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
     val update = s1_valid && s1_hit && s1_update_vec(i)
     // for pf: use s0 data
     val pf_fired = s0_pf_fire_vec(i)
-    val is_evicted = s2_valid && s2_replace_vec(i)
-    val tlb_fired = s2_tlb_fire_vec(i) && !io.tlb_req.resp.bits.miss && !is_evicted
+    val tlb_fired = s2_tlb_fire_vec(i) && !io.tlb_req.resp.bits.miss && io.tlb_req.resp.fire
     when(tlb_fired){
       ent.paddr_valid := !io.tlb_req.resp.bits.miss
       ent.region_addr := region_addr(io.tlb_req.resp.bits.paddr.head)
@@ -944,6 +967,7 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   when(s1_valid && s1_hit){
     assert(PopCount(s1_update_vec) === 1.U, "sms_pf_filter: multi-hit")
   }
+  assert(!io.tlb_req.resp.fire || Cat(s2_tlb_fire_vec).orR, "sms_pf_filter: tlb resp fires, but no tlb req from tlb_req_arb 2 cycles ago")
 
   XSPerfAccumulate("sms_pf_filter_recv_req", io.gen_req.valid)
   XSPerfAccumulate("sms_pf_filter_hit", s1_valid && s1_hit)
@@ -1066,6 +1090,7 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   val io_pht_en = IO(Input(Bool()))
   val io_act_threshold = IO(Input(UInt(REGION_OFFSET.W)))
   val io_act_stride = IO(Input(UInt(6.W)))
+  val io_dcache_evict = IO(Flipped(DecoupledIO(new AGTEvictReq)))
 
   val train_filter = Module(new SMSTrainFilter)
 
@@ -1135,6 +1160,7 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   active_gen_table.io.s0_lookup.bits.region_paddr := train_region_paddr_s0
   active_gen_table.io.s0_lookup.bits.region_vaddr := train_region_vaddr_s0
   active_gen_table.io.s2_stride_hit := stride.io.s2_gen_req.valid
+  active_gen_table.io.s0_dcache_evict <> io_dcache_evict
 
   stride.io.stride_en := io_stride_en
   stride.io.s0_lookup.valid := train_vld_s0

@@ -35,6 +35,57 @@ object TriggerCmp {
   }
 }
 
+object TriggerCmpConsecutive {
+  def apply(actual: Vec[UInt], tdata: UInt, matchType: UInt, enable: Bool, VAddrBits: Int) : Vec[Bool] = {
+    // opt: only compare two possible high bits: orig and orig+1
+    val len1 = actual.length
+    val highPos = log2Up(len1)
+    val lowPC = Wire(Vec(len1, UInt(highPos.W)))
+    lowPC.zipWithIndex.map{case (h, i) => h := actual(i)(highPos - 1, 0)}
+    val highPC = actual(0)(VAddrBits - 1, highPos)
+    val highPC1 = actual(0)(VAddrBits - 1, highPos) + 1.U
+    val highTdata = tdata(VAddrBits - 1, highPos)
+
+    val highPCEqual = highPC === highTdata
+    val highPC1Equal = highPC1 === highTdata
+    val highPCGreater = highPC >= highTdata
+    val highPC1Greater = highPC1 >= highTdata
+    val highPCLess = highPC <= highTdata
+    val highPC1Less = highPC1 <= highTdata
+
+    val carry = Wire(Vec(len1, Bool()))
+    carry.zipWithIndex.map{case (c, i) => c := actual(i)(highPos) =/= actual(0)(highPos)}
+
+    val lowPCEqual = Wire(Vec(len1, Bool()))
+    val lowPCGreater = Wire(Vec(len1, Bool()))
+    val lowPCLess = Wire(Vec(len1, Bool()))
+
+    lowPCEqual.zipWithIndex.map{case (l, i) => l := actual(i)(highPos - 1, 0) === tdata(highPos - 1, 0)}
+    lowPCGreater.zipWithIndex.map{case (l, i) => l := actual(i)(highPos - 1, 0) >= tdata(highPos - 1, 0)}
+    lowPCLess.zipWithIndex.map{case (l, i) => l := actual(i)(highPos - 1, 0) <= tdata(highPos - 1, 0)}
+
+    val overallEqual = Wire(Vec(len1, Bool()))
+    val overallGreater = Wire(Vec(len1, Bool()))
+    val overallLess = Wire(Vec(len1, Bool()))
+
+    overallEqual.zipWithIndex.map{case (o, i) => o := lowPCEqual(i) && highPCEqual}
+
+    // greater: 1. highPC > highTdata; 2. highPC == highTdata && lowPC >= lowTdata
+    overallGreater.zipWithIndex.map{case (o, i) => o := highPCGreater || ((!carry(i) || lowPCGreater(i)) && highPCEqual)}
+
+    // less: 1. highPC < highTdata; 2. highPC == highTdata && lowPC <= lowTdata
+    overallLess.zipWithIndex.map{case (o, i) => o := highPCLess || ((!carry(i) && lowPCLess(i)) && highPCEqual)}
+
+    val ret = Wire(Vec(len1, Bool()))
+
+    ret.zipWithIndex.map{case (r, i) => r := MuxLookup(matchType, false.B,
+      Array(0.U -> overallEqual(i),
+        2.U -> overallGreater(i),
+        3.U -> overallLess(i))) && enable}
+    ret
+  }
+}
+
 object ChainCheck {
   def TimingCheck(prevTiming: Bool, thisTiming: Bool, chain: Bool) = !((prevTiming ^ thisTiming) && chain)
   def HitCheck(prevHit: Bool, chain: Bool) = prevHit || !chain

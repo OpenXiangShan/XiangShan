@@ -14,7 +14,7 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
-package xstransforms
+package xiangshan.transforms
 
 import firrtl.annotations.NoTargetAnnotation
 import firrtl.options.{HasShellOptions, ShellOption}

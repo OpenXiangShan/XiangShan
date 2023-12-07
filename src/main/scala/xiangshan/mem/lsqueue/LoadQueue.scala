@@ -25,6 +25,7 @@ import xiangshan._
 import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
+import xiangshan.cache.mmu._
 import xiangshan.frontend.FtqPtr
 import xiangshan.ExceptionNO._
 import xiangshan.mem.mdp._
@@ -121,10 +122,10 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val refill = Flipped(ValidIO(new Refill))
     val tl_d_channel  = Input(new DcacheToLduForwardIO)
     val release = Flipped(Valid(new Release))
-    val rollback = Output(Valid(new Redirect))
+    val nuke_rollback = Output(Valid(new Redirect))
+    val nack_rollback = Output(Valid(new Redirect))
     val rob = Flipped(new RobLsqIO)
     val uncache = new UncacheWordIO
-    val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
     val exceptionAddr = new ExceptionAddrIO
     val lqFull = Output(Bool())
     val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
@@ -132,6 +133,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val lq_rep_full = Output(Bool())
     val tlbReplayDelayCycleCtrl = Vec(4, Input(UInt(ReSelectLen.W)))
     val l2_hint = Input(Valid(new L2ToL1Hint()))
+    val tlb_hint = Flipped(new TlbHintIO)
     val lqEmpty = Output(Bool())
     val debugTopDown = new LoadQueueTopDownIO
   })
@@ -197,38 +199,14 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   uncacheBuffer.io.ld_raw_data  <> io.ld_raw_data
   uncacheBuffer.io.rob        <> io.rob
   uncacheBuffer.io.uncache    <> io.uncache
-  uncacheBuffer.io.trigger    <> io.trigger
   for ((buff, w) <- uncacheBuffer.io.req.zipWithIndex) {
     buff.valid := io.ldu.ldin(w).valid // from load_s3
     buff.bits := io.ldu.ldin(w).bits // from load_s3
   }
 
-  // rollback
-  def selectOldest[T <: Redirect](valid: Seq[Bool], bits: Seq[T]): (Seq[Bool], Seq[T]) = {
-    assert(valid.length == bits.length)
-    if (valid.length == 0 || valid.length == 1) {
-      (valid, bits)
-    } else if (valid.length == 2) {
-      val res = Seq.fill(2)(Wire(ValidIO(chiselTypeOf(bits(0)))))
-      for (i <- res.indices) {
-        res(i).valid := valid(i)
-        res(i).bits := bits(i)
-      }
-      val oldest = Mux(valid(0) && valid(1), Mux(isAfter(bits(0).robIdx, bits(1).robIdx), res(1), res(0)), Mux(valid(0) && !valid(1), res(0), res(1)))
-      (Seq(oldest.valid), Seq(oldest.bits))
-    } else {
-      val left = selectOldest(valid.take(valid.length / 2), bits.take(bits.length / 2))
-      val right = selectOldest(valid.takeRight(valid.length - (valid.length / 2)), bits.takeRight(bits.length - (bits.length / 2)))
-      selectOldest(left._1 ++ right._1, left._2 ++ right._2)
-    }
-  }
 
-  val (rollbackSelV, rollbackSelBits) = selectOldest(
-                                          Seq(loadQueueRAW.io.rollback.valid, uncacheBuffer.io.rollback.valid),
-                                          Seq(loadQueueRAW.io.rollback.bits, uncacheBuffer.io.rollback.bits)
-                                        )
-  io.rollback.valid := rollbackSelV.head
-  io.rollback.bits := rollbackSelBits.head
+  io.nuke_rollback := loadQueueRAW.io.rollback
+  io.nack_rollback := uncacheBuffer.io.rollback
 
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
 
@@ -252,6 +230,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueReplay.io.rarFull          <> loadQueueRAR.io.lqFull
   loadQueueReplay.io.rawFull          <> loadQueueRAW.io.lqFull
   loadQueueReplay.io.l2_hint          <> io.l2_hint
+  loadQueueReplay.io.tlb_hint         <> io.tlb_hint
   loadQueueReplay.io.tlbReplayDelayCycleCtrl <> io.tlbReplayDelayCycleCtrl
 
   loadQueueReplay.io.debugTopDown <> io.debugTopDown
@@ -265,7 +244,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("full_mask_101", full_mask === 5.U)
   XSPerfAccumulate("full_mask_110", full_mask === 6.U)
   XSPerfAccumulate("full_mask_111", full_mask === 7.U)
-  XSPerfAccumulate("rollback", io.rollback.valid)
+  XSPerfAccumulate("nuke_rollback", io.nuke_rollback.valid)
+  XSPerfAccumulate("nack_rollabck", io.nack_rollback.valid)
 
   // perf cnt
   val perfEvents = Seq(virtualLoadQueue, loadQueueRAR, loadQueueRAW, loadQueueReplay).flatMap(_.getPerfEvents) ++
@@ -278,7 +258,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     ("full_mask_101", full_mask === 5.U),
     ("full_mask_110", full_mask === 6.U),
     ("full_mask_111", full_mask === 7.U),
-    ("rollback", io.rollback.valid)
+    ("nuke_rollback", io.nuke_rollback.valid),
+    ("nack_rollback", io.nack_rollback.valid)
   )
   generatePerfEvent()
   // end

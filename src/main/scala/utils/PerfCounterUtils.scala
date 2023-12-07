@@ -349,23 +349,20 @@ class HPerfCounter(val numPCnt: Int)(implicit p: Parameters) extends XSModule wi
   val event_op_1 = RegNext(io.hpm_event(49, 45))
   val event_op_2 = RegNext(io.hpm_event(54, 50))
 
+  def combineEvents(cnt_1: UInt, cnt_2: UInt, optype: UInt): UInt =
+    Mux(optype(0), cnt_1 & cnt_2,
+    Mux(optype(1), cnt_1 ^ cnt_2,
+    Mux(optype(2), cnt_1 + cnt_2,
+                   cnt_1 | cnt_2)))
 
-  val event_step_0 = Mux(event_op_0(0), events_incr_3.value & events_incr_2.value,
-                     Mux(event_op_0(1), events_incr_3.value ^ events_incr_2.value,
-                     Mux(event_op_0(2), events_incr_3.value + events_incr_2.value,
-                                        events_incr_3.value | events_incr_2.value)))
-  val event_step_1 = Mux(event_op_1(0), events_incr_1.value & events_incr_0.value,
-                     Mux(event_op_1(1), events_incr_1.value ^ events_incr_0.value,
-                     Mux(event_op_1(2), events_incr_1.value + events_incr_0.value,
-                                        events_incr_1.value | events_incr_0.value)))
+  val event_step_0 = combineEvents(events_incr_0.value, events_incr_1.value, event_op_0)
+  val event_step_1 = combineEvents(events_incr_2.value, events_incr_3.value, event_op_1)
 
-  val event_op_1_reg = RegNext(event_op_1)
+  // add registers to optimize the timing (like pipelines)
+  val event_op_2_reg = RegNext(event_op_2)
   val event_step_0_reg = RegNext(event_step_0)
   val event_step_1_reg = RegNext(event_step_1)
-  val selected = Mux(event_op_1_reg(0), event_step_0_reg & event_step_1_reg,
-                 Mux(event_op_1_reg(1), event_step_0_reg ^ event_step_1_reg,
-                 Mux(event_op_1_reg(2), event_step_0_reg + event_step_1_reg,
-                   event_step_0_reg | event_step_1_reg)))
+  val selected = combineEvents(event_step_0_reg, event_step_1_reg, event_op_2_reg)
 
   val perfEvents = Seq(("selected", selected))
   generatePerfEvent()

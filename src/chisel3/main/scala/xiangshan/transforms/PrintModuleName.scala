@@ -14,27 +14,23 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
-package xstransforms
+package xiangshan.transforms
 
 import firrtl._
 import firrtl.ir._
+import firrtl.stage.TransformManager.TransformDependency
 import utils.XSLog
-import firrtl.options.Phase
-import firrtl.stage.FirrtlCircuitAnnotation
 
-class PrintModuleName extends Phase {
+class PrintModuleName extends Transform with DependencyAPIMigration {
 
-  override def invalidates(a: Phase) = false
+  // avoid print's check
+  override def prerequisites = firrtl.stage.Forms.Checks
+  override def invalidates(a: Transform) = false
+  override def optionalPrerequisiteOf: Seq[TransformDependency] = firrtl.stage.Forms.HighEmitters
 
-  override def transform(annotations: AnnotationSeq): AnnotationSeq = {
+  override protected def execute(state: CircuitState): CircuitState = {
 
-    import xstransforms.Helpers._
-
-    val (Seq(circuitAnno: FirrtlCircuitAnnotation), otherAnnos) = annotations.partition {
-      case _: FirrtlCircuitAnnotation => true
-      case _ => false
-    }
-    val c = circuitAnno.circuit
+    val c = state.circuit
 
     def onStmt(s: Statement): Statement = s match {
       case Print(info, StringLit(string), args, clk, en) =>
@@ -43,6 +39,8 @@ class PrintModuleName extends Phase {
         other.mapStmt(onStmt)
     }
 
-    FirrtlCircuitAnnotation(c.mapModule(m => m.mapStmt(onStmt))) +: otherAnnos
+    state.copy(c.mapModule(m => m.mapStmt(onStmt)))
+
   }
+
 }

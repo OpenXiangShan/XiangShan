@@ -24,7 +24,7 @@ import utility._
 import xiangshan._
 import xiangshan.cache._
 import xiangshan.cache.{DCacheWordIO, DCacheLineIO, MemoryOpConstants}
-import xiangshan.cache.mmu.{TlbRequestIO}
+import xiangshan.cache.mmu.{TlbRequestIO, TlbHintIO}
 import xiangshan.mem._
 import xiangshan.backend.rob.RobLsqIO
 
@@ -77,7 +77,8 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddrAndPfFlag))
     val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
     val rob = Flipped(new RobLsqIO)
-    val rollback = Output(Valid(new Redirect))
+    val nuke_rollback = Output(Valid(new Redirect))
+    val nack_rollback = Output(Valid(new Redirect))
     val release = Flipped(Valid(new Release))
     val refill = Flipped(Valid(new Refill))
     val tl_d_channel  = Input(new DcacheToLduForwardIO)
@@ -95,9 +96,9 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val lqCanAccept = Output(Bool())
     val sqCanAccept = Output(Bool())
     val exceptionAddr = new ExceptionAddrIO
-    val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
     val issuePtrExt = Output(new SqPtr)
     val l2_hint = Input(Valid(new L2ToL1Hint()))
+    val tlb_hint = Flipped(new TlbHintIO)
     val force_write = Output(Bool())
     val lqEmpty = Output(Bool())
     val debugTopDown = new LoadQueueTopDownIO
@@ -163,12 +164,12 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   loadQueue.io.ldout               <> io.ldout
   loadQueue.io.ld_raw_data         <> io.ld_raw_data
   loadQueue.io.rob                 <> io.rob
-  loadQueue.io.rollback            <> io.rollback
+  loadQueue.io.nuke_rollback       <> io.nuke_rollback
+  loadQueue.io.nack_rollback       <> io.nack_rollback
   loadQueue.io.replay              <> io.replay
   loadQueue.io.refill              <> io.refill
   loadQueue.io.tl_d_channel        <> io.tl_d_channel
   loadQueue.io.release             <> io.release
-  loadQueue.io.trigger             <> io.trigger
   loadQueue.io.exceptionAddr.isStore := DontCare
   loadQueue.io.lqCancelCnt         <> io.lqCancelCnt
   loadQueue.io.sq.stAddrReadySqPtr <> storeQueue.io.stAddrReadySqPtr
@@ -183,6 +184,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   loadQueue.io.lq_rep_full         <> io.lq_rep_full
   loadQueue.io.lqDeq               <> io.lqDeq
   loadQueue.io.l2_hint             <> io.l2_hint
+  loadQueue.io.tlb_hint            <> io.tlb_hint
   loadQueue.io.lqEmpty             <> io.lqEmpty
 
   // rob commits for lsq is delayed for two cycles, which causes the delayed update for deqPtr in lq/sq

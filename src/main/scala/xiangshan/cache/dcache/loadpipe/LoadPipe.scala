@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.ClientMetadata
 import utils.{HasPerfEvents, XSDebug, XSPerfAccumulate}
-import utility.{ParallelPriorityMux, OneHot, ChiselDB}
+import utility.{ParallelPriorityMux, OneHot, ChiselDB, ParallelORR, ParallelMux}
 import xiangshan.{XSCoreParamsKey, L1CacheErrorInfo}
 import xiangshan.cache.wpu._
 import xiangshan.mem.HasL1PrefetchSourceParameter
@@ -242,22 +242,17 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     s1_wpu_pred_fail_and_real_hit := false.B
   }
 
-  val s1_tag_match_dup_dc = s1_tag_match_way_dup_dc.orR
-  val s1_tag_match_dup_lsu = s1_tag_match_way_dup_lsu.orR
+  val s1_tag_match_dup_dc = ParallelORR(s1_tag_match_way_dup_dc)
+  val s1_tag_match_dup_lsu = ParallelORR(s1_tag_match_way_dup_lsu)
   assert(RegNext(!s1_valid || PopCount(s1_tag_match_way_dup_dc) <= 1.U), "tag should not match with more than 1 way")
-
-  val s1_fake_meta = Wire(new Meta)
-  // s1_fake_meta.tag := get_tag(s1_paddr_dup_dcache)
-  s1_fake_meta.coh := ClientMetadata.onReset
-  val s1_fake_tag = get_tag(s1_paddr_dup_dcache)
 
   // when there are no tag match, we give it a Fake Meta
   // this simplifies our logic in s2 stage
-  val s1_hit_meta = Mux(s1_tag_match_dup_dc, Mux1H(s1_tag_match_way_dup_dc, wayMap((w: Int) => meta_resp(w))), s1_fake_meta)
+  val s1_hit_meta = ParallelMux(s1_tag_match_way_dup_dc.asBools, (0 until nWays).map(w => meta_resp(w)))
   val s1_hit_coh = s1_hit_meta.coh
-  val s1_hit_error = Mux(s1_tag_match_dup_dc, Mux1H(s1_tag_match_way_dup_dc, wayMap((w: Int) => io.extra_meta_resp(w).error)), false.B)
-  val s1_hit_prefetch = Mux(s1_tag_match_dup_dc, Mux1H(s1_tag_match_way_dup_dc, wayMap((w: Int) => io.extra_meta_resp(w).prefetch)), false.B)
-  val s1_hit_access = Mux(s1_tag_match_dup_dc, Mux1H(s1_tag_match_way_dup_dc, wayMap((w: Int) => io.extra_meta_resp(w).access)), false.B)
+  val s1_hit_error = ParallelMux(s1_tag_match_way_dup_dc.asBools, (0 until nWays).map(w => io.extra_meta_resp(w).error))
+  val s1_hit_prefetch = ParallelMux(s1_tag_match_way_dup_dc.asBools, (0 until nWays).map(w => io.extra_meta_resp(w).prefetch))
+  val s1_hit_access = ParallelMux(s1_tag_match_way_dup_dc.asBools, (0 until nWays).map(w => io.extra_meta_resp(w).access))
 
   io.replace_way.set.valid := RegNext(s0_fire)
   io.replace_way.set.bits := get_idx(s1_vaddr)
@@ -267,10 +262,10 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_invalid_way_en = ParallelPriorityMux(s1_invalid_vec.zipWithIndex.map(x => x._1 -> UIntToOH(x._2.U(nWays.W))))
   val s1_repl_way_en_oh = Mux(s1_have_invalid_way, s1_invalid_way_en, UIntToOH(io.replace_way.way))
   val s1_repl_way_en_enc = OHToUInt(s1_repl_way_en_oh)
-  val s1_repl_tag = Mux1H(s1_repl_way_en_oh, wayMap(w => tag_resp(w)))
-  val s1_repl_coh = Mux1H(s1_repl_way_en_oh, wayMap(w => meta_resp(w).coh))
-  val s1_repl_prefetch = Mux1H(s1_repl_way_en_oh, wayMap(w => io.extra_meta_resp(w).prefetch))
-  val s1_repl_extra_meta = Mux1H(s1_repl_way_en_oh, wayMap(w => io.extra_meta_resp(w)))
+  val s1_repl_tag = ParallelMux(s1_repl_way_en_oh.asBools, (0 until nWays).map(w => tag_resp(w)))
+  val s1_repl_coh = ParallelMux(s1_repl_way_en_oh.asBools, (0 until nWays).map(w => meta_resp(w).coh))
+  val s1_repl_prefetch = ParallelMux(s1_repl_way_en_oh.asBools, (0 until nWays).map(w => io.extra_meta_resp(w).prefetch))
+  val s1_repl_extra_meta = ParallelMux(s1_repl_way_en_oh.asBools, (0 until nWays).map(w => io.extra_meta_resp(w)))
 
   val s1_need_replacement = !s1_tag_match_dup_dc
   val s1_way_en = Mux(s1_need_replacement, s1_repl_way_en_oh, s1_tag_match_way_dup_dc)
@@ -298,7 +293,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_will_send_miss_req = s1_valid && !s1_nack && !s1_nack_data && !s1_hit
 
   // check ecc error
-  val s1_encTag = Mux1H(s1_tag_match_way_dup_dc, wayMap((w: Int) => io.tag_resp(w)))
+  val s1_encTag = ParallelMux(s1_tag_match_way_dup_dc.asBools, (0 until nWays).map(w => io.tag_resp(w)))
   val s1_flag_error = Mux(s1_need_replacement, false.B, s1_hit_error) // error reported by exist dcache error bit
 
   // --------------------------------------------------------------------------------

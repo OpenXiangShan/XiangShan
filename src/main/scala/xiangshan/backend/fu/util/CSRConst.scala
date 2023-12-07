@@ -203,17 +203,17 @@ trait HasCSRConst {
   def ModeS     = 0x1.U
   def ModeU     = 0x0.U
 
-  def IRQ_UEIP  = 0
-  def IRQ_SEIP  = 1
-  def IRQ_MEIP  = 3
+  def IRQ_USIP  = 0
+  def IRQ_SSIP  = 1
+  def IRQ_MSIP  = 3
 
   def IRQ_UTIP  = 4
   def IRQ_STIP  = 5
   def IRQ_MTIP  = 7
 
-  def IRQ_USIP  = 8
-  def IRQ_SSIP  = 9
-  def IRQ_MSIP  = 11
+  def IRQ_UEIP  = 8
+  def IRQ_SEIP  = 9
+  def IRQ_MEIP  = 11
 
   def IRQ_DEBUG = 12
 

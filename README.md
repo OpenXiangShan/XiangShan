@@ -66,8 +66,8 @@ Some of the key directories are shown below.
 │       ├── system         # SoC wrapper
 │       ├── top            # top module
 │       ├── utils          # utilization code
-│       ├── xiangshan      # main design code
-│       └── xstransforms   # some useful firrtl transforms
+│       └── xiangshan      # main design code
+│           └── transforms # some useful firrtl transforms
 ├── scripts                # scripts for agile development
 ├── fudian                 # floating unit submodule of XiangShan
 ├── huancun                # L2/L3 cache submodule of XiangShan

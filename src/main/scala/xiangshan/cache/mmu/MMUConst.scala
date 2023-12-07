@@ -51,19 +51,19 @@ case class L2TLBParameters
   l1Associative: String = "fa",
   l1Replacer: Option[String] = Some("plru"),
   // l2
-  l2nSets: Int = 32,
-  l2nWays: Int = 2,
+  l2nSets: Int = 8,
+  l2nWays: Int = 4,
   l2Replacer: Option[String] = Some("setplru"),
   // l3
-  l3nSets: Int = 128,
-  l3nWays: Int = 4,
+  l3nSets: Int = 32,
+  l3nWays: Int = 8,
   l3Replacer: Option[String] = Some("setplru"),
   // sp
   spSize: Int = 16,
   spReplacer: Option[String] = Some("plru"),
   // filter
   ifilterSize: Int = 8,
-  dfilterSize: Int = 8,
+  dfilterSize: Int = 32,
   // miss queue, add more entries than 'must require'
   // 0 for easier bug trigger, please set as big as u can, 8 maybe
   missqueueExtendSize: Int = 0,
@@ -92,6 +92,10 @@ trait HasTlbConst extends HasXSParameter {
   val sectortlbwidth = log2Up(tlbcontiguous)
   val sectorppnLen = ppnLen - sectortlbwidth
   val sectorvpnLen = vpnLen - sectortlbwidth
+
+  val loadfiltersize = 16
+  val storefiltersize = 8
+  val prefetchfiltersize = 8
 
   val sramSinglePort = true
 
