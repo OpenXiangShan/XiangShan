@@ -727,7 +727,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   // refill.alias := req.vaddr(13, 12) // TODO
   // assert(!io.refill_pipe_req.valid || (refill.meta.coh =/= ClientMetadata(Nothing)), "refill modifies meta to Nothing, should not happen")
 
-  io.sms_agt_evict_req.valid := io.refill_pipe_req.fire && should_replace && req_valid
+  io.sms_agt_evict_req.valid := io.main_pipe_req.fire && should_replace && req_valid
   io.sms_agt_evict_req.bits.vaddr := Cat(req.replace_tag(tagBits - 1, 2), req.vaddr(13, 12), 0.U((VAddrBits - tagBits).W))
 
   io.main_pipe_req.valid := !s_mainpipe_req && w_grantlast
