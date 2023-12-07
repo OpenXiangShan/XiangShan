@@ -1165,13 +1165,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // atomics
   // atomics not finished yet
   // io.lsu.atomic <> atomicsReplayUnit.io.lsu
-  val atomicResp = mainPipe.io.atomic_resp.bits
-  when(atomicResp.isAMO){
-    io.lsu.atomics.resp := RegNext(mainPipe.io.atomic_resp)
-  }.otherwise{
-    io.lsu.atomics.resp.valid := RegNext(false.B)
-    io.lsu.atomics.resp.bits := RegNext(mainPipe.io.atomic_resp.bits)
-  }
+  val atomicResp = RegNext(mainPipe.io.atomic_resp)
+  io.lsu.atomics.resp.valid := atomicResp.valid && atomicResp.bits.isAMO
+  io.lsu.atomics.resp.bits := atomicResp.bits
+
   io.lsu.atomics.block_lr := mainPipe.io.block_lr
   // atomicsReplayUnit.io.pipe_resp := RegNext(mainPipe.io.atomic_resp)
   // atomicsReplayUnit.io.block_lr <> mainPipe.io.block_lr
@@ -1328,8 +1325,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   bus.c     <> wb.io.mem_release
   // wb.io.release_wakeup := refillPipe.io.release_wakeup
   // wb.io.release_update := mainPipe.io.release_update
-  // wb.io.probe_ttob_check_req <> mainPipe.io.probe_ttob_check_req
-  // wb.io.probe_ttob_check_resp <> mainPipe.io.probe_ttob_check_resp
+  //wb.io.probe_ttob_check_req <> mainPipe.io.probe_ttob_check_req
+  //wb.io.probe_ttob_check_resp <> mainPipe.io.probe_ttob_check_resp
 
   io.lsu.release.valid := RegNext(wb.io.req.fire)
   io.lsu.release.bits.paddr := RegNext(wb.io.req.bits.addr)

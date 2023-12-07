@@ -1109,10 +1109,11 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   arbiter_with_pipereg(entries.map(_.io.replace_pipe_req), io.replace_pipe_req, Some("replace_pipe_req"))
 
   // amo's main pipe req out
-  val main_pipe_req_vec = entries.map(_.io.main_pipe_req)
-  io.main_pipe_req.valid := VecInit(main_pipe_req_vec.map(_.valid)).asUInt.orR
-  io.main_pipe_req.bits := Mux1H(main_pipe_req_vec.map(_.valid), main_pipe_req_vec.map(_.bits))
-  assert(PopCount(VecInit(main_pipe_req_vec.map(_.valid))) <= 1.U, "multi main pipe req")
+  //val main_pipe_req_vec = entries.map(_.io.main_pipe_req)
+  //io.main_pipe_req.valid := VecInit(main_pipe_req_vec.map(_.valid)).asUInt.orR
+  //io.main_pipe_req.bits := Mux1H(main_pipe_req_vec.map(_.valid), main_pipe_req_vec.map(_.bits))
+  //assert(PopCount(VecInit(main_pipe_req_vec.map(_.valid))) <= 1.U, "multi main pipe req")
+  fastArbiter(entries.map(_.io.main_pipe_req), io.main_pipe_req, Some("main_pipe_req"))
 
   // send evict hint to sms
   val sms_agt_evict_valid = Cat(entries.map(_.io.sms_agt_evict_req.valid)).orR
