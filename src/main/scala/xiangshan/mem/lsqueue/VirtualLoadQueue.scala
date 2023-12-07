@@ -247,9 +247,10 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     }
   }
 
+  XSError(io.vecWriteback.valid && !allocated(io.vecWriteback.bits.uop.lqIdx.value),
+    "wb lqIdx should be allocated at dispatch stage")
   when (io.vecWriteback.valid) {
     val vecWbIndex = io.vecWriteback.bits.uop.lqIdx.value
-    assert(allocated(vecWbIndex))
     addrvalid(vecWbIndex) := true.B
     datavalid(vecWbIndex) := true.B
   }

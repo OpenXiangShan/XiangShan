@@ -705,10 +705,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // module keeps growing higher. Now we give data read a whole cycle.
 
   // Vector stores are written to sbuffer by vector store flow queue rather than sq
+  XSError(io.vecStoreRetire.valid && !vec(rdataPtrExt(0).value), "Vector store flow queue is trying to retire a scalar store")
+  XSError(io.vecStoreRetire.valid && !allocated(rdataPtrExt(0).value), "Vector store flow queue is trying to retire an invalid entry")
   when (io.vecStoreRetire.valid) {
     assert(io.vecStoreRetire.bits === rdataPtrExt(0))
-    assert(vec(rdataPtrExt(0).value), "Vector store flow queue is trying to retire a scalar store")
-    assert(allocated(rdataPtrExt(0).value), "Vector store flow queue is trying to retire an invalid entry")
     vec(rdataPtrExt(0).value) := false.B
     allocated(rdataPtrExt(0).value) := false.B
   }
