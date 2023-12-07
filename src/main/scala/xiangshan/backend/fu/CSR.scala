@@ -246,7 +246,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
 
   def WriteTselect(wdata: UInt) = {
-    Mux(wdata < TriggerNum.U, wdata(3, 0), tselectPhy)
+    Mux(wdata < TriggerNum.U, wdata(log2Up(TriggerNum) - 1, 0), tselectPhy)
   }
 
   def GenTdataDistribute(tdata1: Tdata1Bundle, tdata2: UInt): MatchTriggerIO = {
@@ -578,7 +578,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val vcsr = RegInit(0.U(XLEN.W))
   val vl = Reg(UInt(XLEN.W))
   val vtype = Reg(UInt(XLEN.W))
-  val vlenb = RegInit((VLEN / 8).U(XLEN.W))
+  val vlenb = RegInit((VDataBytes).U(XLEN.W))
 
   // set mstatus->sd and mstatus->vs when true
   val csrw_dirty_vs_state = WireInit(false.B)
@@ -1242,6 +1242,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
         dpc := iexceptionPC // TODO: check it when hasSingleStep
         dcsrNew.cause := MuxCase(0.U, Seq(
           hasTriggerFire -> CAUSE_TRIGGER,
+          raiseDebugException -> CAUSE_EBREAK,
           hasBreakPoint -> CAUSE_HALTREQ,
           hasSingleStep -> CAUSE_STEP
         ))
