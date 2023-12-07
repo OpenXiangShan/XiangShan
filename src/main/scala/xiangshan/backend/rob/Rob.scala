@@ -720,7 +720,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   for (i <- 0 until LoadPipelineWidth) {
     when (RegNext(io.lsq.mmio(i))) {
-      mmio(RegNext(io.lsq.uop(i).robIdx).value) := true.B
+      mmio(RegEnable(io.lsq.uop(i).robIdx, io.lsq.mmio(i)).value) := true.B
     }
   }
 
@@ -1143,7 +1143,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       // Thus, we don't allow load/store instructions to trigger an interrupt.
       // TODO: support non-MMIO load-store instructions to trigger interrupts
       val allow_interrupts = !CommitType.isLoadStore(io.enq.req(i).bits.commitType)
-      interrupt_safe(RegNext(allocatePtrVec(i).value)) := RegNext(allow_interrupts)
+      interrupt_safe(RegEnable(allocatePtrVec(i).value, canEnqueue(i))) := RegEnable(allow_interrupts, canEnqueue(i))
     }
   }
 
