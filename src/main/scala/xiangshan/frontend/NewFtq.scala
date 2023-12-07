@@ -213,6 +213,7 @@ class FtqToCtrlIO(implicit p: Parameters) extends XSBundle with HasBackendRedire
   val pc_mem_waddr = Output(UInt(log2Ceil(FtqSize).W))
   val pc_mem_wdata = Output(new Ftq_RF_Components)
   // newest target
+  val newest_entry_en = Output(Bool())
   val newest_entry_target = Output(UInt(VAddrBits.W))
   val newest_entry_ptr = Output(new FtqPtr)
 }
@@ -651,11 +652,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       }
   }
 
-  // num cycle is fixed
-  io.toBackend.newest_entry_ptr := RegNext(newest_entry_ptr)
-  io.toBackend.newest_entry_target := RegNext(newest_entry_target)
-
-
   bpuPtr := bpuPtr + enq_fire
   copied_bpu_ptr.map(_ := bpuPtr + enq_fire)
   when (io.toIfu.req.fire && allowToIfu) {
@@ -892,15 +888,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     entry_hit_status(wb_idx_reg) := h_false_hit
   }
 
-
-  // **********************************************************************
-  // ***************************** to backend *****************************
-  // **********************************************************************
-  // to backend pc mem / target
-  io.toBackend.pc_mem_wen   := RegNext(last_cycle_bpu_in)
-  io.toBackend.pc_mem_waddr := RegNext(last_cycle_bpu_in_idx)
-  io.toBackend.pc_mem_wdata := RegNext(bpu_in_bypass_buf_for_ifu)
-
   // *******************************************************************************
   // **************************** redirect from backend ****************************
   // *******************************************************************************
@@ -991,6 +978,20 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     // if pdWb and no redirect, set to false
     ifuRedirected(last_cycle_bpu_in_ptr.value) := false.B
   }
+
+  // **********************************************************************
+  // ***************************** to backend *****************************
+  // **********************************************************************
+  // to backend pc mem / target
+  io.toBackend.pc_mem_wen := RegNext(last_cycle_bpu_in)
+  io.toBackend.pc_mem_waddr := RegEnable(last_cycle_bpu_in_idx, last_cycle_bpu_in)
+  io.toBackend.pc_mem_wdata := RegEnable(bpu_in_bypass_buf_for_ifu, last_cycle_bpu_in)
+
+  // num cycle is fixed
+  val newest_entry_en: Bool = RegNext(last_cycle_bpu_in || backendRedirect.valid || ifuRedirectToBpu.valid)
+  io.toBackend.newest_entry_en := RegNext(newest_entry_en)
+  io.toBackend.newest_entry_ptr := RegEnable(newest_entry_ptr, newest_entry_en)
+  io.toBackend.newest_entry_target := RegEnable(newest_entry_target, newest_entry_en)
 
   // *********************************************************************
   // **************************** wb from exu ****************************

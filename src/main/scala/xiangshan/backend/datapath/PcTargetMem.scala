@@ -28,6 +28,7 @@ class PcTargetMemImp(override val wrapper: PcTargetMem)(implicit p: Parameters, 
   targetMem.io.waddr.head := RegEnable(io.fromFrontendFtq.pc_mem_waddr, io.fromFrontendFtq.pc_mem_wen)
   targetMem.io.wdata.head := RegEnable(io.fromFrontendFtq.pc_mem_wdata.startAddr, io.fromFrontendFtq.pc_mem_wen)
 
+  private val newestEn: Bool = io.fromFrontendFtq.newest_entry_en
   private val newestTarget: UInt = io.fromFrontendFtq.newest_entry_target
   for (i <- 0 until numTargetMemRead) {
     val targetPtr = io.fromDataPathFtq(i)
@@ -37,7 +38,7 @@ class PcTargetMemImp(override val wrapper: PcTargetMem)(implicit p: Parameters, 
     val needNewestTarget = RegNext(targetPtr === io.fromFrontendFtq.newest_entry_ptr)
     jumpTargetVec(i) := Mux(
       needNewestTarget,
-      RegNext(newestTarget),
+      RegEnable(newestTarget, newestEn),
       jumpTargetReadVec(i)
     )
   }
