@@ -1050,9 +1050,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_sel_rep_cause = PriorityEncoderOH(s3_rep_info.cause.asUInt)
 
   val s3_exception = ExceptionNO.selectByFu(s3_in.uop.cf.exceptionVec, lduCfg).asUInt.orR
-  when (s3_exception || s3_dly_ld_err || s3_rep_frm_fetch || s3_ldld_rep_inst) {
+  when (s3_exception || s3_dly_ld_err || s3_rep_frm_fetch) {
     io.lsq.ldin.bits.rep_info.cause := 0.U.asTypeOf(s3_rep_info.cause.cloneType)
-    io.lsq.ldin.bits.rep_info.dcache_miss := s3_rep_info.dcache_miss
   } .otherwise {
     io.lsq.ldin.bits.rep_info.cause := VecInit(s3_sel_rep_cause.asBools)
   }
