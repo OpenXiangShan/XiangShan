@@ -212,47 +212,7 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
   ))
 
   // number of writeback num
-  val numOfWB = MuxLookup(typeOfSplit, 1.U(log2Up(MaxUopSize + 1).W), Array(
-    UopSplitType.VSET -> 2.U,
-    UopSplitType.VEC_0XV -> 2.U,
-    UopSplitType.VEC_VVV -> lmul,
-    UopSplitType.VEC_VFV -> lmul,
-    UopSplitType.VEC_EXT2 -> lmul,
-    UopSplitType.VEC_EXT4 -> lmul,
-    UopSplitType.VEC_EXT8 -> lmul,
-    UopSplitType.VEC_VVM -> lmul,
-    UopSplitType.VEC_VFM -> lmul,
-    UopSplitType.VEC_VFRED -> numOfUopVFRED,
-    UopSplitType.VEC_VFREDOSUM -> numOfUopVFREDOSUM,
-    UopSplitType.VEC_VXM -> (lmul +& 1.U),
-    UopSplitType.VEC_VXV -> (lmul +& 1.U),
-    UopSplitType.VEC_VFW -> Cat(lmul, 0.U(1.W)), // lmul <= 4
-    UopSplitType.VEC_WFW -> Cat(lmul, 0.U(1.W)), // lmul <= 4
-    UopSplitType.VEC_VVW -> Cat(lmul, 0.U(1.W)), // lmul <= 4
-    UopSplitType.VEC_WVW -> Cat(lmul, 0.U(1.W)), // lmul <= 4
-    UopSplitType.VEC_VXW -> Cat(lmul, 1.U(1.W)), // lmul <= 4
-    UopSplitType.VEC_WXW -> Cat(lmul, 1.U(1.W)), // lmul <= 4
-    UopSplitType.VEC_WVV -> Cat(lmul, 0.U(1.W)), // lmul <= 4
-    UopSplitType.VEC_WXV -> Cat(lmul, 1.U(1.W)), // lmul <= 4
-    UopSplitType.VEC_SLIDE1UP -> (lmul +& 1.U),
-    UopSplitType.VEC_FSLIDE1UP -> lmul,
-    UopSplitType.VEC_SLIDE1DOWN -> Cat(lmul, 0.U(1.W)),
-    UopSplitType.VEC_FSLIDE1DOWN -> (Cat(lmul, 0.U(1.W)) - 1.U),
-    UopSplitType.VEC_VRED -> lmul,
-    UopSplitType.VEC_SLIDEUP -> (numOfUopVslide + 1.U),
-    UopSplitType.VEC_SLIDEDOWN -> (numOfUopVslide + 1.U),
-    UopSplitType.VEC_M0X -> (lmul +& 1.U),
-    UopSplitType.VEC_MVV -> (Cat(lmul, 0.U(1.W)) - 1.U),
-    UopSplitType.VEC_M0X_VFIRST -> 2.U,
-    UopSplitType.VEC_VWW -> Cat(lmul, 0.U(1.W)),
-    UopSplitType.VEC_RGATHER -> numOfUopVrgather,
-    UopSplitType.VEC_RGATHER_VX -> (numOfUopVrgather +& 1.U),
-    UopSplitType.VEC_RGATHEREI16 -> numOfUopVrgatherei16,
-    UopSplitType.VEC_US_LDST -> Mux(isVlsr, nf +& 2.U, (numOfUopVLoadStoreStrided +& 1.U)),   // with one move instruction
-    UopSplitType.VEC_S_LDST -> (numOfUopVLoadStoreStrided +& 2.U),    // with two move instructions
-    UopSplitType.VEC_I_LDST -> (numOfWBVLoadStoreIndexed +& 1.U),
-    UopSplitType.VEC_MVNR -> (vmvn +& 1.U),
-  ))
+  val numOfWB = Mux(typeOfSplit === UopSplitType.VEC_I_LDST, (numOfWBVLoadStoreIndexed +& 1.U), numOfUop)
 
   isComplex := typeOfSplit =/= UopSplitType.SCA_SIM
   io.out.uopInfo.numOfUop := numOfUop
