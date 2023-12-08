@@ -186,6 +186,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   private val decoderOut = decoder(QMCMinimizer, Cat(opcode.op), truthTable)
   private val vIntFixpDecode = decoderOut.asTypeOf(new VIntFixpDecode)
   private val isFixp = Mux(vIntFixpDecode.misc, opcode.isScalingShift, opcode.isSatAdd || opcode.isAvgAdd)
+  private val isVmvsx = opcode.isVmvsx
   private val widen = opcode.isAddSub && vs1Type(1, 0) =/= vdType(1, 0)
   private val widen_vs2 = widen && vs2Type(1, 0) =/= vdType(1, 0)
   private val eewVs1 = SewOH(vs1Type(1, 0))
@@ -279,7 +280,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   mgu.io.in.mask := maskToMgu
   mgu.io.in.info.ta := outVecCtrl.vta
   mgu.io.in.info.ma := outVecCtrl.vma
-  mgu.io.in.info.vl := outVl
+  mgu.io.in.info.vl := Mux(isVmvsx, 1.U, outVl)
   mgu.io.in.info.vlmul := outVecCtrl.vlmul
   mgu.io.in.info.valid := io.out.valid
   mgu.io.in.info.vstart := outVecCtrl.vstart
