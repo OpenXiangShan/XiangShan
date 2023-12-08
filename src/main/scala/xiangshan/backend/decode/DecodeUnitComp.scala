@@ -298,35 +298,26 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).srcType(0) := SrcType.reg
       csBundle(0).srcType(1) := SrcType.imm
       csBundle(0).lsrc(1) := 0.U
-      csBundle(0).ldest := FP_TMP_REG_MV.U
-      csBundle(0).fuType := FuType.i2f.U
+      csBundle(0).ldest := VECTOR_TMP_REG_LMUL.U
+      csBundle(0).fuType := FuType.i2v.U
+      csBundle(0).fuOpType := Cat(IF2VectorType.i2Vec(2, 0), vsewReg)
       csBundle(0).rfWen := false.B
-      csBundle(0).fpWen := true.B
-      csBundle(0).vecWen := false.B
-      csBundle(0).fpu.isAddSub := false.B
-      csBundle(0).fpu.typeTagIn := FPU.D
-      csBundle(0).fpu.typeTagOut := FPU.D
-      csBundle(0).fpu.fromInt := true.B
-      csBundle(0).fpu.wflags := false.B
-      csBundle(0).fpu.fpWen := true.B
-      csBundle(0).fpu.div := false.B
-      csBundle(0).fpu.sqrt := false.B
-      csBundle(0).fpu.fcvt := false.B
+      csBundle(0).fpWen := false.B
+      csBundle(0).vecWen := true.B
       /*
-      vfmv.s.f
+      vmv.s.x
        */
-      csBundle(1).srcType(0) := SrcType.fp
-      csBundle(1).srcType(1) := SrcType.vp
+      csBundle(1).srcType(0) := SrcType.vp
+      csBundle(1).srcType(1) := SrcType.imm
       csBundle(1).srcType(2) := SrcType.vp
-      csBundle(1).lsrc(0) := FP_TMP_REG_MV.U
+      csBundle(1).lsrc(0) := VECTOR_TMP_REG_LMUL.U
       csBundle(1).lsrc(1) := 0.U
       csBundle(1).lsrc(2) := dest
       csBundle(1).ldest := dest
-      csBundle(1).fuType := FuType.vppu.U
-      csBundle(1).fuOpType := VpermType.dummy
       csBundle(1).rfWen := false.B
       csBundle(1).fpWen := false.B
       csBundle(1).vecWen := true.B
+      csBundle(1).uopIdx := 0.U
     }
     is(UopSplitType.VEC_VXV) {
       /*
