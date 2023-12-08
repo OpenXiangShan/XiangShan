@@ -7,8 +7,8 @@ import xiangshan.backend.Bundles.{ExuInput, connectSamePort}
 import xiangshan.backend.exu.ExeUnitParams
 
 class MultiWakeupQueueIO[T <: Bundle, TFlush <: Data](
-  gen       : T,
-  lastGen   : T,
+  gen       : ExuInput,
+  lastGen   : ExuInput,
   flushGen  : TFlush,
   latWidth  : Int,
 ) extends Bundle {
@@ -23,13 +23,13 @@ class MultiWakeupQueueIO[T <: Bundle, TFlush <: Data](
 }
 
 class MultiWakeupQueue[T <: Bundle, TFlush <: Data](
-  val gen       : T,
-  val lastGen   : T,
+  val gen       : ExuInput,
+  val lastGen   : ExuInput,
   val flushGen  : TFlush,
   val latencySet: Set[Int],
-  flushFunc : (T, TFlush, Int) => Bool,
-  modificationFunc: T => T = { x: T => x },
-  lastConnectFunc: (T, T) => T,
+  flushFunc : (ExuInput, TFlush, Int) => Bool,
+  modificationFunc: ExuInput => ExuInput = { x: ExuInput => x },
+  lastConnectFunc: (ExuInput, ExuInput) => ExuInput,
 ) extends Module {
   require(latencySet.min >= 0)
 
@@ -54,6 +54,9 @@ class MultiWakeupQueue[T <: Bundle, TFlush <: Data](
 
   pipesOut.valid := pipesValidVec.asUInt.orR
   pipesOut.bits := Mux1H(pipesValidVec, pipesBitsVec)
+  pipesOut.bits.rfWen .foreach(_ := pipesValidVec.zip(pipesBitsVec.map(_.rfWen .get)).map{case(valid,wen) => valid && wen}.reduce(_||_))
+  pipesOut.bits.fpWen .foreach(_ := pipesValidVec.zip(pipesBitsVec.map(_.fpWen .get)).map{case(valid,wen) => valid && wen}.reduce(_||_))
+  pipesOut.bits.vecWen.foreach(_ := pipesValidVec.zip(pipesBitsVec.map(_.vecWen.get)).map{case(valid,wen) => valid && wen}.reduce(_||_))
 
   lastConnect.valid := pipesOut.valid
   lastConnect.bits := lastConnectFunc(pipesOut.bits, lastConnect.bits)

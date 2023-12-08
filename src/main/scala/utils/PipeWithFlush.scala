@@ -3,6 +3,7 @@ package utils
 import chisel3._
 import chisel3.util._
 import xiangshan._
+import xiangshan.backend.Bundles.ExuInput
 
 /** Pipeline module generator parameterized by data type and latency.
   *
@@ -14,11 +15,11 @@ import xiangshan._
   * @tparam TFlush Type of [[io.flush]]
   */
 class PipeWithFlush[T <: Data, TFlush <: Data] (
-  gen: T,
+  gen: ExuInput,
   flushGen: TFlush,
   latency: Int,
-  flushFunc: (T, TFlush, Int) => Bool,
-  modificationFunc: T => T = { x: T => x }
+  flushFunc: (ExuInput, TFlush, Int) => Bool,
+  modificationFunc: ExuInput => ExuInput = { x: ExuInput => x }
 ) extends Module {
   require(latency >= 0, "Pipe latency must be greater than or equal to zero!")
 
@@ -31,8 +32,8 @@ class PipeWithFlush[T <: Data, TFlush <: Data] (
   val io = IO(new PipeIO)
 
   val valids: Seq[Bool] = io.enq.valid +: Seq.fill(latency)(RegInit(false.B))
-  val bits: Seq[T] = io.enq.bits +: Seq.fill(latency)(Reg(gen))
-  val modifiedBits: Seq[T] = bits.map(modificationFunc)
+  val bits: Seq[ExuInput] = io.enq.bits +: Seq.fill(latency)(Reg(gen))
+  val modifiedBits: Seq[ExuInput] = bits.map(modificationFunc)
 
   for (i <- 0 until latency) {
     valids(i + 1) := valids(i) && !flushFunc(bits(i), io.flush, i)

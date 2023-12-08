@@ -257,6 +257,16 @@ object Bundles {
           ) && valid
       }
     }
+    def wakeUpFromIQ(successor: Seq[(UInt, UInt)]): Seq[Bool] = {
+      successor.map { case (thatPsrc, srcType) =>
+        val pdestMatch = pdest === thatPsrc
+        pdestMatch && (
+          SrcType.isFp(srcType) && this.fpWen ||
+            SrcType.isXp(srcType) && this.rfWen ||
+            SrcType.isVp(srcType) && this.vecWen
+          )
+      }
+    }
 
     def hasOnlyOneSource: Boolean = exuIndices.size == 1
 
