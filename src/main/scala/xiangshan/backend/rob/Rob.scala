@@ -26,11 +26,12 @@ import utils._
 import xiangshan._
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput}
-import xiangshan.backend.fu.{FuType, FuConfig}
+import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.frontend.FtqPtr
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput}
 import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfo, LsTopdownInfo}
+import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.rename.SnapshotGenerator
 
 
@@ -357,6 +358,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val headNotReady = Output(Bool())
     val cpu_halt = Output(Bool())
     val wfi_enable = Input(Bool())
+    val toDecode = new Bundle {
+      val vtype = ValidIO(VType())
+    }
 
     val debug_ls = Flipped(new DebugLSIO)
     val debugRobHead = Output(new DynInst)
@@ -487,7 +491,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.debugRobHead := debug_microOp(deqPtr.value)
 
   val rab = Module(new RenameBuffer(RabSize))
+  val vtypeBuffer = Module(new VTypeBuffer(VTypeBufferSize))
 
+  /**
+   * connection of [[rab]]
+   */
   rab.io.redirect.valid := io.redirect.valid
 
   rab.io.req.zip(io.enq.req).map { case (dest, src) =>
@@ -512,6 +520,25 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   io.rabCommits := rab.io.commits
   io.diffCommits := rab.io.diffCommits
+
+  /**
+   * connection of [[vtypeBuffer]]
+   */
+
+  vtypeBuffer.io.redirect.valid := io.redirect.valid
+
+  vtypeBuffer.io.req.zip(io.enq.req).map { case (sink, source) =>
+    sink.valid := source.valid && io.enq.canAccept
+    sink.bits := source.bits
+  }
+
+  private val commitIsVTypeVec = VecInit(io.commits.commitValid.zip(io.commits.info).map { case (valid, info) => valid && info.isVset })
+  private val walkIsVTypeVec = VecInit(io.commits.walkValid.zip(io.commits.info).map { case (valid, info) => valid && info.isVset })
+  vtypeBuffer.io.fromRob.commitSize := PopCount(commitIsVTypeVec)
+  vtypeBuffer.io.fromRob.walkSize := PopCount(walkIsVTypeVec)
+  vtypeBuffer.io.snpt := io.snpt
+  vtypeBuffer.io.snpt.snptEnq := snptEnq
+  io.toDecode.vtype := vtypeBuffer.io.toDecode.vtype
 
   /**
     * Enqueue (from dispatch)
@@ -544,7 +571,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
 
   val allocatePtrVec = VecInit((0 until RenameWidth).map(i => enqPtrVec(PopCount(io.enq.req.take(i).map(req => req.valid && req.bits.firstUop)))))
-  io.enq.canAccept := allowEnqueue && !hasBlockBackward && rab.io.canEnq
+  io.enq.canAccept := allowEnqueue && !hasBlockBackward && rab.io.canEnq && vtypeBuffer.io.canEnq
   io.enq.resp      := allocatePtrVec
   val canEnqueue = VecInit(io.enq.req.map(req => req.valid && req.bits.firstUop && io.enq.canAccept))
   val timer = GTimer()
@@ -763,6 +790,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val shouldWalkVec = VecInit(walkPtrVec.map(_ <= lastWalkPtr))
   val walkFinished = VecInit(walkPtrVec.map(_ >= lastWalkPtr)).asUInt.orR
   rab.io.fromRob.walkEnd := state === s_walk && walkFinished
+  vtypeBuffer.io.fromRob.walkEnd := state === s_walk && walkFinished
 
   require(RenameWidth <= CommitWidth)
 
@@ -877,7 +905,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     * (1) redirect: switch to s_walk
     * (2) walk: when walking comes to the end, switch to s_idle
     */
-  val state_next = Mux(io.redirect.valid, s_walk, Mux(state === s_walk && walkFinished && rab.io.status.walkEnd, s_idle, state))
+  val state_next = Mux(
+    io.redirect.valid, s_walk,
+    Mux(
+      state === s_walk && walkFinished && rab.io.status.walkEnd && vtypeBuffer.io.status.walkEnd, s_idle,
+      state
+    )
+  )
   XSPerfAccumulate("s_idle_to_idle",            state === s_idle && state_next === s_idle)
   XSPerfAccumulate("s_idle_to_walk",            state === s_idle && state_next === s_walk)
   XSPerfAccumulate("s_walk_to_idle",            state === s_walk && state_next === s_idle)

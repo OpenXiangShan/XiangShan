@@ -168,6 +168,7 @@ case class XSCoreParameters
   VlsQueueSize: Int = 8,
   RobSize: Int = 256,
   RabSize: Int = 256,
+  VTypeBufferSize: Int = 64, // used to reorder vtype
   IssueQueueSize: Int = 32,
   dpParams: DispatchParameters = DispatchParameters(
     IntDqSize = 16,
@@ -553,6 +554,7 @@ trait HasXSParameter {
   val PhyRegIdxWidth = log2Up(IntPhyRegs) max log2Up(VfPhyRegs)
   val RobSize = coreParams.RobSize
   val RabSize = coreParams.RabSize
+  val VTypeBufferSize = coreParams.VTypeBufferSize
   val IntRefCounterWidth = log2Ceil(RobSize)
   val LSQEnqWidth = coreParams.dpParams.LsDqDeqWidth
   val VirtualLoadQueueSize = coreParams.VirtualLoadQueueSize
