@@ -173,7 +173,7 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
     wakeupLoadDependencyByIQVec := 0.U.asTypeOf(wakeupLoadDependencyByIQVec)
   } else {
     val wakeupVec: IndexedSeq[IndexedSeq[Bool]] = io.wakeUpFromIQ.map((bundle: ValidIO[IssueQueueIQWakeUpBundle]) =>
-      bundle.bits.wakeUp(entryReg.status.psrc zip entryReg.status.srcType, bundle.valid)
+      bundle.bits.wakeUpFromIQ(entryReg.status.psrc zip entryReg.status.srcType)
     ).toIndexedSeq.transpose
     val cancelSel = params.wakeUpSourceExuIdx.zip(io.wakeUpFromIQ).map{ case (x, y) => io.og0Cancel(x) && y.bits.is0Lat}
     srcWakeUpByIQVec := wakeupVec.map(x => VecInit(x.zip(cancelSel).map { case (wakeup, cancel) => wakeup && !cancel }))
@@ -190,7 +190,7 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
 
   if (params.hasIQWakeUp) {
     val wakeupVec: IndexedSeq[IndexedSeq[Bool]] = io.enqDelayWakeUpFromIQ.map( x =>
-      x.bits.wakeUp(entryReg.status.psrc.zip(entryReg.status.srcType), x.valid)
+      x.bits.wakeUpFromIQ(entryReg.status.psrc.zip(entryReg.status.srcType))
     ).toIndexedSeq.transpose
     val cancelSel = params.wakeUpSourceExuIdx.zip(io.enqDelayWakeUpFromIQ).map{ case (x, y) => io.enqDelayOg0Cancel(x) && y.bits.is0Lat}
     enqDelaySrcWakeUpByIQVec := wakeupVec.map(x => VecInit(x.zip(cancelSel).map { case (wakeup, cancel) => wakeup && !cancel }))
