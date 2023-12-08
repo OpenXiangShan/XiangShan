@@ -70,12 +70,12 @@ class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyMod
     require(
       wbPortConfigs.collectFirst { case x: IntWB => x }.nonEmpty ==
         fuConfigs.map(_.writeIntRf).reduce(_ || _),
-      "int wb port has no priority"
+      s"${exuCfg.name} int wb port has no priority"
     )
     require(
       wbPortConfigs.collectFirst { case x: VfWB => x }.nonEmpty ==
         fuConfigs.map(x => x.writeFpRf || x.writeVecRf).reduce(_ || _),
-      "vec wb port has no priority"
+      s"${exuCfg.name} vec wb port has no priority"
     )
   }
 
