@@ -6,7 +6,7 @@ import utils.EnumUtils.OHEnumeration
 import xiangshan.ExceptionNO._
 import xiangshan.SelImm
 import xiangshan.backend.Std
-import xiangshan.backend.fu.fpu.{FDivSqrt, FMA, FPToFP, FPToInt, IntToFP, IntToVec}
+import xiangshan.backend.fu.fpu.{FDivSqrt, FMA, IntToFP, IntToVec}
 import xiangshan.backend.fu.wrapper.{Alu, BranchUnit, DivUnit, JumpUnit, MulUnit, VFAlu, VFMA, VFDivSqrt, VIAluFix, VIMacU, VPPU, VIPU, VSetRiWi, VSetRiWvf, VSetRvfWvf, VCVT}
 import xiangshan.backend.Bundles.ExuInput
 import xiangshan.backend.datapath.DataConfig._
@@ -88,16 +88,7 @@ case class FuConfig (
   def readFp: Boolean = numFpSrc > 0
 
   def fuSel(uop: ExuInput): Bool = {
-    // Don't add more shit here!!!
-    // Todo: add new FuType to distinguish f2i, f2f
-    if (this.fuType == FuType.fmisc) {
-      this.name match {
-        case FuConfig.F2iCfg.name => uop.rfWen.get && uop.fuType === this.fuType.U
-        case FuConfig.F2fCfg.name => uop.fpu.get.fpWen && !uop.fpu.get.div && !uop.fpu.get.sqrt && uop.fuType === this.fuType.U
-      }
-    } else {
       uop.fuType === this.fuType.U
-    }
   }
 
   /**
@@ -140,7 +131,7 @@ case class FuConfig (
 
   def needFPUCtrl: Boolean = {
     import FuType._
-    Seq(fmac, fDivSqrt, fmisc, i2f).contains(fuType)
+    Seq(fmac, fDivSqrt, i2f).contains(fuType)
   }
 
   def needVecCtrl: Boolean = {
@@ -371,36 +362,6 @@ object FuConfig {
     writeFpRf = true,
     writeFflags = true,
     latency = UncertainLatency(),
-    needSrcFrm = true,
-  )
-
-  val F2iCfg: FuConfig = FuConfig (
-    name = "f2i",
-    fuType = FuType.fmisc,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new FPToInt(cfg)(p).suggestName("F2i")),
-    srcData = Seq(
-      Seq(FpData(), FpData()),
-      Seq(FpData()),
-    ),
-    piped = true,
-    writeIntRf = true,
-    writeFflags = true,
-    latency = CertainLatency(2),
-    needSrcFrm = true,
-  )
-
-  val F2fCfg: FuConfig = FuConfig (
-    name = "f2f",
-    fuType = FuType.fmisc,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new FPToFP(cfg)(p).suggestName("F2f")),
-    srcData = Seq(
-      Seq(FpData(), FpData()),
-      Seq(FpData()),
-    ),
-    piped = true,
-    writeFpRf = true,
-    writeFflags = true,
-    latency = CertainLatency(2),
     needSrcFrm = true,
   )
 
@@ -717,7 +678,7 @@ object FuConfig {
 
   def allConfigs = Seq(
     JmpCfg, BrhCfg, I2fCfg, I2vCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg, VSetRvfWvfCfg, VSetRiWvfCfg, VSetRiWiCfg,
-    FmacCfg, F2iCfg, F2fCfg, FDivSqrtCfg, LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg, VialuCfg, VipuCfg, VlduCfg, VstuCfg,
+    FmacCfg, FDivSqrtCfg, LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg, VialuCfg, VipuCfg, VlduCfg, VstuCfg,
     VfaluCfg, VfmaCfg, VfcvtCfg, HyldaCfg, HystaCfg
   )
 

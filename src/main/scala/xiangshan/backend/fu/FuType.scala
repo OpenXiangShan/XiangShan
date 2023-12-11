@@ -39,7 +39,7 @@ object FuType extends OHEnumeration {
 
   // fp
   val fmac = addType(name = "fmac")
-  val fmisc = addType(name = "fmisc")
+  val fmisc = addType(name = "fmisc") // being delated
   val fDivSqrt = addType(name = "fDivSqrt")
 
   // ls

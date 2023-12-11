@@ -348,7 +348,7 @@ case class XSCoreParameters
     implicit val schdType: SchedulerType = VfScheduler()
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams("VFEX0", Seq(VfaluCfg, VfmaCfg, VialuCfg, VppuCfg, F2fCfg, F2iCfg, VSetRvfWvfCfg), Seq(VfWB(port = 0, 0), IntWB(port = 4, 0)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
+        ExeUnitParams("VFEX0", Seq(VfaluCfg, VfmaCfg, VialuCfg, VppuCfg, VSetRvfWvfCfg), Seq(VfWB(port = 0, 0), IntWB(port = 4, 0)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
         ExeUnitParams("VFEX1", Seq(VfaluCfg, VfmaCfg, VimacCfg, VipuCfg, VfcvtCfg), Seq(VfWB(port = 1, 0), IntWB(port = 8, 0)), Seq(Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(VfRD(9, 0)), Seq(VfRD(10, 0)), Seq(VfRD(11, 0)))),
       ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
