@@ -44,7 +44,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
     val prefetch_req    = Flipped(DecoupledIO(new StorePrefetchReq))
     // provide prefetch info to sms
     val prefetch_train  = ValidIO(new StPrefetchTrainBundle())
-    val stld_nuke_query = Valid(new StoreNukeQueryIO)
+    val stld_nuke_query = new StoreNukeQueryIO
     val stout           = DecoupledIO(new ExuOutput) // writeback store
     // store mask, send to sq in store_s0
     val st_mask_out     = Valid(new StoreMaskBundle)
@@ -175,12 +175,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   .elsewhen (s1_fire) { s1_valid := false.B }
   .elsewhen (s1_kill) { s1_valid := false.B }
 
-  // st-ld violation dectect request.
-  io.stld_nuke_query.valid       := s1_valid && !s1_tlb_miss && !s1_in.isHWPrefetch
-  io.stld_nuke_query.bits.robIdx := s1_in.uop.robIdx
-  io.stld_nuke_query.bits.paddr  := s1_paddr
-  io.stld_nuke_query.bits.mask   := s1_in.mask
-
   // issue
   io.issue.valid := s1_valid && !s1_tlb_miss && !s1_in.isHWPrefetch
   io.issue.bits  := RegEnable(s0_in, s0_valid)
@@ -274,6 +268,12 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   // prefetch related
   io.lsq_replenish.miss := io.dcache.resp.fire && io.dcache.resp.bits.miss // miss info
 
+  // st-ld violation dectect request.
+  io.stld_nuke_query.req.valid       := s2_valid && !s2_in.isHWPrefetch
+  io.stld_nuke_query.req.bits.robIdx := s2_in.uop.robIdx
+  io.stld_nuke_query.req.bits.paddr  := s2_in.paddr
+  io.stld_nuke_query.req.bits.mask   := s2_in.mask
+
   // RegNext prefetch train for better timing
   // ** Now, prefetch train is valid at store s3 **
   io.prefetch_train.bits.fromLsPipelineBundle(s2_in, latch = true)
@@ -305,61 +305,22 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   .elsewhen (s3_kill) { s3_valid := false.B }
 
   // wb: writeback
-  val SelectGroupSize   = RollbackGroupSize
-  val lgSelectGroupSize = log2Ceil(SelectGroupSize)
-  val TotalSelectCycles = scala.math.ceil(log2Ceil(LoadQueueRAWSize).toFloat / lgSelectGroupSize).toInt + 1
+  val s3_bad_nuke_detected = io.stld_nuke_query.nuke
+  s3_out                     := DontCare
+  s3_out.uop                 := s3_in.uop
+  s3_out.data                := DontCare
+  s3_out.redirectValid       := false.B
+  s3_out.redirect            := DontCare
+  s3_out.uop.ctrl.replayInst := s3_bad_nuke_detected
+  s3_out.debug.isMMIO        := s3_in.mmio
+  s3_out.debug.paddr         := s3_in.paddr
+  s3_out.debug.vaddr         := s3_in.vaddr
+  s3_out.debug.isPerfCnt     := false.B
+  s3_out.fflags              := DontCare
 
-  s3_out                 := DontCare
-  s3_out.uop             := s3_in.uop
-  s3_out.data            := DontCare
-  s3_out.redirectValid   := false.B
-  s3_out.redirect        := DontCare
-  s3_out.debug.isMMIO    := s3_in.mmio
-  s3_out.debug.paddr     := s3_in.paddr
-  s3_out.debug.vaddr     := s3_in.vaddr
-  s3_out.debug.isPerfCnt := false.B
-  s3_out.fflags          := DontCare
-
-  // Pipeline
-  // --------------------------------------------------------------------------------
-  // stage x
-  // --------------------------------------------------------------------------------
-  // delay TotalSelectCycles - 2 cycle(s)
-  val TotalDelayCycles = TotalSelectCycles - 2
-  val sx_valid = Wire(Vec(TotalDelayCycles + 1, Bool()))
-  val sx_ready = Wire(Vec(TotalDelayCycles + 1, Bool()))
-  val sx_in    = Wire(Vec(TotalDelayCycles + 1, new ExuOutput))
-
-  // backward ready signal
-  s3_ready := true.B
-  assert(!s2_valid || !sx_ready.head, "StoreUnit s2 never stall!")
-  for (i <- 0 until TotalDelayCycles + 1) {
-    if (i == 0) {
-      sx_valid(i) := s3_valid
-      sx_in(i)    := s3_out
-      sx_ready(i) := !s3_valid(i) || sx_in(i).uop.robIdx.needFlush(io.redirect) || (if (TotalDelayCycles == 0) io.stout.ready else sx_ready(i+1))
-    } else {
-      val cur_kill   = sx_in(i).uop.robIdx.needFlush(io.redirect)
-      val cur_can_go = (if (i == TotalDelayCycles) io.stout.ready else sx_ready(i+1))
-      val cur_fire   = sx_valid(i) && !cur_kill && cur_can_go
-      val prev_fire  = sx_valid(i-1) && !sx_in(i-1).uop.robIdx.needFlush(io.redirect) && sx_ready(i)
-
-      sx_ready(i) := !sx_valid(i) || cur_kill || (if (i == TotalDelayCycles) io.stout.ready else sx_ready(i+1))
-      val sx_valid_can_go = prev_fire || cur_fire || cur_kill
-      sx_valid(i) := RegEnable(Mux(prev_fire, true.B, false.B), false.B, sx_valid_can_go)
-      sx_in(i) := RegEnable(sx_in(i-1), prev_fire)
-
-      assert(!sx_valid(i-1) || !sx_ready(i), "StoreUnit s" + (2 + i) + " never stall!")
-    }
-  }
-  val sx_last_valid = sx_valid.takeRight(1).head
-  val sx_last_ready = sx_ready.takeRight(1).head
-  val sx_last_in    = sx_in.takeRight(1).head
-  sx_last_ready := !sx_last_valid || sx_last_in.uop.robIdx.needFlush(io.redirect) || io.stout.ready
-
-  io.stout.valid := sx_last_valid
-  io.stout.bits := sx_last_in
-  io.stout.bits.redirectValid := false.B
+  s3_ready := io.stout.ready
+  io.stout.valid := s3_valid
+  io.stout.bits := s3_out
 
   assert(!io.stout.valid || !(io.stout.bits.uop.robIdx.needFlush(io.redirect) || io.stout.ready), "StoreUnit writeback never stall!")
 

@@ -42,7 +42,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
     // from store unit s1
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
-
+    val storeNuke = Vec(StorePipelineWidth, Output(Bool()))
     // global rollback flush
     val rollback = Output(Valid(new Redirect))
 
@@ -327,7 +327,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
       wrapper.uop := uop
       wrapper
     })
-
+    io.storeNuke(i) := ParallelORR(lqViolationSelVec)
     // select logic
     val lqSelect = selectOldest(lqViolationSelVec, lqViolationSelUopExts)
 
@@ -389,7 +389,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   })
   val oldestOneHot = selectOldestRedirect(allRedirect)
   val oldestRedirect = Mux1H(oldestOneHot, allRedirect)
-  io.rollback := oldestRedirect
+  io.rollback := RegNext(oldestRedirect)
 
   // perf cnt
   val canEnqCount = PopCount(io.query.map(_.req.fire))
