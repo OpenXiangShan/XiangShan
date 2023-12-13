@@ -6,7 +6,7 @@ import utils.EnumUtils.OHEnumeration
 import xiangshan.ExceptionNO._
 import xiangshan.SelImm
 import xiangshan.backend.Std
-import xiangshan.backend.fu.fpu.{I2FCVT}
+import xiangshan.backend.fu.fpu.{I2FCVT, IntToVec}
 import xiangshan.backend.fu.wrapper.{Alu, BranchUnit, DivUnit, JumpUnit, MulUnit, VFAlu, VFMA, VFDivSqrt, VIAluFix, VIMacU, VPPU, VIPU, VSetRiWi, VSetRiWvf, VSetRvfWvf, VCVT}
 import xiangshan.backend.Bundles.ExuInput
 import xiangshan.backend.datapath.DataConfig._
