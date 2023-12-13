@@ -22,7 +22,6 @@ import chisel3.util._
 import freechips.rocketchip.rocket.DecodeLogic
 import freechips.rocketchip.rocket.Instructions._
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
-import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.fu.vector.Bundles.{VSew, VLmul, Category}
 import xiangshan.backend.Bundles.VPUCtrlSignals
 import xiangshan.{FPUCtrlSignals, XSModule}

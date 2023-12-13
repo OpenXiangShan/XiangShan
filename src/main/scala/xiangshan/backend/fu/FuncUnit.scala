@@ -29,7 +29,7 @@ class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
     val taken     = Bool()
   })
   val rmInst      = OptionWrapper(cfg.needFPUCtrl, UInt(3.W))
-  val fpu         = OptionWrapper(cfg.needFPUCtrl, new FPUCtrlSignals)
+  val fpu         = OptionWrapper(cfg.writeFflags, new FPUCtrlSignals)
   val vpu         = OptionWrapper(cfg.needVecCtrl, new VPUCtrlSignals)
 }
 
@@ -44,7 +44,7 @@ class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle
   val replay        = OptionWrapper(cfg.replayInst, Bool())
   val preDecode     = OptionWrapper(cfg.hasPredecode, new PreDecodeInfo)
   val rmInst        = OptionWrapper(cfg.needFPUCtrl, UInt(3.W))
-  val fpu           = OptionWrapper(cfg.needFPUCtrl, new FPUCtrlSignals)
+  val fpu           = OptionWrapper(cfg.writeFflags, new FPUCtrlSignals) // todo： delete
   val vpu           = OptionWrapper(cfg.needVecCtrl, new VPUCtrlSignals)
 }
 

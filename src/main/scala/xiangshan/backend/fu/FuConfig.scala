@@ -549,6 +549,7 @@ object FuConfig {
     maskWakeUp = true,
     dataBits = 128,
     exceptionOut = Seq(illegalInstr),
+    needSrcFrm = true,  //for scalar2vector
   )
 
   val VfmaCfg = FuConfig (
@@ -567,6 +568,7 @@ object FuConfig {
     maskWakeUp = true,
     dataBits = 128,
     exceptionOut = Seq(illegalInstr),
+    needSrcFrm = true,  //for scalar2vector
   )
 
   val VfdivCfg = FuConfig(
@@ -585,6 +587,7 @@ object FuConfig {
     maskWakeUp = true,
     dataBits = 128,
     exceptionOut = Seq(illegalInstr),
+    needSrcFrm = true,  //for scalar2vector
   )
 
   val VfcvtCfg = FuConfig(
@@ -604,7 +607,7 @@ object FuConfig {
     maskWakeUp = true,
     dataBits = 128,
     exceptionOut = Seq(illegalInstr),
-    needSrcFrm = true,//todo：for scalar2vector
+    needSrcFrm = true,  //for scalar2vector
   )
 
 
