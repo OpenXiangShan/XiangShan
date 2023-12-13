@@ -1501,42 +1501,28 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).lsrc(1) := 0.U
       csBundle(0).ldest := FP_TMP_REG_MV.U
       csBundle(0).fuType := FuType.i2f.U
+      csBundle(0).fuOpType := I2fType.fmv_d_x
+      csBundle(0).fpu.wflags := false.B
       csBundle(0).rfWen := false.B
       csBundle(0).fpWen := true.B
       csBundle(0).vecWen := false.B
-      csBundle(0).fpu.isAddSub := false.B
-      csBundle(0).fpu.typeTagIn := FPU.D
-      csBundle(0).fpu.typeTagOut := FPU.D
-      csBundle(0).fpu.fromInt := true.B
-      csBundle(0).fpu.wflags := false.B
-      csBundle(0).fpu.fpWen := true.B
-      csBundle(0).fpu.div := false.B
-      csBundle(0).fpu.sqrt := false.B
-      csBundle(0).fpu.fcvt := false.B
 
       csBundle(1).srcType(0) := SrcType.reg
       csBundle(1).srcType(1) := SrcType.imm
       csBundle(1).lsrc(0) := latchedInst.lsrc(1)
       csBundle(1).lsrc(1) := 0.U
       csBundle(1).ldest := VECTOR_TMP_REG_LMUL.U
-      csBundle(1).fuType := FuType.i2f.U
-      csBundle(1).rfWen := false.B
-      csBundle(1).fpWen := true.B
-      csBundle(1).vecWen := false.B
-      csBundle(1).fpu.isAddSub := false.B
-      csBundle(1).fpu.typeTagIn := FPU.D
-      csBundle(1).fpu.typeTagOut := FPU.D
-      csBundle(1).fpu.fromInt := true.B
-      csBundle(1).fpu.wflags := false.B
-      csBundle(1).fpu.fpWen := true.B
-      csBundle(1).fpu.div := false.B
-      csBundle(1).fpu.sqrt := false.B
-      csBundle(1).fpu.fcvt := false.B
+      csBundle(0).fuType := FuType.i2f.U
+      csBundle(0).fuOpType := I2fType.fmv_d_x
+      csBundle(0).fpu.wflags := false.B
+      csBundle(0).rfWen := false.B
+      csBundle(0).fpWen := false.B
+      csBundle(0).vecWen := true.B
 
       //LMUL
       for (i <- 0 until MAX_VLMUL) {
         csBundle(i + 2).srcType(0) := SrcType.fp
-        csBundle(i + 2).srcType(1) := SrcType.fp
+        csBundle(i + 2).srcType(1) := SrcType.vp
         csBundle(i + 2).lsrc(0) := FP_TMP_REG_MV.U
         csBundle(i + 2).lsrc(1) := VECTOR_TMP_REG_LMUL.U
         csBundle(i + 2).lsrc(2) := dest + i.U // old vd
@@ -1567,18 +1553,11 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).lsrc(1) := 0.U
       csBundle(0).ldest := FP_TMP_REG_MV.U
       csBundle(0).fuType := FuType.i2f.U
+      csBundle(0).fuOpType := I2fType.fmv_d_x
+      csBundle(0).fpu.wflags := false.B
       csBundle(0).rfWen := false.B
       csBundle(0).fpWen := true.B
       csBundle(0).vecWen := false.B
-      csBundle(0).fpu.isAddSub := false.B
-      csBundle(0).fpu.typeTagIn := FPU.D
-      csBundle(0).fpu.typeTagOut := FPU.D
-      csBundle(0).fpu.fromInt := true.B
-      csBundle(0).fpu.wflags := false.B
-      csBundle(0).fpu.fpWen := true.B
-      csBundle(0).fpu.div := false.B
-      csBundle(0).fpu.sqrt := false.B
-      csBundle(0).fpu.fcvt := false.B
 
       //LMUL
       for (i <- 0 until MAX_INDEXED_LS_UOPNUM) {
