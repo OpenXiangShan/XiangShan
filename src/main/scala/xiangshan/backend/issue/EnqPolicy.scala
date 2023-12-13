@@ -7,16 +7,16 @@ import utility.SelectOne
 import xiangshan.XSModule
 
 class EnqPolicyIO(implicit p: IssueBlockParams) extends Bundle {
-  val valid = Input(UInt((p.numEntries-p.numEnq).W))
+  val canEnq = Input(UInt((p.numEntries-p.numEnq).W))
   val enqSelOHVec = Vec(p.numEnq, ValidIO(UInt((p.numEntries-p.numEnq).W)))
 }
 
 class EnqPolicy(implicit p: Parameters, iqP: IssueBlockParams) extends XSModule {
   val io = IO(new EnqPolicyIO)
 
-  val emptyVec = io.valid.asBools.map(!_)
+  val canEnqVec = io.canEnq.asBools
   // Todo: support more policies
-  val selVec: Seq[(Bool, Vec[Bool])] = io.enqSelOHVec.indices.map(i => SelectOne("circ", emptyVec, iqP.numEnq).getNthOH(i + 1))
+  val selVec: Seq[(Bool, Vec[Bool])] = io.enqSelOHVec.indices.map(i => SelectOne("circ", canEnqVec, iqP.numEnq).getNthOH(i + 1))
 
   io.enqSelOHVec.zip(selVec).foreach { case (enqOH, (selValid, selOH)) =>
     enqOH.valid := selValid
