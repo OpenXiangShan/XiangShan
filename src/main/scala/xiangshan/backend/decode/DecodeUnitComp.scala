@@ -211,7 +211,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           csBundle(0).ldest := FP_TMP_REG_MV.U
           csBundle(0).fuType := FuType.i2f.U
           csBundle(0).fuOpType := I2fType.fmv_d_x
-          csBundle(0).fpu.wflags := false.B
+          csBundle(0).wfflags := false.B
           csBundle(0).rfWen := false.B
           csBundle(0).fpWen := true.B
           csBundle(0).vecWen := false.B
@@ -296,7 +296,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).ldest := FP_TMP_REG_MV.U
       csBundle(0).fuType := FuType.i2f.U
       csBundle(0).fuOpType := I2fType.fmv_d_x
-      csBundle(0).fpu.wflags := false.B
+      csBundle(0).wfflags := false.B
       csBundle(0).rfWen := false.B
       csBundle(0).fpWen := true.B
       csBundle(0).vecWen := false.B
@@ -1479,7 +1479,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).ldest := FP_TMP_REG_MV.U
       csBundle(0).fuType := FuType.i2f.U
       csBundle(0).fuOpType := I2fType.fmv_d_x
-      csBundle(0).fpu.wflags := false.B
+      csBundle(0).wfflags := false.B
       csBundle(0).rfWen := false.B
       csBundle(0).fpWen := true.B
       csBundle(0).vecWen := false.B
@@ -1502,7 +1502,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).ldest := FP_TMP_REG_MV.U
       csBundle(0).fuType := FuType.i2f.U
       csBundle(0).fuOpType := I2fType.fmv_d_x
-      csBundle(0).fpu.wflags := false.B
+      csBundle(0).wfflags := false.B
       csBundle(0).rfWen := false.B
       csBundle(0).fpWen := true.B
       csBundle(0).vecWen := false.B
@@ -1514,7 +1514,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(1).ldest := VECTOR_TMP_REG_LMUL.U
       csBundle(0).fuType := FuType.i2f.U
       csBundle(0).fuOpType := I2fType.fmv_d_x
-      csBundle(0).fpu.wflags := false.B
+      csBundle(0).wfflags := false.B
       csBundle(0).rfWen := false.B
       csBundle(0).fpWen := false.B
       csBundle(0).vecWen := true.B
@@ -1554,7 +1554,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).ldest := FP_TMP_REG_MV.U
       csBundle(0).fuType := FuType.i2f.U
       csBundle(0).fuOpType := I2fType.fmv_d_x
-      csBundle(0).fpu.wflags := false.B
+      csBundle(0).wfflags := false.B
       csBundle(0).rfWen := false.B
       csBundle(0).fpWen := true.B
       csBundle(0).vecWen := false.B
