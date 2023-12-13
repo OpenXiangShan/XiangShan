@@ -210,6 +210,10 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val cancelVec = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Bool())))
   val uopIdxVec = OptionWrapper(params.isVecMemIQ, Wire(Vec(params.numEntries, UopIdx())))
 
+  val canTrans = Wire(Bool())
+  val enqReadyOthersVec = Wire(Vec(OthersEntryNum, Bool()))
+  val enqTransSelVec = Wire(Vec(EnqEntryNum, Valid(UInt(OthersEntryNum.W))))
+
   io.transEntryDeqVec := transEntryDeqVec
 
   //enqEntries
@@ -227,7 +231,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     enqEntry.io.enqDelayLdCancel := RegNext(io.ldCancel)
     enqEntry.io.deqSel := deqSelVec(entryIdx)
     enqEntry.io.deqPortIdxWrite := deqPortIdxWriteVec(entryIdx)
-    enqEntry.io.transSel := transSelVec(entryIdx).asUInt.orR
+    enqEntry.io.transSel := canTrans && enqTransSelVec(entryIdx).valid
     enqEntry.io.issueResp := issueRespVec(entryIdx)
     validVec(entryIdx) := enqEntry.io.valid
     canIssueVec(entryIdx) := enqEntry.io.canIssue
@@ -272,6 +276,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     validVec(entryIdx + EnqEntryNum) := othersEntry.io.valid
     canIssueVec(entryIdx + EnqEntryNum) := othersEntry.io.canIssue
     clearVec(entryIdx + EnqEntryNum) := othersEntry.io.clear
+    enqReadyOthersVec(entryIdx) := othersEntry.io.enqReady
     fuTypeVec(entryIdx + EnqEntryNum) := othersEntry.io.fuType
     dataSourceVec(entryIdx + EnqEntryNum) := othersEntry.io.dataSource
     robIdxVec(entryIdx + EnqEntryNum) := othersEntry.io.robIdx
@@ -305,10 +310,18 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
 
 
   //transPolicy
-  transPolicy.io.valid := VecInit(validVec.slice(EnqEntryNum, params.numEntries)).asUInt
-  transSelVec.zip(transPolicy.io.enqSelOHVec).foreach { case (selBools, selOH) =>
-    selBools.zipWithIndex.foreach { case (selBool, i) =>
-      selBool := transPolicy.io.enqSelOHVec.map(_.valid).reduce(_ & _) && selOH.bits(i)
+  transPolicy.io.canEnq := enqReadyOthersVec.asUInt
+  canTrans := PopCount(validVec.take(EnqEntryNum)) <= PopCount(enqReadyOthersVec)
+  enqTransSelVec(0).valid := transPolicy.io.enqSelOHVec(0).valid
+  enqTransSelVec(0).bits := transPolicy.io.enqSelOHVec(0).bits
+  if (params.numEnq == 2) {
+    enqTransSelVec(1).valid := Mux(!validVec(0), transPolicy.io.enqSelOHVec(0).valid, transPolicy.io.enqSelOHVec(1).valid)
+    enqTransSelVec(1).bits := Mux(!validVec(0), transPolicy.io.enqSelOHVec(0).bits, transPolicy.io.enqSelOHVec(1).bits)
+  }
+
+  transSelVec.zip(enqTransSelVec).zipWithIndex.foreach { case ((selBools, selOH), enqIdx) =>
+    selBools.zipWithIndex.foreach { case (selBool, othersIdx) =>
+      selBool := canTrans && validVec(enqIdx) && selOH.valid && selOH.bits(othersIdx)
     }
   }
 

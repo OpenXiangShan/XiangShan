@@ -30,6 +30,7 @@ class OthersEntryIO(implicit p: Parameters, params: IssueBlockParams) extends XS
   val valid = Output(Bool())
   val canIssue = Output(Bool())
   val clear = Output(Bool())
+  val enqReady = Output(Bool())
   val fuType = Output(FuType())
   val dataSource = Output(Vec(params.numRegSrc, DataSource()))
   val srcWakeUpL1ExuOH = OptionWrapper(params.hasIQWakeUp, Output(Vec(params.numRegSrc, ExuOH())))
@@ -64,6 +65,7 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
 
   val validRegNext = Wire(Bool())
   val entryRegNext = Wire(new EntryBundle)
+  val enqReady = Wire(Bool())
   val flushed = Wire(Bool())
   val clear = Wire(Bool())
   val deqSuccess = Wire(Bool())
@@ -86,6 +88,7 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
   entryReg := entryRegNext
 
   //Wire
+  enqReady := !validReg || clear
   flushed := entryReg.status.robIdx.needFlush(io.flush)
   clear := flushed || deqSuccess
   deqSuccess := io.issueResp.valid && io.issueResp.bits.respType === RSFeedbackType.fuIdle && !srcLoadCancelVec.map(_.reduce(_ || _)).getOrElse(false.B)
@@ -286,6 +289,7 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
   io.clear := clear
   io.fuType := IQFuType.readFuType(entryReg.status.fuType, params.getFuCfgs.map(_.fuType)).asUInt
   io.valid := validReg
+  io.enqReady := enqReady
   io.isFirstIssue := !entryReg.status.firstIssue
   io.entry.valid := validReg
   io.entry.bits := entryReg
