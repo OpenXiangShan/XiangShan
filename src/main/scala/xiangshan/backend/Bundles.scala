@@ -80,6 +80,7 @@ object Bundles {
     val canRobCompress  = Bool()
     val selImm          = SelImm()
     val imm             = UInt(ImmUnion.maxLen.W)
+    val rmInst          = UInt(3.W)
     val fpu             = new FPUCtrlSignals
     val vpu             = new VPUCtrlSignals
     val wfflags         = Bool()
@@ -148,6 +149,7 @@ object Bundles {
     val canRobCompress  = Bool()
     val selImm          = SelImm()
     val imm             = UInt(XLEN.W) // Todo: check if it need minimized
+    val rmInst          = UInt(3.W)
     val fpu             = new FPUCtrlSignals
     val vpu             = new VPUCtrlSignals
     val wfflags         = Bool()
@@ -445,7 +447,8 @@ object Bundles {
     val rfWen         = if (params.writeIntRf)    Some(Bool())                        else None
     val fpWen         = if (params.writeFpRf)     Some(Bool())                        else None
     val vecWen        = if (params.writeVecRf)    Some(Bool())                        else None
-    val fpu           = if (params.writeFflags)   Some(new FPUCtrlSignals)            else None
+    val rmInst        = if (params.needFPUCtrl)   Some(UInt(3.W))                     else None
+    val fpu           = if (params.needFPUCtrl)   Some(new FPUCtrlSignals)            else None
     val vpu           = if (params.needVPUCtrl)   Some(new VPUCtrlSignals)            else None
     val flushPipe     = if (params.flushPipe)     Some(Bool())                        else None
     val pc            = if (params.needPc)        Some(UInt(VAddrData().dataWidth.W)) else None
@@ -507,6 +510,7 @@ object Bundles {
       this.fpWen         .foreach(_ := source.common.fpWen.get)
       this.vecWen        .foreach(_ := source.common.vecWen.get)
       this.fpu           .foreach(_ := source.common.fpu.get)
+      this.rmInst        .foreach(_ := source.common.rmInst.get)
       this.vpu           .foreach(_ := source.common.vpu.get)
       this.flushPipe     .foreach(_ := source.common.flushPipe.get)
       this.pc            .foreach(_ := source.common.pc.get)

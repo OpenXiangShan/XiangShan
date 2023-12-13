@@ -6,7 +6,7 @@ import utils.EnumUtils.OHEnumeration
 import xiangshan.ExceptionNO._
 import xiangshan.SelImm
 import xiangshan.backend.Std
-import xiangshan.backend.fu.fpu.{FDivSqrt, FMA, IntToFP, IntToVec}
+import xiangshan.backend.fu.fpu.{I2FCVT}
 import xiangshan.backend.fu.wrapper.{Alu, BranchUnit, DivUnit, JumpUnit, MulUnit, VFAlu, VFMA, VFDivSqrt, VIAluFix, VIMacU, VPPU, VIPU, VSetRiWi, VSetRiWvf, VSetRvfWvf, VCVT}
 import xiangshan.backend.Bundles.ExuInput
 import xiangshan.backend.datapath.DataConfig._
@@ -131,7 +131,7 @@ case class FuConfig (
 
   def needFPUCtrl: Boolean = {
     import FuType._
-    Seq(fmac, fDivSqrt, i2f).contains(fuType)
+    Seq(i2f).contains(fuType)
   }
 
   def needVecCtrl: Boolean = {
@@ -210,7 +210,7 @@ object FuConfig {
   val I2fCfg: FuConfig = FuConfig (
     name = "i2f",
     FuType.i2f,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new IntToFP(cfg)(p).suggestName("i2f")),
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new I2FCVT(cfg)(p).suggestName("i2f")),
     srcData = Seq(
       Seq(IntData()),
     ),
@@ -348,36 +348,6 @@ object FuConfig {
     writeIntRf = true,
     latency = CertainLatency(0),
     immType = Set(SelImm.IMM_VSETVLI, SelImm.IMM_VSETIVLI),
-  )
-
-  val FmacCfg: FuConfig = FuConfig (
-    name = "fmac",
-    fuType = FuType.fmac,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new FMA(cfg)(p).suggestName("FMac")),
-    srcData = Seq(
-      Seq(FpData(), FpData()),
-      Seq(FpData(), FpData(), FpData()),
-    ),
-    piped = false,
-    writeFpRf = true,
-    writeFflags = true,
-    latency = UncertainLatency(),
-    needSrcFrm = true,
-  )
-
-  val FDivSqrtCfg: FuConfig = FuConfig (
-    name = "fDivSqrt",
-    fuType = FuType.fDivSqrt,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new FDivSqrt(cfg)(p).suggestName("FDivSqrt")),
-    srcData = Seq(
-      Seq(FpData(), FpData()),
-    ),
-    piped = false,
-    writeFpRf = true,
-    writeFflags = true,
-    latency = UncertainLatency(),
-    hasInputBuffer = (true, 8, true),
-    needSrcFrm = true,
   )
 
   val LduCfg: FuConfig = FuConfig (
@@ -678,7 +648,7 @@ object FuConfig {
 
   def allConfigs = Seq(
     JmpCfg, BrhCfg, I2fCfg, I2vCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg, VSetRvfWvfCfg, VSetRiWvfCfg, VSetRiWiCfg,
-    FmacCfg, FDivSqrtCfg, LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg, VialuCfg, VipuCfg, VlduCfg, VstuCfg,
+    LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg, VialuCfg, VipuCfg, VlduCfg, VstuCfg,
     VfaluCfg, VfmaCfg, VfcvtCfg, HyldaCfg, HystaCfg
   )
 
