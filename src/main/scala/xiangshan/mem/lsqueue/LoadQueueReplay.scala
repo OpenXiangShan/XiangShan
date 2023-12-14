@@ -503,6 +503,8 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   def replayCanFire(i: Int) = coldCounter(i) >= 0.U && coldCounter(i) < ColdDownThreshold
   def coldDownNow(i: Int) = coldCounter(i) >= ColdDownThreshold
 
+  val replay_req = Wire(Vec(LoadPipelineWidth, DecoupledIO(new LsPipelineBundle)))
+
   val s1_balanceOldestSelExt = (0 until LoadPipelineWidth).map(i => {
     val wrapper = Wire(Valid(new BalanceEntry))
     wrapper.valid        := s1_oldestSel(i).valid
@@ -529,7 +531,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   for (i <- 0 until LoadPipelineWidth) {
     val s1_cancel = uop(s1_balanceOldestSel(i).bits.index).robIdx.needFlush(io.redirect)
     val s1_oldestSelV = s1_balanceOldestSel(i).valid && !s1_cancel
-    s1_can_go(i)          := Mux(s2_oldestSel(i).valid && !s2_cancelReplay(i), io.replay(i).ready && replayCanFire(i), true.B)
+    s1_can_go(i)          := Mux(s2_oldestSel(i).valid && !s2_cancelReplay(i), replay_req(i).ready && replayCanFire(i), true.B)
     s2_oldestSel(i).valid := RegEnable(s1_oldestSelV, s1_can_go(i))
     s2_oldestSel(i).bits  := RegEnable(s1_balanceOldestSel(i).bits.index, s1_can_go(i))
 
@@ -549,24 +551,38 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     s2_cancelReplay(i) := s2_replayUop.robIdx.needFlush(io.redirect)
 
     s2_can_go(i) := DontCare
-    io.replay(i).valid             := s2_oldestSel(i).valid && !s2_cancelReplay(i) && replayCanFire(i)
-    io.replay(i).bits              := DontCare
-    io.replay(i).bits.uop          := s2_replayUop
-    io.replay(i).bits.vaddr        := vaddrModule.io.rdata(i)
-    io.replay(i).bits.isFirstIssue := false.B
-    io.replay(i).bits.isLoadReplay := true.B
-    io.replay(i).bits.replayCarry  := s2_replayCarry
-    io.replay(i).bits.mshrid       := s2_replayMSHRId
-    io.replay(i).bits.replacementUpdated := s2_replacementUpdated
-    io.replay(i).bits.missDbUpdated := s2_missDbUpdated
-    io.replay(i).bits.forward_tlDchannel := s2_replayCauses(LoadReplayCauses.C_DM)
-    io.replay(i).bits.schedIndex   := s2_oldestSel(i).bits
+    replay_req(i).valid             := s2_oldestSel(i).valid && !s2_cancelReplay(i) && replayCanFire(i)
+    replay_req(i).bits              := DontCare
+    replay_req(i).bits.uop          := s2_replayUop
+    replay_req(i).bits.vaddr        := vaddrModule.io.rdata(i)
+    replay_req(i).bits.isFirstIssue := false.B
+    replay_req(i).bits.isLoadReplay := true.B
+    replay_req(i).bits.replayCarry  := s2_replayCarry
+    replay_req(i).bits.mshrid       := s2_replayMSHRId
+    replay_req(i).bits.replacementUpdated := s2_replacementUpdated
+    replay_req(i).bits.missDbUpdated := s2_missDbUpdated
+    replay_req(i).bits.forward_tlDchannel := s2_replayCauses(LoadReplayCauses.C_DM)
+    replay_req(i).bits.schedIndex   := s2_oldestSel(i).bits
 
-    when (io.replay(i).fire) {
+    when (replay_req(i).fire) {
       XSError(!allocated(s2_oldestSel(i).bits), p"LoadQueueReplay: why replay an invalid entry ${s2_oldestSel(i).bits} ?")
     }
   }
 
+  val EnableHybridUnitReplay = Constantin.createRecord("EnableHybridUnitReplay", true.B)(0)
+  when(EnableHybridUnitReplay) {
+    for (i <- 0 until LoadPipelineWidth)
+      io.replay(i) <> replay_req(i)
+  }.otherwise {
+    io.replay(0) <> replay_req(0)
+    io.replay(2).valid := false.B
+    io.replay(2).bits := DontCare
+
+    val arbiter = Module(new RRArbiter(new LsPipelineBundle, 2))
+    arbiter.io.in(0) <> replay_req(1)
+    arbiter.io.in(1) <> replay_req(2)
+    io.replay(1) <> arbiter.io.out
+  }
   // update cold counter
   val lastReplay = RegNext(VecInit(io.replay.map(_.fire)))
   for (i <- 0 until LoadPipelineWidth) {
