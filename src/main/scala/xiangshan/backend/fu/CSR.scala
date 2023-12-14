@@ -474,7 +474,10 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   // Default reset period: 2^16
   // Why this number: reset more frequently while keeping the overhead low
   // Overhead: extra two redirections in every 64K cycles => ~0.1% overhead
-  val slvpredctl = RegInit(UInt(XLEN.W), "h60".U)
+  val slvpredctl = Reg(UInt(XLEN.W))
+  when(reset.asBool) {
+    slvpredctl := Constantin.createRecord("slvpredctl", "h60".U)
+  }
   csrio.customCtrl.lvpred_disable := slvpredctl(0)
   csrio.customCtrl.no_spec_load := slvpredctl(1)
   csrio.customCtrl.storeset_wait_store := slvpredctl(2)
