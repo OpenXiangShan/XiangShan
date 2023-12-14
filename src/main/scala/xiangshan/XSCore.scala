@@ -115,6 +115,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   backend.io.frontendCsrDistributedUpdate := frontend.io.csrUpdate
 
+  require(backend.io.mem.stIn.length == memBlock.io.mem_to_ooo.stIn.length)
   backend.io.mem.stIn.zip(memBlock.io.mem_to_ooo.stIn).foreach { case (sink, source) =>
     sink.valid := source.valid
     sink.bits := 0.U.asTypeOf(sink.bits)

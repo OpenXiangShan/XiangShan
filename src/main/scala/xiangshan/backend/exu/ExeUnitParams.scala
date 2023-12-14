@@ -155,6 +155,10 @@ case class ExeUnitParams(
 
   def hasHystaFu = fuConfigs.map(_.name == "hysta").reduce(_ || _)
 
+  def hasLoadExu = hasLoadFu || hasHyldaFu
+
+  def hasStoreAddrExu = hasStoreAddrFu || hasHystaFu
+
   def hasVecFu = fuConfigs.map(x => FuConfig.VecArithFuConfigs.contains(x)).reduce(_ || _)
 
   def getSrcDataType(srcIdx: Int): Set[DataConfig] = {
