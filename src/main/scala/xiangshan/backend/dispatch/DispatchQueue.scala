@@ -218,7 +218,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dqIndex: Int = 0)(impli
       currentValidCounter,
       validCounter + numEnq - numDeq)
   )
-  allowEnqueue := Mux(currentValidCounter > (size - enqnum).U, false.B, numEnq <= (size - enqnum).U - currentValidCounter)
+  allowEnqueue := Mux(currentValidCounter > (size - enqnum).U +& numDeq, false.B, numEnq +& currentValidCounter <= (size - enqnum).U +& numDeq)
 
   /**
    * Part 3: set output valid and data bits
