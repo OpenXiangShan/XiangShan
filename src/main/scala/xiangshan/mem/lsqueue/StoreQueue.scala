@@ -416,16 +416,15 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val differentFlag = deqPtrExt(0).flag =/= io.forward(i).sqIdx.flag
     val forwardMask = io.forward(i).sqIdxMask
     // all addrvalid terms need to be checked
-    val addrValidVec = WireInit(VecInit((0 until StoreQueueSize).map(i => addrvalid(i) && allocated(i))))
-    val dataValidVec = WireInit(VecInit((0 until StoreQueueSize).map(i => datavalid(i))))
-    val allValidVec  = WireInit(VecInit((0 until StoreQueueSize).map(i => addrvalid(i) && datavalid(i) && allocated(i))))
+    val addrValidVec = WireInit(VecInit((0 until StoreQueueSize).map(j => addrvalid(j) && allocated(j))))
+    val dataValidVec = WireInit(VecInit((0 until StoreQueueSize).map(j => datavalid(j))))
+    val allValidVec  = WireInit(VecInit((0 until StoreQueueSize).map(j => addrvalid(j) && datavalid(j) && allocated(j))))
 
-    val storeSetHitVec =
-      if (LFSTEnable) {
-        WireInit(VecInit((0 until StoreQueueSize).map(j => io.forward(i).uop.loadWaitBit && uop(j).robIdx === io.forward(i).uop.waitForRobIdx)))
-      } else {
-        WireInit(VecInit((0 until StoreQueueSize).map(j => uop(j).storeSetHit && uop(j).ssid === io.forward(i).uop.ssid)))
-      }
+    val lfstEnable = Constantin.createRecord("LFSTEnable", LFSTEnable.B).orR
+    val storeSetHitVec = Mux(lfstEnable,
+      WireInit(VecInit((0 until StoreQueueSize).map(j => io.forward(i).uop.loadWaitBit && uop(j).robIdx === io.forward(i).uop.waitForRobIdx))),
+      WireInit(VecInit((0 until StoreQueueSize).map(j => uop(j).storeSetHit && uop(j).ssid === io.forward(i).uop.ssid)))
+    )
 
     val forwardMask1 = Mux(differentFlag, ~deqMask, deqMask ^ forwardMask)
     val forwardMask2 = Mux(differentFlag, forwardMask, 0.U(StoreQueueSize.W))
