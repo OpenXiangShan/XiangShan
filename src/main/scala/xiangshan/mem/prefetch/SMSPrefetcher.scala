@@ -956,8 +956,8 @@ class SMSTrainFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   val io = IO(new Bundle() {
     // train input
     // hybrid load store
-    val ld_in = Flipped(Vec(backendParams.LduCnt + backendParams.HyuCnt, ValidIO(new LdPrefetchTrainBundle())))
-    val st_in = Flipped(Vec(backendParams.StaCnt + backendParams.HyuCnt, ValidIO(new StPrefetchTrainBundle())))
+    val ld_in = Flipped(Vec(backendParams.LdExuCnt, ValidIO(new LdPrefetchTrainBundle())))
+    val st_in = Flipped(Vec(backendParams.StaExuCnt, ValidIO(new StPrefetchTrainBundle())))
     // filter out
     val train_req = ValidIO(new PrefetchReqBundle())
   })

@@ -377,7 +377,7 @@ class LoadDataFromLQBundle(implicit p: Parameters) extends XSBundle {
 
 // Bundle for load / store wait waking up
 class MemWaitUpdateReq(implicit p: Parameters) extends XSBundle {
-  val robIdx = Vec(backendParams.StaCnt, ValidIO(new RobPtr))
+  val robIdx = Vec(backendParams.StaExuCnt, ValidIO(new RobPtr))
   val sqIdx = Vec(backendParams.StdCnt, ValidIO(new SqPtr))
 }
 

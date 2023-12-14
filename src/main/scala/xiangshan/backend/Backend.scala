@@ -211,6 +211,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   memScheduler.io.fromMem.get.sqCancelCnt := io.mem.sqCancelCnt
   memScheduler.io.fromMem.get.lqCancelCnt := io.mem.lqCancelCnt
   memScheduler.io.fromMem.get.stIssuePtr := io.mem.stIssuePtr
+  require(memScheduler.io.fromMem.get.memWaitUpdateReq.robIdx.length == io.mem.stIn.length)
   memScheduler.io.fromMem.get.memWaitUpdateReq.robIdx.zip(io.mem.stIn).foreach { case (sink, source) =>
     sink.valid := source.valid
     sink.bits  := source.bits.robIdx
@@ -543,7 +544,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val writebackVlda = Vec(params.VlduCnt, Flipped(DecoupledIO(new MemExuOutput(true))))
 
   val s3_delayed_load_error = Input(Vec(LoadPipelineWidth, Bool()))
-  val stIn = Input(Vec(params.StaCnt, ValidIO(new DynInst())))
+  val stIn = Input(Vec(params.StaExuCnt, ValidIO(new DynInst())))
   val memoryViolation = Flipped(ValidIO(new Redirect))
   val exceptionVAddr = Input(UInt(VAddrBits.W))
   val sqDeq = Input(UInt(log2Ceil(EnsbufferWidth + 1).W))
