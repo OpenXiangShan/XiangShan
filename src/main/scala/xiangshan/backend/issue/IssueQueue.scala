@@ -828,6 +828,9 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
   }
 
   io.deq.zipWithIndex.foreach { case (deq, i) =>
+    deq.bits.common.storeSetHit.foreach(_ := deqEntryVec(i).bits.payload.storeSetHit)
+    deq.bits.common.loadWaitStrict.foreach(_ := deqEntryVec(i).bits.payload.loadWaitStrict)
+    deq.bits.common.ssid.foreach(_ := deqEntryVec(i).bits.payload.ssid)
     deq.bits.common.sqIdx.get := deqEntryVec(i).bits.payload.sqIdx
     deq.bits.common.lqIdx.get := deqEntryVec(i).bits.payload.lqIdx
     deq.bits.common.ftqIdx.foreach(_ := deqEntryVec(i).bits.payload.ftqPtr)

@@ -454,6 +454,9 @@ object Bundles {
       val target = UInt(VAddrData().dataWidth.W)
       val taken = Bool()
     }) else None
+    val storeSetHit    = OptionWrapper(params.hasLoadExu, Bool()) // inst has been allocated an store set
+    val loadWaitStrict = OptionWrapper(params.hasLoadExu, Bool()) // load inst will not be executed until ALL former store addr calcuated
+    val ssid           = OptionWrapper(params.hasLoadExu, UInt(SSIDWidth.W))
     val sqIdx = if (params.hasMemAddrFu || params.hasStdFu) Some(new SqPtr) else None
     val lqIdx = if (params.hasMemAddrFu) Some(new LqPtr) else None
     val dataSources = Vec(params.numRegSrc, DataSource())
@@ -510,11 +513,14 @@ object Bundles {
       this.ftqIdx        .foreach(_ := source.common.ftqIdx.get)
       this.ftqOffset     .foreach(_ := source.common.ftqOffset.get)
       this.predictInfo   .foreach(_ := source.common.predictInfo.get)
+      this.storeSetHit   .foreach(_ := source.common.storeSetHit.get)
+      this.loadWaitStrict.foreach(_ := source.common.loadWaitStrict.get)
+      this.ssid          .foreach(_ := source.common.ssid.get)
       this.lqIdx         .foreach(_ := source.common.lqIdx.get)
       this.sqIdx         .foreach(_ := source.common.sqIdx.get)
       this.srcTimer      .foreach(_ := source.common.srcTimer.get)
       this.loadDependency.foreach(_ := source.common.loadDependency.get.map(_ << 1))
-      this.deqLdExuIdx    .foreach(_ := source.common.deqLdExuIdx.get)
+      this.deqLdExuIdx   .foreach(_ := source.common.deqLdExuIdx.get)
     }
   }
 

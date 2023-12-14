@@ -4,7 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import utility.ZeroExt
+import utility.{Constantin, ZeroExt}
 import xiangshan._
 import xiangshan.backend.Bundles.{DynInst, IssueQueueIQWakeUpBundle, LoadShouldCancel, MemExuInput, MemExuOutput}
 import xiangshan.backend.ctrlblock.{DebugLSIO, LsTopdownInfo}
@@ -427,29 +427,33 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
 
   io.mem.redirect := ctrlBlock.io.redirect
   io.mem.issueUops.zip(toMem.flatten).foreach { case (sink, source) =>
+    val enableMdp = Constantin.createRecord("EnableMdp", true.B)(0)
     sink.valid := source.valid
     source.ready := sink.ready
-    sink.bits.iqIdx         := source.bits.iqIdx
-    sink.bits.isFirstIssue  := source.bits.isFirstIssue
-    sink.bits.uop           := 0.U.asTypeOf(sink.bits.uop)
-    sink.bits.src           := 0.U.asTypeOf(sink.bits.src)
+    sink.bits.iqIdx              := source.bits.iqIdx
+    sink.bits.isFirstIssue       := source.bits.isFirstIssue
+    sink.bits.uop                := 0.U.asTypeOf(sink.bits.uop)
+    sink.bits.src                := 0.U.asTypeOf(sink.bits.src)
     sink.bits.src.zip(source.bits.src).foreach { case (l, r) => l := r}
-    sink.bits.deqPortIdx    := source.bits.deqLdExuIdx.getOrElse(0.U)
-    sink.bits.uop.fuType    := source.bits.fuType
-    sink.bits.uop.fuOpType  := source.bits.fuOpType
-    sink.bits.uop.imm       := source.bits.imm
-    sink.bits.uop.robIdx    := source.bits.robIdx
-    sink.bits.uop.pdest     := source.bits.pdest
-    sink.bits.uop.rfWen     := source.bits.rfWen.getOrElse(false.B)
-    sink.bits.uop.fpWen     := source.bits.fpWen.getOrElse(false.B)
-    sink.bits.uop.vecWen    := source.bits.vecWen.getOrElse(false.B)
-    sink.bits.uop.flushPipe := source.bits.flushPipe.getOrElse(false.B)
-    sink.bits.uop.pc        := source.bits.pc.getOrElse(0.U)
-    sink.bits.uop.lqIdx     := source.bits.lqIdx.getOrElse(0.U.asTypeOf(new LqPtr))
-    sink.bits.uop.sqIdx     := source.bits.sqIdx.getOrElse(0.U.asTypeOf(new SqPtr))
-    sink.bits.uop.ftqPtr    := source.bits.ftqIdx.getOrElse(0.U.asTypeOf(new FtqPtr))
-    sink.bits.uop.ftqOffset := source.bits.ftqOffset.getOrElse(0.U)
-    sink.bits.uop.debugInfo := source.bits.perfDebugInfo
+    sink.bits.deqPortIdx         := source.bits.deqLdExuIdx.getOrElse(0.U)
+    sink.bits.uop.fuType         := source.bits.fuType
+    sink.bits.uop.fuOpType       := source.bits.fuOpType
+    sink.bits.uop.imm            := source.bits.imm
+    sink.bits.uop.robIdx         := source.bits.robIdx
+    sink.bits.uop.pdest          := source.bits.pdest
+    sink.bits.uop.rfWen          := source.bits.rfWen.getOrElse(false.B)
+    sink.bits.uop.fpWen          := source.bits.fpWen.getOrElse(false.B)
+    sink.bits.uop.vecWen         := source.bits.vecWen.getOrElse(false.B)
+    sink.bits.uop.flushPipe      := source.bits.flushPipe.getOrElse(false.B)
+    sink.bits.uop.pc             := source.bits.pc.getOrElse(0.U)
+    sink.bits.uop.storeSetHit    := Mux(enableMdp, source.bits.storeSetHit.getOrElse(false.B), false.B)
+    sink.bits.uop.loadWaitStrict := Mux(enableMdp, source.bits.loadWaitStrict.getOrElse(false.B), false.B)
+    sink.bits.uop.ssid           := Mux(enableMdp, source.bits.ssid.getOrElse(0.U(SSIDWidth.W)), 0.U(SSIDWidth.W))
+    sink.bits.uop.lqIdx          := source.bits.lqIdx.getOrElse(0.U.asTypeOf(new LqPtr))
+    sink.bits.uop.sqIdx          := source.bits.sqIdx.getOrElse(0.U.asTypeOf(new SqPtr))
+    sink.bits.uop.ftqPtr         := source.bits.ftqIdx.getOrElse(0.U.asTypeOf(new FtqPtr))
+    sink.bits.uop.ftqOffset      := source.bits.ftqOffset.getOrElse(0.U)
+    sink.bits.uop.debugInfo      := source.bits.perfDebugInfo
   }
   io.mem.loadFastMatch := memScheduler.io.toMem.get.loadFastMatch.map(_.fastMatch)
   io.mem.loadFastImm := memScheduler.io.toMem.get.loadFastMatch.map(_.fastImm)
