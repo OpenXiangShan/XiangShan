@@ -1221,13 +1221,13 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   val hyLdDeqCount = PopCount(io.ooo_to_mem.issueHya.map(x => x.valid && FuType.isLoad(x.bits.uop.fuType)))
   val hyStDeqCount = PopCount(io.ooo_to_mem.issueHya.map(x => x.valid && FuType.isStore(x.bits.uop.fuType)))
-  val ldDeqCount = PopCount(io.ooo_to_mem.issueLda.map(_.valid)) + hyLdDeqCount
-  val stDeqCount = PopCount(io.ooo_to_mem.issueSta.map(_.valid)) + hyStDeqCount
-  val iqDeqCount = ldDeqCount + stDeqCount
+  val ldDeqCount = PopCount(io.ooo_to_mem.issueLda.map(_.valid)) +& hyLdDeqCount
+  val stDeqCount = PopCount(io.ooo_to_mem.issueSta.map(_.valid)) +& hyStDeqCount
+  val iqDeqCount = ldDeqCount +& stDeqCount
   XSPerfAccumulate("load_iq_deq_count", ldDeqCount)
-  XSPerfHistogram("load_iq_deq_count", ldDeqCount, true.B, 0, LduCnt, 1)
+  XSPerfHistogram("load_iq_deq_count", ldDeqCount, true.B, 0, LdExuCnt + 1)
   XSPerfAccumulate("store_iq_deq_count", stDeqCount)
-  XSPerfHistogram("store_iq_deq_count", stDeqCount, true.B, 0, StaCnt, 1)
+  XSPerfHistogram("store_iq_deq_count", stDeqCount, true.B, 0, StAddrCnt + 1)
   XSPerfAccumulate("ls_iq_deq_count", iqDeqCount)
 
   val pfevent = Module(new PFEvent)
