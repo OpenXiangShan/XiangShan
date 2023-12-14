@@ -133,6 +133,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
   val flushEnq = io.loadRegIn.fire && io.loadRegIn.bits.uop.robIdx.needFlush(io.redirect)
   val flushNumReg = RegNext(PopCount(flushEnq +: flushVec))
   val redirectReg = RegNext(io.redirect)
+  val flushVecReg = RegNext(WireInit(VecInit(flushVec)))
 
   /**
     * Enqueue from issue queue:
@@ -177,7 +178,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
   )
     
 
-  when (io.loadRegIn.fire) {
+  when (io.loadRegIn.fire && !flushEnq) {
     val id = enqPtr.value
     val preAllocated = preAlloc(id)
     val isSegment = nf =/= 0.U && !us_whole_reg(fuOpType)
@@ -556,6 +557,13 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
       }
 
       vdState := s_merge
+    }
+  }
+
+  // recover entry when redirct
+  when(redirectReg.valid && flushNumReg =/= 0.U){
+    valid.zip(flushVecReg).map{case (v,enable) => 
+      v := Mux(enable, false.B,v)
     }
   }
 
