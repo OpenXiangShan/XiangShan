@@ -143,7 +143,11 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val gpaddr = MuxCase(mem_addr, Seq(
     stage1Hit -> Cat(stage1.genPPN(), 0.U(offLen.W)),
     onlyS2xlate -> Cat(vpn, 0.U(offLen.W)),
-    !s_last_hptw_req -> Cat(pte.ppn, 0.U(offLen.W))
+    !s_last_hptw_req -> Cat(MuxLookup(level, pte.ppn)(Seq(
+      1.U -> Cat(pte.ppn(ppnLen - 1, vpnnLen * 2), vpn(vpnnLen * 2 - 1, 0)),
+      2.U -> Cat(pte.ppn(ppnLen - 1, vpnnLen), vpn(vpnnLen - 1, 0)
+    ))), 
+    0.U(offLen.W))
   ))
   val hpaddr = Cat(hptw_resp.genPPNS2(get_pn(gpaddr)), get_off(gpaddr))
 
@@ -181,12 +185,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   io.hptw.req.valid := !s_hptw_req || !s_last_hptw_req
   io.hptw.req.bits.id := FsmReqID.U(bMemID.W)
-  io.hptw.req.bits.gvpn := Mux(s_last_hptw_req, get_pn(gpaddr), 
-    MuxLookup(level, get_pn(gpaddr))(Seq(
-      1.U -> Cat(get_pn(gpaddr)(vpnLen - 1, vpnnLen * 2), io.req.bits.req_info.vpn(vpnnLen * 2 - 1, 0)),
-      2.U -> Cat(get_pn(gpaddr)(vpnLen - 1, vpnnLen), io.req.bits.req_info.vpn(vpnnLen - 1, 0))
-    ))
-  )
+  io.hptw.req.bits.gvpn := get_pn(gpaddr)
   io.hptw.req.bits.source := source
 
   when (io.req.fire && io.req.bits.stage1Hit){
