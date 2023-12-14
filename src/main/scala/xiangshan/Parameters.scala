@@ -359,12 +359,14 @@ case class XSCoreParameters
 
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams("LDU0", Seq(LduCfg), Seq(IntWB(6, 0), VfWB(3, 0)), Seq(Seq(IntRD(12, 0)))),
         ExeUnitParams("STA0", Seq(StaCfg), Seq(), Seq(Seq(IntRD(3, 1)))),
       ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
         ExeUnitParams("HYU0", Seq(HyldaCfg, HystaCfg, MouCfg), Seq(IntWB(5, 0), VfWB(5, 0)), Seq(Seq(IntRD(6, 0)))),
         ExeUnitParams("HYU1", Seq(FakeHystaCfg), Seq(), Seq()), // fake unit, used to create a new writeback port
+      ), numEntries = IssueQueueSize, numEnq = 2),
+      IssueBlockParams(Seq(
+        ExeUnitParams("LDU0", Seq(LduCfg), Seq(IntWB(6, 0), VfWB(3, 0)), Seq(Seq(IntRD(12, 0)))),
       ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
         ExeUnitParams("LDU1", Seq(LduCfg), Seq(IntWB(7, 0), VfWB(4, 0)), Seq(Seq(IntRD(13, 0)))),

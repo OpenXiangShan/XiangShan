@@ -426,12 +426,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   }
 
   io.mem.redirect := ctrlBlock.io.redirect
-  private val memIssueUops =
-    Seq(io.mem.issueLda(0)) ++ Seq(io.mem.issueSta(0)) ++
-      io.mem.issueHylda ++ io.mem.issueHysta ++
-      Seq(io.mem.issueLda(1)) ++
-      io.mem.issueVldu ++
-      io.mem.issueStd
   io.mem.issueUops.zip(toMem.flatten).foreach { case (sink, source) =>
     sink.valid := source.valid
     source.ready := sink.ready
@@ -468,21 +462,18 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     loadPcRead := ctrlBlock.io.memLdPcRead(i).data
     ctrlBlock.io.memLdPcRead(i).ptr := io.mem.issueLda(i).bits.uop.ftqPtr
     ctrlBlock.io.memLdPcRead(i).offset := io.mem.issueLda(i).bits.uop.ftqOffset
-    require(toMem.head(i).bits.ftqIdx.isDefined && toMem.head(i).bits.ftqOffset.isDefined)
   }
 
   io.mem.storePcRead.zipWithIndex.foreach { case (storePcRead, i) =>
     storePcRead := ctrlBlock.io.memStPcRead(i).data
     ctrlBlock.io.memStPcRead(i).ptr := io.mem.issueSta(i).bits.uop.ftqPtr
     ctrlBlock.io.memStPcRead(i).offset := io.mem.issueSta(i).bits.uop.ftqOffset
-    require(toMem(1)(i).bits.ftqIdx.isDefined && toMem(1)(i).bits.ftqOffset.isDefined)
   }
 
   io.mem.hyuPcRead.zipWithIndex.foreach( { case (hyuPcRead, i) =>
     hyuPcRead := ctrlBlock.io.memHyPcRead(i).data
     ctrlBlock.io.memHyPcRead(i).ptr := io.mem.issueHylda(i).bits.uop.ftqPtr
     ctrlBlock.io.memHyPcRead(i).offset := io.mem.issueHylda(i).bits.uop.ftqOffset
-    require(toMem(2)(i).bits.ftqIdx.isDefined && toMem(2)(i).bits.ftqOffset.isDefined)
   })
 
   ctrlBlock.io.robio.robHeadLsIssue := io.mem.issueUops.map(deq => deq.fire && deq.bits.uop.robIdx === ctrlBlock.io.robio.robDeqPtr).reduce(_ || _)
@@ -584,18 +575,18 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
 
   // ATTENTION: The issue ports' sequence order should be the same as IQs' deq config
   private [backend] def issueUops: Seq[DecoupledIO[MemExuInput]] = {
-    Seq(issueLda(0)) ++ Seq(issueSta(0)) ++
+    issueSta ++
       issueHylda ++ issueHysta ++
-      Seq(issueLda(1)) ++
+      issueLda ++
       issueVldu ++
       issueStd
-  }
+  }.toSeq
 
   // ATTENTION: The writeback ports' sequence order should be the same as IQs' deq config
   private [backend] def writeBack: Seq[DecoupledIO[MemExuOutput]] = {
-    Seq(writebackLda(0)) ++ Seq(writebackSta(0)) ++
+    writebackSta ++
       writebackHyuLda ++ writebackHyuSta ++
-      Seq(writebackLda(1)) ++
+      writebackLda ++
       writebackVlda ++
       writebackStd
   }
