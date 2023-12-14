@@ -17,7 +17,7 @@ import xiangshan.backend.exu.ExuBlock
 import xiangshan.backend.fu.vector.Bundles.{VConfig, VType}
 import xiangshan.backend.fu.{FenceIO, FenceToSbuffer, FuConfig, FuType, PerfCounterIO}
 import xiangshan.backend.issue.{CancelNetwork, Scheduler, SchedulerImpBase}
-import xiangshan.backend.rob.{RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO}
+import xiangshan.backend.rob.{RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.frontend.{FtqPtr, FtqRead, PreDecodeInfo}
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 
@@ -464,6 +464,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     sink.bits.uop.vecWen         := source.bits.vecWen.getOrElse(false.B)
     sink.bits.uop.flushPipe      := source.bits.flushPipe.getOrElse(false.B)
     sink.bits.uop.pc             := source.bits.pc.getOrElse(0.U)
+    sink.bits.uop.loadWaitBit    := Mux(enableMdp, source.bits.loadWaitBit.getOrElse(false.B), false.B)
+    sink.bits.uop.waitForRobIdx  := Mux(enableMdp, source.bits.waitForRobIdx.getOrElse(0.U.asTypeOf(new RobPtr)), 0.U.asTypeOf(new RobPtr))
     sink.bits.uop.storeSetHit    := Mux(enableMdp, source.bits.storeSetHit.getOrElse(false.B), false.B)
     sink.bits.uop.loadWaitStrict := Mux(enableMdp, source.bits.loadWaitStrict.getOrElse(false.B), false.B)
     sink.bits.uop.ssid           := Mux(enableMdp, source.bits.ssid.getOrElse(0.U(SSIDWidth.W)), 0.U(SSIDWidth.W))

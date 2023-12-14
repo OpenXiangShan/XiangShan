@@ -805,7 +805,12 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
   memIO.loadFastMatch := 0.U.asTypeOf(memIO.loadFastMatch) // TODO: is still needed?
 
   for (i <- io.enq.indices) {
-    s0_enqBits(i).loadWaitBit := false.B
+    val blockNotReleased = isAfter(io.enq(i).bits.sqIdx, memIO.checkWait.stIssuePtr)
+    val storeAddrWaitForIsIssuing = VecInit((0 until StorePipelineWidth).map(i => {
+      memIO.checkWait.memWaitUpdateReq.robIdx(i).valid &&
+        memIO.checkWait.memWaitUpdateReq.robIdx(i).bits.value === io.enq(i).bits.waitForRobIdx.value
+    })).asUInt.orR && !io.enq(i).bits.loadWaitStrict // is waiting for store addr ready
+    s0_enqBits(i).loadWaitBit := io.enq(i).bits.loadWaitBit && !storeAddrWaitForIsIssuing && blockNotReleased
     // when have vpu
     if (params.VlduCnt > 0 || params.VstuCnt > 0) {
       s0_enqBits(i).srcType(3) := SrcType.vp // v0: mask src
@@ -848,6 +853,8 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
   }
 
   io.deq.zipWithIndex.foreach { case (deq, i) =>
+    deq.bits.common.loadWaitBit.foreach(_ := deqEntryVec(i).bits.payload.loadWaitBit)
+    deq.bits.common.waitForRobIdx.foreach(_ := deqEntryVec(i).bits.payload.waitForRobIdx)
     deq.bits.common.storeSetHit.foreach(_ := deqEntryVec(i).bits.payload.storeSetHit)
     deq.bits.common.loadWaitStrict.foreach(_ := deqEntryVec(i).bits.payload.loadWaitStrict)
     deq.bits.common.ssid.foreach(_ := deqEntryVec(i).bits.payload.ssid)
