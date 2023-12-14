@@ -157,8 +157,8 @@ case class XSCoreParameters
   VecLogicRegs: Int = 32 + 1 + 15, // 15: tmp, 1: vconfig
   VCONFIG_IDX: Int = 32,
   NRPhyRegs: Int = 192,
-  VirtualLoadQueueSize: Int = 80,
-  LoadQueueRARSize: Int = 80,
+  VirtualLoadQueueSize: Int = 72,
+  LoadQueueRARSize: Int = 72,
   LoadQueueRAWSize: Int = 64, // NOTE: make sure that LoadQueueRAWSize is power of 2.
   RollbackGroupSize: Int = 8,
   LoadQueueReplaySize: Int = 72,
