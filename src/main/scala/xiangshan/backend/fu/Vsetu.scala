@@ -86,7 +86,7 @@ class VsetModule(implicit p: Parameters) extends XSModule {
 
   private val normalVL = Mux(avl > vlmax, vlmax, avl)
 
-  vl := Mux(isSetVlmax, vlmax, normalVL)
+  vl := Mux(isVsetivli, normalVL, Mux(isSetVlmax, vlmax, normalVL))
 
   private val log2Elen = log2Up(ELEN)
   private val log2VsewMax = Mux(log2Vlmul(2), log2Elen.U + log2Vlmul, log2Elen.U)
