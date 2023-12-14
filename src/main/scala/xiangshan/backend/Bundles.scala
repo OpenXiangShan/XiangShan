@@ -454,6 +454,8 @@ object Bundles {
       val target = UInt(VAddrData().dataWidth.W)
       val taken = Bool()
     }) else None
+    val loadWaitBit    = OptionWrapper(params.hasLoadExu, Bool())
+    val waitForRobIdx  = OptionWrapper(params.hasLoadExu, new RobPtr) // store set predicted previous store robIdx
     val storeSetHit    = OptionWrapper(params.hasLoadExu, Bool()) // inst has been allocated an store set
     val loadWaitStrict = OptionWrapper(params.hasLoadExu, Bool()) // load inst will not be executed until ALL former store addr calcuated
     val ssid           = OptionWrapper(params.hasLoadExu, UInt(SSIDWidth.W))
@@ -513,6 +515,8 @@ object Bundles {
       this.ftqIdx        .foreach(_ := source.common.ftqIdx.get)
       this.ftqOffset     .foreach(_ := source.common.ftqOffset.get)
       this.predictInfo   .foreach(_ := source.common.predictInfo.get)
+      this.loadWaitBit   .foreach(_ := source.common.loadWaitBit.get)
+      this.waitForRobIdx .foreach(_ := source.common.waitForRobIdx.get)
       this.storeSetHit   .foreach(_ := source.common.storeSetHit.get)
       this.loadWaitStrict.foreach(_ := source.common.loadWaitStrict.get)
       this.ssid          .foreach(_ := source.common.ssid.get)
