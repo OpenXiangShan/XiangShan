@@ -1512,12 +1512,12 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(1).lsrc(0) := latchedInst.lsrc(1)
       csBundle(1).lsrc(1) := 0.U
       csBundle(1).ldest := VECTOR_TMP_REG_LMUL.U
-      csBundle(0).fuType := FuType.i2f.U
-      csBundle(0).fuOpType := I2fType.fmv_d_x
-      csBundle(0).wfflags := false.B
-      csBundle(0).rfWen := false.B
-      csBundle(0).fpWen := false.B
-      csBundle(0).vecWen := true.B
+      csBundle(1).fuType := FuType.i2f.U
+      csBundle(1).fuOpType := I2fType.fmv_d_x
+      csBundle(1).wfflags := false.B
+      csBundle(1).rfWen := false.B
+      csBundle(1).fpWen := true.B
+      csBundle(1).vecWen := false.B
 
       //LMUL
       for (i <- 0 until MAX_VLMUL) {

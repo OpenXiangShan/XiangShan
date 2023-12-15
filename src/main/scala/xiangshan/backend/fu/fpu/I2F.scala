@@ -33,8 +33,7 @@ class I2FCVT(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) with H
   val i2f = Module(new Int2FP)
   i2f.io.src := io.in.bits.data.src(0)
   i2f.io.opType := io.in.bits.ctrl.fuOpType
-  i2f.io.rm :=  Mux(io.frm.get === "b111".U, io.in.bits.ctrl.rmInst.get, io.frm.get)
-
+  i2f.io.rm := Mux(io.in.bits.ctrl.rmInst.get === "b111".U, io.frm.get, io.in.bits.ctrl.rmInst.get)
   io.out.bits.res.data := i2f.io.result
   io.out.bits.res.fflags.get := i2f.io.fflags
 }

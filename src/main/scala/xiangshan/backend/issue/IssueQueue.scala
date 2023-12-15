@@ -522,6 +522,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     deq.bits.common.robIdx := deqEntryVec(i).bits.payload.robIdx
     deq.bits.common.imm := deqEntryVec(i).bits.imm
     deq.bits.common.rmInst.foreach(_ := deqEntryVec(i).bits.payload.rmInst)
+    deq.bits.common.wfflags.foreach(_ := deqEntryVec(i).bits.payload.wfflags)
     deq.bits.common.dataSources.zip(finalDataSources(i)).zipWithIndex.foreach {
       case ((sink, source), srcIdx) =>
         sink.value := Mux(

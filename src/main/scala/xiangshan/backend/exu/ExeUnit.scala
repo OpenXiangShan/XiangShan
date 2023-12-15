@@ -215,6 +215,7 @@ class ExeUnitImp(
       sink.bits.ctrl.ftqOffset   .foreach(x => x := source.bits.ftqOffset.get)
       sink.bits.ctrl.predictInfo .foreach(x => x := source.bits.predictInfo.get)
       sink.bits.ctrl.rmInst      .foreach(x => x := source.bits.rmInst.get)
+      sink.bits.ctrl.wfflags     .foreach(x => x := source.bits.wfflags.get)
       sink.bits.ctrl.fpu         .foreach(x => x := source.bits.fpu.get)
       sink.bits.ctrl.vpu         .foreach(x => x := source.bits.vpu.get)
       sink.bits.perfDebugInfo    := source.bits.perfDebugInfo
@@ -243,7 +244,7 @@ class ExeUnitImp(
   io.out.bits.vecWen.foreach(x => x := Mux1H(fuOutValidOH, fuVecWenVec))
   io.out.bits.redirect.foreach(x => x := Mux1H((fuOutValidOH zip fuRedirectVec).filter(_._2.isDefined).map(x => (x._1, x._2.get))))
   io.out.bits.fflags.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.res.fflags.getOrElse(0.U.asTypeOf(io.out.bits.fflags.get)))))
-  io.out.bits.wflags.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.fpu.getOrElse(0.U.asTypeOf(new FPUCtrlSignals)).wflags)))
+  io.out.bits.wflags.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.wfflags.getOrElse(false.B))))
   io.out.bits.vxsat.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.res.vxsat.getOrElse(0.U.asTypeOf(io.out.bits.vxsat.get)))))
   io.out.bits.exceptionVec.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.exceptionVec.getOrElse(0.U.asTypeOf(io.out.bits.exceptionVec.get)))))
   io.out.bits.flushPipe.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.flushPipe.getOrElse(0.U.asTypeOf(io.out.bits.flushPipe.get)))))

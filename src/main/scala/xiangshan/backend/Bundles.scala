@@ -448,6 +448,7 @@ object Bundles {
     val fpWen         = if (params.writeFpRf)     Some(Bool())                        else None
     val vecWen        = if (params.writeVecRf)    Some(Bool())                        else None
     val rmInst        = if (params.needFPUCtrl)   Some(UInt(3.W))                     else None
+    val wfflags       = if (params.writeFflags)   Some(Bool())                        else None
     val fpu           = if (params.writeFflags)   Some(new FPUCtrlSignals)            else None
     val vpu           = if (params.needVPUCtrl)   Some(new VPUCtrlSignals)            else None
     val flushPipe     = if (params.flushPipe)     Some(Bool())                        else None
@@ -511,6 +512,7 @@ object Bundles {
       this.vecWen        .foreach(_ := source.common.vecWen.get)
       this.fpu           .foreach(_ := source.common.fpu.get)
       this.rmInst        .foreach(_ := source.common.rmInst.get)
+      this.wfflags       .foreach(_ := source.common.wfflags.get)
       this.vpu           .foreach(_ := source.common.vpu.get)
       this.flushPipe     .foreach(_ := source.common.flushPipe.get)
       this.pc            .foreach(_ := source.common.pc.get)

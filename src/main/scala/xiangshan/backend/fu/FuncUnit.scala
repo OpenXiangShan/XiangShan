@@ -29,7 +29,8 @@ class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
     val taken     = Bool()
   })
   val rmInst      = OptionWrapper(cfg.needFPUCtrl, UInt(3.W))
-  val fpu         = OptionWrapper(cfg.writeFflags, new FPUCtrlSignals)
+  val fpu         = OptionWrapper(cfg.writeFflags, new FPUCtrlSignals) // todo： delete
+  val wfflags     = OptionWrapper(cfg.writeFflags, Bool())
   val vpu         = OptionWrapper(cfg.needVecCtrl, new VPUCtrlSignals)
 }
 
@@ -45,6 +46,7 @@ class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle
   val preDecode     = OptionWrapper(cfg.hasPredecode, new PreDecodeInfo)
   val rmInst        = OptionWrapper(cfg.needFPUCtrl, UInt(3.W))
   val fpu           = OptionWrapper(cfg.writeFflags, new FPUCtrlSignals) // todo： delete
+  val wfflags       = OptionWrapper(cfg.writeFflags, Bool())
   val vpu           = OptionWrapper(cfg.needVecCtrl, new VPUCtrlSignals)
 }
 
@@ -99,7 +101,8 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
     // io.out.bits.ctrl.flushPipe should be connected in fu
     io.out.bits.ctrl.preDecode.foreach(_ := DataHoldBypass(io.in.bits.ctrl.preDecode.get, io.in.fire))
     io.out.bits.ctrl.rmInst   .foreach(_ := DataHoldBypass(io.in.bits.ctrl.rmInst.get, io.in.fire))
-    io.out.bits.ctrl.fpu      .foreach(_ := DataHoldBypass(io.in.bits.ctrl.fpu.get, io.in.fire))
+    io.out.bits.ctrl.wfflags  .foreach(_ := DataHoldBypass(io.in.bits.ctrl.wfflags.get, io.in.fire))
+    io.out.bits.ctrl.fpu      .foreach(_ := DataHoldBypass(io.in.bits.ctrl.fpu.get, io.in.fire)) // todo： delete
     io.out.bits.ctrl.vpu      .foreach(_ := DataHoldBypass(io.in.bits.ctrl.vpu.get, io.in.fire))
     io.out.bits.perfDebugInfo := DataHoldBypass(io.in.bits.perfDebugInfo, io.in.fire)
   }
@@ -150,6 +153,7 @@ trait HasPipelineReg { this: FuncUnit =>
   io.out.bits.ctrl.fpWen.foreach(_ := ctrlVec.last.fpWen.get)
   io.out.bits.ctrl.vecWen.foreach(_ := ctrlVec.last.vecWen.get)
   io.out.bits.ctrl.rmInst.foreach(_ := ctrlVec.last.rmInst.get)
+  io.out.bits.ctrl.wfflags.foreach(_ := ctrlVec.last.wfflags.get)
   io.out.bits.ctrl.fpu.foreach(_ := ctrlVec.last.fpu.get)
   io.out.bits.ctrl.vpu.foreach(_ := ctrlVec.last.vpu.get)
   io.out.bits.perfDebugInfo := perfVec.last
