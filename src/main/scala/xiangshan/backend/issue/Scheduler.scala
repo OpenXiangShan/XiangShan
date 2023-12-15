@@ -123,6 +123,9 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
   val dispatch2Iq: Dispatch2IqImp = wrapper.dispatch2Iq.module
   val issueQueues: Seq[IssueQueueImp] = wrapper.issueQueue.map(_.module)
 
+  // valid count
+  dispatch2Iq.io.iqValidCnt := issueQueues.filter(_.params.StdCnt == 0).map(_.io.status.validCnt)
+
   // BusyTable Modules
   val intBusyTable = schdType match {
     case IntScheduler() | MemScheduler() => Some(Module(new BusyTable(dispatch2Iq.numIntStateRead, wrapper.numIntStateWrite, IntPhyRegs, IntWB())))
