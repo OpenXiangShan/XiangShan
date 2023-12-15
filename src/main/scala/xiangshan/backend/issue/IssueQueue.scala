@@ -31,9 +31,10 @@ class IssueQueue(params: IssueBlockParams)(implicit p: Parameters) extends LazyM
   }
 }
 
-class IssueQueueStatusBundle(numEnq: Int) extends Bundle {
+class IssueQueueStatusBundle(numEnq: Int, numEntries: Int) extends Bundle {
   val empty = Output(Bool())
   val full = Output(Bool())
+  val validCnt = Output(UInt(log2Ceil(numEntries).W))
   val leftVec = Output(Vec(numEnq + 1, Bool()))
 }
 
@@ -60,7 +61,7 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   // Outputs
   val deq: MixedVec[DecoupledIO[IssueQueueIssueBundle]] = params.genIssueDecoupledBundle
   val wakeupToIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = params.genIQWakeUpSourceValidBundle
-  val status = Output(new IssueQueueStatusBundle(params.numEnq))
+  val status = Output(new IssueQueueStatusBundle(params.numEnq, params.numEntries))
   // val statusNext = Output(new IssueQueueStatusBundle(params.numEnq))
 
   val fromCancelNetwork = Flipped(params.genIssueDecoupledBundle)
@@ -614,6 +615,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   io.enq.foreach(_.ready := !Cat(io.status.leftVec).orR || !enqHasValid) // Todo: more efficient implementation
   io.status.empty := !Cat(validVec).orR
   io.status.full := Cat(io.status.leftVec).orR
+  io.status.validCnt := PopCount(validVec)
 
   protected def getDeqLat(deqPortIdx: Int, fuType: UInt) : UInt = {
     Mux1H(fuLatencyMaps(deqPortIdx) map { case (k, v) => (k.U === fuType, v.U) })
@@ -627,6 +629,15 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   XSPerfHistogram("enq_entry_valid_cnt", enqEntryValidCnt, true.B, 0, params.numEnq + 1)
   XSPerfHistogram("other_entry_valid_cnt", othersValidCnt, true.B, 0, params.numEntries - params.numEnq + 1)
   XSPerfHistogram("valid_cnt", PopCount(validVec), true.B, 0, params.numEntries + 1)
+  // only split when more than 1 func type
+  if (params.getFuCfgs.size > 0) {
+    for (t <- FuType.functionNameMap.keys) {
+      val fuName = FuType.functionNameMap(t)
+      if (params.getFuCfgs.map(_.fuType == t).reduce(_ | _)) {
+        XSPerfHistogram(s"valid_cnt_hist_futype_${fuName}", PopCount(validVec.zip(fuTypeVec).map { case (v, fu) => v && fu === t.U }), true.B, 0, params.numEntries, 1)
+      }
+    }
+  }
   // ready instr count
   private val readyEntriesCnt = PopCount(validVec.zip(canIssueVec).map(x => x._1 && x._2))
   XSPerfHistogram("ready_cnt", readyEntriesCnt, true.B, 0, params.numEntries + 1)

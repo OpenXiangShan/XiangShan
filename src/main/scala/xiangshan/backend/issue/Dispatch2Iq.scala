@@ -5,7 +5,7 @@ import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.decode._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import utility.SelectOne
+import utility.{Constantin, SelectOne}
 import utils._
 import xiangshan._
 import xiangshan.backend.fu.{FuConfig, FuType}
@@ -64,6 +64,7 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
     val readVfState = if (numVfStateRead > 0) Some(Vec(numVfStateRead, Flipped(new BusyTableReadIO))) else None
     val out = MixedVec(params.issueBlockParams.filter(iq => iq.StdCnt == 0).map(x => Vec(x.numEnq, DecoupledIO(new DynInst))))
     val enqLsqIO = if (wrapper.isMem) Some(Flipped(new LsqEnqIO)) else None
+    val iqValidCnt = MixedVec(params.issueBlockParams.filter(_.StdCnt == 0).map(x => Input(UInt(log2Ceil(x.numEntries).W))))
   })
 
 
@@ -429,98 +430,126 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
 
   dontTouch(selIdxOH)
 
-  def loadDeqSeq(storeCnt: Int): Seq[Int] = Map(
-    0 -> Seq(4, 0, 1, 5, 2, 3),
-    1 -> Seq(1, 4, 5, 2, 3, 0),
-    2 -> Seq(4, 1, 2, 5, 0, 3),
-    3 -> Seq(5, 2, 4, 0, 3, 1),
-    4 -> Seq(4, 5, 1, 2, 3, 0),
-    5 -> Seq(4, 5, 1, 2, 3, 0),
-    6 -> Seq(4, 5, 1, 2, 3, 0)
-  )(storeCnt)
+  // decide the priority of hyu for load instructions
+  val hyuPriorityCtr = RegInit(0x100.U(9.W))
+  val addCtr = io.in.map(in => Mux(in.fire && FuType.isLoad(in.bits.fuType), Constantin.createRecord("hyuPriorityAddCtr", 2.U)(1, 0), 0.U)).reduce(_ +& _) // loadCnt * 2
+  val subCtr = io.in.map(in => Mux(in.fire && FuType.isStore(in.bits.fuType), Constantin.createRecord("hyuPrioritySubCtr", 5.U)(2, 0), 0.U)).reduce(_ +& _) // storeCnt * 5
+  val nextCtr = hyuPriorityCtr + addCtr - subCtr
+  hyuPriorityCtr := Mux(addCtr > subCtr && hyuPriorityCtr > nextCtr, 0x1FF.U(9.W),
+                    Mux(addCtr < subCtr && hyuPriorityCtr < nextCtr, 0x000.U(9.W),
+                                                                     nextCtr))
+  val useHyuForLoadMore = hyuPriorityCtr.asBools.last
 
-  def storeDeqSeq(storeCnt: Int): Seq[Int] = loadDeqSeq(storeCnt).filter(_ < 4).reverse
+  // index of issue block
+  private val issueBlockParamsWithoutStd = params.issueBlockParams.filter(_.StdCnt == 0)
+  val loadIqIdx = issueBlockParamsWithoutStd.zipWithIndex.filter(_._1.LduCnt != 0).unzip._2
+  val storeIqIdx = issueBlockParamsWithoutStd.zipWithIndex.filter(_._1.StaCnt != 0).unzip._2
+  val hybridIqIdx = issueBlockParamsWithoutStd.zipWithIndex.filter(_._1.HyuCnt != 0).unzip._2
+  val stHyIqIdx = issueBlockParamsWithoutStd.zipWithIndex.filter(x => x._1.StaCnt != 0 || x._1.HyuCnt != 0).unzip._2
+
+  val Seq(loadIqsEnqPorts, storeIqsEnqPorts, hybridIqsEnqPorts) = Seq(loadIqIdx, storeIqIdx, hybridIqIdx).map(_.map(idx =>
+    (0 until issueBlockParamsWithoutStd(idx).numEnq).map(_ + issueBlockParamsWithoutStd.take(idx).map(_.numEnq).fold(0)(_ + _))
+  ).transpose)
+  val stHyIqsEnqPorts = (storeIqsEnqPorts.transpose ++ hybridIqsEnqPorts.transpose.map(_.reverse).reverse).transpose
+
+  // deq port priority sequence
+  val loadMoreHyuDeq = (loadIqsEnqPorts.take(loadIqsEnqPorts.length / 2) ++ hybridIqsEnqPorts.take(hybridIqsEnqPorts.length / 2) ++
+                        loadIqsEnqPorts.drop(loadIqsEnqPorts.length / 2) ++ hybridIqsEnqPorts.drop(hybridIqsEnqPorts.length / 2)).flatten
+  val loadLessHyuDeq = (loadIqsEnqPorts ++ hybridIqsEnqPorts).flatten
+  val storeDeq = (storeIqsEnqPorts.take(storeIqsEnqPorts.length / 2) ++ hybridIqsEnqPorts.map(_.reverse).reverse.take(hybridIqsEnqPorts.length / 2) ++
+                  storeIqsEnqPorts.drop(storeIqsEnqPorts.length / 2) ++ hybridIqsEnqPorts.map(_.reverse).reverse.drop(hybridIqsEnqPorts.length / 2)).flatten
+
+  require(loadMoreHyuDeq.sorted == expendedFuDeqMap(Seq(ldu)).sorted)
+  require(loadLessHyuDeq.sorted == expendedFuDeqMap(Seq(ldu)).sorted)
+  require(storeDeq.sorted == expendedFuDeqMap(Seq(stu)).sorted)
+
+  // Seq(storeCnt)(priority)
+  val loadMoreHyuDeqSeq: Seq[Seq[Int]] = Seq.fill(numEnq + 1)(loadMoreHyuDeq)
+  val loadLessHyuDeqSeq: Seq[Seq[Int]] = Seq.fill(numEnq + 1)(loadLessHyuDeq)
+  val storeDeqSeq: Seq[Seq[Int]] = Seq.fill(numEnq + 1)(storeDeq)
+
+  require(expendedFuDeqMap(Seq(ldu)).max - expendedFuDeqMap(Seq(ldu)).min == expendedFuDeqMap(Seq(ldu)).length - 1)
+  require(expendedFuDeqMap(Seq(stu)).max - expendedFuDeqMap(Seq(stu)).min == expendedFuDeqMap(Seq(stu)).length - 1)
 
   private abstract class LoadOrStore(val isStore: Boolean) { def isLoad = !isStore }
   private case class Load() extends LoadOrStore(false)
   private case class Store() extends LoadOrStore(true)
 
-  private val allLSPatern = Seq.tabulate(7)(i => (Seq.fill(i)(Load()) ++ Seq.fill(6 - i)(Store())).toSeq.permutations).flatten.zipWithIndex.toSeq
-  // println(allLSPatern.mkString("\n"))
+  private val allLSPatern = Seq.tabulate(numEnq + 1)(i => (Seq.fill(i)(Load()) ++ Seq.fill(numEnq - i)(Store())).toSeq.permutations).flatten.zipWithIndex.toSeq
 
-  // val deqPortReadyVec = outs.map(_.ready)
-  // val (loadSwapMapSeq, loadSwappedReadyVecSeq) = allLSPatern.map { case (lsPattern, _) =>
-  //   val loadDeqIter = loadDeqSeq(lsPattern.count(_ == Store())).iterator
-  //   val swapMap = lsPattern.map {
-  //     case _: Load if (loadDeqIter.hasNext) => Some(loadDeqIter.next())
-  //     case _ => None
-  //   }
-  //   println(lsPattern, swapMap)
-  //   (swapMap, VecInit(swapMap.map(_.map(deqPortReadyVec(_)).getOrElse(false.B))))
-  // }.unzip
-  // println("------------------------------------------------------------")
-  // val (storeSwapMapSeq, storeSwappedReadyVecSeq) = allLSPatern.map { case (lsPattern, _) =>
-  //   val storeDeqIter = storeDeqSeq(lsPattern.count(_ == Store())).iterator
-  //   val swapMap = lsPattern.map {
-  //     case _: Store if (storeDeqIter.hasNext) => Some(storeDeqIter.next())
-  //     case _ => None
-  //   }
-  //   println(lsPattern, swapMap)
-  //   (swapMap, VecInit(swapMap.map(_.map(deqPortReadyVec(_)).getOrElse(false.B))))
-  // }.unzip
   val inIsStoreVec = Cat(uopsIn.map(in => in.valid && FuType.isStore(in.bits.fuType)))
-  // object LSPatternTable {
-  //   val default = BitPat(0.U(allLSPatern.length.W))
-  //   val table = allLSPatern.map { case (pattern, index) =>
-  //     BitPat(pattern.map(s => if (s.isStore) "1" else "0").mkString("b", "", "")) ->
-  //     BitPat((BigInt(1) << index).U(allLSPatern.length.W))
-  //   }
-  //   val truthTable = TruthTable(table, default)
-  // }
   object LoadValidTable {
-    val default = BitPat("b" + "0" * 6)
+    val default = BitPat("b" + "0" * numEnq)
     val table = allLSPatern.map { case (pattern, index) =>
-      pattern.zipWithIndex.filter(_._1.isLoad).map(x => BitPat((1 << x._2).U(6.W))) ++
-      pattern.filterNot(_.isLoad).map(_ => BitPat("b" + "0" * 6)) map
+      pattern.zipWithIndex.filter(_._1.isLoad).map(x => BitPat((1 << x._2).U(numEnq.W))) ++
+      pattern.filterNot(_.isLoad).map(_ => BitPat("b" + "0" * numEnq)) map
       (BitPat(pattern.map(s => if (s.isStore) "1" else "0").mkString("b", "", "")) -> _)
     }.transpose
     val truthTable = table.map(TruthTable(_, default))
-    println(truthTable)
   }
   object StoreValidTable {
-    val default = BitPat("b" + "0" * 6)
+    val default = BitPat("b" + "0" * numEnq)
     val table = allLSPatern.map { case (pattern, index) =>
-      pattern.zipWithIndex.filter(_._1.isStore).map(x => BitPat((1 << x._2).U(6.W))) ++
-      pattern.filterNot(_.isStore).map(_ => BitPat("b" + "0" * 6)) map
+      pattern.zipWithIndex.filter(_._1.isStore).map(x => BitPat((1 << x._2).U(numEnq.W))) ++
+      pattern.filterNot(_.isStore).map(_ => BitPat("b" + "0" * numEnq)) map
       (BitPat(pattern.map(s => if (s.isStore) "1" else "0").mkString("b", "", "")) -> _)
     }.transpose
     val truthTable = table.map(TruthTable(_, default))
-    println(truthTable)
   }
-  object LoadReadyTable {
-    val default = BitPat("b" + "0" * 6)
+  object LoadMoreHyuReadyTable {
+    val default = BitPat("b" + "0" * loadMoreHyuDeqSeq.head.length)
     val table = allLSPatern.map { case (pattern, index) =>
-      loadDeqSeq(pattern.count(_.isStore)).map(x => BitPat((1 << x).U(6.W))) map
+      loadMoreHyuDeqSeq(pattern.count(_.isStore)).map(x => BitPat((1 << x - loadMoreHyuDeqSeq.flatten.min).U(loadMoreHyuDeqSeq.head.length.W))) map
       (BitPat(pattern.map(s => if (s.isStore) "1" else "0").mkString("b", "", "")) -> _)
     }.transpose
     val truthTable = table.map(TruthTable(_, default))
-    println(truthTable)
+  }
+  object LoadLessHyuReadyTable {
+    val default = BitPat("b" + "0" * loadLessHyuDeqSeq.head.length)
+    val table = allLSPatern.map { case (pattern, index) =>
+      loadLessHyuDeqSeq(pattern.count(_.isStore)).map(x => BitPat((1 << x - loadLessHyuDeqSeq.flatten.min).U(loadLessHyuDeqSeq.head.length.W))) map
+      (BitPat(pattern.map(s => if (s.isStore) "1" else "0").mkString("b", "", "")) -> _)
+    }.transpose
+    val truthTable = table.map(TruthTable(_, default))
   }
   object StoreReadyTable {
-    val default = BitPat("b" + "0" * 4)
+    val default = BitPat("b" + "0" * storeDeqSeq.head.length)
     val table = allLSPatern.map { case (pattern, index) =>
-      storeDeqSeq(pattern.count(_.isStore)).map(x => BitPat((1 << x).U(4.W))) map
+      storeDeqSeq(pattern.count(_.isStore)).map(x => BitPat((1 << x - storeDeqSeq.flatten.min).U(storeDeqSeq.head.length.W))) map
       (BitPat(pattern.map(s => if (s.isStore) "1" else "0").mkString("b", "", "")) -> _)
     }.transpose
     val truthTable = table.map(TruthTable(_, default))
-    println(truthTable)
   }
-  // val lsPatternEncodedOH = decoder(QMCMinimizer, inIsStoreVec, LSPatternTable.truthTable)
+
+  // port flip for load/store load balance
+  val loadSwapMap = (loadIqsEnqPorts.map(ports => ports.zipWithIndex.map { case (port, idx) => (port -> ports((idx + 1) % ports.length)) }) ++
+                     hybridIqsEnqPorts.map(_.map(port => (port -> port)))).flatten.sortBy(_._1).unzip._2
+  val storeSwapMap = stHyIqsEnqPorts.map(ports => ports.zipWithIndex.map { case (port, idx) => (port -> ports((idx + 1) % ports.length)) }).flatten.sortBy(_._1).unzip._2
+
+  val loadFlipMap = loadSwapMap.map(x => (1 << x - loadSwapMap.min).U(loadSwapMap.length.W))
+  val storeFlipMap = storeSwapMap.map(x => (1 << x - storeSwapMap.min).U(storeSwapMap.length.W))
+
+  val loadIqValidCnt = loadIqIdx.map(io.iqValidCnt)
+  require(loadIqValidCnt.length == 2)
+  val sthyIqValidCnt = stHyIqIdx.map(io.iqValidCnt)
+  require(sthyIqValidCnt.length == 2)
+
+  val loadDeqNeedFlip = RegNext(loadIqValidCnt(1) < loadIqValidCnt(0)) && Constantin.createRecord("enableLoadBalance", true.B)(0)
+  val storeDeqNeedFlip = RegNext(sthyIqValidCnt(1) < sthyIqValidCnt(0)) && Constantin.createRecord("enableStoreBalance", true.B)(0)
   val loadValidDecoder = LoadValidTable.truthTable.map(decoder(EspressoMinimizer, inIsStoreVec, _))
   val storeValidDecoder = StoreValidTable.truthTable.map(decoder(EspressoMinimizer, inIsStoreVec, _))
-  val loadReadyDecoder = LoadReadyTable.truthTable.map(decoder(EspressoMinimizer, inIsStoreVec, _))
-  val storeReadyDecoder = StoreReadyTable.truthTable.map(decoder(EspressoMinimizer, inIsStoreVec, _))
-  // println(LSPatternTable.truthTable)
+
+  val loadMoreHyuReadyDecoderOriginal = LoadMoreHyuReadyTable.truthTable.map(decoder(EspressoMinimizer, inIsStoreVec, _))
+  val loadMoreHyuReadyDecoderFlipped = loadMoreHyuReadyDecoderOriginal.map(Mux1H(_, loadFlipMap))
+  val loadLessHyuReadyDecoderOriginal = LoadLessHyuReadyTable.truthTable.map(decoder(EspressoMinimizer, inIsStoreVec, _))
+  val loadLessHyuReadyDecoderFlipped = loadLessHyuReadyDecoderOriginal.map(Mux1H(_, loadFlipMap))
+  val loadReadyDecoderOriginal = loadMoreHyuReadyDecoderOriginal zip loadLessHyuReadyDecoderOriginal map (x => Mux(useHyuForLoadMore, x._1, x._2))
+  val loadReadyDecoderFlipped = loadMoreHyuReadyDecoderFlipped zip loadLessHyuReadyDecoderFlipped map (x => Mux(useHyuForLoadMore, x._1, x._2))
+  val storeReadyDecoderOriginal = StoreReadyTable.truthTable.map(decoder(EspressoMinimizer, inIsStoreVec, _))
+  val storeReadyDecoderFlipped = storeReadyDecoderOriginal.map(Mux1H(_, storeFlipMap))
+
+  val loadReadyDecoder = loadReadyDecoderFlipped zip loadReadyDecoderOriginal map (x => Mux(loadDeqNeedFlip, x._1, x._2))
+  val storeReadyDecoder = storeReadyDecoderFlipped zip storeReadyDecoderOriginal map (x => Mux(storeDeqNeedFlip, x._1, x._2))
 
   finalFuDeqMap.zipWithIndex.foreach {
     case ((Seq(FuType.ldu), deqPortIdSeq), i) =>
