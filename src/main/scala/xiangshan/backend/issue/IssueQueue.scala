@@ -56,6 +56,7 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   // Outputs
   val wakeupToIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = params.genIQWakeUpSourceValidBundle
   val status = Output(new IssueQueueStatusBundle(params.numEnq))
+  val validCntDeqVec = Output(Vec(params.numDeq,UInt(params.numEntries.U.getWidth.W)))
   // val statusNext = Output(new IssueQueueStatusBundle(params.numEnq))
 
   val deqDelay: MixedVec[DecoupledIO[IssueQueueIssueBundle]] = params.genIssueDecoupledBundle// = deq.cloneType
@@ -646,6 +647,26 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   private val enqHasValid = validVec.take(params.numEnq).reduce(_ | _)
   private val enqEntryValidCnt = PopCount(validVec.take(params.numEnq))
   private val othersValidCnt = PopCount(validVec.drop(params.numEnq))
+  private val enqEntryValidCntDeq0 = PopCount(
+    validVec.take(params.numEnq).zip(deqCanAcceptVec(0).take(params.numEnq)).map { case (a, b) => a && b }
+  )
+  private val othersValidCntDeq0 = PopCount(
+    validVec.drop(params.numEnq).zip(deqCanAcceptVec(0).drop(params.numEnq)).map { case (a, b) => a && b }
+  )
+  private val enqEntryValidCntDeq1 = PopCount(
+    validVec.take(params.numEnq).zip(deqCanAcceptVec.last.take(params.numEnq)).map { case (a, b) => a && b }
+  )
+  private val othersValidCntDeq1 = PopCount(
+    validVec.drop(params.numEnq).zip(deqCanAcceptVec.last.drop(params.numEnq)).map { case (a, b) => a && b }
+  )
+  protected val deqCanAcceptVecEnq: Seq[IndexedSeq[Bool]] = deqFuCfgs.map { fuCfgs: Seq[FuConfig] =>
+    io.enq.map(_.bits.fuType).map(fuType =>
+      FuType.FuTypeOrR(fuType, fuCfgs.map(_.fuType)))
+  }
+  protected val enqValidCntDeq0 = PopCount(io.enq.map(_.fire).zip(deqCanAcceptVecEnq(0)).map { case (a, b) => a && b })
+  protected val enqValidCntDeq1 = PopCount(io.enq.map(_.fire).zip(deqCanAcceptVecEnq.last).map { case (a, b) => a && b })
+  io.validCntDeqVec.head := RegNext(enqEntryValidCntDeq0 +& othersValidCntDeq0 +& enqValidCntDeq0 - deqBeforeDly.head.fire) // validCntDeqVec(0)
+  io.validCntDeqVec.last := RegNext(enqEntryValidCntDeq1 +& othersValidCntDeq1 +& enqValidCntDeq1 - deqBeforeDly.last.fire) // validCntDeqVec(1)
   io.status.leftVec(0) := validVec.drop(params.numEnq).reduce(_ & _)
   for (i <- 0 until params.numEnq) {
     io.status.leftVec(i + 1) := othersValidCnt === (params.numEntries - params.numEnq - (i + 1)).U
@@ -669,6 +690,10 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   // enq count
   XSPerfAccumulate("enq_valid_cnt", PopCount(io.enq.map(_.fire)))
   XSPerfAccumulate("enq_fire_cnt", PopCount(io.enq.map(_.fire)))
+  XSPerfAccumulate("enq_alu_fire_cnt", PopCount(io.enq.map { case enq => enq.fire && FuType.isAlu(enq.bits.fuType) }))
+  XSPerfAccumulate("enq_brh_fire_cnt", PopCount(io.enq.map { case enq => enq.fire && FuType.isBrh(enq.bits.fuType) }))
+  XSPerfAccumulate("deqDelay0_fire_cnt", PopCount(io.deqDelay.head.fire))
+  XSPerfAccumulate("deqDelay1_fire_cnt", PopCount(io.deqDelay.last.fire))
   // valid count
   XSPerfHistogram("enq_entry_valid_cnt", enqEntryValidCnt, true.B, 0, params.numEnq + 1)
   XSPerfHistogram("other_entry_valid_cnt", othersValidCnt, true.B, 0, params.numEntries - params.numEnq + 1)

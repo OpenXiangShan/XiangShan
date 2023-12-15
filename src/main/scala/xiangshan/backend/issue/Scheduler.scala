@@ -48,6 +48,7 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
     val fuBusyTableRead = MixedVec(params.issueBlockParams.map(x => Input(x.genWbFuBusyTableReadBundle)))
   }
   val wbFuBusyTable = MixedVec(params.issueBlockParams.map(x => Output(x.genWbFuBusyTableWriteBundle)))
+  val IQValidNumVec = Output(Vec(4, Vec(2,UInt(6.W))))
 
   val fromCtrlBlock = new Bundle {
     val pcVec = Input(Vec(params.numPcReadPort, UInt(VAddrData().dataWidth.W)))
@@ -119,6 +120,11 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
   // Modules
   val dispatch2Iq: Dispatch2IqImp = wrapper.dispatch2Iq.module
   val issueQueues: Seq[IssueQueueImp] = wrapper.issueQueue.map(_.module)
+  if (params.isIntSchd) {
+    dispatch2Iq.io.IQValidNumVec.get := io.IQValidNumVec
+    io.IQValidNumVec := VecInit(issueQueues.take(4).map(_.io.validCntDeqVec))
+  }
+  else io.IQValidNumVec := 0.U.asTypeOf(io.IQValidNumVec)
 
   // BusyTable Modules
   val intBusyTable = schdType match {

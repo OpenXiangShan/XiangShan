@@ -2,13 +2,14 @@ package xiangshan.backend.datapath
 
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
-import chisel3.util.{Arbiter, DecoupledIO, RRArbiter, Valid}
+import chisel3.util.{Arbiter, DecoupledIO, RRArbiter, Valid, PopCount}
 import utils.SeqUtils.{MixedVec3, Seq3}
 import utils.{OptionWrapper, SeqUtils}
 import xiangshan.backend.BackendParams
 import xiangshan.backend.datapath.DataConfig.{IntData, VecData}
 import xiangshan.backend.datapath.RdConfig.{IntRD, NoRD, RdConfig, VfRD}
 import xiangshan.backend.regfile.PregParams
+import utils._
 
 case class RFRdArbParams(
   inRdCfgs: Seq3[RdConfig],
@@ -68,6 +69,27 @@ abstract class RFReadArbiterBase(val params: RFRdArbParams)(implicit p: Paramete
         arbiterIn <> ioIn
       }
     }
+  }
+
+  if (params.pregParams.dataCfg.name == "int") {
+    val arbitersIn = arbiters.filter(_.nonEmpty).map(_.get.io.in)
+    val hasConflict = arbitersIn.map { case a =>
+      PopCount(a.map(_.valid)) > 1.U
+    }
+    for (i <- hasConflict.indices) {
+      XSPerfAccumulate(s"IntRFReadPort_${i}_Conflict", PopCount(hasConflict(i)))
+    }
+    val hasRead0 = arbitersIn.map { case a =>
+      a.map(x => x.valid && x.bits.addr === 0.U).reduce(_ || _)
+    }
+    val hasSameAddr = arbitersIn.map { case a =>
+      if (a.size == 2) a(0).valid && a(1).valid && a(0).bits.addr === a(1).bits.addr
+      else false.B
+    }
+    val hasRead0Conflict = hasConflict.zip(hasRead0).map(x => x._1 && x._2)
+    val hasReadSameAddrConflict = hasConflict.zip(hasSameAddr).map(x => x._1 && x._2)
+    XSPerfAccumulate("IntRFRead0_conflict_count", PopCount(hasRead0Conflict))
+    XSPerfAccumulate("IntRFReadSameAddr_conflict_count", PopCount(hasReadSameAddrConflict))
   }
 
   // connection of NoRD
