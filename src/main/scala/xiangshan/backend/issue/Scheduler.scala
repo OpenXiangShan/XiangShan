@@ -279,11 +279,11 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
     s"has intBusyTable: ${intBusyTable.nonEmpty}, " +
     s"has vfBusyTable: ${vfBusyTable.nonEmpty}")
 
-  val memAddrIQs = issueQueues.filter(iq => iq.params.StdCnt == 0)
-  val stAddrIQs = issueQueues.filter(iq => iq.params.StaCnt > 0) // included in memAddrIQs
-  val ldAddrIQs = issueQueues.filter(iq => iq.params.LduCnt > 0)
-  val stDataIQs = issueQueues.filter(iq => iq.params.StdCnt > 0)
-  val hyuIQs = issueQueues.filter(iq => iq.params.HyuCnt > 0)
+  val memAddrIQs = issueQueues.filter(_.params.StdCnt == 0)
+  val stAddrIQs = issueQueues.filter(_.params.StaCnt > 0) // included in memAddrIQs
+  val ldAddrIQs = issueQueues.filter(_.params.LduCnt > 0)
+  val stDataIQs = issueQueues.filter(_.params.StdCnt > 0)
+  val (hyuIQs, hyuIQIdxs) = issueQueues.zipWithIndex.filter(_._1.params.HyuCnt > 0).unzip
 
   println(s"[SchedulerMemImp] memAddrIQs.size: ${memAddrIQs.size}, enq.size: ${memAddrIQs.map(_.io.enq.size).sum}")
   println(s"[SchedulerMemImp] stAddrIQs.size:  ${stAddrIQs.size }, enq.size: ${stAddrIQs.map(_.io.enq.size).sum}")
@@ -316,12 +316,19 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
     case _ =>
   }
 
-  hyuIQs.foreach {
-    case imp: IssueQueueMemAddrImp =>
+  hyuIQs.zip(hyuIQIdxs).foreach {
+    case (imp: IssueQueueMemAddrImp, idx) =>
       imp.io.memIO.get.feedbackIO.head := io.fromMem.get.hyuFeedback.head
       imp.io.memIO.get.feedbackIO(1) := 0.U.asTypeOf(imp.io.memIO.get.feedbackIO(1))
       imp.io.memIO.get.checkWait.stIssuePtr := io.fromMem.get.stIssuePtr
       imp.io.memIO.get.checkWait.memWaitUpdateReq := io.fromMem.get.memWaitUpdateReq
+      // TODO: refactor ditry code
+      imp.io.deq(1).ready := false.B
+      imp.io.deqDelay(1).ready := false.B
+      io.toDataPath(idx)(1).valid := false.B
+      io.toDataPathAfterDelay(idx)(1).valid := false.B
+      io.toDataPath(idx)(1).bits := 0.U.asTypeOf(io.toDataPath(idx)(1).bits)
+      io.toDataPathAfterDelay(idx)(1).bits := 0.U.asTypeOf(io.toDataPathAfterDelay(idx)(1).bits)
     case _ =>
   }
 
