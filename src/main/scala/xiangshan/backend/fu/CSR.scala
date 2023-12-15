@@ -1014,9 +1014,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val isDret   = addr === privDret   && func === CSROpType.jmp
   val isWFI    = func === CSROpType.wfi
 
-  XSDebug(wen, "csr write: pc %x addr %x rdata %x wdata %x func %x\n", io.in.bits.data.pc.get, addr, rdata, wdata, func)
-  XSDebug(wen, "pc %x mstatus %x mideleg %x medeleg %x mode %x\n", io.in.bits.data.pc.get, mstatus, mideleg , medeleg, priviledgeMode)
-
   // Illegal priviledged operation list
   val illegalMret = valid && isMret && priviledgeMode < ModeM
   val illegalSret = valid && isSret && priviledgeMode < ModeS
@@ -1303,8 +1300,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     mstatus := mstatusNew.asUInt
     debugMode := debugModeNew
   }
-
-  XSDebug(raiseExceptionIntr && delegS, "sepc is written!!! pc:%x\n", io.in.bits.data.pc.get)
 
   // Distributed CSR update req
   //

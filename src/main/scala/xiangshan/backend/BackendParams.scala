@@ -100,6 +100,7 @@ case class BackendParams(
   def IqCnt = allSchdParams.map(_.issueBlockParams.length).sum
 
   def numPcReadPort = allSchdParams.map(_.numPcReadPort).sum
+  def numPcMemReadPort = allExuParams.filter(_.needPc).size
   def numTargetReadPort = allExuParams.count(x => x.needTarget)
 
   def numPregRd(dataCfg: DataConfig) = this.getRfReadSize(dataCfg)

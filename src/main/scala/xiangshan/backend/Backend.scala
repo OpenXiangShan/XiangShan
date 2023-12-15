@@ -289,7 +289,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     case (sink, i) =>
       sink := pcTargetMem.io.toExus(i)
   }
-
+  pcTargetMem.io.pcToDataPath <> dataPath.io.pcFromPcTargetMem
   private val csrio = intExuBlock.io.csrio.get
   csrio.hartId := io.fromTop.hartId
   csrio.fpu.fflags := ctrlBlock.io.robio.csr.fflags

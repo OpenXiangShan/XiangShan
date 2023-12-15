@@ -136,7 +136,7 @@ case class FuConfig (
 
   def hasPredecode: Boolean = Seq(FuType.jmp, FuType.brh, FuType.csr).contains(fuType)
 
-  def needPc: Boolean = Seq(FuType.jmp, FuType.brh, FuType.csr, FuType.fence).contains(fuType)
+  def needPc: Boolean = Seq(FuType.jmp, FuType.brh, FuType.fence).contains(fuType)
 
   def needFPUCtrl: Boolean = {
     import FuType._
