@@ -74,7 +74,7 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
       case _: IntWB => io.wakeUp.map(x => x.valid && x.bits.rfWen && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), io.ldCancel))
       case _: VfWB => io.wakeUp.map(x => x.valid && (x.bits.fpWen || x.bits.vecWen) && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), io.ldCancel))
     }
-    wakeupOH := VecInit(tmp.toSeq).asUInt
+    wakeupOH := (if (io.wakeUp.nonEmpty) VecInit(tmp.toSeq).asUInt else 0.U)
   }
   val wbMask = reqVecToMask(io.wbPregs)
   val allocMask = reqVecToMask(io.allocPregs)
@@ -89,7 +89,7 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
     when(allocMask(idx) || cancelMask(idx) || wbMask(idx) || ldCancelMask(idx)) {
       ldDp := 0.U.asTypeOf(ldDp)
     }.elsewhen(wakeUpMask(idx)) {
-      ldDp := Mux1H(wakeupOHVec(idx), shiftLoadDependency)
+      ldDp := (if (io.wakeUp.nonEmpty) Mux1H(wakeupOHVec(idx), shiftLoadDependency) else 0.U.asTypeOf(ldDp))
     }.otherwise {
       ldDp := VecInit(ldDp.map(x => x(x.getWidth - 2, 0) << 1))
     }

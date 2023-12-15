@@ -37,7 +37,7 @@ class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle 
   val frm = if (params.needSrcFrm) Some(Input(UInt(3.W))) else None
 }
 
-class ExeUnit(exuParams: ExeUnitParams)(implicit p: Parameters) extends LazyModule {
+class ExeUnit(val exuParams: ExeUnitParams)(implicit p: Parameters) extends LazyModule {
   override def shouldBeInlined: Boolean = false
 
   lazy val module = new ExeUnitImp(this)(p, exuParams)

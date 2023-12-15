@@ -8,6 +8,8 @@ import xiangshan.backend.fu.{CSRFileIO, FenceIO}
 import xiangshan.backend.Bundles._
 import xiangshan.backend.issue.SchdBlockParams
 import xiangshan.{HasXSParameter, Redirect, XSBundle}
+import utils._
+import xiangshan.backend.fu.FuConfig.{AluCfg, BrhCfg}
 
 class ExuBlock(params: SchdBlockParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
@@ -37,6 +39,17 @@ class ExuBlockImp(
     exu.io.frm.foreach(exuio => io.frm.get <> exuio)
     exu.io.in <> input
     output <> exu.io.out
+    if (exu.wrapper.exuParams.fuConfigs.contains(AluCfg)){
+      XSPerfAccumulate(s"${(exu.wrapper.exuParams.name)}_fire_cnt", PopCount(exu.io.in.fire))
+    }
+  }
+  val aluFireSeq = exus.filter(_.wrapper.exuParams.fuConfigs.contains(AluCfg)).map(_.io.in.fire)
+  for (i <- 0 until (aluFireSeq.size + 1)){
+    XSPerfAccumulate(s"alu_fire_${i}_cnt", PopCount(aluFireSeq) === i.U)
+  }
+  val brhFireSeq = exus.filter(_.wrapper.exuParams.fuConfigs.contains(BrhCfg)).map(_.io.in.fire)
+  for (i <- 0 until (brhFireSeq.size + 1)) {
+    XSPerfAccumulate(s"brh_fire_${i}_cnt", PopCount(brhFireSeq) === i.U)
   }
 }
 
