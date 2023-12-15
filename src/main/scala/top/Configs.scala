@@ -90,7 +90,7 @@ class MinimalConfig(n: Int = 1) extends Config(
           IntDqSize = 12,
           FpDqSize = 12,
           LsDqSize = 12,
-          IntDqDeqWidth = 4,
+          IntDqDeqWidth = 8,
           FpDqDeqWidth = 4,
           LsDqDeqWidth = 6
         ),

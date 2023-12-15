@@ -24,8 +24,9 @@ import utility._
 import xiangshan._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.Bundles.DynInst
+import xiangshan.backend.fu.FuType
 
-class DispatchQueueIO(enqnum: Int, deqnum: Int)(implicit p: Parameters) extends XSBundle {
+class DispatchQueueIO(enqnum: Int, deqnum: Int, size: Int)(implicit p: Parameters) extends XSBundle {
   val enq = new Bundle {
     // output: dispatch queue can accept new requests
     val canAccept = Output(Bool())
@@ -38,12 +39,14 @@ class DispatchQueueIO(enqnum: Int, deqnum: Int)(implicit p: Parameters) extends 
   val redirect = Flipped(ValidIO(new Redirect))
   val dqFull = Output(Bool())
   val deqNext = Vec(deqnum, Output(new DynInst))  // deqNext >> deq
+  val validDeq0Num = Output(UInt(size.U.getWidth.W))
+  val validDeq1Num = Output(UInt(size.U.getWidth.W))
 }
 
 // dispatch queue: accepts at most enqnum uops from dispatch1 and dispatches deqnum uops at every clock cycle
-class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
+class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dqIndex: Int = 0)(implicit p: Parameters)
   extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
-  val io = IO(new DispatchQueueIO(enqnum, deqnum))
+  val io = IO(new DispatchQueueIO(enqnum, deqnum, size))
 
   val s_invalid :: s_valid :: Nil = Enum(2)
 
@@ -51,6 +54,10 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
   val dataModule = Module(new SyncDataModuleTemplate(new DynInst, size, 2 * deqnum, enqnum))
   val robIdxEntries = Reg(Vec(size, new RobPtr))
   val stateEntries = RegInit(VecInit(Seq.fill(size)(s_invalid)))
+  val validDeq0 = RegInit(VecInit(Seq.fill(size)(false.B)))
+  val validDeq1 = RegInit(VecInit(Seq.fill(size)(false.B)))
+  io.validDeq0Num := PopCount(validDeq0.zip(stateEntries).map{case (v, s) => v && (s===s_valid)})
+  io.validDeq1Num := PopCount(validDeq1.zip(stateEntries).map{case (v, s) => v && (s===s_valid)})
 
   class DispatchQueuePtr extends CircularQueuePtr[DispatchQueuePtr](size)
 
@@ -95,6 +102,14 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
     when (VecInit(validVec).asUInt.orR && canEnqueue) {
       robIdxEntries(i) := Mux1H(validVec, io.enq.req.map(_.bits.robIdx))
       stateEntries(i) := s_valid
+      if (dqIndex == 0) {
+        validDeq0(i) := FuType.isIntDq0Deq0(Mux1H(validVec, io.enq.req.map(_.bits.fuType)))
+        validDeq1(i) := FuType.isIntDq0Deq1(Mux1H(validVec, io.enq.req.map(_.bits.fuType)))
+      }
+      else {
+        validDeq0(i) := FuType.isIntDq1Deq0(Mux1H(validVec, io.enq.req.map(_.bits.fuType)))
+        validDeq1(i) := FuType.isIntDq1Deq1(Mux1H(validVec, io.enq.req.map(_.bits.fuType)))
+      }
     }
   }
   for (i <- 0 until enqnum) {
