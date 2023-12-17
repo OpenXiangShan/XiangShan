@@ -62,6 +62,8 @@ class MMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
     val mem_grant = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
 
+    // This entry is valid.
+    val invalid = Output(Bool())
     //  This entry is selected.
     val select = Input(Bool())
     val atomic = Output(Bool())
@@ -79,6 +81,7 @@ class MMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   val resp_data = Reg(UInt(DataBits.W))
   def storeReq = req.cmd === MemoryOpConstants.M_XWR
 
+  io.invalid := state === s_invalid
   //  Assign default values to output signals.
   io.req.ready := false.B
   io.resp.valid := false.B
@@ -385,7 +388,8 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   }
 
   TLArbiter.lowestFromSeq(edge, mem_acquire, entries.map(_.io.mem_acquire))
-  io.flush.empty := deqPtr === enqPtr
+  val invalid_entries = PopCount(entries.map(_.io.invalid))
+  io.flush.empty := invalid_entries === UncacheBufferSize.U
 
   println(s"Uncahe Buffer Size: $UncacheBufferSize entries")
 

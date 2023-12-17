@@ -20,11 +20,7 @@ object types {
   case class DummyAnnotation(any: Any*) extends firrtl.annotations.NoTargetAnnotation
 
   type ChiselStage = circt.stage.ChiselStage
-  type XiangShanStage = circt.stage.ChiselStage
 
   type RunFirrtlTransformAnnotation = DummyAnnotation
   val RunFirrtlTransformAnnotation = DummyAnnotation
-
-  class PrintControl
-  class PrintModuleName
 }

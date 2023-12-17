@@ -358,42 +358,44 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val stFtqOffset = Wire(Vec(StorePipelineWidth, UInt(log2Up(PredictWidth).W)))
   for (w <- 0 until StorePipelineWidth) {
     val detectedRollback = detectRollback(w)
-    rollbackLqWb(w).valid     := detectedRollback._1 && DelayN(storeIn(w).valid && !storeIn(w).bits.miss, TotalSelectCycles)
-    rollbackLqWb(w).bits.uop  := detectedRollback._2
-    rollbackLqWb(w).bits.flag := w.U
+    rollbackLqWb(w).valid := detectedRollback._1 && DelayN(storeIn(w).valid && !storeIn(w).bits.miss, TotalSelectCycles)
+    rollbackLqWb(w).bits  := detectedRollback._2
     stFtqIdx(w) := DelayN(storeIn(w).bits.uop.ftqPtr, TotalSelectCycles)
     stFtqOffset(w) := DelayN(storeIn(w).bits.uop.ftqOffset, TotalSelectCycles)
   }
-
-  val rollbackLqWbValid = rollbackLqWb.map(x => x.valid && !x.bits.uop.robIdx.needFlush(io.redirect))
-  val rollbackLqWbBits = rollbackLqWb.map(x => x.bits)
 
   // select rollback (part2), generate rollback request, then fire rollback request
   // Note that we use robIdx - 1.U to flush the load instruction itself.
   // Thus, here if last cycle's robIdx equals to this cycle's robIdx, it still triggers the redirect.
 
   // select uop in parallel
-  val lqs = selectPartialOldest(rollbackLqWbValid, rollbackLqWbBits)
-  val rollbackUopExt = lqs._2(0)
-  val rollbackUop = rollbackUopExt.uop
-  val rollbackStFtqIdx = stFtqIdx(rollbackUopExt.flag)
-  val rollbackStFtqOffset = stFtqOffset(rollbackUopExt.flag)
-
-  // check if rollback request is still valid in parallel
-  io.rollback.bits             := DontCare
-  io.rollback.bits.robIdx      := rollbackUop.robIdx
-  io.rollback.bits.ftqIdx      := rollbackUop.ftqPtr
-  io.rollback.bits.stFtqIdx    := rollbackStFtqIdx
-  io.rollback.bits.ftqOffset   := rollbackUop.ftqOffset
-  io.rollback.bits.stFtqOffset := rollbackStFtqOffset
-  io.rollback.bits.level       := RedirectLevel.flush
-  io.rollback.bits.interrupt   := DontCare
-  io.rollback.bits.cfiUpdate   := DontCare
-  io.rollback.bits.cfiUpdate.target := rollbackUop.pc
-  io.rollback.bits.debug_runahead_checkpoint_id := rollbackUop.debugInfo.runahead_checkpoint_id
-  // io.rollback.bits.pc := DontCare
-
-  io.rollback.valid := VecInit(rollbackLqWbValid).asUInt.orR
+  def selectOldestRedirect(xs: Seq[Valid[Redirect]]): Vec[Bool] = {
+    val compareVec = (0 until xs.length).map(i => (0 until i).map(j => isAfter(xs(j).bits.robIdx, xs(i).bits.robIdx)))
+    val resultOnehot = VecInit((0 until xs.length).map(i => Cat((0 until xs.length).map(j =>
+      (if (j < i) !xs(j).valid || compareVec(i)(j)
+      else if (j == i) xs(i).valid
+      else !xs(j).valid || !compareVec(j)(i))
+    )).andR))
+    resultOnehot
+  }
+  val allRedirect = (0 until StorePipelineWidth).map(i => {
+    val redirect = Wire(Valid(new Redirect))
+    redirect.valid := rollbackLqWb(i).valid
+    redirect.bits             := DontCare
+    redirect.bits.isRVC       := rollbackLqWb(i).bits.cf.pd.isRVC
+    redirect.bits.robIdx      := rollbackLqWb(i).bits.robIdx
+    redirect.bits.ftqIdx      := rollbackLqWb(i).bits.ftqPtr
+    redirect.bits.ftqOffset   := rollbackLqWb(i).bits.ftqOffset
+    redirect.bits.stFtqIdx    := stFtqIdx(i)
+    redirect.bits.stFtqOffset := stFtqOffset(i)
+    redirect.bits.level       := RedirectLevel.flush
+    redirect.bits.cfiUpdate.target := rollbackLqWb(i).bits.pc
+    redirect.bits.debug_runahead_checkpoint_id := rollbackLqWb(i).bits.debugInfo.runahead_checkpoint_id
+    redirect
+  })
+  val oldestOneHot = selectOldestRedirect(allRedirect)
+  val oldestRedirect = Mux1H(oldestOneHot, allRedirect)
+  io.rollback := oldestRedirect
 
   // perf cnt
   val canEnqCount = PopCount(io.query.map(_.req.fire))

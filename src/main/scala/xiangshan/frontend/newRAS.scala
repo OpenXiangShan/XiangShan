@@ -48,7 +48,7 @@ object RASPtr {
 
 class RASMeta(implicit p: Parameters) extends XSBundle {
   val ssp = UInt(log2Up(RasSize).W)
-  val sctr = UInt(log2Up(RasCtrSize).W)
+  val sctr = UInt(RasCtrSize.W)
   val TOSW = new RASPtr
   val TOSR = new RASPtr
   val NOS = new RASPtr
@@ -108,20 +108,20 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       val commit_meta_TOSR = Input(new RASPtr)
       // for debug purpose only
       val commit_meta_ssp = Input(UInt(log2Up(RasSize).W))
-      val commit_meta_sctr = Input(UInt(log2Up(RasCtrSize).W))
+      val commit_meta_sctr = Input(UInt(RasCtrSize.W))
 
       val redirect_valid = Input(Bool())
       val redirect_isCall = Input(Bool())
       val redirect_isRet = Input(Bool())
       val redirect_meta_ssp = Input(UInt(log2Up(RasSize).W))
-      val redirect_meta_sctr = Input(UInt(log2Up(RasCtrSize).W))
+      val redirect_meta_sctr = Input(UInt(RasCtrSize.W))
       val redirect_meta_TOSW = Input(new RASPtr)
       val redirect_meta_TOSR = Input(new RASPtr)
       val redirect_meta_NOS = Input(new RASPtr)
       val redirect_callAddr = Input(UInt(VAddrBits.W))
 
       val ssp = Output(UInt(log2Up(RasSize).W))
-      val sctr = Output(UInt(log2Up(RasCtrSize).W))
+      val sctr = Output(UInt(RasCtrSize.W))
       val nsp = Output(UInt(log2Up(RasSize).W))
       val TOSR = Output(new RASPtr)
       val TOSW = Output(new RASPtr)
@@ -271,7 +271,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     } .elsewhen (io.redirect_valid && io.redirect_isRet) {
       // getTop using redirect Nos as TOSR
       val popRedSsp = Wire(UInt(log2Up(rasSize).W))
-      val popRedSctr = Wire(UInt(log2Up(RasCtrSize).W))
+      val popRedSctr = Wire(UInt(RasCtrSize.W))
       val popRedTOSR = io.redirect_meta_NOS
       val popRedTOSW = io.redirect_meta_TOSW
 
@@ -299,7 +299,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     } .elsewhen (io.spec_pop_valid) {
       // getTop using current Nos as TOSR
       val popSsp = Wire(UInt(log2Up(rasSize).W))
-      val popSctr = Wire(UInt(log2Up(RasCtrSize).W))
+      val popSctr = Wire(UInt(RasCtrSize.W))
       val popTOSR = topNos
       val popTOSW = TOSW
 
@@ -328,7 +328,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
         writeEntry_s3.ctr := Mux(timingTop.retAddr === io.s3_pushAddr && io.s3_meta.sctr < ctrMax, io.s3_meta.sctr + 1.U, 0.U)
       } .elsewhen (io.s3_missed_pop) {
         val popRedSsp_s3 = Wire(UInt(log2Up(rasSize).W))
-        val popRedSctr_s3 = Wire(UInt(log2Up(RasCtrSize).W))
+        val popRedSctr_s3 = Wire(UInt(RasCtrSize.W))
         val popRedTOSR_s3 = io.s3_meta.NOS
         val popRedTOSW_s3 = io.s3_meta.TOSW
 

@@ -16,15 +16,10 @@
 
 package xiangshan.cache
 
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
-import chisel3.util._
+import difftest.common.DifftestMem
+import org.chipsalliance.cde.config.Parameters
 import xiangshan._
-import utils._
-import utility._
-import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
-import freechips.rocketchip.tilelink._
-import device.RAMHelper
 
 class FakeDCache()(implicit p: Parameters) extends XSModule with HasDCacheParameters {
   val io = IO(new DCacheIO)
@@ -32,18 +27,13 @@ class FakeDCache()(implicit p: Parameters) extends XSModule with HasDCacheParame
   io := DontCare
   // to LoadUnit
   for (i <- 0 until LoadPipelineWidth) {
-    val fakeRAM = Module(new RAMHelper(64L * 1024 * 1024 * 1024))
-    fakeRAM.clk   := clock
-    fakeRAM.en    := io.lsu.load(i).resp.valid && !reset.asBool
-    fakeRAM.rIdx  := RegNext((io.lsu.load(i).s1_paddr_dup_dcache - "h80000000".U) >> 3)
-    fakeRAM.wIdx  := 0.U
-    fakeRAM.wdata := 0.U
-    fakeRAM.wmask := 0.U
-    fakeRAM.wen   := false.B
+    val ram = DifftestMem(64L * 1024 * 1024 * 1024, 8)
+    val ren = RegNext(io.lsu.load(i).req.valid)
+    val raddr = ((io.lsu.load(i).s1_paddr_dup_dcache - "h80000000".U) >> 3).asUInt
 
     io.lsu.load(i).req.ready := true.B
-    io.lsu.load(i).resp.valid := RegNext(RegNext(io.lsu.load(i).req.valid) && !io.lsu.load(i).s1_kill)
-    io.lsu.load(i).resp.bits.data := fakeRAM.rdata
+    io.lsu.load(i).resp.valid := RegNext(ren && !io.lsu.load(i).s1_kill)
+    io.lsu.load(i).resp.bits.data := ram.readAndHold(raddr, ren)
     io.lsu.load(i).resp.bits.miss := false.B
     io.lsu.load(i).resp.bits.replay := false.B
     io.lsu.load(i).resp.bits.id := DontCare

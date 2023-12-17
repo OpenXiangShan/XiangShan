@@ -50,6 +50,12 @@ class MemoryRWHelper extends ExtModule with HasExtModuleInline {
   }
 
   val verilogLines = Seq(
+    "import \"DPI-C\" function longint difftest_ram_read(input longint rIdx);",
+    "import \"DPI-C\" function void difftest_ram_write(",
+    "  input  longint index,",
+    "  input  longint data,",
+    "  input  longint mask",
+    ");",
     "module MemoryRWHelper(",
     "  input         clock,",
     "  input         reset,",
@@ -62,11 +68,11 @@ class MemoryRWHelper extends ExtModule with HasExtModuleInline {
     "  input         wen",
     ");",
     "",
-    "  assign rdata = (!reset && ren) ? ram_read_helper(1, rIdx) : 64'b0;",
+    "  assign rdata = (!reset && ren) ? difftest_ram_read(rIdx) : 64'b0;",
     "",
     "  always @(posedge clock) begin",
     "    if (!reset && wen) begin",
-    "      ram_write_helper(wIdx, wdata, wmask, 1);",
+    "      difftest_ram_write(wIdx, wdata, wmask);",
     "    end",
     "  end",
     "",

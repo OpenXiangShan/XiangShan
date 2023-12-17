@@ -81,6 +81,7 @@ class MinimalConfig(n: Int = 1) extends Config(
         RabSize = 96,
         FtqSize = 8,
         IBufSize = 16,
+        IBufNBank = 2,
         StoreBufferSize = 4,
         StoreBufferThreshold = 3,
         IssueQueueSize = 8,
@@ -244,6 +245,7 @@ class WithNKBL2
   banks: Int = 1
 ) extends Config((site, here, up) => {
   case XSTileKey =>
+    require(inclusive, "L2 must be inclusive")
     val upParams = up(XSTileKey)
     val l2sets = n * 1024 / banks / ways / 64
     upParams.map(p => p.copy(
@@ -260,7 +262,9 @@ class WithNKBL2
         )),
         reqField = Seq(utility.ReqSourceField()),
         echoField = Seq(huancun.DirtyField()),
-        prefetch = Some(coupledL2.prefetch.PrefetchReceiverParams())
+        prefetch = Some(coupledL2.prefetch.PrefetchReceiverParams()),
+        enablePerf = !site(DebugOptionsKey).FPGAPlatform,
+        elaboratedTopDown = !site(DebugOptionsKey).FPGAPlatform
       )),
       L2NBanks = banks
     ))
@@ -296,7 +300,8 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
         tagECC = Some("secded"),
         dataECC = Some("secded"),
         simulation = !site(DebugOptionsKey).FPGAPlatform,
-        prefetch = Some(huancun.prefetch.L3PrefetchReceiverParams())
+        prefetch = Some(huancun.prefetch.L3PrefetchReceiverParams()),
+        tpmeta = Some(huancun.prefetch.DefaultTPmetaParameters())
       ))
     )
 })
@@ -333,14 +338,14 @@ class WithFuzzer extends Config((site, here, up) => {
 
 class MinimalAliasDebugConfig(n: Int = 1) extends Config(
   new WithNKBL3(512, inclusive = false) ++
-    new WithNKBL2(256, inclusive = false) ++
+    new WithNKBL2(256, inclusive = true) ++
     new WithNKBL1D(128) ++
     new MinimalConfig(n)
 )
 
 class MediumConfig(n: Int = 1) extends Config(
   new WithNKBL3(4096, inclusive = false, banks = 4)
-    ++ new WithNKBL2(512, inclusive = false)
+    ++ new WithNKBL2(512, inclusive = true)
     ++ new WithNKBL1D(128)
     ++ new BaseConfig(n)
 )
@@ -351,8 +356,8 @@ class FuzzConfig(dummy: Int = 0) extends Config(
 )
 
 class DefaultConfig(n: Int = 1) extends Config(
-  new WithNKBL3(6 * 1024, inclusive = false, banks = 4, ways = 6)
-    ++ new WithNKBL2(2 * 512, inclusive = false, banks = 4)
-    ++ new WithNKBL1D(128)
+  new WithNKBL3(16 * 1024, inclusive = false, banks = 4, ways = 16)
+    ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4)
+    ++ new WithNKBL1D(64, ways = 4)
     ++ new BaseConfig(n)
 )

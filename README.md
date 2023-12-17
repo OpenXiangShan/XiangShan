@@ -66,8 +66,8 @@ Some of the key directories are shown below.
 │       ├── system         # SoC wrapper
 │       ├── top            # top module
 │       ├── utils          # utilization code
-│       ├── xiangshan      # main design code
-│       └── xstransforms   # some useful firrtl transforms
+│       └── xiangshan      # main design code
+│           └── transforms # some useful firrtl transforms
 ├── scripts                # scripts for agile development
 ├── fudian                 # floating unit submodule of XiangShan
 ├── huancun                # L2/L3 cache submodule of XiangShan
@@ -122,14 +122,3 @@ make emu CONFIG=MinimalConfig EMU_THREADS=2 -j10
 ## Troubleshooting Guide
 
 [Troubleshooting Guide](https://github.com/OpenXiangShan/XiangShan/wiki/Troubleshooting-Guide)
-
-## Acknowledgement
-
-In the development of XiangShan, some sub-modules from the open-source community are employed. All relevant usage is listed below.
-
-| Sub-module         | Source                                                       | Detail                                                       |
-| ------------------ | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| L2 Cache/LLC       | [Sifive block-inclusivecache](https://github.com/ucb-bar/block-inclusivecache-sifive) | Our new L2/L3 design are inspired by Sifive's `block-inclusivecache`. |
-| Diplomacy/TileLink | [Rocket-chip](https://github.com/chipsalliance/rocket-chip)  | We reused the Diplomacy framework and TileLink utility that exist in rocket-chip to negotiate bus. |
-
-We are grateful for the support of the open-source community and encourage other open-source projects to reuse our code within the scope of the [license](LICENSE).

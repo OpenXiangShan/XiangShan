@@ -1,0 +1,17 @@
+src/main/scala/xiangshan/frontend/ @chenguokai
+src/main/scala/xiangshan/frontend/icache @chenguokai @ssszwic
+src/main/scala/xiangshan/frontend/IFU.scala @chenguokai @ssszwic
+src/main/scala/xiangshan/frontend/BPU.scala @chenguokai @eastonman
+src/main/scala/xiangshan/frontend/Composer.scala @chenguokai @eastonman
+src/main/scala/xiangshan/frontend/FauFTB.scala @chenguokai @eastonman
+src/main/scala/xiangshan/frontend/Frontend.scala @chenguokai @eastonman
+src/main/scala/xiangshan/frontend/FrontendBundle.scala @chenguokai @eastonman
+src/main/scala/xiangshan/frontend/FTB.scala @chenguokai @eastonman
+src/main/scala/xiangshan/frontend/IBuffer.scala @chenguokai @eastonman
+src/main/scala/xiangshan/frontend/ITTAGE.scala @chenguokai @eastonman
+src/main/scala/xiangshan/frontend/newRAS.scala @chenguokai @eastonman
+src/main/scala/xiangshan/frontend/SC.scala @chenguokai @eastonman
+src/main/scala/xiangshan/frontend/Tage.scala @chenguokai @eastonman
+src/main/scala/xiangshan/frontend/WrBypass.scala @chenguokai @eastonman
+src/main/scala/xiangshan/frontend/NewFtq.scala @chenguokai @Gao-Zeyu
+src/main/scala/xiangshan/frontend/PreDecode.scala @chenguokai @ssszwic

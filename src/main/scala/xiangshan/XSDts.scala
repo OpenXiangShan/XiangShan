@@ -98,9 +98,9 @@ trait HasXSDts {
   ResourceBinding {
     Resource(device, "reg").bind(ResourceAddress(coreParams.HartId))
     val int_resources = (
-      clint_int_sink.edges.in.flatMap(_.source.sources) ++
-      plic_int_sink.edges.in.flatMap(_.source.sources) ++
-      debug_int_sink.edges.in.flatMap(_.source.sources)
+      memBlock.clint_int_sink.edges.in.flatMap(_.source.sources) ++
+      memBlock.plic_int_sink.edges.in.flatMap(_.source.sources) ++
+      memBlock.debug_int_sink.edges.in.flatMap(_.source.sources)
       ).flatMap {
       s =>
         println(s.resources.map(_.key), s.range)

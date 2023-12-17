@@ -155,11 +155,13 @@ class CtrlBlockImp(
   redirectGen.io.memPredPcRead.data := pcMem.io.rdata(pcMemRdIndexes("memPred").head).getPc(RegNext(redirectGen.io.memPredPcRead.offset))
 
   for ((pcMemIdx, i) <- pcMemRdIndexes("load").zipWithIndex) {
+    // load read pcMem (s0) -> get rdata (s1) -> reg next in Memblock (s2) -> reg next in Memblock (s3) -> consumed by pf (s3)
     pcMem.io.raddr(pcMemIdx) := io.memLdPcRead(i).ptr.value
     io.memLdPcRead(i).data := pcMem.io.rdata(pcMemIdx).getPc(RegNext(io.memLdPcRead(i).offset))
   }
 
   for ((pcMemIdx, i) <- pcMemRdIndexes("hybrid").zipWithIndex) {
+    // load read pcMem (s0) -> get rdata (s1) -> reg next in Memblock (s2) -> reg next in Memblock (s3) -> consumed by pf (s3)
     pcMem.io.raddr(pcMemIdx) := io.memHyPcRead(i).ptr.value
     io.memHyPcRead(i).data := pcMem.io.rdata(pcMemIdx).getPc(RegNext(io.memHyPcRead(i).offset))
   }
@@ -503,9 +505,22 @@ class CtrlBlockImp(
     val perfEventsEu1     = Input(Vec(6, new PerfEvent))
   })
 
-  val allPerfEvents = Seq(decode, rename, dispatch, intDq, fpDq, lsDq, rob).flatMap(_.getPerf)
-  val hpmEvents = allPerfEvents ++ perfinfo.perfEventsEu0 ++ perfinfo.perfEventsEu1 ++ perfinfo.perfEventsRs
-  val perfEvents = HPerfMonitor(csrevents, hpmEvents).getPerfEvents
+  val perfFromUnits = Seq(decode, rename, dispatch, intDq, fpDq, lsDq, rob).flatMap(_.getPerfEvents)
+  val perfFromIO    = perfinfo.perfEventsEu0.map(x => ("perfEventsEu0", x.value)) ++
+                        perfinfo.perfEventsEu1.map(x => ("perfEventsEu1", x.value)) ++
+                        perfinfo.perfEventsRs.map(x => ("perfEventsRs", x.value))
+  val perfBlock     = Seq()
+  // let index = 0 be no event
+  val allPerfEvents = Seq(("noEvent", 0.U)) ++ perfFromUnits ++ perfFromIO ++ perfBlock
+
+  if (printEventCoding) {
+    for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
+      println("CtrlBlock perfEvents Set", name, inc, i)
+    }
+  }
+
+  val allPerfInc = allPerfEvents.map(_._2.asTypeOf(new PerfEvent))
+  val perfEvents = HPerfMonitor(csrevents, allPerfInc).getPerfEvents
   generatePerfEvent()
 }
 

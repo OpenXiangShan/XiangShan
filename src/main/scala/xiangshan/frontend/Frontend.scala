@@ -69,7 +69,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val icache       = outer.icache.module
   val bpu     = Module(new Predictor)
   val ifu     = Module(new NewIFU)
-  val ibuffer =  Module(new Ibuffer)
+  val ibuffer =  Module(new IBuffer)
   val ftq = Module(new Ftq)
 
   val needFlush = RegNext(io.backend.toFtq.redirect.valid)
@@ -90,7 +90,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   // bpu ctrl
   bpu.io.ctrl := csrCtrl.bp_ctrl
-  bpu.io.reset_vector := io.reset_vector
+  bpu.io.reset_vector := RegNext(io.reset_vector)
 
 // pmp
   val prefetchPipeNum = ICacheParameters().prefetchPipeNum
@@ -118,7 +118,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val itlb_ptw = Wire(new VectorTlbPtwIO(coreParams.itlbPortNum))
   itlb_ptw.connect(itlb.io.ptw)
   val itlbRepeater1 = PTWFilter(itlbParams.fenceDelay, itlb_ptw, sfence, tlbCsr, l2tlbParams.ifilterSize)
-  io.ptw <> itlbRepeater1.io.ptw
+  val itlbRepeater2 = PTWRepeaterNB(passReady = false, itlbParams.fenceDelay, itlbRepeater1.io.ptw, io.ptw, sfence, tlbCsr)
 
   icache.io.prefetch <> ftq.io.toPrefetch
 
@@ -321,7 +321,6 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   io.backend.cfVec <> ibuffer.io.out
   io.backend.stallReason <> ibuffer.io.stallReason
-  dontTouch(io.backend.stallReason)
 
   instrUncache.io.req   <> ifu.io.uncacheInter.toUncache
   ifu.io.uncacheInter.fromUncache <> instrUncache.io.resp
@@ -341,7 +340,19 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   pfevent.io.distribute_csr := io.csrCtrl.distribute_csr
   val csrevents = pfevent.io.hpmevent.take(8)
 
-  val allPerfEvents = Seq(ifu, ibuffer, icache, ftq, bpu).flatMap(_.getPerf)
-  override val perfEvents = HPerfMonitor(csrevents, allPerfEvents).getPerfEvents
+  val perfFromUnits = Seq(ifu, ibuffer, icache, ftq, bpu).flatMap(_.getPerfEvents)
+  val perfFromIO    = Seq()
+  val perfBlock     = Seq()
+  // let index = 0 be no event
+  val allPerfEvents = Seq(("noEvent", 0.U)) ++ perfFromUnits ++ perfFromIO ++ perfBlock
+
+  if (printEventCoding) {
+    for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
+      println("Frontend perfEvents Set", name, inc, i)
+    }
+  }
+
+  val allPerfInc = allPerfEvents.map(_._2.asTypeOf(new PerfEvent))
+  override val perfEvents = HPerfMonitor(csrevents, allPerfInc).getPerfEvents
   generatePerfEvent()
 }

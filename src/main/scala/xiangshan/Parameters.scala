@@ -86,9 +86,9 @@ case class XSCoreParameters
   EnableCommitGHistDiff: Boolean = true,
   UbtbSize: Int = 256,
   FtbSize: Int = 2048,
-  RasSize: Int = 32,
-  RasSpecSize: Int = 64,
-  RasCtrSize: Int = 8,
+  RasSize: Int = 16,
+  RasSpecSize: Int = 32,
+  RasCtrSize: Int = 3,
   CacheLineSize: Int = 512,
   FtbWays: Int = 4,
   TageTableInfos: Seq[Tuple3[Int,Int,Int]] =
@@ -141,7 +141,9 @@ case class XSCoreParameters
 
       (preds, ras.io.out)
     }),
+  ICacheECCForceError: Boolean = false,
   IBufSize: Int = 48,
+  IBufNBank: Int = 6, // IBuffer bank amount, should divide IBufSize
   DecodeWidth: Int = 6,
   RenameWidth: Int = 6,
   CommitWidth: Int = 6,
@@ -208,7 +210,7 @@ case class XSCoreParameters
   VsUopSize: Int = 32,
   // ==============================
   UncacheBufferSize: Int = 4,
-  EnableLoadToLoadForward: Boolean = true,
+  EnableLoadToLoadForward: Boolean = false,
   EnableFastForward: Boolean = true,
   EnableLdVioCheckAfterReset: Boolean = true,
   EnableSoftPrefetchAfterReset: Boolean = true,
@@ -535,7 +537,9 @@ trait HasXSParameter {
   val CacheLineSize = coreParams.CacheLineSize
   val CacheLineHalfWord = CacheLineSize / 16
   val ExtHistoryLength = HistoryLength + 64
+  val ICacheECCForceError = coreParams.ICacheECCForceError
   val IBufSize = coreParams.IBufSize
+  val IBufNBank = coreParams.IBufNBank
   val DecodeWidth = coreParams.DecodeWidth
   val RenameWidth = coreParams.RenameWidth
   val CommitWidth = coreParams.CommitWidth
@@ -576,6 +580,7 @@ trait HasXSParameter {
 
   val NumRedirect = backendParams.numRedirect
   val BackendRedirectNum = NumRedirect + 2 //2: ldReplay + Exception
+  val FtqRedirectAheadNum = exuParameters.AluCnt
   val LoadPipelineWidth = coreParams.LoadPipelineWidth
   val StorePipelineWidth = coreParams.StorePipelineWidth
   val VecLoadPipelineWidth = coreParams.VecLoadPipelineWidth
@@ -657,6 +662,7 @@ trait HasXSParameter {
   val numCSRPCntCtrl     = 8
   val numCSRPCntLsu      = 8
   val numCSRPCntHc       = 5
+  val printEventCoding   = true
 
   // Parameters for Sdtrig extension
   protected val TriggerNum = 4

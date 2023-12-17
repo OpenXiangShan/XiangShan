@@ -21,7 +21,6 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
-import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
 import system.HasSoCParameter
 import utils._
@@ -53,16 +52,15 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   with HasXSParameter
 {
   override def shouldBeInlined: Boolean = false
-  // interrupt sinks
-  val clint_int_sink = IntSinkNode(IntSinkPortSimple(1, 2))
-  val debug_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
-  val plic_int_sink = IntSinkNode(IntSinkPortSimple(2, 1))
   // outer facing nodes
   val frontend = LazyModule(new Frontend())
   val csrOut = BundleBridgeSource(Some(() => new DistributedCSRIO()))
   val backend = LazyModule(new Backend(backendParams))
 
   val memBlock = LazyModule(new MemBlock)
+
+  memBlock.frontendBridge.icache_node := frontend.icache.clientNode
+  memBlock.frontendBridge.instr_uncache_node := frontend.instrUncache.clientNode
 }
 
 class XSCore()(implicit p: config.Parameters) extends XSCoreBase
@@ -239,6 +237,10 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     )
   )
 
-  ResetGen(resetTree, reset, !debugOpts.FPGAPlatform)
+  // ResetGen(resetTree, reset, !debugOpts.FPGAPlatform)
+  if (debugOpts.FPGAPlatform) {
+    frontend.reset := memBlock.reset_io_frontend
+    backend.reset := memBlock.reset_io_backend
+  }
 
 }

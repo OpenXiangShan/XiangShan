@@ -19,7 +19,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config._
 import xiangshan._
-import xiangshan.backend.rob.{RobLsqIO, RobPtr}
+import xiangshan.backend.rob.{RobPtr, RobLsqIO}
 import xiangshan.ExceptionNO._
 import xiangshan.cache._
 import utils._
@@ -275,12 +275,12 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
 
   // set trigger default
   entries.foreach {
-    case (e) => 
+    case (e) =>
       e.io.trigger.hitLoadAddrTriggerHitVec := VecInit(Seq.fill(TriggerNum)(false.B))
   }
 
   io.trigger.foreach {
-    case (t) => 
+    case (t) =>
       t.lqLoadAddrTriggerHitVec := VecInit(Seq.fill(TriggerNum)(false.B))
   }
 
@@ -381,7 +381,7 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
   // uncache Writeback
   AddPipelineReg(ldout, io.ldout(0), false.B)
 
-  io.ld_raw_data(0)      := RegNext(ld_raw_data)
+  io.ld_raw_data(0)      := RegEnable(ld_raw_data, ldout.fire)
   io.trigger(0).lqLoadAddrTriggerHitVec := RegNext(lqLoadAddrTriggerHitVec)
 
   for (i <- 0 until LoadPipelineWidth) {
@@ -427,48 +427,41 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
   // stage 2:               lq
   //                        |
   //                     rollback req
-  def selectOldest[T <: DynInst](valid: Seq[Bool], bits: Seq[T]): (Seq[Bool], Seq[T]) = {
-    assert(valid.length == bits.length)
-    if (valid.length == 0 || valid.length == 1) {
-      (valid, bits)
-    } else if (valid.length == 2) {
-      val res = Seq.fill(2)(Wire(ValidIO(chiselTypeOf(bits(0)))))
-      for (i <- res.indices) {
-        res(i).valid := valid(i)
-        res(i).bits := bits(i)
-      }
-      val oldest = Mux(valid(0) && valid(1), Mux(isAfter(bits(0).robIdx, bits(1).robIdx), res(1), res(0)), Mux(valid(0) && !valid(1), res(0), res(1)))
-      (Seq(oldest.valid), Seq(oldest.bits))
-    } else {
-      val left = selectOldest(valid.take(valid.length / 2), bits.take(bits.length / 2))
-      val right = selectOldest(valid.takeRight(valid.length - (valid.length / 2)), bits.takeRight(bits.length - (bits.length / 2)))
-      selectOldest(left._1 ++ right._1, left._2 ++ right._2)
-    }
+  def selectOldestRedirect(xs: Seq[Valid[Redirect]]): Vec[Bool] = {
+    val compareVec = (0 until xs.length).map(i => (0 until i).map(j => isAfter(xs(j).bits.robIdx, xs(i).bits.robIdx)))
+    val resultOnehot = VecInit((0 until xs.length).map(i => Cat((0 until xs.length).map(j =>
+      (if (j < i) !xs(j).valid || compareVec(i)(j)
+      else if (j == i) xs(i).valid
+      else !xs(j).valid || !compareVec(j)(i))
+    )).andR))
+    resultOnehot
   }
-  def detectRollback() = {
-    val reqNeedCheck = VecInit((0 until LoadPipelineWidth).map(w =>
-      s2_enqueue(w) && !enqValidVec(w)
-    ))
-    val reqSelUops = VecInit(s2_req.map(_.uop))
-    val reqSelect = selectOldest(reqNeedCheck, reqSelUops)
-    (RegNext(reqSelect._1(0)), RegNext(reqSelect._2(0)))
-  }
-
-  val (rollbackValid, rollbackUop) = detectRollback()
-  io.rollback.bits           := DontCare
-  io.rollback.bits.robIdx    := rollbackUop.robIdx
-  io.rollback.bits.ftqIdx    := rollbackUop.ftqPtr
-  io.rollback.bits.ftqOffset := rollbackUop.ftqOffset
-  io.rollback.bits.level     := RedirectLevel.flush
-  io.rollback.bits.cfiUpdate.target := rollbackUop.pc
-  io.rollback.bits.debug_runahead_checkpoint_id := rollbackUop.debugInfo.runahead_checkpoint_id
-
+  val reqNeedCheck = VecInit((0 until LoadPipelineWidth).map(w =>
+    s2_enqueue(w) && !enqValidVec(w)
+  ))
+  val reqSelUops = VecInit(s2_req.map(_.uop))
+  val allRedirect = (0 until LoadPipelineWidth).map(i => {
+    val redirect = Wire(Valid(new Redirect))
+    redirect.valid := reqNeedCheck(i)
+    redirect.bits             := DontCare
+    redirect.bits.isRVC       := reqSelUops(i).cf.pd.isRVC
+    redirect.bits.robIdx      := reqSelUops(i).robIdx
+    redirect.bits.ftqIdx      := reqSelUops(i).cf.ftqPtr
+    redirect.bits.ftqOffset   := reqSelUops(i).cf.ftqOffset
+    redirect.bits.level       := RedirectLevel.flush
+    redirect.bits.cfiUpdate.target := reqSelUops(i).cf.pc
+    redirect.bits.debug_runahead_checkpoint_id := reqSelUops(i).debugInfo.runahead_checkpoint_id
+    redirect
+  })
+  val oldestOneHot = selectOldestRedirect(allRedirect)
+  val oldestRedirect = Mux1H(oldestOneHot, allRedirect)
   val lastCycleRedirect = RegNext(io.redirect)
   val lastLastCycleRedirect = RegNext(lastCycleRedirect)
-  io.rollback.valid := rollbackValid &&
-                      !rollbackUop.robIdx.needFlush(io.redirect) &&
-                      !rollbackUop.robIdx.needFlush(lastCycleRedirect) &&
-                      !rollbackUop.robIdx.needFlush(lastLastCycleRedirect)
+  io.rollback.valid := RegNext(oldestRedirect.valid &&
+                      !oldestRedirect.bits.robIdx.needFlush(io.redirect) &&
+                      !oldestRedirect.bits.robIdx.needFlush(lastCycleRedirect) &&
+                      !oldestRedirect.bits.robIdx.needFlush(lastLastCycleRedirect))
+  io.rollback.bits := RegNext(oldestRedirect.bits)
 
   //  perf counter
   val validCount = freeList.io.validCount

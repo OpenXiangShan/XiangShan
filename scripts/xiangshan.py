@@ -78,7 +78,7 @@ class XSArgs(object):
         self.trace = 1 if args.trace or not args.disable_fork and not args.trace_fst else None
         self.trace_fst = "fst" if args.trace_fst else None
         self.config = args.config
-        self.mfc = 1 if args.mfc else None
+        self.is_mfc = 1 if args.mfc else None
         # emu arguments
         self.max_instr = args.max_instr
         self.ram_size = args.ram_size
@@ -126,7 +126,7 @@ class XSArgs(object):
             (self.trace_fst,     "EMU_TRACE"),
             (self.config,        "CONFIG"),
             (self.num_cores,     "NUM_CORES"),
-            (self.mfc,           "MFC")
+            (self.is_mfc,        "MFC")
         ]
         args = filter(lambda arg: arg[0] is not None, makefile_args)
         return args
@@ -250,7 +250,7 @@ class XiangShan(object):
         fork_args = "--enable-fork" if self.args.fork else ""
         diff_args = "--no-diff" if self.args.disable_diff else ""
         chiseldb_args = "--dump-db" if not self.args.disable_db else ""
-        return_code = self.__exec_cmd(f'{numa_args} $NOOP_HOME/build/emu -i {workload} {emu_args} {fork_args} {diff_args} {chiseldb_args}')
+        return_code = self.__exec_cmd(f'ulimit -s {32 * 1024}; {numa_args} $NOOP_HOME/build/emu -i {workload} {emu_args} {fork_args} {diff_args} {chiseldb_args}')
         return return_code
 
     def run_simv(self, workload):
@@ -487,6 +487,7 @@ if __name__ == "__main__":
     parser.add_argument('--trace', action='store_true', help='enable vcd waveform')
     parser.add_argument('--trace-fst', action='store_true', help='enable fst waveform')
     parser.add_argument('--config', nargs='?', type=str, help='config')
+    parser.add_argument('--mfc', action='store_true', help='use mfc')
     # emu arguments
     parser.add_argument('--numa', action='store_true', help='use numactl')
     parser.add_argument('--diff', nargs='?', default="./ready-to-run/riscv64-nemu-interpreter-so", type=str, help='nemu so')
@@ -495,7 +496,6 @@ if __name__ == "__main__":
     parser.add_argument('--no-diff', action='store_true', help='disable difftest')
     parser.add_argument('--ram-size', nargs='?', type=str, help='manually set simulation memory size (8GB by default)')
     parser.add_argument('--no-db', action='store_true', help='disable chiseldb dump')
-    parser.add_argument('--mfc', action='store_true', help='enable MFC')
 
     args = parser.parse_args()
 

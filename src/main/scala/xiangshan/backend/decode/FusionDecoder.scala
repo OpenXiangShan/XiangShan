@@ -658,9 +658,6 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
       XSPerfAccumulate(s"case_${f.fusionName}_$i", instrPairValid && !thisCleared && v && lastFire)
     }
     XSPerfAccumulate(s"conflict_fusion_$i", instrPairValid && thisCleared && fusionVec.asUInt.orR && lastFire)
-
-    XSDebug(out.valid, p"[fusion] valid ${i}, outvalid: ${out.bits.fuType.valid} ${out.bits.fuOpType.valid} ${out.bits.src2Type.valid} ${out.bits.lsrc2.valid} ${out.bits.selImm.valid}\n")
-    XSDebug(out.valid, p"[fusion] valid ${i}, outbits: ${out.bits.fuType.bits} ${out.bits.fuOpType.bits} ${out.bits.src2Type.bits} ${out.bits.lsrc2.bits} ${out.bits.selImm.bits}\n")
   }
 
   XSPerfAccumulate("fused_instr", PopCount(io.out.zipWithIndex.map{ case (x, i) => x.valid && RegNext(io.in(i).valid && io.inReady(i)) }))

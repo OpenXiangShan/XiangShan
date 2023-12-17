@@ -341,14 +341,16 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   // prefetch related
   io.lsq_replenish.miss := io.dcache.resp.fire && io.dcache.resp.bits.miss // miss info
 
-  io.prefetch_train.bits.fromLsPipelineBundle(s2_in)
+  // RegNext prefetch train for better timing
+  // ** Now, prefetch train is valid at store s3 **
+  io.prefetch_train.bits.fromLsPipelineBundle(s2_in, latch = true)
   // override miss bit
-  io.prefetch_train.bits.miss := io.dcache.resp.bits.miss
+  io.prefetch_train.bits.miss := RegNext(io.dcache.resp.bits.miss)
   // TODO: add prefetch and access bit
   io.prefetch_train.bits.meta_prefetch := false.B
   io.prefetch_train.bits.meta_access := false.B
   if(EnableStorePrefetchSMS) {
-    io.prefetch_train.valid := s2_valid && io.dcache.resp.fire && !s2_out.mmio && !s2_in.tlbMiss && !s2_in.isHWPrefetch
+    io.prefetch_train.valid := RegNext(s2_valid && io.dcache.resp.fire && !s2_out.mmio && !s2_in.tlbMiss && !s2_in.isHWPrefetch)
   }else {
     io.prefetch_train.valid := false.B
   }
