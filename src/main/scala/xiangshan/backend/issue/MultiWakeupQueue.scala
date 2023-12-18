@@ -48,6 +48,7 @@ class MultiWakeupQueue[T <: Bundle, TFlush <: Data](
   }
 
   private val pipesValidVec = VecInit(pipes.map(_.io.deq).zip(latencySet).map(_ match {
+    case (deq, 0) => deq.valid
     case (deq, i) => deq.valid && !flushFunc(deq.bits, io.flush, i)
   }))
   private val pipesBitsVec = VecInit(pipes.map(_.io.deq.bits)).map(modificationFunc)
