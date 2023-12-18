@@ -111,6 +111,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     // vector
     val vecWriteback = Flipped(ValidIO(new MemExuOutput(isVector = true)))
     val vecStoreRetire = Flipped(ValidIO(new SqPtr))
+    val vecMMIOReplay = Vec(VecLoadPipelineWidth, DecoupledIO(new LsPipelineBundle()))
 
     // top-down
     val debugTopDown = new LoadQueueTopDownIO
@@ -205,6 +206,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   loadQueue.io.tlb_hint            <> io.tlb_hint
   loadQueue.io.lqEmpty             <> io.lqEmpty
   loadQueue.io.vecWriteback        <> io.vecWriteback
+  loadQueue.io.vecMMIOReplay       <> io.vecMMIOReplay
 
   // rob commits for lsq is delayed for two cycles, which causes the delayed update for deqPtr in lq/sq
   // s0: commit

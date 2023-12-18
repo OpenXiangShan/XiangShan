@@ -1112,7 +1112,13 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_fwd_frm_d_chan_valid = (s3_fwd_frm_d_chan && s3_fwd_data_valid && s3_in.handledByMSHR)
   val s3_fast_rep_canceled = io.replay.valid && io.replay.bits.forward_tlDchannel || !io.dcache.req.ready && !s3_isvec
 
-  io.lsq.ldin.valid := s3_valid && (!s3_fast_rep || s3_fast_rep_canceled) && !s3_in.feedbacked && !s3_isvec
+  // s3 load fast replay
+  io.fast_rep_out.valid := s3_valid && s3_fast_rep && !s3_in.uop.robIdx.needFlush(io.redirect) && !s3_isvec
+  io.fast_rep_out.bits := s3_in
+
+  io.lsq.ldin.valid := s3_valid && (!s3_fast_rep || s3_fast_rep_canceled) && !s3_in.feedbacked
+  // TODO: check this --by hx
+  // io.lsq.ldin.valid := s3_valid && (!s3_fast_rep || !io.fast_rep_out.ready) && !s3_in.feedbacked && !s3_in.lateKill
   io.lsq.ldin.bits := s3_in
   io.lsq.ldin.bits.miss := s3_in.miss && !s3_fwd_frm_d_chan_valid
 
@@ -1271,6 +1277,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.ldout.bits.data   := Mux(s3_valid, s3_ld_data_frm_cache, s3_ld_data_frm_uncache)
   io.ldout.valid       := (s3_out.valid || (io.lsq.uncache.valid && !s3_valid)) && !s3_vecout.isvec
 
+  // TODO: check this --hx
+  // io.ldout.valid       := s3_out.valid && !s3_out.bits.uop.robIdx.needFlush(io.redirect) && !s3_vecout.isvec ||
+  //   io.lsq.uncache.valid && !io.lsq.uncache.bits.uop.robIdx.needFlush(io.redirect) && !s3_out.valid && !io.lsq.uncache.bits.isVls
+
   // s3 load fast replay
   io.fast_rep_out.valid := s3_valid && s3_fast_rep && !s3_isvec
   io.fast_rep_out.bits := s3_in
@@ -1287,10 +1297,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // io.vecldout.bits.redirect := s3_out.bits.redirect
   io.vecldout.bits.debug := s3_out.bits.debug
   io.vecldout.bits.uop := s3_out.bits.uop
-  io.vecldout.valid := s3_vecout.isvec &&
-    (s3_valid && !s3_out.bits.uop.robIdx.needFlush(io.redirect) ||
-      io.lsq.uncache.valid && !io.lsq.uncache.bits.uop.robIdx.needFlush(io.redirect) && !s3_out.valid) &&
-    !io.lsq.ldin.bits.rep_info.need_rep
+  io.vecldout.valid := s3_out.valid && !s3_out.bits.uop.robIdx.needFlush(io.redirect) && s3_vecout.isvec ||
+    io.lsq.uncache.valid && !io.lsq.uncache.bits.uop.robIdx.needFlush(io.redirect) && !s3_out.valid && !io.lsq.uncache.bits.isVls
 
   io.vecReplay.valid := s3_vecout.isvec && s3_valid && !s3_out.bits.uop.robIdx.needFlush(io.redirect) &&
     io.lsq.ldin.bits.rep_info.need_rep

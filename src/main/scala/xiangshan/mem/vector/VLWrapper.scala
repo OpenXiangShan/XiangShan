@@ -34,6 +34,8 @@ class VectorLoadWrapperIOBundle(implicit p: Parameters) extends VLSUBundle {
   val pipeIssue = Vec(VecLoadPipelineWidth, Decoupled(new VecLoadPipeBundle()))
   // loads that fail and need to be replayed
   val pipeReplay = Vec(VecLoadPipelineWidth, Flipped(DecoupledIO(new LsPipelineBundle())))
+  // mmio loads that fail because uncache resources are full
+  val mmioReplay = Vec(VecLoadPipelineWidth, Flipped(DecoupledIO(new LsPipelineBundle())))
   // loads that succeed
   val pipeResult = Vec(VecLoadPipelineWidth, Flipped(DecoupledIO(new VecExuOutput())))
 
@@ -56,6 +58,7 @@ class VectorLoadWrapper(implicit p: Parameters) extends VLSUModule {
   flowQueue.io.flowIn <> uopQueue.io.flowIssue
   flowQueue.io.pipeReplay <> io.pipeReplay
   flowQueue.io.pipeResult <> io.pipeResult
+  flowQueue.io.mmioReplay <> io.mmioReplay
 
   io.uopWriteback <> uopQueue.io.uopWriteback
   io.pipeIssue <> flowQueue.io.pipeIssue

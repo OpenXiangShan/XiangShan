@@ -67,6 +67,8 @@ class VlFlowQueueIOBundle(implicit p: Parameters) extends VLSUBundle {
   val pipeIssue = Vec(VecLoadPipelineWidth, Decoupled(new VecLoadPipeBundle()))
   // loads that fail and need to be replayed
   val pipeReplay = Vec(VecLoadPipelineWidth, Flipped(DecoupledIO(new LsPipelineBundle())))
+  // mmio loads that fail because uncache resources are full
+  val mmioReplay = Vec(VecLoadPipelineWidth, Flipped(DecoupledIO(new LsPipelineBundle())))
   // loads that succeed
   val pipeResult = Vec(VecLoadPipelineWidth, Flipped(DecoupledIO(new VecExuOutput())))
 }
@@ -263,18 +265,20 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
   }
 
   /** Replay **/
-  val requireReplay = io.pipeReplay.map(_.valid)
+  val replays = io.pipeReplay ++ io.mmioReplay
+  val requireReplay = replays.map(_.valid)
+  val replayWidth = replays.length
   // It seems there isn't anything to prohibit accept a replay
-  val allowReplay = WireInit(VecInit(Seq.fill(VecLoadPipelineWidth)(true.B)))
-  val doReplay = Wire(Vec(VecLoadPipelineWidth, Bool()))
+  val allowReplay = WireInit(VecInit(Seq.fill(replayWidth)(true.B)))
+  val doReplay = Wire(Vec(replayWidth, Bool()))
   // handshake
-  for (i <- 0 until VecLoadPipelineWidth) {
-    io.pipeReplay(i).ready := allowReplay(i)
+  for (i <- 0 until replayWidth) {
+    replays(i).ready := allowReplay(i)
     doReplay(i) := requireReplay(i) && allowReplay(i)
   }
   // get the oldest flow ptr
   // TODO: functionalize this
-  val oldestReplayFlowPtr = (doReplay zip io.pipeReplay.map(_.bits.flowPtr)).reduce { (a, b) => (
+  val oldestReplayFlowPtr = (doReplay zip replays.map(_.bits.flowPtr)).reduce { (a, b) => (
     a._1 || b._1,
     Mux(
       a._1 && ((b._1 && isBefore(a._2, b._2)) || !b._1),
