@@ -76,12 +76,25 @@ class Regfile
 
   val mem = Reg(Vec(numPregs, UInt(len.W)))
   for (r <- io.readPorts) {
-    val rdata = if (hasZero) Mux(r.addr === 0.U, 0.U, mem(r.addr)) else mem(r.addr)
-    r.data := RegNext(rdata)
+    r.data := RegNext(mem(r.addr))
   }
-  for (w <- io.writePorts) {
-    when(w.wen) {
-      mem(w.addr) := w.data
+  val writePorts = io.writePorts
+  for (i <- writePorts.indices) {
+    if (i < writePorts.size-1) {
+      val hasSameWrite = writePorts.drop(i + 1).map(w => w.wen && w.addr === writePorts(i).addr && writePorts(i).wen).reduce(_ || _)
+      assert(!hasSameWrite, "RegFile two or more writePorts write same addr")
+    }
+  }
+  for (i <- mem.indices) {
+    if (hasZero && i == 0) {
+      mem(i) := 0.U
+    }
+    else {
+      val wenOH = VecInit(io.writePorts.map(w => w.wen && w.addr === i.U))
+      val wData = Mux1H(wenOH, io.writePorts.map(_.data))
+      when(wenOH.asUInt.orR) {
+        mem(i) := wData
+      }
     }
   }
 
