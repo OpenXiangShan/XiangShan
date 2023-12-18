@@ -36,7 +36,7 @@ class PipeWithFlush[T <: Data, TFlush <: Data] (
   val modifiedBits: Seq[ExuInput] = bits.map(modificationFunc)
 
   for (i <- 0 until latency) {
-    valids(i + 1) := valids(i) && !flushFunc(bits(i), io.flush, i)
+    valids(i + 1) := (if (i==0) valids(i) else valids(i) && !flushFunc(bits(i), io.flush, i))
     when(valids(i)) {
       bits(i + 1) := modifiedBits(i)
     }
