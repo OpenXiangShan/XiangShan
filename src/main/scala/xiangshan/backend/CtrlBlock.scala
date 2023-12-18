@@ -449,7 +449,6 @@ class CtrlBlockImp(
   }
 
   val dqOuts = Seq(io.toIssueBlock.intUops) ++ Seq(io.toIssueBlock.vfUops) ++ Seq(io.toIssueBlock.memUops)
-//  dqOuts.flatten.map(_.bits.pc := 0.U)
   dqOuts.zipWithIndex.foreach { case (dqOut, dqIdx) =>
     dqOut.map(_.bits.pc).zipWithIndex.map{ case (pc, portIdx) =>
       if(params.allSchdParams(dqIdx).numPcReadPort > 0){
