@@ -51,8 +51,8 @@ class JumpDataModule(implicit p: Parameters) extends XSModule {
     !(isJalr || isAuipc) -> ImmUnion.J.toImm32(immMin)
   )), XLEN)
 
-  val snpc = Mux(isRVC, pc + 2.U, pc + 4.U)
-  val target = src1 + offset // NOTE: src1 is (pc/rf(rs1)), src2 is (offset)
+  val snpc = pc + Mux(isRVC, 2.U, 4.U)
+  val target = Mux(JumpOpType.jumpOpisJalr(func), src1, pc) + offset // NOTE: src1 is (pc/rf(rs1)), src2 is (offset)
 
   // RISC-V spec for JALR:
   // The target address is obtained by adding the sign-extended 12-bit I-immediate to the register rs1,
