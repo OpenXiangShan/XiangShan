@@ -1061,6 +1061,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   uncache.io.enableOutstanding := io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable
   uncache.io.hartId := io.hartId
   lsq.io.uncacheOutstanding := io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable
+  vsFlowQueue.io.uncacheOutstanding := io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable
 
   // Lsq
   io.mem_to_ooo.lsqio.mmio       := lsq.io.rob.mmio
@@ -1080,9 +1081,72 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.mem_to_ooo.lsqio.lqCanAccept  := lsq.io.lqCanAccept
   io.mem_to_ooo.lsqio.sqCanAccept  := lsq.io.sqCanAccept
   // lsq.io.uncache        <> uncache.io.lsq
-  AddPipelineReg(lsq.io.uncache.req, uncache.io.lsq.req, false.B)
-  AddPipelineReg(uncache.io.lsq.resp, lsq.io.uncache.resp, false.B)
+  val s_idle :: s_scalar_uncache :: s_vector_uncache :: Nil = Enum(3)
+  val uncacheState = RegInit(s_idle)
+  val uncacheReq = Wire(Decoupled(new UncacheWordReq))
+  val uncacheResp = Wire(Decoupled(new UncacheWordResp))
+
+  uncacheReq.bits := DontCare
+  uncacheReq.valid := false.B
+  uncacheReq.ready := false.B
+  uncacheResp.bits := DontCare
+  uncacheResp.valid := false.B
+  uncacheResp.ready := false.B
+  lsq.io.uncache.req.ready := false.B
+  lsq.io.uncache.resp.valid := false.B
+  lsq.io.uncache.resp.bits := DontCare
+  vsFlowQueue.io.uncache.req.ready := false.B
+  vsFlowQueue.io.uncache.resp.valid := false.B
+  vsFlowQueue.io.uncache.resp.bits := DontCare
+
+  switch (uncacheState) {
+    is (s_idle) {
+      when (uncacheReq.fire) {
+        when (lsq.io.uncache.req.valid) {
+          val isStore = lsq.io.uncache.req.bits.cmd === MemoryOpConstants.M_XWR
+          when (!isStore || !io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable) {
+            uncacheState := s_scalar_uncache
+          }
+        }.otherwise {
+          // val isStore = vsFlowQueue.io.uncache.req.bits.cmd === MemoryOpConstants.M_XWR
+          when (!io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable) {
+            uncacheState := s_vector_uncache
+          }
+        }
+      }
+    }
+
+    is (s_scalar_uncache) {
+      when (uncacheResp.fire) {
+        uncacheState := s_idle
+      }
+    }
+
+    is (s_vector_uncache) {
+      when (uncacheResp.fire) {
+        uncacheState := s_idle
+      }
+    }
+  }
+
+  when (lsq.io.uncache.req.valid) {
+    uncacheReq <> lsq.io.uncache.req
+  }.elsewhen (vsFlowQueue.io.uncache.req.valid) {
+    uncacheReq <> vsFlowQueue.io.uncache.req
+  }
+  when (io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable) {
+    uncacheResp <> lsq.io.uncache.resp
+  }.otherwise {
+    when (uncacheState === s_scalar_uncache) {
+      uncacheResp <> lsq.io.uncache.resp
+    }.elsewhen (uncacheState === s_vector_uncache) {
+      uncacheResp <> vsFlowQueue.io.uncache.resp
+    }
+  }
   // delay dcache refill for 1 cycle for better timing
+  AddPipelineReg(uncacheReq, uncache.io.lsq.req, false.B)
+  AddPipelineReg(uncache.io.lsq.resp, uncacheResp, false.B)
+
   lsq.io.refill         := delayedDcacheRefill
   lsq.io.release        := dcache.io.lsu.release
   lsq.io.lqCancelCnt <> io.mem_to_ooo.lqCancelCnt
@@ -1124,6 +1188,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val vecIssuePort = io.ooo_to_mem.issueVldu.head
   vlWrapper.io.loadRegIn.valid := vecIssuePort.valid && FuType.isVLoad(vecIssuePort.bits.uop.fuType)
   vlWrapper.io.loadRegIn.bits := vecIssuePort.bits
+  vlWrapper.io.mmioReplay <> lsq.io.vecMMIOReplay
   vsUopQueue.io.storeIn.valid := vecIssuePort.valid && FuType.isVStore(vecIssuePort.bits.uop.fuType)
   vsUopQueue.io.storeIn.bits := vecIssuePort.bits
   vecIssuePort.ready := vlWrapper.io.loadRegIn.ready && vsUopQueue.io.storeIn.ready

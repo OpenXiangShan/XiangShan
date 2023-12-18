@@ -696,6 +696,8 @@ object Bundles {
     val vdIdx = if (isVector) Some(UInt(3.W)) else None // TODO: parameterize width
     val vdIdxInField = if (isVector) Some(UInt(3.W)) else None
     val debug = new DebugBundle
+
+    def isVls = FuType.isVls(uop.fuType)
   }
 
   class MemMicroOpRbExt(implicit p: Parameters) extends XSBundle {
