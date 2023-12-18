@@ -408,7 +408,11 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
 
   // update writebackPtr
   for (i <- 0 until VecStorePipelineWidth) {
-    writebackPtr(i) := writebackPtr(i) + writebackCount
+    when (io.redirect.valid && flowCancelCount > distanceBetween(enqPtr(0), writebackPtr(0))) {
+      writebackPtr(i) := enqPtr(i) - flowCancelCount
+    } .otherwise {
+      writebackPtr(i) := writebackPtr(i) + writebackCount
+    }
   }
 
   for (i <- 0 until VecStorePipelineWidth) {
