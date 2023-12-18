@@ -229,7 +229,10 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
     val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
 
     // rollback
+    // For scalar uncache, rollback from frontend when uncache buffer is full
     val rollback = Output(Valid(new Redirect))
+    // For vector uncache, rollback from flow queue when uncache buffer is full
+    val vecReplay = Vec(VecLoadPipelineWidth, DecoupledIO(new LsPipelineBundle()))
   })
 
   val entries = Seq.tabulate(LoadUncacheBufferSize)(i => Module(new UncacheBufferEntry(i)))
@@ -447,7 +450,7 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
   }
   def detectRollback() = {
     val reqNeedCheck = VecInit((0 until LoadPipelineWidth).map(w =>
-      s2_enqueue(w) && !enqValidVec(w)
+      s2_enqueue(w) && !enqValidVec(w) && !s2_req(w).isvec
     ))
     val reqSelUops = VecInit(s2_req.map(_.uop))
     val reqSelect = selectOldest(reqNeedCheck, reqSelUops)
@@ -469,6 +472,23 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
                       !rollbackUop.robIdx.needFlush(io.redirect) &&
                       !rollbackUop.robIdx.needFlush(lastCycleRedirect) &&
                       !rollbackUop.robIdx.needFlush(lastLastCycleRedirect)
+  
+  io.vecReplay.zipWithIndex.foreach { case (x, i) =>
+    val req = s2_req(i)
+    x.valid := s2_enqueue(i) && !enqValidVec(i) && req.isvec
+    x.bits := DontCare
+    x.bits.uop := req.uop
+    x.bits.vaddr := req.vaddr
+    x.bits.paddr := req.paddr
+    x.bits.mask := req.mask
+    x.bits.mmio := true.B
+    x.bits.isvec := true.B
+    x.bits.uop_unit_stride_fof := req.uop_unit_stride_fof
+    x.bits.reg_offset := req.reg_offset
+    x.bits.exp := req.exp
+    x.bits.is_first_ele := req.is_first_ele
+    x.bits.flowPtr := req.flowPtr
+  }
 
   //  perf counter
   val validCount = freeList.io.validCount

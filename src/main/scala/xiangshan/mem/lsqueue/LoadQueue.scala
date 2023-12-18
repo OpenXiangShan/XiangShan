@@ -148,6 +148,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
     val vecWriteback = Flipped(ValidIO(new MemExuOutput(isVector = true)))
     val lqDeqPtr = Output(new LqPtr)
+    val vecMMIOReplay = Vec(VecLoadPipelineWidth, DecoupledIO(new LsPipelineBundle()))
 
     val debugTopDown = new LoadQueueTopDownIO
   })
@@ -217,6 +218,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   uncacheBuffer.io.rob        <> io.rob
   uncacheBuffer.io.uncache    <> io.uncache
   uncacheBuffer.io.trigger    <> io.trigger
+  uncacheBuffer.io.vecReplay  <> io.vecMMIOReplay
   for ((buff, w) <- uncacheBuffer.io.req.zipWithIndex) {
     buff.valid := io.ldu.ldin(w).valid // from load_s3
     buff.bits := io.ldu.ldin(w).bits // from load_s3
@@ -256,6 +258,10 @@ class LoadQueue(implicit p: Parameters) extends XSModule
    */
   loadQueueReplay.io.redirect         <> io.redirect
   loadQueueReplay.io.enq              <> io.ldu.ldin // from load_s3
+  loadQueueReplay.io.enq.zip(io.ldu.ldin).foreach { case (sink, source) =>
+    sink.valid := source.valid && !source.bits.isvec
+    source.ready := sink.ready && !source.bits.isvec
+  }
   loadQueueReplay.io.storeAddrIn      <> io.sta.storeAddrIn // from store_s1
   loadQueueReplay.io.storeDataIn      <> io.std.storeDataIn // from store_s0
   loadQueueReplay.io.replay           <> io.replay

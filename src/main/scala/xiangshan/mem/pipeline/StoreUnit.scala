@@ -252,6 +252,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   s1_vec_feedback.bits.hit              := !s1_tlb_miss
   s1_vec_feedback.bits.sourceType       := RSFeedbackType.tlbMiss
   s1_vec_feedback.bits.paddr            := s1_paddr
+  s1_vec_feedback.bits.mmio             := s1_mmio
+  s1_vec_feedback.bits.atomic           := s1_mmio
   XSDebug(s1_vec_feedback.valid,
     "Vector S1 Store: tlbHit: %d flowPtr: %d\n",
     s1_vec_feedback.bits.hit,
@@ -334,6 +336,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   // vector feedback
   io.vec_feedback_slow.valid := RegNext(s1_vec_feedback.valid && !s1_out.uop.robIdx.needFlush(io.redirect))
   io.vec_feedback_slow.bits  := RegNext(s1_vec_feedback.bits)
+  io.vec_feedback_slow.bits.mmio := s2_mmio && !s2_exception
+  io.vec_feedback_slow.bits.atomic := s2_in.atomic || s2_pmp.atomic
 
   // mmio and exception
   io.lsq_replenish := s2_out

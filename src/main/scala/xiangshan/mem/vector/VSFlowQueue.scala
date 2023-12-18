@@ -104,6 +104,8 @@ class VSFQFeedback (implicit p: Parameters) extends XSBundle {
   val sourceType = VSFQFeedbackType()
   //val dataInvalidSqIdx = new SqPtr
   val paddr = UInt(PAddrBits.W)
+  val mmio = Bool()
+  val atomic = Bool()
 }
 
 class VecStorePipeBundle(implicit p: Parameters) extends MemExuInput(isVector = true) {
@@ -191,6 +193,10 @@ class VsFlowQueueIOBundle(implicit p: Parameters) extends VLSUBundle {
 
   // store-to-load forward
   val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
+
+  // MMIO flows execution path
+  val uncacheOutstanding = Input(Bool())
+  val uncache = new UncacheWordIO
 }
 
 class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQueuePtrHelper
@@ -206,6 +212,8 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
   val flowFinished = RegInit(VecInit(List.fill(VsFlowL1Size)(false.B)))
   val flowCommitted = RegInit(VecInit(List.fill(VsFlowL1Size)(false.B)))
   val flowSecondAccess = RegInit(VecInit(List.fill(VsFlowL1Size)(false.B)))
+  val mmio = RegInit(VecInit(List.fill(VsFlowL1Size)(false.B)))
+  val atomic = RegInit(VecInit(List.fill(VsFlowL1Size)(false.B)))
 
   // 2-level queue for data
   val dataFirstQueue = Reg(Vec(VsFlowL1Size, new VecStoreFlowDataFirst))
@@ -260,6 +268,8 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
     // Assuming that if io.flowIn(i).valid then io.flowIn(i-1).valid
     when (doEnqueue(i)) {
       flowAllocated(enqPtr(i).value) := true.B
+      mmio(enqPtr(i).value) := false.B
+      atomic(enqPtr(i).value) := false.B
 
       val thisFlowIn = io.flowIn(i).bits
       flowQueueEntries(enqPtr(i).value) match { case x =>
@@ -339,6 +349,8 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
   
   for (i <- 0 until VecStorePipelineWidth) {
     when (doFeedback(i)) {
+      mmio(feedbackPtr(i).value) := io.pipeFeedback(i).bits.mmio
+      atomic(feedbackPtr(i).value) := io.pipeFeedback(i).bits.atomic
       when (feedbackHit(i)) {
         flowFinished(feedbackPtr(i).value) := true.B
         flowQueueEntries(feedbackPtr(i).value).paddr := io.pipeFeedback(i).bits.paddr
@@ -430,7 +442,7 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
   }
   // This part only change false to true.
 
-  /* Write to Sbuffer */
+  /* Write to Sbuffer or to uncache */
   val canEnsbuffer = Wire(Vec(EnsbufferWidth, Bool()))
   val allowEnsbuffer = io.sbuffer.map(_.ready)
   val doEnsbuffer = Wire(Vec(EnsbufferWidth, Bool()))
@@ -448,6 +460,13 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
   val sIdle :: sDoing :: Nil = Enum(2)
   val ensbufferState = RegInit(sIdle)
 
+  val us_idle :: us_req :: us_resp :: Nil = Enum(3)
+  val uncacheState = RegInit(us_idle)
+
+  val canEnUncache = WireInit(false.B)
+  val allowEnUncache = io.rob.pendingst && uncacheState === us_idle
+  val doEnUncache = WireInit(false.B)
+
   // handshake
   for (i <- 0 until EnsbufferWidth) {
     val thisPtr = retirePtr(i).value
@@ -456,6 +475,7 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
     val thisInOrder = 
       thisEntry.isInOrder(curFieldIdx(i), curSegmentIdx(i)) &&
       curFieldIdx(i) < nfields && curSegmentIdx(i) < nSegments
+    val isMMIO = mmio(thisPtr)
     io.sbuffer(i).valid := canEnsbuffer(i)
 
     canEnsbuffer(i) := false.B
@@ -463,11 +483,13 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
     doRetire(i) := false.B
     when (ensbufferState === sDoing && flowCommitted(thisPtr) && thisInOrder) {
       if (i == 0) {
-        canEnsbuffer(i) := thisExp
+        canEnsbuffer(i) := thisExp && !isMMIO && uncacheState === us_idle
         doEnsbuffer(i) := canEnsbuffer(i) && allowEnsbuffer(i)
-        doRetire(i) := doEnsbuffer(i) || !thisExp
+        canEnUncache := thisExp && isMMIO
+        doEnUncache := canEnUncache && allowEnUncache
+        doRetire(i) := doEnsbuffer(i) || doEnUncache || !thisExp
       } else {
-        canEnsbuffer(i) := thisExp && canEnsbuffer(i - 1)
+        canEnsbuffer(i) := thisExp && !isMMIO && canEnsbuffer(i - 1) && !canEnUncache
         doEnsbuffer(i) := canEnsbuffer(i) && allowEnsbuffer(i)
         doRetire(i) := doEnsbuffer(i) || (!thisExp && doRetire(i - 1))
       }
@@ -480,6 +502,58 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
       flowCommitted(thisPtr) := false.B
     }
   }
+
+  val uncachePAddr = Reg(UInt(PAddrBits.W))
+  val uncacheData = Reg(UInt(XLEN.W))
+  val uncacheMask = Reg(UInt((XLEN/8).W))
+  val uncacheAtomic = Reg(Bool())
+  switch (uncacheState) {
+    is (us_idle) {
+      val thisPtr = retirePtr(0).value
+      val thisEntry = flowQueueEntries(thisPtr)
+      val thisData = Mux(
+        flowSecondAccess(thisPtr),
+        dataSecondQueue(dataFirstQueue(thisPtr).data),
+        dataFirstQueue(thisPtr).data
+      )
+
+      when (doEnUncache && flowAllocated(thisPtr)) {
+        uncachePAddr := thisEntry.paddr
+        uncacheData := genWdata(thisData, thisEntry.alignedType)
+        uncacheMask := genVWmask(thisEntry.paddr, thisEntry.alignedType)
+        uncacheAtomic := atomic(thisPtr)
+
+        uncacheState := us_req
+      }
+    }
+
+    is (us_req) {
+      when (io.uncache.req.fire) {
+        when (io.uncacheOutstanding) {
+          uncacheState := us_idle
+        }.otherwise {
+          uncacheState := us_resp
+        }
+      }
+    }
+
+    is (us_resp) {
+      when (io.uncache.resp.fire) {
+        uncacheState := us_idle
+      }
+    }
+  }
+
+  io.uncache.req.valid := uncacheState === us_req
+  io.uncache.req.bits match { case x =>
+    x := DontCare
+    x.cmd := MemoryOpConstants.M_XWR
+    x.addr := uncachePAddr
+    x.data := uncacheData
+    x.mask := uncacheMask
+    x.atomic := uncacheAtomic
+  }
+  io.uncache.resp.ready := uncacheState === us_resp
 
   // update retirePtr
   for (i <- 0 until EnsbufferWidth) {

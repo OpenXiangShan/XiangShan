@@ -200,8 +200,9 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     //   flag bits in lq needs to be updated accurately
     io.ldin(i).ready := true.B
     val loadWbIndex = io.ldin(i).bits.uop.lqIdx.value
+    val isvec = io.ldin(i).bits.isvec // vector loads are writebacked from uop queue instead of ldus
 
-    when (io.ldin(i).valid) {
+    when (io.ldin(i).valid && !isvec) {
       val hasExceptions = ExceptionNO.selectByFu(io.ldin(i).bits.uop.exceptionVec, LduCfg).asUInt.orR
       val need_rep = io.ldin(i).bits.rep_info.need_rep
 

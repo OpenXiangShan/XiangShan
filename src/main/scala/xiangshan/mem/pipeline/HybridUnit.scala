@@ -1073,6 +1073,8 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   s2_vec_feedback.bits.hit := !s2_tlb_miss
   s2_vec_feedback.bits.sourceType := RSFeedbackType.tlbMiss
   s2_vec_feedback.bits.paddr := s2_paddr
+  s2_vec_feedback.bits.mmio := s2_st_mmio
+  s2_vec_feedback.bits.atomic := s2_st_mmio
 
   io.stu_io.lsq_replenish := s2_out
   io.stu_io.lsq_replenish.miss := io.ldu_io.dcache.resp.fire && io.ldu_io.dcache.resp.bits.miss
@@ -1162,8 +1164,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
                               (!s3_fast_rep || !io.ldu_io.fast_rep_out.ready) &&
                               !s3_in.feedbacked &&
                               !s3_in.lateKill &&
-                              s3_ld_flow &&
-                              !s3_isvec
+                              s3_ld_flow
   io.ldu_io.lsq.ldin.bits := s3_in
   io.ldu_io.lsq.ldin.bits.miss := s3_in.miss && !s3_fwd_frm_d_chan_valid
 
