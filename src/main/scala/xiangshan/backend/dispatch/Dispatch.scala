@@ -103,7 +103,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     !req.bits.preDecodeInfo.notCFI || FuType.isJump(req.bits.fuType)
   ))
   val isFp     = VecInit(io.fromRename.map(req => FuType.isFArith (req.bits.fuType) ||
-                                                  FuType.isVArith (req.bits.fuType)))
+                                                  FuType.isVArith (req.bits.fuType) ||
+                                                  FuType.isVsetRvfWvf(req.bits.fuType)))
   val isMem    = VecInit(io.fromRename.map(req => FuType.isMem(req.bits.fuType) ||
                                                   FuType.isVls (req.bits.fuType)))
   val isLs     = VecInit(io.fromRename.map(req => FuType.isLoadStore(req.bits.fuType)))
