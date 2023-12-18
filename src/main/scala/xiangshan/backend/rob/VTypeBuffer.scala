@@ -3,7 +3,7 @@ package xiangshan.backend.rob
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility.{CircularQueuePtr, CircularShift, HasCircularQueuePtrHelper, SyncDataModuleTemplate}
+import utility.{CircularQueuePtr, CircularShift, HasCircularQueuePtrHelper, OneHot, SyncDataModuleTemplate}
 import utils.{QueuePerf, XSError, XSPerfAccumulate}
 import xiangshan.backend.Bundles.DynInst
 import xiangshan.backend.fu.vector.Bundles.VType
@@ -200,9 +200,9 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
     infoVec(i) := vtypeBufferReadDataVec(i).vtype
   }
 
-  commitCount   := MuxCase(0.U, commitValidVec.zipWithIndex.map { case(commitValid, idx) => commitValid -> (idx + 1).U}.reverse )
-  walkCount     := MuxCase(0.U, walkValidVec.zipWithIndex.map   { case(walkValid, idx)   => walkValid   -> (idx + 1).U}.reverse )
-  spclWalkCount := MuxCase(0.U, walkValidVec.zipWithIndex.map   { case(walkValid, idx)   => walkValid   -> (idx + 1).U}.reverse )
+  commitCount   := Mux(state === s_idle,      PopCount(commitValidVec), 0.U)
+  walkCount     := Mux(state === s_walk,      PopCount(walkValidVec), 0.U)
+  spclWalkCount := Mux(state === s_spcl_walk, PopCount(walkValidVec), 0.U)
 
   private val walkEndNext = walkSizeNext === 0.U
   private val spclWalkEndNext = spclWalkSizeNext === 0.U
