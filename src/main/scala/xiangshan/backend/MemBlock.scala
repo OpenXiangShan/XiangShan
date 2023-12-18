@@ -829,7 +829,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   for (i <- 0 until exuParameters.StuCnt) when(st_atomics(i)) {
     io.ooo_to_mem.issue(atomic_rs(i)).ready := atomicsUnit.io.in.ready
-    storeUnits(i).io.stin.valid := false.B
 
     state := s_atomics(i)
     if (exuParameters.StuCnt > 1)

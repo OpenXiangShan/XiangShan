@@ -166,7 +166,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   val s1_tlb_miss  = io.tlb.resp.bits.miss
   val s1_mmio      = s1_mmio_cbo
   val s1_exception = ExceptionNO.selectByFu(s1_out.uop.cf.exceptionVec, staCfg).asUInt.orR
-  s1_kill := s1_in.uop.robIdx.needFlush(io.redirect) || s1_tlb_miss
+  val s1_amo       = FuType.storeIsAMO(s1_in.uop.ctrl.fuType)
+  s1_kill := s1_in.uop.robIdx.needFlush(io.redirect) || s1_tlb_miss || s1_amo
 
   s1_ready := true.B
   io.tlb.resp.ready := true.B // TODO: why dtlbResp needs a ready?
@@ -188,7 +189,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   // Send TLB feedback to store issue queue
   // Store feedback is generated in store_s1, sent to RS in store_s2
   val s1_feedback = Wire(Valid(new RSFeedback))
-  s1_feedback.valid                 := s1_valid & !s1_in.isHWPrefetch
+  s1_feedback.valid                 := s1_valid & !s1_in.isHWPrefetch && !s1_amo
   s1_feedback.bits.hit              := !s1_tlb_miss
   s1_feedback.bits.flushState       := io.tlb.resp.bits.ptwBack
   s1_feedback.bits.rsIdx            := s1_out.rsIdx
@@ -213,12 +214,12 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   s1_out.uop.cf.exceptionVec(storePageFault)   := io.tlb.resp.bits.excp(0).pf.st
   s1_out.uop.cf.exceptionVec(storeAccessFault) := io.tlb.resp.bits.excp(0).af.st
 
-  io.lsq.valid     := s1_valid && !s1_in.isHWPrefetch
+  io.lsq.valid     := s1_valid && !s1_in.isHWPrefetch && !s1_amo
   io.lsq.bits      := s1_out
   io.lsq.bits.miss := s1_tlb_miss
 
   // kill dcache write intent request when tlb miss or exception
-  io.dcache.s1_kill  := (s1_tlb_miss || s1_exception || s1_mmio || s1_in.uop.robIdx.needFlush(io.redirect))
+  io.dcache.s1_kill  := (s1_kill || s1_exception || s1_mmio)
   io.dcache.s1_paddr := s1_paddr
 
   // write below io.out.bits assign sentence to prevent overwriting values
