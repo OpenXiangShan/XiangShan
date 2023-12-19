@@ -244,7 +244,7 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
   val flowCancelCount = PopCount(flowNeedCancel)
 
   flowNeedFlush := flowQueueEntries.map(_.uop.robIdx.needFlush(io.redirect))
-  flowNeedCancel := (flowNeedFlush zip flowAllocated).map { case(flush, alloc) => flush && alloc}
+  flowNeedCancel := ((flowNeedFlush zip flowAllocated) zip flowCommitted).map { case((flush, alloc), commited) => flush && alloc && !commited}
 
   /* Enqueue logic */
 
@@ -412,6 +412,19 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
       writebackPtr(i) := enqPtr(i) - flowCancelCount
     } .otherwise {
       writebackPtr(i) := writebackPtr(i) + writebackCount
+    }
+  }
+
+  /*
+  * when redirect, flush writebacked flow entries in 1 cycle 
+  * TODO: mayby need redirect in mulit cycle 
+  */
+  flowNeedCancel.zipWithIndex.map{
+    case (enable, i) => {
+      when(enable){
+        flowAllocated(i) := false.B
+        flowFinished(i) := false.B
+      }
     }
   }
 
