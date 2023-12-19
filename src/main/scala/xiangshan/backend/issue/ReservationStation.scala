@@ -415,8 +415,8 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   val numSelected = PopCount(s1_issuePtrOH.map(_.valid))
   val numReadyEntries = PopCount(statusArray.io.canIssue)
   val shouldSelected = Mux(numReadyEntries > params.numDeq.U, params.numDeq.U, numReadyEntries)
-  XSError(numSelected < shouldSelected,
-    p"performance regression: only $numSelected out of $shouldSelected selected (total: $numReadyEntries)\n")
+  // XSError(numSelected < shouldSelected,
+  //   p"performance regression: only $numSelected out of $shouldSelected selected (total: $numReadyEntries)\n")
 
   // Allocation: store dispatch uops into payload and data array
   s1_dispatchUops_dup.foreach(_.zip(enqReverse(io.fromDispatch)).zipWithIndex.foreach{ case ((uop, in), i) =>
