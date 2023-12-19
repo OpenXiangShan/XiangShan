@@ -136,7 +136,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
 
   val memBlock = LazyModule(new MemBlock()(p.alter((site, here, up) => {
     case XSCoreParamsKey => up(XSCoreParamsKey).copy(
-      IssQueSize = IssQueSize * 2 // exuBlocks.head.scheduler.getMemRsEntries
+      IssQueSize = IssQueSize * 3 // exuBlocks.head.scheduler.getMemRsEntries
     )
   })))
 

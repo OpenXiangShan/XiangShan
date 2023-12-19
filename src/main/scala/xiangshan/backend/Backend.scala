@@ -158,7 +158,7 @@ class BackendImp(outer: Backend)(implicit p: Parameters) extends LazyModuleImp(o
       val loadFastImm = Vec(exuParameters.LduCnt, Output(UInt(12.W)))
       val rsfeedback = Vec(exuParameters.LsExuCnt, Flipped(new MemRSFeedbackIO()(p.alter((site, here, up) => {
         case XSCoreParamsKey => up(XSCoreParamsKey).copy(
-          IssQueSize = IssQueSize * 2
+          IssQueSize = IssQueSize * 3
         )
       }))))
       val loadPc = Vec(exuParameters.LduCnt, Output(UInt(VAddrBits.W)))
