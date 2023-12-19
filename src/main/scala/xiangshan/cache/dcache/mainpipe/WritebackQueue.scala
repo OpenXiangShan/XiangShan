@@ -366,7 +366,7 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   }
 
   io.req_ready_dup.zipWithIndex.foreach { case (rdy, i) =>
-    rdy := Cat(entries.map(_.io.primary_ready_dup(i))).orR
+    rdy := Cat(entries.map(_.io.primary_ready_dup(i))).orR && !block_conflict
   }
 
   io.mem_grant.ready := true.B
