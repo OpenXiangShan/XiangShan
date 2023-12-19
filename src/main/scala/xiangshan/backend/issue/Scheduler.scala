@@ -258,7 +258,11 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
       }
     })
     iq.io.memAddrIssueResp.foreach(_.zipWithIndex.foreach { case (memAddrIssueResp, j) =>
-      memAddrIssueResp := io.memAddrIssueResp(i)(j)
+      if (io.memAddrIssueResp(i).isDefinedAt(j)) {
+        memAddrIssueResp := io.memAddrIssueResp(i)(j)
+      } else {
+        memAddrIssueResp := 0.U.asTypeOf(memAddrIssueResp)
+      }
     })
     iq.io.wbBusyTableRead := io.fromWbFuBusyTable.fuBusyTableRead(i)
     io.wbFuBusyTable(i) := iq.io.wbBusyTableWrite

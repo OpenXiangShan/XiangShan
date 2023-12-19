@@ -355,7 +355,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
           og0resp.bits.respType := RSFeedbackType.rfArbitFail
           og0resp.bits.dataInvalidSqIdx := DontCare
           og0resp.bits.robIdx := fromIQ(iqIdx)(iuIdx).bits.common.robIdx
-          og0resp.bits.uopIdx := fromIQ(iqIdx)(iuIdx).bits.common.vpu.getOrElse(0.U.asTypeOf(new VPUCtrlSignals)).vuopIdx
+          og0resp.bits.uopIdx.foreach(_ := fromIQ(iqIdx)(iuIdx).bits.common.vpu.get.vuopIdx)
           og0resp.bits.rfWen := fromIQ(iqIdx)(iuIdx).bits.common.rfWen.getOrElse(false.B)
           og0resp.bits.fuType := fromIQ(iqIdx)(iuIdx).bits.common.fuType
 
@@ -373,7 +373,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
           )
           og1resp.bits.dataInvalidSqIdx := DontCare
           og1resp.bits.robIdx := s1_toExuData(iqIdx)(iuIdx).robIdx
-          og1resp.bits.uopIdx := s1_toExuData(iqIdx)(iuIdx).vpu.getOrElse(0.U.asTypeOf(new VPUCtrlSignals)).vuopIdx
+          og1resp.bits.uopIdx.foreach(_ := s1_toExuData(iqIdx)(iuIdx).vpu.get.vuopIdx)
           og1resp.bits.rfWen := s1_toExuData(iqIdx)(iuIdx).rfWen.getOrElse(false.B)
           og1resp.bits.fuType := s1_toExuData(iqIdx)(iuIdx).fuType
       }

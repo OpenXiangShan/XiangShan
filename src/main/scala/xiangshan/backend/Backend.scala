@@ -16,6 +16,7 @@ import xiangshan.backend.dispatch.CoreDispatchTopDownIO
 import xiangshan.backend.exu.ExuBlock
 import xiangshan.backend.fu.vector.Bundles.{VConfig, VType}
 import xiangshan.backend.fu.{FenceIO, FenceToSbuffer, FuConfig, FuType, PerfCounterIO}
+import xiangshan.backend.issue.EntryBundles._
 import xiangshan.backend.issue.{CancelNetwork, Scheduler, SchedulerImpBase}
 import xiangshan.backend.rob.{RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.frontend.{FtqPtr, FtqRead, PreDecodeInfo}
@@ -413,7 +414,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
         memScheduler.io.loadFinalIssueResp(i)(j).bits.respType := RSFeedbackType.fuBusy
         memScheduler.io.loadFinalIssueResp(i)(j).bits.rfWen := toMem(i)(j).bits.rfWen.getOrElse(false.B)
         memScheduler.io.loadFinalIssueResp(i)(j).bits.robIdx := toMem(i)(j).bits.robIdx
-        memScheduler.io.loadFinalIssueResp(i)(j).bits.uopIdx := toMem(i)(j).bits.vpu.getOrElse(0.U.asTypeOf(new VPUCtrlSignals)).vuopIdx
+        memScheduler.io.loadFinalIssueResp(i)(j).bits.uopIdx.foreach(_ := toMem(i)(j).bits.vpu.get.vuopIdx)
       }
 
       NewPipelineConnect(
@@ -433,7 +434,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
         memScheduler.io.memAddrIssueResp(i)(j).bits.respType := RSFeedbackType.fuIdle
         memScheduler.io.memAddrIssueResp(i)(j).bits.rfWen := toMem(i)(j).bits.rfWen.getOrElse(false.B)
         memScheduler.io.memAddrIssueResp(i)(j).bits.robIdx := toMem(i)(j).bits.robIdx
-        memScheduler.io.memAddrIssueResp(i)(j).bits.uopIdx := 0.U
       }
     }
   }
