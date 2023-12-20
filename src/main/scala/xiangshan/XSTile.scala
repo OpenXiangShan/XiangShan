@@ -129,6 +129,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       core.module.io.l2PfqBusy := false.B
       core.module.io.debugTopDown.l2MissMatch := l2top.module.debugTopDown.l2MissMatch
       l2top.module.debugTopDown.robHeadPaddr := core.module.io.debugTopDown.robHeadPaddr
+      l2top.module.debugTopDown.robTrueCommit := core.module.io.debugTopDown.robTrueCommit
       core.module.io.l2_tlb_req <> l2top.module.l2_tlb_req
     } else {
       l2top.module.beu_errors.l2 <> 0.U.asTypeOf(l2top.module.beu_errors.l2)

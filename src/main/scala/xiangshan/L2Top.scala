@@ -127,6 +127,7 @@ class L2Top()(implicit p: Parameters) extends LazyModule
       val toTile = Output(Bool())
     })
     val debugTopDown = IO(new Bundle() {
+      val robTrueCommit = Input(UInt(64.W))
       val robHeadPaddr = Flipped(Valid(UInt(36.W)))
       val l2MissMatch = Output(Bool())
     })
@@ -148,6 +149,7 @@ class L2Top()(implicit p: Parameters) extends LazyModule
       // debugTopDown <> l2cache.get.module.io.debugTopDown
       l2cache.get.module.io.debugTopDown.robHeadPaddr := DontCare
       l2cache.get.module.io.debugTopDown.robHeadPaddr.head := debugTopDown.robHeadPaddr
+      l2cache.get.module.io.debugTopDown.robTrueCommit := debugTopDown.robTrueCommit
       debugTopDown.l2MissMatch := l2cache.get.module.io.debugTopDown.l2MissMatch.head
       
       /* l2 tlb */
