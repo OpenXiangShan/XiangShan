@@ -57,7 +57,6 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val og0Cancel = Input(ExuOH(backendParams.numExu))
   val og1Cancel = Input(ExuOH(backendParams.numExu))
   val ldCancel = Vec(backendParams.LduCnt + backendParams.HyuCnt, Flipped(new LoadCancelIO))
-  val finalBlock = Vec(params.numExu, Input(Bool()))
 
   // Outputs
   val wakeupToIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = params.genIQWakeUpSourceValidBundle
@@ -104,7 +103,6 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     val ldCancel = Vec(backendParams.LduCnt + backendParams.HyuCnt, new LoadCancelIO)
     val og0Fail = Output(Bool())
     val og1Fail = Output(Bool())
-    val finalFail = Output(Bool())
   }
 
   private def flushFunc(exuInput: ExuInput, flush: WakeupQueueFlush, stage: Int): Bool = {
@@ -113,7 +111,6 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     val ogFailFlush = stage match {
       case 1 => flush.og0Fail
       case 2 => flush.og1Fail
-      case 3 => flush.finalFail
       case _ => false.B
     }
     redirectFlush || loadDependencyFlush || ogFailFlush
@@ -154,9 +151,11 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     newExuInput
   }
 
-  val wakeUpQueues: Seq[Option[MultiWakeupQueue[ExuInput, WakeupQueueFlush]]] = params.exuBlockParams.map { x => OptionWrapper(x.isIQWakeUpSource, Module(
-    new MultiWakeupQueue(new ExuInput(x), new ExuInput(x, x.copyWakeupOut, x.copyNum), new WakeupQueueFlush, x.fuLatancySet, flushFunc, modificationFunc, lastConnectFunc)
-  ))}
+  val wakeUpQueues: Seq[Option[MultiWakeupQueue[ExuInput, WakeupQueueFlush]]] = params.exuBlockParams.map { x =>
+    OptionWrapper(x.isIQWakeUpSource && !x.hasLoadExu, Module(
+      new MultiWakeupQueue(new ExuInput(x), new ExuInput(x, x.copyWakeupOut, x.copyNum), new WakeupQueueFlush, x.fuLatancySet, flushFunc, modificationFunc, lastConnectFunc)
+    ))
+  }
   val deqBeforeDly = Wire(params.genIssueDecoupledBundle)
 
   val intWbBusyTableIn = io.wbBusyTableRead.map(_.intWbBusyTable)
@@ -489,7 +488,6 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         flush.ldCancel := io.ldCancel
         flush.og0Fail := io.og0Resp(i).valid && RSFeedbackType.isBlocked(io.og0Resp(i).bits.respType)
         flush.og1Fail := io.og1Resp(i).valid && RSFeedbackType.isBlocked(io.og1Resp(i).bits.respType)
-        flush.finalFail := io.finalBlock(i)
         wakeUpQueue.io.flush := flush
         wakeUpQueue.io.enq.valid := deqBeforeDly(i).fire
         wakeUpQueue.io.enq.bits.uop :<= deqBeforeDly(i).bits.common
@@ -517,7 +515,6 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     deq.bits.common.l1ExuOH.foreach(_ := finalWakeUpL1ExuOH.get(i))
     deq.bits.common.srcTimer.foreach(_ := finalSrcTimer.get(i))
     deq.bits.common.loadDependency.foreach(_ := deqEntryVec(i).bits.status.mergedLoadDependency.get)
-    deq.bits.common.deqLdExuIdx.foreach(_ := params.backendParam.getLdExuIdx(deq.bits.exuParams).U)
     deq.bits.common.src := DontCare
     deq.bits.common.preDecode.foreach(_ := deqEntryVec(i).bits.payload.preDecodeInfo)
 
@@ -782,7 +779,8 @@ class IssueQueueMemBundle(implicit p: Parameters, params: IssueBlockParams) exte
     val stIssuePtr = Input(new SqPtr)
     val memWaitUpdateReq = Flipped(new MemWaitUpdateReq)
   }
-  val loadFastMatch = Output(Vec(params.LduCnt, new IssueQueueLoadBundle))
+  val loadFastMatch = Output(Vec(params.LdExuCnt, new IssueQueueLoadBundle))
+  val loadWakeUp = Input(Vec(params.LdExuCnt, ValidIO(new DynInst())))
 
   // vector
   val sqDeqPtr = OptionWrapper(params.isVecMemIQ, Input(new SqPtr))
@@ -850,6 +848,22 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
 
   entries.io.fromMem.get.memWaitUpdateReq := memIO.checkWait.memWaitUpdateReq
   entries.io.fromMem.get.stIssuePtr := memIO.checkWait.stIssuePtr
+
+  // load wakeup
+  val loadWakeUpIter = memIO.loadWakeUp.iterator
+  io.wakeupToIQ.zip(params.exuBlockParams).zipWithIndex.foreach { case ((wakeup, param), i) =>
+    if (param.hasLoadExu) {
+      require(wakeUpQueues(i).isEmpty)
+      val uopWire = loadWakeUpIter.next()
+      val uop = Wire(chiselTypeOf(uopWire))
+      uop.valid := RegNext(uopWire.valid)
+      uop.bits  := RegEnable(uopWire.bits, uopWire.valid)
+      wakeup.valid := uop.fire && FuType.isLoad(uop.bits.fuType)
+      wakeup.bits.fromDynInst(uop.bits)
+      wakeup.bits.loadDependency.foreach(_ := 0.U) // this is correct for load only
+    }
+  }
+  require(!loadWakeUpIter.hasNext)
 
   deqBeforeDly.zipWithIndex.foreach { case (deq, i) =>
     deq.bits.common.loadWaitBit.foreach(_ := deqEntryVec(i).bits.payload.loadWaitBit)

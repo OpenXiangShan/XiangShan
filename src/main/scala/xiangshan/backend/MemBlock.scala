@@ -139,7 +139,8 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
   val ldaIqFeedback = Vec(LduCnt, new MemRSFeedbackIO)
   val staIqFeedback = Vec(StaCnt, new MemRSFeedbackIO)
   val hyuIqFeedback = Vec(HyuCnt, new MemRSFeedbackIO)
-  val ldCancel = Vec(LdExuCnt, new LoadCancelIO)
+  val ldCancel = Vec(backendParams.LdExuCnt, new LoadCancelIO)
+  val wakeup = Vec(backendParams.LdExuCnt, Valid(new DynInst))
 
   val s3_delayed_load_error = Vec(LdExuCnt, Output(Bool()))
 }
@@ -660,6 +661,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.feedback_fast <> io.mem_to_ooo.ldaIqFeedback(i).feedbackFast
     loadUnits(i).io.correctMissTrain := correctMissTrain
     io.mem_to_ooo.ldCancel(i) := loadUnits(i).io.ldCancel
+    io.mem_to_ooo.wakeup(i) := loadUnits(i).io.wakeup
 
     // vector
     loadUnits(i).io.vecldin <> vlWrapper.io.pipeIssue(i)
@@ -791,6 +793,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     hybridUnits(i).io.feedback_fast <> io.mem_to_ooo.hyuIqFeedback(i).feedbackFast
     hybridUnits(i).io.correctMissTrain := correctMissTrain
     io.mem_to_ooo.ldCancel.drop(LduCnt)(i) := hybridUnits(i).io.ldu_io.ldCancel
+    io.mem_to_ooo.wakeup.drop(LduCnt)(i) := hybridUnits(i).io.ldu_io.wakeup
 
     // ------------------------------------
     //  Load Port

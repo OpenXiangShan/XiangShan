@@ -156,6 +156,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val ld_fast_imm      = Input(UInt(12.W))
 
     // rs feedback
+    val wakeup = ValidIO(new DynInst)
     val feedback_fast = ValidIO(new RSFeedback) // stage 2
     val feedback_slow = ValidIO(new RSFeedback) // stage 3
     val ldCancel = Output(new LoadCancelIO()) // use to cancel the uops waked by this load, and cancel load
@@ -395,7 +396,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_rd        := src.uop.fuOpType === LSUOpType.prefetch_r
     out.prf_wr        := src.uop.fuOpType === LSUOpType.prefetch_w
     out.sched_idx     := src.schedIndex
-    out.deqPortIdx    := src.deqPortIdx
     out.vecActive     := true.B // true for scala load
     out
   }
@@ -418,7 +418,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_rd        := src.uop.fuOpType === LSUOpType.prefetch_r
     out.prf_wr        := src.uop.fuOpType === LSUOpType.prefetch_w
     out.sched_idx     := src.schedIndex
-    out.deqPortIdx    := src.deqPortIdx
     out.vecActive     := true.B // true for scala load
     out
   }
@@ -441,7 +440,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_rd        := !src.is_store
     out.prf_wr        := src.is_store
     out.sched_idx     := 0.U
-    out.deqPortIdx    := 0.U // DontCare, since need not send cancel signal to IQ
     out.vecActive     := true.B // true for scala load
     out
   }
@@ -464,7 +462,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_rd        := src.uop.fuOpType === LSUOpType.prefetch_r
     out.prf_wr        := src.uop.fuOpType === LSUOpType.prefetch_w
     out.sched_idx     := 0.U
-    out.deqPortIdx    := src.deqPortIdx
     out.vecActive     := true.B // true for scala load
     out
   }
@@ -503,7 +500,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.vecActive           := src.vecActive
     out.is_first_ele        := src.is_first_ele
     out.flowPtr             := src.flowPtr
-    out.deqPortIdx          := 0.U
     out
   }
 
@@ -515,7 +511,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // Assume the pointer chasing is always ld.
     out.uop.fuOpType       := LSUOpType.ld
     out.try_l2l            := true.B
-    // we dont care out.isFirstIssue and out.rsIdx and s0_sqIdx and out.deqPortIdx in S0 when trying pointchasing
+    // we dont care out.isFirstIssue and out.rsIdx and s0_sqIdx in S0 when trying pointchasing
     // because these signals will be updated in S1
     out.has_rob_entry      := false.B
     out.rsIdx              := 0.U
@@ -529,7 +525,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_rd             := false.B
     out.prf_wr             := false.B
     out.sched_idx          := 0.U
-    out.deqPortIdx         := 0.U // DontCare, since need not send cancel signal to IQ
     out.vecActive          := true.B // true for scala load
     out
   }
@@ -596,7 +591,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   }.otherwise{
     s0_out.uop.debugInfo.tlbFirstReqTime := s0_sel_src.uop.debugInfo.tlbFirstReqTime
   }
-  s0_out.deqPortIdx     := s0_sel_src.deqPortIdx
   s0_out.schedIndex     := s0_sel_src.sched_idx
 
   // load fast replay
@@ -620,6 +614,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // dcache replacement extra info
   // TODO: should prefetch load update replacement?
   io.dcache.replacementUpdated := Mux(s0_ld_rep_select || s0_super_ld_rep_select, io.replay.bits.replacementUpdated, false.B)
+
+  // load wakeup
+  io.wakeup.valid := s0_fire && (s0_super_ld_rep_select || s0_ld_fast_rep_select || s0_ld_rep_select || s0_int_iss_select)
+  io.wakeup.bits := s0_out.uop
 
   XSDebug(io.dcache.req.fire,
     p"[DCACHE LOAD REQ] pc ${Hexadecimal(s0_sel_src.uop.pc)}, vaddr ${Hexadecimal(s0_sel_src.vaddr)}\n"
@@ -781,7 +779,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       s1_in.uop           := io.ldin.bits.uop
       s1_in.rsIdx         := io.ldin.bits.iqIdx
       s1_in.isFirstIssue  := io.ldin.bits.isFirstIssue
-      s1_in.deqPortIdx    := io.ldin.bits.deqPortIdx
       s1_vaddr_lo         := s1_ptr_chasing_vaddr(5, 0)
       s1_paddr_dup_lsu    := Cat(io.tlb.resp.bits.paddr(0)(PAddrBits - 1, 6), s1_vaddr_lo)
       s1_paddr_dup_dcache := Cat(io.tlb.resp.bits.paddr(0)(PAddrBits - 1, 6), s1_vaddr_lo)
@@ -1043,10 +1040,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.feedback_fast.bits.sourceType       := RSFeedbackType.lrqFull
   io.feedback_fast.bits.dataInvalidSqIdx := DontCare
 
-  io.ldCancel.ld1Cancel.valid := s2_valid && s2_out.isFirstIssue && ( // issued from IQ
-    s2_out.rep_info.need_rep || s2_mmio                               // exe fail or is mmio
+  io.ldCancel.ld1Cancel := s2_valid && s2_out.isFirstIssue && ( // issued from IQ
+    s2_out.rep_info.need_rep ||                                 // exe fail
+    s2_mmio                                                     // is mmio
   )
-  io.ldCancel.ld1Cancel.bits := s2_out.deqPortIdx
 
   // fast wakeup
   io.fast_uop.valid := RegNext(
@@ -1220,10 +1217,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.feedback_slow.bits.sourceType       := RSFeedbackType.lrqFull
   io.feedback_slow.bits.dataInvalidSqIdx := DontCare
 
-  io.ldCancel.ld2Cancel.valid := s3_valid && s3_in.isFirstIssue && ( // issued from IQ
-    io.lsq.ldin.bits.rep_info.need_rep || s3_in.mmio                 // exe fail or is mmio
+  io.ldCancel.ld2Cancel := s3_valid && s3_in.isFirstIssue && (  // issued from IQ
+    io.lsq.ldin.bits.rep_info.need_rep ||                       // exe fail or
+    s3_in.mmio                                                  // is mmio
   )
-  io.ldCancel.ld2Cancel.bits := s3_in.deqPortIdx
 
   val s3_ld_wb_meta = Mux(s3_valid, s3_out.bits, io.lsq.uncache.bits)
 

@@ -60,6 +60,8 @@ case class SchdBlockParams(
 
   def HyuCnt: Int = issueBlockParams.map(_.HyuCnt).sum
 
+  def LdExuCnt: Int = issueBlockParams.map(_.LdExuCnt).sum
+
   def VipuCnt: Int = issueBlockParams.map(_.VipuCnt).sum
 
   def VfpuCnt: Int = issueBlockParams.map(_.VfpuCnt).sum
