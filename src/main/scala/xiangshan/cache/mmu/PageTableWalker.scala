@@ -523,10 +523,13 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   when (mem_arb.io.out.fire) {
     for (i <- state.indices) {
-      when (state(i) =/= state_idle && dup(entries(i).req_info.vpn, mem_arb.io.out.bits.req_info.vpn)) {
+      when (state(i) =/= state_idle && !entries(i).s2xlate && dup(entries(i).req_info.vpn, mem_arb.io.out.bits.req_info.vpn)) {
         // NOTE: "dup enq set state to mem_wait" -> "sending req set other dup entries to mem_wait"
         state(i) := state_mem_waiting
         entries(i).wait_id := mem_arb.io.chosen
+      }
+      when (state(i) === state_mem_req && entries(i).s2xlate && entries(i).wait_id === mem_arb.io.chosen) {
+        state(i) := state_mem_waiting
       }
     }
   }
@@ -697,6 +700,7 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   val level = RegInit(0.U(log2Up(Level).W))
   val gpaddr = Reg(UInt(GPAddrBits.W))
+  val req_ppn = Reg(UInt(ppnLen.W))
   val vpn = gpaddr(GPAddrBits-1, offLen)
   val levelNext = level + 1.U
   val l1Hit = Reg(Bool())
@@ -704,8 +708,8 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val pg_base = MakeGPAddr(hgatp.ppn, getGVpnn(vpn, 2.U)) // for l0
 //  val pte = io.mem.resp.bits.MergeRespToPte()
   val pte = io.mem.resp.bits.asTypeOf(new PteBundle().cloneType)
-  val ppn_l1 = Mux(l1Hit, io.req.bits.ppn, pte.ppn)
-  val ppn_l2 = Mux(l2Hit, io.req.bits.ppn, pte.ppn)
+  val ppn_l1 = Mux(l1Hit, req_ppn, pte.ppn)
+  val ppn_l2 = Mux(l2Hit, req_ppn, pte.ppn)
   val ppn = Mux(level === 1.U, ppn_l1, ppn_l2) //for l1 and l2
   val p_pte = MakeAddr(ppn, getVpnn(vpn, 2.U - level))
   val mem_addr = Mux(level === 0.U, pg_base, p_pte)
@@ -758,6 +762,7 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
       accessFault := false.B
       s_pmp_check := false.B
       id := io.req.bits.id
+      req_ppn := io.req.bits.ppn
       l1Hit := io.req.bits.l1Hit
       l2Hit := io.req.bits.l2Hit
     }

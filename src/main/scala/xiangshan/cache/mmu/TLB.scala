@@ -157,7 +157,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       resp_gpa_refill := false.B
     }
     when (ptw.resp.fire && need_gpa && need_gpa_vpn === ptw.resp.bits.getVpn) {
-      need_gpa_gvpn := Mux(ptw.resp.bits.s2xlate === onlyStage2, Cat(ptw.resp.bits.s1.entry.tag, ptw.resp.bits.s1.ppn_low(OHToUInt(ptw.resp.bits.s1.pteidx))), ptw.resp.bits.s2.entry.tag)
+      need_gpa_gvpn := Mux(ptw.resp.bits.s2xlate === onlyStage2, ptw.resp.bits.s2.entry.tag, Cat(ptw.resp.bits.s1.entry.tag, ptw.resp.bits.s1.ppn_low(OHToUInt(ptw.resp.bits.s1.pteidx))))
       resp_gpa_refill := true.B
     }
 
@@ -166,7 +166,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     }
     
     val hit = e_hit || p_hit
-    val miss = (!hit && enable) || hasGpf(i) && !(resp_gpa_refill && need_gpa_vpn_hit) && !isOnlys2xlate
+    val miss = (!hit && enable) || hasGpf(i) && !p_hit && !(resp_gpa_refill && need_gpa_vpn_hit) && !isOnlys2xlate
     hit.suggestName(s"hit_read_${i}")
     miss.suggestName(s"miss_read_${i}")
 
@@ -183,7 +183,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     for (d <- 0 until nRespDups) {
       ppn(d) := Mux(p_hit, p_ppn, e_ppn(d))
       perm(d) := Mux(p_hit, p_perm, e_perm(d))
-      gvpn(d) :=  Mux(hasGpf(i), need_gpa_gvpn, 0.U)
+      gvpn(d) :=  Mux(hasGpf(i), Mux(p_hit, p_gvpn, need_gpa_gvpn), 0.U)
       g_perm(d) := Mux(p_hit, p_g_perm, e_g_perm(d))
       r_s2xlate(d) := Mux(p_hit, p_s2xlate, e_s2xlate(d))
       val paddr = Cat(ppn(d), get_off(req_out(i).vaddr))
@@ -276,21 +276,17 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       (vsatp.mode === 0.U) -> onlyStage2,
       (hgatp.mode === 0.U || req_need_gpa) -> onlyStage1
     ))
-    val ptw_s2xlate = ptw.resp.bits.s2xlate
-    val has_s2xlate = ptw_s2xlate =/= noS2xlate
-    val onlyS2 = ptw_s2xlate === onlyStage2
-    val ptw_s1_hit = ptw.resp.bits.s1.hit(get_pn(req_out(idx).vaddr), Mux(has_s2xlate, io.csr.vsatp.asid, io.csr.satp.asid), io.csr.hgatp.asid, true, false, has_s2xlate)
-    val ptw_s2_hit = ptw.resp.bits.s2.hit(get_pn(req_out(idx).vaddr), io.csr.hgatp.asid)
-    val ptw_just_back = ptw.resp.fire && req_s2xlate === ptw_s2xlate && Mux(onlyS2, ptw_s2_hit, ptw_s1_hit)
-    val ptw_already_back = RegNext(ptw.resp.fire) && RegNext(ptw.resp.bits).hit(get_pn(req_out(idx).vaddr), asid = io.csr.satp.asid, allType = true)
-    io.ptw.req(idx).valid := req_out_v(idx) && (missVec(idx)) && !(ptw_just_back || ptw_already_back) // TODO: remove the regnext, timing
+   
+    val ptw_just_back = ptw.resp.fire && req_s2xlate === ptw.resp.bits.s2xlate && ptw.resp.bits.hit(get_pn(req_out(idx).vaddr), io.csr.satp.asid, io.csr.vsatp.asid, io.csr.hgatp.asid, true, false)
+    val ptw_already_back = RegNext(ptw.resp.fire) && req_s2xlate === RegNext(ptw.resp.bits).s2xlate && RegNext(ptw.resp.bits).hit(get_pn(req_out(idx).vaddr), io.csr.satp.asid, io.csr.vsatp.asid, io.csr.hgatp.asid, allType = true)
+    io.ptw.req(idx).valid := req_out_v(idx) && missVec(idx) && !(ptw_just_back || ptw_already_back) // TODO: remove the regnext, timing
     io.tlbreplay(idx) := req_out_v(idx) && missVec(idx) && (ptw_just_back || ptw_already_back)
     when (io.requestor(idx).req_kill && RegNext(io.requestor(idx).req.fire)) {
       io.ptw.req(idx).valid := false.B
       io.tlbreplay(idx) := true.B
     }
     io.ptw.req(idx).bits.vpn := get_pn(req_out(idx).vaddr)
-    io.ptw.req(idx).bits.s2xlate := RegNext(req_s2xlate)
+    io.ptw.req(idx).bits.s2xlate := req_s2xlate
     io.ptw.req(idx).bits.memidx := req_out(idx).memidx
   }
 
@@ -382,7 +378,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val ppn_s2 = ptw.resp.bits.s2.genPPNS2(vpn)
     val p_ppn = RegEnable(Mux(hasS2xlate, ppn_s2, ppn_s1), io.ptw.resp.fire)
     val p_perm = RegEnable(ptwresp_to_tlbperm(ptw.resp.bits.s1), io.ptw.resp.fire)
-    val p_gvpn = RegEnable(Mux(onlyS1, Cat(ptw.resp.bits.s1.entry.tag, ptw.resp.bits.s1.ppn_low(OHToUInt(ptw.resp.bits.s1.pteidx))), ptw.resp.bits.s2.entry.tag), io.ptw.resp.fire)
+    val p_gvpn = RegEnable(Mux(onlyS2, ptw.resp.bits.s2.entry.tag, Cat(ptw.resp.bits.s1.entry.tag, ptw.resp.bits.s1.ppn_low(OHToUInt(ptw.resp.bits.s1.pteidx)))), io.ptw.resp.fire)
     val p_g_perm = RegEnable(hptwresp_to_tlbperm(ptw.resp.bits.s2), io.ptw.resp.fire)
     val p_s2xlate = RegEnable(ptw.resp.bits.s2xlate, io.ptw.resp.fire)
     (p_hit, p_ppn, p_perm, p_gvpn, p_g_perm, p_s2xlate)

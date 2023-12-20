@@ -1286,6 +1286,12 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
    val s2_tag = s2.entry.tag
    Mux(s2xlate === onlyStage2, s2_tag, s1_tag)
   }
+  
+  def hit(vpn: UInt, asid: UInt, vasid: UInt, vmid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false): Bool = { 
+    val s1_hit = s1.hit(vpn, Mux(this.hasS2xlate(), vasid, asid), vmid, allType, ignoreAsid, this.hasS2xlate)
+    val s2_hit = s2.hit(vpn, vmid)
+    Mux(s2xlate === onlyStage2, s2_hit, s1_hit)
+  }
 }
 
 class PtwRespS2withMemIdx(implicit p: Parameters) extends PtwRespS2 {

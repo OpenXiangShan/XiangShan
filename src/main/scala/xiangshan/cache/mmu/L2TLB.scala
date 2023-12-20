@@ -226,10 +226,12 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   cache.io.csr := csr_dup(2)
   cache.io.sfence_dup.zip(sfence_dup.drop(2).take(4)).map(s => s._1 := s._2)
   cache.io.csr_dup.zip(csr_dup.drop(2).take(3)).map(c => c._1 := c._2)
-  cache.io.resp.ready := Mux(cache.io.resp.bits.hit,
-    outReady(cache.io.resp.bits.req_info.source, outArbCachePort),
-    Mux(cache.io.resp.bits.toFsm.l2Hit && !cache.io.resp.bits.bypassed, llptw.io.in.ready,
-    Mux(cache.io.resp.bits.bypassed || cache.io.resp.bits.isFirst, mq_arb.io.in(0).ready, mq_arb.io.in(0).ready || ptw.io.req.ready)))
+  cache.io.resp.ready := MuxCase(mq_arb.io.in(0).ready || ptw.io.req.ready, Seq(
+    cache.io.resp.bits.hit -> outReady(cache.io.resp.bits.req_info.source, outArbCachePort),
+    (cache.io.resp.bits.toFsm.l2Hit && !cache.io.resp.bits.bypassed) -> llptw.io.in.ready,
+    ((cache.io.resp.bits.bypassed || cache.io.resp.bits.isFirst) && !cache.io.resp.bits.isHptw) -> mq_arb.io.in(0).ready,
+    (cache.io.resp.bits.isHptw) -> hptw.io.req.ready
+  ))
 
   // NOTE: missQueue req has higher priority
   ptw.io.req.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && !cache.io.resp.bits.toFsm.l2Hit &&
@@ -367,11 +369,11 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   llptw_mem.resp.bits.id := DataHoldBypass(mem.d.bits.source, mem.d.valid)
   llptw_mem.resp.bits.value := resp_pte.apply(mem.d.bits.source)
   // mem -> ptw
-  ptw.io.mem.req.ready := mem.a.ready
+  // ptw.io.mem.req.ready := mem.a.ready
   ptw.io.mem.resp.valid := mem_resp_done && mem_resp_from_ptw
   ptw.io.mem.resp.bits := resp_pte.apply(l2tlbParams.llptwsize)
   // mem -> hptw
-  hptw.io.mem.req.ready := mem.a.ready
+  // hptw.io.mem.req.ready := mem.a.ready
   hptw.io.mem.resp.valid := mem_resp_done && mem_resp_from_hptw
   hptw.io.mem.resp.bits := resp_pte.apply(l2tlbParams.llptwsize + 1)
   // mem -> cache

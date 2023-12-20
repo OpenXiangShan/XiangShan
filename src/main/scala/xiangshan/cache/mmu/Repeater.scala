@@ -178,6 +178,7 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
   val v = RegInit(VecInit(Seq.fill(Size)(false.B)))
   val sent = RegInit(VecInit(Seq.fill(Size)(false.B)))
   val vpn = Reg(Vec(Size, UInt(vpnLen.W)))
+  val s2xlate = Reg(Vec(Size, UInt(2.W)))
   val memidx = Reg(Vec(Size, new MemBlockidxBundle))
 
   val enqvalid = WireInit(VecInit(Seq.fill(Width)(false.B)))
@@ -188,69 +189,41 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
 
   val entryIsMatchVec = WireInit(VecInit(Seq.fill(Width)(false.B)))
   val entryMatchIndexVec = WireInit(VecInit(Seq.fill(Width)(0.U(log2Up(Size).W))))
-  val ptwResp_EntryMatchVec = vpn.zip(v).map{ case (pi, vi) => vi && io.ptw.resp.bits.hit(pi, io.csr.satp.asid, true, true)}
+  val ptwResp_EntryMatchVec = vpn.zip(v).zip(s2xlate).map{ case ((pi, vi), s2xlatei) => vi && s2xlatei === io.ptw.resp.bits.s2xlate && io.ptw.resp.bits.hit(pi, io.csr.satp.asid, io.csr.vsatp.asid, io.csr.hgatp.asid, true, true)}
   val ptwResp_EntryMatchFirst = firstValidIndex(ptwResp_EntryMatchVec, true.B)
-  val ptwResp_ReqMatchVec = io.tlb.req.map(a => io.ptw.resp.valid && io.ptw.resp.bits.hit(a.bits.vpn, 0.U, allType = true, true))
+  val ptwResp_ReqMatchVec = io.tlb.req.map(a => io.ptw.resp.valid && a.bits.s2xlate === io.ptw.resp.bits.s2xlate && io.ptw.resp.bits.hit(a.bits.vpn, 0.U, 0.U, io.csr.hgatp.asid, allType = true, true))
 
   io.refill := Cat(ptwResp_EntryMatchVec).orR && io.ptw.resp.fire
   io.ptw.resp.ready := true.B
   // DontCare
   io.tlb.req.map(_.ready := true.B)
   io.tlb.resp.valid := false.B
-  io.tlb.resp.bits.data := 0.U.asTypeOf(new PtwSectorRespwithMemIdx)
+  io.tlb.resp.bits.data := 0.U.asTypeOf(new PtwRespS2withMemIdx)
   io.tlb.resp.bits.vector := 0.U.asTypeOf(Vec(Width, Bool()))
   io.memidx := 0.U.asTypeOf(new MemBlockidxBundle)
 
   // ugly code, should be optimized later
-  if (Enable3Load3Store) {
-    require(Width <= 4, s"DTLB Filter Width ($Width) must equal or less than 4")
-    if (Width == 1) {
-      require(Size == 8, s"prefetch filter Size ($Size) should be 8")
-      canenq(0) := !(Cat(v).andR)
-      enqidx(0) := firstValidIndex(v, false.B)
-    } else if (Width == 3) {
-      require(Size == 8, s"store filter Size ($Size) should be 8")
-      canenq(0) := !(Cat(v.take(3)).andR)
-      enqidx(0) := firstValidIndex(v.take(3), false.B)
-      canenq(1) := !(Cat(v.drop(3).take(3)).andR)
-      enqidx(1) := firstValidIndex(v.drop(3).take(3), false.B) + 3.U
-      canenq(2) := !(Cat(v.drop(6).take(2)).andR)
-      enqidx(2) := firstValidIndex(v.drop(6).take(2), false.B) + 6.U
-    } else if (Width == 4) {
-      require(Size == 16, s"load filter Size ($Size) should be 16")
-      canenq(0) := !(Cat(v.take(4)).andR)
-      enqidx(0) := firstValidIndex(v.take(4), false.B)
-      canenq(1) := !(Cat(v.drop(4).take(4)).andR)
-      enqidx(1) := firstValidIndex(v.drop(4).take(4), false.B) + 4.U
-      canenq(2) := !(Cat(v.drop(8).take(4)).andR)
-      enqidx(2) := firstValidIndex(v.drop(8).take(4), false.B) + 8.U
-      canenq(3) := !(Cat(v.drop(12).take(4)).andR)
-      enqidx(3) := firstValidIndex(v.drop(12).take(4), false.B) + 12.U
-    }
-  } else {
-    require(Width <= 3, s"DTLB Filter Width ($Width) must equal or less than 3")
-    if (Width == 1) {
-      require(Size == 8, s"prefetch filter Size ($Size) should be 8")
-      canenq(0) := !(Cat(v).andR)
-      enqidx(0) := firstValidIndex(v, false.B)
-    } else if (Width == 2) {
-      require(Size == 8, s"store filter Size ($Size) should be 8")
-      canenq(0) := !(Cat(v.take(Size/2)).andR)
-      enqidx(0) := firstValidIndex(v.take(Size/2), false.B)
-      canenq(1) := !(Cat(v.drop(Size/2)).andR)
-      enqidx(1) := firstValidIndex(v.drop(Size/2), false.B) + (Size/2).U
-    } else if (Width == 3) {
-      require(Size == 16, s"load filter Size ($Size) should be 16")
-      canenq(0) := !(Cat(v.take(8)).andR)
-      enqidx(0) := firstValidIndex(v.take(8), false.B)
-      canenq(1) := !(Cat(v.drop(8).take(4)).andR)
-      enqidx(1) := firstValidIndex(v.drop(8).take(4), false.B) + 8.U
-      // four entries for prefetch
-      canenq(2) := !(Cat(v.drop(12)).andR)
-      enqidx(2) := firstValidIndex(v.drop(12), false.B) + 12.U
-    }
+  require(Width <= 3, s"DTLB Filter Width ($Width) must equal or less than 3")
+  if (Width == 1) {
+    require(Size == 8, s"prefetch filter Size ($Size) should be 8")
+    canenq(0) := !(Cat(v).andR)
+    enqidx(0) := firstValidIndex(v, false.B)
+  } else if (Width == 2) {
+    require(Size == 8, s"store filter Size ($Size) should be 8")
+    canenq(0) := !(Cat(v.take(Size/2)).andR)
+    enqidx(0) := firstValidIndex(v.take(Size/2), false.B)
+    canenq(1) := !(Cat(v.drop(Size/2)).andR)
+    enqidx(1) := firstValidIndex(v.drop(Size/2), false.B) + (Size/2).U
+  } else if (Width == 3) {
+    require(Size == 16, s"load filter Size ($Size) should be 16")
+    canenq(0) := !(Cat(v.take(8)).andR)
+    enqidx(0) := firstValidIndex(v.take(8), false.B)
+    canenq(1) := !(Cat(v.drop(8).take(4)).andR)
+    enqidx(1) := firstValidIndex(v.drop(8).take(4), false.B) + 8.U
+    // four entries for prefetch
+    canenq(2) := !(Cat(v.drop(12)).andR)
+    enqidx(2) := firstValidIndex(v.drop(12), false.B) + 12.U
   }
-
 
   for (i <- 0 until Width) {
     enqvalid(i) := io.tlb.req(i).valid && !ptwResp_ReqMatchVec(i) && !entryIsMatchVec(i) && canenq(i)
@@ -258,13 +231,13 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
       enqidx(i) := entryMatchIndexVec(i)
     }
 
-    val entryIsMatch = vpn.zip(v).map{ case (pi, vi) => vi && pi === io.tlb.req(i).bits.vpn}
+    val entryIsMatch = vpn.zip(v).zip(s2xlate).map{ case ((pi, vi), s2xlatei) => vi && s2xlatei === io.tlb.req(i).bits.s2xlate && pi === io.tlb.req(i).bits.vpn}
     entryIsMatchVec(i) := Cat(entryIsMatch).orR
     entryMatchIndexVec(i) := firstValidIndex(entryIsMatch, true.B)
 
     if (i > 0) {
       for (j <- 0 until i) {
-        val newIsMatch = io.tlb.req(i).bits.vpn === io.tlb.req(j).bits.vpn
+        val newIsMatch = io.tlb.req(i).bits.vpn === io.tlb.req(j).bits.vpn && io.tlb.req(i).bits.s2xlate === io.tlb.req(j).bits.s2xlate
         when (newIsMatch && io.tlb.req(j).valid) {
           enqidx(i) := enqidx(j)
           canenq(i) := canenq(j)
@@ -277,6 +250,7 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
       v(enqidx(i)) := true.B
       sent(enqidx(i)) := false.B
       vpn(enqidx(i)) := io.tlb.req(i).bits.vpn
+      s2xlate(enqidx(i)) := io.tlb.req(i).bits.s2xlate
       memidx(enqidx(i)) := io.tlb.req(i).bits.memidx
     }
   }
@@ -287,6 +261,7 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
   for (i <- 0 until Size) {
     io.ptw.req(0).valid := canissue
     io.ptw.req(0).bits.vpn := vpn(issueindex)
+    io.ptw.req(0).bits.s2xlate := s2xlate(issueindex)
   }
   when (io.ptw.req(0).fire) {
     sent(issueindex) := true.B
@@ -391,13 +366,9 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
 
   io.tlb.req.map(_.ready := true.B)
   io.tlb.resp.valid := ptwResp_valid
-  io.tlb.resp.bits.data.entry := ptwResp.entry
-  io.tlb.resp.bits.data.addr_low := ptwResp.addr_low
-  io.tlb.resp.bits.data.ppn_low := ptwResp.ppn_low
-  io.tlb.resp.bits.data.valididx := ptwResp.valididx
-  io.tlb.resp.bits.data.pteidx := ptwResp.pteidx
-  io.tlb.resp.bits.data.pf := ptwResp.pf
-  io.tlb.resp.bits.data.af := ptwResp.af
+  io.tlb.resp.bits.data.s2xlate := ptwResp.s2xlate
+  io.tlb.resp.bits.data.s1 := ptwResp.s1
+  io.tlb.resp.bits.data.s2 := ptwResp.s2
   io.tlb.resp.bits.data.memidx := 0.U.asTypeOf(new MemBlockidxBundle)
   // vector used to represent different requestors of DTLB
   // (e.g. the store DTLB has StuCnt requestors)
@@ -433,11 +404,13 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
   for (i <- 0 until 3) {
     ptw_arb.io.in(i).valid := filter(i).ptw.req(0).valid
     ptw_arb.io.in(i).bits.vpn := filter(i).ptw.req(0).bits.vpn
+    ptw_arb.io.in(i).bits.s2xlate := filter(i).ptw.req(0).bits.s2xlate
     filter(i).ptw.req(0).ready := ptw_arb.io.in(i).ready
   }
   ptw_arb.io.out.ready := io.ptw.req(0).ready
   io.ptw.req(0).valid := ptw_arb.io.out.valid
   io.ptw.req(0).bits.vpn := ptw_arb.io.out.bits.vpn
+  io.ptw.req(0).bits.s2xlate := ptw_arb.io.out.bits.s2xlate
   io.ptw.resp.ready := true.B
 
   io.rob_head_miss_in_tlb := Cat(filter.map(_.rob_head_miss_in_tlb)).orR
