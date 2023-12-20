@@ -213,14 +213,18 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
     enqidx(0) := firstValidIndex(v.take(3), false.B)
     canenq(1) := !(Cat(v.drop(3).take(3)).andR)
     enqidx(1) := firstValidIndex(v.drop(3).take(3), false.B) + 3.U
-    canenq(1) := !(Cat(v.drop(6).take(2)).andR)
-    enqidx(1) := firstValidIndex(v.drop(6).take(2), false.B) + 6.U
+    canenq(2) := !(Cat(v.drop(6).take(2)).andR)
+    enqidx(2) := firstValidIndex(v.drop(6).take(2), false.B) + 6.U
   } else if (Width == 4) {
     require(Size == 16, s"load filter Size ($Size) should be 16")
     canenq(0) := !(Cat(v.take(4)).andR)
     enqidx(0) := firstValidIndex(v.take(4), false.B)
     canenq(1) := !(Cat(v.drop(4).take(4)).andR)
     enqidx(1) := firstValidIndex(v.drop(4).take(4), false.B) + 4.U
+    canenq(2) := !(Cat(v.drop(8).take(4)).andR)
+    enqidx(2) := firstValidIndex(v.drop(8).take(4), false.B) + 8.U
+    canenq(3) := !(Cat(v.drop(12).take(4)).andR)
+    enqidx(3) := firstValidIndex(v.drop(12).take(4), false.B) + 12.U
   }
 
   for (i <- 0 until Width) {
