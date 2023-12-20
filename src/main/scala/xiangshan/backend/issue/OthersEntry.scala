@@ -33,7 +33,7 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
   entryReg := entryRegNext
 
   //Wire
-  CommonWireConnect(common, hasWakeupIQ, validReg, entryReg, io.commonIn, false)
+  CommonWireConnect(common, hasWakeupIQ, validReg, entryReg.status, io.commonIn, false)
 
   if (params.hasIQWakeUp) {
     ShiftLoadDependency(hasWakeupIQ.get)

@@ -57,7 +57,7 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
   enqDelayValidReg                := enqDelayValidRegNext
 
   //Wire
-  CommonWireConnect(common, hasWakeupIQ, validReg, entryReg, io.commonIn, true)
+  CommonWireConnect(common, hasWakeupIQ, validReg, currentStatus, io.commonIn, true)
 
   when(io.commonIn.enq.valid && common.enqReady) {
     entryRegNext := io.commonIn.enq.bits
@@ -73,7 +73,7 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
 
   if (params.hasIQWakeUp) {
     ShiftLoadDependency(hasWakeupIQ.get)
-    CommonIQWakeupConnect(common, hasWakeupIQ.get, validReg, entryReg.status, io.commonIn, true)
+    CommonIQWakeupConnect(common, hasWakeupIQ.get, validReg, currentStatus, io.commonIn, true)
   }
 
   // enq delay wakeup
