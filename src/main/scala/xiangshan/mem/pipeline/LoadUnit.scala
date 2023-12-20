@@ -138,6 +138,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val ld_fast_imm      = Input(UInt(12.W))
 
     // rs feedback
+    val wakeup = ValidIO(new DynInst)
     val feedback_fast = ValidIO(new RSFeedback) // stage 2
     val feedback_slow = ValidIO(new RSFeedback) // stage 3
     val ldCancel = Output(new LoadCancelIO()) // use to cancel the uops waked by this load, and cancel load
@@ -187,8 +188,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s0_ld_rep        = Wire(Bool())
   val s0_l2l_fwd       = Wire(Bool())
   val s0_sched_idx     = Wire(UInt())
-  // Record the issue port idx of load issue queue. This signal is used by load cancel.
-  val s0_deqPortIdx    = Wire(UInt(log2Ceil(LoadPipelineWidth).W))
   val s0_can_go        = s1_ready
   val s0_fire          = s0_valid && s0_can_go
   val s0_out           = Wire(new LqWriteBundle)
@@ -358,7 +357,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s0_prf_rd        := false.B
     s0_prf_wr        := false.B
     s0_sched_idx     := 0.U
-    s0_deqPortIdx    := 0.U
   }
 
   def fromFastReplaySource(src: LqWriteBundle) = {
@@ -378,7 +376,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s0_prf_rd        := src.uop.fuOpType === LSUOpType.prefetch_r
     s0_prf_wr        := src.uop.fuOpType === LSUOpType.prefetch_w
     s0_sched_idx     := src.schedIndex
-    s0_deqPortIdx    := src.deqPortIdx
   }
 
   def fromNormalReplaySource(src: LsPipelineBundle) = {
@@ -398,7 +395,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s0_prf_rd        := src.uop.fuOpType === LSUOpType.prefetch_r
     s0_prf_wr        := src.uop.fuOpType === LSUOpType.prefetch_w
     s0_sched_idx     := src.schedIndex
-    s0_deqPortIdx    := src.deqPortIdx
   }
 
   def fromPrefetchSource(src: L1PrefetchReq) = {
@@ -418,7 +414,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s0_prf_rd        := !src.is_store
     s0_prf_wr        := src.is_store
     s0_sched_idx     := 0.U
-    s0_deqPortIdx    := 0.U
   }
 
   def fromIntIssueSource(src: MemExuInput) = {
@@ -438,7 +433,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s0_prf_rd        := src.uop.fuOpType === LSUOpType.prefetch_r
     s0_prf_wr        := src.uop.fuOpType === LSUOpType.prefetch_w
     s0_sched_idx     := 0.U
-    s0_deqPortIdx    := src.deqPortIdx
   }
 
   def fromVecIssueSource() = {
@@ -458,7 +452,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s0_prf_rd        := false.B
     s0_prf_wr        := false.B
     s0_sched_idx     := 0.U
-    s0_deqPortIdx    := 0.U
   }
 
   def fromLoadToLoadSource(src: LoadToLoadIO) = {
@@ -468,7 +461,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // Assume the pointer chasing is always ld.
     s0_uop.fuOpType       := io.ld_fast_fuOpType
     s0_try_l2l            := true.B
-    // we dont care s0_isFirstIssue and s0_rsIdx and s0_sqIdx and s0_deqPortIdx in S0 when trying pointchasing
+    // we dont care s0_isFirstIssue and s0_rsIdx and s0_sqIdx in S0 when trying pointchasing
     // because these signals will be updated in S1
     s0_has_rob_entry      := false.B
     s0_rsIdx              := 0.U
@@ -482,7 +475,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s0_prf_rd             := false.B
     s0_prf_wr             := false.B
     s0_sched_idx          := 0.U
-    s0_deqPortIdx         := 0.U
   }
 
   // set default
@@ -532,7 +524,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s0_out.uop.debugInfo.tlbFirstReqTime := s0_uop.debugInfo.tlbFirstReqTime
   }
   s0_out.schedIndex     := s0_sched_idx
-  s0_out.deqPortIdx     := s0_deqPortIdx
 
   // load fast replay
   io.fast_rep_in.ready := (s0_can_go && io.dcache.req.ready && s0_ld_fast_rep_ready)
@@ -554,6 +545,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // dcache replacement extra info
   // TODO: should prefetch load update replacement?
   io.dcache.replacementUpdated := Mux(s0_ld_rep_select || s0_super_ld_rep_select, io.replay.bits.replacementUpdated, false.B)
+
+  // load wakeup
+  io.wakeup.valid := s0_fire && (s0_super_ld_rep_select || s0_ld_fast_rep_select || s0_ld_rep_select || s0_int_iss_select)
+  io.wakeup.bits := s0_uop
 
   XSDebug(io.dcache.req.fire,
     p"[DCACHE LOAD REQ] pc ${Hexadecimal(s0_uop.pc)}, vaddr ${Hexadecimal(s0_vaddr)}\n"
@@ -698,7 +693,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       s1_in.uop           := io.ldin.bits.uop
       s1_in.rsIdx         := io.ldin.bits.iqIdx
       s1_in.isFirstIssue  := io.ldin.bits.isFirstIssue
-      s1_in.deqPortIdx    := io.ldin.bits.deqPortIdx
       s1_vaddr_lo         := s1_ptr_chasing_vaddr(5, 0)
       s1_paddr_dup_lsu    := Cat(io.tlb.resp.bits.paddr(0)(PAddrBits - 1, 6), s1_vaddr_lo)
       s1_paddr_dup_dcache := Cat(io.tlb.resp.bits.paddr(0)(PAddrBits - 1, 6), s1_vaddr_lo)
@@ -951,11 +945,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.feedback_fast.bits.sourceType       := RSFeedbackType.lrqFull
   io.feedback_fast.bits.dataInvalidSqIdx := DontCare
 
-  io.ldCancel.ld1Cancel.valid := s2_valid && (
-    (s2_out.rep_info.need_rep && s2_out.isFirstIssue) ||                // exe fail and issued from IQ
-    s2_mmio                                                             // is mmio
+  io.ldCancel.ld1Cancel := s2_valid && (
+    s2_out.rep_info.need_rep ||          // exe fail
+    s2_mmio                              // is mmio
   )
-  io.ldCancel.ld1Cancel.bits := s2_out.deqPortIdx
 
   // fast wakeup
   io.fast_uop.valid := RegNext(
@@ -1115,11 +1108,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.feedback_slow.bits.sourceType       := RSFeedbackType.lrqFull
   io.feedback_slow.bits.dataInvalidSqIdx := DontCare
 
-  io.ldCancel.ld2Cancel.valid := s3_valid && (
-    (io.lsq.ldin.bits.rep_info.need_rep && s3_in.isFirstIssue) ||
+  io.ldCancel.ld2Cancel := s3_valid && (
+    io.lsq.ldin.bits.rep_info.need_rep ||
     s3_in.mmio
   )
-  io.ldCancel.ld2Cancel.bits := s3_in.deqPortIdx
 
   val s3_ld_wb_meta = Mux(s3_out.valid, s3_out.bits, io.lsq.uncache.bits)
 

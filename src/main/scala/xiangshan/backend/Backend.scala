@@ -158,7 +158,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   private val og1CancelVec: Vec[Bool] = dataPath.io.og1CancelVec
   private val og0CancelVec: Seq[Bool] = dataPath.io.og0CancelVec
   private val cancelToBusyTable = dataPath.io.cancelToBusyTable
-  private val finalBlockMem = Wire(Vec(params.memSchdParams.get.numExu, Bool()))
 
   ctrlBlock.io.fromTop.hartId := io.fromTop.hartId
   ctrlBlock.io.frontend <> io.frontend
@@ -203,9 +202,9 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   memScheduler.io.fromDispatch.uops <> ctrlBlock.io.toIssueBlock.memUops
   memScheduler.io.intWriteBack := wbDataPath.io.toIntPreg
   memScheduler.io.vfWriteBack := wbDataPath.io.toVfPreg
-  memScheduler.io.finalBlockMem.get.flatten.zip(finalBlockMem).foreach(x => x._1 := x._2)
   memScheduler.io.fromMem.get.scommit := io.mem.sqDeq
   memScheduler.io.fromMem.get.lcommit := io.mem.lqDeq
+  memScheduler.io.fromMem.get.wakeup := io.mem.wakeup
   memScheduler.io.fromMem.get.sqCancelCnt := io.mem.sqCancelCnt
   memScheduler.io.fromMem.get.lqCancelCnt := io.mem.lqCancelCnt
   memScheduler.io.fromMem.get.stIssuePtr := io.mem.stIssuePtr
@@ -416,7 +415,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     sink.bits.uop           := 0.U.asTypeOf(sink.bits.uop)
     sink.bits.src           := 0.U.asTypeOf(sink.bits.src)
     sink.bits.src.zip(source.bits.src).foreach { case (l, r) => l := r}
-    sink.bits.deqPortIdx    := source.bits.deqPortIdx.getOrElse(0.U)
     sink.bits.uop.fuType    := source.bits.fuType
     sink.bits.uop.fuOpType  := source.bits.fuOpType
     sink.bits.uop.imm       := source.bits.imm
@@ -460,13 +458,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   io.mem.lsqEnqIO <> memScheduler.io.memIO.get.lsqEnqIO
   io.mem.robLsqIO <> ctrlBlock.io.robio.lsq
 
-  private val memFinalIssueBlock = io.mem.issueUops zip memExuBlocksHasLDU.flatten map {
-    case (out, isLdu) =>
-      if (isLdu) out.valid && !out.ready
-      else false.B
-  }
-  finalBlockMem.zip(memFinalIssueBlock).foreach(x => x._1 := x._2)
-
   io.frontendSfence := fenceio.sfence
   io.frontendTlbCsr := csrio.tlb
   io.frontendCsrCtrl := csrio.customCtrl
@@ -497,7 +488,8 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val robLsqIO = new RobLsqIO
   val ldaIqFeedback = Vec(params.LduCnt, Flipped(new MemRSFeedbackIO))
   val staIqFeedback = Vec(params.StaCnt, Flipped(new MemRSFeedbackIO))
-  val ldCancel = Vec(params.LduCnt, Flipped(new LoadCancelIO))
+  val ldCancel = Vec(params.LdExuCnt, Flipped(new LoadCancelIO))
+  val wakeup = Vec(params.LdExuCnt, Flipped(Valid(new DynInst)))
   val loadPcRead = Vec(params.LduCnt, Output(UInt(VAddrBits.W)))
   val storePcRead = Vec(params.StaCnt, Output(UInt(VAddrBits.W)))
 
