@@ -539,6 +539,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
     when (vdUop.robIdx.needFlush(io.redirect)) {
       vdException := 0.U.asTypeOf(vdException)
       vdMask := 0.U
+      vdIdx := 0.U
     }
   }
 
@@ -549,7 +550,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
       vdVl.valid := false.B
       vdUop.replayInst := false.B
 
-      when (vdUop.lastUop) {
+      when (vdUop.lastUop || vdUop.robIdx.needFlush(io.redirect)) {
         vdIdx := 0.U
       }.otherwise {
         vdIdx := vdIdx + 1.U
