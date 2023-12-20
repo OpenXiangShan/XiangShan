@@ -314,6 +314,13 @@ object Bundles {
       this.vecWen := exuInput.vecWen.getOrElse(false.B)
       this.pdest := exuInput.pdest
     }
+
+    def fromDynInst(uop: DynInst): Unit = {
+      this.rfWen := uop.rfWen
+      this.fpWen := uop.fpWen
+      this.vecWen := uop.vecWen
+      this.pdest := uop.pdest
+    }
   }
 
   class VPUCtrlSignals(implicit p: Parameters) extends XSBundle {
@@ -495,7 +502,6 @@ object Bundles {
     val l1ExuVec = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, ExuVec()))
     val srcTimer = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, UInt(3.W)))
     val loadDependency = OptionWrapper(params.isIQWakeUpSink, Vec(LoadPipelineWidth, UInt(3.W)))
-    val deqPortIdx = OptionWrapper(params.hasLoadFu, UInt(log2Ceil(LoadPipelineWidth).W))
 
     val perfDebugInfo = new PerfDebugInfo()
 
@@ -549,7 +555,6 @@ object Bundles {
       this.sqIdx         .foreach(_ := source.common.sqIdx.get)
       this.srcTimer      .foreach(_ := source.common.srcTimer.get)
       this.loadDependency.foreach(_ := source.common.loadDependency.get.map(_ << 1))
-      this.deqPortIdx    .foreach(_ := source.common.deqPortIdx.get)
     }
   }
 
@@ -701,7 +706,6 @@ object Bundles {
     val src = if (isVector) Vec(5, UInt(VLEN.W)) else Vec(3, UInt(XLEN.W))
     val iqIdx = UInt(log2Up(MemIQSizeMax).W)
     val isFirstIssue = Bool()
-    val deqPortIdx = UInt(log2Ceil(LoadPipelineWidth).W)
   }
 
   class MemExuOutput(isVector: Boolean = false)(implicit p: Parameters) extends XSBundle {
@@ -717,16 +721,8 @@ object Bundles {
 
   object LoadShouldCancel {
     def apply(loadDependency: Option[Seq[UInt]], ldCancel: Seq[LoadCancelIO]): Bool = {
-      val ld1Cancel = loadDependency.map(deps =>
-        deps.zipWithIndex.map { case (dep, ldPortIdx) =>
-          ldCancel.map(_.ld1Cancel).map(cancel => cancel.fire && dep(1) && cancel.bits === ldPortIdx.U).reduce(_ || _)
-        }.reduce(_ || _)
-      )
-      val ld2Cancel = loadDependency.map(deps =>
-        deps.zipWithIndex.map { case (dep, ldPortIdx) =>
-          ldCancel.map(_.ld2Cancel).map(cancel => cancel.fire && dep(2) && cancel.bits === ldPortIdx.U).reduce(_ || _)
-        }.reduce(_ || _)
-      )
+      val ld1Cancel = loadDependency.map(_.zip(ldCancel.map(_.ld1Cancel)).map { case (dep, cancel) => cancel && dep(1)}.reduce(_ || _))
+      val ld2Cancel = loadDependency.map(_.zip(ldCancel.map(_.ld2Cancel)).map { case (dep, cancel) => cancel && dep(2)}.reduce(_ || _))
       ld1Cancel.map(_ || ld2Cancel.get).getOrElse(false.B)
     }
   }

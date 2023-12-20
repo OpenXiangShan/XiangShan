@@ -450,8 +450,8 @@ class MemRSFeedbackIO(implicit p: Parameters) extends XSBundle {
 }
 
 class LoadCancelIO(implicit p: Parameters) extends XSBundle {
-  val ld1Cancel = ValidIO(UInt(log2Ceil(LoadPipelineWidth).W))
-  val ld2Cancel = ValidIO(UInt(log2Ceil(LoadPipelineWidth).W))
+  val ld1Cancel = Bool()
+  val ld2Cancel = Bool()
 }
 
 class FrontendToCtrlIO(implicit p: Parameters) extends XSBundle {

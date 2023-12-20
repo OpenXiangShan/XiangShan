@@ -122,9 +122,6 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle with HasDCachePa
   val ldCancel = ValidUndirectioned(UInt(log2Ceil(LoadPipelineWidth).W))
   // loadQueueReplay index.
   val schedIndex = UInt(log2Up(LoadQueueReplaySize).W)
-
-  // issue dequeue port index
-  val deqPortIdx = UInt(log2Ceil(LoadPipelineWidth).W)
 }
 
 class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
@@ -167,7 +164,6 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     delayedLoadError := DontCare
     lateKill := DontCare
     feedbacked := DontCare
-    deqPortIdx := DontCare
     ldCancel := DontCare
   }
 

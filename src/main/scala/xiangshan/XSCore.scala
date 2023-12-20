@@ -133,7 +133,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.stIssuePtr := memBlock.io.mem_to_ooo.stIssuePtr
   backend.io.mem.ldaIqFeedback <> memBlock.io.ldaIqFeedback
   backend.io.mem.staIqFeedback <> memBlock.io.staIqFeedback
-  backend.io.mem.ldCancel <> memBlock.io.ldCancel
+  backend.io.mem.ldCancel <> memBlock.io.mem_to_ooo.ldCancel
+  backend.io.mem.wakeup <> memBlock.io.mem_to_ooo.wakeup
   backend.io.mem.writeBack.zipAll(memBlock.io.mem_to_ooo.writeback, DontCare, DontCare).foreach { case (back, mem) =>
     back <> mem
   } // TODO: replace zipAll with zip when vls is fully implemented

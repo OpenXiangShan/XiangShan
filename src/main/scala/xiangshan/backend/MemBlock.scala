@@ -68,7 +68,7 @@ class ooo_to_mem(implicit p: Parameters) extends XSBundle {
   val issue = Vec(backendParams.LsExuCnt + backendParams.StaCnt, Flipped(DecoupledIO(new MemExuInput)))
 }
 
-class mem_to_ooo(implicit p: Parameters ) extends XSBundle {
+class mem_to_ooo(implicit p: Parameters) extends XSBundle {
   val otherFastWakeup = Vec(backendParams.LduCnt + 2 * backendParams.StaCnt, ValidIO(new DynInst))
   val csrUpdate = new DistributedCSRUpdateReq
   val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize + 1).W))
@@ -91,6 +91,9 @@ class mem_to_ooo(implicit p: Parameters ) extends XSBundle {
     val sqCanAccept = Output(Bool())
   }
   val writeback = Vec(backendParams.LsExuCnt + backendParams.StaCnt, DecoupledIO(new MemExuOutput))
+
+  val ldCancel = Vec(backendParams.LdExuCnt, new LoadCancelIO)
+  val wakeup = Vec(backendParams.LdExuCnt, Valid(new DynInst))
 }
 
 class MemCoreTopDownIO extends Bundle {
@@ -155,7 +158,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val s3_delayed_load_error = Vec(LduCnt, Output(Bool()))
     val ldaIqFeedback = Vec(LduCnt, new MemRSFeedbackIO)
     val staIqFeedback = Vec(StaCnt, new MemRSFeedbackIO)
-    val ldCancel = Vec(LduCnt, new LoadCancelIO)
     val vlsu2vec = new VLSU2VecIO
     val vlsu2int = new VLSU2IntIO
     val vlsu2ctrl = new VLSU2CtrlIO
@@ -512,7 +514,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.feedback_slow <> io.ldaIqFeedback(i).feedbackSlow
     loadUnits(i).io.feedback_fast <> io.ldaIqFeedback(i).feedbackFast
     loadUnits(i).io.correctMissTrain := correctMissTrain
-    io.ldCancel(i) := loadUnits(i).io.ldCancel
+    io.mem_to_ooo.ldCancel(i) := loadUnits(i).io.ldCancel
+    io.mem_to_ooo.wakeup(i) := loadUnits(i).io.wakeup // TODO: connect hyu
 
     // fast replay
     loadUnits(i).io.fast_rep_in.valid := balanceFastReplaySel(i).valid
