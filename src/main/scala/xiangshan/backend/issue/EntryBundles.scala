@@ -144,13 +144,13 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val srcWakeupByWB         = Vec(params.numRegSrc, Bool())
   }
 
-  def CommonWireConnect(common: CommonWireBundle, hasIQWakeup: Option[CommonIQWakeupBundle], validReg: Bool, entryReg: EntryBundle, commonIn: CommonInBundle, isEnq: Boolean)(implicit p: Parameters, params: IssueBlockParams) = {
+  def CommonWireConnect(common: CommonWireBundle, hasIQWakeup: Option[CommonIQWakeupBundle], validReg: Bool, status: Status, commonIn: CommonInBundle, isEnq: Boolean)(implicit p: Parameters, params: IssueBlockParams) = {
     val hasIQWakeupGet        = hasIQWakeup.getOrElse(0.U.asTypeOf(new CommonIQWakeupBundle))
-    common.flushed            := entryReg.status.robIdx.needFlush(commonIn.flush)
+    common.flushed            := status.robIdx.needFlush(commonIn.flush)
     common.deqSuccess         := commonIn.issueResp.valid && commonIn.issueResp.bits.respType === RSFeedbackType.fuIdle && !hasIQWakeupGet.srcLoadCancelVec.asUInt.orR
     common.srcWakeup          := common.srcWakeupByWB.zip(hasIQWakeupGet.srcWakeupByIQ).map { case (x, y) => x || y.asUInt.orR }
-    common.srcWakeupByWB      := commonIn.wakeUpFromWB.map(bundle => bundle.bits.wakeUp(entryReg.status.srcStatus.map(_.psrc) zip entryReg.status.srcStatus.map(_.srcType), bundle.valid)).transpose.map(x => VecInit(x.toSeq).asUInt.orR).toSeq
-    common.canIssue           := validReg && entryReg.status.canIssue && !hasIQWakeupGet.srcCancelVec.asUInt.orR
+    common.srcWakeupByWB      := commonIn.wakeUpFromWB.map(bundle => bundle.bits.wakeUp(status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType), bundle.valid)).transpose.map(x => VecInit(x.toSeq).asUInt.orR).toSeq
+    common.canIssue           := validReg && status.canIssue && !hasIQWakeupGet.srcCancelVec.asUInt.orR
     common.enqReady           := !validReg || common.clear
     if(isEnq) {
       common.validRegNext     := Mux(commonIn.enq.valid && common.enqReady, true.B, Mux(common.clear, false.B, validReg))
