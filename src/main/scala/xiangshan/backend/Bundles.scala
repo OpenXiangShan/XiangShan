@@ -318,13 +318,6 @@ class IssueQueueIQWakeUpBundle(
       this.vecWen := exuInput.vecWen.getOrElse(false.B)
       this.pdest := exuInput.pdest
     }
-
-    def fromDynInst(uop: DynInst): Unit = {
-      this.rfWen := uop.rfWen
-      this.fpWen := uop.fpWen
-      this.vecWen := uop.vecWen
-      this.pdest := uop.pdest
-    }
   }
 
   class VPUCtrlSignals(implicit p: Parameters) extends XSBundle {
