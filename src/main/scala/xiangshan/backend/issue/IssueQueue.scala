@@ -144,11 +144,9 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     newExuInput
   }
 
-  val wakeUpQueues: Seq[Option[MultiWakeupQueue[ExuInput, WakeupQueueFlush]]] = params.exuBlockParams.map { x =>
-    OptionWrapper(x.isIQWakeUpSource && !x.hasLoadExu, Module(
-      new MultiWakeupQueue(new ExuInput(x), new ExuInput(x, x.copyWakeupOut, x.copyNum), new WakeupQueueFlush, x.fuLatancySet, flushFunc, modificationFunc, lastConnectFunc)
-    ))
-  }
+  val wakeUpQueues: Seq[Option[MultiWakeupQueue[ExuInput, WakeupQueueFlush]]] = params.exuBlockParams.map { x => OptionWrapper(x.isIQWakeUpSource && !x.hasLoadExu, Module(
+    new MultiWakeupQueue(new ExuInput(x), new ExuInput(x, x.copyWakeupOut, x.copyNum), new WakeupQueueFlush, x.fuLatancySet, flushFunc, modificationFunc, lastConnectFunc)
+  ))}
   val deqBeforeDly = Wire(params.genIssueDecoupledBundle)
 
   val intWbBusyTableIn = io.wbBusyTableRead.map(_.intWbBusyTable)
@@ -809,13 +807,22 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
   io.wakeupToIQ.zip(params.exuBlockParams).zipWithIndex.foreach { case ((wakeup, param), i) =>
     if (param.hasLoadExu) {
       require(wakeUpQueues(i).isEmpty)
-      val uopWire = loadWakeUpIter.next()
-      val uop = Wire(chiselTypeOf(uopWire))
-      uop.valid := RegNext(uopWire.valid)
-      uop.bits  := RegEnable(uopWire.bits, uopWire.valid)
-      wakeup.valid := uop.fire && FuType.isLoad(uop.bits.fuType)
-      wakeup.bits.fromDynInst(uop.bits)
+      val uop = loadWakeUpIter.next()
+
+      wakeup.valid := RegNext(uop.fire)
+      wakeup.bits.rfWen  := RegNext(uop.bits.rfWen  && uop.fire)
+      wakeup.bits.fpWen  := RegNext(uop.bits.fpWen  && uop.fire)
+      wakeup.bits.vecWen := RegNext(uop.bits.vecWen && uop.fire)
+      wakeup.bits.pdest  := RegNext(uop.bits.pdest)
       wakeup.bits.loadDependency.foreach(_ := 0.U) // this is correct for load only
+
+      wakeup.bits.rfWenCopy .foreach(_.foreach(_ := RegNext(uop.bits.rfWen  && uop.fire)))
+      wakeup.bits.fpWenCopy .foreach(_.foreach(_ := RegNext(uop.bits.fpWen  && uop.fire)))
+      wakeup.bits.vecWenCopy.foreach(_.foreach(_ := RegNext(uop.bits.vecWen && uop.fire)))
+      wakeup.bits.pdestCopy .foreach(_.foreach(_ := RegNext(uop.bits.pdest)))
+      wakeup.bits.loadDependencyCopy.foreach(x => x := 0.U.asTypeOf(x)) // this is correct for load only
+
+      wakeup.bits.is0Lat := 0.U
     }
   }
   require(!loadWakeUpIter.hasNext)
