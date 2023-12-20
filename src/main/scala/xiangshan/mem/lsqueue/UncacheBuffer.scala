@@ -47,9 +47,6 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
     // uncache io
     val uncache = new UncacheWordIO
 
-    // trigger
-    val trigger = new LqTriggerIO
-
     // select this entry
     val select = Output(Bool())
 
@@ -60,7 +57,6 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
 
   val req_valid = RegInit(false.B)
   val req = Reg(new LqWriteBundle)
-  val triggerResult = RegInit(VecInit(Seq.fill(3)(false.B)))
 
   //
   val s_idle :: s_req :: s_resp :: s_wait :: Nil = Enum(4)
@@ -77,18 +73,6 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
   } .elsewhen (io.ldout.fire) {
     req_valid := false.B
   }
-
-  when (io.req.valid) {
-    when (io.req.bits.data_wen_dup(5)) {
-      triggerResult := io.trigger.hitLoadAddrTriggerHitVec
-    }
-  }
-
-  io.trigger.lqLoadAddrTriggerHitVec := Mux(
-    io.ldout.valid,
-    RegNext(triggerResult),
-    VecInit(Seq.fill(3)(false.B))
-  )
 
   io.flush := req_valid && req.uop.robIdx.needFlush(io.redirect)
   /**
@@ -225,9 +209,6 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
     // uncache io
     val uncache = new UncacheWordIO
 
-    // trigger io
-    val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
-
     // rollback
     val rollback = Output(Valid(new Redirect))
   })
@@ -273,16 +254,6 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
     io.ld_raw_data(w) := DontCare
   }
 
-  // set trigger default
-  entries.foreach {
-    case (e) =>
-      e.io.trigger.hitLoadAddrTriggerHitVec := VecInit(Seq.fill(3)(false.B))
-  }
-
-  io.trigger.foreach {
-    case (t) =>
-      t.lqLoadAddrTriggerHitVec := VecInit(Seq.fill(3)(false.B))
-  }
 
   // enqueue
   // s1:
@@ -328,7 +299,6 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
   val uncacheReq = Wire(DecoupledIO(io.uncache.req.bits.cloneType))
   val ldout = Wire(DecoupledIO(io.ldout(0).bits.cloneType))
   val ld_raw_data = Wire(io.ld_raw_data(0).cloneType)
-  val lqLoadAddrTriggerHitVec = Wire(io.trigger(0).lqLoadAddrTriggerHitVec.cloneType)
 
   // init
   uncacheReq.valid := false.B
@@ -336,7 +306,6 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
   ldout.valid      := false.B
   ldout.bits       := DontCare
   ld_raw_data        := DontCare
-  lqLoadAddrTriggerHitVec := DontCare
 
   entries.zipWithIndex.foreach {
     case (e, i) =>
@@ -348,7 +317,6 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
         when (enqValidVec(w) && (i.U === enqIndexVec(w))) {
           e.io.req.valid := true.B
           e.io.req.bits := s2_req(w)
-          e.io.trigger.hitLoadAddrTriggerHitVec := io.trigger(w).hitLoadAddrTriggerHitVec
         }
       }
 
@@ -367,7 +335,6 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
         // Read vaddr for mem exception
         // no inst will be commited 1 cycle before tval update
         // read vaddr for mmio, and only port 0 is used
-        lqLoadAddrTriggerHitVec := e.io.trigger.lqLoadAddrTriggerHitVec
       }
 
       when (i.U === io.uncache.resp.bits.id) {
@@ -384,7 +351,6 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
   // uncache RAW data
   // FIXME: remove it?
   io.ld_raw_data(0) := RegEnable(ld_raw_data, ldout.fire)
-  io.trigger(0).lqLoadAddrTriggerHitVec := RegEnable(lqLoadAddrTriggerHitVec, ldout.fire)
 
   for (i <- 0 until LoadPipelineWidth) {
     io.rob.mmio(i) := RegNext(s1_valid(i) && s1_req(i).mmio)
@@ -429,49 +395,41 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
   // stage 2:               lq
   //                        |
   //                     rollback req
-  def selectOldest[T <: MicroOp](valid: Seq[Bool], bits: Seq[T]): (Seq[Bool], Seq[T]) = {
-    assert(valid.length == bits.length)
-    if (valid.length == 0 || valid.length == 1) {
-      (valid, bits)
-    } else if (valid.length == 2) {
-      val res = Seq.fill(2)(Wire(ValidIO(chiselTypeOf(bits(0)))))
-      for (i <- res.indices) {
-        res(i).valid := valid(i)
-        res(i).bits := bits(i)
-      }
-      val oldest = Mux(valid(0) && valid(1), Mux(isAfter(bits(0).robIdx, bits(1).robIdx), res(1), res(0)), Mux(valid(0) && !valid(1), res(0), res(1)))
-      (Seq(oldest.valid), Seq(oldest.bits))
-    } else {
-      val left = selectOldest(valid.take(valid.length / 2), bits.take(bits.length / 2))
-      val right = selectOldest(valid.takeRight(valid.length - (valid.length / 2)), bits.takeRight(bits.length - (bits.length / 2)))
-      selectOldest(left._1 ++ right._1, left._2 ++ right._2)
-    }
+  def selectOldestRedirect(xs: Seq[Valid[Redirect]]): Vec[Bool] = {
+    val compareVec = (0 until xs.length).map(i => (0 until i).map(j => isAfter(xs(j).bits.robIdx, xs(i).bits.robIdx)))
+    val resultOnehot = VecInit((0 until xs.length).map(i => Cat((0 until xs.length).map(j =>
+      (if (j < i) !xs(j).valid || compareVec(i)(j)
+      else if (j == i) xs(i).valid
+      else !xs(j).valid || !compareVec(j)(i))
+    )).andR))
+    resultOnehot
   }
-  def detectRollback() = {
-    val reqNeedCheck = VecInit((0 until LoadPipelineWidth).map(w =>
-      s2_enqueue(w) && !enqValidVec(w)
-    ))
-    val reqSelUops = VecInit(s2_req.map(_.uop))
-    val reqSelect = selectOldest(reqNeedCheck, reqSelUops)
-    (RegNext(reqSelect._1(0)), RegNext(reqSelect._2(0)))
-  }
-
-  val (rollbackValid, rollbackUop) = detectRollback()
-  io.rollback.bits           := DontCare
-  io.rollback.bits.isRVC     := rollbackUop.cf.pd.isRVC
-  io.rollback.bits.robIdx    := rollbackUop.robIdx
-  io.rollback.bits.ftqIdx    := rollbackUop.cf.ftqPtr
-  io.rollback.bits.ftqOffset := rollbackUop.cf.ftqOffset
-  io.rollback.bits.level     := RedirectLevel.flush
-  io.rollback.bits.cfiUpdate.target := rollbackUop.cf.pc
-  io.rollback.bits.debug_runahead_checkpoint_id := rollbackUop.debugInfo.runahead_checkpoint_id
-
+  val reqNeedCheck = VecInit((0 until LoadPipelineWidth).map(w =>
+    s2_enqueue(w) && !enqValidVec(w)
+  ))
+  val reqSelUops = VecInit(s2_req.map(_.uop))
+  val allRedirect = (0 until LoadPipelineWidth).map(i => {
+    val redirect = Wire(Valid(new Redirect))
+    redirect.valid := reqNeedCheck(i)
+    redirect.bits             := DontCare
+    redirect.bits.isRVC       := reqSelUops(i).cf.pd.isRVC
+    redirect.bits.robIdx      := reqSelUops(i).robIdx
+    redirect.bits.ftqIdx      := reqSelUops(i).cf.ftqPtr
+    redirect.bits.ftqOffset   := reqSelUops(i).cf.ftqOffset
+    redirect.bits.level       := RedirectLevel.flush
+    redirect.bits.cfiUpdate.target := reqSelUops(i).cf.pc
+    redirect.bits.debug_runahead_checkpoint_id := reqSelUops(i).debugInfo.runahead_checkpoint_id
+    redirect
+  })
+  val oldestOneHot = selectOldestRedirect(allRedirect)
+  val oldestRedirect = Mux1H(oldestOneHot, allRedirect)
   val lastCycleRedirect = RegNext(io.redirect)
   val lastLastCycleRedirect = RegNext(lastCycleRedirect)
-  io.rollback.valid := rollbackValid &&
-                      !rollbackUop.robIdx.needFlush(io.redirect) &&
-                      !rollbackUop.robIdx.needFlush(lastCycleRedirect) &&
-                      !rollbackUop.robIdx.needFlush(lastLastCycleRedirect)
+  io.rollback.valid := RegNext(oldestRedirect.valid &&
+                      !oldestRedirect.bits.robIdx.needFlush(io.redirect) &&
+                      !oldestRedirect.bits.robIdx.needFlush(lastCycleRedirect) &&
+                      !oldestRedirect.bits.robIdx.needFlush(lastLastCycleRedirect))
+  io.rollback.bits := RegNext(oldestRedirect.bits)
 
   //  perf counter
   val validCount = freeList.io.validCount

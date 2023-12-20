@@ -845,9 +845,6 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   val tlb_req_arb = Module(new RRArbiterInit(new TlbReq, smsParams.pf_filter_size))
   val pf_req_arb = Module(new RRArbiterInit(UInt(PAddrBits.W), smsParams.pf_filter_size))
 
-  io.tlb_req.req <> tlb_req_arb.io.out
-  io.tlb_req.resp.ready := true.B
-  io.tlb_req.req_kill := false.B
   io.l2_pf_addr.valid := pf_req_arb.io.out.valid
   io.l2_pf_addr.bits := pf_req_arb.io.out.bits
   io.pf_alias_bits := Mux1H(entries.zipWithIndex.map({
@@ -861,8 +858,6 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   val s1_hit = Wire(Bool())
   val s1_replace_vec = Wire(UInt(smsParams.pf_filter_size.W))
   val s1_tlb_fire_vec = Wire(UInt(smsParams.pf_filter_size.W))
-  val s2_valid = Wire(Bool())
-  val s2_replace_vec = Wire(UInt(smsParams.pf_filter_size.W))
   val s2_tlb_fire_vec = Wire(UInt(smsParams.pf_filter_size.W))
 
   // s0: entries lookup
@@ -922,6 +917,9 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   val s1_replace_vec_r = RegEnable(s0_replace_vec, s0_gen_req_valid && !s0_hit)
   val s1_update_vec = RegEnable(VecInit(s0_match_vec).asUInt, s0_gen_req_valid && s0_hit)
   val s1_tlb_fire_vec_r = RegNext(s0_tlb_fire_vec, 0.U.asTypeOf(s0_tlb_fire_vec))
+  // tlb req will latch one cycle after tlb_arb
+  val s1_tlb_req_valid = RegNext(tlb_req_arb.io.out.fire)
+  val s1_tlb_req_bits  = RegEnable(tlb_req_arb.io.out.bits, tlb_req_arb.io.out.fire)
   val s1_alloc_entry = Wire(new PrefetchFilterEntry())
   s1_valid := s1_valid_r
   s1_hit := s1_hit_r
@@ -935,13 +933,13 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   s1_alloc_entry.filter_bits := 0.U
   s1_alloc_entry.alias_bits := s1_gen_req.alias_bits
   s1_alloc_entry.debug_source_type := s1_gen_req.debug_source_type
+  io.tlb_req.req.valid := s1_tlb_req_valid && !((s1_tlb_fire_vec & s1_replace_vec).orR && s1_valid && !s1_hit)
+  io.tlb_req.req.bits := s1_tlb_req_bits
+  io.tlb_req.resp.ready := true.B
+  io.tlb_req.req_kill := false.B
+  tlb_req_arb.io.out.ready := true.B
 
-  // s2: tlb req will latch one cycle after tlb_arb
-  val s2_valid_r = RegNext(s1_valid, false.B)
-  val s2_replace_vec_r = RegNext(s1_replace_vec, 0.U.asTypeOf((s1_replace_vec)))
   val s2_tlb_fire_vec_r = RegNext(s1_tlb_fire_vec, 0.U.asTypeOf(s1_tlb_fire_vec))
-  s2_valid := s2_valid_r
-  s2_replace_vec := s2_replace_vec_r
   s2_tlb_fire_vec := s2_tlb_fire_vec_r.asUInt
 
   for(((v, ent), i) <- valids.zip(entries).zipWithIndex){
@@ -949,8 +947,7 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
     val update = s1_valid && s1_hit && s1_update_vec(i)
     // for pf: use s0 data
     val pf_fired = s0_pf_fire_vec(i)
-    val is_evicted = s2_valid && s2_replace_vec(i)
-    val tlb_fired = s2_tlb_fire_vec(i) && !io.tlb_req.resp.bits.miss && !is_evicted
+    val tlb_fired = s2_tlb_fire_vec(i) && !io.tlb_req.resp.bits.miss && io.tlb_req.resp.fire
     when(tlb_fired){
       ent.paddr_valid := !io.tlb_req.resp.bits.miss
       ent.region_addr := region_addr(io.tlb_req.resp.bits.paddr.head)
@@ -970,6 +967,7 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   when(s1_valid && s1_hit){
     assert(PopCount(s1_update_vec) === 1.U, "sms_pf_filter: multi-hit")
   }
+  assert(!io.tlb_req.resp.fire || Cat(s2_tlb_fire_vec).orR, "sms_pf_filter: tlb resp fires, but no tlb req from tlb_req_arb 2 cycles ago")
 
   XSPerfAccumulate("sms_pf_filter_recv_req", io.gen_req.valid)
   XSPerfAccumulate("sms_pf_filter_hit", s1_valid && s1_hit)
