@@ -444,12 +444,12 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
     val redirect = Wire(Valid(new Redirect))
     redirect.valid := reqNeedCheck(i)
     redirect.bits             := DontCare
-    redirect.bits.isRVC       := reqSelUops(i).cf.pd.isRVC
+    redirect.bits.isRVC       := reqSelUops(i).preDecodeInfo.isRVC
     redirect.bits.robIdx      := reqSelUops(i).robIdx
-    redirect.bits.ftqIdx      := reqSelUops(i).cf.ftqPtr
-    redirect.bits.ftqOffset   := reqSelUops(i).cf.ftqOffset
+    redirect.bits.ftqIdx      := reqSelUops(i).ftqPtr
+    redirect.bits.ftqOffset   := reqSelUops(i).ftqOffset
     redirect.bits.level       := RedirectLevel.flush
-    redirect.bits.cfiUpdate.target := reqSelUops(i).cf.pc
+    redirect.bits.cfiUpdate.target := reqSelUops(i).pc // TODO: check if need pc
     redirect.bits.debug_runahead_checkpoint_id := reqSelUops(i).debugInfo.runahead_checkpoint_id
     redirect
   })

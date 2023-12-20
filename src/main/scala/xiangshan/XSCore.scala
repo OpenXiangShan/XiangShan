@@ -94,22 +94,16 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val backend = outer.backend.module
   val memBlock = outer.memBlock.module
 
-  val fenceio = backend.io.fenceio
-  fenceio.disableSfence := DontCare
-
-  frontend.io.hartId  := io.hartId
+  frontend.io.hartId := memBlock.io.inner_hartId
+  frontend.io.reset_vector := memBlock.io.inner_reset_vector
   frontend.io.backend <> backend.io.frontend
   frontend.io.sfence <> backend.io.frontendSfence
   frontend.io.tlbCsr <> backend.io.frontendTlbCsr
   frontend.io.csrCtrl <> backend.io.frontendCsrCtrl
-  frontend.io.fencei <> fenceio.fencei
+  frontend.io.fencei <> backend.io.fenceio.fencei
 
-  backend.io.fromTop.hartId := io.hartId
-  backend.io.fromTop.externalInterrupt.msip := outer.clint_int_sink.in.head._1(0)
-  backend.io.fromTop.externalInterrupt.mtip := outer.clint_int_sink.in.head._1(1)
-  backend.io.fromTop.externalInterrupt.meip := outer.plic_int_sink.in.head._1(0)
-  backend.io.fromTop.externalInterrupt.seip := outer.plic_int_sink.in.last._1(0)
-  backend.io.fromTop.externalInterrupt.debug := outer.debug_int_sink.in.head._1(0)
+  backend.io.fromTop.hartId := memBlock.io.inner_hartId
+  backend.io.fromTop.externalInterrupt := memBlock.io.externalInterrupt
 
   backend.io.frontendCsrDistributedUpdate := frontend.io.csrUpdate
 
@@ -144,18 +138,35 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.robLsqIO.mmio := memBlock.io.mem_to_ooo.lsqio.mmio
   backend.io.mem.robLsqIO.uop := memBlock.io.mem_to_ooo.lsqio.uop
 
-  frontend.io.reset_vector := io.reset_vector
-
-  io.cpu_halt := backend.io.toTop.cpuHalted
-
   // memblock error exception writeback, 1 cycle after normal writeback
   backend.io.mem.s3_delayed_load_error <> memBlock.io.mem_to_ooo.s3_delayed_load_error
 
-  io.beu_errors.icache <> frontend.io.error.toL1BusErrorUnitInfo()
-  io.beu_errors.dcache <> memBlock.io.error.toL1BusErrorUnitInfo()
-  io.beu_errors.l2 <> DontCare
+  backend.io.mem.exceptionVAddr := memBlock.io.mem_to_ooo.lsqio.vaddr
+  backend.io.mem.csrDistributedUpdate := memBlock.io.mem_to_ooo.csrUpdate
+  backend.io.mem.debugLS := memBlock.io.debug_ls
+  backend.io.mem.lsTopdownInfo := memBlock.io.mem_to_ooo.lsTopdownInfo
+  backend.io.mem.lqCanAccept := memBlock.io.mem_to_ooo.lsqio.lqCanAccept
+  backend.io.mem.sqCanAccept := memBlock.io.mem_to_ooo.lsqio.sqCanAccept
+  backend.io.fenceio.sbuffer.sbIsEmpty := memBlock.io.mem_to_ooo.sbIsEmpty
+  // Todo: remove it
+  backend.io.fenceio.disableSfence := DontCare
 
+  backend.io.perf.frontendInfo := frontend.io.frontendInfo
+  backend.io.perf.memInfo := memBlock.io.memInfo
+  backend.io.perf.perfEventsFrontend := frontend.getPerf
+  backend.io.perf.perfEventsLsu := memBlock.getPerf
+  backend.io.perf.perfEventsHc := io.perfEvents
+  backend.io.perf.perfEventsCtrl := DontCare
+  backend.io.perf.retiredInstr := DontCare
+  backend.io.perf.ctrlInfo := DontCare
+
+  // top -> memBlock
   memBlock.io.hartId := io.hartId
+  memBlock.io.outer_reset_vector := io.reset_vector
+  // frontend -> memBlock
+  memBlock.io.inner_beu_errors_icache <> frontend.io.error.toL1BusErrorUnitInfo()
+  memBlock.io.inner_l2_pf_enable := backend.io.csrCustomCtrl.l2_pf_enable
+  memBlock.io.inner_cpu_halt := backend.io.toTop.cpuHalted
   memBlock.io.ooo_to_mem.issueLda <> backend.io.mem.issueLda
   memBlock.io.ooo_to_mem.issueSta <> backend.io.mem.issueSta
   memBlock.io.ooo_to_mem.issueStd <> backend.io.mem.issueStd
@@ -172,24 +183,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.ooo_to_mem.loadFastMatch := 0.U.asTypeOf(memBlock.io.ooo_to_mem.loadFastMatch)
   memBlock.io.ooo_to_mem.loadFastImm := 0.U.asTypeOf(memBlock.io.ooo_to_mem.loadFastImm)
   memBlock.io.ooo_to_mem.loadFastFuOpType := 0.U.asTypeOf(memBlock.io.ooo_to_mem.loadFastFuOpType)
-
-  backend.io.mem.exceptionVAddr := memBlock.io.mem_to_ooo.lsqio.vaddr
-  backend.io.mem.csrDistributedUpdate := memBlock.io.mem_to_ooo.csrUpdate
-  backend.io.mem.debugLS := memBlock.io.debug_ls
-  backend.io.mem.lsTopdownInfo := memBlock.io.mem_to_ooo.lsTopdownInfo
-  backend.io.mem.lqCanAccept := memBlock.io.mem_to_ooo.lsqio.lqCanAccept
-  backend.io.mem.sqCanAccept := memBlock.io.mem_to_ooo.lsqio.sqCanAccept
-  backend.io.fenceio.sbuffer.sbIsEmpty := memBlock.io.mem_to_ooo.sbIsEmpty
-
-  backend.io.perf.frontendInfo := frontend.io.frontendInfo
-  backend.io.perf.memInfo := memBlock.io.memInfo
-  backend.io.perf.perfEventsFrontend := frontend.getPerf
-  backend.io.perf.perfEventsLsu := memBlock.getPerf
-  backend.io.perf.perfEventsHc := io.perfEvents
-  backend.io.perf.perfEventsCtrl := DontCare
-  backend.io.perf.retiredInstr := DontCare
-  backend.io.perf.ctrlInfo := DontCare
-
 
   memBlock.io.ooo_to_mem.sfence <> backend.io.mem.sfence
 
@@ -211,7 +204,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.l2PfqBusy := io.l2PfqBusy
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
-  io.l2_pf_enable := backend.io.csrCustomCtrl.l2_pf_enable
 
   // top-down info
   memBlock.io.debugTopDown.robHeadVaddr := backend.io.debugTopDown.fromRob.robHeadVaddr
@@ -222,6 +214,11 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.debugTopDown.fromCore.fromMem := memBlock.io.debugTopDown.toCore
   memBlock.io.debugRolling := backend.io.debugRolling
 
+  io.cpu_halt := memBlock.io.outer_cpu_halt
+  io.beu_errors.icache <> memBlock.io.outer_beu_errors_icache
+  io.beu_errors.dcache <> memBlock.io.error.toL1BusErrorUnitInfo()
+  io.beu_errors.l2 <> DontCare
+  io.l2_pf_enable := memBlock.io.outer_l2_pf_enable
   // Modules are reset one by one
   val resetTree = ResetGenNode(
     Seq(
@@ -242,5 +239,4 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     frontend.reset := memBlock.reset_io_frontend
     backend.reset := memBlock.reset_io_backend
   }
-
 }

@@ -28,8 +28,6 @@ import xiangshan.cache._
 import xiangshan.cache.{DCacheLineIO, DCacheWordIO, MemoryOpConstants}
 import xiangshan.backend._
 import xiangshan.backend.rob.{RobLsqIO, RobPtr}
-import difftest._
-import device.RAMHelper
 import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
 
 class SqPtr(implicit p: Parameters) extends CircularQueuePtr[SqPtr](

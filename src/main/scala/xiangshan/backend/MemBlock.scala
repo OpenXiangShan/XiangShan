@@ -348,7 +348,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
           source.bits.miss || isFromStride(source.bits.meta_prefetch)
         )
         l1Prefetcher.stride_train(i).bits := source.bits
-        l1Prefetcher.stride_train(i).bits.uop.cf.pc := Mux(
+        l1Prefetcher.stride_train(i).bits.uop.pc := Mux(
           loadUnits(i).io.s2_ptr_chasing,
           RegNext(io.ooo_to_mem.loadPc(i)),
           RegNext(RegNext(io.ooo_to_mem.loadPc(i)))
@@ -539,7 +539,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     tlb_prefetch.io // let the module have name in waveform
   })
   val dtlb = dtlb_ld ++ dtlb_st ++ dtlb_hy ++ dtlb_prefetch
-  val ptwio = Wire(new VectorTlbPtwIO(LduCnt + StaCnt + HyuCnt + 2)) // load + store + hybrid + hw prefetch
+  val ptwio = Wire(new VectorTlbPtwIO(LduCnt + 1 + StaCnt + HyuCnt + 1)) // load + load prefetch + store + hybrid + hw prefetch
   val dtlb_reqs = dtlb.map(_.requestor).flatten
   val dtlb_pmps = dtlb.map(_.pmp).flatten
   dtlb.map(_.hartId := io.hartId)
@@ -745,7 +745,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     lsq.io.ldu.ldin(i) <> loadUnits(i).io.lsq.ldin
     lsq.io.ldout(i) <> loadUnits(i).io.lsq.uncache
     lsq.io.ld_raw_data(i) <> loadUnits(i).io.lsq.ld_raw_data
-
     lsq.io.l2_hint.valid := l2_hint.valid
     lsq.io.l2_hint.bits.sourceId := l2_hint.bits.sourceId
 
@@ -779,6 +778,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       loadTriggerHitVec(j) := loadUnits(i).io.trigger(j).addrHit && !tdata(j).select
     }
     TriggerCheckCanFire(TriggerNum, triggerCanFireVec, triggerHitVec, triggerTimingVec, triggerChainVec)
+    lsq.io.trigger(i) <> loadUnits(i).io.lsq.trigger
 
     io.mem_to_ooo.writebackLda(i).bits.uop.trigger.backendHit := triggerHitVec
     io.mem_to_ooo.writebackLda(i).bits.uop.trigger.backendCanFire := triggerCanFireVec
@@ -800,16 +800,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     //  Load Port
     // ------------------------------------
     // fast replay
-    hybridUnits(i).io.ldu_io.fast_rep_in.valid := balanceFastReplaySel.drop(LduCnt)(i).valid
-    hybridUnits(i).io.ldu_io.fast_rep_in.bits := balanceFastReplaySel.drop(LduCnt)(i).bits.req
-
-    hybridUnits(i).io.ldu_io.fast_rep_out.ready := false.B
-    val fast_rep_in = loadUnits.map(_.io.fast_rep_in) ++ hybridUnits.map(_.io.ldu_io.fast_rep_in)
-    for (j <- 0 until LduCnt + HyuCnt) {
-      when (balanceFastReplaySel(j).valid && balanceFastReplaySel(j).bits.port === (LduCnt + i).U) {
-        hybridUnits(i).io.ldu_io.fast_rep_out.ready := fast_rep_in(j).ready
-      }
-    }
+    hybridUnits(i).io.ldu_io.fast_rep_in <> hybridUnits(i).io.ldu_io.fast_rep_out
 
     // get input from dispatch
     hybridUnits(i).io.ldu_io.dcache <> dcache.io.lsu.load(LduCnt + i)

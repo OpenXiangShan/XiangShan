@@ -353,7 +353,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   // select rollback (part1) and generate rollback request
   // rollback check
   // Lq rollback seq check is done in s3 (next stage), as getting rollbackLq MicroOp is slow
-  val rollbackLqWb = Wire(Vec(StorePipelineWidth, Valid(new MicroOpRbExt)))
+  val rollbackLqWb = Wire(Vec(StorePipelineWidth, Valid(new DynInst)))
   val stFtqIdx = Wire(Vec(StorePipelineWidth, new FtqPtr))
   val stFtqOffset = Wire(Vec(StorePipelineWidth, UInt(log2Up(PredictWidth).W)))
   for (w <- 0 until StorePipelineWidth) {
@@ -382,7 +382,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     val redirect = Wire(Valid(new Redirect))
     redirect.valid := rollbackLqWb(i).valid
     redirect.bits             := DontCare
-    redirect.bits.isRVC       := rollbackLqWb(i).bits.cf.pd.isRVC
+    redirect.bits.isRVC       := rollbackLqWb(i).bits.preDecodeInfo.isRVC
     redirect.bits.robIdx      := rollbackLqWb(i).bits.robIdx
     redirect.bits.ftqIdx      := rollbackLqWb(i).bits.ftqPtr
     redirect.bits.ftqOffset   := rollbackLqWb(i).bits.ftqOffset

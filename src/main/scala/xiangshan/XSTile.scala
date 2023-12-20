@@ -33,8 +33,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   with HasSoCParameter
 {
   override def shouldBeInlined: Boolean = false
-  private val core = LazyModule(new XSCore())
-  private val l2top = LazyModule(new L2Top())
+  val core = LazyModule(new XSCore())
+  val l2top = LazyModule(new L2Top())
 
   // =========== Public Ports ============
   val core_l3_pf_port = core.memBlock.l3_pf_sender_opt

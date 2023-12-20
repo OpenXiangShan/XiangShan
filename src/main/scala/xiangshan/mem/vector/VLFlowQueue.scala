@@ -79,6 +79,7 @@ class VlflowBundle(implicit p: Parameters) extends VecFlowBundle {
 }
 
 class VlFlowQueue(implicit p: Parameters) extends VLSUModule
+  with HasCircularQueuePtrHelper
 {
   val io = IO(new VlFlowQueueIOBundle())
   println("LoadFlowQueue: size:" + VlFlowSize)
