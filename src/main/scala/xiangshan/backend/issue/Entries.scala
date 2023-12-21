@@ -43,6 +43,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val srcTimerVec         = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Vec(params.numRegSrc, UInt(3.W)))))
   val srcWakeUpL1ExuOHVec = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Vec(params.numRegSrc, ExuVec()))))
   val srcLoadDependencyVec= OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Vec(params.numRegSrc, Vec(LoadPipelineWidth, UInt(3.W))))))
+  val loadDependencyVec   = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Vec(LoadPipelineWidth, UInt(3.W)))))
   //deq sel
   val deqSelVec           = Wire(Vec(params.numEntries, Bool()))
   val issueRespVec        = Wire(Vec(params.numEntries, ValidIO(new EntryDeqRespBundle)))
@@ -192,6 +193,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   io.dataSources                := dataSourceVec
   io.srcWakeUpL1ExuOH.foreach(_ := srcWakeUpL1ExuOHVec.get)
   io.srcTimer.foreach(_         := srcTimerVec.get)
+  io.loadDependency.foreach(_   := loadDependencyVec.get)
   io.isFirstIssue.zipWithIndex.foreach{ case (isFirstIssue, deqIdx) =>
     isFirstIssue                := io.deqSelOH(deqIdx).valid && Mux1H(io.deqSelOH(deqIdx).bits, isFirstIssueVec)
   }
@@ -228,6 +230,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
       srcWakeUpL1ExuOHVec.get(entryIdx)       := out.srcWakeUpL1ExuOH.get
       srcTimerVec.get(entryIdx)               := out.srcTimer.get
       srcLoadDependencyVec.get(entryIdx)      := out.srcLoadDependency.get
+      loadDependencyVec.get(entryIdx)         := out.entry.bits.status.mergedLoadDependency.get
       cancelVec.get(entryIdx)                 := out.cancel.get
     }
   }
@@ -263,6 +266,7 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val dataSources         = Vec(params.numEntries, Vec(params.numRegSrc, Output(DataSource())))
   val srcWakeUpL1ExuOH    = OptionWrapper(params.hasIQWakeUp, Vec(params.numEntries, Vec(params.numRegSrc, Output(ExuVec()))))
   val srcTimer            = OptionWrapper(params.hasIQWakeUp, Vec(params.numEntries, Vec(params.numRegSrc, Output(UInt(3.W)))))
+  val loadDependency      = OptionWrapper(params.hasIQWakeUp, Vec(params.numEntries, Vec(LoadPipelineWidth, UInt(3.W))))
   //deq status
   val isFirstIssue        = Vec(params.numDeq, Output(Bool()))
   val deqEntry            = Vec(params.numDeq, ValidIO(new EntryBundle))
