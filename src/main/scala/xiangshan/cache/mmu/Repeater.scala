@@ -334,9 +334,12 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
 class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) extends XSModule with HasPtwConst {
   require(Size >= Width)
 
-  // all load execute unit, including ldu and hyu
+  private val LduCnt = backendParams.LduCnt
+  private val HyuCnt = backendParams.HyuCnt
+  private val StaCnt = backendParams.StaCnt
+  // all load execute units, including ldu and hyu
   private val LdExuCnt = backendParams.LdExuCnt
-  // all store address execute unit, including sta and hyu
+  // all store address execute units, including sta and hyu
   private val StaExuCnt = backendParams.StaExuCnt
 
   val io = IO(new PTWFilterIO(Width, hasHint = true))
@@ -347,7 +350,7 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
   })
 
   val store_filter = VecInit(Seq.fill(1) {
-    val store_entry = Module(new PTWFilterEntry(Width = StaExuCnt, Size = storefiltersize))
+    val store_entry = Module(new PTWFilterEntry(Width = StaCnt, Size = storefiltersize))
     store_entry.io
   })
 
@@ -359,8 +362,8 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
   val filter = load_filter ++ store_filter ++ prefetch_filter
 
   load_filter.map(_.tlb.req := io.tlb.req.take(LdExuCnt + 1))
-  store_filter.map(_.tlb.req := io.tlb.req.drop(LdExuCnt + 1).take(StaExuCnt))
-  prefetch_filter.map(_.tlb.req := io.tlb.req.drop(LdExuCnt + 1 + StaExuCnt))
+  store_filter.map(_.tlb.req := io.tlb.req.drop(LdExuCnt + 1).take(StaCnt))
+  prefetch_filter.map(_.tlb.req := io.tlb.req.drop(LdExuCnt + 1 + StaCnt))
 
   val flush = DelayN(io.sfence.valid || io.csr.satp.changed, FenceDelay)
   val ptwResp = RegEnable(io.ptw.resp.bits, io.ptw.resp.fire)
@@ -391,7 +394,7 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
   }
   io.tlb.resp.bits.vector(0) := load_filter(0).refill
   io.tlb.resp.bits.vector(LdExuCnt + 1) := store_filter(0).refill
-  io.tlb.resp.bits.vector(LdExuCnt + 1 + StaExuCnt) := prefetch_filter(0).refill
+  io.tlb.resp.bits.vector(LdExuCnt + 1 + StaCnt) := prefetch_filter(0).refill
 
   val hintIO = io.hint.getOrElse(new TlbHintIO)
   val load_hintIO = load_filter(0).hint.getOrElse(new TlbHintIO)
@@ -409,7 +412,7 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
     io.tlb.resp.bits.data.memidx := store_filter(0).memidx
   }
   when (prefetch_filter(0).refill) {
-    io.tlb.resp.bits.vector(LdExuCnt + 1 + StaExuCnt) := true.B
+    io.tlb.resp.bits.vector(LdExuCnt + 1 + StaCnt) := true.B
     io.tlb.resp.bits.data.memidx := 0.U.asTypeOf(new MemBlockidxBundle)
   }
 

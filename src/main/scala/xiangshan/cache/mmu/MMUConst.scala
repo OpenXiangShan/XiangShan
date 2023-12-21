@@ -93,7 +93,7 @@ trait HasTlbConst extends HasXSParameter {
   val sectorppnLen = ppnLen - sectortlbwidth
   val sectorvpnLen = vpnLen - sectortlbwidth
 
-  val loadfiltersize = 16
+  val loadfiltersize = 16 // 4*3(LduCnt:2 + HyuCnt:1) + 4(prefetch:1)
   val storefiltersize = 8
   val prefetchfiltersize = 8
 
