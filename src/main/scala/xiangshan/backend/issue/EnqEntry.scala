@@ -25,7 +25,7 @@ class EnqEntryIO(implicit p: Parameters, params: IssueBlockParams) extends XSBun
   def wakeup              = commonIn.wakeUpFromWB ++ commonIn.wakeUpFromIQ
 }
 
-class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModule {
+class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams) extends XSModule {
   val io = IO(new EnqEntryIO)
 
   val validReg            = RegInit(false.B)
@@ -142,22 +142,22 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
   EntryRegCommonConnect(common, hasWakeupIQ, validReg, entryUpdate, entryReg, currentStatus, io.commonIn, true)
 
   //output
-  CommonOutConnect(io.commonOut, common, hasWakeupIQ, validReg, entryUpdate, entryReg, currentStatus, io.commonIn, true)
+  CommonOutConnect(io.commonOut, common, hasWakeupIQ, validReg, entryUpdate, entryReg, currentStatus, io.commonIn, true, isComp)
 }
 
-class EnqEntryMem()(implicit p: Parameters, params: IssueBlockParams) extends EnqEntry
+class EnqEntryMem(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams) extends EnqEntry(isComp)
   with HasCircularQueuePtrHelper {
   EntryMemConnect(io.commonIn, common, validReg, entryReg, entryRegNext, entryUpdate, true)
 }
 
 object EnqEntry {
-  def apply(implicit p: Parameters, iqParams: IssueBlockParams): EnqEntry = {
+  def apply(isComp: Boolean)(implicit p: Parameters, iqParams: IssueBlockParams): EnqEntry = {
     iqParams.schdType match {
-      case IntScheduler() => new EnqEntry()
+      case IntScheduler() => new EnqEntry(isComp)
       case MemScheduler() =>
-        if (iqParams.StdCnt == 0) new EnqEntryMem()
-        else new EnqEntry()
-      case VfScheduler() => new EnqEntry()
+        if (iqParams.StdCnt == 0) new EnqEntryMem(isComp)
+        else new EnqEntry(isComp)
+      case VfScheduler() => new EnqEntry(isComp)
       case _ => null
     }
   }
