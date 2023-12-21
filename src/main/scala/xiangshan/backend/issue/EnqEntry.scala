@@ -24,7 +24,6 @@ class EnqEntryIO(implicit p: Parameters, params: IssueBlockParams) extends XSBun
 
   //output
   val commonOut           = new CommonOutBundle
-  val transEntry          = ValidIO(new EntryBundle)
 
   def wakeup              = commonIn.wakeUpFromWB ++ commonIn.wakeUpFromIQ
 }
@@ -145,28 +144,13 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
 
   EntryRegCommonConnect(common, hasWakeupIQ, validReg, entryUpdate, entryReg, currentStatus, io.commonIn, true)
 
-  CommonOutConnect(io.commonOut, common, hasWakeupIQ, validReg, entryReg, currentStatus, io.commonIn, true)
-  io.transEntry.valid := validReg && !common.flushed && !common.deqSuccess
-  io.transEntry.bits := entryUpdate
+  //output
+  CommonOutConnect(io.commonOut, common, hasWakeupIQ, validReg, entryUpdate, entryReg, currentStatus, io.commonIn, true)
 }
 
 class EnqEntryMem()(implicit p: Parameters, params: IssueBlockParams) extends EnqEntry
   with HasCircularQueuePtrHelper {
-  entryUpdate.status.blocked                        := EntryMemConnect(io.commonIn, common, validReg, entryReg, entryRegNext, true)
-  val memStatusUpdate                                = entryUpdate.status.mem.get
-  val memStatus                                      = entryReg.status.mem.get
-  val deqFailedForStdInvalid                         = io.commonIn.issueResp.valid && io.commonIn.issueResp.bits.respType === RSFeedbackType.dataInvalid
-
-  when(deqFailedForStdInvalid) {
-    memStatusUpdate.waitForSqIdx                    := io.commonIn.issueResp.bits.dataInvalidSqIdx
-    memStatusUpdate.waitForRobIdx                   := memStatus.waitForRobIdx
-    memStatusUpdate.waitForStd                      := true.B
-    memStatusUpdate.strictWait                      := memStatus.strictWait
-    memStatusUpdate.sqIdx                           := memStatus.sqIdx
-  }.otherwise {
-    memStatusUpdate                                 := memStatus
-  }
-
+  EntryMemConnect(io.commonIn, common, validReg, entryReg, entryRegNext, entryUpdate, true)
 }
 
 class EnqEntryVecMemAddr()(implicit p: Parameters, params: IssueBlockParams) extends EnqEntryMem {

@@ -87,7 +87,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     enqEntry.io.enqDelayWakeUpFromIQ          := RegNext(io.wakeUpFromIQ)
     enqEntry.io.enqDelayOg0Cancel             := RegNext(io.og0Cancel.asUInt)
     enqEntry.io.enqDelayLdCancel              := RegNext(io.ldCancel)
-    transEntryDeqVec(entryIdx)                := enqEntry.io.transEntry
+    transEntryDeqVec(entryIdx)                := enqEntry.io.commonOut.transEntry
     // TODO: move it into EntriesConnect
     if (params.isVecMemIQ) {
       enqEntry.io.commonIn.fromLsq.get.sqDeqPtr := io.vecMemIn.get.sqDeqPtr
@@ -99,7 +99,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     othersEntry.io.commonIn.enq               := transEntryEnqVec(entryIdx)
     EntriesConnect(othersEntry.io.commonIn, othersEntry.io.commonOut, entryIdx + EnqEntryNum)
     othersEntry.io.commonIn.transSel          := transSelVec.map(x => x(entryIdx)).reduce(_ | _)
-    enqReadyOthersVec(entryIdx)               := othersEntry.io.enqReady
+    enqReadyOthersVec(entryIdx)               := othersEntry.io.commonOut.enqReady
     if (params.isVecMemIQ) {
       othersEntry.io.commonIn.fromLsq.get.sqDeqPtr := io.vecMemIn.get.sqDeqPtr
       othersEntry.io.commonIn.fromLsq.get.lqDeqPtr := io.vecMemIn.get.lqDeqPtr
