@@ -78,14 +78,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   val s0_fire         = s0_valid && !s0_kill && s0_can_go
 
   // generate addr
-  // val saddr = s0_in.bits.src(0) + SignExt(s0_in.bits.uop.ctrl.imm(11,0), VAddrBits)
-  val imm12 = WireInit(s0_in.uop.ctrl.imm(11,0))
-  val saddr_lo = s0_in.src(0)(11,0) + Cat(0.U(1.W), imm12)
-  val saddr_hi = Mux(saddr_lo(12),
-    Mux(imm12(11), s0_in.src(0)(VAddrBits-1, 12), s0_in.src(0)(VAddrBits-1, 12)+1.U),
-    Mux(imm12(11), s0_in.src(0)(VAddrBits-1, 12)+SignExt(1.U, VAddrBits-12), s0_in.src(0)(VAddrBits-1, 12)),
-  )
-  val s0_saddr = Cat(saddr_hi, saddr_lo(11,0))
+  val s0_saddr = io.stin.bits.src(0) + SignExt(io.stin.bits.uop.ctrl.imm(11,0), VAddrBits)
   val s0_vaddr = Mux(s0_use_flow_rs, s0_saddr, io.prefetch_req.bits.vaddr)
   val s0_mask  = Mux(s0_use_flow_rs, genVWmask(s0_saddr, s0_in.uop.ctrl.fuOpType(1,0)), 3.U)
 
