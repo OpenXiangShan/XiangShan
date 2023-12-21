@@ -100,10 +100,12 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
       params.lsqFeedback = true
       params.hasFeedback = true
       params.checkWaitBit = false
-      params.numDeq = 3
     }
-    if (cfg == StdExeUnitCfg) {
-      params.numDeq = 3
+    if (cfg == LdExeUnitCfg) {
+      params.numDeq = LoadPipelineWidth
+    }
+    if (cfg == StaExeUnitCfg || cfg == StdExeUnitCfg) {
+      params.numDeq = StorePipelineWidth
     }
     if (cfg.hasCertainLatency) {
       params.fixedLatency = if (cfg == MulDivExeUnitCfg) mulCfg.latency.latencyVal.get else cfg.latency.latencyVal.get
@@ -139,7 +141,7 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
 
   override def toString: String = params.toString
   // for better timing, we limits the size of RS to 2-deq
-  val maxRsDeq = 4
+  val maxRsDeq = (if (Enable3Load3Store) 4 else 2)
   def numRS = (params.numDeq + (maxRsDeq - 1)) / maxRsDeq
   println("=============================== " + numRS)
 
@@ -415,9 +417,10 @@ class ReservationStation(params: RSParams)(implicit p: Parameters) extends XSMod
   val numSelected = PopCount(s1_issuePtrOH.map(_.valid))
   val numReadyEntries = PopCount(statusArray.io.canIssue)
   val shouldSelected = Mux(numReadyEntries > params.numDeq.U, params.numDeq.U, numReadyEntries)
-  // XSError(numSelected < shouldSelected,
-  //   p"performance regression: only $numSelected out of $shouldSelected selected (total: $numReadyEntries)\n")
-
+  if (!Enable3Load3Store) {
+    XSError(numSelected < shouldSelected,
+      p"performance regression: only $numSelected out of $shouldSelected selected (total: $numReadyEntries)\n")
+  }
   // Allocation: store dispatch uops into payload and data array
   s1_dispatchUops_dup.foreach(_.zip(enqReverse(io.fromDispatch)).zipWithIndex.foreach{ case ((uop, in), i) =>
     val s0_valid = in.fire && !enqReverse(s0_enqFlushed)(i)
