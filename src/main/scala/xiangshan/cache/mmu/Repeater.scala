@@ -203,7 +203,7 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
   io.memidx := 0.U.asTypeOf(new MemBlockidxBundle)
 
   // ugly code, should be optimized later
-  require(Width <= 3, s"DTLB Filter Width ($Width) must equal or less than 3")
+  require(Width <= 4, s"DTLB Filter Width ($Width) must equal or less than 4")
   if (Width == 1) {
     require(Size == 8, s"prefetch filter Size ($Size) should be 8")
     canenq(0) := !(Cat(v).andR)
@@ -223,6 +223,12 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
     // four entries for prefetch
     canenq(2) := !(Cat(v.drop(12)).andR)
     enqidx(2) := firstValidIndex(v.drop(12), false.B) + 12.U
+  } else if (Width == 4) {
+    require(Size == 16, s"load filter Size ($Size) should be 16")
+    for (i <- 0 until Width) {
+      canenq(i) := !(Cat(VecInit(v.slice(i * 4, (i + 1) * 4))).andR)
+      enqidx(i) := firstValidIndex(v.slice(i * 4, (i + 1) * 4), false.B) + (i * 4).U
+    }
   }
 
   for (i <- 0 until Width) {
