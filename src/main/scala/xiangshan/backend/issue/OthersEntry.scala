@@ -13,7 +13,6 @@ class OthersEntryIO(implicit p: Parameters, params: IssueBlockParams) extends XS
   val commonIn        = new CommonInBundle
   //output
   val commonOut       = new CommonOutBundle
-  val enqReady        = Output(Bool())
 
   def wakeup          = commonIn.wakeUpFromWB ++ commonIn.wakeUpFromIQ
 }
@@ -25,6 +24,7 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
   val entryReg        = Reg(new EntryBundle)
 
   val common          = Wire(new CommonWireBundle)
+  val entryUpdate     = Wire(new EntryBundle)
   val entryRegNext    = Wire(new EntryBundle)
   val hasWakeupIQ     = OptionWrapper(params.hasIQWakeUp, Wire(new CommonIQWakeupBundle))
 
@@ -43,17 +43,18 @@ class OthersEntry(implicit p: Parameters, params: IssueBlockParams) extends XSMo
   when(io.commonIn.enq.valid && io.commonIn.transSel) {
     entryRegNext := io.commonIn.enq.bits
   }.otherwise {
-    EntryRegCommonConnect(common, hasWakeupIQ, validReg, entryRegNext, entryReg, entryReg.status, io.commonIn, false)
+    entryRegNext := entryUpdate
   }
 
+  EntryRegCommonConnect(common, hasWakeupIQ, validReg, entryUpdate, entryReg, entryReg.status, io.commonIn, false)
+
   //output
-  CommonOutConnect(io.commonOut, common, hasWakeupIQ, validReg, entryReg, entryReg.status, io.commonIn, false)
-  io.enqReady         := common.enqReady
+  CommonOutConnect(io.commonOut, common, hasWakeupIQ, validReg, entryUpdate, entryReg, entryReg.status, io.commonIn, false)
 }
 
 class OthersEntryMem()(implicit p: Parameters, params: IssueBlockParams) extends OthersEntry
   with HasCircularQueuePtrHelper {
-  EntryMemConnect(io.commonIn, common, validReg, entryReg, entryRegNext, false)
+  EntryMemConnect(io.commonIn, common, validReg, entryReg, entryRegNext, entryUpdate, false)
 }
 
 object OthersEntry {
