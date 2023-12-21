@@ -523,10 +523,10 @@ class TageTable
   }
 
   // ------------------------------Debug-------------------------------------
-  val valids = RegInit(VecInit(Seq.fill(nRows)(false.B)))
+  val valids = RegInit(VecInit(Seq.fill(nRowsPerBr)(false.B)))
   when (io.update.mask.reduce(_||_)) { valids(update_idx) := true.B }
   XSDebug("Table usage:------------------------\n")
-  XSDebug("%d out of %d rows are valid\n", PopCount(valids), nRows.U)
+  XSDebug("%d out of %d rows are valid\n", PopCount(valids), nRowsPerBr.U)
 
 }
 
