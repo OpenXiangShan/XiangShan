@@ -115,6 +115,7 @@ class VecStorePipeBundle(implicit p: Parameters) extends MemExuInput(isVector = 
   val alignedType         = UInt(2.W) // ! MAGIC NUM: VLSUConstants.alignTypeBits
   val exp                 = Bool()
   val flowPtr             = new VsFlowPtr
+  val isLastElem          = Bool()
 }
 
 class VsFlowBundle(implicit p: Parameters) extends VecFlowBundle {
@@ -155,6 +156,7 @@ class VecStoreFlowEntry (implicit p: Parameters) extends VecFlowBundle {
     pipeBundle.alignedType          := this.alignedType
     pipeBundle.exp                  := this.exp
     pipeBundle.flowPtr              := thisPtr
+    pipeBundle.isLastElem           := this.isLastElem
     pipeBundle
   }
 
