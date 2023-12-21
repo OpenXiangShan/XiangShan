@@ -73,14 +73,14 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     enqEntry.io.enqDelayWakeUpFromIQ          := RegNext(io.wakeUpFromIQ)
     enqEntry.io.enqDelayOg0Cancel             := RegNext(io.og0Cancel)
     enqEntry.io.enqDelayLdCancel              := RegNext(io.ldCancel)
-    transEntryDeqVec(entryIdx)                := enqEntry.io.transEntry
+    transEntryDeqVec(entryIdx)                := enqEntry.io.commonOut.transEntry
   }
   //othersEntries
   othersEntries.zipWithIndex.foreach { case (othersEntry, entryIdx) =>
     othersEntry.io.commonIn.enq               := transEntryEnqVec(entryIdx)
     EntriesConnect(othersEntry.io.commonIn, othersEntry.io.commonOut, entryIdx + EnqEntryNum)
     othersEntry.io.commonIn.transSel          := transSelVec.map(x => x(entryIdx)).reduce(_ | _)
-    enqReadyOthersVec(entryIdx)               := othersEntry.io.enqReady
+    enqReadyOthersVec(entryIdx)               := othersEntry.io.commonOut.enqReady
   }
 
 
