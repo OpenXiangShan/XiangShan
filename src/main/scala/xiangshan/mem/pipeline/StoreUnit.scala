@@ -97,6 +97,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   // vector
   val s0_exp          = !s0_use_flow_vec || s0_vecstin.exp
   val s0_flowPtr      = s0_vecstin.flowPtr
+  val s0_isLastElem   = s0_vecstin.isLastElem
 
   // generate addr
   // val saddr = s0_in.bits.src(0) + SignExt(s0_in.bits.uop.imm(11,0), VAddrBits)
@@ -167,7 +168,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   s0_out.isvec        := s0_use_flow_vec
   s0_out.is128bit     := false.B
   s0_out.exp          := s0_exp
-  s0_out.sflowPtr      := s0_flowPtr
+  s0_out.sflowPtr     := s0_flowPtr
+  s0_out.isLastElem   := s0_isLastElem
   when(s0_valid && s0_isFirstIssue) {
     s0_out.uop.debugInfo.tlbFirstReqTime := GTimer()
   }
@@ -211,6 +213,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   val s1_mmio      = s1_mmio_cbo
   val s1_exception = ExceptionNO.selectByFu(s1_out.uop.exceptionVec, StaCfg).asUInt.orR
   val s1_isvec     = RegEnable(s0_out.isvec, false.B, s0_fire)
+  val s1_isLastElem = RegEnable(s0_isLastElem, false.B, s0_fire)
   s1_kill := s1_in.uop.robIdx.needFlush(io.redirect) || s1_tlb_miss
 
   s1_ready := !s1_valid || s1_kill || s2_ready
@@ -282,6 +285,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   io.lsq_vec.valid := s1_valid && !s1_in.isHWPrefetch && s1_isvec
   io.lsq_vec.bits  := s1_out
   io.lsq_vec.bits.miss := s1_tlb_miss
+  io.lsq_vec.bits.isLastElem := s1_isLastElem
 
   // kill dcache write intent request when tlb miss or exception
   io.dcache.s1_kill  := (s1_tlb_miss || s1_exception || s1_mmio || s1_in.uop.robIdx.needFlush(io.redirect))

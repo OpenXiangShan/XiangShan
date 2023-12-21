@@ -70,6 +70,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val enq = new SqEnqIO
     val brqRedirect = Flipped(ValidIO(new Redirect))
     val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // store addr, data is not included
+    val vecStoreAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // vec store addr, data is not include 
     val storeAddrInRe = Vec(StorePipelineWidth, Input(new LsPipelineBundle())) // store more mmio and exception
     val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new MemExuOutput))) // store data, send to sq from rs
     val storeMaskIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreMaskBundle))) // store mask, send to sq from rs
@@ -139,6 +140,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val atomic = Reg(Vec(StoreQueueSize, Bool()))
   val prefetch = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // need prefetch when committing this store to sbuffer?
   val vec = Reg(Vec(StoreQueueSize, Bool()))
+  val vecAddrvalid = Reg(Vec(StoreQueueSize, Bool())) // TODO
 
   // ptr
   val enqPtrExt = RegInit(VecInit((0 until io.enq.req.length).map(_.U.asTypeOf(new SqPtr))))
@@ -229,6 +231,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       prefetch(index) := false.B
       mmio(index) := false.B
       vec(index) := io.enq.req(i).bits.instr(6, 0) === "b0100111".U // TODO
+      vecAddrvalid(index) := false.B//TODO
 
       XSError(!io.enq.canAccept || !io.enq.lqCanAccept, s"must accept $i\n")
       XSError(index =/= sqIdx.value, s"must be the same entry $i\n")
@@ -245,7 +248,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   require(IssuePtrMoveStride >= 2)
 
   val addrReadyLookupVec = (0 until IssuePtrMoveStride).map(addrReadyPtrExt + _.U)
-  val addrReadyLookup = addrReadyLookupVec.map(ptr => allocated(ptr.value) && (mmio(ptr.value) || addrvalid(ptr.value) || vec(ptr.value)) && ptr =/= enqPtrExt(0))
+  val addrReadyLookup = addrReadyLookupVec.map(ptr => allocated(ptr.value) && (mmio(ptr.value) || addrvalid(ptr.value) || (vec(ptr.value) && vecAddrvalid(ptr.value))) && ptr =/= enqPtrExt(0))
   val nextAddrReadyPtr = addrReadyPtrExt + PriorityEncoder(VecInit(addrReadyLookup.map(!_) :+ true.B))
   addrReadyPtrExt := nextAddrReadyPtr
 
@@ -265,7 +268,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   // update
   val dataReadyLookupVec = (0 until IssuePtrMoveStride).map(dataReadyPtrExt + _.U)
-  val dataReadyLookup = dataReadyLookupVec.map(ptr => allocated(ptr.value) && (mmio(ptr.value) || datavalid(ptr.value) || vec(ptr.value)) && ptr =/= enqPtrExt(0))
+  val dataReadyLookup = dataReadyLookupVec.map(ptr => allocated(ptr.value) && (mmio(ptr.value) || datavalid(ptr.value) || vec(ptr.value)) && ptr =/= enqPtrExt(0)) // TODO : flag of vector store data valid not add yet 
   val nextDataReadyPtr = dataReadyPtrExt + PriorityEncoder(VecInit(dataReadyLookup.map(!_) :+ true.B))
   dataReadyPtrExt := nextDataReadyPtr
 
@@ -354,6 +357,11 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
     when(vaddrModule.io.wen(i)){
       debug_vaddr(vaddrModule.io.waddr(i)) := vaddrModule.io.wdata(i)
+    }
+    // TODO :  When lastElem issue to stu, set vector store addr ready 
+    val vecStWbIndex = io.vecStoreAddrIn(i).bits.uop.sqIdx.value
+    when(io.vecStoreAddrIn(i).fire){
+      vecAddrvalid(vecStWbIndex) := !io.vecStoreAddrIn(i).bits.miss && io.vecStoreAddrIn(i).bits.isLastElem
     }
   }
 
@@ -707,9 +715,11 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // Vector stores are written to sbuffer by vector store flow queue rather than sq
   XSError(io.vecStoreRetire.valid && !vec(rdataPtrExt(0).value), "Vector store flow queue is trying to retire a scalar store")
   XSError(io.vecStoreRetire.valid && !allocated(rdataPtrExt(0).value), "Vector store flow queue is trying to retire an invalid entry")
+  XSError(io.vecStoreRetire.valid && vec(rdataPtrExt(0).value) && !vecAddrvalid(rdataPtrExt(0).value), "Vector store is trying to retire without write last element!")
   when (io.vecStoreRetire.valid) {
     assert(io.vecStoreRetire.bits === rdataPtrExt(0))
     vec(rdataPtrExt(0).value) := false.B
+    vecAddrvalid(rdataPtrExt(0).value) := false.B
     allocated(rdataPtrExt(0).value) := false.B
   }
 

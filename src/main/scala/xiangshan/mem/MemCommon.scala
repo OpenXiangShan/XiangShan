@@ -102,6 +102,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
 
   // vector
   val isvec = Bool()
+  val isLastElem = Bool()
   val is128bit = Bool()
   val uop_unit_stride_fof = Bool()
   // val rob_idx_valid = Vec(2,Bool())
@@ -168,6 +169,7 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     if (latch) dcacheRequireReplay := RegNext(input.dcacheRequireReplay) else dcacheRequireReplay := input.dcacheRequireReplay
     if (latch) schedIndex := RegNext(input.schedIndex) else schedIndex := input.schedIndex
     if (latch) isvec               := RegNext(input.isvec)               else isvec               := input.isvec
+    if (latch) isLastElem          := RegNext(input.isLastElem)          else isLastElem          := input.isLastElem
     if (latch) is128bit            := RegNext(input.is128bit)            else is128bit            := input.is128bit
     if (latch) exp                 := RegNext(input.exp)                 else exp                 := input.exp
     if (latch) is_first_ele        := RegNext(input.is_first_ele)        else is_first_ele        := input.is_first_ele
