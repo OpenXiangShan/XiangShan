@@ -28,7 +28,7 @@ class EnqEntryIO(implicit p: Parameters, params: IssueBlockParams) extends XSBun
   def wakeup              = commonIn.wakeUpFromWB ++ commonIn.wakeUpFromIQ
 }
 
-class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModule {
+class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams) extends XSModule {
   val io = IO(new EnqEntryIO)
 
   val validReg            = RegInit(false.B)
@@ -145,15 +145,15 @@ class EnqEntry(implicit p: Parameters, params: IssueBlockParams) extends XSModul
   EntryRegCommonConnect(common, hasWakeupIQ, validReg, entryUpdate, entryReg, currentStatus, io.commonIn, true)
 
   //output
-  CommonOutConnect(io.commonOut, common, hasWakeupIQ, validReg, entryUpdate, entryReg, currentStatus, io.commonIn, true)
+  CommonOutConnect(io.commonOut, common, hasWakeupIQ, validReg, entryUpdate, entryReg, currentStatus, io.commonIn, true, isComp)
 }
 
-class EnqEntryMem()(implicit p: Parameters, params: IssueBlockParams) extends EnqEntry
+class EnqEntryMem(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams) extends EnqEntry(isComp)
   with HasCircularQueuePtrHelper {
   EntryMemConnect(io.commonIn, common, validReg, entryReg, entryRegNext, entryUpdate, true)
 }
 
-class EnqEntryVecMemAddr()(implicit p: Parameters, params: IssueBlockParams) extends EnqEntryMem {
+class EnqEntryVecMemAddr(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams) extends EnqEntryMem(isComp) {
 
   require(params.isVecMemAddrIQ, "EnqEntryVecMemAddr can only be instance of VecMemAddr IQ")
 
@@ -180,7 +180,7 @@ class EnqEntryVecMemAddr()(implicit p: Parameters, params: IssueBlockParams) ext
   entryUpdate.status.vecMem.get.uopIdx := entryReg.status.vecMem.get.uopIdx
 }
 
-class EnqEntryVecMemData()(implicit p: Parameters, params: IssueBlockParams) extends EnqEntry
+class EnqEntryVecMemData(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams) extends EnqEntry(isComp)
   with HasCircularQueuePtrHelper {
 
   require(params.isVecStDataIQ, "EnqEntryVecMemData can only be instance of VecMemData IQ")
@@ -206,15 +206,15 @@ class EnqEntryVecMemData()(implicit p: Parameters, params: IssueBlockParams) ext
 }
 
 object EnqEntry {
-  def apply(implicit p: Parameters, iqParams: IssueBlockParams): EnqEntry = {
+  def apply(isComp: Boolean)(implicit p: Parameters, iqParams: IssueBlockParams): EnqEntry = {
     iqParams.schdType match {
-      case IntScheduler() => new EnqEntry()
+      case IntScheduler() => new EnqEntry(isComp)
       case MemScheduler() =>
-        if (iqParams.isLdAddrIQ || iqParams.isStAddrIQ || iqParams.isHyAddrIQ) new EnqEntryMem()
-        else if (iqParams.isVecMemAddrIQ) new EnqEntryVecMemAddr()
-        else if (iqParams.isVecStDataIQ) new EnqEntryVecMemData()
-        else new EnqEntry()
-      case VfScheduler() => new EnqEntry()
+        if (iqParams.isLdAddrIQ || iqParams.isStAddrIQ || iqParams.isHyAddrIQ) new EnqEntryMem(isComp)
+        else if (iqParams.isVecMemAddrIQ) new EnqEntryVecMemAddr(isComp)
+        else if (iqParams.isVecStDataIQ) new EnqEntryVecMemData(isComp)
+        else new EnqEntry(isComp)
+      case VfScheduler() => new EnqEntry(isComp)
       case _ => null
     }
   }

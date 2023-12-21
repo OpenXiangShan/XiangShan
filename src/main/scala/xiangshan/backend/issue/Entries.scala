@@ -38,8 +38,8 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val resps: Vec[Vec[ValidIO[EntryDeqRespBundle]]] = VecInit(io.og0Resp, io.og1Resp, 0.U.asTypeOf(io.og0Resp), 0.U.asTypeOf(io.og0Resp))
 
   //Module
-  val enqEntries          = Seq.fill(EnqEntryNum)(Module(EnqEntry(p, params)))
-  val othersEntries       = Seq.fill(OthersEntryNum)(Module(OthersEntry(p, params)))
+  val enqEntries          = Seq.fill(EnqEntryNum)(Module(EnqEntry(isComp = true)(p, params)))
+  val othersEntries       = Seq.fill(OthersEntryNum)(Module(OthersEntry(isComp = true)(p, params)))
   val transPolicy         = Module(new EnqPolicy)
 
   //Wire
