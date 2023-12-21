@@ -277,11 +277,12 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     entryUpdate.payload                               := entryReg.payload
   }
 
-  def CommonOutConnect(commonOut: CommonOutBundle, common: CommonWireBundle, hasIQWakeup: Option[CommonIQWakeupBundle], validReg: Bool, entryUpdate: EntryBundle, entryReg: EntryBundle, status: Status, commonIn: CommonInBundle, isEnq: Boolean)(implicit p: Parameters, params: IssueBlockParams) = {
+  def CommonOutConnect(commonOut: CommonOutBundle, common: CommonWireBundle, hasIQWakeup: Option[CommonIQWakeupBundle], validReg: Bool, entryUpdate: EntryBundle, entryReg: EntryBundle, status: Status, commonIn: CommonInBundle, isEnq: Boolean, isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams) = {
     val hasIQWakeupGet                                 = hasIQWakeup.getOrElse(0.U.asTypeOf(new CommonIQWakeupBundle))
     val srcWakeupExuOH                                 = if(isEnq) status.srcStatus.map(_.srcWakeUpL1ExuOH.getOrElse(0.U.asTypeOf(ExuVec()))) else hasIQWakeupGet.regSrcWakeupL1ExuOH
     commonOut.valid                                   := validReg
-    commonOut.canIssue                                := (common.canIssue || hasIQWakeupGet.canIssueBypass) && !common.flushed
+    commonOut.canIssue                                := (if (isComp) (common.canIssue || hasIQWakeupGet.canIssueBypass) && !common.flushed
+                                                          else common.canIssue && !common.flushed)
     commonOut.fuType                                  := IQFuType.readFuType(status.fuType, params.getFuCfgs.map(_.fuType)).asUInt
     commonOut.robIdx                                  := status.robIdx
     commonOut.dataSource.zipWithIndex.foreach{ case (dataSourceOut, srcIdx) =>
@@ -296,17 +297,24 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     commonOut.issueTimerRead                          := status.issueTimer
     commonOut.deqPortIdxRead                          := status.deqPortIdx
     if(params.hasIQWakeUp) {
-      val wakeupSrcLoadDependency                     = hasIQWakeupGet.srcWakeupByIQWithoutCancel.map(x => Mux1H(x, hasIQWakeupGet.wakeupLoadDependencyByIQVec))
-      commonOut.srcWakeUpL1ExuOH.get                  := Mux(hasIQWakeupGet.canIssueBypass && !common.canIssue, hasIQWakeupGet.srcWakeupL1ExuOHOut, VecInit(srcWakeupExuOH))
+      val wakeupSrcLoadDependency                      = hasIQWakeupGet.srcWakeupByIQWithoutCancel.map(x => Mux1H(x, hasIQWakeupGet.wakeupLoadDependencyByIQVec))
+      commonOut.srcWakeUpL1ExuOH.get                  := (if (isComp) Mux(hasIQWakeupGet.canIssueBypass && !common.canIssue, hasIQWakeupGet.srcWakeupL1ExuOHOut, VecInit(srcWakeupExuOH))
+                                                          else VecInit(srcWakeupExuOH))
       commonOut.srcTimer.get.zipWithIndex.foreach { case (srcTimerOut, srcIdx) =>
         val wakeupByIQOH                               = hasIQWakeupGet.srcWakeupByIQWithoutCancel(srcIdx)
         srcTimerOut                                   := Mux(wakeupByIQOH.asUInt.orR, Mux1H(wakeupByIQOH, commonIn.wakeUpFromIQ.map(_.bits.is0Lat).toSeq).asUInt, status.srcStatus(srcIdx).srcTimer.get)
       }
       commonOut.entry.bits.status.srcStatus.map(_.srcLoadDependency.get).zipWithIndex.foreach { case (srcLoadDependencyOut, srcIdx) =>
-        srcLoadDependencyOut                          := Mux(hasIQWakeupGet.canIssueBypass && !common.canIssue, hasIQWakeupGet.srcLoadDependencyOut(srcIdx), status.srcStatus(srcIdx).srcLoadDependency.get)
+        srcLoadDependencyOut                          := (if (isComp) Mux(hasIQWakeupGet.canIssueBypass && !common.canIssue, 
+                                                                          hasIQWakeupGet.srcLoadDependencyOut(srcIdx), 
+                                                                          status.srcStatus(srcIdx).srcLoadDependency.get)
+                                                          else status.srcStatus(srcIdx).srcLoadDependency.get)
       }
       commonOut.srcLoadDependency.get.zipWithIndex.foreach { case (srcLoadDependencyOut, srcIdx) =>
-        srcLoadDependencyOut                          := Mux(hasIQWakeupGet.canIssueBypass && !common.canIssue, VecInit(status.srcStatus(srcIdx).srcLoadDependency.get.zip(wakeupSrcLoadDependency(srcIdx)).map(x => x._1 | x._2)), status.srcStatus(srcIdx).srcLoadDependency.get)
+        srcLoadDependencyOut                          := (if (isComp) Mux(hasIQWakeupGet.canIssueBypass && !common.canIssue, 
+                                                                          VecInit(status.srcStatus(srcIdx).srcLoadDependency.get.zip(wakeupSrcLoadDependency(srcIdx)).map(x => x._1 | x._2)), 
+                                                                          status.srcStatus(srcIdx).srcLoadDependency.get)
+                                                          else status.srcStatus(srcIdx).srcLoadDependency.get)
       }
     }
     commonOut.enqReady                                := common.enqReady
