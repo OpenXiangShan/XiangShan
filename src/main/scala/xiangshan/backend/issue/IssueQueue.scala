@@ -175,6 +175,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
 
   val dataSources: Vec[Vec[DataSource]] = entries.io.dataSources
   val finalDataSources: Vec[Vec[DataSource]] = VecInit(finalDeqSelOHVec.map(oh => Mux1H(oh, dataSources)))
+  val loadDependency: Option[Vec[Vec[UInt]]] = entries.io.loadDependency
+  val finalLoadDependency: Option[IndexedSeq[Vec[UInt]]] = loadDependency.map(x => finalDeqSelOHVec.map(oh => Mux1H(oh, x)))
   // (entryIdx)(srcIdx)(exuIdx)
   val wakeUpL1ExuOH: Option[Vec[Vec[Vec[Bool]]]] = entries.io.srcWakeUpL1ExuOH
   val srcTimer: Option[Vec[Vec[UInt]]] = entries.io.srcTimer
@@ -492,7 +494,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     deq.bits.common.dataSources := finalDataSources(i)
     deq.bits.common.l1ExuVec.foreach(_ := finalWakeUpL1ExuOH.get(i))
     deq.bits.common.srcTimer.foreach(_ := finalSrcTimer.get(i))
-    deq.bits.common.loadDependency.foreach(_ := deqEntryVec(i).bits.status.mergedLoadDependency.get)
+    deq.bits.common.loadDependency.foreach(_ := finalLoadDependency.get(i))
     deq.bits.common.src := DontCare
 
     deq.bits.rf.zip(deqEntryVec(i).bits.status.srcStatus.map(_.psrc)).zip(deqEntryVec(i).bits.status.srcStatus.map(_.srcType)).foreach { case ((rf, psrc), srcType) =>
