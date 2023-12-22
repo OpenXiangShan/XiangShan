@@ -738,9 +738,9 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   when (sfence_valid) {
     val l1vmidhit = VecInit(l1vmids.map(_.getOrElse(0.U) === io.csr_dup(0).hgatp.asid)).asUInt
     val spvmidhit = VecInit(spvmids.map(_.getOrElse(0.U) === io.csr_dup(0).hgatp.asid)).asUInt
-    val l1hhit = VecInit(l1h.map(_ === onlyStage1 && io.csr_dup(0).priv.virt || !io.csr_dup(0).priv.virt)).asUInt
-    val sphhit = VecInit(sph.map(_ === onlyStage1 && io.csr_dup(0).priv.virt || !io.csr_dup(0).priv.virt)).asUInt
-    val l2hhit = VecInit(l2h.flatMap(_.map(_ === onlyStage1 && io.csr_dup(0).priv.virt || !io.csr_dup(0).priv.virt))).asUInt
+    val l1hhit = VecInit(l1h.map{a => io.csr_dup(0).priv.virt && a === onlyStage1 || !io.csr_dup(0).priv.virt && a === noS2xlate}).asUInt
+    val sphhit = VecInit(sph.map{a => io.csr_dup(0).priv.virt && a === onlyStage1 || !io.csr_dup(0).priv.virt && a === noS2xlate}).asUInt
+    val l2hhit = VecInit(l2h.flatMap(_.map{a => io.csr_dup(0).priv.virt && a === onlyStage1 || !io.csr_dup(0).priv.virt && a === noS2xlate})).asUInt
     val sfence_vpn = sfence_dup(0).bits.addr(sfence_dup(0).bits.addr.getWidth-1, offLen)
     val l2h_set = getl2hSet(sfence_vpn)
 
