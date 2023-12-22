@@ -1309,9 +1309,15 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.ldu_io.lsq.uncache.ready := true.B
 
   // fast load to load forward
-  io.ldu_io.l2l_fwd_out.valid      := s3_out.valid && !s3_in.lateKill && s3_ld_flow
-  io.ldu_io.l2l_fwd_out.data       := s3_ld_data_frm_cache
-  io.ldu_io.l2l_fwd_out.dly_ld_err := s3_dly_ld_err // ecc delayed error
+  if (EnableLoadToLoadForward) {
+    io.ldu_io.l2l_fwd_out.valid      := s3_out.valid && !s3_in.lateKill && s3_ld_flow
+    io.ldu_io.l2l_fwd_out.data       := s3_ld_data_frm_cache
+    io.ldu_io.l2l_fwd_out.dly_ld_err := s3_dly_ld_err // ecc delayed error
+  } else {
+    io.ldu_io.l2l_fwd_out.valid      := false.B
+    io.ldu_io.l2l_fwd_out.data       := DontCare
+    io.ldu_io.l2l_fwd_out.dly_ld_err := DontCare
+  }
 
   // hybrid unit writeback to rob
   // delay params
