@@ -40,7 +40,7 @@ class VPPU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   private val isMvnr = (VpermType.vmvnr === io.in.bits.ctrl.fuOpType)
 
   // io alias
-  private val opcode  = VpermType.getOpcode(fuOpType)
+  private val opcode = VpermType.getOpcode(fuOpType)
   
   // modules
   private val typeMod = Module(new VIMacSrcTypeModule)

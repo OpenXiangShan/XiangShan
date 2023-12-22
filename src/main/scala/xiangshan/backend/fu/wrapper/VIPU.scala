@@ -101,7 +101,16 @@ class VIPU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
                              (VipuType.viota_m === io.in.bits.ctrl.fuOpType && vuopIdx(log2Up(MaxUopSize)-1,1) === 0.U) ||
                              (VipuType.vid_v   === io.in.bits.ctrl.fuOpType && vuopIdx(log2Up(MaxUopSize)-1,1) === 0.U)    // dirty code TODO:  inset into IAlu
   private val needShiftVs1 = (VipuType.vwredsumu_vs === io.in.bits.ctrl.fuOpType || VipuType.vwredsum_vs === io.in.bits.ctrl.fuOpType) && vuopIdx < vlmul
-  
+
+  // mvxs instruction no need to use vialu module
+  private val isMvxs = (VipuType.vmv_x_s === io.in.bits.ctrl.fuOpType)
+  private val vs2Ext = Mux1H(Seq(
+    (vsew === VSew.e8)  -> SignExt(vs2(7,0), 64),
+    (vsew === VSew.e16) -> SignExt(vs2(15,0), 64),
+    (vsew === VSew.e32) -> SignExt(vs2(31,0), 64),
+    (vsew === VSew.e64) -> vs2
+  ))
+
   // modules
   private val decoder = Module(new VIAluDecoder)
   private val vialu   = Module(new VIAlu)
@@ -139,5 +148,5 @@ class VIPU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
       subIO.in.bits.mask        := srcMask
   }
 
-  io.out.bits.res.data := vialu.io.out.bits.vd
+  io.out.bits.res.data := Mux(isMvxs, RegEnable(vs2Ext, io.in.valid), vialu.io.out.bits.vd)
 }
