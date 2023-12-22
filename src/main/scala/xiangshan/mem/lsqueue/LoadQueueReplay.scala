@@ -215,6 +215,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val debug_vaddr = RegInit(VecInit(List.fill(LoadQueueReplaySize)(0.U(VAddrBits.W))))
   val cause = RegInit(VecInit(List.fill(LoadQueueReplaySize)(0.U(LoadReplayCauses.allCauses.W))))
   val blocking = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
+  val strict = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
 
   // freeliset: store valid entries index.
   // +---+---+--------------+-----+-----+
@@ -278,7 +279,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     // dequeue
     //  FIXME: store*Ptr is not accurate
     dataNotBlockVec(i) := !isBefore(io.stDataReadySqPtr, blockSqIdx(i)) || stDataReadyVec(blockSqIdx(i).value) || io.sqEmpty // for better timing
-    addrNotBlockVec(i) := !isBefore(io.stAddrReadySqPtr, blockSqIdx(i)) || stAddrReadyVec(blockSqIdx(i).value) || io.sqEmpty // for better timing
+    addrNotBlockVec(i) := Mux(strict(i), !isBefore(io.stAddrReadySqPtr, blockSqIdx(i)), stAddrReadyVec(blockSqIdx(i).value)) || io.sqEmpty // for better timing
 
     // store address execute
     storeAddrInSameCycleVec(i) := VecInit((0 until StorePipelineWidth).map(w => {
@@ -513,6 +514,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     io.replay(i).bits.missDbUpdated := s2_missDbUpdated
     io.replay(i).bits.forward_tlDchannel := s2_replayCauses(LoadReplayCauses.C_DM)
     io.replay(i).bits.schedIndex   := s2_oldestSel(i).bits
+    io.replay(i).bits.uop.cf.loadWaitStrict := false.B
 
     when (io.replay(i).fire) {
       XSError(!allocated(s2_oldestSel(i).bits), p"LoadQueueReplay: why replay an invalid entry ${s2_oldestSel(i).bits} ?")
@@ -588,6 +590,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
       // init
       blocking(enqIndex)     := true.B
+      strict(enqIndex)       := false.B
 
       // update blocking pointer
       when (replayInfo.cause(LoadReplayCauses.C_BC) ||
@@ -615,6 +618,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       // special case: st-ld violation
       when (replayInfo.cause(LoadReplayCauses.C_MA)) {
         blockSqIdx(enqIndex) := replayInfo.addr_inv_sq_idx
+        strict(enqIndex) := enq.bits.uop.cf.loadWaitStrict
       }
 
       // special case: data forward fail

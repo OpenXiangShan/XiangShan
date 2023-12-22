@@ -143,7 +143,6 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
   // for better timing, we limits the size of RS to 2-deq
   val maxRsDeq = (if (Enable3Load3Store) 4 else 2)
   def numRS = (params.numDeq + (maxRsDeq - 1)) / maxRsDeq
-  println("=============================== " + numRS)
 
   class RSWrapperImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) with HasPerfEvents {
     require(params.numEnq < params.numDeq || params.numEnq % params.numDeq == 0)
