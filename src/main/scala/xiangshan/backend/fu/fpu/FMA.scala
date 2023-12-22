@@ -135,7 +135,7 @@ class FADD_pipe(val addLat: Int = 2)(implicit p: Parameters) extends FPUPipeline
         mulProd(i).inter_flags,
         0.U.asTypeOf(s1.io.b_inter_flags)
       )
-      s1.io.rm := S1Reg(rm)
+      s1.io.rm := S1Reg(Mux(isFMA, mulProd(i).rm, rm))
       s2.io.in := S2Reg(s1.io.out)
       (s1, s2)
   }
@@ -157,6 +157,7 @@ class FMAMidResult extends FMULToFADD(FPU.ftypes.last.expWidth, FPU.ftypes.last.
     floatMidResult.fp_prod.exp := fp_prod.exp
     floatMidResult.fp_prod.sig := fp_prod.sig
     floatMidResult.inter_flags := inter_flags
+    floatMidResult.rm := rm
     floatMidResult
   }
 
