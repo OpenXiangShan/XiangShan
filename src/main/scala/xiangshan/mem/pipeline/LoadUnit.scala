@@ -1155,7 +1155,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_out.bits.uop             := s3_in.uop
   s3_out.bits.uop.exceptionVec(loadAccessFault) := (s3_dly_ld_err || s3_in.uop.exceptionVec(loadAccessFault)) && s3_exp
   s3_out.bits.uop.flushPipe   := false.B
-  s3_out.bits.uop.replayInst  := false.B
+  s3_out.bits.uop.replayInst  := s3_rep_frm_fetch || s3_flushPipe
   s3_out.bits.data            := s3_in.data
   s3_out.bits.debug.isMMIO    := s3_in.mmio
   s3_out.bits.debug.isPerfCnt := false.B

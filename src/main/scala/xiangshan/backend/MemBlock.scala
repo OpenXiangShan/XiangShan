@@ -1130,7 +1130,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     )).andR))
     resultOnehot
   }
-  val allRedirect = Seq(lsq.io.nuke_rollback, lsq.io.nack_rollback) ++ loadUnits.map(_.io.rollback)
+  val allRedirect = Seq(lsq.io.nuke_rollback, lsq.io.nack_rollback) ++ loadUnits.map(_.io.rollback) ++ hybridUnits.map(_.io.ldu_io.rollback)
   val oldestOneHot = selectOldestRedirect(allRedirect)
   val oldestRedirect = Mux1H(oldestOneHot, allRedirect)
   io.mem_to_ooo.memoryViolation := oldestRedirect
