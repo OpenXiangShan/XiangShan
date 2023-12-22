@@ -482,13 +482,16 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val ifuRedirected = RegInit(VecInit(Seq.fill(FtqSize)(false.B)))
 
   
-  // io.fromBackend.ftqIdxAhead: jmp + alu(aluCnt) + ldReplay + exception
+  // ftqIdxAheadReg: jmp + alu(aluCnt) + ldReplay + exception
+  val redirectReg = RegNext(io.fromBackend.redirect)
+  val ftqIdxAheadReg = RegNext(io.fromBackend.ftqIdxAhead)
+  val ftqIdxSelOHReg = RegNext(io.fromBackend.ftqIdxSelOH)
   val aluAheadStart = 1
-  val ftqIdxAhead = VecInit(Seq.tabulate(FtqRedirectAheadNum)(i => io.fromBackend.ftqIdxAhead(i + aluAheadStart))) // only alu
-  val ftqIdxSelOH = io.fromBackend.ftqIdxSelOH.bits(FtqRedirectAheadNum, 1)
+  val ftqIdxAhead = VecInit(Seq.tabulate(FtqRedirectAheadNum)(i => ftqIdxAheadReg(i + aluAheadStart))) // only alu
+  val ftqIdxSelOH = ftqIdxSelOHReg.bits(FtqRedirectAheadNum, 1)
   
-  val aheadValid   = ftqIdxAhead.map(_.valid).reduce(_|_) && !io.fromBackend.redirect.valid
-  val realAhdValid = io.fromBackend.redirect.valid && (ftqIdxSelOH > 0.U) && RegNext(aheadValid)
+  val aheadValid   = ftqIdxAhead.map(_.valid).reduce(_|_) && !redirectReg.valid
+  val realAhdValid = redirectReg.valid && (ftqIdxSelOH > 0.U) && RegNext(aheadValid)
   val backendRedirect = Wire(Valid(new BranchPredictionRedirect))
   val backendRedirectReg = RegNext(backendRedirect)
   backendRedirectReg.valid := Mux(realAhdValid, 0.B, backendRedirect.valid)
@@ -995,8 +998,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // **************************** wb from exu ****************************
   // *********************************************************************
 
-  backendRedirect.valid := io.fromBackend.redirect.valid
-  backendRedirect.bits.connectRedirect(io.fromBackend.redirect.bits)
+  backendRedirect.valid := redirectReg.valid
+  backendRedirect.bits.connectRedirect(redirectReg.bits)
   backendRedirect.bits.BTBMissBubble := false.B
 
 
@@ -1410,7 +1413,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   XSPerfAccumulate("bpu_to_ifu_bubble_when_ftq_full", (bpuPtr === ifuPtr) && isFull(bpuPtr, commPtr) && io.toIfu.req.ready)
 
   XSPerfAccumulate("redirectAhead_ValidNum", ftqIdxAhead.map(_.valid).reduce(_|_))
-  XSPerfAccumulate("fromBackendRedirect_ValidNum", io.fromBackend.redirect.valid)
+  XSPerfAccumulate("fromBackendRedirect_ValidNum", redirectReg.valid)
   XSPerfAccumulate("toBpuRedirect_ValidNum", io.toBpu.redirect.valid)
 
   val from_bpu = io.fromBpu.resp.bits
