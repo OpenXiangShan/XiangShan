@@ -30,6 +30,7 @@ class MulToAddIO(val ftypes: Seq[FPU.FType])(implicit val p: Parameters) extends
   val mul_out = MixedVec(ftypes.map(t => new FMULToFADD(t.expWidth, t.precision)))
   val addend = UInt(ftypes.map(_.len).max.W)
   val uop = new MicroOp
+  val rm = UInt(3.W)
 
   def getFloat = mul_out.head
   def getDouble = mul_out.last
@@ -89,6 +90,7 @@ class FMUL_pipe(val mulLat: Int = 2)(implicit p: Parameters)
   val outSel = S2Reg(S1Reg(typeSel))
 
   toAdd.addend := S2Reg(S1Reg(io.in.bits.src(2)))
+  toAdd.rm := S2Reg(S1Reg(rm))
   toAdd.mul_out.zip(s3.map(_.io.to_fadd)).foreach(x => x._1 := x._2)
   toAdd.uop := uopVec.last
   io.out.bits.data := Mux1H(outSel, s3.zip(FPU.ftypes).map{
@@ -135,7 +137,7 @@ class FADD_pipe(val addLat: Int = 2)(implicit p: Parameters) extends FPUPipeline
         mulProd(i).inter_flags,
         0.U.asTypeOf(s1.io.b_inter_flags)
       )
-      s1.io.rm := S1Reg(Mux(isFMA, mulProd(i).rm, rm))
+      s1.io.rm := S1Reg(rm)
       s2.io.in := S2Reg(s1.io.out)
       (s1, s2)
   }
@@ -188,7 +190,6 @@ class FMA(implicit p: Parameters) extends FPUSubModule {
   mul_pipe.rm := rm
 
   add_pipe.io.redirectIn := io.redirectIn
-  add_pipe.rm := rm
 
   val fpCtrl = io.in.bits.uop.ctrl.fpu
   mul_pipe.io.in <> io.in
@@ -214,6 +215,7 @@ class FMA(implicit p: Parameters) extends FPUSubModule {
     add_pipe.mulToAdd.uop := io.in.bits.uop
   }
 
+  add_pipe.rm := Mux(midResult.in.valid && !isFMAReg, midResult.in.bits.rm, Mux(isFMAReg, mul_pipe.rm, rm))
   // For FADD, it accepts instructions from io.in and FMUL.
   // When FMUL gives an FMA, FADD accepts this instead of io.in.
   // Since FADD gets FMUL data from add_pipe.mulToAdd, only uop needs Mux.
