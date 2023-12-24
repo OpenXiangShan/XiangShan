@@ -54,7 +54,7 @@ trait HasMemBlockParameters extends HasXSParameter {
   val LdExuCnt  = LduCnt + HyuCnt
   val StAddrCnt = StaCnt + HyuCnt
   val StDataCnt = StdCnt
-  val MemExuCnt = LduCnt + StaCnt + StdCnt + HyuCnt
+  val MemExuCnt = LduCnt + HyuCnt + StaCnt + StdCnt
   val MemAddrExtCnt = LdExuCnt + StaCnt
   val MemVExuCnt = VlduCnt + VstuCnt
 }
@@ -523,23 +523,19 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   // dtlb
   val dtlb_ld = VecInit(Seq.fill(1){
-    val tlb_ld = Module(new TLBNonBlock(LduCnt + 1, 2, ldtlbParams))
+    val tlb_ld = Module(new TLBNonBlock(LduCnt + 1 + HyuCnt, 2, ldtlbParams))
     tlb_ld.io // let the module have name in waveform
   })
   val dtlb_st = VecInit(Seq.fill(1){
     val tlb_st = Module(new TLBNonBlock(StaCnt, 1, sttlbParams))
     tlb_st.io // let the module have name in waveform
   })
-  val dtlb_hy = VecInit(Seq.fill(1){
-    val tlb_hy = Module(new TLBNonBlock(HyuCnt, 2, hytlbParams))
-    tlb_hy.io // let the module have same in waveform
-  })
   val dtlb_prefetch = VecInit(Seq.fill(1){
     val tlb_prefetch = Module(new TLBNonBlock(1, 2, pftlbParams))
     tlb_prefetch.io // let the module have name in waveform
   })
-  val dtlb = dtlb_ld ++ dtlb_st ++ dtlb_hy ++ dtlb_prefetch
-  val ptwio = Wire(new VectorTlbPtwIO(LduCnt + 1 + StaCnt + HyuCnt + 1)) // load + load prefetch + store + hybrid + hw prefetch
+  val dtlb = dtlb_ld ++ dtlb_st ++ dtlb_prefetch
+  val ptwio = Wire(new VectorTlbPtwIO(LduCnt + 1 + HyuCnt + StaCnt + 1)) // load + stream prefetch + hybrid + store + hw prefetch
   val dtlb_reqs = dtlb.map(_.requestor).flatten
   val dtlb_pmps = dtlb.map(_.pmp).flatten
   dtlb.map(_.hartId := io.hartId)
@@ -552,20 +548,20 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     require(ldtlbParams.outReplace == pftlbParams.outReplace)
     require(ldtlbParams.outReplace)
 
-    val replace = Module(new TlbReplace(LduCnt + StaCnt + HyuCnt + 2, ldtlbParams))
-    replace.io.apply_sep(dtlb_ld.map(_.replace) ++ dtlb_st.map(_.replace) ++ dtlb_hy.map(_.replace) ++ dtlb_prefetch.map(_.replace), ptwio.resp.bits.data.entry.tag)
+    val replace = Module(new TlbReplace(LduCnt + 1 + HyuCnt + StaCnt + 1, ldtlbParams))
+    replace.io.apply_sep(dtlb_ld.map(_.replace) ++ dtlb_st.map(_.replace) ++ dtlb_prefetch.map(_.replace), ptwio.resp.bits.data.entry.tag)
   } else {
     if (ldtlbParams.outReplace) {
       val replace_ld = Module(new TlbReplace(LduCnt + 1, ldtlbParams))
       replace_ld.io.apply_sep(dtlb_ld.map(_.replace), ptwio.resp.bits.data.entry.tag)
     }
+    if (hytlbParams.outReplace) {
+      val replace_hy = Module(new TlbReplace(HyuCnt, hytlbParams))
+      replace_hy.io.apply_sep(dtlb_ld.map(_.replace), ptwio.resp.bits.data.entry.tag)
+    }
     if (sttlbParams.outReplace) {
       val replace_st = Module(new TlbReplace(StaCnt, sttlbParams))
       replace_st.io.apply_sep(dtlb_st.map(_.replace), ptwio.resp.bits.data.entry.tag)
-    }
-    if (hytlbParams.outReplace) {
-      val replace_hy = Module(new TlbReplace(HyuCnt, hytlbParams))
-      replace_hy.io.apply_sep(dtlb_hy.map(_.replace), ptwio.resp.bits.data.entry.tag)
     }
     if (pftlbParams.outReplace) {
       val replace_pf = Module(new TlbReplace(1, pftlbParams))
@@ -591,9 +587,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       ptwio.req(i).bits := tlb.bits
     val vector_hit = if (refillBothTlb) Cat(ptw_resp_next.vector).orR
       else if (i < (LduCnt + 1)) Cat(ptw_resp_next.vector.take(LduCnt + 1)).orR
-      else if (i < (LduCnt + 1 + StaCnt)) Cat(ptw_resp_next.vector.drop(LduCnt + 1).take(StaCnt)).orR
-      else if (i < (LduCnt + 1 + StaCnt + HyuCnt)) Cat(ptw_resp_next.vector.drop(LduCnt + 1 + StaCnt).take(HyuCnt)).orR
-      else Cat(ptw_resp_next.vector.drop(LduCnt + StaCnt + HyuCnt + 1)).orR
+      else if (i < (LduCnt + 1 + HyuCnt)) Cat(ptw_resp_next.vector.drop(LduCnt + 1).take(HyuCnt)).orR
+      else if (i < (LduCnt + 1 + HyuCnt + StaCnt)) Cat(ptw_resp_next.vector.drop(LduCnt + 1 + HyuCnt).take(StaCnt)).orR
+      else Cat(ptw_resp_next.vector.drop(LduCnt + 1 + HyuCnt + StaCnt)).orR
     ptwio.req(i).valid := tlb.valid && !(ptw_resp_v && vector_hit &&
       ptw_resp_next.data.hit(tlb.bits.vpn, tlbcsr.satp.asid, allType = true, ignoreAsid = true))
   }
@@ -601,10 +597,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   if (refillBothTlb) {
     dtlb.foreach(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector).orR)
   } else {
-    dtlb_ld.foreach(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector.take(LduCnt + 1)).orR)
-    dtlb_st.foreach(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector.drop(LduCnt + 1).take(StaCnt)).orR)
-    dtlb_hy.foreach(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector.drop(LduCnt + StaCnt + 1).take(HyuCnt)).orR)
-    dtlb_prefetch.foreach(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector.drop(LduCnt + StaCnt + HyuCnt + 1)).orR)
+    dtlb_ld.foreach(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector.take(LduCnt + 1 + HyuCnt)).orR)
+    dtlb_st.foreach(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector.slice(LduCnt + 1 + HyuCnt, LduCnt + 1 + HyuCnt + StaCnt)).orR)
+    dtlb_prefetch.foreach(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector.drop(LduCnt + 1 + HyuCnt + StaCnt)).orR)
   }
 
   val dtlbRepeater  = PTWNewFilter(ldtlbParams.fenceDelay, ptwio, ptw.io.tlb(1), sfence, tlbcsr, l2tlbParams.dfilterSize)
@@ -616,7 +611,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val pmp = Module(new PMP())
   pmp.io.distribute_csr <> csrCtrl.distribute_csr
 
-  val pmp_check = VecInit(Seq.fill(LduCnt + StaCnt + HyuCnt + 2)(Module(new PMPChecker(3)).io))
+  val pmp_check = VecInit(Seq.fill(LduCnt + 1 + HyuCnt + StaCnt + 1)(Module(new PMPChecker(3)).io))
   for ((p,d) <- pmp_check zip dtlb_pmps) {
     p.apply(tlbcsr.priv.dmode, pmp.io.pmp, pmp.io.pma, d)
     require(p.req.bits.size.getWidth == d.bits.size.getWidth)
@@ -625,14 +620,14 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   for (i <- 0 until LduCnt) {
     io.debug_ls.debugLsInfo(i) := loadUnits(i).io.debug_ls
   }
+  for (i <- 0 until HyuCnt) {
+    io.debug_ls.debugLsInfo.drop(LduCnt)(i) := hybridUnits(i).io.ldu_io.debug_ls
+  }
   for (i <- 0 until StaCnt) {
-    io.debug_ls.debugLsInfo.drop(LduCnt)(i) := storeUnits(i).io.debug_ls
+    io.debug_ls.debugLsInfo.drop(LduCnt + HyuCnt)(i) := storeUnits(i).io.debug_ls
   }
   for (i <- 0 until HyuCnt) {
-    io.debug_ls.debugLsInfo.drop(LduCnt + StaCnt)(i) := hybridUnits(i).io.ldu_io.debug_ls
-  }
-  for (i <- 0 until HyuCnt) {
-    io.debug_ls.debugLsInfo.drop(LduCnt + StaCnt + HyuCnt)(i) := hybridUnits(i).io.stu_io.debug_ls
+    io.debug_ls.debugLsInfo.drop(LduCnt + HyuCnt + StaCnt)(i) := hybridUnits(i).io.stu_io.debug_ls
   }
 
   io.mem_to_ooo.lsTopdownInfo := loadUnits.map(_.io.lsTopdownInfo) ++ hybridUnits.map(_.io.ldu_io.lsTopdownInfo)
@@ -820,9 +815,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // dcache refill req
     hybridUnits(i).io.ldu_io.refill <> delayedDcacheRefill
     // dtlb
-    hybridUnits(i).io.tlb <> dtlb_reqs.drop(LduCnt + StaCnt + 1)(i)
+    hybridUnits(i).io.tlb <> dtlb_ld.head.requestor(LduCnt + 1 + i)
     // pmp
-    hybridUnits(i).io.pmp <> pmp_check.drop(LduCnt + StaCnt + 1)(i).resp
+    hybridUnits(i).io.pmp <> pmp_check.drop(LduCnt + 1)(i).resp
     // st-ld violation query
     val stld_nuke_query = VecInit(storeUnits.map(_.io.stld_nuke_query) ++ hybridUnits.map(_.io.stu_io.stld_nuke_query))
     hybridUnits(i).io.ldu_io.stld_nuke_query := stld_nuke_query
@@ -1006,8 +1001,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stu.io.lsq_replenish <> lsq.io.sta.storeAddrInRe(i)
     stu.io.lsq_vec       <> lsq.io.sta.vecStoreAddrIn(i)
     // dtlb
-    stu.io.tlb          <> dtlb_reqs.drop(LduCnt + 1)(i)
-    stu.io.pmp          <> pmp_check(LduCnt + 1 + i).resp
+    stu.io.tlb          <> dtlb_st.head.requestor(i)
+    stu.io.pmp          <> pmp_check(LduCnt + 1 + HyuCnt + i).resp
 
     // prefetch
     stu.io.prefetch_req <> sbuffer.io.store_prefetch(i)
