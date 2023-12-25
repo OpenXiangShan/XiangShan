@@ -555,7 +555,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).lsrc(1) := 0.U
       csBundle(0).ldest := VECTOR_TMP_REG_LMUL.U
       csBundle(0).fuType := FuType.i2v.U
-      csBundle(0).fuOpType := Cat(IF2VectorType.i2Vec(2, 0), vsewReg)
+      csBundle(0).fuOpType := Cat(IF2VectorType.iDup2Vec(2, 0), vsewReg)
       csBundle(0).vecWen := true.B
       //LMUL
       csBundle(1).srcType(0) := SrcType.vp
@@ -598,7 +598,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).lsrc(1) := 0.U
       csBundle(0).ldest := VECTOR_TMP_REG_LMUL.U
       csBundle(0).fuType := FuType.i2v.U
-      csBundle(0).fuOpType := Cat(IF2VectorType.i2Vec(2, 0), vsewReg)
+      csBundle(0).fuOpType := Cat(IF2VectorType.iDup2Vec(2, 0), vsewReg)
       csBundle(0).vecWen := true.B
       //LMUL
       for (i <- 0 until MAX_VLMUL) {
