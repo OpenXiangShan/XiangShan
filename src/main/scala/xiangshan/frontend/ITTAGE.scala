@@ -158,7 +158,7 @@ class ITTageTable
   }
   val bankIdxWidth = log2Ceil(nBanks)
   def get_bank_mask(idx: UInt) = VecInit((0 until nBanks).map(idx(bankIdxWidth-1, 0) === _.U))
-  def get_bank_idx(idx: UInt) = idx >> bankIdxWidth
+  def get_bank_idx(idx: UInt): UInt = (idx >> bankIdxWidth).asUInt
 
   // override val debug = true
   // bypass entries for tage update
@@ -193,14 +193,14 @@ class ITTageTable
   class ITTageEntry() extends ITTageBundle {
     // val valid = Bool()
     val tag = UInt(tagLen.W)
-    val ctr = UInt(ITTageCtrBits.W)
     val target = UInt(VAddrBits.W)
+    val ctr = UInt(ITTageCtrBits.W)
   }
 
   val validArray = RegInit(0.U(nRows.W))
 
-  // Why need add instOffsetBits?
-  val ittageEntrySz = 1 + tagLen + ITTageCtrBits + VAddrBits
+  val ittageEntrySize = tagLen + ITTageCtrBits + VAddrBits
+  assert((new ITTageEntry).getWidth == ittageEntrySize)
 
   // pc is start address of basic block, most 2 branch inst in block
   // def getUnhashedIdx(pc: UInt) = pc >> (instOffsetBits+log2Ceil(TageBanks))
@@ -215,9 +215,17 @@ class ITTageTable
   val s1_bank_req_1h = RegEnable(s0_bank_req_1h, io.req.fire)
 
   val us = Module(new Folded1WDataModuleTemplate(Bool(), nRows, 1, isSync=true, width=uFoldedWidth))
-  // val table  = Module(new SRAMTemplate(new ITTageEntry, set=nRows, way=1, shouldReset=true, holdRead=true, singlePort=false))
-  val table_banks = Seq.fill(nBanks)(
-    Module(new FoldedSRAMTemplate(new ITTageEntry, set=nRows/nBanks, width=bankFoldWidth, shouldReset=true, holdRead=true, singlePort=true)))
+  // Fold SRAM should be done manually with using template
+  // template require isPow2(way) at the time of commit
+  val table_banks = Seq.fill(nBanks)(Module(
+    new SRAMTemplate(Bool(),
+      set=SRAM_SIZE,
+      way=bankFoldWidth * ittageEntrySize,
+      shouldReset=true,
+      holdRead=true,
+      singlePort=true
+    )
+  ))
 
   for (b <- 0 until nBanks) {
     table_banks(b).io.r.req.valid := io.req.fire && s0_bank_req_1h(b)
@@ -226,7 +234,17 @@ class ITTageTable
 
   us.io.raddr(0) := s0_idx
 
-  val table_banks_r = table_banks.map(_.io.r.resp.data(0))
+  val table_banks_r =
+    if (bankFoldWidth > 1) {
+      table_banks.map(
+        _.io.r.resp.data.asTypeOf(Vec(bankFoldWidth, new ITTageEntry))
+          (get_bank_idx(s0_idx)(log2Ceil(bankFoldWidth) - 1, 0))
+      )
+    } else {
+      table_banks.map(
+        _.io.r.resp.data.asTypeOf(new ITTageEntry)
+      )
+    }
 
   val resp_selected = Mux1H(s1_bank_req_1h, table_banks_r)
   val s1_req_rhit = validArray(s1_idx) && resp_selected.tag === s1_tag
@@ -250,12 +268,31 @@ class ITTageTable
 
   resp_invalid_by_write := Mux1H(s1_bank_req_1h, s1_bank_has_write_on_this_req)
 
+  val allocWayMask =
+    if (bankFoldWidth > 1) {
+      VecInit.tabulate(bankFoldWidth * ittageEntrySize)(
+        i => (i / ittageEntrySize).U === update_idx_in_bank(log2Ceil(bankFoldWidth) - 1, 0)
+      ).asUInt
+    } else {
+      VecInit.fill(ittageEntrySize)(true.B).asUInt
+    }
+  val nonAllocaWayMask =
+    if (bankFoldWidth > 1) {
+      VecInit.tabulate(bankFoldWidth * ittageEntrySize)(
+        i => (i / ittageEntrySize).U === update_idx_in_bank(log2Ceil(bankFoldWidth) - 1, 0) &&
+          ((i % ittageEntrySize).U < ITTageCtrBits.U)
+      ).asUInt
+    } else {
+      VecInit.tabulate(ittageEntrySize)(_.U < ITTageCtrBits.U).asUInt
+    }
+  val update_waymask = Mux(io.update.alloc, allocWayMask, nonAllocaWayMask)
+
   for (b <- 0 until nBanks) {
     table_banks(b).io.w.apply(
       valid   = io.update.valid && update_req_bank_1h(b),
-      data    = update_wdata,
+      data    = VecInit(Seq.fill(bankFoldWidth)(update_wdata.asTypeOf(Vec(ittageEntrySize, Bool()))).flatten),
       setIdx  = update_idx_in_bank,
-      waymask = true.B
+      waymask = update_waymask
     )
   }
 
