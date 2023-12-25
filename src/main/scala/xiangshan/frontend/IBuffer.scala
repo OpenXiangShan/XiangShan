@@ -214,11 +214,11 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
       val validIdx = Mux(idx.asUInt >= deqBankPtr.value,
         idx.asUInt - deqBankPtr.value,
         ((idx + IBufNBank).asUInt - deqBankPtr.value)(log2Ceil(IBufNBank) - 1, 0)
-      )
+      )(log2Ceil(DecodeWidth) - 1, 0)
       val bankAdvance = Mux(validIdx >= DecodeWidth.U,
         false.B,
-        validVec(validIdx(log2Ceil(DecodeWidth) - 1, 0))
-      ) && io.out.head.ready
+        validVec(validIdx) && io.out(validIdx).ready
+      )
       ptr := Mux(bankAdvance , ptr + 1.U, ptr)
     }
   }
