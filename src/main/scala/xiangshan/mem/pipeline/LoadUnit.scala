@@ -756,6 +756,16 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.forward_mshr.mshrid := s1_out.mshrid
   io.forward_mshr.paddr  := s1_out.paddr
 
+  // rar pre enqueue check
+  io.lsq.ldld_nuke_query.pre_req.valid := s1_valid
+  io.lsq.ldld_nuke_query.pre_req.bits := DontCare
+  io.lsq.ldld_nuke_query.pre_req.bits.uop  := s1_in.uop
+
+  // raw pre enqueue check
+  io.lsq.stld_nuke_query.pre_req.valid := s1_valid
+  io.lsq.stld_nuke_query.pre_req.bits := DontCare
+  io.lsq.stld_nuke_query.pre_req.bits.uop := s1_in.uop
+
   XSDebug(s1_valid,
     p"S1: pc ${Hexadecimal(s1_out.uop.cf.pc)}, lId ${Hexadecimal(s1_out.uop.lqIdx.asUInt)}, tlb_miss ${io.tlb.resp.bits.miss}, " +
     p"paddr ${Hexadecimal(s1_out.paddr)}, mmio ${s1_out.mmio}\n")
