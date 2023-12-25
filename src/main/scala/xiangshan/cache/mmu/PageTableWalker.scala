@@ -144,8 +144,8 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     stage1Hit -> Cat(stage1.genPPN(), 0.U(offLen.W)),
     onlyS2xlate -> Cat(vpn, 0.U(offLen.W)),
     !s_last_hptw_req -> Cat(MuxLookup(level, pte.ppn)(Seq(
-      1.U -> Cat(pte.ppn(ppnLen - 1, vpnnLen * 2), vpn(vpnnLen * 2 - 1, 0)),
-      2.U -> Cat(pte.ppn(ppnLen - 1, vpnnLen), vpn(vpnnLen - 1, 0)
+      0.U -> Cat(pte.ppn(ppnLen - 1, vpnnLen * 2), vpn(vpnnLen * 2 - 1, 0)),
+      1.U -> Cat(pte.ppn(ppnLen - 1, vpnnLen), vpn(vpnnLen - 1, 0)
     ))), 
     0.U(offLen.W))
   ))
