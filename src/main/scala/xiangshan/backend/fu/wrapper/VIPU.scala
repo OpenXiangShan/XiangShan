@@ -83,7 +83,8 @@ class VIAluDecoder (implicit p: Parameters) extends XSModule {
     VipuType.vmsof_m      -> Cat(VAluOpcode.vmsof, mask, mask, mask).asUInt,
 
     VipuType.viota_m      -> Cat(VAluOpcode.viota, uSew, uSew, uSew).asUInt,
-    VipuType.vid_v        -> Cat(VAluOpcode.vid, uSew, uSew, uSew).asUInt
+    VipuType.vid_v        -> Cat(VAluOpcode.vid, uSew, uSew, uSew).asUInt,
+    VipuType.vmv_x_s      -> Cat(VAluOpcode.vmvxs, uSew, uSew, uSew).asUInt
 
    )).asTypeOf(new VIAluDecodeResultBundle)
 
@@ -101,7 +102,7 @@ class VIPU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
                              (VipuType.viota_m === io.in.bits.ctrl.fuOpType && vuopIdx(log2Up(MaxUopSize)-1,1) === 0.U) ||
                              (VipuType.vid_v   === io.in.bits.ctrl.fuOpType && vuopIdx(log2Up(MaxUopSize)-1,1) === 0.U)    // dirty code TODO:  inset into IAlu
   private val needShiftVs1 = (VipuType.vwredsumu_vs === io.in.bits.ctrl.fuOpType || VipuType.vwredsum_vs === io.in.bits.ctrl.fuOpType) && vuopIdx < vlmul
-  
+
   // modules
   private val decoder = Module(new VIAluDecoder)
   private val vialu   = Module(new VIAlu)
