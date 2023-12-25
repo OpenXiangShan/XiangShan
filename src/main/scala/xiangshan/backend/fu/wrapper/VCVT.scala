@@ -104,7 +104,8 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
     )
   )
   val eNumMax1H = Mux(lmul.head(1).asBool, eNum1H >> ((~lmul.tail(1)).asUInt +1.U), eNum1H << lmul.tail(1)).asUInt(6, 0)
-  val eNumMax = Mux1H(eNumMax1H, Seq(1,2,4,8,16,32,64).map(i => i.U)) //only for cvt intr, don't exist 128 in cvt
+  val eNumMax1HEffect = Mux(isNarrowCvt, eNumMax1H << 1, eNumMax1H).asUInt
+  val eNumMax = Mux1H(eNumMax1HEffect, Seq(1,2,4,8,16,32,64).map(i => i.U)) //only for cvt intr, don't exist 128 in cvt
   val eNumEffectIdx = Mux(vl > eNumMax, eNumMax, vl)
 
   val eNum = Mux1H(eNum1H, Seq(1, 2, 4, 8).map(num =>num.U))
