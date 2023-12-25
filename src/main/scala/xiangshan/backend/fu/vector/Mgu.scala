@@ -74,10 +74,11 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
   maskTailGen.io.in.vta := info.ta
   maskTailGen.io.in.vsew := realEw
   maskTailGen.io.in.maskUsed := maskUsed
-  maskTailGen.io.in.vdIdx := info.vdIdx
+  maskTailGen.io.in.vdIdx := vdIdx
 
-  private val keepEn = maskTailGen.io.out.keepEn
-  private val agnosticEn = maskTailGen.io.out.agnosticEn
+  // maskTailGen gen 16bits to control 16*8bits(result/vd), MSB 8bit is efficient when narrow & info.vdidx.
+  private val keepEn = Mux(narrow && info.vdIdx(0), maskTailGen.io.out.keepEn.head(8), maskTailGen.io.out.keepEn)
+  private val agnosticEn = Mux(narrow && info.vdIdx(0), maskTailGen.io.out.agnosticEn.head(8), maskTailGen.io.out.agnosticEn)
 
   // the result of normal inst and narrow inst which does not need concat
   private val byte1s: UInt = (~0.U(8.W)).asUInt
@@ -94,7 +95,7 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
   }
 
   // the result of narrow inst which needs concat
-  private val narrowNeedCat = info.vdIdx(0).asBool & narrow
+  private val narrowNeedCat = info.vdIdx(0).asBool & narrow & info.vl.orR
   private val narrowResCat = Cat(resVecByte.asUInt(vlen / 2 - 1, 0), oldVd(vlen / 2 - 1, 0))
 
   // the result of mask-generating inst
