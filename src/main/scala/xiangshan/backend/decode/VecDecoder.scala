@@ -381,7 +381,7 @@ object VecDecoder extends DecodeConstants {
     VMULHSU_VV   -> OPMVV(T, FuType.vimac, VimacType.vmulhsu, F, T, F, UopSplitType.VEC_VVV),
     VMULHU_VV    -> OPMVV(T, FuType.vimac, VimacType.vmulhu, F, T, F, UopSplitType.VEC_VVV),
 
-    VMV_X_S      -> OPMVV(T, FuType.vipu, VipuType.dummy, T, F, F, src1 = SrcType.no), // vmv.x.s rd, vs2 # x[rd] = vs2[0]
+    VMV_X_S      -> OPMVV(T, FuType.vipu, VipuType.vmv_x_s, T, F, F, src1 = SrcType.no), // vmv.x.s rd, vs2 # x[rd] = vs2[0]
     VNMSAC_VV    -> OPMVV(T, FuType.vimac, VimacType.vnmsac, F, T, F, UopSplitType.VEC_VVV),
     VNMSUB_VV    -> OPMVV(T, FuType.vimac, VimacType.vnmsub, F, T, F, UopSplitType.VEC_VVV),
     VREDAND_VS   -> OPMVV(T, FuType.vipu, VipuType.vredand_vs, F, T, F, UopSplitType.VEC_VRED),
