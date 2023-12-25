@@ -306,14 +306,20 @@ class SRAM(object):
       mem.add_sequential('always @(posedge %sclk)' % prefix)
       mem.add_sequential("  if (%sen && %swmode) begin" % (prefix, prefix))
       if mask_seg > 0:
-        mem.add_sequential("    for(i=0;i<%d;i=i+1) begin" % mask_seg)
-        if pid in maskedports:
-          mem.add_sequential("      if(%swmask[i]) begin" % prefix)
-          mem.add_sequential("        ram[%saddr][i*%d +: %d] <= %swdata[i*%d +: %d];" %(prefix, mask_gran, mask_gran, prefix, mask_gran, mask_gran))
-          mem.add_sequential("      end")
+        if mask_gran == 1: # If 1 bit mask, use & instead
+          if pid in maskedports:
+            mem.add_sequential("        ram[%saddr]<= %swmask & %swdata;" %(prefix, prefix, prefix))
+          else:
+            mem.add_sequential("      ram[%saddr] <= %swdata;" %(prefix, prefix))
         else:
-          mem.add_sequential("      ram[%saddr][i*%d +: %d] <= %swdata[i*%d +: %d];" %(prefix, mask_gran, mask_gran, prefix, mask_gran, mask_gran))
-        mem.add_sequential("    end")
+          mem.add_sequential("    for (i=0;i<%d;i=i+1) begin" % mask_seg)
+          if pid in maskedports:
+            mem.add_sequential("      if (%swmask[i]) begin" % prefix)
+            mem.add_sequential("        ram[%saddr][i*%d +: %d] <= %swdata[i*%d +: %d];" %(prefix, mask_gran, mask_gran, prefix, mask_gran, mask_gran))
+            mem.add_sequential("      end")
+          else:
+            mem.add_sequential("      ram[%saddr][i*%d +: %d] <= %swdata[i*%d +: %d];" %(prefix, mask_gran, mask_gran, prefix, mask_gran, mask_gran))
+          mem.add_sequential("    end")
       mem.add_sequential("  end")
     return mem.generate(blackbox)
 
