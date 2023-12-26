@@ -18,6 +18,7 @@ case class IssueBlockParams(
   private val exuParams: Seq[ExeUnitParams],
   val numEntries       : Int,
   numEnq               : Int,
+  numComp            : Int,
   numDeqOutside        : Int = 0,
   numWakeupFromOthers  : Int = 0,
   XLEN                 : Int = 64,
@@ -122,6 +123,14 @@ case class IssueBlockParams(
   def dataBitsMax: Int = if (numVecSrc > 0) VLEN else XLEN
 
   def numDeq: Int = numDeqOutside + exuBlockParams.length
+
+  def numSimp: Int = numEntries - numEnq - numComp
+
+  def isAllComp: Boolean = numComp == (numEntries - numEnq)
+
+  def isAllSimp: Boolean = numComp == 0
+
+  def hasCompAndSimp: Boolean = !(isAllComp || isAllSimp)
 
   def JmpCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.jmp)).sum
 
