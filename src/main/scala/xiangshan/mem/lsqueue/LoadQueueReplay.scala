@@ -278,8 +278,8 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   for (i <- 0 until LoadQueueReplaySize) {
     // dequeue
     //  FIXME: store*Ptr is not accurate
-    dataNotBlockVec(i) := !isBefore(io.stDataReadySqPtr, blockSqIdx(i)) || stDataReadyVec(blockSqIdx(i).value) || io.sqEmpty // for better timing
-    addrNotBlockVec(i) := Mux(strict(i), !isBefore(io.stAddrReadySqPtr, blockSqIdx(i)), stAddrReadyVec(blockSqIdx(i).value)) || io.sqEmpty // for better timing
+    dataNotBlockVec(i) := isAfter(io.stDataReadySqPtr, blockSqIdx(i)) || stDataReadyVec(blockSqIdx(i).value) || io.sqEmpty // for better timing
+    addrNotBlockVec(i) := Mux(strict(i), isAfter(io.stAddrReadySqPtr, blockSqIdx(i)), stAddrReadyVec(blockSqIdx(i).value)) || io.sqEmpty // for better timing
 
     // store address execute
     storeAddrInSameCycleVec(i) := VecInit((0 until StorePipelineWidth).map(w => {
