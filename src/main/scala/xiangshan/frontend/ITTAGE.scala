@@ -34,6 +34,7 @@ trait ITTageParams extends HasXSParameter with HasBPUParameter {
   val ITTageCtrBits = 2
   val uFoldedWidth = 16
   val TickWidth = 8
+  val hashTargetWidth = 10
   def ctr_null(ctr: UInt, ctrBits: Int = ITTageCtrBits) = {
     ctr === 0.U
   }
@@ -99,7 +100,6 @@ class ITTageUpdate(implicit p: Parameters) extends ITTageBundle {
   val reset_u = Bool()
   // target
   val target = UInt(VAddrBits.W)
-  val old_target = UInt(VAddrBits.W)
 }
 
 // reuse TAGE Implementation
@@ -113,15 +113,12 @@ class ITTageMeta(implicit p: Parameters) extends XSBundle with ITTageParams{
   val altProviderCtr = UInt(ITTageCtrBits.W)
   val allocate = ValidUndirectioned(UInt(log2Ceil(ITTageNTables).W))
   val taken = Bool()
-  val providerTarget = UInt(VAddrBits.W)
-  val altProviderTarget = UInt(VAddrBits.W)
-  // val scMeta = new SCMeta(EnableSC)
-  // TODO: check if we need target info here
+  val hashedProviderTarget = UInt(hashTargetWidth.W)
   val pred_cycle = if (!env.FPGAPlatform) Some(UInt(64.W)) else None
 
   override def toPrintable = {
-    p"pvdr(v:${provider.valid} num:${provider.bits} ctr:$providerCtr u:$providerU tar:${Hexadecimal(providerTarget)}), " +
-    p"altpvdr(v:${altProvider.valid} num:${altProvider.bits}, ctr:$altProviderCtr, tar:${Hexadecimal(altProviderTarget)}), " +
+    p"pvdr(v:${provider.valid} num:${provider.bits} ctr:$providerCtr u:$providerU,  " +
+    p"altpvdr(v:${altProvider.valid} num:${altProvider.bits}, ctr:$altProviderCtr, " +
     p"altdiff:$altDiffers, alloc(v:${allocate.valid} num:${allocate.bits}), taken:$taken, cycle:${pred_cycle.getOrElse(0.U)}"
   }
 }
@@ -179,7 +176,7 @@ class ITTageTable
       val alt_tag_fh = allFh.getHistWithInfo(altTagFhInfo).folded_hist
       // require(idx_fh.getWidth == log2Ceil(nRows))
       val idx = (unhashed_idx ^ idx_fh)(log2Ceil(nRows)-1, 0)
-      val tag = ((unhashed_idx >> log2Ceil(nRows)) ^ tag_fh ^ (alt_tag_fh << 1)) (tagLen - 1, 0)
+      val tag: UInt = ((unhashed_idx >> log2Ceil(nRows)) ^ tag_fh ^ (alt_tag_fh << 1)) (tagLen - 1, 0)
       (idx, tag)
     }
     else {
@@ -203,8 +200,7 @@ class ITTageTable
   assert((new ITTageEntry).getWidth == ittageEntrySize)
 
   // pc is start address of basic block, most 2 branch inst in block
-  // def getUnhashedIdx(pc: UInt) = pc >> (instOffsetBits+log2Ceil(TageBanks))
-  def getUnhashedIdx(pc: UInt): UInt = pc >> instOffsetBits
+  def getUnhashedIdx(pc: UInt): UInt = (pc >> instOffsetBits).asUInt
 
   val s0_pc = io.req.bits.pc
   val s0_unhashed_idx = getUnhashedIdx(io.req.bits.pc)
@@ -285,16 +281,7 @@ class ITTageTable
     } else {
       VecInit.tabulate(ittageEntrySize)(_.U < ITTageCtrBits.U).asUInt
     }
-  val update_waymask = Mux(io.update.alloc, allocWayMask, nonAllocaWayMask)
 
-  for (b <- 0 until nBanks) {
-    table_banks(b).io.w.apply(
-      valid   = io.update.valid && update_req_bank_1h(b),
-      data    = VecInit(Seq.fill(bankFoldWidth)(update_wdata.asTypeOf(Vec(ittageEntrySize, Bool()))).flatten),
-      setIdx  = update_idx_in_bank,
-      waymask = update_waymask
-    )
-  }
 
   val bank_conflict = (0 until nBanks).map(b => table_banks(b).io.w.req.valid && s0_bank_req_1h(b)).reduce(_||_)
   io.req.ready := true.B // !io.update.valid
@@ -314,9 +301,18 @@ class ITTageTable
   val old_ctr = Mux(wrbypass.io.hit, wrbypass.io.hit_data(0).bits, io.update.oldCtr)
   update_wdata.ctr   := Mux(io.update.alloc, 2.U, inc_ctr(old_ctr, io.update.correct))
   update_wdata.tag   := update_tag
-  // only when ctr is null
-  update_wdata.target := Mux(io.update.alloc || ctr_null(old_ctr), update_target, io.update.old_target)
+  // Update target when ctr is null
+  update_wdata.target := Mux(io.update.alloc || ctr_null(old_ctr), update_target, DontCare)
+  val update_waymask = Mux(io.update.alloc || ctr_null(old_ctr), allocWayMask, nonAllocaWayMask)
 
+  for (b <- 0 until nBanks) {
+    table_banks(b).io.w.apply(
+      valid   = io.update.valid && update_req_bank_1h(b),
+      data    = VecInit(Seq.fill(bankFoldWidth)(update_wdata.asTypeOf(Vec(ittageEntrySize, Bool()))).flatten),
+      setIdx  = update_idx_in_bank,
+      waymask = update_waymask
+    )
+  }
   val newValidArray = VecInit(validArray.asBools)
   when (io.update.valid) {
     newValidArray(update_idx) := true.B
@@ -342,7 +338,7 @@ class ITTageTable
     XSDebug(io.update.valid,
       p"update ITTAGE Table: pc:${Hexadecimal(u.pc)}}, " +
       p"correct:${u.correct}, alloc:${u.alloc}, oldCtr:${u.oldCtr}, " +
-      p"target:${Hexadecimal(u.target)}, old_target:${Hexadecimal(u.old_target)}\n")
+      p"target:${Hexadecimal(u.target)}\n")
     XSDebug(io.update.valid,
       p"update ITTAGE Table: writing tag:${update_tag}, " +
       p"ctr: ${update_wdata.ctr}, target:${Hexadecimal(update_wdata.target)}" +
@@ -389,6 +385,20 @@ class FakeITTage(implicit p: Parameters) extends BaseITTage {
 
 // TODO: check target related logics
 class ITTage(implicit p: Parameters) extends BaseITTage {
+
+  // Use ParallelXOR to hash a long input into short hash
+  private def compute_xor_hash(input: UInt, l: Int): UInt = {
+    val inputWidth = input.getWidth
+    if (inputWidth > 0) {
+      val nChunks = (inputWidth + l - 1) / l
+      val hist_chunks = (0 until nChunks) map { i =>
+        input(min((i + 1) * l, inputWidth) - 1, i * l)
+      }
+      ParallelXOR(hist_chunks)
+    }
+    else 0.U
+  }
+
   override val meta_size = 0.U.asTypeOf(new ITTageMeta).getWidth
 
   val tables = ITTageTableInfos.zipWithIndex.map {
@@ -431,7 +441,6 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val s3_tageTaken_dup     = io.s2_fire.map(f => RegEnable(s2_tageTaken, f))
   val s3_tageTarget_dup    = io.s2_fire.map(f => RegEnable(s2_tageTarget, f))
   val s3_providerTarget    = RegEnable(s2_providerTarget, io.s2_fire(3))
-  val s3_altProviderTarget = RegEnable(s2_altProviderTarget, io.s2_fire(3))
   val s3_provided          = RegEnable(s2_provided, io.s2_fire(3))
   val s3_provider          = RegEnable(s2_provider, io.s2_fire(3))
   val s3_altProvided       = RegEnable(s2_altProvided, io.s2_fire(3))
@@ -462,13 +471,11 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val updateResetU    = WireInit(false.B)
   val updateCorrect   = Wire(Vec(ITTageNTables, Bool()))
   val updateTarget    = Wire(Vec(ITTageNTables, UInt(VAddrBits.W)))
-  val updateOldTarget = Wire(Vec(ITTageNTables, UInt(VAddrBits.W)))
   val updateAlloc     = Wire(Vec(ITTageNTables, Bool()))
   val updateOldCtr    = Wire(Vec(ITTageNTables, UInt(ITTageCtrBits.W)))
   val updateU         = Wire(Vec(ITTageNTables, Bool()))
   updateCorrect   := DontCare
   updateTarget  := DontCare
-  updateOldTarget  := DontCare
   updateAlloc   := DontCare
   updateOldCtr  := DontCare
   updateU       := DontCare
@@ -528,17 +535,16 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
         fp.jalr_target := s3_tageTarget
       }
 
-  resp_meta.provider.valid    := s3_provided
-  resp_meta.provider.bits     := s3_provider
-  resp_meta.altProvider.valid := s3_altProvided
-  resp_meta.altProvider.bits  := s3_altProvider
-  resp_meta.altDiffers        := s3_finalAltPred =/= s3_tageTaken_dup(3)
-  resp_meta.providerU         := s3_providerU
-  resp_meta.providerCtr       := s3_providerCtr
-  resp_meta.altProviderCtr    := s3_altProviderCtr
-  resp_meta.taken             := s3_tageTaken_dup(3)
-  resp_meta.providerTarget    := s3_providerTarget
-  resp_meta.altProviderTarget := s3_altProviderTarget
+  resp_meta.provider.valid          := s3_provided
+  resp_meta.provider.bits           := s3_provider
+  resp_meta.altProvider.valid       := s3_altProvided
+  resp_meta.altProvider.bits        := s3_altProvider
+  resp_meta.altDiffers              := s3_finalAltPred =/= s3_tageTaken_dup(3)
+  resp_meta.providerU               := s3_providerU
+  resp_meta.providerCtr             := s3_providerCtr
+  resp_meta.altProviderCtr          := s3_altProviderCtr
+  resp_meta.taken                   := s3_tageTaken_dup(3)
+  resp_meta.hashedProviderTarget    := compute_xor_hash(s3_providerTarget, hashTargetWidth)
   resp_meta.pred_cycle.map(_:= GTimer())
   // TODO: adjust for ITTAGE
   // Create a mask fo tables which did not hit our query, and also contain useless entries
@@ -554,6 +560,8 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
   // Update in loop
   val updateRealTarget = update.full_target
+  val providerCorrect = updateMeta.provider.valid &&
+    updateMeta.hashedProviderTarget === compute_xor_hash(updateRealTarget, hashTargetWidth)
   when (updateValid) {
     when (updateMeta.provider.valid) {
       val provider = updateMeta.provider.bits
@@ -569,17 +577,14 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
         updateOldCtr(altProvider)  := updateMeta.altProviderCtr
         updateAlloc(altProvider)   := false.B
         updateTarget(altProvider)  := updateRealTarget
-        updateOldTarget(altProvider) := updateMeta.altProviderTarget
       }
 
 
       updateMask(provider)   := true.B
       updateUMask(provider)  := true.B
-
       updateU(provider) := Mux(!updateMeta.altDiffers, updateMeta.providerU, !updateMisPred)
-      updateCorrect(provider)  := updateMeta.providerTarget === updateRealTarget
+      updateCorrect(provider) := providerCorrect
       updateTarget(provider) := updateRealTarget
-      updateOldTarget(provider) := updateMeta.providerTarget
       updateOldCtr(provider) := updateMeta.providerCtr
       updateAlloc(provider)  := false.B
     }
@@ -587,7 +592,6 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
   // if mispredicted and not the case that
   // provider offered correct target but used altpred due to unconfident
-  val providerCorrect = updateMeta.provider.valid && updateMeta.providerTarget === updateRealTarget
   val providerUnconf = updateMeta.providerCtr === 0.U
   when (updateValid && updateMisPred && !(providerCorrect && providerUnconf)) {
     val allocate = updateMeta.allocate
@@ -595,7 +599,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     when (allocate.valid) {
       XSDebug(true.B, p"allocate new table entry, pred cycle ${updateMeta.pred_cycle.getOrElse(0.U)}\n")
       updateMask(allocate.bits)  := true.B
-      updateCorrect(allocate.bits) := true.B // useless for alloc
+      updateCorrect(allocate.bits) := DontCare // useless for alloc
       updateTarget(allocate.bits) := updateRealTarget
       updateAlloc(allocate.bits) := true.B
       updateUMask(allocate.bits) := true.B
@@ -616,7 +620,6 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     tables(i).io.update.valid := RegNext(updateMask(i))
     tables(i).io.update.correct := RegNext(updateCorrect(i))
     tables(i).io.update.target := RegNext(updateTarget(i))
-    tables(i).io.update.old_target := RegNext(updateOldTarget(i))
     tables(i).io.update.alloc := RegNext(updateAlloc(i))
     tables(i).io.update.oldCtr := RegNext(updateOldCtr(i))
 
