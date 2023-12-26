@@ -79,18 +79,6 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
 
   private val walkPtrSnapshots = SnapshotGenerator(enqPtr, io.snpt.snptEnq, io.snpt.snptDeq, io.redirect.valid, io.snpt.flushVec)
 
-  // We should extra walk these preg pairs which compressed in rob enq entry at last cycle after restored snapshots.
-  // enq firstuop: b010100 --invert--> b101011 --keep only continuous 1s from head--> b000011
-  // enq firstuop: b111101 --invert--> b000010 --keep only continuous 1s from head--> b000000
-  private val enqCompressedLastCycleMask: UInt = VecInit(io.req.indices.map(i => io.req.slice(0, i + 1).map(!_.bits.firstUop).reduce(_ && _))).asUInt
-  private val compressedLastRobEntryMaskSnapshots = SnapshotGenerator(enqCompressedLastCycleMask, io.snpt.snptEnq, io.snpt.snptDeq, io.redirect.valid, io.snpt.flushVec)
-  private val compressedExtraWalkMask = compressedLastRobEntryMaskSnapshots(snptSelect)
-  // b111111 --Cat(x,1)--> b1111111 --Reverse--> b1111111 --PriorityEncoder--> 6.U
-  // b001111 --Cat(x,1)--> b0011111 --Reverse--> b1111100 --PriorityEncoder--> 4.U
-  // b000011 --Cat(x,1)--> b0000111 --Reverse--> b1110000 --PriorityEncoder--> 2.U
-  // b000000 --Cat(x,1)--> b0000001 --Reverse--> b1000000 --PriorityEncoder--> 0.U
-  private val compressedExtraWalkSize = PriorityMux(Reverse(Cat(compressedExtraWalkMask, 1.U(1.W))), (0 to RenameWidth).map(i => (RenameWidth - i).U))
-
   val vcfgPtrOH = RegInit(1.U(size.W))
   val vcfgPtrOHShift = CircularShift(vcfgPtrOH)
   // may shift [0, 2) steps
@@ -137,7 +125,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
 
   commitSize := Mux(io.redirect.valid && !io.snpt.useSnpt, 0.U, commitSizeNxt)
   specialWalkSize := specialWalkSizeNext
-  walkSize := Mux(io.redirect.valid, Mux(io.snpt.useSnpt, compressedExtraWalkSize, 0.U), walkSizeNxt)
+  walkSize := Mux(io.redirect.valid, 0.U, walkSizeNxt)
 
   walkPtrNext := MuxCase(walkPtr, Seq(
     (state === s_idle && stateNext === s_walk) -> walkPtrSnapshots(snptSelect),
@@ -266,6 +254,9 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   XSError(isBefore(enqPtr, deqPtr) && !isFull(enqPtr, deqPtr), "\ndeqPtr is older than enqPtr!\n")
 
   QueuePerf(RabSize, numValidEntries, numValidEntries === size.U)
+
+  dontTouch(compressedExtraWalkSize)
+  dontTouch(deqPtrVec)
 
   XSPerfAccumulate("s_idle_to_idle", state === s_idle         && stateNext === s_idle)
   XSPerfAccumulate("s_idle_to_swlk", state === s_idle         && stateNext === s_special_walk)
