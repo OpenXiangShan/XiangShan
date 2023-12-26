@@ -141,12 +141,11 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     common.srcWakeupByWB      := commonIn.wakeUpFromWB.map(bundle => bundle.bits.wakeUp(status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType), bundle.valid)).transpose.map(x => VecInit(x.toSeq).asUInt.orR).toSeq
     common.canIssue           := validReg && status.canIssue
     common.enqReady           := !validReg || common.clear
+    common.clear              := common.flushed || common.deqSuccess || commonIn.transSel
     if(isEnq) {
       common.validRegNext     := Mux(commonIn.enq.valid && common.enqReady, true.B, Mux(common.clear, false.B, validReg))
-      common.clear            := common.flushed || common.deqSuccess || commonIn.transSel
     } else {
-      common.validRegNext     := Mux(commonIn.enq.valid && commonIn.transSel, true.B, Mux(common.clear, false.B, validReg))
-      common.clear            := common.flushed || common.deqSuccess
+      common.validRegNext     := Mux(commonIn.enq.valid, true.B, Mux(common.clear, false.B, validReg))
     }
   }
 
@@ -325,7 +324,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
 
   def EntryMemConnect(commonIn: CommonInBundle, common: CommonWireBundle, validReg: Bool, entryReg: EntryBundle, entryRegNext: EntryBundle, entryUpdate: EntryBundle, isEnq: Boolean)(implicit p: Parameters, params: IssueBlockParams) = {
     val enqValid                                       = if(isEnq) commonIn.enq.valid && common.enqReady 
-                                                         else commonIn.enq.valid && commonIn.transSel
+                                                         else commonIn.enq.valid
     val fromMem                                        = commonIn.fromMem.get
     val memStatus                                      = entryReg.status.mem.get
     val memStatusNext                                  = entryRegNext.status.mem.get

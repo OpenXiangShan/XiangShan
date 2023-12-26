@@ -40,7 +40,11 @@ class OthersEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockPar
     CommonIQWakeupConnect(common, hasWakeupIQ.get, validReg, entryReg.status, io.commonIn, false)
   }
 
-  when(io.commonIn.enq.valid && io.commonIn.transSel) {
+  when(io.commonIn.enq.valid) {
+    assert(common.enqReady, "Entry is not ready when enq is valid\n")
+  }
+
+  when(io.commonIn.enq.valid) {
     entryRegNext := io.commonIn.enq.bits
   }.otherwise {
     entryRegNext := entryUpdate
