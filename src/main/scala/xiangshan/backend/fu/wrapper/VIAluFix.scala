@@ -258,6 +258,22 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   private val outNarrow = Cat(vIntFixpAlus.reverse.map(_.io.narrowVd))
   private val outOpcode = VialuFixType.getOpcode(outCtrl.fuOpType).asTypeOf(vIntFixpAlus.head.io.opcode)
 
+  private val numBytes = dataWidth / 8
+  private val maxMaskIdx = numBytes
+  private val maxVdIdx = 8
+  private val elementsInOneUop = Mux1H(outEewVs1.oneHot, Seq(1, 2, 4, 8).map(k => (numBytes / k).U(5.W)))
+  private val vdIdx = outVecCtrl.vuopIdx(2, 0)
+  private val elementsComputed = Mux1H(Seq.tabulate(maxVdIdx)(i => (vdIdx === i.U) -> (elementsInOneUop * i.U)))
+  val outCmpWithTail = Wire(Vec(maxMaskIdx, UInt(1.W)))
+  // set the bits in vd to 1 if the index is larger than vl and vta is true
+  for (i <- 0 until maxMaskIdx) {
+    when(elementsComputed +& i.U >= outVl) {
+      outCmpWithTail(i) := Mux(outVecCtrl.vta, 1.U, outOldVd(elementsComputed +& i.U))
+    }.otherwise {
+      outCmpWithTail(i) := outCmp(i)
+    }
+  }
+
   /* insts whose mask is not used to generate 'agnosticEn' and 'keepEn' in mgu:
    * vadc, vmadc...
    * vmerge
@@ -284,7 +300,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
 
   mgu.io.in.vd := MuxCase(outVd, Seq(
     narrow -> outNarrow,
-    dstMask -> outCmp,
+    dstMask -> outCmpWithTail.asUInt,
   ))
   mgu.io.in.oldVd := outOldVd
   mgu.io.in.mask := maskToMgu
