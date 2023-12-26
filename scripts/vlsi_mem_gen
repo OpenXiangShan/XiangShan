@@ -308,7 +308,7 @@ class SRAM(object):
       if mask_seg > 0:
         if mask_gran == 1: # If 1 bit mask, use & instead
           if pid in maskedports:
-            mem.add_sequential("        ram[%saddr]<= %swmask & %swdata;" %(prefix, prefix, prefix))
+            mem.add_sequential("      ram[%saddr] <= (%swmask & %swdata) & (~%swmask & ram[%saddr]);" %(prefix, prefix, prefix, prefix, prefix))
           else:
             mem.add_sequential("      ram[%saddr] <= %swdata;" %(prefix, prefix))
         else:
