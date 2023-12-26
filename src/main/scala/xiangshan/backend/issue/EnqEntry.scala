@@ -58,6 +58,10 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
   //Wire
   CommonWireConnect(common, hasWakeupIQ, validReg, currentStatus, io.commonIn, true)
 
+  when(io.commonIn.enq.valid) {
+    assert(common.enqReady, "Entry is not ready when enq is valid\n")
+  }
+
   when(io.commonIn.enq.valid && common.enqReady) {
     entryRegNext := io.commonIn.enq.bits
   }.otherwise {
