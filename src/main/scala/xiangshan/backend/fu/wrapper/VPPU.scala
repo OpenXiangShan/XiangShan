@@ -37,7 +37,8 @@ class VPPU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   private val numVecModule = dataWidth / dataWidthOfDataModule
   private val vppuNeedClearMask = (VpermType.vcompress === io.in.bits.ctrl.fuOpType) && (vuopIdx(log2Up(MaxUopSize)-1,1) === 0.U)
   private val mask = Mux(vppuNeedClearMask, 0.U, srcMask)
-
+  private val isVmvnr = VpermType.isVmvnr(io.in.bits.ctrl.fuOpType)
+  private val emul = VpermType.getEmulVmvnr(io.in.bits.ctrl.fuOpType)
   // io alias
   private val opcode = VpermType.getOpcode(fuOpType)
   
@@ -65,7 +66,7 @@ class VPPU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
       subIO.in.bits.info.vm     := vm
       subIO.in.bits.info.ma     := vma
       subIO.in.bits.info.ta     := vta
-      subIO.in.bits.info.vlmul  := vlmul
+      subIO.in.bits.info.vlmul  := Mux(isVmvnr, emul, vlmul)
       subIO.in.bits.info.vl     := srcVConfig.vl
       subIO.in.bits.info.vstart := vstart
       subIO.in.bits.info.uopIdx := vuopIdx
