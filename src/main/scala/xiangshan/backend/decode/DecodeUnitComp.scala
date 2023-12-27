@@ -688,7 +688,10 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           csBundle(i).uopIdx := i.U
         }
       }
-      when(vlmulReg.orR) {
+      when(vlmulReg(2) === 0.U && vlmulReg(1, 0).orR) {
+        /*
+         * 2 <= vlmul <= 8
+         */
         csBundle(numOfUop - 1.U).srcType(2) := SrcType.vp
         csBundle(numOfUop - 1.U).lsrc(0) := src1
         csBundle(numOfUop - 1.U).lsrc(1) := VECTOR_TMP_REG_LMUL.U + numOfUop - 2.U
