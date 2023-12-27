@@ -80,6 +80,6 @@ class VPPU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
       subIO.in.bits.mask        := mask
   }
 
-  io.out.bits.res.data := Mux(isMvnr, RegEnable(vs2, io.in.valid), vperms.io.out.vd)
+  io.out.bits.res.data := Mux(RegEnable(isMvnr, io.in.valid), RegEnable(vs2, io.in.valid), vperms.io.out.vd)
   io.out.bits.res.vxsat.foreach(_ := vperms.io.out.vxsat)
 }
