@@ -76,28 +76,22 @@ class SimTop(implicit p: Parameters) extends Module {
   soc.io.systemjtag.part_number := 0.U(16.W)
   soc.io.systemjtag.version := 0.U(4.W)
 
-  val io = IO(new Bundle(){
-    val logCtrl = new LogCtrlIO
-    val perfInfo = new PerfInfoIO
-    val uart = new UARTIO
-  })
+  val difftest = DifftestModule.finish("XiangShan")
 
-  simMMIO.io.uart <> io.uart
+  simMMIO.io.uart <> difftest.uart
 
-  val timer = if (!debugOpts.FPGAPlatform && (debugOpts.EnableDebug || debugOpts.EnablePerfDebug)) GTimer() else WireDefault(0.U(64.W))
-  val logEnable =
-    if (!debugOpts.FPGAPlatform && (debugOpts.EnableDebug || debugOpts.EnablePerfDebug))
-      (timer >= io.logCtrl.log_begin) && (timer < io.logCtrl.log_end)
-    else WireDefault(false.B)
-  val clean = if (!debugOpts.FPGAPlatform && debugOpts.EnablePerfDebug) WireDefault(io.perfInfo.clean) else WireDefault(false.B)
-  val dump = if (!debugOpts.FPGAPlatform && debugOpts.EnablePerfDebug) WireDefault(io.perfInfo.dump) else WireDefault(false.B)
+  val hasPerf = !debugOpts.FPGAPlatform && debugOpts.EnablePerfDebug
+  val hasLog = !debugOpts.FPGAPlatform && debugOpts.EnableDebug
+  val hasPerfLog = hasPerf || hasLog
+  val timer = if (hasPerfLog) GTimer() else WireDefault(0.U(64.W))
+  val logEnable = if (hasPerfLog) WireDefault(difftest.logCtrl.enable(timer)) else WireDefault(false.B)
+  val clean = if (hasPerf) WireDefault(difftest.perfCtrl.clean) else WireDefault(false.B)
+  val dump = if (hasPerf) WireDefault(difftest.perfCtrl.dump) else WireDefault(false.B)
 
   dontTouch(timer)
   dontTouch(logEnable)
   dontTouch(clean)
   dontTouch(dump)
-
-  DifftestModule.finish("XiangShan")
 }
 
 object SimTop extends App {

@@ -38,7 +38,7 @@ NUM_CORES ?= 1
 MFC ?= 0
 
 # firtool check and download
-FIRTOOL_VERSION = 1.57.1
+FIRTOOL_VERSION = 1.61.0
 FIRTOOL_URL = https://github.com/llvm/circt/releases/download/firtool-$(FIRTOOL_VERSION)/firrtl-bin-linux-x64.tar.gz
 FIRTOOL_PATH = $(shell which firtool 2>/dev/null)
 CACHE_FIRTOOL_PATH = $(HOME)/.cache/xiangshan/firtool-$(FIRTOOL_VERSION)/bin/firtool
@@ -62,6 +62,7 @@ MFC_ARGS = --dump-fir $(FIRTOOL_ARGS) \
            --firtool-opt "-O=release --disable-annotation-unknown --lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing"
 RELEASE_ARGS += $(MFC_ARGS)
 DEBUG_ARGS += $(MFC_ARGS)
+PLDM_ARGS += $(MFC_ARGS)
 else
 CHISEL_VERSION = chisel3
 FPGA_MEM_ARGS = --infer-rw --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf --gen-mem-verilog full
@@ -96,8 +97,11 @@ endif
 # emu for the release version
 RELEASE_ARGS += --disable-all --remove-assert --fpga-platform
 DEBUG_ARGS   += --enable-difftest
+PLDM_ARGS += --disable-all --fpga-platform
 ifeq ($(RELEASE),1)
 override SIM_ARGS += $(RELEASE_ARGS)
+else ifeq ($(PLDM),1)
+override SIM_ARGS += $(PLDM_ARGS)
 else
 override SIM_ARGS += $(DEBUG_ARGS)
 endif
@@ -151,7 +155,12 @@ endif
 	@cat .__head__ .__diff__ $@ > .__out__
 	@mv .__out__ $@
 	@rm .__head__ .__diff__
+ifeq ($(PLDM),1)
+	sed -i -e 's/$$fatal/$$finish/g' $(SIM_TOP_V)
+	sed -i -e 's|`ifndef SYNTHESIS	// src/main/scala/device/RocketDebugWrapper.scala:141:11|`ifdef SYNTHESIS	// src/main/scala/device/RocketDebugWrapper.scala:141:11|g' $(SIM_TOP_V)
+else
 	sed -i -e 's/$$fatal/xs_assert(`__LINE__)/g' $(SIM_TOP_V)
+endif
 ifeq ($(MFC),1)
 	sed -i -e "s/\$$error(/\$$fwrite(32\'h80000002, /g" $(SIM_TOP_V)
 endif

@@ -221,7 +221,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
 
   switch(pendingstate){
     is(s_idle){
-      when(io.uncache.req.fire && !io.uncacheOutstanding){
+      when(io.uncache.req.fire){
         pendingstate := Mux(loadQueue.io.uncache.req.valid, s_load,
                           Mux(io.uncacheOutstanding, s_idle, s_store))
       }
