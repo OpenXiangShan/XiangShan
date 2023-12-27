@@ -64,10 +64,24 @@ object EntryBundles extends HasCircularQueuePtrHelper {
 
   class EntryDeqRespBundle(implicit p: Parameters) extends Bundle {
     val robIdx                = new RobPtr
-    val respType              = RSFeedbackType() // update credit if needs replay
-    val dataInvalidSqIdx      = new SqPtr
-    val rfWen                 = Bool()
+    val resp                  = RespType()
     val fuType                = FuType()
+  }
+
+  object RespType {
+    def apply() = UInt(2.W)
+
+    def isBlocked(resp: UInt) = {
+      resp === block
+    }
+
+    def succeed(resp: UInt) = {
+      resp === success
+    }
+
+    val block = "b00".U
+    val uncertain = "b01".U
+    val success = "b11".U
   }
 
   class EntryBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
@@ -139,7 +153,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
   def CommonWireConnect(common: CommonWireBundle, hasIQWakeup: Option[CommonIQWakeupBundle], validReg: Bool, status: Status, commonIn: CommonInBundle, isEnq: Boolean)(implicit p: Parameters, params: IssueBlockParams) = {
     val hasIQWakeupGet        = hasIQWakeup.getOrElse(0.U.asTypeOf(new CommonIQWakeupBundle))
     common.flushed            := status.robIdx.needFlush(commonIn.flush)
-    common.deqSuccess         := commonIn.issueResp.valid && commonIn.issueResp.bits.respType === RSFeedbackType.fuIdle && !common.srcLoadCancelVec.asUInt.orR
+    common.deqSuccess         := commonIn.issueResp.valid && RespType.succeed(commonIn.issueResp.bits.resp) && !common.srcLoadCancelVec.asUInt.orR
     common.srcWakeup          := common.srcWakeupByWB.zip(hasIQWakeupGet.srcWakeupByIQ).map { case (x, y) => x || y.asUInt.orR }
     common.srcWakeupByWB      := commonIn.wakeUpFromWB.map(bundle => bundle.bits.wakeUp(status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType), bundle.valid)).transpose.map(x => VecInit(x.toSeq).asUInt.orR).toSeq
     common.canIssue           := validReg && status.canIssue
@@ -239,7 +253,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val hasIQWakeupGet                                 = hasIQWakeup.getOrElse(0.U.asTypeOf(new CommonIQWakeupBundle))
     val cancelByLd                                     = common.srcCancelVec.asUInt.orR
     val cancelWhenWakeup                               = VecInit(hasIQWakeupGet.srcWakeupByIQButCancel.map(_.asUInt.orR)).asUInt.orR
-    val respIssueFail                                  = commonIn.issueResp.valid && RSFeedbackType.isBlocked(commonIn.issueResp.bits.respType)
+    val respIssueFail                                  = commonIn.issueResp.valid && RespType.isBlocked(commonIn.issueResp.bits.resp)
     val srcWakeupExuOH                                 = if(isEnq) status.srcStatus.map(_.srcWakeUpL1ExuOH.getOrElse(0.U.asTypeOf(ExuVec()))) else hasIQWakeupGet.regSrcWakeupL1ExuOH
     entryUpdate.status.robIdx                         := status.robIdx
     entryUpdate.status.fuType                         := IQFuType.readFuType(status.fuType, params.getFuCfgs.map(_.fuType))
@@ -357,7 +371,6 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     // load cannot be issued before older store, unless meet some condition
     val blockedByOlderStore                            = isAfter(memStatusNext.sqIdx, fromMem.stIssuePtr)
 
-    val deqFailedForStdInvalid                         = commonIn.issueResp.valid && commonIn.issueResp.bits.respType === RSFeedbackType.dataInvalid
 
     val staWaitedReleased = Cat(
       fromMem.memWaitUpdateReq.robIdx.map(x => x.valid && x.bits.value === memStatusNext.waitForRobIdx.value)
@@ -371,15 +384,10 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val waitSta                                        = !olderStaNotViolate
 
     memStatusUpdate                                   := memStatus
-    when(deqFailedForStdInvalid) {
-      memStatusUpdate.waitForSqIdx                    := commonIn.issueResp.bits.dataInvalidSqIdx
-      memStatusUpdate.waitForStd                      := true.B
-    }
 
     val shouldBlock                                    = Mux(enqValid, commonIn.enq.bits.status.blocked, entryReg.status.blocked)
     val blockNotReleased                               = waitStd || waitSta
-    val respBlock                                      = deqFailedForStdInvalid
-    entryUpdate.status.blocked                        := shouldBlock && blockNotReleased && blockedByOlderStore || respBlock
+    entryUpdate.status.blocked                        := shouldBlock && blockNotReleased && blockedByOlderStore
     entryRegNext.status.blocked                       := entryUpdate.status.blocked
   }
 

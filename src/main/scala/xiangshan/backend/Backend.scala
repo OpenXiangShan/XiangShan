@@ -388,10 +388,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
 
       if (memScheduler.io.loadFinalIssueResp(i).nonEmpty) {
         memScheduler.io.loadFinalIssueResp(i)(j).valid := issueTimeout
-        memScheduler.io.loadFinalIssueResp(i)(j).bits.dataInvalidSqIdx := DontCare
         memScheduler.io.loadFinalIssueResp(i)(j).bits.fuType := toMem(i)(j).bits.fuType
-        memScheduler.io.loadFinalIssueResp(i)(j).bits.respType := RSFeedbackType.fuBusy
-        memScheduler.io.loadFinalIssueResp(i)(j).bits.rfWen := toMem(i)(j).bits.rfWen.getOrElse(false.B)
+        memScheduler.io.loadFinalIssueResp(i)(j).bits.resp := RespType.block
         memScheduler.io.loadFinalIssueResp(i)(j).bits.robIdx := toMem(i)(j).bits.robIdx
       }
 
