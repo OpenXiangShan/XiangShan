@@ -188,8 +188,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
 
   val dataSources: Vec[Vec[DataSource]] = entries.io.dataSources
   val finalDataSources: Vec[Vec[DataSource]] = VecInit(finalDeqSelOHVec.map(oh => Mux1H(oh, dataSources)))
-  val loadDependency: Option[Vec[Vec[UInt]]] = entries.io.loadDependency
-  val finalLoadDependency: Option[IndexedSeq[Vec[UInt]]] = loadDependency.map(x => finalDeqSelOHVec.map(oh => Mux1H(oh, x)))
+  val loadDependency: Vec[Vec[UInt]] = entries.io.loadDependency
+  val finalLoadDependency: IndexedSeq[Vec[UInt]] = VecInit(finalDeqSelOHVec.map(oh => Mux1H(oh, loadDependency)))
   // (entryIdx)(srcIdx)(exuIdx)
   val wakeUpL1ExuOH: Option[Vec[Vec[UInt]]] = entries.io.srcWakeUpL1ExuOH
   val srcTimer: Option[Vec[Vec[UInt]]] = entries.io.srcTimer
@@ -238,10 +238,10 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         enq.bits.status.srcStatus(j).srcType                    := s0_enqBits(enqIdx).srcType(j)
         enq.bits.status.srcStatus(j).srcState                   := s0_enqBits(enqIdx).srcState(j) & !LoadShouldCancel(Some(s0_enqBits(enqIdx).srcLoadDependency(j)), io.ldCancel)
         enq.bits.status.srcStatus(j).dataSources.value          := DataSource.reg
+        enq.bits.status.srcStatus(j).srcLoadDependency          := VecInit(s0_enqBits(enqIdx).srcLoadDependency(j).map(x => x(x.getWidth - 2, 0) << 1))
         if(params.hasIQWakeUp) {
           enq.bits.status.srcStatus(j).srcTimer.get             := 0.U(3.W)
           enq.bits.status.srcStatus(j).srcWakeUpL1ExuOH.get     := 0.U.asTypeOf(ExuVec())
-          enq.bits.status.srcStatus(j).srcLoadDependency.get    := VecInit(s0_enqBits(enqIdx).srcLoadDependency(j).map(x => x(x.getWidth - 2, 0) << 1))
         }
       }
       enq.bits.status.blocked                                   := false.B
@@ -597,7 +597,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     deq.bits.common.dataSources.zip(finalDataSources(i)).foreach { case (sink, source) => sink := source}
     deq.bits.common.l1ExuOH.foreach(_ := finalWakeUpL1ExuOH.get(i))
     deq.bits.common.srcTimer.foreach(_ := finalSrcTimer.get(i))
-    deq.bits.common.loadDependency.foreach(_ := finalLoadDependency.get(i))
+    deq.bits.common.loadDependency.foreach(_ := finalLoadDependency(i))
     deq.bits.common.src := DontCare
     deq.bits.common.preDecode.foreach(_ := deqEntryVec(i).bits.payload.preDecodeInfo)
 
