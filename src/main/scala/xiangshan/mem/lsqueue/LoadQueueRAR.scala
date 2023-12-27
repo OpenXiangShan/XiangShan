@@ -98,9 +98,8 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   // There are still not completed load instructions before the current load instruction.
   // (e.g. "not completed" means that load instruction get the data or exception).
   val canEnqueue = io.query.map(_.req.valid)
-  val cancelEnqueue = io.query.map(_.req.bits.uop.robIdx.needFlush(io.redirect))
-  val hasNotWritebackedLoad = io.query.map(_.req.bits.uop.lqIdx).map(lqIdx => isAfter(lqIdx, io.ldWbPtr))
-  val needEnqueue = canEnqueue.zip(hasNotWritebackedLoad).zip(cancelEnqueue).map { case ((v, r), c) => v && r && !c }
+  val hasNotWritebackedLoad = io.query.map(_.pre_req).map(x => RegNext(x.valid && isAfter(x.bits.uop.lqIdx, io.ldWbPtr)))
+  val needEnqueue = canEnqueue.zip(hasNotWritebackedLoad).map { case (v, r) => v && r }
 
   // Allocate logic
   val acceptedVec = Wire(Vec(LoadPipelineWidth, Bool()))
@@ -159,7 +158,8 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   // current load will be released.
   for (i <- 0 until LoadQueueRARSize) {
     val deqNotBlock = !isBefore(io.ldWbPtr, uop(i).lqIdx)
-    val needFlush = uop(i).robIdx.needFlush(io.redirect)
+    val needFlush = uop(i).robIdx.needFlush(io.redirect) ||
+                    uop(i).robIdx.needFlush(RegNext(io.redirect))
 
     when (allocated(i) && (deqNotBlock || needFlush)) {
       allocated(i) := false.B
