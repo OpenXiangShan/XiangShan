@@ -1075,6 +1075,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   s2_vec_feedback.bits.paddr := s2_paddr
   s2_vec_feedback.bits.mmio := s2_st_mmio
   s2_vec_feedback.bits.atomic := s2_st_mmio
+  s2_vec_feedback.bits.exceptionVec := s2_exception_vec
 
   io.stu_io.lsq_replenish := s2_out
   io.stu_io.lsq_replenish.miss := io.ldu_io.dcache.resp.fire && io.ldu_io.dcache.resp.bits.miss

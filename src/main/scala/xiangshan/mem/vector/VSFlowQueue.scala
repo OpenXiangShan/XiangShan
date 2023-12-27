@@ -106,6 +106,7 @@ class VSFQFeedback (implicit p: Parameters) extends XSBundle {
   val paddr = UInt(PAddrBits.W)
   val mmio = Bool()
   val atomic = Bool()
+  val exceptionVec = ExceptionVec()
 }
 
 class VecStorePipeBundle(implicit p: Parameters) extends MemExuInput(isVector = true) {
@@ -354,6 +355,7 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
       when (feedbackHit(i)) {
         flowFinished(feedbackPtr(i).value) := true.B
         flowQueueEntries(feedbackPtr(i).value).paddr := io.pipeFeedback(i).bits.paddr
+        flowQueueEntries(feedbackPtr(i).value).uop.exceptionVec := io.pipeFeedback(i).bits.exceptionVec
         // ? any other need to save?
       } .otherwise {
         feedbackNeedReplay(i) := true.B
