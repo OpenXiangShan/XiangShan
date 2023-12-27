@@ -280,7 +280,9 @@ class ITTageTable
   // only when ctr is null
   update_wdata.target := Mux(io.update.alloc || ctr_null(old_ctr), update_target, io.update.old_target)
 
-  when (io.update.valid) { validArray := UIntToOH(update_idx) | validArray }
+  when (io.update.valid) {
+    validArray := UIntToOH(update_idx) | validArray
+  }
 
   // reset all us in 32 cycles
   us.io.resetEn.map(_ := io.update.reset_u)
