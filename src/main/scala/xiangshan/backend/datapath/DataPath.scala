@@ -15,6 +15,7 @@ import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.issue.{ImmExtractor, IntScheduler, MemScheduler, VfScheduler}
+import xiangshan.backend.issue.EntryBundles._
 import xiangshan.backend.regfile._
 import xiangshan.backend.PcToDataPathIO
 
@@ -351,31 +352,25 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
           // IU: issue unit
           val og0resp = toIU.og0resp
           og0FailedVec2(iqIdx)(iuIdx) := fromIQ(iqIdx)(iuIdx).valid && (!fromIQFire(iqIdx)(iuIdx))
-          og0resp.valid := og0FailedVec2(iqIdx)(iuIdx)
-          og0resp.bits.respType := RSFeedbackType.rfArbitFail
-          og0resp.bits.dataInvalidSqIdx := DontCare
-          og0resp.bits.robIdx := fromIQ(iqIdx)(iuIdx).bits.common.robIdx
+          og0resp.valid                 := og0FailedVec2(iqIdx)(iuIdx)
+          og0resp.bits.robIdx           := fromIQ(iqIdx)(iuIdx).bits.common.robIdx
           og0resp.bits.uopIdx.foreach(_ := fromIQ(iqIdx)(iuIdx).bits.common.vpu.get.vuopIdx)
-          og0resp.bits.rfWen := fromIQ(iqIdx)(iuIdx).bits.common.rfWen.getOrElse(false.B)
-          og0resp.bits.fuType := fromIQ(iqIdx)(iuIdx).bits.common.fuType
+          og0resp.bits.resp             := RespType.block
+          og0resp.bits.fuType           := fromIQ(iqIdx)(iuIdx).bits.common.fuType
 
           val og1resp = toIU.og1resp
-          og1FailedVec2(iqIdx)(iuIdx) := s1_toExuValid(iqIdx)(iuIdx) && !toExuFire(iqIdx)(iuIdx)
-          og1resp.valid := s1_toExuValid(iqIdx)(iuIdx)
+          og1FailedVec2(iqIdx)(iuIdx)   := s1_toExuValid(iqIdx)(iuIdx) && !toExuFire(iqIdx)(iuIdx)
+          og1resp.valid                 := s1_toExuValid(iqIdx)(iuIdx)
+          og1resp.bits.robIdx           := s1_toExuData(iqIdx)(iuIdx).robIdx
           // respType:  fuIdle      ->IQ entry clear
           //            fuUncertain ->IQ entry no action
           //            fuBusy      ->IQ entry issued set false, then re-issue
           // Only hyu, lda and sta are fuUncertain at OG1 stage
-          og1resp.bits.respType := Mux(
-            !og1FailedVec2(iqIdx)(iuIdx),
-            if (toIU.issueQueueParams match { case x => x.isHyAddrIQ || x.isLdAddrIQ || x.isStAddrIQ } ) RSFeedbackType.fuUncertain else RSFeedbackType.fuIdle,
-            RSFeedbackType.fuBusy
+          og1resp.bits.resp             := Mux(!og1FailedVec2(iqIdx)(iuIdx),
+            if (toIU.issueQueueParams.isMemAddrIQ) RespType.uncertain else RespType.success,
+            RespType.block
           )
-          og1resp.bits.dataInvalidSqIdx := DontCare
-          og1resp.bits.robIdx := s1_toExuData(iqIdx)(iuIdx).robIdx
-          og1resp.bits.uopIdx.foreach(_ := s1_toExuData(iqIdx)(iuIdx).vpu.get.vuopIdx)
-          og1resp.bits.rfWen := s1_toExuData(iqIdx)(iuIdx).rfWen.getOrElse(false.B)
-          og1resp.bits.fuType := s1_toExuData(iqIdx)(iuIdx).fuType
+          og1resp.bits.fuType           := s1_toExuData(iqIdx)(iuIdx).fuType
       }
   }
 
