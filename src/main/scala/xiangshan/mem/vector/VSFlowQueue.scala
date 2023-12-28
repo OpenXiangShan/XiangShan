@@ -25,6 +25,7 @@ import xiangshan._
 import xiangshan.cache._
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.backend.Bundles._
+import xiangshan.backend.fu.FuConfig._
 
 class VsFlowPtr (implicit p: Parameters) extends CircularQueuePtr[VsFlowPtr](
   p => p(XSCoreParamsKey).VsFlowL1Size
@@ -198,6 +199,86 @@ class VsFlowQueueIOBundle(implicit p: Parameters) extends VLSUBundle {
   // MMIO flows execution path
   val uncacheOutstanding = Input(Bool())
   val uncache = new UncacheWordIO
+
+  // update tval when exception happens
+  // val exceptionAddrValid = Output(Bool())
+  val exceptionAddr = new ExceptionAddrIO
+}
+
+class VsExceptionBuffer(implicit p: Parameters) extends VLSUModule with HasCircularQueuePtrHelper {
+  val io = IO(new Bundle() {
+    val redirect = Flipped(ValidIO(new Redirect))
+    val flowWriteback = Vec(VecStorePipelineWidth, Flipped(ValidIO(new VecStoreExuOutput())))
+    val exceptionAddr = new ExceptionAddrIO
+  })
+
+  val req_valid = RegInit(false.B)
+  val req = Reg(new VecStoreExuOutput())
+
+  // enqueue
+  // S1:
+  val s1_req = VecInit(io.flowWriteback.map(_.bits))
+  val s1_valid = VecInit(io.flowWriteback.map(_.valid))
+  
+  // S2: delay 1 cycle
+  val s2_req = RegNext(s1_req)
+  val s2_valid = (0 until VecStorePipelineWidth).map(i =>
+    RegNext(s1_valid(i)) &&
+    !s2_req(i).uop.robIdx.needFlush(RegNext(io.redirect)) && 
+    !s2_req(i).uop.robIdx.needFlush(io.redirect)
+  )
+  val s2_has_exception = s2_req.map(x => ExceptionNO.selectByFu(x.uop.exceptionVec, VstuCfg).asUInt.orR)
+
+  val s2_enqueue = Wire(Vec(VecStorePipelineWidth, Bool()))
+  for (w <- 0 until VecStorePipelineWidth) {
+    s2_enqueue(w) := s2_valid(w) && s2_has_exception(w)
+  }
+
+  when (req_valid && req.uop.robIdx.needFlush(io.redirect)) {
+    req_valid := s2_enqueue.asUInt.orR
+  }.elsewhen (s2_enqueue.asUInt.orR) {
+    req_valid := req_valid || true.B
+  }
+
+  def selectOldest[T <: VecStoreExuOutput](valid: Seq[Bool], bits: Seq[T]): (Seq[Bool], Seq[T]) = {
+    assert(valid.length == bits.length)
+    if (valid.length == 0 || valid.length == 1) {
+      (valid, bits)
+    } else if (valid.length == 2) {
+      val res = Seq.fill(2)(Wire(Valid(chiselTypeOf(bits(0)))))
+      for (i <- res.indices) {
+        res(i).valid := valid(i)
+        res(i).bits := bits(i)
+      }
+      val oldest = Mux(
+        valid(0) && valid(1),
+        Mux(
+          Cat(bits(0).segmentIdx, bits(0).fieldIdx) < Cat(bits(1).segmentIdx, bits(1).fieldIdx),
+          res(0), res(1)
+        ),
+        Mux(valid(0), res(0), res(1))
+      )
+      (Seq(oldest.valid), Seq(oldest.bits))
+    } else {
+      val left = selectOldest(valid.take(valid.length / 2), bits.take(bits.length / 2))
+      val right = selectOldest(valid.takeRight(valid.length - (valid.length / 2)), bits.takeRight(bits.length - (bits.length / 2)))
+      selectOldest(left._1 ++ right._1, left._2 ++ right._2)
+    }
+  }
+
+  val reqSel = selectOldest(s2_enqueue, s2_req)
+
+  when (req_valid) {
+    req := Mux(
+      reqSel._1(0) && Cat(reqSel._2(0).segmentIdx, reqSel._2(0).fieldIdx) < Cat(req.segmentIdx, req.fieldIdx),
+      reqSel._2(0), req
+    )
+  }.elsewhen (s2_enqueue.asUInt.orR) {
+    req := reqSel._2(0)
+  }
+
+  io.exceptionAddr.vaddr := req.vaddr
+
 }
 
 class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQueuePtrHelper
@@ -219,6 +300,9 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
   // 2-level queue for data
   val dataFirstQueue = Reg(Vec(VsFlowL1Size, new VecStoreFlowDataFirst))
   val dataSecondQueue = Reg(Vec(VsFlowL2Size, UInt(64.W)))
+
+  /* Exception Buffer to save exception vaddr */
+  val exceptionBuffer = Module(new VsExceptionBuffer)
 
   /* Queue Pointers */
 
@@ -445,6 +529,9 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
       // From VecStoreExuOutput
       x.elemIdx := thisEntry.elemIdx
       x.uopQueuePtr   := thisEntry.uopQueuePtr
+      x.segmentIdx := thisEntry.segmentIdx
+      x.fieldIdx := thisEntry.fieldIdx
+      x.vaddr := thisEntry.vaddr
     }
   }
 
@@ -689,4 +776,13 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
     thisForward.matchInvalid := RegNext(matchInvalid)
     thisForward.addrInvalid := RegNext(addrInvalid)
   }
+
+  // Exception Buffer
+  exceptionBuffer.io.redirect := io.redirect
+  exceptionBuffer.io.flowWriteback.zipWithIndex.foreach { case (wb, i) =>
+    wb.valid := io.flowWriteback(i).fire
+    wb.bits := io.flowWriteback(i).bits
+  }
+  // io.exceptionAddrValid := (flowAllocated.asUInt & ~flowCommitted.asUInt).orR // vec store is the head of rob
+  io.exceptionAddr <> exceptionBuffer.io.exceptionAddr
 }

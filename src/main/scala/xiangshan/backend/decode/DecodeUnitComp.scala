@@ -182,6 +182,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
     dst.numWB := latchedUopInfo.numOfWB
     dst.firstUop := false.B
     dst.lastUop := false.B
+    dst.vlsInstr := false.B
   }
 
   csBundle(0).firstUop := true.B
@@ -1493,6 +1494,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).fpu.div := false.B
       csBundle(0).fpu.sqrt := false.B
       csBundle(0).fpu.fcvt := false.B
+      csBundle(0).vlsInstr := true.B
       //LMUL
       for (i <- 0 until MAX_VLMUL) {
         csBundle(i + 1).srcType(0) := SrcType.fp
@@ -1500,6 +1502,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(i + 1).lsrc(2) := dest + i.U // old vd
         csBundle(i + 1).ldest := dest + i.U
         csBundle(i + 1).uopIdx := i.U
+        csBundle(i + 1).vlsInstr := true.B
       }
     }
     is(UopSplitType.VEC_S_LDST) {
@@ -1523,6 +1526,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).fpu.div := false.B
       csBundle(0).fpu.sqrt := false.B
       csBundle(0).fpu.fcvt := false.B
+      csBundle(0).vlsInstr := true.B
 
       csBundle(1).srcType(0) := SrcType.reg
       csBundle(1).srcType(1) := SrcType.imm
@@ -1542,6 +1546,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(1).fpu.div := false.B
       csBundle(1).fpu.sqrt := false.B
       csBundle(1).fpu.fcvt := false.B
+      csBundle(1).vlsInstr := true.B
 
       //LMUL
       for (i <- 0 until MAX_VLMUL) {
@@ -1552,6 +1557,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(i + 2).lsrc(2) := dest + i.U // old vd
         csBundle(i + 2).ldest := dest + i.U
         csBundle(i + 2).uopIdx := i.U
+        csBundle(i + 2).vlsInstr := true.B
       }
     }
     is(UopSplitType.VEC_I_LDST) {
@@ -1589,6 +1595,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).fpu.div := false.B
       csBundle(0).fpu.sqrt := false.B
       csBundle(0).fpu.fcvt := false.B
+      csBundle(0).vlsInstr := true.B
 
       //LMUL
       for (i <- 0 until MAX_INDEXED_LS_UOPNUM) {
@@ -1616,6 +1623,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         )
         csBundle(i + 1).ldest := Mux1H(UIntToOH(offsetVd, MAX_VLMUL), (0 until MAX_VLMUL).map(j => dest + j.U))
         csBundle(i + 1).uopIdx := i.U
+        csBundle(i + 1).vlsInstr := true.B
       }
     }
   }

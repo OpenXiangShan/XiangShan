@@ -206,6 +206,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.ooo_to_mem.lsqio.pendingPtr     := backend.io.mem.robLsqIO.pendingPtr
   memBlock.io.ooo_to_mem.lsqio.pendingPtrNext := backend.io.mem.robLsqIO.pendingPtrNext
   memBlock.io.ooo_to_mem.isStore              := backend.io.mem.isStoreException
+  memBlock.io.ooo_to_mem.isVls                := backend.io.mem.isVlsException
 
   memBlock.io.fetch_to_mem.itlb <> frontend.io.ptw
   memBlock.io.l2_hint.valid := io.l2_hint.valid
