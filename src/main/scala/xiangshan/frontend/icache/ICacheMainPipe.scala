@@ -158,10 +158,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   val missSwitchBit = RegInit(false.B)
 
-  /** replacement status register */
-  val touch_sets = Seq.fill(2)(Wire(Vec(2, UInt(log2Ceil(nSets/2).W))))
-  val touch_ways = Seq.fill(2)(Wire(Vec(2, Valid(UInt(log2Ceil(nWays).W)))) )
-
   /**
     ******************************************************************************
     * ICache Stage 0
@@ -322,22 +318,17 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_hit               = (s1_port_hit(0) && s1_port_hit(1)) || (!s1_double_line && s1_port_hit(0))
 
   /** choose victim cacheline */
+  val bank_vsetIdx    = VecInit((0 until PortNumber).map( i => Mux(s1_req_vsetIdx(i)(0), s1_req_vsetIdx(1)(highestIdxBit, 1), s1_req_vsetIdx(0)(highestIdxBit, 1))))
   val replacers       = Seq.fill(PortNumber)(ReplacementPolicy.fromString(cacheParams.replacer,nWays,nSets/PortNumber))
-  val s1_victim_oh    = ResultHoldBypass(data = VecInit(replacers.zipWithIndex.map{case (replacer, i) => UIntToOH(replacer.way(s1_req_vsetIdx(i)(highestIdxBit, 1)))}), valid = RegNext(s0_fire))
+  val bank_victim_oh  = ResultHoldBypass(data = VecInit(replacers.zipWithIndex.map{case (replacer, i) => UIntToOH(replacer.way(bank_vsetIdx(i)))}), valid = RegNext(s0_fire))
+  val s1_victim_oh    = VecInit((0 until PortNumber).map( i => Mux(s1_req_vsetIdx(i)(0), bank_victim_oh(1), bank_victim_oh(0))))
 
-
-  // when(s1_fire){
-  //   // when (!(PopCount(s1_tag_match_vec(0)) <= 1.U && (PopCount(s1_tag_match_vec(1)) <= 1.U || !s1_double_line))) {
-  //   //   printf("Multiple hit in main pipe\n")
-  //   // }
-  //   assert(PopCount(s1_tag_match_vec(0)) <= 1.U && (PopCount(s1_tag_match_vec(1)) <= 1.U || !s1_double_line),
-  //     "Multiple hit in main pipe, port0:is=%d,ptag=0x%x,vidx=0x%x,vaddr=0x%x port1:is=%d,ptag=0x%x,vidx=0x%x,vaddr=0x%x ",
-  //     PopCount(s1_tag_match_vec(0)) > 1.U,s1_req_ptags(0), get_idx(s1_req_vaddr(0)), s1_req_vaddr(0),
-  //     PopCount(s1_tag_match_vec(1)) > 1.U && s1_double_line, s1_req_ptags(1), get_idx(s1_req_vaddr(1)), s1_req_vaddr(1))
-  // }
-
-  ((replacers zip touch_sets) zip touch_ways).map{case ((r, s),w) => r.access(s,w)}
-  IPFReplacer.waymask := UIntToOH(replacers(0).way(IPFReplacer.vsetIdx))
+  when(s1_fire){
+    assert(PopCount(s1_tag_match_vec(0)) <= 1.U && (PopCount(s1_tag_match_vec(1)) <= 1.U || !s1_double_line),
+      "Multiple hit in main pipe, port0:is=%d,ptag=0x%x,vidx=0x%x,vaddr=0x%x port1:is=%d,ptag=0x%x,vidx=0x%x,vaddr=0x%x ",
+      PopCount(s1_tag_match_vec(0)) > 1.U,s1_req_ptags(0), get_idx(s1_req_vaddr(0)), s1_req_vaddr(0),
+      PopCount(s1_tag_match_vec(1)) > 1.U && s1_double_line, s1_req_ptags(1), get_idx(s1_req_vaddr(1)), s1_req_vaddr(1))
+  }
 
   /** check ipf, get result at the same cycle */
   (0 until PortNumber).foreach { i =>
@@ -773,8 +764,12 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   s2_fetch_finish        := ((s2_valid && s2_fixed_hit) || miss_all_fix || hit_0_except_1_latch || except_0_latch)
 
   /** update replacement status register: 0 is hit access/ 1 is miss access */
-  (touch_ways zip touch_sets).zipWithIndex.map{ case((t_w,t_s), i) =>
+  val port_touch_sets = Seq.fill(PortNumber)(Wire(Vec(2, UInt(log2Ceil(nSets/2).W))))
+  val port_touch_ways = Seq.fill(PortNumber)(Wire(Vec(2, Valid(UInt(log2Ceil(nWays).W)))))
+  (port_touch_ways zip port_touch_sets).zipWithIndex.map{ case((t_w,t_s), i) =>
+    /** update replacement status register: 0 is hit access/ 1 is miss access */
     t_s(0)         := s2_req_vsetIdx(i)(highestIdxBit, 1)
+    // hit in slot will be ignored, which generate a repeated access
     t_w(0).valid   := s2_valid && s2_port_hit(i)
     t_w(0).bits    := OHToUInt(s2_tag_match_vec(i))
 
@@ -782,6 +777,12 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     t_w(1).valid   := s2_valid && !s2_port_hit(i)
     t_w(1).bits    := OHToUInt(s2_waymask(i))
   }
+
+  val touch_ways = VecInit((0 until PortNumber).map( i => Mux(s2_req_vsetIdx(i)(0), port_touch_ways(1), port_touch_ways(0))))
+  val touch_sets = VecInit((0 until PortNumber).map( i => Mux(s2_req_vsetIdx(i)(0), port_touch_sets(1), port_touch_sets(0))))
+  ((replacers zip touch_sets) zip touch_ways).map{case ((r, s),w) => r.access(s,w)}
+  // TODO: need choose one replacer according to the bankid if prefetch to L1
+  IPFReplacer.waymask := UIntToOH(replacers(0).way(IPFReplacer.vsetIdx))
 
   //** use hit one-hot select data
   val s2_hit_datas    = VecInit(s2_data_cacheline.zipWithIndex.map { case(bank, i) =>
