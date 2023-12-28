@@ -478,6 +478,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   io.mem.csrCtrl := csrio.customCtrl
   io.mem.sfence := fenceio.sfence
   io.mem.isStoreException := CommitType.lsInstIsStore(ctrlBlock.io.robio.exception.bits.commitType)
+  io.mem.isVlsException := ctrlBlock.io.robio.exception.bits.vls
   require(io.mem.loadPcRead.size == params.LduCnt)
   io.mem.loadPcRead.zipWithIndex.foreach { case (loadPcRead, i) =>
     loadPcRead := ctrlBlock.io.memLdPcRead(i).data
@@ -598,6 +599,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val csrCtrl = Output(new CustomCSRCtrlIO)
   val sfence = Output(new SfenceBundle)
   val isStoreException = Output(Bool())
+  val isVlsException = Output(Bool())
 
   // ATTENTION: The issue ports' sequence order should be the same as IQs' deq config
   private [backend] def issueUops: Seq[DecoupledIO[MemExuInput]] = {

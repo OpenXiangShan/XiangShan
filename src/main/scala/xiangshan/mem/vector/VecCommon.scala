@@ -156,6 +156,9 @@ class VecExuOutput(implicit p: Parameters) extends MemExuOutput with HasVLSUPara
 class VecStoreExuOutput(implicit p: Parameters) extends MemExuOutput with HasVLSUParameters {
   val elemIdx = UInt(elemIdxBits.W)
   val uopQueuePtr = new VsUopPtr
+  val fieldIdx = UInt(fieldBits.W)
+  val segmentIdx = UInt(elemIdxBits.W)
+  val vaddr = UInt(VAddrBits.W)
 }
 
 class VecUopBundle(implicit p: Parameters) extends VLSUBundleWithMicroOp {

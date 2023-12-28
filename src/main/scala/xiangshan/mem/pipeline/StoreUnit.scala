@@ -257,6 +257,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   s1_vec_feedback.bits.paddr            := s1_paddr
   s1_vec_feedback.bits.mmio             := s1_mmio
   s1_vec_feedback.bits.atomic           := s1_mmio
+  s1_vec_feedback.bits.exceptionVec     := s1_out.uop.exceptionVec
   XSDebug(s1_vec_feedback.valid,
     "Vector S1 Store: tlbHit: %d flowPtr: %d\n",
     s1_vec_feedback.bits.hit,

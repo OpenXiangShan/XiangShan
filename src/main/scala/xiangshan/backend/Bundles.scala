@@ -82,6 +82,7 @@ object Bundles {
     val imm             = UInt(ImmUnion.maxLen.W)
     val fpu             = new FPUCtrlSignals
     val vpu             = new VPUCtrlSignals
+    val vlsInstr        = Bool()
     val wfflags         = Bool()
     val isMove          = Bool()
     val uopIdx          = UopIdx()
@@ -150,6 +151,7 @@ object Bundles {
     val imm             = UInt(XLEN.W) // Todo: check if it need minimized
     val fpu             = new FPUCtrlSignals
     val vpu             = new VPUCtrlSignals
+    val vlsInstr        = Bool()
     val wfflags         = Bool()
     val isMove          = Bool()
     val uopIdx          = UopIdx()
@@ -638,6 +640,7 @@ object Bundles {
     val singleStep = Bool()
     val crossPageIPFFix = Bool()
     val isInterrupt = Bool()
+    val vls = Bool()
     val trigger  = new TriggerCf
   }
 
