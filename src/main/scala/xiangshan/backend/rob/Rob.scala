@@ -406,6 +406,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val realDestSize       = RegInit(VecInit(Seq.fill(RobSize)(0.U(log2Up(MaxUopSize + 1).W))))
   val fflagsDataModule   = RegInit(VecInit(Seq.fill(RobSize)(0.U(5.W))))
   val vxsatDataModule    = RegInit(VecInit(Seq.fill(RobSize)(false.B)))
+  val vls                = RegInit(VecInit(Seq.fill(RobSize)(false.B)))
 
   def isWritebacked(ptr: UInt): Bool = {
     !uopNumVec(ptr).orR && stdWritebacked(ptr)
@@ -619,6 +620,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       }
 
       mmio(enqIndex) := false.B
+
+      vls(enqIndex) := enqUop.vlsInstr
     }
   }
   val dispatchNum = Mux(io.enq.canAccept, PopCount(io.enq.req.map(req => req.valid && req.bits.firstUop)), 0.U)
@@ -773,6 +776,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.exception.bits.singleStep      := RegEnable(exceptionDataRead.bits.singleStep, exceptionHappen)
   io.exception.bits.crossPageIPFFix := RegEnable(exceptionDataRead.bits.crossPageIPFFix, exceptionHappen)
   io.exception.bits.isInterrupt     := RegEnable(intrEnable, exceptionHappen)
+  io.exception.bits.vls             := RegEnable(vls(deqPtr.value), exceptionHappen)
   io.exception.bits.trigger         := RegEnable(exceptionDataRead.bits.trigger, exceptionHappen)
   io.csr.vstart.valid               := RegEnable(exceptionDataRead.bits.vstartEn, false.B, exceptionHappen)
   io.csr.vstart.bits                := RegEnable(exceptionDataRead.bits.vstart, exceptionHappen)

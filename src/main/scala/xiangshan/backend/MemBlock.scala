@@ -81,7 +81,8 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
    val pendingPtrNext = Input(new RobPtr)
   }
 
-  val isStore = Input(Bool())
+  val isStoreException = Input(Bool())
+  val isVlsException = Input(Bool())
   val csrCtrl = Flipped(new CustomCSRCtrlIO)
   val enqLsq = new LsqEnqIO
   val flushSb = Input(Bool())
@@ -1313,7 +1314,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     }
   }
 
-  lsq.io.exceptionAddr.isStore := io.ooo_to_mem.isStore
+  lsq.io.exceptionAddr.isStore := io.ooo_to_mem.isStoreException
+  vsFlowQueue.io.exceptionAddr.isStore := io.ooo_to_mem.isStoreException
   // Exception address is used several cycles after flush.
   // We delay it by 10 cycles to ensure its flush safety.
   val atomicsException = RegInit(false.B)
@@ -1323,7 +1325,15 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     atomicsException := true.B
   }
   val atomicsExceptionAddress = RegEnable(atomicsUnit.io.exceptionAddr.bits, atomicsUnit.io.exceptionAddr.valid)
-  io.mem_to_ooo.lsqio.vaddr := RegNext(Mux(atomicsException, atomicsExceptionAddress, lsq.io.exceptionAddr.vaddr))
+  io.mem_to_ooo.lsqio.vaddr := RegNext(Mux(
+    atomicsException,
+    atomicsExceptionAddress,
+    Mux(
+      io.ooo_to_mem.isVlsException && io.ooo_to_mem.isStoreException,
+      vsFlowQueue.io.exceptionAddr.vaddr,
+      lsq.io.exceptionAddr.vaddr
+    )
+  ))
   XSError(atomicsException && atomicsUnit.io.in.valid, "new instruction before exception triggers\n")
 
   io.memInfo.sqFull := RegNext(lsq.io.sqFull)
