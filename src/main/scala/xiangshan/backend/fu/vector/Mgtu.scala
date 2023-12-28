@@ -36,16 +36,15 @@ class Mgtu(vlen: Int)(implicit p: Parameters) extends  Module {
   val vd = in.vd
   val vl = in.vl
 
-  /**
-    * Mask destination tail elements are always treated as tail-agnostic, regardless of the setting of vta
-    * 1. 1.U(vlen.W) << vl get a bit 1 followed by vl bits 0 (100...000)
-    * 2. 1.U(vlen.W) << vl - 1.U(vlen.W) get a bits with vl bits 1 (11...111)
-    * 3. ~((1.U(vlen.W) << vl) - 1.U(vlen.W)) get a bits with (vlen - vl) bits 1 followed by vl bits 0 (11...1100...000)
-    * 4. vd | tailBit set the high (vlen - vl) bits of vd to 1 (11...11xx...xx)
-    */
-  private val tailBit = ~((1.U(vlen.W) << vl) - 1.U(vlen.W))
+  /*
+   * Mask destination tail elements are always treated as tail-agnostic, regardless of the setting of vta
+   */
+  private val vdWithTail = Wire(Vec(vlen, UInt(1.W)))
+  vdWithTail.zipWithIndex.foreach{ case (bit, idx) =>
+    bit := Mux(idx.U < vl, vd(idx), 1.U)
+  }
 
-  io.out.vd := vd | tailBit
+  io.out.vd := vdWithTail.asUInt
 }
 
 
