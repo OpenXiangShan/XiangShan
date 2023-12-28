@@ -1,184 +1,166 @@
-import csv
-import sys
-from pyecharts.charts import Page, Sunburst
-from pyecharts import options as opts
+from multiprocessing import Process, Manager
+import threading
+import os.path as osp
+import os
+import resource
+import json
+import argparse
+import psutil
+import numpy as np
+import pandas as pd
+import utils as u
+import configs as cf
+from draw import draw
 
 
-class TopDown:
-    """TopDown node"""
-    def __init__(self, name, percentage):
-        self.name = name
-        if isinstance(percentage, TopDown):
-            self.percentage = percentage.percentage
+def batch():
+    paths = u.glob_stats(cf.stats_dir, fname='simulator_err.txt')
+
+    manager = Manager()
+    all_bmk_dict = manager.dict()
+
+    semaphore = threading.Semaphore(psutil.cpu_count())
+
+    # for workload, path in paths:
+    def extract_and_post_process(gloabl_dict, workload, path):
+        with semaphore:
+            flag_file = osp.join(osp.dirname(path), 'simulator_out.txt')
+            with open(flag_file, encoding='utf-8') as f:
+                contents = f.read()
+                if 'EXCEEDING CYCLE/INSTR LIMIT' not in contents and 'HIT GOOD TRAP' not in contents:
+                    print('Skip unfinished job:', workload)
+                    return
+
+            print('Process finished job:', workload)
+
+            d = u.xs_get_stats(path, cf.targets)
+            if len(d):
+
+                # add bmk and point after topdown processing
+                segments = workload.split('_')
+                if len(segments):
+                    d['point'] = segments[-1]
+                    d['workload'] = '_'.join(segments[:-1])
+                    d['bmk'] = segments[0]
+
+            gloabl_dict[workload] = d
+        return
+
+    jobs = [Process(target=extract_and_post_process, args=(
+        all_bmk_dict, workload, path)) for workload, path in paths]
+    _ = [p.start() for p in jobs]
+    _ = [p.join() for p in jobs]
+
+    df = pd.DataFrame.from_dict(all_bmk_dict, orient='index')
+    df = df.sort_index()
+    df = df.reindex(sorted(df.columns), axis=1)
+
+    df = df.fillna(0)
+
+    df.to_csv(cf.CSV_PATH, index=True)
+
+
+def proc_input(wl_df: pd.DataFrame, js: dict, workload: str):
+    # we implement the weighted metrics computation with the following formula:
+    # weight = vec_weight matmul matrix_perf
+    # (N, 1) = (1, W) matmul (W, N)
+    # To make sure the matrix_perf is in the same order as the vec_weight,
+    # we sort the matrix_perf by point
+    assert isinstance(wl_df['point'][0], np.int64)
+    wl_df = wl_df.sort_values(by=['point'])
+    # We also sort the vec_weight by point
+    wl_js = dict(js[workload])
+    wl_df['cpi'] = 1.0 / wl_df['ipc']
+    vec_weight = pd.DataFrame.from_dict(wl_js['points'], orient='index')
+
+    # convert string index into int64
+    vec_weight.index = vec_weight.index.astype(np.int64)
+    # select only existing points
+    vec_weight = vec_weight.loc[wl_df['point']]
+    # make their sum equals 1.0
+    vec_weight.columns = ['weight']
+
+    vec_weight['weight'] = vec_weight['weight'].astype(np.float64)
+    coverage = np.sum(vec_weight.values)
+    vec_weight = vec_weight / coverage
+
+    # Drop these auxiliary fields
+    to_drop = {'bmk', 'point', 'workload', 'ipc'}
+    to_drop = to_drop.intersection(set(wl_df.columns.to_list()))
+    wl_df = wl_df.drop(to_drop, axis=1)
+
+    weight_metrics = np.matmul(vec_weight.values.reshape(1, -1), wl_df.values)
+    weight_metrics_df = pd.DataFrame(weight_metrics, columns=wl_df.columns)
+    # We have to process coverage here to avoid apply weight on top of weight
+    weight_metrics_df['coverage'] = coverage
+    return weight_metrics_df.values, weight_metrics_df.columns
+
+
+def proc_bmk(bmk_df: pd.DataFrame, js: dict):
+    # Similar to per-input proc, we view the instruction count as the weight
+    # and compute weighted metrics with matrix multiplication
+    workloads = bmk_df['workload'].unique()
+    metric_list = []
+    for wl in workloads:
+        metrics, cols = proc_input(bmk_df[bmk_df['workload'] == wl], js, wl)
+        metric_list.append(metrics)
+    metrics = np.concatenate(metric_list, axis=0)
+    metrics = pd.DataFrame(metrics, columns=cols)
+
+    input_dict = {}
+    for workload in workloads:
+        if workload.startswith(workload):
+            input_dict[workload] = int(js[workload]['insts'])
+    input_insts = pd.DataFrame.from_dict(
+        input_dict, orient='index', columns=['insts'])
+    # make their sum equals 1.0
+    vec_weight = input_insts / np.sum(input_insts.values)
+    weight_metric = np.matmul(vec_weight.values.reshape(1, -1), metrics.values)
+    return weight_metric, metrics.columns
+
+
+def compute_weighted_metrics():
+    df = pd.read_csv(cf.CSV_PATH, index_col=0)
+    bmks = df['bmk'].unique()
+    with open(cf.JSON_FILE, 'r', encoding='utf-8') as f:
+        js = json.load(f)
+    weighted = {}
+    for bmk in bmks:
+        if bmk not in cf.spec_bmks['06']['int'] and cf.INT_ONLY:
+            continue
+        if bmk not in cf.spec_bmks['06']['float'] and cf.FP_ONLY:
+            continue
+        df_bmk = df[df['bmk'] == bmk]
+        workloads = df_bmk['workload'].unique()
+        n_wl = len(workloads)
+        if n_wl == 1:
+            metrics, cols = proc_input(df_bmk, js, workloads[0])
         else:
-            self.percentage = percentage
-        self.down = {}
-        self.top = None
-        self.level = 0
-
-    def __add__(self, rhs):
-        if isinstance(rhs, TopDown):
-            return self.percentage + rhs.percentage
-        return self.percentage + rhs
-
-    def __radd__(self, lhs):
-        if isinstance(lhs, TopDown):
-            return lhs.percentage + self.percentage
-        return lhs + self.percentage
-
-    def __sub__(self, rhs):
-        if isinstance(rhs, TopDown):
-            return self.percentage - rhs.percentage
-        return self.percentage - rhs
-
-    def __rsub__(self, lhs):
-        if isinstance(lhs, TopDown):
-            return lhs.percentage - self.percentage
-        return lhs - self.percentage
-
-    def __mul__(self, rhs):
-        if isinstance(rhs, TopDown):
-            return self.percentage * rhs.percentage
-        return self.percentage * rhs
-
-    def __rmul__(self, lhs):
-        if isinstance(lhs, TopDown):
-            return lhs.percentage * self.percentage
-        return lhs * self.percentage
-
-    def __truediv__(self, rhs):
-        if isinstance(rhs, TopDown):
-            return self.percentage / rhs.percentage
-        return self.percentage / rhs
-
-    def __rtruediv__(self, lhs):
-        if isinstance(lhs, TopDown):
-            return lhs.percentage / self.percentage
-        return lhs / self.percentage
-
-    def add_down(self, name, percentage):
-        """Add a leaf node
-
-        Args:
-            name (str): Name of leaf node
-            percentage (float): Percentage of leaf node
-
-        Returns:
-            TopDown: leaf
-        """
-        self.down[name] = TopDown(name, percentage)
-        self.down[name].top = self
-        self.down[name].level = self.level + 1
-        return self.down[name]
-
-    def draw(self):
-        """Draw the TopDown sunburst chart
-
-        Returns:
-            _type_: _description_
-        """
-        if not self.down:
-            return [opts.SunburstItem(name=self.name, value=self.percentage)]
-        items = []
-        for value in self.down.values():
-            items.append(value.draw()[0])
-        if self.top:
-            return [opts.SunburstItem(name=self.name, value=self.percentage, children=items)]
-        return items
+            metrics, cols = proc_bmk(df_bmk, js)
+        weighted[bmk] = metrics[0]
+    weighted_df = pd.DataFrame.from_dict(
+        weighted, orient='index', columns=cols)
+    if 'cpi' in weighted_df.columns:
+        weighted_df = weighted_df.sort_values(by='cpi', ascending=False)
+    else:
+        weighted_df = weighted_df.sort_index()
+    weighted_df.to_csv(cf.OUT_CSV)
 
 
-def process_one(path, head):
-    """Process one chart
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(usage='generate top-down results')
+    parser.add_argument('-s', '--stat-dir', action='store', required=True,
+                        help='stat output directory')
+    parser.add_argument('-j', '--json', action='store', required=True,
+                        help='specify json file', default='resources/spec06_rv64gcb_o2_20m.json')
+    opt = parser.parse_args()
+    cf.stats_dir = opt.stat_dir
+    cf.JSON_FILE = opt.json
+    if not osp.exists('results'):
+        os.makedirs('results')
+    if resource.getrlimit(resource.RLIMIT_NOFILE)[0] <= 8192:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (8192, 8192))
 
-    Args:
-        path (String): csv path
-        head (String): chart head
-
-    Returns:
-        Sunburst chart
-    """
-    with open(path, encoding='UTF-8') as file:
-        csv_file = dict(csv.reader(file))
-
-    def use(name):
-        return float(csv_file[name])
-
-    csv_file['total_slots'] = use('total_cycles') * 6
-    csv_file['ifu2id_allNO_slots'] = use('ifu2id_allNO_cycle') * 6
-    csv_file['ifu2id_hvButNotFull_slots'] = use('fetch_bubbles') - use('ifu2id_allNO_slots')
-
-    stall_cycles_core = use('stall_cycle_fp') + use('stall_cycle_int') + use('stall_cycle_rob_blame') + use('stall_cycle_int_blame') + use('stall_cycle_fp_blame') + use('ls_dq_bound_cycles')
-
-    top = TopDown("Top", 1.0)
-
-# top
-    frontend_bound = top.add_down("Frontend Bound", use('decode_bubbles') / use('total_slots'))
-    bad_speculation = top.add_down("Bad Speculation", (use('slots_issued') - use('slots_retired') + use('recovery_bubbles')) / use('total_slots'))
-    retiring = top.add_down("Retiring", use('slots_retired') / use('total_slots'))
-    backend_bound = top.add_down("Backend Bound", top - frontend_bound - bad_speculation - retiring)
-
-#top->frontend_bound
-    fetch_latency = frontend_bound.add_down("Fetch Latency", use('fetch_bubbles') / use('total_slots'))
-    fetch_bandwidth = frontend_bound.add_down("Fetch Bandwidth", frontend_bound - fetch_latency)
-
-# top->frontend_bound->fetch_latency
-    itlb_miss = fetch_latency.add_down("iTLB Miss", use('itlb_miss_cycles') / use('total_cycles'))
-    icache_miss = fetch_latency.add_down("iCache Miss", use('icache_miss_cycles') / use('total_cycles'))
-    stage2_redirect_cycles = fetch_latency.add_down("Stage2 Redirect", use('stage2_redirect_cycles') / use('total_cycles'))
-    if2id_bandwidth = fetch_latency.add_down("IF2ID Bandwidth", use('ifu2id_hvButNotFull_slots') / use('total_slots'))
-    fetch_latency_others = fetch_latency.add_down("Fetch Latency Others", fetch_latency - itlb_miss - icache_miss - stage2_redirect_cycles - if2id_bandwidth)
-
-# top->frontend_bound->fetch_latency->stage2_redirect_cycles
-    branch_resteers = stage2_redirect_cycles.add_down("Branch Resteers", use('branch_resteers_cycles') / use('total_cycles'))
-    robFlush_bubble = stage2_redirect_cycles.add_down("RobFlush Bubble", use('robFlush_bubble_cycles') / use('total_cycles'))
-    ldReplay_bubble = stage2_redirect_cycles.add_down("LdReplay Bubble", use('ldReplay_bubble_cycles') / use('total_cycles'))
-
-# top->bad_speculation
-    branch_mispredicts = bad_speculation.add_down("Branch Mispredicts", bad_speculation)
-
-# top->backend_bound
-    memory_bound = backend_bound.add_down("Memory Bound", backend_bound * (use('store_bound_cycles') + use('load_bound_cycles')) / (
-        stall_cycles_core + use('store_bound_cycles') + use('load_bound_cycles')))
-    core_bound = backend_bound.add_down("Core Bound", backend_bound - memory_bound)
-
-# top->backend_bound->memory_bound
-    stores_bound = memory_bound.add_down("Stores Bound", use('store_bound_cycles') / use('total_cycles'))
-    loads_bound = memory_bound.add_down("Loads Bound", use('load_bound_cycles') / use('total_cycles'))
-
-# top->backend_bound->core_bound
-    integer_dq = core_bound.add_down("Integer DQ", core_bound * use('stall_cycle_int_blame') / stall_cycles_core)
-    floatpoint_dq = core_bound.add_down("Floatpoint DQ", core_bound * use('stall_cycle_fp_blame') / stall_cycles_core)
-    rob = core_bound.add_down("ROB", core_bound * use('stall_cycle_rob_blame') / stall_cycles_core)
-    integer_prf = core_bound.add_down("Integer PRF", core_bound * use('stall_cycle_int') / stall_cycles_core)
-    floatpoint_prf = core_bound.add_down("Floatpoint PRF", core_bound * use('stall_cycle_fp') / stall_cycles_core)
-    lsu_ports = core_bound.add_down("LSU Ports", core_bound * use('ls_dq_bound_cycles') / stall_cycles_core)
-
-# top->backend_bound->memory_bound->loads_bound
-    l1d_loads_bound = loads_bound.add_down("L1D Loads", use('l1d_loads_bound_cycles') / use('total_cycles'))
-    l2_loads_bound = loads_bound.add_down("L2 Loads", use('l2_loads_bound_cycles') / use('total_cycles'))
-    l3_loads_bound = loads_bound.add_down("L3 Loads", use('l3_loads_bound_cycles') / use('total_cycles'))
-    ddr_loads_bound = loads_bound.add_down("DDR Loads", use('ddr_loads_bound_cycles') / use('total_cycles'))
-
-# top->backend_bound->memory_bound->loads_bound->l1d_loads_bound
-    l1d_loads_mshr_bound = l1d_loads_bound.add_down("L1D Loads MSHR", use('l1d_loads_mshr_bound') / use('total_cycles'))
-    l1d_loads_tlb_bound = l1d_loads_bound.add_down("L1D Loads TLB", use('l1d_loads_tlb_bound') / use('total_cycles'))
-    l1d_loads_store_data_bound = l1d_loads_bound.add_down("L1D Loads sdata", use('l1d_loads_store_data_bound') / use('total_cycles'))
-    l1d_loads_bank_conflict_bound = l1d_loads_bound.add_down("L1D Loads\nBank Conflict", use('l1d_loads_bank_conflict_bound') / use('total_cycles'))
-    l1d_loads_vio_check_redo_bound = l1d_loads_bound.add_down("L1D Loads VioRedo", use('l1d_loads_vio_check_redo_bound') / use('total_cycles'))
-
-
-    return (
-        Sunburst(init_opts=opts.InitOpts(width="1000px", height="1200px"))
-        .add(series_name="", data_pair=top.draw(), radius=[0, "90%"])
-        .set_global_opts(title_opts=opts.TitleOpts(title=head))
-        .set_series_opts(label_opts=opts.LabelOpts(formatter="{b}")))
-
-
-title = sys.argv[1]
-directory = sys.argv[2]
-suffix = sys.argv[3]
-print(title)
-(
-    Page(page_title=title, layout=Page.SimplePageLayout)
-    .add(process_one(directory + "/csv/" + title + ".log.csv", title + "_" + suffix))
-    .render(directory + "/html/" + title + ".html"))
+    batch()
+    compute_weighted_metrics()
+    draw()

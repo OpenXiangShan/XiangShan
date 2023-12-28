@@ -1,44 +1,75 @@
-# top-down 分析工具
+# top-down 分析工具 ([English](#Top-down-Analysis-Tool))
 
-最新的 top-down 分析工具已经与 env-scripts 集成。在使用 `xs_autorun.py` 完成 checkpoint 的运行后，使用 `--report-top-down` 参数即可！
-本仓库集成了 top-down 分析所需要的工具。
+本目录集成了 top-down 分析所需要的工具。在使用 [env-scripts](https://github.com/OpenXiangShan/env-scripts) 脚本完成 checkpoint 的运行后，可以使用本目录下的工具进行 top-down 分析。
 
-## 运行仿真
+## 使用方法
 
-1. 将仿真文件拷贝至 `emus` 目录下，如 `emus/emu_20220316_0`
-2. 将要运行的测试名称写在 `file.f` 中，具体格式可以参考已有文件（目前最大并行度设置为 16 个 emus，以 fifo 顺序运行 `file.f` 中的程序，因此可按需调整该文件的内容）
-3. 在 tmux/screen 中运行 `./run_emu.sh <emu>`，或是 `nohup ./run_emu.sh <emu>`，以忽略退出终端时的 hup 信号
-4. 运行结束后，将自动进行下列操作
+``` shell
+# python top_down.py --help
+usage: generate top-down results
 
-### 提取性能计数器
-
-1. 性能计数器位于 `${spec_name}/${emu}.dir` 中，如 `spec06_rv64gcb_o2_20m/emu_20220316_0.dir`
-2. 性能计数器包含 warmup 过程的结果，因此需要先删去每个文件的前半部分，脚本会自动在 `${spec_name}/${emu}.dir/csv` 生成中间文件
-3. 提取 csv 格式的 top-down 性能计数器
-4. 删除中间文件
-
-```bash
-sed "1,$(($(cat ${dir}/${spec_name}/${emu}.dir/${name}.log | wc -l) / 2))d" ${dir}/${spec_name}/${emu}.dir/${name}.log >${dir}/${spec_name}/${emu}.dir/csv/${name}.log
-${dir}/top-down.sh ${dir}/${spec_name}/${emu}.dir/csv/${name}.log
-rm ${dir}/${spec_name}/${emu}.dir/csv/${name}.log
+optional arguments:
+  -h, --help            show this help message and exit
+  -s STAT_DIR, --stat-dir STAT_DIR
+                        stat output directory
+  -j JSON, --json JSON  specify json file
 ```
 
-### 生成图表
+举例：
 
-生成图表使用的是 `top_down.py`，其会被 `run_emu.sh` 自动调用：
-
-```bash
-$python ${dir}/top_down.py ${name} ${dir}/${spec_name}/${emu}.dir ${emu} # python ./top_down.py title dir suffix
+``` shell
+# python top_down.py -s <...>/SPEC06_EmuTasks_1021_0.3_c157cf -j resources/spec06_rv64gcb_o2_20m.json
+# python top_down.py -s <...>/SPEC06_EmuTasks_1215_allbump -j <...>/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0/cluster-0-0.json
 ```
 
-`top_down.py` 中需要关注的代码如下：
+脚本运行结束后，会生成 `results` 目录：
 
-```python
-# top_down.py
-(
-    Page(page_title=title, layout=Page.SimplePageLayout)
-    .add(process_one(directory + "/csv/" + title + ".log.csv", title + "_" + suffix))
-    .render(directory + "/html/" + title + ".html"))
+``` shell
+# tree results
+results
+├── result.png
+├── results.csv
+└── results-weighted.csv
+
+0 directories, 3 files
 ```
 
-每一个以 `.add` 开头的行代表了一个子图，可以按需增删这些行。
+其中，`result.png` 为 top-down 堆叠条形统计图，`results.csv` 为各采样点的 top-down 计数器，`results-weighted.csv` 为各子项的加权 top-down 计数器。
+
+# <div id="Top-down-Analysis-Tool">Top-down Analysis Tool</div>
+
+This directory contains analysis tool for top-down. After running checkpoints by using [env-scripts](https://github.com/OpenXiangShan/env-scripts), you may use the tool to analyze top-down counters.
+
+## Usage
+
+``` shell
+# python top_down.py --help
+usage: generate top-down results
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -s STAT_DIR, --stat-dir STAT_DIR
+                        stat output directory
+  -j JSON, --json JSON  specify json file
+```
+
+Some examples:
+
+``` shell
+# python top_down.py -s <...>/SPEC06_EmuTasks_1021_0.3_c157cf -j resources/spec06_rv64gcb_o2_20m.json
+# python top_down.py -s <...>/SPEC06_EmuTasks_1215_allbump -j <...>/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0/cluster-0-0.json
+```
+
+A `results` directory would be generated then:
+
+``` shell
+# tree results
+results
+├── result.png
+├── results.csv
+└── results-weighted.csv
+
+0 directories, 3 files
+```
+
+The `result.png` is a stacked bar chart of top-down. The `results.csv` contains per-checkpoint top-down counters. And the `results-weighted.csv` contains weighted counters for all sub tests.

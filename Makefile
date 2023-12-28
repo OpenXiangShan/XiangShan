@@ -38,7 +38,7 @@ NUM_CORES ?= 1
 MFC ?= 0
 
 # firtool check and download
-FIRTOOL_VERSION = 1.57.1
+FIRTOOL_VERSION = 1.61.0
 FIRTOOL_URL = https://github.com/llvm/circt/releases/download/firtool-$(FIRTOOL_VERSION)/firrtl-bin-linux-x64.tar.gz
 FIRTOOL_PATH = $(shell which firtool 2>/dev/null)
 CACHE_FIRTOOL_PATH = $(HOME)/.cache/xiangshan/firtool-$(FIRTOOL_VERSION)/bin/firtool

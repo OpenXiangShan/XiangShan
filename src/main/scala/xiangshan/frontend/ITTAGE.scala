@@ -280,10 +280,8 @@ class ITTageTable
   // only when ctr is null
   update_wdata.target := Mux(io.update.alloc || ctr_null(old_ctr), update_target, io.update.old_target)
 
-  val newValidArray = VecInit(validArray.asBools)
   when (io.update.valid) {
-    newValidArray(update_idx) := true.B
-    validArray := newValidArray.asUInt
+    validArray := UIntToOH(update_idx) | validArray
   }
 
   // reset all us in 32 cycles
