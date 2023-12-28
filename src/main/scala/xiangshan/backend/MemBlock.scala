@@ -81,8 +81,8 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
    val pendingPtrNext = Input(new RobPtr)
   }
 
-  val isStore = Input(Bool()) // TODO: re-name the signal
-  val isVls = Input(Bool()) // TODO: re-name the signal
+  val isStoreException = Input(Bool())
+  val isVlsException = Input(Bool())
   val csrCtrl = Flipped(new CustomCSRCtrlIO)
   val enqLsq = new LsqEnqIO
   val flushSb = Input(Bool())
@@ -1314,8 +1314,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     }
   }
 
-  lsq.io.exceptionAddr.isStore := io.ooo_to_mem.isStore
-  vsFlowQueue.io.exceptionAddr.isStore := io.ooo_to_mem.isStore
+  lsq.io.exceptionAddr.isStore := io.ooo_to_mem.isStoreException
+  vsFlowQueue.io.exceptionAddr.isStore := io.ooo_to_mem.isStoreException
   // Exception address is used several cycles after flush.
   // We delay it by 10 cycles to ensure its flush safety.
   val atomicsException = RegInit(false.B)
@@ -1329,7 +1329,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     atomicsException,
     atomicsExceptionAddress,
     Mux(
-      io.ooo_to_mem.isVls && io.ooo_to_mem.isStore,
+      io.ooo_to_mem.isVlsException && io.ooo_to_mem.isStoreException,
       vsFlowQueue.io.exceptionAddr.vaddr,
       lsq.io.exceptionAddr.vaddr
     )
