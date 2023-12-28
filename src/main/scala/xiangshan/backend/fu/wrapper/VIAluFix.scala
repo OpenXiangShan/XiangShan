@@ -186,7 +186,6 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   private val decoderOut = decoder(QMCMinimizer, Cat(opcode.op), truthTable)
   private val vIntFixpDecode = decoderOut.asTypeOf(new VIntFixpDecode)
   private val isFixp = Mux(vIntFixpDecode.misc, opcode.isScalingShift, opcode.isSatAdd || opcode.isAvgAdd)
-  private val isVmvsx = opcode.isVmvsx
   private val widen = opcode.isAddSub && vs1Type(1, 0) =/= vdType(1, 0)
   private val widen_vs2 = widen && vs2Type(1, 0) =/= vdType(1, 0)
   private val eewVs1 = SewOH(vs1Type(1, 0))
@@ -257,6 +256,23 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   private val outCmp = Mux1H(outEewVs1.oneHot, Seq(8, 4, 2, 1).map(
     k => Cat(vIntFixpAlus.reverse.map(_.io.cmpOut(k - 1, 0)))))
   private val outNarrow = Cat(vIntFixpAlus.reverse.map(_.io.narrowVd))
+  private val outOpcode = VialuFixType.getOpcode(outCtrl.fuOpType).asTypeOf(vIntFixpAlus.head.io.opcode)
+
+  private val numBytes = dataWidth / 8
+  private val maxMaskIdx = numBytes
+  private val maxVdIdx = 8
+  private val elementsInOneUop = Mux1H(outEewVs1.oneHot, Seq(1, 2, 4, 8).map(k => (numBytes / k).U(5.W)))
+  private val vdIdx = outVecCtrl.vuopIdx(2, 0)
+  private val elementsComputed = Mux1H(Seq.tabulate(maxVdIdx)(i => (vdIdx === i.U) -> (elementsInOneUop * i.U)))
+  val outCmpWithTail = Wire(Vec(maxMaskIdx, UInt(1.W)))
+  // set the bits in vd to 1 if the index is larger than vl and vta is true
+  for (i <- 0 until maxMaskIdx) {
+    when(elementsComputed +& i.U >= outVl) {
+      outCmpWithTail(i) := Mux(outVecCtrl.vta, 1.U, outOldVd(elementsComputed +& i.U))
+    }.otherwise {
+      outCmpWithTail(i) := outCmp(i)
+    }
+  }
 
   /* insts whose mask is not used to generate 'agnosticEn' and 'keepEn' in mgu:
    * vadc, vmadc...
@@ -272,15 +288,25 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
 
   private val outEew = Mux(outWiden, outVecCtrl.vsew + 1.U, outVecCtrl.vsew)
 
+  /*
+   * vl of vmv.x.s is 1
+   */
+  private val outIsVmvsx = outOpcode.isVmvsx
+
+  /*
+   * when vstart >= vl, no need to update vd, the old value should be kept
+   */
+  private val outVstartGeVl = outVstart >= outVl
+
   mgu.io.in.vd := MuxCase(outVd, Seq(
     narrow -> outNarrow,
-    dstMask -> outCmp,
+    dstMask -> outCmpWithTail.asUInt,
   ))
   mgu.io.in.oldVd := outOldVd
   mgu.io.in.mask := maskToMgu
   mgu.io.in.info.ta := outVecCtrl.vta
   mgu.io.in.info.ma := outVecCtrl.vma
-  mgu.io.in.info.vl := Mux(isVmvsx, 1.U, outVl)
+  mgu.io.in.info.vl := Mux(outIsVmvsx, 1.U, outVl)
   mgu.io.in.info.vlmul := outVecCtrl.vlmul
   mgu.io.in.info.valid := io.out.valid
   mgu.io.in.info.vstart := outVecCtrl.vstart
@@ -297,9 +323,9 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   mgtu.io.in.vd := outVd
   mgtu.io.in.vl := outVl
 
-  io.out.bits.res.data := Mux(outVecCtrl.isOpMask, mgtu.io.out.vd, mgu.io.out.vd)
-  io.out.bits.res.vxsat.get := (Cat(vIntFixpAlus.map(_.io.vxsat)) & mgu.io.out.asUInt).orR
-  io.out.bits.ctrl.exceptionVec.get(ExceptionNO.illegalInstr) := mgu.io.out.illegal
+  io.out.bits.res.data := Mux(outVstartGeVl, outOldVd, Mux(outVecCtrl.isOpMask, mgtu.io.out.vd, mgu.io.out.vd))
+  io.out.bits.res.vxsat.get := Mux(outVstartGeVl, false.B, (Cat(vIntFixpAlus.map(_.io.vxsat)) & mgu.io.out.asUInt).orR)
+  io.out.bits.ctrl.exceptionVec.get(ExceptionNO.illegalInstr) := mgu.io.out.illegal && !outVstartGeVl
 
   // util function
   def splitMask(maskIn: UInt, sew: SewOH): Vec[UInt] = {

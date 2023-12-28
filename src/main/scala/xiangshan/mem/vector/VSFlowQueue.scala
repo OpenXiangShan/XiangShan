@@ -117,6 +117,7 @@ class VecStorePipeBundle(implicit p: Parameters) extends MemExuInput(isVector = 
   val alignedType         = UInt(2.W) // ! MAGIC NUM: VLSUConstants.alignTypeBits
   val exp                 = Bool()
   val flowPtr             = new VsFlowPtr
+  val isLastElem          = Bool()
 }
 
 class VsFlowBundle(implicit p: Parameters) extends VecFlowBundle {
@@ -157,6 +158,7 @@ class VecStoreFlowEntry (implicit p: Parameters) extends VecFlowBundle {
     pipeBundle.alignedType          := this.alignedType
     pipeBundle.exp                  := this.exp
     pipeBundle.flowPtr              := thisPtr
+    pipeBundle.isLastElem           := this.isLastElem
     pipeBundle
   }
 
@@ -601,11 +603,11 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
       }
     }
     // Assuming that if !io.sbuffer(i).ready then !io.sbuffer(i + 1).ready
-
-    when (doRetire(i)) {
-      flowAllocated(thisPtr) := false.B
-      flowFinished(thisPtr) := false.B
-      flowCommitted(thisPtr) := false.B
+    // sbuffer need 2 cycles to write data, Therefore, we need to delay 1 cycle.
+    when (RegNext(doRetire(i))) {
+      flowAllocated(RegNext(thisPtr)) := false.B
+      flowFinished(RegNext(thisPtr)) := false.B
+      flowCommitted(RegNext(thisPtr)) := false.B
     }
   }
 

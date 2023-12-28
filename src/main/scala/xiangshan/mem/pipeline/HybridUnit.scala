@@ -176,6 +176,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val s0_isvec = WireInit(false.B)
   val s0_exp = WireInit(true.B)
   val s0_flowPtr = WireInit(0.U.asTypeOf(new VsFlowPtr))
+  val s0_isLastElem = WireInit(false.B)
 
   // load flow select/gen
   // src0: super load replayed by LSQ (cache miss replay) (io.ldu_io.replay)
@@ -458,6 +459,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     s0_isvec         := true.B
     s0_exp           := io.vec_stu_io.in.bits.exp
     s0_flowPtr       := io.vec_stu_io.in.bits.flowPtr
+    s0_isLastElem    := io.vec_stu_io.in.bits.isLastElem
     s0_deqPortIdx    := 0.U
   }
 
@@ -525,6 +527,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   s0_out.isFastPath    := s0_l2l_fwd
   s0_out.mshrid        := s0_mshrid
   s0_out.isvec         := s0_isvec
+  s0_out.isLastElem    := s0_isLastElem
   s0_out.exp           := s0_exp
   s0_out.sflowPtr      := s0_flowPtr
   s0_out.uop.exceptionVec(loadAddrMisaligned)  := !s0_addr_aligned && s0_ld_flow
@@ -595,6 +598,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val s1_fire       = s1_valid && !s1_kill && s1_can_go
   val s1_ld_flow    = RegNext(s0_ld_flow)
   val s1_isvec      = RegEnable(s0_out.isvec, false.B, s0_fire)
+  val s1_isLastElem = RegEnable(s0_out.isLastElem, false.B, s0_fire)
 
   s1_ready := !s1_valid || s1_kill || s2_ready
   when (s0_fire) { s1_valid := true.B }
@@ -800,6 +804,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.vec_stu_io.lsq.valid     := s1_valid && !s1_ld_flow && !s1_prf && s1_isvec
   io.vec_stu_io.lsq.bits          := s1_out
   io.vec_stu_io.lsq.bits.miss     := s1_tlb_miss
+  io.vec_stu_io.lsq.bits.isLastElem := s1_isLastElem
 
   io.stu_io.st_mask_out.valid       := s1_valid && !s1_ld_flow && !s1_prf
   io.stu_io.st_mask_out.bits.mask   := s1_out.mask

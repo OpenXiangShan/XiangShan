@@ -344,10 +344,10 @@ object VecDecoder extends DecodeConstants {
     VNCLIPU_WI    -> OPIVI(FuType.vialuF, VialuFixType.vnclipu_wv, T, F, T, selImm = SelImm.IMM_OPIVIU, uopSplitType = UopSplitType.VEC_WXV),
     VNCLIP_WI     -> OPIVI(FuType.vialuF, VialuFixType.vnclip_wv, T, F, T, uopSplitType = UopSplitType.VEC_WXV),
 
-    VMV1R_V       -> OPIVI(FuType.vppu, VpermType.vmvnr, T, F, F, uopSplitType = UopSplitType.VEC_MVNR, src1 = SrcType.no), // vmv1r.v vd, vs2
-    VMV2R_V       -> OPIVI(FuType.vppu, VpermType.vmvnr, T, F, F, uopSplitType = UopSplitType.VEC_MVNR, src1 = SrcType.no), // vmv2r.v vd, vs2
-    VMV4R_V       -> OPIVI(FuType.vppu, VpermType.vmvnr, T, F, F, uopSplitType = UopSplitType.VEC_MVNR, src1 = SrcType.no), // vmv4r.v vd, vs2
-    VMV8R_V       -> OPIVI(FuType.vppu, VpermType.vmvnr, T, F, F, uopSplitType = UopSplitType.VEC_MVNR, src1 = SrcType.no), // vmv8r.v vd, vs2
+    VMV1R_V       -> OPIVI(FuType.vppu, VpermType.vmv1r, T, F, F, uopSplitType = UopSplitType.VEC_MVNR, src1 = SrcType.no), // vmv1r.v vd, vs2
+    VMV2R_V       -> OPIVI(FuType.vppu, VpermType.vmv2r, T, F, F, uopSplitType = UopSplitType.VEC_MVNR, src1 = SrcType.no), // vmv2r.v vd, vs2
+    VMV4R_V       -> OPIVI(FuType.vppu, VpermType.vmv4r, T, F, F, uopSplitType = UopSplitType.VEC_MVNR, src1 = SrcType.no), // vmv4r.v vd, vs2
+    VMV8R_V       -> OPIVI(FuType.vppu, VpermType.vmv8r, T, F, F, uopSplitType = UopSplitType.VEC_MVNR, src1 = SrcType.no), // vmv8r.v vd, vs2
   )
 
   val opmvv: Array[(BitPat, XSDecodeBase)] = Array(
@@ -381,7 +381,7 @@ object VecDecoder extends DecodeConstants {
     VMULHSU_VV   -> OPMVV(T, FuType.vimac, VimacType.vmulhsu, F, T, F, UopSplitType.VEC_VVV),
     VMULHU_VV    -> OPMVV(T, FuType.vimac, VimacType.vmulhu, F, T, F, UopSplitType.VEC_VVV),
 
-    VMV_X_S      -> OPMVV(T, FuType.vipu, VipuType.dummy, T, F, F, src1 = SrcType.no), // vmv.x.s rd, vs2 # x[rd] = vs2[0]
+    VMV_X_S      -> OPMVV(T, FuType.vipu, VipuType.vmv_x_s, T, F, F, src1 = SrcType.no), // vmv.x.s rd, vs2 # x[rd] = vs2[0]
     VNMSAC_VV    -> OPMVV(T, FuType.vimac, VimacType.vnmsac, F, T, F, UopSplitType.VEC_VVV),
     VNMSUB_VV    -> OPMVV(T, FuType.vimac, VimacType.vnmsub, F, T, F, UopSplitType.VEC_VVV),
     VREDAND_VS   -> OPMVV(T, FuType.vipu, VipuType.vredand_vs, F, T, F, UopSplitType.VEC_VRED),

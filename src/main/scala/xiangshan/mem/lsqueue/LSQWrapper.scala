@@ -156,6 +156,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   // store queue wiring
   storeQueue.io.brqRedirect <> io.brqRedirect
   storeQueue.io.storeAddrIn <> io.sta.storeAddrIn // from store_s1
+  storeQueue.io.vecStoreAddrIn  <> io.sta.vecStoreAddrIn // store_s1
   storeQueue.io.storeAddrInRe <> io.sta.storeAddrInRe // from store_s2
   storeQueue.io.storeDataIn <> io.std.storeDataIn // from store_s0
   storeQueue.io.storeMaskIn <> io.sta.storeMaskIn // from store_s0

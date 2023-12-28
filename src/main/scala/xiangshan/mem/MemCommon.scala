@@ -102,6 +102,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
 
   // vector
   val isvec = Bool()
+  val isLastElem = Bool()
   val is128bit = Bool()
   val uop_unit_stride_fof = Bool()
   // val rob_idx_valid = Vec(2,Bool())
@@ -166,6 +167,7 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
 
     // VLSU
     isvec := input.isvec
+    isLastElem := input.isLastElem
     is128bit := input.is128bit
     exp := input.exp
     is_first_ele := input.is_first_ele
