@@ -74,7 +74,7 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
   maskTailGen.io.in.vta := info.ta
   maskTailGen.io.in.vsew := realEw
   maskTailGen.io.in.maskUsed := maskUsed
-  maskTailGen.io.in.vdIdx := info.vdIdx
+  maskTailGen.io.in.vdIdx := vdIdx
 
   private val keepEn = maskTailGen.io.out.keepEn
   private val agnosticEn = maskTailGen.io.out.agnosticEn
@@ -92,10 +92,6 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
       agnosticEn(i) -> byte1s,
     ))
   }
-
-  // the result of narrow inst which needs concat
-  private val narrowNeedCat = info.vdIdx(0).asBool & narrow
-  private val narrowResCat = Cat(resVecByte.asUInt(vlen / 2 - 1, 0), oldVd(vlen / 2 - 1, 0))
 
   // the result of mask-generating inst
   private val maxVdIdx = 8
@@ -122,7 +118,6 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
 
   io.out.vd := MuxCase(resVecByte.asUInt, Seq(
     info.dstMask -> resVecBit.asUInt,
-    narrowNeedCat -> narrowResCat,
   ))
   io.out.keep := keepEn
   io.out.illegal := (info.vl > vlMaxForAssert) && info.valid

@@ -160,6 +160,23 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     vlMax := Mux(vlmul(2), uvlMax >> (-vlmul)(1,0), uvlMax << vlmul(1,0)).asUInt
     vlMax
   }
+  /*
+   * when 1 <= lmul <= 4, numOfUopWV = 2 * lmul, otherwise numOfUopWV = 1
+   */
+  val numOfUopWV = MuxLookup(vlmul, 1.U(4.W), Array(
+    "b000".U -> 2.U,
+    "b001".U -> 4.U,
+    "b010".U -> 8.U,
+  ))
+  /*
+   * need an extra move instruction
+   * when 1 <= lmul <= 4, numOfUopWX = 2 * lmul + 1, otherwise numOfUopWX = 2
+   */
+  val numOfUopWX = MuxLookup(vlmul, 2.U(4.W), Array(
+    "b000".U -> 3.U,
+    "b001".U -> 5.U,
+    "b010".U -> 9.U,
+  ))
 
   stridedLSTable.src := Cat(simple_emul, nf)
   val numOfUopVLoadStoreStrided = stridedLSTable.out
@@ -183,14 +200,14 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     UopSplitType.VEC_VFREDOSUM -> numOfUopVFREDOSUM,
     UopSplitType.VEC_VXM -> (lmul +& 1.U),
     UopSplitType.VEC_VXV -> (lmul +& 1.U),
-    UopSplitType.VEC_VFW -> Cat(lmul, 0.U(1.W)), // lmul <= 4
-    UopSplitType.VEC_WFW -> Cat(lmul, 0.U(1.W)), // lmul <= 4
-    UopSplitType.VEC_VVW -> Cat(lmul, 0.U(1.W)), // lmul <= 4
-    UopSplitType.VEC_WVW -> Cat(lmul, 0.U(1.W)), // lmul <= 4
-    UopSplitType.VEC_VXW -> Cat(lmul, 1.U(1.W)), // lmul <= 4
-    UopSplitType.VEC_WXW -> Cat(lmul, 1.U(1.W)), // lmul <= 4
-    UopSplitType.VEC_WVV -> Cat(lmul, 0.U(1.W)), // lmul <= 4
-    UopSplitType.VEC_WXV -> Cat(lmul, 1.U(1.W)), // lmul <= 4
+    UopSplitType.VEC_VFW -> numOfUopWV, // lmul <= 4
+    UopSplitType.VEC_WFW -> numOfUopWV, // lmul <= 4
+    UopSplitType.VEC_VVW -> numOfUopWV, // lmul <= 4
+    UopSplitType.VEC_WVW -> numOfUopWV, // lmul <= 4
+    UopSplitType.VEC_VXW -> numOfUopWX, // lmul <= 4
+    UopSplitType.VEC_WXW -> numOfUopWX, // lmul <= 4
+    UopSplitType.VEC_WVV -> numOfUopWV, // lmul <= 4
+    UopSplitType.VEC_WXV -> numOfUopWX, // lmul <= 4
     UopSplitType.VEC_SLIDE1UP -> (lmul +& 1.U),
     UopSplitType.VEC_FSLIDE1UP -> lmul,
     UopSplitType.VEC_SLIDE1DOWN -> Cat(lmul, 0.U(1.W)),
@@ -201,7 +218,7 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     UopSplitType.VEC_M0X -> lmul,
     UopSplitType.VEC_MVV -> (Cat(lmul, 0.U(1.W)) - 1.U),
     UopSplitType.VEC_M0X_VFIRST -> 1.U,
-    UopSplitType.VEC_VWW -> Cat(lmul, 0.U(1.W)),
+    UopSplitType.VEC_VWW -> numOfUopWV, // lmul <= 4
     UopSplitType.VEC_RGATHER -> numOfUopVrgather,
     UopSplitType.VEC_RGATHER_VX -> (numOfUopVrgather +& 1.U),
     UopSplitType.VEC_RGATHEREI16 -> numOfUopVrgatherei16,
