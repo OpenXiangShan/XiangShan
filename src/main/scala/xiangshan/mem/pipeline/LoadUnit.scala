@@ -881,14 +881,14 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_data_fwded = s2_dcache_miss && (s2_full_fwd || s2_cache_tag_error)
 
   // ld-ld violation require
-  io.lsq.ldld_nuke_query.req.valid           := s2_valid && s2_can_query
+  io.lsq.ldld_nuke_query.req.valid           := s2_valid && s2_troublem
   io.lsq.ldld_nuke_query.req.bits.uop        := s2_in.uop
   io.lsq.ldld_nuke_query.req.bits.mask       := s2_in.mask
   io.lsq.ldld_nuke_query.req.bits.paddr      := s2_in.paddr
   io.lsq.ldld_nuke_query.req.bits.data_valid := Mux(s2_full_fwd || s2_fwd_data_valid, true.B, !s2_dcache_miss)
 
   // st-ld violation require
-  io.lsq.stld_nuke_query.req.valid           := s2_valid && s2_can_query
+  io.lsq.stld_nuke_query.req.valid           := s2_valid && s2_troublem
   io.lsq.stld_nuke_query.req.bits.uop        := s2_in.uop
   io.lsq.stld_nuke_query.req.bits.mask       := s2_in.mask
   io.lsq.stld_nuke_query.req.bits.paddr      := s2_in.paddr
@@ -1097,7 +1097,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   io.lsq.ldin.bits.uop := s3_out.bits.uop
 
-  val s3_revoke = s3_exception || io.lsq.ldin.bits.rep_info.need_rep
+  val s3_revoke = io.lsq.ldin.bits.rep_info.need_rep
   io.lsq.ldld_nuke_query.revoke := s3_revoke
   io.lsq.stld_nuke_query.revoke := s3_revoke
 
