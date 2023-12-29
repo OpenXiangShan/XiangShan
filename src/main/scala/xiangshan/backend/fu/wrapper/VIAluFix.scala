@@ -285,6 +285,12 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   private val outWiden = (outFormat === VialuFixType.FMT.VVW | outFormat === VialuFixType.FMT.WVW) & !outVecCtrl.isExt & !outVecCtrl.isDstMask
   private val narrow = outVecCtrl.isNarrow
   private val dstMask = outVecCtrl.isDstMask
+  private val outVxsat = Mux(narrow, Cat(vIntFixpAlus.reverse.map(_.io.vxsat(3, 0))), Cat(vIntFixpAlus.reverse.map(_.io.vxsat)))
+
+  // the result of narrow inst which needs concat
+  private val narrowNeedCat = outVecCtrl.vuopIdx(0).asBool && narrow
+  private val outNarrowVd = Mux(narrowNeedCat, Cat(outNarrow, outOldVd(dataWidth / 2 - 1, 0)), outNarrow)
+  private val outVxsatReal = Mux(narrowNeedCat, Cat(outVxsat(numBytes / 2 - 1, 0), 0.U((numBytes / 2).W)), outVxsat)
 
   private val outEew = Mux(outWiden, outVecCtrl.vsew + 1.U, outVecCtrl.vsew)
 
@@ -299,7 +305,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   private val outVstartGeVl = outVstart >= outVl
 
   mgu.io.in.vd := MuxCase(outVd, Seq(
-    narrow -> outNarrow,
+    narrow -> outNarrowVd,
     dstMask -> outCmpWithTail.asUInt,
   ))
   mgu.io.in.oldVd := outOldVd
@@ -324,7 +330,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   mgtu.io.in.vl := outVl
 
   io.out.bits.res.data := Mux(outVstartGeVl, outOldVd, Mux(outVecCtrl.isOpMask, mgtu.io.out.vd, mgu.io.out.vd))
-  io.out.bits.res.vxsat.get := Mux(outVstartGeVl, false.B, (Cat(vIntFixpAlus.map(_.io.vxsat)) & mgu.io.out.asUInt).orR)
+  io.out.bits.res.vxsat.get := Mux(outVstartGeVl, false.B, (outVxsatReal & mgu.io.out.keep).orR)
   io.out.bits.ctrl.exceptionVec.get(ExceptionNO.illegalInstr) := mgu.io.out.illegal && !outVstartGeVl
 
   // util function

@@ -125,6 +125,7 @@ class VIMacU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg
   private val outVd = Cat(vimacs.reverse.map(_.io.vd))
   private val outFormat = VimacType.getFormat(outCtrl.fuOpType)
   private val outWiden = outFormat === VimacType.FMT.VVW
+  private val outVxsat = Cat(vimacs.reverse.map(_.io.vxsat))
 
   private val outEew = Mux(outWiden, outVecCtrl.vsew + 1.U, outVecCtrl.vsew)
   mgu.io.in.vd := outVd
@@ -144,6 +145,6 @@ class VIMacU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg
   mgu.io.in.isIndexedVls := false.B
 
   io.out.bits.res.data := mgu.io.out.vd
-  io.out.bits.res.vxsat.get := (Cat(vimacs.map(_.io.vxsat)) & mgu.io.out.keep).orR
+  io.out.bits.res.vxsat.get := (outVxsat & mgu.io.out.keep).orR
   io.out.bits.ctrl.exceptionVec.get(ExceptionNO.illegalInstr) := mgu.io.out.illegal
 }
