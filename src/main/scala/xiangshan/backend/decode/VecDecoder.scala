@@ -324,9 +324,9 @@ object VecDecoder extends DecodeConstants {
 
     VMSEQ_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmseq_vv, F, T, F, uopSplitType = UopSplitType.VEC_VXM),
     VMSNE_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmsne_vv, F, T, F, uopSplitType = UopSplitType.VEC_VXM),
-    VMSLEU_VI     -> OPIVI(FuType.vialuF, VialuFixType.vmsleu_vv, F, T, F, selImm = SelImm.IMM_OPIVIU, uopSplitType = UopSplitType.VEC_VXM),
+    VMSLEU_VI     -> OPIVI(FuType.vialuF, VialuFixType.vmsleu_vv, F, T, F, selImm = SelImm.IMM_OPIVIS, uopSplitType = UopSplitType.VEC_VXM),
     VMSLE_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmsle_vv, F, T, F, uopSplitType = UopSplitType.VEC_VXM),
-    VMSGTU_VI     -> OPIVI(FuType.vialuF, VialuFixType.vmsgtu_vv, F, T, F, selImm = SelImm.IMM_OPIVIU, uopSplitType = UopSplitType.VEC_VXM),
+    VMSGTU_VI     -> OPIVI(FuType.vialuF, VialuFixType.vmsgtu_vv, F, T, F, selImm = SelImm.IMM_OPIVIS, uopSplitType = UopSplitType.VEC_VXM),
     VMSGT_VI      -> OPIVI(FuType.vialuF, VialuFixType.vmsgt_vv, F, T, F, uopSplitType = UopSplitType.VEC_VXM),
 
     VSLL_VI       -> OPIVI(FuType.vialuF, VialuFixType.vsll_vv, T, F, F, selImm = SelImm.IMM_OPIVIU),
@@ -335,7 +335,7 @@ object VecDecoder extends DecodeConstants {
     VNSRL_WI      -> OPIVI(FuType.vialuF, VialuFixType.vnsrl_wv, T, F, F, selImm = SelImm.IMM_OPIVIU, uopSplitType = UopSplitType.VEC_WXV),
     VNSRA_WI      -> OPIVI(FuType.vialuF, VialuFixType.vnsra_wv, T, F, F, selImm = SelImm.IMM_OPIVIU, uopSplitType = UopSplitType.VEC_WXV),
 
-    VSADDU_VI     -> OPIVI(FuType.vialuF, VialuFixType.vsaddu_vv, T, F, T, selImm = SelImm.IMM_OPIVIU),
+    VSADDU_VI     -> OPIVI(FuType.vialuF, VialuFixType.vsaddu_vv, T, F, T, selImm = SelImm.IMM_OPIVIS),
     VSADD_VI      -> OPIVI(FuType.vialuF, VialuFixType.vsadd_vv, T, F, T),
 
     VSSRL_VI      -> OPIVI(FuType.vialuF, VialuFixType.vssrl_vv, T, F, F, selImm = SelImm.IMM_OPIVIU),
