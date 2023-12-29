@@ -117,7 +117,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val acceptedVec = Wire(Vec(LoadPipelineWidth, Bool()))
   val enqIndexVec = Wire(Vec(LoadPipelineWidth, UInt()))
 
-  // Enqueue
+  val canAcceptCount = PopCount(freeList.io.canAllocate)
   for ((enq, w) <- io.query.map(_.req).zipWithIndex) {
     acceptedVec(w) := false.B
     paddrModule.io.wen(w) := false.B
@@ -128,9 +128,9 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
     //  Allocate ready
     val offset = PopCount(needEnqueue.take(w))
-    val canAccept = freeList.io.canAllocate(offset)
+    val canAccept = canAcceptCount >= (w+1).U
     val enqIndex = freeList.io.allocateSlot(offset)
-    enq.ready := Mux(needEnqueue(w), canAccept, true.B)
+    enq.ready := canAccept
 
     enqIndexVec(w) := enqIndex
     when (needEnqueue(w) && enq.ready) {
