@@ -265,8 +265,10 @@ class PipeLoadForwardQueryIO(implicit p: Parameters) extends LoadForwardQueryIO 
 
   // dataInvalid: addr match, but data is not valid for now
   val dataInvalidFast = Input(Bool()) // resp to load_s1
-  // val dataInvalid = Input(Bool()) // resp to load_s2
   val dataInvalidSqIdx = Input(new SqPtr) // resp to load_s2, sqIdx
+
+  // addrInvalidFast: addr not match
+  val addrInvalidFast = Input(Bool())
   val addrInvalidSqIdx = Input(new SqPtr) // resp to load_s2, sqIdx
 }
 
