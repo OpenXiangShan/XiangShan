@@ -965,22 +965,20 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.feedback_fast.bits.dataInvalidSqIdx := DontCare
 
   // fast wakeup
-  val s2_need_rep = s2_out.rep_info.mem_amb ||
-                    s2_out.rep_info.tlb_miss ||
-                    s2_out.rep_info.fwd_fail ||
-                    s2_dcache_miss_orig ||
-                    s2_bank_conflict_orig ||
-                    s2_wpu_pred_fail_orig ||
-                    s2_out.rep_info.rar_nack ||
-                    s2_out.rep_info.raw_nack ||
-                    s2_out.rep_info.nuke
+  val s2_can_wakeup = !(s2_dcache_miss_orig ||
+                        s2_bank_conflict_orig ||
+                        s2_wpu_pred_fail_orig ||
+                        s2_out.rep_info.rar_nack ||
+                        s2_out.rep_info.raw_nack ||
+                        s2_in.rep_info.nuke)
   io.fast_uop.valid := RegNext(
     !io.dcache.s1_disable_fast_wakeup &&
     s1_valid &&
     !s1_kill &&
     !io.tlb.resp.bits.miss &&
-    !io.lsq.forward.dataInvalidFast
-  ) && (s2_valid && !s2_need_rep && !s2_mmio)
+    !io.lsq.forward.dataInvalidFast &&
+    !io.lsq.forward.addrInvalidFast
+  ) && (s2_valid && s2_can_wakeup && !s2_mmio)
   io.fast_uop.bits := RegNext(s1_out.uop)
 
   //
