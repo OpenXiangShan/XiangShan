@@ -675,7 +675,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val hcounteren = RegInit(UInt(XLEN.W), 0.U)
   val hcounterenMask = 0.U(XLEN.W) //will be used by ZICNTR or ZIHPM
 
-  val vsstatus = RegInit("ha00002000".U(XLEN.W))
+  val vsstatus = RegInit("h200002000".U(XLEN.W))
   val vsstatusStruct = vsstatus.asTypeOf(new MstatusStruct)
   //vsie vsip
   val vsMask = ((1 << 10) | (1 << 6) | (1 << 2)).U(XLEN.W)
