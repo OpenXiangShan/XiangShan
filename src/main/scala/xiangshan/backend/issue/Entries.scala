@@ -4,7 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utility.HasCircularQueuePtrHelper
-import utils.{MathUtils, OptionWrapper, XSError}
+import utils._
 import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.DataConfig.VAddrData
@@ -93,6 +93,9 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val compEntryEnqVec        = othersEntryEnqVec.takeRight(CompEntryNum)
   //debug
   val cancelVec              = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Bool())))
+  val entryInValidVec        = Wire(Vec(params.numEntries, Bool()))
+  val entryOutDeqValidVec    = Wire(Vec(params.numEntries, Bool()))
+  val entryOutTransValidVec  = Wire(Vec(params.numEntries, Bool()))
   //cancel bypass
   val cancelBypassVec        = Wire(Vec(params.numEntries, Bool()))
   val uopIdxVec              = OptionWrapper(params.isVecMemIQ, Wire(Vec(params.numEntries, UopIdx())))
@@ -414,7 +417,38 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     if (params.isVecMemIQ) {
       uopIdxVec.get(entryIdx)   := out.uopIdx.get
     }
+    entryInValidVec(entryIdx)       := out.entryInValid
+    entryOutDeqValidVec(entryIdx)   := out.entryOutDeqValid
+    entryOutTransValidVec(entryIdx) := out.entryOutTransValid
   }
+
+  // entries perf counter
+  // enq
+  for (i <- 0 until params.numEnq) {
+    XSPerfAccumulate(s"enqEntry_${i}_in_cnt", entryInValidVec(i))
+    XSPerfAccumulate(s"enqEntry_${i}_out_deq_cnt", entryOutDeqValidVec(i))
+    XSPerfAccumulate(s"enqEntry_${i}_out_trans_cnt", entryOutTransValidVec(i))
+  }
+  // simple
+  for (i <- 0 until params.numSimp) {
+    XSPerfAccumulate(s"simpEntry_${i}_in_cnt", entryInValidVec(i + params.numEnq))
+    XSPerfAccumulate(s"simpEntry_${i}_out_deq_cnt", entryOutDeqValidVec(i + params.numEnq))
+    XSPerfAccumulate(s"simpEntry_${i}_out_trans_cnt", entryOutTransValidVec(i + params.numEnq))
+  }
+  // complex
+  for (i <- 0 until params.numComp) {
+    XSPerfAccumulate(s"compEntry_${i}_in_cnt", entryInValidVec(i + params.numEnq + params.numSimp))
+    XSPerfAccumulate(s"compEntry_${i}_out_deq_cnt", entryOutDeqValidVec(i + params.numEnq + params.numSimp))
+    XSPerfAccumulate(s"compEntry_${i}_out_trans_cnt", entryOutTransValidVec(i + params.numEnq + params.numSimp))
+  }
+  // total
+  XSPerfAccumulate(s"enqEntry_all_in_cnt", PopCount(entryInValidVec.take(params.numEnq)))
+  XSPerfAccumulate(s"enqEntry_all_out_deq_cnt", PopCount(entryOutDeqValidVec.take(params.numEnq)))
+  XSPerfAccumulate(s"enqEntry_all_out_trans_cnt", PopCount(entryOutTransValidVec.take(params.numEnq)))
+
+  XSPerfAccumulate(s"othersEntry_all_in_cnt", PopCount(entryInValidVec.drop(params.numEnq)))
+  XSPerfAccumulate(s"othersEntry_all_out_deq_cnt", PopCount(entryOutDeqValidVec.drop(params.numEnq)))
+  XSPerfAccumulate(s"othersEntry_all_out_trans_cnt", PopCount(entryOutTransValidVec.drop(params.numEnq)))
 }
 
 class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
