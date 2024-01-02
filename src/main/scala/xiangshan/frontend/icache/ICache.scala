@@ -297,7 +297,7 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
         tagArrays(i).io.w.req.bits.apply(
           data = io.cacheOp.req.bits.write_tag_low,
           setIdx = io.cacheOp.req.bits.index,
-          waymask = UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))
+          waymask = UIntToOH(io.cacheOp.req.bits.wayNum(log2Ceil(nWays) - 1, 0))
         )
       }
       cacheOpShouldResp := true.B
