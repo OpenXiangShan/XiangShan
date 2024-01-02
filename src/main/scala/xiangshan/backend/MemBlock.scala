@@ -277,6 +277,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     io.error.valid := false.B
   }
 
+  println("Enable 3-load and 3-store: " + Enable3Load3Store)
   val loadUnits = Seq.fill(exuParameters.LduCnt)(Module(new LoadUnit))
   val storeUnits = Seq.fill(exuParameters.StuCnt)(Module(new StoreUnit))
   val stdExeUnits = Seq.fill(exuParameters.StuCnt)(Module(new StdExeUnit))
@@ -498,9 +499,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val ptw_resp_v = RegNext(ptwio.resp.valid && !(sfence.valid && tlbcsr.satp.changed), init = false.B)
   ptwio.resp.ready := true.B
 
-  val tlbreplay = WireInit(VecInit(Seq.fill(2)(false.B)))
+  val tlbReplayWidth = (if (Enable3Load3Store) 3 else 2)
+  val tlbreplay = WireInit(VecInit(Seq.fill(tlbReplayWidth)(false.B)))
   dontTouch(tlbreplay)
-  for (i <- 0 until 2) {
+  for (i <- 0 until tlbReplayWidth) {
     tlbreplay(i) := dtlb_ld(0).ptw.req(i).valid && ptw_resp_next.vector(0) && ptw_resp_v &&
       ptw_resp_next.data.hit(dtlb_ld(0).ptw.req(i).bits.vpn, tlbcsr.satp.asid, allType = true, ignoreAsid = true)
   }
