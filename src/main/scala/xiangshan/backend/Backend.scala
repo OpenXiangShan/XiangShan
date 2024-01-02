@@ -54,7 +54,7 @@ class FakeMemBlockWbSourceImp(outer: FakeMemBlockWbSource) extends LazyModuleImp
 }
 
 // Merge CtrlBlock, exuBlocks, wbArbiter, wb2Ctrl, etc into 1 module
-class Backend(memWbSource: HasWritebackSource)(implicit p: Parameters) extends LazyModule 
+class Backend(memWbSource: HasWritebackSource)(implicit p: Parameters) extends LazyModule
   with HasXSParameter
   with HasExuWbHelper
 {
@@ -158,7 +158,7 @@ class BackendImp(outer: Backend)(implicit p: Parameters) extends LazyModuleImp(o
       val loadFastImm = Vec(exuParameters.LduCnt, Output(UInt(12.W)))
       val rsfeedback = Vec(exuParameters.LsExuCnt, Flipped(new MemRSFeedbackIO()(p.alter((site, here, up) => {
         case XSCoreParamsKey => up(XSCoreParamsKey).copy(
-          IssQueSize = IssQueSize * 2
+          IssQueSize = IssQueSize * (if (Enable3Load3Store) 3 else 2)
         )
       }))))
       val loadPc = Vec(exuParameters.LduCnt, Output(UInt(VAddrBits.W)))
@@ -337,7 +337,12 @@ class BackendImp(outer: Backend)(implicit p: Parameters) extends LazyModuleImp(o
 
   ctrlBlock.perfinfo.perfEventsEu0 := exuBlocks(0).getPerf.dropRight(outer.exuBlocks(0).scheduler.numRs)
   ctrlBlock.perfinfo.perfEventsEu1 := exuBlocks(1).getPerf.dropRight(outer.exuBlocks(1).scheduler.numRs)
-  ctrlBlock.perfinfo.perfEventsRs  := outer.exuBlocks.flatMap(b => b.module.getPerf.takeRight(b.scheduler.numRs))
+
+  if (Enable3Load3Store) {
+    ctrlBlock.perfinfo.perfEventsRs  := DontCare // outer.exuBlocks.flatMap(b => b.module.getPerf.takeRight(b.scheduler.numRs))
+  } else {
+    ctrlBlock.perfinfo.perfEventsRs  := outer.exuBlocks.flatMap(b => b.module.getPerf.takeRight(b.scheduler.numRs))
+  }
 
   csrioIn.hartId <> io.hartId
 
