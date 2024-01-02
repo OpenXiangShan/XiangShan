@@ -32,7 +32,7 @@ import xiangshan.backend.fu._
 import xiangshan.backend.fu.util.SdtrigExt
 import xiangshan.cache._
 import xiangshan.cache.wpu.ReplayCarry
-import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
+import xiangshan.cache.mmu.{TlbCmd, TlbHintReq, TlbReq, TlbRequestIO, TlbResp}
 import xiangshan.mem.mdp._
 
 class HybridUnit(implicit p: Parameters) extends XSModule
@@ -66,6 +66,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
       val tl_d_channel  = Input(new DcacheToLduForwardIO)
       val forward_mshr  = Flipped(new LduToMissqueueForwardIO)
       val refill        = Flipped(ValidIO(new Refill))
+      val tlb_hint      = Flipped(new TlbHintReq)
       val l2_hint       = Input(Valid(new L2ToL1Hint))
 
       // fast wakeup
@@ -1053,6 +1054,8 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   s2_out.rep_info.mshr_id         := io.ldu_io.dcache.resp.bits.mshr_id
   s2_out.rep_info.last_beat       := s2_in.paddr(log2Up(refillBytes))
   s2_out.rep_info.debug           := s2_in.uop.debugInfo
+  s2_out.rep_info.tlb_id          := io.ldu_io.tlb_hint.id
+  s2_out.rep_info.tlb_full        := io.ldu_io.tlb_hint.full
 
   // if forward fail, replay this inst from fetch
   val debug_fwd_fail_rep = s2_fwd_fail && !s2_troublem && !s2_in.tlbMiss

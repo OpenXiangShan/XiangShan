@@ -523,7 +523,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   // dtlb
   val dtlb_ld = VecInit(Seq.fill(1){
-    val tlb_ld = Module(new TLBNonBlock(LduCnt + 1 + HyuCnt, 2, ldtlbParams))
+    val tlb_ld = Module(new TLBNonBlock(LduCnt + HyuCnt + 1, 2, ldtlbParams))
     tlb_ld.io // let the module have name in waveform
   })
   val dtlb_st = VecInit(Seq.fill(1){
@@ -535,7 +535,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     tlb_prefetch.io // let the module have name in waveform
   })
   val dtlb = dtlb_ld ++ dtlb_st ++ dtlb_prefetch
-  val ptwio = Wire(new VectorTlbPtwIO(LduCnt + 1 + HyuCnt + StaCnt + 1)) // load + stream prefetch + hybrid + store + hw prefetch
+  val ptwio = Wire(new VectorTlbPtwIO(LduCnt + HyuCnt + 1 + StaCnt + 1)) // load + stream prefetch + hybrid + store + hw prefetch
   val dtlb_reqs = dtlb.map(_.requestor).flatten
   val dtlb_pmps = dtlb.map(_.pmp).flatten
   dtlb.map(_.hartId := io.hartId)
@@ -548,9 +548,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     require(ldtlbParams.outReplace == pftlbParams.outReplace)
     require(ldtlbParams.outReplace)
 
-    val replace = Module(new TlbReplace(LduCnt + 1 + HyuCnt + StaCnt + 1, ldtlbParams))
+    val replace = Module(new TlbReplace(LduCnt + HyuCnt + 1 + StaCnt + 1, ldtlbParams))
     replace.io.apply_sep(dtlb_ld.map(_.replace) ++ dtlb_st.map(_.replace) ++ dtlb_prefetch.map(_.replace), ptwio.resp.bits.data.entry.tag)
   } else {
+    // TODO: there will be bugs in TlbReplace when outReplace enable, since the order of Hyu is not right.
     if (ldtlbParams.outReplace) {
       val replace_ld = Module(new TlbReplace(LduCnt + 1, ldtlbParams))
       replace_ld.io.apply_sep(dtlb_ld.map(_.replace), ptwio.resp.bits.data.entry.tag)
@@ -573,9 +574,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val ptw_resp_v = RegNext(ptwio.resp.valid && !(sfence.valid && tlbcsr.satp.changed), init = false.B)
   ptwio.resp.ready := true.B
 
-  val tlbreplay = WireInit(VecInit(Seq.fill(2)(false.B)))
+  val tlbreplay = WireInit(VecInit(Seq.fill(LdExuCnt)(false.B)))
   dontTouch(tlbreplay)
-  for (i <- 0 until 2) {
+  for (i <- 0 until LdExuCnt) {
     tlbreplay(i) := dtlb_ld(0).ptw.req(i).valid && ptw_resp_next.vector(0) && ptw_resp_v &&
       ptw_resp_next.data.hit(dtlb_ld(0).ptw.req(i).bits.vpn, tlbcsr.satp.asid, allType = true, ignoreAsid = true)
   }
@@ -586,10 +587,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       tlb.ready := ptwio.req(i).ready
       ptwio.req(i).bits := tlb.bits
     val vector_hit = if (refillBothTlb) Cat(ptw_resp_next.vector).orR
-      else if (i < (LduCnt + 1)) Cat(ptw_resp_next.vector.take(LduCnt + 1)).orR
-      else if (i < (LduCnt + 1 + HyuCnt)) Cat(ptw_resp_next.vector.drop(LduCnt + 1).take(HyuCnt)).orR
-      else if (i < (LduCnt + 1 + HyuCnt + StaCnt)) Cat(ptw_resp_next.vector.drop(LduCnt + 1 + HyuCnt).take(StaCnt)).orR
-      else Cat(ptw_resp_next.vector.drop(LduCnt + 1 + HyuCnt + StaCnt)).orR
+      else if (i < (LduCnt + HyuCnt + 1)) Cat(ptw_resp_next.vector.take(LduCnt + HyuCnt + 1)).orR
+      else if (i < (LduCnt + HyuCnt + 1 + StaCnt)) Cat(ptw_resp_next.vector.drop(LduCnt + HyuCnt + 1).take(StaCnt)).orR
+      else Cat(ptw_resp_next.vector.drop(LduCnt + HyuCnt + 1 + StaCnt)).orR
     ptwio.req(i).valid := tlb.valid && !(ptw_resp_v && vector_hit &&
       ptw_resp_next.data.hit(tlb.bits.vpn, tlbcsr.satp.asid, allType = true, ignoreAsid = true))
   }
@@ -597,9 +597,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   if (refillBothTlb) {
     dtlb.foreach(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector).orR)
   } else {
-    dtlb_ld.foreach(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector.take(LduCnt + 1 + HyuCnt)).orR)
-    dtlb_st.foreach(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector.slice(LduCnt + 1 + HyuCnt, LduCnt + 1 + HyuCnt + StaCnt)).orR)
-    dtlb_prefetch.foreach(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector.drop(LduCnt + 1 + HyuCnt + StaCnt)).orR)
+    dtlb_ld.foreach(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector.take(LduCnt + HyuCnt + 1)).orR)
+    dtlb_st.foreach(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector.slice(LduCnt + HyuCnt + 1, LduCnt + HyuCnt + 1 + StaCnt)).orR)
+    dtlb_prefetch.foreach(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector.drop(LduCnt + HyuCnt + 1 + StaCnt)).orR)
   }
 
   val dtlbRepeater  = PTWNewFilter(ldtlbParams.fenceDelay, ptwio, ptw.io.tlb(1), sfence, tlbcsr, l2tlbParams.dfilterSize)
@@ -611,7 +611,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val pmp = Module(new PMP())
   pmp.io.distribute_csr <> csrCtrl.distribute_csr
 
-  val pmp_check = VecInit(Seq.fill(LduCnt + 1 + HyuCnt + StaCnt + 1)(Module(new PMPChecker(3)).io))
+  val pmp_check = VecInit(Seq.fill(LduCnt + HyuCnt + 1 + StaCnt + 1)(Module(new PMPChecker(3)).io))
   for ((p,d) <- pmp_check zip dtlb_pmps) {
     p.apply(tlbcsr.priv.dmode, pmp.io.pmp, pmp.io.pma, d)
     require(p.req.bits.size.getWidth == d.bits.size.getWidth)
@@ -814,10 +814,14 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     hybridUnits(i).io.csrCtrl <> csrCtrl
     // dcache refill req
     hybridUnits(i).io.ldu_io.refill <> delayedDcacheRefill
+    hybridUnits(i).io.ldu_io.tlb_hint.id := dtlbRepeater.io.hint.get.req(LduCnt + i).id
+    hybridUnits(i).io.ldu_io.tlb_hint.full := dtlbRepeater.io.hint.get.req(LduCnt + i).full ||
+      RegNext(tlbreplay(LduCnt + i)) || RegNext(dtlb_ld(0).tlbreplay(LduCnt + i))
+
     // dtlb
-    hybridUnits(i).io.tlb <> dtlb_ld.head.requestor(LduCnt + 1 + i)
+    hybridUnits(i).io.tlb <> dtlb_ld.head.requestor(LduCnt + i)
     // pmp
-    hybridUnits(i).io.pmp <> pmp_check.drop(LduCnt + 1)(i).resp
+    hybridUnits(i).io.pmp <> pmp_check.drop(LduCnt)(i).resp
     // st-ld violation query
     val stld_nuke_query = VecInit(storeUnits.map(_.io.stld_nuke_query) ++ hybridUnits.map(_.io.stu_io.stld_nuke_query))
     hybridUnits(i).io.ldu_io.stld_nuke_query := stld_nuke_query
@@ -965,8 +969,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
 
   // Prefetcher
-  val StreamDTLBPortIndex = LduCnt
-  val PrefetcherDTLBPortIndex = LduCnt + StaCnt + HyuCnt + 1
+  val StreamDTLBPortIndex = LduCnt + HyuCnt // should be 3
+  val PrefetcherDTLBPortIndex = LduCnt + HyuCnt + 1 + StaCnt // should be 5
   prefetcherOpt match {
   case Some(pf) => dtlb_reqs(PrefetcherDTLBPortIndex) <> pf.io.tlb_req
   case None =>
@@ -1002,7 +1006,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stu.io.lsq_vec       <> lsq.io.sta.vecStoreAddrIn(i)
     // dtlb
     stu.io.tlb          <> dtlb_st.head.requestor(i)
-    stu.io.pmp          <> pmp_check(LduCnt + 1 + HyuCnt + i).resp
+    stu.io.pmp          <> pmp_check(LduCnt + HyuCnt + 1 + i).resp
 
     // prefetch
     stu.io.prefetch_req <> sbuffer.io.store_prefetch(i)
