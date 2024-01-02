@@ -134,6 +134,9 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val transEntry            = ValidIO(new EntryBundle)
     // debug
     val cancel                = OptionWrapper(params.hasIQWakeUp, Output(Bool()))
+    val entryInValid          = Output(Bool())
+    val entryOutDeqValid      = Output(Bool())
+    val entryOutTransValid    = Output(Bool())
   }
 
   class CommonWireBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
@@ -344,7 +347,11 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     commonOut.enqReady                                := common.enqReady
     commonOut.transEntry.valid                        := validReg && !common.flushed && !common.deqSuccess
     commonOut.transEntry.bits                         := entryUpdate
+    // debug
     commonOut.cancel.foreach(_                        := hasIQWakeupGet.cancelVec.asUInt.orR)
+    commonOut.entryInValid                            := commonIn.enq.valid
+    commonOut.entryOutDeqValid                        := validReg && (common.flushed || common.deqSuccess)
+    commonOut.entryOutTransValid                      := validReg && commonIn.transSel && !(common.flushed || common.deqSuccess)
   }
 
   def EntryMemConnect(commonIn: CommonInBundle, common: CommonWireBundle, validReg: Bool, entryReg: EntryBundle, entryRegNext: EntryBundle, entryUpdate: EntryBundle, isEnq: Boolean)(implicit p: Parameters, params: IssueBlockParams) = {
