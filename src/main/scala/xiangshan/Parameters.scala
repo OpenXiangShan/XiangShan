@@ -457,6 +457,10 @@ trait HasXSParameter {
   val EnableAtCommitMissTrigger = coreParams.EnableAtCommitMissTrigger
   val EnableStorePrefetchSMS = coreParams.EnableStorePrefetchSMS
   val EnableStorePrefetchSPB = coreParams.EnableStorePrefetchSPB
+  require(LoadPipelineWidth == StorePipelineWidth, "LoadPipelineWidth must be equal StorePipelineWidth!")
+  require(LoadPipelineWidth == exuParameters.LduCnt, "LoadPipelineWidth must be equal exuParameters.LduCnt!")
+  require(StorePipelineWidth == exuParameters.StuCnt, "StorePipelineWidth must be equal exuParameters.StuCnt!")
+  val Enable3Load3Store = (LoadPipelineWidth == 3 && StorePipelineWidth == 3)
   val asidLen = coreParams.MMUAsidLen
   val BTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
   val refillBothTlb = coreParams.refillBothTlb

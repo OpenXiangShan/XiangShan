@@ -198,6 +198,12 @@ class Dispatch2RsDistinctImp(outer: Dispatch2Rs)(implicit p: Parameters) extends
     val blockLoads = isLoadArrays.map(PopCount(_) >= LoadPipelineWidth.U)
     val blockStores = isStoreArrays.map(PopCount(_) >= StorePipelineWidth.U)
 
+    for (i <- 0 until enqLsq.req.length) {
+      enqLsq.needAlloc(i) := false.B
+      enqLsq.req(i).valid := false.B
+      enqLsq.req(i).bits := DontCare
+    }
+
     for (i <- io.in.indices) {
       is_blocked(i) := (
         if (i >= LoadPipelineWidth) Mux(isStore(i), blockStores(i), blockLoads(i)) || is_blocked(i - 1)
