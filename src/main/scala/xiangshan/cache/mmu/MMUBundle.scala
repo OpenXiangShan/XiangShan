@@ -841,10 +841,11 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
   }
 
   //s2xlate control whether compare vmid or not
-  def hit(vpn: UInt, asid: UInt, vmid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false, s2xlate: Bool) = {
+  def hit(vpn: UInt, asid: UInt, vasid: UInt, vmid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false, s2xlate: Bool) = {
     require(vpn.getWidth == vpnLen)
 //    require(this.asid.getWidth <= asid.getWidth)
-    val asid_hit = if (ignoreAsid) true.B else (this.asid === asid)
+    val asid_value = Mux(s2xlate, vasid, asid)
+    val asid_hit = if (ignoreAsid) true.B else (this.asid === asid_value)
     val vmid_hit = Mux(s2xlate, (this.vmid.getOrElse(0.U) === vmid), true.B)
     if (allType) {
       require(hasLevel)
@@ -934,8 +935,9 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
     getVpnClip(vpn, level)(log2Up(num) - 1, 0)
   }
 
-  def hit(vpn: UInt, asid: UInt, vmid:UInt, ignoreAsid: Boolean = false, s2xlate: Bool) = {
-    val asid_hit = if (ignoreAsid) true.B else (this.asid === asid)
+  def hit(vpn: UInt, asid: UInt, vasid: UInt, vmid:UInt, ignoreAsid: Boolean = false, s2xlate: Bool) = {
+    val asid_value = Mux(s2xlate, vasid, asid)
+    val asid_hit = if (ignoreAsid) true.B else (this.asid === asid_value)
     val vmid_hit = Mux(s2xlate, this.vmid.getOrElse(0.U) === vmid, true.B)
     asid_hit && vmid_hit && tag === tagClip(vpn) && (if (hasPerm) true.B else vs(sectorIdxClip(vpn, level)))
   }

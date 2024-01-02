@@ -98,7 +98,7 @@ class PTWRepeaterNB(Width: Int = 1, passReady: Boolean = false, FenceDelay: Int)
     arb.io.in <> io.tlb.req
     arb.io.out
   }
-  val (tlb, ptw, flush) = (io.tlb, io.ptw, DelayN(io.sfence.valid || io.csr.satp.changed, FenceDelay))
+  val (tlb, ptw, flush) = (io.tlb, io.ptw, DelayN(io.sfence.valid || io.csr.satp.changed || (io.csr.priv.virt && io.csr.vsatp.changed), FenceDelay))
   /* sent: tlb -> repeater -> ptw
    * recv: ptw -> repeater -> tlb
    * different from PTWRepeater
@@ -353,7 +353,7 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
   store_filter.map(_.tlb.req := io.tlb.req.drop(exuParameters.LduCnt + 1).take(exuParameters.StuCnt))
   prefetch_filter.map(_.tlb.req := io.tlb.req.drop(exuParameters.LduCnt + 1 + exuParameters.StuCnt))
 
-  val flush = DelayN(io.sfence.valid || io.csr.satp.changed, FenceDelay)
+  val flush = DelayN(io.sfence.valid || io.csr.satp.changed || (io.csr.priv.virt && io.csr.vsatp.changed), FenceDelay)
   val ptwResp = RegEnable(io.ptw.resp.bits, io.ptw.resp.fire)
   val ptwResp_valid = Cat(filter.map(_.refill)).orR
   filter.map(_.tlb.resp.ready := true.B)
