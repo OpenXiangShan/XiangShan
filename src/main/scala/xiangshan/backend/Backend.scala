@@ -18,7 +18,7 @@ import xiangshan.backend.fu.vector.Bundles.{VConfig, VType}
 import xiangshan.backend.fu.{FenceIO, FenceToSbuffer, FuConfig, FuType, PerfCounterIO}
 import xiangshan.backend.issue.{CancelNetwork, Scheduler, SchedulerImpBase}
 import xiangshan.backend.rob.{RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO}
-import xiangshan.frontend.{FtqPtr, FtqRead}
+import xiangshan.frontend.{FtqPtr, FtqRead, PreDecodeInfo}
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 
 class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyModule
@@ -303,8 +303,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   }
 
   pcTargetMem.io.fromFrontendFtq := io.frontend.fromFtq
-  pcTargetMem.io.fromDataPathFtq := bypassNetwork.io.toExus.int.flatten.filter(_.bits.params.hasPredecode).map(_.bits.ftqIdx.get).toSeq
-  intExuBlock.io.in.flatten.filter(_.bits.params.hasPredecode).map(_.bits.predictInfo.get.target).zipWithIndex.foreach {
+  pcTargetMem.io.fromDataPathFtq := bypassNetwork.io.toExus.int.flatten.filter(_.bits.params.needTarget).map(_.bits.ftqIdx.get).toSeq
+  intExuBlock.io.in.flatten.filter(_.bits.params.needTarget).map(_.bits.predictInfo.get.target).zipWithIndex.foreach {
     case (sink, i) =>
       sink := pcTargetMem.io.toExus(i)
   }
@@ -381,6 +381,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     sink.bits.debugInfo := source.bits.uop.debugInfo
     sink.bits.lqIdx.foreach(_ := source.bits.uop.lqIdx)
     sink.bits.sqIdx.foreach(_ := source.bits.uop.sqIdx)
+    sink.bits.predecodeInfo.foreach(_ := source.bits.uop.preDecodeInfo)
     sink.bits.vls.foreach(x => {
       x.vdIdx := source.bits.vdIdx.get
       x.vdIdxInField := source.bits.vdIdxInField.get
@@ -469,6 +470,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     sink.bits.uop.ftqOffset := source.bits.ftqOffset.getOrElse(0.U)
     sink.bits.uop.debugInfo := source.bits.perfDebugInfo
     sink.bits.uop.vpu       := source.bits.vpu.getOrElse(0.U.asTypeOf(new VPUCtrlSignals))
+    sink.bits.uop.preDecodeInfo := source.bits.preDecode.getOrElse(0.U.asTypeOf(new PreDecodeInfo))
   }
   io.mem.loadFastMatch := memScheduler.io.toMem.get.loadFastMatch.map(_.fastMatch)
   io.mem.loadFastImm := memScheduler.io.toMem.get.loadFastMatch.map(_.fastImm)

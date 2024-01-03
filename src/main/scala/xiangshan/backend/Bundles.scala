@@ -454,7 +454,7 @@ object Bundles {
                                                   Some(new FtqPtr)                    else None
     val ftqOffset     = if (params.needPc || params.replayInst || params.hasStoreAddrFu)
                                                   Some(UInt(log2Up(PredictWidth).W))  else None
-    val predictInfo   = if (params.hasPredecode)  Some(new Bundle {
+    val predictInfo   = if (params.needPdInfo)  Some(new Bundle {
       val target = UInt(VAddrData().dataWidth.W)
       val taken = Bool()
     }) else None
