@@ -1290,8 +1290,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val s_normal +: s_atomics = Enum(StaCnt + HyuCnt + 1)
   val state = RegInit(s_normal)
 
-  val atomic_rs = (0 until StaCnt).map(LduCnt + _)
-  val atomic_replay_port_idx = (0 until StaCnt)
   val st_atomics = Seq.tabulate(StaCnt)(i =>
     io.ooo_to_mem.issueSta(i).valid && FuType.storeIsAMO((io.ooo_to_mem.issueSta(i).bits.uop.fuType))
   ) ++ Seq.tabulate(HyuCnt)(i =>
