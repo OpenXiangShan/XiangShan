@@ -394,6 +394,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val mtvecMask = ~(0x2.U(XLEN.W))
   val mtvec = RegInit(UInt(XLEN.W), 0.U)
   val mcounteren = RegInit(UInt(XLEN.W), 0.U)
+  // Currently, XiangShan don't support Unprivileged Counter/Timers CSRs ("Zicntr" and "Zihpm")
+  val mcounterenMask = 0.U(XLEN.W)
   val mcause = RegInit(UInt(XLEN.W), 0.U)
   val mtval = RegInit(UInt(XLEN.W), 0.U)
   val mtval2 = RegInit(UInt(XLEN.W), 0.U)
@@ -547,6 +549,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val sscratch = RegInit(UInt(XLEN.W), 0.U)
   val scounteren = RegInit(UInt(XLEN.W), 0.U)
   val senvcfg = RegInit(UInt(XLEN.W), 0.U)  // !WARNING: there is no logic about this CSR.
+  // Currently, XiangShan don't support Unprivileged Counter/Timers CSRs ("Zicntr" and "Zihpm")
+  val scounterenMask = 0.U(XLEN.W)
 
   // sbpctl
   // Bits 0-7: {LOOP, RAS, SC, TAGE, BIM, BTB, uBTB}
@@ -673,7 +677,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val hgatpMask = Cat("h8".U(Hgatp_Mode_len.W), satp_part_wmask(Hgatp_Vmid_len, VmidLength), satp_part_wmask(Hgatp_Addr_len, PAddrBits-12))
   val htimedelta = RegInit(UInt(XLEN.W), 0.U)
   val hcounteren = RegInit(UInt(XLEN.W), 0.U)
-  val hcounterenMask = 0.U(XLEN.W) //will be used by ZICNTR or ZIHPM
+  // Currently, XiangShan don't support Unprivileged Counter/Timers CSRs ("Zicntr" and "Zihpm")
+  val hcounterenMask = 0.U(XLEN.W)
 
   val vsstatus = RegInit("h200002000".U(XLEN.W))
   val vsstatusStruct = vsstatus.asTypeOf(new MstatusStruct)
@@ -801,6 +806,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     // MaskedRegMap(Uip, uip),
 
     //--- User Counter/Timers ---
+    // TODO: support Unprivileged Counter/Timers CSRs ("Zicntr" and "Zihpm")
     // MaskedRegMap(Cycle, cycle),
     // MaskedRegMap(Time, time),
     // MaskedRegMap(Instret, instret),
@@ -811,7 +817,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     // MaskedRegMap(Sideleg, Sideleg),
     MaskedRegMap(Sie, mie, sieMask, MaskedRegMap.NoSideEffect, sieMask),
     MaskedRegMap(Stvec, stvec, stvecMask, MaskedRegMap.NoSideEffect, stvecMask),
-    MaskedRegMap(Scounteren, scounteren),
+    MaskedRegMap(Scounteren, scounteren, scounterenMask),
 
     //--- Supervisor Configuration ---
     MaskedRegMap(Senvcfg, senvcfg),
@@ -852,7 +858,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Mideleg, mideleg, midelegWMask, MaskedRegMap.NoSideEffect),
     MaskedRegMap(Mie, mie, mieWMask, MaskedRegMap.NoSideEffect),
     MaskedRegMap(Mtvec, mtvec, mtvecMask, MaskedRegMap.NoSideEffect, mtvecMask),
-    MaskedRegMap(Mcounteren, mcounteren),
+    MaskedRegMap(Mcounteren, mcounteren, mcounterenMask),
 
     //--- Machine Trap Handling ---
     MaskedRegMap(Mscratch, mscratch),
@@ -1052,7 +1058,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   csrio.customCtrl.trigger_enable := tdata1Phy.map{t =>
     def tdata1 = t.asTypeOf(new TdataBundle)
     tdata1.m && privilegeMode === ModeM ||
-    tdata1.s && privilegeMode === ModeS || tdata1.u && privilegeMode === ModeU
+    tdata1.s && privilegeMode === ModeS ||  tdata1.u && privilegeMode === ModeU
   }
   csrio.customCtrl.frontend_trigger.t.valid := RegNext(wen && (addr === Tdata1.U || addr === Tdata2.U) && TypeLookup(tselectPhy) === I_Trigger)
   csrio.customCtrl.mem_trigger.t.valid := RegNext(wen && (addr === Tdata1.U || addr === Tdata2.U) && TypeLookup(tselectPhy) =/= I_Trigger)
