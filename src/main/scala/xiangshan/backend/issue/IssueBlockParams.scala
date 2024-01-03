@@ -229,7 +229,7 @@ case class IssueBlockParams(
 
   def hasIQWakeUp: Boolean = numWakeupFromIQ > 0
 
-  def needWakeupFromIntWBPort = backendParam.allExuParams.filter(x => !wakeUpInExuSources.map(_.name).contains(x.name) || x.hasLoadFu).groupBy(x => x.getIntWBPort.getOrElse(IntWB(port = -1)).port).filter(_._1 != -1)
+  def needWakeupFromIntWBPort = backendParam.allExuParams.filter(x => !wakeUpInExuSources.map(_.name).contains(x.name)).groupBy(x => x.getIntWBPort.getOrElse(IntWB(port = -1)).port).filter(_._1 != -1)
 
   def needWakeupFromVfWBPort = backendParam.allExuParams.groupBy(x => x.getVfWBPort.getOrElse(VfWB(port = -1)).port).filter(_._1 != -1)
 
