@@ -82,7 +82,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     size = LoadQueueRARSize,
     allocWidth = LoadPipelineWidth,
     freeWidth = 4,
-    enablePreAlloc = true,
+    enablePreAlloc = false,
     moduleName = "LoadQueueRAR freelist"
   ))
   freeList.io := DontCare
@@ -96,33 +96,43 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
 
   // LoadQueueRAR enqueue condition:
   // There are still not completed load instructions before the current load instruction.
-  // (e.g. "not completed" means that load instruction get the data or exception).
-  val canEnqueue = io.query.map(_.req.valid)
-  val cancelEnqueue = io.query.map(_.req.bits.uop.robIdx.needFlush(io.redirect))
-  val hasNotWritebackedLoad = io.query.map(_.pre_req).map(x => RegNext(x.valid && isAfter(x.bits.uop.lqIdx, io.ldWbPtr)))
-  val needEnqueue = canEnqueue.zip(hasNotWritebackedLoad).zip(cancelEnqueue).map { case ((v, r), c) => v && r && !c }
+  // (e.g. "not completed" means that load instruction get the data or
+  // exception).
+  // pre-Allocate logic
+  val s0_preReqs = io.query.map(_.pre_req.valid)
+  val s0_hasNotWritebackedLoad = io.query.map(_.pre_req).map(x => x.valid && isAfter(x.bits.uop.lqIdx, io.ldWbPtr))
+  val s0_preEnqs = s0_preReqs.zip(s0_hasNotWritebackedLoad).map { case (v, r) => v && r }
+  val s0_canAccepts = Wire(Vec(LoadPipelineWidth, Bool()))
+  val s0_enqIdxs = Wire(Vec(LoadPipelineWidth, UInt()))
+
+  for ((pre_req, w) <- io.query.map(_.pre_req).zipWithIndex) {
+    freeList.io.allocateReq(w) := true.B
+
+    val offset = PopCount(s0_preEnqs.take(w))
+    s0_canAccepts(w) := freeList.io.canAllocate(offset)
+    s0_enqIdxs(w) := freeList.io.allocateSlot(offset)
+    pre_req.ready := s0_canAccepts(w)
+  }
 
   // Allocate logic
-  val acceptedVec = Wire(Vec(LoadPipelineWidth, Bool()))
-  val enqIndexVec = Wire(Vec(LoadPipelineWidth, UInt()))
+  val s1_canEnqs = io.query.map(_.req.valid)
+  val s1_hasNotWritebackedLoad = RegNext(VecInit(s0_hasNotWritebackedLoad))
+  val s1_needEnqs = s1_canEnqs.zip(s1_hasNotWritebackedLoad).map { case (v, r) => v && r }
+  val s1_canAccepts = RegNext(s0_canAccepts)
+  val s1_enqIdxs = RegNext(s0_enqIdxs)
+  val s1_accepts = Wire(Vec(LoadPipelineWidth, Bool()))
 
-  val canAcceptCount = PopCount(freeList.io.canAllocate)
   for ((enq, w) <- io.query.map(_.req).zipWithIndex) {
-    acceptedVec(w) := false.B
+    s1_accepts(w) := false.B
     paddrModule.io.wen(w) := false.B
     freeList.io.doAllocate(w) := false.B
 
-    freeList.io.allocateReq(w) := true.B
-
     //  Allocate ready
-    val offset = PopCount(needEnqueue.take(w))
-    val canAccept = canAcceptCount >= (w+1).U
-    val enqIndex = freeList.io.allocateSlot(offset)
-    enq.ready := canAccept
+    val canAccept = s1_canAccepts(w)
+    val enqIndex = s1_enqIdxs(w)
 
-    enqIndexVec(w) := enqIndex
-    when (needEnqueue(w) && enq.ready) {
-      acceptedVec(w) := true.B
+    when (s1_needEnqs(w) && canAccept) {
+      s1_accepts(w) := true.B
 
       val debug_robIdx = enq.bits.uop.robIdx.asUInt
       XSError(allocated(enqIndex), p"LoadQueueRAR: You can not write an valid entry! check: ldu $w, robIdx $debug_robIdx")
@@ -169,12 +179,12 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   }
 
   // if need replay revoke entry
-  val lastCanAccept = RegNext(acceptedVec)
-  val lastAllocIndex = RegNext(enqIndexVec)
+  val s2_accepts = RegNext(s1_accepts)
+  val s2_enqIdxs = RegNext(s1_enqIdxs)
 
   for ((revoke, w) <- io.query.map(_.revoke).zipWithIndex) {
-    val revokeValid = revoke && lastCanAccept(w)
-    val revokeIndex = lastAllocIndex(w)
+    val revokeValid = revoke && s2_accepts(w)
+    val revokeIndex = s2_enqIdxs(w)
 
     when (allocated(revokeIndex) && revokeValid) {
       allocated(revokeIndex) := false.B
@@ -234,7 +244,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   io.lqFull := freeList.io.empty
 
   // perf cnt
-  val canEnqCount = PopCount(io.query.map(_.req.fire))
+  val canEnqCount = PopCount(s1_accepts)
   val validCount = freeList.io.validCount
   val allowEnqueue = validCount <= (LoadQueueRARSize - LoadPipelineWidth).U
   val ldLdViolationCount = PopCount(io.query.map(_.resp).map(resp => resp.valid && resp.bits.rep_frm_fetch))
