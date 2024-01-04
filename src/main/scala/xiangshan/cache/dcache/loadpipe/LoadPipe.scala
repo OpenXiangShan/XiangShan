@@ -297,6 +297,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_encTag = ParallelMux(s1_tag_match_way_dup_dc.asBools, (0 until nWays).map(w => io.tag_resp(w)))
   val s1_flag_error = Mux(s1_need_replacement, false.B, s1_hit_error) // error reported by exist dcache error bit
 
+  io.lsu.s1_dcache_miss_fast := !s1_tag_match_way_dup_dc.orR
   // --------------------------------------------------------------------------------
   // stage 2
   // --------------------------------------------------------------------------------
