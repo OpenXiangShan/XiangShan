@@ -29,6 +29,7 @@ import xiangshan.cache.{DCacheLineIO, DCacheWordIO, MemoryOpConstants}
 import xiangshan.backend._
 import xiangshan.backend.rob.{RobLsqIO, RobPtr}
 import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
+import xiangshan.backend.decode.isa.bitfield.{Riscv32BitInst, XSInstBitFields}
 
 class SqPtr(implicit p: Parameters) extends CircularQueuePtr[SqPtr](
   p => p(XSCoreParamsKey).StoreQueueSize
@@ -219,6 +220,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val offset = if (i == 0) 0.U else PopCount(io.enq.needAlloc.take(i))
     val sqIdx = enqPtrExt(offset)
     val index = io.enq.req(i).bits.sqIdx.value
+    val enqInstr = io.enq.req(i).bits.instr.asTypeOf(new XSInstBitFields)
     when (canEnqueue(i) && !enqCancel(i)) {
       uop(index) := io.enq.req(i).bits
       // NOTE: the index will be used when replay
@@ -230,7 +232,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       pending(index) := false.B
       prefetch(index) := false.B
       mmio(index) := false.B
-      vec(index) := io.enq.req(i).bits.instr(6, 0) === "b0100111".U // TODO
+      vec(index) := enqInstr.isVecStore // check vector store by the encoding of inst
       vecAddrvalid(index) := false.B//TODO
 
       XSError(!io.enq.canAccept || !io.enq.lqCanAccept, s"must accept $i\n")
