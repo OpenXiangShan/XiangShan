@@ -76,7 +76,7 @@ class Regfile
 
   val mem = Reg(Vec(numPregs, UInt(len.W)))
   for (r <- io.readPorts) {
-    r.data := RegNext(mem(r.addr))
+    r.data := mem(RegNext(r.addr))
   }
   val writePorts = io.writePorts
   for (i <- writePorts.indices) {
