@@ -809,7 +809,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_tlb_miss      = s2_in.tlbMiss
   val s2_fwd_fail      = io.lsq.forward.dataInvalid
 
-  val s2_dcache_miss_orig = io.dcache.resp.bits.miss &&
+  val s2_dcache_miss_orig = RegNext(io.dcache.s1_dcache_miss_fast) &&
                             !s2_fwd_frm_d_chan_or_mshr
   val s2_dcache_miss   =  s2_dcache_miss_orig && !s2_full_fwd
 
