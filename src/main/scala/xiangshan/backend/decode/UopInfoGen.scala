@@ -190,18 +190,18 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     UopSplitType.VSET -> 2.U,
     UopSplitType.VEC_0XV -> 2.U,
     UopSplitType.VEC_VVV -> lmul,
-    UopSplitType.VEC_VFV -> lmul,
+    UopSplitType.VEC_VFV -> (lmul +& 1.U),
     UopSplitType.VEC_EXT2 -> lmul,
     UopSplitType.VEC_EXT4 -> lmul,
     UopSplitType.VEC_EXT8 -> lmul,
     UopSplitType.VEC_VVM -> lmul,
-    UopSplitType.VEC_VFM -> lmul,
+    UopSplitType.VEC_VFM -> (lmul +& 1.U),
     UopSplitType.VEC_VFRED -> numOfUopVFRED,
     UopSplitType.VEC_VFREDOSUM -> numOfUopVFREDOSUM,
     UopSplitType.VEC_VXM -> (lmul +& 1.U),
     UopSplitType.VEC_VXV -> (lmul +& 1.U),
-    UopSplitType.VEC_VFW -> numOfUopWV, // lmul <= 4
-    UopSplitType.VEC_WFW -> numOfUopWV, // lmul <= 4
+    UopSplitType.VEC_VFW -> numOfUopWX, // lmul <= 4
+    UopSplitType.VEC_WFW -> numOfUopWX, // lmul <= 4
     UopSplitType.VEC_VVW -> numOfUopWV, // lmul <= 4
     UopSplitType.VEC_WVW -> numOfUopWV, // lmul <= 4
     UopSplitType.VEC_VXW -> numOfUopWX, // lmul <= 4
@@ -209,9 +209,9 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     UopSplitType.VEC_WVV -> numOfUopWV, // lmul <= 4
     UopSplitType.VEC_WXV -> numOfUopWX, // lmul <= 4
     UopSplitType.VEC_SLIDE1UP -> (lmul +& 1.U),
-    UopSplitType.VEC_FSLIDE1UP -> lmul,
+    UopSplitType.VEC_FSLIDE1UP -> (lmul +& 1.U),
     UopSplitType.VEC_SLIDE1DOWN -> Cat(lmul, 0.U(1.W)),
-    UopSplitType.VEC_FSLIDE1DOWN -> (Cat(lmul, 0.U(1.W)) - 1.U),
+    UopSplitType.VEC_FSLIDE1DOWN -> Cat(lmul, 0.U(1.W)),
     UopSplitType.VEC_VRED -> lmul,
     UopSplitType.VEC_SLIDEUP -> (numOfUopVslide + 1.U),
     UopSplitType.VEC_SLIDEDOWN -> (numOfUopVslide + 1.U),

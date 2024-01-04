@@ -30,6 +30,7 @@ object FuType extends OHEnumeration {
   val brh = addType(name = "brh")
   val i2f = addType(name = "i2f")
   val i2v = addType(name = "i2v")
+  val f2v = addType(name = "f2v")
   val csr = addType(name = "csr")
   val alu = addType(name = "alu")
   val mul = addType(name = "mul")
@@ -69,7 +70,7 @@ object FuType extends OHEnumeration {
   val fpArithAll = Seq(fmac, fmisc, fDivSqrt)
   val scalaMemAll = Seq(ldu, stu, mou)
   val vecOPI = Seq(vipu, vialuF, vppu, vimac)
-  val vecOPF = Seq(vfpu, vfalu, vfma, vfdiv, vfcvt)
+  val vecOPF = Seq(vfpu, vfalu, vfma, vfdiv, vfcvt, f2v)
   val vecVSET = Seq(vsetiwi, vsetiwf, vsetfwf)
   val vecArith = vecOPI ++ vecOPF
   val vecMem = Seq(vldu, vstu)
@@ -149,6 +150,7 @@ object FuType extends OHEnumeration {
     brh -> "brh",
     i2f -> "int_to_float",
     i2v -> "int_to_vector",
+    f2v -> "float_to_vector",
     csr -> "csr",
     alu -> "alu",
     mul -> "mul",
