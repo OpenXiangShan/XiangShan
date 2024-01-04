@@ -71,6 +71,10 @@ trait BitFieldsVec { this: Riscv32BitInst =>
     res.vma   := ZIMM_VSETVLI(7)
     res
   }
+
+  def isVecStore = {
+    this.OPCODE === "b0100111".U && (this.WIDTH === 0.U || this.WIDTH(2) === 1.B)
+  }
 }
 
 class XSInstBitFields extends Riscv32BitInst
