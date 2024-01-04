@@ -609,8 +609,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s1_paddr_dup_lsu    = Wire(UInt())
   val s1_paddr_dup_dcache = Wire(UInt())
   val s1_exception        = ExceptionNO.selectByFu(s1_out.uop.cf.exceptionVec, lduCfg).asUInt.orR   // af & pf exception were modified below.
-  val s1_not_tlb_query    = s1_in.isFastReplay
-  val s1_tlb_miss         = io.tlb.resp.bits.miss && !s1_not_tlb_query
+  val s1_rar_nack         = io.lsq.ldld_nuke_query.pre_req.valid &&
+                            !io.lsq.ldld_nuke_query.pre_req.ready
+  val s1_raw_nack         = io.lsq.stld_nuke_query.pre_req.valid &&
+                            !io.lsq.stld_nuke_query.pre_req.ready
+  val s1_tlb_miss         = io.tlb.resp.bits.miss
   val s1_prf              = s1_in.isPrefetch
   val s1_hw_prf           = s1_in.isHWPrefetch
   val s1_sw_prf           = s1_prf && !s1_hw_prf
@@ -669,6 +672,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s1_out.rsIdx             := s1_in.rsIdx
   s1_out.rep_info.debug    := s1_in.uop.debugInfo
   s1_out.rep_info.nuke     := s1_nuke && !s1_sw_prf
+  s1_out.rep_info.rar_nack := s1_rar_nack
+  s1_out.rep_info.raw_nack := s1_raw_nack
   s1_out.delayedLoadError  := s1_dly_err
 
   when (!s1_dly_err) {
@@ -757,12 +762,12 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.forward_mshr.paddr  := s1_out.paddr
 
   // rar pre enqueue check
-  io.lsq.ldld_nuke_query.pre_req.valid := s1_valid
+  io.lsq.ldld_nuke_query.pre_req.valid := s1_valid && !s1_exception
   io.lsq.ldld_nuke_query.pre_req.bits := DontCare
   io.lsq.ldld_nuke_query.pre_req.bits.uop  := s1_in.uop
 
   // raw pre enqueue check
-  io.lsq.stld_nuke_query.pre_req.valid := s1_valid
+  io.lsq.stld_nuke_query.pre_req.valid := s1_valid && !s1_exception
   io.lsq.stld_nuke_query.pre_req.bits := DontCare
   io.lsq.stld_nuke_query.pre_req.bits.uop := s1_in.uop
 
@@ -852,11 +857,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                               !s2_fwd_frm_d_chan_or_mshr
   val s2_wpu_pred_fail = s2_wpu_pred_fail_orig && !s2_full_fwd
 
-  val s2_rar_nack      = io.lsq.ldld_nuke_query.req.valid &&
-                         !io.lsq.ldld_nuke_query.req.ready
-
-  val s2_raw_nack      = io.lsq.stld_nuke_query.req.valid &&
-                         !io.lsq.stld_nuke_query.req.ready
+  val s2_rar_nack      = s2_in.rep_info.rar_nack
+  val s2_raw_nack      = s2_in.rep_info.raw_nack
   // st-ld violation query
   //  NeedFastRecovery Valid when
   //  1. Fast recovery query request Valid.
@@ -892,8 +894,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                            !s2_dcache_miss &&
                            !s2_bank_conflict &&
                            !s2_wpu_pred_fail &&
-                           !s2_rar_nack &&
-                           !s2_raw_nack &&
+                           !s2_out.rep_info.rar_nack &&
+                           !s2_out.rep_info.raw_nack &&
                            s2_nuke
 
   val s2_fast_rep = !s2_mem_amb &&
@@ -993,13 +995,12 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_can_wakeup = !(s2_dcache_miss_orig ||
                         s2_bank_conflict_orig ||
                         s2_wpu_pred_fail_orig ||
-                        s2_out.rep_info.rar_nack ||
-                        s2_out.rep_info.raw_nack ||
+                        s2_rar_nack ||
+                        s2_raw_nack ||
                         s2_in.rep_info.nuke)
   io.fast_uop.valid := RegNext(
     !io.dcache.s1_disable_fast_wakeup &&
     s1_valid &&
-    !s1_kill &&
     !io.tlb.resp.bits.miss &&
     !io.lsq.forward.dataInvalidFast &&
     !io.lsq.forward.addrInvalidFast
