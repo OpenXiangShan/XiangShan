@@ -70,13 +70,20 @@ object FuType extends OHEnumeration {
   val vstu = addType(name = "vstu")
 
   val intArithAll = Seq(jmp, brh, i2f, i2v, csr, alu, mul, div, fence, bku)
-  // 1 iq -> 2 seq fuType
+  // dq0 includes int's iq0 and iq1
+  // dq1 includes int's iq2 and iq3
   def dq0OHTypeSeq(implicit p: Parameters): Seq[Seq[OHType]] = {
-    val exuParams = p(XSCoreParamsKey).backendParams.allIssueParams.take(2).map(_.exuBlockParams).flatten
+    val intIQParams = p(XSCoreParamsKey).backendParams.intSchdParams.get.issueBlockParams
+    val dq0IQNums = intIQParams.size / 2
+    val iqParams = intIQParams.take(dq0IQNums)
+    val exuParams = iqParams.map(_.exuBlockParams).flatten
     exuParams.map(_.fuConfigs.map(_.fuType))
   }
   def dq1OHTypeSeq(implicit p: Parameters): Seq[Seq[OHType]] = {
-    val exuParams = p(XSCoreParamsKey).backendParams.allIssueParams.slice(2, 4).map(_.exuBlockParams).flatten
+    val intIQParams = p(XSCoreParamsKey).backendParams.intSchdParams.get.issueBlockParams
+    val dq0IQNums = intIQParams.size / 2
+    val iqParams = intIQParams.slice(dq0IQNums,intIQParams.size)
+    val exuParams = iqParams.map(_.exuBlockParams).flatten
     exuParams.map(_.fuConfigs.map(_.fuType))
   }
   def intDq0All(implicit p: Parameters): Seq[OHType] = {

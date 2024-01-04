@@ -17,13 +17,13 @@ class WbArbiterDispatcherIO[T <: Data](private val gen: T, n: Int) extends Bundl
   val out = Vec(n, DecoupledIO(gen))
 }
 
-class WbArbiterDispatcher[T <: Data](private val gen: T, n: Int, acceptCond: T => Seq[Bool])
+class WbArbiterDispatcher[T <: Data](private val gen: T, n: Int, acceptCond: T => (Seq[Bool], Bool))
                            (implicit p: Parameters)
   extends Module {
 
   val io = IO(new WbArbiterDispatcherIO(gen, n))
 
-  private val acceptVec: Vec[Bool] = VecInit(acceptCond(io.in.bits))
+  private val acceptVec: Vec[Bool] = VecInit(acceptCond(io.in.bits)._1)
 
   XSError(io.in.valid && PopCount(acceptVec) > 1.U, s"[ExeUnit] accept vec should no more than 1, ${Binary(acceptVec.asUInt)} ")
 
@@ -32,7 +32,7 @@ class WbArbiterDispatcher[T <: Data](private val gen: T, n: Int, acceptCond: T =
     out.bits := io.in.bits
   }
 
-  io.in.ready := Cat(io.out.zip(acceptVec).map{ case(out, canAccept) => out.ready && canAccept}).orR
+  io.in.ready := Cat(io.out.zip(acceptVec).map{ case(out, canAccept) => out.ready && canAccept}).orR || acceptCond(io.in.bits)._2
 }
 
 class WbArbiterIO()(implicit p: Parameters, params: WbArbiterParams) extends XSBundle {
@@ -129,19 +129,34 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
   (fromExu zip wbReplaceVld).foreach { case (sink, source) => source.ready := sink.ready }
 
   // alias
-  // replace vldu write bundle with vldMdu output bundle
-  val intArbiterInputsWire = WireInit(fromExu)
-  val intArbiterInputsWireY = intArbiterInputsWire.filter(_.bits.params.writeIntRf)
-  val intArbiterInputsWireN = intArbiterInputsWire.filterNot(_.bits.params.writeIntRf)
+  val intArbiterInputsWireY = fromExu.filter(_.bits.params.writeIntRf)
+  val intArbiterInputsWireN = fromExu.filterNot(_.bits.params.writeIntRf)
+  val intArbiterInputsWire = Wire(chiselTypeOf(fromExu))
+  intArbiterInputsWire.foreach{ x =>
+    val id = x.bits.params.exuIdx
+    val indexY = intArbiterInputsWireY.map(_.bits.params.exuIdx).indexOf(id)
+    val indexN = intArbiterInputsWireN.map(_.bits.params.exuIdx).indexOf(id)
+    if (indexY > -1) intArbiterInputsWire(id) := intArbiterInputsWireY(indexY)
+    else if(indexN > -1) intArbiterInputsWire(id) := intArbiterInputsWireN(indexN)
+    else assert(false, "intArbiterInputsWire not in intArbiterInputsWireY or intArbiterInputsWireN")
+  }
+  val vfArbiterInputsWireY = fromExu.filter(_.bits.params.writeVfRf)
+  val vfArbiterInputsWireN = fromExu.filterNot(_.bits.params.writeVfRf)
   val vfArbiterInputsWire = WireInit(fromExu)
-  val vfArbiterInputsWireY = vfArbiterInputsWire.filter(_.bits.params.writeVfRf)
-  val vfArbiterInputsWireN = vfArbiterInputsWire.filterNot(_.bits.params.writeVfRf)
+  vfArbiterInputsWire.foreach { x =>
+    val id = x.bits.params.exuIdx
+    val indexY = vfArbiterInputsWireY.map(_.bits.params.exuIdx).indexOf(id)
+    val indexN = vfArbiterInputsWireN.map(_.bits.params.exuIdx).indexOf(id)
+    if (indexY > -1) vfArbiterInputsWire(id) := vfArbiterInputsWireY(indexY)
+    else if (indexN > -1) vfArbiterInputsWire(id) := vfArbiterInputsWireN(indexN)
+    else assert(false, "vfArbiterInputsWire not in vfArbiterInputsWireY or vfArbiterInputsWireN")
+  }
 
-  def acceptCond(exuOutput: ExuOutput): Seq[Bool] = {
+  def acceptCond(exuOutput: ExuOutput): (Seq[Bool], Bool) = {
     val intWen = if(exuOutput.intWen.isDefined) exuOutput.intWen.get else false.B
     val fpwen  = if(exuOutput.fpWen.isDefined) exuOutput.fpWen.get else false.B
     val vecWen = if(exuOutput.vecWen.isDefined) exuOutput.vecWen.get else false.B
-    Seq(intWen, fpwen || vecWen)
+    (Seq(intWen, fpwen || vecWen), !intWen && !fpwen && !vecWen)
   }
 
   fromExu.zip(intArbiterInputsWire.zip(vfArbiterInputsWire))map{

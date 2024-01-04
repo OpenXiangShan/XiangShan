@@ -840,7 +840,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   MaskedRegMap.generate(mapping, addr, rdata, wen && permitted, wdata)
   io.out.bits.res.data := rdata
   io.out.bits.ctrl.flushPipe.get := flushPipe
-  connectNonPipedCtrlSingal
+  connect0LatencyCtrlSingal
 
   // send distribute csr a w signal
   csrio.customCtrl.distribute_csr.w.valid := wen && permitted

@@ -71,7 +71,7 @@ abstract class RFReadArbiterBase(val params: RFRdArbParams)(implicit p: Paramete
     }
   }
 
-  if (params.pregParams.dataCfg.name == "int") {
+  if (params.pregParams.dataCfg.isInstanceOf[IntData]) {
     val arbitersIn = arbiters.filter(_.nonEmpty).map(_.get.io.in)
     val hasConflict = arbitersIn.map { case a =>
       PopCount(a.map(_.valid)) > 1.U

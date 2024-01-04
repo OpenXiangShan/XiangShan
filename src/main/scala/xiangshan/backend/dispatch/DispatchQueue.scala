@@ -47,6 +47,9 @@ class DispatchQueueIO(enqnum: Int, deqnum: Int, size: Int)(implicit p: Parameter
 class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dqIndex: Int = 0)(implicit p: Parameters)
   extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
   val io = IO(new DispatchQueueIO(enqnum, deqnum, size))
+  require(dpParams.IntDqDeqWidth == 8, "dpParams.IntDqDeqWidth must be 8")
+  require(backendParams.intSchdParams.get.issueBlockParams.size == 4, "int issueBlockParams must be 4")
+  backendParams.intSchdParams.get.issueBlockParams.map(x => require(x.exuBlockParams.size == 2, "int issueBlockParam's must be 2"))
 
   val s_invalid :: s_valid :: Nil = Enum(2)
 

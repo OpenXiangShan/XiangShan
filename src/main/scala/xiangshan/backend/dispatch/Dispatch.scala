@@ -70,12 +70,12 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
       val needAlloc = Vec(RenameWidth, Output(Bool()))
       val req = Vec(RenameWidth, ValidIO(new DynInst))
     }
-    val IQValidNumVec = Input(Vec(4, Vec(2, UInt(6.W)))) //max32
+    val IQValidNumVec = Input(MixedVec(backendParams.genIQValidNumBundle))
     val fromIntDQ = new Bundle {
-      val intDQ0ValidDeq0Num = Input(UInt(16.U.getWidth.W))
-      val intDQ0ValidDeq1Num = Input(UInt(16.U.getWidth.W))
-      val intDQ1ValidDeq0Num = Input(UInt(16.U.getWidth.W))
-      val intDQ1ValidDeq1Num = Input(UInt(16.U.getWidth.W))
+      val intDQ0ValidDeq0Num = Input(UInt(dpParams.IntDqSize.U.getWidth.W))
+      val intDQ0ValidDeq1Num = Input(UInt(dpParams.IntDqSize.U.getWidth.W))
+      val intDQ1ValidDeq0Num = Input(UInt(dpParams.IntDqSize.U.getWidth.W))
+      val intDQ1ValidDeq1Num = Input(UInt(dpParams.IntDqSize.U.getWidth.W))
     }
     val toFpDq = new Bundle {
       val canAccept = Input(Bool())
@@ -131,10 +131,10 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val DQ0Deq1 = io.fromIntDQ.intDQ0ValidDeq1Num
   val DQ1Deq0 = io.fromIntDQ.intDQ1ValidDeq0Num
   val DQ1Deq1 = io.fromIntDQ.intDQ1ValidDeq1Num
-  val IQ01Deq0 = IQ0Deq0Num +& IQ1Deq0Num // RegNext(IQ0Deq0Num +& IQ1Deq0Num)
-  val IQ01Deq1 = IQ0Deq1Num +& IQ1Deq1Num // RegNext(IQ0Deq1Num +& IQ1Deq1Num)
-  val IQ23Deq0 = IQ2Deq0Num +& IQ3Deq0Num // RegNext(IQ2Deq0Num +& IQ3Deq0Num)
-  val IQ23Deq1 = IQ2Deq1Num +& IQ3Deq1Num // RegNext(IQ2Deq1Num +& IQ3Deq1Num)
+  val IQ01Deq0 = IQ0Deq0Num +& IQ1Deq0Num
+  val IQ01Deq1 = IQ0Deq1Num +& IQ1Deq1Num
+  val IQ23Deq0 = IQ2Deq0Num +& IQ3Deq0Num
+  val IQ23Deq1 = IQ2Deq1Num +& IQ3Deq1Num
   val Dq0EnqDeq0 = PopCount(isOnlyDq0)
   val Dq1EnqDeq1 = PopCount(isOnlyDq1)
   val Dq0SumDeq0 = DQ0Deq0 + IQ01Deq0
