@@ -47,7 +47,7 @@ case class ExeUnitParams(
   val writeVfRf: Boolean = writeFpRf || writeVecRf
   val writeFflags: Boolean = fuConfigs.map(_.writeFflags).reduce(_ || _)
   val writeVxsat: Boolean = fuConfigs.map(_.writeVxsat).reduce(_ || _)
-  val hasNoDataWB: Boolean = fuConfigs.map(_.hasNoDataWB).reduce(_ || _)
+  val hasNoDataWB: Boolean = fuConfigs.map(_.hasNoDataWB).reduce(_ && _)
   val hasRedirect: Boolean = fuConfigs.map(_.hasRedirect).reduce(_ || _)
   val hasPredecode: Boolean = fuConfigs.map(_.hasPredecode).reduce(_ || _)
   val exceptionOut: Seq[Int] = fuConfigs.map(_.exceptionOut).reduce(_ ++ _).distinct.sorted

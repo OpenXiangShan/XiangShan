@@ -59,19 +59,20 @@ class ExeUnitImp(
   })
 
   val busy = RegInit(false.B)
-  val robIdx = RegEnable(io.in.bits.robIdx, io.in.fire)
-  when (io.in.fire && io.in.bits.robIdx.needFlush(io.flush)) {
-    busy := false.B
-  }.elsewhen(busy && robIdx.needFlush(io.flush)){
-    busy := false.B
-  }.elsewhen(io.out.fire) {
-    busy := false.B
-  }.elsewhen(io.in.fire) {
-    busy := true.B
-  }
-
   if (exuParams.latencyCertain){
     busy := false.B
+  }
+  else {
+    val robIdx = RegEnable(io.in.bits.robIdx, io.in.fire)
+    when(io.in.fire && io.in.bits.robIdx.needFlush(io.flush)) {
+      busy := false.B
+    }.elsewhen(busy && robIdx.needFlush(io.flush)) {
+      busy := false.B
+    }.elsewhen(io.out.fire) {
+      busy := false.B
+    }.elsewhen(io.in.fire) {
+      busy := true.B
+    }
   }
 
   exuParams.wbPortConfigs.map{

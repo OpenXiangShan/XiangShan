@@ -39,7 +39,7 @@ class ExuBlockImp(
     exu.io.frm.foreach(exuio => io.frm.get <> exuio)
     exu.io.in <> input
     output <> exu.io.out
-    if (exu.wrapper.exuParams.fuConfigs.contains(AluCfg)){
+    if (exu.wrapper.exuParams.fuConfigs.contains(AluCfg) || exu.wrapper.exuParams.fuConfigs.contains(BrhCfg)){
       XSPerfAccumulate(s"${(exu.wrapper.exuParams.name)}_fire_cnt", PopCount(exu.io.in.fire))
     }
   }
