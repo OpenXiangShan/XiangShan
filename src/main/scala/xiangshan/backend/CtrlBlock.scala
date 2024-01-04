@@ -84,8 +84,8 @@ class CtrlBlockImp(
   val rat = Module(new RenameTableWrapper)
   val rename = Module(new Rename)
   val dispatch = Module(new Dispatch)
-  val intDq0 = Module(new DispatchQueue(16, RenameWidth, 4))
-  val intDq1 = Module(new DispatchQueue(16, RenameWidth, 4, dqIndex = 1))
+  val intDq0 = Module(new DispatchQueue(dpParams.IntDqSize, RenameWidth, dpParams.IntDqDeqWidth/2, dqIndex = 0))
+  val intDq1 = Module(new DispatchQueue(dpParams.IntDqSize, RenameWidth, dpParams.IntDqDeqWidth/2, dqIndex = 1))
   val fpDq = Module(new DispatchQueue(dpParams.FpDqSize, RenameWidth, dpParams.FpDqDeqWidth))
   val lsDq = Module(new DispatchQueue(dpParams.LsDqSize, RenameWidth, dpParams.LsDqDeqWidth))
   val redirectGen = Module(new RedirectGenerator)
@@ -468,13 +468,14 @@ class CtrlBlockImp(
   io.toExuBlock.flush := s2_s4_redirect
 
   for ((pcMemIdx, i) <- pcMemRdIndexes("exu").zipWithIndex) {
-    if (i < 4) {
+    val intDq0numDeq = intDq0.dpParams.IntDqDeqWidth/2
+    if (i < intDq0numDeq) {
       pcMem.io.raddr(pcMemIdx) := intDq0.io.deqNext(i).ftqPtr.value
       jumpPcVec(i) := pcMem.io.rdata(pcMemIdx).getPc(RegNext(intDq0.io.deqNext(i).ftqOffset))
     }
     else {
-      pcMem.io.raddr(pcMemIdx) := intDq1.io.deqNext(i - 4).ftqPtr.value
-      jumpPcVec(i) := pcMem.io.rdata(pcMemIdx).getPc(RegNext(intDq1.io.deqNext(i - 4).ftqOffset))
+      pcMem.io.raddr(pcMemIdx) := intDq1.io.deqNext(i - intDq0numDeq).ftqPtr.value
+      jumpPcVec(i) := pcMem.io.rdata(pcMemIdx).getPc(RegNext(intDq1.io.deqNext(i - intDq0numDeq).ftqOffset))
     }
   }
 
@@ -574,7 +575,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   val toExuBlock = new Bundle {
     val flush = ValidIO(new Redirect)
   }
-  val IQValidNumVec = Input(Vec(4, Vec(2, UInt(6.W))))
+  val IQValidNumVec = Input(MixedVec(params.genIQValidNumBundle))
   val fromWB = new Bundle {
     val wbData = Flipped(MixedVec(params.genWrite2CtrlBundles))
   }

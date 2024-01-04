@@ -65,7 +65,7 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
     val readVfState = if (numVfStateRead > 0) Some(Vec(numVfStateRead, Flipped(new BusyTableReadIO))) else None
     val out = MixedVec(params.issueBlockParams.filter(iq => iq.StdCnt == 0).map(x => Vec(x.numEnq, DecoupledIO(new DynInst))))
     val enqLsqIO = if (wrapper.isMem) Some(Flipped(new LsqEnqIO)) else None
-    val IQValidNumVec = if (params.isIntSchd) Some(Input(Vec(4, Vec(2,UInt(6.W))))) else None
+    val IQValidNumVec = if (params.isIntSchd) Some(Input(MixedVec(backendParams.genIQValidNumBundle))) else None
   })
 
 
@@ -154,11 +154,12 @@ class Dispatch2IqIntImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   val outs = io.out.flatten
   require(outs.size == uopsIn.size, "Dispatch2IqInt outs.size =/= uopsIn.size")
   uopsIn <> io.in
-
-  val uopsInDq0 = uopsIn.take(4)
-  val uopsInDq1 = uopsIn.drop(4).take(4)
-  val uopsOutDq0 = outs.take(4)
-  val uopsOutDq1 = outs.drop(4).take(4)
+  val uopsInDq0Num = uopsIn.size / 2
+  val uopsInDq1Num = uopsIn.size / 2
+  val uopsInDq0 = uopsIn.take(uopsInDq0Num)
+  val uopsInDq1 = uopsIn.drop(uopsInDq0Num).take(uopsInDq1Num)
+  val uopsOutDq0 = outs.take(uopsInDq0Num)
+  val uopsOutDq1 = outs.drop(uopsInDq0Num).take(uopsInDq1Num)
   val IQ0Deq0Num = IQValidNumVec(0)(0)
   val IQ0Deq1Num = IQValidNumVec(0)(1)
   val IQ1Deq0Num = IQValidNumVec(1)(0)
@@ -247,7 +248,7 @@ class Dispatch2IqIntImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     IQ0Enq1Select := Cat(false.B, false.B, true.B, false.B).asBools
     IQ1Enq0Select := Cat(false.B, false.B, false.B, false.B).asBools
     IQ1Enq1Select := Cat(false.B, false.B, false.B, false.B).asBools
-  }.elsewhen(uopsOutDq0.last.ready){ // only IQ1 ready
+  }.elsewhen(uopsOutDq0.last.ready){
     IQ0Enq0Select := Cat(false.B, false.B, false.B, false.B).asBools
     IQ0Enq1Select := Cat(false.B, false.B, false.B, false.B).asBools
     IQ1Enq0Select := Cat(false.B, false.B, false.B, true.B).asBools
@@ -270,8 +271,7 @@ class Dispatch2IqIntImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   assert(PopCount(VecInit(IQ0Enq0Select(1), IQ0Enq1Select(1), IQ1Enq0Select(1), IQ1Enq1Select(1))) < 2.U, "Dq1Uop1Select is not one hot")
   assert(PopCount(VecInit(IQ0Enq0Select(2), IQ0Enq1Select(2), IQ1Enq0Select(2), IQ1Enq1Select(2))) < 2.U, "Dq1Uop2Select is not one hot")
   assert(PopCount(VecInit(IQ0Enq0Select(3), IQ0Enq1Select(3), IQ1Enq0Select(3), IQ1Enq1Select(3))) < 2.U, "Dq1Uop3Select is not one hot")
-  val dq0Block = Wire(Vec(4, Bool()))
-  dontTouch(dq0Block)
+  val dq0Block = Wire(Vec(uopsInDq0Num, Bool()))
   if (IQ0FuCfgs.size == IQ1FuCfgs.size && IQ0FuCfgs.size == IQ01BothfuCfgs.size) {
     dq0Block := Cat(false.B, false.B, false.B, false.B).asBools
   }
@@ -281,8 +281,8 @@ class Dispatch2IqIntImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     val iqNotReady1 = (FuTypeOrR(fuTypes(1),IQ0OnlyFuTypes) && !uopsOutDq0.head.ready) || (FuTypeOrR(fuTypes(1),IQ1OnlyFuTypes) && !uopsOutDq0.last.ready)
     val iqNotReady2 = (FuTypeOrR(fuTypes(2),IQ0OnlyFuTypes) && !uopsOutDq0.head.ready) || (FuTypeOrR(fuTypes(2),IQ1OnlyFuTypes) && !uopsOutDq0.last.ready)
     val iqNotReady3 = (FuTypeOrR(fuTypes(3),IQ0OnlyFuTypes) && !uopsOutDq0.head.ready) || (FuTypeOrR(fuTypes(3),IQ1OnlyFuTypes) && !uopsOutDq0.last.ready)
-    val conflict2 = (IQ0Enq0Select(2) || IQ0Enq1Select(2) && FuTypeOrR(fuTypes(2),IQ1OnlyFuTypes)) || (IQ1Enq0Select(2) || IQ1Enq0Select(2) && FuTypeOrR(fuTypes(2),IQ0OnlyFuTypes))
-    val conflict3 = (IQ0Enq0Select(3) || IQ0Enq1Select(3) && FuTypeOrR(fuTypes(3),IQ1OnlyFuTypes)) || (IQ1Enq0Select(3) || IQ1Enq0Select(3) && FuTypeOrR(fuTypes(3),IQ0OnlyFuTypes))
+    val conflict2 = ( (IQ0Enq0Select(2) || IQ0Enq1Select(2)) && FuTypeOrR(fuTypes(2),IQ1OnlyFuTypes)) || ( (IQ1Enq0Select(2) || IQ1Enq1Select(2)) && FuTypeOrR(fuTypes(2),IQ0OnlyFuTypes))
+    val conflict3 = ( (IQ0Enq0Select(3) || IQ0Enq1Select(3)) && FuTypeOrR(fuTypes(3),IQ1OnlyFuTypes)) || ( (IQ1Enq0Select(3) || IQ1Enq1Select(3)) && FuTypeOrR(fuTypes(3),IQ0OnlyFuTypes))
     dq0Block(0) := iqNotReady0
     dq0Block(1) := dq0Block(0) || iqNotReady1
     dq0Block(2) := dq0Block(0) || dq0Block(1) || conflict2
@@ -377,7 +377,7 @@ class Dispatch2IqIntImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     IQ2Enq1Select := Cat(false.B, false.B, true.B, false.B).asBools
     IQ3Enq0Select := Cat(false.B, false.B, false.B, false.B).asBools
     IQ3Enq1Select := Cat(false.B, false.B, false.B, false.B).asBools
-  }.elsewhen(uopsOutDq1.last.ready) { // only IQ1 ready
+  }.elsewhen(uopsOutDq1.last.ready) {
     IQ2Enq0Select := Cat(false.B, false.B, false.B, false.B).asBools
     IQ2Enq1Select := Cat(false.B, false.B, false.B, false.B).asBools
     IQ3Enq0Select := Cat(false.B, false.B, false.B, true.B).asBools
@@ -400,8 +400,7 @@ class Dispatch2IqIntImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   assert(PopCount(VecInit(IQ2Enq0Select(1), IQ2Enq1Select(1), IQ3Enq0Select(1), IQ3Enq1Select(1))) < 2.U, "Dq1Uop1Select is not one hot")
   assert(PopCount(VecInit(IQ2Enq0Select(2), IQ2Enq1Select(2), IQ3Enq0Select(2), IQ3Enq1Select(2))) < 2.U, "Dq1Uop2Select is not one hot")
   assert(PopCount(VecInit(IQ2Enq0Select(3), IQ2Enq1Select(3), IQ3Enq0Select(3), IQ3Enq1Select(3))) < 2.U, "Dq1Uop3Select is not one hot")
-  val dq1Block = Wire(Vec(4, Bool()))
-  dontTouch(dq1Block)
+  val dq1Block = Wire(Vec(uopsInDq1Num, Bool()))
   if (IQ2FuCfgs.size == IQ3FuCfgs.size && IQ2FuCfgs.size == IQ23BothfuCfgs.size) {
     dq1Block := Cat(false.B, false.B, false.B, false.B).asBools
   }
@@ -411,8 +410,8 @@ class Dispatch2IqIntImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     val iqNotReady1 = (FuTypeOrR(fuTypes(1), IQ2OnlyFuTypes) && !uopsOutDq1.head.ready) || (FuTypeOrR(fuTypes(1), IQ3OnlyFuTypes) && !uopsOutDq1.last.ready)
     val iqNotReady2 = (FuTypeOrR(fuTypes(2), IQ2OnlyFuTypes) && !uopsOutDq1.head.ready) || (FuTypeOrR(fuTypes(2), IQ3OnlyFuTypes) && !uopsOutDq1.last.ready)
     val iqNotReady3 = (FuTypeOrR(fuTypes(3), IQ2OnlyFuTypes) && !uopsOutDq1.head.ready) || (FuTypeOrR(fuTypes(3), IQ3OnlyFuTypes) && !uopsOutDq1.last.ready)
-    val conflict2 = (IQ2Enq0Select(2) || IQ2Enq1Select(2) && FuTypeOrR(fuTypes(2), IQ3OnlyFuTypes)) || (IQ3Enq0Select(2) || IQ3Enq0Select(2) && FuTypeOrR(fuTypes(2), IQ2OnlyFuTypes))
-    val conflict3 = (IQ2Enq0Select(3) || IQ2Enq1Select(3) && FuTypeOrR(fuTypes(3), IQ3OnlyFuTypes)) || (IQ3Enq0Select(3) || IQ3Enq0Select(3) && FuTypeOrR(fuTypes(3), IQ2OnlyFuTypes))
+    val conflict2 = ( (IQ2Enq0Select(2) || IQ2Enq1Select(2)) && FuTypeOrR(fuTypes(2), IQ3OnlyFuTypes)) || ( (IQ3Enq0Select(2) || IQ3Enq1Select(2)) && FuTypeOrR(fuTypes(2), IQ2OnlyFuTypes))
+    val conflict3 = ( (IQ2Enq0Select(3) || IQ2Enq1Select(3)) && FuTypeOrR(fuTypes(3), IQ3OnlyFuTypes)) || ( (IQ3Enq0Select(3) || IQ3Enq1Select(3)) && FuTypeOrR(fuTypes(3), IQ2OnlyFuTypes))
     dq1Block(0) := iqNotReady0
     dq1Block(1) := dq1Block(0) || iqNotReady1
     dq1Block(2) := dq1Block(0) || dq1Block(1) || conflict2

@@ -4,7 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import utility.SignExt
 import xiangshan.backend.decode.ImmUnion
-import xiangshan.backend.fu.{BranchModule, FuConfig, PipedFuncUnit}
+import xiangshan.backend.fu.{BranchModule, FuConfig, FuncUnit}
 import xiangshan.backend.datapath.DataConfig.VAddrData
 import xiangshan.{RedirectLevel, XSModule}
 
@@ -17,7 +17,7 @@ class AddrAddModule(len: Int)(implicit p: Parameters) extends XSModule {
   io.target := io.pc + SignExt(ImmUnion.B.toImm32(io.offset), len)
 }
 
-class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg) {
+class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   val dataModule = Module(new BranchModule)
   val addModule = Module(new AddrAddModule(VAddrData().dataWidth))
   dataModule.io.src(0) := io.in.bits.data.src(0) // rs1
@@ -45,5 +45,5 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cf
       redirect.bits.cfiUpdate.predTaken := dataModule.io.pred_taken
       redirect.bits.cfiUpdate.target := addModule.io.target
   }
-  connectNonPipedCtrlSingal
+  connect0LatencyCtrlSingal
 }

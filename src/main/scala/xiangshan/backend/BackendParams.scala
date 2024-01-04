@@ -115,6 +115,10 @@ case class BackendParams(
 
   def numRedirect = allSchdParams.map(_.numRedirect).sum
 
+  def genIQValidNumBundle(implicit p: Parameters) = {
+    this.intSchdParams.get.issueBlockParams.map(x => Vec(x.numDeq, UInt((x.numEntries+x.numEnq).U.getWidth.W)))
+  }
+
   def genIntWriteBackBundle(implicit p: Parameters) = {
     Seq.fill(this.getIntRfWriteSize)(new RfWritePortWithConfig(IntData(), intPregParams.addrWidth))
   }
