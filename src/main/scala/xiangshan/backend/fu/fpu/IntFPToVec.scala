@@ -27,7 +27,7 @@ import xiangshan.backend.fu.{FuConfig, FuncUnit, PipedFuncUnit}
 import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.IF2VectorType
 
-class IntToVec(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg) {
+class IntFPToVec(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg) {
   protected val in = io.in.bits
   protected val out = io.out.bits
 

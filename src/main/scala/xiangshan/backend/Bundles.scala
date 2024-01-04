@@ -314,8 +314,6 @@ object Bundles {
     val nf        = Nf()
     val veew      = VEew()
 
-    val needScalaSrc       = Bool()
-
     val isReverse = Bool() // vrsub, vrdiv
     val isExt     = Bool()
     val isNarrow  = Bool()

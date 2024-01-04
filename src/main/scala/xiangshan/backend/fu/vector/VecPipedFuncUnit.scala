@@ -56,16 +56,7 @@ class VecPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(c
   with HasPipelineReg
   with VecFuncUnitAlias
 {
-  private val extedVs1 = Wire(UInt(VLEN.W))
-
-  // modules
-  private val scalaDupToVector = Module(new ScalaDupToVector(VLEN))
-
-  scalaDupToVector.io.in.scalaData := inData.src(0)
-  scalaDupToVector.io.in.vsew := vsew
-  extedVs1 := scalaDupToVector.io.out.vecData
-
-  private val src0 = Mux(vecCtrl.needScalaSrc, extedVs1, inData.src(0)) // vs1, rs1, fs1, imm
+  private val src0 = inData.src(0)
   private val src1 = WireInit(inData.src(1)) // vs2 only
   if(cfg == FuConfig.VfaluCfg){
     val vs2Fold = Wire(UInt(VLEN.W))
