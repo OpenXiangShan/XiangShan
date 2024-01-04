@@ -48,7 +48,7 @@ class VecLoadPipeBundle(implicit p: Parameters) extends VLSUBundleWithMicroOp {
   val reg_offset          = UInt(vOffsetBits.W)
   // val offset              = Vec(2,UInt(4.W))
   val alignedType         = UInt(alignTypeBits.W)
-  val exp                 = Bool()
+  val vecActive           = Bool() // 1: vector active element, 0: vector not active element
   val is_first_ele        = Bool()
   val flowPtr             = new VlflowPtr
   val isFirstIssue        = Bool()
@@ -201,7 +201,7 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
       x.vec.vecdata       := thisLoadResult.vec.vecdata
       x.vec.mask          := thisLoadResult.vec.mask
       x.vec.reg_offset    := thisLoadResult.vec.reg_offset
-      x.vec.exp           := thisLoadResult.vec.exp
+      x.vec.vecActive           := thisLoadResult.vec.vecActive
       x.vec.is_first_ele  := thisLoadResult.vec.is_first_ele
       x.vec.elemIdx       := thisLoadResult.vec.elemIdx
       x.vec.elemIdxInsideVd := flowQueueEntries(deqPtr(i).value).elemIdxInsideVd
@@ -257,7 +257,7 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
       x.uop_unit_stride_fof := thisFlow.unit_stride_fof
       x.reg_offset          := thisFlow.reg_offset
       x.alignedType         := thisFlow.alignedType
-      x.exp                 := thisFlow.exp
+      x.vecActive                 := thisFlow.exp
       x.is_first_ele        := thisFlow.is_first_ele
       x.flowPtr             := issuePtr(i)
       x.isFirstIssue        := !issued(issuePtr(i).value)
@@ -322,7 +322,7 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
         x.vec.vecdata       := thisPipeResult.vec.vecdata
         x.vec.mask          := thisPipeResult.vec.mask
         x.vec.reg_offset    := thisPipeResult.vec.reg_offset
-        x.vec.exp           := thisPipeResult.vec.exp
+        x.vec.vecActive           := thisPipeResult.vec.vecActive
         x.vec.is_first_ele  := thisPipeResult.vec.is_first_ele
         x.vec.elemIdx       := flowQueueEntries(thisPtr).elemIdx
         x.vec.uopQueuePtr   := flowQueueEntries(thisPtr).uopQueuePtr

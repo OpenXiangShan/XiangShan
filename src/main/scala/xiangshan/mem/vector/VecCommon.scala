@@ -141,7 +141,7 @@ class OnlyVecExuOutput(implicit p: Parameters) extends VLSUBundle {
   // val rob_idx = Vec(2, new RobPtr)
   // val offset = Vec(2, UInt(4.W))
   val reg_offset = UInt(vOffsetBits.W)
-  val exp = Bool()
+  val vecActive = Bool() // 1: vector active element, 0: vector not active element
   val is_first_ele = Bool()
   val elemIdx = UInt(elemIdxBits.W) // element index
   val elemIdxInsideVd = UInt(elemIdxBits.W) // element index in scope of vd

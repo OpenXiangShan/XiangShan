@@ -224,7 +224,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val is128bit      = Bool()
     val uop_unit_stride_fof = Bool()
     val reg_offset    = UInt(vOffsetBits.W)
-    val exp           = Bool()
+    val vecActive     = Bool() // 1: vector active element or scala mem operation, 0: vector not active element
     val is_first_ele  = Bool()
     val flowPtr       = new VlflowPtr
   }
@@ -396,6 +396,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_wr        := src.uop.fuOpType === LSUOpType.prefetch_w
     out.sched_idx     := src.schedIndex
     out.deqPortIdx    := src.deqPortIdx
+    out.vecActive     := true.B // true for scala load
     out
   }
 
@@ -418,6 +419,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_wr        := src.uop.fuOpType === LSUOpType.prefetch_w
     out.sched_idx     := src.schedIndex
     out.deqPortIdx    := src.deqPortIdx
+    out.vecActive     := true.B // true for scala load
     out
   }
 
@@ -440,6 +442,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_wr        := src.is_store
     out.sched_idx     := 0.U
     out.deqPortIdx    := 0.U // DontCare, since need not send cancel signal to IQ
+    out.vecActive     := true.B // true for scala load
     out
   }
 
@@ -462,6 +465,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_wr        := src.uop.fuOpType === LSUOpType.prefetch_w
     out.sched_idx     := 0.U
     out.deqPortIdx    := src.deqPortIdx
+    out.vecActive     := true.B // true for scala load
     out
   }
 
@@ -496,7 +500,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // out.rob_idx             := src.rob_idx
     out.reg_offset          := src.reg_offset
     // out.offset              := src.offset
-    out.exp                 := src.exp
+    out.vecActive           := src.vecActive
     out.is_first_ele        := src.is_first_ele
     out.flowPtr             := src.flowPtr
     out.deqPortIdx          := 0.U
@@ -526,6 +530,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_wr             := false.B
     out.sched_idx          := 0.U
     out.deqPortIdx         := 0.U // DontCare, since need not send cancel signal to IQ
+    out.vecActive          := true.B // true for scala load
     out
   }
 
@@ -581,10 +586,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // s0_out.rob_idx         := s0_rob_idx
   s0_out.reg_offset      := s0_sel_src.reg_offset
   // s0_out.offset          := s0_offset
-  s0_out.exp             := s0_sel_src.exp
+  s0_out.vecActive             := s0_sel_src.vecActive
   s0_out.is_first_ele    := s0_sel_src.is_first_ele
   s0_out.flowPtr         := s0_sel_src.flowPtr
-  s0_out.uop.exceptionVec(loadAddrMisaligned) := !s0_addr_aligned && s0_sel_src.exp
+  s0_out.uop.exceptionVec(loadAddrMisaligned) := !s0_addr_aligned && s0_sel_src.vecActive
   s0_out.forward_tlDchannel := s0_super_ld_rep_select
   when(io.tlb.req.valid && s0_sel_src.isFirstIssue) {
     s0_out.uop.debugInfo.tlbFirstReqTime := GTimer()
@@ -634,7 +639,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s1_kill       = Wire(Bool())
   val s1_can_go     = s2_ready
   val s1_fire       = s1_valid && !s1_kill && s1_can_go
-  val s1_exp        = RegEnable(s0_out.exp, true.B, s0_fire)
+  val s1_vecActive        = RegEnable(s0_out.vecActive, true.B, s0_fire)
   val s1_vec_alignedType = RegEnable(io.vecldin.bits.alignedType, s0_fire)
 
   s1_ready := !s1_valid || s1_kill || s2_ready
@@ -727,12 +732,12 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   when (!s1_dly_err) {
     // current ori test will cause the case of ldest == 0, below will be modifeid in the future.
     // af & pf exception were modified
-    s1_out.uop.exceptionVec(loadPageFault)   := io.tlb.resp.bits.excp(0).pf.ld && s1_exp && !s1_tlb_miss
-    s1_out.uop.exceptionVec(loadAccessFault) := io.tlb.resp.bits.excp(0).af.ld && s1_exp && !s1_tlb_miss
+    s1_out.uop.exceptionVec(loadPageFault)   := io.tlb.resp.bits.excp(0).pf.ld && s1_vecActive && !s1_tlb_miss
+    s1_out.uop.exceptionVec(loadAccessFault) := io.tlb.resp.bits.excp(0).af.ld && s1_vecActive && !s1_tlb_miss
   } .otherwise {
     s1_out.uop.exceptionVec(loadPageFault)      := false.B
     s1_out.uop.exceptionVec(loadAddrMisaligned) := false.B
-    s1_out.uop.exceptionVec(loadAccessFault)    := s1_dly_err && s1_exp
+    s1_out.uop.exceptionVec(loadAccessFault)    := s1_dly_err && s1_vecActive
   }
 
   // pointer chasing
@@ -824,7 +829,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_kill   = Wire(Bool())
   val s2_can_go = s3_ready
   val s2_fire   = s2_valid && !s2_kill && s2_can_go
-  val s2_exp    = RegEnable(s1_out.exp, true.B, s1_fire)
+  val s2_vecActive = RegEnable(s1_out.vecActive, true.B, s1_fire)
   val s2_isvec  = RegEnable(s1_out.isvec, false.B, s1_fire)
   val s2_vec_alignedType = RegEnable(s1_vec_alignedType, s1_fire)
 
@@ -846,7 +851,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_exception_vec = WireInit(s2_in.uop.exceptionVec)
   when (!s2_in.delayedLoadError) {
     s2_exception_vec(loadAccessFault) := (s2_in.uop.exceptionVec(loadAccessFault) || s2_pmp.ld ||
-                                       (io.dcache.resp.bits.tag_error && RegNext(io.csrCtrl.cache_error_enable))) && s2_exp
+                                       (io.dcache.resp.bits.tag_error && RegNext(io.csrCtrl.cache_error_enable))) && s2_vecActive
   }
 
   // soft prefetch will not trigger any exception (but ecc error interrupt may
@@ -854,7 +859,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   when (!s2_in.delayedLoadError && (s2_prf || s2_in.tlbMiss)) {
     s2_exception_vec := 0.U.asTypeOf(s2_exception_vec.cloneType)
   }
-  val s2_exception = ExceptionNO.selectByFu(s2_exception_vec, LduCfg).asUInt.orR && s2_exp
+  val s2_exception = ExceptionNO.selectByFu(s2_exception_vec, LduCfg).asUInt.orR && s2_vecActive
 
   val (s2_fwd_frm_d_chan, s2_fwd_data_frm_d_chan) = io.tl_d_channel.forward(s1_valid && s1_out.forward_tlDchannel, s1_out.mshrid, s1_out.paddr)
   val (s2_fwd_data_valid, s2_fwd_frm_mshr, s2_fwd_data_frm_mshr) = io.forward_mshr.forward()
@@ -1101,7 +1106,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_troublem     = RegNext(s2_troublem)
   val s3_kill         = s3_in.uop.robIdx.needFlush(io.redirect)
   val s3_vecout       = Wire(new OnlyVecExuOutput)
-  val s3_exp          = RegEnable(s2_out.exp, true.B, s2_fire)
+  val s3_vecActive          = RegEnable(s2_out.vecActive, true.B, s2_fire)
   val s3_isvec        = RegEnable(s2_out.isvec, false.B, s2_fire)
   val s3_vec_alignedType = RegEnable(s2_vec_alignedType, s2_fire)
   s3_ready := !s3_valid || s3_kill || io.ldout.ready
@@ -1149,7 +1154,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_rep_info.dcache_miss   := s3_in.rep_info.dcache_miss && !s3_fwd_frm_d_chan_valid
   val s3_sel_rep_cause = PriorityEncoderOH(s3_rep_info.cause.asUInt)
 
-  val s3_exception = ExceptionNO.selectByFu(s3_in.uop.exceptionVec, LduCfg).asUInt.orR && s3_exp
+  val s3_exception = ExceptionNO.selectByFu(s3_in.uop.exceptionVec, LduCfg).asUInt.orR && s3_vecActive
   when (s3_exception || s3_dly_ld_err || s3_rep_frm_fetch) {
     io.lsq.ldin.bits.rep_info.cause := 0.U.asTypeOf(s3_rep_info.cause.cloneType)
   } .otherwise {
@@ -1159,7 +1164,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // Int load, if hit, will be writebacked at s3
   s3_out.valid                := s3_valid && !io.lsq.ldin.bits.rep_info.need_rep && !s3_in.mmio
   s3_out.bits.uop             := s3_in.uop
-  s3_out.bits.uop.exceptionVec(loadAccessFault) := (s3_dly_ld_err || s3_in.uop.exceptionVec(loadAccessFault)) && s3_exp
+  s3_out.bits.uop.exceptionVec(loadAccessFault) := (s3_dly_ld_err || s3_in.uop.exceptionVec(loadAccessFault)) && s3_vecActive
   s3_out.bits.uop.flushPipe   := false.B
   s3_out.bits.uop.replayInst  := s3_rep_frm_fetch || s3_flushPipe
   s3_out.bits.data            := s3_in.data
@@ -1176,7 +1181,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // s3_vecout.rob_idx           := s3_in.rob_idx
   // s3_vecout.offset            := s3_in.offset
   s3_vecout.reg_offset        := s3_in.reg_offset
-  s3_vecout.exp               := s3_exp
+  s3_vecout.vecActive         := s3_vecActive
   s3_vecout.is_first_ele      := s3_in.is_first_ele
   s3_vecout.uopQueuePtr       := DontCare // uopQueuePtr is already saved in flow queue
   s3_vecout.flowPtr           := s3_in.flowPtr
@@ -1310,7 +1315,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.vecReplay.bits.isvec := true.B
   io.vecReplay.bits.uop_unit_stride_fof := s3_in.uop_unit_stride_fof
   io.vecReplay.bits.reg_offset := s3_in.reg_offset
-  io.vecReplay.bits.exp := s3_in.exp
+  io.vecReplay.bits.vecActive := s3_in.vecActive
   io.vecReplay.bits.is_first_ele := s3_in.is_first_ele
   io.vecReplay.bits.flowPtr := s3_in.flowPtr
 

@@ -110,7 +110,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   // val rob_idx = Vec(2,new RobPtr)
   val reg_offset = UInt(vOffsetBits.W)
   // val offset = Vec(2,UInt(4.W))
-  val exp = Bool()
+  val vecActive = Bool() // 1: vector active element or scala mem operation, 0: vector not active element
   val is_first_ele = Bool()
   val flowPtr = new VlflowPtr() // VLFlowQueue ptr
   val sflowPtr = new VsFlowPtr() // VSFlowQueue ptr
@@ -171,7 +171,7 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     if (latch) isvec               := RegNext(input.isvec)               else isvec               := input.isvec
     if (latch) isLastElem          := RegNext(input.isLastElem)          else isLastElem          := input.isLastElem
     if (latch) is128bit            := RegNext(input.is128bit)            else is128bit            := input.is128bit
-    if (latch) exp                 := RegNext(input.exp)                 else exp                 := input.exp
+    if (latch) vecActive                 := RegNext(input.vecActive)                 else vecActive                 := input.vecActive
     if (latch) is_first_ele        := RegNext(input.is_first_ele)        else is_first_ele        := input.is_first_ele
     if (latch) uop_unit_stride_fof := RegNext(input.uop_unit_stride_fof) else uop_unit_stride_fof := input.uop_unit_stride_fof
     if (latch) reg_offset          := RegNext(input.reg_offset)          else reg_offset          := input.reg_offset
@@ -252,7 +252,7 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     if(latch) feedbacked := RegNext(input.feedbacked) else feedbacked := input.feedbacked
     if(latch) isvec               := RegNext(input.isvec)               else isvec               := input.isvec
     if(latch) is128bit            := RegNext(input.is128bit)            else is128bit            := input.is128bit
-    if(latch) exp                 := RegNext(input.exp)                 else exp                 := input.exp
+    if(latch) vecActive                 := RegNext(input.vecActive)                 else vecActive                 := input.vecActive
     if(latch) uop_unit_stride_fof := RegNext(input.uop_unit_stride_fof) else uop_unit_stride_fof := input.uop_unit_stride_fof
     if(latch) reg_offset          := RegNext(input.reg_offset)          else reg_offset          := input.reg_offset
 

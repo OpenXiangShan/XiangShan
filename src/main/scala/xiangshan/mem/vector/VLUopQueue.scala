@@ -421,7 +421,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
     flowWbElemIdx(i) := wb.bits.vec.elemIdx
     flowWbElemIdxInVd(i) := wb.bits.vec.elemIdxInsideVd
     flowWbExcp(i) := wb.bits.uop.exceptionVec
-    flowWbExp(i) := wb.bits.vec.exp
+    flowWbExp(i) := wb.bits.vec.vecActive
     val flowWbElemIdxInField = flowWbElemIdx(i) & (entry.vlmax - 1.U)
 
     // handle the situation where multiple ports are going to write the same uop queue entry

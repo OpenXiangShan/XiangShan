@@ -167,7 +167,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   s0_out.wlineflag    := s0_wlineflag
   s0_out.isvec        := s0_use_flow_vec
   s0_out.is128bit     := false.B
-  s0_out.exp          := s0_exp
+  s0_out.vecActive          := s0_exp
   s0_out.sflowPtr     := s0_flowPtr
   s0_out.isLastElem   := s0_isLastElem
   when(s0_valid && s0_isFirstIssue) {
@@ -202,7 +202,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   val s1_kill   = Wire(Bool())
   val s1_can_go = s2_ready
   val s1_fire   = s1_valid && !s1_kill && s1_can_go
-  val s1_exp    = RegEnable(s0_out.exp, true.B, s0_fire)
+  val s1_exp    = RegEnable(s0_out.vecActive, true.B, s0_fire)
 
   // mmio cbo decoder
   val s1_mmio_cbo  = s1_in.uop.fuOpType === LSUOpType.cbo_clean ||
@@ -309,7 +309,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   val s2_kill   = Wire(Bool())
   val s2_can_go = s3_ready
   val s2_fire   = s2_valid && !s2_kill && s2_can_go
-  val s2_exp    = RegEnable(s1_out.exp, true.B, s1_fire)
+  val s2_exp    = RegEnable(s1_out.vecActive, true.B, s1_fire)
 
   s2_ready := !s2_valid || s2_kill || s3_ready
   when (s1_fire) { s2_valid := true.B }

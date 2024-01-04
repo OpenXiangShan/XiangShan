@@ -532,7 +532,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   s0_out.mshrid        := s0_mshrid
   s0_out.isvec         := s0_isvec
   s0_out.isLastElem    := s0_isLastElem
-  s0_out.exp           := s0_exp
+  s0_out.vecActive           := s0_exp
   s0_out.sflowPtr      := s0_flowPtr
   s0_out.uop.exceptionVec(loadAddrMisaligned)  := !s0_addr_aligned && s0_ld_flow
   s0_out.uop.exceptionVec(storeAddrMisaligned) := !s0_addr_aligned && !s0_ld_flow
@@ -835,7 +835,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val s2_can_go = s3_ready
   val s2_fire   = s2_valid && !s2_kill && s2_can_go
   val s2_isvec  = RegEnable(s1_isvec, false.B, s1_fire)
-  val s2_exp    = RegEnable(s1_out.exp, true.B, s1_fire)
+  val s2_exp    = RegEnable(s1_out.vecActive, true.B, s1_fire)
   val s2_paddr  = RegEnable(s1_paddr_dup_lsu, s1_fire)
 
   s2_kill := s2_in.uop.robIdx.needFlush(io.redirect)
