@@ -660,7 +660,7 @@ object VecDecoder extends DecodeConstants {
     VFMERGE_VFM        -> OPFVF(SrcType.fp, SrcType.vp , FuType.vfalu, VfaluType.vfmerge, F, T, F, UopSplitType.VEC_VFV),
 
     // 13.16. Vector Floating-Point Move Instruction
-    VFMV_V_F           -> OPFVF(SrcType.fp, SrcType.vp , FuType.vfalu, VfaluType.vfmv, F, T, F, src2 = SrcType.X), // vfmv.v.f vd, rs1 # vd[i] = f[rs1]
+    VFMV_V_F           -> OPFVF(SrcType.fp, SrcType.vp , FuType.vfalu, VfaluType.vfmv, F, T, F, UopSplitType.VEC_0XV, src2 = SrcType.X), // vfmv.v.f vd, rs1 # vd[i] = f[rs1]
 
     // 16.2. Floating-Point Scalar Move Instructions
     VFMV_F_S           -> OPFVF(SrcType.X, SrcType.X, FuType.vfalu, VfaluType.vfmv_f_s, T, F, F, UopSplitType.SCA_SIM), // f[rd] = vs2[0] (rs1=0)

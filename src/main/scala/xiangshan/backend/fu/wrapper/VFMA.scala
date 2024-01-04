@@ -88,7 +88,9 @@ class VFMA(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
       mod.io.fp_cIsFpCanonicalNAN := fp_cIsFpCanonicalNAN(i)
   }
 
-  val outEew = Mux(RegNext(resWiden), outVecCtrl.vsew + 1.U, outVecCtrl.vsew)
+  val outFuOpType = outCtrl.fuOpType
+  val outWiden = outCtrl.fuOpType(4)
+  val outEew = Mux(outWiden, outVecCtrl.vsew + 1.U, outVecCtrl.vsew)
   val outVuopidx = outVecCtrl.vuopIdx(2, 0)
   val vlMax = ((VLEN / 8).U >> outEew).asUInt
   val lmulAbs = Mux(outVecCtrl.vlmul(2), (~outVecCtrl.vlmul(1, 0)).asUInt + 1.U, outVecCtrl.vlmul(1, 0))

@@ -135,18 +135,4 @@ object Bundles {
   object Fpu {
     def apply() = new Fpu
   }
-
-  object Category extends NamedUInt(3) {
-    def OPIVV : UInt = "b000".U(width.W)
-    def OPFVV : UInt = "b001".U(width.W)
-    def OPMVV : UInt = "b010".U(width.W)
-    def OPIVI : UInt = "b011".U(width.W)
-    def OPIVX : UInt = "b100".U(width.W)
-    def OPFVF : UInt = "b101".U(width.W)
-    def OPMVX : UInt = "b110".U(width.W)
-    def OPCFG : UInt = "b111".U(width.W)
-    def needScalaSrc(category: UInt) : Bool = {
-      Seq(OPFVF).map(_ === category).reduce(_ || _)
-    }
-  }
 }

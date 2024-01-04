@@ -23,7 +23,7 @@ import freechips.rocketchip.rocket.DecodeLogic
 import freechips.rocketchip.rocket.Instructions._
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 import xiangshan.backend.fu.fpu.FPU
-import xiangshan.backend.fu.vector.Bundles.{VSew, VLmul, Category}
+import xiangshan.backend.fu.vector.Bundles.{VSew, VLmul}
 import xiangshan.backend.Bundles.VPUCtrlSignals
 import xiangshan.{FPUCtrlSignals, XSModule}
 
@@ -72,7 +72,6 @@ class FPToVecDecoder(implicit p: Parameters) extends XSModule {
   io.vpuCtrl.vm    := inst.VM
   io.vpuCtrl.nf    := inst.NF
   io.vpuCtrl.veew := inst.WIDTH
-  io.vpuCtrl.needScalaSrc := Category.needScalaSrc(inst.VCATEGORY)
   io.vpuCtrl.isReverse := needReverseInst
   io.vpuCtrl.isExt     := false.B
   io.vpuCtrl.isNarrow  := false.B

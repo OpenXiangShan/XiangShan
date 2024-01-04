@@ -6,7 +6,7 @@ import utils.EnumUtils.OHEnumeration
 import xiangshan.ExceptionNO._
 import xiangshan.SelImm
 import xiangshan.backend.Std
-import xiangshan.backend.fu.fpu.{FDivSqrt, FMA, FPToFP, FPToInt, IntToFP, IntToVec}
+import xiangshan.backend.fu.fpu.{FDivSqrt, FMA, FPToFP, FPToInt, IntToFP, IntToVec, FPToVec}
 import xiangshan.backend.fu.wrapper.{Alu, BranchUnit, DivUnit, JumpUnit, MulUnit, VFAlu, VFMA, VFDivSqrt, VIAluFix, VIMacU, VPPU, VIPU, VSetRiWi, VSetRiWvf, VSetRvfWvf, VCVT}
 import xiangshan.backend.Bundles.ExuInput
 import xiangshan.backend.datapath.DataConfig._
@@ -242,6 +242,20 @@ object FuConfig {
     latency = CertainLatency(0),
     dataBits = 128,
     immType = Set(SelImm.IMM_OPIVIU, SelImm.IMM_OPIVIS),
+  )
+
+  val F2vCfg: FuConfig = FuConfig (
+    name = "f2v",
+    FuType.f2v,
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new FPToVec(cfg)(p).suggestName("f2v")),
+    srcData = Seq(
+      Seq(FpData(), FpData()),
+      Seq(FpData()),
+    ),
+    piped = true,
+    writeVecRf = true,
+    latency = CertainLatency(0),
+    dataBits = 128,
   )
 
   val CsrCfg: FuConfig = FuConfig (
@@ -714,7 +728,7 @@ object FuConfig {
   )
 
   def allConfigs = Seq(
-    JmpCfg, BrhCfg, I2fCfg, I2vCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg, VSetRvfWvfCfg, VSetRiWvfCfg, VSetRiWiCfg,
+    JmpCfg, BrhCfg, I2fCfg, I2vCfg, F2vCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg, VSetRvfWvfCfg, VSetRiWvfCfg, VSetRiWiCfg,
     FmacCfg, F2iCfg, F2fCfg, FDivSqrtCfg, LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg, VialuCfg, VipuCfg, VlduCfg, VstuCfg,
     VfaluCfg, VfmaCfg, VfcvtCfg, HyldaCfg, HystaCfg
   )
