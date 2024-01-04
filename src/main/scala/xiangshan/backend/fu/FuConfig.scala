@@ -6,7 +6,7 @@ import utils.EnumUtils.OHEnumeration
 import xiangshan.ExceptionNO._
 import xiangshan.SelImm
 import xiangshan.backend.Std
-import xiangshan.backend.fu.fpu.{FDivSqrt, FMA, FPToFP, FPToInt, IntToFP, IntToVec, FPToVec}
+import xiangshan.backend.fu.fpu.{FDivSqrt, FMA, FPToFP, FPToInt, IntToFP, IntFPToVec}
 import xiangshan.backend.fu.wrapper.{Alu, BranchUnit, DivUnit, JumpUnit, MulUnit, VFAlu, VFMA, VFDivSqrt, VIAluFix, VIMacU, VPPU, VIPU, VSetRiWi, VSetRiWvf, VSetRvfWvf, VCVT}
 import xiangshan.backend.Bundles.ExuInput
 import xiangshan.backend.datapath.DataConfig._
@@ -233,7 +233,7 @@ object FuConfig {
   val I2vCfg: FuConfig = FuConfig (
     name = "i2v",
     FuType.i2v,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new IntToVec(cfg)(p).suggestName("i2v")),
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new IntFPToVec(cfg)(p).suggestName("i2v")),
     srcData = Seq(
       Seq(IntData(), IntData()),
     ),
@@ -247,7 +247,7 @@ object FuConfig {
   val F2vCfg: FuConfig = FuConfig (
     name = "f2v",
     FuType.f2v,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new FPToVec(cfg)(p).suggestName("f2v")),
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new IntFPToVec(cfg)(p).suggestName("f2v")),
     srcData = Seq(
       Seq(FpData(), FpData()),
       Seq(FpData()),

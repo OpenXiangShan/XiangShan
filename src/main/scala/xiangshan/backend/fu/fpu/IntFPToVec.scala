@@ -22,19 +22,22 @@ package xiangshan.backend.fu.fpu
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.XSError
 import utility.{SignExt, ZeroExt}
 import xiangshan.backend.fu.{FuConfig, FuncUnit, PipedFuncUnit}
 import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.IF2VectorType
 
-class FPToVec(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg) {
+class IntFPToVec(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg) {
   protected val in = io.in.bits
   protected val out = io.out.bits
+
+  // vsew is the lowest 2 bits of fuOpType
+  private val isImm = IF2VectorType.isImm(in.ctrl.fuOpType(4, 2))
+  // when needDup is true, the scalar data is duplicated in vector register
   private val needDup = IF2VectorType.needDup(in.ctrl.fuOpType(4, 2))
 
   // imm use src(1), scalar use src(0)
-  private val scalaData = in.data.src(0)
+  private val scalaData = Mux(isImm, in.data.src(1), in.data.src(0))
   // vsew is the lowest 2 bits of fuOpType
   private val vsew = in.ctrl.fuOpType(1, 0)
   private val dataWidth = cfg.dataBits
