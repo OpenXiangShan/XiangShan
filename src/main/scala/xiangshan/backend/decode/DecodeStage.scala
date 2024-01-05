@@ -25,6 +25,8 @@ import xiangshan._
 import xiangshan.backend.rename.RatReadPort
 import xiangshan.backend.Bundles._
 import xiangshan.backend.fu.vector.Bundles.VType
+import xiangshan.backend.fu.FuType
+import yunsuan.VpermType
 
 class DecodeStage(implicit p: Parameters) extends XSModule
   with HasPerfEvents
@@ -157,7 +159,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     io.vecRat(i)(0).addr := io.out(i).bits.lsrc(0) // vs1
     io.vecRat(i)(1).addr := io.out(i).bits.lsrc(1) // vs2
     io.vecRat(i)(2).addr := io.out(i).bits.lsrc(2) // old_vd
-    io.vecRat(i)(3).addr := v0Idx.U                // v0
+    io.vecRat(i)(3).addr := Mux(FuType.isVppu(io.out(i).bits.fuType) && (io.out(i).bits.fuOpType === VpermType.vcompress), io.out(i).bits.lsrc(3), v0Idx.U) // v0
     io.vecRat(i)(4).addr := vconfigIdx.U           // vtype
     io.vecRat(i)(5).addr := io.out(i).bits.ldest   // vd
     io.vecRat(i).foreach(_.hold := !io.out(i).ready)

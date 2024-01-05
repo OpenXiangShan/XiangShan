@@ -222,6 +222,7 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     UopSplitType.VEC_RGATHER -> numOfUopVrgather,
     UopSplitType.VEC_RGATHER_VX -> (numOfUopVrgather +& 1.U),
     UopSplitType.VEC_RGATHEREI16 -> numOfUopVrgatherei16,
+    UopSplitType.VEC_COMPRESS -> numOfUopVcompress,
     UopSplitType.VEC_MVNR -> (vmvn +& 1.U),
     UopSplitType.VEC_US_LDST -> Mux(isVlsr, nf +& 2.U, (numOfUopVLoadStoreStrided +& 1.U)),   // with one move instruction
     UopSplitType.VEC_S_LDST -> (numOfUopVLoadStoreStrided +& 2.U),    // with two move instructions

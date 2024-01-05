@@ -135,6 +135,8 @@ object FuType extends OHEnumeration {
 
   def isUncerLat(fuType: UInt): Bool = FuTypeOrR(fuType, uncerLat)
 
+  def isVppu(fuType: UInt): Bool = FuTypeOrR(fuType, vppu)
+
   object FuTypeOrR {
     def apply(fuType: UInt, fu0: OHType, fus: OHType*): Bool = {
       apply(fuType, fu0 +: fus)
