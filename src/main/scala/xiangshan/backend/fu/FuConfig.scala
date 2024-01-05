@@ -92,8 +92,8 @@ case class FuConfig (
     // Todo: add new FuType to distinguish f2i, f2f
     if (this.fuType == FuType.fmisc) {
       this.name match {
-        case FuConfig.F2iCfg.name => uop.rfWen.get
-        case FuConfig.F2fCfg.name => uop.fpu.get.fpWen && !uop.fpu.get.div && !uop.fpu.get.sqrt
+        case FuConfig.F2iCfg.name => (uop.fuType === FuType.fmisc.U) && uop.rfWen.get
+        case FuConfig.F2fCfg.name => (uop.fuType === FuType.fmisc.U) && uop.fpu.get.fpWen && !uop.fpu.get.div && !uop.fpu.get.sqrt
       }
     } else {
       uop.fuType === this.fuType.U
