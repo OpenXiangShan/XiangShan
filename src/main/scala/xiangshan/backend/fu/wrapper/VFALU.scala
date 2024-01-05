@@ -311,8 +311,19 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   )
   cmpResultOldVd := (outOldVd >> cmpResultOldVdRshiftWidth)(4*numVecModule-1,0)
   val cmpResultForMgu = Wire(Vec(cmpResultWidth, Bool()))
+  private val maxVdIdx = 8
+  private val elementsInOneUop = Mux1H(
+    Seq(
+      (outEew === 1.U) -> (cmpResultWidth).U(4.W),
+      (outEew === 2.U) -> (cmpResultWidth / 2).U(4.W),
+      (outEew === 3.U) -> (cmpResultWidth / 4).U(4.W),
+    )
+  )
+  private val vdIdx = outVecCtrl.vuopIdx(2, 0)
+  private val elementsComputed = Mux1H(Seq.tabulate(maxVdIdx)(i => (vdIdx === i.U) -> (elementsInOneUop * i.U)))
   for (i <- 0 until cmpResultWidth) {
-    cmpResultForMgu(i) := Mux(outSrcMaskRShift(i), cmpResult(i), Mux(outVecCtrl.vma, true.B, cmpResultOldVd(i)))
+    val cmpResultWithVmask = Mux(outSrcMaskRShift(i), cmpResult(i), Mux(outVecCtrl.vma, true.B, cmpResultOldVd(i)))
+    cmpResultForMgu(i) := Mux(elementsComputed +& i.U >= outVl, Mux(outVecCtrl.vta, true.B, cmpResultOldVd(i)), cmpResultWithVmask)
   }
   val outIsFold = outVecCtrl.fpu.isFoldTo1_2 || outVecCtrl.fpu.isFoldTo1_4 || outVecCtrl.fpu.isFoldTo1_8
   val outOldVdForREDO = Mux1H(Seq(
@@ -342,6 +353,9 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   }
   val isOutOldVdForREDO = (outCtrl.fuOpType === VfaluType.vfredosum && outIsFold) || outCtrl.fuOpType === VfaluType.vfwredosum
   val taIsFalseForVFREDO = ((outCtrl.fuOpType === VfaluType.vfredosum) || (outCtrl.fuOpType === VfaluType.vfwredosum)) && (outVecCtrl.vuopIdx =/= numOfUopVFREDOSUM - 1.U)
+  // outVecCtrl.fpu.isFpToVecInst means the instruction is float instruction, not vector float instruction
+  val notUseVl = outVecCtrl.fpu.isFpToVecInst || (outCtrl.fuOpType === VfaluType.vfmv_f_s)
+  val notModifyVd = !notUseVl && (outVl === 0.U)
   mgu.io.in.vd := Mux(outVecCtrl.isDstMask, Cat(0.U((dataWidth / 16 * 15).W), cmpResultForMgu.asUInt), resultDataUInt)
   mgu.io.in.oldVd := Mux(isOutOldVdForREDO, outOldVdForRED, outOldVd)
   mgu.io.in.mask := maskToMgu
@@ -350,7 +364,7 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   mgu.io.in.info.vl := outVlFix
   mgu.io.in.info.vstart := outVecCtrl.vstart
   mgu.io.in.info.vlmul := outVecCtrl.vlmul
-  mgu.io.in.info.valid := io.out.valid
+  mgu.io.in.info.valid := Mux(notModifyVd, false.B, io.in.valid)
   mgu.io.in.info.vstart := Mux(outVecCtrl.fpu.isFpToVecInst, 0.U, outVecCtrl.vstart)
   mgu.io.in.info.eew := outEew
   mgu.io.in.info.vsew := outVecCtrl.vsew
@@ -363,7 +377,7 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   val fpCmpFuOpType = Seq(VfaluType.vfeq, VfaluType.vflt, VfaluType.vfle)
   val isCmp = outVecCtrl.fpu.isFpToVecInst && (fpCmpFuOpType.map(_ === outCtrl.fuOpType).reduce(_|_))
   resultFpMask := Mux(isFclass || isCmp, Fill(16, 1.U(1.W)), Fill(VLEN, 1.U(1.W)))
-  io.out.bits.res.data := mgu.io.out.vd & resultFpMask
+  io.out.bits.res.data := Mux(notModifyVd, outOldVd, mgu.io.out.vd & resultFpMask)
   io.out.bits.ctrl.exceptionVec.get(ExceptionNO.illegalInstr) := mgu.io.out.illegal
 
 }
