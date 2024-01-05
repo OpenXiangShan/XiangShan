@@ -124,6 +124,21 @@ class CtrlBlockImp(
     delayed
   }).toSeq
 
+  val wbDataNoStd = io.fromWB.wbData.filter(!_.bits.params.hasStdFu)
+  private val delayedNotFlushedWriteBackNums = wbDataNoStd.map(x => {
+    val valid = x.valid
+    val killedByOlder = x.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect, s3_s5_redirect))
+    val delayed = Wire(Valid(UInt(io.fromWB.wbData.size.U.getWidth.W)))
+    delayed.valid := RegNext(valid && !killedByOlder)
+    val sameRobidxBools = VecInit(wbDataNoStd.map( wb => {
+      val killedByOlderThat = wb.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect, s3_s5_redirect))
+      (wb.bits.robIdx === x.bits.robIdx) && wb.valid && x.valid && !killedByOlderThat && !killedByOlder
+    }).toSeq)
+    dontTouch(sameRobidxBools)
+    delayed.bits := RegNext(PopCount(sameRobidxBools))
+    delayed
+  }).toSeq
+
   private val exuPredecode = VecInit(
     delayedNotFlushedWriteBack.filter(_.bits.redirect.nonEmpty).map(x => x.bits.predecodeInfo.get).toSeq
   )
@@ -461,6 +476,7 @@ class CtrlBlockImp(
   rob.io.hartId := io.fromTop.hartId
   rob.io.redirect := s1_s3_redirect
   rob.io.writeback := delayedNotFlushedWriteBack
+  rob.io.writebackNums := VecInit(delayedNotFlushedWriteBackNums)
 
   io.redirect := s1_s3_redirect
 
