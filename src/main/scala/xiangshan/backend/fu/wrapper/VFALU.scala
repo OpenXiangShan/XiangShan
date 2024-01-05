@@ -114,9 +114,9 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
     )
     // low 4 bits for vs2(fp_a), high 4 bits for vs1(fp_b),
     val isFold = vecCtrl.fpu.isFoldTo1_2 || vecCtrl.fpu.isFoldTo1_4 || vecCtrl.fpu.isFoldTo1_8
-    val f64FirstNotFoldMask = Cat(0.U(3.W), f64Mask(i+2), 0.U(3.W), f64Mask(i))
-    val f32FirstNotFoldMask = Cat(0.U(2.W), f32Mask(i + 5, i+4), 0.U(2.W), Cat(f32Mask(i + 1, i)))
-    val f16FirstNotFoldMask = Cat(f16Mask(i+11,i+8), f16Mask(i+3,0))
+    val f64FirstNotFoldMask = Cat(0.U(3.W), f64Mask(i + 2), 0.U(3.W), f64Mask(i))
+    val f32FirstNotFoldMask = Cat(0.U(2.W), f32Mask(i * 2 + 5, i * 2 + 4), 0.U(2.W), Cat(f32Mask(i * 2 + 1, i * 2)))
+    val f16FirstNotFoldMask = Cat(f16Mask(i * 4 + 11, i * 4 + 8), f16Mask(i * 4 + 3, i * 4))
     val f64MaskI = Mux(isFirstGroupUop, Mux(isFold, f64FirstFoldMask, f64FirstNotFoldMask), Mux(isFold, f64FoldMask, Fill(8,1.U)))
     val f32MaskI = Mux(isFirstGroupUop, Mux(isFold, f32FirstFoldMask, f32FirstNotFoldMask), Mux(isFold, f32FoldMask, Fill(8,1.U)))
     val f16MaskI = Mux(isFirstGroupUop, Mux(isFold, f16FirstFoldMask, f16FirstNotFoldMask), Mux(isFold, f16FoldMask, Fill(8,1.U)))
