@@ -394,21 +394,19 @@ object Bundles {
     def getSource: SchedulerType = exuParams.getWBSource
     def getIntWbBusyBundle = common.rfWen.toSeq
     def getVfWbBusyBundle = common.getVfWen.toSeq
-    def getIntRfReadBundle: Seq[RfReadPortWithConfig] = rf.flatten.filter(_.readInt).toSeq
-    def getVfRfReadBundle: Seq[RfReadPortWithConfig] = rf.flatten.filter(_.readVf).toSeq
 
     def getIntRfReadValidBundle(issueValid: Bool): Seq[ValidIO[RfReadPortWithConfig]] = {
-      getIntRfReadBundle.zip(srcType).map {
-        case (rfRd: RfReadPortWithConfig, t: UInt) =>
-          makeValid(issueValid && SrcType.isXp(t), rfRd)
-      }
+      rf.zip(srcType).map {
+        case (rfRd: MixedVec[RfReadPortWithConfig], t: UInt) =>
+          makeValid(issueValid && SrcType.isXp(t), rfRd.head)
+      }.toSeq
     }
 
     def getVfRfReadValidBundle(issueValid: Bool): Seq[ValidIO[RfReadPortWithConfig]] = {
-      getVfRfReadBundle.zip(srcType).map {
-        case (rfRd: RfReadPortWithConfig, t: UInt) =>
-          makeValid(issueValid && SrcType.isVfp(t), rfRd)
-      }
+      rf.zip(srcType).map {
+        case (rfRd: MixedVec[RfReadPortWithConfig], t: UInt) =>
+          makeValid(issueValid && SrcType.isVfp(t), rfRd.head)
+      }.toSeq
     }
 
     def getIntRfWriteValidBundle(issueValid: Bool) = {
