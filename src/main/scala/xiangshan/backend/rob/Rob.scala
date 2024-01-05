@@ -352,6 +352,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val exception = ValidIO(new ExceptionInfo)
     // exu + brq
     val writeback: MixedVec[ValidIO[ExuOutput]] = Flipped(params.genWrite2CtrlBundles)
+    val writebackNums = Flipped(Vec(writeback.size-params.StdCnt, ValidIO(UInt(writeback.size.U.getWidth.W))))
     val commits = Output(new RobCommitIO)
     val rabCommits = Output(new RabCommitIO)
     val diffCommits = if (backendParams.debugEn) Some(Output(new DiffCommitIO)) else None
@@ -1093,7 +1094,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val canWbSeq = exuWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U)
     val canWbNoBlockSeq = canWbSeq.zip(blockWbSeq).map{ case(canWb, blockWb) => canWb && !blockWb }
     val canStdWbSeq = VecInit(stdWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U))
-    val wbCnt = PopCount(canWbNoBlockSeq)
+    val wbCnt = Mux1H(canWbNoBlockSeq, io.writebackNums.map(_.bits))
 
     val exceptionHas = RegInit(false.B)
     val exceptionHasWire = Wire(Bool())
