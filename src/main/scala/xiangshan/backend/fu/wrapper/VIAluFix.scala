@@ -268,7 +268,8 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   // set the bits in vd to 1 if the index is larger than vl and vta is true
   for (i <- 0 until maxMaskIdx) {
     when(elementsComputed +& i.U >= outVl) {
-      outCmpWithTail(i) := Mux(outVecCtrl.vta, 1.U, outOldVd(elementsComputed +& i.U))
+      // always operate under a tail-agnostic policy
+      outCmpWithTail(i) := 1.U
     }.otherwise {
       outCmpWithTail(i) := outCmp(i)
     }
@@ -326,10 +327,10 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   /**
    * [[mgtu]]'s in connection, for vmask instructions
    */
-  mgtu.io.in.vd := outVd
+  mgtu.io.in.vd := Mux(dstMask && !outVecCtrl.isOpMask, mgu.io.out.vd, outVd)
   mgtu.io.in.vl := outVl
 
-  io.out.bits.res.data := Mux(outVstartGeVl, outOldVd, Mux(outVecCtrl.isOpMask, mgtu.io.out.vd, mgu.io.out.vd))
+  io.out.bits.res.data := Mux(outVstartGeVl, outOldVd, Mux(dstMask, mgtu.io.out.vd, mgu.io.out.vd))
   io.out.bits.res.vxsat.get := Mux(outVstartGeVl, false.B, (outVxsatReal & mgu.io.out.keep).orR)
   io.out.bits.ctrl.exceptionVec.get(ExceptionNO.illegalInstr) := mgu.io.out.illegal && !outVstartGeVl
 
