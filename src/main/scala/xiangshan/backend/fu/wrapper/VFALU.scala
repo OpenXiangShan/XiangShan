@@ -7,7 +7,7 @@ import utils.XSError
 import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.vector.Bundles.{VLmul, VSew, ma}
 import xiangshan.backend.fu.vector.utils.VecDataSplitModule
-import xiangshan.backend.fu.vector.{Mgu, VecInfo, VecPipedFuncUnit}
+import xiangshan.backend.fu.vector.{Mgu, Mgtu, VecInfo, VecPipedFuncUnit}
 import xiangshan.ExceptionNO
 import yunsuan.{VfaluType, VfpuType}
 import yunsuan.vector.VectorFloatAdder
@@ -31,6 +31,7 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   private val vs1Split = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
   private val oldVdSplit  = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
   private val mgu = Module(new Mgu(dataWidth))
+  private val mgtu = Module(new Mgtu(dataWidth))
 
   /**
     * In connection of [[vs2Split]], [[vs1Split]] and [[oldVdSplit]]
@@ -323,7 +324,7 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   private val elementsComputed = Mux1H(Seq.tabulate(maxVdIdx)(i => (vdIdx === i.U) -> (elementsInOneUop * i.U)))
   for (i <- 0 until cmpResultWidth) {
     val cmpResultWithVmask = Mux(outSrcMaskRShift(i), cmpResult(i), Mux(outVecCtrl.vma, true.B, cmpResultOldVd(i)))
-    cmpResultForMgu(i) := Mux(elementsComputed +& i.U >= outVl, Mux(outVecCtrl.vta, true.B, cmpResultOldVd(i)), cmpResultWithVmask)
+    cmpResultForMgu(i) := Mux(elementsComputed +& i.U >= outVl, true.B, cmpResultWithVmask)
   }
   val outIsFold = outVecCtrl.fpu.isFoldTo1_2 || outVecCtrl.fpu.isFoldTo1_4 || outVecCtrl.fpu.isFoldTo1_8
   val outOldVdForREDO = Mux1H(Seq(
@@ -372,12 +373,15 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   mgu.io.in.info.narrow := outVecCtrl.isNarrow
   mgu.io.in.info.dstMask := outVecCtrl.isDstMask
   mgu.io.in.isIndexedVls := false.B
+  mgtu.io.in.vd := Mux(outVecCtrl.isDstMask, mgu.io.out.vd, resultDataUInt)
+  mgtu.io.in.vl := outVl
   val resultFpMask = Wire(UInt(VLEN.W))
   val isFclass = outVecCtrl.fpu.isFpToVecInst && (outCtrl.fuOpType === VfaluType.vfclass)
   val fpCmpFuOpType = Seq(VfaluType.vfeq, VfaluType.vflt, VfaluType.vfle)
   val isCmp = outVecCtrl.fpu.isFpToVecInst && (fpCmpFuOpType.map(_ === outCtrl.fuOpType).reduce(_|_))
   resultFpMask := Mux(isFclass || isCmp, Fill(16, 1.U(1.W)), Fill(VLEN, 1.U(1.W)))
-  io.out.bits.res.data := Mux(notModifyVd, outOldVd, mgu.io.out.vd & resultFpMask)
+  // when dest is mask, the result need to be masked by mgtu
+  io.out.bits.res.data := Mux(notModifyVd, outOldVd, Mux(outVecCtrl.isDstMask, mgtu.io.out.vd, mgu.io.out.vd) & resultFpMask)
   io.out.bits.ctrl.exceptionVec.get(ExceptionNO.illegalInstr) := mgu.io.out.illegal
 
 }
