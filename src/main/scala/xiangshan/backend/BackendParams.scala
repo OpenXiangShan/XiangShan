@@ -27,7 +27,7 @@ import xiangshan.backend.datapath.{WakeUpConfig, WbArbiterParams}
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.issue._
 import xiangshan.backend.regfile._
-import xiangshan.DebugOptionsKey
+import xiangshan.{DebugOptionsKey, XSCoreParamsKey}
 
 import scala.reflect.{ClassTag, classTag}
 
@@ -98,6 +98,10 @@ case class BackendParams(
   def numException = allRealExuParams.count(_.exceptionOut.nonEmpty)
 
   def numRedirect = allSchdParams.map(_.numRedirect).sum
+
+  def numLoadDp = memSchdParams.get.issueBlockParams.filter(x => x.isLdAddrIQ || x.isHyAddrIQ).map(_.numEnq).sum
+
+  def numStoreDp = memSchdParams.get.issueBlockParams.filter(x => x.isStAddrIQ || x.isHyAddrIQ).map(_.numEnq).sum
 
   def genIntWriteBackBundle(implicit p: Parameters) = {
     Seq.fill(this.getIntRfWriteSize)(new RfWritePortWithConfig(IntData(), intPregParams.addrWidth))

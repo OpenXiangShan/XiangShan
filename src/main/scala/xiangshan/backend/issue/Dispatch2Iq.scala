@@ -350,8 +350,8 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
 
   private val enqLsqIO = io.enqLsqIO.get
 
-  private val numLoadDeq = LoadPipelineWidth
-  private val numStoreAMODeq = StorePipelineWidth
+  private val numLoadDeq = LSQLdEnqWidth
+  private val numStoreAMODeq = LSQStEnqWidth
   private val numVLoadDeq = LoadPipelineWidth
   private val numDeq = enqLsqIO.req.size
   private val numEnq = io.in.size

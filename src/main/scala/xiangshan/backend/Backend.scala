@@ -104,6 +104,10 @@ class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyMod
     println(s"[Backend]   port($port): ${seq.map(x => params.getExuName(x._1) + "(" + x._2.toString + ")").mkString(",")}")
   }
 
+  println(s"[Backend] Dispatch Configs:")
+  println(s"[Backend] Load IQ enq width(${params.numLoadDp}), Store IQ enq width(${params.numStoreDp})")
+  println(s"[Backend] Load DP width(${LSQLdEnqWidth}), Store DP width(${LSQStEnqWidth})")
+
   val ctrlBlock = LazyModule(new CtrlBlock(params))
   val pcTargetMem = LazyModule(new PcTargetMem(params))
   val intScheduler = params.intSchdParams.map(x => LazyModule(new Scheduler(x)))

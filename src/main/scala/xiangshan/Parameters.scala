@@ -561,6 +561,8 @@ trait HasXSParameter {
   val VTypeBufferSize = coreParams.VTypeBufferSize
   val IntRefCounterWidth = log2Ceil(RobSize)
   val LSQEnqWidth = coreParams.dpParams.LsDqDeqWidth
+  val LSQLdEnqWidth = LSQEnqWidth min backendParams.numLoadDp
+  val LSQStEnqWidth = LSQEnqWidth min backendParams.numStoreDp
   val VirtualLoadQueueSize = coreParams.VirtualLoadQueueSize
   val LoadQueueRARSize = coreParams.LoadQueueRARSize
   val LoadQueueRAWSize = coreParams.LoadQueueRAWSize

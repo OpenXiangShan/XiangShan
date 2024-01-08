@@ -329,9 +329,11 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule {
   }
 
 
-  val maxAllocate = backendParams.LdExuCnt max backendParams.StaExuCnt
-  val ldCanAccept = lqCounter >= lqAllocNumber +& maxAllocate.U
-  val sqCanAccept = sqCounter >= sqAllocNumber +& maxAllocate.U
+  val lqMaxAllocate = LSQLdEnqWidth
+  val sqMaxAllocate = LSQStEnqWidth
+  val maxAllocate = lqMaxAllocate max sqMaxAllocate
+  val ldCanAccept = lqCounter >= lqAllocNumber +& lqMaxAllocate.U
+  val sqCanAccept = sqCounter >= sqAllocNumber +& sqMaxAllocate.U
   // It is possible that t3_update and enq are true at the same clock cycle.
   // For example, if redirect.valid lasts more than one clock cycle,
   // after the last redirect, new instructions may enter but previously redirect

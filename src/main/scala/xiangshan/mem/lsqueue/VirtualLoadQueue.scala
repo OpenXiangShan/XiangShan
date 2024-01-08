@@ -84,7 +84,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   val lastLastCycleRedirect = RegNext(lastCycleRedirect)
 
   val validCount = distanceBetween(enqPtrExt(0), deqPtr)
-  val allowEnqueue = validCount <= (VirtualLoadQueueSize - LoadPipelineWidth).U
+  val allowEnqueue = validCount <= (VirtualLoadQueueSize - LSQLdEnqWidth).U
   val canEnqueue = io.enq.req.map(_.valid)
   val needCancel = WireInit(VecInit((0 until VirtualLoadQueueSize).map(i => {
     uop(i).robIdx.needFlush(io.redirect) && allocated(i)
