@@ -337,6 +337,14 @@ object Bundles {
       res.vl    := this.vl
       res
     }
+
+    def connectVType(source: VType): Unit = {
+      this.vill  := source.illegal
+      this.vma   := source.vma
+      this.vta   := source.vta
+      this.vsew  := source.vsew
+      this.vlmul := source.vlmul
+    }
   }
 
   // DynInst --[IssueQueue]--> DataPath

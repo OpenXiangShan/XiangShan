@@ -103,6 +103,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   //Comp 1
   decoderComp.io.redirect := io.redirect
   decoderComp.io.csrCtrl := io.csrCtrl
+  decoderComp.io.vtypeBypass := vtypeGen.io.vtype
   // The input inst of decoderComp is latched last cycle.
   // Set input empty, if there is no complex inst latched last cycle.
   decoderComp.io.in.valid := complexValid
