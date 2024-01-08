@@ -62,8 +62,10 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   private val state = RegInit(s_idle)
   private val stateNext = WireInit(state) // otherwise keep state value
   private val stateLast = RegEnable(state, state =/= stateNext)
+  private val stateLastCycle = RegNext(state)
 
-  private val vtypeBuffer = Module(new SyncDataModuleTemplate(new VTypeBufferEntry(), size, numWrite = CommitWidth, numRead = RenameWidth))
+  // +1 read port to get walk initial state
+  private val vtypeBuffer = Module(new SyncDataModuleTemplate(new VTypeBufferEntry(), size, numWrite = RenameWidth, numRead = CommitWidth + 1))
   private val vtypeBufferReadAddrVec = vtypeBuffer.io.raddr
   private val vtypeBufferReadDataVec = vtypeBuffer.io.rdata
   private val vtypeBufferWriteEnVec = vtypeBuffer.io.wen
@@ -174,9 +176,9 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
 
   private val allocPtrVec: Vec[VTypeBufferPtr] = VecInit((0 until RenameWidth).map(i => enqPtrVec(PopCount(needAllocVec.take(i)))))
   private val vtypeBufferReadPtrVecNext: Vec[VTypeBufferPtr] = Mux1H(Seq(
-    (stateNext === s_idle) -> deqPtrVecNext,
-    (stateNext === s_walk) -> walkPtrVecNext,
-    (stateNext === s_spcl_walk) -> deqPtrVecNext,
+    (stateNext === s_idle) -> VecInit(deqPtrVecNext ++ VecInit(0.U.asTypeOf(deqPtrVecNext.head))),
+    (stateNext === s_walk) -> VecInit(walkPtrVecNext ++ VecInit((walkPtrNext - 1.U))),
+    (stateNext === s_spcl_walk) -> VecInit(deqPtrVecNext ++ VecInit(0.U.asTypeOf(deqPtrVecNext.head))),
   ))
 
   /**
@@ -192,6 +194,7 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   private val commitValidVec = Wire(Vec(CommitWidth, Bool()))
   private val walkValidVec = Wire(Vec(CommitWidth, Bool()))
   private val infoVec = Wire(Vec(CommitWidth, VType()))
+  private val walkInitVType = Wire(VType())
 
   for (i <- 0 until CommitWidth) {
     commitValidVec(i) := state === s_idle && i.U < commitSize || state === s_spcl_walk && i.U < spclWalkSize
@@ -199,6 +202,7 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
 
     infoVec(i) := vtypeBufferReadDataVec(i).vtype
   }
+  walkInitVType := vtypeBufferReadDataVec.last.vtype
 
   commitCount   := Mux(state === s_idle,      PopCount(commitValidVec), 0.U)
   walkCount     := Mux(state === s_walk,      PopCount(walkValidVec), 0.U)
@@ -240,10 +244,13 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   )
 
   private val decodeResumeVType = Reg(ValidIO(VType()))
-  private val newestVType = PriorityMux(commitValidVec.zip(infoVec).map { case(commitValid, info) => commitValid -> info }.reverse)
+  private val newestVType = PriorityMux(walkValidVec.zip(infoVec).map { case(walkValid, info) => walkValid -> info }.reverse)
   when (reset.asBool) {
     decodeResumeVType.valid := false.B
-  }.elsewhen (state === s_walk && walkCount =/= 0.U) {
+  }.elsewhen (state === s_walk && stateLastCycle =/= s_walk) {
+    decodeResumeVType.valid := true.B
+    decodeResumeVType.bits := Mux(walkCount =/= 0.U, newestVType, walkInitVType)
+  }.elsewhen (state === s_walk && stateLastCycle === s_walk && walkCount =/= 0.U) {
     decodeResumeVType.valid := true.B
     decodeResumeVType.bits := newestVType
   }.otherwise {
@@ -253,7 +260,7 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   io.canEnq := allowEnqueue && state === s_idle
   io.status.walkEnd := walkEndNext
   // update vtype in decode when VTypeBuffer resumes from walk state
-  io.toDecode.vtype.valid := stateLast === s_walk && state === s_idle && decodeResumeVType.valid
+  io.toDecode.vtype.valid := (state === s_walk || stateLast === s_walk && state === s_idle) && decodeResumeVType.valid
   io.toDecode.vtype.bits := Mux(io.toDecode.vtype.valid, decodeResumeVType.bits, 0.U.asTypeOf(VType()))
 
   XSError(isBefore(enqPtr, deqPtr) && !isFull(enqPtr, deqPtr), "\ndeqPtr is older than enqPtr!\n")
@@ -272,6 +279,7 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
 
   dontTouch(enqPtrVec)
   dontTouch(deqPtrVec)
+  dontTouch(deqPtr)
   dontTouch(numValidEntries)
   dontTouch(commitCount)
   dontTouch(walkCount)
