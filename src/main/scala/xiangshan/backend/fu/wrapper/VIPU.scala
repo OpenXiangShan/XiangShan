@@ -101,7 +101,12 @@ class VIPU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   private val needClearVs1 = (VipuType.vcpop_m === io.in.bits.ctrl.fuOpType && vuopIdx === 0.U) ||
                              (VipuType.viota_m === io.in.bits.ctrl.fuOpType && vuopIdx(log2Up(MaxUopSize)-1,1) === 0.U) ||
                              (VipuType.vid_v   === io.in.bits.ctrl.fuOpType && vuopIdx(log2Up(MaxUopSize)-1,1) === 0.U)    // dirty code TODO:  inset into IAlu
-  private val needShiftVs1 = (VipuType.vwredsumu_vs === io.in.bits.ctrl.fuOpType || VipuType.vwredsum_vs === io.in.bits.ctrl.fuOpType) && vuopIdx < vlmul
+  private val lmul = MuxLookup(vlmul, 1.U(4.W), Array(
+    "b001".U -> 2.U,
+    "b010".U -> 4.U,
+    "b011".U -> 8.U
+  ))
+  private val needShiftVs1 = (VipuType.vwredsumu_vs === io.in.bits.ctrl.fuOpType || VipuType.vwredsum_vs === io.in.bits.ctrl.fuOpType) && vuopIdx < lmul
 
   // modules
   private val decoder = Module(new VIAluDecoder)
@@ -132,9 +137,9 @@ class VIPU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
       subIO.in.bits.srcType(0)  := decoder.io.out.srcType2
       subIO.in.bits.srcType(1)  := decoder.io.out.srcType1
       subIO.in.bits.vdType      := decoder.io.out.vdType
-      subIO.in.bits.vs1         :=  Mux1H(Seq(needClearVs1 -> 0.U,
-                                              needShiftVs1 -> SignExt(vs1(127,64), 128),
-                                           ((!needClearVs1) && (!needShiftVs1)) -> vs1))
+      subIO.in.bits.vs1         := Mux1H(Seq(needClearVs1 -> 0.U,
+                                             needShiftVs1 -> ZeroExt(vs1(127,64), 128),
+                                          ((!needClearVs1) && (!needShiftVs1)) -> vs1))
       subIO.in.bits.vs2         := vs2
       subIO.in.bits.old_vd      := oldVd
       subIO.in.bits.mask        := srcMask
