@@ -1072,8 +1072,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_rep_info = WireInit(s3_in.rep_info)
   val s3_sel_rep_cause = PriorityEncoderOH(s3_rep_info.cause.asUInt)
 
-  val s3_exception = ExceptionNO.selectByFu(s3_in.uop.cf.exceptionVec, lduCfg).asUInt.orR
-  when (s3_exception || s3_dly_ld_err || s3_rep_frm_fetch) {
+  val s3_exception = RegNext(ExceptionNO.selectByFu(s2_out.uop.cf.exceptionVec, lduCfg).asUInt.orR)
+   when (s3_exception || s3_dly_ld_err || s3_rep_frm_fetch || s3_bad_nuke_detected) {
     io.lsq.ldin.bits.rep_info.cause := 0.U.asTypeOf(s3_rep_info.cause.cloneType)
   } .otherwise {
     io.lsq.ldin.bits.rep_info.cause := VecInit(s3_sel_rep_cause.asBools)
