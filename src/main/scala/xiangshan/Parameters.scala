@@ -225,7 +225,7 @@ case class XSCoreParameters
   EnableLdVioCheckAfterReset: Boolean = true,
   EnableSoftPrefetchAfterReset: Boolean = true,
   EnableCacheErrorAfterReset: Boolean = true,
-  EnableAccurateLoadError: Boolean = true,
+  EnableAccurateLoadError: Boolean = false,
   EnableUncacheWriteOutstanding: Boolean = false,
   EnableStorePrefetchAtIssue: Boolean = false,
   EnableStorePrefetchAtCommit: Boolean = false,
