@@ -52,7 +52,7 @@ case class DCacheParameters
   nMaxPrefetchEntry: Int = 1,
   alwaysReleaseData: Boolean = false,
   enableDataEcc: Boolean = false,
-  enableTagEcc: Boolean = true
+  enableTagEcc: Boolean = false
 ) extends L1CacheParameters {
   // if sets * blockBytes > 4KB(page size),
   // cache alias will happen,
