@@ -7,7 +7,7 @@ import xiangshan.ExceptionNO._
 import xiangshan.SelImm
 import xiangshan.backend.Std
 import xiangshan.backend.fu.fpu.{FDivSqrt, FMA, FPToFP, FPToInt, IntToFP, IntFPToVec}
-import xiangshan.backend.fu.wrapper.{Alu, BranchUnit, DivUnit, JumpUnit, MulUnit, VFAlu, VFMA, VFDivSqrt, VIAluFix, VIMacU, VPPU, VIPU, VSetRiWi, VSetRiWvf, VSetRvfWvf, VCVT}
+import xiangshan.backend.fu.wrapper.{Alu, BranchUnit, DivUnit, JumpUnit, MulUnit, VFAlu, VFMA, VFDivSqrt, VIAluFix, VIMacU, VIDiv, VPPU, VIPU, VSetRiWi, VSetRiWvf, VSetRvfWvf, VCVT}
 import xiangshan.backend.Bundles.ExuInput
 import xiangshan.backend.datapath.DataConfig._
 
@@ -145,7 +145,7 @@ case class FuConfig (
 
   def needVecCtrl: Boolean = {
     import FuType._
-    Seq(vipu, vialuF, vimac, vfpu, vppu, vfalu, vfma, vfdiv, vfcvt, vldu, vstu).contains(fuType)
+    Seq(vipu, vialuF, vimac, vidiv, vfpu, vppu, vfalu, vfma, vfdiv, vfcvt, vldu, vstu).contains(fuType)
   }
 
   def isMul: Boolean = fuType == FuType.mul
@@ -159,13 +159,14 @@ case class FuConfig (
   def isVecArith: Boolean = fuType == FuType.vialuF || fuType == FuType.vimac ||
                             fuType == FuType.vppu || fuType == FuType.vipu ||
                             fuType == FuType.vfalu || fuType == FuType.vfma ||
-                            fuType == FuType.vfdiv || fuType == FuType.vfcvt
+                            fuType == FuType.vfdiv || fuType == FuType.vfcvt ||
+                            fuType == FuType.vidiv
 
   def isSta: Boolean = name.contains("sta")
 
   def ckAlwaysEn: Boolean = isCsr || isFence || fuType == FuType.vfalu ||
                             fuType == FuType.fmisc || fuType == FuType.div ||
-                            fuType == FuType.vfdiv
+                            fuType == FuType.vfdiv || fuType == FuType.vidiv
 
   /**
     * Get index of special src data, like [[VConfigData]], [[MaskSrcData]]
@@ -580,6 +581,22 @@ object FuConfig {
     exceptionOut = Seq(illegalInstr),
   )
 
+  val VidivCfg = FuConfig (
+    name = "vidiv",
+    fuType = FuType.vidiv,
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VIDiv(cfg)(p).suggestName("Vidiv")),
+    srcData = Seq(
+      Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()), // vs1, vs2, vd_old, v0, vtype&vl
+    ),
+    piped = false,
+    writeVecRf = true,
+    latency = UncertainLatency(),
+    vconfigWakeUp = true,
+    maskWakeUp = true,
+    dataBits = 128,
+    exceptionOut = Seq(illegalInstr),
+  )
+
   val VppuCfg = FuConfig (
     name = "vppu",
     fuType = FuType.vppu,
@@ -589,7 +606,6 @@ object FuConfig {
     ),
     piped = true,
     writeVecRf = true,
-    writeVxsat = true,
     latency = CertainLatency(1),
     vconfigWakeUp = true,
     maskWakeUp = true,

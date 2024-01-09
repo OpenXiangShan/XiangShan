@@ -10,7 +10,7 @@ import utils._
 import xiangshan.ExceptionNO.illegalInstr
 import xiangshan.backend.fu.FuType
 import xiangshan._
-import yunsuan.{VfpuType, VipuType, VimacType, VpermType, VialuFixType, VfaluType, VfmaType, VfdivType, VfcvtType}
+import yunsuan.{VfpuType, VipuType, VimacType, VpermType, VialuFixType, VfaluType, VfmaType, VfdivType, VfcvtType, VidivType}
 
 abstract class VecDecode extends XSDecodeBase {
   def generate() : List[BitPat]
@@ -357,8 +357,8 @@ object VecDecoder extends DecodeConstants {
     VASUBU_VV    -> OPMVV(T, FuType.vialuF, VialuFixType.vasubu_vv, F, T, F, UopSplitType.VEC_VVV),
     VCOMPRESS_VM -> OPMVV(T, FuType.vppu, VpermType.vcompress, F, T, F, UopSplitType.VEC_COMPRESS),
     VCPOP_M      -> OPMVV(T, FuType.vipu, VipuType.vcpop_m, T, F, F, UopSplitType.VEC_M0X, src1 = SrcType.no), // vcpop.m rd, vs2, vm
-    VDIV_VV      -> OPMVV(T, FuType.vipu, VipuType.dummy, F, T, F),
-    VDIVU_VV     -> OPMVV(T, FuType.vipu, VipuType.dummy, F, T, F),
+    VDIV_VV      -> OPMVV(T, FuType.vidiv, VidivType.vdiv, F, T, F, UopSplitType.VEC_VVV),
+    VDIVU_VV     -> OPMVV(T, FuType.vidiv, VidivType.vdivu, F, T, F, UopSplitType.VEC_VVV),
     VFIRST_M     -> OPMVV(T, FuType.vipu, VipuType.vfirst_m, T, F, F, UopSplitType.VEC_M0X_VFIRST, src1 = SrcType.no), // vfirst.m rd, vs2, vm
     VID_V        -> OPMVV(T, FuType.vipu, VipuType.vid_v, F, T, F, UopSplitType.VEC_MVV, src1 = SrcType.no, src2 = SrcType.no), // vid.v vd, vm
     VIOTA_M      -> OPMVV(T, FuType.vipu, VipuType.viota_m, F, T, F, UopSplitType.VEC_MVV, src1 = SrcType.no), // viota.m vd, vs2, vm
@@ -392,8 +392,8 @@ object VecDecoder extends DecodeConstants {
     VREDOR_VS    -> OPMVV(T, FuType.vipu, VipuType.vredor_vs, F, T, F, UopSplitType.VEC_VRED),
     VREDSUM_VS   -> OPMVV(T, FuType.vipu, VipuType.vredsum_vs, F, T, F, UopSplitType.VEC_VRED),
     VREDXOR_VS   -> OPMVV(T, FuType.vipu, VipuType.vredxor_vs, F, T, F, UopSplitType.VEC_VRED),
-    VREM_VV      -> OPMVV(T, FuType.vipu, VipuType.dummy, F, T, F),
-    VREMU_VV     -> OPMVV(T, FuType.vipu, VipuType.dummy, F, T, F),
+    VREM_VV      -> OPMVV(T, FuType.vidiv, VidivType.vrem, F, T, F, UopSplitType.VEC_VVV),
+    VREMU_VV     -> OPMVV(T, FuType.vidiv, VidivType.vremu, F, T, F, UopSplitType.VEC_VVV),
     VSEXT_VF2    -> OPMVV(T, FuType.vialuF, VialuFixType.vsext_vf2, F, T, F, UopSplitType.VEC_EXT2, src1 = SrcType.no), // vsext.vf2 vd, vs2, vm
     VSEXT_VF4    -> OPMVV(T, FuType.vialuF, VialuFixType.vsext_vf4, F, T, F, UopSplitType.VEC_EXT4, src1 = SrcType.no), // vsext.vf4 vd, vs2, vm
     VSEXT_VF8    -> OPMVV(T, FuType.vialuF, VialuFixType.vsext_vf8, F, T, F, UopSplitType.VEC_EXT8, src1 = SrcType.no), // vsext.vf8 vd, vs2, vm
@@ -421,8 +421,8 @@ object VecDecoder extends DecodeConstants {
     VAADDU_VX      -> OPMVX(T, FuType.vialuF, VialuFixType.vaaddu_vv, F, T, F, UopSplitType.VEC_VXV),
     VASUB_VX       -> OPMVX(T, FuType.vialuF, VialuFixType.vasub_vv, F, T, F, UopSplitType.VEC_VXV),
     VASUBU_VX      -> OPMVX(T, FuType.vialuF, VialuFixType.vasubu_vv, F, T, F, UopSplitType.VEC_VXV),
-    VDIV_VX        -> OPMVX(T, FuType.vipu, VipuType.dummy, F, T, F),
-    VDIVU_VX       -> OPMVX(T, FuType.vipu, VipuType.dummy, F, T, F),
+    VDIV_VX        -> OPMVX(T, FuType.vidiv, VidivType.vdiv, F, T, F, UopSplitType.VEC_VXV),
+    VDIVU_VX       -> OPMVX(T, FuType.vidiv, VidivType.vdivu, F, T, F, UopSplitType.VEC_VXV),
     VMACC_VX       -> OPMVX(T, FuType.vimac, VimacType.vmacc, F, T, F, UopSplitType.VEC_VXV),
     VMADD_VX       -> OPMVX(T, FuType.vimac, VimacType.vmadd, F, T, F, UopSplitType.VEC_VXV),
     VMUL_VX        -> OPMVX(T, FuType.vimac, VimacType.vmul, F, T, F, UopSplitType.VEC_VXV),
@@ -433,8 +433,8 @@ object VecDecoder extends DecodeConstants {
 
     VNMSAC_VX      -> OPMVX(T, FuType.vimac, VimacType.vnmsac, F, T, F, UopSplitType.VEC_VXV),
     VNMSUB_VX      -> OPMVX(T, FuType.vimac, VimacType.vnmsub, F, T, F, UopSplitType.VEC_VXV),
-    VREM_VX        -> OPMVX(T, FuType.vipu, VipuType.dummy, F, T, F),
-    VREMU_VX       -> OPMVX(T, FuType.vipu, VipuType.dummy, F, T, F),
+    VREM_VX        -> OPMVX(T, FuType.vidiv, VidivType.vrem, F, T, F, UopSplitType.VEC_VXV),
+    VREMU_VX       -> OPMVX(T, FuType.vidiv, VidivType.vremu, F, T, F, UopSplitType.VEC_VXV),
 
     VSLIDE1DOWN_VX -> OPMVX(T, FuType.vppu, VpermType.vslide1down, F, T, F, UopSplitType.VEC_SLIDE1DOWN),
     VSLIDE1UP_VX   -> OPMVX(T, FuType.vppu, VpermType.vslide1up, F, T, F, UopSplitType.VEC_SLIDE1UP),

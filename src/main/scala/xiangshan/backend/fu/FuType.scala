@@ -53,6 +53,7 @@ object FuType extends OHEnumeration {
   val vialuF = addType(name = "vialuF")
   val vppu = addType(name = "vppu")
   val vimac = addType(name = "vimac")
+  val vidiv = addType(name = "vidiv")
   val vfpu = addType(name = "vfpu") // will be deleted
   val vfalu = addType(name = "vfalu")
   val vfma = addType(name = "vfma")
@@ -69,7 +70,7 @@ object FuType extends OHEnumeration {
   val intArithAll = Seq(jmp, brh, i2f, i2v, csr, alu, mul, div, fence, bku)
   val fpArithAll = Seq(fmac, fmisc, fDivSqrt)
   val scalaMemAll = Seq(ldu, stu, mou)
-  val vecOPI = Seq(vipu, vialuF, vppu, vimac)
+  val vecOPI = Seq(vipu, vialuF, vppu, vimac, vidiv)
   val vecOPF = Seq(vfpu, vfalu, vfma, vfdiv, vfcvt, f2v)
   val vecVSET = Seq(vsetiwi, vsetiwf, vsetfwf)
   val vecArith = vecOPI ++ vecOPF
@@ -81,7 +82,7 @@ object FuType extends OHEnumeration {
   val lat1 = Seq(vialuF, vppu, vipu)
   val lat2 = Seq(i2f, mul, bku, vimac, vfcvt)
   val lat3 = Seq(vfma)
-  val uncerLat = Seq(fmac, fDivSqrt) ++ scalaMemAll ++ vecMem
+  val uncerLat = Seq(fmac, fDivSqrt, vidiv) ++ scalaMemAll ++ vecMem
 
   def X = BitPat.N(num) // Todo: Don't Care
 
@@ -175,6 +176,7 @@ object FuType extends OHEnumeration {
     vstu -> "vstu",
     vppu -> "vppu",
     vimac -> "vimac",
+    vidiv -> "vidiv",
     vfalu -> "vfalu",
     vfma -> "vfma",
     vfdiv -> "vfdiv"
