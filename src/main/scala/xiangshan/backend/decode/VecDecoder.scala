@@ -562,7 +562,7 @@ object VecDecoder extends DecodeConstants {
     VMFLE_VV           -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfalu, VfaluType.vfle, F, T, F, UopSplitType.VEC_VVM),
 
     // 13.14. Vector Floating-Point Classify Instruction
-    VFCLASS_V          -> OPFVV(SrcType.X , SrcType.X , FuType.vfalu, VfaluType.vfclass, F, T, F, UopSplitType.VEC_VVV),
+    VFCLASS_V          -> OPFVV(SrcType.X , SrcType.vp , FuType.vfalu, VfaluType.vfclass, F, T, F, UopSplitType.VEC_VVV),
 
     // 13.17. Single-Width Floating-Point/Integer Type-Convert Instructions
     VFCVT_XU_F_V       -> OPFVV(SrcType.X , SrcType.vp , FuType.vfcvt, VfcvtType.vfcvt_xufv, F, T, F, UopSplitType.VEC_VVV),
