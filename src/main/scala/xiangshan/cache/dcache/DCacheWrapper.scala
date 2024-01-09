@@ -54,7 +54,9 @@ case class DCacheParameters
   blockBytes: Int = 64,
   nMaxPrefetchEntry: Int = 1,
   alwaysReleaseData: Boolean = false,
-  isKeywordBitsOpt: Option[Boolean] = Some(true)
+  isKeywordBitsOpt: Option[Boolean] = Some(true),
+  enableDataEcc: Boolean = false,
+  enableTagEcc: Boolean = true
 ) extends L1CacheParameters {
   // if sets * blockBytes > 4KB(page size),
   // cache alias will happen,
@@ -127,6 +129,8 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
   require(cfg.nMissEntries < cfg.nReleaseEntries)
   val nEntries = cfg.nMissEntries + cfg.nReleaseEntries
   val releaseIdBase = cfg.nMissEntries
+  val EnableDataEcc = cacheParams.enableDataEcc
+  val EnableTagEcc = cacheParams.enableTagEcc
 
   // banked dcache support
   val DCacheSetDiv = 1
@@ -228,7 +232,7 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
     require(data.getWidth >= (bank+1)*DCacheSRAMRowBytes)
     data(DCacheSRAMRowBytes * (bank + 1) - 1, DCacheSRAMRowBytes * bank)
   }
-  
+
   def get_alias(vaddr: UInt): UInt ={
     require(blockOffBits + idxBits > pgIdxBits)
     if(blockOffBits + idxBits > pgIdxBits){
@@ -362,7 +366,7 @@ class DCacheWordReq(implicit p: Parameters) extends DCacheBundle
   val isFirstIssue = Bool()
   val replayCarry = new ReplayCarry(nWays)
   val lqIdx = new LqPtr
-  
+
   val debug_robIdx = UInt(log2Ceil(RobSize).W)
   def dump() = {
     XSDebug("DCacheWordReq: cmd: %x vaddr: %x data: %x mask: %x id: %d\n",

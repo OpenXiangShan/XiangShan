@@ -406,7 +406,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s2_coh = RegEnable(s1_coh, s1_fire)
   val s2_banked_store_wmask = RegEnable(s1_banked_store_wmask, s1_fire)
   val s2_flag_error = RegEnable(s1_flag_error, s1_fire)
-  val s2_tag_error = dcacheParameters.tagCode.decode(s2_encTag).error && s2_need_tag
+  val s2_tag_error = WireInit(false.B)
   val s2_l2_error = s2_req.error
   val s2_error = s2_flag_error || s2_tag_error || s2_l2_error // data_error not included
 
@@ -415,6 +415,12 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s2_hit = s2_tag_match && s2_has_permission
   val s2_amo_hit = s2_hit && !s2_req.probe && !s2_req.miss && s2_req.isAMO
   val s2_store_hit = s2_hit && !s2_req.probe && !s2_req.miss && s2_req.isStore
+
+  if(EnableTagEcc) {
+    s2_tag_error := dcacheParameters.tagCode.decode(s2_encTag).error && s2_need_tag
+  }else {
+    s2_tag_error := false.B
+  }
 
   s2_s0_set_conlict := s2_valid_dup(0) && s0_idx === s2_idx
   s2_s0_set_conlict_store := s2_valid_dup(1) && store_idx === s2_idx
