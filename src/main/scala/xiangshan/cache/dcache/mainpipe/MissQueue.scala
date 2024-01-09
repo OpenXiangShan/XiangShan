@@ -315,6 +315,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     // val refill_pipe_resp = Input(Bool())
 
     // replace pipe
+    val l2_hint = Input(Valid(new L2ToL1Hint())) // Hint from L2 Cache
     val replace_pipe_req = DecoupledIO(new MainPipeReq)
     val replace_pipe_resp = Input(Bool())
 
@@ -747,7 +748,9 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   io.mem_finish.valid := !s_grantack && w_grantfirst
   io.mem_finish.bits := grantack
 
-  io.replace_pipe_req.valid := !s_replace_req
+  // io.replace_pipe_req.valid := !s_replace_req && io.l2_hint.valid
+  io.replace_pipe_req.valid := false.B
+  // io.replace_pipe_req.valid := !s_replace_req
   val replace = io.replace_pipe_req.bits
   replace := DontCare
   replace.miss := false.B
@@ -893,6 +896,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 //    val refill_pipe_req_dup = Vec(nDupStatus, DecoupledIO(new RefillPipeReqCtrl))
 //    val refill_pipe_resp = Flipped(ValidIO(UInt(log2Up(cfg.nMissEntries).W)))
 
+    val l2_hint = Input(Valid(new L2ToL1Hint())) // Hint from L2 Cache
     val replace_pipe_req = DecoupledIO(new MainPipeReq)
     val replace_pipe_resp = Flipped(ValidIO(UInt(log2Up(cfg.nMissEntries).W)))
 
@@ -1075,6 +1079,13 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
 //      io.debug_early_replace(i) := e.io.debug_early_replace
       e.io.main_pipe_req.ready := io.main_pipe_req.ready
+
+      when(io.l2_hint.bits.sourceId === i.U) {
+        e.io.l2_hint <> io.l2_hint
+      } .otherwise {
+        e.io.l2_hint.valid := false.B
+        e.io.l2_hint.bits := DontCare
+      }
   }
 
   io.req.ready := accept

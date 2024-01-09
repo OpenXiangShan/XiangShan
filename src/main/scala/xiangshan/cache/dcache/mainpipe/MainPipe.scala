@@ -330,38 +330,41 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   s1_repl_way_raw := Mux(RegNext(s0_fire), io.replace_way.way, RegNext(s1_repl_way_raw))
 
   val s1_need_replacement = (s1_req.miss || s1_req.isStore && !s1_req.probe) && !s1_tag_match
-  val s1_way_en = Mux(
-    s1_req.replace,
-    s1_req.replace_way_en,
-    Mux(
-      s1_req.miss,
-      s1_req.miss_way_en,
-      Mux(
-        s1_need_replacement,
-        s1_repl_way_en,
-        s1_tag_match_way
-      )
-    )
-  )
+  // val s1_way_en = Mux(
+  //   s1_req.replace,
+  //   s1_req.replace_way_en,
+  //   Mux(
+  //     s1_req.miss,
+  //     s1_req.miss_way_en,
+  //     Mux(
+  //       s1_need_replacement,
+  //       s1_repl_way_en,
+  //       s1_tag_match_way
+  //     )
+  //   )
+  // )
+  val s1_way_en = Mux(s1_need_replacement, s1_repl_way_en, s1_tag_match_way)
   assert(!RegNext(s1_fire && PopCount(s1_way_en) > 1.U))
-  val s1_tag = Mux(
-    s1_req.replace,
-    get_tag(s1_req.addr),
-    Mux(
-      s1_req.miss,
-      s1_miss_tag,
-      Mux(s1_need_replacement, s1_repl_tag, s1_hit_tag)
-    )
-  )
-  val s1_coh = Mux(
-    s1_req.replace,
-    Mux1H(s1_req.replace_way_en, meta_resp.map(ClientMetadata(_))),
-    Mux(
-      s1_req.miss,
-      s1_miss_coh,
-      Mux(s1_need_replacement, s1_repl_coh, s1_hit_coh)
-    )
-  )
+  // val s1_tag = Mux(
+  //   s1_req.replace,
+  //   get_tag(s1_req.addr),
+  //   Mux(
+  //     s1_req.miss,
+  //     s1_miss_tag,
+  //     Mux(s1_need_replacement, s1_repl_tag, s1_hit_tag)
+  //   )
+  // )
+  val s1_tag = Mux(s1_need_replacement, s1_repl_tag, s1_hit_tag)
+  // val s1_coh = Mux(
+  //   s1_req.replace,
+  //   Mux1H(s1_req.replace_way_en, meta_resp.map(ClientMetadata(_))),
+  //   Mux(
+  //     s1_req.miss,
+  //     s1_miss_coh,
+  //     Mux(s1_need_replacement, s1_repl_coh, s1_hit_coh)
+  //   )
+  // )
+  val s1_coh = Mux(s1_need_replacement, s1_repl_coh, s1_hit_coh)
 
   XSPerfAccumulate("store_has_invalid_way_but_select_valid_way", io.replace_way.set.valid && wayMap(w => !meta_resp(w).asTypeOf(new Meta).coh.isValid()).asUInt.orR && s1_need_replacement && s1_repl_coh.isValid())
   XSPerfAccumulate("store_using_replacement", io.replace_way.set.valid && s1_need_replacement)

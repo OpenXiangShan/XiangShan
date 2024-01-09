@@ -771,6 +771,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val sms_agt_evict_req = DecoupledIO(new AGTEvictReq)
   val debugTopDown = new DCacheTopDownIO
   val debugRolling = Flipped(new RobDebugRollingIO)
+  val l2_hint = Input(Valid(new L2ToL1Hint()))
 }
 
 class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
@@ -864,6 +865,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   missQueue.io.l2_pf_store_only := RegNext(io.l2_pf_store_only, false.B)
   missQueue.io.debugTopDown <> io.debugTopDown
   missQueue.io.sms_agt_evict_req <> io.sms_agt_evict_req
+  missQueue.io.l2_hint <> io.l2_hint
   io.memSetPattenDetected := missQueue.io.memSetPattenDetected
 
   val errors = ldu.map(_.io.error) ++ // load error
