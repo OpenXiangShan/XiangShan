@@ -57,7 +57,7 @@ case class DCacheParameters
   alwaysReleaseData: Boolean = false,
   isKeywordBitsOpt: Option[Boolean] = Some(true),
   enableDataEcc: Boolean = false,
-  enableTagEcc: Boolean = true
+  enableTagEcc: Boolean = false
 ) extends L1CacheParameters {
   // if sets * blockBytes > 4KB(page size),
   // cache alias will happen,
