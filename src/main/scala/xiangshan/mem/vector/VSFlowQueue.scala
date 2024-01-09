@@ -138,6 +138,7 @@ class VecStoreFlowEntry (implicit p: Parameters) extends VecFlowBundle {
   val nSegments = UInt(elemIdxBits.W)
   val fieldIdx = UInt(fieldBits.W)
   val segmentIdx = UInt(elemIdxBits.W)
+  val writeMask = UInt((VLEN/8).W)
 
   def isFirstElem(): Bool = {
     this.fieldIdx === 0.U && this.segmentIdx === 0.U
@@ -166,7 +167,7 @@ class VecStoreFlowEntry (implicit p: Parameters) extends VecFlowBundle {
     // ! MAGIC NUM
     val vaddrMatch = this.vaddr(VAddrBits - 1, 4) === forward.vaddr(VAddrBits - 1, 4)
     val paddrMatch = this.paddr(PAddrBits - 1, 4) === forward.paddr(PAddrBits - 1, 4)
-    val maskMatch = (this.mask & forward.mask) =/= 0.U
+    val maskMatch = (this.writeMask & forward.mask) =/= 0.U
     vaddrMatch && paddrMatch && maskMatch
   }
 }
@@ -373,6 +374,7 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
         x.nSegments := thisFlowIn.nSegments
         x.fieldIdx := thisFlowIn.fieldIdx
         x.segmentIdx := thisFlowIn.segmentIdx
+        x.writeMask := genVWmask(thisFlowIn.vaddr,thisFlowIn.alignedType)
       }
 
       // ? Is there a more elegant way?
@@ -747,10 +749,10 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
   // Forward
   for (thisForward <- io.forward) {
     // for every forward query
-    // val flowNeedForward = Wire(Vec(VsFlowSize, Bool()))
-    val flowNeedForward = (flowQueueEntries.zipWithIndex).map{
-      case (entry,i) => 
-        entry.needForward(thisForward) && flowAllocated(i)
+    // val flowNeedForward = Wire(Vec(VsFlowL1Size, Bool()))
+    val flowNeedForward = (flowQueueEntries zip flowAllocated).map{
+      case (entry,valid) => 
+        entry.needForward(thisForward) && valid
     }
     val flowForwardMask = flowQueueEntries.map(_.mask & thisForward.mask)
     val doForward = flowNeedForward.reduce(_ || _)
