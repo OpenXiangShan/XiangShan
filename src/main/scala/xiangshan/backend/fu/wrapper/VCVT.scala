@@ -128,7 +128,12 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   val resultDataUInt = Wire(UInt(dataWidth.W))
   resultDataUInt := vfcvtResult
 
+  private val narrow = RegNext(RegNext(isNarrowCvt))
+  private val narrowNeedCat = outVecCtrl.vuopIdx(0).asBool && narrow
+  private val outNarrowVd = Mux(narrowNeedCat, Cat(resultDataUInt(dataWidth / 2 - 1, 0), outOldVd(dataWidth / 2 - 1, 0)), resultDataUInt)
+
   mgu.io.in.vd := resultDataUInt
+  mgu.io.in.vd := Mux(narrow, outNarrowVd, resultDataUInt)
   mgu.io.in.oldVd := outOldVd
   mgu.io.in.mask := maskToMgu
   mgu.io.in.info.ta := outVecCtrl.vta
@@ -140,7 +145,7 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   mgu.io.in.info.eew := outEew
   mgu.io.in.info.vsew := outVecCtrl.vsew
   mgu.io.in.info.vdIdx := outVecCtrl.vuopIdx
-  mgu.io.in.info.narrow := RegNext(RegNext(isNarrowCvt))
+  mgu.io.in.info.narrow := narrow
   mgu.io.in.info.dstMask := outVecCtrl.isDstMask
   mgu.io.in.isIndexedVls := false.B
 
