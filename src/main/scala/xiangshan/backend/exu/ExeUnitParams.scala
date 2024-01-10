@@ -111,6 +111,14 @@ case class ExeUnitParams(
     else
       Map()
   }
+  def wakeUpFuLatencyMap: Map[FuType.OHType, Int] = {
+    if (latencyCertain)
+      fuConfigs.filterNot(_.hasNoDataWB).map(x => (x.fuType, x.latency.latencyVal.get)).toMap
+    else if (hasUncertainLatencyVal)
+      fuConfigs.filterNot(_.hasNoDataWB).map(x => (x.fuType, x.latency.uncertainLatencyVal.get)).toMap
+    else
+      Map()
+  }
 
   /**
     * Get set of latency of function units.
@@ -119,6 +127,8 @@ case class ExeUnitParams(
     * @return Set[Latency]
     */
   def fuLatancySet: Set[Int] = fuLatencyMap.values.toSet
+
+  def wakeUpFuLatancySet: Set[Int] = wakeUpFuLatencyMap.values.toSet
 
   def latencyValMax: Int = fuLatancySet.fold(0)(_ max _)
 

@@ -159,7 +159,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   }
 
   val wakeUpQueues: Seq[Option[MultiWakeupQueue[ExuInput, WakeupQueueFlush]]] = params.exuBlockParams.map { x => OptionWrapper(x.isIQWakeUpSource && !x.hasLoadExu, Module(
-    new MultiWakeupQueue(new ExuInput(x), new ExuInput(x, x.copyWakeupOut, x.copyNum), new WakeupQueueFlush, x.fuLatancySet, flushFunc, modificationFunc, lastConnectFunc)
+    new MultiWakeupQueue(new ExuInput(x), new ExuInput(x, x.copyWakeupOut, x.copyNum), new WakeupQueueFlush, x.wakeUpFuLatancySet, flushFunc, modificationFunc, lastConnectFunc)
   ))}
   val deqBeforeDly = Wire(params.genIssueDecoupledBundle)
 

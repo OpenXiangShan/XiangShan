@@ -405,7 +405,7 @@ case class XSCoreParameters
   def iqWakeUpParams = {
     Seq(
       WakeUpConfig(
-        Seq("ALU0", "ALU1", "ALU2", "ALU3", "LDU0", "LDU1", "HYU0") ->
+        Seq("ALU0", "ALU1", "ALU2", "ALU3", "LDU0", "LDU1", "HYU0", "BJU0", "BJU1") ->
         Seq("ALU0", "BJU0", "ALU1", "BJU1", "ALU2", "BJU2", "ALU3", "BJU3", "LDU0", "LDU1", "STA0", "STD0", "STD1", "HYU0")
       ),
     ).flatten
