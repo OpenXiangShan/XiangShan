@@ -77,17 +77,18 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val ifecth = if (q.fetchi) true.B else false.B
   val mode_tmp = if (q.useDmode) csr.priv.dmode else csr.priv.imode
   val mode = (0 until Width).map(i => Mux(isHyperInst(i), csr.priv.spvp, mode_tmp))
-  val virt = csr.priv.virt
-  val sum = (0 until Width).map(i => Mux(virt || isHyperInst(i), io.csr.priv.vsum, io.csr.priv.sum))
-  val mxr = (0 until Width).map(i => Mux(virt || isHyperInst(i), io.csr.priv.vmxr || io.csr.priv.mxr, io.csr.priv.mxr))
+  val virt_in = csr.priv.virt
+  val virt_out = req.map(a => RegEnable(csr.priv.virt, a.fire))
+  val sum = (0 until Width).map(i => Mux(virt_out(i) || isHyperInst(i), io.csr.priv.vsum, io.csr.priv.sum))
+  val mxr = (0 until Width).map(i => Mux(virt_out(i) || isHyperInst(i), io.csr.priv.vmxr || io.csr.priv.mxr, io.csr.priv.mxr))
   val req_in_s2xlate = (0 until Width).map(i => MuxCase(noS2xlate, Seq(
-      (!(virt || req_in(i).bits.hyperinst)) -> noS2xlate,
+      (!(virt_in || req_in(i).bits.hyperinst)) -> noS2xlate,
       (csr.vsatp.mode =/= 0.U && csr.hgatp.mode =/= 0.U) -> allStage,
       (csr.vsatp.mode === 0.U) -> onlyStage2,
       (csr.hgatp.mode === 0.U) -> onlyStage1
     )))
   val req_out_s2xlate = (0 until Width).map(i => MuxCase(noS2xlate, Seq(
-    (!(virt || isHyperInst(i))) -> noS2xlate,
+    (!(virt_out(i) || isHyperInst(i))) -> noS2xlate,
     (csr.vsatp.mode =/= 0.U && csr.hgatp.mode =/= 0.U) -> allStage,
     (csr.vsatp.mode === 0.U) -> onlyStage2,
     (csr.hgatp.mode === 0.U) -> onlyStage1
@@ -100,7 +101,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   // val vmEnable = satp.mode === 8.U // && (mode < ModeM) // FIXME: fix me when boot xv6/linux...
   val vmEnable = (0 until Width).map(i => if (EnbaleTlbDebug) (satp.mode === 8.U)
     else (satp.mode === 8.U) && (mode(i) < ModeM))
-  val s2xlateEnable = (0 until Width).map(i => (isHyperInst(i) || virt) && (vsatp.mode === 8.U || hgatp.mode === 8.U) && (mode(i) < ModeM))
+  val s2xlateEnable = (0 until Width).map(i => (isHyperInst(i) || virt_out(i)) && (vsatp.mode === 8.U || hgatp.mode === 8.U) && (mode(i) < ModeM))
   val portTranslateEnable = (0 until Width).map(i => (vmEnable(i) || s2xlateEnable(i)) && RegNext(!req(i).bits.no_translate))
 
 
@@ -271,10 +272,10 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val req_need_gpa = hasGpf(idx)
     val req_s2xlate = Wire(UInt(2.W))
     req_s2xlate := MuxCase(noS2xlate, Seq(
-      (!(virt || req_out(idx).hyperinst)) -> noS2xlate,
-      (vsatp.mode =/= 0.U && hgatp.mode =/= 0.U) -> allStage,
-      (vsatp.mode === 0.U) -> onlyStage2,
-      (hgatp.mode === 0.U || req_need_gpa) -> onlyStage1
+      (!(virt_out(idx) || req_out(idx).hyperinst)) -> noS2xlate,
+      (csr.vsatp.mode =/= 0.U && csr.hgatp.mode =/= 0.U) -> allStage,
+      (csr.vsatp.mode === 0.U) -> onlyStage2,
+      (csr.hgatp.mode === 0.U || req_need_gpa) -> onlyStage1
     ))
    
     val ptw_just_back = ptw.resp.fire && req_s2xlate === ptw.resp.bits.s2xlate && ptw.resp.bits.hit(get_pn(req_out(idx).vaddr), io.csr.satp.asid, io.csr.vsatp.asid, io.csr.hgatp.asid, true, false)
@@ -301,10 +302,10 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val miss_req_memidx = req_out(idx).memidx
     val miss_req_s2xlate = Wire(UInt(2.W))
     miss_req_s2xlate := MuxCase(noS2xlate, Seq(
-      (!(virt || req_out(idx).hyperinst)) -> noS2xlate,
-      (vsatp.mode =/= 0.U && hgatp.mode =/= 0.U) -> allStage,
-      (vsatp.mode === 0.U) -> onlyStage2,
-      (hgatp.mode === 0.U || req_need_gpa) -> onlyStage1
+      (!(virt_out(idx) || req_out(idx).hyperinst)) -> noS2xlate,
+      (csr.vsatp.mode =/= 0.U && csr.hgatp.mode =/= 0.U) -> allStage,
+      (csr.vsatp.mode === 0.U) -> onlyStage2,
+      (csr.hgatp.mode === 0.U || req_need_gpa) -> onlyStage1
     ))
     val miss_req_s2xlate_reg = RegEnable(miss_req_s2xlate, io.ptw.req(idx).fire)
     val hasS2xlate = miss_req_s2xlate_reg =/= noS2xlate
@@ -449,7 +450,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       val req_need_gpa = gpf
       val req_s2xlate = Wire(UInt(2.W))
       req_s2xlate := MuxCase(noS2xlate, Seq(
-        (!RegNext(virt || req_in(i).bits.hyperinst)) -> noS2xlate,
+        (!RegNext(virt_in || req_in(i).bits.hyperinst)) -> noS2xlate,
         (vsatp.mode =/= 0.U && hgatp.mode =/= 0.U) -> allStage,
         (vsatp.mode === 0.U) -> onlyStage2,
         (hgatp.mode === 0.U || req_need_gpa) -> onlyStage1

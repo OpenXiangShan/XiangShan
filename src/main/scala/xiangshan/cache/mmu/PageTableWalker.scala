@@ -506,13 +506,13 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   val pte = io.mem.resp.bits.value.asTypeOf(new PteBundle().cloneType)
   val gpaddr = MakeGPAddr(io.in.bits.ppn, getVpnn(io.in.bits.req_info.vpn, 0))
-  val hptw_resp = io.hptw.resp.bits.h_resp
+  val hptw_resp = entries(hptw_resp_ptr_reg).hptw_resp
   val hpaddr = Cat(hptw_resp.genPPNS2(get_pn(gpaddr)), get_off(gpaddr))
   val hpaddr_reg = RegEnable(hpaddr, hasHptwResp && io.hptw.resp.fire)
   val addr = MakeAddr(io.in.bits.ppn, getVpnn(io.in.bits.req_info.vpn, 0))
   val addr_reg = RegEnable(addr, io.in.fire)
   io.pmp.req.valid := need_addr_check || hptw_need_addr_check
-  io.pmp.req.bits.addr := Mux(enableS2xlate, hpaddr, addr)
+  io.pmp.req.bits.addr := Mux(hptw_need_addr_check, hpaddr, addr)
   io.pmp.req.bits.cmd := TlbCmd.read
   io.pmp.req.bits.size := 3.U // TODO: fix it
   val pmp_resp_valid = io.pmp.req.valid // same cycle
@@ -557,7 +557,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   when (hyper_arb1.io.out.fire) {
     for (i <- state.indices) {
-      when (state(i) === state_hptw_req && entries(i).ppn === hyper_arb1.io.out.bits.ppn && entries(i).s2xlate) {
+      when (state(i) === state_hptw_req && entries(i).ppn === hyper_arb1.io.out.bits.ppn && entries(i).s2xlate && hyper_arb1.io.chosen === i.U) {
         state(i) := state_hptw_resp
         entries(i).wait_id := hyper_arb1.io.chosen
       }
@@ -566,7 +566,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   when (hyper_arb2.io.out.fire) {
     for (i <- state.indices) {
-      when (state(i) === state_last_hptw_req && entries(i).ppn === hyper_arb2.io.out.bits.ppn && entries(i).s2xlate) {
+      when (state(i) === state_last_hptw_req && entries(i).ppn === hyper_arb2.io.out.bits.ppn && entries(i).s2xlate && hyper_arb2.io.chosen === i.U) {
         state(i) := state_last_hptw_resp
         entries(i).wait_id := hyper_arb2.io.chosen
       }

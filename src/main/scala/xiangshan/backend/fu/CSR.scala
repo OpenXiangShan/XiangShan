@@ -1110,7 +1110,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   // Branch control
   val retTarget = WireInit(0.U)
-  val resetSatp = addr === Satp.U && wen // write to satp will cause the pipeline be flushed
+  val resetSatp = (addr === Satp.U || addr === Hgatp.U || addr === Vsatp.U) && wen // write to satp will cause the pipeline be flushed
   flushPipe := resetSatp || (valid && func === CSROpType.jmp && !isEcall && !isEbreak)
 
   private val illegalRetTarget = WireInit(false.B)
