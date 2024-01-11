@@ -166,8 +166,8 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
     case (mod, i) =>
       mod.io.fp_a             := Mux(opbWiden, vs1Split.io.outVec64b(i), vs2Split.io.outVec64b(i))  // very dirty TODO
       mod.io.fp_b             := Mux(opbWiden, vs2Split.io.outVec64b(i), vs1Split.io.outVec64b(i))  // very dirty TODO
-      mod.io.widen_a          := Cat(vs2Split.io.outVec32b(i+numVecModule), vs2Split.io.outVec32b(i))
-      mod.io.widen_b          := Cat(vs1Split.io.outVec32b(i+numVecModule), vs1Split.io.outVec32b(i))
+      mod.io.widen_a          := Mux(opbWiden, Cat(vs1Split.io.outVec32b(i+numVecModule), vs1Split.io.outVec32b(i)), Cat(vs2Split.io.outVec32b(i+numVecModule), vs2Split.io.outVec32b(i)))
+      mod.io.widen_b          := Mux(opbWiden, Cat(vs2Split.io.outVec32b(i+numVecModule), vs2Split.io.outVec32b(i)), Cat(vs1Split.io.outVec32b(i+numVecModule), vs1Split.io.outVec32b(i)))
       mod.io.frs1             := 0.U     // already vf -> vv
       mod.io.is_frs1          := false.B // already vf -> vv
       mod.io.mask             := Mux(isScalarMove, !vuopIdx.orR, genMaskForMerge(inmask = srcMaskRShift, sew = vsew, i = i))
