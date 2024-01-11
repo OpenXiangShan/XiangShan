@@ -195,19 +195,6 @@ class Dispatch2IqIntImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   when(uopsOutDq0.head.ready && uopsOutDq0.last.ready && IQ0Deq1IsEqual && (popDq0Deq1(1) === 1.U)) {
     lastBrh0SelectIQ0Enq0 := !lastBrh0SelectIQ0Enq0
   }
-  val alu0SelectIQ0Enq0 = Mux(IQ0Deq0IsEqual, !lastAlu0SelectIQ0Enq0, IQ0Deq0IsLess)
-  val brh0SelectIQ0Enq0 = Mux(IQ0Deq1IsEqual, !lastBrh0SelectIQ0Enq0, IQ0Deq1IsLess)
-  val uop0SelectIQ0Enq0 = Mux(isDq0Deq0(0), alu0SelectIQ0Enq0, brh0SelectIQ0Enq0)
-  val alu1SelectIQ0Enq0 = !uop0SelectIQ0Enq0 && (IQ0Deq0IsLess2 || Mux(IQ0Deq0IsEqual, Mux(popDq0Deq0(1) === 1.U, !lastAlu0SelectIQ0Enq0, lastAlu0SelectIQ0Enq0), isDq0Deq0(0)))
-  val brh1SelectIQ0Enq0 = !uop0SelectIQ0Enq0 && (IQ0Deq1IsLess2 || Mux(IQ0Deq1IsEqual, Mux(popDq0Deq1(1) === 1.U, !lastBrh0SelectIQ0Enq0, lastBrh0SelectIQ0Enq0), isDq0Deq1(0)))
-  val uop1SelectIQ0Enq0 = Mux(isDq0Deq0(1), alu1SelectIQ0Enq0, brh1SelectIQ0Enq0)
-  val alu1SelectIQ0Enq1 = isDq0Deq0(0) && IQ0Deq0IsLess2
-  val brh1SelectIQ0Enq1 = isDq0Deq1(0) && IQ0Deq1IsLess2
-  val uop1SelectIQ0Enq1 = uop0SelectIQ0Enq0 && Mux(isDq0Deq0(1), alu1SelectIQ0Enq1, brh1SelectIQ0Enq1)
-  val alu1SelectIQ1Enq0 = uop0SelectIQ0Enq0 && (IQ1Deq0IsLess2 || Mux(IQ0Deq0IsEqual, Mux(popDq0Deq0(1) === 1.U, lastAlu0SelectIQ0Enq0, !lastAlu0SelectIQ0Enq0), isDq0Deq0(0)))
-  val brh1SelectIQ1Enq0 = uop0SelectIQ0Enq0 && (IQ1Deq1IsLess2 || Mux(IQ0Deq1IsEqual, Mux(popDq0Deq1(1) === 1.U, lastBrh0SelectIQ0Enq0, !lastBrh0SelectIQ0Enq0), isDq0Deq0(0)))
-  val uop1SelectIQ1Enq0 = !uop1SelectIQ0Enq0 && !uop1SelectIQ0Enq1 && Mux(isDq0Deq0(1), alu1SelectIQ1Enq0, brh1SelectIQ1Enq0)
-  val uop1SelectIQ1Enq1 = !uop1SelectIQ0Enq0 && !uop1SelectIQ0Enq1 && !uop1SelectIQ1Enq0
   val IQ0FuCfgs = params.issueBlockParams(0).getFuCfgs
   val IQ1FuCfgs = params.issueBlockParams(1).getFuCfgs
   val IQ01BothfuCfgs = IQ0FuCfgs.intersect(IQ1FuCfgs)
@@ -219,6 +206,19 @@ class Dispatch2IqIntImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   val isOnlyIQ1 = uopsInDq0.map(x => x.valid && FuTypeOrR(x.bits.fuType, IQ1OnlyFuTypes))
   val isBothIQ01_0 = uopsInDq0(0).valid && FuTypeOrR(uopsInDq0(0).bits.fuType, IQ01BothfuCfgs.map(_.fuType))
   val isBothIQ01_1 = uopsInDq0(1).valid && FuTypeOrR(uopsInDq0(1).bits.fuType, IQ01BothfuCfgs.map(_.fuType))
+  val alu0SelectIQ0Enq0 = Mux(IQ0Deq0IsEqual, !lastAlu0SelectIQ0Enq0, IQ0Deq0IsLess)
+  val brh0SelectIQ0Enq0 = Mux(IQ0Deq1IsEqual, !lastBrh0SelectIQ0Enq0, IQ0Deq1IsLess)
+  val uop0SelectIQ0Enq0 = Mux(isDq0Deq0(0), alu0SelectIQ0Enq0, brh0SelectIQ0Enq0) || isOnlyIQ0(0)
+  val alu1SelectIQ0Enq0 = !uop0SelectIQ0Enq0 && (IQ0Deq0IsLess2 || Mux(IQ0Deq0IsEqual, Mux(popDq0Deq0(1) === 1.U, !lastAlu0SelectIQ0Enq0, lastAlu0SelectIQ0Enq0), isDq0Deq0(0)))
+  val brh1SelectIQ0Enq0 = !uop0SelectIQ0Enq0 && (IQ0Deq1IsLess2 || Mux(IQ0Deq1IsEqual, Mux(popDq0Deq1(1) === 1.U, !lastBrh0SelectIQ0Enq0, lastBrh0SelectIQ0Enq0), isDq0Deq1(0)))
+  val uop1SelectIQ0Enq0 = Mux(isDq0Deq0(1), alu1SelectIQ0Enq0, brh1SelectIQ0Enq0)
+  val alu1SelectIQ0Enq1 = isDq0Deq0(0) && IQ0Deq0IsLess2
+  val brh1SelectIQ0Enq1 = isDq0Deq1(0) && IQ0Deq1IsLess2
+  val uop1SelectIQ0Enq1 = uop0SelectIQ0Enq0 && Mux(isDq0Deq0(1), alu1SelectIQ0Enq1, brh1SelectIQ0Enq1)
+  val alu1SelectIQ1Enq0 = uop0SelectIQ0Enq0 && (IQ1Deq0IsLess2 || Mux(IQ0Deq0IsEqual, Mux(popDq0Deq0(1) === 1.U, lastAlu0SelectIQ0Enq0, !lastAlu0SelectIQ0Enq0), isDq0Deq0(0)))
+  val brh1SelectIQ1Enq0 = uop0SelectIQ0Enq0 && (IQ1Deq1IsLess2 || Mux(IQ0Deq1IsEqual, Mux(popDq0Deq1(1) === 1.U, lastBrh0SelectIQ0Enq0, !lastBrh0SelectIQ0Enq0), isDq0Deq0(0)))
+  val uop1SelectIQ1Enq0 = !uop1SelectIQ0Enq0 && !uop1SelectIQ0Enq1 && Mux(isDq0Deq0(1), alu1SelectIQ1Enq0, brh1SelectIQ1Enq0)
+  val uop1SelectIQ1Enq1 = !uop1SelectIQ0Enq0 && !uop1SelectIQ0Enq1 && !uop1SelectIQ1Enq0
   val IQ0Enq0Select = Wire(Vec(4, Bool()))
   val IQ0Enq1Select = Wire(Vec(4, Bool()))
   val IQ1Enq0Select = Wire(Vec(4, Bool()))
@@ -327,19 +327,6 @@ class Dispatch2IqIntImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   when(uopsOutDq1.head.ready && uopsOutDq1.last.ready && IQ2Deq1IsEqual && (popDq1Deq1(1) === 1.U)) {
     lastBrh0SelectIQ2Enq0 := !lastBrh0SelectIQ2Enq0
   }
-  val alu0SelectIQ2Enq0 = Mux(IQ2Deq0IsEqual, !lastAlu0SelectIQ2Enq0, IQ2Deq0IsLess)
-  val brh0SelectIQ2Enq0 = Mux(IQ2Deq1IsEqual, !lastBrh0SelectIQ2Enq0, IQ2Deq1IsLess)
-  val uop0SelectIQ2Enq0 = Mux(isDq1Deq0(0), alu0SelectIQ2Enq0, brh0SelectIQ2Enq0)
-  val alu1SelectIQ2Enq0 = !uop0SelectIQ2Enq0 && (IQ2Deq0IsLess2 || Mux(IQ2Deq0IsEqual, Mux(popDq1Deq0(1) === 1.U, !lastAlu0SelectIQ2Enq0, lastAlu0SelectIQ2Enq0), isDq1Deq0(0)))
-  val brh1SelectIQ2Enq0 = !uop0SelectIQ2Enq0 && (IQ2Deq1IsLess2 || Mux(IQ2Deq1IsEqual, Mux(popDq1Deq1(1) === 1.U, !lastBrh0SelectIQ2Enq0, lastBrh0SelectIQ2Enq0), isDq1Deq1(0)))
-  val uop1SelectIQ2Enq0 = Mux(isDq1Deq0(1), alu1SelectIQ2Enq0, brh1SelectIQ2Enq0)
-  val alu1SelectIQ2Enq1 = isDq1Deq0(0) && IQ2Deq0IsLess2
-  val brh1SelectIQ2Enq1 = isDq1Deq1(0) && IQ2Deq1IsLess2
-  val uop1SelectIQ2Enq1 = uop0SelectIQ2Enq0 && Mux(isDq1Deq0(1), alu1SelectIQ2Enq1, brh1SelectIQ2Enq1)
-  val alu1SelectIQ3Enq0 = uop0SelectIQ2Enq0 && (IQ3Deq0IsLess2 || Mux(IQ2Deq0IsEqual, Mux(popDq1Deq0(1) === 1.U, lastAlu0SelectIQ2Enq0, !lastAlu0SelectIQ2Enq0), isDq1Deq0(0)))
-  val brh1SelectIQ3Enq0 = uop0SelectIQ2Enq0 && (IQ3Deq1IsLess2 || Mux(IQ2Deq1IsEqual, Mux(popDq1Deq1(1) === 1.U, lastBrh0SelectIQ2Enq0, !lastBrh0SelectIQ2Enq0), isDq1Deq0(0)))
-  val uop1SelectIQ3Enq0 = !uop1SelectIQ2Enq0 && !uop1SelectIQ2Enq1 && Mux(isDq1Deq0(1), alu1SelectIQ3Enq0, brh1SelectIQ3Enq0)
-  val uop1SelectIQ3Enq1 = !uop1SelectIQ2Enq0 && !uop1SelectIQ2Enq1 && !uop1SelectIQ3Enq0
   val IQ2FuCfgs = params.issueBlockParams(2).getFuCfgs
   val IQ3FuCfgs = params.issueBlockParams(3).getFuCfgs
   val IQ23BothfuCfgs = IQ2FuCfgs.intersect(IQ3FuCfgs)
@@ -351,6 +338,19 @@ class Dispatch2IqIntImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   val isOnlyIQ3 = uopsInDq1.map(x => x.valid && FuTypeOrR(x.bits.fuType, IQ3OnlyFuTypes))
   val isBothIQ23_0 = uopsInDq1(0).valid && FuTypeOrR(uopsInDq1(0).bits.fuType, IQ23BothfuCfgs.map(_.fuType))
   val isBothIQ23_1 = uopsInDq1(1).valid && FuTypeOrR(uopsInDq1(1).bits.fuType, IQ23BothfuCfgs.map(_.fuType))
+  val alu0SelectIQ2Enq0 = Mux(IQ2Deq0IsEqual, !lastAlu0SelectIQ2Enq0, IQ2Deq0IsLess)
+  val brh0SelectIQ2Enq0 = Mux(IQ2Deq1IsEqual, !lastBrh0SelectIQ2Enq0, IQ2Deq1IsLess)
+  val uop0SelectIQ2Enq0 = Mux(isDq1Deq0(0), alu0SelectIQ2Enq0, brh0SelectIQ2Enq0) || isOnlyIQ2(0)
+  val alu1SelectIQ2Enq0 = !uop0SelectIQ2Enq0 && (IQ2Deq0IsLess2 || Mux(IQ2Deq0IsEqual, Mux(popDq1Deq0(1) === 1.U, !lastAlu0SelectIQ2Enq0, lastAlu0SelectIQ2Enq0), isDq1Deq0(0)))
+  val brh1SelectIQ2Enq0 = !uop0SelectIQ2Enq0 && (IQ2Deq1IsLess2 || Mux(IQ2Deq1IsEqual, Mux(popDq1Deq1(1) === 1.U, !lastBrh0SelectIQ2Enq0, lastBrh0SelectIQ2Enq0), isDq1Deq1(0)))
+  val uop1SelectIQ2Enq0 = Mux(isDq1Deq0(1), alu1SelectIQ2Enq0, brh1SelectIQ2Enq0)
+  val alu1SelectIQ2Enq1 = isDq1Deq0(0) && IQ2Deq0IsLess2
+  val brh1SelectIQ2Enq1 = isDq1Deq1(0) && IQ2Deq1IsLess2
+  val uop1SelectIQ2Enq1 = uop0SelectIQ2Enq0 && Mux(isDq1Deq0(1), alu1SelectIQ2Enq1, brh1SelectIQ2Enq1)
+  val alu1SelectIQ3Enq0 = uop0SelectIQ2Enq0 && (IQ3Deq0IsLess2 || Mux(IQ2Deq0IsEqual, Mux(popDq1Deq0(1) === 1.U, lastAlu0SelectIQ2Enq0, !lastAlu0SelectIQ2Enq0), isDq1Deq0(0)))
+  val brh1SelectIQ3Enq0 = uop0SelectIQ2Enq0 && (IQ3Deq1IsLess2 || Mux(IQ2Deq1IsEqual, Mux(popDq1Deq1(1) === 1.U, lastBrh0SelectIQ2Enq0, !lastBrh0SelectIQ2Enq0), isDq1Deq0(0)))
+  val uop1SelectIQ3Enq0 = !uop1SelectIQ2Enq0 && !uop1SelectIQ2Enq1 && Mux(isDq1Deq0(1), alu1SelectIQ3Enq0, brh1SelectIQ3Enq0)
+  val uop1SelectIQ3Enq1 = !uop1SelectIQ2Enq0 && !uop1SelectIQ2Enq1 && !uop1SelectIQ3Enq0
   val IQ2Enq0Select = Wire(Vec(4, Bool()))
   val IQ2Enq1Select = Wire(Vec(4, Bool()))
   val IQ3Enq0Select = Wire(Vec(4, Bool()))
