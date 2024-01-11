@@ -544,17 +544,18 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     // )
     io.replace_access.valid := s3_valid
     io.replace_access.bits.set := RegNext(RegNext(get_idx(s1_req.vaddr)))
-    io.replace_access.bits.way := RegNext(
-      Mux(
-        RegNext(s1_tag_match_dup_dc),
-        RegNext(OHToUInt(s1_tag_match_way_dup_dc)), // if hit, access hit way in plru
-        Mux( // if miss
-          !s2_miss_merged,
-          RegNext(s1_repl_way_en_enc), // 1st fire: access new selected replace way
-          OHToUInt(io.miss_resp.repl_way_en) // 2nd fire: access replace way selected at miss queue allocate time
-        )
-      )
-    )
+    // io.replace_access.bits.way := RegNext(
+    //   Mux(
+    //     RegNext(s1_tag_match_dup_dc),
+    //     RegNext(OHToUInt(s1_tag_match_way_dup_dc)), // if hit, access hit way in plru
+    //     Mux( // if miss
+    //       !s2_miss_merged,
+    //       RegNext(s1_repl_way_en_enc), // 1st fire: access new selected replace way
+    //       OHToUInt(io.miss_resp.repl_way_en) // 2nd fire: access replace way selected at miss queue allocate time
+    //     )
+    //   )
+    // )
+    io.replace_access.bits.way := RegNext(RegNext(Mux(s1_tag_match_dup_dc, OHToUInt(s1_tag_match_way_dup_dc), s1_repl_way_en_enc)))
   }
 
   // update access bit

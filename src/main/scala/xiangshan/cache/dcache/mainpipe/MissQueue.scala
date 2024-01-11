@@ -182,14 +182,20 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
     val merge_store = (req.isFromLoad || req.isFromPrefetch) && new_req.isFromStore
 
     val set_match = addr_to_dcache_set(req.vaddr) === addr_to_dcache_set(new_req.vaddr)
-    val way_match = req.way_en === new_req.way_en
+    // val way_match = req.way_en === new_req.way_en
+    // Mux(
+    //     alloc,
+    //     Mux(
+    //         block_match,
+    //         !alias_match || !(merge_load || merge_store),
+    //         // set_match && way_match
+    //         set_match
+    //       ),
+    //     false.B
+    //   )
     Mux(
         alloc,
-        Mux(
-            block_match,
-            !alias_match || !(merge_load || merge_store),
-            set_match && way_match
-          ),
+        block_match && (!alias_match || !(merge_load || merge_store)),
         false.B
       )
   }
@@ -661,11 +667,16 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     val set_match = set === addr_to_dcache_set(new_req.vaddr)
     val alias_match = is_alias_match(req.vaddr, new_req.vaddr)
 
-    req_valid &&
-      Mux(
+    // req_valid &&
+    //   Mux(
+    //     block_match,
+    //     (!before_req_sent_can_merge(new_req) && !before_data_refill_can_merge(new_req)) || !alias_match,
+    //     set_match && new_req.way_en === req.way_en
+    //   )
+    req_valid && Mux(
         block_match,
         (!before_req_sent_can_merge(new_req) && !before_data_refill_can_merge(new_req)) || !alias_match,
-        set_match && new_req.way_en === req.way_en
+        false.B
       )
   }
 
@@ -681,6 +692,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   io.secondary_reject := should_reject(io.req.bits)
   io.repl_way_en := req.way_en
 
+  
   // should not allocate, merge or reject at the same time
   assert(RegNext(PopCount(Seq(io.primary_ready, io.secondary_ready, io.secondary_reject)) <= 1.U))
 
@@ -753,18 +765,18 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   // io.replace_pipe_req.valid := !s_replace_req
   val replace = io.replace_pipe_req.bits
   replace := DontCare
-  replace.miss := false.B
-  replace.miss_id := io.id
-  replace.miss_dirty := false.B
-  replace.probe := false.B
-  replace.probe_need_data := false.B
-  replace.source := LOAD_SOURCE.U
-  replace.vaddr := req.vaddr // only untag bits are needed
-  replace.addr := Cat(req.replace_tag, 0.U(pgUntagBits.W)) // only tag bits are needed
-  replace.store_mask := 0.U
-  replace.replace := true.B
-  replace.replace_way_en := req.way_en
-  replace.error := false.B
+  // replace.miss := false.B
+  // replace.miss_id := io.id
+  // replace.miss_dirty := false.B
+  // replace.probe := false.B
+  // replace.probe_need_data := false.B
+  // replace.source := LOAD_SOURCE.U
+  // replace.vaddr := req.vaddr // only untag bits are needed
+  // replace.addr := Cat(req.replace_tag, 0.U(pgUntagBits.W)) // only tag bits are needed
+  // replace.store_mask := 0.U
+  // replace.replace := true.B
+  // replace.replace_way_en := req.way_en
+  // replace.error := false.B
 
   // io.refill_pipe_req.valid := !s_refill && w_replace_resp && w_grantlast
   // val refill = io.refill_pipe_req.bits
@@ -809,7 +821,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   io.main_pipe_req.bits.miss_id := io.id
   io.main_pipe_req.bits.miss_param := grant_param
   io.main_pipe_req.bits.miss_dirty := isDirty
-  io.main_pipe_req.bits.miss_way_en := req.way_en
+  // io.main_pipe_req.bits.miss_way_en := req.way_en
   io.main_pipe_req.bits.probe := false.B
   io.main_pipe_req.bits.source := req.source
   io.main_pipe_req.bits.cmd := req.cmd
@@ -974,7 +986,8 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   io.resp.id := Mux(!req_pipeline_reg_handled, OHToUInt(req_mshr_handled_vec), miss_req_pipe_reg.mshr_id)
   io.resp.handled := Cat(req_mshr_handled_vec).orR || req_pipeline_reg_handled
   io.resp.merged := merge
-  io.resp.repl_way_en := Mux(!req_pipeline_reg_handled, Mux1H(secondary_ready_vec, entries.map(_.io.repl_way_en)), miss_req_pipe_reg.req.way_en)
+  // io.resp.repl_way_en := Mux(!req_pipeline_reg_handled, Mux1H(secondary_ready_vec, entries.map(_.io.repl_way_en)), miss_req_pipe_reg.req.way_en)
+  io.resp.repl_way_en := DontCare
 
   /*  MissQueue enq logic is now splitted into 2 cycles
    *

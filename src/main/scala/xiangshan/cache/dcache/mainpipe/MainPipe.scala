@@ -323,8 +323,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   )
   val s1_repl_tag = ParallelMux(s1_repl_way_en.asBools, (0 until nWays).map(w => tag_resp(w)))
   val s1_repl_coh = ParallelMux(s1_repl_way_en.asBools, (0 until nWays).map(w => meta_resp(w))).asTypeOf(new ClientMetadata)
-  val s1_miss_tag = ParallelMux(s1_req.miss_way_en.asBools, (0 until nWays).map(w => tag_resp(w)))
-  val s1_miss_coh = ParallelMux(s1_req.miss_way_en.asBools, (0 until nWays).map(w => meta_resp(w))).asTypeOf(new ClientMetadata)
+  // val s1_miss_tag = ParallelMux(s1_req.miss_way_en.asBools, (0 until nWays).map(w => tag_resp(w)))
+  // val s1_miss_coh = ParallelMux(s1_req.miss_way_en.asBools, (0 until nWays).map(w => meta_resp(w))).asTypeOf(new ClientMetadata)
 
   val s1_repl_way_raw = WireInit(0.U(log2Up(nWays).W))
   s1_repl_way_raw := Mux(RegNext(s0_fire), io.replace_way.way, RegNext(s1_repl_way_raw))
@@ -1626,15 +1626,16 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
       )
     )
     io.replace_access.bits.set := RegNext(s2_idx_dup_for_replace_access)
-    io.replace_access.bits.way := RegNext(
-      Mux(
-        io.miss_req.valid && io.miss_resp.merged,
-        // miss queue 2nd fire: access replace way selected at miss queue allocate time
-        OHToUInt(io.miss_resp.repl_way_en),
-        // new selected replace way or hit way
-        RegNext(OHToUInt(s1_way_en))
-      )
-    )
+    // io.replace_access.bits.way := RegNext(
+    //   Mux(
+    //     io.miss_req.valid && io.miss_resp.merged,
+    //     // miss queue 2nd fire: access replace way selected at miss queue allocate time
+    //     OHToUInt(io.miss_resp.repl_way_en),
+    //     // new selected replace way or hit way
+    //     RegNext(OHToUInt(s1_way_en))
+    //   )
+    // )
+    io.replace_access.bits.way := RegNext(RegNext(OHToUInt(s1_way_en)))
   }
 
   io.replace_way.set.valid := RegNext(s0_fire)
