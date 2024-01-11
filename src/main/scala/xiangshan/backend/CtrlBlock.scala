@@ -97,7 +97,7 @@ class CtrlBlockImp(
 
   private val s0_robFlushRedirect = rob.io.flushOut
   private val s1_robFlushRedirect = Wire(Valid(new Redirect))
-  s1_robFlushRedirect.valid := RegNext(s0_robFlushRedirect.valid)
+  s1_robFlushRedirect.valid := RegNext(s0_robFlushRedirect.valid, false.B)
   s1_robFlushRedirect.bits := RegEnable(s0_robFlushRedirect.bits, s0_robFlushRedirect.valid)
 
   pcMem.io.raddr(pcMemRdIndexes("robFlush").head) := s0_robFlushRedirect.bits.ftqIdx.value
