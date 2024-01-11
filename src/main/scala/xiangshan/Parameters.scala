@@ -302,11 +302,11 @@ case class XSCoreParameters
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
         ExeUnitParams("ALU0", Seq(AluCfg), Seq(IntWB(port = 0, 0)), Seq(Seq(IntRD(0, 0)), Seq(IntRD(1, 0))), true, 2),
-        ExeUnitParams("BJU0", Seq(BrhCfg, JmpCfg, MulCfg, BkuCfg), Seq(IntWB(port = 4, 0)), Seq(Seq(IntRD(8, 0)), Seq(IntRD(7, 1)))),
+        ExeUnitParams("BJU0", Seq(BrhCfg, JmpCfg, MulCfg, BkuCfg), Seq(IntWB(port = 4, 0)), Seq(Seq(IntRD(8, 0)), Seq(IntRD(7, 1))), true, 2),
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
         ExeUnitParams("ALU1", Seq(AluCfg), Seq(IntWB(port = 1, 0)), Seq(Seq(IntRD(2, 0)), Seq(IntRD(3, 0))), true, 2),
-        ExeUnitParams("BJU1", Seq(BrhCfg, JmpCfg, MulCfg, BkuCfg), Seq(IntWB(port = 5, 0)), Seq(Seq(IntRD(9, 0)), Seq(IntRD(5, 1)))),
+        ExeUnitParams("BJU1", Seq(BrhCfg, JmpCfg, MulCfg, BkuCfg), Seq(IntWB(port = 5, 0)), Seq(Seq(IntRD(9, 0)), Seq(IntRD(5, 1))), true, 2),
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
         ExeUnitParams("ALU2", Seq(AluCfg), Seq(IntWB(port = 2, 0)), Seq(Seq(IntRD(4, 0)), Seq(IntRD(5, 0))), true, 2),
@@ -349,8 +349,8 @@ case class XSCoreParameters
 
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams("LDU0", Seq(LduCfg), Seq(IntWB(6, 0), VfWB(6, 0)), Seq(Seq(IntRD(12, 0))), true, 1),
-        ExeUnitParams("LDU1", Seq(LduCfg), Seq(IntWB(7, 0), VfWB(7, 0)), Seq(Seq(IntRD(13, 0))), true, 1),
+        ExeUnitParams("LDU0", Seq(LduCfg), Seq(IntWB(6, 0), VfWB(6, 0)), Seq(Seq(IntRD(12, 0))), true, 2),
+        ExeUnitParams("LDU1", Seq(LduCfg), Seq(IntWB(7, 0), VfWB(7, 0)), Seq(Seq(IntRD(13, 0))), true, 2),
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
         ExeUnitParams("STA0", Seq(StaCfg, MouCfg), Seq(IntWB(6, 1)), Seq(Seq(IntRD(8, 1)))),
