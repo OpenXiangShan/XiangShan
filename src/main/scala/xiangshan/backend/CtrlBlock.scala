@@ -35,6 +35,7 @@ import xiangshan.backend.rename.{Rename, RenameTableWrapper, SnapshotGenerator}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.frontend.{FtqPtr, FtqRead, Ftq_RF_Components}
 import xiangshan.mem.{LqPtr, LsqEnqIO}
+import xiangshan.backend.issue.{IntScheduler, VfScheduler, MemScheduler}
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   val rob_commits = Vec(CommitWidth, Valid(new RobCommitInfo))
@@ -126,12 +127,29 @@ class CtrlBlockImp(
   }).toSeq
 
   val wbDataNoStd = io.fromWB.wbData.filter(!_.bits.params.hasStdFu)
+  val intScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[IntScheduler])
+  val vfScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[VfScheduler])
+  val writeFpVecWbData = io.fromWB.wbData.filter(x => x.bits.params.writeFpRf || x.bits.params.writeVecRf)
+  val memVloadWbData = io.fromWB.wbData.filter(x => x.bits.params.schdType.isInstanceOf[MemScheduler] && x.bits.params.hasVLoadFu)
   private val delayedNotFlushedWriteBackNums = wbDataNoStd.map(x => {
     val valid = x.valid
     val killedByOlder = x.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect, s3_s5_redirect))
     val delayed = Wire(Valid(UInt(io.fromWB.wbData.size.U.getWidth.W)))
     delayed.valid := RegNext(valid && !killedByOlder)
-    val sameRobidxBools = VecInit(wbDataNoStd.map( wb => {
+    val isIntSche = intScheWbData.contains(x)
+    val isVfSche = vfScheWbData.contains(x)
+    val isMemVload = memVloadWbData.contains(x)
+    val canSameRobidxWbData = if (isIntSche) {
+      if (x.bits.params.writeFpRf || x.bits.params.writeVecRf) intScheWbData ++ vfScheWbData
+      else intScheWbData
+    } else if (isVfSche) {
+      writeFpVecWbData
+    } else if (isMemVload) {
+      memVloadWbData
+    } else {
+      Seq(x)
+    }
+    val sameRobidxBools = VecInit(canSameRobidxWbData.map( wb => {
       val killedByOlderThat = wb.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect, s3_s5_redirect))
       (wb.bits.robIdx === x.bits.robIdx) && wb.valid && x.valid && !killedByOlderThat && !killedByOlder
     }).toSeq)
