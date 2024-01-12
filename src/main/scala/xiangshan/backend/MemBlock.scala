@@ -1204,6 +1204,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   vsFlowQueue.io.rob.commit := io.ooo_to_mem.lsqio.commit
   vsFlowQueue.io.rob.pendingPtr := io.ooo_to_mem.lsqio.pendingPtr
   vsFlowQueue.io.rob.pendingPtrNext := io.ooo_to_mem.lsqio.pendingPtrNext
+  (0 until VecStorePipelineWidth).map(i => vsFlowQueue.io.lsq(i) <> lsq.io.sta.vecStoreAddrInactivate(i))
   io.mem_to_ooo.writebackVldu.head.valid := vlWrapper.io.uopWriteback.valid || vsUopQueue.io.uopWriteback.valid
   io.mem_to_ooo.writebackVldu.head.bits := Mux1H(Seq(
     vlWrapper.io.uopWriteback.valid -> vlWrapper.io.uopWriteback.bits,
