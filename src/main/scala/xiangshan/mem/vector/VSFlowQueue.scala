@@ -168,7 +168,8 @@ class VecStoreFlowEntry (implicit p: Parameters) extends VecFlowBundle {
     val vaddrMatch = this.vaddr(VAddrBits - 1, 4) === forward.vaddr(VAddrBits - 1, 4)
     val paddrMatch = this.paddr(PAddrBits - 1, 4) === forward.paddr(PAddrBits - 1, 4)
     val maskMatch = (this.writeMask & forward.mask) =/= 0.U
-    vaddrMatch && paddrMatch && maskMatch
+    val isActive = this.exp
+    vaddrMatch && paddrMatch && maskMatch && isActive
   }
 }
 
@@ -206,6 +207,9 @@ class VsFlowQueueIOBundle(implicit p: Parameters) extends VLSUBundle {
   // update tval when exception happens
   // val exceptionAddrValid = Output(Bool())
   val exceptionAddr = new ExceptionAddrIO
+    
+  // when issue last elem, need to mark vector store addrvalid
+  val lsq = Vec(VecStorePipelineWidth, Valid(new LsPipelineBundle))
 }
 
 class VsExceptionBuffer(implicit p: Parameters) extends VLSUModule with HasCircularQueuePtrHelper {
@@ -407,15 +411,18 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
   /* Execute Logic */
   /** Issue Logic **/
 
-  val canIssue = Wire(Vec(VecLoadPipelineWidth, Bool()))
+  val canIssue = Wire(Vec(VecStorePipelineWidth, Bool()))
   val allowIssue = io.pipeIssue.map(_.ready)
-  val doIssue = Wire(Vec(VecLoadPipelineWidth, Bool()))
-  val issueCount = PopCount(doIssue)
+  val doIssue = Wire(Vec(VecStorePipelineWidth, Bool()))
+  val inActiveIssue = Wire(Vec(VecStorePipelineWidth,Bool()))
+  val issueCount = PopCount(doIssue) + PopCount(inActiveIssue)
 
   // handshake
   for (i <- 0 until VecStorePipelineWidth) {
     val thisPtr = issuePtr(i).value
-    canIssue(i) := !flowNeedCancel(thisPtr) && issuePtr(i) < enqPtr(0)
+    val canIssueToPipline = !flowNeedCancel(thisPtr) && issuePtr(i) < enqPtr(0)
+    canIssue(i) := canIssueToPipline && flowQueueEntries(thisPtr).exp
+    inActiveIssue(i) := canIssueToPipline && !flowQueueEntries(thisPtr).exp
     if (i == 0) {
       doIssue(i) := canIssue(i) && allowIssue(i)
       io.pipeIssue(i).valid := canIssue(i)
@@ -423,6 +430,14 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
       doIssue(i) := canIssue(i) && allowIssue(i) && allowIssue(i-1)
       io.pipeIssue(i).valid := canIssue(i) && allowIssue(i-1)
     }
+    // don't need issue to pipline
+    when(inActiveIssue(i)){
+      flowFinished(thisPtr) := true.B
+    }
+    // mark lsq entries addrvalid
+    io.lsq(i).valid := inActiveIssue(i) && flowQueueEntries(thisPtr).isLastElem
+    io.lsq(i).bits := DontCare // TODO: fix me
+    io.lsq(i).bits.uop := flowQueueEntries(thisPtr).uop
   }
 
   // control signals
