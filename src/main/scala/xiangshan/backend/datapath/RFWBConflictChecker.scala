@@ -42,6 +42,33 @@ class RFWBCollideCheckerIO(val params: RFWBCollideCheckerParams)(implicit p: Par
   val out = Vec(params.portMax + 1, Valid(new RFWBCollideCheckerBundle(pregWidth)))
 }
 
+private object ArbiterCtrl {
+  def apply(request: Seq[Bool]): Seq[Bool] = request.length match {
+    case 0 => Seq()
+    case 1 => Seq(true.B)
+    case _ => true.B +: request.tail.init.scanLeft(request.head)(_ || _).map(!_)
+  }
+}
+
+// when io.in.valid is false.B, io.in.ready is true.B
+class WBArbiter[T <: Data](val gen: T, val n: Int) extends Module {
+  val io = IO(new ArbiterIO(gen, n))
+
+  io.chosen := (n - 1).asUInt
+  io.out.bits := io.in(n - 1).bits
+  for (i <- n - 2 to 0 by -1) {
+    when(io.in(i).valid) {
+      io.chosen := i.asUInt
+      io.out.bits := io.in(i).bits
+    }
+  }
+
+  val grant = ArbiterCtrl(io.in.map(_.valid))
+  for ((in, g) <- io.in.zip(grant))
+    in.ready := (g || !in.valid) && io.out.ready
+  io.out.valid := !grant.last || io.in.last.valid
+}
+
 abstract class RFWBCollideCheckerBase(params: RFWBCollideCheckerParams)(implicit p: Parameters) extends Module {
   protected def portRange: Range
 
@@ -55,33 +82,6 @@ abstract class RFWBCollideCheckerBase(params: RFWBCollideCheckerParams)(implicit
     .flatten
     .groupBy(_.bits.wbCfg.get.port)
     .map(x => (x._1, x._2.sortBy(_.bits.wbCfg.get.priority)))
-
-  private object ArbiterCtrl {
-    def apply(request: Seq[Bool]): Seq[Bool] = request.length match {
-      case 0 => Seq()
-      case 1 => Seq(true.B)
-      case _ => true.B +: request.tail.init.scanLeft(request.head)(_ || _).map(!_)
-    }
-  }
-
-  // when io.in.valid is false.B, io.in.ready is true.B
-  class WBArbiter[T <: Data](val gen: T, val n: Int) extends Module {
-    val io = IO(new ArbiterIO(gen, n))
-
-    io.chosen := (n - 1).asUInt
-    io.out.bits := io.in(n - 1).bits
-    for (i <- n - 2 to 0 by -1) {
-      when(io.in(i).valid) {
-        io.chosen := i.asUInt
-        io.out.bits := io.in(i).bits
-      }
-    }
-
-    val grant = ArbiterCtrl(io.in.map(_.valid))
-    for ((in, g) <- io.in.zip(grant))
-      in.ready := (g || !in.valid) && io.out.ready
-    io.out.valid := !grant.last || io.in.last.valid
-  }
 
   protected val arbiters: Seq[Option[WBArbiter[RFWBCollideCheckerBundle]]] = portRange.map { portIdx =>
     OptionWrapper(
