@@ -52,11 +52,10 @@ abstract class RFReadArbiterBase(val params: RFRdArbParams)(implicit p: Paramete
     .flatten.flatten
     .groupBy(_.bits.rdCfg.get.port)
     .map(x => (x._1, x._2.sortBy(_.bits.rdCfg.get.priority).toSeq))
-
-  protected val arbiters: Seq[Option[Arbiter[RFArbiterBundle]]] = portRange.map { portIdx =>
+  protected val arbiters: Seq[Option[WBArbiter[RFArbiterBundle]]] = portRange.map { portIdx =>
     OptionWrapper(
       inGroup.isDefinedAt(portIdx),
-      Module(new Arbiter(
+      Module(new WBArbiter(
         new RFArbiterBundle(pregWidth),
         inGroup(portIdx).size
       ))
