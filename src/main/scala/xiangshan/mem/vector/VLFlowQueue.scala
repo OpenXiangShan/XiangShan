@@ -195,25 +195,42 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
   // write back results
   for (i <- 0 until VecLoadPipelineWidth) {
     val thisLoadResult = flowLoadResult(deqPtr(i).value)
+    val thisLoadEntries = flowQueueEntries(deqPtr(i).value)
+    val isActiveElem = thisLoadEntries.exp
+
+    val isvec             = Mux(isActiveElem, thisLoadResult.vec.isvec, true.B)   // ?  Can this be false ?
+    val vecdata           = Mux(isActiveElem, thisLoadResult.vec.vecdata, 0.U(VLEN.W))
+    val mask              = Mux(isActiveElem, thisLoadResult.vec.mask, thisLoadEntries.mask)
+    val reg_offset        = Mux(isActiveElem, thisLoadResult.vec.reg_offset, thisLoadEntries.reg_offset)
+    val exp               = Mux(isActiveElem, thisLoadResult.vec.vecActive, thisLoadEntries.exp)
+    val is_first_ele      = Mux(isActiveElem, thisLoadResult.vec.is_first_ele, thisLoadEntries.is_first_ele)
+    val elemIdx           = Mux(isActiveElem, thisLoadResult.vec.elemIdx, thisLoadEntries.elemIdx)
+    val elemIdxInsideVd   = flowQueueEntries(deqPtr(i).value).elemIdxInsideVd
+    val uopQueuePtr       = Mux(isActiveElem, thisLoadResult.vec.uopQueuePtr, thisLoadEntries.uopQueuePtr)
+    val flowPtr           = deqPtr(i)
+      // From ExuOutput
+    val debug             = Mux(isActiveElem, thisLoadResult.debug, 0.U.asTypeOf(thisLoadResult.debug))
+    val uop               = Mux(isActiveElem, thisLoadResult.uop, thisLoadEntries.uop)
+
     io.flowWriteback(i).bits match { case x =>
       // From VecExuOutput
-      x.vec.isvec         := thisLoadResult.vec.isvec   // ?  Can this be false ?
-      x.vec.vecdata       := thisLoadResult.vec.vecdata
-      x.vec.mask          := thisLoadResult.vec.mask
-      x.vec.reg_offset    := thisLoadResult.vec.reg_offset
-      x.vec.vecActive           := thisLoadResult.vec.vecActive
-      x.vec.is_first_ele  := thisLoadResult.vec.is_first_ele
-      x.vec.elemIdx       := thisLoadResult.vec.elemIdx
-      x.vec.elemIdxInsideVd := flowQueueEntries(deqPtr(i).value).elemIdxInsideVd
-      x.vec.uopQueuePtr   := thisLoadResult.vec.uopQueuePtr
+      x.vec.isvec         := isvec
+      x.vec.vecdata       := vecdata
+      x.vec.mask          := mask
+      x.vec.reg_offset    := reg_offset
+      x.vec.exp           := exp
+      x.vec.is_first_ele  := is_first_ele
+      x.vec.elemIdx       := elemIdx
+      x.vec.elemIdxInsideVd := elemIdxInsideVd
+      x.vec.uopQueuePtr   := uopQueuePtr
       x.vec.flowPtr       := deqPtr(i)
       // From ExuOutput
       x.data              := DontCare
       // x.fflags            := thisLoadResult.fflags
       // x.redirectValid     := thisLoadResult.redirectValid
       // x.redirect          := thisLoadResult.redirect
-      x.debug             := thisLoadResult.debug
-      x.uop               := thisLoadResult.uop
+      x.debug             := debug
+      x.uop               := uop
     }
   }
 
@@ -224,25 +241,33 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
   val canIssue = Wire(Vec(VecLoadPipelineWidth, Bool()))
   val allowIssue = io.pipeIssue.map(_.ready)
   val doIssue = Wire(Vec(VecLoadPipelineWidth, Bool()))
-  val issueCount = PopCount(doIssue)
+  // if is inactivative elem, don't issue it to pipline, and mark it as finished.
+  val inActiveIssue = Wire(Vec(VecLoadPipelineWidth, Bool())) 
+  val issueCount = PopCount(doIssue) + PopCount(inActiveIssue)
 
   // handshake
   for (i <- 0 until VecLoadPipelineWidth) {
     val thisPtr = issuePtr(i).value
+    val canIssueToPipline = !flowNeedCancel(thisPtr) && issuePtr(i) < enqPtr(0)
     // Assuming that if io.flowIn(i).ready then io.flowIn(i-1).ready
-    canIssue(i) := !flowNeedCancel(thisPtr) && issuePtr(i) < enqPtr(0)
+    canIssue(i) := canIssueToPipline && flowQueueEntries(thisPtr).exp
     if (i == 0) {
       doIssue(i) := canIssue(i) && allowIssue(i)
       io.pipeIssue(i).valid := canIssue(i)
+      inActiveIssue(i) := canIssueToPipline && !flowQueueEntries(thisPtr).exp // first inactivative element not need to wait pipline ready
     } else {
       doIssue(i) := canIssue(i) && allowIssue(i) && allowIssue(i-1)
       io.pipeIssue(i).valid := canIssue(i) && allowIssue(i-1)
+      inActiveIssue(i) := canIssueToPipline && !flowQueueEntries(thisPtr).exp && (allowIssue(i-1) || inActiveIssue(i-1)) // need to wait pipeline ready
     }
   }
 
   for (i <- 0 until VecLoadPipelineWidth) {
     when (doIssue(i)) {
       flowFinished(issuePtr(i).value) := false.B
+      issued(issuePtr(i).value) := true.B
+    }.elsewhen(inActiveIssue(i) && flowAllocated(issuePtr(i).value)){
+      flowFinished(issuePtr(i).value) := true.B
       issued(issuePtr(i).value) := true.B
     }
   }
