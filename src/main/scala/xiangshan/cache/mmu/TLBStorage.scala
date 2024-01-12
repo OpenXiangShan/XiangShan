@@ -129,8 +129,8 @@ class TLBFA(
       }
     } else {
       for (d <- 0 until nDups) {
-        resp.bits.ppn(d) := ParallelMux(hitVecReg zip ppn_reg) // RegEnable(ParallelMux(hitVec zip entries.map(_.genPPN(saveLevel, req.valid)(vpn))), req.fire)
-        resp.bits.perm(d) := ParallelMux(hitVecReg zip perm_reg) // RegEnable(ParallelMux(hitVec zip entries.map(_.perm)), req.fire)
+        resp.bits.ppn(d) := Mux1H(hitVecReg zip ppn_reg)
+        resp.bits.perm(d) := Mux1H(hitVecReg zip perm_reg)
       }
     }
 
