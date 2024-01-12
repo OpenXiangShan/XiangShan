@@ -1261,8 +1261,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // replace (main pipe)
   val mpStatus = mainPipe.io.status
-  mainPipe.io.replace_req <> missQueue.io.replace_pipe_req
-  missQueue.io.replace_pipe_resp := mainPipe.io.replace_resp
+  // mainPipe.io.replace_req <> missQueue.io.replace_pipe_req
+  // missQueue.io.replace_pipe_resp := mainPipe.io.replace_resp
 
   //----------------------------------------
   // refill pipe
@@ -1389,9 +1389,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   val victimList = VictimList(nSets)
   if (dwpuParam.enCfPred) {
-    when(missQueue.io.replace_pipe_req.valid) {
-      victimList.replace(get_idx(missQueue.io.replace_pipe_req.bits.vaddr))
-    }
+    // when(missQueue.io.replace_pipe_req.valid) {
+    //   victimList.replace(get_idx(missQueue.io.replace_pipe_req.bits.vaddr))
+    // }
     replWayReqs.foreach {
       case req =>
         req.way := DontCare

@@ -33,7 +33,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
   val miss_id = UInt(log2Up(cfg.nMissEntries).W)
   val miss_param = UInt(TLPermissions.bdWidth.W)
   val miss_dirty = Bool()
-  val miss_way_en = UInt(DCacheWays.W)
+  // val miss_way_en = UInt(DCacheWays.W)
 
   val probe = Bool()
   val probe_param = UInt(TLPermissions.bdWidth.W)
@@ -113,8 +113,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val atomic_req = Flipped(DecoupledIO(new MainPipeReq))
     val atomic_resp = ValidIO(new MainPipeResp)
     // replace
-    val replace_req = Flipped(DecoupledIO(new MainPipeReq))
-    val replace_resp = ValidIO(UInt(log2Up(cfg.nMissEntries).W))
+    // val replace_req = Flipped(DecoupledIO(new MainPipeReq))
+    // val replace_resp = ValidIO(UInt(log2Up(cfg.nMissEntries).W))
     // write-back queue
     val wb = DecoupledIO(new WritebackReq)
     val wb_ready_dup = Vec(nDupWbReady, Input(Bool()))
@@ -209,7 +209,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   arbiter(
     in = Seq(
       io.probe_req,
-      io.replace_req,
+      // io.replace_req,
       io.atomic_req,
       store_req // Note: store_req.ready is now manually assigned for better timing
     ),
@@ -220,8 +220,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val store_idx = get_idx(io.store_req.bits.vaddr)
   // manually assign store_req.ready for better timing
   // now store_req set conflict check is done in parallel with req arbiter
+  // store_req.ready := io.meta_read.ready && io.tag_read.ready && s1_ready && !store_set_conflict &&
+  //   !io.probe_req.valid && !io.replace_req.valid && !io.atomic_req.valid
   store_req.ready := io.meta_read.ready && io.tag_read.ready && s1_ready && !store_set_conflict &&
-    !io.probe_req.valid && !io.replace_req.valid && !io.atomic_req.valid
+    !io.probe_req.valid && !io.atomic_req.valid
   val s0_req = req.bits
   val s0_idx = get_idx(s0_req.vaddr)
   val s0_need_tag = io.tag_read.valid
@@ -330,6 +332,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   s1_repl_way_raw := Mux(RegNext(s0_fire), io.replace_way.way, RegNext(s1_repl_way_raw))
 
   val s1_need_replacement = (s1_req.miss || s1_req.isStore && !s1_req.probe) && !s1_tag_match
+
   // val s1_way_en = Mux(
   //   s1_req.replace,
   //   s1_req.replace_way_en,
@@ -343,8 +346,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   //     )
   //   )
   // )
+
   val s1_way_en = Mux(s1_need_replacement, s1_repl_way_en, s1_tag_match_way)
   assert(!RegNext(s1_fire && PopCount(s1_way_en) > 1.U))
+
   // val s1_tag = Mux(
   //   s1_req.replace,
   //   get_tag(s1_req.addr),
@@ -354,7 +359,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   //     Mux(s1_need_replacement, s1_repl_tag, s1_hit_tag)
   //   )
   // )
+
   val s1_tag = Mux(s1_need_replacement, s1_repl_tag, s1_hit_tag)
+
   // val s1_coh = Mux(
   //   s1_req.replace,
   //   Mux1H(s1_req.replace_way_en, meta_resp.map(ClientMetadata(_))),
@@ -364,6 +371,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   //     Mux(s1_need_replacement, s1_repl_coh, s1_hit_coh)
   //   )
   // )
+
   val s1_coh = Mux(s1_need_replacement, s1_repl_coh, s1_hit_coh)
 
   XSPerfAccumulate("store_has_invalid_way_but_select_valid_way", io.replace_way.set.valid && wayMap(w => !meta_resp(w).asTypeOf(new Meta).coh.isValid()).asUInt.orR && s1_need_replacement && s1_repl_coh.isValid())
@@ -1454,7 +1462,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   miss_req.cmd := s2_req.cmd
   miss_req.addr := s2_req.addr
   miss_req.vaddr := s2_req_vaddr_dup_for_miss_req
-  miss_req.way_en := Mux(s2_tag_match, s2_tag_match_way, s2_repl_way_en)
+  // miss_req.way_en := Mux(s2_tag_match, s2_tag_match_way, s2_repl_way_en)
   miss_req.store_data := s2_req.store_data
   miss_req.store_mask := s2_req.store_mask
   miss_req.word_idx := s2_req.word_idx
@@ -1518,8 +1526,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.atomic_resp.valid := atomic_replay_resp_valid || atomic_hit_resp_valid
   io.atomic_resp.bits := Mux(atomic_replay_resp_valid, atomic_replay_resp, atomic_hit_resp)
 
-  io.replace_resp.valid := s3_fire && s3_req_replace_dup(3)
-  io.replace_resp.bits := s3_req.miss_id
+  // io.replace_resp.valid := s3_fire && s3_req_replace_dup(3)
+  // io.replace_resp.bits := s3_req.miss_id
 
   io.meta_write.valid := s3_fire_dup_for_meta_w_valid && update_meta_dup_for_meta_w_valid
   io.meta_write.bits.idx := s3_idx_dup(2)
