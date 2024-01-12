@@ -1445,6 +1445,8 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).ldest := VECTOR_TMP_REG_LMUL.U
       csBundle(0).fuType := FuType.i2v.U
       csBundle(0).fuOpType := Cat(Mux(src1IsImm, IF2VectorType.imm2Vec(2, 0), IF2VectorType.i2Vec(2, 0)), vsewReg)
+      csBundle(0).rfWen := false.B
+      csBundle(0).fpWen := false.B
       csBundle(0).vecWen := true.B
       switch(vlmulReg) {
         is("b000".U ){
@@ -1467,9 +1469,6 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           for (j <- 0 until len) {
             val vd_old0 = if(j==0) (dest + i.U) else (VECTOR_TMP_REG_LMUL + j*2-1).U
             val vd0 = (VECTOR_TMP_REG_LMUL + j*2 ).U
-            // csBundle(i * len + j).srcType(0) := SrcType.vp // SrcType.imm
-            // csBundle(i * len + j).srcType(1) := SrcType.vp
-            // csBundle(i * len + j).srcType(2) := SrcType.vp
             csBundle((i * len + j)*2+0).lsrc(0) := src1 + (i*2+0).U
             csBundle((i * len + j)*2+0).lsrc(1) := src2 + j.U
             csBundle((i * len + j)*2+0).lsrc(2) := vd_old0
@@ -1489,9 +1488,6 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           for (j <- 0 until len) {
             val vd_old = if(j==0) (dest + i.U) else (VECTOR_TMP_REG_LMUL + j-1).U
             val vd = if(j==len-1) (dest + i.U) else (VECTOR_TMP_REG_LMUL + j).U
-            // csBundle(i * len + j).srcType(0) := SrcType.vp // SrcType.imm
-            // csBundle(i * len + j).srcType(1) := SrcType.vp
-            // csBundle(i * len + j).srcType(2) := SrcType.vp
             csBundle(i * len + j).lsrc(0) := src1 + i.U
             csBundle(i * len + j).lsrc(1) := src2 + j.U
             csBundle(i * len + j).lsrc(2) := vd_old
@@ -1499,30 +1495,70 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
             csBundle(i * len + j).uopIdx := (i * len + j).U
           }
       }
-      switch(vlmulReg) {
-        is("b000".U ){
-          when(!vsewReg.orR){
-            genCsBundle_VEC_RGATHEREI16_SEW8(1)
-          } .otherwise{
-            genCsBundle_VEC_RGATHEREI16(1)
+      def genCsBundle_VEC_RGATHEREI16_SEW32(len:Int): Unit ={
+        for (i <- 0 until len)
+          for (j <- 0 until len) {
+            val vd_old = if(j==0) (dest + i.U) else (VECTOR_TMP_REG_LMUL + j-1).U
+            val vd = if(j==len-1) (dest + i.U) else (VECTOR_TMP_REG_LMUL + j).U
+            csBundle(i * len + j).lsrc(0) := src1 + (i / 2).U
+            csBundle(i * len + j).lsrc(1) := src2 + j.U
+            csBundle(i * len + j).lsrc(2) := vd_old
+            csBundle(i * len + j).ldest := vd
+            csBundle(i * len + j).uopIdx := (i * len + j).U
           }
-        }
+      }
+      def genCsBundle_VEC_RGATHEREI16_SEW64(len:Int): Unit ={
+        for (i <- 0 until len)
+          for (j <- 0 until len) {
+            val vd_old = if(j==0) (dest + i.U) else (VECTOR_TMP_REG_LMUL + j-1).U
+            val vd = if(j==len-1) (dest + i.U) else (VECTOR_TMP_REG_LMUL + j).U
+            csBundle(i * len + j).lsrc(0) := src1 + (i / 4).U
+            csBundle(i * len + j).lsrc(1) := src2 + j.U
+            csBundle(i * len + j).lsrc(2) := vd_old
+            csBundle(i * len + j).ldest := vd
+            csBundle(i * len + j).uopIdx := (i * len + j).U
+          }
+      }
+      when(!vsewReg.orR){
+        genCsBundle_VEC_RGATHEREI16_SEW8(1)
+      }.elsewhen(vsewReg === VSew.e32){
+        genCsBundle_VEC_RGATHEREI16_SEW32(1)
+      }.elsewhen(vsewReg === VSew.e64){
+        genCsBundle_VEC_RGATHEREI16_SEW64(1)
+      }.otherwise{
+        genCsBundle_VEC_RGATHEREI16(1)
+      }
+      switch(vlmulReg) {
         is("b001".U) {
           when(!vsewReg.orR) {
             genCsBundle_VEC_RGATHEREI16_SEW8(2)
-          }.otherwise {
+          }.elsewhen(vsewReg === VSew.e32){
+            genCsBundle_VEC_RGATHEREI16_SEW32(2)
+          }.elsewhen(vsewReg === VSew.e64){
+            genCsBundle_VEC_RGATHEREI16_SEW64(2)
+          }.otherwise{
             genCsBundle_VEC_RGATHEREI16(2)
           }
         }
         is("b010".U) {
           when(!vsewReg.orR) {
             genCsBundle_VEC_RGATHEREI16_SEW8(4)
-          }.otherwise {
+          }.elsewhen(vsewReg === VSew.e32){
+            genCsBundle_VEC_RGATHEREI16_SEW32(4)
+          }.elsewhen(vsewReg === VSew.e64){
+            genCsBundle_VEC_RGATHEREI16_SEW64(4)
+          }.otherwise{
             genCsBundle_VEC_RGATHEREI16(4)
           }
         }
         is("b011".U) {
-          genCsBundle_VEC_RGATHEREI16(8)
+          when(vsewReg === VSew.e32){
+            genCsBundle_VEC_RGATHEREI16_SEW32(8)
+          }.elsewhen(vsewReg === VSew.e64){
+            genCsBundle_VEC_RGATHEREI16_SEW64(8)
+          }.otherwise{
+            genCsBundle_VEC_RGATHEREI16(8)
+          }
         }
       }
     }
