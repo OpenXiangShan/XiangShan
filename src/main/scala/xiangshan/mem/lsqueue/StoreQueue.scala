@@ -71,7 +71,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val enq = new SqEnqIO
     val brqRedirect = Flipped(ValidIO(new Redirect))
     val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // store addr, data is not included
-    val vecStoreAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // vec store addr, data is not include 
+    val vecStoreAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // vec store addr, data is not include , from stu
+    val vecStoreAddrInactivate = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // vec store addr, data is not include , from vsFlowQueue
     val storeAddrInRe = Vec(StorePipelineWidth, Input(new LsPipelineBundle())) // store more mmio and exception
     val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new MemExuOutput))) // store data, send to sq from rs
     val storeMaskIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreMaskBundle))) // store mask, send to sq from rs
@@ -360,10 +361,14 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     when(vaddrModule.io.wen(i)){
       debug_vaddr(vaddrModule.io.waddr(i)) := vaddrModule.io.wdata(i)
     }
-    // TODO :  When lastElem issue to stu, set vector store addr ready 
+    // TODO :  When lastElem issue to stu or inactivative issue in vsFlowQueue, set vector store addr ready 
     val vecStWbIndex = io.vecStoreAddrIn(i).bits.uop.sqIdx.value
-    when(io.vecStoreAddrIn(i).fire){
-      vecAddrvalid(vecStWbIndex) := !io.vecStoreAddrIn(i).bits.miss && io.vecStoreAddrIn(i).bits.isLastElem
+    val vecFlowStWbIndex = io.vecStoreAddrInactivate(i).bits.uop.sqIdx.value
+    when(io.vecStoreAddrIn(i).fire && io.vecStoreAddrIn(i).bits.isLastElem){
+      vecAddrvalid(vecStWbIndex) := !io.vecStoreAddrIn(i).bits.miss
+    }
+    when(io.vecStoreAddrInactivate(i).fire){
+      vecAddrvalid(vecFlowStWbIndex) := true.B
     }
   }
 
