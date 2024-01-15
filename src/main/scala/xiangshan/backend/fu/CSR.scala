@@ -866,7 +866,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     fcsr := fflags_wfn(update = true)(RegEnable(csrio.fpu.fflags.bits, csrio.fpu.fflags.valid))
   }
   when(RegNext(csrio.vpu.set_vxsat.valid)) {
-    vcsr := vxsat_wfn(update = true)(RegEnable(csrio.vpu.set_vxsat.bits, csrio.vpu.set_vstart.valid))
+    vcsr := vxsat_wfn(update = true)(RegEnable(csrio.vpu.set_vxsat.bits, csrio.vpu.set_vxsat.valid))
   }
   // set fs and sd in mstatus
   when (csrw_dirty_fp_state || RegNext(csrio.fpu.dirty_fs)) {
@@ -884,7 +884,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     vtype := RegEnable(csrio.vpu.set_vtype.bits, csrio.vpu.set_vtype.valid)
   }
   when (RegNext(csrio.vpu.set_vl.valid)) {
-    vl := RegEnable(csrio.vpu.set_vl.bits, csrio.vpu.set_vtype.valid)
+    vl := RegEnable(csrio.vpu.set_vl.bits, csrio.vpu.set_vl.valid)
   }
   // set vs and sd in mstatus
   when(csrw_dirty_vs_state || RegNext(csrio.vpu.dirty_vs)) {
