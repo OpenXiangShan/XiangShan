@@ -163,10 +163,10 @@ class VecStoreFlowEntry (implicit p: Parameters) extends VecFlowBundle {
     pipeBundle
   }
 
-  def needForward(forward: LoadForwardQueryIO): Bool = {
+  def needForward(forward: LoadForwardQueryIO, paddrValid: Bool): Bool = {
     // ! MAGIC NUM
     val vaddrMatch = this.vaddr(VAddrBits - 1, 4) === forward.vaddr(VAddrBits - 1, 4)
-    val paddrMatch = this.paddr(PAddrBits - 1, 4) === forward.paddr(PAddrBits - 1, 4)
+    val paddrMatch = Mux(paddrValid, this.paddr(PAddrBits - 1, 4) === forward.paddr(PAddrBits - 1, 4), true.B) // TODO: if paddr not ready, we need to set it ture, we need to fix it in feature 
     val maskMatch = (this.writeMask & forward.mask) =/= 0.U
     val isActive = this.vecActive
     vaddrMatch && paddrMatch && maskMatch && isActive
@@ -207,7 +207,7 @@ class VsFlowQueueIOBundle(implicit p: Parameters) extends VLSUBundle {
   // update tval when exception happens
   // val exceptionAddrValid = Output(Bool())
   val exceptionAddr = new ExceptionAddrIO
-    
+
   // when issue last elem, need to mark vector store addrvalid
   val lsq = Vec(VecStorePipelineWidth, Valid(new LsPipelineBundle))
 }
@@ -765,9 +765,9 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
   for (thisForward <- io.forward) {
     // for every forward query
     // val flowNeedForward = Wire(Vec(VsFlowL1Size, Bool()))
-    val flowNeedForward = (flowQueueEntries zip flowAllocated).map{
-      case (entry,valid) => 
-        entry.needForward(thisForward) && valid
+    val flowNeedForward = ((flowQueueEntries zip flowAllocated) zip flowFinished).map{
+      case ((entry,valid), paddrValid) => 
+        entry.needForward(thisForward, paddrValid) && valid
     }
     val flowForwardMask = flowQueueEntries.map(_.mask & thisForward.mask)
     val doForward = flowNeedForward.reduce(_ || _)
