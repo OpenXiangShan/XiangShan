@@ -7,6 +7,8 @@ class DataSource extends Bundle {
 
   def readReg: Bool = value(2)
 
+  def readAnotherReg: Bool =  value === DataSource.anotherReg
+
   def readZero: Bool = value === DataSource.zero
 
   def readForward: Bool = value === DataSource.forward
@@ -21,6 +23,8 @@ object DataSource {
   def apply() = new DataSource
 
   def reg: UInt = "b100".U
+
+  def anotherReg: UInt = "b101".U
 
   // read int preg addr is 0
   def zero: UInt = "b000".U
