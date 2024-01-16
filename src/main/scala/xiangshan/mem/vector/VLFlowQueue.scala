@@ -48,7 +48,7 @@ class VecLoadPipeBundle(implicit p: Parameters) extends VLSUBundleWithMicroOp {
   val reg_offset          = UInt(vOffsetBits.W)
   // val offset              = Vec(2,UInt(4.W))
   val alignedType         = UInt(alignTypeBits.W)
-  val exp                 = Bool()
+  val activative                 = Bool()
   val is_first_ele        = Bool()
   val flowPtr             = new VlflowPtr
   val isFirstIssue        = Bool()
@@ -195,13 +195,13 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
   for (i <- 0 until VecLoadPipelineWidth) {
     val thisLoadResult = flowLoadResult(deqPtr(i).value)
     val thisLoadEntries = flowQueueEntries(deqPtr(i).value)
-    val isActivativeElem = thisLoadEntries.exp
+    val isActivativeElem = thisLoadEntries.activative
 
     val isvec             = Mux(isActivativeElem, thisLoadResult.vec.isvec, true.B)   // ?  Can this be false ?
     val vecdata           = Mux(isActivativeElem, thisLoadResult.vec.vecdata, 0.U(VLEN.W))
     val mask              = Mux(isActivativeElem, thisLoadResult.vec.mask, thisLoadEntries.mask)
     val reg_offset        = Mux(isActivativeElem, thisLoadResult.vec.reg_offset, thisLoadEntries.reg_offset)
-    val exp               = Mux(isActivativeElem, thisLoadResult.vec.exp, thisLoadEntries.exp)
+    val activative        = Mux(isActivativeElem, thisLoadResult.vec.activative, thisLoadEntries.activative)
     val is_first_ele      = Mux(isActivativeElem, thisLoadResult.vec.is_first_ele, thisLoadEntries.is_first_ele)
     val elemIdx           = Mux(isActivativeElem, thisLoadResult.vec.elemIdx, thisLoadEntries.elemIdx)
     val elemIdxInsideVd   = flowQueueEntries(deqPtr(i).value).elemIdxInsideVd
@@ -217,7 +217,7 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
       x.vec.vecdata       := vecdata
       x.vec.mask          := mask
       x.vec.reg_offset    := reg_offset
-      x.vec.exp           := exp
+      x.vec.activative    := activative
       x.vec.is_first_ele  := is_first_ele
       x.vec.elemIdx       := elemIdx
       x.vec.elemIdxInsideVd := elemIdxInsideVd
@@ -249,15 +249,15 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
     val thisPtr = issuePtr(i).value
     val canIssueToPipline = !flowNeedCancel(thisPtr) && issuePtr(i) < enqPtr(0)
     // Assuming that if io.flowIn(i).ready then io.flowIn(i-1).ready
-    canIssue(i) := canIssueToPipline && flowQueueEntries(thisPtr).exp
+    canIssue(i) := canIssueToPipline && flowQueueEntries(thisPtr).activative
     if (i == 0) {
       doIssue(i) := canIssue(i) && allowIssue(i)
       io.pipeIssue(i).valid := canIssue(i)
-      inActivativeIssue(i) := canIssueToPipline && !flowQueueEntries(thisPtr).exp // first inactivative element not need to wait pipline ready
+      inActivativeIssue(i) := canIssueToPipline && !flowQueueEntries(thisPtr).activative // first inactivative element not need to wait pipline ready
     } else {
       doIssue(i) := canIssue(i) && allowIssue(i) && allowIssue(i-1)
       io.pipeIssue(i).valid := canIssue(i) && allowIssue(i-1)
-      inActivativeIssue(i) := canIssueToPipline && !flowQueueEntries(thisPtr).exp && (allowIssue(i-1) || inActivativeIssue(i-1)) // need to wait pipeline ready
+      inActivativeIssue(i) := canIssueToPipline && !flowQueueEntries(thisPtr).activative && (allowIssue(i-1) || inActivativeIssue(i-1)) // need to wait pipeline ready
     }
   }
 
@@ -281,7 +281,7 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
       x.uop_unit_stride_fof := thisFlow.unit_stride_fof
       x.reg_offset          := thisFlow.reg_offset
       x.alignedType         := thisFlow.alignedType
-      x.exp                 := thisFlow.exp
+      x.activative          := thisFlow.activative
       x.is_first_ele        := thisFlow.is_first_ele
       x.flowPtr             := issuePtr(i)
       x.isFirstIssue        := !issued(issuePtr(i).value)
@@ -346,7 +346,7 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
         x.vec.vecdata       := thisPipeResult.vec.vecdata
         x.vec.mask          := thisPipeResult.vec.mask
         x.vec.reg_offset    := thisPipeResult.vec.reg_offset
-        x.vec.exp           := thisPipeResult.vec.exp
+        x.vec.activative    := thisPipeResult.vec.activative
         x.vec.is_first_ele  := thisPipeResult.vec.is_first_ele
         x.vec.elemIdx       := flowQueueEntries(thisPtr).elemIdx
         x.vec.uopQueuePtr   := flowQueueEntries(thisPtr).uopQueuePtr

@@ -141,7 +141,7 @@ class OnlyVecExuOutput(implicit p: Parameters) extends VLSUBundle {
   // val rob_idx = Vec(2, new RobPtr)
   // val offset = Vec(2, UInt(4.W))
   val reg_offset = UInt(vOffsetBits.W)
-  val exp = Bool()
+  val activative = Bool()
   val is_first_ele = Bool()
   val elemIdx = UInt(elemIdxBits.W) // element index
   val elemIdxInsideVd = UInt(elemIdxBits.W) // element index in scope of vd
@@ -193,7 +193,7 @@ class VecFlowBundle(implicit p: Parameters) extends VLSUBundleWithMicroOp {
   val vaddr             = UInt(VAddrBits.W)
   val mask              = UInt(VLENB.W)
   val alignedType       = UInt(alignTypeBits.W)
-  val exp               = Bool()
+  val activative        = Bool()
   val elemIdx           = UInt(elemIdxBits.W)
   val is_first_ele      = Bool()
 }

@@ -40,19 +40,19 @@ object VluopPtr {
   }
 }
 
-object VLExpCtrl {
+object VLActivativeCtrl {
   def apply (vstart: UInt, vl: UInt, eleIdx: UInt):Bool = {
-    val exp = Wire(Bool())
+    val Activative = Wire(Bool())
     when (vstart >= vl || vl === 0.U) {
-      exp := false.B
+      Activative := false.B
     }.otherwise {
       when (eleIdx >= vstart && eleIdx < vl) {
-        exp := true.B
+        Activative := true.B
       }.otherwise {
-        exp := false.B
+        Activative := false.B
       }
     }
-    exp
+    Activative
   }
 }
 
@@ -340,7 +340,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
     val regOffset = (elemIdxInsideField << issueAlignedType)(vOffsetBits - 1, 0)
     val enable = (issueFlowMask & UIntToOH(elemIdxInsideVd(portIdx))).orR
     val ttttvl = Mux(issueEntry.usMaskReg, GenUSMaskRegVL(issueVl), issueVl)
-    val exp = VLExpCtrl(
+    val activative = VLActivativeCtrl(
       vstart = issueVstart,
       vl = ttttvl,
       eleIdx = elemIdxInsideField
@@ -366,7 +366,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
       x.unit_stride_fof := issueEntry.fof
       x.reg_offset := regOffset
       x.alignedType := issueAlignedType
-      x.exp := exp
+      x.activative := activative
       x.elemIdx := elemIdx
       x.is_first_ele := elemIdx === 0.U
       x.uopQueuePtr := flowSplitPtr
@@ -378,7 +378,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
     issueEntry.byteMask := issueEntry.byteMask & ~(
       io.flowIssue.zipWithIndex.map { case (issuePort, i) =>
         val unsetFlowMask = VecInit(Seq.tabulate(VLENB){ j =>
-          elemIdxInsideVd(i) === j.U && issuePort.fire && !issuePort.bits.exp
+          elemIdxInsideVd(i) === j.U && issuePort.fire && !issuePort.bits.activative
         }).asUInt
         val unsetByteMask = GenUopByteMask(unsetFlowMask, issueAlignedType)(VLENB - 1, 0)
         unsetByteMask
@@ -413,7 +413,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
   val flowWbElemIdx = Wire(Vec(flowWritebackWidth, UInt(elemIdxBits.W)))
   val flowWbElemIdxInVd = Wire(Vec(flowWritebackWidth, UInt(elemIdxBits.W)))
   val flowWbExcp = Wire(Vec(flowWritebackWidth, ExceptionVec()))
-  val flowWbExp = Wire(Vec(flowWritebackWidth, Bool()))
+  val flowWbActivative = Wire(Vec(flowWritebackWidth, Bool()))
   io.flowWriteback.zipWithIndex.foreach { case (wb, i) =>
     val ptr = wb.bits.vec.uopQueuePtr
     val entry = uopq(ptr.value)
@@ -421,7 +421,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
     flowWbElemIdx(i) := wb.bits.vec.elemIdx
     flowWbElemIdxInVd(i) := wb.bits.vec.elemIdxInsideVd
     flowWbExcp(i) := wb.bits.uop.exceptionVec
-    flowWbExp(i) := wb.bits.vec.exp
+    flowWbActivative(i) := wb.bits.vec.activative
     val flowWbElemIdxInField = flowWbElemIdx(i) & (entry.vlmax - 1.U)
 
     // handle the situation where multiple ports are going to write the same uop queue entry
@@ -431,7 +431,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
       (j > i).B &&
       io.flowWriteback(j).bits.vec.uopQueuePtr === wb.bits.vec.uopQueuePtr &&
       io.flowWriteback(j).valid)
-    val mergeExpPortVec = (0 until flowWritebackWidth).map(j => flowWbExp(j) && mergePortVec(j))
+    val mergeExpPortVec = (0 until flowWritebackWidth).map(j => flowWbActivative(j) && mergePortVec(j))
     val mergedData = mergeDataWithElemIdx(
       oldData = entry.data.asUInt,
       newData = io.flowWriteback.map(_.bits.vec.vecdata),

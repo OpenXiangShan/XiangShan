@@ -485,7 +485,7 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
     x.bits.isvec := true.B
     x.bits.uop_unit_stride_fof := req.uop_unit_stride_fof
     x.bits.reg_offset := req.reg_offset
-    x.bits.exp := req.exp
+    x.bits.activative := req.activative
     x.bits.is_first_ele := req.is_first_ele
     x.bits.flowPtr := req.flowPtr
   }

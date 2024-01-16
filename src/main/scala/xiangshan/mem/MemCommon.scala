@@ -110,7 +110,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   // val rob_idx = Vec(2,new RobPtr)
   val reg_offset = UInt(vOffsetBits.W)
   // val offset = Vec(2,UInt(4.W))
-  val exp = Bool()
+  val activative = Bool()
   val is_first_ele = Bool()
   val flowPtr = new VlflowPtr() // VLFlowQueue ptr
   val sflowPtr = new VsFlowPtr() // VSFlowQueue ptr
@@ -169,7 +169,7 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     isvec := input.isvec
     isLastElem := input.isLastElem
     is128bit := input.is128bit
-    exp := input.exp
+    activative := input.activative
     is_first_ele := input.is_first_ele
     uop_unit_stride_fof := input.uop_unit_stride_fof
     // rob_idx_valid := input.rob_idx_valid
@@ -247,7 +247,7 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     //VLSU
     isvec := input.isvec
     is128bit := input.is128bit
-    exp := input.exp
+    activative := input.activative
     uop_unit_stride_fof := input.uop_unit_stride_fof
     // rob_idx_valid := input.rob_idx_valid
     // rob_idx := input.rob_idx

@@ -115,7 +115,7 @@ class VecStorePipeBundle(implicit p: Parameters) extends MemExuInput(isVector = 
   val mask                = UInt((VLEN/8).W)
   val uop_unit_stride_fof = Bool()
   val alignedType         = UInt(2.W) // ! MAGIC NUM: VLSUConstants.alignTypeBits
-  val exp                 = Bool()
+  val activative          = Bool()
   val flowPtr             = new VsFlowPtr
   val isLastElem          = Bool()
 }
@@ -157,7 +157,7 @@ class VecStoreFlowEntry (implicit p: Parameters) extends VecFlowBundle {
     pipeBundle.mask                 := this.mask
     pipeBundle.uop_unit_stride_fof  := false.B
     pipeBundle.alignedType          := this.alignedType
-    pipeBundle.exp                  := this.exp
+    pipeBundle.activative           := this.activative
     pipeBundle.flowPtr              := thisPtr
     pipeBundle.isLastElem           := this.isLastElem
     pipeBundle
@@ -168,7 +168,7 @@ class VecStoreFlowEntry (implicit p: Parameters) extends VecFlowBundle {
     val vaddrMatch = this.vaddr(VAddrBits - 1, 4) === forward.vaddr(VAddrBits - 1, 4)
     val paddrMatch = this.paddr(PAddrBits - 1, 4) === forward.paddr(PAddrBits - 1, 4)
     val maskMatch = (this.writeMask & forward.mask) =/= 0.U
-    val isActivative = this.exp
+    val isActivative = this.activative
     vaddrMatch && paddrMatch && maskMatch && isActivative
   }
 }
@@ -369,7 +369,7 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
         x.vaddr := thisFlowIn.vaddr
         x.mask := thisFlowIn.mask
         x.alignedType := thisFlowIn.alignedType
-        x.exp := thisFlowIn.exp
+        x.activative := thisFlowIn.activative
         x.elemIdx := thisFlowIn.elemIdx
         x.is_first_ele := thisFlowIn.is_first_ele
         x.uop := thisFlowIn.uop
@@ -421,8 +421,8 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
   for (i <- 0 until VecStorePipelineWidth) {
     val thisPtr = issuePtr(i).value
     val canIssueToPipline = !flowNeedCancel(thisPtr) && issuePtr(i) < enqPtr(0)
-    canIssue(i) := canIssueToPipline && flowQueueEntries(thisPtr).exp
-    inActivativeIssue(i) := canIssueToPipline && !flowQueueEntries(thisPtr).exp
+    canIssue(i) := canIssueToPipline && flowQueueEntries(thisPtr).activative
+    inActivativeIssue(i) := canIssueToPipline && !flowQueueEntries(thisPtr).activative
     if (i == 0) {
       doIssue(i) := canIssue(i) && allowIssue(i)
       io.pipeIssue(i).valid := canIssue(i)
@@ -596,7 +596,7 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
   for (i <- 0 until EnsbufferWidth) {
     val thisPtr = retirePtr(i).value
     val thisEntry = flowQueueEntries(thisPtr)
-    val thisExp = thisEntry.exp
+    val thisActivative = thisEntry.activative
     val thisInOrder = 
       thisEntry.isInOrder(curFieldIdx(i), curSegmentIdx(i)) &&
       curFieldIdx(i) < nfields && curSegmentIdx(i) < nSegments
@@ -608,15 +608,15 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
     doRetire(i) := false.B
     when (ensbufferState === sDoing && flowCommitted(thisPtr) && thisInOrder) {
       if (i == 0) {
-        canEnsbuffer(i) := thisExp && !isMMIO && uncacheState === us_idle
+        canEnsbuffer(i) := thisActivative && !isMMIO && uncacheState === us_idle
         doEnsbuffer(i) := canEnsbuffer(i) && allowEnsbuffer(i)
-        canEnUncache := thisExp && isMMIO
+        canEnUncache := thisActivative && isMMIO
         doEnUncache := canEnUncache && allowEnUncache
-        doRetire(i) := doEnsbuffer(i) || doEnUncache || !thisExp
+        doRetire(i) := doEnsbuffer(i) || doEnUncache || !thisActivative
       } else {
-        canEnsbuffer(i) := thisExp && !isMMIO && canEnsbuffer(i - 1) && !canEnUncache
+        canEnsbuffer(i) := thisActivative && !isMMIO && canEnsbuffer(i - 1) && !canEnUncache
         doEnsbuffer(i) := canEnsbuffer(i) && allowEnsbuffer(i)
-        doRetire(i) := doEnsbuffer(i) || (!thisExp && doRetire(i - 1))
+        doRetire(i) := doEnsbuffer(i) || (!thisActivative && doRetire(i - 1))
       }
     }
     // Assuming that if !io.sbuffer(i).ready then !io.sbuffer(i + 1).ready
