@@ -75,14 +75,27 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
 
   private val intRFReadReq: Seq3[ValidIO[RfReadPortWithConfig]] = fromIQ.map(x => x.map(xx => xx.bits.getIntRfReadValidBundle(xx.valid)).toSeq).toSeq
   private val intDataSources: Seq[Seq[Vec[DataSource]]] = fromIQ.map(x => x.map(xx => xx.bits.common.dataSources).toSeq)
+  private val intNumRegSrcs: Seq[Seq[Int]] = fromIQ.map(x => x.map(xx => xx.bits.exuParams.numRegSrc).toSeq)
 
   intRFReadArbiter.io.in.zip(intRFReadReq).zipWithIndex.foreach { case ((arbInSeq2, inRFReadReqSeq2), iqIdx) =>
     arbInSeq2.zip(inRFReadReqSeq2).zipWithIndex.foreach { case ((arbInSeq, inRFReadReqSeq), exuIdx) =>
       val srcIndices: Seq[Int] = fromIQ(iqIdx)(exuIdx).bits.exuParams.getRfReadSrcIdx(IntData())
       for (srcIdx <- 0 until fromIQ(iqIdx)(exuIdx).bits.exuParams.numRegSrc) {
         if (srcIndices.contains(srcIdx) && inRFReadReqSeq.isDefinedAt(srcIdx)) {
-          arbInSeq(srcIdx).valid := inRFReadReqSeq(srcIdx).valid && intDataSources(iqIdx)(exuIdx)(srcIdx).readReg
-          arbInSeq(srcIdx).bits.addr := inRFReadReqSeq(srcIdx).bits.addr
+          if (intNumRegSrcs(iqIdx)(exuIdx) == 2) {
+            val src0Req = inRFReadReqSeq(0).valid && intDataSources(iqIdx)(exuIdx)(0).readReg
+            val src1Req = inRFReadReqSeq(1).valid && intDataSources(iqIdx)(exuIdx)(1).readReg
+            if (srcIdx == 0) {
+              arbInSeq(srcIdx).valid := src0Req || src1Req
+              arbInSeq(srcIdx).bits.addr := Mux(src1Req && !src0Req, inRFReadReqSeq(1).bits.addr,inRFReadReqSeq(0).bits.addr)
+            } else {
+              arbInSeq(srcIdx).valid := src0Req && src1Req
+              arbInSeq(srcIdx).bits.addr := inRFReadReqSeq(srcIdx).bits.addr
+            }
+          } else {
+            arbInSeq(srcIdx).valid := inRFReadReqSeq(srcIdx).valid && intDataSources(iqIdx)(exuIdx)(srcIdx).readReg
+            arbInSeq(srcIdx).bits.addr := inRFReadReqSeq(srcIdx).bits.addr
+          }
         } else {
           arbInSeq(srcIdx).valid := false.B
           arbInSeq(srcIdx).bits.addr := 0.U
@@ -291,9 +304,17 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       val s1_data = s1_toExuData(i)(j)
       val s1_addrOH = s1_addrOHs(i)(j)
       val s0 = fromIQ(i)(j) // s0
-      val srcNotBlock = s0.bits.common.dataSources.zip(intRdArbWinner(i)(j) zip vfRdArbWinner(i)(j)).map { case (source, win) =>
+
+      val srcNotBlock = Wire(Bool())
+      srcNotBlock := s0.bits.common.dataSources.zip(intRdArbWinner(i)(j) zip vfRdArbWinner(i)(j)).map { case (source, win) =>
         !source.readReg || win._1 && win._2
       }.fold(true.B)(_ && _)
+      if (fromIQ(i)(j).bits.exuParams.schdType.isInstanceOf[IntScheduler] && (fromIQ(i)(j).bits.exuParams.numRegSrc == 2)) {
+        val src0VfBlock = s0.bits.common.dataSources(0).readReg && !vfRdArbWinner(i)(j)(0)
+        val src1VfBlock = s0.bits.common.dataSources(1).readReg && !vfRdArbWinner(i)(j)(1)
+        val src1IntBlock = s0.bits.common.dataSources(0).readReg && s0.bits.common.dataSources(1).readReg && !intRdArbWinner(i)(j)(1)
+        srcNotBlock := !src0VfBlock && !src1VfBlock && !src1IntBlock
+      }
       val notBlock = srcNotBlock && intWbNotBlock(i)(j) && vfWbNotBlock(i)(j)
       val s1_flush = s0.bits.common.robIdx.needFlush(Seq(io.flush, RegNextWithEnable(io.flush)))
       val s1_cancel = og1FailedVec2(i)(j)
@@ -301,6 +322,9 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       when (s0.fire && !s1_flush && notBlock && !s1_cancel && !s1_ldCancel) {
         s1_valid := s0.valid
         s1_data.fromIssueBundle(s0.bits) // no src data here
+        if (fromIQ(i)(j).bits.exuParams.schdType.isInstanceOf[IntScheduler] && (fromIQ(i)(j).bits.exuParams.numRegSrc == 2)) {
+          s1_data.dataSources(1).value := Mux(!s0.bits.common.dataSources(0).readReg && s0.bits.common.dataSources(1).readReg, DataSource.anotherReg, s0.bits.common.dataSources(1).value)
+        }
         s1_addrOH := s0.bits.addrOH
       }.otherwise {
         s1_valid := false.B
