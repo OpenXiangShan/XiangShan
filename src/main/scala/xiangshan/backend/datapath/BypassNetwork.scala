@@ -85,6 +85,8 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends Mod
         src := Mux1H(forwardOrBypassValidVec3(exuIdx)(srcIdx), forwardDataVec)
       }.elsewhen (exuInput.bits.dataSources(srcIdx).readBypass) {
         src := Mux1H(forwardOrBypassValidVec3(exuIdx)(srcIdx), bypassDataVec)
+      }.elsewhen(exuInput.bits.dataSources(srcIdx).readZero) {
+        src := 0.U
       }.otherwise {
         src := fromDPs(exuIdx).bits.src(srcIdx)
       }
