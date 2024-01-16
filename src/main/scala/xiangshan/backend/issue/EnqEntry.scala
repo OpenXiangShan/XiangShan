@@ -119,7 +119,7 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
 
   for (i <- 0 until params.numRegSrc) {
     enqDelaySrcState(i)                     := entryReg.status.srcStatus(i).srcState | enqDelaySrcWakeUpByWB(i) | enqDelaySrcWakeUpByIQ(i)
-    enqDelayDataSources(i).value            := Mux(enqDelaySrcWakeUpByIQ(i).asBool, DataSource.bypass, DataSource.reg)
+    enqDelayDataSources(i).value            := Mux(enqDelaySrcWakeUpByIQ(i).asBool, DataSource.bypass, entryReg.status.srcStatus(i).dataSources.value)
     if (params.hasIQWakeUp) {
       val wakeUpValid = enqDelaySrcWakeUpByIQVec(i).asUInt.orR
       val wakeUpOH = enqDelaySrcWakeUpByIQVec(i)
