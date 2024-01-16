@@ -193,7 +193,7 @@ class VecFlowBundle(implicit p: Parameters) extends VLSUBundleWithMicroOp {
   val vaddr             = UInt(VAddrBits.W)
   val mask              = UInt(VLENB.W)
   val alignedType       = UInt(alignTypeBits.W)
-  val exp               = Bool()
+  val vecActive         = Bool()
   val elemIdx           = UInt(elemIdxBits.W)
   val is_first_ele      = Bool()
 }
