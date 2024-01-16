@@ -58,7 +58,7 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
     (vuopIdx === 1.U && (vlmul === VLmul.m4 || vlmul === VLmul.m8)) ||
     ((vuopIdx === 2.U || vuopIdx === 3.U) && vlmul === VLmul.m8)
   val maskRshiftWidthForReduction = Wire(UInt(6.W))
-  maskRshiftWidthForReduction := Mux(fuOpType === VfaluType.vfredosum,
+  maskRshiftWidthForReduction := Mux(fuOpType === VfaluType.vfredosum || fuOpType === VfaluType.vfwredosum,
     vuopIdx,
     Mux1H(Seq(
       (vsew === VSew.e16) -> (vuopIdx(1, 0) << 4),
@@ -77,22 +77,40 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
     val f32Mask = inmask(f32MaskNum - 1, 0)
     val f16Mask = inmask(f16MaskNum - 1, 0)
     // vs2 reordered, so mask use high bits
-    val f64FirstFoldMask = Mux1H(
+    val f64FirstFoldMaskUnorder = Mux1H(
       Seq(
         vecCtrl.fpu.isFoldTo1_2 -> Cat(0.U(3.W), f64Mask(0), 0.U(3.W), f64Mask(1)),
       )
     )
-    val f32FirstFoldMask = Mux1H(
+    val f64FirstFoldMaskOrder = Mux1H(
+      Seq(
+        vecCtrl.fpu.isFoldTo1_2 -> Cat(0.U(3.W), f64Mask(1), 0.U(3.W), f64Mask(0))
+      )
+    )
+    val f32FirstFoldMaskUnorder = Mux1H(
       Seq(
         vecCtrl.fpu.isFoldTo1_2 -> Cat(0.U(2.W), f32Mask(1), f32Mask(0), 0.U(2.W), f32Mask(3), f32Mask(2)),
         vecCtrl.fpu.isFoldTo1_4 -> Cat(0.U(3.W), f32Mask(0), 0.U(3.W), f32Mask(1)),
       )
     )
-    val f16FirstFoldMask = Mux1H(
+    val f32FirstFoldMaskOrder = Mux1H(
+      Seq(
+        vecCtrl.fpu.isFoldTo1_2 -> Cat(0.U(2.W), f32Mask(3), f32Mask(2), 0.U(2.W), f32Mask(1), f32Mask(0)),
+        vecCtrl.fpu.isFoldTo1_4 -> Cat(0.U(3.W), f32Mask(1), 0.U(3.W), f32Mask(0)),
+      )
+    )
+    val f16FirstFoldMaskUnorder = Mux1H(
       Seq(
         vecCtrl.fpu.isFoldTo1_2 -> Cat(f16Mask(7,4), f16Mask(3,0)),
         vecCtrl.fpu.isFoldTo1_4 -> Cat(0.U(2.W), f16Mask(1), f16Mask(0), 0.U(2.W), f16Mask(3), f16Mask(2)),
         vecCtrl.fpu.isFoldTo1_8 -> Cat(0.U(3.W), f16Mask(0), 0.U(3.W), f16Mask(1)),
+      )
+    )
+    val f16FirstFoldMaskOrder = Mux1H(
+      Seq(
+        vecCtrl.fpu.isFoldTo1_2 -> Cat(f16Mask(7,4), f16Mask(3,0)),
+        vecCtrl.fpu.isFoldTo1_4 -> Cat(0.U(2.W), f16Mask(3), f16Mask(2), 0.U(2.W), f16Mask(1), f16Mask(0)),
+        vecCtrl.fpu.isFoldTo1_8 -> Cat(0.U(3.W), f16Mask(1), 0.U(3.W), f16Mask(0)),
       )
     )
     val f64FoldMask = Mux1H(
@@ -118,9 +136,21 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
     val f64FirstNotFoldMask = Cat(0.U(3.W), f64Mask(i + 2), 0.U(3.W), f64Mask(i))
     val f32FirstNotFoldMask = Cat(0.U(2.W), f32Mask(i * 2 + 5, i * 2 + 4), 0.U(2.W), Cat(f32Mask(i * 2 + 1, i * 2)))
     val f16FirstNotFoldMask = Cat(f16Mask(i * 4 + 11, i * 4 + 8), f16Mask(i * 4 + 3, i * 4))
-    val f64MaskI = Mux(isFirstGroupUop, Mux(isFold, f64FirstFoldMask, f64FirstNotFoldMask), Mux(isFold, f64FoldMask, Fill(8,1.U)))
-    val f32MaskI = Mux(isFirstGroupUop, Mux(isFold, f32FirstFoldMask, f32FirstNotFoldMask), Mux(isFold, f32FoldMask, Fill(8,1.U)))
-    val f16MaskI = Mux(isFirstGroupUop, Mux(isFold, f16FirstFoldMask, f16FirstNotFoldMask), Mux(isFold, f16FoldMask, Fill(8,1.U)))
+    val f64MaskI = Mux(fuOpType === VfaluType.vfredosum || fuOpType === VfaluType.vfwredosum,
+      Mux(isFold, f64FirstFoldMaskOrder, f64FirstNotFoldMask),
+      Mux(isFirstGroupUop,
+        Mux(isFold, f64FirstFoldMaskUnorder, f64FirstNotFoldMask),
+        Mux(isFold, f64FoldMask, Fill(8, 1.U))))
+    val f32MaskI = Mux(fuOpType === VfaluType.vfredosum || fuOpType === VfaluType.vfwredosum,
+      Mux(isFold, f32FirstFoldMaskOrder, f32FirstNotFoldMask),
+      Mux(isFirstGroupUop,
+        Mux(isFold, f32FirstFoldMaskUnorder, f32FirstNotFoldMask),
+        Mux(isFold, f32FoldMask, Fill(8, 1.U))))
+    val f16MaskI = Mux(fuOpType === VfaluType.vfredosum || fuOpType === VfaluType.vfwredosum,
+      Mux(isFold, f16FirstFoldMaskOrder, f16FirstNotFoldMask),
+      Mux(isFirstGroupUop,
+        Mux(isFold, f16FirstFoldMaskUnorder, f16FirstNotFoldMask),
+        Mux(isFold, f16FoldMask, Fill(8, 1.U))))
     val outMask = Mux1H(
       Seq(
         (sew === 3.U) -> f64MaskI,
