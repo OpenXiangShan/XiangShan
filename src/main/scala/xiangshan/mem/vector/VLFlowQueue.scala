@@ -196,13 +196,13 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
   for (i <- 0 until VecLoadPipelineWidth) {
     val thisLoadResult = flowLoadResult(deqPtr(i).value)
     val thisLoadEntries = flowQueueEntries(deqPtr(i).value)
-    val isActiveElem = thisLoadEntries.exp
+    val isActiveElem = thisLoadEntries.vecActive
 
     val isvec             = Mux(isActiveElem, thisLoadResult.vec.isvec, true.B)   // ?  Can this be false ?
     val vecdata           = Mux(isActiveElem, thisLoadResult.vec.vecdata, 0.U(VLEN.W))
     val mask              = Mux(isActiveElem, thisLoadResult.vec.mask, thisLoadEntries.mask)
     val reg_offset        = Mux(isActiveElem, thisLoadResult.vec.reg_offset, thisLoadEntries.reg_offset)
-    val exp               = Mux(isActiveElem, thisLoadResult.vec.vecActive, thisLoadEntries.exp)
+    val vecActive         = Mux(isActiveElem, thisLoadResult.vec.vecActive, thisLoadEntries.vecActive)
     val is_first_ele      = Mux(isActiveElem, thisLoadResult.vec.is_first_ele, thisLoadEntries.is_first_ele)
     val elemIdx           = Mux(isActiveElem, thisLoadResult.vec.elemIdx, thisLoadEntries.elemIdx)
     val elemIdxInsideVd   = flowQueueEntries(deqPtr(i).value).elemIdxInsideVd
@@ -218,7 +218,7 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
       x.vec.vecdata       := vecdata
       x.vec.mask          := mask
       x.vec.reg_offset    := reg_offset
-      x.vec.exp           := exp
+      x.vec.vecActive    := vecActive
       x.vec.is_first_ele  := is_first_ele
       x.vec.elemIdx       := elemIdx
       x.vec.elemIdxInsideVd := elemIdxInsideVd
@@ -250,15 +250,15 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
     val thisPtr = issuePtr(i).value
     val canIssueToPipline = !flowNeedCancel(thisPtr) && issuePtr(i) < enqPtr(0)
     // Assuming that if io.flowIn(i).ready then io.flowIn(i-1).ready
-    canIssue(i) := canIssueToPipline && flowQueueEntries(thisPtr).exp
+    canIssue(i) := canIssueToPipline && flowQueueEntries(thisPtr).vecActive
     if (i == 0) {
       doIssue(i) := canIssue(i) && allowIssue(i)
       io.pipeIssue(i).valid := canIssue(i)
-      inActiveIssue(i) := canIssueToPipline && !flowQueueEntries(thisPtr).exp // first inactivative element not need to wait pipline ready
+      inActiveIssue(i) := canIssueToPipline && !flowQueueEntries(thisPtr).vecActive // first inactivative element not need to wait pipline ready
     } else {
       doIssue(i) := canIssue(i) && allowIssue(i) && allowIssue(i-1)
       io.pipeIssue(i).valid := canIssue(i) && allowIssue(i-1)
-      inActiveIssue(i) := canIssueToPipline && !flowQueueEntries(thisPtr).exp && (allowIssue(i-1) || inActiveIssue(i-1)) // need to wait pipeline ready
+      inActiveIssue(i) := canIssueToPipline && !flowQueueEntries(thisPtr).vecActive && (allowIssue(i-1) || inActiveIssue(i-1)) // need to wait pipeline ready
     }
   }
 
@@ -282,7 +282,7 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
       x.uop_unit_stride_fof := thisFlow.unit_stride_fof
       x.reg_offset          := thisFlow.reg_offset
       x.alignedType         := thisFlow.alignedType
-      x.vecActive                 := thisFlow.exp
+      x.vecActive           := thisFlow.vecActive
       x.is_first_ele        := thisFlow.is_first_ele
       x.flowPtr             := issuePtr(i)
       x.isFirstIssue        := !issued(issuePtr(i).value)

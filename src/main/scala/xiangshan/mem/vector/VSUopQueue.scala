@@ -298,7 +298,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
     val regOffset = (elemIdxInsideField << issueAlignedType)(vOffsetBits - 1, 0)
     val enable = (issueFlowMask & UIntToOH(elemIdxInsideVd(portIdx))).orR
     val ttttvl = Mux(issueEntry.usMaskReg, GenUSMaskRegVL(issueVl), issueVl)
-    val exp = VLExpCtrl(
+    val vecActive = VLActivativeCtrl(
       vstart = issueVstart,
       vl = ttttvl,
       eleIdx = elemIdxInsideField
@@ -322,7 +322,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
       x.vaddr := vaddr
       x.mask := mask
       x.alignedType := issueAlignedType
-      x.exp := exp
+      x.vecActive := vecActive
       x.elemIdx := elemIdx
       x.is_first_ele := elemIdx === 0.U
       x.data := GenVSData(
