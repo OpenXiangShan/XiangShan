@@ -180,7 +180,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val s0_out           = Wire(new LqWriteBundle)
   // vector
   val s0_isvec = WireInit(false.B)
-  val s0_exp = WireInit(true.B)
+  val s0_vecActive = WireInit(true.B)
   val s0_flowPtr = WireInit(0.U.asTypeOf(new VsFlowPtr))
   val s0_isLastElem = WireInit(false.B)
 
@@ -458,7 +458,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     s0_sched_idx     := 0.U
 
     s0_isvec         := true.B
-    s0_exp           := io.vec_stu_io.in.bits.exp
+    s0_vecActive           := io.vec_stu_io.in.bits.vecActive
     s0_flowPtr       := io.vec_stu_io.in.bits.flowPtr
     s0_isLastElem    := io.vec_stu_io.in.bits.isLastElem
   }
@@ -527,7 +527,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   s0_out.mshrid        := s0_mshrid
   s0_out.isvec         := s0_isvec
   s0_out.isLastElem    := s0_isLastElem
-  s0_out.vecActive           := s0_exp
+  s0_out.vecActive           := s0_vecActive
   s0_out.sflowPtr      := s0_flowPtr
   s0_out.uop.exceptionVec(loadAddrMisaligned)  := !s0_addr_aligned && s0_ld_flow
   s0_out.uop.exceptionVec(storeAddrMisaligned) := !s0_addr_aligned && !s0_ld_flow
@@ -832,7 +832,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val s2_can_go = s3_ready
   val s2_fire   = s2_valid && !s2_kill && s2_can_go
   val s2_isvec  = RegEnable(s1_isvec, false.B, s1_fire)
-  val s2_exp    = RegEnable(s1_out.vecActive, true.B, s1_fire)
+  val s2_vecActive    = RegEnable(s1_out.vecActive, true.B, s1_fire)
   val s2_paddr  = RegEnable(s1_paddr_dup_lsu, s1_fire)
 
   s2_kill := s2_in.uop.robIdx.needFlush(io.redirect)
@@ -854,7 +854,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val s2_exception_vec = WireInit(s2_in.uop.exceptionVec)
   when (s2_ld_flow) {
     when (!s2_in.lateKill) {
-      s2_exception_vec(loadAccessFault) := (s2_in.uop.exceptionVec(loadAccessFault) || s2_pmp.ld) && s2_exp
+      s2_exception_vec(loadAccessFault) := (s2_in.uop.exceptionVec(loadAccessFault) || s2_pmp.ld) && s2_vecActive
       // soft prefetch will not trigger any exception (but ecc error interrupt may be triggered)
       when (s2_prf || s2_in.tlbMiss) {
         s2_exception_vec := 0.U.asTypeOf(s2_exception_vec.cloneType)

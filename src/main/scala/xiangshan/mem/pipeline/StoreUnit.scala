@@ -95,7 +95,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   val s0_can_go       = s1_ready
   val s0_fire         = s0_valid && !s0_kill && s0_can_go
   // vector
-  val s0_exp          = !s0_use_flow_vec || s0_vecstin.exp
+  val s0_vecActive          = !s0_use_flow_vec || s0_vecstin.vecActive
   val s0_flowPtr      = s0_vecstin.flowPtr
   val s0_isLastElem   = s0_vecstin.isLastElem
 
@@ -167,7 +167,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   s0_out.wlineflag    := s0_wlineflag
   s0_out.isvec        := s0_use_flow_vec
   s0_out.is128bit     := false.B
-  s0_out.vecActive          := s0_exp
+  s0_out.vecActive    := s0_vecActive
   s0_out.sflowPtr     := s0_flowPtr
   s0_out.isLastElem   := s0_isLastElem
   when(s0_valid && s0_isFirstIssue) {
@@ -202,7 +202,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   val s1_kill   = Wire(Bool())
   val s1_can_go = s2_ready
   val s1_fire   = s1_valid && !s1_kill && s1_can_go
-  val s1_exp    = RegEnable(s0_out.vecActive, true.B, s0_fire)
+  val s1_vecActive    = RegEnable(s0_out.vecActive, true.B, s0_fire)
 
   // mmio cbo decoder
   val s1_mmio_cbo  = s1_in.uop.fuOpType === LSUOpType.cbo_clean ||
@@ -275,8 +275,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   s1_out.mmio    := s1_mmio
   s1_out.tlbMiss := s1_tlb_miss
   s1_out.atomic  := s1_mmio
-  s1_out.uop.exceptionVec(storePageFault)   := io.tlb.resp.bits.excp(0).pf.st && s1_exp
-  s1_out.uop.exceptionVec(storeAccessFault) := io.tlb.resp.bits.excp(0).af.st && s1_exp
+  s1_out.uop.exceptionVec(storePageFault)   := io.tlb.resp.bits.excp(0).pf.st && s1_vecActive
+  s1_out.uop.exceptionVec(storeAccessFault) := io.tlb.resp.bits.excp(0).af.st && s1_vecActive
 
   // scalar store and scalar load nuke check, and also other purposes
   io.lsq.valid     := s1_valid && !s1_in.isHWPrefetch && !s1_isvec
@@ -310,7 +310,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   val s2_kill   = Wire(Bool())
   val s2_can_go = s3_ready
   val s2_fire   = s2_valid && !s2_kill && s2_can_go
-  val s2_exp    = RegEnable(s1_out.vecActive, true.B, s1_fire)
+  val s2_vecActive    = RegEnable(s1_out.vecActive, true.B, s1_fire)
 
   s2_ready := !s2_valid || s2_kill || s3_ready
   when (s1_fire) { s2_valid := true.B }
@@ -326,7 +326,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   s2_out        := s2_in
   s2_out.mmio   := s2_mmio && !s2_exception
   s2_out.atomic := s2_in.atomic || s2_pmp.atomic
-  s2_out.uop.exceptionVec(storeAccessFault) := (s2_in.uop.exceptionVec(storeAccessFault) || s2_pmp.st) && s2_exp
+  s2_out.uop.exceptionVec(storeAccessFault) := (s2_in.uop.exceptionVec(storeAccessFault) || s2_pmp.st) && s2_vecActive
 
   // kill dcache write intent request when mmio or exception
   io.dcache.s2_kill := (s2_mmio || s2_exception || s2_in.uop.robIdx.needFlush(io.redirect))
