@@ -268,7 +268,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       srcStatusNext.psrc                              := srcStatus.psrc
       srcStatusNext.srcType                           := srcStatus.srcType
       srcStatusNext.srcState                          := Mux(cancel, false.B, wakeup | srcStatus.srcState)
-      srcStatusNext.dataSources.value                 := Mux(wakeupByIQ, DataSource.bypass, DataSource.reg)
+      srcStatusNext.dataSources.value                 := Mux(wakeupByIQ, DataSource.bypass, Mux(srcStatus.dataSources.readBypass, DataSource.reg, srcStatus.dataSources.value))
       if(params.hasIQWakeUp) {
         srcStatusNext.srcTimer.get                    := MuxCase(3.U, Seq(
           // T0: waked up by IQ, T1: reset timer as 1

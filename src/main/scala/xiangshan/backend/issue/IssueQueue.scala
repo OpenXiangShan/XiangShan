@@ -231,7 +231,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         enq.bits.status.srcStatus(j).psrc                       := s0_enqBits(enqIdx).psrc(j)
         enq.bits.status.srcStatus(j).srcType                    := s0_enqBits(enqIdx).srcType(j)
         enq.bits.status.srcStatus(j).srcState                   := s0_enqBits(enqIdx).srcState(j) & !LoadShouldCancel(Some(s0_enqBits(enqIdx).srcLoadDependency(j)), io.ldCancel)
-        enq.bits.status.srcStatus(j).dataSources.value          := DataSource.reg
+        enq.bits.status.srcStatus(j).dataSources.value          := Mux(SrcType.isXp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U), DataSource.zero, DataSource.reg)
         enq.bits.status.srcStatus(j).srcLoadDependency          := VecInit(s0_enqBits(enqIdx).srcLoadDependency(j).map(x => x(x.getWidth - 2, 0) << 1))
         if(params.hasIQWakeUp) {
           enq.bits.status.srcStatus(j).srcTimer.get             := 0.U(3.W)
