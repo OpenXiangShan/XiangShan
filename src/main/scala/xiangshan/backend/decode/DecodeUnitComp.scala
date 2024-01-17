@@ -1448,10 +1448,8 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).rfWen := false.B
       csBundle(0).fpWen := false.B
       csBundle(0).vecWen := true.B
+      genCsBundle_RGATHER_VX(1)
       switch(vlmulReg) {
-        is("b000".U ){
-          genCsBundle_RGATHER_VX(1)
-        }
         is("b001".U ){
           genCsBundle_RGATHER_VX(2)
         }
