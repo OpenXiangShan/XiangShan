@@ -599,7 +599,7 @@ object VecDecoder extends DecodeConstants {
 
     // 14.4. Vector Widening Floating-Point Reduction Instructions
     VFWREDOSUM_VS -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfalu, VfaluType.vfwredosum, F, T, F, UopSplitType.VEC_VFREDOSUM),
-    VFWREDUSUM_VS -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfalu, VfpuType.dummy, F, T, F),
+    VFWREDUSUM_VS -> OPFVV(SrcType.vp, SrcType.vp, FuType.vfalu, VfaluType.vfwredosum, F, T, F, UopSplitType.VEC_VFREDOSUM),
 
   )
 
