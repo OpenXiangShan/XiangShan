@@ -414,14 +414,14 @@ class IssueQueueIQWakeUpBundle(
     def getIntRfReadValidBundle(issueValid: Bool): Seq[ValidIO[RfReadPortWithConfig]] = {
       rf.zip(srcType).map {
         case (rfRd: MixedVec[RfReadPortWithConfig], t: UInt) =>
-          makeValid(issueValid && SrcType.isXp(t), rfRd.head)
+          makeValid(issueValid, rfRd.head)
       }.toSeq
     }
 
     def getVfRfReadValidBundle(issueValid: Bool): Seq[ValidIO[RfReadPortWithConfig]] = {
       rf.zip(srcType).map {
         case (rfRd: MixedVec[RfReadPortWithConfig], t: UInt) =>
-          makeValid(issueValid && SrcType.isVfp(t), rfRd.head)
+          makeValid(issueValid, rfRd.head)
       }.toSeq
     }
 
