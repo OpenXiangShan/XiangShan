@@ -456,6 +456,11 @@ object Bundles {
     val vfConflict = OptionWrapper(vfCertainLat, Bool())
   }
 
+  class ImmInfo extends Bundle {
+    val imm = UInt(32.W)
+    val immType = SelImm()
+  }
+
   // DataPath --[ExuInput]--> Exu
   class ExuInput(val params: ExeUnitParams, copyWakeupOut:Boolean = false, copyNum:Int = 0)(implicit p: Parameters) extends XSBundle {
     val fuType        = FuType()
