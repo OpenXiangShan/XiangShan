@@ -778,7 +778,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   refill.id := req.id
   def missCohGen(cmd: UInt, param: UInt, dirty: Bool) = {
     val c = categorize(cmd)
-    MuxLookup(Cat(c, param, dirty), Nothing, Seq(
+    MuxLookup(Cat(c, param, dirty), Nothing)(Seq(
       //(effect param) -> (next)
       Cat(rd, toB, false.B)  -> Branch,
       Cat(rd, toB, true.B)   -> Branch,
@@ -787,7 +787,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
       Cat(wi, toT, false.B)  -> Trunk,
       Cat(wi, toT, true.B)   -> Dirty,
       Cat(wr, toT, false.B)  -> Dirty,
-      Cat(wr, toT, true.B)   -> Dirty))
+      Cat(wr, toT, true.B)   -> Dirty).toSeq)
   }
   refill.meta.coh := ClientMetadata(missCohGen(req.cmd, grant_param, isDirty))
   refill.error := error

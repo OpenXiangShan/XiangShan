@@ -174,7 +174,7 @@ class SRT16DividerDataModule(len: Int) extends Module {
   val rCarryInit = 0.U(itn_len.W)
 
   val rSumInitTrunc = Cat(0.U(1.W), rSumInit(itn_len - 4, itn_len - 4 - 4 + 1)) // 0.00___
-  val mInitPos1 = MuxLookup(dNormReg(len-2, len-4), "b00100".U(5.W),
+  val mInitPos1 = MuxLookup(dNormReg(len-2, len-4), "b00100".U(5.W))(
     Array(
       0.U -> "b00100".U(5.W),
       1.U -> "b00100".U(5.W),
@@ -186,7 +186,7 @@ class SRT16DividerDataModule(len: Int) extends Module {
       7.U -> "b01000".U(5.W),
     )
   )
-  val mInitPos2 = MuxLookup(dNormReg(len-2, len-4), "b01100".U(5.W),
+  val mInitPos2 = MuxLookup(dNormReg(len-2, len-4), "b01100".U(5.W))(
     Array(
       0.U -> "b01100".U(5.W),
       1.U -> "b01110".U(5.W),
@@ -240,10 +240,10 @@ class SRT16DividerDataModule(len: Int) extends Module {
 
   // Give values to the regs and wires above...
   val dForLookup = dPos(len-2, len-4)
-  mNeg := VecInit(Cat(SignExt(MuxLookup(dNormReg(len-2, len-4), "b00000000".U(7.W), mLookUpTable2.minus_m(0)), 11), 0.U(1.W)), // (2, 5) -> (6, 6)
-                  Cat(SignExt(MuxLookup(dNormReg(len-2, len-4), "b00000000".U(7.W), mLookUpTable2.minus_m(1)), 10) ,0.U(2.W)), // (3, 4) -> (6, 6)
-                  Cat(SignExt(MuxLookup(dNormReg(len-2, len-4), "b00000000".U(7.W), mLookUpTable2.minus_m(2)), 10) ,0.U(2.W)),
-                  Cat(SignExt(MuxLookup(dNormReg(len-2, len-4), "b00000000".U(7.W), mLookUpTable2.minus_m(3)), 11) ,0.U(1.W))
+  mNeg := VecInit(Cat(SignExt(MuxLookup(dNormReg(len-2, len-4), "b00000000".U(7.W))(mLookUpTable2.minus_m(0)), 11), 0.U(1.W)), // (2, 5) -> (6, 6)
+                  Cat(SignExt(MuxLookup(dNormReg(len-2, len-4), "b00000000".U(7.W))(mLookUpTable2.minus_m(1)), 10) ,0.U(2.W)), // (3, 4) -> (6, 6)
+                  Cat(SignExt(MuxLookup(dNormReg(len-2, len-4), "b00000000".U(7.W))(mLookUpTable2.minus_m(2)), 10) ,0.U(2.W)),
+                  Cat(SignExt(MuxLookup(dNormReg(len-2, len-4), "b00000000".U(7.W))(mLookUpTable2.minus_m(3)), 11) ,0.U(1.W))
   )
   udNeg := VecInit( Cat(SignExt(dPos, 66), 0.U(2.W)),
                     Cat(SignExt(dPos, 67), 0.U(1.W)),
