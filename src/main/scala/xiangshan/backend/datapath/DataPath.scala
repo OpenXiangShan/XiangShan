@@ -263,6 +263,13 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     toExu.map(x => MixedVec(x.map(_.valid.cloneType).toSeq)).toSeq
   ))
   val s1_toExuData: MixedVec[MixedVec[ExuInput]] = Reg(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.cloneType).toSeq)).toSeq))
+  val s1_immInfo = Reg(MixedVec(toExu.map(x => MixedVec(x.map(x => new ImmInfo).toSeq)).toSeq))
+  s1_immInfo.zip(fromIQ).map { case (s1Vec, s0Vec) =>
+    s1Vec.zip(s0Vec).map { case (s1, s0) =>
+      s1.imm := s0.bits.common.imm
+      s1.immType := s0.bits.immType
+    }
+  }
   val s1_toExuReady = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.ready.cloneType).toSeq))))
   val s1_srcType: MixedVec[MixedVec[Vec[UInt]]] = MixedVecInit(fromIQ.map(x => MixedVecInit(x.map(xx => RegEnable(xx.bits.srcType, xx.fire)).toSeq)))
 
@@ -331,39 +338,6 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       }
       s0.ready := (s1_ready || !s1_valid) && notBlock
       // IQ(s0) --[Ctrl]--> s1Reg ---------- end
-
-      // IQ(s0) --[Data]--> s1Reg ---------- begin
-      // imm extract
-      when (s0.fire && !s1_flush && notBlock) {
-        if (s1_data.params.immType.nonEmpty && s1_data.src.size > 1) {
-          // rs1 is always int reg, rs2 may be imm
-          when(SrcType.isImm(s0.bits.srcType(1))) {
-            s1_data.src(1) := ImmExtractor(
-              s0.bits.common.imm,
-              s0.bits.immType,
-              s1_data.params.dataBitsMax,
-              s1_data.params.immType.map(_.litValue)
-            )
-          }
-        }
-        if (s1_data.params.hasVecFu) {
-          // Fuck off riscv vector imm!!! Why not src1???
-          when(SrcType.isImm(s0.bits.srcType(0))) {
-            s1_data.src(0) := ImmExtractor(
-              s0.bits.common.imm,
-              s0.bits.immType,
-              s1_data.params.dataBitsMax,
-              s1_data.params.immType.map(_.litValue)
-            )
-          }
-        } else if (s1_data.params.hasLoadFu || s1_data.params.hasHyldaFu) {
-          // dirty code for fused_lui_load
-          when(SrcType.isImm(s0.bits.srcType(0))) {
-            s1_data.src(0) := SignExt(ImmUnion.U.toImm32(s0.bits.common.imm(s0.bits.common.imm.getWidth - 1, ImmUnion.I.len)), XLEN)
-          }
-        }
-      }
-      // IQ(s0) --[Data]--> s1Reg ---------- end
     }
   }
 
@@ -424,6 +398,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       toExu(i)(j).valid := s1_toExuValid(i)(j)
       s1_toExuReady(i)(j) := toExu(i)(j).ready
       sinkData := s1_toExuData(i)(j)
+      val s1 = s1_immInfo(i)(j)
       // s1Reg --[Ctrl]--> exu(s1) ---------- end
 
       // s1Reg --[Data]--> exu(s1) ---------- begin
@@ -446,7 +421,12 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       // data source2: extracted imm and pc saved in s1Reg
       if (sinkData.params.immType.nonEmpty && sinkData.src.size > 1) {
         when(SrcType.isImm(s1_srcType(i)(j)(1))) {
-          sinkData.src(1) := s1_toExuData(i)(j).src(1)
+          sinkData.src(1) := ImmExtractor(
+            s1.imm,
+            s1.immType,
+            sinkData.params.dataBitsMax,
+            sinkData.params.immType.map(_.litValue)
+          )
         }
       }
       if (sinkData.params.hasJmpFu) {
@@ -454,11 +434,16 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
         sinkData.pc.get := pcRdata(index)
       } else if (sinkData.params.hasVecFu) {
         when(SrcType.isImm(s1_srcType(i)(j)(0))) {
-          sinkData.src(0) := s1_toExuData(i)(j).src(0)
+          sinkData.src(0) := ImmExtractor(
+            s1.imm,
+            s1.immType,
+            sinkData.params.dataBitsMax,
+            sinkData.params.immType.map(_.litValue)
+          )
         }
       } else if (sinkData.params.hasLoadFu || sinkData.params.hasHyldaFu) {
         when(SrcType.isImm(s1_srcType(i)(j)(0))) {
-          sinkData.src(0) := s1_toExuData(i)(j).src(0)
+          sinkData.src(0) := SignExt(ImmUnion.U.toImm32(s1.imm(s1.imm.getWidth - 1, ImmUnion.I.len)), XLEN)
         }
       }
       // s1Reg --[Data]--> exu(s1) ---------- end
