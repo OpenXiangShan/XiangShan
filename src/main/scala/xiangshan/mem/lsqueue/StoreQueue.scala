@@ -208,6 +208,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // no inst will be committed 1 cycle before tval update
   vaddrModule.io.raddr(EnsbufferWidth) := (cmtPtrExt(0) + commitCount).value
 
+  // vector store share major opcode with float store
+  def isVecStore(width : UInt) = {
+    width =/= "b001".U && width =/= "b010".U && width =/= "b011".U && width =/= "b100".U
+  }
   /**
     * Enqueue at dispatch
     *
@@ -231,7 +235,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       pending(index) := false.B
       prefetch(index) := false.B
       mmio(index) := false.B
-      vec(index) := io.enq.req(i).bits.instr(6, 0) === "b0100111".U // TODO
+      vec(index) := io.enq.req(i).bits.instr(6, 0) === "b0100111".U && isVecStore(io.enq.req(i).bits.instr(14, 12)) // TODO
       vecAddrvalid(index) := false.B//TODO
 
       XSError(!io.enq.canAccept || !io.enq.lqCanAccept, s"must accept $i\n")
