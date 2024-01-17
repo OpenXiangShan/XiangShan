@@ -260,7 +260,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   bypassNetwork.io.fromDataPath.vf <> dataPath.io.toFpExu
   bypassNetwork.io.fromDataPath.mem <> dataPath.io.toMemExu
   bypassNetwork.io.fromExus.connectExuOutput(_.int)(intExuBlock.io.out)
-  bypassNetwork.io.fromExus.connectExuOutput(_.vf)(0.U.asTypeOf(vfExuBlock.io.out))
+  bypassNetwork.io.fromExus.connectExuOutput(_.vf)(vfExuBlock.io.out)
   bypassNetwork.io.fromExus.mem.flatten.zip(io.mem.writeBack).foreach { case (sink, source) =>
     sink.valid := source.valid
     sink.bits.pdest := source.bits.uop.pdest
@@ -337,11 +337,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
       )
 
       vfExuBlock.io.in(i)(j).bits.vpu.foreach(_.vstart := csrio.vpu.vstart)
-      /* vfExuBlock assign 0 */
-      vfExuBlock.io.in(i)(j).bits := 0.U.asTypeOf(vfExuBlock.io.in(i)(j).bits)
-      vfExuBlock.io.in(i)(j).valid:= false.B
-      bypassNetwork.io.toExus.vf(i)(j).ready := true.B
-      /* vfExuBlock assign 0 */
     }
   }
 
@@ -351,11 +346,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   wbDataPath.io.flush := ctrlBlock.io.redirect
   wbDataPath.io.fromTop.hartId := io.fromTop.hartId
   wbDataPath.io.fromIntExu <> intExuBlock.io.out
-
-  /* vfExuBlock assign 0 */
-  wbDataPath.io.fromVfExu <> 0.U.asTypeOf(vfExuBlock.io.out)
-  vfExuBlock.io.out.map(x => x.map(_.ready := true.B))
-  /* vfExuBlock assign 0 */
+  wbDataPath.io.fromVfExu <> vfExuBlock.io.out
   wbDataPath.io.fromMemExu.flatten.zip(io.mem.writeBack).foreach { case (sink, source) =>
     sink.valid := source.valid
     source.ready := sink.ready
