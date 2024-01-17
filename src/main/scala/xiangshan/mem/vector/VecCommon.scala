@@ -503,7 +503,7 @@ object GenUSWholeEmul extends VLSUConstants{
 
 object GenUSMaskRegVL extends VLSUConstants {
   def apply(vl: UInt): UInt = {
-    (vl >> 3.U)
+    ((vl >> 3.U) + 1.U)
   }
 }
 
