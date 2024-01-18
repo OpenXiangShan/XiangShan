@@ -170,7 +170,7 @@ object XSPerfMax extends HasRegularPerfName {
 object QueuePerf {
   def apply(size: Int, utilization: UInt, full: UInt)(implicit p: Parameters) = {
     XSPerfAccumulate("utilization", utilization)
-    XSPerfHistogram("util", utilization, true.B, 0, size, 1)
+    XSPerfHistogram("util", utilization, true.B, 0, size+1, 1, true, true)
     XSPerfAccumulate("full", full)
     val exHalf = utilization > (size/2).U
     val empty = utilization === 0.U

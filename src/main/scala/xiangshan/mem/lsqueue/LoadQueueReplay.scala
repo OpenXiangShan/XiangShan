@@ -726,6 +726,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val replayDCacheReplayCount = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_DR)))
   val replayForwardFailCount  = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_FF)))
   val replayDCacheMissCount   = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_DM)))
+  val validCount = freeList.io.validCount
   XSPerfAccumulate("enq", enqNumber)
   XSPerfAccumulate("deq", deqNumber)
   XSPerfAccumulate("deq_block", deqBlockCount)
@@ -741,7 +742,8 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("replay_dcache_miss", replayDCacheMissCount)
   XSPerfAccumulate("replay_hint_wakeup", s0_hintSelValid)
   XSPerfAccumulate("replay_hint_priority_beat1", io.l2_hint.valid && io.l2_hint.bits.isKeyword)
-
+  XSPerfHistogram("util", validCount, true.B, 0, LoadQueueReplaySize+1, 1, true, true)
+  
   val perfEvents: Seq[(String, UInt)] = Seq(
     ("enq", enqNumber),
     ("deq", deqNumber),
