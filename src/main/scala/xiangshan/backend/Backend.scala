@@ -271,6 +271,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   bypassNetwork.io.fromDataPath.int <> dataPath.io.toIntExu
   bypassNetwork.io.fromDataPath.vf <> dataPath.io.toFpExu
   bypassNetwork.io.fromDataPath.mem <> dataPath.io.toMemExu
+  bypassNetwork.io.fromDataPath.immInfo := dataPath.io.og1ImmInfo
   bypassNetwork.io.fromExus.connectExuOutput(_.int)(intExuBlock.io.out)
   bypassNetwork.io.fromExus.connectExuOutput(_.vf)(vfExuBlock.io.out)
 
