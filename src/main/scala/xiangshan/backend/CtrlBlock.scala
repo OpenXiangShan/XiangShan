@@ -140,11 +140,8 @@ class CtrlBlockImp(
     val isIntSche = intScheWbData.contains(x)
     val isVfSche = vfScheWbData.contains(x)
     val isMemVload = memVloadWbData.contains(x)
-    val canSameRobidxWbData = if (isIntSche) {
-      if (x.bits.params.writeFpRf || x.bits.params.writeVecRf) intScheWbData ++ vfScheWbData
-      else intScheWbData
-    } else if (isVfSche) {
-      writeFpVecWbData
+    val canSameRobidxWbData = if (isIntSche ||isVfSche) {
+      intScheWbData ++ vfScheWbData
     } else if (isMemVload) {
       memVloadWbData
     } else {
