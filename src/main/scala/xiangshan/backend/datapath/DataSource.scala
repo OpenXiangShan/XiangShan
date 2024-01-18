@@ -7,7 +7,9 @@ class DataSource extends Bundle {
 
   def readReg: Bool = value(2)
 
-  def readAnotherReg: Bool =  value === DataSource.anotherReg
+  def readRegOH: Bool = value === DataSource.reg
+
+  def readAnotherReg: Bool = value === DataSource.anotherReg
 
   def readZero: Bool = value === DataSource.zero
 

@@ -266,6 +266,9 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       s1.immType := s0.bits.immType
     }
   }
+  io.og1ImmInfo.zip(s1_immInfo.flatten).map{ case(out, reg) =>
+    out := reg
+  }
   val s1_toExuReady = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.ready.cloneType).toSeq))))
   val s1_srcType: MixedVec[MixedVec[Vec[UInt]]] = MixedVecInit(fromIQ.map(x => MixedVecInit(x.map(xx => RegEnable(xx.bits.srcType, xx.fire)).toSeq)))
 
@@ -390,7 +393,6 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       toExu(i)(j).valid := s1_toExuValid(i)(j)
       s1_toExuReady(i)(j) := toExu(i)(j).ready
       sinkData := s1_toExuData(i)(j)
-      val s1 = s1_immInfo(i)(j)
       // s1Reg --[Ctrl]--> exu(s1) ---------- end
 
       // s1Reg --[Data]--> exu(s1) ---------- begin
@@ -409,36 +411,10 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
         if (readRfMap.nonEmpty)
           sinkData.src(k) := Mux1H(readRfMap)
       }
-
-      // data source2: extracted imm and pc saved in s1Reg
-      if (sinkData.params.immType.nonEmpty && sinkData.src.size > 1) {
-        when(SrcType.isImm(s1_srcType(i)(j)(1))) {
-          sinkData.src(1) := ImmExtractor(
-            s1.imm,
-            s1.immType,
-            sinkData.params.dataBitsMax,
-            sinkData.params.immType.map(_.litValue)
-          )
-        }
-      }
       if (sinkData.params.hasJmpFu) {
         val index = pcReadFtqPtrFormIQ.map(_.bits.exuParams).indexOf(sinkData.params)
         sinkData.pc.get := pcRdata(index)
-      } else if (sinkData.params.hasVecFu) {
-        when(SrcType.isImm(s1_srcType(i)(j)(0))) {
-          sinkData.src(0) := ImmExtractor(
-            s1.imm,
-            s1.immType,
-            sinkData.params.dataBitsMax,
-            sinkData.params.immType.map(_.litValue)
-          )
-        }
-      } else if (sinkData.params.hasLoadFu) {
-        when(SrcType.isImm(s1_srcType(i)(j)(0))) {
-          sinkData.src(0) := SignExt(ImmUnion.U.toImm32(s1.imm(s1.imm.getWidth - 1, ImmUnion.I.len)), XLEN)
-        }
       }
-      // s1Reg --[Data]--> exu(s1) ---------- end
     }
   }
 
@@ -501,6 +477,8 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
   val toFpExu: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = MixedVec(vfSchdParams.genExuInputBundle)
 
   val toMemExu: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = memSchdParams.genExuInputBundle
+
+  val og1ImmInfo: Vec[ImmInfo] = Output(Vec(params.allExuParams.size, new ImmInfo))
 
   val fromIntWb: MixedVec[RfWritePortWithConfig] = MixedVec(params.genIntWriteBackBundle)
 
