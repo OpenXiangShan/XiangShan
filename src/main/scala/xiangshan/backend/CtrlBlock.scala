@@ -237,6 +237,7 @@ class CtrlBlockImp(
 
   io.toDataPath.vtypeAddr := rob.io.vconfigPdest
 
+  decode.io.isResumeVType := rob.io.toDecode.isResumeVType
   decode.io.walkVType := rob.io.toDecode.vtype
 
   decode.io.redirect := s1_s3_redirect.valid || s2_s4_pendingRedirectValid
