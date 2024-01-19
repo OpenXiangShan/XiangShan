@@ -567,7 +567,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   def missCohGen(cmd: UInt, param: UInt, dirty: Bool) = {
     val c = categorize(cmd)
-    MuxLookup(Cat(c, param, dirty), Nothing, Seq(
+    MuxLookup(Cat(c, param, dirty), Nothing)(Seq(
       //(effect param) -> (next)
       Cat(rd, toB, false.B)  -> Branch,
       Cat(rd, toB, true.B)   -> Branch,

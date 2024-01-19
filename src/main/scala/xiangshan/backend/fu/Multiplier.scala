@@ -79,7 +79,7 @@ class ArrayMulDataModule(len: Int) extends Module {
   var last_x = WireInit(0.U(3.W))
   for(i <- Range(0, len, 2)){
     val x = if(i==0) Cat(a(1,0), 0.U(1.W)) else if(i+1==len) SignExt(a(i, i-1), 3) else a(i+1, i-1)
-    val pp_temp = MuxLookup(x, 0.U, Seq(
+    val pp_temp = MuxLookup(x, 0.U)(Seq(
       1.U -> b_sext,
       2.U -> b_sext,
       3.U -> bx2,
@@ -88,7 +88,7 @@ class ArrayMulDataModule(len: Int) extends Module {
       6.U -> neg_b
     ))
     val s = pp_temp(len)
-    val t = MuxLookup(last_x, 0.U(2.W), Seq(
+    val t = MuxLookup(last_x, 0.U(2.W))(Seq(
       4.U -> 2.U(2.W),
       5.U -> 1.U(2.W),
       6.U -> 1.U(2.W)

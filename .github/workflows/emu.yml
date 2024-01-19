@@ -34,7 +34,7 @@ jobs:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate --num-cores 2
       - name: check verilog
         run:
-          python3 $GITHUB_WORKSPACE/.github/workflows/check_verilog.py build/XSTop.v
+          python3 $GITHUB_WORKSPACE/.github/workflows/check_verilog.py build/rtl/XSTop.v
       - name: build MinimalConfig Release emu
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \

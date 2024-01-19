@@ -417,7 +417,7 @@ class XiangShan(object):
                     print("copy wave file to " + self.args.wave_home)
                     self.__exec_cmd(f"cp $NOOP_HOME/build/*.vcd $WAVE_HOME")
                     self.__exec_cmd(f"cp $NOOP_HOME/build/emu $WAVE_HOME")
-                    self.__exec_cmd(f"cp $NOOP_HOME/build/SimTop.v $WAVE_HOME")
+                    self.__exec_cmd(f"cp $NOOP_HOME/build/rtl/SimTop.v $WAVE_HOME")
                     self.__exec_cmd(f"cp $NOOP_HOME/build/*.db $WAVE_HOME")
                 return ret
         return 0
@@ -440,7 +440,7 @@ class XiangShan(object):
                     print("copy wave file to " + self.args.wave_home)
                     self.__exec_cmd(f"cp $NOOP_HOME/build/*.vcd $WAVE_HOME")
                     self.__exec_cmd(f"cp $NOOP_HOME/build/emu $WAVE_HOME")
-                    self.__exec_cmd(f"cp $NOOP_HOME/build/SimTop.v $WAVE_HOME")
+                    self.__exec_cmd(f"cp $NOOP_HOME/build/rtl/SimTop.v $WAVE_HOME")
                     self.__exec_cmd(f"cp $NOOP_HOME/build/*.db $WAVE_HOME")
                 return ret
         return 0
