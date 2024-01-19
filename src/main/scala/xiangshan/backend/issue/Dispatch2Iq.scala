@@ -818,6 +818,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   private val allLSPatern = Seq.tabulate(numEnq + 1)(i => (Seq.fill(i)(Load()) ++ Seq.fill(numEnq - i)(Store())).toSeq.permutations).flatten.zipWithIndex.toSeq
 
   val inIsStoreVec = Cat(uopsIn.map(in => in.valid && FuType.isStore(in.bits.fuType)))
+  val inIsNotLoadVec = (~Cat(uopsIn.map(in => in.valid && FuType.isLoad(in.bits.fuType)))).asUInt
   object LoadValidTable {
     val default = BitPat("b" + "0" * numEnq)
     val table = allLSPatern.map { case (pattern, index) =>
@@ -876,12 +877,12 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
 
   val loadDeqNeedFlip = RegNext(loadIqValidCnt(1) < loadIqValidCnt(0)) && Constantin.createRecord("enableLoadBalance", true.B)(0)
   val storeDeqNeedFlip = RegNext(sthyIqValidCnt(1) < sthyIqValidCnt(0)) && Constantin.createRecord("enableStoreBalance", true.B)(0)
-  val loadValidDecoder = LoadValidTable.truthTable.map(decoder(EspressoMinimizer, inIsStoreVec, _))
+  val loadValidDecoder = LoadValidTable.truthTable.map(decoder(EspressoMinimizer, inIsNotLoadVec, _))
   val storeValidDecoder = StoreValidTable.truthTable.map(decoder(EspressoMinimizer, inIsStoreVec, _))
 
-  val loadMoreHyuReadyDecoderOriginal = LoadMoreHyuReadyTable.truthTable.map(decoder(EspressoMinimizer, inIsStoreVec, _))
+  val loadMoreHyuReadyDecoderOriginal = LoadMoreHyuReadyTable.truthTable.map(decoder(EspressoMinimizer, inIsNotLoadVec, _))
   val loadMoreHyuReadyDecoderFlipped = loadMoreHyuReadyDecoderOriginal.map(Mux1H(_, loadFlipMap))
-  val loadLessHyuReadyDecoderOriginal = LoadLessHyuReadyTable.truthTable.map(decoder(EspressoMinimizer, inIsStoreVec, _))
+  val loadLessHyuReadyDecoderOriginal = LoadLessHyuReadyTable.truthTable.map(decoder(EspressoMinimizer, inIsNotLoadVec, _))
   val loadLessHyuReadyDecoderFlipped = loadLessHyuReadyDecoderOriginal.map(Mux1H(_, loadFlipMap))
   val loadReadyDecoderOriginal = loadMoreHyuReadyDecoderOriginal zip loadLessHyuReadyDecoderOriginal map (x => Mux(useHyuForLoadMore, x._1, x._2))
   val loadReadyDecoderFlipped = loadMoreHyuReadyDecoderFlipped zip loadLessHyuReadyDecoderFlipped map (x => Mux(useHyuForLoadMore, x._1, x._2))
