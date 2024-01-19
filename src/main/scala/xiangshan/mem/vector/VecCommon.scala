@@ -30,6 +30,8 @@ import xiangshan.backend.Bundles._
   */
 trait VLSUConstants {
   val VLEN = 128
+  //for pack unit-stride flow 
+  val AlignedNum = 4 // 1/2/4/8
   def VLENB = VLEN/8
   def vOffsetBits = log2Up(VLENB) // bits-width to index offset inside a vector reg
 
@@ -536,5 +538,101 @@ object GenVdIdxInField extends VLSUConstants {
       ))
     }
     vdIdx
+  }
+}
+/**
+* Use start and vl to generate flow activative mask
+*/
+object GenFlowMask extends VLSUConstants {
+  def apply(elementMask: UInt, start: UInt, vl: UInt): UInt = {
+    val startMask = ~((1.U << start) - 1.U)
+    val vlMask = (1.U << vl) - 1.U
+    vlMask & elementMask & startMask
+  }
+}
+
+object CheckAligned extends VLSUConstants {
+  def apply(addr: UInt): UInt = {
+    val aligned_16 = (addr(0) === 0.U) // 16-bit
+    val aligned_32 = (addr(1,0) === 0.U) // 32-bit
+    val aligned_64 = (addr(2,0) === 0.U) // 64-bit
+    Cat(true.B, aligned_16, aligned_32, aligned_64)
+  }
+}
+/**
+  search if mask have continue 'len' bit '0' or '1'
+  mask: source
+  len: search length 
+  mod: mod 0 is search if mask have lead 'len' bit '0',  
+       mod 1 is search if mask have lead 'len' bit '1'
+*/
+object GenPackMask extends VLSUConstants{
+  def leadX(mask: UInt, len: Int, mod: Boolean): Bool = {
+    val isLeadX = Wire(Bool())
+    (0 until len).map{ case (i) => {
+      if(i == 0) {
+        isLeadX := mask(i)
+      }
+      else{
+        if(mod){
+          isLeadX := isLeadX & mask(i)
+        }
+        else{
+          isLeadX := !isLeadX & !mask(i)
+        }
+      }
+    }}
+    isLeadX
+  }
+  def leadOneVec(shiftMask: UInt): UInt = {
+    // max is 64-bit, so the max num of flow to pack is 8 
+
+    val lead1 = leadX(shiftMask, 1, true) // continue 1 bit 
+    val lead2 = leadX(shiftMask, 2, true) // continue 2 bit
+    val lead4 = leadX(shiftMask, 4, true) // continue 4 bit
+    val lead8 = leadX(shiftMask, 8, true) // continue 8 bit
+    Cat(lead1, lead2, lead4, lead8)
+  }
+
+  def leadZeroVec(shiftMask: UInt): UInt = {
+    // max is 64-bit, so the max num of flow to pack is 8 
+
+    val lead1 = leadX(shiftMask, 1, false) // continue 1 bit 
+    val lead2 = leadX(shiftMask, 2, false) // continue 2 bit
+    val lead4 = leadX(shiftMask, 4, false) // continue 4 bit
+    val lead8 = leadX(shiftMask, 8, false) // continue 8 bit
+    Cat(lead1, lead2, lead4, lead8)
+  }
+
+  def apply(activeMask: UInt, flowIdx: UInt) = {
+    val shiftMask = activeMask >> flowIdx
+    // pack mask
+    val activePackMask = leadOneVec(shiftMask)
+    val inactivePackMask = leadZeroVec(shiftMask)
+
+    (activePackMask, inactivePackMask)
+  }
+}
+/**
+PackEnable = (LeadXVec >> eew) & alignedVec, where the 0th bit represents the ability to merge into a 64 bit flow, the second bit represents the ability to merge into a 32 bit flow, and so on.
+
+example:
+  addr = 0x0, activeMask = b00011100101111, flowIdx = 0, eew = 0(8-bit)
+
+  step 0 : addrAlignedVec = (1, 1, 1, 1)
+  step 1 : activePackVec = (1, 1, 1, 0), inactivePackVec = (0, 0, 0, 0)
+  step 2 : activePackEnable = (1, 1, 1, 0), inactivePackVec = (0, 0, 0, 0)
+
+  we can package 4 8-bit activative flows into a 32-bit flow.
+*/
+object GenPackVec extends VLSUConstants{
+  def apply(addr: UInt, activeMask: UInt, flowIdx: UInt, eew: UInt): (UInt, UInt) = {
+    val addrAlignedVec = CheckAligned(addr)
+    val (activePackMask, inactivePackMask) = GenPackMask(activeMask, flowIdx)
+    // generate packVec
+    val activePackVec   = addrAlignedVec & (activePackMask >> eew)
+    val inactivePackVec = addrAlignedVec & (inactivePackMask >> eew)
+
+    (activePackVec.asUInt, inactivePackVec.asUInt)
   }
 }
