@@ -239,10 +239,9 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   }
 
   val numValidEntries = distanceBetween(enqPtr, deqPtr)
-  val allowEnqueue = RegEnable(
+  val allowEnqueue = RegNext(
     numValidEntries + enqCount <= (size - RenameWidth).U,
-    /*init = */true.B,
-    /*enable = */enqCount =/= 0.U || commitCount =/= 0.U || walkCount =/= 0.U || spclWalkCount =/= 0.U || io.redirect.valid,
+    true.B
   )
 
   private val decodeResumeVType = Reg(ValidIO(VType()))
