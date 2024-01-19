@@ -359,6 +359,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val cpu_halt = Output(Bool())
     val wfi_enable = Input(Bool())
     val toDecode = new Bundle {
+      val isResumeVType = Output(Bool())
       val vtype = ValidIO(VType())
     }
 
@@ -539,6 +540,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   vtypeBuffer.io.fromRob.walkSize := PopCount(walkIsVTypeVec)
   vtypeBuffer.io.snpt := io.snpt
   vtypeBuffer.io.snpt.snptEnq := snptEnq
+  io.toDecode.isResumeVType := vtypeBuffer.io.toDecode.isResumeVType
   io.toDecode.vtype := vtypeBuffer.io.toDecode.vtype
 
   /**

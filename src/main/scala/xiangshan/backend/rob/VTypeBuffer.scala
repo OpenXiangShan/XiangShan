@@ -43,6 +43,7 @@ class VTypeBufferIO(size: Int)(implicit p: Parameters) extends XSBundle {
   val canEnq = Output(Bool())
 
   val toDecode = Output(new Bundle {
+    val isResumeVType = Bool()
     val vtype = ValidIO(VType())
   })
 
@@ -261,6 +262,8 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   io.canEnq := allowEnqueue && state === s_idle
   io.status.walkEnd := walkEndNext
   // update vtype in decode when VTypeBuffer resumes from walk state
+  // note that VTypeBuffer can still send resuming request in the first cycle of s_idle
+  io.toDecode.isResumeVType := state =/= s_idle || decodeResumeVType.valid
   io.toDecode.vtype.valid := (state === s_walk || stateLast === s_walk && state === s_idle) && decodeResumeVType.valid
   io.toDecode.vtype.bits := Mux(io.toDecode.vtype.valid, decodeResumeVType.bits, 0.U.asTypeOf(VType()))
 
