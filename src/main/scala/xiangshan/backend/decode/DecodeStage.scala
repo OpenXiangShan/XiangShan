@@ -52,6 +52,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     val csrCtrl = Input(new CustomCSRCtrlIO)
     val fusion = Vec(DecodeWidth - 1, Input(Bool()))
     // vtype update
+    val isResumeVType = Input(Bool())
     val commitVType = Flipped(Valid(new VType))
     val walkVType = Flipped(Valid(new VType))
     val stallReason = new Bundle {
@@ -106,7 +107,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   decoderComp.io.vtypeBypass := vtypeGen.io.vtype
   // The input inst of decoderComp is latched last cycle.
   // Set input empty, if there is no complex inst latched last cycle.
-  decoderComp.io.in.valid := complexValid
+  decoderComp.io.in.valid := complexValid && !io.isResumeVType
   decoderComp.io.in.bits.simpleDecodedInst := complexInst
   decoderComp.io.in.bits.uopInfo := complexUopInfo
   decoderComp.io.out.complexDecodedInsts.zipWithIndex.foreach { case (out, i) => out.ready := io.out(i).ready }
@@ -120,11 +121,14 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   // Vec(S,S,S,C,S,S) -> Vec(0,0,0,1,0,0)
   val firstComplexOH: Vec[Bool] = VecInit(PriorityEncoderOH(isComplexVec))
 
+  // block vector inst when vtype is resuming
+  val hasVectorInst = VecInit(decoders.map(x => FuType.FuTypeOrR(x.io.deq.decodedInst.fuType, FuType.vecArithOrMem ++ FuType.vecVSET))).asUInt.orR
+
   io.in.zipWithIndex.foreach { case (in, i) =>
     in.ready := !io.redirect && (
       simplePrefixVec(i) && (i.U +& complexNum) < readyCounter ||
       firstComplexOH(i) && (i.U +& complexNum) <= readyCounter && decoderComp.io.in.ready
-    )
+    ) && !(hasVectorInst && io.isResumeVType)
   }
 
   val finalDecodedInst = Wire(Vec(DecodeWidth, new DecodedInst))
@@ -136,7 +140,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   }
 
   io.out.zipWithIndex.foreach { case (inst, i) =>
-    inst.valid := finalDecodedInstValid(i)
+    inst.valid := finalDecodedInstValid(i) && !(hasVectorInst && io.isResumeVType)
     inst.bits := finalDecodedInst(i)
   }
 
