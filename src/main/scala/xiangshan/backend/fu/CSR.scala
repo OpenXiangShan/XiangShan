@@ -268,7 +268,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     6.U -> I_Trigger, 7.U -> S_Trigger,
     8.U -> I_Trigger, 9.U -> L_Trigger
   )
-  def TypeLookup(select: UInt) = MuxLookup(select, I_Trigger, type_config)
+  def TypeLookup(select: UInt) = MuxLookup(select, I_Trigger)(type_config)
 
   val tdata1Phy = RegInit(VecInit(List.fill(10) {(2L << 60L).U(64.W)})) // init ttype 2
   val tdata2Phy = Reg(Vec(10, UInt(64.W)))
@@ -327,13 +327,13 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     res
   }
 
-  csrio.customCtrl.frontend_trigger.t.bits.addr := MuxLookup(tselectPhy, 0.U, Seq(
+  csrio.customCtrl.frontend_trigger.t.bits.addr := MuxLookup(tselectPhy, 0.U)(Seq(
     0.U -> 0.U,
     1.U -> 1.U,
     6.U -> 2.U,
     8.U -> 3.U
   ))
-  csrio.customCtrl.mem_trigger.t.bits.addr := MuxLookup(tselectPhy, 0.U, Seq(
+  csrio.customCtrl.mem_trigger.t.bits.addr := MuxLookup(tselectPhy, 0.U)(Seq(
     2.U -> 0.U,
     3.U -> 1.U,
     4.U -> 2.U,
