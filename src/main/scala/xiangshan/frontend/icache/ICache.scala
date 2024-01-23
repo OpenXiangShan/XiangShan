@@ -91,7 +91,7 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
 
   def PortNumber = 2
 
-  def partWayNum = 2
+  def partWayNum = 4
   def pWay = nWays/partWayNum
 
   def enableICachePrefetch      = cacheParams.enableICachePrefetch
