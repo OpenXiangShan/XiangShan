@@ -352,4 +352,8 @@ case class IssueBlockParams(
   def getIQName = {
     "IssueQueue" ++ getFuCfgs.map(_.name).distinct.map(_.capitalize).reduce(_ ++ _)
   }
+
+  def getEntryName = {
+    "Entries" ++ getFuCfgs.map(_.name).distinct.map(_.capitalize).reduce(_ ++ _)
+  }
 }

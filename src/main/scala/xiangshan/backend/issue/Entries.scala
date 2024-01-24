@@ -162,6 +162,8 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
 }
 
 class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule {
+  override def desiredName: String = params.getEntryName
+
   private val EnqEntryNum = params.numEnq
   private val OthersEntryNum = params.numEntries - params.numEnq
   val io = IO(new EntriesIO)

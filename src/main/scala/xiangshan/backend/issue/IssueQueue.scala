@@ -71,6 +71,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   extends LazyModuleImp(wrapper)
   with HasXSParameter {
 
+  override def desiredName: String = s"${params.getIQName}"
+
   println(s"[IssueQueueImp] ${params.getIQName} wakeupFromWB(${io.wakeupFromWB.size}), " +
     s"wakeup exu in(${params.wakeUpInExuSources.size}): ${params.wakeUpInExuSources.map(_.name).mkString("{",",","}")}, " +
     s"wakeup exu out(${params.wakeUpOutExuSources.size}): ${params.wakeUpOutExuSources.map(_.name).mkString("{",",","}")}, " +
