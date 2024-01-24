@@ -542,6 +542,7 @@ trait HasXSParameter {
   val ICacheECCForceError = coreParams.ICacheECCForceError
   val IBufSize = coreParams.IBufSize
   val IBufNBank = coreParams.IBufNBank
+  val backendParams: BackendParams = coreParams.backendParams
   val DecodeWidth = coreParams.DecodeWidth
   val RenameWidth = coreParams.RenameWidth
   val CommitWidth = coreParams.CommitWidth
@@ -578,7 +579,6 @@ trait HasXSParameter {
   val VlsQueueSize = coreParams.VlsQueueSize
   val dpParams = coreParams.dpParams
 
-  val backendParams: BackendParams = coreParams.backendParams
   def MemIQSizeMax = backendParams.memSchdParams.get.issueBlockParams.map(_.numEntries).max
   def IQSizeMax = backendParams.allSchdParams.map(_.issueBlockParams.map(_.numEntries).max).max
 
