@@ -228,6 +228,8 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     UopSplitType.VEC_US_LDST -> Mux(isVlsr, nf +& 2.U, Mux(isVlsm, 2.U, (numOfUopVLoadStoreStrided +& 1.U))),   // with one move instruction
     UopSplitType.VEC_S_LDST -> (numOfUopVLoadStoreStrided +& 2.U),    // with two move instructions
     UopSplitType.VEC_I_LDST -> (numOfUopVLoadStoreIndexed +& 1.U),
+    UopSplitType.VEC_REV -> lmul,
+    UopSplitType.VEC_COUNT -> lmul,
   ))
 
   // number of writeback num
