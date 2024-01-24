@@ -1189,10 +1189,10 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
     * log trigger is at writeback valid
     * */
   if(!env.FPGAPlatform){
-    val isWriteInstInfoTable = WireInit(Constantin.createRecord("isWriteInstInfoTable" + p(XSCoreParamsKey).HartId.toString))
-    val instTableName = "InstTable" + p(XSCoreParamsKey).HartId.toString
-    val instSiteName = "Rob" + p(XSCoreParamsKey).HartId.toString
-    val debug_instTable = ChiselDB.createTable(instTableName, new InstInfoEntry)
+    val isWriteInstInfoTable = WireInit(Constantin.createRecord("isWriteInstInfoTable"))
+    val instTableName = "InstTable"
+    val instSiteName = "Rob"
+    val debug_instTable = ChiselDB.createTable(instTableName, new InstInfoEntry, tablePerHart = true)
     // FIXME lyq: only get inst (alu, bj, ls) in exuWriteback
     for (wb <- exuWriteback) {
       when(wb.valid) {
@@ -1219,13 +1219,14 @@ class RobImp(outer: Rob)(implicit p: Parameters) extends LazyModuleImp(outer)
           en = wb.valid,
           site = instSiteName,
           clock = clock,
-          reset = reset
+          reset = reset,
+          siteNeedId = true
         )
       }
     }
 
     // log when committing
-    val load_debug_table = ChiselDB.createTable("LoadDebugTable" + p(XSCoreParamsKey).HartId.toString, new LoadInfoEntry, basicDB = false)
+    val load_debug_table = ChiselDB.createTable("LoadDebugTable" , new LoadInfoEntry, basicDB = false, tablePerHart = true)
     for (i <- 0 until CommitWidth) {
       val log_enable = io.commits.commitValid(i) && io.commits.isCommit && (io.commits.info(i).commitType === CommitType.LOAD)
       val commit_index = deqPtrVec(i).value

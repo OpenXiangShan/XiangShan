@@ -1088,11 +1088,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   XSPerfAccumulate("late_load_hit", ldu.map(_.io.prefetch_info.naive.late_load_hit).reduce(_ || _))
 
   /** LoadMissDB: record load miss state */
-  val isWriteLoadMissTable = WireInit(Constantin.createRecord("isWriteLoadMissTable" + p(XSCoreParamsKey).HartId.toString))
-  val isFirstHitWrite = WireInit(Constantin.createRecord("isFirstHitWrite" + p(XSCoreParamsKey).HartId.toString))
-  val tableName = "LoadMissDB" + p(XSCoreParamsKey).HartId.toString
-  val siteName = "DcacheWrapper" + p(XSCoreParamsKey).HartId.toString
-  val loadMissTable = ChiselDB.createTable(tableName, new LoadMissEntry)
+  val isWriteLoadMissTable = WireInit(Constantin.createRecord("isWriteLoadMissTable"))
+  val isFirstHitWrite = WireInit(Constantin.createRecord("isFirstHitWrite"))
+  val tableName = "LoadMissDB"
+  val siteName = "DcacheWrapper"
+  val loadMissTable = ChiselDB.createTable(tableName, new LoadMissEntry, tablePerHart = true)
   for( i <- 0 until LoadPipelineWidth){
     val loadMissEntry = Wire(new LoadMissEntry)
     val loadMissWriteEn =
@@ -1112,12 +1112,13 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
       en = isWriteLoadMissTable.orR && loadMissWriteEn,
       site = siteName,
       clock = clock,
-      reset = reset
+      reset = reset,
+      siteNeedId = true
     )
   }
 
-  val isWriteLoadAccessTable = WireInit(Constantin.createRecord("isWriteLoadAccessTable" + p(XSCoreParamsKey).HartId.toString))
-  val loadAccessTable = ChiselDB.createTable("LoadAccessDB" + p(XSCoreParamsKey).HartId.toString, new LoadAccessEntry)
+  val isWriteLoadAccessTable = WireInit(Constantin.createRecord("isWriteLoadAccessTable"))
+  val loadAccessTable = ChiselDB.createTable("LoadAccessDB", new LoadAccessEntry, tablePerHart = true)
   for (i <- 0 until LoadPipelineWidth) {
     val loadAccessEntry = Wire(new LoadAccessEntry)
     loadAccessEntry.timeCnt := GTimer()

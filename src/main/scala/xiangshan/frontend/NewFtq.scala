@@ -1314,8 +1314,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   io.toPrefetch.req.bits.target := RegNext(ftq_pc_mem.io.other_rdatas(0).startAddr)
 
   // record position relationship between ifuPtr, pfPtr and bpuPtr
-  val isWritePrefetchPtrTable = WireInit(Constantin.createRecord("isWritePrefetchPtrTable" + p(XSCoreParamsKey).HartId.toString))
-  val prefetchPtrTable = ChiselDB.createTable("PrefetchPtrTable" + p(XSCoreParamsKey).HartId.toString, new PrefetchPtrDB)
+  val isWritePrefetchPtrTable = WireInit(Constantin.createRecord("isWritePrefetchPtrTable"))
+  val prefetchPtrTable = ChiselDB.createTable("PrefetchPtrTable", new PrefetchPtrDB, tablePerHart = true)
   val prefetchPtrDumpData = Wire(new PrefetchPtrDB)
   prefetchPtrDumpData.fromFtqPtr  := distanceBetween(bpuPtr, prefetchPtr)
   prefetchPtrDumpData.fromIfuPtr  := distanceBetween(prefetchPtr, ifuPtr)
@@ -1323,9 +1323,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   prefetchPtrTable.log(
     data = prefetchPtrDumpData,
     en = isWritePrefetchPtrTable.orR && io.toPrefetch.req.fire,
-    site = "FTQ" + p(XSCoreParamsKey).HartId.toString,
+    site = "FTQ",
     clock = clock,
-    reset = reset
+    reset = reset,
+    siteNeedId = true
   )
 
 
@@ -1349,8 +1350,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   io.bpuInfo.bpRight := PopCount(mbpRights)
   io.bpuInfo.bpWrong := PopCount(mbpWrongs)
 
-  val isWriteFTQTable = WireInit(Constantin.createRecord("isWriteFTQTable" + p(XSCoreParamsKey).HartId.toString))
-  val ftqBranchTraceDB = ChiselDB.createTable("FTQTable" + p(XSCoreParamsKey).HartId.toString, new FtqDebugBundle)
+  val isWriteFTQTable = WireInit(Constantin.createRecord("isWriteFTQTable"))
+  val ftqBranchTraceDB = ChiselDB.createTable("FTQTable", new FtqDebugBundle, tablePerHart = true)
   // Cfi Info
   for (i <- 0 until PredictWidth) {
     val pc = commit_pc_bundle.startAddr + (i * instBytes).U
@@ -1387,9 +1388,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     ftqBranchTraceDB.log(
       data = logbundle /* hardware of type T */,
       en = isWriteFTQTable.orR && v && do_commit && isCfi,
-      site = "FTQ" + p(XSCoreParamsKey).HartId.toString,
+      site = "FTQ",
       clock = clock,
-      reset = reset
+      reset = reset,
+      siteNeedId = true
     )
   }
 

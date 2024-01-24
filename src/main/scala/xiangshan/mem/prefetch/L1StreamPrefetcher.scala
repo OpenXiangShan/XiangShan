@@ -205,10 +205,10 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   XSPerfAccumulate("s0_req_valid", io.train_req.valid)
   XSPerfAccumulate("s0_req_cannot_accept", io.train_req.valid && !io.train_req.ready)
 
-  val ratio_const = WireInit(Constantin.createRecord("l2DepthRatio" + p(XSCoreParamsKey).HartId.toString, initValue = L2_DEPTH_RATIO.U))
+  val ratio_const = WireInit(Constantin.createRecord("l2DepthRatio", initValue = L2_DEPTH_RATIO.U))
   val ratio = ratio_const(3, 0)
 
-  val l3_ratio_const = WireInit(Constantin.createRecord("l3DepthRatio" + p(XSCoreParamsKey).HartId.toString, initValue = L3_DEPTH_RATIO.U))
+  val l3_ratio_const = WireInit(Constantin.createRecord("l3DepthRatio", initValue = L3_DEPTH_RATIO.U))
   val l3_ratio = l3_ratio_const(3, 0)
 
   // s1: alloc or update
@@ -317,7 +317,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   val s4_pf_l2_bits = RegEnable(s3_pf_l2_bits, s3_pf_l2_valid)
   val s4_pf_l3_bits = RegEnable(s3_pf_l3_bits, s3_pf_l2_valid)
 
-  val enable_l3_pf = WireInit(Constantin.createRecord("enableL3StreamPrefetch" + p(XSCoreParamsKey).HartId.toString, initValue = 0.U)) =/= 0.U
+  val enable_l3_pf = WireInit(Constantin.createRecord("enableL3StreamPrefetch", initValue = 0.U)) =/= 0.U
   // s5: send the l3 prefetch req out
   val s5_pf_l3_valid = RegNext(s4_pf_l2_valid) && enable_l3_pf
   val s5_pf_l3_bits = RegEnable(s4_pf_l3_bits, s4_pf_l2_valid)

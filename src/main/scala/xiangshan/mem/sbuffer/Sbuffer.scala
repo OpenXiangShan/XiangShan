@@ -512,9 +512,9 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   val sq_empty = !Cat(io.in.map(_.valid)).orR
   val empty = sbuffer_empty && sq_empty
   val threshold = Wire(UInt(5.W)) // RegNext(io.csrCtrl.sbuffer_threshold +& 1.U)
-  threshold := Constantin.createRecord("StoreBufferThreshold_"+p(XSCoreParamsKey).HartId.toString(), initValue = 7.U)
+  threshold := Constantin.createRecord("StoreBufferThreshold", initValue = 7.U)
   val base = Wire(UInt(5.W))
-  base := Constantin.createRecord("StoreBufferBase_"+p(XSCoreParamsKey).HartId.toString(), initValue = 4.U)
+  base := Constantin.createRecord("StoreBufferBase", initValue = 4.U)
   val ActiveCount = PopCount(activeMask)
   val ValidCount = PopCount(validMask)
   val forceThreshold = Mux(io.force_write, threshold - base, threshold)
