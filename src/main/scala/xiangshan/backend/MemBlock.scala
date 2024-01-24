@@ -278,7 +278,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
 
   // L2 Hint for DCache
-  // val l2_hint = RegNext(io.l2_hint)
   dcache.io.l2_hint <> io.l2_hint
 
   println("Enable 3-load and 3-store: " + Enable3Load3Store)

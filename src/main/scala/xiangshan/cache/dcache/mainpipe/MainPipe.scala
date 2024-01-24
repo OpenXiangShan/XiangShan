@@ -112,6 +112,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     // atmoics
     val atomic_req = Flipped(DecoupledIO(new MainPipeReq))
     val atomic_resp = ValidIO(new MainPipeResp)
+    // find matched refill data in missenty
+    val s2_miss_id = Output(UInt(log2Up(cfg.nMissEntries).W))
+    // missqueue refill data
+    val refill_info = Flipped(ValidIO(new MissQueueRefillInfo))
     // replace
     // val replace_req = Flipped(DecoupledIO(new MainPipeReq))
     // val replace_resp = ValidIO(UInt(log2Up(cfg.nMissEntries).W))
@@ -432,7 +436,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   s2_s0_set_conlict_store := s2_valid_dup(1) && store_idx === s2_idx
 
   // For a store req, it either hits and goes to s3, or miss and enter miss queue immediately
-  val s2_can_go_to_s3 = (s2_req_replace_dup_1 || s2_req.probe || s2_req.miss || (s2_req.isStore || s2_req.isAMO) && s2_hit) && s3_ready
+  val s2_can_go_to_s3 = (s2_req_replace_dup_1 || s2_req.probe || (s2_req.miss && io.refill_info.valid) || (s2_req.isStore || s2_req.isAMO) && s2_hit) && s3_ready
   val s2_can_go_to_mq = RegEnable(s1_pregen_can_go_to_mq, s1_fire)
   assert(RegNext(!(s2_valid && s2_can_go_to_s3 && s2_can_go_to_mq)))
   val s2_can_go = s2_can_go_to_s3 || s2_can_go_to_mq
@@ -465,10 +469,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   for (i <- 0 until DCacheBanks) {
     val old_data = s2_data(i)
-    val new_data = get_data_of_bank(i, s2_req.store_data)
+    val new_data = get_data_of_bank(i, Mux(s2_req.miss, io.refill_info.bits.store_data, s2_req.store_data))
     // for amo hit, we should use read out SRAM data
     // do not merge with store data
-    val wmask = Mux(s2_amo_hit, 0.U(wordBytes.W), get_mask_of_bank(i, s2_req.store_mask))
+    val wmask = Mux(s2_amo_hit, 0.U(wordBytes.W), get_mask_of_bank(i, Mux(s2_req.miss, io.refill_info.bits.store_mask, s2_req.store_mask)))
     s2_store_data_merged(i) := mergePutData(old_data, new_data, wmask)
   }
 
@@ -480,10 +484,15 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.probe_ttob_check_req.valid := s2_ttob_probe_valid && s2_valid
   io.probe_ttob_check_req.bits.addr := s2_ttob_probe_addr
 
+  // XSError(s2_req.miss && !io.refill_info.valid, "MainPipe req in s2 but no refill data")
+  XSError(s2_can_go_to_s3 && s2_req.miss && !io.refill_info.valid, "MainPipe req can go to s3 but no refill data")
+
   // s3: write data, meta and tag
   val s3_valid = RegInit(false.B)
   val s3_req = RegEnable(s2_req, s2_fire_to_s3)
   // val s3_idx = get_idx(s3_req.vaddr)
+  val s3_miss_param = RegEnable(io.refill_info.bits.miss_param, s2_fire_to_s3)
+  val s3_miss_dirty = RegEnable(io.refill_info.bits.miss_dirty, s2_fire_to_s3)
   val s3_tag = RegEnable(s2_tag, s2_fire_to_s3)
   val s3_tag_match = RegEnable(s2_tag_match, s2_fire_to_s3)
   val s3_coh = RegEnable(s2_coh, s2_fire_to_s3)
@@ -569,7 +578,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
       Cat(wr, toT, false.B)  -> Dirty,
       Cat(wr, toT, true.B)   -> Dirty))
   }
-  val miss_new_coh = ClientMetadata(missCohGen(s3_req_cmd_dup(2), s3_req.miss_param, s3_req.miss_dirty))
+  // val miss_new_coh = ClientMetadata(missCohGen(s3_req_cmd_dup(2), s3_req.miss_param, s3_req.miss_dirty))
+  val miss_new_coh = ClientMetadata(missCohGen(s3_req_cmd_dup(2), s3_miss_param, s3_miss_dirty))
 
   // LR, SC and AMO
   val debug_sc_fail_addr = RegInit(0.U)
@@ -1675,6 +1685,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     s.s3.bits.way_en := RegEnable(s2_way_en, s2_fire_to_s3)
   }
   dontTouch(io.status_dup)
+
+  io.s2_miss_id := s2_req.miss_id
 
   // report error to beu and csr, 1 cycle after read data resp
   io.error := 0.U.asTypeOf(new L1CacheErrorInfo())
