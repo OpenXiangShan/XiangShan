@@ -385,13 +385,14 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   for(i <- entries.indices){
     val alloc = s1_replace_mask(i) && s1_alloc
     val update = s1_update_mask(i) && s1_update
+    val evict = s1_replace_mask(i) && s1_do_dcache_evict
     val update_entry = WireInit(entries(i))
     update_entry.region_bits := entries(i).region_bits | s1_agt_entry.region_bits
     update_entry.access_cnt := Mux(entries(i).access_cnt === (REGION_BLKS - 1).U,
       entries(i).access_cnt,
       entries(i).access_cnt + (s1_agt_entry.region_bits & (~entries(i).region_bits).asUInt).orR
     )
-    valids(i) := valids(i) || alloc
+    valids(i) := Mux(evict, false.B, valids(i) || alloc)
     entries(i) := Mux(alloc, s1_alloc_entry, Mux(update, update_entry, entries(i)))
   }
 
