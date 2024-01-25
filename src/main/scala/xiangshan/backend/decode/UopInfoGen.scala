@@ -186,6 +186,12 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
   indexedLSWBTable.src := Cat(simple_lmul, nf)
   val numOfWBVLoadStoreIndexed = indexedLSWBTable.out
 
+  val numOfUopVro = MuxLookup(vlmul, 2.U(5.W), Array(
+    "b001".U -> 4.U,
+    "b010".U -> 8.U,
+    "b011".U -> 16.U
+  ))
+
   //number of uop
   val numOfUop = MuxLookup(typeOfSplit, 1.U(log2Up(MaxUopSize + 1).W), Array(
     UopSplitType.VSET -> 2.U,
@@ -230,6 +236,8 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     UopSplitType.VEC_I_LDST -> (numOfUopVLoadStoreIndexed +& 1.U),
     UopSplitType.VEC_REV -> lmul,
     UopSplitType.VEC_COUNT -> lmul,
+    UopSplitType.VEC_ROV -> lmul,
+    UopSplitType.VEC_ROX -> (lmul +& 1.U),
   ))
 
   // number of writeback num

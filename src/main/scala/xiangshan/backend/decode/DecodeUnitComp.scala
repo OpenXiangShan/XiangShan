@@ -1771,6 +1771,61 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(i).uopIdx := i.U
       }
     }
+    is(UopSplitType.VEC_ROV) {
+      val vlmul = vlmulReg
+      def genCsBundle_VEC_ROV(len: Int): Unit = {
+        for (i <- 0 until len) {
+          csBundle(i).lsrc(0) := src1 + i.U
+          csBundle(i).lsrc(1) := src2 + i.U
+          csBundle(i).ldest := dest + i.U
+          csBundle(i).uopIdx := i.U
+        }
+      }
+      switch(vlmul) {
+        is("b001".U) {
+          genCsBundle_VEC_ROV(2)
+        }
+        is("b010".U) {
+          genCsBundle_VEC_ROV(4)
+        }
+        is("b011".U) {
+          genCsBundle_VEC_ROV(8)
+        }
+      }
+    }
+    is(UopSplitType.VEC_ROX) {
+      /*
+      i to vector move
+       */
+      csBundle(0).srcType(0) := SrcType.reg
+      csBundle(0).srcType(1) := SrcType.imm
+      csBundle(0).lsrc(1) := 0.U
+      csBundle(0).ldest := VECTOR_TMP_REG_LMUL.U
+      csBundle(0).fuType := FuType.i2v.U
+      csBundle(0).fuOpType := Cat(Mux(src1IsImm, IF2VectorType.immDup2Vec(2, 0), IF2VectorType.iDup2Vec(2, 0)), vsewReg)
+      csBundle(0).vecWen := true.B
+      val vlmul = vlmulReg
+      def genCsBundle_VEC_ROX(len: Int): Unit = {
+        for (i <- 0 until len) {
+          csBundle(i + 1).srcType(0) := SrcType.vp
+          csBundle(i + 1).lsrc(0) := VECTOR_TMP_REG_LMUL.U
+          csBundle(i + 1).lsrc(1) := src2 + i.U
+          csBundle(i + 1).ldest := dest + i.U
+          csBundle(i + 1).uopIdx := i.U
+        }
+      }
+      switch(vlmul) {
+        is("b001".U) {
+          genCsBundle_VEC_ROX(2)
+        }
+        is("b010".U) {
+          genCsBundle_VEC_ROX(4)
+        }
+        is("b011".U) {
+          genCsBundle_VEC_ROX(8)
+        }
+      }
+    }
   }
 
   //readyFromRename Counter

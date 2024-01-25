@@ -244,7 +244,7 @@ object VecDecoder extends DecodeConstants {
 
     // Zvbb
     VANDN_VV        -> OPIVV(FuType.vialuF, VialuFixType.vandn_vv, T, F, F),
-    VROL_VV         -> OPIVV(FuType.vialuF, VialuFixType.vrol_vv, T, F, F, UopSplitType.X),
+    VROL_VV         -> OPIVV(FuType.vialuF, VialuFixType.vrol_vv, T, F, F, UopSplitType.VEC_ROV),
     VROR_VV         -> OPIVV(FuType.vialuF, VialuFixType.vror_vv, T, F, F, UopSplitType.X),
     VWSLL_VV        -> OPIVV(FuType.vialuF, VialuFixType.vwsll_vv, T, F, F, UopSplitType.X),
   )
@@ -309,7 +309,7 @@ object VecDecoder extends DecodeConstants {
 
     // Zvbb
     VANDN_VX      -> OPIVX(FuType.vialuF, VialuFixType.vandn_vv, T, F, F),
-    VROL_VX       -> OPIVX(FuType.vialuF, VialuFixType.vrol_vv,  T, F, F, UopSplitType.X),
+    VROL_VX       -> OPIVX(FuType.vialuF, VialuFixType.vrol_vv,  T, F, F, UopSplitType.VEC_ROX),
     VROR_VX       -> OPIVX(FuType.vialuF, VialuFixType.vror_vv,  T, F, F, UopSplitType.X),
     VWSLL_VX      -> OPIVX(FuType.vialuF, VialuFixType.vwsll_vv, T, F, F, UopSplitType.X),
   )
