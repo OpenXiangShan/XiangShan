@@ -144,7 +144,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val virtualLoadQueue = Module(new VirtualLoadQueue)  //  control state
   val exceptionBuffer = Module(new LqExceptionBuffer) // exception buffer
   val uncacheBuffer = Module(new UncacheBuffer) // uncache buffer
-
   /**
    * LoadQueueRAR
    */
