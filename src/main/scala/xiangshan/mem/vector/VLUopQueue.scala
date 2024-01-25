@@ -562,9 +562,12 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
   }
 
   // recover entry when redirct
-  when(redirectReg.valid && flushNumReg =/= 0.U){
-    valid.zip(flushVecReg).map{case (v,enable) => 
-      v := Mux(enable, false.B,v)
+  for (i <- 0 until VsUopSize) {
+    when(flushVecReg(i) && redirectReg.valid && flushNumReg =/= 0.U) {
+      valid(i) := false.B
+      finish(i) := false.B
+      preAlloc(i) := false.B
+      exception(i) := false.B
     }
   }
 
