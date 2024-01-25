@@ -245,7 +245,7 @@ object VecDecoder extends DecodeConstants {
     // Zvbb
     VANDN_VV        -> OPIVV(FuType.vialuF, VialuFixType.vandn_vv, T, F, F),
     VROL_VV         -> OPIVV(FuType.vialuF, VialuFixType.vrol_vv, T, F, F, UopSplitType.VEC_ROV),
-    VROR_VV         -> OPIVV(FuType.vialuF, VialuFixType.vror_vv, T, F, F, UopSplitType.X),
+    VROR_VV         -> OPIVV(FuType.vialuF, VialuFixType.vror_vv, T, F, F, UopSplitType.VEC_ROV),
     VWSLL_VV        -> OPIVV(FuType.vialuF, VialuFixType.vwsll_vv, T, F, F, UopSplitType.X),
   )
 
@@ -310,7 +310,7 @@ object VecDecoder extends DecodeConstants {
     // Zvbb
     VANDN_VX      -> OPIVX(FuType.vialuF, VialuFixType.vandn_vv, T, F, F),
     VROL_VX       -> OPIVX(FuType.vialuF, VialuFixType.vrol_vv,  T, F, F, UopSplitType.VEC_ROX),
-    VROR_VX       -> OPIVX(FuType.vialuF, VialuFixType.vror_vv,  T, F, F, UopSplitType.X),
+    VROR_VX       -> OPIVX(FuType.vialuF, VialuFixType.vror_vv,  T, F, F, UopSplitType.VEC_ROX),
     VWSLL_VX      -> OPIVX(FuType.vialuF, VialuFixType.vwsll_vv, T, F, F, UopSplitType.X),
   )
 
@@ -363,7 +363,7 @@ object VecDecoder extends DecodeConstants {
     VMV8R_V       -> OPIVI(FuType.vppu, VpermType.vmv8r, T, F, F, uopSplitType = UopSplitType.VEC_MVNR, src1 = SrcType.no), // vmv8r.v vd, vs2
 
     // Zvbb
-    VROR_VI       -> OPIVI(FuType.vialuF, VialuFixType.vror_vv, T, F, F, UopSplitType.X),
+    VROR_VI       -> OPIVI(FuType.vialuF, VialuFixType.vror_vv, T, F, F, selImm = SelImm.IMM_OPIVIU, UopSplitType.VEC_ROX),
     VWSLL_VI      -> OPIVI(FuType.vialuF, VialuFixType.vwsll_vv, T, F, F, UopSplitType.X),
   )
 
