@@ -159,13 +159,14 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
   val allowDequeue = io.flowWriteback.map(_.ready)
   val doDequeue = Wire(Vec(VecLoadPipelineWidth, Bool()))
   val dequeueCount = PopCount(doDequeue)
+  val packageDequeue = io.flowWriteback.map(_.bits.isPackage).reduce(_ | _) // FIXME: more elegant
 
   for (i <- 0 until VecLoadPipelineWidth) {
     val thisPtr = deqPtr(i).value
     if (i == 0) {
       canDequeue(i) := flowFinished(thisPtr) && !flowNeedCancel(thisPtr) && deqPtr(i) < issuePtr(0)
     } else {
-      canDequeue(i) := flowFinished(thisPtr) && !flowNeedCancel(thisPtr) && deqPtr(i) < issuePtr(0) && canDequeue(i - 1)
+      canDequeue(i) := flowFinished(thisPtr) && !flowNeedCancel(thisPtr) && deqPtr(i) < issuePtr(0) && canDequeue(i - 1) && !packageDequeue // if port 0 is package, port 1 can't writeback
     }
     io.flowWriteback(i).valid := canDequeue(i)
   }
@@ -210,6 +211,11 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
       // From ExuOutput
     val debug             = Mux(isActivativeElem, thisLoadResult.debug, 0.U.asTypeOf(thisLoadResult.debug))
     val uop               = Mux(isActivativeElem, thisLoadResult.uop, thisLoadEntries.uop)
+    //package
+    val isPackage         = thisLoadEntries.isPackage
+    val packageNum        = thisLoadEntries.packageNum
+    val originAlignedType = thisLoadEntries.originAlignedType
+    val alignedType       = thisLoadEntries.alignedType
 
     io.flowWriteback(i).bits match { case x =>
       // From VecExuOutput
@@ -230,6 +236,10 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
       // x.redirect          := thisLoadResult.redirect
       x.debug             := debug
       x.uop               := uop
+      x.isPackage         := isPackage
+      x.packageNum        := packageNum
+      x.originAlignedType := originAlignedType
+      x.alignedType       := alignedType
     }
   }
 

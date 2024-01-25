@@ -161,26 +161,30 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
       log2Up(VLENB).U - sew(1,0),
       log2Up(VLENB).U - eew(1,0)
     )
+    val isUsWholeReg = isUnitStride(mop) && us_whole_reg(fuOpType)
+    val isMaskReg = isUnitStride(mop) && us_mask(fuOpType)
+    val vvl = io.storeIn.bits.src_vl.asTypeOf(VConfig()).vl
+    val evl = Mux(isUsWholeReg, GenUSWholeRegVL(io.storeIn.bits.uop.vpu.nf +& 1.U, eew), Mux(isMaskReg, GenUSMaskRegVL(vvl), vvl))
+    val vvstart = io.storeIn.bits.uop.vpu.vstart
     val flows = GenRealFlowNum(instType, emul, lmul, eew, sew)
     val flowsLog2 = GenRealFlowLog2(instType, emul, lmul, eew, sew)
     val flowsPrevThisUop = uopIdxInField << flowsLog2 // # of flows before this uop in a field
     val flowsPrevThisVd = vdIdxInField << numFlowsSameVdLog2 // # of flows before this vd in a field
     val flowsIncludeThisUop = (uopIdxInField +& 1.U) << flowsLog2 // # of flows before this uop besides this uop
     val alignedType = Mux(isIndexed(instType), sew(1, 0), eew(1, 0))
-    val srcMask = Mux(vm, Fill(VLEN, 1.U(1.W)), io.storeIn.bits.src_mask)
+    val srcMask = GenFlowMask(Mux(vm, Fill(VLEN, 1.U(1.W)), io.storeIn.bits.src_mask), vvstart, evl, true)
     val flowMask = ((srcMask &
       UIntToMask(flowsIncludeThisUop, VLEN + 1) &
       ~UIntToMask(flowsPrevThisUop, VLEN)
     ) >> flowsPrevThisVd)(VLENB - 1, 0)
     val vlmax = GenVLMAX(lmul, sew)
-    val isUsWholeReg = isUnitStride(mop) && us_whole_reg(fuOpType)
     valid(id) := true.B
     finish(id) := false.B
     exception(id) := false.B
     vstart(id) := 0.U
     uopq(id) match { case x =>
       x.uop := io.storeIn.bits.uop
-      x.uop.vpu.vl := Mux(isUsWholeReg, GenUSWholeRegVL(io.storeIn.bits.uop.vpu.nf +& 1.U,eew), io.storeIn.bits.src_vl.asTypeOf(VConfig()).vl)
+      x.uop.vpu.vl := evl
       x.uop.numUops := numUops
       x.uop.lastUop := (uopIdx +& 1.U) === numUops
       x.flowMask := flowMask
@@ -193,7 +197,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
       x.nfields := nf +& 1.U
       x.vm := vm
       x.usWholeReg := isUsWholeReg
-      x.usMaskReg := isUnitStride(mop) && us_mask(fuOpType)
+      x.usMaskReg := isMaskReg
       x.eew := eew
       x.sew := sew
       x.emul := emul
@@ -294,17 +298,11 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
     val stride = Mux(isIndexed(issueInstType), indexedStride, notIndexedStride)
     val fieldOffset = nfIdx << issueAlignedType // field offset inside a segment
     val vaddr = issueBaseAddr + stride + fieldOffset
-    val mask = issueEntry.byteMask
+    val mask = genVWmask(vaddr ,issueAlignedType)
     val regOffset = (elemIdxInsideField << issueAlignedType)(vOffsetBits - 1, 0)
     val enable = (issueFlowMask & UIntToOH(elemIdxInsideVd(portIdx))).orR
-    val ttttvl = Mux(issueEntry.usMaskReg, GenUSMaskRegVL(issueVl), issueVl)
-    val activative = VLActivativeCtrl(
-      vstart = issueVstart,
-      vl = ttttvl,
-      eleIdx = elemIdxInsideField
-    ) && enable
+    val activative = enable
     // TODO: delete me later
-    dontTouch(ttttvl)
     dontTouch(elemIdxInsideField)
     dontTouch(enable)
     dontTouch(nfIdx)
@@ -336,6 +334,10 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
       x.nSegments := issueEntry.vlmax
       x.fieldIdx := nfIdx
       x.segmentIdx := elemIdxInsideField
+          //FIXME
+      x.isPackage            := DontCare
+      x.packageNum           := DontCare
+      x.originAlignedType    := DontCare
     }
   }
 

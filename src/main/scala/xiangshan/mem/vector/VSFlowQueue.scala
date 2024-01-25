@@ -118,6 +118,11 @@ class VecStorePipeBundle(implicit p: Parameters) extends MemExuInput(isVector = 
   val activative          = Bool()
   val flowPtr             = new VsFlowPtr
   val isLastElem          = Bool()
+  
+  // pack
+  // val isPackage         = Bool()
+  // val packageNum        = UInt(log2Up(VLENB).W)
+  // val originAlignedType = UInt(alignTypeBits.W)
 }
 
 class VsFlowBundle(implicit p: Parameters) extends VecFlowBundle {
@@ -138,7 +143,6 @@ class VecStoreFlowEntry (implicit p: Parameters) extends VecFlowBundle {
   val nSegments = UInt(elemIdxBits.W)
   val fieldIdx = UInt(fieldBits.W)
   val segmentIdx = UInt(elemIdxBits.W)
-  val writeMask = UInt((VLEN/8).W)
 
   def isFirstElem(): Bool = {
     this.fieldIdx === 0.U && this.segmentIdx === 0.U
@@ -160,6 +164,9 @@ class VecStoreFlowEntry (implicit p: Parameters) extends VecFlowBundle {
     pipeBundle.activative           := this.activative
     pipeBundle.flowPtr              := thisPtr
     pipeBundle.isLastElem           := this.isLastElem
+    // pipeBundle.isPackage            := DontCare
+    // pipeBundle.packageNum           := DontCare
+    // pipeBundle.originAlignedType    := DontCare
     pipeBundle
   }
 
@@ -167,7 +174,7 @@ class VecStoreFlowEntry (implicit p: Parameters) extends VecFlowBundle {
     // ! MAGIC NUM
     val vaddrMatch = this.vaddr(VAddrBits - 1, 4) === forward.vaddr(VAddrBits - 1, 4)
     val paddrMatch = Mux(paddrValid, this.paddr(PAddrBits - 1, 4) === forward.paddr(PAddrBits - 1, 4), true.B) // TODO: if paddr not ready, we need to set it ture, we need to fix it in feature 
-    val maskMatch = (this.writeMask & forward.mask) =/= 0.U
+    val maskMatch = (this.mask & forward.mask) =/= 0.U
     val isActivative = this.activative
     vaddrMatch && paddrMatch && maskMatch && isActivative
   }
@@ -378,7 +385,6 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
         x.nSegments := thisFlowIn.nSegments
         x.fieldIdx := thisFlowIn.fieldIdx
         x.segmentIdx := thisFlowIn.segmentIdx
-        x.writeMask := genVWmask(thisFlowIn.vaddr,thisFlowIn.alignedType)
       }
 
       // ? Is there a more elegant way?
