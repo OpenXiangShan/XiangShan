@@ -717,7 +717,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     }
   }
 
-  // sfence for virtualization and hfencev, simple implementation for l3
+  // hfencev, simple implementation for l3
   val hfencev_valid_l3 = sfence_dup(3).valid && sfence_dup(3).bits.hv
   when(hfencev_valid_l3) {
     val flushMask = VecInit(l3h.flatMap(_.map(_  === onlyStage1))).asUInt
@@ -742,19 +742,18 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val sphhit = VecInit(sph.map{a => io.csr_dup(0).priv.virt && a === onlyStage1 || !io.csr_dup(0).priv.virt && a === noS2xlate}).asUInt
     val l2hhit = VecInit(l2h.flatMap(_.map{a => io.csr_dup(0).priv.virt && a === onlyStage1 || !io.csr_dup(0).priv.virt && a === noS2xlate})).asUInt
     val sfence_vpn = sfence_dup(0).bits.addr(sfence_dup(0).bits.addr.getWidth-1, offLen)
-    val l2h_set = getl2hSet(sfence_vpn)
 
     when (sfence_dup(0).bits.rs1/*va*/) {
       when (sfence_dup(0).bits.rs2) {
         // all va && all asid
         l2v := l2v & ~l2hhit
-        l1v := l1v & ~(l1hhit & VecInit(UIntToOH(l1vmidhit).asBools.map{a => io.csr_dup(0).priv.virt && a || !io.csr_dup(0).priv.virt}).asUInt)
-        spv := spv & ~(l2hhit & VecInit(UIntToOH(spvmidhit).asBools.map{a => io.csr_dup(0).priv.virt && a || !io.csr_dup(0).priv.virt}).asUInt)
+        l1v := l1v & ~(l1hhit & VecInit(l1vmidhit.asBools.map{a => io.csr_dup(0).priv.virt && a || !io.csr_dup(0).priv.virt}).asUInt)
+        spv := spv & ~(l2hhit & VecInit(spvmidhit.asBools.map{a => io.csr_dup(0).priv.virt && a || !io.csr_dup(0).priv.virt}).asUInt)
       } .otherwise {
         // all va && specific asid except global
         l2v := l2v & (l2g | ~l2hhit)
-        l1v := l1v & ~(~l1g & l1hhit & l1asidhit & VecInit(UIntToOH(l1vmidhit).asBools.map{a => io.csr_dup(0).priv.virt && a || !io.csr_dup(0).priv.virt}).asUInt)
-        spv := spv & ~(~spg & sphhit & spasidhit & VecInit(UIntToOH(spvmidhit).asBools.map{a => io.csr_dup(0).priv.virt && a || !io.csr_dup(0).priv.virt}).asUInt)
+        l1v := l1v & ~(~l1g & l1hhit & l1asidhit & VecInit(l1vmidhit.asBools.map{a => io.csr_dup(0).priv.virt && a || !io.csr_dup(0).priv.virt}).asUInt)
+        spv := spv & ~(~spg & sphhit & spasidhit & VecInit(spvmidhit.asBools.map{a => io.csr_dup(0).priv.virt && a || !io.csr_dup(0).priv.virt}).asUInt)
       }
     } .otherwise {
       when (sfence_dup(0).bits.rs2) {
