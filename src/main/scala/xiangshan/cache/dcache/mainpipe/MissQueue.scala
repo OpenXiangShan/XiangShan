@@ -750,7 +750,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   io.sms_agt_evict_req.bits.vaddr := Cat(req.replace_tag(tagBits - 1, 2), req.vaddr(13, 12), 0.U((VAddrBits - tagBits).W))
 
   // io.main_pipe_req.valid := !s_mainpipe_req && w_grantlast
-  io.main_pipe_req.valid := !s_mainpipe_req && w_l2hint
+  io.main_pipe_req.valid := !s_mainpipe_req && (w_l2hint || w_grantlast)
   io.main_pipe_req.bits := DontCare
   io.main_pipe_req.bits.miss := true.B
   io.main_pipe_req.bits.miss_id := io.id
@@ -800,7 +800,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   io.latency_monitor.amo_miss_refilling   := req_valid && req_primary_fire.isFromAMO      && BoolStopWatch(start_counting, io.mem_grant.fire && !refill_done, true, true)
   io.latency_monitor.pf_miss_refilling    := req_valid && req_primary_fire.isFromPrefetch && BoolStopWatch(start_counting, io.mem_grant.fire && !refill_done, true, true)
 
-  XSError(RegNext(io.l2_hint.valid) && w_grantlast, "refill data arrive early")
+  XSError(req_valid && RegNext(w_l2hint && !RegNext(w_l2hint)) && w_grantlast, "refill data arrive early")
   XSPerfAccumulate("miss_req_primary", primary_fire)
   XSPerfAccumulate("miss_req_merged", secondary_fire)
   XSPerfAccumulate("load_miss_penalty_to_use",
