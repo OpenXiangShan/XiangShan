@@ -168,7 +168,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
     // queue-based replay
     val replay = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))
-    val refill = Flipped(ValidIO(new Refill))
+   // val refill = Flipped(ValidIO(new Refill))
     val tl_d_channel = Input(new DcacheToLduForwardIO)
 
     // from StoreQueue
@@ -538,9 +538,9 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     }
   }
 
-  when(io.refill.valid) {
-    XSDebug("miss resp: paddr:0x%x data %x\n", io.refill.bits.addr, io.refill.bits.data)
-  }
+ // when(io.refill.valid) {
+ //   XSDebug("miss resp: paddr:0x%x data %x\n", io.refill.bits.addr, io.refill.bits.data)
+ // }
 
   //  LoadQueueReplay deallocate
   val freeMaskVec = Wire(Vec(LoadQueueReplaySize, Bool()))
