@@ -90,6 +90,7 @@ package object xiangshan {
 
     def isStrided(fuOpType: UInt): Bool = fuOpType === vlse
     def isIndexed(fuOpType: UInt): Bool = fuOpType === vluxe || fuOpType === vloxe
+    def isMasked(fuOpType: UInt): Bool = fuOpType === vlm
   }
 
   object VstuType {
