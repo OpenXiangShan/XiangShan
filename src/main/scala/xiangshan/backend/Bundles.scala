@@ -572,6 +572,7 @@ object Bundles {
       val vdIdx = UInt(3.W)
       val vdIdxInField = UInt(3.W)
       val isIndexed = Bool()
+      val isMasked = Bool()
     })
     val debug = new DebugBundle
     val debugInfo = new PerfDebugInfo

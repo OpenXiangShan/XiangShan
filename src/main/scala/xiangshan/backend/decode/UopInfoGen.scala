@@ -86,6 +86,7 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
   val veew = Cat(0.U(1.W), io.in.preInfo.vwidth(1, 0))
   val vmvn = io.in.preInfo.vmvn
   val isVlsr = io.in.preInfo.isVlsr
+  val isVlsm = io.in.preInfo.isVlsm
   val vlmul = io.in.preInfo.vlmul
   val nf = io.in.preInfo.nf
   val isComplex = io.out.isComplex
@@ -224,7 +225,7 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     UopSplitType.VEC_RGATHEREI16 -> numOfUopVrgatherei16,
     UopSplitType.VEC_COMPRESS -> numOfUopVcompress,
     UopSplitType.VEC_MVNR -> (vmvn +& 1.U),
-    UopSplitType.VEC_US_LDST -> Mux(isVlsr, nf +& 2.U, (numOfUopVLoadStoreStrided +& 1.U)),   // with one move instruction
+    UopSplitType.VEC_US_LDST -> Mux(isVlsr, nf +& 2.U, Mux(isVlsm, 2.U, (numOfUopVLoadStoreStrided +& 1.U))),   // with one move instruction
     UopSplitType.VEC_S_LDST -> (numOfUopVLoadStoreStrided +& 2.U),    // with two move instructions
     UopSplitType.VEC_I_LDST -> (numOfUopVLoadStoreIndexed +& 1.U),
   ))
@@ -257,6 +258,7 @@ class PreInfo(implicit p: Parameters) extends XSBundle {
   val nf = UInt(3.W)
   val vmvn = UInt(3.W)       // vmvnr
   val isVlsr = Bool()        // is vector whole register load/store
+  val isVlsm = Bool()        // is vector mask load/store
 }
 
 class UopInfo(implicit p: Parameters) extends XSBundle {
