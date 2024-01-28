@@ -1284,7 +1284,7 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
   }
   
   def getVpn: UInt = {
-   val s1_tag = Cat(s1.entry.tag, s1.ppn_low(OHToUInt(s1.pteidx)))
+   val s1_tag = Cat(s1.entry.tag, s1.addr_low)
    val s2_tag = s2.entry.tag
    Mux(s2xlate === onlyStage2, s2_tag, s1_tag)
   }
