@@ -21,7 +21,7 @@ import chisel3.util._
 import freechips.rocketchip.tilelink.TLPermissions._
 import freechips.rocketchip.tilelink.{TLArbiter, TLBundleC, TLBundleD, TLEdgeOut}
 import org.chipsalliance.cde.config.Parameters
-import utils.{HasPerfEvents, HasTLDump, XSDebug, XSPerfAccumulate}
+import utils.{HasPerfEvents, HasTLDump, XSDebug, XSPerfAccumulate, QueuePerf}
 
 class WritebackReqCtrl(implicit p: Parameters) extends DCacheBundle {
   val param  = UInt(cWidth.W)
@@ -658,6 +658,9 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
   // performance counters
   XSPerfAccumulate("wb_req", io.req.fire)
+
+  val num_valids = PopCount(~Cat(primary_ready_vec).asUInt)
+  QueuePerf(cfg.nReleaseEntries, num_valids, num_valids === cfg.nReleaseEntries.U)
 
   val perfValidCount = RegNext(PopCount(entries.map(e => e.io.block_addr.valid)))
   val perfEvents = Seq(
