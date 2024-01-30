@@ -1781,6 +1781,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           csBundle(i).uopIdx := i.U
         }
       }
+      genCsBundle_VEC_ROV(1)
       switch(vlmul) {
         is("b001".U) {
           genCsBundle_VEC_ROV(2)
@@ -1810,10 +1811,12 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           csBundle(i + 1).srcType(0) := SrcType.vp
           csBundle(i + 1).lsrc(0) := VECTOR_TMP_REG_LMUL.U
           csBundle(i + 1).lsrc(1) := src2 + i.U
+          csBundle(i + 1).lsrc(2) := dest + i.U
           csBundle(i + 1).ldest := dest + i.U
           csBundle(i + 1).uopIdx := i.U
         }
       }
+      genCsBundle_VEC_ROX(1)
       switch(vlmul) {
         is("b001".U) {
           genCsBundle_VEC_ROX(2)
