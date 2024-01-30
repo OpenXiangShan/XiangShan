@@ -39,7 +39,7 @@ import xiangshan.mem.LqPtr
 // DCache specific parameters
 case class DCacheParameters
 (
-  nSets: Int = 256,
+  nSets: Int = 128,
   nWays: Int = 8,
   rowBits: Int = 64,
   tagECC: Option[String] = None,
@@ -230,7 +230,7 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
   }
   
   def get_alias(vaddr: UInt): UInt ={
-    require(blockOffBits + idxBits > pgIdxBits)
+    // require(blockOffBits + idxBits > pgIdxBits)
     if(blockOffBits + idxBits > pgIdxBits){
       vaddr(blockOffBits + idxBits - 1, pgIdxBits)
     }else{

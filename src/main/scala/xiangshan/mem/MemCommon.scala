@@ -169,6 +169,7 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     res.vaddr := this.vaddr
     res.paddr := this.paddr
     res.pc    := this.uop.cf.pc
+    res.miss  := this.miss
 
     res
   }
