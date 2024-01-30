@@ -547,14 +547,6 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     }
   }
 
-  when (DelayN(io.mem.resp.fire, 1)) {
-    state.indices.map{i =>
-      when (state(i) === state_last_hptw_req && io.mem.resp.bits.id === entries(i).wait_id) {
-        entries(i).ppn := pte.ppn // for last stage 2 translation
-      }
-    }
-  }
-
   when (hyper_arb1.io.out.fire) {
     for (i <- state.indices) {
       when (state(i) === state_hptw_req && entries(i).ppn === hyper_arb1.io.out.bits.ppn && entries(i).s2xlate && hyper_arb1.io.chosen === i.U) {
