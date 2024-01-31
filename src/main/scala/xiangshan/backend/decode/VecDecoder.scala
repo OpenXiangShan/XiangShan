@@ -11,6 +11,7 @@ import xiangshan.ExceptionNO.illegalInstr
 import xiangshan.backend.fu.FuType
 import xiangshan._
 import yunsuan.{VfpuType, VipuType, VimacType, VpermType, VialuFixType, VfaluType, VfmaType, VfdivType, VfcvtType, VidivType}
+import xiangshan.backend.decode.Zvbb._
 
 abstract class VecDecode extends XSDecodeBase {
   def generate() : List[BitPat]
@@ -240,6 +241,12 @@ object VecDecoder extends DecodeConstants {
 
     VWREDSUMU_VS    -> OPIVV(FuType.vipu, VipuType.vwredsumu_vs, T, F, F, UopSplitType.VEC_VWW),
     VWREDSUM_VS     -> OPIVV(FuType.vipu, VipuType.vwredsum_vs, T, F, F, UopSplitType.VEC_VWW),
+
+    // Zvbb
+    VANDN_VV        -> OPIVV(FuType.vialuF, VialuFixType.vandn_vv, T, F, F),
+    VROL_VV         -> OPIVV(FuType.vialuF, VialuFixType.vrol_vv, T, F, F, UopSplitType.VEC_VVV),
+    VROR_VV         -> OPIVV(FuType.vialuF, VialuFixType.vror_vv, T, F, F, UopSplitType.VEC_VVV),
+    VWSLL_VV        -> OPIVV(FuType.vialuF, VialuFixType.vwsll_vv, T, F, F, UopSplitType.VEC_VVW),
   )
 
   val opivx: Array[(BitPat, XSDecodeBase)] = Array(
@@ -299,6 +306,12 @@ object VecDecoder extends DecodeConstants {
 
     VNCLIPU_WX    -> OPIVX(FuType.vialuF, VialuFixType.vnclipu_wv, T, F, T, UopSplitType.VEC_WXV),
     VNCLIP_WX     -> OPIVX(FuType.vialuF, VialuFixType.vnclip_wv, T, F, T, UopSplitType.VEC_WXV),
+
+    // Zvbb
+    VANDN_VX      -> OPIVX(FuType.vialuF, VialuFixType.vandn_vv, T, F, F),
+    VROL_VX       -> OPIVX(FuType.vialuF, VialuFixType.vrol_vv,  T, F, F, UopSplitType.VEC_VXV),
+    VROR_VX       -> OPIVX(FuType.vialuF, VialuFixType.vror_vv,  T, F, F, UopSplitType.VEC_VXV),
+    VWSLL_VX      -> OPIVX(FuType.vialuF, VialuFixType.vwsll_vv, T, F, F, UopSplitType.VEC_VXW),
   )
 
   val opivi: Array[(BitPat, XSDecodeBase)] = Array(
@@ -348,6 +361,10 @@ object VecDecoder extends DecodeConstants {
     VMV2R_V       -> OPIVI(FuType.vppu, VpermType.vmv2r, T, F, F, uopSplitType = UopSplitType.VEC_MVNR, src1 = SrcType.no), // vmv2r.v vd, vs2
     VMV4R_V       -> OPIVI(FuType.vppu, VpermType.vmv4r, T, F, F, uopSplitType = UopSplitType.VEC_MVNR, src1 = SrcType.no), // vmv4r.v vd, vs2
     VMV8R_V       -> OPIVI(FuType.vppu, VpermType.vmv8r, T, F, F, uopSplitType = UopSplitType.VEC_MVNR, src1 = SrcType.no), // vmv8r.v vd, vs2
+
+    // Zvbb
+    VROR_VI       -> OPIVI(FuType.vialuF, VialuFixType.vror_vv, T, F, F, selImm = SelImm.IMM_VRORVI, UopSplitType.VEC_VXV),
+    VWSLL_VI      -> OPIVI(FuType.vialuF, VialuFixType.vwsll_vv, T, F, F, selImm = SelImm.IMM_OPIVIU, UopSplitType.VEC_VXW),
   )
 
   val opmvv: Array[(BitPat, XSDecodeBase)] = Array(
@@ -414,6 +431,14 @@ object VecDecoder extends DecodeConstants {
     VWSUB_WV     -> OPMVV(T, FuType.vialuF, VialuFixType.vwsub_wv, F, T, F, UopSplitType.VEC_WVW),
     VWSUBU_VV    -> OPMVV(T, FuType.vialuF, VialuFixType.vwsubu_vv, F, T, F, UopSplitType.VEC_VVW),
     VWSUBU_WV    -> OPMVV(T, FuType.vialuF, VialuFixType.vwsubu_wv, F, T, F, UopSplitType.VEC_WVW),
+
+    // Zvbb
+    VBREV_V      -> OPMVV(T, FuType.vialuF, VialuFixType.vbrev_v,  F, T, F, UopSplitType.VEC_VVV, src1 = SrcType.no),
+    VBREV8_V     -> OPMVV(T, FuType.vialuF, VialuFixType.vbrev8_v, F, T, F, UopSplitType.VEC_VVV, src1 = SrcType.no),
+    VREV8_V      -> OPMVV(T, FuType.vialuF, VialuFixType.vrev8_v,  F, T, F, UopSplitType.VEC_VVV, src1 = SrcType.no),
+    VCLZ_V       -> OPMVV(T, FuType.vialuF, VialuFixType.vclz_v,   F, T, F, UopSplitType.VEC_VVV, src1 = SrcType.no),
+    VCTZ_V       -> OPMVV(T, FuType.vialuF, VialuFixType.vctz_v,   F, T, F, UopSplitType.VEC_VVV, src1 = SrcType.no),
+    VCPOP_V      -> OPMVV(T, FuType.vialuF, VialuFixType.vcpop_v,  F, T, F, UopSplitType.VEC_VVV, src1 = SrcType.no),
   )
 
   val opmvx: Array[(BitPat, XSDecodeBase)] = Array(
