@@ -332,7 +332,6 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
     val stride = Mux(isIndexed(issueInstType), indexedStride, notIndexedStride)
     val fieldOffset = nfIdx << issueAlignedType // field offset inside a segment
     val vaddr = issueBaseAddr + stride + fieldOffset
-    val mask = genVWmask(vaddr ,issueAlignedType)
     val regOffset = (elemIdxInsideField << issueAlignedType)(vOffsetBits - 1, 0)
     val enable = (issueFlowMask & UIntToOH(elemIdxInsideVd(portIdx))).orR
     val vecActive = enable
@@ -344,6 +343,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
     val packAlignedType = GenPackAlignedType(packVec.asUInt)
     val isPackage = isUnitStride(issueInstType) && !issueEntry.fof && !isSegment(issueInstType) && (packAlignedType > issueAlignedType) // don't pack fof's flow
     val packageNum = Mux(isPackage, GenPackNum(issueAlignedType, packAlignedType), 1.U)
+    val mask = genVWmask(vaddr ,Mux(isPackage, packAlignedType, issueAlignedType))
     
     (0 until flowIssueWidth).map{
       case i => {
