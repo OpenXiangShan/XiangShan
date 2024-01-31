@@ -566,7 +566,7 @@ object FuConfig {
     maskWakeUp = true,
     dataBits = 128,
     exceptionOut = Seq(illegalInstr),
-    immType = Set(SelImm.IMM_OPIVIU, SelImm.IMM_OPIVIS),
+    immType = Set(SelImm.IMM_OPIVIU, SelImm.IMM_OPIVIS, SelImm.IMM_VRORVI),
   )
 
   val VimacCfg = FuConfig (
