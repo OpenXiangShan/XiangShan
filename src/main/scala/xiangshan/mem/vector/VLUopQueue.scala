@@ -461,7 +461,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
       case (writebackPort, valid) => {
         Mux(valid, writebackPort.bits.packageNum, 0.U(log2Up(VLENB).W))
       }
-    }.fold(0.U(log2Up(VLENB).W))(_ + _)
+    }.fold(0.U(log2Up(VLENB).W))(_ +& _)
     val nextFlowCnt = entry.flow_counter - writebackFlowNum
 
     // handle the situation when the writebacked flows nuke and the vector ld needs to replay from fronend
