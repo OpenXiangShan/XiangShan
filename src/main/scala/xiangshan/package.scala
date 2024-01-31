@@ -691,10 +691,6 @@ package object xiangshan {
     def VEC_M0M          = "b000000".U // VEC_M0M
     def VEC_MMM          = "b000000".U // VEC_MMM
     def VEC_MVNR         = "b000100".U // vmvnr
-    def VEC_REV          = "b000101".U // vbrev.v vbrev8.v vrev8.v
-    def VEC_COUNT        = "b000110".U // vclz.v vctz.v vcpop.v
-    def VEC_ROV          = "b000111".U // vrol.vv vror.vv
-    def VEC_ROX          = "b001000".U // vrol.vx vror.vx
     def dummy     = "b111111".U
 
     def X = BitPat("b000000")

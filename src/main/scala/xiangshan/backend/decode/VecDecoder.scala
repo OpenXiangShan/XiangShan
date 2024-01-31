@@ -244,8 +244,8 @@ object VecDecoder extends DecodeConstants {
 
     // Zvbb
     VANDN_VV        -> OPIVV(FuType.vialuF, VialuFixType.vandn_vv, T, F, F),
-    VROL_VV         -> OPIVV(FuType.vialuF, VialuFixType.vrol_vv, T, F, F, UopSplitType.VEC_ROV),
-    VROR_VV         -> OPIVV(FuType.vialuF, VialuFixType.vror_vv, T, F, F, UopSplitType.VEC_ROV),
+    VROL_VV         -> OPIVV(FuType.vialuF, VialuFixType.vrol_vv, T, F, F, UopSplitType.VEC_VVV),
+    VROR_VV         -> OPIVV(FuType.vialuF, VialuFixType.vror_vv, T, F, F, UopSplitType.VEC_VVV),
     VWSLL_VV        -> OPIVV(FuType.vialuF, VialuFixType.vwsll_vv, T, F, F, UopSplitType.VEC_VVW),
   )
 
@@ -309,8 +309,8 @@ object VecDecoder extends DecodeConstants {
 
     // Zvbb
     VANDN_VX      -> OPIVX(FuType.vialuF, VialuFixType.vandn_vv, T, F, F),
-    VROL_VX       -> OPIVX(FuType.vialuF, VialuFixType.vrol_vv,  T, F, F, UopSplitType.VEC_ROX),
-    VROR_VX       -> OPIVX(FuType.vialuF, VialuFixType.vror_vv,  T, F, F, UopSplitType.VEC_ROX),
+    VROL_VX       -> OPIVX(FuType.vialuF, VialuFixType.vrol_vv,  T, F, F, UopSplitType.VEC_VXV),
+    VROR_VX       -> OPIVX(FuType.vialuF, VialuFixType.vror_vv,  T, F, F, UopSplitType.VEC_VXV),
     VWSLL_VX      -> OPIVX(FuType.vialuF, VialuFixType.vwsll_vv, T, F, F, UopSplitType.VEC_VXW),
   )
 
@@ -363,7 +363,7 @@ object VecDecoder extends DecodeConstants {
     VMV8R_V       -> OPIVI(FuType.vppu, VpermType.vmv8r, T, F, F, uopSplitType = UopSplitType.VEC_MVNR, src1 = SrcType.no), // vmv8r.v vd, vs2
 
     // Zvbb
-    VROR_VI       -> OPIVI(FuType.vialuF, VialuFixType.vror_vv, T, F, F, selImm = SelImm.IMM_VRORVI, UopSplitType.VEC_ROX),
+    VROR_VI       -> OPIVI(FuType.vialuF, VialuFixType.vror_vv, T, F, F, selImm = SelImm.IMM_VRORVI, UopSplitType.VEC_VXV),
     VWSLL_VI      -> OPIVI(FuType.vialuF, VialuFixType.vwsll_vv, T, F, F, selImm = SelImm.IMM_OPIVIU, UopSplitType.VEC_VXW),
   )
 
@@ -433,12 +433,12 @@ object VecDecoder extends DecodeConstants {
     VWSUBU_WV    -> OPMVV(T, FuType.vialuF, VialuFixType.vwsubu_wv, F, T, F, UopSplitType.VEC_WVW),
 
     // Zvbb
-    VBREV_V      -> OPMVV(T, FuType.vialuF, VialuFixType.vbrev_v,  F, T, F, UopSplitType.VEC_REV, src1 = SrcType.no),
-    VBREV8_V     -> OPMVV(T, FuType.vialuF, VialuFixType.vbrev8_v, F, T, F, UopSplitType.VEC_REV, src1 = SrcType.no),
-    VREV8_V      -> OPMVV(T, FuType.vialuF, VialuFixType.vrev8_v,  F, T, F, UopSplitType.VEC_REV, src1 = SrcType.no),
-    VCLZ_V       -> OPMVV(T, FuType.vialuF, VialuFixType.vclz_v,   F, T, F, UopSplitType.VEC_COUNT, src1 = SrcType.no),
-    VCTZ_V       -> OPMVV(T, FuType.vialuF, VialuFixType.vctz_v,   F, T, F, UopSplitType.VEC_COUNT, src1 = SrcType.no),
-    VCPOP_V      -> OPMVV(T, FuType.vialuF, VialuFixType.vcpop_v,  F, T, F, UopSplitType.VEC_COUNT, src1 = SrcType.no),
+    VBREV_V      -> OPMVV(T, FuType.vialuF, VialuFixType.vbrev_v,  F, T, F, UopSplitType.VEC_VVV, src1 = SrcType.no),
+    VBREV8_V     -> OPMVV(T, FuType.vialuF, VialuFixType.vbrev8_v, F, T, F, UopSplitType.VEC_VVV, src1 = SrcType.no),
+    VREV8_V      -> OPMVV(T, FuType.vialuF, VialuFixType.vrev8_v,  F, T, F, UopSplitType.VEC_VVV, src1 = SrcType.no),
+    VCLZ_V       -> OPMVV(T, FuType.vialuF, VialuFixType.vclz_v,   F, T, F, UopSplitType.VEC_VVV, src1 = SrcType.no),
+    VCTZ_V       -> OPMVV(T, FuType.vialuF, VialuFixType.vctz_v,   F, T, F, UopSplitType.VEC_VVV, src1 = SrcType.no),
+    VCPOP_V      -> OPMVV(T, FuType.vialuF, VialuFixType.vcpop_v,  F, T, F, UopSplitType.VEC_VVV, src1 = SrcType.no),
   )
 
   val opmvx: Array[(BitPat, XSDecodeBase)] = Array(
