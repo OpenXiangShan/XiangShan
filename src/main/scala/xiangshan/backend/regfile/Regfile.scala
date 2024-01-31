@@ -65,6 +65,7 @@ class Regfile
   hasZero: Boolean,
   len: Int,
   width: Int,
+  bankNum: Int = 1,
 ) extends Module {
   val io = IO(new Bundle() {
     val readPorts = Vec(numReadPorts, new RfReadPort(len, width))
@@ -76,7 +77,23 @@ class Regfile
 
   val mem = Reg(Vec(numPregs, UInt(len.W)))
   for (r <- io.readPorts) {
-    r.data := mem(RegNext(r.addr))
+    if (bankNum == 1) {
+      r.data := mem(RegNext(r.addr))
+    }
+    else {
+      val banks = (0 until bankNum).map { case i =>
+        mem.zipWithIndex.filter{ case (m, index) => (index % bankNum) == i }.map(_._1)
+      }
+      val bankWidth = bankNum.U.getWidth - 1
+      val hitBankWire = VecInit((0 until bankNum).map { case i => r.addr(bankWidth - 1, 0) === i.U })
+      val hitBankReg = Reg(Vec(bankNum, Bool()))
+      hitBankReg := hitBankWire
+      val banksRdata = Wire(Vec(bankNum, UInt(len.W)))
+      for (i <- 0 until bankNum) {
+        banksRdata(i) := RegEnable(VecInit(banks(i))(r.addr(r.addr.getWidth - 1, bankWidth)), hitBankWire(i))
+      }
+      r.data := Mux1H(hitBankReg, banksRdata)
+    }
   }
   val writePorts = io.writePorts
   for (i <- writePorts.indices) {
@@ -116,6 +133,7 @@ object Regfile {
     wdata        : Seq[UInt],
     hasZero      : Boolean,
     withReset    : Boolean = false,
+    bankNum      : Int = 1,
     debugReadAddr: Option[Seq[UInt]],
     debugReadData: Option[Vec[UInt]],
   )(implicit p: Parameters): Unit = {
@@ -128,7 +146,7 @@ object Regfile {
     val addrBits = waddr.map(_.getWidth).min
     require(waddr.map(_.getWidth).min == waddr.map(_.getWidth).max, s"addrBits != $addrBits")
 
-    val regfile = Module(new Regfile(name, numEntries, numReadPorts, numWritePorts, hasZero, dataBits, addrBits))
+    val regfile = Module(new Regfile(name, numEntries, numReadPorts, numWritePorts, hasZero, dataBits, addrBits, bankNum))
     rdata := regfile.io.readPorts.zip(raddr).map { case (rport, addr) =>
       rport.addr := addr
       rport.data
@@ -182,10 +200,11 @@ object IntRegFile {
     debugReadAddr: Option[Seq[UInt]],
     debugReadData: Option[Vec[UInt]],
     withReset    : Boolean = false,
+    bankNum      : Int,
   )(implicit p: Parameters): Unit = {
     Regfile(
       name, numEntries, raddr, rdata, wen, waddr, wdata,
-      hasZero = true, withReset, debugReadAddr, debugReadData)
+      hasZero = true, withReset, bankNum, debugReadAddr, debugReadData)
   }
 }
 
@@ -209,7 +228,7 @@ object VfRegFile {
     if (splitNum == 1) {
       Regfile(
         name, numEntries, raddr, rdata, wen.head, waddr, wdata,
-        hasZero = false, withReset, debugReadAddr, debugReadData)
+        hasZero = false, withReset, bankNum = 1, debugReadAddr, debugReadData)
     } else {
       val dataWidth = 64
       val numReadPorts = raddr.length
@@ -221,7 +240,7 @@ object VfRegFile {
         wdataVec(i) := wdata.map(_ ((i + 1) * dataWidth - 1, i * dataWidth))
         Regfile(
           name + s"Part${i}", numEntries, raddr, rdataVec(i), wen(i), waddr, wdataVec(i),
-          hasZero = false, withReset, debugReadAddr, debugRDataVec.map(_(i))
+          hasZero = false, withReset, bankNum = 1, debugReadAddr, debugRDataVec.map(_(i))
         )
       }
       for (i <- 0 until rdata.length) {
