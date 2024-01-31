@@ -808,7 +808,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.commits.isCommit := state === s_idle && !blockCommit
   val walk_v = VecInit(walkPtrVec.map(ptr => valid(ptr.value)))
   val commit_v = VecInit(deqPtrVec.map(ptr => valid(ptr.value)))
-  dontTouch(commit_v)
+  if(backendParams.debugEn) {
+    dontTouch(commit_v)
+  }
   val commit_vDeqGroup = Reg(chiselTypeOf(walk_v))
   // store will be commited iff both sta & std have been writebacked
   val commit_w = VecInit(deqPtrVec.map(ptr => isWritebacked(ptr.value)))
@@ -948,10 +950,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   deqPtrValue.zipWithIndex.map{case (deq, i) => deq := deqPtrVec(0) + i.U}
   val commit_vReadVec = Wire(Vec(2 * CommitWidth, chiselTypeOf(commit_v(0))))
   val commit_vNextVec = Wire(Vec(2 * CommitWidth, chiselTypeOf(commit_v(0))))
-  dontTouch(commit_vDeqGroup)
-  dontTouch(commit_vReadVec)
-  dontTouch(commit_vNextVec)
-  dontTouch(deqPtrValue)
+  if(backendParams.debugEn) {
+    dontTouch(commit_vDeqGroup)
+    dontTouch(commit_vReadVec)
+    dontTouch(commit_vNextVec)
+    dontTouch(deqPtrValue)
+  }
   for (i <- 0 until 2 * CommitWidth) {
     commit_vReadVec(i) := valid(deqPtrValue(i).value)
     commit_vNextVec(i) := commit_vReadVec(i)
@@ -968,10 +972,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // update commit_wDeqGroup
   val commit_wReadVec = Wire(Vec(2 * CommitWidth, chiselTypeOf(commit_w(0))))
   val commit_wNextVec = Wire(Vec(2 * CommitWidth, chiselTypeOf(commit_w(0))))
-  dontTouch(commit_wDeqGroup)
-  dontTouch(commit_wReadVec)
-  dontTouch(commit_wNextVec)
-  dontTouch(commit_w)
+  if(backendParams.debugEn) {
+    dontTouch(commit_wDeqGroup)
+    dontTouch(commit_wReadVec)
+    dontTouch(commit_wNextVec)
+    dontTouch(commit_w)
+  }
   for (i <- 0 until 2 * CommitWidth) {
     commit_wReadVec(i) := isWritebacked(deqPtrValue(i).value)
     commit_wNextVec(i) := commit_vReadVec(i)
@@ -1187,9 +1193,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   val interrupt_safeReadVec = Wire(Vec(2 * CommitWidth, chiselTypeOf(interrupt_safe(0))))
   val interrupt_safeNextVec = Wire(Vec(2 * CommitWidth, chiselTypeOf(interrupt_safe(0))))
-  dontTouch(interrupt_safeDeqGroup)
-  dontTouch(interrupt_safeReadVec)
-  dontTouch(interrupt_safeNextVec)
+  if(backendParams.debugEn){
+    dontTouch(interrupt_safeDeqGroup)
+    dontTouch(interrupt_safeReadVec)
+    dontTouch(interrupt_safeNextVec)
+  }
   for (i <- 0 until 2 * CommitWidth) {
     interrupt_safeReadVec(i) := interrupt_safe(deqPtrValue(i).value)
     interrupt_safeNextVec(i) := interrupt_safeReadVec(i)

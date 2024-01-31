@@ -210,6 +210,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   io.debugVconfig.foreach(_ := vconfigDebugReadData.get)
 
   IntRegFile("IntRegFile", intSchdParams.numPregs, intRfRaddr, intRfRdata, intRfWen, intRfWaddr, intRfWdata,
+    bankNum = 1,
     debugReadAddr = intDebugRead.map(_._1),
     debugReadData = intDebugRead.map(_._2))
   VfRegFile("VfRegFile", vfSchdParams.numPregs, vfRfSplitNum, vfRfRaddr, vfRfRdata, vfRfWen, vfRfWaddr, vfRfWdata,

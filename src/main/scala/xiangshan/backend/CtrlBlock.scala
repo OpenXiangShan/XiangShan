@@ -139,7 +139,7 @@ class CtrlBlockImp(
     val isIntSche = intScheWbData.contains(x)
     val isVfSche = vfScheWbData.contains(x)
     val isMemVload = memVloadWbData.contains(x)
-    val canSameRobidxWbData = if (isIntSche ||isVfSche) {
+    val canSameRobidxWbData = if (isIntSche || isVfSche) {
       intScheWbData ++ vfScheWbData
     } else if (isMemVload) {
       memVloadWbData
@@ -150,7 +150,6 @@ class CtrlBlockImp(
       val killedByOlderThat = wb.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect, s3_s5_redirect))
       (wb.bits.robIdx === x.bits.robIdx) && wb.valid && x.valid && !killedByOlderThat && !killedByOlder
     }).toSeq)
-    dontTouch(sameRobidxBools)
     delayed.bits := RegNext(PopCount(sameRobidxBools))
     delayed
   }).toSeq
