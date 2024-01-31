@@ -329,7 +329,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       resp(idx).valid := true.B
       resp(idx).bits.miss := false.B
       val s1_paddr = Cat(stage1.genPPN(get_pn(req_out(idx).vaddr)), get_off(req_out(idx).vaddr))
-      val s2_paddr = Cat(stage2.genPPNS2(get_pn(req_out(idx).vaddr)), get_off(req_out(idx).vaddr))
+      val s2_paddr = Cat(stage2.genPPNS2(), get_off(req_out(idx).vaddr))
       for (d <- 0 until nRespDups) {
         resp(idx).bits.paddr(d) := Mux(s2xlate =/= noS2xlate, s2_paddr, s1_paddr)
         resp(idx).bits.gpaddr(d) := s1_paddr
@@ -376,7 +376,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val onlyS2_hit = ptw.resp.bits.s2.hit(vpn, io.csr.hgatp.asid)
     val p_hit = RegNext(Mux(onlyS2, onlyS2_hit, normal_hit) && io.ptw.resp.fire && s2xlate_hit)
     val ppn_s1 = ptw.resp.bits.s1.genPPN(vpn)
-    val ppn_s2 = ptw.resp.bits.s2.genPPNS2(vpn)
+    val ppn_s2 = ptw.resp.bits.s2.genPPNS2()
     val p_ppn = RegEnable(Mux(hasS2xlate, ppn_s2, ppn_s1), io.ptw.resp.fire)
     val p_perm = RegEnable(ptwresp_to_tlbperm(ptw.resp.bits.s1), io.ptw.resp.fire)
     val p_gvpn = RegEnable(Mux(onlyS2, ptw.resp.bits.s2.entry.tag, ppn_s1), io.ptw.resp.fire)

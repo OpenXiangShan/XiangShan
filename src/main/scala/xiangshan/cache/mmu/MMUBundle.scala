@@ -425,9 +425,23 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     }
     val s1ppn_low = item.s1.ppn_low
     val s2ppn = {
-      if (!pageNormal) item.s2.entry.ppn(ppnLen - 1, vpnnLen) else item.s2.entry.ppn(ppnLen - 1, sectortlbwidth)
+      if (!pageNormal) 
+        MuxLookup(item.s2.entry.level.getOrElse(0.U), item.s2.entry.ppn(ppnLen - 1, vpnnLen))(Seq(
+          0.U -> Cat(item.s2.entry.ppn(ppnLen - 1, vpnnLen * 2), item.s2.entry.tag(vpnnLen * 2 - 1, vpnnLen)),
+        ))
+      else 
+        MuxLookup(item.s2.entry.level.getOrElse(0.U), item.s2.entry.ppn(ppnLen - 1, sectortlbwidth))(Seq(
+          0.U -> Cat(item.s2.entry.ppn(ppnLen - 1, vpnnLen * 2), item.s2.entry.tag(vpnnLen * 2 - 1, sectortlbwidth)),
+          1.U -> Cat(item.s2.entry.ppn(ppnLen - 1, vpnnLen), item.s2.entry.tag(vpnnLen - 1, sectortlbwidth))
+        ))
     }
-    val s2ppn_low = VecInit(Seq.fill(tlbcontiguous)(item.s2.entry.ppn(sectortlbwidth - 1, 0)))
+    val s2ppn_tmp = {
+      MuxLookup(item.s2.entry.level.getOrElse(0.U), item.s2.entry.ppn(ppnLen - 1, 0))(Seq(
+        0.U -> Cat(item.s2.entry.ppn(ppnLen - 1, vpnnLen * 2), item.s2.entry.tag(vpnnLen * 2 - 1, 0)),
+        1.U -> Cat(item.s2.entry.ppn(ppnLen - 1, vpnnLen), item.s2.entry.tag(vpnnLen - 1, 0))
+      ))
+    }
+    val s2ppn_low = VecInit(Seq.fill(tlbcontiguous)(s2ppn_tmp(sectortlbwidth - 1, 0)))
     this.ppn := Mux(item.s2xlate === noS2xlate || item.s2xlate === onlyStage1, s1ppn, s2ppn)
     this.ppn_low := Mux(item.s2xlate === noS2xlate || item.s2xlate === onlyStage1, s1ppn_low, s2ppn_low)
     this.vmid := item.s1.entry.vmid.getOrElse(0.U)
@@ -1087,10 +1101,10 @@ class HptwResp(implicit p: Parameters) extends PtwBundle {
   //   ))
   // }
 
-  def genPPNS2(vpn: UInt): UInt = {
-    MuxLookup(entry.level.get, 0.U, Seq(
-      0.U -> Cat(entry.ppn(entry.ppn.getWidth - 1, vpnnLen * 2), vpn(vpnnLen * 2 - 1, 0)),
-      1.U -> Cat(entry.ppn(entry.ppn.getWidth - 1, vpnnLen), vpn(vpnnLen - 1, 0)),
+  def genPPNS2(): UInt = {
+    MuxLookup(entry.level.get, 0.U)(Seq(
+      0.U -> Cat(entry.ppn(entry.ppn.getWidth - 1, vpnnLen * 2), this.entry.tag(vpnnLen * 2 - 1, 0)),
+      1.U -> Cat(entry.ppn(entry.ppn.getWidth - 1, vpnnLen), this.entry.tag(vpnnLen - 1, 0)),
       2.U -> Cat(entry.ppn(entry.ppn.getWidth - 1, 0))
     ))
   }
