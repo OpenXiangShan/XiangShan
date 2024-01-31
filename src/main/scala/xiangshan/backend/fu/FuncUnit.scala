@@ -82,6 +82,7 @@ class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val csrio = if (cfg.isCsr) Some(new CSRFileIO) else None
   val fenceio = if (cfg.isFence) Some(new FenceIO) else None
   val frm = if (cfg.needSrcFrm) Some(Input(UInt(3.W))) else None
+  val vxrm = if (cfg.needSrcVxrm) Some(Input(UInt(2.W))) else None
 }
 
 abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSModule {

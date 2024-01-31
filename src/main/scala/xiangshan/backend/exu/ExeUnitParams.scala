@@ -57,6 +57,7 @@ case class ExeUnitParams(
   val needPc: Boolean = fuConfigs.map(_.needPc).reduce(_ || _)
   val needTarget: Boolean = fuConfigs.map(_.hasPredecode).reduce(_ || _)
   val needSrcFrm: Boolean = fuConfigs.map(_.needSrcFrm).reduce(_ || _)
+  val needSrcVxrm: Boolean = fuConfigs.map(_.needSrcVxrm).reduce(_ || _)
   val needFPUCtrl: Boolean = fuConfigs.map(_.needFPUCtrl).reduce(_ || _)
   val needVPUCtrl: Boolean = fuConfigs.map(_.needVecCtrl).reduce(_ || _)
   val isHighestWBPriority: Boolean = wbPortConfigs.forall(_.priority == 0)

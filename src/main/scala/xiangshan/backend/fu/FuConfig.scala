@@ -33,6 +33,7 @@ import xiangshan.backend.datapath.DataConfig._
   * @param replayInst if the instuction executed in the $fu can replay in some condition
   * @param trigger if the $fu need trigger out
   * @param needSrcFrm if the $fu need float rounding mode signal
+  * @param needSrcVxrm if the $fu need vector fixed-point rounding mode signal
   * @param immType the immediate type of this $fu
   * @param vconfigWakeUp
   * @param maskWakeUp
@@ -60,6 +61,7 @@ case class FuConfig (
   replayInst    : Boolean = false,
   trigger       : Boolean = false,
   needSrcFrm    : Boolean = false,
+  needSrcVxrm   : Boolean = false,
   immType       : Set[UInt] = Set(),
   // vector
   vconfigWakeUp : Boolean = false,
@@ -556,6 +558,7 @@ object FuConfig {
     piped = true,
     writeVecRf = true,
     writeVxsat = true,
+    needSrcVxrm = true,
     latency = CertainLatency(1),
     vconfigWakeUp = true,
     maskWakeUp = true,
@@ -574,6 +577,7 @@ object FuConfig {
     piped = true,
     writeVecRf = true,
     writeVxsat = true,
+    needSrcVxrm = true,
     latency = CertainLatency(2),
     vconfigWakeUp = true,
     maskWakeUp = true,

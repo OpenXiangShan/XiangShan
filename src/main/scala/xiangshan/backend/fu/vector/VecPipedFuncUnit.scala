@@ -22,8 +22,8 @@ trait VecFuncUnitAlias { this: FuncUnit =>
   protected val vm      = vecCtrl.vm
   protected val vstart  = vecCtrl.vstart
 
-  protected val frm     = vecCtrl.frm
-  protected val vxrm    = vecCtrl.vxrm
+  protected val frm     = if(cfg.needSrcFrm) io.frm.get else vecCtrl.frm
+  protected val vxrm    = if(cfg.needSrcVxrm) io.vxrm.get else vecCtrl.vxrm
   protected val vuopIdx = vecCtrl.vuopIdx
   protected val nf      = vecCtrl.frm
 
