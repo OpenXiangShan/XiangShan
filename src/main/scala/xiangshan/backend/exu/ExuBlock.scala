@@ -37,6 +37,7 @@ class ExuBlockImp(
     exu.io.csrio.foreach(exuio => io.csrio.get <> exuio)
     exu.io.fenceio.foreach(exuio => io.fenceio.get <> exuio)
     exu.io.frm.foreach(exuio => io.frm.get <> exuio)
+    exu.io.vxrm.foreach(exuio => io.vxrm.get <> exuio)
     exu.io.in <> input
     output <> exu.io.out
     if (exu.wrapper.exuParams.fuConfigs.contains(AluCfg) || exu.wrapper.exuParams.fuConfigs.contains(BrhCfg)){
@@ -63,4 +64,5 @@ class ExuBlockIO(implicit p: Parameters, params: SchdBlockParams) extends XSBund
   val csrio = if (params.hasCSR) Some(new CSRFileIO) else None
   val fenceio = if (params.hasFence) Some(new FenceIO) else None
   val frm = if (params.needSrcFrm) Some(Input(UInt(3.W))) else None
+  val vxrm = if (params.needSrcVxrm) Some(Input(UInt(2.W))) else None
 }
