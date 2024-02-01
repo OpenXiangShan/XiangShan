@@ -22,10 +22,10 @@ trait VecFuncUnitAlias { this: FuncUnit =>
   protected val vm      = vecCtrl.vm
   protected val vstart  = vecCtrl.vstart
 
-  protected val frm     = vecCtrl.frm
-  protected val vxrm    = vecCtrl.vxrm
+  protected val frm     = if(cfg.needSrcFrm) io.frm.get else 0.U
+  protected val vxrm    = if(cfg.needSrcVxrm) io.vxrm.get else 0.U
   protected val vuopIdx = vecCtrl.vuopIdx
-  protected val nf      = vecCtrl.frm
+  protected val nf      = 0.U  // No need to handle nf in vector arith unit
 
   protected val fuOpType  = inCtrl.fuOpType
   protected val isNarrow  = vecCtrl.isNarrow

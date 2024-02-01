@@ -36,6 +36,7 @@ class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle 
   val csrio = if (params.hasCSR) Some(new CSRFileIO) else None
   val fenceio = if (params.hasFence) Some(new FenceIO) else None
   val frm = if (params.needSrcFrm) Some(Input(UInt(3.W))) else None
+  val vxrm = if (params.needSrcVxrm) Some(Input(UInt(2.W))) else None
 }
 
 class ExeUnit(exuParams: ExeUnitParams)(implicit p: Parameters) extends LazyModule {
@@ -256,6 +257,7 @@ class ExeUnitImp(
   }))
   io.fenceio.foreach(exuio => funcUnits.foreach(fu => fu.io.fenceio.foreach(fuio => fuio <> exuio)))
   io.frm.foreach(exuio => funcUnits.foreach(fu => fu.io.frm.foreach(fuio => fuio <> exuio)))
+  io.vxrm.foreach(exuio => funcUnits.foreach(fu => fu.io.vxrm.foreach(fuio => fuio <> exuio)))
 
   // debug info
   io.out.bits.debug     := 0.U.asTypeOf(io.out.bits.debug)
