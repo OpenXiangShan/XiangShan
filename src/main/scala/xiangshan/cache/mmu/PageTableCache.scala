@@ -258,7 +258,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   }
   // NOTE: not actually bypassed, just check if hit, re-access the page cache
   def refill_bypass(vpn: UInt, level: Int, h_search: UInt) = {
-    val change_h = MuxLookup(h_search, noS2xlate, Seq(
+    val change_h = MuxLookup(h_search, noS2xlate)(Seq(
       allStage -> onlyStage1,
       onlyStage1 -> onlyStage1,
       onlyStage2 -> onlyStage2
@@ -268,7 +268,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   }
 
   val vpn_search = stageReq.bits.req_info.vpn
-  val h_search = MuxLookup(stageReq.bits.req_info.s2xlate, noS2xlate, Seq(
+  val h_search = MuxLookup(stageReq.bits.req_info.s2xlate, noS2xlate)(Seq(
     allStage -> onlyStage1,
     onlyStage1 -> onlyStage1,
     onlyStage2 -> onlyStage2
@@ -316,7 +316,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
     // delay one cycle after sram read
     val delay_vpn = stageDelay(0).bits.req_info.vpn
-    val delay_h = MuxLookup(stageDelay(0).bits.req_info.s2xlate, noS2xlate, Seq(
+    val delay_h = MuxLookup(stageDelay(0).bits.req_info.s2xlate, noS2xlate)(Seq(
       allStage -> onlyStage1,
       onlyStage1 -> onlyStage1,
       onlyStage2 -> onlyStage2
@@ -368,7 +368,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
     // delay one cycle after sram read
     val delay_vpn = stageDelay(0).bits.req_info.vpn
-    val delay_h = MuxLookup(stageDelay(0).bits.req_info.s2xlate, noS2xlate, Seq(
+    val delay_h = MuxLookup(stageDelay(0).bits.req_info.s2xlate, noS2xlate)(Seq(
       allStage -> onlyStage1,
       onlyStage1 -> onlyStage1,
       onlyStage2 -> onlyStage2
