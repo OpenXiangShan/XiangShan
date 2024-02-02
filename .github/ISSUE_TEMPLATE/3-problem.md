@@ -29,12 +29,13 @@ Please describe step by step what did you do before you encounted the problem. <
 
 #### Environment (please complete the following information): <!-- 环境信息，请务必填写清楚 -->
  - Operating System: [e.g. Ubuntu 20.04]
- - gcc version: [paste firt line of the output of `gcc --version`]
- - mill version: [paste firt line of the output of `mill --version`]
- - XiangShan branch: [paste branch name here]
- - XiangShan commit id: [paste commit id here]
- - NEMU commit id: [paste commit id here]
- - SPIKE commit id: [paste commit id here]
+ - gcc version: [paste first line of the output of `gcc --version`  if applicable]
+ - mill version: [paste first line of the output of `mill -i --version`  if applicable]
+ - java version: [paste first line of the output of `java --version`  if applicable]
+ - XiangShan branch: [paste branch name here if applicable]
+ - XiangShan commit id: [paste commit id here if applicable]
+ - NEMU commit id: [paste commit id here if applicable]
+ - SPIKE commit id: [paste commit id here if applicable]
 
 #### Additional context <!-- 额外信息 -->
 Add any other context about the problem here.
