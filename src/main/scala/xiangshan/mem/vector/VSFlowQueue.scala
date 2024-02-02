@@ -446,9 +446,10 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
       flowFinished(thisPtr) := true.B
     }
     // mark lsq entries addrvalid
-    io.lsq(i).valid := inActiveIssue(i) && flowQueueEntries(thisPtr).isLastElem
+    val feedbackLastElem = (io.pipeFeedback(i).bits.hit && flowQueueEntries(io.pipeFeedback(i).bits.flowPtr.value).isLastElem && io.pipeFeedback(i).valid)
+    io.lsq(i).valid := inActiveIssue(i) && flowQueueEntries(thisPtr).isLastElem ||  feedbackLastElem//FIXME: it will broken when ooo vector store
     io.lsq(i).bits := DontCare // TODO: fix me
-    io.lsq(i).bits.uop := flowQueueEntries(thisPtr).uop
+    io.lsq(i).bits.uop := Mux(feedbackLastElem, flowQueueEntries(io.pipeFeedback(i).bits.flowPtr.value).uop, flowQueueEntries(thisPtr).uop) //FIXME: it will broken when ooo vector store
   }
 
   // control signals
