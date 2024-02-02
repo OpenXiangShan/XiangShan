@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: RISC-V ISA Quesion / Problem
+    url: https://github.com/riscv/riscv-isa-manual/issues
+    about: Ask RISC-V ISA questions here.
+  - name: NEMU Question / Problem
+    url: https://github.com/OpenXiangShan/NEMU/issues
+    about: Ask NEMU questions here.
+  - name: Questions and Discussions
+    url: https://github.com/OpenXiangShan/XiangShan/discussions
+    about: Please consider to use Discussions.
