@@ -160,7 +160,8 @@ class TageBTable(implicit p: Parameters) extends XSModule with TBTParams{
       way = numBr,
       shouldReset = false,
       holdRead = true,
-      bypassWrite = true
+      bypassWrite = true,
+      parentName = s"Tage_bt_"
     ))
 
   // Power-on reset to weak taken
@@ -308,12 +309,12 @@ class TageTable
   // val s1_pc = io.req.bits.pc
   val req_unhashed_idx = getUnhashedIdx(io.req.bits.pc)
 
-  val us = Module(new FoldedSRAMTemplate(Bool(), set=nRowsPerBr, width=uFoldedWidth, way=numBr, shouldReset=true, extraReset=true, holdRead=true, singlePort=true))
+  val us = Module(new FoldedSRAMTemplate(Bool(), set=nRowsPerBr, width=uFoldedWidth, way=numBr, shouldReset=true, extraReset=true, holdRead=true, singlePort=true, parentName = s"Tage_us"))
   us.extra_reset.get := io.update.reset_u.reduce(_||_)
 
 
   val table_banks = Seq.fill(nBanks)(
-    Module(new FoldedSRAMTemplate(new TageEntry, set=bankSize, width=bankFoldWidth, way=numBr, shouldReset=true, holdRead=true, singlePort=true)))
+    Module(new FoldedSRAMTemplate(new TageEntry, set=bankSize, width=bankFoldWidth, way=numBr, shouldReset=true, holdRead=true, singlePort=true, parentName = s"Tage_table_banks")))
 
 
   val (s0_idx, s0_tag) = compute_tag_and_hash(req_unhashed_idx, io.req.bits.folded_hist)

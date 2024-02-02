@@ -26,7 +26,13 @@ import freechips.rocketchip.tilelink._
 import coupledL2.{L2ParamKey, CoupledL2}
 import system.HasSoCParameter
 import top.BusPerfMonitor
-import utility.{DelayN, ResetGen, TLClientsMerger, TLEdgeBuffer, TLLogger}
+//import utility.{DelayN, ResetGen, TLClientsMerger, TLEdgeBuffer, TLLogger}
+import utility.{DelayN,  TLClientsMerger, TLEdgeBuffer, TLLogger, BroadCastBundle }
+
+import coupledL2.mbist.MBISTInterface
+import coupledL2.utils.{ResetGen, DFTResetSignals }
+
+
 
 class XSTile()(implicit p: Parameters) extends LazyModule
   with HasXSParameter
@@ -97,6 +103,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
         val robHeadPaddr = Valid(UInt(PAddrBits.W))
         val l3MissMatch = Input(Bool())
       }
+      val dfx_reset = Input(new DFTResetSignals())
     })
 
     dontTouch(io.hartId)
@@ -104,6 +111,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     val core_soft_rst = core_reset_sink.in.head._1 // unused
 
     l2top.module.hartId.fromTile := io.hartId
+    //add dfx_reset 
+    core.module.io.dfx_reset := io.dfx_reset
     core.module.io.hartId := l2top.module.hartId.toCore
     core.module.io.reset_vector := l2top.module.reset_vector.toCore
     l2top.module.reset_vector.fromTile := io.reset_vector
@@ -140,15 +149,95 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     io.debugTopDown.robHeadPaddr := core.module.io.debugTopDown.robHeadPaddr
     core.module.io.debugTopDown.l3MissMatch := io.debugTopDown.l3MissMatch
 
+    // L2 mbist interface
+    //val l2MbistIntf = if(l2cache.isDefined){
+    //if(coreParams.L2CacheParamsOpt.hasMbist && coreParams.L2CacheParamsOpt.hasShareBus){
+    //if(true && true){
+      //val params = l2top.module.l2TopPipeLine.get.bd.params
+      //val node = l2top.module.l2TopPipeLine.get.node
+      //val intf = Some(Module(new MBISTInterface(
+      //  params = Seq(params),
+      //  ids = Seq(node.children.flatMap(_.array_id)),
+      //  name = s"MBIST_intf_l2",
+      //  pipelineNum = 1
+      //)))
+      //intf.get.toPipeline.head <> l2top.module.l2pipePorts.get
+      //l2top.module.l2TopPipeLine.get.genCSV(intf.get.info, "MBIST_L2")
+      //intf.get.mbist := DontCare
+      //dontTouch(intf.get.mbist)
+      //TODO: add mbist controller connections here
+      //intf
+    //} else {
+    //  None
+    //}
+  //} else {
+  //  None
+  //}
+
+
+
+  val mbistBroadCastToCore = if(coreParams.hasMbist) {
+    //val res = Some(Wire(new coupledL2.utils.BroadCastBundle))
+    val res = Some(Wire(new utility.BroadCastBundle))
+    core.module.dft.get := res.get
+
+//  println(s"running printing LiHe core.module.dft.get is                ${core.module.dft.get}")
+//  println(s"running printing LiHe core  res.get is                      ${res.get}")
+
+    res
+  } else {
+    None
+  }
+
+
+  val mbistBroadCastToL2 = if(coreParams.L2CacheParamsOpt.isDefined) {
+    if(coreParams.L2CacheParamsOpt.get.hasMbist){
+      val res = Some(Wire(new utility.BroadCastBundle))
+      //val res = Some(Wire(new utility.BroadCastBundle))
+      //l2top.module.dft.get := res.get
+
+//  println(s"running printing LiHe coupledL2.utils.BroadCastBundle is    ${utility.BroadCastBundle}")
+//  println(s"running printing LiHe l2top.l2cache.get.module.dft.get is   ${l2top.l2cache.get.module.dft.get}")
+//  println(s"running printing LiHe L2  res.get is                        ${res.get}")
+
+      l2top.module.dft.get := res.get
+      res
+    } else {
+      None
+    }
+  } else {
+    None
+  }
+  //@public val dft = if(mbistBroadCastToCore.isDefined || mbistBroadCastToL2.isDefined){
+  val dft = if(mbistBroadCastToCore.isDefined || mbistBroadCastToL2.isDefined){
+    Some(IO(new coupledL2.utils.BroadCastBundle))
+  } else {
+    None
+  }
+  if(dft.isDefined){
+    if(mbistBroadCastToCore.isDefined){
+      mbistBroadCastToCore.get := dft.get
+    }
+    if(mbistBroadCastToL2.isDefined){
+      mbistBroadCastToL2.get := dft.get
+    }
+  }
+
+
+
+
+
     // Modules are reset one by one
     // io_reset ----
     //             |
     //             v
     // reset ----> OR_SYNC --> {Misc, L2 Cache, Cores}
-    // val resetChain = Seq(
-    //   Seq(l2top.module, core.module)
-    // )
+    val resetChain = Seq(
+      Seq(l2top.module, core.module)
+    )
     // ResetGen(resetChain, reset, !debugOpts.FPGAPlatform)
+    //ResetGen(resetChain, reset, Some(io.dfx_reset), !debugOpts.FPGAPlatform)
+    ResetGen(resetChain, reset,  !debugOpts.FPGAPlatform , Some(io.dfx_reset) )  
   }
 
   lazy val module = new XSTileImp(this)

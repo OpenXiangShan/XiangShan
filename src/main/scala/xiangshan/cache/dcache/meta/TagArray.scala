@@ -23,6 +23,10 @@ import utility.SRAMTemplate
 import utils.XSPerfAccumulate
 import xiangshan.cache.CacheInstrucion._
 
+import coupledL2.mbist.MBISTPipeline
+
+
+
 class TagReadReq(implicit p: Parameters) extends DCacheBundle {
   val idx = UInt(idxBits.W)
   val way_en = UInt(nWays.W)
@@ -60,10 +64,14 @@ class TagArray(implicit p: Parameters) extends DCacheModule {
   }
 
   val tag_array = Module(new SRAMTemplate(UInt(tagBits.W), set = nSets, way = nWays,
-    shouldReset = false, holdRead = false, singlePort = true))
+    shouldReset = false, holdRead = false, singlePort = true, parentName = s"TagArray_tag"))
+
+  val mbistPipeline = {
+    Module(new MBISTPipeline(1 , s"TagArray_mbistPipe"))
+  }
 
   val ecc_array = Module(new SRAMTemplate(UInt(eccTagBits.W), set = nSets, way = nWays,
-    shouldReset = false, holdRead = false, singlePort = true))
+    shouldReset = false, holdRead = false, singlePort = true, parentName = s"TagArray_ecc"))
 
   val wen = rst || io.write.valid
   tag_array.io.w.req.valid := wen

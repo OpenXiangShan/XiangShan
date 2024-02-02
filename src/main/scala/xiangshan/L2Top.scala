@@ -26,7 +26,10 @@ import freechips.rocketchip.tilelink._
 import coupledL2.{L2ParamKey, CoupledL2}
 import system.HasSoCParameter
 import top.BusPerfMonitor
-import utility.{DelayN, ResetGen, TLClientsMerger, TLEdgeBuffer, TLLogger}
+import utility.{DelayN, TLClientsMerger, TLEdgeBuffer, TLLogger , SRAMTemplate}
+
+import coupledL2.utils.ResetGen
+import coupledL2.mbist.MBISTPipeline
 
 class L1BusErrorUnitInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
   val ecc_error = Valid(UInt(soc.PAddrBits.W))
@@ -131,6 +134,59 @@ class L2Top()(implicit p: Parameters) extends LazyModule
     })
 
     val resetDelayN = Module(new DelayN(UInt(PAddrBits.W), 5))
+
+    //val mbistPipeline = {
+    //Module(new MBISTPipeline(2 , s"L2Top_mbistPipe"))
+    // }
+    
+
+
+
+// l2top-l2cache connection add by Lihe
+
+  val mbistBroadCastToL2cache = if(coreParams.L2CacheParamsOpt.isDefined) {
+    if(coreParams.L2CacheParamsOpt.get.hasMbist){
+      val res = Some(Wire(new utility.BroadCastBundle))
+      //val res = Some(Wire(new utility.BroadCastBundle))
+      //l2top.module.dft.get := res.get
+
+//  println(s"running printing LiHe coupledL2.utils.BroadCastBundle is    ${utility.BroadCastBundle}")
+//  println(s"running printing LiHe l2cache.get.module.dft.get is   ${l2cache.get.module.dft.get}")
+//  println(s"running printing LiHe L2  res.get is                        ${res.get}")
+
+      l2cache.get.module.dft.get := res.get
+      res
+    } else {
+      None
+    }
+  } else {
+    None
+  }
+
+//  l2top dft add by LiHe
+/*
+    val sigFromSrams = if(coreParams.hasMbist) Some(SRAMTemplate.genBroadCastBundleTop()) else None
+    val dft = if(coreParams.hasMbist) Some(IO(sigFromSrams.get.cloneType)) else None
+    if(coreParams.hasMbist) {
+      dft.get <> sigFromSrams.get
+      dontTouch(dft.get)
+    }
+*/
+   //val dft = if( mbistBroadCastToL2.isDefined){
+   val dft = if( true){
+    Some(IO(new utility.BroadCastBundle))
+  } else {
+    None
+  }
+  if(dft.isDefined){
+    //if(mbistBroadCastToL2.isDefined){
+    if(true){
+      mbistBroadCastToL2cache.get := dft.get
+    }
+  }
+
+
+
 
     beu.module.io.errors <> beu_errors
     resetDelayN.io.in := reset_vector.fromTile

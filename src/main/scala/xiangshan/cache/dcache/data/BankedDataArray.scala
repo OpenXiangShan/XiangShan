@@ -26,6 +26,9 @@ import xiangshan.{L1CacheErrorInfo, XSCoreParamsKey}
 
 import scala.math.max
 
+import coupledL2.mbist.MBISTPipeline
+
+
 class BankConflictDB(implicit p: Parameters) extends DCacheBundle{
   val addr = Vec(LoadPipelineWidth, Bits(PAddrBits.W))
   val set_index = Vec(LoadPipelineWidth, UInt((DCacheAboveIndexOffset - DCacheSetOffset).W))
@@ -104,7 +107,8 @@ class DataSRAM(bankIdx: Int, wayIdx: Int)(implicit p: Parameters) extends DCache
     way = 1,
     shouldReset = false,
     holdRead = false,
-    singlePort = true
+    singlePort = true,
+    parentName = s"BankedDataArray_data"
   ))
 
   data_sram.io.w.req.valid := io.w.en
@@ -176,8 +180,13 @@ class DataSRAMBank(index: Int)(implicit p: Parameters) extends DCacheModule {
       way = 1,
       shouldReset = false,
       holdRead = false,
-      singlePort = true
+      singlePort = true,
+      parentName = s"BankedDataArray_data_2"
     ))
+  }
+
+  val mbistPipeline = {
+    Module(new MBISTPipeline(1 , s"BankedDataArray_mbistPipe"))
   }
 
   for (w <- 0 until DCacheWays) {
@@ -338,7 +347,8 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
                 way = 1,
                 shouldReset = false,
                 holdRead = false,
-                singlePort = true
+                singlePort = true,
+                parentName = s"BankedDataArray_data_3"
             ))
       )))
       ecc
@@ -708,7 +718,8 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
           way = DCacheWays,
           shouldReset = false,
           holdRead = false,
-          singlePort = true
+          singlePort = true,
+          parentName = s"BankedDataArray_data_2"
         ))
       ))
       ecc

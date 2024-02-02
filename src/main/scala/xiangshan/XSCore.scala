@@ -32,6 +32,12 @@ import xiangshan.mem.L1PrefetchFuzzer
 
 import scala.collection.mutable.ListBuffer
 
+import coupledL2.mbist.{MBISTInterface, MBISTPipeline}
+import coupledL2.utils.{DFTResetSignals, ModuleNode, ResetGen, ResetGenNode }
+
+import utility.SRAMTemplate
+
+
 abstract class XSModule(implicit val p: Parameters) extends Module
   with HasXSParameter
   with HasFPUParameters
@@ -169,6 +175,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
       val l2MissMatch = Input(Bool())
       val l3MissMatch = Input(Bool())
     }
+    val dfx_reset = Input(new DFTResetSignals())
   })
 
   println(s"FPGAPlatform:${env.FPGAPlatform} EnableDebug:${env.EnableDebug}")
@@ -176,6 +183,13 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   private val frontend = outer.frontend.module
   private val backend = outer.backend.module
   private val memBlock = outer.memBlock.module
+
+//connect memblock backend dfx_reset
+
+  outer.backend.module.io.dfx_reset := io.dfx_reset
+  outer.memBlock.module.io.dfx_reset := io.dfx_reset
+
+
 
   frontend.io.hartId  := memBlock.io.inner_hartId
   backend.io.hartId := memBlock.io.inner_hartId
@@ -270,6 +284,45 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.inner_l2_pf_enable := backend.io.l2_pf_enable
   io.l2_pf_enable := memBlock.io.outer_l2_pf_enable
 
+
+  // DFT_mbist interface & pipeline
+  val mbistPipeline = if(coreParams.hasMbist && coreParams.hasShareBus) {
+    Some(Module(new MBISTPipeline(Int.MaxValue,s"MBIST_Core")))
+  } else {
+    None
+  }
+
+  val coreMbistIntf = if (coreParams.hasMbist && coreParams.hasShareBus) {
+    val params = mbistPipeline.get.bd.params
+    val node = mbistPipeline.get.node
+    val intf = Some(Module(new MBISTInterface(
+      params = Seq(params),
+      ids = Seq(node.children.flatMap(_.array_id)),
+      name = s"MBIST_intf_core",
+      pipelineNum = 1
+    )))
+    intf.get.toPipeline.head <> mbistPipeline.get.io.mbist.get
+    mbistPipeline.get.genCSV(intf.get.info, "MBIST_Core")
+    intf.get.mbist := DontCare
+    dontTouch(intf.get.mbist)
+    //TODO: add mbist controller connections here
+    intf
+  } else {
+    None
+  }
+
+  val sigFromSrams = if(coreParams.hasMbist) Some(SRAMTemplate.genBroadCastBundleTop()) else None
+  val dft = if(coreParams.hasMbist) Some(IO(sigFromSrams.get.cloneType)) else None
+  if(coreParams.hasMbist) {
+    dft.get <> sigFromSrams.get
+    dontTouch(dft.get)
+  }
+
+
+
+
+
+
   // top-down info
   memBlock.io.debugTopDown.robHeadVaddr := backend.io.debugTopDown.fromRob.robHeadVaddr
   frontend.io.debugTopDown.robHeadVaddr := backend.io.debugTopDown.fromRob.robHeadVaddr
@@ -278,6 +331,18 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.debugTopDown.fromCore.l3MissMatch := io.debugTopDown.l3MissMatch
   backend.io.debugTopDown.fromCore.fromMem := memBlock.io.debugTopDown.toCore
   memBlock.io.debugRolling := backend.io.debugRolling
+
+  // Modules are reset one by one
+  //val resetTree = ResetGenNode(
+  //  Seq(
+     // ModuleNode(backend),
+     // ModuleNode(memBlock),
+     // ModuleNode(frontend)
+  //  )
+  //)
+
+
+
 
   // Modules are reset one by one
   // val resetTree = ResetGenNode(
@@ -298,10 +363,23 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   //   )
   // )
 
-  // ResetGen(resetTree, reset, !debugOpts.FPGAPlatform)
-  if (debugOpts.FPGAPlatform) {
-    frontend.reset := memBlock.reset_io_frontend
-    backend.reset := memBlock.reset_io_backend
-  }
+
+
+
+
+
+
+
+
+
+
+
+  //ResetGen(resetTree, reset, !debugOpts.FPGAPlatform)
+  //ResetGen(resetTree, reset, Some(io.dfx_reset), !debugOpts.FPGAPlatform)
+  //ResetGen(resetTree, reset,  !debugOpts.FPGAPlatform , Some(io.dfx_reset) )
+   if (debugOpts.FPGAPlatform) {
+     frontend.reset := memBlock.reset_io_frontend
+     backend.reset := memBlock.reset_io_backend
+   }
 
 }

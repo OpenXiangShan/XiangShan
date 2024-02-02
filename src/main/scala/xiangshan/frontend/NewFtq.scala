@@ -27,6 +27,9 @@ import xiangshan.backend.CtrlToFtqIO
 import xiangshan.backend.decode.ImmUnion
 import utility.ChiselDB
 
+import coupledL2.mbist.MBISTPipeline
+
+
 class FtqDebugBundle extends Bundle {
   val pc = UInt(39.W)
   val target = UInt(39.W)
@@ -68,13 +71,19 @@ class FtqNRSRAM[T <: Data](gen: T, numRead: Int)(implicit p: Parameters) extends
   })
 
   for(i <- 0 until numRead){
-    val sram = Module(new SRAMTemplate(gen, FtqSize))
+    //val sram = Module(new SRAMTemplate(gen, FtqSize))
+    val sram = Module(new SRAMTemplate(gen, FtqSize, singlePort=false, bypassWrite=true, parentName = s"NewFtq"))
+    //val sram = Module(new SRAMTemplate(gen, FtqSize, singlePort=true ))
     sram.io.r.req.valid := io.ren(i)
     sram.io.r.req.bits.setIdx := io.raddr(i)
     io.rdata(i) := sram.io.r.resp.data(0)
     sram.io.w.req.valid := io.wen
     sram.io.w.req.bits.setIdx := io.waddr
     sram.io.w.req.bits.data := VecInit(io.wdata)
+  }
+
+  val mbistPipeline = {
+    Module(new MBISTPipeline(1 , s"NewFtq_mbistPipe"))
   }
 
 }

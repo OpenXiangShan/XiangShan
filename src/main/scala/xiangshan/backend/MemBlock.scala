@@ -38,6 +38,9 @@ import xiangshan.mem.mdp._
 import xiangshan.mem.prefetch.{BasePrefecher, SMSParams, SMSPrefetcher, L1Prefetcher}
 import xiangshan.frontend.HasInstrMMIOConst
 
+import coupledL2.mbist.MBISTPipeline
+import utility.ResetGen._
+
 class Std(implicit p: Parameters) extends FunctionUnit {
   io.in.ready := true.B
   io.out.valid := io.in.valid
@@ -224,6 +227,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       val robHeadVaddr = Flipped(Valid(UInt(VAddrBits.W)))
       val toCore = new MemCoreTopDownIO
     }
+
+// dft signal
+    val dfx_reset = Input(new DFTResetSignals())
+
     val debugRolling = Flipped(new RobDebugRollingIO)
 
     // All the signals from/to frontend/backend to/from bus will go through MemBlock
@@ -917,12 +924,30 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
         ModuleNode(ptw_to_l2_buffer)
       )
     )
-    ResetGen(resetTree, reset, !p(DebugOptionsKey).FPGAPlatform)
+
+    //val resetTree = ResetGenNode(
+//      Seq(
+//        ResetGenNode(Seq(ModuleNode(DCacheWrapper),
+//        ModuleNode(L2TLBWrapper)
+//        ) 
+//        )
+//      )
+//    )
+
+//   println(s"running printing LiHe io.dfx_reset is ${io.dfx_reset}")
+
+
+
+    ResetGen(resetTree, reset, !p(DebugOptionsKey).FPGAPlatform , Some(io.dfx_reset))
   } else {
     reset_io_frontend := DontCare
     reset_io_backend := DontCare
   }
 
+  val mbistPipeline = {
+    Module(new MBISTPipeline(2 , s"MemBlock_mbistPipe"))
+  }
+  
   // top-down info
   dcache.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr
   dtlbRepeater.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr

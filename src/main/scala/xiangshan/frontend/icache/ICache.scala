@@ -30,6 +30,9 @@ import xiangshan.cache._
 import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.frontend._
 
+import coupledL2.mbist.MBISTPipeline
+
+
 case class ICacheParameters(
     nSets: Int = 256,
     nWays: Int = 4,
@@ -206,7 +209,8 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
       way=nWays,
       shouldReset = true,
       holdRead = true,
-      singlePort = true
+      singlePort = true,
+      parentName = s"ICache_tag"
     ))
 
     //meta connection
@@ -414,7 +418,8 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
       way=nWays,
       shouldReset = true,
       holdRead = true,
-      singlePort = true
+      singlePort = true,
+      parentName = s"ICache_code"
     ))
 
     if(i == 0) {
@@ -720,7 +725,8 @@ class ICachePartWayArray[T <: Data](gen: T, pWay: Int)(implicit p: Parameters) e
       way=pWay,
       shouldReset = true,
       holdRead = true,
-      singlePort = true
+      singlePort = true,
+      parentName = s"ICache_sram"
     ))
 
     sramBank.io.r.req.valid := io.read.req(bank).valid
@@ -731,6 +737,10 @@ class ICachePartWayArray[T <: Data](gen: T, pWay: Int)(implicit p: Parameters) e
     sramBank.io.w.req.bits.apply(data=io.write.bits.wdata, setIdx=io.write.bits.widx, waymask=io.write.bits.wmask.asUInt)
 
     sramBank
+  }
+
+  val mbistPipeline = {
+    Module(new MBISTPipeline(1 , s"ICache_mbistPipe"))
   }
 
   io.read.req.map(_.ready := !io.write.valid && srams.map(_.io.r.req.ready).reduce(_&&_))

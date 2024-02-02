@@ -27,6 +27,9 @@ import scala.math.min
 import scala.{Tuple2 => &}
 import os.copy
 
+import coupledL2.mbist.MBISTPipeline
+
+
 
 trait FTBParams extends HasXSParameter with HasBPUConst {
   val numEntries = FtbSize
@@ -309,7 +312,12 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     })
 
     // Extract holdRead logic to fix bug that update read override predict read result
-    val ftb = Module(new SRAMTemplate(new FTBEntryWithTag, set = numSets, way = numWays, shouldReset = true, holdRead = false, singlePort = true))
+    val ftb = Module(new SRAMTemplate(new FTBEntryWithTag, set = numSets, way = numWays, shouldReset = true, holdRead = false, singlePort = true, parentName = s"FTB"))
+    
+    val mbistPipeline = {
+    Module(new MBISTPipeline(1 , s"FTB_mbistPipe"))
+  }
+
     val ftb_r_entries = ftb.io.r.resp.data.map(_.entry)
 
     val pred_rdata   = HoldUnless(ftb.io.r.resp.data, RegNext(io.req_pc.valid && !io.update_access))

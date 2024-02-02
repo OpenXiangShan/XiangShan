@@ -25,6 +25,9 @@ import utils.XSDebug
 
 import scala.math.max
 
+import coupledL2.mbist.MBISTPipeline
+
+
 class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray {
   val singlePort = true
   val readHighPriority = false
@@ -72,9 +75,14 @@ class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray {
         way = 1,
         shouldReset = false,
         holdRead = false,
-        singlePort = singlePort
+        singlePort = singlePort,
+        parentName = s"DuplicatedDateArray_a"
       ))
     }
+
+    val mbistPipeline = {
+    Module(new MBISTPipeline(1 , s"DuplicatedDataArray_mbistPipe"))
+   }
 
     for (w <- 0 until nWays) {
       val wen = io.wen && io.w_way_en(w)
@@ -120,7 +128,8 @@ class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray {
         way = nWays,
         shouldReset = false,
         holdRead = false,
-        singlePort = singlePort
+        singlePort = singlePort,
+        parentName = s"DuplicatedDateArray_ecc_b"
       ))
       ecc_array.io.w.req.valid := io.write.valid && io.write.bits.wmask(r)
       ecc_array.io.w.req.bits.apply(

@@ -26,6 +26,8 @@ import xiangshan.backend.fu.{PFEvent, PMP, PMPChecker,PMPReqBundle}
 import xiangshan.cache.mmu._
 import xiangshan.frontend.icache._
 
+import coupledL2.mbist.MBISTPipeline
+
 
 class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
@@ -72,6 +74,10 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val ibuffer =  Module(new IBuffer)
   val ftq = Module(new Ftq)
 
+  val mbistPipeline = {
+    Module(new MBISTPipeline(2 , s"Frontend_mbistPipe"))
+  }
+  
   val needFlush = RegNext(io.backend.toFtq.redirect.valid)
   val FlushControlRedirect = RegNext(io.backend.toFtq.redirect.bits.debugIsCtrl)
   val FlushMemVioRedirect = RegNext(io.backend.toFtq.redirect.bits.debugIsMemVio)

@@ -208,6 +208,10 @@ class BackendImp(outer: Backend)(implicit p: Parameters) extends LazyModuleImp(o
       val fromCore = new CoreDispatchTopDownIO
     }
     val debugRolling = new RobDebugRollingIO
+
+// dft signal
+    val dfx_reset = Input(new DFTResetSignals())
+
   })
 
   private val ctrlBlock = outer.ctrlBlock.module
@@ -386,5 +390,9 @@ class BackendImp(outer: Backend)(implicit p: Parameters) extends LazyModuleImp(o
       :+ ModuleNode(wbArbiter)
       :+ ModuleNode(ctrlBlock)
   )
-  ResetGen(resetTree, reset, !p(DebugOptionsKey).FPGAPlatform)
+
+
+//  println(s"running printing LiHe io.dfx_reset is ${io.dfx_reset}")
+
+  ResetGen(resetTree, reset, !p(DebugOptionsKey).FPGAPlatform , Some(io.dfx_reset))
 }

@@ -26,6 +26,10 @@ import utility._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import freechips.rocketchip.tilelink._
 
+import coupledL2.mbist.MBISTPipeline
+
+
+
 /* ptw cache caches the page table of all the three layers
  * ptw cache resp at next cycle
  * the cache should not be blocked
@@ -176,8 +180,14 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     l2EntryType,
     set = l2tlbParams.l2nSets,
     way = l2tlbParams.l2nWays,
-    singlePort = sramSinglePort
+    singlePort = sramSinglePort,
+    parentName = s"PageTableCache_L2"
   ))
+
+  val mbistPipeline = {
+    Module(new MBISTPipeline(1 , s"PageTableCache_mbistPipe"))
+  }
+
   val l2v = RegInit(0.U((l2tlbParams.l2nSets * l2tlbParams.l2nWays).W))
   val l2g = Reg(UInt((l2tlbParams.l2nSets * l2tlbParams.l2nWays).W))
   val l2asids = Reg(Vec(l2tlbParams.l2nSets, Vec(l2tlbParams.l2nWays, UInt(AsidLength.W))))
@@ -200,7 +210,8 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     l3EntryType,
     set = l2tlbParams.l3nSets,
     way = l2tlbParams.l3nWays,
-    singlePort = sramSinglePort
+    singlePort = sramSinglePort,
+    parentName = s"PageTableCache_L3"
   ))
   val l3v = RegInit(0.U((l2tlbParams.l3nSets * l2tlbParams.l3nWays).W))
   val l3g = Reg(UInt((l2tlbParams.l3nSets * l2tlbParams.l3nWays).W))

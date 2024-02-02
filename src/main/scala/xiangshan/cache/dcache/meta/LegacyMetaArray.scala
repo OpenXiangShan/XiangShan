@@ -24,6 +24,9 @@ import utility.{Code, ParallelOR, ReplacementPolicy, SRAMTemplate}
 import utils.XSDebug
 import xiangshan.L1CacheErrorInfo
 
+import coupledL2.mbist.MBISTPipeline
+
+
 // basic building blocks for L1 DCache
 class L1Metadata(implicit p: Parameters) extends DCacheBundle {
   val coh = new ClientMetadata
@@ -72,7 +75,15 @@ class L1MetadataArray(onReset: () => L1Metadata)(implicit p: Parameters) extends
   }
 
   val tag_array = Module(new SRAMTemplate(UInt(encMetaBits.W), set = nSets, way = nWays,
-    shouldReset = false, holdRead = false, singlePort = true))
+    shouldReset = false, holdRead = false, singlePort = true, parentName = s"LegacyMetaArray" ))
+
+  //ramParamsBelongToThis.hierarchyName = s"LegacyMetaArray"
+  //tag_array.p.hierarchyName = s"LegacyMetaArray"
+
+
+  //val mbistPipeline = {
+  //  Module(new MBISTPipeline(1 , s"LegacyMetaArray_mbistPipe"))
+  //}
 
   // tag write
   val wen = rst || io.write.valid

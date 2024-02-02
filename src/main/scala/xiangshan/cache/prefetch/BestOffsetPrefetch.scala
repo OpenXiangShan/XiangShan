@@ -25,6 +25,9 @@ import xiangshan.cache.mmu.{HasTlbConst}
 import utils._
 import utility._
 
+import coupledL2.mbist.MBISTPipeline
+
+
 case object BOPParamsKey extends Field[BOPParameters]
 
 case class BOPParameters(
@@ -166,7 +169,11 @@ class RecentRequestTable(implicit p: Parameters) extends PrefetchModule {
     }
   }
 
-  val rrTable = Module(new SRAMTemplate(rrTableEntry(), set = rrTableEntries, way = 1, shouldReset = true, singlePort = true))
+  val rrTable = Module(new SRAMTemplate(rrTableEntry(), set = rrTableEntries, way = 1, shouldReset = true, singlePort = true, parentName = s"BestOffestPrefetch"))
+
+  val mbistPipeline = {
+    Module(new MBISTPipeline(1 , s"BestOffsetPrefetch_mbistPipe"))
+  }
 
   val wAddr = io.w.bits
   rrTable.io.w.req.valid := io.w.valid && !io.r.req.valid

@@ -30,6 +30,8 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.jtag.JTAGIO
 
+//import coupledL2.utils.ResetGen
+
 abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
   with BindingScope
 {
@@ -172,8 +174,22 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       val riscv_rst_vec = Input(Vec(NumCores, UInt(38.W)))
     })
 
-    val reset_sync = withClockAndReset(io.clock.asClock, io.reset) { ResetGen() }
-    val jtag_reset_sync = withClockAndReset(io.systemjtag.jtag.TCK, io.systemjtag.reset) { ResetGen() }
+// add DFT reset by LiHe
+    
+    val scan_mode = IO(Input(Bool()))
+    val dft_lgc_rst_n = IO(Input(AsyncReset()))
+    val dft_mode = IO(Input(Bool()))
+    val dfx_reset = Wire(new DFTResetSignals())
+    dfx_reset.lgc_rst_n := dft_lgc_rst_n
+    dfx_reset.mode := dft_mode
+    dfx_reset.scan_mode := scan_mode
+
+
+
+    //val reset_sync = withClockAndReset(io.clock.asClock, io.reset) { ResetGen() }
+    val reset_sync = withClockAndReset(io.clock.asClock, io.reset) { ResetGen(2, Some(dfx_reset)) }
+    //val jtag_reset_sync = withClockAndReset(io.systemjtag.jtag.TCK, io.systemjtag.reset) { ResetGen() }
+    val jtag_reset_sync = withClockAndReset(io.systemjtag.jtag.TCK, io.systemjtag.reset) { ResetGen(2, Some(dfx_reset)) }
 
     // override LazyRawModuleImp's clock and reset
     childClock := io.clock.asClock
@@ -187,6 +203,12 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     dontTouch(io)
     dontTouch(peripheral)
     dontTouch(memory)
+
+    dontTouch(scan_mode)
+    dontTouch(dft_lgc_rst_n)
+    dontTouch(dft_mode)
+    dontTouch(dfx_reset)
+
     misc.module.ext_intrs := io.extIntrs
     misc.module.rtc_clock := io.rtc_clock
     misc.module.pll0_lock := io.pll0_lock
@@ -196,6 +218,10 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
     for ((core, i) <- core_with_l2.zipWithIndex) {
       core.module.io.hartId := i.U
+
+// connect core_with_l2 dfx_reset
+      core.module.io.dfx_reset:= dfx_reset
+
       io.riscv_halt(i) := core.module.io.cpu_halt
       core.module.io.reset_vector := io.riscv_rst_vec(i)
     }
@@ -242,11 +268,64 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       x.version     := io.systemjtag.version
     }
 
+//
+    val mbistBroadCastToTile = if(core_with_l2.head.module.dft.isDefined) {
+      val res = Some(Wire(new utility.BroadCastBundle))
+      core_with_l2.foreach(_.module.dft.get := res.get)
+      res
+    } else {
+      None
+    }
+//    val mbistBroadCastToL3 = if(l3cacheOpt.isDefined) {
+//      if(l3cacheOpt.get.module.dft.isDefined){
+//        val res = Some(Wire(new utility.BroadCastBundle))
+//        l3cacheOpt.get.module.dft.get := res.get
+//        res
+//      } else {
+//        None
+//      }
+//    } else {
+//      None
+//    }
+    //val dft = if(mbistBroadCastToTile.isDefined || mbistBroadCastToL3.isDefined){
+    val dft = if(true || false){
+      Some(IO(new utility.BroadCastBundle))
+    } else {
+      None
+    }
+    if(dft.isDefined){
+      dontTouch(dft.get)
+      if(mbistBroadCastToTile.isDefined){
+        mbistBroadCastToTile.get := dft.get
+      }
+      //if(mbistBroadCastToL3.isDefined){
+      //if(false){
+      //  mbistBroadCastToL3.get := dft.get
+      //}
+    }
+
+
+
+
+
+
+
+//
+
+
+
     withClockAndReset(io.clock.asClock, reset_sync) {
       // Modules are reset one by one
       // reset ----> SYNC --> {SoCMisc, L3 Cache, Cores}
       val resetChain = Seq(Seq(misc.module) ++ l3cacheOpt.map(_.module) ++ core_with_l2.map(_.module))
-      ResetGen(resetChain, reset_sync, !debugOpts.FPGAPlatform)
+      //ResetGen(resetChain, reset_sync, !debugOpts.FPGAPlatform)
+      ResetGen(resetChain, reset_sync, !debugOpts.FPGAPlatform , Some(dfx_reset))
+
+
+//      val coreResetChain:Seq[Reset] = core_with_l2.map(_.moduleInstance.ireset)
+//      val resetChain = Seq(misc.module.reset) ++ l3cacheOpt.map(_.module.reset) ++ coreResetChain
+//      val resetDftSigs = ResetGen.applyOneLevel(resetChain, reset_sync, !debugOpts.FPGAPlatform)
+//      resetDftSigs:= dfx_reset
     }
 
   }

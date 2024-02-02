@@ -12,6 +12,9 @@ import xiangshan.mem.{LdPrefetchTrainBundle, StPrefetchTrainBundle, L1PrefetchRe
 import xiangshan.mem.trace._
 import xiangshan.mem.HasL1PrefetchSourceParameter
 
+import coupledL2.mbist.MBISTPipeline
+
+
 case class SMSParams
 (
   region_size: Int = 1024,
@@ -545,8 +548,14 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   val pht_ram = Module(new SRAMTemplate[PhtEntry](new PhtEntry,
     set = smsParams.pht_size / smsParams.pht_ways,
     way =smsParams.pht_ways,
-    singlePort = true
+    singlePort = true,
+    parentName = s"SMSPrefetcher"
   ))
+
+  val mbistPipeline = {
+    Module(new MBISTPipeline(1 , s"SMSPrefetcher_mbistPipe"))
+  }
+
   def PHT_SETS = smsParams.pht_size / smsParams.pht_ways
   val pht_valids = Seq.fill(smsParams.pht_ways){
     RegInit(VecInit(Seq.fill(PHT_SETS){false.B}))

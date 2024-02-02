@@ -23,6 +23,9 @@ import xiangshan.cache._
 import utils._
 import utility._
 
+import coupledL2.mbist.MBISTPipeline
+
+
 class PrefetchMetaReadBundle(implicit p: Parameters) extends ICacheBundle {
   val idx = UInt(idxBits.W)
 }
@@ -88,11 +91,16 @@ class ICacheBankedMetaArray(readPortNum: Int)(implicit p: Parameters) extends IC
       way = nWays,
       shouldReset = true,
       holdRead = true,
-      singlePort = true
+      singlePort = true,
+      parentName = s"ICacheBankedArray_tag"
     ))
     tag_array
   }
   val valid_array = RegInit(VecInit(Seq.fill(nWays)(0.U(nSets.W))))
+
+  val mbistPipeline1 = {
+    Module(new MBISTPipeline(1 , s"ICacheBankedMetaArray_mbistPipe"))
+  }
 
   // deal read
   // read read bank conflict
@@ -219,12 +227,17 @@ class ICacheMetaArrayNoBanked()(implicit p: Parameters) extends ICacheArray
     way = nWays,
     shouldReset = true,
     holdRead = true,
-    singlePort = true
+    singlePort = true,
+    parentName = s"ICacheBankedArray_tagArray"
   ))
   tagArray.io.r.req.valid := io.read.valid
   tagArray.io.r.req.bits.apply(setIdx=io.read.bits.idx)
   tagArray.io.w.req.valid := io.write.valid
   tagArray.io.w.req.bits.apply(data=write_meta_bits, setIdx=io.write.bits.virIdx, waymask=io.write.bits.waymask)
+
+  val mbistPipeline2 = {
+    Module(new MBISTPipeline(1 , s"ICacheMetaArrayNoBanked_mbistPipe"))
+  }
 
   val read_set_idx_next = RegEnable(io.read.bits.idx, io.read.fire)
   val valid_array = RegInit(VecInit(Seq.fill(nWays)(0.U(nSets.W))))

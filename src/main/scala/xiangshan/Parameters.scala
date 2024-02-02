@@ -77,6 +77,8 @@ case class XSCoreParameters
   RasCtrSize: Int = 3,
   CacheLineSize: Int = 512,
   FtbWays: Int = 4,
+  hasMbist:Boolean = true,
+  hasShareBus:Boolean = true,
   TageTableInfos: Seq[Tuple3[Int,Int,Int]] =
   //       Sets  Hist   Tag
     // Seq(( 2048,    2,    8),
@@ -266,6 +268,7 @@ case class XSCoreParameters
     name = "l2",
     ways = 8,
     sets = 1024, // default 512KB L2
+    hasShareBus = true, 
     prefetch = Some(coupledL2.prefetch.PrefetchReceiverParams())
   )),
   L2NBanks: Int = 1,
