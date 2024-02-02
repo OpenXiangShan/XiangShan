@@ -70,7 +70,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
       val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // from store_s1
       val storeAddrInRe = Vec(StorePipelineWidth, Input(new LsPipelineBundle())) // from store_s2
       val vecStoreAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) //from store_s2
-      val vecStoreAddrInactivate = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // from vsFlowQueue inactivative element issue
+      val vecStoreFlowAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // from vsFlowQueue last element issue
     }
     val std = new Bundle() {
       val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new MemExuOutput))) // from store_s0, store data, send to sq from rs
@@ -159,9 +159,8 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   // store queue wiring
   storeQueue.io.brqRedirect <> io.brqRedirect
   storeQueue.io.storeAddrIn <> io.sta.storeAddrIn // from store_s1
-  storeQueue.io.vecStoreAddrIn  <> io.sta.vecStoreAddrIn // store_s1
+  storeQueue.io.vecStoreAddrIn  <> io.sta.vecStoreFlowAddrIn // from VsFlowQueue inactivative element isuue
   storeQueue.io.storeAddrInRe <> io.sta.storeAddrInRe // from store_s2
-  storeQueue.io.vecStoreAddrInactivate <> io.sta.vecStoreAddrInactivate // from VsFlowQueue inactivative element isuue
   storeQueue.io.storeDataIn <> io.std.storeDataIn // from store_s0
   storeQueue.io.storeMaskIn <> io.sta.storeMaskIn // from store_s0
   storeQueue.io.sbuffer     <> io.sbuffer
