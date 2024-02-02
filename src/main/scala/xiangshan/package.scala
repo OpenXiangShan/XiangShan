@@ -621,7 +621,7 @@ package object xiangshan {
     def IMM_VSETVLI   = "b1100".U
     def IMM_VSETIVLI  = "b1101".U
     def IMM_LUI32 = "b1011".U
-    def IMM_VRORVI = "b1110".U
+    def IMM_VRORVI = "b1111".U
 
     def X      = BitPat("b0000")
 
