@@ -1442,7 +1442,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     }.elsewhen (debugMode) {
       //do nothing
     }.elsewhen (delegVS) {
-      vscause := (hasIntr << (XLEN-1)).asUInt | Mux(hasIntr, intrNO >> 1.U, exceptionNO)
+      vscause := (hasIntr << (XLEN-1)).asUInt | Mux(hasIntr, intrNO - 1.U, exceptionNO)
       vsepc := Mux(hasInstrPageFault || hasInstrAccessFault, iexceptionPC, dexceptionPC)
       vsstatusNew.spp := privilegeMode
       vsstatusNew.pie.s := vsstatusOld.ie.s
