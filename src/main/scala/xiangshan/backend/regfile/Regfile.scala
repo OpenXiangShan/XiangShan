@@ -76,6 +76,7 @@ class Regfile
   println(name + ": size:" + numPregs + " read: " + numReadPorts + " write: " + numWritePorts)
 
   val mem = Reg(Vec(numPregs, UInt(len.W)))
+  require(Seq(1, 2, 4).contains(bankNum), "bankNum must be 1 or 2 or 4")
   for (r <- io.readPorts) {
     if (bankNum == 1) {
       r.data := mem(RegNext(r.addr))
