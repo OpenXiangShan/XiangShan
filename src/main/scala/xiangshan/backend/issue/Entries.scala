@@ -18,6 +18,8 @@ import xiangshan.backend.issue.EntryBundles._
 class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule {
   override def desiredName: String = params.getEntryName
 
+  require(params.numEnq <= 2, "number of enq should be no more than 2")
+
   private val EnqEntryNum         = params.numEnq
   private val OthersEntryNum      = params.numEntries - params.numEnq
   val io = IO(new EntriesIO)
@@ -115,6 +117,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   canTrans := PopCount(validVec.take(EnqEntryNum)) <= PopCount(enqReadyOthersVec)
   enqTransSelVec(0).valid := transPolicy.io.enqSelOHVec(0).valid
   enqTransSelVec(0).bits := transPolicy.io.enqSelOHVec(0).bits
+  // Todo: comments why enqTransSelVec(1).valid relies on validVec(0)
   if (params.numEnq == 2) {
     enqTransSelVec(1).valid := Mux(!validVec(0), transPolicy.io.enqSelOHVec(0).valid, transPolicy.io.enqSelOHVec(1).valid)
     enqTransSelVec(1).bits := Mux(!validVec(0), transPolicy.io.enqSelOHVec(0).bits, transPolicy.io.enqSelOHVec(1).bits)

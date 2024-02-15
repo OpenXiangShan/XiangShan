@@ -389,8 +389,10 @@ case class XSCoreParameters
       ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
         ExeUnitParams("STD0", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(13, 1), VfRD(6, 0)))),
+      ), numEntries = IssueQueueSize, numEnq = 2),
+      IssueBlockParams(Seq(
         ExeUnitParams("STD1", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(5, 1), VfRD(10, Int.MaxValue)))),
-      ), numEntries = IssueQueueSize, numEnq = 4),
+      ), numEntries = IssueQueueSize, numEnq = 2),
     ),
       numPregs = intPreg.numEntries max vfPreg.numEntries,
       numDeqOutside = 0,
