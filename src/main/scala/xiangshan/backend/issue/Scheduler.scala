@@ -97,7 +97,7 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
     val stIssuePtr = Input(new SqPtr())
     val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
     val scommit = Input(UInt(log2Ceil(EnsbufferWidth + 1).W)) // connected to `memBlock.io.sqDeq` instead of ROB
-    val wakeup = Vec(params.LdExuCnt /* + params.HyuCnt */, Flipped(Valid(new DynInst)))
+    val wakeup = Vec(params.LdExuCnt, Flipped(Valid(new DynInst)))
     val lqDeqPtr = Input(new LqPtr)
     val sqDeqPtr = Input(new SqPtr)
     // from lsq
@@ -315,7 +315,7 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
 
   io.toMem.get.loadFastMatch := 0.U.asTypeOf(io.toMem.get.loadFastMatch) // TODO: is still needed?
 
-  private val loadWakeUp = issueQueues.filter(_.params.StdCnt == 0).map(_.asInstanceOf[IssueQueueMemAddrImp].io.memIO.get.loadWakeUp).flatten
+  private val loadWakeUp = issueQueues.filter(_.params.LdExuCnt > 0).map(_.asInstanceOf[IssueQueueMemAddrImp].io.memIO.get.loadWakeUp).flatten
   require(loadWakeUp.length == io.fromMem.get.wakeup.length)
   loadWakeUp.zip(io.fromMem.get.wakeup).foreach(x => x._1 := x._2)
 
