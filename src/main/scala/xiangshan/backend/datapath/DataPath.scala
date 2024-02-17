@@ -362,6 +362,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
           og1FailedVec2(iqIdx)(iuIdx)   := s1_toExuValid(iqIdx)(iuIdx) && !toExuFire(iqIdx)(iuIdx)
           og1resp.valid                 := s1_toExuValid(iqIdx)(iuIdx)
           og1resp.bits.robIdx           := s1_toExuData(iqIdx)(iuIdx).robIdx
+          og1resp.bits.uopIdx.foreach(_ := s1_toExuData(iqIdx)(iuIdx).vpu.get.vuopIdx)
           // respType:  fuIdle      ->IQ entry clear
           //            fuUncertain ->IQ entry no action
           //            fuBusy      ->IQ entry issued set false, then re-issue

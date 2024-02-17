@@ -428,6 +428,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
         memScheduler.io.memAddrIssueResp(i)(j).valid := toMem(i)(j).fire && FuType.isLoad(toMem(i)(j).bits.fuType)
         memScheduler.io.memAddrIssueResp(i)(j).bits.fuType := toMem(i)(j).bits.fuType
         memScheduler.io.memAddrIssueResp(i)(j).bits.robIdx := toMem(i)(j).bits.robIdx
+        memScheduler.io.memAddrIssueResp(i)(j).bits.resp := RespType.success // for load inst, firing at toMem means issuing successfully
       }
     }
   }
