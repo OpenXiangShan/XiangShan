@@ -298,9 +298,18 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val thisCanActualOut = (0 until RenameWidth).map(i => !thisIsBlocked(i) && notBlockedByPrevious(i))
   val thisActualOut = (0 until RenameWidth).map(i => io.enqRob.req(i).valid && io.enqRob.canAccept)
   val hasValidException = io.fromRename.zip(hasException).map(x => x._1.valid && x._2)
-  val dqCanAccept = !((isOnlyDq0.asUInt.orR && !io.toIntDq0.canAccept) || (isOnlyDq1.asUInt.orR && !io.toIntDq1.canAccept) ||
-    (isBothDq01.asUInt.orR && !io.toIntDq0.canAccept && !io.toIntDq1.canAccept) ||
-    (isFp.asUInt.orR && !io.toFpDq.canAccept) || (isLs.asUInt.orR && !io.toLsDq.canAccept))
+
+  // All dispatch queues can accept new RenameWidth uops
+  // A possibly better implementation is as follows. We need block all uops when some one DispatchQueue is full.
+  //   However, dispatch stage cannot rely on the infos from rename stage, since the `rename.io.out.valid` relies on its
+  // ready which is assigned from `dispatch.io.recv`. This would cause a combinational loop:
+  //   dispatch.io.recv <- dispatch.io.fromRename.valid <- rename.io.out.valid <- rename.io.out.ready <- dispatch.io.recv
+  // val dqCanAccept = !((isOnlyDq0.asUInt.orR && !io.toIntDq0.canAccept) || (isOnlyDq1.asUInt.orR && !io.toIntDq1.canAccept) ||
+  //   (isBothDq01.asUInt.orR && !io.toIntDq0.canAccept && !io.toIntDq1.canAccept) ||
+  //   (isFp.asUInt.orR && !io.toFpDq.canAccept) || (isLs.asUInt.orR && !io.toLsDq.canAccept))
+
+  // Todo: use decode2dispatch bypass infos to loose `can accept` condition
+  val dqCanAccept = io.toIntDq0.canAccept && io.toIntDq1.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
 
   // input for ROB, LSQ, Dispatch Queue
   for (i <- 0 until RenameWidth) {
