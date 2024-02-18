@@ -148,10 +148,9 @@ class ExeUnitImp(
       samePort.wbPortConfigs.map(
         x => x match {
           case IntWB(port, priority) => {
-            if (!samePort.latencyCertain) assert(priority == 1,
-              s"${samePort.name}: IntWbPort $port must latencyCertain priority=0 or latencyUnCertain priority=1")
-            else assert(priority == 0,
-              s"${samePort.name}: IntWbPort $port must latencyCertain priority=0 or latencyUnCertain priority=1")
+            if (!samePort.latencyCertain) assert(priority == sameIntPortExuParam.size - 1,
+              s"${samePort.name}: IntWbPort $port must latencyCertain priority=0 or latencyUnCertain priority=max(${sameIntPortExuParam.size - 1})")
+            // Certain latency can be handled by WbBusyTable, so there is no need to limit the exu's WB priority
           }
           case _ =>
         }
@@ -167,10 +166,9 @@ class ExeUnitImp(
       samePort.wbPortConfigs.map(
         x => x match {
           case VfWB(port, priority) => {
-            if (!samePort.latencyCertain) assert(priority == 1,
-              s"${samePort.name}: VfWbPort $port must latencyCertain priority=0 or latencyUnCertain priority=1")
-            else assert(priority == 0,
-              s"${samePort.name}: VfWbPort $port must latencyCertain priority=0 or latencyUnCertain priority=1")
+            if (!samePort.latencyCertain) assert(priority == sameVfPortExuParam.size - 1,
+              s"${samePort.name}: VfWbPort $port must latencyCertain priority=0 or latencyUnCertain priority=max(${sameVfPortExuParam.size - 1})")
+            // Certain latency can be handled by WbBusyTable, so there is no need to limit the exu's WB priority
           }
           case _ =>
         }
