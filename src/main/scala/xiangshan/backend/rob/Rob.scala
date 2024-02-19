@@ -820,7 +820,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val (wflags, dirtyFs) = (0 until CommitWidth).map(i => {
     val v = io.commits.commitValid(i)
     val info = io.commits.info(i)
-    (v & info.wflags, v & info.dirtyFs)
+    (v & info.wflags, v & (info.dirtyFs | fflagsDataRead(i).orR))
   }).unzip
   val fflags = Wire(Valid(UInt(5.W)))
   fflags.valid := io.commits.isCommit && VecInit(wflags).asUInt.orR
