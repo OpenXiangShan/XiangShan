@@ -19,9 +19,11 @@ jobs:
       - name: set env
         run: |
           export HEAD_SHA=${{ github.run_number }}
+          echo "RELEASE_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
           echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
           echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
           echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
+          echo "XSTOP_RELEASE_HOME=/nfs/home/share/kmh_XSTop_release" >> $GITHUB_ENV
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
       - name: clean up
         run: |
@@ -29,20 +31,24 @@ jobs:
       - name: check top wiring
         run:
           bash .github/workflows/check-usage.sh "BoringUtils" $GITHUB_WORKSPACE
-      - name: generate verilog file
-        run:
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate --num-cores 2
+      - name: generate single-core verilog file
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate --num-cores 1 --mfc
+          mv $GITHUB_WORKSPACE/build $GITHUB_WORKSPACE/build-single
+      - name: generate dual-core verilog file
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate --num-cores 2 --mfc
+          mv $GITHUB_WORKSPACE/build $GITHUB_WORKSPACE/build-dual
       - name: check verilog
-        run:
-          python3 $GITHUB_WORKSPACE/.github/workflows/check_verilog.py build/XSTop.v
-      - name: build MinimalConfig Release emu
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
-            --threads 4 --config MinimalConfig --release
-      - name: run MinimalConfig - Linux
+          python3 $GITHUB_WORKSPACE/.github/workflows/check_verilog.py build-single/XSTop.v
+          python3 $GITHUB_WORKSPACE/.github/workflows/check_verilog.py build-dual/XSTop.v
+      - name: release
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 4 --numa --ci linux-hello 2> perf.log
-          cat perf.log | sort
+          mv $GITHUB_WORKSPACE/build-single/XSTop.v $GITHUB_WORKSPACE/build-single/XSTop.sv
+          mv $GITHUB_WORKSPACE/build-dual/XSTop.v $GITHUB_WORKSPACE/build-dual/XSTop.sv
+          mkdir $XSTOP_RELEASE_HOME/kmh_release_${RELEASE_SHA}
+          cp -r $GITHUB_WORKSPACE/build-single $GITHUB_WORKSPACE/build-dual $XSTOP_RELEASE_HOME/kmh_release_${RELEASE_SHA}
   emu-basics:
     runs-on: bosc
     continue-on-error: false
