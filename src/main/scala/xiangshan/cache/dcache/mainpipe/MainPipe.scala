@@ -66,6 +66,9 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
   val replace = Bool()
   val replace_way_en = UInt(DCacheWays.W)
 
+  // prefetch
+  val pf_source = UInt(L1PfSourceBits.W)
+
   val id = UInt(reqIdWidth.W)
 
   def isLoad: Bool = source === LOAD_SOURCE.U
@@ -484,8 +487,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.probe_ttob_check_req.valid := s2_ttob_probe_valid && s2_valid
   io.probe_ttob_check_req.bits.addr := s2_ttob_probe_addr
 
-  // XSError(s2_req.miss && !io.refill_info.valid, "MainPipe req in s2 but no refill data")
-  XSError(s2_can_go_to_s3 && s2_req.miss && !io.refill_info.valid, "MainPipe req can go to s3 but no refill data")
+  XSError(s2_valid && s2_can_go_to_s3 && s2_req.miss && !io.refill_info.valid, "MainPipe req can go to s3 but no refill data")
 
   // s3: write data, meta and tag
   val s3_valid = RegInit(false.B)
@@ -1555,8 +1557,12 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   // io.prefetch_flag_write.bits.idx := s3_idx_dup(3)
   // io.prefetch_flag_write.bits.way_en := s3_way_en_dup(1)
   // io.prefetch_flag_write.bits.flag := false.B
-  io.prefetch_flag_write.valid := false.B
-  io.prefetch_flag_write.bits := DontCare
+//   io.prefetch_flag_write.valid := io.meta_write.valid && new_coh === ClientStates.Nothing
+  io.prefetch_flag_write.valid := s3_fire_dup_for_meta_w_valid && s3_req.miss
+  io.prefetch_flag_write.bits.idx := s3_idx_dup(3)
+  io.prefetch_flag_write.bits.way_en := s3_way_en_dup(1)
+  io.prefetch_flag_write.bits.source := s3_req.pf_source
+  XSPerfAccumulate("mainpipe_update_prefetchArray", io.prefetch_flag_write.valid)
 
   // probe / replace will not update access bit
   io.access_flag_write.valid := s3_fire_dup_for_meta_w_valid && !s3_req.probe && !s3_req.replace

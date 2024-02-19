@@ -769,6 +769,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   io.main_pipe_req.bits.amo_mask := req.amo_mask
   io.main_pipe_req.bits.error := error
   io.main_pipe_req.bits.id := req.id
+  io.main_pipe_req.bits.pf_source := req.pf_source
 
   io.block_addr.valid := req_valid && w_grantlast 
   io.block_addr.bits := req.addr

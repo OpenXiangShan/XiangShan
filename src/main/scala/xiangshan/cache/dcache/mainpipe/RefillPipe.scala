@@ -19,6 +19,7 @@ package xiangshan.cache
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import utils._
 
 class RefillPipeReqCtrl(implicit p: Parameters) extends DCacheBundle {
   val source = UInt(sourceTypeWidth.W)
