@@ -56,6 +56,7 @@ class VFMA(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   val fp_cIsFpCanonicalNAN = Wire(Vec(numVecModule, Bool()))
   vfmas.zipWithIndex.foreach {
     case (mod, i) =>
+      mod.io.fire         := io.in.valid
       mod.io.fp_a         := vs2Split.io.outVec64b(i)
       mod.io.fp_b         := vs1Split.io.outVec64b(i)
       mod.io.fp_c         := oldVdSplit.io.outVec64b(i)
