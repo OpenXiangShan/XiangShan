@@ -554,7 +554,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   def fflags_wfn(update: Boolean)(wdata: UInt): UInt = {
     val fcsrOld = fcsr.asTypeOf(new FcsrStruct)
     val fcsrNew = WireInit(fcsrOld)
-    csrw_dirty_fp_state := true.B
     if (update) {
       fcsrNew.fflags := wdata(4,0) | fcsrOld.fflags
     } else {
