@@ -1101,10 +1101,10 @@ class HptwResp(implicit p: Parameters) extends PtwBundle {
   //   ))
   // }
 
-  def genPPNS2(): UInt = {
+  def genPPNS2(vpn: UInt): UInt = {
     MuxLookup(entry.level.get, 0.U)(Seq(
-      0.U -> Cat(entry.ppn(entry.ppn.getWidth - 1, vpnnLen * 2), this.entry.tag(vpnnLen * 2 - 1, 0)),
-      1.U -> Cat(entry.ppn(entry.ppn.getWidth - 1, vpnnLen), this.entry.tag(vpnnLen - 1, 0)),
+      0.U -> Cat(entry.ppn(entry.ppn.getWidth - 1, vpnnLen * 2), vpn(vpnnLen * 2 - 1, 0)),
+      1.U -> Cat(entry.ppn(entry.ppn.getWidth - 1, vpnnLen), vpn(vpnnLen - 1, 0)),
       2.U -> Cat(entry.ppn(entry.ppn.getWidth - 1, 0))
     ))
   }
