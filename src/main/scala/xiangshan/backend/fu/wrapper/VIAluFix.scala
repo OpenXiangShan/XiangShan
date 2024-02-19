@@ -220,6 +220,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
 
   vIntFixpAlus.zipWithIndex.foreach {
     case (mod, i) =>
+      mod.io.fire := io.in.valid
       mod.io.opcode := opcode
 
       mod.io.info.vm := vm

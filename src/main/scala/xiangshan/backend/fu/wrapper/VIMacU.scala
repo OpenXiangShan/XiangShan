@@ -98,6 +98,7 @@ class VIMacU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg
 
   vimacs.zipWithIndex.foreach {
     case (mod, i) =>
+      mod.io.fire        := io.in.valid
       mod.io.info.vm     := vm
       mod.io.info.ma     := vma
       mod.io.info.ta     := vta

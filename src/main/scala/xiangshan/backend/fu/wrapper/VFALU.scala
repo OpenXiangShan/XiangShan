@@ -194,6 +194,7 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   val fp_bIsFpCanonicalNAN = Wire(Vec(numVecModule,Bool()))
   vfalus.zipWithIndex.foreach {
     case (mod, i) =>
+      mod.io.fire             := io.in.valid
       mod.io.fp_a             := Mux(opbWiden, vs1Split.io.outVec64b(i), vs2Split.io.outVec64b(i))  // very dirty TODO
       mod.io.fp_b             := Mux(opbWiden, vs2Split.io.outVec64b(i), vs1Split.io.outVec64b(i))  // very dirty TODO
       mod.io.widen_a          := Mux(opbWiden, Cat(vs1Split.io.outVec32b(i+numVecModule), vs1Split.io.outVec32b(i)), Cat(vs2Split.io.outVec32b(i+numVecModule), vs2Split.io.outVec32b(i)))
@@ -252,7 +253,7 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
     }
   }
 
-  val outEew = Mux(RegNext(resWiden), outVecCtrl.vsew + 1.U, outVecCtrl.vsew)
+  val outEew = Mux(RegEnable(resWiden, io.in.fire), outVecCtrl.vsew + 1.U, outVecCtrl.vsew)
   val outVuopidx = outVecCtrl.vuopIdx(2, 0)
   val vlMax = ((VLEN/8).U >> outEew).asUInt
   val lmulAbs = Mux(outVecCtrl.vlmul(2), (~outVecCtrl.vlmul(1,0)).asUInt + 1.U, outVecCtrl.vlmul(1,0))
