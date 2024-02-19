@@ -32,19 +32,19 @@ jobs:
         run:
           bash .github/workflows/check-usage.sh "BoringUtils" $GITHUB_WORKSPACE
       - name: generate single-core verilog file
-        run:
+        run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate --num-cores 1 --mfc
           mv $GITHUB_WORKSPACE/build $GITHUB_WORKSPACE/build-single
       - name: generate dual-core verilog file
-        run:
+        run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate --num-cores 2 --mfc
           mv $GITHUB_WORKSPACE/build $GITHUB_WORKSPACE/build-dual
       - name: check verilog
-        run:
+        run: |
           python3 $GITHUB_WORKSPACE/.github/workflows/check_verilog.py build-single/XSTop.v
           python3 $GITHUB_WORKSPACE/.github/workflows/check_verilog.py build-dual/XSTop.v
       - name: release
-        run:
+        run: |
           mv $GITHUB_WORKSPACE/build-single/XSTop.v $GITHUB_WORKSPACE/build-single/XSTop.sv
           mv $GITHUB_WORKSPACE/build-dual/XSTop.v $GITHUB_WORKSPACE/build-dual/XSTop.sv
           mkdir $XSTOP_RELEASE_HOME/kmh_release_${RELEASE_SHA}
