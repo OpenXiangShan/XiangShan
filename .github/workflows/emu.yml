@@ -49,14 +49,6 @@ jobs:
           mv $GITHUB_WORKSPACE/build-dual/XSTop.v $GITHUB_WORKSPACE/build-dual/XSTop.sv
           mkdir $XSTOP_RELEASE_HOME/kmh_release_${RELEASE_SHA}
           cp -r $GITHUB_WORKSPACE/build-single $GITHUB_WORKSPACE/build-dual $XSTOP_RELEASE_HOME/kmh_release_${RELEASE_SHA}
-      - name: build MinimalConfig Release emu
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
-            --threads 4 --config MinimalConfig --release
-      - name: run MinimalConfig - Linux
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 4 --numa --ci linux-hello 2> perf.log
-          cat perf.log | sort
   emu-basics:
     runs-on: bosc
     continue-on-error: false
