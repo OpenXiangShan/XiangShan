@@ -311,7 +311,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     commonOut.fuType                                  := IQFuType.readFuType(status.fuType, params.getFuCfgs.map(_.fuType)).asUInt
     commonOut.robIdx                                  := status.robIdx
     commonOut.dataSource.zipWithIndex.foreach{ case (dataSourceOut, srcIdx) =>
-      dataSourceOut.value                             := Mux(hasIQWakeupGet.srcWakeupByIQ(srcIdx).asUInt.orR, DataSource.forward, status.srcStatus(srcIdx).dataSources.value)
+      dataSourceOut.value                             := Mux(hasIQWakeupGet.srcWakeupByIQWithoutCancel(srcIdx).asUInt.orR, DataSource.forward, status.srcStatus(srcIdx).dataSources.value)
     }
     commonOut.isFirstIssue                            := !status.firstIssue
     commonOut.entry.valid                             := validReg
