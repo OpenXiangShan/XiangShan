@@ -399,7 +399,8 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.mem.req.bits.id := mem_arb.io.chosen
   mem_arb.io.out.ready := io.mem.req.ready
   // TODO: enable: io.mem.resp.valid
-  io.mem.refill := entries(RegNext(io.mem.resp.bits.id(log2Up(l2tlbParams.llptwsize)-1, 0))).req_info
+  // io.mem.refill := entries(RegNext(io.mem.resp.bits.id(log2Up(l2tlbParams.llptwsize)-1, 0))).req_info
+  io.mem.refill := entries(RegEnable(io.mem.resp.bits.id(log2Up(l2tlbParams.llptwsize)-1, 0), io.mem.resp.valid)).req_info
   io.mem.buffer_it := mem_resp_hit
   io.mem.enq_ptr := enq_ptr
 
