@@ -356,7 +356,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
           (exuOH.asUInt & io.og0Cancel.asUInt).orR && srcTimer === 1.U
       }.reduce(_ | _)
       val cancelByLd = srcLoadDependency.map(x => LoadShouldCancel(Some(x), io.ldCancel)).reduce(_ | _)
-      cancelBypass := cancelByOg0 || cancelByLd
+      cancelBypass := cancelByLd
     }
   } else {
     cancelBypassVec.zip(srcLoadDependencyVec).foreach { case (cancelBypass, srcLoadDependency) =>

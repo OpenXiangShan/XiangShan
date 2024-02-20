@@ -306,6 +306,8 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       }
   }
 
+  val og0_cancel_no_load = og0FailedVec2.flatten.zip(params.allExuParams).filter(!_._2.hasLoadFu).map(_._1)
+  val og0_cancel_delay = RegNext(VecInit(og0_cancel_no_load.toSeq))
   for (i <- fromIQ.indices) {
     for (j <- fromIQ(i).indices) {
       // IQ(s0) --[Ctrl]--> s1Reg ---------- begin
@@ -329,8 +331,15 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       val notBlock = srcNotBlock && intWbNotBlock(i)(j) && vfWbNotBlock(i)(j)
       val s1_flush = s0.bits.common.robIdx.needFlush(Seq(io.flush, RegNextWithEnable(io.flush)))
       val s1_cancel = og1FailedVec2(i)(j)
-      val s1_ldCancel = LoadShouldCancel(s0.bits.common.loadDependency, io.ldCancel)
-      when (s0.fire && !s1_flush && notBlock && !s1_cancel && !s1_ldCancel) {
+      val s0_cancel = Wire(Bool())
+      if (s0.bits.exuParams.isIQWakeUpSink) {
+        val exuOHNoLoad = s0.bits.common.l1ExuOH.get.map(x => x.asTypeOf(Vec(x.getWidth, Bool())).zip(params.allExuParams).filter(!_._2.hasLoadFu).map(_._1))
+        s0_cancel := exuOHNoLoad.zip(s0.bits.common.dataSources).map{
+          case (exuOH, dataSource) => (VecInit(exuOH).asUInt & og0_cancel_delay.asUInt).orR && dataSource.readForward
+        }.reduce(_ || _) && s0.valid
+      } else s0_cancel := false.B
+      val s0_ldCancel = LoadShouldCancel(s0.bits.common.loadDependency, io.ldCancel)
+      when (s0.fire && !s1_flush && notBlock && !s1_cancel && !s0_ldCancel && !s0_cancel) {
         s1_valid := s0.valid
         s1_data.fromIssueBundle(s0.bits) // no src data here
         if (fromIQ(i)(j).bits.exuParams.schdType.isInstanceOf[IntScheduler] && (fromIQ(i)(j).bits.exuParams.numRegSrc == 2)) {
@@ -340,7 +349,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       }.otherwise {
         s1_valid := false.B
       }
-      s0.ready := (s1_ready || !s1_valid) && notBlock
+      s0.ready := (s1_ready || !s1_valid) && notBlock && !s1_cancel && !s0_ldCancel && !s0_cancel
       // IQ(s0) --[Ctrl]--> s1Reg ---------- end
     }
   }
@@ -381,12 +390,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   io.og1CancelOH := VecInit(toFlattenExu.map(x => x.valid && !x.fire)).asUInt
 
   io.cancelToBusyTable.zipWithIndex.foreach { case (cancel, i) =>
-    cancel.valid := fromFlattenIQ(i).valid && !fromFlattenIQ(i).fire && {
-      if (fromFlattenIQ(i).bits.common.rfWen.isDefined)
-        fromFlattenIQ(i).bits.common.rfWen.get && fromFlattenIQ(i).bits.common.pdest =/= 0.U
-      else
-        true.B
-    }
+    cancel.valid := fromFlattenIQ(i).valid && !fromFlattenIQ(i).fire
     cancel.bits.rfWen := fromFlattenIQ(i).bits.common.rfWen.getOrElse(false.B)
     cancel.bits.fpWen := fromFlattenIQ(i).bits.common.fpWen.getOrElse(false.B)
     cancel.bits.vecWen := fromFlattenIQ(i).bits.common.vecWen.getOrElse(false.B)
