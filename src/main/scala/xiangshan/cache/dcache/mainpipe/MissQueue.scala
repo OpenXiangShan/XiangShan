@@ -452,7 +452,6 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     req_primary_fire := miss_req_pipe_reg_bits.toMissReqWoStoreData()
     req.addr := get_block_addr(miss_req_pipe_reg_bits.addr)
     //only  load miss need keyword
-    // isKeyword := Mux(miss_req_pipe_reg_bits.isFromLoad, miss_req_pipe_reg_bits.vaddr(5).asBool,false.B) 
     isKeyword := io.miss_req_pipe_reg.isKeyword()
     s_acquire := io.acquire_fired_by_pipe_reg
     s_grantack := false.B
@@ -500,10 +499,6 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     // use the most uptodate meta
     req.req_coh := miss_req_pipe_reg_bits.req_coh
     
-    // isKeyword := Mux(
-    //   before_req_sent_can_merge(req), 
-    //   before_req_sent_merge_iskeyword(req),
-    //   isKeyword)
     isKeyword := Mux(
       before_req_sent_can_merge(req), 
       io.miss_req_pipe_reg.isKeyword(),
@@ -637,20 +632,6 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
       before_data_refill_can_merge(new_req)
     )
   }
-
-  // def before_req_sent_merge_iskeyword(new_req: MissReqWoStoreData): Bool = {
-  //   val need_check_isKeyword = acquire_not_sent && req.isFromLoad && new_req.isFromLoad && should_merge(new_req)
-  //   val use_new_req_isKeyword = isAfter(req.lqIdx, new_req.lqIdx)
-  //   Mux(
-  //     need_check_isKeyword,
-  //     Mux(
-  //       use_new_req_isKeyword,
-  //       new_req.vaddr(5).asBool,
-  //       req.vaddr(5).asBool
-  //     ),
-  //     isKeyword
-  //     )
-  // }
 
   // store can be merged before io.mem_acquire.fire
   // store can not be merged the cycle that io.mem_acquire.fire
