@@ -749,8 +749,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   io.sms_agt_evict_req.valid := false.B
   io.sms_agt_evict_req.bits.vaddr := Cat(req.replace_tag(tagBits - 1, 2), req.vaddr(13, 12), 0.U((VAddrBits - tagBits).W))
 
-  io.main_pipe_req.valid := !s_mainpipe_req && w_grantlast
-  // io.main_pipe_req.valid := !s_mainpipe_req && (io.l2_hint.valid || w_l2hint || w_grantlast)
+  // io.main_pipe_req.valid := !s_mainpipe_req && w_grantlast
+  io.main_pipe_req.valid := !s_mainpipe_req && (w_l2hint || w_grantlast)
   io.main_pipe_req.bits := DontCare
   io.main_pipe_req.bits.miss := true.B
   io.main_pipe_req.bits.miss_id := io.id
@@ -770,6 +770,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   io.main_pipe_req.bits.error := error
   io.main_pipe_req.bits.id := req.id
   io.main_pipe_req.bits.pf_source := req.pf_source
+  io.main_pipe_req.bits.access := access
 
   io.block_addr.valid := req_valid && w_grantlast 
   io.block_addr.bits := req.addr
@@ -779,6 +780,11 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   io.refill_info.bits.store_mask := ~0.U(blockBytes.W)
   io.refill_info.bits.miss_param := grant_param
   io.refill_info.bits.miss_dirty := isDirty
+
+  XSPerfAccumulate("miss_refill_mainpipe_req", io.main_pipe_req.valid)
+  XSPerfAccumulate("miss_refill_hint_proper", RegNext(RegNext(io.main_pipe_req.valid)) && io.refill_info.valid)
+  XSPerfAccumulate("miss_refill_hint_early", RegNext(RegNext(io.main_pipe_req.valid)) && !io.refill_info.valid)
+  XSPerfAccumulate("miss_refill_without_hint", w_grantlast && !w_l2hint)
 //  io.debug_early_replace.valid := BoolStopWatch(io.replace_pipe_resp, io.refill_pipe_req.fire())
 //  io.debug_early_replace.bits.idx := addr_to_dcache_set(req.vaddr)
 //  io.debug_early_replace.bits.tag := req.replace_tag
@@ -819,6 +825,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   val (mshr_penalty_sample, mshr_penalty) = TransactionLatencyCounter(RegNext(RegNext(primary_fire)), release_entry)
   XSPerfHistogram("miss_penalty", mshr_penalty, mshr_penalty_sample, 0, 20, 1, true, true)
   XSPerfHistogram("miss_penalty", mshr_penalty, mshr_penalty_sample, 20, 100, 10, true, false)
+
 
   val load_miss_begin = primary_fire && io.req.bits.isFromLoad
   val refill_finished = RegNext(!w_grantlast && refill_done) && should_refill_data
@@ -1093,7 +1100,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   io.bloom_filter_query.set.bits.addr := io.bloom_filter_query.set.bits.get_addr(Cat(io.req.bits.replace_tag, get_untag(io.req.bits.vaddr))) // the evict block address
 
 //  io.bloom_filter_query.clr.valid := io.main_pipe_req.fire && isFromL1Prefetch(io.refill_pipe_req.bits.prefetch)
-  io.bloom_filter_query.clr.valid := io.main_pipe_req.fire
+  io.bloom_filter_query.clr.valid := io.main_pipe_req.fire && isFromL1Prefetch(io.main_pipe_req.bits.pf_source)
   io.bloom_filter_query.clr.bits.addr := io.bloom_filter_query.clr.bits.get_addr(io.main_pipe_req.bits.addr)
 
   // L1MissTrace Chisel DB
@@ -1124,6 +1131,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   XSPerfAccumulate("miss_req_load_allocate", io.req.fire && !io.req.bits.cancel && alloc && io.req.bits.isFromLoad)
   XSPerfAccumulate("miss_req_store_allocate", io.req.fire && !io.req.bits.cancel && alloc && io.req.bits.isFromStore)
   XSPerfAccumulate("miss_req_amo_allocate", io.req.fire && !io.req.bits.cancel && alloc && io.req.bits.isFromAMO)
+  XSPerfAccumulate("miss_req_prefetch_allocate", io.req.fire && !io.req.bits.cancel && alloc && io.req.bits.isFromPrefetch)
   XSPerfAccumulate("miss_req_merge_load", io.req.fire && !io.req.bits.cancel && merge && io.req.bits.isFromLoad)
   XSPerfAccumulate("miss_req_reject_load", io.req.valid && !io.req.bits.cancel && reject && io.req.bits.isFromLoad)
   XSPerfAccumulate("probe_blocked_by_miss", io.probe_block)

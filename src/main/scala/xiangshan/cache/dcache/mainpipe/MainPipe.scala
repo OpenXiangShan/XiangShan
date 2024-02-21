@@ -68,6 +68,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
 
   // prefetch
   val pf_source = UInt(L1PfSourceBits.W)
+  val access = Bool()
 
   val id = UInt(reqIdWidth.W)
 
@@ -1563,12 +1564,14 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.prefetch_flag_write.bits.way_en := s3_way_en_dup(1)
   io.prefetch_flag_write.bits.source := s3_req.pf_source
   XSPerfAccumulate("mainpipe_update_prefetchArray", io.prefetch_flag_write.valid)
+  XSPerfAccumulate("mainpipe_s2_block_penalty", s2_valid && s2_req.miss && !io.refill_info.valid)
 
   // probe / replace will not update access bit
   io.access_flag_write.valid := s3_fire_dup_for_meta_w_valid && !s3_req.probe && !s3_req.replace
   io.access_flag_write.bits.idx := s3_idx_dup(3)
   io.access_flag_write.bits.way_en := s3_way_en_dup(1)
-  io.access_flag_write.bits.flag := true.B
+  // io.access_flag_write.bits.flag := true.B
+  io.access_flag_write.bits.flag :=Mux(s3_req.miss, s3_req.access, true.B)
 
   io.tag_write.valid := s3_fire_dup_for_tag_w_valid && s3_req_miss_dup_for_tag_w_valid
   io.tag_write.bits.idx := s3_idx_dup(4)

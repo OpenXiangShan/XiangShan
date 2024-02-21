@@ -202,8 +202,8 @@ class FDPrefetcherMonitorBundle()(implicit p: Parameters) extends XSBundle {
   }
 
   val pollution = new XSBundle {
-    val demand_miss = Vec(LoadPipelineWidth, Input(Bool())) // from load pipeline, fisrt miss
-    val cache_pollution = Vec(LoadPipelineWidth, Input(Bool())) // from load pipeline, fisrt miss and pollution caused
+    val demand_miss = Vec(LoadPipelineWidth, Input(Bool())) // from load pipeline, first miss
+    val cache_pollution = Vec(LoadPipelineWidth, Input(Bool())) // from load pipeline, first miss and pollution caused
   }
 
   val pf_ctrl = Output(new PrefetchControlBundle)
