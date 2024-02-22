@@ -143,7 +143,7 @@ case class XSCoreParameters
   LoadQueueRARSize: Int = 72,
   LoadQueueRAWSize: Int = 56, // NOTE: make sure that LoadQueueRAWSize is power of 2.
   RollbackGroupSize: Int = 8,
-  LoadQueueReplaySize: Int = 32,
+  LoadQueueReplaySize: Int = 36,
   LoadUncacheBufferSize: Int = 4,
   LoadQueueNWriteBanks: Int = 8, // NOTE: make sure that LoadQueueRARSize/LoadQueueRAWSize is divided by LoadQueueNWriteBanks
   StoreQueueSize: Int = 56,
@@ -167,12 +167,12 @@ case class XSCoreParameters
     FmacCnt = 4,
     FmiscCnt = 2,
     FmiscDivSqrtCnt = 0,
-    LduCnt = 2,
-    StuCnt = 2
+    LduCnt = 3,
+    StuCnt = 3
   ),
   prefetcher: Option[PrefetcherParams] = Some(SMSParams()),
-  LoadPipelineWidth: Int = 2,
-  StorePipelineWidth: Int = 2,
+  LoadPipelineWidth: Int = 3,
+  StorePipelineWidth: Int = 3,
   VecMemSrcInWidth: Int = 2,
   VecMemInstWbWidth: Int = 1,
   VecMemDispatchWidth: Int = 1,
