@@ -191,13 +191,11 @@ class ITTageTable
   def inc_ctr(ctr: UInt, taken: Bool): UInt = satUpdate(ctr, ITTageCtrBits, taken)
 
   class ITTageEntry() extends ITTageBundle {
-    // val valid = Bool()
+    val valid = Bool()
     val tag = UInt(tagLen.W)
     val ctr = UInt(ITTageCtrBits.W)
     val target = UInt(VAddrBits.W)
   }
-
-  val validArray = RegInit(0.U(nRows.W))
 
   // Why need add instOffsetBits?
   val ittageEntrySz = 1 + tagLen + ITTageCtrBits + VAddrBits
@@ -229,7 +227,7 @@ class ITTageTable
   val table_banks_r = table_banks.map(_.io.r.resp.data(0))
 
   val resp_selected = Mux1H(s1_bank_req_1h, table_banks_r)
-  val s1_req_rhit = validArray(s1_idx) && resp_selected.tag === s1_tag
+  val s1_req_rhit = resp_selected.valid && resp_selected.tag === s1_tag
   val resp_invalid_by_write = Wire(Bool())
 
   io.resp.valid := (if (tagLen != 0) s1_req_rhit && !resp_invalid_by_write else true.B) // && s1_mask(b)
@@ -275,14 +273,11 @@ class ITTageTable
   wrbypass.io.write_data.map(_ := update_wdata.ctr)
 
   val old_ctr = Mux(wrbypass.io.hit, wrbypass.io.hit_data(0).bits, io.update.oldCtr)
+  update_wdata.valid := true.B
   update_wdata.ctr   := Mux(io.update.alloc, 2.U, inc_ctr(old_ctr, io.update.correct))
   update_wdata.tag   := update_tag
   // only when ctr is null
   update_wdata.target := Mux(io.update.alloc || ctr_null(old_ctr), update_target, io.update.old_target)
-
-  when (io.update.valid) {
-    validArray := UIntToOH(update_idx) | validArray
-  }
 
   // reset all us in 32 cycles
   us.io.resetEn.map(_ := io.update.reset_u)
