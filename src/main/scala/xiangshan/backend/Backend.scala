@@ -292,7 +292,7 @@ class BackendImp(outer: Backend)(implicit p: Parameters) extends LazyModuleImp(o
     c.ptr := e.bits.uop.cf.ftqPtr
     c.offset := e.bits.uop.cf.ftqOffset
   }
-  // return load pc at load s2
+  // get valid load pc at load s3
   mem.loadPc <> VecInit(ctrlBlock.io.ld_pc_read.map(_.data))
 
   for((c, e) <- ctrlBlock.io.st_pc_read.zip(exuBlocks(0).io.issue.get.drop(exuParameters.LduCnt))){
@@ -300,7 +300,7 @@ class BackendImp(outer: Backend)(implicit p: Parameters) extends LazyModuleImp(o
     c.ptr := e.bits.uop.cf.ftqPtr
     c.offset := e.bits.uop.cf.ftqOffset
   }
-  // return store pc at store s2
+  // get valid store pc at store s3
   mem.storePc <> VecInit(ctrlBlock.io.st_pc_read.map(_.data))
 
   mem.issue <> exuBlocks(0).io.issue.get
