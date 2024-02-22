@@ -202,7 +202,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
       x.sew := sew
       x.emul := emul
       x.lmul := lmul
-      x.vlmax := vlmax
+      x.vlmax := Mux(isUsWholeReg, evl, vlmax)
       x.instType := instType
     }
 
@@ -246,6 +246,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
   val issueAlignedType = Mux(isIndexed(issueInstType), issueSew(1, 0), issueEew(1, 0))
   val issueMUL = Mux(isIndexed(issueInstType), issueEntry.lmul, issueEntry.emul)
   val issueVLMAXMask = issueEntry.vlmax - 1.U
+  val issueIsWholeReg = issueEntry.usWholeReg
   val issueVLMAXLog2 = GenVLMAXLog2(issueEntry.lmul, issueEntry.sew)
   val issueMULMask = LookupTree(issueAlignedType, List(
     "b00".U -> "b01111".U,
@@ -292,7 +293,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
       issueVLMAXMask,
       issueMULMask
     )// elemIdx inside a vd
-    val nfIdx = elemIdx >> issueVLMAXLog2
+    val nfIdx = Mux(issueIsWholeReg, 0.U, elemIdx >> issueVLMAXLog2)
     val notIndexedStride = Mux(
       isStrided(issueInstType),
       issueEntry.stride(XLEN - 1, 0), // for strided store, stride = x[rs2]
