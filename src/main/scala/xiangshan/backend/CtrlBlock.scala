@@ -651,15 +651,15 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   val read_from_newest_entry = RegNext(jalrTargetReadPtr) === RegNext(io.frontend.fromFtq.newest_entry_ptr)
   io.jalr_target := Mux(read_from_newest_entry, RegNext(io.frontend.fromFtq.newest_entry_target), jalrTargetRead)
   for(i <- 0 until exuParameters.LduCnt){
-    // load read pcMem (s0) -> get rdata (s1) -> reg next in Memblock (s2) -> reg next in Memblock (s3) -> consumed by pf (s3)
+    // load read pcMem (s0) -> get rdata (s1) -> reg next in Ctrlblock (s2) -> reg next in Memblock (s3) -> consumed by pf (s3)
     pcMem.io.raddr(i + PCMEMIDX_LD) := io.ld_pc_read(i).ptr.value
-    io.ld_pc_read(i).data := pcMem.io.rdata(i + PCMEMIDX_LD).getPc(RegNext(io.ld_pc_read(i).offset))
+    io.ld_pc_read(i).data := RegNext(pcMem.io.rdata(i + PCMEMIDX_LD).getPc(RegNext(io.ld_pc_read(i).offset)))
   }
   if(EnableStorePrefetchSMS) {
     for(i <- 0 until exuParameters.StuCnt){
-      // store read pcMem (s0) -> get rdata (s1) -> reg next in Memblock (s2) -> reg next in Memblock (s3) -> consumed by pf (s3)
+      // store read pcMem (s0) -> get rdata (s1) -> reg next in Ctrlblock (s2) -> reg next in Memblock (s3) -> consumed by pf (s3)
       pcMem.io.raddr(i + PCMEMIDX_ST) := io.st_pc_read(i).ptr.value
-      io.st_pc_read(i).data := pcMem.io.rdata(i + PCMEMIDX_ST).getPc(RegNext(io.st_pc_read(i).offset))
+      io.st_pc_read(i).data := RegNext(pcMem.io.rdata(i + PCMEMIDX_ST).getPc(RegNext(io.st_pc_read(i).offset)))
     }
   }else {
     for(i <- 0 until exuParameters.StuCnt){
