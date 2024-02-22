@@ -646,7 +646,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
     }
   }
 
-  //exception or flush by older branch prediction
+  // Exception or flush by older branch prediction
+  // Condition is from RegNext(fromFtq.redirect), 1 cycle after backend rediect
   when(f3_ftq_flush_self || f3_ftq_flush_by_older)  {
     mmio_state := m_idle
     mmio_is_RVC := false.B
@@ -762,7 +763,11 @@ class NewIFU(implicit p: Parameters) extends XSModule
   f3_mmio_missOffset.valid := f3_req_is_mmio
   f3_mmio_missOffset.bits  := 0.U
 
-  mmioFlushWb.valid           := (f3_req_is_mmio && mmio_state === m_waitCommit && RegNext(fromUncache.fire)  && f3_mmio_use_seq_pc)
+  // Send mmioFlushWb back to FTQ 1 cycle after uncache fetch return
+  // When backend redirect, mmio_state reset after 1 cycle.
+  // In this case, mask .valid to avoid overriding backend redirect
+  mmioFlushWb.valid           := (f3_req_is_mmio && mmio_state === m_waitCommit && RegNext(fromUncache.fire) &&
+    f3_mmio_use_seq_pc && !f3_ftq_flush_self && !f3_ftq_flush_by_older)
   mmioFlushWb.bits.pc         := f3_pc
   mmioFlushWb.bits.pd         := f3_pd
   mmioFlushWb.bits.pd.zipWithIndex.map{case(instr,i) => instr.valid :=  f3_mmio_range(i)}
