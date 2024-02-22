@@ -799,7 +799,7 @@ class PtwMergeEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = f
   val pf = Bool()
 }
 
-class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p: Parameters) extends PtwBundle {
+class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean, hasReservedBitforMbist: Boolean)(implicit p: Parameters) extends PtwBundle {
   require(log2Up(num)==log2Down(num))
   // NOTE: hasPerm means that is leaf or not.
 
@@ -809,6 +809,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
   val vs   = Vec(num, Bool())
   val perms = if (hasPerm) Some(Vec(num, new PtePermBundle)) else None
   val prefetch = Bool()
+  val reservedbit = if(hasReservedBitforMbist) Some(Bool()) else None
   // println(s"PtwEntries: tag:1*${tagLen} ppns:${num}*${ppnLen} vs:${num}*1")
   // NOTE: vs is used for different usage:
   // for l3, which store the leaf(leaves), vs is page fault or not.
@@ -836,7 +837,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
     require((data.getWidth / XLEN) == num,
       s"input data length must be multiple of pte length: data.length:${data.getWidth} num:${num}")
 
-    val ps = Wire(new PtwEntries(num, tagLen, level, hasPerm))
+    val ps = Wire(new PtwEntries(num, tagLen, level, hasPerm, hasReservedBitforMbist))
     ps.tag := tagClip(vpn)
     ps.asid := asid
     ps.prefetch := prefetch
@@ -846,6 +847,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
       ps.vs(i)   := !pte.isPf(levelUInt) && (if (hasPerm) pte.isLeaf() else !pte.isLeaf())
       ps.perms.map(_(i) := pte.perm)
     }
+    ps.reservedbit.map(_ := true.B)
     ps
   }
 
@@ -858,8 +860,8 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
   }
 }
 
-class PTWEntriesWithEcc(eccCode: Code, num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p: Parameters) extends PtwBundle {
-  val entries = new PtwEntries(num, tagLen, level, hasPerm)
+class PTWEntriesWithEcc(eccCode: Code, num: Int, tagLen: Int, level: Int, hasPerm: Boolean, hasReservedBitforMbist: Boolean = false)(implicit p: Parameters) extends PtwBundle {
+  val entries = new PtwEntries(num, tagLen, level, hasPerm, hasReservedBitforMbist)
 
   val ecc_block = XLEN
   val ecc_info = get_ecc_info()
