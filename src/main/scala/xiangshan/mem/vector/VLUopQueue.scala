@@ -194,6 +194,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
     dontTouch(flowsPrevThisUop)
     dontTouch(flowsPrevThisVd)
     dontTouch(flowsIncludeThisUop)
+    val vlmax = GenVLMAX(lmul, sew)
     valid(id) := true.B
     finish(id) := false.B
     exception(id) := false.B
@@ -220,7 +221,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
       x.sew := sew
       x.emul := emul
       x.lmul := lmul
-      x.vlmax := GenVLMAX(lmul, sew)
+      x.vlmax := Mux(isUsWholeReg, evl, vlmax)
       x.instType := instType
       x.data := io.loadRegIn.bits.src_vs3
       x.vdIdxInField := vdIdxInField
@@ -271,6 +272,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
   val issueAlignedType = Mux(isIndexed(issueInstType), issueSew(1, 0), issueEew(1, 0))
   val issueMUL = Mux(isIndexed(issueInstType), issueEntry.lmul, issueEntry.emul)
   val issueVLMAXMask = issueEntry.vlmax - 1.U
+  val issueIsWholeReg = issueEntry.usWholeReg
   val issueVLMAXLog2 = GenVLMAXLog2(issueEntry.lmul, issueSew)
   val issueMULMask = LookupTree(issueAlignedType, List(
     "b00".U -> "b01111".U,
@@ -318,7 +320,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
       issueVLMAXMask,
       issueMULMask
     )// elemIdx inside a vd
-    val nfIdx = elemIdx >> issueVLMAXLog2
+    val nfIdx = Mux(issueIsWholeReg, 0.U, elemIdx >> issueVLMAXLog2)
     val notIndexedStride = Mux( // stride for strided/unit-stride instruction
       isStrided(issueInstType),
       issueEntry.stride(XLEN - 1, 0), // for strided load, stride = x[rs2]
