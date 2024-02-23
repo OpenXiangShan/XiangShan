@@ -383,7 +383,7 @@ class LLPTWIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
     val req = DecoupledIO(new L2TlbMemReqBundle())
     val resp = Flipped(Valid(new Bundle {
       val id = Output(UInt(log2Up(l2tlbParams.llptwsize).W))
-      val value = Output(UInt(XLEN.W))
+      val value = Output(UInt(blockBits.W))
     }))
     val enq_ptr = Output(UInt(log2Ceil(l2tlbParams.llptwsize).W))
     val buffer_it = Output(Vec(l2tlbParams.llptwsize, Bool()))
@@ -507,7 +507,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val hptw_resp_ptr_reg = RegNext(io.hptw.resp.bits.id)
   val hptw_need_addr_check = RegNext(hasHptwResp && io.hptw.resp.fire && !flush)
 
-  val pte = io.mem.resp.bits.value.asTypeOf(new PteBundle().cloneType)
+  val ptes = io.mem.resp.bits.value.asTypeOf(Vec(blockBits / XLEN, new PteBundle()))
   val gpaddr = MakeGPAddr(io.in.bits.ppn, getVpnn(io.in.bits.req_info.vpn, 0))
   val hptw_resp = entries(hptw_resp_ptr_reg).hptw_resp
   val hpaddr = Cat(hptw_resp.genPPNS2(get_pn(gpaddr)), get_off(gpaddr))
@@ -545,7 +545,8 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       when (state(i) === state_mem_waiting && io.mem.resp.bits.id === entries(i).wait_id) {
         state(i) := Mux(entries(i).s2xlate, state_last_hptw_req, state_mem_out)
         mem_resp_hit(i) := true.B
-        entries(i).ppn := pte.ppn // for last stage 2 translation
+        val req_addr_low = entries(i).req_info.vpn(log2Ceil(blockBits / XLEN) - 1, 0)
+        entries(i).ppn := ptes(req_addr_low).ppn // for last stage 2 translation
       }
     }
   }

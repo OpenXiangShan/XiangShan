@@ -371,7 +371,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   // mem -> llptw
   llptw_mem.resp.valid := mem_resp_done && mem_resp_from_llptw
   llptw_mem.resp.bits.id := DataHoldBypass(mem.d.bits.source, mem.d.valid)
-  llptw_mem.resp.bits.value := DataHoldBypass(get_part(refill_data_tmp, req_addr_low(mem.d.bits.source)), mem.d.valid)
+  llptw_mem.resp.bits.value := DataHoldBypass(refill_data_tmp.asUInt, mem.d.valid)
   // mem -> ptw
   // ptw.io.mem.req.ready := mem.a.ready
   ptw.io.mem.resp.valid := mem_resp_done && mem_resp_from_ptw
