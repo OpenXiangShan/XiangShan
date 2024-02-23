@@ -398,8 +398,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.mem_to_ooo.writebackHyuLda <> hyuLdExeWbReqs
   io.mem_to_ooo.writebackHyuSta <> hybridUnits.map(_.io.stout)
   io.mem_to_ooo.otherFastWakeup := DontCare
-  io.mem_to_ooo.otherFastWakeup.take(LduCnt).zip(loadUnits.map(_.io.fast_uop)).foreach{case(a,b)=> a := b}
-  io.mem_to_ooo.otherFastWakeup.drop(LduCnt).take(HyuCnt).zip(hybridUnits.map(_.io.ldu_io.fast_uop)).foreach{case(a,b)=> a:=b}
+  io.mem_to_ooo.otherFastWakeup.drop(HyuCnt).take(LduCnt).zip(loadUnits.map(_.io.fast_uop)).foreach{case(a,b)=> a := b}
+  io.mem_to_ooo.otherFastWakeup.take(HyuCnt).zip(hybridUnits.map(_.io.ldu_io.fast_uop)).foreach{case(a,b)=> a:=b}
   val stOut = io.mem_to_ooo.writebackSta ++ io.mem_to_ooo.writebackHyuSta
 
   // prefetch to l1 req
@@ -660,8 +660,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.feedback_slow <> io.mem_to_ooo.ldaIqFeedback(i).feedbackSlow
     loadUnits(i).io.feedback_fast <> io.mem_to_ooo.ldaIqFeedback(i).feedbackFast
     loadUnits(i).io.correctMissTrain := correctMissTrain
-    io.mem_to_ooo.ldCancel(i) := loadUnits(i).io.ldCancel
-    io.mem_to_ooo.wakeup(i) := loadUnits(i).io.wakeup
+    io.mem_to_ooo.ldCancel.drop(HyuCnt)(i) := loadUnits(i).io.ldCancel
+    io.mem_to_ooo.wakeup.drop(HyuCnt)(i) := loadUnits(i).io.wakeup
 
     // vector
     loadUnits(i).io.vecldin <> vlWrapper.io.pipeIssue(i)
@@ -792,8 +792,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     hybridUnits(i).io.feedback_slow <> io.mem_to_ooo.hyuIqFeedback(i).feedbackSlow
     hybridUnits(i).io.feedback_fast <> io.mem_to_ooo.hyuIqFeedback(i).feedbackFast
     hybridUnits(i).io.correctMissTrain := correctMissTrain
-    io.mem_to_ooo.ldCancel.drop(LduCnt)(i) := hybridUnits(i).io.ldu_io.ldCancel
-    io.mem_to_ooo.wakeup.drop(LduCnt)(i) := hybridUnits(i).io.ldu_io.wakeup
+    io.mem_to_ooo.ldCancel.take(HyuCnt)(i) := hybridUnits(i).io.ldu_io.ldCancel
+    io.mem_to_ooo.wakeup.take(HyuCnt)(i) := hybridUnits(i).io.ldu_io.wakeup
 
     // ------------------------------------
     //  Load Port
