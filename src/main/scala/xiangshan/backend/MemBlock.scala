@@ -277,9 +277,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     io.error.valid := false.B
   }
 
-  // L2 Hint for DCache
-  dcache.io.l2_hint <> io.l2_hint
-
   println("Enable 3-load and 3-store: " + Enable3Load3Store)
   val loadUnits = Seq.fill(exuParameters.LduCnt)(Module(new LoadUnit))
   val storeUnits = Seq.fill(exuParameters.StuCnt)(Module(new StoreUnit))
@@ -636,6 +633,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.replay <> lsq.io.replay(i)
 
     val l2_hint = RegNext(io.l2_hint)
+
+    // L2 Hint for DCache
+    dcache.io.l2_hint <> l2_hint
+
     loadUnits(i).io.l2_hint <> l2_hint
     loadUnits(i).io.tlb_hint.id := dtlbRepeater.io.hint.get.req(i).id
     loadUnits(i).io.tlb_hint.full := dtlbRepeater.io.hint.get.req(i).full ||

@@ -320,6 +320,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     // main pipe: amo miss
     val main_pipe_req = DecoupledIO(new MainPipeReq)
     val main_pipe_resp = Input(Bool())
+    val main_pipe_replay = Input(Bool())
 
     // for main pipe s2
     val refill_info = ValidIO(new MissQueueRefillInfo)
@@ -397,6 +398,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   val w_mainpipe_resp = RegInit(true.B)
   val w_l2hint = RegInit(true.B)
 
+  val mainpipe_req_fired = RegInit(true.B)
+
   val release_entry = s_grantack && w_mainpipe_resp
 
   val acquire_not_sent = !s_acquire && !io.mem_acquire.ready
@@ -461,6 +464,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     w_grantfirst := false.B
     w_grantlast := false.B
     w_l2hint := false.B
+    mainpipe_req_fired := false.B
 
     when(miss_req_pipe_reg_bits.isFromStore) {
       req_store_mask := miss_req_pipe_reg_bits.store_mask
@@ -597,6 +601,11 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
   when (io.main_pipe_req.fire) {
     s_mainpipe_req := true.B
+    mainpipe_req_fired := true.B
+  }
+
+  when (io.main_pipe_replay) {
+    s_mainpipe_req := false.B
   }
 
   when (io.main_pipe_resp) {
@@ -781,10 +790,16 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   io.refill_info.bits.miss_param := grant_param
   io.refill_info.bits.miss_dirty := isDirty
 
-  XSPerfAccumulate("miss_refill_mainpipe_req", io.main_pipe_req.valid)
-  XSPerfAccumulate("miss_refill_hint_proper", RegNext(RegNext(io.main_pipe_req.valid)) && io.refill_info.valid)
-  XSPerfAccumulate("miss_refill_hint_early", RegNext(RegNext(io.main_pipe_req.valid)) && !io.refill_info.valid)
-  XSPerfAccumulate("miss_refill_without_hint", w_grantlast && !w_l2hint)
+  XSPerfAccumulate("miss_refill_mainpipe_req", io.main_pipe_req.fire)
+  XSPerfAccumulate("miss_refill_without_hint", io.main_pipe_req.fire && !mainpipe_req_fired && w_grantlast && !w_l2hint)
+  XSPerfAccumulate("miss_refill_hint_arrive1", RegNextN(io.main_pipe_req.fire && !mainpipe_req_fired,1) && w_grantlast && !RegNext(w_grantlast))
+  XSPerfAccumulate("miss_refill_hint_arrive2", RegNextN(io.main_pipe_req.fire && !mainpipe_req_fired,2) && w_grantlast && !RegNext(w_grantlast))
+  XSPerfAccumulate("miss_refill_hint_arrive3", RegNextN(io.main_pipe_req.fire && !mainpipe_req_fired,3) && w_grantlast && !RegNext(w_grantlast))
+  XSPerfAccumulate("miss_refill_hint_arrive4", RegNextN(io.main_pipe_req.fire && !mainpipe_req_fired,4) && w_grantlast && !RegNext(w_grantlast))
+  XSPerfAccumulate("miss_refill_hint_arrive5", RegNextN(io.main_pipe_req.fire && !mainpipe_req_fired,5) && w_grantlast && !RegNext(w_grantlast))
+  XSPerfAccumulate("miss_refill_replay", io.main_pipe_replay)
+  XSPerfAccumulate("miss_refill_replay_without_data", RegNext(RegNext(io.main_pipe_req.fire && mainpipe_req_fired)) && !w_grantlast)
+
 //  io.debug_early_replace.valid := BoolStopWatch(io.replace_pipe_resp, io.refill_pipe_req.fire())
 //  io.debug_early_replace.bits.idx := addr_to_dcache_set(req.vaddr)
 //  io.debug_early_replace.bits.tag := req.replace_tag
@@ -859,6 +874,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     val main_pipe_resp = Flipped(ValidIO(new MainPipeResp))
 
     val s2_miss_id = Input(UInt(log2Up(cfg.nMissEntries).W))
+    val s2_replay_to_mq = Input(Bool())
     val refill_info = ValidIO(new MissQueueRefillInfo)
 
     // block probe
@@ -1029,6 +1045,8 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
       // e.io.replace_pipe_resp := io.replace_pipe_resp.valid && io.replace_pipe_resp.bits === i.U
       e.io.main_pipe_resp := io.main_pipe_resp.valid && io.main_pipe_resp.bits.ack_miss_queue && io.main_pipe_resp.bits.miss_id === i.U
+      // e.io.main_pipe_replay := io.main_pipe_resp.valid && io.main_pipe_resp.bits.replay && io.main_pipe_resp.bits.ack_miss_queue && io.main_pipe_resp.bits.miss_id === i.U
+      e.io.main_pipe_replay := io.s2_replay_to_mq && io.s2_miss_id === i.U
 
       e.io.memSetPattenDetected := memSetPattenDetected
       e.io.nMaxPrefetchEntry := nMaxPrefetchEntry

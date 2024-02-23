@@ -118,6 +118,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val atomic_resp = ValidIO(new MainPipeResp)
     // find matched refill data in missenty
     val s2_miss_id = Output(UInt(log2Up(cfg.nMissEntries).W))
+    val s2_replay_to_mq = Output(Bool())
     // missqueue refill data
     val refill_info = Flipped(ValidIO(new MissQueueRefillInfo))
     // replace
@@ -440,10 +441,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   s2_s0_set_conlict_store := s2_valid_dup(1) && store_idx === s2_idx
 
   // For a store req, it either hits and goes to s3, or miss and enter miss queue immediately
+  val s2_can_go_to_mq_replay = s2_req.miss && !io.refill_info.valid // miss_req in s2 but refill data is invalid
   val s2_can_go_to_s3 = (s2_req_replace_dup_1 || s2_req.probe || (s2_req.miss && io.refill_info.valid) || (s2_req.isStore || s2_req.isAMO) && s2_hit) && s3_ready
   val s2_can_go_to_mq = RegEnable(s1_pregen_can_go_to_mq, s1_fire)
-  assert(RegNext(!(s2_valid && s2_can_go_to_s3 && s2_can_go_to_mq)))
-  val s2_can_go = s2_can_go_to_s3 || s2_can_go_to_mq
+  assert(RegNext(!(s2_valid && s2_can_go_to_s3 && s2_can_go_to_mq && s2_can_go_to_mq_replay)))
+  val s2_can_go = s2_can_go_to_s3 || s2_can_go_to_mq || s2_can_go_to_mq_replay
   val s2_fire = s2_valid && s2_can_go
   val s2_fire_to_s3 = s2_valid_dup(2) && s2_can_go_to_s3
   when (s1_fire) {
@@ -1532,12 +1534,23 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   atomic_replay_resp.replay := true.B
   atomic_replay_resp.ack_miss_queue := false.B
   atomic_replay_resp.id := DontCare
+  val missqueue_replay_resp = Wire(new MainPipeResp)
+  missqueue_replay_resp.source := s2_req.source
+  missqueue_replay_resp.data := DontCare
+  missqueue_replay_resp.miss := true.B
+  missqueue_replay_resp.miss_id := s2_req.miss_id
+  missqueue_replay_resp.error := false.B
+  missqueue_replay_resp.replay := true.B
+  missqueue_replay_resp.ack_miss_queue := s2_req.miss
+  missqueue_replay_resp.id := DontCare
+  // val missqueue_replay_resp_valid = s2_valid_dup(6) && s2_can_go_to_mq_replay
   val atomic_replay_resp_valid = s2_valid_dup(6) && s2_can_go_to_mq_dup(2) && replay && (s2_req.isAMO || s2_req.miss)
   val atomic_hit_resp_valid = s3_valid_dup(10) && (s3_amo_can_go || s3_miss_can_go && (s3_req.isAMO || s3_req.miss))
   //val atomic_replay_resp_valid = s2_valid_dup(6) && s2_can_go_to_mq_dup(2) && replay 
   //val atomic_hit_resp_valid = s3_valid_dup(10) && (s3_amo_can_go || s3_miss_can_go )
+  // io.atomic_resp.valid := atomic_replay_resp_valid || atomic_hit_resp_valid || missqueue_replay_resp_valid
   io.atomic_resp.valid := atomic_replay_resp_valid || atomic_hit_resp_valid
-  io.atomic_resp.bits := Mux(atomic_replay_resp_valid, atomic_replay_resp, atomic_hit_resp)
+  io.atomic_resp.bits := Mux(atomic_replay_resp_valid, atomic_replay_resp, atomic_hit_resp) 
 
   // io.replace_resp.valid := s3_fire && s3_req_replace_dup(3)
   // io.replace_resp.bits := s3_req.miss_id
@@ -1564,7 +1577,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.prefetch_flag_write.bits.way_en := s3_way_en_dup(1)
   io.prefetch_flag_write.bits.source := s3_req.pf_source
   XSPerfAccumulate("mainpipe_update_prefetchArray", io.prefetch_flag_write.valid)
+  XSPerfAccumulate("mainpipe_s2_miss_req", s2_valid && s2_req.miss)
   XSPerfAccumulate("mainpipe_s2_block_penalty", s2_valid && s2_req.miss && !io.refill_info.valid)
+  XSPerfAccumulate("mainpipe_s2_missqueue_replay", s2_valid && s2_can_go_to_mq_replay)
 
   // probe / replace will not update access bit
   io.access_flag_write.valid := s3_fire_dup_for_meta_w_valid && !s3_req.probe && !s3_req.replace
@@ -1696,6 +1711,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   dontTouch(io.status_dup)
 
   io.s2_miss_id := s2_req.miss_id
+  io.s2_replay_to_mq := s2_valid && s2_can_go_to_mq_replay
 
   // report error to beu and csr, 1 cycle after read data resp
   io.error := 0.U.asTypeOf(new L1CacheErrorInfo())

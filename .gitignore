@@ -363,3 +363,8 @@ stack.info*
 
 !ready-to-run/*
 
+# local files
+*.csv
+*.txt
+milc-result
+spec-result
