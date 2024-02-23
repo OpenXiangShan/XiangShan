@@ -64,7 +64,7 @@ class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray {
       val rdata = Output(UInt())
     })
 
-    val r_way_en_reg = RegNext(io.r_way_en)
+    val r_way_en_reg = RegEnable(io.r_way_en, io.ren)  // RegNext(io.r_way_en)
     val data_array = Array.fill(nWays) {
       Module(new SRAMTemplate(
         Bits(rowBits.W),
@@ -110,7 +110,7 @@ class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray {
 
     // use way_en to select a way after data read out
     assert(!(RegNext(io.read(j).fire && PopCount(io.read(j).bits.way_en) > 1.U)))
-    val way_en = RegNext(io.read(j).bits.way_en)
+    val way_en = RegEnable(io.read(j).bits.way_en, io.read(j).fire)  // RegNext(io.read(j).bits.way_en)
 
     val row_error = Wire(Vec(blockRows, Vec(rowWords, Bool())))
     for (r <- 0 until blockRows) {
@@ -163,7 +163,7 @@ class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray {
         }
       })
       io.errors(j).bits.report_to_beu := RegNext(io.read(j).fire) && Cat(row_error.flatten).orR
-      io.errors(j).bits.paddr := RegNext(io.read(j).bits.addr)
+      io.errors(j).bits.paddr := RegEnable(io.read(j).bits.addr, io.read(j).fire)
     }
 
     io.nacks(j) := false.B
