@@ -63,7 +63,7 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
     case ((deps, originalDeps), name) => deps.zip(originalDeps).zipWithIndex.foreach {
       case ((dep, originalDep), deqPortIdx) =>
         // TODO: getLdExuIdx
-        if (name.contains("LDU") && name.replace("LDU", "").toInt == deqPortIdx)
+        if (params.backendParam.getLdExuIdx(params.backendParam.allExuParams.find(_.name == name).get) == deqPortIdx)
           dep := (originalDep << 2).asUInt | 2.U
         else
           dep := originalDep << 1
