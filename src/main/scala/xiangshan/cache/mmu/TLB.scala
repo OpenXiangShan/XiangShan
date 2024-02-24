@@ -163,6 +163,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     }
 
     when (hasGpf(i) && resp_gpa_refill && need_gpa_vpn_hit){
+      need_gpa_vpn := 0.U
       need_gpa := false.B
     }
     
