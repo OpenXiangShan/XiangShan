@@ -446,7 +446,6 @@ class MemRSFeedbackIO(implicit p: Parameters) extends XSBundle {
   // Note: you need to update in implicit Parameters p before imp MemRSFeedbackIO
   // for instance: MemRSFeedbackIO()(updateP)
   val feedbackSlow = ValidIO(new RSFeedback()) // dcache miss queue full, dtlb miss
-  val feedbackFast = ValidIO(new RSFeedback()) // bank conflict
 }
 
 class LoadCancelIO(implicit p: Parameters) extends XSBundle {

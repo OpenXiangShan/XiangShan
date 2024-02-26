@@ -29,15 +29,15 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   // only memAddrIQ use it
   val memEtyResps: MixedVec[ValidIO[EntryDeqRespBundle]] = {
     if (params.isLdAddrIQ && !params.isStAddrIQ)
-      MixedVecInit(io.og0Resp ++ io.og1Resp ++ io.finalIssueResp.get)
-    else if (params.isLdAddrIQ && params.isStAddrIQ || params.isHyAddrIQ)
-      MixedVecInit(io.og0Resp ++ io.og1Resp ++ io.finalIssueResp.get ++ io.fromMem.get.fastResp ++ io.fromMem.get.slowResp)
+      MixedVecInit(io.og0Resp ++ io.og1Resp ++ io.finalIssueResp.get ++ io.memAddrIssueResp.get)
+    else if (params.isHyAddrIQ)
+      MixedVecInit(io.og0Resp ++ io.og1Resp ++ io.finalIssueResp.get ++ io.memAddrIssueResp.get ++ io.fromMem.get.slowResp)
     else if (params.isMemAddrIQ)
-      MixedVecInit(io.og0Resp ++ io.og1Resp ++ io.fromMem.get.fastResp ++ io.fromMem.get.slowResp)
+      MixedVecInit(io.og0Resp ++ io.og1Resp ++ io.fromMem.get.slowResp)
     else MixedVecInit(Seq())
   }
 
-  val resps: Vec[Vec[ValidIO[EntryDeqRespBundle]]] = VecInit(io.og0Resp, io.og1Resp, 0.U.asTypeOf(io.og0Resp), 0.U.asTypeOf(io.og0Resp))
+  val resps: Vec[Vec[ValidIO[EntryDeqRespBundle]]] = VecInit(io.og0Resp, io.og1Resp, 0.U.asTypeOf(io.og0Resp))
 
   //Module
   val enqEntries          = Seq.fill(EnqEntryNum)(Module(EnqEntry(isComp = true)(p, params)))
@@ -458,6 +458,7 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val og0Resp             = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
   val og1Resp             = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
   val finalIssueResp      = OptionWrapper(params.LdExuCnt > 0, Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle))))
+  val memAddrIssueResp    = OptionWrapper(params.LdExuCnt > 0, Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle))))
   //deq sel
   val deqReady            = Vec(params.numDeq, Input(Bool()))
   val deqSelOH            = Vec(params.numDeq, Flipped(ValidIO(UInt(params.numEntries.W))))
@@ -490,7 +491,6 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
     val stIssuePtr        = Input(new SqPtr)
     val memWaitUpdateReq  = Flipped(new MemWaitUpdateReq)
     val slowResp          = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
-    val fastResp          = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
   }) else None
   val vecMemIn = OptionWrapper(params.isVecMemIQ, new Bundle {
     val sqDeqPtr = Input(new SqPtr)
