@@ -162,7 +162,7 @@ class TLBFA(
   val w_hit_vec = VecInit(entries.zip(v).map{case (e, vi) => e.wbhit(io.w.bits.data, Mux(io.w.bits.data.s2xlate =/= noS2xlate, io.csr.vsatp.asid, io.csr.satp.asid), s2xlate = io.w.bits.data.s2xlate) && vi })
   XSError(io.w.valid && Cat(w_hit_vec).orR, s"${parentName} refill, duplicate with existing entries")
 
-  val refill_vpn_reg = RegNext(io.w.bits.data.s1.entry.tag)
+  val refill_vpn_reg = RegEnable(io.w.bits.data.s1.entry.tag, io.w.valid)
   val refill_wayIdx_reg = RegNext(io.w.bits.wayIdx)
   when (RegNext(io.w.valid)) {
     io.access.map { access =>
@@ -280,7 +280,9 @@ class TLBFakeFA(
 
     val pte = helper.pte.asTypeOf(new PteBundle)
     val ppn = pte.ppn
-    val vpn_reg = RegNext(req.bits.vpn)
+    // TODO: RegNext enable: req.valid
+    // val vpn_reg = RegNext(req.bits.vpn)
+    val vpn_reg = RegEnable(req.bits.vpn, req.valid)
     val pf = helper.pf
     val level = helper.level
 

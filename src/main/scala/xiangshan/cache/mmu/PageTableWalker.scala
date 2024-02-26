@@ -509,6 +509,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     mem_resp_hit(enq_ptr) := to_mem_out
   }
 
+  //TODO: enable: io.in.valid?
   val enq_ptr_reg = RegNext(enq_ptr)
   val need_addr_check = RegNext(enq_state === state_addr_check && io.in.fire && !flush)
     
@@ -649,7 +650,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.mem.req.bits.id := mem_arb.io.chosen
   io.mem.req.bits.hptw_bypassed := false.B
   mem_arb.io.out.ready := io.mem.req.ready
-  val mem_refill_id = RegNext(io.mem.resp.bits.id(log2Up(l2tlbParams.llptwsize)-1, 0))
+  val mem_refill_id = RegEnable(io.mem.resp.bits.id(log2Up(l2tlbParams.llptwsize)-1, 0), io.mem.resp.valid)
   io.mem.refill := entries(mem_refill_id).req_info
   io.mem.refill.s2xlate := Mux(entries(mem_refill_id).req_info.s2xlate === noS2xlate, noS2xlate, onlyStage1) // llptw refill the pte of stage 1 
   io.mem.buffer_it := mem_resp_hit
