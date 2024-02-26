@@ -337,6 +337,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     mem_resp_hit(enq_ptr) := to_mem_out
   }
 
+  //TODO: enable: io.in.valid?
   val enq_ptr_reg = RegNext(enq_ptr)
   val need_addr_check = RegNext(enq_state === state_addr_check && io.in.fire && !flush)
   val last_enq_vpn = RegEnable(io.in.bits.req_info.vpn, io.in.fire)
@@ -397,7 +398,9 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.mem.req.bits.addr := MakeAddr(mem_arb.io.out.bits.ppn, getVpnn(mem_arb.io.out.bits.req_info.vpn, 0))
   io.mem.req.bits.id := mem_arb.io.chosen
   mem_arb.io.out.ready := io.mem.req.ready
-  io.mem.refill := entries(RegNext(io.mem.resp.bits.id(log2Up(l2tlbParams.llptwsize)-1, 0))).req_info
+  // TODO: enable: io.mem.resp.valid
+  // io.mem.refill := entries(RegNext(io.mem.resp.bits.id(log2Up(l2tlbParams.llptwsize)-1, 0))).req_info
+  io.mem.refill := entries(RegEnable(io.mem.resp.bits.id(log2Up(l2tlbParams.llptwsize)-1, 0), io.mem.resp.valid)).req_info
   io.mem.buffer_it := mem_resp_hit
   io.mem.enq_ptr := enq_ptr
 

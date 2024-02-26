@@ -112,6 +112,7 @@ class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCo
       val l2 = Bool()
       val l1 = Bool()
       def apply(levelUInt: UInt, valid: Bool) = {
+        // TODO: RegNext enable:
         sp := RegNext((levelUInt === 0.U || levelUInt === 1.U) && valid, false.B)
         l3 := RegNext((levelUInt === 2.U) & valid, false.B)
         l2 := RegNext((levelUInt === 1.U) & valid, false.B)

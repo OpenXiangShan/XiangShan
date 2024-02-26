@@ -78,6 +78,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   val sfence_tmp = DelayN(io.sfence, 1)
   val csr_tmp    = DelayN(io.csr.tlb, 1)
+  // TODO: add ren?
   val sfence_dup = Seq.fill(8)(RegNext(sfence_tmp))
   val csr_dup = Seq.fill(7)(RegNext(csr_tmp))
   val satp   = csr_dup(0).satp
@@ -295,11 +296,13 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val refill_level = Mux(refill_from_mq, 2.U, RegEnable(ptw.io.refill.level, 0.U, ptw.io.mem.req.fire))
   val refill_valid = mem_resp_done && !flush && !flush_latch(mem.d.bits.source)
 
+  // TODO: ?
   cache.io.refill.valid := RegNext(refill_valid, false.B)
   cache.io.refill.bits.ptes := refill_data.asUInt
   cache.io.refill.bits.req_info_dup.map(_ := RegEnable(Mux(refill_from_mq, llptw_mem.refill, ptw.io.refill.req_info), refill_valid))
   cache.io.refill.bits.level_dup.map(_ := RegEnable(refill_level, refill_valid))
   cache.io.refill.bits.levelOH(refill_level, refill_valid)
+  // TODO: enable: refill_valid?
   cache.io.refill.bits.sel_pte_dup.map(_ := RegNext(sel_data(refill_data_tmp.asUInt, req_addr_low(mem.d.bits.source))))
 
   if (env.EnableDifftest) {
@@ -312,6 +315,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     difftest.coreid := io.hartId
     difftest.index := 2.U
     difftest.valid := cache.io.refill.valid
+    // TODO: enable: mem.d.valid
     difftest.addr := difftest_ptw_addr(RegNext(mem.d.bits.source))
     difftest.data := refill_data.asTypeOf(difftest.data)
     difftest.idtfr := DontCare

@@ -70,7 +70,9 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   // val vmEnable = satp.mode === 8.U // && (mode < ModeM) // FIXME: fix me when boot xv6/linux...
   val vmEnable = if (EnbaleTlbDebug) (satp.mode === 8.U)
     else (satp.mode === 8.U && (mode < ModeM))
-  val portTranslateEnable = (0 until Width).map(i => vmEnable && RegNext(!req(i).bits.no_translate))
+  // TODO: RegNext enable:req.valid
+  // val portTranslateEnable = (0 until Width).map(i => vmEnable && RegNext(!req(i).bits.no_translate))
+  val portTranslateEnable = (0 until Width).map(i => vmEnable && RegEnable(!req(i).bits.no_translate, req(i).valid))
 
   val req_in = req
   val req_out = req.map(a => RegEnable(a.bits, a.fire))
@@ -86,8 +88,11 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   for (i <- 0 until Width) {
     entries.io.r_req_apply(io.requestor(i).req.valid, get_pn(req_in(i).bits.vaddr), i)
     entries.io.w_apply(refill, ptw.resp.bits)
-    resp(i).bits.debug.isFirstIssue := RegNext(req(i).bits.debug.isFirstIssue)
-    resp(i).bits.debug.robIdx := RegNext(req(i).bits.debug.robIdx)
+    // TODO: RegNext enable:req.valid
+    // resp(i).bits.debug.isFirstIssue := RegNext(req(i).bits.debug.isFirstIssue)
+    resp(i).bits.debug.isFirstIssue := RegEnable(req(i).bits.debug.isFirstIssue, req(i).valid)
+    // resp(i).bits.debug.robIdx := RegNext(req(i).bits.debug.robIdx)
+    resp(i).bits.debug.robIdx := RegEnable(req(i).bits.debug.robIdx, req(i).valid)
   }
 
   // read TLB, get hit/miss, paddr, perm bits
@@ -130,7 +135,9 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val vaddr = SignExt(req_out(i).vaddr, PAddrBits)
     resp(i).bits.miss := miss
     resp(i).bits.ptwBack := ptw.resp.fire
-    resp(i).bits.memidx := RegNext(req_in(i).bits.memidx)
+    // TODO: RegNext enable: req_in.valid
+    // resp(i).bits.memidx := RegNext(req_in(i).bits.memidx)
+    resp(i).bits.memidx := RegEnable(req_in(i).bits.memidx, req_in(i).valid)
 
     val ppn = WireInit(VecInit(Seq.fill(nRespDups)(0.U(ppnLen.W))))
     val perm = WireInit(VecInit(Seq.fill(nRespDups)(0.U.asTypeOf(new TlbPermBundle))))
@@ -192,9 +199,12 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     XSError(!io.requestor(idx).resp.ready, s"${q.name} port ${idx} is non-block, resp.ready must be true.B")
 
     val ptw_just_back = ptw.resp.fire && ptw.resp.bits.hit(get_pn(req_out(idx).vaddr), asid = io.csr.satp.asid, allType = true)
-    val ptw_already_back = RegNext(ptw.resp.fire) && RegNext(ptw.resp.bits).hit(get_pn(req_out(idx).vaddr), asid = io.csr.satp.asid, allType = true)
+    // TODO: RegNext enable: ptw.resp.valid ? req.valid
+    // val ptw_already_back = RegNext(ptw.resp.fire) && RegNext(ptw.resp.bits).hit(get_pn(req_out(idx).vaddr), asid = io.csr.satp.asid, allType = true)
+    val ptw_already_back = RegNext(ptw.resp.fire) && RegEnable(ptw.resp.bits, ptw.resp.valid).hit(get_pn(req_out(idx).vaddr), asid = io.csr.satp.asid, allType = true)
     io.ptw.req(idx).valid := req_out_v(idx) && missVec(idx) && !(ptw_just_back || ptw_already_back) // TODO: remove the regnext, timing
     io.tlbreplay(idx) := req_out_v(idx) && missVec(idx) && (ptw_just_back || ptw_already_back)
+    // TODO: RegNext enable: io.requestor(idx).req.valid
     when (io.requestor(idx).req_kill && RegNext(io.requestor(idx).req.fire)) {
       io.ptw.req(idx).valid := false.B
       io.tlbreplay(idx) := true.B
@@ -213,6 +223,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val miss_req_memidx = req_out(idx).memidx
     val hit = io.ptw.resp.bits.hit(miss_req_vpn, io.csr.satp.asid, allType = true) && io.ptw.resp.valid
 
+    // TODO: RegNext enable: req_in.valid(fire)
     val new_coming = RegNext(req_in(idx).fire && !req_in(idx).bits.kill && !flush_pipe(idx), false.B)
     val miss_wire = new_coming && missVec(idx)
     val miss_v = ValidHoldBypass(miss_wire, resp(idx).fire, flush_pipe(idx))
@@ -261,6 +272,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   // when ptw resp, tlb at refill_idx maybe set to miss by force.
   // Bypass ptw resp to check.
   def ptw_resp_bypass(vpn: UInt) = {
+    // TODO: RegNext enable: ptw.resp.valid
     val p_hit = RegNext(ptw.resp.bits.hit(vpn, io.csr.satp.asid, allType = true) && io.ptw.resp.fire)
     val p_ppn = RegEnable(ptw.resp.bits.genPPN(vpn), io.ptw.resp.fire)
     val p_perm = RegEnable(ptwresp_to_tlbperm(ptw.resp.bits), io.ptw.resp.fire)
