@@ -146,15 +146,14 @@ class StridePF()(implicit p: Parameters) extends XSModule with HasSMSModuleHelpe
   val s0_matched_last_addr = Mux1H(s0_match_vec, entries_last_addr)
   val s0_matched_last_stride = Mux1H(s0_match_vec, entries_stride)
 
-
-  val s1_vaddr = RegEnable(io.s0_lookup.bits.vaddr, s0_valid)
-  val s1_paddr = RegEnable(io.s0_lookup.bits.paddr, s0_valid)
   val s1_hit = RegNext(s0_hit) && io.s1_valid
   val s1_alloc = RegNext(s0_miss) && io.s1_valid
-  val s1_conf = RegNext(s0_matched_conf)
-  val s1_last_addr = RegNext(s0_matched_last_addr)
-  val s1_last_stride = RegNext(s0_matched_last_stride)
-  val s1_match_vec = RegNext(VecInit(s0_match_vec))
+  val s1_vaddr = RegEnable(io.s0_lookup.bits.vaddr, s0_valid)
+  val s1_paddr = RegEnable(io.s0_lookup.bits.paddr, s0_valid)
+  val s1_conf = RegEnable(s0_matched_conf, s0_valid)
+  val s1_last_addr = RegEnable(s0_matched_last_addr, s0_valid)
+  val s1_last_stride = RegEnable(s0_matched_last_stride, s0_valid)
+  val s1_match_vec = RegEnable(VecInit(s0_match_vec), s0_valid)
 
   val BLOCK_OFFSET = log2Up(dcacheParameters.blockBytes)
   val s1_new_stride_vaddr = s1_vaddr(BLOCK_OFFSET + STRIDE_BLK_ADDR_BITS - 1, BLOCK_OFFSET)
@@ -365,7 +364,7 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   val s1_update = RegNext(s0_update, false.B)
   val s1_update_mask = RegEnable(VecInit(region_match_vec_s0), s0_lookup_valid)
   val s1_agt_entry = RegEnable(s0_agt_entry, s0_lookup_valid)
-  val s1_cross_region_match = RegNext(s0_lookup_valid && s0_cross_region_hit, false.B)
+  val s1_cross_region_match = RegEnable(s0_cross_region_hit, s0_lookup_valid)
   val s1_alloc = RegNext(s0_alloc, false.B)
   val s1_alloc_entry = s1_agt_entry
   val s1_do_dcache_evict = RegNext(s0_do_dcache_evict, false.B)
@@ -470,7 +469,7 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
 
   // stage2: gen pf reg / evict entry to pht
   val s2_do_dcache_evict = RegNext(s1_do_dcache_evict, false.B)
-  val s2_evict_entry = RegEnable(s1_evict_entry, s1_alloc || s1_do_dcache_evict)
+  val s2_evict_entry = RegEnable(s1_evict_entry, (s1_alloc || s1_do_dcache_evict) && s1_evict_valid)
   val s2_evict_valid = RegNext((s1_alloc || s1_do_dcache_evict) && s1_evict_valid, false.B)
   val s2_paddr_valid = RegEnable(s1_pf_gen_paddr_valid, s1_pf_gen_valid)
   val s2_pf_gen_region_tag = RegEnable(s1_pf_gen_region_tag, s1_pf_gen_valid)
@@ -548,9 +547,18 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
     singlePort = true
   ))
   def PHT_SETS = smsParams.pht_size / smsParams.pht_ways
-  val pht_valids = Seq.fill(smsParams.pht_ways){
-    RegInit(VecInit(Seq.fill(PHT_SETS){false.B}))
+  // clockgated on pht_valids
+  val pht_valids_reg = RegInit(VecInit(Seq.fill(smsParams.pht_ways){
+    VecInit(Seq.fill(PHT_SETS){false.B})
+  }))
+  val pht_valids_enable = WireInit(VecInit(Seq.fill(PHT_SETS) {false.B}))
+  val pht_valids_next = WireInit(pht_valids_reg)
+  for(j <- 0 until PHT_SETS){
+    when(pht_valids_enable(j)){
+      (0 until smsParams.pht_ways).foreach(i => pht_valids_reg(i)(j) := pht_valids_next(i)(j))
+    }
   }
+
   val replacement = Seq.fill(PHT_SETS) { ReplacementPolicy.fromString("plru", smsParams.pht_ways) }
 
   val lookup_queue = Module(new OverrideableQueue(new PhtLookup, smsParams.pht_lookup_queue_size))
@@ -600,7 +608,7 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   val s1_region_paddr = RegEnable(s0_region_paddr, s1_reg_en)
   val s1_region_vaddr = RegEnable(s0_region_vaddr, s1_reg_en)
   val s1_region_offset = RegEnable(s0_region_offset, s1_reg_en)
-  val s1_pht_valids = pht_valids.map(way => Mux1H(
+  val s1_pht_valids = pht_valids_reg.map(way => Mux1H(
     (0 until PHT_SETS).map(i => i.U === s1_ram_raddr),
     way
   ))
@@ -687,11 +695,12 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
 
   s1_wait := (s2_valid && s2_evict && s2_ram_waddr === s1_ram_raddr) || s3_ram_en
 
-  for((valids, way_idx) <- pht_valids.zipWithIndex){
+  for((valids, way_idx) <- pht_valids_next.zipWithIndex){
     val update_way = s3_repl_way_mask(way_idx)
     for((v, set_idx) <- valids.zipWithIndex){
       val update_set = s3_repl_update_mask(set_idx)
       when(s3_valid && s3_evict && !s3_hit && update_set && update_way){
+        pht_valids_enable(set_idx) := true.B
         v := true.B
       }
     }
