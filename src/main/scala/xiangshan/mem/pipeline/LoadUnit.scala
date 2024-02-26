@@ -1339,6 +1339,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // vector output
   io.vecldout.bits.vec := s3_vecout
+  // FIXME
+  io.vecldout.bits.isPackage := DontCare
+  io.vecldout.bits.packageNum := DontCare
+  io.vecldout.bits.originAlignedType := DontCare
+  io.vecldout.bits.alignedType := DontCare
   // TODO: VLSU, uncache data logic
   val vecdata = rdataVecHelper(s3_vec_alignedType, s3_picked_data_frm_cache)
   io.vecldout.bits.vec.vecdata := vecdata

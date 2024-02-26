@@ -160,13 +160,14 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
   val allowDequeue = io.flowWriteback.map(_.ready)
   val doDequeue = Wire(Vec(VecLoadPipelineWidth, Bool()))
   val dequeueCount = PopCount(doDequeue)
+  val packageDequeue = io.flowWriteback.map(_.bits.isPackage).reduce(_ | _) // FIXME: more elegant
 
   for (i <- 0 until VecLoadPipelineWidth) {
     val thisPtr = deqPtr(i).value
     if (i == 0) {
       canDequeue(i) := flowFinished(thisPtr) && !flowNeedCancel(thisPtr) && deqPtr(i) < issuePtr(0)
     } else {
-      canDequeue(i) := flowFinished(thisPtr) && !flowNeedCancel(thisPtr) && deqPtr(i) < issuePtr(0) && canDequeue(i - 1)
+      canDequeue(i) := flowFinished(thisPtr) && !flowNeedCancel(thisPtr) && deqPtr(i) < issuePtr(0) && canDequeue(i - 1) && !packageDequeue // if port 0 is package, port 1 can't writeback
     }
     io.flowWriteback(i).valid := canDequeue(i)
   }
@@ -211,6 +212,11 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
       // From ExuOutput
     val debug             = Mux(isActiveElem, thisLoadResult.debug, 0.U.asTypeOf(thisLoadResult.debug))
     val uop               = Mux(isActiveElem, thisLoadResult.uop, thisLoadEntries.uop)
+    //package
+    val isPackage         = thisLoadEntries.isPackage
+    val packageNum        = thisLoadEntries.packageNum
+    val originAlignedType = thisLoadEntries.originAlignedType
+    val alignedType       = thisLoadEntries.alignedType
 
     io.flowWriteback(i).bits match { case x =>
       // From VecExuOutput
@@ -218,7 +224,7 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
       x.vec.vecdata       := vecdata
       x.vec.mask          := mask
       x.vec.reg_offset    := reg_offset
-      x.vec.vecActive    := vecActive
+      x.vec.vecActive     := vecActive
       x.vec.is_first_ele  := is_first_ele
       x.vec.elemIdx       := elemIdx
       x.vec.elemIdxInsideVd := elemIdxInsideVd
@@ -231,6 +237,10 @@ class VlFlowQueue(implicit p: Parameters) extends VLSUModule
       // x.redirect          := thisLoadResult.redirect
       x.debug             := debug
       x.uop               := uop
+      x.isPackage         := isPackage
+      x.packageNum        := packageNum
+      x.originAlignedType := originAlignedType
+      x.alignedType       := alignedType
     }
   }
 
