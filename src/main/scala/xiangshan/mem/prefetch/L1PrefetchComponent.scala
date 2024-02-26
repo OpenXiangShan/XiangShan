@@ -375,7 +375,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   }
 
   assert(!s0_valid || PopCount(VecInit(s0_match_vec)) <= 1.U, "req region should match no more than 1 entry")
-  assert(!(s0_valid && RegNext(s0_valid) && !s0_hit && !RegNext(s0_hit) && replacement.way === RegNext(replacement.way)), "replacement error")
+  assert(!(s0_valid && RegNext(s0_valid) && !s0_hit && !RegEnable(s0_hit, s0_valid) && replacement.way === RegEnable(replacement.way, s0_valid)), "replacement error")
 
   XSPerfAccumulate("s0_enq_fire", s0_valid)
   XSPerfAccumulate("s0_enq_valid", io.prefetch_req.valid)
@@ -407,7 +407,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   XSPerfAccumulate("s1_enq_valid", s1_valid)
   XSPerfAccumulate("s1_enq_alloc", s1_alloc)
   XSPerfAccumulate("s1_enq_update", s1_update)
-  XSPerfAccumulate("hash_conflict", s0_valid && RegNext(s1_valid) && (s0_region =/= RegNext(s1_region)) && (s0_region_hash === RegNext(s1_region_hash)))
+  XSPerfAccumulate("hash_conflict", s0_valid && RegNext(s1_valid) && (s0_region =/= RegEnable(s1_region, s1_valid)) && (s0_region_hash === RegEnable(s1_region_hash, s1_valid)))
 
   // tlb req
   // s0: arb all tlb reqs
@@ -627,7 +627,11 @@ class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamP
   pf_queue_filter.io.prefetch_req.bits := Mux(
     stream_bit_vec_array.io.prefetch_req.valid,
     stream_bit_vec_array.io.prefetch_req.bits,
-    stride_meta_array.io.prefetch_req.bits
+    Mux(
+      stride_meta_array.io.prefetch_req.valid,
+      stride_meta_array.io.prefetch_req.bits,
+      DontCare
+    )
   )
 
   io.l1_req.valid := pf_queue_filter.io.l1_req.valid && enable && pf_ctrl.enable
