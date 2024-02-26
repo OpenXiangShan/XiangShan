@@ -717,14 +717,15 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
     }
   }
   val isPackage = isPackageVec.reduce(_ || _) //only use in unit-stride package element
-  packCounter := packCounter + retireCount - retirePtrOffset //TODO
+  val packCounterNext = packCounter + retireCount - retirePtrOffset //TODO
+  packCounter := packCounterNext
   for (i <- 0 until EnsbufferWidth) {
     val (newFieldIdx, newSegmentIdx) = 
       GenNextSegmentFieldIdx(curFieldIdx(i), curSegmentIdx(i), nfields, retireCount)
-    val nextOffset = Mux(isPackage, (retirePtrOffset + i.U), GenFieldSegmentOffset(newFieldIdx, newSegmentIdx, nSegments))
+    val nextOffset = GenFieldSegmentOffset(newFieldIdx, newSegmentIdx, nSegments)
     curFieldIdx(i) := newFieldIdx
     curSegmentIdx(i) := newSegmentIdx
-    retirePtr(i) := retireFirstPtr + nextOffset - packCounter
+    retirePtr(i) := retireFirstPtr + nextOffset - packCounterNext
   }
 
   // Update ensbuffer state
