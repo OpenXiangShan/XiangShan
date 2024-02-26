@@ -161,26 +161,30 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
       log2Up(VLENB).U - sew(1,0),
       log2Up(VLENB).U - eew(1,0)
     )
+    val isUsWholeReg = isUnitStride(mop) && us_whole_reg(fuOpType)
+    val isMaskReg = isUnitStride(mop) && us_mask(fuOpType)
+    val vvl = io.storeIn.bits.src_vl.asTypeOf(VConfig()).vl
+    val evl = Mux(isUsWholeReg, GenUSWholeRegVL(io.storeIn.bits.uop.vpu.nf +& 1.U, eew), Mux(isMaskReg, GenUSMaskRegVL(vvl), vvl))
+    val vvstart = io.storeIn.bits.uop.vpu.vstart
     val flows = GenRealFlowNum(instType, emul, lmul, eew, sew)
     val flowsLog2 = GenRealFlowLog2(instType, emul, lmul, eew, sew)
     val flowsPrevThisUop = uopIdxInField << flowsLog2 // # of flows before this uop in a field
     val flowsPrevThisVd = vdIdxInField << numFlowsSameVdLog2 // # of flows before this vd in a field
     val flowsIncludeThisUop = (uopIdxInField +& 1.U) << flowsLog2 // # of flows before this uop besides this uop
     val alignedType = Mux(isIndexed(instType), sew(1, 0), eew(1, 0))
-    val srcMask = Mux(vm, Fill(VLEN, 1.U(1.W)), io.storeIn.bits.src_mask)
+    val srcMask = GenFlowMask(Mux(vm, Fill(VLEN, 1.U(1.W)), io.storeIn.bits.src_mask), vvstart, evl, true)
     val flowMask = ((srcMask &
       UIntToMask(flowsIncludeThisUop, VLEN + 1) &
       ~UIntToMask(flowsPrevThisUop, VLEN)
     ) >> flowsPrevThisVd)(VLENB - 1, 0)
     val vlmax = GenVLMAX(lmul, sew)
-    val isUsWholeReg = isUnitStride(mop) && us_whole_reg(fuOpType)
     valid(id) := true.B
     finish(id) := false.B
     exception(id) := false.B
     vstart(id) := 0.U
     uopq(id) match { case x =>
       x.uop := io.storeIn.bits.uop
-      x.uop.vpu.vl := Mux(isUsWholeReg, GenUSWholeRegVL(io.storeIn.bits.uop.vpu.nf +& 1.U,eew), io.storeIn.bits.src_vl.asTypeOf(VConfig()).vl)
+      x.uop.vpu.vl := evl
       x.uop.numUops := numUops
       x.uop.lastUop := (uopIdx +& 1.U) === numUops
       x.flowMask := flowMask
@@ -193,7 +197,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
       x.nfields := nf +& 1.U
       x.vm := vm
       x.usWholeReg := isUsWholeReg
-      x.usMaskReg := isUnitStride(mop) && us_mask(fuOpType)
+      x.usMaskReg := isMaskReg
       x.eew := eew
       x.sew := sew
       x.emul := emul
@@ -262,6 +266,14 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
   assert(!issueValid || PopCount(issueEntry.vlmax) === 1.U, "VLMAX should be power of 2 and non-zero")
 
   val elemIdxInsideVd = Wire(Vec(flowIssueWidth, UInt(flowIdxBits.W)))
+  val packagePortVec = Seq.fill(flowIssueWidth)(Wire(Vec(flowIssueWidth, Bool())))
+  val packageByPrePort = Wire(Vec(flowIssueWidth, Bool()))
+  (packageByPrePort.zipWithIndex).map{
+    case (s, i) => {
+      s := packagePortVec(i).reduce(_ | _)
+    }
+  }
+
   flowSplitIdx.zip(io.flowIssue).zipWithIndex.foreach { case ((flowIdx, issuePort), portIdx) =>
     // AGU
     // TODO: DONT use * to implement multiplication!!!
@@ -294,17 +306,30 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
     val stride = Mux(isIndexed(issueInstType), indexedStride, notIndexedStride)
     val fieldOffset = nfIdx << issueAlignedType // field offset inside a segment
     val vaddr = issueBaseAddr + stride + fieldOffset
-    val mask = issueEntry.byteMask
+    val mask = genVWmask(vaddr ,issueAlignedType)
     val regOffset = (elemIdxInsideField << issueAlignedType)(vOffsetBits - 1, 0)
     val enable = (issueFlowMask & UIntToOH(elemIdxInsideVd(portIdx))).orR
-    val ttttvl = Mux(issueEntry.usMaskReg, GenUSMaskRegVL(issueVl), issueVl)
-    val vecActive = VLActivativeCtrl(
-      vstart = issueVstart,
-      vl = ttttvl,
-      eleIdx = elemIdxInsideField
-    ) && enable
+    val vecActive = enable
+     // seek unit-stride package
+    val inactiveMask = GenFlowMask(issueFlowMask, issueVstart, issueVl, false) // if elemidx > vl || elemidx < vstart, set 1, and inactive element set 1, active element set 0. 
+    val shiftMask = (Mux(enable, issueFlowMask, inactiveMask) >> elemIdxInsideVd(portIdx)).asUInt // if active ,select active mask, else inactive mask
+    val packVec = GenPackVec(vaddr, shiftMask, issueEew(1, 0), elemIdxInsideVd(portIdx)) // FIXME
+    val packAlignedType = GenPackAlignedType(packVec.asUInt)
+    val isPackage = isUnitStride(issueInstType) && !isSegment(issueInstType) && (packAlignedType > issueAlignedType) // don't pack segment unit-stride
+    val packageNum = Mux(isPackage, GenPackNum(issueAlignedType, packAlignedType), 1.U)
+    val realAlignedType = Mux(isPackage, packAlignedType, issueAlignedType)
+
+    (0 until flowIssueWidth).map{
+      case i => {
+        if(i > portIdx){
+          packagePortVec(i)(portIdx) := (isPackage & !(shiftMask(i) ^ shiftMask(portIdx)))
+        }
+        else {
+          packagePortVec(i)(portIdx) := false.B
+        }
+      }
+    }
     // TODO: delete me later
-    dontTouch(ttttvl)
     dontTouch(elemIdxInsideField)
     dontTouch(enable)
     dontTouch(nfIdx)
@@ -315,38 +340,47 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
 
     issuePort.valid := issueValid && flowIdx < issueFlowNum &&
       !issueUop.robIdx.needFlush(io.redirect) &&
-      !issueUop.robIdx.needFlush(redirectReg)
+      !issueUop.robIdx.needFlush(redirectReg) && !packageByPrePort(portIdx)
   
     issuePort.bits match { case x =>
       x.uop := issueUop
       x.vaddr := vaddr
       x.mask := mask
-      x.alignedType := issueAlignedType
+      x.alignedType := realAlignedType
       x.vecActive := vecActive
       x.elemIdx := elemIdx
       x.is_first_ele := elemIdx === 0.U
       x.data := GenVSData(
         data = issueEntry.data.asUInt,
-        elemIdx = elemIdxInsideField,
-        alignedType = issueAlignedType
+        elemIdx = Mux(isPackage, (elemIdxInsideField >> (realAlignedType - issueAlignedType)).asUInt, elemIdxInsideField),
+        alignedType = realAlignedType
       )
       x.uopQueuePtr := flowSplitPtr
-      x.isLastElem := issueUop.lastUop && (flowIdx +& 1.U) === issueFlowNum
+      x.isLastElem := issueUop.lastUop && (flowIdx +& packageNum) === issueFlowNum
       x.nfields := issueNFIELDS
       x.nSegments := issueEntry.vlmax
       x.fieldIdx := nfIdx
       x.segmentIdx := elemIdxInsideField
+      //unit-stride package
+      x.isPackage := isPackage
+      x.packageNum := packageNum
+      x.originAlignedType := issueAlignedType
     }
   }
 
-  val numFlowIssue = PopCount(io.flowIssue.map(_.fire))
+  // unit-stride package handle
+  val numFlowIssue = io.flowIssue.map{
+    case (issuePort) => {
+      Mux(issuePort.fire, issuePort.bits.packageNum, 0.U(log2Up(VLENB).W))
+    }
+  }.fold(0.U(log2Up(VLENB).W))(_ + _)
   val flowIssueFire = Cat(io.flowIssue.map(_.fire)).orR
 
   when (!RegNext(io.redirect.valid) || distanceBetween(enqPtr, flowSplitPtr) > flushNumReg) {
-    when (flowSplitIdx.last < (issueFlowNum - 1.U)) {
+    when (flowSplitIdx.last < (issueFlowNum - numFlowIssue)) {
       // The uop has not been entirly splited yet
       flowSplitIdx.foreach(p => p := p + numFlowIssue)
-      assert(!flowIssueFire || numFlowIssue === flowIssueWidth.U, "both issue port should fire together")
+      // assert(!flowIssueFire || numFlowIssue === flowIssueWidth.U, "both issue port should fire together")
     }.otherwise {
       when (flowIssueFire) {
         // The uop is done spliting
@@ -369,6 +403,8 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
     val entry = uopq(ptr.value)
     flowWbExcp(i) := wb.bits.uop.exceptionVec
     val flowWbElemIdxInField = wb.bits.elemIdx & (entry.vlmax - 1.U)
+    val isPackage = wb.bits.isPackage.asBool
+    val alignedType = Mux(isIndexed(entry.instType), entry.sew(1, 0), Mux(isPackage, wb.bits.alignedType,entry.eew(1, 0)))
 
     // handle the situation where multiple ports are going to write the same uop queue entry
     val mergedByPrevPort = (i != 0).B && Cat((0 until i).map(j =>
@@ -377,7 +413,13 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
       (j > i).B &&
       io.flowWriteback(j).bits.uopQueuePtr === wb.bits.uopQueuePtr &&
       io.flowWriteback(j).valid)
-    val nextFlowCnt = entry.flow_counter - PopCount(mergePortVec)
+    // writeback packNum, if no package, packageNum=1
+    val writebackFlowNum = (io.flowWriteback zip mergePortVec).map{
+      case (writebackPort, valid) => {
+        Mux(valid, writebackPort.bits.packageNum, 0.U(log2Up(VLENB).W))
+      }
+    }.fold(0.U(log2Up(VLENB).W))(_ +& _)
+    val nextFlowCnt = entry.flow_counter - writebackFlowNum
 
     // update data and decrease flow_counter when the writeback port is not merged
     when (wb.valid && !mergedByPrevPort) {
