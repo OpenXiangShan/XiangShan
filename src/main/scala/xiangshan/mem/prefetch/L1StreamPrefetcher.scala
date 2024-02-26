@@ -194,7 +194,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   assert(!s0_valid || !(s0_hit && s0_plus_one_hit && (s0_index === s0_plus_one_index)), "region and region plus 1 index match failed")
   assert(!s0_valid || !(s0_hit && s0_minus_one_hit && (s0_index === s0_minus_one_index)), "region and region minus 1 index match failed")
   assert(!s0_valid || !(s0_plus_one_hit && s0_minus_one_hit && (s0_minus_one_index === s0_plus_one_index)), "region plus 1 and region minus 1 index match failed")
-  assert(!(s0_valid && RegNext(s0_valid) && !s0_hit && !RegNext(s0_hit) && replacement.way === RegNext(replacement.way)), "replacement error")
+  assert(!(s0_valid && RegNext(s0_valid) && !s0_hit && !RegEnable(s0_hit, s0_valid) && replacement.way === RegEnable(replacement.way, s0_valid)), "replacement error")
 
   XSPerfAccumulate("s0_valid_train_req", s0_valid)
   val s0_hit_pattern_vec = Seq(s0_hit, s0_plus_one_hit, s0_minus_one_hit)
