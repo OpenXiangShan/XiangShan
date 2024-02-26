@@ -459,12 +459,17 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       )
 
       deqSelValidVec.zip(deqSelOHVec).zipWithIndex.foreach { case ((selValid, selOH), i) =>
-        selValid := compEntryOldestSel.get(i).valid || simpEntryOldestSel.get(i).valid || enqEntryOldestSel(i).valid
-        selOH := Cat(
-          compEntryOldestSel.get(i).bits,
-          Fill(params.numSimp, !compEntryOldestSel.get(i).valid) & simpEntryOldestSel.get(i).bits,
-          Fill(params.numEnq, !compEntryOldestSel.get(i).valid && !simpEntryOldestSel.get(i).valid) & enqEntryOldestSel(i).bits
-        )
+        if (params.exuBlockParams(i).fuConfigs.contains(FuConfig.FakeHystaCfg)) {
+          selValid := false.B
+          selOH := 0.U.asTypeOf(selOH)
+        } else {
+          selValid := compEntryOldestSel.get(i).valid || simpEntryOldestSel.get(i).valid || enqEntryOldestSel(i).valid
+          selOH := Cat(
+            compEntryOldestSel.get(i).bits,
+            Fill(params.numSimp, !compEntryOldestSel.get(i).valid) & simpEntryOldestSel.get(i).bits,
+            Fill(params.numEnq, !compEntryOldestSel.get(i).valid && !simpEntryOldestSel.get(i).valid) & enqEntryOldestSel(i).bits
+          )
+        }
       }
     }
 
