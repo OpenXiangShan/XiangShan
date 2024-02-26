@@ -1263,7 +1263,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.feedback_slow.bits.sourceType       := RSFeedbackType.lrqFull
   io.feedback_slow.bits.dataInvalidSqIdx := DontCare
 
-  io.ldCancel.ld2Cancel := s3_valid && s3_in.isFirstIssue && (  // issued from IQ
+  io.ldCancel.ld2Cancel := s3_valid && (
     io.lsq.ldin.bits.rep_info.need_rep ||                       // exe fail or
     s3_in.mmio                                                  // is mmio
   )
