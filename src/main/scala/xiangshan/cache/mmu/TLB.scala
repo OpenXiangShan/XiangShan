@@ -152,7 +152,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val enable = portTranslateEnable(i)
     val isOnlys2xlate = req_out_s2xlate(i) === onlyStage2
     val need_gpa_vpn_hit = RegEnable(need_gpa_vpn === get_pn(req_in(i).bits.vaddr), req_in(i).fire)
-    when (io.requestor(i).resp.valid && hasGpf(i) && need_gpa === false.B && !need_gpa_vpn_hit && !isOnlys2xlate) {
+    when (io.requestor(i).resp.valid && !io.requestor(i).req_kill && hasGpf(i) && need_gpa === false.B && !p_hit && !need_gpa_vpn_hit && !isOnlys2xlate ) {
       need_gpa := true.B
       need_gpa_vpn := get_pn(req_out(i).vaddr)
       resp_gpa_refill := false.B
@@ -281,7 +281,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
    
     val ptw_just_back = ptw.resp.fire && req_s2xlate === ptw.resp.bits.s2xlate && ptw.resp.bits.hit(get_pn(req_out(idx).vaddr), io.csr.satp.asid, io.csr.vsatp.asid, io.csr.hgatp.asid, true, false)
     val ptw_already_back = RegNext(ptw.resp.fire) && req_s2xlate === RegNext(ptw.resp.bits).s2xlate && RegNext(ptw.resp.bits).hit(get_pn(req_out(idx).vaddr), io.csr.satp.asid, io.csr.vsatp.asid, io.csr.hgatp.asid, allType = true)
-    io.ptw.req(idx).valid := req_out_v(idx) && missVec(idx) && !(ptw_just_back || ptw_already_back) // TODO: remove the regnext, timing
+    io.ptw.req(idx).valid := req_out_v(idx) && missVec(idx) && !(ptw_just_back || ptw_already_back) && !(hasGpf(idx) && need_gpa) // TODO: remove the regnext, timing
     io.tlbreplay(idx) := req_out_v(idx) && missVec(idx) && (ptw_just_back || ptw_already_back)
     when (io.requestor(idx).req_kill && RegNext(io.requestor(idx).req.fire)) {
       io.ptw.req(idx).valid := false.B
