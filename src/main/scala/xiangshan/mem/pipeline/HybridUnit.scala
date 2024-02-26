@@ -1088,7 +1088,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.stu_io.lsq_replenish := s2_out
   io.stu_io.lsq_replenish.miss := io.ldu_io.dcache.resp.fire && io.ldu_io.dcache.resp.bits.miss
 
-  io.ldu_io.ldCancel.ld1Cancel := s2_valid && s2_ld_flow && s2_out.isFirstIssue && (// issued from IQ
+  io.ldu_io.ldCancel.ld1Cancel := s2_valid && s2_ld_flow && (
     s2_out.rep_info.need_rep || s2_ld_mmio                                          // exe fail or is mmio
   )
 
@@ -1267,7 +1267,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.vec_stu_io.feedbackSlow.valid := RegNext(s2_vec_feedback.valid && !s2_out.uop.robIdx.needFlush(io.redirect))
   io.vec_stu_io.feedbackSlow.bits := RegNext(s2_vec_feedback.bits)
 
-  io.ldu_io.ldCancel.ld2Cancel := s3_valid && s3_ld_flow && s3_in.isFirstIssue && ( // issued from IQ and is load
+  io.ldu_io.ldCancel.ld2Cancel := s3_valid && s3_ld_flow && (                          // is load
     io.ldu_io.lsq.ldin.bits.rep_info.need_rep || s3_in.mmio                            // exe fail or is mmio
   )
 
