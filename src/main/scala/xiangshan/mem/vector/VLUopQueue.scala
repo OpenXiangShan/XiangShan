@@ -113,7 +113,8 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
   /**
     * Redirect
     */
-  val flushVec = valid.zip(uopq).map { case (v, entry) => v && entry.uop.robIdx.needFlush(io.redirect) }
+  val flushed = WireInit(VecInit(Seq.fill(VlUopSize)(false.B))) // entry has been flushed by the redirect arrived in the pre 1 cycle
+  val flushVec = (valid zip flushed).zip(uopq).map { case ((v, f), entry) => v && entry.uop.robIdx.needFlush(io.redirect) && !f }
   val flushEnq = io.loadRegIn.fire && io.loadRegIn.bits.uop.robIdx.needFlush(io.redirect)
   val flushNumReg = RegNext(PopCount(flushEnq +: flushVec))
   val redirectReg = RegNext(io.redirect)
@@ -590,6 +591,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
   for (i <- 0 until VlUopSize) {
     when(flushVecReg(i) && redirectReg.valid && flushNumReg =/= 0.U) {
       valid(i) := false.B
+      flushed(i) := true.B
       finish(i) := false.B
       preAlloc(i) := false.B
       exception(i) := false.B
