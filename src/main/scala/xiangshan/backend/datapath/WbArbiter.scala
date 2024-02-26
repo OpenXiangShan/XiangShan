@@ -48,9 +48,9 @@ class WbArbiter(params: WbArbiterParams)(implicit p: Parameters) extends XSModul
 
   private val inGroup: Map[Int, Seq[DecoupledIO[WriteBackBundle]]] = io.inGroup
 
-  private val arbiters: Seq[Option[Arbiter[WriteBackBundle]]] = Seq.tabulate(params.numOut) { x => {
+  private val arbiters: Seq[Option[WBArbiter[WriteBackBundle]]] = Seq.tabulate(params.numOut) { x => {
     if (inGroup.contains(x)) {
-      Some(Module(new Arbiter(new WriteBackBundle(inGroup.values.head.head.bits.params, backendParams), inGroup(x).length)))
+      Some(Module(new WBArbiter(new WriteBackBundle(inGroup.values.head.head.bits.params, backendParams), inGroup(x).length)))
     } else {
       None
     }
