@@ -124,7 +124,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   // we send feedback right after we receives request
   // also, we always treat amo as tlb hit
   // since we will continue polling tlb all by ourself
-  io.feedbackSlow.valid       := RegNext(RegNext(io.in.valid))
+  io.feedbackSlow.valid       := GatedValidRegNext(GatedValidRegNext(io.in.valid))
   io.feedbackSlow.bits.hit    := true.B
   io.feedbackSlow.bits.robIdx  := RegEnable(io.in.bits.uop.robIdx, io.in.valid)
   io.feedbackSlow.bits.flushState := DontCare
