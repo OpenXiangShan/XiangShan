@@ -509,6 +509,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     mem_resp_hit(enq_ptr) := to_mem_out || to_last_hptw_req
   }
 
+  //TODO: enable: io.in.valid?
   val enq_ptr_reg = RegNext(enq_ptr)
   val need_addr_check = RegNext(enq_state === state_addr_check && io.in.fire && !flush)
     
