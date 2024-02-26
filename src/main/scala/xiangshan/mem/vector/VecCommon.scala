@@ -30,6 +30,8 @@ import xiangshan.backend.Bundles._
   */
 trait VLSUConstants {
   val VLEN = 128
+  //for pack unit-stride flow 
+  val AlignedNum = 4 // 1/2/4/8
   def VLENB = VLEN/8
   def vOffsetBits = log2Up(VLENB) // bits-width to index offset inside a vector reg
 
@@ -151,6 +153,11 @@ class OnlyVecExuOutput(implicit p: Parameters) extends VLSUBundle {
 
 class VecExuOutput(implicit p: Parameters) extends MemExuOutput with HasVLSUParameters {
   val vec = new OnlyVecExuOutput
+    // pack
+  val isPackage         = Bool()
+  val packageNum        = UInt(log2Up(VLENB).W)
+  val originAlignedType = UInt(alignTypeBits.W)
+  val alignedType       = UInt(alignTypeBits.W)
 }
 
 class VecStoreExuOutput(implicit p: Parameters) extends MemExuOutput with HasVLSUParameters {
@@ -159,6 +166,11 @@ class VecStoreExuOutput(implicit p: Parameters) extends MemExuOutput with HasVLS
   val fieldIdx = UInt(fieldBits.W)
   val segmentIdx = UInt(elemIdxBits.W)
   val vaddr = UInt(VAddrBits.W)
+  // pack
+  val isPackage         = Bool()
+  val packageNum        = UInt(log2Up(VLENB).W)
+  val originAlignedType = UInt(alignTypeBits.W)
+  val alignedType       = UInt(alignTypeBits.W)
 }
 
 class VecUopBundle(implicit p: Parameters) extends VLSUBundleWithMicroOp {
@@ -196,6 +208,11 @@ class VecFlowBundle(implicit p: Parameters) extends VLSUBundleWithMicroOp {
   val vecActive         = Bool()
   val elemIdx           = UInt(elemIdxBits.W)
   val is_first_ele      = Bool()
+
+  // pack
+  val isPackage         = Bool()
+  val packageNum        = UInt(log2Up(VLENB).W)
+  val originAlignedType = UInt(alignTypeBits.W)
 }
 
 object MulNum {
@@ -536,5 +553,104 @@ object GenVdIdxInField extends VLSUConstants {
       ))
     }
     vdIdx
+  }
+}
+/**
+* Use start and vl to generate flow activative mask
+* mod = true fill 0
+* mod = false fill 1
+*/
+object GenFlowMask extends VLSUConstants {
+  def apply(elementMask: UInt, start: UInt, vl: UInt , mod: Boolean): UInt = {
+    val startMask = ~UIntToMask(start, VLEN)
+    val vlMask = UIntToMask(vl, VLEN)
+    val maskVlStart = vlMask & startMask
+    if(mod){
+      elementMask & maskVlStart
+    }
+    else{
+      (~elementMask).asUInt & maskVlStart
+    }
+  }
+}
+
+object CheckAligned extends VLSUConstants {
+  def apply(addr: UInt): UInt = {
+    val aligned_16 = (addr(0) === 0.U) // 16-bit
+    val aligned_32 = (addr(1,0) === 0.U) // 32-bit
+    val aligned_64 = (addr(2,0) === 0.U) // 64-bit
+    Cat(true.B, aligned_16, aligned_32, aligned_64)
+  }
+}
+
+/**
+  search if mask have continue 'len' bit '1'
+  mask: source mask
+  len: search length
+*/
+object GenPackMask{
+  def leadX(mask: Seq[Bool], len: Int): Bool = {
+    if(len == 1){
+      mask.head
+    }
+    else{
+      leadX(mask.drop(1),len-1) & mask.head
+    }
+  }
+  def leadOneVec(shiftMask: Seq[Bool]): UInt = {
+    // max is 64-bit, so the max num of flow to pack is 8
+
+    val lead1 = leadX(shiftMask, 1) // continue 1 bit
+    val lead2 = leadX(shiftMask, 2) // continue 2 bit
+    val lead4 = leadX(shiftMask, 4) // continue 4 bit
+    val lead8 = leadX(shiftMask, 8) // continue 8 bit
+    Cat(lead1, lead2, lead4, lead8)
+  }
+
+  def apply(shiftMask: UInt) = {
+    // pack mask
+    val packMask = leadOneVec(shiftMask.asBools)
+    packMask
+  }
+}
+/**
+PackEnable = (LeadXVec >> eew) & alignedVec, where the 0th bit represents the ability to merge into a 64 bit flow, the second bit represents the ability to merge into a 32 bit flow, and so on.
+
+example:
+  addr = 0x0, activeMask = b00011100101111, flowIdx = 0, eew = 0(8-bit)
+
+  step 0 : addrAlignedVec = (1, 1, 1, 1) elemIdxAligned = (1, 1, 1, 1)
+  step 1 : activePackVec = (1, 1, 1, 0), inactivePackVec = (0, 0, 0, 0)
+  step 2 : activePackEnable = (1, 1, 1, 0), inactivePackVec = (0, 0, 0, 0)
+
+  we can package 4 8-bit activative flows into a 32-bit flow.
+*/
+object GenPackVec extends VLSUConstants{
+  def apply(addr: UInt, shiftMask: UInt, eew: UInt, elemIdx: UInt): UInt = {
+    val addrAlignedVec = CheckAligned(addr)
+    val elemIdxAligned = CheckAligned(elemIdx)
+    val packMask = GenPackMask(shiftMask)
+    // generate packVec
+    val packVec = addrAlignedVec & elemIdxAligned & (packMask.asUInt >> eew)
+
+    packVec
+  }
+}
+
+object GenPackAlignedType extends VLSUConstants{
+  def apply(packVec: UInt): UInt = {
+    val packAlignedType = PriorityMux(Seq(
+      packVec(0) -> "b11".U,
+      packVec(1) -> "b10".U,
+      packVec(2) -> "b01".U,
+      packVec(3) -> "b00".U,
+    ))
+    packAlignedType
+  }
+}
+
+object GenPackNum extends VLSUConstants{
+  def apply(alignedType: UInt, packAlignedType: UInt): UInt = {
+    (1.U << (packAlignedType - alignedType)).asUInt
   }
 }
