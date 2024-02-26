@@ -65,7 +65,17 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   //  Mask        : data mask
   //  Datavalid   : data valid
   //
-  val allocated = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B))) // The control signals need to explicitly indicate the initial value
+  //val allocated = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B))) // The control signals need to explicitly indicate the initial value
+  val allocatedReg = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))
+  val allocatedEnable = WireInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))
+  val allocatedNext = WireInit(allocatedReg)
+
+  for(i <- 0 until LoadQueueRAWSize){
+    when(allocatedEnable(i)){
+      allocatedReg(i) := allocatedNext(i)
+    }
+  }
+
   val uop = Reg(Vec(LoadQueueRAWSize, new MicroOp))
   val paddrModule = Module(new LqPAddrModule(
     gen = UInt(PAddrBits.W),
@@ -87,7 +97,15 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     numCamPort = StorePipelineWidth
   ))
   maskModule.io := DontCare
-  val datavalid = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))
+  //val datavalid = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))
+  val datavalidReg = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))
+  val datavalidEnable = WireInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))
+  val datavalidNext = WireInit(datavalidReg)
+  for(i <- 0 until LoadQueueRAWSize){
+    when(datavalidEnable(i)){
+      datavalidReg(i) := datavalidNext(i)
+    }
+  }
 
   // freeliset: store valid entries index.
   // +---+---+--------------+-----+-----+
@@ -137,12 +155,13 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
       acceptedVec(w) := true.B
 
       val debug_robIdx = enq.bits.uop.robIdx.asUInt
-      XSError(allocated(enqIndex), p"LoadQueueRAW: You can not write an valid entry! check: ldu $w, robIdx $debug_robIdx")
+      XSError(allocatedReg(enqIndex), p"LoadQueueRAW: You can not write an valid entry! check: ldu $w, robIdx $debug_robIdx")
 
       freeList.io.doAllocate(w) := true.B
 
       //  Allocate new entry
-      allocated(enqIndex) := true.B
+      allocatedEnable(enqIndex) := true.B
+      allocatedNext(enqIndex) := true.B
 
       //  Write paddr
       paddrModule.io.wen(w) := true.B
@@ -158,7 +177,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
       //  Fill info
       uop(enqIndex) := enq.bits.uop
-      datavalid(enqIndex) := enq.bits.data_valid
+      datavalidEnable(enqIndex) := true.B
+      datavalidNext(enqIndex) := enq.bits.data_valid
     }
   }
 
@@ -179,8 +199,9 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     val deqNotBlock = Mux(!allAddrCheck, !isBefore(io.stAddrReadySqPtr, uop(i).sqIdx), true.B)
     val needCancel = uop(i).robIdx.needFlush(io.redirect)
 
-    when (allocated(i) && (deqNotBlock || needCancel)) {
-      allocated(i) := false.B
+    when (allocatedReg(i) && (deqNotBlock || needCancel)) {
+      allocatedEnable(i) := true.B
+      allocatedNext(i) := false.B
       freeMaskVec(i) := true.B
     }
   }
@@ -193,8 +214,9 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     val revokeValid = revoke && lastCanAccept(w)
     val revokeIndex = lastAllocIndex(w)
 
-    when (allocated(revokeIndex) && revokeValid) {
-      allocated(revokeIndex) := false.B
+    when (allocatedReg(revokeIndex) && revokeValid) {
+      allocatedEnable(revokeIndex) := true.B
+      allocatedNext(revokeIndex) := false.B
       freeMaskVec(revokeIndex) := true.B
     }
   }
@@ -291,13 +313,13 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     if (valid.length <= SelectGroupSize) {
       val (selValid, selBits) = selectPartialOldest(valid, bits)
       val selValidNext = RegNext(selValid(0))
-      val selBitsNext = RegNext(selBits(0))
+      val selBitsNext = RegEnable(selBits(0), selValid(0))
       (Seq(selValidNext && !selBitsNext.uop.robIdx.needFlush(io.redirect) && !selBitsNext.uop.robIdx.needFlush(RegNext(io.redirect))), Seq(selBitsNext))
     } else {
       val select = (0 until numSelectGroups).map(g => {
         val (selValid, selBits) = selectPartialOldest(selectValidGroups(g), selectBitsGroups(g))
         val selValidNext = RegNext(selValid(0))
-        val selBitsNext = RegNext(selBits(0))
+        val selBitsNext = RegEnable(selBits(0), selValid(0))
         (selValidNext && !selBitsNext.uop.robIdx.needFlush(io.redirect) && !selBitsNext.uop.robIdx.needFlush(RegNext(io.redirect)), selBitsNext)
       })
       selectOldest(select.map(_._1), select.map(_._2))
@@ -308,15 +330,15 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     paddrModule.io.violationMdata(i) := io.storeIn(i).bits.paddr
     maskModule.io.violationMdata(i) := io.storeIn(i).bits.mask
 
-    val bypassPaddrMask = RegNext(VecInit((0 until LoadPipelineWidth).map(j => bypassPAddr(j)(PAddrBits-1, DCacheVWordOffset) === io.storeIn(i).bits.paddr(PAddrBits-1, DCacheVWordOffset))))
-    val bypassMMask = RegNext(VecInit((0 until LoadPipelineWidth).map(j => (bypassMask(j) & io.storeIn(i).bits.mask).orR)))
+    val bypassPaddrMask = RegEnable(VecInit((0 until LoadPipelineWidth).map(j => bypassPAddr(j)(PAddrBits-1, DCacheVWordOffset) === io.storeIn(i).bits.paddr(PAddrBits-1, DCacheVWordOffset))), io.storeIn(i).valid)
+    val bypassMMask = RegEnable(VecInit((0 until LoadPipelineWidth).map(j => (bypassMask(j) & io.storeIn(i).bits.mask).orR)), io.storeIn(i).valid)
     val bypassMaskUInt = (0 until LoadPipelineWidth).map(j =>
       Fill(LoadQueueRAWSize, RegNext(RegNext(io.query(j).req.fire))) & Mux(bypassPaddrMask(j) && bypassMMask(j), UIntToOH(RegNext(RegNext(enqIndexVec(j)))), 0.U(LoadQueueRAWSize.W))
     ).reduce(_|_)
 
     val addrMaskMatch = RegNext(paddrModule.io.violationMmask(i).asUInt & maskModule.io.violationMmask(i).asUInt) | bypassMaskUInt
     val entryNeedCheck = RegNext(VecInit((0 until LoadQueueRAWSize).map(j => {
-      allocated(j) && isAfter(uop(j).robIdx, io.storeIn(i).bits.uop.robIdx) && datavalid(j) && !uop(j).robIdx.needFlush(io.redirect)
+      allocatedReg(j) && isAfter(uop(j).robIdx, io.storeIn(i).bits.uop.robIdx) && datavalidReg(j) && !uop(j).robIdx.needFlush(io.redirect)
     })))
     val lqViolationSelVec = VecInit((0 until LoadQueueRAWSize).map(j => {
       addrMaskMatch(j) && entryNeedCheck(j)
