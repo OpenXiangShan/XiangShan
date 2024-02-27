@@ -28,11 +28,11 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
 
   // only memAddrIQ use it
   val memEtyResps: MixedVec[ValidIO[EntryDeqRespBundle]] = {
-    if (params.isLdAddrIQ && !params.isStAddrIQ)
+    if (params.isLdAddrIQ && !params.isStAddrIQ)                                                    //LDU
       MixedVecInit(io.og0Resp ++ io.og1Resp ++ io.finalIssueResp.get ++ io.memAddrIssueResp.get)
-    else if (params.isHyAddrIQ)
-      MixedVecInit(io.og0Resp ++ io.og1Resp ++ io.finalIssueResp.get ++ io.memAddrIssueResp.get ++ io.fromMem.get.slowResp)
-    else if (params.isMemAddrIQ)
+    else if (params.isLdAddrIQ && params.isStAddrIQ || params.isHyAddrIQ)                           //HYU
+      MixedVecInit(io.og0Resp ++ io.og1Resp ++ io.finalIssueResp.get ++ io.memAddrIssueResp.get ++ io.fromMem.get.fastResp ++ io.fromMem.get.slowResp)
+    else if (params.isMemAddrIQ)                                                                    //STU
       MixedVecInit(io.og0Resp ++ io.og1Resp ++ io.fromMem.get.slowResp)
     else MixedVecInit(Seq())
   }
@@ -491,6 +491,7 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
     val stIssuePtr        = Input(new SqPtr)
     val memWaitUpdateReq  = Flipped(new MemWaitUpdateReq)
     val slowResp          = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
+    val fastResp          = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
   }) else None
   val vecMemIn = OptionWrapper(params.isVecMemIQ, new Bundle {
     val sqDeqPtr = Input(new SqPtr)
