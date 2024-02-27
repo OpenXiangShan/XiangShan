@@ -104,7 +104,11 @@ class CounterFilter()(implicit p: Parameters) extends DCacheModule {
   }
   val allocNum = PopCount(canAlloc)
 
-  enqPtrExt.foreach{case x => x := x + allocNum}
+  enqPtrExt.foreach{case x => 
+    when(canAlloc.asUInt.orR){
+      x := x + allocNum
+    }
+  }
   last3CycleAlloc := RegNext(RegNext(allocNum))
 
   // deq
@@ -175,7 +179,7 @@ class BloomFilter(n: Int, bypass: Boolean = true)(implicit p: Parameters) extend
 
   // resp will valid in next cycle
   for(i <- 0 until LoadPipelineWidth) {
-    io.resp(i).valid := RegNext(io.query(i).valid)
+    io.resp(i).valid := GatedValidRegNext(io.query(i).valid)
     if(bypass) {
       io.resp(i).bits.res := RegEnable(data_next(io.query(i).bits.addr), io.query(i).valid)
     }else {

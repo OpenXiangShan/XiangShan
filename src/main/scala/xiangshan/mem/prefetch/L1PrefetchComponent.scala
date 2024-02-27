@@ -221,7 +221,7 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
     deqPtrExt := deqPtrExt + 1.U
   }
 
-  when(RegNext(io.flush)) {
+  when(GatedValidRegNext(io.flush)) {
     valids.foreach {case valid => valid := false.B}
     (0 until enqLen).map {case i => enqPtrExt(i) := i.U.asTypeOf(new Ptr)}
     deqPtrExt := 0.U.asTypeOf(new Ptr)
@@ -375,14 +375,14 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   }
 
   assert(!s0_valid || PopCount(VecInit(s0_match_vec)) <= 1.U, "req region should match no more than 1 entry")
-  assert(!(s0_valid && RegNext(s0_valid) && !s0_hit && !RegEnable(s0_hit, s0_valid) && replacement.way === RegEnable(replacement.way, s0_valid)), "replacement error")
+  assert(!(s0_valid && GatedValidRegNext(s0_valid) && !s0_hit && !RegEnable(s0_hit, s0_valid) && replacement.way === RegEnable(replacement.way, s0_valid)), "replacement error")
 
   XSPerfAccumulate("s0_enq_fire", s0_valid)
   XSPerfAccumulate("s0_enq_valid", io.prefetch_req.valid)
   XSPerfAccumulate("s0_cannot_enq", io.prefetch_req.valid && !s0_can_accept)
 
   // s1: alloc or update
-  val s1_valid = RegNext(s0_valid)
+  val s1_valid = GatedValidRegNext(s0_valid)
   val s1_region = RegEnable(s0_region, s0_valid)
   val s1_region_hash = RegEnable(s0_region_hash, s0_valid)
   val s1_hit = RegEnable(s0_hit, s0_valid)
@@ -407,13 +407,13 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   XSPerfAccumulate("s1_enq_valid", s1_valid)
   XSPerfAccumulate("s1_enq_alloc", s1_alloc)
   XSPerfAccumulate("s1_enq_update", s1_update)
-  XSPerfAccumulate("hash_conflict", s0_valid && RegNext(s1_valid) && (s0_region =/= RegEnable(s1_region, s1_valid)) && (s0_region_hash === RegEnable(s1_region_hash, s1_valid)))
+  XSPerfAccumulate("hash_conflict", s0_valid && GatedValidRegNext(s1_valid) && (s0_region =/= RegEnable(s1_region, s1_valid)) && (s0_region_hash === RegEnable(s1_region_hash, s1_valid)))
 
   // tlb req
   // s0: arb all tlb reqs
   val s0_tlb_fire_vec = VecInit((0 until MLP_SIZE).map{case i => tlb_req_arb.io.in(i).fire})
-  val s1_tlb_fire_vec = RegNext(s0_tlb_fire_vec)
-  val s2_tlb_fire_vec = RegNext(s1_tlb_fire_vec)
+  val s1_tlb_fire_vec = s0_tlb_fire_vec.map(i => GatedValidRegNext(i))
+  val s2_tlb_fire_vec = s1_tlb_fire_vec.map(i => GatedValidRegNext(i))
 
   for(i <- 0 until MLP_SIZE) {
     val evict = s1_alloc && (s1_index === i.U)
@@ -430,7 +430,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   assert(PopCount(s0_tlb_fire_vec) <= 1.U, "s0_tlb_fire_vec should be one-hot or empty")
 
   // s1: send out the req
-  val s1_tlb_req_valid = RegNext(tlb_req_arb.io.out.valid)
+  val s1_tlb_req_valid = GatedValidRegNext(tlb_req_arb.io.out.valid)
   val s1_tlb_req_bits = RegEnable(tlb_req_arb.io.out.bits, tlb_req_arb.io.out.valid)
   val s1_tlb_req_index = RegEnable(OHToUInt(s0_tlb_fire_vec.asUInt), tlb_req_arb.io.out.valid)
   val s1_tlb_evict = s1_alloc && (s1_index === s1_tlb_req_index)
@@ -468,7 +468,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   // l1 pf
   // s0: generate prefetch req paddr per entry, arb them
   val s0_pf_fire_vec = VecInit((0 until MLP_SIZE).map{case i => l1_pf_req_arb.io.in(i).fire})
-  val s1_pf_fire_vec = RegNext(s0_pf_fire_vec)
+  val s1_pf_fire_vec = s0_pf_fire_vec.map(i => GatedValidRegNext(i))
 
   val s0_pf_fire = l1_pf_req_arb.io.out.fire
   val s0_pf_index = l1_pf_req_arb.io.chosen
@@ -565,7 +565,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
 
   // reset meta to avoid muti-hit problem
   for(i <- 0 until MLP_SIZE) {
-    when(reset.asBool || RegNext(io.flush)) {
+    when(reset.asBool || GatedValidRegNext(io.flush)) {
       array(i).reset(i)
     }
   }
