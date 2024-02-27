@@ -340,13 +340,14 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
     val vecActive = enable
 
     // seek unit-stride package
+    val broadenAligendType = Cat("b0".U, issueAlignedType)
     val inactiveMask = GenFlowMask(issueFlowMask, issueVstart, issueVl, false) // if elemidx > vl || elemidx < vstart, set 1, and inactive element set 1, active element set 0. 
     val shiftMask = (Mux(enable, issueFlowMask, inactiveMask) >> elemIdxInsideVd(portIdx)).asUInt // if active ,select active mask, else inactive mask
     val packVec = GenPackVec(vaddr, shiftMask, issueEew(1, 0), elemIdxInsideVd(portIdx)) // FIXME
     val packAlignedType = GenPackAlignedType(packVec.asUInt)
-    val isPackage = isUnitStride(issueInstType) && !issueEntry.fof && !isSegment(issueInstType) && (packAlignedType > issueAlignedType) // don't pack fof's flow
-    val packageNum = Mux(isPackage, GenPackNum(issueAlignedType, packAlignedType), 1.U)
-    val mask = genVWmask(vaddr ,Mux(isPackage, packAlignedType, issueAlignedType))
+    val isPackage = isUnitStride(issueInstType) && !issueEntry.fof && !isSegment(issueInstType) && (packAlignedType > broadenAligendType) // don't pack fof's flow
+    val packageNum = Mux(isPackage, GenPackNum(broadenAligendType, packAlignedType), 1.U)
+    val mask = genVWmask128(vaddr ,Mux(isPackage, packAlignedType, broadenAligendType))
     
     (0 until flowIssueWidth).map{
       case i => {
@@ -366,6 +367,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
     dontTouch(indexedStride)
     dontTouch(stride)
     dontTouch(fieldOffset)
+    XSError(packAlignedType.asUInt > "b100".U, "Unknow packAligned, something error!")
 
     issuePort.valid := issueValid && flowIdx < issueFlowNum &&
       !issueUop.robIdx.needFlush(io.redirect) &&
@@ -377,15 +379,15 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
       x.mask := mask
       x.unit_stride_fof := issueEntry.fof
       x.reg_offset := regOffset
-      x.alignedType := Mux(isPackage, packAlignedType, issueAlignedType)
+      x.alignedType := Mux(isPackage, packAlignedType, broadenAligendType)
       x.vecActive := vecActive
       x.elemIdx := elemIdx
       x.is_first_ele := elemIdx === 0.U
       x.uopQueuePtr := flowSplitPtr
-      x.elemIdxInsideVd := Mux(isPackage, (elemIdxInsideVd(portIdx) >> (packAlignedType - issueAlignedType)).asUInt, elemIdxInsideVd(portIdx)) // maybe more elegen
+      x.elemIdxInsideVd := Mux(isPackage, (elemIdxInsideVd(portIdx) >> (packAlignedType - broadenAligendType)).asUInt, elemIdxInsideVd(portIdx)) // maybe more elegen
       x.isPackage := isPackage
       x.packageNum := packageNum
-      x.originAlignedType := issueAlignedType
+      x.originAlignedType := broadenAligendType
     }
   }
   // unset the byteMask if `exp` of the element is false
@@ -437,7 +439,8 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
     val ptr = wb.bits.vec.uopQueuePtr
     val entry = uopq(ptr.value)
     val isPackage = wb.bits.isPackage.asBool
-    val alignedType = Mux(isIndexed(entry.instType), entry.sew(1, 0), Mux(isPackage, wb.bits.alignedType,entry.eew(1, 0)))
+    val alignedType = Mux(isIndexed(entry.instType), entry.sew(1, 0), Mux(isPackage, wb.bits.alignedType(1, 0),entry.eew(1, 0)))
+    val is128bit = isUnitStride(entry.instType) && isPackage && is128Bit(wb.bits.alignedType)
     flowWbElemIdx(i) := wb.bits.vec.elemIdx
     flowWbElemIdxInVd(i) := wb.bits.vec.elemIdxInsideVd
     flowWbExcp(i) := wb.bits.uop.exceptionVec
@@ -459,6 +462,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
       elemIdx = flowWbElemIdxInVd,
       valids = mergeExpPortVec
     )
+    val merge128Data = Mux(mergeExpPortVec(i), io.flowWriteback(i).bits.vec.vecdata, entry.data.asUInt)
     // writeback packNum, if no package, packageNum=1
     val writebackFlowNum = (io.flowWriteback zip mergePortVec).map{
       case (writebackPort, valid) => {
@@ -473,7 +477,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
 
     // update data and decrease flow_counter when the writeback port is not merged
     when (wb.valid && !mergedByPrevPort) {
-      entry.data := mergedData
+      entry.data := Mux(is128bit, merge128Data, mergedData)
       entry.flow_counter := nextFlowCnt
       finish(ptr.value) := nextFlowCnt === 0.U
       when (!exception(ptr.value) && flowWbExcp(i).asUInt.orR) {
@@ -496,6 +500,7 @@ class VlUopQueue(implicit p: Parameters) extends VLSUModule
     }
 
     assert(!(wb.valid && !valid(ptr.value)), "flow queue is trying to write back an empty entry")
+    XSError(wb.valid && (wb.bits.alignedType > "b100".U), "Unknow AlignedType!")
   }
 
   /**

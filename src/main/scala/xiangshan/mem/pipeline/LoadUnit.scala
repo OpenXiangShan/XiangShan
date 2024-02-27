@@ -253,6 +253,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s0_vec_iss_valid       = io.vecldin.valid
   val s0_l2l_fwd_valid       = io.l2l_fwd_in.valid
   val s0_low_conf_prf_valid  = io.prefetch_req.valid && io.prefetch_req.bits.confidence === 0.U
+  val s0_is128bit            = is128Bit(io.vecldin.bits.alignedType) && io.vecldin.valid
   dontTouch(s0_super_ld_rep_valid)
   dontTouch(s0_ld_fast_rep_valid)
   dontTouch(s0_ld_mmio_valid)
@@ -363,7 +364,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                                          TlbCmd.read
                                        )
   io.tlb.req.bits.vaddr              := Mux(s0_hw_prf_select, io.prefetch_req.bits.paddr, s0_sel_src.vaddr)
-  io.tlb.req.bits.size               := Mux(s0_sel_src.isvec, io.vecldin.bits.alignedType, LSUOpType.size(s0_sel_src.uop.fuOpType))
+  io.tlb.req.bits.size               := Mux(s0_sel_src.isvec, io.vecldin.bits.alignedType(1,0), LSUOpType.size(s0_sel_src.uop.fuOpType)) // FIXME : currently not use, 128 bit load will error if use it
   io.tlb.req.bits.kill               := s0_kill
   io.tlb.req.bits.memidx.is_ld       := true.B
   io.tlb.req.bits.memidx.is_st       := false.B
@@ -388,6 +389,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.dcache.req.bits.replayCarry  := s0_sel_src.rep_carry
   io.dcache.req.bits.id           := DontCare // TODO: update cache meta
   io.dcache.pf_source             := Mux(s0_hw_prf_select, io.prefetch_req.bits.pf_source.value, L1_HW_PREFETCH_NULL)
+  io.dcache.is128Req              := s0_is128bit && s0_vec_iss_select
 
   // load flow priority mux
   def fromNullSource(): FlowSource = {
@@ -529,7 +531,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // Vector load interface
     out.isvec               := true.B
     // vector loads only access a single element at a time, so 128-bit path is not used for now
-    out.is128bit            := false.B
+    out.is128bit            := is128Bit(src.alignedType)
     out.uop_unit_stride_fof := src.uop_unit_stride_fof
     // out.rob_idx_valid       := src.rob_idx_valid
     // out.inner_idx           := src.inner_idx
@@ -592,12 +594,13 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s0_sel_src := ParallelPriorityMux(s0_src_selector, s0_src_format)
 
   // address align check
-  val s0_addr_aligned = LookupTree(Mux(s0_sel_src.isvec, io.vecldin.bits.alignedType, s0_sel_src.uop.fuOpType(1, 0)), List(
+  val s0_addr_aligned = LookupTree(Mux(s0_sel_src.isvec, io.vecldin.bits.alignedType(1,0), s0_sel_src.uop.fuOpType(1, 0)), List(
     "b00".U   -> true.B,                   //b
     "b01".U   -> (s0_sel_src.vaddr(0)    === 0.U), //h
     "b10".U   -> (s0_sel_src.vaddr(1, 0) === 0.U), //w
     "b11".U   -> (s0_sel_src.vaddr(2, 0) === 0.U)  //d
   ))
+  XSError(s0_sel_src.isvec && s0_sel_src.vaddr(3, 0) =/= 0.U && io.vecldin.bits.alignedType(2), "packed 128 bit element is not aligned!")
 
   // accept load flow if dcache ready (tlb is always ready)
   // TODO: prefetch need writeback to loadQueueFlag
@@ -751,13 +754,13 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.lsq.forward.pc        := s1_in.uop.pc // FIXME: remove it
 
   // st-ld violation query
-  // val s1_nuke_paddr_match = VecInit((0 until StorePipelineWidth).map(w => {Mux(s1_isvec && s1_in.is128bit,
-  //   s1_paddr_dup_lsu(PAddrBits-1, 4) === io.stld_nuke_query(w).bits.paddr(PAddrBits-1, 4),
-  //   s1_paddr_dup_lsu(PAddrBits-1, 3) === io.stld_nuke_query(w).bits.paddr(PAddrBits-1, 3))}))
+  val s1_nuke_paddr_match = VecInit((0 until StorePipelineWidth).map(w => {Mux(s1_in.isvec && s1_in.is128bit,
+    s1_paddr_dup_lsu(PAddrBits-1, 4) === io.stld_nuke_query(w).bits.paddr(PAddrBits-1, 4),
+    s1_paddr_dup_lsu(PAddrBits-1, 3) === io.stld_nuke_query(w).bits.paddr(PAddrBits-1, 3))}))
   val s1_nuke = VecInit((0 until StorePipelineWidth).map(w => {
                        io.stld_nuke_query(w).valid && // query valid
                        isAfter(s1_in.uop.robIdx, io.stld_nuke_query(w).bits.robIdx) && // older store
-                       (s1_paddr_dup_lsu(PAddrBits-1, 3) === io.stld_nuke_query(w).bits.paddr(PAddrBits-1, 3)) && // paddr match
+                       s1_nuke_paddr_match(w) && // paddr match
                        (s1_in.mask & io.stld_nuke_query(w).bits.mask).orR // data mask contain
                       })).asUInt.orR && !s1_tlb_miss
 
@@ -1344,8 +1347,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.vecldout.bits.originAlignedType := DontCare
   io.vecldout.bits.alignedType := DontCare
   // TODO: VLSU, uncache data logic
-  val vecdata = rdataVecHelper(s3_vec_alignedType, s3_picked_data_frm_cache)
-  io.vecldout.bits.vec.vecdata := vecdata
+  val vecdata = rdataVecHelper(s3_vec_alignedType(1,0), s3_picked_data_frm_cache)
+  io.vecldout.bits.vec.vecdata := Mux(s3_in.is128bit, s3_merged_data_frm_cache, vecdata)
   io.vecldout.bits.data := 0.U
   // io.vecldout.bits.fflags := s3_out.bits.fflags
   // io.vecldout.bits.redirectValid := s3_out.bits.redirectValid

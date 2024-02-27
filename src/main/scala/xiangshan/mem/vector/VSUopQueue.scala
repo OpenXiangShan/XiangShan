@@ -41,10 +41,11 @@ object VsUopPtr {
 object GenVSData extends VLSUConstants {
   def apply(data: UInt, elemIdx: UInt, alignedType: UInt): UInt = {
     LookupTree(alignedType, List(
-      "b00".U -> ZeroExt(LookupTree(elemIdx(3, 0), List.tabulate(VLEN/8)(i => i.U -> getByte(data, i))), VLEN),
-      "b01".U -> ZeroExt(LookupTree(elemIdx(2, 0), List.tabulate(VLEN/16)(i => i.U -> getHalfWord(data, i))), VLEN),
-      "b10".U -> ZeroExt(LookupTree(elemIdx(1, 0), List.tabulate(VLEN/32)(i => i.U -> getWord(data, i))), VLEN),
-      "b11".U -> ZeroExt(LookupTree(elemIdx(0), List.tabulate(VLEN/64)(i => i.U -> getDoubleWord(data, i))), VLEN)
+      "b000".U -> ZeroExt(LookupTree(elemIdx(3, 0), List.tabulate(VLEN/8)(i => i.U -> getByte(data, i))), VLEN),
+      "b001".U -> ZeroExt(LookupTree(elemIdx(2, 0), List.tabulate(VLEN/16)(i => i.U -> getHalfWord(data, i))), VLEN),
+      "b010".U -> ZeroExt(LookupTree(elemIdx(1, 0), List.tabulate(VLEN/32)(i => i.U -> getWord(data, i))), VLEN),
+      "b011".U -> ZeroExt(LookupTree(elemIdx(0), List.tabulate(VLEN/64)(i => i.U -> getDoubleWord(data, i))), VLEN),
+      "b100".U -> data // if have wider element, it will broken
     ))
   }
 }
@@ -311,14 +312,15 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
     val enable = (issueFlowMask & UIntToOH(elemIdxInsideVd(portIdx))).orR
     val vecActive = enable
      // seek unit-stride package
+    val broadenAligendType = Cat("b0".U, issueAlignedType)
     val inactiveMask = GenFlowMask(issueFlowMask, issueVstart, issueVl, false) // if elemidx > vl || elemidx < vstart, set 1, and inactive element set 1, active element set 0. 
     val shiftMask = (Mux(enable, issueFlowMask, inactiveMask) >> elemIdxInsideVd(portIdx)).asUInt // if active ,select active mask, else inactive mask
     val packVec = GenPackVec(vaddr, shiftMask, issueEew(1, 0), elemIdxInsideVd(portIdx)) // FIXME
     val packAlignedType = GenPackAlignedType(packVec.asUInt)
-    val isPackage = isUnitStride(issueInstType) && !isSegment(issueInstType) && (packAlignedType > issueAlignedType) // don't pack segment unit-stride
-    val packageNum = Mux(isPackage, GenPackNum(issueAlignedType, packAlignedType), 1.U)
-    val realAlignedType = Mux(isPackage, packAlignedType, issueAlignedType)
-    val mask = genVWmask(vaddr ,Mux(isPackage, packAlignedType, issueAlignedType))
+    val isPackage = isUnitStride(issueInstType) && !isSegment(issueInstType) && (packAlignedType > broadenAligendType) // don't pack segment unit-stride
+    val packageNum = Mux(isPackage, GenPackNum(broadenAligendType, packAlignedType), 1.U)
+    val realAlignedType = Mux(isPackage, packAlignedType, broadenAligendType)
+    val mask = genVWmask128(vaddr ,Mux(isPackage, packAlignedType, broadenAligendType))
 
     (0 until flowIssueWidth).map{
       case i => {
@@ -353,7 +355,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
       x.is_first_ele := elemIdx === 0.U
       x.data := GenVSData(
         data = issueEntry.data.asUInt,
-        elemIdx = Mux(isPackage, (elemIdxInsideField >> (realAlignedType - issueAlignedType)).asUInt, elemIdxInsideField),
+        elemIdx = Mux(isPackage, (elemIdxInsideField >> (realAlignedType - broadenAligendType)).asUInt, elemIdxInsideField),
         alignedType = realAlignedType
       )
       x.uopQueuePtr := flowSplitPtr
@@ -365,7 +367,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
       //unit-stride package
       x.isPackage := isPackage
       x.packageNum := packageNum
-      x.originAlignedType := issueAlignedType
+      x.originAlignedType := broadenAligendType
     }
   }
 
@@ -405,7 +407,7 @@ class VsUopQueue(implicit p: Parameters) extends VLSUModule {
     flowWbExcp(i) := wb.bits.uop.exceptionVec
     val flowWbElemIdxInField = wb.bits.elemIdx & (entry.vlmax - 1.U)
     val isPackage = wb.bits.isPackage.asBool
-    val alignedType = Mux(isIndexed(entry.instType), entry.sew(1, 0), Mux(isPackage, wb.bits.alignedType,entry.eew(1, 0)))
+    val alignedType = Mux(isIndexed(entry.instType), Cat("b0".U, entry.sew(1, 0)), Mux(isPackage, wb.bits.alignedType, Cat("b0".U, entry.eew(1, 0))))
 
     // handle the situation where multiple ports are going to write the same uop queue entry
     val mergedByPrevPort = (i != 0).B && Cat((0 until i).map(j =>

@@ -570,6 +570,7 @@ class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
   val s2_pc = Output(UInt(VAddrBits.W))
   // cycle 0: load has updated replacement before
   val replacementUpdated = Output(Bool())
+  val is128Req = Bool()
   // cycle 0: prefetch source bits
   val pf_source = Output(UInt(L1PfSourceBits.W))
   // cycle 0: virtual address: req.addr
@@ -1122,7 +1123,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     ldu(w).io.lsu <> io.lsu.load(w)
 
     // TODO:when have load128Req
-    ldu(w).io.load128Req := false.B
+    ldu(w).io.load128Req := io.lsu.load(w).is128Req
 
     // replay and nack not needed anymore
     // TODO: remove replay and nack

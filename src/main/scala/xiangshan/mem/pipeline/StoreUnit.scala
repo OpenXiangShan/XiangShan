@@ -81,10 +81,10 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
     LSUOpType.size(s0_uop.fuOpType),
     Mux(
       s0_use_flow_vec,
-      io.vecstin.bits.alignedType,
+      io.vecstin.bits.alignedType(1,0),
       3.U
     )
-  )
+  )// may broken if use it in feature
   val s0_mem_idx      = Mux(s0_use_flow_rs || s0_use_flow_vec, s0_uop.sqIdx.value, 0.U)
   val s0_rob_idx      = Mux(s0_use_flow_rs || s0_use_flow_vec, s0_uop.robIdx, 0.U.asTypeOf(s0_uop.robIdx))
   val s0_pc           = Mux(s0_use_flow_rs || s0_use_flow_vec, s0_uop.pc, 0.U)
@@ -175,12 +175,13 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   }
 
   // exception check
-  val s0_addr_aligned = LookupTree(Mux(s0_use_flow_vec, s0_vecstin.alignedType, s0_uop.fuOpType(1, 0)), List(
+  val s0_addr_aligned = LookupTree(Mux(s0_use_flow_vec, s0_vecstin.alignedType(1,0), s0_uop.fuOpType(1, 0)), List(
     "b00".U   -> true.B,              //b
     "b01".U   -> (s0_out.vaddr(0) === 0.U),   //h
     "b10".U   -> (s0_out.vaddr(1,0) === 0.U), //w
     "b11".U   -> (s0_out.vaddr(2,0) === 0.U)  //d
   ))
+  XSError(s0_use_flow_vec && s0_out.vaddr(3, 0) =/= 0.U && s0_vecstin.alignedType(2), "packed 128 bit element is not aligned!")
   s0_out.uop.exceptionVec(storeAddrMisaligned) := Mux(s0_use_flow_rs || s0_use_flow_vec, !s0_addr_aligned, false.B)
 
   io.st_mask_out.valid       := s0_use_flow_rs

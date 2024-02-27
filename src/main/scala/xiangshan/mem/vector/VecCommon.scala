@@ -35,7 +35,7 @@ trait VLSUConstants {
   def VLENB = VLEN/8
   def vOffsetBits = log2Up(VLENB) // bits-width to index offset inside a vector reg
 
-  def alignTypes = 4 // eew/sew = 1/2/4/8
+  def alignTypes = 5 // eew/sew = 1/2/4/8, last indicate 128 bit element
   def alignTypeBits = log2Up(alignTypes)
   def maxMUL = 8
   def maxFields = 8
@@ -64,6 +64,7 @@ trait VLSUConstants {
   def getHalfWord(data: UInt, i: Int = 0) = getSlice(data, i, 16)
   def getWord(data: UInt, i: Int = 0) = getSlice(data, i, 32)
   def getDoubleWord(data: UInt, i: Int = 0) = getSlice(data, i, 64)
+  def getDoubleDoubleWord(data: UInt, i: Int = 0) = getSlice(data, i, 128)
 }
 
 trait HasVLSUParameters extends HasXSParameter with VLSUConstants {
@@ -73,6 +74,7 @@ trait HasVLSUParameters extends HasXSParameter with VLSUConstants {
   def isIndexed(instType: UInt) = instType(0) === "b1".U
   def isNotIndexed(instType: UInt) = instType(0) === "b0".U
   def isSegment(instType: UInt) = instType(2) === "b1".U
+  def is128Bit(alignedType: UInt) = alignedType(2) === "b1".U
 
   def mergeDataWithMask(oldData: UInt, newData: UInt, mask: UInt): Vec[UInt] = {
     require(oldData.getWidth == newData.getWidth)
@@ -155,7 +157,7 @@ class VecExuOutput(implicit p: Parameters) extends MemExuOutput with HasVLSUPara
   val vec = new OnlyVecExuOutput
     // pack
   val isPackage         = Bool()
-  val packageNum        = UInt(log2Up(VLENB).W)
+  val packageNum        = UInt((log2Up(VLENB) + 1).W)
   val originAlignedType = UInt(alignTypeBits.W)
   val alignedType       = UInt(alignTypeBits.W)
 }
@@ -168,7 +170,7 @@ class VecStoreExuOutput(implicit p: Parameters) extends MemExuOutput with HasVLS
   val vaddr = UInt(VAddrBits.W)
   // pack
   val isPackage         = Bool()
-  val packageNum        = UInt(log2Up(VLENB).W)
+  val packageNum        = UInt((log2Up(VLENB) + 1).W)
   val originAlignedType = UInt(alignTypeBits.W)
   val alignedType       = UInt(alignTypeBits.W)
 }
@@ -211,7 +213,7 @@ class VecFlowBundle(implicit p: Parameters) extends VLSUBundleWithMicroOp {
 
   // pack
   val isPackage         = Bool()
-  val packageNum        = UInt(log2Up(VLENB).W)
+  val packageNum        = UInt((log2Up(VLENB) + 1).W)
   val originAlignedType = UInt(alignTypeBits.W)
 }
 
@@ -527,10 +529,11 @@ object GenUSMaskRegVL extends VLSUConstants {
 object GenUopByteMask {
   def apply(flowMask: UInt, alignedType: UInt): UInt = {
     LookupTree(alignedType, List(
-      "b00".U -> flowMask,
-      "b01".U -> FillInterleaved(2, flowMask),
-      "b10".U -> FillInterleaved(4, flowMask),
-      "b11".U -> FillInterleaved(8, flowMask)
+      "b000".U -> flowMask,
+      "b001".U -> FillInterleaved(2, flowMask),
+      "b010".U -> FillInterleaved(4, flowMask),
+      "b011".U -> FillInterleaved(8, flowMask),
+      "b100".U -> FillInterleaved(16, flowMask)
     ))
   }
 }
@@ -579,7 +582,8 @@ object CheckAligned extends VLSUConstants {
     val aligned_16 = (addr(0) === 0.U) // 16-bit
     val aligned_32 = (addr(1,0) === 0.U) // 32-bit
     val aligned_64 = (addr(2,0) === 0.U) // 64-bit
-    Cat(true.B, aligned_16, aligned_32, aligned_64)
+    val aligned_128 = (addr(3,0) === 0.U) // 128-bit
+    Cat(true.B, aligned_16, aligned_32, aligned_64, aligned_128)
   }
 }
 
@@ -604,7 +608,8 @@ object GenPackMask{
     val lead2 = leadX(shiftMask, 2) // continue 2 bit
     val lead4 = leadX(shiftMask, 4) // continue 4 bit
     val lead8 = leadX(shiftMask, 8) // continue 8 bit
-    Cat(lead1, lead2, lead4, lead8)
+    val lead16 = leadX(shiftMask, 16) // continue 16 bit
+    Cat(lead1, lead2, lead4, lead8, lead16)
   }
 
   def apply(shiftMask: UInt) = {
@@ -640,10 +645,11 @@ object GenPackVec extends VLSUConstants{
 object GenPackAlignedType extends VLSUConstants{
   def apply(packVec: UInt): UInt = {
     val packAlignedType = PriorityMux(Seq(
-      packVec(0) -> "b11".U,
-      packVec(1) -> "b10".U,
-      packVec(2) -> "b01".U,
-      packVec(3) -> "b00".U,
+      packVec(0) -> "b100".U,
+      packVec(1) -> "b011".U,
+      packVec(2) -> "b010".U,
+      packVec(3) -> "b001".U,
+      packVec(4) -> "b000".U
     ))
     packAlignedType
   }
@@ -652,5 +658,31 @@ object GenPackAlignedType extends VLSUConstants{
 object GenPackNum extends VLSUConstants{
   def apply(alignedType: UInt, packAlignedType: UInt): UInt = {
     (1.U << (packAlignedType - alignedType)).asUInt
+  }
+}
+
+object genVWmask128 {
+  def apply(addr: UInt, sizeEncode: UInt): UInt = {
+    (LookupTree(sizeEncode, List(
+      "b000".U -> 0x1.U, //0001 << addr(2:0)
+      "b001".U -> 0x3.U, //0011
+      "b010".U -> 0xf.U, //1111
+      "b011".U -> 0xff.U, //11111111
+      "b100".U -> 0xffff.U //1111111111111111
+    )) << addr(3, 0)).asUInt
+  }
+}
+/*
+* only use in max length is 128
+*/
+object genVWdata {
+  def apply(data: UInt, sizeEncode: UInt): UInt = {
+    LookupTree(sizeEncode, List(
+      "b000".U -> Fill(16, data(7, 0)),
+      "b001".U -> Fill(8, data(15, 0)),
+      "b010".U -> Fill(4, data(31, 0)),
+      "b011".U -> Fill(2, data(63,0)),
+      "b100".U -> data(127,0)
+    ))
   }
 }

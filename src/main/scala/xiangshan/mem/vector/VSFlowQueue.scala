@@ -54,6 +54,19 @@ object VsFlowDataPtr {
     ptr
   }
 }
+class VsFlowData128Ptr (implicit p: Parameters) extends CircularQueuePtr[VsFlowData128Ptr](
+  p => p(XSCoreParamsKey).VsFlow128L2Size
+){
+}
+
+object VsFlowData128Ptr {
+  def apply (f: Bool, v: UInt)(implicit p: Parameters): VsFlowData128Ptr = {
+    val ptr = Wire(new VsFlowData128Ptr)
+    ptr.flag := f
+    ptr.value := v
+    ptr
+  }
+}
 
 object VSFQFeedbackType {
   val tlbMiss = 0.U(3.W)
@@ -308,12 +321,14 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
   val flowFinished = RegInit(VecInit(List.fill(VsFlowL1Size)(false.B)))
   val flowCommitted = RegInit(VecInit(List.fill(VsFlowL1Size)(false.B)))
   val flowSecondAccess = RegInit(VecInit(List.fill(VsFlowL1Size)(false.B)))
+  val flowSecondAccess128 = RegInit(VecInit(List.fill(VsFlowL1Size)(false.B)))
   val mmio = RegInit(VecInit(List.fill(VsFlowL1Size)(false.B)))
   val atomic = RegInit(VecInit(List.fill(VsFlowL1Size)(false.B)))
 
   // 2-level queue for data
   val dataFirstQueue = Reg(Vec(VsFlowL1Size, new VecStoreFlowDataFirst))
   val dataSecondQueue = Reg(Vec(VsFlowL2Size, UInt(64.W)))
+  val dataSecondQueue128 = Reg(Vec(VsFlow128L2Size, UInt(128.W))) // 128-bit data reg
 
   /* Exception Buffer to save exception vaddr */
   val exceptionBuffer = Module(new VsExceptionBuffer)
@@ -336,6 +351,7 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
 
   // Data second queue enqueue pointers
   val dataSecondPtr = RegInit(VecInit((0 until VecStorePipelineWidth).map(_.U.asTypeOf(new VsFlowDataPtr))))
+  val dataSecond128Ptr = RegInit(VecInit((0 until VecStorePipelineWidth).map(_.U.asTypeOf(new VsFlowData128Ptr))))
 
   /* Redirect */
   val flowNeedFlush = Wire(Vec(VsFlowL1Size, Bool()))
@@ -360,6 +376,9 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
 
   val doDataSecondEnqueue = WireInit(VecInit(List.fill(VecStorePipelineWidth)(false.B)))
   val dataSecondEnqueueCount = PopCount(doDataSecondEnqueue)
+
+  val doDataSecond128Enqueue = WireInit(VecInit(List.fill(VecStorePipelineWidth)(false.B)))
+  val dataSecond128EnqueueCount = PopCount(doDataSecond128Enqueue)
 
   // handshake and do enqueue
   for (i <- 0 until VecStorePipelineWidth) {
@@ -395,11 +414,22 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
       // ? Is there a more elegant way?
       when (io.flowIn(i).bits.alignedType === 0.U || io.flowIn(i).bits.alignedType === 1.U) {
         doDataSecondEnqueue(i) := false.B
+        doDataSecond128Enqueue(i) := false.B
         flowSecondAccess(enqPtr(i).value) := false.B
+        flowSecondAccess128(enqPtr(i).value) := false.B
         dataFirstQueue(enqPtr(i).value).data := io.flowIn(i).bits.data
-      } .otherwise {
+      } .elsewhen(io.flowIn(i).bits.alignedType(2) === "b1".U){
+        doDataSecondEnqueue(i) := false.B
+        doDataSecond128Enqueue(i) := true.B
+        flowSecondAccess(enqPtr(i).value) := false.B
+        flowSecondAccess128(enqPtr(i).value) := true.B
+        dataFirstQueue(enqPtr(i).value).data := dataSecond128Ptr(i).value
+        dataSecondQueue128(dataSecond128Ptr(i).value) := io.flowIn(i).bits.data
+      }.otherwise {
         doDataSecondEnqueue(i) := true.B
+        doDataSecond128Enqueue(i) := false.B
         flowSecondAccess(enqPtr(i).value) := true.B
+        flowSecondAccess128(enqPtr(i).value) := false.B
         dataFirstQueue(enqPtr(i).value).data := dataSecondPtr(i).value
         dataSecondQueue(dataSecondPtr(i).value) := io.flowIn(i).bits.data
       }
@@ -417,6 +447,9 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
   // update second Ptr
   for (i <- 0 until VecStorePipelineWidth) {
     dataSecondPtr(i) := dataSecondPtr(i) + dataSecondEnqueueCount
+  }
+  for (i <- 0 until VecStorePipelineWidth) {
+    dataSecond128Ptr(i) := dataSecond128Ptr(i) + dataSecond128EnqueueCount
   }
 
   /* Execute Logic */
@@ -669,13 +702,15 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
       val thisData = Mux(
         flowSecondAccess(thisPtr),
         dataSecondQueue(dataFirstQueue(thisPtr).data),
-        dataFirstQueue(thisPtr).data
+        Mux(flowSecondAccess128(thisPtr),
+          dataSecondQueue128(dataFirstQueue(thisPtr).data),
+          dataFirstQueue(thisPtr).data)
       )
 
       when (doEnUncache && flowAllocated(thisPtr)) {
         uncachePAddr := thisEntry.paddr
-        uncacheData := genWdata(thisData, thisEntry.alignedType)
-        uncacheMask := genVWmask(thisEntry.paddr, thisEntry.alignedType)
+        uncacheData := genVWdata(thisData, thisEntry.alignedType)
+        uncacheMask := genVWmask128(thisEntry.paddr, thisEntry.alignedType)
         uncacheAtomic := atomic(thisPtr)
 
         uncacheState := us_req
@@ -767,7 +802,9 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
     val thisData = Wire(UInt(VLEN.W))
     when (flowSecondAccess(thisPtr)) {
       thisData := dataSecondQueue(dataFirstQueue(thisPtr).data)
-    } .otherwise {
+    } .elsewhen(flowSecondAccess128(thisPtr)){
+      thisData := dataSecondQueue128(dataFirstQueue(thisPtr).data)
+    }.otherwise {
       thisData := dataFirstQueue(thisPtr).data
     }
 
@@ -775,8 +812,8 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
       // From DCacheWordReq
       x.cmd   := MemoryOpConstants.M_XWR
       x.vaddr := thisEntry.vaddr
-      x.data  := genWdata(thisData, thisEntry.alignedType)
-      x.mask  := genVWmask(thisEntry.paddr, thisEntry.alignedType)
+      x.data  := genVWdata(thisData, thisEntry.alignedType)
+      x.mask  := genVWmask128(thisEntry.paddr, thisEntry.alignedType)
       x.id    := 0.U                // ! Not Sure
       x.instrtype := 1.U            // ! Not Sure MAGIC NUM
       x.isFirstIssue := false.B     // ! Not Sure

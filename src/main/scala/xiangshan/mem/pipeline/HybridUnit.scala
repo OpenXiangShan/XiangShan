@@ -311,7 +311,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
                                          Mux(s0_ld_flow, TlbCmd.read, TlbCmd.write)
                                        )
   io.tlb.req.bits.vaddr              := Mux(s0_hw_prf_select, io.ldu_io.prefetch_req.bits.paddr, s0_vaddr)
-  io.tlb.req.bits.size               := Mux(s0_isvec, io.vec_stu_io.in.bits.alignedType, LSUOpType.size(s0_uop.fuOpType))
+  io.tlb.req.bits.size               := Mux(s0_isvec, io.vec_stu_io.in.bits.alignedType(1, 0), LSUOpType.size(s0_uop.fuOpType)) // may broken if use it in feature
   io.tlb.req.bits.kill               := s0_kill
   io.tlb.req.bits.memidx.is_ld       := s0_ld_flow
   io.tlb.req.bits.memidx.is_st       := !s0_ld_flow
@@ -335,6 +335,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.ldu_io.dcache.req.bits.replayCarry  := s0_rep_carry
   io.ldu_io.dcache.req.bits.id           := DontCare // TODO: update cache meta
   io.ldu_io.dcache.pf_source             := Mux(s0_hw_prf_select, io.ldu_io.prefetch_req.bits.pf_source.value, L1_HW_PREFETCH_NULL)
+  io.ldu_io.dcache.is128Req              := is128Bit(io.vec_stu_io.in.bits.alignedType) && io.vec_stu_io.in.valid && s0_vec_iss_select
 
   // for store
   io.stu_io.dcache.req.valid             := s0_valid && s0_dcache_ready && !s0_ld_flow && !s0_prf
@@ -503,12 +504,12 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   }
 
   // address align check
-  val s0_addr_aligned = LookupTree(Mux(s0_isvec, io.vec_stu_io.in.bits.alignedType, s0_uop.fuOpType(1, 0)), List(
+  val s0_addr_aligned = LookupTree(Mux(s0_isvec, io.vec_stu_io.in.bits.alignedType(1,0), s0_uop.fuOpType(1, 0)), List(
     "b00".U   -> true.B,                   //b
     "b01".U   -> (s0_vaddr(0)    === 0.U), //h
     "b10".U   -> (s0_vaddr(1, 0) === 0.U), //w
     "b11".U   -> (s0_vaddr(2, 0) === 0.U)  //d
-  ))
+  ))// may broken if use it in feature
 
   // accept load flow if dcache ready (tlb is always ready)
   // TODO: prefetch need writeback to loadQueueFlag
