@@ -194,7 +194,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   assert(!s0_valid || !(s0_hit && s0_plus_one_hit && (s0_index === s0_plus_one_index)), "region and region plus 1 index match failed")
   assert(!s0_valid || !(s0_hit && s0_minus_one_hit && (s0_index === s0_minus_one_index)), "region and region minus 1 index match failed")
   assert(!s0_valid || !(s0_plus_one_hit && s0_minus_one_hit && (s0_minus_one_index === s0_plus_one_index)), "region plus 1 and region minus 1 index match failed")
-  assert(!(s0_valid && RegNext(s0_valid) && !s0_hit && !RegEnable(s0_hit, s0_valid) && replacement.way === RegEnable(replacement.way, s0_valid)), "replacement error")
+  assert(!(s0_valid && GatedValidRegNext(s0_valid) && !s0_hit && !RegEnable(s0_hit, s0_valid) && replacement.way === RegEnable(replacement.way, s0_valid)), "replacement error")
 
   XSPerfAccumulate("s0_valid_train_req", s0_valid)
   val s0_hit_pattern_vec = Seq(s0_hit, s0_plus_one_hit, s0_minus_one_hit)
@@ -212,7 +212,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   val l3_ratio = l3_ratio_const(3, 0)
 
   // s1: alloc or update
-  val s1_valid = RegNext(s0_valid)
+  val s1_valid = GatedValidRegNext(s0_valid)
   val s1_index = RegEnable(s0_index, s0_valid)
   val s1_plus_one_index = RegEnable(s0_plus_one_index, s0_valid)
   val s1_minus_one_index = RegEnable(s0_minus_one_index, s0_valid)
@@ -261,7 +261,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   XSPerfAccumulate("s1_active_minus_one_hit", s1_valid && s1_minus_one_hit)
 
   // s2: trigger prefetch if hit active bit vector, compute meta of prefetch req
-  val s2_valid = RegNext(s1_valid)
+  val s2_valid = GatedValidRegNext(s1_valid)
   val s2_index = RegEnable(s1_index, s1_valid)
   val s2_region_bits = RegEnable(s1_region_bits, s1_valid)
   val s2_region_tag = RegEnable(s1_region_tag, s1_valid)
@@ -307,22 +307,22 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   XSPerfAccumulate("s2_will_send_incr_pf", s2_valid && s2_will_send_pf && !s2_decr_mode)
 
   // s3: send the l1 prefetch req out
-  val s3_pf_l1_valid = RegNext(s2_pf_req_valid)
+  val s3_pf_l1_valid = GatedValidRegNext(s2_pf_req_valid)
   val s3_pf_l1_bits = RegEnable(s2_pf_l1_req_bits, s2_pf_req_valid)
-  val s3_pf_l2_valid = RegNext(s2_pf_req_valid)
+  val s3_pf_l2_valid = GatedValidRegNext(s2_pf_req_valid)
   val s3_pf_l2_bits = RegEnable(s2_pf_l2_req_bits, s2_pf_req_valid)
   val s3_pf_l3_bits = RegEnable(s2_pf_l3_req_bits, s2_pf_req_valid)
 
   XSPerfAccumulate("s3_pf_sent", s3_pf_l1_valid)
 
   // s4: send the l2 prefetch req out
-  val s4_pf_l2_valid = RegNext(s3_pf_l2_valid)
+  val s4_pf_l2_valid = GatedValidRegNext(s3_pf_l2_valid)
   val s4_pf_l2_bits = RegEnable(s3_pf_l2_bits, s3_pf_l2_valid)
   val s4_pf_l3_bits = RegEnable(s3_pf_l3_bits, s3_pf_l2_valid)
 
   val enable_l3_pf = WireInit(Constantin.createRecord("enableL3StreamPrefetch" + p(XSCoreParamsKey).HartId.toString, initValue = 0.U)) =/= 0.U
   // s5: send the l3 prefetch req out
-  val s5_pf_l3_valid = RegNext(s4_pf_l2_valid) && enable_l3_pf
+  val s5_pf_l3_valid = GatedValidRegNext(s4_pf_l2_valid) && enable_l3_pf
   val s5_pf_l3_bits = RegEnable(s4_pf_l3_bits, s4_pf_l2_valid)
 
   io.prefetch_req.valid := s3_pf_l1_valid || s4_pf_l2_valid || s5_pf_l3_valid
@@ -338,25 +338,25 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   val s0_lookup_vaddr = io.stream_lookup_req.bits.vaddr
   val s0_lookup_tag = get_region_tag(s0_lookup_vaddr)
   // S1: match
-  val s1_lookup_valid = RegNext(s0_lookup_valid)
+  val s1_lookup_valid = GatedValidRegNext(s0_lookup_valid)
   val s1_lookup_tag = RegEnable(s0_lookup_tag, s0_lookup_valid)
   val s1_lookup_tag_match_vec = array.map(_.tag_match(s1_lookup_tag))
   val s1_lookup_hit = VecInit(s1_lookup_tag_match_vec).asUInt.orR
   val s1_lookup_index = OHToUInt(VecInit(s1_lookup_tag_match_vec))
   // S2: read active out
-  val s2_lookup_valid = RegNext(s1_lookup_valid)
+  val s2_lookup_valid = GatedValidRegNext(s1_lookup_valid)
   val s2_lookup_hit = RegEnable(s1_lookup_hit, s1_lookup_valid)
   val s2_lookup_index = RegEnable(s1_lookup_index, s1_lookup_valid)
   val s2_lookup_active = array(s2_lookup_index).active
   // S3: send back to Stride
-  val s3_lookup_valid = RegNext(s2_lookup_valid)
+  val s3_lookup_valid = GatedValidRegNext(s2_lookup_valid)
   val s3_lookup_hit = RegEnable(s2_lookup_hit, s2_lookup_valid)
   val s3_lookup_active = RegEnable(s2_lookup_active, s2_lookup_valid)
   io.stream_lookup_resp := s3_lookup_valid && s3_lookup_hit && s3_lookup_active
 
   // reset meta to avoid muti-hit problem
   for(i <- 0 until BIT_VEC_ARRAY_SIZE) {
-    when(reset.asBool || RegNext(io.flush)) {
+    when(reset.asBool || GatedValidRegNext(io.flush)) {
       array(i).reset(i)
     }
   }
