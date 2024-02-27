@@ -900,7 +900,7 @@ class IssueQueueMemIO(implicit p: Parameters, params: IssueBlockParams) extends 
 class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Parameters, params: IssueBlockParams)
   extends IssueQueueImp(wrapper) with HasCircularQueuePtrHelper {
 
-  require(params.StdCnt == 0 && (params.LduCnt + params.StaCnt + params.HyuCnt + params.VlduCnt) > 0, "IssueQueueMemAddrImp can only be instance of MemAddr IQ, " +
+  require(params.StdCnt == 0 && (params.LduCnt + params.StaCnt + params.HyuCnt) > 0, "IssueQueueMemAddrImp can only be instance of MemAddr IQ, " +
     s"StdCnt: ${params.StdCnt}, LduCnt: ${params.LduCnt}, StaCnt: ${params.StaCnt}, HyuCnt: ${params.HyuCnt}")
   println(s"[IssueQueueMemAddrImp] StdCnt: ${params.StdCnt}, LduCnt: ${params.LduCnt}, StaCnt: ${params.StaCnt}, HyuCnt: ${params.HyuCnt}")
 
@@ -917,11 +917,6 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
         memIO.checkWait.memWaitUpdateReq.robIdx(i).bits.value === io.enq(i).bits.waitForRobIdx.value
     })).asUInt.orR && !io.enq(i).bits.loadWaitStrict // is waiting for store addr ready
     s0_enqBits(i).loadWaitBit := io.enq(i).bits.loadWaitBit && !storeAddrWaitForIsIssuing && blockNotReleased
-    // when have vpu
-    if (params.VlduCnt > 0 || params.VstuCnt > 0) {
-      s0_enqBits(i).srcType(3) := SrcType.vp // v0: mask src
-      s0_enqBits(i).srcType(4) := SrcType.vp // vl&vtype
-    }
   }
 
   for (i <- entries.io.enq.indices) {
@@ -987,11 +982,6 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
     deq.bits.common.lqIdx.get := deqEntryVec(i).bits.payload.lqIdx
     deq.bits.common.ftqIdx.foreach(_ := deqEntryVec(i).bits.payload.ftqPtr)
     deq.bits.common.ftqOffset.foreach(_ := deqEntryVec(i).bits.payload.ftqOffset)
-    // when have vpu
-    if (params.VlduCnt > 0 || params.VstuCnt > 0) {
-      deq.bits.common.vpu.foreach(_ := deqEntryVec(i).bits.payload.vpu)
-      deq.bits.common.vpu.foreach(_.vuopIdx := deqEntryVec(i).bits.payload.uopIdx)
-    }
   }
 }
 
