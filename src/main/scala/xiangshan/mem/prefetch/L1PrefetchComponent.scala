@@ -227,7 +227,7 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
     deqPtrExt := deqPtrExt + 1.U
   }
 
-  when(RegNext(io.flush)) {
+  when(GatedValidRegNext(io.flush)) {
     valids.foreach {case valid => valid := false.B}
     (0 until enqLen).map {case i => enqPtrExt(i) := i.U.asTypeOf(new Ptr)}
     deqPtrExt := 0.U.asTypeOf(new Ptr)
@@ -558,8 +558,8 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   // tlb req
   // s0: arb all tlb reqs
   val s0_tlb_fire_vec = VecInit((0 until MLP_SIZE).map{case i => tlb_req_arb.io.in(i).fire})
-  val s1_tlb_fire_vec = RegNext(s0_tlb_fire_vec)
-  val s2_tlb_fire_vec = RegNext(s1_tlb_fire_vec)
+  val s1_tlb_fire_vec = s0_tlb_fire_vec.map(i => GatedValidRegNext(i))
+  val s2_tlb_fire_vec = s1_tlb_fire_vec.map(i => GatedValidRegNext(i))
 
   for(i <- 0 until MLP_SIZE) {
     val l1_evict = s1_l1_alloc && (s1_l1_index === i.U)
@@ -584,7 +584,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   assert(PopCount(s0_tlb_fire_vec) <= 1.U, "s0_tlb_fire_vec should be one-hot or empty")
 
   // s1: send out the req
-  val s1_tlb_req_valid = RegNext(tlb_req_arb.io.out.valid)
+  val s1_tlb_req_valid = GatedValidRegNext(tlb_req_arb.io.out.valid)
   val s1_tlb_req_bits = RegEnable(tlb_req_arb.io.out.bits, tlb_req_arb.io.out.valid)
   val s1_tlb_req_index = RegEnable(OHToUInt(s0_tlb_fire_vec.asUInt), tlb_req_arb.io.out.valid)
   val s1_l1_tlb_evict = s1_l1_alloc && (s1_l1_index === s1_tlb_req_index)
@@ -638,7 +638,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   // l1 pf
   // s0: generate prefetch req paddr per entry, arb them
   val s0_pf_fire_vec = VecInit((0 until MLP_L1_SIZE).map{case i => l1_pf_req_arb.io.in(i).fire})
-  val s1_pf_fire_vec = RegNext(s0_pf_fire_vec)
+  val s1_pf_fire_vec = s0_pf_fire_vec.map(i => GatedValidRegNext(i))
 
   val s0_pf_fire = l1_pf_req_arb.io.out.fire
   val s0_pf_index = l1_pf_req_arb.io.chosen
