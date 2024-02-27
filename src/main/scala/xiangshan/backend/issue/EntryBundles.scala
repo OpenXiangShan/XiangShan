@@ -65,9 +65,8 @@ object EntryBundles extends HasCircularQueuePtrHelper {
   }
 
   class StatusVecMemPart(implicit p:Parameters, params: IssueBlockParams) extends Bundle {
-    val sqIdx = new SqPtr
-    val lqIdx = new LqPtr
-    val uopIdx = UopIdx()
+    val sqIdx                 = new SqPtr
+    val lqIdx                 = new LqPtr
   }
 
   class EntryDeqRespBundle(implicit p: Parameters, params: IssueBlockParams) extends Bundle {
@@ -371,7 +370,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     commonOut.entryOutDeqValid                        := validReg && (common.flushed || common.deqSuccess)
     commonOut.entryOutTransValid                      := validReg && commonIn.transSel && !(common.flushed || common.deqSuccess)
     if (params.isVecMemIQ) {
-      commonOut.uopIdx.get                            := status.vecMem.get.uopIdx
+      commonOut.uopIdx.get                            := entryReg.payload.uopIdx
     }
   }
 
@@ -417,6 +416,34 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val blockNotReleased                               = waitStd || waitSta
     entryUpdate.status.blocked                        := shouldBlock && blockNotReleased && blockedByOlderStore
     entryRegNext.status.blocked                       := entryUpdate.status.blocked
+  }
+
+  def EntryVecMemConnect(commonIn: CommonInBundle, common: CommonWireBundle, validReg: Bool, entryReg: EntryBundle, entryRegNext: EntryBundle, entryUpdate: EntryBundle, isEnq: Boolean, isAddr: Boolean)(implicit p: Parameters, params: IssueBlockParams) = {
+    val enqValid                                       = if (isEnq) commonIn.enq.valid && common.enqReady 
+                                                         else commonIn.enq.valid
+
+    val fromLsq                                        = commonIn.fromLsq.get
+    val vecMemStatus                                   = entryReg.status.vecMem.get
+    val vecMemStatusNext                               = entryRegNext.status.vecMem.get
+    val vecMemStatusUpdate                             = entryUpdate.status.vecMem.get
+
+    when(enqValid) {
+      vecMemStatusNext.sqIdx                          := commonIn.enq.bits.status.vecMem.get.sqIdx
+      vecMemStatusNext.lqIdx                          := commonIn.enq.bits.status.vecMem.get.lqIdx
+    }.otherwise {
+      vecMemStatusNext                                := vecMemStatusUpdate
+    }
+    vecMemStatusUpdate                                := vecMemStatus
+
+    val isLsqHead                                      = if (isAddr) {
+                                                          entryRegNext.status.vecMem.get.lqIdx <= fromLsq.lqDeqPtr &&
+                                                          entryRegNext.status.vecMem.get.sqIdx <= fromLsq.sqDeqPtr
+                                                         } else {
+                                                          entryRegNext.status.vecMem.get.sqIdx.value === fromLsq.sqDeqPtr.value
+                                                         }
+
+    entryRegNext.status.blocked                       := (if (isAddr) entryUpdate.status.blocked || !isLsqHead
+                                                          else !isLsqHead)
   }
 
   def ExuOHGen(exuOH: Vec[Bool], wakeupByIQOH: Vec[Bool], wakeup: Bool, regSrcExuOH: Vec[Bool])(implicit p: Parameters, params: IssueBlockParams) = {
