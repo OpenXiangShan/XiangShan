@@ -658,6 +658,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // get input form dispatch
     loadUnits(i).io.ldin <> io.ooo_to_mem.issueLda(i)
     loadUnits(i).io.feedback_slow <> io.mem_to_ooo.ldaIqFeedback(i).feedbackSlow
+    io.mem_to_ooo.ldaIqFeedback(i).feedbackFast := DontCare
     loadUnits(i).io.correctMissTrain := correctMissTrain
     io.mem_to_ooo.ldCancel.drop(HyuCnt)(i) := loadUnits(i).io.ldCancel
     io.mem_to_ooo.wakeup.drop(HyuCnt)(i) := loadUnits(i).io.wakeup
@@ -789,6 +790,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // get input from dispatch
     hybridUnits(i).io.lsin <> io.ooo_to_mem.issueHya(i)
     hybridUnits(i).io.feedback_slow <> io.mem_to_ooo.hyuIqFeedback(i).feedbackSlow
+    hybridUnits(i).io.feedback_fast <> io.mem_to_ooo.hyuIqFeedback(i).feedbackFast
     hybridUnits(i).io.correctMissTrain := correctMissTrain
     io.mem_to_ooo.ldCancel.take(HyuCnt)(i) := hybridUnits(i).io.ldu_io.ldCancel
     io.mem_to_ooo.wakeup.take(HyuCnt)(i) := hybridUnits(i).io.ldu_io.wakeup
@@ -1012,6 +1014,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     // prefetch
     stu.io.prefetch_req <> sbuffer.io.store_prefetch(i)
+
+    // store unit does not need fast feedback
+    io.mem_to_ooo.staIqFeedback(i).feedbackFast := DontCare
 
     // Lsq to sta unit
     lsq.io.sta.storeMaskIn(i) <> stu.io.st_mask_out
