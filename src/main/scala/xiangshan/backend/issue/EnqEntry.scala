@@ -163,27 +163,7 @@ class EnqEntryVecMemAddr(isComp: Boolean)(implicit p: Parameters, params: IssueB
 
   require(params.isVecMemAddrIQ, "EnqEntryVecMemAddr can only be instance of VecMemAddr IQ")
 
-  val vecMemStatus = entryReg.status.vecMem.get
-  val vecMemStatusNext = entryRegNext.status.vecMem.get
-  val vecMemStatusUpdate = entryUpdate.status.vecMem.get
-  val fromLsq = io.commonIn.fromLsq.get
-
-  when (io.commonIn.enq.valid && common.enqReady) {
-    vecMemStatusNext.sqIdx := io.commonIn.enq.bits.status.vecMem.get.sqIdx
-    vecMemStatusNext.lqIdx := io.commonIn.enq.bits.status.vecMem.get.lqIdx
-  }.otherwise {
-    vecMemStatusNext := vecMemStatusUpdate
-  }
-  vecMemStatusUpdate := vecMemStatus
-
-  val isLsqHead = {
-    // if (params.isVecLdAddrIQ)
-      entryRegNext.status.vecMem.get.lqIdx <= fromLsq.lqDeqPtr &&
-    // else
-      entryRegNext.status.vecMem.get.sqIdx <= fromLsq.sqDeqPtr
-  }
-
-  entryUpdate.status.vecMem.get.uopIdx := entryReg.status.vecMem.get.uopIdx
+  EntryVecMemConnect(io.commonIn, common, validReg, entryReg, entryRegNext, entryUpdate, true, true)
 }
 
 class EnqEntryVecMemData(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams) extends EnqEntry(isComp)
@@ -191,24 +171,7 @@ class EnqEntryVecMemData(isComp: Boolean)(implicit p: Parameters, params: IssueB
 
   require(params.isVecStDataIQ, "EnqEntryVecMemData can only be instance of VecMemData IQ")
 
-  val vecMemStatus = entryReg.status.vecMem.get
-  val vecMemStatusNext = entryRegNext.status.vecMem.get
-  val vecMemStatusUpdate = entryUpdate.status.vecMem.get
-  val fromLsq = io.commonIn.fromLsq.get
-
-  when (io.commonIn.enq.valid && common.enqReady) {
-    vecMemStatusNext.sqIdx := io.commonIn.enq.bits.status.vecMem.get.sqIdx
-    vecMemStatusNext.lqIdx := io.commonIn.enq.bits.status.vecMem.get.lqIdx
-  }.otherwise {
-    vecMemStatusNext := vecMemStatusUpdate
-  }
-  vecMemStatusUpdate := vecMemStatus
-
-  val isLsqHead = entryRegNext.status.vecMem.get.sqIdx.value === fromLsq.sqDeqPtr.value
-
-  entryRegNext.status.blocked := !isLsqHead
-  entryUpdate.status.blocked := !isLsqHead
-  entryUpdate.status.vecMem.get.uopIdx := entryReg.status.vecMem.get.uopIdx
+  EntryVecMemConnect(io.commonIn, common, validReg, entryReg, entryRegNext, entryUpdate, true, false)
 }
 
 object EnqEntry {

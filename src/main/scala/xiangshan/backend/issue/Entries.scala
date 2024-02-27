@@ -57,6 +57,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val fuTypeVec           = Wire(Vec(params.numEntries, FuType()))
   val isFirstIssueVec     = Wire(Vec(params.numEntries, Bool()))
   val issueTimerVec       = Wire(Vec(params.numEntries, UInt(2.W)))
+  val uopIdxVec           = OptionWrapper(params.isVecMemIQ, Wire(Vec(params.numEntries, UopIdx())))
   //src status
   val dataSourceVec       = Wire(Vec(params.numEntries, Vec(params.numRegSrc, DataSource())))
   val loadDependencyVec   = Wire(Vec(params.numEntries, Vec(LoadPipelineWidth, UInt(3.W))))
@@ -98,7 +99,6 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val entryOutTransValidVec  = Wire(Vec(params.numEntries, Bool()))
   //cancel bypass
   val cancelBypassVec        = Wire(Vec(params.numEntries, Bool()))
-  val uopIdxVec              = OptionWrapper(params.isVecMemIQ, Wire(Vec(params.numEntries, UopIdx())))
 
 
   //enqEntries
@@ -112,11 +112,6 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     enqEntry.io.enqDelayOg0Cancel             := RegNext(io.og0Cancel.asUInt)
     enqEntry.io.enqDelayLdCancel              := RegNext(io.ldCancel)
     enqEntryTransVec(entryIdx)                := enqEntry.io.commonOut.transEntry
-    // TODO: move it into EntriesConnect
-    if (params.isVecMemIQ) {
-      enqEntry.io.commonIn.fromLsq.get.sqDeqPtr := io.vecMemIn.get.sqDeqPtr
-      enqEntry.io.commonIn.fromLsq.get.lqDeqPtr := io.vecMemIn.get.lqDeqPtr
-    }
   }
   //othersEntries
   othersEntries.zipWithIndex.foreach { case (othersEntry, entryIdx) =>
@@ -128,10 +123,6 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     othersEntryEnqReadyVec(entryIdx)          := othersEntry.io.commonOut.enqReady
     if (params.hasCompAndSimp && (entryIdx < SimpEntryNum)) {
       simpEntryTransVec.get(entryIdx)         := othersEntry.io.commonOut.transEntry
-    }
-    if (params.isVecMemIQ) {
-      othersEntry.io.commonIn.fromLsq.get.sqDeqPtr := io.vecMemIn.get.sqDeqPtr
-      othersEntry.io.commonIn.fromLsq.get.lqDeqPtr := io.vecMemIn.get.lqDeqPtr
     }
   }
 
@@ -387,9 +378,8 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   io.simpEntryEnqSelVec.foreach(_   := finalSimpTransSelVec.get.zip(enqEntryTransVec).map(x => x._1 & Fill(SimpEntryNum, x._2.valid)))
   io.compEntryEnqSelVec.foreach(_   := finalCompTransSelVec.get.zip(compEnqVec.get).map(x => x._1 & Fill(CompEntryNum, x._2.valid)))
   io.othersEntryEnqSelVec.foreach(_ := finalOthersTransSelVec.get.zip(enqEntryTransVec).map(x => x._1 & Fill(OthersEntryNum, x._2.valid)))
-  io.robIdx.foreach(_           := robIdxVec)
-  io.uopIdx.foreach(_           := uopIdxVec.get)
-  io.rsFeedback                     := 0.U.asTypeOf(io.rsFeedback)  //should be removed
+  io.robIdx.foreach(_               := robIdxVec)
+  io.uopIdx.foreach(_               := uopIdxVec.get)
   io.cancel.foreach(_               := cancelVec.get)               //for debug
 
   def EntriesConnect(in: CommonInBundle, out: CommonOutBundle, entryIdx: Int) = {
@@ -407,8 +397,8 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
       in.fromMem.get.memWaitUpdateReq := io.fromMem.get.memWaitUpdateReq
     }
     if (params.isVecMemIQ) {
-      in.fromLsq.get.sqDeqPtr := io.vecMemIn.get.sqDeqPtr
-      in.fromLsq.get.lqDeqPtr := io.vecMemIn.get.lqDeqPtr
+      in.fromLsq.get.sqDeqPtr   := io.vecMemIn.get.sqDeqPtr
+      in.fromLsq.get.lqDeqPtr   := io.vecMemIn.get.lqDeqPtr
     }
     validVec(entryIdx)          := out.valid
     canIssueVec(entryIdx)       := out.canIssue
@@ -427,7 +417,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
       cancelVec.get(entryIdx)                 := out.cancel.get
     }
     if (params.isVecMemIQ) {
-      uopIdxVec.get(entryIdx)   := out.uopIdx.get
+      uopIdxVec.get(entryIdx)       := out.uopIdx.get
     }
     entryInValidVec(entryIdx)       := out.entryInValid
     entryOutDeqValidVec(entryIdx)   := out.entryOutDeqValid
@@ -505,15 +495,14 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
     val slowResp          = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
     val fastResp          = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
   }) else None
+  // vec mem only
   val vecMemIn = OptionWrapper(params.isVecMemIQ, new Bundle {
     val sqDeqPtr = Input(new SqPtr)
     val lqDeqPtr = Input(new LqPtr)
   })
-
   val robIdx = OptionWrapper(params.isVecMemIQ, Output(Vec(params.numEntries, new RobPtr)))
   val uopIdx = OptionWrapper(params.isVecMemIQ, Output(Vec(params.numEntries, UopIdx())))
 
-  val rsFeedback          = Output(Vec(5, Bool()))
   // trans
   val simpEntryDeqSelVec = OptionWrapper(params.hasCompAndSimp, Vec(params.numEnq, Input(UInt(params.numSimp.W))))
   val simpEntryEnqSelVec = OptionWrapper(params.hasCompAndSimp, Vec(params.numEnq, Output(UInt(params.numSimp.W))))

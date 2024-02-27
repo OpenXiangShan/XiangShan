@@ -18,7 +18,7 @@ case class IssueBlockParams(
   private val exuParams: Seq[ExeUnitParams],
   val numEntries       : Int,
   numEnq               : Int,
-  numComp            : Int,
+  numComp              : Int,
   numDeqOutside        : Int = 0,
   numWakeupFromOthers  : Int = 0,
   XLEN                 : Int = 64,

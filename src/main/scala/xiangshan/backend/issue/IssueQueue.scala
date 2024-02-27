@@ -254,9 +254,6 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       enq.bits.status.firstIssue                                := false.B
       enq.bits.status.issueTimer                                := "b10".U
       enq.bits.status.deqPortIdx                                := 0.U
-      if (params.isVecMemIQ) {
-        enq.bits.status.vecMem.get.uopIdx := s0_enqBits(enqIdx).uopIdx
-      }
       if (params.inIntSchd && params.AluCnt > 0) {
         // dirty code for lui+addi(w) fusion
         val isLuiAddiFusion = s0_enqBits(enqIdx).isLUI32
@@ -989,10 +986,13 @@ class IssueQueueVecMemImp(override val wrapper: IssueQueue)(implicit p: Paramete
   extends IssueQueueImp(wrapper) with HasCircularQueuePtrHelper {
 
   require((params.VstdCnt + params.VlduCnt + params.VstaCnt) > 0, "IssueQueueVecMemImp can only be instance of VecMem IQ")
+  println(s"[IssueQueueVecMemImp] VstdCnt: ${params.VstdCnt}, VlduCnt: ${params.VlduCnt}, VstaCnt: ${params.VstaCnt}")
 
   io.suggestName("none")
   override lazy val io = IO(new IssueQueueMemIO).suggestName("io")
   private val memIO = io.memIO.get
+
+  require(params.numExu == 1, "VecMem IssueQueue has not supported more than 1 deq ports")
 
   def selectOldUop(robIdx: Seq[RobPtr], uopIdx: Seq[UInt], valid: Seq[Bool]): Vec[Bool] = {
     val compareVec = (0 until robIdx.length).map(i => (0 until i).map(j => isAfter(robIdx(j), robIdx(i)) || (robIdx(j).value === robIdx(i).value && uopIdx(i) < uopIdx(j))))
@@ -1056,7 +1056,6 @@ class IssueQueueVecMemImp(override val wrapper: IssueQueue)(implicit p: Paramete
       case enqData =>
         enqData.sqIdx := s0_enqBits(i).sqIdx
         enqData.lqIdx := s0_enqBits(i).lqIdx
-        enqData.uopIdx := s0_enqBits(i).uopIdx
     }
   }
 
