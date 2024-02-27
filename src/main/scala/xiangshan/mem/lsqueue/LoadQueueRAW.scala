@@ -67,7 +67,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   //
   //val allocated = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B))) // The control signals need to explicitly indicate the initial value
   val allocatedReg = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))
-  val allocatedEnable = WireInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))
+  val allocatedEnable = WireInit(VecInit(Seq.fill(LoadQueueRAWSize)(false.B)))
   val allocatedNext = WireInit(allocatedReg)
 
   for(i <- 0 until LoadQueueRAWSize){
@@ -99,7 +99,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   maskModule.io := DontCare
   //val datavalid = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))
   val datavalidReg = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))
-  val datavalidEnable = WireInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))
+  val datavalidEnable = WireInit(VecInit(Seq.fill(LoadQueueRAWSize)(false.B)))
   val datavalidNext = WireInit(datavalidReg)
   for(i <- 0 until LoadQueueRAWSize){
     when(datavalidEnable(i)){
@@ -330,8 +330,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     paddrModule.io.violationMdata(i) := io.storeIn(i).bits.paddr
     maskModule.io.violationMdata(i) := io.storeIn(i).bits.mask
 
-    val bypassPaddrMask = RegEnable(VecInit((0 until LoadPipelineWidth).map(j => bypassPAddr(j)(PAddrBits-1, DCacheVWordOffset) === io.storeIn(i).bits.paddr(PAddrBits-1, DCacheVWordOffset))), io.storeIn(i).valid)
-    val bypassMMask = RegEnable(VecInit((0 until LoadPipelineWidth).map(j => (bypassMask(j) & io.storeIn(i).bits.mask).orR)), io.storeIn(i).valid)
+    val bypassPaddrMask = RegNext(VecInit((0 until LoadPipelineWidth).map(j => bypassPAddr(j)(PAddrBits-1, DCacheVWordOffset) === io.storeIn(i).bits.paddr(PAddrBits-1, DCacheVWordOffset))))
+    val bypassMMask = RegNext(VecInit((0 until LoadPipelineWidth).map(j => (bypassMask(j) & io.storeIn(i).bits.mask).orR)))
     val bypassMaskUInt = (0 until LoadPipelineWidth).map(j =>
       Fill(LoadQueueRAWSize, RegNext(RegNext(io.query(j).req.fire))) & Mux(bypassPaddrMask(j) && bypassMMask(j), UIntToOH(RegNext(RegNext(enqIndexVec(j)))), 0.U(LoadQueueRAWSize.W))
     ).reduce(_|_)
