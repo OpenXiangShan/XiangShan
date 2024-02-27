@@ -70,7 +70,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
   //val allocated = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B))) // The control signals need to explicitly indicate the initial value
   val allocatedReg = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))
-  val allocatedEnable = WireInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))
+  val allocatedEnable = WireInit(VecInit(Seq.fill(LoadQueueRAWSize)(false.B)))
   val allocatedNext = WireInit(allocatedReg)
 
   for(i <- 0 until LoadQueueRAWSize){
@@ -102,7 +102,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   maskModule.io := DontCare
   //val datavalid = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))
   val datavalidReg = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))
-  val datavalidEnable = WireInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))
+  val datavalidEnable = WireInit(VecInit(Seq.fill(LoadQueueRAWSize)(false.B)))
   val datavalidNext = WireInit(datavalidReg)
   for(i <- 0 until LoadQueueRAWSize){
     when(datavalidEnable(i)){
