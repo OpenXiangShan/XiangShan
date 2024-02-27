@@ -146,12 +146,17 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   if (params.isAllComp || params.isAllSimp) {
     //transPolicy
     othersTransPolicy.get.io.canEnq := othersEntryEnqReadyVec.asUInt
+
+    // we only allow all or none of the enq entries transfering to others entries.
     enqCanTrans2Others.get := PopCount(validVec.take(EnqEntryNum)) <= PopCount(othersEntryEnqReadyVec)
+    // othersTransSelVec(i) is the target others entry for enq entry [i].
+    // note that dispatch does not guarantee the validity of enq entries with low index.
+    // that means in some cases enq entry [0] is invalid while enq entry [1] is valid.
+    // in this case, enq entry [1] should use result [0] of TransPolicy.
     othersTransSelVec.get(0).valid := othersTransPolicy.get.io.enqSelOHVec(0).valid && validVec(0)
     othersTransSelVec.get(0).bits  := othersTransPolicy.get.io.enqSelOHVec(0).bits
-    // Todo: comments why enqTransSelVec(1).valid relies on validVec(0)
-  if (params.numEnq == 2) {
-    othersTransSelVec.get(1).valid := Mux(!validVec(0), othersTransPolicy.get.io.enqSelOHVec(0).valid, othersTransPolicy.get.io.enqSelOHVec(1).valid)
+    if (params.numEnq == 2) {
+      othersTransSelVec.get(1).valid := Mux(!validVec(0), othersTransPolicy.get.io.enqSelOHVec(0).valid, othersTransPolicy.get.io.enqSelOHVec(1).valid)
       othersTransSelVec.get(1).bits  := Mux(!validVec(0), othersTransPolicy.get.io.enqSelOHVec(0).bits,  othersTransPolicy.get.io.enqSelOHVec(1).bits)
     }
 
@@ -173,12 +178,19 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     simpTransPolicy.get.io.canEnq := VecInit(simpEntryEnqReadyVec).asUInt
     compTransPolicy.get.io.canEnq := VecInit(validVec.takeRight(CompEntryNum).map(!_)).asUInt
 
+    // we only allow all or none of the enq entries transfering to comp/simp entries.
+    // when all of simp entries are empty and comp entries are enough, transfer to comp entries.
+    // otherwise, transfer to simp entries.
     enqCanTrans2Comp.get := PopCount(validVec.take(EnqEntryNum)) <= PopCount(validVec.takeRight(CompEntryNum).map(!_)) && !validVec.drop(EnqEntryNum).take(SimpEntryNum).reduce(_ || _)
     enqCanTrans2Simp.get := !enqCanTrans2Comp.get && PopCount(validVec.take(EnqEntryNum)) <= PopCount(simpEntryEnqReadyVec)
     simpCanTrans2Comp.get.zipWithIndex.foreach { case (canTrans, idx) =>
       canTrans := !enqCanTrans2Comp.get && PopCount(validVec.takeRight(CompEntryNum).map(!_)) >= (idx + 1).U
     }
 
+    // simp/compTransSelVec(i) is the target simp/comp entry for enq entry [i].
+    // note that dispatch does not guarantee the validity of enq entries with low index.
+    // that means in some cases enq entry [0] is invalid while enq entry [1] is valid.
+    // in this case, enq entry [1] should use result [0] of TransPolicy.
     simpTransSelVec.get(0).valid := simpTransPolicy.get.io.enqSelOHVec(0).valid && validVec(0)
     simpTransSelVec.get(0).bits  := simpTransPolicy.get.io.enqSelOHVec(0).bits
     compTransSelVec.get(0).valid := compTransPolicy.get.io.enqSelOHVec(0).valid && validVec(0)
