@@ -318,9 +318,8 @@ class OthersEntryVecMemAddr()(implicit p: Parameters, params: IssueBlockParams) 
   dontTouch(memStatusNext)
   dontTouch(fromMem)
   dontTouch(io.issueResp)
-  dontTouch(isLsqHead)
 
-  entryRegNext.status.blocked := shouldBlock && blockNotReleased && blockedByOlderStore || respBlock || !isLsqHead
+  entryRegNext.status.blocked := !isLsqHead
 }
 
 class OthersEntryVecMemData()(implicit p: Parameters, params: IssueBlockParams) extends OthersEntry

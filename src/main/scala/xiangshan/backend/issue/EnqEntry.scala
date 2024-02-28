@@ -325,8 +325,7 @@ class EnqEntryVecMemAddr()(implicit p: Parameters, params: IssueBlockParams) ext
       entryRegNext.status.vecMem.get.sqIdx <= fromLsq.sqDeqPtr
   }
 
-  entryRegNext.status.blocked := shouldBlock && blockNotReleased && blockedByOlderStore || respBlock || !isLsqHead
-  entryUpdate.status.blocked := shouldBlock && blockNotReleased && blockedByOlderStore || respBlock || !isLsqHead
+  entryUpdate.status.blocked := !isLsqHead
 }
 
 class EnqEntryVecMemData()(implicit p: Parameters, params: IssueBlockParams) extends EnqEntry
@@ -349,7 +348,6 @@ class EnqEntryVecMemData()(implicit p: Parameters, params: IssueBlockParams) ext
 
   val isLsqHead = entryRegNext.status.vecMem.get.sqIdx.value === fromLsq.sqDeqPtr.value
 
-  entryRegNext.status.blocked := !isLsqHead
   entryUpdate.status.blocked := !isLsqHead
 }
 
