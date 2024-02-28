@@ -758,10 +758,10 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     } .otherwise {
       when (sfence_dup(0).bits.rs2) {
         // specific leaf of addr && all asid
-        spv := spv & (~VecInit(sp.map(_.hit(sfence_vpn, sfence_dup(0).bits.id, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.asid, ignoreAsid = true, s2xlate = io.csr_dup(0).priv.virt))).asUInt)
+        spv := spv & ~(sphhit & VecInit(sp.map(_.hit(sfence_vpn, sfence_dup(0).bits.id, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.asid, ignoreAsid = true, s2xlate = io.csr_dup(0).priv.virt))).asUInt)
       } .otherwise {
         // specific leaf of addr && specific asid
-        spv := spv & (~VecInit(sp.map(_.hit(sfence_vpn, sfence_dup(0).bits.id, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.asid, s2xlate = io.csr_dup(0).priv.virt))).asUInt | spg)
+        spv := spv & ~(~spg & sphhit & VecInit(sp.map(_.hit(sfence_vpn, sfence_dup(0).bits.id, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.asid, s2xlate = io.csr_dup(0).priv.virt))).asUInt)
       }
     }
   }
@@ -786,9 +786,9 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
       }
     }.otherwise {
       when(sfence_dup(0).bits.rs2) {
-        spv := spv & (~VecInit(sp.map(_.hit(hfencev_vpn, sfence_dup(0).bits.id, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.asid, ignoreAsid = true, s2xlate = true.B))).asUInt)
+        spv := spv & ~(sphhit & VecInit(sp.map(_.hit(hfencev_vpn, sfence_dup(0).bits.id, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.asid, ignoreAsid = true, s2xlate = true.B))).asUInt)
       }.otherwise {
-        spv := spv & (~VecInit(sp.map(_.hit(hfencev_vpn, sfence_dup(0).bits.id, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.asid, s2xlate = true.B))).asUInt | spg)
+        spv := spv & ~(~spg & sphhit & VecInit(sp.map(_.hit(hfencev_vpn, sfence_dup(0).bits.id, sfence_dup(0).bits.id, io.csr_dup(0).hgatp.asid, s2xlate = true.B))).asUInt)
       }
     }
   }
@@ -814,9 +814,9 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
       }
     }.otherwise {
       when(sfence_dup(0).bits.rs2) {
-        spv := spv & (~VecInit(sp.map(_.hit(hfenceg_gvpn, 0.U, 0.U, sfence_dup(0).bits.id, ignoreAsid = true, s2xlate = true.B))).asUInt)
+        spv := spv & ~(sphhit & VecInit(sp.map(_.hit(hfenceg_gvpn, 0.U, 0.U, sfence_dup(0).bits.id, ignoreAsid = true, s2xlate = true.B))).asUInt)
       }.otherwise {
-        spv := spv & (~VecInit(sp.map(_.hit(hfenceg_gvpn, 0.U, 0.U, sfence_dup(0).bits.id, ignoreAsid = true, s2xlate = false.B))).asUInt)
+        spv := spv & ~(~spg & sphhit & VecInit(sp.map(_.hit(hfenceg_gvpn, 0.U, 0.U, sfence_dup(0).bits.id, ignoreAsid = true, s2xlate = false.B))).asUInt)
       }
     }
   }
