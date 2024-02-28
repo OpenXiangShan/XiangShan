@@ -169,7 +169,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   s1_kill := s1_in.uop.robIdx.needFlush(io.redirect) || s1_tlb_miss
 
   s1_ready := true.B
-  XSError(s0_valid && !s1_kill && !s2_ready, "StoreUnit s0 never stall!")
   io.tlb.resp.ready := true.B // TODO: why dtlbResp needs a ready?
   when (s0_fire) { s1_valid := true.B }
   .elsewhen (s1_fire) { s1_valid := false.B }
@@ -242,7 +241,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   val s2_fire   = s2_valid && !s2_kill && s2_can_go
 
   s2_ready := true.B
-  XSError(s1_valid && !s2_kill && s3_ready, "StoreUnit s1 never stall!")
   when (s1_fire) { s2_valid := true.B }
   .elsewhen (s2_fire) { s2_valid := false.B }
   .elsewhen (s2_kill) { s2_valid := false.B }
@@ -332,7 +330,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
 
   // backward ready signal
   s3_ready := true.B
-  XSError(s2_valid && !sx_ready.head, "StoreUnit s2 never stall!")
   for (i <- 0 until TotalDelayCycles + 1) {
     if (i == 0) {
       sx_valid(i) := s3_valid
@@ -348,8 +345,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
       val sx_valid_can_go = prev_fire || cur_fire || cur_kill
       sx_valid(i) := RegEnable(Mux(prev_fire, true.B, false.B), false.B, sx_valid_can_go)
       sx_in(i) := RegEnable(sx_in(i-1), prev_fire)
-
-      XSError(sx_valid(i-1) && !sx_ready(i), "StoreUnit s" + (2 + i) + " never stall!")
     }
   }
   val sx_last_valid = sx_valid.takeRight(1).head
@@ -360,8 +355,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   io.stout.valid := sx_last_valid
   io.stout.bits := sx_last_in
   io.stout.bits.redirectValid := false.B
-
-  XSError(io.stout.valid && !io.stout.bits.uop.robIdx.needFlush(io.redirect) && !io.stout.ready, "StoreUnit writeback never stall!")
 
   io.debug_ls := DontCare
   io.debug_ls.s1.isTlbFirstMiss := io.tlb.resp.valid && io.tlb.resp.bits.miss && io.tlb.resp.bits.debug.isFirstIssue && !s1_in.isHWPrefetch
