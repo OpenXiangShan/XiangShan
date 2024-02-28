@@ -41,10 +41,10 @@ class L2TLB()(implicit p: Parameters) extends LazyModule with HasPtwConst {
     requestFields = Seq(ReqSourceField())
   )))
 
-  lazy val module = new L2TLBImp(this)
+  lazy val module = new L2TLBImp(this)(false)
 }
 
-class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) with HasCSRConst with HasPerfEvents {
+class L2TLBImp(outer: L2TLB)(hasRen: Boolean = false)(implicit p: Parameters) extends PtwModule(outer) with HasCSRConst with HasPerfEvents {
 
   val (mem, edge) = outer.node.out.head
 
@@ -54,6 +54,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     val ptwAddr = Output(UInt(64.W))
     val ptwData = Output(Vec(4, UInt(64.W)))
   })
+
+  val io_ren = if(hasRen) Some(Input(Bool())) else None
 
   /* Ptw processes multiple requests
    * Divide Ptw procedure into two stages: cache access ; mem access if cache miss
@@ -79,8 +81,10 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val sfence_tmp = DelayN(io.sfence, 1)
   val csr_tmp    = DelayN(io.csr.tlb, 1)
   // TODO: add ren?
-  val sfence_dup = Seq.fill(8)(RegNext(sfence_tmp))
-  val csr_dup = Seq.fill(7)(RegNext(csr_tmp))
+  // val sfence_dup = Seq.fill(8)(RegNext(sfence_tmp))
+  // val csr_dup = Seq.fill(7)(RegNext(csr_tmp))
+  val sfence_dup = Seq.fill(8)(if(hasRen) RegEnable(sfence_tmp, io_ren.get) else RegNext(sfence_tmp))
+  val csr_dup = Seq.fill(7)(if(hasRen) RegEnable(csr_tmp, io_ren.get) else RegNext(csr_tmp))
   val satp   = csr_dup(0).satp
   val priv   = csr_dup(0).priv
   val flush  = sfence_dup(0).valid || satp.changed
