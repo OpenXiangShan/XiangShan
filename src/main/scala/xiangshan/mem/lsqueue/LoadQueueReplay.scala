@@ -553,6 +553,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     needEnqueue(i) && !io.enq(i).bits.isLoadReplay
   })
 
+  val canAcceptCount = PopCount(freeList.io.canAllocate)
   for ((enq, w) <- io.enq.zipWithIndex) {
     vaddrModule.io.wen(w) := false.B
     freeList.io.doAllocate(w) := false.B
@@ -561,7 +562,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
     //  Allocated ready
     val offset = PopCount(newEnqueue.take(w))
-    val canAccept = freeList.io.canAllocate(offset)
+    val canAccept = canAcceptCount >= (w+1).U
     val enqIndex = Mux(enq.bits.isLoadReplay, enq.bits.schedIndex, freeList.io.allocateSlot(offset))
     enqIndexOH(w) := UIntToOH(enqIndex)
     enq.ready := Mux(enq.bits.isLoadReplay, true.B, canAccept)
