@@ -180,10 +180,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s0_can_go        = s1_ready
   val s0_fire          = s0_valid && s0_can_go
   val s0_out           = Wire(new LqWriteBundle)
+  val s0_vaddr         = Wire(UInt(VAddrBits.W))
 
   // flow source bundle
   class FlowSource extends Bundle {
-    val vaddr         = UInt(VAddrBits.W)
     val mask          = UInt((VLEN/8).W)
     val uop           = new MicroOp
     val try_l2l       = Bool()
@@ -317,7 +317,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                                          Mux(s0_sel_src.prf_wr, TlbCmd.write, TlbCmd.read),
                                          TlbCmd.read
                                        )
-  io.tlb.req.bits.vaddr              := Mux(s0_hw_prf_select, io.prefetch_req.bits.paddr, s0_sel_src.vaddr)
+  io.tlb.req.bits.vaddr              := s0_vaddr
   io.tlb.req.bits.size               := LSUOpType.size(s0_sel_src.uop.ctrl.fuOpType)
   io.tlb.req.bits.kill               := s0_kill
   io.tlb.req.bits.memidx.is_ld       := true.B
@@ -334,7 +334,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                                       MemoryOpConstants.M_PFR,
                                       Mux(s0_sel_src.prf_wr, MemoryOpConstants.M_PFW, MemoryOpConstants.M_XRD)
                                     )
-  io.dcache.req.bits.vaddr        := s0_sel_src.vaddr
+  io.dcache.req.bits.vaddr        := s0_vaddr
   io.dcache.req.bits.mask         := s0_sel_src.mask
   io.dcache.req.bits.data         := DontCare
   io.dcache.req.bits.isFirstIssue := s0_sel_src.isFirstIssue
@@ -352,7 +352,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   def fromFastReplaySource(src: LqWriteBundle): FlowSource = {
     val out = WireInit(0.U.asTypeOf(new FlowSource))
-    out.vaddr         := src.vaddr
     out.mask          := src.mask
     out.uop           := src.uop
     out.try_l2l       := false.B
@@ -373,7 +372,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   def fromNormalReplaySource(src: LsPipelineBundle): FlowSource = {
     val out = WireInit(0.U.asTypeOf(new FlowSource))
-    out.vaddr         := src.vaddr
     out.mask          := genVWmask(src.vaddr, src.uop.ctrl.fuOpType(1, 0))
     out.uop           := src.uop
     out.try_l2l       := false.B
@@ -394,7 +392,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   def fromPrefetchSource(src: L1PrefetchReq): FlowSource = {
     val out = WireInit(0.U.asTypeOf(new FlowSource))
-    out.vaddr         := src.getVaddr()
     out.mask          := 0.U
     out.uop           := DontCare
     out.try_l2l       := false.B
@@ -415,8 +412,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   def fromIntIssueSource(src: ExuInput): FlowSource = {
     val out = WireInit(0.U.asTypeOf(new FlowSource))
-    out.vaddr         := src.src(0) + SignExt(src.uop.ctrl.imm(11, 0), VAddrBits)
-    out.mask          := genVWmask(out.vaddr, src.uop.ctrl.fuOpType(1,0))
+    out.mask          := genVWmask(s0_vaddr, src.uop.ctrl.fuOpType(1,0))
     out.uop           := src.uop
     out.try_l2l       := false.B
     out.has_rob_entry := true.B
@@ -436,7 +432,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   def fromVecIssueSource(): FlowSource = {
     val out = WireInit(0.U.asTypeOf(new FlowSource))
-    out.vaddr         := 0.U
     out.mask          := 0.U
     out.uop           := 0.U.asTypeOf(new MicroOp)
     out.try_l2l       := false.B
@@ -457,7 +452,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   def fromLoadToLoadSource(src: LoadToLoadIO): FlowSource = {
     val out = WireInit(0.U.asTypeOf(new FlowSource))
-    out.vaddr              := Cat(src.data(XLEN-1, 6), s0_ptr_chasing_vaddr(5,0))
     out.mask               := genVWmask(0.U, LSUOpType.ld)
     // When there's no valid instruction from RS and LSQ, we try the load-to-load forwarding.
     // Assume the pointer chasing is always ld.
@@ -503,19 +497,28 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   )
   s0_sel_src := ParallelPriorityMux(s0_src_selector, s0_src_format)
 
+  // select vaddr
+  val s0_int_iss_vaddr  = io.ldin.bits.src(0) + SignExt(io.ldin.bits.uop.ctrl.imm(11, 0), VAddrBits)
+  val s0_vec_iss_vaddr  = WireInit(0.U(VAddrBits.W))
+  val s0_rep_vaddr      = io.replay.bits.vaddr
+
+  val s0_int_vec_vaddr = Mux(s0_int_iss_valid, s0_int_iss_vaddr, s0_vec_iss_vaddr)
+  s0_vaddr := Mux(s0_super_ld_rep_valid || s0_ld_rep_valid, s0_rep_vaddr, s0_int_vec_vaddr)
+
   // address align check
   val s0_addr_aligned = LookupTree(s0_sel_src.uop.ctrl.fuOpType(1, 0), List(
     "b00".U   -> true.B,                   //b
-    "b01".U   -> (s0_sel_src.vaddr(0)    === 0.U), //h
-    "b10".U   -> (s0_sel_src.vaddr(1, 0) === 0.U), //w
-    "b11".U   -> (s0_sel_src.vaddr(2, 0) === 0.U)  //d
+    "b01".U   -> (s0_vaddr(0)    === 0.U), //h
+    "b10".U   -> (s0_vaddr(1, 0) === 0.U), //w
+    "b11".U   -> (s0_vaddr(2, 0) === 0.U)  //d
   ))
 
   // accept load flow if dcache ready (tlb is always ready)
   // TODO: prefetch need writeback to loadQueueFlag
   s0_out               := DontCare
   s0_out.rsIdx         := s0_sel_src.rsIdx
-  s0_out.vaddr         := s0_sel_src.vaddr
+  s0_out.vaddr         := s0_vaddr
+  s0_out.paddr         := io.fast_rep_in.bits.paddr
   s0_out.mask          := s0_sel_src.mask
   s0_out.uop           := s0_sel_src.uop
   s0_out.isFirstIssue  := s0_sel_src.isFirstIssue
@@ -557,7 +560,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.dcache.replacementUpdated := Mux(s0_ld_rep_select || s0_super_ld_rep_select, io.replay.bits.replacementUpdated, false.B)
 
   XSDebug(io.dcache.req.fire,
-    p"[DCACHE LOAD REQ] pc ${Hexadecimal(s0_sel_src.uop.cf.pc)}, vaddr ${Hexadecimal(s0_sel_src.vaddr)}\n"
+    p"[DCACHE LOAD REQ] pc ${Hexadecimal(s0_sel_src.uop.cf.pc)}, vaddr ${Hexadecimal(s0_vaddr)}\n"
   )
   XSDebug(s0_valid,
     p"S0: pc ${Hexadecimal(s0_out.uop.cf.pc)}, lId ${Hexadecimal(s0_out.uop.lqIdx.asUInt)}, " +
@@ -601,8 +604,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s1_vaddr_hi         := s1_in.vaddr(VAddrBits - 1, 6)
   s1_vaddr_lo         := s1_in.vaddr(5, 0)
   s1_vaddr            := Cat(s1_vaddr_hi, s1_vaddr_lo)
-  s1_paddr_dup_lsu    := io.tlb.resp.bits.paddr(0)
-  s1_paddr_dup_dcache := io.tlb.resp.bits.paddr(1)
+  s1_paddr_dup_lsu    := Mux(s1_in.isFastReplay, s1_in.paddr, io.tlb.resp.bits.paddr(0))
+  s1_paddr_dup_dcache := Mux(s1_in.isFastReplay, s1_in.paddr, io.tlb.resp.bits.paddr(1))
 
   when (s1_tlb_memidx.is_ld && io.tlb.resp.valid && !s1_tlb_miss && s1_tlb_memidx.idx === s1_in.uop.lqIdx.value) {
     // printf("load idx = %d\n", s1_tlb_memidx.idx)
@@ -1218,10 +1221,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("s0_fast_replay_issue",         io.fast_rep_in.fire)
   XSPerfAccumulate("s0_stall_out",                 s0_valid && !s0_can_go)
   XSPerfAccumulate("s0_stall_dcache",              s0_valid && !io.dcache.req.ready)
-  XSPerfAccumulate("s0_addr_spec_success",         s0_fire && s0_sel_src.vaddr(VAddrBits-1, 12) === io.ldin.bits.src(0)(VAddrBits-1, 12))
-  XSPerfAccumulate("s0_addr_spec_failed",          s0_fire && s0_sel_src.vaddr(VAddrBits-1, 12) =/= io.ldin.bits.src(0)(VAddrBits-1, 12))
-  XSPerfAccumulate("s0_addr_spec_success_once",    s0_fire && s0_sel_src.vaddr(VAddrBits-1, 12) === io.ldin.bits.src(0)(VAddrBits-1, 12) && s0_sel_src.isFirstIssue)
-  XSPerfAccumulate("s0_addr_spec_failed_once",     s0_fire && s0_sel_src.vaddr(VAddrBits-1, 12) =/= io.ldin.bits.src(0)(VAddrBits-1, 12) && s0_sel_src.isFirstIssue)
+  XSPerfAccumulate("s0_addr_spec_success",         s0_fire && s0_vaddr(VAddrBits-1, 12) === io.ldin.bits.src(0)(VAddrBits-1, 12))
+  XSPerfAccumulate("s0_addr_spec_failed",          s0_fire && s0_vaddr(VAddrBits-1, 12) =/= io.ldin.bits.src(0)(VAddrBits-1, 12))
+  XSPerfAccumulate("s0_addr_spec_success_once",    s0_fire && s0_vaddr(VAddrBits-1, 12) === io.ldin.bits.src(0)(VAddrBits-1, 12) && s0_sel_src.isFirstIssue)
+  XSPerfAccumulate("s0_addr_spec_failed_once",     s0_fire && s0_vaddr(VAddrBits-1, 12) =/= io.ldin.bits.src(0)(VAddrBits-1, 12) && s0_sel_src.isFirstIssue)
   XSPerfAccumulate("s0_forward_tl_d_channel",      s0_out.forward_tlDchannel)
   XSPerfAccumulate("s0_hardware_prefetch_fire",    s0_fire && s0_hw_prf_select)
   XSPerfAccumulate("s0_software_prefetch_fire",    s0_fire && s0_sel_src.prf && s0_int_iss_select)
