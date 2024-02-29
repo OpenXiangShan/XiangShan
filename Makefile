@@ -50,6 +50,8 @@ $(info [INFO] Downloading from $(FIRTOOL_URL))
 $(shell mkdir -p $(HOME)/.cache/xiangshan && curl -L $(FIRTOOL_URL) | tar -xzC $(HOME)/.cache/xiangshan)
 endif
 FIRTOOL_ARGS = --firtool-binary-path $(CACHE_FIRTOOL_PATH)
+else
+FIRTOOL_ARGS = --firtool-binary-path $(FIRTOOL_PATH)
 endif
 endif
 
