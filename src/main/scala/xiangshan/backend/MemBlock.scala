@@ -339,7 +339,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   ldout1.valid := atomicsUnit.io.out.valid || loadUnits(1).io.ldout.valid
   ldout1.bits  := loadWritebackOverride
   atomicsUnit.io.out.ready := ldout1.ready
-  loadUnits.head.io.ldout.ready := ldout1.ready
+  loadUnits(1).io.ldout.ready := ldout1.ready
 
   val ldExeWbReqs = VecInit(Seq(loadUnits.head.io.ldout, ldout1)) ++ loadUnits.drop(2).map(_.io.ldout)
   io.mem_to_ooo.writeback <> ldExeWbReqs ++ VecInit(storeUnits.map(_.io.stout)) ++ VecInit(stdExeUnits.map(_.io.out))
