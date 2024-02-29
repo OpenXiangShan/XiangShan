@@ -81,16 +81,16 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     numCamPort = LoadPipelineWidth
   ))
   paddrModule.io := DontCare
-  //val released = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B)))
-  val releasedReg = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B)))
-  val releasedEnable = WireInit(VecInit(Seq.fill(LoadQueueRARSize)(false.B)))
-  val releasedNext = WireInit(releasedReg)
+  val released = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B)))
+  // val releasedReg = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B)))
+  // val releasedEnable = WireInit(VecInit(Seq.fill(LoadQueueRARSize)(false.B)))
+  // val releasedNext = WireInit(releasedReg)
 
-  for(i <- 0 until LoadQueueRARSize){
-    when(releasedEnable(i)){
-      releasedReg(i) := releasedNext(i)
-    }
-  }
+  // for(i <- 0 until LoadQueueRARSize){
+  //   when(releasedEnable(i)){
+  //     releasedReg(i) := releasedNext(i)
+  //   }
+  // }
   val bypassPAddr = Reg(Vec(LoadPipelineWidth, UInt(PAddrBits.W)))
 
   // freeliset: store valid entries index.
@@ -161,7 +161,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
 
       //  Fill info
       uop(enqIndex) := enq.bits.uop
-      releasedNext(enqIndex) :=
+      released(enqIndex) :=
         enq.bits.data_valid &&
         (release2Cycle.valid &&
         enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release2Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset) ||
@@ -224,7 +224,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
                       RegNext(allocatedReg(i) &
                       paddrModule.io.releaseViolationMmask(w)(i) &
                       robIdxMask(i) &&
-                      releasedReg(i))
+                      released(i))
                     })
     //  Load-to-Load violation check result
     val ldLdViolationMask = VecInit(matchMask)
@@ -249,8 +249,8 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     when (RegNext((paddrModule.io.releaseMmask.takeRight(1)(0)(i) || bypassMatch) && allocatedReg(i) && release1Cycle.valid)) {
       // Note: if a load has missed in dcache and is waiting for refill in load queue,
       // its released flag still needs to be set as true if addr matches.
-      releasedEnable(i) := true.B
-      releasedNext(i) := true.B
+      // releasedEnable(i) := true.B
+      released(i) := true.B
     }
   })
 
