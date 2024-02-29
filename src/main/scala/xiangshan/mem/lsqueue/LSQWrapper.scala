@@ -320,7 +320,7 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule {
     resp.sqIdx := sqPtr + sqOffset(i)
   }
 
-  io.enqLsq.needAlloc := RegNext(io.enq.needAlloc)
+  io.enqLsq.needAlloc := RegEnable(io.enq.needAlloc, io.enq.req.valid)
   io.enqLsq.req.zip(io.enq.req).zip(io.enq.resp).foreach{ case ((toLsq, enq), resp) =>
     val do_enq = enq.valid && !io.redirect.valid && io.enq.canAccept
     toLsq.valid := RegNext(do_enq)

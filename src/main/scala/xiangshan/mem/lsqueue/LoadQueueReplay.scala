@@ -471,7 +471,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   for (i <- 0 until LoadPipelineWidth) {
     val s0_can_go = s1_can_go(i) ||
                     uop(s1_oldestSel(i).bits).robIdx.needFlush(io.redirect) ||
-                    uop(s1_oldestSel(i).bits).robIdx.needFlush(RegNext(io.redirect))
+                    uop(s1_oldestSel(i).bits).robIdx.needFlush(RegEnable(io.redirect, io.redirect.valid))
     val s0_oldestSelIndexOH = s0_oldestSel(i).bits // one-hot
     s1_oldestSel(i).valid := RegEnable(s0_oldestSel(i).valid, s0_can_go)
     s1_oldestSel(i).bits := RegEnable(OHToUInt(s0_oldestSel(i).bits), s0_can_go)
@@ -485,7 +485,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val s2_cancelReplay = Wire(Vec(LoadPipelineWidth, Bool()))
   for (i <- 0 until LoadPipelineWidth) {
     val s1_cancel = uop(s1_oldestSel(i).bits).robIdx.needFlush(io.redirect) ||
-                    uop(s1_oldestSel(i).bits).robIdx.needFlush(RegNext(io.redirect))
+                    uop(s1_oldestSel(i).bits).robIdx.needFlush(RegEnable(io.redirect, io.redirect.valid))
     val s1_oldestSelV = s1_oldestSel(i).valid && !s1_cancel
     s1_can_go(i)          := replayCanFire(i) && (!s2_oldestSel(i).valid || io.replay(i).fire) || s2_cancelReplay(i)
     s2_oldestSel(i).valid := RegEnable(Mux(s1_can_go(i), s1_oldestSelV, false.B), (s1_can_go(i) || io.replay(i).fire))
