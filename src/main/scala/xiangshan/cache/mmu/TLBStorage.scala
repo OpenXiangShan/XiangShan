@@ -108,9 +108,14 @@ class TLBFA(
 
     val vpn = req.bits.vpn
     val vpn_reg = RegEnable(vpn, req.fire)
+    val ppn_reg = RegEnable(VecInit(entries.map(_.genPPN(saveLevel, req.valid)(vpn))), req.fire)
+    val perm_reg = RegEnable(VecInit(entries.map(_.perm)), req.fire)
+    val g_perm_reg = RegEnable(VecInit(entries.map(_.g_perm)), req.fire)
+    val s2xlate_reg = RegEnable(VecInit(entries.map(_.s2xlate)), req.fire)
     val hasS2xlate = req.bits.s2xlate =/= noS2xlate
     val OnlyS2 = req.bits.s2xlate === onlyStage2
     val OnlyS1 = req.bits.s2xlate === onlyStage1
+
     val refill_mask = Mux(io.w.valid, UIntToOH(io.w.bits.wayIdx), 0.U(nWays.W))
     val hitVec = VecInit((entries.zipWithIndex).zip(v zip refill_mask.asBools).map{
       case (e, m) => {
@@ -130,17 +135,17 @@ class TLBFA(
     resp.bits.hit := Cat(hitVecReg).orR
     if (nWays == 1) {
       for (d <- 0 until nDups) {
-        resp.bits.ppn(d) := RegEnable(entries(0).genPPN(saveLevel, req.valid)(vpn), req.fire)
-        resp.bits.perm(d) := RegEnable(entries(0).perm, req.fire)
-        resp.bits.g_perm(d) := RegEnable(entries(0).g_perm, req.fire)
-        resp.bits.s2xlate(d) := RegEnable(entries(0).s2xlate, req.fire)
+        resp.bits.ppn(d) := ppn_reg(0)
+        resp.bits.perm(d) := perm_reg(0)
+        resp.bits.g_perm(d) := g_perm_reg(0)
+        resp.bits.s2xlate(d) := s2xlate_reg(0)
       }
     } else {
       for (d <- 0 until nDups) {
-        resp.bits.ppn(d) := RegEnable(ParallelMux(hitVec zip entries.map(_.genPPN(saveLevel, req.valid)(vpn))), req.fire)
-        resp.bits.perm(d) := RegEnable(ParallelMux(hitVec zip entries.map(_.perm)), req.fire)
-        resp.bits.g_perm(d) := RegEnable(ParallelMux(hitVec zip entries.map(_.g_perm)), req.fire)
-        resp.bits.s2xlate(d) := RegEnable(ParallelMux(hitVec zip entries.map(_.s2xlate)), req.fire)
+        resp.bits.ppn(d) := ParallelMux(hitVecReg zip ppn_reg)
+        resp.bits.perm(d) := ParallelMux(hitVecReg zip perm_reg)
+        resp.bits.g_perm(d) := ParallelMux(hitVec zip g_perm_reg)
+        resp.bits.s2xlate(d) := ParallelMux(hitVec zip s2xlate_reg)
       }
     }
 
