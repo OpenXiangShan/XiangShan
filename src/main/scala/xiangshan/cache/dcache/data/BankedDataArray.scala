@@ -506,15 +506,18 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val read_result_delayed = RegNext(read_result)
   (0 until LoadPipelineWidth).map(i => {
     // io.read_resp(i) := read_result(RegNext(bank_addrs(i)))(RegNext(OHToUInt(way_en(i))))
-    val rr_read_fire = RegNext(RegNext(io.read(i).fire))
-    val rr_div_addr = RegNext(RegNext(div_addrs(i)))
-    val rr_bank_addr = RegNext(RegNext(bank_addrs(i)))
-    val rr_way_addr = RegNext(RegNext(OHToUInt(way_en(i))))
+    val rr_read_fire = RegNext(io.read(i).fire)
+    val rr_div_addr = RegNext(div_addrs(i))
+    val rr_div_addr_next = RegNext(rr_div_addr)
+    val rr_bank_addr = RegNext(bank_addrs(i))
+    val rr_bank_addr_next = RegNext(rr_bank_addr)
+    val rr_way_addr = RegNext(OHToUInt(way_en(i)))
+    val rr_way_addr_next = RegNext(rr_way_addr)
     (0 until VLEN/DCacheSRAMRowBits).map( j =>{
-      io.read_resp_delayed(i)(j) := read_result_delayed(rr_div_addr)(rr_bank_addr(j))(rr_way_addr)
+      io.read_resp_delayed(i)(j) := read_result(rr_div_addr)(rr_bank_addr(j))(rr_way_addr)
       // error detection
       // normal read ports
-      io.read_error_delayed(i)(j) := rr_read_fire && read_error_delayed_result(rr_div_addr)(rr_bank_addr(j))(rr_way_addr) && !RegNext(io.bank_conflict_slow(i))
+      io.read_error_delayed(i)(j) := RegNext(rr_read_fire) && read_error_delayed_result(rr_div_addr_next)(rr_bank_addr_next(j))(rr_way_addr_next) && !RegNext(io.bank_conflict_slow(i))
     })
   })
 
@@ -894,14 +897,17 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
   val bank_result_delayed = RegNext(bank_result)
   (0 until LoadPipelineWidth).map(i => {
-    val rr_read_fire = RegNext(RegNext(io.read(i).fire))
-    val rr_div_addr = RegNext(RegNext(div_addrs(i)))
-    val rr_bank_addr = RegNext(RegNext(bank_addrs(i)))
-    val rr_way_addr = RegNext(RegNext(OHToUInt(way_en(i))))
+    val rr_read_fire = RegNext(io.read(i).fire)
+    val rr_div_addr = RegNext(div_addrs(i))
+    val rr_div_addr_next = RegNext(rr_div_addr)
+    val rr_bank_addr = RegNext(bank_addrs(i))
+    val rr_bank_addr_next = RegNext(rr_bank_addr)
+    val rr_way_addr = RegNext(OHToUInt(way_en(i)))
     (0 until VLEN/DCacheSRAMRowBits).map( j =>{
-      io.read_resp_delayed(i)(j) := bank_result_delayed(rr_div_addr)(rr_bank_addr(j))
+      io.read_resp_delayed(i)(j) := bank_result(rr_div_addr)(rr_bank_addr(j))
       // error detection
-      io.read_error_delayed(i)(j) := rr_read_fire && read_bank_error_delayed(rr_div_addr)(rr_bank_addr(j)) && !RegNext(io.bank_conflict_slow(i))
+      // normal read ports
+      io.read_error_delayed(i)(j) := RegNext(rr_read_fire) && read_bank_error_delayed(rr_div_addr_next)(rr_bank_addr_next(j)) && !RegNext(io.bank_conflict_slow(i))
     })
   })
 
