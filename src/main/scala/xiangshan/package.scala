@@ -661,6 +661,7 @@ package object xiangshan {
         IMM_VSETVLI.litValue   -> ImmUnion.VSETVLI,
         IMM_VSETIVLI.litValue  -> ImmUnion.VSETIVLI,
         IMM_LUI32.litValue     -> ImmUnion.LUI32,
+        IMM_VRORVI.litValue    -> ImmUnion.VRORVI,
       )
       iuMap(immType.litValue)
     }
