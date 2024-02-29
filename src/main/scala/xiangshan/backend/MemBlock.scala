@@ -334,14 +334,14 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   storeUnits.zipWithIndex.map(x => x._1.suggestName("StoreUnit_"+x._2))
   val atomicsUnit = Module(new AtomicsUnit)
 
-  val loadWritebackOverride  = Mux(atomicsUnit.io.out.valid, atomicsUnit.io.out.bits, loadUnits.head.io.ldout.bits)
-  val ldout0 = Wire(Decoupled(new ExuOutput))
-  ldout0.valid := atomicsUnit.io.out.valid || loadUnits.head.io.ldout.valid
-  ldout0.bits  := loadWritebackOverride
-  atomicsUnit.io.out.ready := ldout0.ready
-  loadUnits.head.io.ldout.ready := ldout0.ready
+  val loadWritebackOverride  = Mux(atomicsUnit.io.out.valid, atomicsUnit.io.out.bits, loadUnits(1).io.ldout.bits)
+  val ldout1 = Wire(Decoupled(new ExuOutput))
+  ldout1.valid := atomicsUnit.io.out.valid || loadUnits(1).io.ldout.valid
+  ldout1.bits  := loadWritebackOverride
+  atomicsUnit.io.out.ready := ldout1.ready
+  loadUnits.head.io.ldout.ready := ldout1.ready
 
-  val ldExeWbReqs = ldout0 +: loadUnits.tail.map(_.io.ldout)
+  val ldExeWbReqs = VecInit(Seq(loadUnits.head.io.ldout, ldout1)) ++ loadUnits.drop(2).map(_.io.ldout)
   io.mem_to_ooo.writeback <> ldExeWbReqs ++ VecInit(storeUnits.map(_.io.stout)) ++ VecInit(stdExeUnits.map(_.io.out))
   io.mem_to_ooo.otherFastWakeup := DontCare
   io.mem_to_ooo.otherFastWakeup.take(2).zip(loadUnits.map(_.io.fast_uop)).foreach{case(a,b)=> a := b}
