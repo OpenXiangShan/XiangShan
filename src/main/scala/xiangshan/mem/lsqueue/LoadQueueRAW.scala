@@ -291,14 +291,14 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     if (valid.length <= SelectGroupSize) {
       val (selValid, selBits) = selectPartialOldest(valid, bits)
       val selValidNext = RegNext(selValid(0))
-      val selBitsNext = RegNext(selBits(0))
-      (Seq(selValidNext && !selBitsNext.uop.robIdx.needFlush(io.redirect) && !selBitsNext.uop.robIdx.needFlush(RegNext(io.redirect))), Seq(selBitsNext))
+      val selBitsNext = RegEnable(selBits(0), selValid(0))
+      (Seq(selValidNext && !selBitsNext.uop.robIdx.needFlush(io.redirect) && !selBitsNext.uop.robIdx.needFlush(RegEnable(io.redirect, io.redirect.valid))), Seq(selBitsNext))
     } else {
       val select = (0 until numSelectGroups).map(g => {
         val (selValid, selBits) = selectPartialOldest(selectValidGroups(g), selectBitsGroups(g))
         val selValidNext = RegNext(selValid(0))
-        val selBitsNext = RegNext(selBits(0))
-        (selValidNext && !selBitsNext.uop.robIdx.needFlush(io.redirect) && !selBitsNext.uop.robIdx.needFlush(RegNext(io.redirect)), selBitsNext)
+        val selBitsNext = RegEnable(selBits(0), selValid(0))
+        (selValidNext && !selBitsNext.uop.robIdx.needFlush(io.redirect) && !selBitsNext.uop.robIdx.needFlush(RegEnable(io.redirect, io.redirect.valid)), selBitsNext)
       })
       selectOldest(select.map(_._1), select.map(_._2))
     }
@@ -308,8 +308,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     paddrModule.io.violationMdata(i) := io.storeIn(i).bits.paddr
     maskModule.io.violationMdata(i) := io.storeIn(i).bits.mask
 
-    val bypassPaddrMask = RegNext(VecInit((0 until LoadPipelineWidth).map(j => bypassPAddr(j)(PAddrBits-1, DCacheVWordOffset) === io.storeIn(i).bits.paddr(PAddrBits-1, DCacheVWordOffset))))
-    val bypassMMask = RegNext(VecInit((0 until LoadPipelineWidth).map(j => (bypassMask(j) & io.storeIn(i).bits.mask).orR)))
+    val bypassPaddrMask = RegEnable(VecInit((0 until LoadPipelineWidth).map(j => bypassPAddr(j)(PAddrBits-1, DCacheVWordOffset) === io.storeIn(i).bits.paddr(PAddrBits-1, DCacheVWordOffset))), io.storeIn(i).valid || needEnqueue(j))
+    val bypassMMask = RegEnable(VecInit((0 until LoadPipelineWidth).map(j => (bypassMask(j) & io.storeIn(i).bits.mask).orR)), io.storeIn(i).valid || needEnqueue(j))
     val bypassMaskUInt = (0 until LoadPipelineWidth).map(j =>
       Fill(LoadQueueRAWSize, RegNext(RegNext(io.query(j).req.fire))) & Mux(bypassPaddrMask(j) && bypassMMask(j), UIntToOH(RegNext(RegNext(enqIndexVec(j)))), 0.U(LoadQueueRAWSize.W))
     ).reduce(_|_)
