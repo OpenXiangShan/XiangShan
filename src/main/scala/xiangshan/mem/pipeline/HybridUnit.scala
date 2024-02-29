@@ -1088,9 +1088,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.stu_io.lsq_replenish := s2_out
   io.stu_io.lsq_replenish.miss := io.ldu_io.dcache.resp.fire && io.ldu_io.dcache.resp.bits.miss
 
-  io.ldu_io.ldCancel.ld1Cancel := s2_valid && s2_ld_flow && (
-    s2_out.rep_info.need_rep || s2_ld_mmio                                          // exe fail or is mmio
-  )
+  io.ldu_io.ldCancel.ld1Cancel := false.B
 
   // fast wakeup
   io.ldu_io.fast_uop.valid := RegNext(
