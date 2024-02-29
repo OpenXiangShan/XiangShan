@@ -181,6 +181,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s0_can_go        = s1_ready
   val s0_fire          = s0_valid && s0_can_go
   val s0_out           = Wire(new LqWriteBundle)
+  val s0_tlb_vaddr     = Wire(UInt(VAddrBits.W))
   val s0_vaddr         = Wire(UInt(VAddrBits.W))
 
   // flow source bundle
@@ -318,7 +319,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                                          Mux(s0_sel_src.prf_wr, TlbCmd.write, TlbCmd.read),
                                          TlbCmd.read
                                        )
-  io.tlb.req.bits.vaddr              := s0_vaddr
+  io.tlb.req.bits.vaddr              := s0_tlb_vaddr
   io.tlb.req.bits.size               := LSUOpType.size(s0_sel_src.uop.ctrl.fuOpType)
   io.tlb.req.bits.kill               := s0_kill
   io.tlb.req.bits.memidx.is_ld       := true.B
@@ -413,7 +414,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   def fromIntIssueSource(src: ExuInput): FlowSource = {
     val out = WireInit(0.U.asTypeOf(new FlowSource))
-    out.mask          := genVWmask(s0_vaddr, src.uop.ctrl.fuOpType(1,0))
+    out.mask          := genVWmask(s0_tlb_vaddr, src.uop.ctrl.fuOpType(1,0))
     out.uop           := src.uop
     out.try_l2l       := false.B
     out.has_rob_entry := true.B
@@ -500,18 +501,19 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // select vaddr
   val s0_int_iss_vaddr  = io.ldin.bits.src(0) + io.ld_sign_ext_imm
-  val s0_vec_iss_vaddr  = WireInit(0.U(VAddrBits.W))
+  val s0_vec_iss_vaddr  =
   val s0_rep_vaddr      = io.replay.bits.vaddr
 
   val s0_int_vec_vaddr = Mux(s0_int_iss_valid, s0_int_iss_vaddr, s0_vec_iss_vaddr)
-  s0_vaddr := Mux(s0_super_ld_rep_valid || s0_ld_rep_valid, s0_rep_vaddr, s0_int_vec_vaddr)
+  s0_tlb_vaddr := Mux(s0_super_ld_rep_valid || s0_ld_rep_valid, s0_rep_vaddr, s0_int_vec_vaddr)
+  s0_vaddr := Mux(s0_sel_src.fast_rep, io.fast_rep_in.bits.vaddr, s0_tlb_vaddr)
 
   // address align check
   val s0_addr_aligned = LookupTree(s0_sel_src.uop.ctrl.fuOpType(1, 0), List(
     "b00".U   -> true.B,                   //b
-    "b01".U   -> (s0_vaddr(0)    === 0.U), //h
-    "b10".U   -> (s0_vaddr(1, 0) === 0.U), //w
-    "b11".U   -> (s0_vaddr(2, 0) === 0.U)  //d
+    "b01".U   -> (s0_tlb_vaddr(0)    === 0.U), //h
+    "b10".U   -> (s0_tlb_vaddr(1, 0) === 0.U), //w
+    "b11".U   -> (s0_tlb_vaddr(2, 0) === 0.U)  //d
   ))
 
   // accept load flow if dcache ready (tlb is always ready)
@@ -595,7 +597,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s1_paddr_dup_lsu    = Wire(UInt())
   val s1_paddr_dup_dcache = Wire(UInt())
   val s1_exception        = ExceptionNO.selectByFu(s1_out.uop.cf.exceptionVec, lduCfg).asUInt.orR   // af & pf exception were modified below.
-  val s1_tlb_miss         = io.tlb.resp.bits.miss
+  val s1_not_tlb_query    = s1_in.isFastReplay
+  val s1_tlb_miss         = io.tlb.resp.bits.miss && !s1_not_tlb_query
   val s1_prf              = s1_in.isPrefetch
   val s1_hw_prf           = s1_in.isHWPrefetch
   val s1_sw_prf           = s1_prf && !s1_hw_prf
@@ -612,7 +615,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s1_out.uop.debugInfo.tlbRespTime := GTimer()
   }
 
-  io.tlb.req_kill   := s1_kill || s1_dly_err
+  io.tlb.req_kill   := s1_kill || s1_dly_err || s1_not_tlb_query
   io.tlb.resp.ready := true.B
 
   io.dcache.s1_paddr_dup_lsu    <> s1_paddr_dup_lsu
@@ -659,8 +662,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   when (!s1_dly_err) {
     // current ori test will cause the case of ldest == 0, below will be modifeid in the future.
     // af & pf exception were modified
-    s1_out.uop.cf.exceptionVec(loadPageFault)   := io.tlb.resp.bits.excp(0).pf.ld && !s1_tlb_miss
-    s1_out.uop.cf.exceptionVec(loadAccessFault) := io.tlb.resp.bits.excp(0).af.ld && !s1_tlb_miss
+    s1_out.uop.cf.exceptionVec(loadPageFault)   := io.tlb.resp.bits.excp(0).pf.ld && !s1_tlb_miss && !s1_not_tlb_query
+    s1_out.uop.cf.exceptionVec(loadAccessFault) := io.tlb.resp.bits.excp(0).af.ld && !s1_tlb_miss && !s1_not_tlb_query
+    s1_out.uop.cf.exceptionVec(loadAddrMisaligned) := s1_in.uop.cf.exceptionVec(loadAddrMisaligned) && !s1_not_tlb_query
   } .otherwise {
     s1_out.uop.cf.exceptionVec(loadPageFault)      := false.B
     s1_out.uop.cf.exceptionVec(loadAddrMisaligned) := false.B
@@ -791,7 +795,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // writeback access fault caused by ecc error / bus error
   // * ecc data error is slow to generate, so we will not use it until load stage 3
   // * in load stage 3, an extra signal io.load_error will be used to
-  val s2_actually_mmio = s2_pmp.mmio
+  val s2_not_tlb_query = s2_in.isFastReplay
+  val s2_actually_mmio = s2_pmp.mmio && !s2_not_tlb_query
   val s2_mmio          = !s2_prf &&
                           s2_actually_mmio &&
                          !s2_exception &&
