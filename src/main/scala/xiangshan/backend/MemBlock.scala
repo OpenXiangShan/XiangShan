@@ -281,8 +281,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   println("Enable 3-load and 3-store: " + Enable3Load3Store)
   val loadUnits = Seq.fill(exuParameters.LduCnt)(Module(new LoadUnit))
-  val storeUnits = Seq.fill(exuParameters.StuCnt)(Module(new StoreUnit))
-  val stdExeUnits = Seq.fill(exuParameters.StuCnt)(Module(new StdExeUnit))
+  val storeUnits = Seq.fill(exuParameters.StuCnt)(Module(new StoreAddrUnit))
+  val stdExeUnits = Seq.fill(exuParameters.StuCnt)(Module(new StoreDataUnit))
   val stData = stdExeUnits.map(_.io.out)
   val exeUnits = loadUnits ++ storeUnits
   val l1_pf_req = Wire(Decoupled(new L1PrefetchReq()))
@@ -680,9 +680,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val stu = storeUnits(i)
 
     stdExeUnits(i).io.redirect <> redirect
-    stdExeUnits(i).io.fromInt <> io.ooo_to_mem.issue(i + exuParameters.LduCnt + exuParameters.StuCnt)
-    stdExeUnits(i).io.fromFp := DontCare
-    stdExeUnits(i).io.out := DontCare
+    stdExeUnits(i).io.in <> io.ooo_to_mem.issue(i + exuParameters.LduCnt + exuParameters.StuCnt)
 
     stu.io.redirect      <> redirect
     stu.io.dcache        <> dcache.io.lsu.sta(i)
