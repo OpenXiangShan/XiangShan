@@ -750,6 +750,7 @@ class TlbIO(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parame
   val hartId = Input(UInt(hartIdLen.W))
   val requestor = Vec(Width, Flipped(new TlbRequestIO(nRespDups)))
   val flushPipe = Vec(Width, Input(Bool()))
+  val redirect = Flipped(ValidIO(new Redirect)) // flush the signal need_gpa in tlb
   val ptw = new TlbPtwIOwithMemIdx(Width)
   val refill_to_mem = Output(new TlbRefilltoMemIO())
   val replace = if (q.outReplace) Flipped(new TlbReplaceIO(Width, q)) else null
@@ -762,6 +763,7 @@ class VectorTlbPtwIO(Width: Int)(implicit p: Parameters) extends TlbBundle {
   val resp = Flipped(DecoupledIO(new Bundle {
     val data = new PtwRespS2withMemIdx
     val vector = Output(Vec(Width, Bool()))
+    val getGpa = Output(Vec(Width, Bool()))
   }))
 
   def connect(normal: TlbPtwIOwithMemIdx): Unit = {
@@ -1051,6 +1053,7 @@ class PtwReq(implicit p: Parameters) extends PtwBundle {
 
 class PtwReqwithMemIdx(implicit p: Parameters) extends PtwReq {
   val memidx = new MemBlockidxBundle
+  val getGpa = Bool() // this req is to get gpa when having guest page fault
 }
 
 class PtwResp(implicit p: Parameters) extends PtwBundle {
@@ -1312,6 +1315,7 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
 
 class PtwRespS2withMemIdx(implicit p: Parameters) extends PtwRespS2 {
   val memidx = new MemBlockidxBundle()
+  val getGpa = Bool() // this req is to get gpa when having guest page fault
 }
 
 class L2TLBIO(implicit p: Parameters) extends PtwBundle {

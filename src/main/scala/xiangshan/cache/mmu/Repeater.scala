@@ -157,6 +157,7 @@ class PTWFilterIO(Width: Int, hasHint: Boolean = false)(implicit p: Parameters) 
 class PTWFilterEntryIO(Width: Int, hasHint: Boolean = false)(implicit p: Parameters) extends PTWFilterIO(Width, hasHint){
   val flush = Input(Bool())
   val refill = Output(Bool())
+  val getGpa = Output(Bool())
   val memidx = Output(new MemBlockidxBundle)
 }
 
@@ -179,6 +180,7 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
   val sent = RegInit(VecInit(Seq.fill(Size)(false.B)))
   val vpn = Reg(Vec(Size, UInt(vpnLen.W)))
   val s2xlate = Reg(Vec(Size, UInt(2.W)))
+  val getGpa = Reg(Vec(Size, Bool()))
   val memidx = Reg(Vec(Size, new MemBlockidxBundle))
 
   val enqvalid = WireInit(VecInit(Seq.fill(Width)(false.B)))
@@ -200,7 +202,9 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
   io.tlb.resp.valid := false.B
   io.tlb.resp.bits.data := 0.U.asTypeOf(new PtwRespS2withMemIdx)
   io.tlb.resp.bits.vector := 0.U.asTypeOf(Vec(Width, Bool()))
+  io.tlb.resp.bits.getGpa := 0.U.asTypeOf(Vec(Width, Bool()))
   io.memidx := 0.U.asTypeOf(new MemBlockidxBundle)
+  io.getGpa := 0.U
 
   // ugly code, should be optimized later
   require(Width <= 3, s"DTLB Filter Width ($Width) must equal or less than 3")
@@ -251,6 +255,7 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
       sent(enqidx(i)) := false.B
       vpn(enqidx(i)) := io.tlb.req(i).bits.vpn
       s2xlate(enqidx(i)) := io.tlb.req(i).bits.s2xlate
+      getGpa(enqidx(i)) := io.tlb.req(i).bits.getGpa
       memidx(enqidx(i)) := io.tlb.req(i).bits.memidx
     }
   }
@@ -270,6 +275,7 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
   when (io.ptw.resp.fire) {
     v.zip(ptwResp_EntryMatchVec).map{ case (vi, mi) => when (mi) { vi := false.B }}
     io.memidx := memidx(ptwResp_EntryMatchFirst)
+    io.getGpa := getGpa(ptwResp_EntryMatchFirst)
   }
 
   when (io.flush) {
@@ -367,6 +373,7 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
   io.tlb.req.map(_.ready := true.B)
   io.tlb.resp.valid := ptwResp_valid
   io.tlb.resp.bits.data.s2xlate := ptwResp.s2xlate
+  io.tlb.resp.bits.data.getGpa := DontCare // not used
   io.tlb.resp.bits.data.s1 := ptwResp.s1
   io.tlb.resp.bits.data.s2 := ptwResp.s2
   io.tlb.resp.bits.data.memidx := 0.U.asTypeOf(new MemBlockidxBundle)
@@ -375,10 +382,14 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
   // However, it is only necessary to distinguish between different DTLB now
   for (i <- 0 until Width) {
     io.tlb.resp.bits.vector(i) := false.B
+    io.tlb.resp.bits.getGpa(i) := false.B
   }
   io.tlb.resp.bits.vector(0) := load_filter(0).refill
   io.tlb.resp.bits.vector(exuParameters.LduCnt + 1) := store_filter(0).refill
   io.tlb.resp.bits.vector(exuParameters.LduCnt + 1 + exuParameters.StuCnt) := prefetch_filter(0).refill
+  io.tlb.resp.bits.getGpa(0) := load_filter(0).getGpa
+  io.tlb.resp.bits.getGpa(exuParameters.LduCnt + 1) := store_filter(0).getGpa
+  io.tlb.resp.bits.getGpa(exuParameters.LduCnt + 1 + exuParameters.StuCnt) := prefetch_filter(0).getGpa
 
   val hintIO = io.hint.getOrElse(new TlbHintIO)
   val load_hintIO = load_filter(0).hint.getOrElse(new TlbHintIO)
@@ -425,6 +436,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   val ports = Reg(Vec(Size, Vec(Width, Bool()))) // record which port(s) the entry come from, may not able to cover all the ports
   val vpn = Reg(Vec(Size, UInt(vpnLen.W)))
   val s2xlate = Reg(Vec(Size, UInt(2.W)))
+  val getGpa = Reg(Vec(Size, Bool()))
   val memidx = Reg(Vec(Size, new MemBlockidxBundle))
   val enqPtr = RegInit(0.U(log2Up(Size).W)) // Enq
   val issPtr = RegInit(0.U(log2Up(Size).W)) // Iss to Ptw
@@ -483,6 +495,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   val ports_init = (0 until Width).map(i => (1 << i).U(Width.W))
   val filter_ports = (0 until Width).map(i => ParallelMux(newMatchVec(i).zip(ports_init).drop(i)))
   val resp_vector = RegEnable(ParallelMux(ptwResp_OldMatchVec zip ports), io.ptw.resp.fire)
+  val resp_getGpa = RegEnable(ParallelMux(ptwResp_OldMatchVec zip getGpa), io.ptw.resp.fire)
 
   def canMerge(index: Int) : Bool = {
     ptwResp_newMatchVec(index) || oldMatchVec(index) ||
@@ -526,6 +539,8 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   io.tlb.resp.bits.data.s2 := ptwResp.s2
   io.tlb.resp.bits.data.memidx := memidx(OHToUInt(ptwResp_OldMatchVec))
   io.tlb.resp.bits.vector := resp_vector
+  io.tlb.resp.bits.data.getGpa := getGpa(OHToUInt(ptwResp_OldMatchVec))
+  io.tlb.resp.bits.getGpa := DontCare
 
   val issue_valid = v(issPtr) && !isEmptyIss && !inflight_full
   val issue_filtered = ptwResp_valid && ptwResp_hit(io.ptw.req(0).bits.vpn, io.ptw.req(0).bits.s2xlate, ptwResp)
@@ -541,6 +556,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
         v(enqPtrVec(i)) := !tlb_req_flushed(i)
         vpn(enqPtrVec(i)) := req.bits.vpn
         s2xlate(enqPtrVec(i)) := req.bits.s2xlate
+        getGpa(enqPtrVec(i)) := req.bits.getGpa
         memidx(enqPtrVec(i)) := req.bits.memidx
         ports(enqPtrVec(i)) := req_ports(i).asBools
       }

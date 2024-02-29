@@ -116,6 +116,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   itlb.io.hartId := io.hartId
   itlb.io.base_connect(sfence, tlbCsr)
   itlb.io.flushPipe.map(_ := needFlush)
+  itlb.io.redirect := DontCare // itlb has flushpipe, don't need redirect signal
 
   val itlb_ptw = Wire(new VectorTlbPtwIO(coreParams.itlbPortNum))
   itlb_ptw.connect(itlb.io.ptw)
