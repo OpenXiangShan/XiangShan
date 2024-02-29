@@ -108,6 +108,8 @@ class TLBFA(
 
     val vpn = req.bits.vpn
     val vpn_reg = RegEnable(vpn, req.fire)
+    val ppn_reg = RegEnable(VecInit(entries.map(_.genPPN(saveLevel, req.valid)(vpn))), req.fire)
+    val perm_reg = RegEnable(VecInit(entries.map(_.perm)), req.fire)
 
     val refill_mask = Mux(io.w.valid, UIntToOH(io.w.bits.wayIdx), 0.U(nWays.W))
     val hitVec = VecInit((entries.zipWithIndex).zip(v zip refill_mask.asBools).map{case (e, m) => e._1.hit(vpn, io.csr.satp.asid) && m._1 && !m._2 })
@@ -122,13 +124,13 @@ class TLBFA(
     resp.bits.hit := Cat(hitVecReg).orR
     if (nWays == 1) {
       for (d <- 0 until nDups) {
-        resp.bits.ppn(d) := RegEnable(entries(0).genPPN(saveLevel, req.valid)(vpn), req.fire)
-        resp.bits.perm(d) := RegEnable(entries(0).perm, req.fire)
+        resp.bits.ppn(d) := ppn_reg(0) // RegEnable(entries(0).genPPN(saveLevel, req.valid)(vpn), req.fire)
+        resp.bits.perm(d) := perm_reg(0) // RegEnable(entries(0).perm, req.fire)
       }
     } else {
       for (d <- 0 until nDups) {
-        resp.bits.ppn(d) := RegEnable(ParallelMux(hitVec zip entries.map(_.genPPN(saveLevel, req.valid)(vpn))), req.fire)
-        resp.bits.perm(d) := RegEnable(ParallelMux(hitVec zip entries.map(_.perm)), req.fire)
+        resp.bits.ppn(d) := ParallelMux(hitVecReg zip ppn_reg) // RegEnable(ParallelMux(hitVec zip entries.map(_.genPPN(saveLevel, req.valid)(vpn))), req.fire)
+        resp.bits.perm(d) := ParallelMux(hitVecReg zip perm_reg) // RegEnable(ParallelMux(hitVec zip entries.map(_.perm)), req.fire)
       }
     }
 
