@@ -91,8 +91,8 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   // PAddr write needs 2 cycles, release signal should delay 1 cycle so that
   // load enqueue can catch release.
   val release1Cycle = io.release
-  val release2Cycle = RegNext(io.release)
-  val release2Cycle_dup_lsu = RegNext(io.release)
+  val release2Cycle = RegEnable(io.release, io.release.valid)
+  //val release2Cycle_dup_lsu = RegNext(io.release)
 
   // LoadQueueRAR enqueue condition:
   // There are still not completed load instructions before the current load instruction.
@@ -188,7 +188,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   // 2. release is set.
   // 3. Younger than current load instruction.
   val ldLdViolation = Wire(Vec(LoadPipelineWidth, Bool()))
-  val allocatedUInt = RegNext(allocated.asUInt)
+  //val allocatedUInt = RegNext(allocated.asUInt)
   for ((query, w) <- io.query.zipWithIndex) {
     ldLdViolation(w) := false.B
     paddrModule.io.releaseViolationMdata(w) := query.req.bits.paddr
