@@ -143,7 +143,7 @@ case class XSCoreParameters
   LoadQueueRARSize: Int = 72,
   LoadQueueRAWSize: Int = 56, // NOTE: make sure that LoadQueueRAWSize is power of 2.
   RollbackGroupSize: Int = 8,
-  LoadQueueReplaySize: Int = 36,
+  LoadQueueReplaySize: Int = 48, // NOTE: make sure that LoadQueueReplaySize is divided by LoadQueueNWriteBanks ,and LoadPipelineWidth
   LoadUncacheBufferSize: Int = 4,
   LoadQueueNWriteBanks: Int = 8, // NOTE: make sure that LoadQueueRARSize/LoadQueueRAWSize is divided by LoadQueueNWriteBanks
   StoreQueueSize: Int = 56,
