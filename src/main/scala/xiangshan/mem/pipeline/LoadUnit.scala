@@ -501,7 +501,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // select vaddr
   val s0_int_iss_vaddr  = io.ldin.bits.src(0) + io.ld_sign_ext_imm
-  val s0_vec_iss_vaddr  =
+  val s0_vec_iss_vaddr  = WireInit(0.U(VAddrBits.W))
   val s0_rep_vaddr      = io.replay.bits.vaddr
 
   val s0_int_vec_vaddr = Mux(s0_int_iss_valid, s0_int_iss_vaddr, s0_vec_iss_vaddr)
