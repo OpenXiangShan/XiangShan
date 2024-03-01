@@ -309,7 +309,7 @@ class TageTable
   val req_unhashed_idx = getUnhashedIdx(io.req.bits.pc)
 
   val us = Module(new FoldedSRAMTemplate(Bool(), set=nRowsPerBr, width=uFoldedWidth, way=numBr, shouldReset=true, extraReset=true, holdRead=true, singlePort=true))
-  us.extra_reset.get := io.update.reset_u.reduce(_||_)
+  us.extra_reset.get := io.update.reset_u.reduce(_||_) && io.update.mask.reduce(_||_)
 
 
   val table_banks = Seq.fill(nBanks)(
@@ -424,7 +424,7 @@ class TageTable
     ))
   ))
 
-  us.io.w.apply(io.update.uMask.reduce(_||_), update_u_wdata, update_u_idx, update_u_way_mask)
+  us.io.w.apply(io.update.mask.reduce(_||_) && io.update.uMask.reduce(_||_), update_u_wdata, update_u_idx, update_u_way_mask)
 
   // remove silent updates
   def silentUpdate(ctr: UInt, taken: Bool) = {
