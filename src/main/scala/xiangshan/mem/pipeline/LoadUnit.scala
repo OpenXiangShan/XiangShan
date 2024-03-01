@@ -66,6 +66,18 @@ class LoadToLsqReplayIO(implicit p: Parameters) extends XSBundle
   def raw_nack      = cause(LoadReplayCauses.C_RAW)
   def nuke          = cause(LoadReplayCauses.C_NK)
   def need_rep      = cause.asUInt.orR
+
+  // for human
+  cause(0).suggestName("cause_mem_amb")
+  cause(1).suggestName("cause_tlb_miss")
+  cause(2).suggestName("cause_fwd_fail")
+  cause(3).suggestName("cause_dcache_rep")
+  cause(4).suggestName("cause_dcache_miss")
+  cause(5).suggestName("cause_wpu_fail")
+  cause(6).suggestName("cause_bank_conflict")
+  cause(7).suggestName("cause_rar_nack")
+  cause(8).suggestName("cause_raw_nack")
+  cause(9).suggestName("cause_nuke")
 }
 
 
