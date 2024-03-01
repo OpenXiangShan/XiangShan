@@ -435,6 +435,8 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val is_cache = state.map(_ === state_cache)
   val is_hptw_req = state.map(_ === state_hptw_req)
   val is_last_hptw_req = state.map(_ === state_last_hptw_req)
+  val is_hptw_resp = state.map(_ === state_hptw_resp)
+  val is_last_hptw_resp = state.map(_ === state_last_hptw_resp)
 
   val full = !ParallelOR(is_emptys).asBool
   val enq_ptr = ParallelPriorityEncoder(is_emptys)
@@ -527,7 +529,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   when (mem_arb.io.out.fire) {
     for (i <- state.indices) {
-      when (state(i) =/= state_idle && !entries(i).s2xlate && dup(entries(i).req_info.vpn, mem_arb.io.out.bits.req_info.vpn)) {
+      when (state(i) =/= state_idle && entries(i).s2xlate === entries(mem_arb.io.chosen).s2xlate && Mux(entries(i).s2xlate, dup(entries(i).hptw_resp.entry.tag, entries(mem_arb.io.chosen).hptw_resp.entry.tag), dup(entries(i).req_info.vpn, mem_arb.io.out.bits.req_info.vpn))) {
         // NOTE: "dup enq set state to mem_wait" -> "sending req set other dup entries to mem_wait"
         state(i) := state_mem_waiting
         entries(i).wait_id := mem_arb.io.chosen
@@ -607,8 +609,8 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.hptw.req.bits.gvpn := Mux(hyper_arb1.io.out.valid, hptw_req_gvpn_1, hptw_req_gvpn_2)
   io.hptw.req.bits.id := Mux(hyper_arb1.io.out.valid, hyper_arb1.io.chosen, hyper_arb2.io.chosen)
   io.hptw.req.bits.source := Mux(hyper_arb1.io.out.valid, hyper_arb1.io.out.bits.req_info.source, hyper_arb2.io.out.bits.req_info.source)
-  hyper_arb1.io.out.ready := io.hptw.req.ready
-  hyper_arb2.io.out.ready := io.hptw.req.ready
+  hyper_arb1.io.out.ready := io.hptw.req.ready && !(Cat(is_hptw_resp).orR)
+  hyper_arb2.io.out.ready := io.hptw.req.ready && !(Cat(is_last_hptw_resp).orR)
 
   io.mem.req.valid := mem_arb.io.out.valid && !flush
   val mem_paddr = MakeAddr(mem_arb.io.out.bits.ppn, getVpnn(mem_arb.io.out.bits.req_info.vpn, 0))
