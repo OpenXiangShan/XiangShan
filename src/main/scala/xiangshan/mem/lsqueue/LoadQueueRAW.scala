@@ -308,8 +308,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     paddrModule.io.violationMdata(i) := io.storeIn(i).bits.paddr
     maskModule.io.violationMdata(i) := io.storeIn(i).bits.mask
 
-    val bypassPaddrMask = VecInit((0 until LoadPipelineWidth).map(j => RegEnable(bypassPAddr(j)(PAddrBits-1, DCacheVWordOffset) === io.storeIn(i).bits.paddr(PAddrBits-1, DCacheVWordOffset), io.storeIn(i).valid || needEnqueue(j))))
-    val bypassMMask = VecInit((0 until LoadPipelineWidth).map(j => RegEnable((bypassMask(j) & io.storeIn(i).bits.mask).orR, io.storeIn(i).valid || needEnqueue(j))))
+    val bypassPaddrMask = ((0 until LoadPipelineWidth).map(j => RegEnable(bypassPAddr(j)(PAddrBits-1, DCacheVWordOffset) === io.storeIn(i).bits.paddr(PAddrBits-1, DCacheVWordOffset), io.storeIn(i).valid || needEnqueue(j))))
+    val bypassMMask = ((0 until LoadPipelineWidth).map(j => RegEnable((bypassMask(j) & io.storeIn(i).bits.mask).orR, io.storeIn(i).valid || needEnqueue(j))))
     val bypassMaskUInt = (0 until LoadPipelineWidth).map(j =>
       Fill(LoadQueueRAWSize, RegNext(RegNext(io.query(j).req.fire))) & Mux(bypassPaddrMask(j) && bypassMMask(j), UIntToOH(RegNext(RegNext(enqIndexVec(j)))), 0.U(LoadQueueRAWSize.W))
     ).reduce(_|_)
