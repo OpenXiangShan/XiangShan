@@ -29,10 +29,10 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   // only memAddrIQ use it
   val memEtyResps: MixedVec[ValidIO[EntryDeqRespBundle]] = {
     if (params.isLdAddrIQ && !params.isStAddrIQ)                                                    //LDU
-      MixedVecInit(io.og0Resp ++ io.og1Resp ++ io.finalIssueResp.get ++ io.memAddrIssueResp.get)
+      MixedVecInit(io.og0Resp ++ io.og1Resp ++ io.fromLoad.get.finalIssueResp ++ io.fromLoad.get.memAddrIssueResp)
     else if (params.isLdAddrIQ && params.isStAddrIQ || params.isHyAddrIQ)                           //HYU
-      MixedVecInit(io.og0Resp ++ io.og1Resp ++ io.finalIssueResp.get ++ io.memAddrIssueResp.get ++ io.fromMem.get.fastResp ++ io.fromMem.get.slowResp)
-    else if (params.isMemAddrIQ)                                                                    //STU
+      MixedVecInit(io.og0Resp ++ io.og1Resp ++ io.fromLoad.get.finalIssueResp ++ io.fromLoad.get.memAddrIssueResp ++ io.fromMem.get.fastResp ++ io.fromMem.get.slowResp)
+    else if (params.isMemAddrIQ)                                                                    //STU, VLDU, VSTU
       MixedVecInit(io.og0Resp ++ io.og1Resp ++ io.fromMem.get.slowResp)
     else MixedVecInit(Seq())
   }
@@ -392,10 +392,6 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     in.deqSel                   := deqSelVec(entryIdx)
     in.deqPortIdxWrite          := deqPortIdxWriteVec(entryIdx)
     in.issueResp                := issueRespVec(entryIdx)
-    if (params.isMemAddrIQ) {
-      in.fromMem.get.stIssuePtr := io.fromMem.get.stIssuePtr
-      in.fromMem.get.memWaitUpdateReq := io.fromMem.get.memWaitUpdateReq
-    }
     if (params.isVecMemIQ) {
       in.fromLsq.get.sqDeqPtr   := io.vecMemIn.get.sqDeqPtr
       in.fromLsq.get.lqDeqPtr   := io.vecMemIn.get.lqDeqPtr
@@ -459,8 +455,6 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val enq                 = Vec(params.numEnq, Flipped(ValidIO(new EntryBundle)))
   val og0Resp             = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
   val og1Resp             = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
-  val finalIssueResp      = OptionWrapper(params.LdExuCnt > 0, Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle))))
-  val memAddrIssueResp    = OptionWrapper(params.LdExuCnt > 0, Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle))))
   //deq sel
   val deqReady            = Vec(params.numDeq, Input(Bool()))
   val deqSelOH            = Vec(params.numDeq, Flipped(ValidIO(UInt(params.numEntries.W))))
@@ -488,17 +482,21 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val isFirstIssue        = Vec(params.numDeq, Output(Bool()))
   val deqEntry            = Vec(params.numDeq, ValidIO(new EntryBundle))
   val cancelDeqVec        = Vec(params.numDeq, Output(Bool()))
+
+  // load/hybird only
+  val fromLoad = OptionWrapper(params.isLdAddrIQ || params.isHyAddrIQ, new Bundle {
+    val finalIssueResp    = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
+    val memAddrIssueResp  = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
+  })
   // mem only
-  val fromMem = if (params.isMemAddrIQ) Some(new Bundle {
-    val stIssuePtr        = Input(new SqPtr)
-    val memWaitUpdateReq  = Flipped(new MemWaitUpdateReq)
+  val fromMem = OptionWrapper(params.isMemAddrIQ, new Bundle {
     val slowResp          = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
     val fastResp          = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
-  }) else None
+  })
   // vec mem only
   val vecMemIn = OptionWrapper(params.isVecMemIQ, new Bundle {
-    val sqDeqPtr = Input(new SqPtr)
-    val lqDeqPtr = Input(new LqPtr)
+    val sqDeqPtr          = Input(new SqPtr)
+    val lqDeqPtr          = Input(new LqPtr)
   })
   val robIdx = OptionWrapper(params.isVecMemIQ, Output(Vec(params.numEntries, new RobPtr)))
   val uopIdx = OptionWrapper(params.isVecMemIQ, Output(Vec(params.numEntries, UopIdx())))

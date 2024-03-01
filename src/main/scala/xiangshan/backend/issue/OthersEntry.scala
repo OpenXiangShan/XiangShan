@@ -62,24 +62,12 @@ class OthersEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockPar
   CommonOutConnect(io.commonOut, common, hasWakeupIQ, validReg, entryUpdate, entryReg, entryReg.status, io.commonIn, false, isComp)
 }
 
-class OthersEntryMem(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams) extends OthersEntry(isComp)
-  with HasCircularQueuePtrHelper {
-  EntryMemConnect(io.commonIn, common, validReg, entryReg, entryRegNext, entryUpdate, false)
-}
-
-class OthersEntryVecMemAddr(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams) extends OthersEntryMem(isComp) {
-
-  require(params.isVecMemAddrIQ, "OthersEntryVecMemAddr can only be instance of VecMemAddr IQ")
-
-  EntryVecMemConnect(io.commonIn, common, validReg, entryReg, entryRegNext, entryUpdate, false, true)
-}
-
-class OthersEntryVecMemData(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams) extends OthersEntry(isComp)
+class OthersEntryVecMem(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams) extends OthersEntry(isComp)
   with HasCircularQueuePtrHelper {
 
-  require(params.isVecStDataIQ, "OthersEntryVecMemData can only be instance of VecMemData IQ")
+  require(params.isVecMemIQ, "OthersEntryVecMem can only be instance of VecMem IQ")
 
-  EntryVecMemConnect(io.commonIn, common, validReg, entryReg, entryRegNext, entryUpdate, false, false)
+  EntryVecMemConnect(io.commonIn, common, validReg, entryReg, entryRegNext, entryUpdate)
 }
 
 object OthersEntry {
@@ -87,9 +75,7 @@ object OthersEntry {
     iqParams.schdType match {
       case IntScheduler() => new OthersEntry(isComp)
       case MemScheduler() =>
-        if (iqParams.isLdAddrIQ || iqParams.isStAddrIQ || iqParams.isHyAddrIQ) new OthersEntryMem(isComp)
-        else if (iqParams.isVecMemAddrIQ) new OthersEntryVecMemAddr(isComp)
-        else if (iqParams.isVecStDataIQ) new OthersEntryVecMemData(isComp)
+        if (iqParams.isVecMemIQ) new OthersEntryVecMem(isComp)
         else new OthersEntry(isComp)
       case VfScheduler() => new OthersEntry(isComp)
       case _ => null

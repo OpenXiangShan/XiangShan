@@ -33,7 +33,7 @@ class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyMod
    *
    * Also note that we filter out the 'stData issue-queues' when counting
    */
-  for ((ibp, idx) <- params.memSchdParams.get.issueBlockParams.filter(iq => iq.StdCnt == 0 && iq.VstdCnt == 0).zipWithIndex) {
+  for ((ibp, idx) <- params.memSchdParams.get.issueBlockParams.filter(iq => iq.StdCnt == 0).zipWithIndex) {
     ibp.updateIdx(idx)
   }
 

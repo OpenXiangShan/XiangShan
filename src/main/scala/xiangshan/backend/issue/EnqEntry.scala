@@ -154,24 +154,12 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
   CommonOutConnect(io.commonOut, common, hasWakeupIQ, validReg, entryUpdate, entryReg, currentStatus, io.commonIn, true, isComp)
 }
 
-class EnqEntryMem(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams) extends EnqEntry(isComp)
-  with HasCircularQueuePtrHelper {
-  EntryMemConnect(io.commonIn, common, validReg, entryReg, entryRegNext, entryUpdate, true)
-}
-
-class EnqEntryVecMemAddr(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams) extends EnqEntryMem(isComp) {
-
-  require(params.isVecMemAddrIQ, "EnqEntryVecMemAddr can only be instance of VecMemAddr IQ")
-
-  EntryVecMemConnect(io.commonIn, common, validReg, entryReg, entryRegNext, entryUpdate, true, true)
-}
-
-class EnqEntryVecMemData(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams) extends EnqEntry(isComp)
+class EnqEntryVecMem(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams) extends EnqEntry(isComp)
   with HasCircularQueuePtrHelper {
 
-  require(params.isVecStDataIQ, "EnqEntryVecMemData can only be instance of VecMemData IQ")
+  require(params.isVecMemIQ, "EnqEntryVecMem can only be instance of VecMem IQ")
 
-  EntryVecMemConnect(io.commonIn, common, validReg, entryReg, entryRegNext, entryUpdate, true, false)
+  EntryVecMemConnect(io.commonIn, common, validReg, entryReg, entryRegNext, entryUpdate)
 }
 
 object EnqEntry {
@@ -179,9 +167,7 @@ object EnqEntry {
     iqParams.schdType match {
       case IntScheduler() => new EnqEntry(isComp)
       case MemScheduler() =>
-        if (iqParams.isLdAddrIQ || iqParams.isStAddrIQ || iqParams.isHyAddrIQ) new EnqEntryMem(isComp)
-        else if (iqParams.isVecMemAddrIQ) new EnqEntryVecMemAddr(isComp)
-        else if (iqParams.isVecStDataIQ) new EnqEntryVecMemData(isComp)
+        if (iqParams.isVecMemIQ) new EnqEntryVecMem(isComp)
         else new EnqEntry(isComp)
       case VfScheduler() => new EnqEntry(isComp)
       case _ => null
