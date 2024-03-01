@@ -104,12 +104,11 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
   //  LoadQueueRAW enqueue
   val canEnqueue = io.query.map(_.req.valid)
-  val cancelEnqueue = io.query.map(_.req.bits.uop.robIdx.needFlush(io.redirect))
   val allAddrCheck = io.stIssuePtr === io.stAddrReadySqPtr
   val hasAddrInvalidStore = io.query.map(_.req.bits.uop.sqIdx).map(sqIdx => {
     Mux(!allAddrCheck, isBefore(io.stAddrReadySqPtr, sqIdx), false.B)
   })
-  val needEnqueue = canEnqueue.zip(hasAddrInvalidStore).zip(cancelEnqueue).map { case ((v, r), c) => v && r && !c }
+  val needEnqueue = canEnqueue.zip(hasAddrInvalidStore).map { case (v, r) => v && r }
   val bypassPAddr = Reg(Vec(LoadPipelineWidth, UInt(PAddrBits.W)))
   val bypassMask = Reg(Vec(LoadPipelineWidth, UInt((VLEN/8).W)))
 
@@ -177,7 +176,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   // current load will be released.
   for (i <- 0 until LoadQueueRAWSize) {
     val deqNotBlock = Mux(!allAddrCheck, !isBefore(io.stAddrReadySqPtr, uop(i).sqIdx), true.B)
-    val needCancel = uop(i).robIdx.needFlush(io.redirect)
+    val needCancel = uop(i).robIdx.needFlush(io.redirect) ||
+                     uop(i).robIdx.needFlush(RegNext(io.redirect))
 
     when (allocated(i) && (deqNotBlock || needCancel)) {
       allocated(i) := false.B
