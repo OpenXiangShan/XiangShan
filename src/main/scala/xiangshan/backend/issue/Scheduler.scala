@@ -306,9 +306,9 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
     s"has vfBusyTable: ${vfBusyTable.nonEmpty}")
 
   val memAddrIQs = issueQueues.filter(_.params.isMemAddrIQ)
-  val stAddrIQs = issueQueues.filter(iq => iq.params.StaCnt > 0 || iq.params.VstaCnt > 0) // included in memAddrIQs
-  val ldAddrIQs = issueQueues.filter(iq => iq.params.LduCnt > 0 || iq.params.VlduCnt > 0)
-  val stDataIQs = issueQueues.filter(iq => iq.params.StdCnt > 0 || iq.params.VstdCnt > 0)
+  val stAddrIQs = issueQueues.filter(iq => iq.params.StaCnt > 0) // included in memAddrIQs
+  val ldAddrIQs = issueQueues.filter(iq => iq.params.LduCnt > 0)
+  val stDataIQs = issueQueues.filter(iq => iq.params.StdCnt > 0)
   val vecMemIQs = issueQueues.filter(_.params.isVecMemIQ)
   val (hyuIQs, hyuIQIdxs) = issueQueues.zipWithIndex.filter(_._1.params.HyuCnt > 0).unzip
 
