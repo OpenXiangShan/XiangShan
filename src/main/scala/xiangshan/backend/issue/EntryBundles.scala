@@ -378,8 +378,6 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val origExuOH = 0.U.asTypeOf(exuOH)
     when(wakeupByIQOH.asUInt.orR) {
       origExuOH := Mux1H(wakeupByIQOH, params.wakeUpSourceExuIdx.map(x => MathUtils.IntToOH(x).U(p(XSCoreParamsKey).backendParams.numExu.W)).toSeq).asBools
-    }.elsewhen(wakeup) {
-      origExuOH := 0.U.asTypeOf(origExuOH)
     }.otherwise {
       origExuOH := regSrcExuOH
     }
