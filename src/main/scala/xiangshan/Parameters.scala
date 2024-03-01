@@ -373,7 +373,7 @@ case class XSCoreParameters
         ExeUnitParams("STA0", Seq(StaCfg), Seq(), Seq(Seq(IntRD(3, 1)))),
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
-        ExeUnitParams("HYU0", Seq(HyldaCfg, HystaCfg, MouCfg), Seq(IntWB(5, 0), VfWB(5, 0)), Seq(Seq(IntRD(6, 0)))),
+        ExeUnitParams("HYU0", Seq(HyldaCfg, HystaCfg, MouCfg), Seq(IntWB(5, 0), VfWB(5, 0)), Seq(Seq(IntRD(14, 0)))),
         ExeUnitParams("HYU1", Seq(FakeHystaCfg), Seq(), Seq()), // fake unit, used to create a new writeback port
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
