@@ -853,13 +853,15 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   //  2. Load instruction is younger than requestors(store instructions).
   //  3. Physical address match.
   //  4. Data contains.
-  val s2_nuke          = VecInit((0 until StorePipelineWidth).map(w => {
-                          io.stld_nuke_query(w).valid && // query valid
-                          isAfter(s2_in.uop.robIdx, io.stld_nuke_query(w).bits.robIdx) && // older store
-                          // TODO: Fix me when vector instruction
-                          (s2_in.paddr(PAddrBits-1, 3) === io.stld_nuke_query(w).bits.paddr(PAddrBits-1, 3)) && // paddr match
-                          (s2_in.mask & io.stld_nuke_query(w).bits.mask).orR // data mask contain
-                        })).asUInt.orR && !s2_tlb_miss || s2_in.rep_info.nuke
+  val s2_bad_nukes    = VecInit((0 until StorePipelineWidth).map(w => {
+                          io.stld_nuke_query(w).req.valid && // query valid
+                          isAfter(s2_in.uop.robIdx, io.stld_nuke_query(w).req.bits.robIdx) && // older store
+                           // TODO: Fix me when vector instruction
+                          (s2_in.paddr(PAddrBits-1, 3) === io.stld_nuke_query(w).req.bits.paddr(PAddrBits-1, 3)) && // paddr match
+                          (s2_in.mask & io.stld_nuke_query(w).req.bits.mask).orR && // data mask contain
+                          !s2_tlb_miss
+                        }))
+  val s2_nuke          = s2_bad_nukes.asUInt.orR || s2_in.rep_info.nuke
 
   val s2_cache_handled   = io.dcache.resp.bits.handled
   val s2_cache_tag_error = RegNext(io.csrCtrl.cache_error_enable) &&
@@ -1072,7 +1074,17 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_rep_info = WireInit(s3_in.rep_info)
   val s3_sel_rep_cause = PriorityEncoderOH(s3_rep_info.cause.asUInt)
 
-  val s3_bad_nuke_detected = WireInit(false.B)
+  // s3 nuke check
+  val s3_bad_nukes = Wire(Vec(StorePipelineWidth, Bool()))
+  val s3_bad_nuke_detected = s3_bad_nukes.asUInt.orR // || RegNext(s2_bad_nukes.asUInt.orR)
+  (0 until StorePipelineWidth).map(w => {
+    s3_bad_nukes(w) := (io.stld_nuke_query(w).req.valid && // query valid
+                          isAfter(s3_in.uop.robIdx, io.stld_nuke_query(w).req.bits.robIdx) && // older store
+                          // TODO: Fix me when vector instruction
+                          (s3_in.paddr(PAddrBits-1, 3) === io.stld_nuke_query(w).req.bits.paddr(PAddrBits-1, 3)) && // paddr match
+                          (s3_in.mask & io.stld_nuke_query(w).req.bits.mask).orR // data mask contain
+                        ) && !s3_in.tlbMiss
+  })
 
   val s3_exception = RegNext(ExceptionNO.selectByFu(s2_out.uop.cf.exceptionVec, lduCfg).asUInt.orR)
   when (s3_exception || s3_dly_ld_err || s3_rep_frm_fetch || s3_bad_nuke_detected) {
@@ -1099,13 +1111,14 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_out.bits.debug.vaddr     := s3_in.vaddr
   s3_out.bits.fflags          := DontCare
 
-  io.rollback.valid := s3_valid && (s3_rep_frm_fetch || s3_flushPipe) && !s3_exception
+  io.rollback.valid := s3_valid && (s3_rep_frm_fetch || s3_flushPipe || s3_bad_nuke_detected) && !s3_exception
   io.rollback.bits             := DontCare
   io.rollback.bits.isRVC       := s3_out.bits.uop.cf.pd.isRVC
   io.rollback.bits.robIdx      := s3_out.bits.uop.robIdx
   io.rollback.bits.ftqIdx      := s3_out.bits.uop.cf.ftqPtr
   io.rollback.bits.ftqOffset   := s3_out.bits.uop.cf.ftqOffset
-  io.rollback.bits.level       := Mux(s3_rep_frm_fetch, RedirectLevel.flush, RedirectLevel.flushAfter)
+  io.rollback.bits.level       := Mux(s3_rep_frm_fetch, RedirectLevel.flush,
+                                    Mux(s3_flushPipe, RedirectLevel.flushAfter, RedirectLevel.flush))
   io.rollback.bits.cfiUpdate.target := s3_out.bits.uop.cf.pc
   io.rollback.bits.debug_runahead_checkpoint_id := s3_out.bits.uop.debugInfo.runahead_checkpoint_id
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
