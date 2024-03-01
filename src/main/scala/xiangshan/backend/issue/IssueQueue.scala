@@ -260,7 +260,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         val luiImm = Cat(s0_enqBits(enqIdx).lsrc(1), s0_enqBits(enqIdx).lsrc(0), s0_enqBits(enqIdx).imm(ImmUnion.maxLen - 1, 0))
         enq.bits.imm.foreach(_ := Mux(isLuiAddiFusion, ImmUnion.LUI32.toImm32(luiImm), s0_enqBits(enqIdx).imm))
       }
-      else if (params.inMemSchd && params.LduCnt > 0) {
+      else if (params.isLdAddrIQ || params.isHyAddrIQ) {
         // dirty code for fused_lui_load
         val isLuiLoadFusion = SrcType.isNotReg(s0_enqBits(enqIdx).srcType(0)) && FuType.isLoad(s0_enqBits(enqIdx).fuType)
         enq.bits.imm.foreach(_ := Mux(isLuiLoadFusion, Imm_LUI_LOAD().getLuiImm(s0_enqBits(enqIdx)), s0_enqBits(enqIdx).imm))

@@ -112,7 +112,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
           readZero       -> 0.U,
           readAnotherReg -> fromDPs(exuIdx).bits.src(0),
           readRegOH      -> fromDPs(exuIdx).bits.src(srcIdx),
-          readImm        -> (if (exuInput.bits.params.hasLoadFu && srcIdx == 0) immLoadSrc0 else imm)
+          readImm        -> (if (exuInput.bits.params.hasLoadExu && srcIdx == 0) immLoadSrc0 else imm)
         )
       )
     }
