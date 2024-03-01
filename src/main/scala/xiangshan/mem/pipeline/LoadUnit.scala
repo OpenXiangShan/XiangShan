@@ -854,11 +854,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   //  3. Physical address match.
   //  4. Data contains.
   val s2_bad_nukes    = VecInit((0 until StorePipelineWidth).map(w => {
-                          io.stld_nuke_query(w).req.valid && // query valid
-                          isAfter(s2_in.uop.robIdx, io.stld_nuke_query(w).req.bits.robIdx) && // older store
+                          io.stld_nuke_query(w).valid && // query valid
+                          isAfter(s2_in.uop.robIdx, io.stld_nuke_query(w).bits.robIdx) && // older store
                            // TODO: Fix me when vector instruction
-                          (s2_in.paddr(PAddrBits-1, 3) === io.stld_nuke_query(w).req.bits.paddr(PAddrBits-1, 3)) && // paddr match
-                          (s2_in.mask & io.stld_nuke_query(w).req.bits.mask).orR && // data mask contain
+                          (s2_in.paddr(PAddrBits-1, 3) === io.stld_nuke_query(w).bits.paddr(PAddrBits-1, 3)) && // paddr match
+                          (s2_in.mask & io.stld_nuke_query(w).bits.mask).orR && // data mask contain
                           !s2_tlb_miss
                         }))
   val s2_nuke          = s2_bad_nukes.asUInt.orR || s2_in.rep_info.nuke
@@ -1078,11 +1078,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_bad_nukes = Wire(Vec(StorePipelineWidth, Bool()))
   val s3_bad_nuke_detected = s3_bad_nukes.asUInt.orR // || RegNext(s2_bad_nukes.asUInt.orR)
   (0 until StorePipelineWidth).map(w => {
-    s3_bad_nukes(w) := (io.stld_nuke_query(w).req.valid && // query valid
-                          isAfter(s3_in.uop.robIdx, io.stld_nuke_query(w).req.bits.robIdx) && // older store
+    s3_bad_nukes(w) := (io.stld_nuke_query(w).valid && // query valid
+                          isAfter(s3_in.uop.robIdx, io.stld_nuke_query(w).bits.robIdx) && // older store
                           // TODO: Fix me when vector instruction
-                          (s3_in.paddr(PAddrBits-1, 3) === io.stld_nuke_query(w).req.bits.paddr(PAddrBits-1, 3)) && // paddr match
-                          (s3_in.mask & io.stld_nuke_query(w).req.bits.mask).orR // data mask contain
+                          (s3_in.paddr(PAddrBits-1, 3) === io.stld_nuke_query(w).bits.paddr(PAddrBits-1, 3)) && // paddr match
+                          (s3_in.mask & io.stld_nuke_query(w).bits.mask).orR // data mask contain
                         ) && !s3_in.tlbMiss
   })
 
