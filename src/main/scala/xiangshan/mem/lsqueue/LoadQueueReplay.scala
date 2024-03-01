@@ -67,18 +67,6 @@ object LoadReplayCauses {
   val C_NK  = 9
   // total causes
   val allCauses = 10
-
-  // for human
-  cause(0).suggestName("cause_mem_amb")
-  cause(1).suggestName("cause_tlb_miss")
-  cause(2).suggestName("cause_fwd_fail")
-  cause(3).suggestName("cause_dcache_rep")
-  cause(4).suggestName("cause_dcache_miss")
-  cause(5).suggestName("cause_wpu_fail")
-  cause(6).suggestName("cause_bank_conflict")
-  cause(7).suggestName("cause_rar_nack")
-  cause(8).suggestName("cause_raw_nack")
-  cause(9).suggestName("cause_nuke")
 }
 
 class AgeDetector(numEntries: Int, numEnq: Int, regOut: Boolean = true)(implicit p: Parameters) extends XSModule {
