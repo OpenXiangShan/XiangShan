@@ -262,7 +262,7 @@ case class IssueBlockParams(
   def deqImmTypes: Seq[UInt] = getFuCfgs.flatMap(_.immType).distinct
 
   // set load imm to 32-bit for fused_lui_load
-  def deqImmTypesMaxLen: Int = if (isLdAddrIQ) 32 else deqImmTypes.map(SelImm.getImmUnion(_)).maxBy(_.len).len
+  def deqImmTypesMaxLen: Int = if (isLdAddrIQ || isHyAddrIQ) 32 else deqImmTypes.map(SelImm.getImmUnion(_)).maxBy(_.len).len
 
   def needImm: Boolean = deqImmTypes.nonEmpty
 
