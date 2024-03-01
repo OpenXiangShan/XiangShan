@@ -212,10 +212,10 @@ class ITTageTable
   val s0_bank_req_1h = get_bank_mask(s0_idx)
   val s1_bank_req_1h = RegEnable(s0_bank_req_1h, io.req.fire)
 
-  val us = Module(new Folded1WDataModuleTemplate(Bool(), nRows, 1, isSync=true, width=uFoldedWidth))
-  // val table  = Module(new SRAMTemplate(new ITTageEntry, set=nRows, way=1, shouldReset=true, holdRead=true, singlePort=false))
-  val table_banks = Seq.fill(nBanks)(
-    Module(new FoldedSRAMTemplate(new ITTageEntry, set=nRows/nBanks, width=bankFoldWidth, shouldReset=true, holdRead=true, singlePort=true)))
+  val us = Module(new Folded1WDataModuleTemplate(
+    Bool(), nRows, 1, isSync=true, width=uFoldedWidth, hasRen=true))
+  val table_banks = Seq.fill(nBanks)(Module(new FoldedSRAMTemplate(
+    new ITTageEntry, set=nRows/nBanks, width=bankFoldWidth, shouldReset=true, holdRead=true, singlePort=true)))
 
   for (b <- 0 until nBanks) {
     table_banks(b).io.r.req.valid := io.req.fire && s0_bank_req_1h(b)
@@ -223,6 +223,7 @@ class ITTageTable
   }
 
   us.io.raddr(0) := s0_idx
+  us.io.ren.get(0) := io.req.valid
 
   val table_banks_r = table_banks.map(_.io.r.resp.data(0))
 
@@ -501,7 +502,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   // and also uses a longer history than the provider
   val s2_allocatableSlots = VecInit(s2_resps.map(r => !r.valid && !r.bits.u)).asUInt &
     ~(LowerMask(UIntToOH(s2_provider), ITTageNTables) & Fill(ITTageNTables, s2_provided.asUInt))
-  val s2_allocLFSR   = LFSR64()(ITTageNTables - 1, 0)
+  val s2_allocLFSR   = LFSR64(io.s1_fire(3))(ITTageNTables - 1, 0)
   val s2_firstEntry  = PriorityEncoder(s2_allocatableSlots)
   val s2_maskedEntry = PriorityEncoder(s2_allocatableSlots & s2_allocLFSR)
   val s2_allocEntry  = Mux(s2_allocatableSlots(s2_maskedEntry), s2_maskedEntry, s2_firstEntry)
@@ -570,18 +571,18 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
   for (i <- 0 until ITTageNTables) {
     tables(i).io.update.valid := RegNext(updateMask(i))
-    tables(i).io.update.correct := RegNext(updateCorrect(i))
-    tables(i).io.update.target := RegNext(updateTarget(i))
-    tables(i).io.update.old_target := RegNext(updateOldTarget(i))
-    tables(i).io.update.alloc := RegNext(updateAlloc(i))
-    tables(i).io.update.oldCtr := RegNext(updateOldCtr(i))
+    tables(i).io.update.correct := RegEnable(updateCorrect(i), updateMask(i))
+    tables(i).io.update.target := RegEnable(updateTarget(i), updateMask(i))
+    tables(i).io.update.old_target := RegEnable(updateOldTarget(i), updateMask(i))
+    tables(i).io.update.alloc := RegEnable(updateAlloc(i), updateMask(i))
+    tables(i).io.update.oldCtr := RegEnable(updateOldCtr(i), updateMask(i))
 
-    tables(i).io.update.reset_u := RegNext(updateResetU)
-    tables(i).io.update.uValid := RegNext(updateUMask(i))
-    tables(i).io.update.u := RegNext(updateU(i))
-    tables(i).io.update.pc := RegNext(update.pc)
+    tables(i).io.update.reset_u := RegEnable(updateResetU, updateMask(i))
+    tables(i).io.update.uValid := RegEnable(updateUMask(i), updateMask(i))
+    tables(i).io.update.u := RegEnable(updateU(i), updateMask(i))
+    tables(i).io.update.pc := RegEnable(update.pc, updateMask(i))
     // use fetch pc instead of instruction pc
-    tables(i).io.update.folded_hist := RegNext(updateFhist)
+    tables(i).io.update.folded_hist := RegEnable(updateFhist, updateMask(i))
   }
 
   // all should be ready for req
