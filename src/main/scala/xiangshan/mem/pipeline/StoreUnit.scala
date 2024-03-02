@@ -44,6 +44,9 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
     val prefetch_req    = Flipped(DecoupledIO(new StorePrefetchReq))
     // provide prefetch info to sms
     val prefetch_train  = ValidIO(new StPrefetchTrainBundle())
+    // speculative for gated control
+    val s0_prefetch_spec = Output(Bool())
+    val s1_prefetch_spec = Output(Bool())
     val stld_nuke_query = Valid(new StoreNukeQueryIO)
     val stout           = DecoupledIO(new ExuOutput) // writeback store
     // store mask, send to sq in store_s0
@@ -279,9 +282,13 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   val prefetch_train_valid = WireInit(false.B)
   prefetch_train_valid := s2_valid && io.dcache.resp.fire && !s2_out.mmio && !s2_in.tlbMiss && !s2_in.isHWPrefetch
   if (EnableStorePrefetchSMS) {
+    io.s0_prefetch_spec := s0_fire
+    io.s1_prefetch_spec := s1_fire
     io.prefetch_train.valid := GatedValidRegNext(prefetch_train_valid)
     io.prefetch_train.bits.fromLsPipelineBundle(s2_in, latch = true, enable = prefetch_train_valid)
   } else {
+    io.s0_prefetch_spec := false.B
+    io.s1_prefetch_spec := false.B
     io.prefetch_train.valid := false.B
     io.prefetch_train.bits.fromLsPipelineBundle(s2_in, latch = true, enable = false.B)
   }

@@ -202,7 +202,7 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
   }
   val allocNum = PopCount(canAlloc)
 
-  enqPtrExt.foreach{case x => x := x + allocNum}
+  enqPtrExt.foreach{case x => when(canAlloc.asUInt.orR) {x := x + allocNum} }
 
   // deq
   io.train_req.valid := false.B
@@ -254,15 +254,17 @@ class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1Pref
   val is_vaddr = Bool()
   val source = new L1PrefetchSource()
 
-  def reset(index: Int) = {
-    tag := region_hash_tag(index.U)
-    region := index.U
-    bit_vec := 0.U
-    sent_vec := 0.U
-    sink := SINK_L1
-    alias := 0.U
-    is_vaddr := false.B
-    source.value := L1_HW_PREFETCH_NULL
+  def reset(valid: Bool, index: Int) = {
+    when(valid){
+      tag := region_hash_tag(index.U)
+      region := index.U
+      bit_vec := 0.U
+      sent_vec := 0.U
+      sink := SINK_L1
+      alias := 0.U
+      is_vaddr := false.B
+      source.value := L1_HW_PREFETCH_NULL
+    }
   }
 
   def tag_match(new_tag: UInt): Bool = {
@@ -270,11 +272,13 @@ class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1Pref
     tag === new_tag
   }
 
-  def update(update_bit_vec: UInt, update_sink: UInt) = {
-    bit_vec := bit_vec | update_bit_vec
-    when(update_sink < sink) {
-      bit_vec := (bit_vec & ~sent_vec) | update_bit_vec
-      sink := update_sink
+  def update(valid: Bool, update_bit_vec: UInt, update_sink: UInt) = {
+    when(valid){
+      bit_vec := bit_vec | update_bit_vec
+      when(update_sink < sink) {
+        bit_vec := (bit_vec & ~sent_vec) | update_bit_vec
+        sink := update_sink
+      }
     }
 
     assert(PopCount(update_bit_vec) >= 1.U, "valid bits in update vector should greater than one")
@@ -321,15 +325,17 @@ class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1Pref
     res
   }
 
-  def invalidate() = {
-    // disable sending pf req
-    when(sink === SINK_L1) {
-      bit_vec := 0.U(BIT_VEC_WITDH.W)
-    }.otherwise {
-      sent_vec := ~(0.U(BIT_VEC_WITDH.W))
+  def invalidate(valid: Bool) = {
+    when(valid){
+      // disable sending pf req
+      when(sink === SINK_L1) {
+        bit_vec := 0.U(BIT_VEC_WITDH.W)
+      }.otherwise {
+        sent_vec := ~(0.U(BIT_VEC_WITDH.W))
+      }
+      // disable sending tlb req
+      is_vaddr := false.B
     }
-    // disable sending tlb req
-    is_vaddr := false.B
   }
 }
 
@@ -396,6 +402,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     array(s1_index) := s1_prefetch_req
   }.elsewhen(s1_update) {
     array(s1_index).update(
+      s1_update,
       update_bit_vec = s1_prefetch_req.bit_vec,
       update_sink = s1_prefetch_req.sink
     )
@@ -451,9 +458,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
 
     when(!s2_tlb_resp.bits.miss) {
       array(s2_tlb_update_index).region := Cat(0.U((VAddrBits - PAddrBits).W), s2_tlb_resp.bits.paddr.head(s2_tlb_resp.bits.paddr.head.getWidth - 1, REGION_TAG_OFFSET))
-      when(s2_tlb_resp.bits.excp.head.pf.ld || s2_tlb_resp.bits.excp.head.af.ld) {
-        array(s2_tlb_update_index).invalidate()
-      }
+      array(s2_tlb_update_index).invalidate(s2_tlb_resp.bits.excp.head.pf.ld || s2_tlb_resp.bits.excp.head.af.ld)
     }
   }
   s2_tlb_resp.ready := true.B
@@ -468,7 +473,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   // l1 pf
   // s0: generate prefetch req paddr per entry, arb them
   val s0_pf_fire_vec = VecInit((0 until MLP_SIZE).map{case i => l1_pf_req_arb.io.in(i).fire})
-  val s1_pf_fire_vec = s0_pf_fire_vec.map(i => GatedValidRegNext(i))
+  val s1_pf_fire_vec = VecInit(s0_pf_fire_vec.map(i => RegNext(i)))
 
   val s0_pf_fire = l1_pf_req_arb.io.out.fire
   val s0_pf_index = l1_pf_req_arb.io.chosen
@@ -565,9 +570,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
 
   // reset meta to avoid muti-hit problem
   for(i <- 0 until MLP_SIZE) {
-    when(reset.asBool || GatedValidRegNext(io.flush)) {
-      array(i).reset(i)
-    }
+    array(i).reset(reset.asBool || GatedValidRegNext(io.flush), i)
   }
 
   XSPerfAccumulate("l2_prefetche_queue_busby", io.l2PfqBusy)

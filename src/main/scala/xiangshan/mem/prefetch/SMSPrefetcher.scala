@@ -1051,7 +1051,7 @@ class SMSTrainFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   }
   val allocNum = PopCount(canAlloc)
 
-  enqPtrExt.foreach{case x => x := x + allocNum}
+  enqPtrExt.foreach{case x => when(canAlloc.asUInt.orR) {x := x + allocNum} }
 
   io.train_req.valid := false.B
   io.train_req.bits := DontCare
