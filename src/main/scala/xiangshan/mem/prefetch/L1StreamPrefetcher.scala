@@ -91,18 +91,18 @@ class StreamBitVectorBundle(implicit p: Parameters) extends XSBundle with HasStr
   }
 
   def update(update_bit_vec: UInt, update_active: Bool) = {
-    // if the slot is 0 before, increment cnt
-    val cnt_en = !((bit_vec & update_bit_vec).orR)
-    val cnt_next = Mux(cnt_en, cnt + 1.U, cnt)
+      // if the slot is 0 before, increment cnt
+      val cnt_en = !((bit_vec & update_bit_vec).orR)
+      val cnt_next = Mux(cnt_en, cnt + 1.U, cnt)
 
-    bit_vec := bit_vec | update_bit_vec
-    cnt := cnt_next
-    when(cnt_next >= ACTIVE_THRESHOLD.U) {
-      active := true.B
-    }
-    when(update_active) {
-      active := true.B
-    }
+      bit_vec := bit_vec | update_bit_vec
+      cnt := cnt_next
+      when(cnt_next >= ACTIVE_THRESHOLD.U) {
+        active := true.B
+      }
+      when(update_active) {
+        active := true.B
+      }
 
     assert(PopCount(update_bit_vec) === 1.U, "update vector should be one hot")
     assert(cnt <= BIT_VEC_WITDH.U, "cnt should always less than bit vector size")

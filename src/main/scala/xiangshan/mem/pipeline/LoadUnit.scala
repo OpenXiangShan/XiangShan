@@ -140,6 +140,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // prefetch
     val prefetch_train            = ValidIO(new LdPrefetchTrainBundle()) // provide prefetch info to sms
     val prefetch_train_l1         = ValidIO(new LdPrefetchTrainBundle()) // provide prefetch info to stream & stride
+    // speculative for gated control
+    val s0_prefetch_spec = Output(Bool())
+    val s1_prefetch_spec = Output(Bool())
+
     val prefetch_req              = Flipped(ValidIO(new L1PrefetchReq)) // hardware prefetch to l1 cache req
     val canAcceptLowConfPrefetch  = Output(Bool())
     val canAcceptHighConfPrefetch = Output(Bool())
@@ -1151,11 +1155,15 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // RegNext prefetch train for better timing
   // ** Now, prefetch train is valid at load s3 **
-  io.prefetch_train.valid              := RegNext(s2_valid && !s2_actually_mmio && !s2_in.tlbMiss)
+  val s2_prefetch_train_valid = WireInit(false.B)
+  s2_prefetch_train_valid              := s2_valid && !s2_actually_mmio && !s2_in.tlbMiss
+  io.prefetch_train.valid              := GatedValidRegNext(s2_prefetch_train_valid)
   io.prefetch_train.bits.fromLsPipelineBundle(s2_in, latch = true)
-  io.prefetch_train.bits.miss          := RegNext(io.dcache.resp.bits.miss) // TODO: use trace with bank conflict?
-  io.prefetch_train.bits.meta_prefetch := RegNext(io.dcache.resp.bits.meta_prefetch)
-  io.prefetch_train.bits.meta_access   := RegNext(io.dcache.resp.bits.meta_access)
+  io.prefetch_train.bits.miss          := RegEnable(io.dcache.resp.bits.miss, s2_prefetch_train_valid) // TODO: use trace with bank conflict?
+  io.prefetch_train.bits.meta_prefetch := RegEnable(io.dcache.resp.bits.meta_prefetch, s2_prefetch_train_valid)
+  io.prefetch_train.bits.meta_access   := RegEnable(io.dcache.resp.bits.meta_access, s2_prefetch_train_valid)
+  io.s1_prefetch_spec := s1_fire
+  io.s0_prefetch_spec := s0_fire
 
   io.prefetch_train_l1.valid              := RegNext(s2_valid && !s2_actually_mmio)
   io.prefetch_train_l1.bits.fromLsPipelineBundle(s2_in, latch = true)

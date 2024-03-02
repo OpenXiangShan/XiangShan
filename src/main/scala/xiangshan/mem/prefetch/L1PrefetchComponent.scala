@@ -208,7 +208,7 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
   }
   val allocNum = PopCount(canAlloc)
 
-  enqPtrExt.foreach{case x => x := x + allocNum}
+  enqPtrExt.foreach{case x => when(canAlloc.asUInt.orR) {x := x + allocNum} }
 
   // deq
   io.train_req.valid := false.B
