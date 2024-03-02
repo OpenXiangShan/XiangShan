@@ -300,7 +300,7 @@ class LoadNukeQueryIO(implicit p: Parameters) extends XSBundle {
   val revoke = Output(Bool())
 }
 
-class StoreNukeQueryIO(implicit p: Parameters) extends XSBundle {
+class StoreNukeQueryReq(implicit p: Parameters) extends XSBundle {
   //  robIdx: Requestor's (a store instruction) rob index for match logic.
   val robIdx = new RobPtr
 
@@ -309,6 +309,11 @@ class StoreNukeQueryIO(implicit p: Parameters) extends XSBundle {
 
   //  mask: requestor's (a store instruction) data width mask for match logic.
   val mask = UInt((VLEN/8).W)
+}
+
+class StoreNukeQueryIO(implicit p: Parameters) extends XSBundle {
+  val req = Valid(new StoreNukeQueryReq)
+  val nuke = Input(Bool())
 }
 
 // Store byte valid mask write bundle

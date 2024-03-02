@@ -42,7 +42,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
     // from store unit s1
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
-
+    val storeNuke = Vec(StorePipelineWidth, Output(Bool()))
     // global rollback flush
     val rollback = Output(Valid(new Redirect))
 
@@ -327,7 +327,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
       wrapper.uop := uop
       wrapper
     })
-
+    io.storeNuke(i) := ParallelORR(lqViolationSelVec)
     // select logic
     val lqSelect = selectOldest(lqViolationSelVec, lqViolationSelUopExts)
 
