@@ -1094,7 +1094,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     io.lsq.ldin.bits.rep_info.cause := VecInit(s3_sel_rep_cause.asBools)
   }
   val s3_safe_wakeup = RegNext(s2_late_wakeup) && !s3_in.mmio
-  val s3_safe_writeback = (s3_exception || s3_dly_ld_err || s3_late_wakeup)
+  val s3_safe_writeback = (s3_exception || s3_dly_ld_err || s3_safe_wakeup)
 
   // Int load, if hit, will be writebacked at s3
   s3_out.valid                := s3_valid && s3_safe_writeback
