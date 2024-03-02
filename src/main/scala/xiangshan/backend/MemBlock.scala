@@ -592,7 +592,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.pmp <> pmp_check(i).resp
     // st-ld violation query
     for (s <- 0 until StorePipelineWidth) {
-      loadUnits(i).io.stld_nuke_query(s) := storeUnits(s).io.stld_nuke_query
+      loadUnits(i).io.stld_nuke_query(s).req := storeUnits(s).io.stld_nuke_query.req
     }
     loadUnits(i).io.lq_rep_full <> lsq.io.lq_rep_full
     // load prefetch train
@@ -691,7 +691,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // dtlb
     stu.io.tlb          <> dtlb_reqs.drop(exuParameters.LduCnt + 1)(i)
     stu.io.pmp          <> pmp_check(exuParameters.LduCnt + 1 + i).resp
-
+    // stld nuke
+    stu.io.stld_nuke_query.nuke := RegNext(lsq.io.sta.storeNuke(i)) || // store s3 return
+                                   VecInit(loadUnits.map(x => RegNext(x.io.stld_nuke_query(i).nuke))).asUInt.orR // store s3 return
     // prefetch
     stu.io.prefetch_req <> sbuffer.io.store_prefetch(i)
 
