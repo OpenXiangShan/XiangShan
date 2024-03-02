@@ -471,7 +471,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   val s1_pf_fire_vec = RegNext(s0_pf_fire_vec)
 
   val s0_pf_fire = l1_pf_req_arb.io.out.fire
-  val s0_pf_index = OHToUInt(s0_pf_fire_vec.asUInt)
+  val s0_pf_index = l1_pf_req_arb.io.chosen
   val s0_pf_candidate_oh = get_candidate_oh(l1_pf_req_arb.io.out.bits.paddr)
 
   for(i <- 0 until MLP_SIZE) {
@@ -512,7 +512,6 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     array(s1_pf_index).bit_vec := array(s1_pf_index).bit_vec & ~s1_pf_candidate_oh
   }
 
-  // FIXME: the logic is to long, add an extra pf pipe stage
   io.l1_req.valid := s1_pf_valid && !s1_pf_evict && !s1_pf_update && (s1_pf_bits.paddr >= 0x80000000L.U) && io.enable
   io.l1_req.bits := s1_pf_bits
 
@@ -537,7 +536,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     val evict = s1_alloc && (s1_index === i.U)
     l2_pf_req_arb.io.in(i).valid := array(i).can_send_pf() && (array(i).sink === SINK_L2) && !evict
     l2_pf_req_arb.io.in(i).bits.addr := array(i).get_pf_addr()
-    l2_pf_req_arb.io.in(i).bits.source := MuxLookup(array(i).source.value, MemReqSource.Prefetch2L2Unknown.id.U, Seq(
+    l2_pf_req_arb.io.in(i).bits.source := MuxLookup(array(i).source.value, MemReqSource.Prefetch2L2Unknown.id.U)(Seq(
       L1_HW_PREFETCH_STRIDE -> MemReqSource.Prefetch2L2Stride.id.U,
       L1_HW_PREFETCH_STREAM -> MemReqSource.Prefetch2L2Stream.id.U
     ))

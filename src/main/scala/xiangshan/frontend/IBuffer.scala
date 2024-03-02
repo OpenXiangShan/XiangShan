@@ -132,6 +132,14 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     )
   )
 
+
+  // Bypass wire
+  private val bypassEntries = WireDefault(VecInit.fill(DecodeWidth)(0.U.asTypeOf(Valid(new IBufEntry))))
+  // Normal read wire
+  private val deqEntries = WireDefault(VecInit.fill(DecodeWidth)(0.U.asTypeOf(Valid(new IBufEntry))))
+  // Output register
+  private val outputEntries = RegInit(VecInit.fill(DecodeWidth)(0.U.asTypeOf(Valid(new IBufEntry))))
+
   // Between Bank
   private val deqBankPtrVec: Vec[IBufBankPtr] = RegInit(VecInit.tabulate(DecodeWidth)(_.U.asTypeOf(new IBufBankPtr)))
   private val deqBankPtr: IBufBankPtr = deqBankPtrVec(0)
@@ -145,29 +153,85 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
 
   val validEntries = distanceBetween(enqPtr, deqPtr)
   val allowEnq = RegInit(true.B)
+  val useBypass = enqPtr === deqPtr && io.out.head.ready // empty and last cycle fire
 
-  val numEnq = Mux(io.in.fire, PopCount(io.in.bits.valid), 0.U)
+  val numFromFetch = PopCount(io.in.bits.enqEnable)
+  val numTryEnq = WireDefault(0.U)
+  val numEnq = Mux(io.in.fire, numTryEnq, 0.U)
+  val numBypass = PopCount(bypassEntries.map(_.valid))
   val numTryDeq = Mux(validEntries >= DecodeWidth.U, DecodeWidth.U, validEntries)
   val numDeq = Mux(io.out.head.ready, numTryDeq, 0.U)
-
   val numAfterEnq = validEntries +& numEnq
+
   val nextValidEntries = Mux(io.out(0).ready, numAfterEnq - numTryDeq, numAfterEnq)
   allowEnq := (IBufSize - PredictWidth).U >= nextValidEntries // Disable when almost full
+
+  val enqOffset = VecInit.tabulate(PredictWidth)(i => PopCount(io.in.bits.valid.asBools.take(i)))
+  val enqData = VecInit.tabulate(PredictWidth)(i => Wire(new IBufEntry).fromFetch(io.in.bits, i))
+
+  // when using bypass, bypassed entries do not enqueue
+  when(useBypass) {
+    when(numFromFetch >= DecodeWidth.U) {
+      numTryEnq := numFromFetch - DecodeWidth.U
+    } .otherwise {
+      numTryEnq := 0.U
+    }
+  } .otherwise {
+    numTryEnq := numFromFetch
+  }
+
+  /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  // Bypass
+  /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  bypassEntries.zipWithIndex.foreach {
+    case (entry, idx) =>
+      // Select
+      val validOH = Range(0, PredictWidth).map {
+        i =>
+          io.in.bits.valid(i) &&
+            io.in.bits.enqEnable(i) &&
+            enqOffset(i) === idx.asUInt
+      } // Should be OneHot
+      entry.valid := validOH.reduce(_ || _) && io.in.fire && !io.flush
+      entry.bits := Mux1H(validOH, enqData)
+
+      // Debug Assertion
+      XSError(PopCount(validOH) > 1.asUInt, "validOH is not OneHot")
+  }
+
+  // => Decode Output
+  // clean register output
+  io.out zip outputEntries foreach {
+    case (io, reg) =>
+      io.valid := reg.valid
+      io.bits := reg.bits.toCtrlFlow
+  }
+  outputEntries zip bypassEntries zip deqEntries foreach {
+    case ((out, bypass), deq) =>
+      when(io.out.head.ready) {
+        out := deq
+        when(useBypass) {
+          out := bypass
+        }
+      }
+  }
 
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   // Enqueue
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   io.in.ready := allowEnq
   // Data
-  val enqOffset = VecInit.tabulate(PredictWidth)(i => PopCount(io.in.bits.valid.asBools.take(i)))
-  val enqData = VecInit.tabulate(PredictWidth)(i => Wire(new IBufEntry).fromFetch(io.in.bits, i))
   ibuf.zipWithIndex.foreach {
     case (entry, idx) => {
       // Select
       val validOH = Range(0, PredictWidth).map {
-        i => io.in.bits.valid(i) &&
-          io.in.bits.enqEnable(i) &&
-          enqPtrVec(enqOffset(i)).value === idx.asUInt
+        i =>
+          val useBypassMatch = enqOffset(i) >= DecodeWidth.U &&
+            enqPtrVec(enqOffset(i) - DecodeWidth.U).value === idx.asUInt
+          val normalMatch = enqPtrVec(enqOffset(i)).value === idx.asUInt
+          val m = Mux(useBypass, useBypassMatch, normalMatch) // when using bypass, bypassed entries do not enqueue
+
+          io.in.bits.valid(i) && io.in.bits.enqEnable(i) && m
       } // Should be OneHot
       val wen = validOH.reduce(_ || _) && io.in.fire && !io.flush
 
@@ -182,7 +246,7 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   }
   // Pointer maintenance
   when (io.in.fire && !io.flush) {
-    enqPtrVec := VecInit(enqPtrVec.map(_ + PopCount(io.in.bits.enqEnable)))
+    enqPtrVec := VecInit(enqPtrVec.map(_ + numTryEnq))
   }
 
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -200,8 +264,8 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     bankID => Mux1H(UIntToOH(deqInBankPtr(bankID).value), bankedIBufView(bankID))
   )
   for (i <- 0 until DecodeWidth) {
-    io.out(i).valid := validVec(i)
-    io.out(i).bits := Mux1H(UIntToOH(deqBankPtrVec(i).value), readStage1).toCtrlFlow
+    deqEntries(i).valid := validVec(i)
+    deqEntries(i).bits := Mux1H(UIntToOH(deqBankPtrVec(i).value), readStage1)
   }
   // Pointer maintenance
   deqBankPtrVec := Mux(io.out.head.ready, VecInit(deqBankPtrVec.map(_ + numTryDeq)), deqBankPtrVec)
@@ -229,6 +293,7 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     deqBankPtrVec := deqBankPtrVec.indices.map(_.U.asTypeOf(new IBufBankPtr))
     deqInBankPtr := VecInit.fill(IBufNBank)(0.U.asTypeOf(new IBufInBankPtr))
     deqPtr := 0.U.asTypeOf(new IBufPtr())
+    outputEntries.foreach(_.valid := false.B)
   }
   io.full := !allowEnq
 

@@ -27,7 +27,7 @@ object TriggerCmp {
     val equal = actual === tdata
     val greater = actual >= tdata
     val less = actual <= tdata
-    val res = MuxLookup(matchType, false.B,
+    val res = MuxLookup(matchType, false.B)(
       Array(0.U -> equal,
           2.U -> greater,
           3.U -> less))
@@ -78,7 +78,7 @@ object TriggerCmpConsecutive {
 
     val ret = Wire(Vec(len1, Bool()))
 
-    ret.zipWithIndex.map{case (r, i) => r := MuxLookup(matchType, false.B,
+    ret.zipWithIndex.map{case (r, i) => r := MuxLookup(matchType, false.B)(
       Array(0.U -> overallEqual(i),
         2.U -> overallGreater(i),
         3.U -> overallLess(i))) && enable}

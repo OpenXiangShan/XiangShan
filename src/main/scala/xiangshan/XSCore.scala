@@ -137,7 +137,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
 
   val memBlock = LazyModule(new MemBlock()(p.alter((site, here, up) => {
     case XSCoreParamsKey => up(XSCoreParamsKey).copy(
-      IssQueSize = IssQueSize * 2 // exuBlocks.head.scheduler.getMemRsEntries
+      IssQueSize = IssQueSize * (if (Enable3Load3Store) 3 else 2) // exuBlocks.head.scheduler.getMemRsEntries
     )
   })))
 
@@ -263,6 +263,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.l2_hint.valid := io.l2_hint.valid
   memBlock.io.l2_hint.bits.sourceId := io.l2_hint.bits.sourceId
   memBlock.io.l2_tlb_req <> io.l2_tlb_req
+  memBlock.io.l2_hint.bits.isKeyword := io.l2_hint.bits.isKeyword
   memBlock.io.l2PfqBusy := io.l2PfqBusy
   memBlock.io.int2vlsu <> DontCare
   memBlock.io.vec2vlsu <> DontCare
