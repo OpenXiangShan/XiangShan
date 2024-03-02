@@ -36,21 +36,25 @@ class StrideMetaBundle(implicit p: Parameters) extends XSBundle with HasStridePr
   val confidence = UInt(STRIDE_CONF_BITS.W)
   val hash_pc = UInt(HASH_TAG_WIDTH.W)
 
-  def reset(index: Int) = {
-    pre_vaddr := 0.U
-    stride := 0.U
-    confidence := 0.U
-    hash_pc := index.U
+  def reset(valid: Bool, index: Int) = {
+    when(valid){
+      pre_vaddr := 0.U
+      stride := 0.U
+      confidence := 0.U
+      hash_pc := index.U
+    }
   }
 
-  def alloc(vaddr: UInt, alloc_hash_pc: UInt) = {
-    pre_vaddr := vaddr(STRIDE_VADDR_BITS - 1, 0)
-    stride := 0.U
-    confidence := 0.U
-    hash_pc := alloc_hash_pc
+  def alloc(vaddr: UInt, alloc_hash_pc: UInt, valid: Bool) = {
+    when(valid){
+      pre_vaddr := vaddr(STRIDE_VADDR_BITS - 1, 0)
+      stride := 0.U
+      confidence := 0.U
+      hash_pc := alloc_hash_pc
+    }
   }
 
-  def update(vaddr: UInt, always_update_pre_vaddr: Bool) = {
+  def update(valid: Bool, vaddr: UInt, always_update_pre_vaddr: Bool) = {
     val new_vaddr = vaddr(STRIDE_VADDR_BITS - 1, 0)
     val new_stride = new_vaddr - pre_vaddr
     val new_stride_blk = block_addr(new_stride)
@@ -133,13 +137,13 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
 
   val always_update = WireInit(Constantin.createRecord("always_update" + p(XSCoreParamsKey).HartId.toString, initValue = ALWAYS_UPDATE_PRE_VADDR.U)) === 1.U
 
-  when(s1_alloc) {
-    array(s1_index).alloc(
-      vaddr = s1_vaddr,
-      alloc_hash_pc = s1_pc_hash
-    )
-  }.elsewhen(s1_update) {
-    val res = array(s1_index).update(s1_vaddr, always_update)
+  array(s1_index).alloc(
+    valid = s1_alloc,
+    vaddr = s1_vaddr,
+    alloc_hash_pc = s1_pc_hash
+  )
+  when(s1_update) {
+    val res = array(s1_index).update(s1_update, s1_vaddr, always_update)
     s1_can_send_pf := res._1
     s1_new_stride := res._2
   }
@@ -202,8 +206,6 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
   }
 
   for(i <- 0 until STRIDE_ENTRY_NUM) {
-    when(reset.asBool || GatedValidRegNext(io.flush)) {
-      array(i).reset(i)
-    }
+    array(i).reset(reset.asBool || RegNext(io.flush), i)
   }
 }

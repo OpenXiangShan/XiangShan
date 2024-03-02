@@ -58,44 +58,50 @@ class StreamBitVectorBundle(implicit p: Parameters) extends XSBundle with HasStr
   val cnt = UInt((log2Up(BIT_VEC_WITDH) + 1).W)
   val decr_mode = Bool()
 
-  def reset(index: Int) = {
-    tag := index.U
-    bit_vec := 0.U
-    active := false.B
-    cnt := 0.U
-    decr_mode := INIT_DEC_MODE.B
+  def reset(valid: Bool, index: Int) = {
+    when(valid){
+      tag := index.U
+      bit_vec := 0.U
+      active := false.B
+      cnt := 0.U
+      decr_mode := INIT_DEC_MODE.B
+    }
   }
 
   def tag_match(new_tag: UInt): Bool = {
     region_hash_tag(tag) === region_hash_tag(new_tag)
   }
 
-  def alloc(alloc_tag: UInt, alloc_bit_vec: UInt, alloc_active: Bool, alloc_decr_mode: Bool) = {
-    tag := alloc_tag
-    bit_vec := alloc_bit_vec
-    active := alloc_active
-    cnt := 1.U
-    if(ENABLE_DECR_MODE) {
-      decr_mode := alloc_decr_mode
-    }else {
-      decr_mode := INIT_DEC_MODE.B
+  def alloc(valid: Bool, alloc_tag: UInt, alloc_bit_vec: UInt, alloc_active: Bool, alloc_decr_mode: Bool) = {
+    when(valid){
+      tag := alloc_tag
+      bit_vec := alloc_bit_vec
+      active := alloc_active
+      cnt := 1.U
+      if (ENABLE_DECR_MODE) {
+        decr_mode := alloc_decr_mode
+      } else {
+        decr_mode := INIT_DEC_MODE.B
+      }
     }
 
     assert(PopCount(alloc_bit_vec) === 1.U, "alloc vector should be one hot")
   }
 
-  def update(update_bit_vec: UInt, update_active: Bool) = {
-    // if the slot is 0 before, increment cnt
-    val cnt_en = !((bit_vec & update_bit_vec).orR)
-    val cnt_next = Mux(cnt_en, cnt + 1.U, cnt)
+  def update(valid: Bool, update_bit_vec: UInt, update_active: Bool) = {
+    when(valid){
+      // if the slot is 0 before, increment cnt
+      val cnt_en = !((bit_vec & update_bit_vec).orR)
+      val cnt_next = Mux(cnt_en, cnt + 1.U, cnt)
 
-    bit_vec := bit_vec | update_bit_vec
-    cnt := cnt_next
-    when(cnt_next >= ACTIVE_THRESHOLD.U) {
-      active := true.B
-    }
-    when(update_active) {
-      active := true.B
+      bit_vec := bit_vec | update_bit_vec
+      cnt := cnt_next
+      when(cnt_next >= ACTIVE_THRESHOLD.U) {
+        active := true.B
+      }
+      when(update_active) {
+        active := true.B
+      }
     }
 
     assert(PopCount(update_bit_vec) === 1.U, "update vector should be one hot")
@@ -242,15 +248,17 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   when(s1_alloc) {
     // alloc a new entry
     array(s1_index).alloc(
+      s1_alloc,
       alloc_tag = s1_region_tag,
       alloc_bit_vec = UIntToOH(s1_region_bits),
       alloc_active = s1_plus_one_hit || s1_minus_one_hit,
-      alloc_decr_mode = RegEnable(s0_plus_one_hit, s0_valid))
-
+      alloc_decr_mode = RegEnable(s0_plus_one_hit, s0_valid)
+    )
   }.elsewhen(s1_update) {
     // update a existing entry
     assert(array(s1_index).cnt =/= 0.U || array(s1_index).tag === s1_index, "entry should have been allocated before")
     array(s1_index).update(
+      s1_update,
       update_bit_vec = UIntToOH(s1_region_bits),
       update_active = s1_plus_one_hit || s1_minus_one_hit)
   }
@@ -356,9 +364,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
 
   // reset meta to avoid muti-hit problem
   for(i <- 0 until BIT_VEC_ARRAY_SIZE) {
-    when(reset.asBool || GatedValidRegNext(io.flush)) {
-      array(i).reset(i)
-    }
+    array(i).reset(reset.asBool || GatedValidRegNext(io.flush), i)
   }
 
   XSPerfHistogram("bit_vector_active", PopCount(VecInit(array.map(_.active)).asUInt), true.B, 0, BIT_VEC_ARRAY_SIZE, 1)

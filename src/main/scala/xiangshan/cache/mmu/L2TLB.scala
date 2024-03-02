@@ -80,8 +80,8 @@ class L2TLBImp(outer: L2TLB)(hasRen: Boolean = false)(implicit p: Parameters) ex
 
   val sfence_tmp = DelayN(io.sfence, 1)
   val csr_tmp    = DelayN(io.csr.tlb, 1)
-  val sfence_dup = Seq.fill(8)(if(hasRen) RegEnable(sfence_tmp, io_ren.get) else RegNext(sfence_tmp))
-  val csr_dup = Seq.fill(7)(if(hasRen) RegEnable(csr_tmp, io_ren.get) else RegNext(csr_tmp))
+  val sfence_dup = Seq.fill(9)(if(hasRen) RegEnable(sfence_tmp, io_ren.get) else RegNext(sfence_tmp))
+  val csr_dup = Seq.fill(8)(if(hasRen) RegEnable(csr_tmp, io_ren.get) else RegNext(csr_tmp))
   val satp   = csr_dup(0).satp
   val vsatp  = csr_dup(0).vsatp
   val hgatp  = csr_dup(0).hgatp
