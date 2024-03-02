@@ -749,7 +749,8 @@ package object xiangshan {
     (uop: MicroOp) => FuType.storeCanAccept(uop.ctrl.fuType),
     FuType.stu, 1, 0, writeIntRf = false, writeFpRf = false,
     latency = UncertainLatency(),
-    exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault)
+    exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault),
+    flushPipe = true
   )
 
   val stdCfg = FuConfig(
