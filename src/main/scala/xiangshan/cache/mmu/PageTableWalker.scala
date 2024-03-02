@@ -606,7 +606,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   val hptw_req_gvpn_1 = hyper_arb1.io.out.bits.ppn // first stage 2 translation
   val hptw_req_gvpn_2 = hyper_arb2.io.out.bits.ppn // last stage 2 translation
-  io.hptw.req.valid := (hyper_arb1.io.out.valid || hyper_arb2.io.out.valid) && !flush
+  io.hptw.req.valid := (hyper_arb1.io.out.fire || hyper_arb2.io.out.fire) && !flush
   io.hptw.req.bits.gvpn := Mux(hyper_arb1.io.out.valid, hptw_req_gvpn_1, hptw_req_gvpn_2)
   io.hptw.req.bits.id := Mux(hyper_arb1.io.out.valid, hyper_arb1.io.chosen, hyper_arb2.io.chosen)
   io.hptw.req.bits.source := Mux(hyper_arb1.io.out.valid, hyper_arb1.io.out.bits.req_info.source, hyper_arb2.io.out.bits.req_info.source)

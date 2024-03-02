@@ -452,7 +452,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val bypassed = Wire(Vec(3, Bool()))
   bypassed.indices.foreach(i =>
     bypassed(i) := stageResp.bits.bypassed(i) ||
-      ValidHoldBypass(refill_bypass(vpn_search, i, stageResp.bits.req_info.s2xlate),
+      ValidHoldBypass(refill_bypass(stageResp.bits.req_info.vpn, i, stageResp.bits.req_info.s2xlate),
         OneCycleValid(stageCheck(1).fire, false.B) || io.refill.valid)
   )
 
@@ -462,7 +462,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   io.resp.bits.req_info   := stageResp.bits.req_info
   io.resp.bits.isFirst  := stageResp.bits.isFirst
   io.resp.bits.hit      := (resp_res.l3.hit || resp_res.sp.hit) && !isAllStage
-  io.resp.bits.bypassed := (bypassed(2) || (bypassed(1) && !resp_res.l2.hit) || (bypassed(0) && !resp_res.l1.hit)) && !isAllStage && !isOnlyStage2
+  io.resp.bits.bypassed := (bypassed(2) || (bypassed(1) && !resp_res.l2.hit) || (bypassed(0) && !resp_res.l1.hit)) && !isAllStage
   io.resp.bits.prefetch := resp_res.l3.pre && resp_res.l3.hit || resp_res.sp.pre && resp_res.sp.hit
   io.resp.bits.toFsm.l1Hit := resp_res.l1.hit && !stage1Hit && !isOnlyStage2
   io.resp.bits.toFsm.l2Hit := resp_res.l2.hit && !stage1Hit && !isOnlyStage2

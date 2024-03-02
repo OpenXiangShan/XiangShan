@@ -26,11 +26,7 @@ class L2TlbPrefetchIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPt
   val in = Flipped(ValidIO(new Bundle {
     val vpn = UInt(vpnLen.W)
   }))
-  val out = DecoupledIO(new Bundle {
-    val vpn = UInt(vpnLen.W)
-    val s2xlate = UInt(2.W)
-    val source = UInt(bSourceWidth.W)
-  })
+  val out = DecoupledIO(new L2TlbWithHptwIdBundle)
 }
 
 class L2TlbPrefetch(implicit p: Parameters) extends XSModule with HasPtwConst {
@@ -57,9 +53,11 @@ class L2TlbPrefetch(implicit p: Parameters) extends XSModule with HasPtwConst {
     (io.csr.priv.virt && io.csr.hgatp.mode =/= 0.U) -> onlyStage2
   ))
   io.out.valid := v
-  io.out.bits.vpn := next_req
-  io.out.bits.s2xlate := s2xlate
-  io.out.bits.source := prefetchID.U
+  io.out.bits.req_info.vpn := next_req
+  io.out.bits.req_info.s2xlate := s2xlate
+  io.out.bits.req_info.source := prefetchID.U
+  io.out.bits.isHptw := false.B
+  io.out.bits.hptwId := DontCare
 
   when (io.out.fire) {
     old_v(old_index) := true.B

@@ -1337,6 +1337,11 @@ class L2TlbInnerBundle(implicit p: Parameters) extends PtwReq {
   val source = UInt(bSourceWidth.W)
 }
 
+class L2TlbWithHptwIdBundle(implicit p: Parameters) extends PtwBundle {
+  val req_info = new L2TlbInnerBundle
+  val isHptw = Bool()
+  val hptwId = UInt(log2Up(l2tlbParams.llptwsize).W)
+}
 
 object ValidHoldBypass{
   def apply(infire: Bool, outfire: Bool, flush: Bool = false.B) = {

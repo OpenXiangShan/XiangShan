@@ -98,11 +98,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val llptw = Module(new LLPTW)
   val blockmq = Module(new BlockHelper(3))
   val arb1 = Module(new Arbiter(new PtwReq, PtwWidth))
-  val arb2 = Module(new Arbiter(new Bundle {
-    val vpn = UInt(vpnLen.W)
-    val s2xlate = UInt(2.W)
-    val source = UInt(bSourceWidth.W)
-  }, (if (l2tlbParams.enablePrefetch) 4 else 3) + (if(HasHExtension) 1 else 0)))
+  val arb2 = Module(new Arbiter(new L2TlbWithHptwIdBundle, ((if (l2tlbParams.enablePrefetch) 4 else 3) + (if(HasHExtension) 1 else 0))))
   val hptw_req_arb = Module(new Arbiter(new Bundle {
     val id = UInt(log2Up(l2tlbParams.llptwsize).W)
     val source = UInt(bSourceWidth.W)
@@ -152,22 +148,26 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
  
 
   arb2.io.in(InArbPTWPort).valid := ptw.io.llptw.valid
-  arb2.io.in(InArbPTWPort).bits.vpn := ptw.io.llptw.bits.req_info.vpn
-  arb2.io.in(InArbPTWPort).bits.s2xlate := ptw.io.llptw.bits.req_info.s2xlate
-  arb2.io.in(InArbPTWPort).bits.source := ptw.io.llptw.bits.req_info.source
+  arb2.io.in(InArbPTWPort).bits.req_info := ptw.io.llptw.bits.req_info
+  arb2.io.in(InArbPTWPort).bits.isHptw := false.B 
+  arb2.io.in(InArbPTWPort).bits.hptwId := DontCare
   ptw.io.llptw.ready := arb2.io.in(InArbPTWPort).ready
   block_decoupled(missQueue.io.out, arb2.io.in(InArbMissQueuePort), !ptw.io.req.ready)
 
   arb2.io.in(InArbTlbPort).valid := arb1.io.out.valid
-  arb2.io.in(InArbTlbPort).bits.vpn := arb1.io.out.bits.vpn
-  arb2.io.in(InArbTlbPort).bits.s2xlate := arb1.io.out.bits.s2xlate
-  arb2.io.in(InArbTlbPort).bits.source := arb1.io.chosen
+  arb2.io.in(InArbTlbPort).bits.req_info.vpn := arb1.io.out.bits.vpn
+  arb2.io.in(InArbTlbPort).bits.req_info.s2xlate := arb1.io.out.bits.s2xlate
+  arb2.io.in(InArbTlbPort).bits.req_info.source := arb1.io.chosen
+  arb2.io.in(InArbTlbPort).bits.isHptw := false.B 
+  arb2.io.in(InArbTlbPort).bits.hptwId := DontCare
   arb1.io.out.ready := arb2.io.in(InArbTlbPort).ready
 
   arb2.io.in(InArbHPTWPort).valid := hptw_req_arb.io.out.valid
-  arb2.io.in(InArbHPTWPort).bits.vpn := hptw_req_arb.io.out.bits.gvpn
-  arb2.io.in(InArbHPTWPort).bits.s2xlate := onlyStage2
-  arb2.io.in(InArbHPTWPort).bits.source := hptw_req_arb.io.out.bits.source
+  arb2.io.in(InArbHPTWPort).bits.req_info.vpn := hptw_req_arb.io.out.bits.gvpn
+  arb2.io.in(InArbHPTWPort).bits.req_info.s2xlate := onlyStage2
+  arb2.io.in(InArbHPTWPort).bits.req_info.source := hptw_req_arb.io.out.bits.source
+  arb2.io.in(InArbHPTWPort).bits.isHptw := true.B 
+  arb2.io.in(InArbHPTWPort).bits.hptwId := hptw_req_arb.io.out.bits.id
   hptw_req_arb.io.out.ready := arb2.io.in(InArbHPTWPort).ready
   if (l2tlbParams.enablePrefetch) {
     val prefetch = Module(new L2TlbPrefetch())
@@ -184,19 +184,25 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     val isWriteL2TlbPrefetchTable = WireInit(Constantin.createRecord("isWriteL2TlbPrefetchTable" + p(XSCoreParamsKey).HartId.toString))
     val L2TlbPrefetchTable = ChiselDB.createTable("L2TlbPrefetch_hart" + p(XSCoreParamsKey).HartId.toString, new L2TlbPrefetchDB)
     val L2TlbPrefetchDB = Wire(new L2TlbPrefetchDB)
-    L2TlbPrefetchDB.vpn := prefetch.io.out.bits.vpn
+    L2TlbPrefetchDB.vpn := prefetch.io.out.bits.req_info.vpn
     L2TlbPrefetchTable.log(L2TlbPrefetchDB, isWriteL2TlbPrefetchTable.orR && prefetch.io.out.fire, "L2TlbPrefetch", clock, reset)
   }
   arb2.io.out.ready := cache.io.req.ready
 
 
-  val mq_arb = Module(new Arbiter(new L2TlbInnerBundle, 2))
+  val mq_arb = Module(new Arbiter(new L2TlbWithHptwIdBundle, 2))
   mq_arb.io.in(0).valid := cache.io.resp.valid && !cache.io.resp.bits.hit &&
-    (!cache.io.resp.bits.toFsm.l2Hit || cache.io.resp.bits.bypassed) &&
-    !from_pre(cache.io.resp.bits.req_info.source) && !cache.io.resp.bits.isHptw &&
+    ((!cache.io.resp.bits.toFsm.l2Hit && !cache.io.resp.bits.isHptw) || cache.io.resp.bits.bypassed) &&
+    !from_pre(cache.io.resp.bits.req_info.source) &&
     (cache.io.resp.bits.bypassed || cache.io.resp.bits.isFirst || !ptw.io.req.ready)
-  mq_arb.io.in(0).bits :=  cache.io.resp.bits.req_info
-  mq_arb.io.in(1) <> llptw.io.cache
+  mq_arb.io.in(0).bits.req_info :=  cache.io.resp.bits.req_info
+  mq_arb.io.in(0).bits.isHptw :=  cache.io.resp.bits.isHptw
+  mq_arb.io.in(0).bits.hptwId :=  cache.io.resp.bits.toHptw.id
+  mq_arb.io.in(1).bits.req_info := llptw.io.cache.bits
+  mq_arb.io.in(1).bits.isHptw := false.B
+  mq_arb.io.in(1).bits.hptwId := DontCare
+  mq_arb.io.in(1).valid := llptw.io.cache.valid
+  llptw.io.cache.ready := mq_arb.io.in(1).ready
   missQueue.io.in <> mq_arb.io.out
   missQueue.io.sfence  := sfence_dup(6)
   missQueue.io.csr := csr_dup(5)
@@ -215,12 +221,10 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   llptw.io.csr := csr_dup(1)
 
   cache.io.req.valid := arb2.io.out.valid
-  cache.io.req.bits.req_info.vpn := arb2.io.out.bits.vpn
-  cache.io.req.bits.req_info.s2xlate := arb2.io.out.bits.s2xlate
-  cache.io.req.bits.req_info.source := arb2.io.out.bits.source
-  cache.io.req.bits.isFirst := arb2.io.chosen =/= InArbMissQueuePort.U
-  cache.io.req.bits.isHptw := arb2.io.chosen === InArbHPTWPort.U
-  cache.io.req.bits.hptwId := hptw_req_arb.io.out.bits.id
+  cache.io.req.bits.req_info := arb2.io.out.bits.req_info
+  cache.io.req.bits.isFirst := (arb2.io.chosen =/= InArbMissQueuePort.U && !arb2.io.out.bits.isHptw)
+  cache.io.req.bits.isHptw := arb2.io.out.bits.isHptw
+  cache.io.req.bits.hptwId := arb2.io.out.bits.hptwId
   cache.io.req.bits.bypassed.map(_ := false.B)
   cache.io.sfence := sfence_dup(2)
   cache.io.csr := csr_dup(2)
@@ -229,7 +233,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   cache.io.resp.ready := MuxCase(mq_arb.io.in(0).ready || ptw.io.req.ready, Seq(
     cache.io.resp.bits.hit -> outReady(cache.io.resp.bits.req_info.source, outArbCachePort),
     (cache.io.resp.bits.toFsm.l2Hit && !cache.io.resp.bits.bypassed) -> llptw.io.in.ready,
-    ((cache.io.resp.bits.bypassed || cache.io.resp.bits.isFirst) && !cache.io.resp.bits.isHptw) -> mq_arb.io.in(0).ready,
+    (cache.io.resp.bits.bypassed || cache.io.resp.bits.isFirst) -> mq_arb.io.in(0).ready,
     (cache.io.resp.bits.isHptw) -> hptw.io.req.ready
   ))
 
@@ -654,8 +658,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val isWriteL2TlbMissQueueTable = WireInit(Constantin.createRecord("isWriteL2TlbMissQueueTable" + p(XSCoreParamsKey).HartId.toString))
   val L2TlbMissQueueTable = ChiselDB.createTable("L2TlbMissQueue_hart" + p(XSCoreParamsKey).HartId.toString, new L2TlbMissQueueDB)
   val L2TlbMissQueueInDB, L2TlbMissQueueOutDB = Wire(new L2TlbMissQueueDB)
-  L2TlbMissQueueInDB.vpn := missQueue.io.in.bits.vpn
-  L2TlbMissQueueOutDB.vpn := missQueue.io.out.bits.vpn
+  L2TlbMissQueueInDB.vpn := missQueue.io.in.bits.req_info.vpn
+  L2TlbMissQueueOutDB.vpn := missQueue.io.out.bits.req_info.vpn
   L2TlbMissQueueTable.log(L2TlbMissQueueInDB, isWriteL2TlbMissQueueTable.orR && missQueue.io.in.fire, "L2TlbMissQueueIn", clock, reset)
   L2TlbMissQueueTable.log(L2TlbMissQueueOutDB, isWriteL2TlbMissQueueTable.orR && missQueue.io.out.fire, "L2TlbMissQueueOut", clock, reset)
 }
