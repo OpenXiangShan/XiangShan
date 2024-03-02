@@ -167,6 +167,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val l2_tlb_req = Flipped(new TlbRequestIO(nRespDups = 2))
     val l2PfqBusy = Input(Bool())
     val debugTopDown = new Bundle {
+      val robTrueCommit = Output(UInt(64.W))
       val robHeadPaddr = Valid(UInt(PAddrBits.W))
       val l2MissMatch = Input(Bool())
       val l3MissMatch = Input(Bool())
@@ -277,6 +278,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.debugTopDown.robHeadVaddr := backend.io.debugTopDown.fromRob.robHeadVaddr
   frontend.io.debugTopDown.robHeadVaddr := backend.io.debugTopDown.fromRob.robHeadVaddr
   io.debugTopDown.robHeadPaddr := backend.io.debugTopDown.fromRob.robHeadPaddr
+  io.debugTopDown.robTrueCommit := backend.io.debugRolling.robTrueCommit
   backend.io.debugTopDown.fromCore.l2MissMatch := io.debugTopDown.l2MissMatch
   backend.io.debugTopDown.fromCore.l3MissMatch := io.debugTopDown.l3MissMatch
   backend.io.debugTopDown.fromCore.fromMem := memBlock.io.debugTopDown.toCore
