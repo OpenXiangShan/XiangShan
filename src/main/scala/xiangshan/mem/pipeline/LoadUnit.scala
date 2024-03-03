@@ -609,6 +609,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s1_paddr_dup_lsu    = Wire(UInt())
   val s1_paddr_dup_dcache = Wire(UInt())
   val s1_exception        = ExceptionNO.selectByFu(s1_out.uop.cf.exceptionVec, lduCfg).asUInt.orR   // af & pf exception were modified below.
+  val s1_not_tlb_query    = s1_in.isFastReplay
   val s1_rar_nack         = io.lsq.ldld_nuke_query.pre_req.valid &&
                             !io.lsq.ldld_nuke_query.pre_req.ready
   val s1_raw_nack         = io.lsq.stld_nuke_query.pre_req.valid &&
