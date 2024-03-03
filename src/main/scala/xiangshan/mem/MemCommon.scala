@@ -305,19 +305,15 @@ class NukeQueryIO(implicit p: Parameters) extends XSBundle {
   val raw = new LoadNukeQueryIO
 }
 
-class StoreNukeQueryReq(implicit p: Parameters) extends XSBundle {
-  //  robIdx: Requestor's (a store instruction) rob index for match logic.
-  val robIdx = new RobPtr
-
-  //  paddr: requestor's (a store instruction) physical address for match logic.
-  val paddr  = UInt(PAddrBits.W)
-
-  //  mask: requestor's (a store instruction) data width mask for match logic.
-  val mask = UInt((VLEN/8).W)
-}
-
 class StoreNukeQueryIO(implicit p: Parameters) extends XSBundle {
-  val req = Valid(new StoreNukeQueryReq)
+  val valid = Output(Bool())
+  //  robIdx: Requestor's (a store instruction) rob index for match logic.
+  val robIdx = Output(new RobPtr)
+  //  paddr: requestor's (a store instruction) physical address for match logic.
+  val paddr  = Output(UInt(PAddrBits.W))
+  //  mask: requestor's (a store instruction) data width mask for match logic.
+  val mask = Output(UInt((VLEN/8).W))
+  //
   val nuke = Input(Bool())
 }
 

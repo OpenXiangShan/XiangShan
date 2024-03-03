@@ -284,10 +284,10 @@ class StoreAddrUnit(implicit p: Parameters) extends XSModule with HasDCacheParam
   io.lsq_replenish.miss := io.dcache.resp.fire && io.dcache.resp.bits.miss // miss info
 
   // st-ld violation dectect request.
-  io.stld_nuke_query.req.valid       := s3_valid && !s3_in.isHWPrefetch
-  io.stld_nuke_query.req.bits.robIdx := s3_in.uop.robIdx
-  io.stld_nuke_query.req.bits.paddr  := s3_in.paddr
-  io.stld_nuke_query.req.bits.mask   := s3_in.mask
+  io.stld_nuke_query.valid  := s3_valid && !s3_in.isHWPrefetch
+  io.stld_nuke_query.robIdx := s3_in.uop.robIdx
+  io.stld_nuke_query.paddr  := s3_in.paddr
+  io.stld_nuke_query.mask   := s3_in.mask
 
   // RegNext prefetch train for better timing
   // ** Now, prefetch train is valid at store s4 **

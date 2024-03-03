@@ -590,8 +590,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // pmp
     loadUnits(i).io.pmp <> pmp_check(i).resp
     // st-ld violation query
-    for (s <- 0 until StorePipelineWidth) {
-      loadUnits(i).io.stld_nuke_query(s).req := storeUnits(s).io.stld_nuke_query.req
+    for (w <- 0 until StorePipelineWidth) {
+      loadUnits(i).io.stld_nuke_query(w) <> storeUnits(w).io.stld_nuke_query
     }
     loadUnits(i).io.lq_rep_full <> lsq.io.lq_rep_full
     // load prefetch train
