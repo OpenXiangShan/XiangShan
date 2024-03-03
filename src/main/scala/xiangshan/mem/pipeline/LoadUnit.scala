@@ -1104,7 +1104,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_out.bits.uop             := s3_in.uop
   s3_out.bits.uop.cf.exceptionVec(loadAccessFault) := s3_dly_ld_err  || s3_in.uop.cf.exceptionVec(loadAccessFault)
   s3_out.bits.uop.ctrl.flushPipe := false.B
-  s3_out.bits.uop.ctrl.replayInst := s3_bad_nuke_detected
+  s3_out.bits.uop.ctrl.replayInst := false.B
   s3_out.bits.data            := s3_in.data
   s3_out.bits.redirectValid   := false.B
   s3_out.bits.redirect        := DontCare
