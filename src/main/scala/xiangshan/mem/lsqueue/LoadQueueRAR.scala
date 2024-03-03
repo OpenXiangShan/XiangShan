@@ -99,30 +99,30 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   // (e.g. "not completed" means that load instruction get the data or
   // exception).
   // pre-Allocate logic
-  val s0_preReqs = io.query.map(_.pre_req.valid)
-  val s0_hasNotWritebackedLoad = io.query.map(_.pre_req).map(x => x.valid && isAfter(x.bits.uop.lqIdx, io.ldWbPtr))
+  val s0_preReqs = io.query.map(_.prealloc)
+  val s0_hasNotWritebackedLoad = io.query.map(x => x.prealloc && isAfter(x.lqIdx, io.ldWbPtr))
   val s0_preEnqs = s0_preReqs.zip(s0_hasNotWritebackedLoad).map { case (v, r) => v && r }
   val s0_canAccepts = Wire(Vec(LoadPipelineWidth, Bool()))
   val s0_enqIdxs = Wire(Vec(LoadPipelineWidth, UInt()))
 
-  for ((pre_req, w) <- io.query.map(_.pre_req).zipWithIndex) {
+  for ((req, w) <- io.query.zipWithIndex) {
     freeList.io.allocateReq(w) := true.B
 
     val offset = PopCount(s0_preEnqs.take(w))
     s0_canAccepts(w) := freeList.io.canAllocate(offset)
     s0_enqIdxs(w) := freeList.io.allocateSlot(offset)
-    pre_req.ready := s0_canAccepts(w)
+    req.nack := !s0_canAccepts(w)
   }
 
   // Allocate logic
-  val s1_canEnqs = io.query.map(_.req.valid)
+  val s1_canEnqs = io.query.map(_.alloc)
   val s1_hasNotWritebackedLoad = RegNext(VecInit(s0_hasNotWritebackedLoad))
   val s1_needEnqs = s1_canEnqs.zip(s1_hasNotWritebackedLoad).map { case (v, r) => v && r }
   val s1_canAccepts = RegNext(s0_canAccepts)
   val s1_enqIdxs = RegNext(s0_enqIdxs)
   val s1_accepts = Wire(Vec(LoadPipelineWidth, Bool()))
 
-  for ((enq, w) <- io.query.map(_.req).zipWithIndex) {
+  for ((enq, w) <- io.query.zipWithIndex) {
     s1_accepts(w) := false.B
     paddrModule.io.wen(w) := false.B
     freeList.io.doAllocate(w) := false.B
@@ -134,7 +134,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     when (s1_needEnqs(w) && canAccept) {
       s1_accepts(w) := true.B
 
-      val debug_robIdx = enq.bits.uop.robIdx.asUInt
+      val debug_robIdx = enq.uop.robIdx.asUInt
       XSError(allocated(enqIndex), p"LoadQueueRAR: You can not write an valid entry! check: ldu $w, robIdx $debug_robIdx")
 
       freeList.io.doAllocate(w) := true.B
@@ -145,17 +145,17 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
       //  Write paddr
       paddrModule.io.wen(w) := true.B
       paddrModule.io.waddr(w) := enqIndex
-      paddrModule.io.wdata(w) := enq.bits.paddr
-      bypassPAddr(w) := enq.bits.paddr
+      paddrModule.io.wdata(w) := enq.paddr
+      bypassPAddr(w) := enq.paddr
 
       //  Fill info
-      uop(enqIndex) := enq.bits.uop
+      uop(enqIndex) := enq.uop
       released(enqIndex) :=
-        enq.bits.data_valid &&
+        !enq.dataInvalid &&
         (release2Cycle.valid &&
-        enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release2Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset) ||
+        enq.paddr(PAddrBits-1, DCacheLineOffset) === release2Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset) ||
         release1Cycle.valid &&
-        enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release1Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset))
+        enq.paddr(PAddrBits-1, DCacheLineOffset) === release1Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset))
     }
   }
 
@@ -203,11 +203,10 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   val allocatedUInt = RegNext(allocated.asUInt)
   for ((query, w) <- io.query.zipWithIndex) {
     ldLdViolation(w) := false.B
-    paddrModule.io.releaseViolationMdata(w) := query.req.bits.paddr
+    paddrModule.io.releaseViolationMdata(w) := query.paddr
 
-    query.resp.valid := RegNext(query.req.valid)
     // Generate real violation mask
-    val robIdxMask = VecInit(uop.map(_.robIdx).map(isAfter(_, query.req.bits.uop.robIdx)))
+    val robIdxMask = VecInit(uop.map(_.robIdx).map(isAfter(_, query.uop.robIdx)))
     val matchMask = (0 until LoadQueueRARSize).map(i => {
                       RegNext(allocated(i) &
                       paddrModule.io.releaseViolationMmask(w)(i) &
@@ -217,7 +216,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     //  Load-to-Load violation check result
     val ldLdViolationMask = VecInit(matchMask)
     ldLdViolationMask.suggestName("ldLdViolationMask_" + w)
-    query.resp.bits.rep_frm_fetch := ParallelORR(ldLdViolationMask)
+    query.nuke := ParallelORR(ldLdViolationMask)
   }
 
 
@@ -247,7 +246,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   val canEnqCount = PopCount(s1_accepts)
   val validCount = freeList.io.validCount
   val allowEnqueue = validCount <= (LoadQueueRARSize - LoadPipelineWidth).U
-  val ldLdViolationCount = PopCount(io.query.map(_.resp).map(resp => resp.valid && resp.bits.rep_frm_fetch))
+  val ldLdViolationCount = PopCount(io.query.map(resp => RegNext(resp.alloc) && resp.nuke))
 
   QueuePerf(LoadQueueRARSize, validCount, !allowEnqueue)
   XSPerfAccumulate("enq", canEnqCount)

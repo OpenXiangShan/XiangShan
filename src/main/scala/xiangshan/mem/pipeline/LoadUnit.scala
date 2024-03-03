@@ -80,14 +80,12 @@ class LoadToLsqReplayIO(implicit p: Parameters) extends XSBundle
   cause(9).suggestName("cause_nuke")
 }
 
-
 class LoadToLsqIO(implicit p: Parameters) extends XSBundle {
   val ldin            = DecoupledIO(new LqWriteBundle)
   val uncache         = Flipped(DecoupledIO(new ExuOutput))
   val ld_raw_data     = Input(new LoadDataFromLQBundle)
   val forward         = new PipeLoadForwardQueryIO
-  val stld_nuke_query = new LoadNukeQueryIO
-  val ldld_nuke_query = new LoadNukeQueryIO
+  val nuke            = new NukeQueryIO
 }
 
 class LoadToLoadIO(implicit p: Parameters) extends XSBundle {
@@ -610,10 +608,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s1_paddr_dup_dcache = Wire(UInt())
   val s1_exception        = ExceptionNO.selectByFu(s1_out.uop.cf.exceptionVec, lduCfg).asUInt.orR   // af & pf exception were modified below.
   val s1_not_tlb_query    = s1_in.isFastReplay
-  val s1_rar_nack         = io.lsq.ldld_nuke_query.pre_req.valid &&
-                            !io.lsq.ldld_nuke_query.pre_req.ready
-  val s1_raw_nack         = io.lsq.stld_nuke_query.pre_req.valid &&
-                            !io.lsq.stld_nuke_query.pre_req.ready
+  val s1_rar_nack         = io.lsq.nuke.rar.prealloc &&
+                            io.lsq.nuke.rar.nack
+  val s1_raw_nack         = io.lsq.nuke.raw.prealloc  &&
+                            io.lsq.nuke.raw.nack
   val s1_tlb_miss         = io.tlb.resp.bits.miss
   val s1_prf              = s1_in.isPrefetch
   val s1_hw_prf           = s1_in.isHWPrefetch
@@ -763,14 +761,14 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.forward_mshr.paddr  := s1_out.paddr
 
   // rar pre enqueue check
-  io.lsq.ldld_nuke_query.pre_req.valid := s1_valid && !s1_exception
-  io.lsq.ldld_nuke_query.pre_req.bits := DontCare
-  io.lsq.ldld_nuke_query.pre_req.bits.uop  := s1_in.uop
+  io.lsq.nuke.rar.prealloc := s1_valid && !s1_exception
+  io.lsq.nuke.rar.lqIdx := s1_in.uop.lqIdx
+  io.lsq.nuke.rar.sqIdx := s1_in.uop.sqIdx
 
   // raw pre enqueue check
-  io.lsq.stld_nuke_query.pre_req.valid := s1_valid && !s1_exception
-  io.lsq.stld_nuke_query.pre_req.bits := DontCare
-  io.lsq.stld_nuke_query.pre_req.bits.uop := s1_in.uop
+  io.lsq.nuke.raw.prealloc := s1_valid && !s1_exception
+  io.lsq.nuke.raw.lqIdx := s1_in.uop.lqIdx
+  io.lsq.nuke.raw.sqIdx := s1_in.uop.sqIdx
 
   XSDebug(s1_valid,
     p"S1: pc ${Hexadecimal(s1_out.uop.cf.pc)}, lId ${Hexadecimal(s1_out.uop.lqIdx.asUInt)}, tlb_miss ${io.tlb.resp.bits.miss}, " +
@@ -908,18 +906,18 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_data_fwded = s2_dcache_miss && (s2_full_fwd || s2_cache_tag_error)
 
   // ld-ld violation require
-  io.lsq.ldld_nuke_query.req.valid           := s2_valid && s2_troublem
-  io.lsq.ldld_nuke_query.req.bits.uop        := s2_in.uop
-  io.lsq.ldld_nuke_query.req.bits.mask       := s2_in.mask
-  io.lsq.ldld_nuke_query.req.bits.paddr      := s2_in.paddr
-  io.lsq.ldld_nuke_query.req.bits.data_valid := Mux(s2_full_fwd || s2_fwd_data_valid, true.B, !s2_dcache_miss)
+  io.lsq.nuke.rar.alloc := s2_valid && s2_troublem
+  io.lsq.nuke.rar.uop   := s2_in.uop
+  io.lsq.nuke.rar.mask  := s2_in.mask
+  io.lsq.nuke.rar.paddr := s2_in.paddr
+  io.lsq.nuke.rar.dataInvalid := !Mux(s2_full_fwd || s2_fwd_data_valid, true.B, !s2_dcache_miss)
 
   // st-ld violation require
-  io.lsq.stld_nuke_query.req.valid           := s2_valid && s2_troublem
-  io.lsq.stld_nuke_query.req.bits.uop        := s2_in.uop
-  io.lsq.stld_nuke_query.req.bits.mask       := s2_in.mask
-  io.lsq.stld_nuke_query.req.bits.paddr      := s2_in.paddr
-  io.lsq.stld_nuke_query.req.bits.data_valid := Mux(s2_full_fwd || s2_fwd_data_valid, true.B, !s2_dcache_miss)
+  io.lsq.nuke.raw.alloc := s2_valid && s2_troublem
+  io.lsq.nuke.raw.uop   := s2_in.uop
+  io.lsq.nuke.raw.mask  := s2_in.mask
+  io.lsq.nuke.raw.paddr := s2_in.paddr
+  io.lsq.nuke.raw.dataInvalid := !Mux(s2_full_fwd || s2_fwd_data_valid, true.B, !s2_dcache_miss)
 
   // merge forward result
   // lsq has higher priority than sbuffer
@@ -1079,8 +1077,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_vp_match_fail = RegNext(io.lsq.forward.matchInvalid || io.sbuffer.matchInvalid) && s3_troublem
   val s3_rep_frm_fetch = s3_vp_match_fail
   val s3_ldld_rep_inst =
-      io.lsq.ldld_nuke_query.resp.valid &&
-      io.lsq.ldld_nuke_query.resp.bits.rep_frm_fetch &&
+      io.lsq.nuke.rar.nuke &&
       RegNext(io.csrCtrl.ldld_vio_check_enable)
   val s3_flushPipe = s3_ldld_rep_inst
 
@@ -1138,8 +1135,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.lsq.ldin.bits.uop := s3_out.bits.uop
 
   val s3_revoke = io.lsq.ldin.bits.rep_info.need_rep
-  io.lsq.ldld_nuke_query.revoke := s3_revoke
-  io.lsq.stld_nuke_query.revoke := s3_revoke
+  io.lsq.nuke.rar.revoke := s3_revoke
+  io.lsq.nuke.raw.revoke := s3_revoke
 
   // feedback slow
   s3_fast_rep := RegNext(s2_fast_rep)
