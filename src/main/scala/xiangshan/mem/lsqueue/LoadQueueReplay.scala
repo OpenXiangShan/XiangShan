@@ -225,6 +225,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     size = LoadQueueReplaySize,
     allocWidth = LoadPipelineWidth,
     freeWidth = 4,
+    regOut = true,
     enablePreAlloc = true,
     moduleName = "LoadQueueReplay freelist"
   ))

@@ -82,7 +82,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     size = LoadQueueRARSize,
     allocWidth = LoadPipelineWidth,
     freeWidth = 4,
-    enablePreAlloc = false,
+    enablePreAlloc = true,
     moduleName = "LoadQueueRAR freelist"
   ))
   freeList.io := DontCare
@@ -108,9 +108,8 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   for ((req, w) <- io.query.zipWithIndex) {
     freeList.io.allocateReq(w) := true.B
 
-    val offset = PopCount(s0_preEnqs.take(w))
-    s0_canAccepts(w) := freeList.io.canAllocate(offset)
-    s0_enqIdxs(w) := freeList.io.allocateSlot(offset)
+    s0_canAccepts(w) := freeList.io.canAllocate(w)
+    s0_enqIdxs(w) := freeList.io.allocateSlot(w)
     req.nack := !s0_canAccepts(w)
   }
 
@@ -121,6 +120,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   val s1_canAccepts = RegNext(s0_canAccepts)
   val s1_enqIdxs = RegNext(s0_enqIdxs)
   val s1_accepts = Wire(Vec(LoadPipelineWidth, Bool()))
+  val s1_offset = Wire(Vec(LoadPipelineWidth, UInt()))
 
   for ((enq, w) <- io.query.zipWithIndex) {
     s1_accepts(w) := false.B
@@ -128,8 +128,10 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     freeList.io.doAllocate(w) := false.B
 
     //  Allocate ready
-    val canAccept = s1_canAccepts(w)
-    val enqIndex = s1_enqIdxs(w)
+    val offset = PopCount(s1_needEnqs.take(w))
+    val canAccept = s1_canAccepts(offset)
+    val enqIndex = s1_enqIdxs(offset)
+    s1_offset(w) := offset
 
     when (s1_needEnqs(w) && canAccept) {
       s1_accepts(w) := true.B
@@ -180,11 +182,12 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
 
   // if need replay revoke entry
   val s2_accepts = RegNext(s1_accepts)
-  val s2_enqIdxs = RegNext(s1_enqIdxs)
-
+  val s2_enqIdxs = RegNext(VecInit(s1_offset.map(x => s1_enqIdxs(x))))
   for ((revoke, w) <- io.query.map(_.revoke).zipWithIndex) {
-    val revokeValid = revoke && s2_accepts(w)
-    val revokeIndex = s2_enqIdxs(w)
+    val s2_accept = s2_accepts(w)
+    val s2_enqIdx = s2_enqIdxs(w)
+    val revokeValid = revoke && s2_accept
+    val revokeIndex = s2_enqIdx
 
     when (allocated(revokeIndex) && revokeValid) {
       allocated(revokeIndex) := false.B
