@@ -152,7 +152,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   arb2.io.in(InArbPTWPort).bits.isHptw := false.B 
   arb2.io.in(InArbPTWPort).bits.hptwId := DontCare
   ptw.io.llptw.ready := arb2.io.in(InArbPTWPort).ready
-  block_decoupled(missQueue.io.out, arb2.io.in(InArbMissQueuePort), !ptw.io.req.ready)
+  block_decoupled(missQueue.io.out, arb2.io.in(InArbMissQueuePort), Mux(missQueue.io.out.bits.isHptw, !hptw.io.req.ready, !ptw.io.req.ready))
 
   arb2.io.in(InArbTlbPort).valid := arb1.io.out.valid
   arb2.io.in(InArbTlbPort).bits.req_info.vpn := arb1.io.out.bits.vpn
