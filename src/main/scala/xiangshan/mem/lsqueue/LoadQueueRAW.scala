@@ -107,7 +107,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val s0_preReqs = io.query.map(_.prealloc)
   val allAddrCheck = io.stIssuePtr === io.stAddrReadySqPtr
   val s0_hasAddrInvalidStore = io.query.map(x => {
-    x.prealloc && Mux(!allAddrCheck, isBefore(io.stAddrReadySqPtr, x.sqIdx), false.B)
+    Mux(!allAddrCheck, isBefore(io.stAddrReadySqPtr, x.sqIdx), false.B)
   })
   val s0_preEnqs = s0_preReqs.zip(s0_hasAddrInvalidStore).map { case (v, r) => v && r }
   val s0_canAccepts = Wire(Vec(LoadPipelineWidth, Bool()))
@@ -118,12 +118,12 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
     s0_canAccepts(w) := freeList.io.canAllocate(w)
     s0_enqIdxs(w) := freeList.io.allocateSlot(w)
-    req.nack := !s0_canAccepts(w)
+    req.nack := Mux(s0_hasAddrInvalidStore(w), !s0_canAccepts(w), false.B)
   }
 
   // Allocate logic
   val s1_canEnqs = io.query.map(_.alloc)
-  val s1_hasAddrInvalidStore = RegNext(VecInit(s0_hasAddrInvalidStore))
+  val s1_hasAddrInvalidStore = RegNext(VecInit(s0_preReqs.zip(s0_hasAddrInvalidStore).map(x => x._1 && x._2)))
   val s1_needEnqs = s1_canEnqs.zip(s1_hasAddrInvalidStore).map { case (v, r) => v && r }
   val s1_canAccepts = RegNext(s0_canAccepts)
   val s1_enqIdxs = RegNext(s0_enqIdxs)

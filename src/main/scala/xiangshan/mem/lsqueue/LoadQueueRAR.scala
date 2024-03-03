@@ -100,7 +100,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   // exception).
   // pre-Allocate logic
   val s0_preReqs = io.query.map(_.prealloc)
-  val s0_hasNotWritebackedLoad = io.query.map(x => x.prealloc && isAfter(x.lqIdx, io.ldWbPtr))
+  val s0_hasNotWritebackedLoad = io.query.map(x => isAfter(x.lqIdx, io.ldWbPtr))
   val s0_preEnqs = s0_preReqs.zip(s0_hasNotWritebackedLoad).map { case (v, r) => v && r }
   val s0_canAccepts = Wire(Vec(LoadPipelineWidth, Bool()))
   val s0_enqIdxs = Wire(Vec(LoadPipelineWidth, UInt()))
@@ -110,12 +110,12 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
 
     s0_canAccepts(w) := freeList.io.canAllocate(w)
     s0_enqIdxs(w) := freeList.io.allocateSlot(w)
-    req.nack := !s0_canAccepts(w)
+    req.nack := Mux(s0_hasNotWritebackedLoad(w), !s0_canAccepts(w), false.B)
   }
 
   // Allocate logic
   val s1_canEnqs = io.query.map(_.alloc)
-  val s1_hasNotWritebackedLoad = RegNext(VecInit(s0_hasNotWritebackedLoad))
+  val s1_hasNotWritebackedLoad = RegNext(VecInit(s0_preReqs.zip(s0_hasNotWritebackedLoad).map(x => x._1 && x._2)))
   val s1_needEnqs = s1_canEnqs.zip(s1_hasNotWritebackedLoad).map { case (v, r) => v && r }
   val s1_canAccepts = RegNext(s0_canAccepts)
   val s1_enqIdxs = RegNext(s0_enqIdxs)
