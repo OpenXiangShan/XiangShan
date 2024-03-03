@@ -104,26 +104,26 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
   //  LoadQueueRAW enqueue
   // pre-Allocate logic
-  val s0_preReqs = io.query.map(_.pre_req.valid)
+  val s0_preReqs = io.query.map(_.prealloc)
   val allAddrCheck = io.stIssuePtr === io.stAddrReadySqPtr
-  val s0_hasAddrInvalidStore = io.query.map(_.pre_req).map(x => {
-    x.valid && Mux(!allAddrCheck, isBefore(io.stAddrReadySqPtr, x.bits.uop.sqIdx), false.B)
+  val s0_hasAddrInvalidStore = io.query.map(x => {
+    x.alloc && Mux(!allAddrCheck, isBefore(io.stAddrReadySqPtr, x.sqIdx), false.B)
   })
   val s0_preEnqs = s0_preReqs.zip(s0_hasAddrInvalidStore).map { case (v, r) => v && r }
   val s0_canAccepts = Wire(Vec(LoadPipelineWidth, Bool()))
   val s0_enqIdxs = Wire(Vec(LoadPipelineWidth, UInt()))
 
-  for ((pre_req, w) <- io.query.map(_.pre_req).zipWithIndex) {
+  for ((req, w) <- io.query.zipWithIndex) {
     freeList.io.allocateReq(w) := true.B
 
     val offset = PopCount(s0_preEnqs.take(w))
     s0_canAccepts(w) := freeList.io.canAllocate(offset)
     s0_enqIdxs(w) := freeList.io.allocateSlot(offset)
-    pre_req.ready := s0_canAccepts(w)
+    req.nack := !s0_canAccepts(w)
   }
 
   // Allocate logic
-  val s1_canEnqs = io.query.map(_.req.valid)
+  val s1_canEnqs = io.query.map(_.alloc)
   val s1_hasAddrInvalidStore = RegNext(VecInit(s0_hasAddrInvalidStore))
   val s1_needEnqs = s1_canEnqs.zip(s1_hasAddrInvalidStore).map { case (v, r) => v && r }
   val s1_canAccepts = RegNext(s0_canAccepts)
@@ -133,7 +133,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val bypassMask = Reg(Vec(LoadPipelineWidth, UInt((VLEN/8).W)))
 
 
-  for ((enq, w) <- io.query.map(_.req).zipWithIndex) {
+  for ((enq, w) <- io.query.zipWithIndex) {
     s1_accepts(w) := false.B
     paddrModule.io.wen(w) := false.B
     maskModule.io.wen(w) := false.B
@@ -147,7 +147,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     when (s1_needEnqs(w) && canAccept) {
       s1_accepts(w) := true.B
 
-      val debug_robIdx = enq.bits.uop.robIdx.asUInt
+      val debug_robIdx = enq.uop.robIdx.asUInt
       XSError(allocated(enqIndex), p"LoadQueueRAW: You can not write an valid entry! check: ldu $w, robIdx $debug_robIdx")
 
       freeList.io.doAllocate(w) := true.B
@@ -158,24 +158,23 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
       //  Write paddr
       paddrModule.io.wen(w) := true.B
       paddrModule.io.waddr(w) := enqIndex
-      paddrModule.io.wdata(w) := enq.bits.paddr
-      bypassPAddr(w) := enq.bits.paddr
+      paddrModule.io.wdata(w) := enq.paddr
+      bypassPAddr(w) := enq.paddr
 
       //  Write mask
       maskModule.io.wen(w) := true.B
       maskModule.io.waddr(w) := enqIndex
-      maskModule.io.wdata(w) := enq.bits.mask
-      bypassMask(w) := enq.bits.mask
+      maskModule.io.wdata(w) := enq.mask
+      bypassMask(w) := enq.mask
 
       //  Fill info
-      uop(enqIndex) := enq.bits.uop
-      datavalid(enqIndex) := enq.bits.data_valid
+      uop(enqIndex) := enq.uop
+      datavalid(enqIndex) := !enq.dataInvalid
     }
   }
 
-  for ((query, w) <- io.query.map(_.resp).zipWithIndex) {
-    query.valid := RegNext(io.query(w).req.valid)
-    query.bits.rep_frm_fetch := RegNext(false.B)
+  for ((query, w) <- io.query.zipWithIndex) {
+    query.nuke := RegNext(false.B)
   }
 
   //  LoadQueueRAW deallocate

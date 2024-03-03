@@ -98,9 +98,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val redirect = Flipped(Valid(new Redirect))
     val enq = new LqEnqIO
     val ldu = new Bundle() {
-        val stld_nuke_query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO)) // from load_s2
-        val ldld_nuke_query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO)) // from load_s2
-        val ldin         = Vec(LoadPipelineWidth, Flipped(Decoupled(new LqWriteBundle))) // from load_s3
+        val ldin = Vec(LoadPipelineWidth, Flipped(Decoupled(new LqWriteBundle))) // from load_s3
+        val nuke = Vec(LoadPipelineWidth, Flipped(new NukeQueryIO))
     }
     val sta = new Bundle() {
       val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // from store_s1
@@ -153,10 +152,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueRAR.io.release  <> io.release
   loadQueueRAR.io.ldWbPtr  <> virtualLoadQueue.io.ldWbPtr
   for (w <- 0 until LoadPipelineWidth) {
-    loadQueueRAR.io.query(w).pre_req <> io.ldu.ldld_nuke_query(w).pre_req // from load_s1
-    loadQueueRAR.io.query(w).req    <> io.ldu.ldld_nuke_query(w).req // from load_s2
-    loadQueueRAR.io.query(w).resp   <> io.ldu.ldld_nuke_query(w).resp // to load_s3
-    loadQueueRAR.io.query(w).revoke := io.ldu.ldld_nuke_query(w).revoke // from load_s3
+    loadQueueRAR.io.query(w) <> io.ldu.nuke(w).rar // from load_s1
   }
 
   /**
@@ -168,10 +164,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueRAW.io.stAddrReadySqPtr <> io.sq.stAddrReadySqPtr
   loadQueueRAW.io.stIssuePtr       <> io.sq.stIssuePtr
   for (w <- 0 until LoadPipelineWidth) {
-    loadQueueRAW.io.query(w).pre_req <> io.ldu.stld_nuke_query(w).pre_req // from load_s1
-    loadQueueRAW.io.query(w).req    <> io.ldu.stld_nuke_query(w).req // from load_s2
-    loadQueueRAW.io.query(w).resp   <> io.ldu.stld_nuke_query(w).resp // to load_s3
-    loadQueueRAW.io.query(w).revoke := io.ldu.stld_nuke_query(w).revoke // from load_s3
+    loadQueueRAW.io.query(w) <> io.ldu.nuke(w).raw // from load_s1
   }
 
   /**
