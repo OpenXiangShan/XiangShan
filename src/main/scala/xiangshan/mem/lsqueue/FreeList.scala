@@ -22,7 +22,13 @@ import utils._
 import utility._
 import xiangshan._
 
-class FreeList(size: Int, allocWidth: Int, freeWidth: Int, enablePreAlloc: Boolean = false, moduleName: String = "")(implicit p: Parameters) extends XSModule
+class FreeList(
+  size: Int,
+  allocWidth: Int,
+  freeWidth: Int,
+  enablePreAlloc: Boolean = false,
+  regOut: Boolean = false,
+  moduleName: String = "")(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper
   with HasPerfEvents
 {
@@ -108,20 +114,29 @@ class FreeList(size: Int, allocWidth: Int, freeWidth: Int, enablePreAlloc: Boole
   val doAllocate = io.doAllocate.asUInt.orR
   val numAllocate = PopCount(io.doAllocate)
   val freeSlotCnt = RegInit(size.U(log2Up(size + 1).W))
+  val canAllocate = Wire(Vec(allocWidth, Bool()))
+  val allocateSlot = Wire(Vec(allocWidth, UInt()))
 
   for (i <- 0 until allocWidth) {
     val offset = PopCount(io.allocateReq.take(i))
 
     if (enablePreAlloc) {
       val deqPtr = headPtr + numAllocate + offset
-      io.canAllocate(i) := RegNext(isBefore(deqPtr, tailPtr))
-      io.allocateSlot(i) := RegNext(freeList(deqPtr.value))
+      canAllocate(i) := isBefore(deqPtr, tailPtr)
+      allocateSlot(i) := freeList(deqPtr.value)
     } else {
       val deqPtr = headPtr + offset
-      io.canAllocate(i) := isBefore(deqPtr, tailPtr)
-      io.allocateSlot(i) := freeList(deqPtr.value)
+      canAllocate(i) := isBefore(deqPtr, tailPtr)
+      allocateSlot(i) := freeList(deqPtr.value)
     }
 
+    if (regOut) {
+      io.canAllocate(i) := RegNext(canAllocate(i))
+      io.allocateSlot(i) := RegNext(allocateSlot(i))
+    } else {
+      io.canAllocate(i) := canAllocate(i)
+      io.allocateSlot(i) := allocateSlot(i)
+    }
   }
 
   headPtrNext := headPtr + numAllocate

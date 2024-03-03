@@ -97,7 +97,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     size = LoadQueueRAWSize,
     allocWidth = LoadPipelineWidth,
     freeWidth = 4,
-    enablePreAlloc = false,
+    enablePreAlloc = true,
     moduleName = "LoadQueueRAW freelist"
   ))
   freeList.io := DontCare
@@ -107,7 +107,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val s0_preReqs = io.query.map(_.prealloc)
   val allAddrCheck = io.stIssuePtr === io.stAddrReadySqPtr
   val s0_hasAddrInvalidStore = io.query.map(x => {
-    x.alloc && Mux(!allAddrCheck, isBefore(io.stAddrReadySqPtr, x.sqIdx), false.B)
+    x.prealloc && Mux(!allAddrCheck, isBefore(io.stAddrReadySqPtr, x.sqIdx), false.B)
   })
   val s0_preEnqs = s0_preReqs.zip(s0_hasAddrInvalidStore).map { case (v, r) => v && r }
   val s0_canAccepts = Wire(Vec(LoadPipelineWidth, Bool()))
@@ -116,9 +116,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   for ((req, w) <- io.query.zipWithIndex) {
     freeList.io.allocateReq(w) := true.B
 
-    val offset = PopCount(s0_preEnqs.take(w))
-    s0_canAccepts(w) := freeList.io.canAllocate(offset)
-    s0_enqIdxs(w) := freeList.io.allocateSlot(offset)
+    s0_canAccepts(w) := freeList.io.canAllocate(w)
+    s0_enqIdxs(w) := freeList.io.allocateSlot(w)
     req.nack := !s0_canAccepts(w)
   }
 
@@ -129,6 +128,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val s1_canAccepts = RegNext(s0_canAccepts)
   val s1_enqIdxs = RegNext(s0_enqIdxs)
   val s1_accepts = Wire(Vec(LoadPipelineWidth, Bool()))
+  val s1_offset = Wire(Vec(LoadPipelineWidth, UInt()))
   val bypassPAddr = Reg(Vec(LoadPipelineWidth, UInt(PAddrBits.W)))
   val bypassMask = Reg(Vec(LoadPipelineWidth, UInt((VLEN/8).W)))
 
@@ -143,6 +143,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     val offset = PopCount(s1_needEnqs.take(w))
     val canAccept = s1_canAccepts(offset)
     val enqIndex = s1_enqIdxs(offset)
+    s1_offset(w) := offset
 
     when (s1_needEnqs(w) && canAccept) {
       s1_accepts(w) := true.B
@@ -198,11 +199,12 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
   // if need replay deallocate entry
   val s2_accepts = RegNext(s1_accepts)
-  val s2_enqIdxs = RegNext(s1_enqIdxs)
-
+  val s2_enqIdxs = RegNext(VecInit(s1_offset.map(x => s1_enqIdxs(x))))
   for ((revoke, w) <- io.query.map(_.revoke).zipWithIndex) {
-    val revokeValid = revoke && s2_accepts(w)
-    val revokeIndex = s2_enqIdxs(w)
+    val s2_accept = s2_accepts(w)
+    val s2_enqIdx = s2_enqIdxs(w)
+    val revokeValid = revoke && s2_accept
+    val revokeIndex = s2_enqIdx
 
     when (allocated(revokeIndex) && revokeValid) {
       allocated(revokeIndex) := false.B
@@ -322,7 +324,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     val bypassPaddrMask = RegNext(VecInit((0 until LoadPipelineWidth).map(j => bypassPAddr(j)(PAddrBits-1, DCacheVWordOffset) === io.storeIn(i).bits.paddr(PAddrBits-1, DCacheVWordOffset))))
     val bypassMMask = RegNext(VecInit((0 until LoadPipelineWidth).map(j => (bypassMask(j) & io.storeIn(i).bits.mask).orR)))
     val bypassMaskUInt = (0 until LoadPipelineWidth).map(j =>
-      Fill(LoadQueueRAWSize, RegNext(RegNext(s1_accepts(j)))) & Mux(bypassPaddrMask(j) && bypassMMask(j), UIntToOH(RegNext(RegNext(s1_enqIdxs(j)))), 0.U(LoadQueueRAWSize.W))
+      Fill(LoadQueueRAWSize, RegNext(s2_accepts(j))) & Mux(bypassPaddrMask(j) && bypassMMask(j), UIntToOH(RegNext(s2_enqIdxs(j))), 0.U(LoadQueueRAWSize.W))
     ).reduce(_|_)
 
     val addrMaskMatch = RegNext(paddrModule.io.violationMmask(i).asUInt & maskModule.io.violationMmask(i).asUInt) | bypassMaskUInt
