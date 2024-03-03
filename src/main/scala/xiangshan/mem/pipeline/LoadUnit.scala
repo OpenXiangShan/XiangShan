@@ -997,14 +997,14 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                         s2_bank_conflict_orig ||
                         s2_wpu_pred_fail_orig ||
                         s2_rar_nack ||
-                        s2_raw_nack ||
-                        s2_in.rep_info.nuke)
+                        s2_raw_nack)
   io.fast_uop.valid := RegNext(
     !io.dcache.s1_disable_fast_wakeup &&
     s1_valid &&
     !io.tlb.resp.bits.miss &&
     !io.lsq.forward.dataInvalidFast &&
-    !io.lsq.forward.addrInvalidFast
+    !io.lsq.forward.addrInvalidFast &&
+    !(s1_nuke && !s1_sw_prf)
   ) && (s2_valid && s2_can_wakeup && !s2_mmio)
   io.fast_uop.bits := RegNext(s1_out.uop)
 
