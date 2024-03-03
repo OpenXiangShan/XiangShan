@@ -314,16 +314,15 @@ class StoreAddrUnit(implicit p: Parameters) extends XSModule with HasDCacheParam
   val s4_kill   = s4_in.uop.robIdx.needFlush(io.redirect)
   val s4_can_go = io.stout.ready
   val s4_fire   = s4_valid && !s4_kill && s4_can_go
+  val s4_bad_nuke_detected = io.stld_nuke_query.nuke
 
   when (s3_fire) { s4_valid := (!s3_mmio || s3_exception) && !s3_out.isHWPrefetch  }
   .elsewhen (s4_fire) { s4_valid := false.B }
   .elsewhen (s4_kill) { s4_valid := false.B }
 
   // wb: writeback
-  val s4_bad_nuke_detected = io.stld_nuke_query.nuke
   s4_out                     := DontCare
   s4_out.uop                 := s4_in.uop
-  s3_out.uop.ctrl.flushPipe  := s4_bad_nuke_detected
   s4_out.data                := DontCare
   s4_out.redirectValid       := false.B
   s4_out.redirect            := DontCare
@@ -333,9 +332,26 @@ class StoreAddrUnit(implicit p: Parameters) extends XSModule with HasDCacheParam
   s4_out.debug.isPerfCnt     := false.B
   s4_out.fflags              := DontCare
 
-  s4_ready := io.stout.ready
-  io.stout.valid := s4_valid
-  io.stout.bits := s4_out
+  // Pipeline
+  // --------------------------------------------------------------------------------
+  // stage 5 (like skid buffer)
+  // --------------------------------------------------------------------------------
+  // store write back
+  val s5_valid  = RegInit(false.B)
+  val s5_in     = RegEnable(s4_out, s4_fire)
+  val s5_out    = s5_in
+  val s5_kill   = s5_in.uop.robIdx.needFlush(io.redirect)
+  val s5_can_go = io.stout.ready
+  val s5_real_valid = s5_valid && !s5_kill
+  val s5_fire   = s5_real_valid && s5_can_go
+
+  when (s4_fire) { s5_valid := true.B & (s4_bad_nuke_detected || s5_real_valid) } // when detected bad nuke at s4 or skid buffer is full, into skip buffer
+  .elsewhen (s5_fire) { s5_valid := false.B }
+  .elsewhen (s5_kill) { s5_valid := false.B }
+
+  s4_ready := Mux(s5_real_valid, true.B, io.stout.ready)
+  io.stout.valid := s5_real_valid || s4_valid
+  io.stout.bits := Mux(s5_real_valid, s5_out, s4_out)
 
 
   io.debug_ls := DontCare
