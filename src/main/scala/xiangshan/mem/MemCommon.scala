@@ -279,26 +279,30 @@ class PipeLoadForwardQueryIO(implicit p: Parameters) extends LoadForwardQueryIO 
 //
 // Note that query req may be !ready, as dcache is releasing a block
 // If it happens, a replay from rs is needed.
-class LoadNukeQueryReq(implicit p: Parameters) extends XSBundleWithMicroOp { // provide lqIdx
-  // mask: load's data mask.
-  val mask = UInt((VLEN/8).W)
-
-  // paddr: load's paddr.
-  val paddr      = UInt(PAddrBits.W)
-  // dataInvalid: load data is invalid.
-  val data_valid = Bool()
-}
-
-class LoadNukeQueryResp(implicit p: Parameters) extends XSBundle {
-  // rep_frm_fetch: ld-ld violation check success, replay from fetch.
-  val rep_frm_fetch = Bool()
-}
-
 class LoadNukeQueryIO(implicit p: Parameters) extends XSBundle {
-  val pre_req = Decoupled(new LoadNukeQueryReq)
-  val req    = Valid(new LoadNukeQueryReq)
-  val resp   = Flipped(Valid(new LoadNukeQueryResp))
+  // pre allocation
+  val prealloc = Output(Bool())
+  val lqIdx = Output(new LqPtr)
+  val sqIdx = Output(new SqPtr)
+  val nack = Input(Bool())
+
+  // allocation
+  val alloc = Output(Bool())
+  val uop = Output(new MicroOp)
+  val mask = Output(UInt((VLEN/8).W))
+  val paddr = Output(UInt(PAddrBits.W))
+  val dataInvalid = Output(Bool())
+
+  // ld-ld violation check success, replay from fetch.
+  val nuke = Input(Bool())
+
+  // revoke RAR/RAW allocation
   val revoke = Output(Bool())
+}
+
+class NukeQueryIO(implicit p: Parameters) extends XSBundle {
+  val rar = new LoadNukeQueryIO
+  val raw = new LoadNukeQueryIO
 }
 
 class StoreNukeQueryReq(implicit p: Parameters) extends XSBundle {
