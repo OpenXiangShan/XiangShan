@@ -695,8 +695,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stu.io.tlb          <> dtlb_reqs.drop(exuParameters.LduCnt + 1)(i)
     stu.io.pmp          <> pmp_check(exuParameters.LduCnt + 1 + i).resp
     // stld nuke
-    stu.io.stld_nuke_query.nuke := RegNext(lsq.io.sta.storeNuke(i)) || // store s3 return
-                                   VecInit(loadUnits.map(x => RegNext(x.io.stld_nuke_query(i).nuke))).asUInt.orR // store s3 return
+    stu.io.stld_nuke_query.nuke := RegNext(lsq.io.sta.storeNuke(i))
     // prefetch
     stu.io.prefetch_req <> sbuffer.io.store_prefetch(i)
 
