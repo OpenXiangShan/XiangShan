@@ -228,12 +228,12 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     paddrModule.io.releaseMdata.takeRight(1)(0) := release1Cycle.bits.paddr
   }
 
-  val lastAllocIndexOH = lastAllocIndex.map(UIntToOH(_))
+  val lastAllocIndexOH = s2_enqIdxs.map(UIntToOH(_))
   val lastReleasePAddrMatch = VecInit((0 until LoadPipelineWidth).map(i => {
     (bypassPAddr(i)(PAddrBits-1, DCacheLineOffset) === release1Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset))
   }))
   (0 until LoadQueueRARSize).map(i => {
-    val bypassMatch = VecInit((0 until LoadPipelineWidth).map(j => lastCanAccept(j) && lastAllocIndexOH(j)(i) && lastReleasePAddrMatch(j))).asUInt.orR
+    val bypassMatch = VecInit((0 until LoadPipelineWidth).map(j => s2_accepts(j) && lastAllocIndexOH(j)(i) && lastReleasePAddrMatch(j))).asUInt.orR
     when (RegNext((paddrModule.io.releaseMmask.takeRight(1)(0)(i) || bypassMatch) && allocated(i) && release1Cycle.valid)) {
       // Note: if a load has missed in dcache and is waiting for refill in load queue,
       // its released flag still needs to be set as true if addr matches.
