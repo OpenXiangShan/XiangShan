@@ -802,11 +802,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // if such exception happen, that inst and its exception info
   // will be force writebacked to rob
   val s2_exception_vec = WireInit(s2_in.uop.cf.exceptionVec)
-  val s2_weak_exception_vec = WireInit(s2_in.uop.cf.exceptionVec)
   when (!s2_in.delayedLoadError) {
     s2_exception_vec(loadAccessFault) := s2_in.uop.cf.exceptionVec(loadAccessFault) || s2_pmp.ld ||
-                                       (io.dcache.resp.bits.tag_error && RegNext(io.csrCtrl.cache_error_enable))
-    s2_weak_exception_vec(loadAccessFault) := s2_in.uop.cf.exceptionVec(loadAccessFault) ||
                                        (io.dcache.resp.bits.tag_error && RegNext(io.csrCtrl.cache_error_enable))
   }
 
@@ -814,10 +811,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // be triggered)
   when (!s2_in.delayedLoadError && (s2_prf || s2_in.tlbMiss)) {
     s2_exception_vec := 0.U.asTypeOf(s2_exception_vec.cloneType)
-    s2_weak_exception_vec := 0.U.asTypeOf(s2_weak_exception_vec.cloneType)
   }
   val s2_exception = ExceptionNO.selectByFu(s2_exception_vec, lduCfg).asUInt.orR
-  val s2_weak_exception = ExceptionNO.selectByFu(s2_weak_exception_vec, lduCfg).asUInt.orR
 
   val (s2_fwd_frm_d_chan, s2_fwd_data_frm_d_chan) = io.tl_d_channel.forward(s1_valid && s1_out.forward_tlDchannel, s1_out.mshrid, s1_out.paddr)
   val (s2_fwd_data_valid, s2_fwd_frm_mshr, s2_fwd_data_frm_mshr) = io.forward_mshr.forward()
@@ -830,7 +825,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_actually_mmio = s2_pmp.mmio && !s2_not_tlb_query
   val s2_mmio          = !s2_prf &&
                           s2_actually_mmio &&
-                         !s2_weak_exception &&
                          !s2_in.tlbMiss
 
   val s2_full_fwd      = Wire(Bool())
@@ -878,7 +872,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_cache_tag_error = RegNext(io.csrCtrl.cache_error_enable) &&
                            io.dcache.resp.bits.tag_error
 
-  val s2_troublem        = !s2_weak_exception &&
+  val s2_troublem        = !s2_exception &&
                            !s2_mmio &&
                            !s2_prf &&
                            !s2_in.delayedLoadError
@@ -940,7 +934,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s2_out                     := s2_in
   s2_out.data                := 0.U // data will be generated in load s3
   s2_out.uop.ctrl.fpWen      := s2_in.uop.ctrl.fpWen && !s2_exception
-  s2_out.mmio                := s2_mmio
+  s2_out.mmio                := s2_mmio && !s2_exception
   s2_out.uop.ctrl.flushPipe  := false.B
   s2_out.uop.cf.exceptionVec := s2_exception_vec
   s2_out.forwardMask         := s2_fwd_mask
