@@ -349,8 +349,8 @@ class StoreAddrUnit(implicit p: Parameters) extends XSModule with HasDCacheParam
   .elsewhen (s5_fire) { s5_valid := false.B }
   .elsewhen (s5_kill) { s5_valid := false.B }
 
-  s4_ready := Mux(s5_real_valid, true.B, io.stout.ready)
-  io.stout.valid := s5_real_valid || s4_valid
+  s4_ready := Mux(s5_real_valid || s4_bad_nuke_detected, true.B, io.stout.ready)
+  io.stout.valid := s5_real_valid || (s4_valid && !s4_bad_nuke_detected)
   io.stout.bits := Mux(s5_real_valid, s5_out, s4_out)
 
 
