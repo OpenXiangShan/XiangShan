@@ -799,9 +799,11 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   val storeDeq = (storeIqsEnqPorts.take(storeIqsEnqPorts.length / 2) ++ hybridIqsEnqPorts.map(_.reverse).reverse.take(hybridIqsEnqPorts.length / 2) ++
                   storeIqsEnqPorts.drop(storeIqsEnqPorts.length / 2) ++ hybridIqsEnqPorts.map(_.reverse).reverse.drop(hybridIqsEnqPorts.length / 2)).flatten
 
+  val expendedStuDeq = expendedFuDeqMap.get(Seq(stu)).getOrElse(Seq()) ++ expendedFuDeqMap.get(Seq(stu, mou)).getOrElse(Seq())
+
   require(loadMoreHyuDeq.sorted == expendedFuDeqMap(Seq(ldu)).sorted)
   require(loadLessHyuDeq.sorted == expendedFuDeqMap(Seq(ldu)).sorted)
-  require(storeDeq.sorted == expendedFuDeqMap(Seq(stu)).sorted)
+  require(storeDeq.sorted == expendedStuDeq.sorted)
 
   // Seq(storeCnt)(priority)
   val loadMoreHyuDeqSeq: Seq[Seq[Int]] = Seq.fill(numEnq + 1)(loadMoreHyuDeq)
@@ -809,7 +811,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   val storeDeqSeq: Seq[Seq[Int]] = Seq.fill(numEnq + 1)(storeDeq)
 
   require(expendedFuDeqMap(Seq(ldu)).max - expendedFuDeqMap(Seq(ldu)).min == expendedFuDeqMap(Seq(ldu)).length - 1)
-  require(expendedFuDeqMap(Seq(stu)).max - expendedFuDeqMap(Seq(stu)).min == expendedFuDeqMap(Seq(stu)).length - 1)
+  require(expendedStuDeq.max - expendedStuDeq.min == expendedStuDeq.length - 1)
 
   private abstract class LoadOrStore(val isStore: Boolean) { def isLoad = !isStore }
   private case class Load() extends LoadOrStore(false)
@@ -863,20 +865,18 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   }
 
   // port flip for load/store load balance
-  val loadSwapMap = (loadIqsEnqPorts.map(ports => ports.zipWithIndex.map { case (port, idx) => (port -> ports((idx + 1) % ports.length)) }) ++
+  val loadSwapMap = (loadIqsEnqPorts.map(ports => ports.zipWithIndex.map { case (port, idx) => (port -> ports(ports.length - 1 - idx)) }) ++
                      hybridIqsEnqPorts.map(_.map(port => (port -> port)))).flatten.sortBy(_._1).unzip._2
-  val storeSwapMap = stHyIqsEnqPorts.map(ports => ports.zipWithIndex.map { case (port, idx) => (port -> ports((idx + 1) % ports.length)) }).flatten.sortBy(_._1).unzip._2
+  val storeSwapMap = stHyIqsEnqPorts.map(ports => ports.zipWithIndex.map { case (port, idx) => (port -> ports(ports.length - 1 - idx)) }).flatten.sortBy(_._1).unzip._2
 
   val loadFlipMap = loadSwapMap.map(x => (1 << x - loadSwapMap.min).U(loadSwapMap.length.W))
   val storeFlipMap = storeSwapMap.map(x => (1 << x - storeSwapMap.min).U(storeSwapMap.length.W))
 
   val loadIqValidCnt = loadIqIdx.map(io.iqValidCnt)
-  require(loadIqValidCnt.length == 2)
   val sthyIqValidCnt = stHyIqIdx.map(io.iqValidCnt)
-  require(sthyIqValidCnt.length == 2)
 
-  val loadDeqNeedFlip = RegNext(loadIqValidCnt(1) < loadIqValidCnt(0)) && Constantin.createRecord("enableLoadBalance", true.B)(0)
-  val storeDeqNeedFlip = RegNext(sthyIqValidCnt(1) < sthyIqValidCnt(0)) && Constantin.createRecord("enableStoreBalance", true.B)(0)
+  val loadDeqNeedFlip = RegNext(loadIqValidCnt.last < loadIqValidCnt.head) && Constantin.createRecord("enableLoadBalance", true.B)(0)
+  val storeDeqNeedFlip = RegNext(sthyIqValidCnt.last < sthyIqValidCnt.head) && Constantin.createRecord("enableStoreBalance", true.B)(0)
   val loadValidDecoder = LoadValidTable.truthTable.map(decoder(EspressoMinimizer, inIsNotLoadVec, _))
   val storeValidDecoder = StoreValidTable.truthTable.map(decoder(EspressoMinimizer, inIsStoreVec, _))
 
