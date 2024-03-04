@@ -377,22 +377,20 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
   require(hyaEnqs.size == hydEnqs.size, s"number of enq ports of hybrid address IQs(${hyaEnqs.size}) " +
   s"should be equal to number of enq ports of hybrid data IQs(${hydEnqs.size})")
 
-  for ((idxInSchBlk, i) <- staIdxSeq.zipWithIndex) {
-    dispatch2Iq.io.out(idxInSchBlk).zip(staEnqs).zip(stdEnqs).foreach{ case((dp, staIQ), stdIQ) =>
-      val isAllReady = staIQ.ready && stdIQ.ready
-      dp.ready := isAllReady
-      staIQ.valid := dp.valid && isAllReady
-      stdIQ.valid := dp.valid && isAllReady && FuType.isStore(dp.bits.fuType)
-    }
+  val d2IqStaOut = dispatch2Iq.io.out.zipWithIndex.filter(staIdxSeq contains _._2).unzip._1.flatten
+  d2IqStaOut.zip(staEnqs).zip(stdEnqs).foreach{ case((dp, staIQ), stdIQ) =>
+    val isAllReady = staIQ.ready && stdIQ.ready
+    dp.ready := isAllReady
+    staIQ.valid := dp.valid && isAllReady
+    stdIQ.valid := dp.valid && isAllReady && FuType.FuTypeOrR(dp.bits.fuType, FuType.stu, FuType.mou)
   }
 
-  for ((idxInSchBlk, i) <- hyaIdxSeq.zipWithIndex) {
-    dispatch2Iq.io.out(idxInSchBlk).zip(hyaEnqs).zip(hydEnqs).foreach{ case((dp, hyaIQ), hydIQ) =>
-      val isAllReady = hyaIQ.ready && hydIQ.ready
-      dp.ready := isAllReady
-      hyaIQ.valid := dp.valid && isAllReady
-      hydIQ.valid := dp.valid && isAllReady && FuType.FuTypeOrR(dp.bits.fuType, FuType.stu, FuType.mou)
-    }
+  val d2IqHyaOut = dispatch2Iq.io.out.zipWithIndex.filter(hyaIdxSeq contains _._2).unzip._1.flatten
+  d2IqHyaOut.zip(hyaEnqs).zip(hydEnqs).foreach{ case((dp, hyaIQ), hydIQ) =>
+    val isAllReady = hyaIQ.ready && hydIQ.ready
+    dp.ready := isAllReady
+    hyaIQ.valid := dp.valid && isAllReady
+    hydIQ.valid := dp.valid && isAllReady && FuType.FuTypeOrR(dp.bits.fuType, FuType.stu, FuType.mou)
   }
 
   stDataIQs.zipWithIndex.foreach { case (iq, i) =>

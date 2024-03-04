@@ -384,18 +384,18 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   hybridUnits.zipWithIndex.map(x => x._1.suggestName("HybridUnit_"+x._2))
   val atomicsUnit = Module(new AtomicsUnit)
 
-  val hyuLdaWritebackOverride  = Mux(atomicsUnit.io.out.valid, atomicsUnit.io.out.bits, hybridUnits.head.io.ldout.bits)
-  val hyuLdOut = Wire(Decoupled(new MemExuOutput))
-  hyuLdOut.valid := atomicsUnit.io.out.valid || hybridUnits.head.io.ldout.valid
-  hyuLdOut.bits  := hyuLdaWritebackOverride
-  atomicsUnit.io.out.ready := hyuLdOut.ready
-  hybridUnits.head.io.ldout.ready := hyuLdOut.ready
+  val ldaWritebackOverride  = Mux(atomicsUnit.io.out.valid, atomicsUnit.io.out.bits, loadUnits.head.io.ldout.bits)
+  val ldaOut = Wire(Decoupled(new MemExuOutput))
+  ldaOut.valid := atomicsUnit.io.out.valid || loadUnits.head.io.ldout.valid
+  ldaOut.bits  := ldaWritebackOverride
+  atomicsUnit.io.out.ready := ldaOut.ready
+  loadUnits.head.io.ldout.ready := ldaOut.ready
 
-  val hyuLdExeWbReqs = hyuLdOut +: hybridUnits.tail.map(_.io.ldout)
-  io.mem_to_ooo.writebackLda <> loadUnits.map(_.io.ldout)
+  val ldaExeWbReqs = ldaOut +: loadUnits.tail.map(_.io.ldout)
+  io.mem_to_ooo.writebackLda <> ldaExeWbReqs
   io.mem_to_ooo.writebackSta <> storeUnits.map(_.io.stout)
   io.mem_to_ooo.writebackStd <> stdExeUnits.map(_.io.out)
-  io.mem_to_ooo.writebackHyuLda <> hyuLdExeWbReqs
+  io.mem_to_ooo.writebackHyuLda <> hybridUnits.map(_.io.ldout)
   io.mem_to_ooo.writebackHyuSta <> hybridUnits.map(_.io.stout)
   io.mem_to_ooo.otherFastWakeup := DontCare
   io.mem_to_ooo.otherFastWakeup.drop(HyuCnt).take(LduCnt).zip(loadUnits.map(_.io.fast_uop)).foreach{case(a,b)=> a := b}
@@ -664,9 +664,16 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     io.mem_to_ooo.wakeup.drop(HyuCnt)(i) := loadUnits(i).io.wakeup
 
     // vector
-    loadUnits(i).io.vecldin <> vlWrapper.io.pipeIssue(i)
-    vlWrapper.io.pipeReplay(i) <> loadUnits(i).io.vecReplay
-    vlWrapper.io.pipeResult(i) <> loadUnits(i).io.vecldout
+    if (i < VecLoadPipelineWidth) {
+      loadUnits(i).io.vecldin <> vlWrapper.io.pipeIssue(i)
+      vlWrapper.io.pipeReplay(i) <> loadUnits(i).io.vecReplay
+      vlWrapper.io.pipeResult(i) <> loadUnits(i).io.vecldout
+    } else {
+      loadUnits(i).io.vecldin.valid := false.B
+      loadUnits(i).io.vecldin.bits := DontCare
+      loadUnits(i).io.vecReplay.ready := false.B
+      loadUnits(i).io.vecldout.ready := false.B
+    }
     loadUnits(i).io.vec_forward <> vsFlowQueue.io.forward(i)
 
     // fast replay
