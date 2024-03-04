@@ -471,13 +471,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val isEmpty = enqPtr === deqPtr
   val isReplaying = io.redirect.valid && RedirectLevel.flushItself(io.redirect.bits.level)
 
-  val snptEnq = io.enq.canAccept && io.enq.req.map(x => x.valid && x.bits.snapshot).reduce(_ || _)
-  val snapshotPtrVec = Wire(Vec(RenameWidth, new RobPtr))
-  snapshotPtrVec(0) := io.enq.req(0).bits.robIdx
-  for (i <- 1 until RenameWidth) {
-    snapshotPtrVec(i) := snapshotPtrVec(0) + i.U
-  }
-  val snapshots = SnapshotGenerator(snapshotPtrVec, snptEnq, io.snpt.snptDeq, io.redirect.valid, io.snpt.flushVec)
+  val snptEnq = io.enq.canAccept && io.enq.req.head.valid && io.enq.req.head.bits.snapshot
+  val snapshots = SnapshotGenerator(enqPtrVec, snptEnq, io.snpt.snptDeq, io.redirect.valid, io.snpt.flushVec)
   val debug_lsIssue = WireDefault(debug_lsIssued)
   debug_lsIssue(deqPtr.value) := io.debugHeadLsIssue
 
