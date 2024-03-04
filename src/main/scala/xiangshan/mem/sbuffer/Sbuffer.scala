@@ -378,30 +378,31 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   io.in(0).ready := firstCanInsert
   io.in(1).ready := secondCanInsert && io.in(0).ready
 
-  for(i <- 0 until EnsbufferWidth) {
+  for (i <- 0 until EnsbufferWidth) {
     // train
-    if(EnableStorePrefetchSPB) {
+    if (EnableStorePrefetchSPB) {
       prefetcher.io.sbuffer_enq(i).valid := io.in(i).fire
       prefetcher.io.sbuffer_enq(i).bits := DontCare
       prefetcher.io.sbuffer_enq(i).bits.vaddr := io.in(i).bits.vaddr
-    }else {
+    } else {
       prefetcher.io.sbuffer_enq(i).valid := false.B
       prefetcher.io.sbuffer_enq(i).bits := DontCare
     }
 
     // prefetch req
-    if(EnableStorePrefetchAtCommit) {
-      if(EnableAtCommitMissTrigger) {
+    if (EnableStorePrefetchAtCommit) {
+      if (EnableAtCommitMissTrigger) {
         io.store_prefetch(i).valid := prefetcher.io.prefetch_req(i).valid || (io.in(i).fire && io.in(i).bits.prefetch)
-      }else {
+      } else {
         io.store_prefetch(i).valid := prefetcher.io.prefetch_req(i).valid || io.in(i).fire
       }
       io.store_prefetch(i).bits.paddr := DontCare
       io.store_prefetch(i).bits.vaddr := Mux(prefetcher.io.prefetch_req(i).valid, prefetcher.io.prefetch_req(i).bits.vaddr, io.in(i).bits.vaddr)
       prefetcher.io.prefetch_req(i).ready := io.store_prefetch(i).ready
-    }else {
+    } else {
       io.store_prefetch(i) <> prefetcher.io.prefetch_req(i)
     }
+    io.store_prefetch zip prefetcher.io.prefetch_req drop 2 foreach (x => x._1 <> x._2)
   }
   prefetcher.io.memSetPattenDetected := io.memSetPattenDetected
 
@@ -503,7 +504,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   }
 
   // for now, when enq, trigger a prefetch (if EnableAtCommitMissTrigger)
-  require(EnsbufferWidth == StorePipelineWidth)
+  require(EnsbufferWidth <= StorePipelineWidth)
 
   // ---------------------- Send Dcache Req ---------------------
 

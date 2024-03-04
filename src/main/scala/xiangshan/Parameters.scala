@@ -193,7 +193,7 @@ case class XSCoreParameters
   ),
   prefetcher: Option[PrefetcherParams] = Some(SMSParams()),
   LoadPipelineWidth: Int = 3,
-  StorePipelineWidth: Int = 2,
+  StorePipelineWidth: Int = 3,
   VecLoadPipelineWidth: Int = 2,
   VecStorePipelineWidth: Int = 2,
   VecMemSrcInWidth: Int = 2,
@@ -370,10 +370,13 @@ case class XSCoreParameters
 
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams("STA0", Seq(StaCfg, MouCfg), Seq(IntWB(6, 1)), Seq(Seq(IntRD(3, 1)))),
+        ExeUnitParams("STA0", Seq(StaCfg, MouCfg), Seq(IntWB(5, 1)), Seq(Seq(IntRD(3, 1)))),
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
-        ExeUnitParams("STA1", Seq(StaCfg, MouCfg), Seq(IntWB(7, 1)), Seq(Seq(IntRD(14, 0)))),
+        ExeUnitParams("STA1", Seq(StaCfg, MouCfg), Seq(IntWB(6, 1)), Seq(Seq(IntRD(14, 0)))),
+      ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
+      IssueBlockParams(Seq(
+        ExeUnitParams("STA2", Seq(StaCfg, MouCfg), Seq(IntWB(7, 1)), Seq(Seq(IntRD(15, 0)))),
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
         ExeUnitParams("LDU0", Seq(LduCfg), Seq(IntWB(5, 0), VfWB(5, 0)), Seq(Seq(IntRD(6, 0))), true, 2),
@@ -393,6 +396,9 @@ case class XSCoreParameters
       IssueBlockParams(Seq(
         ExeUnitParams("STD1", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(5, 1), VfRD(10, Int.MaxValue)))),
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
+      IssueBlockParams(Seq(
+        ExeUnitParams("STD2", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(9, 1), VfRD(10, Int.MaxValue)))),
+      ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
     ),
       numPregs = intPreg.numEntries max vfPreg.numEntries,
       numDeqOutside = 0,
@@ -408,7 +414,7 @@ case class XSCoreParameters
     Seq(
       WakeUpConfig(
         Seq("ALU0", "ALU1", "ALU2", "ALU3", "LDU0", "LDU1", "LDU2", "BJU0", "BJU1") ->
-        Seq("ALU0", "BJU0", "ALU1", "BJU1", "ALU2", "BJU2", "ALU3", "BJU3", "LDU0", "LDU1", "LDU2", "STA0", "STA1", "STD0", "STD1")
+        Seq("ALU0", "BJU0", "ALU1", "BJU1", "ALU2", "BJU2", "ALU3", "BJU3", "LDU0", "LDU1", "LDU2", "STA0", "STA1", "STA2", "STD0", "STD1", "STD2")
       ),
     ).flatten
   }
