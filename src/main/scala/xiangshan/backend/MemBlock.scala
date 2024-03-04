@@ -343,8 +343,14 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   val ldExeWbReqs = VecInit(Seq(loadUnits.head.io.ldout, ldout1)) ++ loadUnits.drop(2).map(_.io.ldout)
   io.mem_to_ooo.writeback <> ldExeWbReqs ++ VecInit(storeUnits.map(_.io.stout)) ++ VecInit(stdExeUnits.map(_.io.out))
+
+  // fast uop
+  val cancelFastWakeup = VecInit(storeUnits.map(_.io.stld_nuke_query.s2_valid)).asUInt.orR
   io.mem_to_ooo.otherFastWakeup := DontCare
-  io.mem_to_ooo.otherFastWakeup.take(2).zip(loadUnits.map(_.io.fast_uop)).foreach{case(a,b)=> a := b}
+  io.mem_to_ooo.otherFastWakeup.take(2).zip(loadUnits.map(_.io.fast_uop)).foreach{case(a,b)=> {
+    a.valid := b.valid && !cancelFastWakeup
+    a.bits := b.bits
+  }}
   val stOut = io.mem_to_ooo.writeback.drop(exuParameters.LduCnt).dropRight(exuParameters.StuCnt)
 
   // prefetch to l1 req
@@ -691,7 +697,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stu.io.tlb          <> dtlb_reqs.drop(exuParameters.LduCnt + 1)(i)
     stu.io.pmp          <> pmp_check(exuParameters.LduCnt + 1 + i).resp
     // stld nuke
-    stu.io.stld_nuke_query.nuke := RegNext(lsq.io.sta.storeNuke(i))
+    stu.io.stld_nuke_query.s4_nuke := RegNext(lsq.io.sta.storeNuke(i))
     // prefetch
     stu.io.prefetch_req <> sbuffer.io.store_prefetch(i)
 
