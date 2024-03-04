@@ -1282,11 +1282,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("s2_successfully_forward_mshr",      s2_fire && s2_fwd_frm_mshr && s2_fwd_data_valid)
 
   XSPerfAccumulate("rollback", io.rollback.valid)
-  XSPerfAccumulate("rollback_fetch", io.rollback.valid && s3_rep_frm_fetch)
-  XSPerfAccumulate("rollback_flushPipe", io.rollback.valid && s3_flushPipe)
-  XSPerfAccumulate("rollback_nuke_s2", io.rollback.valid && RegNext(s2_bad_nukes.asUInt.orR))
-  XSPerfAccumulate("s2_dcache_kill", s2_fire && io.dcache.resp.bits.miss && io.dcache.s2_kill && s2_pmp.ld && s2_in.isFastReplay)
-
 
   XSPerfAccumulate("load_to_load_forward",                      s1_try_ptr_chasing && !s1_ptr_chasing_canceled)
   XSPerfAccumulate("load_to_load_forward_try",                  s1_try_ptr_chasing)
