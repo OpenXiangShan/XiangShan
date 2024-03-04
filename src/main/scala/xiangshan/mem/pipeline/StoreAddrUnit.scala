@@ -86,6 +86,7 @@ class StoreAddrUnit(implicit p: Parameters) extends XSModule with HasDCacheParam
 
   io.stin.ready := s1_ready
   io.prefetch_req.ready := s1_ready && io.dcache.req.ready && !s0_iss_valid
+
   // Pipeline
   // --------------------------------------------------------------------------------
   // stage 1
@@ -108,15 +109,16 @@ class StoreAddrUnit(implicit p: Parameters) extends XSModule with HasDCacheParam
   val s1_kill   = Wire(Bool())
   val s1_can_go = s2_ready
   val s1_fire   = s1_valid && !s1_kill && s1_can_go
+  val s1_amo    = FuType.storeIsAMO(s1_in.uop.ctrl.fuType)
 
-  s1_kill := s1_in.uop.robIdx.needFlush(io.redirect) || s1_in.uop.robIdx.needFlush(RegNext(io.redirect))
+  s1_kill := s1_in.uop.robIdx.needFlush(io.redirect) || s1_in.uop.robIdx.needFlush(RegNext(io.redirect)) || s1_amo
   s1_ready := true.B
   io.tlb.resp.ready := true.B // TODO: why dtlbResp needs a ready?
   when (s0_fire) { s1_valid := true.B }
   .elsewhen (s1_fire) { s1_valid := false.B }
   .elsewhen (s1_kill) { s1_valid := false.B }
 
-  io.tlb.req.valid                   := s1_valid
+  io.tlb.req.valid                   := s1_valid && !s1_amo
   io.tlb.req.bits.vaddr              := s1_vaddr
   io.tlb.req.bits.cmd                := TlbCmd.write
   io.tlb.req.bits.size               := s1_size
@@ -136,7 +138,7 @@ class StoreAddrUnit(implicit p: Parameters) extends XSModule with HasDCacheParam
   // NOTE: The store request does not wait for the dcache to be ready.
   //       If the dcache is not ready at this time, the dcache is not queried.
   //       But, store prefetch request will always wait for dcache to be ready to make progress.
-  io.dcache.req.valid              := s1_fire
+  io.dcache.req.valid              := s1_fire && !s1_amo
   io.dcache.req.bits.cmd           := MemoryOpConstants.M_PFW
   io.dcache.req.bits.vaddr         := s1_vaddr
   io.dcache.req.bits.instrtype     := s1_instr_type
@@ -186,8 +188,7 @@ class StoreAddrUnit(implicit p: Parameters) extends XSModule with HasDCacheParam
   val s2_tlb_miss  = io.tlb.resp.bits.miss
   val s2_mmio      = s2_mmio_cbo
   val s2_exception = ExceptionNO.selectByFu(s2_out.uop.cf.exceptionVec, staCfg).asUInt.orR
-  val s2_amo       = FuType.storeIsAMO(s2_in.uop.ctrl.fuType)
-  s2_kill := s2_in.uop.robIdx.needFlush(io.redirect) || s2_tlb_miss || s2_amo
+  s2_kill := s2_in.uop.robIdx.needFlush(io.redirect) || s2_tlb_miss
 
   s2_ready := true.B
   io.tlb.resp.ready := true.B // TODO: why dtlbResp needs a ready?
@@ -199,11 +200,10 @@ class StoreAddrUnit(implicit p: Parameters) extends XSModule with HasDCacheParam
   io.issue.valid := s2_valid && !s2_tlb_miss && !s2_in.isHWPrefetch
   io.issue.bits  := RegEnable(s1_in, s1_valid)
 
-
   // Send TLB feedback to store issue queue
   // Store feedback is generated in store_s1, sent to RS in store_s2
   val s2_feedback = Wire(Valid(new RSFeedback))
-  s2_feedback.valid                 := s2_valid & !s2_in.isHWPrefetch && !s2_amo
+  s2_feedback.valid                 := s2_valid & !s2_in.isHWPrefetch
   s2_feedback.bits.hit              := !s2_tlb_miss
   s2_feedback.bits.flushState       := io.tlb.resp.bits.ptwBack
   s2_feedback.bits.rsIdx            := s2_out.rsIdx
@@ -228,9 +228,15 @@ class StoreAddrUnit(implicit p: Parameters) extends XSModule with HasDCacheParam
   s2_out.uop.cf.exceptionVec(storePageFault)   := io.tlb.resp.bits.excp(0).pf.st
   s2_out.uop.cf.exceptionVec(storeAccessFault) := io.tlb.resp.bits.excp(0).af.st
 
-  io.lsq.valid     := s2_valid && !s2_in.isHWPrefetch && !s2_amo
+  io.lsq.valid     := s2_valid && !s2_in.isHWPrefetch
   io.lsq.bits      := s2_out
   io.lsq.bits.miss := s2_tlb_miss
+
+  // st-ld violation dectect request.
+  io.stld_nuke_query.s2_valid  := s2_valid && !s2_in.isHWPrefetch && !s2_tlb_miss
+  io.stld_nuke_query.s2_robIdx := s2_in.uop.robIdx
+  io.stld_nuke_query.s2_paddr  := s2_paddr
+  io.stld_nuke_query.s2_mask   := s2_in.mask
 
   // kill dcache write intent request when tlb miss or exception
   io.dcache.s1_kill  := (s2_kill || s2_exception || s2_mmio)
@@ -283,12 +289,6 @@ class StoreAddrUnit(implicit p: Parameters) extends XSModule with HasDCacheParam
   // prefetch related
   io.lsq_replenish.miss := io.dcache.resp.fire && io.dcache.resp.bits.miss // miss info
 
-  // st-ld violation dectect request.
-  io.stld_nuke_query.valid  := s3_valid && !s3_in.isHWPrefetch
-  io.stld_nuke_query.robIdx := s3_in.uop.robIdx
-  io.stld_nuke_query.paddr  := s3_in.paddr
-  io.stld_nuke_query.mask   := s3_in.mask
-
   // RegNext prefetch train for better timing
   // ** Now, prefetch train is valid at store s4 **
   io.prefetch_train.bits.fromLsPipelineBundle(s3_in, latch = true)
@@ -314,7 +314,7 @@ class StoreAddrUnit(implicit p: Parameters) extends XSModule with HasDCacheParam
   val s4_kill   = s4_in.uop.robIdx.needFlush(io.redirect)
   val s4_can_go = io.stout.ready
   val s4_fire   = s4_valid && !s4_kill && s4_can_go
-  val s4_bad_nuke_detected = io.stld_nuke_query.nuke
+  val s4_bad_nuke_detected = io.stld_nuke_query.s4_nuke
 
   when (s3_fire) { s4_valid := (!s3_mmio || s3_exception) && !s3_out.isHWPrefetch  }
   .elsewhen (s4_fire) { s4_valid := false.B }
