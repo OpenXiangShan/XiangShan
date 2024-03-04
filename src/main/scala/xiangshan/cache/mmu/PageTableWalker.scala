@@ -503,15 +503,13 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     
   val hasHptwResp = ParallelOR(state.map(_ === state_hptw_resp)).asBool
   val hptw_resp_ptr_reg = RegNext(io.hptw.resp.bits.id)
-  val hptw_need_addr_check = RegNext(hasHptwResp && io.hptw.resp.fire && !flush)
+  val hptw_need_addr_check = RegNext(hasHptwResp && io.hptw.resp.fire && !flush) && state(hptw_resp_ptr_reg) === state_addr_check
 
   val ptes = io.mem.resp.bits.value.asTypeOf(Vec(blockBits / XLEN, new PteBundle()))
   val gpaddr = MakeGPAddr(io.in.bits.ppn, getVpnn(io.in.bits.req_info.vpn, 0))
   val hptw_resp = entries(hptw_resp_ptr_reg).hptw_resp
   val hpaddr = Cat(hptw_resp.genPPNS2(get_pn(gpaddr)), get_off(gpaddr))
-  val hpaddr_reg = RegEnable(hpaddr, hasHptwResp && io.hptw.resp.fire)
   val addr = MakeAddr(io.in.bits.ppn, getVpnn(io.in.bits.req_info.vpn, 0))
-  val addr_reg = RegEnable(addr, io.in.fire)
   io.pmp.req.valid := need_addr_check || hptw_need_addr_check
   io.pmp.req.bits.addr := Mux(hptw_need_addr_check, hpaddr, addr)
   io.pmp.req.bits.cmd := TlbCmd.read
