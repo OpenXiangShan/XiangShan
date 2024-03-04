@@ -151,7 +151,7 @@ class CtrlBlockImp(
       val killedByOlderThat = wb.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect, s3_s5_redirect))
       (wb.bits.robIdx === x.bits.robIdx) && wb.valid && x.valid && !killedByOlderThat && !killedByOlder
     }).toSeq)
-    delayed.bits := RegNext(PopCount(sameRobidxBools))
+    delayed.bits := RegEnable(PopCount(sameRobidxBools), x.valid)
     delayed
   }).toSeq
 

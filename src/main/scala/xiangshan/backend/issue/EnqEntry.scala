@@ -33,7 +33,6 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
 
   val validReg            = RegInit(false.B)
   val enqDelayValidReg    = RegInit(false.B)
-  val entryReg            = Reg(new EntryBundle)
 
   val common              = Wire(new CommonWireBundle)
   val entryUpdate         = Wire(new EntryBundle)
@@ -54,8 +53,8 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
   val enqDelayShiftedWakeupLoadDependencyByIQVec: Vec[Vec[UInt]]  = Wire(Vec(params.numWakeupFromIQ, Vec(LoadPipelineWidth, UInt(3.W))))
 
   //Reg
+  val entryReg = RegEnable(entryRegNext, validReg || common.validRegNext)
   validReg                        := common.validRegNext
-  entryReg                        := entryRegNext
   enqDelayValidReg                := enqDelayValidRegNext
 
   //Wire
