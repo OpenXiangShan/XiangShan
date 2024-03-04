@@ -1029,7 +1029,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
   for (i <- 0 until 2 * CommitWidth) {
     commit_wReadVec(i) := isWritebacked(deqPtrValue(i).value)
-    commit_wNextVec(i) := commit_vReadVec(i)
+    commit_wNextVec(i) := commit_wReadVec(i)
   }
   (0 until CommitWidth).map { case i =>
     val nextVec = commit_wNextVec
@@ -1077,11 +1077,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   for (i <- 0 until RenameWidth) {
     when (canEnqueue(i) && !io.redirect.valid) {
       valid(allocatePtrVec(i).value) := true.B
-      for (j <- 0 until 2*CommitWidth) {
-        when(allocatePtrVec(i).value === deqPtrValue(j).value){
-          commit_vNextVec(j) := true.B
-        }
-      }
     }
   }
   // dequeue logic writes 6 valid
@@ -1192,11 +1187,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       // enq set num of uops
       uopNumVec(i) := enqWBNum
       stdWritebacked(i) := Mux(enqWriteStd, false.B, true.B)
-      for (j <- 0 until 2 * CommitWidth) {
-        when(i.U === deqPtrValue(j).value) {
-          commit_wNextVec(j) := !enqUopNum.orR && Mux(enqWriteStd, false.B, true.B)
-        }
-      }
     }.elsewhen(valid(i)) {
       // update by writing back
       uopNumVec(i) := uopNumVec(i) - wbCnt
