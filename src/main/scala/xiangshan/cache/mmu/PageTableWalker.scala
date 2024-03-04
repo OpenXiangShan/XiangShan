@@ -410,7 +410,6 @@ class LLPTWIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
 
 class LLPTWEntry(implicit p: Parameters) extends XSBundle with HasPtwConst {
   val req_info = new L2TlbInnerBundle()
-  val s2xlate = Bool()
   val ppn = UInt(ppnLen.W)
   val wait_id = UInt(log2Up(l2tlbParams.llptwsize).W)
   val af = Bool()
@@ -475,7 +474,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val to_wait = Cat(dup_vec_wait).orR || dup_req_fire
   val to_mem_out = dup_wait_resp
   val to_cache = Cat(dup_vec_having).orR || Cat(dup_vec_last_hptw).orR
-  val to_hptw = io.in.bits.req_info.s2xlate =/= noS2xlate
+  val to_hptw_req = io.in.bits.req_info.s2xlate =/= noS2xlate
   XSError(RegNext(dup_req_fire && Cat(dup_vec_wait).orR, init = false.B), "mem req but some entries already waiting, should not happed")
 
   XSError(io.in.fire && ((to_mem_out && to_cache) || (to_wait && to_cache)), "llptw enq, to cache conflict with to mem")
@@ -484,7 +483,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     to_mem_out -> state_mem_out, // same to the blew, but the mem resp now
     to_wait -> state_mem_waiting,
     to_cache -> state_cache,
-    to_hptw -> state_hptw_req
+    to_hptw_req -> state_hptw_req
   ))
   val enq_state = Mux(from_pre(io.in.bits.req_info.source) && enq_state_normal =/= state_addr_check, state_idle, enq_state_normal)
   when (io.in.fire) {
@@ -496,7 +495,6 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     entries(enq_ptr).ppn := io.in.bits.ppn
     entries(enq_ptr).wait_id := Mux(to_wait, wait_id, enq_ptr)
     entries(enq_ptr).af := false.B
-    entries(enq_ptr).s2xlate := enableS2xlate
     mem_resp_hit(enq_ptr) := to_mem_out
   }
 
@@ -530,12 +528,12 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   when (mem_arb.io.out.fire) {
     for (i <- state.indices) {
-      when (state(i) =/= state_idle && entries(i).s2xlate === entries(mem_arb.io.chosen).s2xlate && Mux(entries(i).s2xlate, dup(entries(i).hptw_resp.entry.tag, entries(mem_arb.io.chosen).hptw_resp.entry.tag), dup(entries(i).req_info.vpn, mem_arb.io.out.bits.req_info.vpn))) {
+      when (state(i) =/= state_idle && entries(i).req_info.s2xlate === mem_arb.io.out.bits.req_info.s2xlate && Mux(entries(i).req_info.s2xlate === allStage, dup(entries(i).hptw_resp.entry.tag, mem_arb.io.out.bits.hptw_resp.entry.tag), dup(entries(i).req_info.vpn, mem_arb.io.out.bits.req_info.vpn))) {
         // NOTE: "dup enq set state to mem_wait" -> "sending req set other dup entries to mem_wait"
         state(i) := state_mem_waiting
         entries(i).wait_id := mem_arb.io.chosen
       }
-      when (state(i) === state_mem_req && entries(i).s2xlate && entries(i).wait_id === mem_arb.io.chosen) {
+      when (state(i) === state_mem_req && entries(i).req_info.s2xlate =/= noS2xlate && entries(i).wait_id === mem_arb.io.chosen) {
         state(i) := state_mem_waiting
       }
     }
@@ -543,17 +541,19 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   when (io.mem.resp.fire) {
     state.indices.map{i =>
       when (state(i) === state_mem_waiting && io.mem.resp.bits.id === entries(i).wait_id) {
-        state(i) := Mux(entries(i).s2xlate, state_last_hptw_req, state_mem_out)
+        state(i) := Mux(entries(i).req_info.s2xlate =/= noS2xlate, state_last_hptw_req, state_mem_out)
         mem_resp_hit(i) := true.B
-        val req_addr_low = entries(i).req_info.vpn(log2Ceil(blockBits / XLEN) - 1, 0)
-        entries(i).ppn := ptes(req_addr_low).ppn // for last stage 2 translation
+        val req_paddr = MakeAddr(entries(i).ppn, getVpnn(entries(i).req_info.vpn, 0))
+        val req_hpaddr = MakeAddr(entries(i).hptw_resp.genPPNS2(get_pn(req_paddr)), getVpnn(entries(i).req_info.vpn, 0))
+        val index =  Mux(entries(i).req_info.s2xlate === allStage, req_hpaddr, req_paddr)(log2Up(l2tlbParams.blockBytes)-1, log2Up(XLEN/8))
+        entries(i).ppn := ptes(index).ppn // for last stage 2 translation
       }
     }
   }
 
   when (hyper_arb1.io.out.fire) {
     for (i <- state.indices) {
-      when (state(i) === state_hptw_req && entries(i).ppn === hyper_arb1.io.out.bits.ppn && entries(i).s2xlate && hyper_arb1.io.chosen === i.U) {
+      when (state(i) === state_hptw_req && entries(i).ppn === hyper_arb1.io.out.bits.ppn && entries(i).req_info.s2xlate =/= noS2xlate && hyper_arb1.io.chosen === i.U) {
         state(i) := state_hptw_resp
         entries(i).wait_id := hyper_arb1.io.chosen
       }
@@ -562,7 +562,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   when (hyper_arb2.io.out.fire) {
     for (i <- state.indices) {
-      when (state(i) === state_last_hptw_req && entries(i).ppn === hyper_arb2.io.out.bits.ppn && entries(i).s2xlate && hyper_arb2.io.chosen === i.U) {
+      when (state(i) === state_last_hptw_req && entries(i).ppn === hyper_arb2.io.out.bits.ppn && entries(i).req_info.s2xlate =/= noS2xlate && hyper_arb2.io.chosen === i.U) {
         state(i) := state_last_hptw_resp
         entries(i).wait_id := hyper_arb2.io.chosen
       }
@@ -572,7 +572,8 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   when (io.hptw.resp.fire) {
     for (i <- state.indices) {
       when (state(i) === state_hptw_resp && io.hptw.resp.bits.id === entries(i).wait_id) {
-        state(i) := state_addr_check
+        val need_to_waiting = Cat(state.indices.map(i => state(i) === state_mem_waiting && dup(entries(i).hptw_resp.entry.tag, io.hptw.resp.bits.h_resp.entry.tag))).orR
+        state(i) := Mux(need_to_waiting, state_mem_waiting, state_addr_check)
         entries(i).hptw_resp := io.hptw.resp.bits.h_resp
       }
       when (state(i) === state_last_hptw_resp && io.hptw.resp.bits.id === entries(i).wait_id) {
@@ -617,7 +618,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.mem.req.valid := mem_arb.io.out.valid && !flush
   val mem_paddr = MakeAddr(mem_arb.io.out.bits.ppn, getVpnn(mem_arb.io.out.bits.req_info.vpn, 0))
   val mem_hpaddr = MakeAddr(mem_arb.io.out.bits.hptw_resp.genPPNS2(get_pn(mem_paddr)), getVpnn(mem_arb.io.out.bits.req_info.vpn, 0))
-  io.mem.req.bits.addr := Mux(mem_arb.io.out.bits.s2xlate, mem_hpaddr, mem_paddr)
+  io.mem.req.bits.addr := Mux(mem_arb.io.out.bits.req_info.s2xlate =/= noS2xlate, mem_hpaddr, mem_paddr)
   io.mem.req.bits.id := mem_arb.io.chosen
   mem_arb.io.out.ready := io.mem.req.ready
   val mem_refill_id = RegNext(io.mem.resp.bits.id(log2Up(l2tlbParams.llptwsize)-1, 0))
