@@ -307,6 +307,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       // stride will train on miss or prefetch hit
       for (i <- 0 until exuParameters.LduCnt) {
         val source = loadUnits(i).io.prefetch_train_l1
+        /*
         l1Prefetcher.stride_train(i).valid := source.valid && source.bits.isFirstIssue && (
           source.bits.miss || isFromStride(source.bits.meta_prefetch)
         )
@@ -316,6 +317,21 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
           RegEnable(io.ooo_to_mem.loadPc(i), loadUnits(i).io.s1_prefetch_spec),
           RegEnable(RegEnable(io.ooo_to_mem.loadPc(i), loadUnits(i).io.s0_prefetch_spec), loadUnits(i).io.s1_prefetch_spec)
         )
+        */
+        val valid = source.valid && source.bits.isFirstIssue && (
+          source.bits.miss || isFromStride(source.bits.meta_prefetch)
+          )
+        l1Prefetcher.stride_train(i).valid := valid
+        when(valid){
+          l1Prefetcher.stride_train(i).bits := source.bits
+          l1Prefetcher.stride_train(i).bits.uop.cf.pc := Mux(
+            loadUnits(i).io.s2_ptr_chasing,
+            RegEnable(io.ooo_to_mem.loadPc(i), loadUnits(i).io.s1_prefetch_spec),
+            RegEnable(RegEnable(io.ooo_to_mem.loadPc(i), loadUnits(i).io.s0_prefetch_spec), loadUnits(i).io.s1_prefetch_spec)
+          )
+        }.otherwise {
+          l1Prefetcher.stride_train(i).bits := DontCare
+        }
       }
       l1Prefetcher
   }
@@ -597,16 +613,21 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     prefetcherOpt.foreach(pf => {
       // sms will train on all miss load sources
       val source = loadUnits(i).io.prefetch_train
-      pf.io.ld_in(i).valid := Mux(pf_train_on_hit,
+      val valid = Mux(pf_train_on_hit,
         source.valid,
         source.valid && source.bits.isFirstIssue && source.bits.miss
       )
-      pf.io.ld_in(i).bits := source.bits
-      pf.io.ld_in(i).bits.uop.cf.pc := Mux(
-        loadUnits(i).io.s2_ptr_chasing,
-        RegEnable(io.ooo_to_mem.loadPc(i), loadUnits(i).io.s1_prefetch_spec),
-        RegEnable(RegEnable(io.ooo_to_mem.loadPc(i), loadUnits(i).io.s0_prefetch_spec), loadUnits(i).io.s1_prefetch_spec)
-      )
+      pf.io.ld_in(i).valid := valid
+      when(valid){
+        pf.io.ld_in(i).bits := source.bits
+        pf.io.ld_in(i).bits.uop.cf.pc := Mux(
+          loadUnits(i).io.s2_ptr_chasing,
+          RegEnable(io.ooo_to_mem.loadPc(i), loadUnits(i).io.s1_prefetch_spec),
+          RegEnable(RegEnable(io.ooo_to_mem.loadPc(i), loadUnits(i).io.s0_prefetch_spec), loadUnits(i).io.s1_prefetch_spec)
+        )
+      }.otherwise{
+        pf.io.ld_in(i).bits := DontCare
+      }
     })
     l1PrefetcherOpt.foreach(pf => {
       // stream will train on all load sources
@@ -708,14 +729,19 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     // store prefetch train
     prefetcherOpt.foreach(pf => {
-      pf.io.st_in(i).valid := Mux(pf_train_on_hit,
+      val valid = Mux(pf_train_on_hit,
         stu.io.prefetch_train.valid,
         stu.io.prefetch_train.valid && stu.io.prefetch_train.bits.isFirstIssue && (
           stu.io.prefetch_train.bits.miss
           )
       )
-      pf.io.st_in(i).bits := stu.io.prefetch_train.bits
-      pf.io.st_in(i).bits.uop.cf.pc := RegEnable(RegEnable(io.ooo_to_mem.storePc(i), stu.io.s0_prefetch_spec), stu.io.s1_prefetch_spec)
+      pf.io.st_in(i).valid := valid
+      when(valid){
+        pf.io.st_in(i).bits := stu.io.prefetch_train.bits
+        pf.io.st_in(i).bits.uop.cf.pc := RegEnable(RegEnable(io.ooo_to_mem.storePc(i), stu.io.s0_prefetch_spec), stu.io.s1_prefetch_spec)
+      }.otherwise{
+        pf.io.st_in(i).bits := DontCare
+      }
     })
 
     // 1. sync issue info to store set LFST
