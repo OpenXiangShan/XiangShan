@@ -897,9 +897,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
 
   // sync fflags/dirty_fs/vxsat to csr
-  io.csr.fflags := RegNext(fflags)
-  io.csr.dirty_fs := RegNext(dirty_fs)
-  io.csr.vxsat := RegNext(vxsat)
+  io.csr.fflags := RegEnable(fflags, io.commits.isCommit)
+  io.csr.dirty_fs := RegEnable(dirty_fs, io.commits.isCommit)
+  io.csr.vxsat := RegEnable(vxsat, io.commits.isCommit)
 
   // sync v csr to csr
   // for difftest
@@ -1285,7 +1285,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       interrupt_safe(RegEnable(allocatePtrVec(i).value, canEnqueue(i))) := RegEnable(allow_interrupts, canEnqueue(i))
       for (j <- 0 until 2 * CommitWidth) {
         when(RegNext(allocatePtrVec(i).value) === deqPtrValue(j).value) {
-          interrupt_safeNextVec(j) := RegNext(allow_interrupts)
+          interrupt_safeNextVec(j) := RegEnable(allow_interrupts, canEnqueue(i))
         }
       }
     }

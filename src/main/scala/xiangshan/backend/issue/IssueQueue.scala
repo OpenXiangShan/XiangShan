@@ -938,13 +938,13 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
       wakeup.bits.rfWen  := RegNext(uop.bits.rfWen  && uop.fire)
       wakeup.bits.fpWen  := RegNext(uop.bits.fpWen  && uop.fire)
       wakeup.bits.vecWen := RegNext(uop.bits.vecWen && uop.fire)
-      wakeup.bits.pdest  := RegNext(uop.bits.pdest)
+      wakeup.bits.pdest  := RegEnable(uop.bits.pdest, uop.fire)
       wakeup.bits.loadDependency.foreach(_ := 0.U) // this is correct for load only
 
       wakeup.bits.rfWenCopy .foreach(_.foreach(_ := RegNext(uop.bits.rfWen  && uop.fire)))
       wakeup.bits.fpWenCopy .foreach(_.foreach(_ := RegNext(uop.bits.fpWen  && uop.fire)))
       wakeup.bits.vecWenCopy.foreach(_.foreach(_ := RegNext(uop.bits.vecWen && uop.fire)))
-      wakeup.bits.pdestCopy .foreach(_.foreach(_ := RegNext(uop.bits.pdest)))
+      wakeup.bits.pdestCopy .foreach(_.foreach(_ := RegEnable(uop.bits.pdest, uop.fire)))
       wakeup.bits.loadDependencyCopy.foreach(x => x := 0.U.asTypeOf(x)) // this is correct for load only
 
       wakeup.bits.is0Lat := 0.U

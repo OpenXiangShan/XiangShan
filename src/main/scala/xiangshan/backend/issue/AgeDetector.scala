@@ -85,7 +85,7 @@ class AgeDetector(numEntries: Int, numEnq: Int, numDeq: Int)(implicit p: Paramet
       else {
         elem := !nextAge(j)(i)
       }
-      age(i)(j) := elem
+      age(i)(j) := Mux(io.canIssue.asUInt.orR, elem, age(i)(j))
     }
   }
 

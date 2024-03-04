@@ -51,7 +51,6 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
 
   val loadDependency = RegInit(0.U.asTypeOf(Vec(numPhyPregs, Vec(LoadPipelineWidth, UInt(3.W)))))
   val shiftLoadDependency = Wire(Vec(io.wakeUp.size, Vec(LoadPipelineWidth, UInt(3.W))))
-  val table = RegInit(0.U(numPhyPregs.W))
   val tableUpdate = Wire(Vec(numPhyPregs, Bool()))
   val wakeupOHVec = Wire(Vec(numPhyPregs, UInt(io.wakeUp.size.W)))
 
@@ -92,7 +91,7 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
       ldDp := 0.U.asTypeOf(ldDp)
     }.elsewhen(wakeUpMask(idx)) {
       ldDp := (if (io.wakeUp.nonEmpty) Mux1H(wakeupOHVec(idx), shiftLoadDependency) else 0.U.asTypeOf(ldDp))
-    }.otherwise {
+    }.elsewhen(ldDp.map(x => x.orR).reduce(_ | _)) {
       ldDp := VecInit(ldDp.map(x => x(x.getWidth - 2, 0) << 1))
     }
   }
@@ -106,6 +105,10 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
     rename alloc => wbMask  //TODO we still need wbMask because wakeUp signal is partial now
   the bypass state lasts for a maximum of one cycle, cancel(=> busy) or else(=> regFile)
    */
+  val table = VecInit((0 until numPhyPregs).zip(tableUpdate).map{ case (idx, update) =>
+    RegEnable(update, 0.U(1.W), allocMask(idx) || cancelMask(idx) || ldCancelMask(idx) || wakeUpMask(idx) || wbMask(idx))
+  }).asUInt
+
   tableUpdate.zipWithIndex.foreach{ case (update, idx) =>
     when(allocMask(idx) || cancelMask(idx) || ldCancelMask(idx)) {
       update := true.B                                    //busy
@@ -120,8 +123,6 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
     res.resp := !table(res.req)
     res.loadDependency := loadDependency(res.req)
   }
-
-  table := tableUpdate.asUInt
 
   val oddTable = table.asBools.zipWithIndex.filter(_._2 % 2 == 1).map(_._1)
   val evenTable = table.asBools.zipWithIndex.filter(_._2 % 2 == 0).map(_._1)

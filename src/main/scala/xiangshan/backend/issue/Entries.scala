@@ -107,8 +107,8 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     enqEntry.io.commonIn.transSel             := (if (params.isAllComp || params.isAllSimp) enqCanTrans2Others.get && othersTransSelVec.get(entryIdx).valid
                                                   else enqCanTrans2Simp.get && simpTransSelVec.get(entryIdx).valid || enqCanTrans2Comp.get && compTransSelVec.get(entryIdx).valid)
     EntriesConnect(enqEntry.io.commonIn, enqEntry.io.commonOut, entryIdx)
-    enqEntry.io.enqDelayWakeUpFromWB          := RegNext(io.wakeUpFromWB)
-    enqEntry.io.enqDelayWakeUpFromIQ          := RegNext(io.wakeUpFromIQ)
+    enqEntry.io.enqDelayWakeUpFromWB          := RegEnable(io.wakeUpFromWB, io.enq(entryIdx).valid)
+    enqEntry.io.enqDelayWakeUpFromIQ          := RegEnable(io.wakeUpFromIQ, io.enq(entryIdx).valid)
     enqEntry.io.enqDelayOg0Cancel             := RegNext(io.og0Cancel.asUInt)
     enqEntry.io.enqDelayLdCancel              := RegNext(io.ldCancel)
     enqEntryTransVec(entryIdx)                := enqEntry.io.commonOut.transEntry
