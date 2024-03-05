@@ -571,13 +571,13 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
   for (i <- 0 until ITTageNTables) {
     tables(i).io.update.valid := RegNext(updateMask(i))
+    tables(i).io.update.reset_u := RegNext(updateResetU)
     tables(i).io.update.correct := RegEnable(updateCorrect(i), updateMask(i))
     tables(i).io.update.target := RegEnable(updateTarget(i), updateMask(i))
     tables(i).io.update.old_target := RegEnable(updateOldTarget(i), updateMask(i))
     tables(i).io.update.alloc := RegEnable(updateAlloc(i), updateMask(i))
     tables(i).io.update.oldCtr := RegEnable(updateOldCtr(i), updateMask(i))
 
-    tables(i).io.update.reset_u := RegEnable(updateResetU, updateMask(i))
     tables(i).io.update.uValid := RegEnable(updateUMask(i), updateMask(i))
     tables(i).io.update.u := RegEnable(updateU(i), updateMask(i))
     tables(i).io.update.pc := RegEnable(update.pc, updateMask(i))

@@ -834,6 +834,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
   for (w <- 0 until TageBanks) {
     for (i <- 0 until TageNTables) {
       val realWen = realWens(i)
+      tables(i).io.update.reset_u(w) := RegNext(updateResetU(w))
       tables(i).io.update.mask(w)    := RegNext(updateMask(w)(i))
       tables(i).io.update.takens(w) := RegEnable(updateTakens(w)(i), realWen)
       tables(i).io.update.alloc(w) := RegEnable(updateAlloc(w)(i), realWen)
@@ -841,7 +842,6 @@ class Tage(implicit p: Parameters) extends BaseTage {
 
       tables(i).io.update.uMask(w) := RegEnable(updateUMask(w)(i), realWen)
       tables(i).io.update.us(w) := RegEnable(updateU(w)(i), realWen)
-      tables(i).io.update.reset_u(w) := RegEnable(updateResetU(w), realWen)
       // use fetch pc instead of instruction pc
       tables(i).io.update.pc := RegEnable(update.pc, realWen)
       tables(i).io.update.folded_hist := RegEnable(updateFHist, realWen)
