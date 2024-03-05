@@ -1376,7 +1376,6 @@ class HybridUnit(implicit p: Parameters) extends XSModule
 
     hit_ld_addr_trig_hit_vec(i)        := TriggerCmp(RegNext(s3_in.vaddr), tdata2, matchType, tEnable)
     io.ldu_io.trigger(i).addrHit       := Mux(io.ldout.valid && ld_trigger, hit_ld_addr_trig_hit_vec(i), lq_ld_addr_trig_hit_vec(i))
-    io.ldu_io.trigger(i).lastDataHit   := TriggerCmp(last_valid_data, tdata2, matchType, tEnable)
   }}
   io.ldu_io.lsq.trigger.hitLoadAddrTriggerHitVec := hit_ld_addr_trig_hit_vec
 
