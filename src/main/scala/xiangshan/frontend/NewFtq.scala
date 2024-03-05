@@ -1136,8 +1136,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     val notIfu = redirectVec.dropRight(1).map(r => r.valid).reduce(_||_)
     val (idx, offset, flushItSelf) = (r.ftqIdx, r.ftqOffset, RedirectLevel.flushItself(r.level))
     when (RegNext(notIfu)) {
-      commitStateQueueEnable(idx.value) := true.B
-      commitStateQueueNext(idx.value).zipWithIndex.foreach({ case (s, i) =>
+      commitStateQueueEnable(RegNext(idx.value)) := true.B
+      commitStateQueueNext(RegNext(idx.value)).zipWithIndex.foreach({ case (s, i) =>
         when(i.U > RegNext(offset) || i.U === RegNext(offset) && RegNext(flushItSelf)) {
           s := c_invalid
         }
@@ -1154,6 +1154,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // commit
   for (c <- io.fromBackend.rob_commits) {
     when(c.valid) {
+      commitStateQueueEnable(c.bits.ftqIdx.value) := true.B
       commitStateQueueNext(c.bits.ftqIdx.value)(c.bits.ftqOffset) := c_commited
       // TODO: remove this
       // For instruction fusions, we also update the next instruction
@@ -1163,9 +1164,11 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
         commitStateQueueNext(c.bits.ftqIdx.value)(c.bits.ftqOffset + 2.U) := c_commited
       }.elsewhen(c.bits.commitType === 6.U) {
         val index = (c.bits.ftqIdx + 1.U).value
+        commitStateQueueEnable(index) := true.B
         commitStateQueueNext(index)(0) := c_commited
       }.elsewhen(c.bits.commitType === 7.U) {
         val index = (c.bits.ftqIdx + 1.U).value
+        commitStateQueueEnable(index) := true.B
         commitStateQueueNext(index)(1) := c_commited
       }
     }
@@ -1229,7 +1232,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     commPtr_write := commPtrPlus1
     commPtrPlus1_write := commPtrPlus1 + 1.U
   }
-  val commit_state = RegEnable(commitStateQueueNext(commPtr.value), canCommit)
+  val commit_state = RegEnable(commitStateQueueReg(commPtr.value), canCommit)
   val can_commit_cfi = WireInit(cfiIndex_vec(commPtr.value))
   val do_commit_cfi = WireInit(cfiIndex_vec(do_commit_ptr.value))
   //
