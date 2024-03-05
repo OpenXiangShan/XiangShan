@@ -359,6 +359,13 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     val vpn_hit = Wire(Bool())
     val index_hit = Wire(Vec(tlbcontiguous, Bool()))
     val wb_valididx = Wire(Vec(tlbcontiguous, Bool()))
+    val hasS2xlate = this.s2xlate =/= noS2xlate 
+    val onlyS1 = this.s2xlate === onlyStage1
+    val onlyS2 = this.s2xlate === onlyStage2
+    val pteidx_hit = MuxCase(true.B, Seq(
+      onlyS2 -> (VecInit(UIntToOH(data.s2.entry.tag(sectortlbwidth - 1, 0))).asUInt === pteidx.asUInt),
+      hasS2xlate -> (pteidx.asUInt === data.s1.pteidx.asUInt)
+    ))
     //for onlystage2 entry, every valididx is true
     wb_valididx := Mux(s2xlate === onlyStage2, VecInit(UIntToOH(data.s2.entry.tag(sectortlbwidth - 1, 0)).asBools), data.s1.valididx)
     val s2xlate_hit = s2xlate === this.s2xlate
@@ -392,7 +399,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     // Now 0x10 and 0x13 are both valid in page cache
     // However, when 0x13 refill to tlb, will trigger multi hit
     // So will only trigger multi-hit when PopCount(data.valididx) = 1
-    vpn_hit && index_hit.reduce(_ || _) && PopCount(wb_valididx) === 1.U && s2xlate_hit
+    vpn_hit && index_hit.reduce(_ || _) && PopCount(wb_valididx) === 1.U && s2xlate_hit && pteidx_hit
   }
 
   def apply(item: PtwRespS2): TlbSectorEntry = {
