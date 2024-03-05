@@ -631,31 +631,6 @@ class L1CacheErrorInfo(implicit p: Parameters) extends XSBundle {
   }
 }
 
-/* TODO how to trigger on next inst?
-1. If hit is determined at frontend, then set a "next instr" trap at dispatch like singlestep
-2. If it is determined at Load(meaning it must be "hit after", then it must not be a jump. So we can let it commit and set
-xret csr to pc + 4/ + 2
-2.5 The problem is to let it commit. This is the real TODO
-3. If it is load and hit before just treat it as regular load exception
- */
-
-// This bundle carries trigger hit info along the pipeline
-// Now there are 10 triggers divided into 5 groups of 2
-// These groups are
-// (if if) (store store) (load loid) (if store) (if load)
-
-// Triggers in the same group can chain, meaning that they only
-// fire is both triggers in the group matches (the triggerHitVec bit is asserted)
-// Chaining of trigger No. (2i) and (2i+1) is indicated by triggerChainVec(i)
-// Timing of 0 means trap at current inst, 1 means trap at next inst
-// Chaining and timing and the validness of a trigger is controlled by csr
-// In two chained triggers, if they have different timing, both won't fire
-//class TriggerCf (implicit p: Parameters) extends XSBundle {
-//  val triggerHitVec = Vec(10, Bool())
-//  val triggerTiming = Vec(10, Bool())
-//  val triggerChainVec = Vec(5, Bool())
-//}
-
 class TriggerCf(implicit p: Parameters) extends XSBundle {
   // frontend
   val frontendHit       = Vec(TriggerNum, Bool()) // en && hit

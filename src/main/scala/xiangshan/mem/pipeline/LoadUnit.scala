@@ -96,7 +96,6 @@ class LoadUnitTriggerIO(implicit p: Parameters) extends XSBundle {
   val matchType   = Input(UInt(2.W))
   val tEnable     = Input(Bool()) // timing is calculated before this
   val addrHit     = Output(Bool())
-  val lastDataHit = Output(Bool())
 }
 
 class LoadUnit(implicit p: Parameters) extends XSModule
@@ -1394,7 +1393,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
     hit_ld_addr_trig_hit_vec(i) := TriggerCmp(RegNext(s2_out.vaddr), tdata2, matchType, tEnable)
     io.trigger(i).addrHit       := Mux(s3_out.valid, hit_ld_addr_trig_hit_vec(i), lq_ld_addr_trig_hit_vec(i))
-    io.trigger(i).lastDataHit   := TriggerCmp(last_valid_data, tdata2, matchType, tEnable)
   }}
   io.lsq.trigger.hitLoadAddrTriggerHitVec := hit_ld_addr_trig_hit_vec
 

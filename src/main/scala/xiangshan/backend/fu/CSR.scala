@@ -32,14 +32,6 @@ import xiangshan.backend.Bundles.ExceptionInfo
 import xiangshan.backend.fu.util.CSR.CSRNamedConstant.ContextStatus
 import utils.MathUtils.{BigIntGenMask, BigIntNot}
 
-// Trigger Tdata1 bundles
-trait HasTriggerConst {
-  def I_Trigger = 0.U
-  def S_Trigger = 1.U
-  def L_Trigger = 2.U
-  def GenESL(triggerType: UInt) = Cat((triggerType === I_Trigger), (triggerType === S_Trigger), (triggerType === L_Trigger))
-}
-
 class FpuCsrIO extends Bundle {
   val fflags = Output(Valid(UInt(5.W)))
   val isIllegal = Output(Bool())
@@ -143,7 +135,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   with HasCSRConst
   with PMPMethod
   with PMAMethod
-  with HasTriggerConst
   with HasXSParameter
   with SdtrigExt
   with DebugCSR
