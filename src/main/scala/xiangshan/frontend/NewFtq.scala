@@ -492,8 +492,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val aheadValid   = ftqIdxAhead.map(_.valid).reduce(_|_) && !io.fromBackend.redirect.valid
   val realAhdValid = io.fromBackend.redirect.valid && (ftqIdxSelOH > 0.U) && RegNext(aheadValid)
   val backendRedirect = Wire(Valid(new BranchPredictionRedirect))
-  val backendRedirectReg = RegNextWithEnable(backendRedirect)
-  backendRedirectReg.valid := Mux(realAhdValid, 0.B, backendRedirect.valid)
+  val backendRedirectReg = Wire(Valid(new BranchPredictionRedirect))
+  backendRedirectReg.valid := RegNext(Mux(realAhdValid, false.B, backendRedirect.valid))
+  backendRedirectReg.bits := RegEnable(backendRedirect.bits, backendRedirect.valid)
   val fromBackendRedirect = Wire(Valid(new BranchPredictionRedirect))
   fromBackendRedirect := Mux(realAhdValid, backendRedirect, backendRedirectReg)
 
