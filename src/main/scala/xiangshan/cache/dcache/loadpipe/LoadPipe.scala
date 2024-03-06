@@ -414,7 +414,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   resp.bits.miss := real_miss
   io.lsu.s2_first_hit := s2_req.isFirstIssue && s2_hit
   // load pipe need replay when there is a bank conflict or wpu predict fail
-  resp.bits.replay := DontCare
+  resp.bits.replay := (resp.bits.miss && (!io.miss_req.fire || s2_nack || io.mq_enq_cancel)) || io.bank_conflict_slow || s2_wpu_pred_fail
   resp.bits.replayCarry.valid := (resp.bits.miss && (!io.miss_req.fire || s2_nack || io.mq_enq_cancel)) || io.bank_conflict_slow || s2_wpu_pred_fail
   resp.bits.replayCarry.real_way_en := s2_real_way_en
   resp.bits.meta_prefetch := s2_hit_prefetch
@@ -523,40 +523,44 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val hit_update_replace_en  = RegNext(s2_valid) && RegNext(!resp.bits.miss)
   val miss_update_replace_en = RegNext(io.miss_req.fire) && RegNext(!io.mq_enq_cancel) && RegNext(io.miss_resp.handled)
 
-  if (!cfg.updateReplaceOn2ndmiss) {
-    // replacement is only updated on 1st miss
-    // io.replace_access.valid := RegNext(RegNext(
-    //   RegNext(io.meta_read.fire) && s1_valid && !io.lsu.s1_kill) &&
-    //   !s2_nack_no_mshr &&
-    //   !s2_miss_merged
-    // )
-    io.replace_access.valid := s3_valid && RegNext(!s2_miss_merged)
-    io.replace_access.bits.set := RegNext(RegNext(get_idx(s1_req.vaddr)))
-    io.replace_access.bits.way := RegNext(RegNext(Mux(s1_tag_match_dup_dc, OHToUInt(s1_tag_match_way_dup_dc), s1_repl_way_en_enc)))
-  } else {
-    // replacement is updated on both 1st and 2nd miss
-    // timing is worse than !cfg.updateReplaceOn2ndmiss
-    // io.replace_access.valid := RegNext(RegNext(
-    //   RegNext(io.meta_read.fire) && s1_valid && !io.lsu.s1_kill) &&
-    //   !s2_nack_no_mshr &&
-    //   // replacement is updated on 2nd miss only when this req is firstly issued
-    //   (!s2_miss_merged || s2_req.isFirstIssue)
-    // )
-    io.replace_access.valid := s3_valid
-    io.replace_access.bits.set := RegNext(RegNext(get_idx(s1_req.vaddr)))
-    // io.replace_access.bits.way := RegNext(
-    //   Mux(
-    //     RegNext(s1_tag_match_dup_dc),
-    //     RegNext(OHToUInt(s1_tag_match_way_dup_dc)), // if hit, access hit way in plru
-    //     Mux( // if miss
-    //       !s2_miss_merged,
-    //       RegNext(s1_repl_way_en_enc), // 1st fire: access new selected replace way
-    //       OHToUInt(io.miss_resp.repl_way_en) // 2nd fire: access replace way selected at miss queue allocate time
-    //     )
-    //   )
-    // )
-    io.replace_access.bits.way := RegNext(RegNext(Mux(s1_tag_match_dup_dc, OHToUInt(s1_tag_match_way_dup_dc), s1_repl_way_en_enc)))
-  }
+  // if (!cfg.updateReplaceOn2ndmiss) {
+  //   // replacement is only updated on 1st miss
+  //   // io.replace_access.valid := RegNext(RegNext(
+  //   //   RegNext(io.meta_read.fire) && s1_valid && !io.lsu.s1_kill) &&
+  //   //   !s2_nack_no_mshr &&
+  //   //   !s2_miss_merged
+  //   // )
+  //   io.replace_access.valid := s3_valid && RegNext(!s2_miss_merged)
+  //   io.replace_access.bits.set := RegNext(RegNext(get_idx(s1_req.vaddr)))
+  //   io.replace_access.bits.way := RegNext(RegNext(Mux(s1_tag_match_dup_dc, OHToUInt(s1_tag_match_way_dup_dc), s1_repl_way_en_enc)))
+  // } else {
+  //   // replacement is updated on both 1st and 2nd miss
+  //   // timing is worse than !cfg.updateReplaceOn2ndmiss
+  //   // io.replace_access.valid := RegNext(RegNext(
+  //   //   RegNext(io.meta_read.fire) && s1_valid && !io.lsu.s1_kill) &&
+  //   //   !s2_nack_no_mshr &&
+  //   //   // replacement is updated on 2nd miss only when this req is firstly issued
+  //   //   (!s2_miss_merged || s2_req.isFirstIssue)
+  //   // )
+  //   io.replace_access.valid := s3_valid
+  //   io.replace_access.bits.set := RegNext(RegNext(get_idx(s1_req.vaddr)))
+  //   // io.replace_access.bits.way := RegNext(
+  //   //   Mux(
+  //   //     RegNext(s1_tag_match_dup_dc),
+  //   //     RegNext(OHToUInt(s1_tag_match_way_dup_dc)), // if hit, access hit way in plru
+  //   //     Mux( // if miss
+  //   //       !s2_miss_merged,
+  //   //       RegNext(s1_repl_way_en_enc), // 1st fire: access new selected replace way
+  //   //       OHToUInt(io.miss_resp.repl_way_en) // 2nd fire: access replace way selected at miss queue allocate time
+  //   //     )
+  //   //   )
+  //   // )
+  //   io.replace_access.bits.way := RegNext(RegNext(Mux(s1_tag_match_dup_dc, OHToUInt(s1_tag_match_way_dup_dc), s1_repl_way_en_enc)))
+  // }
+
+  io.replace_access.valid := s3_valid && s3_hit
+  io.replace_access.bits.set := RegNext(RegNext(get_idx(s1_req.vaddr)))
+  io.replace_access.bits.way := RegNext(RegNext(OHToUInt(s1_tag_match_way_dup_dc)))
 
   // update access bit
   io.access_flag_write.valid := s3_valid && s3_hit && !s3_is_prefetch

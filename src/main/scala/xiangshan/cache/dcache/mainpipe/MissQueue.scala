@@ -309,7 +309,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     val mem_grant = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
     val mem_finish = DecoupledIO(new TLBundleE(edge.bundle))
 
-    // send refill info to load queue
+    // send refill info to load queue, useless now
     val refill_to_ldq = ValidIO(new Refill)
 
     // replace pipe
@@ -320,6 +320,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     // main pipe: amo miss
     val main_pipe_req = DecoupledIO(new MainPipeReq)
     val main_pipe_resp = Input(Bool())
+    val main_pipe_refill_resp = Input(Bool())
     val main_pipe_replay = Input(Bool())
 
     // for main pipe s2
@@ -396,11 +397,12 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   val w_grantlast = RegInit(true.B)
   // val w_replace_resp = RegInit(true.B)
   val w_mainpipe_resp = RegInit(true.B)
+  val w_refill_resp = RegInit(true.B)
   val w_l2hint = RegInit(true.B)
 
   val mainpipe_req_fired = RegInit(true.B)
 
-  val release_entry = s_grantack && w_mainpipe_resp
+  val release_entry = s_grantack && w_mainpipe_resp && w_refill_resp
 
   val acquire_not_sent = !s_acquire && !io.mem_acquire.ready
   val data_not_refilled = !w_grantfirst
@@ -460,6 +462,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
     s_acquire := io.acquire_fired_by_pipe_reg
     s_grantack := false.B
+    s_mainpipe_req := false.B
 
     w_grantfirst := false.B
     w_grantlast := false.B
@@ -482,8 +485,14 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
       should_replace := false.B
     }
 
-    when (miss_req_pipe_reg_bits.isFromAMO || !miss_req_pipe_reg_bits.isFromAMO) {
-      s_mainpipe_req := false.B
+    // when (miss_req_pipe_reg_bits.isFromAMO || !miss_req_pipe_reg_bits.isFromAMO) {
+    //   s_mainpipe_req := false.B
+    //   w_mainpipe_resp := false.B
+    // }
+    when (!miss_req_pipe_reg_bits.isFromAMO) {
+      w_refill_resp := false.B
+    }
+    when (miss_req_pipe_reg_bits.isFromAMO) {
       w_mainpipe_resp := false.B
     }
 
@@ -610,6 +619,10 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
   when (io.main_pipe_resp) {
     w_mainpipe_resp := true.B
+  }
+
+  when(io.main_pipe_refill_resp) {
+    w_refill_resp := true.B
   }
 
   when (io.l2_hint.valid) {
@@ -798,7 +811,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   XSPerfAccumulate("miss_refill_hint_arrive4", RegNextN(io.main_pipe_req.fire && !mainpipe_req_fired,4) && w_grantlast && !RegNext(w_grantlast))
   XSPerfAccumulate("miss_refill_hint_arrive5", RegNextN(io.main_pipe_req.fire && !mainpipe_req_fired,5) && w_grantlast && !RegNext(w_grantlast))
   XSPerfAccumulate("miss_refill_replay", io.main_pipe_replay)
-  XSPerfAccumulate("miss_refill_replay_without_data", RegNext(RegNext(io.main_pipe_req.fire && mainpipe_req_fired)) && !w_grantlast)
+  XSPerfAccumulate("miss_refill_replay_without_data", RegNextN(io.main_pipe_req.fire && mainpipe_req_fired, 3) && !w_grantlast)
 
 //  io.debug_early_replace.valid := BoolStopWatch(io.replace_pipe_resp, io.refill_pipe_req.fire())
 //  io.debug_early_replace.bits.idx := addr_to_dcache_set(req.vaddr)
@@ -874,7 +887,9 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     val main_pipe_resp = Flipped(ValidIO(new MainPipeResp))
 
     val s2_miss_id = Input(UInt(log2Up(cfg.nMissEntries).W))
+    val s3_miss_id = Input(UInt(log2Up(cfg.nMissEntries).W))
     val s2_replay_to_mq = Input(Bool())
+    val s3_refill_resp = Input(Bool())
     val refill_info = ValidIO(new MissQueueRefillInfo)
 
     // block probe
@@ -1047,6 +1062,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
       e.io.main_pipe_resp := io.main_pipe_resp.valid && io.main_pipe_resp.bits.ack_miss_queue && io.main_pipe_resp.bits.miss_id === i.U
       // e.io.main_pipe_replay := io.main_pipe_resp.valid && io.main_pipe_resp.bits.replay && io.main_pipe_resp.bits.ack_miss_queue && io.main_pipe_resp.bits.miss_id === i.U
       e.io.main_pipe_replay := io.s2_replay_to_mq && io.s2_miss_id === i.U
+      e.io.main_pipe_refill_resp := io.s3_refill_resp & io.s3_miss_id === i.U
 
       e.io.memSetPattenDetected := memSetPattenDetected
       e.io.nMaxPrefetchEntry := nMaxPrefetchEntry
