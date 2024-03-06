@@ -694,8 +694,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   }
   protected val enqValidCntDeq0 = PopCount(io.enq.map(_.fire).zip(deqCanAcceptVecEnq(0)).map { case (a, b) => a && b })
   protected val enqValidCntDeq1 = PopCount(io.enq.map(_.fire).zip(deqCanAcceptVecEnq.last).map { case (a, b) => a && b })
-  io.validCntDeqVec.head := RegNext(enqEntryValidCntDeq0 +& othersValidCntDeq0 +& enqValidCntDeq0 - deqBeforeDly.head.fire) // validCntDeqVec(0)
-  io.validCntDeqVec.last := RegNext(enqEntryValidCntDeq1 +& othersValidCntDeq1 +& enqValidCntDeq1 - deqBeforeDly.last.fire) // validCntDeqVec(1)
+  io.validCntDeqVec.head := RegNext(enqEntryValidCntDeq0 +& othersValidCntDeq0 +& enqValidCntDeq0 - io.deqDelay.head.fire) // validCntDeqVec(0)
+  io.validCntDeqVec.last := RegNext(enqEntryValidCntDeq1 +& othersValidCntDeq1 +& enqValidCntDeq1 - io.deqDelay.last.fire) // validCntDeqVec(1)
   io.status.leftVec(0) := validVec.drop(params.numEnq).reduce(_ & _)
   for (i <- 0 until params.numEnq) {
     io.status.leftVec(i + 1) := othersValidCnt === (params.numEntries - params.numEnq - (i + 1)).U
