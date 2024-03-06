@@ -222,7 +222,7 @@ class TLBFA(
 
 
   val hfenceg = io.sfence
-  val hfenceg_gvpn = sfence_vpn
+  val hfenceg_gvpn = (sfence.bits.addr << 2)(VAddrBits - 1, offLen)
   when (hfenceg_valid) {
     when(hfenceg.bits.rs2) {
       v.zipWithIndex.map { case (a, i) => a := a && !(entries(i).s2xlate =/= noS2xlate) }

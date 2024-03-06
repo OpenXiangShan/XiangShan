@@ -71,9 +71,8 @@ class Fence(implicit p: Parameters) extends FunctionUnit {
   sfence.bits.hg := !disableHfenceg && func === FenceOpType.hfence_g
   XSError(sfence.valid && uop.ctrl.lsrc(0) =/= uop.ctrl.imm(4, 0), "lsrc0 is passed by imm\n")
   XSError(sfence.valid && uop.ctrl.lsrc(1) =/= uop.ctrl.imm(9, 5), "lsrc1 is passed by imm\n")
-  val sfence_addr = Mux(!disableHfenceg && io.in.bits.uop.ctrl.fuOpType === FenceOpType.hfence_g, io.in.bits.src(0) << 2, io.in.bits.src(0)) 
-  sfence.bits.addr := RegEnable(sfence_addr, io.in.fire)
-  sfence.bits.id := RegEnable(io.in.bits.src(1), io.in.fire)
+  sfence.bits.addr := RegEnable(io.in.bits.src(0), io.in.fire)
+  sfence.bits.id   := RegEnable(io.in.bits.src(1), io.in.fire)
 
   when (state === s_idle && io.in.valid) { state := s_wait }
   when (state === s_wait && func === FenceOpType.fencei && sbEmpty) { state := s_icache }

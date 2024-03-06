@@ -801,7 +801,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val l1hhit = VecInit(l1h.map(_ === onlyStage2)).asUInt
     val sphhit = VecInit(sph.map(_ === onlyStage2)).asUInt
     val l2hhit = VecInit(l2h.flatMap(_.map(_ === onlyStage2))).asUInt
-    val hfenceg_gvpn = sfence_dup(0).bits.addr(sfence_dup(0).bits.addr.getWidth - 1, offLen)
+    val hfenceg_gvpn = (sfence_dup(0).bits.addr << 2)(sfence_dup(0).bits.addr.getWidth - 1, offLen)
     when(sfence_dup(0).bits.rs1) {
       when(sfence_dup(0).bits.rs2) {
         l2v := l2v & ~l2hhit
