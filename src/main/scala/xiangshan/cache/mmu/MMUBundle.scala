@@ -1314,9 +1314,20 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
   }
   
   def hit(vpn: UInt, asid: UInt, vasid: UInt, vmid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false): Bool = { 
-    val s1_hit = s1.hit(vpn, Mux(this.hasS2xlate(), vasid, asid), vmid, allType, ignoreAsid, this.hasS2xlate)
-    val s2_hit = s2.hit(vpn, vmid)
-    Mux(s2xlate === onlyStage2, s2_hit, s1_hit)
+    val noS2_hit = s1.hit(vpn, Mux(this.hasS2xlate(), vasid, asid), vmid, allType, ignoreAsid, this.hasS2xlate)
+    val onlyS2_hit = s2.hit(vpn, vmid)
+    // allstage and onlys1 hit
+    val s1vpn = Cat(s1.entry.tag, s1.addr_low)
+    val level = s1.entry.level.getOrElse(0.U) max s2.entry.level.getOrElse(0.U)
+    val hit0 = vpn(vpnnLen * 3 - 1, vpnnLen * 2) === s1vpn(vpnnLen * 3 - 1, vpnnLen * 2)
+    val hit1 = vpn(vpnnLen * 2 - 1, vpnnLen) === s1vpn(vpnnLen * 2 - 1, vpnnLen)
+    val hit2 = vpn(vpnnLen - 1, 0) === s1vpn(vpnnLen - 1, 0)
+    val vpn_hit = Mux(level === 2.U, hit2 && hit1 && hit0, Mux(level === 1.U, hit1 && hit0, hit0))
+    val vmid_hit = Mux(this.s2xlate === allStage, s2.entry.vmid.getOrElse(0.U) === vmid, true.B)
+    val vasid_hit = if (ignoreAsid) true.B else (s1.entry.asid === vasid)
+    val all_onlyS1_hit = vpn_hit && vmid_hit && vasid_hit
+    Mux(this.s2xlate === noS2xlate, noS2_hit, 
+      Mux(this.s2xlate === onlyStage2, onlyS2_hit, all_onlyS1_hit))
   }
 }
 
