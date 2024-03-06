@@ -660,7 +660,9 @@ class DcacheToLduForwardIO(implicit p: Parameters) extends DCacheBundle {
 
     forward_D := all_match
     for (i <- 0 until VLEN/8) {
-      forwardData(i) := selected_data(8 * i + 7, 8 * i)
+      when (all_match) {
+        forwardData(i) := selected_data(8 * i + 7, 8 * i)
+      }
     }
 
     (forward_D, forwardData)
