@@ -281,23 +281,24 @@ class PipeLoadForwardQueryIO(implicit p: Parameters) extends LoadForwardQueryIO 
 // If it happens, a replay from rs is needed.
 class LoadNukeQueryIO(implicit p: Parameters) extends XSBundle {
   // pre allocation
-  val prealloc = Output(Bool())
-  val lqIdx = Output(new LqPtr)
-  val sqIdx = Output(new SqPtr)
-  val nack = Input(Bool())
+  val s1_prealloc = Output(Bool())
+  val s1_lqIdx = Output(new LqPtr)
+  val s1_sqIdx = Output(new SqPtr)
+  val s1_robIdx = Output(new RobPtr)
+  val s1_nack = Input(Bool())
 
   // allocation
-  val alloc = Output(Bool())
-  val uop = Output(new MicroOp)
-  val mask = Output(UInt((VLEN/8).W))
-  val paddr = Output(UInt(PAddrBits.W))
-  val dataInvalid = Output(Bool())
+  val s2_alloc = Output(Bool())
+  val s2_uop = Output(new MicroOp)
+  val s2_mask = Output(UInt((VLEN/8).W))
+  val s2_paddr = Output(UInt(PAddrBits.W))
+  val s2_dataInvalid = Output(Bool())
 
   // ld-ld violation check success, replay from fetch.
-  val nuke = Input(Bool())
+  val s3_nuke = Input(Bool())
 
   // revoke RAR/RAW allocation
-  val revoke = Output(Bool())
+  val s3_revoke = Output(Bool())
 }
 
 class NukeQueryIO(implicit p: Parameters) extends XSBundle {

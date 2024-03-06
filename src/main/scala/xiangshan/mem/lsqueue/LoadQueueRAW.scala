@@ -104,10 +104,10 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
   //  LoadQueueRAW enqueue
   // pre-Allocate logic
-  val s0_preReqs = io.query.map(_.prealloc)
+  val s0_preReqs = io.query.map(_.s1_prealloc)
   val allAddrCheck = io.stIssuePtr === io.stAddrReadySqPtr
   val s0_hasAddrInvalidStore = io.query.map(x => {
-    Mux(!allAddrCheck, isBefore(io.stAddrReadySqPtr, x.sqIdx), false.B)
+    Mux(!allAddrCheck, isBefore(io.stAddrReadySqPtr, x.s1_sqIdx), false.B)
   })
   val s0_preEnqs = s0_preReqs.zip(s0_hasAddrInvalidStore).map { case (v, r) => v && r }
   val s0_canAccepts = Wire(Vec(LoadPipelineWidth, Bool()))
@@ -118,13 +118,17 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
     s0_canAccepts(w) := freeList.io.canAllocate(w)
     s0_enqIdxs(w) := freeList.io.allocateSlot(w)
-    req.nack := Mux(s0_hasAddrInvalidStore(w), !s0_canAccepts(w), false.B)
+    req.s1_nack := Mux(s0_hasAddrInvalidStore(w), !s0_canAccepts(w), false.B)
   }
 
   // Allocate logic
-  val s1_canEnqs = io.query.map(_.alloc)
+  val s1_canEnqs = io.query.map(_.s2_alloc)
   val s1_hasAddrInvalidStore = RegNext(VecInit(s0_preReqs.zip(s0_hasAddrInvalidStore).map(x => x._1 && x._2)))
-  val s1_needEnqs = s1_canEnqs.zip(s1_hasAddrInvalidStore).map { case (v, r) => v && r }
+  val s1_cancel = io.query.map(x => {
+    val x_next = RegNext(x.s1_robIdx)
+    x_next.needFlush(RegNext(io.redirect)) || x_next.needFlush(io.redirect)
+  })
+  val s1_needEnqs = s1_canEnqs.zip(s1_hasAddrInvalidStore.zip(s1_cancel)).map { case (v, x) => v && x._1 && !x._2 }
   val s1_canAccepts = RegNext(s0_canAccepts)
   val s1_enqIdxs = RegNext(s0_enqIdxs)
   val s1_accepts = Wire(Vec(LoadPipelineWidth, Bool()))
@@ -148,7 +152,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     when (s1_needEnqs(w) && canAccept) {
       s1_accepts(w) := true.B
 
-      val debug_robIdx = enq.uop.robIdx.asUInt
+      val debug_robIdx = enq.s2_uop.robIdx.asUInt
       XSError(allocated(enqIndex), p"LoadQueueRAW: You can not write an valid entry! check: ldu $w, robIdx $debug_robIdx")
 
       freeList.io.doAllocate(w) := true.B
@@ -159,23 +163,23 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
       //  Write paddr
       paddrModule.io.wen(w) := true.B
       paddrModule.io.waddr(w) := enqIndex
-      paddrModule.io.wdata(w) := enq.paddr
-      bypassPAddr(w) := enq.paddr
+      paddrModule.io.wdata(w) := enq.s2_paddr
+      bypassPAddr(w) := enq.s2_paddr
 
       //  Write mask
       maskModule.io.wen(w) := true.B
       maskModule.io.waddr(w) := enqIndex
-      maskModule.io.wdata(w) := enq.mask
-      bypassMask(w) := enq.mask
+      maskModule.io.wdata(w) := enq.s2_mask
+      bypassMask(w) := enq.s2_mask
 
       //  Fill info
-      uop(enqIndex) := enq.uop
-      datavalid(enqIndex) := !enq.dataInvalid
+      uop(enqIndex) := enq.s2_uop
+      datavalid(enqIndex) := !enq.s2_dataInvalid
     }
   }
 
   for ((query, w) <- io.query.zipWithIndex) {
-    query.nuke := RegNext(false.B)
+    query.s3_nuke := RegNext(false.B)
   }
 
   //  LoadQueueRAW deallocate
@@ -200,7 +204,11 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   // if need replay deallocate entry
   val s2_accepts = RegNext(s1_accepts)
   val s2_enqIdxs = RegNext(VecInit(s1_offset.map(x => s1_enqIdxs(x))))
-  for ((revoke, w) <- io.query.map(_.revoke).zipWithIndex) {
+  val s2_cancel = io.query.map(x => {
+    val x_next = RegNext(x.s1_robIdx)
+    x_next.needFlush(io.redirect)
+  })
+  for ((revoke, w) <- io.query.map(_.s3_revoke).zipWithIndex) {
     val s2_accept = s2_accepts(w)
     val s2_enqIdx = s2_enqIdxs(w)
     val revokeValid = revoke && s2_accept
@@ -324,7 +332,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     val bypassPaddrMask = RegNext(VecInit((0 until LoadPipelineWidth).map(j => bypassPAddr(j)(PAddrBits-1, DCacheVWordOffset) === io.storeIn(i).bits.paddr(PAddrBits-1, DCacheVWordOffset))))
     val bypassMMask = RegNext(VecInit((0 until LoadPipelineWidth).map(j => (bypassMask(j) & io.storeIn(i).bits.mask).orR)))
     val bypassMaskUInt = (0 until LoadPipelineWidth).map(j =>
-      Fill(LoadQueueRAWSize, RegNext(s2_accepts(j))) & Mux(bypassPaddrMask(j) && bypassMMask(j), UIntToOH(RegNext(s2_enqIdxs(j))), 0.U(LoadQueueRAWSize.W))
+      Fill(LoadQueueRAWSize, RegNext(s2_accepts(j) && !s2_cancel(j))) & Mux(bypassPaddrMask(j) && bypassMMask(j), UIntToOH(RegNext(s2_enqIdxs(j))), 0.U(LoadQueueRAWSize.W))
     ).reduce(_|_)
 
     val addrMaskMatch = RegNext(paddrModule.io.violationMmask(i).asUInt & maskModule.io.violationMmask(i).asUInt) | bypassMaskUInt
