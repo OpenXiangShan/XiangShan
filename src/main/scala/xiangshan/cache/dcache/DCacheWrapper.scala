@@ -1378,8 +1378,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // Bloom Filter
-  bloomFilter.io.set <> missQueue.io.bloom_filter_query.set
-  bloomFilter.io.clr <> missQueue.io.bloom_filter_query.clr
+  // bloomFilter.io.set <> missQueue.io.bloom_filter_query.set
+  // bloomFilter.io.clr <> missQueue.io.bloom_filter_query.clr
+  bloomFilter.io.set <> mainPipe.io.bloom_filter_query.set
+  bloomFilter.io.clr <> mainPipe.io.bloom_filter_query.clr
 
   for (w <- 0 until LoadPipelineWidth)  { bloomFilter.io.query(w) <> ldu(w).io.bloom_filter_query.query }
   for (w <- 0 until LoadPipelineWidth)  { bloomFilter.io.resp(w) <> ldu(w).io.bloom_filter_query.resp }

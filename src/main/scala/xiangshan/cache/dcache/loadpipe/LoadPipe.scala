@@ -255,25 +255,26 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_hit_prefetch = ParallelMux(s1_tag_match_way_dup_dc.asBools, (0 until nWays).map(w => io.extra_meta_resp(w).prefetch))
   val s1_hit_access = ParallelMux(s1_tag_match_way_dup_dc.asBools, (0 until nWays).map(w => io.extra_meta_resp(w).access))
 
-  io.replace_way.set.valid := RegNext(s0_fire)
+  // io.replace_way.set.valid := RegNext(s0_fire)
+  io.replace_way.set.valid := false.B
   io.replace_way.set.bits := get_idx(s1_vaddr)
   io.replace_way.dmWay := get_direct_map_way(s1_vaddr)
   val s1_invalid_vec = wayMap(w => !meta_resp(w).coh.isValid())
   val s1_have_invalid_way = s1_invalid_vec.asUInt.orR
   val s1_invalid_way_en = ParallelPriorityMux(s1_invalid_vec.zipWithIndex.map(x => x._1 -> UIntToOH(x._2.U(nWays.W))))
-  val s1_repl_way_en_oh = Mux(s1_have_invalid_way, s1_invalid_way_en, UIntToOH(io.replace_way.way))
-  val s1_repl_way_en_enc = OHToUInt(s1_repl_way_en_oh)
-  val s1_repl_tag = ParallelMux(s1_repl_way_en_oh.asBools, (0 until nWays).map(w => tag_resp(w)))
-  val s1_repl_coh = ParallelMux(s1_repl_way_en_oh.asBools, (0 until nWays).map(w => meta_resp(w).coh))
-  val s1_repl_prefetch = ParallelMux(s1_repl_way_en_oh.asBools, (0 until nWays).map(w => io.extra_meta_resp(w).prefetch))
-  val s1_repl_extra_meta = ParallelMux(s1_repl_way_en_oh.asBools, (0 until nWays).map(w => io.extra_meta_resp(w)))
+  // val s1_repl_way_en_oh = Mux(s1_have_invalid_way, s1_invalid_way_en, UIntToOH(io.replace_way.way))
+  // val s1_repl_way_en_enc = OHToUInt(s1_repl_way_en_oh)
+  // val s1_repl_tag = ParallelMux(s1_repl_way_en_oh.asBools, (0 until nWays).map(w => tag_resp(w)))
+  // val s1_repl_coh = ParallelMux(s1_repl_way_en_oh.asBools, (0 until nWays).map(w => meta_resp(w).coh))
+  // val s1_repl_prefetch = ParallelMux(s1_repl_way_en_oh.asBools, (0 until nWays).map(w => io.extra_meta_resp(w).prefetch)) // need in mainpipe
+  // val s1_repl_extra_meta = ParallelMux(s1_repl_way_en_oh.asBools, (0 until nWays).map(w => io.extra_meta_resp(w)))
 
   val s1_need_replacement = !s1_tag_match_dup_dc
-  val s1_way_en = Mux(s1_need_replacement, s1_repl_way_en_oh, s1_tag_match_way_dup_dc)
-  val s1_coh = Mux(s1_need_replacement, s1_repl_coh, s1_hit_coh)
-  val s1_tag = Mux(s1_need_replacement, s1_repl_tag, get_tag(s1_paddr_dup_dcache))
+  // val s1_way_en = Mux(s1_need_replacement, s1_repl_way_en_oh, s1_tag_match_way_dup_dc)
+  // val s1_coh = Mux(s1_need_replacement, s1_repl_coh, s1_hit_coh)
+  // val s1_tag = Mux(s1_need_replacement, s1_repl_tag, get_tag(s1_paddr_dup_dcache))
 
-  XSPerfAccumulate("load_has_invalid_way_but_select_valid_way", io.replace_way.set.valid && wayMap(w => !meta_resp(w).coh.isValid()).asUInt.orR && s1_need_replacement && s1_repl_coh.isValid())
+  // XSPerfAccumulate("load_has_invalid_way_but_select_valid_way", io.replace_way.set.valid && wayMap(w => !meta_resp(w).coh.isValid()).asUInt.orR && s1_need_replacement && s1_repl_coh.isValid())
   XSPerfAccumulate("load_using_replacement", io.replace_way.set.valid && s1_need_replacement)
 
   // data read
@@ -341,11 +342,11 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_has_permission = s2_hit_coh.onAccess(s2_req.cmd)._1 // for write prefetch
   val s2_new_hit_coh = s2_hit_coh.onAccess(s2_req.cmd)._3 // for write prefetch
 
-  val s2_way_en = RegEnable(s1_way_en, s1_fire)
-  val s2_repl_coh = RegEnable(s1_repl_coh, s1_fire)
-  val s2_repl_tag = RegEnable(s1_repl_tag, s1_fire)
-  val s2_repl_extra_meta = RegEnable(s1_repl_extra_meta, s1_fire) // not used for now
-  val s2_repl_prefetch = RegEnable(s1_repl_prefetch, s1_fire)
+  // val s2_way_en = RegEnable(s1_way_en, s1_fire)
+  // val s2_repl_coh = RegEnable(s1_repl_coh, s1_fire)
+  // val s2_repl_tag = RegEnable(s1_repl_tag, s1_fire)
+  // val s2_repl_extra_meta = RegEnable(s1_repl_extra_meta, s1_fire) // not used for now
+  // val s2_repl_prefetch = RegEnable(s1_repl_prefetch, s1_fire)
   val s2_encTag = RegEnable(s1_encTag, s1_fire)
 
   // when req got nacked, upper levels should replay this request
@@ -390,9 +391,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.miss_req.bits.vaddr := s2_vaddr
   // io.miss_req.bits.way_en := s2_way_en
   io.miss_req.bits.req_coh := s2_hit_coh
-  io.miss_req.bits.replace_coh := s2_repl_coh
-  io.miss_req.bits.replace_tag := s2_repl_tag
-  io.miss_req.bits.replace_pf := s2_repl_prefetch
+  // io.miss_req.bits.replace_coh := s2_repl_coh
+  // io.miss_req.bits.replace_tag := s2_repl_tag
+  // io.miss_req.bits.replace_pf := s2_repl_prefetch
   io.miss_req.bits.cancel := io.lsu.s2_kill || s2_tag_error
   io.miss_req.bits.pc := io.lsu.s2_pc
   io.miss_req.bits.lqIdx := io.lsu.req.bits.lqIdx

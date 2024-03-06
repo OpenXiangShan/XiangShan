@@ -26,6 +26,7 @@ import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLPermission
 import utils._
 import utility._
 import xiangshan.{L1CacheErrorInfo, XSCoreParamsKey}
+import xiangshan.mem.prefetch._
 import xiangshan.mem.HasL1PrefetchSourceParameter
 
 class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
@@ -68,6 +69,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
 
   // prefetch
   val pf_source = UInt(L1PfSourceBits.W)
+  // val replace_pf = UInt(L1PfSourceBits.W)
   val access = Bool()
 
   val id = UInt(reqIdWidth.W)
@@ -181,6 +183,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val error = Output(new L1CacheErrorInfo())
     // force write
     val force_write = Input(Bool())
+
+    val bloom_filter_query = new Bundle {
+      val set = ValidIO(new BloomQueryBundle(BLOOM_FILTER_ENTRY_NUM))
+      val clr = ValidIO(new BloomQueryBundle(BLOOM_FILTER_ENTRY_NUM))
+    }
   })
 
   // meta array is made of regs, so meta write or read should always be ready
@@ -336,6 +343,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   )
   val s1_repl_tag = ParallelMux(s1_repl_way_en.asBools, (0 until nWays).map(w => tag_resp(w)))
   val s1_repl_coh = ParallelMux(s1_repl_way_en.asBools, (0 until nWays).map(w => meta_resp(w))).asTypeOf(new ClientMetadata)
+  val s1_repl_pf  = ParallelMux(s1_repl_way_en.asBools, (0 until nWays).map(w => io.extra_meta_resp(w).prefetch))
   // val s1_miss_tag = ParallelMux(s1_req.miss_way_en.asBools, (0 until nWays).map(w => tag_resp(w)))
   // val s1_miss_coh = ParallelMux(s1_req.miss_way_en.asBools, (0 until nWays).map(w => meta_resp(w))).asTypeOf(new ClientMetadata)
 
@@ -405,7 +413,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   val s2_repl_tag = RegEnable(s1_repl_tag, s1_fire)
   val s2_repl_coh = RegEnable(s1_repl_coh, s1_fire)
-  val s2_repl_way_en = RegEnable(s1_repl_way_en, s1_fire)
+  val s2_repl_pf  = RegEnable(s1_repl_pf, s1_fire)
+  // val s2_repl_way_en = RegEnable(s1_repl_way_en, s1_fire)
   val s2_need_replacement = RegEnable(s1_need_replacement, s1_fire)
   val s2_need_data = RegEnable(s1_need_data, s1_fire)
   val s2_need_tag = RegEnable(s1_need_tag, s1_fire)
@@ -1488,9 +1497,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   miss_req.amo_data := s2_req.amo_data
   miss_req.amo_mask := s2_req.amo_mask
   miss_req.req_coh := s2_hit_coh
-  miss_req.replace_coh := s2_repl_coh
-  miss_req.replace_tag := s2_repl_tag
-  miss_req.replace_pf := L1_HW_PREFETCH_STORE // TODO: support store cache pollution monitor
+  // miss_req.replace_coh := s2_repl_coh
+  // miss_req.replace_tag := s2_repl_tag
+  // miss_req.replace_pf := L1_HW_PREFETCH_STORE // TODO: support store cache pollution monitor
   miss_req.id := s2_req.id
   miss_req.cancel := false.B
   miss_req.pc := DontCare
@@ -1580,6 +1589,14 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.prefetch_flag_write.bits.idx := s3_idx_dup(3)
   io.prefetch_flag_write.bits.way_en := s3_way_en_dup(1)
   io.prefetch_flag_write.bits.source := s3_req.pf_source
+
+  // regenerate repl_way & repl_coh
+  io.bloom_filter_query.set.valid := s2_fire_to_s3 && s2_req.miss && !isFromL1Prefetch(s2_repl_pf) && s2_repl_coh.isValid() && isFromL1Prefetch(s2_req.pf_source)
+  io.bloom_filter_query.set.bits.addr := io.bloom_filter_query.set.bits.get_addr(Cat(s2_repl_tag, get_untag(s2_req.vaddr))) // the evict block address
+
+  io.bloom_filter_query.clr.valid := s3_fire && isFromL1Prefetch(s3_req.pf_source)
+  io.bloom_filter_query.clr.bits.addr := io.bloom_filter_query.clr.bits.get_addr(s3_req.addr)
+
   XSPerfAccumulate("mainpipe_update_prefetchArray", io.prefetch_flag_write.valid)
   XSPerfAccumulate("mainpipe_s2_miss_req", s2_valid && s2_req.miss)
   XSPerfAccumulate("mainpipe_s2_block_penalty", s2_valid && s2_req.miss && !io.refill_info.valid)

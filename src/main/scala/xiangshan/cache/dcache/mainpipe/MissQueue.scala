@@ -54,11 +54,11 @@ class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   val amo_mask = UInt((DataBits / 8).W)
 
   val req_coh = new ClientMetadata
-  val replace_coh = new ClientMetadata
-  val replace_tag = UInt(tagBits.W)
+  // val replace_coh = new ClientMetadata
+  // val replace_tag = UInt(tagBits.W)
   val id = UInt(reqIdWidth.W)
 
-  val replace_pf = UInt(L1PfSourceBits.W)
+  // val replace_pf = UInt(L1PfSourceBits.W)
 
   // For now, miss queue entry req is actually valid when req.valid && !cancel
   // * req.valid is fast to generate
@@ -111,7 +111,7 @@ class MissReq(implicit p: Parameters) extends MissReqWoStoreData {
   def toMissReqWoStoreData(): MissReqWoStoreData = {
     val out = Wire(new MissReqWoStoreData)
     out.source := source
-    out.replace_pf := replace_pf
+    // out.replace_pf := replace_pf
     out.pf_source := pf_source
     out.cmd := cmd
     out.addr := addr
@@ -122,8 +122,8 @@ class MissReq(implicit p: Parameters) extends MissReqWoStoreData {
     out.amo_data := amo_data
     out.amo_mask := amo_mask
     out.req_coh := req_coh
-    out.replace_coh := replace_coh
-    out.replace_tag := replace_tag
+    // out.replace_coh := replace_coh
+    // out.replace_tag := replace_tag
     out.id := id
     out.cancel := cancel
     out.pc := pc
@@ -477,13 +477,13 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     }
     full_overwrite := miss_req_pipe_reg_bits.isFromStore && miss_req_pipe_reg_bits.full_overwrite
 
-    when (!miss_req_pipe_reg_bits.hit && miss_req_pipe_reg_bits.replace_coh.isValid() && !miss_req_pipe_reg_bits.isFromAMO) {
-      // s_replace_req := false.B
-      // w_replace_resp := false.B
-      should_replace := true.B
-    }.otherwise {
-      should_replace := false.B
-    }
+    // when (!miss_req_pipe_reg_bits.hit && miss_req_pipe_reg_bits.replace_coh.isValid() && !miss_req_pipe_reg_bits.isFromAMO) {
+    //   // s_replace_req := false.B
+    //   // w_replace_resp := false.B
+    //   should_replace := true.B
+    // }.otherwise {
+    //   should_replace := false.B
+    // }
 
     // when (miss_req_pipe_reg_bits.isFromAMO || !miss_req_pipe_reg_bits.isFromAMO) {
     //   s_mainpipe_req := false.B
@@ -520,8 +520,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
       req := miss_req_pipe_reg_bits
       req.addr := get_block_addr(miss_req_pipe_reg_bits.addr)
       // req.way_en := req.way_en
-      req.replace_coh := req.replace_coh
-      req.replace_tag := req.replace_tag
+      // req.replace_coh := req.replace_coh
+      // req.replace_tag := req.replace_tag
       req_store_mask := miss_req_pipe_reg_bits.store_mask
       for (i <- 0 until blockRows) {
         refill_and_store_data(i) := miss_req_pipe_reg_bits.store_data(rowBits * (i + 1) - 1, rowBits * i)
@@ -769,7 +769,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   // Invalid temporary
   // io.sms_agt_evict_req.valid := io.main_pipe_req.fire && should_replace && req_valid
   io.sms_agt_evict_req.valid := false.B
-  io.sms_agt_evict_req.bits.vaddr := Cat(req.replace_tag(tagBits - 1, 2), req.vaddr(13, 12), 0.U((VAddrBits - tagBits).W))
+  io.sms_agt_evict_req.bits  := DontCare
+  // io.sms_agt_evict_req.bits.vaddr := Cat(req.replace_tag(tagBits - 1, 2), req.vaddr(13, 12), 0.U((VAddrBits - tagBits).W))
 
   // io.main_pipe_req.valid := !s_mainpipe_req && w_grantlast
   io.main_pipe_req.valid := !s_mainpipe_req && (w_l2hint || w_grantlast)
@@ -792,6 +793,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   io.main_pipe_req.bits.error := error
   io.main_pipe_req.bits.id := req.id
   io.main_pipe_req.bits.pf_source := req.pf_source
+  // io.main_pipe_req.bits.replace_pf := req.replace_pf
   io.main_pipe_req.bits.access := access
 
   io.block_addr.valid := req_valid && w_grantlast 
@@ -928,10 +930,10 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
       }
     }
 
-    val bloom_filter_query = new Bundle {
-      val set = ValidIO(new BloomQueryBundle(BLOOM_FILTER_ENTRY_NUM))
-      val clr = ValidIO(new BloomQueryBundle(BLOOM_FILTER_ENTRY_NUM))
-    }
+    // val bloom_filter_query = new Bundle {
+    //   val set = ValidIO(new BloomQueryBundle(BLOOM_FILTER_ENTRY_NUM))
+    //   val clr = ValidIO(new BloomQueryBundle(BLOOM_FILTER_ENTRY_NUM))
+    // }
 
     val mq_enq_cancel = Output(Bool())
 
@@ -1130,12 +1132,12 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   io.prefetch_info.fdp.prefetch_monitor_cnt := io.main_pipe_req.fire
   io.prefetch_info.fdp.total_prefetch := alloc && io.req.valid && !io.req.bits.cancel && isFromL1Prefetch(io.req.bits.pf_source)
 
-  io.bloom_filter_query.set.valid := alloc && io.req.valid && !io.req.bits.cancel && !isFromL1Prefetch(io.req.bits.replace_pf) && io.req.bits.replace_coh.isValid() && isFromL1Prefetch(io.req.bits.pf_source)
-  io.bloom_filter_query.set.bits.addr := io.bloom_filter_query.set.bits.get_addr(Cat(io.req.bits.replace_tag, get_untag(io.req.bits.vaddr))) // the evict block address
+  // io.bloom_filter_query.set.valid := alloc && io.req.valid && !io.req.bits.cancel && !isFromL1Prefetch(io.req.bits.replace_pf) && io.req.bits.replace_coh.isValid() && isFromL1Prefetch(io.req.bits.pf_source)
+  // io.bloom_filter_query.set.bits.addr := io.bloom_filter_query.set.bits.get_addr(Cat(io.req.bits.replace_tag, get_untag(io.req.bits.vaddr))) // the evict block address
 
 //  io.bloom_filter_query.clr.valid := io.main_pipe_req.fire && isFromL1Prefetch(io.refill_pipe_req.bits.prefetch)
-  io.bloom_filter_query.clr.valid := io.main_pipe_req.fire && isFromL1Prefetch(io.main_pipe_req.bits.pf_source)
-  io.bloom_filter_query.clr.bits.addr := io.bloom_filter_query.clr.bits.get_addr(io.main_pipe_req.bits.addr)
+  // io.bloom_filter_query.clr.valid := io.main_pipe_req.fire && isFromL1Prefetch(io.main_pipe_req.bits.pf_source)
+  // io.bloom_filter_query.clr.bits.addr := io.bloom_filter_query.clr.bits.get_addr(io.main_pipe_req.bits.addr)
 
   // L1MissTrace Chisel DB
   val debug_miss_trace = Wire(new L1MissTrace)
