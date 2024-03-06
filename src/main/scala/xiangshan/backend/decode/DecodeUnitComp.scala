@@ -75,10 +75,10 @@ class indexedLSUopTable(uopIdx:Int) extends Module {
       }
     }
   }
-  val out = RegNext(decoder(QMCMinimizer, src, TruthTable(combVemulNf.map {
+  val out = decoder(QMCMinimizer, src, TruthTable(combVemulNf.map {
     case (emul, lmul, nf, isFirstUopInVd, offsetVs2, offsetVd) =>
       (BitPat((emul << 5 | lmul << 3 | nf).U(7.W)), BitPat((isFirstUopInVd << 6 | offsetVs2 << 3 | offsetVd).U(7.W)))
-  }, BitPat.N(7))))
+  }, BitPat.N(7)))
   outOffsetVs2 := out(5, 3)
   outOffsetVd := out(2, 0)
   outIsFirstUopInVd := out(6).asBool
@@ -142,9 +142,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   val dest = Cat(0.U(1.W), instFields.RD)
 
   val nf    = instFields.NF
-  val nfNoReg = inDecodedInst.instr.asTypeOf(new XSInstBitFields).NF
   val width = instFields.WIDTH(1, 0)
-  val widthNoReg = inDecodedInst.instr.asTypeOf(new XSInstBitFields).WIDTH(1, 0)
 
   //output of DecodeUnit
   val numOfUop = Wire(UInt(log2Up(maxUopSize).W))
@@ -159,9 +157,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   lmul := latchedUopInfo.lmul
   isVsetSimple := latchedInst.isVset
   val vlmulReg = latchedInst.vpu.vlmul
-  val vlmulNoReg = inDecodedInst.vpu.vlmul
   val vsewReg = latchedInst.vpu.vsew
-  val vsewNoReg = inDecodedInst.vpu.vsew
 
   //Type of uop Div
   val typeOfSplit = latchedInst.uopSplitType
@@ -1699,9 +1695,9 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
     /*
       FMV.D.X
        */
-      val vlmul = vlmulNoReg
-      val vsew = Cat(0.U(1.W), vsewNoReg)
-      val veew = Cat(0.U(1.W), widthNoReg)
+      val vlmul = vlmulReg
+      val vsew = Cat(0.U(1.W), vsewReg)
+      val veew = Cat(0.U(1.W), width)
       val vemul: UInt = veew.asUInt + 1.U + vlmul.asUInt + ~vsew.asUInt
       val simple_lmul = MuxLookup(vlmul, 0.U(2.W), Array(
         "b001".U -> 1.U,
@@ -1734,7 +1730,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
 
       //LMUL
       for (i <- 0 until MAX_INDEXED_LS_UOPNUM) {
-        indexedLSRegOffset(i).src := Cat(simple_emul, simple_lmul, nfNoReg)
+        indexedLSRegOffset(i).src := Cat(simple_emul, simple_lmul, nf)
         val offsetVs2 = indexedLSRegOffset(i).outOffsetVs2
         val offsetVd = indexedLSRegOffset(i).outOffsetVd
         val isFirstUopInVd = indexedLSRegOffset(i).outIsFirstUopInVd
