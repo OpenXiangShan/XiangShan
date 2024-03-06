@@ -381,9 +381,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val onlyS2 = s2xlate === onlyStage2
     val onlyS1 = s2xlate === onlyStage1
     val s2xlate_hit = s2xlate === ptw.resp.bits.s2xlate
-    val normal_hit = ptw.resp.bits.s1.hit(vpn, Mux(hasS2xlate, io.csr.vsatp.asid, io.csr.satp.asid), io.csr.hgatp.asid, true, false, hasS2xlate)
-    val onlyS2_hit = ptw.resp.bits.s2.hit(vpn, io.csr.hgatp.asid)
-    val p_hit = RegNext(Mux(onlyS2, onlyS2_hit, normal_hit) && io.ptw.resp.fire && s2xlate_hit)
+    val resp_hit = ptw.resp.bits.hit(vpn, io.csr.satp.asid, io.csr.vsatp.asid, io.csr.hgatp.asid, true, false)
+    val p_hit = RegNext(resp_hit && io.ptw.resp.fire && s2xlate_hit)
     val ppn_s1 = ptw.resp.bits.s1.genPPN(vpn)
     val gvpn = Mux(onlyS2, vpn, ppn_s1)
     val ppn_s2 = ptw.resp.bits.s2.genPPNS2(gvpn)
