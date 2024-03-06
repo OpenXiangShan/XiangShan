@@ -781,8 +781,8 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     val inflight_tag_matches = widthMap(w => tag_matches(w) && inflightMask(w))
     val line_offset_mask = UIntToOH(getVWordOffset(forward.paddr))
 
-    val valid_tag_match_reg = valid_tag_matches.map(GatedValidRegNext(_))
-    val inflight_tag_match_reg = inflight_tag_matches.map(GatedValidRegNext(_))
+    val valid_tag_match_reg = valid_tag_matches.map(RegEnable(_, forward.valid))
+    val inflight_tag_match_reg = inflight_tag_matches.map(RegEnable(_, forward.valid))
     val forward_mask_candidate_reg = RegEnable(
       VecInit(mask.map(entry => entry(getVWordOffset(forward.paddr)))),
       forward.valid
