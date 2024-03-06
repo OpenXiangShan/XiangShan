@@ -608,10 +608,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s1_paddr_dup_dcache = Wire(UInt())
   val s1_exception        = ExceptionNO.selectByFu(s1_out.uop.cf.exceptionVec, lduCfg).asUInt.orR   // af & pf exception were modified below.
   val s1_not_tlb_query    = s1_in.isFastReplay
-  val s1_rar_nack         = io.lsq.nuke.rar.prealloc &&
-                            io.lsq.nuke.rar.nack
-  val s1_raw_nack         = io.lsq.nuke.raw.prealloc  &&
-                            io.lsq.nuke.raw.nack
+  val s1_rar_nack         = io.lsq.nuke.rar.s1_prealloc &&
+                            io.lsq.nuke.rar.s1_nack
+  val s1_raw_nack         = io.lsq.nuke.raw.s1_prealloc  &&
+                            io.lsq.nuke.raw.s1_nack
   val s1_tlb_miss         = io.tlb.resp.bits.miss && !s1_not_tlb_query
   val s1_prf              = s1_in.isPrefetch
   val s1_hw_prf           = s1_in.isHWPrefetch
@@ -761,14 +761,16 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.forward_mshr.paddr  := s1_out.paddr
 
   // rar pre enqueue check
-  io.lsq.nuke.rar.prealloc := s1_valid && !s1_exception
-  io.lsq.nuke.rar.lqIdx := s1_in.uop.lqIdx
-  io.lsq.nuke.rar.sqIdx := s1_in.uop.sqIdx
+  io.lsq.nuke.rar.s1_prealloc := s1_valid && !s1_exception
+  io.lsq.nuke.rar.s1_lqIdx := s1_in.uop.lqIdx
+  io.lsq.nuke.rar.s1_sqIdx := s1_in.uop.sqIdx
+  io.lsq.nuke.rar.s1_robIdx := s1_in.uop.robIdx
 
   // raw pre enqueue check
-  io.lsq.nuke.raw.prealloc := s1_valid && !s1_exception
-  io.lsq.nuke.raw.lqIdx := s1_in.uop.lqIdx
-  io.lsq.nuke.raw.sqIdx := s1_in.uop.sqIdx
+  io.lsq.nuke.raw.s1_prealloc := s1_valid && !s1_exception
+  io.lsq.nuke.raw.s1_lqIdx := s1_in.uop.lqIdx
+  io.lsq.nuke.raw.s1_sqIdx := s1_in.uop.sqIdx
+  io.lsq.nuke.raw.s1_robIdx := s1_in.uop.robIdx
 
   XSDebug(s1_valid,
     p"S1: pc ${Hexadecimal(s1_out.uop.cf.pc)}, lId ${Hexadecimal(s1_out.uop.lqIdx.asUInt)}, tlb_miss ${io.tlb.resp.bits.miss}, " +
@@ -903,18 +905,18 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_data_fwded = s2_dcache_miss && (s2_full_fwd || s2_cache_tag_error)
 
   // ld-ld violation require
-  io.lsq.nuke.rar.alloc := s2_valid && s2_troublem
-  io.lsq.nuke.rar.uop   := s2_in.uop
-  io.lsq.nuke.rar.mask  := s2_in.mask
-  io.lsq.nuke.rar.paddr := s2_in.paddr
-  io.lsq.nuke.rar.dataInvalid := !Mux(s2_full_fwd || s2_fwd_data_valid, true.B, !s2_dcache_miss)
+  io.lsq.nuke.rar.s2_alloc := s2_valid && s2_troublem
+  io.lsq.nuke.rar.s2_uop   := s2_in.uop
+  io.lsq.nuke.rar.s2_mask  := s2_in.mask
+  io.lsq.nuke.rar.s2_paddr := s2_in.paddr
+  io.lsq.nuke.rar.s2_dataInvalid := !Mux(s2_full_fwd || s2_fwd_data_valid, true.B, !s2_dcache_miss)
 
   // st-ld violation require
-  io.lsq.nuke.raw.alloc := s2_valid && s2_troublem
-  io.lsq.nuke.raw.uop   := s2_in.uop
-  io.lsq.nuke.raw.mask  := s2_in.mask
-  io.lsq.nuke.raw.paddr := s2_in.paddr
-  io.lsq.nuke.raw.dataInvalid := !Mux(s2_full_fwd || s2_fwd_data_valid, true.B, !s2_dcache_miss)
+  io.lsq.nuke.raw.s2_alloc := s2_valid && s2_troublem
+  io.lsq.nuke.raw.s2_uop   := s2_in.uop
+  io.lsq.nuke.raw.s2_mask  := s2_in.mask
+  io.lsq.nuke.raw.s2_paddr := s2_in.paddr
+  io.lsq.nuke.raw.s2_dataInvalid := !Mux(s2_full_fwd || s2_fwd_data_valid, true.B, !s2_dcache_miss)
 
   // merge forward result
   // lsq has higher priority than sbuffer
@@ -1074,7 +1076,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_vp_match_fail = RegNext(io.lsq.forward.matchInvalid || io.sbuffer.matchInvalid) && s3_troublem
   val s3_rep_frm_fetch = s3_vp_match_fail
   val s3_ldld_rep_inst =
-      io.lsq.nuke.rar.nuke &&
+      io.lsq.nuke.rar.s3_nuke &&
       RegNext(io.csrCtrl.ldld_vio_check_enable)
   val s3_flushPipe = s3_ldld_rep_inst
 
@@ -1125,8 +1127,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.lsq.ldin.bits.uop := s3_out.bits.uop
 
   val s3_revoke = io.lsq.ldin.bits.rep_info.need_rep
-  io.lsq.nuke.rar.revoke := s3_revoke
-  io.lsq.nuke.raw.revoke := s3_revoke
+  io.lsq.nuke.rar.s3_revoke := s3_revoke
+  io.lsq.nuke.raw.s3_revoke := s3_revoke
 
   // feedback slow
   s3_fast_rep := RegNext(s2_fast_rep)
