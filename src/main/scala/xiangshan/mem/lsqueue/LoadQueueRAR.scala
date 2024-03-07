@@ -72,7 +72,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   ))
   paddrModule.io := DontCare
   val released = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B)))
-  val bypassPAddr = Reg(Vec(LoadPipelineWidth, UInt(PAddrBits.W)))
+  val s3_bypassPAddr = Reg(Vec(LoadPipelineWidth, UInt(PAddrBits.W)))
 
   // freeliset: store valid entries index.
   // +---+---+--------------+-----+-----+
@@ -152,7 +152,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
       paddrModule.io.wen(w) := true.B
       paddrModule.io.waddr(w) := enqIndex
       paddrModule.io.wdata(w) := enq.s2_paddr
-      bypassPAddr(w) := enq.s2_paddr
+      s3_bypassPAddr(w) := enq.s2_paddr
 
       //  Fill info
       uop(enqIndex) := enq.s2_uop
@@ -236,7 +236,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
 
   val s3_enqIdxsOH = s3_enqIdxs.map(UIntToOH(_))
   val s3_releasePAddrMatch = VecInit((0 until LoadPipelineWidth).map(i => {
-    (bypassPAddr(i)(PAddrBits-1, DCacheLineOffset) === release1Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset))
+    (s3_bypassPAddr(i)(PAddrBits-1, DCacheLineOffset) === release1Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset))
   }))
   (0 until LoadQueueRARSize).map(i => {
     val bypassMatch = VecInit((0 until LoadPipelineWidth).map(j => {
