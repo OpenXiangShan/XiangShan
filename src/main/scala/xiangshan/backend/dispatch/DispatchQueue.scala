@@ -54,7 +54,8 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dqIndex: Int = 0)(impli
   val s_invalid :: s_valid :: Nil = Enum(2)
 
   // queue data array
-  val dataModule = Module(new SyncDataModuleTemplate(new DynInst, size, 2 * deqnum, enqnum))
+  private def hasRen: Boolean = true
+  val dataModule = Module(new SyncDataModuleTemplate(new DynInst, size, 2 * deqnum, enqnum, hasRen = hasRen))
   val robIdxEntries = Reg(Vec(size, new RobPtr))
   val stateEntries = RegInit(VecInit(Seq.fill(size)(s_invalid)))
   val validDeq0 = RegInit(VecInit(Seq.fill(size)(false.B)))
@@ -255,6 +256,9 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dqIndex: Int = 0)(impli
   }
   deqData := io.deqNext
   // T-2: read data from storage: next
+  for (i <- 0 until 2 * deqnum) {
+    dataModule.io.ren.get(i) := io.redirect.valid || io.deq.map(_.valid).reduce(_|_)
+  }
   dataModule.io.raddr := headPtrNext.map(_.value)
 
   // debug: dump dispatch queue states
