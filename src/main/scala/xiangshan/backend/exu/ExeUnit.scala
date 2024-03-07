@@ -112,6 +112,7 @@ class ExeUnitImp(
     clk_gate.io.E := clk_en
     clk_gate.io.CK := clock
     fu.clock := clk_gate.io.Q
+    XSPerfAccumulate(s"clock_gate_en_${fu.cfg.name}", clk_en)
     fu
   }
 
