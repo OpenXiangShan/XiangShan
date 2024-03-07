@@ -561,7 +561,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_pc_mem.io.wdata.fromBranchPrediction(bpu_in_resp)
 
   //                                                            ifuRedirect + backendRedirect + commit
-  val ftq_redirect_sram = Module(new FtqNRSRAM(new Ftq_Redirect_SRAMEntry, 1+FtqRedirectAheadNum+1))
+  val ftq_redirect_sram = Module(new FtqNRSRAM(new Ftq_Redirect_SRAMEntry, IfuRedirectNum+FtqRedirectAheadNum+1))
   // these info is intended to enq at the last stage of bpu
   ftq_redirect_sram.io.wen := io.fromBpu.resp.bits.lastStage.valid(3)
   ftq_redirect_sram.io.waddr := io.fromBpu.resp.bits.lastStage.ftq_idx.value
@@ -575,7 +575,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_meta_1r_sram.io.waddr := io.fromBpu.resp.bits.lastStage.ftq_idx.value
   ftq_meta_1r_sram.io.wdata.meta := io.fromBpu.resp.bits.last_stage_meta
   //                                                            ifuRedirect + backendRedirect + commit
-  val ftb_entry_mem = Module(new SyncDataModuleTemplate(new FTBEntry, FtqSize, 1+FtqRedirectAheadNum+1, 1))
+  val ftb_entry_mem = Module(new SyncDataModuleTemplate(new FTBEntry, FtqSize, IfuRedirectNum+FtqRedirectAheadNum+1, 1))
   ftb_entry_mem.io.wen(0) := io.fromBpu.resp.bits.lastStage.valid(3)
   ftb_entry_mem.io.waddr(0) := io.fromBpu.resp.bits.lastStage.ftq_idx.value
   ftb_entry_mem.io.wdata(0) := io.fromBpu.resp.bits.last_stage_ftb_entry
@@ -905,28 +905,28 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // *******************************************************************************
 
   // redirect read cfiInfo, couples to redirectGen s2
-  val redirectReadStart = 1 // 0 for ifuRedirect
   val ftq_redirect_rdata = Wire(Vec(FtqRedirectAheadNum, new Ftq_Redirect_SRAMEntry))
   val ftb_redirect_rdata = Wire(Vec(FtqRedirectAheadNum, new FTBEntry))
-  for (i <- redirectReadStart until FtqRedirectAheadNum) {
-    ftq_redirect_sram.io.ren(i + redirectReadStart)   := ftqIdxAhead(i).valid
-    ftq_redirect_sram.io.raddr(i + redirectReadStart) := ftqIdxAhead(i).bits.value
-    ftb_entry_mem.io.raddr(i + redirectReadStart)     := ftqIdxAhead(i).bits.value
+  // ftqIdxAhead(0-3) => ftq_redirect_sram(1-4), reuse ftq_redirect_sram(1)
+  for (i <- 1 until FtqRedirectAheadNum) {
+    ftq_redirect_sram.io.ren(i + IfuRedirectNum)   := ftqIdxAhead(i).valid
+    ftq_redirect_sram.io.raddr(i + IfuRedirectNum) := ftqIdxAhead(i).bits.value
+    ftb_entry_mem.io.raddr(i + IfuRedirectNum)     := ftqIdxAhead(i).bits.value
   }
-  ftq_redirect_sram.io.ren(redirectReadStart)   := Mux(aheadValid, ftqIdxAhead(0).valid,      backendRedirect.valid)
-  ftq_redirect_sram.io.raddr(redirectReadStart) := Mux(aheadValid, ftqIdxAhead(0).bits.value, backendRedirect.bits.ftqIdx.value)
-  ftb_entry_mem.io.raddr(redirectReadStart)     := Mux(aheadValid, ftqIdxAhead(0).bits.value, backendRedirect.bits.ftqIdx.value)
+  ftq_redirect_sram.io.ren(IfuRedirectNum)   := Mux(aheadValid, ftqIdxAhead(0).valid,      backendRedirect.valid)
+  ftq_redirect_sram.io.raddr(IfuRedirectNum) := Mux(aheadValid, ftqIdxAhead(0).bits.value, backendRedirect.bits.ftqIdx.value)
+  ftb_entry_mem.io.raddr(IfuRedirectNum)     := Mux(aheadValid, ftqIdxAhead(0).bits.value, backendRedirect.bits.ftqIdx.value)
 
   for (i <- 0 until FtqRedirectAheadNum) {
-    ftq_redirect_rdata(i) := ftq_redirect_sram.io.rdata(i + redirectReadStart)
-    ftb_redirect_rdata(i) := ftb_entry_mem.io.rdata(i + redirectReadStart)
+    ftq_redirect_rdata(i) := ftq_redirect_sram.io.rdata(i + IfuRedirectNum)
+    ftb_redirect_rdata(i) := ftb_entry_mem.io.rdata(i + IfuRedirectNum)
   }
-  val stage3CfiInfo = Mux(realAhdValid, Mux1H(ftqIdxSelOH, ftq_redirect_rdata), ftq_redirect_sram.io.rdata(redirectReadStart))
+  val stage3CfiInfo = Mux(realAhdValid, Mux1H(ftqIdxSelOH, ftq_redirect_rdata), ftq_redirect_sram.io.rdata(IfuRedirectNum))
   val backendRedirectCfi = fromBackendRedirect.bits.cfiUpdate
   backendRedirectCfi.fromFtqRedirectSram(stage3CfiInfo)
 
 
-  val r_ftb_entry = Mux(realAhdValid, Mux1H(ftqIdxSelOH, ftb_redirect_rdata), ftb_entry_mem.io.rdata(redirectReadStart))
+  val r_ftb_entry = Mux(realAhdValid, Mux1H(ftqIdxSelOH, ftb_redirect_rdata), ftb_entry_mem.io.rdata(IfuRedirectNum))
   val r_ftqOffset = fromBackendRedirect.bits.ftqOffset
 
   backendRedirectCfi.br_hit := r_ftb_entry.brIsSaved(r_ftqOffset)
