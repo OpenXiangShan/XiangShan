@@ -991,8 +991,10 @@ class IssueQueueVecMemImp(override val wrapper: IssueQueue)(implicit p: Paramete
   val uopIdxVec = entries.io.uopIdx.get
   val allEntryOldestOH = selectOldUop(robIdxVec, uopIdxVec, validVec)
 
-  finalDeqSelValidVec.head := (allEntryOldestOH.asUInt & canIssueVec.asUInt).orR
-  finalDeqSelOHVec.head := allEntryOldestOH.asUInt & canIssueVec.asUInt
+  deqSelValidVec.head := (allEntryOldestOH.asUInt & canIssueVec.asUInt).orR
+  deqSelOHVec.head := allEntryOldestOH.asUInt & canIssueVec.asUInt
+  finalDeqSelValidVec.head := (allEntryOldestOH.asUInt & canIssueVec.asUInt).orR && deqBeforeDly.head.ready
+  finalDeqSelOHVec.head := deqSelOHVec.head
 
   s0_enqBits.foreach{ x =>
     x.srcType(3) := SrcType.vp // v0: mask src
