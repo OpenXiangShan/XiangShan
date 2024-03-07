@@ -120,7 +120,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     val x_next = RegNext(x.s1_robIdx)
     x_next.needFlush(RegNext(io.redirect)) || x_next.needFlush(io.redirect)
   })
-  val s2_needEnqs = s2_canEnqs.zip(s1_hasNotWritebackedLoad.zip(s2_cancel)).map { case (v, x) => v && x._1 && !x._2 }
+  val s2_needEnqs = s2_canEnqs.zip(s2_hasNotWritebackedLoad.zip(s2_cancel)).map { case (v, x) => v && x._1 && !x._2 }
   val s2_canAccepts = RegNext(s1_canAccepts)
   val s2_enqIdxs = RegNext(s1_enqIdxs)
   val s2_accepts = Wire(Vec(LoadPipelineWidth, Bool()))
