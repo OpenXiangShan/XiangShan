@@ -334,7 +334,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
     // re-replinish mmio, for pma/pmp will get mmio one cycle later
     val storeAddrInFireReg = RegNext(io.storeAddrIn(i).fire && !io.storeAddrIn(i).bits.miss)
-    val stWbIndexReg = RegNext(stWbIndex)
+    //val stWbIndexReg = RegNext(stWbIndex)
+    val stWbIndexReg = RegEnable(stWbIndex, io.storeAddrIn(i).fire)
     when (storeAddrInFireReg) {
       pending(stWbIndexReg) := io.storeAddrInRe(i).mmio
       mmio(stWbIndexReg) := io.storeAddrInRe(i).mmio
@@ -381,7 +382,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       RegNext(io.storeDataIn(i).fire)
       // && !RegNext(io.storeDataIn(i).bits.uop).robIdx.needFlush(io.brqRedirect)
     ) {
-      datavalid(RegNext(stWbIndex)) := true.B
+      datavalid(RegEnable(stWbIndex, io.storeDataIn(i).fire)) := true.B
     }
   }
 
@@ -449,14 +450,14 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     // val vpmaskNotEqual = ((paddrModule.io.forwardMmask(i).asUInt ^ vaddrModule.io.forwardMmask(i).asUInt) & needForward) =/= 0.U
     // val vaddrMatchFailed = vpmaskNotEqual && io.forward(i).valid
     val vpmaskNotEqual = (
-      (RegNext(paddrModule.io.forwardMmask(i).asUInt) ^ RegNext(vaddrModule.io.forwardMmask(i).asUInt)) &
+      (RegEnable(paddrModule.io.forwardMmask(i).asUInt, io.forward(i).valid) ^ RegEnable(vaddrModule.io.forwardMmask(i).asUInt, io.forward(i).valid)) &
       RegNext(needForward) &
       RegNext(addrValidVec.asUInt)
     ) =/= 0.U
     val vaddrMatchFailed = vpmaskNotEqual && RegNext(io.forward(i).valid)
     when (vaddrMatchFailed) {
       XSInfo("vaddrMatchFailed: pc %x pmask %x vmask %x\n",
-        RegNext(io.forward(i).uop.cf.pc),
+        RegEnable(io.forward(i).uop.cf.pc, io.forward(i).valid),
         RegNext(needForward & paddrModule.io.forwardMmask(i).asUInt),
         RegNext(needForward & vaddrModule.io.forwardMmask(i).asUInt)
       );
@@ -542,16 +543,16 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
 
 
-    when (RegNext(io.forward(i).uop.cf.loadWaitStrict)) {
-      io.forward(i).addrInvalidSqIdx := RegNext(io.forward(i).uop.sqIdx - 1.U)
+    when (RegEnable(io.forward(i).uop.cf.loadWaitStrict, io.forward(i).valid)) {
+      io.forward(i).addrInvalidSqIdx := RegEnable((io.forward(i).uop.sqIdx - 1.U), io.forward(i).valid)
     } .elsewhen (addrInvalidFlag) {
       io.forward(i).addrInvalidSqIdx.flag := Mux(!s2_differentFlag || addrInvalidSqIdx >= s2_deqPtrExt.value, s2_deqPtrExt.flag, s2_enqPtrExt.flag)
       io.forward(i).addrInvalidSqIdx.value := addrInvalidSqIdx
     } .otherwise {
       // may be store inst has been written to sbuffer already.
-      io.forward(i).addrInvalidSqIdx := RegNext(io.forward(i).uop.sqIdx)
+      io.forward(i).addrInvalidSqIdx := RegEnable(io.forward(i).uop.sqIdx, io.forward(i).valid)
     }
-    io.forward(i).addrInvalid := Mux(RegNext(io.forward(i).uop.cf.loadWaitStrict), RegNext(hasInvalidAddr), addrInvalidFlag)
+    io.forward(i).addrInvalid := Mux(RegEnable(io.forward(i).uop.cf.loadWaitStrict, io.forward(i).valid), RegNext(hasInvalidAddr), addrInvalidFlag)
 
     // data invalid sq index
     // make chisel happy
@@ -568,7 +569,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       io.forward(i).dataInvalidSqIdx.value := dataInvalidSqIdx
     } .otherwise {
       // may be store inst has been written to sbuffer already.
-      io.forward(i).dataInvalidSqIdx := RegNext(io.forward(i).uop.sqIdx)
+      io.forward(i).dataInvalidSqIdx := RegEnable(io.forward(i).uop.sqIdx, io.forward(i).valid)
     }
   }
 
