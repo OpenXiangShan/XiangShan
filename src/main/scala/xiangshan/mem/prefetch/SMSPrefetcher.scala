@@ -949,7 +949,7 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   io.tlb_req.req_kill := false.B
   tlb_req_arb.io.out.ready := true.B
 
-  val s2_tlb_fire_vec_r = VecInit((0 until s1_tlb_fire_vec.getWidth-1).map(i => GatedValidRegNext(s1_tlb_fire_vec(i), false.B)))
+  val s2_tlb_fire_vec_r = VecInit((0 until s1_tlb_fire_vec.getWidth).map(i => GatedValidRegNext(s1_tlb_fire_vec(i), false.B)))
   s2_tlb_fire_vec := s2_tlb_fire_vec_r.asUInt
 
   for(((v, ent), i) <- valids.zip(entries).zipWithIndex){
