@@ -163,7 +163,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
 
       //  Fill info
       uop(enqIndex) := enq.bits.uop
-      releasedNext(enqIndex) :=
+      released(enqIndex) :=
         enq.bits.data_valid &&
         (release2Cycle.valid &&
         enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release2Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset) ||
@@ -226,7 +226,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
                       RegNext(allocatedReg(i) &
                       paddrModule.io.releaseViolationMmask(w)(i) &
                       robIdxMask(i) &&
-                      releasedReg(i), query.req.valid)
+                      released(i))
                     })
     //  Load-to-Load violation check result
     val ldLdViolationMask = VecInit(matchMask)
