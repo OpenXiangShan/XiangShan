@@ -267,8 +267,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     val numSelectGroups = scala.math.ceil(valid.length.toFloat / SelectGroupSize).toInt
 
     // group info
-    val selectValidGroups = valid.sliding(SelectGroupSize, numSelectGroups).toList
-    val selectBitsGroups = bits.sliding(SelectGroupSize, numSelectGroups).toList
+    val selectValidGroups = valid.grouped(SelectGroupSize).toList
+    val selectBitsGroups = bits.grouped(SelectGroupSize).toList
     // select logic
     if (valid.length <= SelectGroupSize) {
       val (selValid, selBits) = selectPartialOldest(valid, bits)
