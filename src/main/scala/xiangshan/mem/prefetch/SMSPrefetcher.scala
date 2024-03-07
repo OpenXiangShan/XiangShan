@@ -924,7 +924,7 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   val s1_gen_req = RegEnable(s0_gen_req, s0_gen_req_valid)
   val s1_replace_vec_r = RegEnable(s0_replace_vec, s0_gen_req_valid && !s0_hit)
   val s1_update_vec = RegEnable(VecInit(s0_match_vec).asUInt, s0_gen_req_valid && s0_hit)
-  val s1_tlb_fire_vec_r = VecInit(s0_tlb_fire_vec.map(i => GatedValidRegNext(i, false.B)))
+  val s1_tlb_fire_vec_r = GatedValidRegNext(s0_tlb_fire_vec)
   // tlb req will latch one cycle after tlb_arb
   val s1_tlb_req_valid = GatedValidRegNext(tlb_req_arb.io.out.fire)
   val s1_tlb_req_bits  = RegEnable(tlb_req_arb.io.out.bits, tlb_req_arb.io.out.fire)
@@ -947,7 +947,7 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   io.tlb_req.req_kill := false.B
   tlb_req_arb.io.out.ready := true.B
 
-  val s2_tlb_fire_vec_r = VecInit((0 until s1_tlb_fire_vec.getWidth).map(i => GatedValidRegNext(s1_tlb_fire_vec(i), false.B)))
+  val s2_tlb_fire_vec_r = GatedValidRegNext(s1_tlb_fire_vec_r)
   s2_tlb_fire_vec := s2_tlb_fire_vec_r.asUInt
 
   for(((v, ent), i) <- valids.zip(entries).zipWithIndex){
