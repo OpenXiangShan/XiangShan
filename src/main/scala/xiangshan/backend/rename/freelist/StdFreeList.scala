@@ -55,7 +55,7 @@ class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) 
   // allocate new physical registers for instructions at rename stage
   //
   val freeRegCnt = Wire(UInt()) // number of free registers in free list
-  io.canAllocate := RegNext(freeRegCnt >= RenameWidth.U) // use RegNext for better timing
+  io.canAllocate := GatedValidRegNext(freeRegCnt >= RenameWidth.U) // use RegNext for better timing
   XSDebug(p"freeRegCnt: $freeRegCnt\n")
 
   val phyRegCandidates = VecInit(headPtrOHVec.map(sel => Mux1H(sel, freeList)))

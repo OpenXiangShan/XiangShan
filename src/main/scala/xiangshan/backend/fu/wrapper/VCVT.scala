@@ -10,6 +10,7 @@ import xiangshan.backend.fu.vector.{Mgu, VecPipedFuncUnit}
 import xiangshan.ExceptionNO
 import yunsuan.VfpuType
 import yunsuan.vector.VectorConvert.VectorCvt
+import yunsuan.util._
 
 
 class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) {
@@ -39,7 +40,7 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   val isWidenCvt = !widen(1) & widen(0)
   val isNarrowCvt = widen(1) & !widen(0)
   val fire = io.in.valid
-  val fireReg = RegNext(fire)
+  val fireReg = GatedValidRegNext(fire)
 
   // output width 8， 16， 32， 64
   val output1H = Wire(UInt(4.W))
@@ -182,7 +183,7 @@ class VectorCvtTop(vlen: Int, xlen: Int) extends Module{
   val (fire, uopIdx, src, opType, sew, rm, outputWidth1H, isWiden, isNarrow) = (
     io.fire, io.uopIdx, io.src, io.opType, io.sew, io.rm, io.outputWidth1H, io.isWiden, io.isNarrow
   )
-  val fireReg = RegNext(fire)
+  val fireReg = GatedValidRegNext(fire)
 
   val in0 = Mux(isWiden,
     Mux(uopIdx, src(1).tail(32), src(0).tail(32)),

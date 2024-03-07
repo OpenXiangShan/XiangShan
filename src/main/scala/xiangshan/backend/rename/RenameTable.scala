@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import utility.HasCircularQueuePtrHelper
 import utility.ParallelPriorityMux
+import utility.GatedValidRegNext
 import utils.XSError
 import xiangshan._
 
@@ -94,7 +95,7 @@ class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule with 
   // (2) Reading is synchronous now.
   // (3) RAddr at T0 will be used to access the table and get data at T0.
   // (4) WData at T0 is bypassed to RData at T1.
-  val t1_redirect = RegNext(io.redirect, false.B)
+  val t1_redirect = GatedValidRegNext(io.redirect, false.B)
   val t1_raddr = io.readPorts.map(p => RegEnable(p.addr, !p.hold))
   val t1_rdata_use_t1_raddr = VecInit(t1_raddr.map(spec_table(_)))
   val t1_wSpec = RegNext(Mux(io.redirect, 0.U.asTypeOf(io.specWritePorts), io.specWritePorts))

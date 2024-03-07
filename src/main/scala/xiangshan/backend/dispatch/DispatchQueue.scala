@@ -179,7 +179,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dqIndex: Int = 0)(impli
   // For branch mis-prediction or memory violation replay,
   // we delay updating the indices for one clock cycle.
   // For now, we simply use PopCount to count #instr cancelled.
-  val lastCycleMisprediction = RegNext(io.redirect.valid)
+  val lastCycleMisprediction = GatedValidRegNext(io.redirect.valid)
   // find the last one's position, starting from headPtr and searching backwards
   val validBitVec = VecInit((0 until size).map(i => stateEntries(i) === s_valid))
   val loValidBitVec = Cat((0 until size).map(i => validBitVec(i) && headPtrMask(i)))
@@ -199,7 +199,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dqIndex: Int = 0)(impli
       Mux(isTrueEmpty, headPtr(0), walkedTailPtr),
       tailPtr(0) + numEnq)
   )
-  val lastLastCycleMisprediction = RegNext(lastCycleMisprediction)
+  val lastLastCycleMisprediction = GatedValidRegNext(lastCycleMisprediction)
   for (i <- 1 until enqnum) {
     tailPtr(i) := Mux(io.redirect.valid,
       tailPtr(i),

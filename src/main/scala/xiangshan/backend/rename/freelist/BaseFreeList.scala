@@ -57,7 +57,7 @@ abstract class BaseFreeList(size: Int)(implicit p: Parameters) extends XSModule 
     }
   }
 
-  val lastCycleRedirect = RegNext(io.redirect, false.B)
+  val lastCycleRedirect = GatedValidRegNext(io.redirect, false.B)
   val lastCycleSnpt = RegNext(io.snpt, 0.U.asTypeOf(io.snpt))
 
   val headPtr = RegInit(FreeListPtr(false, 0))

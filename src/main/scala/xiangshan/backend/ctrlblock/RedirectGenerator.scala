@@ -3,7 +3,7 @@ package xiangshan.backend.ctrlblock
 import org.chipsalliance.cde.config.Parameters
 import chisel3.util._
 import chisel3._
-import utility.{HasCircularQueuePtrHelper, XORFold}
+import utility.{HasCircularQueuePtrHelper, XORFold, GatedValidRegNext}
 import xiangshan.frontend.{FtqRead, PreDecodeInfo}
 import xiangshan.{MemPredUpdateReq, Redirect, XSBundle, XSModule}
 
@@ -75,8 +75,8 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   val s1_brhTarget = RegEnable(oldestExuRedirect.bits.cfiUpdate.target, oldestExuRedirect.valid)
   val s1_pd = RegNext(oldestExuPredecode)
   val s1_redirect_bits_reg = RegEnable(oldestRedirect.bits, oldestValid)
-  val s1_redirect_valid_reg = RegNext(oldestValid)
-  val s1_redirect_onehot = RegNext(oldestOneHot)
+  val s1_redirect_valid_reg = GatedValidRegNext(oldestValid)
+  val s1_redirect_onehot = VecInit(oldestOneHot.map(x => GatedValidRegNext(x)))
 
   // stage1 -> stage2
   io.stage2Redirect.valid := s1_redirect_valid_reg && !robFlush
@@ -108,7 +108,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   val s2_target = RegEnable(target, s1_redirect_valid_reg)
   val s2_pc = RegEnable(real_pc, s1_redirect_valid_reg)
   val s2_redirect_bits_reg = RegEnable(s1_redirect_bits_reg, s1_redirect_valid_reg)
-  val s2_redirect_valid_reg = RegNext(s1_redirect_valid_reg && !robFlush, init = false.B)
+  val s2_redirect_valid_reg = GatedValidRegNext(s1_redirect_valid_reg && !robFlush, init = false.B)
 
   io.stage3Redirect.valid := s2_redirect_valid_reg
   io.stage3Redirect.bits := s2_redirect_bits_reg
@@ -119,7 +119,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   val store_pc = io.memPredPcRead(s1_redirect_valid_reg, s1_redirect_bits_reg.stFtqIdx, s1_redirect_bits_reg.stFtqOffset)
 
   // update load violation predictor if load violation redirect triggered
-  io.memPredUpdate.valid := RegNext(s1_isReplay && s1_redirect_valid_reg && s2_redirect_bits_reg.flushItself(), init = false.B)
+  io.memPredUpdate.valid := GatedValidRegNext(s1_isReplay && s1_redirect_valid_reg && s2_redirect_bits_reg.flushItself(), init = false.B)
   // update wait table
   io.memPredUpdate.waddr := RegEnable(XORFold(real_pc(VAddrBits - 1, 1), MemPredPCWidth), s1_isReplay && s1_redirect_valid_reg)
   io.memPredUpdate.wdata := true.B

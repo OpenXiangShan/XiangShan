@@ -3,7 +3,7 @@ package xiangshan.backend.rob
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility.{CircularQueuePtr, CircularShift, HasCircularQueuePtrHelper, OneHot, SyncDataModuleTemplate}
+import utility.{CircularQueuePtr, CircularShift, HasCircularQueuePtrHelper, OneHot, SyncDataModuleTemplate, GatedValidRegNext}
 import utils.{QueuePerf, XSError, XSPerfAccumulate}
 import xiangshan.backend.Bundles.DynInst
 import xiangshan.backend.fu.vector.Bundles.VType
@@ -239,7 +239,7 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   }
 
   val numValidEntries = distanceBetween(enqPtr, deqPtr)
-  val allowEnqueue = RegNext(
+  val allowEnqueue = GatedValidRegNext(
     numValidEntries + enqCount <= (size - RenameWidth).U,
     true.B
   )
