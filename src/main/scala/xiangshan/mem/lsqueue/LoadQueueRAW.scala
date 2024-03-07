@@ -190,12 +190,13 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
   // when the stores that "older than" current load address were ready.
   // current load will be released.
+  val needCancel = Wire(Vec(LoadQueueRAWSize, Bool()))
   for (i <- 0 until LoadQueueRAWSize) {
     val deqNotBlock = Mux(!s1_allAddrCheck, !isBefore(io.stAddrReadySqPtr, uop(i).sqIdx), true.B)
-    val needCancel = uop(i).robIdx.needFlush(io.redirect) ||
+    needCancel(i) := uop(i).robIdx.needFlush(io.redirect) ||
                      uop(i).robIdx.needFlush(RegNext(io.redirect))
 
-    when (allocated(i) && (deqNotBlock || needCancel)) {
+    when (allocated(i) && (deqNotBlock || needCancel(i))) {
       allocated(i) := false.B
       freeMaskVec(i) := true.B
     }
@@ -332,12 +333,12 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     val s3_bypassPaddrMask = RegNext(VecInit((0 until LoadPipelineWidth).map(j => s2_bypassPAddr(j)(PAddrBits-1, DCacheVWordOffset) === io.storeIn(i).bits.paddr(PAddrBits-1, DCacheVWordOffset))))
     val s3_bypassMMask = RegNext(VecInit((0 until LoadPipelineWidth).map(j => (s2_bypassMask(j) & io.storeIn(i).bits.mask).orR)))
     val s3_bypassMaskUInt = (0 until LoadPipelineWidth).map(j =>
-      Fill(LoadQueueRAWSize, RegNext(s3_accepts(j) && !s3_cancel(j))) & Mux(s3_bypassPaddrMask(j) && s3_bypassMMask(j), UIntToOH(RegNext(s3_enqIdxs(j))), 0.U(LoadQueueRAWSize.W))
+      Mux(s3_bypassPaddrMask(j) && s3_bypassMMask(j), UIntToOH(RegNext(s3_enqIdxs(j))), 0.U(LoadQueueRAWSize.W))
     ).reduce(_|_)
 
     val addrMaskMatch = RegNext(paddrModule.io.violationMmask(i).asUInt & maskModule.io.violationMmask(i).asUInt) | s3_bypassMaskUInt
     val entryNeedCheck = RegNext(VecInit((0 until LoadQueueRAWSize).map(j => {
-      allocated(j) && isAfter(uop(j).robIdx, io.storeIn(i).bits.uop.robIdx) && datavalid(j) && !uop(j).robIdx.needFlush(io.redirect)
+      allocated(j) && isAfter(uop(j).robIdx, io.storeIn(i).bits.uop.robIdx) && datavalid(j) && !needCancel(i)
     })))
     val lqViolationSelVec = VecInit((0 until LoadQueueRAWSize).map(j => {
       addrMaskMatch(j) && entryNeedCheck(j)
