@@ -25,7 +25,7 @@ class PcTargetMemImp(override val wrapper: PcTargetMem)(implicit p: Parameters, 
   private val jumpTargetReadVec : Vec[UInt] = Wire(Vec(params.numTargetReadPort, UInt(VAddrData().dataWidth.W)))
   private val jumpTargetVec     : Vec[UInt] = Wire(Vec(params.numTargetReadPort, UInt(VAddrData().dataWidth.W)))
 
-  targetMem.io.wen.head := RegNext(io.fromFrontendFtq.pc_mem_wen)
+  targetMem.io.wen.head := GatedValidRegNext(io.fromFrontendFtq.pc_mem_wen)
   targetMem.io.waddr.head := RegEnable(io.fromFrontendFtq.pc_mem_waddr, io.fromFrontendFtq.pc_mem_wen)
   targetMem.io.wdata.head := RegEnable(io.fromFrontendFtq.pc_mem_wdata, io.fromFrontendFtq.pc_mem_wen)
 
@@ -38,7 +38,7 @@ class PcTargetMemImp(override val wrapper: PcTargetMem)(implicit p: Parameters, 
     targetMem.io.ren.get(i) := targetVld
     targetMem.io.raddr(i) := (targetPtr + 1.U).value
     jumpTargetReadVec(i) := targetMem.io.rdata(i).startAddr
-    val needNewestTarget = RegNext(targetPtr === io.fromFrontendFtq.newest_entry_ptr)
+    val needNewestTarget = GatedValidRegNext(targetPtr === io.fromFrontendFtq.newest_entry_ptr)
     jumpTargetVec(i) := Mux(
       needNewestTarget,
       RegEnable(newestTarget, newestEn),
@@ -54,7 +54,7 @@ class PcTargetMemImp(override val wrapper: PcTargetMem)(implicit p: Parameters, 
     val offset = io.pcToDataPath.fromDataPathFtqOffset(i)
     targetMem.io.ren.get(i + params.numTargetReadPort) := vld
     targetMem.io.raddr(i + params.numTargetReadPort) := pcAddr.value
-    pcReadVec(i) := targetMem.io.rdata(i + params.numTargetReadPort).getPc(RegNext(offset))
+    pcReadVec(i) := targetMem.io.rdata(i + params.numTargetReadPort).getPc(RegEnable(offset, vld))
     pcVec(i) := pcReadVec(i)
   }
   io.pcToDataPath.toDataPathPC := pcVec

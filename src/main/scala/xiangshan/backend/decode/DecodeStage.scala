@@ -192,8 +192,8 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   XSPerfHistogram("out_valid_range", PopCount(io.out.map(_.valid)), true.B, 0, DecodeWidth + 1, 1)
   XSPerfHistogram("out_fire_range", PopCount(io.out.map(_.fire)), true.B, 0, DecodeWidth + 1, 1)
 
-  val fusionValid = RegNext(io.fusion)
-  val inValidNotReady = io.in.map(in => RegNext(in.valid && !in.ready))
+  val fusionValid = VecInit(io.fusion.map(x => GatedValidRegNext(x)))
+  val inValidNotReady = io.in.map(in => GatedValidRegNext(in.valid && !in.ready))
   val perfEvents = Seq(
     ("decoder_fused_instr", PopCount(fusionValid)       ),
     ("decoder_waitInstr",   PopCount(inValidNotReady)            ),

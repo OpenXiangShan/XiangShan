@@ -100,7 +100,7 @@ class CtrlBlockImp(
 
   private val s0_robFlushRedirect = rob.io.flushOut
   private val s1_robFlushRedirect = Wire(Valid(new Redirect))
-  s1_robFlushRedirect.valid := RegNext(s0_robFlushRedirect.valid, false.B)
+  s1_robFlushRedirect.valid := GatedValidRegNext(s0_robFlushRedirect.valid, false.B)
   s1_robFlushRedirect.bits := RegEnable(s0_robFlushRedirect.bits, s0_robFlushRedirect.valid)
 
   pcMem.io.ren.get(pcMemRdIndexes("robFlush").head) := s0_robFlushRedirect.valid
@@ -111,7 +111,7 @@ class CtrlBlockImp(
   private val s2_s4_pendingRedirectValid = RegInit(false.B)
   when (s1_s3_redirect.valid) {
     s2_s4_pendingRedirectValid := true.B
-  }.elsewhen (RegNext(io.frontend.toFtq.redirect.valid)) {
+  }.elsewhen (GatedValidRegNext(io.frontend.toFtq.redirect.valid)) {
     s2_s4_pendingRedirectValid := false.B
   }
 
@@ -123,7 +123,7 @@ class CtrlBlockImp(
     val valid = x.valid
     val killedByOlder = x.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect, s3_s5_redirect))
     val delayed = Wire(Valid(new ExuOutput(x.bits.params)))
-    delayed.valid := RegNext(valid && !killedByOlder)
+    delayed.valid := GatedValidRegNext(valid && !killedByOlder)
     delayed.bits := RegEnable(x.bits, x.valid)
     delayed.bits.debugInfo.writebackTime := GTimer()
     delayed
@@ -138,7 +138,7 @@ class CtrlBlockImp(
     val valid = x.valid
     val killedByOlder = x.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect, s3_s5_redirect))
     val delayed = Wire(Valid(UInt(io.fromWB.wbData.size.U.getWidth.W)))
-    delayed.valid := RegNext(valid && !killedByOlder)
+    delayed.valid := GatedValidRegNext(valid && !killedByOlder)
     val isIntSche = intScheWbData.contains(x)
     val isVfSche = vfScheWbData.contains(x)
     val isMemVload = memVloadWbData.contains(x)
@@ -172,7 +172,7 @@ class CtrlBlockImp(
 
   private val memViolation = io.fromMem.violation
   val loadReplay = Wire(ValidIO(new Redirect))
-  loadReplay.valid := RegNext(memViolation.valid &&
+  loadReplay.valid := GatedValidRegNext(memViolation.valid &&
     !memViolation.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect))
   )
   loadReplay.bits := RegEnable(memViolation.bits, memViolation.valid)
@@ -183,30 +183,30 @@ class CtrlBlockImp(
 
   pcMem.io.ren.get(pcMemRdIndexes("redirect").head) := redirectGen.io.redirectPcRead.vld
   pcMem.io.raddr(pcMemRdIndexes("redirect").head) := redirectGen.io.redirectPcRead.ptr.value
-  redirectGen.io.redirectPcRead.data := pcMem.io.rdata(pcMemRdIndexes("redirect").head).getPc(RegNext(redirectGen.io.redirectPcRead.offset))
+  redirectGen.io.redirectPcRead.data := pcMem.io.rdata(pcMemRdIndexes("redirect").head).getPc(RegEnable(redirectGen.io.redirectPcRead.offset, redirectGen.io.redirectPcRead.vld))
   pcMem.io.ren.get(pcMemRdIndexes("memPred").head) := redirectGen.io.memPredPcRead.vld
   pcMem.io.raddr(pcMemRdIndexes("memPred").head) := redirectGen.io.memPredPcRead.ptr.value
-  redirectGen.io.memPredPcRead.data := pcMem.io.rdata(pcMemRdIndexes("memPred").head).getPc(RegNext(redirectGen.io.memPredPcRead.offset))
+  redirectGen.io.memPredPcRead.data := pcMem.io.rdata(pcMemRdIndexes("memPred").head).getPc(RegEnable(redirectGen.io.memPredPcRead.offset, redirectGen.io.memPredPcRead.vld))
 
   for ((pcMemIdx, i) <- pcMemRdIndexes("load").zipWithIndex) {
     // load read pcMem (s0) -> get rdata (s1) -> reg next in Memblock (s2) -> reg next in Memblock (s3) -> consumed by pf (s3)
     pcMem.io.ren.get(pcMemIdx) := io.memLdPcRead(i).vld
     pcMem.io.raddr(pcMemIdx) := io.memLdPcRead(i).ptr.value
-    io.memLdPcRead(i).data := pcMem.io.rdata(pcMemIdx).getPc(RegNext(io.memLdPcRead(i).offset))
+    io.memLdPcRead(i).data := pcMem.io.rdata(pcMemIdx).getPc(RegEnable(io.memLdPcRead(i).offset, io.memLdPcRead(i).vld))
   }
 
   for ((pcMemIdx, i) <- pcMemRdIndexes("hybrid").zipWithIndex) {
     // load read pcMem (s0) -> get rdata (s1) -> reg next in Memblock (s2) -> reg next in Memblock (s3) -> consumed by pf (s3)
     pcMem.io.ren.get(pcMemIdx) := io.memHyPcRead(i).vld
     pcMem.io.raddr(pcMemIdx) := io.memHyPcRead(i).ptr.value
-    io.memHyPcRead(i).data := pcMem.io.rdata(pcMemIdx).getPc(RegNext(io.memHyPcRead(i).offset))
+    io.memHyPcRead(i).data := pcMem.io.rdata(pcMemIdx).getPc(RegEnable(io.memHyPcRead(i).offset, io.memHyPcRead(i).vld))
   }
 
   if (EnableStorePrefetchSMS) {
     for ((pcMemIdx, i) <- pcMemRdIndexes("store").zipWithIndex) {
       pcMem.io.ren.get(pcMemIdx) := io.memStPcRead(i).vld
       pcMem.io.raddr(pcMemIdx) := io.memStPcRead(i).ptr.value
-      io.memStPcRead(i).data := pcMem.io.rdata(pcMemIdx).getPc(RegNext(io.memStPcRead(i).offset))
+      io.memStPcRead(i).data := pcMem.io.rdata(pcMemIdx).getPc(RegEnable(io.memStPcRead(i).offset, io.memStPcRead(i).vld))
     }
   } else {
     io.memStPcRead.foreach(_.data := 0.U)
@@ -220,7 +220,7 @@ class CtrlBlockImp(
   redirectGen.io.robFlush := s1_robFlushRedirect.valid
 
   val s5_flushFromRobValidAhead = DelayN(s1_robFlushRedirect.valid, 4)
-  val s6_flushFromRobValid = RegNext(s5_flushFromRobValidAhead)
+  val s6_flushFromRobValid = GatedValidRegNext(s5_flushFromRobValidAhead)
   val frontendFlushBits = RegEnable(s1_robFlushRedirect.bits, s1_robFlushRedirect.valid) // ??
   // When ROB commits an instruction with a flush, we notify the frontend of the flush without the commit.
   // Flushes to frontend may be delayed by some cycles and commit before flush causes errors.
@@ -229,7 +229,7 @@ class CtrlBlockImp(
     // why flushOut: instructions with flushPipe are not commited to frontend
     // If we commit them to frontend, it will cause flush after commit, which is not acceptable by frontend.
     val s1_isCommit = rob.io.commits.commitValid(i) && rob.io.commits.isCommit && !s0_robFlushRedirect.valid
-    io.frontend.toFtq.rob_commits(i).valid := RegNext(s1_isCommit)
+    io.frontend.toFtq.rob_commits(i).valid := GatedValidRegNext(s1_isCommit)
     io.frontend.toFtq.rob_commits(i).bits := RegEnable(rob.io.commits.info(i), s1_isCommit)
   }
   io.frontend.toFtq.redirect.valid := s6_flushFromRobValid || s3_redirectGen.valid
@@ -272,7 +272,7 @@ class CtrlBlockImp(
 
   // vtype commit
   decode.io.commitVType.bits := io.fromDataPath.vtype
-  decode.io.commitVType.valid := RegNext(rob.io.isVsetFlushPipe)
+  decode.io.commitVType.valid := GatedValidRegNext(rob.io.isVsetFlushPipe)
 
   io.toDataPath.vtypeAddr := rob.io.vconfigPdest
 
@@ -312,7 +312,7 @@ class CtrlBlockImp(
     val shouldFlushMask = (1 to RenameWidth).map(shouldFlush take _ reduce (_ || _))
     s1_s3_redirect.valid && Cat(shouldFlushMask.zip(notCFIMask).map(x => x._1 | x._2)).andR
   })
-  val flushVecNext = RegNext(flushVec, 0.U.asTypeOf(flushVec))
+  val flushVecNext = VecInit(flushVec.map(x => GatedValidRegNext(x, false.B)))
   snpt.io.flushVec := flushVecNext
 
   val useSnpt = VecInit.tabulate(RenameSnapshotNum)(idx =>
@@ -464,7 +464,7 @@ class CtrlBlockImp(
   dispatch.io.sqCanAccept := io.sqCanAccept
   dispatch.io.robHeadNotReady := rob.io.headNotReady
   dispatch.io.robFull := rob.io.robFull
-  dispatch.io.singleStep := RegNext(io.csrCtrl.singlestep)
+  dispatch.io.singleStep := GatedValidRegNext(io.csrCtrl.singlestep)
 
   intDq0.io.enq <> dispatch.io.toIntDq0
   intDq0.io.redirect <> s2_s4_redirect
@@ -483,7 +483,7 @@ class CtrlBlockImp(
   io.toIssueBlock.allocPregs <> dispatch.io.allocPregs
   io.toIssueBlock.flush   <> s2_s4_redirect
 
-  pcMem.io.wen.head   := RegNext(io.frontend.fromFtq.pc_mem_wen)
+  pcMem.io.wen.head   := GatedValidRegNext(io.frontend.fromFtq.pc_mem_wen)
   pcMem.io.waddr.head := RegEnable(io.frontend.fromFtq.pc_mem_waddr, io.frontend.fromFtq.pc_mem_wen)
   pcMem.io.wdata.head := RegEnable(io.frontend.fromFtq.pc_mem_wdata, io.frontend.fromFtq.pc_mem_wen)
 
@@ -498,12 +498,12 @@ class CtrlBlockImp(
     if (i < intDq0numDeq) {
       pcMem.io.ren.get(pcMemIdx) := intDq0.io.deq(i).valid
       pcMem.io.raddr(pcMemIdx) := intDq0.io.deqNext(i).ftqPtr.value
-      jumpPcVec(i) := pcMem.io.rdata(pcMemIdx).getPc(RegNext(intDq0.io.deqNext(i).ftqOffset))
+      jumpPcVec(i) := pcMem.io.rdata(pcMemIdx).getPc(RegEnable(intDq0.io.deqNext(i).ftqOffset, intDq0.io.deq(i).valid))
     }
     else {
       pcMem.io.ren.get(pcMemIdx) := intDq1.io.deq(i - intDq0numDeq).valid
       pcMem.io.raddr(pcMemIdx) := intDq1.io.deqNext(i - intDq0numDeq).ftqPtr.value
-      jumpPcVec(i) := pcMem.io.rdata(pcMemIdx).getPc(RegNext(intDq1.io.deqNext(i - intDq0numDeq).ftqOffset))
+      jumpPcVec(i) := pcMem.io.rdata(pcMemIdx).getPc(RegEnable(intDq1.io.deqNext(i - intDq0numDeq).ftqOffset, intDq1.io.deq(i - intDq0numDeq).valid))
     }
   }
 
@@ -556,10 +556,10 @@ class CtrlBlockImp(
   dispatch.io.debugTopDown.fromCore := io.debugTopDown.fromCore
   io.debugRolling := rob.io.debugRolling
 
-  io.perfInfo.ctrlInfo.robFull := RegNext(rob.io.robFull)
-  io.perfInfo.ctrlInfo.intdqFull := RegNext(intDq0.io.dqFull || intDq1.io.dqFull)
-  io.perfInfo.ctrlInfo.fpdqFull := RegNext(fpDq.io.dqFull)
-  io.perfInfo.ctrlInfo.lsdqFull := RegNext(lsDq.io.dqFull)
+  io.perfInfo.ctrlInfo.robFull := GatedValidRegNext(rob.io.robFull)
+  io.perfInfo.ctrlInfo.intdqFull := GatedValidRegNext(intDq0.io.dqFull || intDq1.io.dqFull)
+  io.perfInfo.ctrlInfo.fpdqFull := GatedValidRegNext(fpDq.io.dqFull)
+  io.perfInfo.ctrlInfo.lsdqFull := GatedValidRegNext(lsDq.io.dqFull)
 
   val pfevent = Module(new PFEvent)
   pfevent.io.distribute_csr := RegNext(io.csrCtrl.distribute_csr)

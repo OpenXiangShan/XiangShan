@@ -133,7 +133,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   // speculatively assign the instruction with an robIdx
   val validCount = PopCount(io.in.zip(needRobFlags).map{ case(in, needRobFlag) => in.valid && in.bits.lastUop && needRobFlag}) // number of instructions waiting to enter rob (from decode)
   val robIdxHead = RegInit(0.U.asTypeOf(new RobPtr))
-  val lastCycleMisprediction = RegNext(io.redirect.valid && !io.redirect.bits.flushItself())
+  val lastCycleMisprediction = GatedValidRegNext(io.redirect.valid && !io.redirect.bits.flushItself())
   val robIdxHeadNext = Mux(io.redirect.valid, io.redirect.bits.robIdx, // redirect: move ptr to given rob index
          Mux(lastCycleMisprediction, robIdxHead + 1.U, // mis-predict: not flush robIdx itself
            Mux(canOut, robIdxHead + validCount, // instructions successfully entered next stage: increase robIdx
@@ -392,7 +392,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   val genSnapshot = Cat(io.out.map(out => out.fire && out.bits.snapshot)).orR
   val snapshotCtr = RegInit((4 * CommitWidth).U)
-  val notInSameSnpt = RegNext(distanceBetween(robIdxHeadNext, io.snptLastEnq.bits) >= CommitWidth.U || !io.snptLastEnq.valid)
+  val notInSameSnpt = GatedValidRegNext(distanceBetween(robIdxHeadNext, io.snptLastEnq.bits) >= CommitWidth.U || !io.snptLastEnq.valid)
   val allowSnpt = if (EnableRenameSnapshot) !snapshotCtr.orR && notInSameSnpt && io.in.head.bits.firstUop else false.B
   io.out.zip(io.in).foreach{ case (out, in) => out.bits.snapshot := allowSnpt && (!in.bits.preDecodeInfo.notCFI || FuType.isJump(in.bits.fuType)) && in.fire }
   when(genSnapshot) {
@@ -430,7 +430,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // II. Free List Update
     intFreeList.io.freeReq(i) := io.int_need_free(i)
     intFreeList.io.freePhyReg(i) := RegNext(io.int_old_pdest(i))
-    fpFreeList.io.freeReq(i)  := RegNext(commitValid && (needDestRegCommit(Reg_F, io.rabCommits.info(i)) || needDestRegCommit(Reg_V, io.rabCommits.info(i))))
+    fpFreeList.io.freeReq(i)  := GatedValidRegNext(commitValid && (needDestRegCommit(Reg_F, io.rabCommits.info(i)) || needDestRegCommit(Reg_V, io.rabCommits.info(i))))
     fpFreeList.io.freePhyReg(i) := Mux(RegNext(needDestRegCommit(Reg_F, io.rabCommits.info(i))), io.fp_old_pdest(i), io.vec_old_pdest(i))
   }
 

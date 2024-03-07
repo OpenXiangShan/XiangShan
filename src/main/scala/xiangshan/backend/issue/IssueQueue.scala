@@ -4,7 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import utility.{GTimer, HasCircularQueuePtrHelper, SelectOne}
+import utility.{GTimer, HasCircularQueuePtrHelper, SelectOne, GatedValidRegNext}
 import utils._
 import xiangshan._
 import xiangshan.backend.Bundles._
@@ -934,16 +934,16 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
       require(wakeUpQueues(i).isEmpty)
       val uop = loadWakeUpIter.next()
 
-      wakeup.valid := RegNext(uop.fire)
-      wakeup.bits.rfWen  := RegNext(uop.bits.rfWen  && uop.fire)
-      wakeup.bits.fpWen  := RegNext(uop.bits.fpWen  && uop.fire)
-      wakeup.bits.vecWen := RegNext(uop.bits.vecWen && uop.fire)
+      wakeup.valid := GatedValidRegNext(uop.fire)
+      wakeup.bits.rfWen  := GatedValidRegNext(uop.bits.rfWen  && uop.fire)
+      wakeup.bits.fpWen  := GatedValidRegNext(uop.bits.fpWen  && uop.fire)
+      wakeup.bits.vecWen := GatedValidRegNext(uop.bits.vecWen && uop.fire)
       wakeup.bits.pdest  := RegEnable(uop.bits.pdest, uop.fire)
       wakeup.bits.loadDependency.foreach(_ := 0.U) // this is correct for load only
 
-      wakeup.bits.rfWenCopy .foreach(_.foreach(_ := RegNext(uop.bits.rfWen  && uop.fire)))
-      wakeup.bits.fpWenCopy .foreach(_.foreach(_ := RegNext(uop.bits.fpWen  && uop.fire)))
-      wakeup.bits.vecWenCopy.foreach(_.foreach(_ := RegNext(uop.bits.vecWen && uop.fire)))
+      wakeup.bits.rfWenCopy .foreach(_.foreach(_ := GatedValidRegNext(uop.bits.rfWen  && uop.fire)))
+      wakeup.bits.fpWenCopy .foreach(_.foreach(_ := GatedValidRegNext(uop.bits.fpWen  && uop.fire)))
+      wakeup.bits.vecWenCopy.foreach(_.foreach(_ := GatedValidRegNext(uop.bits.vecWen && uop.fire)))
       wakeup.bits.pdestCopy .foreach(_.foreach(_ := RegEnable(uop.bits.pdest, uop.fire)))
       wakeup.bits.loadDependencyCopy.foreach(x => x := 0.U.asTypeOf(x)) // this is correct for load only
 
