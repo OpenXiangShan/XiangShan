@@ -27,7 +27,6 @@ class OthersEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockPar
   val io = IO(new OthersEntryIO)
 
   val validReg        = RegInit(false.B)
-  // val entryReg        = Reg(new EntryBundle)
 
   val common          = Wire(new CommonWireBundle)
   val entryUpdate     = Wire(new EntryBundle)
