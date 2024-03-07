@@ -205,10 +205,6 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   // if need replay deallocate entry
   val s3_accepts = RegNext(s2_accepts)
   val s3_enqIdxs = RegNext(VecInit(s2_offset.map(x => s2_enqIdxs(x))))
-  val s3_cancel = io.query.map(x => {
-    val x_next = RegNext(RegNext(x.s1_robIdx))
-    x_next.needFlush(io.redirect)
-  })
   for ((revoke, w) <- io.query.map(_.s3_revoke).zipWithIndex) {
     val s3_accept = s3_accepts(w)
     val s3_enqIdx = s3_enqIdxs(w)
@@ -270,11 +266,13 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
         res(i).valid := valid(i)
         res(i).bits := bits(i)
       }
-      val oldest = Mux(valid(0) && valid(1), Mux(isAfter(bits(0).uop.robIdx, bits(1).uop.robIdx), res(1), res(0)), Mux(valid(0) && !valid(1), res(0), res(1)))
+      val oldest = Mux(valid(0) && valid(1),
+                      Mux(isAfter(bits(0).uop.robIdx, bits(1).uop.robIdx), res(1), res(0)),
+                        Mux(valid(0) && !valid(1), res(0), res(1)))
       (Seq(oldest.valid), Seq(oldest.bits))
     } else {
       val left = selectPartialOldest(valid.take(valid.length / 2), bits.take(bits.length / 2))
-      val right = selectPartialOldest(valid.takeRight(valid.length - (valid.length / 2)), bits.takeRight(bits.length - (bits.length / 2)))
+      val right = selectPartialOldest(valid.drop(valid.length / 2), bits.drop(bits.length / 2))
       selectPartialOldest(left._1 ++ right._1, left._2 ++ right._2)
     }
   }
@@ -291,13 +289,17 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
       val (selValid, selBits) = selectPartialOldest(valid, bits)
       val selValidNext = RegNext(selValid(0))
       val selBitsNext = RegNext(selBits(0))
-      (Seq(selValidNext && !selBitsNext.uop.robIdx.needFlush(io.redirect) && !selBitsNext.uop.robIdx.needFlush(RegNext(io.redirect))), Seq(selBitsNext))
+      val selNotCancel = !selBitsNext.uop.robIdx.needFlush(io.redirect) &&
+                         !selBitsNext.uop.robIdx.needFlush(RegNext(io.redirect))
+      (Seq(selValidNext && selNotCancel), Seq(selBitsNext))
     } else {
       val select = (0 until numSelectGroups).map(g => {
         val (selValid, selBits) = selectPartialOldest(selectValidGroups(g), selectBitsGroups(g))
         val selValidNext = RegNext(selValid(0))
         val selBitsNext = RegNext(selBits(0))
-        (selValidNext && !selBitsNext.uop.robIdx.needFlush(io.redirect) && !selBitsNext.uop.robIdx.needFlush(RegNext(io.redirect)), selBitsNext)
+        val selNotCancel = !selBitsNext.uop.robIdx.needFlush(io.redirect) &&
+                           !selBitsNext.uop.robIdx.needFlush(RegNext(io.redirect))
+        (selValidNext && selNotCancel, selBitsNext)
       })
       selectOldest(select.map(_._1), select.map(_._2))
     }
@@ -307,13 +309,18 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     paddrModule.io.violationMdata(i) := io.storeIn(i).bits.paddr
     maskModule.io.violationMdata(i) := io.storeIn(i).bits.mask
 
-    val s3_bypassPaddrMask = RegNext(VecInit((0 until LoadPipelineWidth).map(j => s2_bypassPAddr(j)(PAddrBits-1, DCacheVWordOffset) === io.storeIn(i).bits.paddr(PAddrBits-1, DCacheVWordOffset))))
-    val s3_bypassMMask = RegNext(VecInit((0 until LoadPipelineWidth).map(j => (s2_bypassMask(j) & io.storeIn(i).bits.mask).orR)))
+    val s3_bypassPaddrMask = RegNext(VecInit((0 until LoadPipelineWidth).map(j => {
+      s2_bypassPAddr(j)(PAddrBits-1, DCacheVWordOffset) === io.storeIn(i).bits.paddr(PAddrBits-1, DCacheVWordOffset)
+    })))
+    val s3_bypassMMask = RegNext(VecInit((0 until LoadPipelineWidth).map(j => {
+      (s2_bypassMask(j) & io.storeIn(i).bits.mask).orR
+    })))
     val s3_bypassMaskUInt = (0 until LoadPipelineWidth).map(j =>
       Mux(s3_bypassPaddrMask(j) && s3_bypassMMask(j), UIntToOH(RegNext(s3_enqIdxs(j))), 0.U(LoadQueueRAWSize.W))
     ).reduce(_|_)
 
-    val addrMaskMatch = RegNext(paddrModule.io.violationMmask(i).asUInt & maskModule.io.violationMmask(i).asUInt) | s3_bypassMaskUInt
+    val addrMaskMatch = RegNext(paddrModule.io.violationMmask(i).asUInt & maskModule.io.violationMmask(i).asUInt) |
+                        s3_bypassMaskUInt
     val entryNeedCheck = RegNext(VecInit((0 until LoadQueueRAWSize).map(j => {
       allocated(j) && isAfter(uop(j).robIdx, io.storeIn(i).bits.uop.robIdx) && datavalid(j) && !needCancel(i)
     })))
@@ -351,7 +358,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val stFtqOffset = Wire(Vec(StorePipelineWidth, UInt(log2Up(PredictWidth).W)))
   for (w <- 0 until StorePipelineWidth) {
     val detectedRollback = detectRollback(w)
-    rollbackLqWb(w).valid := detectedRollback._1 && DelayN(io.storeIn(w).valid && !io.storeIn(w).bits.miss, TotalSelectCycles)
+    rollbackLqWb(w).valid := detectedRollback._1 &&
+                             DelayN(io.storeIn(w).valid && !io.storeIn(w).bits.miss, TotalSelectCycles)
     rollbackLqWb(w).bits  := detectedRollback._2
     stFtqIdx(w) := DelayN(io.storeIn(w).bits.uop.cf.ftqPtr, TotalSelectCycles)
     stFtqOffset(w) := DelayN(io.storeIn(w).bits.uop.cf.ftqOffset, TotalSelectCycles)
