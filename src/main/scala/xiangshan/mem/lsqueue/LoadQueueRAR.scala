@@ -99,46 +99,46 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   // (e.g. "not completed" means that load instruction get the data or
   // exception).
   // pre-Allocate logic
-  val s0_preReqs = io.query.map(_.s1_prealloc)
-  val s0_hasNotWritebackedLoad = io.query.map(x => isAfter(x.s1_lqIdx, io.ldWbPtr))
-  val s0_preEnqs = s0_preReqs.zip(s0_hasNotWritebackedLoad).map { case (v, r) => v && r }
-  val s0_canAccepts = Wire(Vec(LoadPipelineWidth, Bool()))
-  val s0_enqIdxs = Wire(Vec(LoadPipelineWidth, UInt()))
+  val s1_preReqs = io.query.map(_.s1_prealloc)
+  val s1_hasNotWritebackedLoad = io.query.map(x => isAfter(x.s1_lqIdx, io.ldWbPtr))
+  val s1_preEnqs = s1_preReqs.zip(s1_hasNotWritebackedLoad).map { case (v, r) => v && r }
+  val s1_canAccepts = Wire(Vec(LoadPipelineWidth, Bool()))
+  val s1_enqIdxs = Wire(Vec(LoadPipelineWidth, UInt()))
 
   for ((req, w) <- io.query.zipWithIndex) {
     freeList.io.allocateReq(w) := true.B
 
-    s0_canAccepts(w) := freeList.io.canAllocate(w)
-    s0_enqIdxs(w) := freeList.io.allocateSlot(w)
-    req.s1_nack := Mux(s0_hasNotWritebackedLoad(w), !s0_canAccepts(w), false.B)
+    s1_canAccepts(w) := freeList.io.canAllocate(w)
+    s1_enqIdxs(w) := freeList.io.allocateSlot(w)
+    req.s1_nack := Mux(s1_hasNotWritebackedLoad(w), !s1_canAccepts(w), false.B)
   }
 
   // Allocate logic
-  val s1_canEnqs = io.query.map(_.s2_alloc)
-  val s1_hasNotWritebackedLoad = RegNext(VecInit(s0_preReqs.zip(s0_hasNotWritebackedLoad).map(x => x._1 && x._2)))
-  val s1_cancel = io.query.map(x => {
+  val s2_canEnqs = io.query.map(_.s2_alloc)
+  val s2_hasNotWritebackedLoad = RegNext(VecInit(s1_preReqs.zip(s1_hasNotWritebackedLoad).map(x => x._1 && x._2)))
+  val s2_cancel = io.query.map(x => {
     val x_next = RegNext(x.s1_robIdx)
     x_next.needFlush(RegNext(io.redirect)) || x_next.needFlush(io.redirect)
   })
-  val s1_needEnqs = s1_canEnqs.zip(s1_hasNotWritebackedLoad.zip(s1_cancel)).map { case (v, x) => v && x._1 && !x._2 }
-  val s1_canAccepts = RegNext(s0_canAccepts)
-  val s1_enqIdxs = RegNext(s0_enqIdxs)
-  val s1_accepts = Wire(Vec(LoadPipelineWidth, Bool()))
-  val s1_offset = Wire(Vec(LoadPipelineWidth, UInt()))
+  val s2_needEnqs = s2_canEnqs.zip(s1_hasNotWritebackedLoad.zip(s2_cancel)).map { case (v, x) => v && x._1 && !x._2 }
+  val s2_canAccepts = RegNext(s1_canAccepts)
+  val s2_enqIdxs = RegNext(s1_enqIdxs)
+  val s2_accepts = Wire(Vec(LoadPipelineWidth, Bool()))
+  val s2_offset = Wire(Vec(LoadPipelineWidth, UInt()))
 
   for ((enq, w) <- io.query.zipWithIndex) {
-    s1_accepts(w) := false.B
+    s2_accepts(w) := false.B
     paddrModule.io.wen(w) := false.B
     freeList.io.doAllocate(w) := false.B
 
     //  Allocate ready
-    val offset = PopCount(s1_needEnqs.take(w))
-    val canAccept = s1_canAccepts(offset)
-    val enqIndex = s1_enqIdxs(offset)
-    s1_offset(w) := offset
+    val offset = PopCount(s2_needEnqs.take(w))
+    val canAccept = s2_canAccepts(offset)
+    val enqIndex = s2_enqIdxs(offset)
+    s2_offset(w) := offset
 
-    when (s1_needEnqs(w) && canAccept) {
-      s1_accepts(w) := true.B
+    when (s2_needEnqs(w) && canAccept) {
+      s2_accepts(w) := true.B
 
       val debug_robIdx = enq.s2_uop.robIdx.asUInt
       XSError(allocated(enqIndex), p"LoadQueueRAR: You can not write an valid entry! check: ldu $w, robIdx $debug_robIdx")
@@ -185,13 +185,13 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   }
 
   // if need replay revoke entry
-  val s2_accepts = RegNext(s1_accepts)
-  val s2_enqIdxs = RegNext(VecInit(s1_offset.map(x => s1_enqIdxs(x))))
+  val s3_accepts = RegNext(s2_accepts)
+  val s3_enqIdxs = RegNext(VecInit(s2_offset.map(x => s2_enqIdxs(x))))
   for ((revoke, w) <- io.query.map(_.s3_revoke).zipWithIndex) {
-    val s2_accept = s2_accepts(w)
-    val s2_enqIdx = s2_enqIdxs(w)
-    val revokeValid = revoke && s2_accept
-    val revokeIndex = s2_enqIdx
+    val s3_accept = s3_accepts(w)
+    val s3_enqIdx = s3_enqIdxs(w)
+    val revokeValid = revoke && s3_accept
+    val revokeIndex = s3_enqIdx
 
     when (allocated(revokeIndex) && revokeValid) {
       allocated(revokeIndex) := false.B
@@ -234,12 +234,14 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     paddrModule.io.releaseMdata.takeRight(1)(0) := release1Cycle.bits.paddr
   }
 
-  val lastAllocIndexOH = s2_enqIdxs.map(UIntToOH(_))
-  val lastReleasePAddrMatch = VecInit((0 until LoadPipelineWidth).map(i => {
+  val s3_enqIdxsOH = s3_enqIdxs.map(UIntToOH(_))
+  val s3_releasePAddrMatch = VecInit((0 until LoadPipelineWidth).map(i => {
     (bypassPAddr(i)(PAddrBits-1, DCacheLineOffset) === release1Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset))
   }))
   (0 until LoadQueueRARSize).map(i => {
-    val bypassMatch = VecInit((0 until LoadPipelineWidth).map(j => s2_accepts(j) && lastAllocIndexOH(j)(i) && lastReleasePAddrMatch(j))).asUInt.orR
+    val bypassMatch = VecInit((0 until LoadPipelineWidth).map(j => {
+      s3_accepts(j) && s3_enqIdxsOH(j)(i) && s3_releasePAddrMatch(j)
+    })).asUInt.orR
     when (RegNext((paddrModule.io.releaseMmask.takeRight(1)(0)(i) || bypassMatch) && allocated(i) && release1Cycle.valid)) {
       // Note: if a load has missed in dcache and is waiting for refill in load queue,
       // its released flag still needs to be set as true if addr matches.
@@ -250,7 +252,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   io.lqFull := freeList.io.empty
 
   // perf cnt
-  val canEnqCount = PopCount(s1_accepts)
+  val canEnqCount = PopCount(s2_accepts)
   val validCount = freeList.io.validCount
   val allowEnqueue = validCount <= (LoadQueueRARSize - LoadPipelineWidth).U
   val ldLdViolationCount = PopCount(io.query.map(resp => RegNext(resp.s2_alloc) && resp.s3_nuke))
