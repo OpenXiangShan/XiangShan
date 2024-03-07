@@ -227,7 +227,7 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
     deqPtrExt := deqPtrExt + 1.U
   }
 
-  when(GatedValidRegNext(io.flush)) {
+  when(RegNext(io.flush)) {
     valids.foreach {case valid => valid := false.B}
     (0 until enqLen).map {case i => enqPtrExt(i) := i.U.asTypeOf(new Ptr)}
     deqPtrExt := 0.U.asTypeOf(new Ptr)
@@ -558,8 +558,8 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   // tlb req
   // s0: arb all tlb reqs
   val s0_tlb_fire_vec = VecInit((0 until MLP_SIZE).map{case i => tlb_req_arb.io.in(i).fire})
-  val s1_tlb_fire_vec = s0_tlb_fire_vec.map(i => GatedValidRegNext(i))
-  val s2_tlb_fire_vec = s1_tlb_fire_vec.map(i => GatedValidRegNext(i))
+  val s1_tlb_fire_vec = GatedValidRegNext(s0_tlb_fire_vec)
+  val s2_tlb_fire_vec = GatedValidRegNext(s1_tlb_fire_vec)
 
   for(i <- 0 until MLP_SIZE) {
     val l1_evict = s1_l1_alloc && (s1_l1_index === i.U)
