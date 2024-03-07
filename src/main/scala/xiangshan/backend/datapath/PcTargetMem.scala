@@ -20,7 +20,8 @@ class PcTargetMemImp(override val wrapper: PcTargetMem)(implicit p: Parameters, 
   private val numTargetMemRead = params.numTargetReadPort + params.numPcMemReadPort
   val io = IO(new PcTargetMemIO())
 
-  private val targetMem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize, numTargetMemRead, 1))
+  private def hasRen: Boolean = true
+  private val targetMem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize, numTargetMemRead, 1, hasRen = hasRen))
   private val jumpTargetReadVec : Vec[UInt] = Wire(Vec(params.numTargetReadPort, UInt(VAddrData().dataWidth.W)))
   private val jumpTargetVec     : Vec[UInt] = Wire(Vec(params.numTargetReadPort, UInt(VAddrData().dataWidth.W)))
 
@@ -31,8 +32,10 @@ class PcTargetMemImp(override val wrapper: PcTargetMem)(implicit p: Parameters, 
   private val newestEn: Bool = io.fromFrontendFtq.newest_entry_en
   private val newestTarget: UInt = io.fromFrontendFtq.newest_entry_target
   for (i <- 0 until params.numTargetReadPort) {
+    val targetVld = io.fromDataPathVld(i)
     val targetPtr = io.fromDataPathFtq(i)
     // target pc stored in next entry
+    targetMem.io.ren.get(i) := targetVld
     targetMem.io.raddr(i) := (targetPtr + 1.U).value
     jumpTargetReadVec(i) := targetMem.io.rdata(i).startAddr
     val needNewestTarget = RegNext(targetPtr === io.fromFrontendFtq.newest_entry_ptr)
@@ -45,9 +48,11 @@ class PcTargetMemImp(override val wrapper: PcTargetMem)(implicit p: Parameters, 
   private val pcReadVec = Wire(Vec(params.numPcMemReadPort, UInt(VAddrData().dataWidth.W)))
   private val pcVec = Wire(Vec(params.numPcMemReadPort, UInt(VAddrData().dataWidth.W)))
   for (i <- 0 until params.numPcMemReadPort) {
+    val vld = io.pcToDataPath.fromDataPathFtqVld(i)
     val pcAddr = io.pcToDataPath.fromDataPathFtqPtr(i)
     // pc stored in this entry
     val offset = io.pcToDataPath.fromDataPathFtqOffset(i)
+    targetMem.io.ren.get(i + params.numTargetReadPort) := vld
     targetMem.io.raddr(i + params.numTargetReadPort) := pcAddr.value
     pcReadVec(i) := targetMem.io.rdata(i + params.numTargetReadPort).getPc(RegNext(offset))
     pcVec(i) := pcReadVec(i)
@@ -59,6 +64,7 @@ class PcTargetMemImp(override val wrapper: PcTargetMem)(implicit p: Parameters, 
 
 class PcToDataPathIO(params: BackendParams)(implicit p: Parameters) extends XSBundle {
   val toDataPathPC = Output(Vec(params.numPcMemReadPort, UInt(VAddrData().dataWidth.W)))
+  val fromDataPathFtqVld = Input(Vec(params.numPcMemReadPort, Bool()))
   val fromDataPathFtqPtr = Input(Vec(params.numPcMemReadPort, new FtqPtr))
   val fromDataPathFtqOffset = Input(Vec(params.numPcMemReadPort, UInt(log2Up(PredictWidth).W)))
 }
@@ -66,6 +72,7 @@ class PcToDataPathIO(params: BackendParams)(implicit p: Parameters) extends XSBu
 class PcTargetMemIO()(implicit p: Parameters, params: BackendParams) extends XSBundle {
   //input
   val fromFrontendFtq = Flipped(new FtqToCtrlIO)
+  val fromDataPathVld = Input(Vec(params.numTargetReadPort, Bool()))
   val fromDataPathFtq = Input(Vec(params.numTargetReadPort, new FtqPtr))
   //output
   val toExus = Output(Vec(params.numTargetReadPort, UInt(VAddrData().dataWidth.W)))

@@ -20,6 +20,7 @@ class MemCtrl(params: BackendParams)(implicit p: Parameters) extends XSModule {
   waittable.io.csrCtrl := RegNext(io.csrCtrl)
 
   for (i <- 0 until RenameWidth) {
+    ssit.io.ren(i) := io.mdpFoldPcVecVld(i)
     ssit.io.raddr(i) := io.mdpFlodPcVec(i)
     waittable.io.raddr(i) := io.mdpFlodPcVec(i)
   }
@@ -37,6 +38,7 @@ class MemCtrlIO(params: BackendParams)(implicit p: Parameters) extends XSBundle 
   val csrCtrl = Input(new CustomCSRCtrlIO)
   val stIn = Vec(params.StaExuCnt, Flipped(ValidIO(new DynInst))) // use storeSetHit, ssid, robIdx
   val memPredUpdate = Input(new MemPredUpdateReq)
+  val mdpFoldPcVecVld = Input(Vec(DecodeWidth, Bool()))
   val mdpFlodPcVec = Input(Vec(DecodeWidth, UInt(MemPredPCWidth.W)))
   val dispatchLFSTio = Flipped(new DispatchLFSTIO)
   val waitTable2Rename = Vec(DecodeWidth, Output(Bool()))   // loadWaitBit

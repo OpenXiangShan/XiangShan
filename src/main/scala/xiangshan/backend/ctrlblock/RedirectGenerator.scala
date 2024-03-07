@@ -67,6 +67,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   val oldestExuPredecode = Mux1H(io.exuOutPredecode.indices.map(oldestOneHot), io.exuOutPredecode)
   val oldestRedirect = Mux1H(oldestOneHot, allRedirect)
   io.isMisspreRedirect := VecInit(io.exuRedirect.map(x => x.valid)).asUInt.orR
+  io.redirectPcRead.vld := oldestRedirect.valid
   io.redirectPcRead.ptr := oldestRedirect.bits.ftqIdx
   io.redirectPcRead.offset := oldestRedirect.bits.ftqOffset
 
@@ -115,7 +116,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   // get pc from ftq
   // valid only if redirect is caused by load violation
   // store_pc is used to update store set
-  val store_pc = io.memPredPcRead(s1_redirect_bits_reg.stFtqIdx, s1_redirect_bits_reg.stFtqOffset)
+  val store_pc = io.memPredPcRead(s1_redirect_valid_reg, s1_redirect_bits_reg.stFtqIdx, s1_redirect_bits_reg.stFtqOffset)
 
   // update load violation predictor if load violation redirect triggered
   io.memPredUpdate.valid := RegNext(s1_isReplay && s1_redirect_valid_reg && s2_redirect_bits_reg.flushItself(), init = false.B)

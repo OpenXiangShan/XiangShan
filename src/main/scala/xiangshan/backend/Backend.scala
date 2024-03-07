@@ -303,6 +303,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   }
 
   pcTargetMem.io.fromFrontendFtq := io.frontend.fromFtq
+  pcTargetMem.io.fromDataPathVld := bypassNetwork.io.toExus.int.flatten.filter(_.bits.params.needTarget).map(_.valid).toSeq
   pcTargetMem.io.fromDataPathFtq := bypassNetwork.io.toExus.int.flatten.filter(_.bits.params.needTarget).map(_.bits.ftqIdx.get).toSeq
   intExuBlock.io.in.flatten.filter(_.bits.params.needTarget).map(_.bits.predictInfo.get.target).zipWithIndex.foreach {
     case (sink, i) =>
@@ -483,18 +484,21 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   require(io.mem.loadPcRead.size == params.LduCnt)
   io.mem.loadPcRead.zipWithIndex.foreach { case (loadPcRead, i) =>
     loadPcRead := ctrlBlock.io.memLdPcRead(i).data
+    ctrlBlock.io.memLdPcRead(i).vld := io.mem.issueLda(i).valid
     ctrlBlock.io.memLdPcRead(i).ptr := io.mem.issueLda(i).bits.uop.ftqPtr
     ctrlBlock.io.memLdPcRead(i).offset := io.mem.issueLda(i).bits.uop.ftqOffset
   }
 
   io.mem.storePcRead.zipWithIndex.foreach { case (storePcRead, i) =>
     storePcRead := ctrlBlock.io.memStPcRead(i).data
+    ctrlBlock.io.memStPcRead(i).vld := io.mem.issueSta(i).valid
     ctrlBlock.io.memStPcRead(i).ptr := io.mem.issueSta(i).bits.uop.ftqPtr
     ctrlBlock.io.memStPcRead(i).offset := io.mem.issueSta(i).bits.uop.ftqOffset
   }
 
   io.mem.hyuPcRead.zipWithIndex.foreach( { case (hyuPcRead, i) =>
     hyuPcRead := ctrlBlock.io.memHyPcRead(i).data
+    ctrlBlock.io.memHyPcRead(i).vld := io.mem.issueHylda(i).valid
     ctrlBlock.io.memHyPcRead(i).ptr := io.mem.issueHylda(i).bits.uop.ftqPtr
     ctrlBlock.io.memHyPcRead(i).offset := io.mem.issueHylda(i).bits.uop.ftqOffset
   })
