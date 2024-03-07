@@ -268,7 +268,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   ))
   val s1_toExuData: MixedVec[MixedVec[ExuInput]] = Reg(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.cloneType).toSeq)).toSeq))
   val s1_immInfo = Reg(MixedVec(toExu.map(x => MixedVec(x.map(x => new ImmInfo).toSeq)).toSeq))
-  s1_immInfo.zip(fromIQ).map { case (s1Vec, s0Vec) => //
+  s1_immInfo.zip(fromIQ).map { case (s1Vec, s0Vec) =>
     s1Vec.zip(s0Vec).map { case (s1, s0) =>
       s1.imm := Mux(s0.valid, s0.bits.common.imm, s1.imm)
       s1.immType := Mux(s0.valid, s0.bits.immType, s1.immType)
