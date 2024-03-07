@@ -133,8 +133,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val s2_enqIdxs = RegNext(s1_enqIdxs)
   val s2_accepts = Wire(Vec(LoadPipelineWidth, Bool()))
   val s2_offset = Wire(Vec(LoadPipelineWidth, UInt()))
-  val s2_bypassPAddr = Reg(Vec(LoadPipelineWidth, UInt(PAddrBits.W)))
-  val s2_bypassMask = Reg(Vec(LoadPipelineWidth, UInt((VLEN/8).W)))
+  val s3_bypassPAddr = Reg(Vec(LoadPipelineWidth, UInt(PAddrBits.W)))
+  val s3_bypassMask = Reg(Vec(LoadPipelineWidth, UInt((VLEN/8).W)))
 
 
   for ((enq, w) <- io.query.zipWithIndex) {
@@ -164,13 +164,13 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
       paddrModule.io.wen(w) := true.B
       paddrModule.io.waddr(w) := enqIndex
       paddrModule.io.wdata(w) := enq.s2_paddr
-      s2_bypassPAddr(w) := enq.s2_paddr
+      s3_bypassPAddr(w) := enq.s2_paddr
 
       //  Write mask
       maskModule.io.wen(w) := true.B
       maskModule.io.waddr(w) := enqIndex
       maskModule.io.wdata(w) := enq.s2_mask
-      s2_bypassMask(w) := enq.s2_mask
+      s3_bypassMask(w) := enq.s2_mask
 
       //  Fill info
       uop(enqIndex) := enq.s2_uop
@@ -309,18 +309,18 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     paddrModule.io.violationMdata(i) := io.storeIn(i).bits.paddr
     maskModule.io.violationMdata(i) := io.storeIn(i).bits.mask
 
-    val s3_bypassPaddrMask = RegNext(VecInit((0 until LoadPipelineWidth).map(j => {
-      s2_bypassPAddr(j)(PAddrBits-1, DCacheVWordOffset) === io.storeIn(i).bits.paddr(PAddrBits-1, DCacheVWordOffset)
+    val s4_bypassPaddrMask = RegNext(VecInit((0 until LoadPipelineWidth).map(j => {
+      s3_bypassPAddr(j)(PAddrBits-1, DCacheVWordOffset) === io.storeIn(i).bits.paddr(PAddrBits-1, DCacheVWordOffset)
     })))
-    val s3_bypassMMask = RegNext(VecInit((0 until LoadPipelineWidth).map(j => {
-      (s2_bypassMask(j) & io.storeIn(i).bits.mask).orR
+    val s4_bypassMMask = RegNext(VecInit((0 until LoadPipelineWidth).map(j => {
+      (s3_bypassMask(j) & io.storeIn(i).bits.mask).orR
     })))
-    val s3_bypassMaskUInt = (0 until LoadPipelineWidth).map(j =>
-      Mux(s3_bypassPaddrMask(j) && s3_bypassMMask(j), UIntToOH(RegNext(s3_enqIdxs(j))), 0.U(LoadQueueRAWSize.W))
+    val s4_bypassMaskUInt = (0 until LoadPipelineWidth).map(j =>
+      Mux(s4_bypassPaddrMask(j) && s4_bypassMMask(j), UIntToOH(RegNext(s3_enqIdxs(j))), 0.U(LoadQueueRAWSize.W))
     ).reduce(_|_)
 
     val addrMaskMatch = RegNext(paddrModule.io.violationMmask(i).asUInt & maskModule.io.violationMmask(i).asUInt) |
-                        s3_bypassMaskUInt
+                        s4_bypassMaskUInt
     val entryNeedCheck = RegNext(VecInit((0 until LoadQueueRAWSize).map(j => {
       allocated(j) && isAfter(uop(j).robIdx, io.storeIn(i).bits.uop.robIdx) && datavalid(j) && !needCancel(i)
     })))
