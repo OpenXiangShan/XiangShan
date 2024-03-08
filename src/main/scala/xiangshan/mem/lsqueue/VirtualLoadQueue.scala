@@ -80,8 +80,8 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   /**
    * update pointer
    */
-  val lastCycleRedirect = RegNext(io.redirect)
-  val lastLastCycleRedirect = RegNext(lastCycleRedirect)
+  val lastCycleRedirect = GatedValidRegNext(io.redirect)
+  val lastLastCycleRedirect = GatedValidRegNext(lastCycleRedirect)
 
   val validCount = distanceBetween(enqPtrExt(0), deqPtr)
   val allowEnqueue = validCount <= (VirtualLoadQueueSize - LSQLdEnqWidth).U
@@ -89,7 +89,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   val needCancel = WireInit(VecInit((0 until VirtualLoadQueueSize).map(i => {
     uop(i).robIdx.needFlush(io.redirect) && allocated(i)
   })))
-  val lastNeedCancel = RegNext(needCancel)
+  val lastNeedCancel = GatedValidRegNext(needCancel)
   val enqCancel = io.enq.req.map(_.bits.robIdx.needFlush(io.redirect))
   val lastEnqCancel = PopCount(RegNext(VecInit(canEnqueue.zip(enqCancel).map(x => x._1 && x._2))))
   val lastCycleCancelCount = PopCount(lastNeedCancel)
@@ -124,7 +124,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   val deqCountMask = Wire(UInt(DeqPtrMoveStride.W))
   deqCountMask := deqLookup.asUInt & (~deqInSameRedirectCycle.asUInt).asUInt
   val commitCount = PopCount(PriorityEncoderOH(~deqCountMask) - 1.U)
-  val lastCommitCount = RegNext(commitCount)
+  val lastCommitCount = GatedValidRegNext(commitCount)
 
   // update deqPtr
   // cycle 1: generate deqPtrNext
@@ -133,7 +133,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   deqPtrNext := deqPtr + lastCommitCount
   deqPtr := RegEnable(deqPtrNext, 0.U.asTypeOf(new LqPtr), deqPtrUpdateEna)
 
-  io.lqDeq := RegNext(lastCommitCount)
+  io.lqDeq := GatedValidRegNext(lastCommitCount)
   io.lqCancelCnt := redirectCancelCount
   io.ldWbPtr := deqPtr
   io.lqEmpty := RegNext(validCount === 0.U)
