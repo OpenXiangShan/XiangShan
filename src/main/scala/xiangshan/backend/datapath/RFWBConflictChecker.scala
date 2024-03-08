@@ -46,7 +46,7 @@ private object ArbiterCtrl {
   def apply(request: Seq[Bool]): Seq[Bool] = request.length match {
     case 0 => Seq()
     case 1 => Seq(true.B)
-    case _ => true.B +: request.tail.init.scanLeft(request.head)(_ || _).map(!_)
+    case _ => request.head +: request.tail.init.scanLeft(request.head)(_ || _).map(!_)
   }
 }
 
@@ -54,19 +54,60 @@ private object ArbiterCtrl {
 class WBArbiter[T <: Data](val gen: T, val n: Int) extends Module {
   val io = IO(new ArbiterIO(gen, n))
 
+  // These parameters are not carefully set, and may be improved in the future
+  private val CounterWidth = 3
+  private val CounterThreshold = 7
+
+  /* To avoid some weird deadlock caused by delay of og0Cancel */
+  // Use a saturation counter to record the number of consecutive failed requests for each input port
+  // When a counter reaches the threshold, mark it as full
+  // Port marked as full will be prioritized the next time it sends a request
+
+  val cancelCounter      = RegInit(VecInit(Seq.fill(n)(0.U(CounterWidth.W))))
+  val isFull             = RegInit(VecInit(Seq.fill(n)(false.B)))
+  val cancelCounterNext  = Wire(Vec(n, UInt(CounterWidth.W)))
+  val isFullNext         = Wire(Vec(n, Bool()))
+  val hasFull            = RegInit(false.B)
+  val hasFullReq         = Wire(Bool())
+  val finalValid         = Wire(Vec(n, Bool()))
+
+  cancelCounter := cancelCounterNext
+  isFull        := isFullNext
+  hasFull       := isFullNext.asUInt.orR
+  hasFullReq    := io.in.zip(isFull).map{case (in, full) => in.valid && full}.reduce(_ || _)
+
+  cancelCounterNext.zip(isFullNext).zip(cancelCounter).zip(isFull).zipWithIndex.foreach{ case ((((cntNext, fullNext), cnt), full), i) =>
+    when (io.in(i).valid && !io.in(i).ready) {
+      cntNext   := Mux(cnt === CounterThreshold.U, CounterThreshold.U, cnt + 1.U)
+      fullNext  := cnt(CounterWidth - 1, 1).orR  // counterNext === CounterThreshold.U
+    }.elsewhen (io.in(i).valid && io.in(i).ready) {
+      cntNext   := 0.U
+      fullNext  := false.B
+    }.otherwise {
+      cntNext   := cnt
+      fullNext  := full
+    }
+  }
+
+  finalValid := io.in.zipWithIndex.map{ case (in, i) => in.valid && (!hasFull || !hasFullReq || isFull(i)) }
+
   io.chosen := (n - 1).asUInt
   io.out.bits := io.in(n - 1).bits
   for (i <- n - 2 to 0 by -1) {
-    when(io.in(i).valid) {
+    when(finalValid(i)) {
       io.chosen := i.asUInt
       io.out.bits := io.in(i).bits
     }
   }
 
-  val grant = ArbiterCtrl(io.in.map(_.valid))
+  // in_valid    grant      ready
+  // 0           *          1
+  // 1           0          0
+  // 1           1          1
+  val grant = ArbiterCtrl(finalValid)
   for ((in, g) <- io.in.zip(grant))
     in.ready := (g || !in.valid) && io.out.ready
-  io.out.valid := !grant.last || io.in.last.valid
+  io.out.valid := !grant.last || finalValid.last
 }
 
 abstract class RFWBCollideCheckerBase(params: RFWBCollideCheckerParams)(implicit p: Parameters) extends Module {

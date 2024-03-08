@@ -329,7 +329,8 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
         val src0VfBlock = s0.bits.common.dataSources(0).readReg && !vfRdArbWinner(i)(j)(0)
         val src1VfBlock = s0.bits.common.dataSources(1).readReg && !vfRdArbWinner(i)(j)(1)
         val src1IntBlock = s0.bits.common.dataSources(0).readReg && s0.bits.common.dataSources(1).readReg && !intRdArbWinner(i)(j)(1)
-        srcNotBlock := !src0VfBlock && !src1VfBlock && !src1IntBlock
+        val src0IntBlock = (s0.bits.common.dataSources(0).readReg || s0.bits.common.dataSources(1).readReg) && !intRdArbWinner(i)(j)(0)
+        srcNotBlock := !src0VfBlock && !src1VfBlock && !src1IntBlock && !src0IntBlock
       }
       val notBlock = srcNotBlock && intWbNotBlock(i)(j) && vfWbNotBlock(i)(j)
       val s1_flush = s0.bits.common.robIdx.needFlush(Seq(io.flush, RegNextWithEnable(io.flush)))
