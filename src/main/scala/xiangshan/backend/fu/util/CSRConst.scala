@@ -293,3 +293,10 @@ trait HasCSRConst {
   }
 }
 object CSRConst extends HasCSRConst
+
+trait CSRDef {
+  trait FieldEncode {
+    protected val encodeWidth: Int
+  }
+
+}
