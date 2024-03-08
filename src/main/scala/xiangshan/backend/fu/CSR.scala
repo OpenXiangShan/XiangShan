@@ -29,7 +29,7 @@ import xiangshan._
 import xiangshan.backend.fu.util._
 import xiangshan.cache._
 import xiangshan.backend.Bundles.ExceptionInfo
-import xiangshan.backend.fu.util.CSR.CSRNamedConstant.ContextStatus
+import xiangshan.backend.fu.NewCSR.CSRNamedConstant.ContextStatus
 import utils.MathUtils.{BigIntGenMask, BigIntNot}
 
 class FpuCsrIO extends Bundle {
