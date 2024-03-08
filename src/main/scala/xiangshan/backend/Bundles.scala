@@ -301,9 +301,9 @@ class IssueQueueIQWakeUpBundle(
     val is0Lat = Bool()
     val params = backendParams.allExuParams.filter(_.exuIdx == exuIdx).head
     val pdestCopy  = OptionWrapper(copyWakeupOut, Vec(copyNum, UInt(params.wbPregIdxWidth.W)))
-    val rfWenCopy  = OptionWrapper(copyWakeupOut && params.writeIntRf, Vec(copyNum, Bool()))
-    val fpWenCopy  = OptionWrapper(copyWakeupOut && params.writeFpRf, Vec(copyNum, Bool()))
-    val vecWenCopy = OptionWrapper(copyWakeupOut && params.writeVecRf, Vec(copyNum, Bool()))
+    val rfWenCopy  = OptionWrapper(copyWakeupOut && params.needIntWen, Vec(copyNum, Bool()))
+    val fpWenCopy  = OptionWrapper(copyWakeupOut && params.needFpWen, Vec(copyNum, Bool()))
+    val vecWenCopy = OptionWrapper(copyWakeupOut && params.needVecWen, Vec(copyNum, Bool()))
     val loadDependencyCopy = OptionWrapper(copyWakeupOut && params.isIQWakeUpSink, Vec(copyNum,Vec(backendParams.LdExuCnt, UInt(3.W))))
     def fromExuInput(exuInput: ExuInput, l2ExuVecs: Vec[UInt]): Unit = {
       this.rfWen := exuInput.rfWen.getOrElse(false.B)
@@ -487,14 +487,14 @@ class IssueQueueIQWakeUpBundle(
     val iqIdx         = UInt(log2Up(MemIQSizeMax).W)// Only used by store yet
     val isFirstIssue  = Bool()                      // Only used by store yet
     val pdestCopy  = OptionWrapper(copyWakeupOut, Vec(copyNum, UInt(params.wbPregIdxWidth.W)))
-    val rfWenCopy  = OptionWrapper(copyWakeupOut && params.writeIntRf, Vec(copyNum, Bool()))
-    val fpWenCopy  = OptionWrapper(copyWakeupOut && params.writeFpRf, Vec(copyNum, Bool()))
-    val vecWenCopy = OptionWrapper(copyWakeupOut && params.writeVecRf, Vec(copyNum, Bool()))
+    val rfWenCopy  = OptionWrapper(copyWakeupOut && params.needIntWen, Vec(copyNum, Bool()))
+    val fpWenCopy  = OptionWrapper(copyWakeupOut && params.needFpWen, Vec(copyNum, Bool()))
+    val vecWenCopy = OptionWrapper(copyWakeupOut && params.needVecWen, Vec(copyNum, Bool()))
     val loadDependencyCopy = OptionWrapper(copyWakeupOut && params.isIQWakeUpSink, Vec(copyNum,Vec(LoadPipelineWidth, UInt(3.W))))
     val pdest         = UInt(params.wbPregIdxWidth.W)
-    val rfWen         = if (params.writeIntRf)    Some(Bool())                        else None
-    val fpWen         = if (params.writeFpRf)     Some(Bool())                        else None
-    val vecWen        = if (params.writeVecRf)    Some(Bool())                        else None
+    val rfWen         = if (params.needIntWen)    Some(Bool())                        else None
+    val fpWen         = if (params.needFpWen)     Some(Bool())                        else None
+    val vecWen        = if (params.needVecWen)    Some(Bool())                        else None
     val fpu           = if (params.writeFflags)   Some(new FPUCtrlSignals)            else None
     val vpu           = if (params.needVPUCtrl)   Some(new VPUCtrlSignals)            else None
     val flushPipe     = if (params.flushPipe)     Some(Bool())                        else None
@@ -589,9 +589,9 @@ class IssueQueueIQWakeUpBundle(
     val data         = UInt(params.dataBitsMax.W)
     val pdest        = UInt(params.wbPregIdxWidth.W)
     val robIdx       = new RobPtr
-    val intWen       = if (params.writeIntRf)   Some(Bool())                  else None
-    val fpWen        = if (params.writeFpRf)    Some(Bool())                  else None
-    val vecWen       = if (params.writeVecRf)   Some(Bool())                  else None
+    val intWen       = if (params.needIntWen)   Some(Bool())                  else None
+    val fpWen        = if (params.needFpWen)    Some(Bool())                  else None
+    val vecWen       = if (params.needVecWen)   Some(Bool())                  else None
     val redirect     = if (params.hasRedirect)  Some(ValidIO(new Redirect))   else None
     val fflags       = if (params.writeFflags)  Some(UInt(5.W))               else None
     val wflags       = if (params.writeFflags)  Some(Bool())                  else None

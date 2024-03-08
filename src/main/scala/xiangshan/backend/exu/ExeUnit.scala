@@ -228,9 +228,9 @@ class ExeUnitImp(
 
   // Assume that one fu can only write int or fp or vec,
   // otherwise, wenVec should be assigned to wen in fu.
-  private val fuIntWenVec = funcUnits.map(x => x.cfg.writeIntRf.B && x.io.out.bits.ctrl.rfWen.getOrElse(false.B))
-  private val fuFpWenVec  = funcUnits.map(x => x.cfg.writeFpRf.B  && x.io.out.bits.ctrl.fpWen.getOrElse(false.B))
-  private val fuVecWenVec = funcUnits.map(x => x.cfg.writeVecRf.B && x.io.out.bits.ctrl.vecWen.getOrElse(false.B))
+  private val fuIntWenVec = funcUnits.map(x => x.cfg.needIntWen.B && x.io.out.bits.ctrl.rfWen.getOrElse(false.B))
+  private val fuFpWenVec  = funcUnits.map(x => x.cfg.needFpWen.B  && x.io.out.bits.ctrl.fpWen.getOrElse(false.B))
+  private val fuVecWenVec = funcUnits.map(x => x.cfg.needVecWen.B && x.io.out.bits.ctrl.vecWen.getOrElse(false.B))
   // FunctionUnits <---> ExeUnit.out
   io.out.valid := Cat(fuOutValidOH).orR
   funcUnits.foreach(fu => fu.io.out.ready := io.out.ready)

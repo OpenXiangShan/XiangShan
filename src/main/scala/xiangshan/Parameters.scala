@@ -27,7 +27,7 @@ import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.issue.{IntScheduler, IssueBlockParams, MemScheduler, SchdBlockParams, SchedulerType, VfScheduler}
-import xiangshan.backend.regfile.{IntPregParams, PregParams, VfPregParams}
+import xiangshan.backend.regfile.{IntPregParams, PregParams, VfPregParams, FakeIntPregParams}
 import xiangshan.backend.BackendParams
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.prefetch._
@@ -370,13 +370,13 @@ case class XSCoreParameters
 
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams("STA0", Seq(StaCfg, MouCfg), Seq(IntWB(5, 1)), Seq(Seq(IntRD(3, 1)))),
+        ExeUnitParams("STA0", Seq(StaCfg, MouCfg), Seq(FakeIntWB()), Seq(Seq(IntRD(3, 1)))),
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
-        ExeUnitParams("STA1", Seq(StaCfg, MouCfg), Seq(IntWB(6, 1)), Seq(Seq(IntRD(14, 0)))),
+        ExeUnitParams("STA1", Seq(StaCfg, MouCfg), Seq(FakeIntWB()), Seq(Seq(IntRD(14, 0)))),
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
-        ExeUnitParams("STA2", Seq(StaCfg, MouCfg), Seq(IntWB(7, 1)), Seq(Seq(IntRD(15, 0)))),
+        ExeUnitParams("STA2", Seq(StaCfg, MouCfg), Seq(FakeIntWB()), Seq(Seq(IntRD(15, 0)))),
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
         ExeUnitParams("LDU0", Seq(LduCfg), Seq(IntWB(5, 0), VfWB(5, 0)), Seq(Seq(IntRD(6, 0))), true, 2),
@@ -419,6 +419,8 @@ case class XSCoreParameters
     ).flatten
   }
 
+  def fakeIntPreg = FakeIntPregParams(intPreg.numEntries, intPreg.numRead, intPreg.numWrite)
+
   val backendParams: BackendParams = backend.BackendParams(
     Map(
       IntScheduler() -> intSchdParams,
@@ -428,6 +430,7 @@ case class XSCoreParameters
     Seq(
       intPreg,
       vfPreg,
+      fakeIntPreg
     ),
     iqWakeUpParams,
   )

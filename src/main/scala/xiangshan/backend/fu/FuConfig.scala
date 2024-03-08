@@ -50,6 +50,7 @@ case class FuConfig (
   writeIntRf    : Boolean = false,
   writeFpRf     : Boolean = false,
   writeVecRf    : Boolean = false,
+  writeFakeIntRf: Boolean = false,
   writeFflags   : Boolean = false,
   writeVxsat    : Boolean = false,
   dataBits      : Int = 64,
@@ -67,6 +68,9 @@ case class FuConfig (
   vconfigWakeUp : Boolean = false,
   maskWakeUp    : Boolean = false,
 ) {
+  def needIntWen: Boolean = writeIntRf || writeFakeIntRf
+  def needFpWen:  Boolean = writeFpRf
+  def needVecWen: Boolean = writeVecRf
   var vconfigIdx = -1
   var maskSrcIdx = -1
   if (vconfigWakeUp) {
@@ -536,7 +540,7 @@ object FuConfig {
       Seq(IntData()),
     ),
     piped = false, // Todo: check it
-    writeIntRf = true,
+    writeFakeIntRf = true,
     latency = UncertainLatency(),
     exceptionOut = (LduCfg.exceptionOut ++ StaCfg.exceptionOut ++ StdCfg.exceptionOut).distinct,
     trigger = true,
