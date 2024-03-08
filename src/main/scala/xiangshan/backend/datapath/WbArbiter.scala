@@ -161,7 +161,7 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
 
   fromExu.zip(intArbiterInputsWire.zip(vfArbiterInputsWire))map{
     case (exuOut, (intArbiterInput, vfArbiterInput)) =>
-      val regfilesTypeNum = params.pregParams.size
+      val regfilesTypeNum = params.pregParams.filterNot(_.isFake).size
       val in1ToN = Module(new WbArbiterDispatcher(new ExuOutput(exuOut.bits.params), regfilesTypeNum, acceptCond))
       in1ToN.io.in.valid := exuOut.valid
       in1ToN.io.in.bits := exuOut.bits

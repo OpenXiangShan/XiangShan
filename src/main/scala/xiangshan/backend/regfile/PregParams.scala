@@ -8,6 +8,7 @@ abstract class PregParams {
   val numRead: Option[Int]
   val numWrite: Option[Int]
   val dataCfg: DataConfig
+  val isFake: Boolean
 
   def addrWidth = log2Up(numEntries)
 }
@@ -18,7 +19,8 @@ case class IntPregParams(
   numWrite  : Option[Int],
 ) extends PregParams {
 
-  override val dataCfg: DataConfig = IntData()
+  val dataCfg: DataConfig = IntData()
+  val isFake: Boolean = false
 }
 
 case class VfPregParams(
@@ -27,7 +29,8 @@ case class VfPregParams(
   numWrite  : Option[Int],
 ) extends PregParams {
 
-  override val dataCfg: DataConfig = VecData()
+  val dataCfg: DataConfig = VecData()
+  val isFake: Boolean = false
 }
 
 case class NoPregParams() extends PregParams {
@@ -35,5 +38,16 @@ case class NoPregParams() extends PregParams {
   val numRead   : Option[Int] = None
   val numWrite  : Option[Int] = None
 
-  override val dataCfg: DataConfig = NoData()
+  val dataCfg: DataConfig = NoData()
+  val isFake: Boolean = false
+}
+
+case class FakeIntPregParams(
+  numEntries: Int,
+  numRead   : Option[Int],
+  numWrite  : Option[Int],
+) extends PregParams {
+
+  val dataCfg: DataConfig = FakeIntData()
+  val isFake: Boolean = true
 }

@@ -16,6 +16,7 @@ object DataConfig {
   case class MaskSrcData() extends DataConfig("masksrc", VecData().dataWidth) // 128
   case class MaskDstData() extends DataConfig("maskdst", VecData().dataWidth / 8) // 16
   case class VConfigData() extends DataConfig("vconfig", VecData().dataWidth) // Todo: use 16 bit instead
+  case class FakeIntData() extends DataConfig("fakeint", 64)
   case class NoData() extends DataConfig("nodata", 0)
 
   def RegSrcDataSet   : Set[DataConfig] = Set(IntData(), FpData(), VecData(), MaskSrcData(), VConfigData())

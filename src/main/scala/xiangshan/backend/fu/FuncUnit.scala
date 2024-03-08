@@ -17,9 +17,9 @@ class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
   val fuOpType    = FuOpType()
   val robIdx      = new RobPtr
   val pdest       = UInt(PhyRegIdxWidth.W)
-  val rfWen       = OptionWrapper(cfg.writeIntRf, Bool())
-  val fpWen       = OptionWrapper(cfg.writeFpRf,  Bool())
-  val vecWen      = OptionWrapper(cfg.writeVecRf, Bool())
+  val rfWen       = OptionWrapper(cfg.needIntWen, Bool())
+  val fpWen       = OptionWrapper(cfg.needFpWen,  Bool())
+  val vecWen      = OptionWrapper(cfg.needVecWen, Bool())
   val flushPipe   = OptionWrapper(cfg.flushPipe,  Bool())
   val preDecode   = OptionWrapper(cfg.hasPredecode, new PreDecodeInfo)
   val ftqIdx      = OptionWrapper(cfg.needPc || cfg.replayInst || cfg.isSta, new FtqPtr)
@@ -35,9 +35,9 @@ class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
 class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val robIdx        = new RobPtr
   val pdest         = UInt(PhyRegIdxWidth.W) // Todo: use maximum of pregIdxWidth of different pregs
-  val rfWen         = OptionWrapper(cfg.writeIntRf, Bool())
-  val fpWen         = OptionWrapper(cfg.writeFpRf,  Bool())
-  val vecWen        = OptionWrapper(cfg.writeVecRf, Bool())
+  val rfWen         = OptionWrapper(cfg.needIntWen, Bool())
+  val fpWen         = OptionWrapper(cfg.needFpWen,  Bool())
+  val vecWen        = OptionWrapper(cfg.needVecWen, Bool())
   val exceptionVec  = OptionWrapper(cfg.exceptionOut.nonEmpty, ExceptionVec())
   val flushPipe     = OptionWrapper(cfg.flushPipe,  Bool())
   val replay        = OptionWrapper(cfg.replayInst, Bool())

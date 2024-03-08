@@ -310,7 +310,7 @@ case class BackendParams(
   }
 
   def checkReadPortContinuous = {
-    pregParams.foreach { x =>
+    pregParams.filterNot(_.isFake).foreach { x =>
       if (x.numRead.isEmpty) {
         val portIndices: Seq[Int] = getRdPortIndices(x.dataCfg)
         require(isContinuous(portIndices),
@@ -321,7 +321,7 @@ case class BackendParams(
   }
 
   def checkWritePortContinuous = {
-    pregParams.foreach { x =>
+    pregParams.filterNot(_.isFake).foreach { x =>
       if (x.numWrite.isEmpty) {
         val portIndices: Seq[Int] = getWbPortIndices(x.dataCfg)
         require(

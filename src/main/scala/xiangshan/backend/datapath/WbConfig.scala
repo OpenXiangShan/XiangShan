@@ -72,5 +72,14 @@ object WbConfig {
     val priority: Int = Int.MaxValue
     override def dataCfg: DataConfig = NoData()
   }
-}
 
+  case class FakeIntWB(
+    port    : Int = -1,
+    priority: Int = Int.MaxValue,
+  ) extends PregWB {
+
+    def dataCfg: DataConfig = FakeIntData()
+
+    def numPreg(backendParams: BackendParams): Int = backendParams.getPregParams(FakeIntData()).numEntries
+  }
+}

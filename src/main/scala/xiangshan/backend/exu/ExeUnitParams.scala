@@ -45,6 +45,9 @@ case class ExeUnitParams(
   val writeIntRf: Boolean = fuConfigs.map(_.writeIntRf).reduce(_ || _)
   val writeFpRf: Boolean = fuConfigs.map(_.writeFpRf).reduce(_ || _)
   val writeVecRf: Boolean = fuConfigs.map(_.writeVecRf).reduce(_ || _)
+  val needIntWen: Boolean = fuConfigs.map(_.needIntWen).reduce(_ || _)
+  val needFpWen: Boolean = fuConfigs.map(_.needFpWen).reduce(_ || _)
+  val needVecWen: Boolean = fuConfigs.map(_.needVecWen).reduce(_ || _)
   val writeVfRf: Boolean = writeFpRf || writeVecRf
   val writeFflags: Boolean = fuConfigs.map(_.writeFflags).reduce(_ || _)
   val writeVxsat: Boolean = fuConfigs.map(_.writeVxsat).reduce(_ || _)
