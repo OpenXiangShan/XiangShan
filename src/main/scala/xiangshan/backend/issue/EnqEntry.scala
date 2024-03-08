@@ -3,7 +3,7 @@ package xiangshan.backend.issue
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utility.HasCircularQueuePtrHelper
+import utility.{HasCircularQueuePtrHelper, GatedValidRegNext}
 import utils.{MathUtils, OptionWrapper}
 import xiangshan._
 import xiangshan.backend.Bundles._
@@ -31,9 +31,6 @@ class EnqEntryIO(implicit p: Parameters, params: IssueBlockParams) extends XSBun
 class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams) extends XSModule {
   val io = IO(new EnqEntryIO)
 
-  val validReg            = RegInit(false.B)
-  val enqDelayValidReg    = RegInit(false.B)
-
   val common              = Wire(new CommonWireBundle)
   val entryUpdate         = Wire(new EntryBundle)
   val entryRegNext        = Wire(new EntryBundle)
@@ -53,9 +50,9 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
   val enqDelayShiftedWakeupLoadDependencyByIQVec: Vec[Vec[UInt]]  = Wire(Vec(params.numWakeupFromIQ, Vec(LoadPipelineWidth, UInt(3.W))))
 
   //Reg
+  val validReg = GatedValidRegNext(common.validRegNext, false.B)
   val entryReg = RegEnable(entryRegNext, validReg || common.validRegNext)
-  validReg                        := common.validRegNext
-  enqDelayValidReg                := enqDelayValidRegNext
+  val enqDelayValidReg = GatedValidRegNext(enqDelayValidRegNext, false.B)
 
   //Wire
   CommonWireConnect(common, hasWakeupIQ, validReg, currentStatus, io.commonIn, true)

@@ -69,7 +69,7 @@ class NewAgeDetector(numEntries: Int, numEnq: Int, numDeq: Int)(implicit p: Para
       else {
         elem := !nextAge(j)(i)
       }
-      age(i)(j) := elem
+      age(i)(j) := Mux(io.enq(i) | io.enq(j), elem, age(i)(j))
     }
   }
 
