@@ -107,6 +107,8 @@ object Bundles {
     val numWB           = UInt(log2Up(MaxUopSize).W) // rob need this
     val commitType      = CommitType() // Todo: remove it
 
+    val debug_fuType    = OptionWrapper(backendParams.debugEn, FuType())
+
     private def allSignals = srcType.take(3) ++ Seq(fuType, fuOpType, rfWen, fpWen, vecWen,
       isXSTrap, waitForward, blockBackward, flushPipe, canRobCompress, uopSplitType, selImm)
 
@@ -116,6 +118,7 @@ object Bundles {
         table.map{ case (pat, pats) => (pat, pats.map(bitPatToUInt)) }.toArray
       )
       allSignals zip decoder foreach { case (s, d) => s := d }
+      debug_fuType.foreach(_ := fuType)
       this
     }
 
@@ -203,6 +206,10 @@ object Bundles {
     val singleStep      = Bool()
     // schedule
     val replayInst      = Bool()
+
+    val debug_fuType    = OptionWrapper(backendParams.debugEn, FuType())
+
+    def getDebugFuType: UInt = debug_fuType.getOrElse(fuType)
 
     def isLUI: Bool = this.fuType === FuType.alu.U && (this.selImm === SelImm.IMM_U || this.selImm === SelImm.IMM_LUI32)
     def isLUI32: Bool = this.selImm === SelImm.IMM_LUI32

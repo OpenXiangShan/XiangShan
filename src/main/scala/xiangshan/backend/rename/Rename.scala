@@ -182,11 +182,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   // uop calculation
   for (i <- 0 until RenameWidth) {
-    for ((name, data) <- uops(i).elements) {
-      if (io.in(i).bits.elements.contains(name)) {
-        data := io.in(i).bits.elements(name)
-      }
-    }
+    (uops(i): Data).waiveAll :<= (io.in(i).bits: Data).waiveAll
 
     // update cf according to ssit result
     uops(i).storeSetHit := io.ssit(i).valid
