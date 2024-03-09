@@ -361,7 +361,6 @@ class DCacheWordReq(implicit p: Parameters) extends DCacheBundle
   val instrtype   = UInt(sourceTypeWidth.W)
   val isFirstIssue = Bool()
   val replayCarry = new ReplayCarry(nWays)
-  val lqIdx = new LqPtr
 
   val debug_robIdx = UInt(log2Ceil(RobSize).W)
   def dump() = {
