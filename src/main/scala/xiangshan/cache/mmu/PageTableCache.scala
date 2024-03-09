@@ -127,12 +127,62 @@ class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCo
   val csr_dup = Vec(3, Input(new TlbCsrBundle()))
 }
 
+class SplittedWaySRAM[T <: Data]
+(
+  gen: T, set: Int, way: Int = 1, singlePort: Boolean = false,
+  shouldReset: Boolean = false, extraReset: Boolean = false,
+  holdRead: Boolean = false, bypassWrite: Boolean = false,
+  waySplit: Int = 1
+) extends Module {
+  val io = IO(new Bundle() {
+    val r = Flipped(new SRAMReadBus(gen, set, way))
+    val w = Flipped(new SRAMWriteBus(gen, set, way))
+  })
+  val extra_reset = if (extraReset) Some(IO(Input(Bool()))) else None
+
+  require(way % waySplit == 0, "ways must be divisible by waySplit")
+  val innerWay = way / waySplit
+  val innerSetBits = log2Up(set)
+
+  val array = (Seq.fill(waySplit)(
+    Module(new SRAMTemplate(
+      gen, set, innerWay, singlePort = singlePort,
+      shouldReset = shouldReset, extraReset = extraReset,
+      holdRead = holdRead, bypassWrite = bypassWrite
+    ))
+  ))
+
+  for (i <- 0 until waySplit) {
+    val waymask = if (way > 1) io.w.req.bits.waymask.get(innerWay * (i + 1) - 1, innerWay * i) else 1.U
+    array(i).io.r.req.valid := io.r.req.valid
+    array(i).io.r.req.bits.apply(io.r.req.bits.setIdx.head(innerSetBits))
+    array(i).io.w.req.valid := io.w.req.valid
+    array(i).io.w.req.bits.apply(io.w.req.bits.data(i), io.w.req.bits.setIdx.head(innerSetBits), waymask)
+  }
+
+  val rdata =
+      Cat((0 until waySplit).map(i =>
+        (0 until innerWay).map(w =>
+          Cat(array(i).io.r.resp.data(w).asUInt)
+        )
+      ).reverse.flatten)
+
+  println(rdata)
+
+  io.r.resp.data := rdata.asTypeOf(Vec(way, gen))
+
+  println(io.r.resp.data)
+
+  io.r.req.ready := array.head.io.r.req.ready
+  io.w.req.ready := array.head.io.w.req.ready
+}
+
 class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPerfEvents {
   val io = IO(new PtwCacheIO)
 
   val ecc = Code.fromString(l2tlbParams.ecc)
   val l2EntryType = new PTWEntriesWithEcc(ecc, num = PtwL2SectorSize, tagLen = PtwL2TagLen, level = 1, hasPerm = false)
-  val l3EntryType = new PTWEntriesWithEcc(ecc, num = PtwL3SectorSize, tagLen = PtwL3TagLen, level = 2, hasPerm = true)
+  val l3EntryType = new PTWEntriesWithEcc(ecc, num = PtwL3SectorSize, tagLen = PtwL3TagLen, level = 2, hasPerm = true, hasReservedBitforMbist = true)
 
   // TODO: four caches make the codes dirty, think about how to deal with it
 
@@ -172,11 +222,12 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val l1asids = l1.map(_.asid)
 
   // l2: level 1 non-leaf pte
-  val l2 = Module(new SRAMTemplate(
+  val l2 = Module(new SplittedWaySRAM(
     l2EntryType,
     set = l2tlbParams.l2nSets,
     way = l2tlbParams.l2nWays,
-    singlePort = sramSinglePort
+    singlePort = sramSinglePort,
+    waySplit = 4
   ))
   val l2v = RegInit(0.U((l2tlbParams.l2nSets * l2tlbParams.l2nWays).W))
   val l2g = Reg(UInt((l2tlbParams.l2nSets * l2tlbParams.l2nWays).W))
@@ -196,11 +247,12 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   }
 
   // l3: level 2 leaf pte of 4KB pages
-  val l3 = Module(new SRAMTemplate(
+  val l3 = Module(new SplittedWaySRAM(
     l3EntryType,
     set = l2tlbParams.l3nSets,
     way = l2tlbParams.l3nWays,
-    singlePort = sramSinglePort
+    singlePort = sramSinglePort,
+    waySplit = 8
   ))
   val l3v = RegInit(0.U((l2tlbParams.l3nSets * l2tlbParams.l3nWays).W))
   val l3g = Reg(UInt((l2tlbParams.l3nSets * l2tlbParams.l3nWays).W))
