@@ -206,8 +206,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   }
 
   // if need replay deallocate entry
-  val lastCanAccept = RegNext(acceptedVec)
-  val lastAllocIndex = RegNext(enqIndexVec)
+  val lastCanAccept = GatedValidRegNext(acceptedVec)
+  val lastAllocIndex = GatedRegNext(enqIndexVec)
 
   for ((revoke, w) <- io.query.map(_.revoke).zipWithIndex) {
     val revokeValid = revoke && lastCanAccept(w)
@@ -334,7 +334,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     maskModule.io.violationMdata(i) := RegNext(storeIn(i).bits.mask)
 
     val addrMaskMatch = paddrModule.io.violationMmask(i).asUInt & maskModule.io.violationMmask(i).asUInt
-    val entryNeedCheck = RegNext(VecInit((0 until LoadQueueRAWSize).map(j => {
+    val entryNeedCheck = GatedValidRegNext(VecInit((0 until LoadQueueRAWSize).map(j => {
       allocatedReg(j) && isAfter(uop(j).robIdx, storeIn(i).bits.uop.robIdx) && datavalidReg(j) && !uop(j).robIdx.needFlush(io.redirect)
     })))
     val lqViolationSelVec = VecInit((0 until LoadQueueRAWSize).map(j => {

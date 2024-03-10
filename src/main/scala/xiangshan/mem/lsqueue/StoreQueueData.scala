@@ -58,8 +58,8 @@ class SQAddrModule(dataWidth: Int, numEntries: Int, numRead: Int, numWrite: Int,
 
   // read ports
   for (i <- 0 until numRead) {
-    io.rdata(i) := data(RegNext(io.raddr(i)))
-    io.rlineflag(i) := lineflag(RegNext(io.raddr(i)))
+    io.rdata(i) := data(GatedRegNext(io.raddr(i)))
+    io.rlineflag(i) := lineflag(GatedRegNext(io.raddr(i)))
   }
 
   // below is the write ports (with priorities)
@@ -189,7 +189,7 @@ class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
 
   // destorequeue read data
   (0 until numRead).map(i => {
-      io.rdata(i) := data(RegNext(io.raddr(i)))
+      io.rdata(i) := data(GatedRegNext(io.raddr(i)))
   })
 
   // DataModuleTemplate should not be used when there're any write conflicts

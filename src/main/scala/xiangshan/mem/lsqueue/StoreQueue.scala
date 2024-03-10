@@ -170,7 +170,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val deqMask = UIntToMask(deqPtr, StoreQueueSize)
   val enqMask = UIntToMask(enqPtr, StoreQueueSize)
 
-  val commitCount = RegNext(io.rob.scommit)
+  val commitCount = GatedRegNext(io.rob.scommit)
 
   // store can be committed by ROB
   io.rob.mmio := DontCare
@@ -485,14 +485,14 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val vpmaskNotEqual = (
       (RegEnable(paddrModule.io.forwardMmask(i).asUInt, io.forward(i).valid) ^ RegEnable(vaddrModule.io.forwardMmask(i).asUInt, io.forward(i).valid)) &
       RegNext(needForward) &
-      RegNext(addrValidVec.asUInt)
+      GatedRegNext(addrValidVec.asUInt)
     ) =/= 0.U
     val vaddrMatchFailed = vpmaskNotEqual && RegNext(io.forward(i).valid)
     when (vaddrMatchFailed) {
       XSInfo("vaddrMatchFailed: pc %x pmask %x vmask %x\n",
         RegEnable(io.forward(i).uop.pc, io.forward(i).valid),
-        RegNext(needForward & paddrModule.io.forwardMmask(i).asUInt),
-        RegNext(needForward & vaddrModule.io.forwardMmask(i).asUInt)
+        RegEnable(needForward & paddrModule.io.forwardMmask(i).asUInt, io.forward(i).valid),
+        RegEnable(needForward & vaddrModule.io.forwardMmask(i).asUInt, io.forward(i).valid)
       );
     }
     XSPerfAccumulate("vaddr_match_failed", vpmaskNotEqual)
@@ -513,10 +513,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
     // make chisel happy
     val dataInvalidMask1Reg = Wire(UInt(StoreQueueSize.W))
-    dataInvalidMask1Reg := RegNext(dataInvalidMask1)
+    dataInvalidMask1Reg := GatedRegNext(dataInvalidMask1)
     // make chisel happy
     val dataInvalidMask2Reg = Wire(UInt(StoreQueueSize.W))
-    dataInvalidMask2Reg := RegNext(dataInvalidMask2)
+    dataInvalidMask2Reg := GatedRegNext(dataInvalidMask2)
     val dataInvalidMaskReg = dataInvalidMask1Reg | dataInvalidMask2Reg
 
     // If SSID match, address not ready, mark it as addrInvalid
@@ -525,10 +525,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val addrInvalidMask2 = (~addrValidVec.asUInt & storeSetHitVec.asUInt & forwardMask2.asUInt)
     // make chisel happy
     val addrInvalidMask1Reg = Wire(UInt(StoreQueueSize.W))
-    addrInvalidMask1Reg := RegNext(addrInvalidMask1)
+    addrInvalidMask1Reg := GatedRegNext(addrInvalidMask1)
     // make chisel happy
     val addrInvalidMask2Reg = Wire(UInt(StoreQueueSize.W))
-    addrInvalidMask2Reg := RegNext(addrInvalidMask2)
+    addrInvalidMask2Reg := GatedRegNext(addrInvalidMask2)
     val addrInvalidMaskReg = addrInvalidMask1Reg | addrInvalidMask2Reg
 
     // load_s2
@@ -669,7 +669,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     io.uncache.req.bits.mask := DontCare // TODO
   }
 
-  io.uncache.req.bits.atomic := atomic(RegNext(rdataPtrExtNext(0)).value)
+  io.uncache.req.bits.atomic := atomic(GatedRegNext(rdataPtrExtNext(0)).value)
 
   when(io.uncache.req.fire){
     // mmio store should not be committed until uncache req is sent
@@ -815,8 +815,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
  /**
 * update pointers
 **/
-  val lastEnqCancel = PopCount(RegNext(VecInit(canEnqueue.zip(enqCancel).map(x => x._1 && x._2)))) // 1 cycle after redirect
-  val lastCycleCancelCount = PopCount(RegNext(needCancel)) // 1 cycle after redirect
+  val lastEnqCancel = PopCount(RegEnable(VecInit(canEnqueue.zip(enqCancel).map(x => x._1 && x._2)), io.brqRedirect.valid)) // 1 cycle after redirect
+  val lastCycleCancelCount = PopCount(RegEnable(needCancel, io.brqRedirect.valid)) // 1 cycle after redirect
   val lastCycleRedirect = RegNext(io.brqRedirect.valid) // 1 cycle after redirect
   val enqNumber = Mux(!lastCycleRedirect&&io.enq.canAccept && io.enq.lqCanAccept, PopCount(io.enq.req.map(_.valid)), 0.U) // 1 cycle after redirect
 
