@@ -489,10 +489,6 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     l1_pf_req_arb.io.in(i).bits.pf_source := array(i).source
   }
 
-  when(s0_pf_fire) {
-    array(s0_pf_index).sent_vec := array(s0_pf_index).sent_vec | s0_pf_candidate_oh
-  }
-
   assert(PopCount(s0_pf_fire_vec) <= 1.U, "s0_pf_fire_vec should be one-hot or empty")
 
   // s1: send out to dcache
@@ -547,10 +543,6 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     ))
   }
 
-  when(l2_pf_req_arb.io.out.valid) {
-    array(l2_pf_req_arb.io.chosen).sent_vec := array(l2_pf_req_arb.io.chosen).sent_vec | get_candidate_oh(l2_pf_req_arb.io.out.bits.addr)
-  }
-
   // last level cache pf
   // s0: generate prefetch req paddr per entry, arb them, sent out
   io.l3_pf_addr.valid := l3_pf_req_arb.io.out.valid
@@ -566,6 +558,10 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
 
   when(l3_pf_req_arb.io.out.valid) {
     array(l3_pf_req_arb.io.chosen).sent_vec := array(l3_pf_req_arb.io.chosen).sent_vec | get_candidate_oh(l3_pf_req_arb.io.out.bits)
+  }.elsewhen(l2_pf_req_arb.io.out.valid) {
+    array(l2_pf_req_arb.io.chosen).sent_vec := array(l2_pf_req_arb.io.chosen).sent_vec | get_candidate_oh(l2_pf_req_arb.io.out.bits.addr)
+  }.elsewhen(s0_pf_fire) {
+    array(s0_pf_index).sent_vec := array(s0_pf_index).sent_vec | s0_pf_candidate_oh
   }
 
   // reset meta to avoid muti-hit problem
