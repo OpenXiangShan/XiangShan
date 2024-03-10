@@ -748,7 +748,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
         // all va && all asid
         l2v := l2v & ~l2hhit
         l1v := l1v & ~(l1hhit & VecInit(l1vmidhit.asBools.map{a => io.csr_dup(0).priv.virt && a || !io.csr_dup(0).priv.virt}).asUInt)
-        spv := spv & ~(l2hhit & VecInit(spvmidhit.asBools.map{a => io.csr_dup(0).priv.virt && a || !io.csr_dup(0).priv.virt}).asUInt)
+        spv := spv & ~(sphhit & VecInit(spvmidhit.asBools.map{a => io.csr_dup(0).priv.virt && a || !io.csr_dup(0).priv.virt}).asUInt)
       } .otherwise {
         // all va && specific asid except global
         l2v := l2v & (l2g | ~l2hhit)
@@ -778,7 +778,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
       when(sfence_dup(0).bits.rs2) {
         l2v := l2v & ~l2hhit
         l1v := l1v & ~(l1hhit & l1vmidhit)
-        spv := spv & ~(l2hhit & spvmidhit)
+        spv := spv & ~(sphhit & spvmidhit)
       }.otherwise {
         l2v := l2v & (l2g | ~l2hhit)
         l1v := l1v & ~(~l1g & l1hhit & l1asidhit & l1vmidhit)
