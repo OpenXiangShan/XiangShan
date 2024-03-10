@@ -207,8 +207,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   }
 
   // if need replay deallocate entry
-  val lastCanAccept = RegNext(acceptedVec)
-  val lastAllocIndex = RegNext(enqIndexVec)
+  val lastCanAccept = GatedValidRegNext(acceptedVec)
+  val lastAllocIndex = GatedRegNext(enqIndexVec)
 
   for ((revoke, w) <- io.query.map(_.revoke).zipWithIndex) {
     val revokeValid = revoke && lastCanAccept(w)
@@ -333,11 +333,11 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     val bypassPaddrMask = ((0 until LoadPipelineWidth).map(j => RegEnable(bypassPAddr(j)(PAddrBits-1, DCacheVWordOffset) === io.storeIn(i).bits.paddr(PAddrBits-1, DCacheVWordOffset), io.storeIn(i).valid || needEnqueue(j))))
     val bypassMMask = (0 until LoadPipelineWidth).map(j => RegEnable((bypassMask(j) & io.storeIn(i).bits.mask).orR, io.storeIn(i).valid || needEnqueue(j)))
     val bypassMaskUInt = (0 until LoadPipelineWidth).map(j =>
-      Fill(LoadQueueRAWSize, RegNext(RegNext(io.query(j).req.fire))) & Mux(bypassPaddrMask(j) && bypassMMask(j), UIntToOH(RegNext(RegNext(enqIndexVec(j)))), 0.U(LoadQueueRAWSize.W))
+      Fill(LoadQueueRAWSize, RegNext(RegNext(io.query(j).req.fire))) & Mux(bypassPaddrMask(j) && bypassMMask(j), UIntToOH(GatedRegNext(GatedRegNext(enqIndexVec(j)))), 0.U(LoadQueueRAWSize.W))
     ).reduce(_|_)
 
-    val addrMaskMatch = RegNext(paddrModule.io.violationMmask(i).asUInt & maskModule.io.violationMmask(i).asUInt) | bypassMaskUInt
-    val entryNeedCheck = RegNext(VecInit((0 until LoadQueueRAWSize).map(j => {
+    val addrMaskMatch = GatedRegNext(paddrModule.io.violationMmask(i).asUInt & maskModule.io.violationMmask(i).asUInt) | bypassMaskUInt
+    val entryNeedCheck = GatedValidRegNext(VecInit((0 until LoadQueueRAWSize).map(j => {
       allocatedReg(j) && isAfter(uop(j).robIdx, io.storeIn(i).bits.uop.robIdx) && datavalidReg(j) && !uop(j).robIdx.needFlush(io.redirect)
     })))
     val lqViolationSelVec = VecInit((0 until LoadQueueRAWSize).map(j => {
