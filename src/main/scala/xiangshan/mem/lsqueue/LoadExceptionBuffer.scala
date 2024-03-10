@@ -50,8 +50,8 @@ class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircula
   val s2_req = (0 until LoadPipelineWidth + VecLoadPipelineWidth).map(i => {
     RegEnable(s1_req(i), s1_valid(i))})
   val s2_valid = (0 until LoadPipelineWidth + VecLoadPipelineWidth).map(i =>
-    GatedValidRegNext(s1_valid(i)) &&
-    !s2_req(i).uop.robIdx.needFlush(GatedValidRegNext(io.redirect)) &&
+    RegNext(s1_valid(i)) &&
+    !s2_req(i).uop.robIdx.needFlush(RegNext(io.redirect)) &&
     !s2_req(i).uop.robIdx.needFlush(io.redirect)
   )
   val s2_has_exception = s2_req.map(x => ExceptionNO.selectByFu(x.uop.exceptionVec, LduCfg).asUInt.orR)
@@ -104,7 +104,7 @@ class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircula
   io.exceptionAddr.vstart := req.uop.vpu.vstart
   io.exceptionAddr.vl     := req.uop.vpu.vl
   io.exceptionAddr.gpaddr := req.gpaddr
-  XSPerfAccumulate("exception", !GatedValidRegNext(req_valid) && req_valid)
+  XSPerfAccumulate("exception", !RegNext(req_valid) && req_valid)
 
   // end
 }
