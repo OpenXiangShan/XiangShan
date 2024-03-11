@@ -163,6 +163,63 @@ object ICacheMetadata {
   }
 }
 
+// Automatically partition the SRAM based on the width of the data and the desired width.
+// final SRAM width = width * way
+class SRAMTemplateWithFixedWidth[T <: Data]
+(
+  gen: T, set: Int, width: Int, way: Int = 1,
+  shouldReset: Boolean = false, holdRead: Boolean = false,
+  singlePort: Boolean = false, bypassWrite: Boolean = false
+) extends Module {
+
+  val dataBits  = gen.getWidth
+  val bankNum   = math.ceil(dataBits / width).toInt
+  val totalBits = bankNum * width
+
+  val io = IO(new Bundle {
+    val r = Flipped(new SRAMReadBus(gen, set, way))
+    val w = Flipped(new SRAMWriteBus(gen, set, way))
+  })
+
+  val wordType   = UInt(width.W)
+  val writeDatas = (0 until bankNum).map(bank =>
+    VecInit((0 until way).map(i =>
+      io.w.req.bits.data(i).asTypeOf(UInt(totalBits.W)).asTypeOf(Vec(bankNum, wordType))(bank)
+    ))
+  )
+
+  val srams = (0 until bankNum) map { bank =>
+    val sramBank = Module(new SRAMTemplate(
+      wordType,
+      set=set,
+      way=way,
+      shouldReset = shouldReset,
+      holdRead = holdRead,
+      singlePort = singlePort,
+      bypassWrite = bypassWrite,
+    ))
+    // read req
+    sramBank.io.r.req.valid       := io.r.req.valid
+    sramBank.io.r.req.bits.setIdx := io.r.req.bits.setIdx
+
+    // write req
+    sramBank.io.w.req.valid       := io.w.req.valid
+    sramBank.io.w.req.bits.setIdx := io.w.req.bits.setIdx
+    sramBank.io.w.req.bits.data   := writeDatas(bank)
+    sramBank.io.w.req.bits.waymask.map(_ := io.w.req.bits.waymask.get)
+
+    sramBank
+  }
+
+  io.r.req.ready := !io.w.req.valid
+  (0 until way).foreach{i =>
+    io.r.resp.data(i) := VecInit((0 until bankNum).map(bank =>
+                           srams(bank).io.r.resp.data(i)
+                         )).asTypeOf(UInt(totalBits.W))(dataBits-1, 0)
+  }
+
+  io.w.req.ready := srams.map(_.io.w.req.ready).reduce(_&&_)
+}
 
 class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
 {
@@ -716,9 +773,10 @@ class ICachePartWayArray[T <: Data](gen: T, pWay: Int)(implicit p: Parameters) e
   io.read.req.map(_.ready := !io.write.valid)
 
   val srams = (0 until PortNumber) map { bank =>
-    val sramBank = Module(new SRAMTemplate(
+    val sramBank = Module(new SRAMTemplateWithFixedWidth(
       gen,
       set=nSets/2,
+      width=blockBits/4,
       way=pWay,
       shouldReset = true,
       holdRead = true,
