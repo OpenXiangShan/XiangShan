@@ -69,6 +69,8 @@ case class ExeUnitParams(
   val needVPUCtrl: Boolean = fuConfigs.map(_.needVecCtrl).reduce(_ || _)
   val isHighestWBPriority: Boolean = wbPortConfigs.forall(_.priority == 0)
 
+  require(needPc && needTarget || !needPc && !needTarget, "The ExeUnit must need both PC and Target PC")
+
   def copyNum: Int = {
     val setIQ = mutable.Set[IssueBlockParams]()
     iqWakeUpSourcePairs.map(_.sink).foreach{ wakeupSink =>

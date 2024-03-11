@@ -150,10 +150,11 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
 
   private val schdParams = params.allSchdParams
 
-  private val pcReadFtqVld = Wire(chiselTypeOf(io.pcFromPcTargetMem.fromDataPathFtqVld))
-  private val pcReadFtqPtr = Wire(chiselTypeOf(io.pcFromPcTargetMem.fromDataPathFtqPtr))
-  private val pcReadFtqOffset = Wire(chiselTypeOf(io.pcFromPcTargetMem.fromDataPathFtqOffset))
-  private val pcRdata = io.pcFromPcTargetMem.toDataPathPC
+  private val pcReadValid = Wire(chiselTypeOf(io.fromPcTargetMem.fromDataPathValid))
+  private val pcReadFtqPtr = Wire(chiselTypeOf(io.fromPcTargetMem.fromDataPathFtqPtr))
+  private val pcReadFtqOffset = Wire(chiselTypeOf(io.fromPcTargetMem.fromDataPathFtqOffset))
+  private val targetPCRdata = io.fromPcTargetMem.toDataPathTargetPC
+  private val pcRdata = io.fromPcTargetMem.toDataPathPC
   private val intRfRaddr = Wire(Vec(params.numPregRd(IntData()), UInt(intSchdParams.pregIdxWidth.W)))
   private val intRfRdata = Wire(Vec(params.numPregRd(IntData()), UInt(intSchdParams.rfDataWidth.W)))
   private val intRfWen = Wire(Vec(io.fromIntWb.length, Bool()))
@@ -169,12 +170,12 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
 
   val pcReadFtqPtrFormIQ = fromIntIQ.flatten.filter(x => x.bits.exuParams.needPc)
   assert(pcReadFtqPtrFormIQ.size == pcReadFtqPtr.size, s"pcReadFtqPtrFormIQ.size ${pcReadFtqPtrFormIQ.size} not equal pcReadFtqPtr.size ${pcReadFtqPtr.size}")
-  pcReadFtqVld.zip(pcReadFtqPtrFormIQ.map(_.valid)).map(x => x._1 := x._2)
+  pcReadValid.zip(pcReadFtqPtrFormIQ.map(_.valid)).map(x => x._1 := x._2)
   pcReadFtqPtr.zip(pcReadFtqPtrFormIQ.map(_.bits.common.ftqIdx.get)).map(x => x._1 := x._2)
   pcReadFtqOffset.zip(pcReadFtqPtrFormIQ.map(_.bits.common.ftqOffset.get)).map(x => x._1 := x._2)
-  io.pcFromPcTargetMem.fromDataPathFtqVld := pcReadFtqVld
-  io.pcFromPcTargetMem.fromDataPathFtqPtr := pcReadFtqPtr
-  io.pcFromPcTargetMem.fromDataPathFtqOffset := pcReadFtqOffset
+  io.fromPcTargetMem.fromDataPathValid := pcReadValid
+  io.fromPcTargetMem.fromDataPathFtqPtr := pcReadFtqPtr
+  io.fromPcTargetMem.fromDataPathFtqOffset := pcReadFtqOffset
   private val intDebugRead: Option[(Vec[UInt], Vec[UInt])] =
     if (env.AlwaysBasicDiff || env.EnableDifftest) {
       Some(Wire(Vec(32, UInt(intSchdParams.pregIdxWidth.W))), Wire(Vec(32, UInt(XLEN.W))))
@@ -432,6 +433,10 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
         val index = pcReadFtqPtrFormIQ.map(_.bits.exuParams).indexOf(sinkData.params)
         sinkData.pc.get := pcRdata(index)
       }
+      if (sinkData.params.needTarget) {
+        val index = pcReadFtqPtrFormIQ.map(_.bits.exuParams).indexOf(sinkData.params)
+        sinkData.predictInfo.get.target := targetPCRdata(index)
+      }
     }
   }
 
@@ -566,7 +571,7 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
 
   val fromVfWb: MixedVec[RfWritePortWithConfig] = MixedVec(params.genVfWriteBackBundle)
 
-  val pcFromPcTargetMem = Flipped(new PcToDataPathIO(params))
+  val fromPcTargetMem = Flipped(new PcToDataPathIO(params))
 
   val debugIntRat     = if (params.debugEn) Some(Input(Vec(32, UInt(intSchdParams.pregIdxWidth.W)))) else None
   val debugFpRat      = if (params.debugEn) Some(Input(Vec(32, UInt(vfSchdParams.pregIdxWidth.W)))) else None
