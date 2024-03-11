@@ -82,6 +82,11 @@ abstract class LqRawDataModule[T <: Data] (gen: T, numEntries: Int, numRead: Int
     val sx_bankWriteAddrDec = s0_bankWriteAddrDec.map(w => DelayN(w, numWDelay - 1))
     val sx_bankWriteEn = s0_bankWriteEn.map(w => DelayN(w, numWDelay - 1))
     val sx_writeData = io.wdata.map(w => DelayN(w, numWDelay - 1))
+    // val (_,sx_writeData) = io.wdata.map(w => DelayNWithValid(w, io.wen(w), numWDelay - 1))
+    // val sx_writeData = Vec(numWrite, gen)
+    // for(w <- 0 until numWrite) {
+    //    sx_writeData(w) := DelayNWithValid(io.wdata(w), io.wen(w), numWDelay - 1)
+    // }
     sx_bankWriteAddrDec.zipWithIndex.map(a =>
       a._1.suggestName("sx_bankWriteAddrDec" + bank + "_" + a._2)
     )

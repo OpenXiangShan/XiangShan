@@ -145,8 +145,11 @@ class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
   //   }
   // })
   (0 until numWrite).map(i => {
-    val s0_wenVec = (0 until StoreQueueNWriteBanks).map(bank => io.mask.wen(i) && get_bank(io.mask.waddr(i)) === bank.U)
-    val s1_wenVec = GatedRegNext(s0_wenVec)
+     val s0_wenVec = Reg(Vec(StoreQueueNWriteBanks, Bool())) 
+    for(bank <- 0 until StoreQueueNWriteBanks) {
+      s0_wenVec(bank) := io.mask.wen(i) && get_bank(io.mask.waddr(i)) === bank.U
+    }
+   val s1_wenVec = GatedValidRegNext(s0_wenVec)
     (0 until StoreQueueNWriteBanks).map(bank => {
       val s0_wen = s0_wenVec(bank)
       val s1_wen = s1_wenVec(bank)
@@ -171,8 +174,11 @@ class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
   //   }
   // })
   (0 until numWrite).map(i => {
-    val s0_wenVec = (0 until StoreQueueNWriteBanks).map(bank => io.mask.wen(i) && get_bank(io.mask.waddr(i)) === bank.U)
-    val s1_wenVec = GatedRegNext(s0_wenVec)
+    val s0_wenVec = Wire(Vec(StoreQueueNWriteBanks, Bool())) 
+    for(bank <- 0 until StoreQueueNWriteBanks) {
+      s0_wenVec(bank) := io.mask.wen(i) && get_bank(io.mask.waddr(i)) === bank.U
+    }
+    val s1_wenVec = GatedValidRegNext(s0_wenVec)
 
     (0 until StoreQueueNWriteBanks).map(bank => {
       // val s0_wen = io.mask.wen(i) && get_bank(io.mask.waddr(i)) === bank.U
@@ -240,6 +246,8 @@ class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
     val needCheck0Vec = GatedRegNext(io.needForward(i)(0))
     val needCheck1Vec = GatedRegNext(io.needForward(i)(1))
     for (j <- 0 until numEntries) {
+      val needCheck0 = io.needForward(i)(0)(j)
+      val needCheck1 = io.needForward(i)(1)(j)
       val needCheck0Reg = needCheck0Vec(j)
       val needCheck1Reg = needCheck1Vec(j)
       (0 until XLEN / 8).foreach(k => {
