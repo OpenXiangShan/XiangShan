@@ -173,7 +173,7 @@ class SRAMTemplateWithFixedWidth[T <: Data]
 ) extends Module {
 
   val dataBits  = gen.getWidth
-  val bankNum   = math.ceil(dataBits / width).toInt
+  val bankNum   = math.ceil(dataBits.toDouble / width.toDouble).toInt
   val totalBits = bankNum * width
 
   val io = IO(new Bundle {
@@ -211,14 +211,14 @@ class SRAMTemplateWithFixedWidth[T <: Data]
     sramBank
   }
 
-  io.r.req.ready := !io.w.req.valid
   (0 until way).foreach{i =>
     io.r.resp.data(i) := VecInit((0 until bankNum).map(bank =>
                            srams(bank).io.r.resp.data(i)
-                         )).asTypeOf(UInt(totalBits.W))(dataBits-1, 0)
+                         )).asTypeOf(UInt(totalBits.W))(dataBits-1, 0).asTypeOf(gen.cloneType)
   }
 
-  io.w.req.ready := srams.map(_.io.w.req.ready).reduce(_&&_)
+  io.r.req.ready := srams.head.io.r.req.ready
+  io.w.req.ready := srams.head.io.w.req.ready
 }
 
 class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
