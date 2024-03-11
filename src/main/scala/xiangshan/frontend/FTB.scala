@@ -26,6 +26,7 @@ import utility._
 import scala.math.min
 import scala.{Tuple2 => &}
 import os.copy
+import xiangshan.frontend.icache._
 
 
 trait FTBParams extends HasXSParameter with HasBPUConst {
@@ -309,7 +310,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     })
 
     // Extract holdRead logic to fix bug that update read override predict read result
-    val ftb = Module(new SRAMTemplate(new FTBEntryWithTag, set = numSets, way = numWays, shouldReset = true, holdRead = false, singlePort = true))
+    val ftb = Module(new SRAMTemplateWithFixedWidth(new FTBEntryWithTag, set = numSets, width = io.update_write_data.bits.asUInt.getWidth / 4, way = numWays, shouldReset = true, holdRead = false, singlePort = true))
     val ftb_r_entries = ftb.io.r.resp.data.map(_.entry)
 
     val pred_rdata   = HoldUnless(ftb.io.r.resp.data, RegNext(io.req_pc.valid && !io.update_access))
