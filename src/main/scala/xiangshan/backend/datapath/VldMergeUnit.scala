@@ -30,7 +30,7 @@ class VldMergeUnit(val params: ExeUnitParams)(implicit p: Parameters) extends XS
   mgu.io.in.info.valid := wbReg.valid
   mgu.io.in.info.ta := wbReg.bits.vls.get.isMasked || wbReg.bits.vls.get.vpu.vta
   mgu.io.in.info.ma := wbReg.bits.vls.get.vpu.vma
-  mgu.io.in.info.vl := Mux(wbReg.bits.vls.get.isMasked, GenUSMaskRegVL(wbReg.bits.vls.get.vpu.vl), wbReg.bits.vls.get.vpu.vl)
+  mgu.io.in.info.vl := wbReg.bits.vls.get.vpu.vl
   mgu.io.in.info.vstart := wbReg.bits.vls.get.vpu.vstart
   mgu.io.in.info.eew := wbReg.bits.vls.get.vpu.veew
   mgu.io.in.info.vsew := wbReg.bits.vls.get.vpu.vsew
