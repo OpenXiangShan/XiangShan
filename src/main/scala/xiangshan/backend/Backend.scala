@@ -303,13 +303,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   }
 
   pcTargetMem.io.fromFrontendFtq := io.frontend.fromFtq
-  pcTargetMem.io.fromDataPathVld := bypassNetwork.io.toExus.int.flatten.filter(_.bits.params.needTarget).map(_.valid).toSeq
-  pcTargetMem.io.fromDataPathFtq := bypassNetwork.io.toExus.int.flatten.filter(_.bits.params.needTarget).map(_.bits.ftqIdx.get).toSeq
-  intExuBlock.io.in.flatten.filter(_.bits.params.needTarget).map(_.bits.predictInfo.get.target).zipWithIndex.foreach {
-    case (sink, i) =>
-      sink := pcTargetMem.io.toExus(i)
-  }
-  pcTargetMem.io.pcToDataPath <> dataPath.io.pcFromPcTargetMem
+  pcTargetMem.io.toDataPath <> dataPath.io.fromPcTargetMem
   private val csrio = intExuBlock.io.csrio.get
   csrio.hartId := io.fromTop.hartId
   csrio.fpu.fflags := ctrlBlock.io.robio.csr.fflags
