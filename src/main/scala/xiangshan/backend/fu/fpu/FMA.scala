@@ -215,7 +215,7 @@ class FMA(implicit p: Parameters) extends FPUSubModule {
     add_pipe.mulToAdd.uop := io.in.bits.uop
   }
 
-  add_pipe.rm := Mux(midResult.in.valid && !isFMAReg, midResult.in.bits.rm, Mux(isFMAReg, mul_pipe.rm, rm))
+  add_pipe.rm := Mux(midResult.in.valid && !isFMAReg, midResult.in.bits.rm, Mux(isFMAReg, mul_pipe.toAdd.rm, rm))
   // For FADD, it accepts instructions from io.in and FMUL.
   // When FMUL gives an FMA, FADD accepts this instead of io.in.
   // Since FADD gets FMUL data from add_pipe.mulToAdd, only uop needs Mux.
