@@ -118,7 +118,6 @@ class TLBFA(
     // Sector tlb may trigger multi-hit, see def "wbhit"
     XSPerfAccumulate(s"port${i}_multi_hit", !(!resp.valid || (PopCount(hitVecReg) === 0.U || PopCount(hitVecReg) === 1.U)))
 
-    // resp.valid := RegNext(req.valid)
     resp.valid := GatedValidRegNext(req.valid)
     resp.bits.hit := Cat(hitVecReg).orR
     if (nWays == 1) {
@@ -150,11 +149,8 @@ class TLBFA(
   val w_hit_vec = VecInit(entries.zip(v).map{case (e, vi) => e.wbhit(io.w.bits.data, io.csr.satp.asid) && vi })
   XSError(io.w.valid && Cat(w_hit_vec).orR, s"${parentName} refill, duplicate with existing entries")
 
-  // val refill_vpn_reg = RegNext(io.w.bits.data.entry.tag)
   val refill_vpn_reg = RegEnable(io.w.bits.data.entry.tag, io.w.valid)
-  // val refill_wayIdx_reg = RegNext(io.w.bits.wayIdx)
   val refill_wayIdx_reg = RegEnable(io.w.bits.wayIdx, io.w.valid)
-  // when (RegNext(io.w.valid)) {
   when (GatedValidRegNext(io.w.valid)) {
     io.access.map { access =>
       access.sets := get_set_idx(refill_vpn_reg, nSets)
@@ -234,12 +230,10 @@ class TLBFakeFA(
 
     val pte = helper.pte.asTypeOf(new PteBundle)
     val ppn = pte.ppn
-    // val vpn_reg = RegNext(req.bits.vpn)
     val vpn_reg = RegEnable(req.bits.vpn, req.valid)
     val pf = helper.pf
     val level = helper.level
 
-    // resp.valid := RegNext(req.valid)
     resp.valid := GatedValidRegNext(req.valid)
     resp.bits.hit := true.B
     for (d <- 0 until nDups) {
