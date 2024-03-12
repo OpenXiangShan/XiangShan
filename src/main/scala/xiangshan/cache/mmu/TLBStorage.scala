@@ -126,7 +126,6 @@ class TLBFA(
     // Sector tlb may trigger multi-hit, see def "wbhit"
     XSPerfAccumulate(s"port${i}_multi_hit", !(!resp.valid || (PopCount(hitVecReg) === 0.U || PopCount(hitVecReg) === 1.U)))
 
-    // resp.valid := RegNext(req.valid)
     resp.valid := GatedValidRegNext(req.valid)
     resp.bits.hit := Cat(hitVecReg).orR
     if (nWays == 1) {
@@ -281,12 +280,10 @@ class TLBFakeFA(
 
     val pte = helper.pte.asTypeOf(new PteBundle)
     val ppn = pte.ppn
-    // val vpn_reg = RegNext(req.bits.vpn)
     val vpn_reg = RegEnable(req.bits.vpn, req.valid)
     val pf = helper.pf
     val level = helper.level
 
-    // resp.valid := RegNext(req.valid)
     resp.valid := GatedValidRegNext(req.valid)
     resp.bits.hit := true.B
     for (d <- 0 until nDups) {
