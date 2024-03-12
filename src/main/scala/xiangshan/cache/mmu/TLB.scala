@@ -118,7 +118,6 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     // TODO: RegNext enable:req.valid
     // resp(i).bits.debug.isFirstIssue := RegNext(req(i).bits.debug.isFirstIssue)
     resp(i).bits.debug.isFirstIssue := RegEnable(req(i).bits.debug.isFirstIssue, req(i).valid)
-    // resp(i).bits.debug.robIdx := RegNext(req(i).bits.debug.robIdx)
     resp(i).bits.debug.robIdx := RegEnable(req(i).bits.debug.robIdx, req(i).valid)
   }
   
@@ -184,7 +183,6 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val vaddr = SignExt(req_out(i).vaddr, PAddrBits)
     resp(i).bits.miss := miss
     resp(i).bits.ptwBack := ptw.resp.fire
-    // resp(i).bits.memidx := RegNext(req_in(i).bits.memidx)
     resp(i).bits.memidx := RegEnable(req_in(i).bits.memidx, req_in(i).valid)
 
     val ppn = WireInit(VecInit(Seq.fill(nRespDups)(0.U(ppnLen.W))))
@@ -296,7 +294,6 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val ptw_already_back = GatedValidRegNext(ptw.resp.fire) && req_s2xlate === ptw_resp_bits_reg.s2xlate && ptw_resp_bits_reg.hit(get_pn(req_out(idx).vaddr), io.csr.satp.asid, io.csr.vsatp.asid, io.csr.hgatp.asid, allType = true)
     io.ptw.req(idx).valid := req_out_v(idx) && missVec(idx) && !(ptw_just_back || ptw_already_back) // TODO: remove the regnext, timing
     io.tlbreplay(idx) := req_out_v(idx) && missVec(idx) && (ptw_just_back || ptw_already_back)
-    // when (io.requestor(idx).req_kill && RegNext(io.requestor(idx).req.fire)) {
     when (io.requestor(idx).req_kill && GatedValidRegNext(io.requestor(idx).req.fire)) {
       io.ptw.req(idx).valid := false.B
       io.tlbreplay(idx) := true.B
@@ -332,7 +329,6 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
     val new_coming_valid = WireInit(false.B)
     new_coming_valid := req_in(idx).fire && !req_in(idx).bits.kill && !flush_pipe(idx)
-    // val new_coming = RegNext(req_in(idx).fire && !req_in(idx).bits.kill && !flush_pipe(idx), false.B)
     val new_coming = GatedValidRegNext(new_coming_valid)
     val miss_wire = new_coming && missVec(idx)
     val miss_v = ValidHoldBypass(miss_wire, resp(idx).fire, flush_pipe(idx))
@@ -358,8 +354,6 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
       // NOTE: the unfiltered req would be handled by Repeater
     }
-    // assert(RegNext(!resp(idx).valid || resp(idx).ready, true.B), "when tlb resp valid, ready should be true, must")
-    // assert(RegNext(req_out_v(idx) || !(miss_v || miss_req_v), true.B), "when not req_out_v, should not set miss_v/miss_req_v")
     assert(GatedValidRegNext(!resp(idx).valid || resp(idx).ready, true.B), "when tlb resp valid, ready should be true, must")
     assert(GatedValidRegNext(req_out_v(idx) || !(miss_v || miss_req_v), true.B), "when not req_out_v, should not set miss_v/miss_req_v")
 
@@ -414,7 +408,6 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   }
 
   // perf event
-  // val result_ok = req_in.map(a => RegNext(a.fire))
   val result_ok = req_in.map(a => GatedValidRegNext(a.fire))
   val perfEvents =
     Seq(
@@ -429,10 +422,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       XSPerfAccumulate(s"access${i}",result_ok(i) && portTranslateEnable(i))
       XSPerfAccumulate(s"miss${i}", result_ok(i) && missVec(i))
     } else {
-      // XSPerfAccumulate("first_access" + Integer.toString(i, 10), result_ok(i) && portTranslateEnable(i) && RegNext(req(i).bits.debug.isFirstIssue))
       XSPerfAccumulate("first_access" + Integer.toString(i, 10), result_ok(i) && portTranslateEnable(i) && RegEnable(req(i).bits.debug.isFirstIssue, req(i).valid))
       XSPerfAccumulate("access" + Integer.toString(i, 10), result_ok(i) && portTranslateEnable(i))
-      // XSPerfAccumulate("first_miss" + Integer.toString(i, 10), result_ok(i) && portTranslateEnable(i) && missVec(i) && RegNext(req(i).bits.debug.isFirstIssue))
       XSPerfAccumulate("first_miss" + Integer.toString(i, 10), result_ok(i) && portTranslateEnable(i) && missVec(i) && RegEnable(req(i).bits.debug.isFirstIssue, req(i).valid))
       XSPerfAccumulate("miss" + Integer.toString(i, 10), result_ok(i) && portTranslateEnable(i) && missVec(i))
     }
