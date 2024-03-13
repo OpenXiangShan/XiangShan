@@ -145,9 +145,9 @@ class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
   //   }
   // })
   (0 until numWrite).map(i => {
-     val s0_wenVec = Reg(Vec(StoreQueueNWriteBanks, Bool())) 
+     val s0_wenVec = Wire(Vec(StoreQueueNWriteBanks, Bool())) 
     for(bank <- 0 until StoreQueueNWriteBanks) {
-      s0_wenVec(bank) := io.mask.wen(i) && get_bank(io.mask.waddr(i)) === bank.U
+      s0_wenVec(bank) := io.data.wen(i) && get_bank(io.data.waddr(i)) === bank.U
     }
    val s1_wenVec = GatedValidRegNext(s0_wenVec)
     (0 until StoreQueueNWriteBanks).map(bank => {
