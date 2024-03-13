@@ -26,7 +26,7 @@ import freechips.rocketchip.tilelink._
 import coupledL2.{L2ParamKey, CoupledL2}
 import system.HasSoCParameter
 import top.BusPerfMonitor
-import utility.{DelayN, ResetGen, TLClientsMerger, TLEdgeBuffer, TLLogger}
+import utility.{DeclareHartId, DelayN, ResetGen, TLClientsMerger, TLEdgeBuffer, TLLogger}
 
 class XSTile()(implicit p: Parameters) extends LazyModule
   with HasXSParameter
@@ -88,7 +88,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   l2top.d_mmio_port := core.memBlock.uncache.clientNode
 
   // =========== IO Connection ============
-  class XSTileImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
+  class XSTileImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) with DeclareHartId {
     val io = IO(new Bundle {
       val hartId = Input(UInt(64.W))
       val reset_vector = Input(UInt(PAddrBits.W))
@@ -99,6 +99,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       }
     })
 
+    declaredHartId := io.hartId
     dontTouch(io.hartId)
 
     val core_soft_rst = core_reset_sink.in.head._1 // unused

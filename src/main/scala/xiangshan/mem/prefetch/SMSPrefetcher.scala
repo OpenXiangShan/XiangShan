@@ -1214,7 +1214,7 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   trace.pc := 0.U
   trace.paddr := io.l2_req.bits.addr
   trace.source := pf_filter.io.debug_source_type
-  val table = ChiselDB.createTable("L1SMSMissTrace_hart"+ p(XSCoreParamsKey).HartId.toString, new L1MissTrace)
+  val table = ChiselDB.createTable("L1SMSMissTrace_hart", new L1MissTrace, tablePerHart = true)
   table.log(trace, io.l2_req.fire, "SMSPrefetcher", clock, reset)
 
   XSPerfAccumulate("sms_pf_gen_conflict",

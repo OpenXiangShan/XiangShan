@@ -131,7 +131,7 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
   val s1_can_send_pf = WireInit(false.B)
   s0_can_accept := !(s1_valid && s1_pc_hash === s0_pc_hash)
 
-  val always_update = WireInit(Constantin.createRecord("always_update" + p(XSCoreParamsKey).HartId.toString, initValue = ALWAYS_UPDATE_PRE_VADDR.U)) === 1.U
+  val always_update = WireInit(Constantin.createRecord("always_update", initValue = ALWAYS_UPDATE_PRE_VADDR.U)) === 1.U
 
   when(s1_alloc) {
     array(s1_index).alloc(
@@ -144,9 +144,9 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     s1_new_stride := res._2
   }
 
-  val l1_stride_ratio_const = WireInit(Constantin.createRecord("l1_stride_ratio" + p(XSCoreParamsKey).HartId.toString, initValue = 2.U))
+  val l1_stride_ratio_const = WireInit(Constantin.createRecord("l1_stride_ratio", initValue = 2.U))
   val l1_stride_ratio = l1_stride_ratio_const(3, 0)
-  val l2_stride_ratio_const = WireInit(Constantin.createRecord("l2_stride_ratio" + p(XSCoreParamsKey).HartId.toString, initValue = 5.U))
+  val l2_stride_ratio_const = WireInit(Constantin.createRecord("l2_stride_ratio", initValue = 5.U))
   val l2_stride_ratio = l2_stride_ratio_const(3, 0)
   // s2: calculate L1 & L2 pf addr
   val s2_valid = RegNext(s1_valid && s1_can_send_pf)

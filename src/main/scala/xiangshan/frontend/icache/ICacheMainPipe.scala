@@ -146,7 +146,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   // Statistics on the frequency distribution of FTQ fire interval
   val cntFtqFireInterval = RegInit(0.U(32.W))
   cntFtqFireInterval := Mux(fromFtq.fire, 1.U, cntFtqFireInterval + 1.U)
-  XSPerfHistogram("ftq2icache_fire_" + p(XSCoreParamsKey).HartId.toString, 
+  XSPerfHistogram("ftq2icache_fire", 
                   cntFtqFireInterval, fromFtq.fire,
                   1, 300, 1, right_strict = true)
 
@@ -355,8 +355,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   s1_fire  := s1_valid && tlbRespAllValid && s2_ready && !s1_wait
 
   // record cacheline log
-  val isWriteICacheTable = WireInit(Constantin.createRecord("isWriteICacheTable" + p(XSCoreParamsKey).HartId.toString))
-  val ICacheTable = ChiselDB.createTable("ICacheTable" + p(XSCoreParamsKey).HartId.toString, new ICacheDB)
+  val isWriteICacheTable = WireInit(Constantin.createRecord("isWriteICacheTable"))
+  val ICacheTable = ChiselDB.createTable("ICacheTable", new ICacheDB, tablePerHart = true)
 
   val ICacheDumpData_req0 = Wire(new ICacheDB)
   ICacheDumpData_req0.blk_paddr := getBlkAddr(s1_req_paddr(0))

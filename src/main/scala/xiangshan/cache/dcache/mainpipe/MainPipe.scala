@@ -187,7 +187,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   // convert store req to main pipe req, and select a req from store and probe
   val storeWaitCycles = RegInit(0.U(4.W))
   val StoreWaitThreshold = Wire(UInt(4.W))
-  StoreWaitThreshold := Constantin.createRecord("StoreWaitThreshold_"+p(XSCoreParamsKey).HartId.toString(), initValue = 0.U)
+  StoreWaitThreshold := Constantin.createRecord("StoreWaitThreshold", initValue = 0.U)
   val storeWaitTooLong = storeWaitCycles >= StoreWaitThreshold
   val loadsAreComing = io.data_read.asUInt.orR
   val storeCanAccept = storeWaitTooLong || !loadsAreComing || io.force_write

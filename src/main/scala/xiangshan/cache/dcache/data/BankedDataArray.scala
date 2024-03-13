@@ -651,9 +651,9 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     0.U
   )
 
-  val tableName =  "BankConflict" + p(XSCoreParamsKey).HartId.toString
-  val siteName = "BankedDataArray" + p(XSCoreParamsKey).HartId.toString
-  val bankConflictTable = ChiselDB.createTable(tableName, new BankConflictDB)
+  val tableName =  "BankConflict"
+  val siteName = "BankedDataArray"
+  val bankConflictTable = ChiselDB.createTable(tableName, new BankConflictDB, tablePerHart = true)
   val bankConflictData = Wire(new BankConflictDB)
   for (i <- 0 until LoadPipelineWidth) {
     bankConflictData.set_index(i) := set_addrs(i)
@@ -675,13 +675,14 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     bankConflictData.fake_rr_bank_conflict := false.B
   }
 
-  val isWriteBankConflictTable = WireInit(Constantin.createRecord("isWriteBankConflictTable" + p(XSCoreParamsKey).HartId.toString))
+  val isWriteBankConflictTable = WireInit(Constantin.createRecord("isWriteBankConflictTable"))
   bankConflictTable.log(
     data = bankConflictData,
     en = isWriteBankConflictTable.orR && rr_bank_conflict(0)(1),
     site = siteName,
     clock = clock,
-    reset = reset
+    reset = reset,
+    siteNeedId = true
   )
 
   (1 until LoadPipelineWidth).foreach(y => (0 until y).foreach(x =>
@@ -1030,9 +1031,9 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     0.U
   )
 
-  val tableName = "BankConflict" + p(XSCoreParamsKey).HartId.toString
-  val siteName = "BankedDataArray" + p(XSCoreParamsKey).HartId.toString
-  val bankConflictTable = ChiselDB.createTable(tableName, new BankConflictDB)
+  val tableName = "BankConflict"
+  val siteName = "BankedDataArray"
+  val bankConflictTable = ChiselDB.createTable(tableName, new BankConflictDB, tablePerHart = true)
   val bankConflictData = Wire(new BankConflictDB)
   for (i <- 0 until LoadPipelineWidth) {
     bankConflictData.set_index(i) := set_addrs(i)
@@ -1054,13 +1055,14 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     bankConflictData.fake_rr_bank_conflict := false.B
   }
 
-  val isWriteBankConflictTable = WireInit(Constantin.createRecord("isWriteBankConflictTable" + p(XSCoreParamsKey).HartId.toString))
+  val isWriteBankConflictTable = WireInit(Constantin.createRecord("isWriteBankConflictTable"))
   bankConflictTable.log(
     data = bankConflictData,
     en = isWriteBankConflictTable.orR && rr_bank_conflict(0)(1),
     site = siteName,
     clock = clock,
-    reset = reset
+    reset = reset,
+    siteNeedId = true
   )
 
   (1 until LoadPipelineWidth).foreach(y => (0 until y).foreach(x =>

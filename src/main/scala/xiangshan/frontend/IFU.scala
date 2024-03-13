@@ -936,10 +936,10 @@ class NewIFU(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("except_0",   f3_perf_info.except_0 && io.toIbuffer.fire )
   XSPerfHistogram("ifu2ibuffer_validCnt", PopCount(io.toIbuffer.bits.valid & io.toIbuffer.bits.enqEnable), io.toIbuffer.fire, 0, PredictWidth + 1, 1)
 
-  val isWriteFetchToIBufferTable = WireInit(Constantin.createRecord("isWriteFetchToIBufferTable" + p(XSCoreParamsKey).HartId.toString))
-  val isWriteIfuWbToFtqTable = WireInit(Constantin.createRecord("isWriteIfuWbToFtqTable" + p(XSCoreParamsKey).HartId.toString))
-  val fetchToIBufferTable = ChiselDB.createTable("FetchToIBuffer" + p(XSCoreParamsKey).HartId.toString, new FetchToIBufferDB)
-  val ifuWbToFtqTable = ChiselDB.createTable("IfuWbToFtq" + p(XSCoreParamsKey).HartId.toString, new IfuWbToFtqDB)
+  val isWriteFetchToIBufferTable = WireInit(Constantin.createRecord("isWriteFetchToIBufferTable"))
+  val isWriteIfuWbToFtqTable = WireInit(Constantin.createRecord("isWriteIfuWbToFtqTable"))
+  val fetchToIBufferTable = ChiselDB.createTable("FetchToIBuffer", new FetchToIBufferDB, tablePerHart = true)
+  val ifuWbToFtqTable = ChiselDB.createTable("IfuWbToFtq", new IfuWbToFtqDB, tablePerHart = true)
 
   val fetchIBufferDumpData = Wire(new FetchToIBufferDB)
   fetchIBufferDumpData.start_addr := f3_ftq_req.startAddr
@@ -960,16 +960,18 @@ class NewIFU(implicit p: Parameters) extends XSModule
   fetchToIBufferTable.log(
     data = fetchIBufferDumpData,
     en = isWriteFetchToIBufferTable.orR && io.toIbuffer.fire,
-    site = "IFU" + p(XSCoreParamsKey).HartId.toString,
+    site = "IFU",
     clock = clock,
-    reset = reset
+    reset = reset,
+    siteNeedId = true
   )
   ifuWbToFtqTable.log(
     data = ifuWbToFtqDumpData,
     en = isWriteIfuWbToFtqTable.orR && checkFlushWb.valid,
-    site = "IFU" + p(XSCoreParamsKey).HartId.toString,
+    site = "IFU",
     clock = clock,
-    reset = reset
+    reset = reset,
+    siteNeedId = true
   )
 
 }

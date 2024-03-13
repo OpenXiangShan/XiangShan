@@ -817,9 +817,9 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // If redirect at T0, sqCancelCnt is at T2
   io.sqCancelCnt := redirectCancelCount
   val ForceWriteUpper = Wire(UInt(log2Up(StoreQueueSize + 1).W))
-  ForceWriteUpper := Constantin.createRecord("ForceWriteUpper_"+p(XSCoreParamsKey).HartId.toString(), initValue = 60.U)
+  ForceWriteUpper := Constantin.createRecord("ForceWriteUpper", initValue = 60.U)
   val ForceWriteLower = Wire(UInt(log2Up(StoreQueueSize + 1).W))
-  ForceWriteLower := Constantin.createRecord("ForceWriteLower_"+p(XSCoreParamsKey).HartId.toString(), initValue = 55.U)
+  ForceWriteLower := Constantin.createRecord("ForceWriteLower", initValue = 55.U)
 
   val valid_cnt = PopCount(allocated)
   io.force_write := RegNext(Mux(valid_cnt >= ForceWriteUpper, true.B, valid_cnt >= ForceWriteLower && io.force_write), init = false.B)

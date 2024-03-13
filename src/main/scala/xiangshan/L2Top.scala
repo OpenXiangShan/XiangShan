@@ -77,9 +77,9 @@ class L2Top()(implicit p: Parameters) extends LazyModule
   val xbar_l2_buffer = TLBuffer()
 
   val enbale_tllog = !debugOpts.FPGAPlatform && debugOpts.AlwaysBasicDB
-  val l1d_logger = TLLogger(s"L2_L1D_${coreParams.HartId}", enbale_tllog)
-  val l1i_logger = TLLogger(s"L2_L1I_${coreParams.HartId}", enbale_tllog)
-  val ptw_logger = TLLogger(s"L2_PTW_${coreParams.HartId}", enbale_tllog)
+  val l1d_logger = TLLogger(s"L2_L1D", enbale_tllog, needHartId = true)
+  val l1i_logger = TLLogger(s"L2_L1I", enbale_tllog, needHartId = true)
+  val ptw_logger = TLLogger(s"L2_PTW", enbale_tllog, needHartId = true)
   val ptw_to_l2_buffer = LazyModule(new TLBuffer)
   val i_mmio_buffer = LazyModule(new TLBuffer)
 
@@ -144,6 +144,7 @@ class L2Top()(implicit p: Parameters) extends LazyModule
     if (l2cache.isDefined) {
       l2_hint := l2cache.get.module.io.l2_hint
       // debugTopDown <> l2cache.get.module.io.debugTopDown
+      l2cache.get.module.io.hartid := hartId.fromTile
       l2cache.get.module.io.debugTopDown.robHeadPaddr := DontCare
       l2cache.get.module.io.debugTopDown.robHeadPaddr.head := debugTopDown.robHeadPaddr
       debugTopDown.l2MissMatch := l2cache.get.module.io.debugTopDown.l2MissMatch.head

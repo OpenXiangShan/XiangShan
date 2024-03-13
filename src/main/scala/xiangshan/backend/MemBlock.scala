@@ -300,7 +300,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val l1PrefetcherOpt: Option[BasePrefecher] = coreParams.prefetcher.map {
     case _ =>
       val l1Prefetcher = Module(new L1Prefetcher())
-      l1Prefetcher.io.enable := WireInit(Constantin.createRecord("enableL1StreamPrefetcher" + p(XSCoreParamsKey).HartId.toString, initValue = 1.U)) === 1.U
+      l1Prefetcher.io.enable := WireInit(Constantin.createRecord("enableL1StreamPrefetcher", initValue = 1.U)) === 1.U
       l1Prefetcher.pf_ctrl <> dcache.io.pf_ctrl
       l1Prefetcher.l2PfqBusy := io.l2PfqBusy
 
@@ -413,7 +413,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
       val l2_trace = Wire(new LoadPfDbBundle)
       l2_trace.paddr := outer.l2_pf_sender_opt.get.out.head._1.addr
-      val table = ChiselDB.createTable("L2PrefetchTrace"+ p(XSCoreParamsKey).HartId.toString, new LoadPfDbBundle, basicDB = false)
+      val table = ChiselDB.createTable("L2PrefetchTrace", new LoadPfDbBundle, basicDB = false, tablePerHart = true)
       table.log(l2_trace, l1_pf_to_l2.valid, "StreamPrefetchTrace", clock, reset)
       table.log(l2_trace, !l1_pf_to_l2.valid && sms_pf_to_l2.valid, "L2PrefetchTrace", clock, reset)
 
@@ -424,7 +424,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
       val l3_trace = Wire(new LoadPfDbBundle)
       l3_trace.paddr := outer.l3_pf_sender_opt.get.out.head._1.addr
-      val l3_table = ChiselDB.createTable("L3PrefetchTrace"+ p(XSCoreParamsKey).HartId.toString, new LoadPfDbBundle, basicDB = false)
+      val l3_table = ChiselDB.createTable("L3PrefetchTrace", new LoadPfDbBundle, basicDB = false, tablePerHart = true)
       l3_table.log(l3_trace, l1_pf_to_l3.valid, "StreamPrefetchTrace", clock, reset)
 
       XSPerfAccumulate("prefetch_fire_l2", outer.l2_pf_sender_opt.get.out.head._1.addr_valid)
@@ -553,7 +553,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.mem_to_ooo.lsTopdownInfo := loadUnits.map(_.io.lsTopdownInfo)
 
   // LoadUnit
-  val correctMissTrain = WireInit(Constantin.createRecord("CorrectMissTrain" + p(XSCoreParamsKey).HartId.toString, initValue = 0.U)) === 1.U
+  val correctMissTrain = WireInit(Constantin.createRecord("CorrectMissTrain", initValue = 0.U)) === 1.U
 
   for (i <- 0 until exuParameters.LduCnt) {
     loadUnits(i).io.redirect <> redirect

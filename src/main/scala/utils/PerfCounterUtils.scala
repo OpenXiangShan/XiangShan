@@ -215,8 +215,8 @@ object XSPerfRolling extends HasRegularPerfName {
     judgeName(perfName)
     val env = p(DebugOptionsKey)
     if (env.EnableRollingDB && !env.FPGAPlatform) {
-      val tableName = perfName + "_rolling_" + p(XSCoreParamsKey).HartId.toString
-      val rollingTable = ChiselDB.createTable(tableName, new RollingEntry(), basicDB=true)
+      val tableName = perfName + "_rolling"
+      val rollingTable = ChiselDB.createTable(tableName, new RollingEntry(), basicDB=true, tablePerHart = true)
 
       val xAxisCnt = RegInit(0.U(64.W))
       val yAxisCnt = RegInit(0.U(64.W))
@@ -248,8 +248,8 @@ object XSPerfRolling extends HasRegularPerfName {
     judgeName(perfName)
     val env = p(DebugOptionsKey)
     if (env.EnableRollingDB && !env.FPGAPlatform) {
-      val tableName = perfName + "_rolling_" + p(XSCoreParamsKey).HartId.toString
-      val rollingTable = ChiselDB.createTable(tableName, new RollingEntry(), basicDB=true)
+      val tableName = perfName + "_rolling"
+      val rollingTable = ChiselDB.createTable(tableName, new RollingEntry(), basicDB=true, tablePerHart = true)
 
       val xAxisCnt = RegInit(0.U(64.W))
       val yAxisCnt = RegInit(0.U(64.W))
@@ -283,8 +283,8 @@ object XSPerfRolling extends HasRegularPerfName {
     judgeName(perfName)
     val env = p(DebugOptionsKey)
     if (env.EnableRollingDB && !env.FPGAPlatform) {
-      val tableName = perfName + "_rolling_" + p(XSCoreParamsKey).HartId.toString
-      val rollingTable = ChiselDB.createTable(tableName, new RollingEntry(), basicDB=true)
+      val tableName = perfName + "_rolling"
+      val rollingTable = ChiselDB.createTable(tableName, new RollingEntry(), basicDB=true, tablePerHart = true)
 
       val xAxisCnt = RegInit(0.U(64.W))
       val yAxisCnt = RegInit(0.U(64.W))
