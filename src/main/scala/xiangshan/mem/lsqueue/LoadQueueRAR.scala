@@ -74,15 +74,6 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   ))
   paddrModule.io := DontCare
   val released = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B)))
-  // val releasedReg = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B)))
-  // val releasedEnable = WireInit(VecInit(Seq.fill(LoadQueueRARSize)(false.B)))
-  // val releasedNext = WireInit(releasedReg)
-
-  // for(i <- 0 until LoadQueueRARSize){
-  //   when(releasedEnable(i)){
-  //     releasedReg(i) := releasedNext(i)
-  //   }
-  // }
   val bypassPAddr = Reg(Vec(LoadPipelineWidth, UInt(PAddrBits.W)))
 
   // freeliset: store valid entries index.
