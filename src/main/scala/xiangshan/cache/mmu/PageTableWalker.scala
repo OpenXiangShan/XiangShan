@@ -674,7 +674,7 @@ class HPTWIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst 
     val l1Hit = Bool()
     val l2Hit = Bool()
   }))
-  val resp = Valid(new Bundle {
+  val resp = DecoupledIO(new Bundle {
     val source = UInt(bSourceWidth.W)
     val resp = Output(new HptwResp())
     val id = Output(UInt(bMemID.W))
