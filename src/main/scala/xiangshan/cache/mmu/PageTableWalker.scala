@@ -482,10 +482,10 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val mem_resp_hit = RegInit(VecInit(Seq.fill(l2tlbParams.llptwsize)(false.B)))
   val enq_state_normal = MuxCase(state_addr_check, Seq(
     to_mem_out -> state_mem_out, // same to the blew, but the mem resp now
+    to_last_hptw_req -> state_last_hptw_req,
     to_wait -> state_mem_waiting,
     to_cache -> state_cache,
-    to_hptw_req -> state_hptw_req,
-    to_last_hptw_req -> state_last_hptw_req
+    to_hptw_req -> state_hptw_req
   ))
   val enq_state = Mux(from_pre(io.in.bits.req_info.source) && enq_state_normal =/= state_addr_check, state_idle, enq_state_normal)
   when (io.in.fire) {
