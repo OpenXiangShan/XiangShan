@@ -111,7 +111,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val isIntDq0 = VecInit(io.fromRename.map(req => req.valid && FuType.isIntDq0(req.bits.fuType)))
   val isIntDq1 = VecInit(io.fromRename.map(req => req.valid && FuType.isIntDq1(req.bits.fuType)))
   val isAlu = VecInit(io.fromRename.map(req => req.valid && FuType.isBothDeq0(req.bits.fuType)))
-  val isBrh = VecInit(io.fromRename.map(req => req.valid && FuType.isBothDeq1(req.bits.fuType)))
+  val isBrh = VecInit(io.fromRename.map(req => req.valid && (FuType.isBrh(req.bits.fuType) || FuType.isJump(req.bits.fuType))))
   val popAlu = isAlu.zipWithIndex.map { case (_, i) => PopCount(isAlu.take(i + 1)) }
   val popBrh = isBrh.zipWithIndex.map { case (_, i) => PopCount(isBrh.take(i + 1)) }
   val isOnlyDq0 = VecInit(isIntDq0.zip(isIntDq1).map { case (dq0, dq1) => dq0 && !dq1 })
@@ -152,7 +152,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val aluSelectLessDq = isAlu.zip(popAluIsMore).zip(popAlu).map { case ((i, pm), p) => i && (!pm || (pm && p(0).asBool) ^ lastLastAluSelectDq0) }
   val brhSelectLessDq = isBrh.zip(popBrhIsMore).zip(popBrh).map { case ((i, pm), p) => i && (!pm || (pm && p(0).asBool) ^ lastLastBrhSelectDq0) }
   val aluSelectDq0 = isAlu.zip(popAlu).map { case (i, p) => i && (p(0).asBool ^ lastLastAluSelectDq0) }
-  val brhSelectDq0 = isBrh.zip(popBrh).map { case (i, p) => i && (p(0).asBool ^ lastLastBrhSelectDq0) }
+  //val brhSelectDq0 = isBrh.zip(popBrh).map { case (i, p) => i && (p(0).asBool ^ lastLastBrhSelectDq0) }
+  val brhSelectDq0 = isBrh.zip(popBrh).map { case (i, p) => i && !(lastLastBrhSelectDq0 && (p === 1.U || p === 4.U) || !lastLastBrhSelectDq0 && (p === 3.U || p === 6.U))}
   val lastAluSelectDq0 = PriorityMuxDefault(isAlu.reverse.zip(aluSelectDq0.reverse), lastLastAluSelectDq0)
   val lastBrhSelectDq0 = PriorityMuxDefault(isBrh.reverse.zip(brhSelectDq0.reverse), lastLastBrhSelectDq0)
   when(isAlu.asUInt.orR && io.toIntDq0.canAccept && io.toIntDq1.canAccept){
@@ -169,7 +170,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     toIntDq0Valid(i) := Mux(!io.toIntDq0.canAccept, false.B, Mux(!io.toIntDq1.canAccept, isOnlyDq0(i) || isBothDq01(i), isOnlyDq0(i) || aluSelectDq0(i) || brhSelectDq0(i)))
   }
   toIntDq1Valid.indices.map { case i =>
-    toIntDq1Valid(i) := Mux(!io.toIntDq1.canAccept, false.B, Mux(!io.toIntDq0.canAccept, isOnlyDq1(i) || isBothDq01(i), isOnlyDq1(i) || (isAlu(i) ^ aluSelectDq0(i)) || (isBrh(i) ^ brhSelectDq0(i))))
+    toIntDq1Valid(i) := Mux(!io.toIntDq1.canAccept, false.B, Mux(!io.toIntDq0.canAccept, isOnlyDq1(i) || isBothDq01(i), isOnlyDq1(i) || (isAlu(i) ^ aluSelectDq0(i)) || (isBrh(i) && !brhSelectDq0(i))))
   }
   val isBranch = VecInit(io.fromRename.map(req =>
     // cover auipc (a fake branch)
