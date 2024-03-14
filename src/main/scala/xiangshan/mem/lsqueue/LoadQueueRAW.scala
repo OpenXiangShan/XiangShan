@@ -318,7 +318,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     // select logic
     if (valid.length <= SelectGroupSize) {
       val (selValid, selBits) = selectPartialOldest(valid, bits)
-      val selValidNext = RegNext(selValid(0))
+      val selValidNext = GatedValidRegNext(selValid(0))
       val selBitsNext = RegEnable(selBits(0), selValid(0))
       (Seq(selValidNext && !selBitsNext.uop.robIdx.needFlush(io.redirect) && !selBitsNext.uop.robIdx.needFlush(RegNext(io.redirect))), Seq(selBitsNext))
     } else {
@@ -374,12 +374,14 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val rollbackLqWb = Wire(Vec(StorePipelineWidth, Valid(new DynInst)))
   val stFtqIdx = Wire(Vec(StorePipelineWidth, new FtqPtr))
   val stFtqOffset = Wire(Vec(StorePipelineWidth, UInt(log2Up(PredictWidth).W)))
+  val stFtqIdx_resp = (0 until StorePipelineWidth).map(w => DelayNWithValid(io.storeIn(w).bits.uop.cf.ftqPtr, io.storeIn(w).valid, TotalSelectCycles))
+  val stFtqOffset_resp = (0 until StorePipelineWidth).map(w => DelayNWithValid(io.storeIn(w).bits.uop.cf.ftqOffset, io.storeIn(w).valid, TotalSelectCycles))
   for (w <- 0 until StorePipelineWidth) {
     val detectedRollback = detectRollback(w)
     rollbackLqWb(w).valid := detectedRollback._1 && DelayN(storeIn(w).valid && !storeIn(w).bits.miss, TotalSelectCycles)
     rollbackLqWb(w).bits  := detectedRollback._2
-    stFtqIdx(w) := DelayN(storeIn(w).bits.uop.ftqPtr, TotalSelectCycles)
-    stFtqOffset(w) := DelayN(storeIn(w).bits.uop.ftqOffset, TotalSelectCycles)
+    stFtqIdx(w) := stFtqIdx_resp(w)._2
+    stFtqOffset(w) := stFtqOffset_resp(w)._2
   }
 
   // select rollback (part2), generate rollback request, then fire rollback request
