@@ -291,27 +291,24 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
   val pending_read_resp_valid = RegInit(false.B)
   val pending_read_resp_id = Reg(UInt(in.r.bits.id.getWidth.W))
   val has_read_resp = Wire(Bool())
-  val read_resp_last = in.r.fire && in.r.bits.last
+  val r_fire = Wire(Bool())
+  val read_resp_last = r_fire && in.r.bits.last
   val (read_resp_valid, read_resp_id) = readResponse(!has_read_resp || read_resp_last)
   has_read_resp := (read_resp_valid && !read_resp_last) || pending_read_resp_valid
   val rdata_cnt = Counter(outer.burstLen)
   val read_resp_addr = addressMem(in.r.bits.id) + Cat(rdata_cnt.value, 0.U(log2Ceil(ramSplit).W))
   val read_resp_len = arlenMem(in.r.bits.id)
-  val r_vaild= Wire(Bool())
-  r_vaild := (read_resp_valid || pending_read_resp_valid)
-  val read_resp_valid_delay1 = RegNext(r_vaild)
-  val read_resp_valid_delay2 = RegNext(in.r.valid)
-  in.r.valid := (read_resp_valid_delay1 || pending_read_resp_valid) && !read_resp_valid_delay2
-
+  val r_vaild= (read_resp_valid || pending_read_resp_valid)
+  val read_resp_valid_delay1 = RegNext(read_resp_valid)
+  in.r.valid := (read_resp_valid_delay1 || pending_read_resp_valid)
   in.r.bits.id := Mux(pending_read_resp_valid, pending_read_resp_id, read_resp_id)
   val rdata = ramHelper.zipWithIndex.map{ case (ram, i) => ram.read(r_vaild, read_resp_addr + i.U) }
   in.r.bits.data := VecInit(rdata).asUInt
   in.r.bits.resp := AXI4Parameters.RESP_OKAY
-
-  val r_bits_last = Wire(Bool())
-  r_bits_last := (rdata_cnt.value === read_resp_len)
+  val r_bits_last = RegNext(rdata_cnt.value === read_resp_len)
   val r_bits_last_delay = RegNext(r_bits_last)
-  in.r.bits.last := r_bits_last_delay
+  in.r.bits.last := r_bits_last
+  r_fire := (r_vaild && in.r.ready)
 
   when (!pending_read_resp_valid && read_resp_valid && !read_resp_last) {
     pending_read_resp_valid := true.B
@@ -321,7 +318,7 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
   }
   when (read_resp_last) {
     rdata_cnt.reset()
-  }.elsewhen (in.r.fire) {
+  }.elsewhen (r_fire) {
     rdata_cnt.inc()
   }
 
