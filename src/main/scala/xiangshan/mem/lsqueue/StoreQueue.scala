@@ -243,9 +243,11 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val nextAddrReadyPtr = addrReadyPtrExt + PriorityEncoder(VecInit(addrReadyLookup.map(!_) :+ true.B))
   addrReadyPtrExt := nextAddrReadyPtr
 
+  val stAddrReadyVecReg = Wire(Vec(StoreQueueSize, Bool()))
   (0 until StoreQueueSize).map(i => {
-    io.stAddrReadyVec(i) := RegNext(allocated(i) && (mmio(i) || addrvalid(i)))
+    stAddrReadyVecReg(i) := (allocated(i) && (mmio(i) || datavalid(i)))
   })
+  io.stAddrReadyVec := GatedValidRegNext(stAddrReadyVecReg)
 
   when (io.brqRedirect.valid) {
     addrReadyPtrExt := Mux(
@@ -263,9 +265,11 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val nextDataReadyPtr = dataReadyPtrExt + PriorityEncoder(VecInit(dataReadyLookup.map(!_) :+ true.B))
   dataReadyPtrExt := nextDataReadyPtr
 
+  val stDataReadyVecReg = Wire(Vec(StoreQueueSize, Bool()))
   (0 until StoreQueueSize).map(i => {
-    io.stDataReadyVec(i) := RegNext(allocated(i) && (mmio(i) || datavalid(i)))
+    stDataReadyVecReg(i) := (allocated(i) && (mmio(i) || datavalid(i)))
   })
+  io.stDataReadyVec := GatedValidRegNext(stDataReadyVecReg)
 
   when (io.brqRedirect.valid) {
     dataReadyPtrExt := Mux(
