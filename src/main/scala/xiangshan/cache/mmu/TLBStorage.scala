@@ -119,7 +119,7 @@ class TLBFA(
     XSPerfAccumulate(s"port${i}_multi_hit", !(!resp.valid || (PopCount(hitVecReg) === 0.U || PopCount(hitVecReg) === 1.U)))
 
     resp.valid := RegNext(req.valid)
-    resp.bits.hit := Cat(hitVecReg).orR
+    resp.bits.hit := Cat(hitVec).orR
     if (nWays == 1) {
       for (d <- 0 until nDups) {
         resp.bits.ppn(d) := RegEnable(entries(0).genPPN(saveLevel, req.valid)(vpn), req.fire)

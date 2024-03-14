@@ -40,7 +40,8 @@ case class TLBParameters
   outReplace: Boolean = false,
   partialStaticPMP: Boolean = false, // partial static pmp result stored in entries
   outsideRecvFlush: Boolean = false, // if outside moudle waiting for tlb recv flush pipe
-  saveLevel: Boolean = false
+  saveLevel: Boolean = false,
+  missSameCycle: Boolean = false // miss signal occurs in the request cycle
 )
 
 case class L2TLBParameters

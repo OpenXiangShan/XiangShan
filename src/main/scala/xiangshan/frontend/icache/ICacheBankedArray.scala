@@ -205,7 +205,6 @@ class ICacheMetaArrayNoBanked()(implicit p: Parameters) extends ICacheArray
     val read     = Flipped(DecoupledIO(new PrefetchMetaReadBundle))
     val readResp = Output(new PrefetchMetaRespBundle)
     val write    = Flipped(DecoupledIO(new ICacheMetaWriteBundle))
-    val cacheOp  = Flipped(new L1CacheInnerOpIO)
     val fencei   = Input(Bool())
   }}
 
@@ -257,47 +256,7 @@ class ICacheMetaArrayNoBanked()(implicit p: Parameters) extends ICacheArray
 
   io.readResp.metaData := read_metas
 
-  io.write.ready := true.B // TODO : has bug ? should be !io.cacheOp.req.valid
-  // deal with customized cache op
-  require(nWays <= 32)
-  io.cacheOp.resp.bits := DontCare
-  val cacheOpShouldResp = WireInit(false.B)
-  when(io.cacheOp.req.valid){
-    when(
-      CacheInstrucion.isReadTag(io.cacheOp.req.bits.opCode) ||
-      CacheInstrucion.isReadTagECC(io.cacheOp.req.bits.opCode)
-    ){
-      tagArray.io.r.req.valid := true.B
-      tagArray.io.r.req.bits.apply(setIdx = io.cacheOp.req.bits.index)
-      cacheOpShouldResp := true.B
-    }
-    when(CacheInstrucion.isWriteTag(io.cacheOp.req.bits.opCode)){
-      tagArray.io.w.req.valid := true.B
-      tagArray.io.w.req.bits.apply(
-        data = io.cacheOp.req.bits.write_tag_low,
-        setIdx = io.cacheOp.req.bits.index,
-        waymask = UIntToOH(io.cacheOp.req.bits.wayNum(log2Ceil(nWays) - 1, 0))
-      )
-      cacheOpShouldResp := true.B
-    }
-    // TODO
-    // when(CacheInstrucion.isWriteTagECC(io.cacheOp.req.bits.opCode)){
-    //   for (i <- 0 until readPorts) {
-    //     array(i).io.ecc_write.valid := true.B
-    //     array(i).io.ecc_write.bits.idx := io.cacheOp.req.bits.index
-    //     array(i).io.ecc_write.bits.way_en := UIntToOH(io.cacheOp.req.bits.wayNum(4, 0))
-    //     array(i).io.ecc_write.bits.ecc := io.cacheOp.req.bits.write_tag_ecc
-    //   }
-    //   cacheOpShouldResp := true.B
-    // }
-  }
-  io.cacheOp.resp.valid := RegNext(io.cacheOp.req.valid && cacheOpShouldResp)
-  io.cacheOp.resp.bits.read_tag_low := Mux(io.cacheOp.resp.valid,
-    tagArray.io.r.resp.asTypeOf(Vec(nWays, UInt(tagBits.W)))(io.cacheOp.req.bits.wayNum),
-    0.U
-  )
-  io.cacheOp.resp.bits.read_tag_ecc := DontCare // TODO
-  // TODO: deal with duplicated array
+  io.write.ready := true.B
 
   // fencei logic : reset valid_array
   when (io.fencei) {

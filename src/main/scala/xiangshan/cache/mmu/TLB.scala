@@ -118,17 +118,21 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
   /************************  main body above | method/log/perf below ****************************/
   def TLBRead(i: Int) = {
-    val (e_hit, e_ppn, e_perm) = entries.io.r_resp_apply(i)
-    val (p_hit, p_ppn, p_perm) = ptw_resp_bypass(get_pn(req_in(i).bits.vaddr))
+    // pay attention: The hit signal occurs in the request cycle
+    // while ppn and perm occur in the next cycle.
+    val (e_hit_samecycle, e_ppn, e_perm) = entries.io.r_resp_apply(i)
+    val (p_hit_samecycle, p_ppn, p_perm) = ptw_resp_bypass(get_pn(req_in(i).bits.vaddr))
     val enable = portTranslateEnable(i)
 
-    val hit = e_hit || p_hit
+    val hit_samecycle = e_hit_samecycle || p_hit_samecycle
+    val hit = RegNext(hit_samecycle)
+    val miss_samecycle = !hit_samecycle && enable
     val miss = !hit && enable
     hit.suggestName(s"hit_read_${i}")
     miss.suggestName(s"miss_read_${i}")
 
     val vaddr = SignExt(req_out(i).vaddr, PAddrBits)
-    resp(i).bits.miss := miss
+    resp(i).bits.miss := { if (q.missSameCycle) miss_samecycle else miss }
     resp(i).bits.ptwBack := ptw.resp.fire
     resp(i).bits.memidx := RegNext(req_in(i).bits.memidx)
 
@@ -136,8 +140,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val perm = WireInit(VecInit(Seq.fill(nRespDups)(0.U.asTypeOf(new TlbPermBundle))))
 
     for (d <- 0 until nRespDups) {
-      ppn(d) := Mux(p_hit, p_ppn, e_ppn(d))
-      perm(d) := Mux(p_hit, p_perm, e_perm(d))
+      ppn(d) := Mux(RegNext(p_hit_samecycle), p_ppn, e_ppn(d))
+      perm(d) := Mux(RegNext(p_hit_samecycle), p_perm, e_perm(d))
 
       val paddr = Cat(ppn(d), get_off(req_out(i).vaddr))
       resp(i).bits.paddr(d) := Mux(enable, paddr, vaddr)
@@ -261,7 +265,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   // when ptw resp, tlb at refill_idx maybe set to miss by force.
   // Bypass ptw resp to check.
   def ptw_resp_bypass(vpn: UInt) = {
-    val p_hit = RegNext(ptw.resp.bits.hit(vpn, io.csr.satp.asid, allType = true) && io.ptw.resp.fire)
+    val p_hit = ptw.resp.bits.hit(vpn, io.csr.satp.asid, allType = true) && io.ptw.resp.fire
     val p_ppn = RegEnable(ptw.resp.bits.genPPN(vpn), io.ptw.resp.fire)
     val p_perm = RegEnable(ptwresp_to_tlbperm(ptw.resp.bits), io.ptw.resp.fire)
     (p_hit, p_ppn, p_perm)
@@ -317,7 +321,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       val af = io.requestor(i).resp.bits.excp(0).af.instr || io.requestor(i).resp.bits.excp(0).af.st || io.requestor(i).resp.bits.excp(0).af.ld
       val difftest = DifftestModule(new DiffL1TLBEvent)
       difftest.coreid := io.hartId
-      difftest.valid := RegNext(io.requestor(i).req.fire) && !io.requestor(i).req_kill && io.requestor(i).resp.fire && !io.requestor(i).resp.bits.miss && !pf && !af && portTranslateEnable(i)
+      val miss = { if (q.missSameCycle) RegNext(io.requestor(i).resp.bits.miss) else io.requestor(i).resp.bits.miss }
+      difftest.valid := RegNext(io.requestor(i).req.fire) && !io.requestor(i).req_kill && io.requestor(i).resp.fire && !miss && !pf && !af && portTranslateEnable(i)
       if (!Seq("itlb", "ldtlb", "sttlb").contains(q.name)) {
         difftest.valid := false.B
       }
