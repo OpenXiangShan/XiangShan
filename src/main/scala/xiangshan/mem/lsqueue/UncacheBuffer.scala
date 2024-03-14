@@ -107,7 +107,7 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
 
   io.rob.mmio := DontCare
   io.rob.uop := DontCare
-  val pendingld = RegNext(io.rob.pendingld)
+  val pendingld = GatedValidRegNext(io.rob.pendingld)
   val pendingPtr = GatedRegNext(io.rob.pendingPtr)
 
   switch (uncacheState) {
