@@ -44,7 +44,8 @@ class VTypeBufferIO(size: Int)(implicit p: Parameters) extends XSBundle {
 
   val toDecode = Output(new Bundle {
     val isResumeVType = Bool()
-    val vtype = ValidIO(VType())
+    val commitVType = ValidIO(VType())
+    val walkVType = ValidIO(VType())
   })
 
   val status = Output(new Bundle {
@@ -263,8 +264,12 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   // update vtype in decode when VTypeBuffer resumes from walk state
   // note that VTypeBuffer can still send resuming request in the first cycle of s_idle
   io.toDecode.isResumeVType := state =/= s_idle || decodeResumeVType.valid
-  io.toDecode.vtype.valid := (state === s_walk || stateLast === s_walk && state === s_idle) && decodeResumeVType.valid
-  io.toDecode.vtype.bits := Mux(io.toDecode.vtype.valid, decodeResumeVType.bits, 0.U.asTypeOf(VType()))
+  io.toDecode.walkVType.valid := (state === s_walk || stateLast === s_walk && state === s_idle) && decodeResumeVType.valid
+  io.toDecode.walkVType.bits := Mux(io.toDecode.walkVType.valid, decodeResumeVType.bits, 0.U.asTypeOf(VType()))
+
+  private val newestArchVType = PriorityMux(commitValidVec.zip(infoVec).map { case(commitValid, info) => commitValid -> info }.reverse)
+  io.toDecode.commitVType.valid := commitValidVec.asUInt.orR
+  io.toDecode.commitVType.bits := newestArchVType
 
   XSError(isBefore(enqPtr, deqPtr) && !isFull(enqPtr, deqPtr), "\ndeqPtr is older than enqPtr!\n")
 

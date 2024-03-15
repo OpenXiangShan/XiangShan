@@ -271,13 +271,9 @@ class CtrlBlockImp(
   }
 
   // vtype commit
-  decode.io.commitVType.bits := io.fromDataPath.vtype
-  decode.io.commitVType.valid := GatedValidRegNext(rob.io.isVsetFlushPipe)
-
-  io.toDataPath.vtypeAddr := rob.io.vconfigPdest
-
   decode.io.isResumeVType := rob.io.toDecode.isResumeVType
-  decode.io.walkVType := rob.io.toDecode.vtype
+  decode.io.commitVType := rob.io.toDecode.commitVType
+  decode.io.walkVType := rob.io.toDecode.walkVType
 
   decode.io.redirect := s1_s3_redirect.valid || s2_s4_pendingRedirectValid
 
@@ -579,11 +575,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val vfUops = Vec(dpParams.FpDqDeqWidth, DecoupledIO(new DynInst))
     val memUops = Vec(dpParams.LsDqDeqWidth, DecoupledIO(new DynInst))
   }
-  val fromDataPath = new Bundle{
-    val vtype = Input(new VType)
-  }
   val toDataPath = new Bundle {
-    val vtypeAddr = Output(UInt(PhyRegIdxWidth.W))
     val flush = ValidIO(new Redirect)
   }
   val toExuBlock = new Bundle {

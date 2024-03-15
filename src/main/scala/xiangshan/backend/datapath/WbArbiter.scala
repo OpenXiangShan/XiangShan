@@ -93,10 +93,6 @@ class WbDataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBu
 
   val fromMemExu: MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = Flipped(params.memSchdParams.get.genExuOutputDecoupledBundle)
 
-  val oldVdDataFromDataPath = Input(UInt(VLEN.W))
-
-  val oldVdAddrToDataPath = Output(UInt(PhyRegIdxWidth.W))
-
   val toIntPreg = Flipped(MixedVec(Vec(params.numPregWb(IntData()),
     new RfWritePortWithConfig(params.intPregParams.dataCfg, params.intPregParams.addrWidth))))
 
@@ -118,8 +114,6 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
   val vldMgu = Module(new VldMergeUnit(fromExuVld.head.bits.params))
   vldMgu.io.flush := io.flush
   vldMgu.io.writeback <> fromExuVld.head
-  vldMgu.io.oldVdReadData := io.oldVdDataFromDataPath
-  io.oldVdAddrToDataPath := vldMgu.io.oldVdReadAddr
   val wbReplaceVld: Seq[DecoupledIO[ExuOutput]] = fromExuPre.updated(fromExuPre.indexWhere(_.bits.params.hasVLoadFu), vldMgu.io.writebackAfterMerge).toSeq
   val fromExu: MixedVec[DecoupledIO[ExuOutput]] = MixedVecInit(wbReplaceVld)
 

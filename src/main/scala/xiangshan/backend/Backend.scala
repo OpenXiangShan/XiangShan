@@ -160,9 +160,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   memScheduler.io.fromWbFuBusyTable.fuBusyTableRead := wbFuBusyTable.io.out.memRespRead
   dataPath.io.wbConfictRead := wbFuBusyTable.io.out.wbConflictRead
 
-  wbDataPath.io.fromIntExu.flatten.filter(x => x.bits.params.writeIntRf)
-
-  private val vconfig = dataPath.io.vconfigReadPort.data
   private val og1CancelOH: UInt = dataPath.io.og1CancelOH
   private val og0CancelOH: UInt = dataPath.io.og0CancelOH
   private val cancelToBusyTable = dataPath.io.cancelToBusyTable
@@ -183,7 +180,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   ctrlBlock.io.robio.lsq <> io.mem.robLsqIO
   ctrlBlock.io.robio.lsTopdownInfo <> io.mem.lsTopdownInfo
   ctrlBlock.io.robio.debug_ls <> io.mem.debugLS
-  ctrlBlock.io.fromDataPath.vtype := vconfig(7, 0).asTypeOf(new VType)
   ctrlBlock.perfinfo := DontCare // TODO: Implement backend hpm
   ctrlBlock.io.debugEnqLsq.canAccept := io.mem.lsqEnqIO.canAccept
   ctrlBlock.io.debugEnqLsq.resp := io.mem.lsqEnqIO.resp
@@ -249,8 +245,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
 
   dataPath.io.hartId := io.fromTop.hartId
   dataPath.io.flush := ctrlBlock.io.toDataPath.flush
-  dataPath.io.vconfigReadPort.addr := ctrlBlock.io.toDataPath.vtypeAddr
-  dataPath.io.vldReadPort.addr := wbDataPath.io.oldVdAddrToDataPath
 
   dataPath.io.fromIntIQ <> intScheduler.io.toDataPathAfterDelay
   dataPath.io.fromVfIQ <> vfScheduler.io.toDataPathAfterDelay
@@ -303,6 +297,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
 
   pcTargetMem.io.fromFrontendFtq := io.frontend.fromFtq
   pcTargetMem.io.toDataPath <> dataPath.io.fromPcTargetMem
+
   private val csrio = intExuBlock.io.csrio.get
   csrio.hartId := io.fromTop.hartId
   csrio.fpu.fflags := ctrlBlock.io.robio.csr.fflags
@@ -360,7 +355,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   vfExuBlock.io.vxrm.foreach(_ := csrio.vpu.vxrm)
 
   wbDataPath.io.flush := ctrlBlock.io.redirect
-  wbDataPath.io.oldVdDataFromDataPath := dataPath.io.vldReadPort.data
   wbDataPath.io.fromTop.hartId := io.fromTop.hartId
   wbDataPath.io.fromIntExu <> intExuBlock.io.out
   wbDataPath.io.fromVfExu <> vfExuBlock.io.out

@@ -33,9 +33,6 @@ class DataPath(params: BackendParams)(implicit p: Parameters) extends LazyModule
 class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params: BackendParams)
   extends LazyModuleImp(wrapper) with HasXSParameter {
 
-  private val VCONFIG_PORT = params.vconfigPort
-  private val VLD_PORT = params.vldPort
-
   val io = IO(new DataPathIO())
 
   private val (fromIntIQ, toIntIQ, toIntExu) = (io.fromIntIQ, io.toIntIQ, io.toIntExu)
@@ -176,6 +173,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   io.fromPcTargetMem.fromDataPathValid := pcReadValid
   io.fromPcTargetMem.fromDataPathFtqPtr := pcReadFtqPtr
   io.fromPcTargetMem.fromDataPathFtqOffset := pcReadFtqOffset
+
   private val intDebugRead: Option[(Vec[UInt], Vec[UInt])] =
     if (env.AlwaysBasicDiff || env.EnableDifftest) {
       Some(Wire(Vec(32, UInt(intSchdParams.pregIdxWidth.W))), Wire(Vec(32, UInt(XLEN.W))))
@@ -245,10 +243,6 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       vfRfRaddr(portIdx) := 0.U
   }
 
-  vfRfRaddr(VCONFIG_PORT) := io.vconfigReadPort.addr
-  io.vconfigReadPort.data := vfRfRdata(VCONFIG_PORT)
-  // vfRfRaddr(VLD_PORT) := io.vldReadPort.addr
-  io.vldReadPort.data := DontCare
 
   intDebugRead.foreach { case (addr, _) =>
     addr := io.debugIntRat.get
@@ -529,11 +523,6 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
   val hartId = Input(UInt(8.W))
 
   val flush: ValidIO[Redirect] = Flipped(ValidIO(new Redirect))
-
-  // Todo: check if this can be removed
-  val vconfigReadPort = new RfReadPort(XLEN, PhyRegIdxWidth)
-
-  val vldReadPort = new RfReadPort(VLEN, PhyRegIdxWidth)
 
   val wbConfictRead = Input(MixedVec(params.allSchdParams.map(x => MixedVec(x.issueBlockParams.map(x => x.genWbConflictBundle())))))
 
