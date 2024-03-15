@@ -350,11 +350,12 @@ case class XSCoreParameters
     implicit val schdType: SchedulerType = VfScheduler()
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams("VFEX0", Seq(VfaluCfg, VfmaCfg, VialuCfg, VppuCfg, F2fCfg, F2iCfg, VSetRvfWvfCfg), Seq(VfWB(port = 0, 0), IntWB(port = 0, 1)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
+        ExeUnitParams("VFEX0", Seq(VfaluCfg, VfmaCfg, VialuCfg, VimacCfg), Seq(VfWB(port = 5, 0), IntWB(port = 0, 1)), Seq(Seq(VfRD(0, 0)), Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)))),
+        ExeUnitParams("VFEX1", Seq(VipuCfg, VppuCfg, VfcvtCfg, F2vCfg, F2fCfg, F2iCfg, VSetRvfWvfCfg), Seq(VfWB(port = 6, 1), IntWB(port = 1, 2)), Seq(Seq(VfRD(5, 1)), Seq(VfRD(6, 1)), Seq(VfRD(7, 1)), Seq(VfRD(8, 1)), Seq(VfRD(9, 1)))),
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
-        ExeUnitParams("VFEX1", Seq(VfaluCfg, VfmaCfg, VimacCfg, VipuCfg, F2vCfg, VfcvtCfg), Seq(VfWB(port = 1, 0), IntWB(port = 1, 1)), Seq(Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(VfRD(9, 0)), Seq(VfRD(10, 0)), Seq(VfRD(11, 0)))),
-        ExeUnitParams("VFEX2", Seq(VfdivCfg, VidivCfg), Seq(VfWB(port = 2, 0)), Seq(Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(VfRD(9, 0)), Seq(VfRD(10, 0)), Seq(VfRD(11, 0)))),
+        ExeUnitParams("VFEX2", Seq(VfaluCfg, VfmaCfg, VialuCfg), Seq(VfWB(port = 6, 0), IntWB(port = 1, 1)), Seq(Seq(VfRD(5, 0)), Seq(VfRD(6, 0)), Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(VfRD(9, 0)))),
+        ExeUnitParams("VFEX3", Seq(VfdivCfg, VidivCfg), Seq(VfWB(port = 5, 1)), Seq(Seq(VfRD(0, 1)), Seq(VfRD(1, 1)), Seq(VfRD(2, 1)), Seq(VfRD(3, 1)), Seq(VfRD(4, 1)))),
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
     ),
       numPregs = vfPreg.numEntries,
@@ -377,22 +378,22 @@ case class XSCoreParameters
         ExeUnitParams("STA1", Seq(StaCfg, MouCfg), Seq(FakeIntWB()), Seq(Seq(IntRD(13, 1)))),
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
-        ExeUnitParams("LDU0", Seq(LduCfg), Seq(IntWB(5, 0), VfWB(5, 0)), Seq(Seq(IntRD(12, 0))), true, 2),
+        ExeUnitParams("LDU0", Seq(LduCfg), Seq(IntWB(5, 0), VfWB(0, 0)), Seq(Seq(IntRD(12, 0))), true, 2),
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
-        ExeUnitParams("LDU1", Seq(LduCfg), Seq(IntWB(6, 0), VfWB(6, 0)), Seq(Seq(IntRD(13, 0))), true, 2),
+        ExeUnitParams("LDU1", Seq(LduCfg), Seq(IntWB(6, 0), VfWB(1, 0)), Seq(Seq(IntRD(13, 0))), true, 2),
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
-        ExeUnitParams("LDU2", Seq(LduCfg), Seq(IntWB(7, 0), VfWB(7, 0)), Seq(Seq(IntRD(14, 0))), true, 2),
+        ExeUnitParams("LDU2", Seq(LduCfg), Seq(IntWB(7, 0), VfWB(2, 0)), Seq(Seq(IntRD(14, 0))), true, 2),
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
-        ExeUnitParams("VLSU0", Seq(VlduCfg, VstuCfg), Seq(VfWB(3, 0)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
+        ExeUnitParams("VLSU0", Seq(VlduCfg, VstuCfg), Seq(VfWB(3, 0)), Seq(Seq(VfRD(10, 0)), Seq(VfRD(11, 0)), Seq(VfRD(12, 0)), Seq(VfRD(13, 0)), Seq(VfRD(14, 0)))),
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
-        ExeUnitParams("STD0", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(12, 1), VfRD(6, 0)))),
+        ExeUnitParams("STD0", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(12, 1), VfRD(12, Int.MaxValue)))),
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
-        ExeUnitParams("STD1", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(14, 1), VfRD(10, Int.MaxValue)))),
+        ExeUnitParams("STD1", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(14, 1), VfRD(13, Int.MaxValue)))),
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
     ),
       numPregs = intPreg.numEntries max vfPreg.numEntries,
