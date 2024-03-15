@@ -52,7 +52,6 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
   val IQValidNumVec = Output(MixedVec(backendParams.genIQValidNumBundle))
 
   val fromCtrlBlock = new Bundle {
-    val pcVec = Input(Vec(params.numPcReadPort, UInt(VAddrData().dataWidth.W)))
     val flush = Flipped(ValidIO(new Redirect))
   }
   val fromDispatch = new Bundle {
