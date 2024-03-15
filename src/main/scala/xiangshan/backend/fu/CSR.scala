@@ -1533,6 +1533,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   when (RegNext(RegNext(reset.asBool) && !reset.asBool)) {
     mepc := Cat(mepc(XLEN - 1, 1), 0.U(1.W))
     sepc := Cat(sepc(XLEN - 1, 1), 0.U(1.W))
+    vsepc := Cat(vsepc(XLEN - 1, 1), 0.U(1.W))
   }
 
   def readWithScala(addr: Int): UInt = mapping(addr)._1

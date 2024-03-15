@@ -123,6 +123,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   with HasPdConst
   with HasCircularQueuePtrHelper
   with HasPerfEvents
+  with HasTlbConst
 {
   val io = IO(new NewIFUIO)
   val (toFtq, fromFtq)    = (io.ftqInter.toFtq, io.ftqInter.fromFtq)
@@ -385,7 +386,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f2_pf_vec = VecInit((0 until PredictWidth).map(i => (!isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_except_pf(0)   ||  isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_doubleLine &&  f2_except_pf(1))))
   val f2_af_vec = VecInit((0 until PredictWidth).map(i => (!isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_except_af(0)   ||  isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_doubleLine && f2_except_af(1))))
   val f2_gpf_vec = VecInit((0 until PredictWidth).map(i => (!isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_except_gpf(0) || isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_doubleLine && f2_except_gpf(1))))
-  val f2_gpaddrs_vec = VecInit((0 until PredictWidth).map(i => Mux(!isNextLine(f2_pc(i), f2_ftq_req.startAddr), f2_gpaddrs(0), Mux(isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_doubleLine, f2_gpaddrs(1), 0.U(GPAddrBits.W)))))  
+  val f2_gpaddrs_tmp = VecInit((0 until PredictWidth).map(i => Mux(!isNextLine(f2_pc(i), f2_ftq_req.startAddr), Cat(f2_gpaddrs(0)(GPAddrBits-1, offLen), f2_pc(i)(offLen - 1, 0)), Mux(isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_doubleLine, Cat(f2_gpaddrs(1)(GPAddrBits-1, offLen), f2_pc(i)(offLen - 1, 0)), 0.U(GPAddrBits.W)))))  
   val f2_paddrs       = VecInit((0 until PortNumber).map(i => fromICache(i).bits.paddr))
   val f2_perf_info    = io.icachePerfInfo
 
@@ -434,6 +435,12 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f2_hasHalfValid   =  preDecoderOut.hasHalfValid
   val f2_crossPageFault = VecInit((0 until PredictWidth).map(i => isLastInLine(f2_pc(i)) && !f2_except_pf(0) && f2_doubleLine &&  f2_except_pf(1) && !f2_pd(i).isRVC ))
   val f2_crossGuestPageFault = VecInit((0 until PredictWidth).map(i => isLastInLine(f2_pc(i)) && !f2_except_gpf(0) && f2_doubleLine && f2_except_gpf(1) && !f2_pd(i).isRVC ))
+  val f2_gpaddrs_vec = VecInit((0 until PredictWidth).map(i => 
+    if(i != PredictWidth-1) 
+      Mux(f2_crossGuestPageFault(i), f2_gpaddrs_tmp(i + 1), f2_gpaddrs_tmp(i)) 
+    else
+      f2_gpaddrs_tmp(i)
+    ))
   XSPerfAccumulate("fetch_bubble_icache_not_resp",   f2_valid && !icacheRespAllValid )
 
 
