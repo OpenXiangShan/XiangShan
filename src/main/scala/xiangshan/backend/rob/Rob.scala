@@ -362,7 +362,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val rabCommits = Output(new RabCommitIO)
     val diffCommits = if (backendParams.debugEn) Some(Output(new DiffCommitIO)) else None
     val isVsetFlushPipe = Output(Bool())
-    val vconfigPdest = Output(UInt(PhyRegIdxWidth.W))
     val lsq = new RobLsqIO
     val robDeqPtr = Output(new RobPtr)
     val csr = new RobCSRIO
@@ -373,7 +372,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val wfi_enable = Input(Bool())
     val toDecode = new Bundle {
       val isResumeVType = Output(Bool())
-      val vtype = ValidIO(VType())
+      val commitVType = ValidIO(VType())
+      val walkVType = ValidIO(VType())
     }
 
     val debug_ls = Flipped(new DebugLSIO)
@@ -555,7 +555,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   vtypeBuffer.io.snpt := io.snpt
   vtypeBuffer.io.snpt.snptEnq := snptEnq
   io.toDecode.isResumeVType := vtypeBuffer.io.toDecode.isResumeVType
-  io.toDecode.vtype := vtypeBuffer.io.toDecode.vtype
+  io.toDecode.commitVType := vtypeBuffer.io.toDecode.commitVType
+  io.toDecode.walkVType := vtypeBuffer.io.toDecode.walkVType
 
   /**
     * Enqueue (from dispatch)
@@ -765,7 +766,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 //  val needModifyFtqIdxOffset = isVsetFlushPipe && (vsetvlState === vs_waitFlush)
   val needModifyFtqIdxOffset = false.B
   io.isVsetFlushPipe := isVsetFlushPipe
-  io.vconfigPdest := rab.io.vconfigPdest
+
   // io.flushOut will trigger redirect at the next cycle.
   // Block any redirect or commit at the next cycle.
   val lastCycleFlush = RegNext(io.flushOut.valid)

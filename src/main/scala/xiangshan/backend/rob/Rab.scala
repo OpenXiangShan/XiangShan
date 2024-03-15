@@ -44,7 +44,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
 
     val canEnq = Output(Bool())
     val enqPtrVec = Output(Vec(RenameWidth, new RenameBufferPtr))
-    val vconfigPdest = Output(UInt(PhyRegIdxWidth.W))
+
     val commits = Output(new RabCommitIO)
     val diffCommits = if (backendParams.debugEn) Some(Output(new DiffCommitIO)) else None
 
@@ -235,8 +235,6 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   io.enqPtrVec := enqPtrVec
 
   io.status.walkEnd := walkEndNext
-
-  io.vconfigPdest := 0.U
 
   // for difftest
   io.diffCommits.foreach(_ := 0.U.asTypeOf(new DiffCommitIO))

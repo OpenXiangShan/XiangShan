@@ -14,8 +14,7 @@ class VldMergeUnit(val params: ExeUnitParams)(implicit p: Parameters) extends XS
   val io = IO(new VldMergeUnitIO(params))
 
   io.writeback.ready := io.writebackAfterMerge.ready
-  // [WARNING] MemBlock cannot provide oldVdPsrc!!!
-  io.oldVdReadAddr := io.writeback.bits.vls.get.oldVdPsrc
+
   val wbReg = Reg(Valid(new ExuOutput(params)))
   val mgu = Module(new Mgu(VLEN))
   val vdAfterMerge = Wire(UInt(VLEN.W))
@@ -51,7 +50,5 @@ class VldMergeUnit(val params: ExeUnitParams)(implicit p: Parameters) extends XS
 class VldMergeUnitIO(param: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
   val flush = Flipped(ValidIO(new Redirect))
   val writeback = Flipped(DecoupledIO(new ExuOutput(param)))
-  val oldVdReadData = Input(UInt(VLEN.W))
-  val oldVdReadAddr = Output(UInt(PhyRegIdxWidth.W))
   val writebackAfterMerge = DecoupledIO(new ExuOutput(param))
 }

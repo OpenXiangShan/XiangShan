@@ -116,8 +116,6 @@ case class BackendParams(
 
   def numNoDataWB = allSchdParams.map(_.numNoDataWB).sum
   def numExu = allSchdParams.map(_.numExu).sum
-  def vconfigPort = 13 // Todo: remove it
-  def vldPort = 14
 
   def numException = allRealExuParams.count(_.exceptionOut.nonEmpty)
 
