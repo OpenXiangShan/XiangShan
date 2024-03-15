@@ -78,6 +78,7 @@ case class XSCoreParameters
   EnableLoop: Boolean = true,
   EnableSC: Boolean = true,
   EnbaleTlbDebug: Boolean = false,
+  EnableClockGate: Boolean = true,
   EnableJal: Boolean = false,
   EnableFauFTB: Boolean = true,
   UbtbGHRLength: Int = 4,
@@ -491,6 +492,7 @@ trait HasXSParameter {
   val HistoryLength = coreParams.HistoryLength
   val EnableGHistDiff = coreParams.EnableGHistDiff
   val EnableCommitGHistDiff = coreParams.EnableCommitGHistDiff
+  val EnableClockGate = coreParams.EnableClockGate
   val UbtbGHRLength = coreParams.UbtbGHRLength
   val UbtbSize = coreParams.UbtbSize
   val EnableFauFTB = coreParams.EnableFauFTB
