@@ -994,8 +994,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   ftq_redirect_sram.io.ren.head   := fromIfuRedirect.valid
   ftq_redirect_sram.io.raddr.head := fromIfuRedirect.bits.ftqIdx.value
-  ftb_entry_mem.io.ren.get.head   := true.B
-  ftb_entry_mem.io.raddr.head     := fromIfuRedirect.bits.ftqIdx.value
 
   val toBpuCfi = ifuRedirectToBpu.bits.cfiUpdate
   toBpuCfi.fromFtqRedirectSram(ftq_redirect_sram.io.rdata.head)
