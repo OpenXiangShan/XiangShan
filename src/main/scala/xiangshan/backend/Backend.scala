@@ -193,7 +193,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
 
   intScheduler.io.fromTop.hartId := io.fromTop.hartId
   intScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
-  intScheduler.io.fromCtrlBlock.pcVec := ctrlBlock.io.toIssueBlock.pcVec
   intScheduler.io.fromDispatch.allocPregs <> ctrlBlock.io.toIssueBlock.allocPregs
   intScheduler.io.fromDispatch.uops <> ctrlBlock.io.toIssueBlock.intUops
   intScheduler.io.intWriteBack := wbDataPath.io.toIntPreg

@@ -64,7 +64,6 @@ class CtrlBlockImp(
   with HasPerfEvents
 {
   val pcMemRdIndexes = new NamedIndexes(Seq(
-    "exu"       -> params.numPcReadPort,
     "redirect"  -> 1,
     "memPred"   -> 1,
     "robFlush"  -> 1,
@@ -76,6 +75,7 @@ class CtrlBlockImp(
   private val numPcMemReadForExu = params.numPcReadPort
   private val numPcMemRead = pcMemRdIndexes.maxIdx
 
+  // now pcMem read for exu is moved to PcTargetMem (OG0)
   println(s"pcMem read num: $numPcMemRead")
   println(s"pcMem read num for exu: $numPcMemReadForExu")
 
@@ -487,35 +487,9 @@ class CtrlBlockImp(
   pcMem.io.waddr.head := RegEnable(io.frontend.fromFtq.pc_mem_waddr, io.frontend.fromFtq.pc_mem_wen)
   pcMem.io.wdata.head := RegEnable(io.frontend.fromFtq.pc_mem_wdata, io.frontend.fromFtq.pc_mem_wen)
 
-  private val jumpPcVec         : Vec[UInt] = Wire(Vec(params.numPcReadPort, UInt(VAddrData().dataWidth.W)))
-  io.toIssueBlock.pcVec := jumpPcVec
-
   io.toDataPath.flush := s2_s4_redirect
   io.toExuBlock.flush := s2_s4_redirect
 
-  for ((pcMemIdx, i) <- pcMemRdIndexes("exu").zipWithIndex) {
-    val intDq0numDeq = intDq0.dpParams.IntDqDeqWidth/2
-    if (i < intDq0numDeq) {
-      pcMem.io.ren.get(pcMemIdx) := intDq0.io.deq(i).valid
-      pcMem.io.raddr(pcMemIdx) := intDq0.io.deqNext(i).ftqPtr.value
-      jumpPcVec(i) := pcMem.io.rdata(pcMemIdx).getPc(RegEnable(intDq0.io.deqNext(i).ftqOffset, intDq0.io.deq(i).valid))
-    }
-    else {
-      pcMem.io.ren.get(pcMemIdx) := intDq1.io.deq(i - intDq0numDeq).valid
-      pcMem.io.raddr(pcMemIdx) := intDq1.io.deqNext(i - intDq0numDeq).ftqPtr.value
-      jumpPcVec(i) := pcMem.io.rdata(pcMemIdx).getPc(RegEnable(intDq1.io.deqNext(i - intDq0numDeq).ftqOffset, intDq1.io.deq(i - intDq0numDeq).valid))
-    }
-  }
-
-  val dqOuts = Seq(io.toIssueBlock.intUops) ++ Seq(io.toIssueBlock.vfUops) ++ Seq(io.toIssueBlock.memUops)
-  dqOuts.zipWithIndex.foreach { case (dqOut, dqIdx) =>
-    dqOut.map(_.bits.pc).zipWithIndex.map{ case (pc, portIdx) =>
-      if(params.allSchdParams(dqIdx).numPcReadPort > 0){
-        val realJumpPcVec = jumpPcVec.drop(params.allSchdParams.take(dqIdx).map(_.numPcReadPort).sum).take(params.allSchdParams(dqIdx).numPcReadPort)
-        pc := realJumpPcVec(portIdx)
-      }
-    }
-  }
 
   rob.io.hartId := io.fromTop.hartId
   rob.io.redirect := s1_s3_redirect
@@ -604,7 +578,6 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val intUops = Vec(dpParams.IntDqDeqWidth, DecoupledIO(new DynInst))
     val vfUops = Vec(dpParams.FpDqDeqWidth, DecoupledIO(new DynInst))
     val memUops = Vec(dpParams.LsDqDeqWidth, DecoupledIO(new DynInst))
-    val pcVec = Output(Vec(params.numPcReadPort, UInt(VAddrData().dataWidth.W)))
   }
   val fromDataPath = new Bundle{
     val vtype = Input(new VType)
