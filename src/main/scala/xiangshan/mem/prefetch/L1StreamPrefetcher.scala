@@ -58,44 +58,50 @@ class StreamBitVectorBundle(implicit p: Parameters) extends XSBundle with HasStr
   val cnt = UInt((log2Up(BIT_VEC_WITDH) + 1).W)
   val decr_mode = Bool()
 
-  def reset(index: Int) = {
-    tag := index.U
-    bit_vec := 0.U
-    active := false.B
-    cnt := 0.U
-    decr_mode := INIT_DEC_MODE.B
+  def reset(valid: Bool, index: Int) = {
+    when(valid){
+      tag := index.U
+      bit_vec := 0.U
+      active := false.B
+      cnt := 0.U
+      decr_mode := INIT_DEC_MODE.B
+    }
   }
 
   def tag_match(new_tag: UInt): Bool = {
     region_hash_tag(tag) === region_hash_tag(new_tag)
   }
 
-  def alloc(alloc_tag: UInt, alloc_bit_vec: UInt, alloc_active: Bool, alloc_decr_mode: Bool) = {
-    tag := alloc_tag
-    bit_vec := alloc_bit_vec
-    active := alloc_active
-    cnt := 1.U
-    if(ENABLE_DECR_MODE) {
-      decr_mode := alloc_decr_mode
-    }else {
-      decr_mode := INIT_DEC_MODE.B
+  def alloc(valid: Bool, alloc_tag: UInt, alloc_bit_vec: UInt, alloc_active: Bool, alloc_decr_mode: Bool) = {
+    when(valid){
+      tag := alloc_tag
+      bit_vec := alloc_bit_vec
+      active := alloc_active
+      cnt := 1.U
+      if (ENABLE_DECR_MODE) {
+        decr_mode := alloc_decr_mode
+      } else {
+        decr_mode := INIT_DEC_MODE.B
+      }
     }
 
     assert(PopCount(alloc_bit_vec) === 1.U, "alloc vector should be one hot")
   }
 
-  def update(update_bit_vec: UInt, update_active: Bool) = {
-    // if the slot is 0 before, increment cnt
-    val cnt_en = !((bit_vec & update_bit_vec).orR)
-    val cnt_next = Mux(cnt_en, cnt + 1.U, cnt)
+  def update(valid: Bool, update_bit_vec: UInt, update_active: Bool) = {
+    when(valid){
+      // if the slot is 0 before, increment cnt
+      val cnt_en = !((bit_vec & update_bit_vec).orR)
+      val cnt_next = Mux(cnt_en, cnt + 1.U, cnt)
 
-    bit_vec := bit_vec | update_bit_vec
-    cnt := cnt_next
-    when(cnt_next >= ACTIVE_THRESHOLD.U) {
-      active := true.B
-    }
-    when(update_active) {
-      active := true.B
+      bit_vec := bit_vec | update_bit_vec
+      cnt := cnt_next
+      when(cnt_next >= ACTIVE_THRESHOLD.U) {
+        active := true.B
+      }
+      when(update_active) {
+        active := true.B
+      }
     }
 
     assert(PopCount(update_bit_vec) === 1.U, "update vector should be one hot")
@@ -194,7 +200,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   assert(!s0_valid || !(s0_hit && s0_plus_one_hit && (s0_index === s0_plus_one_index)), "region and region plus 1 index match failed")
   assert(!s0_valid || !(s0_hit && s0_minus_one_hit && (s0_index === s0_minus_one_index)), "region and region minus 1 index match failed")
   assert(!s0_valid || !(s0_plus_one_hit && s0_minus_one_hit && (s0_minus_one_index === s0_plus_one_index)), "region plus 1 and region minus 1 index match failed")
-  assert(!(s0_valid && RegNext(s0_valid) && !s0_hit && !RegNext(s0_hit) && replacement.way === RegNext(replacement.way)), "replacement error")
+  assert(!(s0_valid && GatedValidRegNext(s0_valid) && !s0_hit && !RegEnable(s0_hit, s0_valid) && replacement.way === RegEnable(replacement.way, s0_valid)), "replacement error")
 
   XSPerfAccumulate("s0_valid_train_req", s0_valid)
   val s0_hit_pattern_vec = Seq(s0_hit, s0_plus_one_hit, s0_minus_one_hit)
@@ -212,7 +218,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   val l3_ratio = l3_ratio_const(3, 0)
 
   // s1: alloc or update
-  val s1_valid = RegNext(s0_valid)
+  val s1_valid = GatedValidRegNext(s0_valid)
   val s1_index = RegEnable(s0_index, s0_valid)
   val s1_plus_one_index = RegEnable(s0_plus_one_index, s0_valid)
   val s1_minus_one_index = RegEnable(s0_minus_one_index, s0_valid)
@@ -242,15 +248,17 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   when(s1_alloc) {
     // alloc a new entry
     array(s1_index).alloc(
+      s1_alloc,
       alloc_tag = s1_region_tag,
       alloc_bit_vec = UIntToOH(s1_region_bits),
       alloc_active = s1_plus_one_hit || s1_minus_one_hit,
-      alloc_decr_mode = RegEnable(s0_plus_one_hit, s0_valid))
-
+      alloc_decr_mode = RegEnable(s0_plus_one_hit, s0_valid)
+    )
   }.elsewhen(s1_update) {
     // update a existing entry
     assert(array(s1_index).cnt =/= 0.U || array(s1_index).tag === s1_index, "entry should have been allocated before")
     array(s1_index).update(
+      s1_update,
       update_bit_vec = UIntToOH(s1_region_bits),
       update_active = s1_plus_one_hit || s1_minus_one_hit)
   }
@@ -261,7 +269,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   XSPerfAccumulate("s1_active_minus_one_hit", s1_valid && s1_minus_one_hit)
 
   // s2: trigger prefetch if hit active bit vector, compute meta of prefetch req
-  val s2_valid = RegNext(s1_valid)
+  val s2_valid = GatedValidRegNext(s1_valid)
   val s2_index = RegEnable(s1_index, s1_valid)
   val s2_region_bits = RegEnable(s1_region_bits, s1_valid)
   val s2_region_tag = RegEnable(s1_region_tag, s1_valid)
@@ -304,22 +312,22 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   XSPerfAccumulate("s2_will_send_incr_pf", s2_valid && s2_will_send_pf && !s2_decr_mode)
 
   // s3: send the l1 prefetch req out
-  val s3_pf_l1_valid = RegNext(s2_pf_req_valid)
+  val s3_pf_l1_valid = GatedValidRegNext(s2_pf_req_valid)
   val s3_pf_l1_bits = RegEnable(s2_pf_l1_req_bits, s2_pf_req_valid)
-  val s3_pf_l2_valid = RegNext(s2_pf_req_valid)
+  val s3_pf_l2_valid = GatedValidRegNext(s2_pf_req_valid)
   val s3_pf_l2_bits = RegEnable(s2_pf_l2_req_bits, s2_pf_req_valid)
   val s3_pf_l3_bits = RegEnable(s2_pf_l3_req_bits, s2_pf_req_valid)
 
   XSPerfAccumulate("s3_pf_sent", s3_pf_l1_valid)
 
   // s4: send the l2 prefetch req out
-  val s4_pf_l2_valid = RegNext(s3_pf_l2_valid)
+  val s4_pf_l2_valid = GatedValidRegNext(s3_pf_l2_valid)
   val s4_pf_l2_bits = RegEnable(s3_pf_l2_bits, s3_pf_l2_valid)
   val s4_pf_l3_bits = RegEnable(s3_pf_l3_bits, s3_pf_l2_valid)
 
   val enable_l3_pf = WireInit(Constantin.createRecord("enableL3StreamPrefetch" + p(XSCoreParamsKey).HartId.toString, initValue = 0.U)) =/= 0.U
   // s5: send the l3 prefetch req out
-  val s5_pf_l3_valid = RegNext(s4_pf_l2_valid) && enable_l3_pf
+  val s5_pf_l3_valid = GatedValidRegNext(s4_pf_l2_valid) && enable_l3_pf
   val s5_pf_l3_bits = RegEnable(s4_pf_l3_bits, s4_pf_l2_valid)
 
   io.prefetch_req.valid := s3_pf_l1_valid || s4_pf_l2_valid || s5_pf_l3_valid
@@ -335,27 +343,25 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   val s0_lookup_vaddr = io.stream_lookup_req.bits.vaddr
   val s0_lookup_tag = get_region_tag(s0_lookup_vaddr)
   // S1: match
-  val s1_lookup_valid = RegNext(s0_lookup_valid)
+  val s1_lookup_valid = GatedValidRegNext(s0_lookup_valid)
   val s1_lookup_tag = RegEnable(s0_lookup_tag, s0_lookup_valid)
   val s1_lookup_tag_match_vec = array.map(_.tag_match(s1_lookup_tag))
   val s1_lookup_hit = VecInit(s1_lookup_tag_match_vec).asUInt.orR
   val s1_lookup_index = OHToUInt(VecInit(s1_lookup_tag_match_vec))
   // S2: read active out
-  val s2_lookup_valid = RegNext(s1_lookup_valid)
+  val s2_lookup_valid = GatedValidRegNext(s1_lookup_valid)
   val s2_lookup_hit = RegEnable(s1_lookup_hit, s1_lookup_valid)
   val s2_lookup_index = RegEnable(s1_lookup_index, s1_lookup_valid)
   val s2_lookup_active = array(s2_lookup_index).active
   // S3: send back to Stride
-  val s3_lookup_valid = RegNext(s2_lookup_valid)
+  val s3_lookup_valid = GatedValidRegNext(s2_lookup_valid)
   val s3_lookup_hit = RegEnable(s2_lookup_hit, s2_lookup_valid)
   val s3_lookup_active = RegEnable(s2_lookup_active, s2_lookup_valid)
   io.stream_lookup_resp := s3_lookup_valid && s3_lookup_hit && s3_lookup_active
 
   // reset meta to avoid muti-hit problem
   for(i <- 0 until BIT_VEC_ARRAY_SIZE) {
-    when(reset.asBool || RegNext(io.flush)) {
-      array(i).reset(i)
-    }
+    array(i).reset(reset.asBool || GatedValidRegNext(io.flush), i)
   }
 
   XSPerfHistogram("bit_vector_active", PopCount(VecInit(array.map(_.active)).asUInt), true.B, 0, BIT_VEC_ARRAY_SIZE, 1)

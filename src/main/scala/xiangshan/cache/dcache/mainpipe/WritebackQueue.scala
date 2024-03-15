@@ -153,7 +153,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   val state = RegInit(s_invalid)
   val state_dup_0 = RegInit(s_invalid)
   val state_dup_1 = RegInit(s_invalid)
-  val state_dup_for_mp = RegInit(VecInit(Seq.fill(nDupWbReady)(s_invalid)))
+  val state_dup_for_mp = RegInit(VecInit(Seq.fill(nDupWbReady)(s_invalid))) //TODO: clock gate
 
   // internal regs
   // remaining beats
