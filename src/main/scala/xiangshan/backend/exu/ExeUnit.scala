@@ -54,66 +54,67 @@ class ExeUnitImp(
 
   val io = IO(new ExeUnitIO(exuParams))
 
-  val funcUnit = fuCfgs.map(cfg => {
+  val funcUnits = fuCfgs.map(cfg => {
     assert(cfg.fuGen != null, cfg.name + "Cfg'fuGen is null !!!")
     val module = cfg.fuGen(p, cfg)
     module
   })
 
-  val funcUnits = fuCfgs.zip(funcUnit).map{case(cfg, fu) => 
-    val clk_en = WireInit(false.B)
-    val fuVld_en = WireInit(false.B)
-    val fuVld_en_reg = RegInit(false.B)
-    val uncer_en_reg = RegInit(false.B)
+  if (EnableClockGate) {
+    fuCfgs.zip(funcUnits).foreach { case (cfg, fu) =>
+      val clk_en = WireInit(false.B)
+      val fuVld_en = WireInit(false.B)
+      val fuVld_en_reg = RegInit(false.B)
+      val uncer_en_reg = RegInit(false.B)
 
-    val lat0 = FuType.isLat0(io.in.bits.fuType)
-    val latN = FuType.isLatN(io.in.bits.fuType)
-    val uncerLat = FuType.isUncerLat(io.in.bits.fuType)
+      val lat0 = FuType.isLat0(io.in.bits.fuType)
+      val latN = FuType.isLatN(io.in.bits.fuType)
+      val uncerLat = FuType.isUncerLat(io.in.bits.fuType)
 
-    def lat: Int = cfg.latency.latencyVal.getOrElse(0)
+      def lat: Int = cfg.latency.latencyVal.getOrElse(0)
 
-    val fuVldVec = (io.in.valid && latN) +: Seq.fill(lat)(RegInit(false.B))
-    val fuRdyVec = Seq.fill(lat)(Wire(Bool())) :+ io.out.ready
+      val fuVldVec = (io.in.valid && latN) +: Seq.fill(lat)(RegInit(false.B))
+      val fuRdyVec = Seq.fill(lat)(Wire(Bool())) :+ io.out.ready
 
-    for (i <- 0 until lat) {
-      fuRdyVec(i) := !fuVldVec(i + 1) || fuRdyVec(i + 1)
-    }
-
-    for (i <- 1 to lat) {
-      when(fuRdyVec(i - 1) && fuVldVec(i - 1)) {
-        fuVldVec(i) := fuVldVec(i - 1)
-      }.elsewhen(fuRdyVec(i)) {
-        fuVldVec(i) := false.B
+      for (i <- 0 until lat) {
+        fuRdyVec(i) := !fuVldVec(i + 1) || fuRdyVec(i + 1)
       }
-    }
-    fuVld_en := fuVldVec.map(v => v).reduce(_ || _)
-    fuVld_en_reg := fuVld_en
 
-    when(uncerLat && io.in.fire) {
-      uncer_en_reg := true.B
-    }.elsewhen(uncerLat && io.out.fire) {
-      uncer_en_reg := false.B
-    }
+      for (i <- 1 to lat) {
+        when(fuRdyVec(i - 1) && fuVldVec(i - 1)) {
+          fuVldVec(i) := fuVldVec(i - 1)
+        }.elsewhen(fuRdyVec(i)) {
+          fuVldVec(i) := false.B
+        }
+      }
+      fuVld_en := fuVldVec.map(v => v).reduce(_ || _)
+      fuVld_en_reg := fuVld_en
 
-    when(lat0 && io.in.fire) {
-      clk_en := true.B
-    }.elsewhen(latN && fuVld_en || fuVld_en_reg) {
-      clk_en := true.B
-    }.elsewhen(uncerLat && io.in.fire || uncer_en_reg) {
-      clk_en := true.B
-    }
+      when(uncerLat && io.in.fire) {
+        uncer_en_reg := true.B
+      }.elsewhen(uncerLat && io.out.fire) {
+        uncer_en_reg := false.B
+      }
 
-    if (cfg.ckAlwaysEn) {
-      clk_en := true.B
-    }
+      when(lat0 && io.in.fire) {
+        clk_en := true.B
+      }.elsewhen(latN && fuVld_en || fuVld_en_reg) {
+        clk_en := true.B
+      }.elsewhen(uncerLat && io.in.fire || uncer_en_reg) {
+        clk_en := true.B
+      }
 
-    val clk_gate = Module(new ClockGate)
-    clk_gate.io.TE := false.B
-    clk_gate.io.E := clk_en
-    clk_gate.io.CK := clock
-    fu.clock := clk_gate.io.Q
-    XSPerfAccumulate(s"clock_gate_en_${fu.cfg.name}", clk_en)
-    fu
+      if (cfg.ckAlwaysEn) {
+        clk_en := true.B
+      }
+
+      val clk_gate = Module(new ClockGate)
+      clk_gate.io.TE := false.B
+      clk_gate.io.E := clk_en
+      clk_gate.io.CK := clock
+      fu.clock := clk_gate.io.Q
+      XSPerfAccumulate(s"clock_gate_en_${fu.cfg.name}", clk_en)
+    }
   }
 
   val busy = RegInit(false.B)
