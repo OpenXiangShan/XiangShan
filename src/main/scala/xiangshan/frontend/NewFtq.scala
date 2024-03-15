@@ -626,8 +626,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val last_cycle_bpu_in_stage = RegEnable(bpu_in_stage, bpu_in_fire)
 
   def extra_copyNum_for_commitStateQueue = 2
-  val copied_last_cycle_bpu_in = VecInit(Seq.fill(copyNum+extra_copyNum_for_commitStateQueue)(RegNext(bpu_in_fire)))
-  val copied_last_cycle_bpu_in_ptr_for_ftq = VecInit(Seq.fill(extra_copyNum_for_commitStateQueue)(RegNext(bpu_in_resp_ptr)))
+  val copied_last_cycle_bpu_in =
+    VecInit(Seq.fill(copyNum + extra_copyNum_for_commitStateQueue)(RegNext(bpu_in_fire)))
+  val copied_last_cycle_bpu_in_ptr_for_ftq =
+    VecInit(Seq.fill(extra_copyNum_for_commitStateQueue)(RegEnable(bpu_in_resp_ptr, bpu_in_fire)))
 
   newest_entry_target_modified := false.B
   newest_entry_ptr_modified := false.B
