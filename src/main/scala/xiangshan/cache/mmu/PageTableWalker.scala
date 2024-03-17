@@ -528,8 +528,9 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   when (mem_arb.io.out.fire) {
     for (i <- state.indices) {
-      when (state(i) =/= state_idle && state(i) =/= state_mem_out && state(i) =/= state_last_hptw_req && state(i) =/= state_last_hptw_resp && entries(i).req_info.s2xlate === mem_arb.io.out.bits.req_info.s2xlate && 
-      Mux(entries(i).req_info.s2xlate === allStage && state(i) =/= state_hptw_req && state(i) =/= state_hptw_resp, dup(entries(i).hptw_resp.entry.tag, mem_arb.io.out.bits.hptw_resp.entry.tag), dup(entries(i).req_info.vpn, mem_arb.io.out.bits.req_info.vpn))) {
+      when (state(i) =/= state_idle && state(i) =/= state_mem_out && state(i) =/= state_last_hptw_req && state(i) =/= state_last_hptw_resp 
+      && entries(i).req_info.s2xlate === mem_arb.io.out.bits.req_info.s2xlate 
+      && dup(entries(i).req_info.vpn, mem_arb.io.out.bits.req_info.vpn)) {
         // NOTE: "dup enq set state to mem_wait" -> "sending req set other dup entries to mem_wait"
         state(i) := state_mem_waiting
         entries(i).wait_id := mem_arb.io.chosen
@@ -570,7 +571,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   when (io.hptw.resp.fire) {
     for (i <- state.indices) {
       when (state(i) === state_hptw_resp && io.hptw.resp.bits.id === entries(i).wait_id) {
-        val need_to_waiting_vec = state.indices.map(i => state(i) === state_mem_waiting && dup(entries(i).hptw_resp.entry.tag, io.hptw.resp.bits.h_resp.entry.tag))
+        val need_to_waiting_vec = state.indices.map(i => state(i) === state_mem_waiting && dup(entries(i).req_info.vpn, entries(io.hptw.resp.bits.id).req_info.vpn))
         val waiting_index = ParallelMux(need_to_waiting_vec zip entries.map(_.wait_id))
         state(i) := Mux(Cat(need_to_waiting_vec).orR, state_mem_waiting, state_addr_check)
         entries(i).hptw_resp := io.hptw.resp.bits.h_resp
