@@ -3,6 +3,7 @@ package xiangshan.backend.fu.vector
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import xiangshan._
 import xiangshan.backend.fu.FuConfig.VialuCfg
 import xiangshan.backend.fu.vector.Bundles.VConfig
 import xiangshan.backend.fu.vector.utils.ScalaDupToVector
@@ -22,8 +23,10 @@ trait VecFuncUnitAlias { this: FuncUnit =>
   protected val vm      = vecCtrl.vm
   protected val vstart  = vecCtrl.vstart
 
-  protected val frm     = if(cfg.needSrcFrm) io.frm.get else 0.U
-  protected val vxrm    = if(cfg.needSrcVxrm) io.vxrm.get else 0.U
+  protected val frm     = io.frm.getOrElse(0.U(3.W))
+  protected val vxrm    = io.vxrm.getOrElse(0.U(3.W))
+  protected val instRm  = inCtrl.fpu.getOrElse(0.U.asTypeOf(new FPUCtrlSignals)).rm
+  protected val rm      = Mux(vecCtrl.fpu.isFpToVecInst && instRm =/= "b111".U, instRm, frm)
   protected val vuopIdx = vecCtrl.vuopIdx
   protected val nf      = 0.U  // No need to handle nf in vector arith unit
 
