@@ -28,9 +28,9 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   private val isRtz = opcode(2) & opcode(1)
   private val isRod = opcode(2) & !opcode(1) & opcode(0)
   private val isFrm = !isRtz && !isRod
-  private val rm = Mux1H(
+  private val vfcvtRm = Mux1H(
     Seq(isRtz, isRod, isFrm),
-    Seq(1.U, 6.U, frm)
+    Seq(1.U, 6.U, rm)
   )
 
   private val lmul = vlmul // -3->3 => 1/8 ->8
@@ -86,7 +86,7 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   vfcvt.src := vs2Vec
   vfcvt.opType := opcode
   vfcvt.sew := sew
-  vfcvt.rm := rm
+  vfcvt.rm := vfcvtRm
   vfcvt.outputWidth1H := outputWidth1H
   vfcvt.isWiden := isWidenCvt
   vfcvt.isNarrow := isNarrowCvt
