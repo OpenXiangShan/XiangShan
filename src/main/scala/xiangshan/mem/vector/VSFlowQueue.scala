@@ -787,6 +787,7 @@ class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQue
       x.addr  := thisEntry.paddr
       x.wline := false.B            // ! Not Sure
       x.prefetch := false.B
+      x.lqIdx := 0.U.asTypeOf(x.lqIdx)
     }
   }
 
