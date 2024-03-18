@@ -22,7 +22,7 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   private val numVecModule = dataWidth / dataWidthOfDataModule
 
   // io alias
-  private val opcode = fuOpType(7, 0)
+  private val opcode = fuOpType(8, 0)
   private val sew = vsew
 
   private val isRtz = opcode(2) & opcode(1)
@@ -67,6 +67,9 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
     dontTouch(output1H)
   }
   val outputWidth1H = output1H
+  val outIs32bits = RegNext(RegNext(outputWidth1H(2)))
+  val outIsInt = !outCtrl.fuOpType(6)
+  val outIsMvInst = outCtrl.fuOpType(8)
 
   val outEew = RegEnable(RegEnable(Mux1H(output1H, Seq(0,1,2,3).map(i => i.U)), fire), fireReg)
   private val needNoMask = outVecCtrl.fpu.isFpToVecInst
@@ -84,7 +87,7 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
    */
   vfcvt.uopIdx := vuopIdx(0)
   vfcvt.src := vs2Vec
-  vfcvt.opType := opcode
+  vfcvt.opType := opcode(7,0)
   vfcvt.sew := sew
   vfcvt.rm := vfcvtRm
   vfcvt.outputWidth1H := outputWidth1H
@@ -111,11 +114,13 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   )
   val eNumMax1H = Mux(lmul.head(1).asBool, eNum1H >> ((~lmul.tail(1)).asUInt +1.U), eNum1H << lmul.tail(1)).asUInt(6, 0)
   val eNumMax = Mux1H(eNumMax1H, Seq(1,2,4,8,16,32,64).map(i => i.U)) //only for cvt intr, don't exist 128 in cvt
-  val eNumEffectIdx = Mux(vl > eNumMax, eNumMax, vl)
+  val vlForFflags = Mux(vecCtrl.fpu.isFpToVecInst, 1.U, vl)
+  val eNumEffectIdx = Mux(vlForFflags > eNumMax, eNumMax, vlForFflags)
 
   val eNum = Mux1H(eNum1H, Seq(1, 2, 4, 8).map(num =>num.U))
   val eStart = vuopIdx * eNum
-  val maskPart = srcMask >> eStart
+  val maskForFflags = Mux(vecCtrl.fpu.isFpToVecInst, allMaskTrue, srcMask)
+  val maskPart = maskForFflags >> eStart
   val mask =  Mux1H(eNum1H, Seq(1, 2, 4, 8).map(num => maskPart(num-1, 0)))
   val fflagsEn = Wire(Vec(4 * numVecModule, Bool()))
 
@@ -125,7 +130,7 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   val fflagsAll = Wire(Vec(8, UInt(5.W)))
   fflagsAll := vfcvtFflags.asTypeOf(fflagsAll)
   val fflags = fflagsEnCycle2.zip(fflagsAll).map{case(en, fflag) => Mux(en, fflag, 0.U(5.W))}.reduce(_ | _)
-  io.out.bits.res.fflags.get := fflags
+  io.out.bits.res.fflags.get := Mux(outIsMvInst, 0.U, fflags)
 
 
   /**
@@ -155,7 +160,15 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   mgu.io.in.info.dstMask := outVecCtrl.isDstMask
   mgu.io.in.isIndexedVls := false.B
 
-  io.out.bits.res.data := mgu.io.out.vd
+  // for scalar f2i cvt inst
+  val isFp2VecForInt = outVecCtrl.fpu.isFpToVecInst && outIs32bits && outIsInt
+  // for f2i mv inst
+  val result = Mux(outIsMvInst, RegNext(RegNext(vs2.tail(64))), mgu.io.out.vd)
+
+  io.out.bits.res.data := Mux(isFp2VecForInt,
+    Fill(32, result(31)) ## result(31, 0),
+    result
+  )
   io.out.bits.ctrl.exceptionVec.get(ExceptionNO.illegalInstr) := mgu.io.out.illegal
 }
 
