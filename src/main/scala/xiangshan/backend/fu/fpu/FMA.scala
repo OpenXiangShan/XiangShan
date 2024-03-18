@@ -35,6 +35,8 @@ class MulToAddIO(val ftypes: Seq[FPU.FType])(implicit p: Parameters) extends XSB
   val robIdx = new RobPtr
   val pdest = UInt(PhyRegIdxWidth.W)
   val fpWen = Bool()
+  val rm = UInt(3.W)
+
   def getFloat = mul_out.head
   def getDouble = mul_out.last
 }
@@ -95,6 +97,7 @@ class FMUL_pipe(cfg: FuConfig, val mulLat: Int = 2)(implicit p: Parameters)
   val outSel = S2Reg(S1Reg(typeSel))
 
   toAdd.addend := S2Reg(S1Reg(io.in.bits.data.src(2)))
+  toAdd.rm := S2Reg(S1Reg(rm))
   toAdd.mul_out.zip(s3.map(_.io.to_fadd)).foreach(x => x._1 := x._2)
   toAdd.fpCtrl := S2Reg(S1Reg(io.in.bits.ctrl.fpu.get))
   toAdd.robIdx := robIdxVec(latency)

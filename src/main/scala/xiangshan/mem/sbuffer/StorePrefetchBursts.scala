@@ -86,7 +86,8 @@ class PrefetchBurstGenerator(is_store: Boolean)(implicit p: Parameters) extends 
     val prefetch_req = Vec(StorePipelineWidth, DecoupledIO(new StorePrefetchReq))
   })
 
-  require(StorePipelineWidth >= 2)
+  val maxStorePipelineWidth = (if (Enable3Load3Store) 3 else 2)
+  require(StorePipelineWidth >= maxStorePipelineWidth)
 
   val SIZE = BURST_ENGINE_SIZE
 

@@ -39,10 +39,9 @@ abstract class ICacheMissUnitBundle(implicit p: Parameters) extends XSBundle
 class ICacheMissReq(implicit p: Parameters) extends ICacheBundle
 {
     val paddr      = UInt(PAddrBits.W)
-    val vaddr      = UInt(VAddrBits.W)
-    val waymask   = UInt(nWays.W)
+    val vSetIdx    = UInt(log2Ceil(nSets).W)
+    val waymask     = UInt(nWays.W)
 
-    def getVirSetIdx = get_idx(vaddr)
     def getPhyTag    = get_phy_tag(paddr)
 }
 
@@ -92,7 +91,7 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
   /** control logic transformation */
   //request register
   val req = Reg(new ICacheMissReq)
-  val req_idx = req.getVirSetIdx //virtual index
+  val req_idx = req.vSetIdx //virtual index
   val req_tag = req.getPhyTag //physical tag
   val req_waymask = req.waymask
   val req_corrupt = RegInit(false.B)

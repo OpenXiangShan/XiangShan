@@ -536,7 +536,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     val evict = s1_alloc && (s1_index === i.U)
     l2_pf_req_arb.io.in(i).valid := array(i).can_send_pf() && (array(i).sink === SINK_L2) && !evict
     l2_pf_req_arb.io.in(i).bits.addr := array(i).get_pf_addr()
-    l2_pf_req_arb.io.in(i).bits.source := MuxLookup(array(i).source.value, MemReqSource.Prefetch2L2Unknown.id.U, Seq(
+    l2_pf_req_arb.io.in(i).bits.source := MuxLookup(array(i).source.value, MemReqSource.Prefetch2L2Unknown.id.U)(Seq(
       L1_HW_PREFETCH_STRIDE -> MemReqSource.Prefetch2L2Stride.id.U,
       L1_HW_PREFETCH_STREAM -> MemReqSource.Prefetch2L2Stream.id.U
     ))

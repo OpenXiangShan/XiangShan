@@ -458,8 +458,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   }
 
   def outReady(source: UInt, port: Int): Bool = {
-    MuxLookup(source, true.B,
-      (0 until PtwWidth).map(i => i.U -> mergeArb(i).in(port).ready))
+    MuxLookup(source, true.B)((0 until PtwWidth).map(i => i.U -> mergeArb(i).in(port).ready))
   }
 
   // debug info

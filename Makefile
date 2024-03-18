@@ -15,6 +15,7 @@
 #***************************************************************************************
 
 BUILD_DIR = ./build
+RTL_DIR = $(BUILD_DIR)/rtl
 
 TOP = XSTop
 SIM_TOP = SimTop
@@ -22,8 +23,8 @@ SIM_TOP = SimTop
 FPGATOP = top.TopMain
 SIMTOP  = top.SimTop
 
-TOP_V = $(BUILD_DIR)/$(TOP).v
-SIM_TOP_V = $(BUILD_DIR)/$(SIM_TOP).v
+TOP_V = $(RTL_DIR)/$(TOP).v
+SIM_TOP_V = $(RTL_DIR)/$(SIM_TOP).v
 
 SCALA_FILE = $(shell find ./src/main/scala -name '*.scala')
 TEST_FILE = $(shell find ./src/test/scala -name '*.scala')
@@ -37,28 +38,12 @@ CONFIG ?= DefaultConfig
 NUM_CORES ?= 1
 MFC ?= 0
 
-# firtool check and download
-FIRTOOL_VERSION = 1.61.0
-FIRTOOL_URL = https://github.com/llvm/circt/releases/download/firtool-$(FIRTOOL_VERSION)/firrtl-bin-linux-x64.tar.gz
-FIRTOOL_PATH = $(shell which firtool 2>/dev/null)
-CACHE_FIRTOOL_PATH = $(HOME)/.cache/xiangshan/firtool-$(FIRTOOL_VERSION)/bin/firtool
-ifeq ($(MFC),1)
-ifeq ($(FIRTOOL_PATH),)
-ifeq ($(wildcard $(CACHE_FIRTOOL_PATH)),)
-$(info [INFO] Firtool not found in your PATH.)
-$(info [INFO] Downloading from $(FIRTOOL_URL))
-$(shell mkdir -p $(HOME)/.cache/xiangshan && curl -L $(FIRTOOL_URL) | tar -xzC $(HOME)/.cache/xiangshan)
-endif
-FIRTOOL_ARGS = --firtool-binary-path $(CACHE_FIRTOOL_PATH)
-endif
-endif
-
 # common chisel args
 ifeq ($(MFC),1)
 CHISEL_VERSION = chisel
 FPGA_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(TOP).v.conf"
 SIM_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(SIM_TOP).v.conf"
-MFC_ARGS = --dump-fir $(FIRTOOL_ARGS) \
+MFC_ARGS = --dump-fir \
            --firtool-opt "-O=release --disable-annotation-unknown --lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing,locationInfoStyle=none"
 RELEASE_ARGS += $(MFC_ARGS)
 DEBUG_ARGS += $(MFC_ARGS)
@@ -95,9 +80,9 @@ override SIM_ARGS += --with-constantin
 endif
 
 # emu for the release version
-RELEASE_ARGS += --fpga-platform --disable-always-basic-diff --disable-perf
+RELEASE_ARGS += --fpga-platform --disable-always-basic-diff --disable-perf --remove-assert
 DEBUG_ARGS   += --enable-difftest
-PLDM_ARGS += --disable-all --fpga-platform
+PLDM_ARGS += --disable-all --fpga-platform --enable-difftest
 ifeq ($(RELEASE),1)
 override SIM_ARGS += $(RELEASE_ARGS)
 else ifeq ($(PLDM),1)
@@ -111,6 +96,11 @@ TIME_CMD = time -a -o $(TIMELOG)
 
 SED_CMD = sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g'
 
+ifeq ($(PLDM),1)
+SED_IFNDEF = `ifndef SYNTHESIS	// src/main/scala/device/RocketDebugWrapper.scala
+SED_ENDIF  = `endif // not def SYNTHESIS
+endif
+
 .DEFAULT_GOAL = verilog
 
 help:
@@ -122,8 +112,8 @@ $(TOP_V): $(SCALA_FILE)
 		-td $(@D) --config $(CONFIG) $(FPGA_MEM_ARGS)                    \
 		--num-cores $(NUM_CORES) $(RELEASE_ARGS)
 ifeq ($(MFC),1)
-	$(SPLIT_VERILOG) $(BUILD_DIR) $(TOP).v
-	$(MEM_GEN_SEP) "$(MEM_GEN)" "$(TOP_V).conf" "$(BUILD_DIR)"
+	$(SPLIT_VERILOG) $(RTL_DIR) $(TOP).v
+	$(MEM_GEN_SEP) "$(MEM_GEN)" "$(TOP_V).conf" "$(RTL_DIR)"
 endif
 	$(SED_CMD) $@
 	@git log -n 1 >> .__head__
@@ -144,8 +134,8 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 		-td $(@D) --config $(CONFIG) $(SIM_MEM_ARGS)                          \
 		--num-cores $(NUM_CORES) $(SIM_ARGS) --full-stacktrace
 ifeq ($(MFC),1)
-	$(SPLIT_VERILOG) $(BUILD_DIR) $(SIM_TOP).v
-	$(MEM_GEN_SEP) "$(MEM_GEN)" "$(SIM_TOP_V).conf" "$(BUILD_DIR)"
+	$(SPLIT_VERILOG) $(RTL_DIR) $(SIM_TOP).v
+	$(MEM_GEN_SEP) "$(MEM_GEN)" "$(SIM_TOP_V).conf" "$(RTL_DIR)"
 endif
 	$(SED_CMD) $@
 	@git log -n 1 >> .__head__
@@ -157,7 +147,7 @@ endif
 	@rm .__head__ .__diff__
 ifeq ($(PLDM),1)
 	sed -i -e 's/$$fatal/$$finish/g' $(SIM_TOP_V)
-	sed -i -e 's|`ifndef SYNTHESIS	// src/main/scala/device/RocketDebugWrapper.scala:141:11|`ifdef SYNTHESIS	// src/main/scala/device/RocketDebugWrapper.scala:141:11|g' $(SIM_TOP_V)
+	sed -i -e '/sed/! { \|$(SED_IFNDEF)|, \|$(SED_ENDIF)| { \|$(SED_IFNDEF)|d; \|$(SED_ENDIF)|d; } }' $(SIM_TOP_V)
 else
 	sed -i -e 's/$$fatal/xs_assert(`__LINE__)/g' $(SIM_TOP_V)
 endif
@@ -194,6 +184,16 @@ emu-run: emu
 # vcs simulation
 simv:
 	$(MAKE) -C ./difftest simv SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
+
+# palladium simulation
+pldm-build: sim-verilog
+	$(MAKE) -C ./difftest pldm-build SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
+
+pldm-run:
+	$(MAKE) -C ./difftest pldm-run SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
+
+pldm-debug:
+	$(MAKE) -C ./difftest pldm-debug SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
 
 include Makefile.test
 

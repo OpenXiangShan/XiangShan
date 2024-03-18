@@ -65,7 +65,7 @@ object TriggerCmpConsecutive {
 
     val ret = Wire(Vec(len1, Bool()))
 
-    ret.zipWithIndex.map{case (r, i) => r := MuxLookup(matchType, false.B,
+    ret.zipWithIndex.map{case (r, i) => r := MuxLookup(matchType, false.B)(
       Array(0.U -> overallEqual(i),
         2.U -> overallGreater(i),
         3.U -> overallLess(i))) && enable}
