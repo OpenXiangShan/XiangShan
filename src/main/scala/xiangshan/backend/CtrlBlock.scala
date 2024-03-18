@@ -248,6 +248,9 @@ class CtrlBlockImp(
   //exception
   io.frontend.toFtq.ftqIdxAhead.last.valid := s5_flushFromRobValidAhead
   io.frontend.toFtq.ftqIdxAhead.last.bits := frontendFlushBits.ftqIdx
+
+  io.frontend.canAccept := decode.io.canAccept
+
   // Be careful here:
   // T0: rob.io.flushOut, s0_robFlushRedirect
   // T1: s1_robFlushRedirect, rob.io.exception.valid

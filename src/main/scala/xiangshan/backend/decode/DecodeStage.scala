@@ -40,6 +40,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
 
   val io = IO(new Bundle() {
     val redirect = Input(Bool())
+    val canAccept = Output(Bool())
     // from Ibuffer
     val in = Vec(DecodeWidth, Flipped(DecoupledIO(new StaticInst)))
     // to Rename
@@ -75,6 +76,8 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   val vtypeGen = Module(new VTypeGen)
 
   val debug_globalCounter = RegInit(0.U(XLEN.W))
+
+  val canAccept = Wire(Bool())
 
   //Simple 6
   decoders.zip(io.in).foreach { case (dst, src) => dst.io.enq.ctrlFlow := src.bits }
@@ -123,6 +126,10 @@ class DecodeStage(implicit p: Parameters) extends XSModule
 
   // block vector inst when vtype is resuming
   val hasVectorInst = VecInit(decoders.map(x => FuType.FuTypeOrR(x.io.deq.decodedInst.fuType, FuType.vecArithOrMem ++ FuType.vecVSET))).asUInt.orR
+
+  canAccept := !io.redirect && io.out.head.ready && decoderComp.io.in.ready && !io.isResumeVType
+
+  io.canAccept := canAccept
 
   io.in.zipWithIndex.foreach { case (in, i) =>
     in.ready := !io.redirect && (

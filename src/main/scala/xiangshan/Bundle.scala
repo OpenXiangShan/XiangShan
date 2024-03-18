@@ -461,6 +461,7 @@ class FrontendToCtrlIO(implicit p: Parameters) extends XSBundle {
   val fromFtq = new FtqToCtrlIO
   // from backend
   val toFtq = Flipped(new CtrlToFtqIO)
+  val canAccept = Input(Bool())
 }
 
 class SatpStruct(implicit p: Parameters) extends XSBundle {

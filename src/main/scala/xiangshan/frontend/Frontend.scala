@@ -312,6 +312,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   ibuffer.io.SCMissBubble := FlushSCMiss
   ibuffer.io.ITTAGEMissBubble := FlushITTAGEMiss
   ibuffer.io.RASMissBubble := FlushRASMiss
+  ibuffer.io.decodeCanAccept := io.backend.canAccept
 
   FlushControlBTBMiss := ftq.io.ControlBTBMissBubble
   FlushTAGEMiss := ftq.io.TAGEMissBubble
