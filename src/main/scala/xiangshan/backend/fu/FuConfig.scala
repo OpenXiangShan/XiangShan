@@ -96,14 +96,7 @@ case class FuConfig (
   def fuSel(uop: ExuInput): Bool = {
     // Don't add more shit here!!!
     // Todo: add new FuType to distinguish f2i, f2f
-    if (this.fuType == FuType.fmisc) {
-      this.name match {
-        case FuConfig.F2iCfg.name => (uop.fuType === FuType.fmisc.U) && uop.rfWen.get && uop.fuType === this.fuType.U
-        case FuConfig.F2fCfg.name => (uop.fuType === FuType.fmisc.U) && uop.fpu.get.fpWen && !uop.fpu.get.div && !uop.fpu.get.sqrt && uop.fuType === this.fuType.U
-      }
-    } else {
-      uop.fuType === this.fuType.U
-    }
+    uop.fuType === this.fuType.U
   }
 
   /**
@@ -661,6 +654,7 @@ object FuConfig {
     maskWakeUp = true,
     dataBits = 128,
     exceptionOut = Seq(illegalInstr),
+    needSrcFrm = true,
   )
 
   val VfmaCfg = FuConfig (
@@ -679,6 +673,7 @@ object FuConfig {
     maskWakeUp = true,
     dataBits = 128,
     exceptionOut = Seq(illegalInstr),
+    needSrcFrm = true,
   )
 
   val VfdivCfg = FuConfig(
@@ -697,6 +692,7 @@ object FuConfig {
     maskWakeUp = true,
     dataBits = 128,
     exceptionOut = Seq(illegalInstr),
+    needSrcFrm = true,
   )
 
   val VfcvtCfg = FuConfig(
@@ -708,13 +704,15 @@ object FuConfig {
     ),
     piped = true,
     writeVecRf = true,
-    writeFpRf = false,
+    writeFpRf = true,
+    writeIntRf = true,
     writeFflags = true,
     latency = CertainLatency(2),
     vconfigWakeUp = true,
     maskWakeUp = true,
     dataBits = 128,
     exceptionOut = Seq(illegalInstr),
+    needSrcFrm = true,
   )
 
 
