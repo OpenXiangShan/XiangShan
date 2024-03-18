@@ -532,7 +532,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
         updateMask(altProvider)    := true.B
         updateUMask(altProvider)   := false.B
-        updateCorrect(altProvider) := updateMisPred
+        updateCorrect(altProvider) := !updateMisPred
         updateOldCtr(altProvider)  := updateMeta.altProviderCtr
         updateAlloc(altProvider)   := false.B
         updateTarget(altProvider)  := updateRealTarget
@@ -542,7 +542,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
         updateMask(provider) := true.B
         updateUMask(provider) := true.B
         updateU(provider) := Mux(!updateMeta.altDiffers, updateMeta.providerU, !updateMisPred)
-        updateCorrect(provider) := updateMisPred
+        updateCorrect(provider) := !updateMisPred
         updateTarget(provider) := updateRealTarget
         updateOldCtr(provider) := updateMeta.providerCtr
         updateAlloc(provider) := false.B
