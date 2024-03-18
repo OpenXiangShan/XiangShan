@@ -532,7 +532,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   }
 
   // merge data refilled by l2 and store data, update miss queue entry, gen refill_req
-  val new_data = Wire(Vec(blockRows, UInt(rowBits.W)))
+  // val new_data = Wire(Vec(blockRows, UInt(rowBits.W)))
   val new_mask = Wire(Vec(blockRows, UInt(rowBytes.W)))
   // merge refilled data and store data (if needed)
   def mergePutData(old_data: UInt, new_data: UInt, wmask: UInt): UInt = {
@@ -541,7 +541,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   }
   for (i <- 0 until blockRows) {
     // new_data(i) := req.store_data(rowBits * (i + 1) - 1, rowBits * i)
-    new_data(i) := refill_and_store_data(i)
+    // new_data(i) := refill_and_store_data(i)
     // we only need to merge data for Store
     new_mask(i) := Mux(req.isFromStore, req_store_mask(rowBytes * (i + 1) - 1, rowBytes * i), 0.U)
   }
@@ -556,15 +556,17 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
       when (isKeyword) {
        for (i <- 0 until beatRows) {
          val idx = ((refill_count << log2Floor(beatRows)) + i.U) ^ 4.U
-         val grant_row = io.mem_grant.bits.data(rowBits * (i + 1) - 1, rowBits * i)
-         refill_and_store_data(idx) := mergePutData(grant_row, new_data(idx), new_mask(idx))
+        //  val grant_row = io.mem_grant.bits.data(rowBits * (i + 1) - 1, rowBits * i)
+        //  refill_and_store_data(idx) := mergePutData(grant_row, new_data(idx), new_mask(idx))
+        refill_and_store_data(idx) := mergePutData(io.mem_grant.bits.data(rowBits * (i + 1) - 1, rowBits * i), refill_and_store_data(idx), new_mask(idx))
         }
       }
       .otherwise{
        for (i <- 0 until beatRows) {
          val idx = (refill_count << log2Floor(beatRows)) + i.U
-         val grant_row = io.mem_grant.bits.data(rowBits * (i + 1) - 1, rowBits * i)
-         refill_and_store_data(idx) := mergePutData(grant_row, new_data(idx), new_mask(idx))
+        //  val grant_row = io.mem_grant.bits.data(rowBits * (i + 1) - 1, rowBits * i)
+        //  refill_and_store_data(idx) := mergePutData(grant_row, new_data(idx), new_mask(idx))
+        refill_and_store_data(idx) := mergePutData(io.mem_grant.bits.data(rowBits * (i + 1) - 1, rowBits * i), refill_and_store_data(idx), new_mask(idx))
         }
       }
       w_grantlast := w_grantlast || refill_done
@@ -573,7 +575,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
       // Grant
       assert(full_overwrite)
       for (i <- 0 until blockRows) {
-        refill_and_store_data(i) := new_data(i)
+        // refill_and_store_data(i) := new_data(i)
+        refill_and_store_data(i) := refill_and_store_data(i)
       }
       w_grantlast := true.B
       hasData := false.B
@@ -667,14 +670,14 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   // should not allocate, merge or reject at the same time
   assert(RegNext(PopCount(Seq(io.primary_ready, io.secondary_ready, io.secondary_reject)) <= 1.U))
 
-  val refill_data_splited = WireInit(VecInit(Seq.tabulate(cfg.blockBytes * 8 / l1BusDataWidth)(i => {
-    val data = refill_and_store_data.asUInt
-    data((i + 1) * l1BusDataWidth - 1, i * l1BusDataWidth)
-  })))
+  // val refill_data_splited = WireInit(VecInit(Seq.tabulate(cfg.blockBytes * 8 / l1BusDataWidth)(i => {
+  //   val data = refill_and_store_data.asUInt
+  //   data((i + 1) * l1BusDataWidth - 1, i * l1BusDataWidth)
+  // })))
   // when granted data is all ready, wakeup lq's miss load
   io.refill_to_ldq.valid := RegNext(!w_grantlast && io.mem_grant.fire)
   io.refill_to_ldq.bits.addr := RegNext(req.addr + ((refill_count ^ isKeyword) << refillOffBits))
-  io.refill_to_ldq.bits.data := refill_data_splited(RegNext(refill_count ^ isKeyword))
+  // io.refill_to_ldq.bits.data := refill_data_splited(RegNext(refill_count ^ isKeyword))
   io.refill_to_ldq.bits.error := RegNext(io.mem_grant.bits.corrupt || io.mem_grant.bits.denied)
   io.refill_to_ldq.bits.refill_done := RegNext(refill_done && io.mem_grant.fire)
   io.refill_to_ldq.bits.hasdata := hasData
