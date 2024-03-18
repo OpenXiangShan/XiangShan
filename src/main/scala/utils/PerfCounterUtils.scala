@@ -38,7 +38,7 @@ trait HasRegularPerfName {
 }
 
 object XSPerfAccumulate extends HasRegularPerfName {
-  def apply(perfName: String, perfCnt: UInt, perfNeedClean: Bool = false.B)(implicit p: Parameters) = {
+  def apply(perfName: String, perfCnt: UInt)(implicit p: Parameters) = {
     judgeName(perfName)
     val env = p(DebugOptionsKey)
     if (env.EnablePerfDebug && !env.FPGAPlatform) {
@@ -49,7 +49,7 @@ object XSPerfAccumulate extends HasRegularPerfName {
       val counter = RegInit(0.U(64.W)).suggestName(perfName + "Counter")
       val next_counter = WireInit(0.U(64.W)).suggestName(perfName + "Next")
       next_counter := counter + perfCnt
-      counter := Mux(perfClean || perfNeedClean, 0.U, next_counter)
+      counter := Mux(perfClean, 0.U, next_counter)
 
       when (perfDump) {
         XSPerfPrint(p"$perfName, $next_counter\n")(helper.io)
