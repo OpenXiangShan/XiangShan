@@ -572,11 +572,6 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     assert(s2_not_consistent, s"Entry inconsistency after ftb req is not closed!")
   }
 
-  val closeUsefulness = s2_close_ftb_req &&  io.s2_fire(0)
-  val closeUsefulnessClean = !s2_close_ftb_req &&  io.s2_fire(0)
-  //The number of instructions executed after closing ftb req until reopening
-  XSPerfAccumulate("fauftb_close_usefulness_cnt",closeUsefulness,closeUsefulnessClean)
-
   // io.out.bits.resp := RegEnable(io.in.bits.resp_in(0), 0.U.asTypeOf(new BranchPredictionResp), io.s1_fire)
   io.out := io.in.bits.resp_in(0)
 
