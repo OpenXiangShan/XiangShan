@@ -101,7 +101,7 @@ class VIPU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   private val needClearVs1 = (VipuType.vcpop_m === io.in.bits.ctrl.fuOpType && vuopIdx === 0.U) ||
                              (VipuType.viota_m === io.in.bits.ctrl.fuOpType && vuopIdx(log2Up(MaxUopSize)-1,1) === 0.U) ||
                              (VipuType.vid_v   === io.in.bits.ctrl.fuOpType && vuopIdx(log2Up(MaxUopSize)-1,1) === 0.U)    // dirty code TODO:  inset into IAlu
-  private val lmul = MuxLookup(vlmul, 1.U(4.W), Array(
+  private val lmul = MuxLookup(vlmul, 1.U(4.W))(Array(
     "b001".U -> 2.U,
     "b010".U -> 4.U,
     "b011".U -> 8.U
