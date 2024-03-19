@@ -65,17 +65,17 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   private val enqPtrOHVec = VecInit.tabulate(RenameWidth + 1)(enqPtrOHShift.left)
   private val enqPtrVecNext = Wire(enqPtrVec.cloneType)
 
-  private val deqPtrVec = RegInit(VecInit.tabulate(CommitWidth)(idx => RenameBufferPtr(flag = false, idx)))
+  private val deqPtrVec = RegInit(VecInit.tabulate(RabCommitWidth)(idx => RenameBufferPtr(flag = false, idx)))
   private val deqPtr = deqPtrVec.head
   private val deqPtrOH = RegInit(1.U(size.W))
   private val deqPtrOHShift = CircularShift(deqPtrOH)
-  private val deqPtrOHVec = VecInit.tabulate(CommitWidth + 1)(deqPtrOHShift.left)
+  private val deqPtrOHVec = VecInit.tabulate(RabCommitWidth + 1)(deqPtrOHShift.left)
   private val deqPtrVecNext = Wire(deqPtrVec.cloneType)
   XSError(deqPtr.toOH =/= deqPtrOH, p"wrong one-hot reg between $deqPtr and $deqPtrOH")
 
   private val walkPtr = Reg(new RenameBufferPtr)
   private val walkPtrOH = walkPtr.toOH
-  private val walkPtrOHVec = VecInit.tabulate(CommitWidth + 1)(CircularShift(walkPtrOH).left)
+  private val walkPtrOHVec = VecInit.tabulate(RabCommitWidth + 1)(CircularShift(walkPtrOH).left)
   private val walkPtrNext = Wire(new RenameBufferPtr)
 
   private val walkPtrSnapshots = SnapshotGenerator(enqPtr, io.snpt.snptEnq, io.snpt.snptDeq, io.redirect.valid, io.snpt.flushVec)
@@ -189,7 +189,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   io.commits.isCommit := state === s_idle || state === s_special_walk
   io.commits.isWalk := state === s_walk || state === s_special_walk
 
-  for(i <- 0 until CommitWidth) {
+  for(i <- 0 until RabCommitWidth) {
     io.commits.commitValid(i) := state === s_idle && i.U < commitSize || state === s_special_walk && i.U < specialWalkSize
     io.commits.walkValid(i) := state === s_walk && i.U < walkSize || state === s_special_walk && i.U < specialWalkSize
     // special walk use commitPtr
@@ -239,7 +239,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   // for difftest
   io.diffCommits.foreach(_ := 0.U.asTypeOf(new DiffCommitIO))
   io.diffCommits.foreach(_.isCommit := state === s_idle || state === s_special_walk)
-  for(i <- 0 until CommitWidth * MaxUopSize) {
+  for(i <- 0 until RabCommitWidth * MaxUopSize) {
     io.diffCommits.foreach(_.commitValid(i) := (state === s_idle || state === s_special_walk) && i.U < newCommitSize)
     io.diffCommits.foreach(_.info(i) := renameBufferEntries((diffPtr + i.U).value).info)
   }
@@ -248,7 +248,10 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
 
   QueuePerf(RabSize, numValidEntries, numValidEntries === size.U)
 
-  dontTouch(deqPtrVec)
+  if (backendParams.debugEn) {
+    dontTouch(deqPtrVec)
+    dontTouch(walkPtrNext)
+  }
 
   XSPerfAccumulate("s_idle_to_idle", state === s_idle         && stateNext === s_idle)
   XSPerfAccumulate("s_idle_to_swlk", state === s_idle         && stateNext === s_special_walk)
