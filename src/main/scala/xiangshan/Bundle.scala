@@ -43,6 +43,7 @@ import xiangshan.frontend.Ftq_Redirect_SRAMEntry
 import xiangshan.frontend.AllFoldedHistories
 import xiangshan.frontend.AllAheadFoldedHistoryOldestBits
 import xiangshan.frontend.RASPtr
+import xiangshan.backend.rob.RobBundles.RobCommitEntryBundle
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
   val valid = Bool()
@@ -193,7 +194,7 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val flushPipe = Bool() // This inst will flush all the pipe when commit, like exception but can commit
   val uopSplitType = UopSplitType()
   val selImm = SelImm()
-  val imm = UInt(ImmUnion.maxLen.W)
+  val imm = UInt(32.W)
   val commitType = CommitType()
   val fpu = new FPUCtrlSignals
   val uopIdx = UopIdx()
@@ -360,29 +361,7 @@ class DiffCommitIO(implicit p: Parameters) extends XSBundle {
   val info = Vec(CommitWidth * MaxUopSize, new RabCommitInfo)
 }
 
-class RobCommitInfo(implicit p: Parameters) extends XSBundle {
-  val ldest = UInt(6.W)
-  val rfWen = Bool()
-  val fpWen = Bool() // for Rab only
-  def dirtyFs = fpWen // for Rob only
-  val vecWen = Bool()
-  def fpVecWen = fpWen || vecWen
-  val wflags = Bool()
-  val commitType = CommitType()
-  val pdest = UInt(PhyRegIdxWidth.W)
-  val ftqIdx = new FtqPtr
-  val ftqOffset = UInt(log2Up(PredictWidth).W)
-  val isMove = Bool()
-  val isRVC = Bool()
-  val isVset = Bool()
-  val isHls = Bool()
-  val vtype = new VType
-
-  // these should be optimized for synthesis verilog
-  val pc = UInt(VAddrBits.W)
-
-  val instrSize = UInt(log2Ceil(RenameWidth + 1).W)
-}
+class RobCommitInfo(implicit p: Parameters) extends RobCommitEntryBundle
 
 class RobCommitIO(implicit p: Parameters) extends XSBundle {
   val isCommit = Bool()
@@ -410,14 +389,14 @@ class RabCommitInfo(implicit p: Parameters) extends XSBundle {
 
 class RabCommitIO(implicit p: Parameters) extends XSBundle {
   val isCommit = Bool()
-  val commitValid = Vec(CommitWidth, Bool())
+  val commitValid = Vec(RabCommitWidth, Bool())
 
   val isWalk = Bool()
   // valid bits optimized for walk
-  val walkValid = Vec(CommitWidth, Bool())
+  val walkValid = Vec(RabCommitWidth, Bool())
 
-  val info = Vec(CommitWidth, new RabCommitInfo)
-  val robIdx = OptionWrapper(!env.FPGAPlatform, Vec(CommitWidth, new RobPtr))
+  val info = Vec(RabCommitWidth, new RabCommitInfo)
+  val robIdx = OptionWrapper(!env.FPGAPlatform, Vec(RabCommitWidth, new RobPtr))
 
   def hasWalkInstr: Bool = isWalk && walkValid.asUInt.orR
   def hasCommitInstr: Bool = isCommit && commitValid.asUInt.orR

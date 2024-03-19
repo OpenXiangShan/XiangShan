@@ -56,10 +56,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val fpRenamePorts = Vec(RenameWidth, Output(new RatWritePort))
     val vecRenamePorts = Vec(RenameWidth, Output(new RatWritePort))
     // from rename table
-    val int_old_pdest = Vec(CommitWidth, Input(UInt(PhyRegIdxWidth.W)))
-    val fp_old_pdest = Vec(CommitWidth, Input(UInt(PhyRegIdxWidth.W)))
-    val vec_old_pdest = Vec(CommitWidth, Input(UInt(PhyRegIdxWidth.W)))
-    val int_need_free = Vec(CommitWidth, Input(Bool()))
+    val int_old_pdest = Vec(RabCommitWidth, Input(UInt(PhyRegIdxWidth.W)))
+    val fp_old_pdest = Vec(RabCommitWidth, Input(UInt(PhyRegIdxWidth.W)))
+    val vec_old_pdest = Vec(RabCommitWidth, Input(UInt(PhyRegIdxWidth.W)))
+    val int_need_free = Vec(RabCommitWidth, Input(Bool()))
     // to dispatch1
     val out = Vec(RenameWidth, DecoupledIO(new DynInst))
     // for snapshots
@@ -155,7 +155,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uop.srcLoadDependency := DontCare
   })
 
-  require(RenameWidth >= CommitWidth)
   val needVecDest    = Wire(Vec(RenameWidth, Bool()))
   val needFpDest     = Wire(Vec(RenameWidth, Bool()))
   val needIntDest    = Wire(Vec(RenameWidth, Bool()))
@@ -197,7 +196,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     needVecDest(i) := io.in(i).valid && needDestReg(Reg_V, io.in(i).bits)
     needFpDest(i) := io.in(i).valid && needDestReg(Reg_F, io.in(i).bits)
     needIntDest(i) := io.in(i).valid && needDestReg(Reg_I, io.in(i).bits)
-    if (i < CommitWidth) {
+    if (i < RabCommitWidth) {
       walkNeedIntDest(i) := io.rabCommits.walkValid(i) && needDestRegWalk(Reg_I, io.rabCommits.info(i))
       walkNeedFpDest(i) := io.rabCommits.walkValid(i) && needDestRegWalk(Reg_F, io.rabCommits.info(i))
       walkNeedVecDest(i) := io.rabCommits.walkValid(i) && needDestRegWalk(Reg_V, io.rabCommits.info(i))
@@ -293,7 +292,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     vecSpecWen(i) := needVecDest(i) && fpFreeList.io.canAllocate && fpFreeList.io.doAllocate && !io.rabCommits.isWalk && !io.redirect.valid
 
 
-    if (i < CommitWidth) {
+    if (i < RabCommitWidth) {
       walkIntSpecWen(i) := walkNeedIntDest(i) && !io.redirect.valid
       walkPdest(i) := io.rabCommits.info(i).pdest
     } else {
@@ -377,16 +376,20 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   }
 
   val genSnapshot = Cat(io.out.map(out => out.fire && out.bits.snapshot)).orR
-  val snapshotCtr = RegInit((4 * CommitWidth).U)
-  val notInSameSnpt = GatedValidRegNext(distanceBetween(robIdxHeadNext, io.snptLastEnq.bits) >= CommitWidth.U || !io.snptLastEnq.valid)
+  val snapshotCtr = RegInit((4 * RabCommitWidth).U)
+  val notInSameSnpt = GatedValidRegNext(distanceBetween(robIdxHeadNext, io.snptLastEnq.bits) >= RobCommitWidth.U || !io.snptLastEnq.valid)
   val allowSnpt = if (EnableRenameSnapshot) !snapshotCtr.orR && notInSameSnpt && io.in.head.bits.firstUop else false.B
   io.out.zip(io.in).foreach{ case (out, in) => out.bits.snapshot := allowSnpt && (!in.bits.preDecodeInfo.notCFI || FuType.isJump(in.bits.fuType)) && in.fire }
   when(genSnapshot) {
-    snapshotCtr := (4 * CommitWidth).U - PopCount(io.out.map(_.fire))
+    snapshotCtr := (4 * RabCommitWidth).U - PopCount(io.out.map(_.fire))
   }.elsewhen(io.out.head.fire) {
     snapshotCtr := Mux(snapshotCtr < PopCount(io.out.map(_.fire)), 0.U, snapshotCtr - PopCount(io.out.map(_.fire)))
   }
-
+  if(backendParams.debugEn){
+    dontTouch(robIdxHeadNext)
+    dontTouch(notInSameSnpt)
+    dontTouch(genSnapshot)
+  }
   intFreeList.io.snpt := io.snpt
   fpFreeList.io.snpt := io.snpt
   intFreeList.io.snpt.snptEnq := genSnapshot
@@ -395,7 +398,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   /**
     * Instructions commit: update freelist and rename table
     */
-  for (i <- 0 until CommitWidth) {
+  for (i <- 0 until RabCommitWidth) {
     val commitValid = io.rabCommits.isCommit && io.rabCommits.commitValid(i)
     val walkValid = io.rabCommits.isWalk && io.rabCommits.walkValid(i)
 
@@ -469,7 +472,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   XSDebug(io.rabCommits.isWalk, p"Walk Recovery Enabled\n")
   XSDebug(io.rabCommits.isWalk, p"validVec:${Binary(io.rabCommits.walkValid.asUInt)}\n")
-  for (i <- 0 until CommitWidth) {
+  for (i <- 0 until RabCommitWidth) {
     val info = io.rabCommits.info(i)
     XSDebug(io.rabCommits.isWalk && io.rabCommits.walkValid(i), p"[#$i walk info] " +
       p"ldest:${info.ldest} rfWen:${info.rfWen} fpWen:${info.fpWen} vecWen:${info.vecWen}")
