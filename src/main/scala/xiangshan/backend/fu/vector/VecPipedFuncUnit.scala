@@ -72,8 +72,8 @@ class VecPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(c
     )
     src1 := Mux(vecCtrl.fpu.isFoldTo1_2 || vecCtrl.fpu.isFoldTo1_4 || vecCtrl.fpu.isFoldTo1_8, vs2Fold, inData.src(1))
   }
-  protected val vs2 = Mux(isReverse, src0, src1)
-  protected val vs1 = Mux(isReverse, src1, src0)
+  protected val vs2 = src1
+  protected val vs1 = src0
   protected val oldVd = inData.src(2)
 
   protected val outCtrl     = ctrlVec.last
