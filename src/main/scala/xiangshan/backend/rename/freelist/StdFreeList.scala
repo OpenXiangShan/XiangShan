@@ -35,7 +35,7 @@ class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) 
   // free committed instructions' `old_pdest` reg
   //
   val freeReqReg = io.freeReq
-  for (i <- 0 until CommitWidth) {
+  for (i <- 0 until RabCommitWidth) {
     val offset = if (i == 0) 0.U else PopCount(freeReqReg.take(i))
     val enqPtr = lastTailPtr + offset
 

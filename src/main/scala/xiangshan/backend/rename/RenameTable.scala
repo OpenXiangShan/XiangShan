@@ -56,12 +56,12 @@ class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule with 
   val io = IO(new Bundle {
     val redirect = Input(Bool())
     val readPorts = Vec(readPortsNum * RenameWidth, new RatReadPort)
-    val specWritePorts = Vec(CommitWidth, Input(new RatWritePort))
-    val archWritePorts = Vec(CommitWidth, Input(new RatWritePort))
-    val old_pdest = Vec(CommitWidth, Output(UInt(PhyRegIdxWidth.W)))
-    val need_free = Vec(CommitWidth, Output(Bool()))
+    val specWritePorts = Vec(RabCommitWidth, Input(new RatWritePort))
+    val archWritePorts = Vec(RabCommitWidth, Input(new RatWritePort))
+    val old_pdest = Vec(RabCommitWidth, Output(UInt(PhyRegIdxWidth.W)))
+    val need_free = Vec(RabCommitWidth, Output(Bool()))
     val snpt = Input(new SnapshotPort)
-    val diffWritePorts = if (backendParams.debugEn) Some(Vec(CommitWidth * MaxUopSize, Input(new RatWritePort))) else None
+    val diffWritePorts = if (backendParams.debugEn) Some(Vec(RabCommitWidth * MaxUopSize, Input(new RatWritePort))) else None
     val debug_rdata = if (backendParams.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
     val debug_vconfig = if (backendParams.debugEn) reg_t match { // vconfig is implemented as int reg[32]
       case Reg_V => Some(Output(UInt(PhyRegIdxWidth.W)))
@@ -87,8 +87,8 @@ class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule with 
   val arch_table = RegInit(rename_table_init)
   val arch_table_next = WireDefault(arch_table)
   // old_pdest
-  val old_pdest = RegInit(VecInit.fill(CommitWidth)(0.U(PhyRegIdxWidth.W)))
-  val need_free = RegInit(VecInit.fill(CommitWidth)(false.B))
+  val old_pdest = RegInit(VecInit.fill(RabCommitWidth)(0.U(PhyRegIdxWidth.W)))
+  val need_free = RegInit(VecInit.fill(RabCommitWidth)(false.B))
 
   // For better timing, we optimize reading and writing to RenameTable as follows:
   // (1) Writing at T0 will be actually processed at T1.
@@ -193,10 +193,10 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     val vecReadPorts = Vec(RenameWidth, Vec(numVecRatPorts, new RatReadPort))
     val vecRenamePorts = Vec(RenameWidth, Input(new RatWritePort))
 
-    val int_old_pdest = Vec(CommitWidth, Output(UInt(PhyRegIdxWidth.W)))
-    val fp_old_pdest = Vec(CommitWidth, Output(UInt(PhyRegIdxWidth.W)))
-    val vec_old_pdest = Vec(CommitWidth, Output(UInt(PhyRegIdxWidth.W)))
-    val int_need_free = Vec(CommitWidth, Output(Bool()))
+    val int_old_pdest = Vec(RabCommitWidth, Output(UInt(PhyRegIdxWidth.W)))
+    val fp_old_pdest = Vec(RabCommitWidth, Output(UInt(PhyRegIdxWidth.W)))
+    val vec_old_pdest = Vec(RabCommitWidth, Output(UInt(PhyRegIdxWidth.W)))
+    val int_need_free = Vec(RabCommitWidth, Output(Bool()))
     val snpt = Input(new SnapshotPort)
 
     // for debug printing
