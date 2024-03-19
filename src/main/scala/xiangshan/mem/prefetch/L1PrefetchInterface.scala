@@ -31,13 +31,19 @@ trait HasL1PrefetchSourceParameter {
   // l1 prefetch source related
   def L1PfSourceBits = 3
   def L1_HW_PREFETCH_NULL = 0.U
-  def L1_HW_PREFETCH_STRIDE = 1.U
-  def L1_HW_PREFETCH_STREAM = 2.U
-  def L1_HW_PREFETCH_STORE  = 3.U
+  def L1_HW_PREFETCH_CLEAR = 1.U // used to be a prefetch, clear by demand request
+  def L1_HW_PREFETCH_STRIDE = 2.U
+  def L1_HW_PREFETCH_STREAM = 3.U
+  def L1_HW_PREFETCH_STORE  = 4.U
 
-  def isFromL1Prefetch(value: UInt) = value =/= L1_HW_PREFETCH_NULL
-  def isFromStride(value: UInt)     = value === L1_HW_PREFETCH_STRIDE
-  def isFromStream(value: UInt)     = value === L1_HW_PREFETCH_STREAM
+  // ------------------------------------------------------------------------------------------------------------------------
+  // timeline: L1_HW_PREFETCH_NULL  --(pf by stream)--> L1_HW_PREFETCH_STREAM --(pf hit by load)--> L1_HW_PREFETCH_CLEAR
+  // ------------------------------------------------------------------------------------------------------------------------
+
+  def isPrefetchRelated(value: UInt) = value >= L1_HW_PREFETCH_CLEAR
+  def isFromL1Prefetch(value: UInt)  = value >  L1_HW_PREFETCH_CLEAR
+  def isFromStride(value: UInt)      = value === L1_HW_PREFETCH_STRIDE
+  def isFromStream(value: UInt)      = value === L1_HW_PREFETCH_STREAM
 }
 
 class L1PrefetchSource(implicit p: Parameters) extends XSBundle with HasL1PrefetchSourceParameter {
