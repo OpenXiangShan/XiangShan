@@ -179,8 +179,6 @@ class CtrlBlockImp(
   loadReplay.bits.debugIsCtrl := false.B
   loadReplay.bits.debugIsMemVio := true.B
 
-  val pdestReverse = rob.io.commits.info.map(info => info.pdest).reverse
-
   pcMem.io.ren.get(pcMemRdIndexes("redirect").head) := redirectGen.io.redirectPcRead.vld
   pcMem.io.raddr(pcMemRdIndexes("redirect").head) := redirectGen.io.redirectPcRead.ptr.value
   redirectGen.io.redirectPcRead.data := pcMem.io.rdata(pcMemRdIndexes("redirect").head).getPc(RegEnable(redirectGen.io.redirectPcRead.offset, redirectGen.io.redirectPcRead.vld))
@@ -312,12 +310,14 @@ class CtrlBlockImp(
   snpt.io.flushVec := flushVecNext
 
   val useSnpt = VecInit.tabulate(RenameSnapshotNum)(idx =>
-    snpt.io.valids(idx) && s1_s3_redirect.bits.robIdx >= snpt.io.snapshots(idx).robIdx.head
+    snpt.io.valids(idx) && (s1_s3_redirect.bits.robIdx > snpt.io.snapshots(idx).robIdx.head ||
+      !s1_s3_redirect.bits.flushItself() && s1_s3_redirect.bits.robIdx === snpt.io.snapshots(idx).robIdx.head)
   ).reduceTree(_ || _)
   val snptSelect = MuxCase(
     0.U(log2Ceil(RenameSnapshotNum).W),
     (1 to RenameSnapshotNum).map(i => (snpt.io.enqPtr - i.U).value).map(idx =>
-      (snpt.io.valids(idx) && s1_s3_redirect.bits.robIdx >= snpt.io.snapshots(idx).robIdx.head, idx)
+      (snpt.io.valids(idx) && (s1_s3_redirect.bits.robIdx > snpt.io.snapshots(idx).robIdx.head ||
+        !s1_s3_redirect.bits.flushItself() && s1_s3_redirect.bits.robIdx === snpt.io.snapshots(idx).robIdx.head), idx)
     )
   )
 

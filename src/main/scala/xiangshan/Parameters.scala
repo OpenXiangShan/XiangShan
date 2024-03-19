@@ -147,7 +147,9 @@ case class XSCoreParameters
   IBufNBank: Int = 6, // IBuffer bank amount, should divide IBufSize
   DecodeWidth: Int = 6,
   RenameWidth: Int = 6,
-  CommitWidth: Int = 6,
+  CommitWidth: Int = 8,
+  RobCommitWidth: Int = 8,
+  RabCommitWidth: Int = 6,
   MaxUopSize: Int = 65,
   EnableRenameSnapshot: Boolean = true,
   RenameSnapshotNum: Int = 4,
@@ -557,6 +559,8 @@ trait HasXSParameter {
   val DecodeWidth = coreParams.DecodeWidth
   val RenameWidth = coreParams.RenameWidth
   val CommitWidth = coreParams.CommitWidth
+  val RobCommitWidth = coreParams.RobCommitWidth
+  val RabCommitWidth = coreParams.RabCommitWidth
   val MaxUopSize = coreParams.MaxUopSize
   val EnableRenameSnapshot = coreParams.EnableRenameSnapshot
   val RenameSnapshotNum = coreParams.RenameSnapshotNum
