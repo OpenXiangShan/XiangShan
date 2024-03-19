@@ -1,11 +1,9 @@
-package xiangshan.backend.fu.util.CSR
+package xiangshan.backend.fu.NewCSR
 
 import chisel3._
+import chisel3.internal.firrtl.Arg
 
 import scala.language.experimental.macros
-import scala.reflect.macros.blackbox.Context
-import chisel3.internal.firrtl.Arg
-import utils.XSInfo
 
 abstract class CSRRWType
 case object WARL extends CSRRWType
@@ -49,14 +47,10 @@ class CSREnumType(
 )(
   val wfn: CSRFuncTrait#CSRWfnType,
   val rfn: CSRFuncTrait#CSRRfnType,
-  val implicitWfn: CSRFuncTrait#CSRImplicitWfnType,
 )(
   override val factory: ChiselEnum
 ) extends EnumType(factory) with CSRFuncTrait {
   var refedFields: Seq[CSREnumType] = Seq()
-
-  // bind CSRField with its CSRModule
-  private var csrMod: CSROldModule[_] = null
 
   if (factory.all.size == 0) {
     factory.asInstanceOf[CSREnum].addMinValue
@@ -66,22 +60,12 @@ class CSREnumType(
     factory.asInstanceOf[CSREnum].addMaxValue
   }
 
-  println(s"factory.all.size: ${factory.all.size}")
-
-  println(s"A new CSREnumType is created, factory: $factory, width: ${factory.getWidth}")
-
   if (msb - lsb + 1 > this.getWidth)
     println(
       s"[CSRInfo] $this: " +
       s"the setting range($msb, $lsb) of bitfield is widen than EnumType's width(${this.getWidth}), " +
       s"the higher bits will be optimized"
     )
-
-  def bindCSRModule(mod: CSROldModule[_]): Unit = {
-    this.csrMod = mod
-  }
-
-  def getCSRModule: CSROldModule[_] = this.csrMod
 
   def localName = Arg.earlyLocalName(this)
 
@@ -95,10 +79,10 @@ class CSREnumType(
 }
 
 abstract class CSREnum extends ChiselEnum with CSRFuncTrait {
-  def apply(msb: Int, lsb: Int)(wfn: CSRWfnType, rfn: CSRRfnType, impWfn: CSRImplicitWfnType)(factory: ChiselEnum): CSREnumType = {
+  def apply(msb: Int, lsb: Int)(wfn: CSRWfnType, rfn: CSRRfnType)(factory: ChiselEnum): CSREnumType = {
     this.msb = msb
     this.lsb = lsb
-    new CSREnumType(msb, lsb)(wfn, rfn, impWfn)(factory)
+    new CSREnumType(msb, lsb)(wfn, rfn)(factory)
   }
 
   var msb, lsb: Int = 0
@@ -125,28 +109,26 @@ abstract class CSREnum extends ChiselEnum with CSRFuncTrait {
 
 abstract class CSRWARLField extends CSREnum {
   def apply(msb: Int, lsb: Int, wfn: CSRWfnType): CSREnumType =
-    super.apply (msb, lsb)(wfn, rNoFilter, null)(this)
+    super.apply (msb, lsb)(wfn, rNoFilter)(this)
 
   def apply(msb: Int, lsb: Int, rfn: CSRRfnType): CSREnumType =
-    super.apply(msb, lsb)(wNoFilter, rfn, null)(this)
+    super.apply(msb, lsb)(wNoFilter, rfn)(this)
 }
 
 abstract class CSRROField extends CSREnum {
   def apply(msb: Int, lsb: Int, rfn: CSRRfnType): CSREnumType =
-    super.apply (msb, lsb)(wNoFilter, rfn, null)(this)
+    super.apply (msb, lsb)(wNoFilter, rfn)(this)
 }
 
 abstract class CSRRefField extends CSREnum {
   def apply[T <: CSREnumType](msb: Int, lsb: Int, ref: T, wfn: CSRWfnType, rfn: CSRRfnType): CSREnumType =
-    new CSREnumType(msb, lsb, Some(ref))(wfn, rfn, null)(ref.factory)
+    new CSREnumType(msb, lsb, Some(ref))(wfn, rfn)(ref.factory)
 
   def apply[T <: CSREnumType](msb: Int, lsb: Int, ref: T, rfn: CSRRfnType): CSREnumType =
-    new CSREnumType(msb, lsb, Some(ref))(wNoFilter, rfn, null)(ref.factory)
+    new CSREnumType(msb, lsb, Some(ref))(wNoFilter, rfn)(ref.factory)
 }
 
 abstract class CSRRefROField extends CSREnum {
   def apply[T <: CSREnumType](msb: Int, lsb: Int, ref: T, rfn: CSRRfnType): CSREnumType =
-    new CSREnumType(msb, lsb, Some(ref))(wNoFilter, rfn, null)(ref.factory)
+    new CSREnumType(msb, lsb, Some(ref))(wNoFilter, rfn)(ref.factory)
 }
-
-

@@ -1,7 +1,6 @@
-package xiangshan.backend.fu.util.CSR
+package xiangshan.backend.fu.NewCSR
 
 import chisel3._
-import xiangshan.backend.fu.util.CSR.CSRDefines.MtvecMode
 import xiangshan.macros.CSRMacros.CSRFieldsImpl
 
 import scala.language.experimental.macros

@@ -1,11 +1,8 @@
-package xiangshan.backend.fu.util.CSR
+package xiangshan.backend.fu.NewCSR
 
-import freechips.rocketchip.diplomacy.LazyModule
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
-import chisel3.util.{Mux1H, _}
-import xiangshan.backend.fu.util.CSRDef
-import CSRDefines._
+import chisel3.util.Mux1H
+import xiangshan.backend.fu.NewCSR.CSRDefines._
 
 abstract class CSRModule[T <: CSRBundle](
   val modName: String,
@@ -51,7 +48,7 @@ abstract class CSRModule[T <: CSRBundle](
         if (fieldWAliasSeq.nonEmpty) {
           wfnField(field, str)(fieldWAliasSeq)
         } else {
-          when(wen)(field := wdata)
+          when(wen)(field := wdata.elements(str))
         }
       }
     }
@@ -69,7 +66,7 @@ class CSRAddrWriteBundle[T <: CSRBundle](bundle: T) extends Bundle {
   }
 }
 
-class CSRCommonIn extends Bundle with CSRDef{
+class CSRCommonIn extends Bundle {
   val status = new MstatusBundle
   val prvm = PrivMode()
   val v = VirtMode()
@@ -112,29 +109,14 @@ class MstatusModule extends CSRModule("MStatus", new MstatusBundle) {
   val sstatus = IO(Output(new SstatusBundle))
 
   val wAliasSstatus = IO(Input(new CSRAddrWriteBundle(new SstatusBundle)))
-  val wSstatusFields = wAliasSstatus.wdataFields
 
   // write connection
-  reg.elements.foreach { case (str, field: CSREnumType) =>
-    if (!field.isRefField)
-      if (wSstatusFields.elements.contains(str)) {
-        when (wen | wAliasSstatus.wen) {
-          field := Mux1H(Seq(
-            wen -> wdata.elements(str),
-            wAliasSstatus.wen -> wSstatusFields.elements(str)
-          ))
-        }.otherwise(field := field)
-      } else {
-        when(wen)(field := wdata.elements(str))
-      }
-  }
+  this.wfn(reg)(Seq(wAliasSstatus))
 
   // read connection
   mstatus :|= reg
   sstatus := mstatus
   rdata := mstatus.asUInt
-
-  dontTouch(sstatus)
 
   class SstatusBundle extends CSRBundle {
     val SIE  = CSRFieldWARLBits(1, wNoFilter)
