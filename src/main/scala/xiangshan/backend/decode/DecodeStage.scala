@@ -149,6 +149,10 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   io.out.zipWithIndex.foreach { case (inst, i) =>
     inst.valid := finalDecodedInstValid(i) && !(hasVectorInst && io.isResumeVType)
     inst.bits := finalDecodedInst(i)
+    inst.bits.lsrc(0) := Mux(finalDecodedInst(i).vpu.isReverse, finalDecodedInst(i).lsrc(1), finalDecodedInst(i).lsrc(0))
+    inst.bits.lsrc(1) := Mux(finalDecodedInst(i).vpu.isReverse, finalDecodedInst(i).lsrc(0), finalDecodedInst(i).lsrc(1))
+    inst.bits.srcType(0) := Mux(finalDecodedInst(i).vpu.isReverse, finalDecodedInst(i).srcType(1), finalDecodedInst(i).srcType(0))
+    inst.bits.srcType(1) := Mux(finalDecodedInst(i).vpu.isReverse, finalDecodedInst(i).srcType(0), finalDecodedInst(i).srcType(1))
   }
 
   for (i <- 0 until DecodeWidth) {

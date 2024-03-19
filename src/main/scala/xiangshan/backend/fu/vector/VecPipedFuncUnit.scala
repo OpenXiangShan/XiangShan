@@ -61,8 +61,8 @@ class VecPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(c
 {
   private val src0 = inData.src(0)
   private val src1 = WireInit(inData.src(1)) // vs2 only
-  protected val vs2 = Mux(isReverse, src0, src1)
-  protected val vs1 = Mux(isReverse, src1, src0)
+  protected val vs2 = src1
+  protected val vs1 = src0
   protected val oldVd = inData.src(2)
 
   protected val outCtrl     = ctrlVec.last
