@@ -260,6 +260,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).fuType := FuType.f2v.U
       csBundle(0).fuOpType := Cat(IF2VectorType.fDup2Vec(2, 0), vsewReg)
       csBundle(0).vecWen := true.B
+      csBundle(0).vpu.isReverse := false.B
       /*
       LMUL
        */
