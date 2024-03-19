@@ -281,27 +281,7 @@ class NewCSR extends Module with CSRFuncTrait {
     dontTouch(wAliasFflags)
     dontTouch(wAliasFfm)
     // write connection
-    reg.elements.foreach { case (str, field: CSREnumType) =>
-      if (!field.isRefField)
-        if (wAliasFfm.wdataFields.elements.contains(str)) {
-          when(wen | wAliasFfm.wen) {
-            field := Mux1H(Seq(
-              wen -> wdata.elements(str),
-              wAliasFfm.wen -> wAliasFfm.wdataFields.elements(str)
-            ))
-          }.otherwise(field := field)
-        } else if (wAliasFflags.wdataFields.elements.contains(str)) {
-          when(wen | wAliasFflags.wen) {
-            field := Mux1H(Seq(
-              wen -> wdata.elements(str),
-              wAliasFflags.wen -> wAliasFflags.wdataFields.elements(str)
-            ))
-          }.otherwise(field := field)
-        }
-        else {
-          when(wen)(field := wdata.elements(str))
-        }
-    }
+    this.wfn(reg)(Seq(wAliasFflags, wAliasFfm))
 
     // read connection
     fflags := reg.asUInt(4, 0)

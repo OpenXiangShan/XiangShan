@@ -3,7 +3,7 @@ package xiangshan.backend.fu.util.CSR
 import freechips.rocketchip.diplomacy.LazyModule
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
-import chisel3.util._
+import chisel3.util.{Mux1H, _}
 import xiangshan.backend.fu.util.CSRDef
 import CSRDefines._
 
@@ -33,6 +33,29 @@ abstract class CSRModule[T <: CSRBundle](
   }
 
   rdata := reg.asUInt
+
+  def wfnField(field: CSREnumType, str: String)(wAliasSeq: Seq[CSRAddrWriteBundle[_]]) = {
+
+    when(wen | wAliasSeq.map(_.wen).reduce(_ | _)) {
+      field := Mux1H(
+        wAliasSeq.map(wAlias => wAlias.wen -> wAlias.wdataFields.asInstanceOf[CSRBundle].elements(str)) :+
+        wen -> wdata.elements(str)
+      )
+    }.otherwise(field := field)
+  }
+
+  def wfn(reg: T)(wAliasSeq: Seq[CSRAddrWriteBundle[_]]) = {
+    reg.elements.foreach { case (str, field: CSREnumType) =>
+      if (!field.isRefField) {
+        val fieldWAliasSeq = wAliasSeq.filter(_.wdataFields.asInstanceOf[CSRBundle].elements.contains(str))
+        if (fieldWAliasSeq.nonEmpty) {
+          wfnField(field, str)(fieldWAliasSeq)
+        } else {
+          when(wen)(field := wdata)
+        }
+      }
+    }
+  }
 }
 
 class CSRAddrWriteBundle[T <: CSRBundle](bundle: T) extends Bundle {
