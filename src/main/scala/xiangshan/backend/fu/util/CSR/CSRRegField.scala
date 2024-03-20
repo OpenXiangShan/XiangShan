@@ -207,6 +207,8 @@ class NewCSR extends Module with CSRFuncTrait {
       val addr = UInt(12.W)
       val data = UInt(64.W)
     }))
+    val rAddr = Input(UInt(12.W))
+    val rData = Output(UInt(64.W))
     val trap = Flipped(ValidIO(new Bundle {
       val toPRVM = PrivMode()
       val toV = VirtMode()
@@ -289,13 +291,13 @@ class NewCSR extends Module with CSRFuncTrait {
     frm := reg.FRM.asUInt
   })
 
-  val CSRWMap: immutable.SeqMap[Int, CSRAddrWriteBundle[_ <: CSRBundle]] = SeqMap(
-    0x001 -> fcsr.wAliasFflags,
-    0x002 -> fcsr.wAliasFfm,
-    0x003 -> fcsr.w,
-    0x100 -> mstatus.wAliasSstatus,
-    0x300 -> mstatus.w,
-    0x305 -> mtvec.w,
+  val CSRWMap: immutable.SeqMap[Int, (CSRAddrWriteBundle[_], Data)] = SeqMap(
+    0x001 -> (fcsr.wAliasFflags      -> fcsr.fflags     ),
+    0x002 -> (fcsr.wAliasFfm         -> fcsr.frm        ),
+    0x003 -> (fcsr.w                 -> fcsr.rdata      ),
+    0x100 -> (mstatus.wAliasSstatus  -> mstatus.sstatus ),
+    0x300 -> (mstatus.w              -> mstatus.rdata   ),
+    0x305 -> (mtvec.w                -> mtvec.rdata     ),
 //    0x644 -> hip,
   )
 
@@ -305,10 +307,13 @@ class NewCSR extends Module with CSRFuncTrait {
     mtvec,
   )
 
-  for ((id, wBundle) <- CSRWMap) {
+  for ((id, (wBundle, _)) <- CSRWMap) {
     wBundle.wen := wen && addr === id.U
     wBundle.wdata := data
   }
+  io.rData := Mux1H(CSRWMap.map { case (id, (_, rBundle)) =>
+    (io.rAddr === id.U) -> rBundle.asUInt
+  })
 
   csrMods.foreach { mod =>
     mod.commonIn.status := mstatus.mstatus
