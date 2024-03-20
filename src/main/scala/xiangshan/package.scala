@@ -121,13 +121,16 @@ package object xiangshan {
   object IF2VectorType {
     // use last 2 bits for vsew
     def iDup2Vec   = "b1_00".U
-    def fDup2Vec   = "b1_01".U
+    def fDup2Vec   = "b1_00".U
     def immDup2Vec = "b1_10".U
     def i2Vec      = "b0_00".U
     def f2Vec      = "b0_01".U
     def imm2Vec    = "b0_10".U
     def needDup(bits: UInt): Bool = bits(2)
     def isImm(bits: UInt): Bool = bits(1)
+    def isFmv(bits: UInt): Bool = bits(0)
+    def FMX_D_X    = "b0_01_11".U
+    def FMX_W_X    = "b0_01_10".U
   }
 
   object CommitType {

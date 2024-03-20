@@ -35,12 +35,21 @@ class IntFPToVec(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cf
   private val isImm = IF2VectorType.isImm(in.ctrl.fuOpType(4, 2))
   // when needDup is true, the scalar data is duplicated in vector register
   private val needDup = IF2VectorType.needDup(in.ctrl.fuOpType(4, 2))
+  // when isFmv is true, the high bits of the scalar data is 1
+  private val isFmv = IF2VectorType.isFmv(in.ctrl.fuOpType(4, 2))
 
   // imm use src(1), scalar use src(0)
   private val scalaData = Mux(isImm, in.data.src(1), in.data.src(0))
   // vsew is the lowest 2 bits of fuOpType
   private val vsew = in.ctrl.fuOpType(1, 0)
   private val dataWidth = cfg.dataBits
+
+  private val fpData = Mux1H(Seq(
+    (vsew === VSew.e8)  -> Cat(Fill(56, 1.U), scalaData( 7, 0)),
+    (vsew === VSew.e16) -> Cat(Fill(48, 1.U), scalaData(15, 0)),
+    (vsew === VSew.e32) -> Cat(Fill(32, 1.U), scalaData(31, 0)),
+    (vsew === VSew.e64) -> scalaData
+  ))
 
   private val vecE8Data  = Wire(Vec(dataWidth /  8, UInt( 8.W)))
   private val vecE16Data = Wire(Vec(dataWidth / 16, UInt(16.W)))
@@ -57,5 +66,5 @@ class IntFPToVec(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cf
     (vsew === VSew.e16) -> vecE16Data.asUInt,
     (vsew === VSew.e32) -> vecE32Data.asUInt,
     (vsew === VSew.e64) -> vecE64Data.asUInt,
-  )), scalaData)
+  )), Mux(isFmv, fpData, scalaData))
 }
