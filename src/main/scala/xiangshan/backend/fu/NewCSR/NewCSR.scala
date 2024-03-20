@@ -1,13 +1,11 @@
 package xiangshan.backend.fu.NewCSR
 
-import chisel3.util._
 import chisel3._
+import chisel3.util._
 import top.{ArgParser, Generator}
-import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRFieldWARLBits, MtvecMode, PrivMode, VirtMode}
+import xiangshan.backend.fu.NewCSR.CSRDefines.{PrivMode, VirtMode}
 
-import scala.collection.{SeqMap, immutable}
-
-class NewCSR extends Module with CSRFuncTrait with Unprivileged {
+class NewCSR extends Module with MachineLevel with SupervisorLevel with Hypervisor with Unprivileged {
   val io = IO(new Bundle {
     val w = Flipped(ValidIO(new Bundle {
       val addr = UInt(12.W)
@@ -47,42 +45,9 @@ class NewCSR extends Module with CSRFuncTrait with Unprivileged {
   val isSret = tret && tretPRVM === PrivMode.S
   val isMret = tret && tretPRVM === PrivMode.M
 
-  val hip = Module(new CSRModule("Hip", new CSRBundle {
-    val VSSIP = CSRFieldWARLBits( 2, wNoFilter)
-    val VSTIP = CSRFieldWARLBits( 6, wNoEffect)
-    val VSEIP = CSRFieldWARLBits(10, wNoEffect)
-    val SGEIP = CSRFieldWARLBits(12, wNoEffect)
-  }) {} )
+  val CSRWMap = machineLevelCSRMap ++ supervisorLevelCSRMap ++ hypervisorCSRMap ++ unprivilegedCSRMap
 
-  val mstatus = Module(new MstatusModule)
-
-  val mtvec = Module(new CSRModule("Mtvec", new CSRBundle {
-      val mode = MtvecMode(1, 0, wNoFilter)
-      val addr = CSRFieldWARLBits(63, 2, wNoFilter)
-    }
-  ) {
-    when(wen && wdata.mode.isLegal) {
-      reg.mode := wdata.mode
-    }.otherwise(reg.mode := reg.mode)
-  })
-
-
-  val CSRWMap: immutable.SeqMap[Int, (CSRAddrWriteBundle[_], Data)] = SeqMap(
-    0x001 -> (fcsr.wAliasFflags -> fcsr.fflags),
-    0x002 -> (fcsr.wAliasFfm -> fcsr.frm),
-    0x003 -> (fcsr.w -> fcsr.rdata),
-    0x100 -> (mstatus.wAliasSstatus -> mstatus.sstatus),
-    0x300 -> (mstatus.w -> mstatus.rdata),
-    0x305 -> (mtvec.w -> mtvec.rdata),
-    0x644 -> (hip.w -> hip.rdata),
-  )
-
-  val csrMods = Seq(
-    fcsr,
-    mstatus,
-    mtvec,
-    hip,
-  )
+  val csrMods = machineLevelCSRMods ++ supervisorLevelCSRMods ++ hypervisorCSRMods ++ unprivilegedCSRMods
 
   for ((id, (wBundle, _)) <- CSRWMap) {
     wBundle.wen := wen && addr === id.U
@@ -96,6 +61,8 @@ class NewCSR extends Module with CSRFuncTrait with Unprivileged {
     mod.commonIn.status := mstatus.mstatus
     mod.commonIn.prvm := PRVM
     mod.commonIn.v := V
+    println(s"${mod.modName}: ")
+    println(mod.dumpFields)
   }
 }
 

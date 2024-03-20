@@ -3,15 +3,89 @@ package xiangshan.backend.fu.NewCSR
 import chisel3._
 import chisel3.internal.firrtl.Arg
 
+import xiangshan.backend.fu.NewCSR.CSRFunc._
+
 import scala.language.experimental.macros
 
-abstract class CSRRWType
-case object WARL extends CSRRWType
-case object RO extends CSRRWType
-case object WLRL extends CSRRWType
-case object RW extends CSRRWType
+abstract class CSRRWType {
+  val wfn: CSRWfnType
+  val rfn: CSRRfnType
+  val ref: Option[CSREnumType] = None
 
-trait CSRFuncTrait {
+  def isRO: Boolean = this.isInstanceOf[ROType] || this.isInstanceOf[RefROType]
+
+  def isRW: Boolean = this.isInstanceOf[RWType] || this.isInstanceOf[RefRWType]
+
+  def isWARL: Boolean = this.isInstanceOf[WARLType] || this.isInstanceOf[RefWARLType]
+
+  def isWLRL: Boolean = this.isInstanceOf[WLRLType] || this.isInstanceOf[RefWLRLType]
+
+  def isRef: Boolean = this.isInstanceOf[RefROType] || this.isInstanceOf[RefRWType] || this.isInstanceOf[RefWARLType] ||
+    this.isInstanceOf[RefWLRLType]
+
+  override def toString: String = {
+    val typeString = this match {
+      case WARLType(_, _) => "WARL"
+      case ROType(_)      => "RO"
+      case WLRLType(_, _) => "WLRL"
+      case RWType()       => "RW"
+    }
+    typeString + (if (isRef) " Ref" else "")
+  }
+}
+
+case class WARLType(
+  override val wfn: CSRWfnType,
+  override val rfn: CSRRfnType = rNoFilter,
+) extends CSRRWType
+
+case class ROType(
+  override val rfn: CSRRfnType = rNoFilter,
+) extends CSRRWType {
+  override final val wfn: CSRWfnType = wNoEffect
+}
+
+case class WLRLType(
+  override val wfn: CSRWfnType,
+  override val rfn: CSRRfnType,
+) extends CSRRWType
+
+case class RWType() extends CSRRWType {
+  override final val wfn: CSRWfnType = wNoFilter
+  override final val rfn: CSRRfnType = rNoFilter
+}
+
+trait CheckRef { self: CSRRWType =>
+  require(ref.nonEmpty)
+}
+
+case class RefWARLType(
+  override val ref: Option[CSREnumType],
+  override val wfn: CSRWfnType,
+  override val rfn: CSRRfnType = rNoFilter,
+) extends CSRRWType with CheckRef
+
+case class RefROType(
+  override val ref: Option[CSREnumType],
+  override val rfn: CSRRfnType = rNoFilter,
+) extends CSRRWType with CheckRef {
+  override final val wfn: CSRWfnType = wNoEffect
+}
+
+case class RefWLRLType(
+  override val ref: Option[CSREnumType],
+  override val wfn: CSRWfnType,
+  override val rfn: CSRRfnType,
+) extends CSRRWType with CheckRef
+
+case class RefRWType(
+  override val ref: Option[CSREnumType],
+) extends CSRRWType with CheckRef {
+  override final val wfn: CSRWfnType = wNoFilter
+  override final val rfn: CSRRfnType = rNoFilter
+}
+
+object CSRFunc {
   type CSRWfnType = (UInt, UInt, Seq[Data]) => UInt
 
   def wNoFilter: CSRWfnType =
@@ -36,20 +110,16 @@ trait CSRFuncTrait {
   def rFixValue(value: UInt): CSRRfnType = {
     (_, _) => value
   }
-
-  type CSRImplicitWfnType = (UInt, Seq[Data]) => UInt
 }
 
 class CSREnumType(
   val msb: Int,
   val lsb: Int,
-  val refField: Option[CSREnumType] = None,
 )(
-  val wfn: CSRFuncTrait#CSRWfnType,
-  val rfn: CSRFuncTrait#CSRRfnType,
+  val rwType: CSRRWType,
 )(
   override val factory: ChiselEnum
-) extends EnumType(factory) with CSRFuncTrait {
+) extends EnumType(factory) {
   var refedFields: Seq[CSREnumType] = Seq()
 
   if (factory.all.size == 0) {
@@ -69,20 +139,30 @@ class CSREnumType(
 
   def localName = Arg.earlyLocalName(this)
 
-  def registerRefedField(field: CSREnumType): Unit = {
-    this.refedFields :+= field
+  def isRef = this.rwType.isRef
+
+  def isRO = this.rwType.isRO
+
+  def isWARL = this.rwType.isWARL
+
+  // Check if the write data is legal that can update the regfield.
+  // Also check if the write field is not Read Only.
+  def isLegal: Bool = this.factory.asInstanceOf[CSREnum].isLegal(this) && (!this.isRO).B
+
+  def rfn = rwType.rfn
+
+  def wfn = rwType.wfn
+
+  override def toString(): String = {
+    s"${this.localName} ${rwType} [$msb, $lsb]"
   }
-
-  def isRefField = this.refField.nonEmpty
-
-  def isLegal: Bool = this.factory.asInstanceOf[CSREnum].isLegal(this)
 }
 
-abstract class CSREnum extends ChiselEnum with CSRFuncTrait {
-  def apply(msb: Int, lsb: Int)(wfn: CSRWfnType, rfn: CSRRfnType)(factory: ChiselEnum): CSREnumType = {
+abstract class CSREnum extends ChiselEnum {
+  protected def apply(rwType: CSRRWType)(msb: Int, lsb: Int)(factory: ChiselEnum): CSREnumType = {
     this.msb = msb
     this.lsb = lsb
-    new CSREnumType(msb, lsb)(wfn, rfn)(factory)
+    new CSREnumType(msb, lsb)(rwType)(factory)
   }
 
   var msb, lsb: Int = 0
@@ -102,33 +182,65 @@ abstract class CSREnum extends ChiselEnum with CSRFuncTrait {
     Value(((BigInt(1) << (msb - lsb + 1)) - 1).U)
   }
 
-  def isLegal(enum: CSREnumType): Bool = enum.isValid
+  def isLegal(enum: CSREnumType): Bool = true.B
 
   println(s"A new CSREnum is created, factory: $this")
 }
 
-abstract class CSRWARLField extends CSREnum {
-  def apply(msb: Int, lsb: Int, wfn: CSRWfnType): CSREnumType =
-    super.apply (msb, lsb)(wfn, rNoFilter)(this)
+trait CSRROApply { self: CSREnum =>
+  def apply(msb: Int, lsb: Int, rfn: CSRRfnType): CSREnumType = self
+    .apply(ROType(rfn))(msb, lsb)(this)
 
-  def apply(msb: Int, lsb: Int, rfn: CSRRfnType): CSREnumType =
-    super.apply(msb, lsb)(wNoFilter, rfn)(this)
+  def apply(msb: Int, lsb: Int): CSREnumType = self
+    .apply(ROType())(msb, lsb)(this)
 }
 
-abstract class CSRROField extends CSREnum {
-  def apply(msb: Int, lsb: Int, rfn: CSRRfnType): CSREnumType =
-    super.apply (msb, lsb)(wNoFilter, rfn)(this)
+trait CSRRWApply { self: CSREnum =>
+  def apply(msb: Int, lsb: Int): CSREnumType = self
+    .apply(RWType())(msb, lsb)(this)
 }
 
-abstract class CSRRefField extends CSREnum {
-  def apply[T <: CSREnumType](msb: Int, lsb: Int, ref: T, wfn: CSRWfnType, rfn: CSRRfnType): CSREnumType =
-    new CSREnumType(msb, lsb, Some(ref))(wfn, rfn)(ref.factory)
+trait CSRWARLApply { self: CSREnum =>
+  def apply(msb: Int, lsb: Int, wfn: CSRWfnType, rfn: CSRRfnType): CSREnumType = self
+    .apply(WARLType(wfn, rfn))(msb, lsb)(this)
 
-  def apply[T <: CSREnumType](msb: Int, lsb: Int, ref: T, rfn: CSRRfnType): CSREnumType =
-    new CSREnumType(msb, lsb, Some(ref))(wNoFilter, rfn)(ref.factory)
+  def apply(msb: Int, lsb: Int, wfn: CSRWfnType): CSREnumType = self
+    .apply(WARLType(wfn))(msb, lsb)(this)
 }
 
-abstract class CSRRefROField extends CSREnum {
-  def apply[T <: CSREnumType](msb: Int, lsb: Int, ref: T, rfn: CSRRfnType): CSREnumType =
-    new CSREnumType(msb, lsb, Some(ref))(wNoFilter, rfn)(ref.factory)
+trait CSRWLRLApply { self: CSREnum =>
+  def apply(msb: Int, lsb: Int, wfn: CSRWfnType, rfn: CSRRfnType): CSREnumType = self
+    .apply(WLRLType(wfn, rfn))(msb, lsb)(this)
+}
+
+trait CSRMacroApply { self: CSREnum =>
+  def RO(msb: Int, lsb: Int, rfn: CSRRfnType): CSREnumType = self
+    .apply(ROType(rfn))(msb, lsb)(this)
+
+  def RO(msb: Int, lsb: Int): CSREnumType = self
+    .apply(ROType())(msb, lsb)(this)
+
+  def RW(msb: Int, lsb: Int): CSREnumType = self
+    .apply(RWType())(msb, lsb)(this)
+
+  def WARL(msb: Int, lsb: Int, wfn: CSRWfnType, rfn: CSRRfnType): CSREnumType = self
+    .apply(WARLType(wfn, rfn))(msb, lsb)(this)
+
+  def WARL(msb: Int, lsb: Int, wfn: CSRWfnType): CSREnumType = self
+    .apply(WARLType(wfn))(msb, lsb)(this)
+
+  def WLRL(msb: Int, lsb: Int, wfn: CSRWfnType, rfn: CSRRfnType): CSREnumType = self
+    .apply(WLRLType(wfn, rfn))(msb, lsb)(this)
+
+  def RefRO(ref: CSREnumType, msb: Int, lsb: Int, rfn: CSRRfnType): CSREnumType = self
+    .apply(RefROType(Some(ref) ,rfn))(msb, lsb)(ref.factory)
+
+  def RefRO(ref: CSREnumType, msb: Int, lsb: Int): CSREnumType = self
+    .apply(RefROType(Some(ref)))(msb, lsb)(ref.factory)
+
+  def RefWARL(ref: CSREnumType, msb: Int, lsb: Int, wfn: CSRWfnType, rfn: CSRRfnType): CSREnumType = self
+    .apply(RefWARLType(Some(ref), wfn, rfn))(msb, lsb)(ref.factory)
+
+  def RefWARL(ref: CSREnumType, msb: Int, lsb: Int, wfn: CSRWfnType): CSREnumType = self
+    .apply(RefWARLType(Some(ref), wfn))(msb, lsb)(ref.factory)
 }

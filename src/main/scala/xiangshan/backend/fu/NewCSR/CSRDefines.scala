@@ -1,197 +1,191 @@
 package xiangshan.backend.fu.NewCSR
 
 import chisel3._
+import xiangshan.backend.fu.NewCSR.CSRFunc._
 import xiangshan.macros.CSRMacros.CSRFieldsImpl
 
 import scala.language.experimental.macros
 
-object CSRDefines extends CSRFuncTrait {
-  object CSRWARLField1Bits extends CSRWARLField
+object CSRDefines {
+  object CSRField1Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField2Bits extends CSRWARLField
+  object CSRField2Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField3Bits extends CSRWARLField
+  object CSRField3Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField4Bits extends CSRWARLField
+  object CSRField4Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField5Bits extends CSRWARLField
+  object CSRField5Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField6Bits extends CSRWARLField
+  object CSRField6Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField7Bits extends CSRWARLField
+  object CSRField7Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField8Bits extends CSRWARLField
+  object CSRField8Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField9Bits extends CSRWARLField
+  object CSRField9Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField10Bits extends CSRWARLField
+  object CSRField10Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField11Bits extends CSRWARLField
+  object CSRField11Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField12Bits extends CSRWARLField
+  object CSRField12Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField13Bits extends CSRWARLField
+  object CSRField13Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField14Bits extends CSRWARLField
+  object CSRField14Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField15Bits extends CSRWARLField
+  object CSRField15Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField16Bits extends CSRWARLField
+  object CSRField16Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField17Bits extends CSRWARLField
+  object CSRField17Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField18Bits extends CSRWARLField
+  object CSRField18Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField19Bits extends CSRWARLField
+  object CSRField19Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField20Bits extends CSRWARLField
+  object CSRField20Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField21Bits extends CSRWARLField
+  object CSRField21Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField22Bits extends CSRWARLField
+  object CSRField22Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField23Bits extends CSRWARLField
+  object CSRField23Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField24Bits extends CSRWARLField
+  object CSRField24Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField25Bits extends CSRWARLField
+  object CSRField25Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField26Bits extends CSRWARLField
+  object CSRField26Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField27Bits extends CSRWARLField
+  object CSRField27Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField28Bits extends CSRWARLField
+  object CSRField28Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField29Bits extends CSRWARLField
+  object CSRField29Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField30Bits extends CSRWARLField
+  object CSRField30Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField31Bits extends CSRWARLField
+  object CSRField31Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField32Bits extends CSRWARLField
+  object CSRField32Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField33Bits extends CSRWARLField
+  object CSRField33Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField34Bits extends CSRWARLField
+  object CSRField34Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField35Bits extends CSRWARLField
+  object CSRField35Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField36Bits extends CSRWARLField
+  object CSRField36Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField37Bits extends CSRWARLField
+  object CSRField37Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField38Bits extends CSRWARLField
+  object CSRField38Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField39Bits extends CSRWARLField
+  object CSRField39Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField40Bits extends CSRWARLField
+  object CSRField40Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField41Bits extends CSRWARLField
+  object CSRField41Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField42Bits extends CSRWARLField
+  object CSRField42Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField43Bits extends CSRWARLField
+  object CSRField43Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField44Bits extends CSRWARLField
+  object CSRField44Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField45Bits extends CSRWARLField
+  object CSRField45Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField46Bits extends CSRWARLField
+  object CSRField46Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField47Bits extends CSRWARLField
+  object CSRField47Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField48Bits extends CSRWARLField
+  object CSRField48Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField49Bits extends CSRWARLField
+  object CSRField49Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField50Bits extends CSRWARLField
+  object CSRField50Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField51Bits extends CSRWARLField
+  object CSRField51Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField52Bits extends CSRWARLField
+  object CSRField52Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField53Bits extends CSRWARLField
+  object CSRField53Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField54Bits extends CSRWARLField
+  object CSRField54Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField55Bits extends CSRWARLField
+  object CSRField55Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField56Bits extends CSRWARLField
+  object CSRField56Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField57Bits extends CSRWARLField
+  object CSRField57Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField58Bits extends CSRWARLField
+  object CSRField58Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField59Bits extends CSRWARLField
+  object CSRField59Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField60Bits extends CSRWARLField
+  object CSRField60Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField61Bits extends CSRWARLField
+  object CSRField61Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField62Bits extends CSRWARLField
+  object CSRField62Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField63Bits extends CSRWARLField
+  object CSRField63Bits extends CSREnum with CSRMacroApply
 
-  object CSRWARLField64Bits extends CSRWARLField
+  object CSRField64Bits extends CSREnum with CSRMacroApply
 
-  object CSRROField1Bits extends CSRROField
-
-  object CSRROField2Bits extends CSRROField
-
-  object CSRROField3Bits extends CSRROField
-
-  object CSRRefField1Bits extends CSRRefField
-
-  object CSRRefField2Bits extends CSRRefField
-
-  object CSRRefROField1Bits extends CSRRefROField
-
-  object CSRRefROField2Bits extends CSRRefROField
-
-  object ContextStatus extends CSRWARLField with ContextStatusDef
-  trait ContextStatusDef { this: ChiselEnum =>
+  object ContextStatus extends CSREnum with ContextStatusDef with CSRRWApply
+  object ContextStatusRO extends CSREnum with ContextStatusDef with CSRROApply
+  trait ContextStatusDef { this: CSREnum =>
     val Off = Value(0.U)
     val Initial = Value(1.U)
     val Clean = Value(2.U)
     val Dirty = Value(3.U)
   }
 
-  sealed abstract class XLENField extends CSRWARLField {
+  sealed abstract class XLENField extends CSREnum {
     val XLEN32 = Value(1.U)
     val XLEN64 = Value(2.U)
     val XLEN128 = Value(3.U)
   }
 
-  object MXLField extends XLENField
+  object MXLField extends XLENField with CSRROApply
 
-  object SXLField extends XLENField
+  object SXLField extends XLENField with CSRROApply
 
-  object UXLField extends XLENField
+  object UXLField extends XLENField with CSRROApply
 
-  object VSXLField extends XLENField
+  object VSXLField extends XLENField with CSRROApply
 
-  object MtvecMode extends CSRWARLField {
+  object MtvecMode extends CSREnum with CSRWARLApply {
     val Direct = Value(0.U)
     val Vectored = Value(1.U)
 
     override def isLegal(enum: CSREnumType): Bool = Seq(Direct, Vectored).map(_ === enum).reduce(_ || _)
   }
 
-  def CSRFieldWARLBits(msb: Int, lsb: Int, wfn: CSRWfnType): CSREnumType = macro CSRFieldsImpl.CSRFieldWARLBitsRange
+  object CSRWARLField {
+    def apply(msb: Int, lsb: Int, fn: CSRRfnType): CSREnumType = macro CSRFieldsImpl.CSRWARLFieldRange
 
-  def CSRFieldWARLBits(bit: Int, wfn: CSRWfnType): CSREnumType = macro CSRFieldsImpl.CSRFieldWARLBitsBit
+    def apply(bit: Int, fn: CSRRfnType): CSREnumType = macro CSRFieldsImpl.CSRWARLFieldBit
 
-  def CSRFieldROBits(msb: Int, lsb: Int, rfn: CSRRfnType): CSREnumType = macro CSRFieldsImpl.CSRFieldROBitsRange
+    def apply(msb: Int, lsb: Int, fn: CSRWfnType): CSREnumType = macro CSRFieldsImpl.CSRWARLFieldRange
 
-  def CSRFieldROBits(bit: Int, rfn: CSRRfnType): CSREnumType = macro CSRFieldsImpl.CSRFieldROBitsBit
+    def apply(bit: Int, fn: CSRWfnType): CSREnumType = macro CSRFieldsImpl.CSRWARLFieldBit
+  }
 
-  def CSRFieldRefBits(msb: Int, lsb: Int, ref: CSREnumType, rfn: CSRRfnType): CSREnumType = macro CSRFieldsImpl.CSRFieldRefBitsRange
+  object CSRROField {
+    def apply(msb: Int, lsb: Int, rfn: CSRRfnType): CSREnumType = macro CSRFieldsImpl.CSRROFieldRange
 
-  def CSRFieldRefBits(bit: Int, ref: CSREnumType, rfn: CSRRfnType): CSREnumType = macro CSRFieldsImpl.CSRFieldRefBitsBit
+    def apply(bit: Int, rfn: CSRRfnType): CSREnumType = macro CSRFieldsImpl.CSRROFieldBit
+  }
 
-  def CSRFieldRefROBits(msb: Int, lsb: Int, ref: CSREnumType, rfn: CSRRfnType): CSREnumType = macro CSRFieldsImpl.CSRFieldRefROBitsRange
+  object CSRWARLRefField {
+    def apply(ref: CSREnumType, msb: Int, lsb: Int, wfn: CSRWfnType): CSREnumType = macro CSRFieldsImpl.CSRRefWARLFieldRange
 
-  def CSRFieldRefROBits(bit: Int, ref: CSREnumType, rfn: CSRRfnType): CSREnumType = macro CSRFieldsImpl.CSRFieldRefROBitsBit
+    def apply(ref: CSREnumType, bit: Int, wfn: CSRWfnType): CSREnumType = macro CSRFieldsImpl.CSRRefWARLFieldBit
+  }
 
   object PrivMode extends ChiselEnum {
     val U = Value(0.U)

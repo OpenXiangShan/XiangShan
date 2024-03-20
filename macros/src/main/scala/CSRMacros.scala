@@ -5,56 +5,57 @@ import scala.reflect.macros.blackbox.Context
 
 object CSRMacros {
   object CSRFieldsImpl {
-    private def helper(str: String)(c: Context)(msb: c.Expr[Int], lsb: c.Expr[Int], wfn: c.Tree): c.Tree = {
+    private def calcuWidth(c: Context)(msb: c.Expr[Int], lsb: c.Expr[Int]): Int = {
       import c.universe._
 
       val Literal(Constant(i_msb: Int)) = msb.tree
       val Literal(Constant(i_lsb: Int)) = lsb.tree
-      val w = Literal(Constant(i_msb - i_lsb + 1))
-      c.parse(s"CSRDefines.CSR${str}Field${w}Bits($i_msb, $i_lsb, $wfn)")
+      i_msb - i_lsb + 1
     }
 
-    def CSRFieldWARLBitsRange(c: Context)(msb: c.Expr[Int], lsb: c.Expr[Int], wfn: c.Tree): c.Tree = {
-      this.helper("WARL")(c)(msb, lsb, wfn)
-    }
-
-    def CSRFieldWARLBitsBit(c: Context)(bit: c.Expr[Int], wfn: c.Tree): c.Tree = {
-      this.helper("WARL")(c)(bit, bit, wfn)
-    }
-
-    def CSRFieldROBitsRange(c: Context)(msb: c.Expr[Int], lsb: c.Expr[Int], rfn: c.Tree): c.Tree = {
-      this.helper("RO")(c)(msb, lsb, rfn)
-    }
-
-    def CSRFieldROBitsBit(c: Context)(bit: c.Expr[Int], rfn: c.Tree): c.Tree = {
-      this.helper("RO")(c)(bit, bit, rfn)
-    }
-
-    private def refHelper(str: String)(c: Context)(msb: c.Expr[Int], lsb: c.Expr[Int], ref: c.Tree,  rfn: c.Tree): c.Tree = {
+    def CSRROFieldRange(c: Context)(msb: c.Expr[Int], lsb: c.Expr[Int], rfn: c.Tree): c.Tree = {
       import c.universe._
 
       val Literal(Constant(i_msb: Int)) = msb.tree
       val Literal(Constant(i_lsb: Int)) = lsb.tree
-      val w = Literal(Constant(i_msb - i_lsb + 1))
-      c.parse(s"CSRDefines.CSR${str}Field${w}Bits($i_msb, $i_lsb, $ref, $rfn)")
+      c.parse(s"CSRDefines.CSRField${calcuWidth(c)(msb, lsb)}Bits.RO($i_msb, $i_lsb, $rfn)")
     }
 
-    def CSRFieldRefBitsRange(c: Context)(msb: c.Expr[Int], lsb: c.Expr[Int], ref: c.Tree, rfn: c.Tree): c.Tree = {
-      this.refHelper("Ref")(c)(msb, lsb, ref, rfn)
+    def CSRROFieldBit(c: Context)(bit: c.Expr[Int], rfn: c.Tree): c.Tree = {
+      CSRROFieldRange(c)(bit, bit, rfn)
     }
 
-    def CSRFieldRefBitsBit(c: Context)(bit: c.Expr[Int], ref: c.Tree, rfn: c.Tree): c.Tree = {
-      this.refHelper("Ref")(c)(bit, bit, ref, rfn)
+    def CSRWARLFieldRange(c: Context)(msb: c.Expr[Int], lsb: c.Expr[Int], fn: c.Tree): c.Tree = {
+      import c.universe._
+
+      val Literal(Constant(i_msb: Int)) = msb.tree
+      val Literal(Constant(i_lsb: Int)) = lsb.tree
+      c.parse(s"CSRDefines.CSRField${calcuWidth(c)(msb, lsb)}Bits.WARL($i_msb, $i_lsb, $fn)")
     }
 
-    def CSRFieldRefROBitsRange(c: Context)(msb: c.Expr[Int], lsb: c.Expr[Int], ref: c.Tree, rfn: c.Tree): c.Tree = {
-      this.refHelper("RefRO")(c)(msb, lsb, ref, rfn)
+    def CSRWARLFieldBit(c: Context)(bit: c.Expr[Int], fn: c.Tree): c.Tree = {
+      CSRWARLFieldRange(c)(bit, bit, fn)
     }
 
-    def CSRFieldRefROBitsBit(c: Context)(bit: c.Expr[Int], ref: c.Tree, rfn: c.Tree): c.Tree = {
-      this.refHelper("RefRO")(c)(bit, bit, ref, rfn)
+    def CSRRWFieldRange(c: Context)(msb: c.Expr[Int], lsb: c.Expr[Int]): c.Tree = {
+      import c.universe._
+
+      val Literal(Constant(i_msb: Int)) = msb.tree
+      val Literal(Constant(i_lsb: Int)) = lsb.tree
+      c.parse(s"CSRDefines.CSRField${calcuWidth(c)(msb, lsb)}Bits.RW($i_msb, $i_lsb)")
     }
 
+    def CSRRefWARLFieldRange(c: Context)(ref: c.Tree, msb: c.Expr[Int], lsb: c.Expr[Int], wfn: c.Tree): c.Tree = {
+      import c.universe._
+
+      val Literal(Constant(i_msb: Int)) = msb.tree
+      val Literal(Constant(i_lsb: Int)) = lsb.tree
+      c.parse(s"CSRDefines.CSRField${calcuWidth(c)(msb, lsb)}Bits.RefWARL($ref, $i_msb, $i_lsb, $wfn)")
+    }
+
+    def CSRRefWARLFieldBit(c: Context)(ref: c.Tree, bit: c.Expr[Int], wfn: c.Tree): c.Tree = {
+      CSRRefWARLFieldRange(c)(ref, bit, bit, wfn)
+    }
   }
 }
 
