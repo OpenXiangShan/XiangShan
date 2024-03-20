@@ -253,6 +253,7 @@ class NewCSR extends Module with CSRFuncTrait {
     val addr = CSRFieldWARLBits(63, 2, wNoFilter)
   }) {
     when (wen && wdata.mode.isLegal) { reg.mode := wdata.mode }
+      .otherwise(reg.mode := reg.mode)
   } )
 
   val fcsr = Module(new CSRModule("Fcsr", new CSRBundle {
