@@ -115,36 +115,25 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
   vldMgu.io.flush := io.flush
   vldMgu.io.writeback <> fromExuVld.head
   val wbReplaceVld: Seq[DecoupledIO[ExuOutput]] = fromExuPre.updated(fromExuPre.indexWhere(_.bits.params.hasVLoadFu), vldMgu.io.writebackAfterMerge).toSeq
-  val fromExu: MixedVec[DecoupledIO[ExuOutput]] = MixedVecInit(wbReplaceVld)
+  val fromExu: MixedVec[DecoupledIO[ExuOutput]] = Wire(chiselTypeOf(MixedVecInit(wbReplaceVld)))
 
   // io.fromExuPre ------------------------------------------------------------> fromExu
   //               \                                                         /
   //                -> vldMgu.io.writeback -> vldMgu.io.writebackAfterMerge /
-  (fromExu zip wbReplaceVld).foreach { case (sink, source) => source.ready := sink.ready }
+  (fromExu zip wbReplaceVld).foreach { case (sink, source) => 
+    sink.valid := source.valid
+    sink.bits := source.bits
+    source.ready := sink.ready
+  }
 
-  // alias
-  val intArbiterInputsWireY = fromExu.filter(_.bits.params.writeIntRf)
-  val intArbiterInputsWireN = fromExu.filterNot(_.bits.params.writeIntRf)
+  // fromExu -> ArbiterInput
   val intArbiterInputsWire = Wire(chiselTypeOf(fromExu))
-  intArbiterInputsWire.foreach{ x =>
-    val id = x.bits.params.exuIdx
-    val indexY = intArbiterInputsWireY.map(_.bits.params.exuIdx).indexOf(id)
-    val indexN = intArbiterInputsWireN.map(_.bits.params.exuIdx).indexOf(id)
-    if (indexY > -1) intArbiterInputsWire(id) := intArbiterInputsWireY(indexY)
-    else if(indexN > -1) intArbiterInputsWire(id) := intArbiterInputsWireN(indexN)
-    else assert(false, "intArbiterInputsWire not in intArbiterInputsWireY or intArbiterInputsWireN")
-  }
-  val vfArbiterInputsWireY = fromExu.filter(_.bits.params.writeVfRf)
-  val vfArbiterInputsWireN = fromExu.filterNot(_.bits.params.writeVfRf)
-  val vfArbiterInputsWire = WireInit(fromExu)
-  vfArbiterInputsWire.foreach { x =>
-    val id = x.bits.params.exuIdx
-    val indexY = vfArbiterInputsWireY.map(_.bits.params.exuIdx).indexOf(id)
-    val indexN = vfArbiterInputsWireN.map(_.bits.params.exuIdx).indexOf(id)
-    if (indexY > -1) vfArbiterInputsWire(id) := vfArbiterInputsWireY(indexY)
-    else if (indexN > -1) vfArbiterInputsWire(id) := vfArbiterInputsWireN(indexN)
-    else assert(false, "vfArbiterInputsWire not in vfArbiterInputsWireY or vfArbiterInputsWireN")
-  }
+  val intArbiterInputsWireY = intArbiterInputsWire.filter(_.bits.params.writeIntRf)
+  val intArbiterInputsWireN = intArbiterInputsWire.filterNot(_.bits.params.writeIntRf)
+
+  val vfArbiterInputsWire = Wire(chiselTypeOf(fromExu))
+  val vfArbiterInputsWireY = vfArbiterInputsWire.filter(_.bits.params.writeVfRf)
+  val vfArbiterInputsWireN = vfArbiterInputsWire.filterNot(_.bits.params.writeVfRf)
 
   def acceptCond(exuOutput: ExuOutput): (Seq[Bool], Bool) = {
     val intWen = if(exuOutput.intWen.isDefined) exuOutput.intWen.get else false.B
@@ -153,17 +142,39 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
     (Seq(intWen, fpwen || vecWen), !intWen && !fpwen && !vecWen)
   }
 
-  fromExu.zip(intArbiterInputsWire.zip(vfArbiterInputsWire))map{
-    case (exuOut, (intArbiterInput, vfArbiterInput)) =>
-      val regfilesTypeNum = params.pregParams.filterNot(_.isFake).size
-      val in1ToN = Module(new WbArbiterDispatcher(new ExuOutput(exuOut.bits.params), regfilesTypeNum, acceptCond))
-      in1ToN.io.in.valid := exuOut.valid
-      in1ToN.io.in.bits := exuOut.bits
-      exuOut.ready := in1ToN.io.in.ready
-      in1ToN.io.out.zip(MixedVecInit(intArbiterInput, vfArbiterInput)).foreach { case (source, sink) =>
-        sink.valid := source.valid
-        sink.bits := source.bits
-        source.ready := sink.ready
+  intArbiterInputsWire.zip(vfArbiterInputsWire).zip(fromExu).foreach {
+    case ((intArbiterInput, vfArbiterInput), exuOut) =>
+      val writeCond = acceptCond(exuOut.bits)
+      val intWrite = exuOut.valid && writeCond._1(0)
+      val vfWrite = exuOut.valid && writeCond._1(1)
+      val notWrite = writeCond._2
+
+      intArbiterInput.valid := intWrite
+      intArbiterInput.bits := exuOut.bits
+      vfArbiterInput.valid := vfWrite
+      vfArbiterInput.bits := exuOut.bits
+
+      println(s"[WbDataPath] exu: ${exuOut.bits.params.exuIdx}, uncertain: ${exuOut.bits.params.hasUncertainLatency}, certain: ${exuOut.bits.params.latencyCertain}")
+
+      // only EXUs with uncertain latency need result of arbiter
+      // the result data can be maintained until getting success in arbiter
+      if (exuOut.bits.params.hasUncertainLatency) {
+        exuOut.ready := intArbiterInput.ready && intWrite || vfArbiterInput.ready && vfWrite || notWrite
+      } else {
+        exuOut.ready := true.B
+
+        // for EXUs with certain latency, if the request fails in arbiter, the result data will be permanently lost
+        when (intWrite) {
+          assert(intArbiterInput.ready, s"exu ${exuOut.bits.params.exuIdx} failed to write int regfile\n")
+        }
+        when (vfWrite) {
+          assert(vfArbiterInput.ready, s"exu ${exuOut.bits.params.exuIdx} failed to write vf regfile\n")
+        }
+      }
+      // the ports not writting back pregs are always ready
+      // the ports set highest priority are always ready
+      if (exuOut.bits.params.hasNoDataWB || exuOut.bits.params.isHighestWBPriority) {
+        exuOut.ready := true.B
       }
   }
   intArbiterInputsWireN.foreach(_.ready := false.B)
@@ -180,7 +191,7 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
     s"MemExu(${io.fromMemExu.flatten.count(_.bits.params.writeVfRf)})"
   )
 
-  // modules
+  // wb arbiter
   private val intWbArbiter = Module(new WbArbiter(params.getIntWbArbiterParams))
   private val vfWbArbiter = Module(new WbArbiter(params.getVfWbArbiterParams))
   println(s"[WbDataPath] int preg write back port num: ${intWbArbiter.io.out.size}, active port: ${intWbArbiter.io.inGroup.keys.toSeq.sorted}")
@@ -203,9 +214,9 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
     in.ready := arbiterIn.ready
     arbiterIn.bits.fromExuOutput(in.bits)
   }
-
   private val vfWbArbiterOut = vfWbArbiter.io.out
 
+  // WB -> CtrlBlock
   private val intExuInputs = io.fromIntExu.flatten.toSeq
   private val intExuWBs = WireInit(MixedVecInit(intExuInputs))
   private val vfExuInputs = io.fromVfExu.flatten.toSeq
@@ -217,12 +228,6 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
   (intExuWBs zip intExuInputs).foreach { case (wb, input) => wb.valid := input.fire }
   (vfExuWBs zip vfExuInputs).foreach { case (wb, input) => wb.valid := input.fire }
   (memExuWBs zip memExuInputs).foreach { case (wb, input) => wb.valid := input.fire }
-
-  // the ports not writting back pregs are always ready
-  // the ports set highest priority are always ready
-  (fromExu).foreach( x =>
-    if (x.bits.params.hasNoDataWB || x.bits.params.isHighestWBPriority) x.ready := true.B
-  )
 
   // io assign
   private val toIntPreg: MixedVec[RfWritePortWithConfig] = MixedVecInit(intWbArbiterOut.map(x => x.bits.asIntRfWriteBundle(x.fire)).toSeq)
@@ -238,6 +243,13 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
     source.ready := true.B
   }
 
+  // debug
+  if(backendParams.debugEn) {
+    dontTouch(intArbiterInputsWire)
+    dontTouch(vfArbiterInputsWire)
+  }
+
+  // difftest
   if (env.EnableDifftest || env.AlwaysBasicDiff) {
     intWbArbiterOut.foreach(out => {
       val difftest = DifftestModule(new DiffIntWriteback(IntPhyRegs))
