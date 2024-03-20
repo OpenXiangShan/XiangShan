@@ -10,7 +10,7 @@ import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.datapath.WbConfig.{IntWB, PregWB, VfWB}
 import xiangshan.backend.datapath.{DataConfig, WakeUpConfig}
 import xiangshan.backend.fu.{FuConfig, FuType}
-import xiangshan.backend.issue.{IntScheduler, IssueBlockParams, SchedulerType, VfScheduler}
+import xiangshan.backend.issue.{IssueBlockParams, SchedulerType, IntScheduler, VfScheduler, MemScheduler}
 import scala.collection.mutable
 
 case class ExeUnitParams(
@@ -68,6 +68,10 @@ case class ExeUnitParams(
   val needFPUCtrl: Boolean = fuConfigs.map(_.needFPUCtrl).reduce(_ || _)
   val needVPUCtrl: Boolean = fuConfigs.map(_.needVecCtrl).reduce(_ || _)
   val isHighestWBPriority: Boolean = wbPortConfigs.forall(_.priority == 0)
+
+  val isIntExeUnit: Boolean = schdType.isInstanceOf[IntScheduler]
+  val isVfExeUnit: Boolean = schdType.isInstanceOf[VfScheduler]
+  val isMemExeUnit: Boolean = schdType.isInstanceOf[MemScheduler]
 
   require(needPc && needTarget || !needPc && !needTarget, "The ExeUnit must need both PC and Target PC")
 
@@ -139,8 +143,14 @@ case class ExeUnitParams(
   def latencyValMax: Int = fuLatancySet.fold(0)(_ max _)
 
   def intFuLatencyMap: Map[FuType.OHType, Int] = {
-    if (intLatencyCertain)
-      writeIntFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
+    if (intLatencyCertain) {
+      if (isVfExeUnit) {
+        // vf exe unit writing back to int regfile should delay 1 cycle
+        writeIntFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get + 1)).toMap
+      } else {
+        writeIntFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
+      }
+    }
     else
       Map()
   }
