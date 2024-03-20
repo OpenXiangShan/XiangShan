@@ -244,6 +244,7 @@ object FuConfig {
     ),
     piped = true,
     writeVecRf = true,
+    writeFpRf = true,
     latency = CertainLatency(0),
     dataBits = 128,
     immType = Set(SelImm.IMM_OPIVIU, SelImm.IMM_OPIVIS),
