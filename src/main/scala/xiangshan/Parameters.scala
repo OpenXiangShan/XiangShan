@@ -189,7 +189,7 @@ case class XSCoreParameters
   ),
   vfPreg: VfPregParams = VfPregParams(
     numEntries = 192,
-    numRead = Some(14),
+    numRead = None,
     numWrite = None,
   ),
   prefetcher: Option[PrefetcherParams] = Some(SMSParams()),
