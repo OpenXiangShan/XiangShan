@@ -145,14 +145,23 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
   intArbiterInputsWire.zip(vfArbiterInputsWire).zip(fromExu).foreach {
     case ((intArbiterInput, vfArbiterInput), exuOut) =>
       val writeCond = acceptCond(exuOut.bits)
-      val intWrite = exuOut.valid && writeCond._1(0)
-      val vfWrite = exuOut.valid && writeCond._1(1)
-      val notWrite = writeCond._2
+      val intWrite = Wire(Bool())
+      val vfWrite = Wire(Bool())
+      val notWrite = Wire(Bool())
+
+      intWrite := exuOut.valid && writeCond._1(0)
+      vfWrite := exuOut.valid && writeCond._1(1)
+      notWrite := writeCond._2
 
       intArbiterInput.valid := intWrite
       intArbiterInput.bits := exuOut.bits
       vfArbiterInput.valid := vfWrite
       vfArbiterInput.bits := exuOut.bits
+
+      if (exuOut.bits.params.writeIntRf && exuOut.bits.params.isVfExeUnit) {
+        intWrite := RegNext(exuOut.valid && writeCond._1(0))
+        intArbiterInput.bits := RegEnable(exuOut.bits, exuOut.valid)
+      }
 
       println(s"[WbDataPath] exu: ${exuOut.bits.params.exuIdx}, uncertain: ${exuOut.bits.params.hasUncertainLatency}, certain: ${exuOut.bits.params.latencyCertain}")
 
