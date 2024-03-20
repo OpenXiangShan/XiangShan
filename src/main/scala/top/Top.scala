@@ -140,10 +140,10 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
   }
 
   class XSTopImp(wrapper: LazyModule) extends LazyRawModuleImp(wrapper) {
-    if (soc.XSTopPrefix != "") {
+    soc.XSTopPrefix.foreach { prefix =>
       val mod = this.toNamed
       annotate(new ChiselAnnotation {
-        def toFirrtl = NestedPrefixModulesAnnotation(mod, soc.XSTopPrefix, true)
+        def toFirrtl = NestedPrefixModulesAnnotation(mod, prefix, true)
       })
     }
 

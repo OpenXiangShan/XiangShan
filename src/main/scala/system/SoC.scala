@@ -46,7 +46,7 @@ case class SoCParameters
     ways = 8,
     sets = 2048 // 1MB per bank
   )),
-  XSTopPrefix: String = ""
+  XSTopPrefix: Option[String] = None
 ){
   // L3 configurations
   val L3InnerBusWidth = 256
