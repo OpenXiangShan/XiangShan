@@ -29,6 +29,8 @@ import org.chipsalliance.cde.config._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.jtag.JTAGIO
+import chisel3.experimental.{annotate, ChiselAnnotation}
+import sifive.enterprise.firrtl.NestedPrefixModulesAnnotation
 
 abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
   with BindingScope
@@ -138,6 +140,13 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
   }
 
   class XSTopImp(wrapper: LazyModule) extends LazyRawModuleImp(wrapper) {
+    if (soc.XSTopPrefix != "") {
+      val mod = this.toNamed
+      annotate(new ChiselAnnotation {
+        def toFirrtl = NestedPrefixModulesAnnotation(mod, soc.XSTopPrefix, true)
+      })
+    }
+
     FileRegisters.add("dts", dts)
     FileRegisters.add("graphml", graphML)
     FileRegisters.add("json", json)
