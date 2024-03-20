@@ -149,17 +149,17 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   arb2.io.in(InArbPTWPort).valid := ptw.io.llptw.valid
   arb2.io.in(InArbPTWPort).bits.req_info := ptw.io.llptw.bits.req_info
-  arb2.io.in(InArbPTWPort).bits.isHptw := false.B 
+  arb2.io.in(InArbPTWPort).bits.isHptwReq := false.B 
   arb2.io.in(InArbPTWPort).bits.isLLptw := false.B 
   arb2.io.in(InArbPTWPort).bits.hptwId := DontCare
   ptw.io.llptw.ready := arb2.io.in(InArbPTWPort).ready
-  block_decoupled(missQueue.io.out, arb2.io.in(InArbMissQueuePort), Mux(missQueue.io.out.bits.isHptw, !hptw.io.req.ready, Mux(missQueue.io.out.bits.isLLptw, !llptw.io.in.ready, !ptw.io.req.ready)))
+  block_decoupled(missQueue.io.out, arb2.io.in(InArbMissQueuePort), Mux(missQueue.io.out.bits.isHptwReq, !hptw.io.req.ready, Mux(missQueue.io.out.bits.isLLptw, !llptw.io.in.ready, !ptw.io.req.ready)))
 
   arb2.io.in(InArbTlbPort).valid := arb1.io.out.valid
   arb2.io.in(InArbTlbPort).bits.req_info.vpn := arb1.io.out.bits.vpn
   arb2.io.in(InArbTlbPort).bits.req_info.s2xlate := arb1.io.out.bits.s2xlate
   arb2.io.in(InArbTlbPort).bits.req_info.source := arb1.io.chosen
-  arb2.io.in(InArbTlbPort).bits.isHptw := false.B 
+  arb2.io.in(InArbTlbPort).bits.isHptwReq := false.B 
   arb2.io.in(InArbTlbPort).bits.isLLptw := false.B 
   arb2.io.in(InArbTlbPort).bits.hptwId := DontCare
   arb1.io.out.ready := arb2.io.in(InArbTlbPort).ready
@@ -168,7 +168,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   arb2.io.in(InArbHPTWPort).bits.req_info.vpn := hptw_req_arb.io.out.bits.gvpn
   arb2.io.in(InArbHPTWPort).bits.req_info.s2xlate := onlyStage2
   arb2.io.in(InArbHPTWPort).bits.req_info.source := hptw_req_arb.io.out.bits.source
-  arb2.io.in(InArbHPTWPort).bits.isHptw := true.B 
+  arb2.io.in(InArbHPTWPort).bits.isHptwReq := true.B 
   arb2.io.in(InArbHPTWPort).bits.isLLptw := false.B 
   arb2.io.in(InArbHPTWPort).bits.hptwId := hptw_req_arb.io.out.bits.id
   hptw_req_arb.io.out.ready := arb2.io.in(InArbHPTWPort).ready
@@ -195,15 +195,18 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   val mq_arb = Module(new Arbiter(new L2TlbWithHptwIdBundle, 2))
   mq_arb.io.in(0).valid := cache.io.resp.valid && !cache.io.resp.bits.hit &&
-    ((!cache.io.resp.bits.toFsm.l2Hit && !cache.io.resp.bits.isHptw) || cache.io.resp.bits.bypassed || !llptw.io.in.ready) &&
-    !from_pre(cache.io.resp.bits.req_info.source) &&
-    (cache.io.resp.bits.bypassed || cache.io.resp.bits.isFirst || !ptw.io.req.ready)
+    !from_pre(cache.io.resp.bits.req_info.source) && 
+    (cache.io.resp.bits.bypassed || (
+      ((!cache.io.resp.bits.toFsm.l2Hit || cache.io.resp.bits.toFsm.stage1Hit) && !cache.io.resp.bits.isHptwReq && (cache.io.resp.bits.isFirst || !ptw.io.req.ready)) // send to ptw, is first or ptw is busy;
+      || (cache.io.resp.bits.toFsm.l2Hit && cache.io.resp.bits.isFirst && !llptw.io.in.ready) // send to llptw, llptw is full
+    ))
+
   mq_arb.io.in(0).bits.req_info :=  cache.io.resp.bits.req_info
-  mq_arb.io.in(0).bits.isHptw :=  cache.io.resp.bits.isHptw
+  mq_arb.io.in(0).bits.isHptwReq :=  cache.io.resp.bits.isHptwReq
   mq_arb.io.in(0).bits.hptwId :=  cache.io.resp.bits.toHptw.id
-  mq_arb.io.in(0).bits.isLLptw := cache.io.resp.bits.toFsm.l2Hit && !cache.io.resp.bits.isHptw
+  mq_arb.io.in(0).bits.isLLptw := cache.io.resp.bits.toFsm.l2Hit
   mq_arb.io.in(1).bits.req_info := llptw.io.cache.bits
-  mq_arb.io.in(1).bits.isHptw := false.B
+  mq_arb.io.in(1).bits.isHptwReq := false.B
   mq_arb.io.in(1).bits.hptwId := DontCare
   mq_arb.io.in(1).bits.isLLptw := false.B
   mq_arb.io.in(1).valid := llptw.io.cache.valid
@@ -219,7 +222,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     !cache.io.resp.bits.hit &&
     cache.io.resp.bits.toFsm.l2Hit &&
     !cache.io.resp.bits.bypassed &&
-    !cache.io.resp.bits.isHptw
+    !cache.io.resp.bits.isHptwReq
   llptw.io.in.bits.req_info := cache.io.resp.bits.req_info
   llptw.io.in.bits.ppn := cache.io.resp.bits.toFsm.ppn
   llptw.io.sfence := sfence_dup(1)
@@ -227,8 +230,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   cache.io.req.valid := arb2.io.out.valid
   cache.io.req.bits.req_info := arb2.io.out.bits.req_info
-  cache.io.req.bits.isFirst := (arb2.io.chosen =/= InArbMissQueuePort.U && !arb2.io.out.bits.isHptw)
-  cache.io.req.bits.isHptw := arb2.io.out.bits.isHptw
+  cache.io.req.bits.isFirst := (arb2.io.chosen =/= InArbMissQueuePort.U && !arb2.io.out.bits.isHptwReq)
+  cache.io.req.bits.isHptwReq := arb2.io.out.bits.isHptwReq
   cache.io.req.bits.hptwId := arb2.io.out.bits.hptwId
   cache.io.req.bits.bypassed.map(_ := false.B)
   cache.io.sfence := sfence_dup(2)
@@ -239,15 +242,15 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     cache.io.resp.bits.hit -> outReady(cache.io.resp.bits.req_info.source, outArbCachePort),
     (cache.io.resp.bits.toFsm.l2Hit && !cache.io.resp.bits.bypassed && llptw.io.in.ready) -> llptw.io.in.ready,
     (cache.io.resp.bits.bypassed || cache.io.resp.bits.isFirst) -> mq_arb.io.in(0).ready,
-    (!cache.io.resp.bits.hit && !cache.io.resp.bits.bypassed && cache.io.resp.bits.isHptw) -> hptw.io.req.ready,
-    (cache.io.resp.bits.hit && cache.io.resp.bits.isHptw) -> hptw_resp_arb.io.in(HptwRespArbCachePort).ready
+    (!cache.io.resp.bits.hit && !cache.io.resp.bits.bypassed && cache.io.resp.bits.isHptwReq) -> hptw.io.req.ready,
+    (cache.io.resp.bits.hit && cache.io.resp.bits.isHptwReq) -> hptw_resp_arb.io.in(HptwRespArbCachePort).ready
   ))
 
   // NOTE: missQueue req has higher priority
   ptw.io.req.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && !cache.io.resp.bits.toFsm.l2Hit &&
     !cache.io.resp.bits.bypassed &&
     !cache.io.resp.bits.isFirst &&
-    !cache.io.resp.bits.isHptw
+    !cache.io.resp.bits.isHptwReq
   ptw.io.req.bits.req_info := cache.io.resp.bits.req_info
   ptw.io.req.bits.l1Hit := cache.io.resp.bits.toFsm.l1Hit
   ptw.io.req.bits.ppn := cache.io.resp.bits.toFsm.ppn
@@ -257,7 +260,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   ptw.io.csr := csr_dup(6)
   ptw.io.resp.ready := outReady(ptw.io.resp.bits.source, outArbFsmPort)
 
-  hptw.io.req.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && !cache.io.resp.bits.bypassed & cache.io.resp.bits.isHptw
+  hptw.io.req.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && !cache.io.resp.bits.bypassed & cache.io.resp.bits.isHptwReq
   hptw.io.req.bits.gvpn := cache.io.resp.bits.req_info.vpn
   hptw.io.req.bits.id := cache.io.resp.bits.toHptw.id
   hptw.io.req.bits.source := cache.io.resp.bits.req_info.source
@@ -456,7 +459,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   // hptw and page cache -> ptw and llptw
   val HptwRespArbCachePort = 0
   val HptwRespArbHptw = 1
-  hptw_resp_arb.io.in(HptwRespArbCachePort).valid := cache.io.resp.valid && cache.io.resp.bits.hit && cache.io.resp.bits.isHptw
+  hptw_resp_arb.io.in(HptwRespArbCachePort).valid := cache.io.resp.valid && cache.io.resp.bits.hit && cache.io.resp.bits.isHptwReq
   hptw_resp_arb.io.in(HptwRespArbCachePort).bits.id := cache.io.resp.bits.toHptw.id
   hptw_resp_arb.io.in(HptwRespArbCachePort).bits.resp := cache.io.resp.bits.toHptw.resp
   hptw_resp_arb.io.in(HptwRespArbHptw).valid := hptw.io.resp.valid
@@ -473,7 +476,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   // Timing: Maybe need to do some optimization or even add one more cycle
   for (i <- 0 until PtwWidth) {
-    mergeArb(i).in(outArbCachePort).valid := cache.io.resp.valid && cache.io.resp.bits.hit && cache.io.resp.bits.req_info.source===i.U && !cache.io.resp.bits.isHptw 
+    mergeArb(i).in(outArbCachePort).valid := cache.io.resp.valid && cache.io.resp.bits.hit && cache.io.resp.bits.req_info.source===i.U && !cache.io.resp.bits.isHptwReq 
     mergeArb(i).in(outArbCachePort).bits.s2xlate := cache.io.resp.bits.req_info.s2xlate
     mergeArb(i).in(outArbCachePort).bits.s1 := cache.io.resp.bits.toTlb
     mergeArb(i).in(outArbCachePort).bits.s2 := cache.io.resp.bits.toHptw.resp

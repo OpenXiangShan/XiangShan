@@ -1357,7 +1357,7 @@ class L2TlbInnerBundle(implicit p: Parameters) extends PtwReq {
 
 class L2TlbWithHptwIdBundle(implicit p: Parameters) extends PtwBundle {
   val req_info = new L2TlbInnerBundle
-  val isHptw = Bool()
+  val isHptwReq = Bool()
   val isLLptw = Bool()
   val hptwId = UInt(log2Up(l2tlbParams.llptwsize).W)
 }

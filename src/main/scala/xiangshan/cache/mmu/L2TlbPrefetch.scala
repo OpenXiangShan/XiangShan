@@ -56,7 +56,7 @@ class L2TlbPrefetch(implicit p: Parameters) extends XSModule with HasPtwConst {
   io.out.bits.req_info.vpn := next_req
   io.out.bits.req_info.s2xlate := s2xlate
   io.out.bits.req_info.source := prefetchID.U
-  io.out.bits.isHptw := false.B
+  io.out.bits.isHptwReq := false.B
   io.out.bits.isLLptw := false.B
   io.out.bits.hptwId := DontCare
 

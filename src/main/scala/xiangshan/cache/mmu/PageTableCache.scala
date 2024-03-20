@@ -86,7 +86,7 @@ class PtwCacheReq(implicit p: Parameters) extends PtwBundle {
   val req_info = new L2TlbInnerBundle()
   val isFirst = Bool()
   val bypassed = Vec(3, Bool())
-  val isHptw = Bool()
+  val isHptwReq = Bool()
   val hptwId = UInt(log2Up(l2tlbParams.llptwsize).W)
 }
 
@@ -105,7 +105,7 @@ class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCo
       val stage1Hit = Bool() // find stage 1 pte in cache, but need to search stage 2 pte in cache at PTW
     }
     val toTlb = new PtwMergeResp()
-    val isHptw = Bool()
+    val isHptwReq = Bool()
     val toHptw = new Bundle {
       val l1Hit = Bool()
       val l2Hit = Bool()
@@ -464,15 +464,15 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   io.resp.bits.hit      := (resp_res.l3.hit || resp_res.sp.hit) && !isAllStage
   io.resp.bits.bypassed := (bypassed(2) || (bypassed(1) && !resp_res.l2.hit) || (bypassed(0) && !resp_res.l1.hit)) && !isAllStage
   io.resp.bits.prefetch := resp_res.l3.pre && resp_res.l3.hit || resp_res.sp.pre && resp_res.sp.hit
-  io.resp.bits.toFsm.l1Hit := resp_res.l1.hit && !stage1Hit && !isOnlyStage2
-  io.resp.bits.toFsm.l2Hit := resp_res.l2.hit && !stage1Hit && !isOnlyStage2
+  io.resp.bits.toFsm.l1Hit := resp_res.l1.hit && !stage1Hit && !isOnlyStage2 && !stageResp.bits.isHptwReq 
+  io.resp.bits.toFsm.l2Hit := resp_res.l2.hit && !stage1Hit && !isOnlyStage2 && !stageResp.bits.isHptwReq 
   io.resp.bits.toFsm.ppn   := Mux(resp_res.l2.hit, resp_res.l2.ppn, resp_res.l1.ppn)
   io.resp.bits.toFsm.stage1Hit := stage1Hit
 
-  io.resp.bits.isHptw := stageResp.bits.isHptw 
+  io.resp.bits.isHptwReq := stageResp.bits.isHptwReq 
   io.resp.bits.toHptw.id := stageResp.bits.hptwId
-  io.resp.bits.toHptw.l1Hit := resp_res.l1.hit
-  io.resp.bits.toHptw.l2Hit := resp_res.l2.hit
+  io.resp.bits.toHptw.l1Hit := resp_res.l1.hit && stageResp.bits.isHptwReq 
+  io.resp.bits.toHptw.l2Hit := resp_res.l2.hit && stageResp.bits.isHptwReq 
   io.resp.bits.toHptw.ppn := Mux(resp_res.l2.hit, resp_res.l2.ppn, resp_res.l1.ppn)
   val idx = stageResp.bits.req_info.vpn(2, 0)
   io.resp.bits.toHptw.resp.entry.tag := stageResp.bits.req_info.vpn
