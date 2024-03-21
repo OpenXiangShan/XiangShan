@@ -1349,6 +1349,7 @@ class L2TLBIO(implicit p: Parameters) extends PtwBundle {
 class L2TlbMemReqBundle(implicit p: Parameters) extends PtwBundle {
   val addr = UInt(PAddrBits.W)
   val id = UInt(bMemID.W)
+  val hptw_bypassed = Bool()
 }
 
 class L2TlbInnerBundle(implicit p: Parameters) extends PtwReq {

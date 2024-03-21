@@ -112,6 +112,7 @@ class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCo
       val ppn = UInt(ppnLen.W)
       val id = UInt(log2Up(l2tlbParams.llptwsize).W)
       val resp = new HptwResp() // used if hit
+      val bypassed = Bool()
     }
   })
   val refill = Flipped(ValidIO(new Bundle {
@@ -456,6 +457,14 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
         OneCycleValid(stageCheck(1).fire, false.B) || io.refill.valid)
   )
 
+  // stageResp bypass to hptw
+  val hptw_bypassed = Wire(Vec(3, Bool()))
+  hptw_bypassed.indices.foreach(i =>
+    hptw_bypassed(i) := stageResp.bits.bypassed(i) ||
+      ValidHoldBypass(refill_bypass(stageResp.bits.req_info.vpn, i, stageResp.bits.req_info.s2xlate),
+        io.resp.fire)
+  )
+
   val isAllStage = stageResp.bits.req_info.s2xlate === allStage
   val isOnlyStage2 = stageResp.bits.req_info.s2xlate === onlyStage2
   val stage1Hit = (resp_res.l3.hit || resp_res.sp.hit) && isAllStage
@@ -470,6 +479,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   io.resp.bits.toFsm.stage1Hit := stage1Hit
 
   io.resp.bits.isHptwReq := stageResp.bits.isHptwReq 
+  io.resp.bits.toHptw.bypassed := (hptw_bypassed(2) || (hptw_bypassed(1) && !resp_res.l2.hit) || (hptw_bypassed(0) && !resp_res.l1.hit)) && stageResp.bits.isHptwReq 
   io.resp.bits.toHptw.id := stageResp.bits.hptwId
   io.resp.bits.toHptw.l1Hit := resp_res.l1.hit && stageResp.bits.isHptwReq 
   io.resp.bits.toHptw.l2Hit := resp_res.l2.hit && stageResp.bits.isHptwReq 

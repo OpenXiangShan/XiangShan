@@ -177,6 +177,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   mem.req.valid := s_mem_req === false.B && !mem.mask && !accessFault && s_pmp_check
   mem.req.bits.addr := Mux(s2xlate, hpaddr, mem_addr)
   mem.req.bits.id := FsmReqID.U(bMemID.W)
+  mem.req.bits.hptw_bypassed := false.B
 
   io.refill.req_info.s2xlate := Mux(enableS2xlate, onlyStage1, req_s2xlate) // ptw refill the pte of stage 1 when s2xlate is enabled
   io.refill.req_info.vpn := vpn
@@ -607,20 +608,35 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.out.bits.af := entries(mem_ptr).af
   io.out.bits.h_resp := entries(mem_ptr).hptw_resp
 
-  val hptw_req_gvpn_1 = hyper_arb1.io.out.bits.ppn // first stage 2 translation
-  val hptw_req_gvpn_2 = hyper_arb2.io.out.bits.ppn // last stage 2 translation
-  io.hptw.req.valid := (hyper_arb1.io.out.fire || hyper_arb2.io.out.fire) && !flush
-  io.hptw.req.bits.gvpn := Mux(hyper_arb1.io.out.valid, hptw_req_gvpn_1, hptw_req_gvpn_2)
-  io.hptw.req.bits.id := Mux(hyper_arb1.io.out.valid, hyper_arb1.io.chosen, hyper_arb2.io.chosen)
-  io.hptw.req.bits.source := Mux(hyper_arb1.io.out.valid, hyper_arb1.io.out.bits.req_info.source, hyper_arb2.io.out.bits.req_info.source)
-  hyper_arb1.io.out.ready := io.hptw.req.ready && !(Cat(is_hptw_resp).orR)
-  hyper_arb2.io.out.ready := io.hptw.req.ready && !(Cat(is_last_hptw_resp).orR)
+  val hptw_req_arb = Module(new Arbiter(new Bundle{
+      val source = UInt(bSourceWidth.W)
+      val id = UInt(log2Up(l2tlbParams.llptwsize).W)
+      val ppn = UInt(vpnLen.W)
+    } , 2))
+  // first stage 2 translation
+  hptw_req_arb.io.in(0).valid := hyper_arb1.io.out.valid
+  hptw_req_arb.io.in(0).bits.source := hyper_arb1.io.out.bits.req_info.source
+  hptw_req_arb.io.in(0).bits.ppn := hyper_arb1.io.out.bits.ppn
+  hptw_req_arb.io.in(0).bits.id := hyper_arb1.io.chosen
+  hyper_arb1.io.out.ready := hptw_req_arb.io.in(0).ready && !(Cat(is_hptw_resp).orR)
+  // last stage 2 translation
+  hptw_req_arb.io.in(1).valid := hyper_arb2.io.out.valid
+  hptw_req_arb.io.in(1).bits.source := hyper_arb2.io.out.bits.req_info.source
+  hptw_req_arb.io.in(1).bits.ppn := hyper_arb2.io.out.bits.ppn
+  hptw_req_arb.io.in(1).bits.id := hyper_arb2.io.chosen
+  hyper_arb2.io.out.ready := hptw_req_arb.io.in(1).ready && !(Cat(is_last_hptw_resp).orR)
+  hptw_req_arb.io.out.ready := io.hptw.req.ready
+  io.hptw.req.valid := hptw_req_arb.io.out.valid && !flush
+  io.hptw.req.bits.gvpn := hptw_req_arb.io.out.bits.ppn
+  io.hptw.req.bits.id := hptw_req_arb.io.out.bits.id
+  io.hptw.req.bits.source := hptw_req_arb.io.out.bits.source
 
   io.mem.req.valid := mem_arb.io.out.valid && !flush
   val mem_paddr = MakeAddr(mem_arb.io.out.bits.ppn, getVpnn(mem_arb.io.out.bits.req_info.vpn, 0))
   val mem_hpaddr = MakeAddr(mem_arb.io.out.bits.hptw_resp.genPPNS2(get_pn(mem_paddr)), getVpnn(mem_arb.io.out.bits.req_info.vpn, 0))
   io.mem.req.bits.addr := Mux(mem_arb.io.out.bits.req_info.s2xlate =/= noS2xlate, mem_hpaddr, mem_paddr)
   io.mem.req.bits.id := mem_arb.io.chosen
+  io.mem.req.bits.hptw_bypassed := false.B
   mem_arb.io.out.ready := io.mem.req.ready
   val mem_refill_id = RegNext(io.mem.resp.bits.id(log2Up(l2tlbParams.llptwsize)-1, 0))
   io.mem.refill := entries(mem_refill_id).req_info
@@ -672,6 +688,7 @@ class HPTWIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst 
     val ppn = UInt(ppnLen.W)
     val l1Hit = Bool()
     val l2Hit = Bool()
+    val bypassed = Bool() // if bypass, don't refill
   }))
   val resp = DecoupledIO(new Bundle {
     val source = UInt(bSourceWidth.W)
@@ -707,6 +724,7 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val levelNext = level + 1.U
   val l1Hit = Reg(Bool())
   val l2Hit = Reg(Bool())
+  val bypassed = Reg(Bool())
   val pg_base = MakeGPAddr(hgatp.ppn, getGVpnn(vpn, 2.U)) // for l0
 //  val pte = io.mem.resp.bits.MergeRespToPte()
   val pte = io.mem.resp.bits.asTypeOf(new PteBundle().cloneType)
@@ -751,6 +769,7 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   io.mem.req.valid := !s_mem_req && !io.mem.mask && !accessFault && s_pmp_check
   io.mem.req.bits.addr := mem_addr
   io.mem.req.bits.id := HptwReqId.U(bMemID.W)
+  io.mem.req.bits.hptw_bypassed := bypassed
 
   io.refill.req_info.vpn := vpn
   io.refill.level := level
@@ -758,6 +777,7 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   io.refill.req_info.s2xlate := onlyStage2
   when (idle){
     when(io.req.fire){
+      bypassed := io.req.bits.bypassed
       level := Mux(io.req.bits.l2Hit, 2.U, Mux(io.req.bits.l1Hit, 1.U, 0.U))
       idle := false.B
       gpaddr := Cat(io.req.bits.gvpn, 0.U(offLen.W))
