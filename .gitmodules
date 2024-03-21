@@ -16,6 +16,9 @@
 [submodule "utility"]
 	path = utility
 	url = https://github.com/OpenXiangShan/utility
+[submodule "yunsuan"]
+	path = yunsuan
+	url = https://github.com/OpenXiangShan/YunSuan.git
 [submodule "coupledL2"]
 	path = coupledL2
 	url = https://github.com/OpenXiangShan/coupledL2
