@@ -57,6 +57,21 @@ class SimTop(implicit p: Parameters) extends Module {
   soc.io.cacheable_check := DontCare
   soc.io.riscv_rst_vec.foreach(_ := 0x10000000L.U)
 
+
+  // DFT signal set 0
+  soc.scan_mode := false.B
+  soc.dft_lgc_rst_n := true.B.asAsyncReset
+  soc.dft_mode := false.B
+  if(soc.dft.isDefined){
+    soc.dft.get.cgen := false.B
+    soc.dft.get.l3dataram_clk := false.B
+    soc.dft.get.l3dataramclk_bypass := false.B
+    soc.dft.get.ram_hold := false.B
+    soc.dft.get.ram_bypass := false.B
+    soc.dft.get.ram_bp_clken := false.B
+  }
+
+
   // soc.io.rtc_clock is a div100 of soc.io.clock
   val rtcClockDiv = 100
   val rtcTickCycle = rtcClockDiv / 2
