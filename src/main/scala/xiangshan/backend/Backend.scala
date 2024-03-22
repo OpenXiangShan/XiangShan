@@ -156,6 +156,7 @@ class BackendImp(outer: Backend)(implicit p: Parameters) extends LazyModuleImp(o
       val loadFastMatch = Vec(exuParameters.LduCnt, Output(UInt(exuParameters.LduCnt.W)))
       val loadFastFuOpType = Vec(exuParameters.LduCnt, Output(FuOpType()))
       val loadFastImm = Vec(exuParameters.LduCnt, Output(UInt(12.W)))
+      val loadSignExtImm = Vec(exuParameters.LduCnt, Output(UInt(VAddrBits.W)))
       val rsfeedback = Vec(exuParameters.LsExuCnt, Flipped(new MemRSFeedbackIO()(p.alter((site, here, up) => {
         case XSCoreParamsKey => up(XSCoreParamsKey).copy(
           IssQueSize = IssQueSize * (if (Enable3Load3Store) 3 else 2)
@@ -292,7 +293,7 @@ class BackendImp(outer: Backend)(implicit p: Parameters) extends LazyModuleImp(o
     c.ptr := e.bits.uop.cf.ftqPtr
     c.offset := e.bits.uop.cf.ftqOffset
   }
-  // return load pc at load s2
+  // get valid load pc at load s3
   mem.loadPc <> VecInit(ctrlBlock.io.ld_pc_read.map(_.data))
 
   for((c, e) <- ctrlBlock.io.st_pc_read.zip(exuBlocks(0).io.issue.get.drop(exuParameters.LduCnt))){
@@ -300,7 +301,7 @@ class BackendImp(outer: Backend)(implicit p: Parameters) extends LazyModuleImp(o
     c.ptr := e.bits.uop.cf.ftqPtr
     c.offset := e.bits.uop.cf.ftqOffset
   }
-  // return store pc at store s2
+  // get valid store pc at store s3
   mem.storePc <> VecInit(ctrlBlock.io.st_pc_read.map(_.data))
 
   mem.issue <> exuBlocks(0).io.issue.get
@@ -309,6 +310,7 @@ class BackendImp(outer: Backend)(implicit p: Parameters) extends LazyModuleImp(o
   exuBlocks(0).io.scheExtra.loadFastMatch.get <> mem.loadFastMatch
   exuBlocks(0).io.scheExtra.loadFastFuOpType.get <> mem.loadFastFuOpType
   exuBlocks(0).io.scheExtra.loadFastImm.get <> mem.loadFastImm
+  exuBlocks(0).io.scheExtra.loadSignExtImm.get <> mem.loadSignExtImm
 
   val stdIssue = exuBlocks(0).io.issue.get.takeRight(exuParameters.StuCnt)
   exuBlocks.map(_.io).foreach { exu =>

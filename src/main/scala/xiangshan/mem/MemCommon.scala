@@ -265,8 +265,10 @@ class PipeLoadForwardQueryIO(implicit p: Parameters) extends LoadForwardQueryIO 
 
   // dataInvalid: addr match, but data is not valid for now
   val dataInvalidFast = Input(Bool()) // resp to load_s1
-  // val dataInvalid = Input(Bool()) // resp to load_s2
   val dataInvalidSqIdx = Input(new SqPtr) // resp to load_s2, sqIdx
+
+  // addrInvalidFast: addr not match
+  val addrInvalidFast = Input(Bool())
   val addrInvalidSqIdx = Input(new SqPtr) // resp to load_s2, sqIdx
 }
 
@@ -277,36 +279,43 @@ class PipeLoadForwardQueryIO(implicit p: Parameters) extends LoadForwardQueryIO 
 //
 // Note that query req may be !ready, as dcache is releasing a block
 // If it happens, a replay from rs is needed.
-class LoadNukeQueryReq(implicit p: Parameters) extends XSBundleWithMicroOp { // provide lqIdx
-  // mask: load's data mask.
-  val mask = UInt((VLEN/8).W)
-
-  // paddr: load's paddr.
-  val paddr      = UInt(PAddrBits.W)
-  // dataInvalid: load data is invalid.
-  val data_valid = Bool()
-}
-
-class LoadNukeQueryResp(implicit p: Parameters) extends XSBundle {
-  // rep_frm_fetch: ld-ld violation check success, replay from fetch.
-  val rep_frm_fetch = Bool()
-}
-
 class LoadNukeQueryIO(implicit p: Parameters) extends XSBundle {
-  val req    = Decoupled(new LoadNukeQueryReq)
-  val resp   = Flipped(Valid(new LoadNukeQueryResp))
-  val revoke = Output(Bool())
+  // pre allocation
+  val s1_prealloc = Output(Bool())
+  val s1_lqIdx = Output(new LqPtr)
+  val s1_sqIdx = Output(new SqPtr)
+  val s1_robIdx = Output(new RobPtr)
+  val s1_nack = Input(Bool())
+
+  // allocation
+  val s2_alloc = Output(Bool())
+  val s2_uop = Output(new MicroOp)
+  val s2_mask = Output(UInt((VLEN/8).W))
+  val s2_paddr = Output(UInt(PAddrBits.W))
+  val s2_dataInvalid = Output(Bool())
+
+  // ld-ld violation check success, replay from fetch.
+  val s3_nuke = Input(Bool())
+
+  // revoke RAR/RAW allocation
+  val s3_revoke = Output(Bool())
+}
+
+class NukeQueryIO(implicit p: Parameters) extends XSBundle {
+  val rar = new LoadNukeQueryIO
+  val raw = new LoadNukeQueryIO
 }
 
 class StoreNukeQueryIO(implicit p: Parameters) extends XSBundle {
+  val s2_valid = Output(Bool())
   //  robIdx: Requestor's (a store instruction) rob index for match logic.
-  val robIdx = new RobPtr
-
+  val s2_robIdx = Output(new RobPtr)
   //  paddr: requestor's (a store instruction) physical address for match logic.
-  val paddr  = UInt(PAddrBits.W)
-
+  val s2_paddr  = Output(UInt(PAddrBits.W))
   //  mask: requestor's (a store instruction) data width mask for match logic.
-  val mask = UInt((VLEN/8).W)
+  val s2_mask = Output(UInt((VLEN/8).W))
+  //
+  val s4_nuke = Input(Bool())
 }
 
 // Store byte valid mask write bundle

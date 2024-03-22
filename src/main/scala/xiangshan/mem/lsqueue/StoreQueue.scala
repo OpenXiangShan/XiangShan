@@ -489,6 +489,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     // load_s2: generate addrInvalid
     val addrInvalidMask1 = (~addrValidVec.asUInt & storeSetHitVec.asUInt & forwardMask1.asUInt)
     val addrInvalidMask2 = (~addrValidVec.asUInt & storeSetHitVec.asUInt & forwardMask2.asUInt)
+    val addrInvalidMask = addrInvalidMask1 | addrInvalidMask2
+    val hasInvalidAddr = (~addrValidVec.asUInt & needForward).orR
+    io.forward(i).addrInvalidFast := Mux(io.forward(i).uop.cf.loadWaitStrict, hasInvalidAddr, addrInvalidMask.orR)
+
     // make chisel happy
     val addrInvalidMask1Reg = Wire(UInt(StoreQueueSize.W))
     addrInvalidMask1Reg := RegNext(addrInvalidMask1)
@@ -499,6 +503,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
     // load_s2
     io.forward(i).dataInvalid := RegNext(io.forward(i).dataInvalidFast)
+    io.forward(i).addrInvalid := RegNext(io.forward(i).addrInvalidFast)
     // check if vaddr forward mismatched
     io.forward(i).matchInvalid := vaddrMatchFailed
 
@@ -514,7 +519,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val addrInvalidMaskRegWire = Wire(UInt(StoreQueueSize.W))
     addrInvalidMaskRegWire := addrInvalidMaskReg
     val addrInvalidFlag = addrInvalidMaskRegWire.orR
-    val hasInvalidAddr = (~addrValidVec.asUInt & needForward).orR
 
     val addrInvalidSqIdx1 = OHToUInt(Reverse(PriorityEncoderOH(Reverse(addrInvalidMask1Reg))))
     val addrInvalidSqIdx2 = OHToUInt(Reverse(PriorityEncoderOH(Reverse(addrInvalidMask2Reg))))
@@ -539,9 +543,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     //  | Waiting for all older  |   | Wait until the corresponding |
     //  |   stores operations    |   | older store operations       |
     //  +------------------------+   +------------------------------+
-
-
-
     when (RegNext(io.forward(i).uop.cf.loadWaitStrict)) {
       io.forward(i).addrInvalidSqIdx := RegNext(io.forward(i).uop.sqIdx - 1.U)
     } .elsewhen (addrInvalidFlag) {
@@ -551,7 +552,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       // may be store inst has been written to sbuffer already.
       io.forward(i).addrInvalidSqIdx := RegNext(io.forward(i).uop.sqIdx)
     }
-    io.forward(i).addrInvalid := Mux(RegNext(io.forward(i).uop.cf.loadWaitStrict), RegNext(hasInvalidAddr), addrInvalidFlag)
 
     // data invalid sq index
     // make chisel happy
@@ -585,10 +585,12 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   //(2) when they reach ROB's head, they can be sent to uncache channel
   val s_idle :: s_req :: s_resp :: s_wb :: s_wait :: Nil = Enum(5)
   val uncacheState = RegInit(s_idle)
+  val uncacheUop = Reg(new MicroOp)
   switch(uncacheState) {
     is(s_idle) {
       when(RegNext(io.rob.pendingst && pending(deqPtr) && allocated(deqPtr) && datavalid(deqPtr) && addrvalid(deqPtr))) {
         uncacheState := s_req
+        uncacheUop := uop(deqPtr)
       }
     }
     is(s_req) {
@@ -655,7 +657,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   // (4) writeback to ROB (and other units): mark as writebacked
   io.mmioStout.valid := uncacheState === s_wb
-  io.mmioStout.bits.uop := uop(deqPtr)
+  io.mmioStout.bits.uop := uncacheUop
   io.mmioStout.bits.uop.sqIdx := deqPtrExt(0)
   io.mmioStout.bits.data := shiftDataToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).data) // dataModule.io.rdata.read(deqPtr)
   io.mmioStout.bits.redirectValid := false.B
