@@ -630,7 +630,7 @@ object FuConfig {
     piped = true,
     writeIntRf = true,
     writeVecRf = true,
-    latency = CertainLatency(1),
+    latency = CertainLatency(2),
     vconfigWakeUp = true,
     maskWakeUp = true,
     dataBits = 128,
