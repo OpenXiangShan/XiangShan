@@ -634,7 +634,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   io.out.last_stage_meta := last_stage_meta.asUInt
 
 
-  val redirect = RegNext(io.redirect)
+  val redirect = RegNextWithEnable(io.redirect)
   val do_recover = redirect.valid
   val recover_cfi = redirect.bits.cfiUpdate
 

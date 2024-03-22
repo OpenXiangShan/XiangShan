@@ -312,7 +312,7 @@ class TageTable
   val req_unhashed_idx = getUnhashedIdx(io.req.bits.pc)
 
   val us = Module(new FoldedSRAMTemplate(Bool(), set=nRowsPerBr, width=uFoldedWidth, way=numBr, shouldReset=true, extraReset=true, holdRead=true, singlePort=true))
-  us.extra_reset.get := io.update.reset_u.reduce(_||_)
+  us.extra_reset.get := io.update.reset_u.reduce(_||_) && io.update.mask.reduce(_||_)
 
 
   val table_banks = Seq.fill(nBanks)(
@@ -427,7 +427,7 @@ class TageTable
     ))
   ))
 
-  us.io.w.apply(io.update.uMask.reduce(_||_), update_u_wdata, update_u_idx, update_u_way_mask)
+  us.io.w.apply(io.update.mask.reduce(_||_) && io.update.uMask.reduce(_||_), update_u_wdata, update_u_idx, update_u_way_mask)
 
   // remove silent updates
   def silentUpdate(ctr: UInt, taken: Bool) = {
@@ -827,26 +827,28 @@ class Tage(implicit p: Parameters) extends BaseTage {
     }
   }
 
+  val realWens = updateMask.transpose.map(v => v.reduce(_ | _))
   for (w <- 0 until TageBanks) {
     for (i <- 0 until TageNTables) {
-      tables(i).io.update.mask(w)    := RegNext(updateMask(w)(i))
-      tables(i).io.update.takens(w)  := RegNext(updateTakens(w)(i))
-      tables(i).io.update.alloc(w)   := RegNext(updateAlloc(w)(i))
-      tables(i).io.update.oldCtrs(w) := RegNext(updateOldCtrs(w)(i))
-
-      tables(i).io.update.uMask(w)   := RegNext(updateUMask(w)(i))
-      tables(i).io.update.us(w)      := RegNext(updateU(w)(i))
+      val realWen = realWens(i)
       tables(i).io.update.reset_u(w) := RegNext(updateResetU(w))
+      tables(i).io.update.mask(w)    := RegNext(updateMask(w)(i))
+      tables(i).io.update.takens(w) := RegEnable(updateTakens(w)(i), realWen)
+      tables(i).io.update.alloc(w) := RegEnable(updateAlloc(w)(i), realWen)
+      tables(i).io.update.oldCtrs(w) := RegEnable(updateOldCtrs(w)(i), realWen)
+
+      tables(i).io.update.uMask(w) := RegEnable(updateUMask(w)(i), realWen)
+      tables(i).io.update.us(w) := RegEnable(updateU(w)(i), realWen)
       // use fetch pc instead of instruction pc
-      tables(i).io.update.pc       := RegNext(update.pc)
-      tables(i).io.update.folded_hist := RegNext(updateFHist)
-      tables(i).io.update.ghist := RegNext(io.update.bits.ghist)
+      tables(i).io.update.pc := RegEnable(update.pc, realWen)
+      tables(i).io.update.folded_hist := RegEnable(updateFHist, realWen)
+      tables(i).io.update.ghist := RegEnable(io.update.bits.ghist, realWen)
     }
   }
   bt.io.update_mask := RegNext(baseupdate)
-  bt.io.update_cnt := RegNext(updatebcnt)
-  bt.io.update_pc := RegNext(update.pc)
-  bt.io.update_takens := RegNext(bUpdateTakens)
+  bt.io.update_cnt := RegEnable(updatebcnt, baseupdate.reduce(_ | _))
+  bt.io.update_pc := RegEnable(update.pc, baseupdate.reduce(_ | _))
+  bt.io.update_takens := RegEnable(bUpdateTakens, baseupdate.reduce(_ | _))
 
   // all should be ready for req
   io.s1_ready := tables.map(_.io.req.ready).reduce(_ && _) && bt.io.req.ready

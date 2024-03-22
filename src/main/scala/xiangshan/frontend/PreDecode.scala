@@ -362,31 +362,31 @@ class PredChecker(implicit p: Parameters) extends XSModule with HasPdConst {
 
   //Stage 2: detect target fault
   /** target calculation: in the next stage  */
-  val fixedRangeNext = RegNext(fixedRange)
-  val instrValidNext = RegNext(instrValid)
-  val takenIdxNext   = RegNext(takenIdx)
-  val predTakenNext  = RegNext(predTaken)
-  val predTargetNext = RegNext(predTarget)
-  val jumpTargetsNext = RegNext(jumpTargets)
-  val seqTargetsNext = RegNext(seqTargets)
-  val pdsNext = RegNext(pds)
-  val jalFaultVecNext = RegNext(jalFaultVec)
-  val retFaultVecNext = RegNext(retFaultVec)
-  val notCFITakenNext = RegNext(notCFITaken)
-  val invalidTakenNext = RegNext(invalidTaken)
+  val fixedRangeNext = RegEnable(fixedRange, io.in.fire_in)
+  val instrValidNext = RegEnable(instrValid, io.in.fire_in)
+  val takenIdxNext   = RegEnable(takenIdx, io.in.fire_in)
+  val predTakenNext  = RegEnable(predTaken, io.in.fire_in)
+  val predTargetNext = RegEnable(predTarget, io.in.fire_in)
+  val jumpTargetsNext = RegEnable(jumpTargets, io.in.fire_in)
+  val seqTargetsNext = RegEnable(seqTargets, io.in.fire_in)
+  val pdsNext = RegEnable(pds, io.in.fire_in)
+  val jalFaultVecNext = RegEnable(jalFaultVec, io.in.fire_in)
+  val retFaultVecNext = RegEnable(retFaultVec, io.in.fire_in)
+  val notCFITakenNext = RegEnable(notCFITaken, io.in.fire_in)
+  val invalidTakenNext = RegEnable(invalidTaken, io.in.fire_in)
 
   targetFault      := VecInit(pdsNext.zipWithIndex.map{case(pd,i) => fixedRangeNext(i) && instrValidNext(i) && (pd.isJal || pd.isBr) && takenIdxNext === i.U && predTakenNext  && (predTargetNext =/= jumpTargetsNext(i))})
 
 
-  io.out.stage2Out.faultType.zipWithIndex.map{case(faultType, i) => faultType.value := Mux(jalFaultVecNext(i) , FaultType.jalFault ,
+  io.out.stage2Out.faultType.zipWithIndex.foreach{case(faultType, i) => faultType.value := Mux(jalFaultVecNext(i) , FaultType.jalFault ,
                                                                              Mux(retFaultVecNext(i), FaultType.retFault ,
                                                                              Mux(targetFault(i), FaultType.targetFault ,
                                                                              Mux(notCFITakenNext(i) , FaultType.notCFIFault,
                                                                              Mux(invalidTakenNext(i), FaultType.invalidTaken,  FaultType.noFault)))))}
 
-  io.out.stage2Out.fixedMissPred.zipWithIndex.map{case(missPred, i ) => missPred := jalFaultVecNext(i) || retFaultVecNext(i) || notCFITakenNext(i) || invalidTakenNext(i) || targetFault(i)}
-  io.out.stage2Out.fixedTarget.zipWithIndex.map{case(target, i) => target := Mux(jalFaultVecNext(i) || targetFault(i), jumpTargetsNext(i),  seqTargetsNext(i) )}
-  io.out.stage2Out.jalTarget.zipWithIndex.map{case(target, i) => target := jumpTargetsNext(i) }
+  io.out.stage2Out.fixedMissPred.zipWithIndex.foreach{case(missPred, i ) => missPred := jalFaultVecNext(i) || retFaultVecNext(i) || notCFITakenNext(i) || invalidTakenNext(i) || targetFault(i)}
+  io.out.stage2Out.fixedTarget.zipWithIndex.foreach{case(target, i) => target := Mux(jalFaultVecNext(i) || targetFault(i), jumpTargetsNext(i),  seqTargetsNext(i) )}
+  io.out.stage2Out.jalTarget.zipWithIndex.foreach{case(target, i) => target := jumpTargetsNext(i) }
 
 }
 
