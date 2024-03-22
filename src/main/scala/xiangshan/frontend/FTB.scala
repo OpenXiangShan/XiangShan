@@ -45,15 +45,18 @@ trait FTBParams extends HasXSParameter with HasBPUConst {
   def JMP_OFFSET_LEN = 20
 }
 
-class FtbSlot(val offsetLen: Int, val subOffsetLen: Option[Int] = None)(implicit p: Parameters) extends XSBundle with FTBParams {
+class FtbSlot_FtqMem(implicit p: Parameters) extends XSBundle with FTBParams {
+  val offset  = UInt(log2Ceil(PredictWidth).W)
+  val sharing = Bool()
+  val valid   = Bool()
+}
+
+class FtbSlot(val offsetLen: Int, val subOffsetLen: Option[Int] = None)(implicit p: Parameters) extends FtbSlot_FtqMem with FTBParams {
   if (subOffsetLen.isDefined) {
     require(subOffsetLen.get <= offsetLen)
   }
-  val offset  = UInt(log2Ceil(PredictWidth).W)
   val lower   = UInt(offsetLen.W)
   val tarStat = UInt(TAR_STAT_SZ.W)
-  val sharing = Bool()
-  val valid   = Bool()
 
   def setLowerStatByTarget(pc: UInt, target: UInt, isShare: Boolean) = {
     def getTargetStatByHigher(pc_higher: UInt, target_higher: UInt) =
@@ -127,7 +130,45 @@ class FtbSlot(val offsetLen: Int, val subOffsetLen: Option[Int] = None)(implicit
 
 }
 
-class FTBEntry(implicit p: Parameters) extends XSBundle with FTBParams with BPUUtils {
+
+class FTBEntry_part(implicit p: Parameters) extends XSBundle with FTBParams with BPUUtils {
+  val isCall      = Bool()
+  val isRet       = Bool()
+  val isJalr      = Bool()
+
+  def isJal = !isJalr
+}
+
+class FTBEntry_FtqMem(implicit p: Parameters) extends FTBEntry_part with FTBParams with BPUUtils {
+
+  val brSlots = Vec(numBrSlot, new FtbSlot_FtqMem)
+  val tailSlot = new FtbSlot_FtqMem
+
+  def jmpValid = {
+    tailSlot.valid && !tailSlot.sharing
+  }
+
+  def getBrRecordedVec(offset: UInt) = {
+    VecInit(
+      brSlots.map(s => s.valid && s.offset === offset) :+
+      (tailSlot.valid && tailSlot.offset === offset && tailSlot.sharing)
+    )
+  }
+
+  def brIsSaved(offset: UInt) = getBrRecordedVec(offset).reduce(_||_)
+
+  def getBrMaskByOffset(offset: UInt) =
+    brSlots.map{ s => s.valid && s.offset <= offset } :+
+    (tailSlot.valid && tailSlot.offset <= offset && tailSlot.sharing)
+  
+  def newBrCanNotInsert(offset: UInt) = {
+    val lastSlotForBr = tailSlot
+    lastSlotForBr.valid && lastSlotForBr.offset < offset
+  }
+
+}
+
+class FTBEntry(implicit p: Parameters) extends FTBEntry_part with FTBParams with BPUUtils {
 
 
   val valid       = Bool()
@@ -139,10 +180,6 @@ class FTBEntry(implicit p: Parameters) extends XSBundle with FTBParams with BPUU
   // Partial Fall-Through Address
   val pftAddr     = UInt(log2Up(PredictWidth).W)
   val carry       = Bool()
-
-  val isCall      = Bool()
-  val isRet       = Bool()
-  val isJalr      = Bool()
 
   val last_may_be_rvi_call = Bool()
 
@@ -171,7 +208,6 @@ class FTBEntry(implicit p: Parameters) extends XSBundle with FTBParams with BPUU
   }
 
   def getOffsetVec = VecInit(brSlots.map(_.offset) :+ tailSlot.offset)
-  def isJal = !isJalr
   def getFallThrough(pc: UInt, last_stage_entry: Option[Tuple2[FTBEntry, Bool]] = None) = {
     if (last_stage_entry.isDefined) {
       var stashed_carry = RegEnable(last_stage_entry.get._1.carry, last_stage_entry.get._2)
