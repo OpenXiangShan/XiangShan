@@ -447,15 +447,17 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     mem_arb.io.in(i).bits := entries(i)
     mem_arb.io.in(i).valid := is_mems(i) && !io.mem.req_mask(i)
   }
+  
+  // process hptw requests in serial
   val hyper_arb1 = Module(new RRArbiter(new LLPTWEntry(), l2tlbParams.llptwsize))
   for (i <- 0 until l2tlbParams.llptwsize) {
     hyper_arb1.io.in(i).bits := entries(i)
-    hyper_arb1.io.in(i).valid := is_hptw_req(i)
+    hyper_arb1.io.in(i).valid := is_hptw_req(i) && !(Cat(is_hptw_resp).orR) && !(Cat(is_last_hptw_resp).orR)
   }
   val hyper_arb2 = Module(new RRArbiter(new LLPTWEntry(), l2tlbParams.llptwsize))
   for(i <- 0 until l2tlbParams.llptwsize) {
     hyper_arb2.io.in(i).bits := entries(i)
-    hyper_arb2.io.in(i).valid := is_last_hptw_req(i)
+    hyper_arb2.io.in(i).valid := is_last_hptw_req(i) && !(Cat(is_hptw_resp).orR) && !(Cat(is_last_hptw_resp).orR)
   }
 
   val cache_ptr = ParallelMux(is_cache, (0 until l2tlbParams.llptwsize).map(_.U(log2Up(l2tlbParams.llptwsize).W)))
@@ -475,6 +477,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val to_wait = Cat(dup_vec_wait).orR || dup_req_fire
   val to_mem_out = dup_wait_resp && entries(io.mem.resp.bits.id).req_info.s2xlate === noS2xlate
   val to_last_hptw_req = dup_wait_resp && entries(io.mem.resp.bits.id).req_info.s2xlate =/= noS2xlate
+  val last_hptw_req_id = io.mem.resp.bits.id
   val to_cache = Cat(dup_vec_having).orR || Cat(dup_vec_last_hptw).orR
   val to_hptw_req = io.in.bits.req_info.s2xlate =/= noS2xlate
   XSError(RegNext(dup_req_fire && Cat(dup_vec_wait).orR, init = false.B), "mem req but some entries already waiting, should not happed")
@@ -495,9 +498,10 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     // so 2 + FilterSize is enough to avoid dead-lock
     state(enq_ptr) := enq_state
     entries(enq_ptr).req_info := io.in.bits.req_info
-    entries(enq_ptr).ppn := io.in.bits.ppn
+    entries(enq_ptr).ppn := Mux(to_last_hptw_req, last_hptw_req_id, io.in.bits.ppn)
     entries(enq_ptr).wait_id := Mux(to_wait, wait_id, enq_ptr)
     entries(enq_ptr).af := false.B
+    entries(enq_ptr).hptw_resp := Mux(to_last_hptw_req, entries(last_hptw_req_id).hptw_resp, Mux(to_wait, entries(wait_id).hptw_resp, entries(enq_ptr).hptw_resp))
     mem_resp_hit(enq_ptr) := to_mem_out
   }
 
@@ -534,6 +538,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       && dup(entries(i).req_info.vpn, mem_arb.io.out.bits.req_info.vpn)) {
         // NOTE: "dup enq set state to mem_wait" -> "sending req set other dup entries to mem_wait"
         state(i) := state_mem_waiting
+        entries(i).hptw_resp := entries(mem_arb.io.chosen).hptw_resp
         entries(i).wait_id := mem_arb.io.chosen
       }
     }
@@ -571,16 +576,19 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   when (io.hptw.resp.fire) {
     for (i <- state.indices) {
-      when (state(i) === state_hptw_resp && io.hptw.resp.bits.id === entries(i).wait_id) {
+      when (state(i) === state_hptw_resp && io.hptw.resp.bits.id === entries(i).wait_id && io.hptw.resp.bits.h_resp.entry.tag === entries(i).ppn) {
+        // change the entry that is waiting hptw resp
         val need_to_waiting_vec = state.indices.map(i => state(i) === state_mem_waiting && dup(entries(i).req_info.vpn, entries(io.hptw.resp.bits.id).req_info.vpn))
         val waiting_index = ParallelMux(need_to_waiting_vec zip entries.map(_.wait_id))
         state(i) := Mux(Cat(need_to_waiting_vec).orR, state_mem_waiting, state_addr_check)
         entries(i).hptw_resp := io.hptw.resp.bits.h_resp
         entries(i).wait_id := Mux(Cat(need_to_waiting_vec).orR, waiting_index, entries(i).wait_id)
+        //To do: change the entry that is having the same hptw req
       }
-      when (state(i) === state_last_hptw_resp && io.hptw.resp.bits.id === entries(i).wait_id) {
+      when (state(i) === state_last_hptw_resp && io.hptw.resp.bits.id === entries(i).wait_id && io.hptw.resp.bits.h_resp.entry.tag === entries(i).ppn) {
         state(i) := state_mem_out
         entries(i).hptw_resp := io.hptw.resp.bits.h_resp
+        //To do: change the entry that is having the same hptw req
       }
     }
   }
@@ -618,15 +626,15 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   hptw_req_arb.io.in(0).bits.source := hyper_arb1.io.out.bits.req_info.source
   hptw_req_arb.io.in(0).bits.ppn := hyper_arb1.io.out.bits.ppn
   hptw_req_arb.io.in(0).bits.id := hyper_arb1.io.chosen
-  hyper_arb1.io.out.ready := hptw_req_arb.io.in(0).ready && !(Cat(is_hptw_resp).orR)
+  hyper_arb1.io.out.ready := hptw_req_arb.io.in(0).ready
   // last stage 2 translation
-  hptw_req_arb.io.in(1).valid := hyper_arb2.io.out.valid
+  hptw_req_arb.io.in(1).valid := hyper_arb2.io.out.valid 
   hptw_req_arb.io.in(1).bits.source := hyper_arb2.io.out.bits.req_info.source
   hptw_req_arb.io.in(1).bits.ppn := hyper_arb2.io.out.bits.ppn
   hptw_req_arb.io.in(1).bits.id := hyper_arb2.io.chosen
-  hyper_arb2.io.out.ready := hptw_req_arb.io.in(1).ready && !(Cat(is_last_hptw_resp).orR)
-  hptw_req_arb.io.out.ready := io.hptw.req.ready
-  io.hptw.req.valid := hptw_req_arb.io.out.valid && !flush
+  hyper_arb2.io.out.ready := hptw_req_arb.io.in(1).ready 
+  hptw_req_arb.io.out.ready := io.hptw.req.ready 
+  io.hptw.req.valid := hptw_req_arb.io.out.fire && !flush
   io.hptw.req.bits.gvpn := hptw_req_arb.io.out.bits.ppn
   io.hptw.req.bits.id := hptw_req_arb.io.out.bits.id
   io.hptw.req.bits.source := hptw_req_arb.io.out.bits.source
