@@ -497,7 +497,7 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   for(div_index <- 0 until DCacheSetDiv){
     for (bank_index <- 0 until DCacheBanks) {
       for (way_index <- 0 until DCacheWays) {
-        data_read_oh(div_index *  DCacheBanks * DCacheWays + bank_index * DCacheBanks + way_index) := data_banks(div_index)(bank_index)(way_index).io.r.en
+        data_read_oh(div_index *  DCacheBanks * DCacheWays + bank_index * DCacheWays + way_index) := data_banks(div_index)(bank_index)(way_index).io.r.en
       }
     }
   }
