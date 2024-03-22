@@ -293,7 +293,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       !status.srcReady                                  -> false.B,
     ))
     entryUpdate.status.firstIssue                     := commonIn.deqSel || status.firstIssue
-    entryUpdate.status.issueTimer                     := Mux(commonIn.deqSel, 0.U, Mux(status.issued, status.issueTimer + 1.U, "b10".U))
+    entryUpdate.status.issueTimer                     := Mux(commonIn.deqSel, 0.U, Mux(status.issued, status.issueTimer + 1.U, "b11".U))
     entryUpdate.status.deqPortIdx                     := Mux(commonIn.deqSel, commonIn.deqPortIdxWrite, Mux(status.issued, status.deqPortIdx, 0.U))
     entryUpdate.imm.foreach(_                         := entryReg.imm.get)
     entryUpdate.payload                               := entryReg.payload

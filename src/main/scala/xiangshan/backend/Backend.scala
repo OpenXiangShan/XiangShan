@@ -140,6 +140,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   private val dataPath = wrapper.dataPath.module
   private val intExuBlock = wrapper.intExuBlock.get.module
   private val vfExuBlock = wrapper.vfExuBlock.get.module
+  private val og2ForVector = Module(new Og2ForVector(params))
   private val bypassNetwork = Module(new BypassNetwork)
   private val wbDataPath = Module(new WbDataPath(params))
   private val wbFuBusyTable = wrapper.wbFuBusyTable.module
@@ -242,6 +243,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   vfScheduler.io.fromDataPath.og1Cancel := og1CancelOH
   vfScheduler.io.ldCancel := io.mem.ldCancel
   vfScheduler.io.fromDataPath.cancelToBusyTable := cancelToBusyTable
+  vfScheduler.io.fromOg2.get := og2ForVector.io.toVfIQ
 
   dataPath.io.hartId := io.fromTop.hartId
   dataPath.io.flush := ctrlBlock.io.toDataPath.flush
@@ -261,8 +263,12 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   dataPath.io.debugVecRat    .foreach(_ := ctrlBlock.io.debug_vec_rat.get)
   dataPath.io.debugVconfigRat.foreach(_ := ctrlBlock.io.debug_vconfig_rat.get)
 
+  og2ForVector.io.flush := ctrlBlock.io.toDataPath.flush
+  og2ForVector.io.ldCancel := io.mem.ldCancel
+  og2ForVector.io.fromOg1NoReg <> dataPath.io.toFpExu
+
   bypassNetwork.io.fromDataPath.int <> dataPath.io.toIntExu
-  bypassNetwork.io.fromDataPath.vf <> dataPath.io.toFpExu
+  bypassNetwork.io.fromDataPath.vf <> og2ForVector.io.toVfExu
   bypassNetwork.io.fromDataPath.mem <> dataPath.io.toMemExu
   bypassNetwork.io.fromDataPath.immInfo := dataPath.io.og1ImmInfo
   bypassNetwork.io.fromExus.connectExuOutput(_.int)(intExuBlock.io.out)
