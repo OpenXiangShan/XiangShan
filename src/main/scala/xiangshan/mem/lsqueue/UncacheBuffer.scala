@@ -107,8 +107,8 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
 
   io.rob.mmio := DontCare
   io.rob.uop := DontCare
-  val pendingld = RegNext(io.rob.pendingld)
-  val pendingPtr = RegNext(io.rob.pendingPtr)
+  val pendingld = GatedValidRegNext(io.rob.pendingld)
+  val pendingPtr = GatedRegNext(io.rob.pendingPtr)
 
   switch (uncacheState) {
     is (s_idle) {
@@ -293,7 +293,8 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
   val s1_valid = VecInit(io.req.map(_.valid))
 
   // s2: enqueue
-  val s2_req = RegNext(s1_req)
+  val s2_req = (0 until LoadPipelineWidth).map(i => {
+    RegEnable(s1_req(i), s1_valid(i))})
   val s2_valid = (0 until LoadPipelineWidth).map(i => {
     RegNext(s1_valid(i)) &&
     !s2_req(i).uop.robIdx.needFlush(RegNext(io.redirect)) &&
@@ -389,7 +390,7 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
 
   for (i <- 0 until LoadPipelineWidth) {
     io.rob.mmio(i) := RegNext(s1_valid(i) && s1_req(i).mmio)
-    io.rob.uop(i) := RegNext(s1_req(i).uop)
+    io.rob.uop(i) := RegEnable(s1_req(i).uop, s1_valid(i))
   }
 
   // UncacheBuffer deallocate
@@ -458,13 +459,13 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
   })
   val oldestOneHot = selectOldestRedirect(allRedirect)
   val oldestRedirect = Mux1H(oldestOneHot, allRedirect)
-  val lastCycleRedirect = RegNext(io.redirect)
-  val lastLastCycleRedirect = RegNext(lastCycleRedirect)
-  io.rollback.valid := RegNext(oldestRedirect.valid &&
+  val lastCycleRedirect = RegEnable(io.redirect, io.redirect.valid)
+  val lastLastCycleRedirect = RegEnable(lastCycleRedirect, lastCycleRedirect.valid)
+  io.rollback.valid := GatedValidRegNext(oldestRedirect.valid &&
                       !oldestRedirect.bits.robIdx.needFlush(io.redirect) &&
                       !oldestRedirect.bits.robIdx.needFlush(lastCycleRedirect) &&
                       !oldestRedirect.bits.robIdx.needFlush(lastLastCycleRedirect))
-  io.rollback.bits := RegNext(oldestRedirect.bits)
+  io.rollback.bits := RegEnable(oldestRedirect.bits, oldestRedirect.valid)
 
   io.vecReplay.zipWithIndex.foreach { case (x, i) =>
     val req = s2_req(i)

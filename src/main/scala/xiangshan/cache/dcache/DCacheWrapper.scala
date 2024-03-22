@@ -654,7 +654,9 @@ class DcacheToLduForwardIO(implicit p: Parameters) extends DCacheBundle {
 
     forward_D := all_match
     for (i <- 0 until VLEN/8) {
-      forwardData(i) := selected_data(8 * i + 7, 8 * i)
+      when (all_match) {
+        forwardData(i) := selected_data(8 * i + 7, 8 * i)
+      }
     }
 
     (forward_D, forwardData)
@@ -678,7 +680,7 @@ class MissEntryForwardIO(implicit p: Parameters) extends DCacheBundle {
 
   // check if we can forward from mshr or D channel
   def check(req_valid : Bool, req_paddr : UInt) = {
-    RegNext(req_valid && inflight && req_paddr(PAddrBits - 1, blockOffBits) === paddr(PAddrBits - 1, blockOffBits))
+    RegNext(req_valid && inflight && req_paddr(PAddrBits - 1, blockOffBits) === paddr(PAddrBits - 1, blockOffBits)) // TODO: clock gate(1-bit)
   }
 
   def forward(req_valid : Bool, req_paddr : UInt) = {
@@ -863,14 +865,16 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   missQueue.io.lqEmpty := io.lqEmpty
   missQueue.io.hartId := io.hartId
-  missQueue.io.l2_pf_store_only := RegNext(io.l2_pf_store_only, false.B)
+  missQueue.io.l2_pf_store_only := RegEnable(io.l2_pf_store_only, false.B, missQueue.io.l2_pf_store_only | io.l2_pf_store_only) //RegNext(io.l2_pf_store_only, false.B)
   missQueue.io.debugTopDown <> io.debugTopDown
   missQueue.io.sms_agt_evict_req <> io.sms_agt_evict_req
   io.memSetPattenDetected := missQueue.io.memSetPattenDetected
 
   val errors = ldu.map(_.io.error) ++ // load error
     Seq(mainPipe.io.error) // store / misc error
-  io.error <> RegNext(Mux1H(errors.map(e => RegNext(e.valid) -> RegNext(e))))
+  // io.error <> RegNext(Mux1H(errors.map(e => RegNext(e.valid) -> RegNext(e))))
+  val error_mux = Mux1H(errors.map(e => RegNext(e.valid) -> RegEnable(e, e.valid)))
+  io.error <> RegEnable(error_mux, error_mux.valid)
 
   //----------------------------------------
   // meta array
@@ -952,7 +956,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     accessArray.io.read.last.bits.idx := refillPipe.io.prefetch_flag_write.bits.idx
     accessArray.io.read.last.bits.way_en := refillPipe.io.prefetch_flag_write.bits.way_en
 
-    val extra_flag_valid = RegNext(refillPipe.io.prefetch_flag_write.valid)
+    //val extra_flag_valid = RegNext(refillPipe.io.prefetch_flag_write.valid)
+    val extra_flag_valid = Wire(refillPipe.io.prefetch_flag_write.valid.cloneType)
+    val last_reg = RegEnable(refillPipe.io.prefetch_flag_write.valid, refillPipe.io.prefetch_flag_write.valid | extra_flag_valid)
+    extra_flag_valid := last_reg
+    // TODO: use GateRegNext api for clock gating
     val extra_flag_way_en = RegEnable(refillPipe.io.prefetch_flag_write.bits.way_en, refillPipe.io.prefetch_flag_write.valid)
     val extra_flag_prefetch = Mux1H(extra_flag_way_en, prefetchArray.io.resp.last)
     val extra_flag_access = Mux1H(extra_flag_way_en, accessArray.io.resp.last)
@@ -1216,7 +1224,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // atomics
   // atomics not finished yet
   // io.lsu.atomics <> atomicsReplayUnit.io.lsu
-  io.lsu.atomics.resp := RegNext(mainPipe.io.atomic_resp)
+  io.lsu.atomics.resp.valid := RegNext(mainPipe.io.atomic_resp.valid)
+  io.lsu.atomics.resp.bits := RegEnable(mainPipe.io.atomic_resp.bits, mainPipe.io.atomic_resp.valid)
+  // io.lsu.atomics.resp := RegNext(mainPipe.io.atomic_resp)
   io.lsu.atomics.block_lr := mainPipe.io.block_lr
   // atomicsReplayUnit.io.pipe_resp := RegNext(mainPipe.io.atomic_resp)
   // atomicsReplayUnit.io.block_lr <> mainPipe.io.block_lr
@@ -1296,7 +1306,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   bus.e <> missQueue.io.mem_finish
   missQueue.io.probe_addr := bus.b.bits.address
 
-  missQueue.io.main_pipe_resp := RegNext(mainPipe.io.atomic_resp)
+  // missQueue.io.main_pipe_resp := RegNext(mainPipe.io.atomic_resp)
+  missQueue.io.main_pipe_resp.valid := RegNext(mainPipe.io.atomic_resp.valid)
+  missQueue.io.main_pipe_resp.bits := RegEnable(mainPipe.io.atomic_resp.bits, mainPipe.io.atomic_resp.valid)
 
   //----------------------------------------
   // probe
@@ -1312,7 +1324,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   block_decoupled(probeQueue.io.pipe_req, mainPipe.io.probe_req, missQueue.io.refill_pipe_req.valid)
   block_decoupled(io.lsu.store.req, mainPipe.io.store_req, refillPipe.io.req.valid)
 
-  io.lsu.store.replay_resp := RegNext(mainPipe.io.store_replay_resp)
+  // io.lsu.store.replay_resp := RegNext(mainPipe.io.store_replay_resp)
+  io.lsu.store.replay_resp.valid := RegNext(mainPipe.io.store_replay_resp.valid)
+  io.lsu.store.replay_resp.bits := RegEnable(mainPipe.io.store_replay_resp.bits, mainPipe.io.store_replay_resp.valid)
   io.lsu.store.main_pipe_hit_resp := mainPipe.io.store_hit_resp
 
   arbiter_with_pipereg(
@@ -1321,7 +1335,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     name = Some("main_pipe_atomic_req")
   )
 
-  mainPipe.io.invalid_resv_set := RegNext(wb.io.req.fire && wb.io.req.bits.addr === mainPipe.io.lrsc_locked_block.bits)
+  mainPipe.io.invalid_resv_set := RegNext(wb.io.req.fire && wb.io.req.bits.addr === mainPipe.io.lrsc_locked_block.bits) // TODO: clock gate(1-bit)
 
   //----------------------------------------
   // replace (main pipe)
@@ -1382,7 +1396,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   }
 
   missQueue.io.refill_pipe_resp := refillPipe.io.resp
-  io.lsu.store.refill_hit_resp := RegNext(refillPipe.io.store_resp)
+  // io.lsu.store.refill_hit_resp := RegNext(refillPipe.io.store_resp)
+  io.lsu.store.refill_hit_resp.valid := RegNext(refillPipe.io.store_resp.valid)
+  io.lsu.store.refill_hit_resp.bits := RegEnable(refillPipe.io.store_resp.bits, refillPipe.io.store_resp.valid)
 
   //----------------------------------------
   // wb
@@ -1395,8 +1411,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   wb.io.probe_ttob_check_req <> mainPipe.io.probe_ttob_check_req
   wb.io.probe_ttob_check_resp <> mainPipe.io.probe_ttob_check_resp
 
-  io.lsu.release.valid := RegNext(wb.io.req.fire)
-  io.lsu.release.bits.paddr := RegNext(wb.io.req.bits.addr)
+  io.lsu.release.valid := RegEnable(wb.io.req.fire, io.lsu.release.valid | wb.io.req.fire)  // RegNext(wb.io.req.fire)
+  io.lsu.release.bits.paddr := RegEnable(wb.io.req.bits.addr, wb.io.req.fire)  // RegNext(wb.io.req.bits.addr)
   // Note: RegNext() is required by:
   // * load queue released flag update logic
   // * load / load violation check logic
@@ -1549,14 +1565,14 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   ld_access.zip(ldu).foreach {
     case (a, u) =>
       a.valid := RegNext(u.io.lsu.req.fire) && !u.io.lsu.s1_kill
-      a.bits.idx := RegNext(get_idx(u.io.lsu.req.bits.vaddr))
+      a.bits.idx := RegEnable(get_idx(u.io.lsu.req.bits.vaddr), u.io.lsu.req.fire)  // RegNext(get_idx(u.io.lsu.req.bits.vaddr))
       a.bits.tag := get_tag(u.io.lsu.s1_paddr_dup_dcache)
   }
   st_access.valid := RegNext(mainPipe.io.store_req.fire)
-  st_access.bits.idx := RegNext(get_idx(mainPipe.io.store_req.bits.vaddr))
-  st_access.bits.tag := RegNext(get_tag(mainPipe.io.store_req.bits.addr))
+  st_access.bits.idx := RegEnable(get_idx(mainPipe.io.store_req.bits.vaddr), mainPipe.io.store_req.fire)  // RegNext(get_idx(mainPipe.io.store_req.bits.vaddr))
+  st_access.bits.tag := RegEnable(get_tag(mainPipe.io.store_req.bits.addr), mainPipe.io.store_req.fire)  // RegNext(get_tag(mainPipe.io.store_req.bits.addr))
   val access_info = ld_access.toSeq ++ Seq(st_access)
-  val early_replace = RegNext(missQueue.io.debug_early_replace)
+  val early_replace = RegNext(missQueue.io.debug_early_replace) // TODO: clock gate
   val access_early_replace = access_info.map {
     case acc =>
       Cat(early_replace.map {

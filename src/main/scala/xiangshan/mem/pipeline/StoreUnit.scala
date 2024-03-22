@@ -45,6 +45,9 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
     val prefetch_req    = Flipped(DecoupledIO(new StorePrefetchReq))
     // provide prefetch info to sms
     val prefetch_train  = ValidIO(new StPrefetchTrainBundle())
+    // speculative for gated control
+    val s0_prefetch_spec = Output(Bool())
+    val s1_prefetch_spec = Output(Bool())
     val stld_nuke_query = Valid(new StoreNukeQueryIO)
     val stout           = DecoupledIO(new MemExuOutput) // writeback store
     // store mask, send to sq in store_s0
@@ -335,8 +338,10 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   io.dcache.resp.ready := true.B
 
   // feedback tlb miss to RS in store_s2
-  io.feedback_slow.valid := RegNext(s1_feedback.valid && !s1_out.uop.robIdx.needFlush(io.redirect))
-  io.feedback_slow.bits  := RegNext(s1_feedback.bits)
+  val feedback_slow_valid = WireInit(false.B)
+  feedback_slow_valid := s1_feedback.valid && !s1_out.uop.robIdx.needFlush(io.redirect)
+  io.feedback_slow.valid := GatedValidRegNext(feedback_slow_valid)
+  io.feedback_slow.bits  := RegEnable(s1_feedback.bits, feedback_slow_valid)
 
   // vector feedback
   io.vec_feedback_slow.valid := RegNext(s1_vec_feedback.valid && !s1_out.uop.robIdx.needFlush(io.redirect))
@@ -352,17 +357,24 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
 
   // RegNext prefetch train for better timing
   // ** Now, prefetch train is valid at store s3 **
-  io.prefetch_train.bits.fromLsPipelineBundle(s2_in, latch = true)
+  val prefetch_train_valid = WireInit(false.B)
+  prefetch_train_valid := s2_valid && io.dcache.resp.fire && !s2_out.mmio && !s2_in.tlbMiss && !s2_in.isHWPrefetch
+  if (EnableStorePrefetchSMS) {
+    io.s0_prefetch_spec := s0_fire
+    io.s1_prefetch_spec := s1_fire
+    io.prefetch_train.valid := GatedValidRegNext(prefetch_train_valid)
+    io.prefetch_train.bits.fromLsPipelineBundle(s2_in, latch = true, enable = prefetch_train_valid)
+  } else {
+    io.s0_prefetch_spec := false.B
+    io.s1_prefetch_spec := false.B
+    io.prefetch_train.valid := false.B
+    io.prefetch_train.bits.fromLsPipelineBundle(s2_in, latch = true, enable = false.B)
+  }
   // override miss bit
-  io.prefetch_train.bits.miss := RegNext(io.dcache.resp.bits.miss)
+  io.prefetch_train.bits.miss := RegEnable(io.dcache.resp.bits.miss, prefetch_train_valid)
   // TODO: add prefetch and access bit
   io.prefetch_train.bits.meta_prefetch := false.B
   io.prefetch_train.bits.meta_access := false.B
-  if(EnableStorePrefetchSMS) {
-    io.prefetch_train.valid := RegNext(s2_valid && io.dcache.resp.fire && !s2_out.mmio && !s2_in.tlbMiss && !s2_in.isHWPrefetch)
-  }else {
-    io.prefetch_train.valid := false.B
-  }
 
   // Pipeline
   // --------------------------------------------------------------------------------

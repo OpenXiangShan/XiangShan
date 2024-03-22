@@ -36,21 +36,25 @@ class StrideMetaBundle(implicit p: Parameters) extends XSBundle with HasStridePr
   val confidence = UInt(STRIDE_CONF_BITS.W)
   val hash_pc = UInt(HASH_TAG_WIDTH.W)
 
-  def reset(index: Int) = {
-    pre_vaddr := 0.U
-    stride := 0.U
-    confidence := 0.U
-    hash_pc := index.U
+  def reset(valid: Bool, index: Int) = {
+    when(valid){
+      pre_vaddr := 0.U
+      stride := 0.U
+      confidence := 0.U
+      hash_pc := index.U
+    }
   }
 
-  def alloc(vaddr: UInt, alloc_hash_pc: UInt) = {
-    pre_vaddr := vaddr(STRIDE_VADDR_BITS - 1, 0)
-    stride := 0.U
-    confidence := 0.U
-    hash_pc := alloc_hash_pc
+  def alloc(vaddr: UInt, alloc_hash_pc: UInt, valid: Bool) = {
+    when(valid){
+      pre_vaddr := vaddr(STRIDE_VADDR_BITS - 1, 0)
+      stride := 0.U
+      confidence := 0.U
+      hash_pc := alloc_hash_pc
+    }
   }
 
-  def update(vaddr: UInt, always_update_pre_vaddr: Bool) = {
+  def update(valid: Bool, vaddr: UInt, always_update_pre_vaddr: Bool) = {
     val new_vaddr = vaddr(STRIDE_VADDR_BITS - 1, 0)
     val new_stride = new_vaddr - pre_vaddr
     val new_stride_blk = block_addr(new_stride)
@@ -119,7 +123,7 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
   XSPerfAccumulate("s0_miss", s0_valid && !s0_hit)
 
   // s1: alloc or update
-  val s1_valid = RegNext(s0_valid)
+  val s1_valid = GatedValidRegNext(s0_valid)
   val s1_index = RegEnable(s0_index, s0_valid)
   val s1_pc_hash = RegEnable(s0_pc_hash, s0_valid)
   val s1_vaddr = RegEnable(s0_vaddr, s0_valid)
@@ -133,13 +137,13 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
 
   val always_update = WireInit(Constantin.createRecord("always_update" + p(XSCoreParamsKey).HartId.toString, initValue = ALWAYS_UPDATE_PRE_VADDR.U)) === 1.U
 
-  when(s1_alloc) {
-    array(s1_index).alloc(
-      vaddr = s1_vaddr,
-      alloc_hash_pc = s1_pc_hash
-    )
-  }.elsewhen(s1_update) {
-    val res = array(s1_index).update(s1_vaddr, always_update)
+  array(s1_index).alloc(
+    valid = s1_alloc,
+    vaddr = s1_vaddr,
+    alloc_hash_pc = s1_pc_hash
+  )
+  when(s1_update) {
+    val res = array(s1_index).update(s1_update, s1_vaddr, always_update)
     s1_can_send_pf := res._1
     s1_new_stride := res._2
   }
@@ -149,7 +153,7 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
   val l2_stride_ratio_const = WireInit(Constantin.createRecord("l2_stride_ratio" + p(XSCoreParamsKey).HartId.toString, initValue = 5.U))
   val l2_stride_ratio = l2_stride_ratio_const(3, 0)
   // s2: calculate L1 & L2 pf addr
-  val s2_valid = RegNext(s1_valid && s1_can_send_pf)
+  val s2_valid = GatedValidRegNext(s1_valid && s1_can_send_pf)
   val s2_vaddr = RegEnable(s1_vaddr, s1_valid && s1_can_send_pf)
   val s2_stride = RegEnable(s1_stride, s1_valid && s1_can_send_pf)
   val s2_l1_depth = s2_stride << l1_stride_ratio
@@ -170,12 +174,12 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     source = L1_HW_PREFETCH_STRIDE)
 
   // s3: send l1 pf out
-  val s3_valid = if (LOOK_UP_STREAM) RegNext(s2_valid) && !io.stream_lookup_resp else RegNext(s2_valid)
+  val s3_valid = if (LOOK_UP_STREAM) GatedValidRegNext(s2_valid) && !io.stream_lookup_resp else GatedValidRegNext(s2_valid)
   val s3_l1_pf_req_bits = RegEnable(s2_l1_pf_req_bits, s2_valid)
   val s3_l2_pf_req_bits = RegEnable(s2_l2_pf_req_bits, s2_valid)
 
   // s4: send l2 pf out
-  val s4_valid = RegNext(s3_valid)
+  val s4_valid = GatedValidRegNext(s3_valid)
   val s4_l2_pf_req_bits = RegEnable(s3_l2_pf_req_bits, s3_valid)
 
   // l2 has higher priority than l1 ?
@@ -200,8 +204,6 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
   }
 
   for(i <- 0 until STRIDE_ENTRY_NUM) {
-    when(reset.asBool || RegNext(io.flush)) {
-      array(i).reset(i)
-    }
+    array(i).reset(reset.asBool || RegNext(io.flush), i)
   }
 }

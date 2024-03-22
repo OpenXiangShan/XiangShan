@@ -1105,13 +1105,13 @@ class HybridUnit(implicit p: Parameters) extends XSModule
 
   // prefetch train
   io.prefetch_train.valid              := s2_valid && !s2_actually_mmio && !s2_in.tlbMiss
-  io.prefetch_train.bits.fromLsPipelineBundle(s2_in)
+  io.prefetch_train.bits.fromLsPipelineBundle(s2_in, latch = false, enable = false.B)
   io.prefetch_train.bits.miss          := Mux(s2_ld_flow, io.ldu_io.dcache.resp.bits.miss, io.stu_io.dcache.resp.bits.miss) // TODO: use trace with bank conflict?
   io.prefetch_train.bits.meta_prefetch := Mux(s2_ld_flow, io.ldu_io.dcache.resp.bits.meta_prefetch, false.B)
   io.prefetch_train.bits.meta_access   := Mux(s2_ld_flow, io.ldu_io.dcache.resp.bits.meta_access, false.B)
 
   io.prefetch_train_l1.valid              := s2_valid && !s2_actually_mmio && s2_ld_flow
-  io.prefetch_train_l1.bits.fromLsPipelineBundle(s2_in)
+  io.prefetch_train_l1.bits.fromLsPipelineBundle(s2_in, latch = false, enable = false.B)
   io.prefetch_train_l1.bits.miss          := io.ldu_io.dcache.resp.bits.miss
   io.prefetch_train_l1.bits.meta_prefetch := io.ldu_io.dcache.resp.bits.meta_prefetch
   io.prefetch_train_l1.bits.meta_access   := io.ldu_io.dcache.resp.bits.meta_access

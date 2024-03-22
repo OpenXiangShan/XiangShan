@@ -145,35 +145,35 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
   val meta_prefetch = UInt(L1PfSourceBits.W)
   val meta_access = Bool()
 
-  def fromLsPipelineBundle(input: LsPipelineBundle, latch: Boolean = false) = {
-    if (latch) vaddr := RegNext(input.vaddr) else vaddr := input.vaddr
-    if (latch) paddr := RegNext(input.paddr) else paddr := input.paddr
-    if (latch) mask := RegNext(input.mask) else mask := input.mask
-    if (latch) data := RegNext(input.data) else data := input.data
-    if (latch) uop := RegNext(input.uop) else uop := input.uop
-    if (latch) wlineflag := RegNext(input.wlineflag) else wlineflag := input.wlineflag
-    if (latch) miss := RegNext(input.miss) else miss := input.miss
-    if (latch) tlbMiss := RegNext(input.tlbMiss) else tlbMiss := input.tlbMiss
-    if (latch) ptwBack := RegNext(input.ptwBack) else ptwBack := input.ptwBack
-    if (latch) mmio := RegNext(input.mmio) else mmio := input.mmio
-    if (latch) rsIdx := RegNext(input.rsIdx) else rsIdx := input.rsIdx
-    if (latch) forwardMask := RegNext(input.forwardMask) else forwardMask := input.forwardMask
-    if (latch) forwardData := RegNext(input.forwardData) else forwardData := input.forwardData
-    if (latch) isPrefetch := RegNext(input.isPrefetch) else isPrefetch := input.isPrefetch
-    if (latch) isHWPrefetch := RegNext(input.isHWPrefetch) else isHWPrefetch := input.isHWPrefetch
-    if (latch) isFirstIssue := RegNext(input.isFirstIssue) else isFirstIssue := input.isFirstIssue
-    if (latch) hasROBEntry := RegNext(input.hasROBEntry) else hasROBEntry := input.hasROBEntry
-    if (latch) dcacheRequireReplay := RegNext(input.dcacheRequireReplay) else dcacheRequireReplay := input.dcacheRequireReplay
-    if (latch) schedIndex := RegNext(input.schedIndex) else schedIndex := input.schedIndex
-    if (latch) isvec               := RegNext(input.isvec)               else isvec               := input.isvec
-    if (latch) isLastElem          := RegNext(input.isLastElem)          else isLastElem          := input.isLastElem
-    if (latch) is128bit            := RegNext(input.is128bit)            else is128bit            := input.is128bit
-    if (latch) vecActive                 := RegNext(input.vecActive)                 else vecActive                 := input.vecActive
-    if (latch) is_first_ele        := RegNext(input.is_first_ele)        else is_first_ele        := input.is_first_ele
-    if (latch) uop_unit_stride_fof := RegNext(input.uop_unit_stride_fof) else uop_unit_stride_fof := input.uop_unit_stride_fof
-    if (latch) reg_offset          := RegNext(input.reg_offset)          else reg_offset          := input.reg_offset
-    if (latch) flowPtr             := RegNext(input.flowPtr)             else flowPtr             := input.flowPtr
-    if (latch) sflowPtr            := RegNext(input.sflowPtr)            else sflowPtr            := input.sflowPtr
+  def fromLsPipelineBundle(input: LsPipelineBundle, latch: Boolean = false, enable: Bool) = {
+    if (latch) vaddr := RegEnable(input.vaddr, enable) else vaddr := input.vaddr
+    if (latch) paddr := RegEnable(input.paddr, enable) else paddr := input.paddr
+    if (latch) mask := RegEnable(input.mask, enable) else mask := input.mask
+    if (latch) data := RegEnable(input.data, enable) else data := input.data
+    if (latch) uop := RegEnable(input.uop, enable) else uop := input.uop
+    if (latch) wlineflag := RegEnable(input.wlineflag, enable) else wlineflag := input.wlineflag
+    if (latch) miss := RegEnable(input.miss, enable) else miss := input.miss
+    if (latch) tlbMiss := RegEnable(input.tlbMiss, enable) else tlbMiss := input.tlbMiss
+    if (latch) ptwBack := RegEnable(input.ptwBack, enable) else ptwBack := input.ptwBack
+    if (latch) mmio := RegEnable(input.mmio, enable) else mmio := input.mmio
+    if (latch) rsIdx := RegEnable(input.rsIdx, enable) else rsIdx := input.rsIdx
+    if (latch) forwardMask := RegEnable(input.forwardMask, enable) else forwardMask := input.forwardMask
+    if (latch) forwardData := RegEnable(input.forwardData, enable) else forwardData := input.forwardData
+    if (latch) isPrefetch := RegEnable(input.isPrefetch, enable) else isPrefetch := input.isPrefetch
+    if (latch) isHWPrefetch := RegEnable(input.isHWPrefetch, enable) else isHWPrefetch := input.isHWPrefetch
+    if (latch) isFirstIssue := RegEnable(input.isFirstIssue, enable) else isFirstIssue := input.isFirstIssue
+    if (latch) hasROBEntry := RegEnable(input.hasROBEntry, enable) else hasROBEntry := input.hasROBEntry
+    if (latch) dcacheRequireReplay := RegEnable(input.dcacheRequireReplay, enable) else dcacheRequireReplay := input.dcacheRequireReplay
+    if (latch) schedIndex := RegEnable(input.schedIndex, enable) else schedIndex := input.schedIndex
+    if (latch) isvec               := RegEnable(input.isvec, enable)               else isvec               := input.isvec
+    if (latch) isLastElem          := RegEnable(input.isLastElem, enable)          else isLastElem          := input.isLastElem
+    if (latch) is128bit            := RegEnable(input.is128bit, enable)            else is128bit            := input.is128bit
+    if (latch) vecActive                 := RegEnable(input.vecActive, enable)                 else vecActive                 := input.vecActive
+    if (latch) is_first_ele        := RegEnable(input.is_first_ele, enable)        else is_first_ele        := input.is_first_ele
+    if (latch) uop_unit_stride_fof := RegEnable(input.uop_unit_stride_fof, enable) else uop_unit_stride_fof := input.uop_unit_stride_fof
+    if (latch) reg_offset          := RegEnable(input.reg_offset, enable)          else reg_offset          := input.reg_offset
+    if (latch) flowPtr             := RegEnable(input.flowPtr, enable)             else flowPtr             := input.flowPtr
+    if (latch) sflowPtr            := RegEnable(input.sflowPtr, enable)            else sflowPtr            := input.sflowPtr
 
     meta_prefetch := DontCare
     meta_access := DontCare

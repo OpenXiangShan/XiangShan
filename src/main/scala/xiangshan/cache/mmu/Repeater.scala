@@ -77,7 +77,7 @@ class PTWRepeater(Width: Int = 1, FenceDelay: Int)(implicit p: Parameters) exten
   XSDebug(haveOne, p"haveOne:${haveOne} sent:${sent} recv:${recv} sfence:${flush} req:${req} resp:${resp}")
   XSDebug(req_in.valid || io.tlb.resp.valid, p"tlb: ${tlb}\n")
   XSDebug(io.ptw.req(0).valid || io.ptw.resp.valid, p"ptw: ${ptw}\n")
-  assert(!RegNext(recv && io.ptw.resp.valid, init = false.B), "re-receive ptw.resp")
+  assert(!GatedValidRegNext(recv && io.ptw.resp.valid, init = false.B), "re-receive ptw.resp")
   XSError(io.ptw.req(0).valid && io.ptw.resp.valid && !flush, "ptw repeater recv resp when sending")
   XSError(io.ptw.resp.valid && (req.vpn =/= io.ptw.resp.bits.entry.tag), "ptw repeater recv resp with wrong tag")
   XSError(io.ptw.resp.valid && !io.ptw.resp.ready, "ptw repeater's ptw resp back, but not ready")
@@ -369,7 +369,7 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
   val ptwResp = RegEnable(io.ptw.resp.bits, io.ptw.resp.fire)
   val ptwResp_valid = Cat(filter.map(_.refill)).orR
   filter.map(_.tlb.resp.ready := true.B)
-  filter.map(_.ptw.resp.valid := RegNext(io.ptw.resp.fire, init = false.B))
+  filter.map(_.ptw.resp.valid := GatedValidRegNext(io.ptw.resp.fire, init = false.B))
   filter.map(_.ptw.resp.bits := ptwResp)
   filter.map(_.flush := flush)
   filter.map(_.sfence := io.sfence)
@@ -399,9 +399,10 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
   val hintIO = io.hint.getOrElse(new TlbHintIO)
   val load_hintIO = load_filter(0).hint.getOrElse(new TlbHintIO)
   for (i <- 0 until LdExuCnt) {
+    // TODO: RegNext -> RegEnable
     hintIO.req(i) := RegNext(load_hintIO.req(i))
   }
-  hintIO.resp := RegNext(load_hintIO.resp)
+  hintIO.resp := RegEnable(load_hintIO.resp, load_hintIO.resp.valid)
 
   when (load_filter(0).refill) {
     io.tlb.resp.bits.vector(0) := true.B
@@ -460,28 +461,29 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   val ptwResp = RegEnable(io.ptw.resp.bits, io.ptw.resp.fire)
   val ptwResp_OldMatchVec = vpn.zip(v).map{ case (pi, vi) =>
     vi && io.ptw.resp.bits.hit(pi, io.csr.satp.asid, true, true)}
-  val ptwResp_valid = RegNext(io.ptw.resp.fire && Cat(ptwResp_OldMatchVec).orR, init = false.B)
+  val ptwResp_valid = GatedValidRegNext(io.ptw.resp.fire && Cat(ptwResp_OldMatchVec).orR, init = false.B)
   // May send repeated requests to L2 tlb with same vpn(26, 3) when sector tlb
   val oldMatchVec_early = io.tlb.req.map(a => vpn.zip(v).map{ case (pi, vi) => vi && pi === a.bits.vpn})
   val lastReqMatchVec_early = io.tlb.req.map(a => tlb_req.map{ b => b.valid && b.bits.vpn === a.bits.vpn && canEnqueue})
   val newMatchVec_early = io.tlb.req.map(a => io.tlb.req.map(b => a.bits.vpn === b.bits.vpn))
 
   (0 until Width) foreach { i =>
-    tlb_req(i).valid := RegNext(io.tlb.req(i).valid &&
+    tlb_req(i).valid := GatedValidRegNext(io.tlb.req(i).valid &&
       !(ptwResp_valid && ptwResp.hit(io.tlb.req(i).bits.vpn, 0.U, true, true)) &&
       !Cat(lastReqMatchVec_early(i)).orR,
       init = false.B)
     tlb_req(i).bits := RegEnable(io.tlb.req(i).bits, io.tlb.req(i).valid)
   }
 
-  val oldMatchVec = oldMatchVec_early.map(a => RegNext(Cat(a).orR))
+
+  val oldMatchVec = oldMatchVec_early.map(a => GatedValidRegNext(Cat(a).orR))
   val newMatchVec = (0 until Width).map(i => (0 until Width).map(j =>
-    RegNext(newMatchVec_early(i)(j)) && tlb_req(j).valid
+    GatedValidRegNext(newMatchVec_early(i)(j)) && tlb_req(j).valid
   ))
   val ptwResp_newMatchVec = tlb_req.map(a =>
     ptwResp_valid && ptwResp.hit(a.bits.vpn, 0.U, allType = true, true))
 
-  val oldMatchVec2 = (0 until Width).map(i => oldMatchVec_early(i).map(RegNext(_)).map(_ & tlb_req(i).valid))
+  val oldMatchVec2 = (0 until Width).map(i => oldMatchVec_early(i).map(GatedValidRegNext(_)).map(_ & tlb_req(i).valid))
   val update_ports = v.indices.map(i => oldMatchVec2.map(j => j(i)))
   val ports_init = (0 until Width).map(i => (1 << i).U(Width.W))
   val filter_ports = (0 until Width).map(i => ParallelMux(newMatchVec(i).zip(ports_init).drop(i)))
