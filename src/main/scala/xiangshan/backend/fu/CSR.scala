@@ -468,7 +468,11 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     val mstatusNew = Cat(mstatusOld.xs === "b11".U || mstatusOld.fs === "b11".U, mstatus(XLEN-2, 0))
     mstatusNew
   }
-
+  def vsstatusUpdateSideEffect(vsstatus: UInt): UInt = {
+    val vsstatusOld = WireInit(vsstatus.asTypeOf(new MstatusStruct))
+    val vsstatusNew = Cat(vsstatusOld.xs === "b11".U || vsstatusOld.fs === "b11".U, vsstatus(XLEN-2, 0))
+    vsstatusNew
+  }
   val mstatusWMask = (~ZeroExt((
     (if(HasHExtension) {
       GenMask(XLEN - 2, 40) |
@@ -913,7 +917,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Htimedelta, htimedelta),
 
     //--- Virtual Supervisor Registers ---
-    MaskedRegMap(Vsstatus, vsstatus, rmask = sstatusRmask, wmask = sstatusWmask),
+    MaskedRegMap(Vsstatus, vsstatus, rmask = sstatusRmask, wmask = sstatusWmask, wfn = vsstatusUpdateSideEffect),
     MaskedRegMap(Vsie, mie, rmask = vsip_ie_Mask, wmask = vsip_ie_Mask),
     MaskedRegMap(Vstvec, vstvec),
     MaskedRegMap(Vsscratch, vsscratch),
@@ -1045,18 +1049,17 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     fcsr := fflags_wfn(update = true)(RegNext(csrio.fpu.fflags.bits))
   }
   // set fs and sd in mstatus
-  when (csrw_dirty_fp_state || RegNext(csrio.fpu.dirty_fs)) {
+  when (csrw_dirty_fp_state || RegNext(csrio.fpu.dirty_fs)) {  
+    val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
+    mstatusNew.fs := "b11".U
+    mstatusNew.sd := true.B
+    mstatus := mstatusNew.asUInt
     when(virtMode){
       val vsstatusNew = WireInit(vsstatus.asTypeOf(new MstatusStruct))
       vsstatusNew.fs := "b11".U
       vsstatusNew.sd := true.B
       vsstatus := vsstatusNew.asUInt
-    }.otherwise{
-      val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
-      mstatusNew.fs := "b11".U
-      mstatusNew.sd := true.B
-      mstatus := mstatusNew.asUInt
-    }
+    } 
   }
   csrio.fpu.frm := fcsr.asTypeOf(new FcsrStruct).frm
 
