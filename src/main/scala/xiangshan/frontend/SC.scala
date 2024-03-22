@@ -36,8 +36,6 @@ abstract class SCModule(implicit p: Parameters) extends TageModule with HasSCPar
 
 
 class SCMeta(val ntables: Int)(implicit p: Parameters) extends XSBundle with HasSCParameter {
-  val tageTakens = Vec(numBr, Bool())
-  val scUsed = Vec(numBr, Bool())
   val scPreds = Vec(numBr, Bool())
   // Suppose ctrbits of all tables are identical
   val ctrs = Vec(numBr, Vec(ntables, SInt(SCCtrBits.W)))
@@ -293,8 +291,6 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
       val s3_disagree = RegEnable(s2_disagree, io.s2_fire(3))
       io.out.last_stage_spec_info.sc_disagree.map(_ := s3_disagree)
 
-      scMeta.tageTakens(w) := RegEnable(s2_tageTakens_dup(3)(w), io.s2_fire(3))
-      scMeta.scUsed(w)     := RegEnable(s2_provideds(w), io.s2_fire(3))
       scMeta.scPreds(w)    := RegEnable(s2_scPreds(s2_chooseBit), io.s2_fire(3))
       scMeta.ctrs(w)       := RegEnable(s2_scCtrs, io.s2_fire(3))
 
@@ -325,9 +321,9 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
       }
 
       val updateTageMeta = updateMeta
-      when (updateValids(w) && updateSCMeta.scUsed(w)) {
+      when (updateValids(w) && updateTageMeta.providers(w).valid) {
         val scPred = updateSCMeta.scPreds(w)
-        val tagePred = updateSCMeta.tageTakens(w)
+        val tagePred = updateTageMeta.takens(w)
         val taken = update.br_taken_mask(w)
         val scOldCtrs = updateSCMeta.ctrs(w)
         val pvdrCtr = updateTageMeta.providerResps(w).ctr
@@ -372,14 +368,16 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
     }
 
 
+    val realWens = scUpdateMask.transpose.map(v => v.reduce(_ | _))
     for (b <- 0 until TageBanks) {
       for (i <- 0 until SCNTables) {
+        val realWen = realWens(i)
         scTables(i).io.update.mask(b) := RegNext(scUpdateMask(b)(i))
-        scTables(i).io.update.tagePreds(b) := RegNext(scUpdateTagePreds(b))
-        scTables(i).io.update.takens(b)    := RegNext(scUpdateTakens(b))
-        scTables(i).io.update.oldCtrs(b)   := RegNext(scUpdateOldCtrs(b)(i))
-        scTables(i).io.update.pc := RegNext(update.pc)
-        scTables(i).io.update.folded_hist := RegNext(updateFHist)
+        scTables(i).io.update.tagePreds(b) := RegEnable(scUpdateTagePreds(b), realWen)
+        scTables(i).io.update.takens(b) := RegEnable(scUpdateTakens(b), realWen)
+        scTables(i).io.update.oldCtrs(b) := RegEnable(scUpdateOldCtrs(b)(i), realWen)
+        scTables(i).io.update.pc := RegEnable(update.pc, realWen)
+        scTables(i).io.update.folded_hist := RegEnable(updateFHist, realWen)
       }
     }
 

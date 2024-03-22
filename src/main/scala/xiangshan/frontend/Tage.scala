@@ -89,9 +89,12 @@ class TageReq(implicit p: Parameters) extends TageBundle {
   val folded_hist = new AllFoldedHistories(foldedGHistInfos)
 }
 
-class TageResp(implicit p: Parameters) extends TageBundle {
+class TageResp_meta(implicit p: Parameters) extends TageBundle with TageParams {
   val ctr = UInt(TageCtrBits.W)
   val u = Bool()
+}
+
+class TageResp(implicit p: Parameters) extends TageResp_meta {
   val unconf = Bool()
 }
 
@@ -114,20 +117,20 @@ class TageMeta(implicit p: Parameters)
   extends TageBundle with HasSCParameter
 {
   val providers = Vec(numBr, ValidUndirectioned(UInt(log2Ceil(TageNTables).W)))
-  val providerResps = Vec(numBr, new TageResp)
+  val providerResps = Vec(numBr, new TageResp_meta)
   // val altProviders = Vec(numBr, ValidUndirectioned(UInt(log2Ceil(TageNTables).W)))
   // val altProviderResps = Vec(numBr, new TageResp)
   val altUsed = Vec(numBr, Bool())
-  val altDiffers = Vec(numBr, Bool())
   val basecnts = Vec(numBr, UInt(2.W))
   val allocates = Vec(numBr, UInt(TageNTables.W))
-  val takens = Vec(numBr, Bool())
   val scMeta = if (EnableSC) Some(new SCMeta(SCNTables)) else None
   val pred_cycle = if (!env.FPGAPlatform) Some(UInt(64.W)) else None
   val use_alt_on_na = if (!env.FPGAPlatform) Some(Vec(numBr, Bool())) else None
 
   def altPreds = basecnts.map(_(1))
   def allocateValid = allocates.map(_.orR)
+  def altDiffers(i: Int) = basecnts(i)(1) =/= providerResps(i).ctr(TageCtrBits - 1)
+  def takens(i: Int) = Mux(altUsed(i), basecnts(i)(1), providerResps(i).ctr(TageCtrBits-1))
 }
 
 trait TBTParams extends HasXSParameter with TageParams {
@@ -309,7 +312,7 @@ class TageTable
   val req_unhashed_idx = getUnhashedIdx(io.req.bits.pc)
 
   val us = Module(new FoldedSRAMTemplate(Bool(), set=nRowsPerBr, width=uFoldedWidth, way=numBr, shouldReset=true, extraReset=true, holdRead=true, singlePort=true))
-  us.extra_reset.get := io.update.reset_u.reduce(_||_)
+  us.extra_reset.get := io.update.reset_u.reduce(_||_) && io.update.mask.reduce(_||_)
 
 
   val table_banks = Seq.fill(nBanks)(
@@ -424,7 +427,7 @@ class TageTable
     ))
   ))
 
-  us.io.w.apply(io.update.uMask.reduce(_||_), update_u_wdata, update_u_idx, update_u_way_mask)
+  us.io.w.apply(io.update.mask.reduce(_||_) && io.update.uMask.reduce(_||_), update_u_wdata, update_u_idx, update_u_way_mask)
 
   // remove silent updates
   def silentUpdate(ctr: UInt, taken: Bool) = {
@@ -587,7 +590,6 @@ class Tage(implicit p: Parameters) extends BaseTage {
   // val s1_altProviderResps = Wire(Vec(numBr, new TageResp))
   val s1_altUsed          = Wire(Vec(numBr, Bool()))
   val s1_tageTakens       = Wire(Vec(numBr, Bool()))
-  val s1_finalAltPreds    = Wire(Vec(numBr, Bool()))
   val s1_basecnts         = Wire(Vec(numBr, UInt(2.W)))
   val s1_useAltOnNa       = Wire(Vec(numBr, Bool()))
 
@@ -599,7 +601,6 @@ class Tage(implicit p: Parameters) extends BaseTage {
   // val s2_altProviderResps = RegEnable(s1_altProviderResps, io.s1_fire)
   val s2_altUsed          = RegEnable(s1_altUsed, io.s1_fire(1))
   val s2_tageTakens_dup   = io.s1_fire.map(f => RegEnable(s1_tageTakens, f))
-  val s2_finalAltPreds    = RegEnable(s1_finalAltPreds, io.s1_fire(1))
   val s2_basecnts         = RegEnable(s1_basecnts, io.s1_fire(1))
   val s2_useAltOnNa       = RegEnable(s1_useAltOnNa, io.s1_fire(1))
 
@@ -693,14 +694,10 @@ class Tage(implicit p: Parameters) extends BaseTage {
         s1_bimCtr(1),
         providerInfo.resp.ctr(TageCtrBits-1)
       )
-    s1_finalAltPreds(i) := s1_bimCtr(1)
     s1_basecnts(i)      := s1_bimCtr
     s1_useAltOnNa(i)    := providerInfo.use_alt_on_unconf
 
     resp_meta.altUsed(i)    := RegEnable(s2_altUsed(i), io.s2_fire(1))
-    resp_meta.altDiffers(i) := RegEnable(
-      s2_finalAltPreds(i) =/= s2_providerResps(i).ctr(TageCtrBits - 1), io.s2_fire(1)) // alt != provider
-    resp_meta.takens(i)     := RegEnable(s2_tageTakens_dup(0)(i), io.s2_fire(1))
     resp_meta.basecnts(i)   := RegEnable(s2_basecnts(i), io.s2_fire(1))
 
     val tage_enable_dup = dup(RegNext(io.ctrl.tage_enable))
@@ -830,26 +827,28 @@ class Tage(implicit p: Parameters) extends BaseTage {
     }
   }
 
+  val realWens = updateMask.transpose.map(v => v.reduce(_ | _))
   for (w <- 0 until TageBanks) {
     for (i <- 0 until TageNTables) {
-      tables(i).io.update.mask(w)    := RegNext(updateMask(w)(i))
-      tables(i).io.update.takens(w)  := RegNext(updateTakens(w)(i))
-      tables(i).io.update.alloc(w)   := RegNext(updateAlloc(w)(i))
-      tables(i).io.update.oldCtrs(w) := RegNext(updateOldCtrs(w)(i))
-
-      tables(i).io.update.uMask(w)   := RegNext(updateUMask(w)(i))
-      tables(i).io.update.us(w)      := RegNext(updateU(w)(i))
+      val realWen = realWens(i)
       tables(i).io.update.reset_u(w) := RegNext(updateResetU(w))
+      tables(i).io.update.mask(w)    := RegNext(updateMask(w)(i))
+      tables(i).io.update.takens(w) := RegEnable(updateTakens(w)(i), realWen)
+      tables(i).io.update.alloc(w) := RegEnable(updateAlloc(w)(i), realWen)
+      tables(i).io.update.oldCtrs(w) := RegEnable(updateOldCtrs(w)(i), realWen)
+
+      tables(i).io.update.uMask(w) := RegEnable(updateUMask(w)(i), realWen)
+      tables(i).io.update.us(w) := RegEnable(updateU(w)(i), realWen)
       // use fetch pc instead of instruction pc
-      tables(i).io.update.pc       := RegNext(update.pc)
-      tables(i).io.update.folded_hist := RegNext(updateFHist)
-      tables(i).io.update.ghist := RegNext(io.update.bits.ghist)
+      tables(i).io.update.pc := RegEnable(update.pc, realWen)
+      tables(i).io.update.folded_hist := RegEnable(updateFHist, realWen)
+      tables(i).io.update.ghist := RegEnable(io.update.bits.ghist, realWen)
     }
   }
   bt.io.update_mask := RegNext(baseupdate)
-  bt.io.update_cnt := RegNext(updatebcnt)
-  bt.io.update_pc := RegNext(update.pc)
-  bt.io.update_takens := RegNext(bUpdateTakens)
+  bt.io.update_cnt := RegEnable(updatebcnt, baseupdate.reduce(_ | _))
+  bt.io.update_pc := RegEnable(update.pc, baseupdate.reduce(_ | _))
+  bt.io.update_takens := RegEnable(bUpdateTakens, baseupdate.reduce(_ | _))
 
   // all should be ready for req
   io.s1_ready := tables.map(_.io.req.ready).reduce(_ && _) && bt.io.req.ready
