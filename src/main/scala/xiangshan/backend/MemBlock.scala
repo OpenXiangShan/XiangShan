@@ -135,6 +135,13 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
   val writebackHyuLda = Vec(HyuCnt, DecoupledIO(new MemExuOutput))
   val writebackHyuSta = Vec(HyuCnt, DecoupledIO(new MemExuOutput))
   val writebackVldu = Vec(VlduCnt, DecoupledIO(new MemExuOutput(isVector = true)))
+  def writeBack: Seq[DecoupledIO[MemExuOutput]] = {
+    writebackSta ++
+      writebackHyuLda ++ writebackHyuSta ++
+      writebackLda ++
+      writebackVldu ++
+      writebackStd
+  }
 
   val ldaIqFeedback = Vec(LduCnt, new MemRSFeedbackIO)
   val staIqFeedback = Vec(StaCnt, new MemRSFeedbackIO)
@@ -1406,6 +1413,14 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       lsq.io.exceptionAddr.vaddr
     )
   ))
+
+  io.mem_to_ooo.writeBack.map(wb => {
+    wb.bits.uop.trigger.frontendChain := 0.U(TriggerNum.W).asBools
+    wb.bits.uop.trigger.frontendTiming := 0.U(TriggerNum.W).asBools
+    wb.bits.uop.trigger.frontendHit := 0.U(TriggerNum.W).asBools
+    wb.bits.uop.trigger.frontendCanFire := 0.U(TriggerNum.W).asBools
+  })
+
   XSError(atomicsException && atomicsUnit.io.in.valid, "new instruction before exception triggers\n")
 
   io.memInfo.sqFull := RegNext(lsq.io.sqFull)
