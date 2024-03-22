@@ -82,7 +82,7 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   // frontend -> backend -> frontend
   val pd = new PreDecodeInfo
   val ssp = UInt(log2Up(RasSize).W)
-  val sctr = UInt(log2Up(RasCtrSize).W)
+  val sctr = UInt(RasCtrSize.W)
   val TOSW = new RASPtr
   val TOSR = new RASPtr
   val NOS = new RASPtr
