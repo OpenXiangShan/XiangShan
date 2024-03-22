@@ -558,7 +558,7 @@ class SpeculativeInfo(implicit p: Parameters) extends XSBundle
   val lastBrNumOH = UInt((numBr+1).W)
   val histPtr = new CGHPtr
   val ssp = UInt(log2Up(RasSize).W)
-  val sctr = UInt(log2Up(RasCtrSize).W)
+  val sctr = UInt(RasCtrSize.W)
   val TOSW = new RASPtr
   val TOSR = new RASPtr
   val NOS = new RASPtr
