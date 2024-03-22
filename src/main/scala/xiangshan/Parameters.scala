@@ -251,7 +251,7 @@ case class XSCoreParameters
     isICache = true,
   ),
   dwpuParameters: WPUParameters = WPUParameters(
-    enWPU = false,
+    enWPU = true,
     algoName = "mmru",
     enCfPred = false,
     isICache = false,
