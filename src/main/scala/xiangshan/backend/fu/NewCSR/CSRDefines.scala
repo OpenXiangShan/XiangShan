@@ -1,8 +1,11 @@
 package xiangshan.backend.fu.NewCSR
 
 import chisel3._
+import xiangshan.backend.fu.NewCSR.CSRDefines.MtvecMode
 import xiangshan.backend.fu.NewCSR.CSRFunc._
 import xiangshan.macros.CSRMacros.CSRFieldsImpl
+
+import scala.reflect.macros.blackbox.Context
 
 import scala.language.experimental.macros
 
@@ -144,22 +147,14 @@ object CSRDefines {
     val Dirty = Value(3.U)
   }
 
-  sealed abstract class XLENField extends CSREnum {
+  object XLENField extends CSREnum with CSRROApply {
     val XLEN32 = Value(1.U)
     val XLEN64 = Value(2.U)
     val XLEN128 = Value(3.U)
   }
 
-  object MXLField extends XLENField with CSRROApply
-
-  object SXLField extends XLENField with CSRROApply
-
-  object UXLField extends XLENField with CSRROApply
-
-  object VSXLField extends XLENField with CSRROApply
-
   object MtvecMode extends CSREnum with CSRWARLApply {
-    val Direct = Value(0.U)
+    val Direct: Type = Value(0.U)
     val Vectored = Value(1.U)
 
     override def isLegal(enum: CSREnumType): Bool = Seq(Direct, Vectored).map(_ === enum).reduce(_ || _)
@@ -179,6 +174,16 @@ object CSRDefines {
     def apply(msb: Int, lsb: Int, rfn: CSRRfnType): CSREnumType = macro CSRFieldsImpl.CSRROFieldRange
 
     def apply(bit: Int, rfn: CSRRfnType): CSREnumType = macro CSRFieldsImpl.CSRROFieldBit
+
+    def apply(msb: Int, lsb: Int): CSREnumType = macro CSRFieldsImpl.CSRROFieldRangeNoFn
+
+    def apply(bit: Int): CSREnumType = macro CSRFieldsImpl.CSRROFieldBitNoFn
+  }
+
+  object CSRRWField {
+    def apply(msb: Int, lsb: Int): CSREnumType = macro CSRFieldsImpl.CSRRWFieldRange
+
+    def apply(bit: Int): CSREnumType = macro CSRFieldsImpl.CSRRWFieldBit
   }
 
   object CSRWARLRefField {
@@ -187,13 +192,13 @@ object CSRDefines {
     def apply(ref: CSREnumType, bit: Int, wfn: CSRWfnType): CSREnumType = macro CSRFieldsImpl.CSRRefWARLFieldBit
   }
 
-  object PrivMode extends ChiselEnum {
+  object PrivMode extends CSREnum with CSRRWApply {
     val U = Value(0.U)
     val S = Value(1.U)
     val M = Value(3.U)
   }
 
-  object VirtMode extends ChiselEnum {
+  object VirtMode extends CSREnum with CSRRWApply {
     val Off = Value(0.U)
     val On = Value(1.U)
   }

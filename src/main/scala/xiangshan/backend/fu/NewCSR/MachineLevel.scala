@@ -28,32 +28,30 @@ trait MachineLevel { self: NewCSR =>
 
 class MstatusBundle extends CSRBundle {
 
-  val SIE  = CSRWARLField   (1, wNoFilter)
-  val MIE  = CSRWARLField   (3, wNoFilter)
-  val SPIE = CSRWARLField   (5, wNoFilter)
-  val UBE  = CSRROField     (6, rFixValue(0.U))
-  val MPIE = CSRWARLField   (7, wNoFilter)
-  val SPP  = CSRWARLField   (8, wNoFilter)
-  val VS   = ContextStatus  (10, 9)
-  val MPP  = CSRWARLField   (12, 11, wNoFilter)
-  val FS   = ContextStatus  (14, 13)
-  val XS   = ContextStatusRO(16, 15, rFixValue(0.U))
-  val MPRV = CSRWARLField   (17, wNoFilter)
-  val SUM  = CSRWARLField   (18, wNoFilter)
-  val MXR  = CSRWARLField   (19, wNoFilter)
-  val TVM  = CSRWARLField   (20, wNoFilter)
-  val TW   = CSRWARLField   (21, wNoFilter)
-  val TSR  = CSRWARLField   (22, wNoFilter)
-  val UXL  = UXLField       (33, 32, rFixValue("b10".U))
-  val SXL  = SXLField       (35, 34, rFixValue("b10".U))
-  val SBE  = CSRROField     (36, rFixValue(0.U))
-  val MBE  = CSRROField     (37, rFixValue(0.U))
-  val GVA  = CSRWARLField   (38, wNoFilter)
-  val MPV  = CSRWARLField   (39, wNoFilter)
+  val SIE  = CSRRWField     (1).withReset(0.U)
+  val MIE  = CSRRWField     (3).withReset(0.U)
+  val SPIE = CSRRWField     (5).withReset(0.U)
+  val UBE  = CSRROField     (6).withReset(0.U)
+  val MPIE = CSRRWField     (7).withReset(0.U)
+  val SPP  = CSRRWField     (8).withReset(0.U)
+  val VS   = ContextStatus  (10,  9).withReset(ContextStatus.Initial)
+  val MPP  = PrivMode       (12, 11).withReset(PrivMode.U)
+  val FS   = ContextStatus  (14, 13).withReset(ContextStatus.Initial)
+  val XS   = ContextStatusRO(16, 15).withReset(0.U)
+  val MPRV = CSRRWField     (17).withReset(0.U)
+  val SUM  = CSRRWField     (18).withReset(0.U)
+  val MXR  = CSRRWField     (19).withReset(0.U)
+  val TVM  = CSRRWField     (20).withReset(0.U)
+  val TW   = CSRRWField     (21).withReset(0.U)
+  val TSR  = CSRRWField     (22).withReset(0.U)
+  val UXL  = XLENField      (33, 32).withReset(XLENField.XLEN64)
+  val SXL  = XLENField      (35, 34).withReset(XLENField.XLEN64)
+  val SBE  = CSRROField     (36).withReset(0.U)
+  val MBE  = CSRROField     (37).withReset(0.U)
+  val GVA  = CSRRWField     (38).withReset(0.U)
+  val MPV  = CSRRWField     (39).withReset(0.U)
   val SD   = CSRROField     (63,
-    (_, _) =>
-      FS === FS.factory.asInstanceOf[ContextStatusDef].Dirty ||
-        VS === VS.factory.asInstanceOf[ContextStatusDef].Dirty
+    (_, _) => FS === ContextStatus.Dirty || VS === ContextStatus.Dirty
   )
 }
 

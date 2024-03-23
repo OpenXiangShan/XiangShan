@@ -6,13 +6,13 @@ import xiangshan.backend.fu.NewCSR.CSRFunc._
 
 import scala.collection.immutable.SeqMap
 
-trait Hypervisor { self: NewCSR with MachineLevel =>
+trait Hypervisor { self: NewCSR =>
 
   val hip = Module(new CSRModule("Hip", new CSRBundle {
-    val VSSIP = CSRWARLField( 2, wNoFilter)
-    val VSTIP = CSRWARLField( 6, wNoEffect)
-    val VSEIP = CSRWARLField(10, wNoEffect)
-    val SGEIP = CSRWARLField(12, wNoEffect)
+    val VSSIP = CSRRWField( 2)
+    val VSTIP = CSRROField( 6)
+    val VSEIP = CSRROField(10)
+    val SGEIP = CSRROField(12)
   }) {} )
 
   val hypervisorCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], Data)] = SeqMap(

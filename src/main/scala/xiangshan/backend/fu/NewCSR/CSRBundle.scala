@@ -38,6 +38,15 @@ abstract class CSRBundle extends Bundle {
     }
   }
 
+  @inline
+  def init: this.type = {
+    val init = Wire(this)
+    init.elements.foreach { case (str, field: CSREnumType) =>
+      field := (if (field.init.nonEmpty) field.init.get else field.factory(0.U))
+    }
+    init.asInstanceOf[this.type]
+  }
+
   /**
    * filtered read connection
    *
@@ -51,9 +60,14 @@ abstract class CSRBundle extends Bundle {
     }
 
     for ((sink: CSREnumType, source: CSREnumType)  <- this.getFields.zip(that.getFields)) {
-      sink := sink.factory.apply(sink.rfn(source.asUInt, Seq()))
+      if (sink.rfn == null)
+        sink := source // .factory.apply(sink.rfn(source.asUInt, Seq()))
+      else
+        sink := sink.factory(sink.rfn(source.asUInt, Seq()))
     }
   }
 
-  def getFields = this.getElements.map(_.asInstanceOf[CSREnumType])
+  def getFields: Seq[CSREnumType] = this.getElements.map(_.asInstanceOf[CSREnumType])
+
+  def needReset: Boolean = this.getFields.exists(_.needReset)
 }

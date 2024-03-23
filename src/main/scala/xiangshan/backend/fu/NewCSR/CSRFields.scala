@@ -36,11 +36,11 @@ abstract class CSRRWType {
 
 case class WARLType(
   override val wfn: CSRWfnType,
-  override val rfn: CSRRfnType = rNoFilter,
+  override val rfn: CSRRfnType = null,
 ) extends CSRRWType
 
 case class ROType(
-  override val rfn: CSRRfnType = rNoFilter,
+  override val rfn: CSRRfnType = null,
 ) extends CSRRWType {
   override final val wfn: CSRWfnType = wNoEffect
 }
@@ -52,7 +52,7 @@ case class WLRLType(
 
 case class RWType() extends CSRRWType {
   override final val wfn: CSRWfnType = wNoFilter
-  override final val rfn: CSRRfnType = rNoFilter
+  override final val rfn: CSRRfnType = null
 }
 
 trait CheckRef { self: CSRRWType =>
@@ -62,12 +62,12 @@ trait CheckRef { self: CSRRWType =>
 case class RefWARLType(
   override val ref: Option[CSREnumType],
   override val wfn: CSRWfnType,
-  override val rfn: CSRRfnType = rNoFilter,
+  override val rfn: CSRRfnType = null,
 ) extends CSRRWType with CheckRef
 
 case class RefROType(
   override val ref: Option[CSREnumType],
-  override val rfn: CSRRfnType = rNoFilter,
+  override val rfn: CSRRfnType = null,
 ) extends CSRRWType with CheckRef {
   override final val wfn: CSRWfnType = wNoEffect
 }
@@ -82,7 +82,7 @@ case class RefRWType(
   override val ref: Option[CSREnumType],
 ) extends CSRRWType with CheckRef {
   override final val wfn: CSRWfnType = wNoFilter
-  override final val rfn: CSRRfnType = rNoFilter
+  override final val rfn: CSRRfnType = null
 }
 
 object CSRFunc {
@@ -101,8 +101,7 @@ object CSRFunc {
 
   type CSRRfnType = (UInt, Seq[Data]) => UInt
 
-  def rNoFilter: CSRRfnType =
-    (oriV: UInt, _: Seq[Data]) => oriV
+  def rNoFilter: CSRRfnType = null
 
   def rWithFilter(rFilter: (UInt, Seq[Data]) => UInt): CSRRfnType =
     (oriV: UInt, seq: Seq[Data]) => rFilter(oriV, seq)
@@ -120,7 +119,7 @@ class CSREnumType(
 )(
   override val factory: ChiselEnum
 ) extends EnumType(factory) {
-  var refedFields: Seq[CSREnumType] = Seq()
+  var init: Option[EnumType] = None
 
   if (factory.all.size == 0) {
     factory.asInstanceOf[CSREnum].addMinValue
@@ -149,12 +148,33 @@ class CSREnumType(
   // Also check if the write field is not Read Only.
   def isLegal: Bool = this.factory.asInstanceOf[CSREnum].isLegal(this) && (!this.isRO).B
 
-  def rfn = rwType.rfn
+  def needReset: Boolean = init.nonEmpty
 
-  def wfn = rwType.wfn
+  def rfn: CSRRfnType = rwType.rfn
+
+  def wfn: CSRWfnType = rwType.wfn
+
+  protected def resetCheck: Unit = {
+    rwType match {
+      case ROType(rfn) => require(rfn == null)
+      case _ =>
+    }
+  }
+
+  def withReset[T <: EnumType](init: T): this.type = {
+    resetCheck
+    this.init = Some(init)
+    this
+  }
+
+  def withReset(init: UInt): this.type = {
+    resetCheck
+    this.init = Some(this.factory(init))
+    this
+  }
 
   override def toString(): String = {
-    s"${this.localName} ${rwType} [$msb, $lsb]"
+    s"${this.localName} ${rwType} [$msb, $lsb] reset($init)"
   }
 }
 
@@ -188,9 +208,6 @@ abstract class CSREnum extends ChiselEnum {
 }
 
 trait CSRROApply { self: CSREnum =>
-  def apply(msb: Int, lsb: Int, rfn: CSRRfnType): CSREnumType = self
-    .apply(ROType(rfn))(msb, lsb)(this)
-
   def apply(msb: Int, lsb: Int): CSREnumType = self
     .apply(ROType())(msb, lsb)(this)
 }
