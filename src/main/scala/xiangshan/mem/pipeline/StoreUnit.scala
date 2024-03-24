@@ -51,7 +51,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
     val st_mask_out     = Valid(new StoreMaskBundle)
     val debug_ls        = Output(new DebugLsInfoBundle)
     // vector
-    val vecstin           = Flipped(Decoupled(new VecStorePipeBundle()))
+    val vecstin           = Flipped(Decoupled(new VecPipeBundle()))
     val vec_isFirstIssue  = Input(Bool())
     val lsq_vec           = ValidIO(new LsPipelineBundle) // nuke check between vector stores and scalar loads
     val vec_feedback_slow = ValidIO(new VSFQFeedback)
@@ -96,8 +96,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   val s0_fire         = s0_valid && !s0_kill && s0_can_go
   // vector
   val s0_vecActive          = !s0_use_flow_vec || s0_vecstin.vecActive
-  val s0_flowPtr      = s0_vecstin.flowPtr
-  val s0_isLastElem   = s0_vecstin.isLastElem
+  // val s0_flowPtr      = s0_vecstin.flowPtr
+  // val s0_isLastElem   = s0_vecstin.isLastElem
 
   // generate addr
   // val saddr = s0_in.bits.src(0) + SignExt(s0_in.bits.uop.imm(11,0), VAddrBits)
@@ -157,7 +157,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   s0_out.vaddr        := s0_vaddr
   // Now data use its own io
   // s1_out.data := genWdata(s1_in.src(1), s1_in.uop.fuOpType(1,0))
-  s0_out.data         := Mux(s0_use_flow_rs, s0_stin.src(1), s0_vecstin.src_vs3) // FIXME: remove data from pipeline
+  s0_out.data         := s0_stin.src(1)
   s0_out.uop          := s0_uop
   s0_out.miss         := false.B
   s0_out.rsIdx        := s0_rsIdx
@@ -168,8 +168,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   s0_out.isvec        := s0_use_flow_vec
   s0_out.is128bit     := false.B
   s0_out.vecActive    := s0_vecActive
-  s0_out.sflowPtr     := s0_flowPtr
-  s0_out.isLastElem   := s0_isLastElem
   when(s0_valid && s0_isFirstIssue) {
     s0_out.uop.debugInfo.tlbFirstReqTime := GTimer()
   }
@@ -214,7 +212,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   val s1_mmio      = s1_mmio_cbo
   val s1_exception = ExceptionNO.selectByFu(s1_out.uop.exceptionVec, StaCfg).asUInt.orR
   val s1_isvec     = RegEnable(s0_out.isvec, false.B, s0_fire)
-  val s1_isLastElem = RegEnable(s0_isLastElem, false.B, s0_fire)
+  // val s1_isLastElem = RegEnable(s0_isLastElem, false.B, s0_fire)
   s1_kill := s1_in.uop.robIdx.needFlush(io.redirect) || s1_tlb_miss
 
   s1_ready := !s1_valid || s1_kill || s2_ready
@@ -252,7 +250,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
 
   val s1_vec_feedback = Wire(Valid(new VSFQFeedback))
   s1_vec_feedback.valid                 := s1_valid && !s1_in.isHWPrefetch && s1_isvec
-  s1_vec_feedback.bits.flowPtr          := s1_out.sflowPtr
+  // s1_vec_feedback.bits.flowPtr          := s1_out.sflowPtr
   s1_vec_feedback.bits.hit              := !s1_tlb_miss
   s1_vec_feedback.bits.sourceType       := RSFeedbackType.tlbMiss
   s1_vec_feedback.bits.paddr            := s1_paddr
@@ -262,7 +260,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   XSDebug(s1_vec_feedback.valid,
     "Vector S1 Store: tlbHit: %d flowPtr: %d\n",
     s1_vec_feedback.bits.hit,
-    s1_vec_feedback.bits.flowPtr.value
+    // s1_vec_feedback.bits.flowPtr.value
   )
 
   // io.feedback_slow := s1_feedback
@@ -287,7 +285,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   io.lsq_vec.valid := s1_valid && !s1_in.isHWPrefetch && s1_isvec
   io.lsq_vec.bits  := s1_out
   io.lsq_vec.bits.miss := s1_tlb_miss
-  io.lsq_vec.bits.isLastElem := s1_isLastElem
+  // io.lsq_vec.bits.isLastElem := s1_isLastElem
 
   // kill dcache write intent request when tlb miss or exception
   io.dcache.s1_kill  := (s1_tlb_miss || s1_exception || s1_mmio || s1_in.uop.robIdx.needFlush(io.redirect))

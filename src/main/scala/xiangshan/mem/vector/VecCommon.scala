@@ -149,8 +149,8 @@ class OnlyVecExuOutput(implicit p: Parameters) extends VLSUBundle {
   val is_first_ele = Bool()
   val elemIdx = UInt(elemIdxBits.W) // element index
   val elemIdxInsideVd = UInt(elemIdxBits.W) // element index in scope of vd
-  val uopQueuePtr = new VluopPtr
-  val flowPtr = new VlflowPtr
+  // val uopQueuePtr = new VluopPtr
+  // val flowPtr = new VlflowPtr
 }
 
 class VecExuOutput(implicit p: Parameters) extends MemExuOutput with HasVLSUParameters {
@@ -162,18 +162,18 @@ class VecExuOutput(implicit p: Parameters) extends MemExuOutput with HasVLSUPara
   val alignedType       = UInt(alignTypeBits.W)
 }
 
-class VecStoreExuOutput(implicit p: Parameters) extends MemExuOutput with HasVLSUParameters {
-  val elemIdx = UInt(elemIdxBits.W)
-  val uopQueuePtr = new VsUopPtr
-  val fieldIdx = UInt(fieldBits.W)
-  val segmentIdx = UInt(elemIdxBits.W)
-  val vaddr = UInt(VAddrBits.W)
-  // pack
-  val isPackage         = Bool()
-  val packageNum        = UInt((log2Up(VLENB) + 1).W)
-  val originAlignedType = UInt(alignTypeBits.W)
-  val alignedType       = UInt(alignTypeBits.W)
-}
+// class VecStoreExuOutput(implicit p: Parameters) extends MemExuOutput with HasVLSUParameters {
+//   val elemIdx = UInt(elemIdxBits.W)
+//   val uopQueuePtr = new VsUopPtr
+//   val fieldIdx = UInt(fieldBits.W)
+//   val segmentIdx = UInt(elemIdxBits.W)
+//   val vaddr = UInt(VAddrBits.W)
+//   // pack
+//   val isPackage         = Bool()
+//   val packageNum        = UInt((log2Up(VLENB) + 1).W)
+//   val originAlignedType = UInt(alignTypeBits.W)
+//   val alignedType       = UInt(alignTypeBits.W)
+// }
 
 class VecUopBundle(implicit p: Parameters) extends VLSUBundleWithMicroOp {
   val flowMask       = UInt(VLENB.W) // each bit for a flow
@@ -683,6 +683,76 @@ object genVWdata {
       "b010".U -> Fill(4, data(31, 0)),
       "b011".U -> Fill(2, data(63,0)),
       "b100".U -> data(127,0)
+    ))
+  }
+}
+
+object genUSSplitAddr{
+  def apply(addr: UInt, index: UInt): UInt = {
+    val tmpAddr = Cat(addr(38, 4), 0.U(4.W))
+    val nextCacheline = tmpAddr + 16.U
+    LookupTree(index, List(
+      0.U -> tmpAddr,
+      1.U -> nextCacheline
+    ))
+  }
+}
+
+object genUSSplitMask{
+  def apply(mask: UInt, index: UInt, addrOffset: UInt): UInt = {
+    val tmpMask = Cat(0.U(16.W),mask) << addrOffset // 32-bits
+    LookupTree(index, List(
+      0.U -> tmpMask(15, 0),
+      1.U -> tmpMask(31, 16),
+    ))
+  }
+}
+
+object genUSSplitData{
+  def apply(data: UInt, index: UInt, addrOffset: UInt): UInt = {
+    val tmpData = WireInit(0.U(256.W))
+    val lookupTable = (0 until 16).map{case i =>
+      if(i == 0){
+        i.U -> Cat(0.U(128.W), data)
+      }else{
+        i.U -> Cat(0.U(((16-i)*8).W), data, 0.U((i*8).W))
+      }
+    }
+    tmpData := LookupTree(addrOffset, lookupTable).asUInt
+
+    LookupTree(index, List(
+      0.U -> tmpData(127, 0),
+      1.U -> tmpData(255, 128)
+    ))
+  }
+}
+
+object genVdOffset{
+  def apply(offset: UInt, index: UInt): UInt = {
+    LookupTree(index, List(
+      0.U -> offset,
+      1.U -> ((~offset).asUInt + 1.U)
+    ))
+  }
+}
+
+/**
+  * for merge 128-bits data of unit-stride
+  */
+// object mergeDataByoffset{
+//   def apply(oldData: Seq[UInt], newData: UInt, mask: Seq[Bools], offset: Seq[Uint], valid: Seq[Bool]): UInt = {
+
+//   }
+// }
+
+object GenVSData extends VLSUConstants {
+  def apply(data: UInt, elemIdx: UInt, alignedType: UInt): UInt = {
+    LookupTree(alignedType, List(
+      "b000".U -> ZeroExt(LookupTree(elemIdx(3, 0), List.tabulate(VLEN/8)(i => i.U -> getByte(data, i))), VLEN),
+      "b001".U -> ZeroExt(LookupTree(elemIdx(2, 0), List.tabulate(VLEN/16)(i => i.U -> getHalfWord(data, i))), VLEN),
+      "b010".U -> ZeroExt(LookupTree(elemIdx(1, 0), List.tabulate(VLEN/32)(i => i.U -> getWord(data, i))), VLEN),
+      "b011".U -> ZeroExt(LookupTree(elemIdx(0), List.tabulate(VLEN/64)(i => i.U -> getDoubleWord(data, i))), VLEN),
+      "b100".U -> data // if have wider element, it will broken
     ))
   }
 }

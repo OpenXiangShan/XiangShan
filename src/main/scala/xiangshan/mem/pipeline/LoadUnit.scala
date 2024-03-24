@@ -116,7 +116,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val ldout         = Decoupled(new MemExuOutput)
 
     // vec issue path
-    val vecldin = Flipped(Decoupled(new VecLoadPipeBundle))
+    val vecldin = Flipped(Decoupled(new VecPipeBundle))
     val vecldout = Decoupled(new VecExuOutput)
     val vecReplay = Decoupled(new LsPipelineBundle)
 
@@ -228,7 +228,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val reg_offset    = UInt(vOffsetBits.W)
     val vecActive     = Bool() // 1: vector active element or scala mem operation, 0: vector not active element
     val is_first_ele  = Bool()
-    val flowPtr       = new VlflowPtr
+    // val flowPtr       = new VlflowPtr
   }
   val s0_sel_src = Wire(new FlowSource)
 
@@ -507,7 +507,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out
   }
 
-  def fromVecIssueSource(src: VecLoadPipeBundle): FlowSource = {
+  def fromVecIssueSource(src: VecPipeBundle): FlowSource = {
     val out = WireInit(0.U.asTypeOf(new FlowSource))
     out.vaddr         := src.vaddr
     out.mask          := src.mask
@@ -540,7 +540,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // out.offset              := src.offset
     out.vecActive           := src.vecActive
     out.is_first_ele        := src.is_first_ele
-    out.flowPtr             := src.flowPtr
+    // out.flowPtr             := src.flowPtr
     out
   }
 
@@ -627,7 +627,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // s0_out.offset          := s0_offset
   s0_out.vecActive             := s0_sel_src.vecActive
   s0_out.is_first_ele    := s0_sel_src.is_first_ele
-  s0_out.flowPtr         := s0_sel_src.flowPtr
+  // s0_out.flowPtr         := s0_sel_src.flowPtr
   s0_out.uop.exceptionVec(loadAddrMisaligned) := !s0_addr_aligned && s0_sel_src.vecActive
   s0_out.forward_tlDchannel := s0_super_ld_rep_select
   when(io.tlb.req.valid && s0_sel_src.isFirstIssue) {
@@ -1228,8 +1228,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_vecout.reg_offset        := s3_in.reg_offset
   s3_vecout.vecActive         := s3_vecActive
   s3_vecout.is_first_ele      := s3_in.is_first_ele
-  s3_vecout.uopQueuePtr       := DontCare // uopQueuePtr is already saved in flow queue
-  s3_vecout.flowPtr           := s3_in.flowPtr
+  // s3_vecout.uopQueuePtr       := DontCare // uopQueuePtr is already saved in flow queue
+  // s3_vecout.flowPtr           := s3_in.flowPtr
   s3_vecout.elemIdx           := DontCare // elemIdx is already saved in flow queue
   s3_vecout.elemIdxInsideVd   := DontCare
 
@@ -1345,7 +1345,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.vecldout.bits.isPackage := DontCare
   io.vecldout.bits.packageNum := DontCare
   io.vecldout.bits.originAlignedType := DontCare
-  io.vecldout.bits.alignedType := DontCare
+  io.vecldout.bits.alignedType := s3_vec_alignedType
   // TODO: VLSU, uncache data logic
   val vecdata = rdataVecHelper(s3_vec_alignedType(1,0), s3_picked_data_frm_cache)
   io.vecldout.bits.vec.vecdata := Mux(s3_in.is128bit, s3_merged_data_frm_cache, vecdata)
@@ -1370,7 +1370,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.vecReplay.bits.reg_offset := s3_in.reg_offset
   io.vecReplay.bits.vecActive := s3_in.vecActive
   io.vecReplay.bits.is_first_ele := s3_in.is_first_ele
-  io.vecReplay.bits.flowPtr := s3_in.flowPtr
+  // io.vecReplay.bits.flowPtr := s3_in.flowPtr
 
   // fast load to load forward
   if (EnableLoadToLoadForward) {

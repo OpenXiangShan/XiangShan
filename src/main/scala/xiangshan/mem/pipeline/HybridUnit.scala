@@ -129,7 +129,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     }
 
     val vec_stu_io = new Bundle() {
-      val in = Flipped(DecoupledIO(new VecStorePipeBundle()))
+      val in = Flipped(DecoupledIO(new VecPipeBundle()))
       val isFirstIssue = Input(Bool())
       val lsq = ValidIO(new LsPipelineBundle())
       val feedbackSlow = ValidIO(new VSFQFeedback)
@@ -181,7 +181,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   // vector
   val s0_isvec = WireInit(false.B)
   val s0_vecActive = WireInit(true.B)
-  val s0_flowPtr = WireInit(0.U.asTypeOf(new VsFlowPtr))
+  // val s0_flowPtr = WireInit(0.U.asTypeOf(new VsFlowPtr))
   val s0_isLastElem = WireInit(false.B)
 
   // load flow select/gen
@@ -439,7 +439,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     s0_sched_idx     := 0.U
   }
 
-  def fromVecIssueSource(src: VecStorePipeBundle) = {
+  def fromVecIssueSource(src: VecPipeBundle) = {
     // For now, vector port handles only vector store flows
     s0_vaddr         := src.vaddr
     s0_mask          := src.mask
@@ -449,7 +449,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     s0_rsIdx         := 0.U
     s0_rep_carry     := 0.U.asTypeOf(s0_rep_carry.cloneType)
     s0_mshrid        := 0.U
-    s0_isFirstIssue  := src.isFirstIssue
+    // s0_isFirstIssue  := src.isFirstIssue
     s0_fast_rep      := false.B
     s0_ld_rep        := false.B
     s0_l2l_fwd       := false.B
@@ -460,8 +460,8 @@ class HybridUnit(implicit p: Parameters) extends XSModule
 
     s0_isvec         := true.B
     s0_vecActive           := io.vec_stu_io.in.bits.vecActive
-    s0_flowPtr       := io.vec_stu_io.in.bits.flowPtr
-    s0_isLastElem    := io.vec_stu_io.in.bits.isLastElem
+    // s0_flowPtr       := io.vec_stu_io.in.bits.flowPtr
+    // s0_isLastElem    := io.vec_stu_io.in.bits.isLastElem
   }
 
   def fromLoadToLoadSource(src: LoadToLoadIO) = {
@@ -529,7 +529,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   s0_out.isvec         := s0_isvec
   s0_out.isLastElem    := s0_isLastElem
   s0_out.vecActive           := s0_vecActive
-  s0_out.sflowPtr      := s0_flowPtr
+  // s0_out.sflowPtr      := s0_flowPtr
   s0_out.uop.exceptionVec(loadAddrMisaligned)  := !s0_addr_aligned && s0_ld_flow
   s0_out.uop.exceptionVec(storeAddrMisaligned) := !s0_addr_aligned && !s0_ld_flow
   s0_out.forward_tlDchannel := s0_super_ld_rep_select
@@ -1078,7 +1078,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
 
   val s2_vec_feedback = Wire(Valid(new VSFQFeedback))
   s2_vec_feedback.valid := s2_valid && !s2_ld_flow && !s2_hw_prf && s2_isvec
-  s2_vec_feedback.bits.flowPtr := s2_out.sflowPtr
+  // s2_vec_feedback.bits.flowPtr := s2_out.sflowPtr
   s2_vec_feedback.bits.hit := !s2_tlb_miss
   s2_vec_feedback.bits.sourceType := RSFeedbackType.tlbMiss
   s2_vec_feedback.bits.paddr := s2_paddr
