@@ -204,13 +204,10 @@ case class XSCoreParameters
   StoreBufferThreshold: Int = 7,
   EnsbufferWidth: Int = 2,
   // ============ VLSU ============
-  UsQueueSize: Int = 8,
-  VlFlowSize: Int = 32,
-  VlUopSize: Int = 32,
-  VsFlowL1Size: Int = 128,
-  VsFlowL2Size: Int = 32,
-  VsFlow128L2Size: Int = 8,
-  VsUopSize: Int = 32,
+  VlMergeBufferSize: Int = 8,
+  VsMergeBufferSize: Int = 8,
+  UopWritebackWidth: Int = 1,
+  splitBufferSize: Int = 8,
   // ==============================
   UncacheBufferSize: Int = 4,
   EnableLoadToLoadForward: Boolean = false,
@@ -603,13 +600,10 @@ trait HasXSParameter {
   val StoreBufferSize = coreParams.StoreBufferSize
   val StoreBufferThreshold = coreParams.StoreBufferThreshold
   val EnsbufferWidth = coreParams.EnsbufferWidth
-  val UsQueueSize = coreParams.UsQueueSize
-  val VlFlowSize = coreParams.VlFlowSize
-  val VlUopSize = coreParams.VlUopSize
-  val VsFlowL1Size = coreParams.VsFlowL1Size
-  val VsFlowL2Size = coreParams.VsFlowL2Size
-  val VsFlow128L2Size = coreParams.VsFlow128L2Size
-  val VsUopSize = coreParams.VsUopSize
+  val VlMergeBufferSize = coreParams.VlMergeBufferSize
+  val VsMergeBufferSize = coreParams.VsMergeBufferSize
+  val UopWritebackWidth = coreParams.UopWritebackWidth
+  val splitBufferSize = coreParams.splitBufferSize
   val UncacheBufferSize = coreParams.UncacheBufferSize
   val EnableLoadToLoadForward = coreParams.EnableLoadToLoadForward
   val EnableFastForward = coreParams.EnableFastForward

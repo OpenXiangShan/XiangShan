@@ -112,8 +112,8 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   // val offset = Vec(2,UInt(4.W))
   val vecActive = Bool() // 1: vector active element or scala mem operation, 0: vector not active element
   val is_first_ele = Bool()
-  val flowPtr = new VlflowPtr() // VLFlowQueue ptr
-  val sflowPtr = new VsFlowPtr() // VSFlowQueue ptr
+  // val flowPtr = new VlflowPtr() // VLFlowQueue ptr
+  // val sflowPtr = new VsFlowPtr() // VSFlowQueue ptr
 
   // For debug usage
   val isFirstIssue = Bool()
@@ -172,8 +172,8 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     if (latch) is_first_ele        := RegNext(input.is_first_ele)        else is_first_ele        := input.is_first_ele
     if (latch) uop_unit_stride_fof := RegNext(input.uop_unit_stride_fof) else uop_unit_stride_fof := input.uop_unit_stride_fof
     if (latch) reg_offset          := RegNext(input.reg_offset)          else reg_offset          := input.reg_offset
-    if (latch) flowPtr             := RegNext(input.flowPtr)             else flowPtr             := input.flowPtr
-    if (latch) sflowPtr            := RegNext(input.sflowPtr)            else sflowPtr            := input.sflowPtr
+    // if (latch) flowPtr             := RegNext(input.flowPtr)             else flowPtr             := input.flowPtr
+    // if (latch) sflowPtr            := RegNext(input.sflowPtr)            else sflowPtr            := input.sflowPtr
 
     meta_prefetch := DontCare
     meta_access := DontCare
