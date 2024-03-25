@@ -5,7 +5,11 @@ import chisel3.util._
 import top.{ArgParser, Generator}
 import xiangshan.backend.fu.NewCSR.CSRDefines.{PrivMode, VirtMode}
 
-class NewCSR extends Module with MachineLevel with SupervisorLevel with Hypervisor with Unprivileged {
+trait CSRConfig {
+  val GEILEN = 63
+}
+
+class NewCSR extends Module with CSRConfig with MachineLevel with SupervisorLevel with Hypervisor with Unprivileged {
   val io = IO(new Bundle {
     val w = Flipped(ValidIO(new Bundle {
       val addr = UInt(12.W)
@@ -21,6 +25,10 @@ class NewCSR extends Module with MachineLevel with SupervisorLevel with Hypervis
       val toPRVM = PrivMode()
       val toV = VirtMode()
     }))
+    // from interrupt controller
+    val fromIC = Input(new Bundle {
+      val vs = new CSRIRCBundle
+    })
   })
 
   val addr = io.w.bits.addr
@@ -61,6 +69,8 @@ class NewCSR extends Module with MachineLevel with SupervisorLevel with Hypervis
     mod.commonIn.status := mstatus.mstatus
     mod.commonIn.prvm := PRVM
     mod.commonIn.v := V
+    mod.commonIn.hstatus := hstatus.rdata
+    mod.vsi := io.fromIC.vs
     println(s"${mod.modName}: ")
     println(mod.dumpFields)
   }

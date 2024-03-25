@@ -14,6 +14,8 @@ abstract class CSRModule[T <: CSRBundle](
 
   val commonIn = IO(Input(new CSRCommonIn))
   val w = IO(Input(new CSRAddrWriteBundle(bundle)))
+  val vsi = IO(Input(new CSRIRCBundle))
+
   val rdata = IO(Output(bundle))
 
   val reg = (if (bundle.needReset) RegInit(bundle, bundle.init) else Reg(bundle))
@@ -85,4 +87,12 @@ class CSRCommonIn extends Bundle {
   val status = new MstatusBundle
   val prvm = PrivMode()
   val v = VirtMode()
+  val hstatus = new HstatusBundle
+}
+
+// Interrupt Controller
+class CSRIRCBundle extends Bundle {
+  val sip = Input(Bool())
+  val tip = Input(Bool())
+  val eip = Input(Bool())
 }

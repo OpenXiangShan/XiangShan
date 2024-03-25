@@ -57,6 +57,18 @@ object CSRMacros {
       CSRRWFieldRange(c)(bit, bit)
     }
 
+    def CSRWLRLFieldRange(c: Context)(msb: c.Expr[Int], lsb: c.Expr[Int], fn: c.Tree): c.Tree = {
+      import c.universe._
+
+      val Literal(Constant(i_msb: Int)) = msb.tree
+      val Literal(Constant(i_lsb: Int)) = lsb.tree
+      c.parse(s"CSRDefines.CSRField${calcuWidth(c)(msb, lsb)}Bits.WARL($i_msb, $i_lsb, $fn)")
+    }
+
+    def CSRWLRLFieldBit(c: Context)(bit: c.Expr[Int], fn: c.Tree): c.Tree = {
+      CSRWLRLFieldRange(c)(bit, bit, fn)
+    }
+
     def CSRRefWARLFieldRange(c: Context)(ref: c.Tree, msb: c.Expr[Int], lsb: c.Expr[Int], wfn: c.Tree): c.Tree = {
       import c.universe._
 

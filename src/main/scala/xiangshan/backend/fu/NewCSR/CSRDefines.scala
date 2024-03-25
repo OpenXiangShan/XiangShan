@@ -192,6 +192,10 @@ object CSRDefines {
     def apply(ref: CSREnumType, bit: Int, wfn: CSRWfnType): CSREnumType = macro CSRFieldsImpl.CSRRefWARLFieldBit
   }
 
+  object CSRWLRLField {
+    def apply(msb: Int, lsb: Int, fn: CSRWfnType): CSREnumType = macro CSRFieldsImpl.CSRWLRLFieldRange
+  }
+
   object PrivMode extends CSREnum with CSRRWApply {
     val U = Value(0.U)
     val S = Value(1.U)

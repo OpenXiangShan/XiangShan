@@ -173,6 +173,10 @@ class CSREnumType(
     this
   }
 
+  def := (that: UInt): Unit = {
+    this := this.factory(that)
+  }
+
   override def toString(): String = {
     s"${this.localName} ${rwType} [$msb, $lsb] reset($init)"
   }
