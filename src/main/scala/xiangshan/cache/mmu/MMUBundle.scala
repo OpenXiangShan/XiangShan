@@ -519,7 +519,7 @@ class MemBlockidxBundle(implicit p: Parameters) extends TlbBundle {
 class TlbReq(implicit p: Parameters) extends TlbBundle {
   val vaddr = Output(UInt(VAddrBits.W))
   val cmd = Output(TlbCmd())
-  val size = Output(UInt(log2Ceil(log2Ceil(XLEN/8)+1).W))
+  val size = Output(UInt(log2Ceil(log2Ceil(VLEN/8)+1).W))
   val kill = Output(Bool()) // Use for blocked tlb that need sync with other module like icache
   val memidx = Output(new MemBlockidxBundle)
   // do not translate, but still do pmp/pma check
@@ -639,7 +639,7 @@ class TlbIO(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parame
   val ptw = new TlbPtwIOwithMemIdx(Width)
   val refill_to_mem = Output(new TlbRefilltoMemIO())
   val replace = if (q.outReplace) Flipped(new TlbReplaceIO(Width, q)) else null
-  val pmp = Vec(Width, ValidIO(new PMPReqBundle()))
+  val pmp = Vec(Width, ValidIO(new PMPReqBundle(q.lgMaxSize)))
   val tlbreplay = Vec(Width, Output(Bool()))
 }
 

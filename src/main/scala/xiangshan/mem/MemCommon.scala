@@ -105,6 +105,9 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   val isLastElem = Bool()
   val is128bit = Bool()
   val uop_unit_stride_fof = Bool()
+  val usSecondInv = Bool()
+  val elemIdx = UInt(elemIdxBits.W)
+  val alignedType = UInt(alignTypeBits.W)
   // val rob_idx_valid = Vec(2,Bool())
   // val inner_idx = Vec(2,UInt(3.W))
   // val rob_idx = Vec(2,new RobPtr)
@@ -168,10 +171,13 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     if (latch) isvec               := RegNext(input.isvec)               else isvec               := input.isvec
     if (latch) isLastElem          := RegNext(input.isLastElem)          else isLastElem          := input.isLastElem
     if (latch) is128bit            := RegNext(input.is128bit)            else is128bit            := input.is128bit
-    if (latch) vecActive                 := RegNext(input.vecActive)                 else vecActive                 := input.vecActive
+    if (latch) vecActive           := RegNext(input.vecActive)           else vecActive           := input.vecActive
     if (latch) is_first_ele        := RegNext(input.is_first_ele)        else is_first_ele        := input.is_first_ele
     if (latch) uop_unit_stride_fof := RegNext(input.uop_unit_stride_fof) else uop_unit_stride_fof := input.uop_unit_stride_fof
+    if (latch) usSecondInv         := RegNext(input.usSecondInv)         else usSecondInv         := input.usSecondInv
     if (latch) reg_offset          := RegNext(input.reg_offset)          else reg_offset          := input.reg_offset
+    if (latch) elemIdx             := RegNext(input.elemIdx)             else elemIdx             := input.elemIdx
+    if (latch) alignedType         := RegNext(input.alignedType)         else alignedType         := input.alignedType
     // if (latch) flowPtr             := RegNext(input.flowPtr)             else flowPtr             := input.flowPtr
     // if (latch) sflowPtr            := RegNext(input.sflowPtr)            else sflowPtr            := input.sflowPtr
 

@@ -34,6 +34,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   val io = IO(new Bundle() {
     // control
     val redirect = Flipped(Valid(new Redirect))
+    val vecFeedback = Flipped(ValidIO(new FeedbackToLsqIO))
 
     // violation query
     val query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO))
@@ -160,8 +161,9 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   for (i <- 0 until LoadQueueRARSize) {
     val deqNotBlock = !isBefore(io.ldWbPtr, uop(i).lqIdx)
     val needFlush = uop(i).robIdx.needFlush(io.redirect)
+    val vecLdCancel = io.vecFeedback.valid && io.vecFeedback.bits.isFlush && uop(i).robIdx === io.vecFeedback.bits.robidx && uop(i).uopIdx === io.vecFeedback.bits.uopidx
 
-    when (allocated(i) && (deqNotBlock || needFlush)) {
+    when (allocated(i) && (deqNotBlock || needFlush || vecLdCancel)) {
       allocated(i) := false.B
       freeMaskVec(i) := true.B
     }

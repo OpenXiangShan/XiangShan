@@ -24,16 +24,19 @@ import utility._
 import xiangshan._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.Bundles._
+import xiangshan.backend.fu.FuType
 
 /**
   * Common used parameters or functions in vlsu
   */
 trait VLSUConstants {
   val VLEN = 128
-  //for pack unit-stride flow 
+  //for pack unit-stride flow
   val AlignedNum = 4 // 1/2/4/8
   def VLENB = VLEN/8
   def vOffsetBits = log2Up(VLENB) // bits-width to index offset inside a vector reg
+  lazy val vlmBindexBits = 8 //will be overrided later
+  lazy val vsmBindexBits = 8 // will be overrided later
 
   def alignTypes = 5 // eew/sew = 1/2/4/8, last indicate 128 bit element
   def alignTypeBits = log2Up(alignTypes)
@@ -51,7 +54,7 @@ trait VLSUConstants {
   def elemIdxBits = log2Up(maxElemNum) + 1 // to index which element in an instruction
   def flowIdxBits = log2Up(maxFlowNum) + 1 // to index which flow in a uop
   def fieldBits = log2Up(maxFields) + 1 // 4-bits to indicate 1~8
-  
+
   def ewBits = 3 // bits-width of EEW/SEW
   def mulBits = 3 // bits-width of emul/lmul
 
@@ -69,6 +72,8 @@ trait VLSUConstants {
 
 trait HasVLSUParameters extends HasXSParameter with VLSUConstants {
   override val VLEN = coreParams.VLEN
+  override lazy val vlmBindexBits = log2Up(coreParams.VlMergeBufferSize)
+  override lazy val vsmBindexBits = log2Up(coreParams.VsMergeBufferSize)
   def isUnitStride(instType: UInt) = instType(1, 0) === "b00".U
   def isStrided(instType: UInt) = instType(1, 0) === "b10".U
   def isIndexed(instType: UInt) = instType(0) === "b1".U
@@ -101,22 +106,22 @@ trait HasVLSUParameters extends HasXSParameter with VLSUConstants {
     LookupTree(alignedType, List(
       "b00".U -> VecInit(elemIdx.map(e => UIntToOH(e(3, 0)).asBools).transpose.zipWithIndex.map { case (selVec, i) =>
         ParallelPosteriorityMux(
-          true.B +: selVec.zip(valids).map(x => x._1 && x._2), 
+          true.B +: selVec.zip(valids).map(x => x._1 && x._2),
           getByte(oldData, i) +: newData.map(getByte(_))
         )}).asUInt,
       "b01".U -> VecInit(elemIdx.map(e => UIntToOH(e(2, 0)).asBools).transpose.zipWithIndex.map { case (selVec, i) =>
         ParallelPosteriorityMux(
-          true.B +: selVec.zip(valids).map(x => x._1 && x._2), 
+          true.B +: selVec.zip(valids).map(x => x._1 && x._2),
           getHalfWord(oldData, i) +: newData.map(getHalfWord(_))
         )}).asUInt,
       "b10".U -> VecInit(elemIdx.map(e => UIntToOH(e(1, 0)).asBools).transpose.zipWithIndex.map { case (selVec, i) =>
         ParallelPosteriorityMux(
-          true.B +: selVec.zip(valids).map(x => x._1 && x._2), 
+          true.B +: selVec.zip(valids).map(x => x._1 && x._2),
           getWord(oldData, i) +: newData.map(getWord(_))
         )}).asUInt,
       "b11".U -> VecInit(elemIdx.map(e => UIntToOH(e(0)).asBools).transpose.zipWithIndex.map { case (selVec, i) =>
         ParallelPosteriorityMux(
-          true.B +: selVec.zip(valids).map(x => x._1 && x._2), 
+          true.B +: selVec.zip(valids).map(x => x._1 && x._2),
           getDoubleWord(oldData, i) +: newData.map(getDoubleWord(_))
         )}).asUInt
     ))
@@ -124,6 +129,27 @@ trait HasVLSUParameters extends HasXSParameter with VLSUConstants {
 
   def mergeDataWithElemIdx(oldData: UInt, newData: UInt, alignedType: UInt, elemIdx: UInt): UInt = {
     mergeDataWithElemIdx(oldData, Seq(newData), alignedType, Seq(elemIdx), Seq(true.B))
+  }
+  /**
+    * for merge 128-bits data of unit-stride
+    */
+  object mergeDataByoffset{
+    def apply(oldData: UInt, newData: Seq[UInt], mask: Seq[UInt], offset: Seq[UInt], valids: Seq[Bool]): UInt = {
+      require(newData.length == valids.length)
+      require(newData.length == offset.length)
+      // if (i>offset[k] && mask[k][i]==1 && valid[k]) -> newData, else -> oldData
+      val selVec = (mask zip offset).map{case (m,e) =>
+        ((~UIntToMask(e, VLENB)).asBools.zip(m.asBools).map(x=> x._1 && x._2))}.transpose // vector(3,16)
+
+      VecInit(selVec.zipWithIndex.map{ case (selV, i) => // selV: vector(3,1), 0=<i<16
+        ParallelPosteriorityMux(
+          true.B +: selV.zip(valids).map(x => x._1 && x._2),
+          getByte(oldData, i) +: newData.map(getByte(_))
+        )}).asUInt
+    }
+  }
+  def mergeDataByoffset(oldData: UInt, newData: UInt, mask: UInt, offset: UInt): UInt = {
+    mergeDataByoffset(oldData, Seq(newData), Seq(mask), Seq(offset), Seq(true.B))
   }
 }
 abstract class VLSUModule(implicit p: Parameters) extends XSModule
@@ -160,6 +186,8 @@ class VecExuOutput(implicit p: Parameters) extends MemExuOutput with HasVLSUPara
   val packageNum        = UInt((log2Up(VLENB) + 1).W)
   val originAlignedType = UInt(alignTypeBits.W)
   val alignedType       = UInt(alignTypeBits.W)
+   // feedback
+  val vecFeedback       = Bool()
 }
 
 // class VecStoreExuOutput(implicit p: Parameters) extends MemExuOutput with HasVLSUParameters {
@@ -215,6 +243,15 @@ class VecFlowBundle(implicit p: Parameters) extends VLSUBundleWithMicroOp {
   val isPackage         = Bool()
   val packageNum        = UInt((log2Up(VLENB) + 1).W)
   val originAlignedType = UInt(alignTypeBits.W)
+}
+
+class VecMemExuOutput(isVector: Boolean = false)(implicit p: Parameters) extends VLSUBundle{
+  val output = new MemExuOutput(isVector)
+  val vecFeedback = Bool()
+  val mmio = Bool()
+  val usSecondInv = Bool()
+  val elemIdx = UInt(elemIdxBits.W)
+  val alignedType = UInt(alignTypeBits.W)
 }
 
 object MulNum {
@@ -726,24 +763,17 @@ object genUSSplitData{
     ))
   }
 }
-
+/**
+  * generate offset in Vd of flows, only used in Unit-Stride
+  * */
 object genVdOffset{
   def apply(offset: UInt, index: UInt): UInt = {
     LookupTree(index, List(
-      0.U -> offset,
+      0.U -> 0.U,
       1.U -> ((~offset).asUInt + 1.U)
     ))
   }
 }
-
-/**
-  * for merge 128-bits data of unit-stride
-  */
-// object mergeDataByoffset{
-//   def apply(oldData: Seq[UInt], newData: UInt, mask: Seq[Bools], offset: Seq[Uint], valid: Seq[Bool]): UInt = {
-
-//   }
-// }
 
 object GenVSData extends VLSUConstants {
   def apply(data: UInt, elemIdx: UInt, alignedType: UInt): UInt = {

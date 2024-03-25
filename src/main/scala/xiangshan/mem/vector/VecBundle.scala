@@ -25,7 +25,7 @@ import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.rob.RobPtr
 
-class VLSBundle(implicit p: Parameters) extends VLSUBundle {
+class VLSBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle {
   val flowMask            = UInt(VLENB.W) // each bit for a flow
   val byteMask            = UInt(VLENB.W) // each bit for a byte
   val data                = UInt(VLEN.W)
@@ -58,7 +58,7 @@ class VLSBundle(implicit p: Parameters) extends VLSUBundle {
   val vdIdxInField        = UInt(log2Up(maxMUL).W)
   val uopOffset           = UInt(VLEN.W)
   val preIsSplit          = Bool() // if uop need split, only not Unit-Stride or not 128bit-aligned unit stride need split
-  val mBIdx               = UInt()
+  val mBIndex             = if(isVStore) UInt(vsmBindexBits.W) else UInt(vlmBindexBits.W)
 
   val alignedType         = UInt(alignTypeBits.W)
 }
@@ -87,17 +87,17 @@ class VSFQFeedback (implicit p: Parameters) extends XSBundle {
 }
 
 class VecPipelineFeedbackIO(isVStore: Boolean=false) (implicit p: Parameters) extends VLSUBundle {
-  val mBIndex              = UInt()
+  val mBIndex              = if(isVStore) UInt(vsmBindexBits.W) else UInt(vlmBindexBits.W)
   val hit                  = Bool()
   val isvec                = Bool()
   //val flushState = Bool()
   val sourceType           = VSFQFeedbackType()
   //val dataInvalidSqIdx = new SqPtr
-  val paddr                = UInt(PAddrBits.W)
+  //val paddr                = UInt(PAddrBits.W)
   val mmio                 = Bool()
-  val atomic               = Bool()
+  //val atomic               = Bool()
   val exceptionVec         = ExceptionVec()
-  val vec                  = new OnlyVecExuOutput
+  //val vec                  = new OnlyVecExuOutput
 
   val usSecondInv          = Bool() // only for unit stride, second flow is Invalid
   // for load
@@ -109,7 +109,7 @@ class VecPipelineFeedbackIO(isVStore: Boolean=false) (implicit p: Parameters) ex
   val alignedType          = OptionWrapper(!isVStore, UInt(alignTypeBits.W))
 }
 
-class VecPipeBundle(implicit p: Parameters) extends VLSUBundle {
+class VecPipeBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle {
   val vaddr               = UInt(VAddrBits.W)
   val mask                = UInt(VLENB.W)
   val isvec               = Bool()
@@ -122,8 +122,8 @@ class VecPipeBundle(implicit p: Parameters) extends VLSUBundle {
 
   val uop = new DynInst
 
-  val usSecondInv         = Bool() // only for unit stride, second flow is Invalid 
-  val mBIndex             = UInt()
+  val usSecondInv         = Bool() // only for unit stride, second flow is Invalid
+  val mBIndex             = if(isVStore) UInt(vsmBindexBits.W) else UInt(vlmBindexBits.W)
   val elemIdx             = UInt(elemIdxBits.W)
 }
 
@@ -138,7 +138,7 @@ object VecFeedbacks {
   val allFeedbacks = 3
 }
 
-class MergeBufferReq(implicit p: Parameters) extends VLSUBundle{
+class MergeBufferReq(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle{
   val mask                = UInt(VLENB.W)
   val vaddr               = UInt(VAddrBits.W)
   val flowNum             = UInt(flowIdxBits.W)
@@ -147,20 +147,20 @@ class MergeBufferReq(implicit p: Parameters) extends VLSUBundle{
   // val vdOffset            = UInt(vdOffset.W)
 }
 
-class MergeBufferResp(implicit p: Parameters) extends VLSUBundle{
-  val mBIndex             = UInt()
+class MergeBufferResp(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle{
+  val mBIndex             = if(isVStore) UInt(vsmBindexBits.W) else UInt(vlmBindexBits.W)
   val fail                = Bool()
 }
 
-class ToMergeBufferIO(implicit p: Parameters) extends VLSUBundle{
-  val req                 = DecoupledIO(new MergeBufferReq)
-  val resp                = Flipped(ValidIO(new MergeBufferResp))
+class ToMergeBufferIO(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle{
+  val req                 = DecoupledIO(new MergeBufferReq(isVStore))
+  val resp                = Flipped(ValidIO(new MergeBufferResp(isVStore)))
   // val issueInactive       = ValidIO
 }
 
-class FromSplitIO(implicit p: Parameters) extends VLSUBundle{
-  val req                 = Flipped(DecoupledIO(new MergeBufferReq))
-  val resp                = ValidIO(new MergeBufferResp)
+class FromSplitIO(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle{
+  val req                 = Flipped(DecoupledIO(new MergeBufferReq(isVStore)))
+  val resp                = ValidIO(new MergeBufferResp(isVStore))
   // val issueInactive       = Flipped(ValidIO())
 }
 
@@ -171,6 +171,7 @@ class FeedbackToSplitIO(implicit p: Parameters) extends VLSUBundle{
 class FeedbackToLsqIO(implicit p: Parameters) extends VLSUBundle{
   val robidx = new RobPtr
   val uopidx = UopIdx()
+  val vaddr = UInt(VAddrBits.W)
   val feedback = Vec(VecFeedbacks.allFeedbacks, Bool())
 
   def isFlush  = feedback(VecFeedbacks.FLUSH)
@@ -181,23 +182,23 @@ class FeedbackToLsqIO(implicit p: Parameters) extends VLSUBundle{
 class VSplitIO(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle{
   val redirect            = Flipped(ValidIO(new Redirect))
   val in                  = if(isVStore) Flipped(Decoupled(new MemExuInput(isVector = true))) else Flipped(Decoupled(new MemExuInput(isVector = true))) // from iq
-  val toMergeBuffer       = new ToMergeBufferIO //to merge buffer req mergebuffer entry
-  val out                 = Decoupled(new VecPipeBundle())// to scala pipeline
-  val vstd                = OptionWrapper(isVStore, Valid(new MemExuOutput))
+  val toMergeBuffer       = new ToMergeBufferIO(isVStore) //to merge buffer req mergebuffer entry
+  val out                 = Decoupled(new VecPipeBundle(isVStore))// to scala pipeline
+  val vstd                = OptionWrapper(isVStore, Valid(new MemExuOutput(isVector = true)))
 }
 
-class VSplitPipelineIO(implicit p: Parameters) extends VLSUBundle{
+class VSplitPipelineIO(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle{
   val redirect            = Flipped(ValidIO(new Redirect))
   val in                  = Flipped(Decoupled(new MemExuInput(isVector = true)))
-  val toMergeBuffer       = new ToMergeBufferIO // req mergebuffer entry, inactive elem issue
+  val toMergeBuffer       = new ToMergeBufferIO(isVStore) // req mergebuffer entry, inactive elem issue
   val out                 = Decoupled(new VLSBundle())// to split buffer
 }
 
 class VSplitBufferIO(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle{
   val redirect            = Flipped(ValidIO(new Redirect))
   val in                  = Flipped(Decoupled(new VLSBundle()))
-  val out                 = Decoupled(new VecPipeBundle())//to scala pipeline
-  val vstd                = OptionWrapper(isVStore, ValidIO(new MemExuOutput))
+  val out                 = Decoupled(new VecPipeBundle(isVStore))//to scala pipeline
+  val vstd                = OptionWrapper(isVStore, ValidIO(new MemExuOutput(isVector = true)))
 }
 
 class VMergeBufferIO(isVStore : Boolean=false)(implicit p: Parameters) extends VLSUBundle{
