@@ -21,6 +21,7 @@ package xiangshan.backend.fu.wrapper
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.rocket.DecodeLogic
 import utility._
 import utils.XSError
 import xiangshan.{SelImm, SrcType, UopSplitType, XSCoreParamsKey, XSModule}
@@ -35,9 +36,9 @@ import scala.collection.Seq
 
 class VIAluDecodeResultBundle extends Bundle {
   val opcode = UInt(6.W)
-  val srcType2 = UInt(4.W)
-  val srcType1 = UInt(4.W)
-  val vdType = UInt(4.W)
+  val srcType2 = UInt(3.W)
+  val srcType1 = UInt(3.W)
+  val vdType = UInt(3.W)
 }
 
 class VIAluDecoder (implicit p: Parameters) extends XSModule {
@@ -50,45 +51,39 @@ class VIAluDecoder (implicit p: Parameters) extends XSModule {
   })
 
   // u 00 s 01 f 10 mask 1111
-  val uSew   = Cat(0.U(2.W), io.in.sew)
-  val uSew2  = Cat(0.U(2.W), (io.in.sew+1.U))
-  val uSewf2 = Cat(0.U(2.W), (io.in.sew-1.U))
-  val uSewf4 = Cat(0.U(2.W), (io.in.sew-2.U))
-  val uSewf8 = Cat(0.U(2.W), (io.in.sew-3.U))
-  val sSew   = Cat(1.U(2.W), io.in.sew)
-  val sSew2  = Cat(1.U(2.W), (io.in.sew+1.U))
-  val sSewf2 = Cat(1.U(2.W), (io.in.sew - 1.U))
-  val sSewf4 = Cat(1.U(2.W), (io.in.sew - 2.U))
-  val sSewf8 = Cat(1.U(2.W), (io.in.sew - 3.U))
-  val mask   = "b1111".U(4.W)
+  // Cat(1(1111),1(s)/0(u), 1(add1)/0(add0))
+  val uSew   = BitPat("b000")
+  val uSew2  = BitPat("b001")
+  val sSew   = BitPat("b010")
+  val sSew2  = BitPat("b011")
+  val mask = BitPat("b100".U(3.W))
+  val default = List(BitPat("b000000"),BitPat("b000"),BitPat("b000"),BitPat("b000"))
+  val decodeTable : Array[(BitPat, List[BitPat])] = Array(
+    BitPat(VipuType.vredsum_vs)   -> List(BitPat(VAluOpcode.vredsum), uSew, uSew, uSew),
+    BitPat(VipuType.vredmaxu_vs)  -> List(BitPat(VAluOpcode.vredmax), uSew, uSew, uSew),
+    BitPat(VipuType.vredmax_vs)   -> List(BitPat(VAluOpcode.vredmax), sSew, sSew, sSew),
+    BitPat(VipuType.vredminu_vs)  -> List(BitPat(VAluOpcode.vredmin), uSew, uSew, uSew),
+    BitPat(VipuType.vredmin_vs)   -> List(BitPat(VAluOpcode.vredmin), sSew, sSew, sSew),
+    BitPat(VipuType.vredand_vs)   -> List(BitPat(VAluOpcode.vredand), uSew, uSew, uSew),
+    BitPat(VipuType.vredor_vs)    -> List(BitPat(VAluOpcode.vredor), uSew, uSew, uSew),
+    BitPat(VipuType.vredxor_vs)   -> List(BitPat(VAluOpcode.vredxor), uSew, uSew, uSew),
 
-  val out = LookupTree(io.in.fuOpType, List(
-    // --------------------- opcode     srcType2 1 vdType
-    VipuType.vredsum_vs   -> Cat(VAluOpcode.vredsum, uSew, uSew, uSew).asUInt,
-    VipuType.vredmaxu_vs  -> Cat(VAluOpcode.vredmax, uSew, uSew, uSew).asUInt,
-    VipuType.vredmax_vs   -> Cat(VAluOpcode.vredmax, sSew, sSew, sSew).asUInt,
-    VipuType.vredminu_vs  -> Cat(VAluOpcode.vredmin, uSew, uSew, uSew).asUInt,
-    VipuType.vredmin_vs   -> Cat(VAluOpcode.vredmin, sSew, sSew, sSew).asUInt,
-    VipuType.vredand_vs   -> Cat(VAluOpcode.vredand, uSew, uSew, uSew).asUInt,
-    VipuType.vredor_vs    -> Cat(VAluOpcode.vredor, uSew, uSew, uSew).asUInt,
-    VipuType.vredxor_vs   -> Cat(VAluOpcode.vredxor, uSew, uSew, uSew).asUInt,
+    BitPat(VipuType.vwredsumu_vs) -> List(BitPat(VAluOpcode.vredsum), uSew, uSew, uSew2),
+    BitPat(VipuType.vwredsum_vs)  -> List(BitPat(VAluOpcode.vredsum), sSew, sSew, sSew2),
 
-    VipuType.vwredsumu_vs -> Cat(VAluOpcode.vredsum, uSew, uSew, uSew2).asUInt,
-    VipuType.vwredsum_vs  -> Cat(VAluOpcode.vredsum, sSew, sSew, sSew2).asUInt,
+    BitPat(VipuType.vcpop_m)      -> List(BitPat(VAluOpcode.vcpop), mask, mask, uSew),
+    BitPat(VipuType.vfirst_m)     -> List(BitPat(VAluOpcode.vfirst), mask, mask, uSew),
+    BitPat(VipuType.vmsbf_m)      -> List(BitPat(VAluOpcode.vmsbf), mask, mask, mask),
+    BitPat(VipuType.vmsif_m)      -> List(BitPat(VAluOpcode.vmsif), mask, mask, mask),
+    BitPat(VipuType.vmsof_m)      -> List(BitPat(VAluOpcode.vmsof), mask, mask, mask),
 
-    VipuType.vcpop_m      -> Cat(VAluOpcode.vcpop, mask, mask, uSew).asUInt,
-    VipuType.vfirst_m     -> Cat(VAluOpcode.vfirst, mask, mask, uSew).asUInt,
-    VipuType.vmsbf_m      -> Cat(VAluOpcode.vmsbf, mask, mask, mask).asUInt,
-    VipuType.vmsif_m      -> Cat(VAluOpcode.vmsif, mask, mask, mask).asUInt,
-    VipuType.vmsof_m      -> Cat(VAluOpcode.vmsof, mask, mask, mask).asUInt,
-
-    VipuType.viota_m      -> Cat(VAluOpcode.viota, uSew, uSew, uSew).asUInt,
-    VipuType.vid_v        -> Cat(VAluOpcode.vid, uSew, uSew, uSew).asUInt,
-    VipuType.vmv_x_s      -> Cat(VAluOpcode.vmvxs, uSew, uSew, uSew).asUInt
-
-   )).asTypeOf(new VIAluDecodeResultBundle)
-
-   io.out <> out
+    BitPat(VipuType.viota_m)      -> List(BitPat(VAluOpcode.viota), uSew, uSew, uSew),
+    BitPat(VipuType.vid_v)        -> List(BitPat(VAluOpcode.vid), uSew, uSew, uSew),
+    BitPat(VipuType.vmv_x_s)      -> List(BitPat(VAluOpcode.vmvxs), uSew, uSew, uSew)
+  )
+  val decoder = DecodeLogic(io.in.fuOpType, default, decodeTable)
+  val outsig = Seq(io.out.opcode, io.out.srcType2, io.out.srcType1, io.out.vdType)
+  outsig.zip(decoder).foreach({case (s, d) => s := d})
 }
 
 class VIPU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) {
@@ -99,8 +94,8 @@ class VIPU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   private val dataWidthOfDataModule = 64
   private val numVecModule = dataWidth / dataWidthOfDataModule
   private val needClearVs1 = (VipuType.vcpop_m === io.in.bits.ctrl.fuOpType && vuopIdx === 0.U) ||
-                             (VipuType.viota_m === io.in.bits.ctrl.fuOpType && vuopIdx(log2Up(MaxUopSize)-1,1) === 0.U) ||
-                             (VipuType.vid_v   === io.in.bits.ctrl.fuOpType && vuopIdx(log2Up(MaxUopSize)-1,1) === 0.U)    // dirty code TODO:  inset into IAlu
+    (VipuType.viota_m === io.in.bits.ctrl.fuOpType && vuopIdx(log2Up(MaxUopSize)-1,1) === 0.U) ||
+    (VipuType.vid_v   === io.in.bits.ctrl.fuOpType && vuopIdx(log2Up(MaxUopSize)-1,1) === 0.U)    // dirty code TODO:  inset into IAlu
   private val lmul = MuxLookup(vlmul, 1.U(4.W))(Array(
     "b001".U -> 2.U,
     "b010".U -> 4.U,
@@ -111,17 +106,24 @@ class VIPU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   // modules
   private val decoder = Module(new VIAluDecoder)
   private val vialu   = Module(new VIAlu)
-  
+
   /**
-    * [[decoder]]'s in connection
-    */
+   * [[decoder]]'s in connection
+   */
   decoder.io.in.fuOpType := fuOpType
   decoder.io.in.sew      := vsew(1,0)
 
+  val typeop2 = decoder.io.out.srcType2
+  val typeop1 = decoder.io.out.srcType1
+  val typevd = decoder.io.out.vdType
+  val sew = decoder.io.in.sew
 
+  val srcTypeVs2 = Cat(0.U | typeop2(2) , typeop2(1) | typeop2(2) , Fill(2,typeop2(2)) | (sew + typeop2(0)) )
+  val srcTypeVs1 = Cat(0.U | typeop1(2) , typeop1(1) | typeop1(2) , Fill(2,typeop1(2)) | (sew + typeop1(0)) )
+  val vdType =  Cat(0.U | typevd(2) , typevd(1) | typevd(2) , Fill(2,typevd(2)) | (sew + typevd(0)))
   /**
-    * [[vialu]]'s in connection
-    */
+   * [[vialu]]'s in connection
+   */
   vialu.io match {
     case subIO =>
       subIO.in.valid            := io.in.valid
@@ -134,12 +136,12 @@ class VIPU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
       subIO.in.bits.info.vstart := vstart
       subIO.in.bits.info.uopIdx := vuopIdx
       subIO.in.bits.info.vxrm   := vxrm
-      subIO.in.bits.srcType(0)  := decoder.io.out.srcType2
-      subIO.in.bits.srcType(1)  := decoder.io.out.srcType1
-      subIO.in.bits.vdType      := decoder.io.out.vdType
+      subIO.in.bits.srcType(0)  := srcTypeVs2
+      subIO.in.bits.srcType(1)  := srcTypeVs1
+      subIO.in.bits.vdType      := vdType
       subIO.in.bits.vs1         := Mux1H(Seq(needClearVs1 -> 0.U,
-                                             needShiftVs1 -> ZeroExt(vs1(127,64), 128),
-                                          ((!needClearVs1) && (!needShiftVs1)) -> vs1))
+        needShiftVs1 -> ZeroExt(vs1(127,64), 128),
+        ((!needClearVs1) && (!needShiftVs1)) -> vs1))
       subIO.in.bits.vs2         := vs2
       subIO.in.bits.old_vd      := oldVd
       subIO.in.bits.mask        := srcMask
