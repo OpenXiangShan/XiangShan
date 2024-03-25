@@ -286,9 +286,8 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     deqEntries(i).bits := Mux1H(UIntToOH(deqBankPtrVecNext(i).value), readStage1)
   }
   // Pointer maintenance
-  deqBankPtrVecNext := Mux(decodeCanAccept, VecInit(deqBankPtrVec.map(_ + numDeq)), deqBankPtrVec)
-  deqPtrNext := Mux(decodeCanAccept, deqPtr + numDeq, deqPtr)
-  deqPtr := Mux(decodeCanAccept, deqPtr + numDeq, deqPtr)
+  deqBankPtrVecNext := VecInit(deqBankPtrVec.map(_ + numDeq))
+  deqPtrNext := deqPtr + numDeq
   deqInBankPtrNext.zip(deqInBankPtr).zipWithIndex.foreach {
     case ((ptrNext, ptr), idx) => {
       // validVec[k] == bankValid[deqBankPtr + k]
