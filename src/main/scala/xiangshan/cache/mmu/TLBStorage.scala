@@ -107,8 +107,7 @@ class TLBFA(
     val access = io.access(i)
 
     val vpn = req.bits.vpn
-    val vpn_reg = RegEnable(vpn, req.fire())
-    val vpn_gen_ppn = if(saveLevel) vpn else vpn_reg
+    val vpn_reg = RegEnable(vpn, req.fire)
     val hasS2xlate = req.bits.s2xlate =/= noS2xlate
     val OnlyS2 = req.bits.s2xlate === onlyStage2
     val OnlyS1 = req.bits.s2xlate === onlyStage1
@@ -133,11 +132,15 @@ class TLBFA(
       for (d <- 0 until nDups) {
         resp.bits.ppn(d) := RegEnable(entries(0).genPPN(saveLevel, req.valid)(vpn), req.fire)
         resp.bits.perm(d) := RegEnable(entries(0).perm, req.fire)
+        resp.bits.g_perm(d) := RegEnable(entries(0).g_perm, req.fire)
+        resp.bits.s2xlate(d) := RegEnable(entries(0).s2xlate, req.fire)
       }
     } else {
       for (d <- 0 until nDups) {
         resp.bits.ppn(d) := RegEnable(ParallelMux(hitVec zip entries.map(_.genPPN(saveLevel, req.valid)(vpn))), req.fire)
         resp.bits.perm(d) := RegEnable(ParallelMux(hitVec zip entries.map(_.perm)), req.fire)
+        resp.bits.g_perm(d) := RegEnable(ParallelMux(hitVec zip entries.map(_.g_perm)), req.fire)
+        resp.bits.s2xlate(d) := RegEnable(ParallelMux(hitVec zip entries.map(_.s2xlate)), req.fire)
       }
     }
 
@@ -376,6 +379,8 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
       rp.bits.perm(d).x := p.bits.perm(d).x
       rp.bits.perm(d).w := p.bits.perm(d).w
       rp.bits.perm(d).r := p.bits.perm(d).r
+      rp.bits.s2xlate(d) := p.bits.s2xlate(d)
+      rp.bits.g_perm(d) := p.bits.g_perm(d)
     }
   }
 

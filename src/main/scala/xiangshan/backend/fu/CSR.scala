@@ -482,8 +482,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     GenMask(35, 32)       | // SXL and UXL cannot be changed
     GenMask(31, 23)       | // WPRI
     GenMask(16, 15)       | // XS is read-only
-    GenMask(10, 9)        | // WPRI
-    GenMask(6)            | // WPRI
+    GenMask(10, 9)        | // VS, not supported yet
+    GenMask(6)            | // UBE, always little-endian (0)
     GenMask(2)              // WPRI
   ), 64)).asUInt
   val mstatusMask = (~ZeroExt((
@@ -495,7 +495,9 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     GenMask(31, 23)       | // WPRI
     GenMask(10, 9)        | // WPRI
     GenMask(6)            | // WPRI
-    GenMask(2)              // WPRI
+    GenMask(4)            | // WPRI
+    GenMask(2)            | // WPRI
+    GenMask(0)              // WPRI
   ), 64)).asUInt
 
   val medeleg = RegInit(UInt(XLEN.W), 0.U)
@@ -859,8 +861,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Mstatus, mstatus, mstatusWMask, mstatusUpdateSideEffect),
     MaskedRegMap(Misa, misa, 0.U, MaskedRegMap.Unwritable), // now whole misa is unchangeable
     MaskedRegMap(Medeleg, medeleg, medelegWMask),
-    MaskedRegMap(Mideleg, mideleg, midelegWMask, MaskedRegMap.NoSideEffect),
-    MaskedRegMap(Mie, mie, mieWMask, MaskedRegMap.NoSideEffect),
+    MaskedRegMap(Mideleg, mideleg, midelegWMask),
+    MaskedRegMap(Mie, mie, mieWMask),
     MaskedRegMap(Mtvec, mtvec, mtvecMask, MaskedRegMap.NoSideEffect, mtvecMask),
     MaskedRegMap(Mcounteren, mcounteren, mcounterenMask),
 

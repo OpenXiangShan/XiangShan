@@ -362,6 +362,7 @@ class BackendImp(outer: Backend)(implicit p: Parameters) extends LazyModuleImp(o
   csrioIn.interrupt <> ctrlBlock.io.robio.toCSR.intrBitSet
   csrioIn.wfi_event <> ctrlBlock.io.robio.toCSR.wfiEvent
   csrioIn.memExceptionVAddr <> mem.lsqio.exceptionAddr.vaddr
+  csrioIn.memExceptionGPAddr <> mem.lsqio.exceptionAddr.gpaddr
 
   csrioIn.externalInterrupt := io.externalInterrupt
 

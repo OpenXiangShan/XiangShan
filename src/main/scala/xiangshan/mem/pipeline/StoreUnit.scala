@@ -86,15 +86,12 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
     Mux(imm12(11), s0_in.src(0)(VAddrBits-1, 12)+SignExt(1.U, VAddrBits-12), s0_in.src(0)(VAddrBits-1, 12)),
   )
   val s0_saddr = Cat(saddr_hi, saddr_lo(11,0))
-  val isHsv = WireInit(LSUOpType.isHsv(io.in.bits.uop.ctrl.fuOpType))
   val s0_vaddr = Mux(s0_use_flow_rs, s0_saddr, io.prefetch_req.bits.vaddr)
   val s0_mask  = Mux(s0_use_flow_rs, genVWmask(s0_saddr, s0_in.uop.ctrl.fuOpType(1,0)), 3.U)
 
   io.tlb.req.valid                   := s0_valid
   io.tlb.req.bits.vaddr              := s0_vaddr
   io.tlb.req.bits.cmd                := TlbCmd.write
-  io.dtlbReq.bits.hyperinst := isHsv
-  io.dtlbReq.bits.hlvx := false.B
   io.tlb.req.bits.size               := s0_size
   io.tlb.req.bits.kill               := false.B
   io.tlb.req.bits.memidx.is_ld       := false.B
@@ -118,8 +115,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   io.dcache.req.bits.cmd           := MemoryOpConstants.M_PFW
   io.dcache.req.bits.vaddr         := s0_vaddr
   io.dcache.req.bits.instrtype     := s0_instr_type
-  io.tlb.req.bits.hyperinst    := LSUOpType.isHsv(s0_in.uop.ctrl.fuOpType)
-  io.tlb.req.bits.hlvx         := false.B
 
   s0_out              := DontCare
   s0_out.vaddr        := s0_vaddr

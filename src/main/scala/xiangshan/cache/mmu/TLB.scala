@@ -450,7 +450,6 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
         difftest.valid := false.B
       }
       difftest.index := TLBDiffId(p(XSCoreParamsKey).HartId).U
-      difftest.satp := io.csr.satp
       difftest.vpn := RegNext(get_pn(req_in(i).bits.vaddr))
       difftest.ppn := get_pn(io.requestor(i).resp.bits.paddr(0))
       difftest.satp := Cat(io.csr.satp.mode, io.csr.satp.asid, io.csr.satp.ppn)

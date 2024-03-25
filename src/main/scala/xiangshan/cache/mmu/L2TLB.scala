@@ -424,14 +424,13 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   if (env.EnableDifftest) {
     for (i <- 0 until PtwWidth) {
       val difftest = DifftestModule(new DiffL2TLBEvent)
-      difftest.clock := clock
-      difftest.coreid := p(XSCoreParamsKey).HartId.asUInt
+      difftest.coreid := io.hartId
       difftest.valid := io.tlb(i).resp.fire && !io.tlb(i).resp.bits.s1.af && !io.tlb(i).resp.bits.s2.gaf
       difftest.index := i.U
       difftest.vpn := Cat(io.tlb(i).resp.bits.s1.entry.tag, 0.U(sectortlbwidth.W))
       for (j <- 0 until tlbcontiguous) {
-        difftest.ppn(j) := Cat(io.tlb(i).resp.bits.entry.ppn, io.tlb(i).resp.bits.ppn_low(j))
-        difftest.valididx(j) := io.tlb(i).resp.bits.valididx(j)
+        difftest.ppn(j) := Cat(io.tlb(i).resp.bits.s1.entry.ppn, io.tlb(i).resp.bits.s1.ppn_low(j))
+        difftest.valididx(j) := io.tlb(i).resp.bits.s1.valididx(j)
         difftest.pteidx(j) := io.tlb(i).resp.bits.s1.pteidx(j)
       }
       difftest.perm := io.tlb(i).resp.bits.s1.entry.perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt

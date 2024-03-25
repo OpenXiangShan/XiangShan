@@ -97,6 +97,7 @@ trait HasTlbConst extends HasXSParameter {
   val loadfiltersize = 16
   val storefiltersize = 8
   val prefetchfiltersize = 8
+
   val sramSinglePort = true
 
   val timeOutThreshold = 10000

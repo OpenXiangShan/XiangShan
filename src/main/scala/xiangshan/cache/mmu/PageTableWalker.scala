@@ -596,7 +596,6 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       }
     }
   }
-
   when (io.out.fire) {
     assert(state(mem_ptr) === state_mem_out)
     state(mem_ptr) := state_idle

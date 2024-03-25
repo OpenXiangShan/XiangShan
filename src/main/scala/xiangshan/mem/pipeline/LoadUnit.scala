@@ -199,6 +199,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val prf_rd        = Bool()
     val prf_wr        = Bool()
     val sched_idx     = UInt(log2Up(LoadQueueReplaySize+1).W)
+    val hlv           = Bool()
+    val hlvx          = Bool()
   }
   val s0_sel_src = Wire(new FlowSource)
 
@@ -310,8 +312,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // prefetch related ctrl signal
   io.canAcceptLowConfPrefetch  := s0_low_conf_prf_ready
   io.canAcceptHighConfPrefetch := s0_high_conf_prf_ready
-  val isHlv = WireInit(LSUOpType.isHlv(s0_uop.ctrl.fuOpType))
-  val isHlvx = WireInit(LSUOpType.isHlvx(s0_uop.ctrl.fuOpType))
 
   // query DTLB
   io.tlb.req.valid                   := s0_valid
@@ -320,6 +320,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                                          TlbCmd.read
                                        )
   io.tlb.req.bits.vaddr              := Mux(s0_hw_prf_select, io.prefetch_req.bits.paddr, s0_sel_src.vaddr)
+  io.tlb.req.bits.hyperinst          := s0_sel_src.hlv
+  io.tlb.req.bits.hlvx               := s0_sel_src.hlvx
   io.tlb.req.bits.size               := LSUOpType.size(s0_sel_src.uop.ctrl.fuOpType)
   io.tlb.req.bits.kill               := s0_kill
   io.tlb.req.bits.memidx.is_ld       := true.B
@@ -370,6 +372,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_rd        := src.uop.ctrl.fuOpType === LSUOpType.prefetch_r
     out.prf_wr        := src.uop.ctrl.fuOpType === LSUOpType.prefetch_w
     out.sched_idx     := src.schedIndex
+    out.hlv           := LSUOpType.isHlv(src.uop.ctrl.fuOpType)
+    out.hlvx          := LSUOpType.isHlvx(src.uop.ctrl.fuOpType)
     out
   }
 
@@ -391,9 +395,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_rd        := src.uop.ctrl.fuOpType === LSUOpType.prefetch_r
     out.prf_wr        := src.uop.ctrl.fuOpType === LSUOpType.prefetch_w
     out.sched_idx     := src.schedIndex
+    out.hlv           := LSUOpType.isHlv(src.uop.ctrl.fuOpType)
+    out.hlvx          := LSUOpType.isHlvx(src.uop.ctrl.fuOpType)
     out
-    s0_hlv           := LSUOpType.isHlv(src.uop.ctrl.fuOpType)
-    s0_hlvx          := LSUOpType.isHlvx(src.uop.ctrl.fuOpType)
   }
 
   def fromPrefetchSource(src: L1PrefetchReq): FlowSource = {
@@ -414,9 +418,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_rd        := !src.is_store
     out.prf_wr        := src.is_store
     out.sched_idx     := 0.U
+    out.hlv           := false.B
+    out.hlvx          := false.B
     out
-    s0_hlv           := false.B
-    s0_hlvx          := false.B
   }
 
   def fromIntIssueSource(src: ExuInput): FlowSource = {
@@ -437,9 +441,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_rd        := src.uop.ctrl.fuOpType === LSUOpType.prefetch_r
     out.prf_wr        := src.uop.ctrl.fuOpType === LSUOpType.prefetch_w
     out.sched_idx     := 0.U
+    out.hlv           := LSUOpType.isHlv(src.uop.ctrl.fuOpType)
+    out.hlvx          := LSUOpType.isHlvx(src.uop.ctrl.fuOpType)
     out
-    s0_hlv           := LSUOpType.isHlv(src.uop.ctrl.fuOpType)
-    s0_hlvx          := LSUOpType.isHlvx(src.uop.ctrl.fuOpType)
   }
 
   def fromVecIssueSource(): FlowSource = {
@@ -460,9 +464,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_rd        := false.B
     out.prf_wr        := false.B
     out.sched_idx     := 0.U
+    out.hlv           := false.B
+    out.hlvx          := false.B
     out
-    s0_hlv           := false.B
-    s0_hlvx          := false.B
   }
 
   def fromLoadToLoadSource(src: LoadToLoadIO): FlowSource = {
@@ -487,9 +491,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_rd             := false.B
     out.prf_wr             := false.B
     out.sched_idx          := 0.U
+    out.hlv                := LSUOpType.isHlv(out.uop.ctrl.fuOpType)
+    out.hlvx               := LSUOpType.isHlvx(out.uop.ctrl.fuOpType)
     out
-    s0_hlv                := LSUOpType.isHlv(s0_uop.ctrl.fuOpType)
-    s0_hlvx               := LSUOpType.isHlvx(s0_uop.ctrl.fuOpType)
   }
 
   // set default
@@ -631,7 +635,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.sbuffer.valid := s1_valid && !(s1_exception || s1_tlb_miss || s1_kill || s1_dly_err || s1_prf)
   io.sbuffer.vaddr := s1_vaddr
   io.sbuffer.paddr := s1_paddr_dup_lsu
-  io.sbuffer.gpaddr := s1_gpaddr_dup_lsu
   io.sbuffer.gpaddr:= s1_gpaddr_dup_lsu
   io.sbuffer.uop   := s1_in.uop
   io.sbuffer.sqIdx := s1_in.uop.sqIdx
@@ -641,7 +644,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.lsq.forward.valid     := s1_valid && !(s1_exception || s1_tlb_miss || s1_kill || s1_dly_err || s1_prf)
   io.lsq.forward.vaddr     := s1_vaddr
   io.lsq.forward.paddr     := s1_paddr_dup_lsu
-  io.lsq.gpaddr := s1_gpaddr_dup_lsu
+  io.lsq.forward.gpaddr    := s1_gpaddr_dup_lsu 
   io.lsq.forward.uop       := s1_in.uop
   io.lsq.forward.sqIdx     := s1_in.uop.sqIdx
   io.lsq.forward.sqIdxMask := 0.U
@@ -672,9 +675,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // current ori test will cause the case of ldest == 0, below will be modifeid in the future.
     // af & pf exception were modified
     s1_out.uop.cf.exceptionVec(loadPageFault)   := io.tlb.resp.bits.excp(0).pf.ld && !s1_tlb_miss
+    s1_out.uop.cf.exceptionVec(loadGuestPageFault)   := io.tlb.resp.bits.excp(0).gpf.ld && !s1_tlb_miss
     s1_out.uop.cf.exceptionVec(loadAccessFault) := io.tlb.resp.bits.excp(0).af.ld && !s1_tlb_miss
   } .otherwise {
     s1_out.uop.cf.exceptionVec(loadPageFault)      := false.B
+    s1_out.uop.cf.exceptionVec(loadGuestPageFault) := false.B
     s1_out.uop.cf.exceptionVec(loadAddrMisaligned) := false.B
     s1_out.uop.cf.exceptionVec(loadAccessFault)    := s1_dly_err
   }
