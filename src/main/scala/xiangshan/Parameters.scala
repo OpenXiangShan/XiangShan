@@ -140,13 +140,13 @@ case class XSCoreParameters
   IssQueSize: Int = 16,
   NRPhyRegs: Int = 192,
   VirtualLoadQueueSize: Int = 80,
-  LoadQueueRARSize: Int = 80,
-  LoadQueueRAWSize: Int = 64, // NOTE: make sure that LoadQueueRAWSize is power of 2.
+  LoadQueueRARSize: Int = 72,
+  LoadQueueRAWSize: Int = 56, // NOTE: make sure that LoadQueueRAWSize is power of 2.
   RollbackGroupSize: Int = 8,
-  LoadQueueReplaySize: Int = 72,
-  LoadUncacheBufferSize: Int = 20,
+  LoadQueueReplaySize: Int = 32, // NOTE: make sure that LoadQueueReplaySize is divided by LoadQueueNWriteBanks ,and LoadPipelineWidth
+  LoadUncacheBufferSize: Int = 4,
   LoadQueueNWriteBanks: Int = 8, // NOTE: make sure that LoadQueueRARSize/LoadQueueRAWSize is divided by LoadQueueNWriteBanks
-  StoreQueueSize: Int = 64,
+  StoreQueueSize: Int = 56,
   StoreQueueNWriteBanks: Int = 8, // NOTE: make sure that StoreQueueSize is divided by StoreQueueNWriteBanks
   StoreQueueForwardWithMask: Boolean = true,
   VlsQueueSize: Int = 8,
@@ -185,7 +185,7 @@ case class XSCoreParameters
   EnableLdVioCheckAfterReset: Boolean = true,
   EnableSoftPrefetchAfterReset: Boolean = true,
   EnableCacheErrorAfterReset: Boolean = true,
-  EnableAccurateLoadError: Boolean = true,
+  EnableAccurateLoadError: Boolean = false,
   EnableUncacheWriteOutstanding: Boolean = false,
   EnableStorePrefetchAtIssue: Boolean = false,
   EnableStorePrefetchAtCommit: Boolean = false,

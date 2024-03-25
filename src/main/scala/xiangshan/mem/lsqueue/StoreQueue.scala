@@ -52,8 +52,8 @@ class SqEnqIO(implicit p: Parameters) extends XSBundle {
 class DataBufferEntry (implicit p: Parameters)  extends DCacheBundle {
   val addr   = UInt(PAddrBits.W)
   val vaddr  = UInt(VAddrBits.W)
-  val data   = UInt(VLEN.W)
-  val mask   = UInt((VLEN/8).W)
+  val data   = UInt(XLEN.W)
+  val mask   = UInt((XLEN/8).W)
   val wline = Bool()
   val sqPtr  = new SqPtr
   val prefetch = Bool()
@@ -306,13 +306,13 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
       paddrModule.io.waddr(i) := stWbIndex
       paddrModule.io.wdata(i) := io.storeAddrIn(i).bits.paddr
-      paddrModule.io.wmask(i) := io.storeAddrIn(i).bits.mask
+      paddrModule.io.wmask(i) := Mux(io.storeAddrIn(i).bits.paddr(3), io.storeAddrIn(i).bits.mask(15,8), io.storeAddrIn(i).bits.mask(7,0))
       paddrModule.io.wlineflag(i) := io.storeAddrIn(i).bits.wlineflag
       paddrModule.io.wen(i) := true.B
 
       vaddrModule.io.waddr(i) := stWbIndex
       vaddrModule.io.wdata(i) := io.storeAddrIn(i).bits.vaddr
-      vaddrModule.io.wmask(i) := io.storeAddrIn(i).bits.mask
+      vaddrModule.io.wmask(i) := Mux(io.storeAddrIn(i).bits.paddr(3), io.storeAddrIn(i).bits.mask(15,8), io.storeAddrIn(i).bits.mask(7,0))
       vaddrModule.io.wlineflag(i) := io.storeAddrIn(i).bits.wlineflag
       vaddrModule.io.wen(i) := true.B
 
@@ -391,7 +391,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     when (io.storeMaskIn(i).fire) {
       // send data write req to data module
       dataModule.io.mask.waddr(i) := io.storeMaskIn(i).bits.sqIdx.value
-      dataModule.io.mask.wdata(i) := io.storeMaskIn(i).bits.mask
+      dataModule.io.mask.wdata(i) := io.storeMaskIn(i).bits.mask(7,0) | io.storeMaskIn(i).bits.mask(15,8)
       dataModule.io.mask.wen(i) := true.B
     }
   }
@@ -438,12 +438,12 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     dataModule.io.needForward(i)(0) := canForward1 & vaddrModule.io.forwardMmask(i).asUInt
     dataModule.io.needForward(i)(1) := canForward2 & vaddrModule.io.forwardMmask(i).asUInt
 
+    val forward_hi = RegNext(io.forward(i).vaddr)
+
     vaddrModule.io.forwardMdata(i) := io.forward(i).vaddr
-    vaddrModule.io.forwardDataMask(i) := io.forward(i).mask
+    vaddrModule.io.forwardDataMask(i) := Mux(io.forward(i).vaddr(3), io.forward(i).mask(15,8), io.forward(i).mask(7,0))
     paddrModule.io.forwardMdata(i) := io.forward(i).paddr
-    paddrModule.io.forwardDataMask(i) := io.forward(i).mask
-
-
+    paddrModule.io.forwardDataMask(i) := Mux(io.forward(i).vaddr(3), io.forward(i).mask(15,8), io.forward(i).mask(7,0))
     // vaddr cam result does not equal to paddr cam result
     // replay needed
     // val vpmaskNotEqual = ((paddrModule.io.forwardMmask(i).asUInt ^ vaddrModule.io.forwardMmask(i).asUInt) & needForward) =/= 0.U
@@ -463,18 +463,34 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     }
     XSPerfAccumulate("vaddr_match_failed", vpmaskNotEqual)
     XSPerfAccumulate("vaddr_match_really_failed", vaddrMatchFailed)
+   when(forward_hi(3).asBool){
+    for(j <- 0 until VLEN/16){
+      io.forward(i).forwardMaskFast(j) := false.B
+      io.forward(i).forwardMask(j) := false.B
+      io.forward(i).forwardData(j) := 0.U(8.W)
 
-    // Fast forward mask will be generated immediately (load_s1)
-    io.forward(i).forwardMaskFast := dataModule.io.forwardMaskFast(i)
+      io.forward(i).forwardMaskFast(j+8) := dataModule.io.forwardMaskFast(i)(j)
+      io.forward(i).forwardMask(j+8) := dataModule.io.forwardMask(i)(j)
+      io.forward(i).forwardData(j+8) := dataModule.io.forwardData(i)(j)
+    }
+  }.otherwise{
+      for(j <- 0 until VLEN/16){
+       io.forward(i).forwardMaskFast(j) := dataModule.io.forwardMaskFast(i)(j) 
+       io.forward(i).forwardMask(j) := dataModule.io.forwardMask(i)(j)
+       io.forward(i).forwardData(j) := dataModule.io.forwardData(i)(j)
 
-    // Forward result will be generated 1 cycle later (load_s2)
-    io.forward(i).forwardMask := dataModule.io.forwardMask(i)
-    io.forward(i).forwardData := dataModule.io.forwardData(i)
+       io.forward(i).forwardMaskFast(j+8) := false.B
+       io.forward(i).forwardMask(j+8) := false.B
+       io.forward(i).forwardData(j+8) := 0.U(8.W)
+      }
+    }
+
+    // // Forward result will be generated 1 cycle later (load_s2)
     // If addr match, data not ready, mark it as dataInvalid
     // load_s1: generate dataInvalid in load_s1 to set fastUop
     val dataInvalidMask1 = (addrValidVec.asUInt & ~dataValidVec.asUInt & vaddrModule.io.forwardMmask(i).asUInt & forwardMask1.asUInt)
     val dataInvalidMask2 = (addrValidVec.asUInt & ~dataValidVec.asUInt & vaddrModule.io.forwardMmask(i).asUInt & forwardMask2.asUInt)
-    val dataInvalidMask = dataInvalidMask1 | dataInvalidMask2
+    val dataInvalidMask = dataInvalidMask1 | dataInvalidMask2 
     io.forward(i).dataInvalidFast := dataInvalidMask.orR
 
     // make chisel happy
@@ -621,8 +637,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   io.uncache.req.bits := DontCare
   io.uncache.req.bits.cmd  := MemoryOpConstants.M_XWR
   io.uncache.req.bits.addr := paddrModule.io.rdata(0) // data(deqPtr) -> rdata(0)
-  io.uncache.req.bits.data := shiftDataToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).data)
-  io.uncache.req.bits.mask := shiftMaskToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).mask)
+  io.uncache.req.bits.data := dataModule.io.rdata(0).data
+  io.uncache.req.bits.mask := dataModule.io.rdata(0).mask
 
   // CBO op type check can be delayed for 1 cycle,
   // as uncache op will not start in s_idle
@@ -657,7 +673,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   io.mmioStout.valid := uncacheState === s_wb
   io.mmioStout.bits.uop := uop(deqPtr)
   io.mmioStout.bits.uop.sqIdx := deqPtrExt(0)
-  io.mmioStout.bits.data := shiftDataToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).data) // dataModule.io.rdata.read(deqPtr)
+  io.mmioStout.bits.data := dataModule.io.rdata(0).data // dataModule.io.rdata.read(deqPtr)
   io.mmioStout.bits.redirectValid := false.B
   io.mmioStout.bits.redirect := DontCare
   io.mmioStout.bits.debug.isMMIO := true.B
@@ -726,8 +742,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     io.sbuffer(i).bits.cmd   := MemoryOpConstants.M_XWR
     io.sbuffer(i).bits.addr  := dataBuffer.io.deq(i).bits.addr
     io.sbuffer(i).bits.vaddr := dataBuffer.io.deq(i).bits.vaddr
-    io.sbuffer(i).bits.data  := dataBuffer.io.deq(i).bits.data
-    io.sbuffer(i).bits.mask  := dataBuffer.io.deq(i).bits.mask
+    io.sbuffer(i).bits.data  := Mux(dataBuffer.io.deq(i).bits.vaddr(3), (dataBuffer.io.deq(i).bits.data << 64), dataBuffer.io.deq(i).bits.data)
+    io.sbuffer(i).bits.mask  := Mux(dataBuffer.io.deq(i).bits.vaddr(3), (dataBuffer.io.deq(i).bits.mask << 8), dataBuffer.io.deq(i).bits.mask)
     io.sbuffer(i).bits.wline := dataBuffer.io.deq(i).bits.wline
     io.sbuffer(i).bits.prefetch := dataBuffer.io.deq(i).bits.prefetch
 
@@ -760,7 +776,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     for (i <- 0 until EnsbufferWidth) {
       val storeCommit = io.sbuffer(i).fire
       val waddr = ZeroExt(Cat(io.sbuffer(i).bits.addr(PAddrBits - 1, 3), 0.U(3.W)), 64)
-      val sbufferMask = shiftMaskToLow(io.sbuffer(i).bits.addr, io.sbuffer(i).bits.mask)
+      val sbufferMask = shiftMaskToLow(io.sbuffer(i).bits.addr, io.sbuffer(i).bits.mask) 
       val sbufferData = shiftDataToLow(io.sbuffer(i).bits.addr, io.sbuffer(i).bits.data)
       val wmask = sbufferMask
       val wdata = sbufferData & MaskExpand(sbufferMask)

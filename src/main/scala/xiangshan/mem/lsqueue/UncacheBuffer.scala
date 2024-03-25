@@ -121,7 +121,7 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
   io.uncache.req.bits.cmd  := MemoryOpConstants.M_XRD
   io.uncache.req.bits.data := DontCare
   io.uncache.req.bits.addr := req.paddr
-  io.uncache.req.bits.mask := Mux(req.paddr(3), req.mask(15, 8), req.mask(7, 0))
+  io.uncache.req.bits.mask := Mux(req.paddr(3), req.mask(15,8), req.mask(7, 0))
   io.uncache.req.bits.id   := io.id
   io.uncache.req.bits.instrtype := DontCare
   io.uncache.req.bits.replayCarry := DontCare

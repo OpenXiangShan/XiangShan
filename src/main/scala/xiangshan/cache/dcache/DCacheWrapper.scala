@@ -54,7 +54,9 @@ case class DCacheParameters
   blockBytes: Int = 64,
   nMaxPrefetchEntry: Int = 1,
   alwaysReleaseData: Boolean = false,
-  isKeywordBitsOpt: Option[Boolean] = Some(true)
+  isKeywordBitsOpt: Option[Boolean] = Some(true),
+  enableDataEcc: Boolean = false,
+  enableTagEcc: Boolean = false
 ) extends L1CacheParameters {
   // if sets * blockBytes > 4KB(page size),
   // cache alias will happen,
@@ -127,6 +129,8 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
   require(cfg.nMissEntries < cfg.nReleaseEntries)
   val nEntries = cfg.nMissEntries + cfg.nReleaseEntries
   val releaseIdBase = cfg.nMissEntries
+  val EnableDataEcc = cacheParams.enableDataEcc
+  val EnableTagEcc = cacheParams.enableTagEcc
 
   // banked dcache support
   val DCacheSetDiv = 1
@@ -475,14 +479,14 @@ class DCacheLineResp(implicit p: Parameters) extends DCacheBundle
 class Refill(implicit p: Parameters) extends DCacheBundle
 {
   val addr   = UInt(PAddrBits.W)
-  val data   = UInt(l1BusDataWidth.W)
+  // val data   = UInt(l1BusDataWidth.W)
   val error  = Bool() // refilled data has been corrupted
   // for debug usage
   val data_raw = UInt((cfg.blockBytes * 8).W)
   val hasdata = Bool()
   val refill_done = Bool()
   def dump() = {
-    XSDebug("Refill: addr: %x data: %x\n", addr, data)
+    XSDebug("Refill: addr: %x data: %x\n", addr, data_raw)
   }
   val id     = UInt(log2Up(cfg.nMissEntries).W)
 }
@@ -736,7 +740,7 @@ class StorePrefetchReq(implicit p: Parameters) extends DCacheBundle {
 class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
   val load  = Vec(LoadPipelineWidth, Flipped(new DCacheLoadIO)) // for speculative load
   val sta   = Vec(StorePipelineWidth, Flipped(new DCacheStoreIO)) // for non-blocking store
-  val lsq = ValidIO(new Refill)  // refill to load queue, wake up load misses
+  //val lsq = ValidIO(new Refill)  // refill to load queue, wake up load misses
   val tl_d_channel = Output(new DcacheToLduForwardIO)
   val store = new DCacheToSbufferIO // for sbuffer
   val atomics  = Flipped(new AtomicWordIO)  // atomics reqs
@@ -1202,7 +1206,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   (0 until LoadPipelineWidth).map(i => io.lsu.forward_mshr(i).connect(missQueue.io.forward(i)))
 
   // refill to load queue
-  io.lsu.lsq <> missQueue.io.refill_to_ldq
+ // io.lsu.lsq <> missQueue.io.refill_to_ldq
 
   // tilelink stuff
   bus.a <> missQueue.io.mem_acquire

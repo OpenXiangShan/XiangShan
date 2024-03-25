@@ -119,7 +119,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val ldout = Vec(LoadPipelineWidth, DecoupledIO(new ExuOutput))
     val ld_raw_data = Vec(LoadPipelineWidth, Output(new LoadDataFromLQBundle))
     val replay = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))
-    val refill = Flipped(ValidIO(new Refill))
+  //  val refill = Flipped(ValidIO(new Refill))
     val tl_d_channel  = Input(new DcacheToLduForwardIO)
     val release = Flipped(Valid(new Release))
     val nuke_rollback = Output(Valid(new Redirect))
@@ -144,7 +144,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val virtualLoadQueue = Module(new VirtualLoadQueue)  //  control state
   val exceptionBuffer = Module(new LqExceptionBuffer) // exception buffer
   val uncacheBuffer = Module(new UncacheBuffer) // uncache buffer
-
   /**
    * LoadQueueRAR
    */
@@ -202,6 +201,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   for ((buff, w) <- uncacheBuffer.io.req.zipWithIndex) {
     buff.valid := io.ldu.ldin(w).valid // from load_s3
     buff.bits := io.ldu.ldin(w).bits // from load_s3
+    buff.bits.uop.cf.trigger.backendHit.foreach(_ := false.B)
   }
 
 
@@ -218,7 +218,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueReplay.io.storeAddrIn      <> io.sta.storeAddrIn // from store_s1
   loadQueueReplay.io.storeDataIn      <> io.std.storeDataIn // from store_s0
   loadQueueReplay.io.replay           <> io.replay
-  loadQueueReplay.io.refill           <> io.refill
+  //loadQueueReplay.io.refill           <> io.refill
   loadQueueReplay.io.tl_d_channel     <> io.tl_d_channel
   loadQueueReplay.io.stAddrReadySqPtr <> io.sq.stAddrReadySqPtr
   loadQueueReplay.io.stAddrReadyVec   <> io.sq.stAddrReadyVec
@@ -235,6 +235,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
   loadQueueReplay.io.debugTopDown <> io.debugTopDown
 
+  for (w <- 0 until LoadPipelineWidth) {
+    loadQueueReplay.io.enq(w).bits.uop.cf.trigger.backendHit.foreach(_ := false.B)
+  }
   val full_mask = Cat(loadQueueRAR.io.lqFull, loadQueueRAW.io.lqFull, loadQueueReplay.io.lqFull)
   XSPerfAccumulate("full_mask_000", full_mask === 0.U)
   XSPerfAccumulate("full_mask_001", full_mask === 1.U)

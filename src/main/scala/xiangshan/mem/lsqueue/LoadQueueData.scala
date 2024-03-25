@@ -52,6 +52,7 @@ abstract class LqRawDataModule[T <: Data] (gen: T, numEntries: Int, numRead: Int
   require(numWBank >= 2, "write bank must be greater than or equal to two!")
   require(numWDelay >= 1, "write delay must be greater than or equal to one!")
   require(numCamPort >= 0, "camport must be greater than or equal to zero!")
+  require((numEntries % numWBank == 0), "numEntries must be divided by numWBank!")
 
   val numEntryPerBank = numEntries / numWBank
 
