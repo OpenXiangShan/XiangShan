@@ -48,6 +48,7 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
 
   val og0Resp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
   val og1Resp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
+  val og2Resp = OptionWrapper(params.inVfSchd, Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle))))
   val finalIssueResp = OptionWrapper(params.LdExuCnt > 0, Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle))))
   val memAddrIssueResp = OptionWrapper(params.LdExuCnt > 0, Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle))))
   val wbBusyTableRead = Input(params.genWbFuBusyTableReadBundle())
@@ -90,9 +91,9 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val allDeqFuCfgs  : Seq[FuConfig] = params.exuBlockParams.flatMap(_.fuConfigs)
   val fuCfgsCnt     : Map[FuConfig, Int] = allDeqFuCfgs.groupBy(x => x).map { case (cfg, cfgSeq) => (cfg, cfgSeq.length) }
   val commonFuCfgs  : Seq[FuConfig] = fuCfgsCnt.filter(_._2 > 1).keys.toSeq
-  val fuLatencyMaps : Seq[Map[FuType.OHType, Int]] = params.exuBlockParams.map(x => x.fuLatencyMap)
+  val wakeupFuLatencyMaps : Seq[Map[FuType.OHType, Int]] = params.exuBlockParams.map(x => x.wakeUpFuLatencyMap)
 
-  println(s"[IssueQueueImp] ${params.getIQName} fuLatencyMaps: ${fuLatencyMaps}")
+  println(s"[IssueQueueImp] ${params.getIQName} fuLatencyMaps: ${wakeupFuLatencyMaps}")
   println(s"[IssueQueueImp] ${params.getIQName} commonFuCfgs: ${commonFuCfgs.map(_.name)}")
   lazy val io = IO(new IssueQueueIO())
 
@@ -252,7 +253,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       enq.bits.status.blocked                                   := false.B
       enq.bits.status.issued                                    := false.B
       enq.bits.status.firstIssue                                := false.B
-      enq.bits.status.issueTimer                                := "b10".U
+      enq.bits.status.issueTimer                                := "b11".U
       enq.bits.status.deqPortIdx                                := 0.U
       enq.bits.imm.foreach(_                                    := s0_enqBits(enqIdx).imm)
       enq.bits.payload                                          := s0_enqBits(enqIdx)
@@ -262,6 +263,11 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     }
     entriesIO.og1Resp.zipWithIndex.foreach { case (og1Resp, i) =>
       og1Resp                                                   := io.og1Resp(i)
+    }
+    if (params.inVfSchd) {
+      entriesIO.og2Resp.get.zipWithIndex.foreach { case (og2Resp, i) =>
+        og2Resp                                                 := io.og2Resp.get(i)
+      }
     }
     if (params.isLdAddrIQ || params.isHyAddrIQ) {
       entriesIO.fromLoad.get.finalIssueResp.zipWithIndex.foreach { case (finalIssueResp, i) =>
@@ -700,7 +706,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   io.status.validCnt := PopCount(validVec)
 
   protected def getDeqLat(deqPortIdx: Int, fuType: UInt) : UInt = {
-    Mux1H(fuLatencyMaps(deqPortIdx) map { case (k, v) => (fuType(k.id), v.U) })
+    Mux1H(wakeupFuLatencyMaps(deqPortIdx) map { case (k, v) => (fuType(k.id), v.U) })
   }
 
   // issue perf counter
