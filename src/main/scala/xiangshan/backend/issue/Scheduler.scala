@@ -108,6 +108,7 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
   val toMem = if (params.isMemSchd) Some(new Bundle {
     val loadFastMatch = Output(Vec(params.LduCnt, new IssueQueueLoadBundle))
   }) else None
+  val fromOg2 = if(params.isVfSchd) Some(MixedVec(params.issueBlockParams.map(x => Flipped(x.genOG2RespBundle)))) else None
 }
 
 abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockParams, p: Parameters)
@@ -263,6 +264,11 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
         memAddrIssueResp := 0.U.asTypeOf(memAddrIssueResp)
       }
     })
+    if(params.isVfSchd) {
+      iq.io.og2Resp.get.zipWithIndex.foreach { case (og2Resp, exuIdx) =>
+        og2Resp := io.fromOg2.get(i)(exuIdx)
+      }
+    }
     iq.io.wbBusyTableRead := io.fromWbFuBusyTable.fuBusyTableRead(i)
     io.wbFuBusyTable(i) := iq.io.wbBusyTableWrite
   }

@@ -12,6 +12,7 @@ import xiangshan.backend.datapath.{WakeUpConfig, WakeUpSource}
 import xiangshan.backend.exu.{ExeUnit, ExeUnitParams}
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.SelImm
+import xiangshan.backend.issue.EntryBundles.EntryDeqRespBundle
 
 case class IssueBlockParams(
   // top down
@@ -331,6 +332,11 @@ case class IssueBlockParams(
   def genOGRespBundle(implicit p: Parameters) = {
     implicit val issueBlockParams = this
     MixedVec(exuBlockParams.map(_ => new OGRespBundle))
+  }
+
+  def genOG2RespBundle(implicit p: Parameters) = {
+    implicit val issueBlockParams = this
+    MixedVec(exuBlockParams.map(_ => new Valid(new EntryDeqRespBundle)))
   }
 
   def genWbFuBusyTableWriteBundle()(implicit p: Parameters) = {
