@@ -33,18 +33,18 @@ class MBufferBundle(implicit p: Parameters) extends VLSUBundle{
   val exceptionVec     = ExceptionVec()
   val uop              = new DynInst
   val vdOffset         = UInt(vOffsetBits.W)
-  
+
   def allReady(): Bool = (flowNum === 0.U)
 }
 
 abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUModule{
-  val io = (new VMergeBufferIO(isVStore))
+  val io = IO(new VMergeBufferIO(isVStore))
 
   def EnqConnect(source: MergeBufferReq, sink: MBufferBundle) = {
     sink.data         := source.data
     sink.mask         := source.mask
     sink.flowNum      := source.flowNum
-    sink.exceptionVec := 0.U
+    sink.exceptionVec := 0.U.asTypeOf(ExceptionVec())
     sink.uop          := source.uop
     // sink.vdOffset     := source.vdOffset
   }
@@ -57,7 +57,9 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
   def ToLsqConnect(source: MBufferBundle, sink: FeedbackToLsqIO) = {
     sink.robidx                             := source.uop.robIdx
     sink.uopidx                             := source.uop.uopIdx
-    sink.feedback(VecFeedbacks.COMMIT)      := true.B
+    sink.feedback(VecFeedbacks.COMMIT)      := true.B // TODO
+    sink.feedback(VecFeedbacks.FLUSH)       := false.B
+    sink.feedback(VecFeedbacks.LAST)        := true.B
   }
   // freeliset: store valid entries index.
   // +---+---+--------------+-----+-----+
@@ -74,7 +76,8 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
   val freeMaskVec  = WireInit(VecInit(Seq.fill(uopSize)(false.B)))
   val uopFinish    = RegInit(VecInit(Seq.fill(uopSize)(false.B)))
   // enq, from splitPipeline
-  // val allowEnqueue = 
+  // val allowEnqueue =
+  val cancelEnq_test0 = io.fromSplit(0).req.bits.uop.robIdx.needFlush(io.redirect)
   val cancelEnq    = io.fromSplit.map(_.req.bits.uop.robIdx.needFlush(io.redirect))
   val canEnqueue   = io.fromSplit.map(_.req.valid)
   val needEnqueue  = (0 until enqWidth).map{i =>
@@ -95,14 +98,14 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
       freeList.io.doAllocate(i) := true.B
       // enqueue
       allocated(enqIndex)       := true.B
-      uopFinish(enqIndex)       := false.B  
+      uopFinish(enqIndex)       := false.B
       EnqConnect(enq.req.bits, entries(enqIndex))// initial entry
 
       enq.resp.bits.mBIndex := enqIndex
     }
   }
 
-  //redirect 
+  //redirect
   for (i <- 0 until uopSize){
     needCancel(i) := entries(i).uop.robIdx.needFlush(io.redirect) && allocated(i)
     when (needCancel(i)) {
@@ -141,33 +144,33 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
       //writeback connect
       DeqConnect(selEntry, port.bits)
       port.valid := true.B
-      //to lsq 
+      //to lsq
       ToLsqConnect(selEntry, lsqport.bits) // when uopwriteback, free MBuffer entry, write to lsq
     }
    }
 }
 
 class VLMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore=false){
-  override val uopSize = VlMergeBufferSize
-  override val freeList = Module(new FreeList(
+  override lazy val uopSize = VlMergeBufferSize
+  println(s"VLMergeBuffer Size: ${VlMergeBufferSize}")
+  override lazy val freeList = Module(new FreeList(
     size = uopSize,
     allocWidth = LoadPipelineWidth,
     freeWidth = deqWidth,
     enablePreAlloc = false,
     moduleName = "VLoad MergeBuffer freelist"
   ))
-  private val wbData = Reg(Vec(uopSize, Vec(2, UInt(VLEN.W))))
 
   //merge data
-  val flowWbElemIdx = Wire(Vec(VecLoadPipelineWidth, UInt(elemIdxBits.W)))
-  val flowWbElemIdxInVd = Wire(Vec(VecLoadPipelineWidth, UInt(elemIdxBits.W)))
+  val flowWbElemIdx = Wire(Vec(LoadPipelineWidth, UInt(elemIdxBits.W)))
+  val flowWbElemIdxInVd = Wire(Vec(LoadPipelineWidth, UInt(elemIdxBits.W)))
 
   for((pipewb, i) <- io.fromPipeline.zipWithIndex){
     val wbIndex = pipewb.bits.mBIndex
     val alignedType = pipewb.bits.alignedType.get
-    val elemIdxInsideVd = pipewb.bits.vec.elemIdxInsideVd
-    flowWbElemIdx(i) := pipewb.bits.vec.elemIdx
-    flowWbElemIdxInVd(i) := elemIdxInsideVd
+    val elemIdxInsideVd = pipewb.bits.elemIdxInsideVd
+    flowWbElemIdx(i) := pipewb.bits.elemIdx.get
+    flowWbElemIdxInVd(i) := elemIdxInsideVd.get
     // handle the situation where multiple ports are going to write the same uop queue entry
     val mergedByPrevPort = (i != 0).B && Cat((0 until i).map(j =>
       io.fromPipeline(j).bits.mBIndex === pipewb.bits.mBIndex)).orR
@@ -179,22 +182,27 @@ class VLMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
     val mergedData = mergeDataWithElemIdx(
       oldData = entries(wbIndex).data,
       newData = io.fromPipeline.map(_.bits.vecdata.get),
-      alignedType = alignedType,
+      alignedType = alignedType(1,0),
       elemIdx = flowWbElemIdxInVd,
       valids = mergeExpPortVec
     )
+    val usMergeData = mergeDataByoffset(
+      oldData = entries(wbIndex).data,
+      newData = io.fromPipeline.map(_.bits.vecdata.get),
+      mask    = io.fromPipeline.map(_.bits.mask.get),
+      offset  = io.fromPipeline.map(_.bits.reg_offset.get),
+      valids  = mergeExpPortVec
+    )
     when(pipewb.valid && !mergedByPrevPort && alignedType =/= "b100".U){
-      entries(wbIndex) := mergedData
-    }
-    when(pipewb.valid && alignedType === "b100".U){
-      wbData(wbIndex)(elemIdxInsideVd) := pipewb.bits.vecdata.get
+      entries(wbIndex).data := Mux(alignedType(2), usMergeData, mergedData) // if aligned(2) == 1, is Unit-Stride inst
     }
   }
 }
 
 class VSMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore=true){
-  override val uopSize = VsMergeBufferSize
-  override val freeList = Module(new FreeList(
+  override lazy val uopSize = VsMergeBufferSize
+  println(s"VSMergeBuffer Size: ${VsMergeBufferSize}")
+  override lazy val freeList = Module(new FreeList(
     size = uopSize,
     allocWidth = StorePipelineWidth,
     freeWidth = deqWidth,

@@ -59,6 +59,8 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   val io = IO(new Bundle() {
     val hartId = Input(UInt(8.W))
     val brqRedirect = Flipped(ValidIO(new Redirect))
+    val stvecFeedback = Flipped(ValidIO(new FeedbackToLsqIO))
+    val ldvecFeedback = Flipped(ValidIO(new FeedbackToLsqIO))
     val enq = new LsqEnqIO
     val ldu = new Bundle() {
         val stld_nuke_query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO)) // from load_s2
@@ -69,11 +71,9 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
       val storeMaskIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreMaskBundle))) // from store_s0, store mask, send to sq from rs
       val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // from store_s1
       val storeAddrInRe = Vec(StorePipelineWidth, Input(new LsPipelineBundle())) // from store_s2
-      val vecStoreAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) //from store_s2
-      val vecStoreFlowAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // from vsFlowQueue last element issue
     }
     val std = new Bundle() {
-      val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new MemExuOutput))) // from store_s0, store data, send to sq from rs
+      val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new MemExuOutput(isVector = true)))) // from store_s0, store data, send to sq from rs
     }
     val ldout = Vec(LoadPipelineWidth, DecoupledIO(new MemExuOutput))
     val ld_raw_data = Vec(LoadPipelineWidth, Output(new LoadDataFromLQBundle))
@@ -89,6 +89,8 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val uncacheOutstanding = Input(Bool())
     val uncache = new UncacheWordIO
     val mmioStout = DecoupledIO(new MemExuOutput) // writeback uncached store
+    // TODO: implement vector store
+    val vecmmioStout = DecoupledIO(new MemExuOutput(isVector = true)) // vec writeback uncached store
     val sqEmpty = Output(Bool())
     val lq_rep_full = Output(Bool())
     val sqFull = Output(Bool())
@@ -108,11 +110,6 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val tlb_hint = Flipped(new TlbHintIO)
     val force_write = Output(Bool())
     val lqEmpty = Output(Bool())
-
-    // vector
-    val vecWriteback = Flipped(ValidIO(new MemExuOutput(isVector = true)))
-    val vecStoreRetire = Flipped(ValidIO(new SqPtr))
-    val vecMMIOReplay = Vec(VecLoadPipelineWidth, DecoupledIO(new LsPipelineBundle()))
 
     // top-down
     val debugTopDown = new LoadQueueTopDownIO
@@ -157,13 +154,14 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
 
   // store queue wiring
   storeQueue.io.brqRedirect <> io.brqRedirect
+  storeQueue.io.vecFeedback   <> io.stvecFeedback
   storeQueue.io.storeAddrIn <> io.sta.storeAddrIn // from store_s1
-  storeQueue.io.vecStoreAddrIn  <> io.sta.vecStoreFlowAddrIn // from VsFlowQueue inactivative element isuue
   storeQueue.io.storeAddrInRe <> io.sta.storeAddrInRe // from store_s2
   storeQueue.io.storeDataIn <> io.std.storeDataIn // from store_s0
   storeQueue.io.storeMaskIn <> io.sta.storeMaskIn // from store_s0
   storeQueue.io.sbuffer     <> io.sbuffer
   storeQueue.io.mmioStout   <> io.mmioStout
+  storeQueue.io.vecmmioStout <> io.vecmmioStout
   storeQueue.io.rob         <> io.rob
   storeQueue.io.exceptionAddr.isStore := DontCare
   storeQueue.io.sqCancelCnt <> io.sqCancelCnt
@@ -172,12 +170,12 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   storeQueue.io.sqFull      <> io.sqFull
   storeQueue.io.forward     <> io.forward // overlap forwardMask & forwardData, DO NOT CHANGE SEQUENCE
   storeQueue.io.force_write <> io.force_write
-  storeQueue.io.vecStoreRetire <> io.vecStoreRetire
 
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
 
   //  load queue wiring
   loadQueue.io.redirect            <> io.brqRedirect
+  loadQueue.io.vecFeedback           <> io.ldvecFeedback
   loadQueue.io.ldu                 <> io.ldu
   loadQueue.io.ldout               <> io.ldout
   loadQueue.io.ld_raw_data         <> io.ld_raw_data
@@ -198,7 +196,6 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   loadQueue.io.sq.stIssuePtr       <> storeQueue.io.stIssuePtr
   loadQueue.io.sq.sqEmpty          <> storeQueue.io.sqEmpty
   loadQueue.io.sta.storeAddrIn     <> io.sta.storeAddrIn // store_s1
-  loadQueue.io.sta.vecStoreAddrIn  <> io.sta.vecStoreAddrIn // store_s1
   loadQueue.io.std.storeDataIn     <> io.std.storeDataIn // store_s0
   loadQueue.io.lqFull              <> io.lqFull
   loadQueue.io.lq_rep_full         <> io.lq_rep_full
@@ -206,8 +203,6 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   loadQueue.io.l2_hint             <> io.l2_hint
   loadQueue.io.tlb_hint            <> io.tlb_hint
   loadQueue.io.lqEmpty             <> io.lqEmpty
-  loadQueue.io.vecWriteback        <> io.vecWriteback
-  loadQueue.io.vecMMIOReplay       <> io.vecMMIOReplay
 
   // rob commits for lsq is delayed for two cycles, which causes the delayed update for deqPtr in lq/sq
   // s0: commit

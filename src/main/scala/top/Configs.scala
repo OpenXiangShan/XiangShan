@@ -140,28 +140,32 @@ class MinimalConfig(n: Int = 1) extends Config(
           NWays = 4,
           partialStaticPMP = true,
           outsideRecvFlush = true,
-          outReplace = false
+          outReplace = false,
+          lgMaxSize = 4
         ),
         sttlbParameters = TLBParameters(
           name = "sttlb",
           NWays = 4,
           partialStaticPMP = true,
           outsideRecvFlush = true,
-          outReplace = false
+          outReplace = false,
+          lgMaxSize = 4
         ),
         hytlbParameters = TLBParameters(
           name = "hytlb",
           NWays = 4,
           partialStaticPMP = true,
           outsideRecvFlush = true,
-          outReplace = false
+          outReplace = false,
+          lgMaxSize = 4
         ),
         pftlbParameters = TLBParameters(
           name = "pftlb",
           NWays = 4,
           partialStaticPMP = true,
           outsideRecvFlush = true,
-          outReplace = false
+          outReplace = false,
+          lgMaxSize = 4
         ),
         btlbParameters = TLBParameters(
           name = "btlb",

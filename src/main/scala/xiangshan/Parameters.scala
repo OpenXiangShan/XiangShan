@@ -195,7 +195,7 @@ case class XSCoreParameters
   prefetcher: Option[PrefetcherParams] = Some(SMSParams()),
   LoadPipelineWidth: Int = 3,
   StorePipelineWidth: Int = 2,
-  VecLoadPipelineWidth: Int = 2,
+  VecLoadPipelineWidth: Int = 3,
   VecStorePipelineWidth: Int = 2,
   VecMemSrcInWidth: Int = 2,
   VecMemInstWbWidth: Int = 1,
@@ -207,7 +207,7 @@ case class XSCoreParameters
   VlMergeBufferSize: Int = 8,
   VsMergeBufferSize: Int = 8,
   UopWritebackWidth: Int = 1,
-  splitBufferSize: Int = 8,
+  SplitBufferSize: Int = 8,
   // ==============================
   UncacheBufferSize: Int = 4,
   EnableLoadToLoadForward: Boolean = false,
@@ -249,7 +249,8 @@ case class XSCoreParameters
     outReplace = false,
     partialStaticPMP = true,
     outsideRecvFlush = true,
-    saveLevel = true
+    saveLevel = true,
+    lgMaxSize = 4
   ),
   sttlbParameters: TLBParameters = TLBParameters(
     name = "sttlb",
@@ -257,7 +258,8 @@ case class XSCoreParameters
     outReplace = false,
     partialStaticPMP = true,
     outsideRecvFlush = true,
-    saveLevel = true
+    saveLevel = true,
+    lgMaxSize = 4
   ),
   hytlbParameters: TLBParameters = TLBParameters(
     name = "hytlb",
@@ -265,7 +267,8 @@ case class XSCoreParameters
     outReplace = false,
     partialStaticPMP = true,
     outsideRecvFlush = true,
-    saveLevel = true
+    saveLevel = true,
+    lgMaxSize = 4
   ),
   pftlbParameters: TLBParameters = TLBParameters(
     name = "pftlb",
@@ -273,7 +276,8 @@ case class XSCoreParameters
     outReplace = false,
     partialStaticPMP = true,
     outsideRecvFlush = true,
-    saveLevel = true
+    saveLevel = true,
+    lgMaxSize = 4
   ),
   refillBothTlb: Boolean = false,
   btlbParameters: TLBParameters = TLBParameters(
@@ -603,7 +607,7 @@ trait HasXSParameter {
   val VlMergeBufferSize = coreParams.VlMergeBufferSize
   val VsMergeBufferSize = coreParams.VsMergeBufferSize
   val UopWritebackWidth = coreParams.UopWritebackWidth
-  val splitBufferSize = coreParams.splitBufferSize
+  val SplitBufferSize = coreParams.SplitBufferSize
   val UncacheBufferSize = coreParams.UncacheBufferSize
   val EnableLoadToLoadForward = coreParams.EnableLoadToLoadForward
   val EnableFastForward = coreParams.EnableFastForward

@@ -107,6 +107,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 {
   val io = IO(new Bundle() {
     val redirect = Flipped(Valid(new Redirect))
+    val vecFeedback = Flipped(ValidIO(new FeedbackToLsqIO))
     val enq = new LqEnqIO
     val ldu = new Bundle() {
         val stld_nuke_query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO)) // from load_s2
@@ -115,10 +116,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     }
     val sta = new Bundle() {
       val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // from store_s1
-      val vecStoreAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // from store_s1
     }
     val std = new Bundle() {
-      val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new MemExuOutput))) // from store_s0, store data, send to sq from rs
+      val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new MemExuOutput(isVector = true)))) // from store_s0, store data, send to sq from rs
     }
     val sq = new Bundle() {
       val stAddrReadySqPtr = Input(new SqPtr)
@@ -148,9 +148,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val tlb_hint = Flipped(new TlbHintIO)
     val lqEmpty = Output(Bool())
 
-    val vecWriteback = Flipped(ValidIO(new MemExuOutput(isVector = true)))
     val lqDeqPtr = Output(new LqPtr)
-    val vecMMIOReplay = Vec(VecLoadPipelineWidth, DecoupledIO(new LsPipelineBundle()))
 
     val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
 
@@ -167,9 +165,10 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   /**
    * LoadQueueRAR
    */
-  loadQueueRAR.io.redirect <> io.redirect
-  loadQueueRAR.io.release  <> io.release
-  loadQueueRAR.io.ldWbPtr  <> virtualLoadQueue.io.ldWbPtr
+  loadQueueRAR.io.redirect  <> io.redirect
+  loadQueueRAR.io.vecFeedback <> io.vecFeedback
+  loadQueueRAR.io.release   <> io.release
+  loadQueueRAR.io.ldWbPtr   <> virtualLoadQueue.io.ldWbPtr
   for (w <- 0 until LoadPipelineWidth) {
     loadQueueRAR.io.query(w).req    <> io.ldu.ldld_nuke_query(w).req // from load_s1
     loadQueueRAR.io.query(w).resp   <> io.ldu.ldld_nuke_query(w).resp // to load_s2
@@ -180,8 +179,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
    * LoadQueueRAW
    */
   loadQueueRAW.io.redirect         <> io.redirect
+  loadQueueRAW.io.vecFeedback      <> io.vecFeedback
   loadQueueRAW.io.storeIn          <> io.sta.storeAddrIn
-  loadQueueRAW.io.vecStoreIn       <> io.sta.vecStoreAddrIn
   loadQueueRAW.io.stAddrReadySqPtr <> io.sq.stAddrReadySqPtr
   loadQueueRAW.io.stIssuePtr       <> io.sq.stIssuePtr
   for (w <- 0 until LoadPipelineWidth) {
@@ -194,23 +193,25 @@ class LoadQueue(implicit p: Parameters) extends XSModule
    * VirtualLoadQueue
    */
   virtualLoadQueue.io.redirect      <> io.redirect
+  virtualLoadQueue.io.vecCommit     <> io.vecFeedback
   virtualLoadQueue.io.enq           <> io.enq
   virtualLoadQueue.io.ldin          <> io.ldu.ldin // from load_s3
   virtualLoadQueue.io.lqFull        <> io.lqFull
   virtualLoadQueue.io.lqDeq         <> io.lqDeq
   virtualLoadQueue.io.lqCancelCnt   <> io.lqCancelCnt
   virtualLoadQueue.io.lqEmpty       <> io.lqEmpty
-  virtualLoadQueue.io.vecWriteback  <> io.vecWriteback
   virtualLoadQueue.io.ldWbPtr       <> io.lqDeqPtr
 
   /**
    * Load queue exception buffer
    */
   exceptionBuffer.io.redirect <> io.redirect
-  for ((buff, w) <- exceptionBuffer.io.req.zipWithIndex) {
-    buff.valid := io.ldu.ldin(w).valid // from load_s3
-    buff.bits := io.ldu.ldin(w).bits
+  for (i <- 0 until LoadPipelineWidth) {
+    exceptionBuffer.io.req(i).valid := io.ldu.ldin(i).valid && io.ldu.ldin(i).bits.isvec // from load_s3
+    exceptionBuffer.io.req(i).bits := io.ldu.ldin(i).bits
   }
+  // TODO: implement it!
+  exceptionBuffer.io.req(LoadPipelineWidth) := DontCare
   io.exceptionAddr <> exceptionBuffer.io.exceptionAddr
 
   /**
@@ -222,7 +223,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   uncacheBuffer.io.rob        <> io.rob
   uncacheBuffer.io.uncache    <> io.uncache
   uncacheBuffer.io.trigger    <> io.trigger
-  uncacheBuffer.io.vecReplay  <> io.vecMMIOReplay
   for ((buff, w) <- uncacheBuffer.io.req.zipWithIndex) {
     buff.valid := io.ldu.ldin(w).valid // from load_s3
     buff.bits := io.ldu.ldin(w).bits // from load_s3

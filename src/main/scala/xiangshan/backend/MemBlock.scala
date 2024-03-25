@@ -624,7 +624,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val pmp = Module(new PMP())
   pmp.io.distribute_csr <> csrCtrl.distribute_csr
 
-  val pmp_check = VecInit(Seq.fill(LduCnt + HyuCnt + 1 + StaCnt + 1)(Module(new PMPChecker(3)).io))
+  val pmp_check = VecInit(Seq.fill(LduCnt + HyuCnt + 1 + StaCnt + 1)(Module(new PMPChecker(4)).io))
   for ((p,d) <- pmp_check zip dtlb_pmps) {
     p.apply(tlbcsr.priv.dmode, pmp.io.pmp, pmp.io.pma, d)
     require(p.req.bits.size.getWidth == d.bits.size.getWidth)
@@ -676,13 +676,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     // vector
     if (i < VecLoadPipelineWidth) {
-      //TODO /////////////////////////////////////////////////
-      loadUnits(i).io.vecReplay.ready := false.B
       loadUnits(i).io.vecldout.ready := false.B
     } else {
       loadUnits(i).io.vecldin.valid := false.B
       loadUnits(i).io.vecldin.bits := DontCare
-      loadUnits(i).io.vecReplay.ready := false.B
       loadUnits(i).io.vecldout.ready := false.B
     }
 
@@ -954,7 +951,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     //  Vector Store Port
     // ------------------------------------
     hybridUnits(i).io.vec_stu_io.isFirstIssue := true.B
-    lsq.io.sta.vecStoreAddrIn(i + StaCnt) <> hybridUnits(i).io.vec_stu_io.lsq
 
     // -------------------------
     // Store Triggers
@@ -1025,7 +1021,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stu.io.stin         <> io.ooo_to_mem.issueSta(i)
     stu.io.lsq          <> lsq.io.sta.storeAddrIn(i)
     stu.io.lsq_replenish <> lsq.io.sta.storeAddrInRe(i)
-    stu.io.lsq_vec       <> lsq.io.sta.vecStoreAddrIn(i)
     // dtlb
     stu.io.tlb          <> dtlb_st.head.requestor(i)
     stu.io.pmp          <> pmp_check(LduCnt + HyuCnt + 1 + i).resp
@@ -1040,7 +1035,19 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     lsq.io.sta.storeMaskIn(i) <> stu.io.st_mask_out
 
     // Lsq to std unit's rs
-    lsq.io.std.storeDataIn(i) := stData(i)
+    when (vsSplit(i).io.vstd.get.valid) {
+      lsq.io.std.storeDataIn(i).valid := true.B
+      lsq.io.std.storeDataIn(i).bits := vsSplit(i).io.vstd.get.bits
+    } .otherwise {
+      lsq.io.std.storeDataIn(i).valid := stData(i).valid
+      lsq.io.std.storeDataIn(i).bits.uop := stData(i).bits.uop
+      lsq.io.std.storeDataIn(i).bits.data := stData(i).bits.data
+      lsq.io.std.storeDataIn(i).bits.mask.map(_ := 0.U)
+      lsq.io.std.storeDataIn(i).bits.vdIdx.map(_ := 0.U)
+      lsq.io.std.storeDataIn(i).bits.vdIdxInField.map(_ := 0.U)
+      stData(i).ready := !vsSplit(i).io.vstd.get.valid
+    }
+
 
     // store prefetch train
     l1PrefetcherOpt.foreach(pf => {
@@ -1114,6 +1121,13 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stOut(0).valid := true.B
     stOut(0).bits  := lsq.io.mmioStout.bits
     lsq.io.mmioStout.ready := true.B
+  }
+  // vec mmio writeback
+  lsq.io.vecmmioStout.ready := false.B
+  when (lsq.io.vecmmioStout.valid && !storeUnits(0).io.vecstout.valid) {
+    stOut(0).valid := true.B
+    stOut(0).bits  := lsq.io.vecmmioStout.bits
+    lsq.io.vecmmioStout.ready := true.B
   }
 
   when (atomicsUnit.io.out.valid) {
@@ -1244,19 +1258,37 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // lsq.io.vecWriteback.bits := vlWrapper.io.uopWriteback.bits
 
   // vector
-  (0 until VecStorePipelineWidth).foreach{i => 
+  (0 until StorePipelineWidth).foreach{i =>
     vsSplit(i).io.redirect <> redirect
     vsSplit(i).io.in := DontCare
     vsSplit(i).io.toMergeBuffer <> vlMergeBuffer.io.fromSplit(i)
-    vsSplit(i).io.out := storeUnits(i).io.vecstin
+    vsSplit(i).io.out <> storeUnits(i).io.vecstin
     vsSplit(i).io.vstd.get := DontCare
+
+//    vsMergeBuffer.io.fromPipeline(i) <> storeUnits(i).io.vecstout
+    vsMergeBuffer.io.fromPipeline(i) := DontCare
+    storeUnits(i).io.vecstout.ready := false.B
   }
-  (0 until VecLoadPipelineWidth).foreach{i =>
+  (0 until LoadPipelineWidth).foreach{i =>
     vlSplit(i).io.redirect <> redirect
     vlSplit(i).io.in := DontCare
     vlSplit(i).io.toMergeBuffer <> vlMergeBuffer.io.fromSplit(i)
-    vlSplit(i).io.out := loadUnits(i).io.vecldin
+    vlSplit(i).io.out <> loadUnits(i).io.vecldin
+
+//    vlMergeBuffer.io.fromPipeline(i) <> loadUnits(i).io.vecldout
+    vlMergeBuffer.io.fromPipeline(i) := DontCare
+    loadUnits(i).io.vecldout.ready := false.B
   }
+  vlMergeBuffer.io.redirect <> redirect
+  vsMergeBuffer.io.redirect <> redirect
+
+  io.mem_to_ooo.writebackVldu.head.valid := vlMergeBuffer.io.uopWriteback.head.valid || vlMergeBuffer.io.uopWriteback.head.valid
+  io.mem_to_ooo.writebackVldu.head.bits := Mux1H(Seq(
+    vlMergeBuffer.io.uopWriteback.head.valid -> vlMergeBuffer.io.uopWriteback.head.bits,
+    vsMergeBuffer.io.uopWriteback.head.valid -> vsMergeBuffer.io.uopWriteback.head.bits,
+  ))
+  vlMergeBuffer.io.uopWriteback.head.ready := io.mem_to_ooo.writebackVldu.head.ready
+  vsMergeBuffer.io.uopWriteback.head.ready := io.mem_to_ooo.writebackVldu.head.ready && !vlMergeBuffer.io.uopWriteback.head.valid
 
   // Sbuffer
   sbuffer.io.csrCtrl    <> csrCtrl

@@ -28,14 +28,15 @@ import xiangshan.mem._
 import xiangshan.backend.fu.vector.Bundles._
 
 
-class VSplitPipeline(implicit p: Parameters) extends VLSUModule{
-  val io = IO(new VSplitPipelineIO())
+class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends VLSUModule{
+  val io = IO(new VSplitPipelineIO(isVStore))
 
   def us_whole_reg(fuOpType: UInt) = fuOpType === VlduType.vlr
   def us_mask(fuOpType: UInt) = fuOpType === VlduType.vlm
   def us_fof(fuOpType: UInt) = fuOpType === VlduType.vleff
 
   val s1_ready = WireInit(false.B)
+  io.in.ready := s1_ready
 
   /**-----------------------------------------------------------
     * s0 stage
@@ -55,10 +56,10 @@ class VSplitPipeline(implicit p: Parameters) extends VLSUModule{
   val s0_preIsSplit = !(isUnitStride(s0_mop) && !us_fof(s0_fuOpType))
 
   val s0_valid         = Wire(Bool())
-  val s0_kill          = Wire(Bool())
+  val s0_kill          = io.in.bits.uop.robIdx.needFlush(io.redirect)
   val s0_can_go        = s1_ready
   val s0_fire          = s0_valid && s0_can_go
-  val s0_out           = Wire(new VLSBundle)
+  val s0_out           = Wire(new VLSBundle(isVStore))
 
   val isUsWholeReg = isUnitStride(s0_mop) && us_whole_reg(s0_fuOpType)
   val isMaskReg = isUnitStride(s0_mop) && us_mask(s0_fuOpType)
@@ -98,8 +99,8 @@ class VSplitPipeline(implicit p: Parameters) extends VLSUModule{
   val srcMask = GenFlowMask(Mux(s0_vm, Fill(VLEN, 1.U(1.W)), io.in.bits.src_mask), vvstart, evl, true)
 
   val flowMask = ((srcMask &
-    UIntToMask(flowsIncludeThisUop, VLEN + 1) &
-    ~UIntToMask(flowsPrevThisUop, VLEN)
+    UIntToMask(flowsIncludeThisUop.asUInt, VLEN + 1) &
+    (~UIntToMask(flowsPrevThisUop.asUInt, VLEN)).asUInt
   ) >> flowsPrevThisVd)(VLENB - 1, 0)
   val vlmax = GenVLMAX(s0_lmul, s0_sew)
 
@@ -140,8 +141,7 @@ class VSplitPipeline(implicit p: Parameters) extends VLSUModule{
     */
   val s1_valid         = RegInit(false.B)
   val s1_kill          = Wire(Bool())
-  val s1_in            = Wire(new VLSBundle)
-  val s1_out           = Wire(new VLSBundle)
+  val s1_in            = Wire(new VLSBundle(isVStore))
   val s1_can_go        = io.out.ready && io.toMergeBuffer.resp.valid
   val s1_fire          = s1_valid && !s1_kill && s1_can_go
 
@@ -183,18 +183,19 @@ class VSplitPipeline(implicit p: Parameters) extends VLSUModule{
 //   io.toMergeBuffer.req.bits.vdOffset :=
 
   // out connect
-  io.out                := s1_in
+  io.out.valid          := s1_valid
+  io.out.bits           := s1_in
   io.out.bits.uopOffset := uopOffset
   io.out.bits.stride    := stride
-  io.out.bits.mBIdx     := io.toMergeBuffer.resp.bits.mBIndex
+  io.out.bits.mBIndex   := io.toMergeBuffer.resp.bits.mBIndex
 }
 
 abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) extends VLSUModule{
   val io = IO(new VSplitBufferIO(isVStore))
 
-  val splitBufferSize:Int
+  val bufferSize: Int
 
-  class VSplitPtr(implicit p: Parameters) extends CircularQueuePtr[VSplitPtr](splitBufferSize){
+  class VSplitPtr(implicit p: Parameters) extends CircularQueuePtr[VSplitPtr](bufferSize){
   }
 
   object VSplitPtr {
@@ -206,11 +207,11 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
     }
   }
 
-  val uopq = Reg(Vec(splitBufferSize, new VLSBundle))
-  val valid = RegInit(VecInit(Seq.fill(splitBufferSize)(false.B)))
-  val vstart = RegInit(VecInit(Seq.fill(splitBufferSize)(0.U(elemIdxBits.W)))) // index of the exception element
-  val vl = RegInit(VecInit(Seq.fill(splitBufferSize)(0.U.asTypeOf(Valid(UInt(elemIdxBits.W)))))) // only for fof instructions that modify vl
-  val srcMaskVec = Reg(Vec(splitBufferSize, UInt(VLEN.W)))
+  val uopq = Reg(Vec(bufferSize, new VLSBundle(isVStore)))
+  val valid = RegInit(VecInit(Seq.fill(bufferSize)(false.B)))
+  val vstart = RegInit(VecInit(Seq.fill(bufferSize)(0.U(elemIdxBits.W)))) // index of the exception element
+  val vl = RegInit(VecInit(Seq.fill(bufferSize)(0.U.asTypeOf(Valid(UInt(elemIdxBits.W)))))) // only for fof instructions that modify vl
+  val srcMaskVec = Reg(Vec(bufferSize, UInt(VLEN.W)))
   // ptr
   val enqPtr = RegInit(0.U.asTypeOf(new VSplitPtr))
   val deqPtr = RegInit(0.U.asTypeOf(new VSplitPtr))
@@ -221,7 +222,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   /**
     * Redirect
     */
-  val flushed = WireInit(VecInit(Seq.fill(splitBufferSize)(false.B))) // entry has been flushed by the redirect arrived in the pre 1 cycle
+  val flushed = WireInit(VecInit(Seq.fill(bufferSize)(false.B))) // entry has been flushed by the redirect arrived in the pre 1 cycle
   val flushVec = (valid zip flushed).zip(uopq).map { case ((v, f), entry) => v && entry.uop.robIdx.needFlush(io.redirect) && !f }
   val flushEnq = io.in.fire && io.in.bits.uop.robIdx.needFlush(io.redirect)
   val flushNumReg = RegNext(PopCount(flushEnq +: flushVec))
@@ -234,10 +235,12 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
     uopq(id) := io.in.bits
     valid(id) := true.B
   }
+  io.in.ready := isAfter(enqPtr, deqPtr)
 
   //split uops
   val issueValid       = valid(deqPtr.value)
   val issueEntry       = uopq(deqPtr.value)
+  val issueMbIndex     = uopq(deqPtr.value).mBIndex
   val issueFlowNum     = issueEntry.flowNum
   val issueBaseAddr    = issueEntry.baseAddr
   val issueUop         = issueEntry.uop
@@ -262,7 +265,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   ) // elemIdx inside an inst, for exception
   val indexedStride    = IndexAddr( // index for indexed instruction
     index = issueEntry.stride,
-    flow_inner_idx = (splitIdx << issueEew(1, 0))(vOffsetBits - 1, 0) >> issueEew(1, 0),
+    flow_inner_idx = ((splitIdx << issueEew(1, 0))(vOffsetBits - 1, 0) >> issueEew(1, 0)).asUInt,
     eew = issueEew
   )
   val issueStride = Mux(isIndexed(issueInstType), indexedStride, strideOffsetReg)
@@ -294,6 +297,9 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
     x.is_first_ele          := DontCare
     x.usSecondInv           := usNoSplit
     x.elemIdx               := elemIdx
+    x.uop_unit_stride_fof   := DontCare
+    x.isFirstIssue          := DontCare
+    x.mBIndex               := issueMbIndex
   }
 
     //update enqptr
@@ -306,7 +312,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   }
 
   // flush queue
-  for (i <- 0 until splitBufferSize) {
+  for (i <- 0 until bufferSize) {
     when(flushVecReg(i) && redirectReg.valid && flushNumReg =/= 0.U) {
       valid(i) := false.B
       flushed(i) := true.B
@@ -347,8 +353,8 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
 }
 
 class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = true){
-  override val splitBufferSize = splitBufferSize
- // split data
+  override lazy val bufferSize = SplitBufferSize
+  // split data
   val flowData = GenVSData(
         data = issueEntry.data.asUInt,
         elemIdx = splitIdx,
@@ -361,16 +367,19 @@ class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = t
   vstd.valid := canIssue
   vstd.bits.uop := issueUop
   vstd.bits.data := Mux(issuePreIsSplit, usSplitData, flowData)
+  vstd.bits.debug := DontCare
+  vstd.bits.vdIdx.get := DontCare
+  vstd.bits.vdIdxInField.get := DontCare
 }
 
 class VLSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = false){
-  override val splitBufferSize = splitBufferSize
+  override lazy val bufferSize = SplitBufferSize
 }
 
-class VSSplitPipelineImp(implicit p: Parameters) extends VSplitPipeline{
+class VSSplitPipelineImp(implicit p: Parameters) extends VSplitPipeline(isVStore = true){
 }
 
-class VLSplitPipelineImp(implicit p: Parameters) extends VSplitPipeline{
+class VLSplitPipelineImp(implicit p: Parameters) extends VSplitPipeline(isVStore = false){
 }
 
 class VLSplitImp(implicit p: Parameters) extends VLSUModule{
@@ -383,7 +392,7 @@ class VLSplitImp(implicit p: Parameters) extends VLSUModule{
   io.toMergeBuffer <> splitPipeline.io.toMergeBuffer
 
   // Split Buffer
-  splitBuffer.io.in <> splitPipeline.io.in
+  splitBuffer.io.in <> splitPipeline.io.out
   splitBuffer.io.redirect <> io.redirect
   io.out <> splitBuffer.io.out
 }
@@ -398,7 +407,7 @@ class VSSplitImp(implicit p: Parameters) extends VLSUModule{
   io.toMergeBuffer <> splitPipeline.io.toMergeBuffer
 
   // Split Buffer
-  splitBuffer.io.in <> splitPipeline.io.in
+  splitBuffer.io.in <> splitPipeline.io.out
   splitBuffer.io.redirect <> io.redirect
   io.out <> splitBuffer.io.out
   io.vstd.get <> splitBuffer.io.vstd.get

@@ -37,13 +37,13 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val io = IO(new Bundle() {
     // control
     val redirect = Flipped(ValidIO(new Redirect))
+    val vecFeedback = Flipped(ValidIO(new FeedbackToLsqIO))
 
     // violation query
     val query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO))
 
     // from store unit s1
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
-    val vecStoreIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
 
     // global rollback flush
     val rollback = Output(Valid(new Redirect))
@@ -177,11 +177,13 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
   // when the stores that "older than" current load address were ready.
   // current load will be released.
+  val vecLdCancel = Wire(Vec(LoadQueueRAWSize, Bool()))
   for (i <- 0 until LoadQueueRAWSize) {
     val deqNotBlock = Mux(!allAddrCheck, !isBefore(io.stAddrReadySqPtr, uop(i).sqIdx), true.B)
     val needCancel = uop(i).robIdx.needFlush(io.redirect)
+    vecLdCancel(i) := io.vecFeedback.valid && io.vecFeedback.bits.isFlush && uop(i).robIdx === io.vecFeedback.bits.robidx && uop(i).uopIdx === io.vecFeedback.bits.uopidx
 
-    when (allocated(i) && (deqNotBlock || needCancel)) {
+    when (allocated(i) && (deqNotBlock || needCancel || vecLdCancel(i))) {
       allocated(i) := false.B
       freeMaskVec(i) := true.B
     }
@@ -306,9 +308,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     }
   }
 
-  val storeIn = (io.storeIn zip io.vecStoreIn).map { case (scalar, vector) =>
-    Mux(vector.valid, vector, scalar)
-  }
+  val storeIn = io.storeIn
 
   def detectRollback(i: Int) = {
     paddrModule.io.violationMdata(i) := storeIn(i).bits.paddr

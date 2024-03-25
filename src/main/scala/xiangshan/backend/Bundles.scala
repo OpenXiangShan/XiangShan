@@ -210,7 +210,7 @@ object Bundles {
 
     val debug_fuType    = OptionWrapper(backendParams.debugEn, FuType())
 
-    val numLsElem         = UInt((VLEN/8).W)
+    val numLsElem         = UInt((log2Ceil(VLEN/8) + 1).W)
 
     def getDebugFuType: UInt = debug_fuType.getOrElse(fuType)
 
