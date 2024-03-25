@@ -148,6 +148,7 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasPrefe
   }
   XSPerfAccumulate("trigger_disable", trigger_disable)
   XSPerfAccumulate("prefetch_hit", io.timely.prefetch_hit)
+  XSPerfAccumulate("disable_time", !enable)
 
   assert(depth =/= 0.U, "depth should not be zero")
 }

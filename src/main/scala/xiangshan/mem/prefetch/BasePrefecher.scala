@@ -43,6 +43,7 @@ class PrefetchReqBundle()(implicit p: Parameters) extends XSBundle {
   val vaddr = UInt(VAddrBits.W)
   val paddr = UInt(PAddrBits.W)
   val pc    = UInt(VAddrBits.W)
+  val miss  = Bool()
 }
 
 trait PrefetcherParams

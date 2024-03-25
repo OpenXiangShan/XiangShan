@@ -308,8 +308,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s0_kill := s0_ptr_chasing_canceled
 
   // prefetch related ctrl signal
-  io.canAcceptLowConfPrefetch  := s0_low_conf_prf_ready
-  io.canAcceptHighConfPrefetch := s0_high_conf_prf_ready
+  io.canAcceptLowConfPrefetch  := s0_low_conf_prf_ready && io.dcache.req.ready
+  io.canAcceptHighConfPrefetch := s0_high_conf_prf_ready && io.dcache.req.ready
 
   // query DTLB
   io.tlb.req.valid                   := s0_valid
@@ -711,7 +711,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       s1_in.uop.debugInfo.tlbRespTime     := GTimer()
     }
     when (!s1_cancel_ptr_chasing) {
-      s0_ptr_chasing_canceled := s1_try_ptr_chasing && !io.replay.fire && !io.fast_rep_in.fire
+      s0_ptr_chasing_canceled := s1_try_ptr_chasing && !io.replay.fire && !io.fast_rep_in.fire && !(s0_high_conf_prf_valid && io.canAcceptHighConfPrefetch)
       when (s1_try_ptr_chasing) {
         io.ldin.ready := true.B
       }
@@ -1233,10 +1233,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("s2_fwd_frm_d_chan_or_mshr",    s2_valid && s2_fwd_frm_d_chan_or_mshr)
   XSPerfAccumulate("s2_stall_out",                 s2_fire && !s2_can_go)
   XSPerfAccumulate("s2_prefetch",                  s2_fire && s2_prf)
-  XSPerfAccumulate("s2_prefetch_ignored",          s2_fire && s2_prf && s2_mq_nack) // ignore prefetch for mshr full / miss req port conflict
+  XSPerfAccumulate("s2_prefetch_ignored",          s2_fire && s2_prf && io.dcache.s2_mq_nack) // ignore prefetch for mshr full / miss req port conflict
   XSPerfAccumulate("s2_prefetch_miss",             s2_fire && s2_prf && io.dcache.resp.bits.miss) // prefetch req miss in l1
   XSPerfAccumulate("s2_prefetch_hit",              s2_fire && s2_prf && !io.dcache.resp.bits.miss) // prefetch req hit in l1
-  XSPerfAccumulate("s2_prefetch_accept",           s2_fire && s2_prf && io.dcache.resp.bits.miss && !s2_mq_nack) // prefetch a missed line in l1, and l1 accepted it
+  XSPerfAccumulate("s2_prefetch_accept",           s2_fire && s2_prf && io.dcache.resp.bits.miss && !io.dcache.s2_mq_nack) // prefetch a missed line in l1, and l1 accepted it
   XSPerfAccumulate("s2_forward_req",               s2_fire && s2_in.forward_tlDchannel)
   XSPerfAccumulate("s2_successfully_forward_channel_D", s2_fire && s2_fwd_frm_d_chan && s2_fwd_data_valid)
   XSPerfAccumulate("s2_successfully_forward_mshr",      s2_fire && s2_fwd_frm_mshr && s2_fwd_data_valid)

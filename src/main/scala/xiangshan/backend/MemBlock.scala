@@ -351,14 +351,14 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     load_unit.io.prefetch_req.valid <> l1_pf_req.valid
     load_unit.io.prefetch_req.bits <> l1_pf_req.bits
   })
-  // NOTE: loadUnits(0) has higher bank conflict and miss queue arb priority than loadUnits(1)
-  // when loadUnits(0) stage 0 is busy, hw prefetch will never use that pipeline
-  val LowConfPort = 0
-  loadUnits(LowConfPort).io.prefetch_req.bits.confidence := 0.U
+  // NOTE: loadUnits(0) has higher bank conflict and miss queue arb priority than loadUnits(1) and loadUnits(2)
+  // when loadUnits(1)/loadUnits(2) stage 0 is busy, hw prefetch will never use that pipeline
+  val LowConfPorts = if(exuParameters.LduCnt == 2) Seq(1) else if (exuParameters.LduCnt == 3) Seq(1, 2) else Seq(0)
+  LowConfPorts.map{case i => loadUnits(i).io.prefetch_req.bits.confidence := 0.U}
 
   l1_pf_req.ready := (0 until exuParameters.LduCnt).map{
     case i => {
-      if(i == LowConfPort) {
+      if(LowConfPorts.contains(i)) {
         loadUnits(i).io.canAcceptLowConfPrefetch
       }else {
         Mux(l1_pf_req.bits.confidence === 1.U, loadUnits(i).io.canAcceptHighConfPrefetch, loadUnits(i).io.canAcceptLowConfPrefetch)

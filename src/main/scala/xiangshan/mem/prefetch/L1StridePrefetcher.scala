@@ -87,7 +87,8 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     val flush = Input(Bool())
     val dynamic_depth = Input(UInt(32.W)) // TODO: enable dynamic stride depth
     val train_req = Flipped(DecoupledIO(new PrefetchReqBundle))
-    val prefetch_req = ValidIO(new StreamPrefetchReqBundle)
+    val l1_prefetch_req = ValidIO(new StreamPrefetchReqBundle)
+    val l2_l3_prefetch_req = ValidIO(new StreamPrefetchReqBundle)
     // query Stream component to see if a stream pattern has already been detected
     val stream_lookup_req  = ValidIO(new PrefetchReqBundle)
     val stream_lookup_resp = Input(Bool())
@@ -161,13 +162,21 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     width = STRIDE_WIDTH_BLOCKS,
     decr_mode = false.B,
     sink = SINK_L1,
-    source = L1_HW_PREFETCH_STRIDE)
+    source = L1_HW_PREFETCH_STRIDE,
+    // TODO: add stride debug db, not useful for now
+    t_pc = 0xdeadbeefL.U,
+    t_va = 0xdeadbeefL.U
+    )
   val s2_l2_pf_req_bits = (new StreamPrefetchReqBundle).getStreamPrefetchReqBundle(
     vaddr = s2_l2_pf_vaddr,
     width = STRIDE_WIDTH_BLOCKS,
     decr_mode = false.B,
     sink = SINK_L2,
-    source = L1_HW_PREFETCH_STRIDE)
+    source = L1_HW_PREFETCH_STRIDE,
+    // TODO: add stride debug db, not useful for now
+    t_pc = 0xdeadbeefL.U,
+    t_va = 0xdeadbeefL.U
+    )
 
   // s3: send l1 pf out
   val s3_valid = if (LOOK_UP_STREAM) RegNext(s2_valid) && !io.stream_lookup_resp else RegNext(s2_valid)
@@ -178,13 +187,13 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
   val s4_valid = RegNext(s3_valid)
   val s4_l2_pf_req_bits = RegEnable(s3_l2_pf_req_bits, s3_valid)
 
-  // l2 has higher priority than l1 ?
-  io.prefetch_req.valid := s3_valid || s4_valid
-  io.prefetch_req.bits := Mux(s4_valid, s4_l2_pf_req_bits, s3_l1_pf_req_bits)
+  io.l1_prefetch_req.valid := s3_valid
+  io.l1_prefetch_req.bits := s3_l1_pf_req_bits
+  io.l2_l3_prefetch_req.valid := s4_valid
+  io.l2_l3_prefetch_req.bits := s4_l2_pf_req_bits
 
-  XSPerfAccumulate("pf_valid", io.prefetch_req.valid)
-  XSPerfAccumulate("l1_pf_valid", s3_valid && !s4_valid)
-  XSPerfAccumulate("l1_pf_block", s3_valid && s4_valid)
+  XSPerfAccumulate("pf_valid", PopCount(Seq(io.l1_prefetch_req.valid, io.l2_l3_prefetch_req.valid)))
+  XSPerfAccumulate("l1_pf_valid", s3_valid)
   XSPerfAccumulate("l2_pf_valid", s4_valid)
   XSPerfAccumulate("detect_stream", io.stream_lookup_resp)
   XSPerfHistogram("high_conf_num", PopCount(VecInit(array.map(_.confidence === MAX_CONF.U))).asUInt, true.B, 0, STRIDE_ENTRY_NUM, 1)
