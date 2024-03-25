@@ -37,7 +37,12 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     else MixedVecInit(Seq())
   }
 
-  val resps: Vec[Vec[ValidIO[EntryDeqRespBundle]]] = VecInit(io.og0Resp, io.og1Resp, 0.U.asTypeOf(io.og0Resp))
+  val resps: Vec[Vec[ValidIO[EntryDeqRespBundle]]] = {
+    if (params.inVfSchd)
+      VecInit(io.og0Resp, io.og1Resp, io.og2Resp.get, 0.U.asTypeOf(io.og0Resp))
+    else
+      VecInit(io.og0Resp, io.og1Resp, 0.U.asTypeOf(io.og0Resp), 0.U.asTypeOf(io.og0Resp))
+  }
 
   //Module
   val enqEntries          = Seq.fill(EnqEntryNum)(Module(EnqEntry(isComp = true)(p, params)))
@@ -455,6 +460,7 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val enq                 = Vec(params.numEnq, Flipped(ValidIO(new EntryBundle)))
   val og0Resp             = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
   val og1Resp             = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
+  val og2Resp             = OptionWrapper(params.inVfSchd, Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle))))
   //deq sel
   val deqReady            = Vec(params.numDeq, Input(Bool()))
   val deqSelOH            = Vec(params.numDeq, Flipped(ValidIO(UInt(params.numEntries.W))))
