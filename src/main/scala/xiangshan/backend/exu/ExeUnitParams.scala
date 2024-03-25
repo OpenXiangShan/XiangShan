@@ -147,6 +147,7 @@ case class ExeUnitParams(
     if (intLatencyCertain) {
       if (isVfExeUnit) {
         // vf exe unit writing back to int regfile should delay 1 cycle
+        // vf exe unit need og2 --> delay 1 cycle
         writeIntFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get + 2)).toMap
       } else {
         writeIntFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
