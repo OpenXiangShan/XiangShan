@@ -119,6 +119,9 @@ case class XSCoreParameters
       // btb.io.resp_in(0)   := bim.io.resp
       // tage.io.resp_in(0)  := btb.io.resp
       // loop.io.resp_in(0)  := tage.io.resp
+      ftb.io.fauftb_entry_in  := ubtb.io.fauftb_entry_out
+      ftb.io.fauftb_entry_hit_in := ubtb.io.fauftb_entry_hit_out
+
       ubtb.io.in.bits.resp_in(0) := resp_in
       tage.io.in.bits.resp_in(0) := ubtb.io.out
       ftb.io.in.bits.resp_in(0)  := tage.io.out
