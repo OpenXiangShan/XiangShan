@@ -554,23 +554,36 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     s1_close_ftb_req := true.B
   }
 
+  val needReopen = s1_close_ftb_req && (ftb_false_hit || io.redirectFromIFU)
+  val needReopenReg = RegInit(false.B)
   //Clear counter during false_hit
-  when(s1_close_ftb_req && ftb_false_hit && io.s0_fire(0)){
+  when(needReopen && io.s1_fire(0)){
     fauftb_ftb_entry_consistent_counter := 0.U
     s1_close_ftb_req := false.B
+  }.elsewhen(needReopenReg && io.s1_fire(0)){
+    fauftb_ftb_entry_consistent_counter := 0.U
+    s1_close_ftb_req := false.B
+    needReopenReg := false.B
+  }.elsewhen(needReopen && !io.s1_fire(0)){
+    needReopenReg := true.B
   }
 
-  s0_close_ftb_req  := s1_close_ftb_req  && !ftb_false_hit
+  s0_close_ftb_req  := s1_close_ftb_req  && !(ftb_false_hit || io.redirectFromIFU || needReopenReg)
   ftb_false_hit     := io.update.valid && io.update.bits.false_hit
 
   val s2_close_consistent = ftbentry_compare(s2_fauftb_ftb_entry_dup(0),s2_ftb_entry_dup(0)).reduce(_&&_)
-  val s2_not_consistent = ftbentry_compare(s2_ftbBank_dup(0),s2_ftb_entry_dup(0)).reduce(_&&_)
+  val s2_not_close_consistent = ftbentry_compare(s2_ftbBank_dup(0),s2_ftb_entry_dup(0)).reduce(_&&_)
 
   when(s2_close_ftb_req &&  io.s2_fire(0)){
     assert(s2_close_consistent, s"Entry inconsistency after ftb req is closed!")
   }.elsewhen(!s2_close_ftb_req &&  io.s2_fire(0)){
-    assert(s2_not_consistent, s"Entry inconsistency after ftb req is not closed!")
+    assert(s2_not_close_consistent, s"Entry inconsistency after ftb req is not closed!")
   }
+
+  val  reopenCounter = !s1_close_ftb_req && s2_close_ftb_req &&  io.s2_fire(0)
+  val  falseHitReopenCounter = ftb_false_hit && s1_close_ftb_req
+  XSPerfAccumulate("ftb_req_reopen_counter",reopenCounter)
+  XSPerfAccumulate("false_hit_reopen_Counter",falseHitReopenCounter)
 
   // io.out.bits.resp := RegEnable(io.in.bits.resp_in(0), 0.U.asTypeOf(new BranchPredictionResp), io.s1_fire)
   io.out := io.in.bits.resp_in(0)

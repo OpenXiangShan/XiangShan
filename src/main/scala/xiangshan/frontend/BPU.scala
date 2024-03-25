@@ -166,6 +166,7 @@ class BasePredictorIO (implicit p: Parameters) extends XSBundle with HasBPUConst
 
   val update = Flipped(Valid(new BranchPredictionUpdate))
   val redirect = Flipped(Valid(new BranchPredictionRedirect))
+  val redirectFromIFU = Input(Bool())
 }
 
 abstract class BasePredictor(implicit p: Parameters) extends XSModule
@@ -360,6 +361,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   predictors.io.in.bits.resp_in(0) := (0.U).asTypeOf(new BranchPredictionResp)
   predictors.io.fauftb_entry_in := (0.U).asTypeOf(new FTBEntry)
   predictors.io.fauftb_entry_hit_in := false.B
+  predictors.io.redirectFromIFU := RegNext(io.ftq_to_bpu.redirctFromIFU, init=false.B)
   // predictors.io.in.bits.resp_in(0).s1.pc := s0_pc
   // predictors.io.in.bits.toFtq_fire := toFtq_fire
 
