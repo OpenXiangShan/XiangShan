@@ -34,7 +34,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   // params alias
   private val numRegSrc = backendParams.numRegSrc
   private val numVecRegSrc = backendParams.numVecRegSrc
-  private val numVecRatPorts = numVecRegSrc + 1 // +1 dst
+  private val numVecRatPorts = numVecRegSrc
 
   println(s"[Rename] numRegSrc: $numRegSrc")
 
@@ -49,8 +49,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // waittable read result
     val waittable = Flipped(Vec(RenameWidth, Output(Bool())))
     // to rename table
-    val intReadPorts = Vec(RenameWidth, Vec(3, Input(UInt(PhyRegIdxWidth.W))))
-    val fpReadPorts = Vec(RenameWidth, Vec(4, Input(UInt(PhyRegIdxWidth.W))))
+    val intReadPorts = Vec(RenameWidth, Vec(2, Input(UInt(PhyRegIdxWidth.W))))
+    val fpReadPorts = Vec(RenameWidth, Vec(3, Input(UInt(PhyRegIdxWidth.W))))
     val vecReadPorts = Vec(RenameWidth, Vec(numVecRatPorts, Input(UInt(PhyRegIdxWidth.W))))
     val intRenamePorts = Vec(RenameWidth, Output(new RatWritePort))
     val fpRenamePorts = Vec(RenameWidth, Output(new RatWritePort))
