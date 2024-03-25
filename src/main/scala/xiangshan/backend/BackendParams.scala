@@ -259,8 +259,8 @@ case class BackendParams(
 
   def getRfReadSize(dataCfg: DataConfig) = {
     dataCfg match{
-      case IntData() =>  this.getPregParams(dataCfg).numRead.getOrElse(this.getRdPortIndices(dataCfg).size)
-      case VecData() => this.getPregParams(dataCfg).numRead.getOrElse(this.getRdPortIndices(dataCfg).size) + 2
+      case IntData() => this.getPregParams(dataCfg).numRead.getOrElse(this.getRdPortIndices(dataCfg).size)
+      case VecData() => this.getPregParams(dataCfg).numRead.getOrElse(this.getRdPortIndices(dataCfg).size)
     }
   }
 

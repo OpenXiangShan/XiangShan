@@ -244,6 +244,7 @@ object FuConfig {
     ),
     piped = true,
     writeVecRf = true,
+    writeFpRf = true,
     latency = CertainLatency(0),
     dataBits = 128,
     immType = Set(SelImm.IMM_OPIVIU, SelImm.IMM_OPIVIS),
@@ -612,7 +613,7 @@ object FuConfig {
     ),
     piped = true,
     writeVecRf = true,
-    latency = CertainLatency(1),
+    latency = CertainLatency(2),
     vconfigWakeUp = true,
     maskWakeUp = true,
     dataBits = 128,
@@ -761,7 +762,7 @@ object FuConfig {
   )
 
   def VecArithFuConfigs = Seq(
-    VialuCfg, VimacCfg, VppuCfg, VipuCfg, VfaluCfg, VfmaCfg
+    VialuCfg, VimacCfg, VppuCfg, VipuCfg, VfaluCfg, VfmaCfg, VfcvtCfg
   )
 }
 

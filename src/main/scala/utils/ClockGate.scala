@@ -22,7 +22,7 @@ class ClockGate extends BlackBox with HasBlackBoxInline {
       |);
       | reg en_latched /*verilator clock_enable*/;
       |
-      | always_latch @(*) begin
+      | always_latch begin
       |   if (!CK) begin
       |     en_latched = E || TE;
       |   end
