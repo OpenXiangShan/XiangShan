@@ -855,10 +855,6 @@ class IssueQueueIntImp(override val wrapper: IssueQueue)(implicit p: Parameters,
 class IssueQueueVfImp(override val wrapper: IssueQueue)(implicit p: Parameters, iqParams: IssueBlockParams)
   extends IssueQueueImp(wrapper)
 {
-  s0_enqBits.foreach{ x =>
-    x.srcType(3) := SrcType.vp // v0: mask src
-    x.srcType(4) := SrcType.vp // vl&vtype
-  }
   deqBeforeDly.zipWithIndex.foreach{ case (deq, i) => {
     deq.bits.common.fpu.foreach(_ := deqEntryVec(i).bits.payload.fpu)
     deq.bits.common.vpu.foreach(_ := deqEntryVec(i).bits.payload.vpu)
@@ -984,11 +980,6 @@ class IssueQueueVecMemImp(override val wrapper: IssueQueue)(implicit p: Paramete
   deqSelOHVec.head := allEntryOldestOH.asUInt & canIssueVec.asUInt
   finalDeqSelValidVec.head := (allEntryOldestOH.asUInt & canIssueVec.asUInt).orR && deqBeforeDly.head.ready
   finalDeqSelOHVec.head := deqSelOHVec.head
-
-  s0_enqBits.foreach{ x =>
-    x.srcType(3) := SrcType.vp // v0: mask src
-    x.srcType(4) := SrcType.vp // vl&vtype
-  }
 
   for (i <- entries.io.enq.indices) {
     entries.io.enq(i).bits.status match { case enqData =>
