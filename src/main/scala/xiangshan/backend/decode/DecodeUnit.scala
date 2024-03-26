@@ -688,8 +688,6 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   decodedInst.lsrc(2) := Mux(isFMA, inst.FS3, inst.VD)
   decodedInst.lsrc(3) := v0Idx.U
   decodedInst.lsrc(4) := vconfigIdx.U
-  decodedInst.srcType(3) := Mux(inst.VM.asBool, SrcType.DC, SrcType.vp) // mask src
-  decodedInst.srcType(4) := SrcType.vp // vconfig
 
   // read dest location
   decodedInst.ldest := inst.RD
@@ -816,6 +814,9 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   }
 
   decodedInst.vlsInstr := isVls
+
+  decodedInst.srcType(3) := Mux(inst.VM === 0.U && !isFpToVecInst, SrcType.vp, SrcType.DC) // mask src
+  decodedInst.srcType(4) := Mux(!isFpToVecInst, SrcType.vp, SrcType.DC) // vconfig
 
   val uopInfoGen = Module(new UopInfoGen)
   uopInfoGen.io.in.preInfo.typeOfSplit := decodedInst.uopSplitType
