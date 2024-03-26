@@ -164,7 +164,7 @@ object Bundles {
     val flushPipe       = Bool() // This inst will flush all the pipe when commit, like exception but can commit
     val canRobCompress  = Bool()
     val selImm          = SelImm()
-    val imm             = UInt(32.W)
+    val imm             = UInt(ImmUnion.maxLen.W)
     val fpu             = new FPUCtrlSignals
     val vpu             = new VPUCtrlSignals
     val vlsInstr        = Bool()
