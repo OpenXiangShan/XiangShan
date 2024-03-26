@@ -215,7 +215,7 @@ trait XiangShan extends XiangShanModule with HasChisel {
 
   def yunsuanModule = yunsuan(crossValue)
 
-  override def forkArgs = Seq("-Xmx20G", "-Xss256m")
+  override def forkArgs = Seq("-Xmx40G", "-Xss256m")
 
   override def sources = T.sources {
     super.sources() ++ Seq(PathRef(millSourcePath / "src" / crossValue / "main" / "scala"))
@@ -226,7 +226,7 @@ trait XiangShan extends XiangShanModule with HasChisel {
   )
 
   object test extends SbtModuleTests with TestModule.ScalaTest {
-    override def forkArgs = Seq("-Xmx20G", "-Xss256m")
+    override def forkArgs = Seq("-Xmx40G", "-Xss256m")
 
     override def sources = T.sources {
       super.sources() ++ Seq(PathRef(millSourcePath / "src" / crossValue / "test" / "scala"))
