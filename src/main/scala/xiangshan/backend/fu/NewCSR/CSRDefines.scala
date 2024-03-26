@@ -157,7 +157,15 @@ object CSRDefines {
     val Direct: Type = Value(0.U)
     val Vectored = Value(1.U)
 
-    override def isLegal(enum: CSREnumType): Bool = Seq(Direct, Vectored).map(_ === enum).reduce(_ || _)
+    override def isLegal(enum: CSREnumType): Bool = enum.isOneOf(Direct, Vectored)
+  }
+
+  object HgatpMode extends CSREnum with CSRWARLApply {
+    val Sv39x4 = Value(8.U)
+    val Sv48x4 = Value(9.U)
+    val Sv57x4 = Value(10.U)
+
+    override def isLegal(enum: CSREnumType): Bool = enum.isOneOf(Sv39x4)
   }
 
   object CSRWARLField {
