@@ -99,6 +99,8 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val compEntryEnqVec        = othersEntryEnqVec.takeRight(CompEntryNum)
   //debug
   val cancelVec              = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Bool())))
+  val entryoutloadwakeupVec  = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Bool())))
+  val entryoutloadcancelVec  = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Bool())))
   val entryInValidVec        = Wire(Vec(params.numEntries, Bool()))
   val entryOutDeqValidVec    = Wire(Vec(params.numEntries, Bool()))
   val entryOutTransValidVec  = Wire(Vec(params.numEntries, Bool()))
@@ -416,6 +418,8 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
       srcWakeUpL1ExuOHVec.get(entryIdx)       := out.srcWakeUpL1ExuOH.get
       srcTimerVec.get(entryIdx)               := out.srcTimer.get
       cancelVec.get(entryIdx)                 := out.cancel.get
+      entryoutloadwakeupVec.get(entryIdx)     := out.entryoutloadwakeup.get
+      entryoutloadcancelVec.get(entryIdx)     := out.entryoutloadcancel.get
     }
     if (params.isVecMemIQ) {
       uopIdxVec.get(entryIdx)       := out.uopIdx.get
@@ -431,27 +435,47 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     XSPerfAccumulate(s"enqEntry_${i}_in_cnt", entryInValidVec(i))
     XSPerfAccumulate(s"enqEntry_${i}_out_deq_cnt", entryOutDeqValidVec(i))
     XSPerfAccumulate(s"enqEntry_${i}_out_trans_cnt", entryOutTransValidVec(i))
+    if (params.hasIQWakeUp) {
+      XSPerfAccumulate(s"enqEntry_${i}_load_wake_up", entryoutloadwakeupVec.get(i))
+      XSPerfAccumulate(s"enqEntry_${i}_load_cancel", entryoutloadcancelVec.get(i))
+    }
   }
   // simple
   for (i <- 0 until params.numSimp) {
     XSPerfAccumulate(s"simpEntry_${i}_in_cnt", entryInValidVec(i + params.numEnq))
     XSPerfAccumulate(s"simpEntry_${i}_out_deq_cnt", entryOutDeqValidVec(i + params.numEnq))
     XSPerfAccumulate(s"simpEntry_${i}_out_trans_cnt", entryOutTransValidVec(i + params.numEnq))
+    if (params.hasIQWakeUp) {
+      XSPerfAccumulate(s"simpEntry_${i}_load_wake_up", entryoutloadwakeupVec.get(i + params.numEnq))
+      XSPerfAccumulate(s"simpEntry_${i}_load_cancel", entryoutloadcancelVec.get(i + params.numEnq))
+    }
   }
   // complex
   for (i <- 0 until params.numComp) {
     XSPerfAccumulate(s"compEntry_${i}_in_cnt", entryInValidVec(i + params.numEnq + params.numSimp))
     XSPerfAccumulate(s"compEntry_${i}_out_deq_cnt", entryOutDeqValidVec(i + params.numEnq + params.numSimp))
     XSPerfAccumulate(s"compEntry_${i}_out_trans_cnt", entryOutTransValidVec(i + params.numEnq + params.numSimp))
+    if (params.hasIQWakeUp) {
+      XSPerfAccumulate(s"compEntry_${i}_load_wake_up", entryoutloadwakeupVec.get(i + params.numEnq + params.numSimp))
+      XSPerfAccumulate(s"compEntry_${i}_load_wake_up", entryoutloadcancelVec.get(i + params.numEnq + params.numSimp))
+    }
   }
   // total
   XSPerfAccumulate(s"enqEntry_all_in_cnt", PopCount(entryInValidVec.take(params.numEnq)))
   XSPerfAccumulate(s"enqEntry_all_out_deq_cnt", PopCount(entryOutDeqValidVec.take(params.numEnq)))
   XSPerfAccumulate(s"enqEntry_all_out_trans_cnt", PopCount(entryOutTransValidVec.take(params.numEnq)))
+  if (params.hasIQWakeUp) {
+    XSPerfAccumulate(s"enqEntry_all_load_wake_up", PopCount(entryoutloadwakeupVec.get.take(params.numEnq)))
+    XSPerfAccumulate(s"enqEntry_all_load_wake_up", PopCount(entryoutloadcancelVec.get.take(params.numEnq)))
+  }
 
   XSPerfAccumulate(s"othersEntry_all_in_cnt", PopCount(entryInValidVec.drop(params.numEnq)))
   XSPerfAccumulate(s"othersEntry_all_out_deq_cnt", PopCount(entryOutDeqValidVec.drop(params.numEnq)))
   XSPerfAccumulate(s"othersEntry_all_out_trans_cnt", PopCount(entryOutTransValidVec.drop(params.numEnq)))
+  if (params.hasIQWakeUp) {
+    XSPerfAccumulate(s"othersEntry_all_load_wake_up", PopCount(entryoutloadwakeupVec.get.drop(params.numEnq)))
+    XSPerfAccumulate(s"othersEntry_all_load_wake_up", PopCount(entryoutloadcancelVec.get.drop(params.numEnq)))
+  }
 }
 
 class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
