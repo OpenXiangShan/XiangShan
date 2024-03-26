@@ -329,13 +329,21 @@ class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1Pref
   }
 
   def invalidate(valid: Bool) = {
+    when(valid && sink === SINK_L1) {
+      bit_vec := 0.U(BIT_VEC_WITDH.W)
+    }
+    when(valid && sink =/= SINK_L1) {
+      sent_vec := ~(0.U(BIT_VEC_WITDH.W))
+    }
+
     when(valid){
-      // disable sending pf req
-      when(sink === SINK_L1) {
-        bit_vec := 0.U(BIT_VEC_WITDH.W)
-      }.otherwise {
-        sent_vec := ~(0.U(BIT_VEC_WITDH.W))
-      }
+      // for gated test
+      // // disable sending pf req
+      // when(sink === SINK_L1) {
+      //   bit_vec := 0.U(BIT_VEC_WITDH.W)
+      // }.otherwise {
+      //   sent_vec := ~(0.U(BIT_VEC_WITDH.W))
+      // }
       // disable sending tlb req
       is_vaddr := false.B
     }
