@@ -136,6 +136,8 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val entryInValid          = Output(Bool())
     val entryOutDeqValid      = Output(Bool())
     val entryOutTransValid    = Output(Bool())
+    val entryoutloadwakeup    = OptionWrapper(params.hasIQWakeUp, Output(Bool()))
+    val entryoutloadcancel    = OptionWrapper(params.hasIQWakeUp, Output(Bool()))
   }
 
   class CommonWireBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
@@ -325,6 +327,8 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       val wakeupSrcLoadDependency                      = hasIQWakeupGet.srcWakeupByIQWithoutCancel.map(x => Mux1H(x, hasIQWakeupGet.wakeupLoadDependencyByIQVec))
       commonOut.srcWakeUpL1ExuOH.get                  := (if (isComp) Mux(hasIQWakeupGet.canIssueBypass && !common.canIssue, hasIQWakeupGet.srcWakeupL1ExuOHOut, VecInit(srcWakeupExuOH))
                                                           else VecInit(srcWakeupExuOH))
+      commonOut.entryoutloadwakeup.foreach(_          :=VecInit(commonOut.srcWakeUpL1ExuOH.get.map(_.asUInt.orR)).asUInt.orR)
+      commonOut.entryoutloadcancel.foreach(_          :=hasIQWakeupGet.cancelVec.asUInt.orR )
       commonOut.srcTimer.get.zipWithIndex.foreach { case (srcTimerOut, srcIdx) =>
         val wakeupByIQOH                               = hasIQWakeupGet.srcWakeupByIQWithoutCancel(srcIdx)
         srcTimerOut                                   := Mux(wakeupByIQOH.asUInt.orR, Mux1H(wakeupByIQOH, commonIn.wakeUpFromIQ.map(_.bits.is0Lat).toSeq).asUInt, status.srcStatus(srcIdx).srcTimer.get)
@@ -351,6 +355,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     commonOut.transEntry.bits                         := entryUpdate
     // debug
     commonOut.cancel.foreach(_                        := hasIQWakeupGet.cancelVec.asUInt.orR)
+    //commonOut.entryoutloadwakeup.foreach(_            := VecInit(hasIQWakeupGet.srcWakeupByIQ.map(_.asUInt.orR)).asUInt.orR)
     commonOut.entryInValid                            := commonIn.enq.valid
     commonOut.entryOutDeqValid                        := validReg && (common.flushed || common.deqSuccess)
     commonOut.entryOutTransValid                      := validReg && commonIn.transSel && !(common.flushed || common.deqSuccess)
