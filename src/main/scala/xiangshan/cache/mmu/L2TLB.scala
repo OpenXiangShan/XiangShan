@@ -198,7 +198,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     !from_pre(cache.io.resp.bits.req_info.source) && !cache.io.resp.bits.isHptwReq && // hptw reqs are not sent to missqueue
     (cache.io.resp.bits.bypassed || (
       ((!cache.io.resp.bits.toFsm.l2Hit || cache.io.resp.bits.toFsm.stage1Hit) && !cache.io.resp.bits.isHptwReq && (cache.io.resp.bits.isFirst || !ptw.io.req.ready)) // send to ptw, is first or ptw is busy;
-      || (cache.io.resp.bits.toFsm.l2Hit && cache.io.resp.bits.isFirst && !llptw.io.in.ready) // send to llptw, llptw is full
+      || (cache.io.resp.bits.toFsm.l2Hit && !llptw.io.in.ready) // send to llptw, llptw is full
     ))
 
   mq_arb.io.in(0).bits.req_info :=  cache.io.resp.bits.req_info
