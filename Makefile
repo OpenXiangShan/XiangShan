@@ -54,6 +54,12 @@ FPGA_MEM_ARGS = --infer-rw --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf --ge
 SIM_MEM_ARGS = --infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf --gen-mem-verilog full
 endif
 
+ifneq ($(XSTOP_PREFIX),)
+RELEASE_ARGS += --xstop-prefix $(XSTOP_PREFIX)
+DEBUG_ARGS += --xstop-prefix $(XSTOP_PREFIX)
+PLDM_ARGS += --xstop-prefix $(XSTOP_PREFIX)
+endif
+
 # co-simulation with DRAMsim3
 ifeq ($(WITH_DRAMSIM3),1)
 ifndef DRAMSIM3_HOME
@@ -182,7 +188,7 @@ emu-run: emu
 	$(MAKE) -C ./difftest emu-run SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
 
 # vcs simulation
-simv:
+simv: sim-verilog
 	$(MAKE) -C ./difftest simv SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
 
 # palladium simulation
