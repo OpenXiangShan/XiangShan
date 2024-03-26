@@ -134,6 +134,9 @@ class HybridUnit(implicit p: Parameters) extends XSModule
       val feedbackSlow = ValidIO(new VSFQFeedback)
     }
 
+    // speculative for gated control
+    val s0_prefetch_spec = Output(Bool())
+    val s1_prefetch_spec = Output(Bool())
     // prefetch
     val prefetch_train            = ValidIO(new LdPrefetchTrainBundle()) // provide prefetch info to sms
     val prefetch_train_l1         = ValidIO(new LdPrefetchTrainBundle()) // provide prefetch info to stream & stride
@@ -1106,6 +1109,8 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.ldu_io.s2_ptr_chasing                    := RegEnable(s1_try_ptr_chasing && !s1_cancel_ptr_chasing, false.B, s1_fire)
 
   // prefetch train
+  io.s0_prefetch_spec := s0_fire
+  io.s1_prefetch_spec := s1_fire
   io.prefetch_train.valid              := s2_valid && !s2_actually_mmio && !s2_in.tlbMiss
   io.prefetch_train.bits.fromLsPipelineBundle(s2_in)
   io.prefetch_train.bits.miss          := Mux(s2_ld_flow, io.ldu_io.dcache.resp.bits.miss, io.stu_io.dcache.resp.bits.miss) // TODO: use trace with bank conflict?
