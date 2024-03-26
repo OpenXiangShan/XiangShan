@@ -301,13 +301,13 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   private val dcache = outer.dcache.module
   val uncache = outer.uncache.module
 
-  val delayedDcacheRefill = RegNext(dcache.io.lsu.lsq)
+  val delayedDcacheRefill = DelayNWithValid(dcache.io.lsu.lsq, 1)
 
   val csrCtrl = DelayN(io.ooo_to_mem.csrCtrl, 2)
   dcache.io.csr.distribute_csr <> csrCtrl.distribute_csr
   dcache.io.l2_pf_store_only := RegNext(io.ooo_to_mem.csrCtrl.l2_pf_store_only, false.B)
-  io.mem_to_ooo.csrUpdate := RegNext(dcache.io.csr.update)
-  io.error <> RegNext(RegNext(dcache.io.error))
+  io.mem_to_ooo.csrUpdate.w := DelayNWithValid(dcache.io.csr.update.w, 1)
+  io.error <> RegNext(RegNext(dcache.io.error)) // FIXME: no valid signal? so big, can not be gated with GatedRegNext
   when(!csrCtrl.cache_error_enable){
     io.error.report_to_beu := false.B
     io.error.valid := false.B
@@ -329,10 +329,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val prefetcherOpt: Option[BasePrefecher] = coreParams.prefetcher.map {
     case _: SMSParams =>
       val sms = Module(new SMSPrefetcher())
-      sms.io_agt_en := RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_enable_agt, 2, Some(false.B))
-      sms.io_pht_en := RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_enable_pht, 2, Some(false.B))
-      sms.io_act_threshold := RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_active_threshold, 2, Some(12.U))
-      sms.io_act_stride := RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_active_stride, 2, Some(30.U))
+      sms.io_agt_en := GatedRegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_enable_agt, 2, Some(false.B))
+      sms.io_pht_en := GatedRegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_enable_pht, 2, Some(false.B))
+      sms.io_act_threshold := GatedRegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_active_threshold, 2, Some(12.U))
+      sms.io_act_stride := GatedRegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_active_stride, 2, Some(30.U))
       sms.io_stride_en := false.B
       sms.io_dcache_evict <> dcache.io.sms_agt_evict_req
       sms
@@ -366,8 +366,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
         l1Prefetcher.stride_train.drop(LduCnt)(i).bits := source.bits
         l1Prefetcher.stride_train.drop(LduCnt)(i).bits.uop.pc := Mux(
           hybridUnits(i).io.ldu_io.s2_ptr_chasing,
-          RegNext(io.ooo_to_mem.hybridPc(i)),
-          RegNext(RegNext(io.ooo_to_mem.hybridPc(i)))
+          RegEnable(io.ooo_to_mem.hybridPc(i), hybridUnits(i).io.s1_prefetch_spec),
+          RegEnable(RegEnable(io.ooo_to_mem.hybridPc(i), hybridUnits(i).io.s0_prefetch_spec), hybridUnits(i).io.s1_prefetch_spec)
         )
       }
       l1Prefetcher
@@ -379,7 +379,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       l1_pf_req.valid := false.B
       l1_pf_req.bits := DontCare
   }
-  val pf_train_on_hit = RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_train_on_hit, 2, Some(true.B))
+  val pf_train_on_hit = GatedRegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_train_on_hit, 2, Some(true.B))
 
   loadUnits.zipWithIndex.map(x => x._1.suggestName("LoadUnit_"+x._2))
   storeUnits.zipWithIndex.map(x => x._1.suggestName("StoreUnit_"+x._2))
@@ -474,15 +474,15 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // load/store prefetch to l2 cache
   prefetcherOpt.foreach(sms_pf => {
     l1PrefetcherOpt.foreach(l1_pf => {
-      val sms_pf_to_l2 = ValidIODelay(sms_pf.io.l2_req, 2)
-      val l1_pf_to_l2 = ValidIODelay(l1_pf.io.l2_req, 2)
+      val sms_pf_to_l2 = DelayNWithValid(sms_pf.io.l2_req, 2)
+      val l1_pf_to_l2 = DelayNWithValid(l1_pf.io.l2_req, 2)
 
       outer.l2_pf_sender_opt.get.out.head._1.addr_valid := sms_pf_to_l2.valid || l1_pf_to_l2.valid
       outer.l2_pf_sender_opt.get.out.head._1.addr := Mux(l1_pf_to_l2.valid, l1_pf_to_l2.bits.addr, sms_pf_to_l2.bits.addr)
       outer.l2_pf_sender_opt.get.out.head._1.pf_source := Mux(l1_pf_to_l2.valid, l1_pf_to_l2.bits.source, sms_pf_to_l2.bits.source)
-      outer.l2_pf_sender_opt.get.out.head._1.l2_pf_en := RegNextN(io.ooo_to_mem.csrCtrl.l2_pf_enable, 2, Some(true.B))
+      outer.l2_pf_sender_opt.get.out.head._1.l2_pf_en := GatedRegNextN(io.ooo_to_mem.csrCtrl.l2_pf_enable, 2, Some(true.B))
 
-      sms_pf.io.enable := RegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_enable, 2, Some(false.B))
+      sms_pf.io.enable := GatedRegNextN(io.ooo_to_mem.csrCtrl.l1D_pf_enable, 2, Some(false.B))
 
       val l2_trace = Wire(new LoadPfDbBundle)
       l2_trace.paddr := outer.l2_pf_sender_opt.get.out.head._1.addr
@@ -493,7 +493,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       val l1_pf_to_l3 = ValidIODelay(l1_pf.io.l3_req, 4)
       outer.l3_pf_sender_opt.get.out.head._1.addr_valid := l1_pf_to_l3.valid
       outer.l3_pf_sender_opt.get.out.head._1.addr := l1_pf_to_l3.bits
-      outer.l3_pf_sender_opt.get.out.head._1.l2_pf_en := RegNextN(io.ooo_to_mem.csrCtrl.l2_pf_enable, 4, Some(true.B))
+      outer.l3_pf_sender_opt.get.out.head._1.l2_pf_en := GatedRegNextN(io.ooo_to_mem.csrCtrl.l2_pf_enable, 4, Some(true.B))
 
       val l3_trace = Wire(new LoadPfDbBundle)
       l3_trace.paddr := outer.l3_pf_sender_opt.get.out.head._1.addr
@@ -509,8 +509,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   })
 
   // ptw
-  val sfence = RegNext(RegNext(io.ooo_to_mem.sfence))
-  val tlbcsr = RegNext(RegNext(io.ooo_to_mem.tlbCsr))
+  val sfence = Wire(io.ooo_to_mem.sfence.cloneType)
+  val (_a, _b) = DelayNWithValid(io.ooo_to_mem.sfence.bits, io.ooo_to_mem.sfence.valid, 2)
+  sfence.valid := _a
+  sfence.bits := _b
+  val tlbcsr = GatedRegNextN(io.ooo_to_mem.tlbCsr, 2) // FIXME: use GatedRegNextN need a long time
   private val ptw = outer.ptw.module
   private val ptw_to_l2_buffer = outer.ptw_to_l2_buffer.module
   ptw.io.hartId := io.hartId
@@ -586,6 +589,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   ptwio.resp.ready := true.B
 
   val tlbreplay = WireInit(VecInit(Seq.fill(LdExuCnt)(false.B)))
+  val tlbreplay_reg = GatedValidRegNext(tlbreplay)
+  val dtlb_ld0_tlbreplay_reg = GatedValidRegNext(dtlb_ld(0).tlbreplay)
   dontTouch(tlbreplay)
   for (i <- 0 until LdExuCnt) {
     tlbreplay(i) := dtlb_ld(0).ptw.req(i).valid && ptw_resp_next.vector(0) && ptw_resp_v &&
@@ -749,11 +754,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.ld_fast_fuOpType := io.ooo_to_mem.loadFastFuOpType(i)
     loadUnits(i).io.replay <> lsq.io.replay(i)
 
-    val l2_hint = RegNext(io.l2_hint)
+    val l2_hint = DelayNWithValid(io.l2_hint, 1)
     loadUnits(i).io.l2_hint <> l2_hint
     loadUnits(i).io.tlb_hint.id := dtlbRepeater.io.hint.get.req(i).id
     loadUnits(i).io.tlb_hint.full := dtlbRepeater.io.hint.get.req(i).full ||
-      RegNext(tlbreplay(i)) || RegNext(dtlb_ld(0).tlbreplay(i))
+      tlbreplay_reg(i) || dtlb_ld0_tlbreplay_reg(i)
 
     // passdown to lsq (load s2)
     lsq.io.ldu.ldin(i) <> loadUnits(i).io.lsq.ldin
@@ -838,7 +843,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     hybridUnits(i).io.ldu_io.refill <> delayedDcacheRefill
     hybridUnits(i).io.ldu_io.tlb_hint.id := dtlbRepeater.io.hint.get.req(LduCnt + i).id
     hybridUnits(i).io.ldu_io.tlb_hint.full := dtlbRepeater.io.hint.get.req(LduCnt + i).full ||
-      RegNext(tlbreplay(LduCnt + i)) || RegNext(dtlb_ld(0).tlbreplay(LduCnt + i))
+      tlbreplay_reg(LduCnt + i) || dtlb_ld0_tlbreplay_reg(LduCnt + i)
 
     // dtlb
     hybridUnits(i).io.tlb <> dtlb_ld.head.requestor(LduCnt + i)
@@ -856,7 +861,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
         source.valid && source.bits.isFirstIssue && source.bits.miss
       )
       pf.io.ld_in(LduCnt + i).bits := source.bits
-      pf.io.ld_in(LduCnt + i).bits.uop.pc := Mux(hybridUnits(i).io.ldu_io.s2_ptr_chasing, io.ooo_to_mem.hybridPc(i), RegNext(io.ooo_to_mem.hybridPc(i)))
+      pf.io.ld_in(LduCnt + i).bits.uop.pc := Mux(hybridUnits(i).io.ldu_io.s2_ptr_chasing, io.ooo_to_mem.hybridPc(i), RegEnable(io.ooo_to_mem.hybridPc(i), hybridUnits(i).io.s1_prefetch_spec))
     })
     l1PrefetcherOpt.foreach(pf => {
       // stream will train on all load sources
@@ -874,7 +879,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
         source.valid && source.bits.isFirstIssue && source.bits.miss
       ) && FuType.isStore(source.bits.uop.fuType)
       pf.io.st_in(StaCnt + i).bits := source.bits
-      pf.io.st_in(StaCnt + i).bits.uop.pc := RegNext(io.ooo_to_mem.hybridPc(i))
+      pf.io.st_in(StaCnt + i).bits.uop.pc := GatedRegNext(io.ooo_to_mem.hybridPc(i))
     })
 
     // load to load fast forward: load(i) prefers data(i)
@@ -1411,7 +1416,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     atomicsException := true.B
   }
   val atomicsExceptionAddress = RegEnable(atomicsUnit.io.exceptionAddr.bits, atomicsUnit.io.exceptionAddr.valid)
-  io.mem_to_ooo.lsqio.vaddr := RegNext(Mux(
+  io.mem_to_ooo.lsqio.vaddr := GatedRegNext(Mux(
     atomicsException,
     atomicsExceptionAddress,
     Mux(
@@ -1432,9 +1437,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.externalInterrupt.seip := outer.plic_int_sink.in.last._1(0)
   io.externalInterrupt.debug := outer.debug_int_sink.in.head._1(0)
   io.inner_hartId := io.hartId
-  io.inner_reset_vector := RegNext(io.outer_reset_vector)
+  io.inner_reset_vector := GatedRegNext(io.outer_reset_vector)
   io.outer_cpu_halt := io.inner_cpu_halt
-  io.outer_beu_errors_icache := RegNext(io.inner_beu_errors_icache)
+  io.outer_beu_errors_icache := GatedRegNext(io.inner_beu_errors_icache)
   io.outer_l2_pf_enable := io.inner_l2_pf_enable
   // io.inner_hc_perfEvents <> io.outer_hc_perfEvents
 
