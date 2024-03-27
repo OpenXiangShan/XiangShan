@@ -2,11 +2,11 @@ package xiangshan.backend.fu.util
 
 import chisel3._
 import chisel3.util._
-import xiangshan.XSBundle
+import xiangshan.{XSBundle, HasXSParameter}
 import org.chipsalliance.cde.config.Parameters
 import utils.ConsecutiveOnes
 
-trait SdtrigExt {
+trait SdtrigExt extends HasXSParameter{
   implicit val p: Parameters
   class TDataRegs extends XSBundle {
     val tdata1 = UInt(XLEN.W)
@@ -237,14 +237,68 @@ trait SdtrigExt {
    * @return true.B if data meet the trigger match condition
    */
   def TriggerCmp(data: UInt, tdata: UInt, matchType: UInt, enable: Bool): Bool = {
-    val eq = data === tdata
-    val ge = data >= tdata
-    val lt = data < tdata
+    val eq = data(VAddrBits - 1, 0) === tdata(VAddrBits - 1, 0)
+    val ge = data(VAddrBits - 1, 0) >= tdata(VAddrBits - 1, 0)
+    val lt = data(VAddrBits - 1, 0) < tdata(VAddrBits - 1, 0)
     val res = MuxLookup(matchType, false.B, Seq(
       TrigMatchEnum.EQ -> eq,
       TrigMatchEnum.GE -> ge,
       TrigMatchEnum.LT -> lt
     ))
     res && enable
+  }
+
+  /**
+   * author @Guokai Chen
+   * compare between Consecutive pc and tdada2
+   */
+  def TriggerCmpConsecutive(actual: Vec[UInt], tdata: UInt, matchType: UInt, enable: Bool) : Vec[Bool] = {
+    // opt: only compare two possible high bits: orig and orig+1
+    val len1 = actual.length
+    val highPos = log2Up(len1)
+    val lowPC = Wire(Vec(len1, UInt(highPos.W)))
+    lowPC.zipWithIndex.map{case (h, i) => h := actual(i)(highPos - 1, 0)}
+    val highPC = actual(0)(VAddrBits - 1, highPos)
+    val highPC1 = actual(0)(VAddrBits - 1, highPos) + 1.U
+    val highTdata = tdata(VAddrBits - 1, highPos)
+
+    val highPCEqual = highPC === highTdata
+    val highPC1Equal = highPC1 === highTdata
+    val highPCGreater = highPC >= highTdata
+    val highPC1Greater = highPC1 >= highTdata
+    val highPCLess = highPC <= highTdata
+    val highPC1Less = highPC1 <= highTdata
+
+    val carry = Wire(Vec(len1, Bool()))
+    carry.zipWithIndex.map{case (c, i) => c := actual(i)(highPos) =/= actual(0)(highPos)}
+
+    val lowPCEqual = Wire(Vec(len1, Bool()))
+    val lowPCGreater = Wire(Vec(len1, Bool()))
+    val lowPCLess = Wire(Vec(len1, Bool()))
+
+    lowPCEqual.zipWithIndex.map{case (l, i) => l := actual(i)(highPos - 1, 0) === tdata(highPos - 1, 0)}
+    lowPCGreater.zipWithIndex.map{case (l, i) => l := actual(i)(highPos - 1, 0) >= tdata(highPos - 1, 0)}
+    lowPCLess.zipWithIndex.map{case (l, i) => l := actual(i)(highPos - 1, 0) <= tdata(highPos - 1, 0)}
+
+    val overallEqual = Wire(Vec(len1, Bool()))
+    val overallGreater = Wire(Vec(len1, Bool()))
+    val overallLess = Wire(Vec(len1, Bool()))
+
+    overallEqual.zipWithIndex.map{case (o, i) => o := lowPCEqual(i) && highPCEqual}
+
+    // greater: 1. highPC > highTdata; 2. highPC == highTdata && lowPC >= lowTdata
+    overallGreater.zipWithIndex.map{case (o, i) => o := highPCGreater || ((!carry(i) || lowPCGreater(i)) && highPCEqual)}
+
+    // less: 1. highPC < highTdata; 2. highPC == highTdata && lowPC <= lowTdata
+    overallLess.zipWithIndex.map{case (o, i) => o := highPCLess || ((!carry(i) && lowPCLess(i)) && highPCEqual)}
+
+    val ret = Wire(Vec(len1, Bool()))
+
+    ret.zipWithIndex.map{case (r, i) => r := MuxLookup(matchType, false.B)(
+      Array(
+        TrigMatchEnum.EQ -> overallEqual(i),
+        TrigMatchEnum.GE -> overallGreater(i),
+        TrigMatchEnum.LT -> overallLess(i))) && enable}
+    ret
   }
 }
