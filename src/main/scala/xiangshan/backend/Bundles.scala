@@ -210,6 +210,8 @@ object Bundles {
 
     val debug_fuType    = OptionWrapper(backendParams.debugEn, FuType())
 
+    val numLsElem         = UInt((VLEN/8).W)
+
     def getDebugFuType: UInt = debug_fuType.getOrElse(fuType)
 
     def isLUI: Bool = this.fuType === FuType.alu.U && (this.selImm === SelImm.IMM_U || this.selImm === SelImm.IMM_LUI32)
