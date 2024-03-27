@@ -435,5 +435,7 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
   lsqEnqCtrl.io.scommit := io.fromMem.get.scommit
   lsqEnqCtrl.io.lqCancelCnt := io.fromMem.get.lqCancelCnt
   lsqEnqCtrl.io.sqCancelCnt := io.fromMem.get.sqCancelCnt
+  dispatch2Iq.io.lqFreeCount.get := lsqEnqCtrl.io.lqFreeCount
+  dispatch2Iq.io.sqFreeCount.get := lsqEnqCtrl.io.sqFreeCount
   io.memIO.get.lsqEnqIO <> lsqEnqCtrl.io.enqLsq
 }

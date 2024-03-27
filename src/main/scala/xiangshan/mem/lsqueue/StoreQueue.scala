@@ -65,7 +65,10 @@ class DataBufferEntry (implicit p: Parameters)  extends DCacheBundle {
 
 // Store Queue
 class StoreQueue(implicit p: Parameters) extends XSModule
-  with HasDCacheParameters with HasCircularQueuePtrHelper with HasPerfEvents {
+  with HasDCacheParameters
+  with HasCircularQueuePtrHelper
+  with HasPerfEvents
+  with HasVLSUParameters {
   val io = IO(new Bundle() {
     val hartId = Input(UInt(8.W))
     val enq = new SqEnqIO
@@ -150,7 +153,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val cmtPtrExt = RegInit(VecInit((0 until CommitWidth).map(_.U.asTypeOf(new SqPtr))))
   val addrReadyPtrExt = RegInit(0.U.asTypeOf(new SqPtr))
   val dataReadyPtrExt = RegInit(0.U.asTypeOf(new SqPtr))
-  val validCounter = RegInit(0.U(log2Ceil(VirtualLoadQueueSize + 1).W))
 
   val enqPtr = enqPtrExt(0).value
   val deqPtr = deqPtrExt(0).value
@@ -208,6 +210,12 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // no inst will be committed 1 cycle before tval update
   vaddrModule.io.raddr(EnsbufferWidth) := (cmtPtrExt(0) + commitCount).value
 
+  val vStoreFlow = io.enq.req.map(_.bits.numLsElem)
+  val validVStoreFlow = vStoreFlow.zipWithIndex.map{case (vLoadFlowNum_Item, index) => Mux(!RegNext(io.brqRedirect.valid) && io.enq.canAccept && io.enq.lqCanAccept && canEnqueue(index), vLoadFlowNum_Item, 0.U)}
+  val validVStoreOffset = 0.U +: vStoreFlow.zip(io.enq.needAlloc)
+                                         .map{case (flow, needAlloc_Item) => Mux(needAlloc_Item, flow, 0.U)}
+                                         .slice(0, vStoreFlow.length - 1)
+
   /**
     * Enqueue at dispatch
     *
@@ -218,7 +226,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val enqCancel = io.enq.req.map(_.bits.robIdx.needFlush(io.brqRedirect))
   for (i <- 0 until io.enq.req.length) {
     val offset = if (i == 0) 0.U else PopCount(io.enq.needAlloc.take(i))
-    val sqIdx = enqPtrExt(offset)
+    val sqIdx = enqPtrExt(0) + validVStoreOffset.take(i + 1).reduce(_ + _)
+//    val sqIdx = 0.U.asTypeOf(new SqPtr)
     val index = io.enq.req(i).bits.sqIdx.value
     val enqInstr = io.enq.req(i).bits.instr.asTypeOf(new XSInstBitFields)
     when (canEnqueue(i) && !enqCancel(i)) {
@@ -799,7 +808,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val lastEnqCancel = PopCount(RegNext(VecInit(canEnqueue.zip(enqCancel).map(x => x._1 && x._2)))) // 1 cycle after redirect
   val lastCycleCancelCount = PopCount(RegNext(needCancel)) // 1 cycle after redirect
   val lastCycleRedirect = RegNext(io.brqRedirect.valid) // 1 cycle after redirect
-  val enqNumber = Mux(!lastCycleRedirect&&io.enq.canAccept && io.enq.lqCanAccept, PopCount(io.enq.req.map(_.valid)), 0.U) // 1 cycle after redirect
+  val enqNumber = validVStoreFlow.reduce(_ + _)
 
   val lastlastCycleRedirect=RegNext(lastCycleRedirect)// 2 cycle after redirect
   val redirectCancelCount = RegEnable(lastCycleCancelCount + lastEnqCancel, lastCycleRedirect) // 2 cycle after redirect

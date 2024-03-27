@@ -32,7 +32,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper
   with HasLoadHelper
   with HasPerfEvents
-{
+  with HasVLSUParameters {
   val io = IO(new Bundle() {
     // control
     val redirect    = Flipped(Valid(new Redirect))
@@ -96,7 +96,12 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   val redirectCancelCount = RegEnable(lastCycleCancelCount + lastEnqCancel, 0.U, lastCycleRedirect.valid)
 
   // update enqueue pointer
-  val enqNumber = Mux(io.enq.canAccept && io.enq.sqCanAccept, PopCount(io.enq.req.map(_.valid)), 0.U)
+  val vLoadFlow = io.enq.req.map(_.bits.numLsElem)
+  val validVLoadFlow = vLoadFlow.zipWithIndex.map{case (vLoadFlowNum_Item, index) => Mux(io.enq.canAccept && io.enq.sqCanAccept && canEnqueue(index), vLoadFlowNum_Item, 0.U)}
+  val validVLoadOffset = 0.U +: vLoadFlow.zip(io.enq.needAlloc)
+                                .map{case (flow, needAlloc_Item) => Mux(needAlloc_Item, flow, 0.U)}
+                                .slice(0, validVLoadFlow.length - 1)
+  val enqNumber = validVLoadFlow.reduce(_ + _)
   val enqPtrExtNextVec = Wire(Vec(io.enq.req.length, new LqPtr))
   val enqPtrExtNext = Wire(Vec(io.enq.req.length, new LqPtr))
   when (lastLastCycleRedirect.valid) {
@@ -146,7 +151,8 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   io.enq.canAccept := allowEnqueue
   for (i <- 0 until io.enq.req.length) {
     val offset = PopCount(io.enq.needAlloc.take(i))
-    val lqIdx = enqPtrExt(offset)
+    val lqIdx = enqPtrExt(0) + validVLoadOffset.take(i + 1).reduce(_ + _)
+//    val lqIdx = 0.U.asTypeOf(new LqPtr)
     val index = io.enq.req(i).bits.lqIdx.value
     when (canEnqueue(i) && !enqCancel(i)) {
       allocated(index) := true.B
