@@ -10,7 +10,7 @@ import utils._
 import xiangshan._
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.rename.BusyTableReadIO
-import xiangshan.mem.LsqEnqIO
+import xiangshan.mem._
 import xiangshan.backend.Bundles.{DynInst, ExuOH}
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.FuType.FuTypeOrR
@@ -67,6 +67,8 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
     val enqLsqIO = if (wrapper.isMem) Some(Flipped(new LsqEnqIO)) else None
     val iqValidCnt = MixedVec(params.issueBlockParams.filter(_.StdCnt == 0).map(x => Input(UInt(log2Ceil(x.numEntries).W))))
     val IQValidNumVec = if (params.isIntSchd) Some(Input(MixedVec(backendParams.genIQValidNumBundle))) else None
+    val lqFreeCount = if (wrapper.isMem) Some(Input(UInt(log2Up(VirtualLoadQueueSize + 1).W))) else None
+    val sqFreeCount = if (wrapper.isMem) Some(Input(UInt(log2Up(StoreQueueSize + 1).W))) else None
   })
 
 
@@ -684,11 +686,14 @@ class Dispatch2IqSelect(numIn: Int, dispatchCfg: Seq[(Seq[BigInt], Int)])(implic
   */
 class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameters, params: SchdBlockParams)
   extends Dispatch2IqImp(wrapper)
-    with HasXSParameter {
+    with HasXSParameter
+    with HasVLSUParameters {
 
   import FuType._
 
   private val enqLsqIO = io.enqLsqIO.get
+  private val lqFreeCount = io.lqFreeCount.get
+  private val sqFreeCount = io.sqFreeCount.get
 
   private val numLoadDeq = LSQLdEnqWidth
   private val numStoreAMODeq = LSQStEnqWidth
@@ -734,6 +739,44 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     }
   }
 
+  private def us_whole_reg(fuOpType: UInt) = fuOpType === VstuType.vsr
+  private def us_mask(fuOpType: UInt) = fuOpType === VstuType.vsm
+
+  private val uop             = io.in.map(_.bits)
+  private val fuOpType        = uop.map(_.fuOpType)
+  private val vtype           = uop.map(_.vpu.vtype)
+  private val sew             = vtype.map(_.vsew)
+  private val lmul            = vtype.map(_.vlmul)
+  private val eew             = uop.map(_.vpu.veew)
+  private val mop             = fuOpType.map(_(6, 5))
+  private val nf              = fuOpType.zip(uop.map(_.vpu.nf)).map{ case (fuOpType_Item, vpu_Nf_Item) => Mux(us_whole_reg(fuOpType_Item), 0.U, vpu_Nf_Item) }
+  private val emul            = fuOpType.zipWithIndex.map { case (fuOpType_Item, index) => {
+    Mux(us_whole_reg(fuOpType_Item), GenUSWholeEmul(uop(index).vpu.nf), Mux(us_mask(fuOpType_Item), 0.U(mulBits.W), EewLog2(eew(index)) - sew(index) + lmul(index)))
+  }
+  }
+  private val isSegment       = nf.zip(fuOpType).map{ case (fuOpType_Item, nf_Item) => nf_Item =/= 0.U && !us_whole_reg(fuOpType_Item) }
+  private val instType        = isSegment.zip(mop).map{ case (isSegement_Item, mop_Item) => Cat(isSegement_Item, mop_Item) }
+  private val flows           = instType.zipWithIndex.map{ case (instType_Item, index) => GenRealFlowNum(instType_Item, emul(index), lmul(index), eew(index), sew(index)) }
+  private val numLsElem       = flows.map(flow => (1.U(5.W) << flow).asUInt)
+
+  private val isVlsType       = uop.map(fuType_Item => isVls((fuType_Item.fuType)))
+  private val isUnitStrideType= mop.map(mop_Item => isUnitStride(mop_Item))
+
+  private val conserveFlows = isVlsType.zip(isUnitStrideType).map{
+    case (isVlsTyep_Item, isUnitStrideType_Item) => Mux(isUnitStrideType_Item, 2.U, Mux(isVlsTyep_Item, 16.U, 1.U))
+  }
+
+  private val allowDispatch = Wire(Vec(numLsElem.length, Bool()))
+  for (index <- allowDispatch.indices) {
+    when(isStoreVec(index) || isVStoreVec(index)) {
+      allowDispatch(index) := Mux(sqFreeCount > conserveFlows.take(index + 1).reduce(_ + _), true.B, false.B)
+    } .elsewhen(isLoadVec(index) || isVLoadVec(index)) {
+      allowDispatch(index) := Mux(lqFreeCount > conserveFlows.take(index + 1).reduce(_ + _), true.B, false.B)
+    } .otherwise {
+      allowDispatch(index) := false.B
+    }
+  }
+
   // enqLsq io
   require(enqLsqIO.req.size == enqLsqIO.resp.size)
   for (i <- enqLsqIO.req.indices) {
@@ -746,6 +789,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     }
     enqLsqIO.req(i).valid := io.in(i).fire && !isAMOVec(i)
     enqLsqIO.req(i).bits := io.in(i).bits
+    enqLsqIO.req(i).bits.numLsElem := Mux(isVlsType(i), numLsElem(i), 1.U)
     s0_enqLsq_resp(i) := enqLsqIO.resp(i)
   }
 
@@ -767,6 +811,11 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   val outs = io.out.flatten
   val selIdxOH = Wire(MixedVec(finalFuDeqMap.map(x => Vec(x._2.size, ValidIO(UInt(uopsIn.size.W))))))
   selIdxOH.foreach(_.foreach(_ := 0.U.asTypeOf(ValidIO(UInt(uopsIn.size.W)))))
+  uopsIn.zipWithIndex.map {
+    case (uopsIn_Item, index) =>{
+      uopsIn_Item.ready := allowDispatch(index)
+      uopsIn_Item.bits.numLsElem := Mux(isVlsType(index), numLsElem(index), 0.U)
+    }}
 
   dontTouch(selIdxOH)
 
