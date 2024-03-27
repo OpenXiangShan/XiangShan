@@ -392,6 +392,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   io.out.zip(io.in).foreach{ case (out, in) => out.bits.snapshot := allowSnpt && (!in.bits.preDecodeInfo.notCFI || FuType.isJump(in.bits.fuType)) && in.fire }
   when(genSnapshot) {
     snapshotCtr := (4 * RabCommitWidth).U - PopCount(io.out.map(_.fire))
+  }.elsewhen(!io.snptLastEnq.valid){
+    snapshotCtr := 0.U
   }.elsewhen(io.out.head.fire) {
     snapshotCtr := Mux(snapshotCtr < PopCount(io.out.map(_.fire)), 0.U, snapshotCtr - PopCount(io.out.map(_.fire)))
   }
