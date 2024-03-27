@@ -86,7 +86,7 @@ override SIM_ARGS += --with-constantin
 endif
 
 # emu for the release version
-RELEASE_ARGS += --fpga-platform --disable-always-basic-diff --disable-perf --remove-assert
+RELEASE_ARGS += --fpga-platform --disable-always-basic-diff --disable-all --remove-assert
 DEBUG_ARGS   += --enable-difftest
 PLDM_ARGS += --disable-all --fpga-platform --enable-difftest
 ifeq ($(RELEASE),1)
