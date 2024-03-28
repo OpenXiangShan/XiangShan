@@ -370,20 +370,11 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     tdata(csrCtrl.mem_trigger.tUpdate.bits.addr) := csrCtrl.mem_trigger.tUpdate.bits.tdata
   }
 
-  val frontendTriggerTimingVec = in.uop.trigger.frontendTiming
-  val frontendTriggerChainVec = in.uop.trigger.frontendChain
-  val frontendTriggerHitVec = in.uop.trigger.frontendHit
-
-  val backendTriggerTimingVec = tdata.map(_.timing)
-  val backendTriggerChainVec = tdata.map(_.chain)
+  val backendTriggerTimingVec = VecInit(tdata.map(_.timing))
+  val backendTriggerChainVec = VecInit(tdata.map(_.chain))
   val backendTriggerHitVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
+  val backendTriggerCanFireVec = RegInit(VecInit(Seq.fill(TriggerNum)(false.B)))
 
-  val triggerTimingVec = VecInit(backendTriggerTimingVec.zip(frontendTriggerTimingVec).map { case (b, f) => b || f })
-  val triggerChainVec = VecInit(backendTriggerChainVec.zip(frontendTriggerChainVec).map { case (b, f) => b || f })
-  val triggerHitVec = Reg(Vec(TriggerNum, Bool()))
-  triggerHitVec := VecInit(backendTriggerHitVec.zip(frontendTriggerHitVec).map { case (b, f) => b || f })
-
-  val triggerCanFireVec = RegInit(VecInit(Seq.fill(TriggerNum)(false.B)))
   when(state === s_cache_req) {
     // store trigger
     val store_hit = Wire(Vec(TriggerNum, Bool()))
@@ -407,14 +398,14 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     }
     backendTriggerHitVec := store_hit.zip(load_hit).map { case (sh, lh) => sh || lh }
     // triggerCanFireVec will update at T+1
-    TriggerCheckCanFire(TriggerNum, triggerCanFireVec, triggerHitVec, triggerTimingVec, triggerChainVec)
+    TriggerCheckCanFire(TriggerNum, backendTriggerCanFireVec, backendTriggerHitVec, backendTriggerTimingVec, backendTriggerChainVec)
   }
 
   // addr trigger do cmp at s_cache_req
   // trigger result is used at s_finish
   // thus we can delay it safely
-  io.out.bits.uop.trigger.backendHit := triggerHitVec
-  io.out.bits.uop.trigger.backendCanFire := triggerCanFireVec
+  io.out.bits.uop.trigger.backendHit := backendTriggerHitVec
+  io.out.bits.uop.trigger.backendCanFire := backendTriggerCanFireVec
 
   if (env.EnableDifftest) {
     val difftest = DifftestModule(new DiffAtomicEvent)

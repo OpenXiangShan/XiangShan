@@ -101,6 +101,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
       val fromRob = Flipped(new RobDispatchTopDownIO)
       val fromCore = new CoreDispatchTopDownIO
     }
+
+    def toDq = Seq(toIntDq0, toIntDq1, toFpDq, toLsDq)
   })
 
   /**
@@ -343,6 +345,11 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     io.toLsDq.req(i).valid  := io.fromRename(i).valid && isMem(i) &&
                                canEnterDpq && dqCanAccept
     io.toLsDq.req(i).bits   := updatedUop(i)
+
+    //delete trigger message from frontend
+    io.toDq.map(dq => {
+      dq.req(i).bits.trigger.clear()
+    })
 
     XSDebug(io.toIntDq0.req(i).valid, p"pc 0x${Hexadecimal(io.toIntDq0.req(i).bits.pc)} int index $i\n")
     XSDebug(io.toIntDq1.req(i).valid, p"pc 0x${Hexadecimal(io.toIntDq1.req(i).bits.pc)} int index $i\n")
