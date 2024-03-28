@@ -363,3 +363,5 @@ stack.info*
 
 !ready-to-run/*
 
+simulator_err.txt
+simulator_out.txt
