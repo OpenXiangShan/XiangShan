@@ -189,6 +189,8 @@ case class ExeUnitParams(
 
   def hasVStoreFu = fuConfigs.map(_.fuType == FuType.vstu).reduce(_ || _)
 
+  def hasVecLsFu = fuConfigs.map(x => FuType.FuTypeOrR(x.fuType, Seq(FuType.vldu, FuType.vstu))).reduce(_ || _)
+
   def hasStoreAddrFu = fuConfigs.map(_.name == "sta").reduce(_ || _)
 
   def hasStdFu = fuConfigs.map(_.name == "std").reduce(_ || _)

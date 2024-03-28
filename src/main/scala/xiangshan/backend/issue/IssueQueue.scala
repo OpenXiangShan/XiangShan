@@ -4,7 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import utility.{GTimer, HasCircularQueuePtrHelper, SelectOne, GatedValidRegNext}
+import utility.{GTimer, GatedValidRegNext, HasCircularQueuePtrHelper, SelectOne}
 import utils._
 import xiangshan._
 import xiangshan.backend.Bundles._
@@ -13,9 +13,10 @@ import xiangshan.backend.decode.{ImmUnion, Imm_LUI_LOAD}
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.{FuConfig, FuType}
-import xiangshan.mem.{MemWaitUpdateReq, SqPtr, LqPtr}
+import xiangshan.mem.{LqPtr, MemWaitUpdateReq, SqPtr}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.datapath.NewPipelineConnect
+import xiangshan.backend.fu.vector.Bundles.VSew
 
 class IssueQueue(params: IssueBlockParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
@@ -1001,7 +1002,8 @@ class IssueQueueVecMemImp(override val wrapper: IssueQueue)(implicit p: Paramete
     entries.io.enq(i).bits.status match { case enqData =>
       enqData.vecMem.get.sqIdx := s0_enqBits(i).sqIdx
       enqData.vecMem.get.lqIdx := s0_enqBits(i).lqIdx
-
+      // MemAddrIQ also handle vector insts
+      enqData.vecMem.get.numLsElem := s0_enqBits(i).numLsElem
       // update blocked
       val isLsqHead = {
         s0_enqBits(i).lqIdx <= memIO.lqDeqPtr.get &&
@@ -1030,10 +1032,11 @@ class IssueQueueVecMemImp(override val wrapper: IssueQueue)(implicit p: Paramete
   entries.io.vecMemIn.get.sqDeqPtr := memIO.sqDeqPtr.get
   entries.io.vecMemIn.get.lqDeqPtr := memIO.lqDeqPtr.get
 
-
   deqBeforeDly.zipWithIndex.foreach { case (deq, i) =>
     deq.bits.common.sqIdx.foreach(_ := deqEntryVec(i).bits.status.vecMem.get.sqIdx)
     deq.bits.common.lqIdx.foreach(_ := deqEntryVec(i).bits.status.vecMem.get.lqIdx)
+    deq.bits.common.numLsElem.get := deqEntryVec(i).bits.status.vecMem.get.numLsElem
+    deq.bits.common.numLsElem.foreach(_ := deqEntryVec(i).bits.status.vecMem.get.numLsElem)
     if (params.isVecLduIQ) {
       deq.bits.common.ftqIdx.get := deqEntryVec(i).bits.payload.ftqPtr
       deq.bits.common.ftqOffset.get := deqEntryVec(i).bits.payload.ftqOffset

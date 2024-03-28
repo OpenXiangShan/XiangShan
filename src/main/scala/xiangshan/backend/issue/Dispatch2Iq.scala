@@ -739,7 +739,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     }
   }
 
-  private def us_whole_reg(fuOpType: UInt) = fuOpType === VstuType.vsr
+  private def us_whole_reg(fuOpType: UInt) = fuOpType === VstuType.vsr // Todo: move func into FuOpType
   private def us_mask(fuOpType: UInt) = fuOpType === VstuType.vsm
 
   private val uop             = io.in.map(_.bits)
@@ -748,7 +748,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   private val sew             = vtype.map(_.vsew)
   private val lmul            = vtype.map(_.vlmul)
   private val eew             = uop.map(_.vpu.veew)
-  private val mop             = fuOpType.map(_(6, 5))
+  private val mop             = fuOpType.map(_(6, 5)) // Todo: move this func into FuOpType
   private val nf              = fuOpType.zip(uop.map(_.vpu.nf)).map{ case (fuOpType_Item, vpu_Nf_Item) => Mux(us_whole_reg(fuOpType_Item), 0.U, vpu_Nf_Item) }
   private val emul            = fuOpType.zipWithIndex.map { case (fuOpType_Item, index) => {
     Mux(us_whole_reg(fuOpType_Item), GenUSWholeEmul(uop(index).vpu.nf), Mux(us_mask(fuOpType_Item), 0.U(mulBits.W), EewLog2(eew(index)) - sew(index) + lmul(index)))
@@ -1034,7 +1034,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   uopsIn <> io.in
   uopsIn.foreach(_.ready := false.B)
   uopsIn.zipWithIndex.foreach { case (uopIn, idx) =>
-    uopIn.ready := enqMapDeqMatrix(idx).asUInt.orR && lsqCanAccept
+    uopIn.ready := enqMapDeqMatrix(idx).asUInt.orR && lsqCanAccept // Todo: move allowDispatch here
     uopIn.bits.lqIdx := s0_enqLsq_resp(idx).lqIdx
     uopIn.bits.sqIdx := s0_enqLsq_resp(idx).sqIdx
   }

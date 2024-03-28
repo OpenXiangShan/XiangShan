@@ -3,14 +3,15 @@ package xiangshan.backend.issue
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.{MathUtils, OptionWrapper}
+import utils.{MathUtils, OptionWrapper, XSError}
 import utility.HasCircularQueuePtrHelper
 import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.FuType
+import xiangshan.backend.fu.vector.Bundles.NumLsElem
 import xiangshan.backend.rob.RobPtr
-import xiangshan.mem.{MemWaitUpdateReq, SqPtr, LqPtr}
+import xiangshan.mem.{LqPtr, MemWaitUpdateReq, SqPtr}
 
 object EntryBundles extends HasCircularQueuePtrHelper {
 
@@ -57,6 +58,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
   class StatusVecMemPart(implicit p:Parameters, params: IssueBlockParams) extends Bundle {
     val sqIdx                 = new SqPtr
     val lqIdx                 = new LqPtr
+    val numLsElem             = NumLsElem()
   }
 
   class EntryDeqRespBundle(implicit p: Parameters, params: IssueBlockParams) extends Bundle {
@@ -371,7 +373,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     }
 
     // update blocked
-    entryUpdate.status.blocked                        := !isLsqHead
+    entryUpdate.status.blocked                        := !isLsqHead // Todo: remove this
   }
 
   def ExuOHGen(exuOH: Vec[Bool], wakeupByIQOH: Vec[Bool], wakeup: Bool, regSrcExuOH: Vec[Bool])(implicit p: Parameters, params: IssueBlockParams) = {

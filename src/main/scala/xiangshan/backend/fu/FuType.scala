@@ -204,6 +204,14 @@ object FuType extends OHEnumeration {
     def apply(fuType: UInt, fus: Seq[OHType]): Bool = {
       fus.map(x => fuType(x.id)).fold(false.B)(_ || _)
     }
+
+    def apply(fuType: OHType, fu0: OHType, fus: OHType*): Boolean = {
+      apply(fuType, fu0 +: fus)
+    }
+
+    def apply(fuTupe: OHType, fus: Seq[OHType]): Boolean = {
+      fus.map(x => x == fuTupe).fold(false)(_ || _)
+    }
   }
 
   val functionNameMap = Map(
