@@ -240,7 +240,7 @@ trait SdtrigExt extends HasXSParameter{
     val eq = data(VAddrBits - 1, 0) === tdata(VAddrBits - 1, 0)
     val ge = data(VAddrBits - 1, 0) >= tdata(VAddrBits - 1, 0)
     val lt = data(VAddrBits - 1, 0) < tdata(VAddrBits - 1, 0)
-    val res = MuxLookup(matchType, false.B, Seq(
+    val res = MuxLookup(matchType, false.B)(Seq(
       TrigMatchEnum.EQ -> eq,
       TrigMatchEnum.GE -> ge,
       TrigMatchEnum.LT -> lt
