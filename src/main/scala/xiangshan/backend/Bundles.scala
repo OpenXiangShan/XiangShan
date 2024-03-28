@@ -210,7 +210,7 @@ object Bundles {
 
     val debug_fuType    = OptionWrapper(backendParams.debugEn, FuType())
 
-    val numLsElem         = UInt((log2Ceil(VLEN/8) + 1).W)
+    val numLsElem       = NumLsElem()
 
     def getDebugFuType: UInt = debug_fuType.getOrElse(fuType)
 
@@ -523,6 +523,9 @@ class IssueQueueIQWakeUpBundle(
     val storeSetHit    = OptionWrapper(params.hasLoadExu, Bool()) // inst has been allocated an store set
     val loadWaitStrict = OptionWrapper(params.hasLoadExu, Bool()) // load inst will not be executed until ALL former store addr calcuated
     val ssid           = OptionWrapper(params.hasLoadExu, UInt(SSIDWidth.W))
+    // only vector load store need
+    val numLsElem      = OptionWrapper(params.hasVecLsFu, NumLsElem())
+
     val sqIdx = if (params.hasMemAddrFu || params.hasStdFu) Some(new SqPtr) else None
     val lqIdx = if (params.hasMemAddrFu) Some(new LqPtr) else None
     val dataSources = Vec(params.numRegSrc, DataSource())
@@ -585,6 +588,7 @@ class IssueQueueIQWakeUpBundle(
       this.ssid          .foreach(_ := source.common.ssid.get)
       this.lqIdx         .foreach(_ := source.common.lqIdx.get)
       this.sqIdx         .foreach(_ := source.common.sqIdx.get)
+      this.numLsElem     .foreach(_ := source.common.numLsElem.get)
       this.srcTimer      .foreach(_ := source.common.srcTimer.get)
       this.loadDependency.foreach(_ := source.common.loadDependency.get.map(_ << 1))
     }

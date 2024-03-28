@@ -123,6 +123,12 @@ object Bundles {
 
   object VEew extends NamedUInt(3)
 
+  object NumLsElem {
+    def apply()(implicit p: Parameters): UInt = UInt(width.W)
+
+    def width(implicit p: Parameters) = log2Up(p(XSCoreParamsKey).maxElemPerVreg)
+  }
+
   class Fpu extends Bundle{
     val isFpToVecInst = Bool()
     val isFP32Instr   = Bool()

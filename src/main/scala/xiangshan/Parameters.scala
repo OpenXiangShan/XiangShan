@@ -318,6 +318,16 @@ case class XSCoreParameters
 ){
   def vlWidth = log2Up(VLEN) + 1
 
+  /**
+   * the minimum element length of vector elements
+   */
+  val minVecElen: Int = 8
+
+  /**
+   * the maximum number of elements in vector register
+   */
+  val maxElemPerVreg: Int = VLEN / minVecElen
+
   val allHistLens = SCHistLens ++ ITTageTableInfos.map(_._2) ++ TageTableInfos.map(_._2) :+ UbtbGHRLength
   val HistoryLength = allHistLens.max + numBr * FtqSize + 9 // 256 for the predictor configs now
 
@@ -571,6 +581,16 @@ trait HasXSParameter {
   val RobSize = coreParams.RobSize
   val RabSize = coreParams.RabSize
   val VTypeBufferSize = coreParams.VTypeBufferSize
+  /**
+   * the minimum element length of vector elements
+   */
+  val minVecElen: Int = coreParams.minVecElen
+
+  /**
+   * the maximum number of elements in vector register
+   */
+  val maxElemPerVreg: Int = coreParams.maxElemPerVreg
+
   val IntRefCounterWidth = log2Ceil(RobSize)
   val LSQEnqWidth = coreParams.dpParams.LsDqDeqWidth
   val LSQLdEnqWidth = LSQEnqWidth min backendParams.numLoadDp

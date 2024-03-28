@@ -328,8 +328,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // val vlWrapper = Module(new VectorLoadWrapper)
   // val vsUopQueue = Module(new VsUopQueue)
   // val vsFlowQueue = Module(new VsFlowQueue)
-  val vlSplit = Seq.fill(LduCnt)(Module(new VLSplitImp))
-  val vsSplit = Seq.fill(StaCnt)(Module(new VSSplitImp))
+
+  // The number of vector load/store units is decoupled with the number of load/store units
+  val vlSplit = Seq.fill(VlduCnt)(Module(new VLSplitImp))
+  val vsSplit = Seq.fill(VstuCnt)(Module(new VSSplitImp))
   val vlMergeBuffer = Module(new VLMergeBufferImp)
   val vsMergeBuffer = Module(new VSMergeBufferImp)
 
@@ -1258,27 +1260,31 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // lsq.io.vecWriteback.bits := vlWrapper.io.uopWriteback.bits
 
   // vector
-  (0 until StorePipelineWidth).foreach{i =>
+  (0 until VstuCnt).foreach{i =>
     vsSplit(i).io.redirect <> redirect
-    vsSplit(i).io.in := DontCare
+    vsSplit(i).io.in <> io.ooo_to_mem.issueVldu.head
+    vsSplit(i).io.in.valid := io.ooo_to_mem.issueVldu.head.valid && LSUOpType.isVecSt(io.ooo_to_mem.issueVldu.head.bits.uop.fuOpType)
     vsSplit(i).io.toMergeBuffer <> vlMergeBuffer.io.fromSplit(i)
-    vsSplit(i).io.out <> storeUnits(i).io.vecstin
-    vsSplit(i).io.vstd.get := DontCare
+    vsSplit(i).io.out <> storeUnits(i).io.vecstin // Todo: May be some balance mechanism is needed
+    vsSplit(i).io.vstd.get := DontCare // Todo: Discuss how to pass vector store data
 
 //    vsMergeBuffer.io.fromPipeline(i) <> storeUnits(i).io.vecstout
     vsMergeBuffer.io.fromPipeline(i) := DontCare
     storeUnits(i).io.vecstout.ready := false.B
   }
-  (0 until LoadPipelineWidth).foreach{i =>
+  (0 until VlduCnt).foreach{i =>
     vlSplit(i).io.redirect <> redirect
-    vlSplit(i).io.in := DontCare
+    vlSplit(i).io.in <> io.ooo_to_mem.issueVldu.head
+    vlSplit(i).io.in.valid := io.ooo_to_mem.issueVldu.head.valid && LSUOpType.isVecLd(io.ooo_to_mem.issueVldu.head.bits.uop.fuOpType)
     vlSplit(i).io.toMergeBuffer <> vlMergeBuffer.io.fromSplit(i)
-    vlSplit(i).io.out <> loadUnits(i).io.vecldin
+    vlSplit(i).io.out <> loadUnits(i).io.vecldin // Todo: May be some balance mechanism is needed
 
 //    vlMergeBuffer.io.fromPipeline(i) <> loadUnits(i).io.vecldout
     vlMergeBuffer.io.fromPipeline(i) := DontCare
     loadUnits(i).io.vecldout.ready := false.B
   }
+  io.ooo_to_mem.issueVldu.head.ready := vsSplit.head.io.in.ready && vlSplit.head.io.in.ready
+
   vlMergeBuffer.io.redirect <> redirect
   vsMergeBuffer.io.redirect <> redirect
 
