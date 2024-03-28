@@ -84,6 +84,7 @@ class BusPerfMonitorImp(outer: BusPerfMonitor, name: String, stat_latency: Boole
           XSPerfAccumulate(s"${clientName}_${channelName}_${op}_stall",
             i.U === d.opcode && chn.valid && !chn.ready
           )
+        case e: TLBundleE => throw new IllegalArgumentException("Cannot reach here")
       }
     }
   }

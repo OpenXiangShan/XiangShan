@@ -603,7 +603,7 @@ class TLBHintResp(implicit p: Parameters) extends TlbBundle {
 }
 
 class TlbHintIO(implicit p: Parameters) extends TlbBundle {
-  val req = Vec(exuParameters.LduCnt, new TlbHintReq)
+  val req = Vec(backendParams.LdExuCnt, new TlbHintReq)
   val resp = ValidIO(new TLBHintResp)
 }
 

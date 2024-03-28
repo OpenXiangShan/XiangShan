@@ -21,14 +21,72 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.rocket.DecodeLogic
 import freechips.rocketchip.rocket.Instructions._
+import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 import xiangshan.backend.fu.fpu.FPU
+import xiangshan.backend.fu.vector.Bundles.{VSew, VLmul}
+import xiangshan.backend.Bundles.VPUCtrlSignals
 import xiangshan.{FPUCtrlSignals, XSModule}
+
+class FPToVecDecoder(implicit p: Parameters) extends XSModule {
+  val io = IO(new Bundle() {
+    val instr = Input(UInt(32.W))
+    val vpuCtrl = Output(new VPUCtrlSignals)
+  })
+
+  val inst = io.instr.asTypeOf(new XSInstBitFields)
+  val fpToVecInsts = Seq(
+    FADD_S, FSUB_S, FADD_D, FSUB_D,
+    FEQ_S, FLT_S, FLE_S, FEQ_D, FLT_D, FLE_D,
+    FMIN_S, FMAX_S, FMIN_D, FMAX_D,
+    FMUL_S, FMUL_D,
+    FDIV_S, FDIV_D, FSQRT_S, FSQRT_D,
+    FMADD_S, FMSUB_S, FNMADD_S, FNMSUB_S, FMADD_D, FMSUB_D, FNMADD_D, FNMSUB_D,
+    FCLASS_S, FCLASS_D, FSGNJ_S, FSGNJ_D, FSGNJX_S, FSGNJX_D, FSGNJN_S, FSGNJN_D,
+  )
+  val isFpToVecInst = fpToVecInsts.map(io.instr === _).reduce(_ || _)
+  val isFP32Instrs = Seq(
+    FADD_S, FSUB_S, FEQ_S, FLT_S, FLE_S, FMIN_S, FMAX_S,
+    FMUL_S, FDIV_S, FSQRT_S,
+    FMADD_S, FMSUB_S, FNMADD_S, FNMSUB_S,
+    FCLASS_S, FSGNJ_S, FSGNJX_S, FSGNJN_S,
+  )
+  val isFP32Instr = isFP32Instrs.map(io.instr === _).reduce(_ || _)
+  val isFP64Instrs = Seq(
+    FADD_D, FSUB_D, FEQ_D, FLT_D, FLE_D, FMIN_D, FMAX_D,
+    FMUL_D, FDIV_D, FSQRT_D,
+    FMADD_D, FMSUB_D, FNMADD_D, FNMSUB_D,
+    FCLASS_D, FSGNJ_D, FSGNJX_D, FSGNJN_D,
+  )
+  val isFP64Instr = isFP64Instrs.map(io.instr === _).reduce(_ || _)
+  val needReverseInsts = fpToVecInsts
+  val needReverseInst = needReverseInsts.map(_ === inst.ALL).reduce(_ || _)
+  io.vpuCtrl := 0.U.asTypeOf(io.vpuCtrl)
+  io.vpuCtrl.fpu.isFpToVecInst := isFpToVecInst
+  io.vpuCtrl.fpu.isFP32Instr   := isFP32Instr
+  io.vpuCtrl.fpu.isFP64Instr   := isFP64Instr
+  io.vpuCtrl.vill  := false.B
+  io.vpuCtrl.vma   := true.B
+  io.vpuCtrl.vta   := true.B
+  io.vpuCtrl.vsew  := Mux(isFP32Instr, VSew.e32, VSew.e64)
+  io.vpuCtrl.vlmul := Mux(isFP32Instr, VLmul.mf4, VLmul.mf2)
+  io.vpuCtrl.vm    := inst.VM
+  io.vpuCtrl.nf    := inst.NF
+  io.vpuCtrl.veew := inst.WIDTH
+  io.vpuCtrl.isReverse := needReverseInst
+  io.vpuCtrl.isExt     := false.B
+  io.vpuCtrl.isNarrow  := false.B
+  io.vpuCtrl.isDstMask := false.B
+  io.vpuCtrl.isOpMask  := false.B
+}
+
 
 class FPDecoder(implicit p: Parameters) extends XSModule{
   val io = IO(new Bundle() {
     val instr = Input(UInt(32.W))
     val fpCtrl = Output(new FPUCtrlSignals)
   })
+
+  private val inst: XSInstBitFields = io.instr.asTypeOf(new XSInstBitFields)
 
   def X = BitPat("b?")
   def N = BitPat("b0")
@@ -120,9 +178,9 @@ class FPDecoder(implicit p: Parameters) extends XSModule{
     ctrl.div, ctrl.sqrt, ctrl.fcvt
   )
   sigs.zip(decoder).foreach({case (s, d) => s := d})
-  ctrl.typ := io.instr(21, 20)
-  ctrl.fmt := io.instr(26, 25)
-  ctrl.rm := io.instr(14, 12)
+  ctrl.typ := inst.TYP
+  ctrl.fmt := inst.FMT
+  ctrl.rm := inst.RM
 
   val fmaTable: Array[(BitPat, List[BitPat])] = Array(
     FADD_S  -> List(BitPat("b00"),N),

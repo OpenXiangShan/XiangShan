@@ -24,6 +24,9 @@ import xiangshan.ExceptionNO._
 import xiangshan.cache._
 import utils._
 import utility._
+import xiangshan.backend.Bundles
+import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
+import xiangshan.backend.fu.FuConfig.LduCfg
 
 class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper
@@ -38,7 +41,7 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
     val req = Flipped(Valid(new LqWriteBundle))
 
     // writeback mmio data
-    val ldout = DecoupledIO(new ExuOutput)
+    val ldout = DecoupledIO(new MemExuOutput)
     val ld_raw_data = Output(new LoadDataFromLQBundle)
 
     // rob: uncache commit
@@ -46,6 +49,9 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
 
     // uncache io
     val uncache = new UncacheWordIO
+
+    // trigger
+    val trigger = new LqTriggerIO
 
     // select this entry
     val select = Output(Bool())
@@ -57,6 +63,7 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
 
   val req_valid = RegInit(false.B)
   val req = Reg(new LqWriteBundle)
+  val triggerResult = RegInit(VecInit(Seq.fill(TriggerNum)(false.B)))
 
   //
   val s_idle :: s_req :: s_resp :: s_wait :: Nil = Enum(4)
@@ -73,6 +80,18 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
   } .elsewhen (io.ldout.fire) {
     req_valid := false.B
   }
+
+  when (io.req.valid) {
+    when (io.req.bits.data_wen_dup(5)) {
+      triggerResult := io.trigger.hitLoadAddrTriggerHitVec
+    }
+  }
+
+  io.trigger.lqLoadAddrTriggerHitVec := Mux(
+    io.ldout.valid,
+    RegNext(triggerResult),
+    VecInit(Seq.fill(TriggerNum)(false.B))
+  )
 
   io.flush := req_valid && req.uop.robIdx.needFlush(io.redirect)
   /**
@@ -131,7 +150,7 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
 
   when (io.uncache.req.fire) {
     XSDebug("uncache req: pc %x addr %x data %x op %x mask %x\n",
-      req.uop.cf.pc,
+      req.uop.pc,
       io.uncache.req.bits.addr,
       io.uncache.req.bits.data,
       io.uncache.req.bits.cmd,
@@ -146,7 +165,7 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
 
   // uncache writeback
   val selUop = req.uop
-  val func = selUop.ctrl.fuOpType
+  val func = selUop.fuOpType
   val raddr = req.paddr
   val rdataSel = LookupTree(raddr(2, 0), List(
       "b000".U -> uncacheData(63,  0),
@@ -165,12 +184,9 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
   io.ldout.bits.uop           := selUop
   io.ldout.bits.uop.lqIdx     := req.uop.lqIdx
   io.ldout.bits.data          := rdataPartialLoad
-  io.ldout.bits.redirectValid := false.B
-  io.ldout.bits.redirect      := DontCare
   io.ldout.bits.debug.isMMIO  := true.B
   io.ldout.bits.debug.paddr   := req.paddr
   io.ldout.bits.debug.vaddr   := req.vaddr
-  io.ldout.bits.fflags        := DontCare
 
   io.ld_raw_data.lqData     := uncacheData
   io.ld_raw_data.uop        := req.uop
@@ -183,7 +199,7 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
     XSInfo("int load miss write to cbd robidx %d lqidx %d pc 0x%x mmio %x\n",
       io.ldout.bits.uop.robIdx.asUInt,
       io.ldout.bits.uop.lqIdx.asUInt,
-      io.ldout.bits.uop.cf.pc,
+      io.ldout.bits.uop.pc,
       true.B
     )
   }
@@ -200,7 +216,7 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
     val req = Vec(LoadPipelineWidth, Flipped(Valid(new LqWriteBundle)))
 
     // writeback mmio data
-    val ldout = Vec(LoadPipelineWidth, DecoupledIO(new ExuOutput))
+    val ldout = Vec(LoadPipelineWidth, DecoupledIO(new MemExuOutput))
     val ld_raw_data = Vec(LoadPipelineWidth, Output(new LoadDataFromLQBundle))
 
     // rob: uncache commit
@@ -209,13 +225,19 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
     // uncache io
     val uncache = new UncacheWordIO
 
+    // trigger io
+    val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
+
     // rollback
+    // For scalar uncache, rollback from frontend when uncache buffer is full
     val rollback = Output(Valid(new Redirect))
+    // For vector uncache, rollback from flow queue when uncache buffer is full
+    val vecReplay = Vec(VecLoadPipelineWidth, DecoupledIO(new LsPipelineBundle()))
   })
 
   val entries = Seq.tabulate(LoadUncacheBufferSize)(i => Module(new UncacheBufferEntry(i)))
 
-  // freeliset: store valid entries index.
+  // freelist: store valid entries index.
   // +---+---+--------------+-----+-----+
   // | 0 | 1 |      ......  | n-2 | n-1 |
   // +---+---+--------------+-----+-----+
@@ -254,6 +276,16 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
     io.ld_raw_data(w) := DontCare
   }
 
+  // set trigger default
+  entries.foreach {
+    case (e) =>
+      e.io.trigger.hitLoadAddrTriggerHitVec := VecInit(Seq.fill(TriggerNum)(false.B))
+  }
+
+  io.trigger.foreach {
+    case (t) =>
+      t.lqLoadAddrTriggerHitVec := VecInit(Seq.fill(TriggerNum)(false.B))
+  }
 
   // enqueue
   // s1:
@@ -267,7 +299,7 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
     !s2_req(i).uop.robIdx.needFlush(RegNext(io.redirect)) &&
     !s2_req(i).uop.robIdx.needFlush(io.redirect)
   })
-  val s2_has_exception = s2_req.map(x => ExceptionNO.selectByFu(x.uop.cf.exceptionVec, lduCfg).asUInt.orR)
+  val s2_has_exception = s2_req.map(x => ExceptionNO.selectByFu(x.uop.exceptionVec, LduCfg).asUInt.orR)
   val s2_need_replay = s2_req.map(_.rep_info.need_rep)
 
   val s2_enqueue = Wire(Vec(LoadPipelineWidth, Bool()))
@@ -299,6 +331,7 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
   val uncacheReq = Wire(DecoupledIO(io.uncache.req.bits.cloneType))
   val ldout = Wire(DecoupledIO(io.ldout(0).bits.cloneType))
   val ld_raw_data = Wire(io.ld_raw_data(0).cloneType)
+  val lqLoadAddrTriggerHitVec = Wire(io.trigger(0).lqLoadAddrTriggerHitVec.cloneType)
 
   // init
   uncacheReq.valid := false.B
@@ -306,6 +339,7 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
   ldout.valid      := false.B
   ldout.bits       := DontCare
   ld_raw_data        := DontCare
+  lqLoadAddrTriggerHitVec := DontCare
 
   entries.zipWithIndex.foreach {
     case (e, i) =>
@@ -317,6 +351,7 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
         when (enqValidVec(w) && (i.U === enqIndexVec(w))) {
           e.io.req.valid := true.B
           e.io.req.bits := s2_req(w)
+          e.io.trigger.hitLoadAddrTriggerHitVec := io.trigger(w).hitLoadAddrTriggerHitVec
         }
       }
 
@@ -335,6 +370,7 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
         // Read vaddr for mem exception
         // no inst will be commited 1 cycle before tval update
         // read vaddr for mmio, and only port 0 is used
+        lqLoadAddrTriggerHitVec := e.io.trigger.lqLoadAddrTriggerHitVec
       }
 
       when (i.U === io.uncache.resp.bits.id) {
@@ -348,9 +384,8 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
   // uncache Writeback
   AddPipelineReg(ldout, io.ldout(0), false.B)
 
-  // uncache RAW data
-  // FIXME: remove it?
-  io.ld_raw_data(0) := RegEnable(ld_raw_data, ldout.fire)
+  io.ld_raw_data(0)      := RegEnable(ld_raw_data, ldout.fire)
+  io.trigger(0).lqLoadAddrTriggerHitVec := RegNext(lqLoadAddrTriggerHitVec)
 
   for (i <- 0 until LoadPipelineWidth) {
     io.rob.mmio(i) := RegNext(s1_valid(i) && s1_req(i).mmio)
@@ -405,19 +440,19 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
     resultOnehot
   }
   val reqNeedCheck = VecInit((0 until LoadPipelineWidth).map(w =>
-    s2_enqueue(w) && !enqValidVec(w)
+    s2_enqueue(w) && !enqValidVec(w) && !s2_req(w).isvec
   ))
   val reqSelUops = VecInit(s2_req.map(_.uop))
   val allRedirect = (0 until LoadPipelineWidth).map(i => {
     val redirect = Wire(Valid(new Redirect))
     redirect.valid := reqNeedCheck(i)
     redirect.bits             := DontCare
-    redirect.bits.isRVC       := reqSelUops(i).cf.pd.isRVC
+    redirect.bits.isRVC       := reqSelUops(i).preDecodeInfo.isRVC
     redirect.bits.robIdx      := reqSelUops(i).robIdx
-    redirect.bits.ftqIdx      := reqSelUops(i).cf.ftqPtr
-    redirect.bits.ftqOffset   := reqSelUops(i).cf.ftqOffset
+    redirect.bits.ftqIdx      := reqSelUops(i).ftqPtr
+    redirect.bits.ftqOffset   := reqSelUops(i).ftqOffset
     redirect.bits.level       := RedirectLevel.flush
-    redirect.bits.cfiUpdate.target := reqSelUops(i).cf.pc
+    redirect.bits.cfiUpdate.target := reqSelUops(i).pc // TODO: check if need pc
     redirect.bits.debug_runahead_checkpoint_id := reqSelUops(i).debugInfo.runahead_checkpoint_id
     redirect
   })
@@ -430,6 +465,23 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
                       !oldestRedirect.bits.robIdx.needFlush(lastCycleRedirect) &&
                       !oldestRedirect.bits.robIdx.needFlush(lastLastCycleRedirect))
   io.rollback.bits := RegNext(oldestRedirect.bits)
+
+  io.vecReplay.zipWithIndex.foreach { case (x, i) =>
+    val req = s2_req(i)
+    x.valid := s2_enqueue(i) && !enqValidVec(i) && req.isvec
+    x.bits := DontCare
+    x.bits.uop := req.uop
+    x.bits.vaddr := req.vaddr
+    x.bits.paddr := req.paddr
+    x.bits.mask := req.mask
+    x.bits.mmio := true.B
+    x.bits.isvec := true.B
+    x.bits.uop_unit_stride_fof := req.uop_unit_stride_fof
+    x.bits.reg_offset := req.reg_offset
+    x.bits.vecActive := req.vecActive
+    x.bits.is_first_ele := req.is_first_ele
+    x.bits.flowPtr := req.flowPtr
+  }
 
   //  perf counter
   val validCount = freeList.io.validCount

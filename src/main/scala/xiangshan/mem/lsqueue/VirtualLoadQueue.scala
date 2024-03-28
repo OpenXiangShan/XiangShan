@@ -19,11 +19,13 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config._
 import xiangshan._
-import xiangshan.backend.rob.{RobPtr, RobLsqIO}
+import xiangshan.backend.rob.{RobLsqIO, RobPtr}
 import xiangshan.ExceptionNO._
 import xiangshan.cache._
 import utils._
 import utility._
+import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
+import xiangshan.backend.fu.FuConfig.LduCfg
 
 class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
@@ -46,6 +48,8 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     // to dispatch
     val lqDeq       = Output(UInt(log2Up(CommitWidth + 1).W))
     val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize+1).W))
+    // vector load writeback
+    val vecWriteback = Flipped(ValidIO(new MemExuOutput(isVector = true)))
   })
 
   println("VirtualLoadQueue: size: " + VirtualLoadQueueSize)
@@ -57,7 +61,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   //  MicroOp     : inst's microOp
   //  Flags       : load flags
   val allocated = RegInit(VecInit(List.fill(VirtualLoadQueueSize)(false.B))) // The control signals need to explicitly indicate the initial value
-  val uop = Reg(Vec(VirtualLoadQueueSize, new MicroOp))
+  val uop = Reg(Vec(VirtualLoadQueueSize, new DynInst))
   val addrvalid = RegInit(VecInit(List.fill(VirtualLoadQueueSize)(false.B))) // non-mmio addr is valid
   val datavalid = RegInit(VecInit(List.fill(VirtualLoadQueueSize)(false.B))) // non-mmio data is valid
 
@@ -80,7 +84,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   val lastLastCycleRedirect = RegNext(lastCycleRedirect)
 
   val validCount = distanceBetween(enqPtrExt(0), deqPtr)
-  val allowEnqueue = validCount <= (VirtualLoadQueueSize - LoadPipelineWidth).U
+  val allowEnqueue = validCount <= (VirtualLoadQueueSize - LSQLdEnqWidth).U
   val canEnqueue = io.enq.req.map(_.valid)
   val needCancel = WireInit(VecInit((0 until VirtualLoadQueueSize).map(i => {
     uop(i).robIdx.needFlush(io.redirect) && allocated(i)
@@ -118,7 +122,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   val deqInSameRedirectCycle = VecInit(deqLookupVec.map(ptr => needCancel(ptr.value)))
   // make chisel happy
   val deqCountMask = Wire(UInt(DeqPtrMoveStride.W))
-  deqCountMask := deqLookup.asUInt & ~deqInSameRedirectCycle.asUInt
+  deqCountMask := deqLookup.asUInt & (~deqInSameRedirectCycle.asUInt).asUInt
   val commitCount = PopCount(PriorityEncoderOH(~deqCountMask) - 1.U)
   val lastCommitCount = RegNext(commitCount)
 
@@ -196,9 +200,10 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     //   flag bits in lq needs to be updated accurately
     io.ldin(i).ready := true.B
     val loadWbIndex = io.ldin(i).bits.uop.lqIdx.value
+    val isvec = io.ldin(i).bits.isvec // vector loads are writebacked from uop queue instead of ldus
 
-    when (io.ldin(i).valid) {
-      val hasExceptions = ExceptionNO.selectByFu(io.ldin(i).bits.uop.cf.exceptionVec, lduCfg).asUInt.orR
+    when (io.ldin(i).valid && !isvec) {
+      val hasExceptions = ExceptionNO.selectByFu(io.ldin(i).bits.uop.exceptionVec, LduCfg).asUInt.orR
       val need_rep = io.ldin(i).bits.rep_info.need_rep
 
       when (!need_rep) {
@@ -218,13 +223,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
 
         //
         when (io.ldin(i).bits.data_wen_dup(1)) {
-          uop(loadWbIndex).pdest := io.ldin(i).bits.uop.pdest
-        }
-        when (io.ldin(i).bits.data_wen_dup(2)) {
-          uop(loadWbIndex).cf := io.ldin(i).bits.uop.cf
-        }
-        when (io.ldin(i).bits.data_wen_dup(3)) {
-          uop(loadWbIndex).ctrl := io.ldin(i).bits.uop.ctrl
+          uop(loadWbIndex) := io.ldin(i).bits.uop
         }
         when (io.ldin(i).bits.data_wen_dup(4)) {
           uop(loadWbIndex).debugInfo := io.ldin(i).bits.uop.debugInfo
@@ -237,7 +236,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
 
         XSInfo(io.ldin(i).valid, "load hit write to lq idx %d pc 0x%x vaddr %x paddr %x mask %x forwardData %x forwardMask: %x mmio %x\n",
           io.ldin(i).bits.uop.lqIdx.asUInt,
-          io.ldin(i).bits.uop.cf.pc,
+          io.ldin(i).bits.uop.pc,
           io.ldin(i).bits.vaddr,
           io.ldin(i).bits.paddr,
           io.ldin(i).bits.mask,
@@ -247,6 +246,14 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
         )
       }
     }
+  }
+
+  XSError(io.vecWriteback.valid && !allocated(io.vecWriteback.bits.uop.lqIdx.value),
+    "wb lqIdx should be allocated at dispatch stage")
+  when (io.vecWriteback.valid) {
+    val vecWbIndex = io.vecWriteback.bits.uop.lqIdx.value
+    addrvalid(vecWbIndex) := true.B
+    datavalid(vecWbIndex) := true.B
   }
 
   //  perf counter
@@ -267,7 +274,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   }
 
   for (i <- 0 until VirtualLoadQueueSize) {
-    XSDebug(i + " pc %x pa %x ", uop(i).cf.pc, debug_paddr(i))
+    XSDebug(i + " pc %x pa %x ", uop(i).pc, debug_paddr(i))
     PrintFlag(allocated(i), "v")
     PrintFlag(allocated(i) && datavalid(i), "d")
     PrintFlag(allocated(i) && addrvalid(i), "a")

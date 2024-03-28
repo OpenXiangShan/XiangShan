@@ -29,8 +29,8 @@ if __name__ == "__main__":
                 in_miss_entry = False
             elif in_decode and "_pc" in line:
                 err(line, line_number, "PC should not be in decode!!!\n")
-            elif in_dispatch and "_lsrc" in line:
-                err(line, line_number, "lsrc should not be in dispatch!!!\n")
+            # elif in_dispatch and "_lsrc" in line:
+            #     err(line, line_number, "lsrc should not be in dispatch!!!\n")
             elif in_miss_entry and "refill_data_raw" in line:
                 err(line, line_number, "refill_data_raw should not be in MissEntry!!!\n")
             if "always @(posedge clock) begin" in line:

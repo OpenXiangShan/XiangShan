@@ -16,8 +16,8 @@
 
 package xiangshan
 
-import chisel3._
 import org.chipsalliance.cde.config.{Config, Parameters}
+import chisel3._
 import chisel3.util.{Valid, ValidIO}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
@@ -33,8 +33,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   with HasSoCParameter
 {
   override def shouldBeInlined: Boolean = false
-  private val core = LazyModule(new XSCore())
-  private val l2top = LazyModule(new L2Top())
+  val core = LazyModule(new XSCore())
+  val l2top = LazyModule(new L2Top())
 
   // =========== Public Ports ============
   val core_l3_pf_port = core.memBlock.l3_pf_sender_opt
@@ -73,7 +73,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       })
     case None =>
   }
-  
+
   val core_l3_tpmeta_source_port = l2cache match {
     case Some(l2) => l2.tpmeta_source_node
     case None => None
