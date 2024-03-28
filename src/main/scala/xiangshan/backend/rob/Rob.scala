@@ -1598,10 +1598,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val ptr = deqPtrVec(i).value
       val uop = commitDebugUop(i)
       val exuOut = debug_exuDebug(ptr)
-      difftest.valid  := io.commits.commitValid(i) && io.commits.isCommit
-      difftest.paddr  := exuOut.paddr
-      difftest.opType := uop.fuOpType
-      difftest.fuType := uop.fuType
+      difftest.valid    := io.commits.commitValid(i) && io.commits.isCommit
+      difftest.paddr    := exuOut.paddr
+      difftest.opType   := uop.fuOpType
+      difftest.isAtomic := FuType.isAMO(uop.fuType)
+      difftest.isLoad   := FuType.isLoad(uop.fuType)
     }
   }
 
