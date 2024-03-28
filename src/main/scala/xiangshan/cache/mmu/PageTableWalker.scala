@@ -520,7 +520,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val gpaddr = MakeGPAddr(io.in.bits.ppn, getVpnn(io.in.bits.req_info.vpn, 0))
   val hptw_resp = entries(hptw_resp_ptr_reg).hptw_resp
   val hpaddr = Cat(hptw_resp.genPPNS2(get_pn(gpaddr)), get_off(gpaddr))
-  val addr = MakeAddr(io.in.bits.ppn, getVpnn(io.in.bits.req_info.vpn, 0))
+  val addr = RegEnable(MakeAddr(io.in.bits.ppn, getVpnn(io.in.bits.req_info.vpn, 0)), io.in.fire)
   io.pmp.req.valid := need_addr_check || hptw_need_addr_check
   io.pmp.req.bits.addr := Mux(hptw_need_addr_check, hpaddr, addr)
   io.pmp.req.bits.cmd := TlbCmd.read
