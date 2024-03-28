@@ -419,29 +419,19 @@ class FrontendTrigger(implicit p: Parameters) extends XSModule with SdtrigExt {
 
   for (i <- 0 until TriggerNum) { PrintTriggerInfo(triggerEnableVec(i), tdata(i)) }
 
+  //val triggerHitVec = Wire(Vec(PredictWidth, Vec(TriggerNum, Bool())))
+  val triggerHitVec = (0 until TriggerNum).map(j =>
+      TriggerCmpConsecutive(io.pc, tdata(j).tdata2, tdata(j).matchType, triggerEnableVec(j)).map(
+        hit => hit && !tdata(j).select)
+  ).transpose
+
   for (i <- 0 until PredictWidth) {
-    val currentPC = io.pc(i)
-    val currentIsRVC = io.pds(i).isRVC
-    val inst = WireInit(rawInsts(i))
-    val triggerHitVec = Wire(Vec(TriggerNum, Bool()))
     val triggerCanFireVec = Wire(Vec(TriggerNum, Bool()))
-
-    for (j <- 0 until TriggerNum) {
-      triggerHitVec(j) := Mux(
-        tdata(j).select,
-        TriggerCmp(Mux(currentIsRVC, inst(15, 0), inst), tdata(j).tdata2, tdata(j).matchType, triggerEnableVec(j)),
-        TriggerCmp(currentPC, tdata(j).tdata2, tdata(j).matchType, triggerEnableVec(j))
-      )
-    }
-
-    TriggerCheckCanFire(TriggerNum, triggerCanFireVec, triggerHitVec, triggerTimingVec, triggerChainVec)
-
+    TriggerCheckCanFire(TriggerNum, triggerCanFireVec, VecInit(triggerHitVec(i)), triggerTimingVec, triggerChainVec)
     // only hit, no matter fire or not
-    io.triggered(i).frontendHit := triggerHitVec
+    io.triggered(i).frontendHit := triggerHitVec(i)
     // can fire, exception will be handled at rob enq
     io.triggered(i).frontendCanFire := triggerCanFireVec
-    io.triggered(i).frontendTiming  := triggerTimingVec.zip(triggerEnableVec).map{ case(timing, en) => timing && en}
-    io.triggered(i).frontendChain  := triggerChainVec.zip(triggerEnableVec).map{ case(chain, en) => chain && en}
     XSDebug(io.triggered(i).getFrontendCanFire, p"Debug Mode: Predecode Inst No. ${i} has trigger fire vec ${io.triggered(i).frontendCanFire}\n")
   }
   io.triggered.foreach(_.backendCanFire := VecInit(Seq.fill(TriggerNum)(false.B)))

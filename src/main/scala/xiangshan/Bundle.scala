@@ -635,8 +635,6 @@ class L1CacheErrorInfo(implicit p: Parameters) extends XSBundle {
 class TriggerCf(implicit p: Parameters) extends XSBundle {
   // frontend
   val frontendHit       = Vec(TriggerNum, Bool()) // en && hit
-  val frontendTiming    = Vec(TriggerNum, Bool()) // en && timing
-  val frontendChain     = Vec(TriggerNum, Bool()) // en && chain
   val frontendCanFire   = Vec(TriggerNum, Bool())
   // backend
   val backendHit        = Vec(TriggerNum, Bool())
@@ -653,8 +651,6 @@ class TriggerCf(implicit p: Parameters) extends XSBundle {
     frontendCanFire.foreach(_ := false.B)
     backendHit.foreach(_ := false.B)
     backendCanFire.foreach(_ := false.B)
-    frontendTiming.foreach(_ := false.B)
-    frontendChain.foreach(_ := false.B)
   }
 }
 
