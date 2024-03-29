@@ -750,20 +750,20 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   private val eew             = uop.map(_.vpu.veew)
   private val mop             = fuOpType.map(_(6, 5)) // Todo: move this func into FuOpType
   private val nf              = fuOpType.zip(uop.map(_.vpu.nf)).map{ case (fuOpType_Item, vpu_Nf_Item) => Mux(us_whole_reg(fuOpType_Item), 0.U, vpu_Nf_Item) }
-  private val emul            = fuOpType.zipWithIndex.map { case (fuOpType_Item, index) => {
+  private val emul            = fuOpType.zipWithIndex.map { case (fuOpType_Item, index) =>
     Mux(us_whole_reg(fuOpType_Item), GenUSWholeEmul(uop(index).vpu.nf), Mux(us_mask(fuOpType_Item), 0.U(mulBits.W), EewLog2(eew(index)) - sew(index) + lmul(index)))
   }
-  }
+
+  private val isVlsType       = uop.map(uop_Item => isVls((uop_Item.fuType)))
+  private val isUnitStrideType= mop.map(mop_Item => isUnitStride(mop_Item))
   private val isSegment       = nf.zip(fuOpType).map{ case (fuOpType_Item, nf_Item) => nf_Item =/= 0.U && !us_whole_reg(fuOpType_Item) }
   private val instType        = isSegment.zip(mop).map{ case (isSegement_Item, mop_Item) => Cat(isSegement_Item, mop_Item) }
-  private val flows           = instType.zipWithIndex.map{ case (instType_Item, index) => GenRealFlowNum(instType_Item, emul(index), lmul(index), eew(index), sew(index)) }
-  private val numLsElem       = flows.map(flow => (1.U(5.W) << flow).asUInt)
-
-  private val isVlsType       = uop.map(fuType_Item => isVls((fuType_Item.fuType)))
-  private val isUnitStrideType= mop.map(mop_Item => isUnitStride(mop_Item))
+  private val numLsElem       = instType.zipWithIndex.map{ case (instType_Item, index) =>
+    Mux(us_whole_reg(fuOpType(index)) && isVlsType(index), 1.U, Mux(isUnitStrideType(index), 2.U, (1.U(5.W) << GenRealFlowNum(instType_Item, emul(index), lmul(index), eew(index), sew(index))).asUInt))
+  }
 
   private val conserveFlows = isVlsType.zip(isUnitStrideType).map{
-    case (isVlsTyep_Item, isUnitStrideType_Item) => Mux(isUnitStrideType_Item, 2.U, Mux(isVlsTyep_Item, 16.U, 1.U))
+    case (isVlsTyep_Item, isUnitStrideType_Item) => Mux(isUnitStrideType_Item && isVlsTyep_Item, 2.U, Mux(isVlsTyep_Item, 16.U, 1.U))
   }
 
   private val allowDispatch = Wire(Vec(numLsElem.length, Bool()))
