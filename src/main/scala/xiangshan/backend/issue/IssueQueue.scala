@@ -807,20 +807,6 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       }.reduce(_ +& _), true.B, 0, params.numDeq * params.numRegSrc + 1, 1)
     }
   }
-
-  // cancel instr count
-  if (params.hasIQWakeUp) {
-    val cancelVec: Vec[Bool] = entries.io.cancel.get
-    XSPerfAccumulate("cancel_instr_count", PopCount(validVec.zip(cancelVec).map(x => x._1 & x._2)))
-    XSPerfHistogram("cancel_instr_hist", PopCount(validVec.zip(cancelVec).map(x => x._1 & x._2)), true.B, 0, params.numEntries, 1)
-    for (t <- FuType.functionNameMap.keys) {
-      val fuName = FuType.functionNameMap(t)
-      if (params.getFuCfgs.map(_.fuType == t).reduce(_ | _)) {
-        XSPerfAccumulate(s"cancel_instr_count_futype_${fuName}", PopCount(validVec.zip(cancelVec).zip(fuTypeVec).map{ case ((x, y), fu) => x & y & fu === t.U }))
-        XSPerfHistogram(s"cancel_instr_hist_futype_${fuName}", PopCount(validVec.zip(cancelVec).zip(fuTypeVec).map{ case ((x, y), fu) => x & y & fu === t.U }), true.B, 0, params.numEntries, 1)
-      }
-    }
-  }
 }
 
 class IssueQueueLoadBundle(implicit p: Parameters) extends XSBundle {
