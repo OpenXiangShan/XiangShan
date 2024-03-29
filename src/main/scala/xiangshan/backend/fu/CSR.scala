@@ -431,6 +431,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val pma = Wire(Vec(NumPMA, new PMPEntry())) // just used for method parameter
   val pmpMapping = pmp_gen_mapping(pmp_init, NumPMP, PmpcfgBase, PmpaddrBase, pmp)
   val pmaMapping = pmp_gen_mapping(pma_init, NumPMA, PmacfgBase, PmaaddrBase, pma)
+  // !WARNNING: pmp and pma CSRs are not checked in difftest.
 
   // Superviser-Level CSRs
 
