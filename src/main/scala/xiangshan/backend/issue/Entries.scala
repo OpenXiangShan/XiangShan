@@ -67,7 +67,6 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val dataSourceVec       = Wire(Vec(params.numEntries, Vec(params.numRegSrc, DataSource())))
   val loadDependencyVec   = Wire(Vec(params.numEntries, Vec(LoadPipelineWidth, UInt(3.W))))
   val srcLoadDependencyVec= Wire(Vec(params.numEntries, Vec(params.numRegSrc, Vec(LoadPipelineWidth, UInt(3.W)))))
-  val srcTimerVec         = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Vec(params.numRegSrc, UInt(3.W)))))
   val srcWakeUpL1ExuOHVec = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Vec(params.numRegSrc, ExuVec()))))
   //deq sel
   val deqSelVec           = Wire(Vec(params.numEntries, Bool()))
@@ -357,20 +356,9 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     }
   }
 
-  if (params.hasIQWakeUp) {
-    cancelBypassVec.zip(srcWakeUpL1ExuOHVec.get).zip(srcTimerVec.get).zip(srcLoadDependencyVec).foreach{ case (((cancelBypass: Bool, l1ExuOH: Vec[Vec[Bool]]), srcTimer: Vec[UInt]), srcLoadDependency: Vec[Vec[UInt]]) =>
-      val cancelByOg0 = l1ExuOH.zip(srcTimer).map {
-        case(exuOH, srcTimer) =>
-          (exuOH.asUInt & io.og0Cancel.asUInt).orR && srcTimer === 1.U
-      }.reduce(_ | _)
-      val cancelByLd = srcLoadDependency.map(x => LoadShouldCancel(Some(x), io.ldCancel)).reduce(_ | _)
-      cancelBypass := cancelByLd
-    }
-  } else {
-    cancelBypassVec.zip(srcLoadDependencyVec).foreach { case (cancelBypass, srcLoadDependency) =>
-      val cancelByLd = srcLoadDependency.map(x => LoadShouldCancel(Some(x), io.ldCancel)).reduce(_ | _)
-      cancelBypass := cancelByLd
-    }
+  cancelBypassVec.zip(srcLoadDependencyVec).foreach { case (cancelBypass, srcLoadDependency) =>
+    val cancelByLd = srcLoadDependency.map(x => LoadShouldCancel(Some(x), io.ldCancel)).reduce(_ | _)
+    cancelBypass := cancelByLd
   }
 
   io.valid                          := validVec.asUInt
@@ -378,7 +366,6 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   io.fuType                         := fuTypeVec
   io.dataSources                    := dataSourceVec
   io.srcWakeUpL1ExuOH.foreach(_     := srcWakeUpL1ExuOHVec.get.map(x => VecInit(x.map(_.asUInt))))
-  io.srcTimer.foreach(_             := srcTimerVec.get)
   io.loadDependency                 := loadDependencyVec
   io.isFirstIssue.zipWithIndex.foreach{ case (isFirstIssue, deqIdx) =>
     isFirstIssue                    := io.deqSelOH(deqIdx).valid && Mux1H(io.deqSelOH(deqIdx).bits, isFirstIssueVec)
@@ -415,8 +402,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     srcLoadDependencyVec(entryIdx)          := out.srcLoadDependency
     loadDependencyVec(entryIdx)             := out.entry.bits.status.mergedLoadDependency
     if (params.hasIQWakeUp) {
-      srcWakeUpL1ExuOHVec.get(entryIdx)       := out.srcWakeUpL1ExuOH.get
-      srcTimerVec.get(entryIdx)               := out.srcTimer.get
+      srcWakeUpL1ExuOHVec.get(entryIdx)     := out.srcWakeUpL1ExuOH.get
     }
     if (params.isVecMemIQ) {
       uopIdxVec.get(entryIdx)       := out.uopIdx.get
@@ -526,7 +512,6 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val dataSources         = Vec(params.numEntries, Vec(params.numRegSrc, Output(DataSource())))
   val loadDependency      = Vec(params.numEntries, Vec(LoadPipelineWidth, UInt(3.W)))
   val srcWakeUpL1ExuOH    = OptionWrapper(params.hasIQWakeUp, Vec(params.numEntries, Vec(params.numRegSrc, Output(ExuOH()))))
-  val srcTimer            = OptionWrapper(params.hasIQWakeUp, Vec(params.numEntries, Vec(params.numRegSrc, Output(UInt(3.W)))))
   //deq status
   val isFirstIssue        = Vec(params.numDeq, Output(Bool()))
   val deqEntry            = Vec(params.numDeq, ValidIO(new EntryBundle))
