@@ -98,12 +98,13 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val simpEntryEnqVec        = othersEntryEnqVec.take(SimpEntryNum)
   val compEntryEnqVec        = othersEntryEnqVec.takeRight(CompEntryNum)
   //debug
-  val cancelVec              = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Bool())))
-  val entryoutloadwakeupVec  = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Bool())))
-  val entryoutloadcancelVec  = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Bool())))
   val entryInValidVec        = Wire(Vec(params.numEntries, Bool()))
   val entryOutDeqValidVec    = Wire(Vec(params.numEntries, Bool()))
   val entryOutTransValidVec  = Wire(Vec(params.numEntries, Bool()))
+  val perfLdCancelVec        = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Vec(params.numRegSrc, Bool()))))
+  val perfOg0CancelVec       = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Vec(params.numRegSrc, Bool()))))
+  val perfWakeupByWBVec      = Wire(Vec(params.numEntries, Vec(params.numRegSrc, Bool())))
+  val perfWakeupByIQVec      = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Vec(params.numRegSrc, Vec(params.numWakeupFromIQ, Bool())))))
   //cancel bypass
   val cancelBypassVec        = Wire(Vec(params.numEntries, Bool()))
 
@@ -387,7 +388,6 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   io.othersEntryEnqSelVec.foreach(_ := finalOthersTransSelVec.get.zip(enqEntryTransVec).map(x => x._1 & Fill(OthersEntryNum, x._2.valid)))
   io.robIdx.foreach(_               := robIdxVec)
   io.uopIdx.foreach(_               := uopIdxVec.get)
-  io.cancel.foreach(_               := cancelVec.get)               //for debug
 
   def EntriesConnect(in: CommonInBundle, out: CommonOutBundle, entryIdx: Int) = {
     in.flush                    := io.flush
@@ -417,9 +417,6 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     if (params.hasIQWakeUp) {
       srcWakeUpL1ExuOHVec.get(entryIdx)       := out.srcWakeUpL1ExuOH.get
       srcTimerVec.get(entryIdx)               := out.srcTimer.get
-      cancelVec.get(entryIdx)                 := out.cancel.get
-      entryoutloadwakeupVec.get(entryIdx)     := out.entryoutloadwakeup.get
-      entryoutloadcancelVec.get(entryIdx)     := out.entryoutloadcancel.get
     }
     if (params.isVecMemIQ) {
       uopIdxVec.get(entryIdx)       := out.uopIdx.get
@@ -427,6 +424,12 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     entryInValidVec(entryIdx)       := out.entryInValid
     entryOutDeqValidVec(entryIdx)   := out.entryOutDeqValid
     entryOutTransValidVec(entryIdx) := out.entryOutTransValid
+    perfWakeupByWBVec(entryIdx)     := out.perfWakeupByWB
+    if (params.hasIQWakeUp) {
+      perfLdCancelVec.get(entryIdx)   := out.perfLdCancel.get
+      perfOg0CancelVec.get(entryIdx)  := out.perfOg0Cancel.get
+      perfWakeupByIQVec.get(entryIdx) := out.perfWakeupByIQ.get
+    }
   }
 
   // entries perf counter
@@ -435,46 +438,62 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     XSPerfAccumulate(s"enqEntry_${i}_in_cnt", entryInValidVec(i))
     XSPerfAccumulate(s"enqEntry_${i}_out_deq_cnt", entryOutDeqValidVec(i))
     XSPerfAccumulate(s"enqEntry_${i}_out_trans_cnt", entryOutTransValidVec(i))
-    if (params.hasIQWakeUp) {
-      XSPerfAccumulate(s"enqEntry_${i}_load_wake_up", entryoutloadwakeupVec.get(i))
-      XSPerfAccumulate(s"enqEntry_${i}_load_cancel", entryoutloadcancelVec.get(i))
-    }
   }
   // simple
   for (i <- 0 until params.numSimp) {
     XSPerfAccumulate(s"simpEntry_${i}_in_cnt", entryInValidVec(i + params.numEnq))
     XSPerfAccumulate(s"simpEntry_${i}_out_deq_cnt", entryOutDeqValidVec(i + params.numEnq))
     XSPerfAccumulate(s"simpEntry_${i}_out_trans_cnt", entryOutTransValidVec(i + params.numEnq))
-    if (params.hasIQWakeUp) {
-      XSPerfAccumulate(s"simpEntry_${i}_load_wake_up", entryoutloadwakeupVec.get(i + params.numEnq))
-      XSPerfAccumulate(s"simpEntry_${i}_load_cancel", entryoutloadcancelVec.get(i + params.numEnq))
-    }
   }
   // complex
   for (i <- 0 until params.numComp) {
     XSPerfAccumulate(s"compEntry_${i}_in_cnt", entryInValidVec(i + params.numEnq + params.numSimp))
     XSPerfAccumulate(s"compEntry_${i}_out_deq_cnt", entryOutDeqValidVec(i + params.numEnq + params.numSimp))
     XSPerfAccumulate(s"compEntry_${i}_out_trans_cnt", entryOutTransValidVec(i + params.numEnq + params.numSimp))
-    if (params.hasIQWakeUp) {
-      XSPerfAccumulate(s"compEntry_${i}_load_wake_up", entryoutloadwakeupVec.get(i + params.numEnq + params.numSimp))
-      XSPerfAccumulate(s"compEntry_${i}_load_wake_up", entryoutloadcancelVec.get(i + params.numEnq + params.numSimp))
-    }
   }
   // total
   XSPerfAccumulate(s"enqEntry_all_in_cnt", PopCount(entryInValidVec.take(params.numEnq)))
   XSPerfAccumulate(s"enqEntry_all_out_deq_cnt", PopCount(entryOutDeqValidVec.take(params.numEnq)))
   XSPerfAccumulate(s"enqEntry_all_out_trans_cnt", PopCount(entryOutTransValidVec.take(params.numEnq)))
-  if (params.hasIQWakeUp) {
-    XSPerfAccumulate(s"enqEntry_all_load_wake_up", PopCount(entryoutloadwakeupVec.get.take(params.numEnq)))
-    XSPerfAccumulate(s"enqEntry_all_load_wake_up", PopCount(entryoutloadcancelVec.get.take(params.numEnq)))
+  for (srcIdx <- 0 until params.numRegSrc) {
+    XSPerfAccumulate(s"enqEntry_all_wakeup_wb_src${srcIdx}_cnt", PopCount(perfWakeupByWBVec.take(params.numEnq).map(_(srcIdx))))
+    if (params.hasIQWakeUp) {
+      XSPerfAccumulate(s"enqEntry_all_ldCancel_src${srcIdx}_cnt", PopCount(perfLdCancelVec.get.take(params.numEnq).map(_(srcIdx))))
+      XSPerfAccumulate(s"enqEntry_all_og0Cancel_src${srcIdx}_cnt", PopCount(perfOg0CancelVec.get.take(params.numEnq).map(_(srcIdx))))
+      for (iqIdx <- 0 until params.numWakeupFromIQ) {
+        XSPerfAccumulate(s"enqEntry_all_wakeup_iq_from_exu${params.wakeUpSourceExuIdx(iqIdx)}_src${srcIdx}_cnt", PopCount(perfWakeupByIQVec.get.take(params.numEnq).map(_(srcIdx)(iqIdx))))
+      }
+    }
   }
 
   XSPerfAccumulate(s"othersEntry_all_in_cnt", PopCount(entryInValidVec.drop(params.numEnq)))
   XSPerfAccumulate(s"othersEntry_all_out_deq_cnt", PopCount(entryOutDeqValidVec.drop(params.numEnq)))
   XSPerfAccumulate(s"othersEntry_all_out_trans_cnt", PopCount(entryOutTransValidVec.drop(params.numEnq)))
-  if (params.hasIQWakeUp) {
-    XSPerfAccumulate(s"othersEntry_all_load_wake_up", PopCount(entryoutloadwakeupVec.get.drop(params.numEnq)))
-    XSPerfAccumulate(s"othersEntry_all_load_wake_up", PopCount(entryoutloadcancelVec.get.drop(params.numEnq)))
+  for (srcIdx <- 0 until params.numRegSrc) {
+    XSPerfAccumulate(s"othersEntry_all_wakeup_wb_src${srcIdx}_cnt", PopCount(perfWakeupByWBVec.drop(params.numEnq).map(_(srcIdx))))
+    if (params.hasIQWakeUp) {
+      XSPerfAccumulate(s"othersEntry_all_ldCancel_src${srcIdx}_cnt", PopCount(perfLdCancelVec.get.drop(params.numEnq).map(_(srcIdx))))
+      XSPerfAccumulate(s"othersEntry_all_og0Cancel_src${srcIdx}_cnt", PopCount(perfOg0CancelVec.get.drop(params.numEnq).map(_(srcIdx))))
+      for (iqIdx <- 0 until params.numWakeupFromIQ) {
+        XSPerfAccumulate(s"othersEntry_all_wakeup_iq_from_exu${params.wakeUpSourceExuIdx(iqIdx)}_src${srcIdx}_cnt", PopCount(perfWakeupByIQVec.get.drop(params.numEnq).map(_(srcIdx)(iqIdx))))
+      }
+    }
+  }
+
+  for (t <- FuType.functionNameMap.keys) {
+    val fuName = FuType.functionNameMap(t)
+    if (params.getFuCfgs.map(_.fuType == t).reduce(_ | _) && params.getFuCfgs.size > 1) {
+      for (srcIdx <- 0 until params.numRegSrc) {
+        XSPerfAccumulate(s"allEntry_futype_${fuName}_wakeup_wb_src${srcIdx}_cnt", PopCount(perfWakeupByWBVec.zip(fuTypeVec).map{ case(x, fu) => x(srcIdx) && fu(t.id) }))
+        if (params.hasIQWakeUp) {
+          XSPerfAccumulate(s"allEntry_futype_${fuName}_ldCancel_src${srcIdx}_cnt", PopCount(perfLdCancelVec.get.zip(fuTypeVec).map{ case(x, fu) => x(srcIdx) && fu(t.id) }))
+          XSPerfAccumulate(s"allEntry_futype_${fuName}_og0Cancel_src${srcIdx}_cnt", PopCount(perfOg0CancelVec.get.zip(fuTypeVec).map{ case(x, fu) => x(srcIdx) && fu(t.id) }))
+          for (iqIdx <- 0 until params.numWakeupFromIQ) {
+            XSPerfAccumulate(s"allEntry_futype_${fuName}_wakeup_iq_from_exu${params.wakeUpSourceExuIdx(iqIdx)}_src${srcIdx}_cnt", PopCount(perfWakeupByIQVec.get.zip(fuTypeVec).map{ case(x, fu) => x(srcIdx)(iqIdx) && fu(t.id) }))
+          }
+        }
+      }
+    }
   }
 }
 
@@ -536,9 +555,6 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val simpEntryEnqSelVec = OptionWrapper(params.hasCompAndSimp, Vec(params.numEnq, Output(UInt(params.numSimp.W))))
   val compEntryEnqSelVec = OptionWrapper(params.hasCompAndSimp, Vec(params.numEnq, Output(UInt(params.numComp.W))))
   val othersEntryEnqSelVec = OptionWrapper(params.isAllComp || params.isAllSimp, Vec(params.numEnq, Output(UInt((params.numEntries - params.numEnq).W))))
-
-  // debug
-  val cancel              = OptionWrapper(params.hasIQWakeUp, Output(Vec(params.numEntries, Bool())))
 
   def wakeup = wakeUpFromWB ++ wakeUpFromIQ
 }
