@@ -194,11 +194,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val finalLoadDependency: IndexedSeq[Vec[UInt]] = VecInit(finalDeqSelOHVec.map(oh => Mux1H(oh, loadDependency)))
   // (entryIdx)(srcIdx)(exuIdx)
   val wakeUpL1ExuOH: Option[Vec[Vec[UInt]]] = entries.io.srcWakeUpL1ExuOH
-  val srcTimer: Option[Vec[Vec[UInt]]] = entries.io.srcTimer
-
   // (deqIdx)(srcIdx)(exuIdx)
   val finalWakeUpL1ExuOH: Option[Vec[Vec[UInt]]] = wakeUpL1ExuOH.map(x => VecInit(finalDeqSelOHVec.map(oh => Mux1H(oh, x))))
-  val finalSrcTimer = srcTimer.map(x => VecInit(finalDeqSelOHVec.map(oh => Mux1H(oh, x))))
 
   val fuTypeVec = Wire(Vec(params.numEntries, FuType()))
   val deqEntryVec = Wire(Vec(params.numDeq, ValidIO(new EntryBundle)))
@@ -246,7 +243,6 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         )
         enq.bits.status.srcStatus(j).srcLoadDependency          := VecInit(s0_enqBits(enqIdx).srcLoadDependency(j).map(x => x(x.getWidth - 2, 0) << 1))
         if(params.hasIQWakeUp) {
-          enq.bits.status.srcStatus(j).srcTimer.get             := 0.U(3.W)
           enq.bits.status.srcStatus(j).srcWakeUpL1ExuOH.get     := 0.U.asTypeOf(ExuVec())
         }
       }
@@ -600,7 +596,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     require(deq.bits.common.dataSources.size <= finalDataSources(i).size)
     deq.bits.common.dataSources.zip(finalDataSources(i)).foreach { case (sink, source) => sink := source}
     deq.bits.common.l1ExuOH.foreach(_ := finalWakeUpL1ExuOH.get(i))
-    deq.bits.common.srcTimer.foreach(_ := finalSrcTimer.get(i))
+    deq.bits.common.srcTimer.foreach(_ := DontCare)
     deq.bits.common.loadDependency.foreach(_ := finalLoadDependency(i))
     deq.bits.common.src := DontCare
     deq.bits.common.preDecode.foreach(_ := deqEntryVec(i).bits.payload.preDecodeInfo)

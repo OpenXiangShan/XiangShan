@@ -50,7 +50,6 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val srcState              = SrcState()
     val dataSources           = DataSource()
     val srcLoadDependency     = Vec(LoadPipelineWidth, UInt(3.W))
-    val srcTimer              = OptionWrapper(params.hasIQWakeUp, UInt(3.W))
     val srcWakeUpL1ExuOH      = OptionWrapper(params.hasIQWakeUp, ExuVec())
   }
 
@@ -122,7 +121,6 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val dataSource            = Vec(params.numRegSrc, Output(DataSource()))
     val srcLoadDependency     = Vec(params.numRegSrc, Output(Vec(LoadPipelineWidth, UInt(3.W))))
     val srcWakeUpL1ExuOH      = OptionWrapper(params.hasIQWakeUp, Vec(params.numRegSrc, Output(ExuVec())))
-    val srcTimer              = OptionWrapper(params.hasIQWakeUp, Vec(params.numRegSrc, Output(UInt(3.W))))
     //deq
     val isFirstIssue          = Output(Bool())
     val entry                 = ValidIO(new EntryBundle)
@@ -272,14 +270,6 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       srcStatusNext.srcState                          := Mux(cancel, false.B, wakeup | srcStatus.srcState)
       srcStatusNext.dataSources.value                 := Mux(wakeupByIQ, DataSource.bypass, Mux(srcStatus.dataSources.readBypass, DataSource.reg, srcStatus.dataSources.value))
       if(params.hasIQWakeUp) {
-        srcStatusNext.srcTimer.get                    := MuxCase(3.U, Seq(
-          // T0: waked up by IQ, T1: reset timer as 1
-          wakeupByIQ                                  -> 2.U,
-          // do not overflow
-          srcStatus.srcTimer.get.andR                 -> srcStatus.srcTimer.get,
-          // T2+: increase if the entry is valid, the src is ready, and the src is woken up by iq
-          (validReg && SrcState.isReady(srcStatus.srcState) && srcWakeupExuOH(srcIdx).asUInt.orR) -> (srcStatus.srcTimer.get + 1.U)
-        ))
         ExuOHGen(srcStatusNext.srcWakeUpL1ExuOH.get, wakeupByIQOH, wakeup, srcWakeupExuOH(srcIdx))
         srcStatusNext.srcLoadDependency               :=
           Mux(wakeup,
@@ -328,10 +318,6 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       val wakeupSrcLoadDependency                      = hasIQWakeupGet.srcWakeupByIQWithoutCancel.map(x => Mux1H(x, hasIQWakeupGet.wakeupLoadDependencyByIQVec))
       commonOut.srcWakeUpL1ExuOH.get                  := (if (isComp) Mux(hasIQWakeupGet.canIssueBypass && !common.canIssue, hasIQWakeupGet.srcWakeupL1ExuOHOut, VecInit(srcWakeupExuOH))
                                                           else VecInit(srcWakeupExuOH))
-      commonOut.srcTimer.get.zipWithIndex.foreach { case (srcTimerOut, srcIdx) =>
-        val wakeupByIQOH                               = hasIQWakeupGet.srcWakeupByIQWithoutCancel(srcIdx)
-        srcTimerOut                                   := Mux(wakeupByIQOH.asUInt.orR, Mux1H(wakeupByIQOH, commonIn.wakeUpFromIQ.map(_.bits.is0Lat).toSeq).asUInt, status.srcStatus(srcIdx).srcTimer.get)
-      }
       commonOut.srcLoadDependency.zipWithIndex.foreach { case (srcLoadDependencyOut, srcIdx) =>
         srcLoadDependencyOut                          := (if (isComp) Mux(hasIQWakeupGet.canIssueBypass && !common.canIssue,
                                                                       VecInit(status.srcStatus(srcIdx).srcLoadDependency.zip(wakeupSrcLoadDependency(srcIdx)).map(x => x._1 | x._2)),
