@@ -41,7 +41,6 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
   val enqDelaySrcState            = Wire(Vec(params.numRegSrc, SrcState()))
   val enqDelayDataSources         = Wire(Vec(params.numRegSrc, DataSource()))
   val enqDelaySrcWakeUpL1ExuOH    = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numRegSrc, ExuOH())))
-  val enqDelaySrcTimer            = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numRegSrc, UInt(3.W))))
   val enqDelaySrcLoadDependency   = Wire(Vec(params.numRegSrc, Vec(LoadPipelineWidth, UInt(3.W))))
 
   val enqDelaySrcWakeUpByWB: Vec[UInt]                            = Wire(Vec(params.numRegSrc, SrcState()))
@@ -120,7 +119,6 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
       val wakeUpValid = enqDelaySrcWakeUpByIQVec(i).asUInt.orR
       val wakeUpOH = enqDelaySrcWakeUpByIQVec(i)
       enqDelaySrcWakeUpL1ExuOH.get(i)       := Mux1H(wakeUpOH, params.wakeUpSourceExuIdx.map(x => MathUtils.IntToOH(x).U(backendParams.numExu.W)).toSeq)
-      enqDelaySrcTimer.get(i)               := Mux(wakeUpValid, 2.U, 3.U)
       enqDelaySrcLoadDependency(i)          := Mux(enqDelaySrcWakeUpByIQVec(i).asUInt.orR, Mux1H(enqDelaySrcWakeUpByIQVec(i), enqDelayShiftedWakeupLoadDependencyByIQVec), entryReg.status.srcStatus(i).srcLoadDependency)
     } else {
       enqDelaySrcLoadDependency(i)          := entryReg.status.srcStatus(i).srcLoadDependency
@@ -131,7 +129,6 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
     currentStatus.srcStatus.zipWithIndex.foreach { case (srcStatus, srcIdx) =>
       srcStatus.srcState                    := enqDelaySrcState(srcIdx)
       srcStatus.dataSources                 := enqDelayDataSources(srcIdx)
-      srcStatus.srcTimer.foreach(_          := enqDelaySrcTimer.get(srcIdx))
       srcStatus.srcLoadDependency           := enqDelaySrcLoadDependency(srcIdx)
     }
   }
