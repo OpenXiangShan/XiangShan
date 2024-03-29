@@ -194,6 +194,15 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
         block_match && (!alias_match || !(merge_load || merge_store)),
         false.B
       )
+    // Mux(
+    //     alloc,
+    //     Mux(
+    //         block_match,
+    //         !alias_match || !(merge_load || merge_store),
+    //         set_match
+    //       ),
+    //     false.B
+    //   )
   }
 
   def merge_req(new_req: MissReq): Bool = {
@@ -327,6 +336,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     val refill_info = ValidIO(new MissQueueRefillInfo)
 
     val block_addr = ValidIO(UInt(PAddrBits.W))
+    val set_conflict = Input(Bool())
+    val set_to_refill = Output(UInt(log2Up(nSets).W))
 
     // val debug_early_replace = ValidIO(new Bundle() {
     //      // info about the block that has been replaced
@@ -448,6 +459,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
   when (release_entry && req_valid) {
     req_valid := false.B
+    // assert(!RegNextN(w_grantlast,3), "miss entry release late")
   }
 
   when (io.miss_req_pipe_reg.alloc) {
@@ -678,6 +690,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
         block_match,
         (!before_req_sent_can_merge(new_req) && !before_data_refill_can_merge(new_req)) || !alias_match,
         false.B
+        // set_match
       )
   }
 
@@ -773,7 +786,9 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   // io.sms_agt_evict_req.bits.vaddr := Cat(req.replace_tag(tagBits - 1, 2), req.vaddr(13, 12), 0.U((VAddrBits - tagBits).W))
 
   // io.main_pipe_req.valid := !s_mainpipe_req && w_grantlast
+  // io.main_pipe_req.valid := !s_mainpipe_req && !io.set_conflict && (w_l2hint || w_grantlast)
   io.main_pipe_req.valid := !s_mainpipe_req && (w_l2hint || w_grantlast)
+  // io.main_pipe_req.valid := !s_mainpipe_req && (w_l2hint || w_grantfirst || io.mem_grant.fire)
   io.main_pipe_req.bits := DontCare
   io.main_pipe_req.bits.miss := true.B
   io.main_pipe_req.bits.miss_id := io.id
@@ -799,6 +814,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   io.block_addr.valid := req_valid && w_grantlast 
   io.block_addr.bits := req.addr
 
+  io.set_to_refill := addr_to_dcache_set(req.vaddr)
+
   io.refill_info.valid := w_grantlast
   io.refill_info.bits.store_data := refill_and_store_data.asUInt
   io.refill_info.bits.store_mask := ~0.U(blockBytes.W)
@@ -806,7 +823,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   io.refill_info.bits.miss_dirty := isDirty
 
   XSPerfAccumulate("miss_refill_mainpipe_req", io.main_pipe_req.fire)
-  XSPerfAccumulate("miss_refill_without_hint", io.main_pipe_req.fire && !mainpipe_req_fired && w_grantlast && !w_l2hint)
+  XSPerfAccumulate("miss_refill_without_hint", io.main_pipe_req.fire && !mainpipe_req_fired && !w_l2hint)
   XSPerfAccumulate("miss_refill_hint_arrive1", RegNextN(io.main_pipe_req.fire && !mainpipe_req_fired,1) && w_grantlast && !RegNext(w_grantlast))
   XSPerfAccumulate("miss_refill_hint_arrive2", RegNextN(io.main_pipe_req.fire && !mainpipe_req_fired,2) && w_grantlast && !RegNext(w_grantlast))
   XSPerfAccumulate("miss_refill_hint_arrive3", RegNextN(io.main_pipe_req.fire && !mainpipe_req_fired,3) && w_grantlast && !RegNext(w_grantlast))
@@ -814,6 +831,11 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   XSPerfAccumulate("miss_refill_hint_arrive5", RegNextN(io.main_pipe_req.fire && !mainpipe_req_fired,5) && w_grantlast && !RegNext(w_grantlast))
   XSPerfAccumulate("miss_refill_replay", io.main_pipe_replay)
   XSPerfAccumulate("miss_refill_replay_without_data", RegNextN(io.main_pipe_req.fire && mainpipe_req_fired, 3) && !w_grantlast)
+  XSPerfAccumulate("release_as_expected", req_valid && !RegNextN(w_grantlast,3) && !RegNext(release_entry) && release_entry)
+  XSPerfAccumulate("release_after_expected", req_valid && RegNextN(w_grantlast,3) && !RegNext(release_entry) && release_entry)
+  // when(req_valid) {
+  //   assert(!io.main_pipe_replay)
+  // }
 
 //  io.debug_early_replace.valid := BoolStopWatch(io.replace_pipe_resp, io.refill_pipe_req.fire())
 //  io.debug_early_replace.bits.idx := addr_to_dcache_set(req.vaddr)
@@ -842,6 +864,9 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   XSPerfAccumulate("load_miss_penalty_to_use",
     should_refill_data &&
       BoolStopWatch(primary_fire, io.refill_to_ldq.valid, true)
+  )
+  XSPerfAccumulate("penalty_between_grantlast_and_release",
+    BoolStopWatch(!RegNext(w_grantlast) && w_grantlast, release_entry, true)
   )
   XSPerfAccumulate("main_pipe_penalty", BoolStopWatch(io.main_pipe_req.fire, io.main_pipe_resp))
   XSPerfAccumulate("penalty_blocked_by_channel_A", io.mem_acquire.valid && !io.mem_acquire.ready)
@@ -1023,6 +1048,20 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     assert(!RegNext(out.valid && PopCount(Cat(in.map(_.valid))) > 1.U))
   }
 
+  val miss_set_history = Reg(Vec(3, UInt(log2Up(nSets).W)))
+  val miss_set_time_count = RegInit(VecInit(Seq.fill(3){0.U(2.W)}))
+  val miss_set_hid = PriorityEncoder(miss_set_time_count.map(_ === 0.U))
+
+  miss_set_time_count.zipWithIndex.foreach{
+    case(t, i) =>
+      when(io.main_pipe_req.fire && miss_set_hid === i.U) {
+        t := 2.U
+        miss_set_history(i) := addr_to_dcache_set(io.main_pipe_req.bits.vaddr)
+      } .otherwise {
+        t := Mux(t === 0.U, 0.U, t - 1.U)
+      }
+  }
+
   io.mem_grant.ready := false.B
 
   val nMaxPrefetchEntry = WireInit(Constantin.createRecord("nMaxPrefetchEntry" + p(XSCoreParamsKey).HartId.toString, initValue = 14.U))
@@ -1078,6 +1117,8 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
         e.io.l2_hint.valid := false.B
         e.io.l2_hint.bits := DontCare
       }
+
+      e.io.set_conflict := Cat((miss_set_history zip miss_set_time_count).map{ case(s, t) => t > 0.U && s === e.io.set_to_refill }).orR // There is a miss_req from the same cache set fired in 3 cycles.
   }
 
   io.req.ready := accept

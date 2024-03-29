@@ -131,7 +131,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     // write-back queue
     val wb = DecoupledIO(new WritebackReq)
     val wb_ready_dup = Vec(nDupWbReady, Input(Bool()))
-    val probe_ttob_check_req = ValidIO(new ProbeToBCheckReq)
+    // val probe_ttob_check_req = ValidIO(new ProbeToBCheckReq)
     //val probe_ttob_check_resp = Flipped(ValidIO(new ProbeToBCheckResp))
 
     // data sram
@@ -400,8 +400,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s1_hit = s1_tag_match && s1_has_permission
   val s1_pregen_can_go_to_mq = !s1_req.replace && !s1_req.probe && !s1_req.miss && (s1_req.isStore || s1_req.isAMO) && !s1_hit
 
-  val s1_ttob_probe_valid = s1_valid && s1_req.probe && s1_req.probe_param === TLPermissions.toB
-  val s1_ttob_probe_addr = get_block_addr(Cat(s1_tag, get_untag(s1_req.vaddr)))
+  // val s1_ttob_probe_valid = s1_valid && s1_req.probe && s1_req.probe_param === TLPermissions.toB
+  // val s1_ttob_probe_addr = get_block_addr(Cat(s1_tag, get_untag(s1_req.vaddr)))
 
   // s2: select data, return resp if this is a store miss
   val s2_valid = RegInit(false.B)
@@ -496,11 +496,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   val s2_data_word = s2_store_data_merged(s2_req.word_idx)
 
-  val s2_ttob_probe_valid = RegEnable(s1_ttob_probe_valid, s1_fire)
-  val s2_ttob_probe_addr = RegEnable(s1_ttob_probe_addr, s1_fire)
+  // val s2_ttob_probe_valid = RegEnable(s1_ttob_probe_valid, s1_fire)
+  // val s2_ttob_probe_addr = RegEnable(s1_ttob_probe_addr, s1_fire)
 
-  io.probe_ttob_check_req.valid := s2_ttob_probe_valid && s2_valid
-  io.probe_ttob_check_req.bits.addr := s2_ttob_probe_addr
+  // io.probe_ttob_check_req.valid := s2_ttob_probe_valid && s2_valid
+  // io.probe_ttob_check_req.bits.addr := s2_ttob_probe_addr
 
   XSError(s2_valid && s2_can_go_to_s3 && s2_req.miss && !io.refill_info.valid, "MainPipe req can go to s3 but no refill data")
 
@@ -1601,7 +1601,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   XSPerfAccumulate("mainpipe_s2_miss_req", s2_valid && s2_req.miss)
   XSPerfAccumulate("mainpipe_s2_block_penalty", s2_valid && s2_req.miss && !io.refill_info.valid)
   XSPerfAccumulate("mainpipe_s2_missqueue_replay", s2_valid && s2_can_go_to_mq_replay)
-
+  XSPerfAccumulate("mainpipe_slot_conflict_1_2", (s1_idx === s2_idx && s1_way_en === s2_way_en && s1_req.miss && s2_req.miss && s1_valid && s2_valid ))
+  XSPerfAccumulate("mainpipe_slot_conflict_1_3", (s1_idx === s3_idx_dup_for_replace_access && s1_way_en === s3_way_en && s1_req.miss && s3_req.miss && s1_valid && s3_valid))
+  XSPerfAccumulate("mainpipe_slot_conflict_2_3", (s2_idx === s3_idx_dup_for_replace_access && s2_way_en === s3_way_en && s2_req.miss && s3_req.miss && s2_valid && s3_valid))
   // probe / replace will not update access bit
   io.access_flag_write.valid := s3_fire_dup_for_meta_w_valid && !s3_req.probe && !s3_req.replace
   io.access_flag_write.bits.idx := s3_idx_dup(3)
