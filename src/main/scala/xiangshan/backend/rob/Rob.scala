@@ -839,7 +839,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val realDestEnqNum = PopCount(enqNeedWriteRFSeq.zip(uopCanEnqSeq).map { case (writeFlag, valid) => writeFlag && valid })
     when(!robEntries(i).valid && instCanEnqFlag){
       robEntries(i).realDestSize := realDestEnqNum
-    }.elsewhen(robEntries(i).valid && instCanEnqFlag){
+    }.elsewhen(robEntries(i).valid && Cat(uopCanEnqSeq).orR){
       robEntries(i).realDestSize := robEntries(i).realDestSize + realDestEnqNum
     }
     val enqUopNum = PriorityMux(instCanEnqSeq, enqUopNumVec)
