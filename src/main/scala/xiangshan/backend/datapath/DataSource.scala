@@ -3,9 +3,9 @@ package xiangshan.backend.datapath
 import chisel3._
 
 class DataSource extends Bundle {
-  val value = UInt(3.W)
+  val value = UInt(4.W)
 
-  def readReg: Bool = value(2)
+  def readReg: Bool = value(3)
 
   def readRegOH: Bool = value === DataSource.reg
 
@@ -17,6 +17,8 @@ class DataSource extends Bundle {
 
   def readBypass: Bool = value === DataSource.bypass
 
+  def readBypass2: Bool = value === DataSource.bypass2
+
   def readImm: Bool = value === DataSource.imm
 
 }
@@ -24,18 +26,20 @@ class DataSource extends Bundle {
 object DataSource {
   def apply() = new DataSource
 
-  def reg: UInt = "b100".U
+  def reg: UInt = "b1000".U
 
-  def anotherReg: UInt = "b101".U
+  def anotherReg: UInt = "b1001".U
 
   // read int preg addr is 0
-  def zero: UInt = "b000".U
+  def zero: UInt = "b0000".U
 
-  def forward: UInt = "b001".U
+  def forward: UInt = "b0001".U
 
-  def bypass: UInt = "b010".U
+  def bypass: UInt = "b0010".U
 
-  def imm: UInt = "b011".U
+  def bypass2: UInt = "b0011".U
+
+  def imm: UInt = "b0100".U
 
 }
 
