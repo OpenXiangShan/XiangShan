@@ -98,6 +98,8 @@ class VecPipelineFeedbackIO(isVStore: Boolean=false) (implicit p: Parameters) ex
   //val atomic               = Bool()
   val exceptionVec         = ExceptionVec()
   //val vec                  = new OnlyVecExuOutput
+   // feedback
+  val vecFeedback          = Bool()
 
   val usSecondInv          = Bool() // only for unit stride, second flow is Invalid
   // for load
@@ -203,10 +205,10 @@ class VSplitBufferIO(isVStore: Boolean=false)(implicit p: Parameters) extends VL
 
 class VMergeBufferIO(isVStore : Boolean=false)(implicit p: Parameters) extends VLSUBundle{
   val redirect            = Flipped(ValidIO(new Redirect))
-  val fromPipeline        = if(isVStore) Vec(StorePipelineWidth, Flipped(DecoupledIO(new VecPipelineFeedbackIO(isVStore)))) else Vec(LoadPipelineWidth, Flipped(DecoupledIO(new VecPipelineFeedbackIO(isVStore))))
-  val fromSplit           = if(isVStore) Vec(StorePipelineWidth, new FromSplitIO) else Vec(LoadPipelineWidth, new FromSplitIO) // req mergebuffer entry, inactive elem issue
+  val fromPipeline        = if(isVStore) Vec(VecStorePipelineWidth, Flipped(DecoupledIO(new VecPipelineFeedbackIO(isVStore)))) else Vec(VecLoadPipelineWidth, Flipped(DecoupledIO(new VecPipelineFeedbackIO(isVStore))))
+  val fromSplit           = if(isVStore) Vec(VecStorePipelineWidth, new FromSplitIO) else Vec(VecLoadPipelineWidth, new FromSplitIO) // req mergebuffer entry, inactive elem issue
   val uopWriteback        = Vec(UopWritebackWidth, DecoupledIO(new MemExuOutput(isVector = true)))
-  val toSplit             = if(isVStore) Vec(StorePipelineWidth, ValidIO(new FeedbackToSplitIO)) else Vec(LoadPipelineWidth, ValidIO(new FeedbackToSplitIO)) // for inorder inst
+  val toSplit             = if(isVStore) Vec(VecStorePipelineWidth, ValidIO(new FeedbackToSplitIO)) else Vec(VecLoadPipelineWidth, ValidIO(new FeedbackToSplitIO)) // for inorder inst
   val toLsq               = Vec(UopWritebackWidth, ValidIO(new FeedbackToLsqIO)) // for lsq deq
   val feedback            = ValidIO(new RSFeedback)//for rs replay
 }

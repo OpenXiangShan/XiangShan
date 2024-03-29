@@ -260,6 +260,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueReplay.io.l2_hint          <> io.l2_hint
   loadQueueReplay.io.tlb_hint         <> io.tlb_hint
   loadQueueReplay.io.tlbReplayDelayCycleCtrl <> io.tlbReplayDelayCycleCtrl
+  // TODO: implement it!
+  loadQueueReplay.io.vecFeedback := DontCare
 
   loadQueueReplay.io.debugTopDown <> io.debugTopDown
 

@@ -117,7 +117,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
     // vec issue path
     val vecldin = Flipped(Decoupled(new VecPipeBundle))
-    val vecldout = Decoupled(new VecExuOutput)
+    val vecldout = Decoupled(new VecPipelineFeedbackIO(isVStore = false))
 
     // data path
     val tlb           = new TlbRequestIO(2)
@@ -227,7 +227,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val vecActive     = Bool() // 1: vector active element or scala mem operation, 0: vector not active element
     val is_first_ele  = Bool()
     // val flowPtr       = new VlflowPtr
-    val usSecondInv  = Bool()
+    val usSecondInv   = Bool()
+    val mbIndex       = UInt(vlmBindexBits.W)
   }
   val s0_sel_src = Wire(new FlowSource)
 
@@ -522,7 +523,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.vecActive           := src.vecActive
     out.is_first_ele        := src.is_first_ele
     // out.flowPtr             := src.flowPtr
-    out.usSecondInv        := src.usSecondInv
+    out.usSecondInv         := src.usSecondInv
+    out.mbIndex             := src.mBIndex
     out
   }
 
@@ -692,6 +694,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s1_fire       = s1_valid && !s1_kill && s1_can_go
   val s1_vecActive        = RegEnable(s0_out.vecActive, true.B, s0_fire)
   val s1_vec_alignedType = RegEnable(io.vecldin.bits.alignedType, s0_fire)
+  val s1_vec_mBIndex      = RegEnable(io.vecldin.bits.mBIndex, s0_fire)
 
   s1_ready := !s1_valid || s1_kill || s2_ready
   when (s0_fire) { s1_valid := true.B }
@@ -874,6 +877,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_vecActive = RegEnable(s1_out.vecActive, true.B, s1_fire)
   val s2_isvec  = RegEnable(s1_out.isvec, false.B, s1_fire)
   val s2_vec_alignedType = RegEnable(s1_vec_alignedType, s1_fire)
+  val s2_vec_mBIndex      = RegEnable(s1_vec_mBIndex, s1_fire)
 
   s2_kill := s2_in.uop.robIdx.needFlush(io.redirect)
   s2_ready := !s2_valid || s2_kill || s3_ready
@@ -1142,6 +1146,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_vecActive    = RegEnable(s2_out.vecActive, true.B, s2_fire)
   val s3_isvec        = RegEnable(s2_out.isvec, false.B, s2_fire)
   val s3_vec_alignedType = RegEnable(s2_vec_alignedType, s2_fire)
+  val s3_vec_mBIndex     = RegEnable(s2_vec_mBIndex, s2_fire)
   val s3_mmio         = Wire(chiselTypeOf(io.lsq.uncache))
   // TODO: Fix vector load merge buffer nack
   val s3_vec_mb_nack  = Wire(Bool())
@@ -1229,8 +1234,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_vecout.is_first_ele      := s3_in.is_first_ele
   // s3_vecout.uopQueuePtr       := DontCare // uopQueuePtr is already saved in flow queue
   // s3_vecout.flowPtr           := s3_in.flowPtr
-  s3_vecout.elemIdx           := DontCare // elemIdx is already saved in flow queue
+  s3_vecout.elemIdx           := DontCare // elemIdx is already saved in flow queue // TODO:
   s3_vecout.elemIdxInsideVd   := DontCare
+  val s3_usSecondInv          = s3_in.usSecondInv
 
   io.rollback.valid := s3_valid && (s3_rep_frm_fetch || s3_flushPipe) && !s3_exception
   io.rollback.bits             := DontCare
@@ -1342,23 +1348,25 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val vecFeedback = s3_valid && s3_fb_no_waiting && s3_rep_info.need_rep && !io.lsq.ldin.ready && s3_isvec
 
   // vector output
-  io.vecldout.bits.vec := s3_vecout
-  // FIXME
-  io.vecldout.bits.isPackage := DontCare
-  io.vecldout.bits.packageNum := DontCare
-  io.vecldout.bits.originAlignedType := DontCare
-  io.vecldout.bits.alignedType := s3_vec_alignedType
+  io.vecldout.bits.alignedType.get := s3_vec_alignedType
   // vec feedback
   io.vecldout.bits.vecFeedback := vecFeedback
   // TODO: VLSU, uncache data logic
   val vecdata = rdataVecHelper(s3_vec_alignedType(1,0), s3_picked_data_frm_cache)
-  io.vecldout.bits.vec.vecdata := Mux(s3_in.is128bit, s3_merged_data_frm_cache, vecdata)
-  io.vecldout.bits.data := 0.U
-  // io.vecldout.bits.fflags := s3_out.bits.fflags
-  // io.vecldout.bits.redirectValid := s3_out.bits.redirectValid
-  // io.vecldout.bits.redirect := s3_out.bits.redirect
-  io.vecldout.bits.debug := s3_out.bits.debug
-  io.vecldout.bits.uop := s3_out.bits.uop
+  io.vecldout.bits.vecdata.get := Mux(s3_in.is128bit, s3_merged_data_frm_cache, vecdata)
+  // io.vecldout.bits.hit := 
+  io.vecldout.bits.isvec := s3_vecout.isvec
+  io.vecldout.bits.elemIdx.get := s3_vecout.elemIdx
+  io.vecldout.bits.elemIdxInsideVd.get := s3_vecout.elemIdxInsideVd
+  io.vecldout.bits.mask.get := s3_vecout.mask
+  io.vecldout.bits.reg_offset.get := s3_vecout.reg_offset
+  io.vecldout.bits.usSecondInv := s3_usSecondInv
+  io.vecldout.bits.mBIndex := s3_vec_mBIndex
+  io.vecldout.bits.hit := !s3_rep_info.need_rep || io.lsq.ldin.ready
+  io.vecldout.bits.sourceType := RSFeedbackType.lrqFull
+  io.vecldout.bits.exceptionVec := s3_out.bits.uop.exceptionVec
+  io.vecldout.bits.mmio := DontCare
+
   io.vecldout.valid := s3_out.valid && !s3_out.bits.uop.robIdx.needFlush(io.redirect) && s3_vecout.isvec ||
   // TODO: check this, why !io.lsq.uncache.bits.isVls before?
     io.lsq.uncache.valid && !io.lsq.uncache.bits.uop.robIdx.needFlush(io.redirect) && !s3_out.valid && io.lsq.uncache.bits.isVls
