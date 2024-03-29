@@ -234,9 +234,9 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       intRfRaddr(portIdx) := 0.U
   }
 
-  vfRfWaddr := io.fromVfWb.map(_.addr).toSeq
-  vfRfWdata := io.fromVfWb.map(_.data).toSeq
-  vfRfWen.foreach(_.zip(io.fromVfWb.map(_.wen)).foreach { case (wenSink, wenSource) => wenSink := wenSource } )// Todo: support fp multi-write
+  vfRfWaddr := io.fromVfWb.map(x => RegEnable(x.addr, x.wen)).toSeq
+  vfRfWdata := io.fromVfWb.map(x => RegEnable(x.data, x.wen)).toSeq
+  vfRfWen.foreach(_.zip(io.fromVfWb.map(x => RegNext(x.wen))).foreach { case (wenSink, wenSource) => wenSink := wenSource } )// Todo: support fp multi-write
 
   for (portIdx <- vfRfRaddr.indices) {
     if (vfRFReadArbiter.io.out.isDefinedAt(portIdx))

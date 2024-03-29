@@ -42,6 +42,7 @@ case class ExeUnitParams(
   val readIntRf: Boolean = numIntSrc > 0
   val readFpRf: Boolean = numFpSrc > 0
   val readVecRf: Boolean = numVecSrc > 0
+  val readVfRf: Boolean = numVfSrc > 0
   val writeIntRf: Boolean = fuConfigs.map(_.writeIntRf).reduce(_ || _)
   val writeFpRf: Boolean = fuConfigs.map(_.writeFpRf).reduce(_ || _)
   val writeVecRf: Boolean = fuConfigs.map(_.writeVecRf).reduce(_ || _)
