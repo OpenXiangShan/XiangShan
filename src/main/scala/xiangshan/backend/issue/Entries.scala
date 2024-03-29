@@ -5,6 +5,7 @@ import chisel3._
 import chisel3.util._
 import utility.HasCircularQueuePtrHelper
 import utils._
+import utility._
 import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.DataConfig.VAddrData
@@ -114,10 +115,15 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     enqEntry.io.commonIn.transSel             := (if (params.isAllComp || params.isAllSimp) enqCanTrans2Others.get && othersTransSelVec.get(entryIdx).valid
                                                   else enqCanTrans2Simp.get && simpTransSelVec.get(entryIdx).valid || enqCanTrans2Comp.get && compTransSelVec.get(entryIdx).valid)
     EntriesConnect(enqEntry.io.commonIn, enqEntry.io.commonOut, entryIdx)
-    enqEntry.io.enqDelayWakeUpFromWB          := RegEnable(io.wakeUpFromWB, io.enq(entryIdx).valid)
-    enqEntry.io.enqDelayWakeUpFromIQ          := RegEnable(io.wakeUpFromIQ, io.enq(entryIdx).valid)
-    enqEntry.io.enqDelayOg0Cancel             := RegNext(io.og0Cancel.asUInt)
-    enqEntry.io.enqDelayLdCancel              := RegNext(io.ldCancel)
+    enqEntry.io.enqDelayIn1.wakeUpFromWB      := RegEnable(io.wakeUpFromWB, io.enq(entryIdx).valid)
+    enqEntry.io.enqDelayIn1.wakeUpFromIQ      := RegEnable(io.wakeUpFromIQ, io.enq(entryIdx).valid)
+    enqEntry.io.enqDelayIn1.og0Cancel         := RegNext(io.og0Cancel.asUInt)
+    enqEntry.io.enqDelayIn1.ldCancel          := RegNext(io.ldCancel)
+    // note: these signals with 2 cycle delay should not be enabled by io.enq.valid
+    enqEntry.io.enqDelayIn2.wakeUpFromWB      := DelayN(io.wakeUpFromWB, 2)
+    enqEntry.io.enqDelayIn2.wakeUpFromIQ      := DelayN(io.wakeUpFromIQ, 2)
+    enqEntry.io.enqDelayIn2.og0Cancel         := DelayN(io.og0Cancel.asUInt, 2)
+    enqEntry.io.enqDelayIn2.ldCancel          := DelayN(io.ldCancel, 2)
     enqEntryTransVec(entryIdx)                := enqEntry.io.commonOut.transEntry
   }
   //othersEntries
