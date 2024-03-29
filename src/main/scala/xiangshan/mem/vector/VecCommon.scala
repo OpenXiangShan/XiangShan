@@ -181,10 +181,6 @@ class OnlyVecExuOutput(implicit p: Parameters) extends VLSUBundle {
 
 class VecExuOutput(implicit p: Parameters) extends MemExuOutput with HasVLSUParameters {
   val vec = new OnlyVecExuOutput
-    // pack
-  val isPackage         = Bool()
-  val packageNum        = UInt((log2Up(VLENB) + 1).W)
-  val originAlignedType = UInt(alignTypeBits.W)
   val alignedType       = UInt(alignTypeBits.W)
    // feedback
   val vecFeedback       = Bool()

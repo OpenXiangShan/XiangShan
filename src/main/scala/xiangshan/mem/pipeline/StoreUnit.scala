@@ -47,7 +47,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
     val prefetch_train  = ValidIO(new StPrefetchTrainBundle())
     val stld_nuke_query = Valid(new StoreNukeQueryIO)
     val stout           = DecoupledIO(new MemExuOutput) // writeback store
-    val vecstout        = DecoupledIO(new VecPipelineFeedbackIO)
+    val vecstout        = DecoupledIO(new VecPipelineFeedbackIO(isVStore = true))
     // store mask, send to sq in store_s0
     val st_mask_out     = Valid(new StoreMaskBundle)
     val debug_ls        = Output(new DebugLsInfoBundle)
@@ -381,8 +381,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
       sx_in(i).vecFeedback := s3_vecFeedback
       sx_in(i).mmio        := s3_in.mmio
       sx_in(i).usSecondInv := s3_in.usSecondInv
-      // sx_in(i).elemIdx     := s3_in.elemIdx
-      // sx_in(i).alignedType := s3_in.alignedType
+      sx_in(i).elemIdx     := s3_in.elemIdx
+      sx_in(i).alignedType := s3_in.alignedType
       sx_ready(i) := !s3_valid(i) || sx_in(i).output.uop.robIdx.needFlush(io.redirect) || (if (TotalDelayCycles == 0) io.stout.ready else sx_ready(i+1))
     } else {
       val cur_kill   = sx_in(i).output.uop.robIdx.needFlush(io.redirect)
@@ -413,6 +413,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   io.vecstout.bits.mmio := sx_last_in.mmio
   io.vecstout.bits.exceptionVec := sx_last_in.output.uop.exceptionVec
   io.vecstout.bits.usSecondInv := sx_last_in.usSecondInv
+  io.vecstout.bits.vecFeedback := sx_last_in.vecFeedback
   // io.vecstout.bits.reg_offset.map(_ := DontCare)
   // io.vecstout.bits.elemIdx.map(_ := sx_last_in.elemIdx)
   // io.vecstout.bits.elemIdxInsideVd.map(_ := DontCare)

@@ -25,6 +25,7 @@ import xiangshan._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.Bundles._
 import xiangshan.mem._
+import xiangshan.backend.fu.FuType
 
 class MBufferBundle(implicit p: Parameters) extends VLSUBundle{
   val data             = UInt(VLEN.W)
@@ -32,7 +33,7 @@ class MBufferBundle(implicit p: Parameters) extends VLSUBundle{
   val flowNum          = UInt(flowIdxBits.W)
   val exceptionVec     = ExceptionVec()
   val uop              = new DynInst
-  val vdOffset         = UInt(vOffsetBits.W)
+  // val vdOffset         = UInt(vOffsetBits.W)
 
   def allReady(): Bool = (flowNum === 0.U)
 }
@@ -40,26 +41,36 @@ class MBufferBundle(implicit p: Parameters) extends VLSUBundle{
 abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUModule{
   val io = IO(new VMergeBufferIO(isVStore))
 
-  def EnqConnect(source: MergeBufferReq, sink: MBufferBundle) = {
+  def EnqConnect(source: MergeBufferReq): MBufferBundle = {
+    val sink           = Wire(new MBufferBundle)
     sink.data         := source.data
     sink.mask         := source.mask
     sink.flowNum      := source.flowNum
     sink.exceptionVec := 0.U.asTypeOf(ExceptionVec())
     sink.uop          := source.uop
+    sink
     // sink.vdOffset     := source.vdOffset
   }
-  def DeqConnect(source: MBufferBundle, sink: MemExuOutput) = {
+  def DeqConnect(source: MBufferBundle): MemExuOutput = {
+    val sink               = Wire(new MemExuOutput(isVector = true))
     sink.data             := source.data
     sink.mask.get         := source.mask
     sink.uop.exceptionVec := source.exceptionVec
     sink.uop              := source.uop
+    sink.debug            := 0.U.asTypeOf(new DebugBundle)
+    sink.vdIdxInField.get := 0.U
+    sink.vdIdx.get        := 0.U
+    sink
   }
-  def ToLsqConnect(source: MBufferBundle, sink: FeedbackToLsqIO) = {
+  def ToLsqConnect(source: MBufferBundle): FeedbackToLsqIO = {
+    val sink                                 = Wire(new FeedbackToLsqIO)
     sink.robidx                             := source.uop.robIdx
     sink.uopidx                             := source.uop.uopIdx
-    sink.feedback(VecFeedbacks.COMMIT)      := true.B // TODO
+    sink.feedback(VecFeedbacks.COMMIT)      := true.B // TODO:
     sink.feedback(VecFeedbacks.FLUSH)       := false.B
     sink.feedback(VecFeedbacks.LAST)        := true.B
+    sink.vaddr                              := 0.U // TODO: used when exception 
+    sink
   }
   // freeliset: store valid entries index.
   // +---+---+--------------+-----+-----+
@@ -99,10 +110,12 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
       // enqueue
       allocated(enqIndex)       := true.B
       uopFinish(enqIndex)       := false.B
-      EnqConnect(enq.req.bits, entries(enqIndex))// initial entry
-
-      enq.resp.bits.mBIndex := enqIndex
     }
+    entries(enqIndex) := EnqConnect(enq.req.bits)// initial entry
+
+    enq.resp.bits.mBIndex := enqIndex
+    enq.resp.bits.fail    := false.B
+    enq.resp.valid        := canAccept //resp in 1 cycle
   }
 
   //redirect
@@ -122,8 +135,12 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     when(pipewb.valid && pipewb.bits.hit){
       entries(wbIndex).flowNum := flowNumNext
     }
-    XSError(flowNumNext > entries(wbIndex).flowNum, "FlowWriteback overflow!!\n")
+    pipewb.ready := true.B
+    XSError((flowNumNext > entries(wbIndex).flowNum) && pipewb.valid, "FlowWriteback overflow!!\n")
+    XSError(!allocated(wbIndex) && pipewb.valid, "Writeback error flow!!\n")
   }
+  // for inorder mem asscess
+  io.toSplit := DontCare
 
   //feedback to rs
   io.feedback := DontCare
@@ -136,17 +153,18 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
    val selPolicy = SelectOne("circ", uopFinish, deqWidth) // select one entry to deq
    for(((port, lsqport), i) <- (io.uopWriteback zip io.toLsq).zipWithIndex){
     val (selValid, selOHVec) = selPolicy.getNthOH(i + 1)
+    val entryIdx = OHToUInt(selOHVec)
+    val selEntry = entries(entryIdx)
     when(selValid){
-      val entryIdx = OHToUInt(selOHVec)
-      val selEntry = entries(entryIdx)
       freeMaskVec(entryIdx) := true.B
       allocated(entryIdx) := false.B
-      //writeback connect
-      DeqConnect(selEntry, port.bits)
-      port.valid := true.B
-      //to lsq
-      ToLsqConnect(selEntry, lsqport.bits) // when uopwriteback, free MBuffer entry, write to lsq
     }
+    //writeback connect
+    port.valid   := selValid
+    port.bits    := DeqConnect(selEntry)
+    //to lsq
+    lsqport.bits := ToLsqConnect(selEntry) // when uopwriteback, free MBuffer entry, write to lsq
+    lsqport.valid:= selValid
    }
 }
 
@@ -155,15 +173,15 @@ class VLMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
   println(s"VLMergeBuffer Size: ${VlMergeBufferSize}")
   override lazy val freeList = Module(new FreeList(
     size = uopSize,
-    allocWidth = LoadPipelineWidth,
+    allocWidth = VecLoadPipelineWidth,
     freeWidth = deqWidth,
     enablePreAlloc = false,
     moduleName = "VLoad MergeBuffer freelist"
   ))
 
   //merge data
-  val flowWbElemIdx = Wire(Vec(LoadPipelineWidth, UInt(elemIdxBits.W)))
-  val flowWbElemIdxInVd = Wire(Vec(LoadPipelineWidth, UInt(elemIdxBits.W)))
+  val flowWbElemIdx = Wire(Vec(VecLoadPipelineWidth, UInt(elemIdxBits.W)))
+  val flowWbElemIdxInVd = Wire(Vec(VecLoadPipelineWidth, UInt(elemIdxBits.W)))
 
   for((pipewb, i) <- io.fromPipeline.zipWithIndex){
     val wbIndex = pipewb.bits.mBIndex
@@ -174,11 +192,11 @@ class VLMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
     // handle the situation where multiple ports are going to write the same uop queue entry
     val mergedByPrevPort = (i != 0).B && Cat((0 until i).map(j =>
       io.fromPipeline(j).bits.mBIndex === pipewb.bits.mBIndex)).orR
-    val mergePortVec = (0 until LoadPipelineWidth).map(j => (j == i).B ||
+    val mergePortVec = (0 until VecLoadPipelineWidth).map(j => (j == i).B ||
       (j > i).B &&
       io.fromPipeline(j).bits.mBIndex === pipewb.bits.mBIndex &&
       io.fromPipeline(j).valid)
-    val mergeExpPortVec = (0 until LoadPipelineWidth).map(j => mergePortVec(j))
+    val mergeExpPortVec = (0 until VecLoadPipelineWidth).map(j => mergePortVec(j))
     val mergedData = mergeDataWithElemIdx(
       oldData = entries(wbIndex).data,
       newData = io.fromPipeline.map(_.bits.vecdata.get),
@@ -204,15 +222,20 @@ class VSMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
   println(s"VSMergeBuffer Size: ${VsMergeBufferSize}")
   override lazy val freeList = Module(new FreeList(
     size = uopSize,
-    allocWidth = StorePipelineWidth,
+    allocWidth = VecStorePipelineWidth,
     freeWidth = deqWidth,
     enablePreAlloc = false,
     moduleName = "VStore MergeBuffer freelist"
   ))
-  override def DeqConnect(source: MBufferBundle, sink: MemExuOutput) = {
-    sink.data             := DontCare
+  override def DeqConnect(source: MBufferBundle): MemExuOutput = {
+    val sink               = Wire(new MemExuOutput(isVector = true))
+    sink.data             := source.data
     sink.mask.get         := source.mask
     sink.uop.exceptionVec := source.exceptionVec
     sink.uop              := source.uop
+    sink.debug            := 0.U.asTypeOf(new DebugBundle)
+    sink.vdIdxInField.get := 0.U
+    sink.vdIdx.get        := 0.U
+    sink
   }
 }

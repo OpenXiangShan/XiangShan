@@ -154,8 +154,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val mmioStout = DecoupledIO(new MemExuOutput) // writeback uncached store
     val vecmmioStout = DecoupledIO(new MemExuOutput(isVector = true))
     val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
-    // TODO: For vector store commit
-    val robHead = Input(new RobPtr)
     // TODO: scommit is only for scalar store
     val rob = Flipped(new RobLsqIO)
     val uncache = new UncacheWordIO
@@ -205,6 +203,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val dataBuffer = Module(new DatamoduleResultBuffer(new DataBufferEntry))
   val exceptionBuffer = Module(new StoreExceptionBuffer)
   exceptionBuffer.io.redirect := io.brqRedirect
+  exceptionBuffer.io.exceptionAddr.isStore := DontCare
   // TODO: implement it!
   exceptionBuffer.io.storeAddrIn(StorePipelineWidth) := DontCare
 
@@ -406,6 +405,9 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     vaddrModule.io.wen(i) := false.B
     dataModule.io.mask.wen(i) := false.B
     val stWbIndex = io.storeAddrIn(i).bits.uop.sqIdx.value
+    exceptionBuffer.io.storeAddrIn(i).valid := io.storeAddrIn(i).fire && !io.storeAddrIn(i).bits.isvec
+    exceptionBuffer.io.storeAddrIn(i).bits := io.storeAddrIn(i).bits
+    
     when (io.storeAddrIn(i).fire) {
       val addr_valid = !io.storeAddrIn(i).bits.miss
       addrvalid(stWbIndex) := addr_valid //!io.storeAddrIn(i).bits.mmio
@@ -436,9 +438,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule
         uop(stWbIndex + 1.U).robIdx := uop(stWbIndex).robIdx
         uop(stWbIndex + 1.U).uopIdx := uop(stWbIndex).uopIdx
       }
-
-      exceptionBuffer.io.storeAddrIn(i).valid := !io.storeAddrIn(i).bits.isvec
-      exceptionBuffer.io.storeAddrIn(i).bits := io.storeAddrIn(i).bits
 
       XSInfo("store addr write to sq idx %d pc 0x%x miss:%d vaddr %x paddr %x mmio %x isvec %x vec_secondInv %x\n",
         io.storeAddrIn(i).bits.uop.sqIdx.value,
@@ -792,6 +791,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   }
 
   // (4) or vector store:
+  // TODO: implement it!
+  io.vecmmioStout := DontCare
   io.vecmmioStout.valid := uncacheState === s_wb && is_vec(deqPtr)
   io.vecmmioStout.bits.uop := uop(deqPtr)
   io.vecmmioStout.bits.uop.sqIdx := deqPtrExt(0)
@@ -820,7 +821,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // TODO: Deal with vector store mmio
   for (i <- 0 until CommitWidth) {
     val veccount = PopCount(veccommitVec.take(i))
-    when (is_vec(cmtPtrExt(i).value) && isNotAfter(uop(cmtPtrExt(i).value).robIdx, io.robHead) && vec_mbCommit(cmtPtrExt(i).value)) {
+    when (is_vec(cmtPtrExt(i).value) && isNotAfter(uop(cmtPtrExt(i).value).robIdx, io.rob.pendingPtr) && vec_mbCommit(cmtPtrExt(i).value)) {
       if (i == 0){
         // TODO: fixme for mmio
         when (uncacheState === s_idle){
