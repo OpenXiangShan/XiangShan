@@ -426,6 +426,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val mideleg = RegInit(UInt(XLEN.W), 0.U)
   val mscratch = RegInit(UInt(XLEN.W), 0.U)
 
+  val menvcfg = RegInit(UInt(XLEN.W), 0.U)  // !WARNING: there is no logic about this CSR.
+
   // PMP Mapping
   val pmp = Wire(Vec(NumPMP, new PMPEntry())) // just used for method parameter
   val pma = Wire(Vec(NumPMA, new PMPEntry())) // just used for method parameter
@@ -465,6 +467,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val stval = Reg(UInt(XLEN.W))
   val sscratch = RegInit(UInt(XLEN.W), 0.U)
   val scounteren = RegInit(UInt(XLEN.W), 0.U)
+  val senvcfg = RegInit(UInt(XLEN.W), 0.U)  // !WARNING: there is no logic about this CSR.
 
   // sbpctl
   // Bits 0-7: {LOOP, RAS, SC, TAGE, BIM, BTB, uBTB}
@@ -693,6 +696,9 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Stvec, stvec, stvecMask, MaskedRegMap.NoSideEffect, stvecMask),
     MaskedRegMap(Scounteren, scounteren),
 
+    //--- Supervisor Configuration ---
+    MaskedRegMap(Senvcfg, senvcfg),
+
     //--- Supervisor Trap Handling ---
     MaskedRegMap(Sscratch, sscratch),
     MaskedRegMap(Sepc, sepc, sepcMask, MaskedRegMap.NoSideEffect, sepcMask),
@@ -734,6 +740,9 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Mcause, mcause),
     MaskedRegMap(Mtval, mtval),
     MaskedRegMap(Mip, mip.asUInt, 0.U(XLEN.W), MaskedRegMap.Unwritable),
+
+    //--- Machine Configuration ---
+    MaskedRegMap(Menvcfg, menvcfg),
 
     //--- Trigger ---
     MaskedRegMap(Tselect, tselectPhy, WritableMask, WriteTselect),
