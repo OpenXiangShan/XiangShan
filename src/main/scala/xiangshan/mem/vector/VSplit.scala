@@ -117,7 +117,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
     x.fof := isUnitStride(s0_mop) && us_fof(s0_fuOpType)
     x.baseAddr := io.in.bits.src_rs1
     x.stride := io.in.bits.src_stride
-    x.flowNum := (1.U << flowNum)
+    x.flowNum := flowNum
     x.nfields := s0_nf +& 1.U
     x.vm := s0_vm
     x.usWholeReg := isUsWholeReg
@@ -175,7 +175,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
 
   // query mergeBuffer
   io.toMergeBuffer.req.valid             := s1_fire // only can_go will get MergeBuffer entry
-  io.toMergeBuffer.req.bits.flowNum      := Mux(s1_in.preIsSplit, 1.U << flowNum, PopCount(s1_in.flowMask))
+  io.toMergeBuffer.req.bits.flowNum      := Mux(s1_in.preIsSplit, PopCount(s1_in.flowMask), flowNum)
   io.toMergeBuffer.req.bits.data         := s1_in.data
   io.toMergeBuffer.req.bits.uop          := s1_in.uop
   io.toMergeBuffer.req.bits.mask         := flowMask
@@ -362,6 +362,8 @@ class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = t
       )
   val usSplitData      = genUSSplitData(issueEntry.data.asUInt, splitIdx, vaddr(3,0))
 
+  io.out.bits.uop.sqIdx := issueUop.sqIdx + splitIdx
+
   // send data to sq
   val vstd = io.vstd.get
   vstd.valid := canIssue
@@ -376,6 +378,7 @@ class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = t
 
 class VLSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = false){
   override lazy val bufferSize = SplitBufferSize
+  io.out.bits.uop.lqIdx := issueUop.lqIdx + splitIdx
 }
 
 class VSSplitPipelineImp(implicit p: Parameters) extends VSplitPipeline(isVStore = true){
