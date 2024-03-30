@@ -161,23 +161,40 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val csrNotImplemented = RegInit(UInt(XLEN.W), 0.U)
 
   class DcsrStruct extends Bundle {
-    val xdebugver = Output(UInt(2.W))
-    val zero4 = Output(UInt(2.W))
-    val zero3 = Output(UInt(12.W))
-    val ebreakm = Output(Bool())
-    val ebreakh = Output(Bool())
-    val ebreaks = Output(Bool())
-    val ebreaku = Output(Bool())
-    val stepie = Output(Bool()) // 0
-    val stopcycle = Output(Bool())
-    val stoptime = Output(Bool())
-    val cause = Output(UInt(3.W))
-    val v = Output(Bool()) // 0
-    val mprven = Output(Bool())
-    val nmip = Output(Bool())
-    val step = Output(Bool())
-    val prv = Output(UInt(2.W))
+    val debugver  = Output(UInt(4.W)) // 28
+    val pad1      = Output(UInt(10.W))// 18
+    val ebreakvs  = Output(Bool())    // 17 reserved for Hypervisor debug
+    val ebreakvu  = Output(Bool())    // 16 reserved for Hypervisor debug
+    val ebreakm   = Output(Bool())    // 15
+    val pad0      = Output(Bool())    // 14 ebreakh has been removed
+    val ebreaks   = Output(Bool())    // 13
+    val ebreaku   = Output(Bool())    // 12
+    val stepie    = Output(Bool())    // 11
+    val stopcount = Output(Bool())    // 10
+    val stoptime  = Output(Bool())    // 9
+    val cause     = Output(UInt(3.W)) // 6
+    val v         = Output(Bool())    // 5
+    val mprven    = Output(Bool())    // 4
+    val nmip      = Output(Bool())    // 3
+    val step      = Output(Bool())    // 2
+    val prv       = Output(UInt(2.W)) // 0
   }
+
+  object DcsrStruct extends DcsrStruct {
+    private def debugver_offset   = 28
+    private def stopcount_offset  = 10
+    private def stoptime_offset   = 9
+    private def mprven_offset     = 5
+    private def prv_offset        = 0
+    def init: UInt = (
+      (4L << debugver_offset) |   /* Debug implementation as it described in 0.13 draft */
+      (0L << stopcount_offset) |  /* Stop count updating has not been supported */
+      (0L << stoptime_offset) |   /* Stop time updating has not been supported */
+      (0L << mprven_offset) |     /* Whether use mstatus.perven mprven */
+      (3L << prv_offset)          /* Hart was operating in Privilege M when Debug Mode was entered */
+    ).U
+  }
+  require(new DcsrStruct().getWidth == 32)
 
   class MstatusStruct extends Bundle {
     val sd = Output(UInt(1.W))
@@ -218,12 +235,12 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   }
 
   // Debug CSRs
-  val dcsr = RegInit(UInt(32.W), 0x4000b000.U)
+  val dcsr = RegInit(UInt(32.W), DcsrStruct.init)
   val dpc = Reg(UInt(64.W))
-  val dscratch = Reg(UInt(64.W))
+  val dscratch0 = Reg(UInt(64.W))
   val dscratch1 = Reg(UInt(64.W))
   val debugMode = RegInit(false.B)
-  val debugIntrEnable = RegInit(true.B)
+  val debugIntrEnable = RegInit(true.B) // debug interrupt will be handle only when debugIntrEnable
   csrio.debugMode := debugMode
 
   val dpcPrev = RegNext(dpc)
@@ -744,7 +761,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     //--- Debug Mode ---
     MaskedRegMap(Dcsr, dcsr, dcsrMask, dcsrUpdateSideEffect),
     MaskedRegMap(Dpc, dpc),
-    MaskedRegMap(Dscratch, dscratch),
+    MaskedRegMap(Dscratch0, dscratch0),
     MaskedRegMap(Dscratch1, dscratch1),
     MaskedRegMap(Mcountinhibit, mcountinhibit),
     MaskedRegMap(Mcycle, mcycle),
@@ -902,12 +919,26 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   tlbBundle.priv.dmode := Mux(debugMode && dcsr.asTypeOf(new DcsrStruct).mprven, ModeM, Mux(mstatusStruct.mprv.asBool, mstatusStruct.mpp, privilegeMode))
 
   // Branch control
-  val retTarget = Wire(UInt(VAddrBits.W))
+  val retTarget = WireInit(0.U)
   val resetSatp = addr === Satp.U && wen // write to satp will cause the pipeline be flushed
   flushPipe := resetSatp || (valid && func === CSROpType.jmp && !isEcall && !isEbreak)
 
-  retTarget := DontCare
-  // val illegalEret = TODO
+  private val illegalRetTarget = WireInit(false.B)
+  when(valid) {
+    when(isDret) {
+      retTarget := dpc(VAddrBits - 1, 0)
+    }.elsewhen(isMret && !illegalMret) {
+      retTarget := mepc(VAddrBits - 1, 0)
+    }.elsewhen(isSret && !illegalSret && !illegalSModeSret) {
+      retTarget := sepc(VAddrBits - 1, 0)
+    }.elsewhen(isUret) {
+      retTarget := uepc(VAddrBits - 1, 0)
+    }.otherwise {
+      illegalRetTarget := true.B
+    }
+  }.otherwise {
+    illegalRetTarget := true.B // when illegalRetTarget setted, retTarget should never be used
+  }
 
   when (valid && isDret) {
     val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
@@ -964,10 +995,19 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   io.in.ready := true.B
   io.out.valid := valid
 
-  val ebreakCauseException = (privilegeMode === ModeM && dcsrData.ebreakm) || (privilegeMode === ModeS && dcsrData.ebreaks) || (privilegeMode === ModeU && dcsrData.ebreaku)
+  // In this situation, hart will enter debug mode instead of handling a breakpoint exception simply.
+  // Ebreak block instructions backwards, so it's ok to not keep extra info to distinguish between breakpoint
+  // exception and enter-debug-mode exception.
+  val ebreakEnterDebugMode =
+    (privilegeMode === ModeM && dcsrData.ebreakm) ||
+    (privilegeMode === ModeS && dcsrData.ebreaks) ||
+    (privilegeMode === ModeU && dcsrData.ebreaku)
+
+  // raise a debug exception waiting to enter debug mode, instead of a breakpoint exception
+  val raiseDebugException = !debugMode && isEbreak && ebreakEnterDebugMode
 
   val csrExceptionVec = WireInit(cfIn.exceptionVec)
-  csrExceptionVec(breakPoint) := io.in.valid && isEbreak && (ebreakCauseException || debugMode)
+  csrExceptionVec(breakPoint) := io.in.valid && isEbreak
   csrExceptionVec(ecallM) := privilegeMode === ModeM && io.in.valid && isEcall
   csrExceptionVec(ecallS) := privilegeMode === ModeS && io.in.valid && isEcall
   csrExceptionVec(ecallU) := privilegeMode === ModeU && io.in.valid && isEcall
@@ -977,7 +1017,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   csrExceptionVec(illegalInstr) := isIllegalAddr || isIllegalAccess || isIllegalPrivOp
   cfOut.exceptionVec := csrExceptionVec
 
-  XSDebug(io.in.valid && isEbreak, s"Debug Mode: an Ebreak is executed, ebreak cause exception ? ${ebreakCauseException}\n")
+  XSDebug(io.in.valid, s"Debug Mode: an Ebreak is executed, ebreak cause enter-debug-mode exception ? ${raiseDebugException}\n")
 
   /**
     * Exception and Intr
@@ -1007,46 +1047,48 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   // interrupts
   val intrNO = IntPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(intrVec(i), i.U, sum))
-  val raiseIntr = csrio.exception.valid && csrio.exception.bits.isInterrupt
+  val hasIntr = csrio.exception.valid && csrio.exception.bits.isInterrupt
   val ivmEnable = tlbBundle.priv.imode < ModeM && satp.asTypeOf(new SatpStruct).mode === 8.U
   val iexceptionPC = Mux(ivmEnable, SignExt(csrio.exception.bits.uop.cf.pc, XLEN), csrio.exception.bits.uop.cf.pc)
   val dvmEnable = tlbBundle.priv.dmode < ModeM && satp.asTypeOf(new SatpStruct).mode === 8.U
   val dexceptionPC = Mux(dvmEnable, SignExt(csrio.exception.bits.uop.cf.pc, XLEN), csrio.exception.bits.uop.cf.pc)
-  XSDebug(raiseIntr, "interrupt: pc=0x%x, %d\n", dexceptionPC, intrNO)
-  val raiseDebugIntr = intrNO === IRQ_DEBUG.U && raiseIntr
+  XSDebug(hasIntr, "interrupt: pc=0x%x, %d\n", dexceptionPC, intrNO)
+  val hasDebugIntr = intrNO === IRQ_DEBUG.U && hasIntr
 
-  // exceptions
-  val raiseException = csrio.exception.valid && !csrio.exception.bits.isInterrupt
-  val hasInstrPageFault = csrio.exception.bits.uop.cf.exceptionVec(instrPageFault) && raiseException
-  val hasLoadPageFault = csrio.exception.bits.uop.cf.exceptionVec(loadPageFault) && raiseException
-  val hasStorePageFault = csrio.exception.bits.uop.cf.exceptionVec(storePageFault) && raiseException
-  val hasStoreAddrMisaligned = csrio.exception.bits.uop.cf.exceptionVec(storeAddrMisaligned) && raiseException
-  val hasLoadAddrMisaligned = csrio.exception.bits.uop.cf.exceptionVec(loadAddrMisaligned) && raiseException
-  val hasInstrAccessFault = csrio.exception.bits.uop.cf.exceptionVec(instrAccessFault) && raiseException
-  val hasLoadAccessFault = csrio.exception.bits.uop.cf.exceptionVec(loadAccessFault) && raiseException
-  val hasStoreAccessFault = csrio.exception.bits.uop.cf.exceptionVec(storeAccessFault) && raiseException
-  val hasbreakPoint = csrio.exception.bits.uop.cf.exceptionVec(breakPoint) && raiseException
-  val hasSingleStep = csrio.exception.bits.uop.ctrl.singleStep && raiseException
-  val hasTriggerHit = (csrio.exception.bits.uop.cf.trigger.hit) && raiseException
+  // exceptions from rob need to handle
+  val exceptionVecFromRob    = csrio.exception.bits.uop.cf.exceptionVec
+  val hasException           = csrio.exception.valid && !csrio.exception.bits.isInterrupt
+  val hasInstrPageFault      = hasException && exceptionVecFromRob(instrPageFault)
+  val hasLoadPageFault       = hasException && exceptionVecFromRob(loadPageFault)
+  val hasStorePageFault      = hasException && exceptionVecFromRob(storePageFault)
+  val hasStoreAddrMisalign   = hasException && exceptionVecFromRob(storeAddrMisaligned)
+  val hasLoadAddrMisalign    = hasException && exceptionVecFromRob(loadAddrMisaligned)
+  val hasInstrAccessFault    = hasException && exceptionVecFromRob(instrAccessFault)
+  val hasLoadAccessFault     = hasException && exceptionVecFromRob(loadAccessFault)
+  val hasStoreAccessFault    = hasException && exceptionVecFromRob(storeAccessFault)
+  val hasBreakPoint          = hasException && exceptionVecFromRob(breakPoint)
+  val hasSingleStep          = hasException && csrio.exception.bits.uop.ctrl.singleStep
+  val hasTriggerHit          = hasException && csrio.exception.bits.uop.cf.trigger.hit
 
   XSDebug(hasSingleStep, "Debug Mode: single step exception\n")
   XSDebug(hasTriggerHit, p"Debug Mode: trigger hit, is frontend? ${Binary(csrio.exception.bits.uop.cf.trigger.frontendHit.asUInt)} " +
     p"backend hit vec ${Binary(csrio.exception.bits.uop.cf.trigger.backendHit.asUInt)}\n")
 
-  val raiseExceptionVec = csrio.exception.bits.uop.cf.exceptionVec
-  val regularExceptionNO = ExceptionNO.priorities.foldRight(0.U)((i: Int, sum: UInt) => Mux(raiseExceptionVec(i), i.U, sum))
+  val hasExceptionVec = csrio.exception.bits.uop.cf.exceptionVec
+  val regularExceptionNO = ExceptionNO.priorities.foldRight(0.U)((i: Int, sum: UInt) => Mux(hasExceptionVec(i), i.U, sum))
   val exceptionNO = Mux(hasSingleStep || hasTriggerHit, 3.U, regularExceptionNO)
-  val causeNO = (raiseIntr << (XLEN-1)).asUInt | Mux(raiseIntr, intrNO, exceptionNO)
+  val causeNO = (hasIntr << (XLEN-1)).asUInt | Mux(hasIntr, intrNO, exceptionNO)
 
-  val raiseExceptionIntr = csrio.exception.valid
+  val hasExceptionIntr = csrio.exception.valid
 
-  val raiseDebugExceptionIntr = !debugMode && (hasbreakPoint || raiseDebugIntr || hasSingleStep || hasTriggerHit && triggerAction) // TODO
-  val ebreakEnterParkLoop = debugMode && raiseExceptionIntr
+  val hasDebugException = hasBreakPoint && !debugMode && ebreakEnterDebugMode
+  val hasDebugExceptionIntr = !debugMode && (hasDebugException || hasDebugIntr || hasSingleStep || hasTriggerHit && triggerAction) // TODO
+  val ebreakEnterParkLoop = debugMode && hasExceptionIntr
 
-  XSDebug(raiseExceptionIntr, "int/exc: pc %x int (%d):%x exc: (%d):%x\n",
-    dexceptionPC, intrNO, intrVec, exceptionNO, raiseExceptionVec.asUInt
+  XSDebug(hasExceptionIntr, "int/exc: pc %x int (%d):%x exc: (%d):%x\n",
+    dexceptionPC, intrNO, intrVec, exceptionNO, hasExceptionVec.asUInt
   )
-  XSDebug(raiseExceptionIntr,
+  XSDebug(hasExceptionIntr,
     "pc %x mstatus %x mideleg %x medeleg %x mode %x\n",
     dexceptionPC,
     mstatus,
@@ -1065,8 +1107,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     hasInstrAccessFault,
     hasLoadAccessFault,
     hasStoreAccessFault,
-    hasLoadAddrMisaligned,
-    hasStoreAddrMisaligned
+    hasLoadAddrMisalign,
+    hasStoreAddrMisalign,
   )).asUInt.orR
   when (RegNext(RegNext(updateTval))) {
       val tval = Mux(
@@ -1086,10 +1128,10 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   }
 
   val debugTrapTarget = Mux(!isEbreak && debugMode, 0x38020808.U, 0x38020800.U) // 0x808 is when an exception occurs in debug mode prog buf exec
-  val deleg = Mux(raiseIntr, mideleg , medeleg)
+  val deleg = Mux(hasIntr, mideleg, medeleg)
   // val delegS = ((deleg & (1 << (causeNO & 0xf))) != 0) && (privilegeMode < ModeM);
-  val delegS = deleg(causeNO(3,0)) && (privilegeMode < ModeM)
-  val clearTval = !updateTval || raiseIntr
+  val delegS = deleg(causeNO(7,0)) && (privilegeMode < ModeM)
+  val clearTval = !updateTval || hasIntr
   val isXRet = io.in.valid && func === CSROpType.jmp && !isEcall && !isEbreak
 
   // ctrl block will use theses later for flush
@@ -1100,46 +1142,46 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     isXRetFlag := true.B
   }
   csrio.isXRet := isXRetFlag
-  val retTargetReg = RegEnable(retTarget, isXRet)
-
-  val tvec = Mux(delegS, stvec, mtvec)
-  val tvecBase = tvec(VAddrBits - 1, 2)
+  private val retTargetReg = RegEnable(retTarget, isXRet && !illegalRetTarget)
+  private val illegalXret = RegEnable(illegalMret || illegalSret || illegalSModeSret, isXRet)
+  val xtvec = Mux(delegS, stvec, mtvec)
+  val xtvecBase = xtvec(VAddrBits - 1, 2)
+  // When MODE=Vectored, all synchronous exceptions into M/S mode
+  // cause the pc to be set to the address in the BASE field, whereas
+  // interrupts cause the pc to be set to the address in the BASE field
+  // plus four times the interrupt cause number.
+  private val pcFromXtvec = Cat(xtvecBase + Mux(xtvec(0) && hasIntr, causeNO(3, 0), 0.U), 0.U(2.W))
   // XRet sends redirect instead of Flush and isXRetFlag is true.B before redirect.valid.
   // ROB sends exception at T0 while CSR receives at T2.
   // We add a RegNext here and trapTarget is valid at T3.
-  csrio.trapTarget := RegEnable(Mux(isXRetFlag,
-    retTargetReg,
-    Mux(raiseDebugExceptionIntr || ebreakEnterParkLoop, debugTrapTarget,
-      // When MODE=Vectored, all synchronous exceptions into M/S mode
-      // cause the pc to be set to the address in the BASE field, whereas
-      // interrupts cause the pc to be set to the address in the BASE field
-      // plus four times the interrupt cause number.
-      Cat(tvecBase + Mux(tvec(0) && raiseIntr, causeNO(3, 0), 0.U), 0.U(2.W))
-  )), isXRetFlag || csrio.exception.valid)
+  csrio.trapTarget := RegEnable(
+    MuxCase(pcFromXtvec, Seq(
+      (isXRetFlag && !illegalXret) -> retTargetReg,
+      (hasDebugExceptionIntr || ebreakEnterParkLoop) -> debugTrapTarget
+    )),
+    isXRetFlag || csrio.exception.valid)
 
-  when (raiseExceptionIntr) {
+  when (hasExceptionIntr) {
     val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
     val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
     val dcsrNew = WireInit(dcsr.asTypeOf(new DcsrStruct))
     val debugModeNew = WireInit(debugMode)
 
-    when (raiseDebugExceptionIntr) {
-      when (raiseDebugIntr) {
+    when (hasDebugExceptionIntr) {
+      when (hasDebugIntr) {
         debugModeNew := true.B
-        mstatusNew.mprv := false.B
         dpc := iexceptionPC
         dcsrNew.cause := 3.U
         dcsrNew.prv := privilegeMode
         privilegeMode := ModeM
-        XSDebug(raiseDebugIntr, "Debug Mode: Trap to %x at pc %x\n", debugTrapTarget, dpc)
-      }.elsewhen ((hasbreakPoint || hasSingleStep) && !debugMode) {
+        XSDebug(hasDebugIntr, "Debug Mode: Trap to %x at pc %x\n", debugTrapTarget, dpc)
+      }.elsewhen ((hasBreakPoint || hasSingleStep || hasTriggerHit && triggerAction) && !debugMode) {
         // ebreak or ss in running hart
         debugModeNew := true.B
-        dpc := iexceptionPC
-        dcsrNew.cause := Mux(hasTriggerHit, 2.U, Mux(hasbreakPoint, 1.U, 4.U))
-        dcsrNew.prv := privilegeMode // TODO
+        dpc := iexceptionPC // TODO: check it when hasSingleStep
+        dcsrNew.cause := Mux(hasTriggerHit, 2.U, Mux(hasBreakPoint, 1.U, 4.U))
+        dcsrNew.prv := privilegeMode
         privilegeMode := ModeM
-        mstatusNew.mprv := false.B
       }
       dcsr := dcsrNew.asUInt
       debugIntrEnable := false.B
@@ -1166,7 +1208,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     debugMode := debugModeNew
   }
 
-  XSDebug(raiseExceptionIntr && delegS, "sepc is written!!! pc:%x\n", cfIn.pc)
+  XSDebug(hasExceptionIntr && delegS, "sepc is written!!! pc:%x\n", cfIn.pc)
 
   // Distributed CSR update req
   //
@@ -1211,15 +1253,15 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   def readWithScala(addr: Int): UInt = mapping(addr)._1
 
-  val difftestIntrNO = Mux(raiseIntr, causeNO, 0.U)
+  val difftestIntrNO = Mux(hasIntr, causeNO, 0.U)
 
   // Always instantiate basic difftest modules.
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
     val difftest = DifftestModule(new DiffArchEvent, delay = 3, dontCare = true)
     difftest.coreid      := csrio.hartId
     difftest.valid       := csrio.exception.valid
-    difftest.interrupt   := Mux(raiseIntr, causeNO, 0.U)
-    difftest.exception   := Mux(raiseException, causeNO, 0.U)
+    difftest.interrupt   := Mux(hasIntr, causeNO, 0.U)
+    difftest.exception   := Mux(hasException, causeNO, 0.U)
     difftest.exceptionPC := dexceptionPC
     if (env.EnableDifftest) {
       difftest.exceptionInst := csrio.exception.bits.uop.cf.instr
@@ -1256,7 +1298,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     difftest.debugMode := debugMode
     difftest.dcsr := dcsr
     difftest.dpc := dpc
-    difftest.dscratch0 := dscratch
+    difftest.dscratch0 := dscratch0
     difftest.dscratch1 := dscratch1
   }
 }
