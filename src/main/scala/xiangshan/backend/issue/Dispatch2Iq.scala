@@ -813,11 +813,6 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   val outs = io.out.flatten
   val selIdxOH = Wire(MixedVec(finalFuDeqMap.map(x => Vec(x._2.size, ValidIO(UInt(uopsIn.size.W))))))
   selIdxOH.foreach(_.foreach(_ := 0.U.asTypeOf(ValidIO(UInt(uopsIn.size.W)))))
-  uopsIn.zipWithIndex.map {
-    case (uopsIn_Item, index) =>{
-      uopsIn_Item.ready := allowDispatch(index)
-      uopsIn_Item.bits.numLsElem := Mux(isVlsType(index), numLsElem(index), 0.U)
-    }}
 
   dontTouch(selIdxOH)
 
@@ -1036,9 +1031,12 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   uopsIn <> io.in
   uopsIn.foreach(_.ready := false.B)
   uopsIn.zipWithIndex.foreach { case (uopIn, idx) =>
-    uopIn.ready := enqMapDeqMatrix(idx).asUInt.orR && lsqCanAccept // Todo: move allowDispatch here
+    uopIn.ready := enqMapDeqMatrix(idx).asUInt.orR && allowDispatch(idx)
     uopIn.bits.lqIdx := s0_enqLsq_resp(idx).lqIdx
     uopIn.bits.sqIdx := s0_enqLsq_resp(idx).sqIdx
+    uopIn.bits.numLsElem := Mux(isVlsType(idx), numLsElem(idx), 0.U)
+    dontTouch(isVlsType(idx))
+    dontTouch(numLsElem(idx))
   }
 
   // We always read physical register states when in gives the instructions.
