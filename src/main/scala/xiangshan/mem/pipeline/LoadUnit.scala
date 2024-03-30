@@ -419,10 +419,18 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_rd        := src.uop.fuOpType === LSUOpType.prefetch_r
     out.prf_wr        := src.uop.fuOpType === LSUOpType.prefetch_w
     out.sched_idx     := src.schedIndex
-    out.vecActive     := true.B // true for scala load
+    out.isvec         := src.isvec
+    out.is128bit      := src.is128bit
+    out.uop_unit_stride_fof := src.uop_unit_stride_fof
+    out.reg_offset    := src.reg_offset
+    out.vecActive     := src.vecActive
+    out.is_first_ele  := src.is_first_ele
+    out.usSecondInv   := src.usSecondInv
+    out.mbIndex       := src.mbIndex
     out
   }
 
+  // TODO: implement vector mmio
   def fromMmioSource(src: MemExuOutput) = {
     val out = WireInit(0.U.asTypeOf(new FlowSource))
     out.vaddr        := 0.U
@@ -463,10 +471,18 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_rd        := src.uop.fuOpType === LSUOpType.prefetch_r
     out.prf_wr        := src.uop.fuOpType === LSUOpType.prefetch_w
     out.sched_idx     := src.schedIndex
-    out.vecActive     := true.B // true for scala load
+    out.isvec         := src.isvec
+    out.is128bit      := src.is128bit
+    out.uop_unit_stride_fof := src.uop_unit_stride_fof
+    out.reg_offset    := src.reg_offset
+    out.vecActive     := src.vecActive
+    out.is_first_ele  := src.is_first_ele
+    out.usSecondInv   := src.usSecondInv
+    out.mbIndex       := src.mbIndex
     out
   }
 
+  // TODO: implement vector prefetch
   def fromPrefetchSource(src: L1PrefetchReq): FlowSource = {
     val out = WireInit(0.U.asTypeOf(new FlowSource))
     out.vaddr         := src.getVaddr()
@@ -485,7 +501,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_rd        := !src.is_store
     out.prf_wr        := src.is_store
     out.sched_idx     := 0.U
-    out.vecActive     := true.B // true for scala load
     out
   }
 
@@ -550,6 +565,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out
   }
 
+  // TODO: implement vector l2l
   def fromLoadToLoadSource(src: LoadToLoadIO): FlowSource = {
     val out = WireInit(0.U.asTypeOf(new FlowSource))
     out.vaddr              := Cat(src.data(XLEN-1, 6), s0_ptr_chasing_vaddr(5,0))
@@ -572,7 +588,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_rd             := false.B
     out.prf_wr             := false.B
     out.sched_idx          := 0.U
-    out.vecActive          := true.B // true for scala load
     out
   }
 

@@ -32,6 +32,7 @@ import xiangshan.mem.mdp._
 import utils._
 import utility._
 import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
+import math._
 
 object LoadReplayCauses {
   // these causes have priority, lower coding has higher priority.
@@ -69,6 +70,20 @@ object LoadReplayCauses {
   val C_NK  = 9
   // total causes
   val allCauses = 10
+}
+
+class VecReplayInfo(implicit p: Parameters) extends XSBundle with HasVLSUParameters {
+  val isvec = Bool()
+  val isLastElem = Bool()
+  val is128bit = Bool()
+  val uop_unit_stride_fof = Bool()
+  val usSecondInv = Bool()
+  val elemIdx = UInt(elemIdxBits.W)
+  val alignedType = UInt(alignTypeBits.W)
+  val mbIndex = UInt(max(vlmBindexBits, vsmBindexBits).W)
+  val reg_offset = UInt(vOffsetBits.W)
+  val vecActive = Bool()
+  val is_first_ele = Bool()
 }
 
 class AgeDetector(numEntries: Int, numEnq: Int, regOut: Boolean = true)(implicit p: Parameters) extends XSModule {
@@ -206,6 +221,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val allocated = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B))) // The control signals need to explicitly indicate the initial value
   val scheduled = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
   val uop = Reg(Vec(LoadQueueReplaySize, new DynInst))
+  val vecReplay = Reg(Vec(LoadQueueReplaySize, new VecReplayInfo))
   val vaddrModule = Module(new LqVAddrModule(
     gen = UInt(VAddrBits.W),
     numEntries = LoadQueueReplaySize,
@@ -498,6 +514,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   for (i <- 0 until LoadPipelineWidth) {
     val s1_replayIdx = s1_oldestSel(i).bits
     val s2_replayUop = RegEnable(uop(s1_replayIdx), s1_can_go(i))
+    val s2_vecReplay = RegEnable(vecReplay(s1_replayIdx), s1_can_go(i))
     val s2_replayMSHRId = RegEnable(missMSHRId(s1_replayIdx), s1_can_go(i))
     val s2_replacementUpdated = RegEnable(replacementUpdated(s1_replayIdx), s1_can_go(i))
     val s2_missDbUpdated = RegEnable(missDbUpdated(s1_replayIdx), s1_can_go(i))
@@ -510,6 +527,17 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     replay_req(i).valid             := s2_oldestSel(i).valid
     replay_req(i).bits              := DontCare
     replay_req(i).bits.uop          := s2_replayUop
+    replay_req(i).bits.isvec        := s2_vecReplay.isvec
+    replay_req(i).bits.isLastElem   := s2_vecReplay.isLastElem
+    replay_req(i).bits.is128bit     := s2_vecReplay.is128bit
+    replay_req(i).bits.uop_unit_stride_fof := s2_vecReplay.uop_unit_stride_fof
+    replay_req(i).bits.usSecondInv  := s2_vecReplay.usSecondInv
+    replay_req(i).bits.elemIdx      := s2_vecReplay.elemIdx
+    replay_req(i).bits.alignedType  := s2_vecReplay.alignedType
+    replay_req(i).bits.mbIndex      := s2_vecReplay.mbIndex
+    replay_req(i).bits.reg_offset   := s2_vecReplay.reg_offset
+    replay_req(i).bits.vecActive    := s2_vecReplay.vecActive
+    replay_req(i).bits.is_first_ele := s2_vecReplay.is_first_ele
     replay_req(i).bits.vaddr        := vaddrModule.io.rdata(i)
     replay_req(i).bits.isFirstIssue := false.B
     replay_req(i).bits.isLoadReplay := true.B
@@ -592,6 +620,17 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       allocated(enqIndex) := true.B
       scheduled(enqIndex) := false.B
       uop(enqIndex)       := enq.bits.uop
+      vecReplay(enqIndex).isvec := enq.bits.isvec
+      vecReplay(enqIndex).isLastElem := enq.bits.isLastElem
+      vecReplay(enqIndex).is128bit := enq.bits.is128bit
+      vecReplay(enqIndex).uop_unit_stride_fof := enq.bits.uop_unit_stride_fof
+      vecReplay(enqIndex).usSecondInv := enq.bits.usSecondInv
+      vecReplay(enqIndex).elemIdx := enq.bits.elemIdx
+      vecReplay(enqIndex).alignedType:= enq.bits.alignedType
+      vecReplay(enqIndex).mbIndex := enq.bits.mbIndex
+      vecReplay(enqIndex).reg_offset := enq.bits.reg_offset
+      vecReplay(enqIndex).vecActive := enq.bits.vecActive
+      vecReplay(enqIndex).is_first_ele := enq.bits.is_first_ele
 
       vaddrModule.io.wen(w)   := true.B
       vaddrModule.io.waddr(w) := enqIndex
