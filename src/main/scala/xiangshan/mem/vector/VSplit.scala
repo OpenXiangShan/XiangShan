@@ -235,7 +235,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
     uopq(id) := io.in.bits
     valid(id) := true.B
   }
-  io.in.ready := isAfter(enqPtr, deqPtr)
+  io.in.ready := isNotBefore(enqPtr, deqPtr)
 
   //split uops
   val issueValid       = valid(deqPtr.value)
