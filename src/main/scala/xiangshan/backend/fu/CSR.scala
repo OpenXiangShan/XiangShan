@@ -619,13 +619,13 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Fcsr, fcsr, wfn = fcsr_wfn)
   )
 
-  // Hart Priviledge Mode
-  val priviledgeMode = RegInit(UInt(2.W), ModeM)
+  // Hart Privilege Mode
+  val privilegeMode = RegInit(UInt(2.W), ModeM)
 
   //val perfEventscounten = List.fill(nrPerfCnts)(RegInit(false(Bool())))
   // Perf Counter
   val nrPerfCnts = 29  // 3...31
-  val priviledgeModeOH = UIntToOH(priviledgeMode)
+  val privilegeModeOH = UIntToOH(privilegeMode)
   val perfEventscounten = RegInit(0.U.asTypeOf(Vec(nrPerfCnts, Bool())))
   val perfCnts   = List.fill(nrPerfCnts)(RegInit(0.U(XLEN.W)))
   val perfEvents = List.fill(8)(RegInit("h0000000000".U(XLEN.W))) ++
@@ -633,7 +633,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
                    List.fill(8)(RegInit("h8020080200".U(XLEN.W))) ++
                    List.fill(5)(RegInit("hc0300c0300".U(XLEN.W)))
   for (i <-0 until nrPerfCnts) {
-    perfEventscounten(i) := (perfEvents(i)(63,60) & priviledgeModeOH).orR
+    perfEventscounten(i) := (perfEvents(i)(63,60) & privilegeModeOH).orR
   }
 
   val hpmEvents = Wire(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
@@ -804,16 +804,16 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val satpLegalMode = (wdata.asTypeOf(new SatpStruct).mode===0.U) || (wdata.asTypeOf(new SatpStruct).mode===8.U)
 
   // csr access check, special case
-  val tvmNotPermit = (priviledgeMode === ModeS && mstatusStruct.tvm.asBool)
+  val tvmNotPermit = (privilegeMode === ModeS && mstatusStruct.tvm.asBool)
   val accessPermitted = !(addr === Satp.U && tvmNotPermit)
-  csrio.disableSfence := tvmNotPermit || priviledgeMode === ModeU
+  csrio.disableSfence := tvmNotPermit || privilegeMode === ModeU
 
   // general CSR wen check
   val wen = valid && CSROpType.needAccess(func) && (addr=/=Satp.U || satpLegalMode)
   val dcsrPermitted = dcsrPermissionCheck(addr, false.B, debugMode)
   val triggerPermitted = triggerPermissionCheck(addr, true.B, debugMode) // todo dmode
-  val modePermitted = csrAccessPermissionCheck(addr, false.B, priviledgeMode) && dcsrPermitted && triggerPermitted
-  val perfcntPermitted = perfcntPermissionCheck(addr, priviledgeMode, mcounteren, scounteren)
+  val modePermitted = csrAccessPermissionCheck(addr, false.B, privilegeMode) && dcsrPermitted && triggerPermitted
+  val perfcntPermitted = perfcntPermissionCheck(addr, privilegeMode, mcounteren, scounteren)
   val permitted = Mux(addrInPerfCnt, perfcntPermitted, modePermitted) && accessPermitted
 
   MaskedRegMap.generate(mapping, addr, rdata, wen && permitted, wdata)
@@ -859,8 +859,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // Trigger Ctrl
   csrio.customCtrl.trigger_enable := tdata1Phy.map{t =>
     def tdata1 = t.asTypeOf(new TdataBundle)
-    tdata1.m && priviledgeMode === ModeM ||
-    tdata1.s && priviledgeMode === ModeS || tdata1.u && priviledgeMode === ModeU
+    tdata1.m && privilegeMode === ModeM ||
+    tdata1.s && privilegeMode === ModeS || tdata1.u && privilegeMode === ModeU
   }
   csrio.customCtrl.frontend_trigger.t.valid := RegNext(wen && (addr === Tdata1.U || addr === Tdata2.U) && TypeLookup(tselectPhy) === I_Trigger)
   csrio.customCtrl.mem_trigger.t.valid := RegNext(wen && (addr === Tdata1.U || addr === Tdata2.U) && TypeLookup(tselectPhy) =/= I_Trigger)
@@ -877,20 +877,20 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val isWFI    = func === CSROpType.wfi
 
   XSDebug(wen, "csr write: pc %x addr %x rdata %x wdata %x func %x\n", cfIn.pc, addr, rdata, wdata, func)
-  XSDebug(wen, "pc %x mstatus %x mideleg %x medeleg %x mode %x\n", cfIn.pc, mstatus, mideleg , medeleg, priviledgeMode)
+  XSDebug(wen, "pc %x mstatus %x mideleg %x medeleg %x mode %x\n", cfIn.pc, mstatus, mideleg , medeleg, privilegeMode)
 
-  // Illegal priviledged operation list
-  val illegalMret = valid && isMret && priviledgeMode < ModeM
-  val illegalSret = valid && isSret && priviledgeMode < ModeS
-  val illegalSModeSret = valid && isSret && priviledgeMode === ModeS && mstatusStruct.tsr.asBool
+  // Illegal privileged operation list
+  val illegalMret = valid && isMret && privilegeMode < ModeM
+  val illegalSret = valid && isSret && privilegeMode < ModeS
+  val illegalSModeSret = valid && isSret && privilegeMode === ModeS && mstatusStruct.tsr.asBool
   // When TW=1, then if WFI is executed in any less-privileged mode,
   // and it does not complete within an implementation-specific, bounded time limit,
   // the WFI instruction causes an illegal instruction exception.
   // The time limit may always be 0, in which case WFI always causes
   // an illegal instruction exception in less-privileged modes when TW=1.
-  val illegalWFI = valid && isWFI && priviledgeMode < ModeM && mstatusStruct.tw === 1.U
+  val illegalWFI = valid && isWFI && privilegeMode < ModeM && mstatusStruct.tw === 1.U
 
-  // Illegal priviledged instruction check
+  // Illegal privileged instruction check
   val isIllegalAddr = valid && CSROpType.needAccess(func) && MaskedRegMap.isIllegalAddr(mapping, addr)
   val isIllegalAccess = wen && !permitted
   val isIllegalPrivOp = illegalMret || illegalSret || illegalSModeSret || illegalWFI
@@ -898,8 +898,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   // expose several csr bits for tlb
   tlbBundle.priv.mxr   := mstatusStruct.mxr.asBool
   tlbBundle.priv.sum   := mstatusStruct.sum.asBool
-  tlbBundle.priv.imode := priviledgeMode
-  tlbBundle.priv.dmode := Mux(debugMode && dcsr.asTypeOf(new DcsrStruct).mprven, ModeM, Mux(mstatusStruct.mprv.asBool, mstatusStruct.mpp, priviledgeMode))
+  tlbBundle.priv.imode := privilegeMode
+  tlbBundle.priv.dmode := Mux(debugMode && dcsr.asTypeOf(new DcsrStruct).mprven, ModeM, Mux(mstatusStruct.mprv.asBool, mstatusStruct.mpp, privilegeMode))
 
   // Branch control
   val retTarget = Wire(UInt(VAddrBits.W))
@@ -916,7 +916,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     val debugModeNew = WireInit(debugMode)
     when (dcsr.asTypeOf(new DcsrStruct).prv =/= ModeM) {mstatusNew.mprv := 0.U} //If the new privilege mode is less privileged than M-mode, MPRV in mstatus is cleared.
     mstatus := mstatusNew.asUInt
-    priviledgeMode := dcsrNew.prv
+    privilegeMode := dcsrNew.prv
     retTarget := dpc(VAddrBits-1, 0)
     debugModeNew := false.B
     debugIntrEnable := true.B
@@ -928,7 +928,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
     val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
     mstatusNew.ie.m := mstatusOld.pie.m
-    priviledgeMode := mstatusOld.mpp
+    privilegeMode := mstatusOld.mpp
     mstatusNew.pie.m := true.B
     mstatusNew.mpp := ModeU
     when (mstatusOld.mpp =/= ModeM) { mstatusNew.mprv := 0.U }
@@ -941,7 +941,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
     val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
     mstatusNew.ie.s := mstatusOld.pie.s
-    priviledgeMode := Cat(0.U(1.W), mstatusOld.spp)
+    privilegeMode := Cat(0.U(1.W), mstatusOld.spp)
     mstatusNew.pie.s := true.B
     mstatusNew.spp := ModeU
     mstatus := mstatusNew.asUInt
@@ -955,7 +955,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
     // mstatusNew.mpp.m := ModeU //TODO: add mode U
     mstatusNew.ie.u := mstatusOld.pie.u
-    priviledgeMode := ModeU
+    privilegeMode := ModeU
     mstatusNew.pie.u := true.B
     mstatus := mstatusNew.asUInt
     retTarget := uepc(VAddrBits-1, 0)
@@ -964,13 +964,13 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   io.in.ready := true.B
   io.out.valid := valid
 
-  val ebreakCauseException = (priviledgeMode === ModeM && dcsrData.ebreakm) || (priviledgeMode === ModeS && dcsrData.ebreaks) || (priviledgeMode === ModeU && dcsrData.ebreaku)
+  val ebreakCauseException = (privilegeMode === ModeM && dcsrData.ebreakm) || (privilegeMode === ModeS && dcsrData.ebreaks) || (privilegeMode === ModeU && dcsrData.ebreaku)
 
   val csrExceptionVec = WireInit(cfIn.exceptionVec)
   csrExceptionVec(breakPoint) := io.in.valid && isEbreak && (ebreakCauseException || debugMode)
-  csrExceptionVec(ecallM) := priviledgeMode === ModeM && io.in.valid && isEcall
-  csrExceptionVec(ecallS) := priviledgeMode === ModeS && io.in.valid && isEcall
-  csrExceptionVec(ecallU) := priviledgeMode === ModeU && io.in.valid && isEcall
+  csrExceptionVec(ecallM) := privilegeMode === ModeM && io.in.valid && isEcall
+  csrExceptionVec(ecallS) := privilegeMode === ModeS && io.in.valid && isEcall
+  csrExceptionVec(ecallU) := privilegeMode === ModeU && io.in.valid && isEcall
   // Trigger an illegal instr exception when:
   // * unimplemented csr is being read/written
   // * csr access is illegal
@@ -983,15 +983,15 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     * Exception and Intr
     */
   val ideleg =  (mideleg & mip.asUInt)
-  def priviledgedEnableDetect(x: Bool): Bool = Mux(x, ((priviledgeMode === ModeS) && mstatusStruct.ie.s) || (priviledgeMode < ModeS),
-    ((priviledgeMode === ModeM) && mstatusStruct.ie.m) || (priviledgeMode < ModeM))
+  def privilegedEnableDetect(x: Bool): Bool = Mux(x, ((privilegeMode === ModeS) && mstatusStruct.ie.s) || (privilegeMode < ModeS),
+    ((privilegeMode === ModeM) && mstatusStruct.ie.m) || (privilegeMode < ModeM))
 
   val debugIntr = csrio.externalInterrupt.debug & debugIntrEnable
   XSDebug(debugIntr, "Debug Mode: debug interrupt is asserted and valid!")
   // send interrupt information to ROB
   val intrVecEnable = Wire(Vec(12, Bool()))
   val disableInterrupt = debugMode || (dcsrData.step && !dcsrData.stepie)
-  intrVecEnable.zip(ideleg.asBools).map{case(x,y) => x := priviledgedEnableDetect(y) && !disableInterrupt}
+  intrVecEnable.zip(ideleg.asBools).map{case(x,y) => x := privilegedEnableDetect(y) && !disableInterrupt}
   val intrVec = Cat(debugIntr && !debugMode, (mie(11,0) & mip.asUInt & intrVecEnable.asUInt))
   val intrBitSet = intrVec.orR
   csrio.interrupt := intrBitSet
@@ -1052,7 +1052,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     mstatus,
     mideleg,
     medeleg,
-    priviledgeMode
+    privilegeMode
   )
 
   // mtval write logic
@@ -1078,7 +1078,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
         ))),
         memExceptionAddr
     )
-    when (RegNext(priviledgeMode === ModeM)) {
+    when (RegNext(privilegeMode === ModeM)) {
       mtval := tval
     }.otherwise {
       stval := tval
@@ -1087,8 +1087,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
   val debugTrapTarget = Mux(!isEbreak && debugMode, 0x38020808.U, 0x38020800.U) // 0x808 is when an exception occurs in debug mode prog buf exec
   val deleg = Mux(raiseIntr, mideleg , medeleg)
-  // val delegS = ((deleg & (1 << (causeNO & 0xf))) != 0) && (priviledgeMode < ModeM);
-  val delegS = deleg(causeNO(3,0)) && (priviledgeMode < ModeM)
+  // val delegS = ((deleg & (1 << (causeNO & 0xf))) != 0) && (privilegeMode < ModeM);
+  val delegS = deleg(causeNO(3,0)) && (privilegeMode < ModeM)
   val clearTval = !updateTval || raiseIntr
   val isXRet = io.in.valid && func === CSROpType.jmp && !isEcall && !isEbreak
 
@@ -1129,16 +1129,16 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
         mstatusNew.mprv := false.B
         dpc := iexceptionPC
         dcsrNew.cause := 3.U
-        dcsrNew.prv := priviledgeMode
-        priviledgeMode := ModeM
+        dcsrNew.prv := privilegeMode
+        privilegeMode := ModeM
         XSDebug(raiseDebugIntr, "Debug Mode: Trap to %x at pc %x\n", debugTrapTarget, dpc)
       }.elsewhen ((hasbreakPoint || hasSingleStep) && !debugMode) {
         // ebreak or ss in running hart
         debugModeNew := true.B
         dpc := iexceptionPC
         dcsrNew.cause := Mux(hasTriggerHit, 2.U, Mux(hasbreakPoint, 1.U, 4.U))
-        dcsrNew.prv := priviledgeMode // TODO
-        priviledgeMode := ModeM
+        dcsrNew.prv := privilegeMode // TODO
+        privilegeMode := ModeM
         mstatusNew.mprv := false.B
       }
       dcsr := dcsrNew.asUInt
@@ -1148,18 +1148,18 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     }.elsewhen (delegS) {
       scause := causeNO
       sepc := Mux(hasInstrPageFault || hasInstrAccessFault, iexceptionPC, dexceptionPC)
-      mstatusNew.spp := priviledgeMode
+      mstatusNew.spp := privilegeMode
       mstatusNew.pie.s := mstatusOld.ie.s
       mstatusNew.ie.s := false.B
-      priviledgeMode := ModeS
+      privilegeMode := ModeS
       when (clearTval) { stval := 0.U }
     }.otherwise {
       mcause := causeNO
       mepc := Mux(hasInstrPageFault || hasInstrAccessFault, iexceptionPC, dexceptionPC)
-      mstatusNew.mpp := priviledgeMode
+      mstatusNew.mpp := privilegeMode
       mstatusNew.pie.m := mstatusOld.ie.m
       mstatusNew.ie.m := false.B
-      priviledgeMode := ModeM
+      privilegeMode := ModeM
       when (clearTval) { mtval := 0.U }
     }
     mstatus := mstatusNew.asUInt
@@ -1230,7 +1230,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
     val difftest = DifftestModule(new DiffCSRState)
     difftest.coreid := csrio.hartId
-    difftest.priviledgeMode := priviledgeMode
+    difftest.privilegeMode := privilegeMode
     difftest.mstatus := mstatus
     difftest.sstatus := mstatus & sstatusRmask
     difftest.mepc := mepc
