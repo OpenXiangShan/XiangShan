@@ -239,10 +239,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
    */
   loadQueueReplay.io.redirect         <> io.redirect
   loadQueueReplay.io.enq              <> io.ldu.ldin // from load_s3
-  loadQueueReplay.io.enq.zip(io.ldu.ldin).foreach { case (sink, source) =>
-    sink.valid := source.valid && !source.bits.isvec
-    source.ready := sink.ready && !source.bits.isvec
-  }
   loadQueueReplay.io.storeAddrIn      <> io.sta.storeAddrIn // from store_s1
   loadQueueReplay.io.storeDataIn      <> io.std.storeDataIn // from store_s0
   loadQueueReplay.io.replay           <> io.replay

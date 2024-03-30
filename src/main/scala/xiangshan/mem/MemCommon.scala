@@ -29,6 +29,7 @@ import xiangshan.cache._
 import xiangshan.backend.fu.FenceToSbuffer
 import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.mem.prefetch.PrefetchReqBundle
+import math._
 
 object genWmask {
   def apply(addr: UInt, sizeEncode: UInt): UInt = {
@@ -108,6 +109,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   val usSecondInv = Bool()
   val elemIdx = UInt(elemIdxBits.W)
   val alignedType = UInt(alignTypeBits.W)
+  val mbIndex = UInt(max(vlmBindexBits, vsmBindexBits).W)
   // val rob_idx_valid = Vec(2,Bool())
   // val inner_idx = Vec(2,UInt(3.W))
   // val rob_idx = Vec(2,new RobPtr)
@@ -178,6 +180,7 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     if (latch) reg_offset          := RegNext(input.reg_offset)          else reg_offset          := input.reg_offset
     if (latch) elemIdx             := RegNext(input.elemIdx)             else elemIdx             := input.elemIdx
     if (latch) alignedType         := RegNext(input.alignedType)         else alignedType         := input.alignedType
+    if (latch) mbIndex             := RegNext(input.mbIndex)             else mbIndex             := input.mbIndex
     // if (latch) flowPtr             := RegNext(input.flowPtr)             else flowPtr             := input.flowPtr
     // if (latch) sflowPtr            := RegNext(input.sflowPtr)            else sflowPtr            := input.sflowPtr
 
@@ -257,6 +260,7 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     if(latch) vecActive                 := RegNext(input.vecActive)                 else vecActive                 := input.vecActive
     if(latch) uop_unit_stride_fof := RegNext(input.uop_unit_stride_fof) else uop_unit_stride_fof := input.uop_unit_stride_fof
     if(latch) reg_offset          := RegNext(input.reg_offset)          else reg_offset          := input.reg_offset
+    if(latch) mbIndex             := RegNext(input.mbIndex)             else mbIndex             := input.mbIndex
 
     rep_info := DontCare
     data_wen_dup := DontCare
