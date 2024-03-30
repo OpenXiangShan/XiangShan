@@ -229,6 +229,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // val flowPtr       = new VlflowPtr
     val usSecondInv   = Bool()
     val mbIndex       = UInt(vlmBindexBits.W)
+    val elemIdx       = UInt(elemIdxBits.W)
+    val alignedType   = UInt(alignTypeBits.W)
   }
   val s0_sel_src = Wire(new FlowSource)
 
@@ -427,6 +429,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.is_first_ele  := src.is_first_ele
     out.usSecondInv   := src.usSecondInv
     out.mbIndex       := src.mbIndex
+    out.elemIdx       := src.elemIdx    
+    out.alignedType   := src.alignedType   
     out
   }
 
@@ -479,6 +483,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.is_first_ele  := src.is_first_ele
     out.usSecondInv   := src.usSecondInv
     out.mbIndex       := src.mbIndex
+    out.elemIdx       := src.elemIdx    
+    out.alignedType   := src.alignedType   
     out
   }
 
@@ -540,6 +546,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // out.flowPtr             := src.flowPtr
     out.usSecondInv         := src.usSecondInv
     out.mbIndex             := src.mBIndex
+    out.elemIdx             := src.elemIdx    
+    out.alignedType         := src.alignedType   
     out
   }
 
@@ -648,7 +656,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // s0_out.offset          := s0_offset
   s0_out.vecActive             := s0_sel_src.vecActive
   s0_out.usSecondInv    := s0_sel_src.usSecondInv
-  s0_out.is_first_ele    := s0_sel_src.is_first_ele
+  s0_out.is_first_ele   := s0_sel_src.is_first_ele
+  s0_out.elemIdx        := s0_sel_src.elemIdx
+  s0_out.alignedType    := s0_sel_src.alignedType
+  s0_out.mbIndex        := s0_sel_src.mbIndex
   // s0_out.flowPtr         := s0_sel_src.flowPtr
   s0_out.uop.exceptionVec(loadAddrMisaligned) := !s0_addr_aligned && s0_sel_src.vecActive
   s0_out.forward_tlDchannel := s0_super_ld_rep_select
@@ -708,8 +719,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s1_can_go     = s2_ready
   val s1_fire       = s1_valid && !s1_kill && s1_can_go
   val s1_vecActive        = RegEnable(s0_out.vecActive, true.B, s0_fire)
-  val s1_vec_alignedType = RegEnable(io.vecldin.bits.alignedType, s0_fire)
-  val s1_vec_mBIndex      = RegEnable(io.vecldin.bits.mBIndex, s0_fire)
 
   s1_ready := !s1_valid || s1_kill || s2_ready
   when (s0_fire) { s1_valid := true.B }
@@ -891,8 +900,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_fire   = s2_valid && !s2_kill && s2_can_go
   val s2_vecActive = RegEnable(s1_out.vecActive, true.B, s1_fire)
   val s2_isvec  = RegEnable(s1_out.isvec, false.B, s1_fire)
-  val s2_vec_alignedType = RegEnable(s1_vec_alignedType, s1_fire)
-  val s2_vec_mBIndex      = RegEnable(s1_vec_mBIndex, s1_fire)
 
   s2_kill := s2_in.uop.robIdx.needFlush(io.redirect)
   s2_ready := !s2_valid || s2_kill || s3_ready
@@ -1160,8 +1167,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_vecout       = Wire(new OnlyVecExuOutput)
   val s3_vecActive    = RegEnable(s2_out.vecActive, true.B, s2_fire)
   val s3_isvec        = RegEnable(s2_out.isvec, false.B, s2_fire)
-  val s3_vec_alignedType = RegEnable(s2_vec_alignedType, s2_fire)
-  val s3_vec_mBIndex     = RegEnable(s2_vec_mBIndex, s2_fire)
+  val s3_vec_alignedType = RegEnable(s2_out.alignedType, s2_fire)
+  val s3_vec_mBIndex     = RegEnable(s2_out.mbIndex, s2_fire)
   val s3_mmio         = Wire(chiselTypeOf(io.lsq.uncache))
   // TODO: Fix vector load merge buffer nack
   val s3_vec_mb_nack  = Wire(Bool())
@@ -1249,7 +1256,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_vecout.is_first_ele      := s3_in.is_first_ele
   // s3_vecout.uopQueuePtr       := DontCare // uopQueuePtr is already saved in flow queue
   // s3_vecout.flowPtr           := s3_in.flowPtr
-  s3_vecout.elemIdx           := DontCare // elemIdx is already saved in flow queue // TODO:
+  s3_vecout.elemIdx           := s3_in.elemIdx // elemIdx is already saved in flow queue // TODO:
   s3_vecout.elemIdxInsideVd   := DontCare
   val s3_usSecondInv          = s3_in.usSecondInv
 
