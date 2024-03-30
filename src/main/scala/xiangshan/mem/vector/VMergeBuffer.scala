@@ -109,8 +109,9 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
       // enqueue
       allocated(enqIndex)       := true.B
       uopFinish(enqIndex)       := false.B
+
+      entries(enqIndex) := EnqConnect(enq.req.bits)// initial entry
     }
-    entries(enqIndex) := EnqConnect(enq.req.bits)// initial entry
 
     enq.resp.bits.mBIndex := enqIndex
     enq.resp.bits.fail    := false.B
@@ -159,11 +160,11 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
       allocated(entryIdx) := false.B
     }
     //writeback connect
-    port.valid   := selValid
+    port.valid   := selValid && allocated(entryIdx)
     port.bits    := DeqConnect(selEntry)
     //to lsq
     lsqport.bits := ToLsqConnect(selEntry) // when uopwriteback, free MBuffer entry, write to lsq
-    lsqport.valid:= selValid
+    lsqport.valid:= selValid && allocated(entryIdx)
    }
 }
 
