@@ -42,7 +42,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
   val io = IO(new VMergeBufferIO(isVStore))
 
   def EnqConnect(source: MergeBufferReq): MBufferBundle = {
-    val sink           = Wire(new MBufferBundle)
+    val sink           = WireInit(0.U.asTypeOf(new MBufferBundle))
     sink.data         := source.data
     sink.mask         := source.mask
     sink.flowNum      := source.flowNum
@@ -52,7 +52,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     // sink.vdOffset     := source.vdOffset
   }
   def DeqConnect(source: MBufferBundle): MemExuOutput = {
-    val sink               = Wire(new MemExuOutput(isVector = true))
+    val sink               = WireInit(0.U.asTypeOf(new MemExuOutput(isVector = true)))
     sink.data             := source.data
     sink.mask.get         := source.mask
     sink.uop.exceptionVec := source.exceptionVec
@@ -63,7 +63,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     sink
   }
   def ToLsqConnect(source: MBufferBundle): FeedbackToLsqIO = {
-    val sink                                 = Wire(new FeedbackToLsqIO)
+    val sink                                 = WireInit(0.U.asTypeOf(new FeedbackToLsqIO))
     sink.robidx                             := source.uop.robIdx
     sink.uopidx                             := source.uop.uopIdx
     sink.feedback(VecFeedbacks.COMMIT)      := true.B // TODO:
@@ -88,7 +88,6 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
   val uopFinish    = RegInit(VecInit(Seq.fill(uopSize)(false.B)))
   // enq, from splitPipeline
   // val allowEnqueue =
-  val cancelEnq_test0 = io.fromSplit(0).req.bits.uop.robIdx.needFlush(io.redirect)
   val cancelEnq    = io.fromSplit.map(_.req.bits.uop.robIdx.needFlush(io.redirect))
   val canEnqueue   = io.fromSplit.map(_.req.valid)
   val needEnqueue  = (0 until enqWidth).map{i =>
