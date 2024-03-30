@@ -240,7 +240,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   //split uops
   val issueValid       = valid(deqPtr.value)
   val issueEntry       = uopq(deqPtr.value)
-  val issueMbIndex     = uopq(deqPtr.value).mBIndex
+  val issueMbIndex     = issueEntry.mBIndex
   val issueFlowNum     = issueEntry.flowNum
   val issueBaseAddr    = issueEntry.baseAddr
   val issueUop         = issueEntry.uop
@@ -330,8 +330,8 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   val thisPtr = deqPtr.value
   canIssue := !issueUop.robIdx.needFlush(io.redirect) && deqPtr < enqPtr
   doIssue := canIssue && allowIssue
-    when (!RegNext(io.redirect.valid) || distanceBetween(enqPtr, deqPtr) > flushNumReg) {
-    when (splitIdx < (issueFlowNum - issueCount)) {
+  when (!RegNext(io.redirect.valid) || distanceBetween(enqPtr, deqPtr) > flushNumReg) {
+    when ((splitIdx < (issueFlowNum - issueCount)) && doIssue) {
       // The uop has not been entirly splited yet
       splitIdx := splitIdx + issueCount
       strideOffsetReg := strideOffsetReg + issueStride
