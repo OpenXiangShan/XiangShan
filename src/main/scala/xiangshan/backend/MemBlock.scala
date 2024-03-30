@@ -1278,7 +1278,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     vsSplit(i).io.redirect <> redirect
     vsSplit(i).io.in <> io.ooo_to_mem.issueVldu.head
     vsSplit(i).io.in.valid := io.ooo_to_mem.issueVldu.head.valid && LSUOpType.isVecSt(io.ooo_to_mem.issueVldu.head.bits.uop.fuOpType)
-    vsSplit(i).io.toMergeBuffer <> vlMergeBuffer.io.fromSplit(i)
+    vsSplit(i).io.toMergeBuffer <> vsMergeBuffer.io.fromSplit(i)
     vsSplit(i).io.out <> storeUnits(i).io.vecstin // Todo: May be some balance mechanism is needed
     vsSplit(i).io.vstd.get := DontCare // Todo: Discuss how to pass vector store data
 
@@ -1297,8 +1297,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   vlMergeBuffer.io.redirect <> redirect
   vsMergeBuffer.io.redirect <> redirect
-  vlMergeBuffer.io.fromSplit := DontCare
-  vsMergeBuffer.io.fromSplit := DontCare
   vlMergeBuffer.io.toLsq(0) <> lsq.io.ldvecFeedback
   vsMergeBuffer.io.toLsq(0) <> lsq.io.stvecFeedback
 
