@@ -460,7 +460,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   def fromNormalReplaySource(src: LsPipelineBundle): FlowSource = {
     val out = WireInit(0.U.asTypeOf(new FlowSource))
     out.vaddr         := src.vaddr
-    out.mask          := genVWmask(src.vaddr, src.uop.fuOpType(1, 0))
+    out.mask          := Mux(src.isvec, src.mask, genVWmask(src.vaddr, src.uop.fuOpType(1, 0)))
     out.uop           := src.uop
     out.try_l2l       := false.B
     out.has_rob_entry := true.B
@@ -1170,6 +1170,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_vec_alignedType = RegEnable(s2_out.alignedType, s2_fire)
   val s3_vec_mBIndex     = RegEnable(s2_out.mbIndex, s2_fire)
   val s3_mmio         = Wire(chiselTypeOf(io.lsq.uncache))
+  dontTouch(s2_out)
+  dontTouch(s1_out)
   // TODO: Fix vector load merge buffer nack
   val s3_vec_mb_nack  = Wire(Bool())
   s3_vec_mb_nack     := false.B
