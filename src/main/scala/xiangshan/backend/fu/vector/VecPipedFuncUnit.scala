@@ -3,6 +3,7 @@ package xiangshan.backend.fu.vector
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import xiangshan._
 import xiangshan.backend.fu.FuConfig.VialuCfg
 import xiangshan.backend.fu.vector.Bundles.VConfig
 import xiangshan.backend.fu.vector.utils.ScalaDupToVector
@@ -22,8 +23,10 @@ trait VecFuncUnitAlias { this: FuncUnit =>
   protected val vm      = vecCtrl.vm
   protected val vstart  = vecCtrl.vstart
 
-  protected val frm     = if(cfg.needSrcFrm) io.frm.get else 0.U
-  protected val vxrm    = if(cfg.needSrcVxrm) io.vxrm.get else 0.U
+  protected val frm     = io.frm.getOrElse(0.U(3.W))
+  protected val vxrm    = io.vxrm.getOrElse(0.U(3.W))
+  protected val instRm  = inCtrl.fpu.getOrElse(0.U.asTypeOf(new FPUCtrlSignals)).rm
+  protected val rm      = Mux(vecCtrl.fpu.isFpToVecInst && instRm =/= "b111".U, instRm, frm)
   protected val vuopIdx = vecCtrl.vuopIdx
   protected val nf      = 0.U  // No need to handle nf in vector arith unit
 
@@ -58,17 +61,6 @@ class VecPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(c
 {
   private val src0 = inData.src(0)
   private val src1 = WireInit(inData.src(1)) // vs2 only
-  if(cfg == FuConfig.VfaluCfg){
-    val vs2Fold = Wire(UInt(VLEN.W))
-    vs2Fold := Mux1H(
-      Seq(
-        vecCtrl.fpu.isFoldTo1_2 -> inData.src(1)(VLEN/1-1, VLEN/2),
-        vecCtrl.fpu.isFoldTo1_4 -> inData.src(1)(VLEN/2-1, VLEN/4),
-        vecCtrl.fpu.isFoldTo1_8 -> inData.src(1)(VLEN/4-1, VLEN/8),
-      )
-    )
-    src1 := Mux(vecCtrl.fpu.isFoldTo1_2 || vecCtrl.fpu.isFoldTo1_4 || vecCtrl.fpu.isFoldTo1_8, vs2Fold, inData.src(1))
-  }
   protected val vs2 = Mux(isReverse, src0, src1)
   protected val vs1 = Mux(isReverse, src1, src0)
   protected val oldVd = inData.src(2)
