@@ -101,9 +101,9 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   // update enqueue pointer
   val vLoadFlow = io.enq.req.map(_.bits.numLsElem)
   val validVLoadFlow = vLoadFlow.zipWithIndex.map{case (vLoadFlowNum_Item, index) => Mux(io.enq.canAccept && io.enq.sqCanAccept && canEnqueue(index), vLoadFlowNum_Item, 0.U)}
-  val validVLoadOffset = 0.U +: vLoadFlow.zip(io.enq.needAlloc)
-                                .map{case (flow, needAlloc_Item) => Mux(needAlloc_Item, flow, 0.U)}
-                                .slice(0, validVLoadFlow.length - 1)
+  val validVLoadOffset = vLoadFlow.zip(io.enq.needAlloc).map{case (flow, needAlloc_Item) => Mux(needAlloc_Item, flow, 0.U)}
+  val validVLoadOffsetRShift = 0.U +: validVLoadOffset.take(validVLoadFlow.length - 1)
+
   val enqNumber = validVLoadFlow.reduce(_ + _)
   val enqPtrExtNextVec = Wire(Vec(io.enq.req.length, new LqPtr))
   val enqPtrExtNext = Wire(Vec(io.enq.req.length, new LqPtr))
@@ -155,27 +155,29 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
    */
   io.enq.canAccept := allowEnqueue
   for (i <- 0 until io.enq.req.length) {
-    val offset = PopCount(io.enq.needAlloc.take(i))
-    val lqIdx = enqPtrExt(0) + validVLoadOffset.take(i + 1).reduce(_ + _)
-//    val lqIdx = 0.U.asTypeOf(new LqPtr)
+    val lqIdx = enqPtrExt(0) + validVLoadOffsetRShift.take(i + 1).reduce(_ + _)
     val index = io.enq.req(i).bits.lqIdx.value
     val enqInstr = io.enq.req(i).bits.instr.asTypeOf(new XSInstBitFields)
     when (canEnqueue(i) && !enqCancel(i)) {
-      allocated(index) := true.B
-      uop(index) := io.enq.req(i).bits
-      uop(index).lqIdx := lqIdx
+      for (j <- 0 until VecMemDispatchMaxNumber) {
+        when (j.U < validVLoadOffset(i)) {
+          allocated(index + j.U) := true.B
+          uop(index + j.U) := io.enq.req(i).bits
+          uop(index + j.U).lqIdx := lqIdx + j.U
 
-      // init
-      addrvalid(index) := false.B
-      datavalid(index) := false.B
-      isvec(index) := enqInstr.isVecLoad
-      veccommitted(index) := false.B
+          // init
+          addrvalid(index + j.U) := false.B
+          datavalid(index + j.U) := false.B
+          isvec(index + j.U) := enqInstr.isVecLoad
+          veccommitted(index + j.U) := false.B
 
-      debug_mmio(index) := false.B
-      debug_paddr(index) := 0.U
+          debug_mmio(index + j.U) := false.B
+          debug_paddr(index + j.U) := 0.U
 
-      XSError(!io.enq.canAccept || !io.enq.sqCanAccept, s"must accept $i\n")
-      XSError(index =/= lqIdx.value, s"must be the same entry $i\n")
+          XSError(!io.enq.canAccept || !io.enq.sqCanAccept, s"must accept $i\n")
+          XSError(index =/= lqIdx.value, s"must be the same entry $i\n")
+        }
+      }
     }
     io.enq.resp(i) := lqIdx
   }

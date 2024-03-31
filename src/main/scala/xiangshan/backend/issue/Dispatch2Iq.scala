@@ -759,19 +759,21 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   private val isSegment       = nf.zip(fuOpType).map{ case (fuOpType_Item, nf_Item) => nf_Item =/= 0.U && !us_whole_reg(fuOpType_Item) }
   private val instType        = isSegment.zip(mop).map{ case (isSegement_Item, mop_Item) => Cat(isSegement_Item, mop_Item) }
   private val numLsElem       = instType.zipWithIndex.map{ case (instType_Item, index) =>
-    Mux(us_whole_reg(fuOpType(index)) && isVlsType(index), 1.U, Mux(isUnitStrideType(index), 2.U, (1.U(5.W) << GenRealFlowNum(instType_Item, emul(index), lmul(index), eew(index), sew(index))).asUInt))
+    Mux(us_whole_reg(fuOpType(index)) && isVlsType(index), 2.U, Mux(isUnitStrideType(index), 2.U, (1.U(5.W) << GenRealFlowNum(instType_Item, emul(index), lmul(index), eew(index), sew(index))).asUInt))
   }
 
   private val conserveFlows = isVlsType.zip(isUnitStrideType).map{
     case (isVlsTyep_Item, isUnitStrideType_Item) => Mux(isUnitStrideType_Item && isVlsTyep_Item, 2.U, Mux(isVlsTyep_Item, 16.U, 1.U))
   }
 
+
   private val allowDispatch = Wire(Vec(numLsElem.length, Bool()))
   for (index <- allowDispatch.indices) {
+    val flowTotal = conserveFlows.take(index + 1).reduce(_ + _)
     when(isStoreVec(index) || isVStoreVec(index)) {
-      allowDispatch(index) := Mux(sqFreeCount > conserveFlows.take(index + 1).reduce(_ + _), true.B, false.B)
+      allowDispatch(index) := Mux(sqFreeCount > flowTotal && flowTotal <= VecMemDispatchMaxNumber.U, true.B, false.B)
     } .elsewhen(isLoadVec(index) || isVLoadVec(index)) {
-      allowDispatch(index) := Mux(lqFreeCount > conserveFlows.take(index + 1).reduce(_ + _), true.B, false.B)
+      allowDispatch(index) := Mux(lqFreeCount > flowTotal && flowTotal <= VecMemDispatchMaxNumber.U, true.B, false.B)
     } .otherwise {
       allowDispatch(index) := false.B
     }
