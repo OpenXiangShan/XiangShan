@@ -306,31 +306,32 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val enqCancel = io.enq.req.map(_.bits.robIdx.needFlush(io.brqRedirect))
   val vStoreFlow = io.enq.req.map(_.bits.numLsElem)
   val validVStoreFlow = vStoreFlow.zipWithIndex.map{case (vLoadFlowNum_Item, index) => Mux(!RegNext(io.brqRedirect.valid) && io.enq.canAccept && io.enq.lqCanAccept && canEnqueue(index), vLoadFlowNum_Item, 0.U)}
-  val validVStoreOffset = 0.U +: vStoreFlow.zip(io.enq.needAlloc)
-    .map{case (flow, needAlloc_Item) => Mux(needAlloc_Item, flow, 0.U)}
-    .slice(0, vStoreFlow.length - 1)
+  val validVStoreOffset = 0.U +: vStoreFlow.zip(io.enq.needAlloc).map{case (flow, needAlloc_Item) => Mux(needAlloc_Item, flow, 0.U)}
+  val validVStoreOffsetRShift = 0.U +: validVStoreOffset.take(vStoreFlow.length - 1)
+
   for (i <- 0 until io.enq.req.length) {
-    val offset = if (i == 0) 0.U else PopCount(io.enq.needAlloc.take(i))
-    val sqIdx = enqPtrExt(0) + validVStoreOffset.take(i + 1).reduce(_ + _)
-//    val sqIdx = 0.U.asTypeOf(new SqPtr)
+    val sqIdx = enqPtrExt(0) + validVStoreOffsetRShift.take(i + 1).reduce(_ + _)
     val index = io.enq.req(i).bits.sqIdx.value
     val enqInstr = io.enq.req(i).bits.instr.asTypeOf(new XSInstBitFields)
     when (canEnqueue(i) && !enqCancel(i)) {
-      uop(index) := io.enq.req(i).bits
-      // NOTE: the index will be used when replay
-      uop(index).sqIdx := sqIdx
-      allocated(index) := true.B
-      datavalid(index) := false.B
-      addrvalid(index) := false.B
-      committed(index) := false.B
-      pending(index) := false.B
-      prefetch(index) := false.B
-      mmio(index) := false.B
-      is_vec(index) := enqInstr.isVecStore // check vector store by the encoding of inst
-      vec_secondInv(index) := false.B
-
-      XSError(!io.enq.canAccept || !io.enq.lqCanAccept, s"must accept $i\n")
-      XSError(index =/= sqIdx.value, s"must be the same entry $i\n")
+      for (j <- 0 until VecMemDispatchMaxNumber) {
+        when (j.U < validVStoreOffset(i)) {
+          uop(index + j.U) := io.enq.req(i).bits
+          // NOTE: the index will be used when replay
+          uop(index + j.U).sqIdx := sqIdx + j.U
+          allocated(index + j.U) := true.B
+          datavalid(index + j.U) := false.B
+          addrvalid(index + j.U) := false.B
+          committed(index + j.U) := false.B
+          pending(index + j.U) := false.B
+          prefetch(index + j.U) := false.B
+          mmio(index + j.U) := false.B
+          vec(index + j.U) := enqInstr.isVecStore // check vector store by the encoding of inst
+          vecAddrvalid(index + j.U) := false.B//TODO
+          XSError(!io.enq.canAccept || !io.enq.lqCanAccept, s"must accept $i\n")
+          XSError(index =/= sqIdx.value, s"must be the same entry $i\n")
+        }
+      }
     }
     io.enq.resp(i) := sqIdx
   }

@@ -200,6 +200,7 @@ case class XSCoreParameters
   VecMemSrcInWidth: Int = 2,
   VecMemInstWbWidth: Int = 1,
   VecMemDispatchWidth: Int = 1,
+  VecMemDispatchMaxNumber: Int = 16,
   StoreBufferSize: Int = 16,
   StoreBufferThreshold: Int = 7,
   EnsbufferWidth: Int = 2,
@@ -621,6 +622,7 @@ trait HasXSParameter {
   val VecMemSrcInWidth = coreParams.VecMemSrcInWidth
   val VecMemInstWbWidth = coreParams.VecMemInstWbWidth
   val VecMemDispatchWidth = coreParams.VecMemDispatchWidth
+  val VecMemDispatchMaxNumber = coreParams.VecMemDispatchMaxNumber
   val StoreBufferSize = coreParams.StoreBufferSize
   val StoreBufferThreshold = coreParams.StoreBufferThreshold
   val EnsbufferWidth = coreParams.EnsbufferWidth
