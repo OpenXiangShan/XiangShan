@@ -5,16 +5,17 @@ import chisel3.util._
 import top.{ArgParser, Generator}
 import xiangshan.backend.fu.NewCSR.CSRDefines.{PrivMode, VirtMode}
 
-trait CSRConfig {
-  val GEILEN = 63
-  val HIIDWidth = 12 // support Hvictl[27:16](IID)
-  val VMIDLEN = 14 // the length of VMID of XS implementation
-  val VMIDMAX = 14 // the max value of VMIDLEN defined by spec
+object CSRConfig {
+  final val GEILEN = 63
+
+  final val HIIDWidth = 12 // support Hvictl[27:16](IID)
+
+  final val VMIDLEN = 14 // the length of VMID of XS implementation
+
+  final val VMIDMAX = 14 // the max value of VMIDLEN defined by spec
 }
 
-object CSRConfig extends CSRConfig
-
-class NewCSR extends Module with CSRConfig with MachineLevel with SupervisorLevel with Hypervisor with Unprivileged {
+class NewCSR extends Module with MachineLevel with SupervisorLevel with Hypervisor with Unprivileged {
   val io = IO(new Bundle {
     val w = Flipped(ValidIO(new Bundle {
       val addr = UInt(12.W)

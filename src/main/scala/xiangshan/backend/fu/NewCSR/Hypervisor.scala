@@ -164,7 +164,7 @@ class HstatusBundle extends CSRBundle {
   val SPV   = RW(7)
   val SPVP  = RW(8)
   val HU    = RW(9)
-  val VGEIN = WLRL(17, 12, wNoFilter)
+  val VGEIN = HstatusVgeinField(17, 12, wNoFilter, rNoFilter)
   val VTVM  = RW(20)
   val VTM   = RW(21)
   val VTSR  = RW(22)
@@ -172,8 +172,8 @@ class HstatusBundle extends CSRBundle {
 
 }
 
-object HstatusVgeinField extends CSREnum with CSRWLRLApply with CSRConfig {
-  override def isLegal(enum: CSREnumType): Bool = enum.asUInt <= this.GEILEN.U
+object HstatusVgeinField extends CSREnum with CSRWLRLApply {
+  override def isLegal(enum: CSREnumType): Bool = enum.asUInt <= GEILEN.U
 }
 
 class HstatusModule extends CSRModule("Hstatus", new HstatusBundle)
