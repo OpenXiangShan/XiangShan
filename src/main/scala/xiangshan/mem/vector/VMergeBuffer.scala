@@ -211,7 +211,7 @@ class VLMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
       offset  = io.fromPipeline.map(_.bits.reg_offset.get),
       valids  = mergeExpPortVec
     )
-    when(pipewb.valid && !mergedByPrevPort && alignedType =/= "b100".U){
+    when(pipewb.valid && !mergedByPrevPort){
       entries(wbIndex).data := Mux(alignedType(2), usMergeData, mergedData) // if aligned(2) == 1, is Unit-Stride inst
     }
   }
