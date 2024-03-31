@@ -144,7 +144,7 @@ trait HasVLSUParameters extends HasXSParameter with VLSUConstants {
       VecInit(selVec.zipWithIndex.map{ case (selV, i) => // selV: vector(3,1), 0=<i<16
         ParallelPosteriorityMux(
           true.B +: selV.zip(valids).map(x => x._1 && x._2),
-          getByte(oldData, i) +: newData.map(getByte(_))
+          getByte(oldData, i) +: newData.map(getByte(_, i))
         )}).asUInt
     }
   }
