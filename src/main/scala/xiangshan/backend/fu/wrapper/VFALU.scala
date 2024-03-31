@@ -192,24 +192,29 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   srcMaskRShift := (srcMask >> maskRshiftWidth)(4 * numVecModule - 1, 0)
   val fp_aIsFpCanonicalNAN = Wire(Vec(numVecModule,Bool()))
   val fp_bIsFpCanonicalNAN = Wire(Vec(numVecModule,Bool()))
+  val inIsFold = Wire(UInt(3.W))
+  inIsFold := Cat(vecCtrl.fpu.isFoldTo1_8, vecCtrl.fpu.isFoldTo1_4, vecCtrl.fpu.isFoldTo1_2)
   vfalus.zipWithIndex.foreach {
     case (mod, i) =>
       mod.io.fire             := io.in.valid
-      mod.io.fp_a             := Mux(opbWiden, vs1Split.io.outVec64b(i), vs2Split.io.outVec64b(i))  // very dirty TODO
-      mod.io.fp_b             := Mux(opbWiden, vs2Split.io.outVec64b(i), vs1Split.io.outVec64b(i))  // very dirty TODO
-      mod.io.widen_a          := Mux(opbWiden, Cat(vs1Split.io.outVec32b(i+numVecModule), vs1Split.io.outVec32b(i)), Cat(vs2Split.io.outVec32b(i+numVecModule), vs2Split.io.outVec32b(i)))
-      mod.io.widen_b          := Mux(opbWiden, Cat(vs2Split.io.outVec32b(i+numVecModule), vs2Split.io.outVec32b(i)), Cat(vs1Split.io.outVec32b(i+numVecModule), vs1Split.io.outVec32b(i)))
+      mod.io.fp_a             := vs2Split.io.outVec64b(i)
+      mod.io.fp_b             := vs1Split.io.outVec64b(i)
+      mod.io.widen_a          := Cat(vs2Split.io.outVec32b(i+numVecModule), vs2Split.io.outVec32b(i))
+      mod.io.widen_b          := Cat(vs1Split.io.outVec32b(i+numVecModule), vs1Split.io.outVec32b(i))
       mod.io.frs1             := 0.U     // already vf -> vv
       mod.io.is_frs1          := false.B // already vf -> vv
       mod.io.mask             := Mux(isScalarMove, !vuopIdx.orR, genMaskForMerge(inmask = srcMaskRShift, sew = vsew, i = i))
       mod.io.maskForReduction := genMaskForReduction(inmask = srcMaskRShiftForReduction, sew = vsew, i = i)
-      mod.io.uop_idx          := Mux(fuOpType === VfaluType.vfwredosum, 0.U, vuopIdx(0))
+      mod.io.uop_idx          := vuopIdx(0)
       mod.io.is_vec           := true.B // Todo
       mod.io.round_mode       := rm
       mod.io.fp_format        := Mux(resWiden, vsew + 1.U, vsew)
-      mod.io.opb_widening     := opbWiden || (fuOpType === VfaluType.vfwredosum)
+      mod.io.opb_widening     := opbWiden
       mod.io.res_widening     := resWiden
       mod.io.op_code          := opcode
+      mod.io.is_vfwredosum    := fuOpType === VfaluType.vfwredosum
+      mod.io.is_fold          := inIsFold
+      mod.io.vs2_fold         := vs2      // for better timing
       resultData(i)           := mod.io.fp_result
       fflagsData(i)           := mod.io.fflags
       fp_aIsFpCanonicalNAN(i) := vecCtrl.fpu.isFpToVecInst & (
