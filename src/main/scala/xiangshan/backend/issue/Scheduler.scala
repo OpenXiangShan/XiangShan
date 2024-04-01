@@ -220,7 +220,7 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
         if (wakeUpIn.bits.loadDependencyCopy.nonEmpty) wakeUp.bits.loadDependency := wakeUpIn.bits.loadDependencyCopy.get(backendParams.getCopyPdestIndex(exuIdx))
       }
       if (iq.params.numIntSrc == 0) wakeUp.bits.rfWen := false.B
-      if (iq.params.numFpSrc == 0)  wakeUp.bits.fpWen := false.B
+      if (iq.params.numVfSrc == 0)  wakeUp.bits.fpWen := false.B
       if (iq.params.numVfSrc == 0)  wakeUp.bits.vecWen := false.B
     }
     iq.io.og0Cancel := io.fromDataPath.og0Cancel
