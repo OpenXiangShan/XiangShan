@@ -126,7 +126,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.isHls := robEnq.isHls
     robEntry.instrSize := robEnq.instrSize
     robEntry.rfWen := robEnq.rfWen
-    robEntry.fpWen := robEnq.fpWen
+    robEntry.fpWen := robEnq.dirtyFs
     robEntry.loadWaitBit := robEnq.loadWaitBit
     robEntry.eliminatedMove := robEnq.eliminatedMove
     robEntry.debug_pc.foreach(_ := robEnq.pc)
