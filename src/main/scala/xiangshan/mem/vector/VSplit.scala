@@ -112,6 +112,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
     x.uop.uopIdx := uopIdx
     x.uop.numUops := numUops
     x.uop.lastUop := (uopIdx +& 1.U) === numUops
+    x.uop.vpu.nf  := s0_nf
     x.flowMask := flowMask
     x.byteMask := GenUopByteMask(flowMask, Cat("b0".U, alignedType))(VLENB - 1, 0)
     x.fof := isUnitStride(s0_mop) && us_fof(s0_fuOpType)
@@ -163,7 +164,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   val s1_instType         = s1_in.instType
   val s1_stride           = s1_in.stride
   val s1_vmask            = FillInterleaved(8, s1_in.byteMask)(VLEN-1, 0)
-  val s1_alignedType      = Mux(isIndexed(s1_in.instType), s1_in.sew(1, 0), s1_in.eew(1, 0))
+  val s1_alignedType      = s1_in.alignedType
   val s1_notIndexedStride = Mux( // stride for strided/unit-stride instruction
     isStrided(s1_instType),
     s1_stride(XLEN - 1, 0), // for strided load, stride = x[rs2]
