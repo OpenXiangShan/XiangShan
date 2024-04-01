@@ -272,8 +272,11 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
     data_transfer_cnt := 0.U
   }
 
-  val error = DelayN(io.error, 1)
-  when(error.report_to_beu) {
+  val error = Wire(io.error.cloneType)
+  val (error_valid,error_bits) = DelayNWithValid(io.error, io.error.valid, 1)
+  error <> error_bits
+  error.valid := error_valid
+  when(error.report_to_beu && error.valid) {
     io.csr.update.w.bits.addr := (CacheInstrucion.CacheInsRegisterList("CACHE_ERROR")("offset").toInt + Scachebase).U
     io.csr.update.w.bits.data := error.asUInt
     io.csr.update.w.valid := true.B
