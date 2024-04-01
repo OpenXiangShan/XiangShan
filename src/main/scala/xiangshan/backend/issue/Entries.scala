@@ -32,7 +32,9 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
       MixedVecInit(io.og0Resp ++ io.og1Resp ++ io.fromLoad.get.finalIssueResp ++ io.fromLoad.get.memAddrIssueResp)
     else if (params.isLdAddrIQ && params.isStAddrIQ || params.isHyAddrIQ)                           //HYU
       MixedVecInit(io.og0Resp ++ io.og1Resp ++ io.fromLoad.get.finalIssueResp ++ io.fromLoad.get.memAddrIssueResp ++ io.fromMem.get.fastResp ++ io.fromMem.get.slowResp)
-    else if (params.isMemAddrIQ)                                                                    //STU, VLDU, VSTU
+    else if (params.isStAddrIQ)                                                                     //STU, VLDU, VSTU
+      MixedVecInit(io.og0Resp ++ io.og1Resp ++ io.fromMem.get.slowResp)
+    else if (params.isVecLduIQ || params.isVecStuIQ)
       MixedVecInit(io.og0Resp ++ io.og1Resp ++ io.fromMem.get.slowResp)
     else MixedVecInit(Seq())
   }
@@ -235,11 +237,11 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   if (params.isVecMemIQ) {
     // vector memory IQ
     issueRespVec.zip(robIdxVec).zip(uopIdxVec.get).foreach { case ((issueResp, robIdx), uopIdx) =>
-      val hitRespsVec = VecInit(resps.flatten.map(x =>
+      val hitRespsVec = VecInit(memEtyResps.map(x =>
         x.valid && x.bits.robIdx === robIdx && x.bits.uopIdx.get === uopIdx
-      ))
+      ).toSeq)
       issueResp.valid := hitRespsVec.reduce(_ | _)
-      issueResp.bits := Mux1H(hitRespsVec, resps.flatten.map(_.bits))
+      issueResp.bits := Mux1H(hitRespsVec, memEtyResps.map(_.bits).toSeq)
     }
   } else if (params.isMemAddrIQ) {
     // scalar memory IQ
