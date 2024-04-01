@@ -410,6 +410,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   io.vecstout.bits.hit := !sx_last_in.vecFeedback
   io.vecstout.bits.isvec := true.B
   io.vecstout.bits.sourceType := RSFeedbackType.tlbMiss
+  io.vecstout.bits.flushState := DontCare
   io.vecstout.bits.mmio := sx_last_in.mmio
   io.vecstout.bits.exceptionVec := sx_last_in.output.uop.exceptionVec
   io.vecstout.bits.usSecondInv := sx_last_in.usSecondInv

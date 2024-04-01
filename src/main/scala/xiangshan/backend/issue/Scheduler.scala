@@ -94,6 +94,8 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
     val ldaFeedback = Flipped(Vec(params.LduCnt, new MemRSFeedbackIO))
     val staFeedback = Flipped(Vec(params.StaCnt, new MemRSFeedbackIO))
     val hyuFeedback = Flipped(Vec(params.HyuCnt, new MemRSFeedbackIO))
+    val vstuFeedback = Flipped(Vec(params.VstuCnt, new MemRSFeedbackIO))
+    val vlduFeedback = Flipped(Vec(params.VlduCnt, new MemRSFeedbackIO))
     val stIssuePtr = Input(new SqPtr())
     val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
     val scommit = Input(UInt(log2Ceil(EnsbufferWidth + 1).W)) // connected to `memBlock.io.sqDeq` instead of ROB
@@ -418,7 +420,7 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
       imp.io.memIO.get.sqDeqPtr.foreach(_ := io.fromMem.get.sqDeqPtr)
       imp.io.memIO.get.lqDeqPtr.foreach(_ := io.fromMem.get.lqDeqPtr)
       // not used
-      imp.io.memIO.get.feedbackIO := 0.U.asTypeOf(imp.io.memIO.get.feedbackIO)
+      imp.io.memIO.get.feedbackIO.head := io.fromMem.get.vstuFeedback.head // only vector store replay
       // maybe not used
       imp.io.memIO.get.checkWait.stIssuePtr := io.fromMem.get.stIssuePtr
       imp.io.memIO.get.checkWait.memWaitUpdateReq := io.fromMem.get.memWaitUpdateReq

@@ -146,6 +146,8 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
   val ldaIqFeedback = Vec(LduCnt, new MemRSFeedbackIO)
   val staIqFeedback = Vec(StaCnt, new MemRSFeedbackIO)
   val hyuIqFeedback = Vec(HyuCnt, new MemRSFeedbackIO)
+  val vstuIqFeedback= Vec(VstuCnt, new MemRSFeedbackIO)
+  val vlduIqFeedback= Vec(VlduCnt, new MemRSFeedbackIO)
   val ldCancel = Vec(backendParams.LdExuCnt, new LoadCancelIO)
   val wakeup = Vec(backendParams.LdExuCnt, Valid(new DynInst))
 
@@ -1299,6 +1301,14 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   vsMergeBuffer.io.redirect <> redirect
   vlMergeBuffer.io.toLsq(0) <> lsq.io.ldvecFeedback
   vsMergeBuffer.io.toLsq(0) <> lsq.io.stvecFeedback
+  (0 until UopWritebackWidth).foreach{i=>
+    // send to RS
+    vlMergeBuffer.io.feedback(i) <> io.mem_to_ooo.vlduIqFeedback(i).feedbackSlow
+    io.mem_to_ooo.vlduIqFeedback(i).feedbackFast := DontCare
+    // send to RS
+    vsMergeBuffer.io.feedback(i) <> io.mem_to_ooo.vstuIqFeedback(i).feedbackSlow
+    io.mem_to_ooo.vstuIqFeedback(i).feedbackFast := DontCare
+  }
 
   io.mem_to_ooo.writebackVldu.head.valid := vlMergeBuffer.io.uopWriteback.head.valid || vlMergeBuffer.io.uopWriteback.head.valid
   io.mem_to_ooo.writebackVldu.head.bits := Mux1H(Seq(

@@ -90,7 +90,7 @@ class VecPipelineFeedbackIO(isVStore: Boolean=false) (implicit p: Parameters) ex
   val mBIndex              = if(isVStore) UInt(vsmBindexBits.W) else UInt(vlmBindexBits.W)
   val hit                  = Bool()
   val isvec                = Bool()
-  //val flushState = Bool()
+  val flushState           = Bool()
   val sourceType           = VSFQFeedbackType()
   //val dataInvalidSqIdx = new SqPtr
   //val paddr                = UInt(PAddrBits.W)
@@ -210,5 +210,5 @@ class VMergeBufferIO(isVStore : Boolean=false)(implicit p: Parameters) extends V
   val uopWriteback        = Vec(UopWritebackWidth, DecoupledIO(new MemExuOutput(isVector = true)))
   val toSplit             = if(isVStore) Vec(VecStorePipelineWidth, ValidIO(new FeedbackToSplitIO)) else Vec(VecLoadPipelineWidth, ValidIO(new FeedbackToSplitIO)) // for inorder inst
   val toLsq               = Vec(UopWritebackWidth, ValidIO(new FeedbackToLsqIO)) // for lsq deq
-  val feedback            = ValidIO(new RSFeedback)//for rs replay
+  val feedback            = Vec(UopWritebackWidth, ValidIO(new RSFeedback))//for rs replay
 }
