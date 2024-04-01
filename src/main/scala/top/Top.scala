@@ -172,8 +172,12 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       val riscv_rst_vec = Input(Vec(NumCores, UInt(38.W)))
     })
 
-    val reset_sync = withClockAndReset(io.clock.asClock, io.reset) { ResetGen() }
-    val jtag_reset_sync = withClockAndReset(io.systemjtag.jtag.TCK, io.systemjtag.reset) { ResetGen() }
+    val reset_sync =
+      if (debugOpts.FPGAPlatform) withClockAndReset(io.clock.asClock, io.reset) { ResetGen() }
+      else io.reset
+    val jtag_reset_sync =
+      if (debugOpts.FPGAPlatform) withClockAndReset(io.systemjtag.jtag.TCK, io.systemjtag.reset) { ResetGen() }
+      else io.systemjtag.reset
 
     // override LazyRawModuleImp's clock and reset
     childClock := io.clock.asClock
