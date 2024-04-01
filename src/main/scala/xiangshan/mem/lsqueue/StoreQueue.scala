@@ -216,14 +216,14 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val addrvalid = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // non-mmio addr is valid
   val datavalid = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // non-mmio data is valid
   val allvalid  = VecInit((0 until StoreQueueSize).map(i => addrvalid(i) && datavalid(i))) // non-mmio data & addr is valid
-  val committed = Reg(Vec(StoreQueueSize, Bool())) // inst has been committed by rob
-  val pending = Reg(Vec(StoreQueueSize, Bool())) // mmio pending: inst is an mmio inst, it will not be executed until it reachs the end of rob
-  val mmio = Reg(Vec(StoreQueueSize, Bool())) // mmio: inst is an mmio inst
-  val atomic = Reg(Vec(StoreQueueSize, Bool()))
+  val committed = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // inst has been committed by rob
+  val pending = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // mmio pending: inst is an mmio inst, it will not be executed until it reachs the end of rob
+  val mmio = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // mmio: inst is an mmio inst
+  val atomic = RegInit(VecInit(List.fill(StoreQueueSize)(false.B)))
   val prefetch = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // need prefetch when committing this store to sbuffer?
-  val is_vec = Reg(Vec(StoreQueueSize, Bool())) // vector store instruction
+  val is_vec = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // vector store instruction
   //val vec_lastuop = Reg(Vec(StoreQueueSize, Bool())) // last uop of vector store instruction
-  val vec_mbCommit = Reg(Vec(StoreQueueSize, Bool())) // vector store committed from merge buffer to rob
+  val vec_mbCommit = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // vector store committed from merge buffer to rob
   // val vec_robCommit = Reg(Vec(StoreQueueSize, Bool())) // vector store committed by rob
   val vec_secondInv = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // Vector unit-stride, second entry is invalid
 
