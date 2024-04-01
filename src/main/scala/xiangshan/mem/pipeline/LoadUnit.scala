@@ -1388,6 +1388,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.vecldout.bits.mBIndex := s3_vec_mBIndex
   io.vecldout.bits.hit := !s3_rep_info.need_rep || io.lsq.ldin.ready
   io.vecldout.bits.sourceType := RSFeedbackType.lrqFull
+  io.vecldout.bits.flushState := DontCare
   io.vecldout.bits.exceptionVec := s3_out.bits.uop.exceptionVec
   io.vecldout.bits.mmio := DontCare
 

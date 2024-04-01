@@ -26,6 +26,7 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.Bundles._
 import xiangshan.mem._
 import xiangshan.backend.fu.FuType
+import freechips.rocketchip.diplomacy.BufferParams
 
 class MBufferBundle(implicit p: Parameters) extends VLSUBundle{
   val data             = UInt(VLEN.W)
@@ -34,6 +35,8 @@ class MBufferBundle(implicit p: Parameters) extends VLSUBundle{
   val exceptionVec     = ExceptionVec()
   val uop              = new DynInst
   // val vdOffset         = UInt(vOffsetBits.W)
+  val sourceType       = VSFQFeedbackType()
+  val flushState       = Bool()
 
   def allReady(): Bool = (flowNum === 0.U)
 }
@@ -48,6 +51,8 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     sink.flowNum      := source.flowNum
     sink.exceptionVec := 0.U.asTypeOf(ExceptionVec())
     sink.uop          := source.uop
+    sink.sourceType   := 0.U.asTypeOf(VSFQFeedbackType())
+    sink.flushState   := false.B
     sink
     // sink.vdOffset     := source.vdOffset
   }
@@ -86,6 +91,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
   val allocated    = RegInit(VecInit(Seq.fill(uopSize)(false.B)))
   val freeMaskVec  = WireInit(VecInit(Seq.fill(uopSize)(false.B)))
   val uopFinish    = RegInit(VecInit(Seq.fill(uopSize)(false.B)))
+  val needRSReplay = RegInit(VecInit(Seq.fill(uopSize)(false.B)))
   // enq, from splitPipeline
   // val allowEnqueue =
   val cancelEnq    = io.fromSplit.map(_.req.bits.uop.robIdx.needFlush(io.redirect))
@@ -109,6 +115,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
       // enqueue
       allocated(enqIndex)       := true.B
       uopFinish(enqIndex)       := false.B
+      needRSReplay(enqIndex)    := false.B
 
       entries(enqIndex) := EnqConnect(enq.req.bits)// initial entry
     }
@@ -125,6 +132,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
       allocated(i)   := false.B
       freeMaskVec(i) := true.B
       uopFinish(i)   := false.B
+      needRSReplay(i):= false.B
     }
   }
   freeList.io.free := freeMaskVec.asUInt
@@ -132,8 +140,17 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
   for((pipewb) <- io.fromPipeline){
     val wbIndex = pipewb.bits.mBIndex
     val flowNumNext = Mux(pipewb.bits.usSecondInv, entries(wbIndex).flowNum - 2.U, entries(wbIndex).flowNum - 1.U)
-    when(pipewb.valid && pipewb.bits.hit){
+    val sourceTypeNext   = entries(wbIndex).sourceType | pipewb.bits.sourceType
+    val hasExp           = pipewb.bits.exceptionVec.asUInt.orR
+    val exceptionVecNext = Mux(hasExp, pipewb.bits.exceptionVec, entries(wbIndex).exceptionVec)
+    when(pipewb.valid){
       entries(wbIndex).flowNum := flowNumNext
+      entries(wbIndex).sourceType   := sourceTypeNext
+      entries(wbIndex).exceptionVec := exceptionVecNext
+      entries(wbIndex).flushState   := pipewb.bits.flushState
+    }
+    when(pipewb.valid && !pipewb.bits.hit){
+      needRSReplay(wbIndex) := true.B
     }
     pipewb.ready := true.B
     XSError((flowNumNext > entries(wbIndex).flowNum) && pipewb.valid, "FlowWriteback overflow!!\n")
@@ -142,8 +159,6 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
   // for inorder mem asscess
   io.toSplit := DontCare
 
-  //feedback to rs
-  io.feedback := DontCare
   //uopwriteback(deq)
   for (i <- 0 until uopSize){
     when(allocated(i) && entries(i).allReady()){
@@ -157,15 +172,23 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     val selEntry = entries(entryIdx)
     when(selValid){
       freeMaskVec(entryIdx) := true.B
-      allocated(entryIdx) := false.B
+      allocated(entryIdx)   := false.B
       uopFinish(entryIdx)   := false.B
+      needRSReplay(entryIdx):= false.B
     }
     //writeback connect
-    port.valid   := selValid && allocated(entryIdx)
+    port.valid   := selValid && allocated(entryIdx) && !needRSReplay(entryIdx)
     port.bits    := DeqConnect(selEntry)
     //to lsq
     lsqport.bits := ToLsqConnect(selEntry) // when uopwriteback, free MBuffer entry, write to lsq
-    lsqport.valid:= selValid && allocated(entryIdx)
+    lsqport.valid:= selValid && allocated(entryIdx) && !needRSReplay(entryIdx)
+    //to RS
+    io.feedback(i).valid                 := selValid && allocated(entryIdx) && needRSReplay(entryIdx)
+    io.feedback(i).bits.hit              := !needRSReplay(entryIdx)
+    io.feedback(i).bits.robIdx           := selEntry.uop.robIdx
+    io.feedback(i).bits.sourceType       := selEntry.sourceType
+    io.feedback(i).bits.flushState       := selEntry.flushState
+    io.feedback(i).bits.dataInvalidSqIdx := DontCare
    }
 }
 

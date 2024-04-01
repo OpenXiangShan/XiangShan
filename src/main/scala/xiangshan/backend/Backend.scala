@@ -224,6 +224,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   memScheduler.io.fromMem.get.ldaFeedback := io.mem.ldaIqFeedback
   memScheduler.io.fromMem.get.staFeedback := io.mem.staIqFeedback
   memScheduler.io.fromMem.get.hyuFeedback := io.mem.hyuIqFeedback
+  memScheduler.io.fromMem.get.vstuFeedback := io.mem.vstuIqFeedback
+  memScheduler.io.fromMem.get.vlduFeedback := io.mem.vlduIqFeedback
   memScheduler.io.fromSchedulers.wakeupVec.foreach { wakeup => wakeup := iqWakeUpMappedBundle(wakeup.bits.exuIdx) }
   memScheduler.io.fromDataPath.og0Cancel := og0CancelOH
   memScheduler.io.fromDataPath.og1Cancel := og1CancelOH
@@ -531,6 +533,8 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val ldaIqFeedback = Vec(params.LduCnt, Flipped(new MemRSFeedbackIO))
   val staIqFeedback = Vec(params.StaCnt, Flipped(new MemRSFeedbackIO))
   val hyuIqFeedback = Vec(params.HyuCnt, Flipped(new MemRSFeedbackIO))
+  val vstuIqFeedback = Flipped(Vec(params.VstuCnt, new MemRSFeedbackIO))
+  val vlduIqFeedback = Flipped(Vec(params.VlduCnt, new MemRSFeedbackIO))
   val ldCancel = Vec(params.LdExuCnt, Flipped(new LoadCancelIO))
   val wakeup = Vec(params.LdExuCnt, Flipped(Valid(new DynInst)))
   val loadPcRead = Vec(params.LduCnt, Output(UInt(VAddrBits.W)))
