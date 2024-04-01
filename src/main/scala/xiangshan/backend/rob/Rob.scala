@@ -80,6 +80,9 @@ class RobLsqIO(implicit p: Parameters) extends XSBundle {
   val scommit = Output(UInt(log2Up(CommitWidth + 1).W))
   val pendingld = Output(Bool())
   val pendingst = Output(Bool())
+  // set when vector store at the head of ROB
+  val pendingVst = Output(Bool())
+
   val commit = Output(Bool())
   val pendingPtr = Output(new RobPtr)
   val pendingPtrNext = Output(new RobPtr)
@@ -922,7 +925,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.lsq.scommit := RegNext(Mux(io.commits.isCommit, PopCount(stCommitVec), 0.U))
   // indicate a pending load or store
   io.lsq.pendingld := RegNext(io.commits.isCommit && io.commits.info(0).commitType === CommitType.LOAD && valid(deqPtr.value) && mmio(deqPtr.value))
+  // TODO: Check if need deassert pendingst when it is vst
   io.lsq.pendingst := RegNext(io.commits.isCommit && io.commits.info(0).commitType === CommitType.STORE && valid(deqPtr.value))
+  // TODO: Check if set correctly when vector store is at the head of ROB
+  io.lsq.pendingVst := RegNext(io.commits.isCommit && io.commits.info(0).commitType === CommitType.STORE && valid(deqPtr.value) && vls(deqPtr.value))
   io.lsq.commit := RegNext(io.commits.isCommit && io.commits.commitValid(0))
   io.lsq.pendingPtr := RegNext(deqPtr)
   io.lsq.pendingPtrNext := RegNext(deqPtrVec_next.head)
