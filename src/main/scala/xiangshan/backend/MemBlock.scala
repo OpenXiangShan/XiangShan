@@ -76,13 +76,14 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
   val sfence = Input(new SfenceBundle)
   val tlbCsr = Input(new TlbCsrBundle)
   val lsqio = new Bundle {
-   val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
-   val scommit = Input(UInt(log2Up(CommitWidth + 1).W))
-   val pendingld = Input(Bool())
-   val pendingst = Input(Bool())
-   val commit = Input(Bool())
-   val pendingPtr = Input(new RobPtr)
-   val pendingPtrNext = Input(new RobPtr)
+    val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
+    val scommit = Input(UInt(log2Up(CommitWidth + 1).W))
+    val pendingld = Input(Bool())
+    val pendingst = Input(Bool())
+    val pendingVst = Input(Bool())
+    val commit = Input(Bool())
+    val pendingPtr = Input(new RobPtr)
+    val pendingPtrNext = Input(new RobPtr)
   }
 
   val isStoreException = Input(Bool())
@@ -1170,6 +1171,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   lsq.io.rob.scommit             := io.ooo_to_mem.lsqio.scommit
   lsq.io.rob.pendingld           := io.ooo_to_mem.lsqio.pendingld
   lsq.io.rob.pendingst           := io.ooo_to_mem.lsqio.pendingst
+  lsq.io.rob.pendingVst          := io.ooo_to_mem.lsqio.pendingVst
   lsq.io.rob.commit              := io.ooo_to_mem.lsqio.commit
   lsq.io.rob.pendingPtr          := io.ooo_to_mem.lsqio.pendingPtr
   lsq.io.rob.pendingPtrNext      := io.ooo_to_mem.lsqio.pendingPtrNext
