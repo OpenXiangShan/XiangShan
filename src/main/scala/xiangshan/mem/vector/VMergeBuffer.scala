@@ -158,6 +158,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     when(selValid){
       freeMaskVec(entryIdx) := true.B
       allocated(entryIdx) := false.B
+      uopFinish(entryIdx)   := false.B
     }
     //writeback connect
     port.valid   := selValid && allocated(entryIdx)

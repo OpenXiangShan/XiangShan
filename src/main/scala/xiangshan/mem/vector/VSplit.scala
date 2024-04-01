@@ -290,10 +290,10 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   // data
   io.out.bits match { case x =>
     x.uop                   := issueUop
-    x.vaddr                 := Mux(issuePreIsSplit, usSplitVaddr, vaddr)
+    x.vaddr                 := Mux(!issuePreIsSplit, usSplitVaddr, vaddr)
     x.alignedType           := issueAlignedType
     x.isvec                 := true.B
-    x.mask                  := Mux(issuePreIsSplit, usSplitMask, mask)
+    x.mask                  := Mux(!issuePreIsSplit, usSplitMask, mask)
     x.reg_offset            := regOffset //for merge unit-stride
     x.vecActive             := vecActive
     x.is_first_ele          := DontCare
@@ -341,6 +341,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
       when (doIssue) {
         // The uop is done spliting
         splitIdx := 0.U(flowIdxBits.W) // initialize flowIdx
+        valid(deqPtr.value) := false.B
         strideOffsetReg := 0.U
         deqPtr := deqPtr + 1.U
       }
@@ -351,7 +352,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   }
 
   // out connect
-  io.out.valid := canIssue && vecActive
+  io.out.valid := canIssue && (vecActive || !issuePreIsSplit) // TODO: inactive uop do not send to pipeline
 }
 
 class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = true){
@@ -370,11 +371,11 @@ class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = t
   val vstd = io.vstd.get
   vstd.valid := canIssue
   vstd.bits.uop := issueUop
-  vstd.bits.data := Mux(issuePreIsSplit, usSplitData, flowData)
+  vstd.bits.data := Mux(!issuePreIsSplit, usSplitData, flowData)
   vstd.bits.debug := DontCare
   vstd.bits.vdIdx.get := DontCare
   vstd.bits.vdIdxInField.get := DontCare
-  vstd.bits.mask.get := Mux(issuePreIsSplit, usSplitMask, mask)
+  vstd.bits.mask.get := Mux(!issuePreIsSplit, usSplitMask, mask)
 
 }
 
