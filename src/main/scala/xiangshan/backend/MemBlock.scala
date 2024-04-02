@@ -1271,6 +1271,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   // LSQ to store buffer
   lsq.io.sbuffer        <> sbuffer.io.in
+  lsq.io.sbufferVecDifftestInfo <> sbuffer.io.vecDifftestInfo
   lsq.io.sqEmpty        <> sbuffer.io.sqempty
   dcache.io.force_write := lsq.io.force_write
   // lsq.io.vecStoreRetire <> vsFlowQueue.io.sqRelease

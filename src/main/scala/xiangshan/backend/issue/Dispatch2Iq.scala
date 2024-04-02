@@ -746,7 +746,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   private val lmul            = vtype.map(_.vlmul)
   private val eew             = uop.map(_.vpu.veew)
   private val mop             = fuOpType.map(fuOpTypeItem => LSUOpType.getVecLSMop(fuOpTypeItem))
-  private val nf              = fuOpType.zip(uop.map(_.vpu.nf)).map{ case (fuOpTypeItem, vpuItem) => Mux(LSUOpType.isWhole(fuOpTypeItem), 0.U, vpuItem) }
+  private val nf              = fuOpType.zip(uop.map(_.vpu.nf)).map{ case (fuOpTypeItem, nfItem) => Mux(LSUOpType.isWhole(fuOpTypeItem), 0.U, nfItem) }
   private val emul            = fuOpType.zipWithIndex.map { case (fuOpTypeItem, index) =>
     Mux(LSUOpType.isWhole(fuOpTypeItem), GenUSWholeEmul(uop(index).vpu.nf), Mux(LSUOpType.isMasked(fuOpTypeItem), 0.U(mulBits.W), EewLog2(eew(index)) - sew(index) + lmul(index)))
   }
@@ -755,15 +755,23 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   private val isUnitStride    = fuOpType.map(fuOpTypeItem => LSUOpType.isUStride(fuOpTypeItem))
   private val isSegment       = fuOpType.zip(nf).map{ case (fuOpTypeItem, nfItem) => nfItem =/= 0.U && !LSUOpType.isWhole(fuOpTypeItem) }
   private val instType        = isSegment.zip(mop).map{ case (isSegementItem, mopItem) => Cat(isSegementItem, mopItem) }
+  // There is no way to calculate the 'flow' for 'unit-stride' and 'whole' exactly
   private val numLsElem       = instType.zipWithIndex.map{ case (instTypeItem, index) =>
-    Mux(LSUOpType.isWhole(fuOpType(index)) && isVlsType(index), 2.U, Mux(isUnitStride(index), 2.U, (1.U(5.W) << GenRealFlowNum(instTypeItem, emul(index), lmul(index), eew(index), sew(index))).asUInt))
+    Mux(
+      LSUOpType.isWhole(fuOpType(index)) || isUnitStride(index) && isVlsType(index),
+      2.U,
+      (1.U(5.W) << GenRealFlowNum(instTypeItem, emul(index), lmul(index), eew(index), sew(index))).asUInt
+    )
   }
 
   private val conserveFlows = isVlsType.zip(isUnitStride).map{
     case (isVlsTyepItem, isUnitStrideItem) => Mux(isUnitStrideItem && isVlsTyepItem, 2.U, Mux(isVlsTyepItem, 16.U, 1.U))
   }
 
-
+  // A conservative allocation strategy is adopted here.
+  // Both of the following conditions are required for allocation:
+  //  1) The lsq has enough entris.
+  //  2) The number of flows accumulated does not exceed VecMemDispatchMaxNumber.
   private val allowDispatch = Wire(Vec(numLsElem.length, Bool()))
   for (index <- allowDispatch.indices) {
     val flowTotal = conserveFlows.take(index + 1).reduce(_ + _)
