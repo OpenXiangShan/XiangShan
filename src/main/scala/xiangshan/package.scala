@@ -557,6 +557,8 @@ package object xiangshan {
 
     def size(op: UInt) = op(1,0)
 
+    def getVecLSMop(fuOpType: UInt): UInt = fuOpType(6, 5)
+
     def isVecLd(fuOpType: UInt): Bool = fuOpType(8, 7) === "b01".U
     def isVecSt(fuOpType: UInt): Bool = fuOpType(8, 7) === "b10".U
     def isVecLS(fuOpType: UInt): Bool = fuOpType(8, 7).orR

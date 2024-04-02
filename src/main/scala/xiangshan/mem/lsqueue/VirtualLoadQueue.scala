@@ -100,8 +100,8 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
 
   // update enqueue pointer
   val vLoadFlow = io.enq.req.map(_.bits.numLsElem)
-  val validVLoadFlow = vLoadFlow.zipWithIndex.map{case (vLoadFlowNum_Item, index) => Mux(io.enq.canAccept && io.enq.sqCanAccept && canEnqueue(index), vLoadFlowNum_Item, 0.U)}
-  val validVLoadOffset = vLoadFlow.zip(io.enq.needAlloc).map{case (flow, needAlloc_Item) => Mux(needAlloc_Item, flow, 0.U)}
+  val validVLoadFlow = vLoadFlow.zipWithIndex.map{case (vLoadFlowNumItem, index) => Mux(io.enq.canAccept && io.enq.sqCanAccept && canEnqueue(index), vLoadFlowNumItem, 0.U)}
+  val validVLoadOffset = vLoadFlow.zip(io.enq.needAlloc).map{case (flow, needAllocItem) => Mux(needAllocItem, flow, 0.U)}
   val validVLoadOffsetRShift = 0.U +: validVLoadOffset.take(validVLoadFlow.length - 1)
 
   val enqNumber = validVLoadFlow.reduce(_ + _)

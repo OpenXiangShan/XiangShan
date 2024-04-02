@@ -463,6 +463,7 @@ object EewLog2 extends VLSUConstants {
   * eew(1,0) means the number of bytes written at once*/
 object GenRealFlowNum {
   def apply (instType: UInt, emul: UInt, lmul: UInt, eew: UInt, sew: UInt): UInt = {
+    require(instType.getWidth == 3, "The instType width must be 3, (isSegment, mop)")
     (LookupTree(instType,List(
       "b000".U ->  (MulDataSize(emul) >> eew(1,0)).asUInt, // store use, load do not use
       "b010".U ->  (MulDataSize(emul) >> eew(1,0)).asUInt, // strided
@@ -480,6 +481,7 @@ object GenRealFlowNum {
   */
 object GenRealFlowLog2 extends VLSUConstants {
   def apply(instType: UInt, emul: UInt, lmul: UInt, eew: UInt, sew: UInt): UInt = {
+    require(instType.getWidth == 3, "The instType width must be 3, (isSegment, mop)")
     val emulLog2 = Mux(emul.asSInt >= 0.S, 0.U, emul)
     val lmulLog2 = Mux(lmul.asSInt >= 0.S, 0.U, lmul)
     val eewRealFlowLog2 = emulLog2 + log2Up(VLENB).U - eew(1, 0)

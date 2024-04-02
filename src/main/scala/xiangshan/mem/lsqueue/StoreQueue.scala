@@ -304,8 +304,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val canEnqueue = io.enq.req.map(_.valid)
   val enqCancel = io.enq.req.map(_.bits.robIdx.needFlush(io.brqRedirect))
   val vStoreFlow = io.enq.req.map(_.bits.numLsElem)
-  val validVStoreFlow = vStoreFlow.zipWithIndex.map{case (vLoadFlowNum_Item, index) => Mux(!RegNext(io.brqRedirect.valid) && io.enq.canAccept && io.enq.lqCanAccept && canEnqueue(index), vLoadFlowNum_Item, 0.U)}
-  val validVStoreOffset = vStoreFlow.zip(io.enq.needAlloc).map{case (flow, needAlloc_Item) => Mux(needAlloc_Item, flow, 0.U)}
+  val validVStoreFlow = vStoreFlow.zipWithIndex.map{case (vLoadFlowNumItem, index) => Mux(!RegNext(io.brqRedirect.valid) && io.enq.canAccept && io.enq.lqCanAccept && canEnqueue(index), vLoadFlowNumItem, 0.U)}
+  val validVStoreOffset = vStoreFlow.zip(io.enq.needAlloc).map{case (flow, needAllocItem) => Mux(needAllocItem, flow, 0.U)}
   val validVStoreOffsetRShift = 0.U +: validVStoreOffset.take(vStoreFlow.length - 1)
 
   for (i <- 0 until io.enq.req.length) {
