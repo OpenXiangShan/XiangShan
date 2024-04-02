@@ -151,6 +151,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new MemExuOutput(isVector = true)))) // store data, send to sq from rs
     val storeMaskIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreMaskBundle))) // store mask, send to sq from rs
     val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddrAndPfFlag)) // write committed store to sbuffer
+    val sbufferVecDifftestInfo = Vec(EnsbufferWidth, Decoupled(new DynInst)) // The vector store difftest needs is, write committed store to sbuffer
     val uncacheOutstanding = Input(Bool())
     val mmioStout = DecoupledIO(new MemExuOutput) // writeback uncached store
     val vecmmioStout = DecoupledIO(new MemExuOutput(isVector = true))
@@ -202,6 +203,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   ))
   vaddrModule.io := DontCare
   val dataBuffer = Module(new DatamoduleResultBuffer(new DataBufferEntry))
+  val difftestBuffer = if (env.EnableDifftest) Some(Module(new DatamoduleResultBuffer(new DynInst))) else None
   val exceptionBuffer = Module(new StoreExceptionBuffer)
   exceptionBuffer.io.redirect := io.brqRedirect
   exceptionBuffer.io.exceptionAddr.isStore := DontCare
@@ -892,7 +894,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     io.sbuffer(i).bits.wline := dataBuffer.io.deq(i).bits.wline
     io.sbuffer(i).bits.prefetch := dataBuffer.io.deq(i).bits.prefetch
     io.sbuffer(i).bits.vecValid := dataBuffer.io.deq(i).bits.vecValid
-
     // io.sbuffer(i).fire is RegNexted, as sbuffer data write takes 2 cycles.
     // Before data write finish, sbuffer is unable to provide store to load
     // forward data. As an workaround, deqPtrExt and allocated flag update
@@ -903,6 +904,22 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       XSDebug("sbuffer "+i+" fire: ptr %d\n", ptr)
     }
   }
+
+  // Consistent with the logic above, only the vectore difftest required signal is separated from the rtl code
+  if (env.EnableDifftest) {
+    for (i <- 0 until EnsbufferWidth) {
+      val ptr = rdataPtrExt(i).value
+      difftestBuffer.get.io.enq(i).valid := allocated(ptr) && committed(ptr) && (!isVec(ptr) || vecMbCommit(ptr)) && !mmioStall
+      difftestBuffer.get.io.enq(i).bits := uop(ptr)
+    }
+    for (i <- 0 until EnsbufferWidth) {
+      io.sbufferVecDifftestInfo(i).valid := difftestBuffer.get.io.deq(i).valid
+      difftestBuffer.get.io.deq(i).ready := io.sbufferVecDifftestInfo(i).ready
+
+      io.sbufferVecDifftestInfo(i).bits := difftestBuffer.get.io.deq(i).bits
+    }
+  }
+
   (1 until EnsbufferWidth).foreach(i => when(io.sbuffer(i).fire) { assert(io.sbuffer(i - 1).fire) })
   if (coreParams.dcacheParametersOpt.isEmpty) {
     for (i <- 0 until EnsbufferWidth) {
