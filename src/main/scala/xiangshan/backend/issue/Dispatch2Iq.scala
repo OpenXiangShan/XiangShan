@@ -739,31 +739,28 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     }
   }
 
-  private def us_whole_reg(fuOpType: UInt) = fuOpType === VstuType.vsr // Todo: move func into FuOpType
-  private def us_mask(fuOpType: UInt) = fuOpType === VstuType.vsm
-
   private val uop             = io.in.map(_.bits)
   private val fuOpType        = uop.map(_.fuOpType)
   private val vtype           = uop.map(_.vpu.vtype)
   private val sew             = vtype.map(_.vsew)
   private val lmul            = vtype.map(_.vlmul)
   private val eew             = uop.map(_.vpu.veew)
-  private val mop             = fuOpType.map(_(6, 5)) // Todo: move this func into FuOpType
-  private val nf              = fuOpType.zip(uop.map(_.vpu.nf)).map{ case (fuOpType_Item, vpu_Nf_Item) => Mux(us_whole_reg(fuOpType_Item), 0.U, vpu_Nf_Item) }
-  private val emul            = fuOpType.zipWithIndex.map { case (fuOpType_Item, index) =>
-    Mux(us_whole_reg(fuOpType_Item), GenUSWholeEmul(uop(index).vpu.nf), Mux(us_mask(fuOpType_Item), 0.U(mulBits.W), EewLog2(eew(index)) - sew(index) + lmul(index)))
+  private val mop             = fuOpType.map(fuOpTypeItem => LSUOpType.getVecLSMop(fuOpTypeItem))
+  private val nf              = fuOpType.zip(uop.map(_.vpu.nf)).map{ case (fuOpTypeItem, vpuItem) => Mux(LSUOpType.isWhole(fuOpTypeItem), 0.U, vpuItem) }
+  private val emul            = fuOpType.zipWithIndex.map { case (fuOpTypeItem, index) =>
+    Mux(LSUOpType.isWhole(fuOpTypeItem), GenUSWholeEmul(uop(index).vpu.nf), Mux(LSUOpType.isMasked(fuOpTypeItem), 0.U(mulBits.W), EewLog2(eew(index)) - sew(index) + lmul(index)))
   }
 
-  private val isVlsType       = uop.map(uop_Item => isVls((uop_Item.fuType)))
-  private val isUnitStrideType= mop.map(mop_Item => isUnitStride(mop_Item))
-  private val isSegment       = nf.zip(fuOpType).map{ case (fuOpType_Item, nf_Item) => nf_Item =/= 0.U && !us_whole_reg(fuOpType_Item) }
-  private val instType        = isSegment.zip(mop).map{ case (isSegement_Item, mop_Item) => Cat(isSegement_Item, mop_Item) }
-  private val numLsElem       = instType.zipWithIndex.map{ case (instType_Item, index) =>
-    Mux(us_whole_reg(fuOpType(index)) && isVlsType(index), 2.U, Mux(isUnitStrideType(index), 2.U, (1.U(5.W) << GenRealFlowNum(instType_Item, emul(index), lmul(index), eew(index), sew(index))).asUInt))
+  private val isVlsType       = uop.map(uopItem => isVls((uopItem.fuType)))
+  private val isUnitStride    = fuOpType.map(fuOpTypeItem => LSUOpType.isUStride(fuOpTypeItem))
+  private val isSegment       = nf.zip(fuOpType).map{ case (fuOpTypeItem, nfItem) => nfItem =/= 0.U && !LSUOpType.isWhole(fuOpTypeItem) }
+  private val instType        = isSegment.zip(mop).map{ case (isSegementItem, mopItem) => Cat(isSegementItem, mopItem) }
+  private val numLsElem       = instType.zipWithIndex.map{ case (instTypeItem, index) =>
+    Mux(LSUOpType.isWhole(fuOpType(index)) && isVlsType(index), 2.U, Mux(isUnitStride(index), 2.U, (1.U(5.W) << GenRealFlowNum(instTypeItem, emul(index), lmul(index), eew(index), sew(index))).asUInt))
   }
 
-  private val conserveFlows = isVlsType.zip(isUnitStrideType).map{
-    case (isVlsTyep_Item, isUnitStrideType_Item) => Mux(isUnitStrideType_Item && isVlsTyep_Item, 2.U, Mux(isVlsTyep_Item, 16.U, 1.U))
+  private val conserveFlows = isVlsType.zip(isUnitStride).map{
+    case (isVlsTyepItem, isUnitStrideItem) => Mux(isUnitStrideItem && isVlsTyepItem, 2.U, Mux(isVlsTyepItem, 16.U, 1.U))
   }
 
 
@@ -806,6 +803,10 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     }
     enqLsqIO.req(i).valid := io.in(i).fire && !isAMOVec(i)
     enqLsqIO.req(i).bits := io.in(i).bits
+
+    // This is to make it easier to calculate in LSQ.
+    // Both scalar instructions and vector instructions with FLOW equal to 1 have a NUM value of 1.”
+    // But, the 'numLsElem' that is not a vector is set to 0 when passed to IQ
     enqLsqIO.req(i).bits.numLsElem := Mux(isVlsType(i), numLsElem(i), 1.U)
     s0_enqLsq_resp(i) := enqLsqIO.resp(i)
   }
