@@ -189,6 +189,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     io.feedback(i).bits.sourceType       := selEntry.sourceType
     io.feedback(i).bits.flushState       := selEntry.flushState
     io.feedback(i).bits.dataInvalidSqIdx := DontCare
+    io.feedback(i).bits.uopIdx.get       := selEntry.uop.uopIdx
    }
 }
 

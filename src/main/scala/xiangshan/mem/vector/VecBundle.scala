@@ -210,5 +210,5 @@ class VMergeBufferIO(isVStore : Boolean=false)(implicit p: Parameters) extends V
   val uopWriteback        = Vec(UopWritebackWidth, DecoupledIO(new MemExuOutput(isVector = true)))
   val toSplit             = if(isVStore) Vec(VecStorePipelineWidth, ValidIO(new FeedbackToSplitIO)) else Vec(VecLoadPipelineWidth, ValidIO(new FeedbackToSplitIO)) // for inorder inst
   val toLsq               = Vec(UopWritebackWidth, ValidIO(new FeedbackToLsqIO)) // for lsq deq
-  val feedback            = Vec(UopWritebackWidth, ValidIO(new RSFeedback))//for rs replay
+  val feedback            = Vec(UopWritebackWidth, ValidIO(new RSFeedback(isVector = true)))//for rs replay
 }

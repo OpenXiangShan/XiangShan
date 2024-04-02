@@ -876,7 +876,7 @@ class IssueQueueVfImp(override val wrapper: IssueQueue)(implicit p: Parameters, 
 }
 
 class IssueQueueMemBundle(implicit p: Parameters, params: IssueBlockParams) extends Bundle {
-  val feedbackIO = Flipped(Vec(params.numDeq, new MemRSFeedbackIO))
+  val feedbackIO = Flipped(Vec(params.numDeq, new MemRSFeedbackIO(params.isVecMemIQ)))
 
   // TODO: is still needed?
   val checkWait = new Bundle {
@@ -1018,7 +1018,7 @@ class IssueQueueVecMemImp(override val wrapper: IssueQueue)(implicit p: Paramete
     slowResp.bits.robIdx           := memIO.feedbackIO(i).feedbackSlow.bits.robIdx
     slowResp.bits.resp             := Mux(memIO.feedbackIO(i).feedbackSlow.bits.hit, RespType.success, RespType.block)
     slowResp.bits.fuType           := DontCare
-    slowResp.bits.uopIdx.get       := 0.U // Todo
+    slowResp.bits.uopIdx.get       := memIO.feedbackIO(i).feedbackSlow.bits.uopIdx.get
   }
 
   entries.io.fromMem.get.fastResp.zipWithIndex.foreach { case (fastResp, i) =>
@@ -1026,7 +1026,7 @@ class IssueQueueVecMemImp(override val wrapper: IssueQueue)(implicit p: Paramete
     fastResp.bits.robIdx           := memIO.feedbackIO(i).feedbackFast.bits.robIdx
     fastResp.bits.resp             := Mux(memIO.feedbackIO(i).feedbackFast.bits.hit, RespType.success, RespType.block)
     fastResp.bits.fuType           := DontCare
-    fastResp.bits.uopIdx.get       := 0.U // Todo
+    fastResp.bits.uopIdx.get       := memIO.feedbackIO(i).feedbackFast.bits.uopIdx.get
   }
 
   entries.io.vecMemIn.get.sqDeqPtr := memIO.sqDeqPtr.get
