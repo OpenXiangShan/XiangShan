@@ -156,7 +156,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   with HasXSParameter
   with HasSoCParameter {
   val io = IO(new Bundle {
-    val hartId = Input(UInt(64.W))
+    val hartId = Input(UInt(hartIdLen.W))
     val reset_vector = Input(UInt(PAddrBits.W))
     val cpu_halt = Output(Bool())
     val l2_pf_enable = Output(Bool())

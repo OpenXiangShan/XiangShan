@@ -42,7 +42,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   with HasPerfEvents
 {
   val io = IO(new Bundle() {
-    val hartId = Input(UInt(8.W))
+    val hartId = Input(UInt(hartIdLen.W))
     val reset_vector = Input(UInt(PAddrBits.W))
     val fencei = Input(Bool())
     val ptw = new TlbPtwIO()

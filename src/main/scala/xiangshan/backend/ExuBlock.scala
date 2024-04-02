@@ -56,7 +56,7 @@ class ExuBlock(
 }
 
 class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp(outer)
-  with HasWritebackSourceImp with HasPerfEvents {
+  with HasWritebackSourceImp with HasPerfEvents with HasXSParameter {
   val scheduler = outer.scheduler.module
 
   val fuConfigs = outer.fuConfigs
@@ -65,7 +65,7 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
   val numOutFu = outer.numOutFu
 
   val io = IO(new Bundle {
-    val hartId = Input(UInt(8.W))
+    val hartId = Input(UInt(hartIdLen.W))
     // global control
     val redirect = Flipped(ValidIO(new Redirect))
     // dispatch ports

@@ -30,7 +30,7 @@ import xiangshan.backend.fu.PMPRespBundle
 
 class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstants with HasDCacheParameters{
   val io = IO(new Bundle() {
-    val hartId = Input(UInt(8.W))
+    val hartId = Input(UInt(hartIdLen.W))
     val in            = Flipped(Decoupled(new ExuInput))
     val storeDataIn   = Flipped(Valid(new ExuOutput)) // src2 from rs
     val out           = Decoupled(new ExuOutput)

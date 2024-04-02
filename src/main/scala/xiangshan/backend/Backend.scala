@@ -147,7 +147,7 @@ class BackendImp(outer: Backend)(implicit p: Parameters) extends LazyModuleImp(o
   with HasXSParameter
 {
   val io = IO(new Bundle() {
-    val hartId = Input(UInt(64.W))
+    val hartId = Input(UInt(hartIdLen.W))
     val cpu_halt = Output(Bool())
 
     val memBlock = new Bundle() { // TODO: use class

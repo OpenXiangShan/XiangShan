@@ -92,7 +92,7 @@ class ICachePerfInfo(implicit p: Parameters) extends ICacheBundle{
 }
 
 class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
-  val hartId = Input(UInt(8.W))
+  val hartId = Input(UInt(hartIdLen.W))
   /*** internal interface ***/
   val metaArray   = new ICacheMetaReqBundle
   val dataArray   = new ICacheDataReqBundle
