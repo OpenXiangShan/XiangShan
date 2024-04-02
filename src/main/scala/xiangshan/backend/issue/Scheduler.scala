@@ -94,8 +94,8 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
     val ldaFeedback = Flipped(Vec(params.LduCnt, new MemRSFeedbackIO))
     val staFeedback = Flipped(Vec(params.StaCnt, new MemRSFeedbackIO))
     val hyuFeedback = Flipped(Vec(params.HyuCnt, new MemRSFeedbackIO))
-    val vstuFeedback = Flipped(Vec(params.VstuCnt, new MemRSFeedbackIO))
-    val vlduFeedback = Flipped(Vec(params.VlduCnt, new MemRSFeedbackIO))
+    val vstuFeedback = Flipped(Vec(params.VstuCnt, new MemRSFeedbackIO(isVector = true)))
+    val vlduFeedback = Flipped(Vec(params.VlduCnt, new MemRSFeedbackIO(isVector = true)))
     val stIssuePtr = Input(new SqPtr())
     val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
     val scommit = Input(UInt(log2Ceil(EnsbufferWidth + 1).W)) // connected to `memBlock.io.sqDeq` instead of ROB

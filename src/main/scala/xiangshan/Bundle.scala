@@ -434,19 +434,20 @@ class SnapshotPort(implicit p: Parameters) extends XSBundle {
   val flushVec = Vec(RenameSnapshotNum, Bool())
 }
 
-class RSFeedback(implicit p: Parameters) extends XSBundle {
+class RSFeedback(isVector: Boolean = false)(implicit p: Parameters) extends XSBundle {
   val robIdx = new RobPtr
   val hit = Bool()
   val flushState = Bool()
   val sourceType = RSFeedbackType()
   val dataInvalidSqIdx = new SqPtr
+  val uopIdx     = OptionWrapper(isVector, UopIdx())
 }
 
-class MemRSFeedbackIO(implicit p: Parameters) extends XSBundle {
+class MemRSFeedbackIO(isVector: Boolean = false)(implicit p: Parameters) extends XSBundle {
   // Note: you need to update in implicit Parameters p before imp MemRSFeedbackIO
   // for instance: MemRSFeedbackIO()(updateP)
-  val feedbackSlow = ValidIO(new RSFeedback()) // dcache miss queue full, dtlb miss
-  val feedbackFast = ValidIO(new RSFeedback()) // bank conflict
+  val feedbackSlow = ValidIO(new RSFeedback(isVector)) // dcache miss queue full, dtlb miss
+  val feedbackFast = ValidIO(new RSFeedback(isVector)) // bank conflict
 }
 
 class LoadCancelIO(implicit p: Parameters) extends XSBundle {

@@ -147,8 +147,8 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
   val ldaIqFeedback = Vec(LduCnt, new MemRSFeedbackIO)
   val staIqFeedback = Vec(StaCnt, new MemRSFeedbackIO)
   val hyuIqFeedback = Vec(HyuCnt, new MemRSFeedbackIO)
-  val vstuIqFeedback= Vec(VstuCnt, new MemRSFeedbackIO)
-  val vlduIqFeedback= Vec(VlduCnt, new MemRSFeedbackIO)
+  val vstuIqFeedback= Vec(VstuCnt, new MemRSFeedbackIO(isVector = true))
+  val vlduIqFeedback= Vec(VlduCnt, new MemRSFeedbackIO(isVector = true))
   val ldCancel = Vec(backendParams.LdExuCnt, new LoadCancelIO)
   val wakeup = Vec(backendParams.LdExuCnt, Valid(new DynInst))
 
