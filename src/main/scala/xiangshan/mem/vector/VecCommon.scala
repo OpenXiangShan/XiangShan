@@ -248,6 +248,7 @@ class VecMemExuOutput(isVector: Boolean = false)(implicit p: Parameters) extends
   val usSecondInv = Bool()
   val elemIdx = UInt(elemIdxBits.W)
   val alignedType = UInt(alignTypeBits.W)
+  val mbIndex     = UInt(vsmBindexBits.W)
 }
 
 object MulNum {
