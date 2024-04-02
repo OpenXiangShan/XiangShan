@@ -151,7 +151,6 @@ object Bundles {
     val ftqOffset       = UInt(log2Up(PredictWidth).W)
     // passed from DecodedInst
     val srcType         = Vec(numSrc, SrcType())
-    val lsrc            = Vec(numSrc, UInt(6.W))
     val ldest           = UInt(6.W)
     val fuType          = FuType()
     val fuOpType        = FuOpType()

@@ -457,7 +457,7 @@ object XSTrapDecode extends DecodeConstants {
   )
 }
 
-abstract class Imm(val len: Int) extends Bundle {
+abstract class Imm(val len: Int) {
   def toImm32(minBits: UInt): UInt = do_toImm32(minBits(len - 1, 0))
   def do_toImm32(minBits: UInt): UInt
   def minBitsFromInstr(instr: UInt): UInt

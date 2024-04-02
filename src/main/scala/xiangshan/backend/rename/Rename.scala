@@ -281,13 +281,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       when (fused_lui32) {
         val lui_imm = io.in(i).bits.imm(19, 0)
         val add_imm = io.in(i + 1).bits.imm(11, 0)
-        io.out(i).bits.imm := Imm_LUI_LOAD().immFromLuiLoad(lui_imm, add_imm)
-        val lsrcWidth = uops(i).lsrc.head.getWidth
-        val lui_imm_in_imm = ImmUnion.maxLen - Imm_I().len
-        val left_lui_imm = Imm_U().len - lui_imm_in_imm
-        require(2 * lsrcWidth >= left_lui_imm, "cannot fused lui and addi(w) with lsrc")
-        io.out(i).bits.lsrc(0) := lui_imm(lui_imm_in_imm + lsrcWidth - 1, lui_imm_in_imm)
-        io.out(i).bits.lsrc(1) := lui_imm(lui_imm.getWidth - 1, lui_imm_in_imm + lsrcWidth)
+        require(io.out(i).bits.imm.getWidth >= lui_imm.getWidth + add_imm.getWidth)
+        io.out(i).bits.imm := Cat(lui_imm, add_imm)
       }
     }
 
@@ -371,17 +366,12 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val lui_to_load = io.in(i - 1).valid && io.in(i - 1).bits.ldest === io.in(i).bits.lsrc(0)
     val fused_lui_load = last_is_lui && this_is_load && lui_to_load
     when (fused_lui_load) {
-      // The first LOAD operand (base address) is replaced by LUI-imm and stored in {psrc, imm}
-      val lui_imm = io.in(i - 1).bits.imm(19, 0)
-      val ld_imm = io.in(i).bits.imm
+      // The first LOAD operand (base address) is replaced by LUI-imm and stored in imm
+      val lui_imm = io.in(i - 1).bits.imm(ImmUnion.U.len - 1, 0)
+      val ld_imm = io.in(i).bits.imm(ImmUnion.I.len - 1, 0)
+      require(io.out(i).bits.imm.getWidth >= lui_imm.getWidth + ld_imm.getWidth)
       io.out(i).bits.srcType(0) := SrcType.imm
-      io.out(i).bits.imm := Imm_LUI_LOAD().immFromLuiLoad(lui_imm, ld_imm)
-      val psrcWidth = uops(i).psrc.head.getWidth
-      val lui_imm_in_imm = 20/*Todo: uops(i).imm.getWidth*/ - Imm_I().len
-      val left_lui_imm = Imm_U().len - lui_imm_in_imm
-      require(2 * psrcWidth >= left_lui_imm, "cannot fused lui and load with psrc")
-      io.out(i).bits.psrc(0) := lui_imm(lui_imm_in_imm + psrcWidth - 1, lui_imm_in_imm)
-      io.out(i).bits.psrc(1) := lui_imm(lui_imm.getWidth - 1, lui_imm_in_imm + psrcWidth)
+      io.out(i).bits.imm := Cat(lui_imm, ld_imm)
     }
 
   }
