@@ -299,15 +299,15 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule
   val isLastUopVec = io.enq.req.map(_.bits.lastUop)
   val vLoadFlow = io.enq.req.map(_.bits.numLsElem)
   val vStoreFlow = io.enq.req.map(_.bits.numLsElem)
-  val validVLoadFlow = vLoadFlow.zipWithIndex.map{case (vLoadFlowNum_Item, index) => Mux(loadEnqVec(index), vLoadFlowNum_Item, 0.U)}
-  val validVStoreFlow = vStoreFlow.zipWithIndex.map{case (vStoreFlowNum_Item, index) => Mux(storeEnqVec(index), vStoreFlowNum_Item, 0.U)}
+  val validVLoadFlow = vLoadFlow.zipWithIndex.map{case (vLoadFlowNumItem, index) => Mux(loadEnqVec(index), vLoadFlowNumItem, 0.U)}
+  val validVStoreFlow = vStoreFlow.zipWithIndex.map{case (vStoreFlowNumItem, index) => Mux(storeEnqVec(index), vStoreFlowNumItem, 0.U)}
   val enqVLoadOffsetNumber = validVLoadFlow.reduce(_ + _)
   val enqVStoreOffsetNumber = validVStoreFlow.reduce(_ + _)
   val validVLoadOffset = 0.U +: vLoadFlow.zip(io.enq.needAlloc)
-                                .map{case (flow, needAlloc_Item) => Mux(needAlloc_Item(0).asBool, flow, 0.U)}
+                                .map{case (flow, needAllocItem) => Mux(needAllocItem(0).asBool, flow, 0.U)}
                                 .slice(0, validVLoadFlow.length - 1)
   val validVStoreOffset = 0.U +: vStoreFlow.zip(io.enq.needAlloc)
-                                .map{case (flow, needAlloc_Item) => Mux(needAlloc_Item(1).asBool, flow, 0.U)}
+                                .map{case (flow, needAllocItem) => Mux(needAllocItem(1).asBool, flow, 0.U)}
                                 .slice(0, validVStoreFlow.length - 1)
   val lqAllocNumber = enqVLoadOffsetNumber
   val sqAllocNumber = enqVStoreOffsetNumber
