@@ -1286,7 +1286,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     vsSplit(i).io.out <> storeUnits(i).io.vecstin // Todo: May be some balance mechanism is needed
     vsSplit(i).io.vstd.get := DontCare // Todo: Discuss how to pass vector store data
 
-    vsMergeBuffer.io.fromPipeline(i) <> storeUnits(i).io.vecstout
   }
   (0 until VlduCnt).foreach{i =>
     vlSplit(i).io.redirect <> redirect
@@ -1295,7 +1294,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     vlSplit(i).io.toMergeBuffer <> vlMergeBuffer.io.fromSplit(i)
     vlSplit(i).io.out <> loadUnits(i).io.vecldin // Todo: May be some balance mechanism is needed
 
-    vlMergeBuffer.io.fromPipeline(i) <> loadUnits(i).io.vecldout
+  }
+  (0 until LduCnt).foreach{i=>
+    vlMergeBuffer.io.fromPipeline(i) <> loadUnits(i).io.vecldout 
+  }
+  (0 until StaCnt).foreach{i=>
+    vsMergeBuffer.io.fromPipeline(i) <> storeUnits(i).io.vecstout
   }
   io.ooo_to_mem.issueVldu.head.ready := vsSplit.head.io.in.ready && vlSplit.head.io.in.ready
 

@@ -204,8 +204,8 @@ class VLMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
   ))
 
   //merge data
-  val flowWbElemIdx = Wire(Vec(VecLoadPipelineWidth, UInt(elemIdxBits.W)))
-  val flowWbElemIdxInVd = Wire(Vec(VecLoadPipelineWidth, UInt(elemIdxBits.W)))
+  val flowWbElemIdx = Wire(Vec(LoadPipelineWidth, UInt(elemIdxBits.W)))
+  val flowWbElemIdxInVd = Wire(Vec(LoadPipelineWidth, UInt(elemIdxBits.W)))
 
   for((pipewb, i) <- io.fromPipeline.zipWithIndex){
     val wbIndex = pipewb.bits.mBIndex
@@ -215,12 +215,13 @@ class VLMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
     flowWbElemIdxInVd(i) := elemIdxInsideVd.get
     // handle the situation where multiple ports are going to write the same uop queue entry
     val mergedByPrevPort = (i != 0).B && Cat((0 until i).map(j =>
-      io.fromPipeline(j).bits.mBIndex === pipewb.bits.mBIndex)).orR
-    val mergePortVec = (0 until VecLoadPipelineWidth).map(j => (j == i).B ||
+      io.fromPipeline(j).bits.mBIndex === pipewb.bits.mBIndex &&
+      io.fromPipeline(j).valid)).orR
+    val mergePortVec = (0 until LoadPipelineWidth).map(j => (j == i).B ||
       (j > i).B &&
       io.fromPipeline(j).bits.mBIndex === pipewb.bits.mBIndex &&
       io.fromPipeline(j).valid)
-    val mergeExpPortVec = (0 until VecLoadPipelineWidth).map(j => mergePortVec(j))
+    val mergeExpPortVec = (0 until LoadPipelineWidth).map(j => mergePortVec(j))
     val mergedData = mergeDataWithElemIdx(
       oldData = entries(wbIndex).data,
       newData = io.fromPipeline.map(_.bits.vecdata.get),
