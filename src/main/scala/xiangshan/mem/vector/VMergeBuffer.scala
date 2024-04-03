@@ -183,7 +183,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     lsqport.bits := ToLsqConnect(selEntry) // when uopwriteback, free MBuffer entry, write to lsq
     lsqport.valid:= selValid && allocated(entryIdx) && !needRSReplay(entryIdx)
     //to RS
-    io.feedback(i).valid                 := selValid && allocated(entryIdx) && needRSReplay(entryIdx)
+    io.feedback(i).valid                 := selValid && allocated(entryIdx)
     io.feedback(i).bits.hit              := !needRSReplay(entryIdx)
     io.feedback(i).bits.robIdx           := selEntry.uop.robIdx
     io.feedback(i).bits.sourceType       := selEntry.sourceType
