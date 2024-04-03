@@ -774,6 +774,8 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
       allowDispatch(index) := Mux(sqFreeCount > flowTotal && flowTotal <= VecMemDispatchMaxNumber.U, true.B, false.B)
     } .elsewhen(isLoadVec(index) || isVLoadVec(index)) {
       allowDispatch(index) := Mux(lqFreeCount > flowTotal && flowTotal <= VecMemDispatchMaxNumber.U, true.B, false.B)
+    } .elsewhen (isAMOVec(index)) {
+      allowDispatch(index) := true.B
     } .otherwise {
       allowDispatch(index) := false.B
     }
