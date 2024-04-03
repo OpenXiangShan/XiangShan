@@ -84,6 +84,7 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
 
   val loadFinalIssueResp = MixedVec(params.issueBlockParams.map(x => MixedVec(Vec(x.LdExuCnt, Flipped(ValidIO(new IssueQueueDeqRespBundle()(p, x)))))))
   val memAddrIssueResp = MixedVec(params.issueBlockParams.map(x => MixedVec(Vec(x.LdExuCnt, Flipped(ValidIO(new IssueQueueDeqRespBundle()(p, x)))))))
+  val vecLoadIssueResp = MixedVec(params.issueBlockParams.map(x => MixedVec(Vec(x.VlduCnt, Flipped(ValidIO(new IssueQueueDeqRespBundle()(p, x)))))))
 
   val ldCancel = Vec(backendParams.LduCnt + backendParams.HyuCnt, Flipped(new LoadCancelIO))
 
@@ -265,6 +266,9 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
         memAddrIssueResp := 0.U.asTypeOf(memAddrIssueResp)
       }
     })
+    iq.io.vecLoadIssueResp.foreach(_.zipWithIndex.foreach { case (resp, deqIdx) =>
+      resp := io.vecLoadIssueResp(i)(deqIdx)
+    })
     iq.io.wbBusyTableRead := io.fromWbFuBusyTable.fuBusyTableRead(i)
     io.wbFuBusyTable(i) := iq.io.wbBusyTableWrite
   }
@@ -440,4 +444,6 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
   dispatch2Iq.io.lqFreeCount.get := lsqEnqCtrl.io.lqFreeCount
   dispatch2Iq.io.sqFreeCount.get := lsqEnqCtrl.io.sqFreeCount
   io.memIO.get.lsqEnqIO <> lsqEnqCtrl.io.enqLsq
+
+  dontTouch(io.vecLoadIssueResp)
 }

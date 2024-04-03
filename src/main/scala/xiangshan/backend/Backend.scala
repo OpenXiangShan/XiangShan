@@ -391,7 +391,9 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   // to mem
   private val memIssueParams = params.memSchdParams.get.issueBlockParams
   private val memExuBlocksHasLDU = memIssueParams.map(_.exuBlockParams.map(x => x.hasLoadFu || x.hasHyldaFu))
+  private val memExuBlocksHasVecLoad = memIssueParams.map(_.exuBlockParams.map(x => x.hasVLoadFu))
   println(s"[Backend] memExuBlocksHasLDU: $memExuBlocksHasLDU")
+  println(s"[Backend] memExuBlocksHasVecLoad: $memExuBlocksHasVecLoad")
 
   private val toMem = Wire(bypassNetwork.io.toExus.mem.cloneType)
   for (i <- toMem.indices) {
@@ -426,6 +428,18 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
         memScheduler.io.memAddrIssueResp(i)(j).bits.fuType := toMem(i)(j).bits.fuType
         memScheduler.io.memAddrIssueResp(i)(j).bits.robIdx := toMem(i)(j).bits.robIdx
         memScheduler.io.memAddrIssueResp(i)(j).bits.resp := RespType.success // for load inst, firing at toMem means issuing successfully
+      }
+
+      if (memScheduler.io.vecLoadIssueResp(i).nonEmpty && memExuBlocksHasVecLoad(i)(j)) {
+        memScheduler.io.vecLoadIssueResp(i)(j) match {
+          case resp =>
+            resp.valid := toMem(i)(j).fire && LSUOpType.isVecLd(toMem(i)(j).bits.fuOpType)
+            resp.bits.fuType := toMem(i)(j).bits.fuType
+            resp.bits.robIdx := toMem(i)(j).bits.robIdx
+            resp.bits.uopIdx.get := toMem(i)(j).bits.vpu.get.vuopIdx
+            resp.bits.resp := RespType.success
+        }
+        dontTouch(memScheduler.io.vecLoadIssueResp(i)(j))
       }
     }
   }
