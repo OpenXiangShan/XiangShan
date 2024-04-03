@@ -1024,7 +1024,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   dontTouch(deqMapEnqMatrix)
 
   deqMapEnqMatrix.zipWithIndex.foreach { case (deqOH, deqIdx) =>
-    outs(deqIdx).valid := deqOH.asUInt.orR && lsqCanAccept
+    outs(deqIdx).valid := (deqOH.asUInt & allowDispatch.asUInt).orR && lsqCanAccept
     outs(deqIdx).bits := Mux1H(deqOH, uopsIn.map(_.bits))
   }
 
