@@ -27,19 +27,37 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val io = IO(new EntriesIO)
 
   // only memAddrIQ use it
-  val memEtyResps: MixedVec[ValidIO[EntryDeqRespBundle]] = {
-    if (params.isLdAddrIQ && !params.isStAddrIQ)                                                    //LDU
-      MixedVecInit(io.og0Resp ++ io.og1Resp ++ io.fromLoad.get.finalIssueResp ++ io.fromLoad.get.memAddrIssueResp)
-    else if (params.isLdAddrIQ && params.isStAddrIQ || params.isHyAddrIQ)                           //HYU
-      MixedVecInit(io.og0Resp ++ io.og1Resp ++ io.fromLoad.get.finalIssueResp ++ io.fromLoad.get.memAddrIssueResp ++ io.fromMem.get.fastResp ++ io.fromMem.get.slowResp)
-    else if (params.isStAddrIQ)                                                                     //STU, VLDU, VSTU
-      MixedVecInit(io.og0Resp ++ io.og1Resp ++ io.fromMem.get.slowResp)
-    else if (params.isVecLduIQ || params.isVecStuIQ)
-      MixedVecInit(io.og0Resp ++ io.og1Resp ++ io.fromMem.get.slowResp)
-    else MixedVecInit(Seq())
+  val memEtyResps: Seq[ValidIO[EntryDeqRespBundle]] = {
+    val resps =
+      if (params.isLdAddrIQ && !params.isStAddrIQ)                                                    //LDU
+        Seq(io.og0Resp, io.og1Resp, io.fromLoad.get.finalIssueResp, io.fromLoad.get.memAddrIssueResp)
+      else if (params.isLdAddrIQ && params.isStAddrIQ || params.isHyAddrIQ)                           //HYU
+        Seq(io.og0Resp, io.og1Resp, io.fromLoad.get.finalIssueResp, io.fromLoad.get.memAddrIssueResp, io.fromMem.get.fastResp, io.fromMem.get.slowResp)
+      else if (params.isStAddrIQ)                                                                     //STU
+        Seq(io.og0Resp, io.og1Resp, io.fromMem.get.slowResp)
+      else if (params.isVecLduIQ) // Vector store IQ need no vecLdIn.resp, but for now vector store share the vector load IQ
+        Seq(io.og0Resp, io.og1Resp, io.vecLdIn.get.resp)
+      else if (params.isVecStuIQ)
+        Seq(io.og0Resp, io.og1Resp, io.fromMem.get.slowResp)
+      else Seq()
+    if (params.isMemAddrIQ) {
+      println(s"[${this.desiredName}] resp: {" +
+        s"og0Resp: ${resps.contains(io.og0Resp)}, " +
+        s"og1Resp: ${resps.contains(io.og1Resp)}, " +
+        s"finalResp: ${io.fromLoad.nonEmpty && resps.contains(io.fromLoad.get.finalIssueResp)}, " +
+        s"loadBorderResp: ${io.fromLoad.nonEmpty && resps.contains(io.fromLoad.get.memAddrIssueResp)}, " +
+        s"memFastResp: ${io.fromMem.nonEmpty && resps.contains(io.fromMem.get.fastResp)}, " +
+        s"memSlowResp: ${io.fromMem.nonEmpty && resps.contains(io.fromMem.get.slowResp)}, " +
+        s"vecLoadBorderResp: ${io.vecLdIn.nonEmpty && resps.contains(io.vecLdIn.get.resp)}, " +
+        s"}"
+      )
+    }
+    resps.flatten
   }
 
   val resps: Vec[Vec[ValidIO[EntryDeqRespBundle]]] = VecInit(io.og0Resp, io.og1Resp, 0.U.asTypeOf(io.og0Resp))
+
+
 
   //Module
   val enqEntries          = Seq.fill(EnqEntryNum)(Module(EnqEntry(isComp = true)(p, params)))
@@ -384,6 +402,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   io.uopIdx.foreach(_               := uopIdxVec.get)
   io.cancel.foreach(_               := cancelVec.get)               //for debug
 
+
   def EntriesConnect(in: CommonInBundle, out: CommonOutBundle, entryIdx: Int) = {
     in.flush                    := io.flush
     in.wakeUpFromWB             := io.wakeUpFromWB
@@ -449,6 +468,8 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   XSPerfAccumulate(s"othersEntry_all_in_cnt", PopCount(entryInValidVec.drop(params.numEnq)))
   XSPerfAccumulate(s"othersEntry_all_out_deq_cnt", PopCount(entryOutDeqValidVec.drop(params.numEnq)))
   XSPerfAccumulate(s"othersEntry_all_out_trans_cnt", PopCount(entryOutTransValidVec.drop(params.numEnq)))
+
+  io.vecLdIn.foreach(dontTouch(_))
 }
 
 class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
@@ -499,6 +520,9 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val vecMemIn = OptionWrapper(params.isVecMemIQ, new Bundle {
     val sqDeqPtr          = Input(new SqPtr)
     val lqDeqPtr          = Input(new LqPtr)
+  })
+  val vecLdIn = OptionWrapper(params.isVecLduIQ, new Bundle {
+    val resp              = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
   })
   val robIdx = OptionWrapper(params.isVecMemIQ, Output(Vec(params.numEntries, new RobPtr)))
   val uopIdx = OptionWrapper(params.isVecMemIQ, Output(Vec(params.numEntries, UopIdx())))

@@ -51,6 +51,7 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val og1Resp = Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle)))
   val finalIssueResp = OptionWrapper(params.LdExuCnt > 0, Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle))))
   val memAddrIssueResp = OptionWrapper(params.LdExuCnt > 0, Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle))))
+  val vecLoadIssueResp = OptionWrapper(params.VlduCnt > 0, Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle))))
   val wbBusyTableRead = Input(params.genWbFuBusyTableReadBundle())
   val wbBusyTableWrite = Output(params.genWbFuBusyTableWriteBundle())
   val wakeupFromWB: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
@@ -283,6 +284,11 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       }
       entriesIO.fromLoad.get.memAddrIssueResp.zipWithIndex.foreach { case (memAddrIssueResp, i) =>
         memAddrIssueResp                                        := io.memAddrIssueResp.get(i)
+      }
+    }
+    if (params.isVecLduIQ) {
+      entriesIO.vecLdIn.get.resp.zipWithIndex.foreach { case (resp, i) =>
+        resp                                                    := io.vecLoadIssueResp.get(i)
       }
     }
     for(deqIdx <- 0 until params.numDeq) {
@@ -1046,4 +1052,6 @@ class IssueQueueVecMemImp(override val wrapper: IssueQueue)(implicit p: Paramete
     deq.bits.common.vpu.foreach(_.vuopIdx := deqEntryVec(i).bits.payload.uopIdx)
     deq.bits.common.vpu.foreach(_.lastUop := deqEntryVec(i).bits.payload.lastUop)
   }
+
+  io.vecLoadIssueResp.foreach(dontTouch(_))
 }
