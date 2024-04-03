@@ -250,8 +250,9 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val scalarCommitted = WireInit(0.U(log2Ceil(CommitWidth + 1).W))
   val vecCommitted = WireInit(0.U(log2Ceil(CommitWidth + 1).W))
   val commitCount = WireInit(0.U(log2Ceil(CommitWidth + 1).W))
+  val scommit = RegNext(io.rob.scommit)
 
-  scalarCommitCount := scalarCommitCount + RegNext(io.rob.scommit) - scalarCommitted
+  scalarCommitCount := scalarCommitCount + scommit - scalarCommitted
 
   // store can be committed by ROB
   io.rob.mmio := DontCare
@@ -407,7 +408,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val stWbIndex = io.storeAddrIn(i).bits.uop.sqIdx.value
     exceptionBuffer.io.storeAddrIn(i).valid := io.storeAddrIn(i).fire && !io.storeAddrIn(i).bits.isvec
     exceptionBuffer.io.storeAddrIn(i).bits := io.storeAddrIn(i).bits
-    
+
     when (io.storeAddrIn(i).fire) {
       val addr_valid = !io.storeAddrIn(i).bits.miss
       addrvalid(stWbIndex) := addr_valid //!io.storeAddrIn(i).bits.mmio
@@ -704,7 +705,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     * (5) ROB commits the instruction: same as normal instructions
     */
   //(2) when they reach ROB's head, they can be sent to uncache channel
-  // TODO: How to deal with vector store unit-stride 128 bits mmio reqs?
+  // TODO: CAN NOT deal with vector mmio now!
   val s_idle :: s_req :: s_resp :: s_wb :: s_wait :: Nil = Enum(5)
   val uncacheState = RegInit(s_idle)
   switch(uncacheState) {
@@ -733,7 +734,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       }
     }
     is(s_wait) {
-      when(commitCount > 0.U) {
+      // A MMIO store can always move cmtPtrExt as it must be ROB head
+      when(scommit > 0.U) {
         uncacheState := s_idle // ready for next mmio
       }
     }
@@ -823,8 +825,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val veccount = PopCount(veccommitVec.take(i))
     when (is_vec(cmtPtrExt(i).value) && isNotAfter(uop(cmtPtrExt(i).value).robIdx, io.rob.pendingPtr) && vec_mbCommit(cmtPtrExt(i).value)) {
       if (i == 0){
-        // TODO: fixme for mmio
-        when (uncacheState === s_idle){
+        // TODO: fixme for vector mmio
+        when ((uncacheState === s_idle) || (uncacheState === s_wait && scommit > 0.U)){
           committed(cmtPtrExt(0).value) := true.B
           veccommitVec(i) := true.B
         }
@@ -834,7 +836,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       }
     } .elsewhen (scalarCommitCount > i.U - veccount) {
       if (i == 0){
-        when (uncacheState === s_idle){
+        when ((uncacheState === s_idle) || (uncacheState === s_wait && scommit > 0.U)){
           committed(cmtPtrExt(0).value) := true.B
           scalarcommitVec(i) := true.B
         }
@@ -849,7 +851,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   vecCommitted := PopCount(veccommitVec)
   commitCount := scalarCommitted + vecCommitted
 
-  cmtPtrExt := cmtPtrExt.map(_ + RegNext(PopCount(veccommitVec)) + RegNext(scalarCommitted))
+  cmtPtrExt := cmtPtrExt.map(_ + commitCount)
 
   // committed stores will not be cancelled and can be sent to lower level.
   // remove retired insts from sq, add retired store to sbuffer
