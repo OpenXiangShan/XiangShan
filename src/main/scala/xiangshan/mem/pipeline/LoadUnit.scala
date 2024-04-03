@@ -429,8 +429,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.is_first_ele  := src.is_first_ele
     out.usSecondInv   := src.usSecondInv
     out.mbIndex       := src.mbIndex
-    out.elemIdx       := src.elemIdx    
-    out.alignedType   := src.alignedType   
+    out.elemIdx       := src.elemIdx
+    out.alignedType   := src.alignedType
     out
   }
 
@@ -483,8 +483,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.is_first_ele  := src.is_first_ele
     out.usSecondInv   := src.usSecondInv
     out.mbIndex       := src.mbIndex
-    out.elemIdx       := src.elemIdx    
-    out.alignedType   := src.alignedType   
+    out.elemIdx       := src.elemIdx
+    out.alignedType   := src.alignedType
     out
   }
 
@@ -546,8 +546,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // out.flowPtr             := src.flowPtr
     out.usSecondInv         := src.usSecondInv
     out.mbIndex             := src.mBIndex
-    out.elemIdx             := src.elemIdx    
-    out.alignedType         := src.alignedType   
+    out.elemIdx             := src.elemIdx
+    out.alignedType         := src.alignedType
     out
   }
 
@@ -1170,8 +1170,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_vec_alignedType = RegEnable(s2_out.alignedType, s2_fire)
   val s3_vec_mBIndex     = RegEnable(s2_out.mbIndex, s2_fire)
   val s3_mmio         = Wire(chiselTypeOf(io.lsq.uncache))
-  dontTouch(s2_out)
-  dontTouch(s1_out)
   // TODO: Fix vector load merge buffer nack
   val s3_vec_mb_nack  = Wire(Bool())
   s3_vec_mb_nack     := false.B
@@ -1378,7 +1376,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // TODO: VLSU, uncache data logic
   val vecdata = rdataVecHelper(s3_vec_alignedType(1,0), s3_picked_data_frm_cache)
   io.vecldout.bits.vecdata.get := Mux(s3_in.is128bit, s3_merged_data_frm_cache, vecdata)
-  // io.vecldout.bits.hit := 
   io.vecldout.bits.isvec := s3_vecout.isvec
   io.vecldout.bits.elemIdx.get := s3_vecout.elemIdx
   io.vecldout.bits.elemIdxInsideVd.get := s3_vecout.elemIdxInsideVd
