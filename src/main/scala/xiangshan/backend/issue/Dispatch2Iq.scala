@@ -770,12 +770,27 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   private val allowDispatch = Wire(Vec(numLsElem.length, Bool()))
   for (index <- allowDispatch.indices) {
     val flowTotal = conserveFlows.take(index + 1).reduce(_ + _)
-    when(isStoreVec(index) || isVStoreVec(index)) {
-      allowDispatch(index) := Mux(sqFreeCount > flowTotal && flowTotal <= VecMemDispatchMaxNumber.U, true.B, false.B)
-    } .elsewhen(isLoadVec(index) || isVLoadVec(index)) {
-      allowDispatch(index) := Mux(lqFreeCount > flowTotal && flowTotal <= VecMemDispatchMaxNumber.U, true.B, false.B)
-    } .otherwise {
-      allowDispatch(index) := false.B
+    if(index == 0){
+      when(isStoreVec(index) || isVStoreVec(index)) {
+        allowDispatch(index) := Mux(sqFreeCount > flowTotal && flowTotal <= VecMemDispatchMaxNumber.U, true.B, false.B)
+      } .elsewhen(isLoadVec(index) || isVLoadVec(index)) {
+        allowDispatch(index) := Mux(lqFreeCount > flowTotal && flowTotal <= VecMemDispatchMaxNumber.U, true.B, false.B)
+      } .elsewhen (isAMOVec(index)) {
+        allowDispatch(index) := true.B
+      } .otherwise {
+        allowDispatch(index) := false.B
+      }
+    }
+    else{
+      when(isStoreVec(index) || isVStoreVec(index)) {
+        allowDispatch(index) := Mux(sqFreeCount > flowTotal && flowTotal <= VecMemDispatchMaxNumber.U, true.B, false.B) && allowDispatch(index - 1)
+      } .elsewhen(isLoadVec(index) || isVLoadVec(index)) {
+        allowDispatch(index) := Mux(lqFreeCount > flowTotal && flowTotal <= VecMemDispatchMaxNumber.U, true.B, false.B) && allowDispatch(index - 1)
+      } .elsewhen (isAMOVec(index)) {
+        allowDispatch(index) := allowDispatch(index - 1)
+      } .otherwise {
+        allowDispatch(index) := false.B
+      }
     }
   }
 
