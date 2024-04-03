@@ -366,7 +366,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     */
   val p1_valid  = generatePipeControl(lastFire = p0_fire, thisFire = p1_fire || p1_discard, thisFlush = false.B, lastFlush = false.B)
 
-  val p1_vaddr      = RegEnable(p0_vaddr, p0_fire)
+  val p1_vaddr      = RegEnable(p0_vaddr, 0.U(VAddrBits.W), p0_fire)
   val p1_req_cancel = Wire(Bool())
 
   /** 1. Receive resp from ITLB (no blocked) */
@@ -408,7 +408,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val p2_valid  = generatePipeControl(lastFire = p1_fire, thisFire = p2_fire || p2_discard, thisFlush = false.B, lastFlush = false.B)
   
   val p2_paddr      = RegEnable(p1_paddr, p1_fire)
-  val p2_vaddr      = RegEnable(p1_vaddr, p1_fire)
+  val p2_vaddr      = RegEnable(p1_vaddr, 0.U(VAddrBits.W), p1_fire)
   val p2_req_cancel = Wire(Bool())
   val p2_vidx       = get_idx(p2_vaddr)
 
