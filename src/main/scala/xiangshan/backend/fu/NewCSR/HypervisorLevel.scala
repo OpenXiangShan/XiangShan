@@ -10,47 +10,37 @@ import xiangshan.backend.fu.NewCSR.CSRDefines.{
 }
 import xiangshan.backend.fu.NewCSR.CSRFunc._
 import xiangshan.backend.fu.NewCSR.CSRConfig._
-import xiangshan.backend.fu.NewCSR.CSRAnnotation._
 
 import scala.collection.immutable.SeqMap
 
-trait Hypervisor { self: NewCSR =>
+trait HypervisorLevel { self: NewCSR =>
 
-  @CSRAddr(0x600)
-  val hstatus = Module(new HstatusModule)
+  val hstatus = Module(new HstatusModule).setAddr(0x600)
 
-  @CSRAddr(0x602)
-  val hedeleg = Module(new CSRModule("Hedeleg", new HedelegBundle) {})
+  val hedeleg = Module(new CSRModule("Hedeleg", new HedelegBundle)).setAddr(0x602)
 
-  @CSRAddr(0x603)
-  val hideleg = Module(new CSRModule("Hideleg", new HidelegBundle) {})
+  val hideleg = Module(new CSRModule("Hideleg", new HidelegBundle)).setAddr(0x603)
 
-  @CSRAddr(0x604)
-  val hie = Module(new CSRModule("Hie", new HieBundle) {})
+  val hie = Module(new CSRModule("Hie", new HieBundle)).setAddr(0x604)
 
-  @CSRAddr(0x605)
   val htimedelta = Module(new CSRModule("Htimedelta", new CSRBundle {
     val VALUE = RW(63, 0)
-  }) {})
+  })).setAddr(0x605)
 
-  @CSRAddr(0x606)
   val hcounteren = Module(new CSRModule("Hcounteren", new CSRBundle {
     val CY = RW(0)
     val TM = RW(1)
     val IR = RW(2)
     val HPM = RW(31, 3)
-  }) {})
+  })).setAddr(0x606)
 
-  @CSRAddr(0x607)
-  val hgeie = Module(new CSRModule("Hgeie", new HgeieBundle) {})
+  val hgeie = Module(new CSRModule("Hgeie", new HgeieBundle)).setAddr(0x607)
 
-  @CSRAddr(0x608)
   val hvien = Module(new CSRModule("Hvien", new CSRBundle {
     val ien = RW(63, 13)
     // bits 12:0 read only 0
-  }) {})
+  })).setAddr(0x608)
 
-  @CSRAddr(0x609)
   val hvictl = Module(new CSRModule("Hvictl", new CSRBundle {
     // Virtual Trap Interrupt control
     val VTI    = RW  (30)
@@ -65,9 +55,8 @@ trait Hypervisor { self: NewCSR =>
     val DPR    = RW  (9)
     val IPRIOM = RW  (8)
     val IPRIO  = RW  ( 7,  0)
-  }) {})
+  })).setAddr(0x609)
 
-  @CSRAddr(0x60A)
   val henvcfg = Module(new CSRModule("Henvcfg", new CSRBundle {
     val FIOM  = RW(0)     // Fence of I/O implies Memory
     val CBIE  = RW(5, 4)  // Zicbom Enable
@@ -75,38 +64,33 @@ trait Hypervisor { self: NewCSR =>
     val CBZE  = RW(7)     // Zicboz Enable
     val PBMTE = RW(62)    // Svpbmt Enable
     val STCE  = RW(63)    // Sstc Enable
-  }) {})
+  })).setAddr(0x60A)
 
-  @CSRAddr(0x643)
   val htval = Module(new CSRModule("Htval", new CSRBundle {
     val ALL = RW(63, 0)
-  }) {})
+  })).setAddr(0x643)
 
-  @CSRAddr(0x644)
   val hip = Module(new CSRModule("Hip", new HipBundle) with HypervisorBundle {
     rdata.VSSIP := hvip.VSSIP
     rdata.VSTIP := hvip.VSTIP.asUInt.asBool | vsi.tip
     rdata.VSEIP := hvip.VSEIP.asUInt.asBool | vsi.eip | hgeip.ip.asUInt(hstatus.VGEIN.asUInt)
     rdata.SGEIP := (hgeip.ip.asUInt | hgeie.ie.asUInt).orR
-  })
+  }).setAddr(0x644)
 
-  @CSRAddr(0x645)
   val hvip = Module(new CSRModule("Hvip", new CSRBundle {
     val VSSIP = RW( 2)
     val VSTIP = RW( 6)
     val VSEIP = RW(10)
-  }) {})
+  })).setAddr(0x645)
 
-  @CSRAddr(0x646)
   val hviprio1 = Module(new CSRModule("Hviprio1", new CSRBundle {
     val PrioSSI = RW(15,  8)
     val PrioSTI = RW(31, 24)
     val PrioCOI = RW(47, 40)
     val Prio14  = RW(55, 48)
     val Prio15  = RW(63, 56)
-  }) {})
+  })).setAddr(0x646)
 
-  @CSRAddr(0x647)
   val hviprio2 = Module(new CSRModule("Hviprio2", new CSRBundle {
     val Prio16  = RW( 7,  0)
     val Prio17  = RW(15,  8)
@@ -116,38 +100,21 @@ trait Hypervisor { self: NewCSR =>
     val Prio21  = RW(47, 40)
     val Prio22  = RW(55, 48)
     val Prio23  = RW(63, 56)
-  }) {})
+  })).setAddr(0x647)
 
-  @CSRAddr(0x64A)
   val htinst = Module(new CSRModule("Htinst", new CSRBundle {
     val ALL = RO(63, 0)
-  }) {})
+  })).setAddr(0x64A)
 
-  @CSRAddr(0x680)
   val hgatp = Module(new CSRModule("Hgatp", new CSRBundle {
     val MODE = HgatpMode(63, 60, wNoFilter)
     // WARL in privileged spec.
     // RW, since we support max width of VMID
     val VMID = RW(44 - 1 + VMIDLEN, 44)
     val PPN = RW(43, 0)
-  }) {})
+  })).setAddr(0x680)
 
-  @CSRAddr(0xE12)
-  val hgeip = Module(new CSRModule("Hgeip", new HgeipBundle) {})
-
-  hip.hvip := hvip.rdata
-
-  val hypervisorCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], Data)] = SeqMap(
-    0x600 -> (hstatus.w -> hstatus.rdata),
-    0x602 -> (hedeleg.w -> hedeleg.rdata),
-    0x603 -> (hideleg.w -> hideleg.rdata),
-    0x604 -> (hie.w -> hie.rdata),
-    0x605 -> (htimedelta.w, htimedelta.rdata),
-    0x606 -> (hcounteren.w, hcounteren.rdata),
-    0x60A -> (henvcfg.w -> henvcfg.rdata),
-    0x644 -> (hip.w -> hip.rdata),
-    0x645 -> (hvip.w -> hvip.rdata),
-  )
+  val hgeip = Module(new CSRModule("Hgeip", new HgeipBundle)).setAddr(0xE12)
 
   val hypervisorCSRMods: Seq[CSRModule[_]] = Seq(
     hstatus,
@@ -156,9 +123,33 @@ trait Hypervisor { self: NewCSR =>
     hie,
     htimedelta,
     hcounteren,
+    hgeie,
+    hvien,
+    hvictl,
     henvcfg,
+    htval,
     hip,
     hvip,
+    hviprio1,
+    hviprio2,
+    htinst,
+    hgatp,
+    hgeip,
+  )
+
+  hypervisorCSRMods.foreach {
+    case mod: HypervisorBundle =>
+      mod.hstatus := hstatus.rdata
+      mod.hvip := hvip.rdata
+      mod.hideleg := hideleg.rdata
+      mod.hedeleg := hedeleg.rdata
+      mod.hgeip := hgeip.rdata
+      mod.hgeie := hgeie.rdata
+    case _ =>
+  }
+
+  val hypervisorCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], Data)] = SeqMap.from(
+    hypervisorCSRMods.map(csr => (csr.addr -> (csr.w -> csr.rdata.asInstanceOf[CSRBundle].asUInt))).iterator
   )
 }
 

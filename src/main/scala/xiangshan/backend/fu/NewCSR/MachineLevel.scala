@@ -13,7 +13,7 @@ trait MachineLevel { self: NewCSR =>
       val mode = MtvecMode(1, 0, wNoFilter)
       val addr = CSRWARLField(63, 2, wNoFilter)
     }
-  ) {} )
+  ))
 
   val machineLevelCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], Data)] = SeqMap(
     0x300 -> (mstatus.w -> mstatus.rdata),

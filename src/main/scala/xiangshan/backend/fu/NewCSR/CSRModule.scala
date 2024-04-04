@@ -5,9 +5,9 @@ import chisel3.util.Mux1H
 import xiangshan.backend.fu.NewCSR.CSRDefines._
 import chisel3.experimental.BundleLiterals.AddBundleLiteralConstructor
 
-abstract class CSRModule[T <: CSRBundle](
+class CSRModule[T <: CSRBundle](
   val modName: String,
-  val bundle: T
+  val bundle: T,
 ) extends Module {
 
   override def desiredName: String = modName + "Module"
@@ -69,6 +69,13 @@ abstract class CSRModule[T <: CSRBundle](
 
   def dumpFields = {
     this.bundle.getFields.mkString("\n")
+  }
+
+  var addr = 0
+
+  def setAddr(addr_ : Int): this.type = {
+    this.addr = addr_
+    this
   }
 }
 
