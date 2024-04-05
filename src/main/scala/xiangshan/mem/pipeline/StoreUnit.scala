@@ -410,7 +410,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   io.vecstout.valid := sx_last_valid && !sx_last_in.output.uop.robIdx.needFlush(io.redirect) && isVStore(sx_last_in.output.uop.fuType)
   // TODO: implement it!
   io.vecstout.bits.mBIndex := sx_last_in.mbIndex
-  io.vecstout.bits.hit := !sx_last_in.vecFeedback
+  io.vecstout.bits.hit := sx_last_in.vecFeedback
   io.vecstout.bits.isvec := true.B
   io.vecstout.bits.sourceType := RSFeedbackType.tlbMiss
   io.vecstout.bits.flushState := DontCare
