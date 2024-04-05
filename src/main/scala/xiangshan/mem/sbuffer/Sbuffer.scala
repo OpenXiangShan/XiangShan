@@ -321,7 +321,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     mergeMask(i) := widthMap(j =>
       inptags(i) === ptag(j) && activeMask(j)
     )
-    assert(!(PopCount(mergeMask(i).asUInt) > 1.U && io.in(i).fire))
+    assert(!(PopCount(mergeMask(i).asUInt) > 1.U && io.in(i).fire && io.in(i).bits.vecValid))
   }
 
   // insert condition
@@ -381,7 +381,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   for (i <- 0 until EnsbufferWidth) {
     // train
     if (EnableStorePrefetchSPB) {
-      prefetcher.io.sbuffer_enq(i).valid := io.in(i).fire
+      prefetcher.io.sbuffer_enq(i).valid := io.in(i).fire && io.in(i).bits.vecValid
       prefetcher.io.sbuffer_enq(i).bits := DontCare
       prefetcher.io.sbuffer_enq(i).bits.vaddr := io.in(i).bits.vaddr
     } else {
@@ -392,9 +392,9 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     // prefetch req
     if (EnableStorePrefetchAtCommit) {
       if (EnableAtCommitMissTrigger) {
-        io.store_prefetch(i).valid := prefetcher.io.prefetch_req(i).valid || (io.in(i).fire && io.in(i).bits.prefetch)
+        io.store_prefetch(i).valid := prefetcher.io.prefetch_req(i).valid || (io.in(i).fire && io.in(i).bits.vecValid && io.in(i).bits.prefetch)
       } else {
-        io.store_prefetch(i).valid := prefetcher.io.prefetch_req(i).valid || io.in(i).fire
+        io.store_prefetch(i).valid := prefetcher.io.prefetch_req(i).valid || (io.in(i).fire && io.in(i).bits.vecValid)
       }
       io.store_prefetch(i).bits.paddr := DontCare
       io.store_prefetch(i).bits.vaddr := Mux(prefetcher.io.prefetch_req(i).valid, prefetcher.io.prefetch_req(i).bits.vaddr, io.in(i).bits.vaddr)
@@ -459,18 +459,18 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   }
 
   for(((in, vwordOffset), i) <- io.in.zip(Seq(firstWord, secondWord)).zipWithIndex){
-    writeReq(i).valid := in.fire
+    writeReq(i).valid := in.fire && in.bits.vecValid
     writeReq(i).bits.vwordOffset := vwordOffset
     writeReq(i).bits.mask := in.bits.mask
     writeReq(i).bits.data := in.bits.data
     writeReq(i).bits.wline := in.bits.wline
     val debug_insertIdx = if(i == 0) firstInsertIdx else secondInsertIdx
     val insertVec = if(i == 0) firstInsertVec else secondInsertVec
-    assert(!((PopCount(insertVec) > 1.U) && in.fire))
+    assert(!((PopCount(insertVec) > 1.U) && in.fire && in.bits.vecValid))
     val insertIdx = OHToUInt(insertVec)
-    accessIdx(i).valid := RegNext(in.fire)
+    accessIdx(i).valid := RegNext(in.fire && in.bits.vecValid)
     accessIdx(i).bits := RegNext(Mux(canMerge(i), mergeIdx(i), insertIdx))
-    when(in.fire){
+    when(in.fire && in.bits.vecValid){
       when(canMerge(i)){
         writeReq(i).bits.wvec := mergeVec(i)
         mergeWordReq(in.bits, inptags(i), invtags(i), mergeIdx(i), mergeVec(i), vwordOffset)
@@ -492,7 +492,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   }
 
   for((req, i) <- io.in.zipWithIndex){
-    XSDebug(req.fire,
+    XSDebug(req.fire && req.bits.vecValid,
       p"accept req [$i]: " +
         p"addr:${Hexadecimal(req.bits.addr)} " +
         p"mask:${Binary(shiftMaskToLow(req.bits.addr,req.bits.mask))} " +
@@ -841,7 +841,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
 
   if (env.EnableDifftest) {
     for (i <- 0 until EnsbufferWidth) {
-      val storeCommit = io.in(i).fire
+      val storeCommit = io.in(i).fire && io.in(i).bits.vecValid
       val waddr = ZeroExt(Cat(io.in(i).bits.addr(PAddrBits - 1, 3), 0.U(3.W)), 64)
       val sbufferMask = shiftMaskToLow(io.in(i).bits.addr, io.in(i).bits.mask)
       val sbufferData = shiftDataToLow(io.in(i).bits.addr, io.in(i).bits.data)
