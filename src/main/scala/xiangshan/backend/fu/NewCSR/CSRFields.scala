@@ -193,9 +193,18 @@ class CSREnumType(
   def setRW(): this.type = {
     this.setRwType(RWType())
   }
+
+  def setWARL(wfn: CSRWfnType): this.type = {
+    this.setRwType(WARLType(wfn))
+  }
+
+  // override cloneType to make ValidIO etc function return CSREnumType not EnumType
+  override def cloneType: this.type = factory.asInstanceOf[CSREnum].makeType.asInstanceOf[this.type]
 }
 
 abstract class CSREnum extends ChiselEnum {
+  type Type = CSREnumType
+
   protected def apply(rwType: CSRRWType)(msb: Int, lsb: Int)(factory: ChiselEnum): CSREnumType = {
     this.msb = msb
     this.lsb = lsb
@@ -204,6 +213,9 @@ abstract class CSREnum extends ChiselEnum {
 
   var msb, lsb: Int = 0
 
+  def makeType: Type = {
+    new CSREnumType(msb, lsb)(RWType())(this)
+  }
 
   /**
    * Used to allow 0.U.asTypeOf(CSREnumInstance) convertion
