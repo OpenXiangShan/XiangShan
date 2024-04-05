@@ -406,7 +406,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     vaddrModule.io.wen(i) := false.B
     dataModule.io.mask.wen(i) := false.B
     val stWbIndex = io.storeAddrIn(i).bits.uop.sqIdx.value
-    exceptionBuffer.io.storeAddrIn(i).valid := io.storeAddrIn(i).fire && !io.storeAddrIn(i).bits.isvec
+    exceptionBuffer.io.storeAddrIn(i).valid := io.storeAddrIn(i).fire && !io.storeAddrIn(i).bits.miss && !io.storeAddrIn(i).bits.isvec
     exceptionBuffer.io.storeAddrIn(i).bits := io.storeAddrIn(i).bits
 
     when (io.storeAddrIn(i).fire) {
