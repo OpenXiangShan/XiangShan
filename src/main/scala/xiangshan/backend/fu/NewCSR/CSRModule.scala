@@ -3,11 +3,12 @@ package xiangshan.backend.fu.NewCSR
 import chisel3._
 import chisel3.util.Mux1H
 import xiangshan.backend.fu.NewCSR.CSRDefines._
+import xiangshan.backend.fu.NewCSR.CSRBundles._
 import chisel3.experimental.BundleLiterals.AddBundleLiteralConstructor
 
 class CSRModule[T <: CSRBundle](
   val modName: String,
-  val bundle: T,
+  val bundle: T = new OneFieldBundle,
 ) extends Module {
 
   override def desiredName: String = modName + "Module"
