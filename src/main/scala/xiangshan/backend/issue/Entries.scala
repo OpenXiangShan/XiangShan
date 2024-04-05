@@ -35,7 +35,9 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
         Seq(io.og0Resp, io.og1Resp, io.fromLoad.get.finalIssueResp, io.fromLoad.get.memAddrIssueResp, io.fromMem.get.fastResp, io.fromMem.get.slowResp)
       else if (params.isStAddrIQ)                                                                     //STU
         Seq(io.og0Resp, io.og1Resp, io.fromMem.get.slowResp)
-      else if (params.isVecLduIQ) // Vector store IQ need no vecLdIn.resp, but for now vector store share the vector load IQ
+      else if (params.isVecLduIQ && params.isVecStuIQ) // Vector store IQ need no vecLdIn.resp, but for now vector store share the vector load IQ
+        Seq(io.og0Resp, io.og1Resp, io.vecLdIn.get.resp, io.fromMem.get.slowResp)
+      else if (params.isVecLduIQ)
         Seq(io.og0Resp, io.og1Resp, io.vecLdIn.get.resp)
       else if (params.isVecStuIQ)
         Seq(io.og0Resp, io.og1Resp, io.fromMem.get.slowResp)
