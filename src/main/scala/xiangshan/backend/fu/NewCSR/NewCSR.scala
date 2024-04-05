@@ -15,7 +15,13 @@ object CSRConfig {
   final val VMIDMAX = 14 // the max value of VMIDLEN defined by spec
 }
 
-class NewCSR extends Module with MachineLevel with SupervisorLevel with HypervisorLevel with Unprivileged {
+class NewCSR extends Module
+  with MachineLevel
+  with SupervisorLevel
+  with HypervisorLevel
+  with VirtualSupervisorLevel
+  with Unprivileged {
+
   val io = IO(new Bundle {
     val w = Flipped(ValidIO(new Bundle {
       val addr = UInt(12.W)
@@ -59,9 +65,9 @@ class NewCSR extends Module with MachineLevel with SupervisorLevel with Hypervis
   val isSret = tret && tretPRVM === PrivMode.S
   val isMret = tret && tretPRVM === PrivMode.M
 
-  var csrRwMap = machineLevelCSRMap ++ supervisorLevelCSRMap ++ hypervisorCSRMap ++ unprivilegedCSRMap
+  var csrRwMap = machineLevelCSRMap ++ supervisorLevelCSRMap ++ hypervisorCSRMap ++ virtualSupervisorCSRMap ++ unprivilegedCSRMap
 
-  val csrMods = machineLevelCSRMods ++ supervisorLevelCSRMods ++ hypervisorCSRMods ++ unprivilegedCSRMods
+  val csrMods = machineLevelCSRMods ++ supervisorLevelCSRMods ++ hypervisorCSRMods ++ virtualSupervisorCSRMods ++ unprivilegedCSRMods
 
   for ((id, (wBundle, _)) <- csrRwMap) {
     wBundle.wen := wen && addr === id.U

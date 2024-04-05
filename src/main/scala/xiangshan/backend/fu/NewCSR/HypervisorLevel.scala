@@ -21,7 +21,14 @@ trait HypervisorLevel { self: NewCSR =>
 
   val hideleg = Module(new CSRModule("Hideleg", new HidelegBundle)).setAddr(0x603)
 
-  val hie = Module(new CSRModule("Hie", new HieBundle)).setAddr(0x604)
+  val hie = Module(new CSRModule("Hie", new HieBundle) with HypervisorBundle {
+    val writeFromVsie = IO(Flipped(new VsieWriteHie))
+    val wAliasVsie = IO(Input(new CSRAddrWriteBundle(new Vsie)))
+    val wVsieIn = WireInit(wAliasVsie)
+    wVsieIn.wen := wAliasVsie.wen && hideleg.VSSI
+    Flipped
+
+  }).setAddr(0x604)
 
   val htimedelta = Module(new CSRModule("Htimedelta", new CSRBundle {
     val VALUE = RW(63, 0)
@@ -145,6 +152,8 @@ trait HypervisorLevel { self: NewCSR =>
       mod.hedeleg := hedeleg.rdata
       mod.hgeip := hgeip.rdata
       mod.hgeie := hgeie.rdata
+      mod.hip := hip.rdata
+      mod.hie := hie.rdata
     case _ =>
   }
 
@@ -204,46 +213,26 @@ class HgeipBundle extends CSRBundle {
   // bit 0 is read only 0
 }
 
-class HedelegBundle extends CSRBundle {
-  val EX_IAM    = RW(0)
-  val EX_IAF    = RW(1)
-  val EX_II     = RW(2)
-  val EX_BP     = RW(3)
-  val EX_LAM    = RW(4)
-  val EX_LAF    = RW(5)
-  val EX_SAM    = RW(6)
-  val EX_SAF    = RW(7)
-  val EX_UCALL  = RW(8)
-  val EX_HSCALL = RO(9)
-  val EX_VSCALL = RO(10)
-  val EX_MCALL  = RO(11)
-  val EX_IPF    = RW(12)
-  val EX_LPF    = RW(13)
-  val EX_SPF    = RW(15)
-  val EX_IGPF   = RO(20)
-  val EX_LGPF   = RO(21)
-  val EX_VI     = RO(22)
-  val EX_SGPF   = RO(23)
+class HedelegBundle extends ExceptionBundle {
+  // default RW
+  this.EX_HSCALL.setRO()
+  this.EX_VSCALL.setRO()
+  this.EX_MCALL .setRO()
+  this.EX_IGPF  .setRO()
+  this.EX_LGPF  .setRO()
+  this.EX_VI    .setRO()
+  this.EX_SGPF  .setRO()
 }
 
-class HidelegBundle extends CSRBundle {
-  // Software Interrupt
-  val IR_SSI    = RO(1)
-  val IR_VSSI   = RW(2)
-  val IR_MSI    = RO(3)
-  // Time Interrupt
-  val IR_STI    = RO(5)
-  val IR_VSTI   = RW(6)
-  val IR_MTI    = RO(7)
-  // External Interrupt
-  val IR_SEI    = RO(9)
-  val IR_VSEI   = RW(10)
-  val IR_MEI    = RO(11)
-  val IR_SGEI   = RO(12)
-  // SoC
-  val IR_COI    = RW(13) // Counter overflow interrupt
-  val IR_LPRASE = RW(35) // Low-priority RAS event interrupt
-  val IR_HPRASE = RW(43) // High-priority RAS event interrupt
+class HidelegBundle extends InterruptBundle {
+  // default RW
+  this.SSI .setRO()
+  this.MSI .setRO()
+  this.STI .setRO()
+  this.MTI .setRO()
+  this.SEI .setRO()
+  this.MEI .setRO()
+  this.SGEI.setRO()
 }
 
 trait HypervisorBundle { self: CSRModule[_] =>
@@ -253,4 +242,6 @@ trait HypervisorBundle { self: CSRModule[_] =>
   val hedeleg = IO(Input(new HedelegBundle))
   val hgeip   = IO(Input(new HgeipBundle))
   val hgeie   = IO(Input(new HgeieBundle))
+  val hip     = IO(Input(new HipBundle))
+  val hie     = IO(Input(new HieBundle))
 }

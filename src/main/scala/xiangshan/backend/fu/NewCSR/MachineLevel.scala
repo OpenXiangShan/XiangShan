@@ -68,15 +68,4 @@ class MstatusModule extends CSRModule("MStatus", new MstatusBundle) {
   mstatus :|= reg
   sstatus := mstatus
   rdata := mstatus.asUInt
-
-  class SstatusBundle extends CSRBundle {
-    val SIE  = CSRWARLField(1, wNoFilter)
-    val SPIE = CSRWARLField(5, wNoFilter)
-    val SPP  = CSRWARLField(8, wNoFilter)
-    val VS   = ContextStatus(10, 9)
-    val FS   = ContextStatus(14, 13)
-    val SUM  = CSRWARLField(18, wNoFilter)
-    val MXR  = CSRWARLField(19, wNoFilter)
-    val SD   = CSRROField(63, rNoFilter)
-  }
 }
