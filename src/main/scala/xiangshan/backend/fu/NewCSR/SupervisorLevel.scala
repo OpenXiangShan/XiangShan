@@ -4,6 +4,15 @@ import chisel3._
 import xiangshan.backend.fu.NewCSR.CSRDefines._
 import xiangshan.backend.fu.NewCSR.CSRFunc._
 
+import xiangshan.backend.fu.NewCSR.CSRDefines.{
+  CSRRWField => RW,
+  CSRROField => RO,
+  CSRWLRLField => WLRL,
+  CSRWARLField => WARL,
+  _
+}
+import xiangshan.backend.fu.NewCSR.CSRConfig._
+
 import scala.collection.immutable.SeqMap
 
 trait SupervisorLevel { self: NewCSR with MachineLevel =>
@@ -27,4 +36,12 @@ class SstatusBundle extends CSRBundle {
   val MXR  = CSRWARLField   (19, wNoFilter)
   val UXL  = XLENField      (33, 32).withReset(XLENField.XLEN64)
   val SD   = CSRROField     (63, (_, _) => FS === ContextStatus.Dirty || VS === ContextStatus.Dirty)
+}
+
+class SatpBundle extends CSRBundle {
+  val MODE = SatpMode(63, 60, null).withReset(SatpMode.Bare)
+  // WARL in privileged spec.
+  // RW, since we support max width of ASID
+  val ASID = RW(44 - 1 + ASIDLEN, 44)
+  val PPN  = RW(43, 0)
 }

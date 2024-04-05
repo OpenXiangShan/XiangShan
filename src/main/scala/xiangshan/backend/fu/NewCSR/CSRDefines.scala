@@ -1,11 +1,8 @@
 package xiangshan.backend.fu.NewCSR
 
 import chisel3._
-import xiangshan.backend.fu.NewCSR.CSRDefines.MtvecMode
 import xiangshan.backend.fu.NewCSR.CSRFunc._
 import xiangshan.macros.CSRMacros.CSRFieldsImpl
-
-import scala.reflect.macros.blackbox.Context
 
 import scala.language.experimental.macros
 
@@ -153,14 +150,25 @@ object CSRDefines {
     val XLEN128 = Value(3.U)
   }
 
-  object MtvecMode extends CSREnum with CSRWARLApply {
-    val Direct: Type = Value(0.U)
+  object XtvecMode extends CSREnum with CSRWARLApply {
+    val Direct = Value(0.U)
     val Vectored = Value(1.U)
 
     override def isLegal(enum: CSREnumType): Bool = enum.isOneOf(Direct, Vectored)
   }
 
+  object SatpMode extends CSREnum with CSRWARLApply {
+    val Bare = Value(0.U)
+    val Sv39 = Value(8.U)
+    val Sv48 = Value(9.U)
+    val Sv57 = Value(10.U)
+    val Sv64 = Value(11.U) // Reserved for page-based 64-bit virtual addressing
+
+    override def isLegal(enum: CSREnumType): Bool = enum.isOneOf(Sv39)
+  }
+
   object HgatpMode extends CSREnum with CSRWARLApply {
+    val Bare   = Value(0.U)
     val Sv39x4 = Value(8.U)
     val Sv48x4 = Value(9.U)
     val Sv57x4 = Value(10.U)

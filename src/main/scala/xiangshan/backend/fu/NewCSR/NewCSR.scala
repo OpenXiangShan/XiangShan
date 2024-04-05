@@ -8,6 +8,10 @@ import xiangshan.backend.fu.NewCSR.CSRDefines.{PrivMode, VirtMode}
 object CSRConfig {
   final val GEILEN = 63
 
+  final val ASIDLEN = 16 // the length of ASID of XS implementation
+
+  final val ASIDMAX = 16 // the max value of ASIDLEN defined by spec
+
   final val HIIDWidth = 12 // support Hvictl[27:16](IID)
 
   final val VMIDLEN = 14 // the length of VMID of XS implementation

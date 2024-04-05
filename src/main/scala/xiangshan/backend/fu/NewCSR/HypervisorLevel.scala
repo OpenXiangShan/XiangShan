@@ -17,19 +17,22 @@ import scala.collection.immutable.SeqMap
 
 trait HypervisorLevel { self: NewCSR =>
 
-  val hstatus = Module(new HstatusModule).setAddr(0x600)
+  val hstatus = Module(new HstatusModule)
+    .setAddr(0x600)
 
-  val hedeleg = Module(new CSRModule("Hedeleg", new HedelegBundle)).setAddr(0x602)
+  val hedeleg = Module(new CSRModule("Hedeleg", new HedelegBundle))
+    .setAddr(0x602)
 
-  val hideleg = Module(new CSRModule("Hideleg", new HidelegBundle)).setAddr(0x603)
+  val hideleg = Module(new CSRModule("Hideleg", new HidelegBundle))
+    .setAddr(0x603)
 
   val hie = Module(new CSRModule("Hie", new HieBundle) with HypervisorBundle {
-    val writeFromVsie = IO(Flipped(new VsieWriteHie))
-    val wAliasVsie = IO(Input(new CSRAddrWriteBundle(new Vsie)))
-    val wVsieIn = WireInit(wAliasVsie)
-    wVsieIn.wen := wAliasVsie.wen && hideleg.VSSI
-    Flipped
-
+    val fromVSie = IO(Flipped(new VSieToHie))
+    println(reg.VSSIE.asInstanceOf[CSREnumType].factory)
+    println(fromVSie.SSIE.bits.asInstanceOf[CSREnumType].factory)
+    when (fromVSie.SSIE.valid) { reg.VSSIE := fromVSie.SSIE.bits }
+    when (fromVSie.STIE.valid) { reg.VSTIE := fromVSie.STIE.bits }
+    when (fromVSie.SEIE.valid) { reg.VSEIE := fromVSie.SEIE.bits }
   }).setAddr(0x604)
 
   val htimedelta = Module(new CSRModule("Htimedelta", new CSRBundle {
@@ -43,7 +46,8 @@ trait HypervisorLevel { self: NewCSR =>
     val HPM = RW(31, 3)
   })).setAddr(0x606)
 
-  val hgeie = Module(new CSRModule("Hgeie", new HgeieBundle)).setAddr(0x607)
+  val hgeie = Module(new CSRModule("Hgeie", new HgeieBundle))
+    .setAddr(0x607)
 
   val hvien = Module(new CSRModule("Hvien", new CSRBundle {
     val ien = RW(63, 13)
@@ -80,17 +84,33 @@ trait HypervisorLevel { self: NewCSR =>
   })).setAddr(0x643)
 
   val hip = Module(new CSRModule("Hip", new HipBundle) with HypervisorBundle {
+    val fromVSip = IO(Flipped(new VSipToHip))
+    val toHvip = IO(new HipToHvip)
+
     rdata.VSSIP := hvip.VSSIP
     rdata.VSTIP := hvip.VSTIP.asUInt.asBool | vsi.tip
     rdata.VSEIP := hvip.VSEIP.asUInt.asBool | vsi.eip | hgeip.ip.asUInt(hstatus.VGEIN.asUInt)
     rdata.SGEIP := (hgeip.ip.asUInt | hgeie.ie.asUInt).orR
+
+    // VSEIP is read only
+    // VSTIP is read only
+    // VSSIP is alias of hvip
+    toHvip.VSSIP.valid := fromVSip.SSIP.valid
+    println(toHvip.VSSIP.bits.asInstanceOf[CSREnumType].factory)
+    println(fromVSip.SSIP.bits.asInstanceOf[CSREnumType].factory)
+    toHvip.VSSIP.bits := fromVSip.SSIP.bits
   }).setAddr(0x644)
 
   val hvip = Module(new CSRModule("Hvip", new CSRBundle {
     val VSSIP = RW( 2)
     val VSTIP = RW( 6)
     val VSEIP = RW(10)
-  })).setAddr(0x645)
+  }) {
+    val fromHip = IO(Flipped(new HipToHvip))
+    when (fromHip.VSSIP.valid) { reg.VSSIP := fromHip.VSSIP.bits }
+  }).setAddr(0x645)
+
+  hvip.fromHip := hip.toHvip
 
   val hviprio1 = Module(new CSRModule("Hviprio1", new CSRBundle {
     val PrioSSI = RW(15,  8)
@@ -226,6 +246,10 @@ class HidelegBundle extends InterruptBundle {
   this.SEI .setRO()
   this.MEI .setRO()
   this.SGEI.setRO()
+}
+
+class HipToHvip extends Bundle {
+  val VSSIP = ValidIO(RW(0))
 }
 
 trait HypervisorBundle { self: CSRModule[_] =>

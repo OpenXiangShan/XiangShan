@@ -2,46 +2,96 @@ package xiangshan.backend.fu.NewCSR
 
 import chisel3._
 import chisel3.util._
+import xiangshan.backend.fu.NewCSR.CSRBundles._
 import xiangshan.backend.fu.NewCSR.CSRDefines.{
   CSRRWField => RW,
-  CSRROField => RO,
-  CSRWLRLField => WLRL,
-  CSRWARLField => WARL,
-  _
 }
 
 import scala.collection.immutable.SeqMap
 
-trait VirtualSupervisorLevel { self: NewCSR =>
+trait VirtualSupervisorLevel { self: NewCSR with HypervisorLevel =>
 
-  val vsstatus = Module(new CSRModule("Vsstatus", new SstatusBundle)).setAddr(0x200)
-  val vsip = Module(new CSRModule("Vsip", new Vsip) with HypervisorBundle {
-    val writeHie = IO(new VsieWriteHie)
+  val vsstatus = Module(new CSRModule("VSstatus", new SstatusBundle))
+    .setAddr(0x200)
+
+  val vsie = Module(new CSRModule("VSie", new VSie) with HypervisorBundle {
+    val writeHie = IO(new VSieToHie)
+    // read alias of hie is here, write alias will be in hie
+    rdata.SEIE := Mux(hideleg.VSEI.asUInt === 0.U, 0.U, hie.VSEIE.asUInt)
+    rdata.STIE := Mux(hideleg.VSTI.asUInt === 0.U, 0.U, hie.VSTIE.asUInt)
+    rdata.SSIE := Mux(hideleg.VSSI.asUInt === 0.U, 0.U, hie.VSSIE.asUInt)
+
+    writeHie.SEIE.valid := wen && hideleg.VSEI.asUInt.asBool
+    writeHie.STIE.valid := wen && hideleg.VSTI.asUInt.asBool
+    writeHie.SSIE.valid := wen && hideleg.VSSI.asUInt.asBool
+    writeHie.SEIE.bits := wdata.SEIE
+    writeHie.STIE.bits := wdata.STIE
+    writeHie.SSIE.bits := wdata.SSIE
+  }).setAddr(0x204)
+
+  hie.fromVSie := vsie.writeHie
+
+  val vstvec = Module(new CSRModule("VStvec", new XtvecBundle))
+    .setAddr(0x205)
+
+  val vsscratch = Module(new CSRModule("VSscratch"))
+    .setAddr(0x240)
+
+  val vsepc = Module(new CSRModule("VSepc"))
+    .setAddr(0x241)
+
+  val vscause = Module(new CSRModule("VScause", new CauseBundle))
+    .setAddr(0x242)
+
+  // Todo: shrink the width of vstval to the maximum width Virtual Address
+  val vstval = Module(new CSRModule("VStval"))
+    .setAddr(0x243)
+
+  val vsip = Module(new CSRModule("VSip", new VSip) with HypervisorBundle {
+    val writeHip = IO(new VSipToHip)
     // read alias of hip is here, write alias will be in hvip
     // hip.VSEIP is read-only
-    rdata.SEIP := Mux(hideleg.VSEI === 0.U, 0.U, hip.VSEIP)
+    rdata.SEIP := Mux(hideleg.VSEI.asUInt === 0.U, 0.U, hip.VSEIP.asUInt)
     // hip.VSTIP is read-only
-    rdata.STIP := Mux(hideleg.VSTI === 0.U, 0.U, hip.VSTIP)
+    rdata.STIP := Mux(hideleg.VSTI.asUInt === 0.U, 0.U, hip.VSTIP.asUInt)
     // hip.VSSIP is an alias (writable) of the same bit in hvip
-    rdata.SSIP := Mux(hideleg.VSSI === 0.U, 0.U, hip.VSSIP)
+    rdata.SSIP := Mux(hideleg.VSSI.asUInt === 0.U, 0.U, hip.VSSIP.asUInt)
 
-    writeHie.SEIP.valid := wen && hideleg.VSEI.asUInt.asBool
-    writeHie.STIP.valid := wen && hideleg.VSTI.asUInt.asBool
-    writeHie.SSIP.valid := wen && hideleg.VSSI.asUInt.asBool
-    writeHie.SEIP.bits := wdata.SEIP
-    writeHie.STIP.bits := wdata.STIP
-    writeHie.SSIP.bits := wdata.SSIP
-  })
+    writeHip.SEIP.valid := wen && hideleg.VSEI.asUInt.asBool
+    writeHip.STIP.valid := wen && hideleg.VSTI.asUInt.asBool
+    writeHip.SSIP.valid := wen && hideleg.VSSI.asUInt.asBool
+    writeHip.SEIP.bits := wdata.SEIP
+    writeHip.STIP.bits := wdata.STIP
+    writeHip.SSIP.bits := wdata.SSIP
+  }).setAddr(0x244)
 
-  val vsie = Module(new CSRModule("Vsie", new Vsie) with HypervisorBundle {
-    // read alias of hie is here, write alias will be in hip
-    rdata.SEIE := Mux(hideleg.VSEI === 0.U, 0.U, hip.VSEIP)
-    rdata.STIE := Mux(hideleg.VSTI === 0.U, 0.U, hip.VSTIP)
-    rdata.SSIE := Mux(hideleg.VSSI === 0.U, 0.U, hip.VSSIP)
-  })
+  hip.fromVSip := vsip.writeHip
+
+  val vsatp = Module(new CSRModule("VSatp", new SatpBundle) {
+    // Ref: 13.2.18. Virtual Supervisor Address Translation and Protection Register (vsatp)
+    // When V=0, a write to vsatp with an unsupported MODE value is either ignored as it is for satp, or the
+    // fields of vsatp are treated as WARL in the normal way.
+    // However, when V=1, a write to satp with an unsupported MODE value is ignored and no write to vsatp is effected.
+    // if satp is written with an unsupported MODE, the entire write has no effect; no fields in satp are modified.
+    //
+    // We treat all circumstances as if V=1. That is if satp is written with an unsupported MODE,
+    // the entire write has no effect; no fields in satp are modified.
+    when(wen && !wdata.MODE.isLegal) {
+      reg.ASID := reg.ASID
+      reg.PPN := reg.PPN
+    }
+  }).setAddr(0x280)
 
   val virtualSupervisorCSRMods = Seq(
     vsstatus,
+    vsie,
+    vstvec,
+    vsscratch,
+    vsepc,
+    vscause,
+    vstval,
+    vsip,
+    vsatp,
   )
 
   virtualSupervisorCSRMods.foreach(mod =>
@@ -52,7 +102,7 @@ trait VirtualSupervisorLevel { self: NewCSR =>
   )
 }
 
-class Vsip extends InterruptPendingBundle {
+class VSip extends InterruptPendingBundle {
   this.getM.foreach(_.setRO())
   this.getVS.foreach(_.setRO())
   this.getSOC.foreach(_.setRO())
@@ -68,7 +118,7 @@ class Vsip extends InterruptPendingBundle {
   this.SEIP
 }
 
-class Vsie extends InterruptEnableBundle {
+class VSie extends InterruptEnableBundle {
   this.getM.foreach(_.setRO())
   this.getVS.foreach(_.setRO())
   this.getSOC.foreach(_.setRO())
@@ -84,7 +134,15 @@ class Vsie extends InterruptEnableBundle {
   this.SEIE
 }
 
-class VsieWriteHie extends Bundle {
+class VSieToHie extends Bundle {
+  val SSIE: ValidIO[CSREnumType] = ValidIO(RW(0))
+  val STIE: ValidIO[CSREnumType] = ValidIO(RW(0))
+  val SEIE: ValidIO[CSREnumType] = ValidIO(RW(0))
+
+  println(s"[tmp] SSIE: ${SSIE.bits.getClass}")
+}
+
+class VSipToHip extends Bundle {
   val SSIP = ValidIO(RW(0))
   val STIP = ValidIO(RW(0))
   val SEIP = ValidIO(RW(0))

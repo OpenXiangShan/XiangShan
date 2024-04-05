@@ -1,19 +1,15 @@
 package xiangshan.backend.fu.NewCSR
 
 import chisel3._
+import xiangshan.backend.fu.NewCSR.CSRBundles._
 import xiangshan.backend.fu.NewCSR.CSRDefines._
-import xiangshan.backend.fu.NewCSR.CSRFunc._
 
 import scala.collection.immutable.SeqMap
 
 trait MachineLevel { self: NewCSR =>
   val mstatus = Module(new MstatusModule)
 
-  val mtvec = Module(new CSRModule("Mtvec", new CSRBundle {
-      val mode = MtvecMode(1, 0, wNoFilter)
-      val addr = CSRWARLField(63, 2, wNoFilter)
-    }
-  ))
+  val mtvec = Module(new CSRModule("Mtvec", new XtvecBundle))
 
   val machineLevelCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], Data)] = SeqMap(
     0x300 -> (mstatus.w -> mstatus.rdata),
