@@ -77,6 +77,20 @@ class NewCSR extends Module
     (io.rAddr === id.U) -> rBundle.asUInt
   })
 
+  csrMods.foreach {
+    case mod: HypervisorBundle =>
+      mod.hstatus := hstatus.rdata
+      mod.hvip := hvip.rdata
+      mod.hideleg := hideleg.rdata
+      mod.hedeleg := hedeleg.rdata
+      mod.hgeip := hgeip.rdata
+      mod.hgeie := hgeie.rdata
+      mod.hip := hip.rdata
+      mod.hie := hie.rdata
+    case _ =>
+  }
+
+
   csrMods.foreach { mod =>
     mod.commonIn.status := mstatus.mstatus
     mod.commonIn.prvm := PRVM

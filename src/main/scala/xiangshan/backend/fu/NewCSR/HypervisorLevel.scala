@@ -1,6 +1,7 @@
 package xiangshan.backend.fu.NewCSR
 
 import chisel3._
+import chisel3.util._
 import xiangshan.backend.fu.NewCSR.CSRDefines.{
   CSRRWField => RW,
   CSRROField => RO,
@@ -10,6 +11,7 @@ import xiangshan.backend.fu.NewCSR.CSRDefines.{
 }
 import xiangshan.backend.fu.NewCSR.CSRFunc._
 import xiangshan.backend.fu.NewCSR.CSRConfig._
+import xiangshan.backend.fu.NewCSR.CSRBundles._
 
 import scala.collection.immutable.SeqMap
 
@@ -119,7 +121,11 @@ trait HypervisorLevel { self: NewCSR =>
     // RW, since we support max width of VMID
     val VMID = RW(44 - 1 + VMIDLEN, 44)
     val PPN = RW(43, 0)
-  })).setAddr(0x680)
+  }) {
+    // Ref: 13.2.10. Hypervisor Guest Address Translation and Protection Register (hgatp)
+    // A write to hgatp with an unsupported MODE value is not ignored as it is for satp. Instead, the fields of
+    // hgatp are WARL in the normal way, when so indicated.
+  }).setAddr(0x680)
 
   val hgeip = Module(new CSRModule("Hgeip", new HgeipBundle)).setAddr(0xE12)
 
@@ -143,19 +149,6 @@ trait HypervisorLevel { self: NewCSR =>
     hgatp,
     hgeip,
   )
-
-  hypervisorCSRMods.foreach {
-    case mod: HypervisorBundle =>
-      mod.hstatus := hstatus.rdata
-      mod.hvip := hvip.rdata
-      mod.hideleg := hideleg.rdata
-      mod.hedeleg := hedeleg.rdata
-      mod.hgeip := hgeip.rdata
-      mod.hgeie := hgeie.rdata
-      mod.hip := hip.rdata
-      mod.hie := hie.rdata
-    case _ =>
-  }
 
   val hypervisorCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], Data)] = SeqMap.from(
     hypervisorCSRMods.map(csr => (csr.addr -> (csr.w -> csr.rdata.asInstanceOf[CSRBundle].asUInt))).iterator
