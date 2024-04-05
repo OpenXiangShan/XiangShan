@@ -1063,7 +1063,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
         lsq.io.std.storeDataIn(i).bits.vdIdxInField.map(_ := 0.U)
         stData(i).ready := true.B
     }
-    lsq.io.std.storeDataIn.map(_.bits.debug := 0.U.asTypeOf(new DebugBundle)) 
+    lsq.io.std.storeDataIn.map(_.bits.debug := 0.U.asTypeOf(new DebugBundle))
 
 
 
@@ -1296,7 +1296,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   }
   (0 until LduCnt).foreach{i=>
-    vlMergeBuffer.io.fromPipeline(i) <> loadUnits(i).io.vecldout 
+    vlMergeBuffer.io.fromPipeline(i) <> loadUnits(i).io.vecldout
   }
   (0 until StaCnt).foreach{i=>
     vsMergeBuffer.io.fromPipeline(i) <> storeUnits(i).io.vecstout
@@ -1316,7 +1316,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     io.mem_to_ooo.vstuIqFeedback(i).feedbackFast := DontCare
   }
 
-  io.mem_to_ooo.writebackVldu.head.valid := vlMergeBuffer.io.uopWriteback.head.valid || vlMergeBuffer.io.uopWriteback.head.valid
+  io.mem_to_ooo.writebackVldu.head.valid := vlMergeBuffer.io.uopWriteback.head.valid || vsMergeBuffer.io.uopWriteback.head.valid
   io.mem_to_ooo.writebackVldu.head.bits := Mux1H(Seq(
     vlMergeBuffer.io.uopWriteback.head.valid -> vlMergeBuffer.io.uopWriteback.head.bits,
     vsMergeBuffer.io.uopWriteback.head.valid -> vsMergeBuffer.io.uopWriteback.head.bits,
