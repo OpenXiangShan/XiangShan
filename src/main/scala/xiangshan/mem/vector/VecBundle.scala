@@ -146,6 +146,7 @@ class MergeBufferReq(isVStore: Boolean=false)(implicit p: Parameters) extends VL
   val flowNum             = UInt(flowIdxBits.W)
   val uop                 = new DynInst
   val data                = UInt(VLEN.W)
+  val vdIdx               = UInt(3.W)
   // val vdOffset            = UInt(vdOffset.W)
 }
 

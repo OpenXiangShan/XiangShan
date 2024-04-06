@@ -35,6 +35,8 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   def us_mask(fuOpType: UInt) = fuOpType === VlduType.vlm
   def us_fof(fuOpType: UInt) = fuOpType === VlduType.vleff
 
+  val vdIdxReg = RegInit(0.U(3.W))
+
   val s1_ready = WireInit(false.B)
   io.in.ready := s1_ready
 
@@ -180,11 +182,17 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   io.toMergeBuffer.req.bits.flowNum      := Mux(s1_in.preIsSplit, PopCount(s1_in.flowMask), flowNum)
   io.toMergeBuffer.req.bits.data         := s1_in.data
   io.toMergeBuffer.req.bits.uop          := s1_in.uop
-  io.toMergeBuffer.req.bits.uop.vpu.vmask:= s1_vmask
-  io.toMergeBuffer.req.bits.mask         := flowMask
+  io.toMergeBuffer.req.bits.mask         := s1_in.flowMask
   io.toMergeBuffer.req.bits.vaddr        := DontCare
+  io.toMergeBuffer.req.bits.vdIdx        := vdIdxReg
 //   io.toMergeBuffer.req.bits.vdOffset :=
 
+  when (s1_in.uop.lastUop && s1_valid || s1_kill) {
+    vdIdxReg := 0.U
+  }.elsewhen(s1_valid) {
+    vdIdxReg := vdIdxReg + 1.U
+    XSError(vdIdxReg + 1.U === 0.U, s"Overflow! The number of vd should be less than 8\n")
+  }
   // out connect
   io.out.valid          := s1_valid
   io.out.bits           := s1_in
