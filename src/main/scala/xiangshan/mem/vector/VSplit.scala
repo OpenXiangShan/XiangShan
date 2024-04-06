@@ -148,7 +148,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   val s1_can_go        = io.out.ready && io.toMergeBuffer.resp.valid
   val s1_fire          = s1_valid && !s1_kill && s1_can_go
 
-  s1_ready         := s1_kill || !s1_valid || io.out.ready
+  s1_ready         := s1_kill || !s1_valid || io.out.ready && io.toMergeBuffer.resp.valid
 
   when(s0_fire){
     s1_valid := true.B
@@ -194,7 +194,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
     XSError(vdIdxReg + 1.U === 0.U, s"Overflow! The number of vd should be less than 8\n")
   }
   // out connect
-  io.out.valid          := s1_valid
+  io.out.valid          := s1_valid && io.toMergeBuffer.resp.valid
   io.out.bits           := s1_in
   io.out.bits.uopOffset := uopOffset
   io.out.bits.stride    := stride
