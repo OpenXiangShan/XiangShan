@@ -121,7 +121,6 @@ class VSip extends InterruptPendingBundle {
 class VSie extends InterruptEnableBundle {
   this.getM.foreach(_.setRO())
   this.getVS.foreach(_.setRO())
-  this.getSOC.foreach(_.setRO())
   // 13.2.12. Virtual Supervisor Interrupt Registers (vsip and vsie)
   // When bit 10 of hideleg is zero, vsip.SEIE is read-only zeros.
   // Else, vsip.SEIE is alias of hip.VSEIE
@@ -138,8 +137,6 @@ class VSieToHie extends Bundle {
   val SSIE: ValidIO[CSREnumType] = ValidIO(RW(0))
   val STIE: ValidIO[CSREnumType] = ValidIO(RW(0))
   val SEIE: ValidIO[CSREnumType] = ValidIO(RW(0))
-
-  println(s"[tmp] SSIE: ${SSIE.bits.getClass}")
 }
 
 class VSipToHip extends Bundle {

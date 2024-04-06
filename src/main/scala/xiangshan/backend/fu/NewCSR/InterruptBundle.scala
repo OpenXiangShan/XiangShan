@@ -22,6 +22,14 @@ class InterruptBundle extends CSRBundle {
   val COI      = RW(13) // Counter overflow interrupt
   val LPRASEI  = RW(35) // Low-priority RAS event interrupt
   val HPRASEI  = RW(43) // High-priority RAS event interrupt
+
+  def getVS = Seq(VSSI, VSTI, VSEI)
+
+  def getHS = Seq(SSI, STI, SEI)
+
+  def getM = Seq(MSI, MTI, MEI)
+
+  def getSOC = Seq(COI, LPRASEI, HPRASEI)
 }
 
 class InterruptPendingBundle extends CSRBundle {
@@ -77,5 +85,5 @@ class InterruptEnableBundle extends CSRBundle {
 
   def getM = Seq(MSIE, MTIE, MEIE)
 
-  def getSOC = Seq(COIE, LPRASEIE, HPRASEIE)
+  def getALL = Seq(SSIE, VSSIE, MSIE, STIE, VSTIE, MTIE, SEIE, VSEIE, MEIE, SGEIE, COIE, LPRASEIE, HPRASEIE)
 }

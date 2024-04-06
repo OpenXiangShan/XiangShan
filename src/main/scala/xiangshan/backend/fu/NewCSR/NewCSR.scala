@@ -24,7 +24,8 @@ class NewCSR extends Module
   with SupervisorLevel
   with HypervisorLevel
   with VirtualSupervisorLevel
-  with Unprivileged {
+  with Unprivileged
+  with HasExternalInterruptBundle {
 
   val io = IO(new Bundle {
     val w = Flipped(ValidIO(new Bundle {
@@ -81,19 +82,35 @@ class NewCSR extends Module
     (io.rAddr === id.U) -> rBundle.asUInt
   })
 
-  csrMods.foreach {
-    case mod: HypervisorBundle =>
-      mod.hstatus := hstatus.rdata
-      mod.hvip := hvip.rdata
-      mod.hideleg := hideleg.rdata
-      mod.hedeleg := hedeleg.rdata
-      mod.hgeip := hgeip.rdata
-      mod.hgeie := hgeie.rdata
-      mod.hip := hip.rdata
-      mod.hie := hie.rdata
-    case _ =>
+  csrMods.foreach { mod =>
+    mod match {
+      case m: HypervisorBundle =>
+        m.hstatus := hstatus.regOut
+        m.hvip := hvip.regOut
+        m.hideleg := hideleg.regOut
+        m.hedeleg := hedeleg.regOut
+        m.hgeip := hgeip.regOut
+        m.hgeie := hgeie.regOut
+        m.hip := hip.regOut
+        m.hie := hie.regOut
+      case _ =>
+    }
+    mod match {
+      case m: HasMachineInterruptBundle =>
+        m.mvien := mvien.regOut
+        m.mvip := mvip.regOut
+        m.mip := mip.regOut
+      case _ =>
+    }
+    mod match {
+      case m: HasExternalInterruptBundle =>
+        m.SEIP := this.SEIP
+        m.MEIP := this.MEIP
+        m.MTIP := this.MTIP
+        m.MSIP := this.MSIP
+      case _ =>
+    }
   }
-
 
   csrMods.foreach { mod =>
     mod.commonIn.status := mstatus.mstatus

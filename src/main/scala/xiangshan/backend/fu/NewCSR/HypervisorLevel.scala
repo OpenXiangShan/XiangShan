@@ -28,23 +28,24 @@ trait HypervisorLevel { self: NewCSR =>
 
   val hie = Module(new CSRModule("Hie", new HieBundle) with HypervisorBundle {
     val fromVSie = IO(Flipped(new VSieToHie))
-    println(reg.VSSIE.asInstanceOf[CSREnumType].factory)
-    println(fromVSie.SSIE.bits.asInstanceOf[CSREnumType].factory)
+    val fromMie = IO(Flipped(new MieToHie))
+
     when (fromVSie.SSIE.valid) { reg.VSSIE := fromVSie.SSIE.bits }
     when (fromVSie.STIE.valid) { reg.VSTIE := fromVSie.STIE.bits }
     when (fromVSie.SEIE.valid) { reg.VSEIE := fromVSie.SEIE.bits }
+    when (fromMie.VSSIE.valid) { reg.VSSIE := fromMie.VSSIE.bits }
+    when (fromMie.VSTIE.valid) { reg.VSTIE := fromMie.VSTIE.bits }
+    when (fromMie.VSEIE.valid) { reg.VSEIE := fromMie.VSEIE.bits }
+    when (fromMie.SGEIE.valid) { reg.SGEIE := fromMie.SGEIE.bits }
   }).setAddr(0x604)
+
+  hie.fromMie := mie.toHie
 
   val htimedelta = Module(new CSRModule("Htimedelta", new CSRBundle {
     val VALUE = RW(63, 0)
   })).setAddr(0x605)
 
-  val hcounteren = Module(new CSRModule("Hcounteren", new CSRBundle {
-    val CY = RW(0)
-    val TM = RW(1)
-    val IR = RW(2)
-    val HPM = RW(31, 3)
-  })).setAddr(0x606)
+  val hcounteren = Module(new CSRModule("Hcounteren", new Counteren)).setAddr(0x606)
 
   val hgeie = Module(new CSRModule("Hgeie", new HgeieBundle))
     .setAddr(0x607)
@@ -96,8 +97,6 @@ trait HypervisorLevel { self: NewCSR =>
     // VSTIP is read only
     // VSSIP is alias of hvip
     toHvip.VSSIP.valid := fromVSip.SSIP.valid
-    println(toHvip.VSSIP.bits.asInstanceOf[CSREnumType].factory)
-    println(fromVSip.SSIP.bits.asInstanceOf[CSREnumType].factory)
     toHvip.VSSIP.bits := fromVSip.SSIP.bits
   }).setAddr(0x644)
 

@@ -18,6 +18,13 @@ object CSRBundles {
     val ExceptionCode = RW(62, 0)
   }
 
+  class Counteren extends CSRBundle {
+    val CY = RW(0)
+    val TM = RW(1)
+    val IR = RW(2)
+    val HPM = RW(31, 3)
+  }
+
   class OneFieldBundle extends CSRBundle {
     val ALL = RW(63, 0)
   }
