@@ -367,13 +367,8 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val vecMemStatusUpdate                             = entryUpdate.status.vecMem.get
     vecMemStatusUpdate                                := vecMemStatus
 
-    val isLsqHead = {
-      entryReg.status.vecMem.get.lqIdx <= fromLsq.lqDeqPtr &&
-      entryReg.status.vecMem.get.sqIdx <= fromLsq.sqDeqPtr
-    }
-
     // update blocked
-    entryUpdate.status.blocked                        := !isLsqHead // Todo: remove this
+    entryUpdate.status.blocked                        := false.B
   }
 
   def ExuOHGen(exuOH: Vec[Bool], wakeupByIQOH: Vec[Bool], wakeup: Bool, regSrcExuOH: Vec[Bool])(implicit p: Parameters, params: IssueBlockParams) = {
