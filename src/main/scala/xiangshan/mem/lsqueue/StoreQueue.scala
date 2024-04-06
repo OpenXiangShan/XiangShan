@@ -327,6 +327,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
           prefetch(index + j.U) := false.B
           mmio(index + j.U) := false.B
           isVec(index + j.U) := enqInstr.isVecStore // check vector store by the encoding of inst
+          vecMbCommit(index + j.U) := false.B
           vecDataValid(index + j.U) := false.B
           XSError(!io.enq.canAccept || !io.enq.lqCanAccept, s"must accept $i\n")
           XSError(index =/= sqIdx.value, s"must be the same entry $i\n")
@@ -820,7 +821,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // TODO: Deal with vector store mmio
   for (i <- 0 until CommitWidth) {
     val veccount = PopCount(veccommitVec.take(i))
-    when (isVec(cmtPtrExt(i).value) && isNotAfter(uop(cmtPtrExt(i).value).robIdx, io.rob.pendingPtr) && vecMbCommit(cmtPtrExt(i).value)) {
+    when (allocated(cmtPtrExt(i).value) && isVec(cmtPtrExt(i).value) && isNotAfter(uop(cmtPtrExt(i).value).robIdx, io.rob.pendingPtr) && vecMbCommit(cmtPtrExt(i).value)) {
       if (i == 0){
         // TODO: fixme for vector mmio
         when ((uncacheState === s_idle) || (uncacheState === s_wait && scommit > 0.U)){
