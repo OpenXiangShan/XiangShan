@@ -753,7 +753,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
 
   private val isVlsType       = uop.map(uopItem => isVls((uopItem.fuType)))
   private val isUnitStride    = fuOpType.map(fuOpTypeItem => LSUOpType.isUStride(fuOpTypeItem))
-  private val isSegment       = nf.zip(fuOpType).map{ case (fuOpTypeItem, nfItem) => nfItem =/= 0.U && !LSUOpType.isWhole(fuOpTypeItem) }
+  private val isSegment       = fuOpType.zip(nf).map{ case (fuOpTypeItem, nfItem) => nfItem =/= 0.U && !LSUOpType.isWhole(fuOpTypeItem) }
   private val instType        = isSegment.zip(mop).map{ case (isSegementItem, mopItem) => Cat(isSegementItem, mopItem) }
   private val numLsElem       = instType.zipWithIndex.map{ case (instTypeItem, index) =>
     Mux(LSUOpType.isWhole(fuOpType(index)) && isVlsType(index), 2.U, Mux(isUnitStride(index), 2.U, (1.U(5.W) << GenRealFlowNum(instTypeItem, emul(index), lmul(index), eew(index), sew(index))).asUInt))
