@@ -259,7 +259,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s0_int_iss_valid       = io.ldin.valid // int flow first issue or software prefetch
   val s0_l2l_fwd_valid       = io.l2l_fwd_in.valid
   val s0_low_conf_prf_valid  = io.prefetch_req.valid && io.prefetch_req.bits.confidence === 0.U
-  val s0_is128bit            = is128Bit(io.vecldin.bits.alignedType) && io.vecldin.valid
   dontTouch(s0_super_ld_rep_valid)
   dontTouch(s0_ld_fast_rep_valid)
   dontTouch(s0_ld_mmio_valid)
@@ -370,7 +369,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                                          TlbCmd.read
                                        )
   io.tlb.req.bits.vaddr              := Mux(s0_hw_prf_select, io.prefetch_req.bits.paddr, s0_sel_src.vaddr)
-  io.tlb.req.bits.size               := Mux(s0_sel_src.isvec, io.vecldin.bits.alignedType(2,0), LSUOpType.size(s0_sel_src.uop.fuOpType)) // FIXME : currently not use, 128 bit load will error if use it
+  io.tlb.req.bits.size               := Mux(s0_sel_src.isvec, s0_sel_src.alignedType(2,0), LSUOpType.size(s0_sel_src.uop.fuOpType)) // FIXME : currently not use, 128 bit load will error if use it
   io.tlb.req.bits.kill               := s0_kill
   io.tlb.req.bits.memidx.is_ld       := true.B
   io.tlb.req.bits.memidx.is_st       := false.B
@@ -395,7 +394,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.dcache.req.bits.replayCarry  := s0_sel_src.rep_carry
   io.dcache.req.bits.id           := DontCare // TODO: update cache meta
   io.dcache.pf_source             := Mux(s0_hw_prf_select, io.prefetch_req.bits.pf_source.value, L1_HW_PREFETCH_NULL)
-  io.dcache.is128Req              := s0_is128bit && s0_vec_iss_select
+  io.dcache.is128Req              := s0_sel_src.is128bit
 
   // load flow priority mux
   def fromNullSource(): FlowSource = {
@@ -623,13 +622,13 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s0_sel_src := ParallelPriorityMux(s0_src_selector, s0_src_format)
 
   // address align check
-  val s0_addr_aligned = LookupTree(Mux(s0_sel_src.isvec, io.vecldin.bits.alignedType(1,0), s0_sel_src.uop.fuOpType(1, 0)), List(
+  val s0_addr_aligned = LookupTree(Mux(s0_sel_src.isvec, s0_sel_src.alignedType(1,0), s0_sel_src.uop.fuOpType(1, 0)), List(
     "b00".U   -> true.B,                   //b
     "b01".U   -> (s0_sel_src.vaddr(0)    === 0.U), //h
     "b10".U   -> (s0_sel_src.vaddr(1, 0) === 0.U), //w
     "b11".U   -> (s0_sel_src.vaddr(2, 0) === 0.U)  //d
   ))
-  XSError(s0_sel_src.isvec && s0_sel_src.vaddr(3, 0) =/= 0.U && io.vecldin.bits.alignedType(2), "unit-stride 128 bit element is not aligned!")
+  XSError(s0_sel_src.isvec && s0_sel_src.vaddr(3, 0) =/= 0.U && s0_sel_src.alignedType(2), "unit-stride 128 bit element is not aligned!")
 
   // accept load flow if dcache ready (tlb is always ready)
   // TODO: prefetch need writeback to loadQueueFlag
