@@ -37,6 +37,7 @@ class MBufferBundle(implicit p: Parameters) extends VLSUBundle{
   // val vdOffset         = UInt(vOffsetBits.W)
   val sourceType       = VSFQFeedbackType()
   val flushState       = Bool()
+  val vdIdx            = UInt(3.W)
 
   def allReady(): Bool = (flowNum === 0.U)
 }
@@ -53,6 +54,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     sink.uop          := source.uop
     sink.sourceType   := 0.U.asTypeOf(VSFQFeedbackType())
     sink.flushState   := false.B
+    sink.vdIdx        := source.vdIdx
     sink
     // sink.vdOffset     := source.vdOffset
   }
@@ -62,9 +64,10 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     sink.mask.get         := source.mask
     sink.uop.exceptionVec := source.exceptionVec
     sink.uop              := source.uop
+    sink.uop.vpu.vmask    := source.mask
     sink.debug            := 0.U.asTypeOf(new DebugBundle)
     sink.vdIdxInField.get := 0.U
-    sink.vdIdx.get        := 0.U
+    sink.vdIdx.get        := source.vdIdx
     sink
   }
   def ToLsqConnect(source: MBufferBundle): FeedbackToLsqIO = {
@@ -74,7 +77,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     sink.feedback(VecFeedbacks.COMMIT)      := true.B // TODO:
     sink.feedback(VecFeedbacks.FLUSH)       := false.B
     sink.feedback(VecFeedbacks.LAST)        := true.B
-    sink.vaddr                              := 0.U // TODO: used when exception 
+    sink.vaddr                              := 0.U // TODO: used when exception
     sink
   }
   // freeliset: store valid entries index.
@@ -255,13 +258,13 @@ class VSMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
   ))
   override def DeqConnect(source: MBufferBundle): MemExuOutput = {
     val sink               = Wire(new MemExuOutput(isVector = true))
-    sink.data             := source.data
-    sink.mask.get         := source.mask
+    sink.data             := DontCare
+    sink.mask.get         := DontCare
     sink.uop.exceptionVec := source.exceptionVec
     sink.uop              := source.uop
     sink.debug            := 0.U.asTypeOf(new DebugBundle)
-    sink.vdIdxInField.get := 0.U
-    sink.vdIdx.get        := 0.U
+    sink.vdIdxInField.get := DontCare
+    sink.vdIdx.get        := DontCare
     sink
   }
 }
