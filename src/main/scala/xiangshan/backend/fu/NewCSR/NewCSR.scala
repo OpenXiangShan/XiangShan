@@ -17,6 +17,9 @@ object CSRConfig {
   final val VMIDLEN = 14 // the length of VMID of XS implementation
 
   final val VMIDMAX = 14 // the max value of VMIDLEN defined by spec
+
+  final val VaddrWidth = 39 // only Sv39
+
 }
 
 class NewCSR extends Module
@@ -25,7 +28,8 @@ class NewCSR extends Module
   with HypervisorLevel
   with VirtualSupervisorLevel
   with Unprivileged
-  with HasExternalInterruptBundle {
+  with HasExternalInterruptBundle
+  with HasInstCommitBundle {
 
   val io = IO(new Bundle {
     val w = Flipped(ValidIO(new Bundle {
@@ -108,6 +112,17 @@ class NewCSR extends Module
         m.MEIP := this.MEIP
         m.MTIP := this.MTIP
         m.MSIP := this.MSIP
+      case _ =>
+    }
+    mod match {
+      case m: HasMachineCounterControlBundle =>
+        m.mcountinhibit := mcountinhibit.regOut
+      case _ =>
+    }
+    mod match {
+      case m: HasInstCommitBundle =>
+        m.commitValid := this.commitValid
+        m.commitInstNum := this.commitInstNum
       case _ =>
     }
   }

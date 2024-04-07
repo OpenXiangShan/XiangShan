@@ -21,6 +21,8 @@ trait MachineLevel { self: NewCSR =>
   val misa = Module(new CSRModule("Misa", new MisaBundle))
     .setAddr(0x301)
 
+  println(s"[CSR] supported isa ext: ${misa.bundle.getISAString}")
+
   val medeleg = Module(new CSRModule("Medeleg", new MedelegBundle))
     .setAddr(0x302)
 
@@ -84,6 +86,37 @@ trait MachineLevel { self: NewCSR =>
     reg.SEIP := Mux(wen && mvien.SEIE.asUInt.asBool, wdata.SEIP, reg.SEIP)
   }).setAddr(0x309)
 
+  val menvcfg = Module(new CSRModule("Menvcfg", new CSRBundle {
+    val STCE  = RO(    63).withReset(0.U)
+    val PBMTE = RO(    62).withReset(0.U)
+    val ADUE  = RO(    61).withReset(0.U)
+    val PMM   = RO(33, 32).withReset(0.U)
+    val CBZE  = RO(     7).withReset(0.U)
+    val CBCFE = RO(     6).withReset(0.U)
+    val CBIE  = RO( 5,  4).withReset(0.U)
+    val FIOM  = RO(     0).withReset(0.U)
+  })).setAddr(0x30A)
+
+  val mcountinhibit = Module(new CSRModule("Mcountinhibit", new McountinhibitBundle))
+    .setAddr(0x320)
+
+  val mhpmevents: Seq[CSRModule[_]] = (3 to 0x1F).map(num =>
+    Module(new CSRModule(s"Mhpmevent$num"))
+      .setAddr(0x320 + num)
+  )
+
+  val mscratch = Module(new CSRModule("Mscratch"))
+    .setAddr(0x340)
+
+  val mepc = Module(new CSRModule("Mepc", new Epc))
+    .setAddr(0x341)
+
+  val mcause = Module(new CSRModule("Mcause"))
+    .setAddr(0x342)
+
+  val mtval = Module(new CSRModule("Mtval"))
+    .setAddr(0x343)
+
   val mip = Module(new CSRModule("Mip", new MipBundle) with HasMachineInterruptBundle with HasExternalInterruptBundle {
     val fromMvip = IO(Flipped(new MvipToMip))
 
@@ -106,6 +139,45 @@ trait MachineLevel { self: NewCSR =>
 
   mip.fromMvip := mvip.toMip
 
+  val mtinst = Module(new CSRModule("Mtinst"))
+    .setAddr(0x34A)
+
+  val mtval2 = Module(new CSRModule("Mtval2"))
+    .setAddr(0x34B)
+
+  val mseccfg = Module(new CSRModule("Mseccfg", new CSRBundle {
+    val PMM   = RO(33, 32)
+    val SSEED = RO(     9)
+    val USEED = RO(     8)
+    val RLB   = RO(     2)
+    val MMWP  = RO(     1)
+    val MML   = RO(     0)
+  })).setAddr(0x747)
+
+  val mcycle = Module(new CSRModule("Mcycle") with HasMachineCounterControlBundle {
+    reg.ALL := Mux(!mcountinhibit.CY.asUInt.asBool, reg.ALL.asUInt + 1.U, reg.ALL.asUInt)
+  }).setAddr(0xB00)
+
+  val minstret = Module(new CSRModule("Minstret") with HasMachineCounterControlBundle with HasInstCommitBundle {
+    reg.ALL := Mux(!mcountinhibit.IR.asUInt.asBool && commitValid, reg.ALL.asUInt + commitInstNum, reg.ALL.asUInt)
+  })
+
+  // Todo: guarded by mcountinhibit
+  val mhpmcounters: Seq[CSRModule[_]] = (3 to 0x1F).map(num =>
+    Module(new CSRModule(s"Mhpmcounter$num") {
+
+    }).setAddr(0xB00 + num)
+  )
+
+  val mvendorid = Module(new CSRModule("Mvendorid") { rdata.ALL := 0.U })
+    .setAddr(0xF11)
+
+  // architecture id for XiangShan is 25
+  // see https://github.com/riscv/riscv-isa-manual/blob/master/marchid.md
+  val marchid = Module(new CSRModule("Marchid", new CSRBundle {
+    val ALL = MarchidField(63, 0).withReset(MarchidField.XSArchid)
+  })).setAddr(0xF12)
+
   val machineLevelCSRMods: Seq[CSRModule[_]] = Seq(
     mstatus,
     misa,
@@ -116,8 +188,21 @@ trait MachineLevel { self: NewCSR =>
     mcounteren,
     mvien,
     mvip,
+    menvcfg,
+    mcountinhibit,
+    mscratch,
+    mepc,
+    mcause,
+    mtval,
     mip,
-  )
+    mtinst,
+    mtval2,
+    mseccfg,
+    mcycle,
+    minstret,
+    mvendorid,
+    marchid,
+  ) ++ mhpmevents ++ mhpmcounters
 
   val machineLevelCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], Data)] = SeqMap.from(
     machineLevelCSRMods.map(csr => (csr.addr -> (csr.w -> csr.rdata.asInstanceOf[CSRBundle].asUInt))).iterator
@@ -198,7 +283,7 @@ class MisaBundle extends CSRBundle {
   val Z = RO(25).withReset(0.U) // Reserved
   val MXL = XLENField(63, 62).withReset(XLENField.XLEN64)
 
-  def getISAString = this.getFields.filterNot(_ == MXL).map(x => ('A' + x.msb).toChar).mkString
+  def getISAString = this.getFields.filter(x => x != MXL && x.init.get.litValue == 1).sortBy(_.localName).map(x => ('A' + x.msb).toChar).mkString
 }
 
 class MedelegBundle extends ExceptionBundle {
@@ -250,6 +335,21 @@ class MvipBundle extends CSRBundle {
   val OTHERIP  = RW(63, 13)
 }
 
+class Epc extends CSRBundle {
+  // TODO: configure it with VAddrBits
+  val ALL = RW(63, 1)
+}
+
+class McountinhibitBundle extends CSRBundle {
+  val CY = RW(0)
+  val IR = RW(2)
+  val HPM3 = RW(31, 3)
+}
+
+object MarchidField extends CSREnum with CSRROApply {
+  val XSArchid = Value(25.U)
+}
+
 class MieToHie extends Bundle {
   val VSSIE = ValidIO(RW(0))
   val VSTIE = ValidIO(RW(0))
@@ -274,4 +374,14 @@ trait HasExternalInterruptBundle {
   val MEIP = IO(Input(Bool()))
   val MTIP = IO(Input(Bool()))
   val MSIP = IO(Input(Bool()))
+}
+
+trait HasMachineCounterControlBundle { self: CSRModule[_] =>
+  val mcountinhibit = IO(Input(new McountinhibitBundle))
+}
+
+trait HasInstCommitBundle {
+  val commitValid   = IO(Input(Bool()))
+  // need contain 8x8
+  val commitInstNum = IO(Input(UInt(7.W)))
 }
