@@ -220,6 +220,6 @@ object CSRDefines {
 
   object VirtMode extends CSREnum with CSRRWApply {
     val Off = Value(0.U)
-    val On = Value(1.U)
+    val On  = Value(1.U)
   }
 }

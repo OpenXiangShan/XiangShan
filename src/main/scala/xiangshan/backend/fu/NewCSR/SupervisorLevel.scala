@@ -7,6 +7,7 @@ import xiangshan.backend.fu.NewCSR.CSRDefines._
 import xiangshan.backend.fu.NewCSR.CSRFunc._
 import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRROField => RO, CSRRWField => RW, CSRWARLField => WARL, CSRWLRLField => WLRL, _}
 import xiangshan.backend.fu.NewCSR.CSRConfig._
+import xiangshan.backend.fu.NewCSR.CSREvents.TrapEntryHSEventSinkBundle
 
 import scala.collection.immutable.SeqMap
 
@@ -47,13 +48,13 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
   val sscratch = Module(new CSRModule("Sscratch"))
     .setAddr(0x140)
 
-  val sepc = Module(new CSRModule("Sepc", new Epc))
+  val sepc = Module(new CSRModule("Sepc", new Epc) with TrapEntryHSEventSinkBundle)
     .setAddr(0x141)
 
-  val scause = Module(new CSRModule("Scause", new CauseBundle))
+  val scause = Module(new CSRModule("Scause", new CauseBundle) with TrapEntryHSEventSinkBundle)
     .setAddr(0x142)
 
-  val stval = Module(new CSRModule("Stval"))
+  val stval = Module(new CSRModule("Stval") with TrapEntryHSEventSinkBundle)
     .setAddr(0x143)
 
   val sip = Module(new CSRModule("Sip", new SipBundle) with HasMachineInterruptBundle with HasMachineDelegBundle {

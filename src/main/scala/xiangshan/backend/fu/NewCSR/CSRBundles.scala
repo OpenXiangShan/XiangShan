@@ -1,11 +1,12 @@
 package xiangshan.backend.fu.NewCSR
 
 import chisel3._
+import chisel3.experimental.BundleLiterals._
 import xiangshan.backend.fu.NewCSR.CSRDefines.{
-  XtvecMode,
   CSRROField => RO,
   CSRRWField => RW,
   CSRWARLField => WARL,
+  _
 }
 import xiangshan.backend.fu.NewCSR.CSRFunc._
 
@@ -40,5 +41,51 @@ object CSRBundles {
     val CBCFE = RO(     6).withReset(0.U)
     val CBIE  = RO( 5,  4).withReset(0.U)
     val FIOM  = RO(     0).withReset(0.U)
+  }
+
+  class PrivState extends Bundle {
+    val PRVM = PrivMode(0)
+    val V    = VirtMode(0)
+
+    def isModeHU: Bool = this.V === VirtMode.Off && this.PRVM === PrivMode.U
+
+    def isModeHS: Bool = this.V === VirtMode.Off && this.PRVM === PrivMode.S
+
+    def isModeHUorHS: Bool = this.V === VirtMode.Off && this.PRVM.isOneOf(PrivMode.S, PrivMode.U)
+
+    def isModeM: Bool = this.V === VirtMode.Off && this.PRVM === PrivMode.M
+
+    def isModeVU: Bool = this.V === VirtMode.On && this.PRVM === PrivMode.U
+
+    def isModeVS: Bool = this.V === VirtMode.On && this.PRVM === PrivMode.S
+
+    def isVirtual: Bool = this.V === VirtMode.On
+  }
+
+  object PrivState {
+    def ModeM: PrivState = WireInit((new PrivState).Lit(
+      _.PRVM -> PrivMode.M,
+      _.V    -> VirtMode.Off,
+    ))
+
+    def ModeHS: PrivState = WireInit((new PrivState).Lit(
+      _.PRVM -> PrivMode.S,
+      _.V    -> VirtMode.Off,
+    ))
+
+    def ModeHU: PrivState = WireInit((new PrivState).Lit(
+      _.PRVM -> PrivMode.U,
+      _.V    -> VirtMode.Off,
+    ))
+
+    def ModeVS: PrivState = WireInit((new PrivState).Lit(
+      _.PRVM -> PrivMode.S,
+      _.V    -> VirtMode.On,
+    ))
+
+    def ModeVU: PrivState = WireInit((new PrivState).Lit(
+      _.PRVM -> PrivMode.U,
+      _.V    -> VirtMode.On,
+    ))
   }
 }
