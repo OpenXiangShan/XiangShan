@@ -512,8 +512,6 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val mideleg = RegInit(UInt(XLEN.W), midelegInit)
   val mscratch = RegInit(UInt(XLEN.W), 0.U)
 
-  val menvcfg = RegInit(UInt(XLEN.W), 0.U)  // !WARNING: there is no logic about this CSR.
-
   val midelegWMask = "h222".U(XLEN.W)
   // PMP Mapping
   val pmp = Wire(Vec(NumPMP, new PMPEntry())) // just used for method parameter
@@ -873,8 +871,6 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Mtval, mtval),
     MaskedRegMap(Mip, mipReg.asUInt, mipWMask, MaskedRegMap.NoSideEffect, mipMask),
 
-    //--- Machine Configuration ---
-    MaskedRegMap(Menvcfg, menvcfg),
     //--- Trigger ---
     MaskedRegMap(Tselect, tselectPhy, WritableMask, WriteTselect),
     MaskedRegMap(Tdata1, tdata1Phy(tselectPhy), WritableMask, WriteTdata1, WritableMask, ReadTdata1),
