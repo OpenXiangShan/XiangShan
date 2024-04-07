@@ -278,16 +278,15 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // is delayed so that load can get the right data from store queue.
   //
   // Modify deqPtrExtNext and io.sqDeq with care!
-  val sbufferInv = WireInit(VecInit(List.fill(EnsbufferWidth)(false.B)))
-  val deqPtrExtNext = Mux(RegNext(io.sbuffer(1).fire || sbufferInv(1)),
+  val deqPtrExtNext = Mux(RegNext(io.sbuffer(1).fire),
     VecInit(deqPtrExt.map(_ + 2.U)),
-    Mux((RegNext(io.sbuffer(0).fire || sbufferInv(0))) || io.mmioStout.fire || io.vecmmioStout.fire,
+    Mux((RegNext(io.sbuffer(0).fire)) || io.mmioStout.fire || io.vecmmioStout.fire,
       VecInit(deqPtrExt.map(_ + 1.U)),
       deqPtrExt
     )
   )
-  io.sqDeq := RegNext(Mux(RegNext(io.sbuffer(1).fire || sbufferInv(1)), 2.U,
-    Mux((RegNext(io.sbuffer(0).fire || sbufferInv(0))) || io.mmioStout.fire || io.vecmmioStout.fire, 1.U, 0.U)
+  io.sqDeq := RegNext(Mux(RegNext(io.sbuffer(1).fire), 2.U,
+    Mux((RegNext(io.sbuffer(0).fire)) || io.mmioStout.fire || io.vecmmioStout.fire, 1.U, 0.U)
   ))
   assert(!RegNext(RegNext(io.sbuffer(0).fire) && (io.mmioStout.fire || io.vecmmioStout.fire)))
 
@@ -876,10 +875,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   // Send data stored in sbufferReqBitsReg to sbuffer
   for (i <- 0 until EnsbufferWidth) {
-    io.sbuffer(i).valid := dataBuffer.io.deq(i).valid && dataBuffer.io.deq(i).bits.vecValid
+    io.sbuffer(i).valid := dataBuffer.io.deq(i).valid
     dataBuffer.io.deq(i).ready := io.sbuffer(i).ready
     // Write line request should have all 1 mask
-    assert(!(io.sbuffer(i).valid && io.sbuffer(i).bits.wline && !io.sbuffer(i).bits.mask.andR))
+    assert(!(io.sbuffer(i).valid && io.sbuffer(i).bits.wline && io.sbuffer(i).bits.vecValid && !io.sbuffer(i).bits.mask.andR))
     io.sbuffer(i).bits := DontCare
     io.sbuffer(i).bits.cmd   := MemoryOpConstants.M_XWR
     io.sbuffer(i).bits.addr  := dataBuffer.io.deq(i).bits.addr
@@ -888,15 +887,15 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     io.sbuffer(i).bits.mask  := dataBuffer.io.deq(i).bits.mask
     io.sbuffer(i).bits.wline := dataBuffer.io.deq(i).bits.wline
     io.sbuffer(i).bits.prefetch := dataBuffer.io.deq(i).bits.prefetch
-    sbufferInv(i) := dataBuffer.io.deq(i).valid && !dataBuffer.io.deq(i).bits.vecValid
+    io.sbuffer(i).bits.vecValid := dataBuffer.io.deq(i).bits.vecValid
 
     // io.sbuffer(i).fire is RegNexted, as sbuffer data write takes 2 cycles.
     // Before data write finish, sbuffer is unable to provide store to load
     // forward data. As an workaround, deqPtrExt and allocated flag update
     // is delayed so that load can get the right data from store queue.
     val ptr = dataBuffer.io.deq(i).bits.sqPtr.value
-    when (RegNext(io.sbuffer(i).fire || sbufferInv(i))) {
-      allocated(RegEnable(ptr, io.sbuffer(i).fire || sbufferInv(i))) := false.B
+    when (RegNext(io.sbuffer(i).fire)) {
+      allocated(RegEnable(ptr, io.sbuffer(i).fire)) := false.B
       XSDebug("sbuffer "+i+" fire: ptr %d\n", ptr)
     }
   }
