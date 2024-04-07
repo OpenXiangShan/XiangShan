@@ -1180,8 +1180,21 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   }
 
 
-  // FIXME: please move this part to LoadQueueReplay
-  io.debug_ls := DontCare
+  // s1
+  io.debug_ls.s1_robIdx := s1_in.uop.robIdx.value
+  io.debug_ls.s1_isLoadToLoadForward := s1_fire && s1_try_ptr_chasing && !s1_ptr_chasing_canceled
+  io.debug_ls.s1_isTlbFirstMiss := io.tlb.resp.valid && io.tlb.resp.bits.miss && io.tlb.resp.bits.debug.isFirstIssue
+  // s2
+  io.debug_ls.s2_robIdx := s2_in.uop.robIdx.value
+  io.debug_ls.s2_isBankConflict := s2_fire && (!s2_kill && s2_bank_conflict)
+  io.debug_ls.s2_isDcacheFirstMiss := s2_fire && io.dcache.resp.bits.miss && s2_in.isFirstIssue
+  io.debug_ls.s2_isForwardFail := s2_fire && s2_fwd_fail
+  // s3
+  io.debug_ls.s3_robIdx := s2_in.uop.robIdx.value
+  io.debug_ls.s3_isReplayFast := io.fast_rep_out.valid
+  io.debug_ls.s3_isReplay := (s3_valid && !s3_in.feedbacked) && io.lsq.ldin.bits.rep_info.need_rep // include fast replay
+  io.debug_ls.replayCause := io.lsq.ldin.bits.rep_info.cause
+  io.debug_ls.replayCnt := 1.U
 
 
   // Topdown
