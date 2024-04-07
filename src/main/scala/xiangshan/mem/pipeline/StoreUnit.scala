@@ -178,7 +178,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   XSError(s0_use_flow_vec && s0_out.vaddr(3, 0) =/= 0.U && s0_vecstin.alignedType(2), "unit stride 128 bit element is not aligned!")
   s0_out.uop.exceptionVec(storeAddrMisaligned) := Mux(s0_use_flow_rs || s0_use_flow_vec, !s0_addr_aligned, false.B)
 
-  io.st_mask_out.valid       := s0_use_flow_rs
+  io.st_mask_out.valid       := s0_use_flow_rs || s0_use_flow_vec
   io.st_mask_out.bits.mask   := s0_out.mask
   io.st_mask_out.bits.sqIdx  := s0_out.uop.sqIdx
 

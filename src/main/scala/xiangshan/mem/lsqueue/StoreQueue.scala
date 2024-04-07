@@ -31,6 +31,7 @@ import xiangshan.backend.rob.{RobLsqIO, RobPtr}
 import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
 import xiangshan.backend.decode.isa.bitfield.{Riscv32BitInst, XSInstBitFields}
 import xiangshan.backend.fu.FuConfig._
+import xiangshan.backend.fu.FuType
 
 class SqPtr(implicit p: Parameters) extends CircularQueuePtr[SqPtr](
   p => p(XSCoreParamsKey).StoreQueueSize
@@ -474,6 +475,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   for (i <- 0 until StorePipelineWidth) {
     dataModule.io.data.wen(i) := false.B
     val stWbIndex = io.storeDataIn(i).bits.uop.sqIdx.value
+    val isVec     = FuType.isVStore(io.storeDataIn(i).bits.uop.fuType)
     // sq data write takes 2 cycles:
     // sq data write s0
     when (io.storeDataIn(i).fire) {
@@ -481,7 +483,9 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       dataModule.io.data.waddr(i) := stWbIndex
       dataModule.io.data.wdata(i) := Mux(io.storeDataIn(i).bits.uop.fuOpType === LSUOpType.cbo_zero,
         0.U,
-        genVWdata(io.storeDataIn(i).bits.data, io.storeDataIn(i).bits.uop.fuOpType(2,0))
+        Mux(isVec,
+          io.storeDataIn(i).bits.data,
+          genVWdata(io.storeDataIn(i).bits.data, io.storeDataIn(i).bits.uop.fuOpType(2,0)))
       )
       dataModule.io.data.wen(i) := true.B
 
