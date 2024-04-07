@@ -80,7 +80,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val nuke_rollback = Output(Valid(new Redirect))
     val nack_rollback = Output(Valid(new Redirect))
     val release = Flipped(Valid(new Release))
-    val refill = Flipped(Valid(new Refill))
+   // val refill = Flipped(Valid(new Refill))
     val tl_d_channel  = Input(new DcacheToLduForwardIO)
     val uncacheOutstanding = Input(Bool())
     val uncache = new UncacheWordIO
@@ -167,7 +167,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   loadQueue.io.nuke_rollback       <> io.nuke_rollback
   loadQueue.io.nack_rollback       <> io.nack_rollback
   loadQueue.io.replay              <> io.replay
-  loadQueue.io.refill              <> io.refill
+ // loadQueue.io.refill              <> io.refill
   loadQueue.io.tl_d_channel        <> io.tl_d_channel
   loadQueue.io.release             <> io.release
   loadQueue.io.exceptionAddr.isStore := DontCare
