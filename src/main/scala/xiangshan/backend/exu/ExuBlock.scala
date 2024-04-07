@@ -36,7 +36,7 @@ class ExuBlockImp(
     exu.io.flush <> io.flush
     exu.io.csrio.foreach(exuio => io.csrio.get <> exuio)
     exu.io.fenceio.foreach(exuio => io.fenceio.get <> exuio)
-    exu.io.frm.foreach(exuio => io.frm.get <> exuio)
+    exu.io.frm.foreach(exuio => exuio := RegNext(io.frm.get))  // each vf exu pipe frm from csr
     exu.io.vxrm.foreach(exuio => io.vxrm.get <> exuio)
     exu.io.in <> input
     output <> exu.io.out
