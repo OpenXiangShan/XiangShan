@@ -222,6 +222,19 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val simpAgeDetectRequest = OptionWrapper(params.hasCompAndSimp, Wire(Vec(params.numDeq + params.numEnq, UInt(params.numSimp.W))))
   simpAgeDetectRequest.foreach(_ := 0.U.asTypeOf(simpAgeDetectRequest.get))
 
+  // when vf exu (with og2) wake up int/mem iq (without og2), the wakeup signals should delay 1 cycle
+  // as vf exu's min latency is 1, we do not need consider og0cancel
+  val wakeupFromIQ = Wire(chiselTypeOf(io.wakeupFromIQ))
+  wakeupFromIQ.zip(io.wakeupFromIQ).foreach { case (w, w_src) => 
+    if (!params.inVfSchd && params.readVfRf && params.hasWakeupFromVf && w_src.bits.params.isVfExeUnit) {
+      val noCancel = !LoadShouldCancel(Some(w_src.bits.loadDependency), io.ldCancel)
+      w := RegNext(Mux(noCancel, w_src, 0.U.asTypeOf(w)))
+      w.bits.loadDependency.zip(w_src.bits.loadDependency).foreach{ case (ld, ld_src) => ld := RegNext(Mux(noCancel, ld_src << 1, 0.U.asTypeOf(ld))) }
+    } else {
+      w := w_src
+    }
+  }
+
   /**
     * Connection of [[entries]]
     */
@@ -298,7 +311,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       entriesIO.subDeqSelOH.foreach(_(deqIdx)                   := subDeqSelOHVec.get(deqIdx))
     }
     entriesIO.wakeUpFromWB                                      := io.wakeupFromWB
-    entriesIO.wakeUpFromIQ                                      := io.wakeupFromIQ
+    entriesIO.wakeUpFromIQ                                      := wakeupFromIQ
     entriesIO.og0Cancel                                         := io.og0Cancel
     entriesIO.og1Cancel                                         := io.og1Cancel
     entriesIO.ldCancel                                          := io.ldCancel
