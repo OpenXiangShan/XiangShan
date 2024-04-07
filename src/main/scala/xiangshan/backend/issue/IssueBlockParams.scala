@@ -250,6 +250,10 @@ case class IssueBlockParams(
 
   def needWakeupFromVfWBPort = backendParam.allExuParams.filter(x => !wakeUpInExuSources.map(_.name).contains(x.name)).groupBy(x => x.getVfWBPort.getOrElse(VfWB(port = -1)).port).filter(_._1 != -1)
 
+  def hasWakeupFromMem: Boolean = backendParam.allExuParams.filter(x => wakeUpInExuSources.map(_.name).contains(x.name)).map(_.isMemExeUnit).fold(false)(_ | _)
+
+  def hasWakeupFromVf: Boolean = backendParam.allExuParams.filter(x => wakeUpInExuSources.map(_.name).contains(x.name)).map(_.isVfExeUnit).fold(false)(_ | _)
+
   def getFuCfgs: Seq[FuConfig] = exuBlockParams.flatMap(_.fuConfigs).distinct
 
   def deqFuCfgs: Seq[Seq[FuConfig]] = exuBlockParams.map(_.fuConfigs)

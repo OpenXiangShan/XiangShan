@@ -269,8 +269,9 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       srcStatusNext.srcType                           := srcStatus.srcType
       srcStatusNext.srcState                          := Mux(cancel, false.B, wakeup | srcStatus.srcState)
       srcStatusNext.dataSources.value                 := (if (params.inVfSchd && params.readVfRf && params.hasIQWakeUp) {
+                                                            val isWakeupByMemIQ = wakeupByIQOH.zip(commonIn.wakeUpFromIQ).filter(_._2.bits.params.isMemExeUnit).map(_._1).fold(false.B)(_ || _)
                                                             Mux(wakeupByIQ, 
-                                                                DataSource.bypass, 
+                                                                if (params.hasWakeupFromMem) Mux(isWakeupByMemIQ, DataSource.bypass2, DataSource.bypass) else DataSource.bypass, 
                                                                 Mux(srcStatus.dataSources.readBypass, 
                                                                     DataSource.bypass2, 
                                                                     Mux(srcStatus.dataSources.readBypass2, DataSource.reg, srcStatus.dataSources.value)))
@@ -311,7 +312,12 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     commonOut.fuType                                  := IQFuType.readFuType(status.fuType, params.getFuCfgs.map(_.fuType)).asUInt
     commonOut.robIdx                                  := status.robIdx
     commonOut.dataSource.zipWithIndex.foreach{ case (dataSourceOut, srcIdx) =>
-      dataSourceOut.value                             := Mux(hasIQWakeupGet.srcWakeupByIQWithoutCancel(srcIdx).asUInt.orR, DataSource.forward, status.srcStatus(srcIdx).dataSources.value)
+      val wakeupByIQWithoutCancel = hasIQWakeupGet.srcWakeupByIQWithoutCancel(srcIdx).asUInt.orR
+      val wakeupByIQWithoutCancelOH = hasIQWakeupGet.srcWakeupByIQWithoutCancel(srcIdx)
+      val isWakeupByMemIQ = wakeupByIQWithoutCancelOH.zip(commonIn.wakeUpFromIQ).filter(_._2.bits.params.isMemExeUnit).map(_._1).fold(false.B)(_ || _)
+      dataSourceOut.value                             := Mux(wakeupByIQWithoutCancel, 
+                                                              if (params.inVfSchd && params.readVfRf && params.hasWakeupFromMem) Mux(isWakeupByMemIQ, DataSource.bypass, DataSource.forward) else DataSource.forward, 
+                                                              status.srcStatus(srcIdx).dataSources.value)
     }
     commonOut.isFirstIssue                            := !status.firstIssue
     commonOut.entry.valid                             := validReg
