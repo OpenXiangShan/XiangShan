@@ -207,8 +207,6 @@ class CSREnumType(
 }
 
 abstract class CSREnum extends ChiselEnum {
-  type Type = CSREnumType
-
   protected def apply(rwType: CSRRWType)(msb: Int, lsb: Int)(factory: ChiselEnum): CSREnumType = {
     this.msb = msb
     this.lsb = lsb
@@ -217,7 +215,7 @@ abstract class CSREnum extends ChiselEnum {
 
   var msb, lsb: Int = 0
 
-  def makeType: Type = {
+  def makeType: CSREnumType = {
     new CSREnumType(msb, lsb)(RWType())(this)
   }
 
@@ -248,6 +246,7 @@ trait CSRROApply { self: CSREnum =>
 trait CSRRWApply { self: CSREnum =>
   def apply(msb: Int, lsb: Int): CSREnumType = self
     .apply(RWType())(msb, lsb)(this)
+  def apply(bit: Int): CSREnumType = apply(bit, bit)
 }
 
 trait CSRWARLApply { self: CSREnum =>

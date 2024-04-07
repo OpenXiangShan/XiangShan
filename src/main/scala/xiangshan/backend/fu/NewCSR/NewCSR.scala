@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import top.{ArgParser, Generator}
 import xiangshan.backend.fu.NewCSR.CSRDefines.{PrivMode, VirtMode}
+import xiangshan.backend.fu.NewCSR.CSREvents.{CSREvents, EventUpdatePrivStateOutput, TrapEntryMEventSinkBundle}
 
 object CSRConfig {
   final val GEILEN = 63
@@ -20,6 +21,7 @@ object CSRConfig {
 
   final val VaddrWidth = 39 // only Sv39
 
+  final val XLEN = 64 // Todo: use XSParams
 }
 
 class NewCSR extends Module
@@ -30,7 +32,11 @@ class NewCSR extends Module
   with Unprivileged
   with HasExternalInterruptBundle
   with HasInstCommitBundle
-  with SupervisorMachineAliasConnect {
+  with SupervisorMachineAliasConnect
+  with CSREvents
+{
+
+  import CSRConfig._
 
   val io = IO(new Bundle {
     val w = Flipped(ValidIO(new Bundle {
@@ -40,25 +46,30 @@ class NewCSR extends Module
     val rAddr = Input(UInt(12.W))
     val rData = Output(UInt(64.W))
     val trap = Flipped(ValidIO(new Bundle {
-      val toPRVM = PrivMode()
-      val toV = VirtMode()
+      val toPRVM          = PrivMode()
+      val toV             = VirtMode()
+      val tpc             = UInt(VaddrWidth.W)
+      val isInterrupt     = Bool()
+      val trapVec         = UInt(64.W)
+      val isCrossPageIPF  = Bool()
     }))
+    val fromMem = Input(new Bundle {
+      val excpVaddr = UInt(VaddrWidth.W)
+      val excpGVA = UInt(VaddrWidth.W)
+      val excpGPA = UInt(VaddrWidth.W) // Todo: use guest physical address width
+    })
     val tret = Flipped(ValidIO(new Bundle {
       val toPRVM = PrivMode()
       val toV = VirtMode()
     }))
-    // from interrupt controller
-    val fromIC = Input(new Bundle {
-      val vs = new CSRIRCBundle
-    })
   })
 
   val addr = io.w.bits.addr
   val data = io.w.bits.data
   val wen = io.w.valid
 
-  val PRVM = RegInit(PrivMode.M)
-  val V = RegInit(VirtMode.Off)
+  val PRVM = RegInit(PrivMode(0), PrivMode.M)
+  val V = RegInit(VirtMode(0), VirtMode.Off)
 
   val trap = io.trap.valid
   val trapToPRVM = io.trap.bits.toPRVM
@@ -130,6 +141,11 @@ class NewCSR extends Module
         m.commitInstNum := this.commitInstNum
       case _ =>
     }
+    mod match {
+      case m: TrapEntryMEventSinkBundle =>
+        m.trapToM := trapEntryMEvent.out
+      case _ =>
+    }
   }
 
   csrMods.foreach { mod =>
@@ -140,6 +156,45 @@ class NewCSR extends Module
     println(s"${mod.modName}: ")
     println(mod.dumpFields)
   }
+
+  trapEntryMEvent.valid := trapToM
+  trapEntryMEvent.in match {
+    case in =>
+      in.mstatus := mstatus.regOut
+      in.trapPc := io.trap.bits.tpc
+      in.privState.PRVM := PRVM
+      in.privState.V := V
+      in.isInterrupt := io.trap.bits.isInterrupt
+      in.trapVec := io.trap.bits.trapVec
+      in.isCrossPageIPF := io.trap.bits.isCrossPageIPF
+      in.trapMemVaddr := io.fromMem.excpVaddr
+      in.trapMemGVA := io.fromMem.excpGVA
+      in.trapMemGPA := io.fromMem.excpGPA
+      in.iMode.PRVM := PRVM
+      in.iMode.V := V
+      in.dMode.PRVM := Mux(mstatus.rdata.MPRV.asBool, mstatus.rdata.MPP, PRVM)
+      in.dMode.V := Mux(mstatus.rdata.MPRV.asBool, mstatus.rdata.MPV, V)
+      in.satp := satp.rdata
+      in.vsatp := vsatp.rdata
+  }
+
+  PRVM := MuxCase(
+    PRVM,
+    events.filter(_.out.isInstanceOf[EventUpdatePrivStateOutput]).map {
+      x => x.out match {
+        case xx: EventUpdatePrivStateOutput => (xx.privState.valid -> xx.privState.bits.PRVM)
+      }
+    }
+  )
+
+  V := MuxCase(
+    V,
+    events.filter(_.out.isInstanceOf[EventUpdatePrivStateOutput]).map {
+      x => x.out match {
+        case xx: EventUpdatePrivStateOutput => (xx.privState.valid -> xx.privState.bits.V)
+      }
+    }
+  )
 }
 
 trait SupervisorMachineAliasConnect { self: NewCSR with MachineLevel with SupervisorLevel =>

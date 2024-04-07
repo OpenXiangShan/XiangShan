@@ -5,12 +5,13 @@ import chisel3.util._
 import xiangshan.backend.fu.NewCSR.CSRBundles._
 import xiangshan.backend.fu.NewCSR.CSRDefines._
 import xiangshan.backend.fu.NewCSR.CSRDefines.{
-  CSRRWField => RW,
   CSRROField => RO,
-  CSRWLRLField => WLRL,
+  CSRRWField => RW,
   CSRWARLField => WARL,
+  CSRWLRLField => WLRL,
   _
 }
+import xiangshan.backend.fu.NewCSR.CSREvents.TrapEntryMEventSinkBundle
 
 import scala.collection.immutable.SeqMap
 
@@ -105,13 +106,13 @@ trait MachineLevel { self: NewCSR =>
   val mscratch = Module(new CSRModule("Mscratch"))
     .setAddr(0x340)
 
-  val mepc = Module(new CSRModule("Mepc", new Epc))
+  val mepc = Module(new CSRModule("Mepc", new Epc) with TrapEntryMEventSinkBundle)
     .setAddr(0x341)
 
-  val mcause = Module(new CSRModule("Mcause", new CauseBundle))
+  val mcause = Module(new CSRModule("Mcause", new CauseBundle) with TrapEntryMEventSinkBundle)
     .setAddr(0x342)
 
-  val mtval = Module(new CSRModule("Mtval"))
+  val mtval = Module(new CSRModule("Mtval") with TrapEntryMEventSinkBundle)
     .setAddr(0x343)
 
   val mip = Module(new CSRModule("Mip", new MipBundle) with HasMachineInterruptBundle with HasExternalInterruptBundle {
@@ -136,10 +137,10 @@ trait MachineLevel { self: NewCSR =>
     rdata.MSIP := platformIRP.MSIP
   }).setAddr(0x344)
 
-  val mtinst = Module(new CSRModule("Mtinst"))
+  val mtinst = Module(new CSRModule("Mtinst") with TrapEntryMEventSinkBundle)
     .setAddr(0x34A)
 
-  val mtval2 = Module(new CSRModule("Mtval2"))
+  val mtval2 = Module(new CSRModule("Mtval2") with TrapEntryMEventSinkBundle)
     .setAddr(0x34B)
 
   val mseccfg = Module(new CSRModule("Mseccfg", new CSRBundle {
@@ -229,13 +230,13 @@ class MstatusBundle extends CSRBundle {
   val SBE  = CSRROField     (36).withReset(0.U)
   val MBE  = CSRROField     (37).withReset(0.U)
   val GVA  = CSRRWField     (38).withReset(0.U)
-  val MPV  = CSRRWField     (39).withReset(0.U)
+  val MPV  = VirtMode       (39).withReset(0.U)
   val SD   = CSRROField     (63,
     (_, _) => FS === ContextStatus.Dirty || VS === ContextStatus.Dirty
   )
 }
 
-class MstatusModule extends CSRModule("MStatus", new MstatusBundle) {
+class MstatusModule extends CSRModule("MStatus", new MstatusBundle) with TrapEntryMEventSinkBundle {
   val mstatus = IO(Output(bundle))
   val sstatus = IO(Output(new SstatusBundle))
 
