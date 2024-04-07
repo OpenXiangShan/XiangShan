@@ -413,7 +413,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   XSPerfAccumulate("stall_cycle_fp_dq", stall_fp_dq)
   XSPerfAccumulate("stall_cycle_ls_dq", stall_ls_dq)
 
-  val notIssue = io.debugTopDown.fromRob.robHeadLsIssue
+  val notIssue = !io.debugTopDown.fromRob.robHeadLsIssue
   val tlbReplay = io.debugTopDown.fromCore.fromMem.robHeadTlbReplay
   val tlbMiss = io.debugTopDown.fromCore.fromMem.robHeadTlbMiss
   val vioReplay = io.debugTopDown.fromCore.fromMem.robHeadLoadVio
