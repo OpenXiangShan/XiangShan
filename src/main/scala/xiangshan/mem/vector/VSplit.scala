@@ -30,10 +30,10 @@ import xiangshan.backend.fu.vector.Bundles._
 
 class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends VLSUModule{
   val io = IO(new VSplitPipelineIO(isVStore))
-
-  def us_whole_reg(fuOpType: UInt) = fuOpType === VlduType.vlr
-  def us_mask(fuOpType: UInt) = fuOpType === VlduType.vlm
-  def us_fof(fuOpType: UInt) = fuOpType === VlduType.vleff
+  // will be override later
+  def us_whole_reg(fuOpType: UInt): Bool = false.B
+  def us_mask(fuOpType: UInt): Bool = false.B
+  def us_fof(fuOpType: UInt): Bool = false.B
 
   val vdIdxReg = RegInit(0.U(3.W))
 
@@ -56,6 +56,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   val s0_vm = io.in.bits.uop.vpu.vm
   val s0_emul = Mux(us_whole_reg(s0_fuOpType) ,GenUSWholeEmul(io.in.bits.uop.vpu.nf), Mux(us_mask(s0_fuOpType), 0.U(mulBits.W), EewLog2(s0_eew) - s0_sew + s0_lmul))
   val s0_preIsSplit = !(isUnitStride(s0_mop) && !us_fof(s0_fuOpType))
+  val s0_nfield        = s0_nf +& 1.U
 
   val s0_valid         = Wire(Bool())
   val s0_kill          = io.in.bits.uop.robIdx.needFlush(io.redirect)
@@ -89,7 +90,11 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   )
 
   val vvl = io.in.bits.src_vl.asTypeOf(VConfig()).vl
-  val evl = Mux(isUsWholeReg, GenUSWholeRegVL(io.in.bits.uop.vpu.nf +& 1.U,s0_eew), Mux(isMaskReg, GenUSMaskRegVL(vvl), vvl))
+  val evl = Mux(isUsWholeReg,
+                GenUSWholeRegVL(io.in.bits.uop.vpu.nf +& 1.U, s0_eew),
+                Mux(isMaskReg,
+                    GenUSMaskRegVL(vvl),
+                    vvl))
   val vvstart = io.in.bits.uop.vpu.vstart
   val alignedType = Mux(isIndexed(instType), s0_sew(1, 0), s0_eew(1, 0))
   val broadenAligendType = Mux(s0_preIsSplit, Cat("b0".U, alignedType), "b100".U) // if is unit-stride, use 128-bits memory access
@@ -121,7 +126,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
     x.baseAddr := io.in.bits.src_rs1
     x.stride := io.in.bits.src_stride
     x.flowNum := flowNum
-    x.nfields := s0_nf +& 1.U
+    x.nfields := s0_nfield
     x.vm := s0_vm
     x.usWholeReg := isUsWholeReg
     x.usMaskReg := isMaskReg
@@ -394,9 +399,16 @@ class VLSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = f
 }
 
 class VSSplitPipelineImp(implicit p: Parameters) extends VSplitPipeline(isVStore = true){
+  override def us_whole_reg(fuOpType: UInt): Bool = fuOpType === VstuType.vsr
+  override def us_mask(fuOpType: UInt): Bool      = fuOpType === VstuType.vsm
+  override def us_fof(fuOpType: UInt): Bool       = false.B // dont have vector fof store
 }
 
 class VLSplitPipelineImp(implicit p: Parameters) extends VSplitPipeline(isVStore = false){
+
+  override def us_whole_reg(fuOpType: UInt): Bool = fuOpType === VlduType.vlr
+  override def us_mask(fuOpType: UInt): Bool      = fuOpType === VlduType.vlm
+  override def us_fof(fuOpType: UInt): Bool       = fuOpType === VlduType.vleff
 }
 
 class VLSplitImp(implicit p: Parameters) extends VLSUModule{
