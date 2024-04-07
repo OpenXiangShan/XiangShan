@@ -65,7 +65,6 @@ class HybridUnit(implicit p: Parameters) extends XSModule
       val lsq           = new LoadToLsqIO
       val tl_d_channel  = Input(new DcacheToLduForwardIO)
       val forward_mshr  = Flipped(new LduToMissqueueForwardIO)
-      val refill        = Flipped(ValidIO(new Refill))
       val tlb_hint      = Flipped(new TlbHintReq)
       val l2_hint       = Input(Valid(new L2ToL1Hint))
 

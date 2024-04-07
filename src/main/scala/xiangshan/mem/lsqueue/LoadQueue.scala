@@ -131,7 +131,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val ldout = Vec(LoadPipelineWidth, DecoupledIO(new MemExuOutput))
     val ld_raw_data = Vec(LoadPipelineWidth, Output(new LoadDataFromLQBundle))
     val replay = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))
-    val refill = Flipped(ValidIO(new Refill))
+  //  val refill = Flipped(ValidIO(new Refill))
     val tl_d_channel  = Input(new DcacheToLduForwardIO)
     val release = Flipped(Valid(new Release))
     val nuke_rollback = Output(Valid(new Redirect))
@@ -163,7 +163,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   val virtualLoadQueue = Module(new VirtualLoadQueue)  //  control state
   val exceptionBuffer = Module(new LqExceptionBuffer) // exception buffer
   val uncacheBuffer = Module(new UncacheBuffer) // uncache buffer
-
   /**
    * LoadQueueRAR
    */
@@ -246,7 +245,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueReplay.io.storeAddrIn      <> io.sta.storeAddrIn // from store_s1
   loadQueueReplay.io.storeDataIn      <> io.std.storeDataIn // from store_s0
   loadQueueReplay.io.replay           <> io.replay
-  loadQueueReplay.io.refill           <> io.refill
+  //loadQueueReplay.io.refill           <> io.refill
   loadQueueReplay.io.tl_d_channel     <> io.tl_d_channel
   loadQueueReplay.io.stAddrReadySqPtr <> io.sq.stAddrReadySqPtr
   loadQueueReplay.io.stAddrReadyVec   <> io.sq.stAddrReadyVec

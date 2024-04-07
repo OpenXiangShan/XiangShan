@@ -307,7 +307,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   private val dcache = outer.dcache.module
   val uncache = outer.uncache.module
 
-  val delayedDcacheRefill = RegNext(dcache.io.lsu.lsq)
+  //val delayedDcacheRefill = RegNext(dcache.io.lsu.lsq)
 
   val csrCtrl = DelayN(io.ooo_to_mem.csrCtrl, 2)
   dcache.io.csr.distribute_csr <> csrCtrl.distribute_csr
@@ -698,7 +698,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.lsq.stld_nuke_query <> lsq.io.ldu.stld_nuke_query(i)
     loadUnits(i).io.csrCtrl       <> csrCtrl
     // dcache refill req
-    loadUnits(i).io.refill           <> delayedDcacheRefill
+  // loadUnits(i).io.refill           <> delayedDcacheRefill
     // dtlb
     loadUnits(i).io.tlb <> dtlb_reqs.take(LduCnt)(i)
     // pmp
@@ -824,7 +824,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     hybridUnits(i).io.ldu_io.lsq.stld_nuke_query <> lsq.io.ldu.stld_nuke_query(LduCnt + i)
     hybridUnits(i).io.csrCtrl <> csrCtrl
     // dcache refill req
-    hybridUnits(i).io.ldu_io.refill <> delayedDcacheRefill
     hybridUnits(i).io.ldu_io.tlb_hint.id := dtlbRepeater.io.hint.get.req(LduCnt + i).id
     hybridUnits(i).io.ldu_io.tlb_hint.full := dtlbRepeater.io.hint.get.req(LduCnt + i).full ||
       RegNext(tlbreplay(LduCnt + i)) || RegNext(dtlb_ld(0).tlbreplay(LduCnt + i))
@@ -1195,7 +1194,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   AddPipelineReg(uncacheReq, uncache.io.lsq.req, false.B)
   AddPipelineReg(uncache.io.lsq.resp, uncacheResp, false.B)
 
-  lsq.io.refill         := delayedDcacheRefill
+  //lsq.io.refill         := delayedDcacheRefill
   lsq.io.release        := dcache.io.lsu.release
   lsq.io.lqCancelCnt <> io.mem_to_ooo.lqCancelCnt
   lsq.io.sqCancelCnt <> io.mem_to_ooo.sqCancelCnt
