@@ -41,8 +41,10 @@ class DebugLsInfo(implicit p: Parameters) extends XSBundle {
   val s2_isDcacheFirstMiss = Bool() // in s2 (predicted result is in s1 when using WPU, real result is in s2)
   val s2_isForwardFail = Bool() // in s2
   val s3_isReplayFast = Bool()
+  val s3_isReplaySlow = Bool()
+  val s3_isReplayRS = Bool()
   val s3_isReplay = Bool()
-  val replayCause = Vec(LoadReplayCauses.allCauses, Bool)
+  val replayCause = Vec(LoadReplayCauses.allCauses, Bool())
   val replayCnt = UInt(XLEN.W)
 
   def s1SignalEnable(ena: DebugLsInfo) = {
@@ -58,12 +60,14 @@ class DebugLsInfo(implicit p: Parameters) extends XSBundle {
 
   def s3SignalEnable(ena: DebugLsInfo) = {
     when(ena.s3_isReplayFast) { s3_isReplayFast := true.B }
+    when(ena.s3_isReplaySlow) { s3_isReplaySlow := true.B }
+    when(ena.s3_isReplayRS) { s3_isReplayRS := true.B }
     when(ena.s3_isReplay) {
       s3_isReplay := true.B
       replayCnt := replayCnt + 1.U
-    }
-    when(ena.s3_isReplay && (ena.replayCause.asUInt ^ replayCause.asUInt).orR){
-      replayCause := ena.replayCause.zipWithIndex.map{ case (x, i) => x | replayCause(i) }
+      when((ena.replayCause.asUInt ^ replayCause.asUInt).orR) {
+        replayCause := ena.replayCause.zipWithIndex.map{ case (x, i) => x | replayCause(i) }
+      }
     }
   }
 
@@ -73,12 +77,15 @@ object DebugLsInfo {
     val lsInfo = Wire(new DebugLsInfo)
     lsInfo.s1_isTlbFirstMiss := false.B
     lsInfo.s1_isLoadToLoadForward := false.B
-    lsInfo.s3_isReplayFast := false.B
     lsInfo.s2_isBankConflict := false.B
     lsInfo.s2_isDcacheFirstMiss := false.B
     lsInfo.s2_isForwardFail := false.B
+    lsInfo.s3_isReplayFast := false.B
+    lsInfo.s3_isReplaySlow := false.B
+    lsInfo.s3_isReplayRS := false.B
     lsInfo.s3_isReplay := false.B
     lsInfo.replayCnt := 0.U
+    lsInfo.replayCause := Seq.fill(LoadReplayCauses.allCauses)(false.B)
     lsInfo
   }
 
