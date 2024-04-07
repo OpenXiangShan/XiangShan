@@ -88,7 +88,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
 
   println(s"[BypassNetwork] allExuNum: ${toExus.size} intExuNum: ${intExuNum} vfExuNum: ${vfExuNum} memExuNum: ${memExuNum}")
 
-  private val fromDPsHasBypass2Source = fromDPs.filter(x => x.bits.params.isIQWakeUpSource && x.bits.params.writeVfRf && x.bits.params.isVfExeUnit).map(_.bits.params.exuIdx)
+  private val fromDPsHasBypass2Source = fromDPs.filter(x => x.bits.params.isIQWakeUpSource && x.bits.params.writeVfRf && (x.bits.params.isVfExeUnit || x.bits.params.hasLoadExu)).map(_.bits.params.exuIdx)
   private val fromDPsHasBypass2Sink   = fromDPs.filter(x => x.bits.params.isIQWakeUpSink && x.bits.params.readVfRf && x.bits.params.isVfExeUnit).map(_.bits.params.exuIdx)
 
   private val bypass2ValidVec3 = MixedVecInit(

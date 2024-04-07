@@ -78,12 +78,17 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
 
   for (i <- 0 until params.numRegSrc) {
     if (params.inVfSchd && params.readVfRf && params.hasIQWakeUp) {
-      enqDelayDataSources(i).value            := Mux(enqDelayOut1.srcWakeUpByIQ(i).asBool, 
-                                                      DataSource.bypass, 
-                                                      Mux(enqDelayOut2.srcWakeUpByIQ(i).asBool, DataSource.bypass2, entryReg.status.srcStatus(i).dataSources.value))
       val enqDelay1WakeUpValid = enqDelayOut1.srcWakeUpByIQVec(i).asUInt.orR
       val enqDelay1WakeUpOH    = enqDelayOut1.srcWakeUpByIQVec(i)
       val enqDelay2WakeUpOH    = enqDelayOut2.srcWakeUpByIQVec(i)
+      val enqDelay1IsWakeupByMemIQ = enqDelay1WakeUpOH.zip(io.commonIn.wakeUpFromIQ).filter(_._2.bits.params.isMemExeUnit).map(_._1).fold(false.B)(_ || _)
+      val enqDelay2IsWakeupByMemIQ = enqDelay2WakeUpOH.zip(io.commonIn.wakeUpFromIQ).filter(_._2.bits.params.isMemExeUnit).map(_._1).fold(false.B)(_ || _)
+
+      enqDelayDataSources(i).value            := Mux(enqDelayOut1.srcWakeUpByIQ(i).asBool, 
+                                                      if (params.hasWakeupFromMem) Mux(enqDelay1IsWakeupByMemIQ, DataSource.bypass2, DataSource.bypass) else DataSource.bypass, 
+                                                      Mux(enqDelayOut2.srcWakeUpByIQ(i).asBool, 
+                                                          if (params.hasWakeupFromMem) Mux(enqDelay2IsWakeupByMemIQ, DataSource.reg, DataSource.bypass2) else DataSource.bypass2, 
+                                                          entryReg.status.srcStatus(i).dataSources.value))
       enqDelaySrcWakeUpL1ExuOH.get(i)         := Mux(enqDelay1WakeUpValid, 
                                                       Mux1H(enqDelay1WakeUpOH, params.wakeUpSourceExuIdx.map(x => MathUtils.IntToOH(x).U(backendParams.numExu.W))), 
                                                       Mux1H(enqDelay2WakeUpOH, params.wakeUpSourceExuIdx.map(x => MathUtils.IntToOH(x).U(backendParams.numExu.W))))
