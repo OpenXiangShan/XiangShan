@@ -100,7 +100,6 @@ class TageResp(implicit p: Parameters) extends TageResp_meta {
 
 class TageUpdate(implicit p: Parameters) extends TageBundle {
   val pc = UInt(VAddrBits.W)
-  val folded_hist = new AllFoldedHistories(foldedGHistInfos)
   val ghist = UInt(HistoryLength.W)
   // update tag and ctr
   val mask = Vec(numBr, Bool())
@@ -362,18 +361,16 @@ class TageTable
     io.resps(i).bits.unconf := per_br_unconf(i)
   }
 
-  if (EnableGHistDiff) {
-    val update_idx_history = compute_folded_ghist(io.update.ghist, log2Ceil(nRowsPerBr))
-    val update_idx_fh = io.update.folded_hist.getHistWithInfo(idxFhInfo)
-    XSError(update_idx_history =/= update_idx_fh.folded_hist && io.update.mask.reduce(_||_),
-      p"tage table $tableIdx has different fh when update," +
-      p" ghist: ${Binary(update_idx_history)}, fh: ${Binary(update_idx_fh.folded_hist)}\n")
-  }
   // Use fetchpc to compute hash
+  val update_folded_hist = WireInit(0.U.asTypeOf(new AllFoldedHistories(foldedGHistInfos)))
+  update_folded_hist.getHistWithInfo(idxFhInfo).folded_hist := compute_folded_ghist(io.update.ghist, log2Ceil(nRowsPerBr))
+  update_folded_hist.getHistWithInfo(tagFhInfo).folded_hist := compute_folded_ghist(io.update.ghist, tagLen)
+  update_folded_hist.getHistWithInfo(altTagFhInfo).folded_hist := compute_folded_ghist(io.update.ghist, tagLen-1)
+
   val per_bank_update_wdata = Wire(Vec(nBanks, Vec(numBr, new TageEntry))) // corresponds to physical branches
 
   val update_unhashed_idx = getUnhashedIdx(io.update.pc)
-  val (update_idx, update_tag) = compute_tag_and_hash(update_unhashed_idx, io.update.folded_hist)
+  val (update_idx, update_tag) = compute_tag_and_hash(update_unhashed_idx, update_folded_hist)
   val update_req_bank_1h = get_bank_mask(update_idx)
   val update_idx_in_bank = get_bank_idx(update_idx)
 
@@ -615,7 +612,6 @@ class Tage(implicit p: Parameters) extends BaseTage {
   val updateValids = VecInit((0 until TageBanks).map(w =>
       update.ftb_entry.brValids(w) && u_valid && !update.ftb_entry.always_taken(w) &&
       !(PriorityEncoder(update.br_taken_mask) < w.U)))
-  val updateFHist = update.spec_info.folded_hist
 
   val updateMeta = update.meta.asTypeOf(new TageMeta)
 
@@ -841,7 +837,6 @@ class Tage(implicit p: Parameters) extends BaseTage {
       tables(i).io.update.us(w) := RegEnable(updateU(w)(i), realWen)
       // use fetch pc instead of instruction pc
       tables(i).io.update.pc := RegEnable(update.pc, realWen)
-      tables(i).io.update.folded_hist := RegEnable(updateFHist, realWen)
       tables(i).io.update.ghist := RegEnable(io.update.bits.ghist, realWen)
     }
   }

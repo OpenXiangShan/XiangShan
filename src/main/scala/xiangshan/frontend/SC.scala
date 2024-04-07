@@ -48,7 +48,7 @@ class SCResp(val ctrBits: Int = 6)(implicit p: Parameters) extends SCBundle {
 
 class SCUpdate(val ctrBits: Int = 6)(implicit p: Parameters) extends SCBundle {
   val pc = UInt(VAddrBits.W)
-  val folded_hist = new AllFoldedHistories(foldedGHistInfos)
+  val ghist = UInt(HistoryLength.W)
   val mask = Vec(numBr, Bool())
   val oldCtrs = Vec(numBr, SInt(ctrBits.W))
   val tagePreds = Vec(numBr, Bool())
@@ -122,7 +122,11 @@ class SCTable(val nRows: Int, val ctrBits: Int, val histLen: Int)(implicit p: Pa
     ).reduce(_||_)
   }
 
-  val update_idx = getIdx(io.update.pc, io.update.folded_hist)
+  val update_folded_hist = WireInit(0.U.asTypeOf(new AllFoldedHistories(foldedGHistInfos)))
+  if (histLen > 0) {
+    update_folded_hist.getHistWithInfo(idxFhInfo).folded_hist := compute_folded_ghist(io.update.ghist, log2Ceil(nRows))
+  }
+  val update_idx = getIdx(io.update.pc, update_folded_hist)
 
   table.io.w.apply(
     valid = io.update.mask.reduce(_||_),
@@ -377,7 +381,7 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
         scTables(i).io.update.takens(b) := RegEnable(scUpdateTakens(b), realWen)
         scTables(i).io.update.oldCtrs(b) := RegEnable(scUpdateOldCtrs(b)(i), realWen)
         scTables(i).io.update.pc := RegEnable(update.pc, realWen)
-        scTables(i).io.update.folded_hist := RegEnable(updateFHist, realWen)
+        scTables(i).io.update.ghist := RegEnable(io.update.bits.ghist, realWen)
       }
     }
 

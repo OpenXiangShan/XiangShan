@@ -570,7 +570,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_redirect_mem.io.waddr(0) := io.fromBpu.resp.bits.lastStage.ftq_idx.value
   ftq_redirect_mem.io.wdata(0) := io.fromBpu.resp.bits.last_stage_spec_info
   println(f"ftq redirect MEM: entry ${ftq_redirect_mem.io.wdata(0).getWidth} * ${FtqSize} * 3")
-  println(f"ftq redirect MEM: ahead fh ${ftq_redirect_mem.io.wdata(0).afhob.getWidth} * ${FtqSize} * 3")
 
   val ftq_meta_1r_sram = Module(new FtqNRSRAM(new Ftq_1R_SRAMEntry, 1))
   // these info is intended to enq at the last stage of bpu
