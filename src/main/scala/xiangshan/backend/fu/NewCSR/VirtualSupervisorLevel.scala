@@ -11,12 +11,17 @@ import xiangshan.backend.fu.NewCSR.CSRDefines.{
   _
 }
 import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast.CSREnumTypeToUInt
+import xiangshan.backend.fu.NewCSR.CSREvents.{SretEventSinkBundle, TrapEntryVSEventSinkBundle}
 
 import scala.collection.immutable.SeqMap
 
 trait VirtualSupervisorLevel { self: NewCSR with HypervisorLevel =>
 
-  val vsstatus = Module(new CSRModule("VSstatus", new SstatusBundle))
+  val vsstatus = Module(
+    new CSRModule("VSstatus", new SstatusBundle)
+      with SretEventSinkBundle
+      with TrapEntryVSEventSinkBundle
+  )
     .setAddr(0x200)
 
   val vsie = Module(new CSRModule("VSie", new VSie) with HypervisorBundle {
@@ -42,14 +47,23 @@ trait VirtualSupervisorLevel { self: NewCSR with HypervisorLevel =>
   val vsscratch = Module(new CSRModule("VSscratch"))
     .setAddr(0x240)
 
-  val vsepc = Module(new CSRModule("VSepc"))
+  val vsepc = Module(
+    new CSRModule("VSepc", new Epc)
+      with TrapEntryVSEventSinkBundle
+  )
     .setAddr(0x241)
 
-  val vscause = Module(new CSRModule("VScause", new CauseBundle))
+  val vscause = Module(
+    new CSRModule("VScause", new CauseBundle)
+      with TrapEntryVSEventSinkBundle
+  )
     .setAddr(0x242)
 
   // Todo: shrink the width of vstval to the maximum width Virtual Address
-  val vstval = Module(new CSRModule("VStval"))
+  val vstval = Module(
+    new CSRModule("VStval")
+      with TrapEntryVSEventSinkBundle
+  )
     .setAddr(0x243)
 
   val vsip = Module(new CSRModule("VSip", new VSip) with HypervisorBundle {
@@ -98,19 +112,6 @@ trait VirtualSupervisorLevel { self: NewCSR with HypervisorLevel =>
     vsip,
     vsatp,
   )
-
-  virtualSupervisorCSRMods.foreach {
-    case mod: HypervisorBundle =>
-      mod.hstatus := hstatus.rdata
-      mod.hvip := hvip.rdata
-      mod.hideleg := hideleg.rdata
-      mod.hedeleg := hedeleg.rdata
-      mod.hgeip := hgeip.rdata
-      mod.hgeie := hgeie.rdata
-      mod.hip := hip.rdata
-      mod.hie := hie.rdata
-    case _ =>
-  }
 
   virtualSupervisorCSRMods.foreach(mod =>
     require(mod.addr > 0, s"The address of ${mod.modName} has not been set, you can use setAddr(CSRAddr) to set it."))

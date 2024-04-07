@@ -574,6 +574,8 @@ trait HasXSParameter {
     }
   } // VAddrBits is Virtual Memory addr bits
 
+  def VAddrMaxBits = coreParams.VAddrBits max coreParams.GPAddrBits
+
   def AsidLength = coreParams.AsidLength
   def VmidLength = coreParams.VmidLength
   def ReSelectLen = coreParams.ReSelectLen

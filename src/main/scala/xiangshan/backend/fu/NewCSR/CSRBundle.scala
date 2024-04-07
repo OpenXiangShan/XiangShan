@@ -3,12 +3,15 @@ package xiangshan.backend.fu.NewCSR
 import chisel3._
 import chisel3.experimental.SourceInfo
 import chisel3.util.Cat
+import chisel3.experimental.BundleLiterals._
 
 import scala.language.experimental.macros
 
 
 abstract class CSRBundle extends Bundle {
   val len: Int = 64
+
+  var eventFields: Set[CSREnumType] = Set()
 
   override def do_asUInt(implicit sourceInfo: SourceInfo): UInt = {
     val fields = this.getFields
@@ -70,4 +73,21 @@ abstract class CSRBundle extends Bundle {
   def getFields: Seq[CSREnumType] = this.getElements.map(_.asInstanceOf[CSREnumType])
 
   def needReset: Boolean = this.getFields.exists(_.needReset)
+
+  // used by event bundle to filter the fields need to update
+  def addInEvent(fieldFns: (this.type => CSREnumType)*): this.type = {
+    this.eventFields ++= fieldFns.map(fn => fn(this))
+    this
+  }
+
+  override def cloneType: CSRBundle.this.type = {
+    val ret = super.cloneType
+    //
+    (ret.getFields zip this.getFields).foreach { case (l, r) =>
+      if (this.eventFields.contains(r)) {
+        ret.eventFields += l
+      }
+    }
+    ret
+  }
 }
