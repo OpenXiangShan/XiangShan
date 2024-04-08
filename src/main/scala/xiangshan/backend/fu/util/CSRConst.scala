@@ -55,6 +55,9 @@ trait HasCSRConst {
   val Stvec         = 0x105
   val Scounteren    = 0x106
 
+  // Supervisor Configuration
+  val Senvcfg       = 0x10A
+
   // Supervisor Trap Handling
   val Sscratch      = 0x140
   val Sepc          = 0x141
@@ -100,6 +103,9 @@ trait HasCSRConst {
   val Mcause        = 0x342
   val Mtval         = 0x343
   val Mip           = 0x344
+
+  // Machine Configuration
+  val Menvcfg       = 0x30A
 
   // Machine Memory Protection
   // TBD
@@ -188,7 +194,7 @@ trait HasCSRConst {
   // Debug Mode Registers
   val Dcsr          = 0x7B0
   val Dpc           = 0x7B1
-  val Dscratch      = 0x7B2
+  val Dscratch0     = 0x7B2
   val Dscratch1     = 0x7B3
 
   def privEcall  = 0x000.U

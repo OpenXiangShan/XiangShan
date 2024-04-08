@@ -19,6 +19,7 @@ package top
 import org.chipsalliance.cde.config.{Config, Parameters}
 import system.SoCParamsKey
 import xiangshan.{DebugOptionsKey, XSTileKey}
+import difftest.DifftestModule
 
 import scala.annotation.tailrec
 import scala.sys.exit
@@ -100,6 +101,10 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(EnablePerfDebug = false)
           }), tail)
+        case "--xstop-prefix" :: value :: tail if chisel3.BuildInfo.version != "3.6.0" =>
+          nextOption(config.alter((site, here, up) => {
+            case SoCParamsKey => up(SoCParamsKey).copy(XSTopPrefix = Some(value))
+          }), tail)
         case "--firtool-opt" :: option :: tail =>
           firtoolOpts ++= option.split(" ").filter(_.nonEmpty)
           nextOption(config, tail)
@@ -109,7 +114,8 @@ object ArgParser {
           nextOption(config, tail)
       }
     }
-    var config = nextOption(default, args.toList)
+    val newArgs = DifftestModule.parseArgs(args)
+    var config = nextOption(default, newArgs.toList)
     (config, firrtlOpts, firtoolOpts)
   }
 }

@@ -267,7 +267,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   private val dcache = outer.dcache.module
   val uncache = outer.uncache.module
 
-  val delayedDcacheRefill = RegNext(dcache.io.lsu.lsq)
+  //val delayedDcacheRefill = RegNext(dcache.io.lsu.lsq)
 
   val csrCtrl = DelayN(io.ooo_to_mem.csrCtrl, 2)
   dcache.io.csr.distribute_csr <> csrCtrl.distribute_csr
@@ -590,7 +590,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.lsq.nuke <> lsq.io.ldu.nuke(i)
     loadUnits(i).io.csrCtrl       <> csrCtrl
     // dcache refill req
-    loadUnits(i).io.refill           <> delayedDcacheRefill
+  // loadUnits(i).io.refill           <> delayedDcacheRefill
     // dtlb
     loadUnits(i).io.tlb <> dtlb_reqs.take(exuParameters.LduCnt)(i)
     // pmp
@@ -783,7 +783,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   AddPipelineReg(lsq.io.uncache.req, uncache.io.lsq.req, false.B)
   AddPipelineReg(uncache.io.lsq.resp, lsq.io.uncache.resp, false.B)
   // delay dcache refill for 1 cycle for better timing
-  lsq.io.refill         := delayedDcacheRefill
+  //lsq.io.refill         := delayedDcacheRefill
+
   lsq.io.release        := dcache.io.lsu.release
   lsq.io.lqCancelCnt <> io.mem_to_ooo.lqCancelCnt
   lsq.io.sqCancelCnt <> io.mem_to_ooo.sqCancelCnt
