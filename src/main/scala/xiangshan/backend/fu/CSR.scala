@@ -842,7 +842,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Sepc, sepc, sepcMask, MaskedRegMap.NoSideEffect, sepcMask),
     MaskedRegMap(Scause, scause),
     MaskedRegMap(Stval, stval),
-    MaskedRegMap(Sip, mipReg.asUInt, sipWMask, MaskedRegMap.NoSideEffect, sipMask, x => mipWire.asUInt | x),
+    MaskedRegMap(Sip, mipReg.asUInt, sipWMask, MaskedRegMap.NoSideEffect, sipMask, x => (mipWire.asUInt | x) & sipMask),
 
     //--- Supervisor Protection and Translation ---
     MaskedRegMap(Satp, satp, satpMask, MaskedRegMap.NoSideEffect, satpMask),
@@ -880,7 +880,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     MaskedRegMap(Mepc, mepc, mepcMask, MaskedRegMap.NoSideEffect, mepcMask),
     MaskedRegMap(Mcause, mcause),
     MaskedRegMap(Mtval, mtval),
-    MaskedRegMap(Mip, mipReg.asUInt, mipWMask, MaskedRegMap.NoSideEffect, mipMask, x => mipWire.asUInt | x),
+    MaskedRegMap(Mip, mipReg.asUInt, mipWMask, MaskedRegMap.NoSideEffect, mipMask, x => (mipWire.asUInt | x) & mipMask),
 
     //--- Trigger ---
     MaskedRegMap(Tselect, tselectPhy, WritableMask, WriteTselect),
@@ -911,8 +911,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
 
     //--- Hypervisor Trap Handling ---
     MaskedRegMap(Htval, htval),
-    MaskedRegMap(Hip, mipReg.asUInt, hipWMask, MaskedRegMap.NoSideEffect, hipRMask, x => mipWire.asUInt | x),
-    MaskedRegMap(Hvip, mipReg.asUInt, hvipMask, MaskedRegMap.NoSideEffect, hvipMask, x => mipWire.asUInt | x),
+    MaskedRegMap(Hip, mipReg.asUInt, hipWMask, MaskedRegMap.NoSideEffect, hipRMask, x => (mipWire.asUInt | x) & hipRMask),
+    MaskedRegMap(Hvip, mipReg.asUInt, hvipMask, MaskedRegMap.NoSideEffect, hvipMask, x => (mipWire.asUInt | x) & hvipMask),
     MaskedRegMap(Htinst, htinst),
     MaskedRegMap(Hgeip, hgeip),
 
