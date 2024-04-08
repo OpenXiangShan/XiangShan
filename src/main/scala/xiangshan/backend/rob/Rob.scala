@@ -457,7 +457,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val debug_deqUop = debug_microOp(deqPtr.value)
 
   val intrBitSetReg = RegNext(io.csr.intrBitSet)
-  val intrEnable = intrBitSetReg && !hasWaitForward && robDeqGroup(0).interrupt_safe
+  val intrEnable = intrBitSetReg && !hasWaitForward && robDeqGroup(deqPtr.value(bankAddrWidth-1,0)).interrupt_safe
   val deqHasExceptionOrFlush = exceptionDataRead.valid && exceptionDataRead.bits.robIdx === deqPtr
   val deqHasException = deqHasExceptionOrFlush && (exceptionDataRead.bits.exceptionVec.asUInt.orR ||
     exceptionDataRead.bits.singleStep || exceptionDataRead.bits.trigger.canFire)
@@ -669,7 +669,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   deqPtrGenModule.io.exception_state := exceptionDataRead
   deqPtrGenModule.io.intrBitSetReg := intrBitSetReg
   deqPtrGenModule.io.hasNoSpecExec := hasWaitForward
-  deqPtrGenModule.io.interrupt_safe := robDeqGroup(0).interrupt_safe
+  deqPtrGenModule.io.interrupt_safe := robDeqGroup(deqPtr.value(bankAddrWidth-1,0)).interrupt_safe
   deqPtrGenModule.io.blockCommit := blockCommit
   deqPtrGenModule.io.hasCommitted := hasCommitted
   deqPtrGenModule.io.allCommitted := allCommitted
@@ -938,21 +938,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // end update robBanksRdata
 
   // interrupt_safe
-  val interrupt_safeReadVec = Wire(Vec(2 * CommitWidth, chiselTypeOf(robEntries(0).interrupt_safe)))
-  val interrupt_safeNextVec = Wire(Vec(2 * CommitWidth, chiselTypeOf(robEntries(0).interrupt_safe)))
-  for (i <- 0 until 2 * CommitWidth) {
-    interrupt_safeReadVec(i) := robEntries(deqPtrGroup(i).value).interrupt_safe
-    interrupt_safeNextVec(i) := interrupt_safeReadVec(i)
-  }
-  (0 until CommitWidth).map { case i =>
-    val nextVec = interrupt_safeNextVec
-    val commitEn = deqPtrGenModule.io.commitEn
-    val canCommitPriorityCond = deqPtrGenModule.io.canCommitPriorityCond
-    val commit_wNextThis = nextVec.drop(i).take(CommitWidth + 1)
-    val originValue = nextVec(i)
-    val ifCommitEnValue = PriorityMuxDefault(canCommitPriorityCond.zip(commit_wNextThis), originValue)
-    robDeqGroup(i).interrupt_safe := Mux(allCommitted, robBanksRdataNextLineUpdate(i).interrupt_safe, robBanksRdataThisLineUpdate(i).interrupt_safe)
-  }
   for (i <- 0 until RenameWidth) {
     // We RegNext the updates for better timing.
     // Note that instructions won't change the system's states in this cycle.
@@ -965,11 +950,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       // TODO: support non-MMIO load-store instructions to trigger interrupts
       val allow_interrupts = !CommitType.isLoadStore(io.enq.req(i).bits.commitType)
       robEntries(RegEnable(allocatePtrVec(i).value, canEnqueue(i))).interrupt_safe := RegEnable(allow_interrupts, canEnqueue(i))
-      for (j <- 0 until 2 * CommitWidth) {
-        when(RegNext(allocatePtrVec(i).value) === deqPtrGroup(j).value) {
-          interrupt_safeNextVec(j) := RegNext(allow_interrupts)
-        }
-      }
     }
   }
 
