@@ -11,6 +11,7 @@ jobs:
   generate-verilog:
     runs-on: bosc
     continue-on-error: false
+    timeout-minutes: 900
     name: Generate Verilog
     steps:
       - uses: actions/checkout@v2
