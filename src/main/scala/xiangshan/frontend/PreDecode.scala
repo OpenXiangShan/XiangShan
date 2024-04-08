@@ -273,12 +273,17 @@ class RVCExpander(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
     val in = Input(UInt(32.W))
     val out = Output(new ExpandedInstruction)
+    val ill = Output(Bool())
   })
 
+  val decoder = new RVCDecoder(io.in, XLEN, fLen, useAddiForMv = true)
+
   if (HasCExtension) {
-    io.out := new RVCDecoder(io.in, XLEN, fLen, useAddiForMv = true).decode
+    io.out := decoder.decode
+    io.ill := decoder.ill
   } else {
-    io.out := new RVCDecoder(io.in, XLEN, fLen, useAddiForMv = true).passthrough
+    io.out := decoder.passthrough
+    io.ill := false.B
   }
 }
 
