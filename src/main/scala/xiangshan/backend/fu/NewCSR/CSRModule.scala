@@ -15,7 +15,6 @@ class CSRModule[T <: CSRBundle](
 
   val commonIn = IO(Input(new CSRCommonIn))
   val w = IO(Input(new CSRAddrWriteBundle(bundle)))
-  val vsi = IO(Input(new CSRIRCBundle))
 
   // read data with mask
   val rdata = IO(Output(bundle))

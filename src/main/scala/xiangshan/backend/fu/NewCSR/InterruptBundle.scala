@@ -58,6 +58,8 @@ class InterruptPendingBundle extends CSRBundle {
   def getM = Seq(MSIP, MTIP, MEIP)
 
   def getSOC = Seq(COIP, LPRASEIP, HPRASEIP)
+
+  def getALL = Seq(SSIP, VSSIP, MSIP, STIP, VSTIP, MTIP, SEIP, VSEIP, MEIP, SGEIP, COIP, LPRASEIP, HPRASEIP)
 }
 
 class InterruptEnableBundle extends CSRBundle {

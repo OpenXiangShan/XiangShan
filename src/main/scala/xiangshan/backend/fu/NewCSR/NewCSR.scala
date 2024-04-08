@@ -29,7 +29,8 @@ class NewCSR extends Module
   with VirtualSupervisorLevel
   with Unprivileged
   with HasExternalInterruptBundle
-  with HasInstCommitBundle {
+  with HasInstCommitBundle
+  with SupervisorMachineAliasConnect {
 
   val io = IO(new Bundle {
     val w = Flipped(ValidIO(new Bundle {
@@ -104,16 +105,23 @@ class NewCSR extends Module
         m.mvien := mvien.regOut
         m.mvip := mvip.regOut
         m.mip := mip.regOut
+        m.mie := mie.regOut
       case _ =>
     }
     mod match {
-      case m: HasExternalInterruptBundle =>
-        m.platformIRP := this.platformIRP
+      case m: HasMachineDelegBundle =>
+        m.mideleg := mideleg.regOut
+        m.medeleg := medeleg.regOut
       case _ =>
     }
     mod match {
       case m: HasMachineCounterControlBundle =>
         m.mcountinhibit := mcountinhibit.regOut
+      case _ =>
+    }
+    mod match {
+      case m: HasExternalInterruptBundle =>
+        m.platformIRP := this.platformIRP
       case _ =>
     }
     mod match {
@@ -129,10 +137,15 @@ class NewCSR extends Module
     mod.commonIn.prvm := PRVM
     mod.commonIn.v := V
     mod.commonIn.hstatus := hstatus.rdata
-    mod.vsi := io.fromIC.vs
     println(s"${mod.modName}: ")
     println(mod.dumpFields)
   }
+}
+
+trait SupervisorMachineAliasConnect { self: NewCSR with MachineLevel with SupervisorLevel =>
+  mip.fromMvip := mvip.toMip
+  mip.fromSip := sip.toMip
+  mie.fromSie := sie.toMie
 }
 
 object NewCSRMain extends App {

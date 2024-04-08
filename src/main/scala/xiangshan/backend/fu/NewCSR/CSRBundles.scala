@@ -1,7 +1,9 @@
 package xiangshan.backend.fu.NewCSR
 
+import chisel3._
 import xiangshan.backend.fu.NewCSR.CSRDefines.{
   XtvecMode,
+  CSRROField => RO,
   CSRRWField => RW,
   CSRWARLField => WARL,
 }
@@ -27,5 +29,16 @@ object CSRBundles {
 
   class OneFieldBundle extends CSRBundle {
     val ALL = RW(63, 0)
+  }
+
+  class Envcfg extends CSRBundle {
+    val STCE  = RO(    63).withReset(0.U)
+    val PBMTE = RO(    62).withReset(0.U)
+    val ADUE  = RO(    61).withReset(0.U)
+    val PMM   = RO(33, 32).withReset(0.U)
+    val CBZE  = RO(     7).withReset(0.U)
+    val CBCFE = RO(     6).withReset(0.U)
+    val CBIE  = RO( 5,  4).withReset(0.U)
+    val FIOM  = RO(     0).withReset(0.U)
   }
 }

@@ -181,6 +181,10 @@ class CSREnumType(
     s"${this.localName} ${rwType} [$msb, $lsb] reset($init)"
   }
 
+  def asBool: Bool = {
+    this.asUInt.asBool
+  }
+
   private def setRwType(newType: CSRRWType): this.type = {
     this.rwType = newType
     this

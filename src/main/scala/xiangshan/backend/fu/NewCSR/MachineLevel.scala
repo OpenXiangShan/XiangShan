@@ -31,6 +31,11 @@ trait MachineLevel { self: NewCSR =>
 
   val mie = Module(new CSRModule("Mie", new MieBundle) with HypervisorBundle {
     val toHie = IO(new MieToHie)
+    val fromSie = IO(Flipped(new SieToMie))
+
+    when (fromSie.SSIE.valid) { reg.SSIE := fromSie.SSIE.bits }
+    when (fromSie.STIE.valid) { reg.STIE := fromSie.STIE.bits }
+    when (fromSie.SEIE.valid) { reg.SEIE := fromSie.SEIE.bits }
 
     toHie.VSSIE.valid := wen
     toHie.VSTIE.valid := wen
@@ -86,16 +91,8 @@ trait MachineLevel { self: NewCSR =>
     reg.SEIP := Mux(wen && mvien.SEIE.asUInt.asBool, wdata.SEIP, reg.SEIP)
   }).setAddr(0x309)
 
-  val menvcfg = Module(new CSRModule("Menvcfg", new CSRBundle {
-    val STCE  = RO(    63).withReset(0.U)
-    val PBMTE = RO(    62).withReset(0.U)
-    val ADUE  = RO(    61).withReset(0.U)
-    val PMM   = RO(33, 32).withReset(0.U)
-    val CBZE  = RO(     7).withReset(0.U)
-    val CBCFE = RO(     6).withReset(0.U)
-    val CBIE  = RO( 5,  4).withReset(0.U)
-    val FIOM  = RO(     0).withReset(0.U)
-  })).setAddr(0x30A)
+  val menvcfg = Module(new CSRModule("Menvcfg", new Envcfg))
+    .setAddr(0x30A)
 
   val mcountinhibit = Module(new CSRModule("Mcountinhibit", new McountinhibitBundle))
     .setAddr(0x320)
@@ -111,7 +108,7 @@ trait MachineLevel { self: NewCSR =>
   val mepc = Module(new CSRModule("Mepc", new Epc))
     .setAddr(0x341)
 
-  val mcause = Module(new CSRModule("Mcause"))
+  val mcause = Module(new CSRModule("Mcause", new CauseBundle))
     .setAddr(0x342)
 
   val mtval = Module(new CSRModule("Mtval"))
@@ -119,14 +116,16 @@ trait MachineLevel { self: NewCSR =>
 
   val mip = Module(new CSRModule("Mip", new MipBundle) with HasMachineInterruptBundle with HasExternalInterruptBundle {
     val fromMvip = IO(Flipped(new MvipToMip))
+    val fromSip = IO(Flipped(new SipToMip))
 
     // When bit 9 of mvien is zero, the value of bit 9 of mvip is logically ORed into the readable value of mip.SEIP.
     // when bit 9 of mvien is one, bit SEIP in mip is read-only and does not include the value of bit 9 of mvip.
-    rdata.SEIP := Mux(!mvien.SEIE.asUInt.asBool, reg.SEIP.asUInt.asBool | mvip.SEIP.asUInt.asBool | SEIP, SEIP)
+    rdata.SEIP := Mux(!mvien.SEIE.asUInt.asBool, reg.SEIP.asUInt.asBool | mvip.SEIP.asUInt.asBool | platformIRP.SEIP, platformIRP.SEIP)
     when (wen && !mvien.SEIE.asUInt.asBool) { reg.SEIP := reg.SEIP }
     when (fromMvip.SSIP.valid) { reg.SSIP := fromMvip.SSIP.bits }
     when (fromMvip.STIP.valid) { reg.STIP := fromMvip.STIP.bits }
     when (fromMvip.SEIP.valid) { reg.SEIP := fromMvip.SEIP.bits }
+    when (fromSip.SSIP.valid) { reg.SSIP := fromSip.SSIP.bits }
 
     // MEIP is read-only in mip, and is set and cleared by a platform-specific interrupt controller.
     rdata.MEIP := platformIRP.MEIP
@@ -136,8 +135,6 @@ trait MachineLevel { self: NewCSR =>
     // which are used by remote harts to provide machine-level interprocessor interrupts.
     rdata.MSIP := platformIRP.MSIP
   }).setAddr(0x344)
-
-  mip.fromMvip := mvip.toMip
 
   val mtinst = Module(new CSRModule("Mtinst"))
     .setAddr(0x34A)
@@ -367,6 +364,12 @@ trait HasMachineInterruptBundle { self: CSRModule[_] =>
   val mvien = IO(Input(new MvienBundle))
   val mvip  = IO(Input(new MvipBundle))
   val mip   = IO(Input(new MipBundle))
+  val mie   = IO(Input(new MieBundle))
+}
+
+trait HasMachineDelegBundle { self: CSRModule[_] =>
+  val mideleg = IO(Input(new MidelegBundle))
+  val medeleg = IO(Input(new MedelegBundle))
 }
 
 trait HasExternalInterruptBundle {
