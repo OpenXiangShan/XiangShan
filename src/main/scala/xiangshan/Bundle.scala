@@ -95,7 +95,7 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   // frontend -> backend -> frontend
   val pd = new PreDecodeInfo
   val ssp = UInt(log2Up(RasSize).W)
-  val sctr = UInt(RasCtrSize.W)
+  val sctr = UInt(log2Up(RasCtrSize).W)
   val TOSW = new RASPtr
   val TOSR = new RASPtr
   val NOS = new RASPtr
@@ -120,9 +120,6 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
 
   def fromFtqRedirectSram(entry: Ftq_Redirect_SRAMEntry) = {
     // this.hist := entry.ghist
-    this.folded_hist := entry.folded_hist
-    this.lastBrNumOH := entry.lastBrNumOH
-    this.afhob := entry.afhob
     this.histPtr := entry.histPtr
     this.ssp := entry.ssp
     this.sctr := entry.sctr
