@@ -62,6 +62,9 @@ trait VLSUConstants {
     require(data.getWidth >= (i+1) * alignBits)
     data((i+1) * alignBits - 1, i * alignBits)
   }
+  def getNoAlignedSlice(data: UInt, i: Int, alignBits: Int): UInt = {
+    data(i * 8 + alignBits - 1, i * 8)
+  }
 
   def getByte(data: UInt, i: Int = 0) = getSlice(data, i, 8)
   def getHalfWord(data: UInt, i: Int = 0) = getSlice(data, i, 16)
@@ -133,23 +136,65 @@ trait HasVLSUParameters extends HasXSParameter with VLSUConstants {
   /**
     * for merge 128-bits data of unit-stride
     */
-  object mergeDataByoffset{
-    def apply(oldData: UInt, newData: Seq[UInt], mask: Seq[UInt], offset: Seq[UInt], valids: Seq[Bool]): UInt = {
-      require(newData.length == valids.length)
-      require(newData.length == offset.length)
-      // if (i>offset[k] && mask[k][i]==1 && valid[k]) -> newData, else -> oldData
-      val selVec = (mask zip offset).map{case (m,e) =>
-        ((~UIntToMask(e, VLENB)).asBools.zip(m.asBools).map(x=> x._1 && x._2))}.transpose // vector(3,16)
-
-      VecInit(selVec.zipWithIndex.map{ case (selV, i) => // selV: vector(3,1), 0=<i<16
+  object mergeDataByByte{
+    def apply(oldData: UInt, newData: UInt, mask: UInt): UInt = {
+      val selVec = Seq(mask).map(_.asBools).transpose
+      VecInit(selVec.zipWithIndex.map{ case (selV, i) =>
         ParallelPosteriorityMux(
-          true.B +: selV.zip(valids).map(x => x._1 && x._2),
-          getByte(oldData, i) +: newData.map(getByte(_, i))
+          true.B +: selV.map(x => x),
+          getByte(oldData, i) +: Seq(getByte(newData, i))
         )}).asUInt
     }
   }
-  def mergeDataByoffset(oldData: UInt, newData: UInt, mask: UInt, offset: UInt): UInt = {
-    mergeDataByoffset(oldData, Seq(newData), Seq(mask), Seq(offset), Seq(true.B))
+
+  /**
+    * for merge Unit-Stride data to 256-bits
+    * merge 128-bits data to 256-bits
+    * if have 3 port,
+    *   if is port0, it is 6 to 1 Multiplexer -> (128'b0, data) or (data, 128'b0) or (data, port2data) or (port2data, data) or (data, port3data) or (port3data, data)
+    *   if is port1, it is 4 to 1 Multiplexer -> (128'b0, data) or (data, 128'b0) or (data, port3data) or (port3data, data)
+    *   if is port3, it is 2 to 1 Multiplexer -> (128'b0, data) or (data, 128'b0)
+    *
+    */
+  object mergeDataByIndex{
+    def apply(data:  Seq[UInt], mask: Seq[UInt], index: UInt, valids: Seq[Bool]): (UInt, UInt) = {
+      require(data.length == valids.length)
+      require(data.length == mask.length)
+      val muxLength = data.length
+      val selDataMatrix = Wire(Vec(muxLength, Vec(2, UInt((VLEN * 2).W)))) // 3 * 2 * 256
+      val selMaskMatrix = Wire(Vec(muxLength, Vec(2, UInt((VLENB * 2).W)))) // 3 * 2 * 16
+      dontTouch(selDataMatrix)
+      dontTouch(selMaskMatrix)
+      for(i <- 0 until muxLength){
+        if(i == 0){
+          selDataMatrix(i)(0) := Cat(0.U(VLEN.W), data(i))
+          selDataMatrix(i)(1) := Cat(data(i), 0.U(VLEN.W))
+          selMaskMatrix(i)(0) := Cat(0.U(VLENB.W), mask(i))
+          selMaskMatrix(i)(1) := Cat(mask(i), 0.U(VLENB.W))
+        }
+        else{
+          selDataMatrix(i)(0) := Cat(data(i), data(0))
+          selDataMatrix(i)(1) := Cat(data(0), data(i))
+          selMaskMatrix(i)(0) := Cat(mask(i), mask(0))
+          selMaskMatrix(i)(1) := Cat(mask(0), mask(i))
+        }
+      }
+      val selIdxVec = (0 until muxLength).map(_.U)
+      val selIdx    = PriorityMux(valids.reverse, selIdxVec.reverse)
+
+      val selData = LookupTree(index, List(
+        0.U -> selDataMatrix(selIdx)(0),
+        1.U -> selDataMatrix(selIdx)(1)
+      ))
+      val selMask = LookupTree(index, List(
+        0.U -> selMaskMatrix(selIdx)(0),
+        1.U -> selMaskMatrix(selIdx)(1)
+      ))
+      (selData, selMask)
+    }
+  }
+  def mergeDataByIndex(data:  UInt, mask: UInt, index: UInt): (UInt, UInt) = {
+    mergeDataByIndex(Seq(data), Seq(mask), index, Seq(true.B))
   }
 }
 abstract class VLSUModule(implicit p: Parameters) extends XSModule
@@ -757,17 +802,6 @@ object genUSSplitData{
     LookupTree(index, List(
       0.U -> tmpData(127, 0),
       1.U -> tmpData(255, 128)
-    ))
-  }
-}
-/**
-  * generate offset in Vd of flows, only used in Unit-Stride
-  * */
-object genVdOffset{
-  def apply(offset: UInt, index: UInt): UInt = {
-    LookupTree(index, List(
-      0.U -> 0.U,
-      1.U -> ((~offset).asUInt + 1.U)
     ))
   }
 }
