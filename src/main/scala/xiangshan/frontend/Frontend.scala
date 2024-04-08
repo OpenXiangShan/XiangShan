@@ -175,6 +175,9 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
                         checkPcMem(checkTargetIdx(i) + 1.U).startAddr)
   }
 
+  // IFU-backend
+  io.backend.illBuf := ifu.io.illBuf
+
   // commented out for this br could be the last instruction in the fetch block
   def checkNotTakenConsecutive = {
     val prevNotTakenValid = RegInit(0.B)

@@ -81,6 +81,7 @@ class NewIFUIO(implicit p: Parameters) extends XSBundle {
   val iTLBInter        = new TlbRequestIO
   val pmp              = new ICachePMPBundle
   val mmioCommitRead   = new mmioCommitRead
+  val illBuf          = Output(UInt(32.W))  
 }
 
 // record the situation in which fallThruAddr falls into
@@ -129,6 +130,7 @@ class IfuWbToFtqDB extends Bundle {
 
 class NewIFU(implicit p: Parameters) extends XSModule
   with HasICacheParameters
+  with HasXSParameter
   with HasIFUConst
   with HasPdConst
   with HasCircularQueuePtrHelper
@@ -501,11 +503,14 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   //val f3_expd_instr     = RegEnable(f2_expd_instr,  f2_fire)
   val f3_instr          = RegEnable(f2_instr, f2_fire)
-  val f3_expd_instr     = VecInit((0 until PredictWidth).map{ i =>
+  val f3_expd           = (0 until PredictWidth).map{ i =>
     val expander       = Module(new RVCExpander)
     expander.io.in := f3_instr(i)
-    expander.io.out.bits
-  })
+    (expander.io.out.bits, expander.io.ill)
+  }
+  val f3_expd_instr     = VecInit(f3_expd.map(_._1))
+  val f3_ill_raw        = VecInit(f3_expd.map(_._2))
+  
 
   val f3_pd_wire         = RegEnable(f2_pd,            f2_fire)
   val f3_pd              = WireInit(f3_pd_wire)
@@ -751,6 +756,28 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_predecode_range = VecInit(preDecoderOut.pd.map(inst => inst.valid)).asUInt
   val f3_mmio_range      = VecInit((0 until PredictWidth).map(i => if(i ==0) true.B else false.B))
   val f3_instr_valid     = Wire(Vec(PredictWidth, Bool()))
+
+  // Illegal instruction record
+  val f3_ill            = VecInit((0 until PredictWidth).map{ i =>
+    f3_ill_raw(i) && f3_instr_valid(i)
+  })
+  val f4_instr = RegEnable(f3_instr, f3_fire)
+  val f4_ill = RegEnable(f3_ill, f3_fire)
+  val illegalBuf = RegInit(0.U(32.W))
+
+  val illBufClear = RegInit(true.B)
+
+  dontTouch(illegalBuf)
+  when (f4_ill.asUInt.orR && RegNext(f3_fire) && illBufClear) {
+    illegalBuf := ParallelPriorityMux(f4_ill, f4_instr)
+    illBufClear := false.B
+  }
+
+  when (backend_redirect || wb_redirect) {
+    illBufClear := true.B
+  }
+
+  io.illBuf := illegalBuf
 
   /*** prediction result check   ***/
   checkerIn.ftqOffset   := f3_ftq_req.ftqOffset
