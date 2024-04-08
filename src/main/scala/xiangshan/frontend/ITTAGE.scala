@@ -87,7 +87,7 @@ class ITTageResp(implicit p: Parameters) extends ITTageBundle {
 
 class ITTageUpdate(implicit p: Parameters) extends ITTageBundle {
   val pc = UInt(VAddrBits.W)
-  val folded_hist = new AllFoldedHistories(foldedGHistInfos)
+  val ghist = UInt(HistoryLength.W)
   // update tag and ctr
   val valid = Bool()
   val correct = Bool()
@@ -238,7 +238,13 @@ class ITTageTable
   val s1_bank_has_write_on_this_req = RegEnable(VecInit(table_banks.map(_.io.w.req.valid)), io.req.valid)
 
   // Use fetchpc to compute hash
-  val (update_idx, update_tag) = compute_tag_and_hash(getUnhashedIdx(io.update.pc), io.update.folded_hist)
+  val update_folded_hist = WireInit(0.U.asTypeOf(new AllFoldedHistories(foldedGHistInfos)))
+
+  update_folded_hist.getHistWithInfo(idxFhInfo).folded_hist := compute_folded_ghist(io.update.ghist, log2Ceil(nRows))
+  update_folded_hist.getHistWithInfo(tagFhInfo).folded_hist := compute_folded_ghist(io.update.ghist, tagLen)
+  update_folded_hist.getHistWithInfo(altTagFhInfo).folded_hist := compute_folded_ghist(io.update.ghist, tagLen-1)
+  dontTouch(update_folded_hist)
+  val (update_idx, update_tag) = compute_tag_and_hash(getUnhashedIdx(io.update.pc), update_folded_hist)
   val update_req_bank_1h = get_bank_mask(update_idx)
   val update_idx_in_bank = get_bank_idx(update_idx)
   val update_target = io.update.target
@@ -404,7 +410,6 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val updateValid =
     update.is_jalr && !update.is_ret && u_valid && update.ftb_entry.jmpValid &&
     update.jmp_taken && update.cfi_idx.valid && update.cfi_idx.bits === update.ftb_entry.tailSlot.offset
-  val updateFhist = update.spec_info.folded_hist
 
   // meta is splited by composer
   val updateMeta = update.meta.asTypeOf(new ITTageMeta)
@@ -567,7 +572,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     tables(i).io.update.u := RegEnable(updateU(i), updateMask(i))
     tables(i).io.update.pc := RegEnable(update.pc, updateMask(i))
     // use fetch pc instead of instruction pc
-    tables(i).io.update.folded_hist := RegEnable(updateFhist, updateMask(i))
+    tables(i).io.update.ghist := RegEnable(update.ghist, updateMask(i))
   }
 
   // all should be ready for req
