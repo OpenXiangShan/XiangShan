@@ -15,21 +15,21 @@ trait VirtualSupervisorLevel { self: NewCSR with HypervisorLevel =>
     .setAddr(0x200)
 
   val vsie = Module(new CSRModule("VSie", new VSie) with HypervisorBundle {
-    val writeHie = IO(new VSieToHie)
+    val toHie = IO(new VSieToHie)
     // read alias of hie is here, write alias will be in hie
     rdata.SEIE := Mux(hideleg.VSEI.asUInt === 0.U, 0.U, hie.VSEIE.asUInt)
     rdata.STIE := Mux(hideleg.VSTI.asUInt === 0.U, 0.U, hie.VSTIE.asUInt)
     rdata.SSIE := Mux(hideleg.VSSI.asUInt === 0.U, 0.U, hie.VSSIE.asUInt)
 
-    writeHie.SEIE.valid := wen && hideleg.VSEI.asUInt.asBool
-    writeHie.STIE.valid := wen && hideleg.VSTI.asUInt.asBool
-    writeHie.SSIE.valid := wen && hideleg.VSSI.asUInt.asBool
-    writeHie.SEIE.bits := wdata.SEIE
-    writeHie.STIE.bits := wdata.STIE
-    writeHie.SSIE.bits := wdata.SSIE
+    toHie.SEIE.valid := wen && hideleg.VSEI.asUInt.asBool
+    toHie.STIE.valid := wen && hideleg.VSTI.asUInt.asBool
+    toHie.SSIE.valid := wen && hideleg.VSSI.asUInt.asBool
+    toHie.SEIE.bits := wdata.SEIE
+    toHie.STIE.bits := wdata.STIE
+    toHie.SSIE.bits := wdata.SSIE
   }).setAddr(0x204)
 
-  hie.fromVSie := vsie.writeHie
+  hie.fromVSie := vsie.toHie
 
   val vstvec = Module(new CSRModule("VStvec", new XtvecBundle))
     .setAddr(0x205)
@@ -48,24 +48,24 @@ trait VirtualSupervisorLevel { self: NewCSR with HypervisorLevel =>
     .setAddr(0x243)
 
   val vsip = Module(new CSRModule("VSip", new VSip) with HypervisorBundle {
-    val writeHip = IO(new VSipToHip)
+    val toHip = IO(new VSipToHip)
     // read alias of hip is here, write alias will be in hvip
-    // hip.VSEIP is read-only
+    // hip.VSEIP is read-only zero when hideleg.VSEI=0, alias if hip.VSEIP when hideleg.VSEI=1
     rdata.SEIP := Mux(hideleg.VSEI.asUInt === 0.U, 0.U, hip.VSEIP.asUInt)
-    // hip.VSTIP is read-only
+    // hip.VSTIP is read-only zero when hideleg.VSTI=0, alias if hip.VSTIP when hideleg.VSTI=1
     rdata.STIP := Mux(hideleg.VSTI.asUInt === 0.U, 0.U, hip.VSTIP.asUInt)
-    // hip.VSSIP is an alias (writable) of the same bit in hvip
+    // hip.VSSIP is read-only zero when hideleg.VSSI=0, alias (writable) of the same bit in hvip, when hideleg.VSSI=1
     rdata.SSIP := Mux(hideleg.VSSI.asUInt === 0.U, 0.U, hip.VSSIP.asUInt)
 
-    writeHip.SEIP.valid := wen && hideleg.VSEI.asUInt.asBool
-    writeHip.STIP.valid := wen && hideleg.VSTI.asUInt.asBool
-    writeHip.SSIP.valid := wen && hideleg.VSSI.asUInt.asBool
-    writeHip.SEIP.bits := wdata.SEIP
-    writeHip.STIP.bits := wdata.STIP
-    writeHip.SSIP.bits := wdata.SSIP
+    toHip.SEIP.valid := wen && hideleg.VSEI.asUInt.asBool
+    toHip.STIP.valid := wen && hideleg.VSTI.asUInt.asBool
+    toHip.SSIP.valid := wen && hideleg.VSSI.asUInt.asBool
+    toHip.SEIP.bits := wdata.SEIP
+    toHip.STIP.bits := wdata.STIP
+    toHip.SSIP.bits := wdata.SSIP
   }).setAddr(0x244)
 
-  hip.fromVSip := vsip.writeHip
+  hip.fromVSip := vsip.toHip
 
   val vsatp = Module(new CSRModule("VSatp", new SatpBundle) {
     // Ref: 13.2.18. Virtual Supervisor Address Translation and Protection Register (vsatp)
@@ -124,7 +124,7 @@ class VSie extends InterruptEnableBundle {
   // 13.2.12. Virtual Supervisor Interrupt Registers (vsip and vsie)
   // When bit 10 of hideleg is zero, vsip.SEIE is read-only zeros.
   // Else, vsip.SEIE is alias of hip.VSEIE
-  this.SEIE
+  this.SSIE
   // When bit 6 of hideleg is zero, vsip.STIE is read-only zeros.
   // Else, vsip.STIE is alias of hip.VSTIE
   this.STIE

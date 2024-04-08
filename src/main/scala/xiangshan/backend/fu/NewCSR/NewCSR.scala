@@ -108,10 +108,7 @@ class NewCSR extends Module
     }
     mod match {
       case m: HasExternalInterruptBundle =>
-        m.SEIP := this.SEIP
-        m.MEIP := this.MEIP
-        m.MTIP := this.MTIP
-        m.MSIP := this.MSIP
+        m.platformIRP := this.platformIRP
       case _ =>
     }
     mod match {

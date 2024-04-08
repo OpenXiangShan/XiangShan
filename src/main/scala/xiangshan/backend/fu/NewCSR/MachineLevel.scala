@@ -129,12 +129,12 @@ trait MachineLevel { self: NewCSR =>
     when (fromMvip.SEIP.valid) { reg.SEIP := fromMvip.SEIP.bits }
 
     // MEIP is read-only in mip, and is set and cleared by a platform-specific interrupt controller.
-    rdata.MEIP := MEIP
+    rdata.MEIP := platformIRP.MEIP
     // MTIP is read-only in mip, and is cleared by writing to the memory-mapped machine-mode timer compare register
-    rdata.MTIP := MTIP
+    rdata.MTIP := platformIRP.MTIP
     // MSIP is read-only in mip, and is written by accesses to memory-mapped control registers,
     // which are used by remote harts to provide machine-level interprocessor interrupts.
-    rdata.MSIP := MSIP
+    rdata.MSIP := platformIRP.MSIP
   }).setAddr(0x344)
 
   mip.fromMvip := mvip.toMip
@@ -370,10 +370,14 @@ trait HasMachineInterruptBundle { self: CSRModule[_] =>
 }
 
 trait HasExternalInterruptBundle {
-  val SEIP = IO(Input(Bool()))
-  val MEIP = IO(Input(Bool()))
-  val MTIP = IO(Input(Bool()))
-  val MSIP = IO(Input(Bool()))
+  val platformIRP = IO(new Bundle {
+    val MEIP  = Input(Bool())
+    val MTIP  = Input(Bool())
+    val MSIP  = Input(Bool())
+    val SEIP  = Input(Bool())
+    val VSEIP = Input(Bool())
+    val VSTIP = Input(Bool())
+  })
 }
 
 trait HasMachineCounterControlBundle { self: CSRModule[_] =>

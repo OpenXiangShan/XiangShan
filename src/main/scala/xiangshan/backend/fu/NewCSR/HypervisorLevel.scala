@@ -84,20 +84,24 @@ trait HypervisorLevel { self: NewCSR =>
     val ALL = RW(63, 0)
   })).setAddr(0x643)
 
-  val hip = Module(new CSRModule("Hip", new HipBundle) with HypervisorBundle {
+  val hip = Module(new CSRModule("Hip", new HipBundle) with HypervisorBundle with HasExternalInterruptBundle {
     val fromVSip = IO(Flipped(new VSipToHip))
     val toHvip = IO(new HipToHvip)
 
     rdata.VSSIP := hvip.VSSIP
-    rdata.VSTIP := hvip.VSTIP.asUInt.asBool | vsi.tip
-    rdata.VSEIP := hvip.VSEIP.asUInt.asBool | vsi.eip | hgeip.ip.asUInt(hstatus.VGEIN.asUInt)
+    rdata.VSTIP := hvip.VSTIP.asUInt.asBool | platformIRP.VSTIP
+    rdata.VSEIP := hvip.VSEIP.asUInt.asBool | platformIRP.VSEIP | hgeip.ip.asUInt(hstatus.VGEIN.asUInt)
     rdata.SGEIP := (hgeip.ip.asUInt | hgeie.ie.asUInt).orR
 
-    // VSEIP is read only
-    // VSTIP is read only
-    // VSSIP is alias of hvip
-    toHvip.VSSIP.valid := fromVSip.SSIP.valid
-    toHvip.VSSIP.bits := fromVSip.SSIP.bits
+    // hip.VSEIP is read only
+    // hip.VSTIP is read only
+    // hip.VSSIP is alias of hvip.VSSIP
+    // vsip.SSIP is alias of hip.VSSIP
+    toHvip.VSSIP.valid := fromVSip.SSIP.valid || wen
+    toHvip.VSSIP.bits := Mux1H(Seq(
+      fromVSip.SSIP.valid -> fromVSip.SSIP.bits,
+      wen                 -> wdata.VSSIP
+    ))
   }).setAddr(0x644)
 
   val hvip = Module(new CSRModule("Hvip", new CSRBundle {
