@@ -434,6 +434,7 @@ class FrontendToCtrlIO(implicit p: Parameters) extends XSBundle {
   // to backend end
   val cfVec = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
   val stallReason = new StallReasonIO(DecodeWidth)
+  val illBuf = Output(UInt(32.W))
   val fromFtq = new FtqToCtrlIO
   val fromIfu = new IfuToBackendIO
   // from backend
