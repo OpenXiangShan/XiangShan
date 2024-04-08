@@ -94,6 +94,7 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   vfcvt.isWiden := isWidenCvt
   vfcvt.isNarrow := isNarrowCvt
   vfcvt.fire := fire
+  vfcvt.isFpToVecInst := vecCtrl.fpu.isFpToVecInst
   val vfcvtResult = vfcvt.io.result
   val vfcvtFflags = vfcvt.io.fflags
 
@@ -182,6 +183,7 @@ class VectorCvtTopIO(vlen: Int, xlen: Int) extends Bundle{
   val outputWidth1H = Input(UInt(4.W))
   val isWiden = Input(Bool())
   val isNarrow = Input(Bool())
+  val isFpToVecInst = Input(Bool())
 
   val result = Output(UInt(vlen.W))
   val fflags = Output(UInt((vlen/16*5).W))
@@ -193,12 +195,12 @@ class VectorCvtTopIO(vlen: Int, xlen: Int) extends Bundle{
 class VectorCvtTop(vlen: Int, xlen: Int) extends Module{
   val io = IO(new VectorCvtTopIO(vlen, xlen))
 
-  val (fire, uopIdx, src, opType, sew, rm, outputWidth1H, isWiden, isNarrow) = (
-    io.fire, io.uopIdx, io.src, io.opType, io.sew, io.rm, io.outputWidth1H, io.isWiden, io.isNarrow
+  val (fire, uopIdx, src, opType, sew, rm, outputWidth1H, isWiden, isNarrow, isFpToVecInst) = (
+    io.fire, io.uopIdx, io.src, io.opType, io.sew, io.rm, io.outputWidth1H, io.isWiden, io.isNarrow, io.isFpToVecInst
   )
   val fireReg = GatedValidRegNext(fire)
 
-  val in0 = Mux(isWiden,
+  val in0 = Mux(isWiden && !isFpToVecInst,
     Mux(uopIdx, src(1).tail(32), src(0).tail(32)),
     src(0)
   )
@@ -214,6 +216,7 @@ class VectorCvtTop(vlen: Int, xlen: Int) extends Module{
   vectorCvt0.opType := opType
   vectorCvt0.sew := sew
   vectorCvt0.rm := rm
+  vectorCvt0.isFpToVecInst := isFpToVecInst
 
   val vectorCvt1 = Module(new VectorCvt(xlen))
   vectorCvt1.fire := fire
@@ -221,6 +224,7 @@ class VectorCvtTop(vlen: Int, xlen: Int) extends Module{
   vectorCvt1.opType := opType
   vectorCvt1.sew := sew
   vectorCvt1.rm := rm
+  vectorCvt1.isFpToVecInst := isFpToVecInst
 
   val isNarrowCycle2 = RegEnable(RegEnable(isNarrow, fire), fireReg)
   val outputWidth1HCycle2 = RegEnable(RegEnable(outputWidth1H, fire), fireReg)
