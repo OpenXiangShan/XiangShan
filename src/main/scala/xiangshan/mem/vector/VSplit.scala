@@ -298,7 +298,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   val usSplitMask      = genUSSplitMask(issueByteMask, splitIdx, vaddr(3,0))
   val usNoSplit        = (usAligned128 || !(vaddr(3,0) +& PopCount(usSplitMask))(4)) && !issuePreIsSplit && (splitIdx === 0.U)// unit-stride uop don't need to split into two flow
   val usSplitVaddr     = genUSSplitAddr(vaddr, splitIdx)
-  val regOffset        = genVdOffset(vaddr(3,0), splitIdx)
+  val regOffset        = vaddr(3,0) // offset in 256-bits vd
   XSError((splitIdx > 1.U && usNoSplit) || (splitIdx > 1.U && issuePreIsSplit) , "Unit-Stride addr split error!\n")
 
   // data
@@ -308,11 +308,11 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
     x.alignedType           := issueAlignedType
     x.isvec                 := true.B
     x.mask                  := Mux(!issuePreIsSplit, usSplitMask, mask)
-    x.reg_offset            := regOffset //for merge unit-stride
+    x.reg_offset            := regOffset //for merge unit-stride data
     x.vecActive             := vecActive
     x.is_first_ele          := DontCare
     x.usSecondInv           := usNoSplit
-    x.elemIdx               := elemIdx
+    x.elemIdx               := Mux(!issuePreIsSplit, splitIdx, elemIdx) // if is Unit-Stride, elemIdx is the index of 2 splited mem request (for merge data)
     x.uop_unit_stride_fof   := DontCare
     x.isFirstIssue          := DontCare
     x.mBIndex               := issueMbIndex
