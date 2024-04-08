@@ -1125,7 +1125,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   private val deqStdNotWritebacked = robEntries(deqPtr.value).valid && !robEntries(deqPtr.value).stdWritebacked
   private val deqUopNotWritebacked = robEntries(deqPtr.value).valid && !robEntries(deqPtr.value).isUopWritebacked
   private val deqHeadInfo = debug_microOp(deqPtr.value)
-  val deqUopCommitType = io.commits.info(0).commitType
+  val deqUopCommitType = debug_microOp(deqPtr.value).commitType
 
   XSPerfAccumulate("waitAluCycle", deqNotWritebacked && deqHeadInfo.fuType === FuType.alu.U)
   XSPerfAccumulate("waitMulCycle", deqNotWritebacked && deqHeadInfo.fuType === FuType.mul.U)
