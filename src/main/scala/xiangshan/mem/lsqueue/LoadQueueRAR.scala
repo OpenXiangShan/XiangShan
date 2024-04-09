@@ -60,6 +60,17 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   //  PAddr       : physical address.
   //  Released    : DCache released.
   //
+  class STD_CLKGT_func extends BlackBox with HasBlackBoxResource {
+   val io = IO(new Bundle {
+    val TE = Input(Bool())
+    val E  = Input(Bool())
+    val CK = Input(Clock())
+    val Q  = Output(Clock())
+  })
+
+   addResource("/STD_CLKGT_func.v")
+  }
+
   val allocated = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B))) // The control signals need to explicitly indicate the initial value
   val uop = Reg(Vec(LoadQueueRARSize, new DynInst))
   val paddrModule = Module(new LqPAddrModule(
@@ -105,11 +116,10 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   val cancelEnqueue = io.query.map(_.req.bits.uop.robIdx.needFlush(io.redirect))
   val hasNotWritebackedLoad = io.query.map(_.req.bits.uop.lqIdx).map(lqIdx => isAfter(lqIdx, io.ldWbPtr))
   val needEnqueue = canEnqueue.zip(hasNotWritebackedLoad).zip(cancelEnqueue).map { case ((v, r), c) => v && r && !c }
-
+  
   // Allocate logic
   val acceptedVec = Wire(Vec(LoadPipelineWidth, Bool()))
   val enqIndexVec = Wire(Vec(LoadPipelineWidth, UInt()))
-
   for ((enq, w) <- io.query.map(_.req).zipWithIndex) {
     acceptedVec(w) := false.B
     paddrModule.io.wen(w) := false.B
@@ -122,7 +132,6 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     val canAccept = freeList.io.canAllocate(offset)
     val enqIndex = freeList.io.allocateSlot(offset)
     enq.ready := Mux(needEnqueue(w), canAccept, true.B)
-
     enqIndexVec(w) := enqIndex
     when (needEnqueue(w) && enq.ready) {
       acceptedVec(w) := true.B
@@ -151,7 +160,15 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
         enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release1Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset))
     }
   }
-
+  val needEnqueue_valid = Wire(Vec(LoadPipelineWidth, Bool()))
+  needEnqueue_valid := (0 until LoadPipelineWidth).map{ i => needEnqueue(i)}
+  val clkGate = Module(new STD_CLKGT_func)
+   clkGate.io.TE := false.B
+   clkGate.io.E := needEnqueue_valid.asUInt.orR || (freeList.io.validCount =/= 0.U)
+   clkGate.io.CK := clock
+  val gate_clock = clkGate.io.Q
+  paddrModule.clock := gate_clock
+ 
   //  LoadQueueRAR deallocate
   val freeMaskVec = Wire(Vec(LoadQueueRARSize, Bool()))
 

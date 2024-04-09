@@ -55,6 +55,18 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   })
 
   println("LoadQueueRAW: size " + LoadQueueRAWSize)
+
+  class STD_CLKGT_func extends BlackBox with HasBlackBoxResource {
+   val io = IO(new Bundle {
+    val TE = Input(Bool())
+    val E  = Input(Bool())
+    val CK = Input(Clock())
+    val Q  = Output(Clock())
+  })
+
+   addResource("/STD_CLKGT_func.v")
+  }
+
   //  LoadQueueRAW field
   //  +-------+--------+-------+-------+-----------+
   //  | Valid |  uop   |PAddr  | Mask  | Datavalid |
@@ -357,6 +369,15 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
       wrapper
     })
 
+val needEnqueue_valid = Wire(Vec(LoadPipelineWidth, Bool()))
+needEnqueue_valid := (0 until LoadPipelineWidth).map{ i => needEnqueue(i)}
+val clkGate = Module(new STD_CLKGT_func)
+ clkGate.io.TE := false.B
+ clkGate.io.E := needEnqueue_valid.asUInt.orR || (freeList.io.validCount =/= 0.U)
+ clkGate.io.CK := clock
+val gate_clock = clkGate.io.Q
+paddrModule.clock := gate_clock
+maskModule.clock := gate_clock
     // select logic
     val lqSelect = selectOldest(lqViolationSelVec, lqViolationSelUopExts)
 

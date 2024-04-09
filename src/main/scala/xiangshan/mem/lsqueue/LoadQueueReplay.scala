@@ -193,6 +193,18 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   })
 
   println("LoadQueueReplay size: " + LoadQueueReplaySize)
+
+  class STD_CLKGT_func extends BlackBox with HasBlackBoxResource {
+   val io = IO(new Bundle {
+    val TE = Input(Bool())
+    val E  = Input(Bool())
+    val CK = Input(Clock())
+    val Q  = Output(Clock())
+  })
+
+   addResource("/STD_CLKGT_func.v")
+  }
+
   //  LoadQueueReplay field:
   //  +-----------+---------+-------+-------------+--------+
   //  | Allocated | MicroOp | VAddr |    Cause    |  Flags |
@@ -682,6 +694,12 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     }
   }
 
+  val clkGate_vaddrModule = Module(new STD_CLKGT_func)
+    clkGate_vaddrModule.io.TE := false.B
+    clkGate_vaddrModule.io.E := vaddrModule.io.ren.asUInt.orR || vaddrModule.io.wen.asUInt.orR || allocated.asUInt.orR
+    clkGate_vaddrModule.io.CK := clock
+  val gate_clock = clkGate_vaddrModule.io.Q
+  vaddrModule.clock := gate_clock
   freeList.io.free := freeMaskVec.asUInt
 
   io.lqFull := lqFull
