@@ -236,14 +236,13 @@ class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
       val needCheck1 = io.needForward(i)(1)(j)
       val needCheck0Reg = RegNext(needCheck0)
       val needCheck1Reg = RegNext(needCheck1)
-      (0 until XLEN / 8).foreach(k => {
-        matchResultVec(j).validFast := needCheck0 && data(j).valid
-        matchResultVec(j).valid := needCheck0Reg && data(j).valid
-        matchResultVec(j).data := data(j).data
-        matchResultVec(numEntries + j).validFast := needCheck1 && data(j).valid
-        matchResultVec(numEntries + j).valid := needCheck1Reg && data(j).valid
-        matchResultVec(numEntries + j).data := data(j).data
-      })
+
+      matchResultVec(j).validFast := needCheck0 && data(j).valid
+      matchResultVec(j).valid := needCheck0Reg && data(j).valid
+      matchResultVec(j).data := data(j).data
+      matchResultVec(numEntries + j).validFast := needCheck1 && data(j).valid
+      matchResultVec(numEntries + j).valid := needCheck1Reg && data(j).valid
+      matchResultVec(numEntries + j).data := data(j).data
     }
 
     val parallelFwdResult = parallelFwd(matchResultVec).asTypeOf(new FwdEntry)

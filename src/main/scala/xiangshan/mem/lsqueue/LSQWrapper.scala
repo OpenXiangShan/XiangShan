@@ -59,14 +59,14 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val brqRedirect = Flipped(ValidIO(new Redirect))
     val enq = new LsqEnqIO
     val ldu = new Bundle() {
-        val stld_nuke_query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO)) // from load_s2
-        val ldld_nuke_query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO)) // from load_s2
         val ldin = Vec(LoadPipelineWidth, Flipped(Decoupled(new LqWriteBundle))) // from load_s3
+        val nuke = Vec(LoadPipelineWidth, Flipped(new NukeQueryIO))
     }
     val sta = new Bundle() {
       val storeMaskIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreMaskBundle))) // from store_s0, store mask, send to sq from rs
       val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // from store_s1
       val storeAddrInRe = Vec(StorePipelineWidth, Input(new LsPipelineBundle())) // from store_s2
+      val storeNuke = Vec(StorePipelineWidth, Output(Bool())) // from store s2
     }
     val std = new Bundle() {
       val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new ExuOutput))) // from store_s0, store data, send to sq from rs
@@ -180,6 +180,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   loadQueue.io.sq.sqEmpty          <> storeQueue.io.sqEmpty
   loadQueue.io.sta.storeAddrIn     <> io.sta.storeAddrIn // store_s1
   loadQueue.io.std.storeDataIn     <> io.std.storeDataIn // store_s0
+  loadQueue.io.sta.storeNuke       <> io.sta.storeNuke // store_s2
   loadQueue.io.lqFull              <> io.lqFull
   loadQueue.io.lq_rep_full         <> io.lq_rep_full
   loadQueue.io.lqDeq               <> io.lqDeq
