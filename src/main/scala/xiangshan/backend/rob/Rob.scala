@@ -453,7 +453,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   /**
    * RedirectOut: Interrupt and Exceptions
    */
-  val deqDispatchData = commitInfo(0)
+  val deqDispatchData = robEntries(deqPtr.value)
   val debug_deqUop = debug_microOp(deqPtr.value)
 
   val intrBitSetReg = RegNext(io.csr.intrBitSet)
@@ -695,12 +695,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     Mux((state === s_walk) && !walkFinished, VecInit(walkPtrVec.map(_ + CommitWidth.U)), walkPtrVec)
   )
   walkPtrHead := walkPtrVec_next.head
+  walkPtrVec := walkPtrVec_next
   // T io.redirect.valid, T+1 walkPtrLowBits update, T+2 donotNeedWalk update
   val walkPtrLowBits = Reg(UInt(bankAddrWidth.W))
   when(io.redirect.valid){
     walkPtrLowBits := Mux(io.snpt.useSnpt, snapshots(io.snpt.snptSelect)(0).value(bankAddrWidth-1, 0), deqPtrVec_next(0).value(bankAddrWidth-1, 0))
   }
-  val x = (0 until CommitWidth).map(i => (i.U < walkPtrLowBits))
   when(io.redirect.valid) {
     donotNeedWalk := Fill(donotNeedWalk.length, true.B).asTypeOf(donotNeedWalk)
   }.elsewhen(RegNext(io.redirect.valid)){
@@ -708,7 +708,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }.otherwise(
     donotNeedWalk := 0.U.asTypeOf(donotNeedWalk)
   )
-  walkPtrVec := walkPtrVec_next
   walkDestSizeDeqGroup.zip(walkPtrVec_next).map {
     case (reg, ptrNext) => reg := robEntries(deqPtr.value).realDestSize
   }
