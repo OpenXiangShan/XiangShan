@@ -1195,7 +1195,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.debug_ls.s3_isReplayRS := s3_valid && s3_in.feedbacked && io.lsq.ldin.bits.rep_info.need_rep
   io.debug_ls.s3_isReplaySlow := s3_valid && (!s3_fast_rep || s3_fast_rep_canceled) && !s3_in.feedbacked && io.lsq.ldin.bits.rep_info.need_rep
   io.debug_ls.s3_isReplay := s3_valid && io.lsq.ldin.bits.rep_info.need_rep // include fast+slow+rs replay
-  io.debug_ls.replayCause := io.lsq.ldin.bits.rep_info.cause
+  io.debug_ls.replayCause := s3_rep_info.cause
   io.debug_ls.replayCnt := 1.U
 
 
