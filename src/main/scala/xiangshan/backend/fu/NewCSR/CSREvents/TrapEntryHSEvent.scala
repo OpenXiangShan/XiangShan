@@ -113,7 +113,7 @@ class TrapEntryHSEventModule extends Module with CSREventBase {
   out.stval    .valid := valid
   out.htval    .valid := valid
 
-  out.privState.bits            := PrivState.ModeM
+  out.privState.bits            := PrivState.ModeHS
   // mstatus
   out.mstatus.bits.SPP          := current.privState.PRVM.asUInt(0, 0) // SPP is not PrivMode enum type, so asUInt and shrink the width
   out.mstatus.bits.SPIE         := current.sstatus.SIE
