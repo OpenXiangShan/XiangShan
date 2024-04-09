@@ -32,17 +32,17 @@ jobs:
           bash .github/workflows/check-usage.sh "BoringUtils" $GITHUB_WORKSPACE
       - name: generate verilog file
         run:
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate --num-cores 2
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate --num-cores 2 --mfc
       - name: check verilog
         run:
           python3 $GITHUB_WORKSPACE/.github/workflows/check_verilog.py build/rtl/XSTop.v
       - name: build MinimalConfig Release emu
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
-            --threads 4 --config MinimalConfig --release
+            --threads 8 --config MinimalConfig --release --mfc
       - name: run MinimalConfig - Linux
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 4 --numa --ci linux-hello-opensbi 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci linux-hello-opensbi 2> perf.log
           cat perf.log | sort
   emu-basics:
     runs-on: bosc
