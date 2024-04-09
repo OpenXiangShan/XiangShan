@@ -3,15 +3,14 @@ package xiangshan.backend.fu.NewCSR
 import chisel3._
 import chisel3.util._
 import xiangshan.backend.fu.NewCSR.CSRBundles._
-import xiangshan.backend.fu.NewCSR.CSRDefines.{
-  CSRRWField => RW,
-}
+import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRRWField => RW}
+import xiangshan.backend.fu.NewCSR.CSREvents.SretEventSinkBundle
 
 import scala.collection.immutable.SeqMap
 
 trait VirtualSupervisorLevel { self: NewCSR with HypervisorLevel =>
 
-  val vsstatus = Module(new CSRModule("VSstatus", new SstatusBundle))
+  val vsstatus = Module(new CSRModule("VSstatus", new SstatusBundle) with SretEventSinkBundle)
     .setAddr(0x200)
 
   val vsie = Module(new CSRModule("VSie", new VSie) with HypervisorBundle {
@@ -37,7 +36,7 @@ trait VirtualSupervisorLevel { self: NewCSR with HypervisorLevel =>
   val vsscratch = Module(new CSRModule("VSscratch"))
     .setAddr(0x240)
 
-  val vsepc = Module(new CSRModule("VSepc"))
+  val vsepc = Module(new CSRModule("VSepc", new Epc))
     .setAddr(0x241)
 
   val vscause = Module(new CSRModule("VScause", new CauseBundle))

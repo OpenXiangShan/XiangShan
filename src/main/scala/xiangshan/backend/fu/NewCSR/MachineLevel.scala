@@ -239,6 +239,7 @@ class MstatusBundle extends CSRBundle {
 class MstatusModule extends CSRModule("MStatus", new MstatusBundle)
   with TrapEntryMEventSinkBundle
   with MretEventSinkBundle
+  with SretEventSinkBundle
 {
   val mstatus = IO(Output(bundle))
   val sstatus = IO(Output(new SstatusBundle))

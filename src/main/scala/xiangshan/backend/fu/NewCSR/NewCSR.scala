@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import top.{ArgParser, Generator}
 import xiangshan.backend.fu.NewCSR.CSRDefines.{PrivMode, VirtMode}
-import xiangshan.backend.fu.NewCSR.CSREvents.{CSREvents, EventUpdatePrivStateOutput, MretEventSinkBundle, TrapEntryMEventSinkBundle}
+import xiangshan.backend.fu.NewCSR.CSREvents.{CSREvents, EventUpdatePrivStateOutput, MretEventSinkBundle, SretEventSinkBundle, TrapEntryMEventSinkBundle}
 
 object CSRConfig {
   final val GEILEN = 63
@@ -154,6 +154,11 @@ class NewCSR extends Module
         m.retFromM := mretEvent.out
       case _ =>
     }
+    mod match {
+      case m: SretEventSinkBundle =>
+        m.retFromS := sretEvent.out
+      case _ =>
+    }
   }
 
   csrMods.foreach { mod =>
@@ -191,6 +196,18 @@ class NewCSR extends Module
     case in =>
       in.mstatus := mstatus.regOut
       in.mepc := mepc.regOut
+  }
+
+  sretEvent.valid := isSret
+  sretEvent.in match {
+    case in =>
+      in.privState.PRVM := PRVM
+      in.privState.V := V
+      in.sstatus := mstatus.sstatus
+      in.hstatus := hstatus.regOut
+      in.vsstatus := vsstatus.regOut
+      in.sepc := sepc.regOut
+      in.vsepc := vsepc.regOut
   }
 
   PRVM := MuxCase(
