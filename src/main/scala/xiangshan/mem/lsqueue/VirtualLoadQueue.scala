@@ -282,6 +282,8 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
 
   //  perf counter
   QueuePerf(VirtualLoadQueueSize, validCount, !allowEnqueue)
+  val vecValidVec = WireInit(VecInit((0 until VirtualLoadQueueSize).map(i => allocated(i) && isvec(i))))
+  QueuePerf(VirtualLoadQueueSize, PopCount(vecValidVec), !allowEnqueue)
   io.lqFull := !allowEnqueue
   val perfEvents: Seq[(String, UInt)] = Seq()
   generatePerfEvent()

@@ -204,6 +204,10 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   io.out.bits.uopOffset := uopOffset
   io.out.bits.stride    := stride
   io.out.bits.mBIndex   := io.toMergeBuffer.resp.bits.mBIndex
+
+  XSPerfAccumulate("split_out",     io.out.fire)
+  XSPerfAccumulate("pipe_block",    io.out.valid && !io.out.ready)
+  XSPerfAccumulate("mbuffer_block", s1_valid && io.out.ready && !io.toMergeBuffer.resp.valid)
 }
 
 abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) extends VLSUModule{
@@ -367,6 +371,14 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
 
   // out connect
   io.out.valid := canIssue && (vecActive || !issuePreIsSplit) // TODO: inactive uop do not send to pipeline
+
+  XSPerfAccumulate("out_valid",             io.out.valid)
+  XSPerfAccumulate("out_fire",              io.out.fire)
+  XSPerfAccumulate("out_fire_unitstride",   io.out.fire && !issuePreIsSplit)
+  XSPerfAccumulate("unitstride_vlenAlign",  io.out.fire && !issuePreIsSplit && io.out.bits.vaddr(3, 0) === 0.U)
+  XSPerfAccumulate("unitstride_invalid",    io.out.ready && canIssue && !issuePreIsSplit && PopCount(io.out.bits.mask).orR)
+
+  QueuePerf(bufferSize, distanceBetween(enqPtr, deqPtr), !io.in.ready)
 }
 
 class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = true){

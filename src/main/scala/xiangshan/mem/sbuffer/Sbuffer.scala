@@ -862,6 +862,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   XSPerfHistogram("util", perf_valid_entry_count, true.B, 0, StoreBufferSize, 1)
   XSPerfAccumulate("sbuffer_req_valid", PopCount(VecInit(io.in.map(_.valid)).asUInt))
   XSPerfAccumulate("sbuffer_req_fire", PopCount(VecInit(io.in.map(_.fire)).asUInt))
+  XSPerfAccumulate("sbuffer_req_fire_vecinvalid", PopCount(VecInit(io.in.map(data => data.fire && !data.bits.vecValid)).asUInt))
   XSPerfAccumulate("sbuffer_merge", PopCount(VecInit(io.in.zipWithIndex.map({case (in, i) => in.fire && canMerge(i)})).asUInt))
   XSPerfAccumulate("sbuffer_newline", PopCount(VecInit(io.in.zipWithIndex.map({case (in, i) => in.fire && !canMerge(i)})).asUInt))
   XSPerfAccumulate("dcache_req_valid", io.dcache.req.valid)

@@ -205,8 +205,8 @@ case class XSCoreParameters
   StoreBufferThreshold: Int = 7,
   EnsbufferWidth: Int = 2,
   // ============ VLSU ============
-  VlMergeBufferSize: Int = 8,
-  VsMergeBufferSize: Int = 8,
+  VlMergeBufferSize: Int = 16,
+  VsMergeBufferSize: Int = 16,
   UopWritebackWidth: Int = 1,
   SplitBufferSize: Int = 8,
   // ==============================

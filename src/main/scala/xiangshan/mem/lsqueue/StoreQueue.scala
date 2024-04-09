@@ -987,6 +987,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   )
   // perf counter
   QueuePerf(StoreQueueSize, validCount, !allowEnqueue)
+  val vecValidVec = WireInit(VecInit((0 until StoreQueueSize).map(i => allocated(i) && isVec(i))))
+  QueuePerf(StoreQueueSize, PopCount(vecValidVec), !allowEnqueue)
   io.sqFull := !allowEnqueue
   XSPerfAccumulate("mmioCycle", uncacheState =/= s_idle) // lq is busy dealing with uncache req
   XSPerfAccumulate("mmioCnt", io.uncache.req.fire)
