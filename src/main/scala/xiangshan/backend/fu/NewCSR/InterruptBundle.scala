@@ -89,3 +89,19 @@ class InterruptEnableBundle extends CSRBundle {
 
   def getALL = Seq(SSIE, VSSIE, MSIE, STIE, VSTIE, MTIE, SEIE, VSEIE, MEIE, SGEIE, COIE, LPRASEIE, HPRASEIE)
 }
+
+object InterruptNO {
+  // Software Interrupt
+  final val SSI  = 1
+  final val VSSI = 2
+  final val MSI  = 3
+  // Time Interrupt
+  final val STI  = 5
+  final val VSTI = 6
+  final val MTI  = 7
+  // External Interrupt
+  final val SEI  = 9
+  final val VSEI = 10
+  final val MEI  = 11
+  final val SGEI = 12
+}

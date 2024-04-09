@@ -16,6 +16,8 @@ trait CSREvents { self: NewCSR with MachineLevel =>
 
   val trapEntryHSEvent = Module(new TrapEntryHSEventModule)
 
+  val trapEntryVSEvent = Module(new TrapEntryVSEventModule)
+
   val mretEvent = Module(new MretEventModule)
 
   val sretEvent = Module(new SretEventModule)
@@ -23,6 +25,7 @@ trait CSREvents { self: NewCSR with MachineLevel =>
   val events: Seq[Module with CSREventBase] = Seq(
     trapEntryMEvent,
     trapEntryHSEvent,
+    trapEntryVSEvent,
     mretEvent,
     sretEvent,
   )

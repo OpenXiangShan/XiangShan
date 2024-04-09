@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import top.{ArgParser, Generator}
 import xiangshan.backend.fu.NewCSR.CSRDefines.{PrivMode, VirtMode}
-import xiangshan.backend.fu.NewCSR.CSREvents.{CSREvents, EventUpdatePrivStateOutput, MretEventSinkBundle, SretEventSinkBundle, TrapEntryHSEventSinkBundle, TrapEntryMEventSinkBundle}
+import xiangshan.backend.fu.NewCSR.CSREvents.{CSREvents, EventUpdatePrivStateOutput, MretEventSinkBundle, SretEventSinkBundle, TrapEntryHSEventSinkBundle, TrapEntryMEventSinkBundle, TrapEntryVSEventSinkBundle}
 
 object CSRConfig {
   final val GEILEN = 63
@@ -155,6 +155,11 @@ class NewCSR extends Module
       case _ =>
     }
     mod match {
+      case m: TrapEntryVSEventSinkBundle =>
+        m.trapToVS := trapEntryVSEvent.out
+      case _ =>
+    }
+    mod match {
       case m: MretEventSinkBundle =>
         m.retFromM := mretEvent.out
       case _ =>
@@ -215,6 +220,26 @@ class NewCSR extends Module
       in.dMode.PRVM := Mux(mstatus.rdata.MPRV.asBool, mstatus.rdata.MPP, PRVM)
       in.dMode.V := Mux(mstatus.rdata.MPRV.asBool, mstatus.rdata.MPV, V)
       in.satp := satp.rdata
+      in.vsatp := vsatp.rdata
+  }
+
+  trapEntryVSEvent.valid := trapToVS
+  trapEntryVSEvent.in match {
+    case in =>
+      in.vsstatus := vsstatus.regOut
+      in.trapPc := io.trap.bits.tpc
+      in.privState.PRVM := PRVM
+      in.privState.V := V
+      in.isInterrupt := io.trap.bits.isInterrupt
+      in.trapVec := io.trap.bits.trapVec
+      in.isCrossPageIPF := io.trap.bits.isCrossPageIPF
+      in.trapMemVaddr := io.fromMem.excpVaddr
+      in.trapMemGVA := io.fromMem.excpGVA
+      in.trapMemGPA := io.fromMem.excpGPA
+      in.iMode.PRVM := PRVM
+      in.iMode.V := V
+      in.dMode.PRVM := Mux(mstatus.rdata.MPRV.asBool, mstatus.rdata.MPP, PRVM)
+      in.dMode.V := Mux(mstatus.rdata.MPRV.asBool, mstatus.rdata.MPV, V)
       in.vsatp := vsatp.rdata
   }
 
