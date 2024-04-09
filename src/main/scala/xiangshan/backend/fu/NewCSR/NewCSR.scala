@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import top.{ArgParser, Generator}
 import xiangshan.backend.fu.NewCSR.CSRDefines.{PrivMode, VirtMode}
-import xiangshan.backend.fu.NewCSR.CSREvents.{CSREvents, EventUpdatePrivStateOutput, TrapEntryMEventSinkBundle}
+import xiangshan.backend.fu.NewCSR.CSREvents.{CSREvents, EventUpdatePrivStateOutput, MretEventSinkBundle, TrapEntryMEventSinkBundle}
 
 object CSRConfig {
   final val GEILEN = 63
@@ -62,6 +62,9 @@ class NewCSR extends Module
       val toPRVM = PrivMode()
       val toV = VirtMode()
     }))
+    val out = new Bundle {
+      val targetPc = UInt(VaddrWidth.W)
+    }
   })
 
   val addr = io.w.bits.addr
@@ -146,6 +149,11 @@ class NewCSR extends Module
         m.trapToM := trapEntryMEvent.out
       case _ =>
     }
+    mod match {
+      case m: MretEventSinkBundle =>
+        m.retFromM := mretEvent.out
+      case _ =>
+    }
   }
 
   csrMods.foreach { mod =>
@@ -178,6 +186,13 @@ class NewCSR extends Module
       in.vsatp := vsatp.rdata
   }
 
+  mretEvent.valid := isMret
+  mretEvent.in match {
+    case in =>
+      in.mstatus := mstatus.regOut
+      in.mepc := mepc.regOut
+  }
+
   PRVM := MuxCase(
     PRVM,
     events.filter(_.out.isInstanceOf[EventUpdatePrivStateOutput]).map {
@@ -195,6 +210,10 @@ class NewCSR extends Module
       }
     }
   )
+
+  io.out.targetPc := Mux1H(Seq(
+    mretEvent.out.targetPc.valid -> mretEvent.out.targetPc.bits.asUInt
+  ))
 }
 
 trait SupervisorMachineAliasConnect { self: NewCSR with MachineLevel with SupervisorLevel =>

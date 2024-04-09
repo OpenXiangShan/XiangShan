@@ -12,7 +12,7 @@ import xiangshan.backend.fu.NewCSR._
 import xiangshan.backend.fu.util.CSRConst
 
 
-class TrapEntryMEventOutput extends Bundle with EventUpdatePrivStateOutput {
+class TrapEntryMEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase  {
 
   val mstatus = ValidIO((new MstatusBundle ).addInEvent(_.MPV, _.MPP, _.GVA, _.MPIE, _.MIE))
   val mepc    = ValidIO((new Epc           ).addInEvent(_.ALL))
@@ -51,8 +51,7 @@ class TrapEntryMEventInput extends Bundle {
   val vsatp = Input(new SatpBundle)
 }
 
-class TrapEntryMEventModule extends Module {
-  val valid = IO(Input(Bool()))
+class TrapEntryMEventModule extends Module with CSREventBase {
   val in = IO(new TrapEntryMEventInput)
   val out = IO(new TrapEntryMEventOutput)
 
@@ -129,7 +128,7 @@ class TrapEntryMEventModule extends Module {
 trait TrapEntryMEventSinkBundle { self: CSRModule[_] =>
   val trapToM = IO(Flipped(new TrapEntryMEventOutput))
 
-  val updateBundle: ValidIO[CSRBundle] = trapToM.getBundleByName(self.modName.toLowerCase())
+  private val updateBundle: ValidIO[CSRBundle] = trapToM.getBundleByName(self.modName.toLowerCase())
 
   (reg.asInstanceOf[CSRBundle].getFields zip updateBundle.bits.getFields).foreach { case (sink, source) =>
     if (updateBundle.bits.eventFields.contains(source)) {

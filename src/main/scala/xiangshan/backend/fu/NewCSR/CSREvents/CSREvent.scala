@@ -14,11 +14,26 @@ import xiangshan.backend.fu.util.CSRConst
 trait CSREvents { self: NewCSR with MachineLevel =>
   val trapEntryMEvent = Module(new TrapEntryMEventModule)
 
-  val events = Seq(trapEntryMEvent)
+  val mretEvent = Module(new MretEventModule)
+
+  val events: Seq[Module with CSREventBase] = Seq(
+    trapEntryMEvent,
+    mretEvent,
+  )
 
   events.foreach(x => dontTouch(x.out))
 }
 
 trait EventUpdatePrivStateOutput {
   val privState = ValidIO(new PrivState)
+}
+
+trait EventOutputBase {
+  def getBundleByName(name: String): Valid[CSRBundle]
+}
+
+trait CSREventBase {
+  val valid = IO(Input(Bool()))
+  val in: Bundle
+  val out: Bundle
 }

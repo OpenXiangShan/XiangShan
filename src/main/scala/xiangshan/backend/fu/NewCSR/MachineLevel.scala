@@ -11,7 +11,7 @@ import xiangshan.backend.fu.NewCSR.CSRDefines.{
   CSRWLRLField => WLRL,
   _
 }
-import xiangshan.backend.fu.NewCSR.CSREvents.TrapEntryMEventSinkBundle
+import xiangshan.backend.fu.NewCSR.CSREvents._
 
 import scala.collection.immutable.SeqMap
 
@@ -236,7 +236,10 @@ class MstatusBundle extends CSRBundle {
   )
 }
 
-class MstatusModule extends CSRModule("MStatus", new MstatusBundle) with TrapEntryMEventSinkBundle {
+class MstatusModule extends CSRModule("MStatus", new MstatusBundle)
+  with TrapEntryMEventSinkBundle
+  with MretEventSinkBundle
+{
   val mstatus = IO(Output(bundle))
   val sstatus = IO(Output(new SstatusBundle))
 
