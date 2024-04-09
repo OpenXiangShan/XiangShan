@@ -85,7 +85,7 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     val enable = Input(Bool())
     // TODO: flush all entry when process changing happens, or disable stream prefetch for a while
     val flush = Input(Bool())
-    val dynamic_depth = Input(UInt(32.W)) // TODO: enable dynamic stride depth
+    val dynamic_depth = Input(UInt(6.W)) // TODO: enable dynamic stride depth
     val train_req = Flipped(DecoupledIO(new PrefetchReqBundle))
     val prefetch_req = ValidIO(new StreamPrefetchReqBundle)
     // query Stream component to see if a stream pattern has already been detected
@@ -144,17 +144,13 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     s1_new_stride := res._2
   }
 
-  val l1_stride_ratio_const = WireInit(Constantin.createRecord("l1_stride_ratio" + p(XSCoreParamsKey).HartId.toString, initValue = 2.U))
-  val l1_stride_ratio = l1_stride_ratio_const(3, 0)
-  val l2_stride_ratio_const = WireInit(Constantin.createRecord("l2_stride_ratio" + p(XSCoreParamsKey).HartId.toString, initValue = 5.U))
-  val l2_stride_ratio = l2_stride_ratio_const(3, 0)
   // s2: calculate L1 & L2 pf addr
   val s2_valid = RegNext(s1_valid && s1_can_send_pf)
   val s2_vaddr = RegEnable(s1_vaddr, s1_valid && s1_can_send_pf)
   val s2_stride = RegEnable(s1_stride, s1_valid && s1_can_send_pf)
-  val s2_l1_depth = s2_stride << l1_stride_ratio
+  val s2_l1_depth = s2_stride << io.dynamic_depth
   val s2_l1_pf_vaddr = (s2_vaddr + s2_l1_depth)(VAddrBits - 1, 0)
-  val s2_l2_depth = s2_stride << l2_stride_ratio
+  val s2_l2_depth = s2_stride << (io.dynamic_depth + 3.U)
   val s2_l2_pf_vaddr = (s2_vaddr + s2_l2_depth)(VAddrBits - 1, 0)
   val s2_l1_pf_req_bits = (new StreamPrefetchReqBundle).getStreamPrefetchReqBundle(
     vaddr = s2_l1_pf_vaddr,
