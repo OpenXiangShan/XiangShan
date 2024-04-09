@@ -141,11 +141,27 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
   }
   freeList.io.free := freeMaskVec.asUInt
   //pipelineWriteback
-  for((pipewb) <- io.fromPipeline){
+  // handle the situation where multiple ports are going to write the same uop queue entry
+  val mergePortMatrix        = Wire(Vec(pipeWidth, Vec(pipeWidth, Bool())))
+  val mergedByPrevPortVec    = Wire(Vec(pipeWidth, Bool()))
+  (0 until pipeWidth).map{case i => (0 until pipeWidth).map{case j =>
+    mergePortMatrix(i)(j) := (j == i).B ||
+      (j > i).B &&
+      io.fromPipeline(j).bits.mBIndex === io.fromPipeline(i).bits.mBIndex &&
+      io.fromPipeline(j).valid
+  }}
+  (0 until pipeWidth).map{case i =>
+    mergedByPrevPortVec(i) := (i != 0).B && Cat((0 until i).map(j =>
+      io.fromPipeline(j).bits.mBIndex === io.fromPipeline(i).bits.mBIndex &&
+      io.fromPipeline(j).valid)).orR
+  }
+  dontTouch(mergePortMatrix)
+  dontTouch(mergedByPrevPortVec)
+  for((pipewb, i) <- io.fromPipeline.zipWithIndex){
     val wbIndex          = pipewb.bits.mBIndex
-    val flowNumNext      = Mux(pipewb.bits.usSecondInv,
-                               entries(wbIndex).flowNum - 2.U,
-                               entries(wbIndex).flowNum - 1.U)
+    val flowNumOffset    = Mux(pipewb.bits.usSecondInv,
+                               2.U,
+                               PopCount(mergePortMatrix(i)))
     val sourceTypeNext   = entries(wbIndex).sourceType | pipewb.bits.sourceType
     val hasExp           = pipewb.bits.exceptionVec.asUInt.orR
     val exceptionVecNext = Mux(hasExp, pipewb.bits.exceptionVec, entries(wbIndex).exceptionVec)
@@ -153,9 +169,10 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     // if is VLoad, need latch 1 cycle to merge data. only flowNum and wbIndex need to latch
     val latchWbValid     = if(isVStore) pipewb.valid else RegNext(pipewb.valid)
     val latchWbIndex     = if(isVStore) wbIndex      else RegEnable(wbIndex, pipewb.valid)
-    val latchFlowNum     = if(isVStore) flowNumNext  else RegEnable(flowNumNext, pipewb.valid)
-    when(latchWbValid){
-      entries(latchWbIndex).flowNum := latchFlowNum
+    val latchFlowNum     = if(isVStore) flowNumOffset else RegEnable(flowNumOffset, pipewb.valid)
+    val latchMergeByPre  = if(isVStore) mergedByPrevPortVec(i) else RegEnable(mergedByPrevPortVec(i), pipewb.valid)
+    when(latchWbValid && !latchMergeByPre){
+      entries(latchWbIndex).flowNum := entries(latchWbIndex).flowNum - latchFlowNum
     }
 
     when(pipewb.valid){
@@ -167,7 +184,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
       needRSReplay(wbIndex) := true.B
     }
     pipewb.ready := true.B
-    XSError((flowNumNext > entries(wbIndex).flowNum) && pipewb.valid, "FlowWriteback overflow!!\n")
+    XSError((entries(latchWbIndex).flowNum - latchFlowNum > entries(latchWbIndex).flowNum) && latchWbValid && !latchMergeByPre, "FlowWriteback overflow!!\n")
     XSError(!allocated(wbIndex) && pipewb.valid, "Writeback error flow!!\n")
   }
   // for inorder mem asscess
@@ -231,21 +248,13 @@ class VLMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
     val elemIdxInsideVd = pipewb.bits.elemIdxInsideVd
     flowWbElemIdx(i) := pipewb.bits.elemIdx.get
     flowWbElemIdxInVd(i) := elemIdxInsideVd.get
-    // handle the situation where multiple ports are going to write the same uop queue entry
-    val mergedByPrevPort = (i != 0).B && Cat((0 until i).map(j =>
-      io.fromPipeline(j).bits.mBIndex === pipewb.bits.mBIndex &&
-      io.fromPipeline(j).valid)).orR
-    val mergePortVec = (0 until LoadPipelineWidth).map(j => (j == i).B ||
-      (j > i).B &&
-      io.fromPipeline(j).bits.mBIndex === pipewb.bits.mBIndex &&
-      io.fromPipeline(j).valid)
-    val mergeExpPortVec = (0 until LoadPipelineWidth).map(j => mergePortVec(j))
+
     val mergedData = mergeDataWithElemIdx(
       oldData = entries(wbIndex).data,
       newData = io.fromPipeline.map(_.bits.vecdata.get),
       alignedType = alignedType(1,0),
       elemIdx = flowWbElemIdxInVd,
-      valids = mergeExpPortVec
+      valids = mergePortMatrix(i)
     )
     /* this only for unit-stride load data merge
      * cycle0: broden 128-bits to 256-bits (max 6 to 1)
@@ -255,7 +264,7 @@ class VLMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
       data    = io.fromPipeline.map(_.bits.vecdata.get).drop(i),
       mask    = io.fromPipeline.map(_.bits.mask.get).drop(i),
       index   = io.fromPipeline(i).bits.elemIdx.get,
-      valids  = mergeExpPortVec.drop(i)
+      valids  = mergePortMatrix(i).drop(i)
     )
     /** step1 **/
     val pipewbValidReg      = RegNext(pipewb.valid)
@@ -263,7 +272,7 @@ class VLMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
     val mergeDataReg        = RegEnable(mergedData, pipewb.valid) // for not Unit-stride
     val brodenMergeDataReg  = RegEnable(brodenMergeData, pipewb.valid) // only for Unit-stride
     val brodenMergeMaskReg  = RegEnable(brodenMergeMask, pipewb.valid)
-    val mergedByPrevPortReg = RegEnable(mergedByPrevPort, pipewb.valid)
+    val mergedByPrevPortReg = RegEnable(mergedByPrevPortVec(i), pipewb.valid)
     val regOffsetReg        = RegEnable(pipewb.bits.reg_offset.get, pipewb.valid) // only for Unit-stride
     val isusMerge           = RegEnable(alignedType(2), pipewb.valid)
 

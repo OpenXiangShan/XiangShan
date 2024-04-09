@@ -163,6 +163,8 @@ trait HasVLSUParameters extends HasXSParameter with VLSUConstants {
       val muxLength = data.length
       val selDataMatrix = Wire(Vec(muxLength, Vec(2, UInt((VLEN * 2).W)))) // 3 * 2 * 256
       val selMaskMatrix = Wire(Vec(muxLength, Vec(2, UInt((VLENB * 2).W)))) // 3 * 2 * 16
+      dontTouch(selDataMatrix)
+      dontTouch(selMaskMatrix)
       for(i <- 0 until muxLength){
         if(i == 0){
           selDataMatrix(i)(0) := Cat(0.U(VLEN.W), data(i))
@@ -178,7 +180,7 @@ trait HasVLSUParameters extends HasXSParameter with VLSUConstants {
         }
       }
       val selIdxVec = (0 until muxLength).map(_.U)
-      val selIdx    = PriorityMux(valids, selIdxVec)
+      val selIdx    = PriorityMux(valids.reverse, selIdxVec.reverse)
 
       val selData = LookupTree(index, List(
         0.U -> selDataMatrix(selIdx)(0),
