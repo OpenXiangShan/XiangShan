@@ -234,6 +234,9 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
   r_resp.bits.resp := AXI4Parameters.RESP_OKAY
   r_resp.bits.last := (rdata_cnt.value === read_resp_len)
 
+  // The return values of DPI-C are used to determine whether a request has been made or completed
+  // pending_read_req_ready ---> readRequest()
+  // read_resp_valid <--- readResponse()
   when (pending_read_req_ready && !read_resp_valid) {
     read_request_cnt := read_request_cnt + 1.U
   }.elsewhen (read_resp_valid && !pending_read_req_ready) {
@@ -279,6 +282,9 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
   in.b.bits.id := Mux(pending_write_resp_valid, pending_write_resp_id, write_resp_id)
   in.b.bits.resp := AXI4Parameters.RESP_OKAY
 
+  // The return values of DPI-C are used to determine whether a request has been made or completed
+  // pending_write_req_ready ---> writeRequest()
+  // write_resp_valid <--- writeResponse()
   when (pending_write_req_ready && !write_resp_valid) {
     write_request_cnt := write_request_cnt + 1.U
   }.elsewhen (write_resp_valid && !pending_write_req_ready) {
