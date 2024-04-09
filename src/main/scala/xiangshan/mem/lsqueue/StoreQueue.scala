@@ -312,26 +312,26 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   for (i <- 0 until io.enq.req.length) {
     val sqIdx = enqPtrExt(0) + validVStoreOffsetRShift.take(i + 1).reduce(_ + _)
-    val index = io.enq.req(i).bits.sqIdx.value
+    val index = io.enq.req(i).bits.sqIdx
     val enqInstr = io.enq.req(i).bits.instr.asTypeOf(new XSInstBitFields)
     when (canEnqueue(i) && !enqCancel(i)) {
       for (j <- 0 until VecMemDispatchMaxNumber) {
         when (j.U < validVStoreOffset(i)) {
-          uop(index + j.U) := io.enq.req(i).bits
+          uop((index + j.U).value) := io.enq.req(i).bits
           // NOTE: the index will be used when replay
-          uop(index + j.U).sqIdx := sqIdx + j.U
-          allocated(index + j.U) := true.B
-          datavalid(index + j.U) := false.B
-          addrvalid(index + j.U) := false.B
-          committed(index + j.U) := false.B
-          pending(index + j.U) := false.B
-          prefetch(index + j.U) := false.B
-          mmio(index + j.U) := false.B
-          isVec(index + j.U) := enqInstr.isVecStore // check vector store by the encoding of inst
-          vecMbCommit(index + j.U) := false.B
-          vecDataValid(index + j.U) := false.B
+          uop((index + j.U).value).sqIdx := sqIdx + j.U
+          allocated((index + j.U).value) := true.B
+          datavalid((index + j.U).value) := false.B
+          addrvalid((index + j.U).value) := false.B
+          committed((index + j.U).value) := false.B
+          pending((index + j.U).value) := false.B
+          prefetch((index + j.U).value) := false.B
+          mmio((index + j.U).value) := false.B
+          isVec((index + j.U).value) := enqInstr.isVecStore // check vector store by the encoding of inst
+          vecMbCommit((index + j.U).value) := false.B
+          vecDataValid((index + j.U).value) := false.B
           XSError(!io.enq.canAccept || !io.enq.lqCanAccept, s"must accept $i\n")
-          XSError(index =/= sqIdx.value, s"must be the same entry $i\n")
+          XSError(index.value =/= sqIdx.value, s"must be the same entry $i\n")
         }
       }
     }
