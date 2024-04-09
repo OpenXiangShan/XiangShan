@@ -62,6 +62,9 @@ class TrapEntryHSEventModule extends Module with CSREventBase {
   private val current = in
 
   private val trapPC = Wire(UInt(XLEN.W))
+  private val trapMemVaddr = SignExt(in.trapMemVaddr, XLEN)
+  private val trapMemGPA = SignExt(in.trapMemGPA, XLEN)
+  private val trapMemGVA = SignExt(in.trapMemGVA, XLEN)
   private val ivmHS = !current.iMode.isModeHS && current.satp.MODE =/= SatpMode.Bare
   private val ivmVS = !current.iMode.isModeVS && current.vsatp.MODE =/= SatpMode.Bare
   // When enable virtual memory, the higher bit should fill with the msb of address of Sv39/Sv48/Sv57
@@ -96,12 +99,12 @@ class TrapEntryHSEventModule extends Module with CSREventBase {
   private val tval = Mux1H(Seq(
     (tvalFillPc                     ) -> trapPC,
     (tvalFillPcPlus2                ) -> (trapPC + 2.U),
-    (tvalFillMemVaddr && !memIsVirt ) -> in.trapMemVaddr,
-    (tvalFillMemVaddr &&  memIsVirt ) -> in.trapMemGVA,
-    (isGuestExcp                    ) -> in.trapMemGVA,
+    (tvalFillMemVaddr && !memIsVirt ) -> trapMemVaddr,
+    (tvalFillMemVaddr &&  memIsVirt ) -> trapMemGVA,
+    (isGuestExcp                    ) -> trapMemGVA,
   ))
 
-  private val tval2 = Mux(isGuestExcp, in.trapMemGPA, 0.U)
+  private val tval2 = Mux(isGuestExcp, trapMemGPA, 0.U)
 
   out := DontCare
 
