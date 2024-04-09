@@ -379,12 +379,14 @@ class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = t
       )
   val usSplitData      = genUSSplitData(issueEntry.data.asUInt, splitIdx, vaddr(3,0))
 
-  io.out.bits.uop.sqIdx := issueUop.sqIdx + splitIdx
+  val sqIdx = issueUop.sqIdx + splitIdx
+  io.out.bits.uop.sqIdx := sqIdx
 
   // send data to sq
   val vstd = io.vstd.get
   vstd.valid := canIssue
   vstd.bits.uop := issueUop
+  vstd.bits.uop.sqIdx := sqIdx
   vstd.bits.data := Mux(!issuePreIsSplit, usSplitData, flowData)
   vstd.bits.debug := DontCare
   vstd.bits.vdIdx.get := DontCare
