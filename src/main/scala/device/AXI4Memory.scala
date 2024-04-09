@@ -220,7 +220,7 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
   val pending_read_resp_id = Reg(UInt(r_resp.bits.id.getWidth.W))
   val has_read_resp = Wire(Bool())
   val read_resp_last = r_resp.fire && r_resp.bits.last
-  val read_request_cntReg = RegInit(0.U(16.W))
+  val read_request_cntReg = RegInit(0.U(8.W))
   val reqd_have_req_cnt = Wire(Bool())
   reqd_have_req_cnt := (read_request_cntReg =/= 0.U);
   val (read_resp_valid, read_resp_id) = readResponse((!has_read_resp || read_resp_last) && reqd_have_req_cnt)
@@ -235,9 +235,9 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
   r_resp.bits.resp := AXI4Parameters.RESP_OKAY
   r_resp.bits.last := (rdata_cnt.value === read_resp_len)
 
-  when (pending_read_req_ready) {
+  when (pending_read_req_ready && !read_resp_valid) {
     read_request_cntReg := read_request_cntReg + 1.U
-  }.elsewhen (read_resp_valid) {
+  }.elsewhen (read_resp_valid && !pending_read_req_ready) {
     read_request_cntReg := read_request_cntReg - 1.U
   }
   when (!pending_read_resp_valid && read_resp_valid && !read_resp_last) {
@@ -272,7 +272,7 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
   val pending_write_resp_valid = RegInit(false.B)
   val pending_write_resp_id = Reg(UInt(in.b.bits.id.getWidth.W))
   val has_write_resp = Wire(Bool())
-  val write_request_cntReg = RegInit(0.U(16.W))
+  val write_request_cntReg = RegInit(0.U(8.W))
   val write_have_req_cnt = Wire(Bool())
   write_have_req_cnt := (write_request_cntReg =/= 0.U);
   val (write_resp_valid, write_resp_id) = writeResponse((!has_write_resp || in.b.fire) && write_have_req_cnt)
@@ -281,9 +281,9 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
   in.b.bits.id := Mux(pending_write_resp_valid, pending_write_resp_id, write_resp_id)
   in.b.bits.resp := AXI4Parameters.RESP_OKAY
 
-  when (pending_write_req_ready) {
+  when (pending_write_req_ready && !write_resp_valid) {
     write_request_cntReg := write_request_cntReg + 1.U
-  }.elsewhen (write_resp_valid) {
+  }.elsewhen (write_resp_valid && !pending_write_req_ready) {
     write_request_cntReg := write_request_cntReg - 1.U
   }
   when (!pending_write_resp_valid && write_resp_valid && !in.b.ready) {
