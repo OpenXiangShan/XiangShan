@@ -14,12 +14,15 @@ import xiangshan.backend.fu.util.CSRConst
 trait CSREvents { self: NewCSR with MachineLevel =>
   val trapEntryMEvent = Module(new TrapEntryMEventModule)
 
+  val trapEntryHSEvent = Module(new TrapEntryHSEventModule)
+
   val mretEvent = Module(new MretEventModule)
 
   val sretEvent = Module(new SretEventModule)
 
   val events: Seq[Module with CSREventBase] = Seq(
     trapEntryMEvent,
+    trapEntryHSEvent,
     mretEvent,
     sretEvent,
   )

@@ -238,6 +238,7 @@ class MstatusBundle extends CSRBundle {
 
 class MstatusModule extends CSRModule("MStatus", new MstatusBundle)
   with TrapEntryMEventSinkBundle
+  with TrapEntryHSEventSinkBundle
   with MretEventSinkBundle
   with SretEventSinkBundle
 {

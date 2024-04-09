@@ -6,7 +6,7 @@ import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRROField => RO, CSRRWField => R
 import xiangshan.backend.fu.NewCSR.CSRFunc._
 import xiangshan.backend.fu.NewCSR.CSRConfig._
 import xiangshan.backend.fu.NewCSR.CSRBundles._
-import xiangshan.backend.fu.NewCSR.CSREvents.SretEventSinkBundle
+import xiangshan.backend.fu.NewCSR.CSREvents.{SretEventSinkBundle, TrapEntryHSEventSinkBundle}
 
 import scala.collection.immutable.SeqMap
 
@@ -32,15 +32,18 @@ trait HypervisorLevel { self: NewCSR =>
     when (fromMie.VSTIE.valid) { reg.VSTIE := fromMie.VSTIE.bits }
     when (fromMie.VSEIE.valid) { reg.VSEIE := fromMie.VSEIE.bits }
     when (fromMie.SGEIE.valid) { reg.SGEIE := fromMie.SGEIE.bits }
-  }).setAddr(0x604)
+  })
+    .setAddr(0x604)
 
   hie.fromMie := mie.toHie
 
   val htimedelta = Module(new CSRModule("Htimedelta", new CSRBundle {
     val VALUE = RW(63, 0)
-  })).setAddr(0x605)
+  }))
+    .setAddr(0x605)
 
-  val hcounteren = Module(new CSRModule("Hcounteren", new Counteren)).setAddr(0x606)
+  val hcounteren = Module(new CSRModule("Hcounteren", new Counteren))
+    .setAddr(0x606)
 
   val hgeie = Module(new CSRModule("Hgeie", new HgeieBundle))
     .setAddr(0x607)
@@ -48,7 +51,8 @@ trait HypervisorLevel { self: NewCSR =>
   val hvien = Module(new CSRModule("Hvien", new CSRBundle {
     val ien = RW(63, 13)
     // bits 12:0 read only 0
-  })).setAddr(0x608)
+  }))
+    .setAddr(0x608)
 
   val hvictl = Module(new CSRModule("Hvictl", new CSRBundle {
     // Virtual Trap Interrupt control
@@ -64,7 +68,8 @@ trait HypervisorLevel { self: NewCSR =>
     val DPR    = RW  (9)
     val IPRIOM = RW  (8)
     val IPRIO  = RW  ( 7,  0)
-  })).setAddr(0x609)
+  }))
+    .setAddr(0x609)
 
   val henvcfg = Module(new CSRModule("Henvcfg", new CSRBundle {
     val FIOM  = RW(0)     // Fence of I/O implies Memory
@@ -73,11 +78,13 @@ trait HypervisorLevel { self: NewCSR =>
     val CBZE  = RW(7)     // Zicboz Enable
     val PBMTE = RW(62)    // Svpbmt Enable
     val STCE  = RW(63)    // Sstc Enable
-  })).setAddr(0x60A)
+  }))
+    .setAddr(0x60A)
 
   val htval = Module(new CSRModule("Htval", new CSRBundle {
     val ALL = RW(63, 0)
-  })).setAddr(0x643)
+  }) with TrapEntryHSEventSinkBundle)
+    .setAddr(0x643)
 
   val hip = Module(new CSRModule("Hip", new HipBundle) with HypervisorBundle with HasExternalInterruptBundle {
     val fromVSip = IO(Flipped(new VSipToHip))
@@ -97,7 +104,8 @@ trait HypervisorLevel { self: NewCSR =>
       fromVSip.SSIP.valid -> fromVSip.SSIP.bits,
       wen                 -> wdata.VSSIP
     ))
-  }).setAddr(0x644)
+  })
+    .setAddr(0x644)
 
   val hvip = Module(new CSRModule("Hvip", new CSRBundle {
     val VSSIP = RW( 2)
@@ -106,7 +114,8 @@ trait HypervisorLevel { self: NewCSR =>
   }) {
     val fromHip = IO(Flipped(new HipToHvip))
     when (fromHip.VSSIP.valid) { reg.VSSIP := fromHip.VSSIP.bits }
-  }).setAddr(0x645)
+  })
+    .setAddr(0x645)
 
   hvip.fromHip := hip.toHvip
 
@@ -116,7 +125,8 @@ trait HypervisorLevel { self: NewCSR =>
     val PrioCOI = RW(47, 40)
     val Prio14  = RW(55, 48)
     val Prio15  = RW(63, 56)
-  })).setAddr(0x646)
+  }))
+    .setAddr(0x646)
 
   val hviprio2 = Module(new CSRModule("Hviprio2", new CSRBundle {
     val Prio16  = RW( 7,  0)
@@ -127,11 +137,13 @@ trait HypervisorLevel { self: NewCSR =>
     val Prio21  = RW(47, 40)
     val Prio22  = RW(55, 48)
     val Prio23  = RW(63, 56)
-  })).setAddr(0x647)
+  }))
+    .setAddr(0x647)
 
   val htinst = Module(new CSRModule("Htinst", new CSRBundle {
     val ALL = RO(63, 0)
-  })).setAddr(0x64A)
+  }) with TrapEntryHSEventSinkBundle)
+    .setAddr(0x64A)
 
   val hgatp = Module(new CSRModule("Hgatp", new CSRBundle {
     val MODE = HgatpMode(63, 60, wNoFilter)
@@ -143,9 +155,11 @@ trait HypervisorLevel { self: NewCSR =>
     // Ref: 13.2.10. Hypervisor Guest Address Translation and Protection Register (hgatp)
     // A write to hgatp with an unsupported MODE value is not ignored as it is for satp. Instead, the fields of
     // hgatp are WARL in the normal way, when so indicated.
-  }).setAddr(0x680)
+  })
+    .setAddr(0x680)
 
-  val hgeip = Module(new CSRModule("Hgeip", new HgeipBundle)).setAddr(0xE12)
+  val hgeip = Module(new CSRModule("Hgeip", new HgeipBundle))
+    .setAddr(0xE12)
 
   val hypervisorCSRMods: Seq[CSRModule[_]] = Seq(
     hstatus,
@@ -194,6 +208,7 @@ object HstatusVgeinField extends CSREnum with CSRWLRLApply {
 
 class HstatusModule extends CSRModule("Hstatus", new HstatusBundle)
   with SretEventSinkBundle
+  with TrapEntryHSEventSinkBundle
 
 class HvipBundle extends CSRBundle {
   val VSSIP = RW(2)
