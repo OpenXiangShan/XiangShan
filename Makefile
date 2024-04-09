@@ -38,6 +38,13 @@ CONFIG ?= DefaultConfig
 NUM_CORES ?= 1
 MFC ?= 0
 
+
+ifeq ($(MAKECMDGOALS),)
+GOALS = verilog
+else
+GOALS = $(MAKECMDGOALS)
+endif
+
 # common chisel args
 ifeq ($(MFC),1)
 CHISEL_VERSION = chisel
@@ -86,9 +93,12 @@ override SIM_ARGS += --with-constantin
 endif
 
 # emu for the release version
-RELEASE_ARGS += --fpga-platform --disable-always-basic-diff --disable-all --remove-assert
+RELEASE_ARGS += --fpga-platform --disable-all --remove-assert
 DEBUG_ARGS   += --enable-difftest
 PLDM_ARGS    += --fpga-platform --enable-difftest
+ifeq ($(GOALS),verilog)
+RELEASE_ARGS += --disable-always-basic-diff
+endif
 ifeq ($(RELEASE),1)
 override SIM_ARGS += $(RELEASE_ARGS)
 else ifeq ($(PLDM),1)
