@@ -1044,6 +1044,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       when (vsSplit(i).io.vstd.get.valid) {
         lsq.io.std.storeDataIn(i).valid := true.B
         lsq.io.std.storeDataIn(i).bits := vsSplit(i).io.vstd.get.bits
+        stData(i).ready := false.B
       } .otherwise {
         lsq.io.std.storeDataIn(i).valid := stData(i).valid
         lsq.io.std.storeDataIn(i).bits.uop := stData(i).bits.uop
@@ -1051,7 +1052,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
         lsq.io.std.storeDataIn(i).bits.mask.map(_ := 0.U)
         lsq.io.std.storeDataIn(i).bits.vdIdx.map(_ := 0.U)
         lsq.io.std.storeDataIn(i).bits.vdIdxInField.map(_ := 0.U)
-        stData(i).ready := !vsSplit(i).io.vstd.get.valid
+        stData(i).ready := true.B
       }
     }
     else{
