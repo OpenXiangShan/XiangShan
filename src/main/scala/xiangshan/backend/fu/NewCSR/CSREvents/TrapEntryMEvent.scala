@@ -114,7 +114,7 @@ class TrapEntryMEventModule extends Module with CSREventBase {
   out.mstatus.bits.GVA          := tvalFillGVA
   out.mstatus.bits.MPIE         := current.mstatus.MIE
   out.mstatus.bits.MIE          := 0.U
-  out.mepc.bits.ALL             := in.trapPc(in.trapPc.getWidth - 1, 1)
+  out.mepc.bits.ALL             := trapPC(trapPC.getWidth - 1, 1)
   out.mcause.bits.Interrupt     := in.isInterrupt
   out.mcause.bits.ExceptionCode := highPrioTrapNO
   out.mtval.bits.ALL            := tval

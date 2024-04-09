@@ -123,7 +123,7 @@ class TrapEntryHSEventModule extends Module with CSREventBase {
     // SPVP is not PrivMode enum type, so asUInt and shrink the width
   out.hstatus.bits.SPVP         := Mux(!current.privState.isVirtual, in.hstatus.SPVP.asUInt, current.privState.PRVM.asUInt(0, 0))
   out.hstatus.bits.GVA          := tvalFillGVA
-  out.sepc.bits.ALL             := in.trapPc(in.trapPc.getWidth - 1, 1)
+  out.sepc.bits.ALL             := trapPC(trapPC.getWidth - 1, 1)
   out.scause.bits.Interrupt     := in.isInterrupt
   out.scause.bits.ExceptionCode := highPrioTrapNO
   out.stval.bits.ALL            := tval
