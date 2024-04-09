@@ -726,11 +726,38 @@ package object xiangshan {
     def storeAccessFault    = 7
     def ecallU              = 8
     def ecallS              = 9
+    def ecallVS             = 10
     def ecallM              = 11
     def instrPageFault      = 12
     def loadPageFault       = 13
     // def singleStep          = 14
     def storePageFault      = 15
+    def instrGuestPageFault = 20
+    def loadGuestPageFault  = 21
+    def virtualInstrFault   = 22
+    def storeGuestPageFault = 23
+
+    // Just alias
+    def EX_IAM    = instrAddrMisaligned
+    def EX_IAF    = instrAccessFault
+    def EX_II     = illegalInstr
+    def EX_BP     = breakPoint
+    def EX_LAM    = loadAddrMisaligned
+    def EX_LAF    = loadAccessFault
+    def EX_SAM    = storeAddrMisaligned
+    def EX_SAF    = storeAccessFault
+    def EX_UCALL  = ecallU
+    def EX_HSCALL = ecallS
+    def EX_VSCALL = ecallVS
+    def EX_MCALL  = ecallM
+    def EX_IPF    = instrPageFault
+    def EX_LPF    = loadPageFault
+    def EX_SPF    = storePageFault
+    def EX_IGPF   = instrGuestPageFault
+    def EX_LGPF   = loadGuestPageFault
+    def EX_VI     = virtualInstrFault
+    def EX_SGPF   = storeGuestPageFault
+
     def priorities = Seq(
       breakPoint, // TODO: different BP has different priority
       instrPageFault,
