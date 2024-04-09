@@ -209,7 +209,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   val s1_exception = ExceptionNO.selectByFu(s1_out.uop.exceptionVec, StaCfg).asUInt.orR
   val s1_isvec     = RegEnable(s0_out.isvec, false.B, s0_fire)
   // val s1_isLastElem = RegEnable(s0_isLastElem, false.B, s0_fire)
-  s1_kill := s1_in.uop.robIdx.needFlush(io.redirect) || s1_tlb_miss
+  s1_kill := s1_in.uop.robIdx.needFlush(io.redirect) || (s1_tlb_miss && !s1_isvec)
 
   s1_ready := !s1_valid || s1_kill || s2_ready
   io.tlb.resp.ready := true.B // TODO: why dtlbResp needs a ready?
@@ -295,7 +295,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
 
   val s2_exception = ExceptionNO.selectByFu(s2_out.uop.exceptionVec, StaCfg).asUInt.orR
   val s2_mmio = s2_in.mmio || s2_pmp.mmio
-  s2_kill := (s2_mmio && !s2_exception) || s2_in.uop.robIdx.needFlush(io.redirect)
+  s2_kill := ((s2_mmio && !s2_exception) && !s2_in.isvec) || s2_in.uop.robIdx.needFlush(io.redirect)
 
   s2_out        := s2_in
   s2_out.mmio   := s2_mmio && !s2_exception
@@ -309,10 +309,10 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   io.dcache.resp.ready := true.B
 
   // feedback tlb miss to RS in store_s2
-  io.feedback_slow.valid := RegNext(s1_feedback.valid && !s1_out.uop.robIdx.needFlush(io.redirect)) && !s2_in.isvec
+  io.feedback_slow.valid := RegNext(s1_feedback.valid && !s1_out.uop.robIdx.needFlush(io.redirect)) && !RegNext(s1_out.isvec)
   io.feedback_slow.bits  := RegNext(s1_feedback.bits)
 
-  val s2_vecFeedback = RegNext(s1_feedback.valid && !s1_out.uop.robIdx.needFlush(io.redirect)) && s2_in.isvec
+  val s2_vecFeedback = RegNext(!s1_out.uop.robIdx.needFlush(io.redirect) && s1_feedback.bits.hit) && s2_in.isvec
 
   // mmio and exception
   io.lsq_replenish := s2_out
