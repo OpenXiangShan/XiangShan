@@ -156,26 +156,26 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   io.enq.canAccept := allowEnqueue
   for (i <- 0 until io.enq.req.length) {
     val lqIdx = enqPtrExt(0) + validVLoadOffsetRShift.take(i + 1).reduce(_ + _)
-    val index = io.enq.req(i).bits.lqIdx.value
+    val index = io.enq.req(i).bits.lqIdx
     val enqInstr = io.enq.req(i).bits.instr.asTypeOf(new XSInstBitFields)
     when (canEnqueue(i) && !enqCancel(i)) {
       for (j <- 0 until VecMemDispatchMaxNumber) {
         when (j.U < validVLoadOffset(i)) {
-          allocated(index + j.U) := true.B
-          uop(index + j.U) := io.enq.req(i).bits
-          uop(index + j.U).lqIdx := lqIdx + j.U
+          allocated((index + j.U).value) := true.B
+          uop((index + j.U).value) := io.enq.req(i).bits
+          uop((index + j.U).value).lqIdx := lqIdx + j.U
 
           // init
-          addrvalid(index + j.U) := false.B
-          datavalid(index + j.U) := false.B
-          isvec(index + j.U) := enqInstr.isVecLoad
-          veccommitted(index + j.U) := false.B
+          addrvalid((index + j.U).value) := false.B
+          datavalid((index + j.U).value) := false.B
+          isvec((index + j.U).value) := enqInstr.isVecLoad
+          veccommitted((index + j.U).value) := false.B
 
-          debug_mmio(index + j.U) := false.B
-          debug_paddr(index + j.U) := 0.U
+          debug_mmio((index + j.U).value) := false.B
+          debug_paddr((index + j.U).value) := 0.U
 
           XSError(!io.enq.canAccept || !io.enq.sqCanAccept, s"must accept $i\n")
-          XSError(index =/= lqIdx.value, s"must be the same entry $i\n")
+          XSError(index.value =/= lqIdx.value, s"must be the same entry $i\n")
         }
       }
     }
