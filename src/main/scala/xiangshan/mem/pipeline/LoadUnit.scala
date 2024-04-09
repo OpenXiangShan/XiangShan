@@ -1026,7 +1026,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                      s2_troublem
 
   val s2_data_fwded = s2_dcache_miss && (s2_full_fwd || s2_cache_tag_error)
-
+  
   // ld-ld violation require
   io.lsq.ldld_nuke_query.req.valid           := s2_valid && s2_can_query
   io.lsq.ldld_nuke_query.req.bits.uop        := s2_in.uop
