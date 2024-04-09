@@ -220,7 +220,10 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
   val pending_read_resp_id = Reg(UInt(r_resp.bits.id.getWidth.W))
   val has_read_resp = Wire(Bool())
   val read_resp_last = r_resp.fire && r_resp.bits.last
-  val (read_resp_valid, read_resp_id) = readResponse(!has_read_resp || read_resp_last)
+  val read_request_cntReg = RegInit(0.U(16.W))
+  val reqd_have_req_cnt = Wire(Bool())
+  reqd_have_req_cnt := (read_request_cntReg =/= 0.U);
+  val (read_resp_valid, read_resp_id) = readResponse((!has_read_resp || read_resp_last) && reqd_have_req_cnt)
   has_read_resp := (read_resp_valid && !read_resp_last) || pending_read_resp_valid
   val rdata_cnt = Counter(outer.burstLen)
   val read_resp_addr = addressMem(r_resp.bits.id) + rdata_cnt.value
@@ -232,6 +235,11 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
   r_resp.bits.resp := AXI4Parameters.RESP_OKAY
   r_resp.bits.last := (rdata_cnt.value === read_resp_len)
 
+  when (pending_read_req_ready) {
+    read_request_cntReg := read_request_cntReg + 1.U
+  }.elsewhen (read_resp_valid) {
+    read_request_cntReg := read_request_cntReg - 1.U
+  }
   when (!pending_read_resp_valid && read_resp_valid && !read_resp_last) {
     pending_read_resp_valid := true.B
     pending_read_resp_id := read_resp_id
@@ -264,12 +272,20 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
   val pending_write_resp_valid = RegInit(false.B)
   val pending_write_resp_id = Reg(UInt(in.b.bits.id.getWidth.W))
   val has_write_resp = Wire(Bool())
-  val (write_resp_valid, write_resp_id) = writeResponse(!has_write_resp || in.b.fire)
+  val write_request_cntReg = RegInit(0.U(16.W))
+  val write_have_req_cnt = Wire(Bool())
+  write_have_req_cnt := (write_request_cntReg =/= 0.U);
+  val (write_resp_valid, write_resp_id) = writeResponse((!has_write_resp || in.b.fire) && write_have_req_cnt)
   has_write_resp := write_resp_valid || pending_write_resp_valid
   in.b.valid := write_resp_valid || pending_write_resp_valid
   in.b.bits.id := Mux(pending_write_resp_valid, pending_write_resp_id, write_resp_id)
   in.b.bits.resp := AXI4Parameters.RESP_OKAY
 
+  when (pending_write_req_ready) {
+    write_request_cntReg := write_request_cntReg + 1.U
+  }.elsewhen (write_resp_valid) {
+    write_request_cntReg := write_request_cntReg - 1.U
+  }
   when (!pending_write_resp_valid && write_resp_valid && !in.b.ready) {
     pending_write_resp_valid := true.B
     pending_write_resp_id := write_resp_id
