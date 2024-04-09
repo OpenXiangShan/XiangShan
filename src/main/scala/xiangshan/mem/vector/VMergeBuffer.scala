@@ -224,6 +224,8 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     io.feedback(i).bits.dataInvalidSqIdx := DontCare
     io.feedback(i).bits.uopIdx.get       := selEntry.uop.uopIdx
    }
+
+  QueuePerf(uopSize, freeList.io.validCount, freeList.io.validCount === 0.U)
 }
 
 class VLMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore=false){

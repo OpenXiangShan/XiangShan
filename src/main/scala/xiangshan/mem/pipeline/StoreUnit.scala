@@ -445,6 +445,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   // perf cnt
   XSPerfAccumulate("s0_in_valid",                s0_valid)
   XSPerfAccumulate("s0_in_fire",                 s0_fire)
+  XSPerfAccumulate("s0_vecin_fire",              s0_fire && s0_use_flow_vec)
   XSPerfAccumulate("s0_in_fire_first_issue",     s0_fire && s0_isFirstIssue)
   XSPerfAccumulate("s0_addr_spec_success",       s0_fire && !s0_use_flow_vec && s0_saddr(VAddrBits-1, 12) === s0_stin.src(0)(VAddrBits-1, 12))
   XSPerfAccumulate("s0_addr_spec_failed",        s0_fire && !s0_use_flow_vec && s0_saddr(VAddrBits-1, 12) =/= s0_stin.src(0)(VAddrBits-1, 12))
