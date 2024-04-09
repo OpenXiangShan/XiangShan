@@ -13,7 +13,7 @@ import xiangshan.backend.fu.util.CSRConst
 
 
 class MretEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase {
-  val mstatus = ValidIO((new MstatusBundle).addInEvent(_.MIE, _.MPIE, _.MPRV))
+  val mstatus = ValidIO((new MstatusBundle).addInEvent(_.MPP, _.MPV, _.MIE, _.MPIE, _.MPRV))
   val targetPc = ValidIO(new Epc().addInEvent(_.ALL))
 
   override def getBundleByName(name: String): ValidIO[CSRBundle] = {
@@ -40,6 +40,7 @@ class MretEventModule extends Module with CSREventBase {
 
   out.privState.bits.PRVM := in.mstatus.MPP
   out.privState.bits.V    := in.mstatus.MPV
+  out.mstatus.bits.MPP    := PrivMode.U
   out.mstatus.bits.MIE    := in.mstatus.MPIE
   out.mstatus.bits.MPIE   := 1.U
   out.mstatus.bits.MPRV   := Mux(in.mstatus.MPP =/= PrivMode.M, 0.U, in.mstatus.MPRV.asUInt)
