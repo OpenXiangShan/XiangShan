@@ -514,7 +514,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val medeleg = RegInit(UInt(XLEN.W), 0.U)
   val midelegInit = if(HasHExtension){((1 << 12) | (1 << 10) | (1 << 6) | (1 << 2)).U}else{0.U}
   val medelegWMask = if(HasHExtension) {
-      ((1 << 23) | (1 << 22) | (1 << 21) | (1 << 20) | (1 << 15) | (1 << 13) | (1 << 12) | (1 << 10) | (1 << 9) | (1 << 8) | (1 << 3) | (1 << 0)).U(XLEN.W)
+    "hf0b7ff".U(XLEN.W)
   }else {
     "hb3ff".U(XLEN.W)
   }
