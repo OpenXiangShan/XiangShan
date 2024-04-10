@@ -21,6 +21,9 @@ object CSRConfig {
 
   final val VMIDMAX = 14 // the max value of VMIDLEN defined by spec
 
+  // the width of VGEIN
+  final val VGEINWidth = 6
+
   final val VaddrMaxWidth = 41 // only Sv39 and Sv39x4
 
   final val XLEN = 64 // Todo: use XSParams
@@ -33,6 +36,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   with HypervisorLevel
   with VirtualSupervisorLevel
   with Unprivileged
+  with CSRAIA
   with HasExternalInterruptBundle
   with HasInstCommitBundle
   with SupervisorMachineAliasConnect
@@ -69,6 +73,13 @@ class NewCSR(implicit val p: Parameters) extends Module
     }
   })
 
+  val toAIA   = IO(Output(new CSRToAIABundle))
+  val fromAIA = IO(Flipped(Output(new AIAToCSRBundle)))
+
+  dontTouch(toAIA)
+  dontTouch(fromAIA)
+  toAIA := DontCare
+
   val addr = io.w.bits.addr
   val data = io.w.bits.data
   val wen = io.w.valid
@@ -91,9 +102,9 @@ class NewCSR(implicit val p: Parameters) extends Module
   val isSret = tret && tretPRVM === PrivMode.S
   val isMret = tret && tretPRVM === PrivMode.M
 
-  var csrRwMap = machineLevelCSRMap ++ supervisorLevelCSRMap ++ hypervisorCSRMap ++ virtualSupervisorCSRMap ++ unprivilegedCSRMap
+  var csrRwMap = machineLevelCSRMap ++ supervisorLevelCSRMap ++ hypervisorCSRMap ++ virtualSupervisorCSRMap ++ unprivilegedCSRMap ++ aiaCSRMap
 
-  val csrMods = machineLevelCSRMods ++ supervisorLevelCSRMods ++ hypervisorCSRMods ++ virtualSupervisorCSRMods ++ unprivilegedCSRMods
+  val csrMods = machineLevelCSRMods ++ supervisorLevelCSRMods ++ hypervisorCSRMods ++ virtualSupervisorCSRMods ++ unprivilegedCSRMods ++ aiaCSRMods
 
   for ((id, (wBundle, _)) <- csrRwMap) {
     wBundle.wen := wen && addr === id.U
