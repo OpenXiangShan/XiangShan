@@ -103,8 +103,11 @@ trait HasTrainFilterHelper extends HasCircularQueuePtrHelper {
     }else if(source.length == 2) {
       val source_v = source.map(_.valid)
       val res = Wire(source.cloneType)
-      // source 1 is older than source 0
-      val source_1_older = isBefore(source(1).bits.uop.robIdx, source(0).bits.uop.robIdx)
+      // source 1 is older than source 0 (only when source0/1 are both valid)
+      val source_1_older = Mux(Cat(source_v).andR,
+        isBefore(source(1).bits.uop.robIdx, source(0).bits.uop.robIdx),
+        false.B
+      )
       when(source_1_older) {
         res(0) := source(1)
         res(1) := source(0)
