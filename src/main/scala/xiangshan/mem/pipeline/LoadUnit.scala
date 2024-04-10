@@ -1192,9 +1192,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // s3
   io.debug_ls.s3_robIdx := s3_in.uop.robIdx.value
   io.debug_ls.s3_isReplayFast := s3_valid && s3_fast_rep && !s3_fast_rep_canceled
-  io.debug_ls.s3_isReplayRS := s3_valid && s3_in.feedbacked && io.lsq.ldin.bits.rep_info.need_rep
-  io.debug_ls.s3_isReplaySlow := s3_valid && (!s3_fast_rep || s3_fast_rep_canceled) && !s3_in.feedbacked && io.lsq.ldin.bits.rep_info.need_rep
-  io.debug_ls.s3_isReplay := s3_valid && io.lsq.ldin.bits.rep_info.need_rep // include fast+slow+rs replay
+  io.debug_ls.s3_isReplayRS :=  RegNext(io.feedback_fast.valid && !io.feedback_fast.bits.hit) || (io.feedback_slow.valid && !io.feedback_slow.bits.hit)
+  io.debug_ls.s3_isReplaySlow := io.lsq.ldin.valid && io.lsq.ldin.bits.rep_info.need_rep
+  io.debug_ls.s3_isReplay := s3_valid && s3_rep_info.need_rep // include fast+slow+rs replay
   io.debug_ls.replayCause := s3_rep_info.cause
   io.debug_ls.replayCnt := 1.U
 
