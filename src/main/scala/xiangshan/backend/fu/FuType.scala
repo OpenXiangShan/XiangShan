@@ -237,7 +237,8 @@ object FuType extends OHEnumeration {
     vidiv -> "vidiv",
     vfalu -> "vfalu",
     vfma -> "vfma",
-    vfdiv -> "vfdiv"
+    vfdiv -> "vfdiv",
+    vfcvt -> "vfcvt"
   )
 }
 
