@@ -28,6 +28,9 @@ class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyMod
 
   override def shouldBeInlined: Boolean = false
 
+  // check read & write port config
+  params.configChecks
+
   /* Only update the idx in mem-scheduler here
    * Idx in other schedulers can be updated the same way if needed
    *
