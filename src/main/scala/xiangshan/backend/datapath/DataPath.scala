@@ -71,19 +71,20 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   private val vfRdNotBlock: Seq2[Bool] = vfRdArbWinner.map(_.map(_.asUInt.andR))
 
   private val intRFReadReq: Seq3[ValidIO[RfReadPortWithConfig]] = fromIQ.map(x => x.map(xx => xx.bits.getIntRfReadValidBundle(xx.valid)).toSeq).toSeq
-  private val intDataSources: Seq[Seq[Vec[DataSource]]] = fromIQ.map(x => x.map(xx => xx.bits.common.dataSources).toSeq)
-  private val intNumRegSrcs: Seq[Seq[Int]] = fromIQ.map(x => x.map(xx => xx.bits.exuParams.numRegSrc).toSeq)
+  private val vfRFReadReq: Seq3[ValidIO[RfReadPortWithConfig]] = fromIQ.map(x => x.map(xx => xx.bits.getVfRfReadValidBundle(xx.valid)).toSeq).toSeq
+  private val allDataSources: Seq[Seq[Vec[DataSource]]] = fromIQ.map(x => x.map(xx => xx.bits.common.dataSources).toSeq)
+  private val allNumRegSrcs: Seq[Seq[Int]] = fromIQ.map(x => x.map(xx => xx.bits.exuParams.numRegSrc).toSeq)
 
   intRFReadArbiter.io.in.zip(intRFReadReq).zipWithIndex.foreach { case ((arbInSeq2, inRFReadReqSeq2), iqIdx) =>
     arbInSeq2.zip(inRFReadReqSeq2).zipWithIndex.foreach { case ((arbInSeq, inRFReadReqSeq), exuIdx) =>
       val srcIndices: Seq[Int] = fromIQ(iqIdx)(exuIdx).bits.exuParams.getRfReadSrcIdx(IntData())
       for (srcIdx <- 0 until fromIQ(iqIdx)(exuIdx).bits.exuParams.numRegSrc) {
         if (srcIndices.contains(srcIdx) && inRFReadReqSeq.isDefinedAt(srcIdx)) {
-          arbInSeq(srcIdx).valid := inRFReadReqSeq(srcIdx).valid && intDataSources(iqIdx)(exuIdx)(srcIdx).readReg
+          arbInSeq(srcIdx).valid := inRFReadReqSeq(srcIdx).valid && allDataSources(iqIdx)(exuIdx)(srcIdx).readReg
           arbInSeq(srcIdx).bits.addr := inRFReadReqSeq(srcIdx).bits.addr
-//          if (intNumRegSrcs(iqIdx)(exuIdx) == 2) {
-//            val src0Req = inRFReadReqSeq(0).valid && intDataSources(iqIdx)(exuIdx)(0).readReg
-//            val src1Req = inRFReadReqSeq(1).valid && intDataSources(iqIdx)(exuIdx)(1).readReg
+//          if (allNumRegSrcs(iqIdx)(exuIdx) == 2) {
+//            val src0Req = inRFReadReqSeq(0).valid && allDataSources(iqIdx)(exuIdx)(0).readReg
+//            val src1Req = inRFReadReqSeq(1).valid && allDataSources(iqIdx)(exuIdx)(1).readReg
 //            if (srcIdx == 0) {
 //              arbInSeq(srcIdx).valid := src0Req || src1Req
 //              arbInSeq(srcIdx).bits.addr := Mux(src1Req && !src0Req, inRFReadReqSeq(1).bits.addr,inRFReadReqSeq(0).bits.addr)
@@ -92,7 +93,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
 //              arbInSeq(srcIdx).bits.addr := inRFReadReqSeq(srcIdx).bits.addr
 //            }
 //          } else {
-//            arbInSeq(srcIdx).valid := inRFReadReqSeq(srcIdx).valid && intDataSources(iqIdx)(exuIdx)(srcIdx).readReg
+//            arbInSeq(srcIdx).valid := inRFReadReqSeq(srcIdx).valid && allDataSources(iqIdx)(exuIdx)(srcIdx).readReg
 //            arbInSeq(srcIdx).bits.addr := inRFReadReqSeq(srcIdx).bits.addr
 //          }
         } else {
@@ -103,14 +104,12 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     }
   }
 
-  private val vfRFReadReq: Seq3[ValidIO[RfReadPortWithConfig]] = fromIQ.map(x => x.map(xx => xx.bits.getVfRfReadValidBundle(xx.valid)).toSeq).toSeq
-
   vfRFReadArbiter.io.in.zip(vfRFReadReq).zipWithIndex.foreach { case ((arbInSeq2, inRFReadReqSeq2), iqIdx) =>
     arbInSeq2.zip(inRFReadReqSeq2).zipWithIndex.foreach { case ((arbInSeq, inRFReadReqSeq), exuIdx) =>
       val srcIndices: Seq[Int] = VfRegSrcDataSet.flatMap(data => fromIQ(iqIdx)(exuIdx).bits.exuParams.getRfReadSrcIdx(data)).toSeq.sorted
       for (srcIdx <- 0 until fromIQ(iqIdx)(exuIdx).bits.exuParams.numRegSrc) {
         if (srcIndices.contains(srcIdx) && inRFReadReqSeq.isDefinedAt(srcIdx)) {
-          arbInSeq(srcIdx).valid := inRFReadReqSeq(srcIdx).valid
+          arbInSeq(srcIdx).valid := inRFReadReqSeq(srcIdx).valid && allDataSources(iqIdx)(exuIdx)(srcIdx).readReg
           arbInSeq(srcIdx).bits.addr := inRFReadReqSeq(srcIdx).bits.addr
         } else {
           arbInSeq(srcIdx).valid := false.B
