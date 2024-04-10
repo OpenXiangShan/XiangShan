@@ -416,7 +416,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.fast_rep      := true.B
     out.ld_rep        := src.isLoadReplay
     out.l2l_fwd       := false.B
-    out.prf           := LSUOpType.isPrefetch(src.uop.fuOpType)
+    out.prf           := LSUOpType.isPrefetch(src.uop.fuOpType) && !src.isvec
     out.prf_rd        := src.uop.fuOpType === LSUOpType.prefetch_r
     out.prf_wr        := src.uop.fuOpType === LSUOpType.prefetch_w
     out.sched_idx     := src.schedIndex
@@ -470,7 +470,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.fast_rep      := false.B
     out.ld_rep        := true.B
     out.l2l_fwd       := false.B
-    out.prf           := LSUOpType.isPrefetch(src.uop.fuOpType)
+    out.prf           := LSUOpType.isPrefetch(src.uop.fuOpType) && !src.isvec
     out.prf_rd        := src.uop.fuOpType === LSUOpType.prefetch_r
     out.prf_wr        := src.uop.fuOpType === LSUOpType.prefetch_w
     out.sched_idx     := src.schedIndex
