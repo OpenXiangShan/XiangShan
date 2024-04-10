@@ -38,8 +38,6 @@ case class BackendParams(
   iqWakeUpParams : Seq[WakeUpConfig],
 ) {
 
-  configChecks
-
   def debugEn(implicit p: Parameters): Boolean = p(DebugOptionsKey).AlwaysBasicDiff || p(DebugOptionsKey).EnableDifftest
 
   val copyPdestInfo = mutable.HashMap[Int, (Int, Int)]()
@@ -347,10 +345,13 @@ case class BackendParams(
     }
 
     // check 1
+    // if some exus share the same wb port and rd ports, 
+    // the exu with high priority at wb must also have high priority at rd.
     val wbTypes = Seq(IntWB(), VfWB())
     val rdTypes = Seq(IntRD(), VfRD())
     for(wbType <- wbTypes){
       for(rdType <- rdTypes){
+        println(s"[BackendParams] wbType: ${wbType}, rdType: ${rdType}")
         allRealExuParams.map {
           case exuParam =>
             val wbPortConfigs = exuParam.wbPortConfigs
@@ -368,13 +369,14 @@ case class BackendParams(
             (wbConfigs, rdConfigs)
         }.filter(_._1.isDefined)
           .sortBy(_._1.get.priority)
-          .groupBy(_._1.get.port).map {
-            case (_, intWbRdPairs) =>
-              intWbRdPairs.map(_._2).flatten
-        }.map(rdCfgs => rdCfgs.groupBy(_.port).foreach {
-          case (_, rdCfgs) =>
-            rdCfgs.zip(rdCfgs.drop(1)).foreach { case (cfg0, cfg1) => assert(cfg0.priority <= cfg1.priority) }
-        })
+          .groupBy(_._1.get.port).map { case (wbPort, intWbRdPairs) =>
+            val rdCfgs = intWbRdPairs.map(_._2).flatten
+            println(s"[BackendParams] wb port ${wbPort} rdcfgs: ${rdCfgs}")
+            rdCfgs.groupBy(_.port).foreach { case (p, rdCfg) =>
+              //println(s"[BackendParams] rdport: ${p}, cfgs: ${rdCfg}")
+              rdCfg.zip(rdCfg.drop(1)).foreach { case (cfg0, cfg1) => assert(cfg0.priority <= cfg1.priority, s"an exu has high priority at ${wbType} wb port ${wbPort}, but has low priority at ${rdType} rd port ${p}") }
+            }
+        }
       }
     }
   }
