@@ -584,6 +584,9 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   val  falseHitReopenCounter = ftb_false_hit && s1_close_ftb_req
   XSPerfAccumulate("ftb_req_reopen_counter",reopenCounter)
   XSPerfAccumulate("false_hit_reopen_Counter",falseHitReopenCounter)
+  XSPerfAccumulate("ifuRedirec_needReopen",s1_close_ftb_req && io.redirectFromIFU)
+  XSPerfAccumulate("this_cycle_is_close",s2_close_ftb_req && io.s2_fire(0))
+  XSPerfAccumulate("this_cycle_is_open",!s2_close_ftb_req && io.s2_fire(0))
 
   // io.out.bits.resp := RegEnable(io.in.bits.resp_in(0), 0.U.asTypeOf(new BranchPredictionResp), io.s1_fire)
   io.out := io.in.bits.resp_in(0)
