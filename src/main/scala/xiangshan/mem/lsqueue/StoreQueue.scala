@@ -63,7 +63,7 @@ class DataBufferEntry (implicit p: Parameters)  extends DCacheBundle {
 class StoreQueue(implicit p: Parameters) extends XSModule
   with HasDCacheParameters with HasCircularQueuePtrHelper with HasPerfEvents {
   val io = IO(new Bundle() {
-    val hartId = Input(UInt(8.W))
+    val hartId = Input(UInt(hartIdLen.W))
     val enq = new SqEnqIO
     val brqRedirect = Flipped(ValidIO(new Redirect))
     val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // store addr, data is not included

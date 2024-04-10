@@ -279,7 +279,7 @@ class SchedulerImp(outer: Scheduler) extends LazyModuleImp(outer) with HasXSPara
   val numFma = outer.reservationStations.map(_.module.io.fmaMid.getOrElse(Seq()).length).sum
 
   val io = IO(new Bundle {
-    val hartId = Input(UInt(8.W))
+    val hartId = Input(UInt(hartIdLen.W))
     // global control
     val redirect = Flipped(ValidIO(new Redirect))
     // dispatch and issue ports

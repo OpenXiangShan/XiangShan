@@ -266,7 +266,7 @@ class WbArbiterWrapper(
     with HasXSParameter with HasWritebackSourceImp with HasExuWbHelper {
 
     val io = IO(new Bundle {
-      val hartId = Input(UInt(8.W))
+      val hartId = Input(UInt(hartIdLen.W))
       val redirect = Flipped(ValidIO(new Redirect))
       val in = Vec(numInPorts, Flipped(DecoupledIO(new ExuOutput)))
       val out = Vec(numOutPorts, ValidIO(new ExuOutput))

@@ -103,7 +103,7 @@ class PerfCounterIO(implicit p: Parameters) extends XSBundle {
 }
 
 class CSRFileIO(implicit p: Parameters) extends XSBundle {
-  val hartId = Input(UInt(8.W))
+  val hartId = Input(UInt(hartIdLen.W))
   // output (for func === CSROpType.jmp)
   val perf = Input(new PerfCounterIO)
   val isPerfCnt = Output(Bool())

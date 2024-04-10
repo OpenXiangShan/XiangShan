@@ -194,7 +194,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 {
 
   val io = IO(new Bundle {
-    val hartId = Input(UInt(8.W))
+    val hartId = Input(UInt(hartIdLen.W))
     val redirect = Flipped(ValidIO(new Redirect))
 
     val ooo_to_mem = new ooo_to_mem
@@ -228,7 +228,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     // All the signals from/to frontend/backend to/from bus will go through MemBlock
     val externalInterrupt = Flipped(new ExternalInterruptIO)
-    val inner_hartId = Output(UInt(64.W))
+    val inner_hartId = Output(UInt(hartIdLen.W))
     val inner_reset_vector = Output(UInt(PAddrBits.W))
     val outer_reset_vector = Input(UInt(PAddrBits.W))
     val inner_cpu_halt = Input(Bool())

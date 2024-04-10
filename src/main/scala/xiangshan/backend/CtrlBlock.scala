@@ -103,7 +103,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper {
 
   class RedirectGeneratorIO(implicit p: Parameters) extends XSBundle {
-    val hartId = Input(UInt(8.W))
+    val hartId = Input(UInt(hartIdLen.W))
     val exuMispredict = Vec(NumRedirect, Flipped(ValidIO(new ExuOutput)))
     val loadReplay = Flipped(ValidIO(new Redirect))
     val flush = Input(Bool())
@@ -255,7 +255,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   val writebackLengths = outer.writebackSinksParams.map(_.length)
 
   val io = IO(new Bundle {
-    val hartId = Input(UInt(8.W))
+    val hartId = Input(UInt(hartIdLen.W))
     val cpu_halt = Output(Bool())
     val frontend = Flipped(new FrontendToCtrlIO)
     // to exu blocks

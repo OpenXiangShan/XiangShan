@@ -145,6 +145,7 @@ class L2Top()(implicit p: Parameters) extends LazyModule
       l2_hint := l2cache.get.module.io.l2_hint
       // debugTopDown <> l2cache.get.module.io.debugTopDown
       l2cache.get.module.io.debugTopDown.robHeadPaddr := DontCare
+      l2cache.get.module.io.hartId := hartId.fromTile
       l2cache.get.module.io.debugTopDown.robHeadPaddr.head := debugTopDown.robHeadPaddr
       debugTopDown.l2MissMatch := l2cache.get.module.io.debugTopDown.l2MissMatch.head
     } else {

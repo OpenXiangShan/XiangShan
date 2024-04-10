@@ -27,6 +27,7 @@ import xiangshan.frontend.{BasePredictor, BranchPredictionResp, FTB, FakePredict
 import xiangshan.frontend.icache.ICacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import freechips.rocketchip.diplomacy.AddressSet
+import freechips.rocketchip.tile.MaxHartIdBits
 import system.SoCParamsKey
 import huancun._
 import huancun.debug._
@@ -319,6 +320,7 @@ trait HasXSParameter {
   val VLEN = coreParams.VLEN
   val minFLen = 32
   val fLen = 64
+  val hartIdLen = p(MaxHartIdBits)
   def xLen = XLEN
 
   val HasMExtension = coreParams.HasMExtension
