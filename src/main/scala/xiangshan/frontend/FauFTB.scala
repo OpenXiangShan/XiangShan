@@ -112,10 +112,13 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
     }
   }
   val s1_hit_full_pred = Mux1H(s1_hit_oh, s1_possible_full_preds)
+  val s1_hit_fauftbentry  = Mux1H(s1_hit_oh, s1_all_entries)
   XSError(PopCount(s1_hit_oh) > 1.U, "fauftb has multiple hits!\n")
   val fauftb_enable = RegNext(io.ctrl.ubtb_enable)
   io.out.s1.full_pred.map(_ := s1_hit_full_pred)
   io.out.s1.full_pred.map(_ .hit := s1_hit && fauftb_enable)
+  io.fauftb_entry_out := s1_hit_fauftbentry
+  io.fauftb_entry_hit_out := s1_hit && fauftb_enable
 
   // assign metas
   io.out.last_stage_meta := resp_meta.asUInt
