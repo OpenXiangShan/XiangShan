@@ -421,6 +421,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   // preDecoderRegIn.pc  := f2_pc
 
   val preDecoderIn  = preDecoder.io.in
+  preDecoderIn.valid := f2_valid
   preDecoderIn.data := f2_cut_data
   preDecoderIn.frontendTrigger := io.frontendTrigger
   preDecoderIn.csrTriggerEnable := io.csrTriggerEnable
