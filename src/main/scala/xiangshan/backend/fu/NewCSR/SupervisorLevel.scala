@@ -100,6 +100,12 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
   ) ++ SeqMap.from(
     supervisorLevelCSRMods.map(csr => (csr.addr -> (csr.w, csr.rdata.asInstanceOf[CSRBundle].asUInt))).iterator
   )
+
+  val supervisorLevelCSROutMap: SeqMap[Int, UInt] = SeqMap(
+    0x100 -> mstatus.sstatus.asUInt,
+  ) ++ SeqMap.from(
+    supervisorLevelCSRMods.map(csr => (csr.addr -> csr.regOut.asInstanceOf[CSRBundle].asUInt)).iterator
+  )
 }
 
 class SstatusBundle extends CSRBundle {

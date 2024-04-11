@@ -46,4 +46,10 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
   val unprivilegedCSRMods: Seq[CSRModule[_]] = Seq(
     fcsr,
   )
+
+  val unprivilegedCSROutMap: SeqMap[Int, UInt] = SeqMap(
+    0x001 -> fcsr.fflags.asUInt,
+    0x002 -> fcsr.frm.asUInt,
+    0x003 -> fcsr.rdata.asUInt,
+  )
 }

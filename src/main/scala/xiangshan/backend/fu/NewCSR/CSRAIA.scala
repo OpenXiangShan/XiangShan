@@ -7,7 +7,7 @@ import CSRConfig._
 
 import scala.collection.immutable.SeqMap
 
-trait CSRAIA { self: NewCSR =>
+trait CSRAIA { self: NewCSR with HypervisorLevel =>
   val miselect = Module(new CSRModule("Miselevt", new MISelectBundle))
     .setAddr(0x350)
 
@@ -72,6 +72,9 @@ trait CSRAIA { self: NewCSR =>
     aiaCSRMods.map(csr => (csr.addr -> (csr.w -> csr.rdata.asInstanceOf[CSRBundle].asUInt))).iterator
   )
 
+  val aiaCSROutMap: SeqMap[Int, UInt] = SeqMap.from(
+    aiaCSRMods.map(csr => (csr.addr -> csr.regOut.asInstanceOf[CSRBundle].asUInt)).iterator
+  )
 }
 
 class ISelectField(final val maxValue: Int, reserved: Seq[Range]) extends CSREnum with CSRWARLApply {
@@ -152,7 +155,7 @@ class AIAToCSRBundle extends Bundle {
     val data = UInt(XLEN.W)
     val illegal = Bool()
   })
-  val mtopei = new TopEIBundle
-  val stopei = new TopEIBundle
-  val vstopei = new TopEIBundle
+  val mtopei = ValidIO(new TopEIBundle)
+  val stopei = ValidIO(new TopEIBundle)
+  val vstopei = ValidIO(new TopEIBundle)
 }

@@ -186,6 +186,10 @@ trait HypervisorLevel { self: NewCSR =>
   val hypervisorCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], Data)] = SeqMap.from(
     hypervisorCSRMods.map(csr => (csr.addr -> (csr.w -> csr.rdata.asInstanceOf[CSRBundle].asUInt))).iterator
   )
+
+  val hypervisorCSROutMap: SeqMap[Int, UInt] = SeqMap.from(
+    hypervisorCSRMods.map(csr => (csr.addr -> csr.regOut.asInstanceOf[CSRBundle].asUInt)).iterator
+  )
 }
 
 class HstatusBundle extends CSRBundle {
