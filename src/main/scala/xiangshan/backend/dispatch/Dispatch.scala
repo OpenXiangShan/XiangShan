@@ -137,22 +137,22 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val IQ23Deq1 = IQ2Deq1Num +& IQ3Deq1Num
   val Dq0EnqDeq0 = PopCount(isOnlyDq0)
   val Dq1EnqDeq1 = PopCount(isOnlyDq1)
-  val Dq0SumDeq0 = DQ0Deq0 + IQ01Deq0
-  val Dq0SumDeq1 = DQ0Deq1 + IQ01Deq1 + Dq0EnqDeq0
-  val Dq1SumDeq0 = DQ1Deq0 + IQ23Deq0
-  val Dq1SumDeq1 = DQ1Deq1 + IQ23Deq1 + Dq1EnqDeq1
+  val Dq0SumDeq0 = DQ0Deq0 +& IQ01Deq0 +& Dq0EnqDeq0
+  val Dq0SumDeq1 = DQ0Deq1 +& IQ01Deq1
+  val Dq1SumDeq0 = DQ1Deq0 +& IQ23Deq0
+  val Dq1SumDeq1 = DQ1Deq1 +& IQ23Deq1 +& Dq1EnqDeq1
   val lessDeq0IsDq0 = Dq1SumDeq0 > Dq0SumDeq0
-  val lessDeq1IsDq0 = Dq1SumDeq1 > Dq0SumDeq1
+  val lessDeq1IsDq0 = (Dq1SumDeq1 << 1).asUInt > Dq0SumDeq1
   val equalDeq0IsDq0 = Dq1SumDeq0 === Dq0SumDeq0
-  val equalDeq1IsDq0 = Dq1SumDeq1 === Dq0SumDeq1
-  val diffDeq0 = Mux(lessDeq0IsDq0, Dq1SumDeq0 - Dq0SumDeq0, Dq0SumDeq0 - Dq1SumDeq0)
-  val diffDeq1 = Mux(lessDeq1IsDq0, Dq1SumDeq1 - Dq0SumDeq1, Dq0SumDeq1 - Dq1SumDeq1)
-  val popAluIsMore = popAlu.map(_ > diffDeq0)
-  val popBrhIsMore = popBrh.map(_ > diffDeq1)
+  val equalDeq1IsDq0 = (Dq1SumDeq1 << 1).asUInt  === Dq0SumDeq1
+  // val diffDeq0 = Mux(lessDeq0IsDq0, Dq1SumDeq0 - Dq0SumDeq0, Dq0SumDeq0 - Dq1SumDeq0)
+  // val diffDeq1 = Mux(lessDeq1IsDq0, Dq1SumDeq1 - Dq0SumDeq1, Dq0SumDeq1 - Dq1SumDeq1)
+  // val popAluIsMore = popAlu.map(_ > diffDeq0)
+  // val popBrhIsMore = popBrh.map(_ > diffDeq1)
   val lastLastAluSelectDq0 = RegInit(false.B)
   val lastLastBrhSelectDq0 = RegInit(false.B)
-  val aluSelectLessDq = isAlu.zip(popAluIsMore).zip(popAlu).map { case ((i, pm), p) => i && (!pm || (pm && p(0).asBool) ^ lastLastAluSelectDq0) }
-  val brhSelectLessDq = isBrh.zip(popBrhIsMore).zip(popBrh).map { case ((i, pm), p) => i && (!pm || (pm && p(0).asBool) ^ lastLastBrhSelectDq0) }
+  // val aluSelectLessDq = isAlu.zip(popAluIsMore).zip(popAlu).map { case ((i, pm), p) => i && (!pm || (pm && p(0).asBool) ^ lastLastAluSelectDq0) }
+  // val brhSelectLessDq = isBrh.zip(popBrhIsMore).zip(popBrh).map { case ((i, pm), p) => i && (!pm || (pm && p(0).asBool) ^ lastLastBrhSelectDq0) }
   val aluSelectDq0 = isAlu.zip(popAlu).map { case (i, p) => i && (p(0).asBool ^ lastLastAluSelectDq0) }
   //val brhSelectDq0 = isBrh.zip(popBrh).map { case (i, p) => i && (p(0).asBool ^ lastLastBrhSelectDq0) }
   val brhSelectDq0 = isBrh.zip(popBrh).map { case (i, p) => i && !(lastLastBrhSelectDq0 && (p === 1.U || p === 4.U) || !lastLastBrhSelectDq0 && (p === 3.U || p === 6.U))}
