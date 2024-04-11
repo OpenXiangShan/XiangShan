@@ -36,30 +36,15 @@ class TrapEntryHSEventOutput extends Bundle with EventUpdatePrivStateOutput with
   }
 }
 
-class TrapEntryHSEventInput extends Bundle {
-  val sstatus = Input(new SstatusBundle)
-  val hstatus = Input(new HstatusBundle)
-  val trapPc = Input(UInt(VaddrWidth.W))
-  val privState = Input(new PrivState)
-  val isInterrupt = Input(Bool())
-  val trapVec = Input(UInt(64.W))
-  val isCrossPageIPF = Input(Bool())
-  val trapMemVaddr = Input(UInt(VaddrWidth.W))
-  val trapMemGPA = Input(UInt(VaddrWidth.W)) // Todo: use guest physical address width
-  val trapMemGVA = Input(UInt(VaddrWidth.W))
-  // always current privilege
-  val iMode = Input(new PrivState())
-  // take MRPV into consideration
-  val dMode = Input(new PrivState())
-  val satp = Input(new SatpBundle)
-  val vsatp = Input(new SatpBundle)
-}
-
 class TrapEntryHSEventModule extends Module with CSREventBase {
-  val in = IO(new TrapEntryHSEventInput)
+  val in = IO(new TrapEntryEventInput)
   val out = IO(new TrapEntryHSEventOutput)
 
   private val current = in
+
+  private val highPrioTrapNO = in.causeNO.ExceptionCode.asUInt
+  private val isException = !in.causeNO.Interrupt.asBool
+  private val isInterrupt = in.causeNO.Interrupt.asBool
 
   private val trapPC = Wire(UInt(XLEN.W))
   private val trapMemVaddr = SignExt(in.trapMemVaddr, XLEN)
@@ -70,16 +55,8 @@ class TrapEntryHSEventModule extends Module with CSREventBase {
   // When enable virtual memory, the higher bit should fill with the msb of address of Sv39/Sv48/Sv57
   trapPC := Mux(ivmHS || ivmVS, SignExt(in.trapPc, XLEN), ZeroExt(in.trapPc, XLEN))
 
-  private val isInterrupt = in.isInterrupt
-  private val isException = !in.isInterrupt
   private val fetchIsVirt = current.iMode.isVirtual
   private val memIsVirt   = current.dMode.isVirtual
-
-  // Todo: support more interrupt and exception
-  private val exceptionNO = ExceptionNO.priorities.foldRight(0.U)((i: Int, sum: UInt) => Mux(in.trapVec(i), i.U, sum))
-  private val interruptNO = CSRConst.IntPriority.foldRight(0.U)((i: Int, sum: UInt) => Mux(in.trapVec(i), i.U, sum))
-
-  private val highPrioTrapNO = Mux(isInterrupt, interruptNO, exceptionNO)
 
   private val isFetchExcp    = isException && Seq(/*EX_IAM, */ EX_IAF, EX_IPF).map(_.U === highPrioTrapNO).reduce(_ || _)
   private val isMemExcp      = isException && Seq(EX_LAM, EX_LAF, EX_SAM, EX_SAF, EX_LPF, EX_SPF).map(_.U === highPrioTrapNO).reduce(_ || _)
@@ -127,7 +104,7 @@ class TrapEntryHSEventModule extends Module with CSREventBase {
   out.hstatus.bits.SPVP         := Mux(!current.privState.isVirtual, in.hstatus.SPVP.asUInt, current.privState.PRVM.asUInt(0, 0))
   out.hstatus.bits.GVA          := tvalFillGVA
   out.sepc.bits.ALL             := trapPC(trapPC.getWidth - 1, 1)
-  out.scause.bits.Interrupt     := in.isInterrupt
+  out.scause.bits.Interrupt     := isInterrupt
   out.scause.bits.ExceptionCode := highPrioTrapNO
   out.stval.bits.ALL            := tval
   out.htval.bits.ALL            := tval2
