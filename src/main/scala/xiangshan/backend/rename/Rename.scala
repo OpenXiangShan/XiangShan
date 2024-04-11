@@ -65,6 +65,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // for snapshots
     val snpt = Input(new SnapshotPort)
     val snptLastEnq = Flipped(ValidIO(new RobPtr))
+    val snptIsFull= Input(Bool())
     // debug arch ports
     val debug_int_rat = if (backendParams.debugEn) Some(Vec(32, Input(UInt(PhyRegIdxWidth.W)))) else None
     val debug_vconfig_rat = if (backendParams.debugEn) Some(Input(UInt(PhyRegIdxWidth.W))) else None
@@ -386,17 +387,13 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   }
 
   val genSnapshot = Cat(io.out.map(out => out.fire && out.bits.snapshot)).orR
-  val snapshotCtr = RegInit((4 * RabCommitWidth).U)
-  val notInSameSnpt = GatedValidRegNext(distanceBetween(robIdxHeadNext, io.snptLastEnq.bits) >= RobCommitWidth.U || !io.snptLastEnq.valid)
-  val allowSnpt = if (EnableRenameSnapshot) !snapshotCtr.orR && notInSameSnpt && io.in.head.bits.firstUop else false.B
+  val lastCycleCreateSnpt = RegInit(false.B)
+  lastCycleCreateSnpt := genSnapshot && !io.snptISFull
+  val sameSnptDistance = (RobCommitWidth * 4).U
+  // notInSameSnpt: 1.robidxHead - snapLastEnq >= sameSnptDistance 2.no snap
+  val notInSameSnpt = GatedValidRegNext(distanceBetween(robIdxHeadNext, io.snptLastEnq.bits) >= sameSnptDistance || !io.snptLastEnq.valid)
+  val allowSnpt = if (EnableRenameSnapshot) notInSameSnpt && !lastCycleCreateSnpt && io.in.head.bits.firstUop else false.B
   io.out.zip(io.in).foreach{ case (out, in) => out.bits.snapshot := allowSnpt && (!in.bits.preDecodeInfo.notCFI || FuType.isJump(in.bits.fuType)) && in.fire }
-  when(genSnapshot) {
-    snapshotCtr := (4 * RabCommitWidth).U - PopCount(io.out.map(_.fire))
-  }.elsewhen(!io.snptLastEnq.valid){
-    snapshotCtr := 0.U
-  }.elsewhen(io.out.head.fire) {
-    snapshotCtr := Mux(snapshotCtr < PopCount(io.out.map(_.fire)), 0.U, snapshotCtr - PopCount(io.out.map(_.fire)))
-  }
   if(backendParams.debugEn){
     dontTouch(robIdxHeadNext)
     dontTouch(notInSameSnpt)
