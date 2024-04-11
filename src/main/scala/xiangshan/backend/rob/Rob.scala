@@ -112,6 +112,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val enqPtrVec = Wire(Vec(RenameWidth, new RobPtr))
   val deqPtrVec = Wire(Vec(CommitWidth, new RobPtr))
   val walkPtrVec = Reg(Vec(CommitWidth, new RobPtr))
+  val walkPtrTrue = Reg(new RobPtr)
   val lastWalkPtr = Reg(new RobPtr)
   val allowEnqueue = RegInit(true.B)
 
@@ -529,7 +530,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }.otherwise(
     shouldWalkVec := 0.U.asTypeOf(shouldWalkVec)
   )
-  val walkFinished = walkPtrVec.head > lastWalkPtr
+  val walkFinished = walkPtrTrue > lastWalkPtr
   rab.io.fromRob.walkEnd := state === s_walk && walkFinished
   vtypeBuffer.io.fromRob.walkEnd := state === s_walk && walkFinished
 
@@ -690,12 +691,17 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val deqPtrVecForWalk = VecInit((0 until CommitWidth).map(i => deqPtrReadBank + i.U))
   val snapPtrReadBank = snapshots(io.snpt.snptSelect)(0).lineHeadPtr
   val snapPtrVecForWalk = VecInit((0 until CommitWidth).map(i => snapPtrReadBank + i.U))
-  val walkPtrVec_next = Mux(io.redirect.valid,
+  val walkPtrVec_next: Vec[RobPtr] = Mux(io.redirect.valid,
     Mux(io.snpt.useSnpt, snapPtrVecForWalk, deqPtrVecForWalk),
     Mux((state === s_walk) && !walkFinished, VecInit(walkPtrVec.map(_ + CommitWidth.U)), walkPtrVec)
   )
+  val walkPtrTrue_next: RobPtr = Mux(io.redirect.valid,
+    Mux(io.snpt.useSnpt, snapshots(io.snpt.snptSelect)(0), deqPtrVec_next(0)),
+    Mux((state === s_walk) && !walkFinished, walkPtrVec_next.head, walkPtrTrue)
+  )
   walkPtrHead := walkPtrVec_next.head
   walkPtrVec := walkPtrVec_next
+  walkPtrTrue := walkPtrTrue_next
   // T io.redirect.valid, T+1 walkPtrLowBits update, T+2 donotNeedWalk update
   val walkPtrLowBits = Reg(UInt(bankAddrWidth.W))
   when(io.redirect.valid){
@@ -705,9 +711,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     donotNeedWalk := Fill(donotNeedWalk.length, true.B).asTypeOf(donotNeedWalk)
   }.elsewhen(RegNext(io.redirect.valid)){
     donotNeedWalk := (0 until CommitWidth).map(i => (i.U < walkPtrLowBits))
-  }.otherwise(
+  }.otherwise{
     donotNeedWalk := 0.U.asTypeOf(donotNeedWalk)
-  )
+  }
   walkDestSizeDeqGroup.zip(walkPtrVec_next).map {
     case (reg, ptrNext) => reg := robEntries(deqPtr.value).realDestSize
   }
