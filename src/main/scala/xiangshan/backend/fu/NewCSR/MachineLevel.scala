@@ -205,6 +205,10 @@ trait MachineLevel { self: NewCSR =>
   val machineLevelCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], Data)] = SeqMap.from(
     machineLevelCSRMods.map(csr => (csr.addr -> (csr.w -> csr.rdata.asInstanceOf[CSRBundle].asUInt))).iterator
   )
+
+  val machineLevelCSROutMap: SeqMap[Int, UInt] = SeqMap.from(
+    machineLevelCSRMods.map(csr => (csr.addr -> csr.regOut.asInstanceOf[CSRBundle].asUInt)).iterator
+  )
 }
 
 class MstatusBundle extends CSRBundle {

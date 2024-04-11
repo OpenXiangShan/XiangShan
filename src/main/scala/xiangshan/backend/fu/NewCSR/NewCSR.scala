@@ -3,8 +3,11 @@ package xiangshan.backend.fu.NewCSR
 import chisel3._
 import chisel3.util._
 import top.{ArgParser, Generator}
+import xiangshan.backend.fu.NewCSR.CSRBundles.PrivState
 import xiangshan.backend.fu.NewCSR.CSRDefines.{PrivMode, VirtMode}
-import xiangshan.backend.fu.NewCSR.CSREvents.{CSREvents, EventUpdatePrivStateOutput, MretEventSinkBundle, SretEventSinkBundle, TrapEntryHSEventSinkBundle, TrapEntryMEventSinkBundle, TrapEntryVSEventSinkBundle}
+import xiangshan.backend.fu.NewCSR.CSREvents.{CSREvents, EventUpdatePrivStateOutput, MretEventSinkBundle, SretEventSinkBundle, TrapEntryEventInput, TrapEntryHSEventSinkBundle, TrapEntryMEventSinkBundle, TrapEntryVSEventSinkBundle}
+import xiangshan.backend.fu.fpu.Bundles.{Fflags, Frm}
+import xiangshan.backend.fu.vector.Bundles.{Vxrm, Vxsat}
 
 object CSRConfig {
   final val GEILEN = 63
@@ -43,32 +46,52 @@ class NewCSR extends Module
   import CSRConfig._
 
   val io = IO(new Bundle {
-    val w = Flipped(ValidIO(new Bundle {
+    val in = Input(new Bundle {
+      val wen = Bool()
+      val ren = Bool()
       val addr = UInt(12.W)
-      val data = UInt(64.W)
-    }))
-    val rAddr = Input(UInt(12.W))
-    val rData = Output(UInt(64.W))
-    val trap = Flipped(ValidIO(new Bundle {
-      val toPRVM          = PrivMode()
-      val toV             = VirtMode()
-      val tpc             = UInt(VaddrWidth.W)
-      val isInterrupt     = Bool()
-      val trapVec         = UInt(64.W)
-      val isCrossPageIPF  = Bool()
-    }))
+      val wdata = UInt(64.W)
+    })
     val fromMem = Input(new Bundle {
       val excpVaddr = UInt(VaddrWidth.W)
       val excpGVA = UInt(VaddrWidth.W)
       val excpGPA = UInt(VaddrWidth.W) // Todo: use guest physical address width
     })
-    val tret = Flipped(ValidIO(new Bundle {
-      val toPRVM = PrivMode()
-      val toV = VirtMode()
-    }))
-    val out = new Bundle {
+    val fromRob = Input(new Bundle {
+      val trap = ValidIO(new Bundle {
+        val pc = UInt(VaddrWidth.W)
+        val instr = UInt(32.W)
+        val trapVec = Vec(64, Bool())
+        val singleStep = Bool()
+        val crossPageIPFFix = Bool()
+        val isInterrupt = Bool()
+      })
+      val commit = new Bundle {
+        val fflags = ValidIO(Fflags())
+        val fsDirty = Bool()
+        val vxsat = ValidIO(Vxsat())
+        val vsDirty = Bool()
+      }
+    })
+    val mret = Input(Bool())
+    val sret = Input(Bool())
+    val dret = Input(Bool())
+    val wfi = Input(Bool())
+
+    val out = Output(new Bundle {
+      val EX_II = Bool()
+      val EX_VI = Bool()
+      val flushPipe = Bool()
+      val rData = Output(UInt(64.W))
       val targetPc = UInt(VaddrWidth.W)
-    }
+      val regOut = Output(UInt(64.W))
+      val privState = Output(new PrivState)
+      // fp
+      val frm = Frm()
+      // vec
+      val vstart = UInt(XLEN.W)
+      val vxrm = Vxrm()
+    })
   })
 
   val toAIA   = IO(Output(new CSRToAIABundle))
@@ -78,39 +101,49 @@ class NewCSR extends Module
   dontTouch(fromAIA)
   toAIA := DontCare
 
-  val addr = io.w.bits.addr
-  val data = io.w.bits.data
-  val wen = io.w.valid
+  val wen   = io.in.wen
+  val addr  = io.in.addr
+  val wdata = io.in.wdata
+
+  val ren   = io.in.ren
+  val raddr = io.in.addr
+
+  val hasTrap = io.fromRob.trap.valid
+  val trapVec = io.fromRob.trap.bits.trapVec
+  val trapPC = io.fromRob.trap.bits.pc
+  val trapIsInterrupt = io.fromRob.trap.bits.isInterrupt
+  val trapIsCrossPageIPF = io.fromRob.trap.bits.crossPageIPFFix
 
   val PRVM = RegInit(PrivMode(0), PrivMode.M)
   val V = RegInit(VirtMode(0), VirtMode.Off)
 
-  val trap = io.trap.valid
-  val trapToPRVM = io.trap.bits.toPRVM
-  val trapToV = io.trap.bits.toV
-  val trapToM = trapToPRVM === PrivMode.M
-  val trapToHS = trapToPRVM === PrivMode.S && trapToV === VirtMode.Off
-  val trapToHU = trapToPRVM === PrivMode.U && trapToV === VirtMode.Off
-  val trapToVS = trapToPRVM === PrivMode.S && trapToV === VirtMode.On
-  val trapToVU = trapToPRVM === PrivMode.U && trapToV === VirtMode.On
-
-  val tret = io.tret.valid
-  val tretPRVM = io.tret.bits.toPRVM
-  val tretV = io.tret.bits.toV
-  val isSret = tret && tretPRVM === PrivMode.S
-  val isMret = tret && tretPRVM === PrivMode.M
+  val isSret = io.sret
+  val isMret = io.mret
 
   var csrRwMap = machineLevelCSRMap ++ supervisorLevelCSRMap ++ hypervisorCSRMap ++ virtualSupervisorCSRMap ++ unprivilegedCSRMap ++ aiaCSRMap
 
   val csrMods = machineLevelCSRMods ++ supervisorLevelCSRMods ++ hypervisorCSRMods ++ virtualSupervisorCSRMods ++ unprivilegedCSRMods ++ aiaCSRMods
 
+  var csrOutMap = machineLevelCSROutMap ++ supervisorLevelCSROutMap ++ hypervisorCSROutMap ++ virtualSupervisorCSROutMap ++ unprivilegedCSROutMap ++ aiaCSROutMap
+
+  val trapHandleMod = Module(new TrapHandleModule)
+
+  trapHandleMod.io.in.trapInfo.valid := hasTrap
+  trapHandleMod.io.in.trapInfo.bits.trapVec := trapVec.asUInt
+  trapHandleMod.io.in.trapInfo.bits.isInterrupt := trapIsInterrupt
+  trapHandleMod.io.in.privState.PRVM := PRVM
+  trapHandleMod.io.in.privState.V := V
+  trapHandleMod.io.in.mideleg := mideleg.regOut
+  trapHandleMod.io.in.medeleg := medeleg.regOut
+  trapHandleMod.io.in.hideleg := hideleg.regOut
+  trapHandleMod.io.in.hedeleg := hedeleg.regOut
+
+  val entryPrivState = trapHandleMod.io.out.entryPrivState
+
   for ((id, (wBundle, _)) <- csrRwMap) {
     wBundle.wen := wen && addr === id.U
-    wBundle.wdata := data
+    wBundle.wdata := wdata
   }
-  io.rData := Mux1H(csrRwMap.map { case (id, (_, rBundle)) =>
-    (io.rAddr === id.U) -> rBundle.asUInt
-  })
 
   csrMods.foreach { mod =>
     mod match {
@@ -191,68 +224,36 @@ class NewCSR extends Module
     println(mod.dumpFields)
   }
 
-  trapEntryMEvent.valid := trapToM
-  trapEntryMEvent.in match {
-    case in =>
-      in.mstatus := mstatus.regOut
-      in.trapPc := io.trap.bits.tpc
-      in.privState.PRVM := PRVM
-      in.privState.V := V
-      in.isInterrupt := io.trap.bits.isInterrupt
-      in.trapVec := io.trap.bits.trapVec
-      in.isCrossPageIPF := io.trap.bits.isCrossPageIPF
-      in.trapMemVaddr := io.fromMem.excpVaddr
-      in.trapMemGVA := io.fromMem.excpGVA
-      in.trapMemGPA := io.fromMem.excpGPA
-      in.iMode.PRVM := PRVM
-      in.iMode.V := V
-      in.dMode.PRVM := Mux(mstatus.rdata.MPRV.asBool, mstatus.rdata.MPP, PRVM)
-      in.dMode.V := Mux(mstatus.rdata.MPRV.asBool, mstatus.rdata.MPV, V)
-      in.satp := satp.rdata
-      in.vsatp := vsatp.rdata
-  }
+  trapEntryMEvent.valid := entryPrivState.isModeM
+  trapEntryHSEvent.valid := entryPrivState.isModeHS
+  trapEntryVSEvent.valid := entryPrivState.isModeVS
 
-  trapEntryHSEvent.valid := trapToHS
-  trapEntryHSEvent.in match {
-    case in =>
-      in.sstatus := mstatus.sstatus
-      in.hstatus := hstatus.regOut
-      in.trapPc := io.trap.bits.tpc
-      in.privState.PRVM := PRVM
-      in.privState.V := V
-      in.isInterrupt := io.trap.bits.isInterrupt
-      in.trapVec := io.trap.bits.trapVec
-      in.isCrossPageIPF := io.trap.bits.isCrossPageIPF
-      in.trapMemVaddr := io.fromMem.excpVaddr
-      in.trapMemGVA := io.fromMem.excpGVA
-      in.trapMemGPA := io.fromMem.excpGPA
-      in.iMode.PRVM := PRVM
-      in.iMode.V := V
-      in.dMode.PRVM := Mux(mstatus.rdata.MPRV.asBool, mstatus.rdata.MPP, PRVM)
-      in.dMode.V := Mux(mstatus.rdata.MPRV.asBool, mstatus.rdata.MPV, V)
-      in.satp := satp.rdata
-      in.vsatp := vsatp.rdata
-  }
+  trapEntryEvents.foreach(eMod =>
+    eMod.in match {
+      case in: TrapEntryEventInput =>
+        in.causeNO := trapHandleMod.io.out.causeNO
+        in.trapPc := trapPC
+        in.isCrossPageIPF := trapIsCrossPageIPF
 
-  trapEntryVSEvent.valid := trapToVS
-  trapEntryVSEvent.in match {
-    case in =>
-      in.vsstatus := vsstatus.regOut
-      in.trapPc := io.trap.bits.tpc
-      in.privState.PRVM := PRVM
-      in.privState.V := V
-      in.isInterrupt := io.trap.bits.isInterrupt
-      in.trapVec := io.trap.bits.trapVec
-      in.isCrossPageIPF := io.trap.bits.isCrossPageIPF
-      in.trapMemVaddr := io.fromMem.excpVaddr
-      in.trapMemGVA := io.fromMem.excpGVA
-      in.trapMemGPA := io.fromMem.excpGPA
-      in.iMode.PRVM := PRVM
-      in.iMode.V := V
-      in.dMode.PRVM := Mux(mstatus.rdata.MPRV.asBool, mstatus.rdata.MPP, PRVM)
-      in.dMode.V := Mux(mstatus.rdata.MPRV.asBool, mstatus.rdata.MPV, V)
-      in.vsatp := vsatp.rdata
-  }
+        in.iMode.PRVM := PRVM
+        in.iMode.V := V
+        in.dMode.PRVM := Mux(mstatus.rdata.MPRV.asBool, mstatus.rdata.MPP, PRVM)
+        in.dMode.V := Mux(mstatus.rdata.MPRV.asBool, mstatus.rdata.MPV, V)
+
+        in.privState.PRVM := PRVM
+        in.privState.V := V
+        in.mstatus := mstatus.regOut
+        in.hstatus := hstatus.regOut
+        in.sstatus := mstatus.sstatus
+        in.vsstatus := vsstatus.regOut
+        in.satp := satp.rdata
+        in.vsatp := vsatp.rdata
+
+        in.trapMemVaddr := io.fromMem.excpVaddr
+        in.trapMemGVA := io.fromMem.excpGVA
+        in.trapMemGPA := io.fromMem.excpGPA
+    }
+  )
 
   mretEvent.valid := isMret
   mretEvent.in match {
@@ -291,9 +292,24 @@ class NewCSR extends Module
     }
   )
 
+  private val rdata = Mux1H(csrRwMap.map { case (id, (_, rBundle)) =>
+    (raddr === id.U) -> rBundle.asUInt
+  })
+
+  private val regOut = Mux1H(csrOutMap.map { case (id, regOut) =>
+    (raddr === id.U) -> regOut
+  })
+
+  io.out.rData := Mux(ren, rdata, 0.U)
+  io.out.regOut := regOut
   io.out.targetPc := Mux1H(Seq(
-    mretEvent.out.targetPc.valid -> mretEvent.out.targetPc.bits.asUInt
+    mretEvent.out.targetPc.valid -> mretEvent.out.targetPc.bits.asUInt,
+    sretEvent.out.targetPc.valid -> sretEvent.out.targetPc.bits.asUInt,
+
   ))
+
+  io.out.privState.PRVM := PRVM
+  io.out.privState.V := V
 }
 
 trait SupervisorMachineAliasConnect { self: NewCSR with MachineLevel with SupervisorLevel =>
