@@ -276,6 +276,13 @@ object EntryBundles extends HasCircularQueuePtrHelper {
                                                                     DataSource.bypass2, 
                                                                     Mux(srcStatus.dataSources.readBypass2, DataSource.reg, srcStatus.dataSources.value)))
                                                           }
+                                                          else if (params.inMemSchd && params.readVfRf && params.hasIQWakeUp) {
+                                                            Mux(wakeupByIQ, 
+                                                                DataSource.bypass, 
+                                                                Mux(srcStatus.dataSources.readBypass, 
+                                                                    DataSource.bypass2, 
+                                                                    Mux(srcStatus.dataSources.readBypass2, DataSource.reg, srcStatus.dataSources.value)))
+                                                          }
                                                           else Mux(wakeupByIQ, DataSource.bypass, Mux(srcStatus.dataSources.readBypass, DataSource.reg, srcStatus.dataSources.value)))
       if(params.hasIQWakeUp) {
         ExuOHGen(srcStatusNext.srcWakeUpL1ExuOH.get, wakeupByIQOH, wakeup, srcWakeupExuOH(srcIdx))
