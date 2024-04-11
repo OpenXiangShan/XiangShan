@@ -439,6 +439,7 @@ class CtrlBlockImp(
   rename.io.snpt.snptDeq := snpt.io.deq
   rename.io.snpt.useSnpt := useSnpt
   rename.io.snpt.snptSelect := snptSelect
+  rename.io.snptIsFull := snpt.io.valids.asUInt.andR
   rename.io.snpt.flushVec := flushVecNext
   rename.io.snptLastEnq.valid := !isEmpty(snpt.io.enqPtr, snpt.io.deqPtr)
   rename.io.snptLastEnq.bits := snpt.io.snapshots((snpt.io.enqPtr - 1.U).value).robIdx.head
