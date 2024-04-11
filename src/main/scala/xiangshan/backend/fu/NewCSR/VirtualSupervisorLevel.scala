@@ -119,6 +119,10 @@ trait VirtualSupervisorLevel { self: NewCSR with HypervisorLevel =>
   val virtualSupervisorCSRMap = SeqMap.from(
     virtualSupervisorCSRMods.map(csr => (csr.addr -> (csr.w -> csr.rdata.asInstanceOf[CSRBundle].asUInt)))
   )
+
+  val virtualSupervisorCSROutMap: SeqMap[Int, UInt] = SeqMap.from(
+    virtualSupervisorCSRMods.map(csr => (csr.addr -> csr.regOut.asInstanceOf[CSRBundle].asUInt))
+  )
 }
 
 class VSip extends InterruptPendingBundle {
