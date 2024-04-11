@@ -315,9 +315,9 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     ).reduce(_|_)
 
     val addrMaskMatch = RegNext(paddrModule.io.violationMmask(i).asUInt & maskModule.io.violationMmask(i).asUInt) | bypassMaskUInt
-    val entryNeedCheck = RegNext(VecInit((0 until LoadQueueRAWSize).map(j => {
+    val entryNeedCheck = RegNext(RegNext(VecInit((0 until LoadQueueRAWSize).map(j => {
       allocated(j) && isAfter(uop(j).robIdx, io.storeIn(i).bits.uop.robIdx) && datavalid(j) && !uop(j).robIdx.needFlush(io.redirect)
-    })))
+    }))))
     val lqViolationSelVec = VecInit((0 until LoadQueueRAWSize).map(j => {
       addrMaskMatch(j) && entryNeedCheck(j)
     }))
