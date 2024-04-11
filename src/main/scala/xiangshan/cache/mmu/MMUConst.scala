@@ -83,7 +83,8 @@ trait HasTlbConst extends HasXSParameter {
   val offLen  = 12
   val ppnLen  = PAddrBits - offLen
   val vpnnLen = 9
-  val vpnLen  = VAddrBits - offLen
+  val extendVpnnBits = if (HasHExtension) 2 else 0
+  val vpnLen  = VAddrBits - offLen // when opening H extention, vpnlen broaden two bits
   val flagLen = 8
   val pteResLen = XLEN - 44 - 2 - flagLen
   val ppnHignLen = 44 - ppnLen
@@ -100,6 +101,11 @@ trait HasTlbConst extends HasXSParameter {
   val sramSinglePort = true
 
   val timeOutThreshold = 10000
+
+  def noS2xlate = "b00".U
+  def allStage = "b11".U
+  def onlyStage1 = "b01".U
+  def onlyStage2 = "b10".U
 
   def get_pn(addr: UInt) = {
     require(addr.getWidth > offLen)
@@ -142,7 +148,22 @@ trait HasTlbConst extends HasXSParameter {
     replaceWrapper(VecInit(v).asUInt, lruIdx)
   }
 
-  implicit def ptwresp_to_tlbperm(ptwResp: PtwSectorRespwithMemIdx): TlbPermBundle = {
+  implicit def hptwresp_to_tlbperm(hptwResp: HptwResp): TlbPermBundle = {
+    val tp = Wire(new TlbPermBundle)
+    val ptePerm = hptwResp.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
+    tp.pf := hptwResp.gpf
+    tp.af := hptwResp.gaf
+    tp.d := ptePerm.d
+    tp.a := ptePerm.a
+    tp.g := ptePerm.g
+    tp.u := ptePerm.u
+    tp.x := ptePerm.x
+    tp.w := ptePerm.w
+    tp.r := ptePerm.r
+    tp
+  }
+
+  implicit def ptwresp_to_tlbperm(ptwResp: PtwSectorResp): TlbPermBundle = {
     val tp = Wire(new TlbPermBundle)
     val ptePerm = ptwResp.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
     tp.pf := ptwResp.pf
@@ -168,7 +189,7 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val bPtwWidth = log2Up(PtwWidth)
   val bSourceWidth = log2Up(sourceWidth)
   // ptwl1: fully-associated
-  val PtwL1TagLen = vpnnLen
+  val PtwL1TagLen = vpnnLen + extendVpnnBits
 
   /* +-------+----------+-------------+
    * |  Tag  |  SetIdx  |  SectorIdx  |
@@ -181,7 +202,7 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val PtwL2IdxLen = log2Up(PtwL2SetNum * PtwL2SectorSize)
   val PtwL2SectorIdxLen = log2Up(PtwL2SectorSize)
   val PtwL2SetIdxLen = log2Up(PtwL2SetNum)
-  val PtwL2TagLen = vpnnLen * 2 - PtwL2IdxLen
+  val PtwL2TagLen = vpnnLen * 2 - PtwL2IdxLen + extendVpnnBits
 
   // ptwl3: 16-way group-associated
   val l2tlbParams.l3nWays = l2tlbParams.l3nWays
@@ -190,14 +211,15 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
   val PtwL3IdxLen = log2Up(PtwL3SetNum * PtwL3SectorSize)
   val PtwL3SectorIdxLen = log2Up(PtwL3SectorSize)
   val PtwL3SetIdxLen = log2Up(PtwL3SetNum)
-  val PtwL3TagLen = vpnnLen * 3 - PtwL3IdxLen
+  val PtwL3TagLen = vpnnLen * 3 - PtwL3IdxLen + extendVpnnBits
 
   // super page, including 1GB and 2MB page
-  val SPTagLen = vpnnLen * 2
+  val SPTagLen = vpnnLen * 2 + extendVpnnBits
 
   // miss queue
   val MissQueueSize = l2tlbParams.ifilterSize + l2tlbParams.dfilterSize
-  val MemReqWidth = l2tlbParams.llptwsize + 1
+  val MemReqWidth = l2tlbParams.llptwsize + 1 + 1
+  val HptwReqId = l2tlbParams.llptwsize + 1
   val FsmReqID = l2tlbParams.llptwsize
   val bMemID = log2Up(MemReqWidth)
 
@@ -234,8 +256,21 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
     Cat(ppn, off, 0.U(log2Up(XLEN/8).W))(PAddrBits-1, 0)
   }
 
+  def MakeGPAddr(ppn: UInt, off: UInt) = {
+    require(off.getWidth == 9 || off.getWidth == 11)
+    (Cat(ppn, 0.U(offLen.W)) + Cat(off, 0.U(log2Up(XLEN / 8).W)))(GPAddrBits - 1, 0)
+  }
+
   def getVpnn(vpn: UInt, idx: Int): UInt = {
     vpn(vpnnLen*(idx+1)-1, vpnnLen*idx)
+  }
+
+  def getVpnn(vpn: UInt, idx: UInt): UInt = {
+    Mux(idx === 0.U, vpn(vpnnLen - 1, 0), Mux(idx === 1.U, vpn(vpnnLen * 2 - 1, vpnnLen), vpn(vpnnLen * 3 - 1, vpnnLen * 2)))
+  }
+
+  def getGVpnn(vpn: UInt, idx: UInt): UInt = {
+    Mux(idx === 0.U, vpn(vpnnLen - 1, 0), Mux(idx === 1.U, vpn(vpnnLen * 2 - 1, vpnnLen), vpn(vpnnLen * 3 + 1, vpnnLen * 2)))
   }
 
   def getVpnClip(vpn: UInt, level: Int) = {

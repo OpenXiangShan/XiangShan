@@ -333,6 +333,8 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   toITLB.bits.debug.isFirstIssue  := DontCare
   toITLB.bits.memidx              := DontCare
   toITLB.bits.no_translate        := false.B
+  toITLB.bits.hyperinst := DontCare
+  toITLB.bits.hlvx := DontCare
   fromITLB.ready                  := true.B
   // TODO: whether to handle tlb miss for prefetch
   io.iTLBInter.req_kill           := true.B

@@ -42,8 +42,10 @@ class ICacheMainPipeResp(implicit p: Parameters) extends ICacheBundle
   // val select   = Bool()
   val data = UInt((blockBits/2).W)
   val paddr    = UInt(PAddrBits.W)
+  val gpaddr    = UInt(GPAddrBits.W)
   val tlbExcp  = new Bundle{
     val pageFault = Bool()
+    val guestPageFault = Bool()
     val accessFault = Bool()
     val mmio = Bool()
   }
@@ -269,6 +271,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     port.bits.no_translate        := false.B
     port.bits.debug.isFirstIssue  := DontCare
     port.bits.kill                := DontCare
+    port.bits.hlvx                := DontCare
+    port.bits.hyperinst           := DontCare
   }
   io.itlb.foreach(_.req_kill := false.B)
 
@@ -279,11 +283,15 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
                                   (RegNext(s0_fire) || s1_wait_itlb(1)) && !fromITLB(1).bits.miss && s1_double_line))
   val tlbRespPAddr  = VecInit((0 until PortNumber).map(i =>
                         ResultHoldBypass(valid = tlb_valid_tmp(i), data = fromITLB(i).bits.paddr(0))))
+  val tlbRespGPAddr = VecInit((0 until PortNumber).map(i =>
+                        ResultHoldBypass(valid = tlb_valid_tmp(i), data = fromITLB(i).bits.gpaddr(0))))
+  val tlbExcpGPF    = VecInit((0 until PortNumber).map(i => 
+                        ResultHoldBypass(valid = tlb_valid_tmp(i), data = fromITLB(i).bits.excp(0).gpf.instr)))
   val tlbExcpPF     = VecInit((0 until PortNumber).map(i =>
                         ResultHoldBypass(valid = tlb_valid_tmp(i), data = fromITLB(i).bits.excp(0).pf.instr)))
   val tlbExcpAF     = VecInit((0 until PortNumber).map(i =>
                         ResultHoldBypass(valid = tlb_valid_tmp(i), data = fromITLB(i).bits.excp(0).af.instr)))
-  val tlbExcp       = VecInit((0 until PortNumber).map(i => tlbExcpAF(i) || tlbExcpPF(i)))
+  val tlbExcp       = VecInit((0 until PortNumber).map(i => tlbExcpAF(i) || tlbExcpPF(i) || tlbExcpGPF(i)))
 
   val s1_tlb_valid = VecInit((0 until PortNumber).map(i => ValidHoldBypass(tlb_valid_tmp(i), s1_fire)))
   val tlbRespAllValid = s1_tlb_valid(0) && (!s1_double_line || s1_double_line && s1_tlb_valid(1))
@@ -298,6 +306,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   
   /** s1 hit check/tag compare */
   val s1_req_paddr              = tlbRespPAddr
+  val s1_req_gpaddr             = tlbRespGPAddr
   val s1_req_ptags              = VecInit(s1_req_paddr.map(get_phy_tag(_)))
 
   val s1_meta_ptags              = ResultHoldBypass(data = metaResp.tags, valid = RegNext(s0_fire))
@@ -420,6 +429,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   /** s2 data */
   // val mmio = fromPMP.map(port => port.mmio) // TODO: handle it
   val (s2_req_paddr , s2_req_vaddr) = (RegEnable(s1_req_paddr, s1_fire), RegEnable(s1_req_vaddr, s1_fire))
+  val s2_req_gpaddr           = RegEnable(s1_req_gpaddr,        s1_fire)
   val s2_req_vsetIdx          = RegEnable(s1_req_vsetIdx,       s1_fire)
   val s2_req_ptags            = RegEnable(s1_req_ptags,         s1_fire)
   val s2_double_line          = RegEnable(s1_double_line,       s1_fire)
@@ -450,8 +460,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     */
   // short delay exception signal
   val s2_except_tlb_pf  = RegEnable(tlbExcpPF, s1_fire)
+  val s2_except_tlb_gpf = RegEnable(tlbExcpGPF, s1_fire)
   val s2_except_tlb_af  = RegEnable(tlbExcpAF, s1_fire)
-  val s2_except_tlb     = VecInit(Seq(s2_except_tlb_pf(0) || s2_except_tlb_af(0), s2_double_line && (s2_except_tlb_pf(1) || s2_except_tlb_af(1))))
+  val s2_except_tlb     = VecInit(Seq(s2_except_tlb_pf(0) || s2_except_tlb_af(0) || s2_except_tlb_gpf(0), s2_double_line && (s2_except_tlb_pf(1) || s2_except_tlb_af(1) || s2_except_tlb_gpf(1))))
   val s2_has_except_tlb = s2_valid && s2_except_tlb.reduce(_||_)
   // long delay exception signal
   // exception information and mmio
@@ -616,9 +627,11 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     if(i ==0) toIFU(i).valid          := s2_fire
       else   toIFU(i).valid           := s2_fire && s2_double_line
     toIFU(i).bits.paddr               := s2_req_paddr(i)
+    toIFU(i).bits.gpaddr              := s2_req_gpaddr(i)
     toIFU(i).bits.vaddr               := s2_req_vaddr(i)
     toIFU(i).bits.data                := s2_fetch_data(i)
     toIFU(i).bits.tlbExcp.pageFault   := s2_except_tlb_pf(i)
+    toIFU(i).bits.tlbExcp.guestPageFault:= s2_except_tlb_gpf(i)
     toIFU(i).bits.tlbExcp.accessFault := s2_except_tlb_af(i) || s2_corrupt(i) || s2_except_pmp_af(i)
     toIFU(i).bits.tlbExcp.mmio        := s2_mmio
   }
@@ -749,7 +762,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     */
   if (env.EnableDifftest) {
     val discards = (0 until PortNumber).map { i =>
-      val discard = toIFU(i).bits.tlbExcp.pageFault || toIFU(i).bits.tlbExcp.accessFault || toIFU(i).bits.tlbExcp.mmio
+      val discard = toIFU(i).bits.tlbExcp.pageFault || toIFU(i).bits.tlbExcp.guestPageFault || toIFU(i).bits.tlbExcp.accessFault || toIFU(i).bits.tlbExcp.mmio
       discard
     }
     (0 until PortNumber).map { i =>

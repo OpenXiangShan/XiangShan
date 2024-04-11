@@ -81,6 +81,41 @@ trait HasCSRConst {
   val Sdsid         = 0x9C0
   val Sfetchctl     = 0x9e0
 
+  // Hypervisor Trap Setup
+  val Hstatus       = 0x600
+  val Hedeleg       = 0x602
+  val Hideleg       = 0x603
+  val Hie           = 0x604
+  val Hcounteren    = 0x606
+  val Hgeie         = 0x607
+
+  // Hypervisor Trap Handling
+  val Htval         = 0x643
+  val Hip           = 0x644
+  val Hvip          = 0x645
+  val Htinst        = 0x64A
+  val Hgeip         = 0xE12
+
+  // Hypervisor Configuration
+  val Henvcfg       = 0x60A
+
+  // Hypervisor Protection and Translation
+  val Hgatp         = 0x680
+
+  //Hypervisor Counter/Timer Virtualization Registers
+  val Htimedelta    = 0x605
+
+  // Virtual Supervisor Registers
+  val Vsstatus      = 0x200
+  val Vsie          = 0x204
+  val Vstvec        = 0x205
+  val Vsscratch     = 0x240
+  val Vsepc         = 0x241
+  val Vscause       = 0x242
+  val Vstval        = 0x243
+  val Vsip          = 0x244
+  val Vsatp         = 0x280
+
   // Machine Information Registers
   val Mvendorid     = 0xF11
   val Marchid       = 0xF12
@@ -103,6 +138,8 @@ trait HasCSRConst {
   val Mcause        = 0x342
   val Mtval         = 0x343
   val Mip           = 0x344
+  val Mtinst        = 0x34A
+  val Mtval2        = 0x34B
 
   // Machine Configuration
   val Menvcfg       = 0x30A
@@ -211,17 +248,25 @@ trait HasCSRConst {
 
   def IRQ_USIP  = 0
   def IRQ_SSIP  = 1
+  def IRQ_VSSIP = 2
   def IRQ_MSIP  = 3
 
   def IRQ_UTIP  = 4
   def IRQ_STIP  = 5
+  def IRQ_VSTIP = 6
   def IRQ_MTIP  = 7
 
   def IRQ_UEIP  = 8
   def IRQ_SEIP  = 9
+  def IRQ_VSEIP = 10
   def IRQ_MEIP  = 11
 
-  def IRQ_DEBUG = 12
+  def IRQ_SGEIP = 12
+  def IRQ_DEBUG = 13
+
+  val Hgatp_Mode_len = 4
+  val Hgatp_Vmid_len = 16
+  val Hgatp_Addr_len = 44
 
   val Satp_Mode_len = 4
   val Satp_Asid_len = 16
@@ -235,13 +280,29 @@ trait HasCSRConst {
     IRQ_DEBUG,
     IRQ_MEIP, IRQ_MSIP, IRQ_MTIP,
     IRQ_SEIP, IRQ_SSIP, IRQ_STIP,
-    IRQ_UEIP, IRQ_USIP, IRQ_UTIP
+    IRQ_UEIP, IRQ_USIP, IRQ_UTIP,
+    IRQ_VSEIP, IRQ_VSSIP, IRQ_VSTIP, IRQ_SGEIP
   )
 
-  def csrAccessPermissionCheck(addr: UInt, wen: Bool, mode: UInt): Bool = {
-    val readOnly = addr(11,10) === "b11".U
+  def csrAccessPermissionCheck(addr: UInt, wen: Bool, mode: UInt, virt: Bool, hasH: Bool): UInt = {
+    val readOnly = addr(11, 10) === "b11".U
     val lowestAccessPrivilegeLevel = addr(9,8)
-    mode >= lowestAccessPrivilegeLevel && !(wen && readOnly)
+    val priv = Mux(mode === ModeS, ModeH, mode)
+    val ret = Wire(Bool()) //0.U: normal, 1.U: illegal_instruction, 2.U: virtual instruction
+    when (lowestAccessPrivilegeLevel === ModeH && !hasH){
+      ret := 1.U
+    }.elsewhen (readOnly && wen) {
+      ret := 1.U
+    }.elsewhen (priv < lowestAccessPrivilegeLevel) {
+      when(virt && lowestAccessPrivilegeLevel <= ModeH){
+        ret := 2.U
+      }.otherwise{
+        ret := 1.U
+      }
+    }.otherwise{
+      ret := 0.U
+    }
+    ret
   }
 
   def perfcntPermissionCheck(addr: UInt, mode: UInt, mmask: UInt, smask: UInt): Bool = {

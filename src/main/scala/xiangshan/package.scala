@@ -150,7 +150,7 @@ package object xiangshan {
   }
 
   object ExceptionVec {
-    val ExceptionVecSize = 16
+    val ExceptionVecSize = 24
     def apply() = Vec(ExceptionVecSize, Bool())
   }
 
@@ -218,6 +218,8 @@ package object xiangshan {
     def fence  = "b10000".U
     def sfence = "b10001".U
     def fencei = "b10010".U
+    def hfence_v = "b10011".U
+    def hfence_g = "b10100".U
     def nofence= "b00000".U
   }
 
@@ -377,6 +379,19 @@ package object xiangshan {
     def lbu      = "b0100".U
     def lhu      = "b0101".U
     def lwu      = "b0110".U
+    // hypervior load
+    // bit encoding: | hlvx 1 | hlv 1 | load 0 | is unsigned(1bit) | size(2bit) |
+    def hlvb = "b10000".U
+    def hlvh = "b10001".U
+    def hlvw = "b10010".U
+    def hlvd = "b10011".U
+    def hlvbu = "b10100".U
+    def hlvhu = "b10101".U
+    def hlvwu = "b10110".U
+    def hlvxhu = "b110101".U
+    def hlvxwu = "b110110".U
+    def isHlv(op: UInt): Bool = op(4)
+    def isHlvx(op: UInt): Bool = op(5)
 
     // Zicbop software prefetch
     // bit encoding: | prefetch 1 | 0 | prefetch type (2bit) |
@@ -393,6 +408,14 @@ package object xiangshan {
     def sh       = "b0001".U
     def sw       = "b0010".U
     def sd       = "b0011".U
+
+    //hypervisor store
+    // bit encoding: |hsv 1 | store 00 | size(2bit) |
+    def hsvb = "b10000".U
+    def hsvh = "b10001".U
+    def hsvw = "b10010".U
+    def hsvd = "b10011".U
+    def isHsv(op: UInt): Bool = op(4)
 
     // l1 cache op
     // bit encoding: | cbo_zero 01 | size(2bit) 11 |
@@ -521,22 +544,31 @@ package object xiangshan {
     def storeAccessFault    = 7
     def ecallU              = 8
     def ecallS              = 9
+    def ecallVS             = 10
     def ecallM              = 11
     def instrPageFault      = 12
     def loadPageFault       = 13
     // def singleStep          = 14
     def storePageFault      = 15
+    def instrGuestPageFault = 20
+    def loadGuestPageFault  = 21
+    def virtualInstr        = 22
+    def storeGuestPageFault = 23
     def priorities = Seq(
       breakPoint, // TODO: different BP has different priority
       instrPageFault,
+      instrGuestPageFault,
       instrAccessFault,
       illegalInstr,
+      virtualInstr,
       instrAddrMisaligned,
-      ecallM, ecallS, ecallU,
+      ecallM, ecallS, ecallVS, ecallU,
       storeAddrMisaligned,
       loadAddrMisaligned,
       storePageFault,
       loadPageFault,
+      storeGuestPageFault,
+      loadGuestPageFault,
       storeAccessFault,
       loadAccessFault
     )
@@ -545,7 +577,9 @@ package object xiangshan {
       instrAddrMisaligned,
       instrAccessFault,
       illegalInstr,
-      instrPageFault
+      instrPageFault,
+      instrGuestPageFault,
+      virtualInstr
     )
     def partialSelect(vec: Vec[Bool], select: Seq[Int]): Vec[Bool] = {
       val new_vec = Wire(ExceptionVec())
@@ -625,7 +659,7 @@ package object xiangshan {
     fuGen = fenceGen,
     fuSel = (uop: MicroOp) => uop.ctrl.fuType === FuType.fence,
     FuType.fence, 2, 0, writeIntRf = false, writeFpRf = false,
-    latency = UncertainLatency(), exceptionOut = Seq(illegalInstr), // TODO: need rewrite latency structure, not just this value,
+    latency = UncertainLatency(), exceptionOut = Seq(illegalInstr, virtualInstr), // TODO: need rewrite latency structure, not just this value,
     flushPipe = true
   )
 
@@ -638,7 +672,7 @@ package object xiangshan {
     numFpSrc = 0,
     writeIntRf = true,
     writeFpRf = false,
-    exceptionOut = Seq(illegalInstr, breakPoint, ecallU, ecallS, ecallM),
+    exceptionOut = Seq(illegalInstr, virtualInstr, breakPoint, ecallU, ecallS, ecallVS, ecallM),
     flushPipe = true
   )
 
@@ -737,7 +771,7 @@ package object xiangshan {
     (uop: MicroOp) => FuType.loadCanAccept(uop.ctrl.fuType),
     FuType.ldu, 1, 0, writeIntRf = true, writeFpRf = true,
     latency = UncertainLatency(),
-    exceptionOut = Seq(loadAddrMisaligned, loadAccessFault, loadPageFault),
+    exceptionOut = Seq(loadAddrMisaligned, loadAccessFault, loadPageFault, loadGuestPageFault),
     flushPipe = true,
     replayInst = true,
     hasLoadError = true
@@ -749,7 +783,7 @@ package object xiangshan {
     (uop: MicroOp) => FuType.storeCanAccept(uop.ctrl.fuType),
     FuType.stu, 1, 0, writeIntRf = false, writeFpRf = false,
     latency = UncertainLatency(),
-    exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault)
+    exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault, storeGuestPageFault)
   )
 
   val stdCfg = FuConfig(

@@ -102,7 +102,9 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   io.tlb.req.bits.debug.pc           := s0_pc
   io.tlb.req.bits.debug.isFirstIssue := s0_isFirstIssue
   io.tlb.req_kill                    := false.B
-
+  io.tlb.req.bits.hyperinst          := LSUOpType.isHsv(s0_in.uop.ctrl.fuOpType)
+  io.tlb.req.bits.hlvx               := false.B
+  
   // Dcache access here: not **real** dcache write
   // just read meta and tag in dcache, to find out the store will hit or miss
 
@@ -163,6 +165,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
                      s1_in.uop.ctrl.fuOpType === LSUOpType.cbo_flush ||
                      s1_in.uop.ctrl.fuOpType === LSUOpType.cbo_inval
   val s1_paddr     = io.tlb.resp.bits.paddr(0)
+  val s1_gpaddr    = io.tlb.resp.bits.gpaddr(0)
   val s1_tlb_miss  = io.tlb.resp.bits.miss
   val s1_mmio      = s1_mmio_cbo
   val s1_exception = ExceptionNO.selectByFu(s1_out.uop.cf.exceptionVec, staCfg).asUInt.orR
@@ -206,12 +209,14 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   // writeback store inst to lsq
   s1_out         := s1_in
   s1_out.paddr   := s1_paddr
+  s1_out.gpaddr  := s1_gpaddr 
   s1_out.miss    := false.B
   s1_out.mmio    := s1_mmio
   s1_out.tlbMiss := s1_tlb_miss
   s1_out.atomic  := s1_mmio
   s1_out.uop.cf.exceptionVec(storePageFault)   := io.tlb.resp.bits.excp(0).pf.st
   s1_out.uop.cf.exceptionVec(storeAccessFault) := io.tlb.resp.bits.excp(0).af.st
+  s1_out.uop.cf.exceptionVec(storeGuestPageFault) := io.tlb.resp.bits.excp(0).gpf.st
 
   io.lsq.valid     := s1_valid && !s1_in.isHWPrefetch
   io.lsq.bits      := s1_out
