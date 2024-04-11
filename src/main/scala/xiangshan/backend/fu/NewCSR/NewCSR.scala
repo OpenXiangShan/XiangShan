@@ -38,7 +38,6 @@ class NewCSR extends Module
   with Unprivileged
   with CSRAIA
   with HasExternalInterruptBundle
-  with HasInstCommitBundle
   with SupervisorMachineAliasConnect
   with CSREvents
 {
@@ -71,6 +70,8 @@ class NewCSR extends Module
         val fsDirty = Bool()
         val vxsat = ValidIO(Vxsat())
         val vsDirty = Bool()
+        val commitValid = Bool()
+        val commitInstRet = UInt(8.W)
       }
     })
     val mret = Input(Bool())
@@ -184,8 +185,8 @@ class NewCSR extends Module
     }
     mod match {
       case m: HasInstCommitBundle =>
-        m.commitValid := this.commitValid
-        m.commitInstNum := this.commitInstNum
+        m.commitValid   := io.fromRob.commit.commitValid
+        m.commitInstNum := io.fromRob.commit.commitInstRet
       case _ =>
     }
     mod match {
@@ -305,11 +306,18 @@ class NewCSR extends Module
   io.out.targetPc := Mux1H(Seq(
     mretEvent.out.targetPc.valid -> mretEvent.out.targetPc.bits.asUInt,
     sretEvent.out.targetPc.valid -> sretEvent.out.targetPc.bits.asUInt,
-
   ))
 
   io.out.privState.PRVM := PRVM
-  io.out.privState.V := V
+  io.out.privState.V    := V
+
+
+  io.out.EX_VI := false.B
+  io.out.EX_II := false.B
+  io.out.flushPipe := false.B
+  io.out.frm := 0.U
+  io.out.vstart := 0.U
+  io.out.vxrm := 0.U
 }
 
 trait SupervisorMachineAliasConnect { self: NewCSR with MachineLevel with SupervisorLevel =>
