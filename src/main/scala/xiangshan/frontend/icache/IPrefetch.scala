@@ -55,7 +55,7 @@ class PrefetchReq(implicit  p: Parameters) extends IPrefetchBundle{
 }
 
 class PrefetchBufferIO(implicit p: Parameters) extends IPrefetchBundle {
-  val hartId = Input(UInt(8.W))
+  val hartId = Input(UInt(hartIdLen.W))
   val fencei = Input(Bool())
   val IPFFilterRead   = new IPFBufferFilterRead
   val IPFBufferRead   = new IPFBufferRead
@@ -333,6 +333,8 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   toITLB.bits.debug.isFirstIssue  := DontCare
   toITLB.bits.memidx              := DontCare
   toITLB.bits.no_translate        := false.B
+  toITLB.bits.hyperinst := DontCare
+  toITLB.bits.hlvx := DontCare
   fromITLB.ready                  := true.B
   // TODO: whether to handle tlb miss for prefetch
   io.iTLBInter.req_kill           := true.B
@@ -816,7 +818,7 @@ class PrefetchQueue(edge: TLEdgeOut)(implicit p: Parameters) extends IPrefetchMo
 class FDIPPrefetchIO(edge: TLEdgeOut)(implicit p: Parameters) extends IPrefetchBundle {
   /** commen */
   val fencei = Input(Bool())
-  val hartId = Input(UInt(8.W))
+  val hartId = Input(UInt(hartIdLen.W))
 
   /** Prefetch Mainpipe IO */
   val ftqReq              = Flipped(new FtqPrefechBundle)

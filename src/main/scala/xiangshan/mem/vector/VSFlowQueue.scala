@@ -292,7 +292,7 @@ class VsExceptionBuffer(implicit p: Parameters) extends VLSUModule with HasCircu
   }
 
   io.exceptionAddr.vaddr := req.vaddr
-
+  io.exceptionAddr.gpaddr := 0.U // Todo: req.gpaddr
 }
 
 class VsFlowQueue(implicit p: Parameters) extends VLSUModule with HasCircularQueuePtrHelper

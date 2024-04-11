@@ -146,6 +146,8 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
 class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val instr = UInt(32.W)
   val pc = UInt(VAddrBits.W)
+  // Todo: remove this
+  val gpaddr = UInt(GPAddrBits.W)
   val foldpc = UInt(MemPredPCWidth.W)
   val exceptionVec = ExceptionVec()
   val trigger = new TriggerCf
@@ -232,6 +234,9 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
     fuType === FuType.alu.U && fuOpType === ALUOpType.or && selImm === SelImm.IMM_I && ldest === 0.U
   }
   def needWriteRf: Bool = (rfWen && ldest =/= 0.U) || fpWen || vecWen
+  def isHyperInst: Bool = {
+    fuType === FuType.ldu.U && LSUOpType.isHlv(fuOpType) || fuType === FuType.stu.U && LSUOpType.isHsv(fuOpType)
+  }
 }
 
 class CfCtrl(implicit p: Parameters) extends XSBundle {
@@ -379,6 +384,7 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   val isMove = Bool()
   val isRVC = Bool()
   val isVset = Bool()
+  val isHls = Bool()
   val vtype = new VType
 
   // these should be optimized for synthesis verilog
@@ -485,9 +491,15 @@ class TlbSatpBundle(implicit p: Parameters) extends SatpStruct {
 
 class TlbCsrBundle(implicit p: Parameters) extends XSBundle {
   val satp = new TlbSatpBundle()
+  val vsatp = new TlbSatpBundle()
+  val hgatp = new TlbSatpBundle()
   val priv = new Bundle {
     val mxr = Bool()
     val sum = Bool()
+    val vmxr = Bool()
+    val vsum = Bool()
+    val virt = Bool()
+    val spvp = UInt(1.W)
     val imode = UInt(2.W)
     val dmode = UInt(2.W)
   }
@@ -504,8 +516,10 @@ class SfenceBundle(implicit p: Parameters) extends XSBundle {
     val rs1 = Bool()
     val rs2 = Bool()
     val addr = UInt(VAddrBits.W)
-    val asid = UInt(AsidLength.W)
+    val id = UInt((AsidLength).W) // asid or vmid
     val flushPipe = Bool()
+    val hv = Bool()
+    val hg = Bool()
   }
 
   override def toPrintable: Printable = {
@@ -569,6 +583,8 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val singlestep = Output(Bool())
   val frontend_trigger = new FrontendTdataDistributeIO()
   val mem_trigger = new MemTdataDistributeIO()
+  // Virtualization Mode
+  val virtMode = Output(Bool())
 }
 
 class DistributedCSRIO(implicit p: Parameters) extends XSBundle {

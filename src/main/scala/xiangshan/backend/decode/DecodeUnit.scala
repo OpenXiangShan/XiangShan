@@ -23,7 +23,7 @@ import freechips.rocketchip.rocket.Instructions._
 import freechips.rocketchip.util.uintToBitPat
 import utility._
 import utils._
-import xiangshan.ExceptionNO.illegalInstr
+import xiangshan.ExceptionNO.{illegalInstr, virtualInstr}
 import xiangshan._
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.Bundles.{DecodedInst, DynInst, StaticInst}
@@ -447,6 +447,31 @@ object CBODecode extends DecodeConstants {
   )
 }
 
+/*
+ * Hypervisor decode
+ */
+object HypervisorDecode extends DecodeConstants {
+  override val decodeArray: Array[(BitPat, XSDecodeBase)] = Array(
+    HFENCE_GVMA -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.fence, FenceOpType.hfence_g, SelImm.X, noSpec = T, blockBack = T, flushPipe = T),
+    HFENCE_VVMA -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.fence, FenceOpType.hfence_v, SelImm.X, noSpec = T, blockBack = T, flushPipe = T),
+    HINVAL_GVMA -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.fence, FenceOpType.hfence_g, SelImm.X),
+    HINVAL_VVMA -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.fence, FenceOpType.hfence_v, SelImm.X),
+    HLV_B       -> XSDecode(SrcType.reg, SrcType.X,   SrcType.X, FuType.ldu,   LSUOpType.hlvb,       SelImm.X, xWen = T),
+    HLV_BU      -> XSDecode(SrcType.reg, SrcType.X,   SrcType.X, FuType.ldu,   LSUOpType.hlvbu,      SelImm.X, xWen = T),
+    HLV_D       -> XSDecode(SrcType.reg, SrcType.X,   SrcType.X, FuType.ldu,   LSUOpType.hlvd,       SelImm.X, xWen = T),
+    HLV_H       -> XSDecode(SrcType.reg, SrcType.X,   SrcType.X, FuType.ldu,   LSUOpType.hlvh,       SelImm.X, xWen = T),
+    HLV_HU      -> XSDecode(SrcType.reg, SrcType.X,   SrcType.X, FuType.ldu,   LSUOpType.hlvhu,      SelImm.X, xWen = T),
+    HLV_W       -> XSDecode(SrcType.reg, SrcType.X,   SrcType.X, FuType.ldu,   LSUOpType.hlvw,       SelImm.X, xWen = T),
+    HLV_WU      -> XSDecode(SrcType.reg, SrcType.X,   SrcType.X, FuType.ldu,   LSUOpType.hlvwu,      SelImm.X, xWen = T),
+    HLVX_HU     -> XSDecode(SrcType.reg, SrcType.X,   SrcType.X, FuType.ldu,   LSUOpType.hlvxhu,     SelImm.X, xWen = T),
+    HLVX_WU     -> XSDecode(SrcType.reg, SrcType.X,   SrcType.X, FuType.ldu,   LSUOpType.hlvxwu,     SelImm.X, xWen = T),
+    HSV_B       -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.stu,   LSUOpType.hsvb,       SelImm.X),
+    HSV_D       -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.stu,   LSUOpType.hsvd,       SelImm.X),
+    HSV_H       -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.stu,   LSUOpType.hsvh,       SelImm.X),
+    HSV_W       -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.stu,   LSUOpType.hsvw,       SelImm.X),
+  )
+}
+
 /**
  * XiangShan Trap Decode constants
  */
@@ -664,6 +689,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     BDecode.table ++
     CBODecode.table ++
     SvinvalDecode.table ++
+    HypervisorDecode.table ++
     VecDecoder.table
 
   require(decode_table.map(_._2.length == 15).reduce(_ && _), "Decode tables have different column size")
@@ -724,9 +750,25 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     val sinval = BitPat("b0001011_?????_?????_000_00000_1110011") === ctrl_flow.instr
     val w_inval = BitPat("b0001100_00000_00000_000_00000_1110011") === ctrl_flow.instr
     val inval_ir = BitPat("b0001100_00001_00000_000_00000_1110011") === ctrl_flow.instr
-    val svinval_ii = sinval || w_inval || inval_ir
+    val hinval_gvma = HINVAL_GVMA === ctrl_flow.instr
+    val hinval_vvma = HINVAL_VVMA === ctrl_flow.instr
+    val svinval_ii = sinval || w_inval || inval_ir || hinval_gvma || hinval_vvma
     decodedInst.exceptionVec(illegalInstr) := base_ii || svinval_ii
     decodedInst.flushPipe := false.B
+  }
+
+  when(io.csrCtrl.virtMode){
+    // Todo: optimize EX_VI decode
+    // vs/vu attempting to exec hyperinst will raise virtual instruction
+    decodedInst.exceptionVec(virtualInstr) := ctrl_flow.instr === HLV_B || ctrl_flow.instr === HLV_BU ||
+      ctrl_flow.instr === HLV_H   || ctrl_flow.instr === HLV_HU ||
+      ctrl_flow.instr === HLVX_HU || ctrl_flow.instr === HLV_W  ||
+      ctrl_flow.instr === HLVX_WU || ctrl_flow.instr === HLV_WU ||
+      ctrl_flow.instr === HLV_D   || ctrl_flow.instr === HSV_B  ||
+      ctrl_flow.instr === HSV_H   || ctrl_flow.instr === HSV_W  ||
+      ctrl_flow.instr === HSV_D   || ctrl_flow.instr === HFENCE_VVMA ||
+      ctrl_flow.instr === HFENCE_GVMA || ctrl_flow.instr === HINVAL_GVMA ||
+      ctrl_flow.instr === HINVAL_VVMA
   }
 
   // fix frflags

@@ -73,7 +73,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   with HasXSParameter
   with HasSoCParameter {
   val io = IO(new Bundle {
-    val hartId = Input(UInt(64.W))
+    val hartId = Input(UInt(hartIdLen.W))
     val reset_vector = Input(UInt(PAddrBits.W))
     val cpu_halt = Output(Bool())
     val l2_pf_enable = Output(Bool())
@@ -143,7 +143,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   // memblock error exception writeback, 1 cycle after normal writeback
   backend.io.mem.s3_delayed_load_error <> memBlock.io.mem_to_ooo.s3_delayed_load_error
 
-  backend.io.mem.exceptionVAddr := memBlock.io.mem_to_ooo.lsqio.vaddr
+  backend.io.mem.exceptionAddr.vaddr  := memBlock.io.mem_to_ooo.lsqio.vaddr
+  backend.io.mem.exceptionAddr.gpaddr := memBlock.io.mem_to_ooo.lsqio.gpaddr
   backend.io.mem.csrDistributedUpdate := memBlock.io.mem_to_ooo.csrUpdate
   backend.io.mem.debugLS := memBlock.io.debug_ls
   backend.io.mem.lsTopdownInfo := memBlock.io.mem_to_ooo.lsTopdownInfo
@@ -152,6 +153,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.fenceio.sbuffer.sbIsEmpty := memBlock.io.mem_to_ooo.sbIsEmpty
   // Todo: remove it
   backend.io.fenceio.disableSfence := DontCare
+  backend.io.fenceio.disableHfencev := DontCare
+  backend.io.fenceio.disableHfenceg := DontCare
+  backend.io.fenceio.virtMode := DontCare
 
   backend.io.perf.frontendInfo := frontend.io.frontendInfo
   backend.io.perf.memInfo := memBlock.io.memInfo

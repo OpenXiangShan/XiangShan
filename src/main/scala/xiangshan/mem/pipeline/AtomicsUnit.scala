@@ -35,7 +35,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
   with SdtrigExt{
   val io = IO(new Bundle() {
-    val hartId = Input(UInt(8.W))
+    val hartId        = Input(UInt(hartIdLen.W))
     val in            = Flipped(Decoupled(new MemExuInput))
     val storeDataIn   = Flipped(Valid(new MemExuOutput)) // src2 from rs
     val out           = Decoupled(new MemExuOutput)
@@ -45,7 +45,10 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     val flush_sbuffer = new SbufferFlushBundle
     val feedbackSlow  = ValidIO(new RSFeedback)
     val redirect      = Flipped(ValidIO(new Redirect))
-    val exceptionAddr = ValidIO(UInt(VAddrBits.W))
+    val exceptionAddr = ValidIO(new Bundle {
+      val vaddr = UInt(VAddrBits.W)
+      val gpaddr = UInt(GPAddrBits.W)
+    })
     val csrCtrl       = Flipped(new CustomCSRCtrlIO)
   })
 
@@ -63,6 +66,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   val isLr = in.uop.fuOpType === LSUOpType.lr_w || in.uop.fuOpType === LSUOpType.lr_d
   // paddr after translation
   val paddr = Reg(UInt())
+  val gpaddr = Reg(UInt())
   val vaddr = in.src(0)
   val is_mmio = Reg(Bool())
 
@@ -81,7 +85,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   val fuop_reg = Reg(UInt(8.W))
 
   io.exceptionAddr.valid := atom_override_xtval
-  io.exceptionAddr.bits  := in.src(0)
+  io.exceptionAddr.bits.vaddr := in.src(0)
+  io.exceptionAddr.bits.gpaddr := gpaddr
 
   // assign default value to output signals
   io.in.ready          := false.B
@@ -136,6 +141,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     io.dtlb.resp.ready      := true.B
     io.dtlb.req.bits.cmd    := Mux(isLr, TlbCmd.atom_read, TlbCmd.atom_write)
     io.dtlb.req.bits.debug.pc := in.uop.pc
+    io.dtlb.req.bits.debug.robIdx := in.uop.robIdx
     io.dtlb.req.bits.debug.isFirstIssue := false.B
     io.out.bits.uop.debugInfo.tlbFirstReqTime := GTimer() // FIXME lyq: it will be always assigned
 
@@ -149,6 +155,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
 
     when(io.dtlb.resp.fire && have_sent_first_tlb_req){
       paddr := io.dtlb.resp.bits.paddr(0)
+      gpaddr := io.dtlb.resp.bits.gpaddr(0)
       // exception handling
       val addrAligned = LookupTree(in.uop.fuOpType(1,0), List(
         "b00".U   -> true.B,              //b
@@ -162,6 +169,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
       exceptionVec(loadPageFault)       := io.dtlb.resp.bits.excp(0).pf.ld
       exceptionVec(storeAccessFault)    := io.dtlb.resp.bits.excp(0).af.st
       exceptionVec(loadAccessFault)     := io.dtlb.resp.bits.excp(0).af.ld
+      exceptionVec(storeGuestPageFault) := io.dtlb.resp.bits.excp(0).gpf.st
+      exceptionVec(loadGuestPageFault) := io.dtlb.resp.bits.excp(0).gpf.ld
 
       when (!io.dtlb.resp.bits.miss) {
         io.out.bits.uop.debugInfo.tlbRespTime := GTimer()
@@ -185,6 +194,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
 
     // NOTE: only handle load/store exception here, if other exception happens, don't send here
     val exception_va = exceptionVec(storePageFault) || exceptionVec(loadPageFault) ||
+      exceptionVec(storeGuestPageFault) || exceptionVec(loadGuestPageFault) ||
       exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault)
     val exception_pa = pmp.st || pmp.ld
     when (exception_va || exception_pa) {

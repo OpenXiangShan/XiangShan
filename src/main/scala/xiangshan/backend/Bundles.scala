@@ -218,6 +218,10 @@ object Bundles {
     def isSvinval(flush: Bool) = FuType.isFence(fuType) && fuOpType === FenceOpType.sfence && !flush
     def isSvinvalEnd(flush: Bool) = FuType.isFence(fuType) && fuOpType === FenceOpType.nofence && flush
 
+    def isHls: Bool = {
+      fuType === FuType.ldu.U && LSUOpType.isHlv(fuOpType) || fuType === FuType.stu.U && LSUOpType.isHsv(fuOpType)
+    }
+
     def srcIsReady: Vec[Bool] = {
       VecInit(this.srcType.zip(this.srcState).map {
         case (t, s) => SrcType.isNotReg(t) || SrcState.isReady(s)
@@ -695,14 +699,16 @@ class IssueQueueIQWakeUpBundle(
     val pdest = UInt(params.wbPregIdxWidth.W)
   }
 
-  class ExceptionInfo(implicit p: Parameters) extends Bundle {
+  class ExceptionInfo(implicit p: Parameters) extends XSBundle {
     val pc = UInt(VAddrData().dataWidth.W)
     val instr = UInt(32.W)
     val commitType = CommitType()
     val exceptionVec = ExceptionVec()
+    val gpaddr = UInt(GPAddrBits.W)
     val singleStep = Bool()
     val crossPageIPFFix = Bool()
     val isInterrupt = Bool()
+    val isHls = Bool()
     val vls = Bool()
     val trigger  = new TriggerCf
   }

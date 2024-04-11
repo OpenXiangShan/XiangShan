@@ -752,7 +752,7 @@ class DCacheTopDownIO(implicit p: Parameters) extends DCacheBundle {
 }
 
 class DCacheIO(implicit p: Parameters) extends DCacheBundle {
-  val hartId = Input(UInt(8.W))
+  val hartId = Input(UInt(hartIdLen.W))
   val l2_pf_store_only = Input(Bool())
   val lsu = new DCacheToLsuIO
   val csr = new L1CacheToCsrIO

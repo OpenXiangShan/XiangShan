@@ -124,6 +124,7 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
 
   val lsqio = new Bundle {
     val vaddr = Output(UInt(VAddrBits.W))
+    val gpaddr = Output(UInt(GPAddrBits.W))
     val mmio = Output(Vec(LoadPipelineWidth, Bool()))
     val uop = Output(Vec(LoadPipelineWidth, new DynInst))
     val lqCanAccept = Output(Bool())
@@ -246,7 +247,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   with SdtrigExt
 {
   val io = IO(new Bundle {
-    val hartId = Input(UInt(8.W))
+    val hartId = Input(UInt(hartIdLen.W))
     val redirect = Flipped(ValidIO(new Redirect))
 
     val ooo_to_mem = new ooo_to_mem
@@ -272,7 +273,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     // All the signals from/to frontend/backend to/from bus will go through MemBlock
     val externalInterrupt = Flipped(new ExternalInterruptIO)
-    val inner_hartId = Output(UInt(64.W))
+    val inner_hartId = Output(UInt(hartIdLen.W))
     val inner_reset_vector = Output(UInt(PAddrBits.W))
     val outer_reset_vector = Input(UInt(PAddrBits.W))
     val inner_cpu_halt = Input(Bool())
@@ -551,6 +552,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   dtlb.map(_.sfence := sfence)
   dtlb.map(_.csr := tlbcsr)
   dtlb.map(_.flushPipe.map(a => a := false.B)) // non-block doesn't need
+  dtlb.map(_.redirect := io.redirect)
   if (refillBothTlb) {
     require(ldtlbParams.outReplace == sttlbParams.outReplace)
     require(ldtlbParams.outReplace == hytlbParams.outReplace)
@@ -558,36 +560,36 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     require(ldtlbParams.outReplace)
 
     val replace = Module(new TlbReplace(LduCnt + HyuCnt + 1 + StaCnt + 1, ldtlbParams))
-    replace.io.apply_sep(dtlb_ld.map(_.replace) ++ dtlb_st.map(_.replace) ++ dtlb_prefetch.map(_.replace), ptwio.resp.bits.data.entry.tag)
+    replace.io.apply_sep(dtlb_ld.map(_.replace) ++ dtlb_st.map(_.replace) ++ dtlb_prefetch.map(_.replace), ptwio.resp.bits.data.s1.entry.tag)
   } else {
     // TODO: there will be bugs in TlbReplace when outReplace enable, since the order of Hyu is not right.
     if (ldtlbParams.outReplace) {
       val replace_ld = Module(new TlbReplace(LduCnt + 1, ldtlbParams))
-      replace_ld.io.apply_sep(dtlb_ld.map(_.replace), ptwio.resp.bits.data.entry.tag)
+      replace_ld.io.apply_sep(dtlb_ld.map(_.replace), ptwio.resp.bits.data.s1.entry.tag)
     }
     if (hytlbParams.outReplace) {
       val replace_hy = Module(new TlbReplace(HyuCnt, hytlbParams))
-      replace_hy.io.apply_sep(dtlb_ld.map(_.replace), ptwio.resp.bits.data.entry.tag)
+      replace_hy.io.apply_sep(dtlb_ld.map(_.replace), ptwio.resp.bits.data.s1.entry.tag)
     }
     if (sttlbParams.outReplace) {
       val replace_st = Module(new TlbReplace(StaCnt, sttlbParams))
-      replace_st.io.apply_sep(dtlb_st.map(_.replace), ptwio.resp.bits.data.entry.tag)
+      replace_st.io.apply_sep(dtlb_st.map(_.replace), ptwio.resp.bits.data.s1.entry.tag)
     }
     if (pftlbParams.outReplace) {
       val replace_pf = Module(new TlbReplace(1, pftlbParams))
-      replace_pf.io.apply_sep(dtlb_prefetch.map(_.replace), ptwio.resp.bits.data.entry.tag)
+      replace_pf.io.apply_sep(dtlb_prefetch.map(_.replace), ptwio.resp.bits.data.s1.entry.tag)
     }
   }
 
   val ptw_resp_next = RegEnable(ptwio.resp.bits, ptwio.resp.valid)
-  val ptw_resp_v = RegNext(ptwio.resp.valid && !(sfence.valid && tlbcsr.satp.changed), init = false.B)
+  val ptw_resp_v = RegNext(ptwio.resp.valid && !(sfence.valid && tlbcsr.satp.changed && tlbcsr.vsatp.changed && tlbcsr.hgatp.changed), init = false.B)
   ptwio.resp.ready := true.B
 
   val tlbreplay = WireInit(VecInit(Seq.fill(LdExuCnt)(false.B)))
   dontTouch(tlbreplay)
   for (i <- 0 until LdExuCnt) {
     tlbreplay(i) := dtlb_ld(0).ptw.req(i).valid && ptw_resp_next.vector(0) && ptw_resp_v &&
-      ptw_resp_next.data.hit(dtlb_ld(0).ptw.req(i).bits.vpn, tlbcsr.satp.asid, allType = true, ignoreAsid = true)
+      ptw_resp_next.data.hit(dtlb_ld(0).ptw.req(i).bits.vpn, tlbcsr.satp.asid, tlbcsr.vsatp.asid, tlbcsr.hgatp.asid, allType = true, ignoreAsid = true)
   }
 
   dtlb.flatMap(a => a.ptw.req)
@@ -599,8 +601,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       else if (i < (LduCnt + HyuCnt + 1)) Cat(ptw_resp_next.vector.take(LduCnt + HyuCnt + 1)).orR
       else if (i < (LduCnt + HyuCnt + 1 + StaCnt)) Cat(ptw_resp_next.vector.drop(LduCnt + HyuCnt + 1).take(StaCnt)).orR
       else Cat(ptw_resp_next.vector.drop(LduCnt + HyuCnt + 1 + StaCnt)).orR
-    ptwio.req(i).valid := tlb.valid && !(ptw_resp_v && vector_hit &&
-      ptw_resp_next.data.hit(tlb.bits.vpn, tlbcsr.satp.asid, allType = true, ignoreAsid = true))
+    ptwio.req(i).valid := tlb.valid && !(ptw_resp_v && vector_hit && ptw_resp_next.data.hit(tlb.bits.vpn, tlbcsr.satp.asid, tlbcsr.vsatp.asid, tlbcsr.hgatp.asid, allType = true, ignoreAsid = true))
   }
   dtlb.foreach(_.ptw.resp.bits := ptw_resp_next.data)
   if (refillBothTlb) {
@@ -610,6 +611,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     dtlb_st.foreach(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector.slice(LduCnt + HyuCnt + 1, LduCnt + HyuCnt + 1 + StaCnt)).orR)
     dtlb_prefetch.foreach(_.ptw.resp.valid := ptw_resp_v && Cat(ptw_resp_next.vector.drop(LduCnt + HyuCnt + 1 + StaCnt)).orR)
   }
+  dtlb_ld.foreach(_.ptw.resp.bits.getGpa := Cat(ptw_resp_next.getGpa.take(LduCnt + HyuCnt + 1)).orR)
+  dtlb_st.foreach(_.ptw.resp.bits.getGpa := Cat(ptw_resp_next.getGpa.slice(LduCnt + HyuCnt + 1, LduCnt + HyuCnt + 1 + StaCnt)).orR)
+  dtlb_prefetch.foreach(_.ptw.resp.bits.getGpa := Cat(ptw_resp_next.getGpa.drop(LduCnt + HyuCnt + 1 + StaCnt)).orR)
 
   val dtlbRepeater  = PTWNewFilter(ldtlbParams.fenceDelay, ptwio, ptw.io.tlb(1), sfence, tlbcsr, l2tlbParams.dfilterSize)
   val itlbRepeater3 = PTWRepeaterNB(passReady = false, itlbParams.fenceDelay, io.fetch_to_mem.itlb, ptw.io.tlb(0), sfence, tlbcsr)
@@ -1370,7 +1374,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }.elsewhen (atomicsUnit.io.exceptionAddr.valid) {
     atomicsException := true.B
   }
-  val atomicsExceptionAddress = RegEnable(atomicsUnit.io.exceptionAddr.bits, atomicsUnit.io.exceptionAddr.valid)
+  val atomicsExceptionAddress = RegEnable(atomicsUnit.io.exceptionAddr.bits.vaddr, atomicsUnit.io.exceptionAddr.valid)
+  val atomicsExceptionGPAddress = RegEnable(atomicsUnit.io.exceptionAddr.bits.gpaddr, atomicsUnit.io.exceptionAddr.valid)
   io.mem_to_ooo.lsqio.vaddr := RegNext(Mux(
     atomicsException,
     atomicsExceptionAddress,
@@ -1387,6 +1392,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   })
 
   XSError(atomicsException && atomicsUnit.io.in.valid, "new instruction before exception triggers\n")
+  io.mem_to_ooo.lsqio.gpaddr := RegNext(Mux(atomicsException, atomicsExceptionGPAddress, lsq.io.exceptionAddr.gpaddr))
 
   io.memInfo.sqFull := RegNext(lsq.io.sqFull)
   io.memInfo.lqFull := RegNext(lsq.io.lqFull)

@@ -350,7 +350,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   private val HyuCnt = params.HyuCnt
 
   val io = IO(new Bundle() {
-    val hartId = Input(UInt(8.W))
+    val hartId = Input(UInt(hartIdLen.W))
     val redirect = Input(Valid(new Redirect))
     val enq = new RobEnqIO
     val flushOut = ValidIO(new Redirect)
@@ -787,12 +787,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val exceptionHappen = (state === s_idle) && valid(deqPtr.value) && (intrEnable || exceptionEnable) && !lastCycleFlush
   io.exception.valid                := RegNext(exceptionHappen)
   io.exception.bits.pc              := RegEnable(debug_deqUop.pc, exceptionHappen)
+  io.exception.bits.gpaddr          := 0.U // Todo: get gpaddr gpaMem
   io.exception.bits.instr           := RegEnable(debug_deqUop.instr, exceptionHappen)
   io.exception.bits.commitType      := RegEnable(deqDispatchData.commitType, exceptionHappen)
   io.exception.bits.exceptionVec    := RegEnable(exceptionDataRead.bits.exceptionVec, exceptionHappen)
   io.exception.bits.singleStep      := RegEnable(exceptionDataRead.bits.singleStep, exceptionHappen)
   io.exception.bits.crossPageIPFFix := RegEnable(exceptionDataRead.bits.crossPageIPFFix, exceptionHappen)
   io.exception.bits.isInterrupt     := RegEnable(intrEnable, exceptionHappen)
+  io.exception.bits.isHls           := RegEnable(deqDispatchData.isHls, exceptionHappen)
   io.exception.bits.vls             := RegEnable(vls(deqPtr.value), exceptionHappen)
   io.exception.bits.trigger         := RegEnable(exceptionDataRead.bits.trigger, exceptionHappen)
   io.csr.vstart.valid               := RegEnable(exceptionDataRead.bits.vstartEn, false.B, exceptionHappen)
@@ -1317,6 +1319,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     wdata.pc := req.pc
     wdata.vtype := req.vpu.vtype
     wdata.isVset := req.isVset
+    wdata.isHls := req.isHls
     wdata.instrSize := req.instrSize
   }
   for (i <- 0 until CommitWidth) {

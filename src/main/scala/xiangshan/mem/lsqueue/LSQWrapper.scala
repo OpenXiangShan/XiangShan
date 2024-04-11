@@ -33,6 +33,7 @@ import xiangshan.backend.rob.RobLsqIO
 class ExceptionAddrIO(implicit p: Parameters) extends XSBundle {
   val isStore = Input(Bool())
   val vaddr = Output(UInt(VAddrBits.W))
+  val gpaddr = Output(UInt(GPAddrBits.W))
 }
 
 class FwdEntry extends Bundle {
@@ -57,7 +58,7 @@ class LsqEnqIO(implicit p: Parameters) extends MemBlockBundle {
 // Load / Store Queue Wrapper for XiangShan Out of Order LSU
 class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParameters with HasPerfEvents {
   val io = IO(new Bundle() {
-    val hartId = Input(UInt(8.W))
+    val hartId = Input(UInt(hartIdLen.W))
     val brqRedirect = Flipped(ValidIO(new Redirect))
     val enq = new LsqEnqIO
     val ldu = new Bundle() {
@@ -217,6 +218,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   // s3: ptr updated & new address
   // address will be used at the next cycle after exception is triggered
   io.exceptionAddr.vaddr := Mux(RegNext(io.exceptionAddr.isStore), storeQueue.io.exceptionAddr.vaddr, loadQueue.io.exceptionAddr.vaddr)
+  io.exceptionAddr.gpaddr := Mux(RegNext(io.exceptionAddr.isStore), storeQueue.io.exceptionAddr.gpaddr, loadQueue.io.exceptionAddr.gpaddr)
   io.issuePtrExt := storeQueue.io.stAddrReadySqPtr
 
   // naive uncache arbiter

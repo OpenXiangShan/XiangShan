@@ -482,7 +482,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
 
 class ICacheIO(implicit p: Parameters) extends ICacheBundle
 {
-  val hartId = Input(UInt(8.W))
+  val hartId = Input(UInt(hartIdLen.W))
   val prefetch    = Flipped(new FtqPrefechBundle)
   val stop        = Input(Bool())
   val fetch       = new ICacheMainPipeBundle

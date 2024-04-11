@@ -1,3 +1,19 @@
+/***************************************************************************************
+* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
+*
+* XiangShan is licensed under Mulan PSL v2.
+* You can use this software according to the terms and conditions of the Mulan PSL v2.
+* You may obtain a copy of Mulan PSL v2 at:
+*          http://license.coscl.org.cn/MulanPSL2
+*
+* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+*
+* See the Mulan PSL v2 for more details.
+***************************************************************************************/
+
 package xiangshan.backend
 
 import org.chipsalliance.cde.config.Parameters
@@ -320,7 +336,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   csrio.vpu.set_vl.valid := ctrlBlock.io.robio.csr.vcsrFlag
   csrio.vpu.set_vl.bits := ZeroExt(debugVl, XLEN)
   csrio.exception := ctrlBlock.io.robio.exception
-  csrio.memExceptionVAddr := io.mem.exceptionVAddr
+  csrio.memExceptionVAddr := io.mem.exceptionAddr.vaddr
+  csrio.memExceptionGPAddr := io.mem.exceptionAddr.gpaddr
   csrio.externalInterrupt := io.fromTop.externalInterrupt
   csrio.distributedUpdate(0) := io.mem.csrDistributedUpdate
   csrio.distributedUpdate(1) := io.frontendCsrDistributedUpdate
@@ -331,6 +348,9 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   private val fenceio = intExuBlock.io.fenceio.get
   io.fenceio <> fenceio
   fenceio.disableSfence := csrio.disableSfence
+  fenceio.disableHfenceg := csrio.disableHfenceg
+  fenceio.disableHfencev := csrio.disableHfencev
+  fenceio.virtMode := csrio.customCtrl.virtMode
 
   vfExuBlock.io.flush := ctrlBlock.io.toExuBlock.flush
   for (i <- 0 until vfExuBlock.io.in.size) {
@@ -545,7 +565,10 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val s3_delayed_load_error = Input(Vec(LoadPipelineWidth, Bool()))
   val stIn = Input(Vec(params.StaExuCnt, ValidIO(new DynInst())))
   val memoryViolation = Flipped(ValidIO(new Redirect))
-  val exceptionVAddr = Input(UInt(VAddrBits.W))
+  val exceptionAddr = Input(new Bundle {
+    val vaddr = UInt(VAddrBits.W)
+    val gpaddr = UInt(GPAddrBits.W)
+  })
   val sqDeq = Input(UInt(log2Ceil(EnsbufferWidth + 1).W))
   val lqDeq = Input(UInt(log2Up(CommitWidth + 1).W))
   val sqDeqPtr = Input(new SqPtr)
@@ -604,7 +627,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
 
 class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle {
   val fromTop = new Bundle {
-    val hartId = Input(UInt(8.W))
+    val hartId = Input(UInt(hartIdLen.W))
     val externalInterrupt = new ExternalInterruptIO
   }
 

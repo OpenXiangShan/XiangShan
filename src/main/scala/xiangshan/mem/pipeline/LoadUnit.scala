@@ -219,6 +219,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val prf_rd        = Bool()
     val prf_wr        = Bool()
     val sched_idx     = UInt(log2Up(LoadQueueReplaySize+1).W)
+    val hlv           = Bool()
+    val hlvx          = Bool()
     // Record the issue port idx of load issue queue. This signal is used by load cancel.
     val deqPortIdx    = UInt(log2Ceil(LoadPipelineWidth).W)
     // vec only
@@ -363,6 +365,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                                          TlbCmd.read
                                        )
   io.tlb.req.bits.vaddr              := Mux(s0_hw_prf_select, io.prefetch_req.bits.paddr, s0_sel_src.vaddr)
+  io.tlb.req.bits.hyperinst          := s0_sel_src.hlv
+  io.tlb.req.bits.hlvx               := s0_sel_src.hlvx
   io.tlb.req.bits.size               := Mux(s0_sel_src.isvec, io.vecldin.bits.alignedType, LSUOpType.size(s0_sel_src.uop.fuOpType))
   io.tlb.req.bits.kill               := s0_kill
   io.tlb.req.bits.memidx.is_ld       := true.B
@@ -413,6 +417,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_rd        := src.uop.fuOpType === LSUOpType.prefetch_r
     out.prf_wr        := src.uop.fuOpType === LSUOpType.prefetch_w
     out.sched_idx     := src.schedIndex
+    out.hlv           := LSUOpType.isHlv(src.uop.fuOpType)
+    out.hlvx          := LSUOpType.isHlvx(src.uop.fuOpType)
     out.vecActive     := true.B // true for scala load
     out
   }
@@ -435,6 +441,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_rd        := false.B
     out.prf_wr        := false.B
     out.sched_idx     := 0.U
+    out.hlv           := LSUOpType.isHlv(src.uop.fuOpType)
+    out.hlvx          := LSUOpType.isHlvx(src.uop.fuOpType)
     out.vecActive     := true.B
     out
   }
@@ -457,6 +465,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_rd        := src.uop.fuOpType === LSUOpType.prefetch_r
     out.prf_wr        := src.uop.fuOpType === LSUOpType.prefetch_w
     out.sched_idx     := src.schedIndex
+    out.hlv           := LSUOpType.isHlv(src.uop.fuOpType)
+    out.hlvx          := LSUOpType.isHlvx(src.uop.fuOpType)
     out.vecActive     := true.B // true for scala load
     out
   }
@@ -479,6 +489,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_rd        := !src.is_store
     out.prf_wr        := src.is_store
     out.sched_idx     := 0.U
+    out.hlv           := false.B
+    out.hlvx          := false.B
     out.vecActive     := true.B // true for scala load
     out
   }
@@ -501,6 +513,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_rd        := src.uop.fuOpType === LSUOpType.prefetch_r
     out.prf_wr        := src.uop.fuOpType === LSUOpType.prefetch_w
     out.sched_idx     := 0.U
+    out.hlv           := LSUOpType.isHlv(src.uop.fuOpType)
+    out.hlvx          := LSUOpType.isHlvx(src.uop.fuOpType)
     out.vecActive     := true.B // true for scala load
     out
   }
@@ -526,6 +540,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_rd        := false.B
     out.prf_wr        := false.B
     out.sched_idx     := 0.U
+    out.hlv           := false.B
+    out.hlvx          := false.B
     // Vector load interface
     out.isvec               := true.B
     // vector loads only access a single element at a time, so 128-bit path is not used for now
@@ -564,6 +580,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_rd             := false.B
     out.prf_wr             := false.B
     out.sched_idx          := 0.U
+    out.hlv                := LSUOpType.isHlv(out.uop.fuOpType)
+    out.hlvx               := LSUOpType.isHlvx(out.uop.fuOpType)
     out.vecActive          := true.B // true for scala load
     out
   }
@@ -698,6 +716,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s1_vaddr_lo         = Wire(UInt())
   val s1_vaddr            = Wire(UInt())
   val s1_paddr_dup_lsu    = Wire(UInt())
+  val s1_gpaddr_dup_lsu   = Wire(UInt())
   val s1_paddr_dup_dcache = Wire(UInt())
   val s1_exception        = ExceptionNO.selectByFu(s1_out.uop.exceptionVec, LduCfg).asUInt.orR   // af & pf exception were modified below.
   val s1_tlb_miss         = io.tlb.resp.bits.miss
@@ -711,6 +730,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s1_vaddr            := Cat(s1_vaddr_hi, s1_vaddr_lo)
   s1_paddr_dup_lsu    := io.tlb.resp.bits.paddr(0)
   s1_paddr_dup_dcache := io.tlb.resp.bits.paddr(1)
+  s1_gpaddr_dup_lsu   := io.tlb.resp.bits.gpaddr(0)
 
   when (s1_tlb_memidx.is_ld && io.tlb.resp.valid && !s1_tlb_miss && s1_tlb_memidx.idx === s1_in.uop.lqIdx.value) {
     // printf("load idx = %d\n", s1_tlb_memidx.idx)
@@ -728,6 +748,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.sbuffer.valid := s1_valid && !(s1_exception || s1_tlb_miss || s1_kill || s1_dly_err || s1_prf)
   io.sbuffer.vaddr := s1_vaddr
   io.sbuffer.paddr := s1_paddr_dup_lsu
+  io.sbuffer.gpaddr:= s1_gpaddr_dup_lsu
   io.sbuffer.uop   := s1_in.uop
   io.sbuffer.sqIdx := s1_in.uop.sqIdx
   io.sbuffer.mask  := s1_in.mask
@@ -736,6 +757,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.vec_forward.valid := s1_valid && !(s1_exception || s1_tlb_miss || s1_kill || s1_prf)
   io.vec_forward.vaddr := s1_vaddr
   io.vec_forward.paddr := s1_paddr_dup_lsu
+  io.vec_forward.gpaddr:= s1_gpaddr_dup_lsu
   io.vec_forward.uop   := s1_in.uop
   io.vec_forward.sqIdx := s1_in.uop.sqIdx
   io.vec_forward.mask  := s1_in.mask
@@ -744,6 +766,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.lsq.forward.valid     := s1_valid && !(s1_exception || s1_tlb_miss || s1_kill || s1_dly_err || s1_prf)
   io.lsq.forward.vaddr     := s1_vaddr
   io.lsq.forward.paddr     := s1_paddr_dup_lsu
+  io.lsq.forward.gpaddr    := s1_gpaddr_dup_lsu
   io.lsq.forward.uop       := s1_in.uop
   io.lsq.forward.sqIdx     := s1_in.uop.sqIdx
   io.lsq.forward.sqIdxMask := 0.U
@@ -764,6 +787,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s1_out                   := s1_in
   s1_out.vaddr             := s1_vaddr
   s1_out.paddr             := s1_paddr_dup_lsu
+  s1_out.gpaddr            := s1_gpaddr_dup_lsu
   s1_out.tlbMiss           := s1_tlb_miss
   s1_out.ptwBack           := io.tlb.resp.bits.ptwBack
   s1_out.rsIdx             := s1_in.rsIdx
@@ -775,9 +799,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // current ori test will cause the case of ldest == 0, below will be modifeid in the future.
     // af & pf exception were modified
     s1_out.uop.exceptionVec(loadPageFault)   := io.tlb.resp.bits.excp(0).pf.ld && s1_vecActive && !s1_tlb_miss
+    s1_out.uop.exceptionVec(loadGuestPageFault)   := io.tlb.resp.bits.excp(0).gpf.ld && !s1_tlb_miss
     s1_out.uop.exceptionVec(loadAccessFault) := io.tlb.resp.bits.excp(0).af.ld && s1_vecActive && !s1_tlb_miss
   } .otherwise {
     s1_out.uop.exceptionVec(loadPageFault)      := false.B
+    s1_out.uop.exceptionVec(loadGuestPageFault) := false.B
     s1_out.uop.exceptionVec(loadAddrMisaligned) := false.B
     s1_out.uop.exceptionVec(loadAccessFault)    := s1_dly_err && s1_vecActive
   }

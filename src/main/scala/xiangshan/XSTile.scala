@@ -90,7 +90,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   // =========== IO Connection ============
   class XSTileImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
     val io = IO(new Bundle {
-      val hartId = Input(UInt(64.W))
+      val hartId = Input(UInt(hartIdLen.W))
       val reset_vector = Input(UInt(PAddrBits.W))
       val cpu_halt = Output(Bool())
       val debugTopDown = new Bundle {

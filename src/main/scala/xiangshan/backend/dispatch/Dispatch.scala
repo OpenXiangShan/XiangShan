@@ -49,7 +49,7 @@ class CoreDispatchTopDownIO extends Bundle {
 // read rob and enqueue
 class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val io = IO(new Bundle() {
-    val hartId = Input(UInt(8.W))
+    val hartId = Input(UInt(hartIdLen.W))
     // from rename
     val fromRename = Vec(RenameWidth, Flipped(DecoupledIO(new DynInst)))
     val recv = Output(Vec(RenameWidth, Bool()))

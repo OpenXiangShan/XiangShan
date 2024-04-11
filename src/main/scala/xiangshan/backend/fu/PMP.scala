@@ -290,8 +290,6 @@ trait PMPMethod extends PMPConst {
     val cfg = WireInit(0.U.asTypeOf(Vec(NumPMP/8, UInt(PMXLEN.W))))
     // val addr = Wire(Vec(NumPMP, UInt((PMPAddrBits-PMPOffBits).W)))
     // val mask = Wire(Vec(NumPMP, UInt(PMPAddrBits.W)))
-    // addr := DontCare
-    // mask := DontCare
     // INFO: these CSRs could be uninitialized, but for difftesting with NEMU, we opt to initialize them.
     val addr = WireInit(0.U.asTypeOf(Vec(NumPMP, UInt((PMPAddrBits-PMPOffBits).W))))
     val mask = WireInit(0.U.asTypeOf(Vec(NumPMP, UInt(PMPAddrBits.W))))
