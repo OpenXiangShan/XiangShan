@@ -146,6 +146,11 @@ class BasePredictorIO (implicit p: Parameters) extends XSBundle with HasBPUConst
   val out = Output(new BasePredictorOutput)
   // val flush_out = Valid(UInt(VAddrBits.W))
 
+  val fauftb_entry_in = Input(new FTBEntry)
+  val fauftb_entry_hit_in = Input(Bool())
+  val fauftb_entry_out = Output(new FTBEntry)
+  val fauftb_entry_hit_out = Output(Bool())
+
   val ctrl = Input(new BPUCtrl)
 
   val s0_fire = Input(Vec(numDup, Bool()))
@@ -162,6 +167,7 @@ class BasePredictorIO (implicit p: Parameters) extends XSBundle with HasBPUConst
 
   val update = Flipped(Valid(new BranchPredictionUpdate))
   val redirect = Flipped(Valid(new BranchPredictionRedirect))
+  val redirectFromIFU = Input(Bool())
 }
 
 abstract class BasePredictor(implicit p: Parameters) extends XSModule
@@ -172,6 +178,9 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule
   val io = IO(new BasePredictorIO())
 
   io.out := io.in.bits.resp_in(0)
+
+  io.fauftb_entry_out := io.fauftb_entry_in
+  io.fauftb_entry_hit_out := io.fauftb_entry_hit_in
 
   io.out.last_stage_meta := 0.U
 
@@ -342,6 +351,9 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   predictors.io.in.bits.ghist := s0_ghist
   predictors.io.in.bits.folded_hist := s0_folded_gh_dup
   predictors.io.in.bits.resp_in(0) := (0.U).asTypeOf(new BranchPredictionResp)
+  predictors.io.fauftb_entry_in := (0.U).asTypeOf(new FTBEntry)
+  predictors.io.fauftb_entry_hit_in := false.B
+  predictors.io.redirectFromIFU := RegNext(io.ftq_to_bpu.redirctFromIFU, init=false.B)
   // predictors.io.in.bits.resp_in(0).s1.pc := s0_pc
   // predictors.io.in.bits.toFtq_fire := toFtq_fire
 
