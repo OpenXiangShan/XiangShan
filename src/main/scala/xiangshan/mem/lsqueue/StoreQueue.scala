@@ -961,7 +961,14 @@ class StoreQueue(implicit p: Parameters) extends XSModule
  /**
 * update pointers
 **/
-  val lastEnqCancel = PopCount(RegNext(VecInit(canEnqueue.zip(enqCancel).map(x => x._1 && x._2)))) // 1 cycle after redirect
+  val enqCancelValid = canEnqueue.zip(io.enq.req).map{case (v , x) =>
+    v && x.bits.robIdx.needFlush(io.brqRedirect)
+  }
+  val enqCancelNum = enqCancelValid.zip(io.enq.req).map{case (v, req) =>
+    Mux(v, req.bits.numLsElem, 0.U)
+  }
+  val lastEnqCancel = RegNext(enqCancelNum.reduce(_ + _)) // 1 cycle after redirect
+
   val lastCycleCancelCount = PopCount(RegNext(needCancel)) // 1 cycle after redirect
   val lastCycleRedirect = RegNext(io.brqRedirect.valid) // 1 cycle after redirect
   val enqNumber = validVStoreFlow.reduce(_ + _)
