@@ -280,8 +280,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   })
   val thisIsBlocked = VecInit((0 until RenameWidth).map(i => {
     // for i > 0, when Rob is empty but dispatch1 have valid instructions to enqueue, it's blocked
-    if (i > 0) isWaitForward(i) && (!io.enqRob.isEmpty || Cat(io.fromRename.take(i).map(_.valid)).orR)
-    else isWaitForward(i) && !io.enqRob.isEmpty
+    if (i > 0) io.fromRename(i).valid && isWaitForward(i) && (!io.enqRob.isEmpty || Cat(io.fromRename.take(i).map(_.valid)).orR)
+    else io.fromRename(i).valid && isWaitForward(i) && !io.enqRob.isEmpty
   }))
   val nextCanOut = VecInit((0 until RenameWidth).map(i =>
     (!isWaitForward(i) && !isBlockBackward(i)) || !io.fromRename(i).valid
