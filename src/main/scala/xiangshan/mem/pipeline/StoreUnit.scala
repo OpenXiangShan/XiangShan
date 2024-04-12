@@ -386,6 +386,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
       sx_in(i).elemIdx     := s3_in.elemIdx
       sx_in(i).alignedType := s3_in.alignedType
       sx_in(i).mbIndex     := s3_in.mbIndex
+      sx_in(i).mask        := s3_in.mask
       sx_ready(i) := !s3_valid(i) || sx_in(i).output.uop.robIdx.needFlush(io.redirect) || (if (TotalDelayCycles == 0) io.stout.ready else sx_ready(i+1))
     } else {
       val cur_kill   = sx_in(i).output.uop.robIdx.needFlush(io.redirect)
@@ -418,6 +419,9 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   io.vecstout.bits.exceptionVec := sx_last_in.output.uop.exceptionVec
   io.vecstout.bits.usSecondInv := sx_last_in.usSecondInv
   io.vecstout.bits.vecFeedback := sx_last_in.vecFeedback
+  io.vecstout.bits.elemIdx     := sx_last_in.elemIdx
+  io.vecstout.bits.alignedType := sx_last_in.alignedType
+  io.vecstout.bits.mask        := sx_last_in.mask
   // io.vecstout.bits.reg_offset.map(_ := DontCare)
   // io.vecstout.bits.elemIdx.map(_ := sx_last_in.elemIdx)
   // io.vecstout.bits.elemIdxInsideVd.map(_ := DontCare)

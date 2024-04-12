@@ -190,6 +190,8 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   io.toMergeBuffer.req.bits.mask         := s1_in.flowMask
   io.toMergeBuffer.req.bits.vaddr        := DontCare
   io.toMergeBuffer.req.bits.vdIdx        := vdIdxReg
+  io.toMergeBuffer.req.bits.fof          := s1_in.fof
+  io.toMergeBuffer.req.bits.vlmax        := s1_in.vlmax
 //   io.toMergeBuffer.req.bits.vdOffset :=
 
   when (s1_in.uop.lastUop && s1_valid || s1_kill) {
@@ -229,8 +231,6 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
 
   val uopq = Reg(Vec(bufferSize, new VLSBundle(isVStore)))
   val valid = RegInit(VecInit(Seq.fill(bufferSize)(false.B)))
-  val vstart = RegInit(VecInit(Seq.fill(bufferSize)(0.U(elemIdxBits.W)))) // index of the exception element
-  val vl = RegInit(VecInit(Seq.fill(bufferSize)(0.U.asTypeOf(Valid(UInt(elemIdxBits.W)))))) // only for fof instructions that modify vl
   val srcMaskVec = Reg(Vec(bufferSize, UInt(VLEN.W)))
   // ptr
   val enqPtr = RegInit(0.U.asTypeOf(new VSplitPtr))
@@ -316,7 +316,8 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
     x.vecActive             := vecActive
     x.is_first_ele          := DontCare
     x.usSecondInv           := usNoSplit
-    x.elemIdx               := Mux(!issuePreIsSplit, splitIdx, elemIdx) // if is Unit-Stride, elemIdx is the index of 2 splited mem request (for merge data)
+    x.elemIdx               := elemIdx
+    x.elemIdxInsideVd       := splitIdx // if is Unit-Stride, elemIdx is the index of 2 splited mem request (for merge data)
     x.uop_unit_stride_fof   := DontCare
     x.isFirstIssue          := DontCare
     x.mBIndex               := issueMbIndex

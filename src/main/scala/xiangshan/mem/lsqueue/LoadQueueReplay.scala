@@ -81,6 +81,7 @@ class VecReplayInfo(implicit p: Parameters) extends XSBundle with HasVLSUParamet
   val elemIdx = UInt(elemIdxBits.W)
   val alignedType = UInt(alignTypeBits.W)
   val mbIndex = UInt(max(vlmBindexBits, vsmBindexBits).W)
+  val elemIdxInsideVd = UInt(elemIdxBits.W)
   val reg_offset = UInt(vOffsetBits.W)
   val vecActive = Bool()
   val is_first_ele = Bool()
@@ -536,6 +537,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     replay_req(i).bits.elemIdx      := s2_vecReplay.elemIdx
     replay_req(i).bits.alignedType  := s2_vecReplay.alignedType
     replay_req(i).bits.mbIndex      := s2_vecReplay.mbIndex
+    replay_req(i).bits.elemIdxInsideVd := s2_vecReplay.elemIdxInsideVd
     replay_req(i).bits.reg_offset   := s2_vecReplay.reg_offset
     replay_req(i).bits.vecActive    := s2_vecReplay.vecActive
     replay_req(i).bits.is_first_ele := s2_vecReplay.is_first_ele
@@ -630,6 +632,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       vecReplay(enqIndex).elemIdx := enq.bits.elemIdx
       vecReplay(enqIndex).alignedType:= enq.bits.alignedType
       vecReplay(enqIndex).mbIndex := enq.bits.mbIndex
+      vecReplay(enqIndex).elemIdxInsideVd := enq.bits.elemIdxInsideVd
       vecReplay(enqIndex).reg_offset := enq.bits.reg_offset
       vecReplay(enqIndex).vecActive := enq.bits.vecActive
       vecReplay(enqIndex).is_first_ele := enq.bits.is_first_ele

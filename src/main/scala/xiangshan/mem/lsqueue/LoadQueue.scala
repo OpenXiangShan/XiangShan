@@ -210,8 +210,14 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     exceptionBuffer.io.req(i).valid := io.ldu.ldin(i).valid && !io.ldu.ldin(i).bits.isvec // from load_s3
     exceptionBuffer.io.req(i).bits := io.ldu.ldin(i).bits
   }
-  // TODO: implement vlsu exception!
-  exceptionBuffer.io.req(LoadPipelineWidth) := DontCare
+  // vlsu exception!
+  exceptionBuffer.io.req(LoadPipelineWidth).valid               := io.vecFeedback.valid && io.vecFeedback.bits.feedback(VecFeedbacks.FLUSH) // have exception
+  exceptionBuffer.io.req(LoadPipelineWidth).bits                := DontCare
+  exceptionBuffer.io.req(LoadPipelineWidth).bits.vaddr          := io.vecFeedback.bits.vaddr
+  exceptionBuffer.io.req(LoadPipelineWidth).bits.uop.uopIdx     := io.vecFeedback.bits.uopidx
+  exceptionBuffer.io.req(LoadPipelineWidth).bits.uop.robIdx     := io.vecFeedback.bits.robidx
+  exceptionBuffer.io.req(LoadPipelineWidth).bits.uop.vpu.vstart := io.vecFeedback.bits.vstart
+  exceptionBuffer.io.req(LoadPipelineWidth).bits.uop.vpu.vl     := io.vecFeedback.bits.vl
   io.exceptionAddr <> exceptionBuffer.io.exceptionAddr
 
   /**

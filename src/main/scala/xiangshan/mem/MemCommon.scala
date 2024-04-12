@@ -114,6 +114,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   // val inner_idx = Vec(2,UInt(3.W))
   // val rob_idx = Vec(2,new RobPtr)
   val reg_offset = UInt(vOffsetBits.W)
+  val elemIdxInsideVd = UInt(elemIdxBits.W)
   // val offset = Vec(2,UInt(4.W))
   val vecActive = Bool() // 1: vector active element or scala mem operation, 0: vector not active element
   val is_first_ele = Bool()
@@ -181,6 +182,7 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     if (latch) elemIdx             := RegNext(input.elemIdx)             else elemIdx             := input.elemIdx
     if (latch) alignedType         := RegNext(input.alignedType)         else alignedType         := input.alignedType
     if (latch) mbIndex             := RegNext(input.mbIndex)             else mbIndex             := input.mbIndex
+    if(latch) elemIdxInsideVd     := RegNext(input.elemIdxInsideVd)     else elemIdxInsideVd     := input.elemIdxInsideVd
     // if (latch) flowPtr             := RegNext(input.flowPtr)             else flowPtr             := input.flowPtr
     // if (latch) sflowPtr            := RegNext(input.sflowPtr)            else sflowPtr            := input.sflowPtr
 
@@ -261,6 +263,7 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     if(latch) uop_unit_stride_fof := RegNext(input.uop_unit_stride_fof) else uop_unit_stride_fof := input.uop_unit_stride_fof
     if(latch) reg_offset          := RegNext(input.reg_offset)          else reg_offset          := input.reg_offset
     if(latch) mbIndex             := RegNext(input.mbIndex)             else mbIndex             := input.mbIndex
+    if(latch) elemIdxInsideVd     := RegNext(input.elemIdxInsideVd)     else elemIdxInsideVd     := input.elemIdxInsideVd
 
     rep_info := DontCare
     data_wen_dup := DontCare

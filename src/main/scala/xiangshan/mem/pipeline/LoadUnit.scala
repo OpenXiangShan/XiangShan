@@ -230,6 +230,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val usSecondInv   = Bool()
     val mbIndex       = UInt(vlmBindexBits.W)
     val elemIdx       = UInt(elemIdxBits.W)
+    val elemIdxInsideVd = UInt(elemIdxBits.W)
     val alignedType   = UInt(alignTypeBits.W)
   }
   val s0_sel_src = Wire(new FlowSource)
@@ -429,6 +430,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.usSecondInv   := src.usSecondInv
     out.mbIndex       := src.mbIndex
     out.elemIdx       := src.elemIdx
+    out.elemIdxInsideVd := src.elemIdxInsideVd
     out.alignedType   := src.alignedType
     out
   }
@@ -483,6 +485,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.usSecondInv   := src.usSecondInv
     out.mbIndex       := src.mbIndex
     out.elemIdx       := src.elemIdx
+    out.elemIdxInsideVd := src.elemIdxInsideVd
     out.alignedType   := src.alignedType
     out
   }
@@ -546,6 +549,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.usSecondInv         := src.usSecondInv
     out.mbIndex             := src.mBIndex
     out.elemIdx             := src.elemIdx
+    out.elemIdxInsideVd     := src.elemIdxInsideVd
     out.alignedType         := src.alignedType
     out
   }
@@ -657,6 +661,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s0_out.usSecondInv    := s0_sel_src.usSecondInv
   s0_out.is_first_ele   := s0_sel_src.is_first_ele
   s0_out.elemIdx        := s0_sel_src.elemIdx
+  s0_out.elemIdxInsideVd := s0_sel_src.elemIdxInsideVd
   s0_out.alignedType    := s0_sel_src.alignedType
   s0_out.mbIndex        := s0_sel_src.mbIndex
   // s0_out.flowPtr         := s0_sel_src.flowPtr
@@ -1256,7 +1261,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // s3_vecout.uopQueuePtr       := DontCare // uopQueuePtr is already saved in flow queue
   // s3_vecout.flowPtr           := s3_in.flowPtr
   s3_vecout.elemIdx           := s3_in.elemIdx // elemIdx is already saved in flow queue // TODO:
-  s3_vecout.elemIdxInsideVd   := DontCare
+  s3_vecout.elemIdxInsideVd   := s3_in.elemIdxInsideVd
   val s3_usSecondInv          = s3_in.usSecondInv
 
   io.rollback.valid := s3_valid && (s3_rep_frm_fetch || s3_flushPipe) && !s3_exception
@@ -1369,16 +1374,16 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val vecFeedback = s3_valid && s3_fb_no_waiting && s3_rep_info.need_rep && !io.lsq.ldin.ready && s3_isvec
 
   // vector output
-  io.vecldout.bits.alignedType.get := s3_vec_alignedType
+  io.vecldout.bits.alignedType := s3_vec_alignedType
   // vec feedback
   io.vecldout.bits.vecFeedback := vecFeedback
   // TODO: VLSU, uncache data logic
   val vecdata = rdataVecHelper(s3_vec_alignedType(1,0), s3_picked_data_frm_cache)
   io.vecldout.bits.vecdata.get := Mux(s3_in.is128bit, s3_merged_data_frm_cache, vecdata)
   io.vecldout.bits.isvec := s3_vecout.isvec
-  io.vecldout.bits.elemIdx.get := s3_vecout.elemIdx
+  io.vecldout.bits.elemIdx := s3_vecout.elemIdx
   io.vecldout.bits.elemIdxInsideVd.get := s3_vecout.elemIdxInsideVd
-  io.vecldout.bits.mask.get := s3_vecout.mask
+  io.vecldout.bits.mask := s3_vecout.mask
   io.vecldout.bits.reg_offset.get := s3_vecout.reg_offset
   io.vecldout.bits.usSecondInv := s3_usSecondInv
   io.vecldout.bits.mBIndex := s3_vec_mBIndex

@@ -125,6 +125,8 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
 
   val lsqio = new Bundle {
     val vaddr = Output(UInt(VAddrBits.W))
+    val vstart = Output(UInt((log2Up(VLEN) + 1).W))
+    val vl = Output(UInt((log2Up(VLEN) + 1).W))
     val mmio = Output(Vec(LoadPipelineWidth, Bool()))
     val uop = Output(Vec(LoadPipelineWidth, new DynInst))
     val lqCanAccept = Output(Bool())
@@ -1307,8 +1309,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   vlMergeBuffer.io.redirect <> redirect
   vsMergeBuffer.io.redirect <> redirect
-  vlMergeBuffer.io.toLsq(0) <> lsq.io.ldvecFeedback
-  vsMergeBuffer.io.toLsq(0) <> lsq.io.stvecFeedback
+  vlMergeBuffer.io.toLsq.head <> lsq.io.ldvecFeedback
+  vsMergeBuffer.io.toLsq.head <> lsq.io.stvecFeedback
   (0 until UopWritebackWidth).foreach{i=>
     // send to RS
     vlMergeBuffer.io.feedback(i) <> io.mem_to_ooo.vlduIqFeedback(i).feedbackSlow
@@ -1446,6 +1448,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     //   lsq.io.exceptionAddr.vaddr
     // )
   ))
+  io.mem_to_ooo.lsqio.vstart := RegNext(lsq.io.exceptionAddr.vstart)
+  io.mem_to_ooo.lsqio.vl     := RegNext(lsq.io.exceptionAddr.vl)
 
   io.mem_to_ooo.writeBack.map(wb => {
     wb.bits.uop.trigger.frontendChain := 0.U(TriggerNum.W).asBools
