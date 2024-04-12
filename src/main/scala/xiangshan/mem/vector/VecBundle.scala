@@ -102,13 +102,13 @@ class VecPipelineFeedbackIO(isVStore: Boolean=false) (implicit p: Parameters) ex
   val vecFeedback          = Bool()
 
   val usSecondInv          = Bool() // only for unit stride, second flow is Invalid
+  val elemIdx              = UInt(elemIdxBits.W) // element index
+  val mask                 = UInt(VLENB.W)
+  val alignedType          = UInt(alignTypeBits.W)
   // for load
   val reg_offset           = OptionWrapper(!isVStore, UInt(vOffsetBits.W))
-  val elemIdx              = OptionWrapper(!isVStore, UInt(elemIdxBits.W)) // element index
   val elemIdxInsideVd      = OptionWrapper(!isVStore, UInt(elemIdxBits.W)) // element index in scope of vd
   val vecdata              = OptionWrapper(!isVStore, UInt(VLEN.W))
-  val mask                 = OptionWrapper(!isVStore, UInt(VLENB.W))
-  val alignedType          = OptionWrapper(!isVStore, UInt(alignTypeBits.W))
 }
 
 class VecPipeBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle {
@@ -127,6 +127,7 @@ class VecPipeBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLS
   val usSecondInv         = Bool() // only for unit stride, second flow is Invalid
   val mBIndex             = if(isVStore) UInt(vsmBindexBits.W) else UInt(vlmBindexBits.W)
   val elemIdx             = UInt(elemIdxBits.W)
+  val elemIdxInsideVd     = UInt(elemIdxBits.W) // only use in unit-stride
 }
 
 object VecFeedbacks {
@@ -147,6 +148,8 @@ class MergeBufferReq(isVStore: Boolean=false)(implicit p: Parameters) extends VL
   val uop                 = new DynInst
   val data                = UInt(VLEN.W)
   val vdIdx               = UInt(3.W)
+  val fof                 = Bool()
+  val vlmax               = UInt(elemIdxBits.W)
   // val vdOffset            = UInt(vdOffset.W)
 }
 
@@ -176,6 +179,9 @@ class FeedbackToLsqIO(implicit p: Parameters) extends VLSUBundle{
   val uopidx = UopIdx()
   val vaddr = UInt(VAddrBits.W)
   val feedback = Vec(VecFeedbacks.allFeedbacks, Bool())
+    // for exception
+  val vstart           = UInt(elemIdxBits.W)
+  val vl               = UInt(elemIdxBits.W)
 
   def isFlush  = feedback(VecFeedbacks.FLUSH)
   def isCommit = feedback(VecFeedbacks.COMMIT)

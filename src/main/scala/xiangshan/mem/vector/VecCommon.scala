@@ -182,14 +182,12 @@ trait HasVLSUParameters extends HasXSParameter with VLSUConstants {
       val selIdxVec = (0 until muxLength).map(_.U)
       val selIdx    = PriorityMux(valids.reverse, selIdxVec.reverse)
 
-      val selData = LookupTree(index, List(
-        0.U -> selDataMatrix(selIdx)(0),
-        1.U -> selDataMatrix(selIdx)(1)
-      ))
-      val selMask = LookupTree(index, List(
-        0.U -> selMaskMatrix(selIdx)(0),
-        1.U -> selMaskMatrix(selIdx)(1)
-      ))
+      val selData = Mux(index === 0.U,
+                        selDataMatrix(selIdx)(0),
+                        selDataMatrix(selIdx)(1))
+      val selMask = Mux(index === 0.U,
+                        selMaskMatrix(selIdx)(0),
+                        selMaskMatrix(selIdx)(1))
       (selData, selMask)
     }
   }
@@ -294,6 +292,7 @@ class VecMemExuOutput(isVector: Boolean = false)(implicit p: Parameters) extends
   val elemIdx = UInt(elemIdxBits.W)
   val alignedType = UInt(alignTypeBits.W)
   val mbIndex     = UInt(vsmBindexBits.W)
+  val mask        = UInt(VLENB.W)
 }
 
 object MulNum {
