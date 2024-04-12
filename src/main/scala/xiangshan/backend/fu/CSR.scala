@@ -830,7 +830,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrio.disableSfence := tvmNotPermit || priviledgeMode === ModeU
 
   // general CSR wen check
-  val wen = valid && CSROpType.needAccess(func) && (addr=/=Satp.U || satpLegalMode)
+  val wen = valid && CSROpType.isCsrAccess(func) && (addr=/=Satp.U || satpLegalMode)
   val dcsrPermitted = dcsrPermissionCheck(addr, false.B, debugMode)
   val triggerPermitted = triggerPermissionCheck(addr, true.B, debugMode) // todo dmode
   val modePermitted = csrAccessPermissionCheck(addr, false.B, priviledgeMode) && dcsrPermitted && triggerPermitted
@@ -963,7 +963,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val illegalWFI = valid && isWFI && priviledgeMode < ModeM && mstatusStruct.tw === 1.U
 
   // Illegal priviledged instruction check
-  val isIllegalAddr = valid && CSROpType.needAccess(func) && MaskedRegMap.isIllegalAddr(mapping, addr)
+  val isIllegalAddr = valid && CSROpType.isCsrAccess(func) && MaskedRegMap.isIllegalAddr(mapping, addr)
   val isIllegalAccess = wen && !permitted
   val isIllegalPrivOp = illegalMret || illegalSret || illegalSModeSret || illegalWFI
 
