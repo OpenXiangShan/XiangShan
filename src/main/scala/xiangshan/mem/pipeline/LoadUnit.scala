@@ -1113,14 +1113,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.ldCancel.ld1Cancel := false.B
 
   // fast wakeup
-  io.fast_uop.valid := RegNext(
-    !io.dcache.s1_disable_fast_wakeup &&
-    s1_valid &&
-    !s1_kill &&
-    !io.tlb.resp.bits.miss &&
-    !io.lsq.forward.dataInvalidFast
-  ) && (s2_valid && !s2_out.rep_info.need_rep && !s2_mmio) && !s2_isvec
-  io.fast_uop.bits := RegNext(s1_out.uop)
+  io.fast_uop.valid := false.B
+  io.fast_uop.bits := DontCare
 
   //
   io.s2_ptr_chasing                    := RegEnable(s1_try_ptr_chasing && !s1_cancel_ptr_chasing, false.B, s1_fire)
