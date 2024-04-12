@@ -126,7 +126,7 @@ object Bundles {
   object NumLsElem {
     def apply()(implicit p: Parameters): UInt = UInt(width.W)
 
-    def width(implicit p: Parameters) = log2Up(p(XSCoreParamsKey).maxElemPerVreg)
+    def width(implicit p: Parameters) = log2Up(p(XSCoreParamsKey).maxElemPerVreg) + 1
   }
 
   class Fpu extends Bundle{

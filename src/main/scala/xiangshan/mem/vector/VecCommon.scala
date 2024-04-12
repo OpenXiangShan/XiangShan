@@ -807,7 +807,7 @@ object genUSSplitData{
   }
 }
 
-object GenVSData extends VLSUConstants {
+object genVSData extends VLSUConstants {
   def apply(data: UInt, elemIdx: UInt, alignedType: UInt): UInt = {
     LookupTree(alignedType, List(
       "b000".U -> ZeroExt(LookupTree(elemIdx(3, 0), List.tabulate(VLEN/8)(i => i.U -> getByte(data, i))), VLEN),
