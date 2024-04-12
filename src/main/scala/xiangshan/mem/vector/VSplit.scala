@@ -303,7 +303,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   val usNoSplit        = (usAligned128 || !(vaddr(3,0) +& PopCount(usSplitMask))(4)) && !issuePreIsSplit && (splitIdx === 0.U)// unit-stride uop don't need to split into two flow
   val usSplitVaddr     = genUSSplitAddr(vaddr, splitIdx)
   val regOffset        = vaddr(3,0) // offset in 256-bits vd
-  XSError((splitIdx > 1.U && usNoSplit) || (splitIdx > 1.U && issuePreIsSplit) , "Unit-Stride addr split error!\n")
+  XSError((splitIdx > 1.U && usNoSplit) || (splitIdx > 1.U && !issuePreIsSplit) , "Unit-Stride addr split error!\n")
 
   // data
   io.out.bits match { case x =>
