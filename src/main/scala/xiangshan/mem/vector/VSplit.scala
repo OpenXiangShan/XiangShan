@@ -388,11 +388,12 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
 class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = true){
   override lazy val bufferSize = SplitBufferSize
   // split data
-  val flowData = GenVSData(
+  val splitData = GenVSData(
         data = issueEntry.data.asUInt,
         elemIdx = splitIdx,
         alignedType = issueAlignedType
       )
+  val flowData = genVWdata(splitData, issueAlignedType)
   val usSplitData      = genUSSplitData(issueEntry.data.asUInt, splitIdx, vaddr(3,0))
 
   val sqIdx = issueUop.sqIdx + splitIdx
