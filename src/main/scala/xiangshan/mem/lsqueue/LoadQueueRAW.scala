@@ -112,8 +112,6 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     Mux(!allAddrCheck, isBefore(io.stAddrReadySqPtr, sqIdx), false.B)
   })
   val needEnqueue = canEnqueue.zip(hasAddrInvalidStore).zip(cancelEnqueue).map { case ((v, r), c) => v && r && !c }
-  val bypassPAddr = Reg(Vec(LoadPipelineWidth, UInt(PAddrBits.W)))
-  val bypassMask = Reg(Vec(LoadPipelineWidth, UInt((VLEN/8).W)))
 
   // Allocate logic
   val acceptedVec = Wire(Vec(LoadPipelineWidth, Bool()))
@@ -150,13 +148,11 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
       paddrModule.io.wen(w) := true.B
       paddrModule.io.waddr(w) := enqIndex
       paddrModule.io.wdata(w) := enq.bits.paddr
-      bypassPAddr(w) := enq.bits.paddr
 
       //  Write mask
       maskModule.io.wen(w) := true.B
       maskModule.io.waddr(w) := enqIndex
       maskModule.io.wdata(w) := enq.bits.mask
-      bypassMask(w) := enq.bits.mask
 
       //  Fill info
       uop(enqIndex) := enq.bits.uop
@@ -311,16 +307,10 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   }
 
   def detectRollback(i: Int) = {
-    paddrModule.io.violationMdata(i) := storeIn(i).bits.paddr
-    maskModule.io.violationMdata(i) := storeIn(i).bits.mask
+    paddrModule.io.violationMdata(i) := RegNext(storeIn(i).bits.paddr)
+    maskModule.io.violationMdata(i) := RegNext(storeIn(i).bits.mask)
 
-    val bypassPaddrMask = RegNext(VecInit((0 until LoadPipelineWidth).map(j => bypassPAddr(j)(PAddrBits-1, DCacheVWordOffset) === storeIn(i).bits.paddr(PAddrBits-1, DCacheVWordOffset))))
-    val bypassMMask = RegNext(VecInit((0 until LoadPipelineWidth).map(j => (bypassMask(j) & storeIn(i).bits.mask).orR)))
-    val bypassMaskUInt = (0 until LoadPipelineWidth).map(j =>
-      Fill(LoadQueueRAWSize, RegNext(RegNext(io.query(j).req.fire))) & Mux(bypassPaddrMask(j) && bypassMMask(j), UIntToOH(RegNext(RegNext(enqIndexVec(j)))), 0.U(LoadQueueRAWSize.W))
-    ).reduce(_|_)
-
-    val addrMaskMatch = RegNext(paddrModule.io.violationMmask(i).asUInt & maskModule.io.violationMmask(i).asUInt) | bypassMaskUInt
+    val addrMaskMatch = paddrModule.io.violationMmask(i).asUInt & maskModule.io.violationMmask(i).asUInt
     val entryNeedCheck = RegNext(VecInit((0 until LoadQueueRAWSize).map(j => {
       allocated(j) && isAfter(uop(j).robIdx, storeIn(i).bits.uop.robIdx) && datavalid(j) && !uop(j).robIdx.needFlush(io.redirect)
     })))
