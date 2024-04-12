@@ -1010,12 +1010,7 @@ class IssueQueueVecMemImp(override val wrapper: IssueQueue)(implicit p: Paramete
       enqData.vecMem.get.lqIdx := s0_enqBits(i).lqIdx
       // MemAddrIQ also handle vector insts
       enqData.vecMem.get.numLsElem := s0_enqBits(i).numLsElem
-      // update blocked
-      val isLsqHead = {
-        s0_enqBits(i).lqIdx <= memIO.lqDeqPtr.get &&
-        s0_enqBits(i).sqIdx <= memIO.sqDeqPtr.get
-      }
-      enqData.blocked          := !isLsqHead
+      enqData.blocked          := false.B
     }
   }
 
