@@ -344,19 +344,23 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   val canIssue = Wire(Bool())
   val allowIssue = io.out.ready
   val doIssue = Wire(Bool())
-  val issueCount = Mux(usNoSplit, 2.U,PopCount(doIssue)) // for dont need split unit-stride, issue two flow
+  val deqValid = valid(deqPtr.value)
+  val inActiveIssue = deqValid && canIssue && !vecActive && issuePreIsSplit
+  val issueCount = Mux(usNoSplit, 2.U, (PopCount(inActiveIssue) + PopCount(doIssue))) // for dont need split unit-stride, issue two flow
 
   // handshake
   val thisPtr = deqPtr.value
   canIssue := !issueUop.robIdx.needFlush(io.redirect) && deqPtr < enqPtr
   doIssue := canIssue && allowIssue
   when (!RegNext(io.redirect.valid) || distanceBetween(enqPtr, deqPtr) > flushNumReg) {
-    when ((splitIdx < (issueFlowNum - issueCount)) && doIssue) {
-      // The uop has not been entirly splited yet
-      splitIdx := splitIdx + issueCount
-      strideOffsetReg := strideOffsetReg + issueStride
+    when ((splitIdx < (issueFlowNum - issueCount))) {
+      when (doIssue || inActiveIssue) {
+        // The uop has not been entirly splited yet
+        splitIdx := splitIdx + issueCount
+        strideOffsetReg := strideOffsetReg + issueEntry.stride
+      }
     }.otherwise {
-      when (doIssue) {
+      when (doIssue || inActiveIssue) {
         // The uop is done spliting
         splitIdx := 0.U(flowIdxBits.W) // initialize flowIdx
         valid(deqPtr.value) := false.B
