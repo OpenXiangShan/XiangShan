@@ -362,8 +362,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   io.stout.bits.redirectValid := false.B
 
   io.debug_ls := DontCare
-  io.debug_ls.s1.isTlbFirstMiss := io.tlb.resp.valid && io.tlb.resp.bits.miss && io.tlb.resp.bits.debug.isFirstIssue && !s1_in.isHWPrefetch
   io.debug_ls.s1_robIdx := s1_in.uop.robIdx.value
+  io.debug_ls.s1_isTlbFirstMiss := io.tlb.resp.valid && io.tlb.resp.bits.miss && io.tlb.resp.bits.debug.isFirstIssue && !s1_in.isHWPrefetch
 
   private def printPipeLine(pipeline: LsPipelineBundle, cond: Bool, name: String): Unit = {
     XSDebug(cond,
