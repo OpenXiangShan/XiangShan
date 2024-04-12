@@ -10,6 +10,7 @@ import xiangshan.backend.issue.SchdBlockParams
 import xiangshan.{HasXSParameter, Redirect, XSBundle}
 import utils._
 import xiangshan.backend.fu.FuConfig.{AluCfg, BrhCfg}
+import xiangshan.backend.fu.vector.Bundles.VType
 
 class ExuBlock(params: SchdBlockParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
@@ -38,6 +39,7 @@ class ExuBlockImp(
     exu.io.fenceio.foreach(exuio => io.fenceio.get <> exuio)
     exu.io.frm.foreach(exuio => exuio := RegNext(io.frm.get))  // each vf exu pipe frm from csr
     exu.io.vxrm.foreach(exuio => io.vxrm.get <> exuio)
+    exu.io.vtype.foreach(exuio => io.vtype.get <> exuio)
     exu.io.in <> input
     output <> exu.io.out
 //    if (exu.wrapper.exuParams.fuConfigs.contains(AluCfg) || exu.wrapper.exuParams.fuConfigs.contains(BrhCfg)){
@@ -66,4 +68,5 @@ class ExuBlockIO(implicit p: Parameters, params: SchdBlockParams) extends XSBund
   val fenceio = if (params.hasFence) Some(new FenceIO) else None
   val frm = if (params.needSrcFrm) Some(Input(UInt(3.W))) else None
   val vxrm = if (params.needSrcVxrm) Some(Input(UInt(2.W))) else None
+  val vtype = if (params.hasVtype) Some(new VType) else None
 }

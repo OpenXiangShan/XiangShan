@@ -55,6 +55,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     val isResumeVType = Input(Bool())
     val commitVType = Flipped(Valid(new VType))
     val walkVType = Flipped(Valid(new VType))
+    val isVsetvl = Input(Bool())
     val stallReason = new Bundle {
       val in = Flipped(new StallReasonIO(DecodeWidth))
       val out = new StallReasonIO(DecodeWidth)
@@ -100,6 +101,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   vtypeGen.io.redirect := io.redirect
   vtypeGen.io.commitVType := io.commitVType
   vtypeGen.io.walkVType := io.walkVType
+  vtypeGen.io.isVsetvl := io.isVsetvl
 
   //Comp 1
   decoderComp.io.redirect := io.redirect

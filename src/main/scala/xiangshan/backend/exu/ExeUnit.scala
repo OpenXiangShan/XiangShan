@@ -28,6 +28,7 @@ import xiangshan.backend.Bundles.{ExuInput, ExuOutput, MemExuInput, MemExuOutput
 import xiangshan.{FPUCtrlSignals, HasXSParameter, Redirect, XSBundle, XSModule}
 import xiangshan.backend.datapath.WbConfig.{PregWB, _}
 import xiangshan.backend.fu.FuType
+import xiangshan.backend.fu.vector.Bundles.VType
 
 class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
   val flush = Flipped(ValidIO(new Redirect()))
@@ -37,6 +38,7 @@ class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle 
   val fenceio = if (params.hasFence) Some(new FenceIO) else None
   val frm = if (params.needSrcFrm) Some(Input(UInt(3.W))) else None
   val vxrm = if (params.needSrcVxrm) Some(Input(UInt(2.W))) else None
+  val vtype = if (params.hasVtype) Some(new VType) else None
 }
 
 class ExeUnit(val exuParams: ExeUnitParams)(implicit p: Parameters) extends LazyModule {
@@ -258,6 +260,8 @@ class ExeUnitImp(
       exuio <> fuio
       fuio.exception := DelayN(exuio.exception, 2)
   }))
+
+  io.vtype.foreach(exuio => funcUnits.foreach(fu => fu.io.vtype.foreach(fuio => fuio <> exuio)))
   io.fenceio.foreach(exuio => funcUnits.foreach(fu => fu.io.fenceio.foreach(fuio => fuio <> exuio)))
   io.frm.foreach(exuio => funcUnits.foreach(fu => fu.io.frm.foreach(fuio => fuio <> exuio)))
   io.vxrm.foreach(exuio => funcUnits.foreach(fu => fu.io.vxrm.foreach(fuio => fuio <> exuio)))

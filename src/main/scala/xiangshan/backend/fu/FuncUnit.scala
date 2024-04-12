@@ -12,6 +12,7 @@ import xiangshan.frontend.{FtqPtr, PreDecodeInfo}
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.fu.vector.Bundles.Vxsat
 import xiangshan.ExceptionNO.illegalInstr
+import xiangshan.backend.fu.vector.Bundles.VType
 
 class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val fuOpType    = FuOpType()
@@ -83,6 +84,7 @@ class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val fenceio = if (cfg.isFence) Some(new FenceIO) else None
   val frm = if (cfg.needSrcFrm) Some(Input(UInt(3.W))) else None
   val vxrm = if (cfg.needSrcVxrm) Some(Input(UInt(2.W))) else None
+  val vtype = if (cfg.hasVtype) Some(new VType) else None
 }
 
 abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSModule {

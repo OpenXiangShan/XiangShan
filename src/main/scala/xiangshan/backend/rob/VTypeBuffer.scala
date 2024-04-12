@@ -9,6 +9,7 @@ import xiangshan.backend.Bundles.DynInst
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.rename.SnapshotGenerator
 import xiangshan.{SnapshotPort, XSBundle, XSCoreParamsKey, XSModule}
+import xiangshan.VSETOpType
 
 class VTypeBufferPtr(size: Int) extends CircularQueuePtr[VTypeBufferPtr](size) {
   def this()(implicit p: Parameters) = this(p(XSCoreParamsKey).VTypeBufferSize)
@@ -25,6 +26,7 @@ object VTypeBufferPtr {
 
 class VTypeBufferEntry(implicit p: Parameters) extends Bundle {
   val vtype = new VType()
+  val isVsetvl = Bool()
 }
 
 class VTypeBufferIO(size: Int)(implicit p: Parameters) extends XSBundle {
@@ -46,6 +48,7 @@ class VTypeBufferIO(size: Int)(implicit p: Parameters) extends XSBundle {
     val isResumeVType = Bool()
     val commitVType = ValidIO(VType())
     val walkVType = ValidIO(VType())
+    val isVsetvl = Bool()
   })
 
   val status = Output(new Bundle {
@@ -190,18 +193,21 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   vtypeBufferWriteEnVec := needAllocVec
   vtypeBufferWriteDataVec.zip(io.req.map(_.bits)).foreach { case (entry: VTypeBufferEntry, inst) =>
     entry.vtype := inst.vpu.vtype
+    entry.isVsetvl := VSETOpType.isVsetvl(inst.fuOpType)
   }
   vtypeBufferReadAddrVec := vtypeBufferReadPtrVecNext.map(_.value)
 
   private val commitValidVec = Wire(Vec(CommitWidth, Bool()))
   private val walkValidVec = Wire(Vec(CommitWidth, Bool()))
   private val infoVec = Wire(Vec(CommitWidth, VType()))
+  private val isVsetvlVec = Wire(Vec(CommitWidth, Bool()))
 
   for (i <- 0 until CommitWidth) {
     commitValidVec(i) := state === s_idle && i.U < commitSize || state === s_spcl_walk && i.U < spclWalkSize
     walkValidVec(i) := state === s_walk && i.U < walkSize || state === s_spcl_walk && i.U < spclWalkSize
 
     infoVec(i) := vtypeBufferReadDataVec(i).vtype
+    isVsetvlVec(i) := vtypeBufferReadDataVec(i).isVsetvl
   }
 
   commitCount   := Mux(state === s_idle,      PopCount(commitValidVec), 0.U)
@@ -268,6 +274,10 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
 
   io.toDecode.commitVType.valid := commitValidVec.asUInt.orR
   io.toDecode.commitVType.bits := newestArchVType
+
+  // because vsetvl flush pipe, there is only one vset instruction when vsetvl is committed
+  private val hasVsetvl = commitValidVec.zip(isVsetvlVec).map { case(commitValid, isVsetvl) => commitValid && isVsetvl }.reduce(_ || _)
+  io.toDecode.isVsetvl := hasVsetvl
 
   XSError(isBefore(enqPtr, deqPtr) && !isFull(enqPtr, deqPtr), "\ndeqPtr is older than enqPtr!\n")
 
