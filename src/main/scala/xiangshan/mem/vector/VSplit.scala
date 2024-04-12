@@ -358,7 +358,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
       when (doIssue || inActiveIssue) {
         // The uop has not been entirly splited yet
         splitIdx := splitIdx + issueCount
-        strideOffsetReg := strideOffsetReg + issueEntry.stride
+        strideOffsetReg := Mux(!issuePreIsSplit, strideOffsetReg, strideOffsetReg + issueEntry.stride) // when normal unit-stride, don't use strideOffsetReg
       }
     }.otherwise {
       when (doIssue || inActiveIssue) {
