@@ -77,34 +77,41 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
   EnqDelayWakeupConnect(io.enqDelayIn2, enqDelayOut2, entryReg.status, delay = 2)
 
   for (i <- 0 until params.numRegSrc) {
-    if (params.inVfSchd && params.readVfRf && params.hasIQWakeUp) {
-      val enqDelay1WakeUpValid = enqDelayOut1.srcWakeUpByIQVec(i).asUInt.orR
-      val enqDelay1WakeUpOH    = enqDelayOut1.srcWakeUpByIQVec(i)
-      val enqDelay2WakeUpOH    = enqDelayOut2.srcWakeUpByIQVec(i)
-      val enqDelay1IsWakeupByMemIQ = enqDelay1WakeUpOH.zip(io.commonIn.wakeUpFromIQ).filter(_._2.bits.params.isMemExeUnit).map(_._1).fold(false.B)(_ || _)
-      val enqDelay2IsWakeupByMemIQ = enqDelay2WakeUpOH.zip(io.commonIn.wakeUpFromIQ).filter(_._2.bits.params.isMemExeUnit).map(_._1).fold(false.B)(_ || _)
+    val enqDelay1WakeUpValid = enqDelayOut1.srcWakeUpByIQVec(i).asUInt.orR
+    val enqDelay1WakeUpOH    = enqDelayOut1.srcWakeUpByIQVec(i)
+    val enqDelay2WakeUpOH    = enqDelayOut2.srcWakeUpByIQVec(i)
+    val enqDelay1IsWakeupByMemIQ = enqDelay1WakeUpOH.zip(io.commonIn.wakeUpFromIQ).filter(_._2.bits.params.isMemExeUnit).map(_._1).fold(false.B)(_ || _)
+    val enqDelay2IsWakeupByMemIQ = enqDelay2WakeUpOH.zip(io.commonIn.wakeUpFromIQ).filter(_._2.bits.params.isMemExeUnit).map(_._1).fold(false.B)(_ || _)
 
-      enqDelayDataSources(i).value            := Mux(enqDelayOut1.srcWakeUpByIQ(i).asBool, 
-                                                      if (params.hasWakeupFromMem) Mux(enqDelay1IsWakeupByMemIQ, DataSource.bypass2, DataSource.bypass) else DataSource.bypass, 
-                                                      Mux(enqDelayOut2.srcWakeUpByIQ(i).asBool, 
-                                                          if (params.hasWakeupFromMem) Mux(enqDelay2IsWakeupByMemIQ, DataSource.reg, DataSource.bypass2) else DataSource.bypass2, 
-                                                          entryReg.status.srcStatus(i).dataSources.value))
+    if (params.inVfSchd && params.readVfRf && params.hasIQWakeUp) {
+      enqDelayDataSources(i).value            := MuxCase(entryReg.status.srcStatus(i).dataSources.value, Seq(
+                                                    (enqDelayOut1.srcWakeUpByIQ(i).asBool && !enqDelay1IsWakeupByMemIQ)  -> DataSource.bypass,
+                                                    (enqDelayOut1.srcWakeUpByIQ(i).asBool && enqDelay1IsWakeupByMemIQ)   -> DataSource.bypass2,
+                                                    (enqDelayOut2.srcWakeUpByIQ(i).asBool && !enqDelay2IsWakeupByMemIQ)  -> DataSource.bypass2,
+                                                 ))
       enqDelaySrcWakeUpL1ExuOH.get(i)         := Mux(enqDelay1WakeUpValid, 
                                                       Mux1H(enqDelay1WakeUpOH, params.wakeUpSourceExuIdx.map(x => MathUtils.IntToOH(x).U(backendParams.numExu.W))), 
                                                       Mux1H(enqDelay2WakeUpOH, params.wakeUpSourceExuIdx.map(x => MathUtils.IntToOH(x).U(backendParams.numExu.W))))
-    } else {
+    }
+    else if (params.inMemSchd && params.readVfRf && params.hasIQWakeUp) {
+      enqDelayDataSources(i).value            := MuxCase(entryReg.status.srcStatus(i).dataSources.value, Seq(
+                                                    enqDelayOut1.srcWakeUpByIQ(i).asBool                                                            -> DataSource.bypass,
+                                                    (enqDelayOut2.srcWakeUpByIQ(i).asBool && SrcType.isVfp(entryReg.status.srcStatus(i).srcType))   -> DataSource.bypass2,
+                                                 ))
+      enqDelaySrcWakeUpL1ExuOH.get(i)         := Mux(enqDelay1WakeUpValid, 
+                                                      Mux1H(enqDelay1WakeUpOH, params.wakeUpSourceExuIdx.map(x => MathUtils.IntToOH(x).U(backendParams.numExu.W))), 
+                                                      Mux1H(enqDelay2WakeUpOH, params.wakeUpSourceExuIdx.map(x => MathUtils.IntToOH(x).U(backendParams.numExu.W))))
+    }
+    else {
       enqDelayDataSources(i).value            := Mux(enqDelayOut1.srcWakeUpByIQ(i).asBool, DataSource.bypass, entryReg.status.srcStatus(i).dataSources.value)
       if (params.hasIQWakeUp) {
-        val wakeUpOH = enqDelayOut1.srcWakeUpByIQVec(i)
-        enqDelaySrcWakeUpL1ExuOH.get(i)       := Mux1H(wakeUpOH, params.wakeUpSourceExuIdx.map(x => MathUtils.IntToOH(x).U(backendParams.numExu.W)).toSeq)
+        enqDelaySrcWakeUpL1ExuOH.get(i)       := Mux1H(enqDelay1WakeUpOH, params.wakeUpSourceExuIdx.map(x => MathUtils.IntToOH(x).U(backendParams.numExu.W)).toSeq)
       }
     }
 
     enqDelaySrcState(i)                     := entryReg.status.srcStatus(i).srcState | enqDelayOut1.srcWakeUpByWB(i) | enqDelayOut1.srcWakeUpByIQ(i)
     if (params.hasIQWakeUp) {
-      val wakeUpValid = enqDelayOut1.srcWakeUpByIQVec(i).asUInt.orR
-      val wakeUpOH = enqDelayOut1.srcWakeUpByIQVec(i)
-      enqDelaySrcLoadDependency(i)          := Mux(wakeUpValid, Mux1H(wakeUpOH, enqDelayOut1.shiftedWakeupLoadDependencyByIQVec), entryReg.status.srcStatus(i).srcLoadDependency)
+      enqDelaySrcLoadDependency(i)          := Mux(enqDelay1WakeUpValid, Mux1H(enqDelay1WakeUpOH, enqDelayOut1.shiftedWakeupLoadDependencyByIQVec), entryReg.status.srcStatus(i).srcLoadDependency)
     } else {
       enqDelaySrcLoadDependency(i)          := entryReg.status.srcStatus(i).srcLoadDependency
     }
