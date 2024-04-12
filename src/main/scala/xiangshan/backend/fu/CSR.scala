@@ -998,7 +998,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrio.disableHfencev :=  !(privilegeMode === ModeM || (!virtMode && privilegeMode === ModeS))
 
   // general CSR wen check
-  val wen = valid && CSROpType.needAccess(func) && ((addr=/=Satp.U && addr =/= Vsatp.U) || satpLegalMode)
+  val wen = valid && CSROpType.isCsrAccess(func) && ((addr=/=Satp.U && addr =/= Vsatp.U) || satpLegalMode)
   val dcsrPermitted = dcsrPermissionCheck(addr, false.B, debugMode)
   val triggerPermitted = triggerPermissionCheck(addr, true.B, debugMode) // todo dmode
   val HasH = (HasHExtension == true).asBool
@@ -1115,7 +1115,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val illegalVWFI = valid && isWFI && ((virtMode && privilegeMode === ModeS && hstatusStruct.vtw === 1.U && mstatusStruct.tw === 0.U)||
       (virtMode && privilegeMode === ModeU && mstatusStruct.tw === 0.U))
   // Illegal privileged instruction check
-  val isIllegalAddr = valid && CSROpType.needAccess(func) && MaskedRegMap.isIllegalAddr(mapping, addr)
+  val isIllegalAddr = valid && CSROpType.isCsrAccess(func) && MaskedRegMap.isIllegalAddr(mapping, addr)
   val isIllegalAccess = !virtMode && wen && !(Mux(addrInPerfCnt, perfcntPermitted, csrAccess === 0.U && dcsrPermitted && triggerPermitted) && accessPermitted)
   val isIllegalPrivOp = illegalMret || illegalSret || illegalSModeSret || illegalWFI
 
