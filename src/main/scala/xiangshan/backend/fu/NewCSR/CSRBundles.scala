@@ -59,7 +59,21 @@ object CSRBundles {
 
     def isModeVS: Bool = this.V === VirtMode.On && this.PRVM === PrivMode.S
 
+    def isModeHUorVU: Bool = this.PRVM === PrivMode.U
+
     def isVirtual: Bool = this.V === VirtMode.On
+
+    // VU < VS < HS < M
+    // HU < HS < M
+    def < (that: PrivState): Bool = {
+      (this.isVirtual && (that.isModeM || that.isModeHS)) ||
+        (this.V === that.V && this.PRVM < that.PRVM)
+    }
+
+    def > (that: PrivState): Bool = {
+      (that.isVirtual && (this.isModeM || this.isModeHS)) ||
+        (that.V === this.V && that.PRVM < this.PRVM)
+    }
   }
 
   object PrivState {
