@@ -748,7 +748,15 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   private val mop             = fuOpType.map(fuOpTypeItem => LSUOpType.getVecLSMop(fuOpTypeItem))
   private val nf              = fuOpType.zip(uop.map(_.vpu.nf)).map{ case (fuOpTypeItem, nfItem) => Mux(LSUOpType.isWhole(fuOpTypeItem), 0.U, nfItem) }
   private val emul            = fuOpType.zipWithIndex.map { case (fuOpTypeItem, index) =>
-    Mux(LSUOpType.isWhole(fuOpTypeItem), GenUSWholeEmul(uop(index).vpu.nf), Mux(LSUOpType.isMasked(fuOpTypeItem), 0.U(mulBits.W), EewLog2(eew(index)) - sew(index) + lmul(index)))
+    Mux(
+      LSUOpType.isWhole(fuOpTypeItem),
+      GenUSWholeEmul(uop(index).vpu.nf),
+      Mux(
+        LSUOpType.isMasked(fuOpTypeItem),
+        0.U(mulBits.W),
+        EewLog2(eew(index)) - sew(index) + lmul(index)
+      )
+    )
   }
 
   private val isVlsType       = uop.map(uopItem => isVls((uopItem.fuType)))
@@ -758,7 +766,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   // There is no way to calculate the 'flow' for 'unit-stride' and 'whole' exactly
   private val numLsElem       = instType.zipWithIndex.map{ case (instTypeItem, index) =>
     Mux(
-      LSUOpType.isWhole(fuOpType(index)) || isUnitStride(index) && isVlsType(index),
+      (LSUOpType.isWhole(fuOpType(index)) || isUnitStride(index)) && isVlsType(index),
       2.U,
       (1.U(5.W) << GenRealFlowNum(instTypeItem, emul(index), lmul(index), eew(index), sew(index))).asUInt
     )
