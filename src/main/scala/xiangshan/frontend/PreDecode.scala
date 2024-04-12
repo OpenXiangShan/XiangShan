@@ -93,11 +93,11 @@ class PreDecodeResp(implicit p: Parameters) extends XSBundle with HasPdConst {
 
 class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   val io = IO(new Bundle() {
-    val in = Input(new IfuToPreDecode)
+    val in = Input(ValidIO(new IfuToPreDecode))
     val out = Output(new PreDecodeResp)
   })
 
-  val data          = io.in.data
+  val data          = io.in.bits.data
 //  val lastHalfMatch = io.in.lastHalfMatch
   val validStart, validEnd = Wire(Vec(PredictWidth, Bool()))
   val h_validStart, h_validEnd = Wire(Vec(PredictWidth, Bool()))
@@ -130,7 +130,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
     val inst           = WireInit(rawInsts(i))
     //val expander       = Module(new RVCExpander)
     currentIsRVC(i)   := isRVC(inst)
-    val currentPC      = io.in.pc(i)
+    val currentPC      = io.in.bits.pc(i)
     //expander.io.in             := inst
 
     val brType::isCall::isRet::Nil = brInfo(inst)
@@ -226,10 +226,10 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   validH_ValidStartMismatch := h_validStart.zip(h_validStart_diff).map{case(a,b) => a =/= b}.reduce(_||_)
   validH_ValidEndMismatch := h_validEnd.zip(h_validEnd_diff).map{case(a,b) => a =/= b}.reduce(_||_)
 
-  XSError(validStartMismatch, p"validStart mismatch\n")
-  XSError(validEndMismatch, p"validEnd mismatch\n")
-  XSError(validH_ValidStartMismatch, p"h_validStart mismatch\n")
-  XSError(validH_ValidEndMismatch, p"h_validEnd mismatch\n")
+  XSError(io.in.valid && validStartMismatch, p"validStart mismatch\n")
+  XSError(io.in.valid && validEndMismatch, p"validEnd mismatch\n")
+  XSError(io.in.valid && validH_ValidStartMismatch, p"h_validStart mismatch\n")
+  XSError(io.in.valid && validH_ValidEndMismatch, p"h_validEnd mismatch\n")
 
 //  io.out.hasLastHalf := !io.out.pd(PredictWidth - 1).isRVC && io.out.pd(PredictWidth - 1).valid
 

@@ -428,9 +428,10 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val preDecoderOut = Mux1H(UIntToOH(f2_predecod_ptr), preDecoders.map(_.io.out))
   for(i <- 0 until 4){
     val preDecoderIn  = preDecoders(i).io.in
-    preDecoderIn.data := f2_cut_data(i)
-    preDecoderIn.frontendTrigger := io.frontendTrigger
-    preDecoderIn.pc  := f2_pc
+    preDecoderIn.valid := f2_valid
+    preDecoderIn.bits.data := f2_cut_data(i)
+    preDecoderIn.bits.frontendTrigger := io.frontendTrigger
+    preDecoderIn.bits.pc  := f2_pc
   }
 
   //val f2_expd_instr     = preDecoderOut.expInstr
