@@ -23,7 +23,9 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors}
 import freechips.rocketchip.tilelink._
-import coupledL2.{L2ParamKey, CoupledL2}
+import coupledL2.{L2ParamKey, EnableCHI}
+import coupledL2.tl2tl.TL2TLCoupledL2
+import coupledL2.tl2chi.{TL2CHICoupledL2, PortIO}
 import system.HasSoCParameter
 import top.BusPerfMonitor
 import utility.{DelayN, ResetGen, TLClientsMerger, TLEdgeBuffer, TLLogger}
@@ -60,11 +62,13 @@ class L2Top()(implicit p: Parameters) extends LazyModule
     val node = buffers.map(_.node.asInstanceOf[TLNode]).reduce(_ :*=* _)
     (buffers, node)
   }
+  val enableCHI = p(EnableCHI)
+  val enableL2 = coreParams.L2CacheParamsOpt.isDefined
   // =========== Components ============
   val l1_xbar = TLXbar()
   val mmio_xbar = TLXbar()
   val mmio_port = TLIdentityNode() // to L3
-  val memory_port = TLIdentityNode()
+  val memory_port = if (enableCHI && enableL2) None else Some(TLIdentityNode())
   val beu = LazyModule(new BusErrorUnit(
     new XSL1BusErrors(), BusErrorUnitParams(0x38010000)
   ))
@@ -87,24 +91,44 @@ class L2Top()(implicit p: Parameters) extends LazyModule
   val debug_int_node = IntIdentityNode()
   val plic_int_node = IntIdentityNode()
 
-  val l2cache = coreParams.L2CacheParamsOpt.map(l2param =>
-    LazyModule(new CoupledL2()(new Config((_, _, _) => {
-      case L2ParamKey => l2param.copy(
-          hartIds = Seq(p(XSCoreParamsKey).HartId),
-          FPGAPlatform = debugOpts.FPGAPlatform
-        )
-    })))
-  )
+  println(s"enableCHI: ${enableCHI}")
+  val tl2tl_l2cache = if (enableL2 && !enableCHI) {
+    Some(LazyModule(new TL2TLCoupledL2()(new Config((_, _, _) => {
+      case L2ParamKey => coreParams.L2CacheParamsOpt.get.copy(
+        hartIds = Seq(p(XSCoreParamsKey).HartId),
+        FPGAPlatform = debugOpts.FPGAPlatform
+      )
+    }))))
+  } else None
+  val tl2chi_l2cache = if (enableL2 && enableCHI) {
+    Some(LazyModule(new TL2CHICoupledL2()(new Config((_, _, _) => {
+      case L2ParamKey => coreParams.L2CacheParamsOpt.get.copy(
+        hartIds = Seq(p(XSCoreParamsKey).HartId),
+        FPGAPlatform = debugOpts.FPGAPlatform
+      )
+      case EnableCHI => true
+      // case XSCoreParamsKey => p(XSCoreParamsKey)
+    }))))
+  } else None
   val l2_binder = coreParams.L2CacheParamsOpt.map(_ => BankBinder(coreParams.L2NBanks, 64))
 
   // =========== Connection ============
   // l2 to l2_binder, then to memory_port
   l2_binder match {
     case Some(binder) =>
-      memory_port := l2_l3_pmu := TLClientsMerger() := TLXbar() :=* binder :*= l2cache.get.node
+      if (!enableCHI) {
+        memory_port.get := l2_l3_pmu := TLClientsMerger() := TLXbar() :=* binder :*= tl2tl_l2cache.get.node
+      }
     case None =>
-      memory_port := l1_xbar
+      memory_port.get := l1_xbar
   }
+
+  tl2chi_l2cache match {
+    case Some(l2) =>
+      l2.managerNode := TLXbar() :=* l2_binder.get :*= l2.node :*= l1_xbar
+    case None =>
+  }
+  
 
   mmio_xbar := TLBuffer.chainNode(2) := i_mmio_port
   mmio_xbar := TLBuffer.chainNode(2) := d_mmio_port
@@ -129,6 +153,7 @@ class L2Top()(implicit p: Parameters) extends LazyModule
       val robHeadPaddr = Flipped(Valid(UInt(36.W)))
       val l2MissMatch = Output(Bool())
     })
+    val chi = if (enableCHI) Some(IO(new PortIO)) else None
 
     val resetDelayN = Module(new DelayN(UInt(PAddrBits.W), 5))
 
@@ -141,17 +166,26 @@ class L2Top()(implicit p: Parameters) extends LazyModule
     dontTouch(cpu_halt)
 
     val l2_hint = IO(ValidIO(new L2ToL1Hint())) // TODO: parameterize this
-    if (l2cache.isDefined) {
-      l2_hint := l2cache.get.module.io.l2_hint
-      // debugTopDown <> l2cache.get.module.io.debugTopDown
-      l2cache.get.module.io.debugTopDown.robHeadPaddr := DontCare
-      l2cache.get.module.io.hartId := hartId.fromTile
-      l2cache.get.module.io.debugTopDown.robHeadPaddr.head := debugTopDown.robHeadPaddr
-      debugTopDown.l2MissMatch := l2cache.get.module.io.debugTopDown.l2MissMatch.head
+    if (tl2tl_l2cache.isDefined) {
+      l2_hint := tl2tl_l2cache.get.module.io.l2_hint
+      // debugTopDown <> tl2tl_l2cache.get.module.io.debugTopDown
+      tl2tl_l2cache.get.module.io.debugTopDown.robHeadPaddr := DontCare
+      tl2tl_l2cache.get.module.io.hartId := hartId.fromTile
+      tl2tl_l2cache.get.module.io.debugTopDown.robHeadPaddr.head := debugTopDown.robHeadPaddr
+      debugTopDown.l2MissMatch := tl2tl_l2cache.get.module.io.debugTopDown.l2MissMatch.head
+    } else if (tl2chi_l2cache.isDefined) {
+      l2_hint := tl2chi_l2cache.get.module.io.l2_hint
+      // debugTopDown <> tl2chi_l2cache.get.module.io.debugTopDown
+      tl2chi_l2cache.get.module.io.debugTopDown.robHeadPaddr := DontCare
+      tl2chi_l2cache.get.module.io.hartId := hartId.fromTile
+      tl2chi_l2cache.get.module.io.debugTopDown.robHeadPaddr.head := debugTopDown.robHeadPaddr
+      debugTopDown.l2MissMatch := tl2chi_l2cache.get.module.io.debugTopDown.l2MissMatch.head
     } else {
       l2_hint := 0.U.asTypeOf(l2_hint)
       debugTopDown <> DontCare
     }
+
+    chi.foreach(_ <> tl2chi_l2cache.get.module.io.chi)
   }
 
   lazy val module = new L2TopImp(this)

@@ -21,6 +21,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import huancun.{HCCacheParameters, HCCacheParamsKey, HuanCun, PrefetchRecv, TPmetaResp}
+import coupledL2.EnableCHI
 import utility._
 import system._
 import device._
@@ -28,6 +29,7 @@ import chisel3.stage.ChiselGeneratorAnnotation
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.jtag.JTAGIO
 import chisel3.experimental.{annotate, ChiselAnnotation}
 import sifive.enterprise.firrtl.NestedPrefixModulesAnnotation
@@ -62,6 +64,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
   println(s"FPGASoC cores: $NumCores banks: $L3NBanks block size: $L3BlockSize bus size: $L3OuterBusWidth")
 
+  val enableCHI = p(EnableCHI)
+
   val core_with_l2 = tiles.map(coreParams =>
     LazyModule(new XSTile()(p.alterPartial({
       case XSCoreParamsKey => coreParams
@@ -76,6 +80,47 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       )
     })))
   )
+
+  val chi_uncache_sink = if (enableCHI) {
+    val onChipPeripheralRange = AddressSet(0x38000000L, 0x07ffffffL)
+    val uartRange = AddressSet(0x40600000, 0xf)
+    val uartDevice = new SimpleDevice("serial", Seq("xilinx,uartlite"))
+    val uartParams = AXI4SlaveParameters(
+      address = Seq(uartRange),
+      regionType = RegionType.UNCACHED,
+      supportsRead = TransferSizes(1, 8),
+      supportsWrite = TransferSizes(1, 8),
+      resources = uartDevice.reg
+    )
+    val peripheralRange = AddressSet(
+      0x0, 0x7fffffff
+    ).subtract(onChipPeripheralRange).flatMap(x => x.subtract(uartRange))
+
+    Some(AXI4SlaveNode(Seq(AXI4SlavePortParameters(
+      Seq(AXI4SlaveParameters(
+        address = peripheralRange,
+        regionType = RegionType.UNCACHED,
+        supportsRead = TransferSizes(1, 8),
+        supportsWrite = TransferSizes(1, 8),
+        interleavedId = Some(0)
+      ), uartParams),
+      beatBytes = 8
+    ))))
+  } else None
+
+  val chi_uncache_xbar = if (enableCHI) Some(AXI4Xbar()) else None
+
+  if (enableCHI) {
+    for (i <- 0 until NumCores) {
+      chi_uncache_xbar.get :*= core_with_l2(i).axi4_uncache.get
+    }
+    chi_uncache_sink.get := chi_uncache_xbar.get
+
+    val uncache_port = InModuleBody {
+      chi_uncache_sink.get.makeIOs()
+    }
+    // dontTouch(uncache_port)
+  }
 
   // recieve all prefetch req from cores
   val memblock_pf_recv_nodes: Seq[Option[BundleBridgeSink[PrefetchRecv]]] = core_with_l2.map(_.core_l3_pf_port).map{
@@ -92,8 +137,21 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     core_with_l2(i).plic_int_node :*= misc.plic.intnode
     core_with_l2(i).debug_int_node := misc.debugModule.debug.dmOuter.dmOuter.intnode
     misc.plic.intnode := IntBuffer() := core_with_l2(i).beu_int_source
-    misc.peripheral_ports(i) := core_with_l2(i).uncache
-    misc.core_to_l3_ports(i) :=* core_with_l2(i).memory_port
+    if (!enableCHI) {
+      misc.peripheral_ports(i) := core_with_l2(i).tl_uncache 
+    } else {
+      // Make diplomacy happy
+      val clientParameters = TLMasterPortParameters.v1(
+        clients = Seq(TLMasterParameters.v1(
+          "uncache"
+        ))
+      )
+      val clientNode = TLClientNode(Seq(clientParameters))
+      misc.peripheral_ports(i) := clientNode
+    }
+    // misc.peripheral_ports(i) := core_with_l2(i).uncache
+    // misc.core_to_l3_ports(i) :=* core_with_l2(i).memory_port
+    misc.core_to_l3_ports.foreach(port => port(i) :=* core_with_l2(i).memory_port.get)
     memblock_pf_recv_nodes(i).map(recv => {
       println(s"Connecting Core_${i}'s L1 pf source to L3!")
       recv := core_with_l2(i).core_l3_pf_port.get
@@ -152,12 +210,12 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     FileRegisters.add("json", json)
     FileRegisters.add("plusArgs", freechips.rocketchip.util.PlusArgArtefacts.serialize_cHeader())
 
-    val dma = IO(Flipped(misc.dma.cloneType))
-    val peripheral = IO(misc.peripheral.cloneType)
+    // val dma = IO(Flipped(misc.dma.cloneType))
+    // val peripheral = IO(misc.peripheral.cloneType)
     val memory = IO(misc.memory.cloneType)
 
-    misc.dma <> dma
-    peripheral <> misc.peripheral
+    // misc.dma <> dma
+    // peripheral <> misc.peripheral
     memory <> misc.memory
 
     val io = IO(new Bundle {
@@ -192,9 +250,9 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     io.debug_reset := misc.module.debug_module_io.debugIO.ndreset
 
     // input
-    dontTouch(dma)
+    // dontTouch(dma)
     dontTouch(io)
-    dontTouch(peripheral)
+    // dontTouch(peripheral)
     dontTouch(memory)
     misc.module.ext_intrs := io.extIntrs
     misc.module.rtc_clock := io.rtc_clock
@@ -232,6 +290,13 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
         l3.module.io.debugTopDown.robHeadPaddr := core_with_l2.map(_.module.io.debugTopDown.robHeadPaddr)
         core_with_l2.zip(l3.module.io.debugTopDown.addrMatch).foreach { case (tile, l3Match) => tile.module.io.debugTopDown.l3MissMatch := l3Match }
       case None => core_with_l2.foreach(_.module.io.debugTopDown.l3MissMatch := false.B)
+    }
+
+    core_with_l2.foreach { case tile =>
+      tile.module.io.chi.foreach { case chi_port =>
+        chi_port <> DontCare
+        dontTouch(chi_port)
+      }
     }
 
     misc.module.debug_module_io.resetCtrl.hartIsInReset := core_with_l2.map(_.module.reset.asBool)
