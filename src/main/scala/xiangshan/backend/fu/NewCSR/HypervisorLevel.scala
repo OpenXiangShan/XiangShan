@@ -207,7 +207,7 @@ class HstatusBundle extends CSRBundle {
 
 }
 
-object HstatusVgeinField extends CSREnum with CSRWLRLApply {
+object HstatusVgeinField extends CSREnum with WLRLApply {
   override def isLegal(enum: CSREnumType): Bool = enum.asUInt <= GEILEN.U
 }
 
