@@ -207,6 +207,8 @@ class RobEnqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircular
 class RobExceptionInfo(implicit p: Parameters) extends XSBundle {
   // val valid = Bool()
   val robIdx = new RobPtr
+  val ftqPtr = new FtqPtr()
+  val ftqOffset = UInt(log2Up(PredictWidth).W)
   val exceptionVec = ExceptionVec()
   val flushPipe = Bool()
   val isVset = Bool()
@@ -375,6 +377,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val commitVType = ValidIO(VType())
       val walkVType = ValidIO(VType())
     }
+    val readGPAMemAddr = ValidIO(new Bundle {
+      val ftqPtr = new FtqPtr()
+      val ftqOffset = UInt(log2Up(PredictWidth).W)
+    })
+    val readGPAMemData = Input(UInt(GPAddrBits.W))
 
     val debug_ls = Flipped(new DebugLSIO)
     val debugRobHead = Output(new DynInst)
@@ -787,7 +794,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val exceptionHappen = (state === s_idle) && valid(deqPtr.value) && (intrEnable || exceptionEnable) && !lastCycleFlush
   io.exception.valid                := RegNext(exceptionHappen)
   io.exception.bits.pc              := RegEnable(debug_deqUop.pc, exceptionHappen)
-  io.exception.bits.gpaddr          := 0.U // Todo: get gpaddr gpaMem
+  io.exception.bits.gpaddr          := io.readGPAMemData
   io.exception.bits.instr           := RegEnable(debug_deqUop.instr, exceptionHappen)
   io.exception.bits.commitType      := RegEnable(deqDispatchData.commitType, exceptionHappen)
   io.exception.bits.exceptionVec    := RegEnable(exceptionDataRead.bits.exceptionVec, exceptionHappen)
@@ -799,6 +806,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.exception.bits.trigger         := RegEnable(exceptionDataRead.bits.trigger, exceptionHappen)
   io.csr.vstart.valid               := RegEnable(exceptionDataRead.bits.vstartEn, false.B, exceptionHappen)
   io.csr.vstart.bits                := RegEnable(exceptionDataRead.bits.vstart, exceptionHappen)
+
+  // data will be one cycle after valid
+  io.readGPAMemAddr.valid := exceptionHappen
+  io.readGPAMemAddr.bits.ftqPtr := exceptionDataRead.bits.ftqPtr
+  io.readGPAMemAddr.bits.ftqOffset := exceptionDataRead.bits.ftqOffset
 
   XSDebug(io.flushOut.valid,
     p"generate redirect: pc 0x${Hexadecimal(io.exception.bits.pc)} intr $intrEnable " +
@@ -1334,6 +1346,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   for (i <- 0 until RenameWidth) {
     exceptionGen.io.enq(i).valid := canEnqueueEG(i)
     exceptionGen.io.enq(i).bits.robIdx := io.enq.req(i).bits.robIdx
+    exceptionGen.io.enq(i).bits.ftqPtr := io.enq.req(i).bits.ftqPtr
+    exceptionGen.io.enq(i).bits.ftqOffset := io.enq.req(i).bits.ftqOffset
     exceptionGen.io.enq(i).bits.exceptionVec := ExceptionNO.selectFrontend(io.enq.req(i).bits.exceptionVec)
     exceptionGen.io.enq(i).bits.flushPipe := io.enq.req(i).bits.flushPipe
     exceptionGen.io.enq(i).bits.isVset := io.enq.req(i).bits.isVset
@@ -1356,6 +1370,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   for (((wb, exc_wb), i) <- exceptionWBs.zip(exceptionGen.io.wb).zipWithIndex) {
     exc_wb.valid                := wb.valid
     exc_wb.bits.robIdx          := wb.bits.robIdx
+    // only enq inst use ftqPtr to read gpa
+    exc_wb.bits.ftqPtr          := 0.U.asTypeOf(exc_wb.bits.ftqPtr)
+    exc_wb.bits.ftqOffset       := 0.U.asTypeOf(exc_wb.bits.ftqOffset)
     exc_wb.bits.exceptionVec    := wb.bits.exceptionVec.get
     exc_wb.bits.flushPipe       := wb.bits.flushPipe.getOrElse(false.B)
     exc_wb.bits.isVset          := false.B

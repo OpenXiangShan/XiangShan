@@ -51,6 +51,7 @@ class CtrlBlock(params: BackendParams)(implicit p: Parameters) extends LazyModul
 
   lazy val module = new CtrlBlockImp(this)(p, params)
 
+  val gpaMem = LazyModule(new GPAMem())
 }
 
 class CtrlBlockImp(
@@ -81,6 +82,7 @@ class CtrlBlockImp(
 
   val io = IO(new CtrlBlockIO())
 
+  val gpaMem = wrapper.gpaMem.module
   val decode = Module(new DecodeStage)
   val fusionDecoder = Module(new FusionDecoder)
   val rat = Module(new RenameTableWrapper)
@@ -271,6 +273,13 @@ class CtrlBlockImp(
   when (s6_flushFromRobValid) {
     io.frontend.toFtq.redirect.bits.level := RedirectLevel.flush
     io.frontend.toFtq.redirect.bits.cfiUpdate.target := RegEnable(flushTarget, s5_flushFromRobValidAhead)
+  }
+
+  for (i <- 0 until DecodeWidth) {
+    gpaMem.io.fromIFU := io.frontend.fromIfu
+    gpaMem.io.exceptionReadAddr.valid := rob.io.readGPAMemAddr.valid
+    gpaMem.io.exceptionReadAddr.bits.ftqPtr := rob.io.readGPAMemAddr.bits.ftqPtr
+    gpaMem.io.exceptionReadAddr.bits.ftqOffset := rob.io.readGPAMemAddr.bits.ftqOffset
   }
 
   // vtype commit
@@ -494,6 +503,7 @@ class CtrlBlockImp(
   rob.io.redirect := s1_s3_redirect
   rob.io.writeback := delayedNotFlushedWriteBack
   rob.io.writebackNums := VecInit(delayedNotFlushedWriteBackNums)
+  rob.io.readGPAMemData := gpaMem.io.exceptionReadData
 
   io.redirect := s1_s3_redirect
 
