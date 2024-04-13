@@ -135,8 +135,8 @@ object CSRDefines {
 
   object CSRField64Bits extends CSREnum with CSRMacroApply
 
-  object ContextStatus extends CSREnum with ContextStatusDef with CSRRWApply
-  object ContextStatusRO extends CSREnum with ContextStatusDef with CSRROApply
+  object ContextStatus extends CSREnum with ContextStatusDef with RWApply
+  object ContextStatusRO extends CSREnum with ContextStatusDef with ROApply
   trait ContextStatusDef { this: CSREnum =>
     val Off = Value(0.U)
     val Initial = Value(1.U)
@@ -144,20 +144,20 @@ object CSRDefines {
     val Dirty = Value(3.U)
   }
 
-  object XLENField extends CSREnum with CSRROApply {
+  object XLENField extends CSREnum with ROApply {
     val XLEN32 = Value(1.U)
     val XLEN64 = Value(2.U)
     val XLEN128 = Value(3.U)
   }
 
-  object XtvecMode extends CSREnum with CSRWARLApply {
+  object XtvecMode extends CSREnum with WARLApply {
     val Direct = Value(0.U)
     val Vectored = Value(1.U)
 
     override def isLegal(enum: CSREnumType): Bool = enum.isOneOf(Direct, Vectored)
   }
 
-  object SatpMode extends CSREnum with CSRWARLApply {
+  object SatpMode extends CSREnum with WARLApply {
     val Bare = Value(0.U)
     val Sv39 = Value(8.U)
     val Sv48 = Value(9.U)
@@ -167,7 +167,7 @@ object CSRDefines {
     override def isLegal(enum: CSREnumType): Bool = enum.isOneOf(Sv39)
   }
 
-  object HgatpMode extends CSREnum with CSRWARLApply {
+  object HgatpMode extends CSREnum with WARLApply {
     val Bare   = Value(0.U)
     val Sv39x4 = Value(8.U)
     val Sv48x4 = Value(9.U)
@@ -212,13 +212,13 @@ object CSRDefines {
     def apply(msb: Int, lsb: Int, fn: CSRWfnType): CSREnumType = macro CSRFieldsImpl.CSRWLRLFieldRange
   }
 
-  object PrivMode extends CSREnum with CSRRWApply {
+  object PrivMode extends CSREnum with RWApply {
     val U = Value(0.U)
     val S = Value(1.U)
     val M = Value(3.U)
   }
 
-  object VirtMode extends CSREnum with CSRRWApply {
+  object VirtMode extends CSREnum with RWApply {
     val Off = Value(0.U)
     val On  = Value(1.U)
   }

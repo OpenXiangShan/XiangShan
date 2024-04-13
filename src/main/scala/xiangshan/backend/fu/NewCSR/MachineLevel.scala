@@ -353,7 +353,7 @@ class McountinhibitBundle extends CSRBundle {
   val HPM3 = RW(31, 3)
 }
 
-object MarchidField extends CSREnum with CSRROApply {
+object MarchidField extends CSREnum with ROApply {
   val XSArchid = Value(25.U)
 }
 

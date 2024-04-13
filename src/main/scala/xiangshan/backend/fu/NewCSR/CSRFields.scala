@@ -5,8 +5,6 @@ import chisel3.internal.firrtl.Arg
 
 import xiangshan.backend.fu.NewCSR.CSRFunc._
 
-import scala.language.experimental.macros
-
 abstract class CSRRWType {
   val wfn: CSRWfnType
   val rfn: CSRRfnType
@@ -206,7 +204,7 @@ class CSREnumType(
   override def cloneType: this.type = factory.asInstanceOf[CSREnum].makeType.asInstanceOf[this.type]
 }
 
-abstract class CSREnum extends ChiselEnum {
+class CSREnum extends ChiselEnum {
   protected def apply(rwType: CSRRWType)(msb: Int, lsb: Int)(factory: ChiselEnum): CSREnumType = {
     this.msb = msb
     this.lsb = lsb
@@ -238,18 +236,19 @@ abstract class CSREnum extends ChiselEnum {
   println(s"A new CSREnum is created, factory: $this")
 }
 
-trait CSRROApply { self: CSREnum =>
+trait RWApply { self: CSREnum =>
+  def apply(msb: Int, lsb: Int): CSREnumType = self
+    .apply(RWType())(msb, lsb)(this)
+
+  def apply(bit: Int): CSREnumType = apply(bit, bit)
+}
+
+trait ROApply { self: CSREnum =>
   def apply(msb: Int, lsb: Int): CSREnumType = self
     .apply(ROType())(msb, lsb)(this)
 }
 
-trait CSRRWApply { self: CSREnum =>
-  def apply(msb: Int, lsb: Int): CSREnumType = self
-    .apply(RWType())(msb, lsb)(this)
-  def apply(bit: Int): CSREnumType = apply(bit, bit)
-}
-
-trait CSRWARLApply { self: CSREnum =>
+trait WARLApply { self: CSREnum =>
   def apply(msb: Int, lsb: Int, wfn: CSRWfnType, rfn: CSRRfnType): CSREnumType = self
     .apply(WARLType(wfn, rfn))(msb, lsb)(this)
 
@@ -257,7 +256,7 @@ trait CSRWARLApply { self: CSREnum =>
     .apply(WARLType(wfn))(msb, lsb)(this)
 }
 
-trait CSRWLRLApply { self: CSREnum =>
+trait WLRLApply { self: CSREnum =>
   def apply(msb: Int, lsb: Int, wfn: CSRWfnType, rfn: CSRRfnType): CSREnumType = self
     .apply(WLRLType(wfn, rfn))(msb, lsb)(this)
 }
