@@ -176,6 +176,7 @@ case class XSCoreParameters
     StuCnt = 2
   ),
   prefetcher: Option[PrefetcherParams] = Some(SMSParams()),
+  IfuRedirectNum: Int = 1,
   LoadPipelineWidth: Int = 2,
   StorePipelineWidth: Int = 2,
   VecMemSrcInWidth: Int = 2,
@@ -454,6 +455,7 @@ trait HasXSParameter {
   val NumRedirect = exuParameters.JmpCnt + exuParameters.AluCnt
   val BackendRedirectNum = NumRedirect + 2 //2: ldReplay + Exception
   val FtqRedirectAheadNum = exuParameters.AluCnt
+  val IfuRedirectNum = coreParams.IfuRedirectNum
   val LoadPipelineWidth = coreParams.LoadPipelineWidth
   val StorePipelineWidth = coreParams.StorePipelineWidth
   val VecMemSrcInWidth = coreParams.VecMemSrcInWidth
