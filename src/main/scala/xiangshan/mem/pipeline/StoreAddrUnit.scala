@@ -219,7 +219,7 @@ class StoreAddrUnit(implicit p: Parameters) extends XSModule with HasDCacheParam
   val s1_isLastElem = RegEnable(s0_isLastElem, false.B, s0_fire)
   s1_kill := s1_in.uop.robIdx.needFlush(io.redirect) || s1_tlb_miss
 
-  s1_ready := !s1_valid || s1_kill || s2_ready
+  s1_ready := true.B
   io.tlb.resp.ready := true.B // TODO: why dtlbResp needs a ready?
   when (s0_fire) { s1_valid := true.B }
   .elsewhen (s1_fire) { s1_valid := false.B }
@@ -317,7 +317,7 @@ class StoreAddrUnit(implicit p: Parameters) extends XSModule with HasDCacheParam
   val s2_fire   = s2_valid && !s2_kill && s2_can_go
   val s2_vecActive    = RegEnable(s1_out.vecActive, true.B, s1_fire)
 
-  s2_ready := !s2_valid || s2_kill || s3_ready
+  s2_ready := true.B
   when (s1_fire) { s2_valid := true.B }
   .elsewhen (s2_fire) { s2_valid := false.B }
   .elsewhen (s2_kill) { s2_valid := false.B }
@@ -409,19 +409,19 @@ class StoreAddrUnit(implicit p: Parameters) extends XSModule with HasDCacheParam
   val sx_in    = Wire(Vec(TotalDelayCycles + 1, new MemExuOutput))
 
   // backward ready signal
-  s3_ready := sx_ready.head
+  s3_ready := true.B
   for (i <- 0 until TotalDelayCycles + 1) {
     if (i == 0) {
       sx_valid(i) := s3_valid
       sx_in(i)    := s3_out
-      sx_ready(i) := !s3_valid(i) || sx_in(i).uop.robIdx.needFlush(io.redirect) || (if (TotalDelayCycles == 0) io.stout.ready else sx_ready(i+1))
+      sx_ready(i) := true.B
     } else {
       val cur_kill   = sx_in(i).uop.robIdx.needFlush(io.redirect)
       val cur_can_go = (if (i == TotalDelayCycles) io.stout.ready else sx_ready(i+1))
       val cur_fire   = sx_valid(i) && !cur_kill && cur_can_go
       val prev_fire  = sx_valid(i-1) && !sx_in(i-1).uop.robIdx.needFlush(io.redirect) && sx_ready(i)
 
-      sx_ready(i) := !sx_valid(i) || cur_kill || (if (i == TotalDelayCycles) io.stout.ready else sx_ready(i+1))
+      sx_ready(i) := true.B
       val sx_valid_can_go = prev_fire || cur_fire || cur_kill
       sx_valid(i) := RegEnable(Mux(prev_fire, true.B, false.B), false.B, sx_valid_can_go)
       sx_in(i) := RegEnable(sx_in(i-1), prev_fire)
@@ -430,7 +430,7 @@ class StoreAddrUnit(implicit p: Parameters) extends XSModule with HasDCacheParam
   val sx_last_valid = sx_valid.takeRight(1).head
   val sx_last_ready = sx_ready.takeRight(1).head
   val sx_last_in    = sx_in.takeRight(1).head
-  sx_last_ready := !sx_last_valid || sx_last_in.uop.robIdx.needFlush(io.redirect) || io.stout.ready
+  sx_last_ready := true.B
 
   io.stout.valid := sx_last_valid && !sx_last_in.uop.robIdx.needFlush(io.redirect) && isStore(sx_last_in.uop.fuType)
   io.stout.bits := sx_last_in

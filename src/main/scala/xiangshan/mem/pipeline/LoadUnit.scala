@@ -702,7 +702,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s1_vecActive        = RegEnable(s0_out.vecActive, true.B, s0_fire)
   val s1_vec_alignedType = RegEnable(io.vecldin.bits.alignedType, s0_fire)
 
-  s1_ready := !s1_valid || s1_kill || s2_ready
+  s1_ready := true.B
   when (s0_fire) { s1_valid := true.B }
   .elsewhen (s1_fire) { s1_valid := false.B }
   .elsewhen (s1_kill) { s1_valid := false.B }
@@ -901,7 +901,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_vec_alignedType = RegEnable(s1_vec_alignedType, s1_fire)
 
   s2_kill := s2_in.uop.robIdx.needFlush(io.redirect)
-  s2_ready := !s2_valid || s2_kill || s3_ready
+  s2_ready := true.B
   when (s1_fire) { s2_valid := true.B }
   .elsewhen (s2_fire) { s2_valid := false.B }
   .elsewhen (s2_kill) { s2_valid := false.B }
@@ -1168,7 +1168,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_isvec        = RegEnable(s2_out.isvec, false.B, s2_fire)
   val s3_vec_alignedType = RegEnable(s2_vec_alignedType, s2_fire)
   val s3_mmio         = Wire(Valid(new MemExuOutput))
-  s3_ready := !s3_valid || s3_kill || io.ldout.ready
+  s3_ready := true.B
   s3_mmio.valid := RegNextN(io.lsq.uncache.fire, 3, Some(false.B))
   s3_mmio.bits  := RegNextN(io.lsq.uncache.bits, 3)
 
