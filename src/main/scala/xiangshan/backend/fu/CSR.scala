@@ -1402,7 +1402,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     hasStoreAddrMisalign,
     hasInstGuestPageFault,
     hasLoadGuestPageFault,
-    hasStoreGuestPageFault
+    hasStoreGuestPageFault,
+    hasBreakPoint,
   )).asUInt.orR
   val updateTval_h = VecInit(Seq(
     hasInstGuestPageFault,
@@ -1411,7 +1412,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   )).asUInt.orR
   when (RegNext(RegNext(updateTval))) {
       val tval = Mux(
-        RegNext(RegNext(hasInstrPageFault || hasInstrAccessFault || hasInstGuestPageFault)),
+        RegNext(RegNext(hasInstrPageFault || hasInstrAccessFault || hasInstGuestPageFault || hasBreakPoint)),
         RegNext(RegNext(Mux(
           csrio.exception.bits.crossPageIPFFix,
           SignExt(csrio.exception.bits.pc + 2.U, XLEN),
