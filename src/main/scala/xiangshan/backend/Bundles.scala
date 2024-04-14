@@ -762,7 +762,7 @@ class IssueQueueIQWakeUpBundle(
     val src = if (isVector) Vec(5, UInt(VLEN.W)) else Vec(3, UInt(XLEN.W))
     val iqIdx = UInt(log2Up(MemIQSizeMax).W)
     val isFirstIssue = Bool()
-    val flowNum      = OptionWrapper(isVector, UInt(log2Up(VLEN/8).W))
+    val flowNum      = OptionWrapper(isVector, NumLsElem())
 
     def src_rs1 = src(0)
     def src_stride = src(1)
