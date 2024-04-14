@@ -189,12 +189,6 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
   val vmid = UInt(vmidLen.W)
   val s2xlate = UInt(2.W)
 
-  /** s2xlate usage:
-    * bits0 0: disable s2xlate
-    *       1: enable s2xlate
-    * bits1 0: stage 1 and stage 2 if bits0 is 1
-    *       1: Only stage 2 if bits0 is 1
-    * */
 
   /** level usage:
     *  !PageSuper: page is only normal, level is None, match all the tag
@@ -308,12 +302,6 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
   val vmid = UInt(vmidLen.W)
   val s2xlate = UInt(2.W)
 
-  /** s2xlate usage:
-    * bits0 0: disable s2xlate
-    * 1: enable s2xlate
-    * bits1 0: stage 1 and stage 2 if bits0 is 1
-    * 1: Only stage 2 if bits0 is 1
-    * */
 
   /** level usage:
    *  !PageSuper: page is only normal, level is None, match all the tag
@@ -366,7 +354,6 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
       onlyS2 -> (VecInit(UIntToOH(data.s2.entry.tag(sectortlbwidth - 1, 0))).asUInt === pteidx.asUInt),
       hasS2xlate -> (pteidx.asUInt === data.s1.pteidx.asUInt)
     ))
-    //for onlystage2 entry, every valididx is true
     wb_valididx := Mux(s2xlate === onlyStage2, VecInit(UIntToOH(data.s2.entry.tag(sectortlbwidth - 1, 0)).asBools), data.s1.valididx)
     val s2xlate_hit = s2xlate === this.s2xlate
     // NOTE: for timing, dont care low set index bits at hit check
@@ -518,7 +505,7 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit 
   val r = new Bundle {
     val req = Vec(ports, Flipped(DecoupledIO(new Bundle {
       val vpn = Output(UInt(vpnLen.W))
-      val s2xlate = Output(UInt(2.W)) // 0 bit: has s2xlate, 1 bit: Only valid when 0 bit is 1. If 0, all stage; if 1, only stage 2
+      val s2xlate = Output(UInt(2.W)) 
     })))
     val resp = Vec(ports, ValidIO(new Bundle{
       val hit = Output(Bool())
@@ -1100,14 +1087,6 @@ class HptwResp(implicit p: Parameters) extends PtwBundle {
     this.gpf := gpf
     this.gaf := gaf
   }
-
-  // def genPPNS2(): UInt = {
-  //   MuxLookup(entry.level.get, 0.U, Seq(
-  //     0.U -> Cat(entry.ppn(entry.ppn.getWidth - 1, vpnnLen * 2), entry.tag(vpnnLen * 2 - 1, 0)),
-  //     1.U -> Cat(entry.ppn(entry.ppn.getWidth - 1, vpnnLen), entry.tag(vpnnLen - 1, 0)),
-  //     2.U -> Cat(entry.ppn(entry.ppn.getWidth - 1, 0))
-  //   ))
-  // }
 
   def genPPNS2(vpn: UInt): UInt = {
     MuxLookup(entry.level.get, 0.U)(Seq(
