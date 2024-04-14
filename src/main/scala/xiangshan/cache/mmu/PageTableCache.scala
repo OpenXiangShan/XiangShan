@@ -182,7 +182,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val l1g = Reg(UInt(l2tlbParams.l1Size.W))
   val l1asids = l1.map(_.asid)
   val l1vmids = l1.map(_.vmid)
-  val l1h = Reg(Vec(l2tlbParams.l1Size, UInt(2.W))) // 0 bit: s2xlate, 1 bit: stage 1 or stage 2
+  val l1h = Reg(Vec(l2tlbParams.l1Size, UInt(2.W)))
 
   // l2: level 1 non-leaf pte
   val l2 = Module(new SRAMTemplate(
