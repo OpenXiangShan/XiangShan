@@ -1381,7 +1381,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   // FIXME: please move this part to LoadQueueReplay
   io.ldu_io.debug_ls := DontCare
   io.stu_io.debug_ls := DontCare
-  io.stu_io.debug_ls.s1.isTlbFirstMiss := io.tlb.resp.valid && io.tlb.resp.bits.miss && io.tlb.resp.bits.debug.isFirstIssue && !s1_in.isHWPrefetch && !s1_ld_flow
+  io.stu_io.debug_ls.s1_isTlbFirstMiss := io.tlb.resp.valid && io.tlb.resp.bits.miss && io.tlb.resp.bits.debug.isFirstIssue && !s1_in.isHWPrefetch && !s1_ld_flow
   io.stu_io.debug_ls.s1_robIdx := s1_in.uop.robIdx.value
 
  // Topdown
