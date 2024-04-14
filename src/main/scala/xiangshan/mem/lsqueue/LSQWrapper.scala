@@ -345,6 +345,7 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule
   }
 
 
+  //TODO MaxAllocate and width of lqOffset/sqOffset needs to be discussed
   val lqMaxAllocate = LSQLdEnqWidth
   val sqMaxAllocate = LSQStEnqWidth
   val maxAllocate = lqMaxAllocate max sqMaxAllocate
@@ -355,8 +356,8 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule
   // after the last redirect, new instructions may enter but previously redirect has not been resolved (updated according to the cancel count from LSQ).
   // To solve the issue easily, we block enqueue when t3_update, which is RegNext(t2_update).
   io.enq.canAccept := RegNext(ldCanAccept && sqCanAccept && !t2_update)
-  val lqOffset = Wire(Vec(io.enq.resp.length, UInt(log2Up(maxAllocate + 1).W)))
-  val sqOffset = Wire(Vec(io.enq.resp.length, UInt(log2Up(maxAllocate + 1).W)))
+  val lqOffset = Wire(Vec(io.enq.resp.length, UInt(lqPtr.value.getWidth.W)))
+  val sqOffset = Wire(Vec(io.enq.resp.length, UInt(sqPtr.value.getWidth.W)))
   for ((resp, i) <- io.enq.resp.zipWithIndex) {
     lqOffset(i) := validVLoadOffset.take(i + 1).reduce(_ + _)
     resp.lqIdx := lqPtr + lqOffset(i)
