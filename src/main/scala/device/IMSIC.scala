@@ -6,9 +6,9 @@ import chisel3.experimental._
 
 class IMSIC(
   NumIRFiles: Int = 7,
-  NumIRSrc: Int = 12,
   NumHart: Int = 2,
   XLEN: Int = 64,
+  NumIRSrc: Int = 12,
 ) extends Module {
   // has default clock and reset
   val i = IO(Input(new Bundle {
@@ -42,16 +42,24 @@ class IMSIC(
   })
 
   val imsicTop = Module(new imsic_csr_top)
+
+  imsicTop.csr_clk := clock
+  imsicTop.csr_rstn := reset
 }
 
-class imsic_csr_top extends BlackBox(Map(
-  "NR_INTP_FILES" -> 7,
-  "NR_HARTS"      -> 1,
-  "XLEN"          -> 64,
-  "NR_SRC"        -> 32,
+class imsic_csr_top(
+  NumIRFiles: Int = 7,
+  NumIRSrc: Int = 12,
+  NumHart: Int = 2,
+  XLEN: Int = 64,
+) extends BlackBox(Map(
+  "NR_INTP_FILES" -> NumIRFiles,
+  "NR_HARTS"      -> NumHart,
+  "XLEN"          -> XLEN,
+  "NR_SRC"        -> NumIRSrc,
 )) {
   val csr_clk = Input(Clock())
-  val csr_rstn = Input(AsyncReset())
+  val csr_rstn = Input(Reset())
   // Todo: more bundles
 }
 
