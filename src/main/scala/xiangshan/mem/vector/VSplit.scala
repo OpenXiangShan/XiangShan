@@ -344,24 +344,24 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   /** Issue to scala pipeline**/
   val canIssue = Wire(Bool())
   val allowIssue = io.out.ready
-  val doIssue = Wire(Bool())
+  val activeIssue = Wire(Bool())
   val deqValid = valid(deqPtr.value)
   val inActiveIssue = deqValid && canIssue && !vecActive && issuePreIsSplit
-  val issueCount = Mux(usNoSplit, 2.U, (PopCount(inActiveIssue) + PopCount(doIssue))) // for dont need split unit-stride, issue two flow
+  val issueCount = Mux(usNoSplit, 2.U, (PopCount(inActiveIssue) + PopCount(activeIssue))) // for dont need split unit-stride, issue two flow
 
   // handshake
   val thisPtr = deqPtr.value
   canIssue := !issueUop.robIdx.needFlush(io.redirect) && deqPtr < enqPtr
-  doIssue := canIssue && allowIssue
+  activeIssue := canIssue && allowIssue && (vecActive || !issuePreIsSplit) // active issue, current use in no unit-stride
   when (!RegNext(io.redirect.valid) || distanceBetween(enqPtr, deqPtr) > flushNumReg) {
     when ((splitIdx < (issueFlowNum - issueCount))) {
-      when (doIssue || inActiveIssue) {
+      when (activeIssue || inActiveIssue) {
         // The uop has not been entirly splited yet
         splitIdx := splitIdx + issueCount
         strideOffsetReg := Mux(!issuePreIsSplit, strideOffsetReg, strideOffsetReg + issueEntry.stride) // when normal unit-stride, don't use strideOffsetReg
       }
     }.otherwise {
-      when (doIssue || inActiveIssue) {
+      when (activeIssue || inActiveIssue) {
         // The uop is done spliting
         splitIdx := 0.U(flowIdxBits.W) // initialize flowIdx
         valid(deqPtr.value) := false.B
