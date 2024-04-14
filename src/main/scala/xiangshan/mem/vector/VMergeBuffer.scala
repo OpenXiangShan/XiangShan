@@ -309,8 +309,11 @@ class VLMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
   ))
 
   //merge data
-  val flowWbElemIdx = Wire(Vec(LoadPipelineWidth, UInt(elemIdxBits.W)))
-  val flowWbElemIdxInVd = Wire(Vec(LoadPipelineWidth, UInt(elemIdxBits.W)))
+  val flowWbElemIdx     = Wire(Vec(pipeWidth, UInt(elemIdxBits.W)))
+  val flowWbElemIdxInVd = Wire(Vec(pipeWidth, UInt(elemIdxBits.W)))
+  val pipewbValidReg    = Wire(Vec(pipeWidth, Bool()))
+  val wbIndexReg        = Wire(Vec(pipeWidth, UInt(vlmBindexBits.W)))
+  val mergeDataReg      = Wire(Vec(pipeWidth, UInt(VLEN.W)))
 
   for((pipewb, i) <- io.fromPipeline.zipWithIndex){
     /** step0 **/
@@ -320,8 +323,14 @@ class VLMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
     flowWbElemIdx(i) := pipewb.bits.elemIdx
     flowWbElemIdxInVd(i) := elemIdxInsideVd.get
 
+    val oldData = PriorityMux(Seq(
+      (pipewbValidReg(0) && (wbIndexReg(0) === wbIndex)) -> mergeDataReg(0),
+      (pipewbValidReg(1) && (wbIndexReg(1) === wbIndex)) -> mergeDataReg(1),
+      (pipewbValidReg(2) && (wbIndexReg(2) === wbIndex)) -> mergeDataReg(2),
+      true.B                                             -> entries(wbIndex).data // default use entries_data
+    ))
     val mergedData = mergeDataWithElemIdx(
-      oldData = entries(wbIndex).data,
+      oldData = oldData,
       newData = io.fromPipeline.map(_.bits.vecdata.get),
       alignedType = alignedType(1,0),
       elemIdx = flowWbElemIdxInVd,
@@ -338,9 +347,9 @@ class VLMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
       valids  = mergePortMatrix(i).drop(i)
     )
     /** step1 **/
-    val pipewbValidReg      = RegNext(pipewb.valid)
-    val wbIndexReg          = RegEnable(wbIndex, pipewb.valid)
-    val mergeDataReg        = RegEnable(mergedData, pipewb.valid) // for not Unit-stride
+    pipewbValidReg(i)      := RegNext(pipewb.valid)
+    wbIndexReg(i)          := RegEnable(wbIndex, pipewb.valid)
+    mergeDataReg(i)        := RegEnable(mergedData, pipewb.valid) // for not Unit-stride
     val brodenMergeDataReg  = RegEnable(brodenMergeData, pipewb.valid) // only for Unit-stride
     val brodenMergeMaskReg  = RegEnable(brodenMergeMask, pipewb.valid)
     val mergedByPrevPortReg = RegEnable(mergedByPrevPortVec(i), pipewb.valid)
@@ -349,9 +358,9 @@ class VLMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
 
     val usSelData           = Mux1H(UIntToOH(regOffsetReg), (0 until VLENB).map{case i => getNoAlignedSlice(brodenMergeDataReg, i, 128)})
     val usSelMask           = Mux1H(UIntToOH(regOffsetReg), (0 until VLENB).map{case i => brodenMergeMaskReg(16 + i - 1, i)})
-    val usMergeData         = mergeDataByByte(entries(wbIndexReg).data, usSelData, usSelMask)
-    when(pipewbValidReg && !mergedByPrevPortReg){
-      entries(wbIndexReg).data := Mux(isusMerge, usMergeData, mergeDataReg) // if aligned(2) == 1, is Unit-Stride inst
+    val usMergeData         = mergeDataByByte(entries(wbIndexReg(i)).data, usSelData, usSelMask)
+    when(pipewbValidReg(i) && !mergedByPrevPortReg){
+      entries(wbIndexReg(i)).data := Mux(isusMerge, usMergeData, mergeDataReg(i)) // if aligned(2) == 1, is Unit-Stride inst
     }
   }
 }
