@@ -39,13 +39,13 @@ class CSRPermitModule extends Module {
 }
 
 class CSRPermitIO extends Bundle {
-  val in = new Bundle {
+  val in = Input(new Bundle {
     val wen  = Bool()
     val addr = UInt(12.W)
     val privState = new PrivState
-  }
+  })
 
-  val out = new Bundle {
+  val out = Output(new Bundle {
     val legal = Bool()
-  }
+  })
 }

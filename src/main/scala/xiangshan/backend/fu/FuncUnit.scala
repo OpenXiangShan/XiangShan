@@ -13,6 +13,7 @@ import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.fu.vector.Bundles.Vxsat
 import xiangshan.ExceptionNO.illegalInstr
 import xiangshan.backend.fu.vector.Bundles.VType
+import xiangshan.backend.fu.wrapper.CSRInput
 
 class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val fuOpType    = FuOpType()
@@ -84,6 +85,7 @@ class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val flush = Flipped(ValidIO(new Redirect))
   val in = Flipped(DecoupledIO(new FuncUnitInput(cfg)))
   val out = DecoupledIO(new FuncUnitOutput(cfg))
+  val csrin = OptionWrapper(cfg.isCsr, new CSRInput)
   val csrio = OptionWrapper(cfg.isCsr, new CSRFileIO)
   val fenceio = OptionWrapper(cfg.isFence, new FenceIO)
   val frm = OptionWrapper(cfg.needSrcFrm, Input(UInt(3.W)))

@@ -20,6 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import system.HasSoCParameter
 import utility.{Constantin, ZeroExt}
 import xiangshan._
 import xiangshan.backend.Bundles.{DynInst, IssueQueueIQWakeUpBundle, LoadShouldCancel, MemExuInput, MemExuOutput, VPUCtrlSignals}
@@ -394,6 +395,11 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   pcTargetMem.io.fromFrontendFtq := io.frontend.fromFtq
   pcTargetMem.io.toDataPath <> dataPath.io.fromPcTargetMem
 
+  private val csrin = intExuBlock.io.csrin.get
+  csrin.hartId := io.fromTop.hartId
+  csrin.setIpNumValidVec2 := io.fromTop.setIpNumValidVec2
+  csrin.setIpNum := io.fromTop.setIpNum
+
   private val csrio = intExuBlock.io.csrio.get
   csrio.hartId := io.fromTop.hartId
   csrio.fpu.fflags := ctrlBlock.io.robio.csr.fflags
@@ -764,10 +770,12 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   }
 }
 
-class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle {
+class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle with HasSoCParameter {
   val fromTop = new Bundle {
     val hartId = Input(UInt(hartIdLen.W))
     val externalInterrupt = new ExternalInterruptIO
+    val setIpNumValidVec2 = Input(UInt(SetIpNumValidSize.W))
+    val setIpNum = Input(UInt(log2Up(NumIRSrc).W))
   }
 
   val toTop = new Bundle {

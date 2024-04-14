@@ -159,3 +159,7 @@ class AIAToCSRBundle extends Bundle {
   val stopei = ValidIO(new TopEIBundle)
   val vstopei = ValidIO(new TopEIBundle)
 }
+
+trait HasAIABundle { self: CSRModule[_] =>
+  val aiaToCSR = IO(Input(new AIAToCSRBundle))
+}
