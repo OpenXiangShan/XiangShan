@@ -1422,8 +1422,23 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   }}
   io.lsq.trigger.hitLoadAddrTriggerHitVec := hit_ld_addr_trig_hit_vec
 
-  // FIXME: please move this part to LoadQueueReplay
-  io.debug_ls := DontCare
+  // s1
+  io.debug_ls.s1_robIdx := s1_in.uop.robIdx.value
+  io.debug_ls.s1_isLoadToLoadForward := s1_fire && s1_try_ptr_chasing && !s1_ptr_chasing_canceled
+  io.debug_ls.s1_isTlbFirstMiss := s1_fire && s1_tlb_miss && s1_in.isFirstIssue
+  // s2
+  io.debug_ls.s2_robIdx := s2_in.uop.robIdx.value
+  io.debug_ls.s2_isBankConflict := s2_fire && (!s2_kill && s2_bank_conflict)
+  io.debug_ls.s2_isDcacheFirstMiss := s2_fire && io.dcache.resp.bits.miss && s2_in.isFirstIssue
+  io.debug_ls.s2_isForwardFail := s2_fire && s2_fwd_fail
+  // s3
+  io.debug_ls.s3_robIdx := s3_in.uop.robIdx.value
+  io.debug_ls.s3_isReplayFast := s3_valid && s3_fast_rep && !s3_fast_rep_canceled
+  io.debug_ls.s3_isReplayRS :=  RegNext(io.feedback_fast.valid && !io.feedback_fast.bits.hit) || (io.feedback_slow.valid && !io.feedback_slow.bits.hit)
+  io.debug_ls.s3_isReplaySlow := io.lsq.ldin.valid && io.lsq.ldin.bits.rep_info.need_rep
+  io.debug_ls.s3_isReplay := s3_valid && s3_rep_info.need_rep // include fast+slow+rs replay
+  io.debug_ls.replayCause := s3_rep_info.cause
+  io.debug_ls.replayCnt := 1.U
 
   // Topdown
   io.lsTopdownInfo.s1.robIdx          := s1_in.uop.robIdx.value
