@@ -1225,7 +1225,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
         mstatusNew.mprv := 0.U
       }
       mstatus := mstatusNew.asUInt
-    }.elsewhen(isSret && !illegalSret && !illegalSModeSret) {
+    }.elsewhen(isSret && !illegalSret && !illegalSModeSret && !illegalVSModeSret) {
       val mstatusOld = WireInit(mstatus.asTypeOf(new MstatusStruct))
       val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
       val hstatusOld = WireInit(hstatus.asTypeOf(new HstatusStruct))
