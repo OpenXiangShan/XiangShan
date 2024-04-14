@@ -750,7 +750,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   private val emul            = fuOpType.zipWithIndex.map { case (fuOpTypeItem, index) =>
     Mux(
       LSUOpType.isWhole(fuOpTypeItem),
-      GenUSWholeEmul(uop(index).vpu.nf),
+      GenUSWholeEmul(nf(index)),
       Mux(
         LSUOpType.isMasked(fuOpTypeItem),
         0.U(mulBits.W),
@@ -768,7 +768,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     Mux(
       (LSUOpType.isWhole(fuOpType(index)) || isUnitStride(index)) && isVlsType(index),
       2.U,
-      (1.U(5.W) << GenRealFlowNum(instTypeItem, emul(index), lmul(index), eew(index), sew(index))).asUInt
+      GenRealFlowNum(instTypeItem, emul(index), lmul(index), eew(index), sew(index))
     )
   }
 
