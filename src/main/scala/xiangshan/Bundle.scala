@@ -29,20 +29,11 @@ import xiangshan.frontend._
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.backend.Bundles.{DynInst, UopIdx}
 import xiangshan.backend.fu.vector.Bundles.VType
-import xiangshan.frontend.PreDecodeInfo
-import xiangshan.frontend.HasBPUParameter
-import xiangshan.frontend.{AllFoldedHistories, CircularGlobalHistory, GlobalHistory, ShiftingGlobalHistory}
-import xiangshan.frontend.RASEntry
-import xiangshan.frontend.BPUCtrl
-import xiangshan.frontend.FtqPtr
-import xiangshan.frontend.CGHPtr
-import xiangshan.frontend.FtqRead
-import xiangshan.frontend.FtqToCtrlIO
+import xiangshan.frontend.{AllAheadFoldedHistoryOldestBits, AllFoldedHistories, BPUCtrl, CGHPtr, FtqPtr, FtqToCtrlIO}
+import xiangshan.frontend.{Ftq_Redirect_SRAMEntry, HasBPUParameter, IfuToBackendIO, PreDecodeInfo, RASPtr}
 import xiangshan.cache.HasDCacheParameters
-import utils._
 import utility._
 
-import scala.math.max
 import org.chipsalliance.cde.config.Parameters
 import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util.experimental.decode.EspressoMinimizer
@@ -465,6 +456,7 @@ class FrontendToCtrlIO(implicit p: Parameters) extends XSBundle {
   val cfVec = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
   val stallReason = new StallReasonIO(DecodeWidth)
   val fromFtq = new FtqToCtrlIO
+  val fromIfu = new IfuToBackendIO
   // from backend
   val toFtq = Flipped(new CtrlToFtqIO)
   val canAccept = Input(Bool())

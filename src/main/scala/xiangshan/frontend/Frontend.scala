@@ -159,6 +159,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   ftq.io.fromBackend <> io.backend.toFtq
   io.backend.fromFtq <> ftq.io.toBackend
+  io.backend.fromIfu <> ifu.io.toBackend
   io.frontendInfo.bpuInfo <> ftq.io.bpuInfo
 
   val checkPcMem = Reg(Vec(FtqSize, new Ftq_RF_Components))

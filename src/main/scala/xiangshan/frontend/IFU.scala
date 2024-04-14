@@ -48,6 +48,15 @@ class IfuToFtqIO(implicit p:Parameters) extends XSBundle {
   val pdWb = Valid(new PredecodeWritebackBundle)
 }
 
+class IfuToBackendIO(implicit p:Parameters) extends XSBundle {
+  // write to backend gpaddr mem
+  val gpaddrMem_wen = Output(Bool())
+  val gpaddrMem_waddr = Output(UInt(log2Ceil(FtqSize).W)) // Ftq Ptr
+  // 2 gpaddrs, correspond to startAddr & nextLineAddr in bundle FtqICacheInfo
+  // TODO: avoid cross page entry in Ftq
+  val gpaddrMem_wdata = Output(Vec(2, UInt(GPAddrBits.W)))
+}
+
 class FtqInterface(implicit p: Parameters) extends XSBundle {
   val fromFtq = Flipped(new FtqToIfuIO)
   val toFtq   = new IfuToFtqIO
@@ -59,17 +68,18 @@ class UncacheInterface(implicit p: Parameters) extends XSBundle {
 }
 
 class NewIFUIO(implicit p: Parameters) extends XSBundle {
-  val ftqInter        = new FtqInterface
-  val icacheInter     = Flipped(new IFUICacheIO)
-  val icacheStop      = Output(Bool())
-  val icachePerfInfo  = Input(new ICachePerfInfo)
-  val toIbuffer       = Decoupled(new FetchToIBuffer)
-  val uncacheInter   =  new UncacheInterface
-  val frontendTrigger = Flipped(new FrontendTdataDistributeIO)
-  val rob_commits = Flipped(Vec(CommitWidth, Valid(new RobCommitInfo)))
-  val iTLBInter       = new TlbRequestIO
-  val pmp             =   new ICachePMPBundle
-  val mmioCommitRead  = new mmioCommitRead
+  val ftqInter         = new FtqInterface
+  val icacheInter      = Flipped(new IFUICacheIO)
+  val icacheStop       = Output(Bool())
+  val icachePerfInfo   = Input(new ICachePerfInfo)
+  val toIbuffer        = Decoupled(new FetchToIBuffer)
+  val toBackend        = new IfuToBackendIO
+  val uncacheInter     = new UncacheInterface
+  val frontendTrigger  = Flipped(new FrontendTdataDistributeIO)
+  val rob_commits      = Flipped(Vec(CommitWidth, Valid(new RobCommitInfo)))
+  val iTLBInter        = new TlbRequestIO
+  val pmp              = new ICachePMPBundle
+  val mmioCommitRead   = new mmioCommitRead
 }
 
 // record the situation in which fallThruAddr falls into
@@ -357,6 +367,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f2_except_pf    = VecInit((0 until PortNumber).map(i => fromICache(i).bits.tlbExcp.pageFault))
   val f2_except_gpf   = VecInit((0 until PortNumber).map(i => fromICache(i).bits.tlbExcp.guestPageFault))
   val f2_except_af    = VecInit((0 until PortNumber).map(i => fromICache(i).bits.tlbExcp.accessFault))
+  // paddr and gpaddr of [startAddr, nextLineAddr]
+  val f2_paddrs       = VecInit((0 until PortNumber).map(i => fromICache(i).bits.paddr))
   val f2_gpaddrs      = VecInit((0 until PortNumber).map(i => fromICache(i).bits.gpaddr))
   val f2_mmio         = fromICache(0).bits.tlbExcp.mmio &&
     !fromICache(0).bits.tlbExcp.accessFault &&
@@ -384,8 +396,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f2_pf_vec = VecInit((0 until PredictWidth).map(i => (!isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_except_pf(0)   ||  isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_doubleLine &&  f2_except_pf(1))))
   val f2_af_vec = VecInit((0 until PredictWidth).map(i => (!isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_except_af(0)   ||  isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_doubleLine && f2_except_af(1))))
   val f2_gpf_vec = VecInit((0 until PredictWidth).map(i => (!isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_except_gpf(0) || isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_doubleLine && f2_except_gpf(1))))
-  val f2_gpaddrs_tmp = VecInit((0 until PredictWidth).map(i => Mux(!isNextLine(f2_pc(i), f2_ftq_req.startAddr), Cat(f2_gpaddrs(0)(GPAddrBits-1, offLen), f2_pc(i)(offLen - 1, 0)), Mux(isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_doubleLine, Cat(f2_gpaddrs(1)(GPAddrBits-1, offLen), f2_pc(i)(offLen - 1, 0)), 0.U(GPAddrBits.W)))))  
-  val f2_paddrs       = VecInit((0 until PortNumber).map(i => fromICache(i).bits.paddr))
+  val f2_gpaddrs_tmp = VecInit((0 until PredictWidth).map(i => Mux(!isNextLine(f2_pc(i), f2_ftq_req.startAddr), Cat(f2_gpaddrs(0)(GPAddrBits-1, offLen), f2_pc(i)(offLen - 1, 0)), Mux(isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_doubleLine, Cat(f2_gpaddrs(1)(GPAddrBits-1, offLen), f2_pc(i)(offLen - 1, 0)), 0.U(GPAddrBits.W)))))
   val f2_perf_info    = io.icachePerfInfo
 
   def cut(cacheline: UInt, cutPtr: Vec[UInt]) : Vec[UInt] ={
@@ -484,7 +495,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_af_vec         = RegEnable(f2_af_vec,      f2_fire)
   val f3_pf_vec         = RegEnable(f2_pf_vec ,     f2_fire)
   val f3_gpf_vec        = RegEnable(f2_gpf_vec,     f2_fire)
-  val f3_gpaddrs        = RegEnable(f2_gpaddrs_vec, f2_fire)
+  val f3_gpaddr_vec     = RegEnable(f2_gpaddrs_vec, f2_fire)
   val f3_pc             = RegEnable(f2_pc,          f2_fire)
   val f3_half_snpc      = RegEnable(f2_half_snpc,   f2_fire)
   val f3_instr_range    = RegEnable(f2_instr_range, f2_fire)
@@ -494,7 +505,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_hasHalfValid   = RegEnable(f2_hasHalfValid,             f2_fire)
   val f3_except         = VecInit((0 until 2).map{i => f3_except_pf(i) || f3_except_af(i) || f3_except_gpf(i)})
   val f3_has_except     = f3_valid && (f3_except_af.reduce(_||_) || f3_except_pf.reduce(_||_) || f3_except_gpf.reduce(_||_))
-  val f3_pAddrs         = RegEnable(f2_paddrs,  f2_fire)
+  val f3_paddrs         = RegEnable(f2_paddrs,  f2_fire)
+  val f3_gpaddrs        = RegEnable(f2_gpaddrs,  f2_fire)
   val f3_resend_vaddr   = RegEnable(f2_resend_vaddr,             f2_fire)
 
   // Expand 1 bit to prevent overflow when assert
@@ -591,7 +603,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     is(m_waitResp){
       when(fromUncache.fire){
           val isRVC =  fromUncache.bits.data(1,0) =/= 3.U
-          val needResend = !isRVC && f3_pAddrs(0)(2,1) === 3.U
+          val needResend = !isRVC && f3_paddrs(0)(2,1) === 3.U
           mmio_state :=  Mux(needResend, m_sendTLB , m_waitCommit)
 
           mmio_is_RVC := isRVC
@@ -659,7 +671,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   }
 
   toUncache.valid     :=  ((mmio_state === m_sendReq) || (mmio_state === m_resendReq)) && f3_req_is_mmio
-  toUncache.bits.addr := Mux((mmio_state === m_resendReq), mmio_resend_addr, f3_pAddrs(0))
+  toUncache.bits.addr := Mux((mmio_state === m_resendReq), mmio_resend_addr, f3_paddrs(0))
   fromUncache.ready   := true.B
 
   io.iTLBInter.req.valid         := (mmio_state === m_sendTLB) && f3_req_is_mmio
@@ -735,7 +747,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_triggered = frontendTrigger.io.triggered
 
   /*** send to Ibuffer  ***/
-
   io.toIbuffer.valid            := f3_valid && (!f3_req_is_mmio || f3_mmio_can_go) && !f3_flush
   io.toIbuffer.bits.instrs      := f3_expd_instr
   io.toIbuffer.bits.valid       := f3_instr_valid.asUInt
@@ -743,7 +754,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   io.toIbuffer.bits.pd          := f3_pd
   io.toIbuffer.bits.ftqPtr      := f3_ftq_req.ftqIdx
   io.toIbuffer.bits.pc          := f3_pc
-  io.toIbuffer.bits.gpaddr      := f3_gpaddrs
+  io.toIbuffer.bits.gpaddr      := f3_gpaddr_vec
   io.toIbuffer.bits.ftqOffset.zipWithIndex.map{case(a, i) => a.bits := i.U; a.valid := checkerOutStage1.fixedTaken(i) && !f3_req_is_mmio}
   io.toIbuffer.bits.foldpc      := f3_foldpc
   io.toIbuffer.bits.ipf         := VecInit(f3_pf_vec.zip(f3_crossPageFault).map{case (pf, crossPF) => pf || crossPF})
@@ -757,6 +768,10 @@ class NewIFU(implicit p: Parameters) extends XSModule
     io.toIbuffer.bits.valid     := f3_lastHalf_mask & f3_instr_valid.asUInt
   }
 
+  /** to backend */
+  io.toBackend.gpaddrMem_wen   := f3_valid && (!f3_req_is_mmio || f3_mmio_can_go) && !f3_flush // same as toIbuffer
+  io.toBackend.gpaddrMem_waddr := f3_ftq_req.ftqIdx.value
+  io.toBackend.gpaddrMem_wdata := f3_gpaddrs
 
 
   //Write back to Ftq
