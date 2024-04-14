@@ -782,12 +782,12 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   //  2) The number of flows accumulated does not exceed VecMemDispatchMaxNumber.
   private val allowDispatch = Wire(Vec(numLsElem.length, Bool()))
   for (index <- allowDispatch.indices) {
-    val flowTotal = conserveFlows.take(index + 1).reduce(_ + _)
+    val flowTotal = conserveFlows.take(index + 1).reduce(_ +& _)
     if(index == 0){
       when(isStoreVec(index) || isVStoreVec(index)) {
-        allowDispatch(index) := Mux(sqFreeCount > flowTotal && flowTotal <= VecMemDispatchMaxNumber.U, true.B, false.B)
+        allowDispatch(index) := Mux((sqFreeCount > flowTotal) && (flowTotal <= VecMemDispatchMaxNumber.U), true.B, false.B)
       } .elsewhen(isLoadVec(index) || isVLoadVec(index)) {
-        allowDispatch(index) := Mux(lqFreeCount > flowTotal && flowTotal <= VecMemDispatchMaxNumber.U, true.B, false.B)
+        allowDispatch(index) := Mux((lqFreeCount > flowTotal) && (flowTotal <= VecMemDispatchMaxNumber.U), true.B, false.B)
       } .elsewhen (isAMOVec(index)) {
         allowDispatch(index) := true.B
       } .otherwise {
@@ -796,9 +796,9 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     }
     else{
       when(isStoreVec(index) || isVStoreVec(index)) {
-        allowDispatch(index) := Mux(sqFreeCount > flowTotal && flowTotal <= VecMemDispatchMaxNumber.U, true.B, false.B) && allowDispatch(index - 1)
+        allowDispatch(index) := Mux((sqFreeCount > flowTotal) && (flowTotal <= VecMemDispatchMaxNumber.U), true.B, false.B) && allowDispatch(index - 1)
       } .elsewhen(isLoadVec(index) || isVLoadVec(index)) {
-        allowDispatch(index) := Mux(lqFreeCount > flowTotal && flowTotal <= VecMemDispatchMaxNumber.U, true.B, false.B) && allowDispatch(index - 1)
+        allowDispatch(index) := Mux((lqFreeCount > flowTotal) && (flowTotal <= VecMemDispatchMaxNumber.U), true.B, false.B) && allowDispatch(index - 1)
       } .elsewhen (isAMOVec(index)) {
         allowDispatch(index) := allowDispatch(index - 1)
       } .otherwise {
