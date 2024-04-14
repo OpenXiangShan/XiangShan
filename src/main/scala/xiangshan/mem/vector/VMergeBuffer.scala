@@ -216,7 +216,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     val selElemInfield         = selPort.head.elemIdx & (entries(wbMbIndex(i)).vlmax - 1.U)
     val selExceptionVec        = selPort.head.exceptionVec
 
-    when((entries(wbMbIndex(i)).vstart > selElemInfield) && hasExcp(i)){
+    when((entries(wbMbIndex(i)).vstart > selElemInfield) && hasExcp(i) && pipewb.valid){
       when(!entries(wbMbIndex(i)).fof || selElemInfield === 0.U){
         // For fof loads, if element 0 raises an exception, vl is not modified, and the trap is taken.
         entries(wbMbIndex(i)).vstart       := selElemInfield
