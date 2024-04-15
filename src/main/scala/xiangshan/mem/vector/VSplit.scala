@@ -269,8 +269,8 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   val issueUopOffset   = issueEntry.uopOffset
   val issueEew         = issueEntry.eew
   val issueSew         = issueEntry.sew
-  val issueLmul        = issueEntry.emul
-  val issueEmul        = issueEntry.lmul
+  val issueLmul        = issueEntry.lmul
+  val issueEmul        = issueEntry.emul
   val issueAlignedType = issueEntry.alignedType
   val issuePreIsSplit  = issueEntry.preIsSplit
   val issueByteMask    = issueEntry.byteMask
@@ -283,9 +283,14 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
     uopIdx = issueUopIdx,
     flowIdx = splitIdx
   ) // elemIdx inside an inst, for exception
+
+  val issueVLMAXMask = issueEntry.vlmax - 1.U
+  val elemIdxInsideField = elemIdx & issueVLMAXMask
+  val indexFlowInnerIdx = ((elemIdxInsideField << issueEew(1, 0))(vOffsetBits - 1, 0) >> issueEew(1, 0)).asUInt
+
   val indexedStride    = IndexAddr( // index for indexed instruction
     index = issueEntry.stride,
-    flow_inner_idx = ((splitIdx << issueEew(1, 0))(vOffsetBits - 1, 0) >> issueEew(1, 0)).asUInt,
+    flow_inner_idx = indexFlowInnerIdx,
     eew = issueEew
   )
   val issueStride = Mux(isIndexed(issueInstType), indexedStride, strideOffsetReg)
