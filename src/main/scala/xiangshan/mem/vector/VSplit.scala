@@ -177,8 +177,9 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
     s1_stride(XLEN - 1, 0), // for strided load, stride = x[rs2]
     s1_nfields << s1_eew(1, 0) // for unit-stride load, stride = eew * NFIELDS
   )
-  val uopOffset  = (s1_uopidx >> s1_nf) << s1_alignedType
+
   val stride     = Mux(isIndexed(s1_instType), s1_stride, s1_notIndexedStride) // if is index instructions, get index when split
+  val uopOffset  = genVUopOffset(s1_instType, s1_uopidx, s1_nf, stride, s1_alignedType)
 
   s1_kill               := s1_in.uop.robIdx.needFlush(io.redirect)
 
@@ -274,6 +275,9 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   val issueAlignedType = issueEntry.alignedType
   val issuePreIsSplit  = issueEntry.preIsSplit
   val issueByteMask    = issueEntry.byteMask
+  val issueVLMAXMask   = issueEntry.vlmax - 1.U
+  val issueIsWholeReg  = issueEntry.usWholeReg
+  val issueVLMAXLog2 = GenVLMAXLog2(issueEntry.lmul, issueSew)
   val elemIdx = GenElemIdx(
     instType = issueInstType,
     emul = issueEmul,
@@ -284,9 +288,10 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
     flowIdx = splitIdx
   ) // elemIdx inside an inst, for exception
 
-  val issueVLMAXMask = issueEntry.vlmax - 1.U
   val elemIdxInsideField = elemIdx & issueVLMAXMask
   val indexFlowInnerIdx = ((elemIdxInsideField << issueEew(1, 0))(vOffsetBits - 1, 0) >> issueEew(1, 0)).asUInt
+  val nfIdx = Mux(issueIsWholeReg, 0.U, elemIdx >> issueVLMAXLog2)
+  val fieldOffset = nfIdx << issueAlignedType // field offset inside a segment
 
   val indexedStride    = IndexAddr( // index for indexed instruction
     index = issueEntry.stride,
