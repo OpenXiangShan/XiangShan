@@ -164,6 +164,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   }
   s1_in := RegEnable(s0_out, s0_fire)
 
+  val s1_flowNum          = s1_in.flowNum
   val s1_uopidx           = s1_in.uop.vpu.vuopIdx
   val s1_nf               = s1_in.uop.vpu.nf
   val s1_nfields          = s1_in.nfields
@@ -185,7 +186,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
 
   // query mergeBuffer
   io.toMergeBuffer.req.valid             := s1_fire // only can_go will get MergeBuffer entry
-  io.toMergeBuffer.req.bits.flowNum      := Mux(s1_in.preIsSplit, PopCount(s1_in.flowMask), flowNum)
+  io.toMergeBuffer.req.bits.flowNum      := Mux(s1_in.preIsSplit, PopCount(s1_in.flowMask), s1_flowNum)
   io.toMergeBuffer.req.bits.data         := s1_in.data
   io.toMergeBuffer.req.bits.uop          := s1_in.uop
   io.toMergeBuffer.req.bits.mask         := s1_in.flowMask
