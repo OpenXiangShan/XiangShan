@@ -3,13 +3,11 @@ package xiangshan.backend.fu.NewCSR.CSREvents
 import chisel3._
 import chisel3.util._
 import utility.{SignExt, ZeroExt}
-import xiangshan.ExceptionNO
 import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CauseBundle, OneFieldBundle, PrivState}
 import xiangshan.backend.fu.NewCSR.CSRConfig.{VaddrWidth, XLEN}
 import xiangshan.backend.fu.NewCSR.CSRDefines.SatpMode
 import xiangshan.backend.fu.NewCSR._
-import xiangshan.backend.fu.util.CSRConst
 
 
 class TrapEntryMEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase  {
@@ -20,6 +18,7 @@ class TrapEntryMEventOutput extends Bundle with EventUpdatePrivStateOutput with 
   val mtval   = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
   val mtval2  = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
   val mtinst  = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
+  val targetPc = ValidIO(UInt(VaddrWidth.W))
 
   def getBundleByName(name: String): Valid[CSRBundle] = {
     name match {
@@ -88,6 +87,7 @@ class TrapEntryMEventModule extends Module with CSREventBase {
   out.mcause   .valid := valid
   out.mtval    .valid := valid
   out.mtval2   .valid := valid
+  out.targetPc .valid := valid
 
   out.privState.bits            := PrivState.ModeM
   out.mstatus.bits.MPV          := current.privState.V
@@ -101,6 +101,7 @@ class TrapEntryMEventModule extends Module with CSREventBase {
   out.mtval.bits.ALL            := tval
   out.mtval2.bits.ALL           := tval2
   out.mtinst.bits.ALL           := 0.U
+  out.targetPc.bits             := in.pcFromXtvec
 
   dontTouch(isGuestExcp)
   dontTouch(tvalFillGVA)

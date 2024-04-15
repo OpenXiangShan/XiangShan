@@ -2,19 +2,14 @@ package xiangshan.backend.fu.NewCSR.CSREvents
 
 import chisel3._
 import chisel3.util._
-import utility.{SignExt, ZeroExt}
-import xiangshan.ExceptionNO
-import xiangshan.ExceptionNO._
-import xiangshan.backend.fu.NewCSR.CSRBundles.{CauseBundle, OneFieldBundle, PrivState}
-import xiangshan.backend.fu.NewCSR.CSRConfig.{VaddrWidth, XLEN}
-import xiangshan.backend.fu.NewCSR.CSRDefines.{PrivMode, SatpMode}
+import xiangshan.backend.fu.NewCSR.CSRConfig.VaddrWidth
+import xiangshan.backend.fu.NewCSR.CSRDefines.PrivMode
 import xiangshan.backend.fu.NewCSR._
-import xiangshan.backend.fu.util.CSRConst
 
 
 class MretEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase {
   val mstatus = ValidIO((new MstatusBundle).addInEvent(_.MPP, _.MPV, _.MIE, _.MPIE, _.MPRV))
-  val targetPc = ValidIO(new Epc().addInEvent(_.ALL))
+  val targetPc = ValidIO(UInt(VaddrWidth.W))
 
   override def getBundleByName(name: String): ValidIO[CSRBundle] = {
     name match {
@@ -44,7 +39,7 @@ class MretEventModule extends Module with CSREventBase {
   out.mstatus.bits.MIE    := in.mstatus.MPIE
   out.mstatus.bits.MPIE   := 1.U
   out.mstatus.bits.MPRV   := Mux(in.mstatus.MPP =/= PrivMode.M, 0.U, in.mstatus.MPRV.asUInt)
-  out.targetPc.bits       := in.mepc
+  out.targetPc.bits       := in.mepc.asUInt
 }
 
 trait MretEventSinkBundle { self: CSRModule[_] =>

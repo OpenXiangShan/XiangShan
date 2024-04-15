@@ -138,6 +138,9 @@ class NewCSR extends Module
   trapHandleMod.io.in.medeleg := medeleg.regOut
   trapHandleMod.io.in.hideleg := hideleg.regOut
   trapHandleMod.io.in.hedeleg := hedeleg.regOut
+  trapHandleMod.io.in.mtvec := mtvec.regOut
+  trapHandleMod.io.in.stvec := stvec.regOut
+  trapHandleMod.io.in.vstvec := vstvec.regOut
 
   val entryPrivState = trapHandleMod.io.out.entryPrivState
 
@@ -247,6 +250,9 @@ class NewCSR extends Module
         in.hstatus := hstatus.regOut
         in.sstatus := mstatus.sstatus
         in.vsstatus := vsstatus.regOut
+
+        in.pcFromXtvec := trapHandleMod.io.out.pcFromXtvec
+
         in.satp := satp.rdata
         in.vsatp := vsatp.rdata
 
@@ -304,8 +310,11 @@ class NewCSR extends Module
   io.out.rData := Mux(ren, rdata, 0.U)
   io.out.regOut := regOut
   io.out.targetPc := Mux1H(Seq(
-    mretEvent.out.targetPc.valid -> mretEvent.out.targetPc.bits.asUInt,
-    sretEvent.out.targetPc.valid -> sretEvent.out.targetPc.bits.asUInt,
+    mretEvent.out.targetPc.valid -> mretEvent.out.targetPc.bits,
+    sretEvent.out.targetPc.valid -> sretEvent.out.targetPc.bits,
+    trapEntryMEvent.out.targetPc.valid -> trapEntryMEvent.out.targetPc.bits,
+    trapEntryHSEvent.out.targetPc.valid -> trapEntryHSEvent.out.targetPc.bits,
+    trapEntryVSEvent.out.targetPc.valid -> trapEntryVSEvent.out.targetPc.bits,
   ))
 
   io.out.privState.PRVM := PRVM
@@ -315,7 +324,7 @@ class NewCSR extends Module
   io.out.EX_VI := false.B
   io.out.EX_II := false.B
   io.out.flushPipe := false.B
-  io.out.frm := 0.U
+  io.out.frm := fcsr.frm
   io.out.vstart := 0.U
   io.out.vxrm := 0.U
 

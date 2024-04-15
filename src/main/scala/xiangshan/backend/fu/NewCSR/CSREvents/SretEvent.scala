@@ -2,14 +2,10 @@ package xiangshan.backend.fu.NewCSR.CSREvents
 
 import chisel3._
 import chisel3.util._
-import utility.{SignExt, ZeroExt}
-import xiangshan.ExceptionNO
-import xiangshan.ExceptionNO._
-import xiangshan.backend.fu.NewCSR.CSRBundles.{CauseBundle, OneFieldBundle, PrivState}
-import xiangshan.backend.fu.NewCSR.CSRConfig.{VaddrWidth, XLEN}
-import xiangshan.backend.fu.NewCSR.CSRDefines.{PrivMode, SatpMode, VirtMode}
+import xiangshan.backend.fu.NewCSR.CSRBundles.PrivState
+import xiangshan.backend.fu.NewCSR.CSRConfig.VaddrWidth
+import xiangshan.backend.fu.NewCSR.CSRDefines.{PrivMode, VirtMode}
 import xiangshan.backend.fu.NewCSR._
-import xiangshan.backend.fu.util.CSRConst
 
 
 class SretEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase {
@@ -17,7 +13,7 @@ class SretEventOutput extends Bundle with EventUpdatePrivStateOutput with EventO
   val mstatus = ValidIO((new MstatusBundle).addInEvent(_.SIE, _.SPIE, _.SPP, _.MPRV))
   val hstatus = ValidIO((new HstatusBundle).addInEvent(_.SPV))
   val vsstatus = ValidIO((new SstatusBundle).addInEvent(_.SIE, _.SPIE, _.SPP))
-  val targetPc = ValidIO(new Epc().addInEvent(_.ALL))
+  val targetPc = ValidIO(UInt(VaddrWidth.W))
 
   override def getBundleByName(name: String): ValidIO[CSRBundle] = {
     name match {
@@ -79,7 +75,7 @@ class SretEventModule extends Module with CSREventBase {
   out.targetPc.bits       := Mux1H(Seq(
     sretInHSorM -> in.sepc,
     sretInVS    -> in.vsepc,
-  ))
+  )).asUInt
 
   // for better verilog
   dontTouch(sretInHSorM)
