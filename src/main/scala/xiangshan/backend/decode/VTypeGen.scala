@@ -56,7 +56,9 @@ class VTypeGen(implicit p: Parameters) extends XSModule{
 
   private val inHasVset = isVsetVec.asUInt.orR
 
-  when(io.walkVType.valid) {
+  when(io.redirect) {
+    vtypeSpecNext := vtypeArch
+  }.elsewhen(io.walkVType.valid) {
     vtypeSpecNext := io.walkVType.bits
   }.elsewhen(inHasVset && io.canUpdateVType) {
     vtypeSpecNext := vtypeNew
