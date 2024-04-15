@@ -597,7 +597,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val s1_isvec      = RegEnable(s0_out.isvec, false.B, s0_fire)
   val s1_isLastElem = RegEnable(s0_out.isLastElem, false.B, s0_fire)
 
-  s1_ready := !s1_valid || s1_kill || s2_ready
+  s1_ready := true.B
   when (s0_fire) { s1_valid := true.B }
   .elsewhen (s1_fire) { s1_valid := false.B }
   .elsewhen (s1_kill) { s1_valid := false.B }
@@ -838,7 +838,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val s2_paddr  = RegEnable(s1_paddr_dup_lsu, s1_fire)
 
   s2_kill := s2_in.uop.robIdx.needFlush(io.redirect)
-  s2_ready := !s2_valid || s2_kill || s3_ready
+  s2_ready := true.B
   when (s1_fire) { s2_valid := true.B }
   .elsewhen (s2_fire) { s2_valid := false.B }
   .elsewhen (s2_kill) { s2_valid := false.B }
