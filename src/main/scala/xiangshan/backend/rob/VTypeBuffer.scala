@@ -196,7 +196,6 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   private val commitValidVec = Wire(Vec(CommitWidth, Bool()))
   private val walkValidVec = Wire(Vec(CommitWidth, Bool()))
   private val infoVec = Wire(Vec(CommitWidth, VType()))
-  private val walkInitVType = Wire(VType())
 
   for (i <- 0 until CommitWidth) {
     commitValidVec(i) := state === s_idle && i.U < commitSize || state === s_spcl_walk && i.U < spclWalkSize
@@ -204,7 +203,6 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
 
     infoVec(i) := vtypeBufferReadDataVec(i).vtype
   }
-  walkInitVType := vtypeBufferReadDataVec.last.vtype
 
   commitCount   := Mux(state === s_idle,      PopCount(commitValidVec), 0.U)
   walkCount     := Mux(state === s_walk,      PopCount(walkValidVec), 0.U)
@@ -251,7 +249,7 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
     decodeResumeVType.valid := false.B
   }.elsewhen (state === s_walk && stateLastCycle =/= s_walk) {
     decodeResumeVType.valid := true.B
-    decodeResumeVType.bits := Mux(walkCount =/= 0.U, newestVType, walkInitVType)
+    decodeResumeVType.bits := newestVType
   }.elsewhen (state === s_walk && stateLastCycle === s_walk && walkCount =/= 0.U) {
     decodeResumeVType.valid := true.B
     decodeResumeVType.bits := newestVType
@@ -266,8 +264,8 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   io.toDecode.isResumeVType := state =/= s_idle || decodeResumeVType.valid
   io.toDecode.walkVType.valid := (state === s_walk || stateLast === s_walk && state === s_idle) && decodeResumeVType.valid
   io.toDecode.walkVType.bits := Mux(io.toDecode.walkVType.valid, decodeResumeVType.bits, 0.U.asTypeOf(VType()))
-
   private val newestArchVType = PriorityMux(commitValidVec.zip(infoVec).map { case(commitValid, info) => commitValid -> info }.reverse)
+
   io.toDecode.commitVType.valid := commitValidVec.asUInt.orR
   io.toDecode.commitVType.bits := newestArchVType
 
