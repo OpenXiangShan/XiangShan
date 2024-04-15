@@ -100,7 +100,6 @@ class NewCSR extends Module
 
   dontTouch(toAIA)
   dontTouch(fromAIA)
-  toAIA := DontCare
 
   val wen   = io.in.wen
   val addr  = io.in.addr
@@ -118,6 +117,7 @@ class NewCSR extends Module
   val PRVM = RegInit(PrivMode(0), PrivMode.M)
   val V = RegInit(VirtMode(0), VirtMode.Off)
 
+  val isCSRAccess = io.in.ren || io.in.wen
   val isSret = io.sret
   val isMret = io.mret
 
@@ -318,6 +318,22 @@ class NewCSR extends Module
   io.out.frm := 0.U
   io.out.vstart := 0.U
   io.out.vxrm := 0.U
+
+  // Todo: record the last address to avoid xireg is different with xiselect
+  toAIA.addr.valid := isCSRAccess && Seq(miselect, siselect, vsiselect).map(
+    _.addr.U === addr
+  ).reduce(_ || _)
+  toAIA.addr.bits.addr := addr
+  toAIA.addr.bits.prvm := PRVM
+  toAIA.addr.bits.v := V
+  toAIA.vgein := hstatus.rdata.VGEIN.asUInt
+  toAIA.wdata.valid := isCSRAccess && Seq(mireg, sireg, vsireg).map(
+    _.addr.U === addr
+  ).reduce(_ || _)
+  toAIA.wdata.bits.data := wdata
+  toAIA.mClaim := isCSRAccess && mtopei.addr.U === addr
+  toAIA.sClaim := isCSRAccess && stopei.addr.U === addr
+  toAIA.vsClaim := isCSRAccess && vstopei.addr.U === addr
 }
 
 trait SupervisorMachineAliasConnect { self: NewCSR with MachineLevel with SupervisorLevel =>
