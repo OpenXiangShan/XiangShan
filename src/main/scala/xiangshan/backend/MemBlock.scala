@@ -1282,10 +1282,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // lsq.io.vecWriteback.bits := vlWrapper.io.uopWriteback.bits
 
   // vector
+  val vLsuCanaccept = vsSplit.head.io.in.ready && vlSplit.head.io.in.ready
   (0 until VstuCnt).foreach{i =>
     vsSplit(i).io.redirect <> redirect
     vsSplit(i).io.in <> io.ooo_to_mem.issueVldu.head
-    vsSplit(i).io.in.valid := io.ooo_to_mem.issueVldu.head.valid && LSUOpType.isVecSt(io.ooo_to_mem.issueVldu.head.bits.uop.fuOpType)
+    vsSplit(i).io.in.valid := io.ooo_to_mem.issueVldu.head.valid && LSUOpType.isVecSt(io.ooo_to_mem.issueVldu.head.bits.uop.fuOpType) && vLsuCanaccept
     vsSplit(i).io.toMergeBuffer <> vsMergeBuffer.io.fromSplit(i)
     vsSplit(i).io.out <> storeUnits(i).io.vecstin // Todo: May be some balance mechanism is needed
     vsSplit(i).io.vstd.get := DontCare // Todo: Discuss how to pass vector store data
@@ -1294,7 +1295,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   (0 until VlduCnt).foreach{i =>
     vlSplit(i).io.redirect <> redirect
     vlSplit(i).io.in <> io.ooo_to_mem.issueVldu.head
-    vlSplit(i).io.in.valid := io.ooo_to_mem.issueVldu.head.valid && LSUOpType.isVecLd(io.ooo_to_mem.issueVldu.head.bits.uop.fuOpType)
+    vlSplit(i).io.in.valid := io.ooo_to_mem.issueVldu.head.valid && LSUOpType.isVecLd(io.ooo_to_mem.issueVldu.head.bits.uop.fuOpType) && vLsuCanaccept
     vlSplit(i).io.toMergeBuffer <> vlMergeBuffer.io.fromSplit(i)
     vlSplit(i).io.out <> loadUnits(i).io.vecldin // Todo: May be some balance mechanism is needed
 
@@ -1305,7 +1306,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   (0 until StaCnt).foreach{i=>
     vsMergeBuffer.io.fromPipeline(i) <> storeUnits(i).io.vecstout
   }
-  io.ooo_to_mem.issueVldu.head.ready := vsSplit.head.io.in.ready && vlSplit.head.io.in.ready
+  io.ooo_to_mem.issueVldu.head.ready := vLsuCanaccept
 
   vlMergeBuffer.io.redirect <> redirect
   vsMergeBuffer.io.redirect <> redirect
