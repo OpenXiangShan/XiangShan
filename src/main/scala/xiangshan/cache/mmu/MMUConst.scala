@@ -74,7 +74,9 @@ case class L2TLBParameters
   // prefetch
   enablePrefetch: Boolean = true,
   // ecc
-  ecc: Option[String] = Some("secded")
+  ecc: Option[String] = Some("secded"),
+  // enable ecc
+  enablePTWECC: Boolean = false
 )
 
 trait HasTlbConst extends HasXSParameter {

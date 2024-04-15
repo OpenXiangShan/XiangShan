@@ -982,7 +982,7 @@ class PTWEntriesWithEcc(eccCode: Code, num: Int, tagLen: Int, level: Int, hasPer
 
   val ecc_block = XLEN
   val ecc_info = get_ecc_info()
-  val ecc = UInt(ecc_info._1.W)
+  val ecc = if (l2tlbParams.enablePTWECC) Some(UInt(ecc_info._1.W)) else None
 
   def get_ecc_info(): (Int, Int, Int, Int) = {
     val eccBits_per = eccCode.width(ecc_block) - ecc_block
@@ -1005,19 +1005,19 @@ class PTWEntriesWithEcc(eccCode: Code, num: Int, tagLen: Int, level: Int, hasPer
     }
     if (ecc_info._4 != 0) {
       val ecc_unaligned = eccCode.encode(data(data.getWidth-1, ecc_info._3*ecc_block)) >> ecc_info._4
-      ecc := Cat(ecc_unaligned, ecc_slices.asUInt)
-    } else { ecc := ecc_slices.asUInt }
+      ecc.map(_ := Cat(ecc_unaligned, ecc_slices.asUInt))
+    } else { ecc.map(_ := ecc_slices.asUInt)}
   }
 
   def decode(): Bool = {
     val data = entries.asUInt
     val res = Wire(Vec(ecc_info._3 + 1, Bool()))
     for (i <- 0 until ecc_info._3) {
-      res(i) := {if (ecc_info._2 != 0) eccCode.decode(Cat(ecc((i+1)*ecc_info._2-1, i*ecc_info._2), data((i+1)*ecc_block-1, i*ecc_block))).error else false.B}
+      res(i) := {if (ecc_info._2 != 0) eccCode.decode(Cat(ecc.get((i+1)*ecc_info._2-1, i*ecc_info._2), data((i+1)*ecc_block-1, i*ecc_block))).error else false.B}
     }
     if (ecc_info._2 != 0 && ecc_info._4 != 0) {
       res(ecc_info._3) := eccCode.decode(
-        Cat(ecc(ecc_info._1-1, ecc_info._2*ecc_info._3), data(data.getWidth-1, ecc_info._3*ecc_block))).error
+        Cat(ecc.get(ecc_info._1-1, ecc_info._2*ecc_info._3), data(data.getWidth-1, ecc_info._3*ecc_block))).error
     } else { res(ecc_info._3) := false.B }
 
     Cat(res).orR
