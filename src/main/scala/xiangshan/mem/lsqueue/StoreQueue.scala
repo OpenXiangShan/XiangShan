@@ -99,6 +99,16 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   println("StoreQueue: size:" + StoreQueueSize)
 
+  class STD_CLKGT_func extends BlackBox with HasBlackBoxResource {
+   val io = IO(new Bundle {
+    val TE = Input(Bool())
+    val E  = Input(Bool())
+    val CK = Input(Clock())
+    val Q  = Output(Clock())
+  })
+
+   addResource("/STD_CLKGT_func.v")
+  }
   // data modules
   val uop = Reg(Vec(StoreQueueSize, new DynInst))
   // val data = Reg(Vec(StoreQueueSize, new LsqEntry))
@@ -591,6 +601,28 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       io.forward(i).dataInvalidSqIdx := RegEnable(io.forward(i).uop.sqIdx, io.forward(i).valid)
     }
   }
+  val storeMaskIn_valid = Wire(Vec(StorePipelineWidth, Bool()))
+  storeMaskIn_valid := (0 until StorePipelineWidth).map{ i => io.storeMaskIn(i).valid}
+  val storeDataIn_valid = Wire(Vec(StorePipelineWidth, Bool()))
+  storeDataIn_valid := (0 until StorePipelineWidth).map{ i => io.storeDataIn(i).valid}
+  val storeAddrIn_valid = Wire(Vec(StorePipelineWidth, Bool()))
+  storeAddrIn_valid := (0 until StorePipelineWidth).map{ i => io.storeAddrIn(i).valid}
+  val allocated_reg = RegInit(VecInit(List.fill(StoreQueueSize)(false.B)))
+  allocated_reg := allocated 
+  val clkGate_dataModule = Module(new STD_CLKGT_func)
+    clkGate_dataModule.io.TE := false.B
+    clkGate_dataModule.io.E := storeMaskIn_valid.asUInt.orR || storeDataIn_valid.asUInt.orR || allocated.asUInt.orR || allocated_reg.asUInt.orR
+    clkGate_dataModule.io.CK := clock
+  val gate_clock_dataModule = clkGate_dataModule.io.Q
+  dataModule.clock := gate_clock_dataModule 
+
+  val clkGate_addrModule = Module(new STD_CLKGT_func)
+    clkGate_addrModule.io.TE := false.B
+    clkGate_addrModule.io.E := storeAddrIn_valid.asUInt.orR || allocated.asUInt.orR
+    clkGate_addrModule.io.CK := clock
+  val gate_clock_addrModule = clkGate_addrModule.io.Q
+  paddrModule.clock := gate_clock_addrModule
+  vaddrModule.clock := gate_clock_addrModule
 
   /**
     * Memory mapped IO / other uncached operations
