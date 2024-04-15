@@ -252,6 +252,13 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     }
   }
 
+  def wakeUpByVf(OH: Vec[Bool])(implicit p: Parameters): Bool = {
+    val allExuParams = p(XSCoreParamsKey).backendParams.allExuParams
+    OH.zip(allExuParams).map{case (oh,e) =>
+      if (e.isVfExeUnit) oh else false.B
+    }.reduce(_ || _)
+  }
+
   def EntryRegCommonConnect(common: CommonWireBundle, hasIQWakeup: Option[CommonIQWakeupBundle], validReg: Bool, entryUpdate: EntryBundle, entryReg: EntryBundle, status: Status, commonIn: CommonInBundle, isEnq: Boolean)(implicit p: Parameters, params: IssueBlockParams) = {
     val hasIQWakeupGet                                 = hasIQWakeup.getOrElse(0.U.asTypeOf(new CommonIQWakeupBundle))
     val cancelByLd                                     = common.srcCancelVec.asUInt.orR
@@ -282,8 +289,8 @@ object EntryBundles extends HasCircularQueuePtrHelper {
                                                             // Vf / Int -> Mem
                                                             MuxCase(srcStatus.dataSources.value, Seq(
                                                               wakeupByIQ                                                               -> DataSource.bypass,
-                                                              (srcStatus.dataSources.readBypass && SrcType.isVfp(srcStatus.srcType))   -> DataSource.bypass2,
-                                                              (srcStatus.dataSources.readBypass && !SrcType.isVfp(srcStatus.srcType))  -> DataSource.reg,
+                                                              (srcStatus.dataSources.readBypass && wakeUpByVf(srcStatus.srcWakeUpL1ExuOH.get)) -> DataSource.bypass2,
+                                                              (srcStatus.dataSources.readBypass && !wakeUpByVf(srcStatus.srcWakeUpL1ExuOH.get)) -> DataSource.reg,
                                                               srcStatus.dataSources.readBypass2                                        -> DataSource.reg,
                                                             ))
                                                           }
