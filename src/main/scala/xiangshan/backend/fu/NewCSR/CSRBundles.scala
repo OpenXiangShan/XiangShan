@@ -1,13 +1,10 @@
 package xiangshan.backend.fu.NewCSR
 
 import chisel3._
+import chisel3.util._
 import chisel3.experimental.BundleLiterals._
-import xiangshan.backend.fu.NewCSR.CSRDefines.{
-  CSRROField => RO,
-  CSRRWField => RW,
-  CSRWARLField => WARL,
-  _
-}
+import org.chipsalliance.cde.config.Parameters
+import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRROField => RO, CSRRWField => RW, CSRWARLField => WARL, _}
 import xiangshan.backend.fu.NewCSR.CSRFunc._
 
 object CSRBundles {

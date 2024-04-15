@@ -10,7 +10,6 @@ import xiangshan.backend.fu.NewCSR.CSRBundles.{CauseBundle, OneFieldBundle, Priv
 import xiangshan.backend.fu.NewCSR.CSRConfig.{VaddrMaxWidth, XLEN}
 import xiangshan.backend.fu.NewCSR.CSRDefines.SatpMode
 import xiangshan.backend.fu.NewCSR._
-import xiangshan.backend.fu.util.CSRConst
 
 
 class TrapEntryHSEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase  {
@@ -23,6 +22,7 @@ class TrapEntryHSEventOutput extends Bundle with EventUpdatePrivStateOutput with
   val stval   = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
   val htval   = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
   val htinst  = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
+  val targetPc = ValidIO(UInt(VaddrMaxWidth.W))
 
   def getBundleByName(name: String): Valid[CSRBundle] = {
     name match {
@@ -92,6 +92,7 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
   out.scause   .valid := valid
   out.stval    .valid := valid
   out.htval    .valid := valid
+  out.targetPc .valid := valid
 
   out.privState.bits            := PrivState.ModeHS
   // mstatus
@@ -109,6 +110,7 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
   out.stval.bits.ALL            := tval
   out.htval.bits.ALL            := tval2
   out.htinst.bits.ALL           := 0.U
+  out.targetPc.bits             := in.pcFromXtvec
 
   dontTouch(isGuestExcp)
   dontTouch(tvalFillGVA)

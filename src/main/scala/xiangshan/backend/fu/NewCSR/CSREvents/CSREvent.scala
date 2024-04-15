@@ -7,10 +7,9 @@ import utility.{SignExt, ZeroExt}
 import xiangshan.{ExceptionNO, HasXSParameter}
 import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CauseBundle, OneFieldBundle, PrivState}
+import xiangshan.backend.fu.NewCSR.CSRBundles.{CauseBundle, PrivState}
 import xiangshan.backend.fu.NewCSR.CSRConfig._
-import xiangshan.backend.fu.NewCSR.CSRDefines._
 import xiangshan.backend.fu.NewCSR._
-import xiangshan.backend.fu.util.CSRConst
 
 trait CSREvents { self: NewCSR =>
   val trapEntryMEvent = Module(new TrapEntryMEventModule)
@@ -72,6 +71,9 @@ class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSP
   val hstatus = Input(new HstatusBundle)
   val sstatus = Input(new SstatusBundle)
   val vsstatus = Input(new SstatusBundle)
+
+  val pcFromXtvec = Input(UInt(VaddrMaxWidth.W))
+
   val satp = Input(new SatpBundle)
   val vsatp = Input(new SatpBundle)
   // from mem

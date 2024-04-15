@@ -19,6 +19,7 @@ class TrapEntryVSEventOutput extends Bundle with EventUpdatePrivStateOutput with
   val vsepc    = ValidIO((new Epc           ).addInEvent(_.ALL))
   val vscause  = ValidIO((new CauseBundle   ).addInEvent(_.Interrupt, _.ExceptionCode))
   val vstval   = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
+  val targetPc = ValidIO(UInt(VaddrMaxWidth.W))
 
   def getBundleByName(name: String): Valid[CSRBundle] = {
     name match {
@@ -88,6 +89,7 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
   out.vsepc    .valid := valid
   out.vscause  .valid := valid
   out.vstval   .valid := valid
+  out.targetPc .valid := valid
 
   out.privState.bits             := PrivState.ModeVS
   // vsstatus
@@ -99,6 +101,7 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
   out.vscause.bits.Interrupt     := isInterrupt
   out.vscause.bits.ExceptionCode := highPrioTrapNO
   out.vstval.bits.ALL            := tval
+  out.targetPc.bits              := in.pcFromXtvec
 
   dontTouch(tvalFillGVA)
 }
