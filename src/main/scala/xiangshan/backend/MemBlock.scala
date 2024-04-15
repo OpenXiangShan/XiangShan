@@ -711,7 +711,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // st-ld violation query
     val stld_nuke_query = storeUnits.map(_.io.stld_nuke_query) ++ hybridUnits.map(_.io.stu_io.stld_nuke_query)
     for (s <- 0 until StorePipelineWidth) {
-      loadUnits(i).io.stld_nuke_query(s) := stld_nuke_query(s)
+      loadUnits(i).io.stld_nuke_query(s).s1_valid := stld_nuke_query(s).s1_valid
+      loadUnits(i).io.stld_nuke_query(s).s1_robIdx := stld_nuke_query(s).s1_robIdx
+      loadUnits(i).io.stld_nuke_query(s).s1_paddr := stld_nuke_query(s).s1_paddr
+      loadUnits(i).io.stld_nuke_query(s).s1_mask := stld_nuke_query(s).s1_mask
     }
     loadUnits(i).io.lq_rep_full <> lsq.io.lq_rep_full
     // load prefetch train
@@ -841,6 +844,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val stld_nuke_query = VecInit(storeUnits.map(_.io.stld_nuke_query) ++ hybridUnits.map(_.io.stu_io.stld_nuke_query))
     hybridUnits(i).io.ldu_io.stld_nuke_query := stld_nuke_query
     hybridUnits(i).io.ldu_io.lq_rep_full <> lsq.io.lq_rep_full
+    hybridUnits(i).io.stu_io.stld_nuke_query.s3_nuke := RegNext(lsq.io.sta.storeNuke.drop(StaCnt)(i))
     // load prefetch train
     prefetcherOpt.foreach(pf => {
       val source = hybridUnits(i).io.prefetch_train
@@ -1003,6 +1007,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // dtlb
     stu.io.tlb          <> dtlb_st.head.requestor(i)
     stu.io.pmp          <> pmp_check(LduCnt + HyuCnt + 1 + i).resp
+
+    stu.io.stld_nuke_query.s3_nuke := RegNext(lsq.io.sta.storeNuke.take(StaCnt)(i))
 
     // prefetch
     stu.io.prefetch_req <> sbuffer.io.store_prefetch(i)

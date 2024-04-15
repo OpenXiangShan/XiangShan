@@ -95,7 +95,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
       val s3_dly_ld_err = Output(Bool()) // Note that io.s3_dly_ld_err and io.lsq.s3_dly_ld_err is different
 
       // schedule error query
-      val stld_nuke_query = Flipped(Vec(StorePipelineWidth, Valid(new StoreNukeQueryIO)))
+      val stld_nuke_query = Flipped(Vec(StorePipelineWidth, new StoreNukeQueryIO))
 
       // queue-based replay
       val replay       = Flipped(Decoupled(new LsPipelineBundle))
@@ -122,7 +122,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
       val issue           = Valid(new MemExuInput)
       val lsq             = ValidIO(new LsPipelineBundle)
       val lsq_replenish   = Output(new LsPipelineBundle())
-      val stld_nuke_query = Valid(new StoreNukeQueryIO)
+      val stld_nuke_query = new StoreNukeQueryIO
       val st_mask_out     = Valid(new StoreMaskBundle)
       val debug_ls        = Output(new DebugLsInfoBundle)
     }
@@ -679,11 +679,11 @@ class HybridUnit(implicit p: Parameters) extends XSModule
 
   // st-ld violation query
   val s1_nuke = VecInit((0 until StorePipelineWidth).map(w => {
-                       io.ldu_io.stld_nuke_query(w).valid && // query valid
-                       isAfter(s1_in.uop.robIdx, io.ldu_io.stld_nuke_query(w).bits.robIdx) && // older store
+                       io.ldu_io.stld_nuke_query(w).s1_valid && // query valid
+                       isAfter(s1_in.uop.robIdx, io.ldu_io.stld_nuke_query(w).s1_robIdx) && // older store
                        // TODO: Fix me when vector instruction
-                       (s1_paddr_dup_lsu(PAddrBits-1, 3) === io.ldu_io.stld_nuke_query(w).bits.paddr(PAddrBits-1, 3)) && // paddr match
-                       (s1_in.mask & io.ldu_io.stld_nuke_query(w).bits.mask).orR // data mask contain
+                       (s1_paddr_dup_lsu(PAddrBits-1, 3) === io.ldu_io.stld_nuke_query(w).s1_paddr(PAddrBits-1, 3)) && // paddr match
+                       (s1_in.mask & io.ldu_io.stld_nuke_query(w).s1_mask).orR // data mask contain
                       })).asUInt.orR && !s1_tlb_miss && s1_ld_flow
 
   s1_out                   := s1_in
@@ -816,10 +816,11 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.stu_io.issue.bits        := RegEnable(io.lsin.bits, io.lsin.fire)
 
   // st-ld violation dectect request
-  io.stu_io.stld_nuke_query.valid       := s1_valid && !s1_tlb_miss && !s1_ld_flow && !s1_prf
-  io.stu_io.stld_nuke_query.bits.robIdx := s1_in.uop.robIdx
-  io.stu_io.stld_nuke_query.bits.paddr  := s1_paddr_dup_lsu
-  io.stu_io.stld_nuke_query.bits.mask   := s1_in.mask
+  io.stu_io.stld_nuke_query.s1_valid  := s1_valid && !s1_tlb_miss && !s1_ld_flow && !s1_prf
+  io.stu_io.stld_nuke_query.s1_robIdx := s1_in.uop.robIdx
+  io.stu_io.stld_nuke_query.s1_paddr  := s1_paddr_dup_lsu
+  io.stu_io.stld_nuke_query.s1_mask   := s1_in.mask
+  io.ldu_io.stld_nuke_query.map(x => x.s3_nuke := false.B)
 
   // Pipeline
   // --------------------------------------------------------------------------------
@@ -929,11 +930,11 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   //  3. Physical address match.
   //  4. Data contains.
   val s2_nuke = VecInit((0 until StorePipelineWidth).map(w => {
-                        io.ldu_io.stld_nuke_query(w).valid && // query valid
-                        isAfter(s2_in.uop.robIdx, io.ldu_io.stld_nuke_query(w).bits.robIdx) && // older store
+                        io.ldu_io.stld_nuke_query(w).s1_valid && // query valid
+                        isAfter(s2_in.uop.robIdx, io.ldu_io.stld_nuke_query(w).s1_robIdx) && // older store
                         // TODO: Fix me when vector instruction
-                        (s2_in.paddr(PAddrBits-1, 3) === io.ldu_io.stld_nuke_query(w).bits.paddr(PAddrBits-1, 3)) && // paddr match
-                        (s2_in.mask & io.ldu_io.stld_nuke_query(w).bits.mask).orR // data mask contain
+                        (s2_in.paddr(PAddrBits-1, 3) === io.ldu_io.stld_nuke_query(w).s1_paddr(PAddrBits-1, 3)) && // paddr match
+                        (s2_in.mask & io.ldu_io.stld_nuke_query(w).s1_mask).orR // data mask contain
                       })).asUInt.orR && s2_ld_flow || s2_in.rep_info.nuke
 
   val s2_cache_handled   = io.ldu_io.dcache.resp.bits.handled

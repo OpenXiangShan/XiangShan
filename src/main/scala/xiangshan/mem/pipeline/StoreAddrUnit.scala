@@ -45,7 +45,7 @@ class StoreAddrUnit(implicit p: Parameters) extends XSModule with HasDCacheParam
     val prefetch_req    = Flipped(DecoupledIO(new StorePrefetchReq))
     // provide prefetch info to sms
     val prefetch_train  = ValidIO(new StPrefetchTrainBundle())
-    val stld_nuke_query = Valid(new StoreNukeQueryIO)
+    val stld_nuke_query = new StoreNukeQueryIO
     val stout           = DecoupledIO(new MemExuOutput) // writeback store
     // store mask, send to sq in store_s0
     val st_mask_out     = Valid(new StoreMaskBundle)
@@ -57,7 +57,7 @@ class StoreAddrUnit(implicit p: Parameters) extends XSModule with HasDCacheParam
     val vec_feedback_slow = ValidIO(new VSFQFeedback)
   })
 
-  val s1_ready, s2_ready, s3_ready = WireInit(false.B)
+  val s1_ready, s2_ready, s3_ready, s4_ready = WireInit(false.B)
 
   // Pipeline
   // --------------------------------------------------------------------------------
@@ -226,10 +226,10 @@ class StoreAddrUnit(implicit p: Parameters) extends XSModule with HasDCacheParam
   .elsewhen (s1_kill) { s1_valid := false.B }
 
   // st-ld violation dectect request.
-  io.stld_nuke_query.valid       := s1_valid && !s1_tlb_miss && !s1_in.isHWPrefetch
-  io.stld_nuke_query.bits.robIdx := s1_in.uop.robIdx
-  io.stld_nuke_query.bits.paddr  := s1_paddr
-  io.stld_nuke_query.bits.mask   := s1_in.mask
+  io.stld_nuke_query.s1_valid  := s1_valid && !s1_tlb_miss && !s1_in.isHWPrefetch
+  io.stld_nuke_query.s1_robIdx := s1_in.uop.robIdx
+  io.stld_nuke_query.s1_paddr  := s1_paddr
+  io.stld_nuke_query.s1_mask   := s1_in.mask
 
   // issue
   io.issue.valid := s1_valid && !s1_tlb_miss && !s1_in.isHWPrefetch && !s1_isvec
@@ -378,21 +378,18 @@ class StoreAddrUnit(implicit p: Parameters) extends XSModule with HasDCacheParam
   val s3_in     = RegEnable(s2_out, s2_fire)
   val s3_out    = Wire(new MemExuOutput)
   val s3_kill   = s3_in.uop.robIdx.needFlush(io.redirect)
-  val s3_can_go = s3_ready
+  val s3_can_go = s4_ready
   val s3_fire   = s3_valid && !s3_kill && s3_can_go
+  val s3_nuke   = io.stld_nuke_query.s3_nuke
 
+  s3_ready := true.B
   when (s2_fire) { s3_valid := (!s2_mmio || s2_exception) && !s2_out.isHWPrefetch  }
   .elsewhen (s3_fire) { s3_valid := false.B }
   .elsewhen (s3_kill) { s3_valid := false.B }
 
   // wb: writeback
-  val SelectGroupSize   = RollbackGroupSize
-  val lgSelectGroupSize = log2Ceil(SelectGroupSize)
-  val TotalSelectCycles = scala.math.ceil(log2Ceil(LoadQueueRAWSize).toFloat / lgSelectGroupSize).toInt + 1
-
   s3_out                 := DontCare
   s3_out.uop             := s3_in.uop
-  s3_out.data            := DontCare
   s3_out.debug.isMMIO    := s3_in.mmio
   s3_out.debug.paddr     := s3_in.paddr
   s3_out.debug.vaddr     := s3_in.vaddr
@@ -400,40 +397,23 @@ class StoreAddrUnit(implicit p: Parameters) extends XSModule with HasDCacheParam
 
   // Pipeline
   // --------------------------------------------------------------------------------
-  // stage x
+  // stage 4 (skid buffer)
   // --------------------------------------------------------------------------------
-  // delay TotalSelectCycles - 2 cycle(s)
-  val TotalDelayCycles = TotalSelectCycles - 2
-  val sx_valid = Wire(Vec(TotalDelayCycles + 1, Bool()))
-  val sx_ready = Wire(Vec(TotalDelayCycles + 1, Bool()))
-  val sx_in    = Wire(Vec(TotalDelayCycles + 1, new MemExuOutput))
+  val s4_valid = RegInit(false.B)
+  val s4_in = RegEnable(s3_out, s3_fire)
+  val s4_out = s4_in
+  val s4_kill = s4_in.uop.robIdx.needFlush(io.redirect)
+  val s4_can_go = s4_ready
+  val s4_real_valid = s4_valid && !s4_kill
+  val s4_fire = s4_real_valid && s4_can_go
 
-  // backward ready signal
-  s3_ready := true.B
-  for (i <- 0 until TotalDelayCycles + 1) {
-    if (i == 0) {
-      sx_valid(i) := s3_valid
-      sx_in(i)    := s3_out
-      sx_ready(i) := true.B
-    } else {
-      val cur_kill   = sx_in(i).uop.robIdx.needFlush(io.redirect)
-      val cur_can_go = (if (i == TotalDelayCycles) io.stout.ready else sx_ready(i+1))
-      val cur_fire   = sx_valid(i) && !cur_kill && cur_can_go
-      val prev_fire  = sx_valid(i-1) && !sx_in(i-1).uop.robIdx.needFlush(io.redirect) && sx_ready(i)
+  when (s3_fire) { s4_valid := true.B & (s3_nuke || s4_real_valid) } // when detected bad nuke at s4 or skid buffer is full, into skip buffer
+  .elsewhen (s4_fire) { s4_valid := false.B }
+  .elsewhen (s4_kill) { s4_valid := false.B }
 
-      sx_ready(i) := true.B
-      val sx_valid_can_go = prev_fire || cur_fire || cur_kill
-      sx_valid(i) := RegEnable(Mux(prev_fire, true.B, false.B), false.B, sx_valid_can_go)
-      sx_in(i) := RegEnable(sx_in(i-1), prev_fire)
-    }
-  }
-  val sx_last_valid = sx_valid.takeRight(1).head
-  val sx_last_ready = sx_ready.takeRight(1).head
-  val sx_last_in    = sx_in.takeRight(1).head
-  sx_last_ready := true.B
-
-  io.stout.valid := sx_last_valid && !sx_last_in.uop.robIdx.needFlush(io.redirect) && isStore(sx_last_in.uop.fuType)
-  io.stout.bits := sx_last_in
+  s4_ready := Mux(s4_real_valid || s3_nuke, true.B, io.stout.ready)
+  io.stout.valid := s4_real_valid || (s3_valid && !s3_nuke)
+  io.stout.bits := Mux(s4_real_valid, s4_out, s3_out)
 
   io.debug_ls := DontCare
   io.debug_ls.s1_robIdx := s1_in.uop.robIdx.value
