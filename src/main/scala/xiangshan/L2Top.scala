@@ -26,6 +26,7 @@ import freechips.rocketchip.tilelink._
 import coupledL2.{L2ParamKey, EnableCHI}
 import coupledL2.tl2tl.TL2TLCoupledL2
 import coupledL2.tl2chi.{TL2CHICoupledL2, PortIO}
+import huancun.BankBitsKey
 import system.HasSoCParameter
 import top.BusPerfMonitor
 import utility.{DelayN, ResetGen, TLClientsMerger, TLEdgeBuffer, TLLogger}
@@ -108,6 +109,7 @@ class L2Top()(implicit p: Parameters) extends LazyModule
       )
       case EnableCHI => true
       // case XSCoreParamsKey => p(XSCoreParamsKey)
+      case BankBitsKey => coreParams.L2NBanks
     }))))
   } else None
   val l2_binder = coreParams.L2CacheParamsOpt.map(_ => BankBinder(coreParams.L2NBanks, 64))
