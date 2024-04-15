@@ -89,14 +89,16 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
   println(s"[BypassNetwork] allExuNum: ${toExus.size} intExuNum: ${intExuNum} vfExuNum: ${vfExuNum} memExuNum: ${memExuNum}")
 
   private val fromDPsHasBypass2Source = fromDPs.filter(x => x.bits.params.isIQWakeUpSource && x.bits.params.writeVfRf && (x.bits.params.isVfExeUnit || x.bits.params.hasLoadExu)).map(_.bits.params.exuIdx)
-  private val fromDPsHasBypass2Sink   = fromDPs.filter(x => x.bits.params.isIQWakeUpSink && x.bits.params.readVfRf && x.bits.params.isVfExeUnit).map(_.bits.params.exuIdx)
+  private val fromDPsHasBypass2Sink   = fromDPs.filter(x => x.bits.params.isIQWakeUpSink && x.bits.params.readVfRf && (x.bits.params.isVfExeUnit || x.bits.params.isMemExeUnit)).map(_.bits.params.exuIdx)
 
   private val bypass2ValidVec3 = MixedVecInit(
     fromDPsHasBypass2Sink.map(forwardOrBypassValidVec3(_)).map(exu => VecInit(exu.map(l1ExuOH => 
       VecInit(fromDPsHasBypass2Source.map(l1ExuOH(_))).asUInt
     )))
   )
-
+  if(params.debugEn){
+    dontTouch(bypass2ValidVec3)
+  }
   private val bypass2DataVec = VecInit(
     fromDPsHasBypass2Source.map(x => RegNext(bypassDataVec(x)))
   )
@@ -129,6 +131,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
       val readRegOH = exuInput.bits.dataSources(srcIdx).readRegOH
       val readImm = if (exuParm.immType.nonEmpty || exuParm.hasLoadExu) exuInput.bits.dataSources(srcIdx).readImm else false.B
       val bypass2ExuIdx = fromDPsHasBypass2Sink.indexOf(exuIdx)
+      println(s"${exuParm.name}: bypass2ExuIdx is ${bypass2ExuIdx}")
       val readBypass2 = if (bypass2ExuIdx >= 0) dataSource.readBypass2 else false.B
       src := Mux1H(
         Seq(
