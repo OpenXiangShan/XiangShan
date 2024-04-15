@@ -96,7 +96,7 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
     else if (params.inMemSchd && params.readVfRf && params.hasIQWakeUp) {
       enqDelayDataSources(i).value            := MuxCase(entryReg.status.srcStatus(i).dataSources.value, Seq(
                                                     enqDelayOut1.srcWakeUpByIQ(i).asBool                                                            -> DataSource.bypass,
-                                                    (enqDelayOut2.srcWakeUpByIQ(i).asBool && SrcType.isVfp(entryReg.status.srcStatus(i).srcType))   -> DataSource.bypass2,
+                                                    (enqDelayOut2.srcWakeUpByIQ(i).asBool && wakeUpByVf(entryReg.status.srcStatus(i).srcWakeUpL1ExuOH.get))  -> DataSource.bypass2,
                                                  ))
       enqDelaySrcWakeUpL1ExuOH.get(i)         := Mux(enqDelay1WakeUpValid, 
                                                       Mux1H(enqDelay1WakeUpOH, params.wakeUpSourceExuIdx.map(x => MathUtils.IntToOH(x).U(backendParams.numExu.W))), 
