@@ -80,11 +80,11 @@ class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val flush = Flipped(ValidIO(new Redirect))
   val in = Flipped(DecoupledIO(new FuncUnitInput(cfg)))
   val out = DecoupledIO(new FuncUnitOutput(cfg))
-  val csrio = if (cfg.isCsr) Some(new CSRFileIO) else None
-  val fenceio = if (cfg.isFence) Some(new FenceIO) else None
-  val frm = if (cfg.needSrcFrm) Some(Input(UInt(3.W))) else None
-  val vxrm = if (cfg.needSrcVxrm) Some(Input(UInt(2.W))) else None
-  val vtype = if (cfg.hasVtype) Some(new VType) else None
+  val csrio = OptionWrapper(cfg.isCsr, new CSRFileIO)
+  val fenceio = OptionWrapper(cfg.isFence, new FenceIO)
+  val frm = OptionWrapper(cfg.needSrcFrm, Input(UInt(3.W)))
+  val vxrm = OptionWrapper(cfg.needSrcVxrm, Input(UInt(2.W)))
+  val vtype = OptionWrapper(cfg.writeVType, new VType)
 }
 
 abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSModule {

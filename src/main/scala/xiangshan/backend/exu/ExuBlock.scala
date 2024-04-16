@@ -39,7 +39,7 @@ class ExuBlockImp(
     exu.io.fenceio.foreach(exuio => io.fenceio.get <> exuio)
     exu.io.frm.foreach(exuio => exuio := RegNext(io.frm.get))  // each vf exu pipe frm from csr
     exu.io.vxrm.foreach(exuio => io.vxrm.get <> exuio)
-    exu.io.vtype.foreach(exuio => io.vtype.get <> exuio)
+    exu.io.vtype.foreach(exuio => io.vtype.get := exuio)
     exu.io.in <> input
     output <> exu.io.out
 //    if (exu.wrapper.exuParams.fuConfigs.contains(AluCfg) || exu.wrapper.exuParams.fuConfigs.contains(BrhCfg)){
@@ -64,9 +64,9 @@ class ExuBlockIO(implicit p: Parameters, params: SchdBlockParams) extends XSBund
   // out(i)(j): issueblock(i), exu(j).
   val out: MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = params.genExuOutputDecoupledBundle
 
-  val csrio = if (params.hasCSR) Some(new CSRFileIO) else None
-  val fenceio = if (params.hasFence) Some(new FenceIO) else None
-  val frm = if (params.needSrcFrm) Some(Input(UInt(3.W))) else None
-  val vxrm = if (params.needSrcVxrm) Some(Input(UInt(2.W))) else None
-  val vtype = if (params.hasVtype) Some(new VType) else None
+  val csrio = OptionWrapper(params.hasCSR, new CSRFileIO)
+  val fenceio = OptionWrapper(params.hasFence, new FenceIO)
+  val frm = OptionWrapper(params.needSrcFrm, Input(UInt(3.W)))
+  val vxrm = OptionWrapper(params.needSrcVxrm, Input(UInt(2.W)))
+  val vtype = OptionWrapper(params.writeVType, new VType)
 }

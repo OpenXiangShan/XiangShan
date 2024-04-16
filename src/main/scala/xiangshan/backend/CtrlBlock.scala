@@ -272,7 +272,6 @@ class CtrlBlockImp(
   decode.io.isResumeVType := rob.io.toDecode.isResumeVType
   decode.io.commitVType := rob.io.toDecode.commitVType
   decode.io.walkVType := rob.io.toDecode.walkVType
-  decode.io.isVsetvl := rob.io.toDecode.isVsetvl
 
   decode.io.redirect := s1_s3_redirect.valid || s2_s4_pendingRedirectValid
 
@@ -523,10 +522,10 @@ class CtrlBlockImp(
 
   io.robio.robDeqPtr := rob.io.robDeqPtr
 
-  // rob to backend to csr
+  // rob to backend
   io.robio.commitVType := rob.io.toDecode.commitVType
-  // exu block to rob
-  rob.io.wbVType := io.robio.wbVType
+  // exu block to decode
+  decode.io.vsetvlVType := io.robio.vsetvlVType
 
   io.debugTopDown.fromRob := rob.io.debugTopDown.toCore
   dispatch.io.debugTopDown.fromRob := rob.io.debugTopDown.toDispatch
@@ -610,8 +609,11 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val debug_ls = Input(new DebugLSIO())
     val robHeadLsIssue = Input(Bool())
     val robDeqPtr = Output(new RobPtr)
-    val commitVType = Output(ValidIO(VType()))
-    val wbVType = Input(VType())
+    val vsetvlVType = Input(VType())
+    val commitVType = new Bundle {
+      val vtype = Output(ValidIO(VType()))
+      val hasVsetvl = Output(Bool())
+    }
   }
 
   val perfInfo = Output(new Bundle{

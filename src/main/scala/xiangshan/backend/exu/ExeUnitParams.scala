@@ -69,7 +69,7 @@ case class ExeUnitParams(
   val needSrcVxrm: Boolean = fuConfigs.map(_.needSrcVxrm).reduce(_ || _)
   val needFPUCtrl: Boolean = fuConfigs.map(_.needFPUCtrl).reduce(_ || _)
   val needVPUCtrl: Boolean = fuConfigs.map(_.needVecCtrl).reduce(_ || _)
-  val hasVtype: Boolean = fuConfigs.map(_.hasVtype).reduce(_ || _)
+  val writeVType: Boolean = fuConfigs.map(_.writeVType).reduce(_ || _)
   val isHighestWBPriority: Boolean = wbPortConfigs.forall(_.priority == 0)
 
   val isIntExeUnit: Boolean = schdType.isInstanceOf[IntScheduler]

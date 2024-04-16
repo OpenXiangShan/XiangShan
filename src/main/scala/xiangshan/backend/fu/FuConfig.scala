@@ -63,7 +63,7 @@ case class FuConfig (
   trigger       : Boolean = false,
   needSrcFrm    : Boolean = false,
   needSrcVxrm   : Boolean = false,
-  hasVtype      : Boolean = false,
+  writeVType    : Boolean = false,
   immType       : Set[UInt] = Set(),
   // vector
   vconfigWakeUp : Boolean = false,
@@ -352,7 +352,7 @@ object FuConfig {
     ),
     piped = true,
     writeVecRf = true,
-    hasVtype = true,
+    writeVType = true,
     latency = CertainLatency(0),
     immType = Set(SelImm.IMM_VSETVLI, SelImm.IMM_VSETIVLI),
   )
@@ -366,7 +366,7 @@ object FuConfig {
     ),
     piped = true,
     writeVecRf = true,
-    hasVtype = true,
+    writeVType = true,
     latency = CertainLatency(0),
     immType = Set(SelImm.IMM_VSETVLI, SelImm.IMM_VSETIVLI),
   )

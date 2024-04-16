@@ -46,9 +46,11 @@ class VTypeBufferIO(size: Int)(implicit p: Parameters) extends XSBundle {
 
   val toDecode = Output(new Bundle {
     val isResumeVType = Bool()
-    val commitVType = ValidIO(VType())
     val walkVType = ValidIO(VType())
-    val isVsetvl = Bool()
+    val commitVType = new Bundle {
+      val vtype = ValidIO(VType())
+      val hasVsetvl = Bool()
+    }
   })
 
   val status = Output(new Bundle {
@@ -200,14 +202,14 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   private val commitValidVec = Wire(Vec(CommitWidth, Bool()))
   private val walkValidVec = Wire(Vec(CommitWidth, Bool()))
   private val infoVec = Wire(Vec(CommitWidth, VType()))
-  private val isVsetvlVec = Wire(Vec(CommitWidth, Bool()))
+  private val hasVsetvlVec = Wire(Vec(CommitWidth, Bool()))
 
   for (i <- 0 until CommitWidth) {
     commitValidVec(i) := state === s_idle && i.U < commitSize || state === s_spcl_walk && i.U < spclWalkSize
     walkValidVec(i) := state === s_walk && i.U < walkSize || state === s_spcl_walk && i.U < spclWalkSize
 
     infoVec(i) := vtypeBufferReadDataVec(i).vtype
-    isVsetvlVec(i) := vtypeBufferReadDataVec(i).isVsetvl
+    hasVsetvlVec(i) := vtypeBufferReadDataVec(i).isVsetvl
   }
 
   commitCount   := Mux(state === s_idle,      PopCount(commitValidVec), 0.U)
@@ -272,12 +274,12 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   io.toDecode.walkVType.bits := Mux(io.toDecode.walkVType.valid, decodeResumeVType.bits, 0.U.asTypeOf(VType()))
   private val newestArchVType = PriorityMux(commitValidVec.zip(infoVec).map { case(commitValid, info) => commitValid -> info }.reverse)
 
-  io.toDecode.commitVType.valid := commitValidVec.asUInt.orR
-  io.toDecode.commitVType.bits := newestArchVType
+  io.toDecode.commitVType.vtype.valid := commitValidVec.asUInt.orR
+  io.toDecode.commitVType.vtype.bits := newestArchVType
 
   // because vsetvl flush pipe, there is only one vset instruction when vsetvl is committed
-  private val hasVsetvl = commitValidVec.zip(isVsetvlVec).map { case(commitValid, isVsetvl) => commitValid && isVsetvl }.reduce(_ || _)
-  io.toDecode.isVsetvl := hasVsetvl
+  private val hasVsetvl = commitValidVec.zip(hasVsetvlVec).map { case(commitValid, hasVsetvl) => commitValid && hasVsetvl }.reduce(_ || _)
+  io.toDecode.commitVType.hasVsetvl := hasVsetvl
 
   XSError(isBefore(enqPtr, deqPtr) && !isFull(enqPtr, deqPtr), "\ndeqPtr is older than enqPtr!\n")
 

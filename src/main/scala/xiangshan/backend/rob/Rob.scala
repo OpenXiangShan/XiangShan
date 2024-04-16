@@ -72,11 +72,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val wfi_enable = Input(Bool())
     val toDecode = new Bundle {
       val isResumeVType = Output(Bool())
-      val commitVType = ValidIO(VType())
       val walkVType = ValidIO(VType())
-      val isVsetvl = Output(Bool())
+      val commitVType = new Bundle {
+        val vtype = ValidIO(VType())
+        val hasVsetvl = Output(Bool())
+      }
     }
-    val wbVType = Input(VType())
 
     val debug_ls = Flipped(new DebugLSIO)
     val debugRobHead = Output(new DynInst)
@@ -276,11 +277,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   vtypeBuffer.io.snpt := io.snpt
   vtypeBuffer.io.snpt.snptEnq := snptEnq
   io.toDecode.isResumeVType := vtypeBuffer.io.toDecode.isResumeVType
-  io.toDecode.commitVType.valid := vtypeBuffer.io.toDecode.commitVType.valid
-  // when vset instruction is vsetvl, use the writeback vtype value
-  io.toDecode.commitVType.bits := Mux(vtypeBuffer.io.toDecode.isVsetvl, io.wbVType, vtypeBuffer.io.toDecode.commitVType.bits)
+  io.toDecode.commitVType := vtypeBuffer.io.toDecode.commitVType
   io.toDecode.walkVType := vtypeBuffer.io.toDecode.walkVType
-  io.toDecode.isVsetvl := vtypeBuffer.io.toDecode.isVsetvl
 
 
   // When blockBackward instruction leaves Rob (commit or walk), hasBlockBackward should be set to false.B

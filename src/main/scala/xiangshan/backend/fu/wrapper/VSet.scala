@@ -73,7 +73,7 @@ class VSetRiWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
   vsetModule.io.in.vtype := vtype
 
   out.res.data := vsetModule.io.out.vconfig.vl
-  if (cfg.hasVtype) io.vtype.get := vsetModule.io.out.vconfig.vtype
+  if (cfg.writeVType) io.vtype.get := vsetModule.io.out.vconfig.vtype
 
   debugIO.vconfig := vsetModule.io.out.vconfig
 }
@@ -99,7 +99,7 @@ class VSetRvfWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
 
   out.res.data := Mux(vsetModule.io.out.vconfig.vtype.illegal, 0.U,
                       Mux(VSETOpType.isKeepVl(in.ctrl.fuOpType), oldVL, vsetModule.io.out.vconfig.vl))
-  if (cfg.hasVtype) io.vtype.get := vsetModule.io.out.vconfig.vtype
+  if (cfg.writeVType) io.vtype.get := vsetModule.io.out.vconfig.vtype
 
   debugIO.vconfig := res
 }

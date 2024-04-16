@@ -34,11 +34,11 @@ class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle 
   val flush = Flipped(ValidIO(new Redirect()))
   val in = Flipped(DecoupledIO(new ExuInput(params)))
   val out = DecoupledIO(new ExuOutput(params))
-  val csrio = if (params.hasCSR) Some(new CSRFileIO) else None
-  val fenceio = if (params.hasFence) Some(new FenceIO) else None
-  val frm = if (params.needSrcFrm) Some(Input(UInt(3.W))) else None
-  val vxrm = if (params.needSrcVxrm) Some(Input(UInt(2.W))) else None
-  val vtype = if (params.hasVtype) Some(new VType) else None
+  val csrio = OptionWrapper(params.hasCSR, new CSRFileIO)
+  val fenceio = OptionWrapper(params.hasFence, new FenceIO)
+  val frm = OptionWrapper(params.needSrcFrm, Input(UInt(3.W)))
+  val vxrm = OptionWrapper(params.needSrcVxrm, Input(UInt(2.W)))
+  val vtype = OptionWrapper(params.writeVType, new VType)
 }
 
 class ExeUnit(val exuParams: ExeUnitParams)(implicit p: Parameters) extends LazyModule {
@@ -261,7 +261,7 @@ class ExeUnitImp(
       fuio.exception := DelayN(exuio.exception, 2)
   }))
 
-  io.vtype.foreach(exuio => funcUnits.foreach(fu => fu.io.vtype.foreach(fuio => fuio <> exuio)))
+  io.vtype.foreach(exuio => funcUnits.foreach(fu => fu.io.vtype.foreach(fuio => exuio := fuio)))
   io.fenceio.foreach(exuio => funcUnits.foreach(fu => fu.io.fenceio.foreach(fuio => fuio <> exuio)))
   io.frm.foreach(exuio => funcUnits.foreach(fu => fu.io.frm.foreach(fuio => fuio <> exuio)))
   io.vxrm.foreach(exuio => funcUnits.foreach(fu => fu.io.vxrm.foreach(fuio => fuio <> exuio)))
