@@ -23,8 +23,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utility.{SignExt, ZeroExt}
-import xiangshan.backend.fu.HasPipelineReg
-import xiangshan.i2fCfg
+import xiangshan.backend.fu.FuConfig
 
 class IntToFPDataModule(latency: Int)(implicit p: Parameters) extends FPUDataModule {
   val regEnables = IO(Input(Vec(latency, Bool())))
@@ -74,12 +73,12 @@ class IntToFPDataModule(latency: Int)(implicit p: Parameters) extends FPUDataMod
   val s3_out = RegEnable(mux, regEnables(1))
   val s3_tag = RegEnable(s2_tag, regEnables(1))
 
-  fflags := s3_out.exc
+  io.out.fflags := s3_out.exc
   io.out.data := FPU.box(s3_out.data, s3_tag)
 }
 
-class IntToFP(implicit p: Parameters) extends FPUSubModule with HasPipelineReg {
-  override def latency: Int = i2fCfg.latency.latencyVal.get
+class IntToFP(cfg: FuConfig)(implicit p: Parameters) extends FPUPipelineModule(cfg) {
+  override def latency: Int = cfg.latency.latencyVal.get
   override val dataModule = Module(new IntToFPDataModule(latency))
   connectDataModule
   dataModule.regEnables <> VecInit((1 to latency) map (i => regEnable(i)))

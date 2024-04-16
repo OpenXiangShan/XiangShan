@@ -39,9 +39,10 @@ class FtqDebugBundle extends Bundle {
   val predStage = UInt(2.W)
 }
 
-class FtqPtr(implicit p: Parameters) extends CircularQueuePtr[FtqPtr](
-  p => p(XSCoreParamsKey).FtqSize
+class FtqPtr(entries: Int) extends CircularQueuePtr[FtqPtr](
+  entries
 ){
+  def this()(implicit p: Parameters) = this(p(XSCoreParamsKey).FtqSize)
 }
 
 object FtqPtr {
@@ -162,10 +163,12 @@ class Ftq_Pred_Info(implicit p: Parameters) extends XSBundle {
 
 
 class FtqRead[T <: Data](private val gen: T)(implicit p: Parameters) extends XSBundle {
+  val vld = Output(Bool())
   val ptr = Output(new FtqPtr)
   val offset = Output(UInt(log2Ceil(PredictWidth).W))
   val data = Input(gen)
-  def apply(ptr: FtqPtr, offset: UInt) = {
+  def apply(vld: Bool, ptr: FtqPtr, offset: UInt) = {
+    this.vld := vld
     this.ptr := ptr
     this.offset := offset
     this.data
@@ -203,7 +206,6 @@ class FtqToICacheIO(implicit p: Parameters) extends XSBundle with HasCircularQue
 }
 
 trait HasBackendRedirectInfo extends HasXSParameter {
-  def numRedirectPcRead = exuParameters.JmpCnt + exuParameters.AluCnt + 1
   def isLoadReplay(r: Valid[Redirect]) = r.bits.flushItself()
 }
 
@@ -213,6 +215,7 @@ class FtqToCtrlIO(implicit p: Parameters) extends XSBundle with HasBackendRedire
   val pc_mem_waddr = Output(UInt(log2Ceil(FtqSize).W))
   val pc_mem_wdata = Output(new Ftq_RF_Components)
   // newest target
+  val newest_entry_en = Output(Bool())
   val newest_entry_target = Output(UInt(VAddrBits.W))
   val newest_entry_ptr = Output(new FtqPtr)
 }
@@ -482,11 +485,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val ifuRedirected = RegInit(VecInit(Seq.fill(FtqSize)(false.B)))
 
   
-  // io.fromBackend.ftqIdxAhead: jmp + alu(aluCnt) + ldReplay + exception
-  val aluAheadStart = 1
-  val ftqIdxAhead = VecInit(Seq.tabulate(FtqRedirectAheadNum)(i => io.fromBackend.ftqIdxAhead(i + aluAheadStart))) // only alu
-  val ftqIdxSelOH = io.fromBackend.ftqIdxSelOH.bits(FtqRedirectAheadNum, 1)
-  
+  // io.fromBackend.ftqIdxAhead: bju(BjuCnt) + ldReplay + exception
+  val ftqIdxAhead = VecInit(Seq.tabulate(FtqRedirectAheadNum)(i => io.fromBackend.ftqIdxAhead(i))) // only bju
+  val ftqIdxSelOH = io.fromBackend.ftqIdxSelOH.bits(FtqRedirectAheadNum - 1, 0)
+
   val aheadValid   = ftqIdxAhead.map(_.valid).reduce(_|_) && !io.fromBackend.redirect.valid
   val realAhdValid = io.fromBackend.redirect.valid && (ftqIdxSelOH > 0.U) && RegNext(aheadValid)
   val backendRedirect = Wire(Valid(new BranchPredictionRedirect))
@@ -507,7 +509,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   allowToIfu := !ifuFlush && !backendRedirect.valid && !backendRedirectReg.valid
 
   def copyNum = 5
-  val bpuPtr, ifuPtr, ifuWbPtr, commPtr = RegInit(FtqPtr(false.B, 0.U))
+  val bpuPtr, ifuPtr, ifuWbPtr, commPtr, robCommPtr = RegInit(FtqPtr(false.B, 0.U))
   val ifuPtrPlus1 = RegInit(FtqPtr(false.B, 1.U))
   val ifuPtrPlus2 = RegInit(FtqPtr(false.B, 2.U))
   val commPtrPlus1 = RegInit(FtqPtr(false.B, 1.U))
@@ -520,6 +522,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val ifuWbPtr_write     = WireInit(ifuWbPtr)
   val commPtr_write      = WireInit(commPtr)
   val commPtrPlus1_write = WireInit(commPtrPlus1)
+  val robCommPtr_write   = WireInit(robCommPtr)
   ifuPtr       := ifuPtr_write
   ifuPtrPlus1  := ifuPtrPlus1_write
   ifuPtrPlus2  := ifuPtrPlus2_write
@@ -530,6 +533,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     ptr := ifuPtr_write
     dontTouch(ptr)
   }
+  robCommPtr   := robCommPtr_write
   val validEntries = distanceBetween(bpuPtr, commPtr)
   val canCommit = Wire(Bool())
 
@@ -649,11 +653,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
         }
       }
   }
-
-  // num cycle is fixed
-  io.toBackend.newest_entry_ptr := RegNext(newest_entry_ptr)
-  io.toBackend.newest_entry_target := RegNext(newest_entry_target)
-
 
   bpuPtr := bpuPtr + enq_fire
   copied_bpu_ptr.map(_ := bpuPtr + enq_fire)
@@ -891,15 +890,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     entry_hit_status(wb_idx_reg) := h_false_hit
   }
 
-
-  // **********************************************************************
-  // ***************************** to backend *****************************
-  // **********************************************************************
-  // to backend pc mem / target
-  io.toBackend.pc_mem_wen   := RegNext(last_cycle_bpu_in)
-  io.toBackend.pc_mem_waddr := RegNext(last_cycle_bpu_in_idx)
-  io.toBackend.pc_mem_wdata := RegNext(bpu_in_bypass_buf_for_ifu)
-
   // *******************************************************************************
   // **************************** redirect from backend ****************************
   // *******************************************************************************
@@ -990,6 +980,20 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     // if pdWb and no redirect, set to false
     ifuRedirected(last_cycle_bpu_in_ptr.value) := false.B
   }
+
+  // **********************************************************************
+  // ***************************** to backend *****************************
+  // **********************************************************************
+  // to backend pc mem / target
+  io.toBackend.pc_mem_wen := RegNext(last_cycle_bpu_in)
+  io.toBackend.pc_mem_waddr := RegEnable(last_cycle_bpu_in_idx, last_cycle_bpu_in)
+  io.toBackend.pc_mem_wdata := RegEnable(bpu_in_bypass_buf_for_ifu, last_cycle_bpu_in)
+
+  // num cycle is fixed
+  val newest_entry_en: Bool = RegNext(last_cycle_bpu_in || backendRedirect.valid || ifuRedirectToBpu.valid)
+  io.toBackend.newest_entry_en := RegNext(newest_entry_en)
+  io.toBackend.newest_entry_ptr := RegEnable(newest_entry_ptr, newest_entry_en)
+  io.toBackend.newest_entry_target := RegEnable(newest_entry_target, newest_entry_en)
 
   // *********************************************************************
   // **************************** wb from exu ****************************
@@ -1137,6 +1141,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     }
   }
 
+  robCommPtr_write := Mux(io.fromBackend.rob_commits.map(_.valid).reduce(_ | _), ParallelPriorityMux(io.fromBackend.rob_commits.map(_.valid).reverse, io.fromBackend.rob_commits.map(_.bits.ftqIdx).reverse), robCommPtr)
+
   // ****************************************************************
   // **************************** to bpu ****************************
   // ****************************************************************
@@ -1152,10 +1158,14 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val may_have_stall_from_bpu = Wire(Bool())
   val bpu_ftb_update_stall = RegInit(0.U(2.W)) // 2-cycle stall, so we need 3 states
   may_have_stall_from_bpu := bpu_ftb_update_stall =/= 0.U
+  val notInvalidSeq = commitStateQueue(commPtr.value).map(s => s =/= c_invalid).reverse
+  // Todo: @huxuan check it
+  //  canCommit := commPtr =/= ifuWbPtr && !may_have_stall_from_bpu &&
+  //    Cat(commitStateQueue(commPtr.value).map(s => {
+  //      s === c_invalid || s === c_commited
+  //    })).andR
   canCommit := commPtr =/= ifuWbPtr && !may_have_stall_from_bpu &&
-    Cat(commitStateQueue(commPtr.value).map(s => {
-      s === c_invalid || s === c_commited
-    })).andR
+    (isAfter(robCommPtr, commPtr) || PriorityMuxDefault(notInvalidSeq.zip(commitStateQueue(commPtr.value).reverse), c_invalid) === c_commited)
 
   val mmioReadPtr = io.mmioCommitRead.mmioFtqPtr
   val mmioLastCommit = isBefore(commPtr, mmioReadPtr) && (isAfter(ifuPtr,mmioReadPtr)  ||  mmioReadPtr ===   ifuPtr) &&

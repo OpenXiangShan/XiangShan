@@ -162,6 +162,7 @@ class PTWFilterEntryIO(Width: Int, hasHint: Boolean = false)(implicit p: Paramet
 }
 
 class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p: Parameters) extends XSModule with HasPtwConst {
+  private val LdExuCnt = backendParams.LdExuCnt
 
   val io = IO(new PTWFilterEntryIO(Width, hasHint))
   require(isPow2(Size), s"Filter Size ($Size) must be a power of 2")
@@ -207,55 +208,33 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
   io.getGpa := 0.U
 
   // ugly code, should be optimized later
-  if (Enable3Load3Store) {
-    require(Width <= 4, s"DTLB Filter Width ($Width) must equal or less than 4")
-    if (Width == 1) {
-      require(Size == 8, s"prefetch filter Size ($Size) should be 8")
-      canenq(0) := !(Cat(v).andR)
-      enqidx(0) := firstValidIndex(v, false.B)
-    } else if (Width == 3) {
-      require(Size == 8, s"store filter Size ($Size) should be 8")
-      canenq(0) := !(Cat(v.take(3)).andR)
-      enqidx(0) := firstValidIndex(v.take(3), false.B)
-      canenq(1) := !(Cat(v.drop(3).take(3)).andR)
-      enqidx(1) := firstValidIndex(v.drop(3).take(3), false.B) + 3.U
-      canenq(2) := !(Cat(v.drop(6).take(2)).andR)
-      enqidx(2) := firstValidIndex(v.drop(6).take(2), false.B) + 6.U
-    } else if (Width == 4) {
-      require(Size == 16, s"load filter Size ($Size) should be 16")
-      canenq(0) := !(Cat(v.take(4)).andR)
-      enqidx(0) := firstValidIndex(v.take(4), false.B)
-      canenq(1) := !(Cat(v.drop(4).take(4)).andR)
-      enqidx(1) := firstValidIndex(v.drop(4).take(4), false.B) + 4.U
-      canenq(2) := !(Cat(v.drop(8).take(4)).andR)
-      enqidx(2) := firstValidIndex(v.drop(8).take(4), false.B) + 8.U
-      canenq(3) := !(Cat(v.drop(12).take(4)).andR)
-      enqidx(3) := firstValidIndex(v.drop(12).take(4), false.B) + 12.U
-    }
-  } else {
-    require(Width <= 3, s"DTLB Filter Width ($Width) must equal or less than 3")
-    if (Width == 1) {
-      require(Size == 8, s"prefetch filter Size ($Size) should be 8")
-      canenq(0) := !(Cat(v).andR)
-      enqidx(0) := firstValidIndex(v, false.B)
-    } else if (Width == 2) {
-      require(Size == 8, s"store filter Size ($Size) should be 8")
-      canenq(0) := !(Cat(v.take(Size/2)).andR)
-      enqidx(0) := firstValidIndex(v.take(Size/2), false.B)
-      canenq(1) := !(Cat(v.drop(Size/2)).andR)
-      enqidx(1) := firstValidIndex(v.drop(Size/2), false.B) + (Size/2).U
-    } else if (Width == 3) {
-      require(Size == 16, s"load filter Size ($Size) should be 16")
-      canenq(0) := !(Cat(v.take(8)).andR)
-      enqidx(0) := firstValidIndex(v.take(8), false.B)
-      canenq(1) := !(Cat(v.drop(8).take(4)).andR)
-      enqidx(1) := firstValidIndex(v.drop(8).take(4), false.B) + 8.U
-      // four entries for prefetch
-      canenq(2) := !(Cat(v.drop(12)).andR)
-      enqidx(2) := firstValidIndex(v.drop(12), false.B) + 12.U
+  require(Width <= 4, s"DTLB Filter Width ($Width) must equal or less than 4")
+  if (Width == 1) {
+    require(Size == 8, s"prefetch filter Size ($Size) should be 8")
+    canenq(0) := !(Cat(v).andR)
+    enqidx(0) := firstValidIndex(v, false.B)
+  } else if (Width == 2) {
+    require(Size == 8, s"store filter Size ($Size) should be 8")
+    canenq(0) := !(Cat(v.take(Size/2)).andR)
+    enqidx(0) := firstValidIndex(v.take(Size/2), false.B)
+    canenq(1) := !(Cat(v.drop(Size/2)).andR)
+    enqidx(1) := firstValidIndex(v.drop(Size/2), false.B) + (Size/2).U
+  } else if (Width == 3) {
+    require(Size == 16, s"load filter Size ($Size) should be 16")
+    canenq(0) := !(Cat(v.take(8)).andR)
+    enqidx(0) := firstValidIndex(v.take(8), false.B)
+    canenq(1) := !(Cat(v.drop(8).take(4)).andR)
+    enqidx(1) := firstValidIndex(v.drop(8).take(4), false.B) + 8.U
+    // four entries for prefetch
+    canenq(2) := !(Cat(v.drop(12)).andR)
+    enqidx(2) := firstValidIndex(v.drop(12), false.B) + 12.U
+  } else if (Width == 4) {
+    require(Size == 16, s"load filter Size ($Size) should be 16")
+    for (i <- 0 until Width) {
+      canenq(i) := !(Cat(VecInit(v.slice(i * 4, (i + 1) * 4))).andR)
+      enqidx(i) := firstValidIndex(v.slice(i * 4, (i + 1) * 4), false.B) + (i * 4).U
     }
   }
-
 
   for (i <- 0 until Width) {
     enqvalid(i) := io.tlb.req(i).valid && !ptwResp_ReqMatchVec(i) && !entryIsMatchVec(i) && canenq(i)
@@ -312,7 +291,7 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
 
   if (hasHint) {
     val hintIO = io.hint.getOrElse(new TlbHintIO)
-    for (i <- 0 until exuParameters.LduCnt) {
+    for (i <- 0 until LdExuCnt) {
       hintIO.req(i).id := enqidx(i)
       hintIO.req(i).full := !canenq(i) || ptwResp_ReqMatchVec(i)
     }
@@ -364,15 +343,23 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
 class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) extends XSModule with HasPtwConst {
   require(Size >= Width)
 
+  private val LduCnt = backendParams.LduCnt
+  private val HyuCnt = backendParams.HyuCnt
+  private val StaCnt = backendParams.StaCnt
+  // all load execute units, including ldu and hyu
+  private val LdExuCnt = backendParams.LdExuCnt
+  // all store address execute units, including sta and hyu
+  private val StaExuCnt = backendParams.StaExuCnt
+
   val io = IO(new PTWFilterIO(Width, hasHint = true))
 
   val load_filter = VecInit(Seq.fill(1) {
-    val load_entry = Module(new PTWFilterEntry(Width = exuParameters.LduCnt + 1, Size = loadfiltersize, hasHint = true))
+    val load_entry = Module(new PTWFilterEntry(Width = LdExuCnt + 1, Size = loadfiltersize, hasHint = true))
     load_entry.io
   })
 
   val store_filter = VecInit(Seq.fill(1) {
-    val store_entry = Module(new PTWFilterEntry(Width = exuParameters.StuCnt, Size = storefiltersize))
+    val store_entry = Module(new PTWFilterEntry(Width = StaCnt, Size = storefiltersize))
     store_entry.io
   })
 
@@ -383,9 +370,9 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
 
   val filter = load_filter ++ store_filter ++ prefetch_filter
 
-  load_filter.map(_.tlb.req := io.tlb.req.take(exuParameters.LduCnt + 1))
-  store_filter.map(_.tlb.req := io.tlb.req.drop(exuParameters.LduCnt + 1).take(exuParameters.StuCnt))
-  prefetch_filter.map(_.tlb.req := io.tlb.req.drop(exuParameters.LduCnt + 1 + exuParameters.StuCnt))
+  load_filter.map(_.tlb.req := io.tlb.req.take(LdExuCnt + 1))
+  store_filter.map(_.tlb.req := io.tlb.req.drop(LdExuCnt + 1).take(StaCnt))
+  prefetch_filter.map(_.tlb.req := io.tlb.req.drop(LdExuCnt + 1 + StaCnt))
 
   val flush = DelayN(io.sfence.valid || io.csr.satp.changed || (io.csr.priv.virt && io.csr.vsatp.changed), FenceDelay)
   val ptwResp = RegEnable(io.ptw.resp.bits, io.ptw.resp.fire)
@@ -413,15 +400,15 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
     io.tlb.resp.bits.getGpa(i) := false.B
   }
   io.tlb.resp.bits.vector(0) := load_filter(0).refill
-  io.tlb.resp.bits.vector(exuParameters.LduCnt + 1) := store_filter(0).refill
-  io.tlb.resp.bits.vector(exuParameters.LduCnt + 1 + exuParameters.StuCnt) := prefetch_filter(0).refill
+  io.tlb.resp.bits.vector(LdExuCnt + 1) := store_filter(0).refill
+  io.tlb.resp.bits.vector(LdExuCnt + 1 + StaCnt) := prefetch_filter(0).refill
   io.tlb.resp.bits.getGpa(0) := load_filter(0).getGpa
-  io.tlb.resp.bits.getGpa(exuParameters.LduCnt + 1) := store_filter(0).getGpa
-  io.tlb.resp.bits.getGpa(exuParameters.LduCnt + 1 + exuParameters.StuCnt) := prefetch_filter(0).getGpa
+  io.tlb.resp.bits.getGpa(LdExuCnt + 1) := store_filter(0).getGpa
+  io.tlb.resp.bits.getGpa(LdExuCnt + 1 + StaCnt) := prefetch_filter(0).getGpa
 
   val hintIO = io.hint.getOrElse(new TlbHintIO)
   val load_hintIO = load_filter(0).hint.getOrElse(new TlbHintIO)
-  for (i <- 0 until exuParameters.LduCnt) {
+  for (i <- 0 until LdExuCnt) {
     hintIO.req(i) := RegNext(load_hintIO.req(i))
   }
   hintIO.resp := RegNext(load_hintIO.resp)
@@ -431,11 +418,11 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
     io.tlb.resp.bits.data.memidx := load_filter(0).memidx
   }
   when (store_filter(0).refill) {
-    io.tlb.resp.bits.vector(exuParameters.LduCnt + 1) := true.B
+    io.tlb.resp.bits.vector(LdExuCnt + 1) := true.B
     io.tlb.resp.bits.data.memidx := store_filter(0).memidx
   }
   when (prefetch_filter(0).refill) {
-    io.tlb.resp.bits.vector(exuParameters.LduCnt + 1 + exuParameters.StuCnt) := true.B
+    io.tlb.resp.bits.vector(LdExuCnt + 1 + StaCnt) := true.B
     io.tlb.resp.bits.data.memidx := 0.U.asTypeOf(new MemBlockidxBundle)
   }
 

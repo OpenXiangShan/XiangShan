@@ -22,13 +22,15 @@ import chisel3.util._
 import utils._
 import utility._
 import xiangshan._
-import xiangshan.backend.fu.fpu.FPU
+import xiangshan.backend._
+import xiangshan.backend.fu.fpu._
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
 import xiangshan.cache.mmu._
 import xiangshan.frontend.FtqPtr
 import xiangshan.ExceptionNO._
 import xiangshan.mem.mdp._
+import xiangshan.backend.Bundles.{DynInst, MemExuOutput, MemMicroOpRbExt}
 import xiangshan.backend.rob.RobPtr
 
 class LqPtr(implicit p: Parameters) extends CircularQueuePtr[LqPtr](
@@ -46,9 +48,9 @@ object LqPtr {
 }
 
 trait HasLoadHelper { this: XSModule =>
-  def rdataHelper(uop: MicroOp, rdata: UInt): UInt = {
-    val fpWen = uop.ctrl.fpWen
-    LookupTree(uop.ctrl.fuOpType, List(
+  def rdataHelper(uop: DynInst, rdata: UInt): UInt = {
+    val fpWen = uop.fpWen
+    LookupTree(uop.fuOpType, List(
       LSUOpType.lb   -> SignExt(rdata(7, 0) , XLEN),
       LSUOpType.lh   -> SignExt(rdata(15, 0), XLEN),
       /*
@@ -74,19 +76,28 @@ trait HasLoadHelper { this: XSModule =>
       LSUOpType.hlvxwu -> ZeroExt(rdata(31, 0), XLEN),
     ))
   }
+
+  def rdataVecHelper(alignedType: UInt, rdata: UInt): UInt = {
+    LookupTree(alignedType, List(
+      "b00".U -> ZeroExt(rdata(7, 0), VLEN),
+      "b01".U -> ZeroExt(rdata(15, 0), VLEN),
+      "b10".U -> ZeroExt(rdata(31, 0), VLEN),
+      "b11".U -> ZeroExt(rdata(63, 0), VLEN)
+    ))
+  }
 }
 
-class LqEnqIO(implicit p: Parameters) extends XSBundle {
+class LqEnqIO(implicit p: Parameters) extends MemBlockBundle {
   val canAccept = Output(Bool())
   val sqCanAccept = Input(Bool())
-  val needAlloc = Vec(exuParameters.LsExuCnt, Input(Bool()))
-  val req = Vec(exuParameters.LsExuCnt, Flipped(ValidIO(new MicroOp)))
-  val resp = Vec(exuParameters.LsExuCnt, Output(new LqPtr))
+  val needAlloc = Vec(LSQEnqWidth, Input(Bool()))
+  val req = Vec(LSQEnqWidth, Flipped(ValidIO(new DynInst)))
+  val resp = Vec(LSQEnqWidth, Output(new LqPtr))
 }
 
 class LqTriggerIO(implicit p: Parameters) extends XSBundle {
-  val hitLoadAddrTriggerHitVec = Input(Vec(3, Bool()))
-  val lqLoadAddrTriggerHitVec = Output(Vec(3, Bool()))
+  val hitLoadAddrTriggerHitVec = Input(Vec(TriggerNum, Bool()))
+  val lqLoadAddrTriggerHitVec = Output(Vec(TriggerNum, Bool()))
 }
 
 class LoadQueueTopDownIO(implicit p: Parameters) extends XSBundle {
@@ -115,9 +126,10 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     }
     val sta = new Bundle() {
       val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // from store_s1
+      val vecStoreAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // from store_s1
     }
     val std = new Bundle() {
-      val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new ExuOutput))) // from store_s0, store data, send to sq from rs
+      val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new MemExuOutput))) // from store_s0, store data, send to sq from rs
     }
     val sq = new Bundle() {
       val stAddrReadySqPtr = Input(new SqPtr)
@@ -127,7 +139,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
       val stIssuePtr       = Input(new SqPtr)
       val sqEmpty          = Input(Bool())
     }
-    val ldout = Vec(LoadPipelineWidth, DecoupledIO(new ExuOutput))
+    val ldout = Vec(LoadPipelineWidth, DecoupledIO(new MemExuOutput))
     val ld_raw_data = Vec(LoadPipelineWidth, Output(new LoadDataFromLQBundle))
     val replay = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))
   //  val refill = Flipped(ValidIO(new Refill))
@@ -146,6 +158,13 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val tlb_hint = Flipped(new TlbHintIO)
     val lqEmpty = Output(Bool())
+
+    val vecWriteback = Flipped(ValidIO(new MemExuOutput(isVector = true)))
+    val lqDeqPtr = Output(new LqPtr)
+    val vecMMIOReplay = Vec(VecLoadPipelineWidth, DecoupledIO(new LsPipelineBundle()))
+
+    val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
+
     val debugTopDown = new LoadQueueTopDownIO
   })
 
@@ -172,6 +191,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
    */
   loadQueueRAW.io.redirect         <> io.redirect
   loadQueueRAW.io.storeIn          <> io.sta.storeAddrIn
+  loadQueueRAW.io.vecStoreIn       <> io.sta.vecStoreAddrIn
   loadQueueRAW.io.stAddrReadySqPtr <> io.sq.stAddrReadySqPtr
   loadQueueRAW.io.stIssuePtr       <> io.sq.stIssuePtr
   for (w <- 0 until LoadPipelineWidth) {
@@ -183,13 +203,15 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   /**
    * VirtualLoadQueue
    */
-  virtualLoadQueue.io.redirect    <> io.redirect
-  virtualLoadQueue.io.enq         <> io.enq
-  virtualLoadQueue.io.ldin        <> io.ldu.ldin // from load_s3
-  virtualLoadQueue.io.lqFull      <> io.lqFull
-  virtualLoadQueue.io.lqDeq       <> io.lqDeq
-  virtualLoadQueue.io.lqCancelCnt <> io.lqCancelCnt
-  virtualLoadQueue.io.lqEmpty <> io.lqEmpty
+  virtualLoadQueue.io.redirect      <> io.redirect
+  virtualLoadQueue.io.enq           <> io.enq
+  virtualLoadQueue.io.ldin          <> io.ldu.ldin // from load_s3
+  virtualLoadQueue.io.lqFull        <> io.lqFull
+  virtualLoadQueue.io.lqDeq         <> io.lqDeq
+  virtualLoadQueue.io.lqCancelCnt   <> io.lqCancelCnt
+  virtualLoadQueue.io.lqEmpty       <> io.lqEmpty
+  virtualLoadQueue.io.vecWriteback  <> io.vecWriteback
+  virtualLoadQueue.io.ldWbPtr       <> io.lqDeqPtr
 
   /**
    * Load queue exception buffer
@@ -209,6 +231,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   uncacheBuffer.io.ld_raw_data  <> io.ld_raw_data
   uncacheBuffer.io.rob        <> io.rob
   uncacheBuffer.io.uncache    <> io.uncache
+  uncacheBuffer.io.trigger    <> io.trigger
+  uncacheBuffer.io.vecReplay  <> io.vecMMIOReplay
   for ((buff, w) <- uncacheBuffer.io.req.zipWithIndex) {
     buff.valid := io.ldu.ldin(w).valid // from load_s3
     buff.bits := io.ldu.ldin(w).bits // from load_s3
@@ -225,6 +249,10 @@ class LoadQueue(implicit p: Parameters) extends XSModule
    */
   loadQueueReplay.io.redirect         <> io.redirect
   loadQueueReplay.io.enq              <> io.ldu.ldin // from load_s3
+  loadQueueReplay.io.enq.zip(io.ldu.ldin).foreach { case (sink, source) =>
+    sink.valid := source.valid && !source.bits.isvec
+    source.ready := sink.ready && !source.bits.isvec
+  }
   loadQueueReplay.io.storeAddrIn      <> io.sta.storeAddrIn // from store_s1
   loadQueueReplay.io.storeDataIn      <> io.std.storeDataIn // from store_s0
   loadQueueReplay.io.replay           <> io.replay

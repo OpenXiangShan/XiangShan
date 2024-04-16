@@ -19,35 +19,43 @@ package xiangshan.backend.decode
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.rocket.Instructions
+import freechips.rocketchip.rocket.Instructions._
 import freechips.rocketchip.util.uintToBitPat
-import utils._
 import utility._
+import utils._
 import xiangshan.ExceptionNO.{illegalInstr, virtualInstr}
 import xiangshan._
-import freechips.rocketchip.rocket.Instructions._
+import xiangshan.backend.fu.FuType
+import xiangshan.backend.Bundles.{DecodedInst, DynInst, StaticInst}
+import xiangshan.backend.decode.isa.bitfield.{InstVType, XSInstBitFields}
+import xiangshan.backend.fu.vector.Bundles.VType
 
 /**
  * Abstract trait giving defaults and other relevant values to different Decode constants/
  */
 abstract trait DecodeConstants {
   // This X should be used only in 1-bit signal. Otherwise, use BitPat("b???") to align with the width of UInt.
-  def X = BitPat("b?")
+  def X = BitPat("b0")
   def N = BitPat("b0")
   def Y = BitPat("b1")
+  def T = true
+  def F = false
 
   def decodeDefault: List[BitPat] = // illegal instruction
     //   srcType(0) srcType(1) srcType(2) fuType    fuOpType    rfWen
     //   |          |          |          |         |           |  fpWen
-    //   |          |          |          |         |           |  |  isXSTrap
-    //   |          |          |          |         |           |  |  |  noSpecExec
-    //   |          |          |          |         |           |  |  |  |  blockBackward
-    //   |          |          |          |         |           |  |  |  |  |  flushPipe
-    //   |          |          |          |         |           |  |  |  |  |  |  selImm
-    //   |          |          |          |         |           |  |  |  |  |  |  |
-    List(SrcType.X, SrcType.X, SrcType.X, FuType.X, FuOpType.X, N, N, N, N, N, N, SelImm.INVALID_INSTR) // Use SelImm to indicate invalid instr
+    //   |          |          |          |         |           |  |  vecWen
+    //   |          |          |          |         |           |  |  |  isXSTrap
+    //   |          |          |          |         |           |  |  |  |  noSpecExec
+    //   |          |          |          |         |           |  |  |  |  |  blockBackward
+    //   |          |          |          |         |           |  |  |  |  |  |  flushPipe
+    //   |          |          |          |         |           |  |  |  |  |  |  |  canRobCompress
+    //   |          |          |          |         |           |  |  |  |  |  |  |  |  uopSplitType
+    //   |          |          |          |         |           |  |  |  |  |  |  |  |  |             selImm
+    List(SrcType.X, SrcType.X, SrcType.X, FuType.X, FuOpType.X, N, N, N, N, N, N, N, N, UopSplitType.X, SelImm.INVALID_INSTR) // Use SelImm to indicate invalid instr
 
-  val table: Array[(BitPat, List[BitPat])]
+  val decodeArray: Array[(BitPat, XSDecodeBase)]
+  final def table: Array[(BitPat, List[BitPat])] = decodeArray.map(x => (x._1, x._2.generate()))
 }
 
 trait DecodeUnitConstants
@@ -68,33 +76,80 @@ trait DecodeUnitConstants
  * See xiangshan/package.scala, xiangshan/backend/package.scala, Bundle.scala
  */
 
+abstract class XSDecodeBase {
+  def X = BitPat("b?")
+  def N = BitPat("b0")
+  def Y = BitPat("b1")
+  def T = true
+  def F = false
+  def generate() : List[BitPat]
+}
+
+case class XSDecode(
+  src1: BitPat, src2: BitPat, src3: BitPat,
+  fu: FuType.OHType, fuOp: BitPat, selImm: BitPat,
+  uopSplitType: BitPat = UopSplitType.X,
+  xWen: Boolean = false,
+  fWen: Boolean = false,
+  vWen: Boolean = false,
+  mWen: Boolean = false,
+  xsTrap: Boolean = false,
+  noSpec: Boolean = false,
+  blockBack: Boolean = false,
+  flushPipe: Boolean = false,
+  canRobCompress: Boolean = false,
+) extends XSDecodeBase {
+  def generate() : List[BitPat] = {
+    List (src1, src2, src3, BitPat(fu.U(FuType.num.W)), fuOp, xWen.B, fWen.B, (vWen || mWen).B, xsTrap.B, noSpec.B, blockBack.B, flushPipe.B, canRobCompress.B, uopSplitType, selImm)
+  }
+}
+
+case class FDecode(
+  src1: BitPat, src2: BitPat, src3: BitPat,
+  fu: FuType.OHType, fuOp: BitPat, selImm: BitPat = SelImm.X,
+  uopSplitType: BitPat = UopSplitType.X,
+  xWen: Boolean = false,
+  fWen: Boolean = false,
+  vWen: Boolean = false,
+  mWen: Boolean = false,
+  xsTrap: Boolean = false,
+  noSpec: Boolean = false,
+  blockBack: Boolean = false,
+  flushPipe: Boolean = false,
+  canRobCompress: Boolean = false,
+) extends XSDecodeBase {
+  def generate() : List[BitPat] = {
+    XSDecode(src1, src2, src3, fu, fuOp, selImm, uopSplitType, xWen, fWen, vWen, mWen, xsTrap, noSpec, blockBack, flushPipe, canRobCompress).generate()
+  }
+}
+
 /**
  * Decode constants for RV64
  */
 object X64Decode extends DecodeConstants {
-  val table: Array[(BitPat, List[BitPat])] = Array(
-    LD      -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.ldu, LSUOpType.ld,  Y, N, N, N, N, N, SelImm.IMM_I),
-    LWU     -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.ldu, LSUOpType.lwu, Y, N, N, N, N, N, SelImm.IMM_I),
-    SD      -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.stu, LSUOpType.sd,  N, N, N, N, N, N, SelImm.IMM_S),
+  val decodeArray: Array[(BitPat, XSDecodeBase)] = Array(
+    LD      -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.ldu, LSUOpType.ld  , SelImm.IMM_I, xWen = T),
+    LWU     -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.ldu, LSUOpType.lwu , SelImm.IMM_I, xWen = T),
+    SD      -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.stu, LSUOpType.sd  , SelImm.IMM_S          ),
 
-    SLLI    -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.sll, Y, N, N, N, N, N, SelImm.IMM_I),
-    SRLI    -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.srl, Y, N, N, N, N, N, SelImm.IMM_I),
-    SRAI    -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.sra, Y, N, N, N, N, N, SelImm.IMM_I),
+    SLLI    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.sll , SelImm.IMM_I, xWen = T, canRobCompress = T),
+    SRLI    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.srl , SelImm.IMM_I, xWen = T, canRobCompress = T),
+    SRAI    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.sra , SelImm.IMM_I, xWen = T, canRobCompress = T),
 
-    ADDIW   -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.addw, Y, N, N, N, N, N, SelImm.IMM_I),
-    SLLIW   -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.sllw, Y, N, N, N, N, N, SelImm.IMM_I),
-    SRAIW   -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.sraw, Y, N, N, N, N, N, SelImm.IMM_I),
-    SRLIW   -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.srlw, Y, N, N, N, N, N, SelImm.IMM_I),
+    ADDIW   -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.addw, SelImm.IMM_I, xWen = T, canRobCompress = T),
+    SLLIW   -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.sllw, SelImm.IMM_I, xWen = T, canRobCompress = T),
+    SRAIW   -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.sraw, SelImm.IMM_I, xWen = T, canRobCompress = T),
+    SRLIW   -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.srlw, SelImm.IMM_I, xWen = T, canRobCompress = T),
 
-    ADDW    -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.addw, Y, N, N, N, N, N, SelImm.X),
-    SUBW    -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.subw, Y, N, N, N, N, N, SelImm.X),
-    SLLW    -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.sllw, Y, N, N, N, N, N, SelImm.X),
-    SRAW    -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.sraw, Y, N, N, N, N, N, SelImm.X),
-    SRLW    -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.srlw, Y, N, N, N, N, N, SelImm.X),
+    ADDW    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.addw, SelImm.X    , xWen = T, canRobCompress = T),
+    SUBW    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.subw, SelImm.X    , xWen = T, canRobCompress = T),
+    SLLW    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.sllw, SelImm.X    , xWen = T, canRobCompress = T),
+    SRAW    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.sraw, SelImm.X    , xWen = T, canRobCompress = T),
+    SRLW    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.srlw, SelImm.X    , xWen = T, canRobCompress = T),
 
-    RORW    -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.rorw, Y, N, N, N, N, N, SelImm.X),
-    RORIW   -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.rorw, Y, N, N, N, N, N, SelImm.IMM_I),
-    ROLW    -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.rolw, Y, N, N, N, N, N, SelImm.X)
+    RORW    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.rorw, SelImm.X    , xWen = T, canRobCompress = T),
+    RORIW   -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.rorw, SelImm.IMM_I, xWen = T, canRobCompress = T),
+    ROLW    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.rolw, SelImm.X    , xWen = T, canRobCompress = T),
   )
 }
 
@@ -102,232 +157,188 @@ object X64Decode extends DecodeConstants {
  * Overall Decode constants
  */
 object XDecode extends DecodeConstants {
-  val table: Array[(BitPat, List[BitPat])] = Array(
-    LW      -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.ldu, LSUOpType.lw,  Y, N, N, N, N, N, SelImm.IMM_I),
-    LH      -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.ldu, LSUOpType.lh,  Y, N, N, N, N, N, SelImm.IMM_I),
-    LHU     -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.ldu, LSUOpType.lhu, Y, N, N, N, N, N, SelImm.IMM_I),
-    LB      -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.ldu, LSUOpType.lb,  Y, N, N, N, N, N, SelImm.IMM_I),
-    LBU     -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.ldu, LSUOpType.lbu, Y, N, N, N, N, N, SelImm.IMM_I),
+  val decodeArray: Array[(BitPat, XSDecodeBase)] = Array(
+    LW      -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.ldu, LSUOpType.lw  , SelImm.IMM_I, xWen = T),
+    LH      -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.ldu, LSUOpType.lh  , SelImm.IMM_I, xWen = T),
+    LHU     -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.ldu, LSUOpType.lhu , SelImm.IMM_I, xWen = T),
+    LB      -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.ldu, LSUOpType.lb  , SelImm.IMM_I, xWen = T),
+    LBU     -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.ldu, LSUOpType.lbu , SelImm.IMM_I, xWen = T),
+    SW      -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.stu, LSUOpType.sw  , SelImm.IMM_S          ),
+    SH      -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.stu, LSUOpType.sh  , SelImm.IMM_S          ),
+    SB      -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.stu, LSUOpType.sb  , SelImm.IMM_S          ),
+    LUI     -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.add , SelImm.IMM_U, xWen = T, canRobCompress = T),
+    ADDI    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.add , SelImm.IMM_I, xWen = T, canRobCompress = T),
+    ANDI    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.and , SelImm.IMM_I, xWen = T, canRobCompress = T),
+    ORI     -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.or  , SelImm.IMM_I, xWen = T, canRobCompress = T),
+    XORI    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.xor , SelImm.IMM_I, xWen = T, canRobCompress = T),
+    SLTI    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.slt , SelImm.IMM_I, xWen = T, canRobCompress = T),
+    SLTIU   -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.sltu, SelImm.IMM_I, xWen = T, canRobCompress = T),
+    SLL     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.sll , SelImm.X    , xWen = T, canRobCompress = T),
+    ADD     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.add , SelImm.X    , xWen = T, canRobCompress = T),
+    SUB     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.sub , SelImm.X    , xWen = T, canRobCompress = T),
+    SLT     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.slt , SelImm.X    , xWen = T, canRobCompress = T),
+    SLTU    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.sltu, SelImm.X    , xWen = T, canRobCompress = T),
+    AND     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.and , SelImm.X    , xWen = T, canRobCompress = T),
+    OR      -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.or  , SelImm.X    , xWen = T, canRobCompress = T),
+    XOR     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.xor , SelImm.X    , xWen = T, canRobCompress = T),
+    SRA     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.sra , SelImm.X    , xWen = T, canRobCompress = T),
+    SRL     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.srl , SelImm.X    , xWen = T, canRobCompress = T),
 
-    SW      -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.stu, LSUOpType.sw,  N, N, N, N, N, N, SelImm.IMM_S),
-    SH      -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.stu, LSUOpType.sh,  N, N, N, N, N, N, SelImm.IMM_S),
-    SB      -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.stu, LSUOpType.sb,  N, N, N, N, N, N, SelImm.IMM_S),
+    MUL     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mul, MDUOpType.mul   , SelImm.X, xWen = T, canRobCompress = T),
+    MULH    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mul, MDUOpType.mulh  , SelImm.X, xWen = T, canRobCompress = T),
+    MULHU   -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mul, MDUOpType.mulhu , SelImm.X, xWen = T, canRobCompress = T),
+    MULHSU  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mul, MDUOpType.mulhsu, SelImm.X, xWen = T, canRobCompress = T),
+    MULW    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mul, MDUOpType.mulw  , SelImm.X, xWen = T, canRobCompress = T),
 
-    LUI     -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.add, Y, N, N, N, N, N, SelImm.IMM_U),
+    DIV     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.div, MDUOpType.div   , SelImm.X, xWen = T, canRobCompress = T),
+    DIVU    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.div, MDUOpType.divu  , SelImm.X, xWen = T, canRobCompress = T),
+    REM     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.div, MDUOpType.rem   , SelImm.X, xWen = T, canRobCompress = T),
+    REMU    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.div, MDUOpType.remu  , SelImm.X, xWen = T, canRobCompress = T),
+    DIVW    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.div, MDUOpType.divw  , SelImm.X, xWen = T, canRobCompress = T),
+    DIVUW   -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.div, MDUOpType.divuw , SelImm.X, xWen = T, canRobCompress = T),
+    REMW    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.div, MDUOpType.remw  , SelImm.X, xWen = T, canRobCompress = T),
+    REMUW   -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.div, MDUOpType.remuw , SelImm.X, xWen = T, canRobCompress = T),
 
-    ADDI    -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.add, Y, N, N, N, N, N, SelImm.IMM_I),
-    ANDI    -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.and, Y, N, N, N, N, N, SelImm.IMM_I),
-    ORI     -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.or,  Y, N, N, N, N, N, SelImm.IMM_I),
-    XORI    -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.xor, Y, N, N, N, N, N, SelImm.IMM_I),
-    SLTI    -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.slt, Y, N, N, N, N, N, SelImm.IMM_I),
-    SLTIU   -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.sltu, Y, N, N, N, N, N, SelImm.IMM_I),
-
-    SLL     -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.sll,  Y, N, N, N, N, N, SelImm.X),
-    ADD     -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.add,  Y, N, N, N, N, N, SelImm.X),
-    SUB     -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.sub,  Y, N, N, N, N, N, SelImm.X),
-    SLT     -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.slt,  Y, N, N, N, N, N, SelImm.X),
-    SLTU    -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.sltu, Y, N, N, N, N, N, SelImm.X),
-    AND     -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.and,  Y, N, N, N, N, N, SelImm.X),
-    OR      -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.or,   Y, N, N, N, N, N, SelImm.X),
-    XOR     -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.xor,  Y, N, N, N, N, N, SelImm.X),
-    SRA     -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.sra,  Y, N, N, N, N, N, SelImm.X),
-    SRL     -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.srl,  Y, N, N, N, N, N, SelImm.X),
-
-    MUL     -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.mul, MDUOpType.mul,    Y, N, N, N, N, N, SelImm.X),
-    MULH    -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.mul, MDUOpType.mulh,   Y, N, N, N, N, N, SelImm.X),
-    MULHU   -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.mul, MDUOpType.mulhu,  Y, N, N, N, N, N, SelImm.X),
-    MULHSU  -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.mul, MDUOpType.mulhsu, Y, N, N, N, N, N, SelImm.X),
-    MULW    -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.mul, MDUOpType.mulw,   Y, N, N, N, N, N, SelImm.X),
-
-    DIV     -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.div, MDUOpType.div,   Y, N, N, N, N, N, SelImm.X),
-    DIVU    -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.div, MDUOpType.divu,  Y, N, N, N, N, N, SelImm.X),
-    REM     -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.div, MDUOpType.rem,   Y, N, N, N, N, N, SelImm.X),
-    REMU    -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.div, MDUOpType.remu,  Y, N, N, N, N, N, SelImm.X),
-    DIVW    -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.div, MDUOpType.divw,  Y, N, N, N, N, N, SelImm.X),
-    DIVUW   -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.div, MDUOpType.divuw, Y, N, N, N, N, N, SelImm.X),
-    REMW    -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.div, MDUOpType.remw,  Y, N, N, N, N, N, SelImm.X),
-    REMUW   -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.div, MDUOpType.remuw, Y, N, N, N, N, N, SelImm.X),
-
-    AUIPC   -> List(SrcType.pc , SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.auipc, Y, N, N, N, N, N, SelImm.IMM_U),
-    JAL     -> List(SrcType.pc , SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.jal,   Y, N, N, N, N, N, SelImm.IMM_UJ),
-    JALR    -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.jalr,  Y, N, N, N, N, N, SelImm.IMM_I),
-    BEQ     -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.beq,    N, N, N, N, N, N, SelImm.IMM_SB),
-    BNE     -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.bne,    N, N, N, N, N, N, SelImm.IMM_SB),
-    BGE     -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.bge,    N, N, N, N, N, N, SelImm.IMM_SB),
-    BGEU    -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.bgeu,   N, N, N, N, N, N, SelImm.IMM_SB),
-    BLT     -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.blt,    N, N, N, N, N, N, SelImm.IMM_SB),
-    BLTU    -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.bltu,   N, N, N, N, N, N, SelImm.IMM_SB),
+    AUIPC   -> XSDecode(SrcType.pc , SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.auipc, SelImm.IMM_U , xWen = T),
+    JAL     -> XSDecode(SrcType.pc , SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.jal  , SelImm.IMM_UJ, xWen = T),
+    JALR    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.jalr , SelImm.IMM_I , uopSplitType = UopSplitType.SCA_SIM, xWen = T),
+    BEQ     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.brh, BRUOpType.beq   , SelImm.IMM_SB          ),
+    BNE     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.brh, BRUOpType.bne   , SelImm.IMM_SB          ),
+    BGE     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.brh, BRUOpType.bge   , SelImm.IMM_SB          ),
+    BGEU    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.brh, BRUOpType.bgeu  , SelImm.IMM_SB          ),
+    BLT     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.brh, BRUOpType.blt   , SelImm.IMM_SB          ),
+    BLTU    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.brh, BRUOpType.bltu  , SelImm.IMM_SB          ),
 
     // I-type, the immediate12 holds the CSR register.
-    CSRRW   -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrt, Y, N, N, Y, Y, N, SelImm.IMM_I),
-    CSRRS   -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.set, Y, N, N, Y, Y, N, SelImm.IMM_I),
-    CSRRC   -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.clr, Y, N, N, Y, Y, N, SelImm.IMM_I),
+    CSRRW   -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrt , SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
+    CSRRS   -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.set , SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
+    CSRRC   -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.clr , SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
 
-    CSRRWI  -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrti, Y, N, N, Y, Y, N, SelImm.IMM_Z),
-    CSRRSI  -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.seti, Y, N, N, Y, Y, N, SelImm.IMM_Z),
-    CSRRCI  -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.clri, Y, N, N, Y, Y, N, SelImm.IMM_Z),
+    CSRRWI  -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrti, SelImm.IMM_Z, xWen = T, noSpec = T, blockBack = T),
+    CSRRSI  -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.seti, SelImm.IMM_Z, xWen = T, noSpec = T, blockBack = T),
+    CSRRCI  -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.clri, SelImm.IMM_Z, xWen = T, noSpec = T, blockBack = T),
 
-    SFENCE_VMA->List(SrcType.reg, SrcType.reg, SrcType.X, FuType.fence, FenceOpType.sfence, N, N, N, Y, Y, Y, SelImm.X),
-    EBREAK  -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.jmp, Y, N, N, Y, Y, N, SelImm.IMM_I),
-    ECALL   -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.jmp, Y, N, N, Y, Y, N, SelImm.IMM_I),
-    SRET    -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.jmp, Y, N, N, Y, Y, N, SelImm.IMM_I),
-    MRET    -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.jmp, Y, N, N, Y, Y, N, SelImm.IMM_I),
-    DRET    -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.jmp, Y, N, N, Y, Y, N, SelImm.IMM_I),
+    EBREAK  -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.jmp, SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
+    ECALL   -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.jmp, SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
+    SRET    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.jmp, SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
+    MRET    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.jmp, SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
+    DRET    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.jmp, SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
+    WFI     -> XSDecode(SrcType.pc , SrcType.imm, SrcType.X, FuType.csr, CSROpType.wfi, SelImm.X    , xWen = T, noSpec = T, blockBack = T),
 
-    WFI     -> List(SrcType.pc, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wfi, Y, N, N, Y, Y, N, SelImm.X),
-
-    FENCE_I -> List(SrcType.pc, SrcType.imm, SrcType.X, FuType.fence, FenceOpType.fencei, N, N, N, Y, Y, Y, SelImm.X),
-    FENCE   -> List(SrcType.pc, SrcType.imm, SrcType.X, FuType.fence, FenceOpType.fence,  N, N, N, Y, Y, Y, SelImm.X),
+    SFENCE_VMA -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.fence, FenceOpType.sfence, SelImm.X, noSpec = T, blockBack = T, flushPipe = T),
+    FENCE_I    -> XSDecode(SrcType.pc , SrcType.imm, SrcType.X, FuType.fence, FenceOpType.fencei, SelImm.X, noSpec = T, blockBack = T, flushPipe = T),
+    FENCE      -> XSDecode(SrcType.pc , SrcType.imm, SrcType.X, FuType.fence, FenceOpType.fence , SelImm.X, noSpec = T, blockBack = T, flushPipe = T),
 
     // A-type
-    AMOADD_W-> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoadd_w,  Y, N, N, Y, Y, N, SelImm.X),
-    AMOXOR_W-> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoxor_w,  Y, N, N, Y, Y, N, SelImm.X),
-    AMOSWAP_W->List(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoswap_w, Y, N, N, Y, Y, N, SelImm.X),
-    AMOAND_W-> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoand_w,  Y, N, N, Y, Y, N, SelImm.X),
-    AMOOR_W -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoor_w,   Y, N, N, Y, Y, N, SelImm.X),
-    AMOMIN_W-> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amomin_w,  Y, N, N, Y, Y, N, SelImm.X),
-    AMOMINU_W->List(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amominu_w, Y, N, N, Y, Y, N, SelImm.X),
-    AMOMAX_W-> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amomax_w,  Y, N, N, Y, Y, N, SelImm.X),
-    AMOMAXU_W->List(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amomaxu_w, Y, N, N, Y, Y, N, SelImm.X),
+    AMOADD_W  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoadd_w , SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOXOR_W  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoxor_w , SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOSWAP_W -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoswap_w, SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOAND_W  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoand_w , SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOOR_W   -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoor_w  , SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOMIN_W  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amomin_w , SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOMINU_W -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amominu_w, SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOMAX_W  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amomax_w , SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOMAXU_W -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amomaxu_w, SelImm.X, xWen = T, noSpec = T, blockBack = T),
 
-    AMOADD_D-> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoadd_d,  Y, N, N, Y, Y, N, SelImm.X),
-    AMOXOR_D-> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoxor_d,  Y, N, N, Y, Y, N, SelImm.X),
-    AMOSWAP_D->List(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoswap_d, Y, N, N, Y, Y, N, SelImm.X),
-    AMOAND_D-> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoand_d,  Y, N, N, Y, Y, N, SelImm.X),
-    AMOOR_D -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoor_d,   Y, N, N, Y, Y, N, SelImm.X),
-    AMOMIN_D-> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amomin_d,  Y, N, N, Y, Y, N, SelImm.X),
-    AMOMINU_D->List(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amominu_d, Y, N, N, Y, Y, N, SelImm.X),
-    AMOMAX_D-> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amomax_d,  Y, N, N, Y, Y, N, SelImm.X),
-    AMOMAXU_D->List(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amomaxu_d, Y, N, N, Y, Y, N, SelImm.X),
+    AMOADD_D  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoadd_d,  SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOXOR_D  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoxor_d,  SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOSWAP_D -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoswap_d, SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOAND_D  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoand_d,  SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOOR_D   -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoor_d,   SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOMIN_D  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amomin_d,  SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOMINU_D -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amominu_d, SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOMAX_D  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amomax_d,  SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOMAXU_D -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amomaxu_d, SelImm.X, xWen = T, noSpec = T, blockBack = T),
 
-    LR_W    -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.mou, LSUOpType.lr_w, Y, N, N, Y, Y, N, SelImm.X),
-    LR_D    -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.mou, LSUOpType.lr_d, Y, N, N, Y, Y, N, SelImm.X),
-    SC_W    -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.sc_w, Y, N, N, Y, Y, N, SelImm.X),
-    SC_D    -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.sc_d, Y, N, N, Y, Y, N, SelImm.X),
+    LR_W    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.mou, LSUOpType.lr_w, SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    LR_D    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.mou, LSUOpType.lr_d, SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    SC_W    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.sc_w, SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    SC_D    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.sc_d, SelImm.X, xWen = T, noSpec = T, blockBack = T),
 
-    ANDN    -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.andn, Y, N, N, N, N, N, SelImm.X),
-    ORN     -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.orn,  Y, N, N, N, N, N, SelImm.X),
-    XNOR    -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.xnor, Y, N, N, N, N, N, SelImm.X),
-    ORC_B   -> List(SrcType.reg, SrcType.DC,  SrcType.X, FuType.alu, ALUOpType.orcb, Y, N, N, N, N, N, SelImm.X),
+    ANDN    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.andn, SelImm.X, xWen = T, canRobCompress = T),
+    ORN     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.orn , SelImm.X, xWen = T, canRobCompress = T),
+    XNOR    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.xnor, SelImm.X, xWen = T, canRobCompress = T),
+    ORC_B   -> XSDecode(SrcType.reg, SrcType.DC,  SrcType.X, FuType.alu, ALUOpType.orcb, SelImm.X, xWen = T, canRobCompress = T),
 
-    MIN     -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.min,  Y, N, N, N, N, N, SelImm.X),
-    MINU    -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.minu, Y, N, N, N, N, N, SelImm.X),
-    MAX     -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.max,  Y, N, N, N, N, N, SelImm.X),
-    MAXU    -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.maxu, Y, N, N, N, N, N, SelImm.X),
+    MIN     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.min , SelImm.X, xWen = T, canRobCompress = T),
+    MINU    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.minu, SelImm.X, xWen = T, canRobCompress = T),
+    MAX     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.max , SelImm.X, xWen = T, canRobCompress = T),
+    MAXU    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.maxu, SelImm.X, xWen = T, canRobCompress = T),
 
-    SEXT_B  -> List(SrcType.reg, SrcType.DC,  SrcType.X, FuType.alu, ALUOpType.sextb, Y, N, N, N, N, N, SelImm.X),
-    PACKH   -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.packh, Y, N, N, N, N, N, SelImm.X),
-    SEXT_H  -> List(SrcType.reg, SrcType.DC,  SrcType.X, FuType.alu, ALUOpType.sexth, Y, N, N, N, N, N, SelImm.X),
-    PACKW   -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.packw, Y, N, N, N, N, N, SelImm.X),
-    BREV8   -> List(SrcType.reg, SrcType.DC,  SrcType.X, FuType.alu, ALUOpType.revb, Y, N, N, N, N, N, SelImm.X),
-    REV8    -> List(SrcType.reg, SrcType.DC,  SrcType.X, FuType.alu, ALUOpType.rev8, Y, N, N, N, N, N, SelImm.X),
-    PACK    -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.pack, Y, N, N, N, N, N, SelImm.X),
+    SEXT_B  -> XSDecode(SrcType.reg, SrcType.DC,  SrcType.X, FuType.alu, ALUOpType.sextb, SelImm.X, xWen = T, canRobCompress = T),
+    PACKH   -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.packh, SelImm.X, xWen = T, canRobCompress = T),
+    SEXT_H  -> XSDecode(SrcType.reg, SrcType.DC,  SrcType.X, FuType.alu, ALUOpType.sexth, SelImm.X, xWen = T, canRobCompress = T),
+    PACKW   -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.packw, SelImm.X, xWen = T, canRobCompress = T),
+    BREV8   -> XSDecode(SrcType.reg, SrcType.DC,  SrcType.X, FuType.alu, ALUOpType.revb , SelImm.X, xWen = T, canRobCompress = T),
+    REV8    -> XSDecode(SrcType.reg, SrcType.DC,  SrcType.X, FuType.alu, ALUOpType.rev8 , SelImm.X, xWen = T, canRobCompress = T),
+    PACK    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.pack , SelImm.X, xWen = T, canRobCompress = T),
 
-    BSET    -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.bset, Y, N, N, N, N, N, SelImm.X),
-    BSETI   -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.bset, Y, N, N, N, N, N, SelImm.IMM_I),
-    BCLR    -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.bclr, Y, N, N, N, N, N, SelImm.X),
-    BCLRI   -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.bclr, Y, N, N, N, N, N, SelImm.IMM_I),
-    BINV    -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.binv, Y, N, N, N, N, N, SelImm.X),
-    BINVI   -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.binv, Y, N, N, N, N, N, SelImm.IMM_I),
-    BEXT    -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.bext, Y, N, N, N, N, N, SelImm.X),
-    BEXTI   -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.bext, Y, N, N, N, N, N, SelImm.IMM_I),
+    BSET    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.bset, SelImm.X    , xWen = T, canRobCompress = T),
+    BSETI   -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.bset, SelImm.IMM_I, xWen = T, canRobCompress = T),
+    BCLR    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.bclr, SelImm.X    , xWen = T, canRobCompress = T),
+    BCLRI   -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.bclr, SelImm.IMM_I, xWen = T, canRobCompress = T),
+    BINV    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.binv, SelImm.X    , xWen = T, canRobCompress = T),
+    BINVI   -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.binv, SelImm.IMM_I, xWen = T, canRobCompress = T),
+    BEXT    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.bext, SelImm.X    , xWen = T, canRobCompress = T),
+    BEXTI   -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.bext, SelImm.IMM_I, xWen = T, canRobCompress = T),
 
-    ROR     -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.ror, Y, N, N, N, N, N, SelImm.X),
-    RORI    -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.ror, Y, N, N, N, N, N, SelImm.IMM_I),
-    ROL     -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.rol, Y, N, N, N, N, N, SelImm.X),
+    ROR     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.ror, SelImm.X     , xWen = T, canRobCompress = T),
+    RORI    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.ror, SelImm.IMM_I , xWen = T, canRobCompress = T),
+    ROL     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.rol, SelImm.X     , xWen = T, canRobCompress = T),
 
-    SH1ADD  -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.sh1add, Y, N, N, N, N, N, SelImm.X),
-    SH2ADD  -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.sh2add, Y, N, N, N, N, N, SelImm.X),
-    SH3ADD  -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.sh3add, Y, N, N, N, N, N, SelImm.X),
-    SH1ADD_UW   -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.sh1adduw, Y, N, N, N, N, N, SelImm.X),
-    SH2ADD_UW   -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.sh2adduw, Y, N, N, N, N, N, SelImm.X),
-    SH3ADD_UW   -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.sh3adduw, Y, N, N, N, N, N, SelImm.X),
-    ADD_UW      -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.adduw,    Y, N, N, N, N, N, SelImm.X),
-    SLLI_UW     -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.slliuw,   Y, N, N, N, N, N, SelImm.IMM_I)
+    SH1ADD    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.sh1add  , SelImm.X    , xWen = T, canRobCompress = T),
+    SH2ADD    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.sh2add  , SelImm.X    , xWen = T, canRobCompress = T),
+    SH3ADD    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.sh3add  , SelImm.X    , xWen = T, canRobCompress = T),
+    SH1ADD_UW -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.sh1adduw, SelImm.X    , xWen = T, canRobCompress = T),
+    SH2ADD_UW -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.sh2adduw, SelImm.X    , xWen = T, canRobCompress = T),
+    SH3ADD_UW -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.sh3adduw, SelImm.X    , xWen = T, canRobCompress = T),
+    ADD_UW    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.adduw   , SelImm.X    , xWen = T, canRobCompress = T),
+    SLLI_UW   -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.slliuw  , SelImm.IMM_I, xWen = T, canRobCompress = T),
   )
 }
 
 /**
  * FP Decode constants
  */
-object FDecode extends DecodeConstants{
-  val table: Array[(BitPat, List[BitPat])] = Array(
+object FpDecode extends DecodeConstants{
+  val decodeArray: Array[(BitPat, XSDecodeBase)] = Array(
+    FLW     -> FDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.ldu, LSUOpType.lw, selImm = SelImm.IMM_I, fWen = T),
+    FLD     -> FDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.ldu, LSUOpType.ld, selImm = SelImm.IMM_I, fWen = T),
+    FSW     -> FDecode(SrcType.reg, SrcType.fp,  SrcType.X, FuType.stu, LSUOpType.sw, selImm = SelImm.IMM_S          ),
+    FSD     -> FDecode(SrcType.reg, SrcType.fp,  SrcType.X, FuType.stu, LSUOpType.sd, selImm = SelImm.IMM_S          ),
 
-  FLW     -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.ldu, LSUOpType.lw, N, Y, N, N, N, N, SelImm.IMM_I),
-  FLD     -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.ldu, LSUOpType.ld, N, Y, N, N, N, N, SelImm.IMM_I),
-  FSW     -> List(SrcType.reg, SrcType.fp,  SrcType.X, FuType.stu, LSUOpType.sw, N, N, N, N, N, N, SelImm.IMM_S),
-  FSD     -> List(SrcType.reg, SrcType.fp,  SrcType.X, FuType.stu, LSUOpType.sd, N, N, N, N, N, N, SelImm.IMM_S),
+    FMV_X_D -> FDecode(SrcType.fp , SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, xWen = T, canRobCompress = T),
+    FMV_X_W -> FDecode(SrcType.fp , SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, xWen = T, canRobCompress = T),
 
-  FCLASS_S-> List(SrcType.fp , SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, Y, N, N, N, N, N, SelImm.X),
-  FCLASS_D-> List(SrcType.fp , SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, Y, N, N, N, N, N, SelImm.X),
+    FMV_D_X -> FDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.i2f,   FuOpType.X, fWen = T, canRobCompress = T),
+    FMV_W_X -> FDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.i2f,   FuOpType.X, fWen = T, canRobCompress = T),
 
-  FMV_D_X -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.i2f,   FuOpType.X, N, Y, N, N, N, N, SelImm.X),
-  FMV_X_D -> List(SrcType.fp , SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, Y, N, N, N, N, N, SelImm.X),
-  FMV_X_W -> List(SrcType.fp , SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, Y, N, N, N, N, N, SelImm.X),
-  FMV_W_X -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.i2f,   FuOpType.X, N, Y, N, N, N, N, SelImm.X),
+    // FP to FP
+    FCVT_S_D -> FDecode(SrcType.fp, SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, fWen = T, canRobCompress = T),
+    FCVT_D_S -> FDecode(SrcType.fp, SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, fWen = T, canRobCompress = T),
 
-  FSGNJ_S -> List(SrcType.fp,  SrcType.fp, SrcType.X, FuType.fmisc, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
-  FSGNJ_D -> List(SrcType.fp,  SrcType.fp, SrcType.X, FuType.fmisc, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
-  FSGNJX_S-> List(SrcType.fp,  SrcType.fp, SrcType.X, FuType.fmisc, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
-  FSGNJX_D-> List(SrcType.fp,  SrcType.fp, SrcType.X, FuType.fmisc, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
-  FSGNJN_S-> List(SrcType.fp,  SrcType.fp, SrcType.X, FuType.fmisc, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
-  FSGNJN_D-> List(SrcType.fp,  SrcType.fp, SrcType.X, FuType.fmisc, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
+    // Int to FP
+    FCVT_S_W  -> FDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.i2f, FuOpType.X, fWen = T, canRobCompress = T),
+    FCVT_S_WU -> FDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.i2f, FuOpType.X, fWen = T, canRobCompress = T),
+    FCVT_S_L  -> FDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.i2f, FuOpType.X, fWen = T, canRobCompress = T),
+    FCVT_S_LU -> FDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.i2f, FuOpType.X, fWen = T, canRobCompress = T),
 
-  // FP to FP
-  FCVT_S_D-> List(SrcType.fp, SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
-  FCVT_D_S-> List(SrcType.fp, SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
+    FCVT_D_W  -> FDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.i2f, FuOpType.X, fWen = T, canRobCompress = T),
+    FCVT_D_WU -> FDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.i2f, FuOpType.X, fWen = T, canRobCompress = T),
+    FCVT_D_L  -> FDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.i2f, FuOpType.X, fWen = T, canRobCompress = T),
+    FCVT_D_LU -> FDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.i2f, FuOpType.X, fWen = T, canRobCompress = T),
 
-  // Int to FP
-  FCVT_S_W-> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.i2f, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
-  FCVT_S_WU->List(SrcType.reg, SrcType.imm, SrcType.X, FuType.i2f, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
-  FCVT_S_L-> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.i2f, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
-  FCVT_S_LU->List(SrcType.reg, SrcType.imm, SrcType.X, FuType.i2f, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
+    // FP to Int
+    FCVT_W_S  -> FDecode(SrcType.fp , SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, xWen = T, canRobCompress = T),
+    FCVT_WU_S -> FDecode(SrcType.fp , SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, xWen = T, canRobCompress = T),
+    FCVT_L_S  -> FDecode(SrcType.fp , SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, xWen = T, canRobCompress = T),
+    FCVT_LU_S -> FDecode(SrcType.fp , SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, xWen = T, canRobCompress = T),
 
-  FCVT_D_W-> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.i2f, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
-  FCVT_D_WU->List(SrcType.reg, SrcType.imm, SrcType.X, FuType.i2f, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
-  FCVT_D_L-> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.i2f, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
-  FCVT_D_LU->List(SrcType.reg, SrcType.imm, SrcType.X, FuType.i2f, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
+    FCVT_W_D  -> FDecode(SrcType.fp , SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, xWen = T, canRobCompress = T),
+    FCVT_WU_D -> FDecode(SrcType.fp , SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, xWen = T, canRobCompress = T),
+    FCVT_L_D  -> FDecode(SrcType.fp , SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, xWen = T, canRobCompress = T),
+    FCVT_LU_D -> FDecode(SrcType.fp , SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, xWen = T, canRobCompress = T),
 
-  // FP to Int
-  FCVT_W_S-> List(SrcType.fp , SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, Y, N, N, N, N, N, SelImm.X),
-  FCVT_WU_S->List(SrcType.fp , SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, Y, N, N, N, N, N, SelImm.X),
-  FCVT_L_S-> List(SrcType.fp , SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, Y, N, N, N, N, N, SelImm.X),
-  FCVT_LU_S->List(SrcType.fp , SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, Y, N, N, N, N, N, SelImm.X),
-
-  FCVT_W_D-> List(SrcType.fp , SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, Y, N, N, N, N, N, SelImm.X),
-  FCVT_WU_D->List(SrcType.fp , SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, Y, N, N, N, N, N, SelImm.X),
-  FCVT_L_D-> List(SrcType.fp , SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, Y, N, N, N, N, N, SelImm.X),
-  FCVT_LU_D->List(SrcType.fp , SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, Y, N, N, N, N, N, SelImm.X),
-
-  // "fp_single" is used for wb_data formatting (and debugging)
-  FEQ_S    ->List(SrcType.fp , SrcType.fp, SrcType.X, FuType.fmisc, FuOpType.X, Y, N, N, N, N, N, SelImm.X),
-  FLT_S    ->List(SrcType.fp , SrcType.fp, SrcType.X, FuType.fmisc, FuOpType.X, Y, N, N, N, N, N, SelImm.X),
-  FLE_S    ->List(SrcType.fp , SrcType.fp, SrcType.X, FuType.fmisc, FuOpType.X, Y, N, N, N, N, N, SelImm.X),
-
-  FEQ_D    ->List(SrcType.fp , SrcType.fp, SrcType.X, FuType.fmisc, FuOpType.X, Y, N, N, N, N, N, SelImm.X),
-  FLT_D    ->List(SrcType.fp , SrcType.fp, SrcType.X, FuType.fmisc, FuOpType.X, Y, N, N, N, N, N, SelImm.X),
-  FLE_D    ->List(SrcType.fp , SrcType.fp, SrcType.X, FuType.fmisc, FuOpType.X, Y, N, N, N, N, N, SelImm.X),
-
-  FMIN_S   ->List(SrcType.fp,  SrcType.fp, SrcType.X, FuType.fmisc, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
-  FMAX_S   ->List(SrcType.fp,  SrcType.fp, SrcType.X, FuType.fmisc, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
-  FMIN_D   ->List(SrcType.fp,  SrcType.fp, SrcType.X, FuType.fmisc, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
-  FMAX_D   ->List(SrcType.fp,  SrcType.fp, SrcType.X, FuType.fmisc, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
-
-  FADD_S   ->List(SrcType.fp,  SrcType.fp, SrcType.DC, FuType.fmac, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
-  FSUB_S   ->List(SrcType.fp,  SrcType.fp, SrcType.DC, FuType.fmac, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
-  FMUL_S   ->List(SrcType.fp,  SrcType.fp, SrcType.DC, FuType.fmac, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
-  FADD_D   ->List(SrcType.fp,  SrcType.fp, SrcType.DC, FuType.fmac, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
-  FSUB_D   ->List(SrcType.fp,  SrcType.fp, SrcType.DC, FuType.fmac, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
-  FMUL_D   ->List(SrcType.fp,  SrcType.fp, SrcType.DC, FuType.fmac, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
-
-  FMADD_S  ->List(SrcType.fp,  SrcType.fp, SrcType.fp, FuType.fmac, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
-  FMSUB_S  ->List(SrcType.fp,  SrcType.fp, SrcType.fp, FuType.fmac, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
-  FNMADD_S ->List(SrcType.fp,  SrcType.fp, SrcType.fp, FuType.fmac, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
-  FNMSUB_S ->List(SrcType.fp,  SrcType.fp, SrcType.fp, FuType.fmac, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
-  FMADD_D  ->List(SrcType.fp,  SrcType.fp, SrcType.fp, FuType.fmac, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
-  FMSUB_D  ->List(SrcType.fp,  SrcType.fp, SrcType.fp, FuType.fmac, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
-  FNMADD_D ->List(SrcType.fp,  SrcType.fp, SrcType.fp, FuType.fmac, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
-  FNMSUB_D ->List(SrcType.fp,  SrcType.fp, SrcType.fp, FuType.fmac, FuOpType.X, N, Y, N, N, N, N, SelImm.X)
   )
 }
 
@@ -335,47 +346,47 @@ object FDecode extends DecodeConstants{
   * Bit Manipulation Decode
   */
 object BDecode extends DecodeConstants{
-  val table: Array[(BitPat, List[BitPat])] = Array(
+  val decodeArray: Array[(BitPat, XSDecodeBase)] = Array(
     // Basic bit manipulation
-    CLZ     -> List(SrcType.reg, SrcType.DC,  SrcType.X, FuType.bku, BKUOpType.clz,    Y, N, N, N, N, N, SelImm.X),
-    CTZ     -> List(SrcType.reg, SrcType.DC,  SrcType.X, FuType.bku, BKUOpType.ctz,    Y, N, N, N, N, N, SelImm.X),
-    CPOP    -> List(SrcType.reg, SrcType.DC,  SrcType.X, FuType.bku, BKUOpType.cpop,   Y, N, N, N, N, N, SelImm.X),
-    XPERM8  -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.xpermb, Y, N, N, N, N, N, SelImm.X),
-    XPERM4  -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.xpermn, Y, N, N, N, N, N, SelImm.X),
+    CLZ     -> XSDecode(SrcType.reg, SrcType.DC,  SrcType.X, FuType.bku, BKUOpType.clz,    SelImm.X, xWen = T, canRobCompress = T),
+    CTZ     -> XSDecode(SrcType.reg, SrcType.DC,  SrcType.X, FuType.bku, BKUOpType.ctz,    SelImm.X, xWen = T, canRobCompress = T),
+    CPOP    -> XSDecode(SrcType.reg, SrcType.DC,  SrcType.X, FuType.bku, BKUOpType.cpop,   SelImm.X, xWen = T, canRobCompress = T),
+    XPERM8  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.xpermb, SelImm.X, xWen = T, canRobCompress = T),
+    XPERM4  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.xpermn, SelImm.X, xWen = T, canRobCompress = T),
 
-    CLZW    -> List(SrcType.reg, SrcType.DC, SrcType.X, FuType.bku, BKUOpType.clzw,  Y, N, N, N, N, N, SelImm.X),
-    CTZW    -> List(SrcType.reg, SrcType.DC, SrcType.X, FuType.bku, BKUOpType.ctzw,  Y, N, N, N, N, N, SelImm.X),
-    CPOPW   -> List(SrcType.reg, SrcType.DC, SrcType.X, FuType.bku, BKUOpType.cpopw, Y, N, N, N, N, N, SelImm.X),
+    CLZW    -> XSDecode(SrcType.reg, SrcType.DC, SrcType.X, FuType.bku, BKUOpType.clzw,    SelImm.X, xWen = T, canRobCompress = T),
+    CTZW    -> XSDecode(SrcType.reg, SrcType.DC, SrcType.X, FuType.bku, BKUOpType.ctzw,    SelImm.X, xWen = T, canRobCompress = T),
+    CPOPW   -> XSDecode(SrcType.reg, SrcType.DC, SrcType.X, FuType.bku, BKUOpType.cpopw,   SelImm.X, xWen = T, canRobCompress = T),
 
-    CLMUL   -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.clmul,  Y, N, N, N, N, N, SelImm.X),
-    CLMULH  -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.clmulh, Y, N, N, N, N, N, SelImm.X),
-    CLMULR  -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.clmulr, Y, N, N, N, N, N, SelImm.X),
+    CLMUL   -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.clmul,  SelImm.X, xWen = T, canRobCompress = T),
+    CLMULH  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.clmulh, SelImm.X, xWen = T, canRobCompress = T),
+    CLMULR  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.clmulr, SelImm.X, xWen = T, canRobCompress = T),
 
-    AES64ES     -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.aes64es,    Y, N, N, N, N, N, SelImm.X),
-    AES64ESM    -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.aes64esm,   Y, N, N, N, N, N, SelImm.X),
-    AES64DS     -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.aes64ds,    Y, N, N, N, N, N, SelImm.X),
-    AES64DSM    -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.aes64dsm,   Y, N, N, N, N, N, SelImm.X),
-    AES64IM     -> List(SrcType.reg, SrcType.DC,  SrcType.X, FuType.bku, BKUOpType.aes64im,    Y, N, N, N, N, N, SelImm.X),
-    AES64KS1I   -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.bku, BKUOpType.aes64ks1i,  Y, N, N, N, N, N, SelImm.IMM_I),
-    AES64KS2    -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.aes64ks2,   Y, N, N, N, N, N, SelImm.X),
-    SHA256SUM0  -> List(SrcType.reg, SrcType.DC,  SrcType.X, FuType.bku, BKUOpType.sha256sum0, Y, N, N, N, N, N, SelImm.X),
-    SHA256SUM1  -> List(SrcType.reg, SrcType.DC,  SrcType.X, FuType.bku, BKUOpType.sha256sum1, Y, N, N, N, N, N, SelImm.X),
-    SHA256SIG0  -> List(SrcType.reg, SrcType.DC,  SrcType.X, FuType.bku, BKUOpType.sha256sig0, Y, N, N, N, N, N, SelImm.X),
-    SHA256SIG1  -> List(SrcType.reg, SrcType.DC,  SrcType.X, FuType.bku, BKUOpType.sha256sig1, Y, N, N, N, N, N, SelImm.X),
-    SHA512SUM0  -> List(SrcType.reg, SrcType.DC,  SrcType.X, FuType.bku, BKUOpType.sha512sum0, Y, N, N, N, N, N, SelImm.X),
-    SHA512SUM1  -> List(SrcType.reg, SrcType.DC,  SrcType.X, FuType.bku, BKUOpType.sha512sum1, Y, N, N, N, N, N, SelImm.X),
-    SHA512SIG0  -> List(SrcType.reg, SrcType.DC,  SrcType.X, FuType.bku, BKUOpType.sha512sig0, Y, N, N, N, N, N, SelImm.X),
-    SHA512SIG1  -> List(SrcType.reg, SrcType.DC,  SrcType.X, FuType.bku, BKUOpType.sha512sig1, Y, N, N, N, N, N, SelImm.X),
-    SM3P0       -> List(SrcType.reg, SrcType.DC,  SrcType.X, FuType.bku, BKUOpType.sm3p0,  Y, N, N, N, N, N, SelImm.X),
-    SM3P1       -> List(SrcType.reg, SrcType.DC,  SrcType.X, FuType.bku, BKUOpType.sm3p1,  Y, N, N, N, N, N, SelImm.X),
-    SM4KS0      -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.sm4ks0, Y, N, N, N, N, N, SelImm.X),
-    SM4KS1      -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.sm4ks1, Y, N, N, N, N, N, SelImm.X),
-    SM4KS2      -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.sm4ks2, Y, N, N, N, N, N, SelImm.X),
-    SM4KS3      -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.sm4ks3, Y, N, N, N, N, N, SelImm.X),
-    SM4ED0      -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.sm4ed0, Y, N, N, N, N, N, SelImm.X),
-    SM4ED1      -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.sm4ed1, Y, N, N, N, N, N, SelImm.X),
-    SM4ED2      -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.sm4ed2, Y, N, N, N, N, N, SelImm.X),
-    SM4ED3      -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.sm4ed3, Y, N, N, N, N, N, SelImm.X),
+    AES64ES    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.aes64es,    SelImm.X    , xWen = T, canRobCompress = T),
+    AES64ESM   -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.aes64esm,   SelImm.X    , xWen = T, canRobCompress = T),
+    AES64DS    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.aes64ds,    SelImm.X    , xWen = T, canRobCompress = T),
+    AES64DSM   -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.aes64dsm,   SelImm.X    , xWen = T, canRobCompress = T),
+    AES64IM    -> XSDecode(SrcType.reg, SrcType.DC,  SrcType.X, FuType.bku, BKUOpType.aes64im,    SelImm.X    , xWen = T, canRobCompress = T),
+    AES64KS1I  -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.bku, BKUOpType.aes64ks1i,  SelImm.IMM_I, xWen = T, canRobCompress = T),
+    AES64KS2   -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.aes64ks2,   SelImm.X    , xWen = T, canRobCompress = T),
+    SHA256SUM0 -> XSDecode(SrcType.reg, SrcType.DC,  SrcType.X, FuType.bku, BKUOpType.sha256sum0, SelImm.X    , xWen = T, canRobCompress = T),
+    SHA256SUM1 -> XSDecode(SrcType.reg, SrcType.DC,  SrcType.X, FuType.bku, BKUOpType.sha256sum1, SelImm.X    , xWen = T, canRobCompress = T),
+    SHA256SIG0 -> XSDecode(SrcType.reg, SrcType.DC,  SrcType.X, FuType.bku, BKUOpType.sha256sig0, SelImm.X    , xWen = T, canRobCompress = T),
+    SHA256SIG1 -> XSDecode(SrcType.reg, SrcType.DC,  SrcType.X, FuType.bku, BKUOpType.sha256sig1, SelImm.X    , xWen = T, canRobCompress = T),
+    SHA512SUM0 -> XSDecode(SrcType.reg, SrcType.DC,  SrcType.X, FuType.bku, BKUOpType.sha512sum0, SelImm.X    , xWen = T, canRobCompress = T),
+    SHA512SUM1 -> XSDecode(SrcType.reg, SrcType.DC,  SrcType.X, FuType.bku, BKUOpType.sha512sum1, SelImm.X    , xWen = T, canRobCompress = T),
+    SHA512SIG0 -> XSDecode(SrcType.reg, SrcType.DC,  SrcType.X, FuType.bku, BKUOpType.sha512sig0, SelImm.X    , xWen = T, canRobCompress = T),
+    SHA512SIG1 -> XSDecode(SrcType.reg, SrcType.DC,  SrcType.X, FuType.bku, BKUOpType.sha512sig1, SelImm.X    , xWen = T, canRobCompress = T),
+    SM3P0      -> XSDecode(SrcType.reg, SrcType.DC,  SrcType.X, FuType.bku, BKUOpType.sm3p0,      SelImm.X    , xWen = T, canRobCompress = T),
+    SM3P1      -> XSDecode(SrcType.reg, SrcType.DC,  SrcType.X, FuType.bku, BKUOpType.sm3p1,      SelImm.X    , xWen = T, canRobCompress = T),
+    SM4KS0     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.sm4ks0,     SelImm.X    , xWen = T, canRobCompress = T),
+    SM4KS1     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.sm4ks1,     SelImm.X    , xWen = T, canRobCompress = T),
+    SM4KS2     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.sm4ks2,     SelImm.X    , xWen = T, canRobCompress = T),
+    SM4KS3     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.sm4ks3,     SelImm.X    , xWen = T, canRobCompress = T),
+    SM4ED0     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.sm4ed0,     SelImm.X    , xWen = T, canRobCompress = T),
+    SM4ED1     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.sm4ed1,     SelImm.X    , xWen = T, canRobCompress = T),
+    SM4ED2     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.sm4ed2,     SelImm.X    , xWen = T, canRobCompress = T),
+    SM4ED3     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.sm4ed3,     SelImm.X    , xWen = T, canRobCompress = T),
   )
 }
 
@@ -383,11 +394,11 @@ object BDecode extends DecodeConstants{
  * FP Divide SquareRoot Constants
  */
 object FDivSqrtDecode extends DecodeConstants {
-  val table: Array[(BitPat, List[BitPat])] = Array(
-    FDIV_S    ->List(SrcType.fp,  SrcType.fp,  SrcType.X, FuType.fmisc, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
-    FDIV_D    ->List(SrcType.fp,  SrcType.fp,  SrcType.X, FuType.fmisc, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
-    FSQRT_S   ->List(SrcType.fp,  SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, N, Y, N, N, N, N, SelImm.X),
-    FSQRT_D   ->List(SrcType.fp,  SrcType.imm, SrcType.X, FuType.fmisc, FuOpType.X, N, Y, N, N, N, N, SelImm.X)
+  val decodeArray: Array[(BitPat, XSDecodeBase)] = Array(
+    FDIV_S  -> FDecode(SrcType.fp,  SrcType.fp,  SrcType.X, FuType.fDivSqrt, FuOpType.X, fWen = T, canRobCompress = T),
+    FDIV_D  -> FDecode(SrcType.fp,  SrcType.fp,  SrcType.X, FuType.fDivSqrt, FuOpType.X, fWen = T, canRobCompress = T),
+    FSQRT_S -> FDecode(SrcType.fp,  SrcType.imm, SrcType.X, FuType.fDivSqrt, FuOpType.X, fWen = T, canRobCompress = T),
+    FSQRT_D -> FDecode(SrcType.fp,  SrcType.imm, SrcType.X, FuType.fDivSqrt, FuOpType.X, fWen = T, canRobCompress = T),
   )
 }
 
@@ -395,43 +406,44 @@ object FDivSqrtDecode extends DecodeConstants {
  * Svinval extension Constants
  */
 object SvinvalDecode extends DecodeConstants {
-  val table: Array[(BitPat, List[BitPat])] = Array(
-  /* sinval_vma is like sfence.vma , but sinval_vma can be dispatched and issued like normal instructions while sfence.vma
-   * must assure it is the ONLY instrucion executing in backend.
-   */
-  SINVAL_VMA        ->List(SrcType.reg, SrcType.reg, SrcType.X, FuType.fence, FenceOpType.sfence, N, N, N, N, N, N, SelImm.X),
-  /* sfecne.w.inval is the begin instrucion of a TLB flush which set *noSpecExec* and *blockBackward* signals
-   * so when it comes to dispatch , it will block all instruction after itself until all instrucions ahead of it in rob commit
-   * then dispatch and issue this instrucion to flush sbuffer to dcache
-   * after this instrucion commits , issue following sinval_vma instructions (out of order) to flush TLB
-   */
-  SFENCE_W_INVAL    ->List(SrcType.DC, SrcType.DC, SrcType.X, FuType.fence, FenceOpType.nofence, N, N, N, Y, Y, N, SelImm.X),
-  /* sfecne.inval.ir is the end instrucion of a TLB flush which set *noSpecExec* *blockBackward* and *flushPipe* signals
-   * so when it comes to dispatch , it will wait until all sinval_vma ahead of it in rob commit
-   * then dispatch and issue this instrucion
-   * when it commit at the head of rob , flush the pipeline since some instrucions have been fetched to ibuffer using old TLB map
-   */
-  SFENCE_INVAL_IR   ->List(SrcType.DC, SrcType.DC, SrcType.X, FuType.fence, FenceOpType.nofence, N, N, N, Y, Y, Y, SelImm.X)
-  /* what is Svinval extension ?
-   *                       ----->             sfecne.w.inval
-   * sfence.vma   vpn1     ----->             sinval_vma   vpn1
-   * sfence.vma   vpn2     ----->             sinval_vma   vpn2
-   *                       ----->             sfecne.inval.ir
-   *
-   * sfence.vma should be executed in-order and it flushes the pipeline after committing
-   * we can parallel sfence instrucions with this extension
-   */
-    )
+  val decodeArray: Array[(BitPat, XSDecodeBase)] = Array(
+    /* sinval_vma is like sfence.vma , but sinval_vma can be dispatched and issued like normal instructions while sfence.vma
+     * must assure it is the ONLY instrucion executing in backend.
+     */
+    SINVAL_VMA        -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.fence, FenceOpType.sfence, SelImm.X),
+    /* sfecne.w.inval is the begin instrucion of a TLB flush which set *noSpecExec* and *blockBackward* signals
+     * so when it comes to dispatch , it will block all instruction after itself until all instrucions ahead of it in rob commit
+     * then dispatch and issue this instrucion to flush sbuffer to dcache
+     * after this instrucion commits , issue following sinval_vma instructions (out of order) to flush TLB
+     */
+    SFENCE_W_INVAL    -> XSDecode(SrcType.DC, SrcType.DC, SrcType.X, FuType.fence, FenceOpType.nofence, SelImm.X, noSpec = T, blockBack = T),
+    /* sfecne.inval.ir is the end instrucion of a TLB flush which set *noSpecExec* *blockBackward* and *flushPipe* signals
+     * so when it comes to dispatch , it will wait until all sinval_vma ahead of it in rob commit
+     * then dispatch and issue this instrucion
+     * when it commit at the head of rob , flush the pipeline since some instrucions have been fetched to ibuffer using old TLB map
+     */
+    SFENCE_INVAL_IR   -> XSDecode(SrcType.DC, SrcType.DC, SrcType.X, FuType.fence, FenceOpType.nofence, SelImm.X, noSpec = T, blockBack = T, flushPipe = T)
+    /* what is Svinval extension ?
+     *                       ----->             sfecne.w.inval
+     * sfence.vma   vpn1     ----->             sinval_vma   vpn1
+     * sfence.vma   vpn2     ----->             sinval_vma   vpn2
+     *                       ----->             sfecne.inval.ir
+     *
+     * sfence.vma should be executed in-order and it flushes the pipeline after committing
+     * we can parallel sfence instrucions with this extension
+     */
+  )
 }
+
 /*
  * CBO decode
  */
 object CBODecode extends DecodeConstants {
-  val table: Array[(BitPat, List[BitPat])] = Array(
-    CBO_ZERO  -> List(SrcType.reg, SrcType.DC, SrcType.X, FuType.stu, LSUOpType.cbo_zero , N, N, N, N, N, N, SelImm.IMM_S),
-    CBO_CLEAN -> List(SrcType.reg, SrcType.DC, SrcType.X, FuType.stu, LSUOpType.cbo_clean, N, N, N, N, N, N, SelImm.IMM_S),
-    CBO_FLUSH -> List(SrcType.reg, SrcType.DC, SrcType.X, FuType.stu, LSUOpType.cbo_flush, N, N, N, N, N, N, SelImm.IMM_S),
-    CBO_INVAL -> List(SrcType.reg, SrcType.DC, SrcType.X, FuType.stu, LSUOpType.cbo_inval, N, N, N, N, N, N, SelImm.IMM_S)
+  val decodeArray: Array[(BitPat, XSDecodeBase)] = Array(
+    CBO_ZERO  -> XSDecode(SrcType.reg, SrcType.DC, SrcType.X, FuType.stu, LSUOpType.cbo_zero , SelImm.IMM_S),
+    CBO_CLEAN -> XSDecode(SrcType.reg, SrcType.DC, SrcType.X, FuType.stu, LSUOpType.cbo_clean, SelImm.IMM_S),
+    CBO_FLUSH -> XSDecode(SrcType.reg, SrcType.DC, SrcType.X, FuType.stu, LSUOpType.cbo_flush, SelImm.IMM_S),
+    CBO_INVAL -> XSDecode(SrcType.reg, SrcType.DC, SrcType.X, FuType.stu, LSUOpType.cbo_inval, SelImm.IMM_S)
   )
 }
 
@@ -439,24 +451,24 @@ object CBODecode extends DecodeConstants {
  * Hypervisor decode
  */
 object HypervisorDecode extends DecodeConstants {
-  val table: Array[(BitPat, List[BitPat])] = Array(
-    HFENCE_GVMA -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.fence, FenceOpType.hfence_g, N, N, N, Y, Y, Y, SelImm.X),
-    HFENCE_VVMA -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.fence, FenceOpType.hfence_v, N, N, N, Y, Y, Y, SelImm.X),
-    HINVAL_GVMA -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.fence, FenceOpType.hfence_g, N, N, N, N, N, N, SelImm.X),
-    HINVAL_VVMA -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.fence, FenceOpType.hfence_v, N, N, N, N, N, N, SelImm.X),
-    HLV_B       -> List(SrcType.reg, SrcType.X, SrcType.X, FuType.ldu, LSUOpType.hlvb,  Y, N, N, N, N, N, SelImm.X),
-    HLV_BU      -> List(SrcType.reg, SrcType.X, SrcType.X, FuType.ldu, LSUOpType.hlvbu,  Y, N, N, N, N, N, SelImm.X),
-    HLV_D       -> List(SrcType.reg, SrcType.X, SrcType.X, FuType.ldu, LSUOpType.hlvd,  Y, N, N, N, N, N, SelImm.X),
-    HLV_H       -> List(SrcType.reg, SrcType.X, SrcType.X, FuType.ldu, LSUOpType.hlvh,  Y, N, N, N, N, N, SelImm.X),
-    HLV_HU      -> List(SrcType.reg, SrcType.X, SrcType.X, FuType.ldu, LSUOpType.hlvhu,  Y, N, N, N, N, N, SelImm.X),
-    HLV_W       -> List(SrcType.reg, SrcType.X, SrcType.X, FuType.ldu, LSUOpType.hlvw,  Y, N, N, N, N, N, SelImm.X),
-    HLV_WU      -> List(SrcType.reg, SrcType.X, SrcType.X, FuType.ldu, LSUOpType.hlvwu,  Y, N, N, N, N, N, SelImm.X),
-    HLVX_HU     -> List(SrcType.reg, SrcType.X, SrcType.X, FuType.ldu, LSUOpType.hlvxhu,  Y, N, N, N, N, N, SelImm.X),
-    HLVX_WU     -> List(SrcType.reg, SrcType.X, SrcType.X, FuType.ldu, LSUOpType.hlvxwu,  Y, N, N, N, N, N, SelImm.X),
-    HSV_B       -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.stu, LSUOpType.hsvb,  N, N, N, N, N, N, SelImm.X),
-    HSV_D       -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.stu, LSUOpType.hsvd,  N, N, N, N, N, N, SelImm.X),
-    HSV_H       -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.stu, LSUOpType.hsvh,  N, N, N, N, N, N, SelImm.X),
-    HSV_W       -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.stu, LSUOpType.hsvw,  N, N, N, N, N, N, SelImm.X)
+  override val decodeArray: Array[(BitPat, XSDecodeBase)] = Array(
+    HFENCE_GVMA -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.fence, FenceOpType.hfence_g, SelImm.X, noSpec = T, blockBack = T, flushPipe = T),
+    HFENCE_VVMA -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.fence, FenceOpType.hfence_v, SelImm.X, noSpec = T, blockBack = T, flushPipe = T),
+    HINVAL_GVMA -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.fence, FenceOpType.hfence_g, SelImm.X),
+    HINVAL_VVMA -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.fence, FenceOpType.hfence_v, SelImm.X),
+    HLV_B       -> XSDecode(SrcType.reg, SrcType.X,   SrcType.X, FuType.ldu,   LSUOpType.hlvb,       SelImm.X, xWen = T),
+    HLV_BU      -> XSDecode(SrcType.reg, SrcType.X,   SrcType.X, FuType.ldu,   LSUOpType.hlvbu,      SelImm.X, xWen = T),
+    HLV_D       -> XSDecode(SrcType.reg, SrcType.X,   SrcType.X, FuType.ldu,   LSUOpType.hlvd,       SelImm.X, xWen = T),
+    HLV_H       -> XSDecode(SrcType.reg, SrcType.X,   SrcType.X, FuType.ldu,   LSUOpType.hlvh,       SelImm.X, xWen = T),
+    HLV_HU      -> XSDecode(SrcType.reg, SrcType.X,   SrcType.X, FuType.ldu,   LSUOpType.hlvhu,      SelImm.X, xWen = T),
+    HLV_W       -> XSDecode(SrcType.reg, SrcType.X,   SrcType.X, FuType.ldu,   LSUOpType.hlvw,       SelImm.X, xWen = T),
+    HLV_WU      -> XSDecode(SrcType.reg, SrcType.X,   SrcType.X, FuType.ldu,   LSUOpType.hlvwu,      SelImm.X, xWen = T),
+    HLVX_HU     -> XSDecode(SrcType.reg, SrcType.X,   SrcType.X, FuType.ldu,   LSUOpType.hlvxhu,     SelImm.X, xWen = T),
+    HLVX_WU     -> XSDecode(SrcType.reg, SrcType.X,   SrcType.X, FuType.ldu,   LSUOpType.hlvxwu,     SelImm.X, xWen = T),
+    HSV_B       -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.stu,   LSUOpType.hsvb,       SelImm.X),
+    HSV_D       -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.stu,   LSUOpType.hsvd,       SelImm.X),
+    HSV_H       -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.stu,   LSUOpType.hsvh,       SelImm.X),
+    HSV_W       -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.stu,   LSUOpType.hsvw,       SelImm.X),
   )
 }
 
@@ -465,32 +477,12 @@ object HypervisorDecode extends DecodeConstants {
  */
 object XSTrapDecode extends DecodeConstants {
   def TRAP = BitPat("b000000000000?????000000001101011")
-  val table: Array[(BitPat, List[BitPat])] = Array(
-    TRAP    -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.add, Y, N, Y, Y, Y, N, SelImm.IMM_I)
+  val decodeArray: Array[(BitPat, XSDecodeBase)] = Array(
+    TRAP    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.add, SelImm.IMM_I, xWen = T, xsTrap = T, noSpec = T, blockBack = T)
   )
 }
 
-//object Imm32Gen {
-//  def apply(sel: UInt, inst: UInt) = {
-//    val sign = Mux(sel === SelImm.IMM_Z, 0.S, inst(31).asSInt)
-//    val b30_20 = Mux(sel === SelImm.IMM_U, inst(30,20).asSInt, sign)
-//    val b19_12 = Mux(sel =/= SelImm.IMM_U && sel =/= SelImm.IMM_UJ, sign, inst(19,12).asSInt)
-//    val b11 = Mux(sel === SelImm.IMM_U || sel === SelImm.IMM_Z, 0.S,
-//              Mux(sel === SelImm.IMM_UJ, inst(20).asSInt,
-//              Mux(sel === SelImm.IMM_SB, inst(7).asSInt, sign)))
-//    val b10_5 = Mux(sel === SelImm.IMM_U || sel === SelImm.IMM_Z, 0.U(1.W), inst(30,25))
-//    val b4_1 = Mux(sel === SelImm.IMM_U, 0.U(1.W),
-//               Mux(sel === SelImm.IMM_S || sel === SelImm.IMM_SB, inst(11,8),
-//               Mux(sel === SelImm.IMM_Z, inst(19,16), inst(24,21))))
-//    val b0 = Mux(sel === SelImm.IMM_S, inst(7),
-//             Mux(sel === SelImm.IMM_I, inst(20),
-//             Mux(sel === SelImm.IMM_Z, inst(15), 0.U(1.W))))
-//
-//    Cat(sign, b30_20, b19_12, b11, b10_5, b4_1, b0)
-//  }
-//}
-
-abstract class Imm(val len: Int) extends Bundle {
+abstract class Imm(val len: Int) {
   def toImm32(minBits: UInt): UInt = do_toImm32(minBits(len - 1, 0))
   def do_toImm32(minBits: UInt): UInt
   def minBitsFromInstr(instr: UInt): UInt
@@ -549,6 +541,71 @@ case class Imm_B6() extends Imm(6){
   }
 }
 
+case class Imm_OPIVIS() extends Imm(5){
+  override def do_toImm32(minBits: UInt): UInt = SignExt(minBits, 32)
+
+  override def minBitsFromInstr(instr: UInt): UInt = {
+    instr(19, 15)
+  }
+}
+
+case class Imm_OPIVIU() extends Imm(5){
+  override def do_toImm32(minBits: UInt): UInt = ZeroExt(minBits, 32)
+
+  override def minBitsFromInstr(instr: UInt): UInt = {
+    instr(19, 15)
+  }
+}
+
+case class Imm_VSETVLI() extends Imm(11){
+  override def do_toImm32(minBits: UInt): UInt = SignExt(minBits, 32)
+
+  override def minBitsFromInstr(instr: UInt): UInt = {
+    instr(30, 20)
+  }
+}
+
+case class Imm_VSETIVLI() extends Imm(13){
+  override def do_toImm32(minBits: UInt): UInt = SignExt(minBits, 32)
+
+  override def minBitsFromInstr(instr: UInt): UInt = {
+    val rvInst: XSInstBitFields = instr.asTypeOf(new XSInstBitFields)
+    val uimm5 = rvInst.UIMM_VSETIVLI
+    val vtype8 = rvInst.ZIMM_VTYPE
+    Cat(uimm5, vtype8)
+  }
+  /**
+    * get VType from extended imm
+    * @param extedImm
+    * @return VType
+    */
+  def getVType(extedImm: UInt): InstVType = {
+    val vtype = Wire(new InstVType)
+    vtype := extedImm(7, 0).asTypeOf(new InstVType)
+    vtype
+  }
+
+  def getAvl(extedImm: UInt): UInt = {
+    extedImm(12, 8)
+  }
+}
+
+case class Imm_LUI32() extends Imm(32){
+  override def do_toImm32(minBits: UInt): UInt = minBits(31, 0)
+
+  override def minBitsFromInstr(instr: UInt): UInt = {
+    instr(31, 0)
+  }
+}
+
+case class Imm_VRORVI() extends Imm(6){
+  override def do_toImm32(minBits: UInt): UInt = ZeroExt(minBits, 32)
+
+  override def minBitsFromInstr(instr: UInt): UInt = {
+    Cat(instr(26), instr(19, 15))
+  }
+}
+
 object ImmUnion {
   val I = Imm_I()
   val S = Imm_S()
@@ -557,7 +614,15 @@ object ImmUnion {
   val J = Imm_J()
   val Z = Imm_Z()
   val B6 = Imm_B6()
-  val imms = Seq(I, S, B, U, J, Z, B6)
+  val OPIVIS = Imm_OPIVIS()
+  val OPIVIU = Imm_OPIVIU()
+  val VSETVLI = Imm_VSETVLI()
+  val VSETIVLI = Imm_VSETIVLI()
+  val LUI32 = Imm_LUI32()
+  val VRORVI = Imm_VRORVI()
+
+  // do not add special type lui32 to this, keep ImmUnion max len being 20.
+  val imms = Seq(I, S, B, U, J, Z, B6, OPIVIS, OPIVIU, VSETVLI, VSETIVLI, VRORVI)
   val maxLen = imms.maxBy(_.len).len
   val immSelMap = Seq(
     SelImm.IMM_I,
@@ -566,7 +631,12 @@ object ImmUnion {
     SelImm.IMM_U,
     SelImm.IMM_UJ,
     SelImm.IMM_Z,
-    SelImm.IMM_B6
+    SelImm.IMM_B6,
+    SelImm.IMM_OPIVIS,
+    SelImm.IMM_OPIVIU,
+    SelImm.IMM_VSETVLI,
+    SelImm.IMM_VSETIVLI,
+    SelImm.IMM_VRORVI,
   ).zip(imms)
   println(s"ImmUnion max len: $maxLen")
 }
@@ -574,21 +644,30 @@ object ImmUnion {
 case class Imm_LUI_LOAD() {
   def immFromLuiLoad(lui_imm: UInt, load_imm: UInt): UInt = {
     val loadImm = load_imm(Imm_I().len - 1, 0)
-    Cat(lui_imm(Imm_U().len - loadImm.getWidth - 1, 0), loadImm)
+    Cat(lui_imm(ImmUnion.maxLen - loadImm.getWidth - 1, 0), loadImm)
   }
-  def getLuiImm(uop: MicroOp): UInt = {
+  def getLuiImm(uop: DynInst): UInt = {
     val loadImmLen = Imm_I().len
-    val imm_u = Cat(uop.psrc(1), uop.psrc(0), uop.ctrl.imm(ImmUnion.maxLen - 1, loadImmLen))
-    Imm_U().do_toImm32(imm_u)
+    val imm_u = Cat(uop.psrc(1), uop.psrc(0), uop.imm(ImmUnion.maxLen - 1, loadImmLen))
+    Cat(Imm_U().toImm32(imm_u)(31, loadImmLen), uop.imm(loadImmLen - 1, 0))
   }
 }
 
 /**
  * IO bundle for the Decode unit
  */
+class DecodeUnitDeqIO(implicit p: Parameters) extends XSBundle {
+  val decodedInst = Output(new DecodedInst)
+  val isComplex = Output(Bool())
+  val uopInfo = Output(new UopInfo)
+}
 class DecodeUnitIO(implicit p: Parameters) extends XSBundle {
-  val enq = new Bundle { val ctrl_flow = Input(new CtrlFlow) }
-  val deq = new Bundle { val cf_ctrl = Output(new CfCtrl) }
+  val enq = new Bundle {
+    val ctrlFlow = Input(new StaticInst)
+    val vtype = Input(new VType)
+  }
+//  val vconfig = Input(UInt(XLEN.W))
+  val deq = new DecodeUnitDeqIO
   val csrCtrl = Input(new CustomCSRCtrlIO)
 }
 
@@ -598,65 +677,90 @@ class DecodeUnitIO(implicit p: Parameters) extends XSBundle {
 class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstants {
   val io = IO(new DecodeUnitIO)
 
-  val ctrl_flow = Wire(new CtrlFlow) // input with RVC Expanded
-  val cf_ctrl = Wire(new CfCtrl)
+  val ctrl_flow = io.enq.ctrlFlow // input with RVC Expanded
 
-  ctrl_flow := io.enq.ctrl_flow
+  private val inst: XSInstBitFields = io.enq.ctrlFlow.instr.asTypeOf(new XSInstBitFields)
 
-  val decode_table = XDecode.table ++
-    FDecode.table ++
-    FDivSqrtDecode.table ++
+  val decode_table: Array[(BitPat, List[BitPat])] = XDecode.table ++
+    FpDecode.table ++
+//    FDivSqrtDecode.table ++
     X64Decode.table ++
     XSTrapDecode.table ++
     BDecode.table ++
     CBODecode.table ++
     SvinvalDecode.table ++
-    HypervisorDecode.table
+    HypervisorDecode.table ++
+    VecDecoder.table
+
+  require(decode_table.map(_._2.length == 15).reduce(_ && _), "Decode tables have different column size")
   // assertion for LUI: only LUI should be assigned `selImm === SelImm.IMM_U && fuType === FuType.alu`
-  val luiMatch = (t: Seq[BitPat]) => t(3).value == FuType.alu.litValue && t.reverse.head.value == SelImm.IMM_U.litValue
+  val luiMatch = (t: Seq[BitPat]) => t(3).value == FuType.alu.ohid && t.reverse.head.value == SelImm.IMM_U.litValue
   val luiTable = decode_table.filter(t => luiMatch(t._2)).map(_._1).distinct
   assert(luiTable.length == 1 && luiTable.head == LUI, "Conflicts: LUI is determined by FuType and SelImm in Dispatch")
 
   // output
-  cf_ctrl.cf := ctrl_flow
-  val cs: CtrlSignals = Wire(new CtrlSignals()).decode(ctrl_flow.instr, decode_table)
-  cs.singleStep := false.B
-  cs.replayInst := false.B
-  cs.debug_globalID := DontCare
+  val decodedInst: DecodedInst = Wire(new DecodedInst()).decode(ctrl_flow.instr, decode_table)
 
   val fpDecoder = Module(new FPDecoder)
   fpDecoder.io.instr := ctrl_flow.instr
-  cs.fpu := fpDecoder.io.fpCtrl
+  decodedInst.fpu := fpDecoder.io.fpCtrl
+
+  decodedInst.connectStaticInst(io.enq.ctrlFlow)
+
+  decodedInst.uopIdx := 0.U
+  decodedInst.firstUop := true.B
+  decodedInst.lastUop := true.B
+  decodedInst.numUops := 1.U
+  decodedInst.numWB   := 1.U
 
   val isMove = BitPat("b000000000000_?????_000_?????_0010011") === ctrl_flow.instr
-  cs.isMove := isMove && ctrl_flow.instr(RD_MSB, RD_LSB) =/= 0.U
+  decodedInst.isMove := isMove && ctrl_flow.instr(RD_MSB, RD_LSB) =/= 0.U && !io.csrCtrl.singlestep
+
+  // fmadd - b1000011
+  // fmsub - b1000111
+  // fnmsub- b1001011
+  // fnmadd- b1001111
+  private val isFMA = inst.OPCODE === BitPat("b100??11")
+
+  private val v0Idx = 0
+  private val vconfigIdx = VCONFIG_IDX
 
   // read src1~3 location
-  cs.lsrc(0) := ctrl_flow.instr(RS1_MSB, RS1_LSB)
-  cs.lsrc(1) := ctrl_flow.instr(RS2_MSB, RS2_LSB)
-  cs.lsrc(2) := ctrl_flow.instr(RS3_MSB, RS3_LSB)
+  decodedInst.lsrc(0) := inst.RS1
+  decodedInst.lsrc(1) := inst.RS2
+  // src(2) of fma is fs3, src(2) of vector inst is old vd
+  decodedInst.lsrc(2) := Mux(isFMA, inst.FS3, inst.VD)
+  decodedInst.lsrc(3) := v0Idx.U
+  decodedInst.lsrc(4) := vconfigIdx.U
+  decodedInst.srcType(3) := Mux(inst.VM.asBool, SrcType.DC, SrcType.vp) // mask src
+  decodedInst.srcType(4) := SrcType.vp // vconfig
+
   // read dest location
-  cs.ldest := ctrl_flow.instr(RD_MSB, RD_LSB)
+  decodedInst.ldest := inst.RD
 
   // fill in exception vector
-  cf_ctrl.cf.exceptionVec := io.enq.ctrl_flow.exceptionVec
-  cf_ctrl.cf.exceptionVec(illegalInstr) := cs.selImm === SelImm.INVALID_INSTR
+  val vecException = Module(new VecExceptionGen)
+  vecException.io.inst := io.enq.ctrlFlow.instr
+  vecException.io.decodedInst := decodedInst
+  vecException.io.vtype := decodedInst.vpu.vtype
+  decodedInst.exceptionVec(illegalInstr) := decodedInst.selImm === SelImm.INVALID_INSTR || vecException.io.illegalInst
 
   when (!io.csrCtrl.svinval_enable) {
-    val base_ii = cs.selImm === SelImm.INVALID_INSTR
+    val base_ii = decodedInst.selImm === SelImm.INVALID_INSTR || vecException.io.illegalInst
     val sinval = BitPat("b0001011_?????_?????_000_00000_1110011") === ctrl_flow.instr
     val w_inval = BitPat("b0001100_00000_00000_000_00000_1110011") === ctrl_flow.instr
     val inval_ir = BitPat("b0001100_00001_00000_000_00000_1110011") === ctrl_flow.instr
     val hinval_gvma = HINVAL_GVMA === ctrl_flow.instr
     val hinval_vvma = HINVAL_VVMA === ctrl_flow.instr
     val svinval_ii = sinval || w_inval || inval_ir || hinval_gvma || hinval_vvma
-    cf_ctrl.cf.exceptionVec(illegalInstr) := base_ii || svinval_ii
-    cs.flushPipe := false.B
+    decodedInst.exceptionVec(illegalInstr) := base_ii || svinval_ii
+    decodedInst.flushPipe := false.B
   }
 
   when(io.csrCtrl.virtMode){
+    // Todo: optimize EX_VI decode
     // vs/vu attempting to exec hyperinst will raise virtual instruction
-    cf_ctrl.cf.exceptionVec(virtualInstr) := ctrl_flow.instr === HLV_B || ctrl_flow.instr === HLV_BU ||
+    decodedInst.exceptionVec(virtualInstr) := ctrl_flow.instr === HLV_B || ctrl_flow.instr === HLV_BU ||
       ctrl_flow.instr === HLV_H   || ctrl_flow.instr === HLV_HU ||
       ctrl_flow.instr === HLVX_HU || ctrl_flow.instr === HLV_W  ||
       ctrl_flow.instr === HLVX_WU || ctrl_flow.instr === HLV_WU ||
@@ -670,11 +774,11 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   // fix frflags
   //                           fflags    zero csrrs rd    csr
   val isFrflags = BitPat("b000000000001_00000_010_?????_1110011") === ctrl_flow.instr
-  when (cs.fuType === FuType.csr && isFrflags) {
-    cs.blockBackward := false.B
+  when (decodedInst.fuType === FuType.csr.U && isFrflags) {
+    decodedInst.blockBackward := false.B
   }
 
-  cs.imm := LookupTree(cs.selImm, ImmUnion.immSelMap.map(
+  decodedInst.imm := LookupTree(decodedInst.selImm, ImmUnion.immSelMap.map(
     x => {
       val minBits = x._2.minBitsFromInstr(ctrl_flow.instr)
       require(minBits.getWidth == x._2.len)
@@ -682,22 +786,125 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     }
   ))
 
-  cf_ctrl.ctrl := cs
+  private val isLs = FuType.isLoadStore(decodedInst.fuType)
+  private val isVls = FuType.isVls(decodedInst.fuType)
+  private val isStore = FuType.isStore(decodedInst.fuType)
+  private val isAMO = FuType.isAMO(decodedInst.fuType)
+  private val isVStore = FuType.isVStore(decodedInst.fuType)
+  private val isBranch = !decodedInst.preDecodeInfo.notCFI || FuType.isJump(decodedInst.fuType)
 
-  io.deq.cf_ctrl := cf_ctrl
+  decodedInst.commitType := Cat(isLs | isVls, (isStore && !isAMO) | isVStore | isBranch)
 
+  decodedInst.isVset := FuType.isVset(decodedInst.fuType)
+
+  private val needReverseInsts = Seq(VRSUB_VI, VRSUB_VX, VFRDIV_VF, VFRSUB_VF, VFMV_F_S)
+  private val vextInsts = Seq(VZEXT_VF2, VZEXT_VF4, VZEXT_VF8, VSEXT_VF2, VSEXT_VF4, VSEXT_VF8)
+  private val narrowInsts = Seq(
+    VNSRA_WV, VNSRA_WX, VNSRA_WI, VNSRL_WV, VNSRL_WX, VNSRL_WI,
+    VNCLIP_WV, VNCLIP_WX, VNCLIP_WI, VNCLIPU_WV, VNCLIPU_WX, VNCLIPU_WI,
+  )
+  private val maskDstInsts = Seq(
+    VMADC_VV, VMADC_VX,  VMADC_VI,  VMADC_VVM, VMADC_VXM, VMADC_VIM,
+    VMSBC_VV, VMSBC_VX,  VMSBC_VVM, VMSBC_VXM,
+    VMAND_MM, VMNAND_MM, VMANDN_MM, VMXOR_MM, VMOR_MM, VMNOR_MM, VMORN_MM, VMXNOR_MM,
+    VMSEQ_VV, VMSEQ_VX, VMSEQ_VI, VMSNE_VV, VMSNE_VX, VMSNE_VI,
+    VMSLE_VV, VMSLE_VX, VMSLE_VI, VMSLEU_VV, VMSLEU_VX, VMSLEU_VI,
+    VMSLT_VV, VMSLT_VX, VMSLTU_VV, VMSLTU_VX,
+    VMSGT_VX, VMSGT_VI, VMSGTU_VX, VMSGTU_VI,
+    VMFEQ_VV, VMFEQ_VF, VMFNE_VV, VMFNE_VF, VMFLT_VV, VMFLT_VF, VMFLE_VV, VMFLE_VF, VMFGT_VF, VMFGE_VF,
+  )
+  private val maskOpInsts = Seq(
+    VMAND_MM, VMNAND_MM, VMANDN_MM, VMXOR_MM, VMOR_MM, VMNOR_MM, VMORN_MM, VMXNOR_MM,
+  )
+  private val wfflagsInsts = Seq(
+    // opfff
+    FADD_S, FSUB_S, FADD_D, FSUB_D,
+    FEQ_S, FLT_S, FLE_S, FEQ_D, FLT_D, FLE_D,
+    FMIN_S, FMAX_S, FMIN_D, FMAX_D,
+    FMUL_S, FMUL_D,
+    FDIV_S, FDIV_D, FSQRT_S, FSQRT_D,
+    FMADD_S, FMSUB_S, FNMADD_S, FNMSUB_S, FMADD_D, FMSUB_D, FNMADD_D, FNMSUB_D,
+    FSGNJ_S, FSGNJN_S, FSGNJX_S,
+    // opfvv
+    VFADD_VV, VFSUB_VV, VFWADD_VV, VFWSUB_VV, VFWADD_WV, VFWSUB_WV,
+    VFMUL_VV, VFDIV_VV, VFWMUL_VV,
+    VFMACC_VV, VFNMACC_VV, VFMSAC_VV, VFNMSAC_VV, VFMADD_VV, VFNMADD_VV, VFMSUB_VV, VFNMSUB_VV,
+    VFWMACC_VV, VFWNMACC_VV, VFWMSAC_VV, VFWNMSAC_VV,
+    VFSQRT_V,
+    VFMIN_VV, VFMAX_VV,
+    VMFEQ_VV, VMFNE_VV, VMFLT_VV, VMFLE_VV,
+    VFSGNJ_VV, VFSGNJN_VV, VFSGNJX_VV,
+    // opfvf
+    VFADD_VF, VFSUB_VF, VFRSUB_VF, VFWADD_VF, VFWSUB_VF, VFWADD_WF, VFWSUB_WF,
+    VFMUL_VF, VFDIV_VF, VFRDIV_VF, VFWMUL_VF,
+    VFMACC_VF, VFNMACC_VF, VFMSAC_VF, VFNMSAC_VF, VFMADD_VF, VFNMADD_VF, VFMSUB_VF, VFNMSUB_VF,
+    VFWMACC_VF, VFWNMACC_VF, VFWMSAC_VF, VFWNMSAC_VF,
+    VFMIN_VF, VFMAX_VF,
+    VMFEQ_VF, VMFNE_VF, VMFLT_VF, VMFLE_VF, VMFGT_VF, VMFGE_VF,
+    VFSGNJ_VF, VFSGNJN_VF, VFSGNJX_VF,
+    // fcvt & vfcvt
+    FCVT_S_W, FCVT_S_WU, FCVT_S_L, FCVT_S_LU,
+    FCVT_W_S, FCVT_WU_S, FCVT_L_S, FCVT_LU_S,
+    FCVT_D_W, FCVT_D_WU, FCVT_D_L, FCVT_D_LU,
+    FCVT_W_D, FCVT_WU_D, FCVT_L_D, FCVT_LU_D, FCVT_S_D, FCVT_D_S,
+    VFCVT_XU_F_V, VFCVT_X_F_V, VFCVT_RTZ_XU_F_V, VFCVT_RTZ_X_F_V, VFCVT_F_XU_V, VFCVT_F_X_V,
+    VFWCVT_XU_F_V, VFWCVT_X_F_V, VFWCVT_RTZ_XU_F_V, VFWCVT_RTZ_X_F_V, VFWCVT_F_XU_V, VFWCVT_F_X_V, VFWCVT_F_F_V,
+    VFNCVT_XU_F_W, VFNCVT_X_F_W, VFNCVT_RTZ_XU_F_W, VFNCVT_RTZ_X_F_W, VFNCVT_F_XU_W, VFNCVT_F_X_W, VFNCVT_F_F_W,
+    VFNCVT_ROD_F_F_W, VFRSQRT7_V, VFREC7_V,
+  )
+  decodedInst.wfflags := wfflagsInsts.map(_ === inst.ALL).reduce(_ || _)
+  val fpToVecDecoder = Module(new FPToVecDecoder())
+  fpToVecDecoder.io.instr := inst.asUInt
+  val isFpToVecInst = fpToVecDecoder.io.vpuCtrl.fpu.isFpToVecInst
+  decodedInst.vpu := 0.U.asTypeOf(decodedInst.vpu) // Todo: Connect vpu decoder
+  when(isFpToVecInst){
+    decodedInst.vpu := fpToVecDecoder.io.vpuCtrl
+  }.otherwise{
+    decodedInst.vpu.vill := io.enq.vtype.illegal
+    decodedInst.vpu.vma := io.enq.vtype.vma
+    decodedInst.vpu.vta := io.enq.vtype.vta
+    decodedInst.vpu.vsew := io.enq.vtype.vsew
+    decodedInst.vpu.vlmul := io.enq.vtype.vlmul
+    decodedInst.vpu.vm := inst.VM
+    decodedInst.vpu.nf := inst.NF
+    decodedInst.vpu.veew := inst.WIDTH
+    decodedInst.vpu.isReverse := needReverseInsts.map(_ === inst.ALL).reduce(_ || _)
+    decodedInst.vpu.isExt := vextInsts.map(_ === inst.ALL).reduce(_ || _)
+    decodedInst.vpu.isNarrow := narrowInsts.map(_ === inst.ALL).reduce(_ || _)
+    decodedInst.vpu.isDstMask := maskDstInsts.map(_ === inst.ALL).reduce(_ || _)
+    decodedInst.vpu.isOpMask := maskOpInsts.map(_ === inst.ALL).reduce(_ || _)
+  }
+
+  decodedInst.vlsInstr := isVls
+
+  val uopInfoGen = Module(new UopInfoGen)
+  uopInfoGen.io.in.preInfo.typeOfSplit := decodedInst.uopSplitType
+  uopInfoGen.io.in.preInfo.vsew := decodedInst.vpu.vsew
+  uopInfoGen.io.in.preInfo.vlmul := decodedInst.vpu.vlmul
+  uopInfoGen.io.in.preInfo.vwidth := inst.RM
+  uopInfoGen.io.in.preInfo.vmvn := inst.IMM5_OPIVI(2, 0)
+  uopInfoGen.io.in.preInfo.nf := inst.NF
+  uopInfoGen.io.in.preInfo.isVlsr := decodedInst.fuOpType === VlduType.vlr || decodedInst.fuOpType === VstuType.vsr
+  uopInfoGen.io.in.preInfo.isVlsm := decodedInst.fuOpType === VlduType.vlm || decodedInst.fuOpType === VstuType.vsm
+  io.deq.isComplex := uopInfoGen.io.out.isComplex
+  io.deq.uopInfo.numOfUop := uopInfoGen.io.out.uopInfo.numOfUop
+  io.deq.uopInfo.numOfWB := uopInfoGen.io.out.uopInfo.numOfWB
+  io.deq.uopInfo.lmul := uopInfoGen.io.out.uopInfo.lmul
+
+  io.deq.decodedInst := decodedInst
+  io.deq.decodedInst.rfWen := (decodedInst.ldest =/= 0.U) && decodedInst.rfWen
   //-------------------------------------------------------------
   // Debug Info
-  XSDebug("in:  instr=%x pc=%x excepVec=%b crossPageIPFFix=%d\n",
-    io.enq.ctrl_flow.instr, io.enq.ctrl_flow.pc, io.enq.ctrl_flow.exceptionVec.asUInt,
-    io.enq.ctrl_flow.crossPageIPFFix)
-  XSDebug("out: srcType(0)=%b srcType(1)=%b srcType(2)=%b lsrc(0)=%d lsrc(1)=%d lsrc(2)=%d ldest=%d fuType=%b fuOpType=%b\n",
-    io.deq.cf_ctrl.ctrl.srcType(0), io.deq.cf_ctrl.ctrl.srcType(1), io.deq.cf_ctrl.ctrl.srcType(2),
-    io.deq.cf_ctrl.ctrl.lsrc(0), io.deq.cf_ctrl.ctrl.lsrc(1), io.deq.cf_ctrl.ctrl.lsrc(2),
-    io.deq.cf_ctrl.ctrl.ldest, io.deq.cf_ctrl.ctrl.fuType, io.deq.cf_ctrl.ctrl.fuOpType)
-  XSDebug("out: rfWen=%d fpWen=%d isXSTrap=%d noSpecExec=%d isBlocked=%d flushPipe=%d imm=%x\n",
-    io.deq.cf_ctrl.ctrl.rfWen, io.deq.cf_ctrl.ctrl.fpWen, io.deq.cf_ctrl.ctrl.isXSTrap,
-    io.deq.cf_ctrl.ctrl.noSpecExec, io.deq.cf_ctrl.ctrl.blockBackward, io.deq.cf_ctrl.ctrl.flushPipe,
-    io.deq.cf_ctrl.ctrl.imm)
-  XSDebug("out: excepVec=%b\n", io.deq.cf_ctrl.cf.exceptionVec.asUInt)
+//  XSDebug("in:  instr=%x pc=%x excepVec=%b crossPageIPFFix=%d\n",
+//    io.enq.ctrl_flow.instr, io.enq.ctrl_flow.pc, io.enq.ctrl_flow.exceptionVec.asUInt,
+//    io.enq.ctrl_flow.crossPageIPFFix)
+//  XSDebug("out: srcType(0)=%b srcType(1)=%b srcType(2)=%b lsrc(0)=%d lsrc(1)=%d lsrc(2)=%d ldest=%d fuType=%b fuOpType=%b\n",
+//    io.deq.cf_ctrl.ctrl.srcType(0), io.deq.cf_ctrl.ctrl.srcType(1), io.deq.cf_ctrl.ctrl.srcType(2),
+//    io.deq.cf_ctrl.ctrl.lsrc(0), io.deq.cf_ctrl.ctrl.lsrc(1), io.deq.cf_ctrl.ctrl.lsrc(2),
+//    io.deq.cf_ctrl.ctrl.ldest, io.deq.cf_ctrl.ctrl.fuType, io.deq.cf_ctrl.ctrl.fuOpType)
+//  XSDebug("out: rfWen=%d fpWen=%d isXSTrap=%d noSpecExec=%d isBlocked=%d flushPipe=%d imm=%x\n",
+//    io.deq.cf_ctrl.ctrl.rfWen, io.deq.cf_ctrl.ctrl.fpWen, io.deq.cf_ctrl.ctrl.isXSTrap,
+//    io.deq.cf_ctrl.ctrl.noSpecExec, io.deq.cf_ctrl.ctrl.blockBackward, io.deq.cf_ctrl.ctrl.flushPipe,
+//    io.deq.cf_ctrl.ctrl.imm)
+//  XSDebug("out: excepVec=%b\n", io.deq.cf_ctrl.cf.exceptionVec.asUInt)
 }
