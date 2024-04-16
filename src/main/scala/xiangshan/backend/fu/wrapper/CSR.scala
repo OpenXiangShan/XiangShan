@@ -4,7 +4,7 @@ import chisel3._
 import org.chipsalliance.cde.config.Parameters
 import utility._
 import xiangshan._
-import xiangshan.backend.fu.NewCSR.{CSRPermitModule, NewCSR}
+import xiangshan.backend.fu.NewCSR.{CSRPermitModule, NewCSR, VtypeBundle}
 import xiangshan.backend.fu.util._
 import xiangshan.backend.fu.{FuConfig, FuncUnit}
 
@@ -110,29 +110,31 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   exceptionVec(EX_II    ) := csrMod.io.out.EX_II
   exceptionVec(EX_VI    ) := csrMod.io.out.EX_VI // Todo: check other EX_VI
 
+  val isXRet = valid && func === CSROpType.jmp && !isEcall && !isEbreak
+
   io.in.ready := true.B // Todo: Async read imsic may block CSR
   io.out.valid := valid
   io.out.bits.ctrl.exceptionVec.get := exceptionVec
-  io.out.bits.ctrl.flushPipe.get := csrMod.io.out.flushPipe
+  io.out.bits.ctrl.flushPipe.get := csrMod.io.out.flushPipe || isXRet // || frontendTriggerUpdate
   io.out.bits.res.data := csrMod.io.out.rData
   connect0LatencyCtrlSingal
 
-  csrOut.isPerfCnt
-  csrOut.fpu.frm := csrMod.io.out.frm
-  csrOut.vpu.vstart
-  csrOut.vpu.vxsat
-  csrOut.vpu.vxrm := csrMod.io.out.vxrm
-  csrOut.vpu.vcsr
-  csrOut.vpu.vl
-  csrOut.vpu.vtype
-  csrOut.vpu.vlenb
-  csrOut.vpu.vill
-  csrOut.vpu.vma
-  csrOut.vpu.vta
-  csrOut.vpu.vsew
-  csrOut.vpu.vlmul
+  csrOut.isPerfCnt  := csrMod.io.out.isPerfCnt && valid && func =/= CSROpType.jmp
+  csrOut.fpu.frm    := csrMod.io.out.frm
+  csrOut.vpu.vstart := csrMod.io.out.vstart
+  csrOut.vpu.vxsat  := csrMod.io.out.vxsat
+  csrOut.vpu.vxrm   := csrMod.io.out.vxrm
+  csrOut.vpu.vcsr   := csrMod.io.out.vcsr
+  csrOut.vpu.vl     := csrMod.io.out.vl
+  csrOut.vpu.vtype  := csrMod.io.out.vtype
+  csrOut.vpu.vlenb  := csrMod.io.out.vlenb
+  csrOut.vpu.vill   := csrMod.io.out.vtype.asTypeOf(new VtypeBundle).VILL
+  csrOut.vpu.vma    := csrMod.io.out.vtype.asTypeOf(new VtypeBundle).VMA
+  csrOut.vpu.vta    := csrMod.io.out.vtype.asTypeOf(new VtypeBundle).VTA
+  csrOut.vpu.vsew   := csrMod.io.out.vtype.asTypeOf(new VtypeBundle).VSEW
+  csrOut.vpu.vlmul  := csrMod.io.out.vtype.asTypeOf(new VtypeBundle).VLMUL
 
-  csrOut.isXRet
+  csrOut.isXRet := isXRet
 
   csrOut.trapTarget := csrMod.io.out.targetPc
   csrOut.interrupt
