@@ -179,8 +179,8 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
     s1_nfields << s1_eew(1, 0) // for unit-stride load, stride = eew * NFIELDS
   )
 
-  val stride     = Mux(isIndexed(s1_instType), s1_stride, s1_notIndexedStride) // if is index instructions, get index when split
-  val uopOffset  = genVUopOffset(s1_instType, s1_uopidx, s1_nf, stride, s1_alignedType)
+  val stride     = Mux(isIndexed(s1_instType), s1_stride, s1_notIndexedStride).asUInt // if is index instructions, get index when split
+  val uopOffset  = genVUopOffset(s1_instType, s1_uopidx, s1_nf, s1_eew(1, 0), stride, s1_alignedType)
 
   s1_kill               := s1_in.uop.robIdx.needFlush(io.redirect)
 

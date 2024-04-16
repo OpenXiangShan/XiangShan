@@ -836,16 +836,17 @@ object genVStride extends VLSUConstants {
 }
 
 object genVUopOffset extends VLSUConstants {
-  def apply(instType: UInt, uopidx: UInt, nf: UInt, stride: UInt, alignedType: UInt): UInt = {
-    val uopInsidefield = (uopidx >> nf) // when nf == 0, is uopidx
+  def apply(instType: UInt, uopidx: UInt, nf: UInt, eew: UInt, stride: UInt, alignedType: UInt): UInt = {
+    val uopInsidefield = (uopidx >> nf).asUInt // when nf == 0, is uopidx
     (LookupTree(instType,List(
-      "b000".U -> ( (uopidx >> nf) << alignedType                       ) , // unit-stride
-      "b010".U -> ( genVStride(uopInsidefield, stride) << alignedType   ) , // strided
-      "b001".U -> ( 0.U                                                 ) , // indexed-unordered
-      "b011".U -> ( 0.U                                                 ) , // indexed-ordered
-      "b100".U -> ( (uopidx >> nf) << alignedType                       ) , // segment unit-stride
-      "b110".U -> ( genVStride(uopInsidefield, stride) << alignedType   ) , // segment strided
-      "b101".U -> ( 0.U                                                 ) , // segment indexed-unordered
-      "b111".U -> ( 0.U                                                 )   // segment indexed-ordered
-    )))}
+      "b000".U -> ( (uopidx >> nf) << alignedType                                   ) , // unit-stride
+      "b010".U -> ( genVStride(uopInsidefield, stride) << (log2Up(VLENB).U - eew)   ) , // strided
+      "b001".U -> ( 0.U                                                             ) , // indexed-unordered
+      "b011".U -> ( 0.U                                                             ) , // indexed-ordered
+      "b100".U -> ( (uopidx >> nf) << alignedType                                   ) , // segment unit-stride
+      "b110".U -> ( genVStride(uopInsidefield, stride) << (log2Up(VLENB).U - eew)   ) , // segment strided
+      "b101".U -> ( 0.U                                                             ) , // segment indexed-unordered
+      "b111".U -> ( 0.U                                                             )   // segment indexed-ordered
+    ))).asUInt
   }
+}
