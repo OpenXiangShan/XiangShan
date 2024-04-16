@@ -838,7 +838,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
         }
       } else {
         committed(cmtPtrExt(i).value) := true.B
-        veccommitVec(i) := true.B
+        veccommitVec(i) := veccommitVec(i - 1) || scalarcommitVec(i - 1)
       }
     } .elsewhen (scalarCommitCount > i.U - veccount) {
       if (i == 0){
@@ -848,7 +848,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
         }
       } else {
         committed(cmtPtrExt(i).value) := true.B
-        scalarcommitVec(i) := true.B
+        scalarcommitVec(i) := veccommitVec(i - 1) || scalarcommitVec(i - 1)
       }
     }
   }
