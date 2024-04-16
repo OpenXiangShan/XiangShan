@@ -196,9 +196,9 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   io.toMergeBuffer.req.bits.vlmax        := s1_in.vlmax
 //   io.toMergeBuffer.req.bits.vdOffset :=
 
-  when (s1_in.uop.lastUop && s1_valid || s1_kill) {
+  when (s1_in.uop.lastUop && s1_fire || s1_kill) {
     vdIdxReg := 0.U
-  }.elsewhen(s1_valid) {
+  }.elsewhen(s1_fire) {
     vdIdxReg := vdIdxReg + 1.U
     XSError(vdIdxReg + 1.U === 0.U, s"Overflow! The number of vd should be less than 8\n")
   }
