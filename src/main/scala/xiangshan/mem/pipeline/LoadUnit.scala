@@ -701,7 +701,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // load wakeup
   // TODO: vector load wakeup?
-  io.wakeup.valid := s0_fire && (s0_super_ld_rep_select || s0_ld_fast_rep_select || s0_ld_rep_select || s0_int_iss_select) || s0_mmio_fire
+  io.wakeup.valid := !s0_sel_src.isvec && s0_fire && (s0_super_ld_rep_select || s0_ld_fast_rep_select || s0_ld_rep_select || s0_int_iss_select) || s0_mmio_fire
   io.wakeup.bits := s0_out.uop
 
   XSDebug(io.dcache.req.fire,
@@ -1300,7 +1300,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.ldCancel.ld2Cancel := s3_valid && (
     io.lsq.ldin.bits.rep_info.need_rep ||                       // exe fail or
     s3_in.mmio                                                  // is mmio
-  )
+  ) && !s3_isvec
 
   val s3_ld_wb_meta = Mux(s3_valid, s3_out.bits, s3_mmio.bits)
 
