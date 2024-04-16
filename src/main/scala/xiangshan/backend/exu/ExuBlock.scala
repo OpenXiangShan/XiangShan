@@ -10,7 +10,8 @@ import xiangshan.backend.issue.SchdBlockParams
 import xiangshan.{HasXSParameter, Redirect, XSBundle}
 import utils._
 import xiangshan.backend.fu.FuConfig.{AluCfg, BrhCfg}
-import xiangshan.backend.fu.vector.Bundles.VType
+import xiangshan.backend.fu.vector.Bundles.{VType, Vxrm}
+import xiangshan.backend.fu.fpu.Bundles.Frm
 
 class ExuBlock(params: SchdBlockParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
@@ -66,7 +67,7 @@ class ExuBlockIO(implicit p: Parameters, params: SchdBlockParams) extends XSBund
 
   val csrio = OptionWrapper(params.hasCSR, new CSRFileIO)
   val fenceio = OptionWrapper(params.hasFence, new FenceIO)
-  val frm = OptionWrapper(params.needSrcFrm, Input(UInt(3.W)))
-  val vxrm = OptionWrapper(params.needSrcVxrm, Input(UInt(2.W)))
+  val frm = OptionWrapper(params.needSrcFrm, Input(Frm()))
+  val vxrm = OptionWrapper(params.needSrcVxrm, Input(Vxrm()))
   val vtype = OptionWrapper(params.writeVType, new VType)
 }

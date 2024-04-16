@@ -28,7 +28,8 @@ import xiangshan.backend.Bundles.{ExuInput, ExuOutput, MemExuInput, MemExuOutput
 import xiangshan.{FPUCtrlSignals, HasXSParameter, Redirect, XSBundle, XSModule}
 import xiangshan.backend.datapath.WbConfig.{PregWB, _}
 import xiangshan.backend.fu.FuType
-import xiangshan.backend.fu.vector.Bundles.VType
+import xiangshan.backend.fu.vector.Bundles.{VType, Vxrm}
+import xiangshan.backend.fu.fpu.Bundles.Frm
 
 class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
   val flush = Flipped(ValidIO(new Redirect()))
@@ -36,8 +37,8 @@ class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle 
   val out = DecoupledIO(new ExuOutput(params))
   val csrio = OptionWrapper(params.hasCSR, new CSRFileIO)
   val fenceio = OptionWrapper(params.hasFence, new FenceIO)
-  val frm = OptionWrapper(params.needSrcFrm, Input(UInt(3.W)))
-  val vxrm = OptionWrapper(params.needSrcVxrm, Input(UInt(2.W)))
+  val frm = OptionWrapper(params.needSrcFrm, Input(Frm()))
+  val vxrm = OptionWrapper(params.needSrcVxrm, Input(Vxrm()))
   val vtype = OptionWrapper(params.writeVType, new VType)
 }
 
