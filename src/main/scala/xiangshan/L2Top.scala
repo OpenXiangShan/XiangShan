@@ -129,6 +129,7 @@ class L2Top()(implicit p: Parameters) extends LazyModule
   tl2chi_l2cache match {
     case Some(l2) =>
       l2.managerNode := TLXbar() :=* l2_binder.get :*= l2.node :*= l1_xbar
+      l2.mmioNode := mmio_port
     case None =>
   }
   

@@ -81,46 +81,46 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     })))
   )
 
-  val chi_uncache_sink = if (enableCHI) {
-    val onChipPeripheralRange = AddressSet(0x38000000L, 0x07ffffffL)
-    val uartRange = AddressSet(0x40600000, 0xf)
-    val uartDevice = new SimpleDevice("serial", Seq("xilinx,uartlite"))
-    val uartParams = AXI4SlaveParameters(
-      address = Seq(uartRange),
-      regionType = RegionType.UNCACHED,
-      supportsRead = TransferSizes(1, 8),
-      supportsWrite = TransferSizes(1, 8),
-      resources = uartDevice.reg
-    )
-    val peripheralRange = AddressSet(
-      0x0, 0x7fffffff
-    ).subtract(onChipPeripheralRange).flatMap(x => x.subtract(uartRange))
+  // val chi_uncache_sink = if (enableCHI) {
+  //   val onChipPeripheralRange = AddressSet(0x38000000L, 0x07ffffffL)
+  //   val uartRange = AddressSet(0x40600000, 0xf)
+  //   val uartDevice = new SimpleDevice("serial", Seq("xilinx,uartlite"))
+  //   val uartParams = AXI4SlaveParameters(
+  //     address = Seq(uartRange),
+  //     regionType = RegionType.UNCACHED,
+  //     supportsRead = TransferSizes(1, 8),
+  //     supportsWrite = TransferSizes(1, 8),
+  //     resources = uartDevice.reg
+  //   )
+  //   val peripheralRange = AddressSet(
+  //     0x0, 0x7fffffff
+  //   ).subtract(onChipPeripheralRange).flatMap(x => x.subtract(uartRange))
 
-    Some(AXI4SlaveNode(Seq(AXI4SlavePortParameters(
-      Seq(AXI4SlaveParameters(
-        address = peripheralRange,
-        regionType = RegionType.UNCACHED,
-        supportsRead = TransferSizes(1, 8),
-        supportsWrite = TransferSizes(1, 8),
-        interleavedId = Some(0)
-      ), uartParams),
-      beatBytes = 8
-    ))))
-  } else None
+  //   Some(AXI4SlaveNode(Seq(AXI4SlavePortParameters(
+  //     Seq(AXI4SlaveParameters(
+  //       address = peripheralRange,
+  //       regionType = RegionType.UNCACHED,
+  //       supportsRead = TransferSizes(1, 8),
+  //       supportsWrite = TransferSizes(1, 8),
+  //       interleavedId = Some(0)
+  //     ), uartParams),
+  //     beatBytes = 8
+  //   ))))
+  // } else None
 
-  val chi_uncache_xbar = if (enableCHI) Some(AXI4Xbar()) else None
+  // val chi_uncache_xbar = if (enableCHI) Some(AXI4Xbar()) else None
 
-  if (enableCHI) {
-    for (i <- 0 until NumCores) {
-      chi_uncache_xbar.get :*= core_with_l2(i).axi4_uncache.get
-    }
-    chi_uncache_sink.get := chi_uncache_xbar.get
+  // if (enableCHI) {
+  //   for (i <- 0 until NumCores) {
+  //     chi_uncache_xbar.get :*= core_with_l2(i).axi4_uncache.get
+  //   }
+  //   chi_uncache_sink.get := chi_uncache_xbar.get
 
-    val uncache_port = InModuleBody {
-      chi_uncache_sink.get.makeIOs()
-    }
-    // dontTouch(uncache_port)
-  }
+  //   val uncache_port = InModuleBody {
+  //     chi_uncache_sink.get.makeIOs()
+  //   }
+  //   // dontTouch(uncache_port)
+  // }
 
   // recieve all prefetch req from cores
   val memblock_pf_recv_nodes: Seq[Option[BundleBridgeSink[PrefetchRecv]]] = core_with_l2.map(_.core_l3_pf_port).map{

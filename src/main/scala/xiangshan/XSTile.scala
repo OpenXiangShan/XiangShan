@@ -44,7 +44,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   val core_l3_pf_port = core.memBlock.l3_pf_sender_opt
   val memory_port = if (enableCHI && enableL2) None else Some(l2top.memory_port.get)
   val tl_uncache = l2top.mmio_port
-  val axi4_uncache = if (enableCHI) Some(AXI4UserYanker()) else None
+  // val axi4_uncache = if (enableCHI) Some(AXI4UserYanker()) else None
   val beu_int_source = l2top.beu.intNode
   val core_reset_sink = BundleBridgeSink(Some(() => Reset()))
   val clint_int_node = l2top.clint_int_node
@@ -105,18 +105,18 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   l2top.i_mmio_port := l2top.i_mmio_buffer.node := core.memBlock.frontendBridge.instr_uncache_node
   l2top.d_mmio_port := core.memBlock.uncache.clientNode
 
-  if (enableCHI) {
-    axi4_uncache.get :=
-      AXI4IdIndexer(idBits = 2) :=
-      AXI4Buffer() :=
-      AXI4Buffer() :=
-      AXI4Buffer() :=
-      AXI4Buffer() :=
-      AXI4UserYanker() :=
-      AXI4Deinterleaver(8) :=
-      TLToAXI4() :=
-      tl_uncache
-  }
+  // if (enableCHI) {
+  //   axi4_uncache.get :=
+  //     AXI4IdIndexer(idBits = 2) :=
+  //     AXI4Buffer() :=
+  //     AXI4Buffer() :=
+  //     AXI4Buffer() :=
+  //     AXI4Buffer() :=
+  //     AXI4UserYanker() :=
+  //     AXI4Deinterleaver(8) :=
+  //     TLToAXI4() :=
+  //     tl_uncache
+  // }
 
   // =========== IO Connection ============
   class XSTileImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
