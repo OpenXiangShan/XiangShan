@@ -72,8 +72,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val wfi_enable = Input(Bool())
     val toDecode = new Bundle {
       val isResumeVType = Output(Bool())
-      val commitVType = ValidIO(VType())
       val walkVType = ValidIO(VType())
+      val commitVType = new Bundle {
+        val vtype = ValidIO(VType())
+        val hasVsetvl = Output(Bool())
+      }
     }
     val readGPAMemAddr = ValidIO(new Bundle {
       val ftqPtr = new FtqPtr()
