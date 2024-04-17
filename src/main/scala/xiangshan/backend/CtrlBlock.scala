@@ -536,6 +536,11 @@ class CtrlBlockImp(
 
   io.robio.robDeqPtr := rob.io.robDeqPtr
 
+  // rob to backend
+  io.robio.commitVType := rob.io.toDecode.commitVType
+  // exu block to decode
+  decode.io.vsetvlVType := io.robio.vsetvlVType
+
   io.debugTopDown.fromRob := rob.io.debugTopDown.toCore
   dispatch.io.debugTopDown.fromRob := rob.io.debugTopDown.toDispatch
   dispatch.io.debugTopDown.fromCore := io.debugTopDown.fromCore
@@ -618,6 +623,11 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val debug_ls = Input(new DebugLSIO())
     val robHeadLsIssue = Input(Bool())
     val robDeqPtr = Output(new RobPtr)
+    val vsetvlVType = Input(VType())
+    val commitVType = new Bundle {
+      val vtype = Output(ValidIO(VType()))
+      val hasVsetvl = Output(Bool())
+    }
   }
 
   val perfInfo = Output(new Bundle{
