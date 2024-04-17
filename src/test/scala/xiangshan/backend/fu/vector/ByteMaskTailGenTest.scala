@@ -34,10 +34,10 @@ class ByteMaskTailGenTest extends AnyFlatSpec with ChiselScalatestTester with Ma
         println("startBytes: " + m.io.debugOnly.startBytes.peek().litValue.toInt)
         println("vlBytes: " + m.io.debugOnly.vlBytes.peek().litValue.toInt)
         println("prestartEn: " + m.io.debugOnly.prestartEn.peek().litValue.toString(2))
-        println("activeEn: " + m.io.debugOnly.activeEn.peek().litValue.toString(2))
+        println("bodyEn: " + m.io.debugOnly.bodyEn.peek().litValue.toString(2))
         println("tailEn: " + m.io.debugOnly.tailEn.peek().litValue.toString(2))
         println("maskEn: " + m.io.debugOnly.maskEn.peek().litValue.toString(2))
-        println("keepEn: " + m.io.out.keepEn.peek().litValue.toString(2))
+        println("activeEn: " + m.io.out.activeEn.peek().litValue.toString(2))
         println("agnosticEn: " + m.io.out.agnosticEn.peek().litValue.toString(2))
     }
     println("test done")
