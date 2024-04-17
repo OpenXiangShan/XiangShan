@@ -677,6 +677,8 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   // fnmsub- b1001011
   // fnmadd- b1001111
   private val isFMA = inst.OPCODE === BitPat("b100??11")
+  private val isVppu = FuType.isVppu(decodedInst.fuType)
+  private val isVecOPF = FuType.isVecOPF(decodedInst.fuType)
 
   private val v0Idx = 0
   private val vconfigIdx = VCONFIG_IDX
@@ -833,6 +835,9 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   io.deq.decodedInst := decodedInst
   io.deq.decodedInst.rfWen := (decodedInst.ldest =/= 0.U) && decodedInst.rfWen
+
+  // when vta and vma are all set, no need to read old vd
+  decodedInst.srcType(2) := Mux(!isFpToVecInst && ((inst.VM === 0.U && !io.enq.vtype.vma) || !io.enq.vtype.vta || isVppu || isVecOPF || isVStore), SrcType.vp, SrcType.no) // old vd
   //-------------------------------------------------------------
   // Debug Info
 //  XSDebug("in:  instr=%x pc=%x excepVec=%b crossPageIPFFix=%d\n",
