@@ -251,8 +251,8 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   val redirectReg = RegNext(io.redirect)
   val flushVecReg = RegNext(WireInit(VecInit(flushVec)))
 
-  // enqueue
-  when (io.in.fire && !flushEnq) {
+  // enqueue, if redirect, it will be flush next cycle
+  when (io.in.fire) {
     val id = enqPtr.value
     uopq(id) := io.in.bits
     valid(id) := true.B
@@ -362,7 +362,9 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
 
   // handshake
   val thisPtr = deqPtr.value
-  canIssue := !issueUop.robIdx.needFlush(io.redirect) && deqPtr < enqPtr
+  canIssue := !issueUop.robIdx.needFlush(io.redirect) &&
+              !issueUop.robIdx.needFlush(redirectReg) &&
+              deqPtr < enqPtr
   activeIssue := canIssue && allowIssue && (vecActive || !issuePreIsSplit) // active issue, current use in no unit-stride
   when (!RegNext(io.redirect.valid) || distanceBetween(enqPtr, deqPtr) > flushNumReg) {
     when ((splitIdx < (issueFlowNum - issueCount))) {

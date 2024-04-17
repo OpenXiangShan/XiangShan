@@ -276,7 +276,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
       needRSReplay(entryIdx):= false.B
     }
     //writeback connect
-    port.valid   := selFire && allocated(entryIdx) && !needRSReplay(entryIdx)
+    port.valid   := selFire && allocated(entryIdx) && !needRSReplay(entryIdx) && !selEntry.uop.robIdx.needFlush(io.redirect)
     port.bits    := DeqConnect(selEntry)
     //to lsq
     lsqport.bits := ToLsqConnect(selEntry) // when uopwriteback, free MBuffer entry, write to lsq
