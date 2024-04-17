@@ -110,7 +110,7 @@ class L2Top()(implicit p: Parameters) extends LazyModule
       )
       case EnableCHI => true
       // case XSCoreParamsKey => p(XSCoreParamsKey)
-      case BankBitsKey => log2Up(coreParams.L2NBanks)
+      case BankBitsKey => log2Ceil(coreParams.L2NBanks)
     }))))
   } else None
   val l2_binder = coreParams.L2CacheParamsOpt.map(_ => BankBinder(coreParams.L2NBanks, 64))
