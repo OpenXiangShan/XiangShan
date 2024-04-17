@@ -76,7 +76,7 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
   maskTailGen.io.in.maskUsed := maskUsed
   maskTailGen.io.in.vdIdx := vdIdx
 
-  private val keepEn = maskTailGen.io.out.keepEn
+  private val activeEn = maskTailGen.io.out.activeEn
   private val agnosticEn = maskTailGen.io.out.agnosticEn
 
   // the result of normal inst and narrow inst which does not need concat
@@ -88,7 +88,7 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
 
   for (i <- 0 until numBytes) {
     resVecByte(i) := MuxCase(oldVdVecByte(i), Seq(
-      keepEn(i) -> vdVecByte(i),
+      activeEn(i) -> vdVecByte(i),
       agnosticEn(i) -> byte1s,
     ))
   }
@@ -119,14 +119,14 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
   io.out.vd := MuxCase(resVecByte.asUInt, Seq(
     info.dstMask -> resVecBit.asUInt,
   ))
-  io.out.keep := keepEn
+  io.out.active := activeEn
   io.out.illegal := (info.vl > vlMaxForAssert) && info.valid
 
   io.debugOnly.vstartMapVdIdx := vstartMapVdIdx
   io.debugOnly.vlMapVdIdx := vlMapVdIdx
   io.debugOnly.begin := maskTailGen.io.in.begin
   io.debugOnly.end := maskTailGen.io.in.end
-  io.debugOnly.keepEn := keepEn
+  io.debugOnly.activeEn := activeEn
   io.debugOnly.agnosticEn := agnosticEn
   def elemIdxMapVdIdx(elemIdx: UInt) = {
     require(elemIdx.getWidth >= log2Up(vlen))
@@ -150,7 +150,7 @@ class MguIO(vlen: Int)(implicit p: Parameters) extends Bundle {
   }
   val out = new Bundle {
     val vd = Output(UInt(vlen.W))
-    val keep = Output(UInt((vlen / 8).W))
+    val active = Output(UInt((vlen / 8).W))
     val illegal = Output(Bool())
   }
   val debugOnly = Output(new Bundle {
@@ -158,7 +158,7 @@ class MguIO(vlen: Int)(implicit p: Parameters) extends Bundle {
     val vlMapVdIdx = UInt()
     val begin = UInt()
     val end = UInt()
-    val keepEn = UInt()
+    val activeEn = UInt()
     val agnosticEn = UInt()
   })
 }
@@ -212,7 +212,7 @@ class MguTest extends AnyFlatSpec with ChiselScalatestTester with Matchers {
         println("debugOnly.vlMapVdIdx: "     + m.io.debugOnly.vlMapVdIdx.peek().litValue.toString(16))
         println("debugOnly.begin: "          + m.io.debugOnly.begin.peek().litValue)
         println("debugOnly.end: "            + m.io.debugOnly.end.peek().litValue)
-        println("debugOnly.keepEn: "         + m.io.debugOnly.keepEn.peek().litValue.toString(2))
+        println("debugOnly.activeEn: "         + m.io.debugOnly.activeEn.peek().litValue.toString(2))
         println("debugOnly.agnosticEn: "     + m.io.debugOnly.agnosticEn.peek().litValue.toString(2))
     }
     println("test done")
