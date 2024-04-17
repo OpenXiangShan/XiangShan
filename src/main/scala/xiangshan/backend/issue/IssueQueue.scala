@@ -980,26 +980,12 @@ class IssueQueueVecMemImp(override val wrapper: IssueQueue)(implicit p: Paramete
     resultOnehot
   }
 
-  val robIdxVec = entries.io.robIdx.get
-  val uopIdxVec = entries.io.uopIdx.get
-  val allEntryOldestOH = selectOldUop(robIdxVec, uopIdxVec, validVec)
-
-  deqSelValidVec.head := (allEntryOldestOH.asUInt & canIssueVec.asUInt).orR
-  deqSelOHVec.head := allEntryOldestOH.asUInt & canIssueVec.asUInt
-  finalDeqSelValidVec.head := (allEntryOldestOH.asUInt & canIssueVec.asUInt).orR && deqBeforeDly.head.ready
-  finalDeqSelOHVec.head := deqSelOHVec.head
 
   for (i <- entries.io.enq.indices) {
     entries.io.enq(i).bits.status match { case enqData =>
       enqData.vecMem.get.sqIdx := s0_enqBits(i).sqIdx
       enqData.vecMem.get.lqIdx := s0_enqBits(i).lqIdx
-
-      // update blocked
-      val isLsqHead = {
-        s0_enqBits(i).lqIdx <= memIO.lqDeqPtr.get &&
-        s0_enqBits(i).sqIdx <= memIO.sqDeqPtr.get
-      }
-      enqData.blocked          := !isLsqHead
+      enqData.blocked          := false.B
     }
   }
 
