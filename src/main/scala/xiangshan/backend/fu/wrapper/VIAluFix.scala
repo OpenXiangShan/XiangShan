@@ -276,7 +276,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
     }
   }
 
-  /* insts whose mask is not used to generate 'agnosticEn' and 'keepEn' in mgu:
+  /* insts whose mask is not used to generate 'agnosticEn' and 'activeEn' in mgu:
    * vadc, vmadc...
    * vmerge
    */
@@ -332,7 +332,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   mgtu.io.in.vl := outVl
 
   io.out.bits.res.data := Mux(outVstartGeVl, outOldVd, Mux(dstMask, mgtu.io.out.vd, mgu.io.out.vd))
-  io.out.bits.res.vxsat.get := Mux(outVstartGeVl, false.B, (outVxsatReal & mgu.io.out.keep).orR)
+  io.out.bits.res.vxsat.get := Mux(outVstartGeVl, false.B, (outVxsatReal & mgu.io.out.active).orR)
   io.out.bits.ctrl.exceptionVec.get(ExceptionNO.illegalInstr) := mgu.io.out.illegal && !outVstartGeVl
 
   // util function
