@@ -314,18 +314,24 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   csrio.fpu.dirty_fs := ctrlBlock.io.robio.csr.dirty_fs
   csrio.vpu <> 0.U.asTypeOf(csrio.vpu) // Todo
 
+  val vsetvlVType = intExuBlock.io.vtype.getOrElse(0.U.asTypeOf(new VType))
+  ctrlBlock.io.robio.vsetvlVType := vsetvlVType
+
   val debugVconfig = dataPath.io.debugVconfig match {
     case Some(x) => dataPath.io.debugVconfig.get.asTypeOf(new VConfig)
     case None => 0.U.asTypeOf(new VConfig)
   }
-  val debugVtype = VType.toVtypeStruct(debugVconfig.vtype).asUInt
+  val commitVType = ctrlBlock.io.robio.commitVType.vtype
+  val hasVsetvl = ctrlBlock.io.robio.commitVType.hasVsetvl
+  val vtype = VType.toVtypeStruct(Mux(hasVsetvl, vsetvlVType, commitVType.bits)).asUInt
   val debugVl = debugVconfig.vl
   csrio.vpu.set_vxsat := ctrlBlock.io.robio.csr.vxsat
   csrio.vpu.set_vstart.valid := ctrlBlock.io.robio.csr.vstart.valid
   csrio.vpu.set_vstart.bits := ctrlBlock.io.robio.csr.vstart.bits
   csrio.vpu.set_vtype.valid := ctrlBlock.io.robio.csr.vcsrFlag
   //Todo here need change design
-  csrio.vpu.set_vtype.bits := ZeroExt(debugVtype, XLEN)
+  csrio.vpu.set_vtype.valid := commitVType.valid
+  csrio.vpu.set_vtype.bits := ZeroExt(vtype, XLEN)
   csrio.vpu.set_vl.valid := ctrlBlock.io.robio.csr.vcsrFlag
   csrio.vpu.set_vl.bits := ZeroExt(debugVl, XLEN)
   csrio.exception := ctrlBlock.io.robio.exception

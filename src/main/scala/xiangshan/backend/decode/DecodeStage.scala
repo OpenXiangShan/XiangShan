@@ -53,12 +53,16 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     val fusion = Vec(DecodeWidth - 1, Input(Bool()))
     // vtype update
     val isResumeVType = Input(Bool())
-    val commitVType = Flipped(Valid(new VType))
+    val commitVType = new Bundle {
+      val vtype = Flipped(Valid(new VType))
+      val hasVsetvl = Input(Bool())
+    }
     val walkVType = Flipped(Valid(new VType))
     val stallReason = new Bundle {
       val in = Flipped(new StallReasonIO(DecodeWidth))
       val out = new StallReasonIO(DecodeWidth)
     }
+    val vsetvlVType = Input(VType())
   })
 
   // io alias
@@ -100,6 +104,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   vtypeGen.io.redirect := io.redirect
   vtypeGen.io.commitVType := io.commitVType
   vtypeGen.io.walkVType := io.walkVType
+  vtypeGen.io.vsetvlVType := io.vsetvlVType
 
   //Comp 1
   decoderComp.io.redirect := io.redirect
