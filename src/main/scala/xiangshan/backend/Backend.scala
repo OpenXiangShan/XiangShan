@@ -328,6 +328,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   csrio.vpu.set_vtype.bits := ZeroExt(debugVtype, XLEN)
   csrio.vpu.set_vl.valid := ctrlBlock.io.robio.csr.vcsrFlag
   csrio.vpu.set_vl.bits := ZeroExt(debugVl, XLEN)
+  csrio.vpu.dirty_vs := ctrlBlock.io.robio.csr.dirty_vs
   csrio.exception := ctrlBlock.io.robio.exception
   csrio.memExceptionVAddr := io.mem.exceptionVAddr
   csrio.externalInterrupt := io.fromTop.externalInterrupt
