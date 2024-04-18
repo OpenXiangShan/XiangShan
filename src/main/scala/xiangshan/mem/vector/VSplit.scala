@@ -34,7 +34,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   def us_whole_reg(fuOpType: UInt): Bool = false.B
   def us_mask(fuOpType: UInt): Bool = false.B
   def us_fof(fuOpType: UInt): Bool = false.B
-
+  //TODO vdIdxReg should no longer be useful, don't delete it for now
   val vdIdxReg = RegInit(0.U(3.W))
 
   val s1_ready = WireInit(false.B)
@@ -191,17 +191,18 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   io.toMergeBuffer.req.bits.uop          := s1_in.uop
   io.toMergeBuffer.req.bits.mask         := s1_in.flowMask
   io.toMergeBuffer.req.bits.vaddr        := DontCare
-  io.toMergeBuffer.req.bits.vdIdx        := vdIdxReg
+  io.toMergeBuffer.req.bits.vdIdx        := 0.U  //TODO vdIdxReg should no longer be useful, don't delete it for now
   io.toMergeBuffer.req.bits.fof          := s1_in.fof
   io.toMergeBuffer.req.bits.vlmax        := s1_in.vlmax
 //   io.toMergeBuffer.req.bits.vdOffset :=
 
-  when (s1_in.uop.lastUop && s1_fire || s1_kill) {
-    vdIdxReg := 0.U
-  }.elsewhen(s1_fire) {
-    vdIdxReg := vdIdxReg + 1.U
-    XSError(vdIdxReg + 1.U === 0.U, s"Overflow! The number of vd should be less than 8\n")
-  }
+  //TODO vdIdxReg should no longer be useful, don't delete it for now
+//  when (s1_in.uop.lastUop && s1_fire || s1_kill) {
+//    vdIdxReg := 0.U
+//  }.elsewhen(s1_fire) {
+//    vdIdxReg := vdIdxReg + 1.U
+//    XSError(vdIdxReg + 1.U === 0.U, s"Overflow! The number of vd should be less than 8\n")
+//  }
   // out connect
   io.out.valid          := s1_valid && io.toMergeBuffer.resp.valid
   io.out.bits           := s1_in
