@@ -34,7 +34,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   def us_whole_reg(fuOpType: UInt): Bool = false.B
   def us_mask(fuOpType: UInt): Bool = false.B
   def us_fof(fuOpType: UInt): Bool = false.B
-
+  //TODO vdIdxReg should no longer be useful, don't delete it for now
   val vdIdxReg = RegInit(0.U(3.W))
 
   val s1_ready = WireInit(false.B)
@@ -99,19 +99,39 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   val alignedType = Mux(isIndexed(instType), s0_sew(1, 0), s0_eew(1, 0))
   val broadenAligendType = Mux(s0_preIsSplit, Cat("b0".U, alignedType), "b100".U) // if is unit-stride, use 128-bits memory access
   val flowsLog2 = GenRealFlowLog2(instType, s0_emul, s0_lmul, s0_eew, s0_sew)
-  val flowsPrevThisUop = uopIdxInField << flowsLog2 // # of flows before this uop in a field
-  val flowsPrevThisVd = vdIdxInField << numFlowsSameVdLog2 // # of flows before this vd in a field
-  val flowsIncludeThisUop = (uopIdxInField +& 1.U) << flowsLog2 // # of flows before this uop besides this uop
+  val flowsPrevThisUop = (uopIdxInField << flowsLog2).asUInt // # of flows before this uop in a field
+  val flowsPrevThisVd = (vdIdxInField << numFlowsSameVdLog2).asUInt // # of flows before this vd in a field
+  val flowsIncludeThisUop = ((uopIdxInField +& 1.U) << flowsLog2).asUInt // # of flows before this uop besides this uop
   val flowNum = io.in.bits.flowNum.get
+
+  // For vectore indexed  instructions:
+  //  When emul is greater than lmul, multiple uop correspond to a Vd, e.g:
+  //    vsetvli	t1,t0,e8,m1,ta,ma    lmul = 1
+  //    vluxei16.v	v2,(a0),v8       emul = 2
+  //    In this case, we need to ensure the flownumis right shift by flowsPrevThisUop, However, the mask passed to mergebuff is right shift by flowsPrevThisVd e.g:
+  //      vl = 9
+  //      srcMask = 0x1FF
+  //      uopIdxInField = 0 and vdIdxInField = 0, flowMask = 0x00FF, toMergeBuffMask = 0x01FF
+  //      uopIdxInField = 1 and vdIdxInField = 0, flowMask = 0x0001, toMergeBuffMask = 0x01FF
+  //      uopIdxInField = 0 and vdIdxInField = 0, flowMask = 0x0000, toMergeBuffMask = 0x0000
+  //      uopIdxInField = 0 and vdIdxInField = 0, flowMask = 0x0000, toMergeBuffMask = 0x0000
+  val isSpecialIndexed = isIndexed(instType) && s0_emul.asSInt > s0_lmul.asSInt
+
   val srcMask = GenFlowMask(Mux(s0_vm, Fill(VLEN, 1.U(1.W)), io.in.bits.src_mask), vvstart, evl, true)
+  val srcMaskShiftBits = Mux(isSpecialIndexed, flowsPrevThisUop, flowsPrevThisVd)
 
   val flowMask = ((srcMask &
     UIntToMask(flowsIncludeThisUop.asUInt, VLEN + 1) &
     (~UIntToMask(flowsPrevThisUop.asUInt, VLEN)).asUInt
-  ) >> flowsPrevThisVd)(VLENB - 1, 0)
+  ) >> srcMaskShiftBits)(VLENB - 1, 0)
+  val indexedSrcMask = (srcMask >> flowsPrevThisVd).asUInt //only for index instructions
+
+  // Used to calculate the element index.
+  // See 'splitbuffer' for 'io.out.splitIdxOffset' and 'mergebuffer' for 'merge data'
+  val indexedSplitOffset = Mux(isSpecialIndexed, flowsPrevThisUop - flowsPrevThisVd, 0.U) // only for index instructions of emul > lmul
   val vlmax = GenVLMAX(s0_lmul, s0_sew)
 
-    // connect
+  // connect
   s0_out := DontCare
   s0_out match {case x =>
     x.uop := io.in.bits.uop
@@ -121,6 +141,8 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
     x.uop.lastUop := (uopIdx +& 1.U) === numUops
     x.uop.vpu.nf  := s0_nf
     x.flowMask := flowMask
+    x.indexedSrcMask := indexedSrcMask // Only vector indexed instructions uses it
+    x.indexedSplitOffset := indexedSplitOffset
     x.byteMask := GenUopByteMask(flowMask, Cat("b0".U, alignedType))(VLENB - 1, 0)
     x.fof := isUnitStride(s0_mop) && us_fof(s0_fuOpType)
     x.baseAddr := io.in.bits.src_rs1
@@ -169,10 +191,15 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   val s1_nf               = s1_in.uop.vpu.nf
   val s1_nfields          = s1_in.nfields
   val s1_eew              = s1_in.eew
+  val s1_emul             = s1_in.emul
+  val s1_lmul             = s1_in.lmul
   val s1_instType         = s1_in.instType
   val s1_stride           = s1_in.stride
   val s1_vmask            = FillInterleaved(8, s1_in.byteMask)(VLEN-1, 0)
   val s1_alignedType      = s1_in.alignedType
+  val s1_isSpecialIndexed = isIndexed(s1_instType) && s1_emul.asSInt > s1_lmul.asSInt
+  val s1_mask             = Mux(s1_isSpecialIndexed, s1_in.indexedSrcMask, s1_in.flowMask)
+  val s1_vdIdx            = s1_in.vdIdxInField
   val s1_notIndexedStride = Mux( // stride for strided/unit-stride instruction
     isStrided(s1_instType),
     s1_stride(XLEN - 1, 0), // for strided load, stride = x[rs2]
@@ -189,19 +216,20 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   io.toMergeBuffer.req.bits.flowNum      := Mux(s1_in.preIsSplit, PopCount(s1_in.flowMask), s1_flowNum)
   io.toMergeBuffer.req.bits.data         := s1_in.data
   io.toMergeBuffer.req.bits.uop          := s1_in.uop
-  io.toMergeBuffer.req.bits.mask         := s1_in.flowMask
+  io.toMergeBuffer.req.bits.mask         := s1_mask
   io.toMergeBuffer.req.bits.vaddr        := DontCare
-  io.toMergeBuffer.req.bits.vdIdx        := vdIdxReg
+  io.toMergeBuffer.req.bits.vdIdx        := s1_vdIdx  //TODO vdIdxReg should no longer be useful, don't delete it for now
   io.toMergeBuffer.req.bits.fof          := s1_in.fof
   io.toMergeBuffer.req.bits.vlmax        := s1_in.vlmax
 //   io.toMergeBuffer.req.bits.vdOffset :=
 
-  when (s1_in.uop.lastUop && s1_fire || s1_kill) {
-    vdIdxReg := 0.U
-  }.elsewhen(s1_fire) {
-    vdIdxReg := vdIdxReg + 1.U
-    XSError(vdIdxReg + 1.U === 0.U, s"Overflow! The number of vd should be less than 8\n")
-  }
+  //TODO vdIdxReg should no longer be useful, don't delete it for now
+//  when (s1_in.uop.lastUop && s1_fire || s1_kill) {
+//    vdIdxReg := 0.U
+//  }.elsewhen(s1_fire) {
+//    vdIdxReg := vdIdxReg + 1.U
+//    XSError(vdIdxReg + 1.U === 0.U, s"Overflow! The number of vd should be less than 8\n")
+//  }
   // out connect
   io.out.valid          := s1_valid && io.toMergeBuffer.resp.valid
   io.out.bits           := s1_in
@@ -289,6 +317,8 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
     flowIdx = splitIdx
   ) // elemIdx inside an inst, for exception
 
+  val splitIdxOffset = issueEntry.indexedSplitOffset + splitIdx
+
   val elemIdxInsideField = elemIdx & issueVLMAXMask
   val indexFlowInnerIdx = ((elemIdxInsideField << issueEew(1, 0))(vOffsetBits - 1, 0) >> issueEew(1, 0)).asUInt
   val nfIdx = Mux(issueIsWholeReg, 0.U, elemIdx >> issueVLMAXLog2)
@@ -328,7 +358,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
     x.is_first_ele          := DontCare
     x.usSecondInv           := usNoSplit
     x.elemIdx               := elemIdx
-    x.elemIdxInsideVd       := splitIdx // if is Unit-Stride, elemIdx is the index of 2 splited mem request (for merge data)
+    x.elemIdxInsideVd       := splitIdxOffset // if is Unit-Stride, elemIdx is the index of 2 splited mem request (for merge data)
     x.uop_unit_stride_fof   := DontCare
     x.isFirstIssue          := DontCare
     x.mBIndex               := issueMbIndex
@@ -404,7 +434,7 @@ class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = t
   // split data
   val splitData = genVSData(
         data = issueEntry.data.asUInt,
-        elemIdx = splitIdx,
+        elemIdx = splitIdxOffset,
         alignedType = issueAlignedType
       )
   val flowData = genVWdata(splitData, issueAlignedType)

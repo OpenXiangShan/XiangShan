@@ -51,6 +51,9 @@ class VLSBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBun
   val instType            = UInt(3.W)
   val vd_last_uop         = Bool()
   val vd_first_uop        = Bool()
+
+  val indexedSrcMask     = UInt(VLENB.W)
+  val indexedSplitOffset  = UInt(flowIdxBits.W)
   // Inst's uop
   val uop                 = new DynInst
 
