@@ -550,7 +550,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   fflags.bits := wflags.zip(fflagsDataRead).map({
     case (w, f) => Mux(w, f, 0.U)
   }).reduce(_ | _)
+  val dirtyVs = (0 until CommitWidth).map(i => {
+    val v = io.commits.commitValid(i)
+    val info = io.commits.info(i)
+    v & info.dirtyVs
+  })
   val dirty_fs = io.commits.isCommit && VecInit(dirtyFs).asUInt.orR
+  val dirty_vs = io.commits.isCommit && VecInit(dirtyVs).asUInt.orR
 
   val vxsat = Wire(Valid(Bool()))
   vxsat.valid := io.commits.isCommit && vxsat.bits
@@ -620,6 +626,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // sync fflags/dirty_fs/vxsat to csr
   io.csr.fflags := RegNext(fflags)
   io.csr.dirty_fs := RegNext(dirty_fs)
+  io.csr.dirty_vs := RegNext(dirty_vs)
   io.csr.vxsat := RegNext(vxsat)
 
   // sync v csr to csr

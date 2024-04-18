@@ -50,6 +50,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val fpWen = Bool()
     val rfWen = Bool()
     val wflags = Bool()
+    val dirtyVs = Bool()
     val commitType = CommitType()
     val ftqIdx = new FtqPtr
     val ftqOffset = UInt(log2Up(PredictWidth).W)
@@ -112,6 +113,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val debug_fuType = OptionWrapper(backendParams.debugEn, FuType())
     // debug_end
     def dirtyFs = fpWen
+    val dirtyVs = Bool()
   }
 
   def connectEnq(robEntry: RobEntryBundle, robEnq: DynInst): Unit = {
@@ -124,6 +126,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.instrSize := robEnq.instrSize
     robEntry.rfWen := robEnq.rfWen
     robEntry.fpWen := robEnq.dirtyFs
+    robEntry.dirtyVs := robEnq.dirtyVs
     robEntry.loadWaitBit := robEnq.loadWaitBit
     robEntry.eliminatedMove := robEnq.eliminatedMove
     robEntry.debug_pc.foreach(_ := robEnq.pc)
@@ -152,6 +155,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.instrSize := robEntry.instrSize
     robCommitEntry.loadWaitBit := robEntry.loadWaitBit
     robCommitEntry.isMove := robEntry.eliminatedMove
+    robCommitEntry.dirtyVs := robEntry.dirtyVs
     robCommitEntry.debug_pc.foreach(_ := robEntry.debug_pc.get)
     robCommitEntry.debug_instr.foreach(_ := robEntry.debug_instr.get)
     robCommitEntry.debug_ldest.foreach(_ := robEntry.debug_ldest.get)
@@ -204,6 +208,7 @@ class RobCSRIO(implicit p: Parameters) extends XSBundle {
   val vxsat      = Output(Valid(Bool()))
   val vstart     = Output(Valid(UInt(XLEN.W)))
   val dirty_fs   = Output(Bool())
+  val dirty_vs   = Output(Bool())
   val perfinfo   = new Bundle {
     val retiredInstr = Output(UInt(3.W))
   }
