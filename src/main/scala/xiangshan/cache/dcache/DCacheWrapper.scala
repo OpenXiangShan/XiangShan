@@ -864,13 +864,14 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   missQueue.io.hartId := io.hartId
   missQueue.io.l2_pf_store_only := RegNext(io.l2_pf_store_only, false.B)
   missQueue.io.debugTopDown <> io.debugTopDown
-  missQueue.io.sms_agt_evict_req <> io.sms_agt_evict_req
+  // missQueue.io.sms_agt_evict_req <> io.sms_agt_evict_req
   missQueue.io.l2_hint <> RegNext(io.l2_hint)
   missQueue.io.s2_miss_id := mainPipe.io.s2_miss_id
   missQueue.io.s3_miss_id := mainPipe.io.s3_miss_id
   missQueue.io.s2_replay_to_mq := mainPipe.io.s2_replay_to_mq
   missQueue.io.s3_refill_resp := mainPipe.io.s3_refill_resp
   mainPipe.io.refill_info := missQueue.io.refill_info
+  mainPipe.io.sms_agt_evict_req <> io.sms_agt_evict_req
   io.memSetPattenDetected := missQueue.io.memSetPattenDetected
 
   val errors = ldu.map(_.io.error) ++ // load error

@@ -165,6 +165,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     // find the way to be replaced
     val replace_way = new ReplacementWayReqIO
 
+    // sms prefetch
+    val sms_agt_evict_req = DecoupledIO(new AGTEvictReq)
+
     val status = new Bundle() {
       val s0_set = ValidIO(UInt(idxBits.W))
       val s1, s2, s3 = ValidIO(new MainPipeStatus)
@@ -1712,6 +1715,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.replace_way.set.valid := RegNext(s0_fire)
   io.replace_way.set.bits := s1_idx_dup_for_replace_way
   io.replace_way.dmWay := s1_dmWay_dup_for_replace_way
+
+  io.sms_agt_evict_req.valid := s2_valid && s2_req.miss && s2_fire_to_s3
+  io.sms_agt_evict_req.bits.vaddr := Cat(s2_repl_tag(tagBits - 1, 2), s2_req.vaddr(13,12), 0.U((VAddrBits - tagBits).W))
 
   // TODO: consider block policy of a finer granularity
   io.status.s0_set.valid := req.valid

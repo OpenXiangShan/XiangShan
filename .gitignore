@@ -368,3 +368,4 @@ stack.info*
 *.txt
 milc-result
 spec-result
+spec-*

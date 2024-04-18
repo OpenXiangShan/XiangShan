@@ -111,19 +111,15 @@ class MissReq(implicit p: Parameters) extends MissReqWoStoreData {
   def toMissReqWoStoreData(): MissReqWoStoreData = {
     val out = Wire(new MissReqWoStoreData)
     out.source := source
-    // out.replace_pf := replace_pf
     out.pf_source := pf_source
     out.cmd := cmd
     out.addr := addr
     out.vaddr := vaddr
-    // out.way_en := way_en
     out.full_overwrite := full_overwrite
     out.word_idx := word_idx
     out.amo_data := amo_data
     out.amo_mask := amo_mask
     out.req_coh := req_coh
-    // out.replace_coh := replace_coh
-    // out.replace_tag := replace_tag
     out.id := id
     out.cancel := cancel
     out.pc := pc
@@ -194,15 +190,6 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
         block_match && (!alias_match || !(merge_load || merge_store)),
         false.B
       )
-    // Mux(
-    //     alloc,
-    //     Mux(
-    //         block_match,
-    //         !alias_match || !(merge_load || merge_store),
-    //         set_match
-    //       ),
-    //     false.B
-    //   )
   }
 
   def merge_req(new_req: MissReq): Bool = {
@@ -323,8 +310,6 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
     // replace pipe
     val l2_hint = Input(Valid(new L2ToL1Hint())) // Hint from L2 Cache
-    // val replace_pipe_req = DecoupledIO(new MainPipeReq)
-    // val replace_pipe_resp = Input(Bool())
 
     // main pipe: amo miss
     val main_pipe_req = DecoupledIO(new MainPipeReq)
@@ -350,7 +335,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     val forwardInfo = Output(new MissEntryForwardIO)
     val l2_pf_store_only = Input(Bool())
 
-    val sms_agt_evict_req = ValidIO(new AGTEvictReq)
+    // val sms_agt_evict_req = ValidIO(new AGTEvictReq)
 
     // whether the pipeline reg has send out an acquire
     val acquire_fired_by_pipe_reg = Input(Bool())
@@ -401,12 +386,10 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
   val s_acquire = RegInit(true.B)
   val s_grantack = RegInit(true.B)
-  // val s_replace_req = RegInit(true.B)
   val s_mainpipe_req = RegInit(true.B)
 
   val w_grantfirst = RegInit(true.B)
   val w_grantlast = RegInit(true.B)
-  // val w_replace_resp = RegInit(true.B)
   val w_mainpipe_resp = RegInit(true.B)
   val w_refill_resp = RegInit(true.B)
   val w_l2hint = RegInit(true.B)
@@ -427,7 +410,6 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
   val should_replace = RegInit(false.B)
 
-  // val full_overwrite = req.isFromStore && req_store_mask.andR
   val full_overwrite = Reg(Bool())
 
   val (_, _, refill_done, refill_count) = edge.count(io.mem_grant)
@@ -459,7 +441,6 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
   when (release_entry && req_valid) {
     req_valid := false.B
-    // assert(!RegNextN(w_grantlast,3), "miss entry release late")
   }
 
   when (io.miss_req_pipe_reg.alloc) {
@@ -781,8 +762,6 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
   // Invalid temporary
   // io.sms_agt_evict_req.valid := io.main_pipe_req.fire && should_replace && req_valid
-  io.sms_agt_evict_req.valid := false.B
-  io.sms_agt_evict_req.bits  := DontCare
   // io.sms_agt_evict_req.bits.vaddr := Cat(req.replace_tag(tagBits - 1, 2), req.vaddr(13, 12), 0.U((VAddrBits - tagBits).W))
 
   // io.main_pipe_req.valid := !s_mainpipe_req && w_grantlast
@@ -934,7 +913,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 //      val tag = UInt(tagBits.W) // paddr
 //    }))
 
-    val sms_agt_evict_req = DecoupledIO(new AGTEvictReq)
+    // val sms_agt_evict_req = DecoupledIO(new AGTEvictReq)
 
     // forward missqueue
     val forward = Vec(LoadPipelineWidth, new LduToMissqueueForwardIO)
@@ -1151,16 +1130,16 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   fastArbiter(entries.map(_.io.main_pipe_req), io.main_pipe_req, Some("main_pipe_req"))
 
   // send evict hint to sms
-  val sms_agt_evict_valid = Cat(entries.map(_.io.sms_agt_evict_req.valid)).orR
-  val sms_agt_evict_valid_reg = RegInit(false.B)
-  io.sms_agt_evict_req.valid := sms_agt_evict_valid_reg
-  io.sms_agt_evict_req.bits := RegEnable(Mux1H(entries.map(_.io.sms_agt_evict_req.valid), entries.map(_.io.sms_agt_evict_req.bits)), sms_agt_evict_valid)
-  when(sms_agt_evict_valid) {
-    sms_agt_evict_valid_reg := true.B
-  }.elsewhen(io.sms_agt_evict_req.fire) {
-    sms_agt_evict_valid_reg := false.B
-  }
-  assert(PopCount(VecInit(entries.map(_.io.sms_agt_evict_req.valid))) <= 1.U, "multi sms_agt_evict req")
+  // val sms_agt_evict_valid = Cat(entries.map(_.io.sms_agt_evict_req.valid)).orR
+  // val sms_agt_evict_valid_reg = RegInit(false.B)
+  // io.sms_agt_evict_req.valid := sms_agt_evict_valid_reg
+  // io.sms_agt_evict_req.bits := RegEnable(Mux1H(entries.map(_.io.sms_agt_evict_req.valid), entries.map(_.io.sms_agt_evict_req.bits)), sms_agt_evict_valid)
+  // when(sms_agt_evict_valid) {
+  //   sms_agt_evict_valid_reg := true.B
+  // }.elsewhen(io.sms_agt_evict_req.fire) {
+  //   sms_agt_evict_valid_reg := false.B
+  // }
+  // assert(PopCount(VecInit(entries.map(_.io.sms_agt_evict_req.valid))) <= 1.U, "multi sms_agt_evict req")
 
   io.probe_block := Cat(probe_block_vec).orR
 
