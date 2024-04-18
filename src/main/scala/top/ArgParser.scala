@@ -39,6 +39,7 @@ object ArgParser {
       |--with-chiseldb
       |--with-rollingdb
       |--disable-perf
+      |--disable-alwaysdb
       |""".stripMargin
 
   def getConfigByName(confString: String): Parameters = {
@@ -104,6 +105,10 @@ object ArgParser {
         case "--disable-perf" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(EnablePerfDebug = false)
+          }), tail)
+        case "--disable-alwaysdb" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case DebugOptionsKey => up(DebugOptionsKey).copy(AlwaysBasicDB = false)
           }), tail)
         case "--xstop-prefix" :: value :: tail if chisel3.BuildInfo.version != "3.6.0" =>
           nextOption(config.alter((site, here, up) => {

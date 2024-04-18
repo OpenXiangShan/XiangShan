@@ -95,7 +95,7 @@ endif
 # emu for the release version
 RELEASE_ARGS += --fpga-platform --disable-all --remove-assert
 DEBUG_ARGS   += --enable-difftest
-PLDM_ARGS    += --fpga-platform --enable-difftest
+PLDM_ARGS    += --fpga-platform --enable-difftest --disable-alwaysdb
 ifeq ($(GOALS),verilog)
 RELEASE_ARGS += --disable-always-basic-diff
 endif
