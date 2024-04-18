@@ -222,4 +222,13 @@ object CSRDefines {
     val Off = Value(0.U)
     val On  = Value(1.U)
   }
+
+  object DebugverMode extends CSREnum with DebugverModeDef with ROApply
+
+  trait DebugverModeDef {
+    this: CSREnum =>
+    val None = Value(0.U)
+    val Spec = Value(4.U)
+    val Custom = Value(15.U)
+  }
 }
