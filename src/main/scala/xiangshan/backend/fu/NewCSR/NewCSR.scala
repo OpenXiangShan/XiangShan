@@ -135,6 +135,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   val isSret = io.sret
   val isMret = io.mret
   val isDret = io.dret
+  val isWfi  = io.wfi
 
   var csrRwMap = machineLevelCSRMap ++ supervisorLevelCSRMap ++ hypervisorCSRMap ++ virtualSupervisorCSRMap ++ unprivilegedCSRMap ++ aiaCSRMap ++ debugCSRMap
 
@@ -319,6 +320,12 @@ class NewCSR(implicit val p: Parameters) extends Module
       in.dpc  := dpc.regOut
       in.mstatus := mstatus.regOut
   }
+  wfiEvent.valid := isWfi
+  wfiEvent.in match {
+    case in =>
+      in.mie := mie.regOut
+      in.mip := mip.regOut
+  }
 
   PRVM := MuxCase(
     PRVM,
@@ -369,9 +376,6 @@ class NewCSR(implicit val p: Parameters) extends Module
   val intrVec = Cat(debugIntr && !debugMode, mie.rdata.asUInt(11, 0) & mip.rdata.asUInt & intrVecEnable.asUInt) // Todo: asUInt(11,0) is ok?
   val intrBitSet = intrVec.orR
 
-  // wfi
-  val wfi_event = (mie.rdata.asUInt(11, 0) & mip.rdata.asUInt).orR // Todo
-
   private val rdata = Mux1H(csrRwMap.map { case (id, (_, rBundle)) =>
     (raddr === id.U) -> rBundle.asUInt
   })
@@ -408,7 +412,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.out.vlenb := vlenb.rdata.asUInt
   io.out.isPerfCnt := addrInPerfCnt
   io.out.interrupt := intrBitSet
-  io.out.wfi_event := wfi_event
+  io.out.wfi_event :=  wfiEvent.out.wfi_event.bits
   io.out.debugMode := debugMode
 
   // Todo: record the last address to avoid xireg is different with xiselect
