@@ -700,15 +700,17 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     when (!s1_late_kill) {
       // current ori test will cause the case of ldest == 0, below will be modifeid in the future.
       // af & pf exception were modified
-      s1_out.uop.exceptionVec(loadPageFault)   := io.tlb.resp.bits.excp(0).pf.ld
-      s1_out.uop.exceptionVec(loadAccessFault) := io.tlb.resp.bits.excp(0).af.ld
+      s1_out.uop.exceptionVec(loadPageFault)       := io.tlb.resp.bits.excp(0).pf.ld
+      s1_out.uop.exceptionVec(loadGuestPageFault)  := io.tlb.resp.bits.excp(0).gpf.ld
+      s1_out.uop.exceptionVec(loadAccessFault)     := io.tlb.resp.bits.excp(0).af.ld
     } .otherwise {
-      s1_out.uop.exceptionVec(loadAddrMisaligned) := false.B
-      s1_out.uop.exceptionVec(loadAccessFault)    := s1_late_kill
+      s1_out.uop.exceptionVec(loadAddrMisaligned)  := false.B
+      s1_out.uop.exceptionVec(loadAccessFault)     := s1_late_kill
     }
   } .otherwise {
-    s1_out.uop.exceptionVec(storePageFault)   := io.tlb.resp.bits.excp(0).pf.st
-    s1_out.uop.exceptionVec(storeAccessFault) := io.tlb.resp.bits.excp(0).af.st
+    s1_out.uop.exceptionVec(storePageFault)        := io.tlb.resp.bits.excp(0).pf.st
+    s1_out.uop.exceptionVec(storeGuestPageFault)   := io.tlb.resp.bits.excp(0).gpf.st
+    s1_out.uop.exceptionVec(storeAccessFault)      := io.tlb.resp.bits.excp(0).af.st
   }
 
   // pointer chasing

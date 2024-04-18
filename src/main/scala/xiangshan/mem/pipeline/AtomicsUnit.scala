@@ -170,7 +170,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
       exceptionVec(storeAccessFault)    := io.dtlb.resp.bits.excp(0).af.st
       exceptionVec(loadAccessFault)     := io.dtlb.resp.bits.excp(0).af.ld
       exceptionVec(storeGuestPageFault) := io.dtlb.resp.bits.excp(0).gpf.st
-      exceptionVec(loadGuestPageFault) := io.dtlb.resp.bits.excp(0).gpf.ld
+      exceptionVec(loadGuestPageFault)  := io.dtlb.resp.bits.excp(0).gpf.ld
 
       when (!io.dtlb.resp.bits.miss) {
         io.out.bits.uop.debugInfo.tlbRespTime := GTimer()
