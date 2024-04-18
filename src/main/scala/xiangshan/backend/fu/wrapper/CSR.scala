@@ -106,6 +106,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.platformIRP.SEIP := csrIn.externalInterrupt.seip
   csrMod.platformIRP.VSEIP := false.B // Todo
   csrMod.platformIRP.VSTIP := false.B // Todo
+  csrMod.debugIRP := csrIn.externalInterrupt.debug
 
   private val imsic = Module(new IMSIC)
   imsic.i.hartId := io.csrin.get.hartId
@@ -188,7 +189,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   csrOut.tlb := DontCare
 
-  csrOut.debugMode := DontCare
+  csrOut.debugMode := csrMod.io.out.debugMode
 
   csrOut.disableSfence := DontCare
 
