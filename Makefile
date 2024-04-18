@@ -88,7 +88,7 @@ endif
 # emu for the release version
 RELEASE_ARGS += --disable-all --remove-assert --fpga-platform
 DEBUG_ARGS   += --enable-difftest
-PLDM_ARGS    += --fpga-platform --enable-difftest
+PLDM_ARGS    += --fpga-platform --enable-difftest --disable-alwaysdb
 ifeq ($(RELEASE),1)
 override SIM_ARGS += $(RELEASE_ARGS)
 else ifeq ($(PLDM),1)
