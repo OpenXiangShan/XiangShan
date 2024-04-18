@@ -1712,11 +1712,8 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           * N-1 uops will read temporary vector register.
           */
         // csBundle(i + 1).lsrc(2) := Mux1H(UIntToOH(offsetVd, MAX_VLMUL), (0 until MAX_VLMUL).map(j => dest + j.U))
-        csBundle(i + 1).lsrc(2) := Mux(
-          isFirstUopInVd,
-          Mux1H(UIntToOH(offsetVd, MAX_VLMUL), (0 until MAX_VLMUL).map(j => dest + j.U)),
-          VECTOR_TMP_REG_LMUL.U
-        )
+        csBundle(i + 1).srcType(2) := SrcType.vp
+        csBundle(i + 1).lsrc(2) := Mux1H(UIntToOH(offsetVd, MAX_VLMUL), (0 until MAX_VLMUL).map(j => dest + j.U))
         csBundle(i + 1).ldest := Mux1H(UIntToOH(offsetVd, MAX_VLMUL), (0 until MAX_VLMUL).map(j => dest + j.U))
         csBundle(i + 1).uopIdx := i.U
         csBundle(i + 1).vlsInstr := true.B

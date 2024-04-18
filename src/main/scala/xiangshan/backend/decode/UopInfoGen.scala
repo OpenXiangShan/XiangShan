@@ -231,7 +231,7 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
   ))
 
   // number of writeback num
-  val numOfWB = Mux(typeOfSplit === UopSplitType.VEC_I_LDST, (numOfWBVLoadStoreIndexed +& 1.U), numOfUop)
+  val numOfWB = numOfUop
 
   isComplex := typeOfSplit =/= UopSplitType.SCA_SIM
   io.out.uopInfo.numOfUop := numOfUop
