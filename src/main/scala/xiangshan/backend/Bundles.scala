@@ -184,6 +184,7 @@ object Bundles {
     val robIdx          = new RobPtr
     val instrSize       = UInt(log2Ceil(RenameWidth + 1).W)
     val dirtyFs         = Bool()
+    val dirtyVs         = Bool()
 
     val eliminatedMove  = Bool()
     // Take snapshot at this CFI inst
