@@ -26,6 +26,7 @@ import xiangshan.backend.Bundles._
 import xiangshan.backend.rob.RobPtr
 
 class VLSBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle {
+  val srcMask             = UInt(VLENB.W)
   val flowMask            = UInt(VLENB.W) // each bit for a flow
   val byteMask            = UInt(VLENB.W) // each bit for a byte
   val data                = UInt(VLEN.W)

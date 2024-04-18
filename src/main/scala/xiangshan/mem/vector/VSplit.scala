@@ -121,6 +121,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
     x.uop.lastUop := (uopIdx +& 1.U) === numUops
     x.uop.vpu.nf  := s0_nf
     x.flowMask := flowMask
+    x.srcMask := srcMask // Vector indexed instructions uses it
     x.byteMask := GenUopByteMask(flowMask, Cat("b0".U, alignedType))(VLENB - 1, 0)
     x.fof := isUnitStride(s0_mop) && us_fof(s0_fuOpType)
     x.baseAddr := io.in.bits.src_rs1
@@ -173,6 +174,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   val s1_stride           = s1_in.stride
   val s1_vmask            = FillInterleaved(8, s1_in.byteMask)(VLEN-1, 0)
   val s1_alignedType      = s1_in.alignedType
+  val s1_mask    = Mux(isIndexed(s1_instType), s1_in.srcMask, s1_in.flowMask)
   val s1_notIndexedStride = Mux( // stride for strided/unit-stride instruction
     isStrided(s1_instType),
     s1_stride(XLEN - 1, 0), // for strided load, stride = x[rs2]
@@ -189,7 +191,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   io.toMergeBuffer.req.bits.flowNum      := Mux(s1_in.preIsSplit, PopCount(s1_in.flowMask), s1_flowNum)
   io.toMergeBuffer.req.bits.data         := s1_in.data
   io.toMergeBuffer.req.bits.uop          := s1_in.uop
-  io.toMergeBuffer.req.bits.mask         := s1_in.flowMask
+  io.toMergeBuffer.req.bits.mask         := s1_mask
   io.toMergeBuffer.req.bits.vaddr        := DontCare
   io.toMergeBuffer.req.bits.vdIdx        := 0.U  //TODO vdIdxReg should no longer be useful, don't delete it for now
   io.toMergeBuffer.req.bits.fof          := s1_in.fof
