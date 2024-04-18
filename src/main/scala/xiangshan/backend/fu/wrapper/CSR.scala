@@ -5,7 +5,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility._
 import xiangshan._
-import xiangshan.backend.fu.NewCSR.{CSRPermitModule, NewCSR, SbpctlBundle, SlvpredctlBundle, SmblockctlBundle, SpfctlBundle, SrnctlBundle, VtypeBundle}
+import xiangshan.backend.fu.NewCSR._
 import xiangshan.backend.fu.util._
 import xiangshan.backend.fu.{FuConfig, FuncUnit}
 import device._
@@ -203,20 +203,20 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   csrOut.debugMode := csrMod.io.out.debugMode
 
-  csrOut.disableSfence := DontCare
+  csrOut.disableSfence := csrMod.io.out.disableSfence
 
   csrOut.customCtrl match {
     case custom =>
-      custom.l1I_pf_enable := DontCare
-      custom.l2_pf_enable := DontCare
-      custom.l1D_pf_enable := DontCare
-      custom.l1D_pf_train_on_hit := DontCare
-      custom.l1D_pf_enable_agt := DontCare
-      custom.l1D_pf_enable_pht := DontCare
-      custom.l1D_pf_active_threshold := DontCare
-      custom.l1D_pf_active_stride := DontCare
-      custom.l1D_pf_enable_stride := DontCare
-      custom.l2_pf_store_only := DontCare
+      custom.l1I_pf_enable           := csrMod.io.customCtrl.spfctl.asTypeOf(new SpfctlBundle).L1I_PF_ENABLE.asBool
+      custom.l2_pf_enable            := csrMod.io.customCtrl.spfctl.asTypeOf(new SpfctlBundle).L2_PF_ENABLE.asBool
+      custom.l1D_pf_enable           := csrMod.io.customCtrl.spfctl.asTypeOf(new SpfctlBundle).L1D_PF_ENABLE.asBool
+      custom.l1D_pf_train_on_hit     := csrMod.io.customCtrl.spfctl.asTypeOf(new SpfctlBundle).L1D_PF_TRAIN_ON_HIT.asBool
+      custom.l1D_pf_enable_agt       := csrMod.io.customCtrl.spfctl.asTypeOf(new SpfctlBundle).L1D_PF_ENABLE_AGT.asBool
+      custom.l1D_pf_enable_pht       := csrMod.io.customCtrl.spfctl.asTypeOf(new SpfctlBundle).L1D_PF_ENABLE_PHT.asBool
+      custom.l1D_pf_active_threshold := csrMod.io.customCtrl.spfctl.asTypeOf(new SpfctlBundle).L1D_PF_ACTIVE_THRESHOLD.asBool
+      custom.l1D_pf_active_stride    := csrMod.io.customCtrl.spfctl.asTypeOf(new SpfctlBundle).L1D_PF_ACTIVE_STRIDE.asBool
+      custom.l1D_pf_enable_stride    := csrMod.io.customCtrl.spfctl.asTypeOf(new SpfctlBundle).L1D_PF_ENABLE_STRIDE.asBool
+      custom.l2_pf_store_only        := csrMod.io.customCtrl.spfctl.asTypeOf(new SpfctlBundle).L2_PF_STORE_ONLY.asBool
       // ICache
       custom.icache_parity_enable := csrMod.io.customCtrl.sfetchctl
       // Labeled XiangShan

@@ -44,6 +44,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   with SupervisorMachineAliasConnect
   with CSREvents
   with CSRDebugTrigger
+  with CSRCustom
 {
 
   import CSRConfig._
@@ -92,6 +93,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       val privState = new PrivState
       val interrupt = Bool()
       val wfi_event = Bool()
+      val disableSfence = Bool()
       // fp
       val frm = Frm()
       // vec
@@ -155,11 +157,11 @@ class NewCSR(implicit val p: Parameters) extends Module
   val isDret = io.dret
   val isWfi  = io.wfi
 
-  var csrRwMap = machineLevelCSRMap ++ supervisorLevelCSRMap ++ hypervisorCSRMap ++ virtualSupervisorCSRMap ++ unprivilegedCSRMap ++ aiaCSRMap ++ debugCSRMap
+  var csrRwMap = machineLevelCSRMap ++ supervisorLevelCSRMap ++ hypervisorCSRMap ++ virtualSupervisorCSRMap ++ unprivilegedCSRMap ++ aiaCSRMap ++ debugCSRMap ++ customCSRMap
 
-  val csrMods = machineLevelCSRMods ++ supervisorLevelCSRMods ++ hypervisorCSRMods ++ virtualSupervisorCSRMods ++ unprivilegedCSRMods ++ aiaCSRMods ++ debugCSRMods
+  val csrMods = machineLevelCSRMods ++ supervisorLevelCSRMods ++ hypervisorCSRMods ++ virtualSupervisorCSRMods ++ unprivilegedCSRMods ++ aiaCSRMods ++ debugCSRMods ++ customCSRMods
 
-  var csrOutMap = machineLevelCSROutMap ++ supervisorLevelCSROutMap ++ hypervisorCSROutMap ++ virtualSupervisorCSROutMap ++ unprivilegedCSROutMap ++ aiaCSROutMap ++ debugCSROutMap
+  var csrOutMap = machineLevelCSROutMap ++ supervisorLevelCSROutMap ++ hypervisorCSROutMap ++ virtualSupervisorCSROutMap ++ unprivilegedCSROutMap ++ aiaCSROutMap ++ debugCSROutMap ++ customCSROutMap
 
   val trapHandleMod = Module(new TrapHandleModule)
 
@@ -388,6 +390,10 @@ class NewCSR(implicit val p: Parameters) extends Module
   val intrVec = Cat(debugIntr && !debugMode, mie.rdata.asUInt(11, 0) & mip.rdata.asUInt & intrVecEnable.asUInt) // Todo: asUInt(11,0) is ok?
   val intrBitSet = intrVec.orR
 
+  // fence
+  // csr access check, special case
+  val tvmNotPermit = PRVM === PrivMode.S && mstatus.rdata.TVM.asBool
+
   private val rdata = Mux1H(csrRwMap.map { case (id, (_, rBundle)) =>
     (raddr === id.U) -> rBundle.asUInt
   })
@@ -426,6 +432,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.out.interrupt := intrBitSet
   io.out.wfi_event := debugIntr || (mie.rdata.asUInt & mip.rdata.asUInt).orR
   io.out.debugMode := debugMode
+  io.out.disableSfence := tvmNotPermit || PRVM === PrivMode.U
 
   // Todo: record the last address to avoid xireg is different with xiselect
   toAIA.addr.valid := isCSRAccess && Seq(miselect, siselect, vsiselect).map(
