@@ -162,7 +162,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   io.in.ready := true.B // Todo: Async read imsic may block CSR
   io.out.valid := valid
   io.out.bits.ctrl.exceptionVec.get := exceptionVec
-  io.out.bits.ctrl.flushPipe.get := csrMod.io.out.flushPipe || isXRet // || frontendTriggerUpdate
+  io.out.bits.ctrl.flushPipe.get := csrMod.io.out.flushPipe || isXRet // || frontendTriggerUpdate // Todo: trigger
   io.out.bits.res.data := csrMod.io.out.rData
   connect0LatencyCtrlSingal
 

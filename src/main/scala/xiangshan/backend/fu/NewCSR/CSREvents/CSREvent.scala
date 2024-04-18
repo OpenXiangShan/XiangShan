@@ -24,6 +24,8 @@ trait CSREvents { self: NewCSR =>
 
   val dretEvent = Module(new DretEventModule)
 
+  val wfiEvent  = Module(new WfiEventModule)
+
   val events: Seq[Module with CSREventBase] = Seq(
     trapEntryMEvent,
     trapEntryHSEvent,
@@ -31,6 +33,7 @@ trait CSREvents { self: NewCSR =>
     mretEvent,
     sretEvent,
     dretEvent,
+    wfiEvent,
   )
 
   events.foreach(x => dontTouch(x.out))
