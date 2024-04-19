@@ -20,6 +20,7 @@ case class IssueBlockParams(
   val numEntries       : Int,
   numEnq               : Int,
   numComp              : Int,
+  numFastWakeupSrc     : Int = 2,
   numDeqOutside        : Int = 0,
   numWakeupFromOthers  : Int = 0,
   XLEN                 : Int = 64,

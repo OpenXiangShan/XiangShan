@@ -124,7 +124,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
       val isIntScheduler = exuParm.isIntExeUnit
       val dataSource = exuInput.bits.dataSources(srcIdx)
       val isWakeUpSink = params.allIssueParams.filter(_.exuBlockParams.contains(exuParm)).head.exuBlockParams.map(_.isIQWakeUpSink).reduce(_ || _)
-      val readForward = if (isWakeUpSink) dataSource.readForward else false.B
+      val readForward = if (isWakeUpSink && (srcIdx < exuParm.numFastWakeupSrc)) dataSource.readForward else false.B
       val readBypass = if (isWakeUpSink) dataSource.readBypass else false.B
       val readZero = if (isIntScheduler) dataSource.readZero else false.B
       val readAnotherReg = if (isIntScheduler && exuParm.numRegSrc == 2 && srcIdx==1) dataSource.readAnotherReg else false.B

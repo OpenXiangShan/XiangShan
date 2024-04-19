@@ -72,6 +72,8 @@ case class ExeUnitParams(
   val writeVType: Boolean = fuConfigs.map(_.writeVType).reduce(_ || _)
   val isHighestWBPriority: Boolean = wbPortConfigs.forall(_.priority == 0)
 
+  def  numFastWakeupSrc: Int = backendParam.allIssueParams.filter(issueParams => issueParams.exuBlockParams.contains(this)).head.numFastWakeupSrc
+
   val isIntExeUnit: Boolean = schdType.isInstanceOf[IntScheduler]
   val isVfExeUnit: Boolean = schdType.isInstanceOf[VfScheduler]
   val isMemExeUnit: Boolean = schdType.isInstanceOf[MemScheduler]
