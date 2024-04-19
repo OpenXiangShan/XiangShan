@@ -210,6 +210,7 @@ case class XSCoreParameters
   StoreBufferSize: Int = 16,
   StoreBufferThreshold: Int = 7,
   EnsbufferWidth: Int = 2,
+  LoadDependencyWidth: Int = 2,
   // ============ VLSU ============
   UsQueueSize: Int = 8,
   VlFlowSize: Int = 32,
@@ -636,6 +637,7 @@ trait HasXSParameter {
   val StoreBufferSize = coreParams.StoreBufferSize
   val StoreBufferThreshold = coreParams.StoreBufferThreshold
   val EnsbufferWidth = coreParams.EnsbufferWidth
+  val LoadDependencyWidth = coreParams.LoadDependencyWidth
   val UsQueueSize = coreParams.UsQueueSize
   val VlFlowSize = coreParams.VlFlowSize
   val VlUopSize = coreParams.VlUopSize

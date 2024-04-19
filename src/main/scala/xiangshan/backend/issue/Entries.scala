@@ -66,8 +66,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val uopIdxVec           = OptionWrapper(params.isVecMemIQ, Wire(Vec(params.numEntries, UopIdx())))
   //src status
   val dataSourceVec       = Wire(Vec(params.numEntries, Vec(params.numRegSrc, DataSource())))
-  val loadDependencyVec   = Wire(Vec(params.numEntries, Vec(LoadPipelineWidth, UInt(3.W))))
-  val srcLoadDependencyVec= Wire(Vec(params.numEntries, Vec(params.numRegSrc, Vec(LoadPipelineWidth, UInt(3.W)))))
+  val loadDependencyVec   = Wire(Vec(params.numEntries, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
   val srcWakeUpL1ExuOHVec = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Vec(params.numRegSrc, ExuVec()))))
   //deq sel
   val deqSelVec           = Wire(Vec(params.numEntries, Bool()))
@@ -362,11 +361,6 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     }
   }
 
-  cancelBypassVec.zip(srcLoadDependencyVec).foreach { case (cancelBypass, srcLoadDependency) =>
-    val cancelByLd = srcLoadDependency.map(x => LoadShouldCancel(Some(x), io.ldCancel)).reduce(_ | _)
-    cancelBypass := cancelByLd
-  }
-
   io.valid                          := validVec.asUInt
   io.canIssue                       := canIssueVec.asUInt
   io.fuType                         := fuTypeVec
@@ -405,8 +399,8 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     entries(entryIdx)           := out.entry
     deqPortIdxReadVec(entryIdx) := out.deqPortIdxRead
     issueTimerVec(entryIdx)     := out.issueTimerRead
-    srcLoadDependencyVec(entryIdx)          := out.srcLoadDependency
-    loadDependencyVec(entryIdx)             := out.entry.bits.status.mergedLoadDependency
+    loadDependencyVec(entryIdx) := out.entry.bits.status.mergedLoadDependency
+    cancelBypassVec(entryIdx)   := out.cancelBypass
     if (params.hasIQWakeUp) {
       srcWakeUpL1ExuOHVec.get(entryIdx)     := out.srcWakeUpL1ExuOH.get
     }
@@ -516,7 +510,7 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val canIssue            = Output(UInt(params.numEntries.W))
   val fuType              = Vec(params.numEntries, Output(FuType()))
   val dataSources         = Vec(params.numEntries, Vec(params.numRegSrc, Output(DataSource())))
-  val loadDependency      = Vec(params.numEntries, Vec(LoadPipelineWidth, UInt(3.W)))
+  val loadDependency      = Vec(params.numEntries, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
   val srcWakeUpL1ExuOH    = OptionWrapper(params.hasIQWakeUp, Vec(params.numEntries, Vec(params.numRegSrc, Output(ExuOH()))))
   //deq status
   val isFirstIssue        = Vec(params.numDeq, Output(Bool()))
