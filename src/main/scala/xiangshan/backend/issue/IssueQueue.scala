@@ -254,7 +254,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
           DataSource.zero,
           Mux(SrcType.isNotReg(s0_enqBits(enqIdx).srcType(j)), DataSource.imm, DataSource.reg)
         )
-        enq.bits.status.srcStatus(j).srcLoadDependency          := VecInit(s0_enqBits(enqIdx).srcLoadDependency(j).map(x => x(x.getWidth - 2, 0) << 1))
+        enq.bits.status.srcStatus(j).srcLoadDependency          := VecInit(s0_enqBits(enqIdx).srcLoadDependency(j).map(x => x << 1))
         if(params.hasIQWakeUp) {
           enq.bits.status.srcStatus(j).srcWakeUpL1ExuOH.get     := 0.U.asTypeOf(ExuVec())
         }
@@ -617,15 +617,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     deq.bits.common.perfDebugInfo.issueTime := GTimer() + 1.U
   }
 
-  private val deqShift = WireDefault(deqBeforeDly)
-  deqShift.zip(deqBeforeDly).foreach {
-    case (shifted, original) =>
-      original.ready := shifted.ready // this will not cause combinational loop
-      shifted.bits.common.loadDependency.foreach(
-        _ := original.bits.common.loadDependency.get.map(_ << 1)
-      )
-  }
-  io.deqDelay.zip(deqShift).foreach { case (deqDly, deq) =>
+  io.deqDelay.zip(deqBeforeDly).foreach { case (deqDly, deq) =>
     NewPipelineConnect(
       deq, deqDly, deqDly.valid,
       false.B,
