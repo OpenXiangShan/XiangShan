@@ -122,13 +122,11 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
   * @author LinJiaWei, Yinan Xu
   */
 trait HasPipelineReg { this: FuncUnit =>
-  def latency: Int
+  def latency: Int 
 
-  val latfixtiming :Int = cfg.latfixtiming.latencyVal.get
-  val latdiff :Int = if (latfixtiming < latency && latfixtiming != 0) latency - latfixtiming else 0
+  val latdiff :Int = cfg.latency.extraLatencyVal.getOrElse(0)
   val preLat :Int = latency - latdiff
-
-  require(latency >= 0 && latfixtiming >= 0 && latdiff >=0)
+  require(latency >= 0 && latdiff >=0)
 
   def pipelineReg(init: FuncUnitInput , valid:Bool, ready: Bool,latency: Int, flush:ValidIO[Redirect]): (Seq[FuncUnitInput],Seq[Bool],Seq[Bool])={
     val rdyVec = Seq.fill(latency)(Wire(Bool())) :+ ready
