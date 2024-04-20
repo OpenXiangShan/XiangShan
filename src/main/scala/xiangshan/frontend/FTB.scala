@@ -473,8 +473,8 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   val u_meta = update.meta.asTypeOf(new FTBMeta)
   val u_valid = io.update.valid && !io.update.bits.old_entry
 
-  val delay2_pc = DelayN(update.pc, 2)
-  val delay2_entry = DelayN(update.ftb_entry, 2)
+  val (_, delay2_pc) = DelayNWithValid(update.pc, u_valid, 2)
+  val (_, delay2_entry) = DelayNWithValid(update.ftb_entry, u_valid, 2)
 
 
   val update_now = u_valid && u_meta.hit

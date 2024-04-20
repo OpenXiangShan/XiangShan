@@ -881,6 +881,8 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
     tlb_req_arb.io.in(i).bits.no_translate := false.B
     tlb_req_arb.io.in(i).bits.memidx := DontCare
     tlb_req_arb.io.in(i).bits.debug := DontCare
+    tlb_req_arb.io.in(i).bits.hlvx := DontCare
+    tlb_req_arb.io.in(i).bits.hyperinst := DontCare
 
     val pending_req_vec = ent.region_bits & (~ent.filter_bits).asUInt
     val first_one_offset = PriorityMux(
@@ -983,8 +985,8 @@ class SMSTrainFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   val io = IO(new Bundle() {
     // train input
     // hybrid load store
-    val ld_in = Flipped(Vec(exuParameters.LduCnt, ValidIO(new LdPrefetchTrainBundle())))
-    val st_in = Flipped(Vec(exuParameters.StuCnt, ValidIO(new StPrefetchTrainBundle())))
+    val ld_in = Flipped(Vec(backendParams.LdExuCnt, ValidIO(new LdPrefetchTrainBundle())))
+    val st_in = Flipped(Vec(backendParams.StaExuCnt, ValidIO(new StPrefetchTrainBundle())))
     // filter out
     val train_req = ValidIO(new PrefetchReqBundle())
   })
@@ -1006,7 +1008,7 @@ class SMSTrainFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   val entries = RegInit(VecInit(Seq.fill(smsParams.train_filter_size){ (0.U.asTypeOf(new PrefetchReqBundle())) }))
   val valids = RegInit(VecInit(Seq.fill(smsParams.train_filter_size){ (false.B) }))
 
-  val enqLen = exuParameters.LduCnt + exuParameters.StuCnt
+  val enqLen = backendParams.LduCnt + backendParams.StaCnt
   val enqPtrExt = RegInit(VecInit((0 until enqLen).map(_.U.asTypeOf(new Ptr))))
   val deqPtrExt = RegInit(0.U.asTypeOf(new Ptr))
 
@@ -1083,8 +1085,6 @@ class SMSTrainFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
 
 class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSModuleHelper with HasL1PrefetchSourceParameter {
 
-  val maxLduCnt = LoadPipelineWidth
-  require(exuParameters.LduCnt == maxLduCnt)
 
   val io_agt_en = IO(Input(Bool()))
   val io_stride_en = IO(Input(Bool()))

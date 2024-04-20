@@ -20,9 +20,10 @@ package xiangshan.mem
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import xiangshan._
-import utils._
 import utility._
+import utils._
+import xiangshan._
+import xiangshan.backend.Bundles.{DynInst, MemExuInput}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.cache._
 import xiangshan.backend.fu.FenceToSbuffer
@@ -73,9 +74,13 @@ object shiftMaskToLow {
   }
 }
 
-class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with HasDCacheParameters{
+class LsPipelineBundle(implicit p: Parameters) extends XSBundle
+  with HasDCacheParameters
+  with HasVLSUParameters {
+  val uop = new DynInst
   val vaddr = UInt(VAddrBits.W)
   val paddr = UInt(PAddrBits.W)
+  val gpaddr = UInt(GPAddrBits.W)
   // val func = UInt(6.W)
   val mask = UInt((VLEN/8).W)
   val data = UInt((VLEN+1).W)
@@ -86,7 +91,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
   val ptwBack = Bool()
   val mmio = Bool()
   val atomic = Bool()
-  val rsIdx = UInt(log2Up(IssQueSize).W)
+  val rsIdx = UInt(log2Up(MemIQSizeMax).W)
 
   val forwardMask = Vec(VLEN/8, Bool())
   val forwardData = Vec(VLEN/8, UInt(8.W))
@@ -95,6 +100,21 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
   val isPrefetch = Bool()
   val isHWPrefetch = Bool()
   def isSWPrefetch = isPrefetch && !isHWPrefetch
+
+  // vector
+  val isvec = Bool()
+  val isLastElem = Bool()
+  val is128bit = Bool()
+  val uop_unit_stride_fof = Bool()
+  // val rob_idx_valid = Vec(2,Bool())
+  // val inner_idx = Vec(2,UInt(3.W))
+  // val rob_idx = Vec(2,new RobPtr)
+  val reg_offset = UInt(vOffsetBits.W)
+  // val offset = Vec(2,UInt(4.W))
+  val vecActive = Bool() // 1: vector active element or scala mem operation, 0: vector not active element
+  val is_first_ele = Bool()
+  val flowPtr = new VlflowPtr() // VLFlowQueue ptr
+  val sflowPtr = new VsFlowPtr() // VSFlowQueue ptr
 
   // For debug usage
   val isFirstIssue = Bool()
@@ -117,7 +137,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
   val delayedLoadError = Bool()
   val lateKill = Bool()
   val feedbacked = Bool()
-
+  val ldCancel = ValidUndirectioned(UInt(log2Ceil(LoadPipelineWidth).W))
   // loadQueueReplay index.
   val schedIndex = UInt(log2Up(LoadQueueReplaySize).W)
 }
@@ -129,6 +149,7 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
   def fromLsPipelineBundle(input: LsPipelineBundle, latch: Boolean = false) = {
     if (latch) vaddr := RegNext(input.vaddr) else vaddr := input.vaddr
     if (latch) paddr := RegNext(input.paddr) else paddr := input.paddr
+    if (latch) gpaddr := RegNext(input.gpaddr) else gpaddr := input.gpaddr
     if (latch) mask := RegNext(input.mask) else mask := input.mask
     if (latch) data := RegNext(input.data) else data := input.data
     if (latch) uop := RegNext(input.uop) else uop := input.uop
@@ -146,6 +167,15 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     if (latch) hasROBEntry := RegNext(input.hasROBEntry) else hasROBEntry := input.hasROBEntry
     if (latch) dcacheRequireReplay := RegNext(input.dcacheRequireReplay) else dcacheRequireReplay := input.dcacheRequireReplay
     if (latch) schedIndex := RegNext(input.schedIndex) else schedIndex := input.schedIndex
+    if (latch) isvec               := RegNext(input.isvec)               else isvec               := input.isvec
+    if (latch) isLastElem          := RegNext(input.isLastElem)          else isLastElem          := input.isLastElem
+    if (latch) is128bit            := RegNext(input.is128bit)            else is128bit            := input.is128bit
+    if (latch) vecActive                 := RegNext(input.vecActive)                 else vecActive                 := input.vecActive
+    if (latch) is_first_ele        := RegNext(input.is_first_ele)        else is_first_ele        := input.is_first_ele
+    if (latch) uop_unit_stride_fof := RegNext(input.uop_unit_stride_fof) else uop_unit_stride_fof := input.uop_unit_stride_fof
+    if (latch) reg_offset          := RegNext(input.reg_offset)          else reg_offset          := input.reg_offset
+    if (latch) flowPtr             := RegNext(input.flowPtr)             else flowPtr             := input.flowPtr
+    if (latch) sflowPtr            := RegNext(input.sflowPtr)            else sflowPtr            := input.sflowPtr
 
     meta_prefetch := DontCare
     meta_access := DontCare
@@ -162,13 +192,14 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     delayedLoadError := DontCare
     lateKill := DontCare
     feedbacked := DontCare
+    ldCancel := DontCare
   }
 
   def asPrefetchReqBundle(): PrefetchReqBundle = {
     val res = Wire(new PrefetchReqBundle)
     res.vaddr := this.vaddr
     res.paddr := this.paddr
-    res.pc    := this.uop.cf.pc
+    res.pc    := this.uop.pc
 
     res
   }
@@ -187,6 +218,7 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
   def fromLsPipelineBundle(input: LsPipelineBundle, latch: Boolean = false) = {
     if(latch) vaddr := RegNext(input.vaddr) else vaddr := input.vaddr
     if(latch) paddr := RegNext(input.paddr) else paddr := input.paddr
+    if(latch) gpaddr := RegNext(input.gpaddr) else gpaddr := input.gpaddr
     if(latch) mask := RegNext(input.mask) else mask := input.mask
     if(latch) data := RegNext(input.data) else data := input.data
     if(latch) uop := RegNext(input.uop) else uop := input.uop
@@ -217,17 +249,23 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     if(latch) delayedLoadError := RegNext(input.delayedLoadError) else delayedLoadError := input.delayedLoadError
     if(latch) lateKill := RegNext(input.lateKill) else lateKill := input.lateKill
     if(latch) feedbacked := RegNext(input.feedbacked) else feedbacked := input.feedbacked
+    if(latch) isvec               := RegNext(input.isvec)               else isvec               := input.isvec
+    if(latch) is128bit            := RegNext(input.is128bit)            else is128bit            := input.is128bit
+    if(latch) vecActive                 := RegNext(input.vecActive)                 else vecActive                 := input.vecActive
+    if(latch) uop_unit_stride_fof := RegNext(input.uop_unit_stride_fof) else uop_unit_stride_fof := input.uop_unit_stride_fof
+    if(latch) reg_offset          := RegNext(input.reg_offset)          else reg_offset          := input.reg_offset
 
     rep_info := DontCare
     data_wen_dup := DontCare
   }
 }
 
-class LoadForwardQueryIO(implicit p: Parameters) extends XSBundleWithMicroOp {
+class LoadForwardQueryIO(implicit p: Parameters) extends XSBundle {
   val vaddr = Output(UInt(VAddrBits.W))
   val paddr = Output(UInt(PAddrBits.W))
+  val gpaddr = Output(UInt(GPAddrBits.W))
   val mask = Output(UInt((VLEN/8).W))
-  override val uop = Output(new MicroOp) // for replay
+  val uop = Output(new DynInst) // for replay
   val pc = Output(UInt(VAddrBits.W)) //for debug
   val valid = Output(Bool())
 
@@ -277,7 +315,8 @@ class PipeLoadForwardQueryIO(implicit p: Parameters) extends LoadForwardQueryIO 
 //
 // Note that query req may be !ready, as dcache is releasing a block
 // If it happens, a replay from rs is needed.
-class LoadNukeQueryReq(implicit p: Parameters) extends XSBundleWithMicroOp { // provide lqIdx
+class LoadNukeQueryReq(implicit p: Parameters) extends XSBundle { // provide lqIdx
+  val uop = new DynInst
   // mask: load's data mask.
   val mask = UInt((VLEN/8).W)
 
@@ -326,7 +365,7 @@ class LoadDataFromDcacheBundle(implicit p: Parameters) extends DCacheBundle {
   val respDcacheData = UInt(VLEN.W)
   val forwardMask = Vec(VLEN/8, Bool())
   val forwardData = Vec(VLEN/8, UInt(8.W))
-  val uop = new MicroOp // for data selection, only fwen and fuOpType are used
+  val uop = new DynInst // for data selection, only fwen and fuOpType are used
   val addrOffset = UInt(4.W) // for data selection
 
   // forward tilelink D channel
@@ -360,7 +399,7 @@ class LoadDataFromDcacheBundle(implicit p: Parameters) extends DCacheBundle {
 // Load writeback data from load queue (refill)
 class LoadDataFromLQBundle(implicit p: Parameters) extends XSBundle {
   val lqData = UInt(64.W) // load queue has merged data
-  val uop = new MicroOp // for data selection, only fwen and fuOpType are used
+  val uop = new DynInst // for data selection, only fwen and fuOpType are used
   val addrOffset = UInt(3.W) // for data selection
 
   def mergedData(): UInt = {
@@ -370,8 +409,8 @@ class LoadDataFromLQBundle(implicit p: Parameters) extends XSBundle {
 
 // Bundle for load / store wait waking up
 class MemWaitUpdateReq(implicit p: Parameters) extends XSBundle {
-  val staIssue = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
-  val stdIssue = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
+  val robIdx = Vec(backendParams.StaExuCnt, ValidIO(new RobPtr))
+  val sqIdx = Vec(backendParams.StdCnt, ValidIO(new SqPtr))
 }
 
 object AddPipelineReg {

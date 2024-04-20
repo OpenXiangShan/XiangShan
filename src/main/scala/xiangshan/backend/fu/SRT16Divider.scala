@@ -34,6 +34,7 @@ class SRT16DividerDataModule(len: Int) extends Module {
     val valid, sign, kill_w, kill_r, isHi, isW = Input(Bool())
     val in_ready = Output(Bool())
     val out_valid = Output(Bool())
+    val out_validNext = Output(Bool())
     val out_data = Output(UInt(len.W))
     val out_ready = Input(Bool())
   })
@@ -90,9 +91,9 @@ class SRT16DividerDataModule(len: Int) extends Module {
     state := Mux(finalIter, UIntToOH(s_post_0, 7), UIntToOH(s_iter, 7))
   } .elsewhen(state(s_post_0)) { // if rem < 0, rem = rem + d
     state := UIntToOH(s_post_1, 7)
-  } .elsewhen(state(s_post_1) && out_fire) {
+  } .elsewhen(state(s_post_1)) {
     state := UIntToOH(s_finish, 7)
-  } .elsewhen(state(s_finish)) {
+  } .elsewhen(state(s_finish) && io.out_ready) {
     state := UIntToOH(s_idle, 7)
   } .otherwise {
     state := state
@@ -389,8 +390,8 @@ class SRT16DividerDataModule(len: Int) extends Module {
     res
   )
   io.in_ready := state(s_idle)
-  io.out_valid := state(s_post_1)
-
+  io.out_valid := state(s_finish)
+  io.out_validNext := state(s_post_1)
 }
 
 object mLookUpTable2 {
@@ -437,62 +438,4 @@ object mLookUpTable2 {
       6.U -> "b10_10110".U(7.W),
       7.U -> "b10_10010".U(7.W)
     ))
-}
-
-class SRT16Divider(len: Int)(implicit p: Parameters) extends AbstractDivider(len) {
-
-  val newReq = io.in.fire
-
-  val uop = io.in.bits.uop
-  val uopReg = RegEnable(uop, newReq)
-  val ctrlReg = RegEnable(ctrl, newReq)
-
-  val divDataModule = Module(new SRT16DividerDataModule(len))
-
-  val kill_w = uop.robIdx.needFlush(io.redirectIn)
-  val kill_r = !divDataModule.io.in_ready && uopReg.robIdx.needFlush(io.redirectIn)
-
-  divDataModule.io.src(0) := io.in.bits.src(0)
-  divDataModule.io.src(1) := io.in.bits.src(1)
-  divDataModule.io.valid := io.in.valid
-  divDataModule.io.sign := sign
-  divDataModule.io.kill_w := kill_w
-  divDataModule.io.kill_r := kill_r
-  divDataModule.io.isHi := ctrlReg.isHi
-  divDataModule.io.isW := ctrlReg.isW
-  divDataModule.io.out_ready := io.out.ready
-
-  io.in.ready := divDataModule.io.in_ready
-  io.out.valid := divDataModule.io.out_valid
-  io.out.bits.data := divDataModule.io.out_data
-  io.out.bits.uop := uopReg
-}
-
-class DividerWrapper(len: Int)(implicit p: Parameters) extends FunctionUnit(len) {
-  val div = Module(new SRT16Divider(len))
-
-  div.io <> io
-
-  val func = io.in.bits.uop.ctrl.fuOpType
-  val (src1, src2) = (
-    io.in.bits.src(0)(XLEN - 1, 0),
-    io.in.bits.src(1)(XLEN - 1, 0)
-  )
-
-  val isW = MDUOpType.isW(func)
-  val isH = MDUOpType.isH(func)
-  val isDivSign = MDUOpType.isDivSign(func)
-  val divInputFunc = (x: UInt) => Mux(
-    isW,
-    Mux(isDivSign,
-      SignExt(x(31, 0), XLEN),
-      ZeroExt(x(31, 0), XLEN)
-    ),
-    x
-  )
-  div.io.in.bits.src(0) := divInputFunc(src1)
-  div.io.in.bits.src(1) := divInputFunc(src2)
-  div.ctrl.isHi := isH
-  div.ctrl.isW := isW
-  div.ctrl.sign := isDivSign
 }

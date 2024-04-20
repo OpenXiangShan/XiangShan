@@ -284,7 +284,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   with HasCircularQueuePtrHelper
  {
   val io = IO(new Bundle() {
-    val hartId = Input(UInt(8.W))
+    val hartId = Input(UInt(hartIdLen.W))
     // MSHR ID
     val id = Input(UInt(log2Up(cfg.nMissEntries).W))
     // client requests
@@ -680,7 +680,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   io.repl_way_en := req.way_en
 
   // should not allocate, merge or reject at the same time
-  assert(RegNext(PopCount(Seq(io.primary_ready, io.secondary_ready, io.secondary_reject)) <= 1.U))
+  assert(RegNext(PopCount(Seq(io.primary_ready, io.secondary_ready, io.secondary_reject)) <= 1.U || !io.req.valid))
 
   val refill_data_splited = WireInit(VecInit(Seq.tabulate(cfg.blockBytes * 8 / l1BusDataWidth)(i => {
     val data = refill_and_store_data.asUInt
@@ -878,7 +878,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   with HasPerfEvents 
   {
   val io = IO(new Bundle {
-    val hartId = Input(UInt(8.W))
+    val hartId = Input(UInt(hartIdLen.W))
     val req = Flipped(DecoupledIO(new MissReq))
     val resp = Output(new MissResp)
     val refill_to_ldq = ValidIO(new Refill)
@@ -962,7 +962,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
   val req_mshr_handled_vec = entries.map(_.io.req_handled_by_this_entry)
   // merged to pipeline reg
-  val req_pipeline_reg_handled = miss_req_pipe_reg.merge_req(io.req.bits)
+  val req_pipeline_reg_handled = miss_req_pipe_reg.merge_req(io.req.bits) && io.req.valid
   assert(PopCount(Seq(req_pipeline_reg_handled, VecInit(req_mshr_handled_vec).asUInt.orR)) <= 1.U, "miss req will either go to mshr or pipeline reg")
   assert(PopCount(req_mshr_handled_vec) <= 1.U, "Only one mshr can handle a req")
   io.resp.id := Mux(!req_pipeline_reg_handled, OHToUInt(req_mshr_handled_vec), miss_req_pipe_reg.mshr_id)
@@ -1007,7 +1007,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     io.forward(i).forwardData := forwardData
   })
 
-  assert(RegNext(PopCount(secondary_ready_vec) <= 1.U))
+  assert(RegNext(PopCount(secondary_ready_vec) <= 1.U || !io.req.valid))
 //  assert(RegNext(PopCount(secondary_reject_vec) <= 1.U))
   // It is possible that one mshr wants to merge a req, while another mshr wants to reject it.
   // That is, a coming req has the same paddr as that of mshr_0 (merge),

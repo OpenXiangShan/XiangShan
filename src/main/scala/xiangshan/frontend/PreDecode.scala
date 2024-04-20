@@ -26,6 +26,7 @@ import xiangshan._
 import xiangshan.frontend.icache._
 import xiangshan.backend.decode.isa.predecode.PreDecodeInst
 import java.lang.reflect.Parameter
+import xiangshan.backend.fu.util.SdtrigExt
 
 trait HasPdConst extends HasXSParameter with HasICacheParameters with HasIFUConst{
   def isRVC(inst: UInt) = (inst(1,0) =/= 3.U)
@@ -92,11 +93,11 @@ class PreDecodeResp(implicit p: Parameters) extends XSBundle with HasPdConst {
 
 class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   val io = IO(new Bundle() {
-    val in = Input(new IfuToPreDecode)
+    val in = Input(ValidIO(new IfuToPreDecode))
     val out = Output(new PreDecodeResp)
   })
 
-  val data          = io.in.data
+  val data          = io.in.bits.data
 //  val lastHalfMatch = io.in.lastHalfMatch
   val validStart, validEnd = Wire(Vec(PredictWidth, Bool()))
   val h_validStart, h_validEnd = Wire(Vec(PredictWidth, Bool()))
@@ -129,7 +130,7 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
     val inst           = WireInit(rawInsts(i))
     //val expander       = Module(new RVCExpander)
     currentIsRVC(i)   := isRVC(inst)
-    val currentPC      = io.in.pc(i)
+    val currentPC      = io.in.bits.pc(i)
     //expander.io.in             := inst
 
     val brType::isCall::isRet::Nil = brInfo(inst)
@@ -225,10 +226,10 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
   validH_ValidStartMismatch := h_validStart.zip(h_validStart_diff).map{case(a,b) => a =/= b}.reduce(_||_)
   validH_ValidEndMismatch := h_validEnd.zip(h_validEnd_diff).map{case(a,b) => a =/= b}.reduce(_||_)
 
-  XSError(validStartMismatch, p"validStart mismatch\n")
-  XSError(validEndMismatch, p"validEnd mismatch\n")
-  XSError(validH_ValidStartMismatch, p"h_validStart mismatch\n")
-  XSError(validH_ValidEndMismatch, p"h_validEnd mismatch\n")
+  XSError(io.in.valid && validStartMismatch, p"validStart mismatch\n")
+  XSError(io.in.valid && validEndMismatch, p"validEnd mismatch\n")
+  XSError(io.in.valid && validH_ValidStartMismatch, p"h_validStart mismatch\n")
+  XSError(io.in.valid && validH_ValidEndMismatch, p"h_validEnd mismatch\n")
 
 //  io.out.hasLastHalf := !io.out.pd(PredictWidth - 1).isRVC && io.out.pd(PredictWidth - 1).valid
 
@@ -389,11 +390,10 @@ class PredChecker(implicit p: Parameters) extends XSModule with HasPdConst {
 
 }
 
-class FrontendTrigger(implicit p: Parameters) extends XSModule {
+class FrontendTrigger(implicit p: Parameters) extends XSModule with SdtrigExt {
   val io = IO(new Bundle(){
     val frontendTrigger = Input(new FrontendTdataDistributeIO)
-    val csrTriggerEnable = Input(Vec(4, Bool()))
-    val triggered    = Output(Vec(PredictWidth, new TriggerCf))
+    val triggered     = Output(Vec(PredictWidth, new TriggerCf))
 
     val pds           = Input(Vec(PredictWidth, new PreDecodeInfo))
     val pc            = Input(Vec(PredictWidth, UInt(VAddrBits.W)))
@@ -404,61 +404,36 @@ class FrontendTrigger(implicit p: Parameters) extends XSModule {
   val data          = io.data
 
   val rawInsts = if (HasCExtension) VecInit((0 until PredictWidth).map(i => Cat(data(i+1), data(i))))
-                        else         VecInit((0 until PredictWidth).map(i => data(i)))
+  else         VecInit((0 until PredictWidth).map(i => data(i)))
 
-  val tdata = RegInit(VecInit(Seq.fill(4)(0.U.asTypeOf(new MatchTriggerIO))))
-  when(io.frontendTrigger.t.valid) {
-    tdata(io.frontendTrigger.t.bits.addr) := io.frontendTrigger.t.bits.tdata
+  val tdata = RegInit(VecInit(Seq.fill(TriggerNum)(0.U.asTypeOf(new MatchTriggerIO))))
+  when(io.frontendTrigger.tUpdate.valid) {
+    tdata(io.frontendTrigger.tUpdate.bits.addr) := io.frontendTrigger.tUpdate.bits.tdata
   }
-  io.triggered.map{i => i := 0.U.asTypeOf(new TriggerCf)}
-  val triggerEnable = RegInit(VecInit(Seq.fill(4)(false.B))) // From CSR, controlled by priv mode, etc.
-  triggerEnable := io.csrTriggerEnable
-  XSDebug(triggerEnable.asUInt.orR, "Debug Mode: At least one frontend trigger is enabled\n")
+  val triggerEnableVec = RegInit(VecInit(Seq.fill(TriggerNum)(false.B))) // From CSR, controlled by priv mode, etc.
+  triggerEnableVec := io.frontendTrigger.tEnableVec
+  XSDebug(triggerEnableVec.asUInt.orR, "Debug Mode: At least one frontend trigger is enabled\n")
 
-  for (i <- 0 until 4) {PrintTriggerInfo(triggerEnable(i), tdata(i))}
-  val triggerHitVec = Wire(Vec(4, Vec(PredictWidth, Bool())))
+  val triggerTimingVec = VecInit(tdata.map(_.timing))
+  val triggerChainVec = VecInit(tdata.map(_.chain))
 
-  for (j <- 1 until 4) {
-    // port 0 support inst cmp while others don't
-    triggerHitVec(j) := TriggerCmpConsecutive(io.pc, tdata(j).tdata2, tdata(j).matchType, triggerEnable(j), VAddrBits)
-  }
+  for (i <- 0 until TriggerNum) { PrintTriggerInfo(triggerEnableVec(i), tdata(i)) }
+
+  //val triggerHitVec = Wire(Vec(PredictWidth, Vec(TriggerNum, Bool())))
+  val triggerHitVec = (0 until TriggerNum).map(j =>
+      TriggerCmpConsecutive(io.pc, tdata(j).tdata2, tdata(j).matchType, triggerEnableVec(j)).map(
+        hit => hit && !tdata(j).select)
+  ).transpose
 
   for (i <- 0 until PredictWidth) {
-    val currentPC = io.pc(i)
-    val currentIsRVC = io.pds(i).isRVC
-    val inst = WireInit(rawInsts(i))
-    val triggerHitVec_diff = Wire(Vec(4, Bool()))
-
-    for (j <- 0 until 1) {
-      triggerHitVec(j)(i) :=  TriggerCmp(Mux(tdata(j).select, Mux(currentIsRVC, inst(15, 0), inst), currentPC), 
-                                      tdata(j).tdata2, tdata(j).matchType, triggerEnable(j))
-      triggerHitVec_diff(j) := triggerHitVec(j)(i)
-    }
-    for (j <- 1 until 4) {
-      triggerHitVec_diff(j) := TriggerCmp(currentPC, tdata(j).tdata2, tdata(j).matchType, triggerEnable(j))
-    }
-
-    for (j <- 0 until 4) {
-      XSError(triggerHitVec_diff(j) =/= triggerHitVec(j)(i), p"triggerHitVec_diff(${j}) mismatch\n")
-    }
-
-    val frontendHit = Wire(Vec(4, Bool()))
-    for (j <- 0 until 4) {
-      frontendHit(j) := triggerHitVec(j)(i)
-    }
-
-    // fix chains this could be moved further into the pipeline
-    io.triggered(i).frontendHit := frontendHit
-    val enableChain = tdata(0).chain
-    when(enableChain){
-      io.triggered(i).frontendHit(0) := triggerHitVec(0)(i) && triggerHitVec(1)(i) && (tdata(0).timing === tdata(1).timing)
-      io.triggered(i).frontendHit(1) := triggerHitVec(0)(i) && triggerHitVec(1)(i) && (tdata(0).timing === tdata(1).timing)
-    }
-    for(j <- 0 until 2) {
-      io.triggered(i).backendEn(j) := Mux(tdata(j+2).chain, triggerHitVec(j+2)(i), true.B)
-      io.triggered(i).frontendHit(j+2) := !tdata(j+2).chain && triggerHitVec(j+2)(i) // temporary workaround
-    }
-    XSDebug(io.triggered(i).getHitFrontend, p"Debug Mode: Predecode Inst No. ${i} has trigger hit vec ${io.triggered(i).frontendHit}" +
-      p"and backend en ${io.triggered(i).backendEn}\n")
+    val triggerCanFireVec = Wire(Vec(TriggerNum, Bool()))
+    TriggerCheckCanFire(TriggerNum, triggerCanFireVec, VecInit(triggerHitVec(i)), triggerTimingVec, triggerChainVec)
+    // only hit, no matter fire or not
+    io.triggered(i).frontendHit := triggerHitVec(i)
+    // can fire, exception will be handled at rob enq
+    io.triggered(i).frontendCanFire := triggerCanFireVec
+    XSDebug(io.triggered(i).getFrontendCanFire, p"Debug Mode: Predecode Inst No. ${i} has trigger fire vec ${io.triggered(i).frontendCanFire}\n")
   }
+  io.triggered.foreach(_.backendCanFire := VecInit(Seq.fill(TriggerNum)(false.B)))
+  io.triggered.foreach(_.backendHit := VecInit(Seq.fill(TriggerNum)(false.B)))
 }
