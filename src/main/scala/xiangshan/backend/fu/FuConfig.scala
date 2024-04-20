@@ -54,13 +54,7 @@ case class FuConfig (
   writeFflags   : Boolean = false,
   writeVxsat    : Boolean = false,
   dataBits      : Int = 64,
-  latency       : HasFuLatency = CertainLatency(0),
-  /* latfixitming delay N cycles to fixtiming
-  * latency - latfixitming is the cycles to be delayed after the result generated
-  * if latfixtiming !=0 latfixtiming is the pre-latency of funcunit
-  * don't support uncertainlatency; fence, csr; branch, mul, std (Funcunit)
-  */
-  latfixtiming  : HasFuLatency = CertainLatency(0),
+  latency       : HasFuLatency = CertainLatency(0),// two field (base latency, extra latency(option))
   hasInputBuffer: (Boolean, Int, Boolean) = (false, 0, false),
   exceptionOut  : Seq[Int] = Seq(),
   hasLoadError  : Boolean = false,

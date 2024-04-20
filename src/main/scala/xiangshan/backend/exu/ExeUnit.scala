@@ -70,9 +70,8 @@ class ExeUnitImp(
       val fuVld_en_reg = RegInit(false.B)
       val uncer_en_reg = RegInit(false.B)
 
-      def lat: Int = cfg.latency.latencyVal.getOrElse(0)
-      def latfixtiming: Int = cfg.latfixtiming.latencyVal.getOrElse(0)
-      def latReal: Int = latfixtiming max lat
+      def latReal: Int = cfg.latency.latencyVal.getOrElse(0)
+      def extralat: Int = cfg.latency.extraLatencyVal.getOrElse(0)
 
       val uncerLat = cfg.latency.uncertainLatencyVal.nonEmpty
       val lat0 = (latReal == 0 && !uncerLat).asBool
@@ -231,9 +230,7 @@ class ExeUnitImp(
   }
 
   private val OutresVecs = funcUnits.map { fu =>
-    def lat: Int = fu.cfg.latency.latencyVal.getOrElse(0)
-    def latfixtiming: Int = fu.cfg.latfixtiming.latencyVal.getOrElse(0)
-    def latDiff :Int = if (latfixtiming < lat && latfixtiming != 0) lat - latfixtiming else 0
+    def latDiff :Int = fu.cfg.latency.extraLatencyVal.getOrElse(0)
     val OutresVec = fu.io.out.bits.res +: Seq.fill(latDiff)(Reg(chiselTypeOf(fu.io.out.bits.res)))
     for (i <- 1 to latDiff) {
       OutresVec(i) := OutresVec(i - 1)
