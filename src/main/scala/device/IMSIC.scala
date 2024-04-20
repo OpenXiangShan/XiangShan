@@ -46,9 +46,9 @@ class IMSIC(
 
   imsicTop.io.csr_clk         := clock
   imsicTop.io.csr_rstn        := reset
+  imsicTop.io.hart_id         := i.hartId
   imsicTop.io.i.setipnum_vld  := i.setIpNumValidVec2
   imsicTop.io.i.setipnum      := i.setIpNum.bits
-  imsicTop.io.i.hart_id       := i.hartId
   imsicTop.io.i.csr.addr_vld  := i.csr.addr.valid
   imsicTop.io.i.csr.addr      := i.csr.addr.bits.addr
   imsicTop.io.i.csr.priv_lvl  := i.csr.addr.bits.prvm
@@ -61,12 +61,12 @@ class IMSIC(
   o.csr.rdata.valid        := imsicTop.io.o.csr.rdata_vld
   o.csr.rdata.bits.rdata   := imsicTop.io.o.csr.rdata
   o.csr.rdata.bits.illegal := imsicTop.io.o.csr.illegal
-  o.mtopei.valid           := imsicTop.io.o.csr.irq(0)
-  o.stopei.valid           := imsicTop.io.o.csr.irq(1)
-  o.vstopei.valid          := imsicTop.io.o.csr.irq(2)
-  o.mtopei.bits            := imsicTop.io.o.csr.mtopei
-  o.stopei.bits            := imsicTop.io.o.csr.stopei
-  o.vstopei.bits           := imsicTop.io.o.csr.vstopei
+  o.mtopei.valid           := imsicTop.io.o.irq(0)
+  o.stopei.valid           := imsicTop.io.o.irq(1)
+  o.vstopei.valid          := imsicTop.io.o.irq(2)
+  o.mtopei.bits            := imsicTop.io.o.mtopei
+  o.stopei.bits            := imsicTop.io.o.stopei
+  o.vstopei.bits           := imsicTop.io.o.vstopei
 }
 
 class imsic_csr_top(
@@ -86,11 +86,11 @@ class imsic_csr_top(
   val io = IO(new Bundle {
     val csr_clk = Input(Clock())
     val csr_rstn = Input(Reset())
+    val hart_id = Input(UInt(HART_ID_WIDTH.W))
 
     val i = Input(new Bundle {
       val setipnum_vld = UInt((NumHart * NumIRFiles).W)
       val setipnum = UInt(NR_SRC_WIDTH.W)
-      val hart_id = UInt(HART_ID_WIDTH.W)
       val csr = new Bundle {
         val addr_vld = Bool()
         val addr = UInt(12.W)
@@ -99,7 +99,7 @@ class imsic_csr_top(
         val vgein = UInt(6.W)
         val claim = UInt(3.W)
         val wdata_vld = Bool()
-        val wdata = UInt(64.W)
+        val wdata = UInt(XLEN.W)
       }
     })
 
@@ -108,11 +108,11 @@ class imsic_csr_top(
         val rdata_vld = Bool()
         val rdata = UInt(XLEN.W)
         val illegal = Bool()
-        val irq = UInt(3.W)
-        val mtopei = UInt(32.W)
-        val stopei = UInt(32.W)
-        val vstopei = UInt(32.W)
       }
+      val irq = UInt(3.W)
+      val mtopei = UInt(32.W)
+      val stopei = UInt(32.W)
+      val vstopei = UInt(32.W)
     })
   })
 
