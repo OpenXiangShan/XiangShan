@@ -101,7 +101,7 @@ class MinimalConfig(n: Int = 1) extends Config(
         ),
         vfPreg = VfPregParams(
           numEntries = 160,
-          numRead = Some(14),
+          numRead = None,
           numWrite = None,
         ),
         icacheParameters = ICacheParameters(
