@@ -44,7 +44,6 @@ class NewCSR(implicit val p: Parameters) extends Module
   with SupervisorMachineAliasConnect
   with CSREvents
   with CSRDebugTrigger
-  with HasDebugExternalInterruptBundle
 {
 
   import CSRConfig._
@@ -138,11 +137,11 @@ class NewCSR(implicit val p: Parameters) extends Module
   val isMret = io.mret
   val isDret = io.dret
 
-  var csrRwMap = machineLevelCSRMap ++ supervisorLevelCSRMap ++ hypervisorCSRMap ++ virtualSupervisorCSRMap ++ unprivilegedCSRMap ++ aiaCSRMap
+  var csrRwMap = machineLevelCSRMap ++ supervisorLevelCSRMap ++ hypervisorCSRMap ++ virtualSupervisorCSRMap ++ unprivilegedCSRMap ++ aiaCSRMap ++ debugCSRMap
 
-  val csrMods = machineLevelCSRMods ++ supervisorLevelCSRMods ++ hypervisorCSRMods ++ virtualSupervisorCSRMods ++ unprivilegedCSRMods ++ aiaCSRMods
+  val csrMods = machineLevelCSRMods ++ supervisorLevelCSRMods ++ hypervisorCSRMods ++ virtualSupervisorCSRMods ++ unprivilegedCSRMods ++ aiaCSRMods ++ debugCSRMods
 
-  var csrOutMap = machineLevelCSROutMap ++ supervisorLevelCSROutMap ++ hypervisorCSROutMap ++ virtualSupervisorCSROutMap ++ unprivilegedCSROutMap ++ aiaCSROutMap
+  var csrOutMap = machineLevelCSROutMap ++ supervisorLevelCSROutMap ++ hypervisorCSROutMap ++ virtualSupervisorCSROutMap ++ unprivilegedCSROutMap ++ aiaCSROutMap ++ debugCSROutMap
 
   val trapHandleMod = Module(new TrapHandleModule)
 
@@ -234,6 +233,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     mod match {
       case m: DretEventSinkBundle =>
         m.retFromD := dretEvent.out
+      case _ =>
     }
     mod match {
       case m: HasAIABundle =>
@@ -351,7 +351,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   val debugIntrEnable = RegInit(true.B) // debug interrupt will be handle only when debugIntrEnable
   debugMode := dretEvent.out.debugMode
   debugIntrEnable := dretEvent.out.debugIntrEnable
-  val debugIntr = debugIRP & debugIntrEnable
+  val debugIntr = platformIRP.debugIP && debugIntrEnable
 
   // interrupt
   val disableInterrupt = debugMode || (dcsr.rdata.STEP.asBool && !dcsr.rdata.STEPIE.asBool)
