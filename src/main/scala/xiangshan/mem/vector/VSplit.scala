@@ -174,7 +174,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   val s1_stride           = s1_in.stride
   val s1_vmask            = FillInterleaved(8, s1_in.byteMask)(VLEN-1, 0)
   val s1_alignedType      = s1_in.alignedType
-  val s1_mask    = Mux(isIndexed(s1_instType), s1_in.srcMask, s1_in.flowMask)
+  val s1_vdIdx            = s1_in.vdIdxInField
   val s1_notIndexedStride = Mux( // stride for strided/unit-stride instruction
     isStrided(s1_instType),
     s1_stride(XLEN - 1, 0), // for strided load, stride = x[rs2]
