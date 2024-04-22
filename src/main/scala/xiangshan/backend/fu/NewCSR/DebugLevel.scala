@@ -14,6 +14,17 @@ import xiangshan.backend.fu.NewCSR.CSRFunc._
 import scala.collection.immutable.SeqMap
 
 trait DebugLevel { self: NewCSR =>
+  val tselect = Module(new CSRModule("tselect"))
+    .setAddr(0x7A0)
+
+//  val tdata1 = Module(new CSRModule("tdata1", new Tdata1Bundle) {
+//    reg.TYPE := Mux(wdata.TYPE.isLegal, wdata.TYPE.asUInt, Tdata1Type.Disabled.asUInt).asTypeOf(reg.TYPE)
+//    reg.DMODE := (wdata.DMODE.asBool && debugMode).asTypeOf(reg.DMODE)
+//    reg.DATA := Mux(wdata.TYPE.asUInt === Tdata1Type.Mcontrol.asUInt, 0.U, 0.U).asTypeOf(reg.DATA)
+//  })
+  val tdata1 = Module(new CSRModule("tdata1")) // Todo
+    .setAddr(0x7A1)
+
   val dcsr = Module(new CSRModule("dcsr", new DcsrBundle))
     .setAddr(0x7B0)
 
@@ -27,6 +38,8 @@ trait DebugLevel { self: NewCSR =>
     .setAddr(0x7B3)
 
   val debugCSRMods = Seq(
+    tselect,
+    tdata1,
     dcsr,
     dpc,
     dscratch0,
@@ -40,6 +53,12 @@ trait DebugLevel { self: NewCSR =>
   val debugCSROutMap: SeqMap[Int, UInt] = SeqMap.from(
     debugCSRMods.map(csr => csr.addr -> csr.regOut.asInstanceOf[CSRBundle].asUInt).iterator
   )
+}
+
+class Tdata1Bundle extends CSRBundle {
+  val TYPE  = Tdata1Type(63, 60, wNoFilter).withReset(Tdata1Type.Disabled)
+  val DMODE = WARL(59, wNoFilter).withReset(0.U)
+  val DATA  = WARL(58, 0, wNoFilter) // Todo:
 }
 
 class DcsrBundle extends CSRBundle {
@@ -69,6 +88,27 @@ class DcsrBundle extends CSRBundle {
 class Dpc extends CSRBundle {
   val ALL = RW(63, 1)
 }
+
+object Tdata1Type extends CSREnum with WARLApply {
+  val None         = Value(0.U)
+  val Legacy       = Value(1.U)
+  val Mcontrol     = Value(2.U)
+  val Icount       = Value(3.U)
+  val Itrigger     = Value(4.U)
+  val Etrigger     = Value(5.U)
+  val Mcontrol6    = Value(6.U)
+  val Tmexttrigger = Value(7.U)
+  val Disabled     = Value(15.U)
+
+  /**
+   * XS supports part of trigger type of Sdtrig extension
+   * @param enum trigger type checked
+   * @return true.B, If XS support this trigger type
+   */
+
+  override def isLegal(enum: CSREnumType): Bool = enum.asUInt === Mcontrol.asUInt
+}
+
 
 object DcsrDebugVer extends CSREnum with ROApply {
   val None = Value(0.U)
