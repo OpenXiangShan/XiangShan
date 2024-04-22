@@ -2,6 +2,7 @@ package xiangshan.backend.fu.NewCSR
 
 import chisel3._
 import chisel3.util._
+import org.chipsalliance.cde.config.Parameters
 import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRROField => RO, CSRRWField => RW, CSRWARLField => WARL, CSRWLRLField => WLRL, _}
 import xiangshan.backend.fu.NewCSR.CSRFunc._
 import xiangshan.backend.fu.NewCSR.CSRConfig._
@@ -211,7 +212,7 @@ object HstatusVgeinField extends CSREnum with WLRLApply {
   override def isLegal(enum: CSREnumType): Bool = enum.asUInt <= GEILEN.U
 }
 
-class HstatusModule extends CSRModule("Hstatus", new HstatusBundle)
+class HstatusModule(implicit p: Parameters) extends CSRModule("Hstatus", new HstatusBundle)
   with SretEventSinkBundle
   with TrapEntryHSEventSinkBundle
 

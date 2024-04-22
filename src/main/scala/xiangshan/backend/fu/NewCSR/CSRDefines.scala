@@ -195,6 +195,8 @@ object CSRDefines {
 
     def apply(msb: Int, lsb: Int): CSREnumType = macro CSRFieldsImpl.CSRROFieldRangeNoFn
 
+    def apply(msb: Int, lsb: Int, resetVal: Data): CSREnumType = macro CSRFieldsImpl.CSRROFieldRangeNoFnWithReset
+
     def apply(bit: Int): CSREnumType = macro CSRFieldsImpl.CSRROFieldBitNoFn
   }
 

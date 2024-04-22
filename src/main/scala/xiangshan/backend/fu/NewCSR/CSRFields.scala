@@ -122,7 +122,7 @@ class CSREnumType(
     factory.asInstanceOf[CSREnum].addMinValue
   }
 
-  if (this.init != null && factory.all.exists(_.litValue == this.init.litValue)) {
+  if (this.init != null && !factory.all.exists(_.litValue == this.init.litValue)) {
     factory.asInstanceOf[CSREnum].addNewValue(init.asUInt)
   }
 
@@ -315,8 +315,8 @@ trait WLRLApply { self: CSREnum =>
 }
 
 trait CSRMacroApply { self: CSREnum =>
-  def RO(msb: Int, lsb: Int, rfn: CSRRfnType): CSREnumType = self
-    .apply(ROType(rfn))(msb, lsb)(this)
+  def RO(msb: Int, lsb: Int, rfn: CSRRfnType, resetVal: Data = null): CSREnumType = self
+    .apply(ROType(rfn), resetVal)(msb, lsb)(this)
 
   def RO(msb: Int, lsb: Int): CSREnumType = self
     .apply(ROType())(msb, lsb)(this)

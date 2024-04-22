@@ -8,10 +8,21 @@ import xiangshan.backend.fu.NewCSR.CSRBundles.PrivState
 class CSRPermitModule extends Module {
   val io = IO(new CSRPermitIO)
 
-  val (wen, addr, privState) = (
-    io.in.wen,
-    io.in.addr,
+  private val (csrAccess, wen, addr, privState) = (
+    io.in.csrAccess.valid,
+    io.in.csrAccess.bits.wen,
+    io.in.csrAccess.bits.addr,
     io.in.privState
+  )
+
+  private val (mret, sret) = (
+    io.in.mret,
+    io.in.sret,
+  )
+
+  private val (tsr, vtsr) = (
+    io.in.status.tsr,
+    io.in.status.vtsr,
   )
 
   private val isRO = addr(11, 10) === "b11".U
@@ -33,19 +44,37 @@ class CSRPermitModule extends Module {
     accessTable
   ).asBool
 
-  private val rwLegal = !(isRO && wen)
+  private val rwLegal = isRO && wen
 
-  io.out.legal := privilegeLegal && rwLegal
+  private val csrAccessIllegal = csrAccess && (!privilegeLegal || !rwLegal)
+
+  private val mretIllegal = mret && !privState.isModeM
+
+  private val sretIllegal = sret && (
+    privState.isModeHS && tsr || privState.isModeVS && vtsr || privState.isModeHUorVU
+  )
+
+  io.out.illegal := csrAccessIllegal || mretIllegal || sretIllegal
 }
 
 class CSRPermitIO extends Bundle {
   val in = Input(new Bundle {
-    val wen  = Bool()
-    val addr = UInt(12.W)
+    val csrAccess = ValidIO(new Bundle {
+      val wen = Bool()
+      val addr = UInt(12.W)
+    })
     val privState = new PrivState
+    val mret = Bool()
+    val sret = Bool()
+    val status = new Bundle {
+      // Trap SRET
+      val tsr = Bool()
+      // Virtual Trap SRET
+      val vtsr = Bool()
+    }
   })
 
   val out = Output(new Bundle {
-    val legal = Bool()
+    val illegal = Bool()
   })
 }

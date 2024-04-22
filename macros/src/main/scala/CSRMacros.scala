@@ -16,23 +16,33 @@ object CSRMacros {
     }
 
     @compileTimeOnly("")
+    def CSRROFieldRangeWithReset(c: Context)(msb: c.Expr[Int], lsb: c.Expr[Int], rfn: c.Tree, resetVal: c.Tree): c.Tree = {
+      c.parse(s"CSRDefines.CSRField${calcuWidth(c)(msb, lsb)}Bits.RO(${c.eval(msb)}, ${c.eval(lsb)}, $rfn, $resetVal)")
+    }
+
+    @compileTimeOnly("")
     def CSRROFieldRange(c: Context)(msb: c.Expr[Int], lsb: c.Expr[Int], rfn: c.Tree): c.Tree = {
-      c.parse(s"CSRDefines.CSRField${calcuWidth(c)(msb, lsb)}Bits.RO(${c.eval(msb)}, ${c.eval(lsb)}, $rfn)")
+      CSRROFieldRangeWithReset(c)(msb, lsb, rfn, null)
     }
 
     @compileTimeOnly("")
     def CSRROFieldBit(c: Context)(bit: c.Expr[Int], rfn: c.Tree): c.Tree = {
-      CSRROFieldRange(c)(bit, bit, rfn)
+      CSRROFieldRangeWithReset(c)(bit, bit, rfn, null)
     }
 
     @compileTimeOnly("")
     def CSRROFieldRangeNoFn(c: Context)(msb: c.Expr[Int], lsb: c.Expr[Int]): c.Tree = {
-      CSRROFieldRange(c)(msb, lsb, null)
+      CSRROFieldRangeWithReset(c)(msb, lsb, null, null)
+    }
+
+    @compileTimeOnly("")
+    def CSRROFieldRangeNoFnWithReset(c: Context)(msb: c.Expr[Int], lsb: c.Expr[Int], resetVal: c.Tree): c.Tree = {
+      CSRROFieldRangeWithReset(c)(msb, lsb, null, resetVal)
     }
 
     @compileTimeOnly("")
     def CSRROFieldBitNoFn(c: Context)(bit: c.Expr[Int]): c.Tree = {
-      CSRROFieldRange(c)(bit, bit, null)
+      CSRROFieldRangeWithReset(c)(bit, bit, null, null)
     }
 
     @compileTimeOnly("")
