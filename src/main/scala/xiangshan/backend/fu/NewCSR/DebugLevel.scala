@@ -13,7 +13,7 @@ import xiangshan.backend.fu.NewCSR.CSRFunc._
 
 import scala.collection.immutable.SeqMap
 
-trait CSRDebugTrigger { self: NewCSR =>
+trait DebugLevel { self: NewCSR =>
   val dcsr = Module(new CSRModule("dcsr", new DcsrBundle))
     .setAddr(0x7B0)
 
@@ -33,12 +33,12 @@ trait CSRDebugTrigger { self: NewCSR =>
     dscratch1,
   )
 
-  val debugCSRMap = SeqMap.from(
-    debugCSRMods.map(csr => (csr.addr -> (csr.w -> csr.rdata.asInstanceOf[CSRBundle].asUInt))).iterator
+  val debugCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_ <: CSRBundle], UInt)] = SeqMap.from(
+    debugCSRMods.map(csr => csr.addr -> (csr.w -> csr.rdata.asInstanceOf[CSRBundle].asUInt)).iterator
   )
 
   val debugCSROutMap: SeqMap[Int, UInt] = SeqMap.from(
-    debugCSRMods.map(csr => (csr.addr -> csr.regOut.asInstanceOf[CSRBundle].asUInt)).iterator
+    debugCSRMods.map(csr => csr.addr -> csr.regOut.asInstanceOf[CSRBundle].asUInt).iterator
   )
 }
 

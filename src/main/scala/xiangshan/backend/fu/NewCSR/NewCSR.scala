@@ -43,7 +43,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   with HasExternalInterruptBundle
   with SupervisorMachineAliasConnect
   with CSREvents
-  with CSRDebugTrigger
+  with DebugLevel
   with CSRCustom
 {
 
@@ -157,11 +157,35 @@ class NewCSR(implicit val p: Parameters) extends Module
   val isDret = io.dret
   val isWfi  = io.wfi
 
-  var csrRwMap = machineLevelCSRMap ++ supervisorLevelCSRMap ++ hypervisorCSRMap ++ virtualSupervisorCSRMap ++ unprivilegedCSRMap ++ aiaCSRMap ++ debugCSRMap ++ customCSRMap
+  var csrRwMap =
+    machineLevelCSRMap ++
+    supervisorLevelCSRMap ++
+    hypervisorCSRMap ++
+    virtualSupervisorCSRMap ++
+    unprivilegedCSRMap ++
+    debugCSRMap ++
+    aiaCSRMap ++
+    customCSRMap
 
-  val csrMods = machineLevelCSRMods ++ supervisorLevelCSRMods ++ hypervisorCSRMods ++ virtualSupervisorCSRMods ++ unprivilegedCSRMods ++ aiaCSRMods ++ debugCSRMods ++ customCSRMods
+  val csrMods =
+    machineLevelCSRMods ++
+    supervisorLevelCSRMods ++
+    hypervisorCSRMods ++
+    virtualSupervisorCSRMods ++
+    unprivilegedCSRMods ++
+    debugCSRMods ++
+    aiaCSRMods ++
+    customCSRMods
 
-  var csrOutMap = machineLevelCSROutMap ++ supervisorLevelCSROutMap ++ hypervisorCSROutMap ++ virtualSupervisorCSROutMap ++ unprivilegedCSROutMap ++ aiaCSROutMap ++ debugCSROutMap ++ customCSROutMap
+  var csrOutMap =
+    machineLevelCSROutMap ++
+    supervisorLevelCSROutMap ++
+    hypervisorCSROutMap ++
+    virtualSupervisorCSROutMap ++
+    unprivilegedCSROutMap ++
+    debugCSROutMap ++
+    aiaCSROutMap ++
+    customCSROutMap
 
   val trapHandleMod = Module(new TrapHandleModule)
 
