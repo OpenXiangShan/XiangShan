@@ -20,6 +20,7 @@ import org.chipsalliance.cde.config
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import device.MsiInfoBundle
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tile.HasFPUParameters
 import system.HasSoCParameter
@@ -76,8 +77,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   with HasSoCParameter {
   val io = IO(new Bundle {
     val hartId = Input(UInt(hartIdLen.W))
-    val setIpNumValidVec2 = Input(UInt(SetIpNumValidSize.W))
-    val setIpNum = Input(UInt(log2Up(NumIRSrc).W))
+    val msiInfo = Input(ValidIO(new MsiInfoBundle))
     val reset_vector = Input(UInt(PAddrBits.W))
     val cpu_halt = Output(Bool())
     val l2_pf_enable = Output(Bool())
@@ -109,8 +109,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   frontend.io.fencei <> backend.io.fenceio.fencei
 
   backend.io.fromTop.hartId := memBlock.io.inner_hartId
-  backend.io.fromTop.setIpNumValidVec2 := io.setIpNumValidVec2
-  backend.io.fromTop.setIpNum := io.setIpNum
+  backend.io.fromTop.msiInfo := io.msiInfo
   backend.io.fromTop.externalInterrupt := memBlock.io.externalInterrupt
 
   backend.io.frontendCsrDistributedUpdate := frontend.io.csrUpdate
