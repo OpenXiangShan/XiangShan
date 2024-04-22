@@ -1,13 +1,12 @@
 package xiangshan.backend.fu.NewCSR
 
 import chisel3._
-import xiangshan.backend.fu.NewCSR.CSRDefines._
-import xiangshan.backend.fu.NewCSR.CSRDefines.{
-  CSRWARLField => WARL,
-  CSRROField => RO,
-}
+import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRROField => RO, CSRRWField => RW, CSRWARLField => WARL}
 import xiangshan.backend.fu.NewCSR.CSRFunc._
 import xiangshan.backend.fu.vector.Bundles._
+import xiangshan.backend.fu.NewCSR.CSRConfig._
+import xiangshan.backend.fu.fpu.Bundles.{Fflags, Frm}
+import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast._
 
 import scala.collection.immutable.SeqMap
 
@@ -20,22 +19,22 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     val DZ = WARL(3, wNoFilter)
     val NV = WARL(4, wNoFilter)
     val FRM = WARL(7, 5, wNoFilter)
-  }) {
-    val wAliasFflags = IO(Input(new CSRAddrWriteBundle(new CSRBundle {
-      val NX = WARL(0, wNoFilter)
-      val UF = WARL(1, wNoFilter)
-      val OF = WARL(2, wNoFilter)
-      val DZ = WARL(3, wNoFilter)
-      val NV = WARL(4, wNoFilter)
-    })))
-    val wAliasFfm = IO(Input(new CSRAddrWriteBundle(new CSRBundle {
-      val FRM = WARL(2, 0, wNoFilter)
-    })))
-    val fflags = IO(Output(UInt(64.W)))
-    val frm = IO(Output(UInt(64.W)))
+  }) with HasRobCommitBundle {
+    val wAliasFflags = IO(Input(new CSRAddrWriteBundle(new CSRFFlagsBundle)))
+    val wAliasFfm = IO(Input(new CSRAddrWriteBundle(new CSRFrmBundle)))
+    val fflags = IO(Output(Fflags()))
+    val frm = IO(Output(Frm()))
 
     // write connection
     this.wfn(reg)(Seq(wAliasFflags, wAliasFfm))
+
+    when (robCommit.fflags.valid) {
+      reg.NX := robCommit.fflags.bits(0) || reg.NX
+      reg.UF := robCommit.fflags.bits(1) || reg.UF
+      reg.OF := robCommit.fflags.bits(2) || reg.OF
+      reg.DZ := robCommit.fflags.bits(3) || reg.DZ
+      reg.NV := robCommit.fflags.bits(4) || reg.NV
+    }
 
     // read connection
     fflags := reg.asUInt(4, 0)
@@ -43,18 +42,28 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
   }).setAddr(0x003)
 
   // vec
-  val vstart = Module(new CSRModule("vstart"))
+  val vstart = Module(new CSRModule("Vstart", new CSRBundle {
+    val vstart = RW(VlWidth - 2, 0) // hold [0, 128)
+  }) with HasRobCommitBundle {
+    // Todo make The use of vstart values greater than the largest element index for the current SEW setting is reserved.
+    // Not trap
+    when (wen && this.w.wdata < VLEN.U) {
+      reg.vstart := this.w.wdata(VlWidth - 2, 0)
+    }.elsewhen (robCommit.vstart.valid) {
+      reg.vstart := robCommit.vstart.bits
+    }
+  })
     .setAddr(0x008)
 
   val vcsr = Module(new CSRModule("Vcsr", new CSRBundle {
-    val VXSAT = WARL(0, wNoFilter)
-    val VXRM  = WARL(2, 1, wNoFilter)
-  }) {
+    val VXSAT = RW(   0)
+    val VXRM  = RW(2, 1)
+  }) with HasRobCommitBundle {
     val wAliasVxsat = IO(Input(new CSRAddrWriteBundle(new CSRBundle {
-      val VXSAT = WARL(0, wNoFilter)
+      val VXSAT = RW(0)
     })))
     val wAlisaVxrm = IO(Input(new CSRAddrWriteBundle(new CSRBundle {
-      val VXRM = WARL(1, 0, wNoFilter)
+      val VXRM = RW(1, 0)
     })))
     val vxsat = IO(Output(Vxsat()))
     val vxrm  = IO(Output(Vxrm()))
@@ -62,18 +71,34 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     // write connection
     this.wfn(reg)(Seq(wAliasVxsat, wAlisaVxrm))
 
+    when(robCommit.vxsat.valid) {
+      reg.VXSAT := reg.VXSAT.asBool || robCommit.vxsat.bits.asBool
+    }
+
     // read connection
     vxsat := reg.VXSAT.asUInt
     vxrm  := reg.VXRM.asUInt
   }).setAddr(0x00F)
 
-  val vl = Module(new CSRModule("vl"))
+  val vl = Module(new CSRModule("Vl", new CSRBundle {
+    val VL = RO(VlWidth - 1, 0)
+  }) with HasRobCommitBundle {
+    when (robCommit.vl.valid) {
+      reg.VL := robCommit.vl.bits
+    }
+  })
     .setAddr(0xC20)
 
-  val vtype = Module(new CSRModule("vtype", new VtypeBundle))
+  val vtype = Module(new CSRModule("Vtype", new CSRVTypeBundle) with HasRobCommitBundle {
+    when(robCommit.vtype.valid) {
+      reg := robCommit.vtype.bits
+    }
+  })
     .setAddr(0xC21)
 
-  val vlenb = Module(new CSRModule("vlenb"))
+  val vlenb = Module(new CSRModule("Vlenb", new CSRBundle {
+    val VLENB = VlenbField(63, 0).withReset(VlenbField.init)
+  }))
     .setAddr(0xC22)
 
   val unprivilegedCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], Data)] = SeqMap(
@@ -112,10 +137,26 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
   )
 }
 
-class VtypeBundle extends CSRBundle {
+class CSRVTypeBundle extends CSRBundle {
   val VILL  = RO(  63)
   val VMA   = RO(   7)
   val VTA   = RO(   6)
   val VSEW  = RO(5, 3)
   val VLMUL = RO(2, 0)
+}
+
+class CSRFrmBundle extends CSRBundle {
+  val FRM = WARL(2, 0, wNoFilter)
+}
+
+class CSRFFlagsBundle extends CSRBundle {
+  val NX = WARL(0, wNoFilter)
+  val UF = WARL(1, wNoFilter)
+  val OF = WARL(2, wNoFilter)
+  val DZ = WARL(3, wNoFilter)
+  val NV = WARL(4, wNoFilter)
+}
+
+object VlenbField extends CSREnum with ROApply {
+  val init = Value((VLEN / 8).U)
 }

@@ -2,14 +2,16 @@ package xiangshan.backend.fu.NewCSR
 
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.rocket.CSRs
 import org.chipsalliance.cde.config.Parameters
 import top.{ArgParser, Generator}
-import xiangshan.{HasXSParameter, XSCoreParamsKey, XSTileKey}
-import xiangshan.backend.fu.NewCSR.CSRBundles.PrivState
-import xiangshan.backend.fu.NewCSR.CSRDefines.{PrivMode, VirtMode}
+import xiangshan.backend.fu.NewCSR.CSRBundles.{PrivState, RobCommitCSR}
+import xiangshan.backend.fu.NewCSR.CSRDefines.{ContextStatus, PrivMode, VirtMode}
+import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast._
 import xiangshan.backend.fu.NewCSR.CSREvents.{CSREvents, DretEventSinkBundle, EventUpdatePrivStateOutput, MretEventSinkBundle, SretEventSinkBundle, TrapEntryEventInput, TrapEntryHSEventSinkBundle, TrapEntryMEventSinkBundle, TrapEntryVSEventSinkBundle}
-import xiangshan.backend.fu.fpu.Bundles.{Fflags, Frm}
-import xiangshan.backend.fu.vector.Bundles.{Vxrm, Vxsat}
+import xiangshan.backend.fu.fpu.Bundles.Frm
+import xiangshan.backend.fu.vector.Bundles.{Vl, Vxrm, Vxsat}
+import xiangshan.{HasXSParameter, XSCoreParamsKey, XSTileKey}
 
 object CSRConfig {
   final val GEILEN = 63
@@ -30,6 +32,13 @@ object CSRConfig {
   final val VaddrMaxWidth = 41 // only Sv39 and Sv39x4
 
   final val XLEN = 64 // Todo: use XSParams
+
+  final val VLEN = 128
+
+  // Since we need macro to compute the width of CSR field, the input of macro should be the value that can be computed
+  // at compile time. The log2Up function cannot be used as meta-programming function, so we use litral value here
+  // log2Up(128 + 1), hold 0~128
+  final val VlWidth = 8
 }
 
 class NewCSR(implicit val p: Parameters) extends Module
@@ -69,14 +78,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         val crossPageIPFFix = Bool()
         val isInterrupt = Bool()
       })
-      val commit = new Bundle {
-        val fflags = ValidIO(Fflags())
-        val fsDirty = Bool()
-        val vxsat = ValidIO(Vxsat())
-        val vsDirty = Bool()
-        val commitValid = Bool()
-        val commitInstRet = UInt(8.W)
-      }
+      val commit = Input(new RobCommitCSR)
     })
     val mret = Input(Bool())
     val sret = Input(Bool())
@@ -95,19 +97,26 @@ class NewCSR(implicit val p: Parameters) extends Module
       val wfi_event = Bool()
       val disableSfence = Bool()
       // fp
-      val frm = Frm()
+      val fpState = new Bundle {
+        val off = Bool()
+        val frm = Frm()
+      }
       // vec
-      val vstart = UInt(XLEN.W)
-      val vxsat = Vxsat()
-      val vxrm  = Vxrm()
-      val vcsr  = UInt(XLEN.W)
-      val vl    = UInt(XLEN.W)
-      val vtype = UInt(XLEN.W)
-      val vlenb = UInt(XLEN.W)
+      val vecState = new Bundle {
+        val vstart = Vl()
+        val vxsat = Vxsat()
+        val vxrm = Vxrm()
+        val vcsr = UInt(XLEN.W)
+        val vl = Vl()
+        val vtype = UInt(XLEN.W)
+        val vlenb = UInt(XLEN.W)
+        val off = Bool()
+      }
       // perf
       val isPerfCnt = Bool()
       // debug
       val debugMode = Bool()
+      val singleStepFlag = Bool()
     })
     // tlb
     val tlb = Output(new Bundle {
@@ -148,8 +157,14 @@ class NewCSR(implicit val p: Parameters) extends Module
   val trapIsInterrupt = io.fromRob.trap.bits.isInterrupt
   val trapIsCrossPageIPF = io.fromRob.trap.bits.crossPageIPFFix
 
+  // CSR Privilege State
   val PRVM = RegInit(PrivMode(0), PrivMode.M)
   val V = RegInit(VirtMode(0), VirtMode.Off)
+  val debugMode = RegInit(false.B)
+
+  val permitMod = Module(new CSRPermitModule)
+
+  private val wenLegal = wen && !permitMod.io.out.illegal
 
   val isCSRAccess = io.in.ren || io.in.wen
   val isSret = io.sret
@@ -205,9 +220,26 @@ class NewCSR(implicit val p: Parameters) extends Module
   val entryPrivState = trapHandleMod.io.out.entryPrivState
 
   for ((id, (wBundle, _)) <- csrRwMap) {
-    wBundle.wen := wen && addr === id.U
+    wBundle.wen := wenLegal && addr === id.U
     wBundle.wdata := wdata
   }
+
+  // Todo: support set dirty only when fcsr has changed
+  private val writeFpState = wenLegal && Seq(CSRs.fflags, CSRs.frm, CSRs.fcsr).map(_.U === addr).reduce(_ || _)
+  private val writeVecState = wenLegal && Seq(CSRs.vstart, CSRs.vxsat, CSRs.vxrm, CSRs.vcsr).map(_.U === addr).reduce(_ || _)
+
+  permitMod.io.in.csrAccess.valid := isCSRAccess
+  permitMod.io.in.csrAccess.bits.wen := wen
+  permitMod.io.in.csrAccess.bits.addr := addr
+
+  permitMod.io.in.privState.V := V
+  permitMod.io.in.privState.PRVM := PRVM
+
+  permitMod.io.in.mret := isMret
+  permitMod.io.in.sret := isSret
+
+  permitMod.io.in.status.tsr := false.B
+  permitMod.io.in.status.vtsr := false.B
 
   csrMods.foreach { mod =>
     mod match {
@@ -247,9 +279,10 @@ class NewCSR(implicit val p: Parameters) extends Module
       case _ =>
     }
     mod match {
-      case m: HasInstCommitBundle =>
-        m.commitValid   := io.fromRob.commit.commitValid
-        m.commitInstNum := io.fromRob.commit.commitInstRet
+      case m: HasRobCommitBundle =>
+        m.robCommit := io.fromRob.commit
+        m.robCommit.fsDirty := io.fromRob.commit.fsDirty || writeFpState
+        m.robCommit.vsDirty := io.fromRob.commit.vsDirty || writeVecState
       case _ =>
     }
     mod match {
@@ -384,20 +417,27 @@ class NewCSR(implicit val p: Parameters) extends Module
   )
 
   // perf
-  val addrInPerfCnt = (addr >= mcycle.addr.U) && (addr <= mhpmcounters.last.addr.U) ||
+  val addrInPerfCnt = (addr >= CSRs.mcycle.U) && (addr <= CSRs.mhpmcounter31.U) ||
     (addr >= mcountinhibit.addr.U) && (addr <= mhpmevents.last.addr.U) ||
-    addr === mip.addr.U
-    // (addr >= cycle.addr.U) && (addr <= hpmcounters.last.addr.U) // User
+    (addr >= CSRs.cycle.U) && (addr <= CSRs.hpmcounter31.U) ||
+    (addr === CSRs.mip.U) ||
+    (addr === CSRs.hip.U)
+  // Todo: may be vsip and sip
 
   // flush
-  val resetSatp = addr === satp.addr.U && wen // write to satp will cause the pipeline be flushed
-  val wFcsrChangeRM = addr === fcsr.addr.U && wen && wdata(7, 5) =/= fcsr.frm
-  val wFrmChangeRM  = addr === 2.U && wen && wdata(7, 5) =/= fcsr.frm
+  val resetSatp = addr === satp.addr.U && wenLegal // write to satp will cause the pipeline be flushed
+
+  val wFcsrChangeRM = addr === fcsr.addr.U && wenLegal && wdata(7, 5) =/= fcsr.frm
+  val wFrmChangeRM  = addr === CSRs.frm.U  && wenLegal && wdata(2, 0) =/= fcsr.frm
   val frmChange = wFcsrChangeRM || wFrmChangeRM
-  val flushPipe = resetSatp || frmChange
+
+  val wVcsrChangeRM = addr === CSRs.vcsr.U && wenLegal && wdata(2, 1) =/= vcsr.vxrm
+  val wVxrmChangeRM = addr === CSRs.vxrm.U && wenLegal && wdata(1, 0) =/= vcsr.vxrm
+  val vxrmChange = wVcsrChangeRM || wVxrmChangeRM
+
+  val flushPipe = resetSatp || frmChange || vxrmChange
 
   // debug
-  val debugMode = RegInit(false.B)
   val debugIntrEnable = RegInit(true.B) // debug interrupt will be handle only when debugIntrEnable
   debugMode := dretEvent.out.debugMode
   debugIntrEnable := dretEvent.out.debugIntrEnable
@@ -426,37 +466,43 @@ class NewCSR(implicit val p: Parameters) extends Module
     (raddr === id.U) -> regOut
   })
 
+  private val hasEvent = mretEvent.out.targetPc.valid || sretEvent.out.targetPc.valid || dretEvent.out.targetPc.valid ||
+    trapEntryMEvent.out.targetPc.valid || trapEntryHSEvent.out.targetPc.valid || trapEntryVSEvent.out.targetPc.valid
+
   io.out.EX_II     := false.B // Todo
   io.out.EX_VI     := false.B // Todo
-  io.out.flushPipe := false.B // Todo
+  io.out.flushPipe := flushPipe
 
   io.out.rData := Mux(ren, rdata, 0.U)
   io.out.regOut := regOut
-  io.out.targetPc := Mux1H(Seq(
+  io.out.targetPc := RegEnable(Mux1H(Seq(
     mretEvent.out.targetPc.valid -> mretEvent.out.targetPc.bits,
     sretEvent.out.targetPc.valid -> sretEvent.out.targetPc.bits,
     dretEvent.out.targetPc.valid -> dretEvent.out.targetPc.bits,
     trapEntryMEvent.out.targetPc.valid -> trapEntryMEvent.out.targetPc.bits,
     trapEntryHSEvent.out.targetPc.valid -> trapEntryHSEvent.out.targetPc.bits,
     trapEntryVSEvent.out.targetPc.valid -> trapEntryVSEvent.out.targetPc.bits,
-  ))
+  )), hasEvent)
 
   io.out.privState.PRVM := PRVM
   io.out.privState.V    := V
 
-  io.out.frm := fcsr.frm
-  io.out.vstart := vstart.rdata.asUInt
-  io.out.vxsat := vcsr.vxsat
-  io.out.vxrm := vcsr.vxrm
-  io.out.vcsr := vcsr.rdata.asUInt
-  io.out.vl := vl.rdata.asUInt
-  io.out.vtype := vtype.rdata.asUInt
-  io.out.vlenb := vlenb.rdata.asUInt
+  io.out.fpState.frm := fcsr.frm
+  io.out.fpState.off := mstatus.rdata.FS === ContextStatus.Off
+  io.out.vecState.vstart := vstart.rdata.asUInt
+  io.out.vecState.vxsat := vcsr.vxsat
+  io.out.vecState.vxrm := vcsr.vxrm
+  io.out.vecState.vcsr := vcsr.rdata.asUInt
+  io.out.vecState.vl := vl.rdata.asUInt
+  io.out.vecState.vtype := vtype.rdata.asUInt // Todo: check correct
+  io.out.vecState.vlenb := vlenb.rdata.asUInt
+  io.out.vecState.off := mstatus.rdata.VS === ContextStatus.Off
   io.out.isPerfCnt := addrInPerfCnt
   io.out.interrupt := intrBitSet
   io.out.wfi_event := debugIntr || (mie.rdata.asUInt & mip.rdata.asUInt).orR
   io.out.debugMode := debugMode
   io.out.disableSfence := tvmNotPermit || PRVM === PrivMode.U
+  io.out.singleStepFlag := !debugMode && dcsr.rdata.STEP
 
   // Todo: record the last address to avoid xireg is different with xiselect
   toAIA.addr.valid := isCSRAccess && Seq(miselect, siselect, vsiselect).map(
