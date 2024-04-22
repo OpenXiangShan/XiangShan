@@ -256,8 +256,14 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       // rename single step
       custom.singlestep := csrMod.io.out.singleStepFlag
       // trigger
-      custom.frontend_trigger := DontCare
-      custom.mem_trigger := DontCare
+      custom.frontend_trigger.tUpdate.valid := DontCare
+      custom.frontend_trigger.tUpdate.bits.addr := csrMod.tselect.rdata.asUInt
+      custom.frontend_trigger.tUpdate.bits.tdata := DontCare
+      custom.frontend_trigger.tEnableVec := DontCare
+      custom.mem_trigger.tUpdate.valid := DontCare
+      custom.mem_trigger.tUpdate.bits.addr := csrMod.tselect.rdata.asUInt
+      custom.mem_trigger.tUpdate.bits.tdata := DontCare
+      custom.mem_trigger.tEnableVec := DontCare
   }
 }
 
