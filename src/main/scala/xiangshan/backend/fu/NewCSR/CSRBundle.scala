@@ -45,7 +45,7 @@ abstract class CSRBundle extends Bundle {
   def init: this.type = {
     val init = Wire(this)
     init.elements.foreach { case (str, field: CSREnumType) =>
-      field := (if (field.init.nonEmpty) field.init.get else field.factory(0.U))
+      field := (if (field.init != null) field.init else field.factory(0.U))
     }
     init.asInstanceOf[this.type]
   }

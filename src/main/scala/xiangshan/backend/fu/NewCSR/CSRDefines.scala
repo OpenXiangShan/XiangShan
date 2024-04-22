@@ -202,6 +202,10 @@ object CSRDefines {
     def apply(msb: Int, lsb: Int): CSREnumType = macro CSRFieldsImpl.CSRRWFieldRange
 
     def apply(bit: Int): CSREnumType = macro CSRFieldsImpl.CSRRWFieldBit
+
+    def apply(msb: Int, lsb: Int, resetVal: Data): CSREnumType = macro CSRFieldsImpl.CSRRWFieldRangeWithReset
+
+    def apply(bit: Int, resetVal: Data): CSREnumType = macro CSRFieldsImpl.CSRRWFieldBitWithReset
   }
 
   object CSRWARLRefField {

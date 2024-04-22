@@ -290,7 +290,7 @@ class MisaBundle extends CSRBundle {
   val Z = RO(25).withReset(0.U) // Reserved
   val MXL = XLENField(63, 62).withReset(XLENField.XLEN64)
 
-  def getISAString = this.getFields.filter(x => x != MXL && x.init.get.litValue == 1).sortBy(_.lsb).map(x => ('A' + x.msb).toChar).mkString
+  def getISAString = this.getFields.filter(x => x != MXL && x.init.litValue == 1).sortBy(_.lsb).map(x => ('A' + x.msb).toChar).mkString
 }
 
 class MedelegBundle extends ExceptionBundle {
