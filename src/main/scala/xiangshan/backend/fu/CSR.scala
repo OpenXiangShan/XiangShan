@@ -388,27 +388,15 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     vsstatusNew
   }
   val mstatusWMask = (~ZeroExt((
-    (if(HasHExtension) {
-      GenMask(XLEN - 2, 40) |
-      GenMask(37, 36)          // MBE SBE
-    } else
-      GenMask(63)           | // SD is read-only
-    GenMask(62, 36)      ) | // WPRI
+    GenMask(63)           | // SD is read-only
+    (if(HasHExtension)
+        GenMask(62, 40)    // WPRI
+      else
+        GenMask(62, 38)  )| // WPRI
     GenMask(35, 32)       | // SXL and UXL cannot be changed
     GenMask(31, 23)       | // WPRI
     GenMask(16, 15)       | // XS is read-only
     GenMask(6)            | // UBE, always little-endian (0)
-    GenMask(2)              // WPRI
-  ), 64)).asUInt
-  val mstatusMask = (~ZeroExt((
-    (if (HasHExtension) {
-      GenMask(XLEN - 2, 40) |
-        GenMask(37, 36) // MBE SBE
-    } else
-      GenMask(XLEN - 2, 36)) | // WPRI
-    GenMask(31, 23)       | // WPRI
-    GenMask(10, 9)        | // WPRI
-    GenMask(6)            | // WPRI
     GenMask(4)            | // WPRI
     GenMask(2)            | // WPRI
     GenMask(0)              // WPRI
