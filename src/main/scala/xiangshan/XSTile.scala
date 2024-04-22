@@ -24,6 +24,7 @@ import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.amba.axi4._
+import device.MsiInfoBundle
 import system.HasSoCParameter
 import top.{BusPerfMonitor, ArgParser, Generator}
 import utility.{DelayN, ResetGen, TLClientsMerger, TLEdgeBuffer, TLLogger, Constantin, ChiselDB, FileRegisters}
@@ -74,7 +75,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       })
     case None =>
   }
-  
+
   val core_l3_tpmeta_source_port = l2top.l2cache match {
     case Some(l2) => l2.tpmeta_source_node
     case None => None
@@ -92,8 +93,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   class XSTileImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
     val io = IO(new Bundle {
       val hartId = Input(UInt(hartIdLen.W))
-      val setIpNumValidVec2 = Input(UInt(SetIpNumValidSize.W))
-      val setIpNum = Input(UInt(log2Up(NumIRSrc).W))
+      val msiInfo = Input(ValidIO(new MsiInfoBundle))
       val reset_vector = Input(UInt(PAddrBits.W))
       val cpu_halt = Output(Bool())
       val debugTopDown = new Bundle {
@@ -105,8 +105,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     })
 
     dontTouch(io.hartId)
-    dontTouch(io.setIpNumValidVec2)
-    dontTouch(io.setIpNum)
+    dontTouch(io.msiInfo)
     if (!io.chi.isEmpty) { dontTouch(io.chi.get) }
 
     val core_soft_rst = core_reset_sink.in.head._1 // unused
@@ -114,8 +113,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     l2top.module.hartId.fromTile := io.hartId
     core.module.io.hartId := l2top.module.hartId.toCore
     core.module.io.reset_vector := l2top.module.reset_vector.toCore
-    core.module.io.setIpNumValidVec2 := io.setIpNumValidVec2
-    core.module.io.setIpNum := io.setIpNum
+    core.module.io.msiInfo := io.msiInfo
     l2top.module.reset_vector.fromTile := io.reset_vector
     l2top.module.cpu_halt.fromCore := core.module.io.cpu_halt
     io.cpu_halt := l2top.module.cpu_halt.toTile

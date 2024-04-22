@@ -10,10 +10,14 @@ class IMSIC(
   XLEN: Int = 64,
   NumIRSrc: Int = 256,
 ) extends Module {
+  private val NR_SRC_WIDTH = log2Up(NumIRSrc)
+  private val NR_HARTS_WIDTH = log2Up(NumHart)
+  private val INTP_FILE_WIDTH = log2Up(NumIRFiles)
+  private val MSI_INFO_WIDTH = NR_HARTS_WIDTH + INTP_FILE_WIDTH + NR_SRC_WIDTH
+
   // has default clock and reset
   val i = IO(Input(new Bundle {
-    val setIpNumValidVec2 = UInt((NumHart * NumIRFiles).W)
-    val setIpNum          = ValidIO(UInt(log2Up(NumIRSrc).W))
+    val msiInfo           = ValidIO(new MsiInfoBundle(NumIRFiles = NumIRFiles, NumHart = NumHart, NumIRSrc = NumIRSrc))
     val hartId            = UInt(log2Up(NumHart).W)
     val csr = new Bundle {
       val addr = ValidIO(new Bundle {
@@ -42,13 +46,18 @@ class IMSIC(
     val vstopei = ValidIO(UInt(32.W))
   }))
 
-  val imsicTop = Module(new imsic_csr_top)
+  val imsicTop = Module(new imsic_csr_top(
+    NumIRFiles = this.NumIRFiles,
+    NumHart = this.NumHart,
+    XLEN = this.XLEN,
+    NumIRSrc = this.NumIRSrc,
+  ))
 
   imsicTop.io.csr_clk         := clock
   imsicTop.io.csr_rstn        := reset
   imsicTop.io.hart_id         := i.hartId
-  imsicTop.io.i.setipnum_vld  := i.setIpNumValidVec2
-  imsicTop.io.i.setipnum      := i.setIpNum.bits
+  imsicTop.io.i.msi_info_vld  := i.msiInfo.valid
+  imsicTop.io.i.msi_info      := i.msiInfo.bits.info
   imsicTop.io.i.csr.addr_vld  := i.csr.addr.valid
   imsicTop.io.i.csr.addr      := i.csr.addr.bits.addr
   imsicTop.io.i.csr.priv_lvl  := i.csr.addr.bits.prvm
@@ -71,26 +80,30 @@ class IMSIC(
 
 class imsic_csr_top(
   NumIRFiles: Int = 7,
-  NumIRSrc: Int = 256,
-  NumHart: Int = 64,
   XLEN: Int = 64,
+  NumIRSrc: Int = 256,
+  NumHart: Int = 4,
+  EidVldDlyNum: Int = 0,
 ) extends BlackBox(Map(
-  "NR_INTP_FILES" -> NumIRFiles,
-  "NR_HARTS"      -> NumHart,
-  "XLEN"          -> XLEN,
-  "NR_SRC"        -> NumIRSrc,
+  "NR_INTP_FILES"  -> NumIRFiles,
+  "NR_HARTS"       -> NumHart,
+  "XLEN"           -> XLEN,
+  "NR_SRC"         -> NumIRSrc,
+  "EID_VLD_DLY_NUM"-> EidVldDlyNum,
 )) with HasBlackBoxResource {
-  private val HART_ID_WIDTH = log2Up(NumHart)
   private val NR_SRC_WIDTH = log2Up(NumIRSrc)
+  private val NR_HARTS_WIDTH = log2Up(NumHart)
+  private val INTP_FILE_WIDTH = log2Up(NumIRFiles)
+  private val MSI_INFO_WIDTH = NR_HARTS_WIDTH + INTP_FILE_WIDTH + NR_SRC_WIDTH
 
   val io = IO(new Bundle {
     val csr_clk = Input(Clock())
     val csr_rstn = Input(Reset())
-    val hart_id = Input(UInt(HART_ID_WIDTH.W))
+    val hart_id = Input(UInt(NR_HARTS_WIDTH.W))
 
     val i = Input(new Bundle {
-      val setipnum_vld = UInt((NumHart * NumIRFiles).W)
-      val setipnum = UInt(NR_SRC_WIDTH.W)
+      val msi_info = UInt(MSI_INFO_WIDTH.W)
+      val msi_info_vld = Bool()
       val csr = new Bundle {
         val addr_vld = Bool()
         val addr = UInt(12.W)
@@ -117,5 +130,20 @@ class imsic_csr_top(
   })
 
   addResource("/vsrc/imsic/imsic_csr_top.v")
+  addResource("/vsrc/imsic/imsic_csr_gate.v")
+  addResource("/vsrc/imsic/imsic_csr_reg.v")
+  addResource("/vsrc/cmip_dff_sync.sv")
 }
 
+class MsiInfoBundle(
+  NumIRFiles: Int = 7,
+  NumHart: Int = 64,
+  NumIRSrc: Int = 256,
+) extends Bundle {
+  private val NR_SRC_WIDTH = log2Up(NumIRSrc)
+  private val NR_HARTS_WIDTH = log2Up(NumHart)
+  private val INTP_FILE_WIDTH = log2Up(NumIRFiles)
+  private val MSI_INFO_WIDTH = NR_HARTS_WIDTH + INTP_FILE_WIDTH + NR_SRC_WIDTH
+
+  val info = UInt(MSI_INFO_WIDTH.W)
+}

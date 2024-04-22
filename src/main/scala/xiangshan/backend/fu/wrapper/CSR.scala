@@ -124,9 +124,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   private val imsic = Module(new IMSIC)
   imsic.i.hartId := io.csrin.get.hartId
-  imsic.i.setIpNumValidVec2 := io.csrin.get.setIpNumValidVec2
-  imsic.i.setIpNum.valid := true.B // Todo:
-  imsic.i.setIpNum.bits := io.csrin.get.setIpNum // Todo:
+  imsic.i.msiInfo := io.csrin.get.msiInfo
   imsic.i.csr.addr.valid := csrMod.toAIA.addr.valid
   imsic.i.csr.addr.bits.addr := csrMod.toAIA.addr.bits.addr
   imsic.i.csr.addr.bits.prvm := csrMod.toAIA.addr.bits.prvm.asUInt
@@ -288,6 +286,5 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
 class CSRInput(implicit p: Parameters) extends XSBundle with HasSoCParameter{
   val hartId = Input(UInt(8.W))
-  val setIpNumValidVec2 = Input(UInt(SetIpNumValidSize.W))
-  val setIpNum = Input(UInt(log2Up(NumIRSrc).W))
+  val msiInfo = Input(ValidIO(new MsiInfoBundle))
 }

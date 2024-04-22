@@ -19,6 +19,7 @@ package xiangshan.backend
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import device.MsiInfoBundle
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import system.HasSoCParameter
 import utility.{Constantin, ZeroExt}
@@ -39,6 +40,7 @@ import xiangshan.backend.issue.{CancelNetwork, Scheduler, SchedulerImpBase}
 import xiangshan.backend.rob.{RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.frontend.{FtqPtr, FtqRead, PreDecodeInfo}
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
+
 import scala.collection.mutable
 
 class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyModule
@@ -397,8 +399,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
 
   private val csrin = intExuBlock.io.csrin.get
   csrin.hartId := io.fromTop.hartId
-  csrin.setIpNumValidVec2 := io.fromTop.setIpNumValidVec2
-  csrin.setIpNum := io.fromTop.setIpNum
+  csrin.msiInfo := io.fromTop.msiInfo
 
   private val csrio = intExuBlock.io.csrio.get
   csrio.hartId := io.fromTop.hartId
@@ -774,8 +775,7 @@ class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle 
   val fromTop = new Bundle {
     val hartId = Input(UInt(hartIdLen.W))
     val externalInterrupt = new ExternalInterruptIO
-    val setIpNumValidVec2 = Input(UInt(SetIpNumValidSize.W))
-    val setIpNum = Input(UInt(log2Up(NumIRSrc).W))
+    val msiInfo = Input(ValidIO(new MsiInfoBundle))
   }
 
   val toTop = new Bundle {
