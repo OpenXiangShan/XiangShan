@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.experimental.hierarchy.{Definition, instantiable}
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import utility.{DelayN, ClockGate}
+import utility.{ClockGate, DelayN}
 import utils._
 import xiangshan.backend.fu.{CSRFileIO, FenceIO, FuncUnitInput}
 import xiangshan.backend.Bundles.{ExuInput, ExuOutput, MemExuInput, MemExuOutput}
@@ -114,7 +114,6 @@ class ExeUnitImp(
         clk_en := true.B
       }
 
-      clk_en := ~clk_en
       fu.clock := ClockGate(false.B, clk_en, clock)
       XSPerfAccumulate(s"clock_gate_en_${fu.cfg.name}", clk_en)
     }
