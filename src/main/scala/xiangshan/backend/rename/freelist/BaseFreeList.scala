@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.backend.SnapshotGenerator
+import xiangshan.backend.rename.SnapshotGenerator
 import utils._
 import utility._
 
@@ -31,19 +31,19 @@ abstract class BaseFreeList(size: Int)(implicit p: Parameters) extends XSModule 
     val walk = Input(Bool())
 
     val allocateReq = Input(Vec(RenameWidth, Bool()))
-    val walkReq = Input(Vec(CommitWidth, Bool()))
+    val walkReq = Input(Vec(RabCommitWidth, Bool()))
     val allocatePhyReg = Output(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
     val canAllocate = Output(Bool())
     val doAllocate = Input(Bool())
 
-    val freeReq = Input(Vec(CommitWidth, Bool()))
-    val freePhyReg = Input(Vec(CommitWidth, UInt(PhyRegIdxWidth.W)))
+    val freeReq = Input(Vec(RabCommitWidth, Bool()))
+    val freePhyReg = Input(Vec(RabCommitWidth, UInt(PhyRegIdxWidth.W)))
 
-    val commit = Input(new RobCommitIO)
+    val commit = Input(new RabCommitIO)
 
     val snpt = Input(new SnapshotPort)
 
-    val debug_rat = Vec(32, Input(UInt(PhyRegIdxWidth.W)))
+    val debug_rat = if(backendParams.debugEn) Some(Vec(32, Input(UInt(PhyRegIdxWidth.W)))) else None
   })
 
   class FreeListPtr extends CircularQueuePtr[FreeListPtr](size)
@@ -57,7 +57,7 @@ abstract class BaseFreeList(size: Int)(implicit p: Parameters) extends XSModule 
     }
   }
 
-  val lastCycleRedirect = RegNext(io.redirect, false.B)
+  val lastCycleRedirect = GatedValidRegNext(io.redirect, false.B)
   val lastCycleSnpt = RegNext(io.snpt, 0.U.asTypeOf(io.snpt))
 
   val headPtr = RegInit(FreeListPtr(false, 0))
@@ -68,7 +68,7 @@ abstract class BaseFreeList(size: Int)(implicit p: Parameters) extends XSModule 
   // may shift [0, RenameWidth] steps
   val headPtrOHVec = VecInit.tabulate(RenameWidth + 1)(headPtrOHShift.left)
 
-  val snapshots = SnapshotGenerator(headPtr, io.snpt.snptEnq, io.snpt.snptDeq, io.redirect)
+  val snapshots = SnapshotGenerator(headPtr, io.snpt.snptEnq, io.snpt.snptDeq, io.redirect, io.snpt.flushVec)
 
   val redirectedHeadPtr = Mux(
     lastCycleSnpt.useSnpt,

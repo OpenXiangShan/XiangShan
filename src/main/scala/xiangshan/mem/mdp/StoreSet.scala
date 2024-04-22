@@ -23,6 +23,7 @@ import xiangshan._
 import utils._
 import utility._
 import xiangshan.backend.rob.RobPtr
+import xiangshan.backend.Bundles.DynInst
 
 // store set load violation predictor
 // See "Memory Dependence Prediction using Store Sets" for details
@@ -44,6 +45,7 @@ class SSITDataEntry(implicit p: Parameters) extends XSBundle {
 class SSIT(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
     // to decode
+    val ren = Vec(DecodeWidth, Input(Bool()))
     val raddr = Vec(DecodeWidth, Input(UInt(MemPredPCWidth.W))) // xor hashed decode pc(VaddrBits-1, 1)
     // to rename
     val rdata = Vec(RenameWidth, Output(new SSITEntry))
@@ -73,18 +75,21 @@ class SSIT(implicit p: Parameters) extends XSModule {
   val SSIT_UPDATE_STORE_WRITE_PORT = 1
   val SSIT_WRITE_PORT_NUM = 2
 
+  private def hasRen: Boolean = true
   val valid_array = Module(new SyncDataModuleTemplate(
     Bool(),
     SSITSize,
     SSIT_READ_PORT_NUM,
-    SSIT_WRITE_PORT_NUM
+    SSIT_WRITE_PORT_NUM,
+    hasRen = hasRen,
   ))
 
   val data_array = Module(new SyncDataModuleTemplate(
     new SSITDataEntry,
     SSITSize,
     SSIT_READ_PORT_NUM,
-    SSIT_WRITE_PORT_NUM
+    SSIT_WRITE_PORT_NUM,
+    hasRen = hasRen,
   ))
 
   // TODO: use SRAM or not?
@@ -115,6 +120,8 @@ class SSIT(implicit p: Parameters) extends XSModule {
     // io.rdata(i).strict := RegNext(strict(io.raddr(i)) && valid(io.raddr(i)))
 
     // read SSIT in decode stage
+    valid_array.io.ren.get(i) := io.ren(i)
+    data_array.io.ren.get(i) := io.ren(i)
     valid_array.io.raddr(i) := io.raddr(i)
     data_array.io.raddr(i) := io.raddr(i)
 
@@ -339,7 +346,7 @@ class LFST(implicit p: Parameters) extends XSModule {
     val redirect = Input(Valid(new Redirect))
     val dispatch = Flipped(new DispatchLFSTIO)
     // when store issued, mark store as invalid
-    val storeIssue = Vec(exuParameters.StuCnt, Flipped(Valid(new ExuInput)))
+    val storeIssue = Vec(backendParams.StaExuCnt, Flipped(Valid(new DynInst)))
     val csrCtrl = Input(new CustomCSRCtrlIO)
   })
 
@@ -383,11 +390,11 @@ class LFST(implicit p: Parameters) extends XSModule {
   }
 
   // when store is issued, mark it as invalid
-  (0 until exuParameters.StuCnt).map(i => {
+  (0 until backendParams.StaExuCnt).map(i => {
     // TODO: opt timing
     (0 until LFSTWidth).map(j => {
-      when(io.storeIssue(i).valid && io.storeIssue(i).bits.uop.cf.storeSetHit && io.storeIssue(i).bits.uop.robIdx.value === robIdxVec(io.storeIssue(i).bits.uop.cf.ssid)(j).value){
-        validVec(io.storeIssue(i).bits.uop.cf.ssid)(j) := false.B
+      when(io.storeIssue(i).valid && io.storeIssue(i).bits.storeSetHit && io.storeIssue(i).bits.robIdx.value === robIdxVec(io.storeIssue(i).bits.ssid)(j).value){
+        validVec(io.storeIssue(i).bits.ssid)(j) := false.B
       }
     })
   })

@@ -45,7 +45,8 @@ case class SoCParameters
     level = 3,
     ways = 8,
     sets = 2048 // 1MB per bank
-  ))
+  )),
+  XSTopPrefix: Option[String] = None
 ){
   // L3 configurations
   val L3InnerBusWidth = 256
@@ -318,12 +319,6 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     val rtcTick = RegInit(0.U(3.W))
     rtcTick := Cat(rtcTick(1, 0), rtc_clock)
     clint.module.io.rtcTick := rtcTick(1) && !rtcTick(2)
-
-    val freq = 100
-    val cnt = RegInit(freq.U)
-    val tick = cnt === 0.U
-    cnt := Mux(tick, freq.U, cnt - 1.U)
-    clint.module.io.rtcTick := tick
 
     val pll_ctrl_regs = Seq.fill(6){ RegInit(0.U(32.W)) }
     val pll_lock = RegNext(next = pll0_lock, init = false.B)

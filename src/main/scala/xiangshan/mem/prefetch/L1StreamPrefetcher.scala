@@ -119,7 +119,7 @@ class StreamPrefetchReqBundle(implicit p: Parameters) extends XSBundle with HasS
   val trigger_va = UInt(VAddrBits.W)
 
   // align prefetch vaddr and width to region
-  def getStreamPrefetchReqBundle(vaddr: UInt, width: Int, decr_mode: Bool, sink: UInt, source: UInt, t_pc: UInt, t_va: UInt): StreamPrefetchReqBundle = {
+  def getStreamPrefetchReqBundle(valid: Bool, vaddr: UInt, width: Int, decr_mode: Bool, sink: UInt, source: UInt, t_pc: UInt, t_va: UInt): StreamPrefetchReqBundle = {
     val res = Wire(new StreamPrefetchReqBundle)
     res.region := get_region_tag(vaddr)
     res.sink := sink
@@ -136,21 +136,21 @@ class StreamPrefetchReqBundle(implicit p: Parameters) extends XSBundle with HasS
       (0 until width).map{ case i => region_bit_vec << i}.reduce(_ | _)
     )
 
-    assert(PopCount(res.bit_vec) <= width.U, "actual prefetch block number should less than or equals to WIDTH_CACHE_BLOCKS")
-    assert(PopCount(res.bit_vec) >= 1.U, "at least one block should be included")
+    assert(!valid || PopCount(res.bit_vec) <= width.U, "actual prefetch block number should less than or equals to WIDTH_CACHE_BLOCKS")
+    assert(!valid || PopCount(res.bit_vec) >= 1.U, "at least one block should be included")
     assert(sink <= SINK_L3, "invalid sink")
     for(i <- 0 until BIT_VEC_WITDH) {
       when(decr_mode) {
         when(i.U > region_bits) {
-          assert(res.bit_vec(i) === 0.U, s"res.bit_vec(${i}) is not zero in decr_mode, prefetch vector is wrong!")
+          assert(!valid || res.bit_vec(i) === 0.U, s"res.bit_vec(${i}) is not zero in decr_mode, prefetch vector is wrong!")
         }.elsewhen(i.U === region_bits) {
-          assert(res.bit_vec(i) === 1.U, s"res.bit_vec(${i}) is zero in decr_mode, prefetch vector is wrong!")
+          assert(!valid || res.bit_vec(i) === 1.U, s"res.bit_vec(${i}) is zero in decr_mode, prefetch vector is wrong!")
         }
       }.otherwise {
         when(i.U < region_bits) {
-          assert(res.bit_vec(i) === 0.U, s"res.bit_vec(${i}) is not zero in incr_mode, prefetch vector is wrong!")
+          assert(!valid || res.bit_vec(i) === 0.U, s"res.bit_vec(${i}) is not zero in incr_mode, prefetch vector is wrong!")
         }.elsewhen(i.U === region_bits) {
-          assert(res.bit_vec(i) === 1.U, s"res.bit_vec(${i}) is zero in decr_mode, prefetch vector is wrong!")
+          assert(!valid || res.bit_vec(i) === 1.U, s"res.bit_vec(${i}) is zero in decr_mode, prefetch vector is wrong!")
         }
       }
     }
@@ -325,6 +325,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   val s2_will_send_pf = s2_valid && s2_active && s2_can_send_pf
   val s2_pf_req_valid = s2_will_send_pf && io.enable
   val s2_pf_l1_req_bits = (new StreamPrefetchReqBundle).getStreamPrefetchReqBundle(
+    valid = s2_valid,
     vaddr = s2_l1_vaddr,
     width = WIDTH_CACHE_BLOCKS,
     decr_mode = s2_decr_mode,
@@ -334,6 +335,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
     t_va = s2_vaddr
     )
   val s2_pf_l2_req_bits = (new StreamPrefetchReqBundle).getStreamPrefetchReqBundle(
+    valid = s2_valid,
     vaddr = s2_l2_vaddr,
     width = L2_WIDTH_CACHE_BLOCKS,
     decr_mode = s2_decr_mode,
@@ -343,6 +345,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
     t_va = s2_vaddr
     )
   val s2_pf_l3_req_bits = (new StreamPrefetchReqBundle).getStreamPrefetchReqBundle(
+    valid = s2_valid,
     vaddr = s2_l3_vaddr,
     width = L3_WIDTH_CACHE_BLOCKS,
     decr_mode = s2_decr_mode,

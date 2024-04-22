@@ -26,7 +26,7 @@ import utility._
 
 class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) with HasPerfEvents {
 
-  val freeList = RegInit(VecInit(Seq.tabulate(size)( i => (i + 32).U(PhyRegIdxWidth.W) )))
+  val freeList = RegInit(VecInit(Seq.tabulate(size)( i => (i + FpLogicRegs + VecLogicRegs).U(PhyRegIdxWidth.W) )))
   val lastTailPtr = RegInit(FreeListPtr(true, 0)) // tailPtr in the last cycle (need to add freeReqReg)
   val tailPtr = Wire(new FreeListPtr) // this is the real tailPtr
   val tailPtrOHReg = RegInit(0.U(size.W))
@@ -35,7 +35,7 @@ class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) 
   // free committed instructions' `old_pdest` reg
   //
   val freeReqReg = io.freeReq
-  for (i <- 0 until CommitWidth) {
+  for (i <- 0 until RabCommitWidth) {
     val offset = if (i == 0) 0.U else PopCount(freeReqReg.take(i))
     val enqPtr = lastTailPtr + offset
 
@@ -55,7 +55,7 @@ class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) 
   // allocate new physical registers for instructions at rename stage
   //
   val freeRegCnt = Wire(UInt()) // number of free registers in free list
-  io.canAllocate := RegNext(freeRegCnt >= RenameWidth.U) // use RegNext for better timing
+  io.canAllocate := GatedValidRegNext(freeRegCnt >= RenameWidth.U) // use RegNext for better timing
   XSDebug(p"freeRegCnt: $freeRegCnt\n")
 
   val phyRegCandidates = VecInit(headPtrOHVec.map(sel => Mux1H(sel, freeList)))
@@ -65,7 +65,7 @@ class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) 
     XSDebug(p"req:${io.allocateReq(i)} canAllocate:${io.canAllocate} pdest:${io.allocatePhyReg(i)}\n")
   }
   val doCommit = io.commit.isCommit
-  val archAlloc = io.commit.commitValid zip io.commit.info map { case (valid, info) => valid && info.fpWen }
+  val archAlloc = io.commit.commitValid zip io.commit.info map { case (valid, info) => valid && (info.fpWen || info.vecWen) }
   val numArchAllocate = PopCount(archAlloc)
   val archHeadPtrNew  = archHeadPtr + numArchAllocate
   val archHeadPtrNext = Mux(doCommit, archHeadPtrNew, archHeadPtr)
@@ -100,8 +100,8 @@ class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) 
     }
   }
 
-  XSPerfAccumulate("utilization", freeRegCnt)
-  XSPerfAccumulate("allocation_blocked", !io.canAllocate)
+  XSPerfAccumulate("utilization", PopCount(io.allocateReq))
+  XSPerfAccumulate("allocation_blocked_cycle", !io.canAllocate)
   XSPerfAccumulate("can_alloc_wrong", !io.canAllocate && freeRegCnt >= RenameWidth.U)
 
   val freeRegCntReg = RegNext(freeRegCnt)
@@ -111,5 +111,8 @@ class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) 
     ("std_freelist_3_4_valid", freeRegCntReg >= (size / 2).U && freeRegCntReg < (size * 3 / 4).U),
     ("std_freelist_4_4_valid", freeRegCntReg >= (size * 3 / 4).U                                )
   )
+
+  QueuePerf(size = size, utilization = freeRegCntReg, full = freeRegCntReg === 0.U)
+
   generatePerfEvent()
 }

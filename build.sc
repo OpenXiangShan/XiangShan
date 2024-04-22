@@ -26,8 +26,8 @@ val defaultScalaVersion = "2.13.10"
 
 def defaultVersions(chiselVersion: String) = chiselVersion match {
   case "chisel" => Map(
-    "chisel"        -> ivy"org.chipsalliance::chisel:6.1.0",
-    "chisel-plugin" -> ivy"org.chipsalliance:::chisel-plugin:6.1.0",
+    "chisel"        -> ivy"org.chipsalliance::chisel:6.3.0",
+    "chisel-plugin" -> ivy"org.chipsalliance:::chisel-plugin:6.3.0",
     "chiseltest"    -> ivy"edu.berkeley.cs::chiseltest:5.0.2"
   )
   case "chisel3" => Map(
@@ -118,6 +118,13 @@ trait Utility extends HasChisel {
 
 }
 
+object yunsuan extends Cross[YunSuan]("chisel", "chisel3")
+trait YunSuan extends HasChisel {
+
+  override def millSourcePath = os.pwd / "yunsuan"
+
+}
+
 object huancun extends Cross[HuanCun]("chisel", "chisel3")
 trait HuanCun extends millbuild.huancun.common.HuanCunModule with HasChisel {
 
@@ -171,15 +178,22 @@ trait XiangShanModule extends ScalaModule {
 
   def utilityModule: ScalaModule
 
+  def yunsuanModule: ScalaModule
+
   override def moduleDeps = super.moduleDeps ++ Seq(
     rocketModule,
     difftestModule,
     huancunModule,
     coupledL2Module,
+    yunsuanModule,
     fudianModule,
     utilityModule,
   )
 
+  val resourcesPATH = os.pwd.toString() + "/src/main/resources"
+  val envPATH = sys.env("PATH") + ":" + resourcesPATH
+
+  override def forkEnv = Map("PATH" -> envPATH)
 }
 
 object xiangshan extends Cross[XiangShan]("chisel", "chisel3")
@@ -199,14 +213,20 @@ trait XiangShan extends XiangShanModule with HasChisel {
 
   def utilityModule = utility(crossValue)
 
-  override def forkArgs = Seq("-Xmx20G", "-Xss256m")
+  def yunsuanModule = yunsuan(crossValue)
+
+  override def forkArgs = Seq("-Xmx40G", "-Xss256m")
 
   override def sources = T.sources {
     super.sources() ++ Seq(PathRef(millSourcePath / "src" / crossValue / "main" / "scala"))
   }
 
+  override def ivyDeps = super.ivyDeps() ++ Agg(
+    defaultVersions(crossValue)("chiseltest"),
+  )
+
   object test extends SbtModuleTests with TestModule.ScalaTest {
-    override def forkArgs = Seq("-Xmx20G", "-Xss256m")
+    override def forkArgs = Seq("-Xmx40G", "-Xss256m")
 
     override def sources = T.sources {
       super.sources() ++ Seq(PathRef(millSourcePath / "src" / crossValue / "test" / "scala"))
@@ -215,5 +235,10 @@ trait XiangShan extends XiangShanModule with HasChisel {
     override def ivyDeps = super.ivyDeps() ++ Agg(
       defaultVersions(crossValue)("chiseltest")
     )
+
+    val resourcesPATH = os.pwd.toString() + "/src/main/resources"
+    val envPATH = sys.env("PATH") + ":" + resourcesPATH
+
+    override def forkEnv = Map("PATH" -> envPATH)
   }
 }

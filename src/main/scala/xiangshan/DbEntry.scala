@@ -3,8 +3,9 @@ package xiangshan
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util.log2Ceil
-import xiangshan.backend.rob.{DebugLsInfo, DebugMdpInfo}
+import xiangshan.backend.ctrlblock.{DebugLsInfo, DebugMdpInfo}
 import xiangshan.cache.{DCacheBundle, HasDCacheParameters}
+import xiangshan.backend.fu.FuType
 import utility.MemReqSource
 import xiangshan.mem.prefetch.HasL1PrefetchHelper
 

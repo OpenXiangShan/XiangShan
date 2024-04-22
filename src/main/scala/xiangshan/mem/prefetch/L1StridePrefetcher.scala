@@ -158,6 +158,7 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
   val s2_l2_depth = s2_stride << l2_stride_ratio
   val s2_l2_pf_vaddr = (s2_vaddr + s2_l2_depth)(VAddrBits - 1, 0)
   val s2_l1_pf_req_bits = (new StreamPrefetchReqBundle).getStreamPrefetchReqBundle(
+    valid = s2_valid,
     vaddr = s2_l1_pf_vaddr,
     width = STRIDE_WIDTH_BLOCKS,
     decr_mode = false.B,
@@ -168,6 +169,7 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     t_va = 0xdeadbeefL.U
     )
   val s2_l2_pf_req_bits = (new StreamPrefetchReqBundle).getStreamPrefetchReqBundle(
+    valid = s2_valid,
     vaddr = s2_l2_pf_vaddr,
     width = STRIDE_WIDTH_BLOCKS,
     decr_mode = false.B,

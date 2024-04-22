@@ -31,7 +31,10 @@ import circt.stage.ChiselStage
 
 class XiangShanStage extends ChiselStage {
 
-  override val shell = new Shell("xiangshan") with CLI with XiangShanCli
+  override val shell = new Shell("xiangshan") with CLI with XiangShanCli {
+    // These are added by firrtl.options.Shell (which we must extend because we are a Stage)
+    override protected def includeLoggerOptions = false
+  }
 
   trait XiangShanCli { this: Shell =>
     parser.note("XiangShan Options")
@@ -45,7 +48,6 @@ class XiangShanStage extends ChiselStage {
 
     val pm = new PhaseManager(
       targets = Seq(
-        Dependency[chisel3.stage.phases.Checks],
         Dependency[chisel3.stage.phases.AddImplicitOutputFile],
         Dependency[chisel3.stage.phases.AddImplicitOutputAnnotationFile],
         Dependency[chisel3.stage.phases.MaybeAspectPhase],
@@ -53,9 +55,9 @@ class XiangShanStage extends ChiselStage {
         Dependency[chisel3.stage.phases.Convert],
         Dependency[xiangshan.transforms.PrintModuleName],
         Dependency[xiangshan.transforms.PrintControl],
+        Dependency[chisel3.stage.phases.AddDedupGroupAnnotations],
         Dependency[chisel3.stage.phases.MaybeInjectingPhase],
         Dependency[circt.stage.phases.AddImplicitOutputFile],
-        Dependency[circt.stage.phases.Checks],
         Dependency[circt.stage.phases.CIRCT]
       ),
       currentState = Seq(

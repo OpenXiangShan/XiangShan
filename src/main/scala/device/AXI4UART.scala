@@ -33,7 +33,7 @@ class AXI4UART
   override lazy val module = new AXI4SlaveModuleImp[UARTIO](this){
     val rxfifo = RegInit(0.U(32.W))
     val txfifo = Reg(UInt(32.W))
-    val stat = RegInit(1.U(32.W))
+    val stat = RegInit(0.U(32.W))
     val ctrl = RegInit(0.U(32.W))
 
     io.extra.get.out.valid := (waddr(3,0) === 4.U && in.w.fire)

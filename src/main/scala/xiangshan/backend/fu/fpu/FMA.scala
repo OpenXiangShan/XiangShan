@@ -16,42 +16,49 @@
 
 package xiangshan.backend.fu.fpu
 
+import _root_.utils._
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import fudian._
 import fudian.utils.Multiplier
-import fudian.{FCMA, FCMA_ADD, FCMA_ADD_s1, FCMA_ADD_s2, FMUL, FMULToFADD, FMUL_s1, FMUL_s2, FMUL_s3, RawFloat}
-import xiangshan._
-import utils._
 import utility._
+import xiangshan._
+import xiangshan.backend.rob.RobPtr
+import xiangshan.backend.fu.FuConfig
 
 
-class MulToAddIO(val ftypes: Seq[FPU.FType])(implicit val p: Parameters) extends Bundle {
+class MulToAddIO(val ftypes: Seq[FPU.FType])(implicit p: Parameters) extends XSBundle {
   val mul_out = MixedVec(ftypes.map(t => new FMULToFADD(t.expWidth, t.precision)))
   val addend = UInt(ftypes.map(_.len).max.W)
-  val uop = new MicroOp
+  val fpCtrl = new FPUCtrlSignals
+  val robIdx = new RobPtr
+  val pdest = UInt(PhyRegIdxWidth.W)
+  val fpWen = Bool()
   val rm = UInt(3.W)
 
   def getFloat = mul_out.head
   def getDouble = mul_out.last
 }
 
-class FMUL_pipe(val mulLat: Int = 2)(implicit p: Parameters)
-  extends FPUPipelineModule
+class FMUL_pipe(cfg: FuConfig, val mulLat: Int = 2)(implicit p: Parameters)
+  extends FPUPipelineModule(cfg)
 {
   override def latency: Int = mulLat
   override val dataModule: FPUDataModule = null
 
+  private val rm = io.frm.get
+
   val toAdd = IO(Output(new MulToAddIO(FPU.ftypes)))
 
-  val uopIn = uopVec(0)
-  val fpCtrl = uopIn.ctrl.fpu
+  val robIdx = robIdxVec(0)
+  val fpCtrl = DataHoldBypass(io.in.bits.ctrl.fpu.get, io.in.fire)
   val typeTagIn = fpCtrl.typeTagIn
 
   val typeSel = VecInit(FPU.ftypes.zipWithIndex.map(_._2.U === typeTagIn))
 
-  val src1 = FPU.unbox(io.in.bits.src(0), typeTagIn)
-  val src2 = FPU.unbox(io.in.bits.src(1), typeTagIn)
+  val src1 = FPU.unbox(io.in.bits.data.src(0), typeTagIn)
+  val src2 = FPU.unbox(io.in.bits.data.src(1), typeTagIn)
 
   val multiplier = Module(new Multiplier(FPU.ftypes.last.precision+1, pipeAt = Seq(1)))
 
@@ -89,30 +96,37 @@ class FMUL_pipe(val mulLat: Int = 2)(implicit p: Parameters)
 
   val outSel = S2Reg(S1Reg(typeSel))
 
-  toAdd.addend := S2Reg(S1Reg(io.in.bits.src(2)))
+  toAdd.addend := S2Reg(S1Reg(io.in.bits.data.src(2)))
   toAdd.rm := S2Reg(S1Reg(rm))
   toAdd.mul_out.zip(s3.map(_.io.to_fadd)).foreach(x => x._1 := x._2)
-  toAdd.uop := uopVec.last
-  io.out.bits.data := Mux1H(outSel, s3.zip(FPU.ftypes).map{
+  toAdd.fpCtrl := S2Reg(S1Reg(io.in.bits.ctrl.fpu.get))
+  toAdd.robIdx := robIdxVec(latency)
+  toAdd.pdest := S2Reg(S1Reg(io.in.bits.ctrl.pdest))
+  toAdd.fpWen := S2Reg(S1Reg(io.in.bits.ctrl.fpWen.get))
+  io.out.bits.res.data := Mux1H(outSel, s3.zip(FPU.ftypes).map{
     case (mod, t) => FPU.box(mod.io.result, t)
   })
-  fflags := Mux1H(outSel, s3.map(_.io.fflags))
+  io.out.bits.res.fflags.get := Mux1H(outSel, s3.map(_.io.fflags))
+  io.out.bits.ctrl.robIdx := robIdxVec(latency)
+  io.out.bits.ctrl.pdest := S2Reg(S1Reg(io.in.bits.ctrl.pdest))
+  io.out.bits.ctrl.fpu.get := S2Reg(S1Reg(io.in.bits.ctrl.fpu.get))
 }
 
-class FADD_pipe(val addLat: Int = 2)(implicit p: Parameters) extends FPUPipelineModule {
+class FADD_pipe(cfg: FuConfig, val addLat: Int = 2)(implicit p: Parameters) extends FPUPipelineModule(cfg) {
   override val dataModule: FPUDataModule = null
   override def latency: Int = addLat
+
+  private val rm = io.frm.get
 
   val mulToAdd = IO(Input(new MulToAddIO(FPU.ftypes)))
   val isFMA = IO(Input(Bool()))
 
-  val src1 = S1Reg(FPU.unbox(io.in.bits.src(0), io.in.bits.uop.ctrl.fpu.typeTagIn))
+  val src1 = S1Reg(FPU.unbox(io.in.bits.data.src(0), io.in.bits.ctrl.fpu.get.typeTagIn))
   val src2 = S1Reg(FPU.unbox(
-    Mux(isFMA, mulToAdd.addend, io.in.bits.src(1)), io.in.bits.uop.ctrl.fpu.typeTagIn
+    Mux(isFMA, mulToAdd.addend, io.in.bits.data.src(1)), io.in.bits.ctrl.fpu.get.typeTagIn
   ))
 
-  val uopIn = S1Reg(Mux(isFMA, mulToAdd.uop, io.in.bits.uop))
-  val fpCtrl = uopIn.ctrl.fpu
+  val fpCtrl = S1Reg(Mux(isFMA, mulToAdd.fpCtrl, io.in.bits.ctrl.fpu.get))
   val typeTagIn = fpCtrl.typeTagIn
 
   val fma = S1Reg(isFMA)
@@ -145,87 +159,54 @@ class FADD_pipe(val addLat: Int = 2)(implicit p: Parameters) extends FPUPipeline
   val (s1, s2) = stages.unzip
 
   val outSel = S2Reg(VecInit(FPU.ftypes.zipWithIndex.map(_._2.U === typeTagIn)))
-  io.out.bits.data := Mux1H(outSel, s2.zip(FPU.ftypes).map{
+  io.out.bits.res.data := Mux1H(outSel, s2.zip(FPU.ftypes).map{
     case (mod, t) => FPU.box(mod.io.result, t)
   })
-  fflags := Mux1H(outSel, s2.map(_.io.fflags))
+  io.out.bits.res.fflags.get := Mux1H(outSel, s2.map(_.io.fflags))
+  io.out.bits.ctrl.robIdx := robIdxVec(latency)
+  io.out.bits.ctrl.pdest := S2Reg(S1Reg(io.in.bits.ctrl.pdest))
+  io.out.bits.ctrl.fpu.get := S2Reg(S1Reg(io.in.bits.ctrl.fpu.get))
 }
 
-class FMAMidResult extends FMULToFADD(FPU.ftypes.last.expWidth, FPU.ftypes.last.precision) {
-
-  def toFloat: FMULToFADD = {
-    val floatMidResult = Wire(new FMULToFADD(FPU.ftypes.head.expWidth, FPU.ftypes.head.precision))
-    floatMidResult.fp_prod.sign := fp_prod.sign
-    floatMidResult.fp_prod.exp := fp_prod.exp
-    floatMidResult.fp_prod.sig := fp_prod.sig
-    floatMidResult.inter_flags := inter_flags
-    floatMidResult.rm := rm
-    floatMidResult
-  }
-
-  def fromFloat(float: FMULToFADD): FMULToFADD = {
-    fp_prod.sign := float.fp_prod.sign
-    fp_prod.exp := float.fp_prod.exp
-    fp_prod.sig := float.fp_prod.sig
-    inter_flags := float.inter_flags
-    this
-  }
-}
-
-class FMAMidResultIO extends Bundle {
-  val in = Flipped(ValidIO(new FMAMidResult))
-  val out = ValidIO(new FMAMidResult)
-  val waitForAdd = Input(Bool())
-}
-
-class FMA(implicit p: Parameters) extends FPUSubModule {
-  val midResult = IO(new FMAMidResultIO)
-
+class FMA(cfg: FuConfig)(implicit p: Parameters) extends FPUSubModule(cfg) {
+  private val rm = io.frm.get
   override val dataModule = null
-  val mul_pipe = Module(new FMUL_pipe())
-  val add_pipe = Module(new FADD_pipe())
+  val mul_pipe = Module(new FMUL_pipe(cfg))
+  val add_pipe = Module(new FADD_pipe(cfg))
 
 
-  mul_pipe.io.redirectIn := io.redirectIn
-  mul_pipe.rm := rm
+  mul_pipe.io.flush := io.flush
+  mul_pipe.io.frm.get := rm
 
-  add_pipe.io.redirectIn := io.redirectIn
+  add_pipe.io.flush := io.flush
+  add_pipe.io.frm.get := rm
 
-  val fpCtrl = io.in.bits.uop.ctrl.fpu
+  val fpCtrl = io.in.bits.ctrl.fpu.get
   mul_pipe.io.in <> io.in
-  mul_pipe.io.in.valid := io.in.valid && !fpCtrl.isAddSub && !midResult.in.valid
+  mul_pipe.io.in.valid := io.in.valid && !fpCtrl.isAddSub
 
   // For better timing, we let out.valid be true even if it's flushed.
-  val waitAddOperand = RegEnable(midResult.waitForAdd, !mul_pipe.io.out.valid || mul_pipe.io.out.ready)
-  val isFMA = mul_pipe.io.out.valid && mul_pipe.io.out.bits.uop.ctrl.fpu.ren3 && !waitAddOperand
+  val isFMA = mul_pipe.io.out.valid && mul_pipe.io.out.bits.ctrl.fpu.get.ren3
   // However, when sending instructions to add_pipe, we need to determine whether it's flushed.
-  val mulFlushed = mul_pipe.io.out.bits.uop.robIdx.needFlush(io.redirectIn)
-  val isFMAReg = RegNext(isFMA && !mulFlushed)
+  val mulFlushed = mul_pipe.io.out.bits.ctrl.robIdx.needFlush(io.flush)
+  val isFMAReg = isFMA && !mulFlushed
 
   add_pipe.mulToAdd <> mul_pipe.toAdd
-  midResult.out.valid := RegNext(mul_pipe.io.out.valid && waitAddOperand && !mulFlushed)
-  midResult.out.bits := mul_pipe.toAdd.getDouble
-  when (RegNext(mul_pipe.io.out.bits.uop.ctrl.fpu.typeTagIn === FPU.S)) {
-    midResult.out.bits.fromFloat(mul_pipe.toAdd.getFloat)
-  }
-  when (midResult.in.valid && !isFMAReg) {
-    add_pipe.mulToAdd.getDouble := midResult.in.bits
-    add_pipe.mulToAdd.getFloat := midResult.in.bits.toFloat
-    add_pipe.mulToAdd.addend := io.in.bits.src(2)
-    add_pipe.mulToAdd.uop := io.in.bits.uop
-  }
 
-  add_pipe.rm := Mux(midResult.in.valid && !isFMAReg, midResult.in.bits.rm, Mux(isFMAReg, mul_pipe.rm, rm))
   // For FADD, it accepts instructions from io.in and FMUL.
   // When FMUL gives an FMA, FADD accepts this instead of io.in.
   // Since FADD gets FMUL data from add_pipe.mulToAdd, only uop needs Mux.
-  add_pipe.io.in.valid := io.in.valid && (fpCtrl.isAddSub || midResult.in.valid) || isFMAReg
-  add_pipe.io.in.bits.src := io.in.bits.src
-  add_pipe.io.in.bits.uop := Mux(isFMAReg, add_pipe.mulToAdd.uop, io.in.bits.uop)
-  add_pipe.isFMA := io.in.valid && midResult.in.valid || isFMAReg
+  add_pipe.io.in.valid := io.in.valid && fpCtrl.isAddSub || isFMAReg
+  add_pipe.io.in.bits := 0.U.asTypeOf(add_pipe.io.in.bits)
+  add_pipe.io.in.bits.data.src := io.in.bits.data.src
+  add_pipe.io.in.bits.ctrl.robIdx := Mux(isFMAReg, add_pipe.mulToAdd.robIdx, io.in.bits.ctrl.robIdx)
+  add_pipe.io.in.bits.ctrl.pdest := Mux(isFMAReg, add_pipe.mulToAdd.pdest, io.in.bits.ctrl.pdest)
+  add_pipe.io.in.bits.ctrl.fpu.get := Mux(isFMAReg, add_pipe.mulToAdd.fpCtrl, io.in.bits.ctrl.fpu.get)
+  add_pipe.io.in.bits.ctrl.fpWen.get := Mux(isFMAReg, add_pipe.mulToAdd.fpWen, io.in.bits.ctrl.fpWen.get)
+  add_pipe.isFMA := isFMAReg
 
   // When the in uop is Add/Sub, we check FADD, otherwise fmul is checked.
-  io.in.ready := Mux(fpCtrl.isAddSub || midResult.in.valid,
+  io.in.ready := Mux(fpCtrl.isAddSub,
     !isFMAReg && add_pipe.io.in.ready,
     mul_pipe.io.in.ready
   )
@@ -234,23 +215,32 @@ class FMA(implicit p: Parameters) extends FPUSubModule {
   // (1) It always accept FMA from FADD (if an FMA wants FMUL, it's never blocked).
   // (2) It has lower writeback arbitration priority than FADD (and may be blocked when FMUL.out.valid).
   XSError(isFMA && !add_pipe.io.in.ready, "FMA should not be blocked\n")
-  mul_pipe.io.out.ready := isFMA || (io.out.ready && !add_pipe.io.out.valid) || waitAddOperand
+  mul_pipe.io.out.ready := isFMA || (io.out.ready && !add_pipe.io.out.valid)
   add_pipe.io.out.ready := io.out.ready
 
-  io.out.bits.uop := Mux(add_pipe.io.out.valid,
-    add_pipe.io.out.bits.uop,
-    mul_pipe.io.out.bits.uop
+  io.out.bits.ctrl.robIdx := Mux(add_pipe.io.out.valid,
+    add_pipe.io.out.bits.ctrl.robIdx,
+    mul_pipe.io.out.bits.ctrl.robIdx
   )
-  io.out.bits.data := Mux(RegNext(add_pipe.io.out.valid),
-    add_pipe.io.out.bits.data,
-    mul_pipe.io.out.bits.data
+  io.out.bits.ctrl.fpu.get := Mux(add_pipe.io.out.valid,
+    add_pipe.io.out.bits.ctrl.fpu.get,
+    mul_pipe.io.out.bits.ctrl.fpu.get
   )
-  fflags := Mux(RegNext(add_pipe.io.out.valid),
-    add_pipe.fflags,
-    mul_pipe.fflags
+  io.out.bits.ctrl.pdest := Mux(add_pipe.io.out.valid,
+    add_pipe.io.out.bits.ctrl.pdest,
+    mul_pipe.io.out.bits.ctrl.pdest
   )
-  io.out.valid := add_pipe.io.out.valid || (mul_pipe.io.out.valid && !isFMA && !waitAddOperand)
-
-  XSPerfAccumulate("fma_partial_issue_fire", io.in.fire && midResult.waitForAdd)
-  XSPerfAccumulate("fma_mid_result_in_fire", io.in.fire && midResult.in.valid)
+  io.out.bits.res.data := Mux(add_pipe.io.out.valid,
+    add_pipe.io.out.bits.res.data,
+    mul_pipe.io.out.bits.res.data
+  )
+  io.out.bits.res.fflags.get := Mux(add_pipe.io.out.valid,
+    add_pipe.io.out.bits.res.fflags.get,
+    mul_pipe.io.out.bits.res.fflags.get
+  )
+  io.out.valid := add_pipe.io.out.valid || (mul_pipe.io.out.valid && !isFMA)
+  io.out.bits.ctrl.fpWen.get := Mux(add_pipe.io.out.valid,
+    add_pipe.io.out.bits.ctrl.fpWen.get,
+    mul_pipe.io.out.bits.ctrl.fpWen.get
+  )
 }

@@ -21,7 +21,8 @@ import chisel3._
 import chisel3.experimental.hierarchy.{Definition, Instance, instantiable, public}
 import chisel3.util._
 import fudian.FDIV
-import utility.MaskExpand
+import utility.{MaskExpand, RegNextWithEnable}
+import xiangshan.backend.fu.FuConfig
 
 import scala.collection.mutable
 
@@ -51,6 +52,7 @@ class InstantiableFDIV(t: FPU.FType) extends Module {
 class FDivSqrtDataModule(implicit p: Parameters) extends FPUDataModule {
   val in_valid, out_ready = IO(Input(Bool()))
   val in_ready, out_valid = IO(Output(Bool()))
+  val out_validNext = IO(Output(Bool()))
   val kill_w = IO(Input(Bool()))
   val kill_r = IO(Input(Bool()))
 
@@ -79,25 +81,26 @@ class FDivSqrtDataModule(implicit p: Parameters) extends FPUDataModule {
   }
 
   in_ready := divSqrt.map(_.io.specialIO.in_ready).foldRight(true.B)(_ && _)
-  out_valid := Mux1H(outSel, divSqrt.map(_.io.specialIO.out_valid))
+  out_validNext := Mux1H(outSel, divSqrt.map(_.io.specialIO.out_valid))
+  out_valid := RegNext(out_validNext)
   io.out.data := outDataSel.zip(divSqrt.zip(FPU.ftypes).map{
     case (mod, t) => FPU.box(mod.io.result, t)
   }).map(x => x._1 & x._2).reduce(_ | _)
-  fflags := Mux1H(outSel, divSqrt.map(_.io.fflags))
+  io.out.fflags := Mux1H(outSel, divSqrt.map(_.io.fflags))
 }
 
-class FDivSqrt(implicit p: Parameters) extends FPUSubModule {
+class FDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends FPUSubModule(cfg) {
 
-  val uopReg = RegEnable(io.in.bits.uop, io.in.fire)
-  val kill_r = !io.in.ready && uopReg.robIdx.needFlush(io.redirectIn)
+  val robIdxReg = RegEnable(io.in.bits.ctrl.robIdx, io.in.fire)
+  val kill_r = !io.in.ready && robIdxReg.needFlush(io.flush)
 
   override val dataModule = Module(new FDivSqrtDataModule)
   connectDataModule
   dataModule.in_valid := io.in.valid
   dataModule.out_ready := io.out.ready
-  dataModule.kill_w := io.in.bits.uop.robIdx.needFlush(io.redirectIn)
+  dataModule.kill_w := io.in.bits.ctrl.robIdx.needFlush(io.flush)
   dataModule.kill_r := kill_r
   io.in.ready := dataModule.in_ready
   io.out.valid := dataModule.out_valid
-  io.out.bits.uop := uopReg
+  connectNonPipedCtrlSingal
 }

@@ -26,14 +26,20 @@ import org.chipsalliance.cde.config._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
 import xiangshan.frontend.icache.ICacheParameters
 import freechips.rocketchip.devices.debug._
-import freechips.rocketchip.tile.MaxHartIdBits
+import freechips.rocketchip.tile.{MaxHartIdBits, XLen}
+import system._
+import utility._
+import utils._
+import huancun._
+import xiangshan._
 import xiangshan.backend.dispatch.DispatchParameters
-import xiangshan.backend.exu.ExuParameters
+import xiangshan.backend.regfile.{IntPregParams, VfPregParams}
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import device.{EnableJtag, XSDebugModuleParams}
 import huancun._
 import coupledL2._
+import xiangshan.frontend.icache.ICacheParameters
 
 class BaseConfig(n: Int) extends Config((site, here, up) => {
   case XLen => 64
@@ -44,7 +50,7 @@ class BaseConfig(n: Int) extends Config((site, here, up) => {
   case ExportDebug => DebugAttachParams(protocols = Set(JTAG))
   case DebugModuleKey => Some(XSDebugModuleParams(site(XLen)))
   case JtagDTMKey => JtagDTMKey
-  case MaxHartIdBits => 2
+  case MaxHartIdBits => log2Up(n)
   case EnableJtag => true.B
 })
 
@@ -57,48 +63,46 @@ class MinimalConfig(n: Int = 1) extends Config(
   new BaseConfig(n).alter((site, here, up) => {
     case XSTileKey => up(XSTileKey).map(
       p => p.copy(
-        DecodeWidth = 2,
-        RenameWidth = 2,
-        CommitWidth = 2,
+        DecodeWidth = 6,
+        RenameWidth = 6,
+        RobCommitWidth = 8,
         FetchWidth = 4,
-        IssQueSize = 8,
-        NRPhyRegs = 64,
-        VirtualLoadQueueSize = 16,
+        VirtualLoadQueueSize = 24,
         LoadQueueRARSize = 16,
         LoadQueueRAWSize = 12,
-        LoadQueueReplaySize = 12,
+        LoadQueueReplaySize = 24,
         LoadUncacheBufferSize = 8,
         LoadQueueNWriteBanks = 4, // NOTE: make sure that LoadQueue{RAR, RAW, Replay}Size is divided by LoadQueueNWriteBanks.
         RollbackGroupSize = 8,
-        StoreQueueSize = 12,
+        StoreQueueSize = 20,
         StoreQueueNWriteBanks = 4, // NOTE: make sure that StoreQueueSize is divided by StoreQueueNWriteBanks
         StoreQueueForwardWithMask = true,
-        RobSize = 32,
+        RobSize = 48,
+        RabSize = 96,
         FtqSize = 8,
-        IBufSize = 16,
-        IBufNBank = 2,
+        IBufSize = 24,
+        IBufNBank = 6,
         StoreBufferSize = 4,
         StoreBufferThreshold = 3,
-        LoadPipelineWidth = 2,
-        StorePipelineWidth = 2,
+        IssueQueueSize = 8,
+        IssueQueueCompEntrySize = 4,
         dpParams = DispatchParameters(
           IntDqSize = 12,
           FpDqSize = 12,
           LsDqSize = 12,
-          IntDqDeqWidth = 4,
+          IntDqDeqWidth = 8,
           FpDqDeqWidth = 4,
-          LsDqDeqWidth = 4
+          LsDqDeqWidth = 6
         ),
-        exuParameters = ExuParameters(
-          JmpCnt = 1,
-          AluCnt = 2,
-          MulCnt = 0,
-          MduCnt = 1,
-          FmacCnt = 1,
-          FmiscCnt = 1,
-          FmiscDivSqrtCnt = 0,
-          LduCnt = 2,
-          StuCnt = 2
+        intPreg = IntPregParams(
+          numEntries = 64,
+          numRead = None,
+          numWrite = None,
+        ),
+        vfPreg = VfPregParams(
+          numEntries = 160,
+          numRead = None,
+          numWrite = None,
         ),
         icacheParameters = ICacheParameters(
           nSets = 64, // 16KB ICache
@@ -140,6 +144,13 @@ class MinimalConfig(n: Int = 1) extends Config(
         ),
         sttlbParameters = TLBParameters(
           name = "sttlb",
+          NWays = 4,
+          partialStaticPMP = true,
+          outsideRecvFlush = true,
+          outReplace = false
+        ),
+        hytlbParameters = TLBParameters(
+          name = "hytlb",
           NWays = 4,
           partialStaticPMP = true,
           outsideRecvFlush = true,
@@ -260,6 +271,8 @@ class WithNKBL2
         echoField = Seq(huancun.DirtyField()),
         prefetch = Some(coupledL2.prefetch.PrefetchReceiverParams()),
         enablePerf = !site(DebugOptionsKey).FPGAPlatform,
+        enableRollingDB = site(DebugOptionsKey).EnableRollingDB,
+        enableMonitor = site(DebugOptionsKey).AlwaysBasicDB,
         elaboratedTopDown = !site(DebugOptionsKey).FPGAPlatform
       )),
       L2NBanks = banks
