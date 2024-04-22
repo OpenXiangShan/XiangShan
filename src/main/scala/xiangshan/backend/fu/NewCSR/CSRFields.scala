@@ -113,13 +113,17 @@ class CSREnumType(
   val lsb: Int,
 )(
   var rwType: CSRRWType,
+  var init: Data = null
 )(
   override val factory: ChiselEnum
 ) extends EnumType(factory) {
-  var init: Option[EnumType] = None
 
-  if (factory.all.size == 0) {
+  if (factory.all.isEmpty) {
     factory.asInstanceOf[CSREnum].addMinValue
+  }
+
+  if (this.init != null && factory.all.exists(_.litValue == this.init.litValue)) {
+    factory.asInstanceOf[CSREnum].addNewValue(init.asUInt)
   }
 
   if (!factory.all.exists(_.litValue == ((BigInt(1) << (msb - lsb + 1)) - 1))) {
@@ -143,13 +147,36 @@ class CSREnumType(
   // Also check if the write field is not Read Only.
   def isLegal: Bool = this.factory.asInstanceOf[CSREnum].isLegal(this) && (!this.isRO).B
 
-  def needReset: Boolean = init.nonEmpty
+  def needReset: Boolean = init != null
 
   def rfn: CSRRfnType = rwType.rfn
 
   def wfn: CSRWfnType = rwType.wfn
 
-  protected def resetCheck: Unit = {
+  // Check if reset with a enum value in factory.all
+  protected def resetCheck[T <: EnumType](init: T): Unit = {
+    resetCheckRWType
+    require(this.factory.all.contains(init),
+      s"""
+      | The value ${init.litValue} is NOT in ${factory.all}.
+      | Please check if $init is the enum in the $factory")
+      """.stripMargin
+    )
+  }
+
+  // Check if reset with a enum value in factory.all
+  protected def resetCheck(init: UInt): Unit = {
+    resetCheckRWType
+    require(this.factory.all.exists(_.litValue == init.litValue),
+      s"""
+      |The value ${init.litValue} is not in ${factory.all}.
+      |Please add reset value as the tail of (msb,lsb, HERE) or (bit, HERE), If you need reset field with the value NOT in enum set.
+      |                                                ^              ^
+      |""".stripMargin
+    )
+  }
+
+  protected def resetCheckRWType: Unit = {
     rwType match {
       case ROType(rfn) => require(rfn == null)
       case _ =>
@@ -157,14 +184,33 @@ class CSREnumType(
   }
 
   def withReset[T <: EnumType](init: T): this.type = {
-    resetCheck
-    this.init = Some(init)
+    resetCheck(init)
+    this.init = init
+    if (!factory.all.exists(_.litValue == ((BigInt(1) << (msb - lsb + 1)) - 1))) {
+      factory.asInstanceOf[CSREnum].addMaxValue
+    }
     this
   }
 
   def withReset(init: UInt): this.type = {
-    resetCheck
-    this.init = Some(this.factory(init))
+    resetCheck(init)
+    this.init = this.factory(init)
+    if (!factory.all.exists(_.litValue == ((BigInt(1) << (msb - lsb + 1)) - 1))) {
+      factory.asInstanceOf[CSREnum].addMaxValue
+    }
+    this
+  }
+
+  // Reset using the value not in factory.all
+  def withNonEnumReset(init: UInt): this.type = {
+    resetCheckRWType
+    if (!this.factory.all.exists(_.litValue == init.litValue)) {
+      this.factory.asInstanceOf[CSREnum].addNewValue(init)
+      println(s"[CSR-info] add reset value ${init.litValue} into $this")
+    }
+    if (!factory.all.exists(_.litValue == ((BigInt(1) << (msb - lsb + 1)) - 1))) {
+      factory.asInstanceOf[CSREnum].addMaxValue
+    }
     this
   }
 
@@ -202,10 +248,10 @@ class CSREnumType(
 }
 
 class CSREnum extends ChiselEnum {
-  protected def apply(rwType: CSRRWType)(msb: Int, lsb: Int)(factory: ChiselEnum): CSREnumType = {
+  protected def apply(rwType: CSRRWType, init: Data = null)(msb: Int, lsb: Int)(factory: ChiselEnum): CSREnumType = {
     this.msb = msb
     this.lsb = lsb
-    new CSREnumType(msb, lsb)(rwType)(factory)
+    new CSREnumType(msb, lsb)(rwType, init)(factory)
   }
 
   var msb, lsb: Int = 0
@@ -226,6 +272,16 @@ class CSREnum extends ChiselEnum {
    */
   def addMaxValue: Unit = {
     Value(((BigInt(1) << (msb - lsb + 1)) - 1).U)
+  }
+
+  /**
+   *
+   * @param value: A new value need to add in Enum set
+   * @return this
+   */
+  def addNewValue(value: UInt): this.type = {
+    Value(value)
+    this
   }
 
   def isLegal(enum: CSREnumType): Bool = true.B
@@ -265,8 +321,8 @@ trait CSRMacroApply { self: CSREnum =>
   def RO(msb: Int, lsb: Int): CSREnumType = self
     .apply(ROType())(msb, lsb)(this)
 
-  def RW(msb: Int, lsb: Int): CSREnumType = self
-    .apply(RWType())(msb, lsb)(this)
+  def RW(msb: Int, lsb: Int, resetVal: Data = null): CSREnumType = self
+    .apply(RWType(), resetVal)(msb, lsb)(this)
 
   def WARL(msb: Int, lsb: Int, wfn: CSRWfnType, rfn: CSRRfnType): CSREnumType = self
     .apply(WARLType(wfn, rfn))(msb, lsb)(this)

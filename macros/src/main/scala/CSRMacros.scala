@@ -60,6 +60,21 @@ object CSRMacros {
     }
 
     @compileTimeOnly("")
+    def CSRRWFieldRangeWithReset(c: Context)(msb: c.Expr[Int], lsb: c.Expr[Int], resetVal: c.Tree): c.Tree = {
+      c.parse(s"CSRDefines.CSRField${calcuWidth(c)(msb, lsb)}Bits.RW(" +
+        s"${c.eval(msb)}, " +
+        s"${c.eval(lsb)}, " +
+        s"${resetVal}" +
+        s")"
+      )
+    }
+
+    @compileTimeOnly("")
+    def CSRRWFieldBitWithReset(c: Context)(bit: c.Expr[Int], resetVal: c.Tree): c.Tree = {
+      CSRRWFieldRangeWithReset(c)(bit, bit, resetVal)
+    }
+
+    @compileTimeOnly("")
     def CSRWLRLFieldRange(c: Context)(msb: c.Expr[Int], lsb: c.Expr[Int], fn: c.Tree): c.Tree = {
       c.parse(s"CSRDefines.CSRField${calcuWidth(c)(msb, lsb)}Bits.WARL(${c.eval(msb)}, ${c.eval(lsb)}, $fn)")
     }
