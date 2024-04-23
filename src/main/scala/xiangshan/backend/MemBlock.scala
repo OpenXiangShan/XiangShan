@@ -1282,11 +1282,14 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // lsq.io.vecWriteback.bits := vlWrapper.io.uopWriteback.bits
 
   // vector
-  val vLsuCanaccept = vsSplit.head.io.in.ready && vlSplit.head.io.in.ready
+  val vLsuCanaccept = (0 until VlduCnt).map(
+    i => vsSplit(i).io.in.ready && vlSplit(i).io.in.ready
+  )
+
   (0 until VstuCnt).foreach{i =>
     vsSplit(i).io.redirect <> redirect
-    vsSplit(i).io.in <> io.ooo_to_mem.issueVldu.head
-    vsSplit(i).io.in.valid := io.ooo_to_mem.issueVldu.head.valid && LSUOpType.isVecSt(io.ooo_to_mem.issueVldu.head.bits.uop.fuOpType) && vLsuCanaccept
+    vsSplit(i).io.in <> io.ooo_to_mem.issueVldu(i)
+    vsSplit(i).io.in.valid := io.ooo_to_mem.issueVldu(i).valid && LSUOpType.isVecSt(io.ooo_to_mem.issueVldu(i).bits.uop.fuOpType) && vLsuCanaccept(i)
     vsSplit(i).io.toMergeBuffer <> vsMergeBuffer.io.fromSplit(i)
     vsSplit(i).io.out <> storeUnits(i).io.vecstin // Todo: May be some balance mechanism is needed
     vsSplit(i).io.vstd.get := DontCare // Todo: Discuss how to pass vector store data
@@ -1294,8 +1297,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
   (0 until VlduCnt).foreach{i =>
     vlSplit(i).io.redirect <> redirect
-    vlSplit(i).io.in <> io.ooo_to_mem.issueVldu.head
-    vlSplit(i).io.in.valid := io.ooo_to_mem.issueVldu.head.valid && LSUOpType.isVecLd(io.ooo_to_mem.issueVldu.head.bits.uop.fuOpType) && vLsuCanaccept
+    vlSplit(i).io.in <> io.ooo_to_mem.issueVldu(i)
+    vlSplit(i).io.in.valid := io.ooo_to_mem.issueVldu(i).valid && LSUOpType.isVecLd(io.ooo_to_mem.issueVldu(i).bits.uop.fuOpType) && vLsuCanaccept(i)
     vlSplit(i).io.toMergeBuffer <> vlMergeBuffer.io.fromSplit(i)
     vlSplit(i).io.out <> loadUnits(i).io.vecldin // Todo: May be some balance mechanism is needed
 
@@ -1306,12 +1309,20 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   (0 until StaCnt).foreach{i=>
     vsMergeBuffer.io.fromPipeline(i) <> storeUnits(i).io.vecstout
   }
-  io.ooo_to_mem.issueVldu.head.ready := vLsuCanaccept
+
+  (0 until VlduCnt).foreach{i=>
+    io.ooo_to_mem.issueVldu(i).ready := vLsuCanaccept(i)
+  }
 
   vlMergeBuffer.io.redirect <> redirect
   vsMergeBuffer.io.redirect <> redirect
-  vlMergeBuffer.io.toLsq.head <> lsq.io.ldvecFeedback
-  vsMergeBuffer.io.toLsq.head <> lsq.io.stvecFeedback
+  (0 until VlduCnt).foreach{i=>
+    vlMergeBuffer.io.toLsq(i) <> lsq.io.ldvecFeedback(i)
+  }
+  (0 until VstuCnt).foreach{i=>
+    vsMergeBuffer.io.toLsq(i) <> lsq.io.stvecFeedback(i)
+  }
+
   (0 until UopWritebackWidth).foreach{i=>
     // send to RS
     vlMergeBuffer.io.feedback(i) <> io.mem_to_ooo.vlduIqFeedback(i).feedbackSlow
@@ -1321,13 +1332,15 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     io.mem_to_ooo.vstuIqFeedback(i).feedbackFast := DontCare
   }
 
-  io.mem_to_ooo.writebackVldu.head.valid := vlMergeBuffer.io.uopWriteback.head.valid || vsMergeBuffer.io.uopWriteback.head.valid
-  io.mem_to_ooo.writebackVldu.head.bits := Mux1H(Seq(
-    vlMergeBuffer.io.uopWriteback.head.valid -> vlMergeBuffer.io.uopWriteback.head.bits,
-    vsMergeBuffer.io.uopWriteback.head.valid -> vsMergeBuffer.io.uopWriteback.head.bits,
-  ))
-  vlMergeBuffer.io.uopWriteback.head.ready := io.mem_to_ooo.writebackVldu.head.ready
-  vsMergeBuffer.io.uopWriteback.head.ready := io.mem_to_ooo.writebackVldu.head.ready && !vlMergeBuffer.io.uopWriteback.head.valid
+  (0 until VlduCnt).foreach{i=>
+    io.mem_to_ooo.writebackVldu(i).valid := vlMergeBuffer.io.uopWriteback(i).valid || vsMergeBuffer.io.uopWriteback(i).valid
+    io.mem_to_ooo.writebackVldu(i).bits := Mux1H(Seq(
+      vlMergeBuffer.io.uopWriteback(i).valid -> vlMergeBuffer.io.uopWriteback(i).bits,
+      vsMergeBuffer.io.uopWriteback(i).valid -> vsMergeBuffer.io.uopWriteback(i).bits,
+    ))
+    vlMergeBuffer.io.uopWriteback(i).ready := io.mem_to_ooo.writebackVldu(i).ready
+    vsMergeBuffer.io.uopWriteback(i).ready := io.mem_to_ooo.writebackVldu(i).ready && !vlMergeBuffer.io.uopWriteback(i).valid
+  }
 
   // Sbuffer
   sbuffer.io.csrCtrl    <> csrCtrl
