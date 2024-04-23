@@ -134,21 +134,13 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
   val s1_hit = s1_has_permission && s1_new_hit_coh === s1_hit_coh && s1_tag_match.orR
 
   /**
-    * query replacer to choose a way to replace
+    * Don't choose a replace_way anymore
     */
-  // io.replace_way.set.valid := s1_valid
   io.replace_way.set.valid := false.B
   io.replace_way.set.bits  := get_idx(s1_req.vaddr)
   io.replace_way.dmWay     := get_direct_map_way(s1_req.vaddr)
-  // val s1_repl_way_en = UIntToOH(io.replace_way.way)
-  // val s1_repl_tag = Mux1H(s1_repl_way_en, wayMap(w => s1_tag_resp(w)))
-  // val s1_repl_coh = Mux1H(s1_repl_way_en, wayMap(w => s1_meta_resp(w).coh))
 
   val s1_need_replacement = !s1_tag_match.orR
-  // val s1_way_en = Mux(s1_need_replacement, s1_repl_way_en, s1_tag_match)
-  // val s1_coh = Mux(s1_need_replacement, s1_repl_coh, s1_hit_coh)
-  // val s1_tag = Mux(s1_need_replacement, s1_repl_tag, get_tag(s1_paddr))
-
 
 /** S2:
   * miss: send a write hint to Dache
@@ -159,10 +151,7 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
 
   val s2_hit = RegEnable(s1_hit, s1_valid)
   val s2_paddr = RegEnable(s1_paddr, s1_valid)
-  // val s2_way_en = RegEnable(s1_way_en, s1_valid)
   val s2_hit_coh = RegEnable(s1_hit_coh, s1_valid)
-  // val s2_repl_coh = RegEnable(s1_repl_coh, s1_valid)
-  // val s2_repl_tag = RegEnable(s1_repl_tag, s1_valid)
   val s2_is_prefetch = RegEnable(s1_req.instrtype === DCACHE_PREFETCH_SOURCE.U, s1_valid)
 
   io.lsu.resp.valid := s2_valid
@@ -190,8 +179,6 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
   io.miss_req.bits.addr := get_block_addr(s2_paddr)
   io.miss_req.bits.vaddr := s2_req.vaddr
   io.miss_req.bits.req_coh := s2_hit_coh
-  // io.miss_req.bits.replace_coh := s2_repl_coh
-  // io.miss_req.bits.replace_tag := s2_repl_tag
   // TODO: consider tag error
   io.miss_req.bits.cancel := io.lsu.s2_kill
   io.miss_req.bits.pc := io.lsu.s2_pc
@@ -201,8 +188,6 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
     */
   io.replace_access.valid := false.B
   io.replace_access.bits  := DontCare
-  // io.replace_access.bits.set := get_idx(s2_req.vaddr)
-  // io.replace_access.bits.way := OHToUInt(s2_way_en)
 
   XSPerfAccumulate("store_fire", s2_valid && !io.lsu.s2_kill)
   XSPerfAccumulate("sta_hit",  s2_valid &&  s2_hit && !io.lsu.s2_kill)
