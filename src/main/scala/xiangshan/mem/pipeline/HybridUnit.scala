@@ -487,12 +487,13 @@ class HybridUnit(implicit p: Parameters) extends XSModule
 
   // set default
   s0_uop := DontCare
-  when (s0_super_ld_rep_select)      { fromNormalReplaySource(io.ldu_io.replay.bits)     }
-  .elsewhen (s0_ld_fast_rep_select)  { fromFastReplaySource(io.ldu_io.fast_rep_in.bits)  }
-  .elsewhen (s0_ld_rep_select)       { fromNormalReplaySource(io.ldu_io.replay.bits)     }
-  .elsewhen (s0_hw_prf_select)       { fromPrefetchSource(io.ldu_io.prefetch_req.bits)   }
-  .elsewhen (s0_int_iss_select)      { fromIntIssueSource(io.lsin.bits)                  }
-  .elsewhen (s0_vec_iss_select)      { fromVecIssueSource(io.vec_stu_io.in.bits)         }
+  when (s0_super_ld_rep_valid)      { fromNormalReplaySource(io.ldu_io.replay.bits)     }
+  .elsewhen (s0_ld_fast_rep_valid)  { fromFastReplaySource(io.ldu_io.fast_rep_in.bits)  }
+  .elsewhen (s0_ld_rep_valid)       { fromNormalReplaySource(io.ldu_io.replay.bits)     }
+  .elsewhen (s0_high_conf_prf_valid){ fromPrefetchSource(io.ldu_io.prefetch_req.bits)   }
+  .elsewhen (s0_int_iss_valid)      { fromIntIssueSource(io.lsin.bits)                  }
+  .elsewhen (s0_vec_iss_valid)      { fromVecIssueSource(io.vec_stu_io.in.bits)         }
+  .elsewhen (s0_low_conf_prf_valid) { fromPrefetchSource(io.ldu_io.prefetch_req.bits)   }
   .otherwise {
     if (EnableLoadToLoadForward) {
       fromLoadToLoadSource(io.ldu_io.l2l_fwd_in)
