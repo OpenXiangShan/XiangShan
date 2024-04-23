@@ -609,6 +609,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   storeAddrIn_valid := (0 until StorePipelineWidth).map{ i => io.storeAddrIn(i).valid}
   val allocated_reg = RegInit(VecInit(List.fill(StoreQueueSize)(false.B)))
   allocated_reg := allocated 
+  val forward_valid = Wire(Vec(LoadPipelineWidth, Bool()))
+  forward_valid := (0 until LoadPipelineWidth).map{ i => io.forward(i).valid}
   val clkGate_dataModule = Module(new STD_CLKGT_func)
     clkGate_dataModule.io.TE := false.B
     clkGate_dataModule.io.E := storeMaskIn_valid.asUInt.orR || storeDataIn_valid.asUInt.orR || allocated.asUInt.orR || allocated_reg.asUInt.orR
@@ -618,7 +620,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   val clkGate_addrModule = Module(new STD_CLKGT_func)
     clkGate_addrModule.io.TE := false.B
-    clkGate_addrModule.io.E := storeAddrIn_valid.asUInt.orR || allocated.asUInt.orR
+    clkGate_addrModule.io.E := storeAddrIn_valid.asUInt.orR || allocated.asUInt.orR || forward_valid.asUInt.orR
     clkGate_addrModule.io.CK := clock
   val gate_clock_addrModule = clkGate_addrModule.io.Q
   paddrModule.clock := gate_clock_addrModule
