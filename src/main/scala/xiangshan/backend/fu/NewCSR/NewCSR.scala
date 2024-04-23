@@ -164,13 +164,12 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   val permitMod = Module(new CSRPermitModule)
 
-  private val wenLegal = wen && !permitMod.io.out.illegal
+  private val wenLegal = permitMod.io.out.hasLegalWen
 
-  val isCSRAccess = io.in.ren || io.in.wen
-  val isSret = io.sret
-  val isMret = io.mret
-  val isDret = io.dret
-  val isWfi  = io.wfi
+  val isSret = permitMod.io.out.hasLegalSret
+  val isMret = permitMod.io.out.hasLegalMret
+  val isDret = io.dret // Todo: check permission
+  val isWfi  = io.wfi  // Todo: check permission
 
   var csrRwMap =
     machineLevelCSRMap ++
@@ -252,9 +251,9 @@ class NewCSR(implicit val p: Parameters) extends Module
   private val writeFpState = wenLegal && Seq(CSRs.fflags, CSRs.frm, CSRs.fcsr).map(_.U === addr).reduce(_ || _)
   private val writeVecState = wenLegal && Seq(CSRs.vstart, CSRs.vxsat, CSRs.vxrm, CSRs.vcsr).map(_.U === addr).reduce(_ || _)
 
-  permitMod.io.in.csrAccess.valid := isCSRAccess
-  permitMod.io.in.csrAccess.bits.wen := wen
-  permitMod.io.in.csrAccess.bits.addr := addr
+  permitMod.io.in.csrAccess.ren := ren
+  permitMod.io.in.csrAccess.wen := wen
+  permitMod.io.in.csrAccess.addr := addr
 
   permitMod.io.in.privState.V := V
   permitMod.io.in.privState.PRVM := PRVM
@@ -262,8 +261,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   permitMod.io.in.mret := isMret
   permitMod.io.in.sret := isSret
 
-  permitMod.io.in.status.tsr := false.B
-  permitMod.io.in.status.vtsr := false.B
+  permitMod.io.in.status.tsr := mstatus.rdata.TSR.asBool
+  permitMod.io.in.status.vtsr := hstatus.rdata.VTSR.asBool
 
   csrMods.foreach { mod =>
     mod match {
@@ -535,20 +534,20 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.out.singleStepFlag := !debugMode && dcsr.rdata.STEP
 
   // Todo: record the last address to avoid xireg is different with xiselect
-  toAIA.addr.valid := isCSRAccess && Seq(miselect, siselect, vsiselect).map(
+  toAIA.addr.valid := wenLegal && Seq(miselect, siselect, vsiselect).map(
     _.addr.U === addr
   ).reduce(_ || _)
   toAIA.addr.bits.addr := addr
   toAIA.addr.bits.prvm := PRVM
   toAIA.addr.bits.v := V
   toAIA.vgein := hstatus.rdata.VGEIN.asUInt
-  toAIA.wdata.valid := isCSRAccess && Seq(mireg, sireg, vsireg).map(
+  toAIA.wdata.valid := wenLegal && Seq(mireg, sireg, vsireg).map(
     _.addr.U === addr
   ).reduce(_ || _)
   toAIA.wdata.bits.data := wdata
-  toAIA.mClaim := isCSRAccess && mtopei.addr.U === addr
-  toAIA.sClaim := isCSRAccess && stopei.addr.U === addr
-  toAIA.vsClaim := isCSRAccess && vstopei.addr.U === addr
+  toAIA.mClaim := wenLegal && mtopei.addr.U === addr
+  toAIA.sClaim := wenLegal && stopei.addr.U === addr
+  toAIA.vsClaim := wenLegal && vstopei.addr.U === addr
 
   // tlb
   io.tlb.satp := satp.rdata.asUInt
