@@ -80,7 +80,7 @@ class MinimalConfig(n: Int = 1) extends Config(
         // ============ VLSU ============
         VlMergeBufferSize = 8,
         VsMergeBufferSize = 8,
-        UopWritebackWidth = 1,
+        UopWritebackWidth = 2,
         SplitBufferSize = 8,
         // ==============================
         RobSize = 48,

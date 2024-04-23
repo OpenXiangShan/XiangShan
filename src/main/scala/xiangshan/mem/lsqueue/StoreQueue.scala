@@ -69,7 +69,7 @@ class DataBufferEntry (implicit p: Parameters)  extends DCacheBundle {
 class StoreExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
-    val storeAddrIn = Vec(StorePipelineWidth + 1, Flipped(ValidIO(new LsPipelineBundle())))
+    val storeAddrIn = Vec(StorePipelineWidth + VecStorePipelineWidth, Flipped(ValidIO(new LsPipelineBundle())))
     val exceptionAddr = new ExceptionAddrIO
   })
 
@@ -83,15 +83,15 @@ class StoreExceptionBuffer(implicit p: Parameters) extends XSModule with HasCirc
 
   // S2: delay 1 cycle
   val s2_req = RegNext(s1_req)
-  val s2_valid = (0 until StorePipelineWidth + 1).map(i =>
+  val s2_valid = (0 until StorePipelineWidth + VecStorePipelineWidth).map(i =>
     RegNext(s1_valid(i)) &&
       !s2_req(i).uop.robIdx.needFlush(RegNext(io.redirect)) &&
       !s2_req(i).uop.robIdx.needFlush(io.redirect)
   )
   val s2_has_exception = s2_req.map(x => ExceptionNO.selectByFu(x.uop.exceptionVec, StaCfg).asUInt.orR)
 
-  val s2_enqueue = Wire(Vec(StorePipelineWidth + 1, Bool()))
-  for (w <- 0 until StorePipelineWidth + 1) {
+  val s2_enqueue = Wire(Vec(StorePipelineWidth + VecStorePipelineWidth, Bool()))
+  for (w <- 0 until StorePipelineWidth + VecStorePipelineWidth) {
     s2_enqueue(w) := s2_valid(w) && s2_has_exception(w)
   }
 
@@ -132,9 +132,9 @@ class StoreExceptionBuffer(implicit p: Parameters) extends XSModule with HasCirc
     req := reqSel._2(0)
   }
 
-  io.exceptionAddr.vaddr := req.vaddr
+  io.exceptionAddr.vaddr  := req.vaddr
   io.exceptionAddr.vstart := req.uop.vpu.vstart
-  io.exceptionAddr.vl     := 0.U
+  io.exceptionAddr.vl     := req.uop.vpu.vl
 }
 
 // Store Queue
@@ -147,7 +147,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val hartId = Input(UInt(8.W))
     val enq = new SqEnqIO
     val brqRedirect = Flipped(ValidIO(new Redirect))
-    val vecFeedback = Flipped(ValidIO(new FeedbackToLsqIO))
+    val vecFeedback = Vec(VecLoadPipelineWidth, Flipped(ValidIO(new FeedbackToLsqIO)))
     val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // store addr, data is not included
     val storeAddrInRe = Vec(StorePipelineWidth, Input(new LsPipelineBundle())) // store more mmio and exception
     val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new MemExuOutput(isVector = true)))) // store data, send to sq from rs
@@ -209,8 +209,17 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val exceptionBuffer = Module(new StoreExceptionBuffer)
   exceptionBuffer.io.redirect := io.brqRedirect
   exceptionBuffer.io.exceptionAddr.isStore := DontCare
-  // TODO: implement it!
-  exceptionBuffer.io.storeAddrIn(StorePipelineWidth) := DontCare
+  // vlsu exception!
+  for (i <- 0 until VecStorePipelineWidth) {
+    exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).valid               := io.vecFeedback(i).valid && io.vecFeedback(i).bits.feedback(VecFeedbacks.FLUSH) // have exception
+    exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).bits                := DontCare
+    exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).bits.vaddr          := io.vecFeedback(i).bits.vaddr
+    exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).bits.uop.uopIdx     := io.vecFeedback(i).bits.uopidx
+    exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).bits.uop.robIdx     := io.vecFeedback(i).bits.robidx
+    exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).bits.uop.vpu.vstart := io.vecFeedback(i).bits.vstart
+    exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).bits.uop.vpu.vl     := io.vecFeedback(i).bits.vl
+  }
+
 
   val debug_paddr = Reg(Vec(StoreQueueSize, UInt((PAddrBits).W)))
   val debug_vaddr = Reg(Vec(StoreQueueSize, UInt((VAddrBits).W)))
@@ -943,10 +952,15 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   io.exceptionAddr.vl     := exceptionBuffer.io.exceptionAddr.vl
 
   // vector commit or replay from
+  val vecCommittmp = Wire(Vec(StoreQueueSize, Vec(VecStorePipelineWidth, Bool())))
   val vecCommit = Wire(Vec(StoreQueueSize, Bool()))
   for (i <- 0 until StoreQueueSize) {
     val fbk = io.vecFeedback
-    vecCommit(i) := fbk.valid && fbk.bits.isCommit && uop(i).robIdx === fbk.bits.robidx && uop(i).uopIdx === fbk.bits.uopidx
+    for (j <- 0 until VecStorePipelineWidth) {
+      vecCommittmp(i)(j) := fbk(j).valid && fbk(j).bits.isCommit && uop(i).robIdx === fbk(j).bits.robidx && uop(i).uopIdx === fbk(j).bits.uopidx
+    }
+    vecCommit(i) := vecCommittmp(i).reduce(_ || _)
+
     when (vecCommit(i)) {
       vecMbCommit(i) := true.B
     }

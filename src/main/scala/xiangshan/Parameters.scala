@@ -195,8 +195,8 @@ case class XSCoreParameters
   prefetcher: Option[PrefetcherParams] = Some(SMSParams()),
   LoadPipelineWidth: Int = 3,
   StorePipelineWidth: Int = 2,
-  VecLoadPipelineWidth: Int = 1,
-  VecStorePipelineWidth: Int = 1,
+  VecLoadPipelineWidth: Int = 2,
+  VecStorePipelineWidth: Int = 2,
   VecMemSrcInWidth: Int = 2,
   VecMemInstWbWidth: Int = 1,
   VecMemDispatchWidth: Int = 1,
@@ -207,7 +207,7 @@ case class XSCoreParameters
   // ============ VLSU ============
   VlMergeBufferSize: Int = 16,
   VsMergeBufferSize: Int = 16,
-  UopWritebackWidth: Int = 1,
+  UopWritebackWidth: Int = 2,
   SplitBufferSize: Int = 8,
   // ==============================
   UncacheBufferSize: Int = 4,

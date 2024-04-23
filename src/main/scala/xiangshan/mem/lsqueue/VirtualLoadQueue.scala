@@ -37,7 +37,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   val io = IO(new Bundle() {
     // control
     val redirect    = Flipped(Valid(new Redirect))
-    val vecCommit   = Flipped(ValidIO(new FeedbackToLsqIO))
+    val vecCommit   = Vec(VecLoadPipelineWidth, Flipped(ValidIO(new FeedbackToLsqIO)))
     // from dispatch
     val enq         = new LqEnqIO
     // from ldu s3
@@ -200,9 +200,15 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   })
 
   // vector commit or replay
+  val vecLdCommittmp = Wire(Vec(VirtualLoadQueueSize, Vec(VecLoadPipelineWidth, Bool())))
   val vecLdCommit = Wire(Vec(VirtualLoadQueueSize, Bool()))
   for (i <- 0 until VirtualLoadQueueSize) {
-    vecLdCommit(i) := io.vecCommit.valid && io.vecCommit.bits.isCommit && uop(i).robIdx === io.vecCommit.bits.robidx && uop(i).uopIdx === io.vecCommit.bits.uopidx
+    val cmt = io.vecCommit
+    for (j <- 0 until VecLoadPipelineWidth) {
+      vecLdCommittmp(i)(j) := cmt(j).valid && cmt(j).bits.isCommit && uop(i).robIdx === cmt(j).bits.robidx && uop(i).uopIdx === cmt(j).bits.uopidx
+    }
+    vecLdCommit(i) := vecLdCommittmp(i).reduce(_ || _)
+
     when (vecLdCommit(i)) {
       veccommitted(i) := true.B
     }
