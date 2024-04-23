@@ -124,6 +124,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   val isLoadReplay = Bool()
   val isFastPath = Bool()
   val isFastReplay = Bool()
+  val isMMIO = Bool()
   val replayCarry = new ReplayCarry(nWays)
 
   // For dcache miss load
@@ -186,6 +187,7 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     isLoadReplay := DontCare
     isFastPath := DontCare
     isFastReplay := DontCare
+    isMMIO := DontCare
     handledByMSHR := DontCare
     replacementUpdated := DontCare
     missDbUpdated := DontCare
@@ -238,6 +240,7 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     if(latch) isLoadReplay := RegNext(input.isLoadReplay) else isLoadReplay := input.isLoadReplay
     if(latch) isFastPath := RegNext(input.isFastPath) else isFastPath := input.isFastPath
     if(latch) isFastReplay := RegNext(input.isFastReplay) else isFastReplay := input.isFastReplay
+    if(latch) isMMIO := RegNext(input.isMMIO) else isMMIO := input.isMMIO
     if(latch) mshrid := RegNext(input.mshrid) else mshrid := input.mshrid
     if(latch) forward_tlDchannel := RegNext(input.forward_tlDchannel) else forward_tlDchannel := input.forward_tlDchannel
     if(latch) replayCarry := RegNext(input.replayCarry) else replayCarry := input.replayCarry
