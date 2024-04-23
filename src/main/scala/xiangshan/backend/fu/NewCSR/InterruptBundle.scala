@@ -104,4 +104,20 @@ object InterruptNO {
   final val VSEI = 10
   final val MEI  = 11
   final val SGEI = 12
+  // SoC
+  final val COI = 13
+  final val LPRASEI = 35
+  final val HPRASEI = 43
+
+  val interruptDefaultPrio = Seq(
+    HPRASEI,
+
+    MEI, MSI, MTI,
+    SEI, SSI, STI,
+    SGEI,
+    VSEI, VSSI, VSTI,
+    COI,
+
+    LPRASEI
+  )
 }

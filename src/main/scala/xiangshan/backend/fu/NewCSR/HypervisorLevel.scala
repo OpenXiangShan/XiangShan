@@ -56,21 +56,7 @@ trait HypervisorLevel { self: NewCSR =>
   }))
     .setAddr(0x608)
 
-  val hvictl = Module(new CSRModule("Hvictl", new CSRBundle {
-    // Virtual Trap Interrupt control
-    val VTI    = RW  (30)
-    // WARL in AIA spec.
-    // RW, since we support max width of IID
-    val IID    = RW  (15 + HIIDWidth, 16)
-    // determines the interrupt’s presumed default priority order relative to a (virtual) supervisor external interrupt (SEI), major identity 9
-    // 0 = interrupt has higher default priority than an SEI
-    // 1 = interrupt has lower default priority than an SEI
-    // When hvictl.IID = 9, DPR is ignored.
-    // Todo: sort the interrupt specified by hvictl with DPR
-    val DPR    = RW  (9)
-    val IPRIOM = RW  (8)
-    val IPRIO  = RW  ( 7,  0)
-  }))
+  val hvictl = Module(new CSRModule("Hvictl", new HvictlBundle))
     .setAddr(0x609)
 
   val henvcfg = Module(new CSRModule("Henvcfg", new CSRBundle {
@@ -121,25 +107,10 @@ trait HypervisorLevel { self: NewCSR =>
 
   hvip.fromHip := hip.toHvip
 
-  val hviprio1 = Module(new CSRModule("Hviprio1", new CSRBundle {
-    val PrioSSI = RW(15,  8)
-    val PrioSTI = RW(31, 24)
-    val PrioCOI = RW(47, 40)
-    val Prio14  = RW(55, 48)
-    val Prio15  = RW(63, 56)
-  }))
+  val hviprio1 = Module(new CSRModule("Hviprio1", new Hviprio1Bundle))
     .setAddr(0x646)
 
-  val hviprio2 = Module(new CSRModule("Hviprio2", new CSRBundle {
-    val Prio16  = RW( 7,  0)
-    val Prio17  = RW(15,  8)
-    val Prio18  = RW(23, 16)
-    val Prio19  = RW(31, 24)
-    val Prio20  = RW(39, 32)
-    val Prio21  = RW(47, 40)
-    val Prio22  = RW(55, 48)
-    val Prio23  = RW(63, 56)
-  }))
+  val hviprio2 = Module(new CSRModule("Hviprio2", new Hviprio2Bundle))
     .setAddr(0x647)
 
   val htinst = Module(new CSRModule("Htinst", new CSRBundle {
@@ -270,6 +241,41 @@ class HidelegBundle extends InterruptBundle {
 
 class HipToHvip extends Bundle {
   val VSSIP = ValidIO(RW(0))
+}
+
+class HvictlBundle extends CSRBundle {
+  // Virtual Trap Interrupt control
+  val VTI = RW(30)
+  // WARL in AIA spec.
+  // RW, since we support max width of IID
+  val IID = RW(15 + HIIDWidth, 16)
+  // determines the interrupt’s presumed default priority order relative to a (virtual) supervisor external interrupt (SEI), major identity 9
+  // 0 = interrupt has higher default priority than an SEI
+  // 1 = interrupt has lower default priority than an SEI
+  // When hvictl.IID = 9, DPR is ignored.
+  // Todo: sort the interrupt specified by hvictl with DPR
+  val DPR = RW(9)
+  val IPRIOM = RW(8)
+  val IPRIO = RW(7, 0)
+}
+
+class Hviprio1Bundle extends CSRBundle {
+  val PrioSSI = RW(15, 8)
+  val PrioSTI = RW(31, 24)
+  val PrioCOI = RW(47, 40)
+  val Prio14  = RW(55, 48)
+  val Prio15  = RW(63, 56)
+}
+
+class Hviprio2Bundle extends CSRBundle {
+  val Prio16 = RW(7, 0)
+  val Prio17 = RW(15, 8)
+  val Prio18 = RW(23, 16)
+  val Prio19 = RW(31, 24)
+  val Prio20 = RW(39, 32)
+  val Prio21 = RW(47, 40)
+  val Prio22 = RW(55, 48)
+  val Prio23 = RW(63, 56)
 }
 
 trait HypervisorBundle { self: CSRModule[_] =>
