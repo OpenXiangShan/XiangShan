@@ -6,7 +6,7 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.backend.Bundles.{ExuOutput, MemExuOutput}
 import xiangshan.backend.exu.ExeUnitParams
-import xiangshan.backend.fu.vector.{ByteMaskTailGen, Mgu, VecInfo}
+import xiangshan.backend.fu.vector.{ByteMaskTailGen, Mgu, VldMgu, VecInfo}
 import xiangshan.mem.GenUSMaskRegVL
 import yunsuan.vector.SewOH
 
@@ -16,7 +16,7 @@ class VldMergeUnit(val params: ExeUnitParams)(implicit p: Parameters) extends XS
   io.writeback.ready := io.writebackAfterMerge.ready
 
   val wbReg = Reg(Valid(new ExuOutput(params)))
-  val mgu = Module(new Mgu(VLEN))
+  val mgu = Module(new VldMgu(VLEN))
   val vdAfterMerge = Wire(UInt(VLEN.W))
 
   val wbFire = !io.writeback.bits.robIdx.needFlush(io.flush) && io.writeback.fire
