@@ -631,7 +631,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   forward_valid := (0 until LoadPipelineWidth).map{ i => io.forward(i).valid}
   val clkGate_dataModule = Module(new STD_CLKGT_func)
     clkGate_dataModule.io.TE := false.B
-    clkGate_dataModule.io.E := storeMaskIn_valid.asUInt.orR || storeDataIn_valid.asUInt.orR || allocated.asUInt.orR || allocated_reg.asUInt.orR
+    clkGate_dataModule.io.E := storeMaskIn_valid.asUInt.orR || storeDataIn_valid.asUInt.orR || allocated.asUInt.orR || allocated_reg.asUInt.orR || forward_valid.asUInt.orR
     clkGate_dataModule.io.CK := clock
   val gate_clock_dataModule = clkGate_dataModule.io.Q
   dataModule.clock := gate_clock_dataModule 
