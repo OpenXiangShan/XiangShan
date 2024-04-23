@@ -8,12 +8,14 @@ import xiangshan.backend.fu.NewCSR.CSRBundles.PrivState
 class CSRPermitModule extends Module {
   val io = IO(new CSRPermitIO)
 
-  private val (csrAccess, wen, addr, privState) = (
-    io.in.csrAccess.valid,
-    io.in.csrAccess.bits.wen,
-    io.in.csrAccess.bits.addr,
+  private val (ren, wen, addr, privState) = (
+    io.in.csrAccess.ren,
+    io.in.csrAccess.wen,
+    io.in.csrAccess.addr,
     io.in.privState
   )
+
+  private val csrAccess = ren || wen
 
   private val (mret, sret) = (
     io.in.mret,
@@ -25,7 +27,7 @@ class CSRPermitModule extends Module {
     io.in.status.vtsr,
   )
 
-  private val isRO = addr(11, 10) === "b11".U
+  private val csrIsRO = addr(11, 10) === "b11".U
 
   private val accessTable = TruthTable(Seq(
     //       V PRVM ADDR
@@ -44,25 +46,30 @@ class CSRPermitModule extends Module {
     accessTable
   ).asBool
 
-  private val rwLegal = isRO && wen
+  private val rwLegal = csrIsRO && wen
 
-  private val csrAccessIllegal = csrAccess && (!privilegeLegal || !rwLegal)
+  private val csrAccessIllegal = (!privilegeLegal || !rwLegal)
 
-  private val mretIllegal = mret && !privState.isModeM
+  private val mretIllegal = !privState.isModeM
 
   private val sretIllegal = sret && (
     privState.isModeHS && tsr || privState.isModeVS && vtsr || privState.isModeHUorVU
   )
 
-  io.out.illegal := csrAccessIllegal || mretIllegal || sretIllegal
+  io.out.illegal := csrAccess && csrAccessIllegal || mret && mretIllegal || sret && sretIllegal
+
+  io.out.hasLegalWen := io.in.csrAccess.wen && !csrAccessIllegal
+  io.out.hasLegalMret := mret && !mretIllegal
+  io.out.hasLegalSret := sret && !sretIllegal
 }
 
 class CSRPermitIO extends Bundle {
   val in = Input(new Bundle {
-    val csrAccess = ValidIO(new Bundle {
+    val csrAccess = new Bundle {
+      val ren = Bool()
       val wen = Bool()
       val addr = UInt(12.W)
-    })
+    }
     val privState = new PrivState
     val mret = Bool()
     val sret = Bool()
@@ -75,6 +82,10 @@ class CSRPermitIO extends Bundle {
   })
 
   val out = Output(new Bundle {
+    val hasLegalWen = Bool()
+    val hasLegalMret = Bool()
+    val hasLegalSret = Bool()
+    // Todo: split illegal into EX_II and EX_VI
     val illegal = Bool()
   })
 }
