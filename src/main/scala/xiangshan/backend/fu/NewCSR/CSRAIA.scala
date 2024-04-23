@@ -20,7 +20,10 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
   }))
     .setAddr(0x35C)
 
-  val mtopi = Module(new CSRModule("Mtopi", new TopIBundle))
+  val mtopi = Module(new CSRModule("Mtopi", new TopIBundle) with HasInterruptFilterBundle {
+    rdata.IID := topIn.mtopi.IID
+    rdata.IPRIO := topIn.mtopi.IPRIO
+  })
     .setAddr(0xFB0)
 
   val siselect = Module(new CSRModule("Siselect", new SISelectBundle))
@@ -35,7 +38,10 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
   }))
     .setAddr(0x15C)
 
-  val stopi = Module(new CSRModule("Stopi", new TopIBundle))
+  val stopi = Module(new CSRModule("Stopi", new TopIBundle) with HasInterruptFilterBundle {
+    rdata.IID := topIn.stopi.IID
+    rdata.IPRIO := topIn.stopi.IPRIO
+  })
     .setAddr(0xDB0)
 
   val vsiselect = Module(new CSRModule("VSiselect", new VSISelectBundle))
@@ -50,7 +56,9 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
   }))
     .setAddr(0x25C)
 
-  val vstopi = Module(new CSRModule("VStopi", new TopIBundle))
+  val vstopi = Module(new CSRModule("VStopi", new TopIBundle) with HasInterruptFilterBundle {
+    rdata := topIn.vstopi
+  })
     .setAddr(0xEB0)
 
   val aiaCSRMods = Seq(
@@ -162,4 +170,18 @@ class AIAToCSRBundle extends Bundle {
 
 trait HasAIABundle { self: CSRModule[_] =>
   val aiaToCSR = IO(Input(new AIAToCSRBundle))
+}
+
+trait HasInterruptFilterBundle { self: CSRModule[_] =>
+  val topIn = IO(new Bundle {
+    val mtopi = Input(new TopIBundle)
+    val stopi = Input(new TopIBundle)
+    val vstopi = Input(new TopIBundle)
+  })
+}
+
+trait HasISelectBundle { self: CSRModule[_] =>
+  val miselect = IO(Input(new MISelectBundle))
+  val siselect = IO(Input(new SISelectBundle))
+  val vsiselect = IO(Input(new VSISelectBundle))
 }

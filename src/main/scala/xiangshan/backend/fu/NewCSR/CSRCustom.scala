@@ -83,18 +83,18 @@ class SpfctlBundle extends CSRBundle {
 
 class SlvpredctlBundle extends CSRBundle {
   val LVPRED_TIMEOUT          = RW(8, 4, /*resetVal= */ 3.U)
-  val STORESET_NO_FAST_WAKEUP = RW(3).withReset(0.U)
-  val STORESET_WAIT_STORE     = RW(2).withReset(0.U)
-  val NO_SPEC_LOAD            = RW(1).withReset(0.U)
-  val LVPRED_DISABLE          = RW(0).withReset(0.U)
+  val STORESET_NO_FAST_WAKEUP = RW(3).withReset(false.B)
+  val STORESET_WAIT_STORE     = RW(2).withReset(false.B)
+  val NO_SPEC_LOAD            = RW(1).withReset(false.B)
+  val LVPRED_DISABLE          = RW(0).withReset(false.B)
 }
 
 class SmblockctlBundle extends CSRBundle {
-  val UNCACHE_WRITE_OUTSTANDING_ENABLE = RW(   7).withReset(0.U) // Enable uncache write outstanding (0). Todo:
-  val CACHE_ERROR_ENABLE               = RW(   6)                // Enable cache error after reset (CE).
-  val SOFT_PREFETCH_ENABLE             = RW(   5)                // Enable soft-prefetch after reset (SP).
-  val LDLD_VIO_CHECK_ENABLE            = RW(   4)                // Enable load load violation check after reset (LVC).
-  val SBUFFER_THRESHOLD                = RW(3, 0)                // Store buffer flush threshold (Th).
+  val UNCACHE_WRITE_OUTSTANDING_ENABLE = RW(   7).withReset(false.B)  // Enable uncache write outstanding (0).
+  val CACHE_ERROR_ENABLE               = RW(   6).withReset(true.B)   // Enable cache error after reset (CE).
+  val SOFT_PREFETCH_ENABLE             = RW(   5).withReset(true.B)   // Enable soft-prefetch after reset (SP).
+  val LDLD_VIO_CHECK_ENABLE            = RW(   4).withReset(true.B)   // Enable load load violation check after reset (LVC).
+  val SBUFFER_THRESHOLD                = RW(3, 0)// todo:, /*resetVal= */ 7.U) // Store buffer flush threshold (Th).
 }
 
 class SrnctlBundle extends CSRBundle {
