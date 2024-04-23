@@ -108,19 +108,25 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
   val io = IO(new WbDataPathIO()(p, params))
 
   // split
-  val fromExuPre = (io.fromIntExu ++ io.fromVfExu ++ io.fromMemExu).flatten
+  val fromExuPre = collection.mutable.Seq() ++ (io.fromIntExu ++ io.fromVfExu ++ io.fromMemExu).flatten
   val fromExuVld: Seq[DecoupledIO[ExuOutput]] = fromExuPre.filter(_.bits.params.hasVLoadFu).toSeq
-  require(fromExuVld.size == 1, "vldCnt should be 1")
-  val vldMgu = Module(new VldMergeUnit(fromExuVld.head.bits.params))
-  vldMgu.io.flush := io.flush
-  vldMgu.io.writeback <> fromExuVld.head
-  val wbReplaceVld: Seq[DecoupledIO[ExuOutput]] = fromExuPre.updated(fromExuPre.indexWhere(_.bits.params.hasVLoadFu), vldMgu.io.writebackAfterMerge).toSeq
-  val fromExu: MixedVec[DecoupledIO[ExuOutput]] = Wire(chiselTypeOf(MixedVecInit(wbReplaceVld)))
+  val vldMgu: Seq[VldMergeUnit] = fromExuVld.map(x => Module(new VldMergeUnit(x.bits.params)))
+  vldMgu.zip(fromExuVld).foreach{ case (mgu, exu) =>
+    mgu.io.flush := io.flush
+    mgu.io.writeback <> exu
+  }
+  val wbReplaceVld = fromExuPre
+  val vldIdx: Seq[Int] = vldMgu.map(x => fromExuPre.indexWhere(_.bits.params == x.params))
+  println("vldIdx: " + vldIdx)
+  vldIdx.zip(vldMgu).foreach{ case (id, wb) =>
+    wbReplaceVld.update(id, wb.io.writebackAfterMerge)
+  }
+  val fromExu = Wire(chiselTypeOf(MixedVecInit(wbReplaceVld.toSeq)))
 
   // io.fromExuPre ------------------------------------------------------------> fromExu
   //               \                                                         /
   //                -> vldMgu.io.writeback -> vldMgu.io.writebackAfterMerge /
-  (fromExu zip wbReplaceVld).foreach { case (sink, source) => 
+  (fromExu zip wbReplaceVld).foreach { case (sink, source) =>
     sink.valid := source.valid
     sink.bits := source.bits
     source.ready := sink.ready
