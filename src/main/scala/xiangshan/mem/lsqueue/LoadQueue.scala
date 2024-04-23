@@ -107,7 +107,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 {
   val io = IO(new Bundle() {
     val redirect = Flipped(Valid(new Redirect))
-    val vecFeedback = Flipped(ValidIO(new FeedbackToLsqIO))
+    val vecFeedback = Vec(VecLoadPipelineWidth, Flipped(ValidIO(new FeedbackToLsqIO)))
     val enq = new LqEnqIO
     val ldu = new Bundle() {
         val stld_nuke_query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO)) // from load_s2
@@ -211,13 +211,16 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     exceptionBuffer.io.req(i).bits := io.ldu.ldin(i).bits
   }
   // vlsu exception!
-  exceptionBuffer.io.req(LoadPipelineWidth).valid               := io.vecFeedback.valid && io.vecFeedback.bits.feedback(VecFeedbacks.FLUSH) // have exception
-  exceptionBuffer.io.req(LoadPipelineWidth).bits                := DontCare
-  exceptionBuffer.io.req(LoadPipelineWidth).bits.vaddr          := io.vecFeedback.bits.vaddr
-  exceptionBuffer.io.req(LoadPipelineWidth).bits.uop.uopIdx     := io.vecFeedback.bits.uopidx
-  exceptionBuffer.io.req(LoadPipelineWidth).bits.uop.robIdx     := io.vecFeedback.bits.robidx
-  exceptionBuffer.io.req(LoadPipelineWidth).bits.uop.vpu.vstart := io.vecFeedback.bits.vstart
-  exceptionBuffer.io.req(LoadPipelineWidth).bits.uop.vpu.vl     := io.vecFeedback.bits.vl
+  for (i <- 0 until VecLoadPipelineWidth) {
+    exceptionBuffer.io.req(LoadPipelineWidth + i).valid               := io.vecFeedback(i).valid && io.vecFeedback(i).bits.feedback(VecFeedbacks.FLUSH) // have exception
+    exceptionBuffer.io.req(LoadPipelineWidth + i).bits                := DontCare
+    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.vaddr          := io.vecFeedback(i).bits.vaddr
+    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.uop.uopIdx     := io.vecFeedback(i).bits.uopidx
+    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.uop.robIdx     := io.vecFeedback(i).bits.robidx
+    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.uop.vpu.vstart := io.vecFeedback(i).bits.vstart
+    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.uop.vpu.vl     := io.vecFeedback(i).bits.vl
+  }
+
   io.exceptionAddr <> exceptionBuffer.io.exceptionAddr
 
   /**
@@ -263,7 +266,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueReplay.io.tlb_hint         <> io.tlb_hint
   loadQueueReplay.io.tlbReplayDelayCycleCtrl <> io.tlbReplayDelayCycleCtrl
   // TODO: implement it!
-  loadQueueReplay.io.vecFeedback := DontCare
+  loadQueueReplay.io.vecFeedback := io.vecFeedback
 
   loadQueueReplay.io.debugTopDown <> io.debugTopDown
 

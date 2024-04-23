@@ -208,6 +208,8 @@ case class XSCoreParameters
   VlMergeBufferSize: Int = 16,
   VsMergeBufferSize: Int = 16,
   UopWritebackWidth: Int = 1,
+  VLUopWritebackWidth: Int = 1,
+  VSUopWritebackWidth: Int = 1,
   SplitBufferSize: Int = 8,
   // ==============================
   UncacheBufferSize: Int = 4,
@@ -633,6 +635,8 @@ trait HasXSParameter {
   val VlMergeBufferSize = coreParams.VlMergeBufferSize
   val VsMergeBufferSize = coreParams.VsMergeBufferSize
   val UopWritebackWidth = coreParams.UopWritebackWidth
+  val VLUopWritebackWidth = coreParams.VLUopWritebackWidth
+  val VSUopWritebackWidth = coreParams.VSUopWritebackWidth
   val SplitBufferSize = coreParams.SplitBufferSize
   val UncacheBufferSize = coreParams.UncacheBufferSize
   val EnableLoadToLoadForward = coreParams.EnableLoadToLoadForward
