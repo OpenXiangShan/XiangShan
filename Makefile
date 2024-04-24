@@ -85,6 +85,11 @@ ifeq ($(WITH_ROLLINGDB),1)
 override SIM_ARGS += --with-rollingdb
 endif
 
+# run with disable all db
+ifeq ($(WITH_DISABLEDB),1)
+override SIM_ARGS += --disable-alwaysdb
+endif
+
 # dynamic switch CONSTANTIN
 ifeq ($(WITH_CONSTANTIN),0)
 $(info disable WITH_CONSTANTIN)
@@ -95,7 +100,7 @@ endif
 # emu for the release version
 RELEASE_ARGS += --fpga-platform --disable-all --remove-assert
 DEBUG_ARGS   += --enable-difftest
-PLDM_ARGS    += --fpga-platform --enable-difftest --disable-alwaysdb
+PLDM_ARGS    += --fpga-platform --enable-difftest
 ifeq ($(GOALS),verilog)
 RELEASE_ARGS += --disable-always-basic-diff
 endif
