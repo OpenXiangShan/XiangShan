@@ -14,7 +14,6 @@ class CSRModule[T <: CSRBundle](
 
   override def desiredName: String = modName + "Module"
 
-  val commonIn = IO(Input(new CSRCommonIn))
   val w = IO(Input(new CSRAddrWriteBundle(bundle)))
 
   // read data with mask
@@ -26,10 +25,6 @@ class CSRModule[T <: CSRBundle](
 
   protected val wen = w.wen
   protected val wdata = w.wdataFields
-
-  protected val status = commonIn.status
-  protected val v = commonIn.v
-  protected val prvm = commonIn.prvm
 
   reg.elements.foreach { case (str, field: CSREnumType) =>
     val wfield = wdata.elements(str).asInstanceOf[CSREnumType]
@@ -93,13 +88,6 @@ class CSRAddrWriteBundle[T <: CSRBundle](bundle: T) extends Bundle {
     wdataField := wdata
     wdataField
   }
-}
-
-class CSRCommonIn extends Bundle {
-  val status = new MstatusBundle
-  val prvm = PrivMode()
-  val v = VirtMode()
-  val hstatus = new HstatusBundle
 }
 
 // Interrupt Controller
