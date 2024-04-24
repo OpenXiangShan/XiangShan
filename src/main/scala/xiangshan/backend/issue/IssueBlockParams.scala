@@ -106,6 +106,8 @@ case class IssueBlockParams(
 
   def needSrcVxrm: Boolean = exuBlockParams.map(_.needSrcVxrm).reduce(_ || _)
 
+  def writeVConfig: Boolean = exuBlockParams.map(_.writeVConfig).reduce(_ || _)
+
   def numPcReadPort: Int = (if (needPc) 1 else 0) * numEnq
 
   def numWriteIntRf: Int = exuBlockParams.count(_.writeIntRf)
