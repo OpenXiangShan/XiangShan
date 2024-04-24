@@ -599,7 +599,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val s1_ld_flow    = RegNext(s0_ld_flow)
   val s1_isvec      = RegEnable(s0_out.isvec, false.B, s0_fire)
   val s1_isLastElem = RegEnable(s0_out.isLastElem, false.B, s0_fire)
-  val s1_st_amo     = FuType.storeIsAMO(s1_in.uop.ctrl.fuType) && !s1_ld_flow && !s1_isvec
+  val s1_st_amo     = FuType.storeIsAMO(s1_in.uop.fuType) && !s1_ld_flow && !s1_isvec
 
   s1_ready := true.B
   when (s0_fire) { s1_valid := true.B }
