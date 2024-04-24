@@ -191,13 +191,11 @@ class ITTageTable
   def inc_ctr(ctr: UInt, taken: Bool): UInt = satUpdate(ctr, ITTageCtrBits, taken)
 
   class ITTageEntry() extends ITTageBundle {
-    // val valid = Bool()
+    val valid = Bool()
     val tag = UInt(tagLen.W)
     val ctr = UInt(ITTageCtrBits.W)
     val target = UInt(VAddrBits.W)
   }
-
-  val validArray = RegInit(0.U(nRows.W))
 
   // Why need add instOffsetBits?
   val ittageEntrySz = 1 + tagLen + ITTageCtrBits + VAddrBits
@@ -214,10 +212,10 @@ class ITTageTable
   val s0_bank_req_1h = get_bank_mask(s0_idx)
   val s1_bank_req_1h = RegEnable(s0_bank_req_1h, io.req.fire)
 
-  val us = Module(new Folded1WDataModuleTemplate(Bool(), nRows, 1, isSync=true, width=uFoldedWidth))
-  // val table  = Module(new SRAMTemplate(new ITTageEntry, set=nRows, way=1, shouldReset=true, holdRead=true, singlePort=false))
-  val table_banks = Seq.fill(nBanks)(
-    Module(new FoldedSRAMTemplate(new ITTageEntry, set=nRows/nBanks, width=bankFoldWidth, shouldReset=true, holdRead=true, singlePort=true)))
+  val us = Module(new Folded1WDataModuleTemplate(
+    Bool(), nRows, 1, isSync=true, width=uFoldedWidth, hasRen=true))
+  val table_banks = Seq.fill(nBanks)(Module(new FoldedSRAMTemplate(
+    new ITTageEntry, set=nRows/nBanks, width=bankFoldWidth, shouldReset=true, holdRead=true, singlePort=true)))
 
   for (b <- 0 until nBanks) {
     table_banks(b).io.r.req.valid := io.req.fire && s0_bank_req_1h(b)
@@ -225,11 +223,12 @@ class ITTageTable
   }
 
   us.io.raddr(0) := s0_idx
+  us.io.ren.get(0) := io.req.valid
 
   val table_banks_r = table_banks.map(_.io.r.resp.data(0))
 
   val resp_selected = Mux1H(s1_bank_req_1h, table_banks_r)
-  val s1_req_rhit = validArray(s1_idx) && resp_selected.tag === s1_tag
+  val s1_req_rhit = resp_selected.valid && resp_selected.tag === s1_tag
   val resp_invalid_by_write = Wire(Bool())
 
   io.resp.valid := (if (tagLen != 0) s1_req_rhit && !resp_invalid_by_write else true.B) // && s1_mask(b)
@@ -275,14 +274,11 @@ class ITTageTable
   wrbypass.io.write_data.map(_ := update_wdata.ctr)
 
   val old_ctr = Mux(wrbypass.io.hit, wrbypass.io.hit_data(0).bits, io.update.oldCtr)
+  update_wdata.valid := true.B
   update_wdata.ctr   := Mux(io.update.alloc, 2.U, inc_ctr(old_ctr, io.update.correct))
   update_wdata.tag   := update_tag
   // only when ctr is null
   update_wdata.target := Mux(io.update.alloc || ctr_null(old_ctr), update_target, io.update.old_target)
-
-  when (io.update.valid) {
-    validArray := UIntToOH(update_idx) | validArray
-  }
 
   // reset all us in 32 cycles
   us.io.resetEn.map(_ := io.update.reset_u)
@@ -575,18 +571,18 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
   for (i <- 0 until ITTageNTables) {
     tables(i).io.update.valid := RegNext(updateMask(i))
-    tables(i).io.update.correct := RegNext(updateCorrect(i))
-    tables(i).io.update.target := RegNext(updateTarget(i))
-    tables(i).io.update.old_target := RegNext(updateOldTarget(i))
-    tables(i).io.update.alloc := RegNext(updateAlloc(i))
-    tables(i).io.update.oldCtr := RegNext(updateOldCtr(i))
-
     tables(i).io.update.reset_u := RegNext(updateResetU)
-    tables(i).io.update.uValid := RegNext(updateUMask(i))
-    tables(i).io.update.u := RegNext(updateU(i))
-    tables(i).io.update.pc := RegNext(update.pc)
+    tables(i).io.update.correct := RegEnable(updateCorrect(i), updateMask(i))
+    tables(i).io.update.target := RegEnable(updateTarget(i), updateMask(i))
+    tables(i).io.update.old_target := RegEnable(updateOldTarget(i), updateMask(i))
+    tables(i).io.update.alloc := RegEnable(updateAlloc(i), updateMask(i))
+    tables(i).io.update.oldCtr := RegEnable(updateOldCtr(i), updateMask(i))
+
+    tables(i).io.update.uValid := RegEnable(updateUMask(i), updateMask(i))
+    tables(i).io.update.u := RegEnable(updateU(i), updateMask(i))
+    tables(i).io.update.pc := RegEnable(update.pc, updateMask(i))
     // use fetch pc instead of instruction pc
-    tables(i).io.update.folded_hist := RegNext(updateFhist)
+    tables(i).io.update.folded_hist := RegEnable(updateFhist, updateMask(i))
   }
 
   // all should be ready for req

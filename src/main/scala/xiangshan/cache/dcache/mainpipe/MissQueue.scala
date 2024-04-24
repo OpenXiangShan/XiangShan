@@ -276,7 +276,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   with HasCircularQueuePtrHelper
  {
   val io = IO(new Bundle() {
-    val hartId = Input(UInt(8.W))
+    val hartId = Input(UInt(hartIdLen.W))
     // MSHR ID
     val id = Input(UInt(log2Up(cfg.nMissEntries).W))
     // client requests
@@ -314,8 +314,6 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     val refill_info = ValidIO(new MissQueueRefillInfo)
 
     val block_addr = ValidIO(UInt(PAddrBits.W))
-    val set_conflict = Input(Bool())
-    val set_to_refill = Output(UInt(log2Up(nSets).W))
 
     val req_handled_by_this_entry = Output(Bool())
 
@@ -649,7 +647,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   io.secondary_reject := should_reject(io.req.bits)
   
   // should not allocate, merge or reject at the same time
-  assert(RegNext(PopCount(Seq(io.primary_ready, io.secondary_ready, io.secondary_reject)) <= 1.U))
+  assert(RegNext(PopCount(Seq(io.primary_ready, io.secondary_ready, io.secondary_reject)) <= 1.U || !io.req.valid))
 
   val refill_data_splited = WireInit(VecInit(Seq.tabulate(cfg.blockBytes * 8 / l1BusDataWidth)(i => {
     val data = refill_and_store_data.asUInt
@@ -736,8 +734,6 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   io.block_addr.valid := req_valid && w_grantlast 
   io.block_addr.bits := req.addr
 
-  io.set_to_refill := addr_to_dcache_set(req.vaddr)
-
   io.refill_info.valid := w_grantlast
   io.refill_info.bits.store_data := refill_and_store_data.asUInt
   io.refill_info.bits.store_mask := ~0.U(blockBytes.W)
@@ -802,7 +798,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   with HasPerfEvents 
   {
   val io = IO(new Bundle {
-    val hartId = Input(UInt(8.W))
+    val hartId = Input(UInt(hartIdLen.W))
     val req = Flipped(DecoupledIO(new MissReq))
     val resp = Output(new MissResp)
     val refill_to_ldq = ValidIO(new Refill)
@@ -868,7 +864,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
   val req_mshr_handled_vec = entries.map(_.io.req_handled_by_this_entry)
   // merged to pipeline reg
-  val req_pipeline_reg_handled = miss_req_pipe_reg.merge_req(io.req.bits)
+  val req_pipeline_reg_handled = miss_req_pipe_reg.merge_req(io.req.bits) && io.req.valid
   assert(PopCount(Seq(req_pipeline_reg_handled, VecInit(req_mshr_handled_vec).asUInt.orR)) <= 1.U, "miss req will either go to mshr or pipeline reg")
   assert(PopCount(req_mshr_handled_vec) <= 1.U, "Only one mshr can handle a req")
   io.resp.id := Mux(!req_pipeline_reg_handled, OHToUInt(req_mshr_handled_vec), miss_req_pipe_reg.mshr_id)
@@ -912,7 +908,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     io.forward(i).forwardData := forwardData
   })
 
-  assert(RegNext(PopCount(secondary_ready_vec) <= 1.U))
+  assert(RegNext(PopCount(secondary_ready_vec) <= 1.U || !io.req.valid))
 //  assert(RegNext(PopCount(secondary_reject_vec) <= 1.U))
   // It is possible that one mshr wants to merge a req, while another mshr wants to reject it.
   // That is, a coming req has the same paddr as that of mshr_0 (merge),
@@ -930,20 +926,6 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     out.bits := ParallelMux(in.map(_.valid) zip in.map(_.bits))
     in.map(_.ready := out.ready)
     assert(!RegNext(out.valid && PopCount(Cat(in.map(_.valid))) > 1.U))
-  }
-
-  val miss_set_history = Reg(Vec(3, UInt(log2Up(nSets).W)))
-  val miss_set_time_count = RegInit(VecInit(Seq.fill(3){0.U(2.W)}))
-  val miss_set_hid = PriorityEncoder(miss_set_time_count.map(_ === 0.U))
-
-  miss_set_time_count.zipWithIndex.foreach{
-    case(t, i) =>
-      when(io.main_pipe_req.fire && miss_set_hid === i.U) {
-        t := 2.U
-        miss_set_history(i) := addr_to_dcache_set(io.main_pipe_req.bits.vaddr)
-      } .otherwise {
-        t := Mux(t === 0.U, 0.U, t - 1.U)
-      }
   }
 
   io.mem_grant.ready := false.B
@@ -998,8 +980,6 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
         e.io.l2_hint.valid := false.B
         e.io.l2_hint.bits := DontCare
       }
-
-      e.io.set_conflict := Cat((miss_set_history zip miss_set_time_count).map{ case(s, t) => t > 0.U && s === e.io.set_to_refill }).orR // There is a miss_req from the same cache set fired in 3 cycles.
   }
 
   io.req.ready := accept

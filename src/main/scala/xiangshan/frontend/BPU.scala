@@ -27,7 +27,8 @@ import scala.math.min
 import xiangshan.backend.decode.ImmUnion
 
 trait HasBPUConst extends HasXSParameter {
-  val MaxMetaLength = if (!env.FPGAPlatform) 512 else 219 // TODO: Reduce meta length
+  val MaxMetaBaseLength =  if (!env.FPGAPlatform) 512 else 219 // TODO: Reduce meta length
+  val MaxMetaLength = if (HasHExtension) MaxMetaBaseLength + 4 else MaxMetaBaseLength
   val MaxBasicBlockSize = 32
   val LHistoryLength = 32
   // val numBr = 2
@@ -347,7 +348,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   // predictors.io.out.ready := io.bpu_to_ftq.resp.ready
 
   val redirect_req = io.ftq_to_bpu.redirect
-  val do_redirect_dup = dup_seq(RegNext(redirect_req, init=0.U.asTypeOf(io.ftq_to_bpu.redirect)))
+  val do_redirect_dup = dup_seq(RegNextWithEnable(redirect_req))
 
   // Pipeline logic
   s2_redirect_dup.map(_ := false.B)
@@ -724,8 +725,10 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   io.bpu_to_ftq.resp.bits.s3.hasRedirect.zip(s3_redirect_dup).map {case (hr, r) => hr := r}
   io.bpu_to_ftq.resp.bits.s3.ftq_idx := s3_ftq_idx
 
-  predictors.io.update := RegNext(io.ftq_to_bpu.update)
-  predictors.io.update.bits.ghist := RegNext(getHist(io.ftq_to_bpu.update.bits.spec_info.histPtr))
+  predictors.io.update.valid := RegNext(io.ftq_to_bpu.update.valid, init = false.B)
+  predictors.io.update.bits := RegEnable(io.ftq_to_bpu.update.bits, io.ftq_to_bpu.update.valid)
+  predictors.io.update.bits.ghist := RegEnable(
+    getHist(io.ftq_to_bpu.update.bits.spec_info.histPtr), io.ftq_to_bpu.update.valid)
 
   val redirect_dup = do_redirect_dup.map(_.bits)
   predictors.io.redirect := do_redirect_dup(0)

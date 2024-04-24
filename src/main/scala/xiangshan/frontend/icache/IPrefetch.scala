@@ -55,7 +55,7 @@ class PrefetchReq(implicit  p: Parameters) extends IPrefetchBundle{
 }
 
 class PrefetchBufferIO(implicit p: Parameters) extends IPrefetchBundle {
-  val hartId = Input(UInt(8.W))
+  val hartId = Input(UInt(hartIdLen.W))
   val fencei = Input(Bool())
   val IPFFilterRead   = new IPFBufferFilterRead
   val IPFBufferRead   = new IPFBufferRead
@@ -333,6 +333,8 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   toITLB.bits.debug.isFirstIssue  := DontCare
   toITLB.bits.memidx              := DontCare
   toITLB.bits.no_translate        := false.B
+  toITLB.bits.hyperinst := DontCare
+  toITLB.bits.hlvx := DontCare
   fromITLB.ready                  := true.B
   // TODO: whether to handle tlb miss for prefetch
   io.iTLBInter.req_kill           := true.B
@@ -366,7 +368,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     */
   val p1_valid  = generatePipeControl(lastFire = p0_fire, thisFire = p1_fire || p1_discard, thisFlush = false.B, lastFlush = false.B)
 
-  val p1_vaddr      = RegEnable(p0_vaddr, p0_fire)
+  val p1_vaddr      = RegEnable(p0_vaddr, 0.U(VAddrBits.W), p0_fire)
   val p1_req_cancel = Wire(Bool())
 
   /** 1. Receive resp from ITLB (no blocked) */
@@ -408,7 +410,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val p2_valid  = generatePipeControl(lastFire = p1_fire, thisFire = p2_fire || p2_discard, thisFlush = false.B, lastFlush = false.B)
   
   val p2_paddr      = RegEnable(p1_paddr, p1_fire)
-  val p2_vaddr      = RegEnable(p1_vaddr, p1_fire)
+  val p2_vaddr      = RegEnable(p1_vaddr, 0.U(VAddrBits.W), p1_fire)
   val p2_req_cancel = Wire(Bool())
   val p2_vidx       = get_idx(p2_vaddr)
 
@@ -816,7 +818,7 @@ class PrefetchQueue(edge: TLEdgeOut)(implicit p: Parameters) extends IPrefetchMo
 class FDIPPrefetchIO(edge: TLEdgeOut)(implicit p: Parameters) extends IPrefetchBundle {
   /** commen */
   val fencei = Input(Bool())
-  val hartId = Input(UInt(8.W))
+  val hartId = Input(UInt(hartIdLen.W))
 
   /** Prefetch Mainpipe IO */
   val ftqReq              = Flipped(new FtqPrefechBundle)

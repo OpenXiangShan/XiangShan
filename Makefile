@@ -38,13 +38,20 @@ CONFIG ?= DefaultConfig
 NUM_CORES ?= 1
 MFC ?= 0
 
+
+ifeq ($(MAKECMDGOALS),)
+GOALS = verilog
+else
+GOALS = $(MAKECMDGOALS)
+endif
+
 # common chisel args
 ifeq ($(MFC),1)
 CHISEL_VERSION = chisel
 FPGA_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(TOP).v.conf"
 SIM_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(SIM_TOP).v.conf"
-MFC_ARGS = --dump-fir \
-           --firtool-opt "-O=release --disable-annotation-unknown --lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing"
+MFC_ARGS = --dump-fir --target verilog \
+           --firtool-opt "-O=release --disable-annotation-unknown --lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing,locationInfoStyle=none"
 RELEASE_ARGS += $(MFC_ARGS)
 DEBUG_ARGS += $(MFC_ARGS)
 PLDM_ARGS += $(MFC_ARGS)
@@ -52,6 +59,12 @@ else
 CHISEL_VERSION = chisel3
 FPGA_MEM_ARGS = --infer-rw --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf --gen-mem-verilog full
 SIM_MEM_ARGS = --infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf --gen-mem-verilog full
+endif
+
+ifneq ($(XSTOP_PREFIX),)
+RELEASE_ARGS += --xstop-prefix $(XSTOP_PREFIX)
+DEBUG_ARGS += --xstop-prefix $(XSTOP_PREFIX)
+PLDM_ARGS += --xstop-prefix $(XSTOP_PREFIX)
 endif
 
 # co-simulation with DRAMsim3
@@ -80,9 +93,12 @@ override SIM_ARGS += --with-constantin
 endif
 
 # emu for the release version
-RELEASE_ARGS += --disable-all --remove-assert --fpga-platform
+RELEASE_ARGS += --fpga-platform --disable-all --remove-assert
 DEBUG_ARGS   += --enable-difftest
-PLDM_ARGS += --disable-all --fpga-platform --enable-difftest
+PLDM_ARGS    += --fpga-platform --enable-difftest
+ifeq ($(GOALS),verilog)
+RELEASE_ARGS += --disable-always-basic-diff
+endif
 ifeq ($(RELEASE),1)
 override SIM_ARGS += $(RELEASE_ARGS)
 else ifeq ($(PLDM),1)
@@ -132,7 +148,7 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	@date -R | tee -a $(TIMELOG)
 	$(TIME_CMD) mill -i xiangshan[$(CHISEL_VERSION)].test.runMain $(SIMTOP)    \
 		-td $(@D) --config $(CONFIG) $(SIM_MEM_ARGS)                          \
-		--num-cores $(NUM_CORES) $(SIM_ARGS)
+		--num-cores $(NUM_CORES) $(SIM_ARGS) --full-stacktrace
 ifeq ($(MFC),1)
 	$(SPLIT_VERILOG) $(RTL_DIR) $(SIM_TOP).v
 	$(MEM_GEN_SEP) "$(MEM_GEN)" "$(SIM_TOP_V).conf" "$(RTL_DIR)"
@@ -182,7 +198,7 @@ emu-run: emu
 	$(MAKE) -C ./difftest emu-run SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
 
 # vcs simulation
-simv:
+simv: sim-verilog
 	$(MAKE) -C ./difftest simv SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
 
 # palladium simulation

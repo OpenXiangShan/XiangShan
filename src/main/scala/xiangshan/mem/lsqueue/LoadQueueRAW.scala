@@ -26,6 +26,7 @@ import xiangshan.frontend.FtqPtr
 import xiangshan.mem.mdp._
 import utils._
 import utility._
+import xiangshan.backend.Bundles.DynInst
 
 class LoadQueueRAW(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
@@ -42,6 +43,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
     // from store unit s1
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
+    val vecStoreIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
 
     // global rollback flush
     val rollback = Output(Valid(new Redirect))
@@ -66,7 +68,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   //  Datavalid   : data valid
   //
   val allocated = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B))) // The control signals need to explicitly indicate the initial value
-  val uop = Reg(Vec(LoadQueueRAWSize, new MicroOp))
+  val uop = Reg(Vec(LoadQueueRAWSize, new DynInst))
   val paddrModule = Module(new LqPAddrModule(
     gen = UInt(PAddrBits.W),
     numEntries = LoadQueueRAWSize,
@@ -110,8 +112,6 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     Mux(!allAddrCheck, isBefore(io.stAddrReadySqPtr, sqIdx), false.B)
   })
   val needEnqueue = canEnqueue.zip(hasAddrInvalidStore).zip(cancelEnqueue).map { case ((v, r), c) => v && r && !c }
-  val bypassPAddr = Reg(Vec(LoadPipelineWidth, UInt(PAddrBits.W)))
-  val bypassMask = Reg(Vec(LoadPipelineWidth, UInt((VLEN/8).W)))
 
   // Allocate logic
   val acceptedVec = Wire(Vec(LoadPipelineWidth, Bool()))
@@ -148,13 +148,11 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
       paddrModule.io.wen(w) := true.B
       paddrModule.io.waddr(w) := enqIndex
       paddrModule.io.wdata(w) := enq.bits.paddr
-      bypassPAddr(w) := enq.bits.paddr
 
       //  Write mask
       maskModule.io.wen(w) := true.B
       maskModule.io.waddr(w) := enqIndex
       maskModule.io.wdata(w) := enq.bits.mask
-      bypassMask(w) := enq.bits.mask
 
       //  Fill info
       uop(enqIndex) := enq.bits.uop
@@ -304,19 +302,17 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     }
   }
 
+  val storeIn = (io.storeIn zip io.vecStoreIn).map { case (scalar, vector) =>
+    Mux(vector.valid, vector, scalar)
+  }
+
   def detectRollback(i: Int) = {
-    paddrModule.io.violationMdata(i) := io.storeIn(i).bits.paddr
-    maskModule.io.violationMdata(i) := io.storeIn(i).bits.mask
+    paddrModule.io.violationMdata(i) := RegNext(storeIn(i).bits.paddr)
+    maskModule.io.violationMdata(i) := RegNext(storeIn(i).bits.mask)
 
-    val bypassPaddrMask = RegNext(VecInit((0 until LoadPipelineWidth).map(j => bypassPAddr(j)(PAddrBits-1, DCacheVWordOffset) === io.storeIn(i).bits.paddr(PAddrBits-1, DCacheVWordOffset))))
-    val bypassMMask = RegNext(VecInit((0 until LoadPipelineWidth).map(j => (bypassMask(j) & io.storeIn(i).bits.mask).orR)))
-    val bypassMaskUInt = (0 until LoadPipelineWidth).map(j =>
-      Fill(LoadQueueRAWSize, RegNext(RegNext(io.query(j).req.fire))) & Mux(bypassPaddrMask(j) && bypassMMask(j), UIntToOH(RegNext(RegNext(enqIndexVec(j)))), 0.U(LoadQueueRAWSize.W))
-    ).reduce(_|_)
-
-    val addrMaskMatch = RegNext(paddrModule.io.violationMmask(i).asUInt & maskModule.io.violationMmask(i).asUInt) | bypassMaskUInt
+    val addrMaskMatch = paddrModule.io.violationMmask(i).asUInt & maskModule.io.violationMmask(i).asUInt
     val entryNeedCheck = RegNext(VecInit((0 until LoadQueueRAWSize).map(j => {
-      allocated(j) && isAfter(uop(j).robIdx, io.storeIn(i).bits.uop.robIdx) && datavalid(j) && !uop(j).robIdx.needFlush(io.redirect)
+      allocated(j) && isAfter(uop(j).robIdx, storeIn(i).bits.uop.robIdx) && datavalid(j) && !uop(j).robIdx.needFlush(io.redirect)
     })))
     val lqViolationSelVec = VecInit((0 until LoadQueueRAWSize).map(j => {
       addrMaskMatch(j) && entryNeedCheck(j)
@@ -338,7 +334,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     XSDebug(
       lqViolation,
       "need rollback (ld wb before store) pc %x robidx %d target %x\n",
-      io.storeIn(i).bits.uop.cf.pc, io.storeIn(i).bits.uop.robIdx.asUInt, lqViolationUop.robIdx.asUInt
+      storeIn(i).bits.uop.pc, storeIn(i).bits.uop.robIdx.asUInt, lqViolationUop.robIdx.asUInt
     )
 
     (lqViolation, lqViolationUop)
@@ -347,15 +343,15 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   // select rollback (part1) and generate rollback request
   // rollback check
   // Lq rollback seq check is done in s3 (next stage), as getting rollbackLq MicroOp is slow
-  val rollbackLqWb = Wire(Vec(StorePipelineWidth, Valid(new MicroOp)))
+  val rollbackLqWb = Wire(Vec(StorePipelineWidth, Valid(new DynInst)))
   val stFtqIdx = Wire(Vec(StorePipelineWidth, new FtqPtr))
   val stFtqOffset = Wire(Vec(StorePipelineWidth, UInt(log2Up(PredictWidth).W)))
   for (w <- 0 until StorePipelineWidth) {
     val detectedRollback = detectRollback(w)
-    rollbackLqWb(w).valid := detectedRollback._1 && DelayN(io.storeIn(w).valid && !io.storeIn(w).bits.miss, TotalSelectCycles)
+    rollbackLqWb(w).valid := detectedRollback._1 && DelayN(storeIn(w).valid && !storeIn(w).bits.miss, TotalSelectCycles)
     rollbackLqWb(w).bits  := detectedRollback._2
-    stFtqIdx(w) := DelayN(io.storeIn(w).bits.uop.cf.ftqPtr, TotalSelectCycles)
-    stFtqOffset(w) := DelayN(io.storeIn(w).bits.uop.cf.ftqOffset, TotalSelectCycles)
+    stFtqIdx(w) := DelayN(storeIn(w).bits.uop.ftqPtr, TotalSelectCycles)
+    stFtqOffset(w) := DelayN(storeIn(w).bits.uop.ftqOffset, TotalSelectCycles)
   }
 
   // select rollback (part2), generate rollback request, then fire rollback request
@@ -376,14 +372,14 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     val redirect = Wire(Valid(new Redirect))
     redirect.valid := rollbackLqWb(i).valid
     redirect.bits             := DontCare
-    redirect.bits.isRVC       := rollbackLqWb(i).bits.cf.pd.isRVC
+    redirect.bits.isRVC       := rollbackLqWb(i).bits.preDecodeInfo.isRVC
     redirect.bits.robIdx      := rollbackLqWb(i).bits.robIdx
-    redirect.bits.ftqIdx      := rollbackLqWb(i).bits.cf.ftqPtr
-    redirect.bits.ftqOffset   := rollbackLqWb(i).bits.cf.ftqOffset
+    redirect.bits.ftqIdx      := rollbackLqWb(i).bits.ftqPtr
+    redirect.bits.ftqOffset   := rollbackLqWb(i).bits.ftqOffset
     redirect.bits.stFtqIdx    := stFtqIdx(i)
     redirect.bits.stFtqOffset := stFtqOffset(i)
     redirect.bits.level       := RedirectLevel.flush
-    redirect.bits.cfiUpdate.target := rollbackLqWb(i).bits.cf.pc
+    redirect.bits.cfiUpdate.target := rollbackLqWb(i).bits.pc
     redirect.bits.debug_runahead_checkpoint_id := rollbackLqWb(i).bits.debugInfo.runahead_checkpoint_id
     redirect
   })
