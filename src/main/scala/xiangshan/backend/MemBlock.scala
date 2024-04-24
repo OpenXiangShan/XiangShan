@@ -1303,14 +1303,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   for (i <- 0 until StaCnt) when(st_atomics(i)) {
     io.ooo_to_mem.issueSta(i).ready := atomicsUnit.io.in.ready
-    storeUnits(i).io.stin.valid := false.B
 
     state := s_atomics(i)
     assert(!st_atomics.zipWithIndex.filterNot(_._2 == i).unzip._1.reduce(_ || _))
   }
   for (i <- 0 until HyuCnt) when(st_atomics(StaCnt + i)) {
     io.ooo_to_mem.issueHya(i).ready := atomicsUnit.io.in.ready
-    hybridUnits(i).io.lsin.valid := false.B
 
     state := s_atomics(StaCnt + i)
     assert(!st_atomics.zipWithIndex.filterNot(_._2 == StaCnt + i).unzip._1.reduce(_ || _))

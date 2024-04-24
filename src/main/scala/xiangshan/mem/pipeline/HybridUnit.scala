@@ -599,6 +599,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val s1_ld_flow    = RegNext(s0_ld_flow)
   val s1_isvec      = RegEnable(s0_out.isvec, false.B, s0_fire)
   val s1_isLastElem = RegEnable(s0_out.isLastElem, false.B, s0_fire)
+  val s1_st_amo     = FuType.storeIsAMO(s1_in.uop.ctrl.fuType) && !s1_ld_flow && !s1_isvec
 
   s1_ready := true.B
   when (s0_fire) { s1_valid := true.B }
@@ -728,6 +729,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val s1_cancel_ptr_chasing    = WireInit(false.B)
 
   s1_kill := s1_late_kill ||
+             s1_st_amo ||
              s1_cancel_ptr_chasing ||
              s1_in.uop.robIdx.needFlush(io.redirect) ||
              RegEnable(s0_kill, false.B, io.lsin.valid || io.ldu_io.replay.valid || io.ldu_io.l2l_fwd_in.valid || io.ldu_io.fast_rep_in.valid || io.vec_stu_io.in.valid)
@@ -788,7 +790,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.ldu_io.wakeup.valid := s0_fire && s0_ld_flow && (s0_super_ld_rep_select || s0_ld_fast_rep_select || s0_ld_rep_select || s0_int_iss_select)
   io.ldu_io.wakeup.bits := s0_uop
 
-  io.stu_io.dcache.s1_kill := s1_tlb_miss || s1_exception || s1_mmio || s1_in.uop.robIdx.needFlush(io.redirect)
+  io.stu_io.dcache.s1_kill := s1_tlb_miss || s1_exception || s1_mmio || s1_in.uop.robIdx.needFlush(io.redirect) || s1_st_amo
   io.stu_io.dcache.s1_paddr := s1_paddr_dup_dcache
 
 
@@ -803,11 +805,11 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     p"paddr ${Hexadecimal(s1_out.paddr)}, mmio ${s1_out.mmio}\n")
 
   // store out
-  io.stu_io.lsq.valid         := s1_valid && !s1_ld_flow && !s1_prf && !s1_isvec
+  io.stu_io.lsq.valid         := s1_valid && !s1_ld_flow && !s1_prf && !s1_isvec && !s1_st_amo
   io.stu_io.lsq.bits          := s1_out
   io.stu_io.lsq.bits.miss     := s1_tlb_miss
 
-  io.vec_stu_io.lsq.valid     := s1_valid && !s1_ld_flow && !s1_prf && s1_isvec
+  io.vec_stu_io.lsq.valid     := s1_valid && !s1_ld_flow && !s1_prf && s1_isvec && !s1_st_amo
   io.vec_stu_io.lsq.bits          := s1_out
   io.vec_stu_io.lsq.bits.miss     := s1_tlb_miss
   io.vec_stu_io.lsq.bits.isLastElem := s1_isLastElem

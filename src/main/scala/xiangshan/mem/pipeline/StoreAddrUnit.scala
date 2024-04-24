@@ -24,6 +24,7 @@ import utility._
 import xiangshan.ExceptionNO._
 import xiangshan._
 import xiangshan.backend.Bundles.{MemExuInput, MemExuOutput}
+import xiangshan.backend.fu._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.FuType._
@@ -217,7 +218,8 @@ class StoreAddrUnit(implicit p: Parameters) extends XSModule with HasDCacheParam
   val s1_exception = ExceptionNO.selectByFu(s1_out.uop.exceptionVec, StaCfg).asUInt.orR
   val s1_isvec     = RegEnable(s0_out.isvec, false.B, s0_fire)
   val s1_isLastElem = RegEnable(s0_isLastElem, false.B, s0_fire)
-  s1_kill := s1_in.uop.robIdx.needFlush(io.redirect) || s1_tlb_miss
+  val s1_amo       = FuType.storeIsAMO(s1_in.uop.fuType)
+  s1_kill := s1_in.uop.robIdx.needFlush(io.redirect) || s1_tlb_miss || s1_amo
 
   s1_ready := true.B
   io.tlb.resp.ready := true.B // TODO: why dtlbResp needs a ready?
@@ -239,7 +241,7 @@ class StoreAddrUnit(implicit p: Parameters) extends XSModule with HasDCacheParam
   // Send TLB feedback to store issue queue
   // Store feedback is generated in store_s1, sent to RS in store_s2
   val s1_feedback = Wire(Valid(new RSFeedback))
-  s1_feedback.valid                 := s1_valid & !s1_in.isHWPrefetch && !s1_isvec
+  s1_feedback.valid                 := s1_valid & !s1_in.isHWPrefetch && !s1_isvec && !s1_amo
   s1_feedback.bits.hit              := !s1_tlb_miss
   s1_feedback.bits.flushState       := io.tlb.resp.bits.ptwBack
   s1_feedback.bits.robIdx           := s1_out.uop.robIdx
@@ -284,7 +286,7 @@ class StoreAddrUnit(implicit p: Parameters) extends XSModule with HasDCacheParam
   s1_out.uop.exceptionVec(storeGuestPageFault) := io.tlb.resp.bits.excp(0).gpf.st && s1_vecActive
 
   // scalar store and scalar load nuke check, and also other purposes
-  io.lsq.valid     := s1_valid && !s1_in.isHWPrefetch && !s1_isvec
+  io.lsq.valid     := s1_valid && !s1_in.isHWPrefetch && !s1_isvec && !s1_amo
   io.lsq.bits      := s1_out
   io.lsq.bits.miss := s1_tlb_miss
   // vector store and scalar load nuke check
@@ -294,7 +296,7 @@ class StoreAddrUnit(implicit p: Parameters) extends XSModule with HasDCacheParam
   io.lsq_vec.bits.isLastElem := s1_isLastElem
 
   // kill dcache write intent request when tlb miss or exception
-  io.dcache.s1_kill  := (s1_tlb_miss || s1_exception || s1_mmio || s1_in.uop.robIdx.needFlush(io.redirect))
+  io.dcache.s1_kill  := (s1_kill || s1_exception || s1_mmio)
   io.dcache.s1_paddr := s1_paddr
 
   // write below io.out.bits assign sentence to prevent overwriting values
