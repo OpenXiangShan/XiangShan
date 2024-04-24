@@ -362,10 +362,3 @@ stack.info*
 *.bin
 
 !ready-to-run/*
-
-# local files
-*.csv
-*.txt
-milc-result
-spec-result
-spec-*

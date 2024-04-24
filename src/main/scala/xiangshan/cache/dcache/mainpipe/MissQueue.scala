@@ -816,10 +816,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     val main_pipe_req = DecoupledIO(new MainPipeReq)
     val main_pipe_resp = Flipped(ValidIO(new MainPipeResp))
 
-    val s2_miss_id = Input(UInt(log2Up(cfg.nMissEntries).W))
-    val s3_miss_id = Input(UInt(log2Up(cfg.nMissEntries).W))
-    val s2_replay_to_mq = Input(Bool())
-    val s3_refill_resp = Input(Bool())
+    val mainpipe_info = Input(new MainPipeInfoToMQ)
     val refill_info = ValidIO(new MissQueueRefillInfo)
 
     // block probe
@@ -987,8 +984,8 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
       e.io.acquire_fired_by_pipe_reg := acquire_from_pipereg.fire
 
       e.io.main_pipe_resp := io.main_pipe_resp.valid && io.main_pipe_resp.bits.ack_miss_queue && io.main_pipe_resp.bits.miss_id === i.U
-      e.io.main_pipe_replay := io.s2_replay_to_mq && io.s2_miss_id === i.U
-      e.io.main_pipe_refill_resp := io.s3_refill_resp & io.s3_miss_id === i.U
+      e.io.main_pipe_replay := io.mainpipe_info.s2_replay_to_mq && io.mainpipe_info.s2_miss_id === i.U
+      e.io.main_pipe_refill_resp := io.mainpipe_info.s3_refill_resp & io.mainpipe_info.s3_miss_id === i.U
 
       e.io.memSetPattenDetected := memSetPattenDetected
       e.io.nMaxPrefetchEntry := nMaxPrefetchEntry
@@ -1010,7 +1007,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   io.refill_to_ldq.valid := Cat(entries.map(_.io.refill_to_ldq.valid)).orR
   io.refill_to_ldq.bits := ParallelMux(entries.map(_.io.refill_to_ldq.valid) zip entries.map(_.io.refill_to_ldq.bits))
 
-  io.refill_info := MuxCase(DontCare, entries.zipWithIndex.map{ case(e,i) => ((io.s2_miss_id === i.U) -> e.io.refill_info)})
+  io.refill_info := MuxCase(DontCare, entries.zipWithIndex.map{ case(e,i) => ((io.mainpipe_info.s2_miss_id === i.U) -> e.io.refill_info)})
 
   acquire_from_pipereg.valid := miss_req_pipe_reg.can_send_acquire(io.req.valid, io.req.bits)
   acquire_from_pipereg.bits := miss_req_pipe_reg.get_acquire(io.l2_pf_store_only)

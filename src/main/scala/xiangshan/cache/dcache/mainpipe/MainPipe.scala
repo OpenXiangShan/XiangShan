@@ -101,6 +101,13 @@ class MainPipeStatus(implicit p: Parameters) extends DCacheBundle {
   val way_en = UInt(nWays.W)
 }
 
+class MainPipeInfoToMQ(implicit p:Parameters) extends DCacheBundle {
+  val s2_miss_id = UInt(log2Up(cfg.nMissEntries).W) // For refill data selection
+  val s2_replay_to_mq = Bool()
+  val s3_miss_id = UInt(log2Up(cfg.nMissEntries).W) // For mshr release
+  val s3_refill_resp = Bool()
+}
+
 class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents with HasL1PrefetchSourceParameter {
   val io = IO(new Bundle() {
     // probe queue
@@ -117,11 +124,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     // atmoics
     val atomic_req = Flipped(DecoupledIO(new MainPipeReq))
     val atomic_resp = ValidIO(new MainPipeResp)
-    // find matched refill data in missenty
-    val s2_miss_id = Output(UInt(log2Up(cfg.nMissEntries).W))
-    val s3_miss_id = Output(UInt(log2Up(cfg.nMissEntries).W))
-    val s2_replay_to_mq = Output(Bool())
-    val s3_refill_resp = Output(Bool())
+    // find matched refill data in missentry
+    val mainpipe_info = Output(new MainPipeInfoToMQ)
     // missqueue refill data
     val refill_info = Flipped(ValidIO(new MissQueueRefillInfo))
     // write-back queue
@@ -408,7 +412,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   // For a store req, it either hits and goes to s3, or miss and enter miss queue immediately
   val s2_req_miss_without_data = s2_req.miss && !io.refill_info.valid
-  val s2_can_go_to_mq_replay = s2_req_miss_without_data && RegEnable(s2_req_miss_without_data && !io.s2_replay_to_mq, s2_valid) // miss_req in s2 but refill data is invalid, can block 1 cycle
+  val s2_can_go_to_mq_replay = s2_req_miss_without_data && RegEnable(s2_req_miss_without_data && !io.mainpipe_info.s2_replay_to_mq, s2_valid) // miss_req in s2 but refill data is invalid, can block 1 cycle
   val s2_can_go_to_s3 = (s2_req_replace_dup_1 || s2_req.probe || (s2_req.miss && io.refill_info.valid) || (s2_req.isStore || s2_req.isAMO) && s2_hit) && s3_ready
   val s2_can_go_to_mq = RegEnable(s1_pregen_can_go_to_mq, s1_fire)
   assert(RegNext(!(s2_valid && s2_can_go_to_s3 && s2_can_go_to_mq && s2_can_go_to_mq_replay)))
@@ -1608,10 +1612,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   }
   dontTouch(io.status_dup)
 
-  io.s2_miss_id := s2_req.miss_id
-  io.s3_miss_id := s3_req.miss_id
-  io.s2_replay_to_mq := s2_valid && s2_can_go_to_mq_replay
-  io.s3_refill_resp := RegNext(s2_valid && s2_req.miss && s2_fire_to_s3)
+  io.mainpipe_info.s2_miss_id := s2_req.miss_id
+  io.mainpipe_info.s3_miss_id := s3_req.miss_id
+  io.mainpipe_info.s2_replay_to_mq := s2_valid && s2_can_go_to_mq_replay
+  io.mainpipe_info.s3_refill_resp := RegNext(s2_valid && s2_req.miss && s2_fire_to_s3)
 
   // report error to beu and csr, 1 cycle after read data resp
   io.error := 0.U.asTypeOf(new L1CacheErrorInfo())
