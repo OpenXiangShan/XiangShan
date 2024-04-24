@@ -238,7 +238,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   intrMod.io.in.vstopei := vstopei.rdata.asUInt
   intrMod.io.in.hviprio1 := hviprio1.rdata.asUInt
   intrMod.io.in.hviprio2 := hviprio2.rdata.asUInt
-  intrMod.io.in.iprios := Cat(iprios.map(iprio => iprio.rdata.asUInt))
+  intrMod.io.in.iprios := Cat(miregiprios.map(iprio => iprio.rdata.asInstanceOf[CSRBundle].asUInt))
   // val disableInterrupt = debugMode || (dcsr.rdata.STEP.asBool && !dcsr.rdata.STEPIE.asBool)
   // val intrVec = Cat(debugIntr && !debugMode, mie.rdata.asUInt(11, 0) & mip.rdata.asUInt & intrVecEnable.asUInt) // Todo: asUInt(11,0) is ok?
 
@@ -261,6 +261,23 @@ class NewCSR(implicit val p: Parameters) extends Module
   permitMod.io.in.mret := io.mret
   permitMod.io.in.sret := io.sret
 
+  permitMod.io.in.status.tsr := mstatus.rdata.TSR.asBool
+  permitMod.io.in.status.vtsr := hstatus.rdata.VTSR.asBool
+
+  miregiprios.foreach { mod =>
+    mod.w.wen := (addr === mireg.addr.U) && (miselect.regOut.ALL.asUInt === mod.addr.U)
+    mod.w.wdata := wdata
+  }
+
+  siregiprios.foreach { mod =>
+    mod.w.wen := (addr === sireg.addr.U) && (siselect.regOut.ALL.asUInt === mod.addr.U)
+    mod.w.wdata := wdata
+  }
+
+  vsiregiprios.foreach { mod =>
+    mod.w.wen := (addr === vsireg.addr.U) && (vsiselect.regOut.ALL.asUInt === mod.addr.U)
+    mod.w.wdata := wdata
+  }
   permitMod.io.in.status.tsr := mstatus.rdata.TSR.asBool
   permitMod.io.in.status.vtsr := hstatus.rdata.VTSR.asBool
 
@@ -352,10 +369,10 @@ class NewCSR(implicit val p: Parameters) extends Module
       case _ =>
     }
     mod match {
-      case m: HasInterruptFilterBundle =>
-        m.topIn.mtopi  := intrMod.io.out.mtopi
-        m.topIn.stopi  := intrMod.io.out.stopi
-        m.topIn.vstopi := intrMod.io.out.vstopi
+      case m: HasInterruptFilterSink =>
+        m.topIR.mtopi  := intrMod.io.out.mtopi
+        m.topIR.stopi  := intrMod.io.out.stopi
+        m.topIR.vstopi := intrMod.io.out.vstopi
       case _ =>
     }
     mod match {
@@ -371,10 +388,6 @@ class NewCSR(implicit val p: Parameters) extends Module
   }
 
   csrMods.foreach { mod =>
-    mod.commonIn.status := mstatus.mstatus
-    mod.commonIn.prvm := PRVM
-    mod.commonIn.v := V
-    mod.commonIn.hstatus := hstatus.rdata
     println(s"${mod.modName}: ")
     println(mod.dumpFields)
   }
