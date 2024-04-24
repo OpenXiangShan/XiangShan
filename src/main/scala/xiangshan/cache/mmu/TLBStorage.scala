@@ -142,10 +142,10 @@ class TLBFA(
       }
     } else {
       for (d <- 0 until nDups) {
-        resp.bits.ppn(d) := ParallelMux(hitVecReg zip ppn_reg)
-        resp.bits.perm(d) := ParallelMux(hitVecReg zip perm_reg)
-        resp.bits.g_perm(d) := ParallelMux(hitVec zip g_perm_reg)
-        resp.bits.s2xlate(d) := ParallelMux(hitVec zip s2xlate_reg)
+        resp.bits.ppn(d) := Mux1H(hitVecReg zip ppn_reg)
+        resp.bits.perm(d) := Mux1H(hitVecReg zip perm_reg)
+        resp.bits.g_perm(d) := Mux1H(hitVec zip g_perm_reg)
+        resp.bits.s2xlate(d) := Mux1H(hitVec zip s2xlate_reg)
       }
     }
 
