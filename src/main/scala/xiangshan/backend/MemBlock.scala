@@ -1424,7 +1424,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   if (p(DebugOptionsKey).FPGAPlatform) {
     val resetTree = ResetGenNode(
       Seq(
-        ResetGenNode(Seq(ResetGenNode(Seq(CellNode(reset_io_frontend))))),
+        CellNode(reset_io_frontend),
         CellNode(reset_io_backend),
         ModuleNode(itlbRepeater3),
         ModuleNode(dtlbRepeater),

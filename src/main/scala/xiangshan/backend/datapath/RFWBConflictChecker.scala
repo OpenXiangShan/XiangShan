@@ -79,7 +79,7 @@ class WBArbiter[T <: Data](val gen: T, val n: Int) extends Module {
   cancelCounterNext.zip(isFullNext).zip(cancelCounter).zip(isFull).zipWithIndex.foreach{ case ((((cntNext, fullNext), cnt), full), i) =>
     when (io.in(i).valid && !io.in(i).ready) {
       cntNext   := Mux(cnt === CounterThreshold.U, CounterThreshold.U, cnt + 1.U)
-      fullNext  := cnt(CounterWidth - 1, 1).orR  // counterNext === CounterThreshold.U
+      fullNext  := cnt(CounterWidth - 1, 1).andR  // counterNext === CounterThreshold.U
     }.elsewhen (io.in(i).valid && io.in(i).ready) {
       cntNext   := 0.U
       fullNext  := false.B
@@ -105,8 +105,8 @@ class WBArbiter[T <: Data](val gen: T, val n: Int) extends Module {
   // 1           0          0
   // 1           1          1
   val grant = ArbiterCtrl(finalValid)
-  for ((in, g) <- io.in.zip(grant))
-    in.ready := (g || !in.valid) && io.out.ready
+  for (((in, g), v) <- io.in.zip(grant).zip(finalValid))
+    in.ready := (g && v || !in.valid) && io.out.ready
   io.out.valid := !grant.last || finalValid.last
 }
 

@@ -108,6 +108,7 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
   val toMem = if (params.isMemSchd) Some(new Bundle {
     val loadFastMatch = Output(Vec(params.LduCnt, new IssueQueueLoadBundle))
   }) else None
+  val fromOg2 = if(params.isVfSchd) Some(MixedVec(params.issueBlockParams.map(x => Flipped(x.genOG2RespBundle)))) else None
 }
 
 abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockParams, p: Parameters)
@@ -219,7 +220,7 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
         if (wakeUpIn.bits.loadDependencyCopy.nonEmpty) wakeUp.bits.loadDependency := wakeUpIn.bits.loadDependencyCopy.get(backendParams.getCopyPdestIndex(exuIdx))
       }
       if (iq.params.numIntSrc == 0) wakeUp.bits.rfWen := false.B
-      if (iq.params.numFpSrc == 0)  wakeUp.bits.fpWen := false.B
+      if (iq.params.numVfSrc == 0)  wakeUp.bits.fpWen := false.B
       if (iq.params.numVfSrc == 0)  wakeUp.bits.vecWen := false.B
     }
     iq.io.og0Cancel := io.fromDataPath.og0Cancel
@@ -263,6 +264,11 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
         memAddrIssueResp := 0.U.asTypeOf(memAddrIssueResp)
       }
     })
+    if(params.isVfSchd) {
+      iq.io.og2Resp.get.zipWithIndex.foreach { case (og2Resp, exuIdx) =>
+        og2Resp := io.fromOg2.get(i)(exuIdx)
+      }
+    }
     iq.io.wbBusyTableRead := io.fromWbFuBusyTable.fuBusyTableRead(i)
     io.wbFuBusyTable(i) := iq.io.wbBusyTableWrite
   }
@@ -288,7 +294,7 @@ class SchedulerArithImp(override val wrapper: Scheduler)(implicit params: SchdBl
     iq.io.enq <> dispatch2Iq.io.out(i)
     val intWBIQ = params.schdType match {
       case IntScheduler() => wakeupFromIntWBVec.zipWithIndex.filter(x => iq.params.needWakeupFromIntWBPort.keys.toSeq.contains(x._2)).map(_._1)
-      case VfScheduler() => wakeupFromVfWBVec
+      case VfScheduler() => wakeupFromVfWBVec.zipWithIndex.filter(x => iq.params.needWakeupFromVfWBPort.keys.toSeq.contains(x._2)).map(_._1)
       case _ => null
     }
     iq.io.wakeupFromWB.zip(intWBIQ).foreach{ case (sink, source) => sink := source}
@@ -327,7 +333,7 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
   memAddrIQs.zipWithIndex.foreach { case (iq, i) =>
     iq.io.flush <> io.fromCtrlBlock.flush
     iq.io.enq <> dispatch2Iq.io.out(i)
-    iq.io.wakeupFromWB.zip(wakeupFromIntWBVec.zipWithIndex.filter(x => iq.params.needWakeupFromIntWBPort.keys.toSeq.contains(x._2)).map(_._1) ++ wakeupFromVfWBVec).foreach{ case (sink, source) => sink := source}
+    iq.io.wakeupFromWB.zip(wakeupFromIntWBVec.zipWithIndex.filter(x => iq.params.needWakeupFromIntWBPort.keys.toSeq.contains(x._2)).map(_._1) ++ wakeupFromVfWBVec.zipWithIndex.filter(x => iq.params.needWakeupFromVfWBPort.keys.toSeq.contains(x._2)).map(_._1)).foreach{ case (sink, source) => sink := source}
   }
 
   ldAddrIQs.zipWithIndex.foreach {
@@ -394,7 +400,7 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
 
   stDataIQs.zipWithIndex.foreach { case (iq, i) =>
     iq.io.flush <> io.fromCtrlBlock.flush
-    iq.io.wakeupFromWB.zip(wakeupFromIntWBVec.zipWithIndex.filter(x => iq.params.needWakeupFromIntWBPort.keys.toSeq.contains(x._2)).map(_._1).toSeq ++ wakeupFromVfWBVec).foreach{ case (sink, source) => sink := source}
+    iq.io.wakeupFromWB.zip(wakeupFromIntWBVec.zipWithIndex.filter(x => iq.params.needWakeupFromIntWBPort.keys.toSeq.contains(x._2)).map(_._1).toSeq ++ wakeupFromVfWBVec.zipWithIndex.filter(x => iq.params.needWakeupFromVfWBPort.keys.toSeq.contains(x._2)).map(_._1).toSeq).foreach{ case (sink, source) => sink := source}
   }
 
   (stdEnqs ++ hydEnqs).zip(staEnqs ++ hyaEnqs).zipWithIndex.foreach { case ((stdIQEnq, staIQEnq), i) =>
@@ -422,7 +428,7 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
       // maybe not used
       imp.io.memIO.get.checkWait.stIssuePtr := io.fromMem.get.stIssuePtr
       imp.io.memIO.get.checkWait.memWaitUpdateReq := io.fromMem.get.memWaitUpdateReq
-      imp.io.wakeupFromWB.zip(wakeupFromIntWBVec.zipWithIndex.filter(x => imp.params.needWakeupFromIntWBPort.keys.toSeq.contains(x._2)).map(_._1).toSeq ++ wakeupFromVfWBVec).foreach{ case (sink, source) => sink := source}
+      imp.io.wakeupFromWB.zip(wakeupFromIntWBVec.zipWithIndex.filter(x => imp.params.needWakeupFromIntWBPort.keys.toSeq.contains(x._2)).map(_._1).toSeq ++ wakeupFromVfWBVec.zipWithIndex.filter(x => imp.params.needWakeupFromVfWBPort.keys.toSeq.contains(x._2)).map(_._1).toSeq).foreach{ case (sink, source) => sink := source}
 
     case _ =>
   }

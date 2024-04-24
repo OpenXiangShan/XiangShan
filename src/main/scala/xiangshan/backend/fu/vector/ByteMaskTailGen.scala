@@ -27,14 +27,14 @@ class ByteMaskTailGenIO(vlen: Int)(implicit p: Parameters) extends Bundle {
     val vdIdx = UInt(3.W)
   })
   val out = Output(new Bundle {
-    val keepEn     = UInt(numBytes.W)
+    val activeEn   = UInt(numBytes.W)
     val agnosticEn = UInt(numBytes.W)
   })
   val debugOnly = Output(new Bundle {
     val startBytes = UInt()
     val vlBytes = UInt()
     val prestartEn = UInt()
-    val activeEn = UInt()
+    val bodyEn = UInt()
     val tailEn = UInt()
     val maskEn = UInt()
     val maskAgnosticEn = UInt()
@@ -63,19 +63,19 @@ class ByteMaskTailGen(vlen: Int)(implicit p: Parameters) extends Module {
   private val vdIdx      = io.in.vdIdx
 
   private val prestartEn = UIntToContLow1s(startBytes, maxVLMAX)
-  private val activeEn = UIntToContLow0s(startBytes, maxVLMAX) & UIntToContLow1s(vlBytes, maxVLMAX)
+  private val bodyEn = UIntToContLow0s(startBytes, maxVLMAX) & UIntToContLow1s(vlBytes, maxVLMAX)
   private val tailEn = UIntToContLow0s(vlBytes, maxVLMAX)
   private val prestartEnInVd = LookupTree(vdIdx, (0 until maxVLMUL).map(i => i.U -> prestartEn((i+1)*numBytes - 1, i*numBytes)))
-  private val activeEnInVd = LookupTree(vdIdx, (0 until maxVLMUL).map(i => i.U -> activeEn((i+1)*numBytes - 1, i*numBytes)))
+  private val bodyEnInVd = LookupTree(vdIdx, (0 until maxVLMUL).map(i => i.U -> bodyEn((i+1)*numBytes - 1, i*numBytes)))
   private val tailEnInVd = LookupTree(vdIdx, (0 until maxVLMUL).map(i => i.U -> tailEn((i+1)*numBytes - 1, i*numBytes)))
 
   private val maskEn = MaskExtractor(vlen)(io.in.maskUsed, io.in.vsew)
   private val maskOffEn = (~maskEn).asUInt
-  private val maskAgnosticEn = Mux(io.in.vma, maskOffEn, 0.U)
+  private val maskAgnosticEn = Mux(io.in.vma, maskOffEn, 0.U) & bodyEnInVd
 
   private val tailAgnosticEn = Mux(io.in.vta, tailEnInVd, 0.U)
 
-  private val keepEn = Mux(io.in.begin >= io.in.end, 0.U(numBytes.W), activeEnInVd & maskEn)
+  private val activeEn = Mux(io.in.begin >= io.in.end, 0.U(numBytes.W), bodyEnInVd & maskEn)
   private val agnosticEn = Mux(io.in.begin >= io.in.end, 0.U(numBytes.W), maskAgnosticEn | tailAgnosticEn)
 
   // TODO: delete me later
@@ -84,23 +84,23 @@ class ByteMaskTailGen(vlen: Int)(implicit p: Parameters) extends Module {
   dontTouch(vlBytes)
   dontTouch(vdIdx)
   dontTouch(prestartEn)
-  dontTouch(activeEn)
+  dontTouch(bodyEn)
   dontTouch(tailEn)
   dontTouch(prestartEnInVd)
-  dontTouch(activeEnInVd)
+  dontTouch(bodyEnInVd)
   dontTouch(tailEnInVd)
   dontTouch(maskEn)
   dontTouch(maskOffEn)
   dontTouch(maskAgnosticEn)
   dontTouch(tailAgnosticEn)
 
-  io.out.keepEn := keepEn
+  io.out.activeEn := activeEn
   io.out.agnosticEn := agnosticEn
 
   io.debugOnly.startBytes := startBytes
   io.debugOnly.vlBytes := vlBytes
   io.debugOnly.prestartEn := prestartEnInVd
-  io.debugOnly.activeEn := activeEn
+  io.debugOnly.bodyEn := bodyEn
   io.debugOnly.tailEn := tailEnInVd
   io.debugOnly.maskEn := maskEn
   io.debugOnly.maskAgnosticEn := maskAgnosticEn

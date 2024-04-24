@@ -39,7 +39,7 @@ class PcTargetMemImp(override val wrapper: PcTargetMem)(implicit p: Parameters, 
     // target pc stored in next entry
     targetMem.io.ren.get(i) := readValid(i)
     targetMem.io.raddr(i) := (targetPtr + 1.U).value
-    val needNewestTarget = GatedValidRegNext(targetPtr === io.fromFrontendFtq.newest_entry_ptr)
+    val needNewestTarget = RegEnable(targetPtr === io.fromFrontendFtq.newest_entry_ptr && newestEn, false.B, readValid(i))
     targetPCVec(i) := Mux(
       needNewestTarget,
       RegEnable(newestTarget, newestEn),

@@ -178,12 +178,13 @@ object Bundles {
     val commitType      = CommitType()
     // rename
     val srcState        = Vec(numSrc, SrcState())
-    val srcLoadDependency  = Vec(numSrc, Vec(LoadPipelineWidth, UInt(3.W)))
+    val srcLoadDependency  = Vec(numSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
     val psrc            = Vec(numSrc, UInt(PhyRegIdxWidth.W))
     val pdest           = UInt(PhyRegIdxWidth.W)
     val robIdx          = new RobPtr
     val instrSize       = UInt(log2Ceil(RenameWidth + 1).W)
     val dirtyFs         = Bool()
+    val dirtyVs         = Bool()
 
     val eliminatedMove  = Bool()
     // Take snapshot at this CFI inst
@@ -252,7 +253,7 @@ object Bundles {
     * @param pregIdxWidth index width of preg
     * @param exuIndices exu indices of wakeup bundle
     */
-  sealed abstract class IssueQueueWakeUpBaseBundle(pregIdxWidth: Int, val exuIndices: Seq[Int]) extends Bundle {
+  sealed abstract class IssueQueueWakeUpBaseBundle(pregIdxWidth: Int, val exuIndices: Seq[Int])(implicit p: Parameters) extends XSBundle {
     val rfWen = Bool()
     val fpWen = Bool()
     val vecWen = Bool()
@@ -297,24 +298,24 @@ object Bundles {
     }
   }
 
-  class IssueQueueWBWakeUpBundle(exuIndices: Seq[Int], backendParams: BackendParams) extends IssueQueueWakeUpBaseBundle(backendParams.pregIdxWidth, exuIndices) {
+  class IssueQueueWBWakeUpBundle(exuIndices: Seq[Int], backendParams: BackendParams)(implicit p: Parameters) extends IssueQueueWakeUpBaseBundle(backendParams.pregIdxWidth, exuIndices) {
 
   }
 
-class IssueQueueIQWakeUpBundle(
-  exuIdx: Int,
-  backendParams: BackendParams,
-  copyWakeupOut: Boolean = false,
-  copyNum: Int = 0
-) extends IssueQueueWakeUpBaseBundle(backendParams.pregIdxWidth, Seq(exuIdx)) {
-    val loadDependency = Vec(backendParams.LduCnt + backendParams.HyuCnt, UInt(3.W))
+  class IssueQueueIQWakeUpBundle(
+    exuIdx: Int,
+    backendParams: BackendParams,
+    copyWakeupOut: Boolean = false,
+    copyNum: Int = 0
+  )(implicit p: Parameters) extends IssueQueueWakeUpBaseBundle(backendParams.pregIdxWidth, Seq(exuIdx)) {
+    val loadDependency = Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))
     val is0Lat = Bool()
     val params = backendParams.allExuParams.filter(_.exuIdx == exuIdx).head
     val pdestCopy  = OptionWrapper(copyWakeupOut, Vec(copyNum, UInt(params.wbPregIdxWidth.W)))
     val rfWenCopy  = OptionWrapper(copyWakeupOut && params.needIntWen, Vec(copyNum, Bool()))
     val fpWenCopy  = OptionWrapper(copyWakeupOut && params.needFpWen, Vec(copyNum, Bool()))
     val vecWenCopy = OptionWrapper(copyWakeupOut && params.needVecWen, Vec(copyNum, Bool()))
-    val loadDependencyCopy = OptionWrapper(copyWakeupOut && params.isIQWakeUpSink, Vec(copyNum,Vec(backendParams.LdExuCnt, UInt(3.W))))
+    val loadDependencyCopy = OptionWrapper(copyWakeupOut && params.isIQWakeUpSink, Vec(copyNum, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
     def fromExuInput(exuInput: ExuInput, l2ExuVecs: Vec[UInt]): Unit = {
       this.rfWen := exuInput.rfWen.getOrElse(false.B)
       this.fpWen := exuInput.fpWen.getOrElse(false.B)
@@ -500,7 +501,7 @@ class IssueQueueIQWakeUpBundle(
     val rfWenCopy  = OptionWrapper(copyWakeupOut && params.needIntWen, Vec(copyNum, Bool()))
     val fpWenCopy  = OptionWrapper(copyWakeupOut && params.needFpWen, Vec(copyNum, Bool()))
     val vecWenCopy = OptionWrapper(copyWakeupOut && params.needVecWen, Vec(copyNum, Bool()))
-    val loadDependencyCopy = OptionWrapper(copyWakeupOut && params.isIQWakeUpSink, Vec(copyNum,Vec(LoadPipelineWidth, UInt(3.W))))
+    val loadDependencyCopy = OptionWrapper(copyWakeupOut && params.isIQWakeUpSink, Vec(copyNum, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
     val pdest         = UInt(params.wbPregIdxWidth.W)
     val rfWen         = if (params.needIntWen)    Some(Bool())                        else None
     val fpWen         = if (params.needFpWen)     Some(Bool())                        else None
@@ -528,7 +529,7 @@ class IssueQueueIQWakeUpBundle(
     val dataSources = Vec(params.numRegSrc, DataSource())
     val l1ExuOH = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, ExuOH()))
     val srcTimer = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, UInt(3.W)))
-    val loadDependency = OptionWrapper(params.isIQWakeUpSink, Vec(LoadPipelineWidth, UInt(3.W)))
+    val loadDependency = OptionWrapper(params.isIQWakeUpSink, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
 
     val perfDebugInfo = new PerfDebugInfo()
 
@@ -786,8 +787,8 @@ class IssueQueueIQWakeUpBundle(
 
   object LoadShouldCancel {
     def apply(loadDependency: Option[Seq[UInt]], ldCancel: Seq[LoadCancelIO]): Bool = {
-      val ld1Cancel = loadDependency.map(_.zip(ldCancel.map(_.ld1Cancel)).map { case (dep, cancel) => cancel && dep(1)}.reduce(_ || _))
-      val ld2Cancel = loadDependency.map(_.zip(ldCancel.map(_.ld2Cancel)).map { case (dep, cancel) => cancel && dep(2)}.reduce(_ || _))
+      val ld1Cancel = loadDependency.map(_.zip(ldCancel.map(_.ld1Cancel)).map { case (dep, cancel) => cancel && dep(0)}.reduce(_ || _))
+      val ld2Cancel = loadDependency.map(_.zip(ldCancel.map(_.ld2Cancel)).map { case (dep, cancel) => cancel && dep(1)}.reduce(_ || _))
       ld1Cancel.map(_ || ld2Cancel.get).getOrElse(false.B)
     }
   }

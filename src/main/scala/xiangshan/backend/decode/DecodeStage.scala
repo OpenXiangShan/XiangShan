@@ -34,7 +34,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
 
   // params alias
   private val numVecRegSrc = backendParams.numVecRegSrc
-  private val numVecRatPorts = numVecRegSrc + 1 // +1 dst
+  private val numVecRatPorts = numVecRegSrc
   private val v0Idx = 0
   private val vconfigIdx = VCONFIG_IDX
 
@@ -46,20 +46,24 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     // to Rename
     val out = Vec(DecodeWidth, DecoupledIO(new DecodedInst))
     // RAT read
-    val intRat = Vec(RenameWidth, Vec(3, Flipped(new RatReadPort))) // Todo: make it configurable
-    val fpRat = Vec(RenameWidth, Vec(4, Flipped(new RatReadPort)))
+    val intRat = Vec(RenameWidth, Vec(2, Flipped(new RatReadPort))) // Todo: make it configurable
+    val fpRat = Vec(RenameWidth, Vec(3, Flipped(new RatReadPort)))
     val vecRat = Vec(RenameWidth, Vec(numVecRatPorts, Flipped(new RatReadPort)))
     // csr control
     val csrCtrl = Input(new CustomCSRCtrlIO)
     val fusion = Vec(DecodeWidth - 1, Input(Bool()))
     // vtype update
     val isResumeVType = Input(Bool())
-    val commitVType = Flipped(Valid(new VType))
+    val commitVType = new Bundle {
+      val vtype = Flipped(Valid(new VType))
+      val hasVsetvl = Input(Bool())
+    }
     val walkVType = Flipped(Valid(new VType))
     val stallReason = new Bundle {
       val in = Flipped(new StallReasonIO(DecodeWidth))
       val out = new StallReasonIO(DecodeWidth)
     }
+    val vsetvlVType = Input(VType())
   })
 
   // io alias
@@ -103,6 +107,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   vtypeGen.io.redirect := io.redirect
   vtypeGen.io.commitVType := io.commitVType
   vtypeGen.io.walkVType := io.walkVType
+  vtypeGen.io.vsetvlVType := io.vsetvlVType
 
   //Comp 1
   decoderComp.io.redirect := io.redirect
@@ -149,6 +154,10 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   io.out.zipWithIndex.foreach { case (inst, i) =>
     inst.valid := finalDecodedInstValid(i) && !(hasVectorInst && io.isResumeVType)
     inst.bits := finalDecodedInst(i)
+    inst.bits.lsrc(0) := Mux(finalDecodedInst(i).vpu.isReverse, finalDecodedInst(i).lsrc(1), finalDecodedInst(i).lsrc(0))
+    inst.bits.lsrc(1) := Mux(finalDecodedInst(i).vpu.isReverse, finalDecodedInst(i).lsrc(0), finalDecodedInst(i).lsrc(1))
+    inst.bits.srcType(0) := Mux(finalDecodedInst(i).vpu.isReverse, finalDecodedInst(i).srcType(1), finalDecodedInst(i).srcType(0))
+    inst.bits.srcType(1) := Mux(finalDecodedInst(i).vpu.isReverse, finalDecodedInst(i).srcType(0), finalDecodedInst(i).srcType(1))
   }
 
   for (i <- 0 until DecodeWidth) {
@@ -156,14 +165,12 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     // We use the lsrc/ldest before fusion decoder to read RAT for better timing.
     io.intRat(i)(0).addr := io.out(i).bits.lsrc(0)
     io.intRat(i)(1).addr := io.out(i).bits.lsrc(1)
-    io.intRat(i)(2).addr := io.out(i).bits.ldest
     io.intRat(i).foreach(_.hold := !io.out(i).ready)
 
     // Floating-point instructions can not be fused now.
     io.fpRat(i)(0).addr := io.out(i).bits.lsrc(0)
     io.fpRat(i)(1).addr := io.out(i).bits.lsrc(1)
     io.fpRat(i)(2).addr := io.out(i).bits.lsrc(2)
-    io.fpRat(i)(3).addr := io.out(i).bits.ldest
     io.fpRat(i).foreach(_.hold := !io.out(i).ready)
 
     // Vec instructions
@@ -173,7 +180,6 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     io.vecRat(i)(2).addr := io.out(i).bits.lsrc(2) // old_vd
     io.vecRat(i)(3).addr := Mux(FuType.isVppu(io.out(i).bits.fuType) && (io.out(i).bits.fuOpType === VpermType.vcompress), io.out(i).bits.lsrc(3), v0Idx.U) // v0
     io.vecRat(i)(4).addr := vconfigIdx.U           // vtype
-    io.vecRat(i)(5).addr := io.out(i).bits.ldest   // vd
     io.vecRat(i).foreach(_.hold := !io.out(i).ready)
   }
 

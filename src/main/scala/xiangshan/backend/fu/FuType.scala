@@ -116,6 +116,10 @@ object FuType extends OHEnumeration {
     val fuTypes = dq0OHTypeSeq(p)(1).intersect(dq0OHTypeSeq(p)(3)).intersect(dq1OHTypeSeq(p)(1)).intersect(dq1OHTypeSeq(p)(3))
     fuTypes.distinct
   }
+  def is0latency(fuType: UInt): Bool = {
+    val fuTypes = FuConfig.allConfigs.filter(_.latency == CertainLatency(0)).map(_.fuType)
+    FuTypeOrR(fuType, fuTypes)
+  }
   val fpArithAll = Seq(fmac, fmisc, fDivSqrt)
   val scalaMemAll = Seq(ldu, stu, mou)
   val vecOPI = Seq(vipu, vialuF, vppu, vimac, vidiv)
@@ -237,7 +241,8 @@ object FuType extends OHEnumeration {
     vidiv -> "vidiv",
     vfalu -> "vfalu",
     vfma -> "vfma",
-    vfdiv -> "vfdiv"
+    vfdiv -> "vfdiv",
+    vfcvt -> "vfcvt"
   )
 }
 

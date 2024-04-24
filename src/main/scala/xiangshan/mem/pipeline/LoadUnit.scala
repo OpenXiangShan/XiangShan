@@ -1173,10 +1173,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_vecActive    = RegEnable(s2_out.vecActive, true.B, s2_fire)
   val s3_isvec        = RegEnable(s2_out.isvec, false.B, s2_fire)
   val s3_vec_alignedType = RegEnable(s2_vec_alignedType, s2_fire)
-  val s3_mmio         = Wire(chiselTypeOf(io.lsq.uncache))
+  val s3_mmio         = Wire(Valid(new MemExuOutput))
   s3_ready := !s3_valid || s3_kill || io.ldout.ready
-  s3_mmio.valid := RegNextN(io.lsq.uncache.valid, 3, Some(false.B))
-  s3_mmio.ready := RegNextN(io.lsq.uncache.ready, 3, Some(false.B))
+  s3_mmio.valid := RegNextN(io.lsq.uncache.fire, 3, Some(false.B))
   s3_mmio.bits  := RegNextN(io.lsq.uncache.bits, 3)
 
   // forwrad last beat

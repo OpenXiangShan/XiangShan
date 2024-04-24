@@ -44,6 +44,9 @@ class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyMod
 
   override def shouldBeInlined: Boolean = false
 
+  // check read & write port config
+  params.configChecks
+
   /* Only update the idx in mem-scheduler here
    * Idx in other schedulers can be updated the same way if needed
    *
@@ -156,6 +159,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   private val dataPath = wrapper.dataPath.module
   private val intExuBlock = wrapper.intExuBlock.get.module
   private val vfExuBlock = wrapper.vfExuBlock.get.module
+  private val og2ForVector = Module(new Og2ForVector(params))
   private val bypassNetwork = Module(new BypassNetwork)
   private val wbDataPath = Module(new WbDataPath(params))
   private val wbFuBusyTable = wrapper.wbFuBusyTable.module
@@ -257,6 +261,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   vfScheduler.io.fromDataPath.og1Cancel := og1CancelOH
   vfScheduler.io.ldCancel := io.mem.ldCancel
   vfScheduler.io.fromDataPath.cancelToBusyTable := cancelToBusyTable
+  vfScheduler.io.fromOg2.get := og2ForVector.io.toVfIQ
 
   dataPath.io.hartId := io.fromTop.hartId
   dataPath.io.flush := ctrlBlock.io.toDataPath.flush
@@ -276,8 +281,12 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   dataPath.io.debugVecRat    .foreach(_ := ctrlBlock.io.debug_vec_rat.get)
   dataPath.io.debugVconfigRat.foreach(_ := ctrlBlock.io.debug_vconfig_rat.get)
 
+  og2ForVector.io.flush := ctrlBlock.io.toDataPath.flush
+  og2ForVector.io.ldCancel := io.mem.ldCancel
+  og2ForVector.io.fromOg1NoReg <> dataPath.io.toFpExu
+
   bypassNetwork.io.fromDataPath.int <> dataPath.io.toIntExu
-  bypassNetwork.io.fromDataPath.vf <> dataPath.io.toFpExu
+  bypassNetwork.io.fromDataPath.vf <> og2ForVector.io.toVfExu
   bypassNetwork.io.fromDataPath.mem <> dataPath.io.toMemExu
   bypassNetwork.io.fromDataPath.immInfo := dataPath.io.og1ImmInfo
   bypassNetwork.io.fromExus.connectExuOutput(_.int)(intExuBlock.io.out)
@@ -320,20 +329,27 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   csrio.fpu.dirty_fs := ctrlBlock.io.robio.csr.dirty_fs
   csrio.vpu <> 0.U.asTypeOf(csrio.vpu) // Todo
 
+  val vsetvlVType = intExuBlock.io.vtype.getOrElse(0.U.asTypeOf(new VType))
+  ctrlBlock.io.robio.vsetvlVType := vsetvlVType
+
   val debugVconfig = dataPath.io.debugVconfig match {
     case Some(x) => dataPath.io.debugVconfig.get.asTypeOf(new VConfig)
     case None => 0.U.asTypeOf(new VConfig)
   }
-  val debugVtype = VType.toVtypeStruct(debugVconfig.vtype).asUInt
+  val commitVType = ctrlBlock.io.robio.commitVType.vtype
+  val hasVsetvl = ctrlBlock.io.robio.commitVType.hasVsetvl
+  val vtype = VType.toVtypeStruct(Mux(hasVsetvl, vsetvlVType, commitVType.bits)).asUInt
   val debugVl = debugVconfig.vl
   csrio.vpu.set_vxsat := ctrlBlock.io.robio.csr.vxsat
   csrio.vpu.set_vstart.valid := ctrlBlock.io.robio.csr.vstart.valid
   csrio.vpu.set_vstart.bits := ctrlBlock.io.robio.csr.vstart.bits
   csrio.vpu.set_vtype.valid := ctrlBlock.io.robio.csr.vcsrFlag
   //Todo here need change design
-  csrio.vpu.set_vtype.bits := ZeroExt(debugVtype, XLEN)
+  csrio.vpu.set_vtype.valid := commitVType.valid
+  csrio.vpu.set_vtype.bits := ZeroExt(vtype, XLEN)
   csrio.vpu.set_vl.valid := ctrlBlock.io.robio.csr.vcsrFlag
   csrio.vpu.set_vl.bits := ZeroExt(debugVl, XLEN)
+  csrio.vpu.dirty_vs := ctrlBlock.io.robio.csr.dirty_vs
   csrio.exception := ctrlBlock.io.robio.exception
   csrio.memExceptionVAddr := io.mem.exceptionAddr.vaddr
   csrio.memExceptionGPAddr := io.mem.exceptionAddr.gpaddr

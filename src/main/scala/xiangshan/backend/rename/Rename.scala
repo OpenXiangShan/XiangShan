@@ -34,7 +34,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   // params alias
   private val numRegSrc = backendParams.numRegSrc
   private val numVecRegSrc = backendParams.numVecRegSrc
-  private val numVecRatPorts = numVecRegSrc + 1 // +1 dst
+  private val numVecRatPorts = numVecRegSrc
 
   println(s"[Rename] numRegSrc: $numRegSrc")
 
@@ -49,22 +49,23 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // waittable read result
     val waittable = Flipped(Vec(RenameWidth, Output(Bool())))
     // to rename table
-    val intReadPorts = Vec(RenameWidth, Vec(3, Input(UInt(PhyRegIdxWidth.W))))
-    val fpReadPorts = Vec(RenameWidth, Vec(4, Input(UInt(PhyRegIdxWidth.W))))
+    val intReadPorts = Vec(RenameWidth, Vec(2, Input(UInt(PhyRegIdxWidth.W))))
+    val fpReadPorts = Vec(RenameWidth, Vec(3, Input(UInt(PhyRegIdxWidth.W))))
     val vecReadPorts = Vec(RenameWidth, Vec(numVecRatPorts, Input(UInt(PhyRegIdxWidth.W))))
     val intRenamePorts = Vec(RenameWidth, Output(new RatWritePort))
     val fpRenamePorts = Vec(RenameWidth, Output(new RatWritePort))
     val vecRenamePorts = Vec(RenameWidth, Output(new RatWritePort))
     // from rename table
-    val int_old_pdest = Vec(CommitWidth, Input(UInt(PhyRegIdxWidth.W)))
-    val fp_old_pdest = Vec(CommitWidth, Input(UInt(PhyRegIdxWidth.W)))
-    val vec_old_pdest = Vec(CommitWidth, Input(UInt(PhyRegIdxWidth.W)))
-    val int_need_free = Vec(CommitWidth, Input(Bool()))
+    val int_old_pdest = Vec(RabCommitWidth, Input(UInt(PhyRegIdxWidth.W)))
+    val fp_old_pdest = Vec(RabCommitWidth, Input(UInt(PhyRegIdxWidth.W)))
+    val vec_old_pdest = Vec(RabCommitWidth, Input(UInt(PhyRegIdxWidth.W)))
+    val int_need_free = Vec(RabCommitWidth, Input(Bool()))
     // to dispatch1
     val out = Vec(RenameWidth, DecoupledIO(new DynInst))
     // for snapshots
     val snpt = Input(new SnapshotPort)
     val snptLastEnq = Flipped(ValidIO(new RobPtr))
+    val snptIsFull= Input(Bool())
     // debug arch ports
     val debug_int_rat = if (backendParams.debugEn) Some(Vec(32, Input(UInt(PhyRegIdxWidth.W)))) else None
     val debug_vconfig_rat = if (backendParams.debugEn) Some(Input(UInt(PhyRegIdxWidth.W))) else None
@@ -155,7 +156,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uop.srcLoadDependency := DontCare
   })
 
-  require(RenameWidth >= CommitWidth)
   val needVecDest    = Wire(Vec(RenameWidth, Bool()))
   val needFpDest     = Wire(Vec(RenameWidth, Bool()))
   val needIntDest    = Wire(Vec(RenameWidth, Bool()))
@@ -197,7 +197,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     needVecDest(i) := io.in(i).valid && needDestReg(Reg_V, io.in(i).bits)
     needFpDest(i) := io.in(i).valid && needDestReg(Reg_F, io.in(i).bits)
     needIntDest(i) := io.in(i).valid && needDestReg(Reg_I, io.in(i).bits)
-    if (i < CommitWidth) {
+    if (i < RabCommitWidth) {
       walkNeedIntDest(i) := io.rabCommits.walkValid(i) && needDestRegWalk(Reg_I, io.rabCommits.info(i))
       walkNeedFpDest(i) := io.rabCommits.walkValid(i) && needDestRegWalk(Reg_F, io.rabCommits.info(i))
       walkNeedVecDest(i) := io.rabCommits.walkValid(i) && needDestRegWalk(Reg_V, io.rabCommits.info(i))
@@ -233,6 +233,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     }
     uops(i).wfflags := (compressMasksVec(i) & Cat(io.in.map(_.bits.wfflags).reverse)).orR
     uops(i).dirtyFs := (compressMasksVec(i) & Cat(io.in.map(_.bits.fpWen).reverse)).orR
+    // vector instructions' uopSplitType cannot be UopSplitType.SCA_SIM
+    uops(i).dirtyVs := (compressMasksVec(i) & Cat(io.in.map(_.bits.uopSplitType =/= UopSplitType.SCA_SIM).reverse)).orR
 
     uops(i).psrc(0) := Mux1H(uops(i).srcType(0), Seq(io.intReadPorts(i)(0), io.fpReadPorts(i)(0), io.vecReadPorts(i)(0)))
     uops(i).psrc(1) := Mux1H(uops(i).srcType(1), Seq(io.intReadPorts(i)(1), io.fpReadPorts(i)(1), io.vecReadPorts(i)(1)))
@@ -293,7 +295,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     vecSpecWen(i) := needVecDest(i) && fpFreeList.io.canAllocate && fpFreeList.io.doAllocate && !io.rabCommits.isWalk && !io.redirect.valid
 
 
-    if (i < CommitWidth) {
+    if (i < RabCommitWidth) {
       walkIntSpecWen(i) := walkNeedIntDest(i) && !io.redirect.valid
       walkPdest(i) := io.rabCommits.info(i).pdest
     } else {
@@ -377,16 +379,18 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   }
 
   val genSnapshot = Cat(io.out.map(out => out.fire && out.bits.snapshot)).orR
-  val snapshotCtr = RegInit((4 * CommitWidth).U)
-  val notInSameSnpt = GatedValidRegNext(distanceBetween(robIdxHeadNext, io.snptLastEnq.bits) >= CommitWidth.U || !io.snptLastEnq.valid)
-  val allowSnpt = if (EnableRenameSnapshot) !snapshotCtr.orR && notInSameSnpt && io.in.head.bits.firstUop else false.B
+  val lastCycleCreateSnpt = RegInit(false.B)
+  lastCycleCreateSnpt := genSnapshot && !io.snptIsFull
+  val sameSnptDistance = (RobCommitWidth * 4).U
+  // notInSameSnpt: 1.robidxHead - snapLastEnq >= sameSnptDistance 2.no snap
+  val notInSameSnpt = GatedValidRegNext(distanceBetween(robIdxHeadNext, io.snptLastEnq.bits) >= sameSnptDistance || !io.snptLastEnq.valid)
+  val allowSnpt = if (EnableRenameSnapshot) notInSameSnpt && !lastCycleCreateSnpt && io.in.head.bits.firstUop else false.B
   io.out.zip(io.in).foreach{ case (out, in) => out.bits.snapshot := allowSnpt && (!in.bits.preDecodeInfo.notCFI || FuType.isJump(in.bits.fuType)) && in.fire }
-  when(genSnapshot) {
-    snapshotCtr := (4 * CommitWidth).U - PopCount(io.out.map(_.fire))
-  }.elsewhen(io.out.head.fire) {
-    snapshotCtr := Mux(snapshotCtr < PopCount(io.out.map(_.fire)), 0.U, snapshotCtr - PopCount(io.out.map(_.fire)))
+  if(backendParams.debugEn){
+    dontTouch(robIdxHeadNext)
+    dontTouch(notInSameSnpt)
+    dontTouch(genSnapshot)
   }
-
   intFreeList.io.snpt := io.snpt
   fpFreeList.io.snpt := io.snpt
   intFreeList.io.snpt.snptEnq := genSnapshot
@@ -395,7 +399,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   /**
     * Instructions commit: update freelist and rename table
     */
-  for (i <- 0 until CommitWidth) {
+  for (i <- 0 until RabCommitWidth) {
     val commitValid = io.rabCommits.isCommit && io.rabCommits.commitValid(i)
     val walkValid = io.rabCommits.isWalk && io.rabCommits.walkValid(i)
 
@@ -469,7 +473,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   XSDebug(io.rabCommits.isWalk, p"Walk Recovery Enabled\n")
   XSDebug(io.rabCommits.isWalk, p"validVec:${Binary(io.rabCommits.walkValid.asUInt)}\n")
-  for (i <- 0 until CommitWidth) {
+  for (i <- 0 until RabCommitWidth) {
     val info = io.rabCommits.info(i)
     XSDebug(io.rabCommits.isWalk && io.rabCommits.walkValid(i), p"[#$i walk info] " +
       p"ldest:${info.ldest} rfWen:${info.rfWen} fpWen:${info.fpWen} vecWen:${info.vecWen}")

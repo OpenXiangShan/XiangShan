@@ -251,7 +251,8 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   /**
    * [[mgu]]'s in connection
    */
-  private val outEewVs1 = DelayN(eewVs1, latency)
+  //private val outEewVs1 = DelayN(eewVs1, latency)
+  private val outEewVs1 = SNReg(eewVs1, latency)
 
   private val outVd = Cat(vIntFixpAlus.reverse.map(_.io.vd))
   private val outCmp = Mux1H(outEewVs1.oneHot, Seq(8, 4, 2, 1).map(
@@ -276,7 +277,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
     }
   }
 
-  /* insts whose mask is not used to generate 'agnosticEn' and 'keepEn' in mgu:
+  /* insts whose mask is not used to generate 'agnosticEn' and 'activeEn' in mgu:
    * vadc, vmadc...
    * vmerge
    */
@@ -316,7 +317,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   mgu.io.in.info.ma := outVecCtrl.vma
   mgu.io.in.info.vl := Mux(outIsVmvsx, 1.U, outVl)
   mgu.io.in.info.vlmul := outVecCtrl.vlmul
-  mgu.io.in.info.valid := io.out.valid
+  mgu.io.in.info.valid := validVec.last
   mgu.io.in.info.vstart := outVecCtrl.vstart
   mgu.io.in.info.eew := outEew
   mgu.io.in.info.vsew := outVecCtrl.vsew
@@ -332,7 +333,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   mgtu.io.in.vl := outVl
 
   io.out.bits.res.data := Mux(outVstartGeVl, outOldVd, Mux(dstMask, mgtu.io.out.vd, mgu.io.out.vd))
-  io.out.bits.res.vxsat.get := Mux(outVstartGeVl, false.B, (outVxsatReal & mgu.io.out.keep).orR)
+  io.out.bits.res.vxsat.get := Mux(outVstartGeVl, false.B, (outVxsatReal & mgu.io.out.active).orR)
   io.out.bits.ctrl.exceptionVec.get(ExceptionNO.illegalInstr) := mgu.io.out.illegal && !outVstartGeVl
 
   // util function

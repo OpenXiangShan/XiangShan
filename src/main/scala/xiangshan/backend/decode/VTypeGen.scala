@@ -12,10 +12,14 @@ class VTypeGen(implicit p: Parameters) extends XSModule{
   val io = IO(new Bundle {
     val insts = Flipped(Vec(DecodeWidth, ValidIO(UInt(32.W))))
     val redirect = Input(Bool())
-    val commitVType = Flipped(Valid(new VType))
     val walkVType   = Flipped(Valid(new VType))
     val canUpdateVType = Input(Bool())
     val vtype = Output(new VType)
+    val vsetvlVType = Input(new VType)
+    val commitVType = new Bundle {
+      val vtype = Flipped(Valid(new VType))
+      val hasVsetvl = Input(Bool())
+    }
   })
   private val instValidVec = io.insts.map(_.valid)
   private val instFieldVec = io.insts.map(_.bits.asTypeOf(new XSInstBitFields))
@@ -50,13 +54,18 @@ class VTypeGen(implicit p: Parameters) extends XSModule{
 
   private val vtypeNew = vsetModule.io.out.vconfig.vtype
 
-  when(io.commitVType.valid) {
-    vtypeArchNext := io.commitVType.bits
+  when(io.commitVType.vtype.valid) {
+    vtypeArchNext := io.commitVType.vtype.bits
   }
 
   private val inHasVset = isVsetVec.asUInt.orR
 
-  when(io.walkVType.valid) {
+  when(io.redirect) {
+    vtypeSpecNext := vtypeArch
+  }.elsewhen(io.commitVType.hasVsetvl) {
+    // when vsetvl instruction commit, also update vtypeSpec, because vsetvl flush pipe
+    vtypeSpecNext := io.vsetvlVType
+  }.elsewhen(io.walkVType.valid) {
     vtypeSpecNext := io.walkVType.bits
   }.elsewhen(inHasVset && io.canUpdateVType) {
     vtypeSpecNext := vtypeNew

@@ -430,7 +430,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   // val mmio = fromPMP.map(port => port.mmio) // TODO: handle it
   val (s2_req_paddr , s2_req_vaddr) = (RegEnable(s1_req_paddr, s1_fire), RegEnable(s1_req_vaddr, s1_fire))
   val s2_req_gpaddr           = RegEnable(s1_req_gpaddr,        s1_fire)
-  val s2_req_vsetIdx          = RegEnable(s1_req_vsetIdx,       s1_fire)
+  val s2_req_vsetIdx          = RegEnable(s1_req_vsetIdx, 0.U.asTypeOf(s1_req_vsetIdx), s1_fire)
   val s2_req_ptags            = RegEnable(s1_req_ptags,         s1_fire)
   val s2_double_line          = RegEnable(s1_double_line,       s1_fire)
   val s2_port_hit             = RegEnable(s1_port_hit,          s1_fire)

@@ -263,7 +263,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
 
   def WriteTselect(wdata: UInt) = {
-    Mux(wdata < TriggerNum.U, wdata(3, 0), tselectPhy)
+    Mux(wdata < TriggerNum.U, wdata(log2Up(TriggerNum) - 1, 0), tselectPhy)
   }
 
   def GenTdataDistribute(tdata1: Tdata1Bundle, tdata2: UInt): MatchTriggerIO = {
@@ -388,27 +388,15 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     vsstatusNew
   }
   val mstatusWMask = (~ZeroExt((
-    (if(HasHExtension) {
-      GenMask(XLEN - 2, 40) |
-      GenMask(37, 36)          // MBE SBE
-    } else
-      GenMask(63)           | // SD is read-only
-    GenMask(62, 36)      ) | // WPRI
+    GenMask(63)           | // SD is read-only
+    (if(HasHExtension)
+        GenMask(62, 40)    // WPRI
+      else
+        GenMask(62, 38)  )| // WPRI
     GenMask(35, 32)       | // SXL and UXL cannot be changed
     GenMask(31, 23)       | // WPRI
     GenMask(16, 15)       | // XS is read-only
     GenMask(6)            | // UBE, always little-endian (0)
-    GenMask(2)              // WPRI
-  ), 64)).asUInt
-  val mstatusMask = (~ZeroExt((
-    (if (HasHExtension) {
-      GenMask(XLEN - 2, 40) |
-        GenMask(37, 36) // MBE SBE
-    } else
-      GenMask(XLEN - 2, 36)) | // WPRI
-    GenMask(31, 23)       | // WPRI
-    GenMask(10, 9)        | // WPRI
-    GenMask(6)            | // WPRI
     GenMask(4)            | // WPRI
     GenMask(2)            | // WPRI
     GenMask(0)              // WPRI
@@ -693,7 +681,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val vcsr = RegInit(0.U(XLEN.W))
   val vl = Reg(UInt(XLEN.W))
   val vtype = Reg(UInt(XLEN.W))
-  val vlenb = RegInit((VLEN / 8).U(XLEN.W))
+  val vlenb = RegInit(VDataBytes.U(XLEN.W))
 
   // set mstatus->sd and mstatus->vs when true
   val csrw_dirty_vs_state = WireInit(false.B)
@@ -1511,6 +1499,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
         dpc := iexceptionPC // TODO: check it when hasSingleStep
         dcsrNew.cause := MuxCase(0.U, Seq(
           hasTriggerFire -> CAUSE_TRIGGER,
+          raiseDebugException -> CAUSE_EBREAK,
           hasBreakPoint -> CAUSE_HALTREQ,
           hasSingleStep -> CAUSE_STEP
         ))

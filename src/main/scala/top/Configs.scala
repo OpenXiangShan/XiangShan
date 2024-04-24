@@ -65,7 +65,7 @@ class MinimalConfig(n: Int = 1) extends Config(
       p => p.copy(
         DecodeWidth = 6,
         RenameWidth = 6,
-        CommitWidth = 6,
+        RobCommitWidth = 8,
         FetchWidth = 4,
         VirtualLoadQueueSize = 24,
         LoadQueueRARSize = 16,
@@ -101,7 +101,7 @@ class MinimalConfig(n: Int = 1) extends Config(
         ),
         vfPreg = VfPregParams(
           numEntries = 160,
-          numRead = Some(14),
+          numRead = None,
           numWrite = None,
         ),
         icacheParameters = ICacheParameters(

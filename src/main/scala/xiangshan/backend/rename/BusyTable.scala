@@ -30,7 +30,7 @@ import xiangshan.backend.datapath.{DataSource}
 class BusyTableReadIO(implicit p: Parameters) extends XSBundle {
   val req = Input(UInt(PhyRegIdxWidth.W))
   val resp = Output(Bool())
-  val loadDependency = Vec(LoadPipelineWidth, Output(UInt(3.W)))
+  val loadDependency = Vec(LoadPipelineWidth, Output(UInt(LoadDependencyWidth.W)))
 }
 
 class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB: PregWB)(implicit p: Parameters, params: SchdBlockParams) extends XSModule with HasPerfEvents {
@@ -49,8 +49,8 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
     val read = Vec(numReadPorts, new BusyTableReadIO)
   })
 
-  val loadDependency = RegInit(0.U.asTypeOf(Vec(numPhyPregs, Vec(LoadPipelineWidth, UInt(3.W)))))
-  val shiftLoadDependency = Wire(Vec(io.wakeUp.size, Vec(LoadPipelineWidth, UInt(3.W))))
+  val loadDependency = RegInit(0.U.asTypeOf(Vec(numPhyPregs, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
+  val shiftLoadDependency = Wire(Vec(io.wakeUp.size, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
   val tableUpdate = Wire(Vec(numPhyPregs, Bool()))
   val wakeupOHVec = Wire(Vec(numPhyPregs, UInt(io.wakeUp.size.W)))
 
@@ -61,9 +61,8 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
   shiftLoadDependency.zip(io.wakeUp.map(_.bits.loadDependency)).zip(params.wakeUpInExuSources.map(_.name)).foreach {
     case ((deps, originalDeps), name) => deps.zip(originalDeps).zipWithIndex.foreach {
       case ((dep, originalDep), deqPortIdx) =>
-        // TODO: getLdExuIdx
         if (params.backendParam.getLdExuIdx(params.backendParam.allExuParams.find(_.name == name).get) == deqPortIdx)
-          dep := (originalDep << 2).asUInt | 2.U
+          dep := 1.U
         else
           dep := originalDep << 1
     }
@@ -92,7 +91,7 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
     }.elsewhen(wakeUpMask(idx)) {
       ldDp := (if (io.wakeUp.nonEmpty) Mux1H(wakeupOHVec(idx), shiftLoadDependency) else 0.U.asTypeOf(ldDp))
     }.elsewhen(ldDp.map(x => x.orR).reduce(_ | _)) {
-      ldDp := VecInit(ldDp.map(x => x(x.getWidth - 2, 0) << 1))
+      ldDp := VecInit(ldDp.map(x => x << 1))
     }
   }
 
