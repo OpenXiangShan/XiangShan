@@ -243,6 +243,17 @@ class CSREnumType(
     this.setRwType(WARLType(wfn))
   }
 
+  def ||(that: Bool): Bool = {
+    require(this.getWidth == 1, s"Only 1 bit field can use operator ||. The width of left operand is ${this.getWidth}")
+    this.asBool || that
+  }
+
+  def ||(that: CSREnumType): Bool = {
+    require(this.getWidth == 1, s"Only 1 bit field can use operator ||. The width of left operand is ${this.getWidth}")
+    require(that.getWidth == 1, s"Only 1 bit field can use operator ||. The width of right operand is ${that.getWidth}")
+    this.asBool || that.asBool
+  }
+
   // override cloneType to make ValidIO etc function return CSREnumType not EnumType
   override def cloneType: this.type = factory.asInstanceOf[CSREnum].makeType.asInstanceOf[this.type]
 }
