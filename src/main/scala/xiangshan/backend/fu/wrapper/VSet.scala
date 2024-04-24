@@ -71,8 +71,13 @@ class VSetRiWi(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
 class VSetRiWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
   vsetModule.io.in.avl := avl
   vsetModule.io.in.vtype := vtype
+  val vl = vsetModule.io.out.vconfig.vl
+  val vlmax = vsetModule.io.out.vlmax
 
   out.res.data := ZeroExt(vsetModule.io.out.vconfig.asUInt, XLEN)
+
+  if (cfg.writeVConfig) io.vlIsZero.get := vl === 0.U
+  if (cfg.writeVConfig) io.vlIsVlmax.get := vl === vlmax
 
   debugIO.vconfig := vsetModule.io.out.vconfig
 }
@@ -92,11 +97,15 @@ class VSetRvfWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
 
   val oldVL = in.data.src(0).asTypeOf(VConfig()).vl
   val res = WireInit(0.U.asTypeOf(VConfig()))
+  val vlmax = vsetModule.io.out.vlmax
   res.vl := Mux(vsetModule.io.out.vconfig.vtype.illegal, 0.U,
               Mux(VSETOpType.isKeepVl(in.ctrl.fuOpType), oldVL, vsetModule.io.out.vconfig.vl))
   res.vtype := vsetModule.io.out.vconfig.vtype
 
   out.res.data := ZeroExt(res.asUInt, XLEN)
+
+  if (cfg.writeVConfig) io.vlIsZero.get := res.vl === 0.U
+  if (cfg.writeVConfig) io.vlIsVlmax.get := res.vl === vlmax
 
   debugIO.vconfig := res
 }

@@ -365,6 +365,8 @@ class IssueQueueIQWakeUpBundle(
     val isOpMask  = Bool() // vmand, vmnand
     val isMove    = Bool() // vmv.s.x, vmv.v.v, vmv.v.x, vmv.v.i
 
+    val isDependOldvd = Bool() // some instruction's computation depends on oldvd
+
     def vtype: VType = {
       val res = Wire(VType())
       res.illegal := this.vill

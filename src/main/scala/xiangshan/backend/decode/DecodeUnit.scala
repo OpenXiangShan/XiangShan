@@ -812,9 +812,14 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     decodedInst.vpu.veew := inst.WIDTH
     decodedInst.vpu.isReverse := needReverseInsts.map(_ === inst.ALL).reduce(_ || _)
     decodedInst.vpu.isExt := vextInsts.map(_ === inst.ALL).reduce(_ || _)
-    decodedInst.vpu.isNarrow := narrowInsts.map(_ === inst.ALL).reduce(_ || _)
-    decodedInst.vpu.isDstMask := maskDstInsts.map(_ === inst.ALL).reduce(_ || _)
-    decodedInst.vpu.isOpMask := maskOpInsts.map(_ === inst.ALL).reduce(_ || _)
+    val isNarrow = narrowInsts.map(_ === inst.ALL).reduce(_ || _)
+    val isDstMask = maskDstInsts.map(_ === inst.ALL).reduce(_ || _)
+    val isOpMask = maskOpInsts.map(_ === inst.ALL).reduce(_ || _)
+    val isVlx = decodedInst.fuOpType === VlduType.vloxe || decodedInst.fuOpType === VlduType.vluxe
+    decodedInst.vpu.isNarrow := isNarrow
+    decodedInst.vpu.isDstMask := isDstMask
+    decodedInst.vpu.isOpMask := isOpMask
+    decodedInst.vpu.isDependOldvd := isVppu || isVecOPF || isVStore || (isDstMask && !isOpMask) || isNarrow || isVlx
   }
 
   decodedInst.vlsInstr := isVls
@@ -836,8 +841,8 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   io.deq.decodedInst := decodedInst
   io.deq.decodedInst.rfWen := (decodedInst.ldest =/= 0.U) && decodedInst.rfWen
 
-  // when vta and vma are all set, no need to read old vd
-  decodedInst.srcType(2) := Mux(!isFpToVecInst && ((inst.VM === 0.U && !io.enq.vtype.vma) || !io.enq.vtype.vta || isVppu || isVecOPF || isVStore), SrcType.vp, SrcType.no) // old vd
+  // when instruction is not a vector instruction
+  decodedInst.srcType(2) := Mux(!isFpToVecInst, SrcType.vp, SrcType.no) // old vd
   //-------------------------------------------------------------
   // Debug Info
 //  XSDebug("in:  instr=%x pc=%x excepVec=%b crossPageIPFFix=%d\n",
