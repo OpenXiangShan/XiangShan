@@ -96,6 +96,9 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     //wakeup
     val wakeUpFromWB: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
     val wakeUpFromIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
+    // vl
+    val vlIsZero              = Input(Bool())
+    val vlIsVlmax             = Input(Bool())
     //cancel
     val og0Cancel             = Input(ExuOH(backendParams.numExu))
     val og1Cancel             = Input(ExuOH(backendParams.numExu))
@@ -149,6 +152,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val deqSuccess            = Bool()
     val srcWakeup             = Vec(params.numRegSrc, Bool())
     val srcWakeupByWB         = Vec(params.numRegSrc, Bool())
+    val vlWakeupByWb          = Bool()
     val srcLoadDependencyOut  = Vec(params.numRegSrc, Vec(LoadPipelineWidth, UInt(3.W)))
     val srcCancelVec          = Vec(params.numRegSrc, Bool())
     val srcLoadCancelVec      = Vec(params.numRegSrc, Bool())
@@ -181,6 +185,12 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       common.validRegNext     := Mux(commonIn.enq.valid && common.enqReady, true.B, Mux(common.clear, false.B, validReg))
     } else {
       common.validRegNext     := Mux(commonIn.enq.valid, true.B, Mux(common.clear, false.B, validReg))
+    }
+    if (params.numRegSrc == 5) {
+      // only when numRegSrc == 5 need vl
+      common.vlWakeupByWb     := common.srcWakeupByWB(4)
+    } else {
+      common.vlWakeupByWb     := false.B
     }
   }
 
@@ -266,9 +276,32 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       val wakeupByIQ = hasIQWakeupGet.srcWakeupByIQ(srcIdx).asUInt.orR
       val wakeupByIQOH = hasIQWakeupGet.srcWakeupByIQ(srcIdx)
       val wakeup = common.srcWakeup(srcIdx)
+
+      val ignoreOldVd = Wire(Bool())
+      val vlWakeUpByWb = common.vlWakeupByWb
+      val isDependOldvd = entryReg.payload.vpu.isDependOldvd
+      val vta = entryReg.payload.vpu.vta
+      val vma = entryReg.payload.vpu.vma
+      val vm = entryReg.payload.vpu.vm
+      val vlIsZero = commonIn.vlIsZero
+      val vlIsVlmax = commonIn.vlIsVlmax
+      val ignoreTail = vlIsVlmax && (vm =/= 0.U || vma)
+      val ignoreWhole = !vlIsVlmax && (vm =/= 0.U || vma) && vta
+      if (params.numVfSrc > 0 && srcIdx == 2) {
+        /**
+          * the src store the old vd, update it when vl is write back
+          * 1. when the instruction depend on old vd, we cannot set the srctype to imm, we will update the method of uop split to avoid this situation soon
+          * 2. when vl = 0, we cannot set the srctype to imm because the vd keep the old value
+          * 3. when vl = vlmax, we can set srctype to imm when vta is not set
+          */
+        ignoreOldVd := vlWakeUpByWb && !isDependOldvd && !vlIsZero && (ignoreTail || ignoreWhole)
+      } else {
+        ignoreOldVd := false.B
+      }
+
       srcStatusNext.psrc                              := srcStatus.psrc
-      srcStatusNext.srcType                           := srcStatus.srcType
-      srcStatusNext.srcState                          := Mux(cancel, false.B, wakeup | srcStatus.srcState)
+      srcStatusNext.srcType                           := Mux(ignoreOldVd, SrcType.no, srcStatus.srcType)
+      srcStatusNext.srcState                          := Mux(cancel, false.B, wakeup | srcStatus.srcState | ignoreOldVd)
       srcStatusNext.dataSources.value                 := Mux(wakeupByIQ, DataSource.bypass, Mux(srcStatus.dataSources.readBypass, DataSource.reg, srcStatus.dataSources.value))
       if(params.hasIQWakeUp) {
         srcStatusNext.srcTimer.get                    := MuxCase(3.U, Seq(

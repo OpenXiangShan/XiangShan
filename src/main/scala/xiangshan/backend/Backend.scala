@@ -163,6 +163,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   private val og1CancelOH: UInt = dataPath.io.og1CancelOH
   private val og0CancelOH: UInt = dataPath.io.og0CancelOH
   private val cancelToBusyTable = dataPath.io.cancelToBusyTable
+  private val vlIsZero = intExuBlock.io.vlIsZero.get
+  private val vlIsVlmax = intExuBlock.io.vlIsVlmax.get
 
   ctrlBlock.io.IQValidNumVec := intScheduler.io.IQValidNumVec
   ctrlBlock.io.fromTop.hartId := io.fromTop.hartId
@@ -199,6 +201,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   intScheduler.io.fromDataPath.og1Cancel := og1CancelOH
   intScheduler.io.ldCancel := io.mem.ldCancel
   intScheduler.io.fromDataPath.cancelToBusyTable := cancelToBusyTable
+  intScheduler.io.vlWriteBack.vlIsZero := false.B
+  intScheduler.io.vlWriteBack.vlIsVlmax := false.B
 
   memScheduler.io.fromTop.hartId := io.fromTop.hartId
   memScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
@@ -231,6 +235,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   memScheduler.io.fromDataPath.og1Cancel := og1CancelOH
   memScheduler.io.ldCancel := io.mem.ldCancel
   memScheduler.io.fromDataPath.cancelToBusyTable := cancelToBusyTable
+  memScheduler.io.vlWriteBack.vlIsZero := vlIsZero
+  memScheduler.io.vlWriteBack.vlIsVlmax := vlIsVlmax
 
   vfScheduler.io.fromTop.hartId := io.fromTop.hartId
   vfScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
@@ -244,6 +250,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   vfScheduler.io.fromDataPath.og1Cancel := og1CancelOH
   vfScheduler.io.ldCancel := io.mem.ldCancel
   vfScheduler.io.fromDataPath.cancelToBusyTable := cancelToBusyTable
+  vfScheduler.io.vlWriteBack.vlIsZero := vlIsZero
+  vfScheduler.io.vlWriteBack.vlIsVlmax := vlIsVlmax
 
   dataPath.io.hartId := io.fromTop.hartId
   dataPath.io.flush := ctrlBlock.io.toDataPath.flush

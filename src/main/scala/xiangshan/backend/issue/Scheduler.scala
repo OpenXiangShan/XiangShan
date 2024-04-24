@@ -64,6 +64,11 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
     new RfWritePortWithConfig(backendParams.vfPregParams.dataCfg, backendParams.vfPregParams.addrWidth)))
   val toDataPathAfterDelay: MixedVec[MixedVec[DecoupledIO[IssueQueueIssueBundle]]] = MixedVec(params.issueBlockParams.map(_.genIssueDecoupledBundle))
 
+  val vlWriteBack = new Bundle {
+    val vlIsZero = Input(Bool())
+    val vlIsVlmax = Input(Bool())
+  }
+
   val fromSchedulers = new Bundle {
     val wakeupVec: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpInValidBundle)
   }
@@ -228,6 +233,12 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
     iq.io.og0Cancel := io.fromDataPath.og0Cancel
     iq.io.og1Cancel := io.fromDataPath.og1Cancel
     iq.io.ldCancel := io.ldCancel
+  }
+
+  // connect the vl writeback informatino to the issue queues
+  issueQueues.zipWithIndex.foreach { case(iq, i) =>
+    iq.io.vlIsVlmax := io.vlWriteBack.vlIsVlmax
+    iq.io.vlIsZero := io.vlWriteBack.vlIsZero
   }
 
   private val iqWakeUpOutMap: Map[Int, ValidIO[IssueQueueIQWakeUpBundle]] =

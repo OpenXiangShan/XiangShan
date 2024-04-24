@@ -83,6 +83,8 @@ class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val fenceio = if (cfg.isFence) Some(new FenceIO) else None
   val frm = if (cfg.needSrcFrm) Some(Input(UInt(3.W))) else None
   val vxrm = if (cfg.needSrcVxrm) Some(Input(UInt(2.W))) else None
+  val vlIsZero = OptionWrapper(cfg.writeVConfig, Output(Bool()))
+  val vlIsVlmax = OptionWrapper(cfg.writeVConfig, Output(Bool()))
 }
 
 abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSModule {
