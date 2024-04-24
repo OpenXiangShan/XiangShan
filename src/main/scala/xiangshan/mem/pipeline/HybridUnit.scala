@@ -1212,10 +1212,12 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   } .otherwise {
     io.ldu_io.lsq.ldin.bits.rep_info.cause := VecInit(s3_sel_rep_cause.asBools)
   }
+  val s3_no_need_rep = !RegNext(s2_out.rep_info.need_rep) && !s3_in.mmio
+  val s3_safe_writeback = (s3_exception || s3_dly_ld_err || s3_no_need_rep)
 
   // Int flow, if hit, will be writebacked at s3
   s3_out.valid                := s3_valid &&
-                                (!s3_ld_flow && !s3_in.feedbacked || !io.ldu_io.lsq.ldin.bits.rep_info.need_rep) && !s3_in.mmio
+                                (!s3_ld_flow && !s3_in.feedbacked && !s3_in.mmio || s3_safe_writeback)
   s3_out.bits.uop             := s3_in.uop
   s3_out.bits.uop.exceptionVec(loadAccessFault) := (s3_dly_ld_err  || s3_in.uop.exceptionVec(loadAccessFault)) && s3_ld_flow
   s3_out.bits.uop.replayInst := s3_rep_frm_fetch
