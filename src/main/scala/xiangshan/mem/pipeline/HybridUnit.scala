@@ -161,7 +161,6 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val s0_valid         = Wire(Bool())
   val s0_dcache_ready  = Wire(Bool())
   val s0_kill          = Wire(Bool())
-  val s0_vaddr         = Wire(UInt(VAddrBits.W))
   val s0_mask          = Wire(UInt((VLEN/8).W))
   val s0_uop           = Wire(new DynInst)
   val s0_has_rob_entry = Wire(Bool())
@@ -177,6 +176,8 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val s0_can_go        = s1_ready
   val s0_fire          = s0_valid && s0_dcache_ready && s0_can_go
   val s0_out           = Wire(new LqWriteBundle)
+  val s0_tlb_vaddr     = Wire(UInt(VAddrBits.W))
+  val s0_vaddr         = Wire(UInt(VAddrBits.W))
   // vector
   val s0_isvec = WireInit(false.B)
   val s0_vecActive = WireInit(true.B)
@@ -309,7 +310,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
                                          Mux(s0_prf_wr, TlbCmd.write, TlbCmd.read),
                                          Mux(s0_ld_flow, TlbCmd.read, TlbCmd.write)
                                        )
-  io.tlb.req.bits.vaddr              := Mux(s0_hw_prf_select, io.ldu_io.prefetch_req.bits.paddr, s0_vaddr)
+  io.tlb.req.bits.vaddr              := Mux(s0_hw_prf_select, io.ldu_io.prefetch_req.bits.paddr, s0_tlb_vaddr)
   io.tlb.req.bits.size               := Mux(s0_isvec, io.vec_stu_io.in.bits.alignedType, LSUOpType.size(s0_uop.fuOpType))
   io.tlb.req.bits.kill               := s0_kill
   io.tlb.req.bits.memidx.is_ld       := s0_ld_flow
@@ -343,7 +344,6 @@ class HybridUnit(implicit p: Parameters) extends XSModule
 
   // load flow priority mux
   def fromNullSource() = {
-    s0_vaddr         := 0.U
     s0_mask          := 0.U
     s0_uop           := 0.U.asTypeOf(new DynInst)
     s0_try_l2l       := false.B
@@ -362,7 +362,6 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   }
 
   def fromFastReplaySource(src: LqWriteBundle) = {
-    s0_vaddr         := src.vaddr
     s0_mask          := src.mask
     s0_uop           := src.uop
     s0_try_l2l       := false.B
@@ -381,7 +380,6 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   }
 
   def fromNormalReplaySource(src: LsPipelineBundle) = {
-    s0_vaddr         := src.vaddr
     s0_mask          := genVWmask(src.vaddr, src.uop.fuOpType(1, 0))
     s0_uop           := src.uop
     s0_try_l2l       := false.B
@@ -400,7 +398,6 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   }
 
   def fromPrefetchSource(src: L1PrefetchReq) = {
-    s0_vaddr         := src.getVaddr()
     s0_mask          := 0.U
     s0_uop           := DontCare
     s0_try_l2l       := false.B
@@ -419,8 +416,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   }
 
   def fromIntIssueSource(src: MemExuInput) = {
-    s0_vaddr         := src.src(0) + SignExt(src.uop.imm(11, 0), VAddrBits)
-    s0_mask          := genVWmask(s0_vaddr, src.uop.fuOpType(1,0))
+    s0_mask          := genVWmask(s0_tlb_vaddr, src.uop.fuOpType(1,0))
     s0_uop           := src.uop
     s0_try_l2l       := false.B
     s0_has_rob_entry := true.B
@@ -439,7 +435,6 @@ class HybridUnit(implicit p: Parameters) extends XSModule
 
   def fromVecIssueSource(src: VecStorePipeBundle) = {
     // For now, vector port handles only vector store flows
-    s0_vaddr         := src.vaddr
     s0_mask          := src.mask
     s0_uop           := src.uop
     s0_try_l2l       := false.B
@@ -457,13 +452,12 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     s0_sched_idx     := 0.U
 
     s0_isvec         := true.B
-    s0_vecActive           := io.vec_stu_io.in.bits.vecActive
+    s0_vecActive     := io.vec_stu_io.in.bits.vecActive
     s0_flowPtr       := io.vec_stu_io.in.bits.flowPtr
     s0_isLastElem    := io.vec_stu_io.in.bits.isLastElem
   }
 
   def fromLoadToLoadSource(src: LoadToLoadIO) = {
-    s0_vaddr              := Cat(src.data(XLEN-1, 6), s0_ptr_chasing_vaddr(5,0))
     s0_mask               := genVWmask(s0_vaddr, io.ldu_io.ld_fast_fuOpType(1, 0))
     // When there's no valid instruction from RS and LSQ, we try the load-to-load forwarding.
     // Assume the pointer chasing is always ld.
@@ -501,6 +495,14 @@ class HybridUnit(implicit p: Parameters) extends XSModule
       fromNullSource()
     }
   }
+  // select vaddr
+  val s0_int_iss_vaddr  = io.lsin.bits.src(0) + SignExt(io.lsin.bits.uop.imm(11, 0), VAddrBits)
+  val s0_vec_iss_vaddr  = io.vec_stu_io.in.bits.vaddr
+  val s0_rep_vaddr      = io.ldu_io.replay.bits.vaddr
+
+  val s0_int_vec_vaddr = Mux(s0_int_iss_valid, s0_int_iss_vaddr, s0_vec_iss_vaddr)
+  s0_tlb_vaddr := Mux(s0_super_ld_rep_valid || s0_ld_rep_valid, s0_rep_vaddr, s0_int_vec_vaddr)
+  s0_vaddr := Mux(s0_fast_rep, io.ldu_io.fast_rep_in.bits.vaddr, s0_tlb_vaddr)
 
   // address align check
   val s0_addr_aligned = LookupTree(Mux(s0_isvec, io.vec_stu_io.in.bits.alignedType, s0_uop.fuOpType(1, 0)), List(
@@ -617,7 +619,8 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   val s1_ld_exception     = ExceptionNO.selectByFu(s1_out.uop.exceptionVec, LduCfg).asUInt.orR   // af & pf exception were modified below.
   val s1_st_exception     = ExceptionNO.selectByFu(s1_out.uop.exceptionVec, StaCfg).asUInt.orR   // af & pf exception were modified below.
   val s1_exception        = (s1_ld_flow && s1_ld_exception) || (!s1_ld_flow && s1_st_exception)
-  val s1_tlb_miss         = io.tlb.resp.bits.miss
+  val s1_not_tlb_query    = s1_in.isFastReplay
+  val s1_tlb_miss         = io.tlb.resp.bits.miss && !s1_not_tlb_query
   val s1_prf              = s1_in.isPrefetch
   val s1_hw_prf           = s1_in.isHWPrefetch
   val s1_sw_prf           = s1_prf && !s1_hw_prf
@@ -632,8 +635,8 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   s1_vaddr_hi         := s1_in.vaddr(VAddrBits - 1, 6)
   s1_vaddr_lo         := s1_in.vaddr(5, 0)
   s1_vaddr            := Cat(s1_vaddr_hi, s1_vaddr_lo)
-  s1_paddr_dup_lsu    := io.tlb.resp.bits.paddr(0)
-  s1_paddr_dup_dcache := io.tlb.resp.bits.paddr(1)
+  s1_paddr_dup_lsu    := Mux(s1_in.isFastReplay, s1_in.paddr(0), io.tlb.resp.bits.paddr(0))
+  s1_paddr_dup_dcache := Mux(s1_in.isFastReplay, s1_in.paddr(1), io.tlb.resp.bits.paddr(1))
 
   when (s1_tlb_memidx.is_ld && io.tlb.resp.valid && !s1_tlb_miss &&
         s1_tlb_memidx.idx === s1_in.uop.lqIdx.value && s1_ld_flow) {
