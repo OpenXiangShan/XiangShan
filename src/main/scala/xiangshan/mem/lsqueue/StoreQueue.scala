@@ -736,10 +736,12 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // TODO: CAN NOT deal with vector mmio now!
   val s_idle :: s_req :: s_resp :: s_wb :: s_wait :: Nil = Enum(5)
   val uncacheState = RegInit(s_idle)
+  val uncacheUop = Reg(new DynInst)
   switch(uncacheState) {
     is(s_idle) {
       when(RegNext(io.rob.pendingst && uop(deqPtr).robIdx === io.rob.pendingPtr && pending(deqPtr) && allocated(deqPtr) && datavalid(deqPtr) && addrvalid(deqPtr))) {
         uncacheState := s_req
+        uncacheUop := uop(deqPtr)
       }
     }
     is(s_req) {
@@ -811,7 +813,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   // (4) scalar store: writeback to ROB (and other units): mark as writebacked
   io.mmioStout.valid := uncacheState === s_wb && !isVec(deqPtr)
-  io.mmioStout.bits.uop := uop(deqPtr)
+  io.mmioStout.bits.uop := uncacheUop
   io.mmioStout.bits.uop.sqIdx := deqPtrExt(0)
   io.mmioStout.bits.data := shiftDataToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).data) // dataModule.io.rdata.read(deqPtr)
   io.mmioStout.bits.debug.isMMIO := true.B
