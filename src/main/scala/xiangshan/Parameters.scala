@@ -317,6 +317,7 @@ trait HasXSParameter {
   implicit val p: Parameters
 
   val PAddrBits = p(SoCParamsKey).PAddrBits // PAddrBits is Phyical Memory addr bits
+  val NodeIDWidth = p(SoCParamsKey).NodeIDWidth // NodeID width among NoC
 
   val coreParams = p(XSCoreParamsKey)
   val env = p(DebugOptionsKey)

@@ -297,6 +297,10 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
         chi_port <> DontCare
         dontTouch(chi_port)
       }
+      tile.module.io.nodeID.foreach { case nodeID =>
+        nodeID := DontCare
+        dontTouch(nodeID)
+      }
     }
 
     misc.module.debug_module_io.resetCtrl.hartIsInReset := core_with_l2.map(_.module.reset.asBool)

@@ -128,6 +128,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
         val l3MissMatch = Input(Bool())
       }
       val chi = if (enableCHI) Some(new PortIO) else None
+      val nodeID = if (enableCHI) Some(Input(UInt(NodeIDWidth.W))) else None
     })
 
     dontTouch(io.hartId)
@@ -171,6 +172,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     core.module.io.debugTopDown.l3MissMatch := io.debugTopDown.l3MissMatch
 
     io.chi.foreach(_ <> l2top.module.chi.get)
+    l2top.module.nodeID.foreach(_ := io.nodeID.get)
 
     // Modules are reset one by one
     // io_reset ----

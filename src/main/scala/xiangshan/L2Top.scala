@@ -158,6 +158,7 @@ class L2Top()(implicit p: Parameters) extends LazyModule
       val l2MissMatch = Output(Bool())
     })
     val chi = if (enableCHI) Some(IO(new PortIO)) else None
+    val nodeID = if (enableCHI) Some(IO(Input(UInt(NodeIDWidth.W)))) else None
 
     val resetDelayN = Module(new DelayN(UInt(PAddrBits.W), 5))
 
@@ -183,6 +184,7 @@ class L2Top()(implicit p: Parameters) extends LazyModule
       tl2chi_l2cache.get.module.io.debugTopDown.robHeadPaddr := DontCare
       tl2chi_l2cache.get.module.io.hartId := hartId.fromTile
       tl2chi_l2cache.get.module.io.debugTopDown.robHeadPaddr.head := debugTopDown.robHeadPaddr
+      tl2chi_l2cache.get.module.io.nodeID := nodeID.get
       debugTopDown.l2MissMatch := tl2chi_l2cache.get.module.io.debugTopDown.l2MissMatch.head
     } else {
       l2_hint := 0.U.asTypeOf(l2_hint)
