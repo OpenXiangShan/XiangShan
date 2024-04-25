@@ -16,7 +16,6 @@ abstract class CSRBundle extends Bundle {
   override def do_asUInt(implicit sourceInfo: SourceInfo): UInt = {
     // sorted from msb to lsb
     val fields = this.getFields.sortWith((l, r) => l.lsb > r.lsb)
-    println(s"[CSRBundle-do_asUInt-tmp] $fields")
     var paddedFields: Seq[Data] = Seq()
     var lsb = len
 
