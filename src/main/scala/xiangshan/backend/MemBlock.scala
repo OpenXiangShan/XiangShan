@@ -338,7 +338,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val vlSplit = Seq.fill(VlduCnt)(Module(new VLSplitImp))
   val vsSplit = Seq.fill(VstuCnt)(Module(new VSSplitImp))
   val vlMergeBuffer = Module(new VLMergeBufferImp)
-  val vsMergeBuffer = Module(new VSMergeBufferImp)
+  val vsMergeBuffer = Seq.fill(VstuCnt)(Module(new VSMergeBufferImp))
 
   val l1_pf_req = Wire(Decoupled(new L1PrefetchReq()))
   dcache.io.sms_agt_evict_req.ready := false.B
@@ -1286,11 +1286,29 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     i => vsSplit(i).io.in.ready && vlSplit(i).io.in.ready
   )
 
+  // init port
+  /**
+   * TODO: splited vsMergebuffer maybe remove, if one RS can accept two feedback, or don't need RS replay uop
+   * for now:
+   *  RS0 -> VsSplit0 -> stu0 -> vsMergebuffer0 -> feedback -> RS0
+   *  RS1 -> VsSplit1 -> stu1 -> vsMergebuffer1 -> feedback -> RS1
+   *
+   * vector load don't need feedback
+   *
+   *  RS0 -> VlSplit0  -> ldu0 -> |
+   *  RS1 -> VlSplit1  -> ldu1 -> |  -> vlMergebuffer
+   *        replayIO   -> ldu3 -> |
+   * */
+  (0 until VstuCnt).foreach{i =>
+    vsMergeBuffer(i).io.fromPipeline := DontCare
+    vsMergeBuffer(i).io.fromSplit := DontCare
+  }
+
   (0 until VstuCnt).foreach{i =>
     vsSplit(i).io.redirect <> redirect
     vsSplit(i).io.in <> io.ooo_to_mem.issueVldu(i)
     vsSplit(i).io.in.valid := io.ooo_to_mem.issueVldu(i).valid && LSUOpType.isVecSt(io.ooo_to_mem.issueVldu(i).bits.uop.fuOpType) && vLsuCanaccept(i)
-    vsSplit(i).io.toMergeBuffer <> vsMergeBuffer.io.fromSplit(i)
+    vsSplit(i).io.toMergeBuffer <> vsMergeBuffer(i).io.fromSplit.head
     vsSplit(i).io.out <> storeUnits(i).io.vecstin // Todo: May be some balance mechanism is needed
     vsSplit(i).io.vstd.get := DontCare // Todo: Discuss how to pass vector store data
 
@@ -1306,8 +1324,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   (0 until LduCnt).foreach{i=>
     vlMergeBuffer.io.fromPipeline(i) <> loadUnits(i).io.vecldout
   }
-  (0 until StaCnt).foreach{i=>
-    vsMergeBuffer.io.fromPipeline(i) <> storeUnits(i).io.vecstout
+  (0 until VstuCnt).foreach{i=>
+    vsMergeBuffer(i).io.fromPipeline.head <> storeUnits(i).io.vecstout
   }
 
   (0 until VlduCnt).foreach{i=>
@@ -1315,31 +1333,33 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
 
   vlMergeBuffer.io.redirect <> redirect
-  vsMergeBuffer.io.redirect <> redirect
+  vsMergeBuffer.map(_.io.redirect <> redirect)
   (0 until VlduCnt).foreach{i=>
     vlMergeBuffer.io.toLsq(i) <> lsq.io.ldvecFeedback(i)
   }
   (0 until VstuCnt).foreach{i=>
-    vsMergeBuffer.io.toLsq(i) <> lsq.io.stvecFeedback(i)
+    vsMergeBuffer(i).io.toLsq.head <> lsq.io.stvecFeedback(i)
   }
 
-  (0 until UopWritebackWidth).foreach{i=>
+  (0 until VlduCnt).foreach{i=>
     // send to RS
     vlMergeBuffer.io.feedback(i) <> io.mem_to_ooo.vlduIqFeedback(i).feedbackSlow
     io.mem_to_ooo.vlduIqFeedback(i).feedbackFast := DontCare
+  }
+  (0 until VstuCnt).foreach{i =>
     // send to RS
-    vsMergeBuffer.io.feedback(i) <> io.mem_to_ooo.vstuIqFeedback(i).feedbackSlow
+    vsMergeBuffer(i).io.feedback.head <> io.mem_to_ooo.vstuIqFeedback(i).feedbackSlow
     io.mem_to_ooo.vstuIqFeedback(i).feedbackFast := DontCare
   }
 
   (0 until VlduCnt).foreach{i=>
-    io.mem_to_ooo.writebackVldu(i).valid := vlMergeBuffer.io.uopWriteback(i).valid || vsMergeBuffer.io.uopWriteback(i).valid
+    io.mem_to_ooo.writebackVldu(i).valid := vlMergeBuffer.io.uopWriteback(i).valid || vsMergeBuffer(i).io.uopWriteback.head.valid
     io.mem_to_ooo.writebackVldu(i).bits := Mux1H(Seq(
       vlMergeBuffer.io.uopWriteback(i).valid -> vlMergeBuffer.io.uopWriteback(i).bits,
-      vsMergeBuffer.io.uopWriteback(i).valid -> vsMergeBuffer.io.uopWriteback(i).bits,
+      vsMergeBuffer(i).io.uopWriteback.head.valid -> vsMergeBuffer(i).io.uopWriteback.head.bits,
     ))
     vlMergeBuffer.io.uopWriteback(i).ready := io.mem_to_ooo.writebackVldu(i).ready
-    vsMergeBuffer.io.uopWriteback(i).ready := io.mem_to_ooo.writebackVldu(i).ready && !vlMergeBuffer.io.uopWriteback(i).valid
+    vsMergeBuffer(i).io.uopWriteback.head.ready := io.mem_to_ooo.writebackVldu(i).ready && !vlMergeBuffer.io.uopWriteback(i).valid
   }
 
   // Sbuffer
