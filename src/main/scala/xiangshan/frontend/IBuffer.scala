@@ -265,7 +265,7 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
       entry := Mux(wen, writeEntry, entry)
 
       // Debug Assertion
-      XSError(PopCount(validOH) > 1.asUInt, "validOH is not OneHot")
+      XSError(io.in.valid && PopCount(validOH) > 1.asUInt, "validOH is not OneHot")
     }
   }
   // Pointer maintenance
