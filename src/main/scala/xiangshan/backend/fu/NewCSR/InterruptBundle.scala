@@ -120,4 +120,10 @@ object InterruptNO {
 
     LPRASEI
   )
+
+  def getPrioIdx(f: this.type => Int): Int = {
+    val idx = this.interruptDefaultPrio.indexOf(f(this))
+    assert(idx != -1)
+    idx
+  }
 }

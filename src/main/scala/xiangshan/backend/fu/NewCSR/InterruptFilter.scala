@@ -13,16 +13,20 @@ import xiangshan.backend.fu.NewCSR.InterruptNO
 class InterruptFilter extends Module {
   val io = IO(new InterruptFilterIO)
 
+  val privState = io.in.privState
   val mstatusMIE = io.in.mstatusMIE
   val sstatusSIE = io.in.sstatusSIE
   val vsstatusSIE = io.in.vsstatusSIE
   val mip = io.in.mip
   val mie = io.in.mie
   val mideleg = io.in.mideleg
-  val privState = io.in.privState
+  val sip = io.in.sip
+  val sie = io.in.sie
   val hip = io.in.hip
   val hie = io.in.hie
   val hideleg = io.in.hideleg
+  val vsip = io.in.vsip
+  val vsie = io.in.vsie
   val hvictl = io.in.hvictl
   val hstatus = io.in.hstatus
   val mtopei = io.in.mtopei
@@ -30,13 +34,26 @@ class InterruptFilter extends Module {
   val vstopei = io.in.vstopei
   val hviprio1 = io.in.hviprio1
   val hviprio2 = io.in.hviprio2
-  val iprios = io.in.iprios
+  val miprios = io.in.miprios
+  val hsiprios = io.in.hsiprios
   val hviprios = Cat(hviprio2.asUInt, hviprio1.asUInt)
 
-  val mtopiIsNotZero: Bool = (mip.asUInt & mie.asUInt & (~mideleg.asUInt).asUInt) =/= 0.U
-  val stopiIsNotZero: Bool = privState.isModeHS & ((((mip.asUInt | hip.asUInt) & (mie.asUInt | hie.asUInt)) & (~hideleg.asUInt).asUInt) =/= 0.U)
+  val mipFields = mip.asTypeOf(new MipBundle)
+  val mieFields = mie.asTypeOf(new MieBundle)
+  val sipFields = sip.asTypeOf(new SipBundle)
+  val sieFields = sie.asTypeOf(new SieBundle)
+  val hipFields = hip.asTypeOf(new HipBundle)
+  val hieFields = hie.asTypeOf(new HieBundle)
+  val hidelegFields = hideleg.asTypeOf(new HidelegBundle)
 
-  val ipriosIsZero: Bool = !iprios.orR
+  private val hsip = hip.asUInt | sip.asUInt
+  private val hsie = hie.asUInt | sie.asUInt
+
+  val mtopiIsNotZero: Bool = (mip & mie & (~mideleg).asUInt) =/= 0.U
+  val stopiIsNotZero: Bool = privState.isModeHS && ((hsip & hsie & (~hideleg).asUInt) =/= 0.U)
+
+  val mIpriosIsZero : Bool = miprios  === 0.U
+  val hsIpriosIsZero: Bool = hsiprios === 0.U
 
   def findIndex(input: UInt): UInt = {
     val select = WireInit(0.U(log2Up(InterruptNO.interruptDefaultPrio.length).W))
@@ -108,29 +125,32 @@ class InterruptFilter extends Module {
     }
   }
 
-  val iidNum = Wire(UInt(6.W))
-  val prioNum = Wire(UInt(8.W))
-  iidNum := highIprio(iprios)._1
-  prioNum := highIprio(iprios)._2
+  private val (mIidNum,  mPrioNum)  = highIprio(miprios)
+  private val (hsIidNum, hsPrioNum) = highIprio(hsiprios)
 
-  val iidDefaultPrioHighMEI: Bool = findIndex(iidNum) < 1.U
-  val iidDefaultPrioLowMEI:  Bool = findIndex(iidNum) > 1.U
-  val iidDefaultPrioHighSEI: Bool = findIndex(iidNum) < 4.U
-  val iidDefaultPrioLowSEI:  Bool = findIndex(iidNum) > 4.U
+  private val mIidIdx  = findIndex(mIidNum)
+  private val hsIidIdx = findIndex(hsIidNum)
 
-  val intrIsEI: Bool = (iidNum === InterruptNO.SEI.U) || (iidNum === InterruptNO.MEI.U)
+  private val mIidDefaultPrioHighMEI: Bool = mIidIdx < InterruptNO.getPrioIdx(_.MEI).U
+  private val mIidDefaultPrioLowMEI : Bool = mIidIdx > InterruptNO.getPrioIdx(_.MEI).U
 
-  val mtopiPrioNumReal = Mux(intrIsEI, mtopei.IPRIO.asUInt, prioNum)
-  val stopiPrioNumReal = Mux(intrIsEI, stopei.IPRIO.asUInt, prioNum)
+  private val hsIidDefaultPrioHighSEI: Bool = hsIidIdx < InterruptNO.getPrioIdx(_.SEI).U
+  private val hsIidDefaultPrioLowSEI : Bool = hsIidIdx > InterruptNO.getPrioIdx(_.SEI).U
+
+  private val mIrIsEI  = ( mIidNum === InterruptNO.SEI.U) || ( mIidNum === InterruptNO.MEI.U)
+  private val hsIrIsEI = (hsIidNum === InterruptNO.SEI.U) || (hsIidNum === InterruptNO.MEI.U)
+
+  val mtopiPrioNumReal = Mux( mIrIsEI, mtopei.IPRIO.asUInt,  mPrioNum)
+  val stopiPrioNumReal = Mux(hsIrIsEI, stopei.IPRIO.asUInt, hsPrioNum)
 
   // update mtopi
-  io.out.mtopi.IID := Mux(mtopiIsNotZero, iidNum, 0.U)
-  io.out.mtopi.IPRIO := Mux(mtopiIsNotZero, Mux(ipriosIsZero, 1.U,
+  io.out.mtopi.IID := Mux(mtopiIsNotZero, mIidNum, 0.U)
+  io.out.mtopi.IPRIO := Mux(mtopiIsNotZero, Mux(mIpriosIsZero, 1.U,
     Mux1H(
       Seq(
         mtopiPrioNumReal >= 1.U && mtopiPrioNumReal <= 255.U,
-        (mtopiPrioNumReal > 255.U) || ((mtopiPrioNumReal === 0.U) && iidDefaultPrioLowMEI),
-        (mtopiPrioNumReal === 0.U) && iidDefaultPrioHighMEI,
+        (mtopiPrioNumReal > 255.U) || ((mtopiPrioNumReal === 0.U) && mIidDefaultPrioLowMEI),
+        (mtopiPrioNumReal === 0.U) && mIidDefaultPrioHighMEI,
       ),
       Seq(
         mtopiPrioNumReal(7, 0),
@@ -141,13 +161,13 @@ class InterruptFilter extends Module {
     0.U
   )
   // upadte stopi
-  io.out.stopi.IID := Mux(stopiIsNotZero, iidNum, 0.U)
-  io.out.stopi.IPRIO := Mux(stopiIsNotZero, Mux(ipriosIsZero, 1.U,
+  io.out.stopi.IID := Mux(stopiIsNotZero, hsIidNum, 0.U)
+  io.out.stopi.IPRIO := Mux(stopiIsNotZero, Mux(hsIpriosIsZero, 1.U,
     Mux1H(
       Seq(
         stopiPrioNumReal >= 1.U && stopiPrioNumReal <= 255.U,
-        (stopiPrioNumReal > 255.U) || ((stopiPrioNumReal === 0.U) && iidDefaultPrioLowSEI),
-        (stopiPrioNumReal === 0.U) && iidDefaultPrioHighSEI,
+        (stopiPrioNumReal > 255.U) || ((stopiPrioNumReal === 0.U) && hsIidDefaultPrioLowSEI),
+        (stopiPrioNumReal === 0.U) && hsIidDefaultPrioHighSEI,
       ),
       Seq(
         stopiPrioNumReal(7, 0),
@@ -159,9 +179,9 @@ class InterruptFilter extends Module {
   )
 
   // refactor this code & has some problem
-  val VSCandidate1: Bool = (hideleg.VSEI.asUInt =/= 0.U) && hip.VSEIP.asBool && hie.VSEIE.asBool && (hstatus.VGEIN.asUInt =/= 0.U) && (vstopei.asUInt =/= 0.U)
-  val VSCandidate2: Bool = (hideleg.VSEI.asUInt =/= 0.U) && hip.VSEIP.asBool && hie.VSEIE.asBool && (hstatus.VGEIN.asUInt === 0.U) && (hvictl.IID.asUInt === 9.U) && (hvictl.IPRIO.asUInt =/= 0.U)
-  val VSCandidate3: Bool = (hideleg.VSEI.asUInt =/= 0.U) && hip.VSEIP.asBool && hie.VSEIE.asBool && !VSCandidate1 && !VSCandidate2
+  val VSCandidate1: Bool = hidelegFields.VSEI && hipFields.VSEIP && hieFields.VSEIE.asBool && (hstatus.VGEIN.asUInt =/= 0.U) && (vstopei.asUInt =/= 0.U)
+  val VSCandidate2: Bool = hidelegFields.VSEI && hipFields.VSEIP && hieFields.VSEIE.asBool && (hstatus.VGEIN.asUInt === 0.U) && (hvictl.IID.asUInt === 9.U) && (hvictl.IPRIO.asUInt =/= 0.U)
+  val VSCandidate3: Bool = hidelegFields.VSEI && hipFields.VSEIP && hieFields.VSEIE.asBool && !VSCandidate1 && !VSCandidate2
   val VSCandidate4: Bool = hvictl.VTI.asUInt === 0.U
   val VSCandidate5: Bool = (hvictl.VTI.asUInt === 1.U) && (hvictl.IID.asUInt =/= 9.U)
 
@@ -271,29 +291,54 @@ class InterruptFilter extends Module {
     CandidateNoValid -> 0.U,
   ))
 
-  val ideleg = mideleg.asUInt & mip.asUInt
-  def priviledgeEnableDetect(x: Bool): Bool = Mux(x, ((privState.PRVM === PrivMode.S) && sstatusSIE) || (privState.PRVM < PrivMode.S),
-    ((privState.PRVM === PrivMode.M) && mstatusMIE) || (privState.PRVM < PrivMode.M))
-  val intrVecEnable = Wire(Vec(64, Bool()))
-  intrVecEnable.zip(ideleg.asBools).map { case (x, y) => x := priviledgeEnableDetect(y) } // todo: !disableInterrupt
-  val intrVec = mie.asUInt & mip.asUInt & intrVecEnable.asUInt // todo: Cat(debugIntr && !debugMode, mie.rdata.asUInt(11, 0) & mip.rdata.asUInt & intrVecEnable.asUInt)
+  val mIRVec = Mux(
+    privState.isModeM && mstatusMIE || privState < PrivState.ModeM,
+    mip.asUInt & mie.asUInt & (~(mideleg.asUInt)).asUInt,
+    0.U
+  )
+
+  val hsIRVec = Mux(
+    privState.isModeHS && sstatusSIE || privState < PrivState.ModeHS,
+    hsip & hsie & (~(hideleg.asUInt)).asUInt,
+    0.U
+  )
+
+  val vsIRVec = Mux(
+    privState.isModeVS && vsstatusSIE || privState < PrivState.ModeVS,
+    vsip.asUInt & vsie.asUInt,
+    0.U
+  )
+
+  // todo: support debug interrupt
+  // Cat(debugIntr && !debugMode, mie.rdata.asUInt(11, 0) & mip.rdata.asUInt & intrVecEnable.asUInt)
+  val intrVec = mIRVec | hsIRVec | vsIRVec
 
   io.out.interruptVec.valid := intrVec.orR
   io.out.interruptVec.bits := intrVec
+
+  dontTouch(hsip)
+  dontTouch(hsie)
+  dontTouch(mIRVec)
+  dontTouch(hsIRVec)
+  dontTouch(vsIRVec)
 }
 
 class InterruptFilterIO extends Bundle {
   val in = Input(new Bundle {
+    val privState = new PrivState
     val mstatusMIE  = Bool()
     val sstatusSIE  = Bool()
     val vsstatusSIE = Bool()
-    val mip = new MipBundle
-    val mie = new MieBundle
-    val mideleg = new MidelegBundle
-    val privState = new PrivState
-    val hip = new HipBundle
-    val hie = new HieBundle
-    val hideleg = new HidelegBundle
+    val mip = UInt(64.W)
+    val mie = UInt(64.W)
+    val mideleg = UInt(64.W)
+    val sip = UInt(64.W)
+    val sie = UInt(64.W)
+    val hip = UInt(64.W)
+    val hie = UInt(64.W)
+    val hideleg = UInt(64.W)
+    val vsip = UInt(64.W)
+    val vsie = UInt(64.W)
     val hvictl = new HvictlBundle
     val hstatus = new HstatusBundle
     val mtopei = new TopEIBundle
@@ -301,13 +346,15 @@ class InterruptFilterIO extends Bundle {
     val vstopei = new TopEIBundle
     val hviprio1 = new Hviprio1Bundle
     val hviprio2 = new Hviprio2Bundle
-    val iprios = UInt((64*8).W)
+
+    val miprios = UInt((64*8).W)
+    val hsiprios = UInt((64*8).W)
   })
 
   val out = Output(new Bundle {
     val interruptVec = ValidIO(UInt(64.W))
-    val mtopi = new TopIBundle
-    val stopi = new TopIBundle
+    val mtopi  = new TopIBundle
+    val stopi  = new TopIBundle
     val vstopi = new TopIBundle
   })
 }
