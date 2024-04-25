@@ -11,31 +11,31 @@ import scala.collection.immutable.SeqMap
 
 trait CSRCustom { self: NewCSR =>
   // Supervisor Custom Read/Write
-  val sbpctl = Module(new CSRModule("sbpctl", new SbpctlBundle))
+  val sbpctl = Module(new CSRModule("Sbpctl", new SbpctlBundle))
     .setAddr(0x5C0)
 
-  val spfctl = Module(new CSRModule("spfctl", new SpfctlBundle))
+  val spfctl = Module(new CSRModule("Spfctl", new SpfctlBundle))
     .setAddr(0x5C1)
 
   // slvpredctl: load violation predict settings
   // Default reset period: 2^16
   // why this number: reset more frequently while keeping the overhead low
   // Overhead: extra two redirections in every 64K cycles => ~0.1% overhead
-  val slvpredctl = Module(new CSRModule("slvpredctl", new SlvpredctlBundle))
+  val slvpredctl = Module(new CSRModule("Slvpredctl", new SlvpredctlBundle))
     .setAddr(0x5C2)
 
   // smblockctl: memory block configurations
-  val smblockctl = Module(new CSRModule("smblockctl", new SmblockctlBundle))
+  val smblockctl = Module(new CSRModule("Smblockctl", new SmblockctlBundle))
     .setAddr(0x5C3)
 
-  val srnctl = Module(new CSRModule("srnctl", new SrnctlBundle))
+  val srnctl = Module(new CSRModule("Srnctl", new SrnctlBundle))
     .setAddr(0x5C4)
 
   // sdsid: Differentiated Services ID
-  val sdsid = Module(new CSRModule("sdsid"))
+  val sdsid = Module(new CSRModule("Sdsid"))
     .setAddr(0x9C0)
 
-  val sfetchctl = Module(new CSRModule("sfetchctl", new SfetchctlBundle))
+  val sfetchctl = Module(new CSRModule("Sfetchctl", new SfetchctlBundle))
     .setAddr(0x9E0)
 
   val customCSRMods = Seq(
@@ -94,7 +94,7 @@ class SmblockctlBundle extends CSRBundle {
   val CACHE_ERROR_ENABLE               = RW(   6).withReset(true.B)   // Enable cache error after reset (CE).
   val SOFT_PREFETCH_ENABLE             = RW(   5).withReset(true.B)   // Enable soft-prefetch after reset (SP).
   val LDLD_VIO_CHECK_ENABLE            = RW(   4).withReset(true.B)   // Enable load load violation check after reset (LVC).
-  val SBUFFER_THRESHOLD                = RW(3, 0)// todo:, /*resetVal= */ 7.U) // Store buffer flush threshold (Th).
+  val SBUFFER_THRESHOLD                = SbufferField(3, 0).withReset(SbufferField.Th) // Store buffer flush threshold (Th).
 }
 
 class SrnctlBundle extends CSRBundle {
@@ -105,4 +105,8 @@ class SrnctlBundle extends CSRBundle {
 
 class SfetchctlBundle extends CSRBundle {
   val ICACHE_PARITY_ENABLE = RW(0).withReset(false.B) // L1I Cache Parity check enable
+}
+
+object SbufferField extends CSREnum with RWApply {
+  val Th = Value(7.U)
 }
