@@ -196,10 +196,30 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     val force_write = Input(Bool())
   })
 
+  class STD_CLKGT_func extends BlackBox with HasBlackBoxResource {
+   val io = IO(new Bundle {
+    val TE = Input(Bool())
+    val E  = Input(Bool())
+    val CK = Input(Clock())
+    val Q  = Output(Clock())
+  })
+
+   addResource("/STD_CLKGT_func.v")
+  }
+
   val dataModule = Module(new SbufferData)
   dataModule.io.writeReq <> DontCare
   val prefetcher = Module(new StorePfWrapper())
   val writeReq = dataModule.io.writeReq
+
+  val writeReq_valid = Wire(Vec(EnsbufferWidth, Bool()))
+  writeReq_valid := (0 until EnsbufferWidth).map{ i => writeReq(i).valid}
+  val clkGate = Module(new STD_CLKGT_func)
+   clkGate.io.TE := false.B
+   clkGate.io.E := writeReq_valid.asUInt.orR || (RegNext(writeReq_valid)).asUInt.orR || io.dcache.main_pipe_hit_resp.fire || io.dcache.refill_hit_resp.fire || RegNext(io.dcache.main_pipe_hit_resp.fire || io.dcache.refill_hit_resp.fire)
+   clkGate.io.CK := clock
+  val gate_clock = clkGate.io.Q
+  dataModule.clock := gate_clock
 
   val ptag = Reg(Vec(StoreBufferSize, UInt(PTagWidth.W)))
   val vtag = Reg(Vec(StoreBufferSize, UInt(VTagWidth.W)))
