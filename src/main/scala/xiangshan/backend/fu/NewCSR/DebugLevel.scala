@@ -14,7 +14,7 @@ import xiangshan.backend.fu.NewCSR.CSRFunc._
 import scala.collection.immutable.SeqMap
 
 trait DebugLevel { self: NewCSR =>
-  val tselect = Module(new CSRModule("tselect"))
+  val tselect = Module(new CSRModule("Tselect"))
     .setAddr(0x7A0)
 
 //  val tdata1 = Module(new CSRModule("tdata1", new Tdata1Bundle) {
@@ -22,19 +22,19 @@ trait DebugLevel { self: NewCSR =>
 //    reg.DMODE := (wdata.DMODE.asBool && debugMode).asTypeOf(reg.DMODE)
 //    reg.DATA := Mux(wdata.TYPE.asUInt === Tdata1Type.Mcontrol.asUInt, 0.U, 0.U).asTypeOf(reg.DATA)
 //  })
-  val tdata1 = Module(new CSRModule("tdata1")) // Todo
+  val tdata1 = Module(new CSRModule("Tdata1")) // Todo
     .setAddr(0x7A1)
 
-  val dcsr = Module(new CSRModule("dcsr", new DcsrBundle))
+  val dcsr = Module(new CSRModule("Dcsr", new DcsrBundle))
     .setAddr(0x7B0)
 
-  val dpc = Module(new CSRModule("dpc", new Dpc))
+  val dpc = Module(new CSRModule("Dpc", new Dpc))
     .setAddr(0x7B1)
 
-  val dscratch0 = Module(new CSRModule("dscratch0"))
+  val dscratch0 = Module(new CSRModule("Dscratch0"))
     .setAddr(0x7B2)
 
-  val dscratch1 = Module(new CSRModule("dscratch1"))
+  val dscratch1 = Module(new CSRModule("Dscratch1"))
     .setAddr(0x7B3)
 
   val debugCSRMods = Seq(
