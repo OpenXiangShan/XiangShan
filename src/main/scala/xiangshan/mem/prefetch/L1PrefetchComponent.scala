@@ -118,9 +118,9 @@ trait HasTrainFilterHelper extends HasCircularQueuePtrHelper {
       res
     }else if(source.length == 3) {
       // TODO: generalize
-      val res_0_1 = Wire(source.cloneType)
-      val res_1_2 = Wire(source.cloneType)
-      val res = Wire(source.cloneType)
+      val res_0_1 = Reg(source.cloneType)
+      val res_1_2 = Reg(source.cloneType)
+      val res = Reg(source.cloneType)
 
       val tmp = reorder(VecInit(source.slice(0, 2)))
       res_0_1(0) := tmp(0)

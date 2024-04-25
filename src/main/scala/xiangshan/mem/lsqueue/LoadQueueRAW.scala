@@ -43,6 +43,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
     // from store unit s1
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
+    val storeNuke = Vec(StorePipelineWidth, Output(Bool()))
     val vecStoreIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
 
     // global rollback flush
@@ -260,31 +261,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     val numSelectGroups = scala.math.ceil(valid.length.toFloat / SelectGroupSize).toInt
 
     // group info
-    val selectValidGroups =
-      if (valid.length <= SelectGroupSize) {
-        Seq(valid)
-      } else {
-        (0 until numSelectGroups).map(g => {
-          if (valid.length < (g + 1) * SelectGroupSize) {
-            valid.takeRight(valid.length - g * SelectGroupSize)
-          } else {
-            (0 until SelectGroupSize).map(j => valid(g * SelectGroupSize + j))
-          }
-        })
-      }
-    val selectBitsGroups =
-      if (bits.length <= SelectGroupSize) {
-        Seq(bits)
-      } else {
-        (0 until numSelectGroups).map(g => {
-          if (bits.length < (g + 1) * SelectGroupSize) {
-            bits.takeRight(bits.length - g * SelectGroupSize)
-          } else {
-            (0 until SelectGroupSize).map(j => bits(g * SelectGroupSize + j))
-          }
-        })
-      }
-
+    val selectValidGroups = valid.grouped(SelectGroupSize).toList
+    val selectBitsGroups = bits.grouped(SelectGroupSize).toList
     // select logic
     if (valid.length <= SelectGroupSize) {
       val (selValid, selBits) = selectPartialOldest(valid, bits)
@@ -323,7 +301,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
       wrapper.uop := uop
       wrapper
     })
-
+    io.storeNuke(i) := ParallelORR(lqViolationSelVec)
     // select logic
     val lqSelect = selectOldest(lqViolationSelVec, lqViolationSelUopExts)
 

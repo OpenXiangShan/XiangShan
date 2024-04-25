@@ -124,6 +124,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   val isLoadReplay = Bool()
   val isFastPath = Bool()
   val isFastReplay = Bool()
+  val isMMIO = Bool()
   val replayCarry = new ReplayCarry(nWays)
 
   // For dcache miss load
@@ -186,6 +187,7 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     isLoadReplay := DontCare
     isFastPath := DontCare
     isFastReplay := DontCare
+    isMMIO := DontCare
     handledByMSHR := DontCare
     replacementUpdated := DontCare
     missDbUpdated := DontCare
@@ -238,6 +240,7 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     if(latch) isLoadReplay := RegNext(input.isLoadReplay) else isLoadReplay := input.isLoadReplay
     if(latch) isFastPath := RegNext(input.isFastPath) else isFastPath := input.isFastPath
     if(latch) isFastReplay := RegNext(input.isFastReplay) else isFastReplay := input.isFastReplay
+    if(latch) isMMIO := RegNext(input.isMMIO) else isMMIO := input.isMMIO
     if(latch) mshrid := RegNext(input.mshrid) else mshrid := input.mshrid
     if(latch) forward_tlDchannel := RegNext(input.forward_tlDchannel) else forward_tlDchannel := input.forward_tlDchannel
     if(latch) replayCarry := RegNext(input.replayCarry) else replayCarry := input.replayCarry
@@ -338,14 +341,15 @@ class LoadNukeQueryIO(implicit p: Parameters) extends XSBundle {
 }
 
 class StoreNukeQueryIO(implicit p: Parameters) extends XSBundle {
+  val s1_valid = Output(Bool())
   //  robIdx: Requestor's (a store instruction) rob index for match logic.
-  val robIdx = new RobPtr
-
+  val s1_robIdx = Output(new RobPtr)
   //  paddr: requestor's (a store instruction) physical address for match logic.
-  val paddr  = UInt(PAddrBits.W)
-
+  val s1_paddr  = Output(UInt(PAddrBits.W))
   //  mask: requestor's (a store instruction) data width mask for match logic.
-  val mask = UInt((VLEN/8).W)
+  val s1_mask = Output(UInt((VLEN/8).W))
+  //
+  val s3_nuke = Input(Bool())
 }
 
 // Store byte valid mask write bundle

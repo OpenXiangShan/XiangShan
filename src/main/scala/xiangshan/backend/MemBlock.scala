@@ -167,13 +167,14 @@ class fetch_to_mem(implicit p: Parameters) extends XSBundle{
 
 // triple buffer applied in i-mmio path (two at MemBlock, one at L2Top)
 class InstrUncacheBuffer()(implicit p: Parameters) extends LazyModule with HasInstrMMIOConst {
-  val node = new TLBufferNode(BufferParams.default, BufferParams.default, BufferParams.default, BufferParams.default, BufferParams.default)
+  val bufParam = BufferParams.default
+  val node = new TLBufferNode(bufParam, bufParam, bufParam, bufParam, bufParam)
   lazy val module = new InstrUncacheBufferImpl
 
   class InstrUncacheBufferImpl extends LazyModuleImp(this) {
     (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
-      out.a <> BufferParams.default(BufferParams.default(in.a))
-      in.d <> BufferParams.default(BufferParams.default(out.d))
+      out.a <> bufParam(bufParam(in.a))
+      in.d <> bufParam(bufParam(out.d))
 
       // only a.valid, a.ready, a.address can change
       // hoping that the rest would be optimized to keep MemBlock port unchanged after adding buffer
@@ -321,8 +322,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
 
   val loadUnits = Seq.fill(LduCnt)(Module(new LoadUnit))
-  val storeUnits = Seq.fill(StaCnt)(Module(new StoreUnit))
-  val stdExeUnits = Seq.fill(StdCnt)(Module(new MemExeUnit(backendParams.memSchdParams.get.issueBlockParams.find(_.StdCnt != 0).get.exuBlockParams.head)))
+  val storeUnits = Seq.fill(StaCnt)(Module(new StoreAddrUnit))
+  val stdExeUnits = Seq.fill(StdCnt)(Module(new StoreDataUnit))
   val hybridUnits = Seq.fill(HyuCnt)(Module(new HybridUnit)) // Todo: replace it with HybridUnit
   val stData = stdExeUnits.map(_.io.out)
   val exeUnits = loadUnits ++ storeUnits
@@ -380,7 +381,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
   // load prefetch to l1 Dcache
   l1PrefetcherOpt match {
-    case Some(pf) => l1_pf_req <> Pipeline(in = pf.io.l1_req, depth = 1, pipe = true, name = Some("pf_queue_to_ldu_reg"))
+    case Some(pf) => l1_pf_req <> Pipeline(in = pf.io.l1_req, depth = 1, pipe = false, name = Some("pf_queue_to_ldu_reg"))
     case None =>
       l1_pf_req.valid := false.B
       l1_pf_req.bits := DontCare
@@ -624,7 +625,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val pmp = Module(new PMP())
   pmp.io.distribute_csr <> csrCtrl.distribute_csr
 
-  val pmp_check = VecInit(Seq.fill(LduCnt + HyuCnt + 1 + StaCnt + 1)(Module(new PMPChecker(3)).io))
+  val pmp_check = VecInit(Seq.fill(LduCnt + HyuCnt + 1 + StaCnt + 1)(Module(new PMPChecker(3, leaveHitMux = true)).io))
   for ((p,d) <- pmp_check zip dtlb_pmps) {
     p.apply(tlbcsr.priv.dmode, pmp.io.pmp, pmp.io.pma, d)
     require(p.req.bits.size.getWidth == d.bits.size.getWidth)
@@ -710,7 +711,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // st-ld violation query
     val stld_nuke_query = storeUnits.map(_.io.stld_nuke_query) ++ hybridUnits.map(_.io.stu_io.stld_nuke_query)
     for (s <- 0 until StorePipelineWidth) {
-      loadUnits(i).io.stld_nuke_query(s) := stld_nuke_query(s)
+      loadUnits(i).io.stld_nuke_query(s).s1_valid := stld_nuke_query(s).s1_valid
+      loadUnits(i).io.stld_nuke_query(s).s1_robIdx := stld_nuke_query(s).s1_robIdx
+      loadUnits(i).io.stld_nuke_query(s).s1_paddr := stld_nuke_query(s).s1_paddr
+      loadUnits(i).io.stld_nuke_query(s).s1_mask := stld_nuke_query(s).s1_mask
     }
     loadUnits(i).io.lq_rep_full <> lsq.io.lq_rep_full
     // load prefetch train
@@ -844,6 +848,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val stld_nuke_query = VecInit(storeUnits.map(_.io.stld_nuke_query) ++ hybridUnits.map(_.io.stu_io.stld_nuke_query))
     hybridUnits(i).io.ldu_io.stld_nuke_query := stld_nuke_query
     hybridUnits(i).io.ldu_io.lq_rep_full <> lsq.io.lq_rep_full
+    hybridUnits(i).io.stu_io.stld_nuke_query.s3_nuke := RegNext(lsq.io.sta.storeNuke.drop(StaCnt)(i))
     // load prefetch train
     prefetcherOpt.foreach(pf => {
       val source = hybridUnits(i).io.prefetch_train
@@ -989,10 +994,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   // StoreUnit
   for (i <- 0 until StdCnt) {
-    stdExeUnits(i).io.flush <> redirect
-    stdExeUnits(i).io.in.valid := io.ooo_to_mem.issueStd(i).valid
-    io.ooo_to_mem.issueStd(i).ready := stdExeUnits(i).io.in.ready
-    stdExeUnits(i).io.in.bits := io.ooo_to_mem.issueStd(i).bits
+    stdExeUnits(i).io.redirect <> redirect
+    stdExeUnits(i).io.in <> io.ooo_to_mem.issueStd(i)
   }
 
   for (i <- 0 until StaCnt) {
@@ -1008,6 +1011,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // dtlb
     stu.io.tlb          <> dtlb_st.head.requestor(i)
     stu.io.pmp          <> pmp_check(LduCnt + HyuCnt + 1 + i).resp
+
+    stu.io.stld_nuke_query.s3_nuke := RegNext(lsq.io.sta.storeNuke.take(StaCnt)(i))
 
     // prefetch
     stu.io.prefetch_req <> sbuffer.io.store_prefetch(i)
@@ -1302,14 +1307,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   for (i <- 0 until StaCnt) when(st_atomics(i)) {
     io.ooo_to_mem.issueSta(i).ready := atomicsUnit.io.in.ready
-    storeUnits(i).io.stin.valid := false.B
 
     state := s_atomics(i)
     assert(!st_atomics.zipWithIndex.filterNot(_._2 == i).unzip._1.reduce(_ || _))
   }
   for (i <- 0 until HyuCnt) when(st_atomics(StaCnt + i)) {
     io.ooo_to_mem.issueHya(i).ready := atomicsUnit.io.in.ready
-    hybridUnits(i).io.lsin.valid := false.B
 
     state := s_atomics(StaCnt + i)
     assert(!st_atomics.zipWithIndex.filterNot(_._2 == StaCnt + i).unzip._1.reduce(_ || _))

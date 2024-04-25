@@ -350,7 +350,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   val s2_instrtype = s2_req.instrtype
 
-  val s2_tag_error = dcacheParameters.tagCode.decode(s2_encTag).error // error reported by tag ecc check
+  val s2_tag_error = WireInit(false.B)
   val s2_flag_error = RegEnable(s1_flag_error, s1_fire)
 
   val s2_hit_prefetch = RegEnable(s1_hit_prefetch, s1_fire)
@@ -365,6 +365,12 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   dump_pipeline_valids("LoadPipe s2", "s2_nack_no_mshr", s2_valid && s2_nack_no_mshr)
 
   val s2_can_send_miss_req = RegEnable(s1_will_send_miss_req, s1_fire)
+
+  if(EnableTagEcc) {
+    s2_tag_error := dcacheParameters.tagCode.decode(s2_encTag).error // error reported by tag ecc check
+  }else {
+    s2_tag_error := false.B
+  }
 
   // send load miss to miss queue
   io.miss_req.valid := s2_valid && s2_can_send_miss_req
