@@ -443,12 +443,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f2_hasHalfValid   =  preDecoderOut.hasHalfValid
   val f2_crossPageFault = VecInit((0 until PredictWidth).map(i => isLastInLine(f2_pc(i)) && !f2_except_pf(0) && f2_doubleLine &&  f2_except_pf(1) && !f2_pd(i).isRVC ))
   val f2_crossGuestPageFault = VecInit((0 until PredictWidth).map(i => isLastInLine(f2_pc(i)) && !f2_except_gpf(0) && f2_doubleLine && f2_except_gpf(1) && !f2_pd(i).isRVC ))
-  val f2_gpaddrs_vec = VecInit((0 until PredictWidth).map(i => 
-    if(i != PredictWidth-1) 
-      Mux(f2_crossGuestPageFault(i), f2_gpaddrs_tmp(i + 1), f2_gpaddrs_tmp(i)) 
-    else
-      f2_gpaddrs_tmp(i)
-    ))
   XSPerfAccumulate("fetch_bubble_icache_not_resp",   f2_valid && !icacheRespAllValid )
 
 
@@ -495,7 +489,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_af_vec         = RegEnable(f2_af_vec,      f2_fire)
   val f3_pf_vec         = RegEnable(f2_pf_vec ,     f2_fire)
   val f3_gpf_vec        = RegEnable(f2_gpf_vec,     f2_fire)
-  val f3_gpaddr_vec     = RegEnable(f2_gpaddrs_vec, f2_fire)
   val f3_pc             = RegEnable(f2_pc,          f2_fire)
   val f3_half_snpc      = RegEnable(f2_half_snpc,   f2_fire)
   val f3_instr_range    = RegEnable(f2_instr_range, f2_fire)
@@ -754,7 +747,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
   io.toIbuffer.bits.pd          := f3_pd
   io.toIbuffer.bits.ftqPtr      := f3_ftq_req.ftqIdx
   io.toIbuffer.bits.pc          := f3_pc
-  io.toIbuffer.bits.gpaddr      := f3_gpaddr_vec
   io.toIbuffer.bits.ftqOffset.zipWithIndex.map{case(a, i) => a.bits := i.U; a.valid := checkerOutStage1.fixedTaken(i) && !f3_req_is_mmio}
   io.toIbuffer.bits.foldpc      := f3_foldpc
   io.toIbuffer.bits.ipf         := VecInit(f3_pf_vec.zip(f3_crossPageFault).map{case (pf, crossPF) => pf || crossPF})
@@ -769,9 +761,16 @@ class NewIFU(implicit p: Parameters) extends XSModule
   }
 
   /** to backend */
+  val f3_gpaddrsFix = VecInit((0 until PortNumber).map(i => 
+    if(i == 0) 
+      Mux(f3_crossGuestPageFault(i), f3_gpaddrs(i + 1), f3_gpaddrs(i)) 
+    else
+      f3_gpaddrs(i)
+    ))
+
   io.toBackend.gpaddrMem_wen   := f3_valid && (!f3_req_is_mmio || f3_mmio_can_go) && !f3_flush // same as toIbuffer
   io.toBackend.gpaddrMem_waddr := f3_ftq_req.ftqIdx.value
-  io.toBackend.gpaddrMem_wdata := f3_gpaddrs
+  io.toBackend.gpaddrMem_wdata := f3_gpaddrsFix
 
 
   //Write back to Ftq
