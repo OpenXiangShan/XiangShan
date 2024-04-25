@@ -211,7 +211,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   csrOut.trapTarget := csrMod.io.out.targetPc
   csrOut.interrupt := csrMod.io.out.interrupt
-  csrOut.wfi_event := csrMod.io.out.wfi_event
+  csrOut.wfi_event := csrMod.io.out.wfiEvent
 
   csrOut.tlb := tlb
 
