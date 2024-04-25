@@ -20,16 +20,17 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
+import xiangshan.backend.rename._
 import utils._
 import utility._
 
 
-class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) with HasPerfEvents {
+class StdFreeList(freeListSize: Int, numLogicRegs: Int, regType: RegType)(implicit p: Parameters) extends BaseFreeList(freeListSize) with HasPerfEvents {
 
-  val freeList = RegInit(VecInit(Seq.tabulate(size)( i => (i + FpLogicRegs + VecLogicRegs).U(PhyRegIdxWidth.W) )))
+  val freeList = RegInit(VecInit(Seq.tabulate(freeListSize)( i => (i + numLogicRegs).U(PhyRegIdxWidth.W) )))
   val lastTailPtr = RegInit(FreeListPtr(true, 0)) // tailPtr in the last cycle (need to add freeReqReg)
   val tailPtr = Wire(new FreeListPtr) // this is the real tailPtr
-  val tailPtrOHReg = RegInit(0.U(size.W))
+  val tailPtrOHReg = RegInit(0.U(freeListSize.W))
 
   //
   // free committed instructions' `old_pdest` reg
@@ -65,7 +66,12 @@ class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) 
     XSDebug(p"req:${io.allocateReq(i)} canAllocate:${io.canAllocate} pdest:${io.allocatePhyReg(i)}\n")
   }
   val doCommit = io.commit.isCommit
-  val archAlloc = io.commit.commitValid zip io.commit.info map { case (valid, info) => valid && (info.fpWen || info.vecWen) }
+  val archAlloc = io.commit.commitValid zip io.commit.info map { case (valid, info) =>
+    valid && (regType match {
+      case Reg_F => info.fpWen
+      case Reg_V => info.vecWen
+    })
+  }
   val numArchAllocate = PopCount(archAlloc)
   val archHeadPtrNew  = archHeadPtr + numArchAllocate
   val archHeadPtrNext = Mux(doCommit, archHeadPtrNew, archHeadPtr)
@@ -89,12 +95,12 @@ class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) 
 
   XSDebug(p"head:$headPtr tail:$tailPtr\n")
 
-  XSError(!isFull(tailPtr, archHeadPtr), "fpArchFreeList should always be full\n")
+  XSError(!isFull(tailPtr, archHeadPtr), s"${regType}ArchFreeList should always be full\n")
 
   val enableFreeListCheck = false
   if (enableFreeListCheck) {
-    for (i <- 0 until size) {
-      for (j <- i+1 until size) {
+    for (i <- 0 until freeListSize) {
+      for (j <- i+1 until freeListSize) {
         XSError(freeList(i) === freeList(j), s"Found same entry in free list! (i=$i j=$j)\n")
       }
     }
@@ -106,13 +112,13 @@ class StdFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) 
 
   val freeRegCntReg = RegNext(freeRegCnt)
   val perfEvents = Seq(
-    ("std_freelist_1_4_valid", freeRegCntReg <  (size / 4).U                                    ),
-    ("std_freelist_2_4_valid", freeRegCntReg >= (size / 4).U && freeRegCntReg < (size / 2).U    ),
-    ("std_freelist_3_4_valid", freeRegCntReg >= (size / 2).U && freeRegCntReg < (size * 3 / 4).U),
-    ("std_freelist_4_4_valid", freeRegCntReg >= (size * 3 / 4).U                                )
+    ("std_freelist_1_4_valid", freeRegCntReg <  (freeListSize / 4).U                                    ),
+    ("std_freelist_2_4_valid", freeRegCntReg >= (freeListSize / 4).U && freeRegCntReg < (freeListSize / 2).U    ),
+    ("std_freelist_3_4_valid", freeRegCntReg >= (freeListSize / 2).U && freeRegCntReg < (freeListSize * 3 / 4).U),
+    ("std_freelist_4_4_valid", freeRegCntReg >= (freeListSize * 3 / 4).U                                )
   )
 
-  QueuePerf(size = size, utilization = freeRegCntReg, full = freeRegCntReg === 0.U)
+  QueuePerf(size = freeListSize, utilization = freeRegCntReg, full = freeRegCntReg === 0.U)
 
   generatePerfEvent()
 }
