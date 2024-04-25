@@ -86,7 +86,7 @@ override SIM_ARGS += --with-rollingdb
 endif
 
 # run with disable all db
-ifeq ($(WITH_DISABLEDB),1)
+ifeq ($(DISABLE_ALWAYSDB),1)
 override SIM_ARGS += --disable-alwaysdb
 endif
 
