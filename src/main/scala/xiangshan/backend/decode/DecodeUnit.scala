@@ -815,10 +815,11 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     val isNarrow = narrowInsts.map(_ === inst.ALL).reduce(_ || _)
     val isDstMask = maskDstInsts.map(_ === inst.ALL).reduce(_ || _)
     val isOpMask = maskOpInsts.map(_ === inst.ALL).reduce(_ || _)
+    val isVlx = decodedInst.fuOpType === VlduType.vloxe || decodedInst.fuOpType === VlduType.vluxe
     decodedInst.vpu.isNarrow := isNarrow
     decodedInst.vpu.isDstMask := isDstMask
     decodedInst.vpu.isOpMask := isOpMask
-    decodedInst.vpu.isDependOldvd := isVppu || isVecOPF || isVStore || (isDstMask && !isOpMask) || isNarrow
+    decodedInst.vpu.isDependOldvd := isVppu || isVecOPF || isVStore || (isDstMask && !isOpMask) || isNarrow || isVlx
   }
 
   decodedInst.vlsInstr := isVls
