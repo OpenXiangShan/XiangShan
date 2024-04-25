@@ -171,7 +171,10 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   // tlb
   val tlb = Wire(new TlbCsrBundle)
-  tlb.satp.apply(csrMod.io.tlb.satp)
+  tlb.satp.changed := csrMod.io.tlb.satpASIDChanged
+  tlb.satp.mode := csrMod.io.tlb.satp.MODE
+  tlb.satp.asid := csrMod.io.tlb.satp.ASID
+  tlb.satp.ppn := csrMod.io.tlb.satp.PPN
   // expose several csr bits for tlb
   tlb.priv.mxr := csrMod.io.tlb.mxr
   tlb.priv.sum := csrMod.io.tlb.sum

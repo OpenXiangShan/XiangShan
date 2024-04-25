@@ -452,6 +452,7 @@ class SatpStruct(implicit p: Parameters) extends XSBundle {
 class TlbSatpBundle(implicit p: Parameters) extends SatpStruct {
   val changed = Bool()
 
+  // Todo: remove it
   def apply(satp_value: UInt): Unit = {
     require(satp_value.getWidth == XLEN)
     val sa = satp_value.asTypeOf(new SatpStruct)
