@@ -15,7 +15,7 @@ class CSRPermitModule extends Module {
     io.in.privState
   )
 
-  private val csrAccess = ren || wen
+  private val csrAccess = WireInit(ren || wen)
 
   private val (mret, sret) = (
     io.in.mret,
@@ -46,9 +46,9 @@ class CSRPermitModule extends Module {
     accessTable
   ).asBool
 
-  private val rwLegal = csrIsRO && wen
+  private val rwIllegal = csrIsRO && wen
 
-  private val csrAccessIllegal = (!privilegeLegal || !rwLegal)
+  private val csrAccessIllegal = (!privilegeLegal || rwIllegal)
 
   private val mretIllegal = !privState.isModeM
 
@@ -57,6 +57,10 @@ class CSRPermitModule extends Module {
   )
 
   io.out.illegal := csrAccess && csrAccessIllegal || mret && mretIllegal || sret && sretIllegal
+
+  // Todo: check correct
+  io.out.EX_II := io.out.illegal && !privState.isVirtual
+  io.out.EX_VI := io.out.illegal && privState.isVirtual
 
   io.out.hasLegalWen := io.in.csrAccess.wen && !csrAccessIllegal
   io.out.hasLegalMret := mret && !mretIllegal
@@ -87,5 +91,7 @@ class CSRPermitIO extends Bundle {
     val hasLegalSret = Bool()
     // Todo: split illegal into EX_II and EX_VI
     val illegal = Bool()
+    val EX_II = Bool()
+    val EX_VI = Bool()
   })
 }
