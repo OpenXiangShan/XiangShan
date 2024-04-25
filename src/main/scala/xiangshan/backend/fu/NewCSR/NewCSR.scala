@@ -468,6 +468,14 @@ class NewCSR(implicit val p: Parameters) extends Module
     }
   )
 
+  debugMode := MuxCase(
+    debugMode,
+    Seq(
+      dretEvent.out.debugMode.valid -> dretEvent.out.debugMode.bits
+    )
+  )
+
+
   // perf
   val addrInPerfCnt = (addr >= CSRs.mcycle.U) && (addr <= CSRs.mhpmcounter31.U) ||
     (addr >= mcountinhibit.addr.U) && (addr <= mhpmevents.last.addr.U) ||
@@ -491,7 +499,6 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   // debug
   val debugIntrEnable = RegInit(true.B) // debug interrupt will be handle only when debugIntrEnable
-  debugMode := dretEvent.out.debugMode
   debugIntrEnable := dretEvent.out.debugIntrEnable
   val debugIntr = platformIRP.debugIP && debugIntrEnable
 

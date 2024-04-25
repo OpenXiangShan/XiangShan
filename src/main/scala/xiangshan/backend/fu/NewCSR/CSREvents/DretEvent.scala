@@ -10,7 +10,7 @@ import xiangshan.backend.fu.NewCSR._
 class DretEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase {
   val dcsr = ValidIO((new DcsrBundle).addInEvent(_.V, _.PRV))
   val mstatus = ValidIO((new MstatusBundle).addInEvent(_.MPRV))
-  val debugMode = Bool()
+  val debugMode = ValidIO(Bool())
   val debugIntrEnable = Bool()
   val targetPc = ValidIO(UInt(VaddrMaxWidth.W))
 
@@ -34,6 +34,7 @@ class DretEventModule extends Module with CSREventBase {
 
   out := DontCare
 
+  out.debugMode.valid := valid
   out.privState.valid := valid
   out.dcsr.valid      := valid
   out.mstatus.valid   := valid
