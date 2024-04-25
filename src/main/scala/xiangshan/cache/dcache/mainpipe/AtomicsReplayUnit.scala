@@ -26,7 +26,7 @@ class AtomicsReplayEntry(implicit p: Parameters) extends DCacheModule
   val io = IO(new Bundle {
     val lsu  = Flipped(new AtomicWordIO)
     val pipe_req  = Decoupled(new MainPipeReq)
-    val pipe_resp = Flipped(ValidIO(new AtomicsResp))
+    val pipe_resp = Flipped(ValidIO(new MainPipeResp))
     val block_lr = Input(Bool())
 
     val block_addr  = Output(Valid(UInt()))

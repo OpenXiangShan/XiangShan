@@ -41,7 +41,6 @@ class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   val cmd = UInt(M_SZ.W)
   val addr = UInt(PAddrBits.W)
   val vaddr = UInt(VAddrBits.W)
-  val way_en = UInt(DCacheWays.W)
   val pc = UInt(VAddrBits.W)
 
   val lqIdx = new LqPtr
@@ -54,11 +53,7 @@ class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   val amo_mask = UInt((DataBits / 8).W)
 
   val req_coh = new ClientMetadata
-  val replace_coh = new ClientMetadata
-  val replace_tag = UInt(tagBits.W)
   val id = UInt(reqIdWidth.W)
-
-  val replace_pf = UInt(L1PfSourceBits.W)
 
   // For now, miss queue entry req is actually valid when req.valid && !cancel
   // * req.valid is fast to generate
@@ -89,6 +84,12 @@ class MissReqStoreData(implicit p: Parameters) extends DCacheBundle {
   val store_mask = UInt(cfg.blockBytes.W)
 }
 
+class MissQueueRefillInfo(implicit p: Parameters) extends MissReqStoreData {
+  // refill_info for mainpipe req awake
+  val miss_param = UInt(TLPermissions.bdWidth.W)
+  val miss_dirty = Bool()
+}
+
 class MissReq(implicit p: Parameters) extends MissReqWoStoreData {
   // store data and store mask will be written to miss queue entry
   // 1 cycle after req.fire() and meta write
@@ -105,19 +106,15 @@ class MissReq(implicit p: Parameters) extends MissReqWoStoreData {
   def toMissReqWoStoreData(): MissReqWoStoreData = {
     val out = Wire(new MissReqWoStoreData)
     out.source := source
-    out.replace_pf := replace_pf
     out.pf_source := pf_source
     out.cmd := cmd
     out.addr := addr
     out.vaddr := vaddr
-    out.way_en := way_en
     out.full_overwrite := full_overwrite
     out.word_idx := word_idx
     out.amo_data := amo_data
     out.amo_mask := amo_mask
     out.req_coh := req_coh
-    out.replace_coh := replace_coh
-    out.replace_tag := replace_tag
     out.id := id
     out.cancel := cancel
     out.pc := pc
@@ -133,7 +130,6 @@ class MissResp(implicit p: Parameters) extends DCacheBundle {
   // cache req missed, merged into one of miss queue entries
   // i.e. !miss_merged means this access is the first miss for this cacheline
   val merged = Bool()
-  val repl_way_en = UInt(DCacheWays.W)
 }
 
 
@@ -182,14 +178,10 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
     val merge_store = (req.isFromLoad || req.isFromPrefetch) && new_req.isFromStore
 
     val set_match = addr_to_dcache_set(req.vaddr) === addr_to_dcache_set(new_req.vaddr)
-    val way_match = req.way_en === new_req.way_en
+
     Mux(
         alloc,
-        Mux(
-            block_match,
-            !alias_match || !(merge_load || merge_store),
-            set_match && way_match
-          ),
+        block_match && (!alias_match || !(merge_load || merge_store)),
         false.B
       )
   }
@@ -301,41 +293,32 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     // this entry is busy and it can not merge the new req
     val secondary_reject = Output(Bool())
     // way selected for replacing, used to support plru update
-    val repl_way_en = Output(UInt(DCacheWays.W))
     // bus
     val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
     val mem_grant = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
     val mem_finish = DecoupledIO(new TLBundleE(edge.bundle))
 
-    // send refill info to load queue
+    // send refill info to load queue, useless now
     val refill_to_ldq = ValidIO(new Refill)
 
-    // refill pipe
-    val refill_pipe_req = DecoupledIO(new RefillPipeReq)
-    val refill_pipe_resp = Input(Bool())
-
     // replace pipe
-    val replace_pipe_req = DecoupledIO(new MainPipeReq)
-    val replace_pipe_resp = Input(Bool())
+    val l2_hint = Input(Valid(new L2ToL1Hint())) // Hint from L2 Cache
 
     // main pipe: amo miss
     val main_pipe_req = DecoupledIO(new MainPipeReq)
     val main_pipe_resp = Input(Bool())
+    val main_pipe_refill_resp = Input(Bool())
+    val main_pipe_replay = Input(Bool())
+
+    // for main pipe s2
+    val refill_info = ValidIO(new MissQueueRefillInfo)
 
     val block_addr = ValidIO(UInt(PAddrBits.W))
-
-    val debug_early_replace = ValidIO(new Bundle() {
-      // info about the block that has been replaced
-      val idx = UInt(idxBits.W) // vaddr
-      val tag = UInt(tagBits.W) // paddr
-    })
 
     val req_handled_by_this_entry = Output(Bool())
 
     val forwardInfo = Output(new MissEntryForwardIO)
     val l2_pf_store_only = Input(Bool())
-
-    val sms_agt_evict_req = ValidIO(new AGTEvictReq)
 
     // whether the pipeline reg has send out an acquire
     val acquire_fired_by_pipe_reg = Input(Bool())
@@ -386,17 +369,17 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
   val s_acquire = RegInit(true.B)
   val s_grantack = RegInit(true.B)
-  val s_replace_req = RegInit(true.B)
-  val s_refill = RegInit(true.B)
   val s_mainpipe_req = RegInit(true.B)
 
   val w_grantfirst = RegInit(true.B)
   val w_grantlast = RegInit(true.B)
-  val w_replace_resp = RegInit(true.B)
-  val w_refill_resp = RegInit(true.B)
   val w_mainpipe_resp = RegInit(true.B)
+  val w_refill_resp = RegInit(true.B)
+  val w_l2hint = RegInit(true.B)
 
-  val release_entry = s_grantack && w_refill_resp && w_mainpipe_resp
+  val mainpipe_req_fired = RegInit(true.B)
+
+  val release_entry = s_grantack && w_mainpipe_resp && w_refill_resp
 
   val acquire_not_sent = !s_acquire && !io.mem_acquire.ready
   val data_not_refilled = !w_grantfirst
@@ -410,7 +393,6 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
   val should_replace = RegInit(false.B)
 
-  // val full_overwrite = req.isFromStore && req_store_mask.andR
   val full_overwrite = Reg(Bool())
 
   val (_, _, refill_done, refill_count) = edge.count(io.mem_grant)
@@ -456,9 +438,12 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
     s_acquire := io.acquire_fired_by_pipe_reg
     s_grantack := false.B
+    s_mainpipe_req := false.B
 
     w_grantfirst := false.B
     w_grantlast := false.B
+    w_l2hint := false.B
+    mainpipe_req_fired := false.B
 
     when(miss_req_pipe_reg_bits.isFromStore) {
       req_store_mask := miss_req_pipe_reg_bits.store_mask
@@ -469,20 +454,10 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     full_overwrite := miss_req_pipe_reg_bits.isFromStore && miss_req_pipe_reg_bits.full_overwrite
 
     when (!miss_req_pipe_reg_bits.isFromAMO) {
-      s_refill := false.B
       w_refill_resp := false.B
     }
 
-    when (!miss_req_pipe_reg_bits.hit && miss_req_pipe_reg_bits.replace_coh.isValid() && !miss_req_pipe_reg_bits.isFromAMO) {
-      s_replace_req := false.B
-      w_replace_resp := false.B
-      should_replace := true.B
-    }.otherwise {
-      should_replace := false.B
-    }
-
     when (miss_req_pipe_reg_bits.isFromAMO) {
-      s_mainpipe_req := false.B
       w_mainpipe_resp := false.B
     }
 
@@ -509,9 +484,6 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     when (miss_req_pipe_reg_bits.isFromStore) {
       req := miss_req_pipe_reg_bits
       req.addr := get_block_addr(miss_req_pipe_reg_bits.addr)
-      req.way_en := req.way_en
-      req.replace_coh := req.replace_coh
-      req.replace_tag := req.replace_tag
       req_store_mask := miss_req_pipe_reg_bits.store_mask
       for (i <- 0 until blockRows) {
         refill_and_store_data(i) := miss_req_pipe_reg_bits.store_data(rowBits * (i + 1) - 1, rowBits * i)
@@ -590,28 +562,25 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     s_grantack := true.B
   }
 
-  when (io.replace_pipe_req.fire) {
-    s_replace_req := true.B
-  }
-
-  when (io.replace_pipe_resp) {
-    w_replace_resp := true.B
-  }
-
-  when (io.refill_pipe_req.fire) {
-    s_refill := true.B
-  }
-
-  when (io.refill_pipe_resp) {
-    w_refill_resp := true.B
-  }
-
   when (io.main_pipe_req.fire) {
     s_mainpipe_req := true.B
+    mainpipe_req_fired := true.B
+  }
+
+  when (io.main_pipe_replay) {
+    s_mainpipe_req := false.B
   }
 
   when (io.main_pipe_resp) {
     w_mainpipe_resp := true.B
+  }
+
+  when(io.main_pipe_refill_resp) {
+    w_refill_resp := true.B
+  }
+
+  when (io.l2_hint.valid) {
+    w_l2hint := true.B
   }
 
   def before_req_sent_can_merge(new_req: MissReqWoStoreData): Bool = {
@@ -659,11 +628,10 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     val set_match = set === addr_to_dcache_set(new_req.vaddr)
     val alias_match = is_alias_match(req.vaddr, new_req.vaddr)
 
-    req_valid &&
-      Mux(
+    req_valid && Mux(
         block_match,
         (!before_req_sent_can_merge(new_req) && !before_data_refill_can_merge(new_req)) || !alias_match,
-        set_match && new_req.way_en === req.way_en
+        false.B
       )
   }
 
@@ -677,8 +645,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   }
   io.secondary_ready := should_merge(io.req.bits)
   io.secondary_reject := should_reject(io.req.bits)
-  io.repl_way_en := req.way_en
-
+  
   // should not allocate, merge or reject at the same time
   assert(RegNext(PopCount(Seq(io.primary_ready, io.secondary_ready, io.secondary_reject)) <= 1.U || !io.req.valid))
 
@@ -746,85 +713,36 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   io.mem_finish.valid := !s_grantack && w_grantfirst
   io.mem_finish.bits := grantack
 
-  io.replace_pipe_req.valid := !s_replace_req
-  val replace = io.replace_pipe_req.bits
-  replace := DontCare
-  replace.miss := false.B
-  replace.miss_id := io.id
-  replace.miss_dirty := false.B
-  replace.probe := false.B
-  replace.probe_need_data := false.B
-  replace.source := LOAD_SOURCE.U
-  replace.vaddr := req.vaddr // only untag bits are needed
-  replace.addr := Cat(req.replace_tag, 0.U(pgUntagBits.W)) // only tag bits are needed
-  replace.store_mask := 0.U
-  replace.replace := true.B
-  replace.replace_way_en := req.way_en
-  replace.error := false.B
-
-  io.refill_pipe_req.valid := !s_refill && w_replace_resp && w_grantlast
-  val refill = io.refill_pipe_req.bits
-  refill.source := req.source
-  refill.vaddr := req.vaddr
-  refill.addr := req.addr
-  refill.way_en := req.way_en
-  refill.wmask := Mux(
-    hasData || req.isFromLoad,
-    ~0.U(DCacheBanks.W),
-    VecInit((0 until DCacheBanks).map(i => get_mask_of_bank(i, req_store_mask).orR)).asUInt
-  )
-  refill.data := refill_and_store_data.asTypeOf((new RefillPipeReq).data)
-  refill.miss_id := io.id
-  refill.id := req.id
-  def missCohGen(cmd: UInt, param: UInt, dirty: Bool) = {
-    val c = categorize(cmd)
-    MuxLookup(Cat(c, param, dirty), Nothing)(Seq(
-      //(effect param) -> (next)
-      Cat(rd, toB, false.B)  -> Branch,
-      Cat(rd, toB, true.B)   -> Branch,
-      Cat(rd, toT, false.B)  -> Trunk,
-      Cat(rd, toT, true.B)   -> Dirty,
-      Cat(wi, toT, false.B)  -> Trunk,
-      Cat(wi, toT, true.B)   -> Dirty,
-      Cat(wr, toT, false.B)  -> Dirty,
-      Cat(wr, toT, true.B)   -> Dirty).toSeq)
-  }
-  refill.meta.coh := ClientMetadata(missCohGen(req.cmd, grant_param, isDirty))
-  refill.error := error
-  refill.prefetch := req.pf_source
-  refill.access := access
-  refill.alias := req.vaddr(13, 12) // TODO
-  assert(!io.refill_pipe_req.valid || (refill.meta.coh =/= ClientMetadata(Nothing)), "refill modifies meta to Nothing, should not happen")
-
-  io.sms_agt_evict_req.valid := io.refill_pipe_req.fire && should_replace && req_valid
-  io.sms_agt_evict_req.bits.vaddr := Cat(req.replace_tag(tagBits - 1, 2), req.vaddr(13, 12), 0.U((VAddrBits - tagBits).W))
-
-  io.main_pipe_req.valid := !s_mainpipe_req && w_grantlast
+  // Send mainpipe_req when receive hint from L2 or receive data without hint
+  io.main_pipe_req.valid := !s_mainpipe_req && (w_l2hint || w_grantlast)
   io.main_pipe_req.bits := DontCare
   io.main_pipe_req.bits.miss := true.B
   io.main_pipe_req.bits.miss_id := io.id
-  io.main_pipe_req.bits.miss_param := grant_param
-  io.main_pipe_req.bits.miss_dirty := isDirty
-  io.main_pipe_req.bits.miss_way_en := req.way_en
   io.main_pipe_req.bits.probe := false.B
   io.main_pipe_req.bits.source := req.source
   io.main_pipe_req.bits.cmd := req.cmd
   io.main_pipe_req.bits.vaddr := req.vaddr
   io.main_pipe_req.bits.addr := req.addr
-  io.main_pipe_req.bits.store_data := refill_and_store_data.asUInt
-  io.main_pipe_req.bits.store_mask := ~0.U(blockBytes.W)
   io.main_pipe_req.bits.word_idx := req.word_idx
   io.main_pipe_req.bits.amo_data := req.amo_data
   io.main_pipe_req.bits.amo_mask := req.amo_mask
   io.main_pipe_req.bits.error := error
   io.main_pipe_req.bits.id := req.id
+  io.main_pipe_req.bits.pf_source := req.pf_source
+  io.main_pipe_req.bits.access := access
 
-  io.block_addr.valid := req_valid && w_grantlast && !w_refill_resp
+  io.block_addr.valid := req_valid && w_grantlast 
   io.block_addr.bits := req.addr
 
-  io.debug_early_replace.valid := BoolStopWatch(io.replace_pipe_resp, io.refill_pipe_req.fire)
-  io.debug_early_replace.bits.idx := addr_to_dcache_set(req.vaddr)
-  io.debug_early_replace.bits.tag := req.replace_tag
+  io.refill_info.valid := w_grantlast
+  io.refill_info.bits.store_data := refill_and_store_data.asUInt
+  io.refill_info.bits.store_mask := ~0.U(blockBytes.W)
+  io.refill_info.bits.miss_param := grant_param
+  io.refill_info.bits.miss_dirty := isDirty
+
+  XSPerfAccumulate("miss_refill_mainpipe_req", io.main_pipe_req.fire)
+  XSPerfAccumulate("miss_refill_without_hint", io.main_pipe_req.fire && !mainpipe_req_fired && !w_l2hint)
+  XSPerfAccumulate("miss_refill_replay", io.main_pipe_replay)
 
   val w_grantfirst_forward_info = Mux(isKeyword, w_grantlast, w_grantfirst)
   val w_grantlast_forward_info = Mux(isKeyword, w_grantfirst, w_grantlast)
@@ -850,11 +768,13 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     should_refill_data &&
       BoolStopWatch(primary_fire, io.refill_to_ldq.valid, true)
   )
+  XSPerfAccumulate("penalty_between_grantlast_and_release",
+    BoolStopWatch(!RegNext(w_grantlast) && w_grantlast, release_entry, true)
+  )
   XSPerfAccumulate("main_pipe_penalty", BoolStopWatch(io.main_pipe_req.fire, io.main_pipe_resp))
   XSPerfAccumulate("penalty_blocked_by_channel_A", io.mem_acquire.valid && !io.mem_acquire.ready)
   XSPerfAccumulate("penalty_waiting_for_channel_D", s_acquire && !w_grantlast && !io.mem_grant.valid)
   XSPerfAccumulate("penalty_waiting_for_channel_E", io.mem_finish.valid && !io.mem_finish.ready)
-  XSPerfAccumulate("penalty_from_grant_to_refill", !w_refill_resp && w_grantlast)
   XSPerfAccumulate("prefetch_req_primary", primary_fire && io.req.bits.source === DCACHE_PREFETCH_SOURCE.U)
   XSPerfAccumulate("prefetch_req_merged", secondary_fire && io.req.bits.source === DCACHE_PREFETCH_SOURCE.U)
   XSPerfAccumulate("can_not_send_acquire_because_of_merging_store", !s_acquire && io.miss_req_pipe_reg.merge && miss_req_pipe_reg_bits.isFromStore)
@@ -887,32 +807,19 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     val mem_grant = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
     val mem_finish = DecoupledIO(new TLBundleE(edge.bundle))
 
-    val refill_pipe_req = DecoupledIO(new RefillPipeReq)
-    val refill_pipe_req_dup = Vec(nDupStatus, DecoupledIO(new RefillPipeReqCtrl))
-    val refill_pipe_resp = Flipped(ValidIO(UInt(log2Up(cfg.nMissEntries).W)))
-
-    val replace_pipe_req = DecoupledIO(new MainPipeReq)
-    val replace_pipe_resp = Flipped(ValidIO(UInt(log2Up(cfg.nMissEntries).W)))
+    val l2_hint = Input(Valid(new L2ToL1Hint())) // Hint from L2 Cache
 
     val main_pipe_req = DecoupledIO(new MainPipeReq)
-    val main_pipe_resp = Flipped(ValidIO(new AtomicsResp))
+    val main_pipe_resp = Flipped(ValidIO(new MainPipeResp))
+
+    val mainpipe_info = Input(new MainPipeInfoToMQ)
+    val refill_info = ValidIO(new MissQueueRefillInfo)
 
     // block probe
     val probe_addr = Input(UInt(PAddrBits.W))
     val probe_block = Output(Bool())
 
     val full = Output(Bool())
-
-    // only for performance counter
-    // This is valid when an mshr has finished replacing a block (w_replace_resp),
-    // but hasn't received Grant from L2 (!w_grantlast)
-    val debug_early_replace = Vec(cfg.nMissEntries, ValidIO(new Bundle() {
-      // info about the block that has been replaced
-      val idx = UInt(idxBits.W) // vaddr
-      val tag = UInt(tagBits.W) // paddr
-    }))
-
-    val sms_agt_evict_req = DecoupledIO(new AGTEvictReq)
 
     // forward missqueue
     val forward = Vec(LoadPipelineWidth, new LduToMissqueueForwardIO)
@@ -931,11 +838,6 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
         val prefetch_monitor_cnt = Output(Bool())
         val total_prefetch = Output(Bool())
       }
-    }
-
-    val bloom_filter_query = new Bundle {
-      val set = ValidIO(new BloomQueryBundle(BLOOM_FILTER_ENTRY_NUM))
-      val clr = ValidIO(new BloomQueryBundle(BLOOM_FILTER_ENTRY_NUM))
     }
 
     val mq_enq_cancel = Output(Bool())
@@ -968,7 +870,6 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   io.resp.id := Mux(!req_pipeline_reg_handled, OHToUInt(req_mshr_handled_vec), miss_req_pipe_reg.mshr_id)
   io.resp.handled := Cat(req_mshr_handled_vec).orR || req_pipeline_reg_handled
   io.resp.merged := merge
-  io.resp.repl_way_en := Mux(!req_pipeline_reg_handled, Mux1H(secondary_ready_vec, entries.map(_.io.repl_way_en)), miss_req_pipe_reg.req.way_en)
 
   /*  MissQueue enq logic is now splitted into 2 cycles
    *
@@ -1064,21 +965,29 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
       e.io.acquire_fired_by_pipe_reg := acquire_from_pipereg.fire
 
-      e.io.refill_pipe_resp := io.refill_pipe_resp.valid && io.refill_pipe_resp.bits === i.U
-      e.io.replace_pipe_resp := io.replace_pipe_resp.valid && io.replace_pipe_resp.bits === i.U
       e.io.main_pipe_resp := io.main_pipe_resp.valid && io.main_pipe_resp.bits.ack_miss_queue && io.main_pipe_resp.bits.miss_id === i.U
+      e.io.main_pipe_replay := io.mainpipe_info.s2_replay_to_mq && io.mainpipe_info.s2_miss_id === i.U
+      e.io.main_pipe_refill_resp := io.mainpipe_info.s3_refill_resp & io.mainpipe_info.s3_miss_id === i.U
 
       e.io.memSetPattenDetected := memSetPattenDetected
       e.io.nMaxPrefetchEntry := nMaxPrefetchEntry
 
-      io.debug_early_replace(i) := e.io.debug_early_replace
       e.io.main_pipe_req.ready := io.main_pipe_req.ready
+
+      when(io.l2_hint.bits.sourceId === i.U) {
+        e.io.l2_hint <> io.l2_hint
+      } .otherwise {
+        e.io.l2_hint.valid := false.B
+        e.io.l2_hint.bits := DontCare
+      }
   }
 
   io.req.ready := accept
   io.mq_enq_cancel := io.req.bits.cancel
   io.refill_to_ldq.valid := Cat(entries.map(_.io.refill_to_ldq.valid)).orR
   io.refill_to_ldq.bits := ParallelMux(entries.map(_.io.refill_to_ldq.valid) zip entries.map(_.io.refill_to_ldq.bits))
+
+  io.refill_info := MuxCase(DontCare, entries.zipWithIndex.map{ case(e,i) => ((io.mainpipe_info.s2_miss_id === i.U) -> e.io.refill_info)})
 
   acquire_from_pipereg.valid := miss_req_pipe_reg.can_send_acquire(io.req.valid, io.req.bits)
   acquire_from_pipereg.bits := miss_req_pipe_reg.get_acquire(io.l2_pf_store_only)
@@ -1090,39 +999,8 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   TLArbiter.lowest(edge, io.mem_acquire, acquire_sources:_*)
   TLArbiter.lowest(edge, io.mem_finish, entries.map(_.io.mem_finish):_*)
 
-  // arbiter_with_pipereg_N_dup(entries.map(_.io.refill_pipe_req), io.refill_pipe_req,
-  // io.refill_pipe_req_dup,
-  // Some("refill_pipe_req"))
-  val out_refill_pipe_req = Wire(Decoupled(new RefillPipeReq))
-  val out_refill_pipe_req_ctrl = Wire(Decoupled(new RefillPipeReqCtrl))
-  out_refill_pipe_req_ctrl.valid := out_refill_pipe_req.valid
-  out_refill_pipe_req_ctrl.bits := out_refill_pipe_req.bits.getCtrl
-  out_refill_pipe_req.ready := out_refill_pipe_req_ctrl.ready
-  arbiter(entries.map(_.io.refill_pipe_req), out_refill_pipe_req, Some("refill_pipe_req"))
-  for (dup <- io.refill_pipe_req_dup) {
-    AddPipelineReg(out_refill_pipe_req_ctrl, dup, false.B)
-  }
-  AddPipelineReg(out_refill_pipe_req, io.refill_pipe_req, false.B)
-
-  arbiter_with_pipereg(entries.map(_.io.replace_pipe_req), io.replace_pipe_req, Some("replace_pipe_req"))
-
   // amo's main pipe req out
-  val main_pipe_req_vec = entries.map(_.io.main_pipe_req)
-  io.main_pipe_req.valid := VecInit(main_pipe_req_vec.map(_.valid)).asUInt.orR
-  io.main_pipe_req.bits := Mux1H(main_pipe_req_vec.map(_.valid), main_pipe_req_vec.map(_.bits))
-  assert(PopCount(VecInit(main_pipe_req_vec.map(_.valid))) <= 1.U, "multi main pipe req")
-
-  // send evict hint to sms
-  val sms_agt_evict_valid = Cat(entries.map(_.io.sms_agt_evict_req.valid)).orR
-  val sms_agt_evict_valid_reg = RegInit(false.B)
-  io.sms_agt_evict_req.valid := sms_agt_evict_valid_reg
-  io.sms_agt_evict_req.bits := RegEnable(Mux1H(entries.map(_.io.sms_agt_evict_req.valid), entries.map(_.io.sms_agt_evict_req.bits)), sms_agt_evict_valid)
-  when(sms_agt_evict_valid) {
-    sms_agt_evict_valid_reg := true.B
-  }.elsewhen(io.sms_agt_evict_req.fire) {
-    sms_agt_evict_valid_reg := false.B
-  }
-  assert(PopCount(VecInit(entries.map(_.io.sms_agt_evict_req.valid))) <= 1.U, "multi sms_agt_evict req")
+  fastArbiter(entries.map(_.io.main_pipe_req), io.main_pipe_req, Some("main_pipe_req"))
 
   io.probe_block := Cat(probe_block_vec).orR
 
@@ -1132,14 +1010,8 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   io.prefetch_info.naive.late_miss_prefetch := io.req.valid && io.req.bits.isPrefetchRead && (miss_req_pipe_reg.matched(io.req.bits) || Cat(entries.map(_.io.matched)).orR)
 
   io.prefetch_info.fdp.late_miss_prefetch := (miss_req_pipe_reg.prefetch_late_en(io.req.bits.toMissReqWoStoreData(), io.req.valid) || Cat(entries.map(_.io.prefetch_info.late_prefetch)).orR)
-  io.prefetch_info.fdp.prefetch_monitor_cnt := io.refill_pipe_req.fire
+  io.prefetch_info.fdp.prefetch_monitor_cnt := io.main_pipe_req.fire
   io.prefetch_info.fdp.total_prefetch := alloc && io.req.valid && !io.req.bits.cancel && isFromL1Prefetch(io.req.bits.pf_source)
-
-  io.bloom_filter_query.set.valid := alloc && io.req.valid && !io.req.bits.cancel && !isFromL1Prefetch(io.req.bits.replace_pf) && io.req.bits.replace_coh.isValid() && isFromL1Prefetch(io.req.bits.pf_source)
-  io.bloom_filter_query.set.bits.addr := io.bloom_filter_query.set.bits.get_addr(Cat(io.req.bits.replace_tag, get_untag(io.req.bits.vaddr))) // the evict block address
-
-  io.bloom_filter_query.clr.valid := io.refill_pipe_req.fire && isFromL1Prefetch(io.refill_pipe_req.bits.prefetch)
-  io.bloom_filter_query.clr.bits.addr := io.bloom_filter_query.clr.bits.get_addr(io.refill_pipe_req.bits.addr)
 
   // L1MissTrace Chisel DB
   val debug_miss_trace = Wire(new L1MissTrace)
@@ -1169,6 +1041,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   XSPerfAccumulate("miss_req_load_allocate", io.req.fire && !io.req.bits.cancel && alloc && io.req.bits.isFromLoad)
   XSPerfAccumulate("miss_req_store_allocate", io.req.fire && !io.req.bits.cancel && alloc && io.req.bits.isFromStore)
   XSPerfAccumulate("miss_req_amo_allocate", io.req.fire && !io.req.bits.cancel && alloc && io.req.bits.isFromAMO)
+  XSPerfAccumulate("miss_req_prefetch_allocate", io.req.fire && !io.req.bits.cancel && alloc && io.req.bits.isFromPrefetch)
   XSPerfAccumulate("miss_req_merge_load", io.req.fire && !io.req.bits.cancel && merge && io.req.bits.isFromLoad)
   XSPerfAccumulate("miss_req_reject_load", io.req.valid && !io.req.bits.cancel && reject && io.req.bits.isFromLoad)
   XSPerfAccumulate("probe_blocked_by_miss", io.probe_block)
