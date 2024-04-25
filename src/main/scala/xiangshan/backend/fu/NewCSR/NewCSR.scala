@@ -120,7 +120,8 @@ class NewCSR(implicit val p: Parameters) extends Module
     })
     // tlb
     val tlb = Output(new Bundle {
-      val satp = UInt(XLEN.W)
+      val satpASIDChanged = Bool()
+      val satp = new SatpBundle
       val mxr = Bool()
       val sum = Bool()
       val imode = UInt(2.W)
@@ -561,7 +562,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   toAIA.vsClaim := wenLegal && vstopei.addr.U === addr
 
   // tlb
-  io.tlb.satp := satp.rdata.asUInt
+  io.tlb.satpASIDChanged := wenLegal && addr === CSRs.satp.U && satp.rdata.ASID =/= wdata.asTypeOf(new SatpBundle).ASID
+  io.tlb.satp := satp.rdata
   io.tlb.mxr := mstatus.rdata.MXR.asBool
   io.tlb.sum := mstatus.rdata.SUM.asBool
   io.tlb.imode := PRVM.asUInt
