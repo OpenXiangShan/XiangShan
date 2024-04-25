@@ -166,8 +166,8 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   private val wenLegal = permitMod.io.out.hasLegalWen
 
-  val isSret = permitMod.io.out.hasLegalSret
-  val isMret = permitMod.io.out.hasLegalMret
+  val legalSret = permitMod.io.out.hasLegalSret
+  val legalMret = permitMod.io.out.hasLegalMret
   val isDret = io.dret // Todo: check permission
   val isWfi  = io.wfi  // Todo: check permission
 
@@ -258,8 +258,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   permitMod.io.in.privState.V := V
   permitMod.io.in.privState.PRVM := PRVM
 
-  permitMod.io.in.mret := isMret
-  permitMod.io.in.sret := isSret
+  permitMod.io.in.mret := io.mret
+  permitMod.io.in.sret := io.sret
 
   permitMod.io.in.status.tsr := mstatus.rdata.TSR.asBool
   permitMod.io.in.status.vtsr := hstatus.rdata.VTSR.asBool
@@ -411,14 +411,14 @@ class NewCSR(implicit val p: Parameters) extends Module
     }
   }
 
-  mretEvent.valid := isMret
+  mretEvent.valid := legalMret
   mretEvent.in match {
     case in =>
       in.mstatus := mstatus.regOut
       in.mepc := mepc.regOut
   }
 
-  sretEvent.valid := isSret
+  sretEvent.valid := legalSret
   sretEvent.in match {
     case in =>
       in.privState.PRVM := PRVM
@@ -498,8 +498,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   private val hasEvent = mretEvent.out.targetPc.valid || sretEvent.out.targetPc.valid || dretEvent.out.targetPc.valid ||
     trapEntryMEvent.out.targetPc.valid || trapEntryHSEvent.out.targetPc.valid || trapEntryVSEvent.out.targetPc.valid
 
-  io.out.EX_II     := false.B // Todo
-  io.out.EX_VI     := false.B // Todo
+  io.out.EX_II     := permitMod.io.out.EX_II
+  io.out.EX_VI     := permitMod.io.out.EX_VI
   io.out.flushPipe := flushPipe
 
   io.out.rData := Mux(ren, rdata, 0.U)
