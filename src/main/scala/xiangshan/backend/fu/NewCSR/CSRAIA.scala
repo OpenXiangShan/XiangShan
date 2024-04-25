@@ -24,7 +24,7 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
     .setAddr(0x35C)
 
   val mtopi = Module(new CSRModule("Mtopi", new TopIBundle) with HasInterruptFilterSink {
-    rdata.IID := topIR.mtopi.IID
+    rdata.IID   := topIR.mtopi.IID
     rdata.IPRIO := topIR.mtopi.IPRIO
   })
     .setAddr(0xFB0)
@@ -44,7 +44,7 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
     .setAddr(0x15C)
 
   val stopi = Module(new CSRModule("Stopi", new TopIBundle) with HasInterruptFilterSink {
-    rdata.IID := topIR.stopi.IID
+    rdata.IID   := topIR.stopi.IID
     rdata.IPRIO := topIR.stopi.IPRIO
   })
     .setAddr(0xDB0)
@@ -64,7 +64,8 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
     .setAddr(0x25C)
 
   val vstopi = Module(new CSRModule("VStopi", new TopIBundle) with HasInterruptFilterSink {
-    rdata := topIR.vstopi
+    rdata.IID   := topIR.vstopi.IID
+    rdata.IPRIO := topIR.vstopi.IPRIO
   })
     .setAddr(0xEB0)
 
@@ -74,11 +75,6 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
   )
 
   val siregiprios: Seq[CSRModule[_]] = Range(0, 0xF, 2).map(num =>
-    Module(new CSRModule(s"Iprio$num"))
-      .setAddr(0x30 + num)
-  )
-
-  val vsiregiprios: Seq[CSRModule[_]] = Range(0, 0xF, 2).map(num =>
     Module(new CSRModule(s"Iprio$num"))
       .setAddr(0x30 + num)
   )
@@ -114,16 +110,12 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
     siregiprios.map(prio => (siselect.rdata.ALL.asUInt === prio.addr.U) -> prio.rdata.asInstanceOf[CSRBundle])
   ).asUInt
 
-  private val vsiregRead = Mux1H(
-    vsiregiprios.map(prio => (miselect.rdata.ALL.asUInt === prio.addr.U) -> prio.rdata.asInstanceOf[CSRBundle])
-  ).asUInt
-
   aiaCSRMods.foreach { mod =>
     mod match {
       case m: HasIregSink =>
         m.iregRead.mireg := miregRead
         m.iregRead.sireg := siregRead
-        m.iregRead.vsireg := vsiregRead
+        m.iregRead.vsireg := 0.U // Todo: IMSIC
       case _ =>
     }
   }
@@ -222,8 +214,8 @@ trait HasAIABundle { self: CSRModule[_] =>
 
 trait HasInterruptFilterSink { self: CSRModule[_] =>
   val topIR = IO(new Bundle {
-    val mtopi = Input(new TopIBundle)
-    val stopi = Input(new TopIBundle)
+    val mtopi  = Input(new TopIBundle)
+    val stopi  = Input(new TopIBundle)
     val vstopi = Input(new TopIBundle)
   })
 }
