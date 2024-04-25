@@ -94,7 +94,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       val regOut = UInt(64.W)
       val privState = new PrivState
       val interrupt = Bool()
-      val wfi_event = Bool()
+      val wfiEvent = Bool()
       val disableSfence = Bool()
       // fp
       val fpState = new Bundle {
@@ -539,7 +539,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.out.vecState.off := mstatus.rdata.VS === ContextStatus.Off
   io.out.isPerfCnt := addrInPerfCnt
   io.out.interrupt := intrMod.io.out.interruptVec.valid
-  io.out.wfi_event := debugIntr || (mie.rdata.asUInt & mip.rdata.asUInt).orR
+  io.out.wfiEvent := debugIntr || (mie.rdata.asUInt & mip.rdata.asUInt).orR
   io.out.debugMode := debugMode
   io.out.disableSfence := tvmNotPermit || PRVM === PrivMode.U
   io.out.singleStepFlag := !debugMode && dcsr.rdata.STEP
