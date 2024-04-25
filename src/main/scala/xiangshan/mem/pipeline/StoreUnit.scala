@@ -293,8 +293,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
 
   val s2_pmp = WireInit(io.pmp)
 
-  val s2_exception = ExceptionNO.selectByFu(s2_out.uop.exceptionVec, StaCfg).asUInt.orR
-  val s2_mmio = s2_in.mmio || s2_pmp.mmio
+  val s2_exception = (ExceptionNO.selectByFu(s2_out.uop.exceptionVec, StaCfg).asUInt.orR) && RegNext(s1_feedback.bits.hit)
+  val s2_mmio = (s2_in.mmio || s2_pmp.mmio) && RegNext(s1_feedback.bits.hit)
   s2_kill := ((s2_mmio && !s2_exception) && !s2_in.isvec) || s2_in.uop.robIdx.needFlush(io.redirect)
 
   s2_out        := s2_in
