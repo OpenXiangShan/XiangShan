@@ -1,0 +1,397 @@
+/***************************************************************************************
+  * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+  * Copyright (c) 2020-2021 Peng Cheng Laboratory
+  *
+  * XiangShan is licensed under Mulan PSL v2.
+  * You can use this software according to the terms and conditions of the Mulan PSL v2.
+  * You may obtain a copy of Mulan PSL v2 at:
+  *          http://license.coscl.org.cn/MulanPSL2
+  *
+  * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+  * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+  *
+  * See the Mulan PSL v2 for more details.
+  ***************************************************************************************/
+
+package xiangshan.mem
+
+import org.chipsalliance.cde.config.Parameters
+import chisel3._
+import chisel3.util._
+import utils._
+import utility._
+import xiangshan._
+import xiangshan.backend.rob.RobPtr
+import xiangshan.backend.Bundles._
+import xiangshan.mem._
+import xiangshan.backend.fu.FuType
+import freechips.rocketchip.diplomacy.BufferParams
+import xiangshan.cache.mmu._
+import xiangshan.cache._
+import xiangshan.cache.wpu.ReplayCarry
+import xiangshan.backend.fu.util.SdtrigExt
+import xiangshan.ExceptionNO._
+import xiangshan.backend.fu.vector.Bundles.VConfig
+
+class VSegmentBundle(implicit p: Parameters) extends VLSUBundle
+{
+  val vaddr            = UInt(VAddrBits.W)
+  val uop              = new DynInst
+  val paddr            = UInt(PAddrBits.W)
+  val mask             = UInt(VLEN.W)
+  val valid            = Bool()
+  val alignedType      = UInt(alignTypeBits.W)
+  val vl               = UInt(elemIdxBits.W)
+  val vlmaxInVd        = UInt(elemIdxBits.W)
+  val vlmaxMaskInVd    = UInt(elemIdxBits.W)
+  // for exception
+  val vstart           = UInt(elemIdxBits.W)
+  val exceptionvaddr   = UInt(VAddrBits.W)
+  val exception_va     = Bool()
+  val exception_pa     = Bool()
+}
+
+class VSegmentUnit (implicit p: Parameters) extends VLSUModule
+  with HasDCacheParameters
+  with MemoryOpConstants
+  with SdtrigExt
+  with HasLoadHelper
+{
+  val io               = IO(new VSegmentUnitIO)
+
+  val maxSize          = VSegmentBufferSize
+
+  class VSegUPtr(implicit p: Parameters) extends CircularQueuePtr[VSegUPtr](maxSize){
+  }
+
+  object VSegUPtr {
+    def apply(f: Bool, v: UInt)(implicit p: Parameters): VSegUPtr = {
+      val ptr           = Wire(new VSegUPtr)
+      ptr.flag         := f
+      ptr.value        := v
+      ptr
+    }
+  }
+
+  // buffer uop
+  val instMicroOp       = Reg(new VSegmentBundle)
+  val data              = Reg(Vec(maxSize, UInt(VLEN.W)))
+  val uopIdx            = Reg(Vec(maxSize, UopIdx()))
+  val stride            = Reg(Vec(maxSize, UInt(VLEN.W)))
+  val allocated         = RegInit(VecInit(Seq.fill(maxSize)(false.B)))
+  val enqPtr            = RegInit(0.U.asTypeOf(new VSegUPtr))
+  val deqPtr            = RegInit(0.U.asTypeOf(new VSegUPtr))
+  val stridePtr         = WireInit(0.U.asTypeOf(new VSegUPtr)) // for select stride/index
+
+  val segmentIdx        = RegInit(0.U(elemIdxBits.W))
+  val fieldIdx          = RegInit(0.U(fieldBits.W))
+  val segmentOffset     = RegInit(0.U(VAddrBits.W))
+  val splitPtr          = RegInit(0.U.asTypeOf(new VSegUPtr)) // for select load/store data
+  val splitPtrNext      = WireInit(0.U.asTypeOf(new VSegUPtr))
+
+  val exception_va      = WireInit(false.B)
+  val exception_pa      = WireInit(false.B)
+
+  val maxSegIdx         = instMicroOp.vl
+  val maxNfields        = instMicroOp.uop.vpu.nf
+
+  XSError(segmentIdx > maxSegIdx, s"segmentIdx > vl, something error!\n")
+  XSError(fieldIdx > maxNfields, s"fieldIdx > nfields, something error!\n")
+
+  // Segment instruction's FSM
+  val s_idle :: s_flush_sbuffer_req :: s_wait_flush_sbuffer_resp :: s_tlb_req :: s_wait_tlb_resp :: s_pm ::s_cache_req :: s_cache_resp :: s_latch_and_merge_data :: s_finish :: Nil = Enum(10)
+  val state             = RegInit(s_idle)
+  val stateNext         = WireInit(s_idle)
+  val sbufferEmpty      = io.flush_sbuffer.empty
+
+  /**
+   * state update
+   */
+  state  := stateNext
+
+  /**
+   * state transfer
+   */
+  when(state === s_idle){
+    stateNext := Mux(isAfter(enqPtr, deqPtr), s_flush_sbuffer_req, s_idle)
+  }.elsewhen(state === s_flush_sbuffer_req){
+    stateNext := Mux(sbufferEmpty, s_tlb_req, s_wait_flush_sbuffer_resp) // if sbuffer is empty, go to query tlb
+
+  }.elsewhen(state === s_wait_flush_sbuffer_resp){
+    stateNext := Mux(sbufferEmpty, s_tlb_req, s_wait_flush_sbuffer_resp)
+
+  }.elsewhen(state === s_tlb_req){
+    stateNext := s_wait_tlb_resp
+
+  }.elsewhen(state === s_wait_tlb_resp){
+    stateNext := Mux(!io.dtlb.resp.bits.miss && io.dtlb.resp.fire, s_pm, s_tlb_req)
+
+  }.elsewhen(state === s_pm){
+    stateNext := Mux(exception_pa || exception_va, s_finish, s_cache_req)
+
+  }.elsewhen(state === s_cache_req){
+    stateNext := Mux(io.dcache.req.fire, s_cache_resp, s_cache_req)
+
+  }.elsewhen(state === s_cache_resp){
+    when(io.dcache.req.fire) {
+      when(io.dcache.resp.bits.miss) {
+        stateNext := s_cache_req
+      }.otherwise {
+        stateNext := s_latch_and_merge_data
+      }
+    }.otherwise{
+      stateNext := s_cache_resp
+    }
+
+  }.elsewhen(state === s_latch_and_merge_data){
+    when((segmentIdx === maxSegIdx) && (fieldIdx === maxNfields)){
+      stateNext := s_finish // segment instruction finish
+    }.otherwise{
+      stateNext := s_tlb_req // need continue
+    }
+
+  }.elsewhen(state === s_finish){ // writeback uop
+    stateNext := Mux(distanceBetween(enqPtr, deqPtr) === 0.U, s_idle, s_finish)
+
+  }.otherwise{
+    stateNext := s_idle
+    XSError(true.B, s"Unknown state!\n")
+  }
+
+  /*************************************************************************
+   *                            enqueue logic
+   *************************************************************************/
+  io.in.ready                         := true.B
+  val fuOpType                         = io.in.bits.uop.fuOpType
+  val vtype                            = io.in.bits.uop.vpu.vtype
+  val mop                              = fuOpType(6, 5)
+  val instType                         = Cat(true.B, mop)
+  val eew                              = io.in.bits.uop.vpu.veew
+  val sew                              = vtype.vsew
+  val lmul                             = vtype.vlmul
+  val vl                               = instMicroOp.vl
+  val vm                               = instMicroOp.uop.vpu.vm
+  val vstart                           = instMicroOp.uop.vpu.vstart
+  val srcMask                          = GenFlowMask(Mux(vm, Fill(VLEN, 1.U(1.W)), io.in.bits.src_mask), vstart, vl, true)
+  // first uop enqueue, we need to latch microOp of segment instruction
+  when(io.in.fire && !instMicroOp.valid){
+    val vlmaxInVd                      = GenVLMAX(Mux(lmul.asSInt > 0.S, 0.U, lmul), Mux(isIndexed(instType), sew(1, 0), eew(1, 0))) // element number in a vd
+    instMicroOp.vaddr                 := io.in.bits.src_rs1(VAddrBits - 1, 0)
+    instMicroOp.valid                 := true.B // if is first uop
+    instMicroOp.alignedType           := Mux(isIndexed(instType), sew(1, 0), eew(1, 0))
+    instMicroOp.uop                   := io.in.bits.uop
+    instMicroOp.mask                  := srcMask
+    instMicroOp.vstart                := 0.U
+    instMicroOp.vlmaxInVd             := vlmaxInVd
+    instMicroOp.vlmaxMaskInVd         := UIntToMask(vlmaxInVd, elemIdxBits) // for merge data
+    instMicroOp.vl                    := io.in.bits.src_vl.asTypeOf(VConfig()).vl
+    segmentOffset                     := 0.U
+    fieldIdx                          := 0.U
+  }
+  // latch data
+  when(io.in.fire){
+    data(enqPtr.value)                := io.in.bits.src_vs3
+    stride(enqPtr.value)              := io.in.bits.src_stride
+    uopIdx(enqPtr.value)              := io.in.bits.uop.vpu.vuopIdx
+  }
+
+  // update enqptr, only 1 port
+  when(io.in.fire){
+    enqPtr                            := enqPtr + 1.U
+  }
+
+  /*************************************************************************
+   *                            output logic
+   *************************************************************************/
+  // MicroOp
+  val baseVaddr                       = instMicroOp.vaddr
+  val alignedType                     = instMicroOp.alignedType
+  val fuType                          = instMicroOp.uop.fuType
+  val mask                            = instMicroOp.mask
+  val exceptionVec                    = instMicroOp.uop.exceptionVec
+  val issueEew                        = instMicroOp.uop.vpu.veew
+  val issueLmul                       = instMicroOp.uop.vpu.vtype.vlmul
+  val issueSew                        = instMicroOp.uop.vpu.vtype.vsew
+  val issueEmul                       = EewLog2(issueEew) - issueSew + issueLmul
+  val elemIdxInVd                     = segmentIdx & instMicroOp.vlmaxMaskInVd
+  val issueInstType                   = Cat(true.B, instMicroOp.uop.fuOpType(6, 5)) // always segment instruction
+  val issueVLMAXLog2                  = GenVLMAXLog2(
+                                                      Mux(issueLmul.asSInt > 0.S, 0.U, issueLmul),
+                                                      Mux(isIndexed(issueInstType), issueSew(1, 0), issueEew(1, 0))
+                                                    ) // max element number log2 in vd
+  val issueVlMax                      = instMicroOp.vlmaxInVd // max elementIdx in vd
+  val issueMaxIdxInIndex              = GenVLMAX(Mux(issueEmul.asSInt > 0.S, 0.U, issueEmul), issueEew) // index element index in index register
+  val issueMaxIdxInIndexMask          = UIntToMask(issueMaxIdxInIndex, elemIdxBits)
+  val issueMaxIdxInIndexLog2          = GenVLMAXLog2(Mux(issueEmul.asSInt > 0.S, 0.U, issueEmul), issueEew)
+  val issueIndexIdx                   = segmentIdx & issueMaxIdxInIndexMask
+
+  val indexStride                     = IndexAddr( // index for indexed instruction
+                                                    index = stride(stridePtr.value),
+                                                    flow_inner_idx = issueIndexIdx,
+                                                    eew = issueEew
+                                                  )
+  val realSegmentOffset               = Mux(isIndexed(issueInstType),
+                                            indexStride,
+                                            segmentOffset)
+  val vaddr                           = baseVaddr + (fieldIdx << alignedType).asUInt + realSegmentOffset
+  /**
+   * tlb req and tlb resq
+   */
+
+  // query DTLB IO Assign
+  io.dtlb.req                         := DontCare
+  io.dtlb.resp.ready                  := true.B
+  io.dtlb.req.valid                   := state === s_tlb_req
+  io.dtlb.req.bits.cmd                := Mux(FuType.isVLoad(fuType), TlbCmd.read, TlbCmd.write)
+  io.dtlb.req.bits.vaddr              := vaddr
+  io.dtlb.req.bits.size               := instMicroOp.alignedType(2,0)
+  io.dtlb.req.bits.memidx.is_ld       := FuType.isVLoad(fuType)
+  io.dtlb.req.bits.memidx.is_st       := FuType.isVStore(fuType)
+  io.dtlb.req.bits.debug.robIdx       := instMicroOp.uop.robIdx
+  io.dtlb.req.bits.no_translate       := false.B
+  io.dtlb.req.bits.debug.pc           := instMicroOp.uop.pc
+  io.dtlb.req.bits.debug.isFirstIssue := DontCare
+  io.dtlb.req_kill                    := false.B
+
+  // tlb resp
+  when(io.dtlb.resp.fire && state === s_wait_tlb_resp){
+      exceptionVec(storePageFault)    := io.dtlb.resp.bits.excp(0).pf.st
+      exceptionVec(loadPageFault)     := io.dtlb.resp.bits.excp(0).pf.ld
+      exceptionVec(storeAccessFault)  := io.dtlb.resp.bits.excp(0).af.st
+      exceptionVec(loadAccessFault)   := io.dtlb.resp.bits.excp(0).af.ld
+      when(!io.dtlb.resp.bits.miss){
+        instMicroOp.paddr             := io.dtlb.resp.bits.paddr(0)
+      }
+  }
+  // pmp
+  // NOTE: only handle load/store exception here, if other exception happens, don't send here
+  val pmp = WireInit(io.pmpResp)
+  when(state === s_pm){
+    exception_va := exceptionVec(storePageFault) || exceptionVec(loadPageFault) ||
+    exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault)
+    exception_pa := pmp.st || pmp.ld
+
+    instMicroOp.exception_pa       := exception_pa
+    instMicroOp.exception_va       := exception_va
+    // update storeAccessFault bit
+    exceptionVec(loadAccessFault)  := exceptionVec(loadAccessFault) || pmp.ld
+    exceptionVec(storeAccessFault) := exceptionVec(storeAccessFault) || pmp.st
+
+    instMicroOp.exceptionvaddr     := vaddr
+    instMicroOp.vl                 := segmentIdx // for exception
+    instMicroOp.vstart             := segmentIdx // for exception
+  }
+
+  /**
+   * flush sbuffer IO Assign
+   */
+  io.flush_sbuffer.valid           := !sbufferEmpty && (state === s_flush_sbuffer_req)
+
+
+  /**
+   * merge data for load
+   */
+  val cacheData = io.dcache.resp.bits.data
+  val pickData  = rdataVecHelper(alignedType(1,0), cacheData)
+  val mergedData = mergeDataWithElemIdx(
+    oldData = data(splitPtr.value),
+    newData = Seq(pickData),
+    alignedType = alignedType(1,0),
+    elemIdx = Seq(elemIdxInVd),
+    valids = Seq(true.B)
+  )
+  when(state === s_latch_and_merge_data){
+    data(splitPtr.value) := mergedData
+  }
+  /**
+   * split data for store
+   * */
+  val splitData = genVSData(
+    data = data(splitPtr.value),
+    elemIdx = elemIdxInVd,
+    alignedType = alignedType
+  )
+  val flowData  = genVWdata(splitData, alignedType) // TODO: connect vstd, pass vector data
+  val wmask     = genVWmask(vaddr, alignedType(1, 0)) & mask(segmentIdx)
+
+  /**
+   * dcache req
+   */
+  io.dcache.req                    := DontCare
+  io.dcache.req.valid              := state === s_cache_req && FuType.isVLoad(fuType)
+  io.dcache.req.bits.cmd           := Mux(FuType.isVLoad(fuType), MemoryOpConstants.M_XRD, MemoryOpConstants.M_PFW)
+  io.dcache.req.bits.vaddr         := vaddr
+  io.dcache.req.bits.amo_mask      := Mux(FuType.isVLoad(fuType), mask, wmask)
+  io.dcache.req.bits.amo_data      := flowData
+  io.dcache.req.bits.source        := Mux(FuType.isVLoad(fuType), LOAD_SOURCE.U, STORE_SOURCE.U)
+  io.dcache.req.bits.id            := DontCare
+
+  /**
+   * update ptr
+   * */
+
+  val splitPtrOffset = Mux(lmul.asSInt < 0.S, 1.U, (1.U << lmul).asUInt)
+  splitPtrNext := PriorityMux(Seq(
+    ((fieldIdx === maxNfields) && (elemIdxInVd === (issueVlMax - 1.U)))   -> (deqPtr +                     // segment finish and need access next register in group
+                                                                             (segmentIdx >> issueVLMAXLog2).asUInt),
+    (fieldIdx === maxNfields)                                             -> deqPtr,                       // segment finish
+    true.B                                                                -> (splitPtr + splitPtrOffset)   // next field
+  ))
+
+  // update splitPtr
+  when(state === s_latch_and_merge_data){
+    splitPtr := splitPtrNext
+  }.elsewhen(io.in.fire && !instMicroOp.valid){
+    splitPtr := deqPtr // initial splitPtr
+  }
+
+  // update stridePtr, only use in index
+  val strideOffset = Mux(isIndexed(issueInstType), segmentIdx >> issueMaxIdxInIndexLog2, 0.U)
+  stridePtr       := deqPtr + strideOffset
+
+  // update fieldIdx
+  when(fieldIdx === maxNfields && state === s_latch_and_merge_data){
+    fieldIdx := 0.U
+  }.elsewhen(state === s_latch_and_merge_data){
+    fieldIdx := fieldIdx + 1.U
+  }
+  //update segmentOffset
+  when(fieldIdx === maxNfields && state === s_latch_and_merge_data){
+    segmentOffset := segmentOffset + Mux(isUnitStride(issueInstType), (maxNfields +& 1.U) << issueEew, stride(stridePtr.value))
+  }
+
+  //update deqPtr
+  when(io.uopwriteback.fire){
+    deqPtr := deqPtr + 1.U
+  }
+
+  /*************************************************************************
+   *                            dequeue logic
+   *************************************************************************/
+  when(stateNext === s_idle){
+    instMicroOp.valid := false.B
+  }
+  io.uopwriteback.valid               := state === s_finish
+  io.uopwriteback.bits.uop            := instMicroOp.uop
+  io.uopwriteback.bits.mask.get       := instMicroOp.mask
+  io.uopwriteback.bits.data           := data(deqPtr.value)
+  io.uopwriteback.bits.vdIdx.get      := uopIdx(deqPtr.value)
+  io.uopwriteback.bits.uop.vpu.vl     := instMicroOp.vl
+  io.uopwriteback.bits.uop.vpu.vstart := instMicroOp.vstart
+  io.uopwriteback.bits.debug          := DontCare
+  io.uopwriteback.bits.vdIdxInField.get := DontCare
+
+  //to RS
+  io.feedback.valid                   := state === s_finish
+  io.feedback.bits.hit                := true.B
+  io.feedback.bits.robIdx             := instMicroOp.uop.robIdx
+  io.feedback.bits.sourceType         := DontCare
+  io.feedback.bits.flushState         := DontCare
+  io.feedback.bits.dataInvalidSqIdx   := DontCare
+  io.feedback.bits.uopIdx.get         := uopIdx(deqPtr.value)
+
+  // exception
+  io.exceptionAddr                    := DontCare // TODO: fix it when handle exception
+}
+

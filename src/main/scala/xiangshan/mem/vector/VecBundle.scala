@@ -24,6 +24,9 @@ import utility._
 import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.rob.RobPtr
+import xiangshan.backend.fu.PMPRespBundle
+import xiangshan.cache.mmu.{TlbCmd, TlbRequestIO}
+import xiangshan.cache._
 
 class VLSBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle {
   val flowMask            = UInt(VLENB.W) // each bit for a flow
@@ -193,7 +196,7 @@ class FeedbackToLsqIO(implicit p: Parameters) extends VLSUBundle{
 
 class VSplitIO(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle{
   val redirect            = Flipped(ValidIO(new Redirect))
-  val in                  = if(isVStore) Flipped(Decoupled(new MemExuInput(isVector = true))) else Flipped(Decoupled(new MemExuInput(isVector = true))) // from iq
+  val in                  = Flipped(Decoupled(new MemExuInput(isVector = true))) // from iq
   val toMergeBuffer       = new ToMergeBufferIO(isVStore) //to merge buffer req mergebuffer entry
   val out                 = Decoupled(new VecPipeBundle(isVStore))// to scala pipeline
   val vstd                = OptionWrapper(isVStore, Valid(new MemExuOutput(isVector = true)))
@@ -221,4 +224,16 @@ class VMergeBufferIO(isVStore : Boolean=false)(implicit p: Parameters) extends V
   val toSplit             = if(isVStore) Vec(VecStorePipelineWidth, ValidIO(new FeedbackToSplitIO)) else Vec(VecLoadPipelineWidth, ValidIO(new FeedbackToSplitIO)) // for inorder inst
   val toLsq               = if(isVStore) Vec(VSUopWritebackWidth, ValidIO(new FeedbackToLsqIO)) else Vec(VLUopWritebackWidth, ValidIO(new FeedbackToLsqIO)) // for lsq deq
   val feedback            = if(isVStore) Vec(VSUopWritebackWidth, ValidIO(new RSFeedback(isVector = true))) else Vec(VLUopWritebackWidth, ValidIO(new RSFeedback(isVector = true)))//for rs replay
+}
+
+class VSegmentUnitIO(implicit p: Parameters) extends VLSUBundle{
+  val in                  = Flipped(Decoupled(new MemExuInput(isVector = true))) // from iq
+  val uopwriteback        = DecoupledIO(new MemExuOutput(isVector = true)) // writeback data
+  val dcache              = new AtomicWordIO // read dcache port
+  val dtlb                = new TlbRequestIO(2)
+  val pmpResp             = Flipped(new PMPRespBundle())
+  val flush_sbuffer       = new SbufferFlushBundle
+  val feedback            = ValidIO(new RSFeedback(isVector = true))
+  val redirect            = Flipped(ValidIO(new Redirect))
+  val exceptionAddr       = ValidIO(new FeedbackToLsqIO)
 }

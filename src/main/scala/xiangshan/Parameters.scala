@@ -211,6 +211,7 @@ case class XSCoreParameters
   VLUopWritebackWidth: Int = 1,
   VSUopWritebackWidth: Int = 1,
   SplitBufferSize: Int = 8,
+  VSegmentBufferSize: Int = 8,
   // ==============================
   UncacheBufferSize: Int = 4,
   EnableLoadToLoadForward: Boolean = false,
@@ -638,6 +639,7 @@ trait HasXSParameter {
   val VLUopWritebackWidth = coreParams.VLUopWritebackWidth
   val VSUopWritebackWidth = coreParams.VSUopWritebackWidth
   val SplitBufferSize = coreParams.SplitBufferSize
+  val VSegmentBufferSize = coreParams.VSegmentBufferSize
   val UncacheBufferSize = coreParams.UncacheBufferSize
   val EnableLoadToLoadForward = coreParams.EnableLoadToLoadForward
   val EnableFastForward = coreParams.EnableFastForward

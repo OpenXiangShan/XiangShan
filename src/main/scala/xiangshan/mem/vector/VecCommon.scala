@@ -834,7 +834,9 @@ object genVStride extends VLSUConstants {
     ))
   }
 }
-
+/**
+ * generate uopOffset, not used in segment instruction
+ * */
 object genVUopOffset extends VLSUConstants {
   def apply(instType: UInt, isfof: Bool, uopidx: UInt, nf: UInt, eew: UInt, stride: UInt, alignedType: UInt): UInt = {
     val uopInsidefield = (uopidx >> nf).asUInt // when nf == 0, is uopidx
