@@ -366,7 +366,8 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
 
     //update enqptr
   when (redirectReg.valid && flushNumReg =/= 0.U) {
-    enqPtr := enqPtr - flushNumReg
+    val enqPtrNext = enqPtr - flushNumReg
+    enqPtr := Mux(isBefore(enqPtrNext, deqPtr), deqPtr, enqPtrNext)
   }.otherwise {
     when (io.in.fire) {
       enqPtr := enqPtr + 1.U
