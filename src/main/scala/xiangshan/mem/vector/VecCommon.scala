@@ -836,17 +836,25 @@ object genVStride extends VLSUConstants {
 }
 
 object genVUopOffset extends VLSUConstants {
-  def apply(instType: UInt, uopidx: UInt, nf: UInt, eew: UInt, stride: UInt, alignedType: UInt): UInt = {
+  def apply(instType: UInt, isfof: Bool, uopidx: UInt, nf: UInt, eew: UInt, stride: UInt, alignedType: UInt): UInt = {
     val uopInsidefield = (uopidx >> nf).asUInt // when nf == 0, is uopidx
-    (LookupTree(instType,List(
-      "b000".U -> ( (uopidx >> nf) << alignedType                                   ) , // unit-stride
+
+    val fofVUopOffset = (LookupTree(instType,List(
+      "b000".U -> ( genVStride(uopInsidefield, stride) << (log2Up(VLENB).U - eew)   ) , // unit-stride fof
+      "b100".U -> ( genVStride(uopInsidefield, stride) << (log2Up(VLENB).U - eew)   ) , // segment unit-stride fof
+    ))).asUInt
+
+    val otherVUopOffset = (LookupTree(instType,List(
+      "b000".U -> ( uopInsidefield << alignedType                                   ) , // unit-stride
       "b010".U -> ( genVStride(uopInsidefield, stride) << (log2Up(VLENB).U - eew)   ) , // strided
       "b001".U -> ( 0.U                                                             ) , // indexed-unordered
       "b011".U -> ( 0.U                                                             ) , // indexed-ordered
-      "b100".U -> ( (uopidx >> nf) << alignedType                                   ) , // segment unit-stride
+      "b100".U -> ( uopInsidefield << alignedType                                   ) , // segment unit-stride
       "b110".U -> ( genVStride(uopInsidefield, stride) << (log2Up(VLENB).U - eew)   ) , // segment strided
       "b101".U -> ( 0.U                                                             ) , // segment indexed-unordered
       "b111".U -> ( 0.U                                                             )   // segment indexed-ordered
     ))).asUInt
+
+    Mux(isfof, fofVUopOffset, otherVUopOffset)
   }
 }
