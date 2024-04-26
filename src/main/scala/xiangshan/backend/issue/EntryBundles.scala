@@ -280,12 +280,13 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       val ignoreOldVd = Wire(Bool())
       val vlWakeUpByWb = common.vlWakeupByWb
       val isDependOldvd = entryReg.payload.vpu.isDependOldvd
+      val isWritePartVd = entryReg.payload.vpu.isWritePartVd
       val vta = entryReg.payload.vpu.vta
       val vma = entryReg.payload.vpu.vma
       val vm = entryReg.payload.vpu.vm
       val vlIsZero = commonIn.vlIsZero
       val vlIsVlmax = commonIn.vlIsVlmax
-      val ignoreTail = vlIsVlmax && (vm =/= 0.U || vma)
+      val ignoreTail = vlIsVlmax && (vm =/= 0.U || vma) && !isWritePartVd
       val ignoreWhole = !vlIsVlmax && (vm =/= 0.U || vma) && vta
       if (params.numVfSrc > 0 && srcIdx == 2) {
         /**

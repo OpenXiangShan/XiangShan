@@ -95,6 +95,7 @@ class FPToVecDecoder(implicit p: Parameters) extends XSModule {
   io.vpuCtrl.isDstMask := false.B
   io.vpuCtrl.isOpMask  := false.B
   io.vpuCtrl.isDependOldvd := false.B
+  io.vpuCtrl.isWritePartVd := false.B
 }
 
 

@@ -204,6 +204,10 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(1).ldest := VCONFIG_IDX.U
         csBundle(1).vecWen := true.B
         when(VSETOpType.isVsetvli(latchedInst.fuOpType) && dest === 0.U && src1 === 0.U) {
+          // write nothing, uop0 is a nop instruction
+          csBundle(0).rfWen := false.B
+          csBundle(0).fpWen := false.B
+          csBundle(0).vecWen := false.B
           csBundle(1).fuType := FuType.vsetfwf.U
           csBundle(1).srcType(0) := SrcType.vp
           csBundle(1).lsrc(0) := VCONFIG_IDX.U
