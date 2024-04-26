@@ -154,6 +154,7 @@ object EnqEntry {
   def apply(isComp: Boolean)(implicit p: Parameters, iqParams: IssueBlockParams): EnqEntry = {
     iqParams.schdType match {
       case IntScheduler() => new EnqEntry(isComp)
+      case FpScheduler()  => new EnqEntry(isComp)
       case MemScheduler() =>
         if (iqParams.isVecMemIQ) new EnqEntryVecMem(isComp)
         else new EnqEntry(isComp)

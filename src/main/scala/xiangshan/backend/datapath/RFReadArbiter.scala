@@ -6,8 +6,8 @@ import chisel3.util.{Arbiter, DecoupledIO, RRArbiter, Valid, PopCount}
 import utils.SeqUtils.{MixedVec3, Seq3}
 import utils.{OptionWrapper, SeqUtils}
 import xiangshan.backend.BackendParams
-import xiangshan.backend.datapath.DataConfig.{IntData, VecData}
-import xiangshan.backend.datapath.RdConfig.{IntRD, NoRD, RdConfig, VfRD}
+import xiangshan.backend.datapath.DataConfig.{IntData, VecData, FpData}
+import xiangshan.backend.datapath.RdConfig.{IntRD, NoRD, RdConfig, VfRD, FpRD}
 import xiangshan.backend.regfile.PregParams
 import utils._
 
@@ -118,6 +118,14 @@ class IntRFReadArbiter(
   p: Parameters
 ) extends RFReadArbiterBase(RFRdArbParams(backendParams.getRdCfgs[IntRD], backendParams.intPregParams)) {
   override protected def portRange: Range = 0 to backendParams.getRdPortIndices(IntData()).max
+}
+
+class FpRFReadArbiter(
+  backendParams: BackendParams
+)(implicit
+  p: Parameters
+) extends RFReadArbiterBase(RFRdArbParams(backendParams.getRdCfgs[FpRD], backendParams.intPregParams)) {
+  override protected def portRange: Range = 0 to backendParams.getRdPortIndices(FpData()).max
 }
 
 class VfRFReadArbiter(

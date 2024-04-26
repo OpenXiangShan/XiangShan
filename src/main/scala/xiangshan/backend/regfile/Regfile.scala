@@ -209,6 +209,27 @@ object IntRegFile {
   }
 }
 
+object FpRegFile {
+  // non-return version
+  def apply(
+             name         : String,
+             numEntries   : Int,
+             raddr        : Seq[UInt],
+             rdata        : Vec[UInt],
+             wen          : Seq[Bool],
+             waddr        : Seq[UInt],
+             wdata        : Seq[UInt],
+             debugReadAddr: Option[Seq[UInt]],
+             debugReadData: Option[Vec[UInt]],
+             withReset    : Boolean = false,
+             bankNum      : Int,
+           )(implicit p: Parameters): Unit = {
+    Regfile(
+      name, numEntries, raddr, rdata, wen, waddr, wdata,
+      hasZero = false, withReset, bankNum, debugReadAddr, debugReadData)
+  }
+}
+
 object VfRegFile {
   // non-return version
   def apply(
