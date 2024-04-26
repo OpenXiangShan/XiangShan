@@ -85,6 +85,11 @@ ifeq ($(WITH_ROLLINGDB),1)
 override SIM_ARGS += --with-rollingdb
 endif
 
+# run with disable all db
+ifeq ($(DISABLE_ALWAYSDB),1)
+override SIM_ARGS += --disable-alwaysdb
+endif
+
 # dynamic switch CONSTANTIN
 ifeq ($(WITH_CONSTANTIN),0)
 $(info disable WITH_CONSTANTIN)
