@@ -931,8 +931,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val exceptionHas = RegInit(false.B)
     val exceptionHasWire = Wire(Bool())
     exceptionHasWire := MuxCase(exceptionHas, Seq(
-      (needUpdate(i).valid && exceptionGen.io.out.valid && exceptionGen.io.out.bits.robIdx.value === needUpdateRobIdx(i)) -> true.B,
-      (!needUpdate(i).valid || allCommitted) -> false.B
+      // allCommitted has high priority, because the robidx in exceptionHas before maybe different from the current one
+      (!needUpdate(i).valid || allCommitted) -> false.B,
+      (needUpdate(i).valid && exceptionGen.io.out.valid && exceptionGen.io.out.bits.robIdx.value === needUpdateRobIdx(i)) -> true.B
     ))
     exceptionHas := exceptionHasWire
 
