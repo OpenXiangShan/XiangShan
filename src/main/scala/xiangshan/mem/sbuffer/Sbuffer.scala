@@ -217,7 +217,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   writeReq_valid := (0 until EnsbufferWidth).map{ i => writeReq(i).valid}
   val clkGate = Module(new STD_CLKGT_func)
    clkGate.io.TE := false.B
-   clkGate.io.E := writeReq_valid.asUInt.orR || (RegNext(writeReq_valid)).asUInt.orR || io.dcache.main_pipe_hit_resp.fire || io.dcache.refill_hit_resp.fire || RegNext(io.dcache.main_pipe_hit_resp.fire || io.dcache.refill_hit_resp.fire)
+   clkGate.io.E := writeReq_valid.asUInt.orR || (RegNext(writeReq_valid)).asUInt.orR || io.dcache.main_pipe_hit_resp.fire || RegNext(io.dcache.main_pipe_hit_resp.fire)
    clkGate.io.CK := clock
   val gate_clock = clkGate.io.Q
   dataModule.clock := gate_clock
