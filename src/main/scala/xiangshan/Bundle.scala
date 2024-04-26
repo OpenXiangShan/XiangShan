@@ -324,6 +324,7 @@ class ResetPregStateReq(implicit p: Parameters) extends XSBundle {
   // NOTE: set isInt and isFp both to 'false' when invalid
   val isInt = Bool()
   val isFp = Bool()
+  val isVec = Bool()
   val preg = UInt(PhyRegIdxWidth.W)
 }
 
