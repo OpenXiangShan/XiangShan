@@ -200,6 +200,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   val s1_isSpecialIndexed = isIndexed(s1_instType) && s1_emul.asSInt > s1_lmul.asSInt
   val s1_mask             = Mux(s1_isSpecialIndexed, s1_in.indexedSrcMask, s1_in.flowMask)
   val s1_vdIdx            = s1_in.vdIdxInField
+  val s1_fof              = s1_in.fof
   val s1_notIndexedStride = Mux( // stride for strided/unit-stride instruction
     isStrided(s1_instType),
     s1_stride(XLEN - 1, 0), // for strided load, stride = x[rs2]
@@ -207,7 +208,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   )
 
   val stride     = Mux(isIndexed(s1_instType), s1_stride, s1_notIndexedStride).asUInt // if is index instructions, get index when split
-  val uopOffset  = genVUopOffset(s1_instType, s1_uopidx, s1_nf, s1_eew(1, 0), stride, s1_alignedType)
+  val uopOffset  = genVUopOffset(s1_instType, s1_fof, s1_uopidx, s1_nf, s1_eew(1, 0), stride, s1_alignedType)
 
   s1_kill               := s1_in.uop.robIdx.needFlush(io.redirect)
 
