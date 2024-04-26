@@ -23,7 +23,7 @@ object DataConfig {
   def IntRegSrcDataSet: Set[DataConfig] = Set(IntData())
   def FpRegSrcDataSet : Set[DataConfig] = Set(FpData())
   def VecRegSrcDataSet: Set[DataConfig] = Set(VecData(), MaskSrcData(), VConfigData())
-  def VfRegSrcDataSet : Set[DataConfig] = Set(FpData(), VecData(), MaskSrcData(), VConfigData())
+  def VfRegSrcDataSet : Set[DataConfig] = Set(VecData(), MaskSrcData(), VConfigData())
 
   def RegDataMaxWidth : Int = RegSrcDataSet.map(_.dataWidth).max
 }

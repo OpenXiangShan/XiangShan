@@ -19,9 +19,10 @@ case class WbArbiterParams(
 
   def numOut = wbCfgs.head match {
     case _: WbConfig.IntWB => pregParams.numWrite.getOrElse(backendParams.getWbPortIndices(IntData()).size)
+    case _: WbConfig.FpWB => pregParams.numWrite.getOrElse(backendParams.getWbPortIndices(FpData()).size)
     case _: WbConfig.VfWB => pregParams.numWrite.getOrElse(backendParams.getWbPortIndices(VecData()).size)
     case x =>
-      assert(assertion = false, s"the WbConfig in WbArbiterParams should be either IntWB or VfWB, found ${x.getClass}")
+      assert(assertion = false, s"the WbConfig in WbArbiterParams should be either IntWB or FpWB or VfWB, found ${x.getClass}")
       0
   }
 

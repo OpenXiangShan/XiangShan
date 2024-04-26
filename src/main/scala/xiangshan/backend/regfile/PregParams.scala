@@ -23,6 +23,16 @@ case class IntPregParams(
   val isFake: Boolean = false
 }
 
+case class FpPregParams(
+                          numEntries: Int,
+                          numRead   : Option[Int],
+                          numWrite  : Option[Int],
+                        ) extends PregParams {
+
+  val dataCfg: DataConfig = FpData()
+  val isFake: Boolean = false
+}
+
 case class VfPregParams(
   numEntries: Int,
   numRead   : Option[Int],

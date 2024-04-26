@@ -6,8 +6,8 @@ import utils.EnumUtils.OHEnumeration
 import xiangshan.ExceptionNO._
 import xiangshan.SelImm
 import xiangshan.backend.Std
-import xiangshan.backend.fu.fpu.{FDivSqrt, FMA, FPToFP, FPToInt, IntToFP, IntFPToVec}
-import xiangshan.backend.fu.wrapper.{Alu, BranchUnit, DivUnit, JumpUnit, MulUnit, VFAlu, VFMA, VFDivSqrt, VIAluFix, VIMacU, VIDiv, VPPU, VIPU, VSetRiWi, VSetRiWvf, VSetRvfWvf, VCVT}
+import xiangshan.backend.fu.fpu.{FDivSqrt, FPToFP, FPToInt, IntToFP, IntFPToVec}
+import xiangshan.backend.fu.wrapper._
 import xiangshan.backend.Bundles.ExuInput
 import xiangshan.backend.datapath.DataConfig._
 
@@ -145,12 +145,13 @@ case class FuConfig (
 
   def needFPUCtrl: Boolean = {
     import FuType._
-    Seq(fmac, fDivSqrt, fmisc, i2f).contains(fuType)
+    Seq(fmac, fDivSqrt, i2f).contains(fuType)
   }
 
   def needVecCtrl: Boolean = {
     import FuType._
-    Seq(vipu, vialuF, vimac, vidiv, vfpu, vppu, vfalu, vfma, vfdiv, vfcvt, vldu, vstu).contains(fuType)
+    Seq(falu, fmac, fDivSqrt, fcvt,
+      vipu, vialuF, vimac, vidiv, vfpu, vppu, vfalu, vfma, vfdiv, vfcvt, vldu, vstu).contains(fuType)
   }
 
   def isMul: Boolean = fuType == FuType.mul
@@ -167,12 +168,12 @@ case class FuConfig (
                             fuType == FuType.vfdiv || fuType == FuType.vfcvt ||
                             fuType == FuType.vidiv
 
-  def needOg2: Boolean = isVecArith || fuType == FuType.fmisc || fuType == FuType.vsetfwf || fuType == FuType.f2v
+  def needOg2: Boolean = isVecArith || fuType == FuType.vsetfwf || fuType == FuType.f2v
 
   def isSta: Boolean = name.contains("sta")
 
   def ckAlwaysEn: Boolean = isCsr || isFence || fuType == FuType.vfalu ||
-                            fuType == FuType.fmisc || fuType == FuType.div ||
+                            fuType == FuType.div ||
                             fuType == FuType.vfdiv || fuType == FuType.vidiv
 
   /**
@@ -247,7 +248,6 @@ object FuConfig {
     ),
     piped = true,
     writeVecRf = true,
-    writeFpRf = true,
     latency = CertainLatency(0),
     dataBits = 128,
     immType = Set(SelImm.IMM_OPIVIU, SelImm.IMM_OPIVIS),
@@ -382,51 +382,6 @@ object FuConfig {
     writeIntRf = true,
     latency = CertainLatency(0),
     immType = Set(SelImm.IMM_VSETVLI, SelImm.IMM_VSETIVLI),
-  )
-
-  val FmacCfg: FuConfig = FuConfig (
-    name = "fmac",
-    fuType = FuType.fmac,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new FMA(cfg)(p).suggestName("FMac")),
-    srcData = Seq(
-      Seq(FpData(), FpData()),
-      Seq(FpData(), FpData(), FpData()),
-    ),
-    piped = false,
-    writeFpRf = true,
-    writeFflags = true,
-    latency = UncertainLatency(),
-    needSrcFrm = true,
-  )
-
-  val F2iCfg: FuConfig = FuConfig (
-    name = "f2i",
-    fuType = FuType.fmisc,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new FPToInt(cfg)(p).suggestName("F2i")),
-    srcData = Seq(
-      Seq(FpData(), FpData()),
-      Seq(FpData()),
-    ),
-    piped = true,
-    writeIntRf = true,
-    writeFflags = true,
-    latency = CertainLatency(2),
-    needSrcFrm = true,
-  )
-
-  val F2fCfg: FuConfig = FuConfig (
-    name = "f2f",
-    fuType = FuType.fmisc,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new FPToFP(cfg)(p).suggestName("F2f")),
-    srcData = Seq(
-      Seq(FpData(), FpData()),
-      Seq(FpData()),
-    ),
-    piped = true,
-    writeFpRf = true,
-    writeFflags = true,
-    latency = CertainLatency(2),
-    needSrcFrm = true,
   )
 
   val FDivSqrtCfg: FuConfig = FuConfig (
@@ -652,7 +607,6 @@ object FuConfig {
     ),
     piped = true,
     writeVecRf = true,
-    writeFpRf = true,
     writeIntRf = true,
     writeFflags = true,
     latency = CertainLatency(1),
@@ -672,7 +626,6 @@ object FuConfig {
     ),
     piped = true,
     writeVecRf = true,
-    writeFpRf = true,
     writeFflags = true,
     latency = CertainLatency(3),
     vconfigWakeUp = true,
@@ -691,7 +644,6 @@ object FuConfig {
     ),
     piped = false,
     writeVecRf = true,
-    writeFpRf = true,
     writeFflags = true,
     latency = UncertainLatency(),
     vconfigWakeUp = true,
@@ -710,7 +662,6 @@ object FuConfig {
     ),
     piped = true,
     writeVecRf = true,
-    writeFpRf = true,
     writeIntRf = true,
     writeFflags = true,
     latency = CertainLatency(2),
@@ -721,6 +672,67 @@ object FuConfig {
     needSrcFrm = true,
   )
 
+  val FaluCfg = FuConfig(
+    name = "falu",
+    fuType = FuType.falu,
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new FAlu(cfg)(p).suggestName("Falu")),
+    srcData = Seq(
+      Seq(FpData(), FpData()),
+    ),
+    piped = true,
+    writeFpRf = true,
+    writeIntRf = true,
+    writeFflags = true,
+    latency = CertainLatency(1),
+    dataBits = 64,
+    needSrcFrm = true,
+  )
+
+  val FmacCfg = FuConfig(
+    name = "fmac",
+    fuType = FuType.fmac,
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new FMA(cfg)(p).suggestName("Fmac")),
+    srcData = Seq(
+      Seq(FpData(), FpData(), FpData()),
+    ),
+    piped = true,
+    writeFpRf = true,
+    writeFflags = true,
+    latency = CertainLatency(3),
+    dataBits = 64,
+    needSrcFrm = true,
+  )
+
+  val FdivCfg = FuConfig(
+    name = "fdiv",
+    fuType = FuType.fDivSqrt,
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new FDivSqrt(cfg)(p).suggestName("Fdiv")),
+    srcData = Seq(
+      Seq(FpData(), FpData()),
+    ),
+    piped = false,
+    writeFpRf = true,
+    writeFflags = true,
+    latency = UncertainLatency(),
+    dataBits = 64,
+    needSrcFrm = true,
+  )
+
+  val FcvtCfg = FuConfig(
+    name = "fcvt",
+    fuType = FuType.fcvt,
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new FCVT(cfg)(p).suggestName("Fcvt")),
+    srcData = Seq(
+      Seq(FpData()),
+    ),
+    piped = true,
+    writeFpRf = true,
+    writeIntRf = true,
+    writeFflags = true,
+    latency = CertainLatency(2),
+    dataBits = 64,
+    needSrcFrm = true,
+  )
 
   val VlduCfg: FuConfig = FuConfig (
     name = "vldu",
@@ -762,7 +774,8 @@ object FuConfig {
 
   def allConfigs = Seq(
     JmpCfg, BrhCfg, I2fCfg, I2vCfg, F2vCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg, VSetRvfWvfCfg, VSetRiWvfCfg, VSetRiWiCfg,
-    FmacCfg, F2iCfg, F2fCfg, FDivSqrtCfg, LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg, VialuCfg, VipuCfg, VlduCfg, VstuCfg,
+    FDivSqrtCfg, LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg, VialuCfg, VipuCfg, VlduCfg, VstuCfg,
+    FaluCfg, FmacCfg, FcvtCfg, FdivCfg,
     VfaluCfg, VfmaCfg, VfcvtCfg, HyldaCfg, HystaCfg
   )
 
