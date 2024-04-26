@@ -19,10 +19,12 @@ package top
 import org.chipsalliance.cde.config.{Config, Parameters}
 import system.SoCParamsKey
 import xiangshan.{DebugOptionsKey, XSTileKey}
+import freechips.rocketchip.tile.MaxHartIdBits
 import difftest.DifftestModule
 
 import scala.annotation.tailrec
 import scala.sys.exit
+import chisel3.util.log2Up
 
 object ArgParser {
   // TODO: add more explainations
@@ -66,9 +68,12 @@ object ArgParser {
           nextOption(getConfigByName(confString), tail)
         case "--num-cores" :: value :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case XSTileKey => (0 until value.toInt) map{ i =>
+            case XSTileKey => (0 until value.toInt) map { i =>
               up(XSTileKey).head.copy(HartId = i)
             }
+            case MaxHartIdBits =>
+              require(log2Up(value.toInt) <= 10, "MaxHartIdBits should not be larger than 10.")
+              log2Up(value.toInt)
           }), tail)
         case "--with-dramsim3" :: tail =>
           nextOption(config.alter((site, here, up) => {
