@@ -447,6 +447,11 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     printRenameInfo(x, y)
   }
 
+  io.out.map { case x =>
+    when(x.valid && x.bits.rfWen){
+      assert(x.bits.ldest =/= 0.U, "rfWen cannot be 1 when Int regfile ldest is 0")
+    }
+  }
   val debugRedirect = RegEnable(io.redirect.bits, io.redirect.valid)
   // bad speculation
   val recStall = io.redirect.valid || io.rabCommits.isWalk
