@@ -71,8 +71,8 @@ class SpfctlBundle extends CSRBundle {
   // turn off L2 BOP, turn on L1 SMS by default
   val L2_PF_STORE_ONLY        = RW(    17).withReset(false.B)     // L2 pf store only
   val L1D_PF_ENABLE_STRIDE    = RW(    16).withReset(true.B)      // L1D prefetch enable stride
-  val L1D_PF_ACTIVE_STRIDE    = RW(15, 10, /*resetVal= */ 30.U)   // L1D prefetch active page stride
-  val L1D_PF_ACTIVE_THRESHOLD = RW( 9,  6, /*resetVal= */ 12.U)   // L1D prefetch active page threshold
+  val L1D_PF_ACTIVE_STRIDE    = SpfctlL1DPfActiveStride(15, 10).withReset(SpfctlL1DPfActiveStride.initValue)   // L1D prefetch active page stride
+  val L1D_PF_ACTIVE_THRESHOLD = SpfctlL1DPfActiveThreshold( 9,  6).withReset(SpfctlL1DPfActiveThreshold.initValue)   // L1D prefetch active page threshold
   val L1D_PF_ENABLE_PHT       = RW(     5).withReset(true.B)      // L1D prefetch enable pht
   val L1D_PF_ENABLE_AGT       = RW(     4).withReset(true.B)      // L1D prefetch enable agt
   val L1D_PF_TRAIN_ON_HIT     = RW(     3).withReset(false.B)     // L1D train prefetch on hit
@@ -82,7 +82,7 @@ class SpfctlBundle extends CSRBundle {
 }
 
 class SlvpredctlBundle extends CSRBundle {
-  val LVPRED_TIMEOUT          = RW(8, 4, /*resetVal= */ 3.U)
+  val LVPRED_TIMEOUT          = SlvpredCtlTimeOut(8, 4).withReset(SlvpredCtlTimeOut.initValue)
   val STORESET_NO_FAST_WAKEUP = RW(3).withReset(false.B)
   val STORESET_WAIT_STORE     = RW(2).withReset(false.B)
   val NO_SPEC_LOAD            = RW(1).withReset(false.B)
@@ -94,7 +94,7 @@ class SmblockctlBundle extends CSRBundle {
   val CACHE_ERROR_ENABLE               = RW(   6).withReset(true.B)   // Enable cache error after reset (CE).
   val SOFT_PREFETCH_ENABLE             = RW(   5).withReset(true.B)   // Enable soft-prefetch after reset (SP).
   val LDLD_VIO_CHECK_ENABLE            = RW(   4).withReset(true.B)   // Enable load load violation check after reset (LVC).
-  val SBUFFER_THRESHOLD                = SbufferField(3, 0).withReset(SbufferField.Th) // Store buffer flush threshold (Th).
+  val SBUFFER_THRESHOLD                = SbufferThreshold(3, 0).withReset(SbufferThreshold.initValue) // Store buffer flush threshold (Th).
 }
 
 class SrnctlBundle extends CSRBundle {
@@ -107,6 +107,19 @@ class SfetchctlBundle extends CSRBundle {
   val ICACHE_PARITY_ENABLE = RW(0).withReset(false.B) // L1I Cache Parity check enable
 }
 
-object SbufferField extends CSREnum with RWApply {
-  val Th = Value(7.U)
+object SbufferThreshold extends CSREnum with RWApply {
+  val initValue = Value(7.U)
 }
+
+object SpfctlL1DPfActiveStride extends CSREnum with RWApply {
+  val initValue = Value(30.U)
+}
+
+object SpfctlL1DPfActiveThreshold extends CSREnum with RWApply {
+  val initValue = Value(12.U)
+}
+
+object SlvpredCtlTimeOut extends CSREnum with RWApply {
+  val initValue = Value(3.U)
+}
+

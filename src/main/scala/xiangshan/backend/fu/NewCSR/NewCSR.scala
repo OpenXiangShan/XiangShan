@@ -5,7 +5,7 @@ import chisel3.util._
 import freechips.rocketchip.rocket.CSRs
 import org.chipsalliance.cde.config.Parameters
 import top.{ArgParser, Generator}
-import xiangshan.backend.fu.NewCSR.CSRBundles.{PrivState, RobCommitCSR}
+import xiangshan.backend.fu.NewCSR.CSRBundles.{CSRCustomState, PrivState, RobCommitCSR}
 import xiangshan.backend.fu.NewCSR.CSRDefines.{ContextStatus, PrivMode, VirtMode}
 import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast._
 import xiangshan.backend.fu.NewCSR.CSREvents.{CSREvents, DretEventSinkBundle, EventUpdatePrivStateOutput, MretEventSinkBundle, SretEventSinkBundle, TrapEntryEventInput, TrapEntryHSEventSinkBundle, TrapEntryMEventSinkBundle, TrapEntryVSEventSinkBundle}
@@ -95,7 +95,8 @@ class NewCSR(implicit val p: Parameters) extends Module
       val privState = new PrivState
       val interrupt = Bool()
       val wfiEvent = Bool()
-      val disableSfence = Bool()
+      val tvm = Bool()
+      val vtvm = Bool()
       // fp
       val fpState = new Bundle {
         val off = Bool()
@@ -117,6 +118,8 @@ class NewCSR(implicit val p: Parameters) extends Module
       // debug
       val debugMode = Bool()
       val singleStepFlag = Bool()
+      // custom
+      val custom = new CSRCustomState
     })
     // tlb
     val tlb = Output(new Bundle {
@@ -503,8 +506,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   val debugIntr = platformIRP.debugIP && debugIntrEnable
 
   // fence
-  // csr access check, special case
-  val tvmNotPermit = PRVM === PrivMode.S && mstatus.rdata.TVM.asBool
+  val tvm = mstatus.rdata.TVM.asBool
+  val vtvm = hstatus.rdata.VTVM.asBool
 
   private val rdata = Mux1H(csrRwMap.map { case (id, (_, rBundle)) =>
     (raddr === id.U) -> rBundle.asUInt
@@ -549,8 +552,51 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.out.interrupt := intrMod.io.out.interruptVec.valid
   io.out.wfiEvent := debugIntr || (mie.rdata.asUInt & mip.rdata.asUInt).orR
   io.out.debugMode := debugMode
-  io.out.disableSfence := tvmNotPermit || PRVM === PrivMode.U
   io.out.singleStepFlag := !debugMode && dcsr.rdata.STEP
+  io.out.tvm := tvm
+  io.out.vtvm := vtvm
+
+  /**
+   * [[io.out.custom]] connection
+   */
+  io.out.custom.l1I_pf_enable           := spfctl.rdata.L1I_PF_ENABLE.asBool
+  io.out.custom.l2_pf_enable            := spfctl.rdata.L2_PF_ENABLE.asBool
+  io.out.custom.l1D_pf_enable           := spfctl.rdata.L1D_PF_ENABLE.asBool
+  io.out.custom.l1D_pf_train_on_hit     := spfctl.rdata.L1D_PF_TRAIN_ON_HIT.asBool
+  io.out.custom.l1D_pf_enable_agt       := spfctl.rdata.L1D_PF_ENABLE_AGT.asBool
+  io.out.custom.l1D_pf_enable_pht       := spfctl.rdata.L1D_PF_ENABLE_PHT.asBool
+  io.out.custom.l1D_pf_active_threshold := spfctl.rdata.L1D_PF_ACTIVE_THRESHOLD.asUInt
+  io.out.custom.l1D_pf_active_stride    := spfctl.rdata.L1D_PF_ACTIVE_STRIDE.asUInt
+  io.out.custom.l1D_pf_enable_stride    := spfctl.rdata.L1D_PF_ENABLE_STRIDE.asBool
+  io.out.custom.l2_pf_store_only        := spfctl.rdata.L2_PF_STORE_ONLY.asBool
+
+  io.out.custom.icache_parity_enable    := sfetchctl.rdata.ICACHE_PARITY_ENABLE.asBool
+
+  io.out.custom.dsid                    := sdsid.rdata.asUInt
+
+  io.out.custom.lvpred_disable          := slvpredctl.rdata.LVPRED_DISABLE.asBool
+  io.out.custom.no_spec_load            := slvpredctl.rdata.NO_SPEC_LOAD.asBool
+  io.out.custom.storeset_wait_store     := slvpredctl.rdata.STORESET_WAIT_STORE.asBool
+  io.out.custom.storeset_no_fast_wakeup := slvpredctl.rdata.STORESET_NO_FAST_WAKEUP.asBool
+  io.out.custom.lvpred_timeout          := slvpredctl.rdata.LVPRED_TIMEOUT.asUInt
+
+  io.out.custom.bp_ctrl.ubtb_enable     := sbpctl.rdata.UBTB_ENABLE .asBool
+  io.out.custom.bp_ctrl.btb_enable      := sbpctl.rdata.BTB_ENABLE  .asBool
+  io.out.custom.bp_ctrl.bim_enable      := sbpctl.rdata.BIM_ENABLE  .asBool
+  io.out.custom.bp_ctrl.tage_enable     := sbpctl.rdata.TAGE_ENABLE .asBool
+  io.out.custom.bp_ctrl.sc_enable       := sbpctl.rdata.SC_ENABLE   .asBool
+  io.out.custom.bp_ctrl.ras_enable      := sbpctl.rdata.RAS_ENABLE  .asBool
+  io.out.custom.bp_ctrl.loop_enable     := sbpctl.rdata.LOOP_ENABLE .asBool
+
+  io.out.custom.sbuffer_threshold                := smblockctl.rdata.SBUFFER_THRESHOLD.asUInt
+  io.out.custom.ldld_vio_check_enable            := smblockctl.rdata.LDLD_VIO_CHECK_ENABLE.asBool
+  io.out.custom.soft_prefetch_enable             := smblockctl.rdata.SOFT_PREFETCH_ENABLE.asBool
+  io.out.custom.cache_error_enable               := smblockctl.rdata.CACHE_ERROR_ENABLE.asBool
+  io.out.custom.uncache_write_outstanding_enable := smblockctl.rdata.UNCACHE_WRITE_OUTSTANDING_ENABLE.asBool
+
+  io.out.custom.fusion_enable           := srnctl.rdata.FUSION_ENABLE.asBool
+  io.out.custom.wfi_enable              := srnctl.rdata.WFI_ENABLE.asBool
+  io.out.custom.svinval_enable          := srnctl.rdata.SVINVAL_ENABLE.asBool
 
   // Todo: record the last address to avoid xireg is different with xiselect
   toAIA.addr.valid := wenLegal && Seq(miselect, siselect, vsiselect).map(
