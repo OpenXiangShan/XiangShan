@@ -283,8 +283,9 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     if (i > 0) isWaitForward(i) && (!io.enqRob.isEmpty || Cat(io.fromRename.take(i).map(_.valid)).orR)
     else isWaitForward(i) && !io.enqRob.isEmpty
   }))
+  // Only the uop with block backward flag will block the next uop
   val nextCanOut = VecInit((0 until RenameWidth).map(i =>
-    (!isWaitForward(i) && !isBlockBackward(i)) || !io.fromRename(i).valid
+    !isBlockBackward(i) || !io.fromRename(i).valid
   ))
   val notBlockedByPrevious = VecInit((0 until RenameWidth).map(i =>
     if (i == 0) true.B
@@ -377,7 +378,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     * Part 4: send response to rename when dispatch queue accepts the uop
     */
   val hasValidInstr = VecInit(io.fromRename.map(_.valid)).asUInt.orR
-  val hasSpecialInstr = Cat((0 until RenameWidth).map(i => io.fromRename(i).valid && (isBlockBackward(i) || isWaitForward(i)))).orR
+  val hasSpecialInstr = Cat((0 until RenameWidth).map(i => io.fromRename(i).valid && isBlockBackward(i))).orR
   for (i <- 0 until RenameWidth) {
     io.recv(i) := thisCanActualOut(i) && io.enqRob.canAccept && dqCanAccept
     io.fromRename(i).ready := !hasValidInstr || !hasSpecialInstr && io.enqRob.canAccept && dqCanAccept
