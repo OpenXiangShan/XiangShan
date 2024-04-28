@@ -112,6 +112,10 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
   tableUpdate.zipWithIndex.foreach{ case (update, idx) =>
     when(allocMask(idx) || cancelMask(idx) || ldCancelMask(idx)) {
       update := true.B                                    //busy
+      if (idx == 0 && pregWB.isInstanceOf[IntWB]) {
+          // Int RegFile 0 is always ready
+          update := false.B
+      }
     }.elsewhen(wakeUpMask(idx) || wbMask(idx)) {
       update := false.B                                   //ready
     }.otherwise {
