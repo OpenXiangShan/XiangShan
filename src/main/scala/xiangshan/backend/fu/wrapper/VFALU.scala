@@ -327,12 +327,15 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   outSrcMaskRShift := (maskToMgu >> (outVecCtrl.vuopIdx(2,0) * vlMax))(4*numVecModule-1,0)
   val f16FFlagsEn = outSrcMaskRShift
   val f32FFlagsEn = Wire(Vec(numVecModule,UInt(4.W)))
-  for (i <- 0 until numVecModule){
-    f32FFlagsEn(i) := Cat(Fill(2, 0.U),outSrcMaskRShift(2*i+1,2*i))
-  }
   val f64FFlagsEn = Wire(Vec(numVecModule, UInt(4.W)))
-  for (i <- 0 until numVecModule) {
+  val f16VlMaskEn = vlMaskRShift
+  val f32VlMaskEn = Wire(Vec(numVecModule, UInt(4.W)))
+  val f64VlMaskEn = Wire(Vec(numVecModule, UInt(4.W)))
+  for (i <- 0 until numVecModule){
+    f32FFlagsEn(i) := Cat(Fill(2, 0.U), outSrcMaskRShift(2*i+1,2*i))
     f64FFlagsEn(i) := Cat(Fill(3, 0.U), outSrcMaskRShift(i))
+    f32VlMaskEn(i) := Cat(Fill(2, 0.U), vlMaskRShift(2 * i + 1, 2 * i))
+    f64VlMaskEn(i) := Cat(Fill(3, 0.U), vlMaskRShift(i))
   }
   val fflagsEn= Mux1H(
     Seq(
@@ -341,7 +344,14 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
       (outEew === 3.U) -> f64FFlagsEn.asUInt
     )
   )
-  allFFlagsEn := Mux(outIsResuction, Fill(4*numVecModule, 1.U), (fflagsEn & vlMaskRShift)).asTypeOf(allFFlagsEn)
+  val vlMaskEn = Mux1H(
+    Seq(
+      (outEew === 1.U) -> f16VlMaskEn.asUInt,
+      (outEew === 2.U) -> f32VlMaskEn.asUInt,
+      (outEew === 3.U) -> f64VlMaskEn.asUInt
+    )
+  )
+  allFFlagsEn := Mux(outIsResuction, Fill(4*numVecModule, 1.U), (fflagsEn & vlMaskEn)).asTypeOf(allFFlagsEn)
 
   val allFFlags = fflagsData.asTypeOf(Vec(4*numVecModule,UInt(5.W)))
   val outFFlags = allFFlagsEn.zip(allFFlags).map{
