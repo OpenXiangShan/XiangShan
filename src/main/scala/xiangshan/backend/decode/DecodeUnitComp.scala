@@ -228,6 +228,11 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           csBundle(1).lsrc(1) := FP_TMP_REG_MV.U
           csBundle(1).vecWen := true.B
           csBundle(1).ldest := VCONFIG_IDX.U
+        }.elsewhen(dest === 0.U) {
+          // write nothing, uop0 is a nop instruction
+          csBundle(0).rfWen := false.B
+          csBundle(0).fpWen := false.B
+          csBundle(0).vecWen := false.B
         }
         // use bypass vtype from vtypeGen
         csBundle(0).vpu.connectVType(io.vtypeBypass)
