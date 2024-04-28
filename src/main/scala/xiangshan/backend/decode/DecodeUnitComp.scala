@@ -176,6 +176,9 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   val uopRes = RegInit(0.U(log2Up(maxUopSize).W))
   val uopResNext = WireInit(uopRes)
   val e64 = 3.U(2.W)
+  val isUsSegment = instFields.MOP === 0.U && nf =/= 0.U && (instFields.LUMOP === 0.U || instFields.LUMOP === "b10000".U)
+  val isIxSegment = instFields.MOP(0) === 1.U && nf =/= 0.U
+  val isSdSegment = instFields.MOP === "b10".U && nf =/= 0.U
 
   //uop div up to maxUopSize
   val csBundle = Wire(Vec(maxUopSize, new DecodedInst))
@@ -1628,6 +1631,8 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(i + 1).uopIdx := i.U
         csBundle(i + 1).vlsInstr := true.B
       }
+      csBundle.head.waitForward := isUsSegment
+      csBundle(numOfUop - 1.U).blockBackward := isUsSegment
     }
     is(UopSplitType.VEC_S_LDST) {
       /*
@@ -1667,6 +1672,8 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(i + 2).uopIdx := i.U
         csBundle(i + 2).vlsInstr := true.B
       }
+      csBundle.head.waitForward := isSdSegment
+      csBundle(numOfUop - 1.U).blockBackward := isSdSegment
     }
     is(UopSplitType.VEC_I_LDST) {
     /*
@@ -1722,6 +1729,8 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(i + 1).uopIdx := i.U
         csBundle(i + 1).vlsInstr := true.B
       }
+      csBundle.head.waitForward := isIxSegment
+      csBundle(numOfUop - 1.U).blockBackward := isIxSegment
     }
   }
 
