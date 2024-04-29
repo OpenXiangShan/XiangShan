@@ -180,7 +180,7 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
   fpBusyTable match {
     case Some(bt) =>
       bt.io.allocPregs.zip(io.fromDispatch.allocPregs).foreach { case (btAllocPregs, dpAllocPregs) =>
-        btAllocPregs.valid := dpAllocPregs.isVec
+        btAllocPregs.valid := dpAllocPregs.isFp
         btAllocPregs.bits := dpAllocPregs.preg
       }
       bt.io.wbPregs.zipWithIndex.foreach { case (wb, i) =>
