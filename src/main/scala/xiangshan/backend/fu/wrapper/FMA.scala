@@ -9,6 +9,7 @@ import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.backend.fu.fpu.FpPipedFuncUnit
 import yunsuan.VfpuType
 import yunsuan.vector.VectorFloatFMA
+import yunsuan.fpulite.FloatFMA
 
 class FMA(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
   XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VfpuType.dummy, "fma OpType not supported")
@@ -20,7 +21,7 @@ class FMA(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
   private val src2 = inData.src(2)
 
   // modules
-  private val fma = Module(new VectorFloatFMA)
+  private val fma = Module(new FloatFMA)
 
   val fp_aIsFpCanonicalNAN  = fp_fmt === VSew.e32 && !src1.head(32).andR ||
                               fp_fmt === VSew.e16 && !src1.head(48).andR
@@ -33,15 +34,8 @@ class FMA(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
   fma.io.fp_a         := src1
   fma.io.fp_b         := src0
   fma.io.fp_c         := src2
-  fma.io.widen_a      := 0.U
-  fma.io.widen_b      := 0.U
-  fma.io.frs1         := 0.U
-  fma.io.is_frs1      := false.B
-  fma.io.uop_idx      := 0.U
-  fma.io.is_vec       := false.B
   fma.io.round_mode   := rm
   fma.io.fp_format    := fp_fmt
-  fma.io.res_widening := false.B
   fma.io.op_code      := opcode
   fma.io.fp_aIsFpCanonicalNAN := fp_aIsFpCanonicalNAN
   fma.io.fp_bIsFpCanonicalNAN := fp_bIsFpCanonicalNAN
