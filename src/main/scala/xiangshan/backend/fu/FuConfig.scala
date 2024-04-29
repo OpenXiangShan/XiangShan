@@ -247,6 +247,7 @@ object FuConfig {
       Seq(IntData(), IntData()),
     ),
     piped = true,
+    writeFpRf = true,
     writeVecRf = true,
     latency = CertainLatency(0),
     dataBits = 128,
