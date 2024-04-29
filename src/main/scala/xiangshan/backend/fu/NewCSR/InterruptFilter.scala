@@ -71,33 +71,19 @@ class InterruptFilter extends Module {
       case 1 =>
         (index, value)
       case 2 =>
-        val minIndex = Mux1H(
-          Seq(
-            value.head < value.drop(1).head,
-            value.head === value.drop(1).head,
-            value.head > value.drop(1).head,
-          ),
-          Seq(
-            index.head,
-            Mux(findIndex(index.head) < findIndex(index.drop(1).head), index.head, index.drop(1).head),
-            index.drop(1).head,
-          )
-        )
-        val minValue = Mux1H(
-          Seq(
-            value.head < value.drop(1).head,
-            value.head === value.drop(1).head,
-            value.head > value.drop(1).head,
-          ),
-          Seq(
-            value.head,
-            Mux(findIndex(index.head) < findIndex(index.drop(1).head), value.head, value.drop(1).head),
-            value.drop(1).head,
-          )
-        )
+        val minIndex = Mux1H(Seq(
+          (value.head < value.drop(1).head)   -> index.head,
+          (value.head === value.drop(1).head) -> Mux(findIndex(index.head) < findIndex(index.drop(1).head), index.head, index.drop(1).head),
+          (value.head > value.drop(1).head)   -> index.drop(1).head,
+        ))
+        val minValue = Mux1H(Seq(
+          (value.head < value.drop(1).head)   -> value.head,
+          (value.head === value.drop(1).head) -> Mux(findIndex(index.head) < findIndex(index.drop(1).head), value.head, value.drop(1).head),
+          (value.head > value.drop(1).head)   -> value.drop(1).head,
+        ))
         (Seq(minIndex), Seq(minValue))
       case _ =>
-        val (leftIndex, leftValue) = minSelect(index.take(value.size/2), value.take(value.size/2))
+        val (leftIndex, leftValue)   = minSelect(index.take(value.size/2), value.take(value.size/2))
         val (rightIndex, rightValue) = minSelect(index.drop(value.size/2), value.drop(value.size/2))
         minSelect(leftIndex ++ rightIndex, leftValue ++ rightValue)
     }
@@ -145,48 +131,46 @@ class InterruptFilter extends Module {
 
   // update mtopi
   io.out.mtopi.IID := Mux(mtopiIsNotZero, mIidNum, 0.U)
-  io.out.mtopi.IPRIO := Mux(mtopiIsNotZero, Mux(mIpriosIsZero, 1.U,
-    Mux1H(
-      Seq(
-        mtopiPrioNumReal >= 1.U && mtopiPrioNumReal <= 255.U,
-        (mtopiPrioNumReal > 255.U) || ((mtopiPrioNumReal === 0.U) && mIidDefaultPrioLowMEI),
-        (mtopiPrioNumReal === 0.U) && mIidDefaultPrioHighMEI,
-      ),
-      Seq(
-        mtopiPrioNumReal(7, 0),
-        255.U,
-        0.U,
-      )
-    )),
+  io.out.mtopi.IPRIO := Mux(
+    mtopiIsNotZero,
+    Mux(
+      mIpriosIsZero,
+      1.U,
+      Mux1H(Seq(
+        (mtopiPrioNumReal >= 1.U && mtopiPrioNumReal <= 255.U) -> mtopiPrioNumReal(7, 0),
+        ((mtopiPrioNumReal > 255.U) || ((mtopiPrioNumReal === 0.U) && mIidDefaultPrioLowMEI)) -> 255.U,
+        ((mtopiPrioNumReal === 0.U) && mIidDefaultPrioHighMEI) -> 0.U,
+      ))
+    ),
     0.U
   )
+
   // upadte stopi
   io.out.stopi.IID := Mux(stopiIsNotZero, hsIidNum, 0.U)
-  io.out.stopi.IPRIO := Mux(stopiIsNotZero, Mux(hsIpriosIsZero, 1.U,
-    Mux1H(
-      Seq(
-        stopiPrioNumReal >= 1.U && stopiPrioNumReal <= 255.U,
-        (stopiPrioNumReal > 255.U) || ((stopiPrioNumReal === 0.U) && hsIidDefaultPrioLowSEI),
-        (stopiPrioNumReal === 0.U) && hsIidDefaultPrioHighSEI,
-      ),
-      Seq(
-        stopiPrioNumReal(7, 0),
-        255.U,
-        0.U,
-      )
-    )),
+  io.out.stopi.IPRIO := Mux(
+    stopiIsNotZero,
+    Mux(
+      hsIpriosIsZero,
+      1.U,
+      Mux1H(Seq(
+        (stopiPrioNumReal >= 1.U && stopiPrioNumReal <= 255.U) -> stopiPrioNumReal(7, 0),
+        ((stopiPrioNumReal > 255.U) || ((stopiPrioNumReal === 0.U) && hsIidDefaultPrioLowSEI)) -> 255.U,
+        ((stopiPrioNumReal === 0.U) && hsIidDefaultPrioHighSEI) -> 0.U,
+      ))
+    ),
     0.U
   )
 
   // refactor this code & has some problem
-  val VSCandidate1: Bool = hidelegFields.VSEI && hipFields.VSEIP && hieFields.VSEIE.asBool && (hstatus.VGEIN.asUInt =/= 0.U) && (vstopei.asUInt =/= 0.U)
-  val VSCandidate2: Bool = hidelegFields.VSEI && hipFields.VSEIP && hieFields.VSEIE.asBool && (hstatus.VGEIN.asUInt === 0.U) && (hvictl.IID.asUInt === 9.U) && (hvictl.IPRIO.asUInt =/= 0.U)
-  val VSCandidate3: Bool = hidelegFields.VSEI && hipFields.VSEIP && hieFields.VSEIE.asBool && !VSCandidate1 && !VSCandidate2
-  val VSCandidate4: Bool = hvictl.VTI.asUInt === 0.U
-  val VSCandidate5: Bool = (hvictl.VTI.asUInt === 1.U) && (hvictl.IID.asUInt =/= 9.U)
+  val Candidate1: Bool = hidelegFields.VSEI && hipFields.VSEIP && hieFields.VSEIE.asBool && (hstatus.VGEIN.asUInt =/= 0.U) && (vstopei.asUInt =/= 0.U)
+  val Candidate2: Bool = hidelegFields.VSEI && hipFields.VSEIP && hieFields.VSEIE.asBool && (hstatus.VGEIN.asUInt === 0.U) && (hvictl.IID.asUInt === 9.U) && (hvictl.IPRIO.asUInt =/= 0.U)
+  val Candidate3: Bool = hidelegFields.VSEI && hipFields.VSEIP && hieFields.VSEIE.asBool && !Candidate1 && !Candidate2
+  val Candidate4: Bool = hvictl.VTI.asUInt === 0.U
+  val Candidate5: Bool = (hvictl.VTI.asUInt === 1.U) && (hvictl.IID.asUInt =/= 9.U)
+  val CandidateNoValid: Bool = !Candidate1 && !Candidate2 && !Candidate3 && !Candidate4 && !Candidate5
 
-  assert(PopCount(Cat(VSCandidate1, VSCandidate2, VSCandidate3)) < 2.U, "Only one Candidate could be select from Candidate1/2/3 in VS-level!")
-  assert(PopCount(Cat(VSCandidate4, VSCandidate5)) < 2.U, "Only one Candidate could be select from Candidate4/5 in VS-level!")
+  assert(PopCount(Cat(Candidate1, Candidate2, Candidate3)) < 2.U, "Only one Candidate could be select from Candidate1/2/3 in VS-level!")
+  assert(PopCount(Cat(Candidate4, Candidate5)) < 2.U, "Only one Candidate could be select from Candidate4/5 in VS-level!")
 
   val VSIidNumTmp = Wire(UInt(6.W))
   val VSIidNum = Wire(UInt(6.W))
@@ -200,95 +184,57 @@ class InterruptFilter extends Module {
     ((VSIidNumTmp =/= 0.U) && (VSIidNumTmp =/= 1.U)) -> (VSIidNumTmp + 11.U),
   ))
 
-  val iidVSCandidate1 = Wire(UInt(12.W))
-  val iidVSCandidate2 = Wire(UInt(12.W))
-  val iidVSCandidate3 = Wire(UInt(12.W))
-  val iidVSCandidate4 = Wire(UInt(12.W))
-  val iidVSCandidate5 = Wire(UInt(12.W))
-  val iprioVSCandidate1 = Wire(UInt(11.W))
-  val iprioVSCandidate2 = Wire(UInt(11.W))
-  val iprioVSCandidate3 = Wire(UInt(11.W))
-  val iprioVSCandidate4 = Wire(UInt(11.W))
-  val iprioVSCandidate5 = Wire(UInt(11.W))
+  val iidCandidate123   = Wire(UInt(12.W))
+  val iidCandidate45    = Wire(UInt(12.W))
+  val iprioCandidate123 = Wire(UInt(11.W))
+  val iprioCandidate45  = Wire(UInt(11.W))
+  iidCandidate123 := InterruptNO.SEI.U
+  iprioCandidate123 := Mux1H(Seq(
+    Candidate1 -> vstopei.IPRIO.asUInt,
+    Candidate2 -> hvictl.IPRIO.asUInt,
+    Candidate3 -> 256.U,
+  ))
+  iidCandidate45 := Mux1H(Seq(
+    Candidate4 -> VSIidNum,
+    Candidate5 -> hvictl.IID.asUInt,
+  ))
+  iprioCandidate45 := Mux1H(Seq(
+    Candidate4 -> VSPrioNum,
+    Candidate5 -> hvictl.IPRIO.asUInt,
+  ))
 
-  iidVSCandidate1 := InterruptNO.SEI.U
-  iidVSCandidate2 := InterruptNO.SEI.U
-  iidVSCandidate3 := InterruptNO.SEI.U
-  iidVSCandidate4 := VSIidNum
-  iidVSCandidate5 := hvictl.IID.asUInt
+  val Candidate123 = Candidate1 || Candidate2 || Candidate3
+  val Candidate45 = Candidate4 || Candidate5
 
-  iprioVSCandidate1 := vstopei.IPRIO.asUInt
-  iprioVSCandidate2 := hvictl.IPRIO.asUInt
-  iprioVSCandidate3 := 256.U
-  iprioVSCandidate4 := VSPrioNum
-  iprioVSCandidate5 := hvictl.IPRIO.asUInt
+  val Candidate123HighCandidate45 = Mux1H(Seq(
+    (Candidate123 && Candidate4)   -> ((iprioCandidate123 < iprioCandidate45) || ((iprioCandidate123 === iprioCandidate45) && (findIndex(iidCandidate123) <= findIndex(iidCandidate45)))),
+    (Candidate123 && Candidate5)   -> ((iprioCandidate123 < iprioCandidate45) || ((iprioCandidate123 === iprioCandidate45) && hvictl.DPR.asBool)),
+    (Candidate123 && !Candidate45) -> true.B,
+  ))
+  val Candidate123LowCandidate45 = Mux1H(Seq(
+    (Candidate123 && Candidate4)   -> ((iprioCandidate123 > iprioCandidate45) || ((iprioCandidate123 === iprioCandidate45) && (findIndex(iidCandidate123) > findIndex(iidCandidate45)))),
+    (Candidate123 && Candidate5)   -> ((iprioCandidate123 > iprioCandidate45) || ((iprioCandidate123 === iprioCandidate45) && !hvictl.DPR.asBool)),
+    (!Candidate123 && Candidate45) -> true.B,
+  ))
 
-  def iprioComp(iidA: UInt, iprioA: UInt, iidB: UInt, iprioB: UInt): (UInt, UInt) = {
-    val iprioAHighIprioB: Bool = (iprioA < iprioB) || ((iprioA === iprioB) && (findIndex(iidA) < findIndex(iidB))) || ((iprioA === iprioB) && (findIndex(iidA) === findIndex(iidB)))
-    val iprioBHighIprioA: Bool = (iprioA > iprioB) || ((iprioA === iprioB) && (findIndex(iidA) > findIndex(iidB)))
-    val iid = Mux1H(Seq(
-      iprioAHighIprioB -> iidA,
-      iprioBHighIprioA -> iidB,
-    ))
-    val iprio = Mux1H(Seq(
-      iprioAHighIprioB -> iprioA,
-      iprioBHighIprioA -> iprioB,
-    ))
-    (iid, iprio)
-  }
-
-  def iprioCompWithDPR(iidA: UInt, iprioA: UInt, iidB: UInt, iprioB: UInt, DPR: Bool): (UInt, UInt) = {
-    val iprioAHighIprioB: Bool = (iprioA < iprioB) || ((iprioA === iprioB) && !DPR)
-    val iprioBHighIprioA: Bool = (iprioA > iprioB) || ((iprioA === iprioB) && DPR)
-    val iid = Mux1H(Seq(
-      iprioAHighIprioB -> iidA,
-      iprioBHighIprioA -> iidB,
-    ))
-    val iprio = Mux1H(Seq(
-      iprioAHighIprioB -> iprioA,
-      iprioBHighIprioA -> iprioB,
-    ))
-    (iid, iprio)
-  }
-
-  val VSCandidate14 = iprioComp(iidVSCandidate1, iprioVSCandidate1, iidVSCandidate4, iprioVSCandidate4)
-  val VSCandidate24 = iprioComp(iidVSCandidate2, iprioVSCandidate2, iidVSCandidate4, iprioVSCandidate4)
-  val VSCandidate34 = iprioComp(iidVSCandidate3, iprioVSCandidate3, iidVSCandidate4, iprioVSCandidate4)
-  val VSCandidate15 = iprioCompWithDPR(iidVSCandidate5, iprioVSCandidate5, iidVSCandidate1, iprioVSCandidate1, hvictl.DPR.asBool)
-  val VSCandidate25 = iprioCompWithDPR(iidVSCandidate5, iprioVSCandidate5, iidVSCandidate2, iprioVSCandidate2, hvictl.DPR.asBool)
-  val VSCandidate35 = iprioCompWithDPR(iidVSCandidate5, iprioVSCandidate5, iidVSCandidate3, iprioVSCandidate3, hvictl.DPR.asBool)
-
-  val Candidate1Valid  = VSCandidate1 && !VSCandidate4 && !VSCandidate5
-  val Candidate2Valid  = VSCandidate2 && !VSCandidate4 && !VSCandidate5
-  val Candidate3Valid  = VSCandidate3 && !VSCandidate4 && !VSCandidate5
-  val Candidate4Valid  = VSCandidate4 && !VSCandidate1 && !VSCandidate2 && !VSCandidate3
-  val Candidate5Valid  = VSCandidate5 && !VSCandidate1 && !VSCandidate2 && !VSCandidate3
-  val Candidate14Valid = VSCandidate1 && VSCandidate4
-  val Candidate15Valid = VSCandidate1 && VSCandidate5
-  val Candidate24Valid = VSCandidate2 && VSCandidate4
-  val Candidate25Valid = VSCandidate2 && VSCandidate5
-  val Candidate34Valid = VSCandidate3 && VSCandidate4
-  val Candidate35Valid = VSCandidate3 && VSCandidate5
-  val CandidateNoValid = !VSCandidate1 && !VSCandidate2 && !VSCandidate3 && !VSCandidate4 && !VSCandidate5
+  val iidCandidate = Wire(UInt(12.W))
+  val iprioCandidate = Wire(UInt(11.W))
+  iidCandidate := Mux1H(Seq(
+    Candidate123HighCandidate45 -> iidCandidate123,
+    Candidate123LowCandidate45 -> iidCandidate45,
+  ))
+  iprioCandidate := Mux1H(Seq(
+    Candidate123HighCandidate45 -> iprioCandidate123,
+    Candidate123LowCandidate45 -> iprioCandidate45,
+  ))
 
   // update vstopi
-  io.out.vstopi.IID := Mux1H(Seq(
-    Candidate14Valid -> VSCandidate14._1,
-    Candidate15Valid -> VSCandidate15._1,
-    Candidate24Valid -> VSCandidate24._1,
-    Candidate25Valid -> VSCandidate25._1,
-    Candidate34Valid -> VSCandidate34._1,
-    Candidate35Valid -> VSCandidate35._1,
-    CandidateNoValid -> 0.U,
-  ))
+  io.out.vstopi.IID := Mux(CandidateNoValid, 0.U, iidCandidate)
   io.out.vstopi.IPRIO := Mux1H(Seq(
-    Candidate14Valid -> VSCandidate14._2(7, 0),
-    Candidate15Valid -> Mux(hvictl.IPRIOM.asBool, VSCandidate15._2(7, 0), 1.U),
-    Candidate24Valid -> VSCandidate24._2(7, 0),
-    Candidate25Valid -> Mux(hvictl.IPRIOM.asBool, VSCandidate25._2(7, 0), 1.U),
-    Candidate34Valid -> Mux(VSCandidate34._2 > 255.U, 255.U, VSCandidate34._2(7, 0)),
-    Candidate35Valid -> Mux(hvictl.IPRIOM.asBool, Mux(VSCandidate34._2 > 255.U, 255.U, VSCandidate35._2(7, 0)), 1.U),
     CandidateNoValid -> 0.U,
+    (iprioCandidate > 255.U) -> 255.U,
+    (Candidate123LowCandidate45 && Candidate5 && !hvictl.IPRIOM.asBool) -> 1.U,
+    (Candidate123HighCandidate45 || (Candidate123LowCandidate45 && Candidate4) || (Candidate123LowCandidate45 && Candidate5 && hvictl.IPRIOM.asBool)) -> iprioCandidate(7, 0),
   ))
 
   val mIRVec = Mux(
