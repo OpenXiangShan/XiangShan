@@ -10,6 +10,7 @@ import xiangshan.backend.fu.fpu.FpNonPipedFuncUnit
 import xiangshan.backend.rob.RobPtr
 import yunsuan.VfpuType
 import yunsuan.vector.VectorFloatDivider
+import yunsuan.fpulite.FloatDivider
 
 class FDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends FpNonPipedFuncUnit(cfg) {
   XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VfpuType.dummy, "fdiv OpType not supported")
@@ -20,7 +21,7 @@ class FDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends FpNonPipedFuncUnit
   private val src1 = inData.src(1)
 
   // modules
-  private val fdiv = Module(new VectorFloatDivider)
+  private val fdiv = Module(new FloatDivider)
 
   val fp_aIsFpCanonicalNAN  = fp_fmt === VSew.e32 && !src1.head(32).andR ||
                               fp_fmt === VSew.e16 && !src1.head(48).andR
@@ -40,13 +41,8 @@ class FDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends FpNonPipedFuncUnit
   fdiv.io.fp_format_i    := fp_fmt
   fdiv.io.opa_i          := src1
   fdiv.io.opb_i          := src0
-  fdiv.io.frs2_i         := 0.U
-  fdiv.io.frs1_i         := 0.U
-  fdiv.io.is_frs2_i      := false.B
-  fdiv.io.is_frs1_i      := false.B
   fdiv.io.is_sqrt_i      := opcode
   fdiv.io.rm_i           := rm
-  fdiv.io.is_vec_i       := false.B
   fdiv.io.fp_aIsFpCanonicalNAN := fp_aIsFpCanonicalNAN
   fdiv.io.fp_bIsFpCanonicalNAN := fp_bIsFpCanonicalNAN
 
