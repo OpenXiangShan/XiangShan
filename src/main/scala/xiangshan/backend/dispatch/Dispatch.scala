@@ -189,7 +189,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val isVStore = VecInit(io.fromRename.map(req => FuType.isVStore(req.bits.fuType)))
   val isAMO    = VecInit(io.fromRename.map(req => FuType.isAMO(req.bits.fuType)))
   val isBlockBackward = VecInit(io.fromRename.map(_.bits.blockBackward))
-  val isWaitForward    = VecInit(io.fromRename.map(_.bits.waitForward))
+  val isWaitForward    = VecInit(io.fromRename.map(x => x.valid && x.bits.waitForward))
 
   val singleStepStatus = RegInit(false.B)
   val inst0actualOut = io.enqRob.req(0).valid
@@ -271,18 +271,21 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val allResourceReady = io.enqRob.canAccept && toIntDqCanAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
 
   // Instructions should enter dispatch queues in order.
-  // thisIsBlocked: this instruction is blocked by itself (based on noSpecExec)
+  // blockedByWaitForward: this instruction is blocked by itself (based on waitForward)
   // nextCanOut: next instructions can out (based on blockBackward)
   // notBlockedByPrevious: previous instructions can enqueue
   val hasException = VecInit(io.fromRename.zip(updatedUop).map {
     case (fromRename: DecoupledIO[DynInst], uop: DynInst) =>
       selectFrontend(fromRename.bits.exceptionVec).asUInt.orR || uop.singleStep || fromRename.bits.trigger.getFrontendCanFire
   })
-  val thisIsBlocked = VecInit((0 until RenameWidth).map(i => {
-    // for i > 0, when Rob is empty but dispatch1 have valid instructions to enqueue, it's blocked
-    if (i > 0) isWaitForward(i) && (!io.enqRob.isEmpty || Cat(io.fromRename.take(i).map(_.valid)).orR)
-    else isWaitForward(i) && !io.enqRob.isEmpty
-  }))
+
+  private val blockedByWaitForward = Wire(Vec(RenameWidth, Bool()))
+  blockedByWaitForward(0) := !io.enqRob.isEmpty && isWaitForward(0)
+  for (i <- 1 until RenameWidth) {
+    blockedByWaitForward(i) := blockedByWaitForward(i - 1) || !io.enqRob.isEmpty && isWaitForward(i)
+  }
+  dontTouch(blockedByWaitForward)
+
   // Only the uop with block backward flag will block the next uop
   val nextCanOut = VecInit((0 until RenameWidth).map(i =>
     !isBlockBackward(i) || !io.fromRename(i).valid
@@ -297,7 +300,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   // this instruction can actually dequeue: 3 conditions
   // (1) resources are ready
   // (2) previous instructions are ready
-  val thisCanActualOut = (0 until RenameWidth).map(i => !thisIsBlocked(i) && notBlockedByPrevious(i))
+  val thisCanActualOut = (0 until RenameWidth).map(i => !blockedByWaitForward(i) && notBlockedByPrevious(i))
   val thisActualOut = (0 until RenameWidth).map(i => io.enqRob.req(i).valid && io.enqRob.canAccept)
   val hasValidException = io.fromRename.zip(hasException).map(x => x._1.valid && x._2)
 
