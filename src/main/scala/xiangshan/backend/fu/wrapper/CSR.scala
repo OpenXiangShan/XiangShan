@@ -162,16 +162,10 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   // ctrl block will use theses later for flush // Todo: optimize isXRetFlag's DelayN
   val isXRetFlag = RegInit(false.B)
-  isXRetFlag := Mux1H(
-    Seq(
-      DelayN(flush, 5),
-      isXRet,
-    ),
-    Seq(
-      false.B,
-      true.B,
-    )
-  )
+  isXRetFlag := Mux1H(Seq(
+    DelayN(flush, 5) -> false.B,
+    isXRet -> true.B,
+  ))
 
   flushPipe := csrMod.io.out.flushPipe || isXRet // || frontendTriggerUpdate // Todo: trigger
 
