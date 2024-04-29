@@ -6,7 +6,7 @@ import utils.EnumUtils.OHEnumeration
 import xiangshan.ExceptionNO._
 import xiangshan.SelImm
 import xiangshan.backend.Std
-import xiangshan.backend.fu.fpu.{FDivSqrt, FPToFP, FPToInt, IntToFP, IntFPToVec}
+import xiangshan.backend.fu.fpu.{ FPToFP, FPToInt, IntToFP, IntFPToVec}
 import xiangshan.backend.fu.wrapper._
 import xiangshan.backend.Bundles.ExuInput
 import xiangshan.backend.datapath.DataConfig._
