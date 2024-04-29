@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRROField => RO, CSRRWField => RW, CSRWARLField => WARL, CSRWLRLField => WLRL, _}
 import CSRConfig._
+import xiangshan.backend.fu.NewCSR.CSRBundles.PrivState
 
 import scala.collection.immutable.SeqMap
 
@@ -61,6 +62,22 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
   })
     .setAddr(0xEB0)
 
+  // iprios isn't CSR register
+  val iprios: Seq[CSRModule[IprioBundle]] = (0 to 0xE by 2).map(num =>
+    Module(new CSRModule(s"Iprio$num", new IprioBundle) with HasISelectBundle {
+      val ModeIsM: Bool = privState.PRVM.asUInt === PrivMode.M.asUInt
+      val ModeIsS: Bool = privState.PRVM.asUInt === PrivMode.S.asUInt
+
+      when(ModeIsM && (miselect.asUInt === (0x30 + num).U) && wen) {
+        reg.ALL := mireg
+      }
+      when(ModeIsS && (siselect.asUInt === (0x30 + num).U) && wen) {
+        reg.ALL := sireg
+      }
+    })
+      .setAddr(0x30 + num) 
+  )
+
   val aiaCSRMods = Seq(
     miselect,
     mireg,
@@ -74,7 +91,7 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
     vsireg,
     vstopi,
     vstopei,
-  )
+  ) ++ iprios
 
   val aiaCSRMap = SeqMap.from(
     aiaCSRMods.map(csr => (csr.addr -> (csr.w -> csr.rdata.asInstanceOf[CSRBundle].asUInt))).iterator
@@ -138,6 +155,10 @@ class TopEIBundle extends CSRBundle {
   val IPRIO = RW(10, 0)
 }
 
+class IprioBundle extends CSRBundle {
+  val ALL = RW(63, 0).withReset(0.U)
+}
+
 class CSRToAIABundle extends Bundle {
   private final val AddrWidth = 12
 
@@ -181,7 +202,9 @@ trait HasInterruptFilterBundle { self: CSRModule[_] =>
 }
 
 trait HasISelectBundle { self: CSRModule[_] =>
+  val privState = IO(Input(new PrivState))
   val miselect = IO(Input(new MISelectBundle))
   val siselect = IO(Input(new SISelectBundle))
-  val vsiselect = IO(Input(new VSISelectBundle))
+  val mireg = IO(Input(UInt(XLEN.W)))
+  val sireg = IO(Input(UInt(XLEN.W)))
 }
