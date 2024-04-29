@@ -220,11 +220,6 @@ class NewCSR(implicit val p: Parameters) extends Module
   val entryPrivState = trapHandleMod.io.out.entryPrivState
 
     // interrupt
-  val iprioMod = Module(new IprioModule)
-  iprioMod.io.in.miselect := miselect.rdata.asUInt
-  iprioMod.io.in.siselect := siselect.rdata.asUInt
-  iprioMod.io.in.vsiselect := vsiselect.rdata.asUInt
-
   val intrMod = Module(new InterruptFilter)
   intrMod.io.in.mstatusMIE := mstatus.rdata.MIE.asBool
   intrMod.io.in.sstatusSIE := mstatus.rdata.SIE.asBool
@@ -244,7 +239,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   intrMod.io.in.vstopei := vstopei.rdata.asUInt
   intrMod.io.in.hviprio1 := hviprio1.rdata.asUInt
   intrMod.io.in.hviprio2 := hviprio2.rdata.asUInt
-  intrMod.io.in.iprios := iprioMod.io.out.iprios
+  intrMod.io.in.iprios := Cat(iprios.map(iprio => iprio.rdata.asUInt))
   // val disableInterrupt = debugMode || (dcsr.rdata.STEP.asBool && !dcsr.rdata.STEPIE.asBool)
   // val intrVec = Cat(debugIntr && !debugMode, mie.rdata.asUInt(11, 0) & mip.rdata.asUInt & intrVecEnable.asUInt) // Todo: asUInt(11,0) is ok?
 
@@ -366,9 +361,12 @@ class NewCSR(implicit val p: Parameters) extends Module
     }
     mod match {
       case m: HasISelectBundle =>
+        m.privState.PRVM := PRVM
+        m.privState.V := V
         m.miselect := miselect.regOut
         m.siselect := siselect.regOut
-        m.vsiselect := vsiselect.regOut
+        m.mireg := mireg.regOut.asUInt
+        m.sireg := sireg.regOut.asUInt
       case _ =>
     }
   }
