@@ -338,6 +338,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   val s1_srcType: MixedVec[MixedVec[Vec[UInt]]] = MixedVecInit(fromIQ.map(x => MixedVecInit(x.map(xx => RegEnable(xx.bits.srcType, xx.fire)).toSeq)))
 
   val s1_intPregRData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src.cloneType).toSeq))))
+  val s1_fpPregRData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src.cloneType).toSeq))))
   val s1_vfPregRData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src.cloneType).toSeq))))
 
   val rfrPortConfigs = schdParams.map(_.issueBlockParams).flatten.map(_.exuBlockParams.map(_.rfrPortConfigs))
@@ -352,6 +353,18 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
           .filter { case (_, rfrPortConfig) => rfrPortConfig.isInstanceOf[IntRD] }
           .foreach { case (sink, cfg) => sink := intRfRdata(cfg.port) }
       }
+  }
+
+  println(s"[DataPath] s1_fpPregRData.flatten.flatten.size: ${s1_fpPregRData.flatten.flatten.size}, fpRfRdata.size: ${fpRfRdata.size}")
+  s1_fpPregRData.foreach(_.foreach(_.foreach(_ := 0.U)))
+  s1_fpPregRData.zip(rfrPortConfigs).foreach { case (iqRdata, iqCfg) =>
+    iqRdata.zip(iqCfg).foreach { case (iuRdata, iuCfg) =>
+      val realIuCfg = iuCfg.map(x => if (x.size > 1) x.filter(_.isInstanceOf[FpRD]) else x).flatten
+      assert(iuRdata.size == realIuCfg.size, "iuRdata.size != realIuCfg.size")
+      iuRdata.zip(realIuCfg)
+        .filter { case (_, rfrPortConfig) => rfrPortConfig.isInstanceOf[FpRD] }
+        .foreach { case (sink, cfg) => sink := fpRfRdata(cfg.port) }
+    }
   }
 
   println(s"[DataPath] s1_vfPregRData.flatten.flatten.size: ${s1_vfPregRData.flatten.flatten.size}, vfRfRdata.size: ${vfRfRdata.size}")
@@ -492,7 +505,10 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
             Some(SrcType.isXp(s1_srcType(i)(j)(k)) -> s1_intPregRData(i)(j)(k))
           else None) :+
           (if (s1_vfPregRData(i)(j).isDefinedAt(k) && srcDataTypeSet.intersect(VfRegSrcDataSet).nonEmpty)
-            Some(SrcType.isVfp(s1_srcType(i)(j)(k))-> s1_vfPregRData(i)(j)(k))
+            Some(SrcType.isVp(s1_srcType(i)(j)(k))-> s1_vfPregRData(i)(j)(k))
+          else None) :+
+          (if (s1_fpPregRData(i)(j).isDefinedAt(k) && srcDataTypeSet.intersect(FpRegSrcDataSet).nonEmpty)
+            Some(SrcType.isFp(s1_srcType(i)(j)(k)) -> s1_fpPregRData(i)(j)(k))
           else None)
         ).filter(_.nonEmpty).map(_.get)
         if (readRfMap.nonEmpty)
