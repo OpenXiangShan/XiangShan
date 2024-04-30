@@ -88,7 +88,7 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   val diffPtr = RegInit(0.U.asTypeOf(new RenameBufferPtr))
   val diffPtrNext = Wire(new RenameBufferPtr)
   // Regs
-  val renameBuffer = Mem(size, new RenameBufferEntry)
+  val renameBuffer = Reg(Vec(size, new RenameBufferEntry))
   val renameBufferEntries = VecInit((0 until size) map (i => renameBuffer(i)))
 
   val s_idle :: s_special_walk :: s_walk :: Nil = Enum(3)
