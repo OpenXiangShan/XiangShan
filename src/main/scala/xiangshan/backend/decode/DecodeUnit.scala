@@ -454,6 +454,13 @@ object HypervisorDecode extends DecodeConstants {
   )
 }
 
+object ZicondDecode extends DecodeConstants {
+  override val decodeArray: Array[(BitPat, XSDecodeBase)] = Array(
+    CZERO_EQZ   -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.czero_eqz, SelImm.X, xWen = T, canRobCompress = T),
+    CZERO_NEZ   -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.czero_nez, SelImm.X, xWen = T, canRobCompress = T),
+  )
+}
+
 /**
  * XiangShan Trap Decode constants
  */
@@ -672,7 +679,8 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     CBODecode.table ++
     SvinvalDecode.table ++
     HypervisorDecode.table ++
-    VecDecoder.table
+    VecDecoder.table ++
+    ZicondDecode.table
 
   require(decode_table.map(_._2.length == 15).reduce(_ && _), "Decode tables have different column size")
   // assertion for LUI: only LUI should be assigned `selImm === SelImm.IMM_U && fuType === FuType.alu`

@@ -126,6 +126,21 @@ class MiscResultSelect(implicit p: Parameters) extends XSModule {
   io.miscRes := Mux(io.func(5), maskedLogicRes, Mux(io.func(4), logicAdv, logicBase))
 }
 
+class ConditionalZeroModule(implicit p: Parameters) extends XSModule {
+  val io = IO(new Bundle() {
+    val condition = Input(UInt(XLEN.W))
+    val value = Input(UInt(XLEN.W))
+    val isNez = Input(Bool())
+    val condRes = Output(UInt(XLEN.W))
+  })
+
+  val condition_zero = io.condition === 0.U
+  val use_zero = !io.isNez &&  condition_zero ||
+                  io.isNez && !condition_zero
+
+  io.condRes := Mux(use_zero, 0.U, io.value)
+}
+
 class ShiftResultSelect(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val func = Input(UInt(4.W))
@@ -169,12 +184,13 @@ class WordResultSelect(implicit p: Parameters) extends XSModule {
 class AluResSel(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val func = Input(UInt(3.W))
-    val addRes, shiftRes, miscRes, compareRes, wordRes = Input(UInt(XLEN.W))
+    val addRes, shiftRes, miscRes, compareRes, wordRes, condRes = Input(UInt(XLEN.W))
     val aluRes = Output(UInt(XLEN.W))
   })
 
   val res = Mux(io.func(2, 1) === 0.U, Mux(io.func(0), io.wordRes, io.shiftRes),
-            Mux(!io.func(2), Mux(io.func(0), io.compareRes, io.addRes), io.miscRes))
+                                       Mux(!io.func(2), Mux(io.func(0), io.compareRes, io.addRes),
+                                                        Mux(io.func(1, 0) === 3.U, io.condRes, io.miscRes)))
   io.aluRes := res
 }
 
@@ -334,6 +350,13 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   miscResSel.io.src     := src1
   val miscRes = miscResSel.io.miscRes
 
+  val condModule = Module(new ConditionalZeroModule)
+  condModule.io.value     := src1
+  condModule.io.condition := src2
+  condModule.io.isNez     := func(1)
+  val condRes = condModule.io.condRes
+
+
   val wordResSel = Module(new WordResultSelect)
   wordResSel.io.func := func
   wordResSel.io.addw := addw
@@ -352,6 +375,7 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   aluResSel.io.shiftRes := shiftRes
   aluResSel.io.miscRes := miscRes
   aluResSel.io.wordRes := wordRes
+  aluResSel.io.condRes := condRes
   val aluRes = aluResSel.io.aluRes
 
   io.result := aluRes
