@@ -6,7 +6,7 @@ import chisel3.util.{DecoupledIO, MixedVec, ValidIO, log2Up}
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles.WriteBackBundle
 import xiangshan.backend.datapath.DataConfig.{FpData, IntData, VecData}
-import xiangshan.backend.datapath.WbConfig.{IntWB, PregWB, VfWB}
+import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.regfile.PregParams
 
 case class WbArbiterParams(
@@ -40,7 +40,7 @@ case class WbArbiterParams(
         ValidIO(new WriteBackBundle(
           wbCfgs.head.dataCfg match {
             case IntData() => IntWB(port = x)
-            case FpData() => VfWB(port = x)
+            case FpData()  => FpWB(port = x)
             case VecData() => VfWB(port = x)
             case _ => ???
           },
