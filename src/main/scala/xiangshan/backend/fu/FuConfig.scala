@@ -349,7 +349,7 @@ object FuConfig {
     fuType = FuType.vsetfwf,
     fuGen = (p: Parameters, cfg: FuConfig) => Module(new VSetRvfWvf(cfg)(p).suggestName("VSetRvfWvf")),
     srcData = Seq(
-      Seq(FpData(), FpData()),
+      Seq(VecData(), VecData()),
     ),
     piped = true,
     writeVecRf = true,
