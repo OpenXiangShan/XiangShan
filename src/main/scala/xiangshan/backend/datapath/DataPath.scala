@@ -667,7 +667,7 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
   val fromPcTargetMem = Flipped(new PcToDataPathIO(params))
 
   val debugIntRat     = if (params.debugEn) Some(Input(Vec(32, UInt(intSchdParams.pregIdxWidth.W)))) else None
-  val debugFpRat      = if (params.debugEn) Some(Input(Vec(32, UInt(vfSchdParams.pregIdxWidth.W)))) else None
+  val debugFpRat      = if (params.debugEn) Some(Input(Vec(32, UInt(fpSchdParams.pregIdxWidth.W)))) else None
   val debugVecRat     = if (params.debugEn) Some(Input(Vec(32, UInt(vfSchdParams.pregIdxWidth.W)))) else None
   val debugVconfigRat = if (params.debugEn) Some(Input(UInt(vfSchdParams.pregIdxWidth.W))) else None
   val debugVconfig    = if (params.debugEn) Some(Output(UInt(XLEN.W))) else None
