@@ -434,10 +434,10 @@ case class XSCoreParameters
         ExeUnitParams("VLSU0", Seq(VlduCfg, VstuCfg), Seq(VfWB(0, 0)), Seq(Seq(VfRD(10, 0)), Seq(VfRD(11, 0)), Seq(VfRD(12, 0)), Seq(VfRD(13, 0)), Seq(VfRD(14, 0)))),
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
-        ExeUnitParams("STD0", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(10, 1), VfRD(12, Int.MaxValue)))),
+        ExeUnitParams("STD0", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(10, 1), FpRD(14, 0)))),
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
-        ExeUnitParams("STD1", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(11, 1), VfRD(13, Int.MaxValue)))),
+        ExeUnitParams("STD1", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(11, 1), FpRD(15, 0)))),
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
     ),
       numPregs = intPreg.numEntries max vfPreg.numEntries,
