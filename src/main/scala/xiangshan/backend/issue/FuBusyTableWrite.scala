@@ -42,7 +42,7 @@ class FuBusyTableWrite(fuLatencyMap: Map[FuType.OHType, Int]) (implicit p: Param
     VecInit((0 until tableSize).map {
       lat =>
         Cat(
-          latMappedFuTypeSet.getOrElse(lat, Set()).map(
+          latMappedFuTypeSet.getOrElse(lat, Set()).toSeq.sorted.map(
             fuType => resp.bits.fuType(fuType.id)
           ).toSeq
         ).orR
