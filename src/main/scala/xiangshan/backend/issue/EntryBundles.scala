@@ -288,6 +288,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       val vlIsVlmax = commonIn.vlIsVlmax
       val ignoreTail = vlIsVlmax && (vm =/= 0.U || vma) && !isWritePartVd
       val ignoreWhole = !vlIsVlmax && (vm =/= 0.U || vma) && vta
+      val srcIsVec = SrcType.isVp(srcStatus.srcType)
       if (params.numVfSrc > 0 && srcIdx == 2) {
         /**
           * the src store the old vd, update it when vl is write back
@@ -295,7 +296,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
           * 2. when vl = 0, we cannot set the srctype to imm because the vd keep the old value
           * 3. when vl = vlmax, we can set srctype to imm when vta is not set
           */
-        ignoreOldVd := vlWakeUpByWb && !isDependOldvd && !vlIsZero && (ignoreTail || ignoreWhole)
+        ignoreOldVd := srcIsVec && vlWakeUpByWb && !isDependOldvd && !vlIsZero && (ignoreTail || ignoreWhole)
       } else {
         ignoreOldVd := false.B
       }
