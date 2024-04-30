@@ -282,7 +282,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   private val blockedByWaitForward = Wire(Vec(RenameWidth, Bool()))
   blockedByWaitForward(0) := !io.enqRob.isEmpty && isWaitForward(0)
   for (i <- 1 until RenameWidth) {
-    blockedByWaitForward(i) := blockedByWaitForward(i - 1) || !io.enqRob.isEmpty && isWaitForward(i)
+    blockedByWaitForward(i) := blockedByWaitForward(i - 1) || (!io.enqRob.isEmpty || Cat(io.fromRename.take(i).map(_.valid)).orR) && isWaitForward(i)
   }
   dontTouch(blockedByWaitForward)
 
