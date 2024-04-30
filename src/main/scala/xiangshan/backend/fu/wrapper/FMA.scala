@@ -7,7 +7,7 @@ import utils.XSError
 import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.backend.fu.fpu.FpPipedFuncUnit
-import yunsuan.VfpuType
+import yunsuan.{VfmaType, VfpuType}
 import yunsuan.vector.VectorFloatFMA
 import yunsuan.fpulite.FloatFMA
 
@@ -27,8 +27,8 @@ class FMA(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
                               fp_fmt === VSew.e16 && !src1.head(48).andR
   val fp_bIsFpCanonicalNAN  = fp_fmt === VSew.e32 && !src0.head(32).andR ||
                               fp_fmt === VSew.e16 && !src0.head(48).andR
-  val fp_cIsFpCanonicalNAN  = fp_fmt === VSew.e32 && !src2.head(32).andR ||
-                              fp_fmt === VSew.e16 && !src2.head(48).andR
+  val fp_cIsFpCanonicalNAN  = !(opcode === VfmaType.vfmul) && (fp_fmt === VSew.e32 && !src2.head(32).andR ||
+                              fp_fmt === VSew.e16 && !src2.head(48).andR)
 
   fma.io.fire         := io.in.valid
   fma.io.fp_a         := src1
