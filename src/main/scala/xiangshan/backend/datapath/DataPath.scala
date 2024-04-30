@@ -347,8 +347,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   s1_intPregRData.foreach(_.foreach(_.foreach(_ := 0.U)))
   s1_intPregRData.zip(rfrPortConfigs).foreach { case (iqRdata, iqCfg) =>
       iqRdata.zip(iqCfg).foreach { case (iuRdata, iuCfg) =>
-        val realIuCfg = iuCfg.map(x => if(x.size > 1) x.filter(_.isInstanceOf[IntRD]) else x).flatten
-        assert(iuRdata.size == realIuCfg.size, s"iuRdata.size(${iuRdata.size}) != realIuCfg.size(${realIuCfg.size})")
+        val realIuCfg = iuCfg.map(x => x.filter(_.isInstanceOf[IntRD])).flatten
         iuRdata.zip(realIuCfg)
           .filter { case (_, rfrPortConfig) => rfrPortConfig.isInstanceOf[IntRD] }
           .foreach { case (sink, cfg) => sink := intRfRdata(cfg.port) }
@@ -359,8 +358,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   s1_fpPregRData.foreach(_.foreach(_.foreach(_ := 0.U)))
   s1_fpPregRData.zip(rfrPortConfigs).foreach { case (iqRdata, iqCfg) =>
     iqRdata.zip(iqCfg).foreach { case (iuRdata, iuCfg) =>
-      val realIuCfg = iuCfg.map(x => if (x.size > 1) x.filter(_.isInstanceOf[FpRD]) else x).flatten
-      assert(iuRdata.size == realIuCfg.size, "iuRdata.size != realIuCfg.size")
+      val realIuCfg = iuCfg.map(x => x.filter(_.isInstanceOf[FpRD])).flatten
       iuRdata.zip(realIuCfg)
         .filter { case (_, rfrPortConfig) => rfrPortConfig.isInstanceOf[FpRD] }
         .foreach { case (sink, cfg) => sink := fpRfRdata(cfg.port) }
@@ -371,8 +369,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   s1_vfPregRData.foreach(_.foreach(_.foreach(_ := 0.U)))
   s1_vfPregRData.zip(rfrPortConfigs).foreach{ case(iqRdata, iqCfg) =>
       iqRdata.zip(iqCfg).foreach{ case(iuRdata, iuCfg) =>
-        val realIuCfg = iuCfg.map(x => if(x.size > 1) x.filter(_.isInstanceOf[VfRD]) else x).flatten
-        assert(iuRdata.size == realIuCfg.size, "iuRdata.size != realIuCfg.size")
+        val realIuCfg = iuCfg.map(x => x.filter(_.isInstanceOf[VfRD])).flatten
         iuRdata.zip(realIuCfg)
           .filter { case (_, rfrPortConfig) => rfrPortConfig.isInstanceOf[VfRD] }
           .foreach { case (sink, cfg) => sink := vfRfRdata(cfg.port) }
