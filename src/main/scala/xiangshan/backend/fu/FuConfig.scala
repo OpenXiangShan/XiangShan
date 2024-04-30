@@ -385,21 +385,6 @@ object FuConfig {
     immType = Set(SelImm.IMM_VSETVLI, SelImm.IMM_VSETIVLI),
   )
 
-  val FDivSqrtCfg: FuConfig = FuConfig (
-    name = "fDivSqrt",
-    fuType = FuType.fDivSqrt,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new FDivSqrt(cfg)(p).suggestName("FDivSqrt")),
-    srcData = Seq(
-      Seq(FpData(), FpData()),
-    ),
-    piped = false,
-    writeFpRf = true,
-    writeFflags = true,
-    latency = UncertainLatency(),
-    hasInputBuffer = (true, 8, true),
-    needSrcFrm = true,
-  )
-
   val LduCfg: FuConfig = FuConfig (
     name = "ldu",
     fuType = FuType.ldu,
@@ -775,7 +760,7 @@ object FuConfig {
 
   def allConfigs = Seq(
     JmpCfg, BrhCfg, I2fCfg, I2vCfg, F2vCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg, VSetRvfWvfCfg, VSetRiWvfCfg, VSetRiWiCfg,
-    FDivSqrtCfg, LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg, VialuCfg, VipuCfg, VlduCfg, VstuCfg,
+    LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg, VialuCfg, VipuCfg, VlduCfg, VstuCfg,
     FaluCfg, FmacCfg, FcvtCfg, FdivCfg,
     VfaluCfg, VfmaCfg, VfcvtCfg, HyldaCfg, HystaCfg
   )
