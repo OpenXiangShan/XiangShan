@@ -46,7 +46,13 @@ class FDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends FpNonPipedFuncUnit
   fdiv.io.fp_aIsFpCanonicalNAN := fp_aIsFpCanonicalNAN
   fdiv.io.fp_bIsFpCanonicalNAN := fp_bIsFpCanonicalNAN
 
-  private val resultData = fdiv.io.fpdiv_res_o
+  private val resultData = Mux1H(
+    Seq(
+      (outCtrl.vpu.get.vsew === VSew.e16) -> Cat(Fill(48, 1.U), fdiv.io.fpdiv_res_o(15, 0)),
+      (outCtrl.vpu.get.vsew === VSew.e32) -> Cat(Fill(32, 1.U), fdiv.io.fpdiv_res_o(31, 0)),
+      (outCtrl.vpu.get.vsew === VSew.e64) -> fdiv.io.fpdiv_res_o
+    )
+  )
   private val fflagsData = fdiv.io.fflags_o
 
   io.in.ready  := fdiv.io.start_ready_o
