@@ -173,7 +173,7 @@ case class FuConfig (
   def isSta: Boolean = name.contains("sta")
 
   def ckAlwaysEn: Boolean = isCsr || isFence || fuType == FuType.vfalu ||
-                            fuType == FuType.div ||
+                            fuType == FuType.div || fuType == FuType.fDivSqrt ||
                             fuType == FuType.vfdiv || fuType == FuType.vidiv
 
   /**
