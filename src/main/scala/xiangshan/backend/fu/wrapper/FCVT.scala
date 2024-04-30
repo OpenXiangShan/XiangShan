@@ -90,9 +90,12 @@ class FCVT(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
   io.out.bits.res.fflags.get := Mux(outIsMvInst, 0.U, fcvtFflags)
 
   // for scalar f2i cvt inst
-  val isFp2VecForInt = outIs32bits && outIsInt
+  val isFpToInt32 = outIs32bits && outIsInt
   // for f2i mv inst
   val result = Mux(outIsMvInst, RegNext(RegNext(src0)), fcvtResult)
 
-  io.out.bits.res.data := Fill(32, result(31)) ## result(31, 0)
+  io.out.bits.res.data := Mux(isFpToInt32,
+    Fill(32, result(31)) ## result(31, 0),
+    result
+  )
 }
