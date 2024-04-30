@@ -60,6 +60,7 @@ class FCVT(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
     dontTouch(output1H)
   }
   val outputWidth1H = output1H
+  val outIs16bits = RegNext(RegNext(outputWidth1H(1)))
   val outIs32bits = RegNext(RegNext(outputWidth1H(2)))
   val outIsInt = !outCtrl.fuOpType(6)
   val outIsMvInst = outCtrl.fuOpType(8)
@@ -92,7 +93,14 @@ class FCVT(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
   // for scalar f2i cvt inst
   val isFpToInt32 = outIs32bits && outIsInt
   // for f2i mv inst
-  val result = Mux(outIsMvInst, RegNext(RegNext(src0)), fcvtResult)
+  val result = Mux(outIsMvInst, RegNext(RegNext(src0)),
+    // for scalar fp32 fp16 result
+    Mux(
+      outIs32bits && !outIsInt,
+      Cat(Fill(32, 1.U), fcvtResult(31,0)),
+      Mux(outIs16bits && !outIsInt, Cat(Fill(48, 1.U), fcvtResult(15,0)), fcvtResult)
+    )
+  )
 
   io.out.bits.res.data := Mux(isFpToInt32,
     Fill(32, result(31)) ## result(31, 0),
