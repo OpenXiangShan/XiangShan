@@ -772,7 +772,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
     val allocatableMask = updateMeta.allocates(i)
     val canAllocate = updateMeta.allocateValid(i)
 
-    val allocLFSR = LFSR64(u_valid)(TageNTables - 1, 0)
+    val allocLFSR = random.LFSR(width = 15)(TageNTables - 1, 0)
     val longerHistoryTableMask = ~(LowerMask(UIntToOH(updateProvider), TageNTables) & Fill(TageNTables, updateProvided.asUInt))
     val canAllocMask = allocatableMask & longerHistoryTableMask
     val allocFailureMask = ~allocatableMask & longerHistoryTableMask
