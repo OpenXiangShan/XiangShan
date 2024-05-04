@@ -29,6 +29,8 @@ import xiangshan.backend._
 import xiangshan.cache.mmu._
 import xiangshan.frontend._
 import xiangshan.mem.L1PrefetchFuzzer
+import scala.collection.mutable.ListBuffer
+import xiangshan.cache.mmu.TlbRequestIO
 
 abstract class XSModule(implicit val p: Parameters) extends Module
   with HasXSParameter
@@ -73,15 +75,17 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   with HasXSParameter
   with HasSoCParameter {
   val io = IO(new Bundle {
-    val hartId = Input(UInt(64.W))
+    val hartId = Input(UInt(hartIdLen.W))
     val reset_vector = Input(UInt(PAddrBits.W))
     val cpu_halt = Output(Bool())
     val l2_pf_enable = Output(Bool())
     val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
     val beu_errors = Output(new XSL1BusErrors())
     val l2_hint = Input(Valid(new L2ToL1Hint()))
+    val l2_tlb_req = Flipped(new TlbRequestIO(nRespDups = 2))
     val l2PfqBusy = Input(Bool())
     val debugTopDown = new Bundle {
+      val robTrueCommit = Output(UInt(64.W))
       val robHeadPaddr = Valid(UInt(PAddrBits.W))
       val l2MissMatch = Input(Bool())
       val l3MissMatch = Input(Bool())
@@ -145,7 +149,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   // memblock error exception writeback, 1 cycle after normal writeback
   backend.io.mem.s3_delayed_load_error <> memBlock.io.mem_to_ooo.s3_delayed_load_error
 
-  backend.io.mem.exceptionVAddr := memBlock.io.mem_to_ooo.lsqio.vaddr
+  backend.io.mem.exceptionAddr.vaddr  := memBlock.io.mem_to_ooo.lsqio.vaddr
+  backend.io.mem.exceptionAddr.gpaddr := memBlock.io.mem_to_ooo.lsqio.gpaddr
   backend.io.mem.csrDistributedUpdate := memBlock.io.mem_to_ooo.csrUpdate
   backend.io.mem.debugLS := memBlock.io.debug_ls
   backend.io.mem.lsTopdownInfo := memBlock.io.mem_to_ooo.lsTopdownInfo
@@ -154,6 +159,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.fenceio.sbuffer.sbIsEmpty := memBlock.io.mem_to_ooo.sbIsEmpty
   // Todo: remove it
   backend.io.fenceio.disableSfence := DontCare
+  backend.io.fenceio.disableHfencev := DontCare
+  backend.io.fenceio.disableHfenceg := DontCare
+  backend.io.fenceio.virtMode := DontCare
 
   backend.io.perf.frontendInfo := frontend.io.frontendInfo
   backend.io.perf.memInfo := memBlock.io.memInfo
@@ -207,6 +215,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.fetch_to_mem.itlb <> frontend.io.ptw
   memBlock.io.l2_hint.valid := io.l2_hint.valid
   memBlock.io.l2_hint.bits.sourceId := io.l2_hint.bits.sourceId
+  memBlock.io.l2_tlb_req <> io.l2_tlb_req
+  memBlock.io.l2_hint.bits.isKeyword := io.l2_hint.bits.isKeyword
   memBlock.io.l2PfqBusy := io.l2PfqBusy
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
@@ -215,6 +225,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.debugTopDown.robHeadVaddr := backend.io.debugTopDown.fromRob.robHeadVaddr
   frontend.io.debugTopDown.robHeadVaddr := backend.io.debugTopDown.fromRob.robHeadVaddr
   io.debugTopDown.robHeadPaddr := backend.io.debugTopDown.fromRob.robHeadPaddr
+  io.debugTopDown.robTrueCommit := backend.io.debugRolling.robTrueCommit
   backend.io.debugTopDown.fromCore.l2MissMatch := io.debugTopDown.l2MissMatch
   backend.io.debugTopDown.fromCore.l3MissMatch := io.debugTopDown.l3MissMatch
   backend.io.debugTopDown.fromCore.fromMem := memBlock.io.debugTopDown.toCore

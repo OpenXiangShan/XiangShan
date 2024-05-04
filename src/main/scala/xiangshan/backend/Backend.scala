@@ -1,3 +1,19 @@
+/***************************************************************************************
+* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2020-2021 Peng Cheng Laboratory
+*
+* XiangShan is licensed under Mulan PSL v2.
+* You can use this software according to the terms and conditions of the Mulan PSL v2.
+* You may obtain a copy of Mulan PSL v2 at:
+*          http://license.coscl.org.cn/MulanPSL2
+*
+* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+*
+* See the Mulan PSL v2 for more details.
+***************************************************************************************/
+
 package xiangshan.backend
 
 import org.chipsalliance.cde.config.Parameters
@@ -27,6 +43,9 @@ class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyMod
   with HasXSParameter {
 
   override def shouldBeInlined: Boolean = false
+
+  // check read & write port config
+  params.configChecks
 
   /* Only update the idx in mem-scheduler here
    * Idx in other schedulers can be updated the same way if needed
@@ -140,6 +159,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   private val dataPath = wrapper.dataPath.module
   private val intExuBlock = wrapper.intExuBlock.get.module
   private val vfExuBlock = wrapper.vfExuBlock.get.module
+  private val og2ForVector = Module(new Og2ForVector(params))
   private val bypassNetwork = Module(new BypassNetwork)
   private val wbDataPath = Module(new WbDataPath(params))
   private val wbFuBusyTable = wrapper.wbFuBusyTable.module
@@ -187,7 +207,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   ctrlBlock.io.debugEnqLsq.resp := io.mem.lsqEnqIO.resp
   ctrlBlock.io.debugEnqLsq.req := memScheduler.io.memIO.get.lsqEnqIO.req
   ctrlBlock.io.debugEnqLsq.needAlloc := memScheduler.io.memIO.get.lsqEnqIO.needAlloc
-
 
   intScheduler.io.fromTop.hartId := io.fromTop.hartId
   intScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
@@ -252,6 +271,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   vfScheduler.io.fromDataPath.cancelToBusyTable := cancelToBusyTable
   vfScheduler.io.vlWriteBack.vlIsZero := vlIsZero
   vfScheduler.io.vlWriteBack.vlIsVlmax := vlIsVlmax
+  vfScheduler.io.fromOg2.get := og2ForVector.io.toVfIQ
 
   dataPath.io.hartId := io.fromTop.hartId
   dataPath.io.flush := ctrlBlock.io.toDataPath.flush
@@ -271,8 +291,12 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   dataPath.io.debugVecRat    .foreach(_ := ctrlBlock.io.debug_vec_rat.get)
   dataPath.io.debugVconfigRat.foreach(_ := ctrlBlock.io.debug_vconfig_rat.get)
 
+  og2ForVector.io.flush := ctrlBlock.io.toDataPath.flush
+  og2ForVector.io.ldCancel := io.mem.ldCancel
+  og2ForVector.io.fromOg1NoReg <> dataPath.io.toFpExu
+
   bypassNetwork.io.fromDataPath.int <> dataPath.io.toIntExu
-  bypassNetwork.io.fromDataPath.vf <> dataPath.io.toFpExu
+  bypassNetwork.io.fromDataPath.vf <> og2ForVector.io.toVfExu
   bypassNetwork.io.fromDataPath.mem <> dataPath.io.toMemExu
   bypassNetwork.io.fromDataPath.immInfo := dataPath.io.og1ImmInfo
   bypassNetwork.io.fromExus.connectExuOutput(_.int)(intExuBlock.io.out)
@@ -315,22 +339,30 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   csrio.fpu.dirty_fs := ctrlBlock.io.robio.csr.dirty_fs
   csrio.vpu <> 0.U.asTypeOf(csrio.vpu) // Todo
 
+  val vsetvlVType = intExuBlock.io.vtype.getOrElse(0.U.asTypeOf(new VType))
+  ctrlBlock.io.robio.vsetvlVType := vsetvlVType
+
   val debugVconfig = dataPath.io.debugVconfig match {
     case Some(x) => dataPath.io.debugVconfig.get.asTypeOf(new VConfig)
     case None => 0.U.asTypeOf(new VConfig)
   }
-  val debugVtype = VType.toVtypeStruct(debugVconfig.vtype).asUInt
+  val commitVType = ctrlBlock.io.robio.commitVType.vtype
+  val hasVsetvl = ctrlBlock.io.robio.commitVType.hasVsetvl
+  val vtype = VType.toVtypeStruct(Mux(hasVsetvl, vsetvlVType, commitVType.bits)).asUInt
   val debugVl = debugVconfig.vl
   csrio.vpu.set_vxsat := ctrlBlock.io.robio.csr.vxsat
   csrio.vpu.set_vstart.valid := ctrlBlock.io.robio.csr.vstart.valid
   csrio.vpu.set_vstart.bits := ctrlBlock.io.robio.csr.vstart.bits
   csrio.vpu.set_vtype.valid := ctrlBlock.io.robio.csr.vcsrFlag
   //Todo here need change design
-  csrio.vpu.set_vtype.bits := ZeroExt(debugVtype, XLEN)
+  csrio.vpu.set_vtype.valid := commitVType.valid
+  csrio.vpu.set_vtype.bits := ZeroExt(vtype, XLEN)
   csrio.vpu.set_vl.valid := ctrlBlock.io.robio.csr.vcsrFlag
   csrio.vpu.set_vl.bits := ZeroExt(debugVl, XLEN)
+  csrio.vpu.dirty_vs := ctrlBlock.io.robio.csr.dirty_vs
   csrio.exception := ctrlBlock.io.robio.exception
-  csrio.memExceptionVAddr := io.mem.exceptionVAddr
+  csrio.memExceptionVAddr := io.mem.exceptionAddr.vaddr
+  csrio.memExceptionGPAddr := io.mem.exceptionAddr.gpaddr
   csrio.externalInterrupt := io.fromTop.externalInterrupt
   csrio.distributedUpdate(0) := io.mem.csrDistributedUpdate
   csrio.distributedUpdate(1) := io.frontendCsrDistributedUpdate
@@ -341,6 +373,9 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   private val fenceio = intExuBlock.io.fenceio.get
   io.fenceio <> fenceio
   fenceio.disableSfence := csrio.disableSfence
+  fenceio.disableHfenceg := csrio.disableHfenceg
+  fenceio.disableHfencev := csrio.disableHfencev
+  fenceio.virtMode := csrio.customCtrl.virtMode
 
   vfExuBlock.io.flush := ctrlBlock.io.toExuBlock.flush
   for (i <- 0 until vfExuBlock.io.in.size) {
@@ -573,7 +608,10 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val s3_delayed_load_error = Input(Vec(LoadPipelineWidth, Bool()))
   val stIn = Input(Vec(params.StaExuCnt, ValidIO(new DynInst())))
   val memoryViolation = Flipped(ValidIO(new Redirect))
-  val exceptionVAddr = Input(UInt(VAddrBits.W))
+  val exceptionAddr = Input(new Bundle {
+    val vaddr = UInt(VAddrBits.W)
+    val gpaddr = UInt(GPAddrBits.W)
+  })
   val sqDeq = Input(UInt(log2Ceil(EnsbufferWidth + 1).W))
   val lqDeq = Input(UInt(log2Up(CommitWidth + 1).W))
   val sqDeqPtr = Input(new SqPtr)
@@ -632,7 +670,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
 
 class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle {
   val fromTop = new Bundle {
-    val hartId = Input(UInt(8.W))
+    val hartId = Input(UInt(hartIdLen.W))
     val externalInterrupt = new ExternalInterruptIO
   }
 

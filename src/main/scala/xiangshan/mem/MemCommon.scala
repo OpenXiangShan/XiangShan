@@ -81,6 +81,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   val uop = new DynInst
   val vaddr = UInt(VAddrBits.W)
   val paddr = UInt(PAddrBits.W)
+  val gpaddr = UInt(GPAddrBits.W)
   // val func = UInt(6.W)
   val mask = UInt((VLEN/8).W)
   val data = UInt((VLEN+1).W)
@@ -154,6 +155,7 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
   def fromLsPipelineBundle(input: LsPipelineBundle, latch: Boolean = false) = {
     if (latch) vaddr := RegNext(input.vaddr) else vaddr := input.vaddr
     if (latch) paddr := RegNext(input.paddr) else paddr := input.paddr
+    if (latch) gpaddr := RegNext(input.gpaddr) else gpaddr := input.gpaddr
     if (latch) mask := RegNext(input.mask) else mask := input.mask
     if (latch) data := RegNext(input.data) else data := input.data
     if (latch) uop := RegNext(input.uop) else uop := input.uop
@@ -227,6 +229,7 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
   def fromLsPipelineBundle(input: LsPipelineBundle, latch: Boolean = false) = {
     if(latch) vaddr := RegNext(input.vaddr) else vaddr := input.vaddr
     if(latch) paddr := RegNext(input.paddr) else paddr := input.paddr
+    if(latch) gpaddr := RegNext(input.gpaddr) else gpaddr := input.gpaddr
     if(latch) mask := RegNext(input.mask) else mask := input.mask
     if(latch) data := RegNext(input.data) else data := input.data
     if(latch) uop := RegNext(input.uop) else uop := input.uop
@@ -273,6 +276,7 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
 class LoadForwardQueryIO(implicit p: Parameters) extends XSBundle {
   val vaddr = Output(UInt(VAddrBits.W))
   val paddr = Output(UInt(PAddrBits.W))
+  val gpaddr = Output(UInt(GPAddrBits.W))
   val mask = Output(UInt((VLEN/8).W))
   val uop = Output(new DynInst) // for replay
   val pc = Output(UInt(VAddrBits.W)) //for debug

@@ -133,6 +133,7 @@ class StoreExceptionBuffer(implicit p: Parameters) extends XSModule with HasCirc
   }
 
   io.exceptionAddr.vaddr  := req.vaddr
+  io.exceptionAddr.gpaddr := req.gpaddr
   io.exceptionAddr.vstart := req.uop.vpu.vstart
   io.exceptionAddr.vl     := req.uop.vpu.vl
 }
@@ -144,7 +145,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   with HasPerfEvents
   with HasVLSUParameters {
   val io = IO(new Bundle() {
-    val hartId = Input(UInt(8.W))
+    val hartId = Input(UInt(hartIdLen.W))
     val enq = new SqEnqIO
     val brqRedirect = Flipped(ValidIO(new Redirect))
     val vecFeedback = Vec(VecLoadPipelineWidth, Flipped(ValidIO(new FeedbackToLsqIO)))
@@ -580,7 +581,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     paddrModule.io.forwardMdata(i) := io.forward(i).paddr
     paddrModule.io.forwardDataMask(i) := io.forward(i).mask
 
-
     // vaddr cam result does not equal to paddr cam result
     // replay needed
     // val vpmaskNotEqual = ((paddrModule.io.forwardMmask(i).asUInt ^ vaddrModule.io.forwardMmask(i).asUInt) & needForward) =/= 0.U
@@ -947,7 +947,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   }
 
   // Read vaddr for mem exception
-  io.exceptionAddr.vaddr := exceptionBuffer.io.exceptionAddr.vaddr
+  io.exceptionAddr.vaddr  := exceptionBuffer.io.exceptionAddr.vaddr
+  io.exceptionAddr.gpaddr  := exceptionBuffer.io.exceptionAddr.gpaddr
   io.exceptionAddr.vstart := exceptionBuffer.io.exceptionAddr.vstart
   io.exceptionAddr.vl     := exceptionBuffer.io.exceptionAddr.vl
 

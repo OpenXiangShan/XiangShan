@@ -38,7 +38,7 @@ class PipeWithFlush[T <: Data, TFlush <: Data] (
   for (i <- 0 until latency) {
     valids(i + 1) := (if (i==0) valids(i) else valids(i) && !flushFunc(bits(i), io.flush, i))
     when(valids(i)) {
-      bits(i + 1) := modifiedBits(i)
+      bits(i + 1) := (if (i==0) bits(i) else modifiedBits(i))
     }
   }
   io.deq.valid := valids.last

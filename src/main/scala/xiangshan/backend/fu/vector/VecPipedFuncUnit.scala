@@ -61,17 +61,6 @@ class VecPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(c
 {
   private val src0 = inData.src(0)
   private val src1 = WireInit(inData.src(1)) // vs2 only
-  if(cfg == FuConfig.VfaluCfg){
-    val vs2Fold = Wire(UInt(VLEN.W))
-    vs2Fold := Mux1H(
-      Seq(
-        vecCtrl.fpu.isFoldTo1_2 -> inData.src(1)(VLEN/1-1, VLEN/2),
-        vecCtrl.fpu.isFoldTo1_4 -> inData.src(1)(VLEN/2-1, VLEN/4),
-        vecCtrl.fpu.isFoldTo1_8 -> inData.src(1)(VLEN/4-1, VLEN/8),
-      )
-    )
-    src1 := Mux(vecCtrl.fpu.isFoldTo1_2 || vecCtrl.fpu.isFoldTo1_4 || vecCtrl.fpu.isFoldTo1_8, vs2Fold, inData.src(1))
-  }
   protected val vs2 = src1
   protected val vs1 = src0
   protected val oldVd = inData.src(2)

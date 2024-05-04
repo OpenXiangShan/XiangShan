@@ -51,6 +51,7 @@ class CtrlBlock(params: BackendParams)(implicit p: Parameters) extends LazyModul
 
   lazy val module = new CtrlBlockImp(this)(p, params)
 
+  val gpaMem = LazyModule(new GPAMem())
 }
 
 class CtrlBlockImp(
@@ -81,6 +82,7 @@ class CtrlBlockImp(
 
   val io = IO(new CtrlBlockIO())
 
+  val gpaMem = wrapper.gpaMem.module
   val decode = Module(new DecodeStage)
   val fusionDecoder = Module(new FusionDecoder)
   val rat = Module(new RenameTableWrapper)
@@ -179,8 +181,6 @@ class CtrlBlockImp(
   loadReplay.bits.debugIsCtrl := false.B
   loadReplay.bits.debugIsMemVio := true.B
 
-  val pdestReverse = rob.io.commits.info.map(info => info.pdest).reverse
-
   pcMem.io.ren.get(pcMemRdIndexes("redirect").head) := redirectGen.io.redirectPcRead.vld
   pcMem.io.raddr(pcMemRdIndexes("redirect").head) := redirectGen.io.redirectPcRead.ptr.value
   redirectGen.io.redirectPcRead.data := pcMem.io.rdata(pcMemRdIndexes("redirect").head).getPc(RegEnable(redirectGen.io.redirectPcRead.offset, redirectGen.io.redirectPcRead.vld))
@@ -248,6 +248,9 @@ class CtrlBlockImp(
   //exception
   io.frontend.toFtq.ftqIdxAhead.last.valid := s5_flushFromRobValidAhead
   io.frontend.toFtq.ftqIdxAhead.last.bits := frontendFlushBits.ftqIdx
+
+  io.frontend.canAccept := decode.io.canAccept
+
   // Be careful here:
   // T0: rob.io.flushOut, s0_robFlushRedirect
   // T1: s1_robFlushRedirect, rob.io.exception.valid
@@ -268,6 +271,13 @@ class CtrlBlockImp(
   when (s6_flushFromRobValid) {
     io.frontend.toFtq.redirect.bits.level := RedirectLevel.flush
     io.frontend.toFtq.redirect.bits.cfiUpdate.target := RegEnable(flushTarget, s5_flushFromRobValidAhead)
+  }
+
+  for (i <- 0 until DecodeWidth) {
+    gpaMem.io.fromIFU := io.frontend.fromIfu
+    gpaMem.io.exceptionReadAddr.valid := rob.io.readGPAMemAddr.valid
+    gpaMem.io.exceptionReadAddr.bits.ftqPtr := rob.io.readGPAMemAddr.bits.ftqPtr
+    gpaMem.io.exceptionReadAddr.bits.ftqOffset := rob.io.readGPAMemAddr.bits.ftqOffset
   }
 
   // vtype commit
@@ -308,16 +318,18 @@ class CtrlBlockImp(
     val shouldFlushMask = (1 to RenameWidth).map(shouldFlush take _ reduce (_ || _))
     s1_s3_redirect.valid && Cat(shouldFlushMask.zip(notCFIMask).map(x => x._1 | x._2)).andR
   })
-  val flushVecNext = VecInit(flushVec.map(x => GatedValidRegNext(x, false.B)))
+  val flushVecNext = flushVec zip snpt.io.valids map (x => GatedValidRegNext(x._1 && x._2, false.B))
   snpt.io.flushVec := flushVecNext
 
   val useSnpt = VecInit.tabulate(RenameSnapshotNum)(idx =>
-    snpt.io.valids(idx) && s1_s3_redirect.bits.robIdx >= snpt.io.snapshots(idx).robIdx.head
+    snpt.io.valids(idx) && (s1_s3_redirect.bits.robIdx > snpt.io.snapshots(idx).robIdx.head ||
+      !s1_s3_redirect.bits.flushItself() && s1_s3_redirect.bits.robIdx === snpt.io.snapshots(idx).robIdx.head)
   ).reduceTree(_ || _)
   val snptSelect = MuxCase(
     0.U(log2Ceil(RenameSnapshotNum).W),
     (1 to RenameSnapshotNum).map(i => (snpt.io.enqPtr - i.U).value).map(idx =>
-      (snpt.io.valids(idx) && s1_s3_redirect.bits.robIdx >= snpt.io.snapshots(idx).robIdx.head, idx)
+      (snpt.io.valids(idx) && (s1_s3_redirect.bits.robIdx > snpt.io.snapshots(idx).robIdx.head ||
+        !s1_s3_redirect.bits.flushItself() && s1_s3_redirect.bits.robIdx === snpt.io.snapshots(idx).robIdx.head), idx)
     )
   )
 
@@ -427,6 +439,7 @@ class CtrlBlockImp(
   rename.io.snpt.snptDeq := snpt.io.deq
   rename.io.snpt.useSnpt := useSnpt
   rename.io.snpt.snptSelect := snptSelect
+  rename.io.snptIsFull := snpt.io.valids.asUInt.andR
   rename.io.snpt.flushVec := flushVecNext
   rename.io.snptLastEnq.valid := !isEmpty(snpt.io.enqPtr, snpt.io.deqPtr)
   rename.io.snptLastEnq.bits := snpt.io.snapshots((snpt.io.enqPtr - 1.U).value).robIdx.head
@@ -491,6 +504,7 @@ class CtrlBlockImp(
   rob.io.redirect := s1_s3_redirect
   rob.io.writeback := delayedNotFlushedWriteBack
   rob.io.writebackNums := VecInit(delayedNotFlushedWriteBackNums)
+  rob.io.readGPAMemData := gpaMem.io.exceptionReadData
 
   io.redirect := s1_s3_redirect
 
@@ -505,6 +519,7 @@ class CtrlBlockImp(
   io.robio.csr.perfinfo.retiredInstr <> RegNext(rob.io.csr.perfinfo.retiredInstr)
   io.robio.exception := rob.io.exception
   io.robio.exception.bits.pc := s1_robFlushPc
+  io.robio.exception.bits.gpaddr := 0.U // Todo: get gpaddr gpaMem
 
   // rob to mem block
   io.robio.lsq <> rob.io.lsq
@@ -520,6 +535,11 @@ class CtrlBlockImp(
   rob.io.debugEnqLsq := io.debugEnqLsq
 
   io.robio.robDeqPtr := rob.io.robDeqPtr
+
+  // rob to backend
+  io.robio.commitVType := rob.io.toDecode.commitVType
+  // exu block to decode
+  decode.io.vsetvlVType := io.robio.vsetvlVType
 
   io.debugTopDown.fromRob := rob.io.debugTopDown.toCore
   dispatch.io.debugTopDown.fromRob := rob.io.debugTopDown.toDispatch
@@ -603,6 +623,11 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val debug_ls = Input(new DebugLSIO())
     val robHeadLsIssue = Input(Bool())
     val robDeqPtr = Output(new RobPtr)
+    val vsetvlVType = Input(VType())
+    val commitVType = new Bundle {
+      val vtype = Output(ValidIO(VType()))
+      val hasVsetvl = Output(Bool())
+    }
   }
 
   val perfInfo = Output(new Bundle{

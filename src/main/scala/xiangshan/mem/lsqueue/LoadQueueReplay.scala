@@ -188,7 +188,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
     // queue-based replay
     val replay = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))
-    val refill = Flipped(ValidIO(new Refill))
+   // val refill = Flipped(ValidIO(new Refill))
     val tl_d_channel = Input(new DcacheToLduForwardIO)
 
     // from StoreQueue
@@ -396,7 +396,12 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     allocated(i) && !scheduled(i) && cause(i)(LoadReplayCauses.C_DM) && blocking(i) && missMSHRId(i) === io.l2_hint.bits.sourceId && io.l2_hint.valid
   })).asUInt
   // l2 will send 2 beats data in 2 cycles, so if data needed by this load is in first beat, select it this cycle, otherwise next cycle
-  val s0_loadHintSelMask = s0_loadHintWakeMask & VecInit(dataInLastBeatReg.map(!_)).asUInt
+  // when isKeyword = 1, s0_loadHintSelMask need overturn
+    val s0_loadHintSelMask = Mux(
+     io.l2_hint.bits.isKeyword,
+     s0_loadHintWakeMask & dataInLastBeatReg.asUInt,
+     s0_loadHintWakeMask & VecInit(dataInLastBeatReg.map(!_)).asUInt
+     )
   val s0_remLoadHintSelMask = VecInit((0 until LoadPipelineWidth).map(rem => getRemBits(s0_loadHintSelMask)(rem)))
   val s0_remHintSelValidVec = VecInit((0 until LoadPipelineWidth).map(rem => ParallelORR(s0_remLoadHintSelMask(rem))))
   val s0_hintSelValid = ParallelORR(s0_loadHintSelMask)
@@ -493,7 +498,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
                     uop(s1_oldestSel(i).bits).robIdx.needFlush(io.redirect) ||
                     uop(s1_oldestSel(i).bits).robIdx.needFlush(RegNext(io.redirect))
     val s0_oldestSelIndexOH = s0_oldestSel(i).bits // one-hot
-    s1_oldestSel(i).valid := RegEnable(s0_oldestSel(i).valid, s0_can_go)
+    s1_oldestSel(i).valid := RegEnable(s0_oldestSel(i).valid, false.B, s0_can_go)
     s1_oldestSel(i).bits := RegEnable(OHToUInt(s0_oldestSel(i).bits), s0_can_go)
 
     for (j <- 0 until LoadQueueReplaySize) {
@@ -508,7 +513,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
                     uop(s1_oldestSel(i).bits).robIdx.needFlush(RegNext(io.redirect))
     val s1_oldestSelV = s1_oldestSel(i).valid && !s1_cancel
     s1_can_go(i)          := replayCanFire(i) && (!s2_oldestSel(i).valid || replay_req(i).fire) || s2_cancelReplay(i)
-    s2_oldestSel(i).valid := RegEnable(Mux(s1_can_go(i), s1_oldestSelV, false.B), (s1_can_go(i) || replay_req(i).fire))
+    s2_oldestSel(i).valid := RegEnable(Mux(s1_can_go(i), s1_oldestSelV, false.B), false.B, (s1_can_go(i) || replay_req(i).fire))
     s2_oldestSel(i).bits  := RegEnable(s1_oldestSel(i).bits, s1_can_go(i))
 
     vaddrModule.io.ren(i) := s1_oldestSel(i).valid && s1_can_go(i)
@@ -586,9 +591,9 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     }
   }
 
-  when(io.refill.valid) {
-    XSDebug("miss resp: paddr:0x%x data %x\n", io.refill.bits.addr, io.refill.bits.data)
-  }
+ // when(io.refill.valid) {
+ //   XSDebug("miss resp: paddr:0x%x data %x\n", io.refill.bits.addr, io.refill.bits.data)
+ // }
 
   // init
   freeMaskVec.map(e => e := false.B)
@@ -697,6 +702,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
         missMSHRId(enqIndex) := replayInfo.mshr_id
       }
       dataInLastBeatReg(enqIndex) := dataInLastBeat
+      //dataInLastBeatReg(enqIndex) := Mux(io.l2_hint.bits.isKeyword, !dataInLastBeat, dataInLastBeat)
     }
 
     //
@@ -814,6 +820,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("replay_forward_fail", replayForwardFailCount)
   XSPerfAccumulate("replay_dcache_miss", replayDCacheMissCount)
   XSPerfAccumulate("replay_hint_wakeup", s0_hintSelValid)
+  XSPerfAccumulate("replay_hint_priority_beat1", io.l2_hint.valid && io.l2_hint.bits.isKeyword)
 
   val perfEvents: Seq[(String, UInt)] = Seq(
     ("enq", enqNumber),

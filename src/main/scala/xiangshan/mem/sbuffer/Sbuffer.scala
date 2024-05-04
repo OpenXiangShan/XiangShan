@@ -42,8 +42,9 @@ trait HasSbufferConst extends HasXSParameter {
   val MissqReplayCountBits = log2Up(SbufferReplayDelayCycles) + 1
 
   // dcache write hit resp has 2 sources
-  // refill pipe resp and main pipe resp
-  val NumDcacheWriteResp = 2 // hardcoded
+  // refill pipe resp and main pipe resp (fixed:only main pipe resp)
+  // val NumDcacheWriteResp = 2 // hardcoded
+  val NumDcacheWriteResp = 1 // hardcoded
 
   val SbufferIndexWidth: Int = log2Up(StoreBufferSize)
   // paddr = ptag + offset
@@ -190,7 +191,7 @@ class Sbuffer(implicit p: Parameters)
     with HasSbufferConst
     with HasPerfEvents {
   val io = IO(new Bundle() {
-    val hartId = Input(UInt(8.W))
+    val hartId = Input(UInt(hartIdLen.W))
     val in = Vec(EnsbufferWidth, Flipped(Decoupled(new DCacheWordReqWithVaddrAndPfFlag)))  //Todo: store logic only support Width == 2 now
     val vecDifftestInfo = Vec(EnsbufferWidth, Flipped(Decoupled(new DynInst)))
     val dcache = Flipped(new DCacheToSbufferIO)
@@ -1010,7 +1011,7 @@ class Sbuffer(implicit p: Parameters)
   XSPerfAccumulate("evenCanInsert", evenCanInsert)
   XSPerfAccumulate("oddCanInsert", oddCanInsert)
   XSPerfAccumulate("mainpipe_resp_valid", io.dcache.main_pipe_hit_resp.fire)
-  XSPerfAccumulate("refill_resp_valid", io.dcache.refill_hit_resp.fire)
+  //XSPerfAccumulate("refill_resp_valid", io.dcache.refill_hit_resp.fire)
   XSPerfAccumulate("replay_resp_valid", io.dcache.replay_resp.fire)
   XSPerfAccumulate("coh_timeout", cohHasTimeOut)
 
@@ -1029,7 +1030,7 @@ class Sbuffer(implicit p: Parameters)
     ("sbuffer_flush     ", sbuffer_state === x_drain_sbuffer                                                                           ),
     ("sbuffer_replace   ", sbuffer_state === x_replace                                                                                 ),
     ("mpipe_resp_valid  ", io.dcache.main_pipe_hit_resp.fire                                                                         ),
-    ("refill_resp_valid ", io.dcache.refill_hit_resp.fire                                                                            ),
+    //("refill_resp_valid ", io.dcache.refill_hit_resp.fire                                                                            ),
     ("replay_resp_valid ", io.dcache.replay_resp.fire                                                                                ),
     ("coh_timeout       ", cohHasTimeOut                                                                                               ),
     ("sbuffer_1_4_valid ", (perf_valid_entry_count < (StoreBufferSize.U/4.U))                                                          ),

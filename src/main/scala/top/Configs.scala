@@ -50,7 +50,7 @@ class BaseConfig(n: Int) extends Config((site, here, up) => {
   case ExportDebug => DebugAttachParams(protocols = Set(JTAG))
   case DebugModuleKey => Some(XSDebugModuleParams(site(XLen)))
   case JtagDTMKey => JtagDTMKey
-  case MaxHartIdBits => 2
+  case MaxHartIdBits => log2Up(n)
   case EnableJtag => true.B
 })
 
@@ -62,10 +62,10 @@ class BaseConfig(n: Int) extends Config((site, here, up) => {
 class MinimalConfig(n: Int = 1) extends Config(
   new BaseConfig(n).alter((site, here, up) => {
     case XSTileKey => up(XSTileKey).map(
-      _.copy(
+      p => p.copy(
         DecodeWidth = 6,
         RenameWidth = 6,
-        CommitWidth = 6,
+        RobCommitWidth = 8,
         FetchWidth = 4,
         VirtualLoadQueueSize = 24,
         LoadQueueRARSize = 24,
@@ -190,8 +190,13 @@ class MinimalConfig(n: Int = 1) extends Config(
           ways = 8,
           sets = 128,
           echoField = Seq(huancun.DirtyField()),
-          prefetch = None
-        )),
+          prefetch = None,
+          clientCaches = Seq(L1Param(
+            "dcache",
+            isKeywordBitsOpt = p.dcacheParametersOpt.get.isKeywordBitsOpt
+          )),
+          )
+        ),
         L2NBanks = 2,
         prefetcher = None // if L2 pf_recv_node does not exist, disable SMS prefetcher
       )
@@ -269,12 +274,15 @@ class WithNKBL2
           sets = 2 * p.dcacheParametersOpt.get.nSets / banks,
           ways = p.dcacheParametersOpt.get.nWays + 2,
           aliasBitsOpt = p.dcacheParametersOpt.get.aliasBitsOpt,
-          vaddrBitsOpt = Some(p.VAddrBits - log2Up(p.dcacheParametersOpt.get.blockBytes))
+          vaddrBitsOpt = Some(p.VAddrBits - log2Up(p.dcacheParametersOpt.get.blockBytes)),
+          isKeywordBitsOpt = p.dcacheParametersOpt.get.isKeywordBitsOpt
         )),
         reqField = Seq(utility.ReqSourceField()),
         echoField = Seq(huancun.DirtyField()),
         prefetch = Some(coupledL2.prefetch.PrefetchReceiverParams()),
         enablePerf = !site(DebugOptionsKey).FPGAPlatform,
+        enableRollingDB = site(DebugOptionsKey).EnableRollingDB,
+        enableMonitor = site(DebugOptionsKey).AlwaysBasicDB,
         elaboratedTopDown = !site(DebugOptionsKey).FPGAPlatform
       )),
       L2NBanks = banks

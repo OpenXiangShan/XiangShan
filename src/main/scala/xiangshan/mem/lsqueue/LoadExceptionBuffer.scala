@@ -100,6 +100,7 @@ class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircula
   io.exceptionAddr.vaddr := req.vaddr
   io.exceptionAddr.vstart := req.uop.vpu.vstart
   io.exceptionAddr.vl     := req.uop.vpu.vl
+  io.exceptionAddr.gpaddr := req.gpaddr
   XSPerfAccumulate("exception", !RegNext(req_valid) && req_valid)
 
   // end

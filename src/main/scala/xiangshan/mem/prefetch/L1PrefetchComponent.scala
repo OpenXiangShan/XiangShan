@@ -103,8 +103,11 @@ trait HasTrainFilterHelper extends HasCircularQueuePtrHelper {
     }else if(source.length == 2) {
       val source_v = source.map(_.valid)
       val res = Wire(source.cloneType)
-      // source 1 is older than source 0
-      val source_1_older = isBefore(source(1).bits.uop.robIdx, source(0).bits.uop.robIdx)
+      // source 1 is older than source 0 (only when source0/1 are both valid)
+      val source_1_older = Mux(Cat(source_v).andR,
+        isBefore(source(1).bits.uop.robIdx, source(0).bits.uop.robIdx),
+        false.B
+      )
       when(source_1_older) {
         res(0) := source(1)
         res(1) := source(0)
@@ -425,6 +428,8 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     tlb_req_arb.io.in(i).bits.no_translate := false.B
     tlb_req_arb.io.in(i).bits.memidx := DontCare
     tlb_req_arb.io.in(i).bits.debug := DontCare
+    tlb_req_arb.io.in(i).bits.hlvx := DontCare
+    tlb_req_arb.io.in(i).bits.hyperinst := DontCare
   }
 
   assert(PopCount(s0_tlb_fire_vec) <= 1.U, "s0_tlb_fire_vec should be one-hot or empty")
@@ -536,7 +541,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     val evict = s1_alloc && (s1_index === i.U)
     l2_pf_req_arb.io.in(i).valid := array(i).can_send_pf() && (array(i).sink === SINK_L2) && !evict
     l2_pf_req_arb.io.in(i).bits.addr := array(i).get_pf_addr()
-    l2_pf_req_arb.io.in(i).bits.source := MuxLookup(array(i).source.value, MemReqSource.Prefetch2L2Unknown.id.U, Seq(
+    l2_pf_req_arb.io.in(i).bits.source := MuxLookup(array(i).source.value, MemReqSource.Prefetch2L2Unknown.id.U)(Seq(
       L1_HW_PREFETCH_STRIDE -> MemReqSource.Prefetch2L2Stride.id.U,
       L1_HW_PREFETCH_STREAM -> MemReqSource.Prefetch2L2Stream.id.U
     ))

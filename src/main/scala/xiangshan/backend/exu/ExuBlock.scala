@@ -10,6 +10,8 @@ import xiangshan.backend.issue.SchdBlockParams
 import xiangshan.{HasXSParameter, Redirect, XSBundle}
 import utils._
 import xiangshan.backend.fu.FuConfig.{AluCfg, BrhCfg}
+import xiangshan.backend.fu.vector.Bundles.{VType, Vxrm}
+import xiangshan.backend.fu.fpu.Bundles.Frm
 
 class ExuBlock(params: SchdBlockParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
@@ -36,15 +38,17 @@ class ExuBlockImp(
     exu.io.flush <> io.flush
     exu.io.csrio.foreach(exuio => io.csrio.get <> exuio)
     exu.io.fenceio.foreach(exuio => io.fenceio.get <> exuio)
-    exu.io.frm.foreach(exuio => io.frm.get <> exuio)
+    exu.io.frm.foreach(exuio => exuio := RegNext(io.frm.get))  // each vf exu pipe frm from csr
     exu.io.vxrm.foreach(exuio => io.vxrm.get <> exuio)
     exu.io.vlIsZero.foreach(exuio => io.vlIsZero.get := exuio)
     exu.io.vlIsVlmax.foreach(exuio => io.vlIsVlmax.get := exuio)
+    exu.io.vtype.foreach(exuio => io.vtype.get := exuio)
     exu.io.in <> input
     output <> exu.io.out
-    if (exu.wrapper.exuParams.fuConfigs.contains(AluCfg) || exu.wrapper.exuParams.fuConfigs.contains(BrhCfg)){
-      XSPerfAccumulate(s"${(exu.wrapper.exuParams.name)}_fire_cnt", PopCount(exu.io.in.fire))
-    }
+//    if (exu.wrapper.exuParams.fuConfigs.contains(AluCfg) || exu.wrapper.exuParams.fuConfigs.contains(BrhCfg)){
+//      XSPerfAccumulate(s"${(exu.wrapper.exuParams.name)}_fire_cnt", PopCount(exu.io.in.fire))
+//    }
+    XSPerfAccumulate(s"${(exu.wrapper.exuParams.name)}_fire_cnt", PopCount(exu.io.in.fire))
   }
   val aluFireSeq = exus.filter(_.wrapper.exuParams.fuConfigs.contains(AluCfg)).map(_.io.in.fire)
   for (i <- 0 until (aluFireSeq.size + 1)){
@@ -63,10 +67,11 @@ class ExuBlockIO(implicit p: Parameters, params: SchdBlockParams) extends XSBund
   // out(i)(j): issueblock(i), exu(j).
   val out: MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = params.genExuOutputDecoupledBundle
 
-  val csrio = if (params.hasCSR) Some(new CSRFileIO) else None
-  val fenceio = if (params.hasFence) Some(new FenceIO) else None
-  val frm = if (params.needSrcFrm) Some(Input(UInt(3.W))) else None
-  val vxrm = if (params.needSrcVxrm) Some(Input(UInt(2.W))) else None
+  val csrio = OptionWrapper(params.hasCSR, new CSRFileIO)
+  val fenceio = OptionWrapper(params.hasFence, new FenceIO)
+  val frm = OptionWrapper(params.needSrcFrm, Input(Frm()))
+  val vxrm = OptionWrapper(params.needSrcVxrm, Input(Vxrm()))
+  val vtype = OptionWrapper(params.writeVType, new VType)
   val vlIsZero = OptionWrapper(params.writeVConfig, Output(Bool()))
   val vlIsVlmax = OptionWrapper(params.writeVConfig, Output(Bool()))
 }

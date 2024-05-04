@@ -1696,12 +1696,12 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       val vsew = Cat(0.U(1.W), vsewReg)
       val veew = Cat(0.U(1.W), width)
       val vemul: UInt = veew.asUInt + 1.U + vlmul.asUInt + ~vsew.asUInt
-      val simple_lmul = MuxLookup(vlmul, 0.U(2.W), Array(
+      val simple_lmul = MuxLookup(vlmul, 0.U(2.W))(Array(
         "b001".U -> 1.U,
         "b010".U -> 2.U,
         "b011".U -> 3.U
       ))
-      val simple_emul = MuxLookup(vemul, 0.U(2.W), Array(
+      val simple_emul = MuxLookup(vemul, 0.U(2.W))(Array(
         "b001".U -> 1.U,
         "b010".U -> 2.U,
         "b011".U -> 3.U

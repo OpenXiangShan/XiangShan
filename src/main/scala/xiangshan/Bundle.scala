@@ -29,20 +29,11 @@ import xiangshan.frontend._
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.backend.Bundles.{DynInst, UopIdx}
 import xiangshan.backend.fu.vector.Bundles.VType
-import xiangshan.frontend.PreDecodeInfo
-import xiangshan.frontend.HasBPUParameter
-import xiangshan.frontend.{AllFoldedHistories, CircularGlobalHistory, GlobalHistory, ShiftingGlobalHistory}
-import xiangshan.frontend.RASEntry
-import xiangshan.frontend.BPUCtrl
-import xiangshan.frontend.FtqPtr
-import xiangshan.frontend.CGHPtr
-import xiangshan.frontend.FtqRead
-import xiangshan.frontend.FtqToCtrlIO
+import xiangshan.frontend.{AllAheadFoldedHistoryOldestBits, AllFoldedHistories, BPUCtrl, CGHPtr, FtqPtr, FtqToCtrlIO}
+import xiangshan.frontend.{Ftq_Redirect_SRAMEntry, HasBPUParameter, IfuToBackendIO, PreDecodeInfo, RASPtr}
 import xiangshan.cache.HasDCacheParameters
-import utils._
 import utility._
 
-import scala.math.max
 import org.chipsalliance.cde.config.Parameters
 import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util.experimental.decode.EspressoMinimizer
@@ -52,6 +43,7 @@ import xiangshan.frontend.Ftq_Redirect_SRAMEntry
 import xiangshan.frontend.AllFoldedHistories
 import xiangshan.frontend.AllAheadFoldedHistoryOldestBits
 import xiangshan.frontend.RASPtr
+import xiangshan.backend.rob.RobBundles.RobCommitEntryBundle
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
   val valid = Bool()
@@ -146,6 +138,8 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
 class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val instr = UInt(32.W)
   val pc = UInt(VAddrBits.W)
+  // Todo: remove this
+  val gpaddr = UInt(GPAddrBits.W)
   val foldpc = UInt(MemPredPCWidth.W)
   val exceptionVec = ExceptionVec()
   val trigger = new TriggerCf
@@ -200,7 +194,7 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val flushPipe = Bool() // This inst will flush all the pipe when commit, like exception but can commit
   val uopSplitType = UopSplitType()
   val selImm = SelImm()
-  val imm = UInt(ImmUnion.maxLen.W)
+  val imm = UInt(32.W)
   val commitType = CommitType()
   val fpu = new FPUCtrlSignals
   val uopIdx = UopIdx()
@@ -232,6 +226,9 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
     fuType === FuType.alu.U && fuOpType === ALUOpType.or && selImm === SelImm.IMM_I && ldest === 0.U
   }
   def needWriteRf: Bool = (rfWen && ldest =/= 0.U) || fpWen || vecWen
+  def isHyperInst: Bool = {
+    fuType === FuType.ldu.U && LSUOpType.isHlv(fuOpType) || fuType === FuType.stu.U && LSUOpType.isHsv(fuOpType)
+  }
 }
 
 class CfCtrl(implicit p: Parameters) extends XSBundle {
@@ -364,28 +361,7 @@ class DiffCommitIO(implicit p: Parameters) extends XSBundle {
   val info = Vec(CommitWidth * MaxUopSize, new RabCommitInfo)
 }
 
-class RobCommitInfo(implicit p: Parameters) extends XSBundle {
-  val ldest = UInt(6.W)
-  val rfWen = Bool()
-  val fpWen = Bool() // for Rab only
-  def dirtyFs = fpWen // for Rob only
-  val vecWen = Bool()
-  def fpVecWen = fpWen || vecWen
-  val wflags = Bool()
-  val commitType = CommitType()
-  val pdest = UInt(PhyRegIdxWidth.W)
-  val ftqIdx = new FtqPtr
-  val ftqOffset = UInt(log2Up(PredictWidth).W)
-  val isMove = Bool()
-  val isRVC = Bool()
-  val isVset = Bool()
-  val vtype = new VType
-
-  // these should be optimized for synthesis verilog
-  val pc = UInt(VAddrBits.W)
-
-  val instrSize = UInt(log2Ceil(RenameWidth + 1).W)
-}
+class RobCommitInfo(implicit p: Parameters) extends RobCommitEntryBundle
 
 class RobCommitIO(implicit p: Parameters) extends XSBundle {
   val isCommit = Bool()
@@ -413,14 +389,14 @@ class RabCommitInfo(implicit p: Parameters) extends XSBundle {
 
 class RabCommitIO(implicit p: Parameters) extends XSBundle {
   val isCommit = Bool()
-  val commitValid = Vec(CommitWidth, Bool())
+  val commitValid = Vec(RabCommitWidth, Bool())
 
   val isWalk = Bool()
   // valid bits optimized for walk
-  val walkValid = Vec(CommitWidth, Bool())
+  val walkValid = Vec(RabCommitWidth, Bool())
 
-  val info = Vec(CommitWidth, new RabCommitInfo)
-  val robIdx = OptionWrapper(!env.FPGAPlatform, Vec(CommitWidth, new RobPtr))
+  val info = Vec(RabCommitWidth, new RabCommitInfo)
+  val robIdx = OptionWrapper(!env.FPGAPlatform, Vec(RabCommitWidth, new RobPtr))
 
   def hasWalkInstr: Bool = isWalk && walkValid.asUInt.orR
   def hasCommitInstr: Bool = isCommit && commitValid.asUInt.orR
@@ -460,8 +436,10 @@ class FrontendToCtrlIO(implicit p: Parameters) extends XSBundle {
   val cfVec = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
   val stallReason = new StallReasonIO(DecodeWidth)
   val fromFtq = new FtqToCtrlIO
+  val fromIfu = new IfuToBackendIO
   // from backend
   val toFtq = Flipped(new CtrlToFtqIO)
+  val canAccept = Input(Bool())
 }
 
 class SatpStruct(implicit p: Parameters) extends XSBundle {
@@ -485,9 +463,15 @@ class TlbSatpBundle(implicit p: Parameters) extends SatpStruct {
 
 class TlbCsrBundle(implicit p: Parameters) extends XSBundle {
   val satp = new TlbSatpBundle()
+  val vsatp = new TlbSatpBundle()
+  val hgatp = new TlbSatpBundle()
   val priv = new Bundle {
     val mxr = Bool()
     val sum = Bool()
+    val vmxr = Bool()
+    val vsum = Bool()
+    val virt = Bool()
+    val spvp = UInt(1.W)
     val imode = UInt(2.W)
     val dmode = UInt(2.W)
   }
@@ -504,8 +488,10 @@ class SfenceBundle(implicit p: Parameters) extends XSBundle {
     val rs1 = Bool()
     val rs2 = Bool()
     val addr = UInt(VAddrBits.W)
-    val asid = UInt(AsidLength.W)
+    val id = UInt((AsidLength).W) // asid or vmid
     val flushPipe = Bool()
+    val hv = Bool()
+    val hg = Bool()
   }
 
   override def toPrintable: Printable = {
@@ -565,10 +551,12 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
 
   // distribute csr write signal
   val distribute_csr = new DistributedCSRIO()
-
+  // TODO: move it to a new bundle, since single step is not a custom control signal
   val singlestep = Output(Bool())
   val frontend_trigger = new FrontendTdataDistributeIO()
   val mem_trigger = new MemTdataDistributeIO()
+  // Virtualization Mode
+  val virtMode = Output(Bool())
 }
 
 class DistributedCSRIO(implicit p: Parameters) extends XSBundle {
@@ -635,8 +623,6 @@ class L1CacheErrorInfo(implicit p: Parameters) extends XSBundle {
 class TriggerCf(implicit p: Parameters) extends XSBundle {
   // frontend
   val frontendHit       = Vec(TriggerNum, Bool()) // en && hit
-  val frontendTiming    = Vec(TriggerNum, Bool()) // en && timing
-  val frontendChain     = Vec(TriggerNum, Bool()) // en && chain
   val frontendCanFire   = Vec(TriggerNum, Bool())
   // backend
   val backendHit        = Vec(TriggerNum, Bool())
@@ -653,8 +639,6 @@ class TriggerCf(implicit p: Parameters) extends XSBundle {
     frontendCanFire.foreach(_ := false.B)
     backendHit.foreach(_ := false.B)
     backendCanFire.foreach(_ := false.B)
-    frontendTiming.foreach(_ := false.B)
-    frontendChain.foreach(_ := false.B)
   }
 }
 
@@ -696,5 +680,6 @@ class StallReasonIO(width: Int) extends Bundle {
 // custom l2 - l1 interface
 class L2ToL1Hint(implicit p: Parameters) extends XSBundle with HasDCacheParameters {
   val sourceId = UInt(log2Up(cfg.nMissEntries).W)    // tilelink sourceID -> mshr id
+  val isKeyword = Bool()                             // miss entry keyword -> L1 load queue replay
 }
 

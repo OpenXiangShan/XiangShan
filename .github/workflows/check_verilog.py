@@ -13,6 +13,7 @@ if __name__ == "__main__":
     in_sync_always = False
     always_depth = 0
     line_number = 0
+    count_xstile = 0
     with open(sys.argv[1], "r") as f:
         for line in f:
             if "$fatal" in line or "$fwrite" in line:
@@ -27,6 +28,12 @@ if __name__ == "__main__":
                 in_decode = False
                 in_dispatch = False
                 in_miss_entry = False
+            elif line.startswith("module XSTile"):
+                count_xstile += 1
+                if count_xstile > 1:
+                    err(line, line_number, "Found duplicated XSTile!\n" +
+                                           "Please convert Map, Set to Seq and sort it to generate RTL in Scala.\n" +
+                                           "And always use HartID from IO.\n")
             elif in_decode and "_pc" in line:
                 err(line, line_number, "PC should not be in decode!!!\n")
             elif in_dispatch and "_lsrc" in line:

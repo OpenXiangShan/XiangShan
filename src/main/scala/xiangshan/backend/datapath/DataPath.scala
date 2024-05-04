@@ -18,6 +18,7 @@ import xiangshan.backend.issue.{ImmExtractor, IntScheduler, MemScheduler, VfSche
 import xiangshan.backend.issue.EntryBundles._
 import xiangshan.backend.regfile._
 import xiangshan.backend.PcToDataPathIO
+import xiangshan.backend.fu.FuType.is0latency
 
 class DataPath(params: BackendParams)(implicit p: Parameters) extends LazyModule {
   override def shouldBeInlined: Boolean = false
@@ -71,28 +72,31 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   private val vfRdNotBlock: Seq2[Bool] = vfRdArbWinner.map(_.map(_.asUInt.andR))
 
   private val intRFReadReq: Seq3[ValidIO[RfReadPortWithConfig]] = fromIQ.map(x => x.map(xx => xx.bits.getIntRfReadValidBundle(xx.valid)).toSeq).toSeq
-  private val intDataSources: Seq[Seq[Vec[DataSource]]] = fromIQ.map(x => x.map(xx => xx.bits.common.dataSources).toSeq)
-  private val intNumRegSrcs: Seq[Seq[Int]] = fromIQ.map(x => x.map(xx => xx.bits.exuParams.numRegSrc).toSeq)
+  private val vfRFReadReq: Seq3[ValidIO[RfReadPortWithConfig]] = fromIQ.map(x => x.map(xx => xx.bits.getVfRfReadValidBundle(xx.valid)).toSeq).toSeq
+  private val allDataSources: Seq[Seq[Vec[DataSource]]] = fromIQ.map(x => x.map(xx => xx.bits.common.dataSources).toSeq)
+  private val allNumRegSrcs: Seq[Seq[Int]] = fromIQ.map(x => x.map(xx => xx.bits.exuParams.numRegSrc).toSeq)
 
   intRFReadArbiter.io.in.zip(intRFReadReq).zipWithIndex.foreach { case ((arbInSeq2, inRFReadReqSeq2), iqIdx) =>
     arbInSeq2.zip(inRFReadReqSeq2).zipWithIndex.foreach { case ((arbInSeq, inRFReadReqSeq), exuIdx) =>
       val srcIndices: Seq[Int] = fromIQ(iqIdx)(exuIdx).bits.exuParams.getRfReadSrcIdx(IntData())
       for (srcIdx <- 0 until fromIQ(iqIdx)(exuIdx).bits.exuParams.numRegSrc) {
         if (srcIndices.contains(srcIdx) && inRFReadReqSeq.isDefinedAt(srcIdx)) {
-          if (intNumRegSrcs(iqIdx)(exuIdx) == 2) {
-            val src0Req = inRFReadReqSeq(0).valid && intDataSources(iqIdx)(exuIdx)(0).readReg
-            val src1Req = inRFReadReqSeq(1).valid && intDataSources(iqIdx)(exuIdx)(1).readReg
-            if (srcIdx == 0) {
-              arbInSeq(srcIdx).valid := src0Req || src1Req
-              arbInSeq(srcIdx).bits.addr := Mux(src1Req && !src0Req, inRFReadReqSeq(1).bits.addr,inRFReadReqSeq(0).bits.addr)
-            } else {
-              arbInSeq(srcIdx).valid := src0Req && src1Req
-              arbInSeq(srcIdx).bits.addr := inRFReadReqSeq(srcIdx).bits.addr
-            }
-          } else {
-            arbInSeq(srcIdx).valid := inRFReadReqSeq(srcIdx).valid && intDataSources(iqIdx)(exuIdx)(srcIdx).readReg
-            arbInSeq(srcIdx).bits.addr := inRFReadReqSeq(srcIdx).bits.addr
-          }
+          arbInSeq(srcIdx).valid := inRFReadReqSeq(srcIdx).valid && allDataSources(iqIdx)(exuIdx)(srcIdx).readReg
+          arbInSeq(srcIdx).bits.addr := inRFReadReqSeq(srcIdx).bits.addr
+//          if (allNumRegSrcs(iqIdx)(exuIdx) == 2) {
+//            val src0Req = inRFReadReqSeq(0).valid && allDataSources(iqIdx)(exuIdx)(0).readReg
+//            val src1Req = inRFReadReqSeq(1).valid && allDataSources(iqIdx)(exuIdx)(1).readReg
+//            if (srcIdx == 0) {
+//              arbInSeq(srcIdx).valid := src0Req || src1Req
+//              arbInSeq(srcIdx).bits.addr := Mux(src1Req && !src0Req, inRFReadReqSeq(1).bits.addr,inRFReadReqSeq(0).bits.addr)
+//            } else {
+//              arbInSeq(srcIdx).valid := src0Req && src1Req
+//              arbInSeq(srcIdx).bits.addr := inRFReadReqSeq(srcIdx).bits.addr
+//            }
+//          } else {
+//            arbInSeq(srcIdx).valid := inRFReadReqSeq(srcIdx).valid && allDataSources(iqIdx)(exuIdx)(srcIdx).readReg
+//            arbInSeq(srcIdx).bits.addr := inRFReadReqSeq(srcIdx).bits.addr
+//          }
         } else {
           arbInSeq(srcIdx).valid := false.B
           arbInSeq(srcIdx).bits.addr := 0.U
@@ -101,14 +105,12 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     }
   }
 
-  private val vfRFReadReq: Seq3[ValidIO[RfReadPortWithConfig]] = fromIQ.map(x => x.map(xx => xx.bits.getVfRfReadValidBundle(xx.valid)).toSeq).toSeq
-
   vfRFReadArbiter.io.in.zip(vfRFReadReq).zipWithIndex.foreach { case ((arbInSeq2, inRFReadReqSeq2), iqIdx) =>
     arbInSeq2.zip(inRFReadReqSeq2).zipWithIndex.foreach { case ((arbInSeq, inRFReadReqSeq), exuIdx) =>
       val srcIndices: Seq[Int] = VfRegSrcDataSet.flatMap(data => fromIQ(iqIdx)(exuIdx).bits.exuParams.getRfReadSrcIdx(data)).toSeq.sorted
       for (srcIdx <- 0 until fromIQ(iqIdx)(exuIdx).bits.exuParams.numRegSrc) {
         if (srcIndices.contains(srcIdx) && inRFReadReqSeq.isDefinedAt(srcIdx)) {
-          arbInSeq(srcIdx).valid := inRFReadReqSeq(srcIdx).valid
+          arbInSeq(srcIdx).valid := inRFReadReqSeq(srcIdx).valid && allDataSources(iqIdx)(exuIdx)(srcIdx).readReg
           arbInSeq(srcIdx).bits.addr := inRFReadReqSeq(srcIdx).bits.addr
         } else {
           arbInSeq(srcIdx).valid := false.B
@@ -214,7 +216,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   io.debugVconfig.foreach(_ := vconfigDebugReadData.get)
 
   IntRegFile("IntRegFile", intSchdParams.numPregs, intRfRaddr, intRfRdata, intRfWen, intRfWaddr, intRfWdata,
-    bankNum = 1,
+    bankNum = 4,
     debugReadAddr = intDebugRead.map(_._1),
     debugReadData = intDebugRead.map(_._2))
   VfRegFile("VfRegFile", vfSchdParams.numPregs, vfRfSplitNum, vfRfRaddr, vfRfRdata, vfRfWen, vfRfWaddr, vfRfWdata,
@@ -232,9 +234,9 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       intRfRaddr(portIdx) := 0.U
   }
 
-  vfRfWaddr := io.fromVfWb.map(_.addr).toSeq
-  vfRfWdata := io.fromVfWb.map(_.data).toSeq
-  vfRfWen.foreach(_.zip(io.fromVfWb.map(_.wen)).foreach { case (wenSink, wenSource) => wenSink := wenSource } )// Todo: support fp multi-write
+  vfRfWaddr := io.fromVfWb.map(x => RegEnable(x.addr, x.wen)).toSeq
+  vfRfWdata := io.fromVfWb.map(x => RegEnable(x.data, x.wen)).toSeq
+  vfRfWen.foreach(_.zip(io.fromVfWb.map(x => RegNext(x.wen))).foreach { case (wenSink, wenSource) => wenSink := wenSource } )// Todo: support fp multi-write
 
   for (portIdx <- vfRfRaddr.indices) {
     if (vfRFReadArbiter.io.out.isDefinedAt(portIdx))
@@ -304,8 +306,13 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       }
   }
 
-  val og0_cancel_no_load = og0FailedVec2.flatten.zip(params.allExuParams).filter(!_._2.hasLoadFu).map(_._1)
-  val og0_cancel_delay = RegNext(VecInit(og0_cancel_no_load.toSeq))
+  val og0_cancel_no_load = VecInit(og0FailedVec2.flatten.zip(params.allExuParams).filter(!_._2.hasLoadFu).map(_._1).toSeq)
+  val exuParamsNoLoad = fromIQ.flatten.zip(params.allExuParams).filter(!_._2.hasLoadFu)
+  val is_0latency = Wire(Vec(og0_cancel_no_load.size, Bool()))
+  is_0latency := exuParamsNoLoad.map(x => is0latency(x._1.bits.common.fuType))
+  val og0_cancel_delay = RegNext(VecInit(og0_cancel_no_load.zip(is_0latency).map(x => x._1 && x._2)))
+  val isVfScheduler = VecInit(exuParamsNoLoad.map(x => x._2.schdType.isInstanceOf[VfScheduler].B))
+  val og0_cancel_delay_for_mem = VecInit(og0_cancel_delay.zip(isVfScheduler).map(x => x._1 && !x._2))
   for (i <- fromIQ.indices) {
     for (j <- fromIQ(i).indices) {
       // IQ(s0) --[Ctrl]--> s1Reg ---------- begin
@@ -320,30 +327,31 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       srcNotBlock := s0.bits.common.dataSources.zip(intRdArbWinner(i)(j) zip vfRdArbWinner(i)(j)).map { case (source, win) =>
         !source.readReg || win._1 && win._2
       }.fold(true.B)(_ && _)
-      if (fromIQ(i)(j).bits.exuParams.schdType.isInstanceOf[IntScheduler] && (fromIQ(i)(j).bits.exuParams.numRegSrc == 2)) {
-        val src0VfBlock = s0.bits.common.dataSources(0).readReg && !vfRdArbWinner(i)(j)(0)
-        val src1VfBlock = s0.bits.common.dataSources(1).readReg && !vfRdArbWinner(i)(j)(1)
-        val src1IntBlock = s0.bits.common.dataSources(0).readReg && s0.bits.common.dataSources(1).readReg && !intRdArbWinner(i)(j)(1)
-        val src0IntBlock = (s0.bits.common.dataSources(0).readReg || s0.bits.common.dataSources(1).readReg) && !intRdArbWinner(i)(j)(0)
-        srcNotBlock := !src0VfBlock && !src1VfBlock && !src1IntBlock && !src0IntBlock
-      }
+//      if (fromIQ(i)(j).bits.exuParams.schdType.isInstanceOf[IntScheduler] && (fromIQ(i)(j).bits.exuParams.numRegSrc == 2)) {
+//        val src0VfBlock = s0.bits.common.dataSources(0).readReg && !vfRdArbWinner(i)(j)(0)
+//        val src1VfBlock = s0.bits.common.dataSources(1).readReg && !vfRdArbWinner(i)(j)(1)
+//        val src1IntBlock = s0.bits.common.dataSources(0).readReg && s0.bits.common.dataSources(1).readReg && !intRdArbWinner(i)(j)(1)
+//        val src0IntBlock = (s0.bits.common.dataSources(0).readReg || s0.bits.common.dataSources(1).readReg) && !intRdArbWinner(i)(j)(0)
+//        srcNotBlock := !src0VfBlock && !src1VfBlock && !src1IntBlock && !src0IntBlock
+//      }
       val notBlock = srcNotBlock && intWbNotBlock(i)(j) && vfWbNotBlock(i)(j)
       val s1_flush = s0.bits.common.robIdx.needFlush(Seq(io.flush, RegNextWithEnable(io.flush)))
       val s1_cancel = og1FailedVec2(i)(j)
       val s0_cancel = Wire(Bool())
+      val og0_cancel_delay_need = if (s0.bits.exuParams.schdType.isInstanceOf[MemScheduler]) og0_cancel_delay_for_mem else og0_cancel_delay
       if (s0.bits.exuParams.isIQWakeUpSink) {
         val exuOHNoLoad = s0.bits.common.l1ExuOH.get.map(x => x.asTypeOf(Vec(x.getWidth, Bool())).zip(params.allExuParams).filter(!_._2.hasLoadFu).map(_._1))
         s0_cancel := exuOHNoLoad.zip(s0.bits.common.dataSources).map{
-          case (exuOH, dataSource) => (VecInit(exuOH).asUInt & og0_cancel_delay.asUInt).orR && dataSource.readForward
+          case (exuOH, dataSource) => (VecInit(exuOH).asUInt & og0_cancel_delay_need.asUInt).orR && dataSource.readForward
         }.reduce(_ || _) && s0.valid
       } else s0_cancel := false.B
       val s0_ldCancel = LoadShouldCancel(s0.bits.common.loadDependency, io.ldCancel)
       when (s0.fire && !s1_flush && notBlock && !s1_cancel && !s0_ldCancel && !s0_cancel) {
         s1_valid := s0.valid
         s1_data.fromIssueBundle(s0.bits) // no src data here
-        if (fromIQ(i)(j).bits.exuParams.schdType.isInstanceOf[IntScheduler] && (fromIQ(i)(j).bits.exuParams.numRegSrc == 2)) {
-          s1_data.dataSources(1).value := Mux(!s0.bits.common.dataSources(0).readReg && s0.bits.common.dataSources(1).readReg, DataSource.anotherReg, s0.bits.common.dataSources(1).value)
-        }
+//        if (fromIQ(i)(j).bits.exuParams.schdType.isInstanceOf[IntScheduler] && (fromIQ(i)(j).bits.exuParams.numRegSrc == 2)) {
+//          s1_data.dataSources(1).value := Mux(!s0.bits.common.dataSources(0).readReg && s0.bits.common.dataSources(1).readReg, DataSource.anotherReg, s0.bits.common.dataSources(1).value)
+//        }
         s1_addrOH := s0.bits.addrOH
       }.otherwise {
         s1_valid := false.B
@@ -399,6 +407,13 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     cancel.bits.pdest := fromFlattenIQ(i).bits.common.pdest
   }
 
+  if (backendParams.debugEn){
+    dontTouch(og0_cancel_no_load)
+    dontTouch(is_0latency)
+    dontTouch(og0_cancel_delay)
+    dontTouch(isVfScheduler)
+    dontTouch(og0_cancel_delay_for_mem)
+  }
   for (i <- toExu.indices) {
     for (j <- toExu(i).indices) {
       // s1Reg --[Ctrl]--> exu(s1) ---------- begin

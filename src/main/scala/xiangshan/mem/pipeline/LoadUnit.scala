@@ -127,7 +127,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val lsq           = new LoadToLsqIO
     val tl_d_channel  = Input(new DcacheToLduForwardIO)
     val forward_mshr  = Flipped(new LduToMissqueueForwardIO)
-    val refill        = Flipped(ValidIO(new Refill))
+   // val refill        = Flipped(ValidIO(new Refill))
     val l2_hint       = Input(Valid(new L2ToL1Hint))
     val tlb_hint      = Flipped(new TlbHintReq)
     // fast wakeup
@@ -217,6 +217,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val prf_rd        = Bool()
     val prf_wr        = Bool()
     val sched_idx     = UInt(log2Up(LoadQueueReplaySize+1).W)
+    val hlv           = Bool()
+    val hlvx          = Bool()
     // Record the issue port idx of load issue queue. This signal is used by load cancel.
     val deqPortIdx    = UInt(log2Ceil(LoadPipelineWidth).W)
     // vec only
@@ -370,7 +372,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                                          TlbCmd.read
                                        )
   io.tlb.req.bits.vaddr              := Mux(s0_hw_prf_select, io.prefetch_req.bits.paddr, s0_sel_src.vaddr)
-  io.tlb.req.bits.size               := Mux(s0_sel_src.isvec, s0_sel_src.alignedType(2,0), LSUOpType.size(s0_sel_src.uop.fuOpType)) // FIXME : currently not use, 128 bit load will error if use it
+  io.tlb.req.bits.hyperinst          := s0_sel_src.hlv
+  io.tlb.req.bits.hlvx               := s0_sel_src.hlvx
+  io.tlb.req.bits.size               := Mux(s0_sel_src.isvec, s0_sel_src.alignedType(2,0), LSUOpType.size(s0_sel_src.uop.fuOpType))
   io.tlb.req.bits.kill               := s0_kill
   io.tlb.req.bits.memidx.is_ld       := true.B
   io.tlb.req.bits.memidx.is_st       := false.B
@@ -394,6 +398,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.dcache.req.bits.debug_robIdx := s0_sel_src.uop.robIdx.value
   io.dcache.req.bits.replayCarry  := s0_sel_src.rep_carry
   io.dcache.req.bits.id           := DontCare // TODO: update cache meta
+  io.dcache.req.bits.lqIdx        := s0_sel_src.uop.lqIdx
   io.dcache.pf_source             := Mux(s0_hw_prf_select, io.prefetch_req.bits.pf_source.value, L1_HW_PREFETCH_NULL)
   io.dcache.is128Req              := s0_sel_src.is128bit
 
@@ -432,6 +437,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.elemIdx       := src.elemIdx
     out.elemIdxInsideVd := src.elemIdxInsideVd
     out.alignedType   := src.alignedType
+    out.hlv           := LSUOpType.isHlv(src.uop.fuOpType)
+    out.hlvx          := LSUOpType.isHlvx(src.uop.fuOpType)
     out
   }
 
@@ -454,6 +461,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_rd        := false.B
     out.prf_wr        := false.B
     out.sched_idx     := 0.U
+    out.hlv           := LSUOpType.isHlv(src.uop.fuOpType)
+    out.hlvx          := LSUOpType.isHlvx(src.uop.fuOpType)
     out.vecActive     := true.B
     out
   }
@@ -487,6 +496,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.elemIdx       := src.elemIdx
     out.elemIdxInsideVd := src.elemIdxInsideVd
     out.alignedType   := src.alignedType
+    out.hlv           := LSUOpType.isHlv(src.uop.fuOpType)
+    out.hlvx          := LSUOpType.isHlvx(src.uop.fuOpType)
     out
   }
 
@@ -551,6 +562,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.elemIdx             := src.elemIdx
     out.elemIdxInsideVd     := src.elemIdxInsideVd
     out.alignedType         := src.alignedType
+    out.hlv                 := false.B
+    out.hlvx                := false.B
     out
   }
 
@@ -572,6 +585,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_rd        := src.uop.fuOpType === LSUOpType.prefetch_r
     out.prf_wr        := src.uop.fuOpType === LSUOpType.prefetch_w
     out.sched_idx     := 0.U
+    out.hlv           := LSUOpType.isHlv(src.uop.fuOpType)
+    out.hlvx          := LSUOpType.isHlvx(src.uop.fuOpType)
     out.vecActive     := true.B // true for scala load
     out
   }
@@ -599,6 +614,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_rd             := false.B
     out.prf_wr             := false.B
     out.sched_idx          := 0.U
+    out.hlv                := LSUOpType.isHlv(out.uop.fuOpType)
+    out.hlvx               := LSUOpType.isHlvx(out.uop.fuOpType)
     out
   }
 
@@ -738,6 +755,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s1_vaddr_lo         = Wire(UInt())
   val s1_vaddr            = Wire(UInt())
   val s1_paddr_dup_lsu    = Wire(UInt())
+  val s1_gpaddr_dup_lsu   = Wire(UInt())
   val s1_paddr_dup_dcache = Wire(UInt())
   val s1_exception        = ExceptionNO.selectByFu(s1_out.uop.exceptionVec, LduCfg).asUInt.orR   // af & pf exception were modified below.
   val s1_tlb_miss         = io.tlb.resp.bits.miss
@@ -751,6 +769,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s1_vaddr            := Cat(s1_vaddr_hi, s1_vaddr_lo)
   s1_paddr_dup_lsu    := io.tlb.resp.bits.paddr(0)
   s1_paddr_dup_dcache := io.tlb.resp.bits.paddr(1)
+  s1_gpaddr_dup_lsu   := io.tlb.resp.bits.gpaddr(0)
 
   when (s1_tlb_memidx.is_ld && io.tlb.resp.valid && !s1_tlb_miss && s1_tlb_memidx.idx === s1_in.uop.lqIdx.value) {
     // printf("load idx = %d\n", s1_tlb_memidx.idx)
@@ -768,6 +787,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.sbuffer.valid := s1_valid && !(s1_exception || s1_tlb_miss || s1_kill || s1_dly_err || s1_prf)
   io.sbuffer.vaddr := s1_vaddr
   io.sbuffer.paddr := s1_paddr_dup_lsu
+  io.sbuffer.gpaddr:= s1_gpaddr_dup_lsu
   io.sbuffer.uop   := s1_in.uop
   io.sbuffer.sqIdx := s1_in.uop.sqIdx
   io.sbuffer.mask  := s1_in.mask
@@ -776,6 +796,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.lsq.forward.valid     := s1_valid && !(s1_exception || s1_tlb_miss || s1_kill || s1_dly_err || s1_prf)
   io.lsq.forward.vaddr     := s1_vaddr
   io.lsq.forward.paddr     := s1_paddr_dup_lsu
+  io.lsq.forward.gpaddr    := s1_gpaddr_dup_lsu
   io.lsq.forward.uop       := s1_in.uop
   io.lsq.forward.sqIdx     := s1_in.uop.sqIdx
   io.lsq.forward.sqIdxMask := 0.U
@@ -796,6 +817,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s1_out                   := s1_in
   s1_out.vaddr             := s1_vaddr
   s1_out.paddr             := s1_paddr_dup_lsu
+  s1_out.gpaddr            := s1_gpaddr_dup_lsu
   s1_out.tlbMiss           := s1_tlb_miss
   s1_out.ptwBack           := io.tlb.resp.bits.ptwBack
   s1_out.rsIdx             := s1_in.rsIdx
@@ -807,9 +829,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // current ori test will cause the case of ldest == 0, below will be modifeid in the future.
     // af & pf exception were modified
     s1_out.uop.exceptionVec(loadPageFault)   := io.tlb.resp.bits.excp(0).pf.ld && s1_vecActive && !s1_tlb_miss
+    s1_out.uop.exceptionVec(loadGuestPageFault)   := io.tlb.resp.bits.excp(0).gpf.ld && !s1_tlb_miss
     s1_out.uop.exceptionVec(loadAccessFault) := io.tlb.resp.bits.excp(0).af.ld && s1_vecActive && !s1_tlb_miss
   } .otherwise {
     s1_out.uop.exceptionVec(loadPageFault)      := false.B
+    s1_out.uop.exceptionVec(loadGuestPageFault) := false.B
     s1_out.uop.exceptionVec(loadAddrMisaligned) := false.B
     s1_out.uop.exceptionVec(loadAccessFault)    := s1_dly_err && s1_vecActive
   }
@@ -1173,15 +1197,14 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_isvec        = RegEnable(s2_out.isvec, false.B, s2_fire)
   val s3_vec_alignedType = RegEnable(s2_out.alignedType, s2_fire)
   val s3_vec_mBIndex     = RegEnable(s2_out.mbIndex, s2_fire)
-  val s3_mmio         = Wire(chiselTypeOf(io.lsq.uncache))
+  val s3_mmio         = Wire(Valid(new MemExuOutput))
   // TODO: Fix vector load merge buffer nack
   val s3_vec_mb_nack  = Wire(Bool())
   s3_vec_mb_nack     := false.B
   XSError(s3_valid && s3_vec_mb_nack, "Merge buffer should always accept vector loads!")
 
   s3_ready := !s3_valid || s3_kill || io.ldout.ready
-  s3_mmio.valid := RegNextN(io.lsq.uncache.valid, 3, Some(false.B))
-  s3_mmio.ready := RegNextN(io.lsq.uncache.ready, 3, Some(false.B))
+  s3_mmio.valid := RegNextN(io.lsq.uncache.fire, 3, Some(false.B))
   s3_mmio.bits  := RegNextN(io.lsq.uncache.bits, 3)
 
   // forwrad last beat
@@ -1355,8 +1378,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // FIXME: add 1 cycle delay ?
   // io.lsq.uncache.ready := !s3_valid
+  val s3_outexception = ExceptionNO.selectByFu(s3_out.bits.uop.exceptionVec, LduCfg).asUInt.orR && s3_vecActive
   io.ldout.bits        := s3_ld_wb_meta
-  io.ldout.bits.data   := Mux(s3_valid, s3_ld_data_frm_cache, s3_ld_data_frm_uncache)
+  io.ldout.bits.data   := Mux(s3_valid, Mux(!s3_outexception, s3_ld_data_frm_cache, 0.U), s3_ld_data_frm_uncache)
   io.ldout.valid       := (s3_out.valid || (s3_mmio.valid && !s3_valid)) && !s3_vecout.isvec
 
   // TODO: check this --hx
@@ -1425,8 +1449,23 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   }}
   io.lsq.trigger.hitLoadAddrTriggerHitVec := hit_ld_addr_trig_hit_vec
 
-  // FIXME: please move this part to LoadQueueReplay
-  io.debug_ls := DontCare
+  // s1
+  io.debug_ls.s1_robIdx := s1_in.uop.robIdx.value
+  io.debug_ls.s1_isLoadToLoadForward := s1_fire && s1_try_ptr_chasing && !s1_ptr_chasing_canceled
+  io.debug_ls.s1_isTlbFirstMiss := s1_fire && s1_tlb_miss && s1_in.isFirstIssue
+  // s2
+  io.debug_ls.s2_robIdx := s2_in.uop.robIdx.value
+  io.debug_ls.s2_isBankConflict := s2_fire && (!s2_kill && s2_bank_conflict)
+  io.debug_ls.s2_isDcacheFirstMiss := s2_fire && io.dcache.resp.bits.miss && s2_in.isFirstIssue
+  io.debug_ls.s2_isForwardFail := s2_fire && s2_fwd_fail
+  // s3
+  io.debug_ls.s3_robIdx := s3_in.uop.robIdx.value
+  io.debug_ls.s3_isReplayFast := s3_valid && s3_fast_rep && !s3_fast_rep_canceled
+  io.debug_ls.s3_isReplayRS :=  RegNext(io.feedback_fast.valid && !io.feedback_fast.bits.hit) || (io.feedback_slow.valid && !io.feedback_slow.bits.hit)
+  io.debug_ls.s3_isReplaySlow := io.lsq.ldin.valid && io.lsq.ldin.bits.rep_info.need_rep
+  io.debug_ls.s3_isReplay := s3_valid && s3_rep_info.need_rep // include fast+slow+rs replay
+  io.debug_ls.replayCause := s3_rep_info.cause
+  io.debug_ls.replayCnt := 1.U
 
   // Topdown
   io.lsTopdownInfo.s1.robIdx          := s1_in.uop.robIdx.value

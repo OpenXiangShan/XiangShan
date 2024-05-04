@@ -34,31 +34,36 @@ class DecodeStage(implicit p: Parameters) extends XSModule
 
   // params alias
   private val numVecRegSrc = backendParams.numVecRegSrc
-  private val numVecRatPorts = numVecRegSrc + 1 // +1 dst
+  private val numVecRatPorts = numVecRegSrc
   private val v0Idx = 0
   private val vconfigIdx = VCONFIG_IDX
 
   val io = IO(new Bundle() {
     val redirect = Input(Bool())
+    val canAccept = Output(Bool())
     // from Ibuffer
     val in = Vec(DecodeWidth, Flipped(DecoupledIO(new StaticInst)))
     // to Rename
     val out = Vec(DecodeWidth, DecoupledIO(new DecodedInst))
     // RAT read
-    val intRat = Vec(RenameWidth, Vec(3, Flipped(new RatReadPort))) // Todo: make it configurable
-    val fpRat = Vec(RenameWidth, Vec(4, Flipped(new RatReadPort)))
+    val intRat = Vec(RenameWidth, Vec(2, Flipped(new RatReadPort))) // Todo: make it configurable
+    val fpRat = Vec(RenameWidth, Vec(3, Flipped(new RatReadPort)))
     val vecRat = Vec(RenameWidth, Vec(numVecRatPorts, Flipped(new RatReadPort)))
     // csr control
     val csrCtrl = Input(new CustomCSRCtrlIO)
     val fusion = Vec(DecodeWidth - 1, Input(Bool()))
     // vtype update
     val isResumeVType = Input(Bool())
-    val commitVType = Flipped(Valid(new VType))
+    val commitVType = new Bundle {
+      val vtype = Flipped(Valid(new VType))
+      val hasVsetvl = Input(Bool())
+    }
     val walkVType = Flipped(Valid(new VType))
     val stallReason = new Bundle {
       val in = Flipped(new StallReasonIO(DecodeWidth))
       val out = new StallReasonIO(DecodeWidth)
     }
+    val vsetvlVType = Input(VType())
   })
 
   // io alias
@@ -75,6 +80,8 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   val vtypeGen = Module(new VTypeGen)
 
   val debug_globalCounter = RegInit(0.U(XLEN.W))
+
+  val canAccept = Wire(Bool())
 
   //Simple 6
   decoders.zip(io.in).foreach { case (dst, src) => dst.io.enq.ctrlFlow := src.bits }
@@ -100,6 +107,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   vtypeGen.io.redirect := io.redirect
   vtypeGen.io.commitVType := io.commitVType
   vtypeGen.io.walkVType := io.walkVType
+  vtypeGen.io.vsetvlVType := io.vsetvlVType
 
   //Comp 1
   decoderComp.io.redirect := io.redirect
@@ -123,6 +131,10 @@ class DecodeStage(implicit p: Parameters) extends XSModule
 
   // block vector inst when vtype is resuming
   val hasVectorInst = VecInit(decoders.map(x => FuType.FuTypeOrR(x.io.deq.decodedInst.fuType, FuType.vecArithOrMem ++ FuType.vecVSET))).asUInt.orR
+
+  canAccept := !io.redirect && io.out.head.ready && decoderComp.io.in.ready && !io.isResumeVType
+
+  io.canAccept := canAccept
 
   io.in.zipWithIndex.foreach { case (in, i) =>
     in.ready := !io.redirect && (
@@ -153,14 +165,12 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     // We use the lsrc/ldest before fusion decoder to read RAT for better timing.
     io.intRat(i)(0).addr := io.out(i).bits.lsrc(0)
     io.intRat(i)(1).addr := io.out(i).bits.lsrc(1)
-    io.intRat(i)(2).addr := io.out(i).bits.ldest
     io.intRat(i).foreach(_.hold := !io.out(i).ready)
 
     // Floating-point instructions can not be fused now.
     io.fpRat(i)(0).addr := io.out(i).bits.lsrc(0)
     io.fpRat(i)(1).addr := io.out(i).bits.lsrc(1)
     io.fpRat(i)(2).addr := io.out(i).bits.lsrc(2)
-    io.fpRat(i)(3).addr := io.out(i).bits.ldest
     io.fpRat(i).foreach(_.hold := !io.out(i).ready)
 
     // Vec instructions
@@ -170,7 +180,6 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     io.vecRat(i)(2).addr := io.out(i).bits.lsrc(2) // old_vd
     io.vecRat(i)(3).addr := Mux(FuType.isVppu(io.out(i).bits.fuType) && (io.out(i).bits.fuOpType === VpermType.vcompress), io.out(i).bits.lsrc(3), v0Idx.U) // v0
     io.vecRat(i)(4).addr := vconfigIdx.U           // vtype
-    io.vecRat(i)(5).addr := io.out(i).bits.ldest   // vd
     io.vecRat(i).foreach(_.hold := !io.out(i).ready)
   }
 

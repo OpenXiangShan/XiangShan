@@ -65,7 +65,7 @@ class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) w
   /**
     * Deallocation: when refCounter becomes zero, the register can be released to freelist
     */
-  for (i <- 0 until CommitWidth) {
+  for (i <- 0 until RabCommitWidth) {
     when (io.freeReq(i)) {
       val freePtr = tailPtr + PopCount(io.freeReq.take(i))
       freeList(freePtr.value) := io.freePhyReg(i)

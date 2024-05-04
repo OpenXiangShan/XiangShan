@@ -105,8 +105,8 @@ class WBArbiter[T <: Data](val gen: T, val n: Int) extends Module {
   // 1           0          0
   // 1           1          1
   val grant = ArbiterCtrl(finalValid)
-  for ((in, g) <- io.in.zip(grant))
-    in.ready := (g || !in.valid) && io.out.ready
+  for (((in, g), v) <- io.in.zip(grant).zip(finalValid))
+    in.ready := (g && v || !in.valid) && io.out.ready
   io.out.valid := !grant.last || finalValid.last
 }
 

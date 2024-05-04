@@ -21,22 +21,25 @@ import chisel3._
 import chisel3.experimental.hierarchy.{Definition, instantiable}
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import utility.DelayN
+import utility.{ClockGate, DelayN}
 import utils._
 import xiangshan.backend.fu.{CSRFileIO, FenceIO, FuncUnitInput}
 import xiangshan.backend.Bundles.{ExuInput, ExuOutput, MemExuInput, MemExuOutput}
 import xiangshan.{FPUCtrlSignals, HasXSParameter, Redirect, XSBundle, XSModule}
 import xiangshan.backend.datapath.WbConfig.{PregWB, _}
 import xiangshan.backend.fu.FuType
+import xiangshan.backend.fu.vector.Bundles.{VType, Vxrm}
+import xiangshan.backend.fu.fpu.Bundles.Frm
 
 class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
   val flush = Flipped(ValidIO(new Redirect()))
   val in = Flipped(DecoupledIO(new ExuInput(params)))
   val out = DecoupledIO(new ExuOutput(params))
-  val csrio = if (params.hasCSR) Some(new CSRFileIO) else None
-  val fenceio = if (params.hasFence) Some(new FenceIO) else None
-  val frm = if (params.needSrcFrm) Some(Input(UInt(3.W))) else None
-  val vxrm = if (params.needSrcVxrm) Some(Input(UInt(2.W))) else None
+  val csrio = OptionWrapper(params.hasCSR, new CSRFileIO)
+  val fenceio = OptionWrapper(params.hasFence, new FenceIO)
+  val frm = OptionWrapper(params.needSrcFrm, Input(Frm()))
+  val vxrm = OptionWrapper(params.needSrcVxrm, Input(Vxrm()))
+  val vtype = OptionWrapper(params.writeVType, new VType)
   val vlIsZero = OptionWrapper(params.writeVConfig, Output(Bool()))
   val vlIsVlmax = OptionWrapper(params.writeVConfig, Output(Bool()))
 }
@@ -69,20 +72,23 @@ class ExeUnitImp(
       val fuVld_en_reg = RegInit(false.B)
       val uncer_en_reg = RegInit(false.B)
 
-      val lat0 = FuType.isLat0(io.in.bits.fuType)
-      val latN = FuType.isLatN(io.in.bits.fuType)
-      val uncerLat = FuType.isUncerLat(io.in.bits.fuType)
+      def latReal: Int = cfg.latency.latencyVal.getOrElse(0)
+      def extralat: Int = cfg.latency.extraLatencyVal.getOrElse(0)
 
-      def lat: Int = cfg.latency.latencyVal.getOrElse(0)
+      val uncerLat = cfg.latency.uncertainLatencyVal.nonEmpty
+      val lat0 = (latReal == 0 && !uncerLat).asBool
+      val latN = (latReal > 0&& !uncerLat).asBool
 
-      val fuVldVec = (io.in.valid && latN) +: Seq.fill(lat)(RegInit(false.B))
-      val fuRdyVec = Seq.fill(lat)(Wire(Bool())) :+ io.out.ready
 
-      for (i <- 0 until lat) {
+
+      val fuVldVec = (io.in.valid && latN) +: Seq.fill(latReal)(RegInit(false.B))
+      val fuRdyVec = Seq.fill(latReal)(Wire(Bool())) :+ io.out.ready
+
+      for (i <- 0 until latReal) {
         fuRdyVec(i) := !fuVldVec(i + 1) || fuRdyVec(i + 1)
       }
 
-      for (i <- 1 to lat) {
+      for (i <- 1 to latReal) {
         when(fuRdyVec(i - 1) && fuVldVec(i - 1)) {
           fuVldVec(i) := fuVldVec(i - 1)
         }.elsewhen(fuRdyVec(i)) {
@@ -92,9 +98,9 @@ class ExeUnitImp(
       fuVld_en := fuVldVec.map(v => v).reduce(_ || _)
       fuVld_en_reg := fuVld_en
 
-      when(uncerLat && io.in.fire) {
+      when(uncerLat.asBool && io.in.fire) {
         uncer_en_reg := true.B
-      }.elsewhen(uncerLat && io.out.fire) {
+      }.elsewhen(uncerLat.asBool && io.out.fire) {
         uncer_en_reg := false.B
       }
 
@@ -102,7 +108,7 @@ class ExeUnitImp(
         clk_en := true.B
       }.elsewhen(latN && fuVld_en || fuVld_en_reg) {
         clk_en := true.B
-      }.elsewhen(uncerLat && io.in.fire || uncer_en_reg) {
+      }.elsewhen(uncerLat.asBool && io.in.fire || uncer_en_reg) {
         clk_en := true.B
       }
 
@@ -110,11 +116,7 @@ class ExeUnitImp(
         clk_en := true.B
       }
 
-      val clk_gate = Module(new ClockGate)
-      clk_gate.io.TE := false.B
-      clk_gate.io.E := clk_en
-      clk_gate.io.CK := clock
-      fu.clock := clk_gate.io.Q
+      fu.clock := ClockGate(false.B, clk_en, clock)
       XSPerfAccumulate(s"clock_gate_en_${fu.cfg.name}", clk_en)
     }
   }
@@ -225,10 +227,21 @@ class ExeUnitImp(
       sink.bits.perfDebugInfo    := source.bits.perfDebugInfo
   }
 
+  private val OutresVecs = funcUnits.map { fu =>
+    def latDiff :Int = fu.cfg.latency.extraLatencyVal.getOrElse(0)
+    val OutresVec = fu.io.out.bits.res +: Seq.fill(latDiff)(Reg(chiselTypeOf(fu.io.out.bits.res)))
+    for (i <- 1 to latDiff) {
+      OutresVec(i) := OutresVec(i - 1)
+    }
+    OutresVec
+  }
+  OutresVecs.foreach(vec => vec.foreach(res =>dontTouch(res)))
+
   private val fuOutValidOH = funcUnits.map(_.io.out.valid)
   XSError(PopCount(fuOutValidOH) > 1.U, p"fuOutValidOH ${Binary(VecInit(fuOutValidOH).asUInt)} should be one-hot)\n")
   private val fuOutBitsVec = funcUnits.map(_.io.out.bits)
-  private val fuRedirectVec: Seq[Option[ValidIO[Redirect]]] = funcUnits.map(_.io.out.bits.res.redirect)
+  private val fuOutresVec = OutresVecs.map(_.last)
+  private val fuRedirectVec: Seq[Option[ValidIO[Redirect]]] = fuOutresVec.map(_.redirect)
 
   // Assume that one fu can only write int or fp or vec,
   // otherwise, wenVec should be assigned to wen in fu.
@@ -240,16 +253,16 @@ class ExeUnitImp(
   funcUnits.foreach(fu => fu.io.out.ready := io.out.ready)
 
   // select one fu's result
-  io.out.bits.data := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.res.data))
+  io.out.bits.data := Mux1H(fuOutValidOH, fuOutresVec.map(_.data))
   io.out.bits.robIdx := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.robIdx))
   io.out.bits.pdest := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.pdest))
   io.out.bits.intWen.foreach(x => x := Mux1H(fuOutValidOH, fuIntWenVec))
   io.out.bits.fpWen.foreach(x => x := Mux1H(fuOutValidOH, fuFpWenVec))
   io.out.bits.vecWen.foreach(x => x := Mux1H(fuOutValidOH, fuVecWenVec))
   io.out.bits.redirect.foreach(x => x := Mux1H((fuOutValidOH zip fuRedirectVec).filter(_._2.isDefined).map(x => (x._1, x._2.get))))
-  io.out.bits.fflags.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.res.fflags.getOrElse(0.U.asTypeOf(io.out.bits.fflags.get)))))
+  io.out.bits.fflags.foreach(x => x := Mux1H(fuOutValidOH, fuOutresVec.map(_.fflags.getOrElse(0.U.asTypeOf(io.out.bits.fflags.get)))))
   io.out.bits.wflags.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.fpu.getOrElse(0.U.asTypeOf(new FPUCtrlSignals)).wflags)))
-  io.out.bits.vxsat.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.res.vxsat.getOrElse(0.U.asTypeOf(io.out.bits.vxsat.get)))))
+  io.out.bits.vxsat.foreach(x => x := Mux1H(fuOutValidOH, fuOutresVec.map(_.vxsat.getOrElse(0.U.asTypeOf(io.out.bits.vxsat.get)))))
   io.out.bits.exceptionVec.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.exceptionVec.getOrElse(0.U.asTypeOf(io.out.bits.exceptionVec.get)))))
   io.out.bits.flushPipe.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.flushPipe.getOrElse(0.U.asTypeOf(io.out.bits.flushPipe.get)))))
   io.out.bits.replay.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.replay.getOrElse(0.U.asTypeOf(io.out.bits.replay.get)))))
@@ -260,6 +273,8 @@ class ExeUnitImp(
       exuio <> fuio
       fuio.exception := DelayN(exuio.exception, 2)
   }))
+
+  io.vtype.foreach(exuio => funcUnits.foreach(fu => fu.io.vtype.foreach(fuio => exuio := fuio)))
   io.fenceio.foreach(exuio => funcUnits.foreach(fu => fu.io.fenceio.foreach(fuio => fuio <> exuio)))
   io.frm.foreach(exuio => funcUnits.foreach(fu => fu.io.frm.foreach(fuio => fuio <> exuio)))
   io.vxrm.foreach(exuio => funcUnits.foreach(fu => fu.io.vxrm.foreach(fuio => fuio <> exuio)))

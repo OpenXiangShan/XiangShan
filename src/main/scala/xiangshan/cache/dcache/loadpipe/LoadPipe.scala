@@ -26,6 +26,7 @@ import xiangshan.{XSCoreParamsKey, L1CacheErrorInfo}
 import xiangshan.cache.wpu._
 import xiangshan.mem.HasL1PrefetchSourceParameter
 import xiangshan.mem.prefetch._
+import xiangshan.mem.LqPtr
 
 class LoadPfDbBundle(implicit p: Parameters) extends DCacheBundle {
   val paddr = UInt(PAddrBits.W)
@@ -254,25 +255,16 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_hit_prefetch = ParallelMux(s1_tag_match_way_dup_dc.asBools, (0 until nWays).map(w => io.extra_meta_resp(w).prefetch))
   val s1_hit_access = ParallelMux(s1_tag_match_way_dup_dc.asBools, (0 until nWays).map(w => io.extra_meta_resp(w).access))
 
-  io.replace_way.set.valid := RegNext(s0_fire)
+  // io.replace_way.set.valid := RegNext(s0_fire)
+  io.replace_way.set.valid := false.B
   io.replace_way.set.bits := get_idx(s1_vaddr)
   io.replace_way.dmWay := get_direct_map_way(s1_vaddr)
   val s1_invalid_vec = wayMap(w => !meta_resp(w).coh.isValid())
   val s1_have_invalid_way = s1_invalid_vec.asUInt.orR
   val s1_invalid_way_en = ParallelPriorityMux(s1_invalid_vec.zipWithIndex.map(x => x._1 -> UIntToOH(x._2.U(nWays.W))))
-  val s1_repl_way_en_oh = Mux(s1_have_invalid_way, s1_invalid_way_en, UIntToOH(io.replace_way.way))
-  val s1_repl_way_en_enc = OHToUInt(s1_repl_way_en_oh)
-  val s1_repl_tag = ParallelMux(s1_repl_way_en_oh.asBools, (0 until nWays).map(w => tag_resp(w)))
-  val s1_repl_coh = ParallelMux(s1_repl_way_en_oh.asBools, (0 until nWays).map(w => meta_resp(w).coh))
-  val s1_repl_prefetch = ParallelMux(s1_repl_way_en_oh.asBools, (0 until nWays).map(w => io.extra_meta_resp(w).prefetch))
-  val s1_repl_extra_meta = ParallelMux(s1_repl_way_en_oh.asBools, (0 until nWays).map(w => io.extra_meta_resp(w)))
 
   val s1_need_replacement = !s1_tag_match_dup_dc
-  val s1_way_en = Mux(s1_need_replacement, s1_repl_way_en_oh, s1_tag_match_way_dup_dc)
-  val s1_coh = Mux(s1_need_replacement, s1_repl_coh, s1_hit_coh)
-  val s1_tag = Mux(s1_need_replacement, s1_repl_tag, get_tag(s1_paddr_dup_dcache))
 
-  XSPerfAccumulate("load_has_invalid_way_but_select_valid_way", io.replace_way.set.valid && wayMap(w => !meta_resp(w).coh.isValid()).asUInt.orR && s1_need_replacement && s1_repl_coh.isValid())
   XSPerfAccumulate("load_using_replacement", io.replace_way.set.valid && s1_need_replacement)
 
   // data read
@@ -340,11 +332,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_has_permission = s2_hit_coh.onAccess(s2_req.cmd)._1 // for write prefetch
   val s2_new_hit_coh = s2_hit_coh.onAccess(s2_req.cmd)._3 // for write prefetch
 
-  val s2_way_en = RegEnable(s1_way_en, s1_fire)
-  val s2_repl_coh = RegEnable(s1_repl_coh, s1_fire)
-  val s2_repl_tag = RegEnable(s1_repl_tag, s1_fire)
-  val s2_repl_extra_meta = RegEnable(s1_repl_extra_meta, s1_fire) // not used for now
-  val s2_repl_prefetch = RegEnable(s1_repl_prefetch, s1_fire)
   val s2_encTag = RegEnable(s1_encTag, s1_fire)
 
   // when req got nacked, upper levels should replay this request
@@ -387,14 +374,10 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.miss_req.bits.cmd := s2_req.cmd
   io.miss_req.bits.addr := get_block_addr(s2_paddr)
   io.miss_req.bits.vaddr := s2_vaddr
-  io.miss_req.bits.way_en := s2_way_en
   io.miss_req.bits.req_coh := s2_hit_coh
-  io.miss_req.bits.replace_coh := s2_repl_coh
-  io.miss_req.bits.replace_tag := s2_repl_tag
-  io.miss_req.bits.replace_pf := s2_repl_prefetch
   io.miss_req.bits.cancel := io.lsu.s2_kill || s2_tag_error
   io.miss_req.bits.pc := io.lsu.s2_pc
-
+  io.miss_req.bits.lqIdx := io.lsu.req.bits.lqIdx
   // send back response
   val resp = Wire(ValidIO(new DCacheWordResp))
   resp.valid := s2_valid
@@ -413,7 +396,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   resp.bits.miss := real_miss
   io.lsu.s2_first_hit := s2_req.isFirstIssue && s2_hit
   // load pipe need replay when there is a bank conflict or wpu predict fail
-  resp.bits.replay := DontCare
+  resp.bits.replay := (resp.bits.miss && (!io.miss_req.fire || s2_nack || io.mq_enq_cancel)) || io.bank_conflict_slow || s2_wpu_pred_fail
   resp.bits.replayCarry.valid := (resp.bits.miss && (!io.miss_req.fire || s2_nack || io.mq_enq_cancel)) || io.bank_conflict_slow || s2_wpu_pred_fail
   resp.bits.replayCarry.real_way_en := s2_real_way_en
   resp.bits.meta_prefetch := s2_hit_prefetch
@@ -522,39 +505,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val hit_update_replace_en  = RegNext(s2_valid) && RegNext(!resp.bits.miss)
   val miss_update_replace_en = RegNext(io.miss_req.fire) && RegNext(!io.mq_enq_cancel) && RegNext(io.miss_resp.handled)
 
-  if (!cfg.updateReplaceOn2ndmiss) {
-    // replacement is only updated on 1st miss
-    // io.replace_access.valid := RegNext(RegNext(
-    //   RegNext(io.meta_read.fire) && s1_valid && !io.lsu.s1_kill) &&
-    //   !s2_nack_no_mshr &&
-    //   !s2_miss_merged
-    // )
-    io.replace_access.valid := s3_valid && RegNext(!s2_miss_merged)
-    io.replace_access.bits.set := RegNext(RegNext(get_idx(s1_req.vaddr)))
-    io.replace_access.bits.way := RegNext(RegNext(Mux(s1_tag_match_dup_dc, OHToUInt(s1_tag_match_way_dup_dc), s1_repl_way_en_enc)))
-  } else {
-    // replacement is updated on both 1st and 2nd miss
-    // timing is worse than !cfg.updateReplaceOn2ndmiss
-    // io.replace_access.valid := RegNext(RegNext(
-    //   RegNext(io.meta_read.fire) && s1_valid && !io.lsu.s1_kill) &&
-    //   !s2_nack_no_mshr &&
-    //   // replacement is updated on 2nd miss only when this req is firstly issued
-    //   (!s2_miss_merged || s2_req.isFirstIssue)
-    // )
-    io.replace_access.valid := s3_valid
-    io.replace_access.bits.set := RegNext(RegNext(get_idx(s1_req.vaddr)))
-    io.replace_access.bits.way := RegNext(
-      Mux(
-        RegNext(s1_tag_match_dup_dc),
-        RegNext(OHToUInt(s1_tag_match_way_dup_dc)), // if hit, access hit way in plru
-        Mux( // if miss
-          !s2_miss_merged,
-          RegNext(s1_repl_way_en_enc), // 1st fire: access new selected replace way
-          OHToUInt(io.miss_resp.repl_way_en) // 2nd fire: access replace way selected at miss queue allocate time
-        )
-      )
-    )
-  }
+  io.replace_access.valid := s3_valid && s3_hit
+  io.replace_access.bits.set := RegNext(RegNext(get_idx(s1_req.vaddr)))
+  io.replace_access.bits.way := RegNext(RegNext(OHToUInt(s1_tag_match_way_dup_dc)))
 
   // update access bit
   io.access_flag_write.valid := s3_valid && s3_hit && !s3_is_prefetch

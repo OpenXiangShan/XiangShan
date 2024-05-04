@@ -30,7 +30,7 @@ import freechips.rocketchip.tilelink._
   * delay slot for reqs that pde miss in page cache
   * if pde hit in page cache, go to LLPTW instead.
   */
-class L2TlbMQBundle(implicit p: Parameters) extends L2TlbInnerBundle
+class L2TlbMQBundle(implicit p: Parameters) extends L2TlbWithHptwIdBundle
 
 class L2TlbMQIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
   val in = Flipped(Decoupled(new L2TlbMQBundle()))
@@ -41,5 +41,5 @@ class L2TlbMissQueue(implicit p: Parameters) extends XSModule with HasPtwConst {
   require(MissQueueSize >= (l2tlbParams.ifilterSize + l2tlbParams.dfilterSize))
   val io = IO(new L2TlbMQIO())
 
-  io.out <> Queue(io.in, MissQueueSize, flush = Some(io.sfence.valid || io.csr.satp.changed))
+  io.out <> Queue(io.in, MissQueueSize, flush = Some(io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed))
 }

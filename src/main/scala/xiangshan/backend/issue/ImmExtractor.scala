@@ -38,7 +38,7 @@ class ImmExtractor(dataBits: Int, immTypeSet: Set[BigInt]) extends Module {
     SelImm.IMM_VRORVI   .litValue -> SignExt(ImmUnion.VRORVI  .toImm32(io.in.imm), IntData().dataWidth),
   )
 
-  val usedMap: Map[BigInt, UInt] = extractMap.view.filterKeys(x => immTypeSet.contains(x)).toMap
+  val usedMap: Seq[(BigInt, UInt)] = extractMap.view.filterKeys(x => immTypeSet.contains(x)).toSeq.sortWith(_._1 < _._1)
   println(usedMap)
 
   io.out.imm := MuxLookup(io.in.immType, 0.U)(usedMap.map { case (k, v) => (k.U, v) }.toSeq)

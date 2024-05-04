@@ -65,7 +65,6 @@ class HybridUnit(implicit p: Parameters) extends XSModule
       val lsq           = new LoadToLsqIO
       val tl_d_channel  = Input(new DcacheToLduForwardIO)
       val forward_mshr  = Flipped(new LduToMissqueueForwardIO)
-      val refill        = Flipped(ValidIO(new Refill))
       val tlb_hint      = Flipped(new TlbHintReq)
       val l2_hint       = Input(Valid(new L2ToL1Hint))
 
@@ -702,15 +701,17 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     when (!s1_late_kill) {
       // current ori test will cause the case of ldest == 0, below will be modifeid in the future.
       // af & pf exception were modified
-      s1_out.uop.exceptionVec(loadPageFault)   := io.tlb.resp.bits.excp(0).pf.ld
-      s1_out.uop.exceptionVec(loadAccessFault) := io.tlb.resp.bits.excp(0).af.ld
+      s1_out.uop.exceptionVec(loadPageFault)       := io.tlb.resp.bits.excp(0).pf.ld
+      s1_out.uop.exceptionVec(loadGuestPageFault)  := io.tlb.resp.bits.excp(0).gpf.ld
+      s1_out.uop.exceptionVec(loadAccessFault)     := io.tlb.resp.bits.excp(0).af.ld
     } .otherwise {
-      s1_out.uop.exceptionVec(loadAddrMisaligned) := false.B
-      s1_out.uop.exceptionVec(loadAccessFault)    := s1_late_kill
+      s1_out.uop.exceptionVec(loadAddrMisaligned)  := false.B
+      s1_out.uop.exceptionVec(loadAccessFault)     := s1_late_kill
     }
   } .otherwise {
-    s1_out.uop.exceptionVec(storePageFault)   := io.tlb.resp.bits.excp(0).pf.st
-    s1_out.uop.exceptionVec(storeAccessFault) := io.tlb.resp.bits.excp(0).af.st
+    s1_out.uop.exceptionVec(storePageFault)        := io.tlb.resp.bits.excp(0).pf.st
+    s1_out.uop.exceptionVec(storeGuestPageFault)   := io.tlb.resp.bits.excp(0).gpf.st
+    s1_out.uop.exceptionVec(storeAccessFault)      := io.tlb.resp.bits.excp(0).af.st
   }
 
   // pointer chasing
@@ -1383,7 +1384,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   // FIXME: please move this part to LoadQueueReplay
   io.ldu_io.debug_ls := DontCare
   io.stu_io.debug_ls := DontCare
-  io.stu_io.debug_ls.s1.isTlbFirstMiss := io.tlb.resp.valid && io.tlb.resp.bits.miss && io.tlb.resp.bits.debug.isFirstIssue && !s1_in.isHWPrefetch && !s1_ld_flow
+  io.stu_io.debug_ls.s1_isTlbFirstMiss := io.tlb.resp.valid && io.tlb.resp.bits.miss && io.tlb.resp.bits.debug.isFirstIssue && !s1_in.isHWPrefetch && !s1_ld_flow
   io.stu_io.debug_ls.s1_robIdx := s1_in.uop.robIdx.value
 
  // Topdown

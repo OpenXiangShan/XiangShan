@@ -5,6 +5,7 @@ import chisel3._
 import chisel3.util._
 import utility.HasCircularQueuePtrHelper
 import utils._
+import utility._
 import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.DataConfig.VAddrData
@@ -57,7 +58,12 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     resps.flatten
   }
 
-  val resps: Vec[Vec[ValidIO[EntryDeqRespBundle]]] = VecInit(io.og0Resp, io.og1Resp, 0.U.asTypeOf(io.og0Resp))
+  val resps: Vec[Vec[ValidIO[EntryDeqRespBundle]]] = {
+    if (params.inVfSchd)
+      VecInit(io.og0Resp, io.og1Resp, io.og2Resp.get, 0.U.asTypeOf(io.og0Resp))
+    else
+      VecInit(io.og0Resp, io.og1Resp, 0.U.asTypeOf(io.og0Resp), 0.U.asTypeOf(io.og0Resp))
+  }
 
 
 
@@ -82,9 +88,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val uopIdxVec           = OptionWrapper(params.isVecMemIQ, Wire(Vec(params.numEntries, UopIdx())))
   //src status
   val dataSourceVec       = Wire(Vec(params.numEntries, Vec(params.numRegSrc, DataSource())))
-  val loadDependencyVec   = Wire(Vec(params.numEntries, Vec(LoadPipelineWidth, UInt(3.W))))
-  val srcLoadDependencyVec= Wire(Vec(params.numEntries, Vec(params.numRegSrc, Vec(LoadPipelineWidth, UInt(3.W)))))
-  val srcTimerVec         = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Vec(params.numRegSrc, UInt(3.W)))))
+  val loadDependencyVec   = Wire(Vec(params.numEntries, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
   val srcWakeUpL1ExuOHVec = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Vec(params.numRegSrc, ExuVec()))))
   //deq sel
   val deqSelVec           = Wire(Vec(params.numEntries, Bool()))
@@ -115,10 +119,13 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val simpEntryEnqVec        = othersEntryEnqVec.take(SimpEntryNum)
   val compEntryEnqVec        = othersEntryEnqVec.takeRight(CompEntryNum)
   //debug
-  val cancelVec              = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Bool())))
   val entryInValidVec        = Wire(Vec(params.numEntries, Bool()))
   val entryOutDeqValidVec    = Wire(Vec(params.numEntries, Bool()))
   val entryOutTransValidVec  = Wire(Vec(params.numEntries, Bool()))
+  val perfLdCancelVec        = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Vec(params.numRegSrc, Bool()))))
+  val perfOg0CancelVec       = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Vec(params.numRegSrc, Bool()))))
+  val perfWakeupByWBVec      = Wire(Vec(params.numEntries, Vec(params.numRegSrc, Bool())))
+  val perfWakeupByIQVec      = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Vec(params.numRegSrc, Vec(params.numWakeupFromIQ, Bool())))))
   //cancel bypass
   val cancelBypassVec        = Wire(Vec(params.numEntries, Bool()))
 
@@ -129,10 +136,15 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     enqEntry.io.commonIn.transSel             := (if (params.isAllComp || params.isAllSimp) enqCanTrans2Others.get && othersTransSelVec.get(entryIdx).valid
                                                   else enqCanTrans2Simp.get && simpTransSelVec.get(entryIdx).valid || enqCanTrans2Comp.get && compTransSelVec.get(entryIdx).valid)
     EntriesConnect(enqEntry.io.commonIn, enqEntry.io.commonOut, entryIdx)
-    enqEntry.io.enqDelayWakeUpFromWB          := RegEnable(io.wakeUpFromWB, io.enq(entryIdx).valid)
-    enqEntry.io.enqDelayWakeUpFromIQ          := RegEnable(io.wakeUpFromIQ, io.enq(entryIdx).valid)
-    enqEntry.io.enqDelayOg0Cancel             := RegNext(io.og0Cancel.asUInt)
-    enqEntry.io.enqDelayLdCancel              := RegNext(io.ldCancel)
+    enqEntry.io.enqDelayIn1.wakeUpFromWB      := RegEnable(io.wakeUpFromWB, io.enq(entryIdx).valid)
+    enqEntry.io.enqDelayIn1.wakeUpFromIQ      := RegEnable(io.wakeUpFromIQ, io.enq(entryIdx).valid)
+    enqEntry.io.enqDelayIn1.og0Cancel         := RegNext(io.og0Cancel.asUInt)
+    enqEntry.io.enqDelayIn1.ldCancel          := RegNext(io.ldCancel)
+    // note: these signals with 2 cycle delay should not be enabled by io.enq.valid
+    enqEntry.io.enqDelayIn2.wakeUpFromWB      := DelayN(io.wakeUpFromWB, 2)
+    enqEntry.io.enqDelayIn2.wakeUpFromIQ      := DelayN(io.wakeUpFromIQ, 2)
+    enqEntry.io.enqDelayIn2.og0Cancel         := DelayN(io.og0Cancel.asUInt, 2)
+    enqEntry.io.enqDelayIn2.ldCancel          := DelayN(io.ldCancel, 2)
     enqEntryTransVec(entryIdx)                := enqEntry.io.commonOut.transEntry
   }
   //othersEntries
@@ -371,28 +383,11 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     }
   }
 
-  if (params.hasIQWakeUp) {
-    cancelBypassVec.zip(srcWakeUpL1ExuOHVec.get).zip(srcTimerVec.get).zip(srcLoadDependencyVec).foreach{ case (((cancelBypass: Bool, l1ExuOH: Vec[Vec[Bool]]), srcTimer: Vec[UInt]), srcLoadDependency: Vec[Vec[UInt]]) =>
-      val cancelByOg0 = l1ExuOH.zip(srcTimer).map {
-        case(exuOH, srcTimer) =>
-          (exuOH.asUInt & io.og0Cancel.asUInt).orR && srcTimer === 1.U
-      }.reduce(_ | _)
-      val cancelByLd = srcLoadDependency.map(x => LoadShouldCancel(Some(x), io.ldCancel)).reduce(_ | _)
-      cancelBypass := cancelByLd
-    }
-  } else {
-    cancelBypassVec.zip(srcLoadDependencyVec).foreach { case (cancelBypass, srcLoadDependency) =>
-      val cancelByLd = srcLoadDependency.map(x => LoadShouldCancel(Some(x), io.ldCancel)).reduce(_ | _)
-      cancelBypass := cancelByLd
-    }
-  }
-
   io.valid                          := validVec.asUInt
   io.canIssue                       := canIssueVec.asUInt
   io.fuType                         := fuTypeVec
   io.dataSources                    := dataSourceVec
   io.srcWakeUpL1ExuOH.foreach(_     := srcWakeUpL1ExuOHVec.get.map(x => VecInit(x.map(_.asUInt))))
-  io.srcTimer.foreach(_             := srcTimerVec.get)
   io.loadDependency                 := loadDependencyVec
   io.isFirstIssue.zipWithIndex.foreach{ case (isFirstIssue, deqIdx) =>
     isFirstIssue                    := io.deqSelOH(deqIdx).valid && Mux1H(io.deqSelOH(deqIdx).bits, isFirstIssueVec)
@@ -402,7 +397,6 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   io.othersEntryEnqSelVec.foreach(_ := finalOthersTransSelVec.get.zip(enqEntryTransVec).map(x => x._1 & Fill(OthersEntryNum, x._2.valid)))
   io.robIdx.foreach(_               := robIdxVec)
   io.uopIdx.foreach(_               := uopIdxVec.get)
-  io.cancel.foreach(_               := cancelVec.get)               //for debug
 
 
   def EntriesConnect(in: CommonInBundle, out: CommonOutBundle, entryIdx: Int) = {
@@ -430,12 +424,10 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     entries(entryIdx)           := out.entry
     deqPortIdxReadVec(entryIdx) := out.deqPortIdxRead
     issueTimerVec(entryIdx)     := out.issueTimerRead
-    srcLoadDependencyVec(entryIdx)          := out.srcLoadDependency
-    loadDependencyVec(entryIdx)             := out.entry.bits.status.mergedLoadDependency
+    loadDependencyVec(entryIdx) := out.entry.bits.status.mergedLoadDependency
+    cancelBypassVec(entryIdx)   := out.cancelBypass
     if (params.hasIQWakeUp) {
-      srcWakeUpL1ExuOHVec.get(entryIdx)       := out.srcWakeUpL1ExuOH.get
-      srcTimerVec.get(entryIdx)               := out.srcTimer.get
-      cancelVec.get(entryIdx)                 := out.cancel.get
+      srcWakeUpL1ExuOHVec.get(entryIdx)     := out.srcWakeUpL1ExuOH.get
     }
     if (params.isVecMemIQ) {
       uopIdxVec.get(entryIdx)       := out.uopIdx.get
@@ -443,7 +435,15 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     entryInValidVec(entryIdx)       := out.entryInValid
     entryOutDeqValidVec(entryIdx)   := out.entryOutDeqValid
     entryOutTransValidVec(entryIdx) := out.entryOutTransValid
+    perfWakeupByWBVec(entryIdx)     := out.perfWakeupByWB
+    if (params.hasIQWakeUp) {
+      perfLdCancelVec.get(entryIdx)   := out.perfLdCancel.get
+      perfOg0CancelVec.get(entryIdx)  := out.perfOg0Cancel.get
+      perfWakeupByIQVec.get(entryIdx) := out.perfWakeupByIQ.get
+    }
   }
+
+  io.vecLdIn.foreach(dontTouch(_))
 
   // entries perf counter
   // enq
@@ -468,12 +468,47 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   XSPerfAccumulate(s"enqEntry_all_in_cnt", PopCount(entryInValidVec.take(params.numEnq)))
   XSPerfAccumulate(s"enqEntry_all_out_deq_cnt", PopCount(entryOutDeqValidVec.take(params.numEnq)))
   XSPerfAccumulate(s"enqEntry_all_out_trans_cnt", PopCount(entryOutTransValidVec.take(params.numEnq)))
+  for (srcIdx <- 0 until params.numRegSrc) {
+    XSPerfAccumulate(s"enqEntry_all_wakeup_wb_src${srcIdx}_cnt", PopCount(perfWakeupByWBVec.take(params.numEnq).map(_(srcIdx))))
+    if (params.hasIQWakeUp) {
+      XSPerfAccumulate(s"enqEntry_all_ldCancel_src${srcIdx}_cnt", PopCount(perfLdCancelVec.get.take(params.numEnq).map(_(srcIdx))))
+      XSPerfAccumulate(s"enqEntry_all_og0Cancel_src${srcIdx}_cnt", PopCount(perfOg0CancelVec.get.take(params.numEnq).map(_(srcIdx))))
+      for (iqIdx <- 0 until params.numWakeupFromIQ) {
+        XSPerfAccumulate(s"enqEntry_all_wakeup_iq_from_exu${params.wakeUpSourceExuIdx(iqIdx)}_src${srcIdx}_cnt", PopCount(perfWakeupByIQVec.get.take(params.numEnq).map(_(srcIdx)(iqIdx))))
+      }
+    }
+  }
 
   XSPerfAccumulate(s"othersEntry_all_in_cnt", PopCount(entryInValidVec.drop(params.numEnq)))
   XSPerfAccumulate(s"othersEntry_all_out_deq_cnt", PopCount(entryOutDeqValidVec.drop(params.numEnq)))
   XSPerfAccumulate(s"othersEntry_all_out_trans_cnt", PopCount(entryOutTransValidVec.drop(params.numEnq)))
 
-  io.vecLdIn.foreach(dontTouch(_))
+  for (srcIdx <- 0 until params.numRegSrc) {
+    XSPerfAccumulate(s"othersEntry_all_wakeup_wb_src${srcIdx}_cnt", PopCount(perfWakeupByWBVec.drop(params.numEnq).map(_(srcIdx))))
+    if (params.hasIQWakeUp) {
+      XSPerfAccumulate(s"othersEntry_all_ldCancel_src${srcIdx}_cnt", PopCount(perfLdCancelVec.get.drop(params.numEnq).map(_(srcIdx))))
+      XSPerfAccumulate(s"othersEntry_all_og0Cancel_src${srcIdx}_cnt", PopCount(perfOg0CancelVec.get.drop(params.numEnq).map(_(srcIdx))))
+      for (iqIdx <- 0 until params.numWakeupFromIQ) {
+        XSPerfAccumulate(s"othersEntry_all_wakeup_iq_from_exu${params.wakeUpSourceExuIdx(iqIdx)}_src${srcIdx}_cnt", PopCount(perfWakeupByIQVec.get.drop(params.numEnq).map(_(srcIdx)(iqIdx))))
+      }
+    }
+  }
+
+  for (t <- FuType.functionNameMap.keys) {
+    val fuName = FuType.functionNameMap(t)
+    if (params.getFuCfgs.map(_.fuType == t).reduce(_ | _) && params.getFuCfgs.size > 1) {
+      for (srcIdx <- 0 until params.numRegSrc) {
+        XSPerfAccumulate(s"allEntry_futype_${fuName}_wakeup_wb_src${srcIdx}_cnt", PopCount(perfWakeupByWBVec.zip(fuTypeVec).map{ case(x, fu) => x(srcIdx) && fu(t.id) }))
+        if (params.hasIQWakeUp) {
+          XSPerfAccumulate(s"allEntry_futype_${fuName}_ldCancel_src${srcIdx}_cnt", PopCount(perfLdCancelVec.get.zip(fuTypeVec).map{ case(x, fu) => x(srcIdx) && fu(t.id) }))
+          XSPerfAccumulate(s"allEntry_futype_${fuName}_og0Cancel_src${srcIdx}_cnt", PopCount(perfOg0CancelVec.get.zip(fuTypeVec).map{ case(x, fu) => x(srcIdx) && fu(t.id) }))
+          for (iqIdx <- 0 until params.numWakeupFromIQ) {
+            XSPerfAccumulate(s"allEntry_futype_${fuName}_wakeup_iq_from_exu${params.wakeUpSourceExuIdx(iqIdx)}_src${srcIdx}_cnt", PopCount(perfWakeupByIQVec.get.zip(fuTypeVec).map{ case(x, fu) => x(srcIdx)(iqIdx) && fu(t.id) }))
+          }
+        }
+      }
+    }
+  }
 }
 
 class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
@@ -482,6 +517,7 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val enq                 = Vec(params.numEnq, Flipped(ValidIO(new EntryBundle)))
   val og0Resp             = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
   val og1Resp             = Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle)))
+  val og2Resp             = OptionWrapper(params.inVfSchd, Vec(params.numDeq, Flipped(ValidIO(new EntryDeqRespBundle))))
   //deq sel
   val deqReady            = Vec(params.numDeq, Input(Bool()))
   val deqSelOH            = Vec(params.numDeq, Flipped(ValidIO(UInt(params.numEntries.W))))
@@ -504,9 +540,8 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val canIssue            = Output(UInt(params.numEntries.W))
   val fuType              = Vec(params.numEntries, Output(FuType()))
   val dataSources         = Vec(params.numEntries, Vec(params.numRegSrc, Output(DataSource())))
-  val loadDependency      = Vec(params.numEntries, Vec(LoadPipelineWidth, UInt(3.W)))
+  val loadDependency      = Vec(params.numEntries, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
   val srcWakeUpL1ExuOH    = OptionWrapper(params.hasIQWakeUp, Vec(params.numEntries, Vec(params.numRegSrc, Output(ExuOH()))))
-  val srcTimer            = OptionWrapper(params.hasIQWakeUp, Vec(params.numEntries, Vec(params.numRegSrc, Output(UInt(3.W)))))
   //deq status
   val isFirstIssue        = Vec(params.numDeq, Output(Bool()))
   val deqEntry            = Vec(params.numDeq, ValidIO(new EntryBundle))
@@ -538,9 +573,6 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val simpEntryEnqSelVec = OptionWrapper(params.hasCompAndSimp, Vec(params.numEnq, Output(UInt(params.numSimp.W))))
   val compEntryEnqSelVec = OptionWrapper(params.hasCompAndSimp, Vec(params.numEnq, Output(UInt(params.numComp.W))))
   val othersEntryEnqSelVec = OptionWrapper(params.isAllComp || params.isAllSimp, Vec(params.numEnq, Output(UInt((params.numEntries - params.numEnq).W))))
-
-  // debug
-  val cancel              = OptionWrapper(params.hasIQWakeUp, Output(Vec(params.numEntries, Bool())))
 
   def wakeup = wakeUpFromWB ++ wakeUpFromIQ
 }

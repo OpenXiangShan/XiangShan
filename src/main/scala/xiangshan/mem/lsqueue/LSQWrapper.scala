@@ -35,6 +35,7 @@ class ExceptionAddrIO(implicit p: Parameters) extends XSBundle {
   val vaddr = Output(UInt(VAddrBits.W))
   val vstart = Output(UInt((log2Up(VLEN) + 1).W))
   val vl = Output(UInt((log2Up(VLEN) + 1).W))
+  val gpaddr = Output(UInt(GPAddrBits.W))
 }
 
 class FwdEntry extends Bundle {
@@ -59,7 +60,7 @@ class LsqEnqIO(implicit p: Parameters) extends MemBlockBundle {
 // Load / Store Queue Wrapper for XiangShan Out of Order LSU
 class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParameters with HasPerfEvents {
   val io = IO(new Bundle() {
-    val hartId = Input(UInt(8.W))
+    val hartId = Input(UInt(hartIdLen.W))
     val brqRedirect = Flipped(ValidIO(new Redirect))
     val stvecFeedback = Vec(VecStorePipelineWidth, Flipped(ValidIO(new FeedbackToLsqIO)))
     val ldvecFeedback = Vec(VecLoadPipelineWidth, Flipped(ValidIO(new FeedbackToLsqIO)))
@@ -87,7 +88,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val nuke_rollback = Output(Valid(new Redirect))
     val nack_rollback = Output(Valid(new Redirect))
     val release = Flipped(Valid(new Release))
-    val refill = Flipped(Valid(new Refill))
+   // val refill = Flipped(Valid(new Refill))
     val tl_d_channel  = Input(new DcacheToLduForwardIO)
     val uncacheOutstanding = Input(Bool())
     val uncache = new UncacheWordIO
@@ -187,7 +188,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   loadQueue.io.nuke_rollback       <> io.nuke_rollback
   loadQueue.io.nack_rollback       <> io.nack_rollback
   loadQueue.io.replay              <> io.replay
-  loadQueue.io.refill              <> io.refill
+ // loadQueue.io.refill              <> io.refill
   loadQueue.io.tl_d_channel        <> io.tl_d_channel
   loadQueue.io.release             <> io.release
   loadQueue.io.trigger             <> io.trigger
@@ -217,6 +218,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   io.exceptionAddr.vaddr := Mux(RegNext(io.exceptionAddr.isStore), storeQueue.io.exceptionAddr.vaddr, loadQueue.io.exceptionAddr.vaddr)
   io.exceptionAddr.vstart := Mux(RegNext(io.exceptionAddr.isStore), storeQueue.io.exceptionAddr.vstart, loadQueue.io.exceptionAddr.vstart)
   io.exceptionAddr.vl     := Mux(RegNext(io.exceptionAddr.isStore), storeQueue.io.exceptionAddr.vl, loadQueue.io.exceptionAddr.vl)
+  io.exceptionAddr.gpaddr := Mux(RegNext(io.exceptionAddr.isStore), storeQueue.io.exceptionAddr.gpaddr, loadQueue.io.exceptionAddr.gpaddr)
   io.issuePtrExt := storeQueue.io.stAddrReadySqPtr
 
   // naive uncache arbiter

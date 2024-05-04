@@ -26,8 +26,8 @@ val defaultScalaVersion = "2.13.10"
 
 def defaultVersions(chiselVersion: String) = chiselVersion match {
   case "chisel" => Map(
-    "chisel"        -> ivy"org.chipsalliance::chisel:6.0.0-RC1",
-    "chisel-plugin" -> ivy"org.chipsalliance:::chisel-plugin:6.0.0-RC1",
+    "chisel"        -> ivy"org.chipsalliance::chisel:6.3.0",
+    "chisel-plugin" -> ivy"org.chipsalliance:::chisel-plugin:6.3.0",
     "chiseltest"    -> ivy"edu.berkeley.cs::chiseltest:5.0.2"
   )
   case "chisel3" => Map(
@@ -215,7 +215,7 @@ trait XiangShan extends XiangShanModule with HasChisel {
 
   def yunsuanModule = yunsuan(crossValue)
 
-  override def forkArgs = Seq("-Xmx20G", "-Xss256m")
+  override def forkArgs = Seq("-Xmx40G", "-Xss256m")
 
   override def sources = T.sources {
     super.sources() ++ Seq(PathRef(millSourcePath / "src" / crossValue / "main" / "scala"))
@@ -226,7 +226,7 @@ trait XiangShan extends XiangShanModule with HasChisel {
   )
 
   object test extends SbtModuleTests with TestModule.ScalaTest {
-    override def forkArgs = Seq("-Xmx20G", "-Xss256m")
+    override def forkArgs = Seq("-Xmx40G", "-Xss256m")
 
     override def sources = T.sources {
       super.sources() ++ Seq(PathRef(millSourcePath / "src" / crossValue / "test" / "scala"))

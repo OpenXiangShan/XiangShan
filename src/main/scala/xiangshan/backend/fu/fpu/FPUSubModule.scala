@@ -68,3 +68,6 @@ abstract class FPUSubModule(cfg: FuConfig)(implicit p: Parameters) extends FuncU
 abstract class FPUPipelineModule(cfg: FuConfig)(implicit p: Parameters)
   extends FPUSubModule(cfg)
   with HasPipelineReg
+{
+  override def latency: Int = cfg.latency.latencyVal.get
+}

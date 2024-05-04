@@ -42,7 +42,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   with HasPerfEvents
 {
   val io = IO(new Bundle() {
-    val hartId = Input(UInt(8.W))
+    val hartId = Input(UInt(hartIdLen.W))
     val reset_vector = Input(UInt(PAddrBits.W))
     val fencei = Input(Bool())
     val ptw = new TlbPtwIO()
@@ -114,6 +114,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   itlb.io.hartId := io.hartId
   itlb.io.base_connect(sfence, tlbCsr)
   itlb.io.flushPipe.map(_ := needFlush)
+  itlb.io.redirect := DontCare // itlb has flushpipe, don't need redirect signal
 
   val itlb_ptw = Wire(new VectorTlbPtwIO(coreParams.itlbPortNum))
   itlb_ptw.connect(itlb.io.ptw)
@@ -158,6 +159,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   ftq.io.fromBackend <> io.backend.toFtq
   io.backend.fromFtq <> ftq.io.toBackend
+  io.backend.fromIfu <> ifu.io.toBackend
   io.frontendInfo.bpuInfo <> ftq.io.bpuInfo
 
   val checkPcMem = Reg(Vec(FtqSize, new Ftq_RF_Components))
@@ -312,6 +314,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   ibuffer.io.SCMissBubble := FlushSCMiss
   ibuffer.io.ITTAGEMissBubble := FlushITTAGEMiss
   ibuffer.io.RASMissBubble := FlushRASMiss
+  ibuffer.io.decodeCanAccept := io.backend.canAccept
 
   FlushControlBTBMiss := ftq.io.ControlBTBMissBubble
   FlushTAGEMiss := ftq.io.TAGEMissBubble

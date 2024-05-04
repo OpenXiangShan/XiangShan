@@ -134,6 +134,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   io.tlb.req.bits.debug.pc           := s0_pc
   io.tlb.req.bits.debug.isFirstIssue := s0_isFirstIssue
   io.tlb.req_kill                    := false.B
+  io.tlb.req.bits.hyperinst          := LSUOpType.isHsv(s0_uop.fuOpType)
+  io.tlb.req.bits.hlvx               := false.B
 
   // Dcache access here: not **real** dcache write
   // just read meta and tag in dcache, to find out the store will hit or miss
@@ -204,6 +206,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
                      s1_in.uop.fuOpType === LSUOpType.cbo_flush ||
                      s1_in.uop.fuOpType === LSUOpType.cbo_inval
   val s1_paddr     = io.tlb.resp.bits.paddr(0)
+  val s1_gpaddr    = io.tlb.resp.bits.gpaddr(0)
   val s1_tlb_miss  = io.tlb.resp.bits.miss
   val s1_mmio      = s1_mmio_cbo
   val s1_exception = ExceptionNO.selectByFu(s1_out.uop.exceptionVec, StaCfg).asUInt.orR
@@ -250,12 +253,14 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   // writeback store inst to lsq
   s1_out         := s1_in
   s1_out.paddr   := s1_paddr
+  s1_out.gpaddr  := s1_gpaddr
   s1_out.miss    := false.B
   s1_out.mmio    := s1_mmio
   s1_out.tlbMiss := s1_tlb_miss
   s1_out.atomic  := s1_mmio
-  s1_out.uop.exceptionVec(storePageFault)   := io.tlb.resp.bits.excp(0).pf.st && s1_vecActive
-  s1_out.uop.exceptionVec(storeAccessFault) := io.tlb.resp.bits.excp(0).af.st && s1_vecActive
+  s1_out.uop.exceptionVec(storePageFault)      := io.tlb.resp.bits.excp(0).pf.st && s1_vecActive
+  s1_out.uop.exceptionVec(storeAccessFault)    := io.tlb.resp.bits.excp(0).af.st && s1_vecActive
+  s1_out.uop.exceptionVec(storeGuestPageFault) := io.tlb.resp.bits.excp(0).gpf.st && s1_vecActive
 
   // scalar store and scalar load nuke check, and also other purposes
   io.lsq.valid     := s1_valid && !s1_in.isHWPrefetch
@@ -430,8 +435,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   // io.vecstout.bits.alignedType.map(_ := sx_last_in.alignedType)
 
   io.debug_ls := DontCare
-  io.debug_ls.s1.isTlbFirstMiss := io.tlb.resp.valid && io.tlb.resp.bits.miss && io.tlb.resp.bits.debug.isFirstIssue && !s1_in.isHWPrefetch
   io.debug_ls.s1_robIdx := s1_in.uop.robIdx.value
+  io.debug_ls.s1_isTlbFirstMiss := io.tlb.resp.valid && io.tlb.resp.bits.miss && io.tlb.resp.bits.debug.isFirstIssue && !s1_in.isHWPrefetch
 
   private def printPipeLine(pipeline: LsPipelineBundle, cond: Bool, name: String): Unit = {
     XSDebug(cond,

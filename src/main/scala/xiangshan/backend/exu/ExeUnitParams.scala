@@ -42,12 +42,14 @@ case class ExeUnitParams(
   val readIntRf: Boolean = numIntSrc > 0
   val readFpRf: Boolean = numFpSrc > 0
   val readVecRf: Boolean = numVecSrc > 0
+  val readVfRf: Boolean = numVfSrc > 0
   val writeIntRf: Boolean = fuConfigs.map(_.writeIntRf).reduce(_ || _)
   val writeFpRf: Boolean = fuConfigs.map(_.writeFpRf).reduce(_ || _)
   val writeVecRf: Boolean = fuConfigs.map(_.writeVecRf).reduce(_ || _)
   val needIntWen: Boolean = fuConfigs.map(_.needIntWen).reduce(_ || _)
   val needFpWen: Boolean = fuConfigs.map(_.needFpWen).reduce(_ || _)
   val needVecWen: Boolean = fuConfigs.map(_.needVecWen).reduce(_ || _)
+  val needOg2: Boolean = fuConfigs.map(_.needOg2).reduce(_ || _)
   val writeVfRf: Boolean = writeFpRf || writeVecRf
   val writeFflags: Boolean = fuConfigs.map(_.writeFflags).reduce(_ || _)
   val writeVxsat: Boolean = fuConfigs.map(_.writeVxsat).reduce(_ || _)
@@ -68,6 +70,7 @@ case class ExeUnitParams(
   val needFPUCtrl: Boolean = fuConfigs.map(_.needFPUCtrl).reduce(_ || _)
   val needVPUCtrl: Boolean = fuConfigs.map(_.needVecCtrl).reduce(_ || _)
   val writeVConfig: Boolean = fuConfigs.map(_.writeVConfig).reduce(_ || _)
+  val writeVType: Boolean = fuConfigs.map(_.writeVType).reduce(_ || _)
   val isHighestWBPriority: Boolean = wbPortConfigs.forall(_.priority == 0)
 
   val isIntExeUnit: Boolean = schdType.isInstanceOf[IntScheduler]
@@ -116,7 +119,7 @@ case class ExeUnitParams(
     */
   def fuLatencyMap: Map[FuType.OHType, Int] = {
     if (latencyCertain)
-      fuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
+      if(needOg2) fuConfigs.map(x => (x.fuType, x.latency.latencyVal.get + 1)).toMap else fuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
     else if (hasUncertainLatencyVal)
       fuConfigs.map(x => (x.fuType, x.latency.uncertainLatencyVal)).toMap.filter(_._2.nonEmpty).map(x => (x._1, x._2.get))
     else
@@ -147,7 +150,8 @@ case class ExeUnitParams(
     if (intLatencyCertain) {
       if (isVfExeUnit) {
         // vf exe unit writing back to int regfile should delay 1 cycle
-        writeIntFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get + 1)).toMap
+        // vf exe unit need og2 --> delay 1 cycle
+        writeIntFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get + 2)).toMap
       } else {
         writeIntFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
       }
@@ -160,7 +164,7 @@ case class ExeUnitParams(
 
   def vfFuLatencyMap: Map[FuType.OHType, Int] = {
     if (vfLatencyCertain)
-      writeVfFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
+      if(needOg2) writeVfFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get + 1)).toMap else writeVfFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
     else
       Map()
   }
