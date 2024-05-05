@@ -90,6 +90,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     sink.vstart                             := source.vstart // TODO: if lsq need vl for fof?
     sink.vaddr                              := source.vaddr
     sink.vl                                 := source.vl
+    sink.exceptionVec                       := source.exceptionVec
     sink
   }
   // freeliset: store valid entries index.
@@ -207,17 +208,27 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
   }
 
   for((pipewb, i) <- io.fromPipeline.zipWithIndex){
+    val entry               = entries(wbMbIndex(i))
+    val entryVeew           = entry.uop.vpu.veew
+    val entryIsUS           = LSUOpType.isUStride(entry.uop.fuOpType)
+    val entryExcp           = entry.exceptionVec.asUInt.orR && entry.mask.orR
+
     val sel                    = selectOldest(mergePortMatrix(i), pipeBits, wbElemIdxInField)
     val selPort                = sel._2
     val selElemInfield         = selPort(0).elemIdx & (entries(wbMbIndex(i)).vlmax - 1.U)
     val selExceptionVec        = selPort(0).exceptionVec
-    val thisPortExcp           = pipewb.bits.exceptionVec.asUInt.orR && pipewb.bits.mask.orR
 
-    when((((entries(wbMbIndex(i)).vstart >= selElemInfield) && thisPortExcp && portHasExcp(i)) || (!thisPortExcp && portHasExcp(i))) && pipewb.valid){
+    val USFirstUopOffset       = (searchVFirstUnMask(selPort(0).mask) << entryVeew).asUInt
+    val isUSFirstUop           = !selPort(0).elemIdx.orR
+    val vaddr                  = selPort(0).vaddr + Mux(entryIsUS && isUSFirstUop, USFirstUopOffset, 0.U)
+
+    // select oldest port to raise exception
+    when((((entries(wbMbIndex(i)).vstart >= selElemInfield) && entryExcp && portHasExcp(i)) || (!entryExcp && portHasExcp(i))) && pipewb.valid && !mergedByPrevPortVec(i)){
       when(!entries(wbMbIndex(i)).fof || selElemInfield === 0.U){
         // For fof loads, if element 0 raises an exception, vl is not modified, and the trap is taken.
         entries(wbMbIndex(i)).vstart       := selElemInfield
         entries(wbMbIndex(i)).exceptionVec := selExceptionVec
+        entries(wbMbIndex(i)).vaddr        := vaddr
       }.otherwise{
         entries(wbMbIndex(i)).vl           := selElemInfield
       }

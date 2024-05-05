@@ -90,6 +90,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   // val s0_flowPtr      = s0_vecstin.flowPtr
   // val s0_isLastElem   = s0_vecstin.isLastElem
   val s0_secondInv    = s0_vecstin.usSecondInv
+  val s0_elemIdx      = s0_vecstin.elemIdx
+  val s0_alignedType  = s0_vecstin.alignedType
   val s0_mBIndex      = s0_vecstin.mBIndex
 
   // generate addr
@@ -164,6 +166,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   s0_out.is128bit     := false.B
   s0_out.vecActive    := s0_vecActive
   s0_out.usSecondInv  := s0_secondInv
+  s0_out.elemIdx      := s0_elemIdx
+  s0_out.alignedType  := s0_alignedType
   s0_out.mbIndex      := s0_mBIndex
   when(s0_valid && s0_isFirstIssue) {
     s0_out.uop.debugInfo.tlbFirstReqTime := GTimer()
@@ -392,6 +396,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
       sx_in(i).alignedType := s3_in.alignedType
       sx_in(i).mbIndex     := s3_in.mbIndex
       sx_in(i).mask        := s3_in.mask
+      sx_in(i).vaddr       := s3_in.vaddr
       sx_ready(i) := !s3_valid(i) || sx_in(i).output.uop.robIdx.needFlush(io.redirect) || (if (TotalDelayCycles == 0) io.stout.ready else sx_ready(i+1))
     } else {
       val cur_kill   = sx_in(i).output.uop.robIdx.needFlush(io.redirect)
@@ -427,6 +432,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   io.vecstout.bits.elemIdx     := sx_last_in.elemIdx
   io.vecstout.bits.alignedType := sx_last_in.alignedType
   io.vecstout.bits.mask        := sx_last_in.mask
+  io.vecstout.bits.vaddr       := sx_last_in.vaddr
   // io.vecstout.bits.reg_offset.map(_ := DontCare)
   // io.vecstout.bits.elemIdx.map(_ := sx_last_in.elemIdx)
   // io.vecstout.bits.elemIdxInsideVd.map(_ := DontCare)

@@ -219,6 +219,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).bits.uop.robIdx     := io.vecFeedback(i).bits.robidx
     exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).bits.uop.vpu.vstart := io.vecFeedback(i).bits.vstart
     exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).bits.uop.vpu.vl     := io.vecFeedback(i).bits.vl
+    exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).bits.uop.exceptionVec     := io.vecFeedback(i).bits.exceptionVec
   }
 
 

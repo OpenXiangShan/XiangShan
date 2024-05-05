@@ -293,6 +293,7 @@ class VecMemExuOutput(isVector: Boolean = false)(implicit p: Parameters) extends
   val alignedType = UInt(alignTypeBits.W)
   val mbIndex     = UInt(vsmBindexBits.W)
   val mask        = UInt(VLENB.W)
+  val vaddr       = UInt(VAddrBits.W)
 }
 
 object MulNum {
@@ -860,3 +861,25 @@ object genVUopOffset extends VLSUConstants {
     Mux(isfof, fofVUopOffset, otherVUopOffset)
   }
 }
+
+
+
+object searchVFirstUnMask extends VLSUConstants {
+  def apply(mask: UInt): UInt = {
+    require(mask.getWidth == 16, "The mask width must be 16")
+    val select = (0 until 16).zip(mask.asBools).map{case (i, v) =>
+      (v, i.U)
+    }
+    PriorityMuxDefault(select, 0.U)
+  }
+
+  def apply(mask: UInt, regOffset: UInt): UInt = {
+    require(mask.getWidth == 16, "The mask width must be 16")
+    val realMask = (mask >> regOffset).asUInt
+    val select = (0 until 16).zip(realMask.asBools).map{case (i, v) =>
+      (v, i.U)
+    }
+    PriorityMuxDefault(select, 0.U)
+  }
+}
+
