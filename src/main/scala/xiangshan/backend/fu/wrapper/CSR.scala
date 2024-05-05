@@ -177,6 +177,12 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   tlb.priv.sum := csrMod.io.tlb.sum
   tlb.priv.imode := csrMod.io.tlb.imode
   tlb.priv.dmode := csrMod.io.tlb.dmode
+  tlb.vsatp := DontCare // Todo
+  tlb.hgatp := DontCare // Todo
+  tlb.priv.vmxr := DontCare // Todo
+  tlb.priv.vsum := DontCare // Todo
+  tlb.priv.spvp := DontCare // Todo
+  tlb.priv.virt := csrMod.io.out.privState.V.asBool
 
   io.in.ready := true.B // Todo: Async read imsic may block CSR
   io.out.valid := valid
@@ -212,6 +218,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrOut.debugMode := csrMod.io.out.debugMode
 
   csrOut.disableSfence := csrMod.io.out.disableSfence
+  csrOut.disableHfencev := DontCare // Todo
+  csrOut.disableHfenceg := DontCare // Todo
 
   csrOut.customCtrl match {
     case custom =>
@@ -257,13 +265,15 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       custom.singlestep := csrMod.io.out.singleStepFlag
       // trigger
       custom.frontend_trigger.tUpdate.valid := DontCare
-      custom.frontend_trigger.tUpdate.bits.addr := csrMod.tselect.rdata.asUInt
+      custom.frontend_trigger.tUpdate.bits.addr := DontCare
       custom.frontend_trigger.tUpdate.bits.tdata := DontCare
       custom.frontend_trigger.tEnableVec := DontCare
       custom.mem_trigger.tUpdate.valid := DontCare
-      custom.mem_trigger.tUpdate.bits.addr := csrMod.tselect.rdata.asUInt
+      custom.mem_trigger.tUpdate.bits.addr := DontCare
       custom.mem_trigger.tUpdate.bits.tdata := DontCare
       custom.mem_trigger.tEnableVec := DontCare
+      // virtual mode
+      custom.virtMode := csrMod.io.out.privState.V.asBool
   }
 }
 
