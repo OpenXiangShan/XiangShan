@@ -753,13 +753,6 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
       ctrl_flow.instr === HINVAL_VVMA
   }
 
-  // fix frflags
-  //                           fflags    zero csrrs rd    csr
-  val isFrflags = BitPat("b000000000001_00000_010_?????_1110011") === ctrl_flow.instr
-  when (decodedInst.fuType === FuType.csr.U && isFrflags) {
-    decodedInst.blockBackward := false.B
-  }
-
   decodedInst.imm := LookupTree(decodedInst.selImm, ImmUnion.immSelMap.map(
     x => {
       val minBits = x._2.minBitsFromInstr(ctrl_flow.instr)
