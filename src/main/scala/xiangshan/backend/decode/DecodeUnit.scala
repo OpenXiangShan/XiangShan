@@ -174,7 +174,7 @@ object XDecode extends DecodeConstants {
     SLLW    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.sllw, SelImm.X    , xWen = T, canRobCompress = T),
     SRAW    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.sraw, SelImm.X    , xWen = T, canRobCompress = T),
     SRLW    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.srlw, SelImm.X    , xWen = T, canRobCompress = T),
-    
+
     // RV64M
     MUL     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mul, MDUOpType.mul   , SelImm.X, xWen = T, canRobCompress = T),
     MULH    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mul, MDUOpType.mulh  , SelImm.X, xWen = T, canRobCompress = T),
@@ -250,7 +250,7 @@ object XDecode extends DecodeConstants {
 }
 
 object BitmanipDecode extends DecodeConstants{
-  /* 
+  /*
     Note: Some Bitmanip instruction may have different OP code between rv32 and rv64.
     Including pseudo instruction like zext.h, and different funct12 like rev8.
     If some day we need to support change XLEN via CSR, we should care about this.
