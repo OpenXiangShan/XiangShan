@@ -848,7 +848,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     }.otherwise {
       enqLsqIO.needAlloc(i) := 1.U // load | vload
     }
-    enqLsqIO.req(i).valid := io.in(i).fire && !isAMOVec(i)
+    enqLsqIO.req(i).valid := io.in(i).fire && !isAMOVec(i) && !isSegment(i)
     enqLsqIO.req(i).bits := io.in(i).bits
 
     // This is to make it easier to calculate in LSQ.
