@@ -256,7 +256,9 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   when (reset.asBool) {
     decodeResumeVType.valid := false.B
   }.elsewhen (state === s_walk && stateLastCycle =/= s_walk) {
-    decodeResumeVType.valid := true.B
+    // when walkCount === 0.u, vtypegen will use arch vtype to set it's spec vtype
+    // no need to use newestVType from vtypeBuffer
+    decodeResumeVType.valid := walkCount =/= 0.U
     decodeResumeVType.bits := newestVType
   }.elsewhen (state === s_walk && stateLastCycle === s_walk && walkCount =/= 0.U) {
     decodeResumeVType.valid := true.B
