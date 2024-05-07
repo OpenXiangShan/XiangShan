@@ -436,7 +436,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   when(stateNext === s_idle){
     instMicroOp.valid := false.B
   }
-  io.uopwriteback.valid               := state === s_finish
+  io.uopwriteback.valid               := (state === s_finish) && distanceBetween(enqPtr, deqPtr) =/= 0.U
   io.uopwriteback.bits.uop            := instMicroOp.uop
   io.uopwriteback.bits.mask.get       := instMicroOp.mask
   io.uopwriteback.bits.data           := data(deqPtr.value)
