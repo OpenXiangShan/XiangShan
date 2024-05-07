@@ -1238,8 +1238,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // atomics
   // atomics not finished yet
   val atomic_resp_valid = mainPipe.io.atomic_resp.valid && mainPipe.io.atomic_resp.bits.isAMO
-  io.lsu.atomics.resp.valid := RegNext(atomic_resp_valid)
-  io.lsu.atomics.resp.bits := RegEnable(mainPipe.io.atomic_resp.bits, atomic_resp_valid)
+  val atomicResp = Wire(mainPipe.io.atomic_resp.cloneType) // NOTE: Wire() default initial bundle with 0
+  atomicResp.valid := RegNext(atomic_resp_valid)
+  atomicResp.bits := RegEnable(mainPipe.io.atomic_resp.bits, atomic_resp_valid)
+  
+  io.lsu.atomics.resp := atomicResp
   io.lsu.atomics.block_lr := mainPipe.io.block_lr
   // atomicsReplayUnit.io.pipe_resp := RegNext(mainPipe.io.atomic_resp)
   // atomicsReplayUnit.io.block_lr <> mainPipe.io.block_lr
