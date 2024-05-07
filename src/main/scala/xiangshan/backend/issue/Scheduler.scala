@@ -8,7 +8,7 @@ import utils.OptionWrapper
 import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.DataConfig.{IntData, VAddrData, VecData, FpData}
-import xiangshan.backend.datapath.WbConfig.{IntWB, VfWB}
+import xiangshan.backend.datapath.WbConfig.{IntWB, FpWB, VfWB}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.regfile.RfWritePortWithConfig
 import xiangshan.backend.rename.BusyTable
@@ -145,7 +145,7 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
     case _ => None
   }
   val fpBusyTable = schdType match {
-    case FpScheduler() | MemScheduler() => Some(Module(new BusyTable(dispatch2Iq.numFpStateRead, wrapper.numFpStateWrite, FpPhyRegs, IntWB())))
+    case FpScheduler() | MemScheduler() => Some(Module(new BusyTable(dispatch2Iq.numFpStateRead, wrapper.numFpStateWrite, FpPhyRegs, FpWB())))
     case _ => None
   }
   val vfBusyTable = schdType match {
