@@ -414,7 +414,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   fpExuBlock.io.flush := ctrlBlock.io.toExuBlock.flush
   for (i <- 0 until fpExuBlock.io.in.length) {
     for (j <- 0 until fpExuBlock.io.in(i).length) {
-      val shouldLdCancel = LoadShouldCancel(bypassNetwork.io.toExus.int(i)(j).bits.loadDependency, io.mem.ldCancel)
+      val shouldLdCancel = LoadShouldCancel(bypassNetwork.io.toExus.fp(i)(j).bits.loadDependency, io.mem.ldCancel)
       NewPipelineConnect(
         bypassNetwork.io.toExus.fp(i)(j), fpExuBlock.io.in(i)(j), fpExuBlock.io.in(i)(j).fire,
         Mux(
