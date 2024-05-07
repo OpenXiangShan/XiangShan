@@ -175,6 +175,22 @@ trait MachineLevel { self: NewCSR =>
     val ALL = MarchidField(63, 0).withReset(MarchidField.XSArchid)
   })).setAddr(0xF12)
 
+  val mimpid = Module(new CSRModule("Mimpid", new CSRBundle {
+    val ALL = RO(0).withReset(0.U)
+  }))
+    .setAddr(0xF13)
+
+  val mhartid = Module(new CSRModule("Mhartid", new CSRBundle {
+    val ALL = RO(7, 0)
+  }) {
+    val hartid = IO(Input(UInt(hartIdLen.W)))
+    this.reg.ALL := RegEnable(hartid, reset.asBool)
+  })
+    .setAddr(0xF14)
+
+  val mconfigptr = Module(new CSRModule("Mconfigptr"))
+    .setAddr(0xF15)
+
   val machineLevelCSRMods: Seq[CSRModule[_]] = Seq(
     mstatus,
     misa,
@@ -199,6 +215,9 @@ trait MachineLevel { self: NewCSR =>
     minstret,
     mvendorid,
     marchid,
+    mimpid,
+    mhartid,
+    mconfigptr,
   ) ++ mhpmevents ++ mhpmcounters
 
   val machineLevelCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], Data)] = SeqMap.from(

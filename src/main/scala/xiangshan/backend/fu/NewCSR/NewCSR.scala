@@ -62,6 +62,9 @@ class NewCSR(implicit val p: Parameters) extends Module
   import CSRConfig._
 
   val io = IO(new Bundle {
+    val fromTop = Input(new Bundle {
+      val hartId = UInt(hartIdLen.W)
+    })
     val in = Input(new Bundle {
       val wen = Bool()
       val ren = Bool()
@@ -143,9 +146,6 @@ class NewCSR(implicit val p: Parameters) extends Module
       val sdsid = UInt(XLEN.W)
       val sfetchctl  = Bool()
     })
-    val inSimOnly = OptionWrapper(env.AlwaysBasicDiff || env.EnableDifftest, Input(new Bundle {
-      val hartId = UInt(8.W)
-    }))
   })
 
   val toAIA   = IO(Output(new CSRToAIABundle))
@@ -291,6 +291,8 @@ class NewCSR(implicit val p: Parameters) extends Module
     mod.w.wen := (addr === sireg.addr.U) && (siselect.regOut.ALL.asUInt === mod.addr.U)
     mod.w.wdata := wdata
   }
+
+  mhartid.hartid := this.io.fromTop.hartId
 
   csrMods.foreach { mod =>
     mod match {
@@ -642,7 +644,7 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   // Always instantiate basic difftest modules.
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
-    val hartId = io.inSimOnly.get.hartId
+    val hartId = io.fromTop.hartId
     val trapValid = io.fromRob.trap.valid
     val trapNO = trapHandleMod.io.out.causeNO.ExceptionCode.asUInt
     val interrupt = trapHandleMod.io.out.causeNO.Interrupt.asBool
