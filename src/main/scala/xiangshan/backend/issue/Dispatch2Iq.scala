@@ -808,6 +808,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   }
 
   // A conservative allocation strategy is adopted here.
+  // if is segment instruction, need disptch it to Vldst_RS0, so, except port 0, stall other.
   // Both of the following conditions are required for allocation:
   //  1) The lsq has enough entris.
   //  2) The number of flows accumulated does not exceed VecMemDispatchMaxNumber.
