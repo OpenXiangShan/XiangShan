@@ -857,6 +857,8 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     VFMIN_VF, VFMAX_VF,
     VMFEQ_VF, VMFNE_VF, VMFLT_VF, VMFLE_VF, VMFGT_VF, VMFGE_VF,
     VFSGNJ_VF, VFSGNJN_VF, VFSGNJX_VF,
+    // vfred
+    VFREDOSUM_VS, VFREDUSUM_VS, VFREDMAX_VS, VFREDMIN_VS, VFWREDOSUM_VS, VFWREDUSUM_VS,
     // fcvt & vfcvt
     FCVT_S_W, FCVT_S_WU, FCVT_S_L, FCVT_S_LU,
     FCVT_W_S, FCVT_WU_S, FCVT_L_S, FCVT_LU_S,
