@@ -713,7 +713,13 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // dcache access
     loadUnits(i).io.dcache <> dcache.io.lsu.load(i)
     if(i == 0){
-      dcache.io.lsu.load(i).req.valid := loadUnits(i).io.dcache.req.valid || vSegmentUnit.io.dcache.req.valid
+      vSegmentUnit.io.rdcache := DontCare
+      dcache.io.lsu.load(i).req.valid := loadUnits(i).io.dcache.req.valid || vSegmentUnit.io.rdcache.req.valid
+      dcache.io.lsu.load(i).req.bits  := Mux1H(Seq(
+        vSegmentUnit.io.rdcache.req.valid -> vSegmentUnit.io.rdcache.req.bits,
+        loadUnits(i).io.dcache.req.valid -> loadUnits(i).io.dcache.req.bits
+      ))
+      vSegmentUnit.io.rdcache.req.ready := dcache.io.lsu.load(i).req.ready
     }
     // forward
     loadUnits(i).io.lsq.forward <> lsq.io.forward(i)
@@ -1034,6 +1040,15 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     stu.io.redirect      <> redirect
     stu.io.dcache        <> dcache.io.lsu.sta(i)
+    if(i == 0){
+      vSegmentUnit.io.wdcache := DontCare
+      dcache.io.lsu.sta(i).req.valid := stu.io.dcache.req.valid || vSegmentUnit.io.wdcache.req.valid
+      vSegmentUnit.io.wdcache.req.ready := dcache.io.lsu.sta(i).req.ready
+      dcache.io.lsu.sta(i).req.bits  := Mux1H(Seq(
+        vSegmentUnit.io.wdcache.req.valid -> vSegmentUnit.io.wdcache.req.bits,
+        stu.io.dcache.req.valid           -> stu.io.dcache.req.bits
+      ))
+    }
     stu.io.feedback_slow <> io.mem_to_ooo.staIqFeedback(i).feedbackSlow
     stu.io.stin         <> io.ooo_to_mem.issueSta(i)
     stu.io.lsq          <> lsq.io.sta.storeAddrIn(i)
@@ -1275,6 +1290,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   // LSQ to store buffer
   lsq.io.sbuffer        <> sbuffer.io.in
+  sbuffer.io.in(0).valid := lsq.io.sbuffer(0).valid || vSegmentUnit.io.sbuffer.valid
+  sbuffer.io.in(0).bits  := Mux1H(Seq(
+    vSegmentUnit.io.sbuffer.valid -> vSegmentUnit.io.sbuffer.bits,
+    lsq.io.sbuffer(0).valid       -> lsq.io.sbuffer(0).bits
+  ))
+  vSegmentUnit.io.sbuffer.ready := sbuffer.io.in(0).ready
   lsq.io.sbufferVecDifftestInfo <> sbuffer.io.vecDifftestInfo
   lsq.io.sqEmpty        <> sbuffer.io.sqempty
   dcache.io.force_write := lsq.io.force_write
@@ -1459,13 +1480,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   atomicsUnit.io.pmpResp := pmp_check(0).resp
 
   atomicsUnit.io.dcache <> dcache.io.lsu.atomics
-  dcache.io.lsu.atomics.req.valid := atomicsUnit.io.dcache.req.valid || vSegmentUnit.io.dcache.req.valid
-  dcache.io.lsu.atomics.req.bits := Mux1H(Seq(
-    vSegmentUnit.io.dcache.req.valid -> vSegmentUnit.io.dcache.req.bits,
-    atomicsUnit.io.dcache.req.valid  -> atomicsUnit.io.dcache.req.bits
-  ))
-  vSegmentUnit.io.dcache.block_lr := false.B
-  vSegmentUnit.io.dcache.req.ready := dcache.io.lsu.atomics.req.ready
   atomicsUnit.io.flush_sbuffer.empty := stIsEmpty
 
   atomicsUnit.io.csrCtrl := csrCtrl
@@ -1570,7 +1584,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   vSegmentUnit.io.pmpResp <> pmp_check.head.resp
   vSegmentUnit.io.flush_sbuffer.empty := stIsEmpty
   vSegmentUnit.io.redirect <> io.redirect
-  vSegmentUnit.io.dcache.resp <> dcache.io.lsu.atomics.resp
+  vSegmentUnit.io.wdcache.resp.bits := dcache.io.lsu.sta(0).resp.bits
+  vSegmentUnit.io.wdcache.resp.valid := dcache.io.lsu.sta(0).resp.valid
+  vSegmentUnit.io.rdcache.resp.bits := dcache.io.lsu.load(0).resp.bits
+  vSegmentUnit.io.rdcache.resp.valid := dcache.io.lsu.load(0).resp.valid
 
   // top-down info
   dcache.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr

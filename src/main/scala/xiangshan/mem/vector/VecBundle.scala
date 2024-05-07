@@ -231,7 +231,9 @@ class VMergeBufferIO(isVStore : Boolean=false)(implicit p: Parameters) extends V
 class VSegmentUnitIO(implicit p: Parameters) extends VLSUBundle{
   val in                  = Flipped(Decoupled(new MemExuInput(isVector = true))) // from iq
   val uopwriteback        = DecoupledIO(new MemExuOutput(isVector = true)) // writeback data
-  val dcache              = new AtomicWordIO // read dcache port
+  val wdcache             = new DCacheStoreIO // write dcache port
+  val rdcache             = new DCacheLoadIO // read dcache port
+  val sbuffer             = Decoupled(new DCacheWordReqWithVaddrAndPfFlag)
   val dtlb                = new TlbRequestIO(2)
   val pmpResp             = Flipped(new PMPRespBundle())
   val flush_sbuffer       = new SbufferFlushBundle

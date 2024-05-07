@@ -100,7 +100,20 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   XSError(fieldIdx > maxNfields, s"fieldIdx > nfields, something error!\n")
 
   // Segment instruction's FSM
-  val s_idle :: s_flush_sbuffer_req :: s_wait_flush_sbuffer_resp :: s_tlb_req :: s_wait_tlb_resp :: s_pm ::s_cache_req :: s_cache_resp :: s_latch_and_merge_data :: s_finish :: Nil = Enum(10)
+  /*
+  * s_idle: wait request
+  * s_flush_sbuffer_req: flush sbuffer
+  * s_wait_flush_sbuffer_resp: wait sbuffer empty
+  * s_tlb_req:
+  * s_wait_tlb_resp:
+  * s_pm:
+  * s_cache_req:
+  * s_cache_resp:
+  * s_latch_and_merge_data:
+  * s_send_data:
+  * s_finish:
+  * */
+  val s_idle :: s_flush_sbuffer_req :: s_wait_flush_sbuffer_resp :: s_tlb_req :: s_wait_tlb_resp :: s_pm ::s_cache_req :: s_cache_resp :: s_latch_and_merge_data :: s_send_data :: s_finish :: Nil = Enum(11)
   val state             = RegInit(s_idle)
   val stateNext         = WireInit(s_idle)
   val sbufferEmpty      = io.flush_sbuffer.empty
@@ -131,26 +144,34 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     stateNext := Mux(exception_pa || exception_va, s_finish, s_cache_req)
 
   }.elsewhen(state === s_cache_req){
-    stateNext := Mux(io.dcache.req.fire, s_cache_resp, s_cache_req)
+    stateNext := Mux(io.wdcache.req.fire || io.rdcache.req.fire, s_cache_resp, s_cache_req)
 
   }.elsewhen(state === s_cache_resp){
-    when(io.dcache.req.fire) {
-      when(io.dcache.resp.bits.miss) {
+    when(io.wdcache.resp.fire || io.rdcache.resp.fire) {
+      when(io.wdcache.resp.bits.miss && io.rdcache.resp.bits.miss) {
         stateNext := s_cache_req
       }.otherwise {
-        stateNext := s_latch_and_merge_data
+        stateNext := Mux(FuType.isVLoad(instMicroOp.uop.fuType), s_latch_and_merge_data, s_send_data)
       }
     }.otherwise{
       stateNext := s_cache_resp
     }
 
-  }.elsewhen(state === s_latch_and_merge_data){
-    when((segmentIdx === maxSegIdx) && (fieldIdx === maxNfields)){
+  }.elsewhen(state === s_latch_and_merge_data) {
+    when((segmentIdx === maxSegIdx) && (fieldIdx === maxNfields)) {
       stateNext := s_finish // segment instruction finish
-    }.otherwise{
+    }.otherwise {
       stateNext := s_tlb_req // need continue
     }
 
+  }.elsewhen(state === s_send_data) { // when sbuffer accept data
+    when(!io.sbuffer.fire) {
+      stateNext := s_send_data
+    }.elsewhen((segmentIdx === maxSegIdx) && (fieldIdx === maxNfields)) {
+      stateNext := s_finish // segment instruction finish
+    }.otherwise {
+      stateNext := s_tlb_req // need continue
+    }
   }.elsewhen(state === s_finish){ // writeback uop
     stateNext := Mux(distanceBetween(enqPtr, deqPtr) === 0.U, s_idle, s_finish)
 
@@ -292,7 +313,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   /**
    * merge data for load
    */
-  val cacheData = io.dcache.resp.bits.data
+  val cacheData = io.rdcache.resp.bits.data
   val pickData  = rdataVecHelper(alignedType(1,0), cacheData)
   val mergedData = mergeDataWithElemIdx(
     oldData = data(splitPtr.value),
@@ -316,16 +337,59 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   val wmask     = genVWmask(vaddr, alignedType(1, 0)) & mask(segmentIdx)
 
   /**
-   * dcache req
+   * rdcache req
    */
-  io.dcache.req                    := DontCare
-  io.dcache.req.valid              := state === s_cache_req && FuType.isVLoad(fuType)
-  io.dcache.req.bits.cmd           := Mux(FuType.isVLoad(fuType), MemoryOpConstants.M_XRD, MemoryOpConstants.M_PFW)
-  io.dcache.req.bits.vaddr         := vaddr
-  io.dcache.req.bits.amo_mask      := Mux(FuType.isVLoad(fuType), mask, wmask)
-  io.dcache.req.bits.amo_data      := flowData
-  io.dcache.req.bits.source        := Mux(FuType.isVLoad(fuType), LOAD_SOURCE.U, STORE_SOURCE.U)
-  io.dcache.req.bits.id            := DontCare
+  io.rdcache.req                    := DontCare
+  io.rdcache.req.valid              := state === s_cache_req && FuType.isVLoad(fuType)
+  io.rdcache.req.bits.cmd           := MemoryOpConstants.M_XRD
+  io.rdcache.req.bits.vaddr         := vaddr
+  io.rdcache.req.bits.mask          := mask
+  io.rdcache.req.bits.data          := flowData
+  io.rdcache.pf_source              := LOAD_SOURCE.U
+  io.rdcache.req.bits.id            := DontCare
+  io.rdcache.resp.ready             := true.B
+  io.rdcache.s1_paddr_dup_lsu       := instMicroOp.paddr
+  io.rdcache.s1_paddr_dup_dcache    := instMicroOp.paddr
+  io.rdcache.s1_kill                := false.B
+  io.rdcache.s2_kill                := false.B
+  if (env.FPGAPlatform){
+    io.rdcache.s0_pc                := DontCare
+    io.rdcache.s1_pc                := DontCare
+    io.rdcache.s2_pc                := DontCare
+  }else{
+    io.rdcache.s0_pc                := instMicroOp.uop.pc
+    io.rdcache.s1_pc                := instMicroOp.uop.pc
+    io.rdcache.s2_pc                := instMicroOp.uop.pc
+  }
+  io.rdcache.replacementUpdated     := false.B
+  io.rdcache.is128Req               := false.B
+
+  /**
+  * wdcache req
+  * */
+  io.wdcache.req                    := DontCare
+  io.wdcache.req.valid              := state === s_cache_req && FuType.isVStore(fuType)
+  io.wdcache.req.bits.cmd           := MemoryOpConstants.M_PFW
+  io.wdcache.req.bits.vaddr         := vaddr
+  io.wdcache.resp.ready             := true.B
+  io.wdcache.s1_paddr               := instMicroOp.paddr
+  io.wdcache.s1_kill                := false.B
+  io.wdcache.s2_kill                := false.B
+  io.wdcache.s2_pc                  := instMicroOp.uop.pc
+
+
+  /**
+   * write data to sbuffer
+   * */
+
+  io.sbuffer.bits                  := DontCare
+  io.sbuffer.valid                 := state === s_send_data
+  io.sbuffer.bits.mask             := wmask
+  io.sbuffer.bits.data             := flowData
+  io.sbuffer.bits.vaddr            := vaddr
+  io.sbuffer.bits.cmd              := MemoryOpConstants.M_XWR
+  io.sbuffer.bits.id               := DontCare
+  io.sbuffer.bits.addr             := instMicroOp.paddr
 
   /**
    * update ptr
