@@ -77,6 +77,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   // buffer uop
   val instMicroOp       = Reg(new VSegmentBundle)
   val data              = Reg(Vec(maxSize, UInt(VLEN.W)))
+  val pdest             = Reg(Vec(maxSize, UInt(PhyRegIdxWidth.W)))
   val uopIdx            = Reg(Vec(maxSize, UopIdx()))
   val stride            = Reg(Vec(maxSize, UInt(VLEN.W)))
   val allocated         = RegInit(VecInit(Seq.fill(maxSize)(false.B)))
@@ -215,6 +216,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     data(enqPtr.value)                := io.in.bits.src_vs3
     stride(enqPtr.value)              := io.in.bits.src_stride
     uopIdx(enqPtr.value)              := io.in.bits.uop.vpu.vuopIdx
+    pdest(enqPtr.value)               := io.in.bits.uop.pdest
   }
 
   // update enqptr, only 1 port
@@ -443,6 +445,8 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.uopwriteback.bits.vdIdx.get      := uopIdx(deqPtr.value)
   io.uopwriteback.bits.uop.vpu.vl     := instMicroOp.vl
   io.uopwriteback.bits.uop.vpu.vstart := instMicroOp.vstart
+  io.uopwriteback.bits.uop.vpu.vmask  := instMicroOp.mask
+  io.uopwriteback.bits.uop.pdest      := pdest(deqPtr.value)
   io.uopwriteback.bits.debug          := DontCare
   io.uopwriteback.bits.vdIdxInField.get := DontCare
 
