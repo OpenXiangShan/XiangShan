@@ -35,7 +35,7 @@ import xiangshan.backend.rename.{Rename, RenameTableWrapper, SnapshotGenerator}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.frontend.{FtqPtr, FtqRead, Ftq_RF_Components}
 import xiangshan.mem.{LqPtr, LsqEnqIO}
-import xiangshan.backend.issue.{IntScheduler, VfScheduler, MemScheduler}
+import xiangshan.backend.issue.{IntScheduler, FpScheduler, VfScheduler, MemScheduler}
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   val rob_commits = Vec(CommitWidth, Valid(new RobCommitInfo))
@@ -134,8 +134,8 @@ class CtrlBlockImp(
 
   val wbDataNoStd = io.fromWB.wbData.filter(!_.bits.params.hasStdFu)
   val intScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[IntScheduler])
+  val fpScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[FpScheduler])
   val vfScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[VfScheduler])
-  val writeFpVecWbData = io.fromWB.wbData.filter(x => x.bits.params.writeFpRf || x.bits.params.writeVecRf)
   val memVloadWbData = io.fromWB.wbData.filter(x => x.bits.params.schdType.isInstanceOf[MemScheduler] && x.bits.params.hasVLoadFu)
   private val delayedNotFlushedWriteBackNums = wbDataNoStd.map(x => {
     val valid = x.valid
@@ -143,9 +143,15 @@ class CtrlBlockImp(
     val delayed = Wire(Valid(UInt(io.fromWB.wbData.size.U.getWidth.W)))
     delayed.valid := GatedValidRegNext(valid && !killedByOlder)
     val isIntSche = intScheWbData.contains(x)
+    val isFpSche = fpScheWbData.contains(x)
     val isVfSche = vfScheWbData.contains(x)
     val isMemVload = memVloadWbData.contains(x)
-    val canSameRobidxWbData = if (isIntSche || isVfSche) {
+    val canSameRobidxWbData = if (isIntSche) {
+      intScheWbData ++ fpScheWbData ++ vfScheWbData
+    } else if (isFpSche) {
+      intScheWbData ++ fpScheWbData
+    }
+    else if(isVfSche) {
       intScheWbData ++ vfScheWbData
     } else if (isMemVload) {
       memVloadWbData
