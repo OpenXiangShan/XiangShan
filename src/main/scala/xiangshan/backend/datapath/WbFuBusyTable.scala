@@ -109,7 +109,7 @@ class WbFuBusyTableImp(override val wrapper: WbFuBusyTable)(implicit  p: Paramet
 
   //per wbPort fuBusyTable
   writeBusyTable(intWbBusyTable, intAllBusyTableWithParms, IntWB())
-  writeBusyTable(fpWbBusyTable, intAllBusyTableWithParms, FpWB())
+  writeBusyTable(fpWbBusyTable, fpAllBusyTableWithParms, FpWB())
   writeBusyTable(vfWbBusyTable, vfAllBusyTableWithParms, VfWB())
   //per wbPort conflict
   writeConflict(intConflict, intAllDeqRespSetWithParms, IntWB())
