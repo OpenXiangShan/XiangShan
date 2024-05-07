@@ -22,3 +22,6 @@
 [submodule "coupledL2"]
 	path = coupledL2
 	url = https://github.com/OpenXiangShan/coupledL2
+[submodule "tools/millw"]
+	path = tools/millw
+	url = https://github.com/lefou/millw.git

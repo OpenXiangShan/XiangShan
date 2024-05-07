@@ -37,6 +37,7 @@ IMAGE  ?= temp
 CONFIG ?= DefaultConfig
 NUM_CORES ?= 1
 MFC ?= 0
+MILL ?= ./millw
 
 
 ifeq ($(MAKECMDGOALS),)
@@ -125,11 +126,11 @@ endif
 .DEFAULT_GOAL = verilog
 
 help:
-	mill -i xiangshan[$(CHISEL_VERSION)].runMain $(FPGATOP) --help
+	$(MILL) -i xiangshan[$(CHISEL_VERSION)].runMain $(FPGATOP) --help
 
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
-	$(TIME_CMD) mill -i xiangshan[$(CHISEL_VERSION)].runMain $(FPGATOP)   \
+	$(TIME_CMD) $(MILL) -i xiangshan[$(CHISEL_VERSION)].runMain $(FPGATOP)   \
 		-td $(@D) --config $(CONFIG) $(FPGA_MEM_ARGS)                    \
 		--num-cores $(NUM_CORES) $(RELEASE_ARGS)
 ifeq ($(MFC),1)
@@ -151,7 +152,7 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
 	@echo "\n[mill] Generating Verilog files..." > $(TIMELOG)
 	@date -R | tee -a $(TIMELOG)
-	$(TIME_CMD) mill -i xiangshan[$(CHISEL_VERSION)].test.runMain $(SIMTOP)    \
+	$(TIME_CMD) $(MILL) -i xiangshan[$(CHISEL_VERSION)].test.runMain $(SIMTOP)    \
 		-td $(@D) --config $(CONFIG) $(SIM_MEM_ARGS)                          \
 		--num-cores $(NUM_CORES) $(SIM_ARGS) --full-stacktrace
 ifeq ($(MFC),1)
@@ -190,10 +191,10 @@ bump:
 	git submodule foreach "git fetch origin&&git checkout master&&git reset --hard origin/master"
 
 bsp:
-	mill -i mill.bsp.BSP/install
+	$(MILL) -i mill.bsp.BSP/install
 
 idea:
-	mill -i mill.scalalib.GenIdea/idea
+	$(MILL) -i mill.scalalib.GenIdea/idea
 
 # verilator simulation
 emu: sim-verilog
