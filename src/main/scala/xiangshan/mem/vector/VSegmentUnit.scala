@@ -419,12 +419,13 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
    * */
 
   val splitPtrOffset = Mux(lmul.asSInt < 0.S, 1.U, (1.U << lmul).asUInt)
-  splitPtrNext := PriorityMux(Seq(
-    ((fieldIdx === maxNfields) && (elemIdxInVd === (issueVlMax - 1.U)))   -> (deqPtr +                     // segment finish and need access next register in group
-                                                                             (segmentIdx >> issueVLMAXLog2).asUInt),
-    (fieldIdx === maxNfields)                                             -> deqPtr,                       // segment finish
-    true.B                                                                -> (splitPtr + splitPtrOffset)   // next field
-  ))
+  splitPtrNext :=
+    Mux(fieldIdx === maxNfields,
+     (deqPtr + ((segmentIdx +& 1.U) >> issueVLMAXLog2).asUInt), // segment finish
+     (splitPtr + splitPtrOffset)) // next field
+  dontTouch(issueVLMAXLog2)
+  dontTouch(splitPtrNext)
+  dontTouch(stridePtr)
 
   // update splitPtr
   when(state === s_latch_and_merge_data || state === s_send_data){
@@ -434,7 +435,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   }
 
   // update stridePtr, only use in index
-  val strideOffset = Mux(isIndexed(issueInstType), segmentIdx >> issueMaxIdxInIndexLog2, 0.U)
+  val strideOffset = Mux(isIndexed(issueInstType), (segmentIdx +& 1.U) >> issueMaxIdxInIndexLog2, 0.U)
   stridePtr       := deqPtr + strideOffset
 
   // update fieldIdx
