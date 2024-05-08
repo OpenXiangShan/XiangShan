@@ -33,6 +33,7 @@ import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.backend.fu.util.SdtrigExt
 import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.vector.Bundles.VConfig
+import xiangshan.backend.fu.vector.Utils.VecDataToMaskDataVec
 
 class VSegmentBundle(implicit p: Parameters) extends VLSUBundle
 {
@@ -467,7 +468,11 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
    *                            dequeue logic
    *************************************************************************/
   val uopIdxInField = GenUopIdxInField(instType, issueEmul, issueLmul, uopIdx(deqPtr.value))
-  val vdIdxInField = GenVdIdxInField(instType, issueEmul, issueLmul, uopIdxInField) // for merge oldvd
+  val vdIdxInField  = GenVdIdxInField(instType, issueEmul, issueLmul, uopIdxInField) // for merge oldvd
+  /*select mask of vd, maybe remove in feature*/
+  val realEw        = Mux(isIndexed(issueInstType), issueSew(1, 0), issueEew(1, 0))
+  val maskDataVec: Vec[UInt] = VecDataToMaskDataVec(instMicroOp.mask, realEw)
+  val maskUsed      = maskDataVec(vdIdxInField)
 
   when(stateNext === s_idle){
     instMicroOp.valid := false.B
@@ -479,7 +484,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.uopwriteback.bits.vdIdx.get      := vdIdxInField
   io.uopwriteback.bits.uop.vpu.vl     := instMicroOp.vl
   io.uopwriteback.bits.uop.vpu.vstart := instMicroOp.vstart
-  io.uopwriteback.bits.uop.vpu.vmask  := instMicroOp.mask
+  io.uopwriteback.bits.uop.vpu.vmask  := maskUsed
   io.uopwriteback.bits.uop.pdest      := pdest(deqPtr.value)
   io.uopwriteback.bits.debug          := DontCare
   io.uopwriteback.bits.vdIdxInField.get := DontCare
