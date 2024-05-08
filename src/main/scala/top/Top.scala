@@ -85,47 +85,6 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     })))
   )
 
-  // val chi_uncache_sink = if (enableCHI) {
-  //   val onChipPeripheralRange = AddressSet(0x38000000L, 0x07ffffffL)
-  //   val uartRange = AddressSet(0x40600000, 0xf)
-  //   val uartDevice = new SimpleDevice("serial", Seq("xilinx,uartlite"))
-  //   val uartParams = AXI4SlaveParameters(
-  //     address = Seq(uartRange),
-  //     regionType = RegionType.UNCACHED,
-  //     supportsRead = TransferSizes(1, 8),
-  //     supportsWrite = TransferSizes(1, 8),
-  //     resources = uartDevice.reg
-  //   )
-  //   val peripheralRange = AddressSet(
-  //     0x0, 0x7fffffff
-  //   ).subtract(onChipPeripheralRange).flatMap(x => x.subtract(uartRange))
-
-  //   Some(AXI4SlaveNode(Seq(AXI4SlavePortParameters(
-  //     Seq(AXI4SlaveParameters(
-  //       address = peripheralRange,
-  //       regionType = RegionType.UNCACHED,
-  //       supportsRead = TransferSizes(1, 8),
-  //       supportsWrite = TransferSizes(1, 8),
-  //       interleavedId = Some(0)
-  //     ), uartParams),
-  //     beatBytes = 8
-  //   ))))
-  // } else None
-
-  // val chi_uncache_xbar = if (enableCHI) Some(AXI4Xbar()) else None
-
-  // if (enableCHI) {
-  //   for (i <- 0 until NumCores) {
-  //     chi_uncache_xbar.get :*= core_with_l2(i).axi4_uncache.get
-  //   }
-  //   chi_uncache_sink.get := chi_uncache_xbar.get
-
-  //   val uncache_port = InModuleBody {
-  //     chi_uncache_sink.get.makeIOs()
-  //   }
-  //   // dontTouch(uncache_port)
-  // }
-
   // recieve all prefetch req from cores
   val memblock_pf_recv_nodes: Seq[Option[BundleBridgeSink[PrefetchRecv]]] = core_with_l2.map(_.core_l3_pf_port).map{
     x => x.map(_ => BundleBridgeSink(Some(() => new PrefetchRecv)))
@@ -153,8 +112,6 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       val clientNode = TLClientNode(Seq(clientParameters))
       misc.peripheral_ports(i) := clientNode
     }
-    // misc.peripheral_ports(i) := core_with_l2(i).uncache
-    // misc.core_to_l3_ports(i) :=* core_with_l2(i).memory_port
     misc.core_to_l3_ports.foreach(port => port(i) :=* core_with_l2(i).memory_port.get)
     memblock_pf_recv_nodes(i).map(recv => {
       println(s"Connecting Core_${i}'s L1 pf source to L3!")
@@ -214,14 +171,10 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     FileRegisters.add("json", json)
     FileRegisters.add("plusArgs", freechips.rocketchip.util.PlusArgArtefacts.serialize_cHeader())
 
-    // val dma = IO(Flipped(misc.dma.cloneType))
-    // val peripheral = IO(misc.peripheral.cloneType)
     val dma = socMisc.map(m => IO(Flipped(m.dma.cloneType)))
     val peripheral = socMisc.map(m => IO(m.peripheral.cloneType))
     val memory = IO(misc.memory.cloneType)
 
-    // misc.dma <> dma
-    // peripheral <> misc.peripheral
     socMisc match {
       case Some(m) =>
         m.dma <> dma.get

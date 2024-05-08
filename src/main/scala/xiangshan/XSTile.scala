@@ -104,19 +104,6 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   l2top.i_mmio_port := l2top.i_mmio_buffer.node := core.memBlock.frontendBridge.instr_uncache_node
   l2top.d_mmio_port := core.memBlock.uncache.clientNode
 
-  // if (enableCHI) {
-  //   axi4_uncache.get :=
-  //     AXI4IdIndexer(idBits = 2) :=
-  //     AXI4Buffer() :=
-  //     AXI4Buffer() :=
-  //     AXI4Buffer() :=
-  //     AXI4Buffer() :=
-  //     AXI4UserYanker() :=
-  //     AXI4Deinterleaver(8) :=
-  //     TLToAXI4() :=
-  //     tl_uncache
-  // }
-
   // =========== IO Connection ============
   class XSTileImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
     val io = IO(new Bundle {
