@@ -100,18 +100,41 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   XSError(segmentIdx > maxSegIdx, s"segmentIdx > vl, something error!\n")
   XSError(fieldIdx > maxNfields, s"fieldIdx > nfields, something error!\n")
 
+  // MicroOp
+  val baseVaddr                       = instMicroOp.vaddr
+  val alignedType                     = instMicroOp.alignedType
+  val fuType                          = instMicroOp.uop.fuType
+  val mask                            = instMicroOp.mask
+  val exceptionVec                    = instMicroOp.uop.exceptionVec
+  val issueEew                        = instMicroOp.uop.vpu.veew
+  val issueLmul                       = instMicroOp.uop.vpu.vtype.vlmul
+  val issueSew                        = instMicroOp.uop.vpu.vtype.vsew
+  val issueEmul                       = EewLog2(issueEew) - issueSew + issueLmul
+  val elemIdxInVd                     = segmentIdx & instMicroOp.vlmaxMaskInVd
+  val issueInstType                   = Cat(true.B, instMicroOp.uop.fuOpType(6, 5)) // always segment instruction
+  val issueVLMAXLog2                  = GenVLMAXLog2(
+    Mux(issueLmul.asSInt > 0.S, 0.U, issueLmul),
+    Mux(isIndexed(issueInstType), issueSew(1, 0), issueEew(1, 0))
+  ) // max element number log2 in vd
+  val issueVlMax                      = instMicroOp.vlmaxInVd // max elementIdx in vd
+  val issueMaxIdxInIndex              = GenVLMAX(Mux(issueEmul.asSInt > 0.S, 0.U, issueEmul), issueEew) // index element index in index register
+  val issueMaxIdxInIndexMask          = UIntToMask(issueMaxIdxInIndex, elemIdxBits)
+  val issueMaxIdxInIndexLog2          = GenVLMAXLog2(Mux(issueEmul.asSInt > 0.S, 0.U, issueEmul), issueEew)
+  val issueIndexIdx                   = segmentIdx & issueMaxIdxInIndexMask
+  val segmentActive                   = (mask & UIntToOH(elemIdxInVd)).orR
+
   // Segment instruction's FSM
   /*
   * s_idle: wait request
   * s_flush_sbuffer_req: flush sbuffer
   * s_wait_flush_sbuffer_resp: wait sbuffer empty
-  * s_tlb_req:
-  * s_wait_tlb_resp:
-  * s_pm:
-  * s_cache_req:
-  * s_cache_resp:
-  * s_latch_and_merge_data:
-  * s_send_data:
+  * s_tlb_req: request tlb
+  * s_wait_tlb_resp: wait tlb resp
+  * s_pm: check pmp
+  * s_cache_req: request cache
+  * s_cache_resp: wait cache resp
+  * s_latch_and_merge_data: for read data
+  * s_send_data: for send write data
   * s_finish:
   * */
   val s_idle :: s_flush_sbuffer_req :: s_wait_flush_sbuffer_resp :: s_tlb_req :: s_wait_tlb_resp :: s_pm ::s_cache_req :: s_cache_resp :: s_latch_and_merge_data :: s_send_data :: s_finish :: Nil = Enum(11)
@@ -136,7 +159,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     stateNext := Mux(sbufferEmpty, s_tlb_req, s_wait_flush_sbuffer_resp)
 
   }.elsewhen(state === s_tlb_req){
-    stateNext := s_wait_tlb_resp
+    stateNext := Mux(segmentActive, s_wait_tlb_resp, Mux(FuType.isVLoad(instMicroOp.uop.fuType), s_latch_and_merge_data, s_send_data))
 
   }.elsewhen(state === s_wait_tlb_resp){
     stateNext := Mux(!io.dtlb.resp.bits.miss && io.dtlb.resp.fire, s_pm, s_tlb_req)
@@ -209,7 +232,6 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     instMicroOp.vlmaxMaskInVd         := UIntToMask(vlmaxInVd, elemIdxBits) // for merge data
     instMicroOp.vl                    := io.in.bits.src_vl.asTypeOf(VConfig()).vl
     segmentOffset                     := 0.U
-    fieldIdx                          := 0.U
   }
   // latch data
   when(io.in.fire){
@@ -227,27 +249,6 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   /*************************************************************************
    *                            output logic
    *************************************************************************/
-  // MicroOp
-  val baseVaddr                       = instMicroOp.vaddr
-  val alignedType                     = instMicroOp.alignedType
-  val fuType                          = instMicroOp.uop.fuType
-  val mask                            = instMicroOp.mask
-  val exceptionVec                    = instMicroOp.uop.exceptionVec
-  val issueEew                        = instMicroOp.uop.vpu.veew
-  val issueLmul                       = instMicroOp.uop.vpu.vtype.vlmul
-  val issueSew                        = instMicroOp.uop.vpu.vtype.vsew
-  val issueEmul                       = EewLog2(issueEew) - issueSew + issueLmul
-  val elemIdxInVd                     = segmentIdx & instMicroOp.vlmaxMaskInVd
-  val issueInstType                   = Cat(true.B, instMicroOp.uop.fuOpType(6, 5)) // always segment instruction
-  val issueVLMAXLog2                  = GenVLMAXLog2(
-                                                      Mux(issueLmul.asSInt > 0.S, 0.U, issueLmul),
-                                                      Mux(isIndexed(issueInstType), issueSew(1, 0), issueEew(1, 0))
-                                                    ) // max element number log2 in vd
-  val issueVlMax                      = instMicroOp.vlmaxInVd // max elementIdx in vd
-  val issueMaxIdxInIndex              = GenVLMAX(Mux(issueEmul.asSInt > 0.S, 0.U, issueEmul), issueEew) // index element index in index register
-  val issueMaxIdxInIndexMask          = UIntToMask(issueMaxIdxInIndex, elemIdxBits)
-  val issueMaxIdxInIndexLog2          = GenVLMAXLog2(Mux(issueEmul.asSInt > 0.S, 0.U, issueEmul), issueEew)
-  val issueIndexIdx                   = segmentIdx & issueMaxIdxInIndexMask
 
   val indexStride                     = IndexAddr( // index for indexed instruction
                                                     index = stride(stridePtr.value),
@@ -265,7 +266,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   // query DTLB IO Assign
   io.dtlb.req                         := DontCare
   io.dtlb.resp.ready                  := true.B
-  io.dtlb.req.valid                   := state === s_tlb_req
+  io.dtlb.req.valid                   := state === s_tlb_req && segmentActive
   io.dtlb.req.bits.cmd                := Mux(FuType.isVLoad(fuType), TlbCmd.read, TlbCmd.write)
   io.dtlb.req.bits.vaddr              := vaddr
   io.dtlb.req.bits.size               := instMicroOp.alignedType(2,0)
@@ -324,7 +325,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     elemIdx = Seq(elemIdxInVd),
     valids = Seq(true.B)
   )
-  when(state === s_latch_and_merge_data){
+  when(state === s_latch_and_merge_data && segmentActive){
     data(splitPtr.value) := mergedData
   }
   /**
@@ -406,7 +407,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   ))
 
   // update splitPtr
-  when(state === s_latch_and_merge_data){
+  when(state === s_latch_and_merge_data || state === s_send_data){
     splitPtr := splitPtrNext
   }.elsewhen(io.in.fire && !instMicroOp.valid){
     splitPtr := deqPtr // initial splitPtr
@@ -417,13 +418,24 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   stridePtr       := deqPtr + strideOffset
 
   // update fieldIdx
-  when(fieldIdx === maxNfields && state === s_latch_and_merge_data){
+  when(io.in.fire && !instMicroOp.valid){
     fieldIdx := 0.U
-  }.elsewhen(state === s_latch_and_merge_data){
+  }.elsewhen(fieldIdx === maxNfields && (state === s_latch_and_merge_data || state === s_send_data)){
+    fieldIdx := 0.U
+  }.elsewhen((state === s_latch_and_merge_data || state === s_send_data)){
     fieldIdx := fieldIdx + 1.U
+  }.elsewhen(!segmentActive){ // if segment is inactive, pass segment
+    fieldIdx := maxNfields
   }
+  //update segmentIdx
+  when(io.in.fire && !instMicroOp.valid){
+    segmentIdx := 0.U
+  }.elsewhen(fieldIdx === maxNfields && (state === s_latch_and_merge_data || state === s_send_data) && segmentIdx =/= maxSegIdx){
+    segmentIdx := segmentIdx + 1.U
+  }
+
   //update segmentOffset
-  when(fieldIdx === maxNfields && state === s_latch_and_merge_data){
+  when(fieldIdx === maxNfields && (state === s_latch_and_merge_data || state === s_send_data)){
     segmentOffset := segmentOffset + Mux(isUnitStride(issueInstType), (maxNfields +& 1.U) << issueEew, stride(stridePtr.value))
   }
 
