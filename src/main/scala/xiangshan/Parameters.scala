@@ -465,12 +465,16 @@ case class XSCoreParameters
         Seq("ALU0", "BJU0", "ALU1", "BJU1", "ALU2", "BJU2", "ALU3", "BJU3", "LDU0", "LDU1", "LDU2", "STA0", "STA1", "STD0", "STD1")
       ),
       WakeUpConfig(
-        Seq("VFEX0", "VFEX1", "VFEX2", "VFEX3") ->
-        Seq("VFEX0", "VFEX1", "VFEX2", "VFEX3", "VFEX4", "VFEX5")
+        Seq("FEX0", "FEX1", "FEX2", "FEX3", "LDU0", "LDU1", "LDU2") ->
+        Seq("FEX0", "FEX1", "FEX2", "FEX3", "FEX4", "FEX5")
+      ),
+      WakeUpConfig(
+        Seq("FEX0", "FEX1", "FEX2", "FEX3") ->
+        Seq("STD0", "STD1")
       ),
       WakeUpConfig(
         Seq("VFEX0", "VFEX1", "VFEX2", "VFEX3") ->
-        Seq("STD0", "STD1")
+        Seq("VFEX0", "VFEX1", "VFEX2", "VFEX3", "VFEX4", "VFEX5")
       ),
     ).flatten
   }
