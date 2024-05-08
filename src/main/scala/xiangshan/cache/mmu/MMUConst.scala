@@ -74,7 +74,9 @@ case class L2TLBParameters
   // prefetch
   enablePrefetch: Boolean = true,
   // ecc
-  ecc: Option[String] = Some("secded")
+  ecc: Option[String] = Some("secded"),
+  // enable ecc
+  enablePTWECC: Boolean = false
 )
 
 trait HasTlbConst extends HasXSParameter {
@@ -94,8 +96,8 @@ trait HasTlbConst extends HasXSParameter {
   val sectorppnLen = ppnLen - sectortlbwidth
   val sectorvpnLen = vpnLen - sectortlbwidth
 
-  val loadfiltersize = 16
-  val storefiltersize = 8
+  val loadfiltersize = 16 // 4*3(LduCnt:2 + HyuCnt:1) + 4(prefetch:1)
+  val storefiltersize = if (StorePipelineWidth >= 3) 16 else 8
   val prefetchfiltersize = 8
 
   val sramSinglePort = true

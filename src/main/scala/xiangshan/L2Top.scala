@@ -31,6 +31,7 @@ import huancun.BankBitsKey
 import system.HasSoCParameter
 import top.BusPerfMonitor
 import utility.{DelayN, ResetGen, TLClientsMerger, TLEdgeBuffer, TLLogger}
+import xiangshan.cache.mmu.TlbRequestIO
 
 class L1BusErrorUnitInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
   val ecc_error = Valid(UInt(soc.PAddrBits.W))
@@ -154,11 +155,13 @@ class L2Top()(implicit p: Parameters) extends LazyModule
       val toTile = Output(Bool())
     })
     val debugTopDown = IO(new Bundle() {
+      val robTrueCommit = Input(UInt(64.W))
       val robHeadPaddr = Flipped(Valid(UInt(36.W)))
       val l2MissMatch = Output(Bool())
     })
     val chi = if (enableCHI) Some(IO(new PortIO)) else None
     val nodeID = if (enableCHI) Some(IO(Input(UInt(NodeIDWidth.W)))) else None
+    val l2_tlb_req = IO(new TlbRequestIO(nRespDups = 2))
 
     val resetDelayN = Module(new DelayN(UInt(PAddrBits.W), 5))
 
@@ -177,18 +180,58 @@ class L2Top()(implicit p: Parameters) extends LazyModule
       tl2tl_l2cache.get.module.io.debugTopDown.robHeadPaddr := DontCare
       tl2tl_l2cache.get.module.io.hartId := hartId.fromTile
       tl2tl_l2cache.get.module.io.debugTopDown.robHeadPaddr.head := debugTopDown.robHeadPaddr
+      tl2tl_l2cache.get.module.io.debugTopDown.robTrueCommit := debugTopDown.robTrueCommit
       debugTopDown.l2MissMatch := tl2tl_l2cache.get.module.io.debugTopDown.l2MissMatch.head
+
+      /* l2 tlb */
+      l2_tlb_req.req.bits := DontCare
+      l2_tlb_req.req.valid := tl2tl_l2cache.get.module.io.l2_tlb_req.req.valid
+      l2_tlb_req.resp.ready := tl2tl_l2cache.get.module.io.l2_tlb_req.resp.ready
+      l2_tlb_req.req.bits.vaddr := tl2tl_l2cache.get.module.io.l2_tlb_req.req.bits.vaddr
+      l2_tlb_req.req.bits.cmd := tl2tl_l2cache.get.module.io.l2_tlb_req.req.bits.cmd
+      l2_tlb_req.req.bits.size := tl2tl_l2cache.get.module.io.l2_tlb_req.req.bits.size
+      l2_tlb_req.req.bits.kill := tl2tl_l2cache.get.module.io.l2_tlb_req.req.bits.kill
+      l2_tlb_req.req.bits.no_translate := tl2tl_l2cache.get.module.io.l2_tlb_req.req.bits.no_translate
+      l2_tlb_req.req_kill := tl2tl_l2cache.get.module.io.l2_tlb_req.req_kill
+      tl2tl_l2cache.get.module.io.l2_tlb_req.resp.valid := l2_tlb_req.resp.valid
+      tl2tl_l2cache.get.module.io.l2_tlb_req.req.ready := l2_tlb_req.req.ready
+      tl2tl_l2cache.get.module.io.l2_tlb_req.resp.bits.paddr.head := l2_tlb_req.resp.bits.paddr.head
+      tl2tl_l2cache.get.module.io.l2_tlb_req.resp.bits.miss := l2_tlb_req.resp.bits.miss
+      tl2tl_l2cache.get.module.io.l2_tlb_req.resp.bits.excp.head <> l2_tlb_req.resp.bits.excp.head
+
     } else if (tl2chi_l2cache.isDefined) {
       l2_hint := tl2chi_l2cache.get.module.io.l2_hint
       // debugTopDown <> tl2chi_l2cache.get.module.io.debugTopDown
       tl2chi_l2cache.get.module.io.debugTopDown.robHeadPaddr := DontCare
       tl2chi_l2cache.get.module.io.hartId := hartId.fromTile
       tl2chi_l2cache.get.module.io.debugTopDown.robHeadPaddr.head := debugTopDown.robHeadPaddr
+      tl2chi_l2cache.get.module.io.debugTopDown.robTrueCommit := debugTopDown.robTrueCommit
       tl2chi_l2cache.get.module.io.nodeID := nodeID.get
       debugTopDown.l2MissMatch := tl2chi_l2cache.get.module.io.debugTopDown.l2MissMatch.head
+
+      /* l2 tlb */
+      l2_tlb_req.req.bits := DontCare
+      l2_tlb_req.req.valid := tl2chi_l2cache.get.module.io.l2_tlb_req.req.valid
+      l2_tlb_req.resp.ready := tl2chi_l2cache.get.module.io.l2_tlb_req.resp.ready
+      l2_tlb_req.req.bits.vaddr := tl2chi_l2cache.get.module.io.l2_tlb_req.req.bits.vaddr
+      l2_tlb_req.req.bits.cmd := tl2chi_l2cache.get.module.io.l2_tlb_req.req.bits.cmd
+      l2_tlb_req.req.bits.size := tl2chi_l2cache.get.module.io.l2_tlb_req.req.bits.size
+      l2_tlb_req.req.bits.kill := tl2chi_l2cache.get.module.io.l2_tlb_req.req.bits.kill
+      l2_tlb_req.req.bits.no_translate := tl2chi_l2cache.get.module.io.l2_tlb_req.req.bits.no_translate
+      l2_tlb_req.req_kill := tl2chi_l2cache.get.module.io.l2_tlb_req.req_kill
+      tl2chi_l2cache.get.module.io.l2_tlb_req.resp.valid := l2_tlb_req.resp.valid
+      tl2chi_l2cache.get.module.io.l2_tlb_req.req.ready := l2_tlb_req.req.ready
+      tl2chi_l2cache.get.module.io.l2_tlb_req.resp.bits.paddr.head := l2_tlb_req.resp.bits.paddr.head
+      tl2chi_l2cache.get.module.io.l2_tlb_req.resp.bits.miss := l2_tlb_req.resp.bits.miss
+      tl2chi_l2cache.get.module.io.l2_tlb_req.resp.bits.excp.head <> l2_tlb_req.resp.bits.excp.head
     } else {
       l2_hint := 0.U.asTypeOf(l2_hint)
       debugTopDown <> DontCare
+
+      l2_tlb_req.req.valid := false.B
+      l2_tlb_req.req.bits := DontCare
+      l2_tlb_req.req_kill := DontCare
+      l2_tlb_req.resp.ready := true.B
     }
 
     chi.foreach(_ <> tl2chi_l2cache.get.module.io.chi)

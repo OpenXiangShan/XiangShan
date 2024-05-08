@@ -38,6 +38,13 @@ CONFIG ?= DefaultConfig
 NUM_CORES ?= 1
 MFC ?= 0
 
+
+ifeq ($(MAKECMDGOALS),)
+GOALS = verilog
+else
+GOALS = $(MAKECMDGOALS)
+endif
+
 # common chisel args
 ifeq ($(MFC),1)
 CHISEL_VERSION = chisel
@@ -78,6 +85,11 @@ ifeq ($(WITH_ROLLINGDB),1)
 override SIM_ARGS += --with-rollingdb
 endif
 
+# run with disable all db
+ifeq ($(DISABLE_ALWAYSDB),1)
+override SIM_ARGS += --disable-alwaysdb
+endif
+
 # dynamic switch CONSTANTIN
 ifeq ($(WITH_CONSTANTIN),0)
 $(info disable WITH_CONSTANTIN)
@@ -86,9 +98,12 @@ override SIM_ARGS += --with-constantin
 endif
 
 # emu for the release version
-RELEASE_ARGS += --disable-all --remove-assert --fpga-platform
+RELEASE_ARGS += --fpga-platform --disable-all --remove-assert
 DEBUG_ARGS   += --enable-difftest
 PLDM_ARGS    += --fpga-platform --enable-difftest
+ifeq ($(GOALS),verilog)
+RELEASE_ARGS += --disable-always-basic-diff
+endif
 ifeq ($(RELEASE),1)
 override SIM_ARGS += $(RELEASE_ARGS)
 else ifeq ($(PLDM),1)
@@ -138,7 +153,7 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	@date -R | tee -a $(TIMELOG)
 	$(TIME_CMD) mill -i xiangshan[$(CHISEL_VERSION)].test.runMain $(SIMTOP)    \
 		-td $(@D) --config $(CONFIG) $(SIM_MEM_ARGS)                          \
-		--num-cores $(NUM_CORES) $(SIM_ARGS)
+		--num-cores $(NUM_CORES) $(SIM_ARGS) --full-stacktrace
 ifeq ($(MFC),1)
 	$(SPLIT_VERILOG) $(RTL_DIR) $(SIM_TOP).v
 	$(MEM_GEN_SEP) "$(MEM_GEN)" "$(SIM_TOP_V).conf" "$(RTL_DIR)"

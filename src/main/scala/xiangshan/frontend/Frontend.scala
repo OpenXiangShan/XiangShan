@@ -22,7 +22,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utils._
 import utility._
 import xiangshan._
-import xiangshan.backend.fu.{PFEvent, PMP, PMPChecker,PMPReqBundle}
+import xiangshan.backend.fu.{PFEvent, PMP, PMPChecker, PMPReqBundle}
 import xiangshan.cache.mmu._
 import xiangshan.frontend.icache._
 
@@ -87,8 +87,6 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   // trigger
   ifu.io.frontendTrigger := csrCtrl.frontend_trigger
-  val triggerEn = csrCtrl.trigger_enable
-  ifu.io.csrTriggerEnable := VecInit(triggerEn(0), triggerEn(1), triggerEn(6), triggerEn(8))
 
   // bpu ctrl
   bpu.io.ctrl := csrCtrl.bp_ctrl
@@ -161,6 +159,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   ftq.io.fromBackend <> io.backend.toFtq
   io.backend.fromFtq <> ftq.io.toBackend
+  io.backend.fromIfu <> ifu.io.toBackend
   io.frontendInfo.bpuInfo <> ftq.io.bpuInfo
 
   val checkPcMem = Reg(Vec(FtqSize, new Ftq_RF_Components))
@@ -315,6 +314,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   ibuffer.io.SCMissBubble := FlushSCMiss
   ibuffer.io.ITTAGEMissBubble := FlushITTAGEMiss
   ibuffer.io.RASMissBubble := FlushRASMiss
+  ibuffer.io.decodeCanAccept := io.backend.canAccept
 
   FlushControlBTBMiss := ftq.io.ControlBTBMissBubble
   FlushTAGEMiss := ftq.io.TAGEMissBubble

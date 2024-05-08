@@ -182,7 +182,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val l1g = Reg(UInt(l2tlbParams.l1Size.W))
   val l1asids = l1.map(_.asid)
   val l1vmids = l1.map(_.vmid)
-  val l1h = Reg(Vec(l2tlbParams.l1Size, UInt(2.W))) // 0 bit: s2xlate, 1 bit: stage 1 or stage 2
+  val l1h = Reg(Vec(l2tlbParams.l1Size, UInt(2.W)))
 
   // l2: level 1 non-leaf pte
   val l2 = Module(new SRAMTemplate(
@@ -338,7 +338,12 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val hitWayData = hitWayEntry.entries
     val hit = ParallelOR(hitVec)
     val hitWay = ParallelPriorityMux(hitVec zip (0 until l2tlbParams.l2nWays).map(_.U(log2Up(l2tlbParams.l2nWays).W)))
-    val eccError = hitWayEntry.decode()
+    val eccError = WireInit(false.B)
+    if (l2tlbParams.enablePTWECC) {
+      eccError := hitWayEntry.decode()
+    } else {
+      eccError := false.B
+    }
 
     ridx.suggestName(s"l2_ridx")
     ramDatas.suggestName(s"l2_ramDatas")
@@ -391,7 +396,12 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val hitWayEcc = hitWayEntry.ecc
     val hit = ParallelOR(hitVec)
     val hitWay = ParallelPriorityMux(hitVec zip (0 until l2tlbParams.l3nWays).map(_.U(log2Up(l2tlbParams.l3nWays).W)))
-    val eccError = hitWayEntry.decode()
+    val eccError = WireInit(false.B)
+    if (l2tlbParams.enablePTWECC) {
+      eccError := hitWayEntry.decode()
+    } else {
+      eccError := false.B
+    }
 
     when (hit && stageCheck_valid_1cycle) { ptwl3replace.access(genPtwL3SetIdx(check_vpn), hitWay) }
 

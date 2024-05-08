@@ -19,10 +19,12 @@ package top
 import org.chipsalliance.cde.config.{Config, Parameters}
 import system.SoCParamsKey
 import xiangshan.{DebugOptionsKey, XSTileKey}
+import freechips.rocketchip.tile.MaxHartIdBits
 import difftest.DifftestModule
 
 import scala.annotation.tailrec
 import scala.sys.exit
+import chisel3.util.log2Up
 
 object ArgParser {
   // TODO: add more explainations
@@ -39,6 +41,7 @@ object ArgParser {
       |--with-chiseldb
       |--with-rollingdb
       |--disable-perf
+      |--disable-alwaysdb
       |""".stripMargin
 
   def getConfigByName(confString: String): Parameters = {
@@ -65,9 +68,12 @@ object ArgParser {
           nextOption(getConfigByName(confString), tail)
         case "--num-cores" :: value :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case XSTileKey => (0 until value.toInt) map{ i =>
+            case XSTileKey => (0 until value.toInt) map { i =>
               up(XSTileKey).head.copy(HartId = i)
             }
+            case MaxHartIdBits =>
+              require(log2Up(value.toInt) <= 10, "MaxHartIdBits should not be larger than 10.")
+              log2Up(value.toInt)
           }), tail)
         case "--with-dramsim3" :: tail =>
           nextOption(config.alter((site, here, up) => {
@@ -93,6 +99,10 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(EnableDifftest = true)
           }), tail)
+        case "--disable-always-basic-diff" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case DebugOptionsKey => up(DebugOptionsKey).copy(AlwaysBasicDiff = false)
+          }), tail)
         case "--enable-log" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(EnableDebug = true)
@@ -100,6 +110,10 @@ object ArgParser {
         case "--disable-perf" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(EnablePerfDebug = false)
+          }), tail)
+        case "--disable-alwaysdb" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case DebugOptionsKey => up(DebugOptionsKey).copy(AlwaysBasicDB = false)
           }), tail)
         case "--xstop-prefix" :: value :: tail if chisel3.BuildInfo.version != "3.6.0" =>
           nextOption(config.alter((site, here, up) => {

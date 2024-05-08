@@ -545,7 +545,9 @@ class UncacheWordIO(implicit p: Parameters) extends DCacheBundle
   val resp = Flipped(DecoupledIO(new UncacheWordResp))
 }
 
-class AtomicsResp(implicit p: Parameters) extends DCacheBundle {
+class MainPipeResp(implicit p: Parameters) extends DCacheBundle {
+  //distinguish amo
+  val source  = UInt(sourceTypeWidth.W)
   val data    = UInt(DataBits.W)
   val miss    = Bool()
   val miss_id = UInt(log2Up(cfg.nMissEntries).W)
@@ -555,12 +557,15 @@ class AtomicsResp(implicit p: Parameters) extends DCacheBundle {
   val ack_miss_queue = Bool()
 
   val id     = UInt(reqIdWidth.W)
+
+  def isAMO: Bool = source === AMO_SOURCE.U
+  def isStore: Bool = source === STORE_SOURCE.U
 }
 
 class AtomicWordIO(implicit p: Parameters) extends DCacheBundle
 {
   val req  = DecoupledIO(new MainPipeReq)
-  val resp = Flipped(ValidIO(new AtomicsResp))
+  val resp = Flipped(ValidIO(new MainPipeResp))
   val block_lr = Input(Bool())
 }
 
@@ -609,11 +614,12 @@ class DCacheToSbufferIO(implicit p: Parameters) extends DCacheBundle {
   val req = Flipped(Decoupled(new DCacheLineReq))
 
   val main_pipe_hit_resp = ValidIO(new DCacheLineResp)
-  val refill_hit_resp = ValidIO(new DCacheLineResp)
+  //val refill_hit_resp = ValidIO(new DCacheLineResp)
 
   val replay_resp = ValidIO(new DCacheLineResp)
 
-  def hit_resps: Seq[ValidIO[DCacheLineResp]] = Seq(main_pipe_hit_resp, refill_hit_resp)
+  //def hit_resps: Seq[ValidIO[DCacheLineResp]] = Seq(main_pipe_hit_resp, refill_hit_resp)
+  def hit_resps: Seq[ValidIO[DCacheLineResp]] = Seq(main_pipe_hit_resp)
 }
 
 // forward tilelink channel D's data to ldu
@@ -765,6 +771,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val sms_agt_evict_req = DecoupledIO(new AGTEvictReq)
   val debugTopDown = new DCacheTopDownIO
   val debugRolling = Flipped(new RobDebugRollingIO)
+  val l2_hint = Input(Valid(new L2ToL1Hint()))
 }
 
 class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
@@ -821,8 +828,16 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   // Enable L1 Store prefetch
   val StorePrefetchL1Enabled = EnableStorePrefetchAtCommit || EnableStorePrefetchAtIssue || EnableStorePrefetchSPB
-  val MetaReadPort = if(StorePrefetchL1Enabled) LoadPipelineWidth + 1 + StorePipelineWidth else LoadPipelineWidth + 1
-  val TagReadPort = if(StorePrefetchL1Enabled) LoadPipelineWidth + 1 + StorePipelineWidth else LoadPipelineWidth + 1
+  val MetaReadPort =
+        if (StorePrefetchL1Enabled)
+          1 + backendParams.LduCnt + backendParams.StaCnt + backendParams.HyuCnt
+        else
+          1 + backendParams.LduCnt + backendParams.HyuCnt
+  val TagReadPort =
+        if (StorePrefetchL1Enabled)
+          1 + backendParams.LduCnt + backendParams.StaCnt + backendParams.HyuCnt
+        else
+          1 + backendParams.LduCnt + backendParams.HyuCnt
 
   // Enable L1 Load prefetch
   val LoadPrefetchL1Enabled = true
@@ -832,10 +847,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // core data structures
   val bankedDataArray = if(dwpuParam.enWPU) Module(new SramedDataArray) else Module(new BankedDataArray)
-  val metaArray = Module(new L1CohMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 2))
-  val errorArray = Module(new L1FlagMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 2))
-  val prefetchArray = Module(new L1PrefetchSourceArray(readPorts = PrefetchArrayReadPort, writePorts = 2 + LoadPipelineWidth)) // prefetch flag array
-  val accessArray = Module(new L1FlagMetaArray(readPorts = AccessArrayReadPort, writePorts = LoadPipelineWidth + 2))
+  val metaArray = Module(new L1CohMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 1))
+  val errorArray = Module(new L1FlagMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 1))
+  val prefetchArray = Module(new L1PrefetchSourceArray(readPorts = PrefetchArrayReadPort, writePorts = 1 + LoadPipelineWidth)) // prefetch flag array
+  val accessArray = Module(new L1FlagMetaArray(readPorts = AccessArrayReadPort, writePorts = LoadPipelineWidth + 1))
   val tagArray = Module(new DuplicatedTagArray(readPorts = TagReadPort))
   val prefetcherMonitor = Module(new PrefetcherMonitor)
   val fdpMonitor =  Module(new FDPrefetcherMonitor)
@@ -848,7 +863,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val ldu = Seq.tabulate(LoadPipelineWidth)({ i => Module(new LoadPipe(i))})
   val stu = Seq.tabulate(StorePipelineWidth)({ i => Module(new StorePipe(i))})
   val mainPipe     = Module(new MainPipe)
-  val refillPipe   = Module(new RefillPipe)
+  // val refillPipe   = Module(new RefillPipe)
   val missQueue    = Module(new MissQueue(edge))
   val probeQueue   = Module(new ProbeQueue(edge))
   val wb           = Module(new WritebackQueue(edge))
@@ -857,7 +872,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   missQueue.io.hartId := io.hartId
   missQueue.io.l2_pf_store_only := RegNext(io.l2_pf_store_only, false.B)
   missQueue.io.debugTopDown <> io.debugTopDown
-  missQueue.io.sms_agt_evict_req <> io.sms_agt_evict_req
+  missQueue.io.l2_hint <> RegNext(io.l2_hint)
+  missQueue.io.mainpipe_info := mainPipe.io.mainpipe_info
+  mainPipe.io.refill_info := missQueue.io.refill_info
+  mainPipe.io.sms_agt_evict_req <> io.sms_agt_evict_req
   io.memSetPattenDetected := missQueue.io.memSetPattenDetected
 
   val errors = ldu.map(_.io.error) ++ // load error
@@ -866,38 +884,64 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // meta array
+  val HybridLoadReadBase = LoadPipelineWidth - backendParams.HyuCnt
+  val HybridStoreReadBase = StorePipelineWidth - backendParams.HyuCnt
+
+  val hybrid_meta_read_ports = Wire(Vec(backendParams.HyuCnt, DecoupledIO(new MetaReadReq)))
+  val hybrid_meta_resp_ports = Wire(Vec(backendParams.HyuCnt, ldu(0).io.meta_resp.cloneType))
+  for (i <- 0 until backendParams.HyuCnt) {
+    val HybridLoadMetaReadPort = HybridLoadReadBase + i
+    val HybridStoreMetaReadPort = HybridStoreReadBase + i
+
+    hybrid_meta_read_ports(i).valid := ldu(HybridLoadMetaReadPort).io.meta_read.valid ||
+                                       (stu(HybridStoreMetaReadPort).io.meta_read.valid && StorePrefetchL1Enabled.B)
+    hybrid_meta_read_ports(i).bits := Mux(ldu(HybridLoadMetaReadPort).io.meta_read.valid, ldu(HybridLoadMetaReadPort).io.meta_read.bits,
+                                          stu(HybridStoreMetaReadPort).io.meta_read.bits)
+
+    ldu(HybridLoadMetaReadPort).io.meta_read.ready := hybrid_meta_read_ports(i).ready
+    stu(HybridStoreMetaReadPort).io.meta_read.ready := hybrid_meta_read_ports(i).ready && StorePrefetchL1Enabled.B
+
+    ldu(HybridLoadMetaReadPort).io.meta_resp := hybrid_meta_resp_ports(i)
+    stu(HybridStoreMetaReadPort).io.meta_resp := hybrid_meta_resp_ports(i)
+  }
 
   // read / write coh meta
-  val meta_read_ports = ldu.map(_.io.meta_read) ++
+  val meta_read_ports = ldu.map(_.io.meta_read).take(HybridLoadReadBase) ++
     Seq(mainPipe.io.meta_read) ++
-    stu.map(_.io.meta_read)
+    stu.map(_.io.meta_read).take(HybridStoreReadBase) ++ hybrid_meta_read_ports
 
-  val meta_resp_ports = ldu.map(_.io.meta_resp) ++
+  val meta_resp_ports = ldu.map(_.io.meta_resp).take(HybridLoadReadBase) ++
     Seq(mainPipe.io.meta_resp) ++
-    stu.map(_.io.meta_resp)
+    stu.map(_.io.meta_resp).take(HybridStoreReadBase) ++ hybrid_meta_resp_ports
 
   val meta_write_ports = Seq(
-    mainPipe.io.meta_write,
-    refillPipe.io.meta_write
+    mainPipe.io.meta_write
+    // refillPipe.io.meta_write
   )
   if(StorePrefetchL1Enabled) {
     meta_read_ports.zip(metaArray.io.read).foreach { case (p, r) => r <> p }
     meta_resp_ports.zip(metaArray.io.resp).foreach { case (p, r) => p := r }
-  }else {
-    meta_read_ports.take(LoadPipelineWidth + 1).zip(metaArray.io.read).foreach { case (p, r) => r <> p }
-    meta_resp_ports.take(LoadPipelineWidth + 1).zip(metaArray.io.resp).foreach { case (p, r) => p := r }
+  } else {
+    (meta_read_ports.take(HybridLoadReadBase + 1) ++
+     meta_read_ports.takeRight(backendParams.HyuCnt)).zip(metaArray.io.read).foreach { case (p, r) => r <> p }
+    (meta_resp_ports.take(HybridLoadReadBase + 1) ++
+     meta_resp_ports.takeRight(backendParams.HyuCnt)).zip(metaArray.io.resp).foreach { case (p, r) => p := r }
 
-    meta_read_ports.drop(LoadPipelineWidth + 1).foreach { case p => p.ready := false.B }
-    meta_resp_ports.drop(LoadPipelineWidth + 1).foreach { case p => p := 0.U.asTypeOf(p) }
+    meta_read_ports.drop(HybridLoadReadBase + 1).take(HybridStoreReadBase).foreach { case p => p.ready := false.B }
+    meta_resp_ports.drop(HybridLoadReadBase + 1).take(HybridStoreReadBase).foreach { case p => p := 0.U.asTypeOf(p) }
   }
   meta_write_ports.zip(metaArray.io.write).foreach { case (p, w) => w <> p }
 
   // read extra meta (exclude stu)
-  meta_read_ports.take(LoadPipelineWidth + 1).zip(errorArray.io.read).foreach { case (p, r) => r <> p }
-  meta_read_ports.take(LoadPipelineWidth + 1).zip(prefetchArray.io.read).foreach { case (p, r) => r <> p }
-  meta_read_ports.take(LoadPipelineWidth + 1).zip(accessArray.io.read).foreach { case (p, r) => r <> p }
-  val extra_meta_resp_ports = ldu.map(_.io.extra_meta_resp) ++
-    Seq(mainPipe.io.extra_meta_resp)
+  (meta_read_ports.take(HybridLoadReadBase + 1) ++
+   meta_read_ports.takeRight(backendParams.HyuCnt)).zip(errorArray.io.read).foreach { case (p, r) => r <> p }
+  (meta_read_ports.take(HybridLoadReadBase + 1) ++
+   meta_read_ports.takeRight(backendParams.HyuCnt)).zip(prefetchArray.io.read).foreach { case (p, r) => r <> p }
+  (meta_read_ports.take(HybridLoadReadBase + 1) ++
+   meta_read_ports.takeRight(backendParams.HyuCnt)).zip(accessArray.io.read).foreach { case (p, r) => r <> p }
+  val extra_meta_resp_ports = ldu.map(_.io.extra_meta_resp).take(HybridLoadReadBase) ++
+    Seq(mainPipe.io.extra_meta_resp) ++
+    ldu.map(_.io.extra_meta_resp).takeRight(backendParams.HyuCnt)
   extra_meta_resp_ports.zip(errorArray.io.resp).foreach { case (p, r) => {
     (0 until nWays).map(i => { p(i).error := r(i) })
   }}
@@ -910,16 +954,23 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   if(LoadPrefetchL1Enabled) {
     // use last port to read prefetch and access flag
-    prefetchArray.io.read.last.valid := refillPipe.io.prefetch_flag_write.valid
-    prefetchArray.io.read.last.bits.idx := refillPipe.io.prefetch_flag_write.bits.idx
-    prefetchArray.io.read.last.bits.way_en := refillPipe.io.prefetch_flag_write.bits.way_en
+//    prefetchArray.io.read.last.valid := refillPipe.io.prefetch_flag_write.valid
+//    prefetchArray.io.read.last.bits.idx := refillPipe.io.prefetch_flag_write.bits.idx
+//    prefetchArray.io.read.last.bits.way_en := refillPipe.io.prefetch_flag_write.bits.way_en
+//
+//    accessArray.io.read.last.valid := refillPipe.io.prefetch_flag_write.valid
+//    accessArray.io.read.last.bits.idx := refillPipe.io.prefetch_flag_write.bits.idx
+//    accessArray.io.read.last.bits.way_en := refillPipe.io.prefetch_flag_write.bits.way_en
+    prefetchArray.io.read.last.valid := mainPipe.io.prefetch_flag_write.valid
+    prefetchArray.io.read.last.bits.idx := mainPipe.io.prefetch_flag_write.bits.idx
+    prefetchArray.io.read.last.bits.way_en := mainPipe.io.prefetch_flag_write.bits.way_en
 
-    accessArray.io.read.last.valid := refillPipe.io.prefetch_flag_write.valid
-    accessArray.io.read.last.bits.idx := refillPipe.io.prefetch_flag_write.bits.idx
-    accessArray.io.read.last.bits.way_en := refillPipe.io.prefetch_flag_write.bits.way_en
+    accessArray.io.read.last.valid := mainPipe.io.prefetch_flag_write.valid
+    accessArray.io.read.last.bits.idx := mainPipe.io.prefetch_flag_write.bits.idx
+    accessArray.io.read.last.bits.way_en := mainPipe.io.prefetch_flag_write.bits.way_en
 
-    val extra_flag_valid = RegNext(refillPipe.io.prefetch_flag_write.valid)
-    val extra_flag_way_en = RegEnable(refillPipe.io.prefetch_flag_write.bits.way_en, refillPipe.io.prefetch_flag_write.valid)
+    val extra_flag_valid = RegNext(mainPipe.io.prefetch_flag_write.valid)
+    val extra_flag_way_en = RegEnable(mainPipe.io.prefetch_flag_write.bits.way_en, mainPipe.io.prefetch_flag_write.valid)
     val extra_flag_prefetch = Mux1H(extra_flag_way_en, prefetchArray.io.resp.last)
     val extra_flag_access = Mux1H(extra_flag_way_en, accessArray.io.resp.last)
 
@@ -929,46 +980,48 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   // write extra meta
   val error_flag_write_ports = Seq(
-    mainPipe.io.error_flag_write, // error flag generated by corrupted store
-    refillPipe.io.error_flag_write // corrupted signal from l2
+    mainPipe.io.error_flag_write // error flag generated by corrupted store
+    // refillPipe.io.error_flag_write // corrupted signal from l2
   )
   error_flag_write_ports.zip(errorArray.io.write).foreach { case (p, w) => w <> p }
 
   val prefetch_flag_write_ports = ldu.map(_.io.prefetch_flag_write) ++ Seq(
-    mainPipe.io.prefetch_flag_write, // set prefetch_flag to false if coh is set to Nothing
-    refillPipe.io.prefetch_flag_write // refill required by prefetch will set prefetch_flag
+    mainPipe.io.prefetch_flag_write // set prefetch_flag to false if coh is set to Nothing
+    // refillPipe.io.prefetch_flag_write // refill required by prefetch will set prefetch_flag
   )
   prefetch_flag_write_ports.zip(prefetchArray.io.write).foreach { case (p, w) => w <> p }
 
+  // FIXME: add hybrid unit?
   val same_cycle_update_pf_flag = ldu(0).io.prefetch_flag_write.valid && ldu(1).io.prefetch_flag_write.valid && (ldu(0).io.prefetch_flag_write.bits.idx === ldu(1).io.prefetch_flag_write.bits.idx) && (ldu(0).io.prefetch_flag_write.bits.way_en === ldu(1).io.prefetch_flag_write.bits.way_en)
   XSPerfAccumulate("same_cycle_update_pf_flag", same_cycle_update_pf_flag)
 
   val access_flag_write_ports = ldu.map(_.io.access_flag_write) ++ Seq(
-    mainPipe.io.access_flag_write,
-    refillPipe.io.access_flag_write
+    mainPipe.io.access_flag_write
+    // refillPipe.io.access_flag_write
   )
   access_flag_write_ports.zip(accessArray.io.write).foreach { case (p, w) => w <> p }
 
   //----------------------------------------
   // tag array
   if(StorePrefetchL1Enabled) {
-    require(tagArray.io.read.size == (ldu.size + stu.size + 1))
+    require(tagArray.io.read.size == (LoadPipelineWidth + StorePipelineWidth - backendParams.HyuCnt + 1))
   }else {
-    require(tagArray.io.read.size == (ldu.size + 1))
+    require(tagArray.io.read.size == (LoadPipelineWidth + 1))
   }
-  val tag_write_intend = missQueue.io.refill_pipe_req.valid || mainPipe.io.tag_write_intend
+  // val tag_write_intend = missQueue.io.refill_pipe_req.valid || mainPipe.io.tag_write_intend
+  val tag_write_intend = mainPipe.io.tag_write_intend
   assert(!RegNext(!tag_write_intend && tagArray.io.write.valid))
-  ldu.zipWithIndex.foreach {
+  ldu.take(HybridLoadReadBase).zipWithIndex.foreach {
     case (ld, i) =>
       tagArray.io.read(i) <> ld.io.tag_read
       ld.io.tag_resp := tagArray.io.resp(i)
       ld.io.tag_read.ready := !tag_write_intend
   }
   if(StorePrefetchL1Enabled) {
-    stu.zipWithIndex.foreach {
+    stu.take(HybridStoreReadBase).zipWithIndex.foreach {
       case (st, i) =>
-        tagArray.io.read(ldu.size + i) <> st.io.tag_read
-        st.io.tag_resp := tagArray.io.resp(ldu.size + i)
+        tagArray.io.read(HybridLoadReadBase + i) <> st.io.tag_read
+        st.io.tag_resp := tagArray.io.resp(HybridLoadReadBase + i)
         st.io.tag_read.ready := !tag_write_intend
     }
   }else {
@@ -978,15 +1031,45 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
         st.io.tag_resp := 0.U.asTypeOf(st.io.tag_resp)
     }
   }
+  for (i <- 0 until backendParams.HyuCnt) {
+    val HybridLoadTagReadPort = HybridLoadReadBase + i
+    val HybridStoreTagReadPort = HybridStoreReadBase + i
+    val TagReadPort =
+      if (EnableStorePrefetchSPB)
+        HybridLoadReadBase + HybridStoreReadBase + i
+      else
+        HybridLoadReadBase + i
+
+    // read tag
+    ldu(HybridLoadTagReadPort).io.tag_read.ready := false.B
+    stu(HybridStoreTagReadPort).io.tag_read.ready := false.B
+
+    if (StorePrefetchL1Enabled) {
+      when (ldu(HybridLoadTagReadPort).io.tag_read.valid) {
+        tagArray.io.read(TagReadPort) <> ldu(HybridLoadTagReadPort).io.tag_read
+        ldu(HybridLoadTagReadPort).io.tag_read.ready := !tag_write_intend
+      } .otherwise {
+        tagArray.io.read(TagReadPort) <> stu(HybridStoreTagReadPort).io.tag_read
+        stu(HybridStoreTagReadPort).io.tag_read.ready := !tag_write_intend
+      }
+    } else {
+      tagArray.io.read(TagReadPort) <> ldu(HybridLoadTagReadPort).io.tag_read
+      ldu(HybridLoadTagReadPort).io.tag_read.ready := !tag_write_intend
+    }
+
+    // tag resp
+    ldu(HybridLoadTagReadPort).io.tag_resp := tagArray.io.resp(TagReadPort)
+    stu(HybridStoreTagReadPort).io.tag_resp := tagArray.io.resp(TagReadPort)
+  }
   tagArray.io.read.last <> mainPipe.io.tag_read
   mainPipe.io.tag_resp := tagArray.io.resp.last
 
   val fake_tag_read_conflict_this_cycle = PopCount(ldu.map(ld=> ld.io.tag_read.valid))
   XSPerfAccumulate("fake_tag_read_conflict", fake_tag_read_conflict_this_cycle)
 
-  val tag_write_arb = Module(new Arbiter(new TagWriteReq, 2))
-  tag_write_arb.io.in(0) <> refillPipe.io.tag_write
-  tag_write_arb.io.in(1) <> mainPipe.io.tag_write
+  val tag_write_arb = Module(new Arbiter(new TagWriteReq, 1))
+  // tag_write_arb.io.in(0) <> refillPipe.io.tag_write
+  tag_write_arb.io.in(0) <> mainPipe.io.tag_write
   tagArray.io.write <> tag_write_arb.io.out
 
   ldu.map(m => {
@@ -998,18 +1081,18 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // data array
   mainPipe.io.data_read.zip(ldu).map(x => x._1 := x._2.io.lsu.req.valid)
 
-  val dataWriteArb = Module(new Arbiter(new L1BankedDataWriteReq, 2))
-  dataWriteArb.io.in(0) <> refillPipe.io.data_write
-  dataWriteArb.io.in(1) <> mainPipe.io.data_write
+  val dataWriteArb = Module(new Arbiter(new L1BankedDataWriteReq, 1))
+  // dataWriteArb.io.in(0) <> refillPipe.io.data_write
+  dataWriteArb.io.in(0) <> mainPipe.io.data_write
 
   bankedDataArray.io.write <> dataWriteArb.io.out
 
   for (bank <- 0 until DCacheBanks) {
-    val dataWriteArb_dup = Module(new Arbiter(new L1BankedDataWriteReqCtrl, 2))
-    dataWriteArb_dup.io.in(0).valid := refillPipe.io.data_write_dup(bank).valid
-    dataWriteArb_dup.io.in(0).bits := refillPipe.io.data_write_dup(bank).bits
-    dataWriteArb_dup.io.in(1).valid := mainPipe.io.data_write_dup(bank).valid
-    dataWriteArb_dup.io.in(1).bits := mainPipe.io.data_write_dup(bank).bits
+    val dataWriteArb_dup = Module(new Arbiter(new L1BankedDataWriteReqCtrl, 1))
+    // dataWriteArb_dup.io.in(0).valid := refillPipe.io.data_write_dup(bank).valid
+    // dataWriteArb_dup.io.in(0).bits := refillPipe.io.data_write_dup(bank).bits
+    dataWriteArb_dup.io.in(0).valid := mainPipe.io.data_write_dup(bank).valid
+    dataWriteArb_dup.io.in(0).bits := mainPipe.io.data_write_dup(bank).bits
 
     bankedDataArray.io.write_dup(bank) <> dataWriteArb_dup.io.out
   }
@@ -1150,8 +1233,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // atomics
   // atomics not finished yet
-  // io.lsu.atomics <> atomicsReplayUnit.io.lsu
-  io.lsu.atomics.resp := RegNext(mainPipe.io.atomic_resp)
+  // io.lsu.atomic <> atomicsReplayUnit.io.lsu
+  val atomicResp = RegNext(mainPipe.io.atomic_resp)
+  io.lsu.atomics.resp.valid := atomicResp.valid && atomicResp.bits.isAMO
+  io.lsu.atomics.resp.bits := atomicResp.bits
+
   io.lsu.atomics.block_lr := mainPipe.io.block_lr
   // atomicsReplayUnit.io.pipe_resp := RegNext(mainPipe.io.atomic_resp)
   // atomicsReplayUnit.io.block_lr <> mainPipe.io.block_lr
@@ -1159,25 +1245,47 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // miss queue
   // missReqArb port:
-  // enableStorePrefetch: main pipe * 1 + load pipe * 2 + store pipe * 2; disable: main pipe * 1 + load pipe * 2
+  // enableStorePrefetch: main pipe * 1 + load pipe * 2 + store pipe * 1 +
+  // hybrid * 1; disable: main pipe * 1 + load pipe * 2 + hybrid * 1
   // higher priority is given to lower indices
-  val MissReqPortCount = if(StorePrefetchL1Enabled) LoadPipelineWidth + 1 + StorePipelineWidth else LoadPipelineWidth + 1
+  val MissReqPortCount = if(StorePrefetchL1Enabled) 1 + backendParams.LduCnt + backendParams.StaCnt + backendParams.HyuCnt else 1 + backendParams.LduCnt + backendParams.HyuCnt
   val MainPipeMissReqPort = 0
+  val HybridMissReqBase = MissReqPortCount - backendParams.HyuCnt
 
   // Request
   val missReqArb = Module(new ArbiterFilterByCacheLineAddr(new MissReq, MissReqPortCount, blockOffBits, PAddrBits))
 
   missReqArb.io.in(MainPipeMissReqPort) <> mainPipe.io.miss_req
-  for (w <- 0 until LoadPipelineWidth)  { missReqArb.io.in(w + 1) <> ldu(w).io.miss_req }
+  for (w <- 0 until backendParams.LduCnt)  { missReqArb.io.in(w + 1) <> ldu(w).io.miss_req }
 
   for (w <- 0 until LoadPipelineWidth) { ldu(w).io.miss_resp := missQueue.io.resp }
   mainPipe.io.miss_resp := missQueue.io.resp
 
   if(StorePrefetchL1Enabled) {
-    for (w <- 0 until StorePipelineWidth) { missReqArb.io.in(w + 1 + LoadPipelineWidth) <> stu(w).io.miss_req }
+    for (w <- 0 until backendParams.StaCnt) { missReqArb.io.in(1 + backendParams.LduCnt + w) <> stu(w).io.miss_req }
   }else {
-    for (w <- 0 until StorePipelineWidth) { stu(w).io.miss_req.ready := false.B }
+    for (w <- 0 until backendParams.StaCnt) { stu(w).io.miss_req.ready := false.B }
   }
+
+  for (i <- 0 until backendParams.HyuCnt) {
+    val HybridLoadReqPort = HybridLoadReadBase + i
+    val HybridStoreReqPort = HybridStoreReadBase + i
+    val HybridMissReqPort = HybridMissReqBase + i
+
+    ldu(HybridLoadReqPort).io.miss_req.ready := false.B
+    stu(HybridStoreReqPort).io.miss_req.ready := false.B
+
+    if (StorePrefetchL1Enabled) {
+      when (ldu(HybridLoadReqPort).io.miss_req.valid) {
+        missReqArb.io.in(HybridMissReqPort) <> ldu(HybridLoadReqPort).io.miss_req
+      } .otherwise {
+        missReqArb.io.in(HybridMissReqPort) <> stu(HybridStoreReqPort).io.miss_req
+      }
+    } else {
+      missReqArb.io.in(HybridMissReqPort) <> ldu(HybridLoadReqPort).io.miss_req
+    }
+  }
+
 
   wb.io.miss_req.valid := missReqArb.io.out.valid
   wb.io.miss_req.bits  := missReqArb.io.out.bits.addr
@@ -1218,84 +1326,31 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   probeQueue.io.lrsc_locked_block <> mainPipe.io.lrsc_locked_block
   probeQueue.io.update_resv_set <> mainPipe.io.update_resv_set
 
+  val refill_req = RegNext(missQueue.io.main_pipe_req.valid && ((missQueue.io.main_pipe_req.bits.isLoad) | (missQueue.io.main_pipe_req.bits.isStore)))
   //----------------------------------------
   // mainPipe
   // when a req enters main pipe, if it is set-conflict with replace pipe or refill pipe,
   // block the req in main pipe
-  block_decoupled(probeQueue.io.pipe_req, mainPipe.io.probe_req, missQueue.io.refill_pipe_req.valid)
-  block_decoupled(io.lsu.store.req, mainPipe.io.store_req, refillPipe.io.req.valid)
+  // block_decoupled(probeQueue.io.pipe_req, mainPipe.io.probe_req, missQueue.io.refill_pipe_req.valid)
+  block_decoupled(probeQueue.io.pipe_req, mainPipe.io.probe_req, refill_req)
+  // block_decoupled(io.lsu.store.req, mainPipe.io.store_req, refillPipe.io.req.valid)
+  block_decoupled(io.lsu.store.req, mainPipe.io.store_req, refill_req)
 
   io.lsu.store.replay_resp := RegNext(mainPipe.io.store_replay_resp)
   io.lsu.store.main_pipe_hit_resp := mainPipe.io.store_hit_resp
 
-  arbiter_with_pipereg(
-    in = Seq(missQueue.io.main_pipe_req, io.lsu.atomics.req),
-    out = mainPipe.io.atomic_req,
-    name = Some("main_pipe_atomic_req")
-  )
+  mainPipe.io.atomic_req <> io.lsu.atomics.req
 
   mainPipe.io.invalid_resv_set := RegNext(wb.io.req.fire && wb.io.req.bits.addr === mainPipe.io.lrsc_locked_block.bits)
 
   //----------------------------------------
   // replace (main pipe)
   val mpStatus = mainPipe.io.status
-  mainPipe.io.replace_req <> missQueue.io.replace_pipe_req
-  missQueue.io.replace_pipe_resp := mainPipe.io.replace_resp
+  mainPipe.io.refill_req <> missQueue.io.main_pipe_req
 
-  //----------------------------------------
-  // refill pipe
-  val refillShouldBeBlocked = (mpStatus.s1.valid && mpStatus.s1.bits.set === missQueue.io.refill_pipe_req.bits.idx) ||
-    Cat(Seq(mpStatus.s2, mpStatus.s3).map(s =>
-      s.valid &&
-        s.bits.set === missQueue.io.refill_pipe_req.bits.idx &&
-        s.bits.way_en === missQueue.io.refill_pipe_req.bits.way_en
-    )).orR
-  block_decoupled(missQueue.io.refill_pipe_req, refillPipe.io.req, refillShouldBeBlocked)
-
-  val mpStatus_dup = mainPipe.io.status_dup
-  val mq_refill_dup = missQueue.io.refill_pipe_req_dup
-  val refillShouldBeBlocked_dup = VecInit((0 until nDupStatus).map { case i =>
-    mpStatus_dup(i).s1.valid && mpStatus_dup(i).s1.bits.set === mq_refill_dup(i).bits.idx ||
-    Cat(Seq(mpStatus_dup(i).s2, mpStatus_dup(i).s3).map(s =>
-      s.valid &&
-        s.bits.set === mq_refill_dup(i).bits.idx &&
-        s.bits.way_en === mq_refill_dup(i).bits.way_en
-    )).orR
-  })
-  dontTouch(refillShouldBeBlocked_dup)
-
-  refillPipe.io.req_dup_for_data_w.zipWithIndex.foreach { case (r, i) =>
-    r.bits := (mq_refill_dup.drop(dataWritePort).take(DCacheBanks))(i).bits
-  }
-  refillPipe.io.req_dup_for_meta_w.bits := mq_refill_dup(metaWritePort).bits
-  refillPipe.io.req_dup_for_tag_w.bits := mq_refill_dup(tagWritePort).bits
-  refillPipe.io.req_dup_for_err_w.bits := mq_refill_dup(errWritePort).bits
-  refillPipe.io.req_dup_for_data_w.zipWithIndex.foreach { case (r, i) =>
-    r.valid := (mq_refill_dup.drop(dataWritePort).take(DCacheBanks))(i).valid &&
-      !(refillShouldBeBlocked_dup.drop(dataWritePort).take(DCacheBanks))(i)
-  }
-  refillPipe.io.req_dup_for_meta_w.valid := mq_refill_dup(metaWritePort).valid && !refillShouldBeBlocked_dup(metaWritePort)
-  refillPipe.io.req_dup_for_tag_w.valid := mq_refill_dup(tagWritePort).valid && !refillShouldBeBlocked_dup(tagWritePort)
-  refillPipe.io.req_dup_for_err_w.valid := mq_refill_dup(errWritePort).valid && !refillShouldBeBlocked_dup(errWritePort)
-
-  val refillPipe_io_req_valid_dup = VecInit(mq_refill_dup.zip(refillShouldBeBlocked_dup).map(
-    x => x._1.valid && !x._2
-  ))
-  val refillPipe_io_data_write_valid_dup = VecInit(refillPipe_io_req_valid_dup.slice(0, nDupDataWriteReady))
-  val refillPipe_io_tag_write_valid_dup = VecInit(refillPipe_io_req_valid_dup.slice(nDupDataWriteReady, nDupStatus))
-  dontTouch(refillPipe_io_req_valid_dup)
-  dontTouch(refillPipe_io_data_write_valid_dup)
-  dontTouch(refillPipe_io_tag_write_valid_dup)
-  mainPipe.io.data_write_ready_dup := VecInit(refillPipe_io_data_write_valid_dup.map(v => !v))
-  mainPipe.io.tag_write_ready_dup := VecInit(refillPipe_io_tag_write_valid_dup.map(v => !v))
+  mainPipe.io.data_write_ready_dup := VecInit(Seq.fill(nDupDataWriteReady)(true.B)) 
+  mainPipe.io.tag_write_ready_dup := VecInit(Seq.fill(nDupDataWriteReady)(true.B)) 
   mainPipe.io.wb_ready_dup := wb.io.req_ready_dup
-
-  mq_refill_dup.zip(refillShouldBeBlocked_dup).foreach { case (r, block) =>
-    r.ready := refillPipe.io.req.ready && !block
-  }
-
-  missQueue.io.refill_pipe_resp := refillPipe.io.resp
-  io.lsu.store.refill_hit_resp := RegNext(refillPipe.io.store_resp)
 
   //----------------------------------------
   // wb
@@ -1303,10 +1358,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   wb.io.req <> mainPipe.io.wb
   bus.c     <> wb.io.mem_release
-  wb.io.release_wakeup := refillPipe.io.release_wakeup
-  wb.io.release_update := mainPipe.io.release_update
-  wb.io.probe_ttob_check_req <> mainPipe.io.probe_ttob_check_req
-  wb.io.probe_ttob_check_resp <> mainPipe.io.probe_ttob_check_resp
+  // wb.io.release_wakeup := refillPipe.io.release_wakeup
+  // wb.io.release_update := mainPipe.io.release_update
+  //wb.io.probe_ttob_check_req <> mainPipe.io.probe_ttob_check_req
+  //wb.io.probe_ttob_check_resp <> mainPipe.io.probe_ttob_check_resp
 
   io.lsu.release.valid := RegNext(wb.io.req.fire)
   io.lsu.release.bits.paddr := RegNext(wb.io.req.bits.addr)
@@ -1351,8 +1406,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // Bloom Filter
-  bloomFilter.io.set <> missQueue.io.bloom_filter_query.set
-  bloomFilter.io.clr <> missQueue.io.bloom_filter_query.clr
+  // bloomFilter.io.set <> missQueue.io.bloom_filter_query.set
+  // bloomFilter.io.clr <> missQueue.io.bloom_filter_query.clr
+  bloomFilter.io.set <> mainPipe.io.bloom_filter_query.set
+  bloomFilter.io.clr <> mainPipe.io.bloom_filter_query.clr
 
   for (w <- 0 until LoadPipelineWidth)  { bloomFilter.io.query(w) <> ldu(w).io.bloom_filter_query.query }
   for (w <- 0 until LoadPipelineWidth)  { bloomFilter.io.resp(w) <> ldu(w).io.bloom_filter_query.resp }
@@ -1367,9 +1424,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   val victimList = VictimList(nSets)
   if (dwpuParam.enCfPred) {
-    when(missQueue.io.replace_pipe_req.valid) {
-      victimList.replace(get_idx(missQueue.io.replace_pipe_req.bits.vaddr))
-    }
+    // when(missQueue.io.replace_pipe_req.valid) {
+    //   victimList.replace(get_idx(missQueue.io.replace_pipe_req.bits.vaddr))
+    // }
     replWayReqs.foreach {
       case req =>
         req.way := DontCare
@@ -1424,6 +1481,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     sink.bits    := source.bits
   }
 
+
   //----------------------------------------
   // Customized csr cache op support
   val cacheOpDecoder = Module(new CSRCacheOpDecoder("dcache", CacheInstrucion.COP_ID_DCACHE))
@@ -1457,29 +1515,29 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   io.mshrFull := missQueue.io.full
 
   // performance counter
-  val ld_access = Wire(Vec(LoadPipelineWidth, missQueue.io.debug_early_replace.last.cloneType))
-  val st_access = Wire(ld_access.last.cloneType)
-  ld_access.zip(ldu).foreach {
-    case (a, u) =>
-      a.valid := RegNext(u.io.lsu.req.fire) && !u.io.lsu.s1_kill
-      a.bits.idx := RegNext(get_idx(u.io.lsu.req.bits.vaddr))
-      a.bits.tag := get_tag(u.io.lsu.s1_paddr_dup_dcache)
-  }
-  st_access.valid := RegNext(mainPipe.io.store_req.fire)
-  st_access.bits.idx := RegNext(get_idx(mainPipe.io.store_req.bits.vaddr))
-  st_access.bits.tag := RegNext(get_tag(mainPipe.io.store_req.bits.addr))
-  val access_info = ld_access.toSeq ++ Seq(st_access)
-  val early_replace = RegNext(missQueue.io.debug_early_replace)
-  val access_early_replace = access_info.map {
-    case acc =>
-      Cat(early_replace.map {
-        case r =>
-          acc.valid && r.valid &&
-            acc.bits.tag === r.bits.tag &&
-            acc.bits.idx === r.bits.idx
-      })
-  }
-  XSPerfAccumulate("access_early_replace", PopCount(Cat(access_early_replace)))
+//  val ld_access = Wire(Vec(LoadPipelineWidth, missQueue.io.debug_early_replace.last.cloneType))
+//  val st_access = Wire(ld_access.last.cloneType)
+//  ld_access.zip(ldu).foreach {
+//    case (a, u) =>
+//      a.valid := RegNext(u.io.lsu.req.fire()) && !u.io.lsu.s1_kill
+//      a.bits.idx := RegNext(get_idx(u.io.lsu.req.bits.vaddr))
+//      a.bits.tag := get_tag(u.io.lsu.s1_paddr_dup_dcache)
+//  }
+//  st_access.valid := RegNext(mainPipe.io.store_req.fire())
+//  st_access.bits.idx := RegNext(get_idx(mainPipe.io.store_req.bits.vaddr))
+//  st_access.bits.tag := RegNext(get_tag(mainPipe.io.store_req.bits.addr))
+//  val access_info = ld_access.toSeq ++ Seq(st_access)
+//  val early_replace = RegNext(missQueue.io.debug_early_replace)
+//  val access_early_replace = access_info.map {
+//    case acc =>
+//      Cat(early_replace.map {
+//        case r =>
+//          acc.valid && r.valid &&
+//            acc.bits.tag === r.bits.tag &&
+//            acc.bits.idx === r.bits.idx
+//      })
+//  }
+//  XSPerfAccumulate("access_early_replace", PopCount(Cat(access_early_replace)))
 
   val perfEvents = (Seq(wb, mainPipe, missQueue, probeQueue) ++ ldu).flatMap(_.getPerfEvents)
   generatePerfEvent()

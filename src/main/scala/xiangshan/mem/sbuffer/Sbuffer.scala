@@ -39,8 +39,9 @@ trait HasSbufferConst extends HasXSParameter {
   val MissqReplayCountBits = log2Up(SbufferReplayDelayCycles) + 1
 
   // dcache write hit resp has 2 sources
-  // refill pipe resp and main pipe resp
-  val NumDcacheWriteResp = 2 // hardcoded
+  // refill pipe resp and main pipe resp (fixed:only main pipe resp)
+  // val NumDcacheWriteResp = 2 // hardcoded
+  val NumDcacheWriteResp = 1 // hardcoded
 
   val SbufferIndexWidth: Int = log2Up(StoreBufferSize)
   // paddr = ptag + offset
@@ -378,33 +379,31 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   io.in(0).ready := firstCanInsert
   io.in(1).ready := secondCanInsert && io.in(0).ready
 
-  for(i <- 0 until EnsbufferWidth) {
+  for (i <- 0 until EnsbufferWidth) {
     // train
-    if(EnableStorePrefetchSPB) {
+    if (EnableStorePrefetchSPB) {
       prefetcher.io.sbuffer_enq(i).valid := io.in(i).fire
       prefetcher.io.sbuffer_enq(i).bits := DontCare
       prefetcher.io.sbuffer_enq(i).bits.vaddr := io.in(i).bits.vaddr
-    }else {
+    } else {
       prefetcher.io.sbuffer_enq(i).valid := false.B
       prefetcher.io.sbuffer_enq(i).bits := DontCare
     }
 
     // prefetch req
-    if(EnableStorePrefetchAtCommit) {
-      if(EnableAtCommitMissTrigger) {
+    if (EnableStorePrefetchAtCommit) {
+      if (EnableAtCommitMissTrigger) {
         io.store_prefetch(i).valid := prefetcher.io.prefetch_req(i).valid || (io.in(i).fire && io.in(i).bits.prefetch)
-      }else {
+      } else {
         io.store_prefetch(i).valid := prefetcher.io.prefetch_req(i).valid || io.in(i).fire
       }
       io.store_prefetch(i).bits.paddr := DontCare
       io.store_prefetch(i).bits.vaddr := Mux(prefetcher.io.prefetch_req(i).valid, prefetcher.io.prefetch_req(i).bits.vaddr, io.in(i).bits.vaddr)
       prefetcher.io.prefetch_req(i).ready := io.store_prefetch(i).ready
-    }else {
+    } else {
       io.store_prefetch(i) <> prefetcher.io.prefetch_req(i)
     }
-  }
-  if (Enable3Load3Store) {
-    io.store_prefetch(2) <> prefetcher.io.prefetch_req(2)
+    io.store_prefetch zip prefetcher.io.prefetch_req drop 2 foreach (x => x._1 <> x._2)
   }
   prefetcher.io.memSetPattenDetected := io.memSetPattenDetected
 
@@ -505,7 +504,9 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     )
   }
 
-  require(Enable3Load3Store || (EnsbufferWidth == StorePipelineWidth))
+  // for now, when enq, trigger a prefetch (if EnableAtCommitMissTrigger)
+  require(EnsbufferWidth <= StorePipelineWidth)
+
   // ---------------------- Send Dcache Req ---------------------
 
   val sbuffer_empty = Cat(invalidMask).andR
@@ -839,6 +840,25 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     )
   }
 
+  if (env.EnableDifftest) {
+    for (i <- 0 until EnsbufferWidth) {
+      val storeCommit = io.in(i).fire
+      val waddr = ZeroExt(Cat(io.in(i).bits.addr(PAddrBits - 1, 3), 0.U(3.W)), 64)
+      val sbufferMask = shiftMaskToLow(io.in(i).bits.addr, io.in(i).bits.mask)
+      val sbufferData = shiftDataToLow(io.in(i).bits.addr, io.in(i).bits.data)
+      val wmask = sbufferMask
+      val wdata = sbufferData & MaskExpand(sbufferMask)
+
+      val difftest = DifftestModule(new DiffStoreEvent, delay = 2)
+      difftest.coreid := io.hartId
+      difftest.index  := i.U
+      difftest.valid  := storeCommit
+      difftest.addr   := waddr
+      difftest.data   := wdata
+      difftest.mask   := wmask
+    }
+  }
+
   val perf_valid_entry_count = RegNext(PopCount(VecInit(stateVec.map(s => !s.isInvalid())).asUInt))
   XSPerfHistogram("util", perf_valid_entry_count, true.B, 0, StoreBufferSize, 1)
   XSPerfAccumulate("sbuffer_req_valid", PopCount(VecInit(io.in.map(_.valid)).asUInt))
@@ -853,7 +873,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   XSPerfAccumulate("evenCanInsert", evenCanInsert)
   XSPerfAccumulate("oddCanInsert", oddCanInsert)
   XSPerfAccumulate("mainpipe_resp_valid", io.dcache.main_pipe_hit_resp.fire)
-  XSPerfAccumulate("refill_resp_valid", io.dcache.refill_hit_resp.fire)
+  //XSPerfAccumulate("refill_resp_valid", io.dcache.refill_hit_resp.fire)
   XSPerfAccumulate("replay_resp_valid", io.dcache.replay_resp.fire)
   XSPerfAccumulate("coh_timeout", cohHasTimeOut)
 
@@ -872,7 +892,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     ("sbuffer_flush     ", sbuffer_state === x_drain_sbuffer                                                                           ),
     ("sbuffer_replace   ", sbuffer_state === x_replace                                                                                 ),
     ("mpipe_resp_valid  ", io.dcache.main_pipe_hit_resp.fire                                                                         ),
-    ("refill_resp_valid ", io.dcache.refill_hit_resp.fire                                                                            ),
+    //("refill_resp_valid ", io.dcache.refill_hit_resp.fire                                                                            ),
     ("replay_resp_valid ", io.dcache.replay_resp.fire                                                                                ),
     ("coh_timeout       ", cohHasTimeOut                                                                                               ),
     ("sbuffer_1_4_valid ", (perf_valid_entry_count < (StoreBufferSize.U/4.U))                                                          ),
