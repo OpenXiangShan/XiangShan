@@ -318,7 +318,24 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   /**
    * merge data for load
    */
-  val cacheData = io.rdcache.resp.bits.data
+  val cacheData = LookupTree(vaddr(3,0), List(
+    "b0000".U -> io.rdcache.resp.bits.data_delayed(63,    0),
+    "b0001".U -> io.rdcache.resp.bits.data_delayed(63,    8),
+    "b0010".U -> io.rdcache.resp.bits.data_delayed(63,   16),
+    "b0011".U -> io.rdcache.resp.bits.data_delayed(63,   24),
+    "b0100".U -> io.rdcache.resp.bits.data_delayed(63,   32),
+    "b0101".U -> io.rdcache.resp.bits.data_delayed(63,   40),
+    "b0110".U -> io.rdcache.resp.bits.data_delayed(63,   48),
+    "b0111".U -> io.rdcache.resp.bits.data_delayed(63,   56),
+    "b1000".U -> io.rdcache.resp.bits.data_delayed(127,  64),
+    "b1001".U -> io.rdcache.resp.bits.data_delayed(127,  72),
+    "b1010".U -> io.rdcache.resp.bits.data_delayed(127,  80),
+    "b1011".U -> io.rdcache.resp.bits.data_delayed(127,  88),
+    "b1100".U -> io.rdcache.resp.bits.data_delayed(127,  96),
+    "b1101".U -> io.rdcache.resp.bits.data_delayed(127, 104),
+    "b1110".U -> io.rdcache.resp.bits.data_delayed(127, 112),
+    "b1111".U -> io.rdcache.resp.bits.data_delayed(127, 120)
+  ))
   val pickData  = rdataVecHelper(alignedType(1,0), cacheData)
   val mergedData = mergeDataWithElemIdx(
     oldData = data(splitPtr.value),
