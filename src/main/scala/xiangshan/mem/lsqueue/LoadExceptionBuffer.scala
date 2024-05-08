@@ -91,8 +91,10 @@ class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircula
   val reqSel = selectOldest(s2_enqueue, s2_req)
 
   when (req_valid) {
-    req := Mux(reqSel._1(0) && isAfter(req.uop.robIdx, reqSel._2(0).uop.robIdx) ||
-      (isNotBefore(req.uop.robIdx, reqSel._2(0).uop.robIdx) && req.uop.uopIdx > reqSel._2(0).uop.uopIdx), reqSel._2(0), req)
+    req := Mux(
+      reqSel._1(0) && (isAfter(req.uop.robIdx, reqSel._2(0).uop.robIdx) || (isNotBefore(req.uop.robIdx, reqSel._2(0).uop.robIdx) && req.uop.uopIdx > reqSel._2(0).uop.uopIdx)),
+      reqSel._2(0),
+      req)
   } .elsewhen (s2_enqueue.asUInt.orR) {
     req := reqSel._2(0)
   }
