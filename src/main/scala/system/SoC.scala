@@ -228,11 +228,9 @@ trait HaveAXI4PeripheralPort { this: BaseSoC =>
 
 }
 
-class SoCMisc()(implicit p: Parameters) extends BaseSoC
+class MemMisc()(implicit p: Parameters) extends BaseSoC
   with HaveAXI4MemPort
-  // with HaveAXI4PeripheralPort
   with PMAConst
-  // with HaveSlaveAXI4Port
 {
   val enableCHI = p(EnableCHI)
 
@@ -349,3 +347,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
 
   lazy val module = new SoCMiscImp(this)
 }
+class SoCMisc()(implicit p: Parameters) extends MemMisc
+  with HaveAXI4PeripheralPort
+  with HaveSlaveAXI4Port
+

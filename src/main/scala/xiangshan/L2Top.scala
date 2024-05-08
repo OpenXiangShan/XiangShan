@@ -101,6 +101,8 @@ class L2Top()(implicit p: Parameters) extends LazyModule
         hartIds = Seq(p(XSCoreParamsKey).HartId),
         FPGAPlatform = debugOpts.FPGAPlatform
       )
+      case EnableCHI => false
+      case BankBitsKey => log2Ceil(coreParams.L2NBanks)
     }))))
   } else None
   val tl2chi_l2cache = if (enableL2 && enableCHI) {

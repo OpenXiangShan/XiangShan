@@ -37,13 +37,19 @@ import sifive.enterprise.firrtl.NestedPrefixModulesAnnotation
 abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
   with BindingScope
 {
-  val misc = LazyModule(new SoCMisc())
+  // val misc = LazyModule(new SoCMisc())
   lazy val dts = DTS(bindingTree)
   lazy val json = JSON(bindingTree)
 }
 
 class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 {
+  val enableCHI = p(EnableCHI)
+
+  val nocMisc = if (enableCHI) Some(LazyModule(new MemMisc())) else None
+  val socMisc = if (!enableCHI) Some(LazyModule(new SoCMisc())) else None
+  val misc: MemMisc = if (enableCHI) nocMisc.get else socMisc.get
+
   ResourceBinding {
     val width = ResourceInt(2)
     val model = "freechips,rocketchip-unknown"
@@ -63,8 +69,6 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
   }
 
   println(s"FPGASoC cores: $NumCores banks: $L3NBanks block size: $L3BlockSize bus size: $L3OuterBusWidth")
-
-  val enableCHI = p(EnableCHI)
 
   val core_with_l2 = tiles.map(coreParams =>
     LazyModule(new XSTile()(p.alterPartial({
@@ -212,10 +216,21 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
     // val dma = IO(Flipped(misc.dma.cloneType))
     // val peripheral = IO(misc.peripheral.cloneType)
+    val dma = socMisc.map(m => IO(Flipped(m.dma.cloneType)))
+    val peripheral = socMisc.map(m => IO(m.peripheral.cloneType))
     val memory = IO(misc.memory.cloneType)
 
     // misc.dma <> dma
     // peripheral <> misc.peripheral
+    socMisc match {
+      case Some(m) =>
+        m.dma <> dma.get
+        peripheral.get <> m.peripheral
+        dontTouch(dma.get)
+        dontTouch(peripheral.get)
+      case None =>
+    }
+    
     memory <> misc.memory
 
     val io = IO(new Bundle {
@@ -250,9 +265,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     io.debug_reset := misc.module.debug_module_io.debugIO.ndreset
 
     // input
-    // dontTouch(dma)
     dontTouch(io)
-    // dontTouch(peripheral)
     dontTouch(memory)
     misc.module.ext_intrs := io.extIntrs
     misc.module.rtc_clock := io.rtc_clock
