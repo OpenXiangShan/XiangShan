@@ -1296,9 +1296,16 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     lsq.io.sbuffer(0).valid       -> lsq.io.sbuffer(0).bits
   ))
   vSegmentUnit.io.sbuffer.ready := sbuffer.io.in(0).ready
-  lsq.io.sbufferVecDifftestInfo <> sbuffer.io.vecDifftestInfo
   lsq.io.sqEmpty        <> sbuffer.io.sqempty
   dcache.io.force_write := lsq.io.force_write
+
+  // Initialize when unenabled difftest.
+  sbuffer.io.vecDifftestInfo    := DontCare
+  lsq.io.sbufferVecDifftestInfo := DontCare
+  if (env.EnableDifftest) {
+    lsq.io.sbufferVecDifftestInfo <> sbuffer.io.vecDifftestInfo
+  }
+
   // lsq.io.vecStoreRetire <> vsFlowQueue.io.sqRelease
   // lsq.io.vecWriteback.valid := vlWrapper.io.uopWriteback.fire &&
   //   vlWrapper.io.uopWriteback.bits.uop.vpu.lastUop

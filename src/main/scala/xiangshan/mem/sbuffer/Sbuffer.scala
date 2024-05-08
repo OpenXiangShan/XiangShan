@@ -869,6 +869,10 @@ class Sbuffer(implicit p: Parameters)
   *                     --------------                     *
   **********************************************************
   */
+  // Initialize when unenabled difftest.
+  for (i <- 0 until EnsbufferWidth) {
+    io.vecDifftestInfo(i) := DontCare
+  }
   if (env.EnableDifftest) {
     val VecMemFLOWMaxNumber = 16
 

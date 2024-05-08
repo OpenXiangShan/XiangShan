@@ -919,7 +919,13 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     }
   }
 
-  // Consistent with the logic above, only the vectore difftest required signal is separated from the rtl code
+
+  // Initialize when unenabled difftest.
+  for (i <- 0 until EnsbufferWidth) {
+    io.sbufferVecDifftestInfo(i) := DontCare
+  }
+  // Consistent with the logic above.
+  // Only the vector store difftest required signal is separated from the rtl code.
   if (env.EnableDifftest) {
     for (i <- 0 until EnsbufferWidth) {
       val ptr = rdataPtrExt(i).value
