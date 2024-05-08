@@ -422,8 +422,8 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   } // FTBBank
 
   //for fauftbCounter
-  val s0_close_ftb_req = WireInit(false.B)
-  val s1_close_ftb_req = RegInit(false.B)
+  val s0_close_ftb_req = RegInit(false.B)
+  val s1_close_ftb_req = RegEnable(s0_close_ftb_req, false.B, io.s0_fire(0))
   val s2_close_ftb_req = RegEnable(s1_close_ftb_req, false.B, io.s1_fire(0))
   val s2_fauftb_ftb_entry_dup = io.s1_fire.map(f => RegEnable(io.fauftb_entry_in, f))
   val s2_fauftb_ftb_entry_hit_dup = io.s1_fire.map(f => RegEnable(io.fauftb_entry_hit_in, f))
@@ -515,30 +515,27 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   }
 
   when((fauftb_ftb_entry_consistent_counter >= FTBCLOSE_THRESHOLD) && io.s0_fire(0)){
-    s1_close_ftb_req := true.B
+    s0_close_ftb_req := true.B
   }
 
-  val needReopen = s1_close_ftb_req && (ftb_false_hit || io.redirectFromIFU)
-  val needReopenReg = RegInit(false.B)
+  val needReopen = s0_close_ftb_req && (ftb_false_hit || io.redirectFromIFU)
+  // val needReopenReg = RegInit(false.B)
   //Clear counter during false_hit
-  when(needReopen && io.s1_fire(0)){
+  when(needReopen){
     fauftb_ftb_entry_consistent_counter := 0.U
-    s1_close_ftb_req := false.B
-  }.elsewhen(needReopenReg && io.s1_fire(0)){
-    fauftb_ftb_entry_consistent_counter := 0.U
-    s1_close_ftb_req := false.B
-    needReopenReg := false.B
-  }.elsewhen(needReopen && !io.s1_fire(0)){
-    needReopenReg := true.B
+    s0_close_ftb_req := false.B
   }
 
-  s0_close_ftb_req  := s1_close_ftb_req  && !(ftb_false_hit || io.redirectFromIFU || needReopenReg)
+  // s0_close_ftb_req  := s1_close_ftb_req
+  // s0_close_ftb_req  := s1_close_ftb_req  && !(ftb_false_hit || io.redirectFromIFU || needReopenReg)
+
+
   ftb_false_hit     := io.update.valid && io.update.bits.false_hit
 
   val s2_close_consistent = ftbentry_compare(s2_fauftb_ftb_entry_dup(0),s2_ftb_entry_dup(0)).reduce(_&&_)
   val s2_not_close_consistent = ftbentry_compare(s2_ftbBank_dup(0),s2_ftb_entry_dup(0)).reduce(_&&_)
 
-  when(s2_close_ftb_req &&  io.s2_fire(0)){
+  when(s2_close_ftb_req && io.s2_fire(0)){
     assert(s2_close_consistent, s"Entry inconsistency after ftb req is closed!")
   }.elsewhen(!s2_close_ftb_req &&  io.s2_fire(0)){
     assert(s2_not_close_consistent, s"Entry inconsistency after ftb req is not closed!")
