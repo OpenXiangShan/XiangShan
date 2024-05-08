@@ -247,7 +247,8 @@ class WithNKBL2
   n: Int,
   ways: Int = 8,
   inclusive: Boolean = true,
-  banks: Int = 1
+  banks: Int = 1,
+  tp: Boolean = true
 ) extends Config((site, here, up) => {
   case XSTileKey =>
     require(inclusive, "L2 must be inclusive")
@@ -268,7 +269,7 @@ class WithNKBL2
         )),
         reqField = Seq(utility.ReqSourceField()),
         echoField = Seq(huancun.DirtyField()),
-        prefetch = Some(coupledL2.prefetch.PrefetchReceiverParams()),
+        prefetch = Some(coupledL2.prefetch.PrefetchReceiverParams(tp = tp)),
         enablePerf = !site(DebugOptionsKey).FPGAPlatform,
         enableRollingDB = site(DebugOptionsKey).EnableRollingDB,
         enableMonitor = site(DebugOptionsKey).AlwaysBasicDB,
@@ -379,7 +380,7 @@ class KunminghuV2Config(n: Int = 1) extends Config(
     ++ new Config((site, here, up) => {
       case SoCParamsKey => up(SoCParamsKey).copy(L3CacheParamsOpt = None) // There will be no L3
     })
-    ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4)
+    ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4, tp = false)
     ++ new WithNKBL1D(64, ways = 4)
     ++ new BaseConfig(n)
 )
