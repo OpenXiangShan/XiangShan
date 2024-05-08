@@ -631,9 +631,9 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
 
     require(deq.bits.common.dataSources.size <= finalDataSources(i).size)
     deq.bits.common.dataSources.zip(finalDataSources(i)).foreach { case (sink, source) => sink := source}
-    deq.bits.common.l1ExuOH.foreach(_ := finalWakeUpL1ExuOH.get(i))
+    deq.bits.common.l1ExuOH.foreach(_.zip(finalWakeUpL1ExuOH.get(i)).foreach { case (sink, source) => sink := source})
     deq.bits.common.srcTimer.foreach(_ := DontCare)
-    deq.bits.common.loadDependency.foreach(_ := finalLoadDependency(i))
+    deq.bits.common.loadDependency.foreach(_.zip(finalLoadDependency(i)).foreach { case (sink, source) => sink := source})
     deq.bits.common.src := DontCare
     deq.bits.common.preDecode.foreach(_ := deqEntryVec(i).bits.payload.preDecodeInfo)
 
