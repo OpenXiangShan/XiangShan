@@ -71,6 +71,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   private val fpRdArbWinner: Seq2[MixedVec[Bool]] = fpRFReadArbiter.io.in.map(_.map(x => MixedVecInit(x.map(_.ready).toSeq)).toSeq).toSeq
   private val vfRdArbWinner: Seq2[MixedVec[Bool]] = vfRFReadArbiter.io.in.map(_.map(x => MixedVecInit(x.map(_.ready).toSeq)).toSeq).toSeq
   private val intWbNotBlock: Seq[MixedVec[Bool]] = intWbBusyArbiter.io.in.map(x => MixedVecInit(x.map(_.ready).toSeq)).toSeq
+  private val fpWbNotBlock: Seq[MixedVec[Bool]] = fpWbBusyArbiter.io.in.map(x => MixedVecInit(x.map(_.ready).toSeq)).toSeq
   private val vfWbNotBlock: Seq[MixedVec[Bool]] = vfWbBusyArbiter.io.in.map(x => MixedVecInit(x.map(_.ready).toSeq)).toSeq
 
   private val intRdNotBlock: Seq2[Bool] = intRdArbWinner.map(_.map(_.asUInt.andR))
@@ -394,8 +395,9 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       val s0 = fromIQ(i)(j) // s0
 
       val srcNotBlock = Wire(Bool())
-      srcNotBlock := s0.bits.common.dataSources.zip(intRdArbWinner(i)(j) zip vfRdArbWinner(i)(j)).map { case (source, win) =>
-        !source.readReg || win._1 && win._2
+      srcNotBlock := s0.bits.common.dataSources.zip(intRdArbWinner(i)(j) zip fpRdArbWinner(i)(j) zip vfRdArbWinner(i)(j)).map {
+        case (source, ((win_int, win_fp),win_vf)) =>
+        !source.readReg || win_int && win_fp && win_vf
       }.fold(true.B)(_ && _)
 //      if (fromIQ(i)(j).bits.exuParams.schdType.isInstanceOf[IntScheduler] && (fromIQ(i)(j).bits.exuParams.numRegSrc == 2)) {
 //        val src0VfBlock = s0.bits.common.dataSources(0).readReg && !vfRdArbWinner(i)(j)(0)
@@ -404,7 +406,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
 //        val src0IntBlock = (s0.bits.common.dataSources(0).readReg || s0.bits.common.dataSources(1).readReg) && !intRdArbWinner(i)(j)(0)
 //        srcNotBlock := !src0VfBlock && !src1VfBlock && !src1IntBlock && !src0IntBlock
 //      }
-      val notBlock = srcNotBlock && intWbNotBlock(i)(j) && vfWbNotBlock(i)(j)
+      val notBlock = srcNotBlock && intWbNotBlock(i)(j) && fpWbNotBlock(i)(j) && vfWbNotBlock(i)(j)
       val s1_flush = s0.bits.common.robIdx.needFlush(Seq(io.flush, RegNextWithEnable(io.flush)))
       val s1_cancel = og1FailedVec2(i)(j)
       val s0_cancel = Wire(Bool())
