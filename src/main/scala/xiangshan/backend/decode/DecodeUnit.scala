@@ -207,8 +207,9 @@ object XDecode extends DecodeConstants {
     // System, the immediate12 holds the CSR register.
 
     // CSR RO should be ahead of CSRRS and CSRRC, since decoder don't handle the inclusive relation-ship among the patterns.
-    CSRRS_RO -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.ro, SelImm.IMM_I, xWen = F, noSpec = T, blockBack = T),
-    CSRRC_RO -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.ro, SelImm.IMM_I, xWen = F, noSpec = T, blockBack = T),
+    CSRRS_RO -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.ro, SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
+    CSRRC_RO -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.ro, SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
+
     CSRRW   -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrt , SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
     CSRRS   -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.set , SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
     CSRRC   -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.clr , SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
