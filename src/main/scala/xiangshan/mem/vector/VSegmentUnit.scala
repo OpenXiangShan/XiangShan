@@ -94,7 +94,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   val exception_va      = WireInit(false.B)
   val exception_pa      = WireInit(false.B)
 
-  val maxSegIdx         = instMicroOp.vl
+  val maxSegIdx         = instMicroOp.vl - 1.U
   val maxNfields        = instMicroOp.uop.vpu.nf
 
   XSError(segmentIdx > maxSegIdx, s"segmentIdx > vl, something error!\n")
