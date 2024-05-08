@@ -302,9 +302,11 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     exceptionVec(loadAccessFault)  := exceptionVec(loadAccessFault) || pmp.ld
     exceptionVec(storeAccessFault) := exceptionVec(storeAccessFault) || pmp.st
 
-    instMicroOp.exceptionvaddr     := vaddr
-    instMicroOp.vl                 := segmentIdx // for exception
-    instMicroOp.vstart             := segmentIdx // for exception
+    when(exception_va || exception_pa){
+      instMicroOp.exceptionvaddr     := vaddr
+      instMicroOp.vl                 := segmentIdx // for exception
+      instMicroOp.vstart             := segmentIdx // for exception
+    }
   }
 
   /**
@@ -447,6 +449,9 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   /*************************************************************************
    *                            dequeue logic
    *************************************************************************/
+  val uopIdxInField = GenUopIdxInField(instType, issueEmul, issueLmul, uopIdx(deqPtr.value))
+  val vdIdxInField = GenVdIdxInField(instType, issueEmul, issueLmul, uopIdxInField) // for merge oldvd
+
   when(stateNext === s_idle){
     instMicroOp.valid := false.B
   }
@@ -454,7 +459,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.uopwriteback.bits.uop            := instMicroOp.uop
   io.uopwriteback.bits.mask.get       := instMicroOp.mask
   io.uopwriteback.bits.data           := data(deqPtr.value)
-  io.uopwriteback.bits.vdIdx.get      := uopIdx(deqPtr.value)
+  io.uopwriteback.bits.vdIdx.get      := vdIdxInField
   io.uopwriteback.bits.uop.vpu.vl     := instMicroOp.vl
   io.uopwriteback.bits.uop.vpu.vstart := instMicroOp.vstart
   io.uopwriteback.bits.uop.vpu.vmask  := instMicroOp.mask
