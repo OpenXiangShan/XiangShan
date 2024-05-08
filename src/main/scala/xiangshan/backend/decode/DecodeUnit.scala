@@ -205,6 +205,10 @@ object XDecode extends DecodeConstants {
     BLTU    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.brh, BRUOpType.bltu  , SelImm.IMM_SB          ),
 
     // System, the immediate12 holds the CSR register.
+
+    // CSR RO should be ahead of CSRRS and CSRRC, since decoder don't handle the inclusive relation-ship among the patterns.
+    CSRRS_RO -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.ro, SelImm.IMM_I, xWen = F, noSpec = T, blockBack = T),
+    CSRRC_RO -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.ro, SelImm.IMM_I, xWen = F, noSpec = T, blockBack = T),
     CSRRW   -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrt , SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
     CSRRS   -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.set , SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
     CSRRC   -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.clr , SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
@@ -212,9 +216,6 @@ object XDecode extends DecodeConstants {
     CSRRWI  -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrti, SelImm.IMM_Z, xWen = T, noSpec = T, blockBack = T),
     CSRRSI  -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.seti, SelImm.IMM_Z, xWen = T, noSpec = T, blockBack = T),
     CSRRCI  -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.clri, SelImm.IMM_Z, xWen = T, noSpec = T, blockBack = T),
-
-    CSRRS_RO-> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.ro  , SelImm.IMM_I, xWen = F, noSpec = T, blockBack = T),
-    CSRRC_RO-> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.ro  , SelImm.IMM_I, xWen = F, noSpec = T, blockBack = T),
 
     EBREAK  -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.jmp, SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
     ECALL   -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.jmp, SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
