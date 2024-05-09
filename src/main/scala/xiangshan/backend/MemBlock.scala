@@ -516,11 +516,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   })
 
   // ptw
-  val sfence = Wire(io.ooo_to_mem.sfence.cloneType)
-  val (_a, _b) = DelayNWithValid(io.ooo_to_mem.sfence.bits, io.ooo_to_mem.sfence.valid, 2)
-  sfence.valid := _a
-  sfence.bits := _b
-  val tlbcsr = GatedRegNextN(io.ooo_to_mem.tlbCsr, 2) // FIXME: use GatedRegNextN need a long time
+  val sfence = RegNext(RegNext(io.ooo_to_mem.sfence))
+  val tlbcsr = RegNext(RegNext(io.ooo_to_mem.tlbCsr))
   private val ptw = outer.ptw.module
   private val ptw_to_l2_buffer = outer.ptw_to_l2_buffer.module
   ptw.io.hartId := io.hartId

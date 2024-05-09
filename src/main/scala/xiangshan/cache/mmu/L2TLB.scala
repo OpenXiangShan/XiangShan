@@ -78,7 +78,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   val sfence_tmp = DelayN(io.sfence, 1)
   val csr_tmp    = DelayN(io.csr.tlb, 1)
-  val sfence_dup = Seq.fill(9)(RegEnable(sfence_tmp, sfence_tmp.valid))
+  val sfence_dup = Seq.fill(9)(RegNext(sfence_tmp))
   val csr_dup = Seq.fill(8)(RegNext(csr_tmp)) // TODO: add csr_modified?
   val satp   = csr_dup(0).satp
   val vsatp  = csr_dup(0).vsatp
