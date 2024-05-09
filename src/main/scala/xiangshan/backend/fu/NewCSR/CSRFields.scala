@@ -329,6 +329,8 @@ trait WARLApply { self: CSREnum =>
 
   def apply(msb: Int, lsb: Int, wfn: CSRWfnType): CSREnumType = self
     .apply(WARLType(wfn))(msb, lsb)(this)
+
+  def apply(bit: Int, wfn: CSRWfnType): CSREnumType = apply(bit, bit, wfn)
 }
 
 trait WLRLApply { self: CSREnum =>
