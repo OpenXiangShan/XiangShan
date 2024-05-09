@@ -166,14 +166,17 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     stateNext := Mux(!io.dtlb.resp.bits.miss && io.dtlb.resp.fire, s_pm, s_tlb_req)
 
   }.elsewhen(state === s_pm){
-    stateNext := Mux(exception_pa || exception_va, s_finish, s_cache_req)
+    /* if is vStore, send data to sbuffer, so don't need query dcache */
+    stateNext := Mux(exception_pa || exception_va,
+                     s_finish,
+                     Mux(FuType.isVLoad(instMicroOp.uop.fuType), s_cache_req, s_send_data))
 
   }.elsewhen(state === s_cache_req){
-    stateNext := Mux(io.wdcache.req.fire || io.rdcache.req.fire, s_cache_resp, s_cache_req)
+    stateNext := Mux(io.rdcache.req.fire, s_cache_resp, s_cache_req)
 
   }.elsewhen(state === s_cache_resp){
-    when(io.wdcache.resp.fire || io.rdcache.resp.fire) {
-      when(io.wdcache.resp.bits.miss && io.rdcache.resp.bits.miss) {
+    when(io.rdcache.resp.fire) {
+      when(io.rdcache.resp.bits.miss) {
         stateNext := s_cache_req
       }.otherwise {
         stateNext := Mux(FuType.isVLoad(instMicroOp.uop.fuType), s_latch_and_merge_data, s_send_data)
@@ -360,7 +363,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   val wmask     = genVWmask(vaddr, alignedType(1, 0)) & mask(segmentIdx)
 
   /**
-   * rdcache req
+   * rdcache req, write request don't need to query dcache, because we write element to sbuffer
    */
   io.rdcache.req                    := DontCare
   io.rdcache.req.valid              := state === s_cache_req && FuType.isVLoad(fuType)
@@ -386,19 +389,6 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   }
   io.rdcache.replacementUpdated     := false.B
   io.rdcache.is128Req               := false.B
-
-  /**
-  * wdcache req
-  * */
-  io.wdcache.req                    := DontCare
-  io.wdcache.req.valid              := state === s_cache_req && FuType.isVStore(fuType)
-  io.wdcache.req.bits.cmd           := MemoryOpConstants.M_PFW
-  io.wdcache.req.bits.vaddr         := vaddr
-  io.wdcache.resp.ready             := true.B
-  io.wdcache.s1_paddr               := instMicroOp.paddr
-  io.wdcache.s1_kill                := false.B
-  io.wdcache.s2_kill                := false.B
-  io.wdcache.s2_pc                  := instMicroOp.uop.pc
 
 
   /**
