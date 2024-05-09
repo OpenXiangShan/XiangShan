@@ -36,7 +36,7 @@ SPLIT_VERILOG = ./scripts/split_verilog.sh
 IMAGE  ?= temp
 CONFIG ?= DefaultConfig
 NUM_CORES ?= 1
-MFC ?= 0
+MFC ?= 1
 
 
 ifeq ($(MAKECMDGOALS),)
