@@ -31,7 +31,10 @@ import xiangshan.backend.ctrlblock.DebugLsInfoBundle
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
 import xiangshan.cache.{DcacheStoreRequestIO, DCacheStoreIO, MemoryOpConstants, HasDCacheParameters, StorePrefetchReq}
 
-class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameters {
+class StoreUnit(implicit p: Parameters) extends XSModule
+  with HasDCacheParameters
+  with HasVLSUParameters
+  {
   val io = IO(new Bundle() {
     val redirect        = Flipped(ValidIO(new Redirect))
     val stin            = Flipped(Decoupled(new MemExuInput))
@@ -85,6 +88,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   val s0_kill         = s0_uop.robIdx.needFlush(io.redirect)
   val s0_can_go       = s1_ready
   val s0_fire         = s0_valid && !s0_kill && s0_can_go
+  val s0_is128bit     = is128Bit(s0_vecstin.alignedType)
   // vector
   val s0_vecActive    = !s0_use_flow_vec || s0_vecstin.vecActive
   // val s0_flowPtr      = s0_vecstin.flowPtr
@@ -163,7 +167,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   s0_out.isHWPrefetch := s0_use_flow_prf
   s0_out.wlineflag    := s0_wlineflag
   s0_out.isvec        := s0_use_flow_vec
-  s0_out.is128bit     := false.B
+  s0_out.is128bit     := s0_is128bit
   s0_out.vecActive    := s0_vecActive
   s0_out.usSecondInv  := s0_secondInv
   s0_out.elemIdx      := s0_elemIdx
@@ -229,6 +233,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   io.stld_nuke_query.bits.robIdx := s1_in.uop.robIdx
   io.stld_nuke_query.bits.paddr  := s1_paddr
   io.stld_nuke_query.bits.mask   := s1_in.mask
+  io.stld_nuke_query.bits.matchLine := s1_in.isvec && s1_in.is128bit
 
   // issue
   io.issue.valid := s1_valid && !s1_tlb_miss && !s1_in.isHWPrefetch && !s1_isvec

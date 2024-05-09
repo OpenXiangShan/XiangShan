@@ -802,9 +802,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.lsq.forward.pc        := s1_in.uop.pc // FIXME: remove it
 
   // st-ld violation query
-  val s1_nuke_paddr_match = VecInit((0 until StorePipelineWidth).map(w => {Mux(s1_in.isvec && s1_in.is128bit,
+    // if store unit is 128-bits memory access, need match 128-bit
+  private val s1_isMatch128 = io.stld_nuke_query.map(x => (x.bits.matchLine || (s1_in.isvec && s1_in.is128bit)))
+  val s1_nuke_paddr_match = VecInit((0 until StorePipelineWidth).zip(s1_isMatch128).map{case (w, s) => {Mux(s,
     s1_paddr_dup_lsu(PAddrBits-1, 4) === io.stld_nuke_query(w).bits.paddr(PAddrBits-1, 4),
-    s1_paddr_dup_lsu(PAddrBits-1, 3) === io.stld_nuke_query(w).bits.paddr(PAddrBits-1, 3))}))
+    s1_paddr_dup_lsu(PAddrBits-1, 3) === io.stld_nuke_query(w).bits.paddr(PAddrBits-1, 3))}})
   val s1_nuke = VecInit((0 until StorePipelineWidth).map(w => {
                        io.stld_nuke_query(w).valid && // query valid
                        isAfter(s1_in.uop.robIdx, io.stld_nuke_query(w).bits.robIdx) && // older store
@@ -1001,9 +1003,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   //  2. Load instruction is younger than requestors(store instructions).
   //  3. Physical address match.
   //  4. Data contains.
-  val s2_nuke_paddr_match = VecInit((0 until StorePipelineWidth).map(w => {Mux(s2_in.isvec && s2_in.is128bit,
+  private val s2_isMatch128 = io.stld_nuke_query.map(x => (x.bits.matchLine || (s2_in.isvec && s2_in.is128bit)))
+  val s2_nuke_paddr_match = VecInit((0 until StorePipelineWidth).zip(s2_isMatch128).map{case (w, s) => {Mux(s,
     s2_in.paddr(PAddrBits-1, 4) === io.stld_nuke_query(w).bits.paddr(PAddrBits-1, 4),
-    s2_in.paddr(PAddrBits-1, 3) === io.stld_nuke_query(w).bits.paddr(PAddrBits-1, 3))}))
+    s2_in.paddr(PAddrBits-1, 3) === io.stld_nuke_query(w).bits.paddr(PAddrBits-1, 3))}})
   val s2_nuke          = VecInit((0 until StorePipelineWidth).map(w => {
                           io.stld_nuke_query(w).valid && // query valid
                           isAfter(s2_in.uop.robIdx, io.stld_nuke_query(w).bits.robIdx) && // older store

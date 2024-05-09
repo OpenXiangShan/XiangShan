@@ -359,6 +359,9 @@ class StoreNukeQueryIO(implicit p: Parameters) extends XSBundle {
 
   //  mask: requestor's (a store instruction) data width mask for match logic.
   val mask = UInt((VLEN/8).W)
+
+  // matchLine: if store is vector 128-bits, load unit need to compare 128-bits vaddr.
+  val matchLine = Bool()
 }
 
 // Store byte valid mask write bundle
