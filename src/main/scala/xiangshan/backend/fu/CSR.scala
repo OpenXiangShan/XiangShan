@@ -953,7 +953,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     println(f"$addr%#03x ${mapping(addr)._1}")
   }
 
-  val vs_s_csr_map = Map(
+  val vs_s_csr_map = List(
     Sstatus.U  -> Vsstatus.U,
     Sie.U      -> Vsie.U,
     Stvec.U    -> Vstvec.U,

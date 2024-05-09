@@ -4,8 +4,10 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util.log2Ceil
 import xiangshan.backend.ctrlblock.{DebugLsInfo, DebugMdpInfo}
-import xiangshan.cache.DCacheBundle
+import xiangshan.cache.{DCacheBundle, HasDCacheParameters}
 import xiangshan.backend.fu.FuType
+import utility.MemReqSource
+import xiangshan.mem.prefetch.HasL1PrefetchHelper
 
 /** Mem */
 class LoadMissEntry(implicit p: Parameters) extends DCacheBundle {
@@ -48,4 +50,25 @@ class LoadInfoEntry(implicit p: Parameters) extends XSBundle{
   val cacheMiss = Bool()
   val tlbQueryLatency = UInt(64.W)
   val exeLatency = UInt(64.W)
+}
+
+class StreamPFTraceInEntry(implicit p: Parameters) extends XSBundle with HasL1PrefetchHelper{
+  val TriggerPC = UInt(VAddrBits.W)
+  val TriggerVaddr = UInt(VAddrBits.W)
+  val PFVaddr = UInt(VAddrBits.W)
+  val PFSink = UInt(SINK_BITS.W)
+}
+
+class StreamTrainTraceEntry(implicit p: Parameters) extends XSBundle with HasDCacheParameters{
+  val Type = UInt(MemReqSource.reqSourceBits.W)
+  val OldAddr = UInt(VAddrBits.W)
+  val CurAddr = UInt(VAddrBits.W)
+  val Offset = UInt(32.W)
+  val Score = UInt(32.W)
+  val Miss = Bool()
+}
+
+class StreamPFTraceOutEntry(implicit p: Parameters) extends XSBundle with HasL1PrefetchHelper{
+  val PFVaddr = UInt(VAddrBits.W)
+  val PFSink = UInt(SINK_BITS.W)
 }
