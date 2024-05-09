@@ -203,11 +203,13 @@ class ITTageTable
   // def getUnhashedIdx(pc: UInt) = pc >> (instOffsetBits+log2Ceil(TageBanks))
   def getUnhashedIdx(pc: UInt): UInt = pc >> instOffsetBits
 
+  val s0_valid = io.req.valid
   val s0_pc = io.req.bits.pc
   val s0_unhashed_idx = getUnhashedIdx(io.req.bits.pc)
 
   val (s0_idx, s0_tag) = compute_tag_and_hash(s0_unhashed_idx, io.req.bits.folded_hist)
   val (s1_idx, s1_tag) = (RegEnable(s0_idx, io.req.fire), RegEnable(s0_tag, io.req.fire))
+  val s1_valid = RegNext(s0_valid)
   val s0_bank_req_1h = get_bank_mask(s0_idx)
   val s1_bank_req_1h = RegEnable(s0_bank_req_1h, io.req.fire)
 
@@ -230,7 +232,7 @@ class ITTageTable
   val s1_req_rhit = resp_selected.valid && resp_selected.tag === s1_tag
   val resp_invalid_by_write = Wire(Bool())
 
-  io.resp.valid := (if (tagLen != 0) s1_req_rhit && !resp_invalid_by_write else true.B) // && s1_mask(b)
+  io.resp.valid := (if (tagLen != 0) s1_req_rhit && !resp_invalid_by_write else true.B) && s1_valid
   io.resp.bits.ctr := resp_selected.ctr
   io.resp.bits.u := us.io.rdata(0)
   io.resp.bits.target := resp_selected.target
@@ -357,9 +359,6 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     case ((nRows, histLen, tagLen), i) =>
       // val t = if(EnableBPD) Module(new TageTable(nRows, histLen, tagLen, UBitPeriod)) else Module(new FakeTageTable)
       val t = Module(new ITTageTable(nRows, histLen, tagLen, UBitPeriod, i))
-      t.io.req.valid := io.s0_fire(3)
-      t.io.req.bits.pc := s0_pc_dup(3)
-      t.io.req.bits.folded_hist := io.in.bits.folded_hist(3)
       t
   }
   override def getFoldedHistoryInfo = Some(tables.map(_.getFoldedHistoryInfo).reduce(_++_))
@@ -367,6 +366,9 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
   val useAltOnNa = RegInit((1 << (UAONA_bits-1)).U(UAONA_bits.W))
   val tickCtr = RegInit(0.U(TickWidth.W))
+
+  // uftb miss or hasIndirect
+  val s0_isIndirect = !io.in.bits.resp_in(0).s0_uftbHit || io.in.bits.resp_in(0).s0_uftbHasIndirect
 
   // Keep the table responses to process in s2
 
@@ -432,6 +434,16 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
   // val updateTageMisPreds = VecInit((0 until numBr).map(i => updateMetas(i).taken =/= u.takens(i)))
   val updateMisPred = update.mispred_mask(numBr) // the last one indicates jmp results
+
+
+  // Predict
+  tables.map { t => {
+      t.io.req.valid := io.s0_fire(3) && s0_isIndirect
+      t.io.req.bits.pc := s0_pc_dup(3)
+      t.io.req.bits.folded_hist := io.in.bits.folded_hist(3)
+    }
+  }
+
   // access tag tables and output meta info
   class ITTageTableInfo(implicit p: Parameters) extends ITTageResp {
     val tableIdx = UInt(log2Ceil(ITTageNTables).W)

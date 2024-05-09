@@ -43,9 +43,12 @@ class FauFTBEntry(implicit p: Parameters) extends FTBEntry()(p) {}
 
 class FauFTBWay(implicit p: Parameters) extends XSModule with FauFTBParams {
   val io = IO(new Bundle{
-    val req_tag = Input(UInt(tagSize.W))
-    val resp = Output(new FauFTBEntry)
-    val resp_hit = Output(Bool())
+    val s0_req_tag = Input(UInt(tagSize.W))
+    val s0_resp = Output(new FauFTBEntry)
+    val s0_resp_hit = Output(Bool())
+    val s1_req_tag = Input(UInt(tagSize.W))
+    val s1_resp = Output(new FauFTBEntry)
+    val s1_resp_hit = Output(Bool())
     val update_req_tag = Input(UInt(tagSize.W))
     val update_hit = Output(Bool())
     val write_valid = Input(Bool())
@@ -58,8 +61,11 @@ class FauFTBWay(implicit p: Parameters) extends XSModule with FauFTBParams {
   val tag = Reg(UInt(tagSize.W))
   val valid = RegInit(false.B)
 
-  io.resp := data
-  io.resp_hit := tag === io.req_tag && valid
+  io.s0_resp := data
+  io.s0_resp_hit := tag ===  io.s0_req_tag && valid
+  io.s1_resp := data
+  io.s1_resp_hit := tag === io.s1_req_tag && valid
+
   // write bypass to avoid multiple hit
   io.update_hit := ((tag === io.update_req_tag) && valid) ||
                    ((io.write_tag === io.update_req_tag) && io.write_valid)
@@ -94,16 +100,26 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   val replacer_touch_ways = Wire(Vec(2, Valid(UInt(log2Ceil(numWays).W))))
 
 
-  // pred req
-  ways.foreach(_.io.req_tag := getTag(s1_pc_dup(0)))
+  // s0 pred req
+  ways.foreach(_.io.s0_req_tag := getTag(s0_pc_dup(0)))
 
-  // pred resp
-  val s1_hit_oh = VecInit(ways.map(_.io.resp_hit)).asUInt
+  // s0 pred resp
+  val s0_hit_oh = VecInit(ways.map(_.io.s0_resp_hit)).asUInt
+  val s0_hit_data = Mux1H(s0_hit_oh, ways.map(_.io.s0_resp))
+  io.out.s0_uftbHit := s0_hit_oh.orR
+  io.out.s0_uftbHasIndirect := s0_hit_data.jmpValid
+
+
+  // s1 pred req
+  ways.foreach(_.io.s1_req_tag := getTag(s1_pc_dup(0)))
+
+  // s1 pred resp
+  val s1_hit_oh = VecInit(ways.map(_.io.s1_resp_hit)).asUInt
   val s1_hit = s1_hit_oh.orR
   val s1_hit_way = OHToUInt(s1_hit_oh)
   val s1_possible_full_preds = Wire(Vec(numWays, new FullBranchPrediction))
 
-  val s1_all_entries = VecInit(ways.map(_.io.resp))
+  val s1_all_entries = VecInit(ways.map(_.io.s1_resp))
   for (c & fp & e <- ctrs zip s1_possible_full_preds zip s1_all_entries) {
     fp.hit := DontCare
     fp.multiHit := false.B

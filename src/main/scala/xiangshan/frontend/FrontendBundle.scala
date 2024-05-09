@@ -524,6 +524,9 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
 
   def taken = br_taken_mask.reduce(_||_) || slot_valids.last // || (is_jal || is_jalr)
 
+  // Last slot contains a indirect branch
+  def hasIndirect = slot_valids.last && !is_br_sharing
+
   def fromFtbEntry(
                     entry: FTBEntry,
                     pc: UInt,
@@ -595,10 +598,12 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
 }
 
 class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUConst {
-  // val valids = Vec(3, Bool())
   val s1 = new BranchPredictionBundle
   val s2 = new BranchPredictionBundle
   val s3 = new BranchPredictionBundle
+
+  val s0_uftbHit = Bool()
+  val s0_uftbHasIndirect = Bool()
 
   val last_stage_meta = UInt(MaxMetaLength.W)
   val last_stage_spec_info = new Ftq_Redirect_SRAMEntry
