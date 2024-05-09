@@ -54,7 +54,7 @@ class IfuToBackendIO(implicit p:Parameters) extends XSBundle {
   val gpaddrMem_waddr = Output(UInt(log2Ceil(FtqSize).W)) // Ftq Ptr
   // 2 gpaddrs, correspond to startAddr & nextLineAddr in bundle FtqICacheInfo
   // TODO: avoid cross page entry in Ftq
-  val gpaddrMem_wdata = Output(Vec(2, UInt(GPAddrBits.W)))
+  val gpaddrMem_wdata = Output(UInt(GPAddrBits.W))
 }
 
 class FtqInterface(implicit p: Parameters) extends XSBundle {
@@ -369,7 +369,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f2_except_af    = VecInit((0 until PortNumber).map(i => fromICache(i).bits.tlbExcp.accessFault))
   // paddr and gpaddr of [startAddr, nextLineAddr]
   val f2_paddrs       = VecInit((0 until PortNumber).map(i => fromICache(i).bits.paddr))
-  val f2_gpaddrs      = VecInit((0 until PortNumber).map(i => fromICache(i).bits.gpaddr))
+  // for crossGuestPageFault
+  val f2_gpaddrs_tmp  = VecInit((0 until PortNumber).map(i => fromICache(i).bits.gpaddr))
+  val f2_gpaddrs      = VecInit((0 until PortNumber).map(i => if(i == 0) Mux(fromICache(i).bits.tlbExcp.guestPageFault, f2_gpaddrs_tmp(i), (f2_gpaddrs_tmp(i + 1) - (1 << (blockOffBits)).U)) else f2_gpaddrs_tmp(i)))
   val f2_mmio         = fromICache(0).bits.tlbExcp.mmio &&
     !fromICache(0).bits.tlbExcp.accessFault &&
     !fromICache(0).bits.tlbExcp.pageFault   &&
@@ -761,16 +763,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
   }
 
   /** to backend */
-  val f3_gpaddrsFix = VecInit((0 until PortNumber).map(i => 
-    if(i == 0) 
-      Mux(f3_crossGuestPageFault(i), f3_gpaddrs(i + 1), f3_gpaddrs(i)) 
-    else
-      f3_gpaddrs(i)
-    ))
-
   io.toBackend.gpaddrMem_wen   := f3_valid && (!f3_req_is_mmio || f3_mmio_can_go) && !f3_flush // same as toIbuffer
   io.toBackend.gpaddrMem_waddr := f3_ftq_req.ftqIdx.value
-  io.toBackend.gpaddrMem_wdata := f3_gpaddrsFix
+  io.toBackend.gpaddrMem_wdata := f3_gpaddrs(0)
 
 
   //Write back to Ftq
