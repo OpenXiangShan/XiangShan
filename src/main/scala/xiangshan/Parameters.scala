@@ -482,30 +482,30 @@ trait HasXSParameter {
 
   implicit val p: Parameters
 
-  val PAddrBits = p(SoCParamsKey).PAddrBits // PAddrBits is Phyical Memory addr bits
-  val NodeIDWidth = p(SoCParamsKey).NodeIDWidth // NodeID width among NoC
+  def PAddrBits = p(SoCParamsKey).PAddrBits // PAddrBits is Phyical Memory addr bits
+  def NodeIDWidth = p(SoCParamsKey).NodeIDWidth // NodeID width among NoC
 
-  val coreParams = p(XSCoreParamsKey)
-  val env = p(DebugOptionsKey)
+  def coreParams = p(XSCoreParamsKey)
+  def env = p(DebugOptionsKey)
 
-  val XLEN = coreParams.XLEN
-  val VLEN = coreParams.VLEN
-  val ELEN = coreParams.ELEN
-  val HSXLEN = coreParams.HSXLEN
+  def XLEN = coreParams.XLEN
+  def VLEN = coreParams.VLEN
+  def ELEN = coreParams.ELEN
+  def HSXLEN = coreParams.HSXLEN
   val minFLen = 32
   val fLen = 64
-  val hartIdLen = p(MaxHartIdBits)
-  def xLen = XLEN
+  def hartIdLen = p(MaxHartIdBits)
+  val xLen = XLEN
 
-  val HasMExtension = coreParams.HasMExtension
-  val HasCExtension = coreParams.HasCExtension
-  val HasHExtension = coreParams.HasHExtension
-  val HasDiv = coreParams.HasDiv
-  val HasIcache = coreParams.HasICache
-  val HasDcache = coreParams.HasDCache
-  val AddrBits = coreParams.AddrBits // AddrBits is used in some cases
-  val GPAddrBits = coreParams.GPAddrBits
-  val VAddrBits = {
+  def HasMExtension = coreParams.HasMExtension
+  def HasCExtension = coreParams.HasCExtension
+  def HasHExtension = coreParams.HasHExtension
+  def HasDiv = coreParams.HasDiv
+  def HasIcache = coreParams.HasICache
+  def HasDcache = coreParams.HasDCache
+  def AddrBits = coreParams.AddrBits // AddrBits is used in some cases
+  def GPAddrBits = coreParams.GPAddrBits
+  def VAddrBits = {
     if(HasHExtension){
       coreParams.GPAddrBits
     }else{
@@ -513,55 +513,55 @@ trait HasXSParameter {
     }
   } // VAddrBits is Virtual Memory addr bits
 
-  val AsidLength = coreParams.AsidLength
-  val VmidLength = coreParams.VmidLength
-  val ReSelectLen = coreParams.ReSelectLen
-  val AddrBytes = AddrBits / 8 // unused
-  val DataBits = XLEN
-  val DataBytes = DataBits / 8
-  val VDataBytes = VLEN / 8
-  val HasFPU = coreParams.HasFPU
-  val HasVPU = coreParams.HasVPU
-  val HasCustomCSRCacheOp = coreParams.HasCustomCSRCacheOp
-  val FetchWidth = coreParams.FetchWidth
-  val PredictWidth = FetchWidth * (if (HasCExtension) 2 else 1)
-  val EnableBPU = coreParams.EnableBPU
-  val EnableBPD = coreParams.EnableBPD // enable backing predictor(like Tage) in BPUStage3
-  val EnableRAS = coreParams.EnableRAS
-  val EnableLB = coreParams.EnableLB
-  val EnableLoop = coreParams.EnableLoop
-  val EnableSC = coreParams.EnableSC
-  val EnbaleTlbDebug = coreParams.EnbaleTlbDebug
-  val HistoryLength = coreParams.HistoryLength
-  val EnableGHistDiff = coreParams.EnableGHistDiff
-  val EnableCommitGHistDiff = coreParams.EnableCommitGHistDiff
-  val EnableClockGate = coreParams.EnableClockGate
-  val UbtbGHRLength = coreParams.UbtbGHRLength
-  val UbtbSize = coreParams.UbtbSize
-  val EnableFauFTB = coreParams.EnableFauFTB
-  val FtbSize = coreParams.FtbSize
-  val FtbWays = coreParams.FtbWays
-  val RasSize = coreParams.RasSize
-  val RasSpecSize = coreParams.RasSpecSize
-  val RasCtrSize = coreParams.RasCtrSize
+  def AsidLength = coreParams.AsidLength
+  def VmidLength = coreParams.VmidLength
+  def ReSelectLen = coreParams.ReSelectLen
+  def AddrBytes = AddrBits / 8 // unused
+  def DataBits = XLEN
+  def DataBytes = DataBits / 8
+  def VDataBytes = VLEN / 8
+  def HasFPU = coreParams.HasFPU
+  def HasVPU = coreParams.HasVPU
+  def HasCustomCSRCacheOp = coreParams.HasCustomCSRCacheOp
+  def FetchWidth = coreParams.FetchWidth
+  def PredictWidth = FetchWidth * (if (HasCExtension) 2 else 1)
+  def EnableBPU = coreParams.EnableBPU
+  def EnableBPD = coreParams.EnableBPD // enable backing predictor(like Tage) in BPUStage3
+  def EnableRAS = coreParams.EnableRAS
+  def EnableLB = coreParams.EnableLB
+  def EnableLoop = coreParams.EnableLoop
+  def EnableSC = coreParams.EnableSC
+  def EnbaleTlbDebug = coreParams.EnbaleTlbDebug
+  def HistoryLength = coreParams.HistoryLength
+  def EnableGHistDiff = coreParams.EnableGHistDiff
+  def EnableCommitGHistDiff = coreParams.EnableCommitGHistDiff
+  def EnableClockGate = coreParams.EnableClockGate
+  def UbtbGHRLength = coreParams.UbtbGHRLength
+  def UbtbSize = coreParams.UbtbSize
+  def EnableFauFTB = coreParams.EnableFauFTB
+  def FtbSize = coreParams.FtbSize
+  def FtbWays = coreParams.FtbWays
+  def RasSize = coreParams.RasSize
+  def RasSpecSize = coreParams.RasSpecSize
+  def RasCtrSize = coreParams.RasCtrSize
 
   def getBPDComponents(resp_in: BranchPredictionResp, p: Parameters) = {
     coreParams.branchPredictor(resp_in, p)
   }
-  val numBr = coreParams.numBr
-  val TageTableInfos = coreParams.TageTableInfos
-  val TageBanks = coreParams.numBr
-  val SCNRows = coreParams.SCNRows
-  val SCCtrBits = coreParams.SCCtrBits
-  val SCHistLens = coreParams.SCHistLens
-  val SCNTables = coreParams.SCNTables
+  def numBr = coreParams.numBr
+  def TageTableInfos = coreParams.TageTableInfos
+  def TageBanks = coreParams.numBr
+  def SCNRows = coreParams.SCNRows
+  def SCCtrBits = coreParams.SCCtrBits
+  def SCHistLens = coreParams.SCHistLens
+  def SCNTables = coreParams.SCNTables
 
-  val SCTableInfos = Seq.fill(SCNTables)((SCNRows, SCCtrBits)) zip SCHistLens map {
+  def SCTableInfos = Seq.fill(SCNTables)((SCNRows, SCCtrBits)) zip SCHistLens map {
     case ((n, cb), h) => (n, cb, h)
   }
-  val ITTageTableInfos = coreParams.ITTageTableInfos
+  def ITTageTableInfos = coreParams.ITTageTableInfos
   type FoldedHistoryInfo = Tuple2[Int, Int]
-  val foldedGHistInfos =
+  def foldedGHistInfos =
     (TageTableInfos.map{ case (nRows, h, t) =>
       if (h > 0)
         Set((h, min(log2Ceil(nRows/numBr), h)), (h, min(h, t)), (h, min(h, t-1)))
@@ -585,147 +585,147 @@ trait HasXSParameter {
 
 
 
-  val CacheLineSize = coreParams.CacheLineSize
-  val CacheLineHalfWord = CacheLineSize / 16
-  val ExtHistoryLength = HistoryLength + 64
-  val ICacheECCForceError = coreParams.ICacheECCForceError
-  val IBufSize = coreParams.IBufSize
-  val IBufNBank = coreParams.IBufNBank
-  val backendParams: BackendParams = coreParams.backendParams
-  val DecodeWidth = coreParams.DecodeWidth
-  val RenameWidth = coreParams.RenameWidth
-  val CommitWidth = coreParams.CommitWidth
-  val RobCommitWidth = coreParams.RobCommitWidth
-  val RabCommitWidth = coreParams.RabCommitWidth
-  val MaxUopSize = coreParams.MaxUopSize
-  val EnableRenameSnapshot = coreParams.EnableRenameSnapshot
-  val RenameSnapshotNum = coreParams.RenameSnapshotNum
-  val FtqSize = coreParams.FtqSize
-  val EnableLoadFastWakeUp = coreParams.EnableLoadFastWakeUp
-  val IntLogicRegs = coreParams.IntLogicRegs
-  val FpLogicRegs = coreParams.FpLogicRegs
-  val VecLogicRegs = coreParams.VecLogicRegs
-  val VCONFIG_IDX = coreParams.VCONFIG_IDX
-  val IntPhyRegs = coreParams.intPreg.numEntries
-  val VfPhyRegs = coreParams.vfPreg.numEntries
-  val MaxPhyPregs = IntPhyRegs max VfPhyRegs
-  val PhyRegIdxWidth = log2Up(IntPhyRegs) max log2Up(VfPhyRegs)
-  val RobSize = coreParams.RobSize
-  val RabSize = coreParams.RabSize
-  val VTypeBufferSize = coreParams.VTypeBufferSize
-  val IntRefCounterWidth = log2Ceil(RobSize)
-  val LSQEnqWidth = coreParams.dpParams.LsDqDeqWidth
-  val LSQLdEnqWidth = LSQEnqWidth min backendParams.numLoadDp
-  val LSQStEnqWidth = LSQEnqWidth min backendParams.numStoreDp
-  val VirtualLoadQueueSize = coreParams.VirtualLoadQueueSize
-  val LoadQueueRARSize = coreParams.LoadQueueRARSize
-  val LoadQueueRAWSize = coreParams.LoadQueueRAWSize
-  val RollbackGroupSize = coreParams.RollbackGroupSize
-  val LoadQueueReplaySize = coreParams.LoadQueueReplaySize
-  val LoadUncacheBufferSize = coreParams.LoadUncacheBufferSize
-  val LoadQueueNWriteBanks = coreParams.LoadQueueNWriteBanks
-  val StoreQueueSize = coreParams.StoreQueueSize
-  val StoreQueueNWriteBanks = coreParams.StoreQueueNWriteBanks
-  val StoreQueueForwardWithMask = coreParams.StoreQueueForwardWithMask
-  val VlsQueueSize = coreParams.VlsQueueSize
-  val dpParams = coreParams.dpParams
+  def CacheLineSize = coreParams.CacheLineSize
+  def CacheLineHalfWord = CacheLineSize / 16
+  def ExtHistoryLength = HistoryLength + 64
+  def ICacheECCForceError = coreParams.ICacheECCForceError
+  def IBufSize = coreParams.IBufSize
+  def IBufNBank = coreParams.IBufNBank
+  def backendParams: BackendParams = coreParams.backendParams
+  def DecodeWidth = coreParams.DecodeWidth
+  def RenameWidth = coreParams.RenameWidth
+  def CommitWidth = coreParams.CommitWidth
+  def RobCommitWidth = coreParams.RobCommitWidth
+  def RabCommitWidth = coreParams.RabCommitWidth
+  def MaxUopSize = coreParams.MaxUopSize
+  def EnableRenameSnapshot = coreParams.EnableRenameSnapshot
+  def RenameSnapshotNum = coreParams.RenameSnapshotNum
+  def FtqSize = coreParams.FtqSize
+  def EnableLoadFastWakeUp = coreParams.EnableLoadFastWakeUp
+  def IntLogicRegs = coreParams.IntLogicRegs
+  def FpLogicRegs = coreParams.FpLogicRegs
+  def VecLogicRegs = coreParams.VecLogicRegs
+  def VCONFIG_IDX = coreParams.VCONFIG_IDX
+  def IntPhyRegs = coreParams.intPreg.numEntries
+  def VfPhyRegs = coreParams.vfPreg.numEntries
+  def MaxPhyPregs = IntPhyRegs max VfPhyRegs
+  def PhyRegIdxWidth = log2Up(IntPhyRegs) max log2Up(VfPhyRegs)
+  def RobSize = coreParams.RobSize
+  def RabSize = coreParams.RabSize
+  def VTypeBufferSize = coreParams.VTypeBufferSize
+  def IntRefCounterWidth = log2Ceil(RobSize)
+  def LSQEnqWidth = coreParams.dpParams.LsDqDeqWidth
+  def LSQLdEnqWidth = LSQEnqWidth min backendParams.numLoadDp
+  def LSQStEnqWidth = LSQEnqWidth min backendParams.numStoreDp
+  def VirtualLoadQueueSize = coreParams.VirtualLoadQueueSize
+  def LoadQueueRARSize = coreParams.LoadQueueRARSize
+  def LoadQueueRAWSize = coreParams.LoadQueueRAWSize
+  def RollbackGroupSize = coreParams.RollbackGroupSize
+  def LoadQueueReplaySize = coreParams.LoadQueueReplaySize
+  def LoadUncacheBufferSize = coreParams.LoadUncacheBufferSize
+  def LoadQueueNWriteBanks = coreParams.LoadQueueNWriteBanks
+  def StoreQueueSize = coreParams.StoreQueueSize
+  def StoreQueueNWriteBanks = coreParams.StoreQueueNWriteBanks
+  def StoreQueueForwardWithMask = coreParams.StoreQueueForwardWithMask
+  def VlsQueueSize = coreParams.VlsQueueSize
+  def dpParams = coreParams.dpParams
 
   def MemIQSizeMax = backendParams.memSchdParams.get.issueBlockParams.map(_.numEntries).max
   def IQSizeMax = backendParams.allSchdParams.map(_.issueBlockParams.map(_.numEntries).max).max
 
-  val NumRedirect = backendParams.numRedirect
-  val BackendRedirectNum = NumRedirect + 2 //2: ldReplay + Exception
-  val FtqRedirectAheadNum = NumRedirect
-  val LoadPipelineWidth = coreParams.LoadPipelineWidth
-  val StorePipelineWidth = coreParams.StorePipelineWidth
-  val VecLoadPipelineWidth = coreParams.VecLoadPipelineWidth
-  val VecStorePipelineWidth = coreParams.VecStorePipelineWidth
-  val VecMemSrcInWidth = coreParams.VecMemSrcInWidth
-  val VecMemInstWbWidth = coreParams.VecMemInstWbWidth
-  val VecMemDispatchWidth = coreParams.VecMemDispatchWidth
-  val StoreBufferSize = coreParams.StoreBufferSize
-  val StoreBufferThreshold = coreParams.StoreBufferThreshold
-  val EnsbufferWidth = coreParams.EnsbufferWidth
-  val LoadDependencyWidth = coreParams.LoadDependencyWidth
-  val UsQueueSize = coreParams.UsQueueSize
-  val VlFlowSize = coreParams.VlFlowSize
-  val VlUopSize = coreParams.VlUopSize
-  val VsFlowL1Size = coreParams.VsFlowL1Size
-  val VsFlowL2Size = coreParams.VsFlowL2Size
-  val VsUopSize = coreParams.VsUopSize
-  val UncacheBufferSize = coreParams.UncacheBufferSize
-  val EnableLoadToLoadForward = coreParams.EnableLoadToLoadForward
-  val EnableFastForward = coreParams.EnableFastForward
-  val EnableLdVioCheckAfterReset = coreParams.EnableLdVioCheckAfterReset
-  val EnableSoftPrefetchAfterReset = coreParams.EnableSoftPrefetchAfterReset
-  val EnableCacheErrorAfterReset = coreParams.EnableCacheErrorAfterReset
-  val EnableAccurateLoadError = coreParams.EnableAccurateLoadError
-  val EnableUncacheWriteOutstanding = coreParams.EnableUncacheWriteOutstanding
-  val EnableStorePrefetchAtIssue = coreParams.EnableStorePrefetchAtIssue
-  val EnableStorePrefetchAtCommit = coreParams.EnableStorePrefetchAtCommit
-  val EnableAtCommitMissTrigger = coreParams.EnableAtCommitMissTrigger
-  val EnableStorePrefetchSMS = coreParams.EnableStorePrefetchSMS
-  val EnableStorePrefetchSPB = coreParams.EnableStorePrefetchSPB
+  def NumRedirect = backendParams.numRedirect
+  def BackendRedirectNum = NumRedirect + 2 //2: ldReplay + Exception
+  def FtqRedirectAheadNum = NumRedirect
+  def LoadPipelineWidth = coreParams.LoadPipelineWidth
+  def StorePipelineWidth = coreParams.StorePipelineWidth
+  def VecLoadPipelineWidth = coreParams.VecLoadPipelineWidth
+  def VecStorePipelineWidth = coreParams.VecStorePipelineWidth
+  def VecMemSrcInWidth = coreParams.VecMemSrcInWidth
+  def VecMemInstWbWidth = coreParams.VecMemInstWbWidth
+  def VecMemDispatchWidth = coreParams.VecMemDispatchWidth
+  def StoreBufferSize = coreParams.StoreBufferSize
+  def StoreBufferThreshold = coreParams.StoreBufferThreshold
+  def EnsbufferWidth = coreParams.EnsbufferWidth
+  def LoadDependencyWidth = coreParams.LoadDependencyWidth
+  def UsQueueSize = coreParams.UsQueueSize
+  def VlFlowSize = coreParams.VlFlowSize
+  def VlUopSize = coreParams.VlUopSize
+  def VsFlowL1Size = coreParams.VsFlowL1Size
+  def VsFlowL2Size = coreParams.VsFlowL2Size
+  def VsUopSize = coreParams.VsUopSize
+  def UncacheBufferSize = coreParams.UncacheBufferSize
+  def EnableLoadToLoadForward = coreParams.EnableLoadToLoadForward
+  def EnableFastForward = coreParams.EnableFastForward
+  def EnableLdVioCheckAfterReset = coreParams.EnableLdVioCheckAfterReset
+  def EnableSoftPrefetchAfterReset = coreParams.EnableSoftPrefetchAfterReset
+  def EnableCacheErrorAfterReset = coreParams.EnableCacheErrorAfterReset
+  def EnableAccurateLoadError = coreParams.EnableAccurateLoadError
+  def EnableUncacheWriteOutstanding = coreParams.EnableUncacheWriteOutstanding
+  def EnableStorePrefetchAtIssue = coreParams.EnableStorePrefetchAtIssue
+  def EnableStorePrefetchAtCommit = coreParams.EnableStorePrefetchAtCommit
+  def EnableAtCommitMissTrigger = coreParams.EnableAtCommitMissTrigger
+  def EnableStorePrefetchSMS = coreParams.EnableStorePrefetchSMS
+  def EnableStorePrefetchSPB = coreParams.EnableStorePrefetchSPB
   require(LoadPipelineWidth == backendParams.LdExuCnt, "LoadPipelineWidth must be equal exuParameters.LduCnt!")
   require(StorePipelineWidth == backendParams.StaCnt, "StorePipelineWidth must be equal exuParameters.StuCnt!")
-  val Enable3Load3Store = (LoadPipelineWidth == 3 && StorePipelineWidth == 3)
-  val asidLen = coreParams.MMUAsidLen
-  val vmidLen = coreParams.MMUVmidLen
-  val BTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
-  val refillBothTlb = coreParams.refillBothTlb
-  val iwpuParam = coreParams.iwpuParameters
-  val dwpuParam = coreParams.dwpuParameters
-  val itlbParams = coreParams.itlbParameters
-  val ldtlbParams = coreParams.ldtlbParameters
-  val sttlbParams = coreParams.sttlbParameters
-  val hytlbParams = coreParams.hytlbParameters
-  val pftlbParams = coreParams.pftlbParameters
-  val l2ToL1Params = coreParams.l2ToL1tlbParameters
-  val btlbParams = coreParams.btlbParameters
-  val l2tlbParams = coreParams.l2tlbParameters
-  val NumPerfCounters = coreParams.NumPerfCounters
+  def Enable3Load3Store = (LoadPipelineWidth == 3 && StorePipelineWidth == 3)
+  def asidLen = coreParams.MMUAsidLen
+  def vmidLen = coreParams.MMUVmidLen
+  def BTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
+  def refillBothTlb = coreParams.refillBothTlb
+  def iwpuParam = coreParams.iwpuParameters
+  def dwpuParam = coreParams.dwpuParameters
+  def itlbParams = coreParams.itlbParameters
+  def ldtlbParams = coreParams.ldtlbParameters
+  def sttlbParams = coreParams.sttlbParameters
+  def hytlbParams = coreParams.hytlbParameters
+  def pftlbParams = coreParams.pftlbParameters
+  def l2ToL1Params = coreParams.l2ToL1tlbParameters
+  def btlbParams = coreParams.btlbParameters
+  def l2tlbParams = coreParams.l2tlbParameters
+  def NumPerfCounters = coreParams.NumPerfCounters
 
-  val instBytes = if (HasCExtension) 2 else 4
-  val instOffsetBits = log2Ceil(instBytes)
+  def instBytes = if (HasCExtension) 2 else 4
+  def instOffsetBits = log2Ceil(instBytes)
 
-  val icacheParameters = coreParams.icacheParameters
-  val dcacheParameters = coreParams.dcacheParametersOpt.getOrElse(DCacheParameters())
+  def icacheParameters = coreParams.icacheParameters
+  def dcacheParameters = coreParams.dcacheParametersOpt.getOrElse(DCacheParameters())
 
   // dcache block cacheline when lr for LRSCCycles - LRSCBackOff cycles
   // for constrained LR/SC loop
-  val LRSCCycles = 64
+  def LRSCCycles = 64
   // for lr storm
-  val LRSCBackOff = 8
+  def LRSCBackOff = 8
 
   // cache hierarchy configurations
-  val l1BusDataWidth = 256
+  def l1BusDataWidth = 256
 
   // load violation predict
-  val ResetTimeMax2Pow = 20 //1078576
-  val ResetTimeMin2Pow = 10 //1024
+  def ResetTimeMax2Pow = 20 //1078576
+  def ResetTimeMin2Pow = 10 //1024
   // wait table parameters
-  val WaitTableSize = 1024
-  val MemPredPCWidth = log2Up(WaitTableSize)
-  val LWTUse2BitCounter = true
+  def WaitTableSize = 1024
+  def MemPredPCWidth = log2Up(WaitTableSize)
+  def LWTUse2BitCounter = true
   // store set parameters
-  val SSITSize = WaitTableSize
-  val LFSTSize = 32
-  val SSIDWidth = log2Up(LFSTSize)
-  val LFSTWidth = 4
-  val StoreSetEnable = true // LWT will be disabled if SS is enabled
-  val LFSTEnable = true
+  def SSITSize = WaitTableSize
+  def LFSTSize = 32
+  def SSIDWidth = log2Up(LFSTSize)
+  def LFSTWidth = 4
+  def StoreSetEnable = true // LWT will be disabled if SS is enabled
+  def LFSTEnable = true
 
-  val PCntIncrStep: Int = 6
-  val numPCntHc: Int = 25
-  val numPCntPtw: Int = 19
+  def PCntIncrStep: Int = 6
+  def numPCntHc: Int = 25
+  def numPCntPtw: Int = 19
 
-  val numCSRPCntFrontend = 8
-  val numCSRPCntCtrl     = 8
-  val numCSRPCntLsu      = 8
-  val numCSRPCntHc       = 5
-  val printEventCoding   = true
+  def numCSRPCntFrontend = 8
+  def numCSRPCntCtrl     = 8
+  def numCSRPCntLsu      = 8
+  def numCSRPCntHc       = 5
+  def printEventCoding   = true
 
   // Parameters for Sdtrig extension
-  protected val TriggerNum = 4
-  protected val TriggerChainMaxLength = 2
+  protected def TriggerNum = 4
+  protected def TriggerChainMaxLength = 2
 }
