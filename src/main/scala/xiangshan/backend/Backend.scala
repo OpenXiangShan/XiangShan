@@ -465,7 +465,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
 
   io.mem.redirect := ctrlBlock.io.redirect
   io.mem.issueUops.zip(toMem.flatten).foreach { case (sink, source) =>
-    val enableMdp = Constantin.createRecord("EnableMdp", true.B)(0)
+    val enableMdp = Constantin.createRecord("EnableMdp", true)
     sink.valid := source.valid
     source.ready := sink.ready
     sink.bits.iqIdx              := source.bits.iqIdx

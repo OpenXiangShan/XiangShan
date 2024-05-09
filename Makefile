@@ -91,9 +91,7 @@ override SIM_ARGS += --disable-alwaysdb
 endif
 
 # dynamic switch CONSTANTIN
-ifeq ($(WITH_CONSTANTIN),0)
-$(info disable WITH_CONSTANTIN)
-else
+ifeq ($(WITH_CONSTANTIN),1)
 override SIM_ARGS += --with-constantin
 endif
 

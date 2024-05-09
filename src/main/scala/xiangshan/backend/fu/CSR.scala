@@ -538,7 +538,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   // Overhead: extra two redirections in every 64K cycles => ~0.1% overhead
   val slvpredctl = Reg(UInt(XLEN.W))
   when(reset.asBool) {
-    slvpredctl := Constantin.createRecord("slvpredctl", "h60".U)
+    slvpredctl := Constantin.createRecord("slvpredctl", 0x60)
   }
   csrio.customCtrl.lvpred_disable := slvpredctl(0)
   csrio.customCtrl.no_spec_load := slvpredctl(1)

@@ -772,8 +772,8 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
 
   // decide the priority of hyu for load instructions
   val hyuPriorityCtr = RegInit(0x100.U(9.W))
-  val addCtr = io.in.map(in => Mux(in.fire && FuType.isLoad(in.bits.fuType), Constantin.createRecord("hyuPriorityAddCtr", 2.U)(1, 0), 0.U)).reduce(_ +& _) // loadCnt * 2
-  val subCtr = io.in.map(in => Mux(in.fire && FuType.isStore(in.bits.fuType), Constantin.createRecord("hyuPrioritySubCtr", 5.U)(2, 0), 0.U)).reduce(_ +& _) // storeCnt * 5
+  val addCtr = io.in.map(in => Mux(in.fire && FuType.isLoad(in.bits.fuType), Constantin.createRecord("hyuPriorityAddCtr", 2)(1, 0), 0.U)).reduce(_ +& _) // loadCnt * 2
+  val subCtr = io.in.map(in => Mux(in.fire && FuType.isStore(in.bits.fuType), Constantin.createRecord("hyuPrioritySubCtr", 5)(2, 0), 0.U)).reduce(_ +& _) // storeCnt * 5
   val nextCtr = hyuPriorityCtr + addCtr - subCtr
   hyuPriorityCtr := Mux(addCtr > subCtr && hyuPriorityCtr > nextCtr, 0x1FF.U(9.W),
                     Mux(addCtr < subCtr && hyuPriorityCtr < nextCtr, 0x000.U(9.W),
@@ -875,8 +875,8 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   val loadIqValidCnt = loadIqIdx.map(io.iqValidCnt)
   val sthyIqValidCnt = stHyIqIdx.map(io.iqValidCnt)
 
-  val loadDeqNeedFlip = RegNext(loadIqValidCnt.last < loadIqValidCnt.head) && Constantin.createRecord("enableLoadBalance", true.B)(0)
-  val storeDeqNeedFlip = RegNext(sthyIqValidCnt.last < sthyIqValidCnt.head) && Constantin.createRecord("enableStoreBalance", true.B)(0)
+  val loadDeqNeedFlip = RegNext(loadIqValidCnt.last < loadIqValidCnt.head) && Constantin.createRecord("enableLoadBalance", true)
+  val storeDeqNeedFlip = RegNext(sthyIqValidCnt.last < sthyIqValidCnt.head) && Constantin.createRecord("enableStoreBalance", true)
   val loadValidDecoder = LoadValidTable.truthTable.map(decoder(EspressoMinimizer, inIsNotLoadVec, _))
   val storeValidDecoder = StoreValidTable.truthTable.map(decoder(EspressoMinimizer, inIsStoreAmoVec, _))
 

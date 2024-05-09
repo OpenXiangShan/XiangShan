@@ -675,7 +675,7 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     bankConflictData.fake_rr_bank_conflict := false.B
   }
 
-  val isWriteBankConflictTable = WireInit(Constantin.createRecord("isWriteBankConflictTable" + p(XSCoreParamsKey).HartId.toString))
+  val isWriteBankConflictTable = Constantin.createRecord(s"isWriteBankConflictTable${p(XSCoreParamsKey).HartId}")
   bankConflictTable.log(
     data = bankConflictData,
     en = isWriteBankConflictTable.orR && rr_bank_conflict(0)(1),
@@ -1054,7 +1054,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     bankConflictData.fake_rr_bank_conflict := false.B
   }
 
-  val isWriteBankConflictTable = WireInit(Constantin.createRecord("isWriteBankConflictTable" + p(XSCoreParamsKey).HartId.toString))
+  val isWriteBankConflictTable = Constantin.createRecord(s"isWriteBankConflictTable${p(XSCoreParamsKey).HartId}")
   bankConflictTable.log(
     data = bankConflictData,
     en = isWriteBankConflictTable.orR && rr_bank_conflict(0)(1),
