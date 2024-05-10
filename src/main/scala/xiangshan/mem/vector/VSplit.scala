@@ -247,25 +247,26 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   val io = IO(new VSplitBufferIO(isVStore))
 
   val bufferSize: Int
+  private val freeWidth = Seq(io.out).length
+  private val allocWidth = Seq(io.in).length
 
-  class VSplitPtr(implicit p: Parameters) extends CircularQueuePtr[VSplitPtr](bufferSize){
-  }
+  // freelist
+  val freeList = Module(new FreeList(
+    size = bufferSize,
+    allocWidth = allocWidth,
+    freeWidth = freeWidth,
+    enablePreAlloc = false,
+    moduleName = "VSplit Buffer freelist"
+  ))
 
-  object VSplitPtr {
-    def apply(f: Bool, v: UInt)(implicit p: Parameters): VSplitPtr = {
-      val ptr = Wire(new VSplitPtr)
-      ptr.flag := f
-      ptr.value := v
-      ptr
-    }
-  }
+  val uopq          = Reg(Vec(bufferSize, new VLSBundle(isVStore)))
+  val allocated     = RegInit(VecInit(Seq.fill(bufferSize)(false.B)))
+  val allocatedWire = WireInit(VecInit(Seq.fill(bufferSize)(false.B))) // for back to back split, advance lower
+  val freeMask      = WireInit(VecInit(Seq.fill(bufferSize)(false.B)))
+  val needCancel    = WireInit(VecInit(Seq.fill(bufferSize)(false.B)))
+  val activeIssue   = Wire(Bool())
+  val inActiveIssue = Wire(Bool())
 
-  val uopq = Reg(Vec(bufferSize, new VLSBundle(isVStore)))
-  val valid = RegInit(VecInit(Seq.fill(bufferSize)(false.B)))
-  val srcMaskVec = Reg(Vec(bufferSize, UInt(VLEN.W)))
-  // ptr
-  val enqPtr = RegInit(0.U.asTypeOf(new VSplitPtr))
-  val deqPtr = RegInit(0.U.asTypeOf(new VSplitPtr))
   // for split
   val splitIdx = RegInit(0.U(flowIdxBits.W))
   val strideOffsetReg = RegInit(0.U(VLEN.W))
@@ -273,24 +274,55 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   /**
     * Redirect
     */
-  val flushed = WireInit(VecInit(Seq.fill(bufferSize)(false.B))) // entry has been flushed by the redirect arrived in the pre 1 cycle
-  val flushVec = (valid zip flushed).zip(uopq).map { case ((v, f), entry) => v && entry.uop.robIdx.needFlush(io.redirect) && !f }
-  val flushEnq = io.in.fire && io.in.bits.uop.robIdx.needFlush(io.redirect)
-  val flushNumReg = RegNext(PopCount(flushEnq +: flushVec))
-  val redirectReg = RegNext(io.redirect)
-  val flushVecReg = RegNext(WireInit(VecInit(flushVec)))
+  val cancelEnq    = io.in.bits.uop.robIdx.needFlush(io.redirect)
+  val canEnqueue   = io.in.valid
+  val needEnqueue  = canEnqueue && !cancelEnq
 
-  // enqueue, if redirect, it will be flush next cycle
-  when (io.in.fire) {
-    val id = enqPtr.value
-    uopq(id) := io.in.bits
-    valid(id) := true.B
+  // enqueue
+  freeList.io.doAllocate.head := false.B
+  freeList.io.allocateReq.head := true.B
+  val offset    = PopCount(needEnqueue)
+  val canAccept = freeList.io.canAllocate(offset)
+  val enqIndex  = freeList.io.allocateSlot(offset)
+  io.in.ready  := canAccept
+  val doEnqueue = canAccept && needEnqueue
+
+  when(doEnqueue){
+    freeList.io.doAllocate.head := true.B
+    uopq(enqIndex) := io.in.bits
   }
-  io.in.ready := isNotBefore(enqPtr, deqPtr)
+  freeList.io.free := freeMask.asUInt
+
+  // select one uop
+  val selPolicy        = SelectOne("circ", allocatedWire, freeWidth) // select one entry to split
+  val (selValid, selOHVec) = selPolicy.getNthOH(1)
+  val entryIdx         = OHToUInt(selOHVec)
+
+  /* latch selentry, wait split or redirect*/
+  val splitFinish      = WireInit(false.B)
+  val selValidReg      = RegInit(false.B)
+  val selIdxReg        = Reg(UInt(entryIdx.getWidth.W))
+
+  // 0 -> 1
+  when(selValid && !selValidReg){
+    selValidReg := true.B
+  }
+  // 1 -> 0
+  when((uopq(selIdxReg).uop.robIdx.needFlush(io.redirect) || !selValid && splitFinish && (activeIssue || inActiveIssue)) &&
+       selValidReg){
+
+    selValidReg := false.B
+  }
+  // have new uop need to split and last uop is split finish
+  when((selValid && !selValidReg) ||
+    (selValid && selValidReg && splitFinish && (activeIssue || inActiveIssue))){
+
+    selIdxReg         := entryIdx
+  }
 
   //split uops
-  val issueValid       = valid(deqPtr.value)
-  val issueEntry       = uopq(deqPtr.value)
+  val issueValid       = allocated(selIdxReg) && selValidReg
+  val issueEntry       = uopq(selIdxReg)
   val issueMbIndex     = issueEntry.mBIndex
   val issueFlowNum     = issueEntry.flowNum
   val issueBaseAddr    = issueEntry.baseAddr
@@ -307,7 +339,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   val issueByteMask    = issueEntry.byteMask
   val issueVLMAXMask   = issueEntry.vlmax - 1.U
   val issueIsWholeReg  = issueEntry.usWholeReg
-  val issueVLMAXLog2 = GenVLMAXLog2(issueEntry.lmul, issueSew)
+  val issueVLMAXLog2   = GenVLMAXLog2(issueEntry.lmul, issueSew)
   val elemIdx = GenElemIdx(
     instType = issueInstType,
     emul = issueEmul,
@@ -365,41 +397,22 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
     x.mBIndex               := issueMbIndex
   }
 
-    //update enqptr
-  when (redirectReg.valid && flushNumReg =/= 0.U) {
-    val enqPtrNext = enqPtr - flushNumReg
-    enqPtr := Mux(isBefore(enqPtrNext, deqPtr), deqPtr, enqPtrNext)
-  }.otherwise {
-    when (io.in.fire) {
-      enqPtr := enqPtr + 1.U
-    }
-  }
-
-  // flush queue
-  for (i <- 0 until bufferSize) {
-    when(flushVecReg(i) && redirectReg.valid && flushNumReg =/= 0.U) {
-      valid(i) := false.B
-      flushed(i) := true.B
-    }
+  // redirect
+  for (i <- 0 until bufferSize){
+    needCancel(i) := uopq(i).uop.robIdx.needFlush(io.redirect) && allocated(i)
   }
 
  /* Execute logic */
   /** Issue to scala pipeline**/
-  val canIssue = Wire(Bool())
   val allowIssue = io.out.ready
-  val activeIssue = Wire(Bool())
-  val deqValid = valid(deqPtr.value)
-  val inActiveIssue = deqValid && canIssue && !vecActive && issuePreIsSplit
   val issueCount = Mux(usNoSplit, 2.U, (PopCount(inActiveIssue) + PopCount(activeIssue))) // for dont need split unit-stride, issue two flow
+  splitFinish := splitIdx >= (issueFlowNum - issueCount)
 
   // handshake
-  val thisPtr = deqPtr.value
-  canIssue := !issueUop.robIdx.needFlush(io.redirect) &&
-              !issueUop.robIdx.needFlush(redirectReg) &&
-              deqPtr < enqPtr
-  activeIssue := canIssue && allowIssue && (vecActive || !issuePreIsSplit) // active issue, current use in no unit-stride
-  when (!RegNext(io.redirect.valid) || distanceBetween(enqPtr, deqPtr) > flushNumReg) {
-    when ((splitIdx < (issueFlowNum - issueCount))) {
+  activeIssue := issueValid && allowIssue && (vecActive || !issuePreIsSplit) // active issue, current use in no unit-stride
+  inActiveIssue := issueValid && !vecActive && issuePreIsSplit
+  when (!issueEntry.uop.robIdx.needFlush(io.redirect)) {
+    when (!splitFinish) {
       when (activeIssue || inActiveIssue) {
         // The uop has not been entirly splited yet
         splitIdx := splitIdx + issueCount
@@ -409,26 +422,56 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
       when (activeIssue || inActiveIssue) {
         // The uop is done spliting
         splitIdx := 0.U(flowIdxBits.W) // initialize flowIdx
-        valid(deqPtr.value) := false.B
         strideOffsetReg := 0.U
-        deqPtr := deqPtr + 1.U
       }
     }
   }.otherwise {
     splitIdx := 0.U(flowIdxBits.W) // initialize flowIdx
     strideOffsetReg := 0.U
   }
+  // allocatedWire, only for freelist select next uop back-to-back
+  for (i <- 0 until bufferSize){
+    when(needCancel(i)){ // redirect
+      allocatedWire(i) := false.B
+    }.elsewhen(splitFinish && (activeIssue || inActiveIssue) && (i.U === selIdxReg)){ // finish
+      allocatedWire(i) := false.B
+    }.otherwise{
+      allocatedWire(i) := allocated(i)
+    }
+  }
+  // allocated
+  for (i <- 0 until bufferSize){
+    when(needCancel(i)) { // redirect
+      allocated(i) := false.B
+    }.elsewhen(splitFinish && (activeIssue || inActiveIssue) && (i.U === selIdxReg)){ //dequeue
+      allocated(i) := false.B
+    }.elsewhen(doEnqueue && (i.U === enqIndex)){
+      allocated(i) := true.B
+    }
+  }
+  // freeMask
+  for (i <- 0 until bufferSize){
+    when(needCancel(i)) { // redirect
+      freeMask(i) := true.B
+    }.elsewhen(splitFinish && (activeIssue || inActiveIssue) && (i.U === selIdxReg)) { //dequeue
+      freeMask(i) := true.B
+    }.otherwise{
+      freeMask(i) := false.B
+    }
+  }
 
   // out connect
-  io.out.valid := canIssue && (vecActive || !issuePreIsSplit) // TODO: inactive uop do not send to pipeline
+  io.out.valid := issueValid && (vecActive || !issuePreIsSplit) // TODO: inactive unit-stride uop do not send to pipeline
+
+  XSError(!allocated(entryIdx) && selValid, "select invalid entry!")
 
   XSPerfAccumulate("out_valid",             io.out.valid)
   XSPerfAccumulate("out_fire",              io.out.fire)
   XSPerfAccumulate("out_fire_unitstride",   io.out.fire && !issuePreIsSplit)
   XSPerfAccumulate("unitstride_vlenAlign",  io.out.fire && !issuePreIsSplit && io.out.bits.vaddr(3, 0) === 0.U)
-  XSPerfAccumulate("unitstride_invalid",    io.out.ready && canIssue && !issuePreIsSplit && PopCount(io.out.bits.mask).orR)
+  XSPerfAccumulate("unitstride_invalid",    io.out.ready && issueValid && !issuePreIsSplit && PopCount(io.out.bits.mask).orR)
 
-  QueuePerf(bufferSize, distanceBetween(enqPtr, deqPtr), !io.in.ready)
+  QueuePerf(bufferSize, freeList.io.validCount, freeList.io.validCount === 0.U)
 }
 
 class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = true){
@@ -447,7 +490,7 @@ class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = t
 
   // send data to sq
   val vstd = io.vstd.get
-  vstd.valid := canIssue
+  vstd.valid := issueValid
   vstd.bits.uop := issueUop
   vstd.bits.uop.sqIdx := sqIdx
   vstd.bits.data := Mux(!issuePreIsSplit, usSplitData, flowData)
