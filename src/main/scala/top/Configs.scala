@@ -50,7 +50,7 @@ class BaseConfig(n: Int) extends Config((site, here, up) => {
   case ExportDebug => DebugAttachParams(protocols = Set(JTAG))
   case DebugModuleKey => Some(XSDebugModuleParams(site(XLen)))
   case JtagDTMKey => JtagDTMKey
-  case MaxHartIdBits => log2Up(n)
+  case MaxHartIdBits => log2Up(n) max 6
   case EnableJtag => true.B
 })
 

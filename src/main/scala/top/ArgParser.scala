@@ -72,8 +72,7 @@ object ArgParser {
               up(XSTileKey).head.copy(HartId = i)
             }
             case MaxHartIdBits =>
-              require(log2Up(value.toInt) <= 10, "MaxHartIdBits should not be larger than 10.")
-              log2Up(value.toInt)
+              log2Up(value.toInt) max up(MaxHartIdBits)
           }), tail)
         case "--with-dramsim3" :: tail =>
           nextOption(config.alter((site, here, up) => {
