@@ -193,7 +193,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     }
 
   }.elsewhen(state === s_send_data) { // when sbuffer accept data
-    when(!io.sbuffer.fire) {
+    when(!io.sbuffer.fire && segmentActive) {
       stateNext := s_send_data
     }.elsewhen((segmentIdx === maxSegIdx) && (fieldIdx === maxNfields)) {
       stateNext := s_finish // segment instruction finish
