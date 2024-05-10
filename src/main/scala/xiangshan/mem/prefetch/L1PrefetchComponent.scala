@@ -280,13 +280,11 @@ class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1Pref
     (tag === new_tag) && valid
   }
 
-  def update(valid: Bool, update_bit_vec: UInt, update_sink: UInt) = {
-    when(valid){
-      bit_vec := bit_vec | update_bit_vec
-      when(update_sink < sink) {
-        bit_vec := (bit_vec & ~sent_vec) | update_bit_vec
-        sink := update_sink
-      }
+  def update(update_bit_vec: UInt, update_sink: UInt) = {
+    bit_vec := bit_vec | update_bit_vec
+    when(update_sink < sink) {
+      bit_vec := (bit_vec & ~sent_vec) | update_bit_vec
+      sink := update_sink
     }
 
     assert(PopCount(update_bit_vec) >= 1.U, "valid bits in update vector should greater than one")
@@ -441,7 +439,6 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     l1_array(s1_l1_index) := s1_l1_prefetch_req
   }.elsewhen(s1_l1_update) {
     l1_array(s1_l1_index).update(
-      s1_l1_update,
       update_bit_vec = s1_l1_prefetch_req.bit_vec,
       update_sink = s1_l1_prefetch_req.sink
     )
