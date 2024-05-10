@@ -996,8 +996,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   ))
   val addrInPerfCnt = (addr >= Mcycle.U) && (addr <= Mhpmcounter31.U) ||
     (addr >= Mcountinhibit.U) && (addr <= Mhpmevent31.U) ||
-    (addr >= Cycle.U) && (addr <= Hpmcounter31.U) ||
-    addr === Mip.U
+    (addr >= Cycle.U) && (addr <= Hpmcounter31.U)
   csrio.isPerfCnt := addrInPerfCnt && valid && func =/= CSROpType.jmp
 
   // satp wen check
