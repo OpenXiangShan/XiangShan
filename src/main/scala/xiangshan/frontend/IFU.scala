@@ -398,7 +398,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f2_pf_vec = VecInit((0 until PredictWidth).map(i => (!isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_except_pf(0)   ||  isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_doubleLine &&  f2_except_pf(1))))
   val f2_af_vec = VecInit((0 until PredictWidth).map(i => (!isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_except_af(0)   ||  isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_doubleLine && f2_except_af(1))))
   val f2_gpf_vec = VecInit((0 until PredictWidth).map(i => (!isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_except_gpf(0) || isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_doubleLine && f2_except_gpf(1))))
-  val f2_gpaddrs_tmp = VecInit((0 until PredictWidth).map(i => Mux(!isNextLine(f2_pc(i), f2_ftq_req.startAddr), Cat(f2_gpaddrs(0)(GPAddrBits-1, offLen), f2_pc(i)(offLen - 1, 0)), Mux(isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_doubleLine, Cat(f2_gpaddrs(1)(GPAddrBits-1, offLen), f2_pc(i)(offLen - 1, 0)), 0.U(GPAddrBits.W)))))
   val f2_perf_info    = io.icachePerfInfo
 
   def cut(cacheline: UInt, cutPtr: Vec[UInt]) : Vec[UInt] ={
