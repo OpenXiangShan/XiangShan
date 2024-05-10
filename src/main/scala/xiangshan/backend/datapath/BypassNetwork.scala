@@ -3,7 +3,7 @@ package xiangshan.backend.datapath
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utility.{SignExt, ZeroExt}
+import utility.{GatedValidRegNext, SignExt, ZeroExt}
 import xiangshan.{XSBundle, XSModule}
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles.{ExuBypassBundle, ExuInput, ExuOH, ExuOutput, ImmInfo}
@@ -104,8 +104,11 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
   if(params.debugEn){
     dontTouch(bypass2ValidVec3)
   }
+  private val bypass2DateEn = VecInit(
+    fromExus.map(x => GatedValidRegNext(x.valid))
+  ).asUInt
   private val bypass2DataVec = VecInit(
-    fromDPsHasBypass2Source.map(x => RegNext(bypassDataVec(x)))
+    fromDPsHasBypass2Source.map(x => RegEnable(bypassDataVec(x), bypass2DateEn(x).asBool))
   )
 
   println(s"[BypassNetwork] HasBypass2SourceExuNum: ${fromDPsHasBypass2Source.size} HasBypass2SinkExuNum: ${fromDPsHasBypass2Sink.size} bypass2DataVecSize: ${bypass2DataVec.length}")
