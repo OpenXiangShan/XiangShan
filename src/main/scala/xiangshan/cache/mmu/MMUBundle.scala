@@ -405,15 +405,27 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
                           else 0.U })
     this.perm.apply(item.s1)
 
+    val s1tag = {if (pageNormal) item.s1.entry.tag else item.s1.entry.tag(sectorvpnLen - 1, vpnnLen - sectortlbwidth)}
+    val s2tag = {if (pageNormal) item.s2.entry.tag(vpnLen - 1, sectortlbwidth) else item.s2.entry.tag(vpnLen - 1, vpnnLen)}
+    // if stage1 page is larger than stage2 page, need to merge s1tag and s2tag.
+    val s1tagFix = { 
+      if (pageNormal){
+        MuxCase(s1tag, Seq(
+          (item.s1.entry.level.getOrElse(0.U) === 0.U && item.s2.entry.level.getOrElse(0.U) === 1.U) -> Cat(item.s1.entry.tag(sectorvpnLen - 1, vpnnLen * 2 - sectortlbwidth), item.s2.entry.tag(vpnnLen * 2 - 1,  vpnnLen), 0.U((vpnnLen - sectortlbwidth).W)),
+          (item.s1.entry.level.getOrElse(0.U) === 0.U && item.s2.entry.level.getOrElse(0.U) === 2.U) -> Cat(item.s1.entry.tag(sectorvpnLen - 1, vpnnLen * 2 - sectortlbwidth), item.s2.entry.tag(vpnnLen * 2 - 1,  sectortlbwidth)),
+          (item.s1.entry.level.getOrElse(0.U) === 1.U && item.s2.entry.level.getOrElse(0.U) === 2.U) -> Cat(item.s1.entry.tag(sectorvpnLen - 1, vpnnLen - sectortlbwidth), item.s2.entry.tag(vpnnLen - 1,  sectortlbwidth))
+        ))
+      } else {
+        MuxCase(s1tag, Seq(
+          (item.s1.entry.level.getOrElse(0.U) === 0.U && item.s2.entry.level.getOrElse(0.U) === 1.U) -> Cat(item.s1.entry.tag(sectorvpnLen - 1, vpnnLen * 2 - sectortlbwidth), item.s2.entry.tag(vpnnLen * 2 - 1,  vpnnLen))
+        ))
+      }}
+    this.tag := Mux(item.s2xlate === onlyStage2, s2tag, Mux(item.s2xlate === allStage, s1tagFix, s1tag))
     val s2page_pageSuper = item.s2.entry.level.getOrElse(0.U) =/= 2.U
     this.pteidx := Mux(item.s2xlate === onlyStage2, VecInit(UIntToOH(item.s2.entry.tag(sectortlbwidth - 1, 0)).asBools),  item.s1.pteidx)
     val s2_valid = Mux(s2page_pageSuper, VecInit(Seq.fill(tlbcontiguous)(true.B)), VecInit(UIntToOH(item.s2.entry.tag(sectortlbwidth - 1, 0)).asBools))
     this.valididx := Mux(item.s2xlate === onlyStage2, s2_valid, item.s1.valididx)
-
-    val s1tag = {if (pageNormal) item.s1.entry.tag else item.s1.entry.tag(sectorvpnLen - 1, vpnnLen - sectortlbwidth)}
-    val s2tag = {if (pageNormal) item.s2.entry.tag(vpnLen - 1, sectortlbwidth) else item.s2.entry.tag(vpnLen - 1, vpnnLen)}
-    this.tag := Mux(item.s2xlate === onlyStage2, s2tag, s1tag)
-
+    // if stage2 page is larger than stage1 page, need to merge s2tag and s2ppn to get a new s2ppn.
     val s1ppn = {
       if (!pageNormal) item.s1.entry.ppn(sectorppnLen - 1, vpnnLen - sectortlbwidth) else item.s1.entry.ppn
     }
@@ -1284,10 +1296,20 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
     this.s2xlate === onlyStage2
   }
   
-  def getVpn: UInt = {
-   val s1_tag = Cat(s1.entry.tag, s1.addr_low)
-   val s2_tag = s2.entry.tag
-   Mux(s2xlate === onlyStage2, s2_tag, s1_tag)
+  def getVpn(vpn: UInt): UInt = {
+    val level = s1.entry.level.getOrElse(0.U) max s2.entry.level.getOrElse(0.U)
+    val s1tag = Cat(s1.entry.tag, OHToUInt(s1.pteidx))
+    val s1tagFix = MuxCase(s1.entry.tag, Seq(
+      (s1.entry.level.getOrElse(0.U) === 0.U && s2.entry.level.getOrElse(0.U) === 1.U) -> Cat(s1.entry.tag(sectorvpnLen - 1, vpnnLen * 2 - sectortlbwidth), s2.entry.tag(vpnnLen * 2 - 1,  vpnnLen), 0.U((vpnnLen - sectortlbwidth).W)),
+      (s1.entry.level.getOrElse(0.U) === 0.U && s2.entry.level.getOrElse(0.U) === 2.U) -> Cat(s1.entry.tag(sectorvpnLen - 1, vpnnLen * 2 - sectortlbwidth), s2.entry.tag(vpnnLen * 2 - 1,  sectortlbwidth)),
+      (s1.entry.level.getOrElse(0.U) === 1.U && s2.entry.level.getOrElse(0.U) === 2.U) -> Cat(s1.entry.tag(sectorvpnLen - 1, vpnnLen - sectortlbwidth), s2.entry.tag(vpnnLen - 1,  sectortlbwidth))
+    ))
+    val s1_vpn = MuxLookup(level, s1tag)(Seq(
+      0.U -> Cat(s1tagFix(sectorvpnLen-1, vpnnLen * 2 - sectortlbwidth), vpn(vpnnLen*2-1, 0)),
+      1.U -> Cat(s1tagFix(sectorvpnLen-1, vpnnLen - sectortlbwidth), vpn(vpnnLen-1, 0)))
+    ) 
+    val s2_vpn = s2.entry.tag
+    Mux(s2xlate === onlyStage2, s2_vpn, Mux(s2xlate === allStage, s1_vpn, s1tag))
   }
   
   def hit(vpn: UInt, asid: UInt, vasid: UInt, vmid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false): Bool = { 
