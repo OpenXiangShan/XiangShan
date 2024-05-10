@@ -270,7 +270,7 @@ class WithNKBL2
         reqField = Seq(utility.ReqSourceField()),
         echoField = Seq(huancun.DirtyField()),
         prefetch = Some(coupledL2.prefetch.PrefetchReceiverParams()),
-        enablePerf = !site(DebugOptionsKey).FPGAPlatform,
+        enablePerf = !site(DebugOptionsKey).FPGAPlatform && site(DebugOptionsKey).EnablePerfDebug,
         enableRollingDB = site(DebugOptionsKey).EnableRollingDB,
         enableMonitor = site(DebugOptionsKey).AlwaysBasicDB,
         elaboratedTopDown = !site(DebugOptionsKey).FPGAPlatform
@@ -298,7 +298,7 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
           val l2params = core.L2CacheParamsOpt.get.toCacheParams
           l2params.copy(sets = 2 * clientDirBytes / core.L2NBanks / l2params.ways / 64, ways = l2params.ways + 2)
         },
-        enablePerf = true,
+        enablePerf = !site(DebugOptionsKey).FPGAPlatform && site(DebugOptionsKey).EnablePerfDebug,
         ctrl = Some(CacheCtrl(
           address = 0x39000000,
           numCores = tiles.size
