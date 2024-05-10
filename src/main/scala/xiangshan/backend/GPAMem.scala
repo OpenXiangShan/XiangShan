@@ -19,7 +19,7 @@ class GPAMemImp(override val wrapper: GPAMem)(implicit p: Parameters) extends La
 
   private val PageOffsetWidth = 12
 
-  private val mem = Module (new SyncDataModuleTemplate(Vec(2, UInt(GPAddrBits.W)), FtqSize, numRead = 1, numWrite = 1, hasRen = true))
+  private val mem = Module (new SyncDataModuleTemplate(UInt(GPAddrBits.W), FtqSize, numRead = 1, numWrite = 1, hasRen = true))
 
   mem.io.wen.head := io.fromIFU.gpaddrMem_wen
   mem.io.waddr.head := io.fromIFU.gpaddrMem_waddr
@@ -30,14 +30,8 @@ class GPAMemImp(override val wrapper: GPAMem)(implicit p: Parameters) extends La
 
   private val ftqOffset = RegEnable(io.exceptionReadAddr.bits.ftqOffset, io.exceptionReadAddr.valid)
 
-  private val gpa0base = mem.io.rdata.head.head
-  private val gpa1base = mem.io.rdata.head.last
-  private val gpa0 = gpa0base + Cat(ftqOffset, 0.U(instOffsetBits))
-  private val gpa1 = gpa1base + Cat(ftqOffset, 0.U(instOffsetBits))
-
-  private val gpa0basePage = getGPAPage(gpa0base)
-  private val gpa0page = getGPAPage(gpa0)
-  private val gpa = Mux(gpa0basePage === gpa0page, gpa0, gpa1)
+  private val gpabase = mem.io.rdata.head
+  private val gpa = gpabase + Cat(ftqOffset, 0.U(instOffsetBits))
 
   io.exceptionReadData := gpa
 

@@ -264,7 +264,6 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
 class LoadForwardQueryIO(implicit p: Parameters) extends XSBundle {
   val vaddr = Output(UInt(VAddrBits.W))
   val paddr = Output(UInt(PAddrBits.W))
-  val gpaddr = Output(UInt(GPAddrBits.W))
   val mask = Output(UInt((VLEN/8).W))
   val uop = Output(new DynInst) // for replay
   val pc = Output(UInt(VAddrBits.W)) //for debug

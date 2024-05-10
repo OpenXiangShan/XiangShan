@@ -748,7 +748,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.sbuffer.valid := s1_valid && !(s1_exception || s1_tlb_miss || s1_kill || s1_dly_err || s1_prf)
   io.sbuffer.vaddr := s1_vaddr
   io.sbuffer.paddr := s1_paddr_dup_lsu
-  io.sbuffer.gpaddr:= s1_gpaddr_dup_lsu
   io.sbuffer.uop   := s1_in.uop
   io.sbuffer.sqIdx := s1_in.uop.sqIdx
   io.sbuffer.mask  := s1_in.mask
@@ -757,7 +756,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.vec_forward.valid := s1_valid && !(s1_exception || s1_tlb_miss || s1_kill || s1_prf)
   io.vec_forward.vaddr := s1_vaddr
   io.vec_forward.paddr := s1_paddr_dup_lsu
-  io.vec_forward.gpaddr:= s1_gpaddr_dup_lsu
   io.vec_forward.uop   := s1_in.uop
   io.vec_forward.sqIdx := s1_in.uop.sqIdx
   io.vec_forward.mask  := s1_in.mask
@@ -766,7 +764,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.lsq.forward.valid     := s1_valid && !(s1_exception || s1_tlb_miss || s1_kill || s1_dly_err || s1_prf)
   io.lsq.forward.vaddr     := s1_vaddr
   io.lsq.forward.paddr     := s1_paddr_dup_lsu
-  io.lsq.forward.gpaddr    := s1_gpaddr_dup_lsu
   io.lsq.forward.uop       := s1_in.uop
   io.lsq.forward.sqIdx     := s1_in.uop.sqIdx
   io.lsq.forward.sqIdxMask := 0.U

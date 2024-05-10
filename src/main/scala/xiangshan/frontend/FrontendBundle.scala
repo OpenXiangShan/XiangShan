@@ -130,7 +130,6 @@ class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val acf          = Vec(PredictWidth, Bool())
   val crossPageIPFFix = Vec(PredictWidth, Bool())
   val triggered    = Vec(PredictWidth, new TriggerCf)
-  val gpaddr     = Vec(PredictWidth, UInt(GPAddrBits.W))
   val topdown_info = new FrontendTopDownBundle
 }
 

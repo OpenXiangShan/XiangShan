@@ -68,13 +68,11 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
   val acf = Bool()
   val crossPageIPFFix = Bool()
   val triggered = new TriggerCf
-  val gpaddr = UInt(GPAddrBits.W)
 
   def fromFetch(fetch: FetchToIBuffer, i: Int): IBufEntry = {
     inst   := fetch.instrs(i)
     pc     := fetch.pc(i)
     foldpc := fetch.foldpc(i)
-    gpaddr := fetch.gpaddr(i)
     pd     := fetch.pd(i)
     pred_taken := fetch.ftqOffset(i).valid
     ftqPtr := fetch.ftqPtr
@@ -107,7 +105,6 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
     cf.ssid := DontCare
     cf.ftqPtr := ftqPtr
     cf.ftqOffset := ftqOffset
-    cf.gpaddr := gpaddr
     cf
   }
 }

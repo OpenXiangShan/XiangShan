@@ -473,8 +473,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     vaddrModule.io.forwardDataMask(i) := io.forward(i).mask
     paddrModule.io.forwardMdata(i) := io.forward(i).paddr
     paddrModule.io.forwardDataMask(i) := io.forward(i).mask
-    gpaddrModule.io.forwardMdata(i) := io.forward(i).gpaddr
-    gpaddrModule.io.forwardDataMask(i) := io.forward(i).mask
 
 
     // vaddr cam result does not equal to paddr cam result
