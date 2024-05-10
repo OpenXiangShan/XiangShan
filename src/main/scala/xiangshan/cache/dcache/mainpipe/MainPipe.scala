@@ -481,8 +481,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   // data_error will be reported by data array 1 cycle after data read resp
   val s3_data_error = Wire(Bool())
   s3_data_error := Mux(GatedValidRegNextN(s1_fire,2), // ecc check result is generated 2 cycle after read req
-    io.readline_error_delayed && RegEnable(s2_may_report_data_error, s2_valid),
-    RegEnable(s3_data_error, s3_valid) // do not update s3_data_error if !s1_fire
+    io.readline_error_delayed && RegNext(s2_may_report_data_error),
+    RegNext(s3_data_error) // do not update s3_data_error if !s1_fire
   )
   // error signal for amo inst
   // s3_error = s3_flag_error || s3_tag_error || s3_l2_error || s3_data_error
