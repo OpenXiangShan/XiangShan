@@ -78,6 +78,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     }
   })
 
+  // io alias
+  private val dispatchCanAcc = io.out.head.ready
+
   val compressUnit = Module(new CompressUnit())
   // create free list and rat
   val intFreeList = Module(new MEFreeList(IntPhyRegs))
@@ -119,12 +122,12 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   }
   // only when all free list and dispatch1 has enough space can we do allocation
   // when isWalk, freelist can definitely allocate
-  intFreeList.io.doAllocate := fpFreeList.io.canAllocate && vecFreeList.io.canAllocate && io.out(0).ready || io.rabCommits.isWalk
-  fpFreeList.io.doAllocate := intFreeList.io.canAllocate && vecFreeList.io.canAllocate && io.out(0).ready || io.rabCommits.isWalk
-  vecFreeList.io.doAllocate := intFreeList.io.canAllocate && fpFreeList.io.canAllocate && io.out(0).ready || io.rabCommits.isWalk
+  intFreeList.io.doAllocate := fpFreeList.io.canAllocate && vecFreeList.io.canAllocate && dispatchCanAcc || io.rabCommits.isWalk
+  fpFreeList.io.doAllocate := intFreeList.io.canAllocate && vecFreeList.io.canAllocate && dispatchCanAcc || io.rabCommits.isWalk
+  vecFreeList.io.doAllocate := intFreeList.io.canAllocate && fpFreeList.io.canAllocate && dispatchCanAcc || io.rabCommits.isWalk
 
   //           dispatch1 ready ++ float point free list ready ++ int free list ready ++ vec free list ready     ++ not walk
-  val canOut = io.out(0).ready && fpFreeList.io.canAllocate && intFreeList.io.canAllocate && vecFreeList.io.canAllocate && !io.rabCommits.isWalk
+  val canOut = dispatchCanAcc && fpFreeList.io.canAllocate && intFreeList.io.canAllocate && vecFreeList.io.canAllocate && !io.rabCommits.isWalk
 
   compressUnit.io.in.zip(io.in).foreach{ case(sink, source) =>
     sink.valid := source.valid
@@ -502,16 +505,16 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   XSPerfAccumulate("in_valid_count", PopCount(io.in.map(_.valid)))
   XSPerfAccumulate("in_fire_count", PopCount(io.in.map(_.fire)))
   XSPerfAccumulate("in_valid_not_ready_count", PopCount(io.in.map(x => x.valid && !x.ready)))
-  XSPerfAccumulate("wait_cycle", !io.in.head.valid && io.out.head.ready)
+  XSPerfAccumulate("wait_cycle", !io.in.head.valid && dispatchCanAcc)
 
   // These stall reasons could overlap each other, but we configure the priority as fellows.
   // walk stall > dispatch stall > int freelist stall > fp freelist stall
   private val inHeadStall = io.in.head match { case x => x.valid && !x.ready }
   private val stallForWalk      = inHeadValid &&  io.rabCommits.isWalk
-  private val stallForDispatch  = inHeadValid && !io.rabCommits.isWalk && !io.out(0).ready
-  private val stallForIntFL     = inHeadValid && !io.rabCommits.isWalk &&  io.out(0).ready && !intFreeList.io.canAllocate
-  private val stallForFpFL      = inHeadValid && !io.rabCommits.isWalk &&  io.out(0).ready &&  intFreeList.io.canAllocate && vecFreeList.io.canAllocate && !fpFreeList.io.canAllocate
-  private val stallForVecFL     = inHeadValid && !io.rabCommits.isWalk &&  io.out(0).ready &&  intFreeList.io.canAllocate && fpFreeList.io.canAllocate && !vecFreeList.io.canAllocate
+  private val stallForDispatch  = inHeadValid && !io.rabCommits.isWalk && !dispatchCanAcc
+  private val stallForIntFL     = inHeadValid && !io.rabCommits.isWalk &&  dispatchCanAcc && !intFreeList.io.canAllocate
+  private val stallForFpFL      = inHeadValid && !io.rabCommits.isWalk &&  dispatchCanAcc &&  intFreeList.io.canAllocate && vecFreeList.io.canAllocate && !fpFreeList.io.canAllocate
+  private val stallForVecFL     = inHeadValid && !io.rabCommits.isWalk &&  dispatchCanAcc &&  intFreeList.io.canAllocate && fpFreeList.io.canAllocate && !vecFreeList.io.canAllocate
   XSPerfAccumulate("stall_cycle",          inHeadStall)
   XSPerfAccumulate("stall_cycle_walk",     stallForWalk)
   XSPerfAccumulate("stall_cycle_dispatch", stallForDispatch)
@@ -533,10 +536,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     ("rename_waitinstr           ", PopCount((0 until RenameWidth).map(i => io.in(i).valid && !io.in(i).ready))                                  ),
     ("rename_stall               ", inHeadStall),
     ("rename_stall_cycle_walk    ", inHeadValid &&  io.rabCommits.isWalk),
-    ("rename_stall_cycle_dispatch", inHeadValid && !io.rabCommits.isWalk && !io.out(0).ready),
-    ("rename_stall_cycle_int     ", inHeadValid && !io.rabCommits.isWalk &&  io.out(0).ready && !intFreeList.io.canAllocate),
-    ("rename_stall_cycle_fp      ", inHeadValid && !io.rabCommits.isWalk &&  io.out(0).ready && intFreeList.io.canAllocate && vecFreeList.io.canAllocate && !fpFreeList.io.canAllocate),
-    ("rename_stall_cycle_vec     ", inHeadValid && !io.rabCommits.isWalk &&  io.out(0).ready && intFreeList.io.canAllocate && fpFreeList.io.canAllocate && !vecFreeList.io.canAllocate),
+    ("rename_stall_cycle_dispatch", inHeadValid && !io.rabCommits.isWalk && !dispatchCanAcc),
+    ("rename_stall_cycle_int     ", inHeadValid && !io.rabCommits.isWalk &&  dispatchCanAcc && !intFreeList.io.canAllocate),
+    ("rename_stall_cycle_fp      ", inHeadValid && !io.rabCommits.isWalk &&  dispatchCanAcc && intFreeList.io.canAllocate && vecFreeList.io.canAllocate && !fpFreeList.io.canAllocate),
+    ("rename_stall_cycle_vec     ", inHeadValid && !io.rabCommits.isWalk &&  dispatchCanAcc && intFreeList.io.canAllocate && fpFreeList.io.canAllocate && !vecFreeList.io.canAllocate),
   )
   val intFlPerf = intFreeList.getPerfEvents
   val fpFlPerf = fpFreeList.getPerfEvents
