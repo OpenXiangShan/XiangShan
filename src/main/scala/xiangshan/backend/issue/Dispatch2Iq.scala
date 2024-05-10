@@ -771,6 +771,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   }
 
   private val uop             = io.in.map(_.bits)
+  private val fuType          = uop.map(_.fuType)
   private val fuOpType        = uop.map(_.fuOpType)
   private val vtype           = uop.map(_.vpu.vtype)
   private val sew             = vtype.map(_.vsew)
@@ -790,9 +791,9 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     )
   }
 
-  private val isVlsType       = uop.map(uopItem => isVls((uopItem.fuType)))
+  private val isVlsType       = fuType.map(fuTypeItem => isVls(fuTypeItem))
+  private val isSegment       = fuType.map(fuTypeItem => isVsegls(fuTypeItem))
   private val isUnitStride    = fuOpType.map(fuOpTypeItem => LSUOpType.isUStride(fuOpTypeItem))
-  private val isSegment       = fuOpType.zip(nf).map{ case (fuOpTypeItem, nfItem) => nfItem =/= 0.U && !LSUOpType.isWhole(fuOpTypeItem) }
   private val instType        = isSegment.zip(mop).map{ case (isSegementItem, mopItem) => Cat(isSegementItem, mopItem) }
   // There is no way to calculate the 'flow' for 'unit-stride' and 'whole' exactly
   private val numLsElem       = instType.zipWithIndex.map{ case (instTypeItem, index) =>
