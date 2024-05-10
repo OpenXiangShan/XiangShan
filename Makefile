@@ -36,7 +36,7 @@ SPLIT_VERILOG = ./scripts/split_verilog.sh
 IMAGE  ?= temp
 CONFIG ?= DefaultConfig
 NUM_CORES ?= 1
-MFC ?= 0
+MFC ?= 1
 
 
 ifeq ($(MAKECMDGOALS),)
@@ -91,9 +91,7 @@ override SIM_ARGS += --disable-alwaysdb
 endif
 
 # dynamic switch CONSTANTIN
-ifeq ($(WITH_CONSTANTIN),0)
-$(info disable WITH_CONSTANTIN)
-else
+ifeq ($(WITH_CONSTANTIN),1)
 override SIM_ARGS += --with-constantin
 endif
 
