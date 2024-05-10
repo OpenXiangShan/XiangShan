@@ -416,7 +416,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val ldaExeWbReqs = ldaOut +: loadUnits.tail.map(_.io.ldout)
   io.mem_to_ooo.writebackLda <> ldaExeWbReqs
   io.mem_to_ooo.writebackSta <> storeUnits.map(_.io.stout)
-  io.mem_to_ooo.writebackStd <> stdExeUnits.map(_.io.out)
+  io.mem_to_ooo.writebackStd.zip(stdExeUnits).foreach {x =>
+    x._1.bits  := x._2.io.out.bits
+    x._1.valid := x._2.io.out.fire
+  }
   io.mem_to_ooo.writebackHyuLda <> hybridUnits.map(_.io.ldout)
   io.mem_to_ooo.writebackHyuSta <> hybridUnits.map(_.io.stout)
   io.mem_to_ooo.otherFastWakeup := DontCare
