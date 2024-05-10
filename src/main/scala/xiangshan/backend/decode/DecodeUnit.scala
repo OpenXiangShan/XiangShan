@@ -915,6 +915,13 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   io.deq.decodedInst := decodedInst
   io.deq.decodedInst.rfWen := (decodedInst.ldest =/= 0.U) && decodedInst.rfWen
+  // change vlsu to vseglsu when NF =/= 0.U
+  io.deq.decodedInst.fuType := Mux1H(Seq(
+    (!FuType.FuTypeOrR(decodedInst.fuType, FuType.vldu, FuType.vstu)                   ) -> decodedInst.fuType,
+    ( FuType.FuTypeOrR(decodedInst.fuType, FuType.vldu, FuType.vstu) && inst.NF === 0.U) -> decodedInst.fuType,
+    ( FuType.FuTypeOrR(decodedInst.fuType, FuType.vstu)              && inst.NF =/= 0.U) -> FuType.vsegstu.U,
+    ( FuType.FuTypeOrR(decodedInst.fuType, FuType.vldu)              && inst.NF =/= 0.U) -> FuType.vsegldu.U,
+  ))
   //-------------------------------------------------------------
   // Debug Info
 //  XSDebug("in:  instr=%x pc=%x excepVec=%b crossPageIPFFix=%d\n",
