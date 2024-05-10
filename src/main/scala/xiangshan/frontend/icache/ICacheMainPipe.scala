@@ -364,7 +364,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   s1_fire  := s1_valid && tlbRespAllValid && s2_ready && !s1_wait
 
   // record cacheline log
-  val isWriteICacheTable = WireInit(Constantin.createRecord("isWriteICacheTable" + p(XSCoreParamsKey).HartId.toString))
+  val isWriteICacheTable = Constantin.createRecord(s"isWriteICacheTable${p(XSCoreParamsKey).HartId}")
   val ICacheTable = ChiselDB.createTable("ICacheTable" + p(XSCoreParamsKey).HartId.toString, new ICacheDB)
 
   val ICacheDumpData_req0 = Wire(new ICacheDB)

@@ -345,10 +345,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       sms
   }
   prefetcherOpt.foreach{ pf => pf.io.l1_req.ready := false.B }
+  val hartId = p(XSCoreParamsKey).HartId
   val l1PrefetcherOpt: Option[BasePrefecher] = coreParams.prefetcher.map {
     case _ =>
       val l1Prefetcher = Module(new L1Prefetcher())
-      l1Prefetcher.io.enable := WireInit(Constantin.createRecord("enableL1StreamPrefetcher" + p(XSCoreParamsKey).HartId.toString, initValue = 1.U)) === 1.U
+      l1Prefetcher.io.enable := Constantin.createRecord(s"enableL1StreamPrefetcher$hartId", initValue = true)
       l1Prefetcher.pf_ctrl <> dcache.io.pf_ctrl
       l1Prefetcher.l2PfqBusy := io.l2PfqBusy
 
@@ -496,7 +497,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
       val l2_trace = Wire(new LoadPfDbBundle)
       l2_trace.paddr := outer.l2_pf_sender_opt.get.out.head._1.addr
-      val table = ChiselDB.createTable("L2PrefetchTrace"+ p(XSCoreParamsKey).HartId.toString, new LoadPfDbBundle, basicDB = false)
+      val table = ChiselDB.createTable(s"L2PrefetchTrace$hartId", new LoadPfDbBundle, basicDB = false)
       table.log(l2_trace, l1_pf_to_l2.valid, "StreamPrefetchTrace", clock, reset)
       table.log(l2_trace, !l1_pf_to_l2.valid && sms_pf_to_l2.valid, "L2PrefetchTrace", clock, reset)
 
@@ -507,7 +508,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
       val l3_trace = Wire(new LoadPfDbBundle)
       l3_trace.paddr := outer.l3_pf_sender_opt.get.out.head._1.addr
-      val l3_table = ChiselDB.createTable("L3PrefetchTrace"+ p(XSCoreParamsKey).HartId.toString, new LoadPfDbBundle, basicDB = false)
+      val l3_table = ChiselDB.createTable(s"L3PrefetchTrace$hartId", new LoadPfDbBundle, basicDB = false)
       l3_table.log(l3_trace, l1_pf_to_l3.valid, "StreamPrefetchTrace", clock, reset)
 
       XSPerfAccumulate("prefetch_fire_l2", outer.l2_pf_sender_opt.get.out.head._1.addr_valid)
@@ -672,7 +673,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     PrintTriggerInfo(tEnable(j), tdata(j))
 
   // LoadUnit
-  val correctMissTrain = WireInit(Constantin.createRecord("CorrectMissTrain" + p(XSCoreParamsKey).HartId.toString, initValue = 0.U)) === 1.U
+  val correctMissTrain = Constantin.createRecord(s"CorrectMissTrain$hartId", initValue = false)
 
   for (i <- 0 until LduCnt) {
     loadUnits(i).io.redirect <> redirect
