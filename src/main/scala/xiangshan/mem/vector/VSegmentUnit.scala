@@ -184,18 +184,22 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     }.otherwise{
       stateNext := s_cache_resp
     }
-
+    /* if segment is inactive, don't need to wait access all of the field */
   }.elsewhen(state === s_latch_and_merge_data) {
-    when((segmentIdx === maxSegIdx) && (fieldIdx === maxNfields)) {
+    when((segmentIdx === maxSegIdx) && (fieldIdx === maxNfields) ||
+      ((segmentIdx === maxSegIdx) && !segmentActive)) {
+
       stateNext := s_finish // segment instruction finish
     }.otherwise {
       stateNext := s_tlb_req // need continue
     }
-
+    /* if segment is inactive, don't need to wait access all of the field */
   }.elsewhen(state === s_send_data) { // when sbuffer accept data
     when(!io.sbuffer.fire && segmentActive) {
       stateNext := s_send_data
-    }.elsewhen((segmentIdx === maxSegIdx) && (fieldIdx === maxNfields)) {
+    }.elsewhen(((segmentIdx === maxSegIdx) && (fieldIdx === maxNfields)) ||
+               ((segmentIdx === maxSegIdx) && !segmentActive)) {
+
       stateNext := s_finish // segment instruction finish
     }.otherwise {
       stateNext := s_tlb_req // need continue
@@ -408,10 +412,14 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   /**
    * update ptr
    * */
+  private val fieldActiveWirteFinish = io.sbuffer.fire && segmentActive // writedata finish and is a active segment
+  XSError(io.sbuffer.fire && !segmentActive, "Attempt write inactive segment to sbuffer, something wrong!\n")
+
+  private val segmentInactiveFinish = ((state === s_latch_and_merge_data) || (state === s_send_data)) && !segmentActive
 
   val splitPtrOffset = Mux(lmul.asSInt < 0.S, 1.U, (1.U << lmul).asUInt)
   splitPtrNext :=
-    Mux(fieldIdx === maxNfields,
+    Mux(fieldIdx === maxNfields || !segmentActive, // if segment is active, need to complete this segment, otherwise jump to next segment
      (deqPtr + ((segmentIdx +& 1.U) >> issueVLMAXLog2).asUInt), // segment finish
      (splitPtr + splitPtrOffset)) // next field
   dontTouch(issueVLMAXLog2)
@@ -419,7 +427,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   dontTouch(stridePtr)
 
   // update splitPtr
-  when(state === s_latch_and_merge_data || state === s_send_data){
+  when(state === s_latch_and_merge_data || (state === s_send_data && (fieldActiveWirteFinish || !segmentActive))){
     splitPtr := splitPtrNext
   }.elsewhen(io.in.fire && !instMicroOp.valid){
     splitPtr := deqPtr // initial splitPtr
@@ -430,24 +438,32 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   stridePtr       := deqPtr + strideOffset
 
   // update fieldIdx
-  when(io.in.fire && !instMicroOp.valid){
+  when(io.in.fire && !instMicroOp.valid){ // init
     fieldIdx := 0.U
-  }.elsewhen(fieldIdx === maxNfields && (state === s_latch_and_merge_data || state === s_send_data)){
+  }.elsewhen(state === s_latch_and_merge_data && segmentActive ||
+            (state === s_send_data && fieldActiveWirteFinish)){ // only if segment is active
+
+    /* next segment, only if segment complete */
+    fieldIdx := Mux(fieldIdx === maxNfields, 0.U, fieldIdx + 1.U)
+  }.elsewhen(segmentInactiveFinish){ // segment is inactive, go to next segment
     fieldIdx := 0.U
-  }.elsewhen((state === s_latch_and_merge_data || state === s_send_data)){
-    fieldIdx := fieldIdx + 1.U
-  }.elsewhen(!segmentActive){ // if segment is inactive, pass segment
-    fieldIdx := maxNfields
   }
   //update segmentIdx
   when(io.in.fire && !instMicroOp.valid){
     segmentIdx := 0.U
-  }.elsewhen(fieldIdx === maxNfields && (state === s_latch_and_merge_data || state === s_send_data) && segmentIdx =/= maxSegIdx){
+  }.elsewhen(fieldIdx === maxNfields && (state === s_latch_and_merge_data || (state === s_send_data && fieldActiveWirteFinish)) &&
+             segmentIdx =/= maxSegIdx){ // next segment, only if segment is active
+
+    segmentIdx := segmentIdx + 1.U
+  }.elsewhen(segmentInactiveFinish && segmentIdx =/= maxSegIdx){ // if segment is inactive, go to next segment
     segmentIdx := segmentIdx + 1.U
   }
 
   //update segmentOffset
-  when(fieldIdx === maxNfields && (state === s_latch_and_merge_data || state === s_send_data)){
+  /* when segment is active or segment is inactive, increase segmentOffset */
+  when((fieldIdx === maxNfields && (state === s_latch_and_merge_data || (state === s_send_data && fieldActiveWirteFinish))) ||
+       segmentInactiveFinish){
+
     segmentOffset := segmentOffset + Mux(isUnitStride(issueInstType), (maxNfields +& 1.U) << issueEew, stride(stridePtr.value))
   }
 
@@ -482,7 +498,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.uopwriteback.bits.vdIdxInField.get := DontCare
 
   //to RS
-  io.feedback.valid                   := state === s_finish
+  io.feedback.valid                   := state === s_finish && distanceBetween(enqPtr, deqPtr) =/= 0.U
   io.feedback.bits.hit                := true.B
   io.feedback.bits.robIdx             := instMicroOp.uop.robIdx
   io.feedback.bits.sourceType         := DontCare
