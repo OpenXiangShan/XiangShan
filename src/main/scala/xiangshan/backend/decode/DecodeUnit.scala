@@ -918,9 +918,13 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   // change vlsu to vseglsu when NF =/= 0.U
   io.deq.decodedInst.fuType := Mux1H(Seq(
     (!FuType.FuTypeOrR(decodedInst.fuType, FuType.vldu, FuType.vstu)                   ) -> decodedInst.fuType,
-    ( FuType.FuTypeOrR(decodedInst.fuType, FuType.vldu, FuType.vstu) && inst.NF === 0.U) -> decodedInst.fuType,
-    ( FuType.FuTypeOrR(decodedInst.fuType, FuType.vstu)              && inst.NF =/= 0.U) -> FuType.vsegstu.U,
-    ( FuType.FuTypeOrR(decodedInst.fuType, FuType.vldu)              && inst.NF =/= 0.U) -> FuType.vsegldu.U,
+    ( FuType.FuTypeOrR(decodedInst.fuType, FuType.vldu, FuType.vstu) && inst.NF === 0.U || (inst.NF =/= 0.U && (inst.MOP === "b00".U && inst.SUMOP === "b01000".U))) -> decodedInst.fuType,
+    // MOP === b00 && SUMOP === b01000: unit-stride whole register store
+    // MOP =/= b00                    : strided and indexed store
+    ( FuType.FuTypeOrR(decodedInst.fuType, FuType.vstu)              && inst.NF =/= 0.U && ((inst.MOP === "b00".U && inst.SUMOP =/= "b01000".U) || inst.MOP =/= "b00".U)) -> FuType.vsegstu.U,
+    // MOP === b00 && LUMOP === b01000: unit-stride whole register load
+    // MOP =/= b00                    : strided and indexed load
+    ( FuType.FuTypeOrR(decodedInst.fuType, FuType.vldu)              && inst.NF =/= 0.U && ((inst.MOP === "b00".U && inst.LUMOP =/= "b01000".U) || inst.MOP =/= "b00".U)) -> FuType.vsegldu.U,
   ))
   //-------------------------------------------------------------
   // Debug Info
