@@ -39,7 +39,7 @@ import xiangshan.mem.LqPtr
 // DCache specific parameters
 case class DCacheParameters
 (
-  nSets: Int = 256,
+  nSets: Int = 128,
   nWays: Int = 8,
   rowBits: Int = 64,
   tagECC: Option[String] = None,
@@ -230,7 +230,7 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
   }
   
   def get_alias(vaddr: UInt): UInt ={
-    require(blockOffBits + idxBits > pgIdxBits)
+    // require(blockOffBits + idxBits > pgIdxBits)
     if(blockOffBits + idxBits > pgIdxBits){
       vaddr(blockOffBits + idxBits - 1, pgIdxBits)
     }else{
@@ -1171,10 +1171,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   XSPerfAccumulate("late_load_hit", ldu.map(_.io.prefetch_info.naive.late_load_hit).reduce(_ || _))
 
   /** LoadMissDB: record load miss state */
-  val isWriteLoadMissTable = WireInit(Constantin.createRecord("isWriteLoadMissTable" + p(XSCoreParamsKey).HartId.toString))
-  val isFirstHitWrite = WireInit(Constantin.createRecord("isFirstHitWrite" + p(XSCoreParamsKey).HartId.toString))
-  val tableName = "LoadMissDB" + p(XSCoreParamsKey).HartId.toString
-  val siteName = "DcacheWrapper" + p(XSCoreParamsKey).HartId.toString
+  val hartId = p(XSCoreParamsKey).HartId
+  val isWriteLoadMissTable = Constantin.createRecord(s"isWriteLoadMissTable$hartId")
+  val isFirstHitWrite = Constantin.createRecord(s"isFirstHitWrite$hartId")
+  val tableName = s"LoadMissDB$hartId"
+  val siteName = s"DcacheWrapper$hartId"
   val loadMissTable = ChiselDB.createTable(tableName, new LoadMissEntry)
   for( i <- 0 until LoadPipelineWidth){
     val loadMissEntry = Wire(new LoadMissEntry)
@@ -1199,8 +1200,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     )
   }
 
-  val isWriteLoadAccessTable = WireInit(Constantin.createRecord("isWriteLoadAccessTable" + p(XSCoreParamsKey).HartId.toString))
-  val loadAccessTable = ChiselDB.createTable("LoadAccessDB" + p(XSCoreParamsKey).HartId.toString, new LoadAccessEntry)
+  val isWriteLoadAccessTable = Constantin.createRecord(s"isWriteLoadAccessTable$hartId")
+  val loadAccessTable = ChiselDB.createTable(s"LoadAccessDB$hartId", new LoadAccessEntry)
   for (i <- 0 until LoadPipelineWidth) {
     val loadAccessEntry = Wire(new LoadAccessEntry)
     loadAccessEntry.timeCnt := GTimer()

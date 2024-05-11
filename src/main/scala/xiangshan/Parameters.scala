@@ -99,14 +99,6 @@ case class XSCoreParameters
   FtbWays: Int = 4,
   TageTableInfos: Seq[Tuple3[Int,Int,Int]] =
   //       Sets  Hist   Tag
-    // Seq(( 2048,    2,    8),
-    //     ( 2048,    9,    8),
-    //     ( 2048,   13,    8),
-    //     ( 2048,   20,    8),
-    //     ( 2048,   26,    8),
-    //     ( 2048,   44,    8),
-    //     ( 2048,   73,    8),
-    //     ( 2048,  256,    8)),
     Seq(( 4096,    8,    8),
         ( 4096,   13,    8),
         ( 4096,   32,    8),
@@ -123,30 +115,24 @@ case class XSCoreParameters
   SCCtrBits: Int = 6,
   SCHistLens: Seq[Int] = Seq(0, 4, 10, 16),
   numBr: Int = 2,
-  branchPredictor: Function2[BranchPredictionResp, Parameters, Tuple2[Seq[BasePredictor], BranchPredictionResp]] =
-    ((resp_in: BranchPredictionResp, p: Parameters) => {
-      val ftb = Module(new FTB()(p))
-      val ubtb =Module(new FauFTB()(p))
-      // val bim = Module(new BIM()(p))
-      val tage = Module(new Tage_SC()(p))
-      val ras = Module(new RAS()(p))
-      val ittage = Module(new ITTage()(p))
-      val preds = Seq(ubtb, tage, ftb, ittage, ras)
-      preds.map(_.io := DontCare)
+  branchPredictor: (BranchPredictionResp, Parameters) => Tuple2[Seq[BasePredictor], BranchPredictionResp] =
+  (resp_in: BranchPredictionResp, p: Parameters) => {
+    val ftb = Module(new FTB()(p))
+    val uftb = Module(new FauFTB()(p))
+    val tage = Module(new Tage_SC()(p))
+    val ras = Module(new RAS()(p))
+    val ittage = Module(new ITTage()(p))
+    val preds = Seq(uftb, tage, ftb, ittage, ras)
+    preds.map(_.io := DontCare)
 
-      // ubtb.io.resp_in(0)  := resp_in
-      // bim.io.resp_in(0)   := ubtb.io.resp
-      // btb.io.resp_in(0)   := bim.io.resp
-      // tage.io.resp_in(0)  := btb.io.resp
-      // loop.io.resp_in(0)  := tage.io.resp
-      ubtb.io.in.bits.resp_in(0) := resp_in
-      tage.io.in.bits.resp_in(0) := ubtb.io.out
-      ftb.io.in.bits.resp_in(0)  := tage.io.out
-      ittage.io.in.bits.resp_in(0)  := ftb.io.out
-      ras.io.in.bits.resp_in(0) := ittage.io.out
+    uftb.io.in.bits.resp_in(0) := resp_in
+    tage.io.in.bits.resp_in(0) := uftb.io.out
+    ftb.io.in.bits.resp_in(0) := tage.io.out
+    ittage.io.in.bits.resp_in(0) := ftb.io.out
+    ras.io.in.bits.resp_in(0) := ittage.io.out
 
-      (preds, ras.io.out)
-    }),
+    (preds, ras.io.out)
+  },
   ICacheECCForceError: Boolean = false,
   IBufSize: Int = 48,
   IBufNBank: Int = 6, // IBuffer bank amount, should divide IBufSize

@@ -64,7 +64,7 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasPrefe
   io.pf_ctrl.confidence := confidence
 
   val depth_const = Wire(UInt(DEPTH_BITS.W))
-  depth_const := Constantin.createRecord("depth" + p(XSCoreParamsKey).HartId.toString, initValue = 32.U)
+  depth_const := Constantin.createRecord(s"depth${p(XSCoreParamsKey).HartId}", initValue = 32)
 
   val total_prefetch_cnt = RegInit(0.U((log2Up(TIMELY_CHECK_INTERVAL) + 1).W))
   val late_hit_prefetch_cnt = RegInit(0.U((log2Up(TIMELY_CHECK_INTERVAL) + 1).W))
@@ -119,7 +119,7 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasPrefe
     enable := false.B
   }
 
-  val enableDynamicPrefetcher_const = WireInit(Constantin.createRecord("enableDynamicPrefetcher" + p(XSCoreParamsKey).HartId.toString, initValue = 1.U))
+  val enableDynamicPrefetcher_const = Constantin.createRecord(s"enableDynamicPrefetcher${p(XSCoreParamsKey).HartId}", initValue = 1)
   val enableDynamicPrefetcher = enableDynamicPrefetcher_const === 1.U
 
   when(!enableDynamicPrefetcher) {
@@ -148,6 +148,7 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasPrefe
   }
   XSPerfAccumulate("trigger_disable", trigger_disable)
   XSPerfAccumulate("prefetch_hit", io.timely.prefetch_hit)
+  XSPerfAccumulate("disable_time", !enable)
 
   assert(depth =/= 0.U, "depth should not be zero")
 }
