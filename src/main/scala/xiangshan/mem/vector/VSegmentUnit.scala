@@ -118,9 +118,9 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     Mux(isIndexed(issueInstType), issueSew(1, 0), issueEew(1, 0))
   ) // max element number log2 in vd
   val issueVlMax                      = instMicroOp.vlmaxInVd // max elementIdx in vd
-  val issueMaxIdxInIndex              = GenVLMAX(Mux(issueEmul.asSInt > 0.S, 0.U, issueEmul), issueEew) // index element index in index register
+  val issueMaxIdxInIndex              = GenVLMAX(Mux(issueEmul.asSInt > 0.S, 0.U, issueEmul), issueEew(1, 0)) // index element index in index register
   val issueMaxIdxInIndexMask          = UIntToMask(issueMaxIdxInIndex, elemIdxBits)
-  val issueMaxIdxInIndexLog2          = GenVLMAXLog2(Mux(issueEmul.asSInt > 0.S, 0.U, issueEmul), issueEew)
+  val issueMaxIdxInIndexLog2          = GenVLMAXLog2(Mux(issueEmul.asSInt > 0.S, 0.U, issueEmul), issueEew(1, 0))
   val issueIndexIdx                   = segmentIdx & issueMaxIdxInIndexMask
   val segmentActive                   = (mask & UIntToOH(elemIdxInVd)).orR
 
@@ -464,7 +464,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   when((fieldIdx === maxNfields && (state === s_latch_and_merge_data || (state === s_send_data && fieldActiveWirteFinish))) ||
        segmentInactiveFinish){
 
-    segmentOffset := segmentOffset + Mux(isUnitStride(issueInstType), (maxNfields +& 1.U) << issueEew, stride(stridePtr.value))
+    segmentOffset := segmentOffset + Mux(isUnitStride(issueInstType), (maxNfields +& 1.U) << issueEew(1, 0), stride(stridePtr.value))
   }
 
   //update deqPtr
