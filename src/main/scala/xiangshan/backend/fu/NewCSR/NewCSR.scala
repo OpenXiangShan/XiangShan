@@ -566,8 +566,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   private val hasEvent = mretEvent.out.targetPc.valid || sretEvent.out.targetPc.valid || dretEvent.out.targetPc.valid ||
     trapEntryMEvent.out.targetPc.valid || trapEntryHSEvent.out.targetPc.valid || trapEntryVSEvent.out.targetPc.valid
 
-  io.out.EX_II     := permitMod.io.out.EX_II
-  io.out.EX_VI     := permitMod.io.out.EX_VI
+  io.out.EX_II := permitMod.io.out.EX_II || Cat(csrMods.map(mod => !(addr === mod.addr.U)).reverse).andR
+  io.out.EX_VI := permitMod.io.out.EX_VI
   io.out.flushPipe := flushPipe
 
   io.out.rData := Mux(ren, rdata, 0.U)
