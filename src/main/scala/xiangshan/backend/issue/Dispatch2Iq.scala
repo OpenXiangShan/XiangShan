@@ -798,7 +798,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   // There is no way to calculate the 'flow' for 'unit-stride' and 'whole' exactly
   private val numLsElem       = instType.zipWithIndex.map{ case (instTypeItem, index) =>
     Mux(
-      (LSUOpType.isWhole(fuOpType(index)) || isUnitStride(index)) && isVlsType(index),
+      (LSUOpType.isWhole(fuOpType(index)) || LSUOpType.isMasked(fuOpType(index)) || isUnitStride(index)) && isVlsType(index),
       2.U,
       GenRealFlowNum(instTypeItem, emul(index), lmul(index), eew(index), sew(index))
     )
