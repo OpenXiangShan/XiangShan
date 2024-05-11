@@ -70,6 +70,7 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case XSTileKey => (0 until value.toInt) map { i =>
               up(XSTileKey).head.copy(HartId = i)
+              up(XSTileKey).head.copy(MaxHadtId = value.toInt)
             }
             case MaxHartIdBits =>
               require(log2Up(value.toInt) <= 10, "MaxHartIdBits should not be larger than 10.")

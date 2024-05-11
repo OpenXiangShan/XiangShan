@@ -56,6 +56,7 @@ case object XSCoreParamsKey extends Field[XSCoreParameters]
 case class XSCoreParameters
 (
   HasPrefetch: Boolean = false,
+  MaxHadtId: Int = 0,
   HartId: Int = 0,
   XLEN: Int = 64,
   VLEN: Int = 128,
