@@ -122,7 +122,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   val issueMaxIdxInIndexMask          = UIntToMask(issueMaxIdxInIndex, elemIdxBits)
   val issueMaxIdxInIndexLog2          = GenVLMAXLog2(Mux(issueEmul.asSInt > 0.S, 0.U, issueEmul), issueEew(1, 0))
   val issueIndexIdx                   = segmentIdx & issueMaxIdxInIndexMask
-  val segmentActive                   = (mask & UIntToOH(elemIdxInVd)).orR
+  val segmentActive                   = (mask & UIntToOH(segmentIdx)).orR
 
   // Segment instruction's FSM
   /*
