@@ -173,7 +173,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       need_gpa := false.B
     }
     
-    TimeOutAssert(need_gpa && !resp_gpa_refill, 5000, s"port{i} need gpa long time not refill.")
+    TimeOutAssert(need_gpa && !resp_gpa_refill, timeOutThreshold, s"port{i} need gpa long time not refill.")
   
     val hit = e_hit || p_hit
     val miss = (!hit && enable) || hasGpf(i) && !p_hit && !(resp_gpa_refill && need_gpa_vpn_hit) && !isOnlys2xlate

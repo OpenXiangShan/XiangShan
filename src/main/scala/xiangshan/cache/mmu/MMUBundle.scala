@@ -1305,8 +1305,8 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
       (s1.entry.level.getOrElse(0.U) === 1.U && s2.entry.level.getOrElse(0.U) === 2.U) -> Cat(s1.entry.tag(sectorvpnLen - 1, vpnnLen - sectortlbwidth), s2.entry.tag(vpnnLen - 1,  sectortlbwidth))
     ))
     val s1_vpn = MuxLookup(level, s1tag)(Seq(
-      0.U -> Cat(s1tagFix(sectorvpnLen-1, vpnnLen * 2 - sectortlbwidth), vpn(vpnnLen*2-1, 0)),
-      1.U -> Cat(s1tagFix(sectorvpnLen-1, vpnnLen - sectortlbwidth), vpn(vpnnLen-1, 0)))
+      0.U -> Cat(s1tagFix(sectorvpnLen - 1, vpnnLen * 2 - sectortlbwidth), vpn(vpnnLen * 2 - 1, 0)),
+      1.U -> Cat(s1tagFix(sectorvpnLen - 1, vpnnLen - sectortlbwidth), vpn(vpnnLen - 1, 0)))
     ) 
     val s2_vpn = s2.entry.tag
     Mux(s2xlate === onlyStage2, s2_vpn, Mux(s2xlate === allStage, s1_vpn, s1tag))
