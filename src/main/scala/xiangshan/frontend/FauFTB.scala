@@ -107,7 +107,7 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   val s0_hit_oh = VecInit(ways.map(_.io.s0_resp_hit)).asUInt
   val s0_hit_data = Mux1H(s0_hit_oh, ways.map(_.io.s0_resp))
   io.out.s0_uftbHit := s0_hit_oh.orR
-  io.out.s0_uftbHasIndirect := s0_hit_data.jmpValid
+  io.out.s0_uftbHasIndirect := s0_hit_data.jmpValid && s0_hit_data.isJalr
 
 
   // s1 pred req
