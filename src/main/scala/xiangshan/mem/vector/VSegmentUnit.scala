@@ -434,7 +434,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   }
 
   // update stridePtr, only use in index
-  val strideOffset = Mux(isIndexed(issueInstType), (segmentIdx +& 1.U) >> issueMaxIdxInIndexLog2, 0.U)
+  val strideOffset = Mux(isIndexed(issueInstType), segmentIdx >> issueMaxIdxInIndexLog2, 0.U)
   stridePtr       := deqPtr + strideOffset
 
   // update fieldIdx
