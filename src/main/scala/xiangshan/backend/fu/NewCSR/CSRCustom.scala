@@ -31,10 +31,6 @@ trait CSRCustom { self: NewCSR =>
   val srnctl = Module(new CSRModule("Srnctl", new SrnctlBundle))
     .setAddr(0x5C4)
 
-  // sdsid: Differentiated Services ID
-  val sdsid = Module(new CSRModule("Sdsid"))
-    .setAddr(0x9C0)
-
   val sfetchctl = Module(new CSRModule("Sfetchctl", new SfetchctlBundle))
     .setAddr(0x9E0)
 
@@ -44,7 +40,6 @@ trait CSRCustom { self: NewCSR =>
     slvpredctl,
     smblockctl,
     srnctl,
-    sdsid,
     sfetchctl,
   )
 

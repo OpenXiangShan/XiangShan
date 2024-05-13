@@ -627,8 +627,6 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   io.out.custom.icache_parity_enable    := sfetchctl.rdata.ICACHE_PARITY_ENABLE.asBool
 
-  io.out.custom.dsid                    := sdsid.rdata.asUInt
-
   io.out.custom.lvpred_disable          := slvpredctl.rdata.LVPRED_DISABLE.asBool
   io.out.custom.no_spec_load            := slvpredctl.rdata.NO_SPEC_LOAD.asBool
   io.out.custom.storeset_wait_store     := slvpredctl.rdata.STORESET_WAIT_STORE.asBool

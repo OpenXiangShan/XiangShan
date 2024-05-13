@@ -242,8 +242,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       custom.l2_pf_store_only         := csrMod.io.out.custom.l2_pf_store_only
       // ICache
       custom.icache_parity_enable     := csrMod.io.out.custom.icache_parity_enable
-      // Labeled XiangShan
-      custom.dsid                     := csrMod.io.out.custom.dsid
       // Load violation predictor
       custom.lvpred_disable           := csrMod.io.out.custom.lvpred_disable
       custom.no_spec_load             := csrMod.io.out.custom.no_spec_load
