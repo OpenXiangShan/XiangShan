@@ -567,10 +567,6 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     updateResetU := true.B
   }
 
-  XSPerfAccumulate(s"ittage_reset_u", updateResetU)
-
-
-
   for (i <- 0 until ITTageNTables) {
     tables(i).io.update.valid := RegNext(updateMask(i), init = false.B)
     tables(i).io.update.reset_u := RegNext(updateResetU, init = false.B)
@@ -589,8 +585,12 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
   // all should be ready for req
   io.s1_ready := tables.map(_.io.req.ready).reduce(_&&_)
-  XSPerfAccumulate(f"ittage_write_blocks_read", !io.s1_ready)
+
   // Debug and perf info
+  XSPerfAccumulate("ittage_reset_u", updateResetU)
+  XSPerfAccumulate("ittage_write_blocks_read", !io.s1_ready)
+  XSPerfAccumulate("ittage_used", io.s0_fire(0) && s0_isIndirect)
+  XSPerfAccumulate("ittage_closed_due_to_uftb_info", io.s0_fire(0) && !s0_isIndirect)
 
   def pred_perf(name: String, cond: Bool)   = XSPerfAccumulate(s"${name}_at_pred", cond && io.s2_fire(3))
   def commit_perf(name: String, cond: Bool) = XSPerfAccumulate(s"${name}_at_commit", cond && updateValid)
@@ -643,14 +643,6 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   XSPerfAccumulate("updated", updateValid)
 
   if (debug) {
-    // for (b <- 0 until ITTageBanks) {
-    //   val m = updateMetas(b)
-    //   // val bri = u.metas(b)
-    //   XSDebug(updateValids(b), "update(%d): pc=%x, cycle=%d, hist=%x, taken:%b, misPred:%d, bimctr:%d, pvdr(%d):%d, altDiff:%d, pvdrU:%d, pvdrCtr:%d, alloc(%d):%d\n",
-    //     b.U, update.pc, 0.U, updateHist.predHist, update.full_pred.taken_mask(b), update.mispred_mask(b),
-    //     0.U, m.provider.valid, m.provider.bits, m.altDiffers, m.providerU, m.providerCtr, m.allocate.valid, m.allocate.bits
-    //   )
-    // }
     val s2_resps = RegEnable(s1_resps, io.s1_fire(3))
     XSDebug("req: v=%d, pc=0x%x\n", io.s0_fire(3), s0_pc_dup(3))
     XSDebug("s1_fire:%d, resp: pc=%x\n", io.s1_fire(3), debug_pc_s1)
@@ -668,6 +660,3 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
   generatePerfEvent()
 }
-
-
-// class Tage_SC(implicit p: Parameters) extends Tage with HasSC {}
