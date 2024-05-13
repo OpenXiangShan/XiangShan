@@ -34,6 +34,7 @@ object ArgParser {
       |--xs-help                  print this help message
       |--config <ConfigClassName>
       |--num-cores <Int>
+      |--hartidbits <Int>
       |--with-dramsim3
       |--fpga-platform
       |--enable-difftest
@@ -73,6 +74,10 @@ object ArgParser {
             }
             case MaxHartIdBits =>
               log2Up(value.toInt) max up(MaxHartIdBits)
+          }), tail)
+        case "--hartidbits" :: hartidbits :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case MaxHartIdBits => hartidbits
           }), tail)
         case "--with-dramsim3" :: tail =>
           nextOption(config.alter((site, here, up) => {
