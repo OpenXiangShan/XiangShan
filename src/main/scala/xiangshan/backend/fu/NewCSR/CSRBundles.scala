@@ -9,6 +9,7 @@ import xiangshan.backend.fu.NewCSR.CSRFunc._
 import xiangshan.backend.fu.fpu.Bundles.Fflags
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart, Vxsat}
 import xiangshan.frontend.BPUCtrl
+import chisel3.experimental.noPrefix
 
 object CSRBundles {
   class XtvecBundle extends CSRBundle {
@@ -43,25 +44,63 @@ object CSRBundles {
     val FIOM  = RO(     0).withReset(0.U)
   }
 
-  class PrivState extends Bundle {
+  class PrivState extends Bundle { self =>
     val PRVM = PrivMode(0)
     val V    = VirtMode(0)
 
-    def isModeHU: Bool = this.V === VirtMode.Off && this.PRVM === PrivMode.U
+    def isModeM: Bool = isModeMImpl()
 
-    def isModeHS: Bool = this.V === VirtMode.Off && this.PRVM === PrivMode.S
+    def isModeHS: Bool = isModeHSImpl()
 
-    def isModeHUorHS: Bool = this.V === VirtMode.Off && this.PRVM.isOneOf(PrivMode.S, PrivMode.U)
+    def isModeHU: Bool = isModeHUImpl()
 
-    def isModeM: Bool = this.V === VirtMode.Off && this.PRVM === PrivMode.M
+    def isModeVU: Bool = isModeVUImpl()
 
-    def isModeVU: Bool = this.V === VirtMode.On && this.PRVM === PrivMode.U
+    def isModeVS: Bool = isModeVSImpl()
 
-    def isModeVS: Bool = this.V === VirtMode.On && this.PRVM === PrivMode.S
+    def isModeHUorVU: Bool = this.PrvmIsU()
 
-    def isModeHUorVU: Bool = this.PRVM === PrivMode.U
+    def isVirtual: Bool = this.V.isOneOf(VirtMode.On)
 
-    def isVirtual: Bool = this.V === VirtMode.On
+    private[this] object PrvmIsM {
+      val v: Bool = dontTouch(WireInit(self.PRVM === PrivMode.M).suggestName("PrvmIsM"))
+      def apply(): Bool = v
+    }
+
+    private[this] object PrvmIsS {
+      val v: Bool = dontTouch(WireInit(self.PRVM === PrivMode.S).suggestName("PrvmIsS"))
+      def apply(): Bool = v
+    }
+
+    private[this] object PrvmIsU {
+      val v: Bool = dontTouch(WireInit(self.PRVM === PrivMode.U).suggestName("PrvmIsU"))
+      def apply(): Bool = v
+    }
+
+    private[this] object isModeMImpl {
+      val v: Bool = dontTouch(WireInit(PrvmIsM()).suggestName("isModeM"))
+      def apply(): Bool = v
+    }
+
+    private[this] object isModeHSImpl {
+      val v: Bool = dontTouch(WireInit(!self.isVirtual && noPrefix(PrvmIsS())).suggestName("isModeHS"))
+      def apply(): Bool = v
+    }
+
+    private[this] object isModeHUImpl {
+      val v: Bool = dontTouch(WireInit(!self.isVirtual && noPrefix(PrvmIsU())).suggestName("isModeHU"))
+      def apply(): Bool = v
+    }
+
+    private[this] object isModeVSImpl {
+      val v: Bool = dontTouch(WireInit(self.isVirtual && noPrefix(PrvmIsS())).suggestName("isModeVS"))
+      def apply(): Bool = v
+    }
+
+    private[this] object isModeVUImpl {
+      val v: Bool = dontTouch(WireInit(self.isVirtual && noPrefix(PrvmIsU())).suggestName("isModeVU"))
+      def apply(): Bool = v
+    }
 
     // VU < VS < HS < M
     // HU < HS < M

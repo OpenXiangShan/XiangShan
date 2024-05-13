@@ -16,6 +16,8 @@ import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart, Vxrm, Vxsat}
 import xiangshan.{HasXSParameter, XSCoreParamsKey, XSTileKey}
 
+import scala.collection.immutable.SeqMap
+
 object CSRConfig {
   final val GEILEN = 63
 
@@ -179,9 +181,14 @@ class NewCSR(implicit val p: Parameters) extends Module
   val PRVM = RegInit(PrivMode(0), PrivMode.M)
   val V = RegInit(VirtMode(0), VirtMode.Off)
   val debugMode = RegInit(false.B)
+
   private val privState = Wire(new PrivState)
   privState.PRVM := PRVM
   privState.V := V
+
+  private val isModeM              = privState.isModeM
+  private val (isModeHS, isModeHU) = (privState.isModeHS, privState.isModeHU)
+  private val (isModeVS, isModeVU) = (privState.isModeVS, privState.isModeVU)
 
   val permitMod = Module(new CSRPermitModule)
 
@@ -192,7 +199,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   val isDret = io.dret // Todo: check permission
   val isWfi  = io.wfi  // Todo: check permission
 
-  var csrRwMap =
+  var csrRwMap: SeqMap[Int, (CSRAddrWriteBundle[_], Data)] =
     machineLevelCSRMap ++
     supervisorLevelCSRMap ++
     hypervisorCSRMap ++
@@ -203,7 +210,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     customCSRMap ++
     pmpCSRMap
 
-  val csrMods =
+  val csrMods: Seq[CSRModule[_]] =
     machineLevelCSRMods ++
     supervisorLevelCSRMods ++
     hypervisorCSRMods ++
@@ -214,7 +221,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     customCSRMods ++
     pmpCSRMods
 
-  var csrOutMap =
+  var csrOutMap: SeqMap[Int, UInt] =
     machineLevelCSROutMap ++
     supervisorLevelCSROutMap ++
     hypervisorCSROutMap ++
@@ -230,8 +237,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   trapHandleMod.io.in.trapInfo.valid := hasTrap
   trapHandleMod.io.in.trapInfo.bits.trapVec := trapVec.asUInt
   trapHandleMod.io.in.trapInfo.bits.isInterrupt := trapIsInterrupt
-  trapHandleMod.io.in.privState.PRVM := PRVM
-  trapHandleMod.io.in.privState.V := V
+  trapHandleMod.io.in.privState := privState
   trapHandleMod.io.in.mideleg := mideleg.regOut
   trapHandleMod.io.in.medeleg := medeleg.regOut
   trapHandleMod.io.in.hideleg := hideleg.regOut
@@ -244,8 +250,7 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   // interrupt
   val intrMod = Module(new InterruptFilter)
-  intrMod.io.in.privState.PRVM := PRVM
-  intrMod.io.in.privState.V := V
+  intrMod.io.in.privState := privState
   intrMod.io.in.mstatusMIE := mstatus.rdata.MIE.asBool
   intrMod.io.in.sstatusSIE := mstatus.rdata.SIE.asBool
   intrMod.io.in.vsstatusSIE := vsstatus.rdata.SIE.asBool
@@ -281,8 +286,17 @@ class NewCSR(implicit val p: Parameters) extends Module
   pmpEntryMod.io.in.wdata := wdata
 
   for ((id, (wBundle, _)) <- csrRwMap) {
-    wBundle.wen := wenLegal && addr === id.U
-    wBundle.wdata := wdata
+    if (vsMapS.contains(id)) {
+      // VS access CSR by S: privState.isModeVS && addrMappedToVS === sMapVS(id).U
+      wBundle.wen := wenLegal && (isModeVS && addr === vsMapS(id).U) || (!isModeVS && addr === id.U)
+      wBundle.wdata := wdata
+    } else if (sMapVS.contains(id)) {
+      wBundle.wen := wenLegal && !isModeVS && addr === id.U
+      wBundle.wdata := wdata
+    } else {
+      wBundle.wen := wenLegal && addr === id.U
+      wBundle.wdata := wdata
+    }
   }
 
   // Todo: support set dirty only when fcsr has changed
@@ -293,8 +307,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   permitMod.io.in.csrAccess.wen := wen
   permitMod.io.in.csrAccess.addr := addr
 
-  permitMod.io.in.privState.V := V
-  permitMod.io.in.privState.PRVM := PRVM
+  permitMod.io.in.privState := privState
 
   permitMod.io.in.mret := io.mret
   permitMod.io.in.sret := io.sret
@@ -313,7 +326,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   }
 
   mhartid.hartid := this.io.fromTop.hartId
-  
+
   cfgs.zipWithIndex.foreach { case (mod, i) =>
     mod.w.wen := wen && (addr === (0x3A0 + i / 8 * 2).U)
     mod.w.wdata := pmpEntryMod.io.out.pmpCfgWData(8*((i%8)+1)-1,8*(i%8))
@@ -420,8 +433,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     }
     mod match {
       case m: HasISelectBundle =>
-        m.privState.PRVM := PRVM
-        m.privState.V := V
+        m.privState := privState
         m.miselect := miselect.regOut
         m.siselect := siselect.regOut
         m.mireg := mireg.regOut.asUInt
@@ -456,8 +468,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         in.dMode.PRVM := Mux(mstatus.rdata.MPRV.asBool, mstatus.rdata.MPP, PRVM)
         in.dMode.V := Mux(mstatus.rdata.MPRV.asBool, mstatus.rdata.MPV, V)
 
-        in.privState.PRVM := PRVM
-        in.privState.V := V
+        in.privState := privState
         in.mstatus := mstatus.regOut
         in.hstatus := hstatus.regOut
         in.sstatus := mstatus.sstatus
@@ -482,8 +493,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   sretEvent.valid := legalSret
   sretEvent.in match {
     case in =>
-      in.privState.PRVM := PRVM
-      in.privState.V := V
+      in.privState := privState
       in.sstatus := mstatus.sstatus
       in.hstatus := hstatus.regOut
       in.vsstatus := vsstatus.regOut
@@ -581,8 +591,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     trapEntryVSEvent.out.targetPc.valid -> trapEntryVSEvent.out.targetPc.bits,
   )), hasEvent)
 
-  io.out.privState.PRVM := PRVM
-  io.out.privState.V    := V
+  io.out.privState := privState
 
   io.out.fpState.frm := fcsr.frm
   io.out.fpState.off := mstatus.rdata.FS === ContextStatus.Off
@@ -685,8 +694,8 @@ class NewCSR(implicit val p: Parameters) extends Module
     val interrupt = trapHandleMod.io.out.causeNO.Interrupt.asBool
     val interruptNO = Mux(interrupt, trapNO, 0.U)
     val exceptionNO = Mux(!interrupt, trapNO, 0.U)
-    val ivmHS = privState.isModeHS && satp.rdata.MODE =/= SatpMode.Bare
-    val ivmVS = privState.isModeVS && vsatp.rdata.MODE =/= SatpMode.Bare
+    val ivmHS = isModeHS && satp.rdata.MODE =/= SatpMode.Bare
+    val ivmVS = isModeVS && vsatp.rdata.MODE =/= SatpMode.Bare
     // When enable virtual memory, the higher bit should fill with the msb of address of Sv39/Sv48/Sv57
     val exceptionPC = Mux(ivmHS || ivmVS, SignExt(trapPC, XLEN), ZeroExt(trapPC, XLEN))
 
