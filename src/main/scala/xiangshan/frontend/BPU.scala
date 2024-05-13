@@ -690,12 +690,13 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   val s3_redirect_on_target_dup = resp.s3.getTarget.zip(previous_s2_pred.getTarget).map {case (t1, t2) => t1 =/= t2}
   val s3_redirect_on_jalr_target_dup = resp.s3.full_pred.zip(previous_s2_pred.full_pred).map {case (fp1, fp2) => fp1.hit_taken_on_jalr && fp1.jalr_target =/= fp2.jalr_target}
   val s3_redirect_on_fall_thru_error_dup = resp.s3.fallThruError
+  val s3_redirect_on_ftb_multi_hit_dup = resp.s3.ftbMultiHit
 
-  for ((((((s3_redirect, s3_fire), s3_redirect_on_br_taken), s3_redirect_on_target), s3_redirect_on_fall_thru_error), s3_both_first_taken) <-
-    s3_redirect_dup zip s3_fire_dup zip s3_redirect_on_br_taken_dup zip s3_redirect_on_target_dup zip s3_redirect_on_fall_thru_error_dup zip s3_both_first_taken_dup) {
+  for (((((((s3_redirect, s3_fire), s3_redirect_on_br_taken), s3_redirect_on_target), s3_redirect_on_fall_thru_error), s3_redirect_on_ftb_multi_hit), s3_both_first_taken) <-
+    s3_redirect_dup zip s3_fire_dup zip s3_redirect_on_br_taken_dup zip s3_redirect_on_target_dup zip s3_redirect_on_fall_thru_error_dup zip s3_redirect_on_ftb_multi_hit_dup zip s3_both_first_taken_dup) {
 
     s3_redirect := s3_fire && (
-      (s3_redirect_on_br_taken && !s3_both_first_taken) || s3_redirect_on_target || s3_redirect_on_fall_thru_error
+      (s3_redirect_on_br_taken && !s3_both_first_taken) || s3_redirect_on_target || s3_redirect_on_fall_thru_error || s3_redirect_on_ftb_multi_hit
     )
   }
 

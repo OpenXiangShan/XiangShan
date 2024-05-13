@@ -429,6 +429,7 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
   val offsets = Vec(totalSlot, UInt(log2Ceil(PredictWidth).W))
   val fallThroughAddr = UInt(VAddrBits.W)
   val fallThroughErr = Bool()
+  val multiHit = Bool()
 
   val is_jal = Bool()
   val is_jalr = Bool()
@@ -502,6 +503,7 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
   }
 
   def fallThruError: Bool = hit && fallThroughErr
+  def ftbMultiHit: Bool = hit && multiHit
 
   def hit_taken_on_jmp =
     !real_slot_taken_mask().init.reduce(_||_) &&
@@ -582,6 +584,7 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
   def brTaken          = VecInit(full_pred.map(_.brTaken))
   def shouldShiftVec   = VecInit(full_pred.map(_.shouldShiftVec))
   def fallThruError    = VecInit(full_pred.map(_.fallThruError))
+  def ftbMultiHit      = VecInit(full_pred.map(_.ftbMultiHit))
 
   def taken = VecInit(cfiIndex.map(_.valid))
 
