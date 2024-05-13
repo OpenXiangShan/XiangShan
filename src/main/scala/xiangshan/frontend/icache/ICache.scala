@@ -629,7 +629,6 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   //Parity error port
   val errors = mainPipe.io.errors
-  //io.error <> RegNext(Mux1H(errors.map(e => e.valid -> e)))
   io.error <> RegEnable(Mux1H(errors.map(e => e.valid -> e)),errors.map(e => e.valid).reduce(_|_))
   io.error.valid := RegNext(errors.map(e => e.valid).reduce(_|_),init = false.B)
 
