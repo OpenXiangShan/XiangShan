@@ -305,6 +305,10 @@ package object xiangshan {
     def bltu       = "b111_1100".U
     def bgeu       = "b111_1110".U
 
+    // Zicond
+    def czero_eqz  = "b111_0100".U
+    def czero_nez  = "b111_0110".U
+
     // misc optype
     def and        = "b100_0000".U
     def andn       = "b100_0001".U
@@ -851,6 +855,7 @@ package object xiangshan {
     // freelist full
     val IntFlStall = Value("IntFlStall")
     val FpFlStall = Value("FpFlStall")
+    val VecFlStall = Value("VecFlStall")
     // dispatch queue full
     val IntDqStall = Value("IntDqStall")
     val FpDqStall = Value("FpDqStall")

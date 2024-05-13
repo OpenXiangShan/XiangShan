@@ -21,7 +21,7 @@ import org.chipsalliance.cde.config._
 import chisel3.util.{Valid, ValidIO}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
-import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors}
+import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors, MaxHartIdBits}
 import freechips.rocketchip.tilelink._
 import coupledL2.{CoupledL2, L2ParamKey}
 import system.HasSoCParameter
@@ -91,9 +91,10 @@ class L2Top()(implicit p: Parameters) extends LazyModule
   val l2cache = coreParams.L2CacheParamsOpt.map(l2param =>
     LazyModule(new CoupledL2()(new Config((_, _, _) => {
       case L2ParamKey => l2param.copy(
-          hartIds = Seq(p(XSCoreParamsKey).HartId),
+          hartId = p(XSCoreParamsKey).HartId,
           FPGAPlatform = debugOpts.FPGAPlatform
         )
+      case MaxHartIdBits => p(MaxHartIdBits)
     })))
   )
   val l2_binder = coreParams.L2CacheParamsOpt.map(_ => BankBinder(coreParams.L2NBanks, 64))
@@ -149,9 +150,9 @@ class L2Top()(implicit p: Parameters) extends LazyModule
       // debugTopDown <> l2cache.get.module.io.debugTopDown
       l2cache.get.module.io.debugTopDown.robHeadPaddr := DontCare
       l2cache.get.module.io.hartId := hartId.fromTile
-      l2cache.get.module.io.debugTopDown.robHeadPaddr.head := debugTopDown.robHeadPaddr
+      l2cache.get.module.io.debugTopDown.robHeadPaddr := debugTopDown.robHeadPaddr
       l2cache.get.module.io.debugTopDown.robTrueCommit := debugTopDown.robTrueCommit
-      debugTopDown.l2MissMatch := l2cache.get.module.io.debugTopDown.l2MissMatch.head
+      debugTopDown.l2MissMatch := l2cache.get.module.io.debugTopDown.l2MissMatch
       
       /* l2 tlb */
       l2_tlb_req.req.bits := DontCare

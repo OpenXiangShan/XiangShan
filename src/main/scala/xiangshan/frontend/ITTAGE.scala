@@ -263,7 +263,7 @@ class ITTageTable
   // io.req.ready := !bank_conflict
   XSPerfAccumulate(f"ittage_table_bank_conflict", bank_conflict)
 
-  us.io.wen := io.update.uValid
+  us.io.wen := io.update.uValid && io.update.valid
   us.io.waddr := update_idx
   us.io.wdata := io.update.u
 
@@ -502,7 +502,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   // and also uses a longer history than the provider
   val s2_allocatableSlots = VecInit(s2_resps.map(r => !r.valid && !r.bits.u)).asUInt &
     ~(LowerMask(UIntToOH(s2_provider), ITTageNTables) & Fill(ITTageNTables, s2_provided.asUInt))
-  val s2_allocLFSR   = LFSR64()(ITTageNTables - 1, 0)
+  val s2_allocLFSR   = random.LFSR(width = 15)(ITTageNTables - 1, 0)
   val s2_firstEntry  = PriorityEncoder(s2_allocatableSlots)
   val s2_maskedEntry = PriorityEncoder(s2_allocatableSlots & s2_allocLFSR)
   val s2_allocEntry  = Mux(s2_allocatableSlots(s2_maskedEntry), s2_maskedEntry, s2_firstEntry)
@@ -570,15 +570,15 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
 
   for (i <- 0 until ITTageNTables) {
-    tables(i).io.update.valid := RegNext(updateMask(i))
-    tables(i).io.update.reset_u := RegNext(updateResetU)
+    tables(i).io.update.valid := RegNext(updateMask(i), init = false.B)
+    tables(i).io.update.reset_u := RegNext(updateResetU, init = false.B)
     tables(i).io.update.correct := RegEnable(updateCorrect(i), updateMask(i))
     tables(i).io.update.target := RegEnable(updateTarget(i), updateMask(i))
     tables(i).io.update.old_target := RegEnable(updateOldTarget(i), updateMask(i))
     tables(i).io.update.alloc := RegEnable(updateAlloc(i), updateMask(i))
     tables(i).io.update.oldCtr := RegEnable(updateOldCtr(i), updateMask(i))
 
-    tables(i).io.update.uValid := RegEnable(updateUMask(i), updateMask(i))
+    tables(i).io.update.uValid := RegEnable(updateUMask(i), false.B, updateMask(i))
     tables(i).io.update.u := RegEnable(updateU(i), updateMask(i))
     tables(i).io.update.pc := RegEnable(update.pc, updateMask(i))
     // use fetch pc instead of instruction pc

@@ -357,10 +357,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       sms
   }
   prefetcherOpt.foreach{ pf => pf.io.l1_req.ready := false.B }
+  val hartId = p(XSCoreParamsKey).HartId
   val l1PrefetcherOpt: Option[BasePrefecher] = coreParams.prefetcher.map {
     case _ =>
       val l1Prefetcher = Module(new L1Prefetcher())
-      l1Prefetcher.io.enable := WireInit(Constantin.createRecord("enableL1StreamPrefetcher" + p(XSCoreParamsKey).HartId.toString, initValue = 1.U)) === 1.U
+      l1Prefetcher.io.enable := Constantin.createRecord(s"enableL1StreamPrefetcher$hartId", initValue = true)
       l1Prefetcher.pf_ctrl <> dcache.io.pf_ctrl
       l1Prefetcher.l2PfqBusy := io.l2PfqBusy
 
@@ -430,14 +431,17 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     load_unit.io.prefetch_req.valid <> l1_pf_req.valid
     load_unit.io.prefetch_req.bits <> l1_pf_req.bits
   })
+
   hybridUnits.foreach(hybrid_unit => {
     hybrid_unit.io.ldu_io.prefetch_req.valid <> l1_pf_req.valid
     hybrid_unit.io.ldu_io.prefetch_req.bits <> l1_pf_req.bits
   })
-  // NOTE: loadUnits(0) has higher bank conflict and miss queue arb priority than loadUnits(1)
-  // when loadUnits(0) stage 0 is busy, hw prefetch will never use that pipeline
-  val LowConfPort = 0
-  loadUnits(LowConfPort).io.prefetch_req.bits.confidence := 0.U
+
+  // NOTE: loadUnits(0) has higher bank conflict and miss queue arb priority than loadUnits(1) and loadUnits(2)
+  // when loadUnits(1)/loadUnits(2) stage 0 is busy, hw prefetch will never use that pipeline
+  val LowConfPorts = if(LduCnt == 2) Seq(1) else if (LduCnt == 3) Seq(1, 2) else Seq(0)
+  LowConfPorts.map{case i => loadUnits(i).io.prefetch_req.bits.confidence := 0.U}
+  hybridUnits.foreach(hybrid_unit => { hybrid_unit.io.ldu_io.prefetch_req.bits.confidence := 0.U })
 
   val canAcceptHighConfPrefetch = loadUnits.map(_.io.canAcceptHighConfPrefetch) ++
                                   hybridUnits.map(_.io.canAcceptLowConfPrefetch)
@@ -445,7 +449,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
                                  hybridUnits.map(_.io.canAcceptLowConfPrefetch)
   l1_pf_req.ready := (0 until LduCnt + HyuCnt).map{
     case i => {
-      if(i == LowConfPort) {
+      if(LowConfPorts.contains(i)) {
         loadUnits(i).io.canAcceptLowConfPrefetch
       }else {
         Mux(l1_pf_req.bits.confidence === 1.U, canAcceptHighConfPrefetch(i), canAcceptLowConfPrefetch(i))
@@ -505,7 +509,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
       val l2_trace = Wire(new LoadPfDbBundle)
       l2_trace.paddr := outer.l2_pf_sender_opt.get.out.head._1.addr
-      val table = ChiselDB.createTable("L2PrefetchTrace"+ p(XSCoreParamsKey).HartId.toString, new LoadPfDbBundle, basicDB = false)
+      val table = ChiselDB.createTable(s"L2PrefetchTrace$hartId", new LoadPfDbBundle, basicDB = false)
       table.log(l2_trace, l1_pf_to_l2.valid, "StreamPrefetchTrace", clock, reset)
       table.log(l2_trace, !l1_pf_to_l2.valid && sms_pf_to_l2.valid, "L2PrefetchTrace", clock, reset)
 
@@ -516,7 +520,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
       val l3_trace = Wire(new LoadPfDbBundle)
       l3_trace.paddr := outer.l3_pf_sender_opt.get.out.head._1.addr
-      val l3_table = ChiselDB.createTable("L3PrefetchTrace"+ p(XSCoreParamsKey).HartId.toString, new LoadPfDbBundle, basicDB = false)
+      val l3_table = ChiselDB.createTable(s"L3PrefetchTrace$hartId", new LoadPfDbBundle, basicDB = false)
       l3_table.log(l3_trace, l1_pf_to_l3.valid, "StreamPrefetchTrace", clock, reset)
 
       XSPerfAccumulate("prefetch_fire_l2", outer.l2_pf_sender_opt.get.out.head._1.addr_valid)
@@ -681,7 +685,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     PrintTriggerInfo(tEnable(j), tdata(j))
 
   // LoadUnit
-  val correctMissTrain = WireInit(Constantin.createRecord("CorrectMissTrain" + p(XSCoreParamsKey).HartId.toString, initValue = 0.U)) === 1.U
+  val correctMissTrain = Constantin.createRecord(s"CorrectMissTrain$hartId", initValue = false)
 
   for (i <- 0 until LduCnt) {
     loadUnits(i).io.redirect <> redirect

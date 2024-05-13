@@ -7,7 +7,7 @@ import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles.{ExuBypassBundle, ExuInput, ExuOutput}
 import xiangshan.backend.datapath.DataConfig.DataConfig
 import xiangshan.backend.datapath.RdConfig._
-import xiangshan.backend.datapath.WbConfig.{IntWB, PregWB, VfWB}
+import xiangshan.backend.datapath.WbConfig.{IntWB, PregWB, VfWB, FpWB}
 import xiangshan.backend.datapath.{DataConfig, WakeUpConfig}
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.issue.{IssueBlockParams, SchedulerType, IntScheduler, VfScheduler, MemScheduler}
@@ -50,7 +50,7 @@ case class ExeUnitParams(
   val needFpWen: Boolean = fuConfigs.map(_.needFpWen).reduce(_ || _)
   val needVecWen: Boolean = fuConfigs.map(_.needVecWen).reduce(_ || _)
   val needOg2: Boolean = fuConfigs.map(_.needOg2).reduce(_ || _)
-  val writeVfRf: Boolean = writeFpRf || writeVecRf
+  val writeVfRf: Boolean = writeVecRf
   val writeFflags: Boolean = fuConfigs.map(_.writeFflags).reduce(_ || _)
   val writeVxsat: Boolean = fuConfigs.map(_.writeVxsat).reduce(_ || _)
   val hasNoDataWB: Boolean = fuConfigs.map(_.hasNoDataWB).reduce(_ && _)
@@ -100,13 +100,15 @@ case class ExeUnitParams(
   }
 
   val writeIntFuConfigs: Seq[FuConfig] = fuConfigs.filter(x => x.writeIntRf)
-  val writeVfFuConfigs: Seq[FuConfig] = fuConfigs.filter(x => x.writeFpRf || x.writeVecRf)
+  val writeFpFuConfigs: Seq[FuConfig] = fuConfigs.filter(x => x.writeFpRf)
+  val writeVfFuConfigs: Seq[FuConfig] = fuConfigs.filter(x => x.writeVecRf)
 
   /**
     * Check if this exu has certain latency
     */
   def latencyCertain: Boolean = fuConfigs.map(x => x.latency.latencyVal.nonEmpty).reduce(_ && _)
   def intLatencyCertain: Boolean = writeIntFuConfigs.forall(x => x.latency.latencyVal.nonEmpty)
+  def fpLatencyCertain: Boolean = writeFpFuConfigs.forall(x => x.latency.latencyVal.nonEmpty)
   def vfLatencyCertain: Boolean = writeVfFuConfigs.forall(x => x.latency.latencyVal.nonEmpty)
   // only load use it
   def hasUncertainLatencyVal: Boolean = fuConfigs.map(x => x.latency.uncertainLatencyVal.nonEmpty).reduce(_ || _)
@@ -161,6 +163,15 @@ case class ExeUnitParams(
   }
 
   def intLatencyValMax: Int = intFuLatencyMap.values.fold(0)(_ max _)
+
+  def fpFuLatencyMap: Map[FuType.OHType, Int] = {
+    if (fpLatencyCertain)
+      writeFpFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
+    else
+      Map()
+  }
+
+  def fpLatencyValMax: Int = fpFuLatencyMap.values.fold(0)(_ max _)
 
   def vfFuLatencyMap: Map[FuType.OHType, Int] = {
     if (vfLatencyCertain)
@@ -259,6 +270,12 @@ case class ExeUnitParams(
   def getIntWBPort = {
     wbPortConfigs.collectFirst {
       case x: IntWB => x
+    }
+  }
+
+  def getFpWBPort = {
+    wbPortConfigs.collectFirst {
+      case x: FpWB => x
     }
   }
 

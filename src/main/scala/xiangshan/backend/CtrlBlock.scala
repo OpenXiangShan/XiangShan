@@ -35,7 +35,7 @@ import xiangshan.backend.rename.{Rename, RenameTableWrapper, SnapshotGenerator}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.frontend.{FtqPtr, FtqRead, Ftq_RF_Components}
 import xiangshan.mem.{LqPtr, LsqEnqIO}
-import xiangshan.backend.issue.{IntScheduler, VfScheduler, MemScheduler}
+import xiangshan.backend.issue.{IntScheduler, FpScheduler, VfScheduler, MemScheduler}
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   val rob_commits = Vec(CommitWidth, Valid(new RobCommitInfo))
@@ -90,7 +90,8 @@ class CtrlBlockImp(
   val dispatch = Module(new Dispatch)
   val intDq0 = Module(new DispatchQueue(dpParams.IntDqSize, RenameWidth, dpParams.IntDqDeqWidth/2, dqIndex = 0))
   val intDq1 = Module(new DispatchQueue(dpParams.IntDqSize, RenameWidth, dpParams.IntDqDeqWidth/2, dqIndex = 1))
-  val fpDq = Module(new DispatchQueue(dpParams.FpDqSize, RenameWidth, dpParams.FpDqDeqWidth))
+  val fpDq = Module(new DispatchQueue(dpParams.FpDqSize, RenameWidth, dpParams.VecDqDeqWidth))
+  val vecDq = Module(new DispatchQueue(dpParams.FpDqSize, RenameWidth, dpParams.VecDqDeqWidth))
   val lsDq = Module(new DispatchQueue(dpParams.LsDqSize, RenameWidth, dpParams.LsDqDeqWidth))
   val redirectGen = Module(new RedirectGenerator)
   private def hasRen: Boolean = true
@@ -133,8 +134,8 @@ class CtrlBlockImp(
 
   val wbDataNoStd = io.fromWB.wbData.filter(!_.bits.params.hasStdFu)
   val intScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[IntScheduler])
+  val fpScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[FpScheduler])
   val vfScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[VfScheduler])
-  val writeFpVecWbData = io.fromWB.wbData.filter(x => x.bits.params.writeFpRf || x.bits.params.writeVecRf)
   val memVloadWbData = io.fromWB.wbData.filter(x => x.bits.params.schdType.isInstanceOf[MemScheduler] && x.bits.params.hasVLoadFu)
   private val delayedNotFlushedWriteBackNums = wbDataNoStd.map(x => {
     val valid = x.valid
@@ -142,9 +143,15 @@ class CtrlBlockImp(
     val delayed = Wire(Valid(UInt(io.fromWB.wbData.size.U.getWidth.W)))
     delayed.valid := GatedValidRegNext(valid && !killedByOlder)
     val isIntSche = intScheWbData.contains(x)
+    val isFpSche = fpScheWbData.contains(x)
     val isVfSche = vfScheWbData.contains(x)
     val isMemVload = memVloadWbData.contains(x)
-    val canSameRobidxWbData = if (isIntSche || isVfSche) {
+    val canSameRobidxWbData = if (isIntSche) {
+      intScheWbData ++ fpScheWbData ++ vfScheWbData
+    } else if (isFpSche) {
+      intScheWbData ++ fpScheWbData
+    }
+    else if(isVfSche) {
       intScheWbData ++ vfScheWbData
     } else if (isMemVload) {
       memVloadWbData
@@ -483,11 +490,15 @@ class CtrlBlockImp(
   fpDq.io.enq <> dispatch.io.toFpDq
   fpDq.io.redirect <> s2_s4_redirect
 
+  vecDq.io.enq <> dispatch.io.toVecDq
+  vecDq.io.redirect <> s2_s4_redirect
+
   lsDq.io.enq <> dispatch.io.toLsDq
   lsDq.io.redirect <> s2_s4_redirect
 
   io.toIssueBlock.intUops <> (intDq0.io.deq :++ intDq1.io.deq)
-  io.toIssueBlock.vfUops  <> fpDq.io.deq
+  io.toIssueBlock.fpUops <> fpDq.io.deq
+  io.toIssueBlock.vfUops  <> vecDq.io.deq
   io.toIssueBlock.memUops <> lsDq.io.deq
   io.toIssueBlock.allocPregs <> dispatch.io.allocPregs
   io.toIssueBlock.flush   <> s2_s4_redirect
@@ -519,7 +530,6 @@ class CtrlBlockImp(
   io.robio.csr.perfinfo.retiredInstr <> RegNext(rob.io.csr.perfinfo.retiredInstr)
   io.robio.exception := rob.io.exception
   io.robio.exception.bits.pc := s1_robFlushPc
-  io.robio.exception.bits.gpaddr := 0.U // Todo: get gpaddr gpaMem
 
   // rob to mem block
   io.robio.lsq <> rob.io.lsq
@@ -548,7 +558,7 @@ class CtrlBlockImp(
 
   io.perfInfo.ctrlInfo.robFull := GatedValidRegNext(rob.io.robFull)
   io.perfInfo.ctrlInfo.intdqFull := GatedValidRegNext(intDq0.io.dqFull || intDq1.io.dqFull)
-  io.perfInfo.ctrlInfo.fpdqFull := GatedValidRegNext(fpDq.io.dqFull)
+  io.perfInfo.ctrlInfo.fpdqFull := GatedValidRegNext(vecDq.io.dqFull)
   io.perfInfo.ctrlInfo.lsdqFull := GatedValidRegNext(lsDq.io.dqFull)
 
   val pfevent = Module(new PFEvent)
@@ -561,7 +571,7 @@ class CtrlBlockImp(
     val perfEventsEu1     = Input(Vec(6, new PerfEvent))
   })
 
-  val perfFromUnits = Seq(decode, rename, dispatch, intDq0, intDq1, fpDq, lsDq, rob).flatMap(_.getPerfEvents)
+  val perfFromUnits = Seq(decode, rename, dispatch, intDq0, intDq1, vecDq, lsDq, rob).flatMap(_.getPerfEvents)
   val perfFromIO    = perfinfo.perfEventsEu0.map(x => ("perfEventsEu0", x.value)) ++
                         perfinfo.perfEventsEu1.map(x => ("perfEventsEu1", x.value)) ++
                         perfinfo.perfEventsRs.map(x => ("perfEventsRs", x.value))
@@ -592,7 +602,8 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val flush = ValidIO(new Redirect)
     val allocPregs = Vec(RenameWidth, Output(new ResetPregStateReq))
     val intUops = Vec(dpParams.IntDqDeqWidth, DecoupledIO(new DynInst))
-    val vfUops = Vec(dpParams.FpDqDeqWidth, DecoupledIO(new DynInst))
+    val vfUops = Vec(dpParams.VecDqDeqWidth, DecoupledIO(new DynInst))
+    val fpUops = Vec(dpParams.FpDqDeqWidth, DecoupledIO(new DynInst))
     val memUops = Vec(dpParams.LsDqDeqWidth, DecoupledIO(new DynInst))
   }
   val toDataPath = new Bundle {

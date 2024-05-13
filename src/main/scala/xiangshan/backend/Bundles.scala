@@ -406,14 +406,9 @@ object Bundles {
     p: Parameters
   ) extends Bundle {
     private val rfReadDataCfgSet: Seq[Set[DataConfig]] = exuParams.getRfReadDataCfgSet
-    // check which set both have fp and vec and remove fp
-    private val rfReadDataCfgSetFilterFp = rfReadDataCfgSet.map((set: Set[DataConfig]) =>
-      if (set.contains(FpData()) && set.contains(VecData())) set.filter(_ != FpData())
-      else set
-    )
 
     val rf: MixedVec[MixedVec[RfReadPortWithConfig]] = Flipped(MixedVec(
-      rfReadDataCfgSetFilterFp.map((set: Set[DataConfig]) =>
+      rfReadDataCfgSet.map((set: Set[DataConfig]) =>
         MixedVec(set.map((x: DataConfig) => new RfReadPortWithConfig(x, exuParams.rdPregIdxWidth)).toSeq)
       )
     ))
@@ -429,6 +424,13 @@ object Bundles {
     def getVfWbBusyBundle = common.getVfWen.toSeq
 
     def getIntRfReadValidBundle(issueValid: Bool): Seq[ValidIO[RfReadPortWithConfig]] = {
+      rf.zip(srcType).map {
+        case (rfRd: MixedVec[RfReadPortWithConfig], t: UInt) =>
+          makeValid(issueValid, rfRd.head)
+      }.toSeq
+    }
+
+    def getFpRfReadValidBundle(issueValid: Bool): Seq[ValidIO[RfReadPortWithConfig]] = {
       rf.zip(srcType).map {
         case (rfRd: MixedVec[RfReadPortWithConfig], t: UInt) =>
           makeValid(issueValid, rfRd.head)
@@ -461,31 +463,40 @@ object Bundles {
 
   class WbFuBusyTableWriteBundle(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
     private val intCertainLat = params.intLatencyCertain
+    private val fpCertainLat = params.fpLatencyCertain
     private val vfCertainLat = params.vfLatencyCertain
     private val intLat = params.intLatencyValMax
+    private val fpLat = params.fpLatencyValMax
     private val vfLat = params.vfLatencyValMax
 
     val intWbBusyTable = OptionWrapper(intCertainLat, UInt((intLat + 1).W))
+    val fpWbBusyTable = OptionWrapper(fpCertainLat, UInt((fpLat + 1).W))
     val vfWbBusyTable = OptionWrapper(vfCertainLat, UInt((vfLat + 1).W))
     val intDeqRespSet = OptionWrapper(intCertainLat, UInt((intLat + 1).W))
+    val fpDeqRespSet = OptionWrapper(fpCertainLat, UInt((fpLat + 1).W))
     val vfDeqRespSet = OptionWrapper(vfCertainLat, UInt((vfLat + 1).W))
   }
 
   class WbFuBusyTableReadBundle(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
     private val intCertainLat = params.intLatencyCertain
+    private val fpCertainLat = params.fpLatencyCertain
     private val vfCertainLat = params.vfLatencyCertain
     private val intLat = params.intLatencyValMax
+    private val fpLat = params.fpLatencyValMax
     private val vfLat = params.vfLatencyValMax
 
     val intWbBusyTable = OptionWrapper(intCertainLat, UInt((intLat + 1).W))
+    val fpWbBusyTable = OptionWrapper(fpCertainLat, UInt((fpLat + 1).W))
     val vfWbBusyTable = OptionWrapper(vfCertainLat, UInt((vfLat + 1).W))
   }
 
   class WbConflictBundle(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
     private val intCertainLat = params.intLatencyCertain
+    private val fpCertainLat = params.fpLatencyCertain
     private val vfCertainLat = params.vfLatencyCertain
 
     val intConflict = OptionWrapper(intCertainLat, Bool())
+    val fpConflict = OptionWrapper(fpCertainLat, Bool())
     val vfConflict = OptionWrapper(vfCertainLat, Bool())
   }
 
@@ -560,9 +571,13 @@ object Bundles {
       }
     }
 
-    def getVfWen = {
+    def getFpWen = {
       if (params.writeFpRf) this.fpWen
-      else if(params.writeVecRf) this.vecWen
+      else None
+    }
+
+    def getVfWen = {
+      if(params.writeVecRf) this.vecWen
       else None
     }
 
@@ -686,13 +701,24 @@ object Bundles {
       rfWrite
     }
 
-    def asVfRfWriteBundle(fire: Bool): RfWritePortWithConfig = {
-      val rfWrite = Wire(Output(new RfWritePortWithConfig(this.params.dataCfg, backendParams.getPregParams(VecData()).addrWidth)))
-      rfWrite.wen := (this.fpWen || this.vecWen) && fire
+    def asFpRfWriteBundle(fire: Bool): RfWritePortWithConfig = {
+      val rfWrite = Wire(Output(new RfWritePortWithConfig(this.params.dataCfg, backendParams.getPregParams(FpData()).addrWidth)))
+      rfWrite.wen := this.fpWen && fire
       rfWrite.addr := this.pdest
       rfWrite.data := this.data
       rfWrite.intWen := false.B
       rfWrite.fpWen := this.fpWen
+      rfWrite.vecWen := false.B
+      rfWrite
+    }
+
+    def asVfRfWriteBundle(fire: Bool): RfWritePortWithConfig = {
+      val rfWrite = Wire(Output(new RfWritePortWithConfig(this.params.dataCfg, backendParams.getPregParams(VecData()).addrWidth)))
+      rfWrite.wen := this.vecWen && fire
+      rfWrite.addr := this.pdest
+      rfWrite.data := this.data
+      rfWrite.intWen := false.B
+      rfWrite.fpWen := false.B
       rfWrite.vecWen := this.vecWen
       rfWrite
     }

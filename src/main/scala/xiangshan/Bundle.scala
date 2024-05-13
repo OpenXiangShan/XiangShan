@@ -138,8 +138,6 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
 class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val instr = UInt(32.W)
   val pc = UInt(VAddrBits.W)
-  // Todo: remove this
-  val gpaddr = UInt(GPAddrBits.W)
   val foldpc = UInt(MemPredPCWidth.W)
   val exceptionVec = ExceptionVec()
   val trigger = new TriggerCf
@@ -324,6 +322,7 @@ class ResetPregStateReq(implicit p: Parameters) extends XSBundle {
   // NOTE: set isInt and isFp both to 'false' when invalid
   val isInt = Bool()
   val isFp = Bool()
+  val isVec = Bool()
   val preg = UInt(PhyRegIdxWidth.W)
 }
 

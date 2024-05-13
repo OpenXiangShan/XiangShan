@@ -71,6 +71,7 @@ object OthersEntry {
   def apply(isComp: Boolean)(implicit p: Parameters, iqParams: IssueBlockParams): OthersEntry = {
     iqParams.schdType match {
       case IntScheduler() => new OthersEntry(isComp)
+      case FpScheduler()  => new OthersEntry(isComp)
       case MemScheduler() =>
         if (iqParams.isVecMemIQ) new OthersEntryVecMem(isComp)
         else new OthersEntry(isComp)

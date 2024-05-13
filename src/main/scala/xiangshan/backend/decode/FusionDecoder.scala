@@ -49,7 +49,7 @@ abstract class BaseFusionCase(pair: Seq[Valid[UInt]])(implicit p: Parameters)
 
   protected def getInstrTable(pat: BitPat): List[BitPat] = {
     // Only these instructions can be fused now
-    val allDecodeTable = XDecode.table ++ X64Decode.table ++ BDecode.table
+    val allDecodeTable = XDecode.table ++ BitmanipDecode.table ++ ScalarCryptoDecode.table
     allDecodeTable.filter(_._1 == pat).map(_._2).head
   }
   // Must sync these indices with MicroOp.decode

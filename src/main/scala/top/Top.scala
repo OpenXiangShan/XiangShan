@@ -27,6 +27,7 @@ import device._
 import chisel3.stage.ChiselGeneratorAnnotation
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.diplomacy._
+import freechips.rocketchip.tile._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.jtag.JTAGIO
 import chisel3.experimental.{annotate, ChiselAnnotation}
@@ -74,6 +75,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
         hartIds = tiles.map(_.HartId),
         FPGAPlatform = debugOpts.FPGAPlatform
       )
+      case MaxHartIdBits => p(MaxHartIdBits)
     })))
   )
 
