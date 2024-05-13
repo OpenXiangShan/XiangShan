@@ -15,7 +15,7 @@ import xiangshan.backend.fu.NewCSR.CSREvents.{SretEventSinkBundle, TrapEntryVSEv
 
 import scala.collection.immutable.SeqMap
 
-trait VirtualSupervisorLevel { self: NewCSR with HypervisorLevel =>
+trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with HypervisorLevel =>
 
   val vsstatus = Module(
     new CSRModule("VSstatus", new SstatusBundle)
@@ -86,6 +86,9 @@ trait VirtualSupervisorLevel { self: NewCSR with HypervisorLevel =>
 
   hip.fromVSip := vsip.toHip
 
+  val vstimecmp = Module(new CSRModule("VStimecmp"))
+    .setAddr(0x24D)
+
   val vsatp = Module(new CSRModule("VSatp", new SatpBundle) {
     // Ref: 13.2.18. Virtual Supervisor Address Translation and Protection Register (vsatp)
     // When V=0, a write to vsatp with an unsupported MODE value is either ignored as it is for satp, or the
@@ -110,6 +113,7 @@ trait VirtualSupervisorLevel { self: NewCSR with HypervisorLevel =>
     vscause,
     vstval,
     vsip,
+    vstimecmp,
     vsatp,
   )
 
@@ -123,6 +127,27 @@ trait VirtualSupervisorLevel { self: NewCSR with HypervisorLevel =>
   val virtualSupervisorCSROutMap: SeqMap[Int, UInt] = SeqMap.from(
     virtualSupervisorCSRMods.map(csr => (csr.addr -> csr.regOut.asInstanceOf[CSRBundle].asUInt))
   )
+
+  import freechips.rocketchip.rocket.CSRs
+
+  val sMapVS = SeqMap(
+    CSRs.sstatus  -> CSRs.vsstatus,
+    CSRs.sie      -> CSRs.vsie,
+    CSRs.stvec    -> CSRs.vstvec,
+    CSRs.sscratch -> CSRs.vsscratch,
+    CSRs.sepc     -> CSRs.vsepc,
+    CSRs.scause   -> CSRs.vscause,
+    CSRs.stval    -> CSRs.vstval,
+    CSRs.sip      -> CSRs.vsip,
+    CSRs.stimecmp -> CSRs.vstimecmp,
+    CSRs.siselect -> CSRs.vsiselect,
+    CSRs.sireg    -> CSRs.vsireg,
+    CSRs.stopei   -> CSRs.vstopei,
+    CSRs.satp     -> CSRs.vsatp,
+    CSRs.stopi    -> CSRs.vstopi,
+  )
+
+  val vsMapS: SeqMap[Int, Int] = SeqMap.from(sMapVS.map(x => (x._2 -> x._1)))
 }
 
 class VSip extends InterruptPendingBundle {

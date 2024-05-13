@@ -79,6 +79,9 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
   })
     .setAddr(0x144)
 
+  val stimecmp = Module(new CSRModule("Stimecmp"))
+    .setAddr(0x14D)
+
   val satp = Module(new CSRModule("Satp", new SatpBundle))
     .setAddr(0x180)
 
@@ -92,6 +95,7 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
     scause,
     stval,
     sip,
+    stimecmp,
     satp,
   )
 
