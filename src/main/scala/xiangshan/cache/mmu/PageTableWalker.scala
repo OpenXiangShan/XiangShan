@@ -317,7 +317,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   }
 
 
-  when (sfence.valid) {
+  when (flush) {
     idle := true.B
     s_pmp_check := true.B
     s_mem_req := true.B
