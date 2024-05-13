@@ -146,16 +146,6 @@ class NewCSR(implicit val p: Parameters) extends Module
       val imode = UInt(2.W)
       val dmode = UInt(2.W)
     })
-    // customCtrl
-    val customCtrl = Output(new Bundle {
-      val sbpctl = UInt(XLEN.W)
-      val spfctl = UInt(XLEN.W)
-      val slvpredctl = UInt(XLEN.W)
-      val smblockctl = UInt(XLEN.W)
-      val srnctl = UInt(XLEN.W)
-      val sdsid = UInt(XLEN.W)
-      val sfetchctl  = Bool()
-    })
   })
 
   val toAIA   = IO(Output(new CSRToAIABundle))
@@ -674,15 +664,6 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.tlb.sum := mstatus.rdata.SUM.asBool
   io.tlb.imode := PRVM.asUInt
   io.tlb.dmode := Mux((debugMode && dcsr.rdata.MPRVEN.asBool || !debugMode) && mstatus.rdata.MPRV.asBool, mstatus.rdata.MPP.asUInt, PRVM.asUInt)
-
-  // customCtrl
-  io.customCtrl.sbpctl := sbpctl.rdata.asUInt
-  io.customCtrl.spfctl := spfctl.rdata.asUInt
-  io.customCtrl.slvpredctl := slvpredctl.rdata.asUInt
-  io.customCtrl.smblockctl := smblockctl.rdata.asUInt
-  io.customCtrl.srnctl := srnctl.rdata.asUInt
-  io.customCtrl.sdsid := sdsid.rdata.asUInt
-  io.customCtrl.sfetchctl := sfetchctl.rdata.ICACHE_PARITY_ENABLE.asBool
 
   // Always instantiate basic difftest modules.
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
