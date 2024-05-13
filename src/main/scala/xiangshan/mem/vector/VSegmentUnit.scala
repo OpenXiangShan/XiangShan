@@ -119,7 +119,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   ) // max element number log2 in vd
   val issueVlMax                      = instMicroOp.vlmaxInVd // max elementIdx in vd
   val issueMaxIdxInIndex              = GenVLMAX(Mux(issueEmul.asSInt > 0.S, 0.U, issueEmul), issueEew(1, 0)) // index element index in index register
-  val issueMaxIdxInIndexMask          = UIntToMask(issueMaxIdxInIndex, elemIdxBits)
+  val issueMaxIdxInIndexMask          = GenVlMaxMask(issueMaxIdxInIndex, elemIdxBits)
   val issueMaxIdxInIndexLog2          = GenVLMAXLog2(Mux(issueEmul.asSInt > 0.S, 0.U, issueEmul), issueEew(1, 0))
   val issueIndexIdx                   = segmentIdx & issueMaxIdxInIndexMask
   val segmentActive                   = (mask & UIntToOH(segmentIdx)).orR
@@ -237,7 +237,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     instMicroOp.mask                  := srcMask
     instMicroOp.vstart                := 0.U
     instMicroOp.vlmaxInVd             := vlmaxInVd
-    instMicroOp.vlmaxMaskInVd         := UIntToMask(vlmaxInVd, elemIdxBits) // for merge data
+    instMicroOp.vlmaxMaskInVd         := GenVlMaxMask(vlmaxInVd, elemIdxBits) // for merge data
     instMicroOp.vl                    := io.in.bits.src_vl.asTypeOf(VConfig()).vl
     segmentOffset                     := 0.U
   }
@@ -475,8 +475,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   /*************************************************************************
    *                            dequeue logic
    *************************************************************************/
-  val uopIdxInField = GenUopIdxInField(instType, issueEmul, issueLmul, uopIdx(deqPtr.value))
-  val vdIdxInField  = GenVdIdxInField(instType, issueEmul, issueLmul, uopIdxInField) // for merge oldvd
+  val vdIdxInField = GenUopIdxInField(Mux(isIndexed(instType), issueLmul, issueEmul), uopIdx(deqPtr.value))
   /*select mask of vd, maybe remove in feature*/
   val realEw        = Mux(isIndexed(issueInstType), issueSew(1, 0), issueEew(1, 0))
   val maskDataVec: Vec[UInt] = VecDataToMaskDataVec(instMicroOp.mask, realEw)
@@ -495,7 +494,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.uopwriteback.bits.uop.vpu.vmask  := maskUsed
   io.uopwriteback.bits.uop.pdest      := pdest(deqPtr.value)
   io.uopwriteback.bits.debug          := DontCare
-  io.uopwriteback.bits.vdIdxInField.get := DontCare
+  io.uopwriteback.bits.vdIdxInField.get := vdIdxInField
 
   //to RS
   io.feedback.valid                   := state === s_finish && distanceBetween(enqPtr, deqPtr) =/= 0.U

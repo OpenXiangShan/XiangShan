@@ -470,6 +470,9 @@ object Log2Num {
 }
 
 object GenUopIdxInField {
+  /**
+   * Used in normal vector instruction
+   * */
   def apply (instType: UInt, emul: UInt, lmul: UInt, uopIdx: UInt): UInt = {
     val isIndexed = instType(0)
     val mulInField = Mux(
@@ -478,6 +481,20 @@ object GenUopIdxInField {
       emul
     )
     LookupTree(mulInField, List(
+      "b101".U -> 0.U,
+      "b110".U -> 0.U,
+      "b111".U -> 0.U,
+      "b000".U -> 0.U,
+      "b001".U -> uopIdx(0),
+      "b010".U -> uopIdx(1, 0),
+      "b011".U -> uopIdx(2, 0)
+    ))
+  }
+  /**
+   *  Only used in segment instruction.
+   * */
+  def apply (select: UInt, uopIdx: UInt): UInt = {
+    LookupTree(select, List(
       "b101".U -> 0.U,
       "b110".U -> 0.U,
       "b111".U -> 0.U,
@@ -577,6 +594,13 @@ object GenVLMAXLog2 extends VLSUConstants {
 }
 object GenVLMAX {
   def apply(lmul: UInt, sew: UInt): UInt = 1.U << GenVLMAXLog2(lmul, sew)
+}
+/**
+ * generate mask base on vlmax
+ * example: vlmax = b100, max = b011
+ * */
+object GenVlMaxMask{
+  def apply(vlmax: UInt, length: Int): UInt = (vlmax - 1.U)(length-1, 0)
 }
 
 object GenUSWholeRegVL extends VLSUConstants {
