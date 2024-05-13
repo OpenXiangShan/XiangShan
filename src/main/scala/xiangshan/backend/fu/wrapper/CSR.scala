@@ -107,10 +107,10 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.io.fromRob.commit.instNum.valid := true.B  // Todo: valid control signal
   csrMod.io.fromRob.commit.instNum.bits  := csrIn.perf.retiredInstr
 
-  csrMod.io.mret := isMret
-  csrMod.io.sret := isSret
-  csrMod.io.dret := isDret
-  csrMod.io.wfi  := isWfi
+  csrMod.io.mret := isMret && valid
+  csrMod.io.sret := isSret && valid
+  csrMod.io.dret := isDret && valid
+  csrMod.io.wfi  := isWfi  && valid
 
   csrMod.platformIRP.MEIP := csrIn.externalInterrupt.meip
   csrMod.platformIRP.MTIP := csrIn.externalInterrupt.mtip
