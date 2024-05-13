@@ -125,8 +125,8 @@ case class XSCoreParameters
     val preds = Seq(uftb, tage, ftb, ittage, ras)
     preds.map(_.io := DontCare)
 
-    ftb.io.fauftb_entry_in  := ubtb.io.fauftb_entry_out
-    ftb.io.fauftb_entry_hit_in := ubtb.io.fauftb_entry_hit_out
+    ftb.io.fauftb_entry_in  := uftb.io.fauftb_entry_out
+    ftb.io.fauftb_entry_hit_in := uftb.io.fauftb_entry_hit_out
 
     uftb.io.in.bits.resp_in(0) := resp_in
     tage.io.in.bits.resp_in(0) := uftb.io.out

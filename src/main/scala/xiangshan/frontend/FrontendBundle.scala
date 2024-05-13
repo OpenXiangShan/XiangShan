@@ -48,7 +48,7 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICache
     this.startAddr := b.startAddr
     this.nextlineStart := b.nextLineAddr
     when (b.fallThruError) {
-      val nextBlockHigherTemp = Mux(startAddr(log2Ceil(PredictWidth)+instOffsetBits), b.startAddr, b.nextLineAddr)
+      val nextBlockHigherTemp = Mux(startAddr(log2Ceil(PredictWidth)+instOffsetBits), b.nextLineAddr, b.startAddr)
       val nextBlockHigher = nextBlockHigherTemp(VAddrBits-1, log2Ceil(PredictWidth)+instOffsetBits+1)
       this.nextStartAddr :=
         Cat(nextBlockHigher,
@@ -542,7 +542,7 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
 
     val startLower        = Cat(0.U(1.W),    pc(instOffsetBits+log2Ceil(PredictWidth)-1, instOffsetBits))
     val endLowerwithCarry = Cat(entry.carry, entry.pftAddr)
-    fallThroughErr := startLower >= endLowerwithCarry
+    fallThroughErr := startLower >= endLowerwithCarry || endLowerwithCarry > startLower + (FetchWidth * 4).U
     fallThroughAddr := Mux(fallThroughErr, pc + (FetchWidth * 4).U, entry.getFallThrough(pc, last_stage_entry))
   }
 

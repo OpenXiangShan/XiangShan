@@ -421,7 +421,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     Mux1H(total_hits, ftb.io.r.resp.data).display(true.B)
   } // FTBBank
 
-  //for fauftbCounter
+  //FTB switch register & temporary storage of fauftb prediction results
   val s0_close_ftb_req = RegInit(false.B)
   val s1_close_ftb_req = RegEnable(s0_close_ftb_req, false.B, io.s0_fire(0))
   val s2_close_ftb_req = RegEnable(s1_close_ftb_req, false.B, io.s1_fire(0))
@@ -457,10 +457,6 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   }
   val s3_hit_dup = io.s2_fire.zip(s2_hit_dup).map {case (f, h) => RegEnable(h, 0.B, f)}
   val writeWay = Mux(s1_close_ftb_req,0.U,ftbBank.io.read_hits.bits)
-
-  //Consistent count of entries for fauftb and ftb
-  val ftb_false_hit = WireInit(false.B)
-  val fauftb_ftb_entry_consistent_counter = RegInit(0.U(64.W))
 
   def ftbslot_compare(x: FtbSlot, y: FtbSlot) = {
     VecInit(
@@ -504,6 +500,8 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     )
   }
 
+  //Consistent count of entries for fauftb and ftb
+  val fauftb_ftb_entry_consistent_counter = RegInit(0.U(64.W))
   val fauftb_ftb_entry_consistentSeq = ftbentry_compare(s2_fauftb_ftb_entry_dup(0),s2_ftbBank_dup(0))
   val fauftb_ftb_entry_consistent = fauftb_ftb_entry_consistentSeq.reduce(_&&_)
 
@@ -518,19 +516,14 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     s0_close_ftb_req := true.B
   }
 
+  //Clear counter during false_hit or ifuRedirect
+  val ftb_false_hit = WireInit(false.B)
   val needReopen = s0_close_ftb_req && (ftb_false_hit || io.redirectFromIFU)
-  // val needReopenReg = RegInit(false.B)
-  //Clear counter during false_hit
+  ftb_false_hit := io.update.valid && io.update.bits.false_hit
   when(needReopen){
     fauftb_ftb_entry_consistent_counter := 0.U
     s0_close_ftb_req := false.B
   }
-
-  // s0_close_ftb_req  := s1_close_ftb_req
-  // s0_close_ftb_req  := s1_close_ftb_req  && !(ftb_false_hit || io.redirectFromIFU || needReopenReg)
-
-
-  ftb_false_hit     := io.update.valid && io.update.bits.false_hit
 
   val s2_close_consistent = ftbentry_compare(s2_fauftb_ftb_entry_dup(0),s2_ftb_entry_dup(0)).reduce(_&&_)
   val s2_not_close_consistent = ftbentry_compare(s2_ftbBank_dup(0),s2_ftb_entry_dup(0)).reduce(_&&_)
@@ -608,14 +601,20 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   ftb_write.tag   := ftbAddr.getTag(Mux(update_now, update.pc, delay2_pc))(tagSize-1, 0)
 
   val write_valid = update_now || DelayN(u_valid && !u_meta.hit, 2)
+  val write_pc    = Mux(update_now, update.pc,       delay2_pc)
 
   ftbBank.io.update_write_data.valid := write_valid
   ftbBank.io.update_write_data.bits := ftb_write
-  ftbBank.io.update_pc          := Mux(update_now, update.pc,       delay2_pc)
+  ftbBank.io.update_pc          := write_pc
   ftbBank.io.update_write_way   := Mux(update_now, u_meta.writeWay, RegNext(ftbBank.io.update_hits.bits)) // use it one cycle later
   ftbBank.io.update_write_alloc := Mux(update_now, false.B,         RegNext(!ftbBank.io.update_hits.valid)) // use it one cycle later
   ftbBank.io.update_access := u_valid && !u_meta.hit
   ftbBank.io.s1_fire := io.s1_fire(0)
+
+  val ftb_write_fallThrough = ftb_write.entry.getFallThrough(write_pc)
+  when(write_valid){
+    assert(write_pc + (FetchWidth * 4).U >= ftb_write_fallThrough, s"FTB write_entry fallThrough address error!")
+  }
 
   XSDebug("req_v=%b, req_pc=%x, ready=%b (resp at next cycle)\n", io.s0_fire(0), s0_pc_dup(0), ftbBank.io.req_pc.ready)
   XSDebug("s2_hit=%b, hit_way=%b\n", s2_hit_dup(0), writeWay.asUInt)
