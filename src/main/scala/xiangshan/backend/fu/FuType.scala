@@ -41,8 +41,9 @@ object FuType extends OHEnumeration {
   val bku = addType(name = "bku")
 
   // fp
+  val falu = addType(name = "falu")
   val fmac = addType(name = "fmac")
-  val fmisc = addType(name = "fmisc")
+  val fcvt = addType(name = "fcvt")
   val fDivSqrt = addType(name = "fDivSqrt")
 
   // ls
@@ -120,7 +121,7 @@ object FuType extends OHEnumeration {
     val fuTypes = FuConfig.allConfigs.filter(_.latency == CertainLatency(0)).map(_.fuType)
     FuTypeOrR(fuType, fuTypes)
   }
-  val fpArithAll = Seq(fmac, fmisc, fDivSqrt)
+  val fpArithAll = Seq(falu, fcvt, fmac, fDivSqrt)
   val scalaMemAll = Seq(ldu, stu, mou)
   val vecOPI = Seq(vipu, vialuF, vppu, vimac, vidiv)
   val vecOPF = Seq(vfpu, vfalu, vfma, vfdiv, vfcvt, f2v)
@@ -223,7 +224,6 @@ object FuType extends OHEnumeration {
     fence -> "fence",
     bku -> "bku",
     fmac -> "fmac",
-    fmisc -> "fmisc",
     fDivSqrt -> "fdiv_fsqrt",
     ldu -> "load",
     stu -> "store",

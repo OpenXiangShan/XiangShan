@@ -91,7 +91,8 @@ class MinimalConfig(n: Int = 1) extends Config(
           FpDqSize = 12,
           LsDqSize = 12,
           IntDqDeqWidth = 8,
-          FpDqDeqWidth = 4,
+          FpDqDeqWidth = 6,
+          VecDqDeqWidth = 6,
           LsDqDeqWidth = 6
         ),
         intPreg = IntPregParams(

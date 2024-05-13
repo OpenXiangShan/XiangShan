@@ -120,9 +120,6 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
 
   def fromFtqRedirectSram(entry: Ftq_Redirect_SRAMEntry) = {
     // this.hist := entry.ghist
-    this.folded_hist := entry.folded_hist
-    this.lastBrNumOH := entry.lastBrNumOH
-    this.afhob := entry.afhob
     this.histPtr := entry.histPtr
     this.ssp := entry.ssp
     this.sctr := entry.sctr
@@ -322,6 +319,7 @@ class ResetPregStateReq(implicit p: Parameters) extends XSBundle {
   // NOTE: set isInt and isFp both to 'false' when invalid
   val isInt = Bool()
   val isFp = Bool()
+  val isVec = Bool()
   val preg = UInt(PhyRegIdxWidth.W)
 }
 

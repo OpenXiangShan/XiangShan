@@ -75,7 +75,15 @@ class FPToVecDecoder(implicit p: Parameters) extends XSModule {
     FMV_X_W,
   )
   val isLmulMf4Cvt = isLmulMf4Cvts.map(io.instr === _).reduce(_ || _)
-  val needReverseInsts = fpToVecInsts
+  val needReverseInsts = Seq(
+    FADD_S, FSUB_S, FADD_D, FSUB_D,
+    FEQ_S, FLT_S, FLE_S, FEQ_D, FLT_D, FLE_D,
+    FMIN_S, FMAX_S, FMIN_D, FMAX_D,
+    FMUL_S, FMUL_D,
+    FDIV_S, FDIV_D, FSQRT_S, FSQRT_D,
+    FMADD_S, FMSUB_S, FNMADD_S, FNMSUB_S, FMADD_D, FMSUB_D, FNMADD_D, FNMSUB_D,
+    FCLASS_S, FCLASS_D, FSGNJ_S, FSGNJ_D, FSGNJX_S, FSGNJX_D, FSGNJN_S, FSGNJN_D,
+  )
   val needReverseInst = needReverseInsts.map(_ === inst.ALL).reduce(_ || _)
   io.vpuCtrl := 0.U.asTypeOf(io.vpuCtrl)
   io.vpuCtrl.fpu.isFpToVecInst := isFpToVecInst

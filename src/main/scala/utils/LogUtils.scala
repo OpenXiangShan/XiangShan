@@ -46,7 +46,7 @@ object XSLog {
       val ctrlInfo = ctrlInfoOpt.getOrElse(Module(new LogPerfHelper).io)
       val logEnable = ctrlInfo.logEnable
       val logTimestamp = ctrlInfo.timer
-      val check_cond = (if (debugLevel == XSLogLevel.ERROR) true.B else logEnable) && cond && RegNext(true.B, false.B)
+      val check_cond = (if (debugLevel == XSLogLevel.ERROR) true.B else logEnable) && cond
       when (check_cond) {
         val commonInfo = p"[$debugLevel][time=$logTimestamp] $MagicStr: "
         printf((if (prefix) commonInfo else p"") + pable)

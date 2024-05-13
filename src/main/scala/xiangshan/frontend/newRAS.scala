@@ -46,7 +46,7 @@ object RASPtr {
   }
 }
 
-class RASMeta(implicit p: Parameters) extends XSBundle {
+class RASInternalMeta(implicit p: Parameters) extends XSBundle {
   val ssp = UInt(log2Up(RasSize).W)
   val sctr = UInt(RasCtrSize.W)
   val TOSW = new RASPtr
@@ -54,14 +54,27 @@ class RASMeta(implicit p: Parameters) extends XSBundle {
   val NOS = new RASPtr
 }
 
+object RASInternalMeta {
+  def apply(ssp: UInt, sctr: UInt, TOSW: RASPtr, TOSR: RASPtr, NOS: RASPtr)(implicit p: Parameters):RASInternalMeta = {
+    val e = Wire(new RASInternalMeta)
+    e.ssp := ssp
+    e.TOSW := TOSW
+    e.TOSR := TOSR
+    e.NOS := NOS
+    e
+  }
+}
+
+class RASMeta(implicit p: Parameters) extends XSBundle {
+  val ssp = UInt(log2Up(RasSize).W)
+  val TOSW = new RASPtr
+}
+
 object RASMeta {
   def apply(ssp: UInt, sctr: UInt, TOSW: RASPtr, TOSR: RASPtr, NOS: RASPtr)(implicit p: Parameters):RASMeta = {
     val e = Wire(new RASMeta)
     e.ssp := ssp
-    e.sctr := sctr
     e.TOSW := TOSW
-    e.TOSR := TOSR
-    e.NOS := NOS
     e
   }
 }
@@ -95,7 +108,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       val s2_fire = Input(Bool())
       val s3_fire = Input(Bool())
       val s3_cancel = Input(Bool())
-      val s3_meta = Input(new RASMeta)
+      val s3_meta = Input(new RASInternalMeta)
       val s3_missed_pop = Input(Bool())
       val s3_missed_push = Input(Bool())
       val s3_pushAddr = Input(UInt(VAddrBits.W))
@@ -105,10 +118,8 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       val commit_pop_valid = Input(Bool())
       val commit_push_addr = Input(UInt(VAddrBits.W))
       val commit_meta_TOSW = Input(new RASPtr)
-      val commit_meta_TOSR = Input(new RASPtr)
       // for debug purpose only
       val commit_meta_ssp = Input(UInt(log2Up(RasSize).W))
-      val commit_meta_sctr = Input(UInt(RasCtrSize.W))
 
       val redirect_valid = Input(Bool())
       val redirect_isCall = Input(Bool())
@@ -564,7 +575,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     a.targets.last := Mux(s2_is_jalr, io.out.s2.full_pred(i).jalr_target, io.in.bits.resp_in(0).s2.full_pred(i).targets.last)
   }
 
-  val s2_meta = Wire(new RASMeta)
+  val s2_meta = Wire(new RASInternalMeta)
   s2_meta.ssp := stack.ssp
   s2_meta.sctr := stack.sctr
   s2_meta.TOSR := stack.TOSR
@@ -609,13 +620,18 @@ class RAS(implicit p: Parameters) extends BasePredictor {
 
   // no longer need the top Entry, but TOSR, TOSW, ssp sctr
   // TODO: remove related signals
+
+  val last_stage_meta = Wire(new RASMeta)
+  last_stage_meta.ssp := s3_meta.ssp
+  last_stage_meta.TOSW := s3_meta.TOSW
+
   io.out.last_stage_spec_info.sctr  := s3_meta.sctr
   io.out.last_stage_spec_info.ssp := s3_meta.ssp
   io.out.last_stage_spec_info.TOSW := s3_meta.TOSW
   io.out.last_stage_spec_info.TOSR := s3_meta.TOSR
   io.out.last_stage_spec_info.NOS := s3_meta.NOS
   io.out.last_stage_spec_info.topAddr := s3_top
-  io.out.last_stage_meta := s3_meta.asUInt
+  io.out.last_stage_meta := last_stage_meta.asUInt
 
 
   val redirect = RegNextWithEnable(io.redirect)
@@ -644,9 +660,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   stack.commit_pop_valid := updateValid && update.is_ret_taken
   stack.commit_push_addr := update.ftb_entry.getFallThrough(update.pc) + Mux(update.ftb_entry.last_may_be_rvi_call, 2.U, 0.U)
   stack.commit_meta_TOSW := updateMeta.TOSW
-  stack.commit_meta_TOSR := updateMeta.TOSR
   stack.commit_meta_ssp := updateMeta.ssp
-  stack.commit_meta_sctr := updateMeta.sctr
 
 
   XSPerfAccumulate("ras_s3_cancel", s3_cancel)

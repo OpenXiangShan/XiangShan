@@ -22,7 +22,7 @@ import org.chipsalliance.cde.config._
 import chisel3.util.{Valid, ValidIO}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
-import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors}
+import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors, MaxHartIdBits}
 import freechips.rocketchip.tilelink._
 import coupledL2.{L2ParamKey, EnableCHI}
 import coupledL2.tl2tl.TL2TLCoupledL2
@@ -98,22 +98,24 @@ class L2Top()(implicit p: Parameters) extends LazyModule
   val tl2tl_l2cache = if (enableL2 && !enableCHI) {
     Some(LazyModule(new TL2TLCoupledL2()(new Config((_, _, _) => {
       case L2ParamKey => coreParams.L2CacheParamsOpt.get.copy(
-        hartIds = Seq(p(XSCoreParamsKey).HartId),
+        hartId = p(XSCoreParamsKey).HartId,
         FPGAPlatform = debugOpts.FPGAPlatform
       )
       case EnableCHI => false
       case BankBitsKey => log2Ceil(coreParams.L2NBanks)
+      case MaxHartIdBits => p(MaxHartIdBits)
     }))))
   } else None
   val tl2chi_l2cache = if (enableL2 && enableCHI) {
     Some(LazyModule(new TL2CHICoupledL2()(new Config((_, _, _) => {
       case L2ParamKey => coreParams.L2CacheParamsOpt.get.copy(
-        hartIds = Seq(p(XSCoreParamsKey).HartId),
+        hartId = p(XSCoreParamsKey).HartId,
         FPGAPlatform = debugOpts.FPGAPlatform
       )
       case EnableCHI => true
       // case XSCoreParamsKey => p(XSCoreParamsKey)
       case BankBitsKey => log2Ceil(coreParams.L2NBanks)
+      case MaxHartIdBits => p(MaxHartIdBits)
     }))))
   } else None
   val l2_binder = coreParams.L2CacheParamsOpt.map(_ => BankBinder(coreParams.L2NBanks, 64))
@@ -181,9 +183,9 @@ class L2Top()(implicit p: Parameters) extends LazyModule
       // debugTopDown <> tl2tl_l2cache.get.module.io.debugTopDown
       tl2tl_l2cache.get.module.io.debugTopDown.robHeadPaddr := DontCare
       tl2tl_l2cache.get.module.io.hartId := hartId.fromTile
-      tl2tl_l2cache.get.module.io.debugTopDown.robHeadPaddr.head := debugTopDown.robHeadPaddr
+      tl2tl_l2cache.get.module.io.debugTopDown.robHeadPaddr := debugTopDown.robHeadPaddr
       tl2tl_l2cache.get.module.io.debugTopDown.robTrueCommit := debugTopDown.robTrueCommit
-      debugTopDown.l2MissMatch := tl2tl_l2cache.get.module.io.debugTopDown.l2MissMatch.head
+      debugTopDown.l2MissMatch := tl2tl_l2cache.get.module.io.debugTopDown.l2MissMatch
 
       /* l2 tlb */
       l2_tlb_req.req.bits := DontCare
@@ -206,10 +208,10 @@ class L2Top()(implicit p: Parameters) extends LazyModule
       // debugTopDown <> tl2chi_l2cache.get.module.io.debugTopDown
       tl2chi_l2cache.get.module.io.debugTopDown.robHeadPaddr := DontCare
       tl2chi_l2cache.get.module.io.hartId := hartId.fromTile
-      tl2chi_l2cache.get.module.io.debugTopDown.robHeadPaddr.head := debugTopDown.robHeadPaddr
+      tl2chi_l2cache.get.module.io.debugTopDown.robHeadPaddr := debugTopDown.robHeadPaddr
       tl2chi_l2cache.get.module.io.debugTopDown.robTrueCommit := debugTopDown.robTrueCommit
       tl2chi_l2cache.get.module.io.nodeID := nodeID.get
-      debugTopDown.l2MissMatch := tl2chi_l2cache.get.module.io.debugTopDown.l2MissMatch.head
+      debugTopDown.l2MissMatch := tl2chi_l2cache.get.module.io.debugTopDown.l2MissMatch
 
       /* l2 tlb */
       l2_tlb_req.req.bits := DontCare
