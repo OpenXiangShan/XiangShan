@@ -1673,22 +1673,29 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(numOfUop - 1.U).blockBackward := isSdSegment
     }
     is(UopSplitType.VEC_I_LDST) {
-      def genCsBundle_SEGMENT_INDEXED_LOADSTORE(emul:Int): Unit ={
+      def genCsBundle_SEGMENT_INDEXED_LOADSTORE(lmul:Int, nf:Int): Unit ={
         for (i <- 0 until MAX_VLMUL) {
-          val src0Type = SrcType.fp
-          val src1Type = if (i < emul) SrcType.vp else SrcType.no
-          // lsrc0 is useless after uop 0, but we use it to ensure the correctness of the uop dependency
-          val lsrc0 = FP_TMP_REG_MV.U
-          val oldVd = dest + i.U
-          csBundle(i + 1).srcType(0) := src0Type
-          csBundle(i + 1).lsrc(0) := lsrc0
-          csBundle(i + 1).srcType(1) := src1Type
+          val vecWen = if (i < lmul * nf) true.B else false.B
+          val src2Type = if (i < lmul * nf) SrcType.vp else SrcType.no
+          csBundle(i + 1).srcType(0) := SrcType.fp
+          csBundle(i + 1).lsrc(0) := FP_TMP_REG_MV.U
+          csBundle(i + 1).srcType(1) := SrcType.no
           csBundle(i + 1).lsrc(1) := src2 + i.U
-          csBundle(i + 1).srcType(2) := SrcType.vp
-          csBundle(i + 1).lsrc(2) := oldVd
+          csBundle(i + 1).srcType(2) := src2Type
+          csBundle(i + 1).lsrc(2) := dest + i.U
           csBundle(i + 1).ldest := dest + i.U
+          csBundle(i + 1).rfWen := false.B
+          csBundle(i + 1).fpWen := false.B
+          csBundle(i + 1).vecWen := vecWen
           csBundle(i + 1).uopIdx := i.U
           csBundle(i + 1).vlsInstr := true.B
+        }
+      }
+      def genCsBundle_SEGMENT_INDEXED_LOADSTORE_SRC1(emul:Int): Unit ={
+        for (i <- 0 until MAX_VLMUL) {
+          val src1Type = if (i < emul) SrcType.vp else SrcType.no
+          csBundle(i + 1).srcType(1) := src1Type
+          csBundle(i + 1).lsrc(1) := src2 + i.U
         }
       }
 
@@ -1735,16 +1742,68 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         }
       }.otherwise{
         // nf > 1, is segment indexed load/store
-        genCsBundle_SEGMENT_INDEXED_LOADSTORE(1)
-        switch(vemul) {
-          is("b001".U ){
-            genCsBundle_SEGMENT_INDEXED_LOADSTORE(2)
+        // gen src0, vd
+        switch(simple_lmul) {
+          is(0.U) {
+            switch(nf) {
+              is(1.U) {
+                genCsBundle_SEGMENT_INDEXED_LOADSTORE(1, 2)
+              }
+              is(2.U) {
+                genCsBundle_SEGMENT_INDEXED_LOADSTORE(1, 3)
+              }
+              is(3.U) {
+                genCsBundle_SEGMENT_INDEXED_LOADSTORE(1, 4)
+              }
+              is(4.U) {
+                genCsBundle_SEGMENT_INDEXED_LOADSTORE(1, 5)
+              }
+              is(5.U) {
+                genCsBundle_SEGMENT_INDEXED_LOADSTORE(1, 6)
+              }
+              is(6.U) {
+                genCsBundle_SEGMENT_INDEXED_LOADSTORE(1, 7)
+              }
+              is(7.U) {
+                genCsBundle_SEGMENT_INDEXED_LOADSTORE(1, 8)
+              }
+            }
           }
-          is("b010".U ){
-            genCsBundle_SEGMENT_INDEXED_LOADSTORE(4)
+          is(1.U) {
+            switch(nf) {
+              is(1.U) {
+                genCsBundle_SEGMENT_INDEXED_LOADSTORE(2, 2)
+              }
+              is(2.U) {
+                genCsBundle_SEGMENT_INDEXED_LOADSTORE(2, 3)
+              }
+              is(3.U) {
+                genCsBundle_SEGMENT_INDEXED_LOADSTORE(2, 4)
+              }
+            }
           }
-          is("b011".U ){
-            genCsBundle_SEGMENT_INDEXED_LOADSTORE(8)
+          is(2.U) {
+            switch(nf) {
+              is(1.U) {
+                genCsBundle_SEGMENT_INDEXED_LOADSTORE(4, 2)
+              }
+            }
+          }
+        }
+
+        // gen src1
+        switch(simple_emul) {
+          is(0.U) {
+            genCsBundle_SEGMENT_INDEXED_LOADSTORE_SRC1(1)
+          }
+          is(1.U) {
+            genCsBundle_SEGMENT_INDEXED_LOADSTORE_SRC1(2)
+          }
+          is(2.U) {
+            genCsBundle_SEGMENT_INDEXED_LOADSTORE_SRC1(4)
+          }
+          is(3.U) {
+            genCsBundle_SEGMENT_INDEXED_LOADSTORE_SRC1(8)
           }
         }
       }
