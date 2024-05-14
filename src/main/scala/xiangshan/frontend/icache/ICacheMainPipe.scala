@@ -643,6 +643,11 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     */
   // data/meta parity error
   val s2_data_errors = Wire(Vec(PortNumber,Vec(nWays, Bool())))
+
+  val s1_fire_delay1 = RegNext(s1_fire,init = false.B)
+  val s1_fire_delay2 = RegNext(s1_fire_delay1, init = false.B)
+  val s1_double_line_delay2 = RegNext(RegNext(s1_double_line))
+
   (0 until PortNumber).map{ i =>
     val read_datas = s2_data_cacheline(i).asTypeOf(Vec(nWays,Vec(dataCodeUnitNum, UInt(dataCodeUnit.W))))
     val read_codes = s2_data_errorBits(i).asTypeOf(Vec(nWays,Vec(dataCodeUnitNum, UInt(dataCodeBits.W))))
@@ -655,11 +660,11 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     // register for timing
     if(i == 0){
       (0 until nWays).map{ w =>
-        s2_data_errors(i)(w) := RegNext(RegNext(s1_fire)) && RegNext(data_error_wayBits(w)).reduce(_||_)
+        s2_data_errors(i)(w) := s1_fire_delay2 && RegEnable(data_error_wayBits(w),s1_fire_delay1).reduce(_||_)
       }
     } else {
       (0 until nWays).map{ w =>
-        s2_data_errors(i)(w) := RegNext(RegNext(s1_fire)) && RegNext(RegNext(s1_double_line)) && RegNext(data_error_wayBits(w)).reduce(_||_)
+        s2_data_errors(i)(w) := s1_fire_delay2 && s1_double_line_delay2 && RegEnable(data_error_wayBits(w),s1_fire_delay1).reduce(_||_)
       }
     }
   }
@@ -669,12 +674,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_parity_error       = VecInit((0 until PortNumber).map(i => RegNext(s2_parity_meta_error(i)) || s2_parity_data_error(i)))
 
   for(i <- 0 until PortNumber){
-    io.errors(i).valid            := RegNext(s2_parity_error(i) && RegNext(RegNext(s1_fire)))
-    io.errors(i).report_to_beu    := RegNext(s2_parity_error(i) && RegNext(RegNext(s1_fire)))
-    io.errors(i).paddr            := RegNext(RegNext(s2_req_paddr(i)))
+    val valid                      = s2_parity_error(i) && s1_fire_delay2
+    io.errors(i).valid            := RegNext(valid)
+    io.errors(i).report_to_beu    := RegNext(valid)
+    io.errors(i).paddr            := RegEnable(RegEnable(s2_req_paddr(i), s1_fire_delay1), valid)
     io.errors(i).source           := DontCare
-    io.errors(i).source.tag       := RegNext(RegNext(s2_parity_meta_error(i)))
-    io.errors(i).source.data      := RegNext(s2_parity_data_error(i))
+    io.errors(i).source.tag       := RegEnable(RegEnable(s2_parity_meta_error(i), s1_fire_delay1), valid)
+    io.errors(i).source.data      := RegEnable(s2_parity_data_error(i), valid)
     io.errors(i).source.l2        := false.B
     io.errors(i).opType           := DontCare
     io.errors(i).opType.fetch     := true.B
@@ -685,7 +691,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     when(RegNext(s2_fire && s2_corrupt(i))){
       io.errors(i).valid            := true.B
       io.errors(i).report_to_beu    := false.B // l2 should have report that to bus error unit, no need to do it again
-      io.errors(i).paddr            := RegNext(s2_req_paddr(i))
+      io.errors(i).paddr            := RegEnable(s2_req_paddr(i),s1_fire_delay1)
       io.errors(i).source.tag       := false.B
       io.errors(i).source.data      := false.B
       io.errors(i).source.l2        := true.B
