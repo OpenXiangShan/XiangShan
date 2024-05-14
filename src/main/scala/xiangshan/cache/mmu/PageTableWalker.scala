@@ -837,4 +837,12 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
       finish := true.B
     }
   }
+   when (flush) {
+    idle := true.B
+    s_pmp_check := true.B
+    s_mem_req := true.B
+    w_mem_resp := true.B
+    accessFault := false.B
+    mem_addr_update := false.B
+  }
 }
