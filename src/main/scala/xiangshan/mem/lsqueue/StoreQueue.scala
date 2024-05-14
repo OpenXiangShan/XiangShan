@@ -32,6 +32,7 @@ import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
 import xiangshan.backend.decode.isa.bitfield.{Riscv32BitInst, XSInstBitFields}
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.FuType
+import xiangshan.ExceptionNO._
 
 class SqPtr(implicit p: Parameters) extends CircularQueuePtr[SqPtr](
   p => p(XSCoreParamsKey).StoreQueueSize
@@ -69,7 +70,7 @@ class DataBufferEntry (implicit p: Parameters)  extends DCacheBundle {
 class StoreExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
-    val storeAddrIn = Vec(StorePipelineWidth + VecStorePipelineWidth, Flipped(ValidIO(new LsPipelineBundle())))
+    val storeAddrIn = Vec(StorePipelineWidth * 2 + VecStorePipelineWidth, Flipped(ValidIO(new LsPipelineBundle())))
     val exceptionAddr = new ExceptionAddrIO
   })
 
@@ -83,15 +84,15 @@ class StoreExceptionBuffer(implicit p: Parameters) extends XSModule with HasCirc
 
   // S2: delay 1 cycle
   val s2_req = RegNext(s1_req)
-  val s2_valid = (0 until StorePipelineWidth + VecStorePipelineWidth).map(i =>
+  val s2_valid = (0 until StorePipelineWidth * 2 + VecStorePipelineWidth).map(i =>
     RegNext(s1_valid(i)) &&
       !s2_req(i).uop.robIdx.needFlush(RegNext(io.redirect)) &&
       !s2_req(i).uop.robIdx.needFlush(io.redirect)
   )
   val s2_has_exception = s2_req.map(x => ExceptionNO.selectByFu(x.uop.exceptionVec, StaCfg).asUInt.orR)
 
-  val s2_enqueue = Wire(Vec(StorePipelineWidth + VecStorePipelineWidth, Bool()))
-  for (w <- 0 until StorePipelineWidth + VecStorePipelineWidth) {
+  val s2_enqueue = Wire(Vec(StorePipelineWidth * 2 + VecStorePipelineWidth, Bool()))
+  for (w <- 0 until StorePipelineWidth * 2 + VecStorePipelineWidth) {
     s2_enqueue(w) := s2_valid(w) && s2_has_exception(w)
   }
 
@@ -214,14 +215,14 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   exceptionBuffer.io.exceptionAddr.isStore := DontCare
   // vlsu exception!
   for (i <- 0 until VecStorePipelineWidth) {
-    exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).valid               := io.vecFeedback(i).valid && io.vecFeedback(i).bits.feedback(VecFeedbacks.FLUSH) // have exception
-    exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).bits                := DontCare
-    exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).bits.vaddr          := io.vecFeedback(i).bits.vaddr
-    exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).bits.uop.uopIdx     := io.vecFeedback(i).bits.uopidx
-    exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).bits.uop.robIdx     := io.vecFeedback(i).bits.robidx
-    exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).bits.uop.vpu.vstart := io.vecFeedback(i).bits.vstart
-    exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).bits.uop.vpu.vl     := io.vecFeedback(i).bits.vl
-    exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).bits.uop.exceptionVec     := io.vecFeedback(i).bits.exceptionVec
+    exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).valid               := io.vecFeedback(i).valid && io.vecFeedback(i).bits.feedback(VecFeedbacks.FLUSH) // have exception
+    exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).bits                := DontCare
+    exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).bits.vaddr          := io.vecFeedback(i).bits.vaddr
+    exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).bits.uop.uopIdx     := io.vecFeedback(i).bits.uopidx
+    exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).bits.uop.robIdx     := io.vecFeedback(i).bits.robidx
+    exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).bits.uop.vpu.vstart := io.vecFeedback(i).bits.vstart
+    exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).bits.uop.vpu.vl     := io.vecFeedback(i).bits.vl
+    exceptionBuffer.io.storeAddrIn(StorePipelineWidth * 2 + i).bits.uop.exceptionVec     := io.vecFeedback(i).bits.exceptionVec
   }
 
 
@@ -430,6 +431,9 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val stWbIndex = io.storeAddrIn(i).bits.uop.sqIdx.value
     exceptionBuffer.io.storeAddrIn(i).valid := io.storeAddrIn(i).fire && !io.storeAddrIn(i).bits.miss && !io.storeAddrIn(i).bits.isvec
     exceptionBuffer.io.storeAddrIn(i).bits := io.storeAddrIn(i).bits
+    // will re-enter exceptionbuffer at store_s2
+    exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).valid := false.B
+    exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).bits := 0.U.asTypeOf(new LsPipelineBundle)
 
     when (io.storeAddrIn(i).fire) {
       val addr_valid = !io.storeAddrIn(i).bits.miss
@@ -480,6 +484,12 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     // if dcache report a miss in sta pipeline, this store will trigger a prefetch when committing to sbuffer (if EnableAtCommitMissTrigger)
     when (storeAddrInFireReg) {
       prefetch(stWbIndexReg) := io.storeAddrInRe(i).miss
+    }
+    // enter exceptionbuffer again
+    when (storeAddrInFireReg) {
+      exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).valid := io.storeAddrInRe(i).af
+      exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).bits := RegEnable(io.storeAddrIn(i).bits, io.storeAddrIn(i).fire && !io.storeAddrIn(i).bits.miss)
+      exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).bits.uop.exceptionVec(storeAccessFault) := io.storeAddrInRe(i).af
     }
 
     when(vaddrModule.io.wen(i)){

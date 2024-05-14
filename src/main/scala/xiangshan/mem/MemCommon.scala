@@ -90,6 +90,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   val miss = Bool()
   val tlbMiss = Bool()
   val ptwBack = Bool()
+  val af = Bool()
   val mmio = Bool()
   val atomic = Bool()
   val rsIdx = UInt(log2Up(MemIQSizeMax).W)
@@ -163,6 +164,7 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     if (latch) miss := RegNext(input.miss) else miss := input.miss
     if (latch) tlbMiss := RegNext(input.tlbMiss) else tlbMiss := input.tlbMiss
     if (latch) ptwBack := RegNext(input.ptwBack) else ptwBack := input.ptwBack
+    if (latch) af := RegNext(input.af) else af := input.af
     if (latch) mmio := RegNext(input.mmio) else mmio := input.mmio
     if (latch) rsIdx := RegNext(input.rsIdx) else rsIdx := input.rsIdx
     if (latch) forwardMask := RegNext(input.forwardMask) else forwardMask := input.forwardMask

@@ -312,6 +312,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s2_kill := ((s2_mmio && !s2_exception) && !s2_in.isvec) || s2_in.uop.robIdx.needFlush(io.redirect)
 
   s2_out        := s2_in
+  s2_out.af     := s2_pmp.st && !s2_in.isvec
   s2_out.mmio   := s2_mmio && !s2_exception
   s2_out.atomic := s2_in.atomic || s2_pmp.atomic
   s2_out.uop.exceptionVec(storeAccessFault) := (s2_in.uop.exceptionVec(storeAccessFault) || s2_pmp.st) && s2_vecActive
