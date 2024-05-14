@@ -119,7 +119,7 @@ trait HypervisorLevel { self: NewCSR =>
     .setAddr(0x64A)
 
   val hgatp = Module(new CSRModule("Hgatp", new CSRBundle {
-    val MODE = HgatpMode(63, 60, wNoFilter)
+    val MODE = HgatpMode(63, 60, wNoFilter).withReset(HgatpMode.Bare)
     // WARL in privileged spec.
     // RW, since we support max width of VMID
     val VMID = RW(44 - 1 + VMIDLEN, 44)
