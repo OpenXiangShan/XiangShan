@@ -53,6 +53,13 @@ class VSegmentBundle(implicit p: Parameters) extends VLSUBundle
   val exception_pa     = Bool()
 }
 
+class VSegmentUop(implicit p: Parameters) extends VLSUBundle{
+  val pdest            = UInt(VLEN.W)
+  val vecWen           = Bool()
+  val uopIdx           = UopIdx()
+
+}
+
 class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   with HasDCacheParameters
   with MemoryOpConstants
@@ -78,8 +85,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   // buffer uop
   val instMicroOp       = Reg(new VSegmentBundle)
   val data              = Reg(Vec(maxSize, UInt(VLEN.W)))
-  val pdest             = Reg(Vec(maxSize, UInt(PhyRegIdxWidth.W)))
-  val uopIdx            = Reg(Vec(maxSize, UopIdx()))
+  val uopq              = Reg(Vec(maxSize, new VSegmentUop))
   val stride            = Reg(Vec(maxSize, UInt(VLEN.W)))
   val allocated         = RegInit(VecInit(Seq.fill(maxSize)(false.B)))
   val enqPtr            = RegInit(0.U.asTypeOf(new VSegUPtr))
@@ -245,8 +251,9 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   when(io.in.fire){
     data(enqPtr.value)                := io.in.bits.src_vs3
     stride(enqPtr.value)              := io.in.bits.src_stride
-    uopIdx(enqPtr.value)              := io.in.bits.uop.vpu.vuopIdx
-    pdest(enqPtr.value)               := io.in.bits.uop.pdest
+    uopq(enqPtr.value).uopIdx         := io.in.bits.uop.vpu.vuopIdx
+    uopq(enqPtr.value).pdest          := io.in.bits.uop.pdest
+    uopq(enqPtr.value).vecWen         := io.in.bits.uop.vecWen
   }
 
   // update enqptr, only 1 port
@@ -475,7 +482,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   /*************************************************************************
    *                            dequeue logic
    *************************************************************************/
-  val vdIdxInField = GenUopIdxInField(Mux(isIndexed(instType), issueLmul, issueEmul), uopIdx(deqPtr.value))
+  val vdIdxInField = GenUopIdxInField(Mux(isIndexed(instType), issueLmul, issueEmul), uopq(deqPtr.value).uopIdx)
   /*select mask of vd, maybe remove in feature*/
   val realEw        = Mux(isIndexed(issueInstType), issueSew(1, 0), issueEew(1, 0))
   val maskDataVec: Vec[UInt] = VecDataToMaskDataVec(instMicroOp.mask, realEw)
@@ -492,9 +499,11 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.uopwriteback.bits.uop.vpu.vl     := instMicroOp.vl
   io.uopwriteback.bits.uop.vpu.vstart := instMicroOp.vstart
   io.uopwriteback.bits.uop.vpu.vmask  := maskUsed
-  io.uopwriteback.bits.uop.pdest      := pdest(deqPtr.value)
+  io.uopwriteback.bits.uop.pdest      := uopq(deqPtr.value).pdest
   io.uopwriteback.bits.debug          := DontCare
   io.uopwriteback.bits.vdIdxInField.get := vdIdxInField
+  io.uopwriteback.bits.uop.vpu.vuopIdx  := uopq(deqPtr.value).uopIdx
+  io.uopwriteback.bits.uop.vecWen     := uopq(deqPtr.value).vecWen
 
   //to RS
   io.feedback.valid                   := state === s_finish && distanceBetween(enqPtr, deqPtr) =/= 0.U
@@ -503,7 +512,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.feedback.bits.sourceType         := DontCare
   io.feedback.bits.flushState         := DontCare
   io.feedback.bits.dataInvalidSqIdx   := DontCare
-  io.feedback.bits.uopIdx.get         := uopIdx(deqPtr.value)
+  io.feedback.bits.uopIdx.get         := uopq(deqPtr.value).uopIdx
 
   // exception
   io.exceptionAddr                    := DontCare // TODO: fix it when handle exception
