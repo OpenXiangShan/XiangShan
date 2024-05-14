@@ -26,9 +26,9 @@ class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
   val vlWen       = OptionWrapper(cfg.needVlWen, Bool())
   val flushPipe   = OptionWrapper(cfg.flushPipe,  Bool())
   val preDecode   = OptionWrapper(cfg.hasPredecode, new PreDecodeInfo)
-  val ftqIdx      = OptionWrapper(cfg.needPc || cfg.replayInst || cfg.isSta, new FtqPtr)
-  val ftqOffset   = OptionWrapper(cfg.needPc || cfg.replayInst || cfg.isSta, UInt(log2Up(PredictWidth).W))
-  val predictInfo = OptionWrapper(cfg.hasRedirect, new Bundle {
+  val ftqIdx      = OptionWrapper(cfg.needPc || cfg.replayInst || cfg.isSta || cfg.isCsr, new FtqPtr)
+  val ftqOffset   = OptionWrapper(cfg.needPc || cfg.replayInst || cfg.isSta || cfg.isCsr, UInt(log2Up(PredictWidth).W))
+  val predictInfo = OptionWrapper(cfg.needPdInfo, new Bundle {
     val target    = UInt(VAddrData().dataWidth.W)
     val taken     = Bool()
   })

@@ -165,7 +165,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     isXRet -> true.B,
   ))
 
-  flushPipe := csrMod.io.out.flushPipe || isXRet // || frontendTriggerUpdate // Todo: trigger
+  flushPipe := csrMod.io.out.flushPipe // || frontendTriggerUpdate // Todo: trigger
 
   // tlb
   val tlb = Wire(new TlbCsrBundle)
@@ -190,6 +190,20 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   io.out.bits.ctrl.exceptionVec.get := exceptionVec
   io.out.bits.ctrl.flushPipe.get := flushPipe
   io.out.bits.res.data := csrMod.io.out.rData
+
+  io.out.bits.res.redirect.get.valid := isXRet
+  val redirect = io.out.bits.res.redirect.get.bits
+  redirect := 0.U.asTypeOf(redirect)
+  redirect.level := RedirectLevel.flushAfter
+  redirect.robIdx := io.in.bits.ctrl.robIdx
+  redirect.ftqIdx := io.in.bits.ctrl.ftqIdx.get
+  redirect.ftqOffset := io.in.bits.ctrl.ftqOffset.get
+  redirect.cfiUpdate.predTaken := true.B
+  redirect.cfiUpdate.taken := true.B
+  redirect.cfiUpdate.target := csrMod.io.out.targetPc
+  // Only mispred will send redirect to frontend
+  redirect.cfiUpdate.isMisPred := true.B
+
   connect0LatencyCtrlSingal
 
   // Todo: summerize all difftest skip condition

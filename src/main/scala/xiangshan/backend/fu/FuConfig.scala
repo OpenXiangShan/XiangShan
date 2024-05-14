@@ -141,8 +141,8 @@ case class FuConfig (
     getSrcMaxWidthVec.map(w => UInt(w.W))
   }
 
-  // csr's redirect is in its exception bundle
-  def hasRedirect: Boolean = Seq(FuType.jmp, FuType.brh).contains(fuType)
+  // csr's redirect also uses redirect bundle
+  def hasRedirect: Boolean = Seq(FuType.jmp, FuType.brh, FuType.csr).contains(fuType)
 
   def hasPredecode: Boolean = Seq(FuType.jmp, FuType.brh, FuType.csr, FuType.ldu).contains(fuType)
 

@@ -565,9 +565,9 @@ object Bundles {
     val flushPipe     = if (params.flushPipe)     Some(Bool())                        else None
     val pc            = if (params.needPc)        Some(UInt(VAddrData().dataWidth.W)) else None
     val preDecode     = if (params.hasPredecode)  Some(new PreDecodeInfo)             else None
-    val ftqIdx        = if (params.needPc || params.replayInst || params.hasStoreAddrFu)
+    val ftqIdx        = if (params.needPc || params.replayInst || params.hasStoreAddrFu || params.hasCSR)
                                                   Some(new FtqPtr)                    else None
-    val ftqOffset     = if (params.needPc || params.replayInst || params.hasStoreAddrFu)
+    val ftqOffset     = if (params.needPc || params.replayInst || params.hasStoreAddrFu || params.hasCSR)
                                                   Some(UInt(log2Up(PredictWidth).W))  else None
     val predictInfo   = if (params.needPdInfo)  Some(new Bundle {
       val target = UInt(VAddrData().dataWidth.W)
