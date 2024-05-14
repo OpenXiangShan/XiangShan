@@ -157,6 +157,8 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   val src1IsImm = src1Type === SrcType.imm
   val src1IsFp = src1Type === SrcType.fp
 
+  val isVstore = FuType.isVStore(latchedInst.fuType)
+
   numOfUop := latchedUopInfo.numOfUop
   numOfWB := latchedUopInfo.numOfWB
 
@@ -1804,6 +1806,13 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           }
           is(3.U) {
             genCsBundle_SEGMENT_INDEXED_LOADSTORE_SRC1(8)
+          }
+        }
+
+        // when is vstore instructions, not set vecwen
+        when(isVstore) {
+          for (i <- 0 until MAX_VLMUL) {
+            csBundle(i + 1).vecWen := false.B
           }
         }
       }
