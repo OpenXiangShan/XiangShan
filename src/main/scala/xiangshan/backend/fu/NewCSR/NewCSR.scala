@@ -6,7 +6,7 @@ import freechips.rocketchip.rocket.CSRs
 import difftest._
 import org.chipsalliance.cde.config.Parameters
 import top.{ArgParser, Generator}
-import utility.{SignExt, ZeroExt}
+import utility.{DataHoldBypass, SignExt, ZeroExt}
 import utils.OptionWrapper
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CSRCustomState, PrivState, RobCommitCSR}
 import xiangshan.backend.fu.NewCSR.CSRDefines.{ContextStatus, PrivMode, SatpMode, VirtMode}
@@ -563,7 +563,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     (raddr === id.U) -> regOut
   })
 
-  private val hasEvent = mretEvent.out.targetPc.valid || sretEvent.out.targetPc.valid || dretEvent.out.targetPc.valid ||
+  private val needTargetUpdate = mretEvent.out.targetPc.valid || sretEvent.out.targetPc.valid || dretEvent.out.targetPc.valid ||
     trapEntryMEvent.out.targetPc.valid || trapEntryHSEvent.out.targetPc.valid || trapEntryVSEvent.out.targetPc.valid
 
   private val noCSRIllegal = (ren || wen) && Cat(csrRwMap.keys.toSeq.sorted.map(csrAddr => !(addr === csrAddr.U))).andR
@@ -574,14 +574,14 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   io.out.rData := Mux(ren, rdata, 0.U)
   io.out.regOut := regOut
-  io.out.targetPc := RegEnable(Mux1H(Seq(
+  io.out.targetPc := DataHoldBypass(Mux1H(Seq(
     mretEvent.out.targetPc.valid -> mretEvent.out.targetPc.bits,
     sretEvent.out.targetPc.valid -> sretEvent.out.targetPc.bits,
     dretEvent.out.targetPc.valid -> dretEvent.out.targetPc.bits,
     trapEntryMEvent.out.targetPc.valid -> trapEntryMEvent.out.targetPc.bits,
     trapEntryHSEvent.out.targetPc.valid -> trapEntryHSEvent.out.targetPc.bits,
     trapEntryVSEvent.out.targetPc.valid -> trapEntryVSEvent.out.targetPc.bits,
-  )), hasEvent)
+  )), needTargetUpdate)
 
   io.out.privState := privState
 

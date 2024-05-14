@@ -288,11 +288,10 @@ class CtrlBlockImp(
     s1_robFlushPc, // replay inst
     s1_robFlushPc + Mux(s1_robFlushRedirect.bits.isRVC, 2.U, 4.U) // flush pipe
   ), s1_robFlushRedirect.valid)
-  private val s2_csrIsXRet = io.robio.csr.isXRet
   private val s5_csrIsTrap = DelayN(rob.io.exception.valid, 4)
-  private val s2_s5_trapTargetFromCsr = io.robio.csr.trapTarget
+  private val s5_trapTargetFromCsr = io.robio.csr.trapTarget
 
-  val flushTarget = Mux(s2_csrIsXRet || s5_csrIsTrap, s2_s5_trapTargetFromCsr, s2_robFlushPc)
+  val flushTarget = Mux(s5_csrIsTrap, s5_trapTargetFromCsr, s2_robFlushPc)
   when (s6_flushFromRobValid) {
     io.frontend.toFtq.redirect.bits.level := RedirectLevel.flush
     io.frontend.toFtq.redirect.bits.cfiUpdate.target := RegEnable(flushTarget, s5_flushFromRobValidAhead)
