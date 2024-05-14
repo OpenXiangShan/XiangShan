@@ -89,6 +89,11 @@ ifeq ($(WITH_RESETGEN),1)
 override SIM_ARGS += --reset-gen
 endif
 
+# run with disable all perf
+ifeq ($(DISABLE_PERF),1)
+override SIM_ARGS += --disable-perf
+endif
+
 # run with disable all db
 ifeq ($(DISABLE_ALWAYSDB),1)
 override SIM_ARGS += --disable-alwaysdb
