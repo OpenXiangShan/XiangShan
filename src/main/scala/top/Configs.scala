@@ -382,6 +382,6 @@ class KunminghuV2Config(n: Int = 1) extends Config(
       case SoCParamsKey => up(SoCParamsKey).copy(L3CacheParamsOpt = None) // There will be no L3
     })
     ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4, tp = false)
-    ++ new WithNKBL1D(64, ways = 4)
+    ++ new WithNKBL1D(64, ways = 8)
     ++ new BaseConfig(n)
 )
