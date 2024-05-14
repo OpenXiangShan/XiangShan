@@ -452,6 +452,7 @@ case object DebugOptionsKey extends Field[DebugOptions]
 case class DebugOptions
 (
   FPGAPlatform: Boolean = false,
+  ResetGen: Boolean = false,
   EnableDifftest: Boolean = false,
   AlwaysBasicDiff: Boolean = true,
   EnableDebug: Boolean = false,
