@@ -85,6 +85,7 @@ ifeq ($(WITH_ROLLINGDB),1)
 override SIM_ARGS += --with-rollingdb
 endif
 
+# enable ResetGen
 ifeq ($(WITH_RESETGEN),1)
 override SIM_ARGS += --reset-gen
 endif
