@@ -71,7 +71,7 @@ class ExuBlockIO(implicit p: Parameters, params: SchdBlockParams) extends XSBund
   val fenceio = OptionWrapper(params.hasFence, new FenceIO)
   val frm = OptionWrapper(params.needSrcFrm, Input(Frm()))
   val vxrm = OptionWrapper(params.needSrcVxrm, Input(Vxrm()))
-  val vtype = OptionWrapper(params.writeVType, new VType)
+  val vtype = OptionWrapper(params.writeVConfig, new VType)
   val vlIsZero = OptionWrapper(params.writeVConfig, Output(Bool()))
   val vlIsVlmax = OptionWrapper(params.writeVConfig, Output(Bool()))
 }
