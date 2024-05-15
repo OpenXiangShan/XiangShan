@@ -45,6 +45,7 @@ object ArgParser {
       |--enable-log
       |--with-chiseldb
       |--with-rollingdb
+      |--trace-rtl
       |--disable-perf
       |--disable-alwaysdb
       |""".stripMargin
@@ -102,6 +103,10 @@ object ArgParser {
         case "--with-rollingdb" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(EnableRollingDB = true)
+          }), tail)
+        case "--trace-rtl" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case DebugOptionsKey => up(DebugOptionsKey).copy(TraceRTLMode = true)
           }), tail)
         case "--with-constantin" :: tail =>
           nextOption(config.alter((site, here, up) => {
