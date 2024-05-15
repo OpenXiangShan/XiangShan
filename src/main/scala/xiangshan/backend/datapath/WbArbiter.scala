@@ -25,7 +25,7 @@ class WbArbiterDispatcher[T <: Data](private val gen: T, n: Int, acceptCond: T =
 
   private val acceptVec: Vec[Bool] = VecInit(acceptCond(io.in.bits)._1)
 
-  XSError(io.in.valid && PopCount(acceptVec) > 1.U, s"[ExeUnit] accept vec should no more than 1, ${Binary(acceptVec.asUInt)} ")
+  XSError(io.in.valid && PopCount(acceptVec) > 1.U, p"[ExeUnit] accept vec should no more than 1, ${Binary(acceptVec.asUInt)} ")
 
   io.out.zipWithIndex.foreach { case (out, i) =>
     out.valid := acceptVec(i) && io.in.valid
