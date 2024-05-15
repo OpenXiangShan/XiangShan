@@ -14,7 +14,7 @@ import xiangshan.mem._
 import xiangshan.backend.Bundles.{DynInst, ExuOH}
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.FuType.FuTypeOrR
-
+import xiangshan.backend.dispatch.Dispatch2IqFpImp
 import scala.collection._
 
 class Dispatch2Iq(val schdBlockParams : SchdBlockParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
@@ -48,7 +48,7 @@ class Dispatch2Iq(val schdBlockParams : SchdBlockParams)(implicit p: Parameters)
 
   lazy val module: Dispatch2IqImp = schdBlockParams.schdType match {
     case IntScheduler() => new Dispatch2IqIntImp(this)(p, schdBlockParams)
-    case FpScheduler()  => new Dispatch2IqArithImp(this)(p, schdBlockParams)
+    case FpScheduler()  => new Dispatch2IqFpImp(this)(p, schdBlockParams)
     case MemScheduler() => new Dispatch2IqMemImp(this)(p, schdBlockParams)
     case VfScheduler() => new Dispatch2IqArithImp(this)(p, schdBlockParams)
     case _ => null
@@ -73,7 +73,8 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
     val out = MixedVec(params.issueBlockParams.filter(iq => iq.StdCnt == 0).map(x => Vec(x.numEnq, DecoupledIO(new DynInst))))
     val enqLsqIO = if (wrapper.isMem) Some(Flipped(new LsqEnqIO)) else None
     val iqValidCnt = MixedVec(params.issueBlockParams.filter(_.StdCnt == 0).map(x => Input(UInt(log2Ceil(x.numEntries).W))))
-    val IQValidNumVec = if (params.isIntSchd) Some(Input(MixedVec(backendParams.genIQValidNumBundle))) else None
+    val intIQValidNumVec = if (params.isIntSchd) Some(Input(MixedVec(backendParams.genIntIQValidNumBundle))) else None
+    val fpIQValidNumVec = if (params.isFpSchd) Some(Input(MixedVec(backendParams.genFpIQValidNumBundle))) else None
     val lqFreeCount = if (wrapper.isMem) Some(Input(UInt(log2Up(VirtualLoadQueueSize + 1).W))) else None
     val sqFreeCount = if (wrapper.isMem) Some(Input(UInt(log2Up(StoreQueueSize + 1).W))) else None
   })
@@ -155,7 +156,7 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
 class Dispatch2IqIntImp(override val wrapper: Dispatch2Iq)(implicit p: Parameters, params: SchdBlockParams)
   extends Dispatch2IqImp(wrapper)
     with HasXSParameter {
-  val IQValidNumVec = io.IQValidNumVec.get
+  val intIQValidNumVec = io.intIQValidNumVec.get
   // numEnq = 4 + 4 + 2
   private val numEnq = io.in.size
 
@@ -170,14 +171,14 @@ class Dispatch2IqIntImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   val uopsInDq1 = uopsIn.drop(uopsInDq0Num).take(uopsInDq1Num)
   val uopsOutDq0 = outs.take(uopsInDq0Num)
   val uopsOutDq1 = outs.drop(uopsInDq0Num).take(uopsInDq1Num)
-  val IQ0Deq0Num = IQValidNumVec(0)(0)
-  val IQ0Deq1Num = IQValidNumVec(0)(1)
-  val IQ1Deq0Num = IQValidNumVec(1)(0)
-  val IQ1Deq1Num = IQValidNumVec(1)(1)
-  val IQ2Deq0Num = IQValidNumVec(2)(0)
-  val IQ2Deq1Num = IQValidNumVec(2)(1)
-  val IQ3Deq0Num = IQValidNumVec(3)(0)
-  val IQ3Deq1Num = IQValidNumVec(3)(1)
+  val IQ0Deq0Num = intIQValidNumVec(0)(0)
+  val IQ0Deq1Num = intIQValidNumVec(0)(1)
+  val IQ1Deq0Num = intIQValidNumVec(1)(0)
+  val IQ1Deq1Num = intIQValidNumVec(1)(1)
+  val IQ2Deq0Num = intIQValidNumVec(2)(0)
+  val IQ2Deq1Num = intIQValidNumVec(2)(1)
+  val IQ3Deq0Num = intIQValidNumVec(3)(0)
+  val IQ3Deq1Num = intIQValidNumVec(3)(1)
 
   val IQ0Deq0IsLess = IQ1Deq0Num > IQ0Deq0Num
   val IQ0Deq1IsLess = IQ1Deq1Num > IQ0Deq1Num

@@ -52,7 +52,8 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
     val fuBusyTableRead = MixedVec(params.issueBlockParams.map(x => Input(x.genWbFuBusyTableReadBundle)))
   }
   val wbFuBusyTable = MixedVec(params.issueBlockParams.map(x => Output(x.genWbFuBusyTableWriteBundle)))
-  val IQValidNumVec = Output(MixedVec(backendParams.genIQValidNumBundle))
+  val intIQValidNumVec = Output(MixedVec(backendParams.genIntIQValidNumBundle))
+  val fpIQValidNumVec = Output(MixedVec(backendParams.genFpIQValidNumBundle))
 
   val fromCtrlBlock = new Bundle {
     val flush = Flipped(ValidIO(new Redirect))
@@ -138,11 +139,16 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
   // Modules
   val dispatch2Iq: Dispatch2IqImp = wrapper.dispatch2Iq.module
   val issueQueues: Seq[IssueQueueImp] = wrapper.issueQueue.map(_.module)
+  io.intIQValidNumVec := 0.U.asTypeOf(io.intIQValidNumVec)
+  io.fpIQValidNumVec := 0.U.asTypeOf(io.fpIQValidNumVec)
   if (params.isIntSchd) {
-    dispatch2Iq.io.IQValidNumVec.get := io.IQValidNumVec
-    io.IQValidNumVec := MixedVecInit(issueQueues.map(_.io.validCntDeqVec))
+    dispatch2Iq.io.intIQValidNumVec.get := io.intIQValidNumVec
+    io.intIQValidNumVec := MixedVecInit(issueQueues.map(_.io.validCntDeqVec))
   }
-  else io.IQValidNumVec := 0.U.asTypeOf(io.IQValidNumVec)
+  else if (params.isFpSchd) {
+    dispatch2Iq.io.fpIQValidNumVec.get := io.fpIQValidNumVec
+    io.fpIQValidNumVec := MixedVecInit(issueQueues.map(_.io.validCntDeqVec))
+  }
 
   // valid count
   dispatch2Iq.io.iqValidCnt := issueQueues.filter(_.params.StdCnt == 0).map(_.io.status.validCnt)
