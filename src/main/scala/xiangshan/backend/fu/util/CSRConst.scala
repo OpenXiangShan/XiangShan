@@ -116,7 +116,6 @@ trait HasCSRConst {
   val Scachebase    = 0x5C5
 
   // Supervisor Custom Read/Write
-  val Sdsid         = 0x9C0
   val Sfetchctl     = 0x9e0
 
   // Hypervisor Trap Setup

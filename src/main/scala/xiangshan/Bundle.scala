@@ -522,8 +522,6 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val l2_pf_store_only = Output(Bool())
   // ICache
   val icache_parity_enable = Output(Bool())
-  // Labeled XiangShan
-  val dsid = Output(UInt(8.W)) // TODO: DsidWidth as parameter
   // Load violation predictor
   val lvpred_disable = Output(Bool())
   val no_spec_load = Output(Bool())
