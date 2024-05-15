@@ -82,6 +82,12 @@ endif
 override SIM_ARGS += --with-dramsim3
 endif
 
+# trace xiangshan mode: accept trace instead of gcpt
+ifeq ($(TRACERTL_MODE),1)
+override SIM_ARGS += --trace-rtl
+endif
+
+
 # run emu with chisel-db
 ifeq ($(WITH_CHISELDB),1)
 override SIM_ARGS += --with-chiseldb
