@@ -148,7 +148,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   // Statistics on the frequency distribution of FTQ fire interval
   val cntFtqFireInterval = RegInit(0.U(32.W))
   cntFtqFireInterval := Mux(fromFtq.fire, 1.U, cntFtqFireInterval + 1.U)
-  XSPerfHistogram("ftq2icache_fire_" + p(XSCoreParamsKey).HartId.toString, 
+  XSPerfHistogram("ftq2icache_fire",
                   cntFtqFireInterval, fromFtq.fire,
                   1, 300, 1, right_strict = true)
 
