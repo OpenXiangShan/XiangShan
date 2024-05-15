@@ -68,7 +68,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
       val needAlloc = Vec(RenameWidth, Output(Bool()))
       val req = Vec(RenameWidth, ValidIO(new DynInst))
     }
-    val IQValidNumVec = Input(MixedVec(backendParams.genIQValidNumBundle))
+    val intIQValidNumVec = Input(MixedVec(backendParams.genIntIQValidNumBundle))
+    val fpIQValidNumVec = Input(MixedVec(backendParams.genFpIQValidNumBundle))
     val fromIntDQ = new Bundle {
       val intDQ0ValidDeq0Num = Input(UInt(dpParams.IntDqSize.U.getWidth.W))
       val intDQ0ValidDeq1Num = Input(UInt(dpParams.IntDqSize.U.getWidth.W))
@@ -124,14 +125,14 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val isOnlyDq0 = VecInit(isIntDq0.zip(isIntDq1).map { case (dq0, dq1) => dq0 && !dq1 })
   val isOnlyDq1 = VecInit(isIntDq0.zip(isIntDq1).map { case (dq0, dq1) => dq1 && !dq0 })
   val isBothDq01 = VecInit(isIntDq0.zip(isIntDq1).map { case (dq0, dq1) => dq0 || dq1 }) // alu,brh
-  val IQ0Deq0Num = io.IQValidNumVec(0)(0)
-  val IQ0Deq1Num = io.IQValidNumVec(0)(1)
-  val IQ1Deq0Num = io.IQValidNumVec(1)(0)
-  val IQ1Deq1Num = io.IQValidNumVec(1)(1)
-  val IQ2Deq0Num = io.IQValidNumVec(2)(0)
-  val IQ2Deq1Num = io.IQValidNumVec(2)(1)
-  val IQ3Deq0Num = io.IQValidNumVec(3)(0)
-  val IQ3Deq1Num = io.IQValidNumVec(3)(1)
+  val IQ0Deq0Num = io.intIQValidNumVec(0)(0)
+  val IQ0Deq1Num = io.intIQValidNumVec(0)(1)
+  val IQ1Deq0Num = io.intIQValidNumVec(1)(0)
+  val IQ1Deq1Num = io.intIQValidNumVec(1)(1)
+  val IQ2Deq0Num = io.intIQValidNumVec(2)(0)
+  val IQ2Deq1Num = io.intIQValidNumVec(2)(1)
+  val IQ3Deq0Num = io.intIQValidNumVec(3)(0)
+  val IQ3Deq1Num = io.intIQValidNumVec(3)(1)
   val DQ0Deq0 = io.fromIntDQ.intDQ0ValidDeq0Num
   val DQ0Deq1 = io.fromIntDQ.intDQ0ValidDeq1Num
   val DQ1Deq0 = io.fromIntDQ.intDQ1ValidDeq0Num

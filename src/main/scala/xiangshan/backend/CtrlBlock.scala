@@ -462,8 +462,8 @@ class CtrlBlockImp(
 
   // pipeline between rename and dispatch
   PipeGroupConnect(renameOut, dispatch.io.fromRename, s1_s3_redirect.valid, "renamePipeDispatch")
-
-  dispatch.io.IQValidNumVec := io.IQValidNumVec
+  dispatch.io.intIQValidNumVec := io.intIQValidNumVec
+  dispatch.io.fpIQValidNumVec := io.fpIQValidNumVec
   dispatch.io.fromIntDQ.intDQ0ValidDeq0Num := intDq0.io.validDeq0Num
   dispatch.io.fromIntDQ.intDQ0ValidDeq1Num := intDq0.io.validDeq1Num
   dispatch.io.fromIntDQ.intDQ1ValidDeq0Num := intDq1.io.validDeq0Num
@@ -610,7 +610,8 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   val toExuBlock = new Bundle {
     val flush = ValidIO(new Redirect)
   }
-  val IQValidNumVec = Input(MixedVec(params.genIQValidNumBundle))
+  val intIQValidNumVec = Input(MixedVec(params.genIntIQValidNumBundle))
+  val fpIQValidNumVec = Input(MixedVec(params.genFpIQValidNumBundle))
   val fromWB = new Bundle {
     val wbData = Flipped(MixedVec(params.genWrite2CtrlBundles))
   }
