@@ -37,6 +37,7 @@ object ArgParser {
       |--hartidbits <Int>
       |--with-dramsim3
       |--fpga-platform
+      |--reset-gen
       |--enable-difftest
       |--enable-log
       |--with-chiseldb
@@ -98,6 +99,10 @@ object ArgParser {
         case "--fpga-platform" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(FPGAPlatform = true)
+          }), tail)
+        case "--reset-gen" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case DebugOptionsKey => up(DebugOptionsKey).copy(ResetGen = true)
           }), tail)
         case "--enable-difftest" :: tail =>
           nextOption(config.alter((site, here, up) => {

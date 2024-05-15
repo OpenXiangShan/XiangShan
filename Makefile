@@ -85,6 +85,16 @@ ifeq ($(WITH_ROLLINGDB),1)
 override SIM_ARGS += --with-rollingdb
 endif
 
+# enable ResetGen
+ifeq ($(WITH_RESETGEN),1)
+override SIM_ARGS += --reset-gen
+endif
+
+# run with disable all perf
+ifeq ($(DISABLE_PERF),1)
+override SIM_ARGS += --disable-perf
+endif
+
 # run with disable all db
 ifeq ($(DISABLE_ALWAYSDB),1)
 override SIM_ARGS += --disable-alwaysdb
@@ -96,7 +106,7 @@ override SIM_ARGS += --with-constantin
 endif
 
 # emu for the release version
-RELEASE_ARGS += --fpga-platform --disable-all --remove-assert
+RELEASE_ARGS += --fpga-platform --disable-all --remove-assert --reset-gen
 DEBUG_ARGS   += --enable-difftest
 PLDM_ARGS    += --fpga-platform --enable-difftest
 ifeq ($(GOALS),verilog)
