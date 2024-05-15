@@ -31,6 +31,7 @@ import top.BusPerfMonitor
 import utility.{ReqSourceKey, TLClientsMerger, TLEdgeBuffer, TLLogger}
 import xiangshan.backend.fu.PMAConst
 import xiangshan.{DebugOptionsKey, XSTileKey}
+import coupledL2.EnableCHI
 
 case object SoCParamsKey extends Field[SoCParameters]
 
@@ -46,7 +47,8 @@ case class SoCParameters
     ways = 8,
     sets = 2048 // 1MB per bank
   )),
-  XSTopPrefix: Option[String] = None
+  XSTopPrefix: Option[String] = None,
+  NodeIDWidth: Int = 7
 ){
   // L3 configurations
   val L3InnerBusWidth = 256
@@ -226,14 +228,14 @@ trait HaveAXI4PeripheralPort { this: BaseSoC =>
 
 }
 
-class SoCMisc()(implicit p: Parameters) extends BaseSoC
+class MemMisc()(implicit p: Parameters) extends BaseSoC
   with HaveAXI4MemPort
-  with HaveAXI4PeripheralPort
   with PMAConst
-  with HaveSlaveAXI4Port
 {
+  val enableCHI = p(EnableCHI)
+
   val peripheral_ports = Array.fill(NumCores) { TLTempNode() }
-  val core_to_l3_ports = Array.fill(NumCores) { TLTempNode() }
+  val core_to_l3_ports = if (enableCHI) None else Some(Array.fill(NumCores) { TLTempNode() })
 
   val l3_in = TLTempNode()
   val l3_out = TLTempNode()
@@ -249,11 +251,13 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     peripheralXbar := TLBuffer.chainNode(2, Some("L2_to_L3_peripheral_buffer")) := port
   }
 
-  for ((core_out, i) <- core_to_l3_ports.zipWithIndex){
-    l3_banked_xbar :=*
-      TLLogger(s"L3_L2_$i", !debugOpts.FPGAPlatform && debugOpts.AlwaysBasicDB) :=*
-      TLBuffer() :=
-      core_out
+  core_to_l3_ports.foreach { case _ =>
+    for ((core_out, i) <- core_to_l3_ports.get.zipWithIndex){
+      l3_banked_xbar :=*
+        TLLogger(s"L3_L2_$i", !debugOpts.FPGAPlatform && debugOpts.AlwaysBasicDB) :=*
+        TLBuffer() :=
+        core_out
+    }
   }
   l3_banked_xbar := TLBuffer.chainNode(2) := l3_xbar
 
@@ -343,3 +347,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
 
   lazy val module = new SoCMiscImp(this)
 }
+class SoCMisc()(implicit p: Parameters) extends MemMisc
+  with HaveAXI4PeripheralPort
+  with HaveSlaveAXI4Port
+

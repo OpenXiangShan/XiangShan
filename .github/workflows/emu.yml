@@ -44,6 +44,9 @@ jobs:
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci linux-hello-opensbi 2> perf.log
           cat perf.log | sort
+      - name: check CHI version verilog
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate --config KunminghuV2Config --release --mfc
   emu-basics:
     runs-on: bosc
     continue-on-error: false
