@@ -23,7 +23,8 @@ object CSRBundles {
   }
 
   class Counteren extends CSRBundle {
-    val CY = RW(0)
+    // Todo: remove reset after adding mcounteren in difftest
+    val CY = RW(0).withReset(0.U)
     val TM = RW(1)
     val IR = RW(2)
     val HPM = RW(31, 3)
