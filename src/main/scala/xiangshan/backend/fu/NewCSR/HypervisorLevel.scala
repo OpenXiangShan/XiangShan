@@ -173,7 +173,7 @@ class HstatusBundle extends CSRBundle {
   val HU    = RW(9)
   val VGEIN = HstatusVgeinField(17, 12, wNoFilter, rNoFilter)
   val VTVM  = RW(20)
-  val VTM   = RW(21)
+  val VTW   = RW(21)
   val VTSR  = RW(22)
   val VSXL  = XLENField(33, 32).withReset(XLENField.XLEN64)
 

@@ -187,7 +187,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   val legalSret = permitMod.io.out.hasLegalSret
   val legalMret = permitMod.io.out.hasLegalMret
   val isDret = io.dret // Todo: check permission
-  val isWfi  = io.wfi  // Todo: check permission
+  val isWfi  = permitMod.io.out.hasLegalWfi
 
   var csrRwMap: SeqMap[Int, (CSRAddrWriteBundle[_], Data)] =
     machineLevelCSRMap ++
@@ -301,9 +301,13 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   permitMod.io.in.mret := io.mret
   permitMod.io.in.sret := io.sret
+  permitMod.io.in.wfi  := io.wfi
 
   permitMod.io.in.status.tsr := mstatus.rdata.TSR.asBool
   permitMod.io.in.status.vtsr := hstatus.rdata.VTSR.asBool
+
+  permitMod.io.in.status.tw := mstatus.rdata.TW.asBool
+  permitMod.io.in.status.vtw := hstatus.rdata.VTW.asBool
 
   miregiprios.foreach { mod =>
     mod.w.wen := (addr === mireg.addr.U) && (miselect.regOut.ALL.asUInt === mod.addr.U)

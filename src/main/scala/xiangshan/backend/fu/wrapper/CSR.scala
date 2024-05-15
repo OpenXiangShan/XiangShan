@@ -154,7 +154,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   exceptionVec(EX_VSCALL) := isEcall && privState.isModeVS
   exceptionVec(EX_UCALL ) := isEcall && privState.isModeHUorVU
   exceptionVec(EX_II    ) := csrMod.io.out.EX_II
-  //exceptionVec(EX_VI    ) := csrMod.io.out.EX_VI // Todo: check other EX_VI
+  exceptionVec(EX_VI    ) := csrMod.io.out.EX_VI
 
   val isXRet = valid && func === CSROpType.jmp && !isEcall && !isEbreak
 

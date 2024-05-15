@@ -17,14 +17,20 @@ class CSRPermitModule extends Module {
 
   private val csrAccess = WireInit(ren || wen)
 
-  private val (mret, sret) = (
+  private val (mret, sret, wfi) = (
     io.in.mret,
     io.in.sret,
+    io.in.wfi,
   )
 
   private val (tsr, vtsr) = (
     io.in.status.tsr,
     io.in.status.vtsr,
+  )
+
+  private val (tw, vtw) = (
+    io.in.status.tw,
+    io.in.status.vtw
   )
 
   private val csrIsRO = addr(11, 10) === "b11".U
@@ -56,15 +62,19 @@ class CSRPermitModule extends Module {
     privState.isModeHS && tsr || privState.isModeVS && vtsr || privState.isModeHUorVU
   )
 
+  private val wfi_EX_II = wfi && (!privState.isModeM && tw)
+  private val wfi_EX_VI = wfi && (privState.isModeVS && vtw && !tw || privState.isModeVU && !tw)
+
   io.out.illegal := csrAccess && csrAccessIllegal || mret && mretIllegal || sret && sretIllegal
 
   // Todo: check correct
-  io.out.EX_II := io.out.illegal && !privState.isVirtual
-  io.out.EX_VI := io.out.illegal && privState.isVirtual
+  io.out.EX_II := io.out.illegal && !privState.isVirtual || wfi_EX_II
+  io.out.EX_VI := io.out.illegal && privState.isVirtual || wfi_EX_VI
 
   io.out.hasLegalWen := io.in.csrAccess.wen && !csrAccessIllegal
   io.out.hasLegalMret := mret && !mretIllegal
   io.out.hasLegalSret := sret && !sretIllegal
+  io.out.hasLegalWfi := wfi && !wfi_EX_II && !wfi_EX_VI
 }
 
 class CSRPermitIO extends Bundle {
@@ -77,11 +87,16 @@ class CSRPermitIO extends Bundle {
     val privState = new PrivState
     val mret = Bool()
     val sret = Bool()
+    val wfi = Bool()
     val status = new Bundle {
       // Trap SRET
       val tsr = Bool()
       // Virtual Trap SRET
       val vtsr = Bool()
+      // Timeout Wait
+      val tw = Bool()
+      // Virtual Timeout Wait
+      val vtw = Bool()
     }
   })
 
@@ -89,6 +104,7 @@ class CSRPermitIO extends Bundle {
     val hasLegalWen = Bool()
     val hasLegalMret = Bool()
     val hasLegalSret = Bool()
+    val hasLegalWfi = Bool()
     // Todo: split illegal into EX_II and EX_VI
     val illegal = Bool()
     val EX_II = Bool()
