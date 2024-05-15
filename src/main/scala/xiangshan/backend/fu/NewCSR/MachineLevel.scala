@@ -341,10 +341,14 @@ class MidelegBundle extends InterruptBundle {
 class MieBundle extends InterruptEnableBundle {
   this.SGEIE.setRO()
   this.getVS.foreach(_.setRO())
+  // Todo: remove this after more enable bits supported in NEMU
+  this.getSOC.foreach(_.setRO())
 }
 
 class MipBundle extends InterruptPendingBundle {
   this.getM.foreach(_.setRO())
+  // Todo: remove this after more enable bits supported in NEMU
+  this.getSOC.foreach(_.setRO())
 }
 
 class MvienBundle extends CSRBundle {

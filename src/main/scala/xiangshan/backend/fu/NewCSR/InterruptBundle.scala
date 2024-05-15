@@ -87,6 +87,8 @@ class InterruptEnableBundle extends CSRBundle {
 
   def getM = Seq(MSIE, MTIE, MEIE)
 
+  def getSOC = Seq(COIE, LPRASEIE, HPRASEIE)
+
   def getALL = Seq(SSIE, VSSIE, MSIE, STIE, VSTIE, MTIE, SEIE, VSEIE, MEIE, SGEIE, COIE, LPRASEIE, HPRASEIE)
 }
 
