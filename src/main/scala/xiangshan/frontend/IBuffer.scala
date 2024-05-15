@@ -332,6 +332,8 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     deqInBankPtr := VecInit.fill(IBufNBank)(0.U.asTypeOf(new IBufInBankPtr))
     deqPtr := 0.U.asTypeOf(new IBufPtr())
     outputEntries.foreach(_.valid := false.B)
+    currentOutUseBypass := false.B
+    numBypassRemain := 0.U
   }.otherwise {
     deqPtr := deqPtrNext
     deqInBankPtr := deqInBankPtrNext
