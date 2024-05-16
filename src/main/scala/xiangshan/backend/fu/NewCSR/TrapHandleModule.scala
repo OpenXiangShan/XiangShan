@@ -37,7 +37,7 @@ class TrapHandleModule extends Module {
     handleTrapUnderVS -> io.in.vstvec,
     handleTrapUnderHS -> io.in.stvec
   ))
-  private val pcFromXtvec = Cat(xtvec.addr.asUInt + Mux(io.in.mtvec.mode === XtvecMode.Vectored && hasIR, interruptNO(5, 0), 0.U), 0.U(2.W))
+  private val pcFromXtvec = Cat(xtvec.addr.asUInt + Mux(xtvec.mode === XtvecMode.Vectored && hasIR, interruptNO(5, 0), 0.U), 0.U(2.W))
 
   io.out.entryPrivState := MuxCase(default = PrivState.ModeM, mapping = Seq(
     handleTrapUnderVS -> PrivState.ModeVS,
