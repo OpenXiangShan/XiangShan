@@ -1031,8 +1031,9 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     fcsr := fflags_wfn(update = true)(RegEnable(csrio.fpu.fflags.bits, csrio.fpu.fflags.valid))
   }
   when(RegNext(csrio.vpu.set_vxsat.valid)) {
-    fcsr := fflags_wfn(update = true)(RegNext(csrio.fpu.fflags.bits))
+    vcsr := vxsat_wfn(update = true)(RegEnable(csrio.vpu.set_vxsat.bits, csrio.vpu.set_vxsat.valid))
   }
+
   // set fs and sd in mstatus
   when (csrw_dirty_fp_state || RegNext(csrio.fpu.dirty_fs)) {
     val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
