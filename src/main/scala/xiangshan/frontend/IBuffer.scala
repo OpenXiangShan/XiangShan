@@ -171,7 +171,7 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   val numBypassRemainNext = Wire(numBypassRemain.cloneType)
 
   // empty and decode can accept insts and previous bypass insts are all out
-  val useBypass = enqPtr === deqPtr && decodeCanAccept && numBypassRemain === 0.U
+  val useBypass = enqPtr === deqPtr && decodeCanAccept && (numBypassRemain === 0.U || currentOutUseBypass && numBypassRemainNext === 0.U)
 
   // The number of decode accepted insts.
   // Since decode promises accepting insts in order, use priority encoder to simplify the accumulation.
