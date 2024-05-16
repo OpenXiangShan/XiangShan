@@ -18,8 +18,9 @@ class TrapHandleModule extends Module {
   private val hasEX = hasTrap && !trapInfo.bits.isInterrupt
 
   private val trapVec = io.in.trapInfo.bits.trapVec
+  private val intrVec = io.in.trapInfo.bits.intrVec
   private val hasEXVec = Mux(hasEX, trapVec, 0.U)
-  private val hasIRVec = Mux(hasIR, trapVec, 0.U)
+  private val hasIRVec = Mux(hasIR, intrVec, 0.U)
 
   // Todo: support more interrupt and exception
   private val exceptionNO = ExceptionNO.priorities.foldRight(0.U(6.W))((i: Int, sum: UInt) => Mux(hasEXVec(i), i.U, sum))
@@ -53,6 +54,7 @@ class TrapHandleIO extends Bundle {
   val in = Input(new Bundle {
     val trapInfo = ValidIO(new Bundle {
       val trapVec = UInt(64.W)
+      val intrVec = UInt(64.W)
       val isInterrupt = Bool()
     })
     val privState = new PrivState
