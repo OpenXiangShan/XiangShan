@@ -31,7 +31,7 @@ class GPAMemImp(override val wrapper: GPAMem)(implicit p: Parameters) extends La
   private val ftqOffset = RegEnable(io.exceptionReadAddr.bits.ftqOffset, io.exceptionReadAddr.valid)
 
   private val gpabase = mem.io.rdata.head
-  private val gpa = gpabase + Cat(ftqOffset, 0.U(instOffsetBits))
+  private val gpa = gpabase + Cat(ftqOffset, 0.U(instOffsetBits.W))
 
   io.exceptionReadData := gpa
 
