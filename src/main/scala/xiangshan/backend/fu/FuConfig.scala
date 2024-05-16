@@ -596,6 +596,7 @@ object FuConfig {
     ),
     piped = true,
     writeVecRf = true,
+    writeFpRf = true,
     writeIntRf = true,
     writeFflags = true,
     latency = CertainLatency(1),
