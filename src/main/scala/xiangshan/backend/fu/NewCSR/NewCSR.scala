@@ -538,7 +538,11 @@ class NewCSR(implicit val p: Parameters) extends Module
     (addr >= CSRs.cycle.U) && (addr <= CSRs.hpmcounter31.U) ||
     (addr === CSRs.mip.U) ||
     (addr === CSRs.hip.U) ||
-    Cat(aiaCSRMap.keys.toSeq.sorted.map(_.U === addr)).orR
+    Cat(aiaCSRMap.keys.toSeq.sorted.map(_.U === addr)).orR ||
+    (addr === CSRs.stimecmp.U) ||
+    (addr === CSRs.mcounteren.U) ||
+    (addr === CSRs.scounteren.U) ||
+    (addr === CSRs.menvcfg.U)
   // Todo: may be vsip and sip
 
   // flush
