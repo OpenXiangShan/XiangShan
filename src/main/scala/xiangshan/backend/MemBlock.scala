@@ -1525,20 +1525,35 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }.elsewhen (atomicsUnit.io.exceptionAddr.valid) {
     atomicsException := true.B
   }
+
+  val vSegmentException = RegInit(false.B)
+  when (DelayN(redirect.valid, 10) && vSegmentException) {
+    vSegmentException := false.B
+  }.elsewhen (vSegmentUnit.io.exceptionInfo.valid) {
+    vSegmentException := true.B
+  }
   val atomicsExceptionAddress = RegEnable(atomicsUnit.io.exceptionAddr.bits.vaddr, atomicsUnit.io.exceptionAddr.valid)
+  val vSegmentExceptionVstart = RegEnable(vSegmentUnit.io.exceptionInfo.bits.vstart, vSegmentUnit.io.exceptionInfo.valid)
+  val vSegmentExceptionVl     = RegEnable(vSegmentUnit.io.exceptionInfo.bits.vl, vSegmentUnit.io.exceptionInfo.valid)
+  val vSegmentExceptionAddress = RegEnable(vSegmentUnit.io.exceptionInfo.bits.vaddr, vSegmentUnit.io.exceptionInfo.valid)
   val atomicsExceptionGPAddress = RegEnable(atomicsUnit.io.exceptionAddr.bits.gpaddr, atomicsUnit.io.exceptionAddr.valid)
   io.mem_to_ooo.lsqio.vaddr := RegNext(Mux(
     atomicsException,
     atomicsExceptionAddress,
-    lsq.io.exceptionAddr.vaddr
-    // Mux(
-    //   io.ooo_to_mem.isVlsException && io.ooo_to_mem.isStoreException,
-    //   vsFlowQueue.io.exceptionAddr.vaddr,
-    //   lsq.io.exceptionAddr.vaddr
-    // )
+    Mux(vSegmentException,
+      vSegmentExceptionAddress,
+      lsq.io.exceptionAddr.vaddr)
   ))
-  io.mem_to_ooo.lsqio.vstart := RegNext(lsq.io.exceptionAddr.vstart)
-  io.mem_to_ooo.lsqio.vl     := RegNext(lsq.io.exceptionAddr.vl)
+  // vsegment instruction is executed atomic, which mean atomicsException and vSegmentException should not raise at the same time.
+  XSError(atomicsException && vSegmentException, "atomicsException and vSegmentException raise at the same time!")
+  io.mem_to_ooo.lsqio.vstart := RegNext(Mux(vSegmentException,
+                                            vSegmentExceptionVstart,
+                                            lsq.io.exceptionAddr.vstart)
+  )
+  io.mem_to_ooo.lsqio.vl     := RegNext(Mux(vSegmentException,
+                                            vSegmentExceptionVl,
+                                            lsq.io.exceptionAddr.vl)
+  )
 
   io.mem_to_ooo.writeBack.map(wb => {
     wb.bits.uop.trigger.frontendHit := 0.U(TriggerNum.W).asBools
