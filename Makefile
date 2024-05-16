@@ -121,7 +121,7 @@ override SIM_ARGS += $(DEBUG_ARGS)
 endif
 
 TIMELOG = $(BUILD_DIR)/time.log
-TIME_CMD = time -a -o $(TIMELOG)
+TIME_CMD = time -avp -o $(TIMELOG)
 
 SED_CMD = sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g'
 
@@ -157,7 +157,7 @@ verilog: $(TOP_V)
 
 $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
-	@echo "\n[mill] Generating Verilog files..." > $(TIMELOG)
+	@echo -e "\n[mill] Generating Verilog files..." > $(TIMELOG)
 	@date -R | tee -a $(TIMELOG)
 	$(TIME_CMD) mill -i xiangshan[$(CHISEL_VERSION)].test.runMain $(SIMTOP)    \
 		-td $(@D) --config $(CONFIG) $(SIM_MEM_ARGS)                          \
