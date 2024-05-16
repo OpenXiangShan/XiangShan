@@ -271,8 +271,8 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   // PMP
   val pmpEntryMod = Module(new PMPEntryHandleModule)
-  pmpEntryMod.io.in.pmpCfg  := Cat(cfgs.map(_.regOut.asInstanceOf[CSRBundle].asUInt(7, 0)).reverse)
-  pmpEntryMod.io.in.pmpAddr := Cat(pmpaddr.map(_.regOut.asInstanceOf[CSRBundle].asUInt(PMPAddrBits-1, 0)).reverse)
+  pmpEntryMod.io.in.pmpCfg  := cfgs.map(_.regOut.asInstanceOf[PMPCfgBundle])
+  pmpEntryMod.io.in.pmpAddr := pmpaddr.map(_.regOut.asInstanceOf[PMPAddrBundle])
   pmpEntryMod.io.in.ren   := ren
   pmpEntryMod.io.in.wen   := wen
   pmpEntryMod.io.in.addr  := addr

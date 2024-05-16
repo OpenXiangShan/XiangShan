@@ -25,13 +25,11 @@ class PMPEntryHandleModule(implicit p: Parameters) extends PMPModule {
   val addr  = io.in.addr
   val wdata = io.in.wdata
 
-  val pmpCfgs  = WireInit(pmpCfg).asTypeOf(Vec(p(PMParameKey).NumPMP, new PMPCfgBundle))
-  val pmpAddrs = WireInit(pmpAddr).asTypeOf(Vec(p(PMParameKey).NumPMP, new PMPAddrBundle))
   val pmpMask  = RegInit(VecInit(Seq.fill(p(PMParameKey).NumPMP)(0.U(PMPAddrBits.W))))
 
   val pmpEntry = Wire(Vec(p(PMParameKey).NumPMP, new PMPEntry))
   for (i <- pmpEntry.indices) {
-    pmpEntry(i).gen(pmpCfgs(i), pmpAddrs(i), pmpMask(i))
+    pmpEntry(i).gen(pmpCfg(i), pmpAddr(i), pmpMask(i))
   }
 
   // write pmpCfg
@@ -40,7 +38,8 @@ class PMPEntryHandleModule(implicit p: Parameters) extends PMPModule {
     when (wen && (addr === (0x3A0 + i).U)) {
       for (j <- cfgVec.indices) {
         val cfgOldTmp = pmpEntry(8*i/2+j).cfg
-        val cfgNewTmp = wdata(8*(j+1)-1, 8*j).asTypeOf(new PMPCfgBundle)
+        val cfgNewTmp = Wire(new PMPCfgBundle)
+        cfgNewTmp := wdata(8*(j+1)-1, 8*j)
         cfgVec(j) := cfgOldTmp
         when (!cfgOldTmp.L.asBool) {
           cfgVec(j) := cfgNewTmp
@@ -56,7 +55,7 @@ class PMPEntryHandleModule(implicit p: Parameters) extends PMPModule {
     }
   }
 
-  io.out.pmpCfgWData := cfgVec.asUInt
+  io.out.pmpCfgWData := Cat(cfgVec.map(_.asUInt).reverse)
 
   val pmpAddrW = Wire(Vec(p(PMParameKey).NumPMP, UInt(64.W)))
   val pmpAddrR = Wire(Vec(p(PMParameKey).NumPMP, UInt(64.W)))
@@ -93,8 +92,8 @@ class PMPEntryHandleIOBundle(implicit p: Parameters) extends PMPBundle {
     val ren   = Bool()
     val addr  = UInt(12.W)
     val wdata = UInt(64.W)
-    val pmpCfg  = UInt((NumPMP/8*PMXLEN).W)
-    val pmpAddr = UInt((NumPMP*(PMPAddrBits - PMPOffBits)).W)
+    val pmpCfg  = Vec(NumPMP, new PMPCfgBundle)
+    val pmpAddr = Vec(NumPMP, new PMPAddrBundle)
   })
 
   val out = Output(new Bundle {
