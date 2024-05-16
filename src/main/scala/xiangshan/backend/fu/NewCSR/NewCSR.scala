@@ -222,22 +222,6 @@ class NewCSR(implicit val p: Parameters) extends Module
     customCSROutMap ++
     pmpCSROutMap
 
-  val trapHandleMod = Module(new TrapHandleModule)
-
-  trapHandleMod.io.in.trapInfo.valid := hasTrap
-  trapHandleMod.io.in.trapInfo.bits.trapVec := trapVec.asUInt
-  trapHandleMod.io.in.trapInfo.bits.isInterrupt := trapIsInterrupt
-  trapHandleMod.io.in.privState := privState
-  trapHandleMod.io.in.mideleg := mideleg.regOut
-  trapHandleMod.io.in.medeleg := medeleg.regOut
-  trapHandleMod.io.in.hideleg := hideleg.regOut
-  trapHandleMod.io.in.hedeleg := hedeleg.regOut
-  trapHandleMod.io.in.mtvec := mtvec.regOut
-  trapHandleMod.io.in.stvec := stvec.regOut
-  trapHandleMod.io.in.vstvec := vstvec.regOut
-
-  val entryPrivState = trapHandleMod.io.out.entryPrivState
-
   // interrupt
   val intrMod = Module(new InterruptFilter)
   intrMod.io.in.privState := privState
@@ -265,6 +249,25 @@ class NewCSR(implicit val p: Parameters) extends Module
   intrMod.io.in.hsiprios := Cat(siregiprios.map(_.rdata.asInstanceOf[CSRBundle].asUInt).reverse)
   // val disableInterrupt = debugMode || (dcsr.rdata.STEP.asBool && !dcsr.rdata.STEPIE.asBool)
   // val intrVec = Cat(debugIntr && !debugMode, mie.rdata.asUInt(11, 0) & mip.rdata.asUInt & intrVecEnable.asUInt) // Todo: asUInt(11,0) is ok?
+
+  val intrVec = RegEnable(intrMod.io.out.interruptVec.bits, 0.U, intrMod.io.out.interruptVec.valid)
+
+  val trapHandleMod = Module(new TrapHandleModule)
+
+  trapHandleMod.io.in.trapInfo.valid := hasTrap
+  trapHandleMod.io.in.trapInfo.bits.trapVec := trapVec.asUInt
+  trapHandleMod.io.in.trapInfo.bits.intrVec := intrVec
+  trapHandleMod.io.in.trapInfo.bits.isInterrupt := trapIsInterrupt
+  trapHandleMod.io.in.privState := privState
+  trapHandleMod.io.in.mideleg := mideleg.regOut
+  trapHandleMod.io.in.medeleg := medeleg.regOut
+  trapHandleMod.io.in.hideleg := hideleg.regOut
+  trapHandleMod.io.in.hedeleg := hedeleg.regOut
+  trapHandleMod.io.in.mtvec := mtvec.regOut
+  trapHandleMod.io.in.stvec := stvec.regOut
+  trapHandleMod.io.in.vstvec := vstvec.regOut
+
+  val entryPrivState = trapHandleMod.io.out.entryPrivState
 
   // PMP
   val pmpEntryMod = Module(new PMPEntryHandleModule)
