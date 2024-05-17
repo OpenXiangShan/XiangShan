@@ -140,9 +140,16 @@ class NewCSR(implicit val p: Parameters) extends Module
     // tlb
     val tlb = Output(new Bundle {
       val satpASIDChanged = Bool()
+      val vsatpASIDChanged = Bool()
+      val hgatpVMIDChanged = Bool()
       val satp = new SatpBundle
+      val vsatp = new SatpBundle
+      val hgatp = new HgatpBundle
       val mxr = Bool()
       val sum = Bool()
+      val vmxr = Bool()
+      val vsum = Bool()
+      val spvp = Bool()
       val imode = UInt(2.W)
       val dmode = UInt(2.W)
     })
@@ -546,7 +553,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   // Todo: may be vsip and sip
 
   // flush
-  val resetSatp = addr === satp.addr.U && wenLegal // write to satp will cause the pipeline be flushed
+  val resetSatp = Cat(Seq(satp, vsatp, hgatp).map(_.addr.U === addr)).orR && wenLegal // write to satp will cause the pipeline be flushed
 
   val wFcsrChangeRM = addr === fcsr.addr.U && wenLegal && wdata(7, 5) =/= fcsr.frm
   val wFrmChangeRM  = addr === CSRs.frm.U  && wenLegal && wdata(2, 0) =/= fcsr.frm
@@ -673,9 +680,17 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   // tlb
   io.tlb.satpASIDChanged := wenLegal && addr === CSRs.satp.U && satp.rdata.ASID =/= wdata.asTypeOf(new SatpBundle).ASID
+  io.tlb.vsatpASIDChanged := wenLegal && addr === CSRs.vsatp.U && vsatp.rdata.ASID =/= wdata.asTypeOf(new SatpBundle).ASID
+  io.tlb.hgatpVMIDChanged := wenLegal && addr === CSRs.hgatp.U && hgatp.rdata.VMID =/= wdata.asTypeOf(new HgatpBundle).VMID
   io.tlb.satp := satp.rdata
+  io.tlb.vsatp := vsatp.rdata
+  io.tlb.hgatp := hgatp.rdata
   io.tlb.mxr := mstatus.rdata.MXR.asBool
   io.tlb.sum := mstatus.rdata.SUM.asBool
+  io.tlb.vmxr := vsstatus.rdata.MXR.asBool
+  io.tlb.vsum := vsstatus.rdata.SUM.asBool
+  io.tlb.spvp := hstatus.rdata.SPVP.asBool
+
   io.tlb.imode := PRVM.asUInt
   io.tlb.dmode := Mux((debugMode && dcsr.rdata.MPRVEN.asBool || !debugMode) && mstatus.rdata.MPRV.asBool, mstatus.rdata.MPP.asUInt, PRVM.asUInt)
 

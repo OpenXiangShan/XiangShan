@@ -169,21 +169,28 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   // tlb
   val tlb = Wire(new TlbCsrBundle)
-  tlb.satp.changed := csrMod.io.tlb.satpASIDChanged
-  tlb.satp.mode := csrMod.io.tlb.satp.MODE.asUInt
-  tlb.satp.asid := csrMod.io.tlb.satp.ASID.asUInt
-  tlb.satp.ppn := csrMod.io.tlb.satp.PPN.asUInt
+  tlb.satp.changed  := csrMod.io.tlb.satpASIDChanged
+  tlb.satp.mode     := csrMod.io.tlb.satp.MODE.asUInt
+  tlb.satp.asid     := csrMod.io.tlb.satp.ASID.asUInt
+  tlb.satp.ppn      := csrMod.io.tlb.satp.PPN.asUInt
+  tlb.vsatp.changed := csrMod.io.tlb.vsatpASIDChanged
+  tlb.vsatp.mode    := csrMod.io.tlb.vsatp.MODE.asUInt
+  tlb.vsatp.asid    := csrMod.io.tlb.vsatp.ASID.asUInt
+  tlb.vsatp.ppn     := csrMod.io.tlb.vsatp.PPN.asUInt
+  tlb.hgatp.changed := csrMod.io.tlb.hgatpVMIDChanged
+  tlb.hgatp.mode    := csrMod.io.tlb.hgatp.MODE.asUInt
+  tlb.hgatp.asid    := csrMod.io.tlb.hgatp.VMID.asUInt
+  tlb.hgatp.ppn     := csrMod.io.tlb.hgatp.PPN.asUInt
+
   // expose several csr bits for tlb
   tlb.priv.mxr := csrMod.io.tlb.mxr
   tlb.priv.sum := csrMod.io.tlb.sum
+  tlb.priv.vmxr := csrMod.io.tlb.vmxr
+  tlb.priv.vsum := csrMod.io.tlb.vsum
+  tlb.priv.spvp := csrMod.io.tlb.spvp
+  tlb.priv.virt := csrMod.io.out.privState.V.asBool
   tlb.priv.imode := csrMod.io.tlb.imode
   tlb.priv.dmode := csrMod.io.tlb.dmode
-  tlb.vsatp := DontCare // Todo
-  tlb.hgatp := DontCare // Todo
-  tlb.priv.vmxr := DontCare // Todo
-  tlb.priv.vsum := DontCare // Todo
-  tlb.priv.spvp := DontCare // Todo
-  tlb.priv.virt := csrMod.io.out.privState.V.asBool
 
   io.in.ready := true.B // Todo: Async read imsic may block CSR
   io.out.valid := valid
