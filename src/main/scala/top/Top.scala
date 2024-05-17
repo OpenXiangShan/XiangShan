@@ -18,6 +18,7 @@ package top
 
 import chisel3._
 import chisel3.util._
+import difftest.DifftestModule
 import xiangshan._
 import utils._
 import huancun.{HCCacheParameters, HCCacheParamsKey, HuanCun, PrefetchRecv, TPmetaResp}
@@ -305,6 +306,7 @@ object TopMain extends App {
 
   // tools: init to close dpi-c when in fpga
   val envInFPGA = config(DebugOptionsKey).FPGAPlatform
+  val enableDifftest = config(DebugOptionsKey).EnableDifftest
   val enableChiselDB = config(DebugOptionsKey).EnableChiselDB
   val enableConstantin = config(DebugOptionsKey).EnableConstantin
   Constantin.init(enableConstantin && !envInFPGA)
@@ -312,5 +314,11 @@ object TopMain extends App {
 
   val soc = DisableMonitors(p => LazyModule(new XSTop()(p)))(config)
   Generator.execute(firrtlOpts, soc.module, firtoolOpts)
+
+  // generate difftest bundles (w/o DifftestTopIO)
+  if (enableDifftest) {
+    DifftestModule.finish("XiangShan", false)
+  }
+
   FileRegisters.write(fileDir = "./build", filePrefix = "XSTop.")
 }
