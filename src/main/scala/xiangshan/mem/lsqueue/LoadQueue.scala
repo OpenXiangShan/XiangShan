@@ -156,13 +156,64 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
     val debugTopDown = new LoadQueueTopDownIO
   })
-
+  class STD_CLKGT_func extends BlackBox with HasBlackBoxResource {
+   val io = IO(new Bundle {
+    val TE = Input(Bool())
+    val E  = Input(Bool())
+    val CK = Input(Clock())
+    val Q  = Output(Clock())
+  })
+    addResource("/STD_CLKGT_func.v")
+  }
   val loadQueueRAR = Module(new LoadQueueRAR)  //  read-after-read violation
   val loadQueueRAW = Module(new LoadQueueRAW)  //  read-after-write violation
   val loadQueueReplay = Module(new LoadQueueReplay)  //  enqueue if need replay
   val virtualLoadQueue = Module(new VirtualLoadQueue)  //  control state
   val exceptionBuffer = Module(new LqExceptionBuffer) // exception buffer
   val uncacheBuffer = Module(new UncacheBuffer) // uncache buffer
+
+  if (EnableClockGate) {
+    val rar_clk_en = WireInit(false.B)
+    val ldld_nuke_query_req_valid = Wire(Vec(LoadPipelineWidth, Bool()))
+    ldld_nuke_query_req_valid := (0 until LoadPipelineWidth).map{ i => io.ldu.ldld_nuke_query(i).req.valid}
+    val ldld_nuke_query_revoke = Wire(Vec(LoadPipelineWidth, Bool()))
+    //ignore s3_exception & revoke's delay
+    ldld_nuke_query_revoke := (0 until LoadPipelineWidth).map{ i => io.ldu.ldld_nuke_query(i).revoke && DelayN(io.ldu.ldld_nuke_query(i).req.valid, 2)}
+    
+    rar_clk_en := ldld_nuke_query_req_valid.asUInt.orR ||                                               // ldld_query_req
+                    RegNext(ldld_nuke_query_req_valid.asUInt.orR) ||                                    // ldld_query_resp
+                    ldld_nuke_query_revoke.asUInt.orR || RegNext(ldld_nuke_query_revoke.asUInt.orR) ||  // ldld_revoke
+                    io.release.valid || RegNext(io.release.valid) || DelayN(io.release.valid, 2) ||     // release
+                    io.redirect.valid                                                                   // redirect
+    // loadQueueRAR.clock := ClockGate(false.B, rar_clk_en, clock)
+    val clkGate_rar = Module(new STD_CLKGT_func)
+     clkGate_rar.io.TE := false.B
+     clkGate_rar.io.E := rar_clk_en
+     clkGate_rar.io.CK := clock
+    loadQueueRAR.clock := clkGate_rar.io.Q
+
+    val raw_clk_en = WireInit(false.B)
+    val stld_nuke_query_req_valid = Wire(Vec(LoadPipelineWidth, Bool()))
+    stld_nuke_query_req_valid := (0 until LoadPipelineWidth).map{ i => io.ldu.stld_nuke_query(i).req.valid}
+    val stld_nuke_query_revoke = Wire(Vec(LoadPipelineWidth, Bool()))
+    stld_nuke_query_revoke := (0 until LoadPipelineWidth).map{ i => io.ldu.stld_nuke_query(i).revoke && DelayN(io.ldu.ldld_nuke_query(i).req.valid, 2)}
+    val sta_storeAddrIn_valid = Wire(Vec(StorePipelineWidth, Bool()))
+    sta_storeAddrIn_valid := (0 until StorePipelineWidth).map{ i => io.sta.storeAddrIn(i).valid}
+    val sta_vecStoreAddrIn_valid = Wire(Vec(StorePipelineWidth, Bool()))
+    sta_vecStoreAddrIn_valid := (0 until StorePipelineWidth).map{ i => io.sta.vecStoreAddrIn(i).valid}
+    
+    raw_clk_en := stld_nuke_query_req_valid.asUInt.orR ||                                           // stld_query_req
+                  RegNext(stld_nuke_query_req_valid.asUInt.orR) || 
+                  stld_nuke_query_revoke.asUInt.orR || RegNext(stld_nuke_query_revoke.asUInt.orR) || // ldld_revoke
+                  sta_storeAddrIn_valid.asUInt.orR || RegNext(sta_storeAddrIn_valid.asUInt.orR) ||
+                  sta_vecStoreAddrIn_valid.asUInt.orR || RegNext(sta_vecStoreAddrIn_valid.asUInt.orR) ||
+                  io.redirect.valid
+    val clkGate_raw = Module(new STD_CLKGT_func)
+     clkGate_raw.io.TE := false.B
+     clkGate_raw.io.E := raw_clk_en
+     clkGate_raw.io.CK := clock
+    loadQueueRAW.clock := clkGate_raw.io.Q
+  }
 
   /**
    * LoadQueueRAR

@@ -56,16 +56,16 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
   println("LoadQueueRAW: size " + LoadQueueRAWSize)
 
-  class STD_CLKGT_func extends BlackBox with HasBlackBoxResource {
-   val io = IO(new Bundle {
-    val TE = Input(Bool())
-    val E  = Input(Bool())
-    val CK = Input(Clock())
-    val Q  = Output(Clock())
-  })
+  // class STD_CLKGT_func extends BlackBox with HasBlackBoxResource {
+  //  val io = IO(new Bundle {
+  //   val TE = Input(Bool())
+  //   val E  = Input(Bool())
+  //   val CK = Input(Clock())
+  //   val Q  = Output(Clock())
+  // })
 
-   addResource("/STD_CLKGT_func.v")
-  }
+  //  addResource("/STD_CLKGT_func.v")
+  // }
 
   //  LoadQueueRAW field
   //  +-------+--------+-------+-------+-----------+
@@ -80,11 +80,11 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   //  Datavalid   : data valid
   //
 
-  val allocated = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B))) // The control signals need to explicitly indicate the initial value
-  // val allocatedReg = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))
-  // val allocatedEnable = WireInit(VecInit(Seq.fill(LoadQueueRAWSize)(false.B)))
-  // val allocatedNext = WireInit(allocatedReg)
-
+  // val allocated = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B))) // The control signals need to explicitly indicate the initial value
+  val allocatedReg = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))
+  val allocatedEnable = WireInit(VecInit(Seq.fill(LoadQueueRAWSize)(false.B)))
+  val allocatedNext = WireInit(allocatedReg)
+  allocatedReg := Mux(allocatedEnable.asUInt.orR, allocatedNext, allocatedReg)
   // for(i <- 0 until LoadQueueRAWSize){
   //   when(allocatedEnable(i)){
   //     allocatedReg(i) := allocatedNext(i)
@@ -112,10 +112,11 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     numCamPort = StorePipelineWidth
   ))
   maskModule.io := DontCare
-  val datavalid = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))
-  // val datavalidReg = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))
-  // val datavalidEnable = WireInit(VecInit(Seq.fill(LoadQueueRAWSize)(false.B)))
-  // val datavalidNext = WireInit(datavalidReg)
+  // val datavalid = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))
+  val datavalidReg = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))
+  val datavalidEnable = WireInit(VecInit(Seq.fill(LoadQueueRAWSize)(false.B)))
+  val datavalidNext = WireInit(datavalidReg)
+  datavalidReg := Mux(datavalidEnable.asUInt.orR, datavalidNext, datavalidReg)
   // for(i <- 0 until LoadQueueRAWSize){
   //   when(datavalidEnable(i)){
   //     datavalidReg(i) := datavalidNext(i)
@@ -170,12 +171,13 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
       acceptedVec(w) := true.B
 
       val debug_robIdx = enq.bits.uop.robIdx.asUInt
-      XSError(allocated(enqIndex), p"LoadQueueRAW: You can not write an valid entry! check: ldu $w, robIdx $debug_robIdx")
+      XSError(allocatedReg(enqIndex), p"LoadQueueRAW: You can not write an valid entry! check: ldu $w, robIdx $debug_robIdx")
 
       freeList.io.doAllocate(w) := true.B
 
       //  Allocate new entry
-      allocated(enqIndex) := true.B
+      allocatedEnable(enqIndex) := true.B
+      allocatedNext(enqIndex) := true.B
 
       //  Write paddr
       paddrModule.io.wen(w) := true.B
@@ -191,7 +193,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
       //  Fill info
       uop(enqIndex) := enq.bits.uop
-      datavalid(enqIndex) := enq.bits.data_valid
+      datavalidEnable(enqIndex) := true.B
+      datavalidReg(enqIndex) := enq.bits.data_valid
     }
   }
 
@@ -212,8 +215,9 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     val deqNotBlock = Mux(!allAddrCheck, !isBefore(io.stAddrReadySqPtr, uop(i).sqIdx), true.B)
     val needCancel = uop(i).robIdx.needFlush(io.redirect)
 
-    when (allocated(i) && (deqNotBlock || needCancel)) {
-      allocated(i) := false.B
+    when (allocatedReg(i) && (deqNotBlock || needCancel)) {
+      allocatedEnable(i) := true.B
+      allocatedReg(i) := false.B
       freeMaskVec(i) := true.B
     }
   }
@@ -226,8 +230,9 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     val revokeValid = revoke && lastCanAccept(w)
     val revokeIndex = lastAllocIndex(w)
 
-    when (allocated(revokeIndex) && revokeValid) {
-      allocated(revokeIndex) := false.B
+    when (allocatedReg(revokeIndex) && revokeValid) {
+      allocatedEnable(revokeIndex) := true.B
+      allocatedReg(revokeIndex) := false.B
       freeMaskVec(revokeIndex) := true.B
     }
   }
@@ -353,7 +358,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
     val addrMaskMatch = GatedRegNext(paddrModule.io.violationMmask(i).asUInt & maskModule.io.violationMmask(i).asUInt) | bypassMaskUInt
     val entryNeedCheck = GatedValidRegNext(VecInit((0 until LoadQueueRAWSize).map(j => {
-      allocated(j) && isAfter(uop(j).robIdx, storeIn(i).bits.uop.robIdx) && datavalid(j) && !uop(j).robIdx.needFlush(io.redirect)
+      allocatedReg(j) && isAfter(uop(j).robIdx, storeIn(i).bits.uop.robIdx) && datavalidReg(j) && !uop(j).robIdx.needFlush(io.redirect)
     })))
     val lqViolationSelVec = VecInit((0 until LoadQueueRAWSize).map(j => {
       addrMaskMatch(j) && entryNeedCheck(j)
@@ -365,15 +370,15 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
       wrapper
     })
 
-val needEnqueue_valid = Wire(Vec(LoadPipelineWidth, Bool()))
-needEnqueue_valid := (0 until LoadPipelineWidth).map{ i => needEnqueue(i)}
-val clkGate = Module(new STD_CLKGT_func)
- clkGate.io.TE := false.B
- clkGate.io.E := needEnqueue_valid.asUInt.orR || (freeList.io.validCount =/= 0.U)
- clkGate.io.CK := clock
-val gate_clock = clkGate.io.Q
-paddrModule.clock := gate_clock
-maskModule.clock := gate_clock
+// val needEnqueue_valid = Wire(Vec(LoadPipelineWidth, Bool()))
+// needEnqueue_valid := (0 until LoadPipelineWidth).map{ i => needEnqueue(i)}
+// val clkGate = Module(new STD_CLKGT_func)
+//  clkGate.io.TE := false.B
+//  clkGate.io.E := needEnqueue_valid.asUInt.orR || (freeList.io.validCount =/= 0.U)
+//  clkGate.io.CK := clock
+// val gate_clock = clkGate.io.Q
+// paddrModule.clock := gate_clock
+// maskModule.clock := gate_clock
     // select logic
     val lqSelect = selectOldest(lqViolationSelVec, lqViolationSelUopExts)
 

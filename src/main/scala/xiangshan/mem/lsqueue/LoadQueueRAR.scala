@@ -60,16 +60,16 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   //  PAddr       : physical address.
   //  Released    : DCache released.
   //
-  class STD_CLKGT_func extends BlackBox with HasBlackBoxResource {
-   val io = IO(new Bundle {
-    val TE = Input(Bool())
-    val E  = Input(Bool())
-    val CK = Input(Clock())
-    val Q  = Output(Clock())
-  })
+  // class STD_CLKGT_func extends BlackBox with HasBlackBoxResource {
+  //  val io = IO(new Bundle {
+  //   val TE = Input(Bool())
+  //   val E  = Input(Bool())
+  //   val CK = Input(Clock())
+  //   val Q  = Output(Clock())
+  // })
 
-   addResource("/STD_CLKGT_func.v")
-  }
+  //  addResource("/STD_CLKGT_func.v")
+  // }
 
   val allocated = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B))) // The control signals need to explicitly indicate the initial value
   val uop = Reg(Vec(LoadQueueRARSize, new DynInst))
@@ -160,14 +160,14 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
         enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release1Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset))
     }
   }
-  val needEnqueue_valid = Wire(Vec(LoadPipelineWidth, Bool()))
-  needEnqueue_valid := (0 until LoadPipelineWidth).map{ i => needEnqueue(i)}
-  val clkGate = Module(new STD_CLKGT_func)
-   clkGate.io.TE := false.B
-   clkGate.io.E := needEnqueue_valid.asUInt.orR || (freeList.io.validCount =/= 0.U)
-   clkGate.io.CK := clock
-  val gate_clock = clkGate.io.Q
-  paddrModule.clock := gate_clock
+  // val needEnqueue_valid = Wire(Vec(LoadPipelineWidth, Bool()))
+  // needEnqueue_valid := (0 until LoadPipelineWidth).map{ i => needEnqueue(i)}
+  // val clkGate = Module(new STD_CLKGT_func)
+  //  clkGate.io.TE := false.B
+  //  clkGate.io.E := needEnqueue_valid.asUInt.orR || (freeList.io.validCount =/= 0.U)
+  //  clkGate.io.CK := clock
+  // val gate_clock = clkGate.io.Q
+  // paddrModule.clock := gate_clock
  
   //  LoadQueueRAR deallocate
   val freeMaskVec = Wire(Vec(LoadQueueRARSize, Bool()))
