@@ -282,11 +282,12 @@ class Hviprio2Bundle extends CSRBundle {
 }
 
 class HgatpBundle extends CSRBundle {
+  final val PPN_msb = PAddrWidth - AddrWidthInPage - 1
   val MODE = HgatpMode(63, 60, wNoFilter).withReset(HgatpMode.Bare)
   // WARL in privileged spec.
   // RW, since we support max width of VMID
   val VMID = RW(44 - 1 + VMIDLEN, 44)
-  val PPN = RW(43, 0)
+  val PPN = RW(PAddrWidth, 0)
 }
 
 trait HypervisorBundle { self: CSRModule[_] =>
