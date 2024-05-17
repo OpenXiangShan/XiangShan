@@ -82,7 +82,15 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
   val stimecmp = Module(new CSRModule("Stimecmp"))
     .setAddr(0x14D)
 
-  val satp = Module(new CSRModule("Satp", new SatpBundle))
+  val satp = Module(new CSRModule("Satp", new SatpBundle) {
+    // If satp is written with an unsupported MODE,
+    // the entire write has no effect; no fields in satp are modified.
+    when (wen && wdata.MODE.isLegal) {
+      reg := wdata
+    }.otherwise {
+      reg := reg
+    }
+  })
     .setAddr(0x180)
 
   val supervisorLevelCSRMods: Seq[CSRModule[_]] = Seq(
