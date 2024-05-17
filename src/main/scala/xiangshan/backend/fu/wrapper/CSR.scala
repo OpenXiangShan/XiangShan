@@ -38,7 +38,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   // split imm from IMM_Z
   val addr = src2(11, 0)
-  val csri = src2(16, 12)
+  val csri = ZeroExt(src2(16, 12), XLEN)
 
   import CSRConst._
 
