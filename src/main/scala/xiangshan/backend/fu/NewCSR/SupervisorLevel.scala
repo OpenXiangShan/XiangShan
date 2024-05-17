@@ -152,11 +152,12 @@ class SipBundle extends InterruptPendingBundle {
 }
 
 class SatpBundle extends CSRBundle {
+  final val PPN_msb = PAddrWidth - AddrWidthInPage - 1
   val MODE = SatpMode(63, 60, null).withReset(SatpMode.Bare)
   // WARL in privileged spec.
   // RW, since we support max width of ASID
   val ASID = RW(44 - 1 + ASIDLEN, 44)
-  val PPN  = RW(43, 0)
+  val PPN  = RW(PPN_msb, 0)
 }
 
 class SieToMie extends Bundle {
