@@ -96,11 +96,14 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
     // However, when V=1, a write to satp with an unsupported MODE value is ignored and no write to vsatp is effected.
     // if satp is written with an unsupported MODE, the entire write has no effect; no fields in satp are modified.
     //
-    // We treat all circumstances as if V=1. That is if satp is written with an unsupported MODE,
+    // We treat all circumstances as if V=1. That is if vsatp is written with an unsupported MODE,
     // the entire write has no effect; no fields in satp are modified.
-    when(wen && !wdata.MODE.isLegal) {
-      reg.ASID := reg.ASID
-      reg.PPN := reg.PPN
+    when(wen) {
+      when (wdata.MODE.isLegal) {
+        reg := wdata
+      }
+    }.otherwise {
+      reg := reg
     }
   }).setAddr(0x280)
 

@@ -118,16 +118,19 @@ trait HypervisorLevel { self: NewCSR =>
   }) with TrapEntryHSEventSinkBundle)
     .setAddr(0x64A)
 
-  val hgatp = Module(new CSRModule("Hgatp", new CSRBundle {
-    val MODE = HgatpMode(63, 60, wNoFilter).withReset(HgatpMode.Bare)
-    // WARL in privileged spec.
-    // RW, since we support max width of VMID
-    val VMID = RW(44 - 1 + VMIDLEN, 44)
-    val PPN = RW(43, 0)
-  }) {
+  val hgatp = Module(new CSRModule("Hgatp", new HgatpBundle) {
     // Ref: 13.2.10. Hypervisor Guest Address Translation and Protection Register (hgatp)
     // A write to hgatp with an unsupported MODE value is not ignored as it is for satp. Instead, the fields of
     // hgatp are WARL in the normal way, when so indicated.
+    //
+    // But we treat hgatp as the same of satp and vsatp.
+    // If hgatp is written with an unsupported MODE,
+    // the entire write has no effect; no fields in hgatp are modified.
+    when(wen && wdata.MODE.isLegal) {
+      reg := wdata
+    }.otherwise {
+      reg := reg
+    }
   })
     .setAddr(0x680)
 
@@ -276,6 +279,14 @@ class Hviprio2Bundle extends CSRBundle {
   val Prio21 = RW(47, 40)
   val Prio22 = RW(55, 48)
   val Prio23 = RW(63, 56)
+}
+
+class HgatpBundle extends CSRBundle {
+  val MODE = HgatpMode(63, 60, wNoFilter).withReset(HgatpMode.Bare)
+  // WARL in privileged spec.
+  // RW, since we support max width of VMID
+  val VMID = RW(44 - 1 + VMIDLEN, 44)
+  val PPN = RW(43, 0)
 }
 
 trait HypervisorBundle { self: CSRModule[_] =>
