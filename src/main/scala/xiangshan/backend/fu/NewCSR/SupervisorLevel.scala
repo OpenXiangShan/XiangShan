@@ -27,6 +27,10 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
     rdata.STIE := Mux(mideleg.STI.asBool, mie.STIE.asUInt, 0.U)
     rdata.SEIE := Mux(mideleg.SEI.asBool, mie.SEIE.asUInt, 0.U)
 
+    // Sie is alias of mie.
+    // There are no regs in CSR sie.
+    regOut := mie.asUInt
+
     toMie.SSIE.valid := wen && mideleg.SSI.asBool
     toMie.STIE.valid := wen && mideleg.STI.asBool
     toMie.SEIE.valid := wen && mideleg.SEI.asBool
