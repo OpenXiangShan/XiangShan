@@ -8,8 +8,7 @@ import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.backend.fu.fpu.FpPipedFuncUnit
 import yunsuan.{VfaluType, VfpuType}
-import yunsuan.vector.VectorFloatAdder
-import yunsuan.fpulite.FloatAdder
+import yunsuan.fpu.FloatAdder
 
 class FAlu(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
   XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VfpuType.dummy, "falu OpType not supported")
