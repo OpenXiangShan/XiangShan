@@ -142,19 +142,19 @@ class SstatusBundle extends CSRBundle {
 }
 
 class SieBundle extends InterruptEnableBundle {
-  this.getALL.foreach(_.setRO())
-  this.SSIE.setRW()
-  this.STIE.setRW()
-  this.SEIE.setRW()
+  this.getALL.foreach(_.setRO().withReset(0.U))
+  this.SSIE.setRW().withReset(0.U)
+  this.STIE.setRW().withReset(0.U)
+  this.SEIE.setRW().withReset(0.U)
   // Todo: LCOFIE
 }
 
 class SipBundle extends InterruptPendingBundle {
-  this.getALL.foreach(_.setRO())
+  this.getALL.foreach(_.setRO().withReset(0.U))
   // If implemented, SEIP is read-only in sip, and is set and cleared by the execution environment, typically through a platform-specific interrupt controller
   // If implemented, STIP is read-only in sip, and is set and cleared by the execution environment.
   // If implemented, SSIP is writable in sip and may also be set to 1 by a platform-specific interrupt controller.
-  this.SSIP.setRW()
+  this.SSIP.setRW().withReset(0.U)
   // Todo: LCOFIE
 }
 
