@@ -30,6 +30,8 @@ class InterruptBundle extends CSRBundle {
   def getM = Seq(MSI, MTI, MEI)
 
   def getSOC = Seq(COI, LPRASEI, HPRASEI)
+
+  def getALL = Seq(SSI, VSSI, MSI, STI, VSTI, MTI, SEI, VSEI, MEI, SGEI, COI, LPRASEI, HPRASEI)
 }
 
 class InterruptPendingBundle extends CSRBundle {

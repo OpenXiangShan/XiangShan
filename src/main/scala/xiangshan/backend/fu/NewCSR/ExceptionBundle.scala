@@ -30,4 +30,7 @@ class ExceptionBundle extends CSRBundle {
   // 32-47 Reserved
   // 48-63 Designated for custom use
   // >= 64 Reserved
+
+  def getALL = Seq(EX_SGPF, EX_VI, EX_LGPF, EX_IGPF, EX_SPF, EX_LPF, EX_IPF, EX_MCALL, EX_VSCALL,
+    EX_HSCALL, EX_UCALL, EX_SAF, EX_SAM, EX_LAF, EX_LAM, EX_BP, EX_II, EX_IAF, EX_IAM)
 }
