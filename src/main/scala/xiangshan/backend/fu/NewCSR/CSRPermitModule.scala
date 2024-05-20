@@ -37,14 +37,15 @@ class CSRPermitModule extends Module {
 
   private val accessTable = TruthTable(Seq(
     //       V PRVM ADDR
-    BitPat("b?__00___00") -> BitPat.Y(), // HU/VU access U
-    BitPat("b?__00___??") -> BitPat.N(), // HU/VU access the others
+    BitPat("b0__00___00") -> BitPat.Y(), // HU access U
+    BitPat("b1__00___00") -> BitPat.Y(), // VU access U
+    BitPat("b0__01___00") -> BitPat.Y(), // HS access U
+    BitPat("b0__01___01") -> BitPat.Y(), // HS access S
     BitPat("b1__01___00") -> BitPat.Y(), // VS access U
     BitPat("b1__01___01") -> BitPat.Y(), // VS access S
-    BitPat("b1__01___??") -> BitPat.N(), // VS access the others
-    BitPat("b0__01___11") -> BitPat.N(), // HS access M
-    BitPat("b0__01___??") -> BitPat.Y(), // HS access the others
-    BitPat("b0__11___??") -> BitPat.Y(), // M  access any
+    BitPat("b0__11___00") -> BitPat.Y(), // M  access HU
+    BitPat("b0__11___01") -> BitPat.Y(), // M  access HS
+    BitPat("b0__11___11") -> BitPat.Y(), // M  access M
   ), BitPat.N())
 
   private val privilegeLegal = chisel3.util.experimental.decode.decoder(
