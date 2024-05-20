@@ -235,9 +235,9 @@ class NewCSR(implicit val p: Parameters) extends Module
   // interrupt
   val intrMod = Module(new InterruptFilter)
   intrMod.io.in.privState := privState
-  intrMod.io.in.mstatusMIE := mstatus.rdata.MIE.asBool
-  intrMod.io.in.sstatusSIE := mstatus.rdata.SIE.asBool
-  intrMod.io.in.vsstatusSIE := vsstatus.rdata.SIE.asBool
+  intrMod.io.in.mstatusMIE := mstatus.regOut.MIE.asBool
+  intrMod.io.in.sstatusSIE := mstatus.regOut.SIE.asBool
+  intrMod.io.in.vsstatusSIE := vsstatus.regOut.SIE.asBool
   intrMod.io.in.mip := mip.rdata.asUInt
   intrMod.io.in.mie := mie.rdata.asUInt
   intrMod.io.in.mideleg := mideleg.rdata.asUInt
@@ -255,8 +255,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   intrMod.io.in.vstopei := vstopei.rdata.asUInt
   intrMod.io.in.hviprio1 := hviprio1.rdata.asUInt
   intrMod.io.in.hviprio2 := hviprio2.rdata.asUInt
-  intrMod.io.in.miprios := Cat(miregiprios.map(_.rdata.asInstanceOf[CSRBundle].asUInt).reverse)
-  intrMod.io.in.hsiprios := Cat(siregiprios.map(_.rdata.asInstanceOf[CSRBundle].asUInt).reverse)
+  intrMod.io.in.miprios := Cat(miregiprios.map(_.rdata).reverse)
+  intrMod.io.in.hsiprios := Cat(siregiprios.map(_.rdata).reverse)
   // val disableInterrupt = debugMode || (dcsr.rdata.STEP.asBool && !dcsr.rdata.STEPIE.asBool)
   // val intrVec = Cat(debugIntr && !debugMode, mie.rdata.asUInt(11, 0) & mip.rdata.asUInt & intrVecEnable.asUInt) // Todo: asUInt(11,0) is ok?
 
@@ -316,11 +316,11 @@ class NewCSR(implicit val p: Parameters) extends Module
   permitMod.io.in.sret := io.sret
   permitMod.io.in.wfi  := io.wfi
 
-  permitMod.io.in.status.tsr := mstatus.rdata.TSR.asBool
-  permitMod.io.in.status.vtsr := hstatus.rdata.VTSR.asBool
+  permitMod.io.in.status.tsr := mstatus.regOut.TSR.asBool
+  permitMod.io.in.status.vtsr := hstatus.regOut.VTSR.asBool
 
-  permitMod.io.in.status.tw := mstatus.rdata.TW.asBool
-  permitMod.io.in.status.vtw := hstatus.rdata.VTW.asBool
+  permitMod.io.in.status.tw := mstatus.regOut.TW.asBool
+  permitMod.io.in.status.vtw := hstatus.regOut.VTW.asBool
 
   miregiprios.foreach { mod =>
     mod.w.wen := (addr === mireg.addr.U) && (miselect.regOut.ALL.asUInt === mod.addr.U)
@@ -472,8 +472,8 @@ class NewCSR(implicit val p: Parameters) extends Module
 
         in.iMode.PRVM := PRVM
         in.iMode.V := V
-        in.dMode.PRVM := Mux(mstatus.rdata.MPRV.asBool, mstatus.rdata.MPP, PRVM)
-        in.dMode.V := Mux(mstatus.rdata.MPRV.asBool, mstatus.rdata.MPV, V)
+        in.dMode.PRVM := Mux(mstatus.regOut.MPRV.asBool, mstatus.regOut.MPP, PRVM)
+        in.dMode.V := Mux(mstatus.regOut.MPRV.asBool, mstatus.regOut.MPV, V)
 
         in.privState := privState
         in.mstatus := mstatus.regOut
@@ -482,8 +482,9 @@ class NewCSR(implicit val p: Parameters) extends Module
         in.vsstatus := vsstatus.regOut
         in.pcFromXtvec := trapHandleMod.io.out.pcFromXtvec
 
-        in.satp := satp.rdata
-        in.vsatp := vsatp.rdata
+        in.satp  := satp.regOut
+        in.vsatp := vsatp.regOut
+        in.hgatp := hgatp.regOut
 
         in.memExceptionVAddr := io.fromMem.excpVA
         in.memExceptionGPAddr := io.fromMem.excpGPA
@@ -574,8 +575,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   val debugIntr = platformIRP.debugIP && debugIntrEnable
 
   // fence
-  val tvm = mstatus.rdata.TVM.asBool
-  val vtvm = hstatus.rdata.VTVM.asBool
+  val tvm = mstatus.regOut.TVM.asBool
+  val vtvm = hstatus.regOut.VTVM.asBool
 
   private val rdata = Mux1H(csrRwMap.map { case (id, (_, rBundle)) =>
     (raddr === id.U) -> rBundle.asUInt
@@ -608,7 +609,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.out.privState := privState
 
   io.out.fpState.frm := fcsr.frm
-  io.out.fpState.off := mstatus.rdata.FS === ContextStatus.Off
+  io.out.fpState.off := mstatus.regOut.FS === ContextStatus.Off
   io.out.vecState.vstart := vstart.rdata.asUInt
   io.out.vecState.vxsat := vcsr.vxsat
   io.out.vecState.vxrm := vcsr.vxrm
@@ -616,54 +617,54 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.out.vecState.vl := vl.rdata.asUInt
   io.out.vecState.vtype := vtype.rdata.asUInt // Todo: check correct
   io.out.vecState.vlenb := vlenb.rdata.asUInt
-  io.out.vecState.off := mstatus.rdata.VS === ContextStatus.Off
+  io.out.vecState.off := mstatus.regOut.VS === ContextStatus.Off
   io.out.isPerfCnt := addrInPerfCnt
   io.out.interrupt := intrMod.io.out.interruptVec.valid
   io.out.wfiEvent := debugIntr || (mie.rdata.asUInt & mip.rdata.asUInt).orR
   io.out.debugMode := debugMode
-  io.out.singleStepFlag := !debugMode && dcsr.rdata.STEP
+  io.out.singleStepFlag := !debugMode && dcsr.regOut.STEP
   io.out.tvm := tvm
   io.out.vtvm := vtvm
 
   /**
    * [[io.out.custom]] connection
    */
-  io.out.custom.l1I_pf_enable           := spfctl.rdata.L1I_PF_ENABLE.asBool
-  io.out.custom.l2_pf_enable            := spfctl.rdata.L2_PF_ENABLE.asBool
-  io.out.custom.l1D_pf_enable           := spfctl.rdata.L1D_PF_ENABLE.asBool
-  io.out.custom.l1D_pf_train_on_hit     := spfctl.rdata.L1D_PF_TRAIN_ON_HIT.asBool
-  io.out.custom.l1D_pf_enable_agt       := spfctl.rdata.L1D_PF_ENABLE_AGT.asBool
-  io.out.custom.l1D_pf_enable_pht       := spfctl.rdata.L1D_PF_ENABLE_PHT.asBool
-  io.out.custom.l1D_pf_active_threshold := spfctl.rdata.L1D_PF_ACTIVE_THRESHOLD.asUInt
-  io.out.custom.l1D_pf_active_stride    := spfctl.rdata.L1D_PF_ACTIVE_STRIDE.asUInt
-  io.out.custom.l1D_pf_enable_stride    := spfctl.rdata.L1D_PF_ENABLE_STRIDE.asBool
-  io.out.custom.l2_pf_store_only        := spfctl.rdata.L2_PF_STORE_ONLY.asBool
+  io.out.custom.l1I_pf_enable           := spfctl.regOut.L1I_PF_ENABLE.asBool
+  io.out.custom.l2_pf_enable            := spfctl.regOut.L2_PF_ENABLE.asBool
+  io.out.custom.l1D_pf_enable           := spfctl.regOut.L1D_PF_ENABLE.asBool
+  io.out.custom.l1D_pf_train_on_hit     := spfctl.regOut.L1D_PF_TRAIN_ON_HIT.asBool
+  io.out.custom.l1D_pf_enable_agt       := spfctl.regOut.L1D_PF_ENABLE_AGT.asBool
+  io.out.custom.l1D_pf_enable_pht       := spfctl.regOut.L1D_PF_ENABLE_PHT.asBool
+  io.out.custom.l1D_pf_active_threshold := spfctl.regOut.L1D_PF_ACTIVE_THRESHOLD.asUInt
+  io.out.custom.l1D_pf_active_stride    := spfctl.regOut.L1D_PF_ACTIVE_STRIDE.asUInt
+  io.out.custom.l1D_pf_enable_stride    := spfctl.regOut.L1D_PF_ENABLE_STRIDE.asBool
+  io.out.custom.l2_pf_store_only        := spfctl.regOut.L2_PF_STORE_ONLY.asBool
 
-  io.out.custom.icache_parity_enable    := sfetchctl.rdata.ICACHE_PARITY_ENABLE.asBool
+  io.out.custom.icache_parity_enable    := sfetchctl.regOut.ICACHE_PARITY_ENABLE.asBool
 
-  io.out.custom.lvpred_disable          := slvpredctl.rdata.LVPRED_DISABLE.asBool
-  io.out.custom.no_spec_load            := slvpredctl.rdata.NO_SPEC_LOAD.asBool
-  io.out.custom.storeset_wait_store     := slvpredctl.rdata.STORESET_WAIT_STORE.asBool
-  io.out.custom.storeset_no_fast_wakeup := slvpredctl.rdata.STORESET_NO_FAST_WAKEUP.asBool
-  io.out.custom.lvpred_timeout          := slvpredctl.rdata.LVPRED_TIMEOUT.asUInt
+  io.out.custom.lvpred_disable          := slvpredctl.regOut.LVPRED_DISABLE.asBool
+  io.out.custom.no_spec_load            := slvpredctl.regOut.NO_SPEC_LOAD.asBool
+  io.out.custom.storeset_wait_store     := slvpredctl.regOut.STORESET_WAIT_STORE.asBool
+  io.out.custom.storeset_no_fast_wakeup := slvpredctl.regOut.STORESET_NO_FAST_WAKEUP.asBool
+  io.out.custom.lvpred_timeout          := slvpredctl.regOut.LVPRED_TIMEOUT.asUInt
 
-  io.out.custom.bp_ctrl.ubtb_enable     := sbpctl.rdata.UBTB_ENABLE .asBool
-  io.out.custom.bp_ctrl.btb_enable      := sbpctl.rdata.BTB_ENABLE  .asBool
-  io.out.custom.bp_ctrl.bim_enable      := sbpctl.rdata.BIM_ENABLE  .asBool
-  io.out.custom.bp_ctrl.tage_enable     := sbpctl.rdata.TAGE_ENABLE .asBool
-  io.out.custom.bp_ctrl.sc_enable       := sbpctl.rdata.SC_ENABLE   .asBool
-  io.out.custom.bp_ctrl.ras_enable      := sbpctl.rdata.RAS_ENABLE  .asBool
-  io.out.custom.bp_ctrl.loop_enable     := sbpctl.rdata.LOOP_ENABLE .asBool
+  io.out.custom.bp_ctrl.ubtb_enable     := sbpctl.regOut.UBTB_ENABLE .asBool
+  io.out.custom.bp_ctrl.btb_enable      := sbpctl.regOut.BTB_ENABLE  .asBool
+  io.out.custom.bp_ctrl.bim_enable      := sbpctl.regOut.BIM_ENABLE  .asBool
+  io.out.custom.bp_ctrl.tage_enable     := sbpctl.regOut.TAGE_ENABLE .asBool
+  io.out.custom.bp_ctrl.sc_enable       := sbpctl.regOut.SC_ENABLE   .asBool
+  io.out.custom.bp_ctrl.ras_enable      := sbpctl.regOut.RAS_ENABLE  .asBool
+  io.out.custom.bp_ctrl.loop_enable     := sbpctl.regOut.LOOP_ENABLE .asBool
 
-  io.out.custom.sbuffer_threshold                := smblockctl.rdata.SBUFFER_THRESHOLD.asUInt
-  io.out.custom.ldld_vio_check_enable            := smblockctl.rdata.LDLD_VIO_CHECK_ENABLE.asBool
-  io.out.custom.soft_prefetch_enable             := smblockctl.rdata.SOFT_PREFETCH_ENABLE.asBool
-  io.out.custom.cache_error_enable               := smblockctl.rdata.CACHE_ERROR_ENABLE.asBool
-  io.out.custom.uncache_write_outstanding_enable := smblockctl.rdata.UNCACHE_WRITE_OUTSTANDING_ENABLE.asBool
+  io.out.custom.sbuffer_threshold                := smblockctl.regOut.SBUFFER_THRESHOLD.asUInt
+  io.out.custom.ldld_vio_check_enable            := smblockctl.regOut.LDLD_VIO_CHECK_ENABLE.asBool
+  io.out.custom.soft_prefetch_enable             := smblockctl.regOut.SOFT_PREFETCH_ENABLE.asBool
+  io.out.custom.cache_error_enable               := smblockctl.regOut.CACHE_ERROR_ENABLE.asBool
+  io.out.custom.uncache_write_outstanding_enable := smblockctl.regOut.UNCACHE_WRITE_OUTSTANDING_ENABLE.asBool
 
-  io.out.custom.fusion_enable           := srnctl.rdata.FUSION_ENABLE.asBool
-  io.out.custom.wfi_enable              := srnctl.rdata.WFI_ENABLE.asBool
-  io.out.custom.svinval_enable          := srnctl.rdata.SVINVAL_ENABLE.asBool
+  io.out.custom.fusion_enable           := srnctl.regOut.FUSION_ENABLE.asBool
+  io.out.custom.wfi_enable              := srnctl.regOut.WFI_ENABLE.asBool
+  io.out.custom.svinval_enable          := srnctl.regOut.SVINVAL_ENABLE.asBool
 
   // Todo: record the last address to avoid xireg is different with xiselect
   toAIA.addr.valid := wenLegal && Seq(miselect, siselect, vsiselect).map(
@@ -672,7 +673,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   toAIA.addr.bits.addr := addr
   toAIA.addr.bits.prvm := PRVM
   toAIA.addr.bits.v := V
-  toAIA.vgein := hstatus.rdata.VGEIN.asUInt
+  toAIA.vgein := hstatus.regOut.VGEIN.asUInt
   toAIA.wdata.valid := wenLegal && Seq(mireg, sireg, vsireg).map(
     _.addr.U === addr
   ).reduce(_ || _)
@@ -682,20 +683,20 @@ class NewCSR(implicit val p: Parameters) extends Module
   toAIA.vsClaim := wenLegal && vstopei.addr.U === addr
 
   // tlb
-  io.tlb.satpASIDChanged := wenLegal && addr === CSRs.satp.U && satp.rdata.ASID =/= wdata.asTypeOf(new SatpBundle).ASID
-  io.tlb.vsatpASIDChanged := wenLegal && addr === CSRs.vsatp.U && vsatp.rdata.ASID =/= wdata.asTypeOf(new SatpBundle).ASID
-  io.tlb.hgatpVMIDChanged := wenLegal && addr === CSRs.hgatp.U && hgatp.rdata.VMID =/= wdata.asTypeOf(new HgatpBundle).VMID
+  io.tlb.satpASIDChanged  := wenLegal && addr === CSRs. satp.U && satp .regOut.ASID =/= wdata.asTypeOf(new SatpBundle).ASID
+  io.tlb.vsatpASIDChanged := wenLegal && addr === CSRs.vsatp.U && vsatp.regOut.ASID =/= wdata.asTypeOf(new SatpBundle).ASID
+  io.tlb.hgatpVMIDChanged := wenLegal && addr === CSRs.hgatp.U && hgatp.regOut.VMID =/= wdata.asTypeOf(new HgatpBundle).VMID
   io.tlb.satp := satp.rdata
   io.tlb.vsatp := vsatp.rdata
   io.tlb.hgatp := hgatp.rdata
-  io.tlb.mxr := mstatus.rdata.MXR.asBool
-  io.tlb.sum := mstatus.rdata.SUM.asBool
-  io.tlb.vmxr := vsstatus.rdata.MXR.asBool
-  io.tlb.vsum := vsstatus.rdata.SUM.asBool
-  io.tlb.spvp := hstatus.rdata.SPVP.asBool
+  io.tlb.mxr  :=  mstatus.regOut.MXR.asBool
+  io.tlb.sum  :=  mstatus.regOut.SUM.asBool
+  io.tlb.vmxr := vsstatus.regOut.MXR.asBool
+  io.tlb.vsum := vsstatus.regOut.SUM.asBool
+  io.tlb.spvp :=  hstatus.regOut.SPVP.asBool
 
   io.tlb.imode := PRVM.asUInt
-  io.tlb.dmode := Mux((debugMode && dcsr.rdata.MPRVEN.asBool || !debugMode) && mstatus.rdata.MPRV.asBool, mstatus.rdata.MPP.asUInt, PRVM.asUInt)
+  io.tlb.dmode := Mux((debugMode && dcsr.regOut.MPRVEN.asBool || !debugMode) && mstatus.regOut.MPRV.asBool, mstatus.regOut.MPP.asUInt, PRVM.asUInt)
 
   // Always instantiate basic difftest modules.
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
@@ -705,8 +706,8 @@ class NewCSR(implicit val p: Parameters) extends Module
     val interrupt = trapHandleMod.io.out.causeNO.Interrupt.asBool
     val interruptNO = Mux(interrupt, trapNO, 0.U)
     val exceptionNO = Mux(!interrupt, trapNO, 0.U)
-    val ivmHS = isModeHS && satp.rdata.MODE =/= SatpMode.Bare
-    val ivmVS = isModeVS && vsatp.rdata.MODE =/= SatpMode.Bare
+    val ivmHS = isModeHS &&  satp.regOut.MODE =/= SatpMode.Bare
+    val ivmVS = isModeVS && vsatp.regOut.MODE =/= SatpMode.Bare
     // When enable virtual memory, the higher bit should fill with the msb of address of Sv39/Sv48/Sv57
     val exceptionPC = Mux(ivmHS || ivmVS, SignExt(trapPC, XLEN), ZeroExt(trapPC, XLEN))
 

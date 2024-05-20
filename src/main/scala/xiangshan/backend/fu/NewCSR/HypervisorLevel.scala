@@ -78,10 +78,10 @@ trait HypervisorLevel { self: NewCSR =>
     val fromVSip = IO(Flipped(new VSipToHip))
     val toHvip = IO(new HipToHvip)
 
-    rdata.VSSIP := hvip.VSSIP
-    rdata.VSTIP := hvip.VSTIP.asUInt.asBool | platformIRP.VSTIP
-    rdata.VSEIP := hvip.VSEIP.asUInt.asBool | platformIRP.VSEIP | hgeip.ip.asUInt(hstatus.VGEIN.asUInt)
-    rdata.SGEIP := (hgeip.ip.asUInt | hgeie.ie.asUInt).orR
+    rdataFields.VSSIP := hvip.VSSIP
+    rdataFields.VSTIP := hvip.VSTIP.asUInt.asBool | platformIRP.VSTIP
+    rdataFields.VSEIP := hvip.VSEIP.asUInt.asBool | platformIRP.VSEIP | hgeip.ip.asUInt(hstatus.VGEIN.asUInt)
+    rdataFields.SGEIP := (hgeip.ip.asUInt | hgeie.ie.asUInt).orR
 
     // hip.VSEIP is read only
     // hip.VSTIP is read only
@@ -159,7 +159,7 @@ trait HypervisorLevel { self: NewCSR =>
   )
 
   val hypervisorCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], Data)] = SeqMap.from(
-    hypervisorCSRMods.map(csr => (csr.addr -> (csr.w -> csr.rdata.asInstanceOf[CSRBundle].asUInt))).iterator
+    hypervisorCSRMods.map(csr => (csr.addr -> (csr.w -> csr.rdata))).iterator
   )
 
   val hypervisorCSROutMap: SeqMap[Int, UInt] = SeqMap.from(
