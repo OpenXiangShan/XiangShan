@@ -326,10 +326,12 @@ class MisaBundle extends CSRBundle {
 }
 
 class MedelegBundle extends ExceptionBundle {
-  this.EX_MCALL.setRO() // never delegate machine level ecall
+  this.getALL.foreach(_.setRW().withReset(0.U))
+  this.EX_MCALL.setRO().withReset(0.U) // never delegate machine level ecall
 }
 
 class MidelegBundle extends InterruptBundle {
+  this.getALL.foreach(_.setRW().withReset(0.U))
   // Don't delegate Machine level interrupts
   this.getM.foreach(_.setRO().withReset(0.U))
   // Ref: 13.4.2. Machine Interrupt Delegation Register (mideleg)
@@ -342,16 +344,18 @@ class MidelegBundle extends InterruptBundle {
 }
 
 class MieBundle extends InterruptEnableBundle {
-  this.SGEIE.setRO()
-  this.getVS.foreach(_.setRO())
+  this.getALL.foreach(_.setRW().withReset(0.U))
+  this.SGEIE.setRO().withReset(0.U)
+  this.getVS.foreach(_.setRO().withReset(0.U))
   // Todo: remove this after more enable bits supported in NEMU
-  this.getSOC.foreach(_.setRO())
+  this.getSOC.foreach(_.setRO().withReset(0.U))
 }
 
 class MipBundle extends InterruptPendingBundle {
-  this.getM.foreach(_.setRO())
+  this.getALL.foreach(_.setRW().withReset(0.U))
+  this.getM.foreach(_.setRO().withReset(0.U))
   // Todo: remove this after more enable bits supported in NEMU
-  this.getSOC.foreach(_.setRO())
+  this.getSOC.foreach(_.setRO().withReset(0.U))
 }
 
 class MvienBundle extends CSRBundle {
