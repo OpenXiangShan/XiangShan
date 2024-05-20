@@ -3,19 +3,17 @@ package xiangshan.backend.fu.NewCSR.CSREvents
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility.{SignExt, ZeroExt}
-import xiangshan.{ExceptionNO, HasXSParameter}
+import utility.SignExt
 import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CauseBundle, OneFieldBundle, PrivState}
 import xiangshan.backend.fu.NewCSR.CSRConfig.{VaddrMaxWidth, XLEN}
-import xiangshan.backend.fu.NewCSR.CSRDefines.SatpMode
 import xiangshan.backend.fu.NewCSR._
 
 
 class TrapEntryMEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase  {
 
   val mstatus = ValidIO((new MstatusBundle ).addInEvent(_.MPV, _.MPP, _.GVA, _.MPIE, _.MIE))
-  val mepc    = ValidIO((new Epc           ).addInEvent(_.ALL))
+  val mepc    = ValidIO((new Epc           ).addInEvent(_.epc))
   val mcause  = ValidIO((new CauseBundle   ).addInEvent(_.Interrupt, _.ExceptionCode))
   val mtval   = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
   val mtval2  = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
@@ -39,21 +37,36 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
   val out = IO(new TrapEntryMEventOutput)
 
   private val current = in
+  private val iMode = current.iMode
+  private val dMode = current.dMode
+  private val satp  = current.satp
+  private val vsatp = current.vsatp
+  private val hgatp = current.hgatp
 
   private val highPrioTrapNO = in.causeNO.ExceptionCode.asUInt
   private val isException = !in.causeNO.Interrupt.asBool
   private val isInterrupt = in.causeNO.Interrupt.asBool
 
-  private val trapPC = Wire(UInt(XLEN.W))
-  private val trapMemVA = SignExt(in.memExceptionVAddr, XLEN)
-  private val trapMemGPA = SignExt(in.memExceptionGPAddr, XLEN)
-  private val ivmHS = !current.iMode.isModeHS && current.satp.MODE =/= SatpMode.Bare
-  private val ivmVS = !current.iMode.isModeVS && current.vsatp.MODE =/= SatpMode.Bare
-  // When enable virtual memory, the higher bit should fill with the msb of address of Sv39/Sv48/Sv57
-  trapPC := Mux(ivmHS || ivmVS, SignExt(in.trapPc, XLEN), ZeroExt(in.trapPc, XLEN))
+  private val trapPC = genTrapVA(
+    iMode,
+    satp,
+    vsatp,
+    hgatp,
+    in.trapPc,
+  )
 
-  private val fetchIsVirt = current.iMode.isVirtual
-  private val memIsVirt   = current.dMode.isVirtual
+  private val trapMemVA = genTrapVA(
+    dMode,
+    satp,
+    vsatp,
+    hgatp,
+    in.memExceptionVAddr,
+  )
+
+  private val trapMemGPA = SignExt(in.memExceptionGPAddr, XLEN)
+
+  private val fetchIsVirt = iMode.isVirtual
+  private val memIsVirt   = dMode.isVirtual
 
   private val isFetchExcp    = isException && Seq(/*EX_IAM, */ EX_IAF, EX_IPF).map(_.U === highPrioTrapNO).reduce(_ || _)
   private val isMemExcp      = isException && Seq(EX_LAM, EX_LAF, EX_SAM, EX_SAF, EX_LPF, EX_SPF).map(_.U === highPrioTrapNO).reduce(_ || _)
@@ -96,7 +109,7 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
   out.mstatus.bits.GVA          := tvalFillGVA
   out.mstatus.bits.MPIE         := current.mstatus.MIE
   out.mstatus.bits.MIE          := 0.U
-  out.mepc.bits.ALL             := trapPC(trapPC.getWidth - 1, 1)
+  out.mepc.bits.epc             := trapPC(VaddrMaxWidth - 1, 1)
   out.mcause.bits.Interrupt     := isInterrupt
   out.mcause.bits.ExceptionCode := highPrioTrapNO
   out.mtval.bits.ALL            := tval

@@ -4,7 +4,6 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.{SignExt, ZeroExt}
-import xiangshan.{ExceptionNO, HasXSParameter}
 import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CauseBundle, OneFieldBundle, PrivState}
 import xiangshan.backend.fu.NewCSR.CSRConfig.{VaddrMaxWidth, XLEN}
@@ -17,7 +16,7 @@ class TrapEntryHSEventOutput extends Bundle with EventUpdatePrivStateOutput with
   // Todo: use sstatus instead of mstatus
   val mstatus = ValidIO((new MstatusBundle ).addInEvent(_.SPP, _.SPIE, _.SIE))
   val hstatus = ValidIO((new HstatusBundle ).addInEvent(_.SPV, _.SPVP, _.GVA))
-  val sepc    = ValidIO((new Epc           ).addInEvent(_.ALL))
+  val sepc    = ValidIO((new Epc           ).addInEvent(_.epc))
   val scause  = ValidIO((new CauseBundle   ).addInEvent(_.Interrupt, _.ExceptionCode))
   val stval   = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
   val htval   = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
@@ -42,13 +41,32 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
   val out = IO(new TrapEntryHSEventOutput)
 
   private val current = in
+  private val iMode = current.iMode
+  private val dMode = current.dMode
+  private val satp = current.satp
+  private val vsatp = current.vsatp
+  private val hgatp = current.hgatp
 
   private val highPrioTrapNO = in.causeNO.ExceptionCode.asUInt
   private val isException = !in.causeNO.Interrupt.asBool
   private val isInterrupt = in.causeNO.Interrupt.asBool
 
-  private val trapPC = Wire(UInt(XLEN.W))
-  private val trapMemVA = SignExt(in.memExceptionVAddr, XLEN)
+  private val trapPC = genTrapVA(
+    iMode,
+    satp,
+    vsatp,
+    hgatp,
+    in.trapPc,
+  )
+
+  private val trapMemVA = genTrapVA(
+    dMode,
+    satp,
+    vsatp,
+    hgatp,
+    in.memExceptionVAddr,
+  )
+
   private val trapMemGPA = SignExt(in.memExceptionGPAddr, XLEN)
   private val ivmHS = !current.iMode.isModeHS && current.satp.MODE =/= SatpMode.Bare
   private val ivmVS = !current.iMode.isModeVS && current.vsatp.MODE =/= SatpMode.Bare
@@ -104,7 +122,7 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
     // SPVP is not PrivMode enum type, so asUInt and shrink the width
   out.hstatus.bits.SPVP         := Mux(!current.privState.isVirtual, in.hstatus.SPVP.asUInt, current.privState.PRVM.asUInt(0, 0))
   out.hstatus.bits.GVA          := tvalFillGVA
-  out.sepc.bits.ALL             := trapPC(trapPC.getWidth - 1, 1)
+  out.sepc.bits.epc             := trapPC(VaddrMaxWidth - 1, 1)
   out.scause.bits.Interrupt     := isInterrupt
   out.scause.bits.ExceptionCode := highPrioTrapNO
   out.stval.bits.ALL            := tval

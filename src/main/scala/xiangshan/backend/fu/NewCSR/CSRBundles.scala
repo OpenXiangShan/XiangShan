@@ -61,6 +61,8 @@ object CSRBundles {
 
     def isModeHUorVU: Bool = this.PrvmIsU()
 
+    def isModeHSorHU: Bool = (this.PrvmIsU() || this.PrvmIsS()) && !this.isVirtual
+
     def isVirtual: Bool = this.V.isOneOf(VirtMode.On)
 
     private[this] object PrvmIsM {
