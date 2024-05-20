@@ -32,7 +32,7 @@ class TrapHandleModule extends Module {
   private val hdeleg = Mux(hasIR, io.in.hideleg.asUInt, io.in.hedeleg.asUInt)
 
   private val handleTrapUnderHS = mdeleg(causeNO) && privState < PrivState.ModeM
-  private val handleTrapUnderVS = mdeleg(causeNO) && hdeleg(causeNO) && privState < PrivState.ModeHS
+  private val handleTrapUnderVS = mdeleg(causeNO) && hdeleg(causeNO) && privState.isVirtual
 
   private val xtvec = MuxCase(io.in.mtvec, Seq(
     handleTrapUnderVS -> io.in.vstvec,

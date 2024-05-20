@@ -221,7 +221,7 @@ class HgeipBundle extends CSRBundle {
 }
 
 class HedelegBundle extends ExceptionBundle {
-  // default RW
+  // The default configs are RW
   this.EX_HSCALL.setRO()
   this.EX_VSCALL.setRO()
   this.EX_MCALL .setRO()
