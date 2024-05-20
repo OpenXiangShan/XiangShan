@@ -1561,7 +1561,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.outer_l2_pf_enable := io.inner_l2_pf_enable
   // io.inner_hc_perfEvents <> io.outer_hc_perfEvents
 
-  if (p(DebugOptionsKey).FPGAPlatform) {
+  if (p(DebugOptionsKey).ResetGen) {
     val resetTree = ResetGenNode(
       Seq(
         CellNode(reset_io_frontend),
@@ -1572,7 +1572,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
         ModuleNode(ptw_to_l2_buffer)
       )
     )
-    ResetGen(resetTree, reset, !p(DebugOptionsKey).FPGAPlatform)
+    ResetGen(resetTree, reset, !p(DebugOptionsKey).ResetGen)
   } else {
     reset_io_frontend := DontCare
     reset_io_backend := DontCare

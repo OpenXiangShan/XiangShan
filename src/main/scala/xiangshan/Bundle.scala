@@ -120,9 +120,6 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
 
   def fromFtqRedirectSram(entry: Ftq_Redirect_SRAMEntry) = {
     // this.hist := entry.ghist
-    this.folded_hist := entry.folded_hist
-    this.lastBrNumOH := entry.lastBrNumOH
-    this.afhob := entry.afhob
     this.histPtr := entry.histPtr
     this.ssp := entry.ssp
     this.sctr := entry.sctr
@@ -526,8 +523,6 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val l2_pf_store_only = Output(Bool())
   // ICache
   val icache_parity_enable = Output(Bool())
-  // Labeled XiangShan
-  val dsid = Output(UInt(8.W)) // TODO: DsidWidth as parameter
   // Load violation predictor
   val lvpred_disable = Output(Bool())
   val no_spec_load = Output(Bool())

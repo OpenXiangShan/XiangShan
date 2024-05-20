@@ -85,6 +85,16 @@ ifeq ($(WITH_ROLLINGDB),1)
 override SIM_ARGS += --with-rollingdb
 endif
 
+# enable ResetGen
+ifeq ($(WITH_RESETGEN),1)
+override SIM_ARGS += --reset-gen
+endif
+
+# run with disable all perf
+ifeq ($(DISABLE_PERF),1)
+override SIM_ARGS += --disable-perf
+endif
+
 # run with disable all db
 ifeq ($(DISABLE_ALWAYSDB),1)
 override SIM_ARGS += --disable-alwaysdb
@@ -96,7 +106,7 @@ override SIM_ARGS += --with-constantin
 endif
 
 # emu for the release version
-RELEASE_ARGS += --fpga-platform --disable-all --remove-assert
+RELEASE_ARGS += --fpga-platform --disable-all --remove-assert --reset-gen
 DEBUG_ARGS   += --enable-difftest
 PLDM_ARGS    += --fpga-platform --enable-difftest
 ifeq ($(GOALS),verilog)
@@ -111,7 +121,7 @@ override SIM_ARGS += $(DEBUG_ARGS)
 endif
 
 TIMELOG = $(BUILD_DIR)/time.log
-TIME_CMD = time -a -o $(TIMELOG)
+TIME_CMD = time -avp -o $(TIMELOG)
 
 SED_CMD = sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g'
 
@@ -147,7 +157,7 @@ verilog: $(TOP_V)
 
 $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
-	@echo "\n[mill] Generating Verilog files..." > $(TIMELOG)
+	@echo -e "\n[mill] Generating Verilog files..." > $(TIMELOG)
 	@date -R | tee -a $(TIMELOG)
 	$(TIME_CMD) mill -i xiangshan[$(CHISEL_VERSION)].test.runMain $(SIMTOP)    \
 		-td $(@D) --config $(CONFIG) $(SIM_MEM_ARGS)                          \

@@ -240,6 +240,8 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
   io.read.ready := !io.write.valid && !io.fencei && tagArrays.map(_.io.r.req.ready).reduce(_&&_)
 
   //Parity Decode
+  val read_fire_delay1 = RegNext(io.read.fire, init = false.B)
+  val read_fire_delay2 = RegNext(read_fire_delay1, init = false.B)
   val read_metas = Wire(Vec(2,Vec(nWays,new ICacheMetadata())))
   for((tagArray,i) <- tagArrays.zipWithIndex){
     val read_meta_bits = tagArray.io.r.resp.asTypeOf(Vec(nWays,UInt(metaEntryBits.W)))
@@ -247,7 +249,7 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
     val read_meta_wrong = read_meta_decoded.map{ way_bits_decoded => way_bits_decoded.error}
     val read_meta_corrected = VecInit(read_meta_decoded.map{ way_bits_decoded => way_bits_decoded.corrected})
     read_metas(i) := read_meta_corrected.asTypeOf(Vec(nWays,new ICacheMetadata()))
-    (0 until nWays).map{ w => io.readResp.errors(i)(w) := RegNext(read_meta_wrong(w)) && RegNext(RegNext(io.read.fire))}
+    (0 until nWays).foreach{ w => io.readResp.errors(i)(w) := RegEnable(read_meta_wrong(w), read_fire_delay1) && read_fire_delay2}
   }
 
   //Parity Encode
@@ -627,7 +629,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   //Parity error port
   val errors = mainPipe.io.errors
-  io.error <> RegNext(Mux1H(errors.map(e => e.valid -> e)))
+  io.error <> RegEnable(Mux1H(errors.map(e => e.valid -> e)),errors.map(e => e.valid).reduce(_|_))
+  io.error.valid := RegNext(errors.map(e => e.valid).reduce(_|_),init = false.B)
 
 
   mainPipe.io.fetch.req <> io.fetch.req

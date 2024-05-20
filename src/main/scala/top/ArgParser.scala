@@ -34,8 +34,10 @@ object ArgParser {
       |--xs-help                  print this help message
       |--config <ConfigClassName>
       |--num-cores <Int>
+      |--hartidbits <Int>
       |--with-dramsim3
       |--fpga-platform
+      |--reset-gen
       |--enable-difftest
       |--enable-log
       |--with-chiseldb
@@ -72,8 +74,11 @@ object ArgParser {
               up(XSTileKey).head.copy(HartId = i)
             }
             case MaxHartIdBits =>
-              require(log2Up(value.toInt) <= 10, "MaxHartIdBits should not be larger than 10.")
-              log2Up(value.toInt)
+              log2Up(value.toInt) max up(MaxHartIdBits)
+          }), tail)
+        case "--hartidbits" :: hartidbits :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case MaxHartIdBits => hartidbits
           }), tail)
         case "--with-dramsim3" :: tail =>
           nextOption(config.alter((site, here, up) => {
@@ -94,6 +99,10 @@ object ArgParser {
         case "--fpga-platform" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(FPGAPlatform = true)
+          }), tail)
+        case "--reset-gen" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case DebugOptionsKey => up(DebugOptionsKey).copy(ResetGen = true)
           }), tail)
         case "--enable-difftest" :: tail =>
           nextOption(config.alter((site, here, up) => {

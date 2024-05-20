@@ -508,6 +508,7 @@ case object DebugOptionsKey extends Field[DebugOptions]
 case class DebugOptions
 (
   FPGAPlatform: Boolean = false,
+  ResetGen: Boolean = false,
   EnableDifftest: Boolean = false,
   AlwaysBasicDiff: Boolean = true,
   EnableDebug: Boolean = false,
@@ -525,6 +526,7 @@ trait HasXSParameter {
   implicit val p: Parameters
 
   def PAddrBits = p(SoCParamsKey).PAddrBits // PAddrBits is Phyical Memory addr bits
+  def NodeIDWidth = p(SoCParamsKey).NodeIDWidth // NodeID width among NoC
 
   def coreParams = p(XSCoreParamsKey)
   def env = p(DebugOptionsKey)

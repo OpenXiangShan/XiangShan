@@ -252,7 +252,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   )
 
   // ResetGen(resetTree, reset, !debugOpts.FPGAPlatform)
-  if (debugOpts.FPGAPlatform) {
+  if (debugOpts.ResetGen) {
     frontend.reset := memBlock.reset_io_frontend
     backend.reset := memBlock.reset_io_backend
   }
