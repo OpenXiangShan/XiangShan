@@ -1,7 +1,8 @@
 package xiangshan.backend.fu.NewCSR
 
 import chisel3._
-import chisel3.util.ValidIO
+import chisel3.util.{Cat, ValidIO}
+import utility.SignExt
 import xiangshan.backend.fu.NewCSR.CSRBundles._
 import xiangshan.backend.fu.NewCSR.CSRDefines._
 import xiangshan.backend.fu.NewCSR.CSRFunc._
@@ -23,9 +24,9 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
     // an interrupt is delegated to S-mode by setting a bit in the mideleg register, it becomes visible in the
     // sip register and is maskable using the sie register. Otherwise, the corresponding bits in sip and sie
     // are **read-only zero**.
-    rdata.SSIE := Mux(mideleg.SSI.asBool, mie.SSIE.asUInt, 0.U)
-    rdata.STIE := Mux(mideleg.STI.asBool, mie.STIE.asUInt, 0.U)
-    rdata.SEIE := Mux(mideleg.SEI.asBool, mie.SEIE.asUInt, 0.U)
+    rdataFields.SSIE := Mux(mideleg.SSI.asBool, mie.SSIE.asUInt, 0.U)
+    rdataFields.STIE := Mux(mideleg.STI.asBool, mie.STIE.asUInt, 0.U)
+    rdataFields.SEIE := Mux(mideleg.SEI.asBool, mie.SEIE.asUInt, 0.U)
 
     // Sie is alias of mie.
     // There are no regs in CSR sie.
@@ -52,7 +53,9 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
   val sscratch = Module(new CSRModule("Sscratch"))
     .setAddr(0x140)
 
-  val sepc = Module(new CSRModule("Sepc", new Epc) with TrapEntryHSEventSinkBundle)
+  val sepc = Module(new CSRModule("Sepc", new Epc) with TrapEntryHSEventSinkBundle {
+    rdata := SignExt(Cat(reg.epc.asUInt, 0.U(1.W)), XLEN)
+  })
     .setAddr(0x141)
 
   val scause = Module(new CSRModule("Scause", new CauseBundle) with TrapEntryHSEventSinkBundle)
@@ -74,9 +77,9 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
     // sip register and is maskable using the sie register. Otherwise, the corresponding bits in sip and sie
     // are **read-only zero**.
 
-    rdata.SSIP := Mux(mideleg.SSI.asUInt.asBool, mip.SSIP.asUInt, 0.U)
-    rdata.STIP := Mux(mideleg.STI.asUInt.asBool, mip.STIP.asUInt, 0.U)
-    rdata.SEIP := Mux(mideleg.SEI.asUInt.asBool, mip.SEIP.asUInt, 0.U)
+    rdataFields.SSIP := Mux(mideleg.SSI.asUInt.asBool, mip.SSIP.asUInt, 0.U)
+    rdataFields.STIP := Mux(mideleg.STI.asUInt.asBool, mip.STIP.asUInt, 0.U)
+    rdataFields.SEIP := Mux(mideleg.SEI.asUInt.asBool, mip.SEIP.asUInt, 0.U)
 
     toMip.SSIP.valid := wen && mideleg.SSI.asBool
     toMip.SSIP.bits := wdata.SSIP
@@ -114,7 +117,7 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
   val supervisorLevelCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], Data)] = SeqMap(
     0x100 -> (mstatus.wAliasSstatus, mstatus.sstatus),
   ) ++ SeqMap.from(
-    supervisorLevelCSRMods.map(csr => (csr.addr -> (csr.w, csr.rdata.asInstanceOf[CSRBundle].asUInt))).iterator
+    supervisorLevelCSRMods.map(csr => (csr.addr -> (csr.w, csr.rdata))).iterator
   )
 
   val supervisorLevelCSROutMap: SeqMap[Int, UInt] = SeqMap(

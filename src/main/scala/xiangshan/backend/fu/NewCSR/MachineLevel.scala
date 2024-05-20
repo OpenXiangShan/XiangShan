@@ -3,6 +3,7 @@ package xiangshan.backend.fu.NewCSR
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.SignExt
 import xiangshan.backend.fu.NewCSR.CSRBundles._
 import xiangshan.backend.fu.NewCSR.CSRDefines._
 import xiangshan.backend.fu.NewCSR.CSRDefines.{
@@ -46,10 +47,10 @@ trait MachineLevel { self: NewCSR =>
     toHie.VSEIE.bits := wdata.VSEIE
     toHie.SGEIE.bits := wdata.SGEIE
 
-    rdata.VSSIE := hie.VSSIE
-    rdata.VSTIE := hie.VSTIE
-    rdata.VSEIE := hie.VSEIE
-    rdata.SGEIE := hie.SGEIE
+    rdataFields.VSSIE := hie.VSSIE
+    rdataFields.VSTIE := hie.VSTIE
+    rdataFields.VSEIE := hie.VSEIE
+    rdataFields.SGEIE := hie.SGEIE
   }).setAddr(0x304)
 
   val mtvec = Module(new CSRModule("Mtvec", new XtvecBundle))
@@ -70,7 +71,7 @@ trait MachineLevel { self: NewCSR =>
     // But when bit 1 of mvien is one, bit 1(SSIP) of mvip is a separate writable bit independent of mip.SSIP.
     // When the value of bit 1 of mvien is changed from zero to one, the value of bit 1 of mvip becomes UNSPECIFIED.
     // XS will keep the value in mvip.SSIP when mvien.SSIE is changed from zero to one
-    rdata.SSIP := Mux(!mvien.SSIE.asUInt.asBool, mip.SSIP, reg.SSIP)
+    rdataFields.SSIP := Mux(!mvien.SSIE.asUInt.asBool, mip.SSIP, reg.SSIP)
     toMip.SSIP.valid := wen && !mvien.SSIE.asUInt.asBool
     toMip.SSIP.bits := wdata.SSIP
     reg.SSIP := Mux(wen && mvien.SSIE.asUInt.asBool, wdata.SSIP, reg.SSIP)
@@ -78,14 +79,14 @@ trait MachineLevel { self: NewCSR =>
     // Bit 5 of mvip is an alias of the same bit (STIP) in mip when that bit is writable in mip.
     // When STIP is not writable in mip (such as when menvcfg.STCE = 1), bit 5 of mvip is read-only zero.
     // Todo: check mip writable when menvcfg.STCE = 1
-    rdata.STIP := mip.STIP
+    rdataFields.STIP := mip.STIP
     toMip.STIP.valid := wen
     toMip.STIP.bits := wdata.STIP
 
     // When bit 9 of mvien is zero, bit 9 of mvip is an alias of the software-writable bit 9 of mip (SEIP).
     // But when bit 9 of mvien is one, bit 9 of mvip is a writable bit independent of mip.SEIP.
     // Unlike for bit 1, changing the value of bit 9 of mvien does not affect the value of bit 9 of mvip.
-    rdata.SEIP := Mux(!mvien.SEIE.asUInt.asBool, mip.SEIP, reg.SEIP)
+    rdataFields.SEIP := Mux(!mvien.SEIE.asUInt.asBool, mip.SEIP, reg.SEIP)
     toMip.SEIP.valid := wen && !mvien.SEIE.asUInt.asBool
     toMip.SEIP.bits := wdata.SEIP
     reg.SEIP := Mux(wen && mvien.SEIE.asUInt.asBool, wdata.SEIP, reg.SEIP)
@@ -105,7 +106,9 @@ trait MachineLevel { self: NewCSR =>
   val mscratch = Module(new CSRModule("Mscratch"))
     .setAddr(0x340)
 
-  val mepc = Module(new CSRModule("Mepc", new Epc) with TrapEntryMEventSinkBundle)
+  val mepc = Module(new CSRModule("Mepc", new Epc) with TrapEntryMEventSinkBundle {
+    rdata := SignExt(Cat(reg.epc.asUInt, 0.U(1.W)), XLEN)
+  })
     .setAddr(0x341)
 
   val mcause = Module(new CSRModule("Mcause", new CauseBundle) with TrapEntryMEventSinkBundle)
@@ -120,7 +123,7 @@ trait MachineLevel { self: NewCSR =>
 
     // When bit 9 of mvien is zero, the value of bit 9 of mvip is logically ORed into the readable value of mip.SEIP.
     // when bit 9 of mvien is one, bit SEIP in mip is read-only and does not include the value of bit 9 of mvip.
-    rdata.SEIP := Mux(!mvien.SEIE.asUInt.asBool, reg.SEIP.asUInt.asBool | mvip.SEIP.asUInt.asBool | platformIRP.SEIP, platformIRP.SEIP)
+    rdataFields.SEIP := Mux(!mvien.SEIE.asUInt.asBool, reg.SEIP.asUInt.asBool | mvip.SEIP.asUInt.asBool | platformIRP.SEIP, platformIRP.SEIP)
     when (wen && !mvien.SEIE.asUInt.asBool) { reg.SEIP := reg.SEIP }
     when (fromMvip.SSIP.valid) { reg.SSIP := fromMvip.SSIP.bits }
     when (fromMvip.STIP.valid) { reg.STIP := fromMvip.STIP.bits }
@@ -128,12 +131,12 @@ trait MachineLevel { self: NewCSR =>
     when (fromSip.SSIP.valid) { reg.SSIP := fromSip.SSIP.bits }
 
     // MEIP is read-only in mip, and is set and cleared by a platform-specific interrupt controller.
-    rdata.MEIP := platformIRP.MEIP
+    rdataFields.MEIP := platformIRP.MEIP
     // MTIP is read-only in mip, and is cleared by writing to the memory-mapped machine-mode timer compare register
-    rdata.MTIP := platformIRP.MTIP
+    rdataFields.MTIP := platformIRP.MTIP
     // MSIP is read-only in mip, and is written by accesses to memory-mapped control registers,
     // which are used by remote harts to provide machine-level interprocessor interrupts.
-    rdata.MSIP := platformIRP.MSIP
+    rdataFields.MSIP := platformIRP.MSIP
   }).setAddr(0x344)
 
   val mtinst = Module(new CSRModule("Mtinst") with TrapEntryMEventSinkBundle)
@@ -166,7 +169,7 @@ trait MachineLevel { self: NewCSR =>
     }).setAddr(0xB00 + num)
   )
 
-  val mvendorid = Module(new CSRModule("Mvendorid") { rdata.ALL := 0.U })
+  val mvendorid = Module(new CSRModule("Mvendorid") { rdata := 0.U })
     .setAddr(0xF11)
 
   // architecture id for XiangShan is 25
@@ -221,7 +224,7 @@ trait MachineLevel { self: NewCSR =>
   ) ++ mhpmevents ++ mhpmcounters
 
   val machineLevelCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], Data)] = SeqMap.from(
-    machineLevelCSRMods.map(csr => (csr.addr -> (csr.w -> csr.rdata.asInstanceOf[CSRBundle].asUInt))).iterator
+    machineLevelCSRMods.map(csr => (csr.addr -> (csr.w -> csr.rdata))).iterator
   )
 
   val machineLevelCSROutMap: SeqMap[Int, UInt] = SeqMap.from(
@@ -376,8 +379,9 @@ class MvipBundle extends CSRBundle {
 }
 
 class Epc extends CSRBundle {
-  // TODO: configure it with VAddrBits
-  val ALL = RW(63, 1)
+  import CSRConfig._
+
+  val epc = RW(VaddrMaxWidth - 1, 1)
 }
 
 class McountinhibitBundle extends CSRBundle {

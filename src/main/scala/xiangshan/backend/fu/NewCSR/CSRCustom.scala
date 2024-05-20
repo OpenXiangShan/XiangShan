@@ -44,7 +44,7 @@ trait CSRCustom { self: NewCSR =>
   )
 
   val customCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_ <: CSRBundle], Data)] = SeqMap.from(
-    customCSRMods.map(csr => (csr.addr -> (csr.w -> csr.rdata.asInstanceOf[CSRBundle].asUInt))).iterator
+    customCSRMods.map(csr => (csr.addr -> (csr.w -> csr.rdata))).iterator
   )
 
   val customCSROutMap: SeqMap[Int, UInt] = SeqMap.from(

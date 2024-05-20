@@ -16,8 +16,8 @@ class CSRModule[T <: CSRBundle](
 
   val w = IO(Input(new CSRAddrWriteBundle(bundle)))
 
-  // read data with mask
-  val rdata = IO(Output(bundle))
+  // read data with mask, the same as the value of CSRR
+  val rdata = IO(Output(UInt(bundle.len.W)))
   // read data without mask
   val regOut = IO(Output(bundle))
 
@@ -44,7 +44,10 @@ class CSRModule[T <: CSRBundle](
     }
   }
 
-  rdata :|= reg
+  protected val rdataFields = Wire(bundle)
+  rdataFields :|= reg
+
+  rdata := rdataFields.asUInt
   regOut := reg
 
   def wfnField(field: CSREnumType, str: String)(wAliasSeq: Seq[CSRAddrWriteBundle[_]]) = {

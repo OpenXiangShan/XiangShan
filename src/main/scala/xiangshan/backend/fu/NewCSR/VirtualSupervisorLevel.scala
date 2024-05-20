@@ -2,6 +2,7 @@ package xiangshan.backend.fu.NewCSR
 
 import chisel3._
 import chisel3.util._
+import utility.SignExt
 import xiangshan.backend.fu.NewCSR.CSRBundles._
 import xiangshan.backend.fu.NewCSR.CSRDefines.{
   CSRRWField => RW,
@@ -27,9 +28,9 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
   val vsie = Module(new CSRModule("VSie", new VSie) with HypervisorBundle {
     val toHie = IO(new VSieToHie)
     // read alias of hie is here, write alias will be in hie
-    rdata.SEIE := Mux(hideleg.VSEI.asUInt === 0.U, 0.U, hie.VSEIE.asUInt)
-    rdata.STIE := Mux(hideleg.VSTI.asUInt === 0.U, 0.U, hie.VSTIE.asUInt)
-    rdata.SSIE := Mux(hideleg.VSSI.asUInt === 0.U, 0.U, hie.VSSIE.asUInt)
+    rdataFields.SEIE := Mux(hideleg.VSEI.asUInt === 0.U, 0.U, hie.VSEIE.asUInt)
+    rdataFields.STIE := Mux(hideleg.VSTI.asUInt === 0.U, 0.U, hie.VSTIE.asUInt)
+    rdataFields.SSIE := Mux(hideleg.VSSI.asUInt === 0.U, 0.U, hie.VSSIE.asUInt)
 
     toHie.SEIE.valid := wen && hideleg.VSEI.asUInt.asBool
     toHie.STIE.valid := wen && hideleg.VSTI.asUInt.asBool
@@ -50,6 +51,9 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
   val vsepc = Module(
     new CSRModule("VSepc", new Epc)
       with TrapEntryVSEventSinkBundle
+    {
+      rdata := SignExt(Cat(reg.epc.asUInt, 0.U(1.W)), XLEN)
+    }
   )
     .setAddr(0x241)
 
@@ -70,11 +74,11 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
     val toHip = IO(new VSipToHip)
     // read alias of hip is here, write alias will be in hvip
     // hip.VSEIP is read-only zero when hideleg.VSEI=0, alias if hip.VSEIP when hideleg.VSEI=1
-    rdata.SEIP := Mux(hideleg.VSEI.asUInt === 0.U, 0.U, hip.VSEIP.asUInt)
+    rdataFields.SEIP := Mux(hideleg.VSEI.asUInt === 0.U, 0.U, hip.VSEIP.asUInt)
     // hip.VSTIP is read-only zero when hideleg.VSTI=0, alias if hip.VSTIP when hideleg.VSTI=1
-    rdata.STIP := Mux(hideleg.VSTI.asUInt === 0.U, 0.U, hip.VSTIP.asUInt)
+    rdataFields.STIP := Mux(hideleg.VSTI.asUInt === 0.U, 0.U, hip.VSTIP.asUInt)
     // hip.VSSIP is read-only zero when hideleg.VSSI=0, alias (writable) of the same bit in hvip, when hideleg.VSSI=1
-    rdata.SSIP := Mux(hideleg.VSSI.asUInt === 0.U, 0.U, hip.VSSIP.asUInt)
+    rdataFields.SSIP := Mux(hideleg.VSSI.asUInt === 0.U, 0.U, hip.VSSIP.asUInt)
 
     toHip.SEIP.valid := wen && hideleg.VSEI.asUInt.asBool
     toHip.STIP.valid := wen && hideleg.VSTI.asUInt.asBool
@@ -124,7 +128,7 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
     require(mod.addr > 0, s"The address of ${mod.modName} has not been set, you can use setAddr(CSRAddr) to set it."))
 
   val virtualSupervisorCSRMap = SeqMap.from(
-    virtualSupervisorCSRMods.map(csr => (csr.addr -> (csr.w -> csr.rdata.asInstanceOf[CSRBundle].asUInt)))
+    virtualSupervisorCSRMods.map(csr => (csr.addr -> (csr.w -> csr.rdata)))
   )
 
   val virtualSupervisorCSROutMap: SeqMap[Int, UInt] = SeqMap.from(

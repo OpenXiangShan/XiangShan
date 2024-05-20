@@ -24,8 +24,8 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
     .setAddr(0x35C)
 
   val mtopi = Module(new CSRModule("Mtopi", new TopIBundle) with HasInterruptFilterSink {
-    rdata.IID   := topIR.mtopi.IID
-    rdata.IPRIO := topIR.mtopi.IPRIO
+    rdataFields.IID   := topIR.mtopi.IID
+    rdataFields.IPRIO := topIR.mtopi.IPRIO
   })
     .setAddr(0xFB0)
 
@@ -44,8 +44,8 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
     .setAddr(0x15C)
 
   val stopi = Module(new CSRModule("Stopi", new TopIBundle) with HasInterruptFilterSink {
-    rdata.IID   := topIR.stopi.IID
-    rdata.IPRIO := topIR.stopi.IPRIO
+    rdataFields.IID   := topIR.stopi.IID
+    rdataFields.IPRIO := topIR.stopi.IPRIO
   })
     .setAddr(0xDB0)
 
@@ -64,8 +64,8 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
     .setAddr(0x25C)
 
   val vstopi = Module(new CSRModule("VStopi", new TopIBundle) with HasInterruptFilterSink {
-    rdata.IID   := topIR.vstopi.IID
-    rdata.IPRIO := topIR.vstopi.IPRIO
+    rdataFields.IID   := topIR.vstopi.IID
+    rdataFields.IPRIO := topIR.vstopi.IPRIO
   })
     .setAddr(0xEB0)
 
@@ -95,26 +95,26 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
   )
 
   val aiaCSRMap = SeqMap.from(
-    aiaCSRMods.map(csr => (csr.addr -> (csr.w -> csr.rdata.asInstanceOf[CSRBundle].asUInt))).iterator
+    aiaCSRMods.map(csr => (csr.addr -> (csr.w -> csr.rdata))).iterator
   )
 
   val aiaCSROutMap: SeqMap[Int, UInt] = SeqMap.from(
     aiaCSRMods.map(csr => (csr.addr -> csr.regOut.asInstanceOf[CSRBundle].asUInt)).iterator
   )
 
-  private val miregRead = Mux1H(
-    miregiprios.map(prio => (miselect.rdata.ALL.asUInt === prio.addr.U) -> prio.rdata.asInstanceOf[CSRBundle])
-  ).asUInt
+  private val miregRData: UInt = Mux1H(
+    miregiprios.map(prio => (miselect.rdata.asUInt === prio.addr.U) -> prio.rdata)
+  )
 
-  private val siregRead = Mux1H(
-    siregiprios.map(prio => (siselect.rdata.ALL.asUInt === prio.addr.U) -> prio.rdata.asInstanceOf[CSRBundle])
-  ).asUInt
+  private val siregRData: UInt = Mux1H(
+    siregiprios.map(prio => (siselect.rdata.asUInt === prio.addr.U) -> prio.rdata)
+  )
 
   aiaCSRMods.foreach { mod =>
     mod match {
       case m: HasIregSink =>
-        m.iregRead.mireg := miregRead
-        m.iregRead.sireg := siregRead
+        m.iregRead.mireg := miregRData
+        m.iregRead.sireg := siregRData
         m.iregRead.vsireg := 0.U // Todo: IMSIC
       case _ =>
     }

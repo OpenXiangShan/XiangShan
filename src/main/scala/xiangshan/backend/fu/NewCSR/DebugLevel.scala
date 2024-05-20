@@ -47,7 +47,7 @@ trait DebugLevel { self: NewCSR =>
   )
 
   val debugCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_ <: CSRBundle], UInt)] = SeqMap.from(
-    debugCSRMods.map(csr => csr.addr -> (csr.w -> csr.rdata.asInstanceOf[CSRBundle].asUInt)).iterator
+    debugCSRMods.map(csr => csr.addr -> (csr.w -> csr.rdata)).iterator
   )
 
   val debugCSROutMap: SeqMap[Int, UInt] = SeqMap.from(
