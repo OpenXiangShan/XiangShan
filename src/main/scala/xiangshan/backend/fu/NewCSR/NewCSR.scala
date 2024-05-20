@@ -291,7 +291,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   for ((id, (wBundle, _)) <- csrRwMap) {
     if (vsMapS.contains(id)) {
       // VS access CSR by S: privState.isModeVS && addrMappedToVS === sMapVS(id).U
-      wBundle.wen := wenLegal && (isModeVS && addr === vsMapS(id).U) || (!isModeVS && addr === id.U)
+      wBundle.wen := wenLegal && ((isModeVS && addr === vsMapS(id).U) || (!isModeVS && addr === id.U))
       wBundle.wdata := wdata
     } else if (sMapVS.contains(id)) {
       wBundle.wen := wenLegal && !isModeVS && addr === id.U
