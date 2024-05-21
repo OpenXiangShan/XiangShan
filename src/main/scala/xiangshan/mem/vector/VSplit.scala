@@ -490,7 +490,7 @@ class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = t
 
   // send data to sq
   val vstd = io.vstd.get
-  vstd.valid := issueValid
+  vstd.valid := issueValid && (vecActive || !issuePreIsSplit)
   vstd.bits.uop := issueUop
   vstd.bits.uop.sqIdx := sqIdx
   vstd.bits.data := Mux(!issuePreIsSplit, usSplitData, flowData)
