@@ -64,9 +64,6 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
     in.memExceptionVAddr,
   )
   private val trapMemGPA = SignExt(in.memExceptionGPAddr, XLEN)
-  private val ivmVS = !current.iMode.isModeVS && current.vsatp.MODE =/= SatpMode.Bare
-  // When enable virtual memory, the higher bit should fill with the msb of address of Sv39/Sv48/Sv57
-  trapPC := Mux(ivmVS, SignExt(in.trapPc, XLEN), ZeroExt(in.trapPc, XLEN))
 
   private val fetchIsVirt = current.iMode.isVirtual
   private val memIsVirt   = current.dMode.isVirtual
