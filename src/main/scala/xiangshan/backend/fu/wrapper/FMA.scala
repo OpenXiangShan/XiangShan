@@ -8,8 +8,7 @@ import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.backend.fu.fpu.FpPipedFuncUnit
 import yunsuan.{VfmaType, VfpuType}
-import yunsuan.vector.VectorFloatFMA
-import yunsuan.fpulite.FloatFMA
+import yunsuan.fpu.FloatFMA
 
 class FMA(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
   XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VfpuType.dummy, "fma OpType not supported")
