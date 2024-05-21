@@ -69,6 +69,8 @@ object FuType extends OHEnumeration {
   // vec ls
   val vldu = addType(name = "vldu")
   val vstu = addType(name = "vstu")
+  val vsegldu = addType(name = "vsegldu")
+  val vsegstu = addType(name = "vsegstu")
 
   val intArithAll = Seq(jmp, brh, i2f, i2v, csr, alu, mul, div, fence, bku)
   // dq0 includes int's iq0 and iq1
@@ -127,7 +129,7 @@ object FuType extends OHEnumeration {
   val vecOPF = Seq(vfpu, vfalu, vfma, vfdiv, vfcvt, f2v)
   val vecVSET = Seq(vsetiwi, vsetiwf, vsetfwf)
   val vecArith = vecOPI ++ vecOPF
-  val vecMem = Seq(vldu, vstu)
+  val vecMem = Seq(vldu, vstu, vsegldu, vsegstu)
   val vecArithOrMem = vecArith ++ vecMem
   val vecAll = vecVSET ++ vecMem
 
@@ -179,11 +181,23 @@ object FuType extends OHEnumeration {
 
   def isVArith(fuType: UInt): Bool = FuTypeOrR(fuType, vecArith)
 
-  def isVls(fuType: UInt): Bool = FuTypeOrR(fuType, vldu, vstu)
+  def isVls(fuType: UInt): Bool = FuTypeOrR(fuType, vldu, vstu, vsegldu, vsegstu)
 
-  def isVLoad(fuType: UInt): Bool = FuTypeOrR(fuType, vldu)
+  def isVnonsegls(fuType: UInt): Bool = FuTypeOrR(fuType, vldu, vstu)
 
-  def isVStore(fuType: UInt): Bool = FuTypeOrR(fuType, vstu)
+  def isVsegls(futype: UInt): Bool = FuTypeOrR(futype, vsegldu, vsegstu)
+
+  def isVLoad(fuType: UInt): Bool = FuTypeOrR(fuType, vldu, vsegldu)
+
+  def isVStore(fuType: UInt): Bool = FuTypeOrR(fuType, vstu, vsegstu)
+
+  def isVSegLoad(fuType: UInt): Bool = FuTypeOrR(fuType, vsegldu)
+
+  def isVSegStore(fuType: UInt): Bool = FuTypeOrR(fuType, vsegstu)
+
+  def isVNonsegLoad(fuType: UInt): Bool = FuTypeOrR(fuType, vldu)
+
+  def isVNonsegStore(fuType: UInt): Bool = FuTypeOrR(fuType, vstu)
 
   def isVecOPF(fuType: UInt): Bool = FuTypeOrR(fuType, vecOPF)
 
@@ -208,6 +222,14 @@ object FuType extends OHEnumeration {
 
     def apply(fuType: UInt, fus: Seq[OHType]): Bool = {
       fus.map(x => fuType(x.id)).fold(false.B)(_ || _)
+    }
+
+    def apply(fuType: OHType, fu0: OHType, fus: OHType*): Boolean = {
+      apply(fuType, fu0 +: fus)
+    }
+
+    def apply(fuTupe: OHType, fus: Seq[OHType]): Boolean = {
+      fus.map(x => x == fuTupe).fold(false)(_ || _)
     }
   }
 

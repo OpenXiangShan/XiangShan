@@ -69,6 +69,11 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
     new RfWritePortWithConfig(backendParams.vfPregParams.dataCfg, backendParams.vfPregParams.addrWidth)))
   val toDataPathAfterDelay: MixedVec[MixedVec[DecoupledIO[IssueQueueIssueBundle]]] = MixedVec(params.issueBlockParams.map(_.genIssueDecoupledBundle))
 
+  val vlWriteBack = new Bundle {
+    val vlIsZero = Input(Bool())
+    val vlIsVlmax = Input(Bool())
+  }
+
   val fromSchedulers = new Bundle {
     val wakeupVec: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpInValidBundle)
   }
@@ -89,6 +94,7 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
 
   val loadFinalIssueResp = MixedVec(params.issueBlockParams.map(x => MixedVec(Vec(x.LdExuCnt, Flipped(ValidIO(new IssueQueueDeqRespBundle()(p, x)))))))
   val memAddrIssueResp = MixedVec(params.issueBlockParams.map(x => MixedVec(Vec(x.LdExuCnt, Flipped(ValidIO(new IssueQueueDeqRespBundle()(p, x)))))))
+  val vecLoadIssueResp = MixedVec(params.issueBlockParams.map(x => MixedVec(Vec(x.VlduCnt, Flipped(ValidIO(new IssueQueueDeqRespBundle()(p, x)))))))
 
   val ldCancel = Vec(backendParams.LduCnt + backendParams.HyuCnt, Flipped(new LoadCancelIO))
 
@@ -99,6 +105,8 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
     val ldaFeedback = Flipped(Vec(params.LduCnt, new MemRSFeedbackIO))
     val staFeedback = Flipped(Vec(params.StaCnt, new MemRSFeedbackIO))
     val hyuFeedback = Flipped(Vec(params.HyuCnt, new MemRSFeedbackIO))
+    val vstuFeedback = Flipped(Vec(params.VstuCnt, new MemRSFeedbackIO(isVector = true)))
+    val vlduFeedback = Flipped(Vec(params.VlduCnt, new MemRSFeedbackIO(isVector = true)))
     val stIssuePtr = Input(new SqPtr())
     val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
     val scommit = Input(UInt(log2Ceil(EnsbufferWidth + 1).W)) // connected to `memBlock.io.sqDeq` instead of ROB
@@ -262,6 +270,12 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
     iq.io.ldCancel := io.ldCancel
   }
 
+  // connect the vl writeback informatino to the issue queues
+  issueQueues.zipWithIndex.foreach { case(iq, i) =>
+    iq.io.vlIsVlmax := io.vlWriteBack.vlIsVlmax
+    iq.io.vlIsZero := io.vlWriteBack.vlIsZero
+  }
+
   private val iqWakeUpOutMap: Map[Int, ValidIO[IssueQueueIQWakeUpBundle]] =
     issueQueues.flatMap(_.io.wakeupToIQ)
       .map(x => (x.bits.exuIdx, x))
@@ -297,6 +311,9 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
       } else {
         memAddrIssueResp := 0.U.asTypeOf(memAddrIssueResp)
       }
+    })
+    iq.io.vecLoadIssueResp.foreach(_.zipWithIndex.foreach { case (resp, deqIdx) =>
+      resp := io.vecLoadIssueResp(i)(deqIdx)
     })
     if(params.isVfSchd) {
       iq.io.og2Resp.get.zipWithIndex.foreach { case (og2Resp, exuIdx) =>
@@ -467,7 +484,7 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
       imp.io.memIO.get.sqDeqPtr.foreach(_ := io.fromMem.get.sqDeqPtr)
       imp.io.memIO.get.lqDeqPtr.foreach(_ := io.fromMem.get.lqDeqPtr)
       // not used
-      imp.io.memIO.get.feedbackIO := 0.U.asTypeOf(imp.io.memIO.get.feedbackIO)
+      //imp.io.memIO.get.feedbackIO.head := io.fromMem.get.vstuFeedback.head // only vector store replay
       // maybe not used
       imp.io.memIO.get.checkWait.stIssuePtr := io.fromMem.get.stIssuePtr
       imp.io.memIO.get.checkWait.memWaitUpdateReq := io.fromMem.get.memWaitUpdateReq
@@ -479,6 +496,15 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
 
     case _ =>
   }
+  val vecMemFeedbackIO: Seq[MemRSFeedbackIO] = vecMemIQs.map {
+    case imp: IssueQueueVecMemImp =>
+      imp.io.memIO.get.feedbackIO
+  }.flatten
+  assert(vecMemFeedbackIO.size == io.fromMem.get.vstuFeedback.size, "vecMemFeedback size dont match!")
+  vecMemFeedbackIO.zip(io.fromMem.get.vstuFeedback).foreach{
+    case (sink, source) =>
+      sink := source
+  }
 
   val lsqEnqCtrl = Module(new LsqEnqCtrl)
 
@@ -488,5 +514,9 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
   lsqEnqCtrl.io.scommit := io.fromMem.get.scommit
   lsqEnqCtrl.io.lqCancelCnt := io.fromMem.get.lqCancelCnt
   lsqEnqCtrl.io.sqCancelCnt := io.fromMem.get.sqCancelCnt
+  dispatch2Iq.io.lqFreeCount.get := lsqEnqCtrl.io.lqFreeCount
+  dispatch2Iq.io.sqFreeCount.get := lsqEnqCtrl.io.sqFreeCount
   io.memIO.get.lsqEnqIO <> lsqEnqCtrl.io.enqLsq
+
+  dontTouch(io.vecLoadIssueResp)
 }

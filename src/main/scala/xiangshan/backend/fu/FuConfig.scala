@@ -63,6 +63,7 @@ case class FuConfig (
   trigger       : Boolean = false,
   needSrcFrm    : Boolean = false,
   needSrcVxrm   : Boolean = false,
+  writeVConfig  : Boolean = false,
   writeVType    : Boolean = false,
   immType       : Set[UInt] = Set(),
   // vector
@@ -353,6 +354,7 @@ object FuConfig {
     ),
     piped = true,
     writeVecRf = true,
+    writeVConfig = true,
     writeVType = true,
     latency = CertainLatency(0),
     immType = Set(SelImm.IMM_VSETVLI, SelImm.IMM_VSETIVLI),
@@ -367,6 +369,7 @@ object FuConfig {
     ),
     piped = true,
     writeVecRf = true,
+    writeVConfig = true,
     writeVType = true,
     latency = CertainLatency(0),
     immType = Set(SelImm.IMM_VSETVLI, SelImm.IMM_VSETIVLI),
@@ -758,9 +761,47 @@ object FuConfig {
     dataBits = 128,
   )
 
+  val VseglduSeg: FuConfig = FuConfig (
+    name = "vsegldu",
+    fuType = FuType.vsegldu,
+    fuGen = null,
+    srcData = Seq(
+      Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()), //vs1, vs2, vd_old, v0, vconfig
+    ),
+    piped = false, // Todo: check it
+    writeVecRf = true,
+    latency = UncertainLatency(),
+    exceptionOut = Seq(loadAddrMisaligned, loadAccessFault, loadPageFault),
+    flushPipe = true,
+    replayInst = true,
+    hasLoadError = true,
+    vconfigWakeUp = true,
+    maskWakeUp = true,
+    dataBits = 128,
+  )
+
+  val VsegstuCfg: FuConfig = FuConfig(
+    name = "vsegstu",
+    fuType = FuType.vsegstu,
+    fuGen = null,
+    srcData = Seq(
+      Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()), //vs1, vs2, vd_old, v0, vconfig
+    ),
+    piped = false,
+    writeVecRf = false,
+    latency = UncertainLatency(),
+    exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault),
+    flushPipe = true,
+    replayInst = true,
+    hasLoadError = true,
+    vconfigWakeUp = true,
+    maskWakeUp = true,
+    dataBits = 128,
+  )
+
   def allConfigs = Seq(
     JmpCfg, BrhCfg, I2fCfg, I2vCfg, F2vCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg, VSetRvfWvfCfg, VSetRiWvfCfg, VSetRiWiCfg,
-    LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg, VialuCfg, VipuCfg, VlduCfg, VstuCfg,
+    LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg, VialuCfg, VipuCfg, VlduCfg, VstuCfg, VseglduSeg, VsegstuCfg,
     FaluCfg, FmacCfg, FcvtCfg, FdivCfg,
     VfaluCfg, VfmaCfg, VfcvtCfg, HyldaCfg, HystaCfg
   )

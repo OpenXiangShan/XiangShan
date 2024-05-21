@@ -29,6 +29,7 @@ import xiangshan.cache._
 import xiangshan.backend.fu.FenceToSbuffer
 import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.mem.prefetch.PrefetchReqBundle
+import math._
 
 object genWmask {
   def apply(addr: UInt, sizeEncode: UInt): UInt = {
@@ -89,6 +90,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   val miss = Bool()
   val tlbMiss = Bool()
   val ptwBack = Bool()
+  val af = Bool()
   val mmio = Bool()
   val atomic = Bool()
   val rsIdx = UInt(log2Up(MemIQSizeMax).W)
@@ -106,15 +108,20 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   val isLastElem = Bool()
   val is128bit = Bool()
   val uop_unit_stride_fof = Bool()
+  val usSecondInv = Bool()
+  val elemIdx = UInt(elemIdxBits.W)
+  val alignedType = UInt(alignTypeBits.W)
+  val mbIndex = UInt(max(vlmBindexBits, vsmBindexBits).W)
   // val rob_idx_valid = Vec(2,Bool())
   // val inner_idx = Vec(2,UInt(3.W))
   // val rob_idx = Vec(2,new RobPtr)
   val reg_offset = UInt(vOffsetBits.W)
+  val elemIdxInsideVd = UInt(elemIdxBits.W)
   // val offset = Vec(2,UInt(4.W))
   val vecActive = Bool() // 1: vector active element or scala mem operation, 0: vector not active element
   val is_first_ele = Bool()
-  val flowPtr = new VlflowPtr() // VLFlowQueue ptr
-  val sflowPtr = new VsFlowPtr() // VSFlowQueue ptr
+  // val flowPtr = new VlflowPtr() // VLFlowQueue ptr
+  // val sflowPtr = new VsFlowPtr() // VSFlowQueue ptr
 
   // For debug usage
   val isFirstIssue = Bool()
@@ -157,6 +164,7 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     if (latch) miss := RegNext(input.miss) else miss := input.miss
     if (latch) tlbMiss := RegNext(input.tlbMiss) else tlbMiss := input.tlbMiss
     if (latch) ptwBack := RegNext(input.ptwBack) else ptwBack := input.ptwBack
+    if (latch) af := RegNext(input.af) else af := input.af
     if (latch) mmio := RegNext(input.mmio) else mmio := input.mmio
     if (latch) rsIdx := RegNext(input.rsIdx) else rsIdx := input.rsIdx
     if (latch) forwardMask := RegNext(input.forwardMask) else forwardMask := input.forwardMask
@@ -170,12 +178,17 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     if (latch) isvec               := RegNext(input.isvec)               else isvec               := input.isvec
     if (latch) isLastElem          := RegNext(input.isLastElem)          else isLastElem          := input.isLastElem
     if (latch) is128bit            := RegNext(input.is128bit)            else is128bit            := input.is128bit
-    if (latch) vecActive                 := RegNext(input.vecActive)                 else vecActive                 := input.vecActive
+    if (latch) vecActive           := RegNext(input.vecActive)           else vecActive           := input.vecActive
     if (latch) is_first_ele        := RegNext(input.is_first_ele)        else is_first_ele        := input.is_first_ele
     if (latch) uop_unit_stride_fof := RegNext(input.uop_unit_stride_fof) else uop_unit_stride_fof := input.uop_unit_stride_fof
+    if (latch) usSecondInv         := RegNext(input.usSecondInv)         else usSecondInv         := input.usSecondInv
     if (latch) reg_offset          := RegNext(input.reg_offset)          else reg_offset          := input.reg_offset
-    if (latch) flowPtr             := RegNext(input.flowPtr)             else flowPtr             := input.flowPtr
-    if (latch) sflowPtr            := RegNext(input.sflowPtr)            else sflowPtr            := input.sflowPtr
+    if (latch) elemIdx             := RegNext(input.elemIdx)             else elemIdx             := input.elemIdx
+    if (latch) alignedType         := RegNext(input.alignedType)         else alignedType         := input.alignedType
+    if (latch) mbIndex             := RegNext(input.mbIndex)             else mbIndex             := input.mbIndex
+    if(latch) elemIdxInsideVd     := RegNext(input.elemIdxInsideVd)     else elemIdxInsideVd     := input.elemIdxInsideVd
+    // if (latch) flowPtr             := RegNext(input.flowPtr)             else flowPtr             := input.flowPtr
+    // if (latch) sflowPtr            := RegNext(input.sflowPtr)            else sflowPtr            := input.sflowPtr
 
     meta_prefetch := DontCare
     meta_access := DontCare
@@ -255,6 +268,8 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     if(latch) vecActive                 := RegNext(input.vecActive)                 else vecActive                 := input.vecActive
     if(latch) uop_unit_stride_fof := RegNext(input.uop_unit_stride_fof) else uop_unit_stride_fof := input.uop_unit_stride_fof
     if(latch) reg_offset          := RegNext(input.reg_offset)          else reg_offset          := input.reg_offset
+    if(latch) mbIndex             := RegNext(input.mbIndex)             else mbIndex             := input.mbIndex
+    if(latch) elemIdxInsideVd     := RegNext(input.elemIdxInsideVd)     else elemIdxInsideVd     := input.elemIdxInsideVd
 
     rep_info := DontCare
     data_wen_dup := DontCare
@@ -346,6 +361,9 @@ class StoreNukeQueryIO(implicit p: Parameters) extends XSBundle {
 
   //  mask: requestor's (a store instruction) data width mask for match logic.
   val mask = UInt((VLEN/8).W)
+
+  // matchLine: if store is vector 128-bits, load unit need to compare 128-bits vaddr.
+  val matchLine = Bool()
 }
 
 // Store byte valid mask write bundle

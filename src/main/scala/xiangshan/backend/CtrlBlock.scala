@@ -460,11 +460,9 @@ class CtrlBlockImp(
     Cat(rename.io.out.map(out => out.valid && out.bits.snapshot)).orR
   )
 
-
   // pipeline between rename and dispatch
-   for (i <- 0 until RenameWidth) {
-     PipelineConnect(renameOut(i), dispatch.io.fromRename(i), dispatch.io.recv(i), s1_s3_redirect.valid)
-   }
+  PipeGroupConnect(renameOut, dispatch.io.fromRename, s1_s3_redirect.valid, "renamePipeDispatch")
+
   dispatch.io.IQValidNumVec := io.IQValidNumVec
   dispatch.io.fromIntDQ.intDQ0ValidDeq0Num := intDq0.io.validDeq0Num
   dispatch.io.fromIntDQ.intDQ0ValidDeq1Num := intDq0.io.validDeq1Num

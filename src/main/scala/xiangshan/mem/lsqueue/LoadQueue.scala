@@ -118,6 +118,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 {
   val io = IO(new Bundle() {
     val redirect = Flipped(Valid(new Redirect))
+    val vecFeedback = Vec(VecLoadPipelineWidth, Flipped(ValidIO(new FeedbackToLsqIO)))
     val enq = new LqEnqIO
     val ldu = new Bundle() {
         val stld_nuke_query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO)) // from load_s2
@@ -126,10 +127,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     }
     val sta = new Bundle() {
       val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // from store_s1
-      val vecStoreAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // from store_s1
     }
     val std = new Bundle() {
-      val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new MemExuOutput))) // from store_s0, store data, send to sq from rs
+      val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new MemExuOutput(isVector = true)))) // from store_s0, store data, send to sq from rs
     }
     val sq = new Bundle() {
       val stAddrReadySqPtr = Input(new SqPtr)
@@ -159,9 +159,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val tlb_hint = Flipped(new TlbHintIO)
     val lqEmpty = Output(Bool())
 
-    val vecWriteback = Flipped(ValidIO(new MemExuOutput(isVector = true)))
     val lqDeqPtr = Output(new LqPtr)
-    val vecMMIOReplay = Vec(VecLoadPipelineWidth, DecoupledIO(new LsPipelineBundle()))
 
     val trigger = Vec(LoadPipelineWidth, new LqTriggerIO)
 
@@ -177,9 +175,10 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   /**
    * LoadQueueRAR
    */
-  loadQueueRAR.io.redirect <> io.redirect
-  loadQueueRAR.io.release  <> io.release
-  loadQueueRAR.io.ldWbPtr  <> virtualLoadQueue.io.ldWbPtr
+  loadQueueRAR.io.redirect  <> io.redirect
+  loadQueueRAR.io.vecFeedback <> io.vecFeedback
+  loadQueueRAR.io.release   <> io.release
+  loadQueueRAR.io.ldWbPtr   <> virtualLoadQueue.io.ldWbPtr
   for (w <- 0 until LoadPipelineWidth) {
     loadQueueRAR.io.query(w).req    <> io.ldu.ldld_nuke_query(w).req // from load_s1
     loadQueueRAR.io.query(w).resp   <> io.ldu.ldld_nuke_query(w).resp // to load_s2
@@ -190,8 +189,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
    * LoadQueueRAW
    */
   loadQueueRAW.io.redirect         <> io.redirect
+  loadQueueRAW.io.vecFeedback      <> io.vecFeedback
   loadQueueRAW.io.storeIn          <> io.sta.storeAddrIn
-  loadQueueRAW.io.vecStoreIn       <> io.sta.vecStoreAddrIn
   loadQueueRAW.io.stAddrReadySqPtr <> io.sq.stAddrReadySqPtr
   loadQueueRAW.io.stIssuePtr       <> io.sq.stIssuePtr
   for (w <- 0 until LoadPipelineWidth) {
@@ -204,23 +203,34 @@ class LoadQueue(implicit p: Parameters) extends XSModule
    * VirtualLoadQueue
    */
   virtualLoadQueue.io.redirect      <> io.redirect
+  virtualLoadQueue.io.vecCommit     <> io.vecFeedback
   virtualLoadQueue.io.enq           <> io.enq
   virtualLoadQueue.io.ldin          <> io.ldu.ldin // from load_s3
   virtualLoadQueue.io.lqFull        <> io.lqFull
   virtualLoadQueue.io.lqDeq         <> io.lqDeq
   virtualLoadQueue.io.lqCancelCnt   <> io.lqCancelCnt
   virtualLoadQueue.io.lqEmpty       <> io.lqEmpty
-  virtualLoadQueue.io.vecWriteback  <> io.vecWriteback
   virtualLoadQueue.io.ldWbPtr       <> io.lqDeqPtr
 
   /**
    * Load queue exception buffer
    */
   exceptionBuffer.io.redirect <> io.redirect
-  for ((buff, w) <- exceptionBuffer.io.req.zipWithIndex) {
-    buff.valid := io.ldu.ldin(w).valid // from load_s3
-    buff.bits := io.ldu.ldin(w).bits
+  for (i <- 0 until LoadPipelineWidth) {
+    exceptionBuffer.io.req(i).valid := io.ldu.ldin(i).valid && !io.ldu.ldin(i).bits.isvec // from load_s3
+    exceptionBuffer.io.req(i).bits := io.ldu.ldin(i).bits
   }
+  // vlsu exception!
+  for (i <- 0 until VecLoadPipelineWidth) {
+    exceptionBuffer.io.req(LoadPipelineWidth + i).valid               := io.vecFeedback(i).valid && io.vecFeedback(i).bits.feedback(VecFeedbacks.FLUSH) // have exception
+    exceptionBuffer.io.req(LoadPipelineWidth + i).bits                := DontCare
+    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.vaddr          := io.vecFeedback(i).bits.vaddr
+    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.uop.uopIdx     := io.vecFeedback(i).bits.uopidx
+    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.uop.robIdx     := io.vecFeedback(i).bits.robidx
+    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.uop.vpu.vstart := io.vecFeedback(i).bits.vstart
+    exceptionBuffer.io.req(LoadPipelineWidth + i).bits.uop.vpu.vl     := io.vecFeedback(i).bits.vl
+  }
+
   io.exceptionAddr <> exceptionBuffer.io.exceptionAddr
 
   /**
@@ -232,7 +242,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   uncacheBuffer.io.rob        <> io.rob
   uncacheBuffer.io.uncache    <> io.uncache
   uncacheBuffer.io.trigger    <> io.trigger
-  uncacheBuffer.io.vecReplay  <> io.vecMMIOReplay
   for ((buff, w) <- uncacheBuffer.io.req.zipWithIndex) {
     buff.valid := io.ldu.ldin(w).valid // from load_s3
     buff.bits := io.ldu.ldin(w).bits // from load_s3
@@ -249,10 +258,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
    */
   loadQueueReplay.io.redirect         <> io.redirect
   loadQueueReplay.io.enq              <> io.ldu.ldin // from load_s3
-  loadQueueReplay.io.enq.zip(io.ldu.ldin).foreach { case (sink, source) =>
-    sink.valid := source.valid && !source.bits.isvec
-    source.ready := sink.ready && !source.bits.isvec
-  }
   loadQueueReplay.io.storeAddrIn      <> io.sta.storeAddrIn // from store_s1
   loadQueueReplay.io.storeDataIn      <> io.std.storeDataIn // from store_s0
   loadQueueReplay.io.replay           <> io.replay
@@ -270,6 +275,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueReplay.io.l2_hint          <> io.l2_hint
   loadQueueReplay.io.tlb_hint         <> io.tlb_hint
   loadQueueReplay.io.tlbReplayDelayCycleCtrl <> io.tlbReplayDelayCycleCtrl
+  // TODO: implement it!
+  loadQueueReplay.io.vecFeedback := io.vecFeedback
 
   loadQueueReplay.io.debugTopDown <> io.debugTopDown
 

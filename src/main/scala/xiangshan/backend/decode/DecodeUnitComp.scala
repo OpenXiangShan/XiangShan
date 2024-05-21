@@ -36,52 +36,44 @@ import scala.collection.Seq
 import chisel3.util.experimental.decode.{QMCMinimizer, TruthTable, decoder}
 
 class indexedLSUopTable(uopIdx:Int) extends Module {
-  val src = IO(Input(UInt(7.W)))
+  val src = IO(Input(UInt(4.W)))
   val outOffsetVs2 = IO(Output(UInt(3.W)))
   val outOffsetVd = IO(Output(UInt(3.W)))
-  val outIsFirstUopInVd = IO(Output(Bool()))
-  def genCsBundle_VEC_INDEXED_LDST(lmul:Int, emul:Int, nfields:Int, uopIdx:Int): (Int, Int, Int) ={
-    if (lmul * nfields <= 8) {
-      for (k <-0 until nfields) {
-        if (lmul < emul) {    // lmul < emul, uop num is depend on emul * nf
-          var offset = 1 << (emul - lmul)
-          for (i <- 0 until (1 << emul)) {
-            if (uopIdx == k * (1 << emul) + i) {
-              return (i, i / offset + k * (1 << lmul), if (i % offset == 0) 1 else 0)
-            }
-          }
-        } else {              // lmul > emul, uop num is depend on lmul * nf
-          var offset = 1 << (lmul - emul)
-          for (i <- 0 until (1 << lmul)) {
-            if (uopIdx == k * (1 << lmul) + i) {
-              return (i / offset, i + k * (1 << lmul), 1)
-            }
-          }
+  def genCsBundle_VEC_INDEXED_LDST(lmul:Int, emul:Int, uopIdx:Int): (Int, Int) ={
+    // only consider non segment indexed load/store
+    if (lmul < emul) {    // lmul < emul, uop num is depend on emul * nf
+      var offset = 1 << (emul - lmul)
+      for (i <- 0 until (1 << emul)) {
+        if (uopIdx == i) {
+          return (i, i / offset)
+        }
+      }
+    } else {              // lmul > emul, uop num is depend on lmul * nf
+      var offset = 1 << (lmul - emul)
+      for (i <- 0 until (1 << lmul)) {
+        if (uopIdx == i) {
+          return (i / offset, i)
         }
       }
     }
-    return (0, 0, 1)
+    return (0, 0)
   }
   // strided load/store
-  var combVemulNf : Seq[(Int, Int, Int, Int, Int, Int)] = Seq()
+  var combVemulNf : Seq[(Int, Int, Int, Int)] = Seq()
   for (emul <- 0 until 4) {
     for (lmul <- 0 until 4) {
-      for (nf <- 0 until 8) {
-        var offset = genCsBundle_VEC_INDEXED_LDST(lmul, emul, nf+1, uopIdx)
-        var offsetVs2 = offset._1
-        var offsetVd = offset._2
-        var isFirstUopInVd = offset._3
-        combVemulNf :+= (emul, lmul, nf, isFirstUopInVd, offsetVs2, offsetVd)
-      }
+      var offset = genCsBundle_VEC_INDEXED_LDST(lmul, emul, uopIdx)
+      var offsetVs2 = offset._1
+      var offsetVd = offset._2
+      combVemulNf :+= (emul, lmul, offsetVs2, offsetVd)
     }
   }
   val out = decoder(QMCMinimizer, src, TruthTable(combVemulNf.map {
-    case (emul, lmul, nf, isFirstUopInVd, offsetVs2, offsetVd) =>
-      (BitPat((emul << 5 | lmul << 3 | nf).U(7.W)), BitPat((isFirstUopInVd << 6 | offsetVs2 << 3 | offsetVd).U(7.W)))
-  }, BitPat.N(7)))
+    case (emul, lmul, offsetVs2, offsetVd) =>
+      (BitPat((emul << 2 | lmul).U(4.W)), BitPat((offsetVs2 << 3 | offsetVd).U(6.W)))
+  }, BitPat.N(6)))
   outOffsetVs2 := out(5, 3)
   outOffsetVd := out(2, 0)
-  outIsFirstUopInVd := out(6).asBool
 }
 
 trait VectorConstants {
@@ -150,7 +142,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   val lmul = Wire(UInt(4.W))
   val isVsetSimple = Wire(Bool())
 
-  val indexedLSRegOffset = Seq.tabulate(MAX_INDEXED_LS_UOPNUM)(i => Module(new indexedLSUopTable(i)))
+  val indexedLSRegOffset = Seq.tabulate(MAX_VLMUL)(i => Module(new indexedLSUopTable(i)))
   indexedLSRegOffset.map(_.src := 0.U)
 
   //pre decode
@@ -165,6 +157,8 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   val src1IsImm = src1Type === SrcType.imm
   val src1IsFp = src1Type === SrcType.fp
 
+  val isVstore = FuType.isVStore(latchedInst.fuType)
+
   numOfUop := latchedUopInfo.numOfUop
   numOfWB := latchedUopInfo.numOfWB
 
@@ -176,6 +170,9 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   val uopRes = RegInit(0.U(log2Up(maxUopSize).W))
   val uopResNext = WireInit(uopRes)
   val e64 = 3.U(2.W)
+  val isUsSegment = instFields.MOP === 0.U && nf =/= 0.U && (instFields.LUMOP === 0.U || instFields.LUMOP === "b10000".U)
+  val isIxSegment = instFields.MOP(0) === 1.U && nf =/= 0.U
+  val isSdSegment = instFields.MOP === "b10".U && nf =/= 0.U
 
   //uop div up to maxUopSize
   val csBundle = Wire(Vec(maxUopSize, new DecodedInst))
@@ -204,6 +201,10 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(1).ldest := VCONFIG_IDX.U
         csBundle(1).vecWen := true.B
         when(VSETOpType.isVsetvli(latchedInst.fuOpType) && dest === 0.U && src1 === 0.U) {
+          // write nothing, uop0 is a nop instruction
+          csBundle(0).rfWen := false.B
+          csBundle(0).fpWen := false.B
+          csBundle(0).vecWen := false.B
           csBundle(1).fuType := FuType.vsetfwf.U
           csBundle(1).srcType(0) := SrcType.vp
           csBundle(1).lsrc(0) := VCONFIG_IDX.U
@@ -229,6 +230,11 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           csBundle(1).lsrc(1) := FP_TMP_REG_MV.U
           csBundle(1).vecWen := true.B
           csBundle(1).ldest := VCONFIG_IDX.U
+        }.elsewhen(dest === 0.U) {
+          // write nothing, uop0 is a nop instruction
+          csBundle(0).rfWen := false.B
+          csBundle(0).fpWen := false.B
+          csBundle(0).vecWen := false.B
         }
         // use bypass vtype from vtypeGen
         csBundle(0).vpu.connectVType(io.vtypeBypass)
@@ -1624,6 +1630,8 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(i + 1).uopIdx := i.U
         csBundle(i + 1).vlsInstr := true.B
       }
+      csBundle.head.waitForward := isUsSegment
+      csBundle(numOfUop - 1.U).blockBackward := isUsSegment
     }
     is(UopSplitType.VEC_S_LDST) {
       /*
@@ -1663,11 +1671,36 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(i + 2).uopIdx := i.U
         csBundle(i + 2).vlsInstr := true.B
       }
+      csBundle.head.waitForward := isSdSegment
+      csBundle(numOfUop - 1.U).blockBackward := isSdSegment
     }
     is(UopSplitType.VEC_I_LDST) {
-    /*
-      FMV.D.X
-       */
+      def genCsBundle_SEGMENT_INDEXED_LOADSTORE(lmul:Int, nf:Int): Unit ={
+        for (i <- 0 until MAX_VLMUL) {
+          val vecWen = if (i < lmul * nf) true.B else false.B
+          val src2Type = if (i < lmul * nf) SrcType.vp else SrcType.no
+          csBundle(i + 1).srcType(0) := SrcType.fp
+          csBundle(i + 1).lsrc(0) := FP_TMP_REG_MV.U
+          csBundle(i + 1).srcType(1) := SrcType.no
+          csBundle(i + 1).lsrc(1) := src2 + i.U
+          csBundle(i + 1).srcType(2) := src2Type
+          csBundle(i + 1).lsrc(2) := dest + i.U
+          csBundle(i + 1).ldest := dest + i.U
+          csBundle(i + 1).rfWen := false.B
+          csBundle(i + 1).fpWen := false.B
+          csBundle(i + 1).vecWen := vecWen
+          csBundle(i + 1).uopIdx := i.U
+          csBundle(i + 1).vlsInstr := true.B
+        }
+      }
+      def genCsBundle_SEGMENT_INDEXED_LOADSTORE_SRC1(emul:Int): Unit ={
+        for (i <- 0 until MAX_VLMUL) {
+          val src1Type = if (i < emul) SrcType.vp else SrcType.no
+          csBundle(i + 1).srcType(1) := src1Type
+          csBundle(i + 1).lsrc(1) := src2 + i.U
+        }
+      }
+
       val vlmul = vlmulReg
       val vsew = Cat(0.U(1.W), vsewReg)
       val veew = Cat(0.U(1.W), width)
@@ -1694,33 +1727,97 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).vlsInstr := true.B
 
       //LMUL
-      for (i <- 0 until MAX_INDEXED_LS_UOPNUM) {
-        indexedLSRegOffset(i).src := Cat(simple_emul, simple_lmul, nf)
-        val offsetVs2 = indexedLSRegOffset(i).outOffsetVs2
-        val offsetVd = indexedLSRegOffset(i).outOffsetVd
-        val isFirstUopInVd = indexedLSRegOffset(i).outIsFirstUopInVd
-        csBundle(i + 1).srcType(0) := SrcType.fp
-        csBundle(i + 1).lsrc(0) := FP_TMP_REG_MV.U
-        csBundle(i + 1).lsrc(1) := Mux1H(UIntToOH(offsetVs2, MAX_VLMUL), (0 until MAX_VLMUL).map(j => src2 + j.U))
-        /**
-          * For indexed instructions, VLSU will concatenate all the uops that write the same logic vd register and
-          * writeback only once for all these uops. However, these uops share the same lsrc(2)/old vd and the same
-          * ldest/vd that is equal to old vd, which leads to data dependence between the uops. Therefore there will be
-          * deadlock for indexed instructions with emul > lmul.
-          *
-          * Assume N = emul/lmul. To break the deadlock, only the first uop will read old vd as lsrc(2), and the rest
-          * N-1 uops will read temporary vector register.
-          */
-        // csBundle(i + 1).lsrc(2) := Mux1H(UIntToOH(offsetVd, MAX_VLMUL), (0 until MAX_VLMUL).map(j => dest + j.U))
-        csBundle(i + 1).lsrc(2) := Mux(
-          isFirstUopInVd,
-          Mux1H(UIntToOH(offsetVd, MAX_VLMUL), (0 until MAX_VLMUL).map(j => dest + j.U)),
-          VECTOR_TMP_REG_LMUL.U
-        )
-        csBundle(i + 1).ldest := Mux1H(UIntToOH(offsetVd, MAX_VLMUL), (0 until MAX_VLMUL).map(j => dest + j.U))
-        csBundle(i + 1).uopIdx := i.U
-        csBundle(i + 1).vlsInstr := true.B
+      when(nf === 0.U) {
+        for (i <- 0 until MAX_VLMUL) {
+          indexedLSRegOffset(i).src := Cat(simple_emul, simple_lmul)
+          val offsetVs2 = indexedLSRegOffset(i).outOffsetVs2
+          val offsetVd = indexedLSRegOffset(i).outOffsetVd
+          csBundle(i + 1).srcType(0) := SrcType.fp
+          csBundle(i + 1).lsrc(0) := FP_TMP_REG_MV.U
+          csBundle(i + 1).lsrc(1) := Mux1H(UIntToOH(offsetVs2, MAX_VLMUL), (0 until MAX_VLMUL).map(j => src2 + j.U))
+          csBundle(i + 1).srcType(2) := SrcType.vp
+          // lsrc2 is old vd
+          csBundle(i + 1).lsrc(2) := Mux1H(UIntToOH(offsetVd, MAX_VLMUL), (0 until MAX_VLMUL).map(j => dest + j.U))
+          csBundle(i + 1).ldest := Mux1H(UIntToOH(offsetVd, MAX_VLMUL), (0 until MAX_VLMUL).map(j => dest + j.U))
+          csBundle(i + 1).uopIdx := i.U
+          csBundle(i + 1).vlsInstr := true.B
+        }
+      }.otherwise{
+        // nf > 1, is segment indexed load/store
+        // gen src0, vd
+        switch(simple_lmul) {
+          is(0.U) {
+            switch(nf) {
+              is(1.U) {
+                genCsBundle_SEGMENT_INDEXED_LOADSTORE(1, 2)
+              }
+              is(2.U) {
+                genCsBundle_SEGMENT_INDEXED_LOADSTORE(1, 3)
+              }
+              is(3.U) {
+                genCsBundle_SEGMENT_INDEXED_LOADSTORE(1, 4)
+              }
+              is(4.U) {
+                genCsBundle_SEGMENT_INDEXED_LOADSTORE(1, 5)
+              }
+              is(5.U) {
+                genCsBundle_SEGMENT_INDEXED_LOADSTORE(1, 6)
+              }
+              is(6.U) {
+                genCsBundle_SEGMENT_INDEXED_LOADSTORE(1, 7)
+              }
+              is(7.U) {
+                genCsBundle_SEGMENT_INDEXED_LOADSTORE(1, 8)
+              }
+            }
+          }
+          is(1.U) {
+            switch(nf) {
+              is(1.U) {
+                genCsBundle_SEGMENT_INDEXED_LOADSTORE(2, 2)
+              }
+              is(2.U) {
+                genCsBundle_SEGMENT_INDEXED_LOADSTORE(2, 3)
+              }
+              is(3.U) {
+                genCsBundle_SEGMENT_INDEXED_LOADSTORE(2, 4)
+              }
+            }
+          }
+          is(2.U) {
+            switch(nf) {
+              is(1.U) {
+                genCsBundle_SEGMENT_INDEXED_LOADSTORE(4, 2)
+              }
+            }
+          }
+        }
+
+        // gen src1
+        switch(simple_emul) {
+          is(0.U) {
+            genCsBundle_SEGMENT_INDEXED_LOADSTORE_SRC1(1)
+          }
+          is(1.U) {
+            genCsBundle_SEGMENT_INDEXED_LOADSTORE_SRC1(2)
+          }
+          is(2.U) {
+            genCsBundle_SEGMENT_INDEXED_LOADSTORE_SRC1(4)
+          }
+          is(3.U) {
+            genCsBundle_SEGMENT_INDEXED_LOADSTORE_SRC1(8)
+          }
+        }
+
+        // when is vstore instructions, not set vecwen
+        when(isVstore) {
+          for (i <- 0 until MAX_VLMUL) {
+            csBundle(i + 1).vecWen := false.B
+          }
+        }
       }
+      csBundle.head.waitForward := isIxSegment
+      csBundle(numOfUop - 1.U).blockBackward := isIxSegment
     }
   }
 

@@ -68,7 +68,7 @@ class MinimalConfig(n: Int = 1) extends Config(
         RobCommitWidth = 8,
         FetchWidth = 4,
         VirtualLoadQueueSize = 24,
-        LoadQueueRARSize = 16,
+        LoadQueueRARSize = 24,
         LoadQueueRAWSize = 12,
         LoadQueueReplaySize = 24,
         LoadUncacheBufferSize = 8,
@@ -77,6 +77,12 @@ class MinimalConfig(n: Int = 1) extends Config(
         StoreQueueSize = 20,
         StoreQueueNWriteBanks = 4, // NOTE: make sure that StoreQueueSize is divided by StoreQueueNWriteBanks
         StoreQueueForwardWithMask = true,
+        // ============ VLSU ============
+        VlMergeBufferSize = 8,
+        VsMergeBufferSize = 8,
+        UopWritebackWidth = 2,
+        SplitBufferSize = 8,
+        // ==============================
         RobSize = 48,
         RabSize = 96,
         FtqSize = 8,
@@ -84,7 +90,7 @@ class MinimalConfig(n: Int = 1) extends Config(
         IBufNBank = 6,
         StoreBufferSize = 4,
         StoreBufferThreshold = 3,
-        IssueQueueSize = 8,
+        IssueQueueSize = 10,
         IssueQueueCompEntrySize = 4,
         dpParams = DispatchParameters(
           IntDqSize = 12,
@@ -141,28 +147,32 @@ class MinimalConfig(n: Int = 1) extends Config(
           NWays = 4,
           partialStaticPMP = true,
           outsideRecvFlush = true,
-          outReplace = false
+          outReplace = false,
+          lgMaxSize = 4
         ),
         sttlbParameters = TLBParameters(
           name = "sttlb",
           NWays = 4,
           partialStaticPMP = true,
           outsideRecvFlush = true,
-          outReplace = false
+          outReplace = false,
+          lgMaxSize = 4
         ),
         hytlbParameters = TLBParameters(
           name = "hytlb",
           NWays = 4,
           partialStaticPMP = true,
           outsideRecvFlush = true,
-          outReplace = false
+          outReplace = false,
+          lgMaxSize = 4
         ),
         pftlbParameters = TLBParameters(
           name = "pftlb",
           NWays = 4,
           partialStaticPMP = true,
           outsideRecvFlush = true,
-          outReplace = false
+          outReplace = false,
+          lgMaxSize = 4
         ),
         btlbParameters = TLBParameters(
           name = "btlb",

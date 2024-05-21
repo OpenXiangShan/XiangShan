@@ -199,17 +199,19 @@ case class XSCoreParameters
   VecMemSrcInWidth: Int = 2,
   VecMemInstWbWidth: Int = 1,
   VecMemDispatchWidth: Int = 1,
+  VecMemDispatchMaxNumber: Int = 16,
   StoreBufferSize: Int = 16,
   StoreBufferThreshold: Int = 7,
   EnsbufferWidth: Int = 2,
   LoadDependencyWidth: Int = 2,
   // ============ VLSU ============
-  UsQueueSize: Int = 8,
-  VlFlowSize: Int = 32,
-  VlUopSize: Int = 32,
-  VsFlowL1Size: Int = 128,
-  VsFlowL2Size: Int = 32,
-  VsUopSize: Int = 32,
+  VlMergeBufferSize: Int = 16,
+  VsMergeBufferSize: Int = 16,
+  UopWritebackWidth: Int = 2,
+  VLUopWritebackWidth: Int = 2,
+  VSUopWritebackWidth: Int = 1,
+  SplitBufferSize: Int = 8,
+  VSegmentBufferSize: Int = 8,
   // ==============================
   UncacheBufferSize: Int = 4,
   EnableLoadToLoadForward: Boolean = false,
@@ -252,7 +254,8 @@ case class XSCoreParameters
     outReplace = false,
     partialStaticPMP = true,
     outsideRecvFlush = true,
-    saveLevel = true
+    saveLevel = true,
+    lgMaxSize = 4
   ),
   sttlbParameters: TLBParameters = TLBParameters(
     name = "sttlb",
@@ -260,7 +263,8 @@ case class XSCoreParameters
     outReplace = false,
     partialStaticPMP = true,
     outsideRecvFlush = true,
-    saveLevel = true
+    saveLevel = true,
+    lgMaxSize = 4
   ),
   hytlbParameters: TLBParameters = TLBParameters(
     name = "hytlb",
@@ -268,7 +272,8 @@ case class XSCoreParameters
     outReplace = false,
     partialStaticPMP = true,
     outsideRecvFlush = true,
-    saveLevel = true
+    saveLevel = true,
+    lgMaxSize = 4
   ),
   pftlbParameters: TLBParameters = TLBParameters(
     name = "pftlb",
@@ -276,7 +281,8 @@ case class XSCoreParameters
     outReplace = false,
     partialStaticPMP = true,
     outsideRecvFlush = true,
-    saveLevel = true
+    saveLevel = true,
+    lgMaxSize = 4
   ),
   l2ToL1tlbParameters: TLBParameters = TLBParameters(
     name = "l2tlb",
@@ -324,6 +330,16 @@ case class XSCoreParameters
   softPTWDelay: Int = 1
 ){
   def vlWidth = log2Up(VLEN) + 1
+
+  /**
+   * the minimum element length of vector elements
+   */
+  val minVecElen: Int = 8
+
+  /**
+   * the maximum number of elements in vector register
+   */
+  val maxElemPerVreg: Int = VLEN / minVecElen
 
   val allHistLens = SCHistLens ++ ITTageTableInfos.map(_._2) ++ TageTableInfos.map(_._2) :+ UbtbGHRLength
   val HistoryLength = allHistLens.max + numBr * FtqSize + 9 // 256 for the predictor configs now
@@ -425,7 +441,10 @@ case class XSCoreParameters
         ExeUnitParams("LDU2", Seq(LduCfg), Seq(IntWB(7, 0), FpWB(7, 0)), Seq(Seq(IntRD(14, 0))), true, 2),
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
-        ExeUnitParams("VLSU0", Seq(VlduCfg, VstuCfg), Seq(VfWB(0, 0)), Seq(Seq(VfRD(10, 0)), Seq(VfRD(11, 0)), Seq(VfRD(12, 0)), Seq(VfRD(13, 0)), Seq(VfRD(14, 0)))),
+        ExeUnitParams("VLSU0", Seq(VlduCfg, VstuCfg, VseglduSeg, VsegstuCfg), Seq(VfWB(0, 0)), Seq(Seq(VfRD(10, 0)), Seq(VfRD(11, 0)), Seq(VfRD(12, 0)), Seq(VfRD(13, 0)), Seq(VfRD(14, 0)))),
+      ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
+      IssueBlockParams(Seq(
+        ExeUnitParams("VLSU1", Seq(VlduCfg, VstuCfg), Seq(VfWB(8, 0)), Seq(Seq(VfRD(15, 0)), Seq(VfRD(16, 0)), Seq(VfRD(17, 0)), Seq(VfRD(18, 0)), Seq(VfRD(19, 0)))),
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
         ExeUnitParams("STD0", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(10, 1), FpRD(14, 0)))),
@@ -638,6 +657,16 @@ trait HasXSParameter {
   def RobSize = coreParams.RobSize
   def RabSize = coreParams.RabSize
   def VTypeBufferSize = coreParams.VTypeBufferSize
+  /**
+   * the minimum element length of vector elements
+   */
+  def minVecElen: Int = coreParams.minVecElen
+
+  /**
+   * the maximum number of elements in vector register
+   */
+  def maxElemPerVreg: Int = coreParams.maxElemPerVreg
+
   def IntRefCounterWidth = log2Ceil(RobSize)
   def LSQEnqWidth = coreParams.dpParams.LsDqDeqWidth
   def LSQLdEnqWidth = LSQEnqWidth min backendParams.numLoadDp
@@ -668,16 +697,18 @@ trait HasXSParameter {
   def VecMemSrcInWidth = coreParams.VecMemSrcInWidth
   def VecMemInstWbWidth = coreParams.VecMemInstWbWidth
   def VecMemDispatchWidth = coreParams.VecMemDispatchWidth
+  def VecMemDispatchMaxNumber = coreParams.VecMemDispatchMaxNumber
   def StoreBufferSize = coreParams.StoreBufferSize
   def StoreBufferThreshold = coreParams.StoreBufferThreshold
   def EnsbufferWidth = coreParams.EnsbufferWidth
   def LoadDependencyWidth = coreParams.LoadDependencyWidth
-  def UsQueueSize = coreParams.UsQueueSize
-  def VlFlowSize = coreParams.VlFlowSize
-  def VlUopSize = coreParams.VlUopSize
-  def VsFlowL1Size = coreParams.VsFlowL1Size
-  def VsFlowL2Size = coreParams.VsFlowL2Size
-  def VsUopSize = coreParams.VsUopSize
+  def VlMergeBufferSize = coreParams.VlMergeBufferSize
+  def VsMergeBufferSize = coreParams.VsMergeBufferSize
+  def UopWritebackWidth = coreParams.UopWritebackWidth
+  def VLUopWritebackWidth = coreParams.VLUopWritebackWidth
+  def VSUopWritebackWidth = coreParams.VSUopWritebackWidth
+  def SplitBufferSize = coreParams.SplitBufferSize
+  def VSegmentBufferSize = coreParams.VSegmentBufferSize
   def UncacheBufferSize = coreParams.UncacheBufferSize
   def EnableLoadToLoadForward = coreParams.EnableLoadToLoadForward
   def EnableFastForward = coreParams.EnableFastForward

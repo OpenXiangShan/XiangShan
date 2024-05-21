@@ -33,6 +33,8 @@ import xiangshan.backend.rob.RobLsqIO
 class ExceptionAddrIO(implicit p: Parameters) extends XSBundle {
   val isStore = Input(Bool())
   val vaddr = Output(UInt(VAddrBits.W))
+  val vstart = Output(UInt((log2Up(VLEN) + 1).W))
+  val vl = Output(UInt((log2Up(VLEN) + 1).W))
   val gpaddr = Output(UInt(GPAddrBits.W))
 }
 
@@ -60,6 +62,8 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   val io = IO(new Bundle() {
     val hartId = Input(UInt(hartIdLen.W))
     val brqRedirect = Flipped(ValidIO(new Redirect))
+    val stvecFeedback = Vec(VecStorePipelineWidth, Flipped(ValidIO(new FeedbackToLsqIO)))
+    val ldvecFeedback = Vec(VecLoadPipelineWidth, Flipped(ValidIO(new FeedbackToLsqIO)))
     val enq = new LsqEnqIO
     val ldu = new Bundle() {
         val stld_nuke_query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO)) // from load_s2
@@ -70,16 +74,15 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
       val storeMaskIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreMaskBundle))) // from store_s0, store mask, send to sq from rs
       val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // from store_s1
       val storeAddrInRe = Vec(StorePipelineWidth, Input(new LsPipelineBundle())) // from store_s2
-      val vecStoreAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) //from store_s2
-      val vecStoreFlowAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle))) // from vsFlowQueue last element issue
     }
     val std = new Bundle() {
-      val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new MemExuOutput))) // from store_s0, store data, send to sq from rs
+      val storeDataIn = Vec(StorePipelineWidth, Flipped(Valid(new MemExuOutput(isVector = true)))) // from store_s0, store data, send to sq from rs
     }
     val ldout = Vec(LoadPipelineWidth, DecoupledIO(new MemExuOutput))
     val ld_raw_data = Vec(LoadPipelineWidth, Output(new LoadDataFromLQBundle))
     val replay = Vec(LoadPipelineWidth, Decoupled(new LsPipelineBundle))
     val sbuffer = Vec(EnsbufferWidth, Decoupled(new DCacheWordReqWithVaddrAndPfFlag))
+    val sbufferVecDifftestInfo = Vec(EnsbufferWidth, Decoupled(new DynInst)) // The vector store difftest needs is
     val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
     val rob = Flipped(new RobLsqIO)
     val nuke_rollback = Output(Valid(new Redirect))
@@ -90,6 +93,8 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val uncacheOutstanding = Input(Bool())
     val uncache = new UncacheWordIO
     val mmioStout = DecoupledIO(new MemExuOutput) // writeback uncached store
+    // TODO: implement vector store
+    val vecmmioStout = DecoupledIO(new MemExuOutput(isVector = true)) // vec writeback uncached store
     val sqEmpty = Output(Bool())
     val lq_rep_full = Output(Bool())
     val sqFull = Output(Bool())
@@ -109,11 +114,6 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val tlb_hint = Flipped(new TlbHintIO)
     val force_write = Output(Bool())
     val lqEmpty = Output(Bool())
-
-    // vector
-    val vecWriteback = Flipped(ValidIO(new MemExuOutput(isVector = true)))
-    val vecStoreRetire = Flipped(ValidIO(new SqPtr))
-    val vecMMIOReplay = Vec(VecLoadPipelineWidth, DecoupledIO(new LsPipelineBundle()))
 
     // top-down
     val debugTopDown = new LoadQueueTopDownIO
@@ -150,7 +150,6 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     storeQueue.io.enq.needAlloc(i)      := io.enq.needAlloc(i)(1)
     storeQueue.io.enq.req(i).valid      := io.enq.needAlloc(i)(1) && io.enq.req(i).valid
     storeQueue.io.enq.req(i).bits       := io.enq.req(i).bits
-    storeQueue.io.enq.req(i).bits       := io.enq.req(i).bits
     storeQueue.io.enq.req(i).bits.lqIdx := loadQueue.io.enq.resp(i)
 
     io.enq.resp(i).lqIdx := loadQueue.io.enq.resp(i)
@@ -159,13 +158,15 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
 
   // store queue wiring
   storeQueue.io.brqRedirect <> io.brqRedirect
+  storeQueue.io.vecFeedback   <> io.stvecFeedback
   storeQueue.io.storeAddrIn <> io.sta.storeAddrIn // from store_s1
-  storeQueue.io.vecStoreAddrIn  <> io.sta.vecStoreFlowAddrIn // from VsFlowQueue inactivative element isuue
   storeQueue.io.storeAddrInRe <> io.sta.storeAddrInRe // from store_s2
   storeQueue.io.storeDataIn <> io.std.storeDataIn // from store_s0
   storeQueue.io.storeMaskIn <> io.sta.storeMaskIn // from store_s0
   storeQueue.io.sbuffer     <> io.sbuffer
+  storeQueue.io.sbufferVecDifftestInfo <> io.sbufferVecDifftestInfo
   storeQueue.io.mmioStout   <> io.mmioStout
+  storeQueue.io.vecmmioStout <> io.vecmmioStout
   storeQueue.io.rob         <> io.rob
   storeQueue.io.exceptionAddr.isStore := DontCare
   storeQueue.io.sqCancelCnt <> io.sqCancelCnt
@@ -174,12 +175,12 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   storeQueue.io.sqFull      <> io.sqFull
   storeQueue.io.forward     <> io.forward // overlap forwardMask & forwardData, DO NOT CHANGE SEQUENCE
   storeQueue.io.force_write <> io.force_write
-  storeQueue.io.vecStoreRetire <> io.vecStoreRetire
 
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
 
   //  load queue wiring
   loadQueue.io.redirect            <> io.brqRedirect
+  loadQueue.io.vecFeedback           <> io.ldvecFeedback
   loadQueue.io.ldu                 <> io.ldu
   loadQueue.io.ldout               <> io.ldout
   loadQueue.io.ld_raw_data         <> io.ld_raw_data
@@ -200,7 +201,6 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   loadQueue.io.sq.stIssuePtr       <> storeQueue.io.stIssuePtr
   loadQueue.io.sq.sqEmpty          <> storeQueue.io.sqEmpty
   loadQueue.io.sta.storeAddrIn     <> io.sta.storeAddrIn // store_s1
-  loadQueue.io.sta.vecStoreAddrIn  <> io.sta.vecStoreAddrIn // store_s1
   loadQueue.io.std.storeDataIn     <> io.std.storeDataIn // store_s0
   loadQueue.io.lqFull              <> io.lqFull
   loadQueue.io.lq_rep_full         <> io.lq_rep_full
@@ -208,8 +208,6 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   loadQueue.io.l2_hint             <> io.l2_hint
   loadQueue.io.tlb_hint            <> io.tlb_hint
   loadQueue.io.lqEmpty             <> io.lqEmpty
-  loadQueue.io.vecWriteback        <> io.vecWriteback
-  loadQueue.io.vecMMIOReplay       <> io.vecMMIOReplay
 
   // rob commits for lsq is delayed for two cycles, which causes the delayed update for deqPtr in lq/sq
   // s0: commit
@@ -218,6 +216,8 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   // s3: ptr updated & new address
   // address will be used at the next cycle after exception is triggered
   io.exceptionAddr.vaddr := Mux(RegNext(io.exceptionAddr.isStore), storeQueue.io.exceptionAddr.vaddr, loadQueue.io.exceptionAddr.vaddr)
+  io.exceptionAddr.vstart := Mux(RegNext(io.exceptionAddr.isStore), storeQueue.io.exceptionAddr.vstart, loadQueue.io.exceptionAddr.vstart)
+  io.exceptionAddr.vl     := Mux(RegNext(io.exceptionAddr.isStore), storeQueue.io.exceptionAddr.vl, loadQueue.io.exceptionAddr.vl)
   io.exceptionAddr.gpaddr := Mux(RegNext(io.exceptionAddr.isStore), storeQueue.io.exceptionAddr.gpaddr, loadQueue.io.exceptionAddr.gpaddr)
   io.issuePtrExt := storeQueue.io.stAddrReadySqPtr
 
@@ -278,7 +278,8 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   generatePerfEvent()
 }
 
-class LsqEnqCtrl(implicit p: Parameters) extends XSModule {
+class LsqEnqCtrl(implicit p: Parameters) extends XSModule
+  with HasVLSUParameters  {
   val io = IO(new Bundle {
     val redirect = Flipped(ValidIO(new Redirect))
     // to dispatch
@@ -290,6 +291,8 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule {
     // from/tp lsq
     val lqCancelCnt = Input(UInt(log2Up(VirtualLoadQueueSize + 1).W))
     val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))
+    val lqFreeCount = Output(UInt(log2Up(VirtualLoadQueueSize + 1).W))
+    val sqFreeCount = Output(UInt(log2Up(StoreQueueSize + 1).W))
     val enqLsq = Flipped(new LsqEnqIO)
   })
 
@@ -301,12 +304,24 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule {
 
   val loadEnqVec = io.enq.req.zip(io.enq.needAlloc).map(x => x._1.valid && x._2(0))
   val storeEnqVec = io.enq.req.zip(io.enq.needAlloc).map(x => x._1.valid && x._2(1))
-  val loadEnqNumber = PopCount(loadEnqVec)
-  val storeEnqNumber = PopCount(storeEnqVec)
   val isLastUopVec = io.enq.req.map(_.bits.lastUop)
-  val lqAllocNumber = PopCount(loadEnqVec.zip(isLastUopVec).map(x => x._1 && x._2))
-  val sqAllocNumber = PopCount(storeEnqVec.zip(isLastUopVec).map(x => x._1 && x._2))
+  val vLoadFlow = io.enq.req.map(_.bits.numLsElem)
+  val vStoreFlow = io.enq.req.map(_.bits.numLsElem)
+  val validVLoadFlow = vLoadFlow.zipWithIndex.map{case (vLoadFlowNumItem, index) => Mux(loadEnqVec(index), vLoadFlowNumItem, 0.U)}
+  val validVStoreFlow = vStoreFlow.zipWithIndex.map{case (vStoreFlowNumItem, index) => Mux(storeEnqVec(index), vStoreFlowNumItem, 0.U)}
+  val enqVLoadOffsetNumber = validVLoadFlow.reduce(_ + _)
+  val enqVStoreOffsetNumber = validVStoreFlow.reduce(_ + _)
+  val validVLoadOffset = 0.U +: vLoadFlow.zip(io.enq.needAlloc)
+                                .map{case (flow, needAllocItem) => Mux(needAllocItem(0).asBool, flow, 0.U)}
+                                .slice(0, validVLoadFlow.length - 1)
+  val validVStoreOffset = 0.U +: vStoreFlow.zip(io.enq.needAlloc)
+                                .map{case (flow, needAllocItem) => Mux(needAllocItem(1).asBool, flow, 0.U)}
+                                .slice(0, validVStoreFlow.length - 1)
+  val lqAllocNumber = enqVLoadOffsetNumber
+  val sqAllocNumber = enqVStoreOffsetNumber
 
+  io.lqFreeCount  := lqCounter
+  io.sqFreeCount  := sqCounter
   // How to update ptr and counter:
   // (1) by default, updated according to enq/commit
   // (2) when redirect and dispatch queue is empty, update according to lsq
@@ -332,6 +347,7 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule {
   }
 
 
+  //TODO MaxAllocate and width of lqOffset/sqOffset needs to be discussed
   val lqMaxAllocate = LSQLdEnqWidth
   val sqMaxAllocate = LSQStEnqWidth
   val maxAllocate = lqMaxAllocate max sqMaxAllocate
@@ -339,22 +355,21 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule {
   val sqCanAccept = sqCounter >= sqAllocNumber +& sqMaxAllocate.U
   // It is possible that t3_update and enq are true at the same clock cycle.
   // For example, if redirect.valid lasts more than one clock cycle,
-  // after the last redirect, new instructions may enter but previously redirect
-  // has not been resolved (updated according to the cancel count from LSQ).
+  // after the last redirect, new instructions may enter but previously redirect has not been resolved (updated according to the cancel count from LSQ).
   // To solve the issue easily, we block enqueue when t3_update, which is RegNext(t2_update).
   io.enq.canAccept := RegNext(ldCanAccept && sqCanAccept && !t2_update)
-  val lqOffset = Wire(Vec(io.enq.resp.length, UInt(log2Up(maxAllocate + 1).W)))
-  val sqOffset = Wire(Vec(io.enq.resp.length, UInt(log2Up(maxAllocate + 1).W)))
+  val lqOffset = Wire(Vec(io.enq.resp.length, UInt(lqPtr.value.getWidth.W)))
+  val sqOffset = Wire(Vec(io.enq.resp.length, UInt(sqPtr.value.getWidth.W)))
   for ((resp, i) <- io.enq.resp.zipWithIndex) {
-    lqOffset(i) := PopCount(io.enq.needAlloc.zip(isLastUopVec).take(i).map(x => x._1(0) && x._2))
+    lqOffset(i) := validVLoadOffset.take(i + 1).reduce(_ + _)
     resp.lqIdx := lqPtr + lqOffset(i)
-    sqOffset(i) := PopCount(io.enq.needAlloc.zip(isLastUopVec).take(i).map(x => x._1(1) && x._2))
+    sqOffset(i) := validVStoreOffset.take(i + 1).reduce(_ + _)
     resp.sqIdx := sqPtr + sqOffset(i)
   }
 
-  io.enqLsq.needAlloc := RegNext(VecInit(io.enq.needAlloc.zip(io.enq.req).map(x => x._1 & Fill(2, x._2.bits.lastUop))))
+  io.enqLsq.needAlloc := RegNext(io.enq.needAlloc)
   io.enqLsq.req.zip(io.enq.req).zip(io.enq.resp).foreach{ case ((toLsq, enq), resp) =>
-    val do_enq = enq.valid && !io.redirect.valid && io.enq.canAccept && enq.bits.lastUop
+    val do_enq = enq.valid && !io.redirect.valid && io.enq.canAccept
     toLsq.valid := RegNext(do_enq)
     toLsq.bits := RegEnable(enq.bits, do_enq)
     toLsq.bits.lqIdx := RegEnable(resp.lqIdx, do_enq)

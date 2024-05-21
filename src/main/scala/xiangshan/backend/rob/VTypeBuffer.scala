@@ -72,7 +72,7 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   private val stateLastCycle = RegNext(state)
 
   // +1 read port to get walk initial state
-  private val vtypeBuffer = Module(new SyncDataModuleTemplate(new VTypeBufferEntry(), size, numWrite = RenameWidth, numRead = CommitWidth + 1))
+  private val vtypeBuffer = Module(new SyncDataModuleTemplate(new VTypeBufferEntry(), size, numWrite = RenameWidth, numRead = CommitWidth))
   private val vtypeBufferReadAddrVec = vtypeBuffer.io.raddr
   private val vtypeBufferReadDataVec = vtypeBuffer.io.rdata
   private val vtypeBufferWriteEnVec = vtypeBuffer.io.wen
@@ -183,9 +183,9 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
 
   private val allocPtrVec: Vec[VTypeBufferPtr] = VecInit((0 until RenameWidth).map(i => enqPtrVec(PopCount(needAllocVec.take(i)))))
   private val vtypeBufferReadPtrVecNext: Vec[VTypeBufferPtr] = Mux1H(Seq(
-    (stateNext === s_idle) -> VecInit(deqPtrVecNext ++ VecInit(0.U.asTypeOf(deqPtrVecNext.head))),
-    (stateNext === s_walk) -> VecInit(walkPtrVecNext ++ VecInit((walkPtrNext - 1.U))),
-    (stateNext === s_spcl_walk) -> VecInit(deqPtrVecNext ++ VecInit(0.U.asTypeOf(deqPtrVecNext.head))),
+    (stateNext === s_idle) -> deqPtrVecNext,
+    (stateNext === s_walk) -> walkPtrVecNext,
+    (stateNext === s_spcl_walk) -> deqPtrVecNext,
   ))
 
   /**
@@ -203,6 +203,9 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   private val walkValidVec = Wire(Vec(CommitWidth, Bool()))
   private val infoVec = Wire(Vec(CommitWidth, VType()))
   private val hasVsetvlVec = Wire(Vec(CommitWidth, Bool()))
+
+  private val isCommit = state === s_idle || state === s_spcl_walk
+  private val isWalk = state === s_walk || state === s_spcl_walk
 
   for (i <- 0 until CommitWidth) {
     commitValidVec(i) := state === s_idle && i.U < commitSize || state === s_spcl_walk && i.U < spclWalkSize
@@ -253,12 +256,16 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
 
   private val decodeResumeVType = Reg(ValidIO(VType()))
   private val newestVType = PriorityMux(walkValidVec.zip(infoVec).map { case(walkValid, info) => walkValid -> info }.reverse)
+  private val newestArchVType = PriorityMux(commitValidVec.zip(infoVec).map { case(commitValid, info) => commitValid -> info }.reverse)
+  private val commitVTypeValid = commitValidVec.asUInt.orR
+
   when (reset.asBool) {
     decodeResumeVType.valid := false.B
-  }.elsewhen (state === s_walk && stateLastCycle =/= s_walk) {
-    decodeResumeVType.valid := true.B
-    decodeResumeVType.bits := newestVType
-  }.elsewhen (state === s_walk && stateLastCycle === s_walk && walkCount =/= 0.U) {
+  }.elsewhen (state === s_spcl_walk) {
+    // special walk use commit vtype
+    decodeResumeVType.valid := commitVTypeValid
+    decodeResumeVType.bits := newestArchVType
+  }.elsewhen (state === s_walk && walkCount =/= 0.U) {
     decodeResumeVType.valid := true.B
     decodeResumeVType.bits := newestVType
   }.otherwise {
@@ -270,11 +277,10 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   // update vtype in decode when VTypeBuffer resumes from walk state
   // note that VTypeBuffer can still send resuming request in the first cycle of s_idle
   io.toDecode.isResumeVType := state =/= s_idle || decodeResumeVType.valid
-  io.toDecode.walkVType.valid := (state === s_walk || stateLast === s_walk && state === s_idle) && decodeResumeVType.valid
+  io.toDecode.walkVType.valid := isWalk && decodeResumeVType.valid
   io.toDecode.walkVType.bits := Mux(io.toDecode.walkVType.valid, decodeResumeVType.bits, 0.U.asTypeOf(VType()))
-  private val newestArchVType = PriorityMux(commitValidVec.zip(infoVec).map { case(commitValid, info) => commitValid -> info }.reverse)
 
-  io.toDecode.commitVType.vtype.valid := commitValidVec.asUInt.orR
+  io.toDecode.commitVType.vtype.valid := isCommit && commitVTypeValid
   io.toDecode.commitVType.vtype.bits := newestArchVType
 
   // because vsetvl flush pipe, there is only one vset instruction when vsetvl is committed

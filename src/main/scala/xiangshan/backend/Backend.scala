@@ -205,6 +205,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   private val og1CancelOH: UInt = dataPath.io.og1CancelOH
   private val og0CancelOH: UInt = dataPath.io.og0CancelOH
   private val cancelToBusyTable = dataPath.io.cancelToBusyTable
+  private val vlIsZero = intExuBlock.io.vlIsZero.get
+  private val vlIsVlmax = intExuBlock.io.vlIsVlmax.get
 
   ctrlBlock.io.IQValidNumVec := intScheduler.io.IQValidNumVec
   ctrlBlock.io.fromTop.hartId := io.fromTop.hartId
@@ -241,6 +243,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   intScheduler.io.fromDataPath.og1Cancel := og1CancelOH
   intScheduler.io.ldCancel := io.mem.ldCancel
   intScheduler.io.fromDataPath.cancelToBusyTable := cancelToBusyTable
+  intScheduler.io.vlWriteBack.vlIsZero := false.B
+  intScheduler.io.vlWriteBack.vlIsVlmax := false.B
 
   fpScheduler.io.fromTop.hartId := io.fromTop.hartId
   fpScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
@@ -255,6 +259,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   fpScheduler.io.fromDataPath.og1Cancel := og1CancelOH
   fpScheduler.io.ldCancel := io.mem.ldCancel
   fpScheduler.io.fromDataPath.cancelToBusyTable := cancelToBusyTable
+  fpScheduler.io.vlWriteBack.vlIsZero := false.B
+  fpScheduler.io.vlWriteBack.vlIsVlmax := false.B
 
   memScheduler.io.fromTop.hartId := io.fromTop.hartId
   memScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
@@ -281,11 +287,15 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   memScheduler.io.fromMem.get.ldaFeedback := io.mem.ldaIqFeedback
   memScheduler.io.fromMem.get.staFeedback := io.mem.staIqFeedback
   memScheduler.io.fromMem.get.hyuFeedback := io.mem.hyuIqFeedback
+  memScheduler.io.fromMem.get.vstuFeedback := io.mem.vstuIqFeedback
+  memScheduler.io.fromMem.get.vlduFeedback := io.mem.vlduIqFeedback
   memScheduler.io.fromSchedulers.wakeupVec.foreach { wakeup => wakeup := iqWakeUpMappedBundle(wakeup.bits.exuIdx) }
   memScheduler.io.fromDataPath.og0Cancel := og0CancelOH
   memScheduler.io.fromDataPath.og1Cancel := og1CancelOH
   memScheduler.io.ldCancel := io.mem.ldCancel
   memScheduler.io.fromDataPath.cancelToBusyTable := cancelToBusyTable
+  memScheduler.io.vlWriteBack.vlIsZero := vlIsZero
+  memScheduler.io.vlWriteBack.vlIsVlmax := vlIsVlmax
 
   vfScheduler.io.fromTop.hartId := io.fromTop.hartId
   vfScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
@@ -300,6 +310,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   vfScheduler.io.fromDataPath.og1Cancel := og1CancelOH
   vfScheduler.io.ldCancel := io.mem.ldCancel
   vfScheduler.io.fromDataPath.cancelToBusyTable := cancelToBusyTable
+  vfScheduler.io.vlWriteBack.vlIsZero := vlIsZero
+  vfScheduler.io.vlWriteBack.vlIsVlmax := vlIsVlmax
   vfScheduler.io.fromOg2.get := og2ForVector.io.toVfIQ
 
   dataPath.io.hartId := io.fromTop.hartId
@@ -487,7 +499,9 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   // to mem
   private val memIssueParams = params.memSchdParams.get.issueBlockParams
   private val memExuBlocksHasLDU = memIssueParams.map(_.exuBlockParams.map(x => x.hasLoadFu || x.hasHyldaFu))
+  private val memExuBlocksHasVecLoad = memIssueParams.map(_.exuBlockParams.map(x => x.hasVLoadFu))
   println(s"[Backend] memExuBlocksHasLDU: $memExuBlocksHasLDU")
+  println(s"[Backend] memExuBlocksHasVecLoad: $memExuBlocksHasVecLoad")
 
   private val toMem = Wire(bypassNetwork.io.toExus.mem.cloneType)
   for (i <- toMem.indices) {
@@ -522,6 +536,18 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
         memScheduler.io.memAddrIssueResp(i)(j).bits.fuType := toMem(i)(j).bits.fuType
         memScheduler.io.memAddrIssueResp(i)(j).bits.robIdx := toMem(i)(j).bits.robIdx
         memScheduler.io.memAddrIssueResp(i)(j).bits.resp := RespType.success // for load inst, firing at toMem means issuing successfully
+      }
+
+      if (memScheduler.io.vecLoadIssueResp(i).nonEmpty && memExuBlocksHasVecLoad(i)(j)) {
+        memScheduler.io.vecLoadIssueResp(i)(j) match {
+          case resp =>
+            resp.valid := toMem(i)(j).fire && LSUOpType.isVecLd(toMem(i)(j).bits.fuOpType)
+            resp.bits.fuType := toMem(i)(j).bits.fuType
+            resp.bits.robIdx := toMem(i)(j).bits.robIdx
+            resp.bits.uopIdx.get := toMem(i)(j).bits.vpu.get.vuopIdx
+            resp.bits.resp := RespType.success
+        }
+        dontTouch(memScheduler.io.vecLoadIssueResp(i)(j))
       }
     }
   }
@@ -558,6 +584,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     sink.bits.uop.debugInfo      := source.bits.perfDebugInfo
     sink.bits.uop.vpu            := source.bits.vpu.getOrElse(0.U.asTypeOf(new VPUCtrlSignals))
     sink.bits.uop.preDecodeInfo  := source.bits.preDecode.getOrElse(0.U.asTypeOf(new PreDecodeInfo))
+    sink.bits.uop.numLsElem      := source.bits.numLsElem.getOrElse(0.U) // Todo: remove this bundle, keep only the one below
+    sink.bits.flowNum.foreach(_  := source.bits.numLsElem.get)
   }
   io.mem.loadFastMatch := memScheduler.io.toMem.get.loadFastMatch.map(_.fastMatch)
   io.mem.loadFastImm := memScheduler.io.toMem.get.loadFastMatch.map(_.fastImm)
@@ -627,6 +655,8 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val ldaIqFeedback = Vec(params.LduCnt, Flipped(new MemRSFeedbackIO))
   val staIqFeedback = Vec(params.StaCnt, Flipped(new MemRSFeedbackIO))
   val hyuIqFeedback = Vec(params.HyuCnt, Flipped(new MemRSFeedbackIO))
+  val vstuIqFeedback = Flipped(Vec(params.VstuCnt, new MemRSFeedbackIO(isVector = true)))
+  val vlduIqFeedback = Flipped(Vec(params.VlduCnt, new MemRSFeedbackIO(isVector = true)))
   val ldCancel = Vec(params.LdExuCnt, Flipped(new LoadCancelIO))
   val wakeup = Vec(params.LdExuCnt, Flipped(Valid(new DynInst)))
   val loadPcRead = Vec(params.LduCnt, Output(UInt(VAddrBits.W)))

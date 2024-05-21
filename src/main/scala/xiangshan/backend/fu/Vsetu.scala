@@ -33,6 +33,7 @@ class VsetModuleIO(implicit p: Parameters) extends XSBundle {
 
   val out = Output(new Bundle {
     val vconfig: VConfig = VConfig()
+    val vlmax  : UInt = UInt(vlWidth.W)
   })
 
   // test bundle for internal state
@@ -102,6 +103,8 @@ class VsetModule(implicit p: Parameters) extends XSModule {
   outVConfig.vtype.vma := Mux(illegal, 0.U, vtype.vma)
   outVConfig.vtype.vlmul := Mux(illegal, 0.U, vtype.vlmul)
   outVConfig.vtype.vsew := Mux(illegal, 0.U, vtype.vsew)
+
+  io.out.vlmax := vlmax
 
   io.testOut.vlmax := vlmax
   io.testOut.log2Vlmax := log2Vlmax
