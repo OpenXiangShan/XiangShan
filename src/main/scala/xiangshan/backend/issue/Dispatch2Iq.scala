@@ -1011,6 +1011,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
 
   finalFuDeqMap.zipWithIndex.foreach {
     case ((Seq(FuType.ldu), deqPortIdSeq), i) =>
+      println(s"[Dispatch2IqMemImp] deqPort $deqPortIdSeq use ldu policy")
       val maxSelNum = wrapper.numIn
       val selNum = deqPortIdSeq.length
       val portReadyVec = loadReadyDecoder.map(Mux1H(_, deqPortIdSeq.map(outs(_).ready).toSeq))
@@ -1025,7 +1026,8 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
           selIdxOH(i)(OHToUInt(Mux1H(selPortIdxOH, loadReadyDecoder))).bits := Mux1H(selectIdxOH, loadValidDecoder)
         }
       }
-    case ((Seq(FuType.stu, FuType.mou), deqPortIdSeq), i) =>
+    case ((fuTypeSeq, deqPortIdSeq), i) if fuTypeSeq.contains(FuType.stu) =>
+      println(s"[Dispatch2IqMemImp] deqPort $deqPortIdSeq use stu policy")
       val maxSelNum = wrapper.numIn
       val selNum = deqPortIdSeq.length
       val portReadyVec = storeReadyDecoder.map(Mux1H(_, deqPortIdSeq.map(outs(_).ready).toSeq))
