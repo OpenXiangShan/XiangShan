@@ -78,6 +78,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         val hasVsetvl = Output(Bool())
       }
     }
+    val fromDecode = new Bundle {
+      val lastSpecVType = Flipped(Valid(new VType))
+      val specVtype = Input(new VType)
+    }
     val readGPAMemAddr = ValidIO(new Bundle {
       val ftqPtr = new FtqPtr()
       val ftqOffset = UInt(log2Up(PredictWidth).W)
@@ -284,7 +288,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.toDecode.isResumeVType := vtypeBuffer.io.toDecode.isResumeVType
   io.toDecode.commitVType := vtypeBuffer.io.toDecode.commitVType
   io.toDecode.walkVType := vtypeBuffer.io.toDecode.walkVType
-
+  vtypeBuffer.io.fromDecode.lastSpecVType := io.fromDecode.lastSpecVType
+  vtypeBuffer.io.fromDecode.specVtype := io.fromDecode.specVtype
 
   // When blockBackward instruction leaves Rob (commit or walk), hasBlockBackward should be set to false.B
   // To reduce registers usage, for hasBlockBackward cases, we allow enqueue after ROB is empty.
