@@ -177,16 +177,27 @@ class FTBEntry(implicit p: Parameters) extends XSBundle with FTBParams with BPUU
     val higher_minus_one_tail = Wire(UInt((VAddrBits - JMP_OFFSET_LEN - 1).W))
     if (last_stage.isDefined) {
       val last_stage_pc = last_stage.get._1
-      val last_stage_pc_h_br = last_stage_pc(VAddrBits-1, BR_OFFSET_LEN+1)
       val stage_en = last_stage.get._2
-      higher_br := RegEnable(last_stage_pc_h_br, stage_en)
-      higher_plus_one_br := RegEnable(last_stage_pc_h_br+1.U, stage_en)
-      higher_minus_one_br := RegEnable(last_stage_pc_h_br-1.U, stage_en)
+      val last_stage_pc_higher = RegEnable(last_stage_pc(VAddrBits - 1, JMP_OFFSET_LEN + 1), stage_en)
+      val last_stage_pc_middle = RegEnable(last_stage_pc(JMP_OFFSET_LEN, BR_OFFSET_LEN + 1), stage_en)
+      val last_stage_pc_higher_plus_one  = RegEnable(last_stage_pc(VAddrBits - 1, JMP_OFFSET_LEN + 1) + 1.U, stage_en)
+      val last_stage_pc_higher_minus_one = RegEnable(last_stage_pc(VAddrBits - 1, JMP_OFFSET_LEN + 1) - 1.U, stage_en)
+      val last_stage_pc_middle_plus_one  = RegEnable(Cat(0.U(1.W), last_stage_pc(JMP_OFFSET_LEN, BR_OFFSET_LEN + 1)) + 1.U, stage_en)
+      val last_stage_pc_middle_minus_one = RegEnable(Cat(0.U(1.W), last_stage_pc(JMP_OFFSET_LEN, BR_OFFSET_LEN + 1)) - 1.U, stage_en)
 
-      val last_stage_pc_h_tail = last_stage_pc(VAddrBits-1, JMP_OFFSET_LEN+1)
-      higher_tail := higher_br(VAddrBits-1-BR_OFFSET_LEN-1, JMP_OFFSET_LEN-BR_OFFSET_LEN)
-      higher_plus_one_tail := RegEnable(last_stage_pc_h_tail+1.U, stage_en)
-      higher_minus_one_tail := RegEnable(last_stage_pc_h_tail-1.U, stage_en)
+      higher_br := Cat(last_stage_pc_higher, last_stage_pc_middle)
+      higher_plus_one_br := Mux(
+          last_stage_pc_middle_plus_one(JMP_OFFSET_LEN - BR_OFFSET_LEN),
+          Cat(last_stage_pc_higher_plus_one, last_stage_pc_middle_plus_one(JMP_OFFSET_LEN - BR_OFFSET_LEN-1, 0)),
+          Cat(last_stage_pc_higher, last_stage_pc_middle_plus_one(JMP_OFFSET_LEN - BR_OFFSET_LEN-1, 0)))
+      higher_minus_one_br := Mux(
+          last_stage_pc_middle_minus_one(JMP_OFFSET_LEN - BR_OFFSET_LEN),
+          Cat(last_stage_pc_higher_minus_one, last_stage_pc_middle_minus_one(JMP_OFFSET_LEN - BR_OFFSET_LEN-1, 0)),
+          Cat(last_stage_pc_higher, last_stage_pc_middle_minus_one(JMP_OFFSET_LEN - BR_OFFSET_LEN-1, 0)))
+
+      higher_tail := last_stage_pc_higher
+      higher_plus_one_tail := last_stage_pc_higher_plus_one
+      higher_minus_one_tail := last_stage_pc_higher_minus_one
     }else{
       higher_br := h_br
       higher_plus_one_br := h_br + 1.U
