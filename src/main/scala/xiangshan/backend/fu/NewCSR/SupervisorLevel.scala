@@ -15,6 +15,9 @@ import scala.collection.immutable.SeqMap
 trait SupervisorLevel { self: NewCSR with MachineLevel =>
   val sie = Module(new CSRModule("Sie", new SieBundle) with HasMachineInterruptBundle with HasMachineDelegBundle{
     val toMie = IO(new SieToMie)
+    // Sie is alias of mie.
+    // There are no regs in CSR sie.
+    regOut := mie.asUInt
     // Ref: 7.1.3. Supervisor Interrupt Registers (sip and sie)
     // The sip and sie registers are subsets of the mip and mie registers. Reading any
     // implemented field, or writing any writable field, of sip/sie effects a read or write of the
@@ -24,13 +27,9 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
     // an interrupt is delegated to S-mode by setting a bit in the mideleg register, it becomes visible in the
     // sip register and is maskable using the sie register. Otherwise, the corresponding bits in sip and sie
     // are **read-only zero**.
-    rdataFields.SSIE := Mux(mideleg.SSI.asBool, mie.SSIE.asUInt, 0.U)
-    rdataFields.STIE := Mux(mideleg.STI.asBool, mie.STIE.asUInt, 0.U)
-    rdataFields.SEIE := Mux(mideleg.SEI.asBool, mie.SEIE.asUInt, 0.U)
-
-    // Sie is alias of mie.
-    // There are no regs in CSR sie.
-    regOut := mie.asUInt
+    regOut.SSIE := Mux(mideleg.SSI.asBool, mie.SSIE.asUInt, 0.U)
+    regOut.STIE := Mux(mideleg.STI.asBool, mie.STIE.asUInt, 0.U)
+    regOut.SEIE := Mux(mideleg.SEI.asBool, mie.SEIE.asUInt, 0.U)
 
     toMie.SSIE.valid := wen && mideleg.SSI.asBool
     toMie.STIE.valid := wen && mideleg.STI.asBool
@@ -77,9 +76,9 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
     // sip register and is maskable using the sie register. Otherwise, the corresponding bits in sip and sie
     // are **read-only zero**.
 
-    rdataFields.SSIP := Mux(mideleg.SSI.asUInt.asBool, mip.SSIP.asUInt, 0.U)
-    rdataFields.STIP := Mux(mideleg.STI.asUInt.asBool, mip.STIP.asUInt, 0.U)
-    rdataFields.SEIP := Mux(mideleg.SEI.asUInt.asBool, mip.SEIP.asUInt, 0.U)
+    regOut.SSIP := Mux(mideleg.SSI.asUInt.asBool, mip.SSIP.asUInt, 0.U)
+    regOut.STIP := Mux(mideleg.STI.asUInt.asBool, mip.STIP.asUInt, 0.U)
+    regOut.SEIP := Mux(mideleg.SEI.asUInt.asBool, mip.SEIP.asUInt, 0.U)
 
     toMip.SSIP.valid := wen && mideleg.SSI.asBool
     toMip.SSIP.bits := wdata.SSIP

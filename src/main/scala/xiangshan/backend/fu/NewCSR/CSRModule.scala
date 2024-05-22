@@ -45,7 +45,7 @@ class CSRModule[T <: CSRBundle](
   }
 
   protected val rdataFields = Wire(bundle)
-  rdataFields :|= reg
+  rdataFields :|= regOut
 
   rdata := rdataFields.asUInt
   regOut := reg

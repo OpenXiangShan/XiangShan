@@ -24,8 +24,8 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
     .setAddr(0x35C)
 
   val mtopi = Module(new CSRModule("Mtopi", new TopIBundle) with HasInterruptFilterSink {
-    rdataFields.IID   := topIR.mtopi.IID
-    rdataFields.IPRIO := topIR.mtopi.IPRIO
+    regOut.IID   := topIR.mtopi.IID
+    regOut.IPRIO := topIR.mtopi.IPRIO
   })
     .setAddr(0xFB0)
 
@@ -44,8 +44,8 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
     .setAddr(0x15C)
 
   val stopi = Module(new CSRModule("Stopi", new TopIBundle) with HasInterruptFilterSink {
-    rdataFields.IID   := topIR.stopi.IID
-    rdataFields.IPRIO := topIR.stopi.IPRIO
+    regOut.IID   := topIR.stopi.IID
+    regOut.IPRIO := topIR.stopi.IPRIO
   })
     .setAddr(0xDB0)
 
@@ -64,8 +64,8 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
     .setAddr(0x25C)
 
   val vstopi = Module(new CSRModule("VStopi", new TopIBundle) with HasInterruptFilterSink {
-    rdataFields.IID   := topIR.vstopi.IID
-    rdataFields.IPRIO := topIR.vstopi.IPRIO
+    regOut.IID   := topIR.vstopi.IID
+    regOut.IPRIO := topIR.vstopi.IPRIO
   })
     .setAddr(0xEB0)
 

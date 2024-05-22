@@ -15,7 +15,7 @@ trait CSRPMP { self: NewCSR =>
   val pmpcfg: Seq[CSRModule[_]] = Range(0, p(PMParameKey).NumPMP/8+1, 2).map(num =>
     Module(new CSRModule(s"Pmpcfg$num") with HasPMPCfgRSink {
       // read condition
-      rdata := cfgRData(64*(num/2+1)-1, 64*num/2)
+      regOut := cfgRData(64*(num/2+1)-1, 64*num/2)
     })
       .setAddr(0x3A0 + num)
   )
