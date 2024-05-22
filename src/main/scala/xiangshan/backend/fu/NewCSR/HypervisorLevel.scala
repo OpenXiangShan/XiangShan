@@ -78,10 +78,10 @@ trait HypervisorLevel { self: NewCSR =>
     val fromVSip = IO(Flipped(new VSipToHip))
     val toHvip = IO(new HipToHvip)
 
-    rdataFields.VSSIP := hvip.VSSIP
-    rdataFields.VSTIP := hvip.VSTIP.asUInt.asBool | platformIRP.VSTIP
-    rdataFields.VSEIP := hvip.VSEIP.asUInt.asBool | platformIRP.VSEIP | hgeip.ip.asUInt(hstatus.VGEIN.asUInt)
-    rdataFields.SGEIP := (hgeip.ip.asUInt | hgeie.ie.asUInt).orR
+    regOut.VSSIP := hvip.VSSIP
+    regOut.VSTIP := hvip.VSTIP.asUInt.asBool | platformIRP.VSTIP
+    regOut.VSEIP := hvip.VSEIP.asUInt.asBool | platformIRP.VSEIP | hgeip.ip.asUInt(hstatus.VGEIN.asUInt)
+    regOut.SGEIP := (hgeip.ip.asUInt | hgeie.ie.asUInt).orR
 
     // hip.VSEIP is read only
     // hip.VSTIP is read only
@@ -197,17 +197,17 @@ class HvipBundle extends CSRBundle {
 }
 
 class HieBundle extends CSRBundle {
-  val VSSIE = RW( 2)
-  val VSTIE = RW( 6)
-  val VSEIE = RW(10)
-  val SGEIE = RW(12)
+  val VSSIE = RW( 2).withReset(0.U)
+  val VSTIE = RW( 6).withReset(0.U)
+  val VSEIE = RW(10).withReset(0.U)
+  val SGEIE = RW(12).withReset(0.U)
 }
 
 class HipBundle extends CSRBundle {
-  val VSSIP = RW( 2) // alias of hvip.VSSIP
-  val VSTIP = RO( 6) // hvip.VSTIP |　PLIC.VSTIP
-  val VSEIP = RO(10) // hvip.VSEIP | hgeip(hstatus.VGEIN) | PLIC.VSEIP
-  val SGEIP = RO(12) // |(hgeip & hegie)
+  val VSSIP = RW( 2).withReset(0.U) // alias of hvip.VSSIP
+  val VSTIP = RO( 6).withReset(0.U) // hvip.VSTIP |　PLIC.VSTIP
+  val VSEIP = RO(10).withReset(0.U) // hvip.VSEIP | hgeip(hstatus.VGEIN) | PLIC.VSEIP
+  val SGEIP = RO(12).withReset(0.U) // |(hgeip & hegie)
 }
 
 class HgeieBundle extends CSRBundle {
@@ -221,25 +221,27 @@ class HgeipBundle extends CSRBundle {
 }
 
 class HedelegBundle extends ExceptionBundle {
+  this.getALL.foreach(_.setRW().withReset(0.U))
   // The default configs are RW
-  this.EX_HSCALL.setRO()
-  this.EX_VSCALL.setRO()
-  this.EX_MCALL .setRO()
-  this.EX_IGPF  .setRO()
-  this.EX_LGPF  .setRO()
-  this.EX_VI    .setRO()
-  this.EX_SGPF  .setRO()
+  this.EX_HSCALL.setRO().withReset(0.U)
+  this.EX_VSCALL.setRO().withReset(0.U)
+  this.EX_MCALL .setRO().withReset(0.U)
+  this.EX_IGPF  .setRO().withReset(0.U)
+  this.EX_LGPF  .setRO().withReset(0.U)
+  this.EX_VI    .setRO().withReset(0.U)
+  this.EX_SGPF  .setRO().withReset(0.U)
 }
 
 class HidelegBundle extends InterruptBundle {
+  this.getALL.foreach(_.setRW().withReset(0.U))
   // default RW
-  this.SSI .setRO()
-  this.MSI .setRO()
-  this.STI .setRO()
-  this.MTI .setRO()
-  this.SEI .setRO()
-  this.MEI .setRO()
-  this.SGEI.setRO()
+  this.SSI .setRO().withReset(0.U)
+  this.MSI .setRO().withReset(0.U)
+  this.STI .setRO().withReset(0.U)
+  this.MTI .setRO().withReset(0.U)
+  this.SEI .setRO().withReset(0.U)
+  this.MEI .setRO().withReset(0.U)
+  this.SGEI.setRO().withReset(0.U)
 }
 
 class HipToHvip extends Bundle {

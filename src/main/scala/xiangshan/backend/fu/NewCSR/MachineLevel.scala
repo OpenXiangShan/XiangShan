@@ -47,10 +47,10 @@ trait MachineLevel { self: NewCSR =>
     toHie.VSEIE.bits := wdata.VSEIE
     toHie.SGEIE.bits := wdata.SGEIE
 
-    rdataFields.VSSIE := hie.VSSIE
-    rdataFields.VSTIE := hie.VSTIE
-    rdataFields.VSEIE := hie.VSEIE
-    rdataFields.SGEIE := hie.SGEIE
+    regOut.VSSIE := hie.VSSIE
+    regOut.VSTIE := hie.VSTIE
+    regOut.VSEIE := hie.VSEIE
+    regOut.SGEIE := hie.SGEIE
   }).setAddr(0x304)
 
   val mtvec = Module(new CSRModule("Mtvec", new XtvecBundle))
@@ -71,7 +71,7 @@ trait MachineLevel { self: NewCSR =>
     // But when bit 1 of mvien is one, bit 1(SSIP) of mvip is a separate writable bit independent of mip.SSIP.
     // When the value of bit 1 of mvien is changed from zero to one, the value of bit 1 of mvip becomes UNSPECIFIED.
     // XS will keep the value in mvip.SSIP when mvien.SSIE is changed from zero to one
-    rdataFields.SSIP := Mux(!mvien.SSIE.asUInt.asBool, mip.SSIP, reg.SSIP)
+    regOut.SSIP := Mux(!mvien.SSIE.asUInt.asBool, mip.SSIP, reg.SSIP)
     toMip.SSIP.valid := wen && !mvien.SSIE.asUInt.asBool
     toMip.SSIP.bits := wdata.SSIP
     reg.SSIP := Mux(wen && mvien.SSIE.asUInt.asBool, wdata.SSIP, reg.SSIP)
@@ -79,14 +79,14 @@ trait MachineLevel { self: NewCSR =>
     // Bit 5 of mvip is an alias of the same bit (STIP) in mip when that bit is writable in mip.
     // When STIP is not writable in mip (such as when menvcfg.STCE = 1), bit 5 of mvip is read-only zero.
     // Todo: check mip writable when menvcfg.STCE = 1
-    rdataFields.STIP := mip.STIP
+    regOut.STIP := mip.STIP
     toMip.STIP.valid := wen
     toMip.STIP.bits := wdata.STIP
 
     // When bit 9 of mvien is zero, bit 9 of mvip is an alias of the software-writable bit 9 of mip (SEIP).
     // But when bit 9 of mvien is one, bit 9 of mvip is a writable bit independent of mip.SEIP.
     // Unlike for bit 1, changing the value of bit 9 of mvien does not affect the value of bit 9 of mvip.
-    rdataFields.SEIP := Mux(!mvien.SEIE.asUInt.asBool, mip.SEIP, reg.SEIP)
+    regOut.SEIP := Mux(!mvien.SEIE.asUInt.asBool, mip.SEIP, reg.SEIP)
     toMip.SEIP.valid := wen && !mvien.SEIE.asUInt.asBool
     toMip.SEIP.bits := wdata.SEIP
     reg.SEIP := Mux(wen && mvien.SEIE.asUInt.asBool, wdata.SEIP, reg.SEIP)
