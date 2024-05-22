@@ -588,6 +588,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   mainPipe.io.respStall             := io.stop
   mainPipe.io.csr_parity_enable     := io.csr_parity_enable
   mainPipe.io.hartId                := io.hartId
+  mainPipe.io.fencei                := io.fencei
 
   io.pmp(0) <> mainPipe.io.pmp(0)
   io.pmp(1) <> mainPipe.io.pmp(1)
