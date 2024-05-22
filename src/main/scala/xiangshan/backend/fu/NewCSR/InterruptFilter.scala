@@ -2,6 +2,7 @@ package xiangshan.backend.fu.NewCSR
 
 import chisel3._
 import chisel3.util._
+import utility.DelayN
 import utils._
 import xiangshan.ExceptionNO
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CauseBundle, PrivState, XtvecBundle}
@@ -258,10 +259,13 @@ class InterruptFilter extends Module {
   // support debug interrupt
   val disableInterrupt = io.in.debugMode || (io.in.dcsr.STEP.asBool && !io.in.dcsr.STEPIE.asBool)
   val debugInterupt = ((io.in.debugIntr && !io.in.debugMode) << CSRConst.IRQ_DEBUG).asUInt
-  val intrVec = VecInit((mIRVec | hsIRVec | vsIRVec | debugInterupt).asBools.map(IR => IR && !disableInterrupt)).asUInt
 
-  io.out.interruptVec.valid := intrVec.orR
-  io.out.interruptVec.bits := intrVec
+  val intrVec = VecInit((mIRVec | hsIRVec | vsIRVec | debugInterupt).asBools.map(IR => IR && !disableInterrupt)).asUInt
+  // delay at least 6 cycles to maintain the atomic of sret/mret
+  val delayedIntrVec = DelayN(intrVec, 6)
+
+  io.out.interruptVec.valid := delayedIntrVec.orR
+  io.out.interruptVec.bits := delayedIntrVec
 
   dontTouch(hsip)
   dontTouch(hsie)
