@@ -213,6 +213,14 @@ class LoadQueue(implicit p: Parameters) extends XSModule
      clkGate_raw.io.E := raw_clk_en
      clkGate_raw.io.CK := clock
     loadQueueRAW.clock := clkGate_raw.io.Q
+    val ldu_ldin_valid = Wire(Vec(LoadPipelineWidth, Bool()))
+    ldu_ldin_valid := (0 until LoadPipelineWidth).map{ i => io.ldu.ldin(i).valid}
+    val exception_clk_en = ldu_ldin_valid.asUInt.orR || RegNext(ldu_ldin_valid.asUInt.orR) || io.redirect.valid || RegNext(io.redirect.valid)
+    val clkGate_exceptionBuffer = Module(new STD_CLKGT_func)
+     clkGate_exceptionBuffer.io.TE := false.B
+     clkGate_exceptionBuffer.io.E := exception_clk_en
+     clkGate_exceptionBuffer.io.CK := clock
+    exceptionBuffer.clock := clkGate_exceptionBuffer.io.Q
   }
 
   /**
@@ -253,6 +261,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   virtualLoadQueue.io.lqEmpty       <> io.lqEmpty
   virtualLoadQueue.io.vecWriteback  <> io.vecWriteback
   virtualLoadQueue.io.ldWbPtr       <> io.lqDeqPtr
+
 
   /**
    * Load queue exception buffer
