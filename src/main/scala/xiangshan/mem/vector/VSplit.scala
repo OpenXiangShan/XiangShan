@@ -45,16 +45,17 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
     * decode and generate AlignedType, uop mask, preIsSplit
     * ----------------------------------------------------------
     */
-  val s0_vtype = io.in.bits.uop.vpu.vtype
+  val s0_uop = io.in.bits.uop
+  val s0_vtype = s0_uop.vpu.vtype
   val s0_sew = s0_vtype.vsew
-  val s0_eew = io.in.bits.uop.vpu.veew
+  val s0_eew = s0_uop.vpu.veew
   val s0_lmul = s0_vtype.vlmul
   // when load whole register or unit-stride masked , emul should be 1
-  val s0_fuOpType = io.in.bits.uop.fuOpType
+  val s0_fuOpType = s0_uop.fuOpType
   val s0_mop = s0_fuOpType(6, 5)
-  val s0_nf = Mux(us_whole_reg(s0_fuOpType), 0.U, io.in.bits.uop.vpu.nf)
-  val s0_vm = io.in.bits.uop.vpu.vm
-  val s0_emul = Mux(us_whole_reg(s0_fuOpType) ,GenUSWholeEmul(io.in.bits.uop.vpu.nf), Mux(us_mask(s0_fuOpType), 0.U(mulBits.W), EewLog2(s0_eew) - s0_sew + s0_lmul))
+  val s0_nf = Mux(us_whole_reg(s0_fuOpType), 0.U, s0_uop.vpu.nf)
+  val s0_vm = s0_uop.vpu.vm
+  val s0_emul = Mux(us_whole_reg(s0_fuOpType) ,GenUSWholeEmul(s0_uop.vpu.nf), Mux(us_mask(s0_fuOpType), 0.U(mulBits.W), EewLog2(s0_eew) - s0_sew + s0_lmul))
   val s0_preIsSplit = !(isUnitStride(s0_mop) && !us_fof(s0_fuOpType))
   val s0_nfield        = s0_nf +& 1.U
 
@@ -187,8 +188,9 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   s1_in := RegEnable(s0_out, s0_fire)
 
   val s1_flowNum          = s1_in.flowNum
-  val s1_uopidx           = s1_in.uop.vpu.vuopIdx
-  val s1_nf               = s1_in.uop.vpu.nf
+  val s1_uop              = s1_in.uop
+  val s1_uopidx           = s1_uop.vpu.vuopIdx
+  val s1_nf               = s1_uop.vpu.nf
   val s1_nfields          = s1_in.nfields
   val s1_eew              = s1_in.eew
   val s1_emul             = s1_in.emul
@@ -247,26 +249,12 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
 abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) extends VLSUModule{
   val io = IO(new VSplitBufferIO(isVStore))
 
-  val bufferSize: Int
-  private val freeWidth = Seq(io.out).length
-  private val allocWidth = Seq(io.in).length
-
-  // freelist
-  val freeList = Module(new FreeList(
-    size = bufferSize,
-    allocWidth = allocWidth,
-    freeWidth = freeWidth,
-    enablePreAlloc = false,
-    moduleName = "VSplit Buffer freelist"
-  ))
-
-  val uopq          = Reg(Vec(bufferSize, new VLSBundle(isVStore)))
-  val allocated     = RegInit(VecInit(Seq.fill(bufferSize)(false.B)))
-  val allocatedWire = WireInit(VecInit(Seq.fill(bufferSize)(false.B))) // for back to back split, advance lower
-  val freeMask      = WireInit(VecInit(Seq.fill(bufferSize)(false.B)))
-  val needCancel    = WireInit(VecInit(Seq.fill(bufferSize)(false.B)))
+  val uopq          = Reg(new VLSBundle(isVStore))
+  val allocated     = RegInit(false.B)
+  val needCancel    = WireInit(false.B)
   val activeIssue   = Wire(Bool())
   val inActiveIssue = Wire(Bool())
+  val splitFinish   = WireInit(false.B)
 
   // for split
   val splitIdx = RegInit(0.U(flowIdxBits.W))
@@ -280,50 +268,18 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   val needEnqueue  = canEnqueue && !cancelEnq
 
   // enqueue
-  freeList.io.doAllocate.head := false.B
-  freeList.io.allocateReq.head := true.B
   val offset    = PopCount(needEnqueue)
-  val canAccept = freeList.io.canAllocate(offset)
-  val enqIndex  = freeList.io.allocateSlot(offset)
+  val canAccept = !allocated || allocated && splitFinish && (activeIssue || inActiveIssue) // if is valid entry, need split finish and send last uop
   io.in.ready  := canAccept
   val doEnqueue = canAccept && needEnqueue
 
   when(doEnqueue){
-    freeList.io.doAllocate.head := true.B
-    uopq(enqIndex) := io.in.bits
-  }
-  freeList.io.free := freeMask.asUInt
-
-  // select one uop
-  val selPolicy        = SelectOne("circ", allocatedWire, freeWidth) // select one entry to split
-  val (selValid, selOHVec) = selPolicy.getNthOH(1)
-  val entryIdx         = OHToUInt(selOHVec)
-
-  /* latch selentry, wait split or redirect*/
-  val splitFinish      = WireInit(false.B)
-  val selValidReg      = RegInit(false.B)
-  val selIdxReg        = Reg(UInt(entryIdx.getWidth.W))
-
-  // 0 -> 1
-  when(selValid && !selValidReg){
-    selValidReg := true.B
-  }
-  // 1 -> 0
-  when((uopq(selIdxReg).uop.robIdx.needFlush(io.redirect) || !selValid && splitFinish && (activeIssue || inActiveIssue)) &&
-       selValidReg){
-
-    selValidReg := false.B
-  }
-  // have new uop need to split and last uop is split finish
-  when((selValid && !selValidReg) ||
-    (selValid && selValidReg && splitFinish && (activeIssue || inActiveIssue))){
-
-    selIdxReg         := entryIdx
+    uopq := io.in.bits
   }
 
   //split uops
-  val issueValid       = allocated(selIdxReg) && selValidReg
-  val issueEntry       = uopq(selIdxReg)
+  val issueValid       = allocated && !needCancel
+  val issueEntry       = uopq
   val issueMbIndex     = issueEntry.mBIndex
   val issueFlowNum     = issueEntry.flowNum
   val issueBaseAddr    = issueEntry.baseAddr
@@ -399,9 +355,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   }
 
   // redirect
-  for (i <- 0 until bufferSize){
-    needCancel(i) := uopq(i).uop.robIdx.needFlush(io.redirect) && allocated(i)
-  }
+  needCancel := uopq.uop.robIdx.needFlush(io.redirect) && allocated
 
  /* Execute logic */
   /** Issue to scala pipeline**/
@@ -430,53 +384,26 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
     splitIdx := 0.U(flowIdxBits.W) // initialize flowIdx
     strideOffsetReg := 0.U
   }
-  // allocatedWire, only for freelist select next uop back-to-back
-  for (i <- 0 until bufferSize){
-    when(needCancel(i)){ // redirect
-      allocatedWire(i) := false.B
-    }.elsewhen(splitFinish && (activeIssue || inActiveIssue) && (i.U === selIdxReg)){ // finish
-      allocatedWire(i) := false.B
-    }.otherwise{
-      allocatedWire(i) := allocated(i)
-    }
-  }
   // allocated
-  for (i <- 0 until bufferSize){
-    when(needCancel(i)) { // redirect
-      allocated(i) := false.B
-    }.elsewhen(splitFinish && (activeIssue || inActiveIssue) && (i.U === selIdxReg)){ //dequeue
-      allocated(i) := false.B
-    }.elsewhen(doEnqueue && (i.U === enqIndex)){
-      allocated(i) := true.B
-    }
-  }
-  // freeMask
-  for (i <- 0 until bufferSize){
-    when(needCancel(i)) { // redirect
-      freeMask(i) := true.B
-    }.elsewhen(splitFinish && (activeIssue || inActiveIssue) && (i.U === selIdxReg)) { //dequeue
-      freeMask(i) := true.B
-    }.otherwise{
-      freeMask(i) := false.B
-    }
+  when(doEnqueue){ // if enqueue need to been cancelled, it will be false, so this have high priority
+    allocated := true.B
+  }.elsewhen(needCancel) { // redirect
+    allocated := false.B
+  }.elsewhen(splitFinish && (activeIssue || inActiveIssue)){ //dequeue
+    allocated := false.B
   }
 
   // out connect
   io.out.valid := issueValid && (vecActive || !issuePreIsSplit) // TODO: inactive unit-stride uop do not send to pipeline
-
-  XSError(!allocated(entryIdx) && selValid, "select invalid entry!")
 
   XSPerfAccumulate("out_valid",             io.out.valid)
   XSPerfAccumulate("out_fire",              io.out.fire)
   XSPerfAccumulate("out_fire_unitstride",   io.out.fire && !issuePreIsSplit)
   XSPerfAccumulate("unitstride_vlenAlign",  io.out.fire && !issuePreIsSplit && io.out.bits.vaddr(3, 0) === 0.U)
   XSPerfAccumulate("unitstride_invalid",    io.out.ready && issueValid && !issuePreIsSplit && PopCount(io.out.bits.mask).orR)
-
-  QueuePerf(bufferSize, freeList.io.validCount, freeList.io.validCount === 0.U)
 }
 
 class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = true){
-  override lazy val bufferSize = SplitBufferSize
   // split data
   val splitData = genVSData(
         data = issueEntry.data.asUInt,
@@ -503,7 +430,6 @@ class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = t
 }
 
 class VLSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = false){
-  override lazy val bufferSize = SplitBufferSize
   io.out.bits.uop.lqIdx := issueUop.lqIdx + splitIdx
 }
 
