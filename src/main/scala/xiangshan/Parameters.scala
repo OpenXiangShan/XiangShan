@@ -321,7 +321,8 @@ case class XSCoreParameters
     name = "l2",
     ways = 8,
     sets = 1024, // default 512KB L2
-    prefetch = Some(coupledL2.prefetch.PrefetchReceiverParams())
+    prefetch = Seq(coupledL2.prefetch.PrefetchReceiverParams(), coupledL2.prefetch.BOPParameters(),
+      coupledL2.prefetch.TPParameters()),
   )),
   L2NBanks: Int = 1,
   usePTWRepeater: Boolean = false,
