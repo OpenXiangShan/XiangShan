@@ -769,6 +769,14 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   val mmioStall = mmio(rdataPtrExt(0).value)
   val vecStall = vec(rdataPtrExt(0).value)
+
+  val dataBuffer_enq_valid = Wire(Vec(EnsbufferWidth, Bool()))
+  dataBuffer_enq_valid := (0 until EnsbufferWidth).map{ i => dataBuffer.io.enq(i).valid}
+  val clkGate_dataBuffer = Module(new STD_CLKGT_func)
+    clkGate_dataBuffer.io.TE := false.B
+    clkGate_dataBuffer.io.E := dataBuffer_enq_valid.asUInt.orR || RegNext(dataBuffer_enq_valid.asUInt.orR)
+    clkGate_dataBuffer.io.CK := clock
+  dataBuffer.clock := clkGate_dataBuffer.io.Q
   for (i <- 0 until EnsbufferWidth) {
     val ptr = rdataPtrExt(i).value
     dataBuffer.io.enq(i).valid := allocated(ptr) && committed(ptr) && !mmioStall && !vecStall
