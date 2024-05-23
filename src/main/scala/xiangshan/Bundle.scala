@@ -117,6 +117,9 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   val isMisPred = Bool()
   val shift = UInt((log2Ceil(numBr)+1).W)
   val addIntoHist = Bool()
+  // raise exceptions from backend
+  val backendIPF = Bool() // instruction page fault
+  val backendIAF = Bool() // instruction access fault
 
   def fromFtqRedirectSram(entry: Ftq_Redirect_SRAMEntry) = {
     // this.hist := entry.ghist
@@ -583,6 +586,14 @@ class DistributedCSRUpdateReq(implicit p: Parameters) extends XSBundle {
     }
     println("Distributed CSR update req registered for " + src_description)
   }
+}
+
+class AddrTransType(implicit p: Parameters) extends XSBundle {
+  val bare, sv39, sv39x4 = Bool()
+
+  def checkAccessFault(target: UInt): Bool = bare && target(XLEN - 1, PAddrBits).orR
+  def checkPageFault(target: UInt): Bool = sv39 && target(XLEN - 1, 39) =/= VecInit.fill(XLEN - 39)(target(38)).asUInt ||
+                                           sv39x4 && target(XLEN - 1, 41) =/= VecInit.fill(XLEN - 41)(target(40)).asUInt
 }
 
 class L1CacheErrorInfo(implicit p: Parameters) extends XSBundle {

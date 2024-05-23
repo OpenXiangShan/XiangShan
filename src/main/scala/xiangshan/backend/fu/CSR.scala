@@ -115,6 +115,8 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val customCtrl = Output(new CustomCSRCtrlIO)
   // distributed csr write
   val distributedUpdate = Vec(2, Flipped(new DistributedCSRUpdateReq))
+  // instruction fetch address translation type
+  val instrAddrTransType = Output(new AddrTransType)
 }
 
 class VtypeStruct(implicit p: Parameters) extends XSBundle {
@@ -1532,6 +1534,15 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     hstatus := hstatusNew.asUInt
     debugMode := debugModeNew
   }
+
+  // instruction fetch address translation type
+  csrio.instrAddrTransType.bare := privilegeMode === ModeM ||
+                                   (!virtMode && tlbBundle.satp.mode === 0.U) ||
+                                   (virtMode && tlbBundle.vsatp.mode === 0.U && tlbBundle.hgatp.mode === 0.U)
+  csrio.instrAddrTransType.sv39 := privilegeMode =/= ModeM && !virtMode && tlbBundle.satp.mode === 8.U ||
+                                   virtMode && tlbBundle.vsatp.mode === 8.U
+  csrio.instrAddrTransType.sv39x4 := virtMode && tlbBundle.vsatp.mode === 0.U && tlbBundle.hgatp.mode === 8.U
+  assert(PopCount(csrio.instrAddrTransType.asUInt) === 1.U, "Exactly one instr fetch addr trans type can be asserted.")
 
   // Distributed CSR update req
   //

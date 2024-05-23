@@ -41,6 +41,8 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   redirect.cfiUpdate.taken := true.B
   redirect.cfiUpdate.target := jumpDataModule.io.target
   redirect.cfiUpdate.isMisPred := jumpDataModule.io.target(VAddrData().dataWidth - 1, 0) =/= jmpTarget || !predTaken
+  redirect.cfiUpdate.backendIAF := io.instrAddrTransType.get.checkAccessFault(jumpDataModule.io.target)
+  redirect.cfiUpdate.backendIPF := io.instrAddrTransType.get.checkPageFault(jumpDataModule.io.target)
 //  redirect.debug_runahead_checkpoint_id := uop.debugInfo.runahead_checkpoint_id // Todo: assign it
 
   io.in.ready := io.out.ready
