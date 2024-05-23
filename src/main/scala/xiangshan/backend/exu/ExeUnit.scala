@@ -29,7 +29,7 @@ import xiangshan.backend.datapath.WbConfig.{PregWB, _}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Bundles.{VType, Vxrm}
 import xiangshan.backend.fu.fpu.Bundles.Frm
-import xiangshan.backend.fu.wrapper.CSRInput
+import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
 
 class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
   val flush = Flipped(ValidIO(new Redirect()))
@@ -37,6 +37,7 @@ class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle 
   val out = DecoupledIO(new ExuOutput(params))
   val csrin = Option.when(params.hasCSR)(new CSRInput)
   val csrio = Option.when(params.hasCSR)(new CSRFileIO)
+  val csrToDecode = Option.when(params.hasCSR)(Output(new CSRToDecode))
   val fenceio = Option.when(params.hasFence)(new FenceIO)
   val frm = Option.when(params.needSrcFrm)(Input(Frm()))
   val vxrm = Option.when(params.needSrcVxrm)(Input(Vxrm()))
@@ -330,6 +331,7 @@ class ExeUnitImp(
       fuio.exception := DelayN(exuio.exception, 2)
   }))
   io.csrin.foreach(exuio => funcUnits.foreach(fu => fu.io.csrin.foreach{fuio => fuio := exuio}))
+  io.csrToDecode.foreach(toDecode => funcUnits.foreach(fu => fu.io.csrToDecode.foreach(fuOut => toDecode := fuOut)))
 
   io.vtype.foreach(exuio => funcUnits.foreach(fu => fu.io.vtype.foreach(fuio => exuio := fuio)))
   io.fenceio.foreach(exuio => funcUnits.foreach(fu => fu.io.fenceio.foreach(fuio => fuio <> exuio)))

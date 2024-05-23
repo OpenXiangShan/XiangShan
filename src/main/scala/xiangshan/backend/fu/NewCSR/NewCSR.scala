@@ -14,6 +14,7 @@ import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast._
 import xiangshan.backend.fu.NewCSR.CSREvents.{CSREvents, DretEventSinkBundle, EventUpdatePrivStateOutput, MretEventSinkBundle, SretEventSinkBundle, TrapEntryDEventSinkBundle, TrapEntryEventInput, TrapEntryHSEventSinkBundle, TrapEntryMEventSinkBundle, TrapEntryVSEventSinkBundle}
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart, Vxrm, Vxsat}
+import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.{FrontendTdataDistributeIO, HasXSParameter, MemTdataDistributeIO, XSCoreParamsKey, XSTileKey}
 import xiangshan._
 import xiangshan.backend.fu.util.CSRConst
@@ -167,6 +168,8 @@ class NewCSR(implicit val p: Parameters) extends Module
       val imode = UInt(2.W)
       val dmode = UInt(2.W)
     })
+
+    val toDecode = new CSRToDecode
   })
 
   val toAIA   = IO(Output(new CSRToAIABundle))
@@ -325,7 +328,6 @@ class NewCSR(implicit val p: Parameters) extends Module
   permitMod.io.in.csrAccess.ren := ren
   permitMod.io.in.csrAccess.wen := wen
   permitMod.io.in.csrAccess.addr := addr
-
 
   permitMod.io.in.privState := privState
   permitMod.io.in.debugMode := debugMode
@@ -488,7 +490,6 @@ class NewCSR(implicit val p: Parameters) extends Module
   trapEntryMEvent .valid := hasTrap && entryPrivState.isModeM
   trapEntryHSEvent.valid := hasTrap && entryPrivState.isModeHS
   trapEntryVSEvent.valid := hasTrap && entryPrivState.isModeVS
-
 
   Seq(trapEntryMEvent, trapEntryHSEvent, trapEntryVSEvent, trapEntryDEvent).foreach { eMod =>
     eMod.in match {
@@ -875,6 +876,16 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   io.tlb.imode := PRVM.asUInt
   io.tlb.dmode := Mux((debugMode && dcsr.regOut.MPRVEN.asBool || !debugMode) && mstatus.regOut.MPRV.asBool, mstatus.regOut.MPP.asUInt, PRVM.asUInt)
+
+  io.toDecode.illegalInst.sfenceVMA  := isModeHS && mstatus.regOut.TVM  || isModeHU
+  io.toDecode.virtualInst.sfenceVMA  := isModeVS && hstatus.regOut.VTVM || isModeVU
+  io.toDecode.illegalInst.sfencePart := isModeHU
+  io.toDecode.virtualInst.sfencePart := isModeVU
+  io.toDecode.illegalInst.hfenceGVMA := isModeHS && mstatus.regOut.TVM || isModeHU
+  io.toDecode.illegalInst.hfenceVVMA := isModeHU
+  io.toDecode.virtualInst.hfence     := isModeVS || isModeVU
+  io.toDecode.illegalInst.hlsv       := isModeHU && hstatus.regOut.HU
+  io.toDecode.virtualInst.hlsv       := isModeVS || isModeVU
 
   // Always instantiate basic difftest modules.
   if (env.AlwaysBasicDiff || env.EnableDifftest) {

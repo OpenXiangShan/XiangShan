@@ -30,6 +30,7 @@ import xiangshan.backend.Bundles.{DecodedInst, DynInst, StaticInst}
 import xiangshan.backend.decode.isa.PseudoInstructions
 import xiangshan.backend.decode.isa.bitfield.{InstVType, XSInstBitFields}
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
+import xiangshan.backend.fu.wrapper.CSRToDecode
 
 /**
  * Abstract trait giving defaults and other relevant values to different Decode constants/
@@ -704,6 +705,7 @@ class DecodeUnitIO(implicit p: Parameters) extends XSBundle {
 //  val vconfig = Input(UInt(XLEN.W))
   val deq = new DecodeUnitDeqIO
   val csrCtrl = Input(new CustomCSRCtrlIO)
+  val fromCSR = Input(new CSRToDecode)
 }
 
 /**
@@ -781,21 +783,26 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   vecException.io.decodedInst := decodedInst
   vecException.io.vtype := decodedInst.vpu.vtype
   vecException.io.vstart := decodedInst.vpu.vstart
-  decodedInst.exceptionVec(illegalInstr) := decodedInst.selImm === SelImm.INVALID_INSTR || vecException.io.illegalInst
 
-  when(io.csrCtrl.virtMode){
-    // Todo: optimize EX_VI decode
-    // vs/vu attempting to exec hyperinst will raise virtual instruction
-    decodedInst.exceptionVec(virtualInstr) := ctrl_flow.instr === HLV_B || ctrl_flow.instr === HLV_BU ||
-      ctrl_flow.instr === HLV_H   || ctrl_flow.instr === HLV_HU ||
-      ctrl_flow.instr === HLVX_HU || ctrl_flow.instr === HLV_W  ||
-      ctrl_flow.instr === HLVX_WU || ctrl_flow.instr === HLV_WU ||
-      ctrl_flow.instr === HLV_D   || ctrl_flow.instr === HSV_B  ||
-      ctrl_flow.instr === HSV_H   || ctrl_flow.instr === HSV_W  ||
-      ctrl_flow.instr === HSV_D   || ctrl_flow.instr === HFENCE_VVMA ||
-      ctrl_flow.instr === HFENCE_GVMA || ctrl_flow.instr === HINVAL_GVMA ||
-      ctrl_flow.instr === HINVAL_VVMA
-  }
+  private val exceptionII =
+    decodedInst.selImm === SelImm.INVALID_INSTR ||
+    vecException.io.illegalInst ||
+    io.fromCSR.illegalInst.sfenceVMA  && FuType.FuTypeOrR(decodedInst.fuType, FuType.fence) && decodedInst.fuOpType === FenceOpType.sfence  ||
+    io.fromCSR.illegalInst.sfencePart && FuType.FuTypeOrR(decodedInst.fuType, FuType.fence) && decodedInst.fuOpType === FenceOpType.nofence ||
+    io.fromCSR.illegalInst.hfenceGVMA && FuType.FuTypeOrR(decodedInst.fuType, FuType.fence) && decodedInst.fuOpType === FenceOpType.hfence_g ||
+    io.fromCSR.illegalInst.hfenceVVMA && FuType.FuTypeOrR(decodedInst.fuType, FuType.fence) && decodedInst.fuOpType === FenceOpType.hfence_v ||
+    io.fromCSR.illegalInst.hlsv       && FuType.FuTypeOrR(decodedInst.fuType, FuType.ldu)   && (LSUOpType.isHlv(decodedInst.fuOpType) || LSUOpType.isHlvx(decodedInst.fuOpType)) ||
+    io.fromCSR.illegalInst.hlsv       && FuType.FuTypeOrR(decodedInst.fuType, FuType.stu)   && LSUOpType.isHsv(decodedInst.fuOpType)
+
+  private val exceptionVI =
+    io.fromCSR.virtualInst.sfenceVMA  && FuType.FuTypeOrR(decodedInst.fuType, FuType.fence) && decodedInst.fuOpType === FenceOpType.sfence ||
+    io.fromCSR.virtualInst.sfencePart && FuType.FuTypeOrR(decodedInst.fuType, FuType.fence) && decodedInst.fuOpType === FenceOpType.nofence ||
+    io.fromCSR.virtualInst.hfence     && FuType.FuTypeOrR(decodedInst.fuType, FuType.fence) && (decodedInst.fuOpType === FenceOpType.hfence_g || decodedInst.fuOpType === FenceOpType.hfence_v) ||
+    io.fromCSR.virtualInst.hlsv       && FuType.FuTypeOrR(decodedInst.fuType, FuType.ldu)   && (LSUOpType.isHlv(decodedInst.fuOpType) || LSUOpType.isHlvx(decodedInst.fuOpType)) ||
+    io.fromCSR.virtualInst.hlsv       && FuType.FuTypeOrR(decodedInst.fuType, FuType.stu)   && LSUOpType.isHsv(decodedInst.fuOpType)
+
+  decodedInst.exceptionVec(illegalInstr) := exceptionII
+  decodedInst.exceptionVec(virtualInstr) := exceptionVI
 
   decodedInst.imm := LookupTree(decodedInst.selImm, ImmUnion.immSelMap.map(
     x => {

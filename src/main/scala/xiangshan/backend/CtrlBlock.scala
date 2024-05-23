@@ -31,11 +31,12 @@ import xiangshan.backend.decode.{DecodeStage, FusionDecoder}
 import xiangshan.backend.dispatch.{CoreDispatchTopDownIO, Dispatch, DispatchQueue}
 import xiangshan.backend.fu.PFEvent
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
+import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.{Rename, RenameTableWrapper, SnapshotGenerator}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.frontend.{FtqPtr, FtqRead, Ftq_RF_Components}
 import xiangshan.mem.{LqPtr, LsqEnqIO}
-import xiangshan.backend.issue.{IntScheduler, FpScheduler, VfScheduler, MemScheduler}
+import xiangshan.backend.issue.{FpScheduler, IntScheduler, MemScheduler, VfScheduler}
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   val rob_commits = Vec(CommitWidth, Valid(new RobCommitInfo))
@@ -305,6 +306,7 @@ class CtrlBlockImp(
   }
 
   // vtype commit
+  decode.io.fromCSR := io.fromCSR.toDecode
   decode.io.isResumeVType := rob.io.toDecode.isResumeVType
   decode.io.commitVType := rob.io.toDecode.commitVType
   decode.io.walkVType := rob.io.toDecode.walkVType
@@ -630,6 +632,9 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val cpuHalt = Output(Bool())
   }
   val frontend = Flipped(new FrontendToCtrlIO())
+  val fromCSR = new Bundle{
+    val toDecode = Input(new CSRToDecode)
+  }
   val toIssueBlock = new Bundle {
     val flush = ValidIO(new Redirect)
     val allocPregs = Vec(RenameWidth, Output(new ResetPregStateReq))

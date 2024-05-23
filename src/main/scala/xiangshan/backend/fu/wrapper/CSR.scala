@@ -17,6 +17,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 {
   val csrIn = io.csrio.get
   val csrOut = io.csrio.get
+  val csrToDecode = io.csrToDecode.get
 
   val setFsDirty = csrIn.fpu.dirty_fs
   val setFflags = csrIn.fpu.fflags
@@ -301,9 +302,71 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       // virtual mode
       custom.virtMode := csrMod.io.out.privState.V.asBool
   }
+
+  csrToDecode := csrMod.io.toDecode
 }
 
 class CSRInput(implicit p: Parameters) extends XSBundle with HasSoCParameter{
   val hartId = Input(UInt(8.W))
   val msiInfo = Input(ValidIO(new MsiInfoBundle))
+}
+
+class CSRToDecode(implicit p: Parameters) extends XSBundle {
+  val illegalInst = new Bundle {
+    /**
+     * illegal sfence.vma, sinval.vma
+     * raise EX_II when isModeHS && mstatus.TVM=1 || isModeHU
+     */
+    val sfenceVMA = Bool()
+
+    /**
+     * illegal sfence.w.inval sfence.inval.ir
+     * raise EX_II when isModeHU
+     */
+    val sfencePart = Bool()
+
+    /**
+     * illegal hfence.gvma, hinval.gvma
+     * raise EX_II when isModeHS && mstatus.TVM=1 || isModeHU
+     * the condition is the same as sfenceVMA
+     */
+    val hfenceGVMA = Bool()
+
+    /**
+     * illegal hfence.vvma, hinval.vvma
+     * raise EX_II when isModeHU
+     */
+    val hfenceVVMA = Bool()
+
+    /**
+     * illegal hlv, hlvx, and hsv
+     * raise EX_II when isModeHU && hstatus.HU=0
+     */
+    val hlsv = Bool()
+  }
+  val virtualInst = new Bundle {
+    /**
+     * illegal sfence.vma, svinval.vma
+     * raise EX_VI when isModeVS && hstatus.VTVM=1 || isModeVU
+     */
+    val sfenceVMA = Bool()
+
+    /**
+     * illegal sfence.w.inval sfence.inval.ir
+     * raise EX_VI when isModeVU
+     */
+    val sfencePart = Bool()
+
+    /**
+     * illegal hfence.gvma, hinval.gvma, hfence.vvma, hinval.vvma
+     * raise EX_VI when isModeVS || isModeVU
+     */
+    val hfence = Bool()
+
+    /**
+     * illegal hlv, hlvx, and hsv
+     * raise EX_VI when isModeVS || isModeVU
+     */
+    val hlsv = Bool()
+  }
 }
