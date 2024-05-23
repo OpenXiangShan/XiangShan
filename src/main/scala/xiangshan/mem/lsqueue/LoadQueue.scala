@@ -215,12 +215,28 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     loadQueueRAW.clock := clkGate_raw.io.Q
     val ldu_ldin_valid = Wire(Vec(LoadPipelineWidth, Bool()))
     ldu_ldin_valid := (0 until LoadPipelineWidth).map{ i => io.ldu.ldin(i).valid}
-    val exception_clk_en = ldu_ldin_valid.asUInt.orR || RegNext(ldu_ldin_valid.asUInt.orR) || io.redirect.valid || RegNext(io.redirect.valid)
+    val exception_clk_en = ldu_ldin_valid.asUInt.orR || RegNext(ldu_ldin_valid.asUInt.orR) ||
+                           io.redirect.valid || RegNext(io.redirect.valid)
     val clkGate_exceptionBuffer = Module(new STD_CLKGT_func)
      clkGate_exceptionBuffer.io.TE := false.B
      clkGate_exceptionBuffer.io.E := exception_clk_en
      clkGate_exceptionBuffer.io.CK := clock
     exceptionBuffer.clock := clkGate_exceptionBuffer.io.Q
+
+    val trigger_valid = Wire(Vec(LoadPipelineWidth, Bool()))
+    trigger_valid := (0 until LoadPipelineWidth).map{ i => io.trigger(i).hitLoadAddrTriggerHitVec.asUInt.orR}
+    val uncache_clk_en = io.redirect.valid || RegNext(io.redirect.valid) ||
+                         ldu_ldin_valid.asUInt.orR || RegNext(ldu_ldin_valid.asUInt.orR) ||
+                         io.ldout(0).ready || RegNext(io.ldout(0).ready) ||
+                         io.rob.pendingld || RegNext(io.rob.pendingld) ||
+                         io.uncache.req.ready || io.uncache.resp.valid ||
+                         trigger_valid.asUInt.orR || RegNext(trigger_valid.asUInt.orR)
+
+    val clkGate_uncacheBuffer = Module(new STD_CLKGT_func)
+     clkGate_uncacheBuffer.io.TE := false.B
+     clkGate_uncacheBuffer.io.E := uncache_clk_en
+     clkGate_uncacheBuffer.io.CK := clock
+    uncacheBuffer.clock := clkGate_uncacheBuffer.io.Q
   }
 
   /**
