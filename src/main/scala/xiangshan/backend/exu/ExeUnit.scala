@@ -142,6 +142,8 @@ class ExeUnitImp(
     x => x match {
       case IntWB(port, priority) => assert(priority >= 0 && priority <= 2,
         s"${exuParams.name}: WbPort must priority=0 or priority=1")
+      case FpWB(port, priority) => assert(priority >= 0 && priority <= 2,
+        s"${exuParams.name}: WbPort must priority=0 or priority=1")
       case VfWB (port, priority) => assert(priority >= 0 && priority <= 2,
         s"${exuParams.name}: WbPort must priority=0 or priority=1")
       case _ =>
@@ -158,6 +160,24 @@ class ExeUnitImp(
           case IntWB(port, priority) => {
             if (!samePort.latencyCertain) assert(priority == sameIntPortExuParam.size - 1,
               s"${samePort.name}: IntWbPort $port must latencyCertain priority=0 or latencyUnCertain priority=max(${sameIntPortExuParam.size - 1})")
+            // Certain latency can be handled by WbBusyTable, so there is no need to limit the exu's WB priority
+          }
+          case _ =>
+        }
+      )
+    )
+  }
+  val fpWbPort = exuParams.getFpWBPort
+  if (fpWbPort.isDefined) {
+    val sameFpPortExuParam = backendParams.allExuParams.filter(_.getFpWBPort.isDefined)
+      .filter(_.getFpWBPort.get.port == fpWbPort.get.port)
+    val samePortOneCertainOneUncertain = sameFpPortExuParam.map(_.latencyCertain).contains(true) && sameFpPortExuParam.map(_.latencyCertain).contains(false)
+    if (samePortOneCertainOneUncertain) sameFpPortExuParam.map(samePort =>
+      samePort.wbPortConfigs.map(
+        x => x match {
+          case FpWB(port, priority) => {
+            if (!samePort.latencyCertain) assert(priority == sameFpPortExuParam.size - 1,
+              s"${samePort.name}: FpWbPort $port must latencyCertain priority=0 or latencyUnCertain priority=max(${sameFpPortExuParam.size - 1})")
             // Certain latency can be handled by WbBusyTable, so there is no need to limit the exu's WB priority
           }
           case _ =>
