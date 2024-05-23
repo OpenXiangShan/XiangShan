@@ -1088,10 +1088,11 @@ class HptwResp(implicit p: Parameters) extends PtwBundle {
   val gaf = Bool()
 
   def apply(gpf: Bool, gaf: Bool, level: UInt, pte: PteBundle, vpn: UInt, vmid: UInt) = {
+    val resp_pte = Mux(gaf, 0.U.asTypeOf(pte), pte)
     this.entry.level.map(_ := level)
     this.entry.tag := vpn
-    this.entry.perm.map(_ := pte.getPerm())
-    this.entry.ppn := pte.ppn
+    this.entry.perm.map(_ := resp_pte.getPerm())
+    this.entry.ppn := resp_pte.ppn
     this.entry.prefetch := DontCare
     this.entry.asid := DontCare
     this.entry.vmid.map(_ := vmid)
@@ -1194,12 +1195,12 @@ class PtwMergeResp(implicit p: Parameters) extends PtwBundle {
 
   def apply(pf: Bool, af: Bool, level: UInt, pte: PteBundle, vpn: UInt, asid: UInt, vmid:UInt, addr_low : UInt, not_super : Boolean = true) = {
     assert(tlbcontiguous == 8, "Only support tlbcontiguous = 8!")
-
+    val resp_pte = Mux(af, 0.U.asTypeOf(pte), pte)
     val ptw_resp = Wire(new PtwMergeEntry(tagLen = sectorvpnLen, hasPerm = true, hasLevel = true))
-    ptw_resp.ppn := pte.ppn(ppnLen - 1, sectortlbwidth)
-    ptw_resp.ppn_low := pte.ppn(sectortlbwidth - 1, 0)
+    ptw_resp.ppn := resp_pte.ppn(ppnLen - 1, sectortlbwidth)
+    ptw_resp.ppn_low := resp_pte.ppn(sectortlbwidth - 1, 0)
     ptw_resp.level.map(_ := level)
-    ptw_resp.perm.map(_ := pte.getPerm())
+    ptw_resp.perm.map(_ := resp_pte.getPerm())
     ptw_resp.tag := vpn(vpnLen - 1, sectortlbwidth)
     ptw_resp.pf := pf
     ptw_resp.af := af
