@@ -147,6 +147,13 @@ class CSREnumType(
   // Also check if the write field is not Read Only.
   def isLegal: Bool = this.factory.asInstanceOf[CSREnum].isLegal(this) && (!this.isRO).B
 
+  def isLegal(dmode: Bool): Bool = this.factory.asInstanceOf[CSREnum].isLegal(this, dmode) && (!this.isRO).B
+
+  // make the illegal wdata legalize
+  def legalize: CSREnumType = this.factory.asInstanceOf[CSREnum].legalize(this)
+
+  def legalize(dmode: Bool): CSREnumType = this.factory.asInstanceOf[CSREnum].legalize(this, dmode)
+
   def needReset: Boolean = init != null
 
   def rfn: CSRRfnType = rwType.rfn
@@ -307,6 +314,12 @@ class CSREnum extends ChiselEnum {
   }
 
   def isLegal(enum: CSREnumType): Bool = true.B
+
+  def isLegal(enum: CSREnumType, dmode: Bool): Bool = true.B
+
+  def legalize(enum: CSREnumType): CSREnumType = makeType
+
+  def legalize(enum: CSREnumType, dmode: Bool): CSREnumType = makeType
 
   println(s"A new CSREnum is created, factory: $this")
 }

@@ -255,9 +255,10 @@ class InterruptFilter extends Module {
     0.U
   )
 
-  // todo: support debug interrupt
-  // Cat(debugIntr && !debugMode, mie.rdata.asUInt(11, 0) & mip.rdata.asUInt & intrVecEnable.asUInt)
-  val intrVec = mIRVec | hsIRVec | vsIRVec
+  // support debug interrupt
+  val disableInterrupt = io.in.debugMode || (io.in.dcsr.STEP.asBool && !io.in.dcsr.STEPIE.asBool)
+  val debugInterupt = ((io.in.debugIntr && !io.in.debugMode) << CSRConst.IRQ_DEBUG).asUInt
+  val intrVec = VecInit((mIRVec | hsIRVec | vsIRVec | debugInterupt).asBools.map(IR => IR && !disableInterrupt)).asUInt
 
   io.out.interruptVec.valid := intrVec.orR
   io.out.interruptVec.bits := intrVec
@@ -292,6 +293,9 @@ class InterruptFilterIO extends Bundle {
     val vstopei = new TopEIBundle
     val hviprio1 = new Hviprio1Bundle
     val hviprio2 = new Hviprio2Bundle
+    val debugIntr = Bool()
+    val debugMode = Bool()
+    val dcsr = new DcsrBundle
 
     val miprios = UInt((64*8).W)
     val hsiprios = UInt((64*8).W)

@@ -11,7 +11,7 @@ class DretEventOutput extends Bundle with EventUpdatePrivStateOutput with EventO
   val dcsr = ValidIO((new DcsrBundle).addInEvent(_.V, _.PRV))
   val mstatus = ValidIO((new MstatusBundle).addInEvent(_.MPRV))
   val debugMode = ValidIO(Bool())
-  val debugIntrEnable = Bool()
+  val debugIntrEnable = ValidIO(Bool())
   val targetPc = ValidIO(UInt(VaddrMaxWidth.W))
 
   override def getBundleByName(name: String): ValidIO[CSRBundle] = {
@@ -34,18 +34,19 @@ class DretEventModule extends Module with CSREventBase {
 
   out := DontCare
 
-  out.debugMode.valid := valid
-  out.privState.valid := valid
-  out.dcsr.valid      := valid
-  out.mstatus.valid   := valid
-  out.targetPc.valid  := valid
+  out.debugMode.valid       := valid
+  out.privState.valid       := valid
+  out.dcsr.valid            := valid
+  out.mstatus.valid         := valid
+  out.debugIntrEnable.valid := valid
+  out.targetPc.valid        := valid
 
-  out.privState.bits.PRVM := in.dcsr.PRV.asUInt
-  out.privState.bits.V    := in.dcsr.V
-  out.mstatus.bits.MPRV   := Mux(in.dcsr.PRV =/= PrivMode.M, 0.U, in.mstatus.MPRV.asUInt)
-  out.debugMode.bits      := false.B
-  out.debugIntrEnable     := true.B
-  out.targetPc.bits       := in.dpc.asUInt
+  out.privState.bits.PRVM  := in.dcsr.PRV.asUInt
+  out.privState.bits.V     := in.dcsr.V
+  out.mstatus.bits.MPRV    := Mux(in.dcsr.PRV =/= PrivMode.M, 0.U, in.mstatus.MPRV.asUInt)
+  out.debugMode.bits       := false.B
+  out.debugIntrEnable.bits := true.B
+  out.targetPc.bits        := in.dpc.asUInt
 }
 
 trait DretEventSinkBundle { self: CSRModule[_] =>
