@@ -39,6 +39,7 @@ import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import device.{EnableJtag, XSDebugModuleParams}
 import huancun._
 import coupledL2._
+import coupledL2.prefetch._
 import xiangshan.frontend.icache.ICacheParameters
 
 class BaseConfig(n: Int) extends Config((site, here, up) => {
@@ -191,7 +192,7 @@ class MinimalConfig(n: Int = 1) extends Config(
           ways = 8,
           sets = 128,
           echoField = Seq(huancun.DirtyField()),
-          prefetch = None,
+          prefetch = Nil,
           clientCaches = Seq(L1Param(
             "dcache",
             isKeywordBitsOpt = p.dcacheParametersOpt.get.isKeywordBitsOpt
@@ -280,7 +281,7 @@ class WithNKBL2
         )),
         reqField = Seq(utility.ReqSourceField()),
         echoField = Seq(huancun.DirtyField()),
-        prefetch = Some(coupledL2.prefetch.PrefetchReceiverParams(tp = tp)),
+        prefetch = Seq(PrefetchReceiverParams(), BOPParameters()) ++ (if (tp) Seq(TPParameters()) else Nil),
         enablePerf = !site(DebugOptionsKey).FPGAPlatform && site(DebugOptionsKey).EnablePerfDebug,
         enableRollingDB = site(DebugOptionsKey).EnableRollingDB,
         enableMonitor = site(DebugOptionsKey).AlwaysBasicDB,
