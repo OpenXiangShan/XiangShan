@@ -12,7 +12,7 @@ import utility._
 import xiangshan.backend.fu.FuConfig.{AluCfg, BrhCfg}
 import xiangshan.backend.fu.vector.Bundles.{VType, Vxrm}
 import xiangshan.backend.fu.fpu.Bundles.Frm
-import xiangshan.backend.fu.wrapper.CSRInput
+import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
 
 class ExuBlock(params: SchdBlockParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
@@ -47,6 +47,7 @@ class ExuBlockImp(
     exu.io.vtype.foreach(exuio => io.vtype.get := exuio)
     exu.io.in <> input
     output <> exu.io.out
+    io.csrToDecode.foreach(toDecode => exu.io.csrToDecode.foreach(exuOut => toDecode := exuOut))
 //    if (exu.wrapper.exuParams.fuConfigs.contains(AluCfg) || exu.wrapper.exuParams.fuConfigs.contains(BrhCfg)){
 //      XSPerfAccumulate(s"${(exu.wrapper.exuParams.name)}_fire_cnt", PopCount(exu.io.in.fire))
 //    }
@@ -71,6 +72,7 @@ class ExuBlockIO(implicit p: Parameters, params: SchdBlockParams) extends XSBund
 
   val csrio = Option.when(params.hasCSR)(new CSRFileIO)
   val csrin = Option.when(params.hasCSR)(new CSRInput)
+  val csrToDecode = Option.when(params.hasCSR)(Output(new CSRToDecode))
 
   val fenceio = Option.when(params.hasFence)(new FenceIO)
   val frm = Option.when(params.needSrcFrm)(Input(Frm()))

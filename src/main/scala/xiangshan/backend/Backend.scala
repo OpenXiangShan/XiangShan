@@ -216,6 +216,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   ctrlBlock.io.fpIQValidNumVec := fpScheduler.io.fpIQValidNumVec
   ctrlBlock.io.fromTop.hartId := io.fromTop.hartId
   ctrlBlock.io.frontend <> io.frontend
+  ctrlBlock.io.fromCSR.toDecode := intExuBlock.io.csrToDecode.get
   ctrlBlock.io.fromWB.wbData <> wbDataPath.io.toCtrlBlock.writeback
   ctrlBlock.io.fromMem.stIn <> io.mem.stIn
   ctrlBlock.io.fromMem.violation <> io.mem.memoryViolation
