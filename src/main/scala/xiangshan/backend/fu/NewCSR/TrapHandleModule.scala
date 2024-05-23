@@ -17,15 +17,15 @@ class TrapHandleModule extends Module {
   private val hasIR = hasTrap && trapInfo.bits.isInterrupt
   private val hasEX = hasTrap && !trapInfo.bits.isInterrupt
 
-  private val trapVec = io.in.trapInfo.bits.trapVec
+  private val exceptionVec = io.in.trapInfo.bits.trapVec
   private val intrVec = io.in.trapInfo.bits.intrVec
-  private val hasEXVec = Mux(hasEX, trapVec, 0.U)
+  private val hasEXVec = Mux(hasEX, exceptionVec, 0.U)
   private val hasIRVec = Mux(hasIR, intrVec, 0.U)
 
   // Todo: support more interrupt and exception
-  private val exceptionNO = ExceptionNO.priorities.foldRight(0.U(6.W))((i: Int, sum: UInt) => Mux(hasEXVec(i), i.U, sum))
+  private val exceptionRegular = ExceptionNO.priorities.foldRight(0.U(6.W))((i: Int, sum: UInt) => Mux(hasEXVec(i), i.U, sum))
   private val interruptNO = CSRConst.IntPriority.foldRight(0.U(6.W))((i: Int, sum: UInt) => Mux(hasIRVec(i), i.U, sum))
-
+  private val exceptionNO = Mux(trapInfo.bits.singleStep || trapInfo.bits.triggerFire, ExceptionNO.breakPoint.U, exceptionRegular)
   private val causeNO = Mux(hasIR, interruptNO, exceptionNO)
 
   private val mdeleg = Mux(hasIR, io.in.mideleg.asUInt, io.in.medeleg.asUInt)
@@ -56,6 +56,8 @@ class TrapHandleIO extends Bundle {
       val trapVec = UInt(64.W)
       val intrVec = UInt(64.W)
       val isInterrupt = Bool()
+      val singleStep = Bool()
+      val triggerFire = Bool()
     })
     val privState = new PrivState
     val mideleg = new MidelegBundle

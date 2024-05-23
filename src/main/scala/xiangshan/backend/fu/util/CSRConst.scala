@@ -295,7 +295,7 @@ trait HasCSRConst {
   def IRQ_MEIP  = 11
 
   def IRQ_SGEIP = 12
-  def IRQ_DEBUG = 13
+  def IRQ_DEBUG = 17
 
   val Hgatp_Mode_len = 4
   val Hgatp_Vmid_len = 16

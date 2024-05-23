@@ -88,6 +88,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.io.fromRob.trap.bits.singleStep := csrIn.exception.bits.singleStep
   csrMod.io.fromRob.trap.bits.crossPageIPFFix := csrIn.exception.bits.crossPageIPFFix
   csrMod.io.fromRob.trap.bits.isInterrupt := csrIn.exception.bits.isInterrupt
+  csrMod.io.fromRob.trap.bits.triggerCf := csrIn.exception.bits.trigger
 
   csrMod.io.fromRob.commit.fflags := setFflags
   csrMod.io.fromRob.commit.fsDirty := setFsDirty
@@ -111,6 +112,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.io.sret := isSret && valid
   csrMod.io.dret := isDret && valid
   csrMod.io.wfi  := isWfi  && valid
+  csrMod.io.ebreak := isEbreak && valid
 
   csrMod.platformIRP.MEIP := csrIn.externalInterrupt.meip
   csrMod.platformIRP.MTIP := csrIn.externalInterrupt.mtip
@@ -165,7 +167,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     isXRet -> true.B,
   ))
 
-  flushPipe := csrMod.io.out.flushPipe // || frontendTriggerUpdate // Todo: trigger
+  flushPipe := csrMod.io.out.flushPipe
 
   // tlb
   val tlb = Wire(new TlbCsrBundle)
@@ -290,14 +292,14 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       // rename single step
       custom.singlestep := csrMod.io.out.singleStepFlag
       // trigger
-      custom.frontend_trigger.tUpdate.valid       := false.B
-      custom.frontend_trigger.tUpdate.bits.addr   := DontCare
-      custom.frontend_trigger.tUpdate.bits.tdata  := DontCare
-      custom.frontend_trigger.tEnableVec          := DontCare
-      custom.mem_trigger.tUpdate.valid            := false.B
-      custom.mem_trigger.tUpdate.bits.addr        := DontCare
-      custom.mem_trigger.tUpdate.bits.tdata       := DontCare
-      custom.mem_trigger.tEnableVec               := DontCare
+      custom.frontend_trigger.tUpdate.valid       := csrMod.io.out.frontendTrigger.tUpdate.valid
+      custom.frontend_trigger.tUpdate.bits.addr   := csrMod.io.out.frontendTrigger.tUpdate.bits.addr
+      custom.frontend_trigger.tUpdate.bits.tdata  := csrMod.io.out.frontendTrigger.tUpdate.bits.tdata
+      custom.frontend_trigger.tEnableVec          := csrMod.io.out.frontendTrigger.tEnableVec
+      custom.mem_trigger.tUpdate.valid            := csrMod.io.out.memTrigger.tUpdate.valid
+      custom.mem_trigger.tUpdate.bits.addr        := csrMod.io.out.memTrigger.tUpdate.bits.addr
+      custom.mem_trigger.tUpdate.bits.tdata       := csrMod.io.out.memTrigger.tUpdate.bits.tdata
+      custom.mem_trigger.tEnableVec               := csrMod.io.out.memTrigger.tEnableVec
       // virtual mode
       custom.virtMode := csrMod.io.out.privState.V.asBool
   }

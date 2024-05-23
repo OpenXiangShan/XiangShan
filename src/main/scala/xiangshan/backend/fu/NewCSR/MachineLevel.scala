@@ -264,6 +264,7 @@ class MstatusBundle extends CSRBundle {
 class MstatusModule(implicit override val p: Parameters) extends CSRModule("MStatus", new MstatusBundle)
   with TrapEntryMEventSinkBundle
   with TrapEntryHSEventSinkBundle
+  with DretEventSinkBundle
   with MretEventSinkBundle
   with SretEventSinkBundle
   with HasRobCommitBundle

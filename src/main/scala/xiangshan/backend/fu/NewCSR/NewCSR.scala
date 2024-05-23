@@ -11,10 +11,12 @@ import utils.OptionWrapper
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CSRCustomState, PrivState, RobCommitCSR}
 import xiangshan.backend.fu.NewCSR.CSRDefines.{ContextStatus, PrivMode, SatpMode, VirtMode}
 import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast._
-import xiangshan.backend.fu.NewCSR.CSREvents.{CSREvents, DretEventSinkBundle, EventUpdatePrivStateOutput, MretEventSinkBundle, SretEventSinkBundle, TrapEntryEventInput, TrapEntryHSEventSinkBundle, TrapEntryMEventSinkBundle, TrapEntryVSEventSinkBundle}
+import xiangshan.backend.fu.NewCSR.CSREvents.{CSREvents, DretEventSinkBundle, EventUpdatePrivStateOutput, MretEventSinkBundle, SretEventSinkBundle, TrapEntryDEventSinkBundle, TrapEntryEventInput, TrapEntryHSEventSinkBundle, TrapEntryMEventSinkBundle, TrapEntryVSEventSinkBundle}
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart, Vxrm, Vxsat}
-import xiangshan.{HasXSParameter, XSCoreParamsKey, XSTileKey}
+import xiangshan.{FrontendTdataDistributeIO, HasXSParameter, MemTdataDistributeIO, XSCoreParamsKey, XSTileKey}
+import xiangshan._
+import xiangshan.backend.fu.util.CSRConst
 
 import scala.collection.immutable.SeqMap
 
@@ -54,6 +56,10 @@ object CSRConfig {
   final val PMPOffBits = 2
 
   final val PMPAddrBits = PMPAddrWidth - PMPOffBits
+
+  // trigger
+  final val triggerNum    = 4     // Todo: use XSParams
+  final val tselectWidth  = 2     // log2Up(triggerNum)
 }
 
 class NewCSR(implicit val p: Parameters) extends Module
@@ -94,6 +100,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         val instr = UInt(32.W)
         val trapVec = UInt(64.W)
         val singleStep = Bool()
+        val triggerCf = new TriggerCf
         val crossPageIPFFix = Bool()
         val isInterrupt = Bool()
       })
@@ -103,6 +110,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     val sret = Input(Bool())
     val dret = Input(Bool())
     val wfi  = Input(Bool())
+    val ebreak = Input(Bool())
 
     val out = Output(new Bundle {
       val EX_II = Bool()
@@ -137,6 +145,9 @@ class NewCSR(implicit val p: Parameters) extends Module
       // debug
       val debugMode = Bool()
       val singleStepFlag = Bool()
+      // trigger
+      val frontendTrigger = new FrontendTdataDistributeIO()
+      val memTrigger = new MemTdataDistributeIO()
       // custom
       val custom = new CSRCustomState
     })
@@ -176,6 +187,11 @@ class NewCSR(implicit val p: Parameters) extends Module
   val trapPC = io.fromRob.trap.bits.pc
   val trapIsInterrupt = io.fromRob.trap.bits.isInterrupt
   val trapIsCrossPageIPF = io.fromRob.trap.bits.crossPageIPFFix
+  val triggerCf = io.fromRob.trap.bits.triggerCf
+
+  // debug_intrrupt
+  val debugIntrEnable = RegInit(true.B) // debug interrupt will be handle only when debugIntrEnable
+  val debugIntr = platformIRP.debugIP && debugIntrEnable
 
   // CSR Privilege State
   val PRVM = RegInit(PrivMode(0), PrivMode.M)
@@ -310,7 +326,9 @@ class NewCSR(implicit val p: Parameters) extends Module
   permitMod.io.in.csrAccess.wen := wen
   permitMod.io.in.csrAccess.addr := addr
 
+
   permitMod.io.in.privState := privState
+  permitMod.io.in.debugMode := debugMode
 
   permitMod.io.in.mret := io.mret
   permitMod.io.in.sret := io.sret
@@ -389,6 +407,11 @@ class NewCSR(implicit val p: Parameters) extends Module
       case _ =>
     }
     mod match {
+      case m: TrapEntryDEventSinkBundle =>
+        m.trapToD := trapEntryDEvent.out
+      case _ =>
+    }
+    mod match {
       case m: TrapEntryMEventSinkBundle =>
         m.trapToM := trapEntryMEvent.out
       case _ =>
@@ -463,7 +486,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   trapEntryHSEvent.valid := hasTrap && entryPrivState.isModeHS
   trapEntryVSEvent.valid := hasTrap && entryPrivState.isModeVS
 
-  Seq(trapEntryMEvent, trapEntryHSEvent, trapEntryVSEvent).foreach { eMod =>
+
+  Seq(trapEntryMEvent, trapEntryHSEvent, trapEntryVSEvent, trapEntryDEvent).foreach { eMod =>
     eMod.in match {
       case in: TrapEntryEventInput =>
         in.causeNO := trapHandleMod.io.out.causeNO
@@ -538,10 +562,18 @@ class NewCSR(implicit val p: Parameters) extends Module
   debugMode := MuxCase(
     debugMode,
     Seq(
-      dretEvent.out.debugMode.valid -> dretEvent.out.debugMode.bits
+      dretEvent.out.debugMode.valid -> dretEvent.out.debugMode.bits,
+      trapEntryDEvent.out.debugMode.valid -> trapEntryDEvent.out.debugMode.bits
     )
   )
 
+  debugIntrEnable := MuxCase(
+    debugIntrEnable,
+    Seq(
+      dretEvent.out.debugIntrEnable.valid -> dretEvent.out.debugIntrEnable.bits,
+      trapEntryDEvent.out.debugIntrEnable.valid -> trapEntryDEvent.out.debugIntrEnable.bits
+    )
+  )
 
   // perf
   val addrInPerfCnt = (addr >= CSRs.mcycle.U) && (addr <= CSRs.mhpmcounter31.U) ||
@@ -567,12 +599,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   val wVxrmChangeRM = addr === CSRs.vxrm.U && wenLegal && wdata(1, 0) =/= vcsr.vxrm
   val vxrmChange = wVcsrChangeRM || wVxrmChangeRM
 
-  val flushPipe = resetSatp || frmChange || vxrmChange
-
-  // debug
-  val debugIntrEnable = RegInit(true.B) // debug interrupt will be handle only when debugIntrEnable
-  debugIntrEnable := dretEvent.out.debugIntrEnable
-  val debugIntr = platformIRP.debugIP && debugIntrEnable
+  val triggerFrontendChange = Wire(Bool())
+  val flushPipe = resetSatp || frmChange || vxrmChange || triggerFrontendChange
 
   // fence
   val tvm = mstatus.regOut.TVM.asBool
@@ -587,7 +615,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   })
 
   private val needTargetUpdate = mretEvent.out.targetPc.valid || sretEvent.out.targetPc.valid || dretEvent.out.targetPc.valid ||
-    trapEntryMEvent.out.targetPc.valid || trapEntryHSEvent.out.targetPc.valid || trapEntryVSEvent.out.targetPc.valid
+    trapEntryMEvent.out.targetPc.valid || trapEntryHSEvent.out.targetPc.valid || trapEntryVSEvent.out.targetPc.valid || trapEntryDEvent.out.targetPc.valid
 
   private val noCSRIllegal = (ren || wen) && Cat(csrRwMap.keys.toSeq.sorted.map(csrAddr => !(addr === csrAddr.U))).andR
 
@@ -597,14 +625,19 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   io.out.rData := Mux(ren, rdata, 0.U)
   io.out.regOut := regOut
-  io.out.targetPc := DataHoldBypass(Mux1H(Seq(
-    mretEvent.out.targetPc.valid -> mretEvent.out.targetPc.bits,
-    sretEvent.out.targetPc.valid -> sretEvent.out.targetPc.bits,
-    dretEvent.out.targetPc.valid -> dretEvent.out.targetPc.bits,
-    trapEntryMEvent.out.targetPc.valid -> trapEntryMEvent.out.targetPc.bits,
-    trapEntryHSEvent.out.targetPc.valid -> trapEntryHSEvent.out.targetPc.bits,
-    trapEntryVSEvent.out.targetPc.valid -> trapEntryVSEvent.out.targetPc.bits,
-  )), needTargetUpdate)
+  io.out.targetPc := DataHoldBypass(
+    Mux(trapEntryDEvent.out.targetPc.valid,
+      trapEntryDEvent.out.targetPc.bits,
+      Mux1H(Seq(
+        mretEvent.out.targetPc.valid -> mretEvent.out.targetPc.bits,
+        sretEvent.out.targetPc.valid -> sretEvent.out.targetPc.bits,
+        dretEvent.out.targetPc.valid -> dretEvent.out.targetPc.bits,
+        trapEntryMEvent.out.targetPc.valid -> trapEntryMEvent.out.targetPc.bits,
+        trapEntryHSEvent.out.targetPc.valid -> trapEntryHSEvent.out.targetPc.bits,
+        trapEntryVSEvent.out.targetPc.valid -> trapEntryVSEvent.out.targetPc.bits)
+      )
+    ),
+  needTargetUpdate)
 
   io.out.privState := privState
 
@@ -625,6 +658,149 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.out.singleStepFlag := !debugMode && dcsr.regOut.STEP
   io.out.tvm := tvm
   io.out.vtvm := vtvm
+
+  /**
+   * debug_begin
+   */
+  // debug_intr
+  val hasIntr = hasTrap && trapIsInterrupt
+  val hasDebugIntr = hasIntr && intrVec(CSRConst.IRQ_DEBUG)
+
+  // debug_exception_ebreak
+  val hasExp = hasTrap && !trapIsInterrupt
+  val breakPoint = trapVec(ExceptionNO.breakPoint).asBool
+  val hasBreakPoint = hasExp && breakPoint
+  val ebreakEnterDebugMode =
+    (privState.isModeM && dcsr.regOut.EBREAKM.asBool) ||
+      (privState.isModeHS && dcsr.regOut.EBREAKS.asBool) ||
+      (privState.isModeHU && dcsr.regOut.EBREAKU.asBool)
+  val hasDebugEbreakException = hasBreakPoint && ebreakEnterDebugMode
+
+  // debug_exception_trigger
+  val triggerFrontendHitVec = triggerCf.frontendHit
+  val triggerMemHitVec = triggerCf.backendHit
+  val triggerHitVec = triggerFrontendHitVec.asUInt | triggerMemHitVec.asUInt // Todo: update mcontrol.hit
+  val triggerFrontendCanFireVec = triggerCf.frontendCanFire.asUInt
+  val triggerMemCanFireVec = triggerCf.backendCanFire.asUInt
+  val triggerCanFireVec = triggerFrontendCanFireVec | triggerMemCanFireVec
+  val tdata1WireVec = tdata1RegVec.map{ mod => {
+      val tdata1Wire = Wire(new Tdata1Bundle)
+      tdata1Wire := mod.rdata
+      tdata1Wire
+  }}
+  val tdata2WireVec = tdata2RegVec.map{ mod => {
+      val tdata2Wire = Wire(new Tdata2Bundle)
+      tdata2Wire := mod.rdata
+      tdata2Wire
+  }}
+  val mcontrolWireVec = tdata1WireVec.map{ mod => {
+    val mcontrolWire = Wire(new Mcontrol)
+    mcontrolWire := mod.DATA.asUInt
+    mcontrolWire
+  }}
+
+  // More than one triggers can hit at the same time, but only fire one
+  // We select the first hit trigger to fire
+  val triggerFireOH = PriorityEncoderOH(triggerCanFireVec)
+  val triggerFireAction = PriorityMux(triggerFireOH, tdata1WireVec.map(_.getTriggerAction)).asUInt
+  val hasTriggerFire = hasExp && triggerCf.canFire
+  val hasDebugTriggerException = hasTriggerFire && (triggerFireAction === TrigAction.DebugMode.asUInt)
+
+  // debug_exception_single
+  val hasSingleStep = hasExp && io.fromRob.trap.bits.singleStep
+
+  val hasDebugException = hasDebugEbreakException || hasDebugTriggerException || hasSingleStep
+  val hasDebugTrap = hasDebugException || hasDebugIntr
+
+  trapEntryDEvent.valid                       := hasDebugTrap && !debugMode
+  trapEntryDEvent.in.hasDebugIntr             := hasDebugIntr
+  trapEntryDEvent.in.debugMode                := debugMode
+  trapEntryDEvent.in.hasTrap                  := hasTrap
+  trapEntryDEvent.in.hasSingleStep            := hasSingleStep
+  trapEntryDEvent.in.hasTriggerFire           := hasTriggerFire
+  trapEntryDEvent.in.hasDebugEbreakException  := hasDebugEbreakException
+  trapEntryDEvent.in.breakPoint               := breakPoint
+
+  trapHandleMod.io.in.trapInfo.bits.singleStep  := hasSingleStep
+  trapHandleMod.io.in.trapInfo.bits.triggerFire := hasTriggerFire
+
+  intrMod.io.in.debugMode := debugMode
+  intrMod.io.in.debugIntr := debugIntr
+  intrMod.io.in.dcsr      := dcsr.rdata.asUInt
+
+  val tselect1H = UIntToOH(tselect.rdata.asUInt, TriggerNum).asBools
+  val chainVec = mcontrolWireVec.map(_.CHAIN.asBool)
+  val newTriggerChainVec = tselect1H.zip(chainVec).map{case(a, b) => a | b}
+  val newTriggerChainIsLegal = TriggerUtil.TriggerCheckChainLegal(newTriggerChainVec, TriggerChainMaxLength)
+
+  val tdata1Update  = addr === tdata1.addr.U && wenLegal
+  val tdata2Update  = addr === tdata2.addr.U && wenLegal
+  val triggerUpdate = tdata1Update || tdata2Update
+
+  tdata1RegVec.foreach { mod =>
+    mod match {
+      case m: HasdebugModeBundle =>
+        m.debugMode := debugMode
+        m.chainable := newTriggerChainIsLegal
+      case _ =>
+    }
+  }
+  tdata1RegVec.zip(tdata2RegVec).zipWithIndex.map { case ((mod1, mod2), idx) => {
+      mod1.w.wen    := tdata1Update && (tselect.rdata === idx.U)
+      mod1.w.wdata  := wdata
+      mod2.w.wen    := tdata2Update && (tselect.rdata === idx.U)
+      mod2.w.wdata  := wdata
+    }
+  }
+
+  val tdata1Wdata = Wire(new Tdata1Bundle)
+  tdata1Wdata := wdata
+  val mcontrolWdata = Wire(new Mcontrol)
+  mcontrolWdata := tdata1Wdata.DATA.asUInt
+  val tdata1TypeWdata = tdata1Wdata.TYPE
+
+  val tdata1Selected = Wire(new Tdata1Bundle)
+  tdata1Selected := tdata1.rdata.asUInt
+  val mcontrolSelected = Wire(new Mcontrol)
+  mcontrolSelected := tdata1Selected.DATA.asUInt
+  val tdata2Selected = Wire(new Tdata2Bundle)
+  tdata2Selected := tdata2.rdata.asUInt
+
+  val frontendTriggerUpdate =
+    tdata1Update && tdata1TypeWdata.isLegal && mcontrolWdata.isFetchTrigger ||
+      mcontrolSelected.isFetchTrigger && triggerUpdate
+
+  val memTriggerUpdate =
+    tdata1Update && tdata1TypeWdata.isLegal && mcontrolWdata.isMemAccTrigger ||
+      mcontrolSelected.isMemAccTrigger && triggerUpdate
+
+  val triggerEnableVec = tdata1WireVec.zip(mcontrolWireVec).map { case(tdata1, mcontrol) =>
+    tdata1.TYPE.isLegal && (
+      mcontrol.M && privState.isModeM ||
+        mcontrol.S && (privState.isModeHS) ||
+        mcontrol.U && privState.isModeHU)
+  }
+
+  val fetchTriggerEnableVec = triggerEnableVec.zip(mcontrolWireVec).map {
+    case (tEnable, mod) => tEnable && mod.isFetchTrigger
+  }
+  val memAccTriggerEnableVec = triggerEnableVec.zip(mcontrolWireVec).map {
+    case (tEnable, mod) => tEnable && mod.isMemAccTrigger
+  }
+
+  triggerFrontendChange := frontendTriggerUpdate
+
+  io.out.frontendTrigger.tUpdate.valid       := RegNext(RegNext(frontendTriggerUpdate))
+  io.out.frontendTrigger.tUpdate.bits.addr   := tselect.rdata.asUInt
+  io.out.frontendTrigger.tUpdate.bits.tdata.GenTdataDistribute(tdata1Selected, tdata2Selected)
+  io.out.frontendTrigger.tEnableVec          := fetchTriggerEnableVec
+  io.out.memTrigger.tUpdate.valid            := RegNext(RegNext(memTriggerUpdate))
+  io.out.memTrigger.tUpdate.bits.addr        := tselect.rdata.asUInt
+  io.out.memTrigger.tUpdate.bits.tdata.GenTdataDistribute(tdata1Selected, tdata2Selected)
+  io.out.memTrigger.tEnableVec               := memAccTriggerEnableVec
+  /**
+   * debug_end
+   */
 
   /**
    * [[io.out.custom]] connection

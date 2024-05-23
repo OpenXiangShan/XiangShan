@@ -11,6 +11,8 @@ import xiangshan.backend.fu.NewCSR.CSRDefines.{HgatpMode, SatpMode}
 import xiangshan.backend.fu.NewCSR._
 
 trait CSREvents { self: NewCSR =>
+  val trapEntryDEvent = Module(new TrapEntryDEventModule)
+
   val trapEntryMEvent = Module(new TrapEntryMEventModule)
 
   val trapEntryHSEvent = Module(new TrapEntryHSEventModule)
@@ -24,6 +26,7 @@ trait CSREvents { self: NewCSR =>
   val dretEvent = Module(new DretEventModule)
 
   val events: Seq[Module with CSREventBase] = Seq(
+    trapEntryDEvent,
     trapEntryMEvent,
     trapEntryHSEvent,
     trapEntryVSEvent,
@@ -35,6 +38,7 @@ trait CSREvents { self: NewCSR =>
   events.foreach(x => dontTouch(x.out))
 
   val trapEntryEvents: Seq[Module with CSREventBase] = Seq(
+    trapEntryDEvent,
     trapEntryMEvent,
     trapEntryHSEvent,
     trapEntryVSEvent,
