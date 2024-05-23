@@ -154,7 +154,7 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
 
   commitSize := Mux(io.redirect.valid && !io.snpt.useSnpt, 0.U, commitSizeNext)
   spclWalkSize := spclWalkSizeNext
-  walkSize := Mux(io.redirect.valid && !io.snpt.useSnpt, 0.U, walkSizeNext)
+  walkSize := Mux(io.redirect.valid, 0.U, walkSizeNext)
 
   walkPtrNext := MuxCase(walkPtr, Seq(
     (state === s_idle && stateNext === s_walk) -> walkPtrSnapshots(snptSelect),
