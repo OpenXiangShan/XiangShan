@@ -188,7 +188,5 @@ object CSRBundles {
     // Rename
     val fusion_enable = Output(Bool())
     val wfi_enable = Output(Bool())
-    // Decode
-    val svinval_enable = Output(Bool())
   }
 }

@@ -783,18 +783,6 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   vecException.io.vstart := decodedInst.vpu.vstart
   decodedInst.exceptionVec(illegalInstr) := decodedInst.selImm === SelImm.INVALID_INSTR || vecException.io.illegalInst
 
-  when (!io.csrCtrl.svinval_enable) {
-    val base_ii = decodedInst.selImm === SelImm.INVALID_INSTR || vecException.io.illegalInst
-    val sinval = BitPat("b0001011_?????_?????_000_00000_1110011") === ctrl_flow.instr
-    val w_inval = BitPat("b0001100_00000_00000_000_00000_1110011") === ctrl_flow.instr
-    val inval_ir = BitPat("b0001100_00001_00000_000_00000_1110011") === ctrl_flow.instr
-    val hinval_gvma = HINVAL_GVMA === ctrl_flow.instr
-    val hinval_vvma = HINVAL_VVMA === ctrl_flow.instr
-    val svinval_ii = sinval || w_inval || inval_ir || hinval_gvma || hinval_vvma
-    decodedInst.exceptionVec(illegalInstr) := base_ii || svinval_ii
-    decodedInst.flushPipe := false.B
-  }
-
   when(io.csrCtrl.virtMode){
     // Todo: optimize EX_VI decode
     // vs/vu attempting to exec hyperinst will raise virtual instruction
