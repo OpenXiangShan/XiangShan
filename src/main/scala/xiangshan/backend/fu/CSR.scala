@@ -569,7 +569,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   val srnctl = RegInit(UInt(XLEN.W), "h7".U)
   csrio.customCtrl.fusion_enable := srnctl(0)
-  csrio.customCtrl.svinval_enable := srnctl(1)
   csrio.customCtrl.wfi_enable := srnctl(2)
 
   // Hypervisor CSRs

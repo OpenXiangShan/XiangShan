@@ -94,7 +94,6 @@ class SmblockctlBundle extends CSRBundle {
 
 class SrnctlBundle extends CSRBundle {
   val WFI_ENABLE     = RW(2).withReset(true.B)
-  val SVINVAL_ENABLE = RW(1).withReset(true.B)
   val FUSION_ENABLE  = RW(0).withReset(true.B)
 }
 

@@ -843,7 +843,6 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   io.out.custom.fusion_enable           := srnctl.regOut.FUSION_ENABLE.asBool
   io.out.custom.wfi_enable              := srnctl.regOut.WFI_ENABLE.asBool
-  io.out.custom.svinval_enable          := srnctl.regOut.SVINVAL_ENABLE.asBool
 
   // Todo: record the last address to avoid xireg is different with xiselect
   toAIA.addr.valid := wenLegal && Seq(miselect, siselect, vsiselect).map(
