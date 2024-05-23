@@ -192,7 +192,7 @@ jobs:
       - name: Build MC EMU
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
-            --num-cores 2 \
+            --num-cores 2 --emu-optimize "" \
             --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 \
             --with-dramsim3 --threads 16 --mfc
       - name: MC Test
