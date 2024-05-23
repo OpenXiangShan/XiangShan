@@ -174,7 +174,7 @@ object XDecode extends DecodeConstants {
     SLLW    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.sllw, SelImm.X    , xWen = T, canRobCompress = T),
     SRAW    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.sraw, SelImm.X    , xWen = T, canRobCompress = T),
     SRLW    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.alu, ALUOpType.srlw, SelImm.X    , xWen = T, canRobCompress = T),
-    
+
     // RV64M
     MUL     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mul, MDUOpType.mul   , SelImm.X, xWen = T, canRobCompress = T),
     MULH    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mul, MDUOpType.mulh  , SelImm.X, xWen = T, canRobCompress = T),
@@ -250,7 +250,7 @@ object XDecode extends DecodeConstants {
 }
 
 object BitmanipDecode extends DecodeConstants{
-  /* 
+  /*
     Note: Some Bitmanip instruction may have different OP code between rv32 and rv64.
     Including pseudo instruction like zext.h, and different funct12 like rev8.
     If some day we need to support change XLEN via CSR, we should care about this.
@@ -738,6 +738,8 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   // fnmsub- b1001011
   // fnmadd- b1001111
   private val isFMA = inst.OPCODE === BitPat("b100??11")
+  private val isVppu = FuType.isVppu(decodedInst.fuType)
+  private val isVecOPF = FuType.isVecOPF(decodedInst.fuType)
 
   private val v0Idx = 0
   private val vconfigIdx = VCONFIG_IDX
@@ -784,13 +786,6 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
       ctrl_flow.instr === HSV_D   || ctrl_flow.instr === HFENCE_VVMA ||
       ctrl_flow.instr === HFENCE_GVMA || ctrl_flow.instr === HINVAL_GVMA ||
       ctrl_flow.instr === HINVAL_VVMA
-  }
-
-  // fix frflags
-  //                           fflags    zero csrrs rd    csr
-  val isFrflags = BitPat("b000000000001_00000_010_?????_1110011") === ctrl_flow.instr
-  when (decodedInst.fuType === FuType.csr.U && isFrflags) {
-    decodedInst.blockBackward := false.B
   }
 
   decodedInst.imm := LookupTree(decodedInst.selImm, ImmUnion.immSelMap.map(
@@ -887,9 +882,16 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     decodedInst.vpu.veew := inst.WIDTH
     decodedInst.vpu.isReverse := needReverseInsts.map(_ === inst.ALL).reduce(_ || _)
     decodedInst.vpu.isExt := vextInsts.map(_ === inst.ALL).reduce(_ || _)
-    decodedInst.vpu.isNarrow := narrowInsts.map(_ === inst.ALL).reduce(_ || _)
-    decodedInst.vpu.isDstMask := maskDstInsts.map(_ === inst.ALL).reduce(_ || _)
-    decodedInst.vpu.isOpMask := maskOpInsts.map(_ === inst.ALL).reduce(_ || _)
+    val isNarrow = narrowInsts.map(_ === inst.ALL).reduce(_ || _)
+    val isDstMask = maskDstInsts.map(_ === inst.ALL).reduce(_ || _)
+    val isOpMask = maskOpInsts.map(_ === inst.ALL).reduce(_ || _)
+    val isVlx = decodedInst.fuOpType === VlduType.vloxe || decodedInst.fuOpType === VlduType.vluxe
+    val isWritePartVd = decodedInst.uopSplitType === UopSplitType.VEC_VRED || decodedInst.uopSplitType === UopSplitType.VEC_0XV
+    decodedInst.vpu.isNarrow := isNarrow
+    decodedInst.vpu.isDstMask := isDstMask
+    decodedInst.vpu.isOpMask := isOpMask
+    decodedInst.vpu.isDependOldvd := isVppu || isVecOPF || isVStore || (isDstMask && !isOpMask) || isNarrow || isVlx
+    decodedInst.vpu.isWritePartVd := isWritePartVd
   }
 
   decodedInst.vlsInstr := isVls
@@ -913,6 +915,17 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   io.deq.decodedInst := decodedInst
   io.deq.decodedInst.rfWen := (decodedInst.ldest =/= 0.U) && decodedInst.rfWen
+  // change vlsu to vseglsu when NF =/= 0.U
+  io.deq.decodedInst.fuType := Mux1H(Seq(
+    (!FuType.FuTypeOrR(decodedInst.fuType, FuType.vldu, FuType.vstu)                   ) -> decodedInst.fuType,
+    ( FuType.FuTypeOrR(decodedInst.fuType, FuType.vldu, FuType.vstu) && inst.NF === 0.U || (inst.NF =/= 0.U && (inst.MOP === "b00".U && inst.SUMOP === "b01000".U))) -> decodedInst.fuType,
+    // MOP === b00 && SUMOP === b01000: unit-stride whole register store
+    // MOP =/= b00                    : strided and indexed store
+    ( FuType.FuTypeOrR(decodedInst.fuType, FuType.vstu)              && inst.NF =/= 0.U && ((inst.MOP === "b00".U && inst.SUMOP =/= "b01000".U) || inst.MOP =/= "b00".U)) -> FuType.vsegstu.U,
+    // MOP === b00 && LUMOP === b01000: unit-stride whole register load
+    // MOP =/= b00                    : strided and indexed load
+    ( FuType.FuTypeOrR(decodedInst.fuType, FuType.vldu)              && inst.NF =/= 0.U && ((inst.MOP === "b00".U && inst.LUMOP =/= "b01000".U) || inst.MOP =/= "b00".U)) -> FuType.vsegldu.U,
+  ))
   //-------------------------------------------------------------
   // Debug Info
 //  XSDebug("in:  instr=%x pc=%x excepVec=%b crossPageIPFFix=%d\n",

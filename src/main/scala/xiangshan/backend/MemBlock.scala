@@ -76,13 +76,14 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
   val sfence = Input(new SfenceBundle)
   val tlbCsr = Input(new TlbCsrBundle)
   val lsqio = new Bundle {
-   val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
-   val scommit = Input(UInt(log2Up(CommitWidth + 1).W))
-   val pendingld = Input(Bool())
-   val pendingst = Input(Bool())
-   val commit = Input(Bool())
-   val pendingPtr = Input(new RobPtr)
-   val pendingPtrNext = Input(new RobPtr)
+    val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
+    val scommit = Input(UInt(log2Up(CommitWidth + 1).W))
+    val pendingld = Input(Bool())
+    val pendingst = Input(Bool())
+    val pendingVst = Input(Bool())
+    val commit = Input(Bool())
+    val pendingPtr = Input(new RobPtr)
+    val pendingPtrNext = Input(new RobPtr)
   }
 
   val isStoreException = Input(Bool())
@@ -124,6 +125,8 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
 
   val lsqio = new Bundle {
     val vaddr = Output(UInt(VAddrBits.W))
+    val vstart = Output(UInt((log2Up(VLEN) + 1).W))
+    val vl = Output(UInt((log2Up(VLEN) + 1).W))
     val gpaddr = Output(UInt(GPAddrBits.W))
     val mmio = Output(Vec(LoadPipelineWidth, Bool()))
     val uop = Output(Vec(LoadPipelineWidth, new DynInst))
@@ -147,6 +150,8 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
   val ldaIqFeedback = Vec(LduCnt, new MemRSFeedbackIO)
   val staIqFeedback = Vec(StaCnt, new MemRSFeedbackIO)
   val hyuIqFeedback = Vec(HyuCnt, new MemRSFeedbackIO)
+  val vstuIqFeedback= Vec(VstuCnt, new MemRSFeedbackIO(isVector = true))
+  val vlduIqFeedback= Vec(VlduCnt, new MemRSFeedbackIO(isVector = true))
   val ldCancel = Vec(backendParams.LdExuCnt, new LoadCancelIO)
   val wakeup = Vec(backendParams.LdExuCnt, Valid(new DynInst))
 
@@ -327,9 +332,16 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val hybridUnits = Seq.fill(HyuCnt)(Module(new HybridUnit)) // Todo: replace it with HybridUnit
   val stData = stdExeUnits.map(_.io.out)
   val exeUnits = loadUnits ++ storeUnits
-  val vlWrapper = Module(new VectorLoadWrapper)
-  val vsUopQueue = Module(new VsUopQueue)
-  val vsFlowQueue = Module(new VsFlowQueue)
+  // val vlWrapper = Module(new VectorLoadWrapper)
+  // val vsUopQueue = Module(new VsUopQueue)
+  // val vsFlowQueue = Module(new VsFlowQueue)
+
+  // The number of vector load/store units is decoupled with the number of load/store units
+  val vlSplit = Seq.fill(VlduCnt)(Module(new VLSplitImp))
+  val vsSplit = Seq.fill(VstuCnt)(Module(new VSSplitImp))
+  val vlMergeBuffer = Module(new VLMergeBufferImp)
+  val vsMergeBuffer = Seq.fill(VstuCnt)(Module(new VSMergeBufferImp))
+  val vSegmentUnit  = Module(new VSegmentUnit)
 
   val l1_pf_req = Wire(Decoupled(new L1PrefetchReq()))
   dcache.io.sms_agt_evict_req.ready := false.B
@@ -404,7 +416,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val ldaExeWbReqs = ldaOut +: loadUnits.tail.map(_.io.ldout)
   io.mem_to_ooo.writebackLda <> ldaExeWbReqs
   io.mem_to_ooo.writebackSta <> storeUnits.map(_.io.stout)
-  io.mem_to_ooo.writebackStd <> stdExeUnits.map(_.io.out)
+  io.mem_to_ooo.writebackStd.zip(stdExeUnits).foreach {x =>
+    x._1.bits  := x._2.io.out.bits
+    x._1.valid := x._2.io.out.fire
+  }
   io.mem_to_ooo.writebackHyuLda <> hybridUnits.map(_.io.ldout)
   io.mem_to_ooo.writebackHyuSta <> hybridUnits.map(_.io.stout)
   io.mem_to_ooo.otherFastWakeup := DontCare
@@ -638,7 +653,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val pmp = Module(new PMP())
   pmp.io.distribute_csr <> csrCtrl.distribute_csr
 
-  val pmp_check = VecInit(Seq.fill(DTlbSize)(Module(new PMPChecker(3)).io))
+  val pmp_check = VecInit(Seq.fill(DTlbSize)(Module(new PMPChecker(4)).io))
   for ((p,d) <- pmp_check zip dtlb_pmps) {
     p.apply(tlbcsr.priv.dmode, pmp.io.pmp, pmp.io.pma, d)
     require(p.req.bits.size.getWidth == d.bits.size.getWidth)
@@ -689,23 +704,28 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     io.mem_to_ooo.wakeup.drop(HyuCnt)(i) := loadUnits(i).io.wakeup
 
     // vector
-    if (i < VecLoadPipelineWidth) {
-      loadUnits(i).io.vecldin <> vlWrapper.io.pipeIssue(i)
-      vlWrapper.io.pipeReplay(i) <> loadUnits(i).io.vecReplay
-      vlWrapper.io.pipeResult(i) <> loadUnits(i).io.vecldout
+    if (i < VlduCnt) {
+      loadUnits(i).io.vecldout.ready := false.B
     } else {
       loadUnits(i).io.vecldin.valid := false.B
       loadUnits(i).io.vecldin.bits := DontCare
-      loadUnits(i).io.vecReplay.ready := false.B
       loadUnits(i).io.vecldout.ready := false.B
     }
-    loadUnits(i).io.vec_forward <> vsFlowQueue.io.forward(i)
 
     // fast replay
     loadUnits(i).io.fast_rep_in <> loadUnits(i).io.fast_rep_out
 
     // dcache access
     loadUnits(i).io.dcache <> dcache.io.lsu.load(i)
+    if(i == 0){
+      vSegmentUnit.io.rdcache := DontCare
+      dcache.io.lsu.load(i).req.valid := loadUnits(i).io.dcache.req.valid || vSegmentUnit.io.rdcache.req.valid
+      dcache.io.lsu.load(i).req.bits  := Mux1H(Seq(
+        vSegmentUnit.io.rdcache.req.valid -> vSegmentUnit.io.rdcache.req.bits,
+        loadUnits(i).io.dcache.req.valid -> loadUnits(i).io.dcache.req.bits
+      ))
+      vSegmentUnit.io.rdcache.req.ready := dcache.io.lsu.load(i).req.ready
+    }
     // forward
     loadUnits(i).io.lsq.forward <> lsq.io.forward(i)
     loadUnits(i).io.sbuffer <> sbuffer.io.forward(i)
@@ -719,6 +739,14 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   // loadUnits(i).io.refill           <> delayedDcacheRefill
     // dtlb
     loadUnits(i).io.tlb <> dtlb_reqs.take(LduCnt)(i)
+    if(i == 0 ){ // port 0 assign to vsegmentUnit
+      dtlb_reqs.take(LduCnt)(i).req.valid := loadUnits(i).io.tlb.req.valid || vSegmentUnit.io.dtlb.req.valid
+      vSegmentUnit.io.dtlb.req.ready      := dtlb_reqs.take(LduCnt)(i).req.ready
+      dtlb_reqs.take(LduCnt)(i).req.bits  := Mux1H(Seq(
+        vSegmentUnit.io.dtlb.req.valid -> vSegmentUnit.io.dtlb.req.bits,
+        loadUnits(i).io.tlb.req.valid -> loadUnits(i).io.tlb.req.bits
+      ))
+    }
     // pmp
     loadUnits(i).io.pmp <> pmp_check(i).resp
     // st-ld violation query
@@ -838,7 +866,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     hybridUnits(i).io.ldu_io.lsq.forward <> lsq.io.forward(LduCnt + i)
     // forward
     hybridUnits(i).io.ldu_io.sbuffer <> sbuffer.io.forward(LduCnt + i)
-    hybridUnits(i).io.ldu_io.vec_forward <> vsFlowQueue.io.forward(LduCnt + i)
+    // hybridUnits(i).io.ldu_io.vec_forward <> vsFlowQueue.io.forward(LduCnt + i)
+    hybridUnits(i).io.ldu_io.vec_forward := DontCare
     hybridUnits(i).io.ldu_io.tl_d_channel := dcache.io.lsu.forward_D(LduCnt + i)
     hybridUnits(i).io.ldu_io.forward_mshr <> dcache.io.lsu.forward_mshr(LduCnt + i)
     // ld-ld violation check
@@ -956,7 +985,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     //  Vector Store Port
     // ------------------------------------
     hybridUnits(i).io.vec_stu_io.isFirstIssue := true.B
-    lsq.io.sta.vecStoreAddrIn(i + StaCnt) <> hybridUnits(i).io.vec_stu_io.lsq
 
     // -------------------------
     // Store Triggers
@@ -1021,7 +1049,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stu.io.stin         <> io.ooo_to_mem.issueSta(i)
     stu.io.lsq          <> lsq.io.sta.storeAddrIn(i)
     stu.io.lsq_replenish <> lsq.io.sta.storeAddrInRe(i)
-    stu.io.lsq_vec       <> lsq.io.sta.vecStoreAddrIn(i)
     // dtlb
     stu.io.tlb          <> dtlb_st.head.requestor(i)
     stu.io.pmp          <> pmp_check(LduCnt + HyuCnt + 1 + i).resp
@@ -1036,7 +1063,33 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     lsq.io.sta.storeMaskIn(i) <> stu.io.st_mask_out
 
     // Lsq to std unit's rs
-    lsq.io.std.storeDataIn(i) := stData(i)
+    if(i < VstuCnt){
+      when (vsSplit(i).io.vstd.get.valid) {
+        lsq.io.std.storeDataIn(i).valid := true.B
+        lsq.io.std.storeDataIn(i).bits := vsSplit(i).io.vstd.get.bits
+        stData(i).ready := false.B
+      } .otherwise {
+        lsq.io.std.storeDataIn(i).valid := stData(i).valid
+        lsq.io.std.storeDataIn(i).bits.uop := stData(i).bits.uop
+        lsq.io.std.storeDataIn(i).bits.data := stData(i).bits.data
+        lsq.io.std.storeDataIn(i).bits.mask.map(_ := 0.U)
+        lsq.io.std.storeDataIn(i).bits.vdIdx.map(_ := 0.U)
+        lsq.io.std.storeDataIn(i).bits.vdIdxInField.map(_ := 0.U)
+        stData(i).ready := true.B
+      }
+    }
+    else{
+        lsq.io.std.storeDataIn(i).valid := stData(i).valid
+        lsq.io.std.storeDataIn(i).bits.uop := stData(i).bits.uop
+        lsq.io.std.storeDataIn(i).bits.data := stData(i).bits.data
+        lsq.io.std.storeDataIn(i).bits.mask.map(_ := 0.U)
+        lsq.io.std.storeDataIn(i).bits.vdIdx.map(_ := 0.U)
+        lsq.io.std.storeDataIn(i).bits.vdIdxInField.map(_ := 0.U)
+        stData(i).ready := true.B
+    }
+    lsq.io.std.storeDataIn.map(_.bits.debug := 0.U.asTypeOf(new DebugBundle))
+
+
 
     // store prefetch train
     l1PrefetcherOpt.foreach(pf => {
@@ -1066,12 +1119,13 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stu.io.stout.ready := true.B
 
     // vector
-    if (i < VecStorePipelineWidth) {
-      stu.io.vecstin <> vsFlowQueue.io.pipeIssue(i)
-      vsFlowQueue.io.pipeFeedback(i) <> stu.io.vec_feedback_slow
+    if (i < VstuCnt) {
+      stu.io.vecstin <> vsSplit(i).io.out
+      // vsFlowQueue.io.pipeFeedback(i) <> stu.io.vec_feedback_slow // need connect
     } else {
       stu.io.vecstin.valid := false.B
       stu.io.vecstin.bits := DontCare
+      stu.io.vecstout.ready := false.B
     }
     stu.io.vec_isFirstIssue := true.B // TODO
     // -------------------------
@@ -1103,6 +1157,13 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stOut(0).bits  := lsq.io.mmioStout.bits
     lsq.io.mmioStout.ready := true.B
   }
+  // vec mmio writeback
+  lsq.io.vecmmioStout.ready := false.B
+  when (lsq.io.vecmmioStout.valid && !storeUnits(0).io.vecstout.valid) {
+    stOut(0).valid := true.B
+    stOut(0).bits  := lsq.io.vecmmioStout.bits
+    lsq.io.vecmmioStout.ready := true.B
+  }
 
   when (atomicsUnit.io.out.valid) {
     // when atom inst writeback, surpress normal load trigger
@@ -1118,7 +1179,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   uncache.io.enableOutstanding := io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable
   uncache.io.hartId := io.hartId
   lsq.io.uncacheOutstanding := io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable
-  vsFlowQueue.io.uncacheOutstanding := io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable
 
   // Lsq
   io.mem_to_ooo.lsqio.mmio       := lsq.io.rob.mmio
@@ -1127,6 +1187,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   lsq.io.rob.scommit             := io.ooo_to_mem.lsqio.scommit
   lsq.io.rob.pendingld           := io.ooo_to_mem.lsqio.pendingld
   lsq.io.rob.pendingst           := io.ooo_to_mem.lsqio.pendingst
+  lsq.io.rob.pendingVst          := io.ooo_to_mem.lsqio.pendingVst
   lsq.io.rob.commit              := io.ooo_to_mem.lsqio.commit
   lsq.io.rob.pendingPtr          := io.ooo_to_mem.lsqio.pendingPtr
   lsq.io.rob.pendingPtrNext      := io.ooo_to_mem.lsqio.pendingPtrNext
@@ -1167,9 +1228,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   lsq.io.uncache.req.ready := false.B
   lsq.io.uncache.resp.valid := false.B
   lsq.io.uncache.resp.bits := DontCare
-  vsFlowQueue.io.uncache.req.ready := false.B
-  vsFlowQueue.io.uncache.resp.valid := false.B
-  vsFlowQueue.io.uncache.resp.bits := DontCare
 
   switch (uncacheState) {
     is (s_idle) {
@@ -1203,16 +1261,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   when (lsq.io.uncache.req.valid) {
     uncacheReq <> lsq.io.uncache.req
-  }.elsewhen (vsFlowQueue.io.uncache.req.valid) {
-    uncacheReq <> vsFlowQueue.io.uncache.req
   }
   when (io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable) {
     uncacheResp <> lsq.io.uncache.resp
   }.otherwise {
     when (uncacheState === s_scalar_uncache) {
       uncacheResp <> lsq.io.uncache.resp
-    }.elsewhen (uncacheState === s_vector_uncache) {
-      uncacheResp <> vsFlowQueue.io.uncache.resp
     }
   }
   // delay dcache refill for 1 cycle for better timing
@@ -1231,59 +1285,135 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   lsq.io.tl_d_channel <> dcache.io.lsu.tl_d_channel
 
   // LSQ to store buffer
-  // lsq.io.sbuffer        <> sbuffer.io.in
-  val sbReq = Seq(vsFlowQueue.io.sbuffer, lsq.io.sbuffer)
-  val sbReqValid = sbReq.map(_.head.valid)
-  sbuffer.io.in.zipWithIndex.foreach { case (in, i) =>
-    in.valid := ParallelPriorityMux(sbReqValid, sbReq.map(_(i).valid))
-    in.bits := ParallelPriorityMux(sbReqValid, sbReq.map(_(i).bits))
-  }
-  for (i <- 0 until sbuffer.io.in.length) {
-    for (j <- 0 until sbReq.length) {
-        sbReq(j)(i).ready := sbuffer.io.in(i).ready && (if (j == 0) true.B else !sbReqValid.take(j).reduce(_||_))
-    }
-  }
+  lsq.io.sbuffer        <> sbuffer.io.in
+  sbuffer.io.in(0).valid := lsq.io.sbuffer(0).valid || vSegmentUnit.io.sbuffer.valid
+  sbuffer.io.in(0).bits  := Mux1H(Seq(
+    vSegmentUnit.io.sbuffer.valid -> vSegmentUnit.io.sbuffer.bits,
+    lsq.io.sbuffer(0).valid       -> lsq.io.sbuffer(0).bits
+  ))
+  vSegmentUnit.io.sbuffer.ready := sbuffer.io.in(0).ready
   lsq.io.sqEmpty        <> sbuffer.io.sqempty
   dcache.io.force_write := lsq.io.force_write
-  lsq.io.vecStoreRetire <> vsFlowQueue.io.sqRelease
-  lsq.io.vecWriteback.valid := vlWrapper.io.uopWriteback.fire &&
-    vlWrapper.io.uopWriteback.bits.uop.vpu.lastUop
-  lsq.io.vecWriteback.bits := vlWrapper.io.uopWriteback.bits
+
+  // Initialize when unenabled difftest.
+  sbuffer.io.vecDifftestInfo    := DontCare
+  lsq.io.sbufferVecDifftestInfo := DontCare
+  if (env.EnableDifftest) {
+    lsq.io.sbufferVecDifftestInfo <> sbuffer.io.vecDifftestInfo
+  }
+
+  // lsq.io.vecStoreRetire <> vsFlowQueue.io.sqRelease
+  // lsq.io.vecWriteback.valid := vlWrapper.io.uopWriteback.fire &&
+  //   vlWrapper.io.uopWriteback.bits.uop.vpu.lastUop
+  // lsq.io.vecWriteback.bits := vlWrapper.io.uopWriteback.bits
 
   // vector
-  vlWrapper.io.redirect <> redirect
-  vsUopQueue.io.redirect <> redirect
-  vsFlowQueue.io.redirect <> redirect
-  // Vector loads/stores are only issued from port 0, and port 1 is idle.
-  // However, we still need two ports because loads and stores must writeback
-  // via different ports.
-  val vecIssuePort = io.ooo_to_mem.issueVldu.head
-  vlWrapper.io.loadRegIn.valid := vecIssuePort.valid && FuType.isVLoad(vecIssuePort.bits.uop.fuType)
-  vlWrapper.io.loadRegIn.bits := vecIssuePort.bits
-  vlWrapper.io.mmioReplay <> lsq.io.vecMMIOReplay
-  vsUopQueue.io.storeIn.valid := vecIssuePort.valid && FuType.isVStore(vecIssuePort.bits.uop.fuType)
-  vsUopQueue.io.storeIn.bits := vecIssuePort.bits
-  vecIssuePort.ready := vlWrapper.io.loadRegIn.ready && vsUopQueue.io.storeIn.ready
-  vsFlowQueue.io.flowIn <> vsUopQueue.io.flowIssue
-  vsUopQueue.io.flowWriteback <> vsFlowQueue.io.flowWriteback
-  vsFlowQueue.io.pipeIssue.drop(StaCnt).zip(hybridUnits.map(_.io.vec_stu_io.in)).foreach { case (a, b) => a <> b }
-  vsFlowQueue.io.pipeFeedback.drop(StaCnt).zip(hybridUnits.map(_.io.vec_stu_io.feedbackSlow)).foreach { case (a, b) => a <> b }
-  vsFlowQueue.io.rob.lcommit := io.ooo_to_mem.lsqio.lcommit
-  vsFlowQueue.io.rob.scommit := io.ooo_to_mem.lsqio.scommit
-  vsFlowQueue.io.rob.pendingld := io.ooo_to_mem.lsqio.pendingld
-  vsFlowQueue.io.rob.pendingst := io.ooo_to_mem.lsqio.pendingst
-  vsFlowQueue.io.rob.commit := io.ooo_to_mem.lsqio.commit
-  vsFlowQueue.io.rob.pendingPtr := io.ooo_to_mem.lsqio.pendingPtr
-  vsFlowQueue.io.rob.pendingPtrNext := io.ooo_to_mem.lsqio.pendingPtrNext
-  (0 until VecStorePipelineWidth).foreach(i => vsFlowQueue.io.lsq(i) <> lsq.io.sta.vecStoreFlowAddrIn(i))
-  lsq.io.sta.vecStoreFlowAddrIn.drop(VecStorePipelineWidth).foreach { x => x.valid := false.B; x.bits := DontCare }
-  io.mem_to_ooo.writebackVldu.head.valid := vlWrapper.io.uopWriteback.valid || vsUopQueue.io.uopWriteback.valid
-  io.mem_to_ooo.writebackVldu.head.bits := Mux1H(Seq(
-    vlWrapper.io.uopWriteback.valid -> vlWrapper.io.uopWriteback.bits,
-    vsUopQueue.io.uopWriteback.valid -> vsUopQueue.io.uopWriteback.bits,
-  ))
-  vlWrapper.io.uopWriteback.ready := io.mem_to_ooo.writebackVldu.head.ready
-  vsUopQueue.io.uopWriteback.ready := io.mem_to_ooo.writebackVldu.head.ready
+  val vLsuCanaccept = (0 until VlduCnt).map(
+    i => vsSplit(i).io.in.ready && vlSplit(i).io.in.ready
+  )
+  val isSegment     = (io.ooo_to_mem.issueVldu.head.bits.uop.vpu.nf =/= 0.U) &&
+                    !(io.ooo_to_mem.issueVldu.head.bits.uop.fuOpType === VlduType.vlr || io.ooo_to_mem.issueVldu.head.bits.uop.fuOpType === VstuType.vsr)
+
+  // init port
+  /**
+   * TODO: splited vsMergebuffer maybe remove, if one RS can accept two feedback, or don't need RS replay uop
+   * for now:
+   *  RS0 -> VsSplit0 -> stu0 -> vsMergebuffer0 -> feedback -> RS0
+   *  RS1 -> VsSplit1 -> stu1 -> vsMergebuffer1 -> feedback -> RS1
+   *
+   * vector load don't need feedback
+   *
+   *  RS0 -> VlSplit0  -> ldu0 -> |
+   *  RS1 -> VlSplit1  -> ldu1 -> |  -> vlMergebuffer
+   *        replayIO   -> ldu3 -> |
+   * */
+  (0 until VstuCnt).foreach{i =>
+    vsMergeBuffer(i).io.fromPipeline := DontCare
+    vsMergeBuffer(i).io.fromSplit := DontCare
+  }
+
+  (0 until VstuCnt).foreach{i =>
+    vsSplit(i).io.redirect <> redirect
+    vsSplit(i).io.in <> io.ooo_to_mem.issueVldu(i)
+    vsSplit(i).io.in.valid := io.ooo_to_mem.issueVldu(i).valid && LSUOpType.isVecSt(io.ooo_to_mem.issueVldu(i).bits.uop.fuOpType) &&
+                              vLsuCanaccept(i) && !isSegment
+    vsSplit(i).io.toMergeBuffer <> vsMergeBuffer(i).io.fromSplit.head
+    vsSplit(i).io.out <> storeUnits(i).io.vecstin // Todo: May be some balance mechanism is needed
+    vsSplit(i).io.vstd.get := DontCare // Todo: Discuss how to pass vector store data
+
+  }
+  (0 until VlduCnt).foreach{i =>
+    vlSplit(i).io.redirect <> redirect
+    vlSplit(i).io.in <> io.ooo_to_mem.issueVldu(i)
+    vlSplit(i).io.in.valid := io.ooo_to_mem.issueVldu(i).valid && LSUOpType.isVecLd(io.ooo_to_mem.issueVldu(i).bits.uop.fuOpType) &&
+                              vLsuCanaccept(i) && !isSegment
+    vlSplit(i).io.toMergeBuffer <> vlMergeBuffer.io.fromSplit(i)
+    vlSplit(i).io.out <> loadUnits(i).io.vecldin // Todo: May be some balance mechanism is needed
+
+  }
+  (0 until LduCnt).foreach{i=>
+    vlMergeBuffer.io.fromPipeline(i) <> loadUnits(i).io.vecldout
+  }
+  (0 until VstuCnt).foreach{i=>
+    vsMergeBuffer(i).io.fromPipeline.head <> storeUnits(i).io.vecstout
+  }
+
+  (0 until VlduCnt).foreach{i=>
+    io.ooo_to_mem.issueVldu(i).ready := vLsuCanaccept(i) || isSegment // segment uop always enqueue
+  }
+
+  vlMergeBuffer.io.redirect <> redirect
+  vsMergeBuffer.map(_.io.redirect <> redirect)
+  (0 until VlduCnt).foreach{i=>
+    vlMergeBuffer.io.toLsq(i) <> lsq.io.ldvecFeedback(i)
+  }
+  (0 until VstuCnt).foreach{i=>
+    vsMergeBuffer(i).io.toLsq.head <> lsq.io.stvecFeedback(i)
+  }
+
+  (0 until VlduCnt).foreach{i=>
+    // send to RS
+    vlMergeBuffer.io.feedback(i) <> io.mem_to_ooo.vlduIqFeedback(i).feedbackSlow
+    io.mem_to_ooo.vlduIqFeedback(i).feedbackFast := DontCare
+  }
+  (0 until VstuCnt).foreach{i =>
+    // send to RS
+    if(i == 0){
+      io.mem_to_ooo.vstuIqFeedback(i).feedbackSlow.valid := vsMergeBuffer(i).io.feedback.head.valid || vSegmentUnit.io.feedback.valid
+      io.mem_to_ooo.vstuIqFeedback(i).feedbackSlow.bits := Mux1H(Seq(
+        vSegmentUnit.io.feedback.valid -> vSegmentUnit.io.feedback.bits,
+        vsMergeBuffer(i).io.feedback.head.valid ->  vsMergeBuffer(i).io.feedback.head.bits
+      ))
+      io.mem_to_ooo.vstuIqFeedback(i).feedbackFast := DontCare
+    }
+    else {
+      vsMergeBuffer(i).io.feedback.head <> io.mem_to_ooo.vstuIqFeedback(i).feedbackSlow
+      io.mem_to_ooo.vstuIqFeedback(i).feedbackFast := DontCare
+    }
+  }
+
+  (0 until VlduCnt).foreach{i=>
+    if(i == 0){ // for segmentUnit, segmentUnit use port0 writeback
+      io.mem_to_ooo.writebackVldu(i).valid := vlMergeBuffer.io.uopWriteback(i).valid || vsMergeBuffer(i).io.uopWriteback.head.valid || vSegmentUnit.io.uopwriteback.valid
+      io.mem_to_ooo.writebackVldu(i).bits := Mux1H(Seq(
+        vSegmentUnit.io.uopwriteback.valid          -> vSegmentUnit.io.uopwriteback.bits,
+        vlMergeBuffer.io.uopWriteback(i).valid      -> vlMergeBuffer.io.uopWriteback(i).bits,
+        vsMergeBuffer(i).io.uopWriteback.head.valid -> vsMergeBuffer(i).io.uopWriteback.head.bits,
+      ))
+      vlMergeBuffer.io.uopWriteback(i).ready := io.mem_to_ooo.writebackVldu(i).ready && !vSegmentUnit.io.uopwriteback.valid
+      vsMergeBuffer(i).io.uopWriteback.head.ready := io.mem_to_ooo.writebackVldu(i).ready && !vlMergeBuffer.io.uopWriteback(i).valid && !vSegmentUnit.io.uopwriteback.valid
+      vSegmentUnit.io.uopwriteback.ready := io.mem_to_ooo.writebackVldu(i).ready
+    }
+    else {
+      io.mem_to_ooo.writebackVldu(i).valid := vlMergeBuffer.io.uopWriteback(i).valid || vsMergeBuffer(i).io.uopWriteback.head.valid
+      io.mem_to_ooo.writebackVldu(i).bits := Mux1H(Seq(
+        vlMergeBuffer.io.uopWriteback(i).valid -> vlMergeBuffer.io.uopWriteback(i).bits,
+        vsMergeBuffer(i).io.uopWriteback.head.valid -> vsMergeBuffer(i).io.uopWriteback.head.bits,
+      ))
+      vlMergeBuffer.io.uopWriteback(i).ready := io.mem_to_ooo.writebackVldu(i).ready
+      vsMergeBuffer(i).io.uopWriteback.head.ready := io.mem_to_ooo.writebackVldu(i).ready && !vlMergeBuffer.io.uopWriteback(i).valid
+    }
+  }
 
   // Sbuffer
   sbuffer.io.csrCtrl    <> csrCtrl
@@ -1292,7 +1422,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   sbuffer.io.force_write <> lsq.io.force_write
   // flush sbuffer
   val fenceFlush = io.ooo_to_mem.flushSb
-  val atomicsFlush = atomicsUnit.io.flush_sbuffer.valid
+  val atomicsFlush = atomicsUnit.io.flush_sbuffer.valid || vSegmentUnit.io.flush_sbuffer.valid
   val stIsEmpty = sbuffer.io.flush.empty && uncache.io.flush.empty
   io.mem_to_ooo.sbIsEmpty := RegNext(stIsEmpty)
 
@@ -1386,7 +1516,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
 
   lsq.io.exceptionAddr.isStore := io.ooo_to_mem.isStoreException
-  vsFlowQueue.io.exceptionAddr.isStore := io.ooo_to_mem.isStoreException
   // Exception address is used several cycles after flush.
   // We delay it by 10 cycles to ensure its flush safety.
   val atomicsException = RegInit(false.B)
@@ -1400,12 +1529,15 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.mem_to_ooo.lsqio.vaddr := GatedRegNext(Mux(
     atomicsException,
     atomicsExceptionAddress,
-    Mux(
-      io.ooo_to_mem.isVlsException && io.ooo_to_mem.isStoreException,
-      vsFlowQueue.io.exceptionAddr.vaddr,
-      lsq.io.exceptionAddr.vaddr
-    )
+    lsq.io.exceptionAddr.vaddr
+    // Mux(
+    //   io.ooo_to_mem.isVlsException && io.ooo_to_mem.isStoreException,
+    //   vsFlowQueue.io.exceptionAddr.vaddr,
+    //   lsq.io.exceptionAddr.vaddr
+    // )
   ))
+  io.mem_to_ooo.lsqio.vstart := RegNext(lsq.io.exceptionAddr.vstart)
+  io.mem_to_ooo.lsqio.vl     := RegNext(lsq.io.exceptionAddr.vl)
 
   io.mem_to_ooo.writeBack.map(wb => {
     wb.bits.uop.trigger.frontendHit := 0.U(TriggerNum.W).asBools
@@ -1431,7 +1563,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.outer_l2_pf_enable := io.inner_l2_pf_enable
   // io.inner_hc_perfEvents <> io.outer_hc_perfEvents
 
-  if (p(DebugOptionsKey).FPGAPlatform) {
+  if (p(DebugOptionsKey).ResetGen) {
     val resetTree = ResetGenNode(
       Seq(
         CellNode(reset_io_frontend),
@@ -1442,11 +1574,21 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
         ModuleNode(ptw_to_l2_buffer)
       )
     )
-    ResetGen(resetTree, reset, !p(DebugOptionsKey).FPGAPlatform)
+    ResetGen(resetTree, reset, !p(DebugOptionsKey).ResetGen)
   } else {
     reset_io_frontend := DontCare
     reset_io_backend := DontCare
   }
+  // vector segmentUnit
+  vSegmentUnit.io.in.bits <> io.ooo_to_mem.issueVldu.head.bits
+  vSegmentUnit.io.in.valid := isSegment && io.ooo_to_mem.issueVldu.head.valid// is segment instruction
+  vSegmentUnit.io.dtlb.resp.bits <> dtlb_reqs.take(LduCnt).head.resp.bits
+  vSegmentUnit.io.dtlb.resp.valid <> dtlb_reqs.take(LduCnt).head.resp.valid
+  vSegmentUnit.io.pmpResp <> pmp_check.head.resp
+  vSegmentUnit.io.flush_sbuffer.empty := stIsEmpty
+  vSegmentUnit.io.redirect <> io.redirect
+  vSegmentUnit.io.rdcache.resp.bits := dcache.io.lsu.load(0).resp.bits
+  vSegmentUnit.io.rdcache.resp.valid := dcache.io.lsu.load(0).resp.valid
 
   // top-down info
   dcache.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr

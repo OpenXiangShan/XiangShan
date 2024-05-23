@@ -3,14 +3,15 @@ package xiangshan.backend.issue
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.{MathUtils, OptionWrapper}
+import utils.{MathUtils, OptionWrapper, XSError}
 import utility.HasCircularQueuePtrHelper
 import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.FuType
+import xiangshan.backend.fu.vector.Bundles.NumLsElem
 import xiangshan.backend.rob.RobPtr
-import xiangshan.mem.{MemWaitUpdateReq, SqPtr, LqPtr}
+import xiangshan.mem.{LqPtr, MemWaitUpdateReq, SqPtr}
 
 object EntryBundles extends HasCircularQueuePtrHelper {
 
@@ -56,6 +57,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
   class StatusVecMemPart(implicit p:Parameters, params: IssueBlockParams) extends Bundle {
     val sqIdx                 = new SqPtr
     val lqIdx                 = new LqPtr
+    val numLsElem             = NumLsElem()
   }
 
   class EntryDeqRespBundle(implicit p: Parameters, params: IssueBlockParams) extends Bundle {
@@ -93,6 +95,9 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     //wakeup
     val wakeUpFromWB: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
     val wakeUpFromIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
+    // vl
+    val vlIsZero              = Input(Bool())
+    val vlIsVlmax             = Input(Bool())
     //cancel
     val og0Cancel             = Input(ExuOH(backendParams.numExu))
     val og1Cancel             = Input(ExuOH(backendParams.numExu))
@@ -148,6 +153,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val deqSuccess            = Bool()
     val srcWakeup             = Vec(params.numRegSrc, Bool())
     val srcWakeupByWB         = Vec(params.numRegSrc, Bool())
+    val vlWakeupByWb          = Bool()
     val srcCancelVec          = Vec(params.numRegSrc, Bool())
     val srcLoadCancelVec      = Vec(params.numRegSrc, Bool())
     val srcLoadDependencyNext = Vec(params.numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
@@ -174,6 +180,12 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       common.validRegNext     := Mux(commonIn.enq.valid && common.enqReady, true.B, Mux(common.clear, false.B, validReg))
     } else {
       common.validRegNext     := Mux(commonIn.enq.valid, true.B, Mux(common.clear, false.B, validReg))
+    }
+    if (params.numRegSrc == 5) {
+      // only when numRegSrc == 5 need vl
+      common.vlWakeupByWb     := common.srcWakeupByWB(4)
+    } else {
+      common.vlWakeupByWb     := false.B
     }
   }
 
@@ -242,9 +254,34 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       val wakeupByIQ = hasIQWakeupGet.srcWakeupByIQ(srcIdx).asUInt.orR
       val wakeupByIQOH = hasIQWakeupGet.srcWakeupByIQ(srcIdx)
       val wakeup = common.srcWakeup(srcIdx)
+
+      val ignoreOldVd = Wire(Bool())
+      val vlWakeUpByWb = common.vlWakeupByWb
+      val isDependOldvd = entryReg.payload.vpu.isDependOldvd
+      val isWritePartVd = entryReg.payload.vpu.isWritePartVd
+      val vta = entryReg.payload.vpu.vta
+      val vma = entryReg.payload.vpu.vma
+      val vm = entryReg.payload.vpu.vm
+      val vlIsZero = commonIn.vlIsZero
+      val vlIsVlmax = commonIn.vlIsVlmax
+      val ignoreTail = vlIsVlmax && (vm =/= 0.U || vma) && !isWritePartVd
+      val ignoreWhole = !vlIsVlmax && (vm =/= 0.U || vma) && vta
+      val srcIsVec = SrcType.isVp(srcStatus.srcType)
+      if (params.numVfSrc > 0 && srcIdx == 2) {
+        /**
+          * the src store the old vd, update it when vl is write back
+          * 1. when the instruction depend on old vd, we cannot set the srctype to imm, we will update the method of uop split to avoid this situation soon
+          * 2. when vl = 0, we cannot set the srctype to imm because the vd keep the old value
+          * 3. when vl = vlmax, we can set srctype to imm when vta is not set
+          */
+        ignoreOldVd := srcIsVec && vlWakeUpByWb && !isDependOldvd && !vlIsZero && (ignoreTail || ignoreWhole)
+      } else {
+        ignoreOldVd := false.B
+      }
+
       srcStatusNext.psrc                              := srcStatus.psrc
-      srcStatusNext.srcType                           := srcStatus.srcType
-      srcStatusNext.srcState                          := Mux(cancel, false.B, wakeup | srcStatus.srcState)
+      srcStatusNext.srcType                           := Mux(ignoreOldVd, SrcType.no, srcStatus.srcType)
+      srcStatusNext.srcState                          := Mux(cancel, false.B, wakeup | srcStatus.srcState | ignoreOldVd)
       srcStatusNext.dataSources.value                 := (if (params.inVfSchd && params.readVfRf && params.hasIQWakeUp) {
                                                             // Vf / Mem -> Vf
                                                             val isWakeupByMemIQ = wakeupByIQOH.zip(commonIn.wakeUpFromIQ).filter(_._2.bits.params.isMemExeUnit).map(_._1).fold(false.B)(_ || _)
@@ -390,13 +427,8 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val vecMemStatusUpdate                             = entryUpdate.status.vecMem.get
     vecMemStatusUpdate                                := vecMemStatus
 
-    val isLsqHead = {
-      entryReg.status.vecMem.get.lqIdx <= fromLsq.lqDeqPtr &&
-      entryReg.status.vecMem.get.sqIdx <= fromLsq.sqDeqPtr
-    }
-
     // update blocked
-    entryUpdate.status.blocked                        := !isLsqHead
+    entryUpdate.status.blocked                        := false.B
   }
 
   def ExuOHGen(exuOH: Vec[Bool], wakeupByIQOH: Vec[Bool], regSrcExuOH: Vec[Bool])(implicit p: Parameters, params: IssueBlockParams) = {

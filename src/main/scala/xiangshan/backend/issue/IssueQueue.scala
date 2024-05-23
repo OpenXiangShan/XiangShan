@@ -4,7 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import utility.{GTimer, HasCircularQueuePtrHelper, SelectOne, GatedValidRegNext}
+import utility.{GTimer, GatedValidRegNext, HasCircularQueuePtrHelper, SelectOne}
 import utils._
 import xiangshan._
 import xiangshan.backend.Bundles._
@@ -13,9 +13,10 @@ import xiangshan.backend.decode.{ImmUnion, Imm_LUI_LOAD}
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.{FuConfig, FuType}
-import xiangshan.mem.{MemWaitUpdateReq, SqPtr, LqPtr}
+import xiangshan.mem.{LqPtr, MemWaitUpdateReq, SqPtr}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.datapath.NewPipelineConnect
+import xiangshan.backend.fu.vector.Bundles.VSew
 
 class IssueQueue(params: IssueBlockParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
@@ -23,6 +24,7 @@ class IssueQueue(params: IssueBlockParams)(implicit p: Parameters) extends LazyM
   implicit val iqParams = params
   lazy val module: IssueQueueImp = iqParams.schdType match {
     case IntScheduler() => new IssueQueueIntImp(this)
+    case FpScheduler() => new IssueQueueFpImp(this)
     case VfScheduler() => new IssueQueueVfImp(this)
     case MemScheduler() =>
       if (iqParams.StdCnt == 0 && !iqParams.isVecMemIQ) new IssueQueueMemAddrImp(this)
@@ -51,10 +53,13 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val og2Resp = OptionWrapper(params.inVfSchd, Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle))))
   val finalIssueResp = OptionWrapper(params.LdExuCnt > 0, Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle))))
   val memAddrIssueResp = OptionWrapper(params.LdExuCnt > 0, Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle))))
+  val vecLoadIssueResp = OptionWrapper(params.VlduCnt > 0, Vec(params.numDeq, Flipped(ValidIO(new IssueQueueDeqRespBundle))))
   val wbBusyTableRead = Input(params.genWbFuBusyTableReadBundle())
   val wbBusyTableWrite = Output(params.genWbFuBusyTableWriteBundle())
   val wakeupFromWB: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
   val wakeupFromIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
+  val vlIsZero = Input(Bool())
+  val vlIsVlmax = Input(Bool())
   val og0Cancel = Input(ExuOH(backendParams.numExu))
   val og1Cancel = Input(ExuOH(backendParams.numExu))
   val ldCancel = Vec(backendParams.LduCnt + backendParams.HyuCnt, Flipped(new LoadCancelIO))
@@ -103,6 +108,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val fuBusyTableRead = params.exuBlockParams.map { case x => OptionWrapper(x.latencyValMax > 0, Module(new FuBusyTableRead(x.fuLatencyMap))) }
   val intWbBusyTableWrite = params.exuBlockParams.map { case x => OptionWrapper(x.intLatencyCertain, Module(new FuBusyTableWrite(x.intFuLatencyMap))) }
   val intWbBusyTableRead = params.exuBlockParams.map { case x => OptionWrapper(x.intLatencyCertain, Module(new FuBusyTableRead(x.intFuLatencyMap))) }
+  val fpWbBusyTableWrite = params.exuBlockParams.map { case x => OptionWrapper(x.fpLatencyCertain, Module(new FuBusyTableWrite(x.fpFuLatencyMap))) }
+  val fpWbBusyTableRead = params.exuBlockParams.map { case x => OptionWrapper(x.fpLatencyCertain, Module(new FuBusyTableRead(x.fpFuLatencyMap))) }
   val vfWbBusyTableWrite = params.exuBlockParams.map { case x => OptionWrapper(x.vfLatencyCertain, Module(new FuBusyTableWrite(x.vfFuLatencyMap))) }
   val vfWbBusyTableRead = params.exuBlockParams.map { case x => OptionWrapper(x.vfLatencyCertain, Module(new FuBusyTableRead(x.vfFuLatencyMap))) }
 
@@ -165,13 +172,17 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val deqBeforeDly = Wire(params.genIssueDecoupledBundle)
 
   val intWbBusyTableIn = io.wbBusyTableRead.map(_.intWbBusyTable)
+  val fpWbBusyTableIn = io.wbBusyTableRead.map(_.fpWbBusyTable)
   val vfWbBusyTableIn = io.wbBusyTableRead.map(_.vfWbBusyTable)
   val intWbBusyTableOut = io.wbBusyTableWrite.map(_.intWbBusyTable)
+  val fpWbBusyTableOut = io.wbBusyTableWrite.map(_.fpWbBusyTable)
   val vfWbBusyTableOut = io.wbBusyTableWrite.map(_.vfWbBusyTable)
   val intDeqRespSetOut = io.wbBusyTableWrite.map(_.intDeqRespSet)
+  val fpDeqRespSetOut = io.wbBusyTableWrite.map(_.fpDeqRespSet)
   val vfDeqRespSetOut = io.wbBusyTableWrite.map(_.vfDeqRespSet)
   val fuBusyTableMask = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
   val intWbBusyTableMask = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
+  val fpWbBusyTableMask = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
   val vfWbBusyTableMask = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
   val s0_enqValidVec = io.enq.map(_.valid)
   val s0_enqSelValidVec = Wire(Vec(params.numEnq, Bool()))
@@ -225,7 +236,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   // when vf exu (with og2) wake up int/mem iq (without og2), the wakeup signals should delay 1 cycle
   // as vf exu's min latency is 1, we do not need consider og0cancel
   val wakeupFromIQ = Wire(chiselTypeOf(io.wakeupFromIQ))
-  wakeupFromIQ.zip(io.wakeupFromIQ).foreach { case (w, w_src) => 
+  wakeupFromIQ.zip(io.wakeupFromIQ).foreach { case (w, w_src) =>
     if (!params.inVfSchd && params.readVfRf && params.hasWakeupFromVf && w_src.bits.params.isVfExeUnit) {
       val noCancel = !LoadShouldCancel(Some(w_src.bits.loadDependency), io.ldCancel)
       w := RegNext(Mux(noCancel, w_src, 0.U.asTypeOf(w)))
@@ -286,6 +297,11 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         memAddrIssueResp                                        := io.memAddrIssueResp.get(i)
       }
     }
+    if (params.isVecLduIQ) {
+      entriesIO.vecLdIn.get.resp.zipWithIndex.foreach { case (resp, i) =>
+        resp                                                    := io.vecLoadIssueResp.get(i)
+      }
+    }
     for(deqIdx <- 0 until params.numDeq) {
       entriesIO.deqReady(deqIdx)                                := deqBeforeDly(deqIdx).ready
       entriesIO.deqSelOH(deqIdx).valid                          := deqSelValidVec(deqIdx)
@@ -299,6 +315,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     }
     entriesIO.wakeUpFromWB                                      := io.wakeupFromWB
     entriesIO.wakeUpFromIQ                                      := wakeupFromIQ
+    entriesIO.vlIsZero                                          := io.vlIsZero
+    entriesIO.vlIsVlmax                                         := io.vlIsVlmax
     entriesIO.og0Cancel                                         := io.og0Cancel
     entriesIO.og1Cancel                                         := io.og1Cancel
     entriesIO.ldCancel                                          := io.ldCancel
@@ -340,9 +358,13 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       if (intWbBusyTableRead(i).nonEmpty) mergeFuBusy & (~intWbBusyTableMask(i))
       else mergeFuBusy
     }
-    val mergeVfWbBusy = {
-      if (vfWbBusyTableRead(i).nonEmpty) mergeIntWbBusy & (~vfWbBusyTableMask(i))
+    val mergefpWbBusy = {
+      if (fpWbBusyTableRead(i).nonEmpty) mergeIntWbBusy & (~fpWbBusyTableMask(i))
       else mergeIntWbBusy
+    }
+    val mergeVfWbBusy = {
+      if (vfWbBusyTableRead(i).nonEmpty) mergefpWbBusy & (~vfWbBusyTableMask(i))
+      else mergefpWbBusy
     }
     merge := mergeVfWbBusy
   }
@@ -524,6 +546,19 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     }
   }
 
+  fpWbBusyTableWrite.zip(fpWbBusyTableOut).zip(fpDeqRespSetOut).zipWithIndex.foreach { case (((busyTableWrite: Option[FuBusyTableWrite], busyTable: Option[UInt]), deqResp), i) =>
+    if (busyTableWrite.nonEmpty) {
+      val btwr = busyTableWrite.get
+      val bt = busyTable.get
+      val dq = deqResp.get
+      btwr.io.in.deqResp := toBusyTableDeqResp(i)
+      btwr.io.in.og0Resp := io.og0Resp(i)
+      btwr.io.in.og1Resp := io.og1Resp(i)
+      bt := btwr.io.out.fuBusyTable
+      dq := btwr.io.out.deqRespSet
+    }
+  }
+
   vfWbBusyTableWrite.zip(vfWbBusyTableOut).zip(vfDeqRespSetOut).zipWithIndex.foreach { case (((busyTableWrite: Option[FuBusyTableWrite], busyTable: Option[UInt]), deqResp), i) =>
     if (busyTableWrite.nonEmpty) {
       val btwr = busyTableWrite.get
@@ -548,6 +583,18 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     }
     else {
       intWbBusyTableMask(i) := 0.U(params.numEntries.W)
+    }
+  }
+  fpWbBusyTableRead.zip(fpWbBusyTableIn).zipWithIndex.foreach { case ((busyTableRead: Option[FuBusyTableRead], busyTable: Option[UInt]), i) =>
+    if (busyTableRead.nonEmpty) {
+      val btrd = busyTableRead.get
+      val bt = busyTable.get
+      btrd.io.in.fuBusyTable := bt
+      btrd.io.in.fuTypeRegVec := fuTypeVec
+      fpWbBusyTableMask(i) := btrd.io.out.fuBusyTableMask
+    }
+    else {
+      fpWbBusyTableMask(i) := 0.U(params.numEntries.W)
     }
   }
   vfWbBusyTableRead.zip(vfWbBusyTableIn).zipWithIndex.foreach { case ((busyTableRead: Option[FuBusyTableRead], busyTable: Option[UInt]), i) =>
@@ -595,9 +642,9 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
 
     require(deq.bits.common.dataSources.size <= finalDataSources(i).size)
     deq.bits.common.dataSources.zip(finalDataSources(i)).foreach { case (sink, source) => sink := source}
-    deq.bits.common.l1ExuOH.foreach(_ := finalWakeUpL1ExuOH.get(i))
+    deq.bits.common.l1ExuOH.foreach(_.zip(finalWakeUpL1ExuOH.get(i)).foreach { case (sink, source) => sink := source})
     deq.bits.common.srcTimer.foreach(_ := DontCare)
-    deq.bits.common.loadDependency.foreach(_ := finalLoadDependency(i))
+    deq.bits.common.loadDependency.foreach(_.zip(finalLoadDependency(i)).foreach { case (sink, source) => sink := source})
     deq.bits.common.src := DontCare
     deq.bits.common.preDecode.foreach(_ := deqEntryVec(i).bits.payload.preDecodeInfo)
 
@@ -850,8 +897,19 @@ class IssueQueueVfImp(override val wrapper: IssueQueue)(implicit p: Parameters, 
   }}
 }
 
+class IssueQueueFpImp(override val wrapper: IssueQueue)(implicit p: Parameters, iqParams: IssueBlockParams)
+  extends IssueQueueImp(wrapper)
+{
+  deqBeforeDly.zipWithIndex.foreach{ case (deq, i) => {
+    deq.bits.common.fpu.foreach(_ := deqEntryVec(i).bits.payload.fpu)
+    deq.bits.common.vpu.foreach(_ := deqEntryVec(i).bits.payload.vpu)
+    deq.bits.common.vpu.foreach(_.vuopIdx := deqEntryVec(i).bits.payload.uopIdx)
+    deq.bits.common.vpu.foreach(_.lastUop := deqEntryVec(i).bits.payload.lastUop)
+  }}
+}
+
 class IssueQueueMemBundle(implicit p: Parameters, params: IssueBlockParams) extends Bundle {
-  val feedbackIO = Flipped(Vec(params.numDeq, new MemRSFeedbackIO))
+  val feedbackIO = Flipped(Vec(params.numDeq, new MemRSFeedbackIO(params.isVecMemIQ)))
 
   // TODO: is still needed?
   val checkWait = new Bundle {
@@ -972,13 +1030,9 @@ class IssueQueueVecMemImp(override val wrapper: IssueQueue)(implicit p: Paramete
     entries.io.enq(i).bits.status match { case enqData =>
       enqData.vecMem.get.sqIdx := s0_enqBits(i).sqIdx
       enqData.vecMem.get.lqIdx := s0_enqBits(i).lqIdx
-
-      // update blocked
-      val isLsqHead = {
-        s0_enqBits(i).lqIdx <= memIO.lqDeqPtr.get &&
-        s0_enqBits(i).sqIdx <= memIO.sqDeqPtr.get
-      }
-      enqData.blocked          := !isLsqHead
+      // MemAddrIQ also handle vector insts
+      enqData.vecMem.get.numLsElem := s0_enqBits(i).numLsElem
+      enqData.blocked          := false.B
     }
   }
 
@@ -987,7 +1041,7 @@ class IssueQueueVecMemImp(override val wrapper: IssueQueue)(implicit p: Paramete
     slowResp.bits.robIdx           := memIO.feedbackIO(i).feedbackSlow.bits.robIdx
     slowResp.bits.resp             := Mux(memIO.feedbackIO(i).feedbackSlow.bits.hit, RespType.success, RespType.block)
     slowResp.bits.fuType           := DontCare
-    slowResp.bits.uopIdx.get       := 0.U // Todo
+    slowResp.bits.uopIdx.get       := memIO.feedbackIO(i).feedbackSlow.bits.uopIdx.get
   }
 
   entries.io.fromMem.get.fastResp.zipWithIndex.foreach { case (fastResp, i) =>
@@ -995,16 +1049,17 @@ class IssueQueueVecMemImp(override val wrapper: IssueQueue)(implicit p: Paramete
     fastResp.bits.robIdx           := memIO.feedbackIO(i).feedbackFast.bits.robIdx
     fastResp.bits.resp             := Mux(memIO.feedbackIO(i).feedbackFast.bits.hit, RespType.success, RespType.block)
     fastResp.bits.fuType           := DontCare
-    fastResp.bits.uopIdx.get       := 0.U // Todo
+    fastResp.bits.uopIdx.get       := memIO.feedbackIO(i).feedbackFast.bits.uopIdx.get
   }
 
   entries.io.vecMemIn.get.sqDeqPtr := memIO.sqDeqPtr.get
   entries.io.vecMemIn.get.lqDeqPtr := memIO.lqDeqPtr.get
 
-
   deqBeforeDly.zipWithIndex.foreach { case (deq, i) =>
     deq.bits.common.sqIdx.foreach(_ := deqEntryVec(i).bits.status.vecMem.get.sqIdx)
     deq.bits.common.lqIdx.foreach(_ := deqEntryVec(i).bits.status.vecMem.get.lqIdx)
+    deq.bits.common.numLsElem.get := deqEntryVec(i).bits.status.vecMem.get.numLsElem
+    deq.bits.common.numLsElem.foreach(_ := deqEntryVec(i).bits.status.vecMem.get.numLsElem)
     if (params.isVecLduIQ) {
       deq.bits.common.ftqIdx.get := deqEntryVec(i).bits.payload.ftqPtr
       deq.bits.common.ftqOffset.get := deqEntryVec(i).bits.payload.ftqOffset
@@ -1014,4 +1069,6 @@ class IssueQueueVecMemImp(override val wrapper: IssueQueue)(implicit p: Paramete
     deq.bits.common.vpu.foreach(_.vuopIdx := deqEntryVec(i).bits.payload.uopIdx)
     deq.bits.common.vpu.foreach(_.lastUop := deqEntryVec(i).bits.payload.lastUop)
   }
+
+  io.vecLoadIssueResp.foreach(dontTouch(_))
 }

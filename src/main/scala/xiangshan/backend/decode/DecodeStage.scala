@@ -132,7 +132,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   // block vector inst when vtype is resuming
   val hasVectorInst = VecInit(decoders.map(x => FuType.FuTypeOrR(x.io.deq.decodedInst.fuType, FuType.vecArithOrMem ++ FuType.vecVSET))).asUInt.orR
 
-  canAccept := !io.redirect && io.out.head.ready && decoderComp.io.in.ready && !io.isResumeVType
+  canAccept := !io.redirect && (io.out.head.ready || decoderComp.io.in.ready) && !io.isResumeVType
 
   io.canAccept := canAccept
 

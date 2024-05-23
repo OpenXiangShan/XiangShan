@@ -555,7 +555,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   io.tlb.resp.bits.data.s2 := ptwResp.s2
   io.tlb.resp.bits.data.memidx := memidx(OHToUInt(ptwResp_OldMatchVec))
   io.tlb.resp.bits.vector := resp_vector
-  io.tlb.resp.bits.data.getGpa := getGpa(OHToUInt(ptwResp_OldMatchVec))
+  io.tlb.resp.bits.data.getGpa := RegNext(getGpa(OHToUInt(ptwResp_OldMatchVec)))
   io.tlb.resp.bits.getGpa := DontCare
 
   val issue_valid = v(issPtr) && !isEmptyIss && !inflight_full

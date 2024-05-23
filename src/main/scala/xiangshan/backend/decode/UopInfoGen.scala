@@ -59,10 +59,20 @@ class indexedLSNumOfUopTable() extends Module {
   var combVemulNf : Seq[(Int, Int, Int, Int)] = Seq()
   for (emul <- 0 until 4) {
     for (lmul <- 0 until 4) {
-      var max_mul = if (lmul > emul) lmul else emul
-      for (nf <- 0 until 8) {
-        if ((1 << lmul) * (nf + 1) <= 8) {    // indexed load/store must ensure that the lmul * nf is less or equal to 8
-          combVemulNf :+= (emul, lmul, nf, (1 << max_mul) * (nf + 1))
+      var emul_val = 1 << emul
+      var lmul_val = 1 << lmul
+      var mul_max = if (emul_val > lmul_val) emul_val else lmul_val
+      // nf = 0, number of uop = Max(lmul, emul)
+      if ((1 << lmul) <= 8) {    // indexed load/store must ensure that the lmul * nf is less or equal to 8
+        combVemulNf :+= (emul, lmul, 0, mul_max)
+      } else {
+        combVemulNf :+= (emul, lmul, 0, 0)
+      }
+      // nf > 0, number of uop = Max(lmul * nf, emul)
+      for (nf <- 1 until 8) {
+        var uop_num = if (lmul_val * (nf + 1) > emul_val) lmul_val * (nf + 1) else emul_val
+        if (lmul_val * (nf + 1) <= 8) {    // indexed load/store must ensure that the lmul * nf is less or equal to 8
+          combVemulNf :+= (emul, lmul, nf, uop_num)
         } else {
           combVemulNf :+= (emul, lmul, nf, 0)
         }
@@ -70,8 +80,8 @@ class indexedLSNumOfUopTable() extends Module {
     }
   }
   out := decoder(QMCMinimizer, src, TruthTable(combVemulNf.map {
-    case (emul, lmul, nf, uopNum) => (BitPat((emul << 5 | lmul << 3 | nf).U(7.W)), BitPat(uopNum.U(7.W)))
-  }, BitPat.N(7)))
+    case (emul, lmul, nf, uopNum) => (BitPat((emul << 5 | lmul << 3 | nf).U(7.W)), BitPat(uopNum.U(4.W)))
+  }, BitPat.N(4)))
 }
 
 class UopInfoGen (implicit p: Parameters) extends XSModule {
@@ -79,7 +89,6 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
 
   val stridedLSTable = Module(new strdiedLSNumOfUopTable)     // decoder for strided load/store
   val indexedLSTable = Module(new indexedLSNumOfUopTable)     // decoder for indexed load/store
-  val indexedLSWBTable = Module(new indexedLSNumOfUopTable)   // decoder for indexed load/store WB
 
   val typeOfSplit = io.in.preInfo.typeOfSplit
   val vsew = Cat(0.U(1.W), io.in.preInfo.vsew)
@@ -183,8 +192,6 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
   val numOfUopVLoadStoreStrided = stridedLSTable.out
   indexedLSTable.src := Cat(simple_emul, simple_lmul, nf)
   val numOfUopVLoadStoreIndexed = indexedLSTable.out
-  indexedLSWBTable.src := Cat(simple_lmul, nf)
-  val numOfWBVLoadStoreIndexed = indexedLSWBTable.out
 
   //number of uop
   val numOfUop = MuxLookup(typeOfSplit, 1.U(log2Up(MaxUopSize + 1).W))(Array(
@@ -231,7 +238,7 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
   ))
 
   // number of writeback num
-  val numOfWB = Mux(typeOfSplit === UopSplitType.VEC_I_LDST, (numOfWBVLoadStoreIndexed +& 1.U), numOfUop)
+  val numOfWB = numOfUop
 
   // vector instruction's uop UopSplitType are not SCA_SIM, and when the number of uop is 1, we can regard it as a simple instruction
   isComplex := typeOfSplit =/= UopSplitType.SCA_SIM && numOfUop =/= 1.U

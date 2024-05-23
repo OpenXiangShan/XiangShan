@@ -50,7 +50,7 @@ class BaseConfig(n: Int) extends Config((site, here, up) => {
   case ExportDebug => DebugAttachParams(protocols = Set(JTAG))
   case DebugModuleKey => Some(XSDebugModuleParams(site(XLen)))
   case JtagDTMKey => JtagDTMKey
-  case MaxHartIdBits => log2Up(n)
+  case MaxHartIdBits => log2Up(n) max 6
   case EnableJtag => true.B
 })
 
@@ -68,7 +68,7 @@ class MinimalConfig(n: Int = 1) extends Config(
         RobCommitWidth = 8,
         FetchWidth = 4,
         VirtualLoadQueueSize = 24,
-        LoadQueueRARSize = 16,
+        LoadQueueRARSize = 24,
         LoadQueueRAWSize = 12,
         LoadQueueReplaySize = 24,
         LoadUncacheBufferSize = 8,
@@ -77,6 +77,12 @@ class MinimalConfig(n: Int = 1) extends Config(
         StoreQueueSize = 20,
         StoreQueueNWriteBanks = 4, // NOTE: make sure that StoreQueueSize is divided by StoreQueueNWriteBanks
         StoreQueueForwardWithMask = true,
+        // ============ VLSU ============
+        VlMergeBufferSize = 8,
+        VsMergeBufferSize = 8,
+        UopWritebackWidth = 2,
+        SplitBufferSize = 8,
+        // ==============================
         RobSize = 48,
         RabSize = 96,
         FtqSize = 8,
@@ -84,14 +90,15 @@ class MinimalConfig(n: Int = 1) extends Config(
         IBufNBank = 6,
         StoreBufferSize = 4,
         StoreBufferThreshold = 3,
-        IssueQueueSize = 8,
+        IssueQueueSize = 10,
         IssueQueueCompEntrySize = 4,
         dpParams = DispatchParameters(
           IntDqSize = 12,
           FpDqSize = 12,
           LsDqSize = 12,
           IntDqDeqWidth = 8,
-          FpDqDeqWidth = 4,
+          FpDqDeqWidth = 6,
+          VecDqDeqWidth = 6,
           LsDqDeqWidth = 6
         ),
         intPreg = IntPregParams(
@@ -140,28 +147,32 @@ class MinimalConfig(n: Int = 1) extends Config(
           NWays = 4,
           partialStaticPMP = true,
           outsideRecvFlush = true,
-          outReplace = false
+          outReplace = false,
+          lgMaxSize = 4
         ),
         sttlbParameters = TLBParameters(
           name = "sttlb",
           NWays = 4,
           partialStaticPMP = true,
           outsideRecvFlush = true,
-          outReplace = false
+          outReplace = false,
+          lgMaxSize = 4
         ),
         hytlbParameters = TLBParameters(
           name = "hytlb",
           NWays = 4,
           partialStaticPMP = true,
           outsideRecvFlush = true,
-          outReplace = false
+          outReplace = false,
+          lgMaxSize = 4
         ),
         pftlbParameters = TLBParameters(
           name = "pftlb",
           NWays = 4,
           partialStaticPMP = true,
           outsideRecvFlush = true,
-          outReplace = false
+          outReplace = false,
+          lgMaxSize = 4
         ),
         btlbParameters = TLBParameters(
           name = "btlb",
@@ -185,8 +196,7 @@ class MinimalConfig(n: Int = 1) extends Config(
             "dcache",
             isKeywordBitsOpt = p.dcacheParametersOpt.get.isKeywordBitsOpt
           )),
-          )
-        ),
+        )),
         L2NBanks = 2,
         prefetcher = None // if L2 pf_recv_node does not exist, disable SMS prefetcher
       )
@@ -248,7 +258,8 @@ class WithNKBL2
   n: Int,
   ways: Int = 8,
   inclusive: Boolean = true,
-  banks: Int = 1
+  banks: Int = 1,
+  tp: Boolean = true
 ) extends Config((site, here, up) => {
   case XSTileKey =>
     require(inclusive, "L2 must be inclusive")
@@ -269,8 +280,8 @@ class WithNKBL2
         )),
         reqField = Seq(utility.ReqSourceField()),
         echoField = Seq(huancun.DirtyField()),
-        prefetch = Some(coupledL2.prefetch.PrefetchReceiverParams()),
-        enablePerf = !site(DebugOptionsKey).FPGAPlatform,
+        prefetch = Some(coupledL2.prefetch.PrefetchReceiverParams(tp = tp)),
+        enablePerf = !site(DebugOptionsKey).FPGAPlatform && site(DebugOptionsKey).EnablePerfDebug,
         enableRollingDB = site(DebugOptionsKey).EnableRollingDB,
         enableMonitor = site(DebugOptionsKey).AlwaysBasicDB,
         elaboratedTopDown = !site(DebugOptionsKey).FPGAPlatform
@@ -298,7 +309,7 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
           val l2params = core.L2CacheParamsOpt.get.toCacheParams
           l2params.copy(sets = 2 * clientDirBytes / core.L2NBanks / l2params.ways / 64, ways = l2params.ways + 2)
         },
-        enablePerf = true,
+        enablePerf = !site(DebugOptionsKey).FPGAPlatform && site(DebugOptionsKey).EnablePerfDebug,
         ctrl = Some(CacheCtrl(
           address = 0x39000000,
           numCores = tiles.size
@@ -367,6 +378,20 @@ class FuzzConfig(dummy: Int = 0) extends Config(
 class DefaultConfig(n: Int = 1) extends Config(
   new WithNKBL3(16 * 1024, inclusive = false, banks = 4, ways = 16)
     ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4)
+    ++ new WithNKBL1D(64, ways = 8)
+    ++ new BaseConfig(n)
+)
+
+class WithCHI extends Config((_, _, _) => {
+  case EnableCHI => true
+})
+
+class KunminghuV2Config(n: Int = 1) extends Config(
+  new WithCHI
+    ++ new Config((site, here, up) => {
+      case SoCParamsKey => up(SoCParamsKey).copy(L3CacheParamsOpt = None) // There will be no L3
+    })
+    ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4, tp = false)
     ++ new WithNKBL1D(64, ways = 8)
     ++ new BaseConfig(n)
 )

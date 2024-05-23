@@ -179,7 +179,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_vaddr = Cat(s1_req.vaddr(VAddrBits - 1, blockOffBits), io.lsu.s1_paddr_dup_lsu(blockOffBits - 1, 0))
   val s1_bank_oh = RegEnable(s0_bank_oh, s0_fire)
   val s1_nack = RegNext(io.nack)
-  val s1_nack_data = !io.banked_data_read.ready
   val s1_fire = s1_valid && s2_ready
   s1_ready := !s1_valid || s1_fire
 
@@ -268,13 +267,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   XSPerfAccumulate("load_using_replacement", io.replace_way.set.valid && s1_need_replacement)
 
-  // data read
-  io.banked_data_read.valid := s1_fire && !s1_nack && !io.lsu.s1_kill && !s1_is_prefetch
-  io.banked_data_read.bits.addr := s1_vaddr
-  io.banked_data_read.bits.way_en := s1_pred_tag_match_way_dup_dc
-  io.banked_data_read.bits.bankMask := s1_bank_oh
-  io.is128Req := s1_load128Req
-
   // query bloom filter
   io.bloom_filter_query.query.valid := s1_valid
   io.bloom_filter_query.query.bits.addr := io.bloom_filter_query.query.bits.get_addr(s1_paddr_dup_dcache)
@@ -283,7 +275,14 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_has_permission = s1_hit_coh.onAccess(s1_req.cmd)._1
   val s1_new_hit_coh = s1_hit_coh.onAccess(s1_req.cmd)._3
   val s1_hit = s1_tag_match_dup_dc && s1_has_permission && s1_hit_coh === s1_new_hit_coh
-  val s1_will_send_miss_req = s1_valid && !s1_nack && !s1_nack_data && !s1_hit
+  val s1_will_send_miss_req = s1_valid && !s1_nack && !s1_hit
+
+  // data read
+  io.banked_data_read.valid := s1_fire && !s1_nack && !io.lsu.s1_kill && !s1_is_prefetch && s1_hit
+  io.banked_data_read.bits.addr := s1_vaddr
+  io.banked_data_read.bits.way_en := s1_pred_tag_match_way_dup_dc
+  io.banked_data_read.bits.bankMask := s1_bank_oh
+  io.is128Req := s1_load128Req
 
   // check ecc error
   val s1_encTag = ParallelMux(s1_tag_match_way_dup_dc.asBools, (0 until nWays).map(w => io.tag_resp(w)))

@@ -68,13 +68,11 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
   val acf = Bool()
   val crossPageIPFFix = Bool()
   val triggered = new TriggerCf
-  val gpaddr = UInt(GPAddrBits.W)
 
   def fromFetch(fetch: FetchToIBuffer, i: Int): IBufEntry = {
     inst   := fetch.instrs(i)
     pc     := fetch.pc(i)
     foldpc := fetch.foldpc(i)
-    gpaddr := fetch.gpaddr(i)
     pd     := fetch.pd(i)
     pred_taken := fetch.ftqOffset(i).valid
     ftqPtr := fetch.ftqPtr
@@ -107,7 +105,6 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
     cf.ssid := DontCare
     cf.ftqPtr := ftqPtr
     cf.ftqOffset := ftqOffset
-    cf.gpaddr := gpaddr
     cf
   }
 }
@@ -167,10 +164,14 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   val numTryEnq = WireDefault(0.U)
   val numEnq = Mux(io.in.fire, numTryEnq, 0.U)
 
-  val useBypass = enqPtr === deqPtr && decodeCanAccept // empty and decode can accept insts
   // Record the insts in output entries are from bypass or deq.
   // Update deqPtr if they are from deq
   val currentOutUseBypass = RegInit(false.B)
+  val numBypassRemain = RegInit(0.U(log2Up(DecodeWidth).W))
+  val numBypassRemainNext = Wire(numBypassRemain.cloneType)
+
+  // empty and decode can accept insts and previous bypass insts are all out
+  val useBypass = enqPtr === deqPtr && decodeCanAccept && (numBypassRemain === 0.U || currentOutUseBypass && numBypassRemainNext === 0.U)
 
   // The number of decode accepted insts.
   // Since decode promises accepting insts in order, use priority encoder to simplify the accumulation.
@@ -228,17 +229,30 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
       io.valid := reg.valid
       io.bits := reg.bits.toCtrlFlow
   }
-  outputEntries zip bypassEntries zip deqEntries foreach {
-    case ((out, bypass), deq) =>
+  (outputEntries zip bypassEntries zip deqEntries).zipWithIndex.foreach {
+    case (((out, bypass), deq), i) =>
       when(decodeCanAccept) {
-        out := deq
-        currentOutUseBypass := false.B
         when(useBypass && io.in.valid) {
           out := bypass
           currentOutUseBypass := true.B
+        }.elsewhen(currentOutUseBypass && numBypassRemainNext =/= 0.U) {
+          out := Mux(i.U < numBypassRemainNext, outputEntries(i.U + numOut), 0.U.asTypeOf(out))
+          currentOutUseBypass := true.B
+        }.otherwise {
+          out := deq
+          currentOutUseBypass := false.B
         }
       }
   }
+
+  when(useBypass && io.in.valid) {
+    numBypassRemain := numBypass
+  }.elsewhen(currentOutUseBypass) {
+    numBypassRemain := numBypassRemainNext
+  }.otherwise {
+    assert(numBypassRemain === 0.U, "numBypassRemain should keep 0 when not in currentOutUseBypass")
+  }
+  numBypassRemainNext := numBypassRemain - numOut
 
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   // Enqueue
@@ -318,6 +332,8 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     deqInBankPtr := VecInit.fill(IBufNBank)(0.U.asTypeOf(new IBufInBankPtr))
     deqPtr := 0.U.asTypeOf(new IBufPtr())
     outputEntries.foreach(_.valid := false.B)
+    currentOutUseBypass := false.B
+    numBypassRemain := 0.U
   }.otherwise {
     deqPtr := deqPtrNext
     deqInBankPtr := deqInBankPtrNext

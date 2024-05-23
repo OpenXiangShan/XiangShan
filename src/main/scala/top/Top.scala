@@ -18,16 +18,20 @@ package top
 
 import chisel3._
 import chisel3.util._
+import difftest.DifftestModule
 import xiangshan._
 import utils._
 import huancun.{HCCacheParameters, HCCacheParamsKey, HuanCun, PrefetchRecv, TPmetaResp}
+import coupledL2.EnableCHI
 import utility._
 import system._
 import device._
 import chisel3.stage.ChiselGeneratorAnnotation
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.diplomacy._
+import freechips.rocketchip.tile._
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.jtag.JTAGIO
 import chisel3.experimental.{annotate, ChiselAnnotation}
 import sifive.enterprise.firrtl.NestedPrefixModulesAnnotation
@@ -35,13 +39,19 @@ import sifive.enterprise.firrtl.NestedPrefixModulesAnnotation
 abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
   with BindingScope
 {
-  val misc = LazyModule(new SoCMisc())
+  // val misc = LazyModule(new SoCMisc())
   lazy val dts = DTS(bindingTree)
   lazy val json = JSON(bindingTree)
 }
 
 class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 {
+  val enableCHI = p(EnableCHI)
+
+  val nocMisc = if (enableCHI) Some(LazyModule(new MemMisc())) else None
+  val socMisc = if (!enableCHI) Some(LazyModule(new SoCMisc())) else None
+  val misc: MemMisc = if (enableCHI) nocMisc.get else socMisc.get
+
   ResourceBinding {
     val width = ResourceInt(2)
     val model = "freechips,rocketchip-unknown"
@@ -74,6 +84,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
         hartIds = tiles.map(_.HartId),
         FPGAPlatform = debugOpts.FPGAPlatform
       )
+      case MaxHartIdBits => p(MaxHartIdBits)
     })))
   )
 
@@ -92,8 +103,19 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     core_with_l2(i).plic_int_node :*= misc.plic.intnode
     core_with_l2(i).debug_int_node := misc.debugModule.debug.dmOuter.dmOuter.intnode
     misc.plic.intnode := IntBuffer() := core_with_l2(i).beu_int_source
-    misc.peripheral_ports(i) := core_with_l2(i).uncache
-    misc.core_to_l3_ports(i) :=* core_with_l2(i).memory_port
+    if (!enableCHI) {
+      misc.peripheral_ports(i) := core_with_l2(i).tl_uncache 
+    } else {
+      // Make diplomacy happy
+      val clientParameters = TLMasterPortParameters.v1(
+        clients = Seq(TLMasterParameters.v1(
+          "uncache"
+        ))
+      )
+      val clientNode = TLClientNode(Seq(clientParameters))
+      misc.peripheral_ports(i) := clientNode
+    }
+    misc.core_to_l3_ports.foreach(port => port(i) :=* core_with_l2(i).memory_port.get)
     memblock_pf_recv_nodes(i).map(recv => {
       println(s"Connecting Core_${i}'s L1 pf source to L3!")
       recv := core_with_l2(i).core_l3_pf_port.get
@@ -152,12 +174,19 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     FileRegisters.add("json", json)
     FileRegisters.add("plusArgs", freechips.rocketchip.util.PlusArgArtefacts.serialize_cHeader())
 
-    val dma = IO(Flipped(misc.dma.cloneType))
-    val peripheral = IO(misc.peripheral.cloneType)
+    val dma = socMisc.map(m => IO(Flipped(m.dma.cloneType)))
+    val peripheral = socMisc.map(m => IO(m.peripheral.cloneType))
     val memory = IO(misc.memory.cloneType)
 
-    misc.dma <> dma
-    peripheral <> misc.peripheral
+    socMisc match {
+      case Some(m) =>
+        m.dma <> dma.get
+        peripheral.get <> m.peripheral
+        dontTouch(dma.get)
+        dontTouch(peripheral.get)
+      case None =>
+    }
+    
     memory <> misc.memory
 
     val io = IO(new Bundle {
@@ -192,9 +221,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     io.debug_reset := misc.module.debug_module_io.debugIO.ndreset
 
     // input
-    dontTouch(dma)
     dontTouch(io)
-    dontTouch(peripheral)
     dontTouch(memory)
     misc.module.ext_intrs := io.extIntrs
     misc.module.rtc_clock := io.rtc_clock
@@ -234,6 +261,17 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       case None => core_with_l2.foreach(_.module.io.debugTopDown.l3MissMatch := false.B)
     }
 
+    core_with_l2.foreach { case tile =>
+      tile.module.io.chi.foreach { case chi_port =>
+        chi_port <> DontCare
+        dontTouch(chi_port)
+      }
+      tile.module.io.nodeID.foreach { case nodeID =>
+        nodeID := DontCare
+        dontTouch(nodeID)
+      }
+    }
+
     misc.module.debug_module_io.resetCtrl.hartIsInReset := core_with_l2.map(_.module.reset.asBool)
     misc.module.debug_module_io.clock := io.clock
     misc.module.debug_module_io.reset := reset_sync
@@ -255,7 +293,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       // Modules are reset one by one
       // reset ----> SYNC --> {SoCMisc, L3 Cache, Cores}
       val resetChain = Seq(Seq(misc.module) ++ l3cacheOpt.map(_.module) ++ core_with_l2.map(_.module))
-      ResetGen(resetChain, reset_sync, !debugOpts.FPGAPlatform)
+      ResetGen(resetChain, reset_sync, !debugOpts.ResetGen)
     }
 
   }
@@ -268,6 +306,7 @@ object TopMain extends App {
 
   // tools: init to close dpi-c when in fpga
   val envInFPGA = config(DebugOptionsKey).FPGAPlatform
+  val enableDifftest = config(DebugOptionsKey).EnableDifftest
   val enableChiselDB = config(DebugOptionsKey).EnableChiselDB
   val enableConstantin = config(DebugOptionsKey).EnableConstantin
   Constantin.init(enableConstantin && !envInFPGA)
@@ -275,5 +314,11 @@ object TopMain extends App {
 
   val soc = DisableMonitors(p => LazyModule(new XSTop()(p)))(config)
   Generator.execute(firrtlOpts, soc.module, firtoolOpts)
+
+  // generate difftest bundles (w/o DifftestTopIO)
+  if (enableDifftest) {
+    DifftestModule.finish("XiangShan", false)
+  }
+
   FileRegisters.write(fileDir = "./build", filePrefix = "XSTop.")
 }

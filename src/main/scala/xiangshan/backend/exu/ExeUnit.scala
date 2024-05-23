@@ -39,7 +39,9 @@ class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle 
   val fenceio = OptionWrapper(params.hasFence, new FenceIO)
   val frm = OptionWrapper(params.needSrcFrm, Input(Frm()))
   val vxrm = OptionWrapper(params.needSrcVxrm, Input(Vxrm()))
-  val vtype = OptionWrapper(params.writeVType, new VType)
+  val vtype = OptionWrapper(params.writeVConfig, new VType)
+  val vlIsZero = OptionWrapper(params.writeVConfig, Output(Bool()))
+  val vlIsVlmax = OptionWrapper(params.writeVConfig, Output(Bool()))
 }
 
 class ExeUnit(val exuParams: ExeUnitParams)(implicit p: Parameters) extends LazyModule {
@@ -276,6 +278,8 @@ class ExeUnitImp(
   io.fenceio.foreach(exuio => funcUnits.foreach(fu => fu.io.fenceio.foreach(fuio => fuio <> exuio)))
   io.frm.foreach(exuio => funcUnits.foreach(fu => fu.io.frm.foreach(fuio => fuio <> exuio)))
   io.vxrm.foreach(exuio => funcUnits.foreach(fu => fu.io.vxrm.foreach(fuio => fuio <> exuio)))
+  io.vlIsZero.foreach(exuio => funcUnits.foreach(fu => fu.io.vlIsZero.foreach(fuio => exuio := fuio)))
+  io.vlIsVlmax.foreach(exuio => funcUnits.foreach(fu => fu.io.vlIsVlmax.foreach(fuio => exuio := fuio)))
 
   // debug info
   io.out.bits.debug     := 0.U.asTypeOf(io.out.bits.debug)
@@ -297,7 +301,7 @@ class Dispatcher[T <: Data](private val gen: T, n: Int, acceptCond: T => Seq[Boo
 
   private val acceptVec: Vec[Bool] = VecInit(acceptCond(io.in.bits))
 
-  XSError(io.in.valid && PopCount(acceptVec) > 1.U, s"s[ExeUnit] accept vec should no more than 1, ${Binary(acceptVec.asUInt)} ")
+  XSError(io.in.valid && PopCount(acceptVec) > 1.U, p"[ExeUnit] accept vec should no more than 1, ${Binary(acceptVec.asUInt)} ")
   XSError(io.in.valid && PopCount(acceptVec) === 0.U, "[ExeUnit] there is a inst not dispatched to any fu")
 
   io.out.zipWithIndex.foreach { case (out, i) =>

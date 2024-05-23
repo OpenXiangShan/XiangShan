@@ -40,6 +40,8 @@ class ExuBlockImp(
     exu.io.fenceio.foreach(exuio => io.fenceio.get <> exuio)
     exu.io.frm.foreach(exuio => exuio := RegNext(io.frm.get))  // each vf exu pipe frm from csr
     exu.io.vxrm.foreach(exuio => io.vxrm.get <> exuio)
+    exu.io.vlIsZero.foreach(exuio => io.vlIsZero.get := exuio)
+    exu.io.vlIsVlmax.foreach(exuio => io.vlIsVlmax.get := exuio)
     exu.io.vtype.foreach(exuio => io.vtype.get := exuio)
     exu.io.in <> input
     output <> exu.io.out
@@ -69,5 +71,7 @@ class ExuBlockIO(implicit p: Parameters, params: SchdBlockParams) extends XSBund
   val fenceio = OptionWrapper(params.hasFence, new FenceIO)
   val frm = OptionWrapper(params.needSrcFrm, Input(Frm()))
   val vxrm = OptionWrapper(params.needSrcVxrm, Input(Vxrm()))
-  val vtype = OptionWrapper(params.writeVType, new VType)
+  val vtype = OptionWrapper(params.writeVConfig, new VType)
+  val vlIsZero = OptionWrapper(params.writeVConfig, Output(Bool()))
+  val vlIsVlmax = OptionWrapper(params.writeVConfig, Output(Bool()))
 }

@@ -476,8 +476,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     req.req_coh := miss_req_pipe_reg_bits.req_coh
     
     isKeyword := Mux(
-      before_req_sent_can_merge(req), 
-      before_req_sent_merge_iskeyword(req),
+      before_req_sent_can_merge(miss_req_pipe_reg_bits), 
+      before_req_sent_merge_iskeyword(miss_req_pipe_reg_bits),
       isKeyword)
     assert(!miss_req_pipe_reg_bits.isFromPrefetch, "can not merge a prefetch req, late prefetch should always be ignored!")
       

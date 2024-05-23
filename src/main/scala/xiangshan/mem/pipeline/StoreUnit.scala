@@ -31,7 +31,10 @@ import xiangshan.backend.ctrlblock.DebugLsInfoBundle
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
 import xiangshan.cache.{DcacheStoreRequestIO, DCacheStoreIO, MemoryOpConstants, HasDCacheParameters, StorePrefetchReq}
 
-class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameters {
+class StoreUnit(implicit p: Parameters) extends XSModule
+  with HasDCacheParameters
+  with HasVLSUParameters
+  {
   val io = IO(new Bundle() {
     val redirect        = Flipped(ValidIO(new Redirect))
     val stin            = Flipped(Decoupled(new MemExuInput))
@@ -50,14 +53,13 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
     val s1_prefetch_spec = Output(Bool())
     val stld_nuke_query = Valid(new StoreNukeQueryIO)
     val stout           = DecoupledIO(new MemExuOutput) // writeback store
+    val vecstout        = DecoupledIO(new VecPipelineFeedbackIO(isVStore = true))
     // store mask, send to sq in store_s0
     val st_mask_out     = Valid(new StoreMaskBundle)
     val debug_ls        = Output(new DebugLsInfoBundle)
     // vector
-    val vecstin           = Flipped(Decoupled(new VecStorePipeBundle()))
+    val vecstin           = Flipped(Decoupled(new VecPipeBundle(isVStore = true)))
     val vec_isFirstIssue  = Input(Bool())
-    val lsq_vec           = ValidIO(new LsPipelineBundle) // nuke check between vector stores and scalar loads
-    val vec_feedback_slow = ValidIO(new VSFQFeedback)
   })
 
   val s1_ready, s2_ready, s3_ready = WireInit(false.B)
@@ -79,15 +81,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   val s0_uop          = Mux(s0_use_flow_rs, s0_stin.uop, s0_vecstin.uop)
   val s0_isFirstIssue = s0_use_flow_rs && io.stin.bits.isFirstIssue || s0_use_flow_vec && io.vec_isFirstIssue
   val s0_rsIdx        = Mux(s0_use_flow_rs, io.stin.bits.iqIdx, 0.U)
-  val s0_size         = Mux(
-    s0_use_flow_rs,
-    LSUOpType.size(s0_uop.fuOpType),
-    Mux(
-      s0_use_flow_vec,
-      io.vecstin.bits.alignedType,
-      3.U
-    )
-  )
+  val s0_size         = Mux(s0_use_flow_rs || s0_use_flow_vec, s0_uop.fuOpType(2,0), 0.U)// may broken if use it in feature
   val s0_mem_idx      = Mux(s0_use_flow_rs || s0_use_flow_vec, s0_uop.sqIdx.value, 0.U)
   val s0_rob_idx      = Mux(s0_use_flow_rs || s0_use_flow_vec, s0_uop.robIdx, 0.U.asTypeOf(s0_uop.robIdx))
   val s0_pc           = Mux(s0_use_flow_rs || s0_use_flow_vec, s0_uop.pc, 0.U)
@@ -97,10 +91,15 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   val s0_kill         = s0_uop.robIdx.needFlush(io.redirect)
   val s0_can_go       = s1_ready
   val s0_fire         = s0_valid && !s0_kill && s0_can_go
+  val s0_is128bit     = is128Bit(s0_vecstin.alignedType)
   // vector
-  val s0_vecActive          = !s0_use_flow_vec || s0_vecstin.vecActive
-  val s0_flowPtr      = s0_vecstin.flowPtr
-  val s0_isLastElem   = s0_vecstin.isLastElem
+  val s0_vecActive    = !s0_use_flow_vec || s0_vecstin.vecActive
+  // val s0_flowPtr      = s0_vecstin.flowPtr
+  // val s0_isLastElem   = s0_vecstin.isLastElem
+  val s0_secondInv    = s0_vecstin.usSecondInv
+  val s0_elemIdx      = s0_vecstin.elemIdx
+  val s0_alignedType  = s0_vecstin.alignedType
+  val s0_mBIndex      = s0_vecstin.mBIndex
 
   // generate addr
   // val saddr = s0_in.bits.src(0) + SignExt(s0_in.bits.uop.imm(11,0), VAddrBits)
@@ -122,7 +121,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   )
   val s0_mask  = Mux(
     s0_use_flow_rs,
-    genVWmask(s0_saddr, s0_uop.fuOpType(1,0)),
+    genVWmask128(s0_saddr, s0_uop.fuOpType(2,0)),
     Mux(
       s0_use_flow_vec,
       s0_vecstin.mask,
@@ -162,7 +161,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   s0_out.vaddr        := s0_vaddr
   // Now data use its own io
   // s1_out.data := genWdata(s1_in.src(1), s1_in.uop.fuOpType(1,0))
-  s0_out.data         := Mux(s0_use_flow_rs, s0_stin.src(1), s0_vecstin.src_vs3) // FIXME: remove data from pipeline
+  s0_out.data         := s0_stin.src(1)
   s0_out.uop          := s0_uop
   s0_out.miss         := false.B
   s0_out.rsIdx        := s0_rsIdx
@@ -171,24 +170,28 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   s0_out.isHWPrefetch := s0_use_flow_prf
   s0_out.wlineflag    := s0_wlineflag
   s0_out.isvec        := s0_use_flow_vec
-  s0_out.is128bit     := false.B
+  s0_out.is128bit     := s0_is128bit
   s0_out.vecActive    := s0_vecActive
-  s0_out.sflowPtr     := s0_flowPtr
-  s0_out.isLastElem   := s0_isLastElem
+  s0_out.usSecondInv  := s0_secondInv
+  s0_out.elemIdx      := s0_elemIdx
+  s0_out.alignedType  := s0_alignedType
+  s0_out.mbIndex      := s0_mBIndex
   when(s0_valid && s0_isFirstIssue) {
     s0_out.uop.debugInfo.tlbFirstReqTime := GTimer()
   }
 
   // exception check
-  val s0_addr_aligned = LookupTree(Mux(s0_use_flow_vec, s0_vecstin.alignedType, s0_uop.fuOpType(1, 0)), List(
+  val s0_addr_aligned = LookupTree(Mux(s0_use_flow_vec, s0_vecstin.alignedType(1,0), s0_uop.fuOpType(1, 0)), List(
     "b00".U   -> true.B,              //b
     "b01".U   -> (s0_out.vaddr(0) === 0.U),   //h
     "b10".U   -> (s0_out.vaddr(1,0) === 0.U), //w
     "b11".U   -> (s0_out.vaddr(2,0) === 0.U)  //d
   ))
+  // if vector store sends 128-bit requests, its address must be 128-aligned
+  XSError(s0_use_flow_vec && s0_out.vaddr(3, 0) =/= 0.U && s0_vecstin.alignedType(2), "unit stride 128 bit element is not aligned!")
   s0_out.uop.exceptionVec(storeAddrMisaligned) := Mux(s0_use_flow_rs || s0_use_flow_vec, !s0_addr_aligned, false.B)
 
-  io.st_mask_out.valid       := s0_use_flow_rs
+  io.st_mask_out.valid       := s0_use_flow_rs || s0_use_flow_vec
   io.st_mask_out.bits.mask   := s0_out.mask
   io.st_mask_out.bits.sqIdx  := s0_out.uop.sqIdx
 
@@ -219,8 +222,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   val s1_mmio      = s1_mmio_cbo
   val s1_exception = ExceptionNO.selectByFu(s1_out.uop.exceptionVec, StaCfg).asUInt.orR
   val s1_isvec     = RegEnable(s0_out.isvec, false.B, s0_fire)
-  val s1_isLastElem = RegEnable(s0_isLastElem, false.B, s0_fire)
-  s1_kill := s1_in.uop.robIdx.needFlush(io.redirect) || s1_tlb_miss
+  // val s1_isLastElem = RegEnable(s0_isLastElem, false.B, s0_fire)
+  s1_kill := s1_in.uop.robIdx.needFlush(io.redirect) || (s1_tlb_miss && !s1_isvec)
 
   s1_ready := !s1_valid || s1_kill || s2_ready
   io.tlb.resp.ready := true.B // TODO: why dtlbResp needs a ready?
@@ -233,6 +236,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   io.stld_nuke_query.bits.robIdx := s1_in.uop.robIdx
   io.stld_nuke_query.bits.paddr  := s1_paddr
   io.stld_nuke_query.bits.mask   := s1_in.mask
+  io.stld_nuke_query.bits.matchLine := s1_in.isvec && s1_in.is128bit
 
   // issue
   io.issue.valid := s1_valid && !s1_tlb_miss && !s1_in.isHWPrefetch && !s1_isvec
@@ -242,7 +246,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   // Send TLB feedback to store issue queue
   // Store feedback is generated in store_s1, sent to RS in store_s2
   val s1_feedback = Wire(Valid(new RSFeedback))
-  s1_feedback.valid                 := s1_valid & !s1_in.isHWPrefetch && !s1_isvec
+  s1_feedback.valid                 := s1_valid & !s1_in.isHWPrefetch
   s1_feedback.bits.hit              := !s1_tlb_miss
   s1_feedback.bits.flushState       := io.tlb.resp.bits.ptwBack
   s1_feedback.bits.robIdx           := s1_out.uop.robIdx
@@ -255,23 +259,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
     s1_feedback.bits.robIdx.value
   )
 
-  val s1_vec_feedback = Wire(Valid(new VSFQFeedback))
-  s1_vec_feedback.valid                 := s1_valid && !s1_in.isHWPrefetch && s1_isvec
-  s1_vec_feedback.bits.flowPtr          := s1_out.sflowPtr
-  s1_vec_feedback.bits.hit              := !s1_tlb_miss
-  s1_vec_feedback.bits.sourceType       := RSFeedbackType.tlbMiss
-  s1_vec_feedback.bits.paddr            := s1_paddr
-  s1_vec_feedback.bits.mmio             := s1_mmio
-  s1_vec_feedback.bits.atomic           := s1_mmio
-  s1_vec_feedback.bits.exceptionVec     := s1_out.uop.exceptionVec
-  XSDebug(s1_vec_feedback.valid,
-    "Vector S1 Store: tlbHit: %d flowPtr: %d\n",
-    s1_vec_feedback.bits.hit,
-    s1_vec_feedback.bits.flowPtr.value
-  )
-
   // io.feedback_slow := s1_feedback
-  // io.vec_feedback_slow := s1_vec_feedback
 
   // get paddr from dtlb, check if rollback is needed
   // writeback store inst to lsq
@@ -287,14 +275,9 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   s1_out.uop.exceptionVec(storeGuestPageFault) := io.tlb.resp.bits.excp(0).gpf.st && s1_vecActive
 
   // scalar store and scalar load nuke check, and also other purposes
-  io.lsq.valid     := s1_valid && !s1_in.isHWPrefetch && !s1_isvec
+  io.lsq.valid     := s1_valid && !s1_in.isHWPrefetch
   io.lsq.bits      := s1_out
   io.lsq.bits.miss := s1_tlb_miss
-  // vector store and scalar load nuke check
-  io.lsq_vec.valid := s1_valid && !s1_in.isHWPrefetch && s1_isvec
-  io.lsq_vec.bits  := s1_out
-  io.lsq_vec.bits.miss := s1_tlb_miss
-  io.lsq_vec.bits.isLastElem := s1_isLastElem
 
   // kill dcache write intent request when tlb miss or exception
   io.dcache.s1_kill  := (s1_tlb_miss || s1_exception || s1_mmio || s1_in.uop.robIdx.needFlush(io.redirect))
@@ -327,11 +310,12 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
 
   val s2_pmp = WireInit(io.pmp)
 
-  val s2_exception = ExceptionNO.selectByFu(s2_out.uop.exceptionVec, StaCfg).asUInt.orR
-  val s2_mmio = s2_in.mmio || s2_pmp.mmio
-  s2_kill := (s2_mmio && !s2_exception) || s2_in.uop.robIdx.needFlush(io.redirect)
+  val s2_exception = (ExceptionNO.selectByFu(s2_out.uop.exceptionVec, StaCfg).asUInt.orR) && RegNext(s1_feedback.bits.hit)
+  val s2_mmio = (s2_in.mmio || s2_pmp.mmio) && RegNext(s1_feedback.bits.hit)
+  s2_kill := ((s2_mmio && !s2_exception) && !s2_in.isvec) || s2_in.uop.robIdx.needFlush(io.redirect)
 
   s2_out        := s2_in
+  s2_out.af     := s2_pmp.st && !s2_in.isvec
   s2_out.mmio   := s2_mmio && !s2_exception
   s2_out.atomic := s2_in.atomic || s2_pmp.atomic
   s2_out.uop.exceptionVec(storeAccessFault) := (s2_in.uop.exceptionVec(storeAccessFault) || s2_pmp.st) && s2_vecActive
@@ -343,16 +327,11 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   io.dcache.resp.ready := true.B
 
   // feedback tlb miss to RS in store_s2
-  val feedback_slow_valid = WireInit(false.B)
-  feedback_slow_valid := s1_feedback.valid && !s1_out.uop.robIdx.needFlush(io.redirect)
+  val feedback_slow_valid = s1_feedback.valid && !s1_out.uop.robIdx.needFlush(io.redirect) && !s1_out.isvec
   io.feedback_slow.valid := GatedValidRegNext(feedback_slow_valid)
   io.feedback_slow.bits  := RegEnable(s1_feedback.bits, feedback_slow_valid)
 
-  // vector feedback
-  io.vec_feedback_slow.valid := RegNext(s1_vec_feedback.valid && !s1_out.uop.robIdx.needFlush(io.redirect))
-  io.vec_feedback_slow.bits  := RegNext(s1_vec_feedback.bits)
-  io.vec_feedback_slow.bits.mmio := s2_mmio && !s2_exception
-  io.vec_feedback_slow.bits.atomic := s2_in.atomic || s2_pmp.atomic
+  val s2_vecFeedback = RegNext(!s1_out.uop.robIdx.needFlush(io.redirect) && s1_feedback.bits.hit) && s2_in.isvec
 
   // mmio and exception
   io.lsq_replenish := s2_out
@@ -388,10 +367,11 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   // store write back
   val s3_valid  = RegInit(false.B)
   val s3_in     = RegEnable(s2_out, s2_fire)
-  val s3_out    = Wire(new MemExuOutput)
+  val s3_out    = Wire(new MemExuOutput(isVector = true))
   val s3_kill   = s3_in.uop.robIdx.needFlush(io.redirect)
   val s3_can_go = s3_ready
   val s3_fire   = s3_valid && !s3_kill && s3_can_go
+  val s3_vecFeedback = RegEnable(s2_vecFeedback, s2_fire)
 
   when (s2_fire) { s3_valid := (!s2_mmio || s2_exception) && !s2_out.isHWPrefetch  }
   .elsewhen (s3_fire) { s3_valid := false.B }
@@ -418,20 +398,28 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   val TotalDelayCycles = TotalSelectCycles - 2
   val sx_valid = Wire(Vec(TotalDelayCycles + 1, Bool()))
   val sx_ready = Wire(Vec(TotalDelayCycles + 1, Bool()))
-  val sx_in    = Wire(Vec(TotalDelayCycles + 1, new MemExuOutput))
+  val sx_in    = Wire(Vec(TotalDelayCycles + 1, new VecMemExuOutput(isVector = true)))
 
   // backward ready signal
   s3_ready := sx_ready.head
   for (i <- 0 until TotalDelayCycles + 1) {
     if (i == 0) {
-      sx_valid(i) := s3_valid
-      sx_in(i)    := s3_out
-      sx_ready(i) := !s3_valid(i) || sx_in(i).uop.robIdx.needFlush(io.redirect) || (if (TotalDelayCycles == 0) io.stout.ready else sx_ready(i+1))
+      sx_valid(i)          := s3_valid
+      sx_in(i).output      := s3_out
+      sx_in(i).vecFeedback := s3_vecFeedback
+      sx_in(i).mmio        := s3_in.mmio
+      sx_in(i).usSecondInv := s3_in.usSecondInv
+      sx_in(i).elemIdx     := s3_in.elemIdx
+      sx_in(i).alignedType := s3_in.alignedType
+      sx_in(i).mbIndex     := s3_in.mbIndex
+      sx_in(i).mask        := s3_in.mask
+      sx_in(i).vaddr       := s3_in.vaddr
+      sx_ready(i) := !s3_valid(i) || sx_in(i).output.uop.robIdx.needFlush(io.redirect) || (if (TotalDelayCycles == 0) io.stout.ready else sx_ready(i+1))
     } else {
-      val cur_kill   = sx_in(i).uop.robIdx.needFlush(io.redirect)
+      val cur_kill   = sx_in(i).output.uop.robIdx.needFlush(io.redirect)
       val cur_can_go = (if (i == TotalDelayCycles) io.stout.ready else sx_ready(i+1))
       val cur_fire   = sx_valid(i) && !cur_kill && cur_can_go
-      val prev_fire  = sx_valid(i-1) && !sx_in(i-1).uop.robIdx.needFlush(io.redirect) && sx_ready(i)
+      val prev_fire  = sx_valid(i-1) && !sx_in(i-1).output.uop.robIdx.needFlush(io.redirect) && sx_ready(i)
 
       sx_ready(i) := !sx_valid(i) || cur_kill || (if (i == TotalDelayCycles) io.stout.ready else sx_ready(i+1))
       val sx_valid_can_go = prev_fire || cur_fire || cur_kill
@@ -442,10 +430,32 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   val sx_last_valid = sx_valid.takeRight(1).head
   val sx_last_ready = sx_ready.takeRight(1).head
   val sx_last_in    = sx_in.takeRight(1).head
-  sx_last_ready := !sx_last_valid || sx_last_in.uop.robIdx.needFlush(io.redirect) || io.stout.ready
+  sx_last_ready := !sx_last_valid || sx_last_in.output.uop.robIdx.needFlush(io.redirect) || io.stout.ready
 
-  io.stout.valid := sx_last_valid && !sx_last_in.uop.robIdx.needFlush(io.redirect) && isStore(sx_last_in.uop.fuType)
-  io.stout.bits := sx_last_in
+  io.stout.valid := sx_last_valid && !sx_last_in.output.uop.robIdx.needFlush(io.redirect) && isStore(sx_last_in.output.uop.fuType)
+  io.stout.bits := sx_last_in.output
+
+  io.vecstout.valid := sx_last_valid && !sx_last_in.output.uop.robIdx.needFlush(io.redirect) && isVStore(sx_last_in.output.uop.fuType)
+  // TODO: implement it!
+  io.vecstout.bits.mBIndex := sx_last_in.mbIndex
+  io.vecstout.bits.hit := sx_last_in.vecFeedback
+  io.vecstout.bits.isvec := true.B
+  io.vecstout.bits.sourceType := RSFeedbackType.tlbMiss
+  io.vecstout.bits.flushState := DontCare
+  io.vecstout.bits.mmio := sx_last_in.mmio
+  io.vecstout.bits.exceptionVec := sx_last_in.output.uop.exceptionVec
+  io.vecstout.bits.usSecondInv := sx_last_in.usSecondInv
+  io.vecstout.bits.vecFeedback := sx_last_in.vecFeedback
+  io.vecstout.bits.elemIdx     := sx_last_in.elemIdx
+  io.vecstout.bits.alignedType := sx_last_in.alignedType
+  io.vecstout.bits.mask        := sx_last_in.mask
+  io.vecstout.bits.vaddr       := sx_last_in.vaddr
+  // io.vecstout.bits.reg_offset.map(_ := DontCare)
+  // io.vecstout.bits.elemIdx.map(_ := sx_last_in.elemIdx)
+  // io.vecstout.bits.elemIdxInsideVd.map(_ := DontCare)
+  // io.vecstout.bits.vecdata.map(_ := DontCare)
+  // io.vecstout.bits.mask.map(_ := DontCare)
+  // io.vecstout.bits.alignedType.map(_ := sx_last_in.alignedType)
 
   io.debug_ls := DontCare
   io.debug_ls.s1_robIdx := s1_in.uop.robIdx.value
@@ -467,6 +477,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule with HasDCacheParameter
   // perf cnt
   XSPerfAccumulate("s0_in_valid",                s0_valid)
   XSPerfAccumulate("s0_in_fire",                 s0_fire)
+  XSPerfAccumulate("s0_vecin_fire",              s0_fire && s0_use_flow_vec)
   XSPerfAccumulate("s0_in_fire_first_issue",     s0_fire && s0_isFirstIssue)
   XSPerfAccumulate("s0_addr_spec_success",       s0_fire && !s0_use_flow_vec && s0_saddr(VAddrBits-1, 12) === s0_stin.src(0)(VAddrBits-1, 12))
   XSPerfAccumulate("s0_addr_spec_failed",        s0_fire && !s0_use_flow_vec && s0_saddr(VAddrBits-1, 12) =/= s0_stin.src(0)(VAddrBits-1, 12))

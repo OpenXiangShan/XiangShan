@@ -133,6 +133,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.ldaIqFeedback <> memBlock.io.mem_to_ooo.ldaIqFeedback
   backend.io.mem.staIqFeedback <> memBlock.io.mem_to_ooo.staIqFeedback
   backend.io.mem.hyuIqFeedback <> memBlock.io.mem_to_ooo.hyuIqFeedback
+  backend.io.mem.vstuIqFeedback <> memBlock.io.mem_to_ooo.vstuIqFeedback
+  backend.io.mem.vlduIqFeedback <> memBlock.io.mem_to_ooo.vlduIqFeedback
   backend.io.mem.ldCancel <> memBlock.io.mem_to_ooo.ldCancel
   backend.io.mem.wakeup <> memBlock.io.mem_to_ooo.wakeup
   backend.io.mem.writebackLda <> memBlock.io.mem_to_ooo.writebackLda
@@ -203,6 +205,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.ooo_to_mem.lsqio.scommit        := backend.io.mem.robLsqIO.scommit
   memBlock.io.ooo_to_mem.lsqio.pendingld      := backend.io.mem.robLsqIO.pendingld
   memBlock.io.ooo_to_mem.lsqio.pendingst      := backend.io.mem.robLsqIO.pendingst
+  memBlock.io.ooo_to_mem.lsqio.pendingVst     := backend.io.mem.robLsqIO.pendingVst
   memBlock.io.ooo_to_mem.lsqio.commit         := backend.io.mem.robLsqIO.commit
   memBlock.io.ooo_to_mem.lsqio.pendingPtr     := backend.io.mem.robLsqIO.pendingPtr
   memBlock.io.ooo_to_mem.lsqio.pendingPtrNext := backend.io.mem.robLsqIO.pendingPtrNext
@@ -249,7 +252,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   )
 
   // ResetGen(resetTree, reset, !debugOpts.FPGAPlatform)
-  if (debugOpts.FPGAPlatform) {
+  if (debugOpts.ResetGen) {
     frontend.reset := memBlock.reset_io_frontend
     backend.reset := memBlock.reset_io_backend
   }

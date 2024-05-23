@@ -23,8 +23,11 @@ import xiangshan._
 import utils._
 import utility._
 import xiangshan.cache._
+import xiangshan.mem._
+import xiangshan.backend.Bundles.DynInst
 import difftest._
 import freechips.rocketchip.util._
+import xiangshan.backend.fu.FuType._
 
 class SbufferFlushBundle extends Bundle {
   val valid = Output(Bool())
@@ -183,10 +186,14 @@ class SbufferData(implicit p: Parameters) extends XSModule with HasSbufferConst 
   io.maskOut := mask
 }
 
-class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst with HasPerfEvents {
+class Sbuffer(implicit p: Parameters)
+  extends DCacheModule
+    with HasSbufferConst
+    with HasPerfEvents {
   val io = IO(new Bundle() {
     val hartId = Input(UInt(hartIdLen.W))
     val in = Vec(EnsbufferWidth, Flipped(Decoupled(new DCacheWordReqWithVaddrAndPfFlag)))  //Todo: store logic only support Width == 2 now
+    val vecDifftestInfo = Vec(EnsbufferWidth, Flipped(Decoupled(new DynInst)))
     val dcache = Flipped(new DCacheToSbufferIO)
     val forward = Vec(LoadPipelineWidth, Flipped(new LoadForwardQueryIO))
     val sqempty = Input(Bool())
@@ -342,7 +349,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     mergeMask(i) := widthMap(j =>
       inptags(i) === ptag(j) && activeMask(j)
     )
-    assert(!(PopCount(mergeMask(i).asUInt) > 1.U && io.in(i).fire))
+    assert(!(PopCount(mergeMask(i).asUInt) > 1.U && io.in(i).fire && io.in(i).bits.vecValid))
   }
 
   // insert condition
@@ -402,7 +409,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   for (i <- 0 until EnsbufferWidth) {
     // train
     if (EnableStorePrefetchSPB) {
-      prefetcher.io.sbuffer_enq(i).valid := io.in(i).fire
+      prefetcher.io.sbuffer_enq(i).valid := io.in(i).fire && io.in(i).bits.vecValid
       prefetcher.io.sbuffer_enq(i).bits := DontCare
       prefetcher.io.sbuffer_enq(i).bits.vaddr := io.in(i).bits.vaddr
     } else {
@@ -413,9 +420,9 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
     // prefetch req
     if (EnableStorePrefetchAtCommit) {
       if (EnableAtCommitMissTrigger) {
-        io.store_prefetch(i).valid := prefetcher.io.prefetch_req(i).valid || (io.in(i).fire && io.in(i).bits.prefetch)
+        io.store_prefetch(i).valid := prefetcher.io.prefetch_req(i).valid || (io.in(i).fire && io.in(i).bits.vecValid && io.in(i).bits.prefetch)
       } else {
-        io.store_prefetch(i).valid := prefetcher.io.prefetch_req(i).valid || io.in(i).fire
+        io.store_prefetch(i).valid := prefetcher.io.prefetch_req(i).valid || (io.in(i).fire && io.in(i).bits.vecValid)
       }
       io.store_prefetch(i).bits.paddr := DontCare
       io.store_prefetch(i).bits.vaddr := Mux(prefetcher.io.prefetch_req(i).valid, prefetcher.io.prefetch_req(i).bits.vaddr, io.in(i).bits.vaddr)
@@ -480,18 +487,18 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   }
 
   for(((in, vwordOffset), i) <- io.in.zip(Seq(firstWord, secondWord)).zipWithIndex){
-    writeReq(i).valid := in.fire
+    writeReq(i).valid := in.fire && in.bits.vecValid
     writeReq(i).bits.vwordOffset := vwordOffset
     writeReq(i).bits.mask := in.bits.mask
     writeReq(i).bits.data := in.bits.data
     writeReq(i).bits.wline := in.bits.wline
     val debug_insertIdx = if(i == 0) firstInsertIdx else secondInsertIdx
     val insertVec = if(i == 0) firstInsertVec else secondInsertVec
-    assert(!((PopCount(insertVec) > 1.U) && in.fire))
+    assert(!((PopCount(insertVec) > 1.U) && in.fire && in.bits.vecValid))
     val insertIdx = OHToUInt(insertVec)
-    accessIdx(i).valid := GatedValidRegNext(in.fire)
+    accessIdx(i).valid := GatedValidRegNext(in.fire && in.bits.vecValid)
     accessIdx(i).bits := RegEnable(Mux(canMerge(i), mergeIdx(i), insertIdx), accessIdx(i).valid)
-    when(in.fire){
+    when(in.fire && in.bits.vecValid){
       when(canMerge(i)){
         writeReq(i).bits.wvec := mergeVec(i)
         mergeWordReq(in.bits, inptags(i), invtags(i), mergeIdx(i), mergeVec(i), vwordOffset)
@@ -513,7 +520,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   }
 
   for((req, i) <- io.in.zipWithIndex){
-    XSDebug(req.fire,
+    XSDebug(req.fire && req.bits.vecValid,
       p"accept req [$i]: " +
         p"addr:${Hexadecimal(req.bits.addr)} " +
         p"mask:${Binary(shiftMaskToLow(req.bits.addr,req.bits.mask))} " +
@@ -858,23 +865,157 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
       stateVec(i).w_timeout
     )
   }
-
+  
+  /*
+  *
+  **********************************************************
+  *      -------------                   -------------     *
+  *      | XiangShan |                   |    NEMU   |     *
+  *      -------------                   -------------     *
+  *            |                               |           *
+  *            V                               V           *
+  *          -----                           -----         *
+  *          | Q |                           | Q |         *
+  *          | U |                           | U |         *
+  *          | E |                           | E |         *
+  *          | U |                           | U |         *
+  *          | E |                           | E |         *
+  *          |   |                           |   |         *
+  *          -----                           -----         *
+  *            |                               |           *
+  *            |        --------------         |           *
+  *            |>>>>>>>>|  DIFFTEST  |<<<<<<<<<|           *
+  *                     --------------                     *
+  **********************************************************
+  */
+  // Initialize when unenabled difftest.
+  for (i <- 0 until EnsbufferWidth) {
+    io.vecDifftestInfo(i) := DontCare
+  }
   if (env.EnableDifftest) {
-    for (i <- 0 until EnsbufferWidth) {
-      val storeCommit = io.in(i).fire
-      val waddr = ZeroExt(Cat(io.in(i).bits.addr(PAddrBits - 1, 3), 0.U(3.W)), 64)
-      val sbufferMask = shiftMaskToLow(io.in(i).bits.addr, io.in(i).bits.mask)
-      val sbufferData = shiftDataToLow(io.in(i).bits.addr, io.in(i).bits.data)
-      val wmask = sbufferMask
-      val wdata = sbufferData & MaskExpand(sbufferMask)
+    val VecMemFLOWMaxNumber = 16
 
-      val difftest = DifftestModule(new DiffStoreEvent, delay = 2)
-      difftest.coreid := io.hartId
-      difftest.index  := i.U
-      difftest.valid  := storeCommit
-      difftest.addr   := waddr
-      difftest.data   := wdata
-      difftest.mask   := wmask
+    def UIntSlice(in: UInt, High: UInt, Low: UInt): UInt = {
+      val maxNum = in.getWidth
+      val result = Wire(Vec(maxNum, Bool()))
+
+      for (i <- 0 until maxNum) {
+        when (Low + i.U <= High) {
+          result(i) := in(Low + i.U)
+        }.otherwise{
+          result(i) := 0.U
+        }
+      }
+
+      result.asUInt
+    }
+
+    // To align with 'nemu', we need:
+    //  For 'unit-store' and 'whole' vector store instr, we re-split here,
+    //  and for the res, we do nothing.
+    for (i <- 0 until EnsbufferWidth) {
+      io.vecDifftestInfo(i).ready := io.in(i).ready
+
+      val uop             = io.vecDifftestInfo(i).bits
+
+      val isVse           = isVStore(uop.fuType) && LSUOpType.isUStride(uop.fuOpType)
+      val isVsm           = isVStore(uop.fuType) && VstuType.isMasked(uop.fuOpType)
+      val isVsr           = isVStore(uop.fuType) && VstuType.isWhole(uop.fuOpType)
+
+      val vpu             = uop.vpu
+      val veew            = uop.vpu.veew
+      val eew             = EewLog2(veew)
+      val EEB             = (1.U << eew).asUInt //Only when VLEN=128 effective element byte
+      val EEWBits         = (EEB << 3.U).asUInt
+      val nf              = Mux(isVsr, 0.U, vpu.nf)
+
+      val isSegment       = nf =/= 0.U && !isVsm
+      val isVSLine        = (isVse || isVsm || isVsr) && !isSegment
+
+      // The number of stores generated by a uop theroy.
+      // No other vector instructions need to be considered.
+      val flow            = Mux(
+                              isVSLine,
+                              (16.U >> eew).asUInt,
+                              0.U
+                            )
+
+      val rawData         = io.in(i).bits.data
+      val rawMask         = io.in(i).bits.mask
+      val rawAddr         = io.in(i).bits.addr
+
+      // A common difftest interface for scalar and vector instr
+      val difftestCommon = DifftestModule(new DiffStoreEvent, delay = 2)
+      when (isVSLine) {
+        val splitMask         = UIntSlice(rawMask, EEB - 1.U, 0.U)(7,0)  // Byte
+        val splitData         = UIntSlice(rawData, EEWBits - 1.U, 0.U)(63,0) // Double word
+        val storeCommit       = io.in(i).fire && splitMask.orR && io.in(i).bits.vecValid
+        val waddr             = rawAddr
+        val wmask             = splitMask
+        val wdata             = splitData & MaskExpand(splitMask)
+
+        difftestCommon.coreid := io.hartId
+        difftestCommon.index  := (i*VecMemFLOWMaxNumber).U
+        difftestCommon.valid  := storeCommit
+        difftestCommon.addr   := waddr
+        difftestCommon.data   := wdata
+        difftestCommon.mask   := wmask
+
+      }.otherwise{
+        val storeCommit       = io.in(i).fire
+        val waddr             = ZeroExt(Cat(io.in(i).bits.addr(PAddrBits - 1, 3), 0.U(3.W)), 64)
+        val sbufferMask       = shiftMaskToLow(io.in(i).bits.addr, io.in(i).bits.mask)
+        val sbufferData       = shiftDataToLow(io.in(i).bits.addr, io.in(i).bits.data)
+        val wmask             = sbufferMask
+        val wdata             = sbufferData & MaskExpand(sbufferMask)
+
+        difftestCommon.coreid := io.hartId
+        difftestCommon.index  := (i*VecMemFLOWMaxNumber).U
+        difftestCommon.valid  := storeCommit && io.in(i).bits.vecValid
+        difftestCommon.addr   := waddr
+        difftestCommon.data   := wdata
+        difftestCommon.mask   := wmask
+
+      }
+
+      // Only the interface used by the 'unit-store' and 'whole' vector store instr
+      for (index <- 1 until VecMemFLOWMaxNumber) {
+        val difftest = DifftestModule(new DiffStoreEvent, delay = 2)
+
+        // I've already done something process with 'mask' outside:
+        //  Different cases of 'vm' have been considered:
+        //    Any valid store will definitely not have all 0 masks,
+        //    and the extra part due to unaligned access must have a mask of 0
+        when (index.U < flow && isVSLine) {
+          // Make NEMU-difftest happy
+          val shiftIndex  = EEB*index.U
+          val shiftFlag   = shiftIndex(2,0).orR // Double word Flag
+          val shiftBytes  = Mux(shiftFlag, shiftIndex(2,0), 0.U)
+          val shiftBits   = shiftBytes << 3.U
+          val splitMask   = UIntSlice(rawMask, (EEB*(index+1).U - 1.U), EEB*index.U)(7,0)  // Byte
+          val splitData   = UIntSlice(rawData, (EEWBits*(index+1).U - 1.U), EEWBits*index.U)(63,0) // Double word
+          val storeCommit = io.in(i).fire && splitMask.orR  && io.in(i).bits.vecValid
+          val waddr       = Cat(rawAddr(PAddrBits - 1, 4), Cat(shiftIndex(3), 0.U(3.W)))
+          val wmask       = splitMask << shiftBytes
+          val wdata       = (splitData & MaskExpand(splitMask)) << shiftBits
+
+          difftest.coreid := io.hartId
+          difftest.index  := (i*VecMemFLOWMaxNumber+index).U
+          difftest.valid  := storeCommit
+          difftest.addr   := waddr
+          difftest.data   := wdata
+          difftest.mask   := wmask
+
+        }.otherwise{
+          difftest.coreid := 0.U
+          difftest.index  := 0.U
+          difftest.valid  := 0.U
+          difftest.addr   := 0.U
+          difftest.data   := 0.U
+          difftest.mask   := 0.U
+
+        }
+      }
     }
   }
 
@@ -882,6 +1023,7 @@ class Sbuffer(implicit p: Parameters) extends DCacheModule with HasSbufferConst 
   XSPerfHistogram("util", perf_valid_entry_count, true.B, 0, StoreBufferSize, 1)
   XSPerfAccumulate("sbuffer_req_valid", PopCount(VecInit(io.in.map(_.valid)).asUInt))
   XSPerfAccumulate("sbuffer_req_fire", PopCount(VecInit(io.in.map(_.fire)).asUInt))
+  XSPerfAccumulate("sbuffer_req_fire_vecinvalid", PopCount(VecInit(io.in.map(data => data.fire && !data.bits.vecValid)).asUInt))
   XSPerfAccumulate("sbuffer_merge", PopCount(VecInit(io.in.zipWithIndex.map({case (in, i) => in.fire && canMerge(i)})).asUInt))
   XSPerfAccumulate("sbuffer_newline", PopCount(VecInit(io.in.zipWithIndex.map({case (in, i) => in.fire && !canMerge(i)})).asUInt))
   XSPerfAccumulate("dcache_req_valid", io.dcache.req.valid)

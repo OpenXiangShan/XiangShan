@@ -23,7 +23,7 @@ import xiangshan._
 import utils._
 import utility._
 import xiangshan.backend.Bundles._
-import xiangshan.backend.datapath.WbConfig.{IntWB, VfWB, NoWB, PregWB}
+import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.issue.SchdBlockParams
 import xiangshan.backend.datapath.{DataSource}
 
@@ -70,8 +70,10 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
 
   wakeupOHVec.zipWithIndex.foreach{ case (wakeupOH, idx) =>
     val tmp = pregWB match {
-      case _: IntWB => io.wakeUp.map(x => x.valid && x.bits.rfWen && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), io.ldCancel))
-      case _: VfWB => io.wakeUp.map(x => x.valid && (x.bits.fpWen || x.bits.vecWen) && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), io.ldCancel))
+      case IntWB(_, _) => io.wakeUp.map(x => x.valid && x.bits.rfWen && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), io.ldCancel))
+      case FpWB(_, _)  => io.wakeUp.map(x => x.valid && x.bits.fpWen && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), io.ldCancel))
+      case VfWB(_, _)  => io.wakeUp.map(x => x.valid && x.bits.vecWen && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), io.ldCancel))
+      case _ => throw new IllegalArgumentException(s"WbConfig ${pregWB} is not permitted")
     }
     wakeupOH := (if (io.wakeUp.nonEmpty) VecInit(tmp.toSeq).asUInt else 0.U)
   }
@@ -79,9 +81,10 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
   val allocMask = reqVecToMask(io.allocPregs)
   val wakeUpMask = VecInit(wakeupOHVec.map(_.orR).toSeq).asUInt
   val cancelMask = pregWB match {
-    case _: IntWB => io.cancel.map(x => Mux(x.valid && x.bits.rfWen, UIntToOH(x.bits.pdest), 0.U)).fold(0.U)(_ | _)
-    case _: VfWB => io.cancel.map(x => Mux(x.valid && (x.bits.fpWen || x.bits.vecWen), UIntToOH(x.bits.pdest), 0.U)).fold(0.U)(_ | _)
-    case _: NoWB => throw new IllegalArgumentException("NoWB is not permitted")
+    case IntWB(_, _) => io.cancel.map(x => Mux(x.valid && x.bits.rfWen, UIntToOH(x.bits.pdest), 0.U)).fold(0.U)(_ | _)
+    case FpWB(_, _)  => io.cancel.map(x => Mux(x.valid && x.bits.fpWen, UIntToOH(x.bits.pdest), 0.U)).fold(0.U)(_ | _)
+    case VfWB(_, _)  => io.cancel.map(x => Mux(x.valid && x.bits.vecWen, UIntToOH(x.bits.pdest), 0.U)).fold(0.U)(_ | _)
+    case _ => throw new IllegalArgumentException(s"WbConfig ${pregWB} is not permitted")
   }
   val ldCancelMask = loadDependency.map(x => LoadShouldCancel(Some(x), io.ldCancel))
 
@@ -111,6 +114,10 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
   tableUpdate.zipWithIndex.foreach{ case (update, idx) =>
     when(allocMask(idx) || cancelMask(idx) || ldCancelMask(idx)) {
       update := true.B                                    //busy
+      if (idx == 0 && pregWB.isInstanceOf[IntWB]) {
+          // Int RegFile 0 is always ready
+          update := false.B
+      }
     }.elsewhen(wakeUpMask(idx) || wbMask(idx)) {
       update := false.B                                   //ready
     }.otherwise {

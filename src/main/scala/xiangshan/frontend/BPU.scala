@@ -27,7 +27,7 @@ import scala.math.min
 import xiangshan.backend.decode.ImmUnion
 
 trait HasBPUConst extends HasXSParameter {
-  val MaxMetaBaseLength =  if (!env.FPGAPlatform) 512 else 219 // TODO: Reduce meta length
+  val MaxMetaBaseLength =  if (!env.FPGAPlatform) 512 else 247 // TODO: Reduce meta length
   val MaxMetaLength = if (HasHExtension) MaxMetaBaseLength + 4 else MaxMetaBaseLength
   val MaxBasicBlockSize = 32
   val LHistoryLength = 32
@@ -420,10 +420,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     s2_fire_dup(2) && s2_redirect_dup(2) ||
     s3_fire_dup(2) && s3_redirect_dup(2)
   io.bpu_to_ftq.resp.bits  := predictors.io.out
-  io.bpu_to_ftq.resp.bits.last_stage_spec_info.folded_hist := s3_folded_gh_dup(2)
   io.bpu_to_ftq.resp.bits.last_stage_spec_info.histPtr     := s3_ghist_ptr_dup(2)
-  io.bpu_to_ftq.resp.bits.last_stage_spec_info.lastBrNumOH := s3_last_br_num_oh_dup(2)
-  io.bpu_to_ftq.resp.bits.last_stage_spec_info.afhob       := s3_ahead_fh_oldest_bits_dup(2)
 
   val full_pred_diff = WireInit(false.B)
   val full_pred_diff_stage = WireInit(0.U)
@@ -750,12 +747,29 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
       yield (0 until numBr).map(i => shift === (i+1).U && taken && addIntoHist )
 
   val oldPtr_dup = redirect_dup.map(_.cfiUpdate.histPtr)
-  val oldFh_dup = redirect_dup.map(_.cfiUpdate.folded_hist)
   val updated_ptr_dup = oldPtr_dup.zip(shift_dup).map {case (oldPtr, shift) => oldPtr - shift}
+  def computeFoldedHist(hist: UInt, compLen: Int)(histLen: Int): UInt = {
+    if (histLen > 0) {
+      val nChunks     = (histLen + compLen - 1) / compLen
+      val hist_chunks = (0 until nChunks) map { i =>
+        hist(min((i + 1) * compLen, histLen) - 1, i * compLen)
+      }
+      ParallelXOR(hist_chunks)
+    }
+    else 0.U
+  }
+
+  val oldFh_dup = dup_seq(WireInit(0.U.asTypeOf(new AllFoldedHistories(foldedGHistInfos))))
+  oldFh_dup.zip(oldPtr_dup).map { case (oldFh, oldPtr) =>
+      foldedGHistInfos.foreach { case (histLen, compLen) => 
+        oldFh.getHistWithInfo((histLen, compLen)).folded_hist := computeFoldedHist(getHist(oldPtr), compLen)(histLen)
+      }
+  }
+
   val updated_fh_dup =
-    for ((((((oldFh, afhob), lastBrNumOH), taken), addIntoHist), shift) <-
-      oldFh_dup zip afhob_dup zip lastBrNumOH_dup zip taken_dup zip addIntoHist_dup zip shift_dup)
-    yield VecInit((0 to numBr).map(i => oldFh.update(afhob, lastBrNumOH, i, taken && addIntoHist)))(shift)
+    for (((((oldFh, oldPtr), taken), addIntoHist), shift) <-
+      oldFh_dup zip oldPtr_dup zip taken_dup zip addIntoHist_dup zip shift_dup)
+    yield VecInit((0 to numBr).map(i => oldFh.update(ghv, oldPtr, i, taken && addIntoHist)))(shift)
   val thisBrNumOH_dup = shift_dup.map(shift => UIntToOH(shift, numBr+1))
   val thisAheadFhOb_dup = dup_wire(new AllAheadFoldedHistoryOldestBits(foldedGHistInfos))
   thisAheadFhOb_dup.zip(oldPtr_dup).map {case (afhob, oldPtr) => afhob.read(ghv, oldPtr)}
@@ -818,24 +832,13 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     }
 
     // Calculate true history using Parallel XOR
-    def computeFoldedHist(hist: UInt, compLen: Int)(histLen: Int): UInt = {
-      if (histLen > 0) {
-        val nChunks     = (histLen + compLen - 1) / compLen
-        val hist_chunks = (0 until nChunks) map { i =>
-          hist(min((i + 1) * compLen, histLen) - 1, i * compLen)
-        }
-        ParallelXOR(hist_chunks)
-      }
-      else 0.U
-    }
     // Do differential
-    val predictFHistAll: AllFoldedHistories = io.ftq_to_bpu.update.bits.spec_info.folded_hist
     TageTableInfos.map {
       case (nRows, histLen, _) => {
         val nRowsPerBr = nRows / numBr
+        val predictGHistPtr = io.ftq_to_bpu.update.bits.spec_info.histPtr
         val commitTrueHist: UInt = computeFoldedHist(getCommitHist(commitGHistPtr), log2Ceil(nRowsPerBr))(histLen)
-        val predictFHist         : UInt = predictFHistAll.
-          getHistWithInfo((histLen, min(histLen, log2Ceil(nRowsPerBr)))).folded_hist
+        val predictFHist  : UInt = computeFoldedHist(getHist(predictGHistPtr), log2Ceil(nRowsPerBr))(histLen)
         XSWarn(updateValid && predictFHist =/= commitTrueHist,
           p"predict time ghist: ${predictFHist} is different from commit time: ${commitTrueHist}\n")
       }

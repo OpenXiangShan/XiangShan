@@ -17,6 +17,7 @@ object WbConfig {
     override def toString: String = {
       var res = this match {
         case _: IntWB => "INT"
+        case _: FpWB => "FP"
         case _: VfWB => "VF"
         case _: NoWB => "NO"
         case _ => "??"
@@ -44,6 +45,16 @@ object WbConfig {
     def dataCfg: DataConfig = IntData()
 
     def numPreg(backendParams: BackendParams): Int = backendParams.getPregParams(IntData()).numEntries
+  }
+
+  case class FpWB(
+    port: Int = -1,
+    priority: Int = Int.MaxValue,
+  ) extends PregWB {
+
+    def dataCfg: DataConfig = FpData()
+
+    def numPreg(backendParams: BackendParams): Int = backendParams.getPregParams(FpData()).numEntries
   }
 
   case class VfWB(

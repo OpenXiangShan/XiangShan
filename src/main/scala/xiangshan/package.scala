@@ -70,7 +70,7 @@ package object xiangshan {
   }
 
   object VlduType {
-    // bit encoding: | padding (2bit) || mop (2bit) | lumop(5bit) |
+    // bit encoding: | vector or scala (2bit) || mop (2bit) | lumop(5bit) |
     // only unit-stride use lumop
     // mop [1:0]
     // 0 0 : unit-stride
@@ -82,17 +82,19 @@ package object xiangshan {
     // 0 1 0 0 0 : unit-stride, whole register load
     // 0 1 0 1 1 : unit-stride, mask load, EEW=8
     // 1 0 0 0 0 : unit-stride fault-only-first
-    def vle       = "b00_00_00000".U
-    def vlr       = "b00_00_01000".U
-    def vlm       = "b00_00_01011".U
-    def vleff     = "b00_00_10000".U
-    def vluxe     = "b00_01_00000".U
-    def vlse      = "b00_10_00000".U
-    def vloxe     = "b00_11_00000".U
+    def vle       = "b01_00_00000".U
+    def vlr       = "b01_00_01000".U // whole
+    def vlm       = "b01_00_01011".U // mask
+    def vleff     = "b01_00_10000".U
+    def vluxe     = "b01_01_00000".U // index
+    def vlse      = "b01_10_00000".U // strided
+    def vloxe     = "b01_11_00000".U // index
 
-    def isStrided(fuOpType: UInt): Bool = fuOpType === vlse
-    def isIndexed(fuOpType: UInt): Bool = fuOpType === vluxe || fuOpType === vloxe
-    def isMasked(fuOpType: UInt): Bool = fuOpType === vlm
+    def isWhole  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01000".U
+    def isMasked (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01011".U
+    def isStrided(fuOpType: UInt): Bool = fuOpType(6, 5) === "b10".U
+    def isIndexed(fuOpType: UInt): Bool = fuOpType(5)
+    def isVecLd  (fuOpType: UInt): Bool = fuOpType(8, 7) === "b01".U
   }
 
   object VstuType {
@@ -107,15 +109,18 @@ package object xiangshan {
     // 0 0 0 0 0 : unit-stride load
     // 0 1 0 0 0 : unit-stride, whole register load
     // 0 1 0 1 1 : unit-stride, mask load, EEW=8
-    def vse       = "b00_00_00000".U
-    def vsr       = "b00_00_01000".U
-    def vsm       = "b00_00_01011".U
-    def vsuxe     = "b00_01_00000".U
-    def vsse      = "b00_10_00000".U
-    def vsoxe     = "b00_11_00000".U
+    def vse       = "b10_00_00000".U
+    def vsr       = "b10_00_01000".U // whole
+    def vsm       = "b10_00_01011".U // mask
+    def vsuxe     = "b10_01_00000".U // index
+    def vsse      = "b10_10_00000".U // strided
+    def vsoxe     = "b10_11_00000".U // index
 
-    def isStrided(fuOpType: UInt): Bool = fuOpType === vsse
-    def isIndexed(fuOpType: UInt): Bool = fuOpType === vsuxe || fuOpType === vsoxe
+    def isWhole  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01000".U
+    def isMasked (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01011".U
+    def isStrided(fuOpType: UInt): Bool = fuOpType(6, 5) === "b10".U
+    def isIndexed(fuOpType: UInt): Bool = fuOpType(5)
+    def isVecSt  (fuOpType: UInt): Bool = fuOpType(8, 7) === "b10".U
   }
 
   object IF2VectorType {
@@ -578,6 +583,18 @@ package object xiangshan {
     def amomaxu_d = "b101011".U
 
     def size(op: UInt) = op(1,0)
+
+    def getVecLSMop(fuOpType: UInt): UInt = fuOpType(6, 5)
+
+    def isVecLd(fuOpType: UInt): Bool = fuOpType(8, 7) === "b01".U
+    def isVecSt(fuOpType: UInt): Bool = fuOpType(8, 7) === "b10".U
+    def isVecLS(fuOpType: UInt): Bool = fuOpType(8, 7).orR
+
+    def isUStride(fuOpType: UInt): Bool = fuOpType(6, 0) === "b00_00000".U
+    def isWhole  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01000".U
+    def isMasked (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01011".U
+    def isStrided(fuOpType: UInt): Bool = fuOpType(6, 5) === "b10".U
+    def isIndexed(fuOpType: UInt): Bool = fuOpType(5)
   }
 
   object BKUOpType {
@@ -838,6 +855,7 @@ package object xiangshan {
     // freelist full
     val IntFlStall = Value("IntFlStall")
     val FpFlStall = Value("FpFlStall")
+    val VecFlStall = Value("VecFlStall")
     // dispatch queue full
     val IntDqStall = Value("IntDqStall")
     val FpDqStall = Value("FpDqStall")

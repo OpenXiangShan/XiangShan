@@ -84,7 +84,9 @@ class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val fenceio = OptionWrapper(cfg.isFence, new FenceIO)
   val frm = OptionWrapper(cfg.needSrcFrm, Input(UInt(3.W)))
   val vxrm = OptionWrapper(cfg.needSrcVxrm, Input(UInt(2.W)))
-  val vtype = OptionWrapper(cfg.writeVType, new VType)
+  val vtype = OptionWrapper(cfg.writeVConfig, new VType)
+  val vlIsZero = OptionWrapper(cfg.writeVConfig, Output(Bool()))
+  val vlIsVlmax = OptionWrapper(cfg.writeVConfig, Output(Bool()))
 }
 
 abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSModule {
@@ -122,7 +124,7 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
   * @author LinJiaWei, Yinan Xu
   */
 trait HasPipelineReg { this: FuncUnit =>
-  def latency: Int 
+  def latency: Int
 
   val latdiff :Int = cfg.latency.extraLatencyVal.getOrElse(0)
   val preLat :Int = latency - latdiff

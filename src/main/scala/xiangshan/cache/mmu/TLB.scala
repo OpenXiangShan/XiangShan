@@ -154,27 +154,29 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val (p_hit, p_ppn, p_perm, p_gvpn, p_g_perm, p_s2xlate) = ptw_resp_bypass(get_pn(req_in(i).bits.vaddr), req_in_s2xlate(i))
     val enable = portTranslateEnable(i)
     val isOnlys2xlate = req_out_s2xlate(i) === onlyStage2
-    val need_gpa_vpn_hit = RegEnable(need_gpa_vpn === get_pn(req_in(i).bits.vaddr), req_in(i).fire)
+    val need_gpa_vpn_hit = need_gpa_vpn === get_pn(req_out(i).vaddr) 
     val isitlb = TlbCmd.isExec(req_out(i).cmd)
 
     when (!isitlb && need_gpa_robidx.needFlush(redirect) || isitlb && flush_pipe(i)){
       need_gpa := false.B
       resp_gpa_refill := false.B
       need_gpa_vpn := 0.U
-    }.elsewhen (io.requestor(i).resp.valid && !io.requestor(i).req_kill && hasGpf(i) && need_gpa === false.B && !p_hit && !(resp_gpa_refill && need_gpa_vpn_hit) && !isOnlys2xlate ) {
+    }.elsewhen (req_out_v(i) && !p_hit && !(resp_gpa_refill && need_gpa_vpn_hit) && !isOnlys2xlate && hasGpf(i) && need_gpa === false.B && !io.requestor(i).req_kill) {
       need_gpa := true.B
       need_gpa_vpn := get_pn(req_out(i).vaddr)
       resp_gpa_refill := false.B
       need_gpa_robidx := req_out(i).debug.robIdx
-    }.elsewhen (ptw.resp.fire && need_gpa && need_gpa_vpn === ptw.resp.bits.getVpn) {
+    }.elsewhen (ptw.resp.fire && need_gpa && need_gpa_vpn === ptw.resp.bits.getVpn(need_gpa_vpn)) {
       need_gpa_gvpn := ptw.resp.bits.s2.entry.tag
       resp_gpa_refill := true.B
     }
 
-    when (hasGpf(i) && resp_gpa_refill && need_gpa_vpn_hit){
+    when (req_out_v(i) && hasGpf(i) && resp_gpa_refill && need_gpa_vpn_hit ){
       need_gpa := false.B
     }
     
+    TimeOutAssert(need_gpa && !resp_gpa_refill, timeOutThreshold, s"port{i} need gpa long time not refill.")
+  
     val hit = e_hit || p_hit
     val miss = (!hit && enable) || hasGpf(i) && !p_hit && !(resp_gpa_refill && need_gpa_vpn_hit) && !isOnlys2xlate
     hit.suggestName(s"hit_read_${i}")

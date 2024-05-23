@@ -120,9 +120,6 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
 
   def fromFtqRedirectSram(entry: Ftq_Redirect_SRAMEntry) = {
     // this.hist := entry.ghist
-    this.folded_hist := entry.folded_hist
-    this.lastBrNumOH := entry.lastBrNumOH
-    this.afhob := entry.afhob
     this.histPtr := entry.histPtr
     this.ssp := entry.ssp
     this.sctr := entry.sctr
@@ -138,8 +135,6 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
 class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val instr = UInt(32.W)
   val pc = UInt(VAddrBits.W)
-  // Todo: remove this
-  val gpaddr = UInt(GPAddrBits.W)
   val foldpc = UInt(MemPredPCWidth.W)
   val exceptionVec = ExceptionVec()
   val trigger = new TriggerCf
@@ -324,6 +319,7 @@ class ResetPregStateReq(implicit p: Parameters) extends XSBundle {
   // NOTE: set isInt and isFp both to 'false' when invalid
   val isInt = Bool()
   val isFp = Bool()
+  val isVec = Bool()
   val preg = UInt(PhyRegIdxWidth.W)
 }
 
@@ -410,19 +406,20 @@ class SnapshotPort(implicit p: Parameters) extends XSBundle {
   val flushVec = Vec(RenameSnapshotNum, Bool())
 }
 
-class RSFeedback(implicit p: Parameters) extends XSBundle {
+class RSFeedback(isVector: Boolean = false)(implicit p: Parameters) extends XSBundle {
   val robIdx = new RobPtr
   val hit = Bool()
   val flushState = Bool()
   val sourceType = RSFeedbackType()
   val dataInvalidSqIdx = new SqPtr
+  val uopIdx     = OptionWrapper(isVector, UopIdx())
 }
 
-class MemRSFeedbackIO(implicit p: Parameters) extends XSBundle {
+class MemRSFeedbackIO(isVector: Boolean = false)(implicit p: Parameters) extends XSBundle {
   // Note: you need to update in implicit Parameters p before imp MemRSFeedbackIO
   // for instance: MemRSFeedbackIO()(updateP)
-  val feedbackSlow = ValidIO(new RSFeedback()) // dcache miss queue full, dtlb miss
-  val feedbackFast = ValidIO(new RSFeedback()) // bank conflict
+  val feedbackSlow = ValidIO(new RSFeedback(isVector)) // dcache miss queue full, dtlb miss
+  val feedbackFast = ValidIO(new RSFeedback(isVector)) // bank conflict
 }
 
 class LoadCancelIO(implicit p: Parameters) extends XSBundle {
@@ -526,8 +523,6 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val l2_pf_store_only = Output(Bool())
   // ICache
   val icache_parity_enable = Output(Bool())
-  // Labeled XiangShan
-  val dsid = Output(UInt(8.W)) // TODO: DsidWidth as parameter
   // Load violation predictor
   val lvpred_disable = Output(Bool())
   val no_spec_load = Output(Bool())
