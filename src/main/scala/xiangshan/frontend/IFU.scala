@@ -65,7 +65,7 @@ class FtqInterface(implicit p: Parameters) extends XSBundle {
 
 class UncacheInterface(implicit p: Parameters) extends XSBundle {
   val fromUncache = Flipped(DecoupledIO(new InsUncacheResp))
-  val toUncache   = DecoupledIO( new InsUncacheReq )
+  val toUncache   = DecoupledIO(new InsUncacheReq )
 }
 
 class NewIFUIO(implicit p: Parameters) extends XSBundle {
@@ -315,12 +315,12 @@ class NewIFU(implicit p: Parameters) extends XSModule
   /**
    * In order to reduce power consumption, avoid calculating the full PC value in the first level.
    * code of original logic, this code has been deprecated
-   * val f1_pc                 = VecInit(f1_pc_lower_result.map{ i =>  
+   * val f1_pc                 = VecInit(f1_pc_lower_result.map{ i =>
    *  Mux(i(f1_pc_adder_cut_point), Cat(f1_pc_high_plus1,i(f1_pc_adder_cut_point-1,0)), Cat(f1_pc_high,i(f1_pc_adder_cut_point-1,0)))})
-   * 
+   *
    */
   val f1_pc_lower_result    = VecInit((0 until PredictWidth).map(i => Cat(0.U(1.W), f1_ftq_req.startAddr(PcCutPoint-1, 0)) + (i * 2).U)) // cat with overflow bit
-  
+
   val f1_pc                 = CatPC(f1_pc_lower_result, f1_pc_high, f1_pc_high_plus1)
 
   val f1_half_snpc_lower_result = VecInit((0 until PredictWidth).map(i => Cat(0.U(1.W), f1_ftq_req.startAddr(PcCutPoint-1, 0)) + ((i+2) * 2).U)) // cat with overflow bit
@@ -336,6 +336,12 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   val f1_cut_ptr            = if(HasCExtension)  VecInit((0 until PredictWidth + 1).map(i =>  Cat(0.U(2.W), f1_ftq_req.startAddr(blockOffBits-1, 1)) + i.U ))
                                   else           VecInit((0 until PredictWidth).map(i =>     Cat(0.U(2.W), f1_ftq_req.startAddr(blockOffBits-1, 2)) + i.U ))
+
+  /* Fake ICache only for simulation */
+  val fakeICache = Module(new FakeICache)
+  dontTouch(fakeICache.io)
+  fakeICache.io.req.valid := f1_fire
+  fakeICache.io.req.bits.addr := f1_ftq_req.startAddr
 
   /**
     ******************************************************************************
@@ -444,6 +450,18 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f2_cache_response_data = fromICache.map(_.bits.data)
   val f2_data_2_cacheline = Cat(f2_cache_response_data(0), f2_cache_response_data(0))
 
+  val f2_fakeICache_data = fakeICache.io.resp
+  val f2_fakeICache_cacheline = DataHoldBypass(Cat(f2_fakeICache_data.bits.data1, f2_fakeICache_data.bits.data0), RegNext(f1_fire))
+  val f2_fakeICache_cacheline_valid = DataHoldBypass(f2_fakeICache_data.valid, RegNext(f1_fire))
+  val f2_fakeICache_addr = DataHoldBypass(f2_fakeICache_data.bits.addr, RegNext(f1_fire))
+  dontTouch(f2_fakeICache_cacheline)
+  dontTouch(f2_fakeICache_cacheline_valid)
+  dontTouch(f2_fakeICache_addr)
+
+  when (f2_fakeICache_cacheline_valid && fromICache(0).valid && f2_valid && f2_icache_all_resp_wire) {
+    XSError(f2_data_2_cacheline =/= f2_fakeICache_cacheline, "Fake ICache data not match")
+  }
+
   val f2_cut_data   = cut(f2_data_2_cacheline, f2_cut_ptr)
 
   /** predecode (include RVC expander) */
@@ -528,7 +546,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_pc_last_lower_result_plus2 = RegEnable(f2_pc_lower_result(PredictWidth - 1) + 2.U, f2_fire)
   val f3_pc_last_lower_result_plus4 = RegEnable(f2_pc_lower_result(PredictWidth - 1) + 4.U, f2_fire)
   //val f3_half_snpc      = RegEnable(f2_half_snpc,   f2_fire)
-  
+
   /**
     ***********************************************************************
     * Half snpc(i) is larger than pc(i) by 4. Using pc to calculate half snpc may be a good choice.
@@ -615,11 +633,11 @@ class NewIFU(implicit p: Parameters) extends XSModule
     is_first_instr := false.B
   }
 
-  when(f3_flush && !f3_req_is_mmio)                                                 {f3_valid := false.B}
-  .elsewhen(mmioF3Flush && f3_req_is_mmio && !f3_need_not_flush)                    {f3_valid := false.B}
-  .elsewhen(f2_fire && !f2_flush )                                                  {f3_valid := true.B }
-  .elsewhen(io.toIbuffer.fire && !f3_req_is_mmio)                                   {f3_valid := false.B}
-  .elsewhen{f3_req_is_mmio && f3_mmio_req_commit}                                   {f3_valid := false.B}
+  when(f3_flush && !f3_req_is_mmio)                              {f3_valid := false.B}
+  .elsewhen(mmioF3Flush && f3_req_is_mmio && !f3_need_not_flush) {f3_valid := false.B}
+  .elsewhen(f2_fire && !f2_flush )                               {f3_valid := true.B }
+  .elsewhen(io.toIbuffer.fire && !f3_req_is_mmio)                {f3_valid := false.B}
+  .elsewhen{f3_req_is_mmio && f3_mmio_req_commit}                {f3_valid := false.B}
 
   val f3_mmio_use_seq_pc = RegInit(false.B)
 
