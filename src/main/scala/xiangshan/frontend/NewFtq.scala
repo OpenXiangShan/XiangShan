@@ -540,6 +540,18 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val validEntries = distanceBetween(bpuPtr, commPtr)
   val canCommit = Wire(Bool())
 
+  val backendIpf = RegInit(false.B)
+  val backendIaf = RegInit(false.B)
+  val backendPcFaultIfuPtr = RegInit(FtqPtr(false.B, 0.U))
+  when (backendRedirect.valid && (backendRedirect.bits.cfiUpdate.backendIPF || backendRedirect.bits.cfiUpdate.backendIAF)) {
+    backendIpf := backendRedirect.bits.cfiUpdate.backendIPF
+    backendIaf := backendRedirect.bits.cfiUpdate.backendIAF
+    backendPcFaultIfuPtr := ifuWbPtr_write
+  } .elsewhen ((backendIpf || backendIaf) && ifuWbPtr =/= backendPcFaultIfuPtr) {
+    backendIpf := false.B
+    backendIaf := false.B
+  }
+
   // **********************************************************************
   // **************************** enq from bpu ****************************
   // **********************************************************************
@@ -810,6 +822,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   io.toICache.req.valid := entry_is_to_send && ifuPtr =/= bpuPtr
   io.toICache.req.bits.readValid.zipWithIndex.map{case(copy, i) => copy := toICacheEntryToSend(i) && copied_ifu_ptr(i) =/= copied_bpu_ptr(i)}
   io.toICache.req.bits.pcMemRead.zipWithIndex.map{case(copy,i) => copy.fromFtqPcBundle(toICachePcBundle(i))}
+  io.toICache.req.bits.backendIpf := backendIpf
+  io.toICache.req.bits.backendIaf := backendIaf
   // io.toICache.req.bits.bypassSelect := last_cycle_bpu_in && bpu_in_bypass_ptr === ifuPtr
   // io.toICache.req.bits.bpuBypassWrite.zipWithIndex.map{case(bypassWrtie, i) =>
   //   bypassWrtie.startAddr := bpu_in_bypass_buf.tail(i).startAddr
