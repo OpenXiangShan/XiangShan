@@ -422,10 +422,12 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   /** s2 control */
   val s2_fetch_finish = Wire(Bool())
 
-  val s2_valid          = generatePipeControl(lastFire = s1_fire, thisFire = s2_fire, thisFlush = io.fencei, lastFlush = false.B)
+  val s2_valid          = generatePipeControl(lastFire = s1_fire, thisFire = s2_fire, thisFlush = false.B, lastFlush = false.B)
 
   s2_ready      := (s2_valid && s2_fetch_finish && !io.respStall) || !s2_valid
-  s2_fire       := s2_valid && s2_fetch_finish && !io.respStall && !io.fencei
+  s2_fire       := s2_valid && s2_fetch_finish && !io.respStall
+
+  val s2_fencei_latch = holdReleaseLatch(valid = io.fencei && s2_valid, release = s2_fire, flush = false.B)
 
   /** s2 data */
   // val mmio = fromPMP.map(port => port.mmio) // TODO: handle it
@@ -627,8 +629,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     ******************************************************************************
     */
   (0 until PortNumber).map{ i =>
-    if(i ==0) toIFU(i).valid          := s2_fire
-      else   toIFU(i).valid           := s2_fire && s2_double_line
+    if(i == 0) toIFU(i).valid         := s2_fire && !s2_fencei_latch
+      else     toIFU(i).valid         := s2_fire && !s2_fencei_latch && s2_double_line
     toIFU(i).bits.paddr               := s2_req_paddr(i)
     toIFU(i).bits.gpaddr              := s2_req_gpaddr(i)
     toIFU(i).bits.vaddr               := s2_req_vaddr(i)
