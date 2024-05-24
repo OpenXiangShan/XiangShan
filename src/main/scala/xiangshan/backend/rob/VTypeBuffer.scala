@@ -165,6 +165,8 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
 
   walkPtr := walkPtrNext
 
+  private val useSnapshot = (state === s_idle && stateNext === s_walk) || (state === s_walk && io.snpt.useSnpt && io.redirect.valid)
+
   // update enq ptr
   private val enqPtrNext = Mux(
     state === s_walk && stateNext === s_idle,
@@ -216,9 +218,6 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   private val walkValidVec = Wire(Vec(CommitWidth, Bool()))
   private val infoVec = Wire(Vec(CommitWidth, VType()))
   private val hasVsetvlVec = Wire(Vec(CommitWidth, Bool()))
-
-  private val isCommit = state === s_idle || state === s_spcl_walk
-  private val isWalk = state === s_walk || state === s_spcl_walk
 
   for (i <- 0 until CommitWidth) {
     commitValidVec(i) := state === s_idle && i.U < commitSize || state === s_spcl_walk && i.U < spclWalkSize
@@ -278,7 +277,7 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
     // special walk use commit vtype
     decodeResumeVType.valid := commitVTypeValid
     decodeResumeVType.bits := newestArchVType
-  }.elsewhen (state === s_walk && stateLast === s_idle) {
+  }.elsewhen (useSnapshot) {
     // use snapshot vtype
     decodeResumeVType.valid := true.B
     decodeResumeVType.bits := walkVtypeSnapshots(snptSelect)
@@ -294,10 +293,10 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   // update vtype in decode when VTypeBuffer resumes from walk state
   // note that VTypeBuffer can still send resuming request in the first cycle of s_idle
   io.toDecode.isResumeVType := state =/= s_idle || decodeResumeVType.valid
-  io.toDecode.walkVType.valid := isWalk && decodeResumeVType.valid
+  io.toDecode.walkVType.valid := decodeResumeVType.valid
   io.toDecode.walkVType.bits := Mux(io.toDecode.walkVType.valid, decodeResumeVType.bits, 0.U.asTypeOf(VType()))
 
-  io.toDecode.commitVType.vtype.valid := isCommit && commitVTypeValid
+  io.toDecode.commitVType.vtype.valid := commitVTypeValid
   io.toDecode.commitVType.vtype.bits := newestArchVType
 
   // because vsetvl flush pipe, there is only one vset instruction when vsetvl is committed

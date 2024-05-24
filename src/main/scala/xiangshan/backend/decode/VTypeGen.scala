@@ -59,7 +59,9 @@ class VTypeGen(implicit p: Parameters) extends XSModule{
 
   private val vtypeNew = vsetModule.io.out.vconfig.vtype
 
-  when(io.commitVType.vtype.valid) {
+  when(io.commitVType.hasVsetvl) {
+    vtypeArchNext := io.vsetvlVType
+  }.elsewhen(io.commitVType.vtype.valid) {
     vtypeArchNext := io.commitVType.vtype.bits
   }
 
@@ -71,12 +73,10 @@ class VTypeGen(implicit p: Parameters) extends XSModule{
     lastSpecVTypeNext.bits := vtypeSpec
     vtypeSpecNext := io.vsetvlVType
   }.elsewhen(io.walkVType.valid) {
-    lastSpecVTypeNext.valid := true.B
-    lastSpecVTypeNext.bits := vtypeSpec
+    lastSpecVTypeNext.valid := false.B
     vtypeSpecNext := io.walkVType.bits
   }.elsewhen(io.redirect) {
-    lastSpecVTypeNext.valid := true.B
-    lastSpecVTypeNext.bits := vtypeSpec
+    lastSpecVTypeNext.valid := false.B
     vtypeSpecNext := vtypeArch
   }.elsewhen(inHasVset && io.canUpdateVType) {
     lastSpecVTypeNext.valid := true.B
