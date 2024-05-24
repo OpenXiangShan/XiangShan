@@ -87,6 +87,7 @@ class IFUICacheIO(implicit p: Parameters)extends XSBundle with HasICacheParamete
 class FtqToICacheRequestBundle(implicit p: Parameters)extends XSBundle with HasICacheParameters{
   val pcMemRead           = Vec(5, new FtqICacheInfo)
   val readValid           = Vec(5, Bool())
+  val pcIllegal           = Bool()
 }
 
 

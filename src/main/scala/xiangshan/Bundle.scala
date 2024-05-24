@@ -305,6 +305,8 @@ class Redirect(implicit p: Parameters) extends XSBundle {
   val interrupt = Bool()
   val cfiUpdate = new CfiUpdateInfo
 
+  val pcIllegal = Bool()
+
   val stFtqIdx = new FtqPtr // for load violation predict
   val stFtqOffset = UInt(log2Up(PredictWidth).W)
 

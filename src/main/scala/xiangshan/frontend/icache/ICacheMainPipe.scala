@@ -173,6 +173,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s0_req_vsetIdx = (0 until partWayNum + 1).map(i => VecInit(s0_req_vaddr(i).map(get_idx(_))))
   val s0_only_first  = (0 until partWayNum + 1).map(i => fromFtq.bits.readValid(i) && !fromFtqReq(i).crossCacheline)
   val s0_double_line = (0 until partWayNum + 1).map(i => fromFtq.bits.readValid(i) && fromFtqReq(i).crossCacheline)
+  val s0_pcIllegal   = fromFtq.bits.pcIllegal
 
   val s0_final_valid        = s0_valid
   val s0_final_vaddr        = s0_req_vaddr.head
@@ -237,6 +238,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_req_vaddr   = RegEnable(s0_final_vaddr, s0_fire)
   val s1_req_vsetIdx = RegEnable(s0_final_vsetIdx, s0_fire)
   val s1_double_line = RegEnable(s0_final_double_line, s0_fire)
+  val s1_pcIllegal   = RegEnable(s0_pcIllegal, s0_fire)
 
   /** tlb request and response */
   fromITLB.foreach(_.ready := true.B)
@@ -288,7 +290,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val tlbExcpGPF    = VecInit((0 until PortNumber).map(i => 
                         ResultHoldBypass(valid = tlb_valid_tmp(i), data = fromITLB(i).bits.excp(0).gpf.instr)))
   val tlbExcpPF     = VecInit((0 until PortNumber).map(i =>
-                        ResultHoldBypass(valid = tlb_valid_tmp(i), data = fromITLB(i).bits.excp(0).pf.instr)))
+                        ResultHoldBypass(valid = tlb_valid_tmp(i), data = fromITLB(i).bits.excp(0).pf.instr || s1_pcIllegal)))
   val tlbExcpAF     = VecInit((0 until PortNumber).map(i =>
                         ResultHoldBypass(valid = tlb_valid_tmp(i), data = fromITLB(i).bits.excp(0).af.instr)))
   val tlbExcp       = VecInit((0 until PortNumber).map(i => tlbExcpAF(i) || tlbExcpPF(i) || tlbExcpGPF(i)))
