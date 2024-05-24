@@ -161,8 +161,10 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
 
   private val vs2GroupedVec32b: Vec[UInt] = VecInit(vs2Split.io.outVec32b.zipWithIndex.groupBy(_._2 % 2).map(x => x._1 -> x._2.map(_._1)).values.map(x => Cat(x.reverse)).toSeq)
   private val vs2GroupedVec16b: Vec[UInt] = VecInit(vs2Split.io.outVec16b.zipWithIndex.groupBy(_._2 % 2).map(x => x._1 -> x._2.map(_._1)).values.map(x => Cat(x.reverse)).toSeq)
-  private val vs2GroupedVec8b: Vec[UInt] = VecInit(vs2Split.io.outVec8b.zipWithIndex.groupBy(_._2 % 2).map(x => x._1 -> x._2.map(_._1)).values.map(x => Cat(x.reverse)).toSeq)
-  private val vs1GroupedVec: Vec[UInt] = VecInit(vs1Split.io.outVec32b.zipWithIndex.groupBy(_._2 % 2).map(x => x._1 -> x._2.map(_._1)).values.map(x => Cat(x.reverse)).toSeq)
+  private val vs2GroupedVec8b : Vec[UInt] = VecInit(vs2Split.io.outVec8b .zipWithIndex.groupBy(_._2 % 2).map(x => x._1 -> x._2.map(_._1)).values.map(x => Cat(x.reverse)).toSeq)
+  private val vs1GroupedVec32b: Vec[UInt] = VecInit(vs1Split.io.outVec32b.zipWithIndex.groupBy(_._2 % 2).map(x => x._1 -> x._2.map(_._1)).values.map(x => Cat(x.reverse)).toSeq)
+  private val vs1GroupedVec16b: Vec[UInt] = VecInit(vs1Split.io.outVec16b.zipWithIndex.groupBy(_._2 % 2).map(x => x._1 -> x._2.map(_._1)).values.map(x => Cat(x.reverse)).toSeq)
+  private val vs1GroupedVec8b : Vec[UInt] = VecInit(vs1Split.io.outVec8b .zipWithIndex.groupBy(_._2 % 2).map(x => x._1 -> x._2.map(_._1)).values.map(x => Cat(x.reverse)).toSeq)
 
   /**
    * In connection of [[vs2Split]], [[vs1Split]] and [[oldVdSplit]]
@@ -190,19 +192,32 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   private val widen_vs2 = widen && vs2Type(1, 0) =/= vdType(1, 0)
   private val eewVs1 = SewOH(vs1Type(1, 0))
   private val eewVd = SewOH(vdType(1, 0))
+  private val isVwsll = opcode.isVwsll
 
   // Extension instructions
   private val vf2 = isVextF2
   private val vf4 = isVextF4
   private val vf8 = isVextF8
 
-  private val vs1VecUsed: Vec[UInt] = Mux(widen || isNarrow, vs1GroupedVec, vs1Split.io.outVec64b)
-  private val vs2VecUsed = Wire(Vec(numVecModule, UInt(64.W)))
-  when(vf2) {
+  private val vs1VecUsed: Vec[UInt] = Wire(Vec(numVecModule, UInt(64.W)))
+  private val vs2VecUsed: Vec[UInt] = Wire(Vec(numVecModule, UInt(64.W)))
+  private val isVwsllEewVdIs64 = isVwsll && eewVd.is64
+  private val isVwsllEewVdIs32 = isVwsll && eewVd.is32
+  private val isVwsllEewVdIs16 = isVwsll && eewVd.is16
+  when(widen || isNarrow || isVwsllEewVdIs64) {
+    vs1VecUsed := vs1GroupedVec32b
+  }.elsewhen(isVwsllEewVdIs32) {
+    vs1VecUsed := vs1GroupedVec16b
+  }.elsewhen(isVwsllEewVdIs16) {
+    vs1VecUsed := vs1GroupedVec8b
+  }.otherwise {
+    vs1VecUsed := vs1Split.io.outVec64b
+  }
+  when(vf2 || isVwsllEewVdIs64) {
     vs2VecUsed := vs2GroupedVec32b
-  }.elsewhen(vf4) {
+  }.elsewhen(vf4 || isVwsllEewVdIs32) {
     vs2VecUsed := vs2GroupedVec16b
-  }.elsewhen(vf8) {
+  }.elsewhen(vf8 || isVwsllEewVdIs16) {
     vs2VecUsed := vs2GroupedVec8b
   }.otherwise {
     vs2VecUsed := vs2Split.io.outVec64b
@@ -251,10 +266,19 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   /**
    * [[mgu]]'s in connection
    */
+  private val outIsVwsll = RegEnable(isVwsll, io.in.valid)
+  private val outIsVwsllEewVdIs64 = RegEnable(isVwsllEewVdIs64, io.in.valid)
+  private val outIsVwsllEewVdIs32 = RegEnable(isVwsllEewVdIs32, io.in.valid)
+  private val outIsVwsllEewVdIs16 = RegEnable(isVwsllEewVdIs16, io.in.valid)
   //private val outEewVs1 = DelayN(eewVs1, latency)
   private val outEewVs1 = SNReg(eewVs1, latency)
 
-  private val outVd = Cat(vIntFixpAlus.reverse.map(_.io.vd))
+  private val outVdTmp = Cat(vIntFixpAlus.reverse.map(_.io.vd))
+  private val outVd = Mux1H(Seq(
+    (outIsVwsllEewVdIs64 || !outIsVwsll) -> outVdTmp,
+    outIsVwsllEewVdIs32 -> Cat(outVdTmp(127,  96), outVdTmp(63, 32), outVdTmp( 95, 64), outVdTmp(31,  0)),
+    outIsVwsllEewVdIs16 -> Cat(outVdTmp(127, 112), outVdTmp(63, 48), outVdTmp(111, 96), outVdTmp(47, 32), outVdTmp(95, 80), outVdTmp(31, 16), outVdTmp(79, 64), outVdTmp(15,0)),
+  ))
   private val outCmp = Mux1H(outEewVs1.oneHot, Seq(8, 4, 2, 1).map(
     k => Cat(vIntFixpAlus.reverse.map(_.io.cmpOut(k - 1, 0)))))
   private val outNarrow = Cat(vIntFixpAlus.reverse.map(_.io.narrowVd))
