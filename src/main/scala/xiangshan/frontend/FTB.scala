@@ -43,6 +43,9 @@ trait FTBParams extends HasXSParameter with HasBPUConst {
 
   def BR_OFFSET_LEN = 12
   def JMP_OFFSET_LEN = 20
+
+  def FTBCLOSE_THRESHOLD_SZ = log2Ceil(500)
+  def FTBCLOSE_THRESHOLD = 500.U(FTBCLOSE_THRESHOLD_SZ.W) //can be modified
 }
 
 class FtbSlot(val offsetLen: Int, val subOffsetLen: Option[Int] = None)(implicit p: Parameters) extends XSBundle with FTBParams {
@@ -123,6 +126,16 @@ class FtbSlot(val offsetLen: Int, val subOffsetLen: Option[Int] = None)(implicit
     this.sharing := (this.offsetLen > that.offsetLen && that.offsetLen == this.subOffsetLen.get).B
     this.valid := that.valid
     this.lower := ZeroExt(that.lower, this.offsetLen)
+  }
+
+  def slotConsistent(that: FtbSlot) = {
+    VecInit(
+      this.offset  === that.offset,
+      this.lower   === that.lower,
+      this.tarStat === that.tarStat,
+      this.sharing === that.sharing,
+      this.valid   === that.valid
+    ).reduce(_&&_)
   }
 
 }
@@ -221,6 +234,37 @@ class FTBEntry(implicit p: Parameters) extends XSBundle with FTBParams with BPUU
     VecInit(brSlots.map(_.offset) :+ tailSlot.offset)
   }
 
+  def entryConsistent(that: FTBEntry) = {
+    val validDiff     = this.valid === that.valid
+    val brSlotsDiffSeq  : IndexedSeq[Bool] =
+      this.brSlots.zip(that.brSlots).map{
+        case(x,y) => x.slotConsistent(y)
+      }
+    val tailSlotDiff  = this.tailSlot.slotConsistent(that.tailSlot)
+    val pftAddrDiff   = this.pftAddr === that.pftAddr
+    val carryDiff     = this.carry   === that.carry
+    val isCallDiff    = this.isCall  === that.isCall
+    val isRetDiff     = this.isRet   === that.isRet
+    val isJalrDiff    = this.isJalr  === that.isJalr
+    val lastMayBeRviCallDiff = this.last_may_be_rvi_call === that.last_may_be_rvi_call
+    val alwaysTakenDiff : IndexedSeq[Bool] =
+      this.always_taken.zip(that.always_taken).map{
+        case(x,y) => x === y
+      }
+    VecInit(
+      validDiff,
+      brSlotsDiffSeq.reduce(_&&_),
+      tailSlotDiff,
+      pftAddrDiff,
+      carryDiff,
+      isCallDiff,
+      isRetDiff,
+      isJalrDiff,
+      lastMayBeRviCallDiff,
+      alwaysTakenDiff.reduce(_&&_)
+    ).reduce(_&&_)
+  }
+
   def display(cond: Bool): Unit = {
     XSDebug(cond, p"-----------FTB entry----------- \n")
     XSDebug(cond, p"v=${valid}\n")
@@ -286,8 +330,6 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   override val meta_size = WireInit(0.U.asTypeOf(new FTBMeta)).getWidth
 
   val ftbAddr = new TableAddr(log2Up(numSets), 1)
-
-  def FTBCLOSE_THRESHOLD = 500.U(64.W) //can be modified
 
   class FTBBank(val numSets: Int, val nWays: Int) extends XSModule with BPUUtils {
     val io = IO(new Bundle {
@@ -458,52 +500,9 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   val s3_hit_dup = io.s2_fire.zip(s2_hit_dup).map {case (f, h) => RegEnable(h, 0.B, f)}
   val writeWay = Mux(s1_close_ftb_req,0.U,ftbBank.io.read_hits.bits)
 
-  def ftbslot_compare(x: FtbSlot, y: FtbSlot) = {
-    VecInit(
-      x.offset  === y.offset,
-      x.lower   === y.lower,
-      x.tarStat === y.tarStat,
-      x.sharing === y.sharing,
-      x.valid   === y.valid
-    )
-  }
-
-  def ftbentry_compare(x: FTBEntry, y: FTBEntry) = {
-    val validDiff     = x.valid === y.valid
-    val brSlotsDiffVec  : IndexedSeq[Vec[Bool]] =
-      x.brSlots.zip(y.brSlots).map{
-        case(xSlot,ySlot) => ftbslot_compare(xSlot,ySlot)
-      }
-    val brSlotsDiffSeq  : IndexedSeq[Bool] = brSlotsDiffVec.map(_.reduce(_&&_))
-    val tailSlotDiffSeq : IndexedSeq[Bool] = ftbslot_compare(x.tailSlot,y.tailSlot).toIndexedSeq
-    val pftAddrDiff   = x.pftAddr  === y.pftAddr
-    val carryDiff     = x.carry  === y.carry
-    val isCallDiff    = x.isCall === y.isCall
-    val isRetDiff     = x.isRet  === y.isRet
-    val isJalrDiff    = x.isJalr === y.isJalr
-    val lastMayBeRviCallDiff = x.last_may_be_rvi_call === y.last_may_be_rvi_call
-    val alwaysTakenDiff : IndexedSeq[Bool] =
-      x.always_taken.zip(y.always_taken).map{
-        case(xAT,yAT) => xAT === yAT
-      }
-    VecInit(
-      validDiff,
-      brSlotsDiffSeq.reduce(_&&_),
-      tailSlotDiffSeq.reduce(_&&_),
-      pftAddrDiff,
-      carryDiff,
-      isCallDiff,
-      isRetDiff,
-      isJalrDiff,
-      lastMayBeRviCallDiff,
-      alwaysTakenDiff.reduce(_&&_)
-    )
-  }
-
   //Consistent count of entries for fauftb and ftb
   val fauftb_ftb_entry_consistent_counter = RegInit(0.U(64.W))
-  val fauftb_ftb_entry_consistentSeq = ftbentry_compare(s2_fauftb_ftb_entry_dup(0),s2_ftbBank_dup(0))
-  val fauftb_ftb_entry_consistent = fauftb_ftb_entry_consistentSeq.reduce(_&&_)
+  val fauftb_ftb_entry_consistent = s2_fauftb_ftb_entry_dup(0).entryConsistent(s2_ftbBank_dup(0))
 
   //if close ftb_req, the counter need keep
   when(io.s2_fire(0) && s2_fauftb_ftb_entry_hit_dup(0) && s2_ftb_hit_dup(0) ){
@@ -525,8 +524,8 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     s0_close_ftb_req := false.B
   }
 
-  val s2_close_consistent = ftbentry_compare(s2_fauftb_ftb_entry_dup(0),s2_ftb_entry_dup(0)).reduce(_&&_)
-  val s2_not_close_consistent = ftbentry_compare(s2_ftbBank_dup(0),s2_ftb_entry_dup(0)).reduce(_&&_)
+  val s2_close_consistent = s2_fauftb_ftb_entry_dup(0).entryConsistent(s2_ftb_entry_dup(0))
+  val s2_not_close_consistent = s2_ftbBank_dup(0).entryConsistent(s2_ftb_entry_dup(0))
 
   when(s2_close_ftb_req && io.s2_fire(0)){
     assert(s2_close_consistent, s"Entry inconsistency after ftb req is closed!")
