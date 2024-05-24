@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.decode.TruthTable
 import xiangshan.backend.fu.NewCSR.CSRBundles.PrivState
+import freechips.rocketchip.rocket.CSRs
 
 class CSRPermitModule extends Module {
   val io = IO(new CSRPermitIO)
@@ -32,6 +33,11 @@ class CSRPermitModule extends Module {
   private val (tw, vtw) = (
     io.in.status.tw,
     io.in.status.vtw
+  )
+
+  private val (tvm, vtvm) = (
+    io.in.status.tvm,
+    io.in.status.vtvm,
   )
 
   private val csrIsRO = addr(11, 10) === "b11".U
@@ -75,11 +81,14 @@ class CSRPermitModule extends Module {
   private val wfi_EX_II = wfi && (!privState.isModeM && tw)
   private val wfi_EX_VI = wfi && (privState.isModeVS && vtw && !tw || privState.isModeVU && !tw)
 
+  private val rwSatp_EX_II = csrAccess && privState.isModeHS &&  tvm && (addr === CSRs.satp.U || addr === CSRs.hgatp.U)
+  private val rwSatp_EX_VI = csrAccess && privState.isModeVS && vtvm && (addr === CSRs.satp.U)
+
   io.out.illegal := csrAccess && csrAccessIllegal || mret && mretIllegal || sret && sretIllegal
 
   // Todo: check correct
-  io.out.EX_II := io.out.illegal && !privState.isVirtual || wfi_EX_II
-  io.out.EX_VI := io.out.illegal && privState.isVirtual || wfi_EX_VI
+  io.out.EX_II := io.out.illegal && !privState.isVirtual || wfi_EX_II || rwSatp_EX_II
+  io.out.EX_VI := io.out.illegal &&  privState.isVirtual || wfi_EX_VI || rwSatp_EX_VI
 
   io.out.hasLegalWen := io.in.csrAccess.wen && !csrAccessIllegal && debugRegCanAccess && triggerRegCanAccess
   io.out.hasLegalMret := mret && !mretIllegal
@@ -108,6 +117,10 @@ class CSRPermitIO extends Bundle {
       val tw = Bool()
       // Virtual Timeout Wait
       val vtw = Bool()
+      // Trap Virtual Memory
+      val tvm = Bool()
+      // Virtual Trap Virtual Memory
+      val vtvm = Bool()
     }
   })
 
