@@ -456,10 +456,11 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
           // respType:  fuIdle      ->IQ entry clear
           //            fuUncertain ->IQ entry no action
           //            fuBusy      ->IQ entry issued set false, then re-issue
-          // Only hyu, lda and sta are fuUncertain at OG1 stage
+          // hyu, lda and sta are fuUncertain at OG1 stage
+          // and all vector arith exu should check success in og2 stage
           og1resp.bits.resp             := Mux(og1FailedVec2(iqIdx)(iuIdx),
             RespType.block,
-            if (toIU.issueQueueParams match { case x => x.isLdAddrIQ || x.isStAddrIQ || x.isHyAddrIQ || x.isVecLduIQ || x.isVecStuIQ})
+            if (toIU.issueQueueParams match { case x => x.isLdAddrIQ || x.isStAddrIQ || x.isHyAddrIQ || x.isVecLduIQ || x.isVecStuIQ || x.inVfSchd})
               RespType.uncertain
             else
               RespType.success,
