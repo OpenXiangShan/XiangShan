@@ -1007,25 +1007,6 @@ class IssueQueueVecMemImp(override val wrapper: IssueQueue)(implicit p: Paramete
 
   require(params.numExu == 1, "VecMem IssueQueue has not supported more than 1 deq ports")
 
-  def selectOldUop(robIdx: Seq[RobPtr], uopIdx: Seq[UInt], valid: Seq[Bool]): Vec[Bool] = {
-    val compareVec = (0 until robIdx.length).map(i => (0 until i).map(j => isAfter(robIdx(j), robIdx(i)) || (robIdx(j).value === robIdx(i).value && uopIdx(i) < uopIdx(j))))
-    val resultOnehot = VecInit((0 until robIdx.length).map(i => Cat((0 until robIdx.length).map(j =>
-      (if (j < i) !valid(j) || compareVec(i)(j)
-      else if (j == i) valid(i)
-      else !valid(j) || !compareVec(j)(i))
-    )).andR))
-    resultOnehot
-  }
-
-  val robIdxVec = entries.io.robIdx.get
-  val uopIdxVec = entries.io.uopIdx.get
-  val allEntryOldestOH = selectOldUop(robIdxVec, uopIdxVec, validVec)
-
-  deqSelValidVec.head := (allEntryOldestOH.asUInt & canIssueVec.asUInt).orR
-  deqSelOHVec.head := allEntryOldestOH.asUInt & canIssueVec.asUInt
-  finalDeqSelValidVec.head := (allEntryOldestOH.asUInt & canIssueVec.asUInt).orR && deqBeforeDly.head.ready
-  finalDeqSelOHVec.head := deqSelOHVec.head
-
   for (i <- entries.io.enq.indices) {
     entries.io.enq(i).bits.status match { case enqData =>
       enqData.vecMem.get.sqIdx := s0_enqBits(i).sqIdx
@@ -1058,7 +1039,6 @@ class IssueQueueVecMemImp(override val wrapper: IssueQueue)(implicit p: Paramete
   deqBeforeDly.zipWithIndex.foreach { case (deq, i) =>
     deq.bits.common.sqIdx.foreach(_ := deqEntryVec(i).bits.status.vecMem.get.sqIdx)
     deq.bits.common.lqIdx.foreach(_ := deqEntryVec(i).bits.status.vecMem.get.lqIdx)
-    deq.bits.common.numLsElem.get := deqEntryVec(i).bits.status.vecMem.get.numLsElem
     deq.bits.common.numLsElem.foreach(_ := deqEntryVec(i).bits.status.vecMem.get.numLsElem)
     if (params.isVecLduIQ) {
       deq.bits.common.ftqIdx.get := deqEntryVec(i).bits.payload.ftqPtr
