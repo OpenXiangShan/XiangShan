@@ -340,6 +340,9 @@ class NewCSR(implicit val p: Parameters) extends Module
   permitMod.io.in.status.tw := mstatus.regOut.TW.asBool
   permitMod.io.in.status.vtw := hstatus.regOut.VTW.asBool
 
+  permitMod.io.in.status.tvm  := mstatus.regOut.TVM.asBool
+  permitMod.io.in.status.vtvm := hstatus.regOut.VTVM.asBool
+
   miregiprios.foreach { mod =>
     mod.w.wen := (addr === mireg.addr.U) && (miselect.regOut.ALL.asUInt === mod.addr.U)
     mod.w.wdata := wdata
