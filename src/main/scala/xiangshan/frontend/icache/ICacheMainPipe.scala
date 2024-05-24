@@ -244,7 +244,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_wait_itlb  = RegInit(VecInit(Seq.fill(PortNumber)(false.B)))
 
   (0 until PortNumber).foreach { i =>
-    when(RegNext(s0_fire) && fromITLB(i).bits.miss) {
+    when(io.fencei) {
+      s1_wait_itlb(i) := false.B
+    }.elsewhen(RegNext(s0_fire) && fromITLB(i).bits.miss) {
       s1_wait_itlb(i) := true.B
     }.elsewhen(s1_wait_itlb(i) && !fromITLB(i).bits.miss) {
       s1_wait_itlb(i) := false.B
@@ -294,7 +296,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
                         ResultHoldBypass(valid = tlb_valid_tmp(i), data = fromITLB(i).bits.excp(0).af.instr)))
   val tlbExcp       = VecInit((0 until PortNumber).map(i => tlbExcpAF(i) || tlbExcpPF(i) || tlbExcpGPF(i)))
 
-  val s1_tlb_valid = VecInit((0 until PortNumber).map(i => ValidHoldBypass(tlb_valid_tmp(i), s1_fire)))
+  val s1_tlb_valid = VecInit((0 until PortNumber).map(i => ValidHoldBypass(tlb_valid_tmp(i), s1_fire, io.fencei)))
   val tlbRespAllValid = s1_tlb_valid(0) && (!s1_double_line || s1_double_line && s1_tlb_valid(1))
 
 
