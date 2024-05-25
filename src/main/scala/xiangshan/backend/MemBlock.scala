@@ -1352,8 +1352,11 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   (0 until LduCnt).foreach{i=>
     vlMergeBuffer.io.fromPipeline(i) <> loadUnits(i).io.vecldout
   }
-  (0 until VstuCnt).foreach{i=>
-    vsMergeBuffer(i).io.fromPipeline.head <> storeUnits(i).io.vecstout
+
+  (0 until StaCnt).foreach{i=>
+    if(i < VstuCnt){
+      vsMergeBuffer(i).io.fromPipeline.head <> storeUnits(i).io.vecstout
+    }
   }
 
   (0 until VlduCnt).foreach{i=>
