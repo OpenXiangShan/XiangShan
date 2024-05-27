@@ -127,7 +127,14 @@ trait HypervisorLevel { self: NewCSR =>
     // If hgatp is written with an unsupported MODE,
     // the entire write has no effect; no fields in hgatp are modified.
     when(wen && wdata.MODE.isLegal) {
-      reg := wdata
+      when (wdata.MODE === HgatpMode.Bare) {
+        reg := 0.U
+      }.otherwise {
+        reg := wdata
+      }
+    }.elsewhen (wen && !wdata.MODE.isLegal) {
+      reg.PPN := wdata.PPN
+      reg.VMID := wdata.VMID
     }.otherwise {
       reg := reg
     }
