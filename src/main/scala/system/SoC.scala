@@ -380,6 +380,7 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
     val pll0_lock = IO(Input(Bool()))
     val pll0_ctrl = IO(Output(Vec(6, UInt(32.W))))
     val cacheable_check = IO(new TLPMAIO)
+    val clintTime = IO(Output(ValidIO(UInt(64.W))))
 
     debugModule.module.io <> debug_module_io
 
@@ -400,6 +401,8 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
 
     val pll_ctrl_regs = Seq.fill(6){ RegInit(0.U(32.W)) }
     val pll_lock = RegNext(next = pll0_lock, init = false.B)
+
+    clintTime := clint.module.io.time
 
     pll0_ctrl <> VecInit(pll_ctrl_regs)
 

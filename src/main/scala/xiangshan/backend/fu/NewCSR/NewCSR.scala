@@ -84,6 +84,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   val io = IO(new Bundle {
     val fromTop = Input(new Bundle {
       val hartId = UInt(hartIdLen.W)
+      val clintTime = Input(ValidIO(UInt(64.W)))
     })
     val in = Input(new Bundle {
       val wen = Bool()
@@ -177,6 +178,7 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   dontTouch(toAIA)
   dontTouch(fromAIA)
+  dontTouch(io.fromTop.clintTime)
 
   val wen   = io.in.wen
   val addr  = io.in.addr
