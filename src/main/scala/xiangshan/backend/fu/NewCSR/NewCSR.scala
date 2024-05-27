@@ -335,6 +335,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   permitMod.io.in.mret := io.mret
   permitMod.io.in.sret := io.sret
   permitMod.io.in.wfi  := io.wfi
+  permitMod.io.in.csrIsCustom := customCSRMods.map(_.addr.U === addr).reduce(_ || _).orR
 
   permitMod.io.in.status.tsr := mstatus.regOut.TSR.asBool
   permitMod.io.in.status.vtsr := hstatus.regOut.VTSR.asBool
