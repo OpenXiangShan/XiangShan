@@ -9,6 +9,7 @@ import xiangshan.backend.fu.NewCSR.CSRDefines.{
   CSRROField => RO,
   CSRWLRLField => WLRL,
   CSRWARLField => WARL,
+  VirtMode,
   _
 }
 import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast.CSREnumTypeToUInt
@@ -93,7 +94,7 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
   val vstimecmp = Module(new CSRModule("VStimecmp"))
     .setAddr(0x24D)
 
-  val vsatp = Module(new CSRModule("VSatp", new SatpBundle) {
+  val vsatp = Module(new CSRModule("VSatp", new SatpBundle) with VirtualSupervisorBundle {
     // Ref: 13.2.18. Virtual Supervisor Address Translation and Protection Register (vsatp)
     // When V=0, a write to vsatp with an unsupported MODE value is either ignored as it is for satp, or the
     // fields of vsatp are treated as WARL in the normal way.
@@ -102,10 +103,11 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
     //
     // We treat all circumstances as if V=1. That is if vsatp is written with an unsupported MODE,
     // the entire write has no effect; no fields in satp are modified.
-    when(wen) {
-      when (wdata.MODE.isLegal) {
-        reg := wdata
-      }
+    when(wen && wdata.MODE.isLegal) {
+      reg := wdata
+    }.elsewhen(wen && !v && !wdata.MODE.isLegal) {
+      reg.PPN := wdata.PPN
+      reg.ASID := wdata.ASID
     }.otherwise {
       reg := reg
     }
@@ -199,4 +201,8 @@ class VSipToHip extends Bundle {
   val SSIP = ValidIO(RW(0))
   val STIP = ValidIO(RW(0))
   val SEIP = ValidIO(RW(0))
+}
+
+trait VirtualSupervisorBundle { self: CSRModule[_] =>
+  val v = IO(Input(Bool()))
 }

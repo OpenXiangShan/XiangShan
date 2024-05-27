@@ -382,6 +382,11 @@ class NewCSR(implicit val p: Parameters) extends Module
       case _ =>
     }
     mod match {
+      case m: VirtualSupervisorBundle =>
+        m.v := V.asUInt.asBool
+      case _ =>
+    }
+    mod match {
       case m: HasMachineInterruptBundle =>
         m.mvien := mvien.regOut
         m.mvip := mvip.regOut
