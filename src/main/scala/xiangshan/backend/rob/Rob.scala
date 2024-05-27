@@ -347,7 +347,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         doingSvinval := false.B
       }
       // when we are in the process of Svinval software code area , only Svinval.vma and end instruction of Svinval can appear
-      assert(!doingSvinval || (enqUop.isSvinval(enqUop.flushPipe) || enqUop.isSvinvalEnd(enqUop.flushPipe)))
+      assert(!doingSvinval || (enqUop.isSvinval(enqUop.flushPipe) || enqUop.isSvinvalEnd(enqUop.flushPipe) || enqUop.isNotSvinval))
       when(enqUop.isWFI && !enqHasException && !enqHasTriggerCanFire) {
         hasWFI := true.B
       }
