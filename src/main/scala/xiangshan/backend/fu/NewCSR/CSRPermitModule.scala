@@ -66,22 +66,25 @@ class CSRPermitModule extends Module {
     BitPat("b0__11___11") -> BitPat.Y(), // M  access M
   ), BitPat.N())
 
-  private val isDebugReg = addr(11, 4) === "h7b".U
-  private val debugRegCanAccess = Mux(isDebugReg, debugMode, true.B)
-
+  private val isDebugReg   = addr(11, 4) === "h7b".U
   private val isTriggerReg = addr(11, 4) === "h7a".U
-  private val triggerRegCanAccess = Mux(isTriggerReg, debugMode || privState.isModeM, true.B)
 
-  private val privilegeLegal = chisel3.util.experimental.decode.decoder(
+  private val regularPrivilegeLegal = chisel3.util.experimental.decode.decoder(
     privState.V.asUInt ## privState.PRVM.asUInt ## addr(9, 8),
     accessTable
   ).asBool
 
+  private val privilegeLegal = MuxCase(
+    regularPrivilegeLegal,
+    Seq(
+      isDebugReg   -> debugMode,
+      isTriggerReg -> (debugMode || privState.isModeM),
+    )
+  )
+
   private val rwIllegal = csrIsRO && wen
 
-  private val csrAccessIllegal = (!privilegeLegal || rwIllegal) ||
-    (isDebugReg && !debugMode) ||                           // for debug reg
-    (isTriggerReg && !(debugMode || privState.isModeM))     // for trigger reg
+  private val csrAccessIllegal = (!privilegeLegal || rwIllegal)
 
   private val mretIllegal = !privState.isModeM
 
@@ -113,7 +116,7 @@ class CSRPermitModule extends Module {
   io.out.EX_II := io.out.illegal && !privState.isVirtual || wfi_EX_II || rwSatp_EX_II || accessHPM_EX_II || rwCustom_EX_II
   io.out.EX_VI := io.out.illegal &&  privState.isVirtual || wfi_EX_VI || rwSatp_EX_VI || accessHPM_EX_VI
 
-  io.out.hasLegalWen := io.in.csrAccess.wen && !csrAccessIllegal && debugRegCanAccess && triggerRegCanAccess
+  io.out.hasLegalWen := io.in.csrAccess.wen && !csrAccessIllegal
   io.out.hasLegalMret := mret && !mretIllegal
   io.out.hasLegalSret := sret && !sretIllegal
   io.out.hasLegalWfi := wfi && !wfi_EX_II && !wfi_EX_VI
