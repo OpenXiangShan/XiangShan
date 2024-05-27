@@ -401,6 +401,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   private val csrin = intExuBlock.io.csrin.get
   csrin.hartId := io.fromTop.hartId
   csrin.msiInfo := io.fromTop.msiInfo
+  csrin.clintTime := io.fromTop.clintTime
 
   private val csrio = intExuBlock.io.csrio.get
   csrio.hartId := io.fromTop.hartId
@@ -777,6 +778,7 @@ class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle 
     val hartId = Input(UInt(hartIdLen.W))
     val externalInterrupt = new ExternalInterruptIO
     val msiInfo = Input(ValidIO(new MsiInfoBundle))
+    val clintTime = Input(ValidIO(UInt(64.W)))
   }
 
   val toTop = new Bundle {

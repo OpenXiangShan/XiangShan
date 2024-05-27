@@ -102,6 +102,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       }
       val chi = if (enableCHI) Some(new PortIO) else None
       val nodeID = if (enableCHI) Some(Input(UInt(NodeIDWidth.W))) else None
+      val clintTime = Input(ValidIO(UInt(64.W)))
     })
 
     dontTouch(io.hartId)
@@ -114,6 +115,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     core.module.io.hartId := l2top.module.hartId.toCore
     core.module.io.reset_vector := l2top.module.reset_vector.toCore
     core.module.io.msiInfo := io.msiInfo
+    core.module.io.clintTime := io.clintTime
     l2top.module.reset_vector.fromTile := io.reset_vector
     l2top.module.cpu_halt.fromCore := core.module.io.cpu_halt
     io.cpu_halt := l2top.module.cpu_halt.toTile

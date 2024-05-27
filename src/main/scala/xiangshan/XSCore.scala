@@ -78,6 +78,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val io = IO(new Bundle {
     val hartId = Input(UInt(hartIdLen.W))
     val msiInfo = Input(ValidIO(new MsiInfoBundle))
+    val clintTime = Input(ValidIO(UInt(64.W)))
     val reset_vector = Input(UInt(PAddrBits.W))
     val cpu_halt = Output(Bool())
     val l2_pf_enable = Output(Bool())
@@ -110,6 +111,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   backend.io.fromTop.hartId := memBlock.io.inner_hartId
   backend.io.fromTop.msiInfo := io.msiInfo
+  backend.io.fromTop.clintTime := io.clintTime
+
   backend.io.fromTop.externalInterrupt := memBlock.io.externalInterrupt
 
   backend.io.frontendCsrDistributedUpdate := frontend.io.csrUpdate

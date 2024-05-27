@@ -124,6 +124,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.platformIRP.debugIP := csrIn.externalInterrupt.debug
 
   csrMod.io.fromTop.hartId := io.csrin.get.hartId
+  csrMod.io.fromTop.clintTime := io.csrin.get.clintTime
 
   private val imsic = Module(new IMSIC)
   imsic.i.hartId := io.csrin.get.hartId
@@ -309,6 +310,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 class CSRInput(implicit p: Parameters) extends XSBundle with HasSoCParameter{
   val hartId = Input(UInt(8.W))
   val msiInfo = Input(ValidIO(new MsiInfoBundle))
+  val clintTime = Input(ValidIO(UInt(64.W)))
 }
 
 class CSRToDecode(implicit p: Parameters) extends XSBundle {
