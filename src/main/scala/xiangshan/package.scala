@@ -28,17 +28,18 @@ import xiangshan.backend.decode.{Imm, ImmUnion}
 
 package object xiangshan {
   object SrcType {
-    def imm = "b000".U
-    def pc  = "b000".U
-    def xp  = "b001".U
-    def fp  = "b010".U
-    def vp  = "b100".U
-    def no  = "b000".U // this src read no reg but cannot be Any value
+    def imm = "b0000".U
+    def pc  = "b0000".U
+    def xp  = "b0001".U
+    def fp  = "b0010".U
+    def vp  = "b0100".U
+    def v0  = "b1000".U
+    def no  = "b0000".U // this src read no reg but cannot be Any value
 
     // alias
     def reg = this.xp
     def DC  = imm // Don't Care
-    def X   = BitPat("b000")
+    def X   = BitPat("b0000")
 
     def isPc(srcType: UInt) = srcType===pc
     def isImm(srcType: UInt) = srcType===imm
@@ -46,10 +47,11 @@ package object xiangshan {
     def isXp(srcType: UInt) = srcType(0)
     def isFp(srcType: UInt) = srcType(1)
     def isVp(srcType: UInt) = srcType(2)
+    def isV0(srcType: UInt) = srcType(3)
     def isPcOrImm(srcType: UInt) = isPc(srcType) || isImm(srcType)
     def isNotReg(srcType: UInt): Bool = !srcType.orR
     def isVfp(srcType: UInt) = isVp(srcType) || isFp(srcType)
-    def apply() = UInt(3.W)
+    def apply() = UInt(4.W)
   }
 
   object SrcState {

@@ -755,6 +755,10 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   // read dest location
   decodedInst.ldest := inst.RD
 
+  // init v0Wen vlWen
+  decodedInst.v0Wen := false.B
+  decodedInst.vlWen := false.B
+
   // fill in exception vector
   val vecException = Module(new VecExceptionGen)
   vecException.io.inst := io.enq.ctrlFlow.instr
