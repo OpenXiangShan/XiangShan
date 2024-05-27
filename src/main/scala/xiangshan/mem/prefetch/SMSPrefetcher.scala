@@ -1128,7 +1128,6 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   val train_region_paddr = region_addr(train_ld.paddr)
   val train_region_vaddr = region_addr(train_ld.vaddr)
   val train_region_offset = train_block_tag(REGION_OFFSET - 1, 0)
-  // val train_vld = GatedValidRegNext(pending_vld || Cat(ld_curr_vld).orR, false.B)
   val train_vld = train_filter.io.train_req.valid
 
 

@@ -37,18 +37,18 @@ class StrideMetaBundle(implicit p: Parameters) extends XSBundle with HasStridePr
   val hash_pc = UInt(HASH_TAG_WIDTH.W)
 
   def reset(index: Int) = {
-      pre_vaddr := 0.U
-      stride := 0.U
-      confidence := 0.U
-      hash_pc := index.U
-    }
+    pre_vaddr := 0.U
+    stride := 0.U
+    confidence := 0.U
+    hash_pc := index.U
+  }
 
   def alloc(vaddr: UInt, alloc_hash_pc: UInt) = {
-      pre_vaddr := vaddr(STRIDE_VADDR_BITS - 1, 0)
-      stride := 0.U
-      confidence := 0.U
-      hash_pc := alloc_hash_pc
-    }
+    pre_vaddr := vaddr(STRIDE_VADDR_BITS - 1, 0)
+    stride := 0.U
+    confidence := 0.U
+    hash_pc := alloc_hash_pc
+  }
 
   def update(vaddr: UInt, always_update_pre_vaddr: Bool) = {
     val new_vaddr = vaddr(STRIDE_VADDR_BITS - 1, 0)
