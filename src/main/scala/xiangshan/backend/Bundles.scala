@@ -468,39 +468,57 @@ object Bundles {
     private val intCertainLat = params.intLatencyCertain
     private val fpCertainLat = params.fpLatencyCertain
     private val vfCertainLat = params.vfLatencyCertain
+    private val v0CertainLat = params.v0LatencyCertain
+    private val vlCertainLat = params.vlLatencyCertain
     private val intLat = params.intLatencyValMax
     private val fpLat = params.fpLatencyValMax
     private val vfLat = params.vfLatencyValMax
+    private val v0Lat = params.v0LatencyValMax
+    private val vlLat = params.vlLatencyValMax
 
     val intWbBusyTable = OptionWrapper(intCertainLat, UInt((intLat + 1).W))
     val fpWbBusyTable = OptionWrapper(fpCertainLat, UInt((fpLat + 1).W))
     val vfWbBusyTable = OptionWrapper(vfCertainLat, UInt((vfLat + 1).W))
+    val v0WbBusyTable = OptionWrapper(v0CertainLat, UInt((v0Lat + 1).W))
+    val vlWbBusyTable = OptionWrapper(vlCertainLat, UInt((vlLat + 1).W))
     val intDeqRespSet = OptionWrapper(intCertainLat, UInt((intLat + 1).W))
     val fpDeqRespSet = OptionWrapper(fpCertainLat, UInt((fpLat + 1).W))
     val vfDeqRespSet = OptionWrapper(vfCertainLat, UInt((vfLat + 1).W))
+    val v0DeqRespSet = OptionWrapper(v0CertainLat, UInt((v0Lat + 1).W))
+    val vlDeqRespSet = OptionWrapper(vlCertainLat, UInt((vlLat + 1).W))
   }
 
   class WbFuBusyTableReadBundle(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
     private val intCertainLat = params.intLatencyCertain
     private val fpCertainLat = params.fpLatencyCertain
     private val vfCertainLat = params.vfLatencyCertain
+    private val v0CertainLat = params.v0LatencyCertain
+    private val vlCertainLat = params.vlLatencyCertain
     private val intLat = params.intLatencyValMax
     private val fpLat = params.fpLatencyValMax
     private val vfLat = params.vfLatencyValMax
+    private val v0Lat = params.v0LatencyValMax
+    private val vlLat = params.vlLatencyValMax
 
     val intWbBusyTable = OptionWrapper(intCertainLat, UInt((intLat + 1).W))
     val fpWbBusyTable = OptionWrapper(fpCertainLat, UInt((fpLat + 1).W))
     val vfWbBusyTable = OptionWrapper(vfCertainLat, UInt((vfLat + 1).W))
+    val v0WbBusyTable = OptionWrapper(v0CertainLat, UInt((v0Lat + 1).W))
+    val vlWbBusyTable = OptionWrapper(vlCertainLat, UInt((vlLat + 1).W))
   }
 
   class WbConflictBundle(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
     private val intCertainLat = params.intLatencyCertain
     private val fpCertainLat = params.fpLatencyCertain
     private val vfCertainLat = params.vfLatencyCertain
+    private val v0CertainLat = params.v0LatencyCertain
+    private val vlCertainLat = params.vlLatencyCertain
 
     val intConflict = OptionWrapper(intCertainLat, Bool())
     val fpConflict = OptionWrapper(fpCertainLat, Bool())
     val vfConflict = OptionWrapper(vfCertainLat, Bool())
+    val v0Conflict = OptionWrapper(v0CertainLat, Bool())
+    val vlConflict = OptionWrapper(vlCertainLat, Bool())
   }
 
   class ImmInfo extends Bundle {

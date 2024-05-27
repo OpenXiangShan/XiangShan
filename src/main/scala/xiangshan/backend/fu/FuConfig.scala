@@ -50,6 +50,8 @@ case class FuConfig (
   writeIntRf    : Boolean = false,
   writeFpRf     : Boolean = false,
   writeVecRf    : Boolean = false,
+  writeV0Rf     : Boolean = false,
+  writeVlRf     : Boolean = false,
   writeFakeIntRf: Boolean = false,
   writeFflags   : Boolean = false,
   writeVxsat    : Boolean = false,
