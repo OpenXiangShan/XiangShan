@@ -543,11 +543,13 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val backendIpf = RegInit(false.B)
   val backendIaf = RegInit(false.B)
   val backendPcFaultIfuPtr = RegInit(FtqPtr(false.B, 0.U))
-  when (backendRedirect.valid && !realAhdValid && (backendRedirect.bits.cfiUpdate.backendIPF || backendRedirect.bits.cfiUpdate.backendIAF)) {
-    backendIpf := backendRedirect.bits.cfiUpdate.backendIPF
-    backendIaf := backendRedirect.bits.cfiUpdate.backendIAF
-    backendPcFaultIfuPtr := ifuWbPtr_write
-  } .elsewhen ((backendIpf || backendIaf) && ifuWbPtr =/= backendPcFaultIfuPtr) {
+  when (fromBackendRedirect.valid) {
+    backendIpf := fromBackendRedirect.bits.cfiUpdate.backendIPF
+    backendIaf := fromBackendRedirect.bits.cfiUpdate.backendIAF
+    when (fromBackendRedirect.bits.cfiUpdate.backendIPF || fromBackendRedirect.bits.cfiUpdate.backendIAF) {
+      backendPcFaultIfuPtr := ifuWbPtr_write
+    }
+  } .elsewhen (ifuWbPtr =/= backendPcFaultIfuPtr) {
     backendIpf := false.B
     backendIaf := false.B
   }
