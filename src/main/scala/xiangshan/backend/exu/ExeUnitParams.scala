@@ -102,6 +102,8 @@ case class ExeUnitParams(
   val writeIntFuConfigs: Seq[FuConfig] = fuConfigs.filter(x => x.writeIntRf)
   val writeFpFuConfigs: Seq[FuConfig] = fuConfigs.filter(x => x.writeFpRf)
   val writeVfFuConfigs: Seq[FuConfig] = fuConfigs.filter(x => x.writeVecRf)
+  val writeV0FuConfigs: Seq[FuConfig] = fuConfigs.filter(x => x.writeV0Rf)
+  val writeVlFuConfigs: Seq[FuConfig] = fuConfigs.filter(x => x.writeVlRf)
 
   /**
     * Check if this exu has certain latency
@@ -110,6 +112,8 @@ case class ExeUnitParams(
   def intLatencyCertain: Boolean = writeIntFuConfigs.forall(x => x.latency.latencyVal.nonEmpty)
   def fpLatencyCertain: Boolean = writeFpFuConfigs.forall(x => x.latency.latencyVal.nonEmpty)
   def vfLatencyCertain: Boolean = writeVfFuConfigs.forall(x => x.latency.latencyVal.nonEmpty)
+  def v0LatencyCertain: Boolean = writeV0FuConfigs.forall(x => x.latency.latencyVal.nonEmpty)
+  def vlLatencyCertain: Boolean = writeVlFuConfigs.forall(x => x.latency.latencyVal.nonEmpty)
   // only load use it
   def hasUncertainLatencyVal: Boolean = fuConfigs.map(x => x.latency.uncertainLatencyVal.nonEmpty).reduce(_ || _)
 
@@ -181,6 +185,24 @@ case class ExeUnitParams(
   }
 
   def vfLatencyValMax: Int = vfFuLatencyMap.values.fold(0)(_ max _)
+
+  def v0FuLatencyMap: Map[FuType.OHType, Int] = {
+    if (v0LatencyCertain)
+      if(needOg2) writeV0FuConfigs.map(x => (x.fuType, x.latency.latencyVal.get + 1)).toMap else writeV0FuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
+    else
+      Map()
+  }
+
+  def v0LatencyValMax: Int = v0FuLatencyMap.values.fold(0)(_ max _)
+
+  def vlFuLatencyMap: Map[FuType.OHType, Int] = {
+    if (vlLatencyCertain)
+      if(needOg2) writeVlFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get + 1)).toMap else writeVlFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
+    else
+      Map()
+  }
+
+  def vlLatencyValMax: Int = vlFuLatencyMap.values.fold(0)(_ max _)
 
   /**
     * Check if this exu has fixed latency

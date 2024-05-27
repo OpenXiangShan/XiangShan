@@ -67,6 +67,26 @@ object WbConfig {
     def numPreg(backendParams: BackendParams): Int = backendParams.getPregParams(VecData()).numEntries
   }
 
+  case class V0WB(
+    port    : Int = -1,
+    priority: Int = Int.MaxValue,
+  ) extends PregWB {
+
+    def dataCfg: DataConfig = MaskSrcData()
+
+    def numPreg(backendParams: BackendParams): Int = backendParams.getPregParams(MaskSrcData()).numEntries
+  }
+
+  case class VlWB(
+    port    : Int = -1,
+    priority: Int = Int.MaxValue,
+  ) extends PregWB {
+
+    def dataCfg: DataConfig = VConfigData()
+
+    def numPreg(backendParams: BackendParams): Int = backendParams.getPregParams(VConfigData()).numEntries
+  }
+
   case class NoWB(
     port    : Int = -1,
     priority: Int = Int.MaxValue,

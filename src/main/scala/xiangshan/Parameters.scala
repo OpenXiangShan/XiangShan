@@ -27,7 +27,7 @@ import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.issue.{IntScheduler, IssueBlockParams, MemScheduler, SchdBlockParams, SchedulerType, VfScheduler, FpScheduler}
-import xiangshan.backend.regfile.{IntPregParams, PregParams, VfPregParams, FakeIntPregParams, FpPregParams}
+import xiangshan.backend.regfile._
 import xiangshan.backend.BackendParams
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.prefetch._
@@ -188,6 +188,16 @@ case class XSCoreParameters
   ),
   vfPreg: VfPregParams = VfPregParams(
     numEntries = 128,
+    numRead = None,
+    numWrite = None,
+  ),
+  v0Preg: V0PregParams = V0PregParams(
+    numEntries = 22,
+    numRead = None,
+    numWrite = None,
+  ),
+  vlPreg: VlPregParams = VlPregParams(
+    numEntries = 32,
     numRead = None,
     numWrite = None,
   ),
@@ -498,6 +508,8 @@ case class XSCoreParameters
       intPreg,
       fpPreg,
       vfPreg,
+      v0Preg,
+      vlPreg,
       fakeIntPreg
     ),
     iqWakeUpParams,
@@ -653,6 +665,8 @@ trait HasXSParameter {
   def IntPhyRegs = coreParams.intPreg.numEntries
   def FpPhyRegs = coreParams.fpPreg.numEntries
   def VfPhyRegs = coreParams.vfPreg.numEntries
+  def V0PhyRegs = coreParams.v0Preg.numEntries
+  def VlPhyRegs = coreParams.vlPreg.numEntries
   def MaxPhyPregs = IntPhyRegs max VfPhyRegs
   def PhyRegIdxWidth = log2Up(IntPhyRegs) max log2Up(VfPhyRegs)
   def RobSize = coreParams.RobSize

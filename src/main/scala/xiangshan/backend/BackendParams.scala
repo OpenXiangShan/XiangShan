@@ -81,6 +81,8 @@ case class BackendParams(
   def intPregParams: IntPregParams = pregParams.collectFirst { case x: IntPregParams => x }.get
   def fpPregParams: FpPregParams = pregParams.collectFirst { case x: FpPregParams => x }.get
   def vfPregParams: VfPregParams = pregParams.collectFirst { case x: VfPregParams => x }.get
+  def v0PregParams: V0PregParams = pregParams.collectFirst { case x: V0PregParams => x }.get
+  def vlPregParams: VlPregParams = pregParams.collectFirst { case x: VlPregParams => x }.get
   def getPregParams: Map[DataConfig, PregParams] = {
     pregParams.map(x => (x.dataCfg, x)).toMap
   }

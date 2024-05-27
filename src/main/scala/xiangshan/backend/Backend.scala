@@ -244,8 +244,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   intScheduler.io.fromDataPath.og1Cancel := og1CancelOH
   intScheduler.io.ldCancel := io.mem.ldCancel
   intScheduler.io.fromDataPath.cancelToBusyTable := cancelToBusyTable
-  intScheduler.io.vlWriteBack.vlIsZero := false.B
-  intScheduler.io.vlWriteBack.vlIsVlmax := false.B
+  intScheduler.io.vlWriteBackInfo.vlIsZero := false.B
+  intScheduler.io.vlWriteBackInfo.vlIsVlmax := false.B
 
   fpScheduler.io.fromTop.hartId := io.fromTop.hartId
   fpScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
@@ -260,8 +260,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   fpScheduler.io.fromDataPath.og1Cancel := og1CancelOH
   fpScheduler.io.ldCancel := io.mem.ldCancel
   fpScheduler.io.fromDataPath.cancelToBusyTable := cancelToBusyTable
-  fpScheduler.io.vlWriteBack.vlIsZero := false.B
-  fpScheduler.io.vlWriteBack.vlIsVlmax := false.B
+  fpScheduler.io.vlWriteBackInfo.vlIsZero := false.B
+  fpScheduler.io.vlWriteBackInfo.vlIsVlmax := false.B
 
   memScheduler.io.fromTop.hartId := io.fromTop.hartId
   memScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
@@ -295,8 +295,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   memScheduler.io.fromDataPath.og1Cancel := og1CancelOH
   memScheduler.io.ldCancel := io.mem.ldCancel
   memScheduler.io.fromDataPath.cancelToBusyTable := cancelToBusyTable
-  memScheduler.io.vlWriteBack.vlIsZero := vlIsZero
-  memScheduler.io.vlWriteBack.vlIsVlmax := vlIsVlmax
+  memScheduler.io.vlWriteBackInfo.vlIsZero := vlIsZero
+  memScheduler.io.vlWriteBackInfo.vlIsVlmax := vlIsVlmax
 
   vfScheduler.io.fromTop.hartId := io.fromTop.hartId
   vfScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
@@ -311,8 +311,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   vfScheduler.io.fromDataPath.og1Cancel := og1CancelOH
   vfScheduler.io.ldCancel := io.mem.ldCancel
   vfScheduler.io.fromDataPath.cancelToBusyTable := cancelToBusyTable
-  vfScheduler.io.vlWriteBack.vlIsZero := vlIsZero
-  vfScheduler.io.vlWriteBack.vlIsVlmax := vlIsVlmax
+  vfScheduler.io.vlWriteBackInfo.vlIsZero := vlIsZero
+  vfScheduler.io.vlWriteBackInfo.vlIsVlmax := vlIsVlmax
   vfScheduler.io.fromOg2.get := og2ForVector.io.toVfIQ
 
   dataPath.io.hartId := io.fromTop.hartId

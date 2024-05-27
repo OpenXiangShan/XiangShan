@@ -40,7 +40,15 @@ class Dispatch2Iq(val schdBlockParams : SchdBlockParams)(implicit p: Parameters)
     case _ => 0
   }
   val numVfStateRead = schdBlockParams.schdType match {
-    case VfScheduler() | MemScheduler() => numRegSrc * numIn
+    case VfScheduler() | MemScheduler() => math.min(numRegSrc, 3) * numIn
+    case _ => 0
+  }
+  val numV0StateRead = schdBlockParams.schdType match {
+    case VfScheduler() | MemScheduler() => numIn
+    case _ => 0
+  }
+  val numVlStateRead = schdBlockParams.schdType match {
+    case VfScheduler() | MemScheduler() => numIn
     case _ => 0
   }
 
@@ -62,6 +70,8 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
   val numIntStateRead = wrapper.numIntStateRead
   val numFpStateRead = wrapper.numFpStateRead
   val numVfStateRead = wrapper.numVfStateRead
+  val numV0StateRead = wrapper.numV0StateRead
+  val numVlStateRead = wrapper.numVlStateRead
   val numIssueBlock = wrapper.issueBlockParams.size
 
   val io = IO(new Bundle() {
