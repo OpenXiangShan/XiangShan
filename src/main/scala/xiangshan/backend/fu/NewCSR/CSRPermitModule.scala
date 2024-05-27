@@ -40,6 +40,8 @@ class CSRPermitModule extends Module {
     io.in.status.vtvm,
   )
 
+  private val csrIsCustom = io.in.csrIsCustom
+
   private val csrIsRO = addr(11, 10) === "b11".U
 
   private val accessTable = TruthTable(Seq(
@@ -84,10 +86,12 @@ class CSRPermitModule extends Module {
   private val rwSatp_EX_II = csrAccess && privState.isModeHS &&  tvm && (addr === CSRs.satp.U || addr === CSRs.hgatp.U)
   private val rwSatp_EX_VI = csrAccess && privState.isModeVS && vtvm && (addr === CSRs.satp.U)
 
+  private val rwCustom_EX_II = csrAccess && privState.isModeVS && csrIsCustom
+
   io.out.illegal := csrAccess && csrAccessIllegal || mret && mretIllegal || sret && sretIllegal
 
   // Todo: check correct
-  io.out.EX_II := io.out.illegal && !privState.isVirtual || wfi_EX_II || rwSatp_EX_II
+  io.out.EX_II := io.out.illegal && !privState.isVirtual || wfi_EX_II || rwSatp_EX_II || rwCustom_EX_II
   io.out.EX_VI := io.out.illegal &&  privState.isVirtual || wfi_EX_VI || rwSatp_EX_VI
 
   io.out.hasLegalWen := io.in.csrAccess.wen && !csrAccessIllegal && debugRegCanAccess && triggerRegCanAccess
@@ -108,6 +112,7 @@ class CSRPermitIO extends Bundle {
     val mret = Bool()
     val sret = Bool()
     val wfi = Bool()
+    val csrIsCustom = Bool()
     val status = new Bundle {
       // Trap SRET
       val tsr = Bool()
