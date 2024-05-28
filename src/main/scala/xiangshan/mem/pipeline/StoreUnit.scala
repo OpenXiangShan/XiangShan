@@ -48,6 +48,9 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     val prefetch_req    = Flipped(DecoupledIO(new StorePrefetchReq))
     // provide prefetch info to sms
     val prefetch_train  = ValidIO(new StPrefetchTrainBundle())
+    // speculative for gated control
+    val s0_prefetch_spec = Output(Bool())
+    val s1_prefetch_spec = Output(Bool())
     val stld_nuke_query = Valid(new StoreNukeQueryIO)
     val stout           = DecoupledIO(new MemExuOutput) // writeback store
     val vecstout        = DecoupledIO(new VecPipelineFeedbackIO(isVStore = true))
@@ -344,8 +347,12 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.prefetch_train.bits.meta_prefetch := false.B
   io.prefetch_train.bits.meta_access := false.B
   if(EnableStorePrefetchSMS) {
+    io.s0_prefetch_spec := s0_fire
+    io.s1_prefetch_spec := s1_fire
     io.prefetch_train.valid := RegNext(s2_valid && io.dcache.resp.fire && !s2_out.mmio && !s2_in.tlbMiss && !s2_in.isHWPrefetch)
   }else {
+    io.s0_prefetch_spec := false.B
+    io.s1_prefetch_spec := false.B
     io.prefetch_train.valid := false.B
   }
 
