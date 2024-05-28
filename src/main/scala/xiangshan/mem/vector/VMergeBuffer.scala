@@ -117,6 +117,8 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     canEnqueue(i) && !cancelEnq(i)
   }
 
+  val freeCount    = uopSize.U - freeList.io.validCount
+
   for ((enq, i) <- io.fromSplit.zipWithIndex){
     freeList.io.doAllocate(i) := false.B
 
@@ -125,7 +127,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     val offset    = PopCount(needEnqueue.take(i))
     val canAccept = freeList.io.canAllocate(offset)
     val enqIndex  = freeList.io.allocateSlot(offset)
-    enq.req.ready := canAccept
+    enq.req.ready := freeCount >= (i + 1).U // for better timing
 
     when(needEnqueue(i) && enq.req.ready){
       freeList.io.doAllocate(i) := true.B
@@ -139,7 +141,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
 
     enq.resp.bits.mBIndex := enqIndex
     enq.resp.bits.fail    := false.B
-    enq.resp.valid        := canAccept //resp in 1 cycle
+    enq.resp.valid        := freeCount >= (i + 1).U // for better timing
   }
 
   //redirect
