@@ -69,6 +69,7 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICache
 class FtqICacheInfo(implicit p: Parameters)extends XSBundle with HasICacheParameters{
   val startAddr           = UInt(VAddrBits.W)
   val nextlineStart       = UInt(VAddrBits.W)
+  val ftqIdx              = new FtqPtr
   def crossCacheline =  startAddr(blockOffBits - 1) === 1.U
   def fromFtqPcBundle(b: Ftq_RF_Components) = {
     this.startAddr := b.startAddr
@@ -100,15 +101,6 @@ class PredecodeWritebackBundle(implicit p:Parameters) extends XSBundle {
   val target       = UInt(VAddrBits.W)
   val jalTarget    = UInt(VAddrBits.W)
   val instrRange   = Vec(PredictWidth, Bool())
-}
-
-// Ftq send req to Prefetch
-class PrefetchRequest(implicit p:Parameters) extends XSBundle {
-  val target          = UInt(VAddrBits.W)
-}
-
-class FtqPrefechBundle(implicit p:Parameters) extends XSBundle {
-  val req = DecoupledIO(new PrefetchRequest)
 }
 
 class mmioCommitRead(implicit p: Parameters) extends XSBundle {

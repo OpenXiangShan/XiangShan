@@ -246,7 +246,7 @@ case class XSCoreParameters
     useDmode = false,
     NWays = 48,
   ),
-  itlbPortNum: Int = 2 + ICacheParameters().prefetchPipeNum + 1,
+  itlbPortNum: Int = ICacheParameters().prefetchPipeNum + 1,
   ipmpPortNum: Int = 2 + ICacheParameters().prefetchPipeNum + 1,
   ldtlbParameters: TLBParameters = TLBParameters(
     name = "ldtlb",

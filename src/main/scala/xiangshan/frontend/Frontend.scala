@@ -108,8 +108,8 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   ifu.io.pmp.resp <> pmp_check.last.resp
 
   val itlb = Module(new TLB(coreParams.itlbPortNum, nRespDups = 1,
-    Seq(false, false) ++ Seq.fill(prefetchPipeNum)(false) ++ Seq(true), itlbParams))
-  itlb.io.requestor.take(2 + prefetchPipeNum) zip icache.io.itlb foreach {case (a,b) => a <> b}
+    Seq.fill(prefetchPipeNum)(false) ++ Seq(true), itlbParams))
+  itlb.io.requestor.take(prefetchPipeNum) zip icache.io.itlb foreach {case (a,b) => a <> b}
   itlb.io.requestor.last <> ifu.io.iTLBInter // mmio may need re-tlb, blocked
   itlb.io.hartId := io.hartId
   itlb.io.base_connect(sfence, tlbCsr)
@@ -143,10 +143,10 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   ifu.io.icacheInter.topdownIcacheMiss := icache.io.fetch.topdownIcacheMiss
   ifu.io.icacheInter.topdownItlbMiss := icache.io.fetch.topdownItlbMiss
   icache.io.stop := ifu.io.icacheStop
+  icache.io.flush := ftq.io.icacheFlush
 
   ifu.io.icachePerfInfo := icache.io.perfInfo
 
-  icache.io.csr.distribute_csr <> DontCare
   io.csrUpdate := DontCare
 
   icache.io.csr_pf_enable     := RegNext(csrCtrl.l1I_pf_enable)
