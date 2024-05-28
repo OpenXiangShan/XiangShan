@@ -380,6 +380,8 @@ class RabCommitInfo(implicit p: Parameters) extends XSBundle {
   val rfWen = Bool()
   val fpWen = Bool()
   val vecWen = Bool()
+  val v0Wen = Bool()
+  val vlWen = Bool()
   val isMove = Bool()
 }
 

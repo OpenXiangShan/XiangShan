@@ -36,6 +36,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   private val numVecRegSrc = backendParams.numVecRegSrc
   private val numVecRatPorts = numVecRegSrc
   private val v0Idx = 0
+  private val vlIdx = 0
   private val vconfigIdx = VCONFIG_IDX
 
   val io = IO(new Bundle() {
@@ -50,6 +51,8 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     val intRat = Vec(RenameWidth, Vec(2, Flipped(new RatReadPort))) // Todo: make it configurable
     val fpRat = Vec(RenameWidth, Vec(3, Flipped(new RatReadPort)))
     val vecRat = Vec(RenameWidth, Vec(numVecRatPorts, Flipped(new RatReadPort)))
+    val v0Rat = Vec(RenameWidth, Flipped(new RatReadPort))
+    val vlRat = Vec(RenameWidth, Flipped(new RatReadPort))
     // csr control
     val csrCtrl = Input(new CustomCSRCtrlIO)
     val fusion = Vec(DecodeWidth - 1, Input(Bool()))
@@ -189,9 +192,15 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     io.vecRat(i)(0).addr := io.out(i).bits.lsrc(0) // vs1
     io.vecRat(i)(1).addr := io.out(i).bits.lsrc(1) // vs2
     io.vecRat(i)(2).addr := io.out(i).bits.lsrc(2) // old_vd
-    io.vecRat(i)(3).addr := Mux(FuType.isVppu(io.out(i).bits.fuType) && (io.out(i).bits.fuOpType === VpermType.vcompress), io.out(i).bits.lsrc(3), v0Idx.U) // v0
-    io.vecRat(i)(4).addr := vconfigIdx.U           // vtype
+    io.vecRat(i)(3).addr := io.out(i).bits.lsrc(3) // no use
+    io.vecRat(i)(4).addr := io.out(i).bits.lsrc(4) // no use
     io.vecRat(i).foreach(_.hold := !io.out(i).ready)
+
+    io.v0Rat(i).addr := Mux(FuType.isVppu(io.out(i).bits.fuType) && (io.out(i).bits.fuOpType === VpermType.vcompress), io.out(i).bits.lsrc(3), v0Idx.U) // v0
+    io.v0Rat(i).hold := !io.out(i).ready
+
+    io.vlRat(i).addr := vlIdx.U // vl
+    io.vlRat(i).hold := !io.out(i).ready
   }
 
   val hasValid = VecInit(io.in.map(_.valid)).asUInt.orR

@@ -161,6 +161,8 @@ object Bundles {
     val rfWen           = Bool()
     val fpWen           = Bool()
     val vecWen          = Bool()
+    val v0Wen           = Bool()
+    val vlWen           = Bool()
     val isXSTrap        = Bool()
     val waitForward     = Bool() // no speculate execution
     val blockBackward   = Bool()
