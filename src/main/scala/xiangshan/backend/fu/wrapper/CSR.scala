@@ -343,6 +343,18 @@ class CSRToDecode(implicit p: Parameters) extends XSBundle {
      * raise EX_II when isModeHU && hstatus.HU=0
      */
     val hlsv = Bool()
+
+    /**
+     * decode all fp inst
+     * raise EX_II when FS=Off
+     */
+    val fsIsOff = Bool()
+
+    /**
+     * decode all vec inst
+     * raise EX_II when VS=Off
+     */
+    val vsIsOff = Bool()
   }
   val virtualInst = new Bundle {
     /**

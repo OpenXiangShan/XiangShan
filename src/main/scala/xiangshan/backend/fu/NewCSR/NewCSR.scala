@@ -892,6 +892,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.toDecode.virtualInst.hfence     := isModeVS || isModeVU
   io.toDecode.illegalInst.hlsv       := isModeHU && hstatus.regOut.HU
   io.toDecode.virtualInst.hlsv       := isModeVS || isModeVU
+  io.toDecode.illegalInst.fsIsOff    := mstatus.regOut.FS === ContextStatus.Off
+  io.toDecode.illegalInst.vsIsOff    := mstatus.regOut.VS === ContextStatus.Off
 
   // Always instantiate basic difftest modules.
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
