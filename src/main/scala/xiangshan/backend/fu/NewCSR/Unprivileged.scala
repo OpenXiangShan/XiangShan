@@ -103,14 +103,28 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
   }))
     .setAddr(0xC22)
 
+  val cycle = Module(new CSRModule("cycle", new CSRBundle {
+    val cycle = RO(63, 0)
+  }) with HasMHPMSink {
+    regOut.cycle := mHPM.cycle
+  })
+    .setAddr(CSRs.cycle)
+
   val time = Module(new CSRModule("time", new CSRBundle {
     val time = RO(63, 0)
-  }) with HasZicntrSink {
-    when (cntr.time.valid) {
-      reg.time := cntr.time.bits
+  }) with HasMHPMSink {
+    when (mHPM.time.valid) {
+      reg.time := mHPM.time.bits
     }
   })
     .setAddr(CSRs.time)
+
+  val instret = Module(new CSRModule("instret", new CSRBundle {
+    val instret = RO(63, 0)
+  }) with HasMHPMSink {
+    regOut.instret := mHPM.instret
+  })
+    .setAddr(CSRs.instret)
 
   val unprivilegedCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], Data)] = SeqMap(
     0x001 -> (fcsr.wAliasFflags -> fcsr.fflags),
@@ -123,7 +137,9 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     0xC20 -> (vl.w              -> vl.rdata),
     0xC21 -> (vtype.w           -> vtype.rdata),
     0xC22 -> (vlenb.w           -> vlenb.rdata),
+    CSRs.cycle -> (cycle.w      -> cycle.rdata),
     CSRs.time -> (time.w        -> time.rdata),
+    CSRs.instret -> (instret.w  -> instret.rdata),
   )
 
   val unprivilegedCSRMods: Seq[CSRModule[_]] = Seq(
@@ -133,7 +149,9 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     vl,
     vtype,
     vlenb,
+    cycle,
     time,
+    instret,
   )
 
   val unprivilegedCSROutMap: SeqMap[Int, UInt] = SeqMap(
@@ -147,7 +165,9 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     0xC20 -> vl.rdata.asUInt,
     0xC21 -> vtype.rdata.asUInt,
     0xC22 -> vlenb.rdata.asUInt,
-    CSRs.time -> time.rdata,
+    CSRs.cycle   -> cycle.rdata,
+    CSRs.time    -> time.rdata,
+    CSRs.instret -> instret.rdata,
   )
 }
 
@@ -175,8 +195,11 @@ object VlenbField extends CSREnum with ROApply {
   val init = Value((VLEN / 8).U)
 }
 
-trait HasZicntrSink { self: CSRModule[_] =>
-  val cntr = IO(Input(new Bundle {
+trait HasMHPMSink { self: CSRModule[_] =>
+  val mHPM = IO(Input(new Bundle {
+    val cycle   = UInt(64.W)
+    // ValidIO is used to update time reg
     val time    = ValidIO(UInt(64.W))
+    val instret = UInt(64.W)
   }))
 }

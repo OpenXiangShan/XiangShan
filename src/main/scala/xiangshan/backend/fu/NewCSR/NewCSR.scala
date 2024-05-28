@@ -348,6 +348,10 @@ class NewCSR(implicit val p: Parameters) extends Module
   permitMod.io.in.status.tvm  := mstatus.regOut.TVM.asBool
   permitMod.io.in.status.vtvm := hstatus.regOut.VTVM.asBool
 
+  permitMod.io.in.status.mcounteren := mcounteren.rdata
+  permitMod.io.in.status.hcounteren := mcounteren.rdata
+  permitMod.io.in.status.scounteren := mcounteren.rdata
+
   miregiprios.foreach { mod =>
     mod.w.wen := (addr === mireg.addr.U) && (miselect.regOut.ALL.asUInt === mod.addr.U)
     mod.w.wdata := wdata
@@ -489,8 +493,13 @@ class NewCSR(implicit val p: Parameters) extends Module
       case _ =>
     }
     mod match {
-      case m: HasZicntrSink =>
-        m.cntr.time := io.fromTop.clintTime
+      case m: HasMHPMSink =>
+        // cycle from mcycle
+        m.mHPM.cycle := mcycle.rdata
+        // time from clint
+        m.mHPM.time  := io.fromTop.clintTime
+        // instret from minstret
+        m.mHPM.instret := minstret.rdata
       case _ =>
     }
   }

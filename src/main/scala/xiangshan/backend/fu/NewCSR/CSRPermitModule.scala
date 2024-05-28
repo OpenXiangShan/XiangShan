@@ -3,7 +3,7 @@ package xiangshan.backend.fu.NewCSR
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.decode.TruthTable
-import xiangshan.backend.fu.NewCSR.CSRBundles.PrivState
+import xiangshan.backend.fu.NewCSR.CSRBundles.{Counteren, PrivState}
 import freechips.rocketchip.rocket.CSRs
 
 class CSRPermitModule extends Module {
@@ -42,7 +42,16 @@ class CSRPermitModule extends Module {
 
   private val csrIsCustom = io.in.csrIsCustom
 
+  private val (mcounteren, hcounteren, scounteren) = (
+    io.in.status.mcounteren,
+    io.in.status.hcounteren,
+    io.in.status.scounteren,
+  )
+
   private val csrIsRO = addr(11, 10) === "b11".U
+  private val csrIsUnpriv = addr(9, 8) === "b00".U
+  private val csrIsHPM = addr >= CSRs.cycle.U && addr <= CSRs.hpmcounter31.U
+  private val counterAddr = addr(4, 0) // 32 counters
 
   private val accessTable = TruthTable(Seq(
     //       V PRVM ADDR
@@ -88,11 +97,21 @@ class CSRPermitModule extends Module {
 
   private val rwCustom_EX_II = csrAccess && privState.isModeVS && csrIsCustom
 
+  private val accessHPM = ren && csrIsHPM
+  private val accessHPM_EX_II = accessHPM && (
+    !mcounteren(counterAddr) ||
+    privState.isModeHU && scounteren(counterAddr)
+  )
+  private val accessHPM_EX_VI = accessHPM && mcounteren(counterAddr) && (
+    privState.isModeVS && !hcounteren(counterAddr) ||
+    privState.isModeVU && (!hcounteren(counterAddr) || !scounteren(counterAddr))
+  )
+
   io.out.illegal := csrAccess && csrAccessIllegal || mret && mretIllegal || sret && sretIllegal
 
   // Todo: check correct
-  io.out.EX_II := io.out.illegal && !privState.isVirtual || wfi_EX_II || rwSatp_EX_II || rwCustom_EX_II
-  io.out.EX_VI := io.out.illegal &&  privState.isVirtual || wfi_EX_VI || rwSatp_EX_VI
+  io.out.EX_II := io.out.illegal && !privState.isVirtual || wfi_EX_II || rwSatp_EX_II || accessHPM_EX_II || rwCustom_EX_II
+  io.out.EX_VI := io.out.illegal &&  privState.isVirtual || wfi_EX_VI || rwSatp_EX_VI || accessHPM_EX_VI
 
   io.out.hasLegalWen := io.in.csrAccess.wen && !csrAccessIllegal && debugRegCanAccess && triggerRegCanAccess
   io.out.hasLegalMret := mret && !mretIllegal
@@ -126,6 +145,15 @@ class CSRPermitIO extends Bundle {
       val tvm = Bool()
       // Virtual Trap Virtual Memory
       val vtvm = Bool()
+      // Machine level counter enable, access PMC from the level less than M will trap EX_II
+      val mcounteren = UInt(32.W)
+      // Hypervisor level counter enable.
+      // Accessing PMC from VS/VU level will trap EX_VI, if m[x]=1 && h[x]=0
+      val hcounteren = UInt(32.W)
+      // Supervisor level counter enable.
+      // Accessing PMC from **HU level** will trap EX_II, if s[x]=0
+      // Accessing PMC from **VU level** will trap EX_VI, if m[x]=1 && h[x]=1 && s[x]=0
+      val scounteren = UInt(32.W)
     }
   })
 
