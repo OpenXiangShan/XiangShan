@@ -258,7 +258,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   io.debugVconfig.foreach(_ := vconfigDebugReadData.get)
 
   IntRegFile("IntRegFile", intSchdParams.numPregs, intRfRaddr, intRfRdata, intRfWen, intRfWaddr, intRfWdata,
-    bankNum = 4,
+    bankNum = 1,
     debugReadAddr = intDebugRead.map(_._1),
     debugReadData = intDebugRead.map(_._2))
   FpRegFile("FpRegFile", fpSchdParams.numPregs, fpRfRaddr, fpRfRdata, fpRfWen, fpRfWaddr, fpRfWdata,
@@ -269,9 +269,9 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     debugReadAddr = vfDebugRead.map(_._1),
     debugReadData = vfDebugRead.map(_._2))
 
-  intRfWaddr := io.fromIntWb.map(_.addr).toSeq
-  intRfWdata := io.fromIntWb.map(_.data).toSeq
-  intRfWen := io.fromIntWb.map(_.wen).toSeq
+  intRfWaddr := io.fromIntWb.map(x => RegEnable(x.addr, x.wen)).toSeq
+  intRfWdata := io.fromIntWb.map(x => RegEnable(x.data, x.wen)).toSeq
+  intRfWen := RegNext(VecInit(io.fromIntWb.map(_.wen).toSeq))
 
   for (portIdx <- intRfRaddr.indices) {
     if (intRFReadArbiter.io.out.isDefinedAt(portIdx))
@@ -280,9 +280,9 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       intRfRaddr(portIdx) := 0.U
   }
 
-  fpRfWaddr := io.fromFpWb.map(_.addr).toSeq
-  fpRfWdata := io.fromFpWb.map(_.data).toSeq
-  fpRfWen := io.fromFpWb.map(_.wen).toSeq
+  fpRfWaddr := io.fromFpWb.map(x => RegEnable(x.addr, x.wen)).toSeq
+  fpRfWdata := io.fromFpWb.map(x => RegEnable(x.data, x.wen)).toSeq
+  fpRfWen := RegNext(VecInit(io.fromFpWb.map(_.wen).toSeq))
 
   for (portIdx <- fpRfRaddr.indices) {
     if (fpRFReadArbiter.io.out.isDefinedAt(portIdx))
