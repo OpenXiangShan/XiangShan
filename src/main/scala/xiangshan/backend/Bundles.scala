@@ -248,7 +248,7 @@ object Bundles {
       this
     }
 
-    def needWriteRf: Bool = (rfWen && ldest =/= 0.U) || fpWen || vecWen
+    def needWriteRf: Bool = (rfWen && ldest =/= 0.U) || fpWen || vecWen || v0Wen || vlWen
   }
 
   trait BundleSource {
@@ -265,6 +265,8 @@ object Bundles {
     val rfWen = Bool()
     val fpWen = Bool()
     val vecWen = Bool()
+    val v0Wen = Bool()
+    val vlWen = Bool()
     val pdest = UInt(pregIdxWidth.W)
 
     /**
@@ -281,6 +283,20 @@ object Bundles {
           ) && valid
       }
     }
+    def wakeUpV0(successor: (UInt, UInt), valid: Bool): Bool = {
+      val (thatPsrc, srcType) = successor
+      val pdestMatch = pdest === thatPsrc
+      pdestMatch && (
+        SrcType.isV0(srcType) && this.v0Wen
+      ) && valid
+    }
+    def wakeUpVl(successor: (UInt, UInt), valid: Bool): Bool = {
+      val (thatPsrc, srcType) = successor
+      val pdestMatch = pdest === thatPsrc
+      pdestMatch && (
+        SrcType.isVp(srcType) && this.vlWen
+      ) && valid
+    }
     def wakeUpFromIQ(successor: Seq[(UInt, UInt)]): Seq[Bool] = {
       successor.map { case (thatPsrc, srcType) =>
         val pdestMatch = pdest === thatPsrc
@@ -290,6 +306,20 @@ object Bundles {
             SrcType.isVp(srcType) && this.vecWen
           )
       }
+    }
+    def wakeUpV0FromIQ(successor: (UInt, UInt)): Bool = {
+      val (thatPsrc, srcType) = successor
+      val pdestMatch = pdest === thatPsrc
+      pdestMatch && (
+        SrcType.isV0(srcType) && this.v0Wen
+      )
+    }
+    def wakeUpVlFromIQ(successor: (UInt, UInt)): Bool = {
+      val (thatPsrc, srcType) = successor
+      val pdestMatch = pdest === thatPsrc
+      pdestMatch && (
+        SrcType.isVp(srcType) && this.vlWen
+      )
     }
 
     def hasOnlyOneSource: Boolean = exuIndices.size == 1
@@ -323,11 +353,15 @@ object Bundles {
     val rfWenCopy  = OptionWrapper(copyWakeupOut && params.needIntWen, Vec(copyNum, Bool()))
     val fpWenCopy  = OptionWrapper(copyWakeupOut && params.needFpWen, Vec(copyNum, Bool()))
     val vecWenCopy = OptionWrapper(copyWakeupOut && params.needVecWen, Vec(copyNum, Bool()))
+    val v0WenCopy = OptionWrapper(copyWakeupOut && params.needV0Wen, Vec(copyNum, Bool()))
+    val vlWenCopy = OptionWrapper(copyWakeupOut && params.needVlWen, Vec(copyNum, Bool()))
     val loadDependencyCopy = OptionWrapper(copyWakeupOut && params.isIQWakeUpSink, Vec(copyNum, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
     def fromExuInput(exuInput: ExuInput, l2ExuVecs: Vec[UInt]): Unit = {
       this.rfWen := exuInput.rfWen.getOrElse(false.B)
       this.fpWen := exuInput.fpWen.getOrElse(false.B)
       this.vecWen := exuInput.vecWen.getOrElse(false.B)
+      this.v0Wen := exuInput.v0Wen.getOrElse(false.B)
+      this.vlWen := exuInput.vlWen.getOrElse(false.B)
       this.pdest := exuInput.pdest
     }
 
@@ -335,6 +369,8 @@ object Bundles {
       this.rfWen := exuInput.rfWen.getOrElse(false.B)
       this.fpWen := exuInput.fpWen.getOrElse(false.B)
       this.vecWen := exuInput.vecWen.getOrElse(false.B)
+      this.v0Wen := exuInput.v0Wen.getOrElse(false.B)
+      this.vlWen := exuInput.vlWen.getOrElse(false.B)
       this.pdest := exuInput.pdest
     }
   }
@@ -425,32 +461,12 @@ object Bundles {
 
     def exuIdx = exuParams.exuIdx
     def getSource: SchedulerType = exuParams.getWBSource
-    def getIntWbBusyBundle = common.rfWen.toSeq
-    def getVfWbBusyBundle = common.getVfWen.toSeq
 
-    def getIntRfReadValidBundle(issueValid: Bool): Seq[ValidIO[RfReadPortWithConfig]] = {
+    def getRfReadValidBundle(issueValid: Bool): Seq[ValidIO[RfReadPortWithConfig]] = {
       rf.zip(srcType).map {
         case (rfRd: MixedVec[RfReadPortWithConfig], t: UInt) =>
           makeValid(issueValid, rfRd.head)
       }.toSeq
-    }
-
-    def getFpRfReadValidBundle(issueValid: Bool): Seq[ValidIO[RfReadPortWithConfig]] = {
-      rf.zip(srcType).map {
-        case (rfRd: MixedVec[RfReadPortWithConfig], t: UInt) =>
-          makeValid(issueValid, rfRd.head)
-      }.toSeq
-    }
-
-    def getVfRfReadValidBundle(issueValid: Bool): Seq[ValidIO[RfReadPortWithConfig]] = {
-      rf.zip(srcType).map {
-        case (rfRd: MixedVec[RfReadPortWithConfig], t: UInt) =>
-          makeValid(issueValid, rfRd.head)
-      }.toSeq
-    }
-
-    def getIntRfWriteValidBundle(issueValid: Bool) = {
-
     }
   }
 
@@ -458,12 +474,6 @@ object Bundles {
     val issueQueueParams = this.params
     val og0resp = Valid(new EntryDeqRespBundle)
     val og1resp = Valid(new EntryDeqRespBundle)
-  }
-
-  class fuBusyRespBundle(implicit p: Parameters, params: IssueBlockParams) extends Bundle {
-    val respType = RSFeedbackType() // update credit if needs replay
-    val rfWen = Bool() // TODO: use params to identify IntWB/VfWB
-    val fuType = FuType()
   }
 
   class WbFuBusyTableWriteBundle(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
@@ -546,6 +556,8 @@ object Bundles {
     val rfWen         = if (params.needIntWen)    Some(Bool())                        else None
     val fpWen         = if (params.needFpWen)     Some(Bool())                        else None
     val vecWen        = if (params.needVecWen)    Some(Bool())                        else None
+    val v0Wen         = if (params.needV0Wen)     Some(Bool())                        else None
+    val vlWen         = if (params.needVlWen)     Some(Bool())                        else None
     val fpu           = if (params.writeFflags)   Some(new FPUCtrlSignals)            else None
     val vpu           = if (params.needVPUCtrl)   Some(new VPUCtrlSignals)            else None
     val flushPipe     = if (params.flushPipe)     Some(Bool())                        else None
@@ -594,16 +606,6 @@ object Bundles {
       }
     }
 
-    def getFpWen = {
-      if (params.writeFpRf) this.fpWen
-      else None
-    }
-
-    def getVfWen = {
-      if(params.writeVecRf) this.vecWen
-      else None
-    }
-
     def fromIssueBundle(source: IssueQueueIssueBundle): Unit = {
       // src is assigned to rfReadData
       this.fuType        := source.common.fuType
@@ -618,6 +620,8 @@ object Bundles {
       this.rfWen         .foreach(_ := source.common.rfWen.get)
       this.fpWen         .foreach(_ := source.common.fpWen.get)
       this.vecWen        .foreach(_ := source.common.vecWen.get)
+      this.v0Wen         .foreach(_ := source.common.v0Wen.get)
+      this.vlWen         .foreach(_ := source.common.vlWen.get)
       this.fpu           .foreach(_ := source.common.fpu.get)
       this.vpu           .foreach(_ := source.common.vpu.get)
       this.flushPipe     .foreach(_ := source.common.flushPipe.get)
@@ -651,6 +655,8 @@ object Bundles {
     val intWen       = if (params.needIntWen)   Some(Bool())                  else None
     val fpWen        = if (params.needFpWen)    Some(Bool())                  else None
     val vecWen       = if (params.needVecWen)   Some(Bool())                  else None
+    val v0Wen        = if (params.needV0Wen)    Some(Bool())                  else None
+    val vlWen        = if (params.needVlWen)    Some(Bool())                  else None
     val redirect     = if (params.hasRedirect)  Some(ValidIO(new Redirect))   else None
     val fflags       = if (params.writeFflags)  Some(UInt(5.W))               else None
     val wflags       = if (params.writeFflags)  Some(Bool())                  else None
@@ -682,6 +688,8 @@ object Bundles {
     val rfWen = Bool()
     val fpWen = Bool()
     val vecWen = Bool()
+    val v0Wen = Bool()
+    val vlWen = Bool()
     val pdest = UInt(params.pregIdxWidth(backendParams).W)
     val data = UInt(params.dataWidth.W)
     val robIdx = new RobPtr()(p)
@@ -700,6 +708,8 @@ object Bundles {
       this.rfWen  := source.intWen.getOrElse(false.B)
       this.fpWen  := source.fpWen.getOrElse(false.B)
       this.vecWen := source.vecWen.getOrElse(false.B)
+      this.v0Wen  := source.v0Wen.getOrElse(false.B)
+      this.vlWen  := source.vlWen.getOrElse(false.B)
       this.pdest  := source.pdest
       this.data   := source.data
       this.robIdx := source.robIdx
@@ -721,6 +731,8 @@ object Bundles {
       rfWrite.intWen := this.rfWen
       rfWrite.fpWen := false.B
       rfWrite.vecWen := false.B
+      rfWrite.v0Wen := false.B
+      rfWrite.vlWen := false.B
       rfWrite
     }
 
@@ -732,6 +744,8 @@ object Bundles {
       rfWrite.intWen := false.B
       rfWrite.fpWen := this.fpWen
       rfWrite.vecWen := false.B
+      rfWrite.v0Wen := false.B
+      rfWrite.vlWen := false.B
       rfWrite
     }
 
@@ -743,6 +757,34 @@ object Bundles {
       rfWrite.intWen := false.B
       rfWrite.fpWen := false.B
       rfWrite.vecWen := this.vecWen
+      rfWrite.v0Wen := false.B
+      rfWrite.vlWen := false.B
+      rfWrite
+    }
+
+    def asV0RfWriteBundle(fire: Bool): RfWritePortWithConfig = {
+      val rfWrite = Wire(Output(new RfWritePortWithConfig(this.params.dataCfg, backendParams.getPregParams(MaskSrcData()).addrWidth)))
+      rfWrite.wen := this.v0Wen && fire
+      rfWrite.addr := this.pdest
+      rfWrite.data := this.data
+      rfWrite.intWen := false.B
+      rfWrite.fpWen := false.B
+      rfWrite.vecWen := false.B
+      rfWrite.v0Wen := this.v0Wen
+      rfWrite.vlWen := false.B
+      rfWrite
+    }
+
+    def asVlRfWriteBundle(fire: Bool): RfWritePortWithConfig = {
+      val rfWrite = Wire(Output(new RfWritePortWithConfig(this.params.dataCfg, backendParams.getPregParams(VConfigData()).addrWidth)))
+      rfWrite.wen := this.vlWen && fire
+      rfWrite.addr := this.pdest
+      rfWrite.data := this.data
+      rfWrite.intWen := false.B
+      rfWrite.fpWen := false.B
+      rfWrite.vecWen := false.B
+      rfWrite.v0Wen := false.B
+      rfWrite.vlWen := this.vlWen
       rfWrite
     }
   }
@@ -803,16 +845,9 @@ object Bundles {
     val rfWen = Bool()
     val fpWen = Bool()
     val vecWen = Bool()
+    val v0Wen = Bool()
+    val vlWen = Bool()
     val pdest = UInt(PhyRegIdxWidth.W)
-
-    def needCancel(srcType: UInt, psrc: UInt, valid: Bool): Bool = {
-      val pdestMatch = pdest === psrc
-      pdestMatch && (
-        SrcType.isFp(srcType) && !this.rfWen ||
-          SrcType.isXp(srcType) && this.rfWen ||
-          SrcType.isVp(srcType) && !this.rfWen
-        ) && valid
-    }
   }
 
   class MemExuInput(isVector: Boolean = false)(implicit p: Parameters) extends XSBundle {

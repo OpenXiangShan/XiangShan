@@ -78,9 +78,9 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   private val fpRdNotBlock: Seq2[Bool] = fpRdArbWinner.map(_.map(_.asUInt.andR))
   private val vfRdNotBlock: Seq2[Bool] = vfRdArbWinner.map(_.map(_.asUInt.andR))
 
-  private val intRFReadReq: Seq3[ValidIO[RfReadPortWithConfig]] = fromIQ.map(x => x.map(xx => xx.bits.getIntRfReadValidBundle(xx.valid)).toSeq).toSeq
-  private val fpRFReadReq: Seq3[ValidIO[RfReadPortWithConfig]] = fromIQ.map(x => x.map(xx => xx.bits.getFpRfReadValidBundle(xx.valid)).toSeq).toSeq
-  private val vfRFReadReq: Seq3[ValidIO[RfReadPortWithConfig]] = fromIQ.map(x => x.map(xx => xx.bits.getVfRfReadValidBundle(xx.valid)).toSeq).toSeq
+  private val intRFReadReq: Seq3[ValidIO[RfReadPortWithConfig]] = fromIQ.map(x => x.map(xx => xx.bits.getRfReadValidBundle(xx.valid)).toSeq).toSeq
+  private val fpRFReadReq: Seq3[ValidIO[RfReadPortWithConfig]] = fromIQ.map(x => x.map(xx => xx.bits.getRfReadValidBundle(xx.valid)).toSeq).toSeq
+  private val vfRFReadReq: Seq3[ValidIO[RfReadPortWithConfig]] = fromIQ.map(x => x.map(xx => xx.bits.getRfReadValidBundle(xx.valid)).toSeq).toSeq
   private val allDataSources: Seq[Seq[Vec[DataSource]]] = fromIQ.map(x => x.map(xx => xx.bits.common.dataSources).toSeq)
   private val allNumRegSrcs: Seq[Seq[Int]] = fromIQ.map(x => x.map(xx => xx.bits.exuParams.numRegSrc).toSeq)
 
@@ -143,8 +143,8 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   }
 
   private val intRFWriteReq: Seq2[Bool] = fromIQ.map(x => x.map(xx => xx.valid && xx.bits.common.rfWen.getOrElse(false.B)).toSeq).toSeq
-  private val fpRFWriteReq: Seq2[Bool] = fromIQ.map(x => x.map(xx => xx.valid && xx.bits.common.getFpWen.getOrElse(false.B)).toSeq).toSeq
-  private val vfRFWriteReq: Seq2[Bool] = fromIQ.map(x => x.map(xx => xx.valid && xx.bits.common.getVfWen.getOrElse(false.B)).toSeq).toSeq
+  private val fpRFWriteReq: Seq2[Bool] = fromIQ.map(x => x.map(xx => xx.valid && xx.bits.common.fpWen.getOrElse(false.B)).toSeq).toSeq
+  private val vfRFWriteReq: Seq2[Bool] = fromIQ.map(x => x.map(xx => xx.valid && xx.bits.common.vecWen.getOrElse(false.B)).toSeq).toSeq
 
   intWbBusyArbiter.io.in.zip(intRFWriteReq).foreach { case (arbInSeq, inRFWriteReqSeq) =>
     arbInSeq.zip(inRFWriteReqSeq).foreach { case (arbIn, inRFWriteReq) =>
@@ -168,16 +168,6 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   private val fpSchdParams = params.schdParams(FpScheduler())
   private val vfSchdParams = params.schdParams(VfScheduler())
   private val memSchdParams = params.schdParams(MemScheduler())
-
-  private val numIntRfReadByExu = intSchdParams.numIntRfReadByExu + memSchdParams.numIntRfReadByExu
-  private val numFpRfReadByExu = fpSchdParams.numFpRfReadByExu + memSchdParams.numFpRfReadByExu
-  private val numVfRfReadByExu = vfSchdParams.numVfRfReadByExu + memSchdParams.numVfRfReadByExu
-  // Todo: limit read port
-  private val numIntR = numIntRfReadByExu
-  private val numFpR = numFpRfReadByExu
-  private val numVfR = numVfRfReadByExu
-  println(s"[DataPath] RegFile read req needed by Exu: Int(${numIntRfReadByExu}), Fp(${numFpRfReadByExu}), Vf(${numVfRfReadByExu})")
-  println(s"[DataPath] RegFile read port: Int(${numIntR}), Fp(${numFpR}), Vf(${numVfR})")
 
   private val schdParams = params.allSchdParams
 
