@@ -73,6 +73,8 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
       case IntWB(_, _) => io.wakeUp.map(x => x.valid && x.bits.rfWen && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), io.ldCancel))
       case FpWB(_, _)  => io.wakeUp.map(x => x.valid && x.bits.fpWen && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), io.ldCancel))
       case VfWB(_, _)  => io.wakeUp.map(x => x.valid && x.bits.vecWen && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), io.ldCancel))
+      case V0WB(_, _)  => io.wakeUp.map(x => x.valid && x.bits.v0Wen && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), io.ldCancel))
+      case VlWB(_, _)  => io.wakeUp.map(x => x.valid && x.bits.vlWen && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), io.ldCancel))
       case _ => throw new IllegalArgumentException(s"WbConfig ${pregWB} is not permitted")
     }
     wakeupOH := (if (io.wakeUp.nonEmpty) VecInit(tmp.toSeq).asUInt else 0.U)
@@ -84,6 +86,8 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
     case IntWB(_, _) => io.cancel.map(x => Mux(x.valid && x.bits.rfWen, UIntToOH(x.bits.pdest), 0.U)).fold(0.U)(_ | _)
     case FpWB(_, _)  => io.cancel.map(x => Mux(x.valid && x.bits.fpWen, UIntToOH(x.bits.pdest), 0.U)).fold(0.U)(_ | _)
     case VfWB(_, _)  => io.cancel.map(x => Mux(x.valid && x.bits.vecWen, UIntToOH(x.bits.pdest), 0.U)).fold(0.U)(_ | _)
+    case V0WB(_, _)  => io.cancel.map(x => Mux(x.valid && x.bits.v0Wen, UIntToOH(x.bits.pdest), 0.U)).fold(0.U)(_ | _)
+    case VlWB(_, _)  => io.cancel.map(x => Mux(x.valid && x.bits.vlWen, UIntToOH(x.bits.pdest), 0.U)).fold(0.U)(_ | _)
     case _ => throw new IllegalArgumentException(s"WbConfig ${pregWB} is not permitted")
   }
   val ldCancelMask = loadDependency.map(x => LoadShouldCancel(Some(x), io.ldCancel))
