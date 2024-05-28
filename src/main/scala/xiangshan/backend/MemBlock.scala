@@ -41,6 +41,7 @@ import xiangshan.mem._
 import xiangshan.mem.mdp._
 import xiangshan.frontend.HasInstrMMIOConst
 import xiangshan.mem.prefetch.{BasePrefecher, L1Prefetcher, SMSParams, SMSPrefetcher}
+import xiangshan.backend.datapath.NewPipelineConnect
 
 trait HasMemBlockParameters extends HasXSParameter {
   // number of memory units
@@ -1338,7 +1339,13 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     vsSplit(i).io.in.valid := io.ooo_to_mem.issueVldu(i).valid && LSUOpType.isVecSt(io.ooo_to_mem.issueVldu(i).bits.uop.fuOpType) &&
                               vLsuCanaccept(i) && !isSegment
     vsSplit(i).io.toMergeBuffer <> vsMergeBuffer(i).io.fromSplit.head
-    vsSplit(i).io.out <> storeUnits(i).io.vecstin // Todo: May be some balance mechanism is needed
+    NewPipelineConnect(
+      vsSplit(i).io.out, storeUnits(i).io.vecstin, storeUnits(i).io.vecstin.fire,
+      Mux(vsSplit(i).io.out.fire,
+          vsSplit(i).io.out.bits.uop.robIdx.needFlush(io.redirect),
+          storeUnits(i).io.vecstin.bits.uop.robIdx.needFlush(io.redirect)),
+      Option("VsSplitConnectStu")
+    )
     vsSplit(i).io.vstd.get := DontCare // Todo: Discuss how to pass vector store data
 
   }
@@ -1348,7 +1355,13 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     vlSplit(i).io.in.valid := io.ooo_to_mem.issueVldu(i).valid && LSUOpType.isVecLd(io.ooo_to_mem.issueVldu(i).bits.uop.fuOpType) &&
                               vLsuCanaccept(i) && !isSegment
     vlSplit(i).io.toMergeBuffer <> vlMergeBuffer.io.fromSplit(i)
-    vlSplit(i).io.out <> loadUnits(i).io.vecldin // Todo: May be some balance mechanism is needed
+    NewPipelineConnect(
+      vlSplit(i).io.out, loadUnits(i).io.vecldin, loadUnits(i).io.vecldin.fire,
+      Mux(vlSplit(i).io.out.fire,
+          vlSplit(i).io.out.bits.uop.robIdx.needFlush(io.redirect),
+          loadUnits(i).io.vecldin.bits.uop.robIdx.needFlush(io.redirect)),
+      Option("VlSplitConnectLdu")
+    )
 
   }
   (0 until LduCnt).foreach{i=>
