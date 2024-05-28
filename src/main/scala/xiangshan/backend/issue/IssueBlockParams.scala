@@ -7,7 +7,7 @@ import utils.SeqUtils
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.DataConfig.DataConfig
-import xiangshan.backend.datapath.WbConfig.{IntWB, PregWB, VfWB, FpWB}
+import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.datapath.{WakeUpConfig, WakeUpSource}
 import xiangshan.backend.exu.{ExeUnit, ExeUnitParams}
 import xiangshan.backend.fu.{FuConfig, FuType}
@@ -70,6 +70,10 @@ case class IssueBlockParams(
   def numVecSrc: Int = exuBlockParams.map(_.numVecSrc).max
 
   def numVfSrc: Int = exuBlockParams.map(_.numVfSrc).max
+
+  def numV0Src: Int = exuBlockParams.map(_.numV0Src).max
+
+  def numVlSrc: Int = exuBlockParams.map(_.numVlSrc).max
 
   def numRegSrc: Int = exuBlockParams.map(_.numRegSrc).max
 
@@ -253,6 +257,10 @@ case class IssueBlockParams(
   def needWakeupFromFpWBPort = backendParam.allExuParams.filter(x => !wakeUpInExuSources.map(_.name).contains(x.name)).groupBy(x => x.getFpWBPort.getOrElse(FpWB(port = -1)).port).filter(_._1 != -1)
 
   def needWakeupFromVfWBPort = backendParam.allExuParams.filter(x => !wakeUpInExuSources.map(_.name).contains(x.name)).groupBy(x => x.getVfWBPort.getOrElse(VfWB(port = -1)).port).filter(_._1 != -1)
+
+  def needWakeupFromV0WBPort = backendParam.allExuParams.filter(x => !wakeUpInExuSources.map(_.name).contains(x.name)).groupBy(x => x.getV0WBPort.getOrElse(V0WB(port = -1)).port).filter(_._1 != -1)
+
+  def needWakeupFromVlWBPort = backendParam.allExuParams.filter(x => !wakeUpInExuSources.map(_.name).contains(x.name)).groupBy(x => x.getVlWBPort.getOrElse(VlWB(port = -1)).port).filter(_._1 != -1)
 
   def hasWakeupFromMem: Boolean = backendParam.allExuParams.filter(x => wakeUpInExuSources.map(_.name).contains(x.name)).map(_.isMemExeUnit).fold(false)(_ | _)
 

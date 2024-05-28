@@ -7,7 +7,7 @@ import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles.{ExuBypassBundle, ExuInput, ExuOutput}
 import xiangshan.backend.datapath.DataConfig.DataConfig
 import xiangshan.backend.datapath.RdConfig._
-import xiangshan.backend.datapath.WbConfig.{IntWB, PregWB, VfWB, FpWB}
+import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.datapath.{DataConfig, WakeUpConfig}
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.issue.{IssueBlockParams, SchedulerType, IntScheduler, VfScheduler, MemScheduler}
@@ -36,6 +36,8 @@ case class ExeUnitParams(
   val numFpSrc: Int = fuConfigs.map(_.numFpSrc).max
   val numVecSrc: Int = fuConfigs.map(_.numVecSrc).max
   val numVfSrc: Int = fuConfigs.map(_.numVfSrc).max
+  val numV0Src: Int = fuConfigs.map(_.numV0Src).max
+  val numVlSrc: Int = fuConfigs.map(_.numVlSrc).max
   val numRegSrc: Int = fuConfigs.map(_.numRegSrc).max
   val numSrc: Int = fuConfigs.map(_.numSrc).max
   val dataBitsMax: Int = fuConfigs.map(_.dataBits).max
@@ -49,6 +51,8 @@ case class ExeUnitParams(
   val needIntWen: Boolean = fuConfigs.map(_.needIntWen).reduce(_ || _)
   val needFpWen: Boolean = fuConfigs.map(_.needFpWen).reduce(_ || _)
   val needVecWen: Boolean = fuConfigs.map(_.needVecWen).reduce(_ || _)
+  val needV0Wen: Boolean = fuConfigs.map(_.needV0Wen).reduce(_ || _)
+  val needVlWen: Boolean = fuConfigs.map(_.needVlWen).reduce(_ || _)
   val needOg2: Boolean = fuConfigs.map(_.needOg2).reduce(_ || _)
   val writeVfRf: Boolean = writeVecRf
   val writeFflags: Boolean = fuConfigs.map(_.writeFflags).reduce(_ || _)
@@ -304,6 +308,18 @@ case class ExeUnitParams(
   def getVfWBPort = {
     wbPortConfigs.collectFirst {
       case x: VfWB => x
+    }
+  }
+
+  def getV0WBPort = {
+    wbPortConfigs.collectFirst {
+      case x: V0WB => x
+    }
+  }
+
+  def getVlWBPort = {
+    wbPortConfigs.collectFirst {
+      case x: VlWB => x
     }
   }
 

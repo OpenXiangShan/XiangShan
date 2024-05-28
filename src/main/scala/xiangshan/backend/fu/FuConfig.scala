@@ -75,6 +75,8 @@ case class FuConfig (
   def needIntWen: Boolean = writeIntRf || writeFakeIntRf
   def needFpWen:  Boolean = writeFpRf
   def needVecWen: Boolean = writeVecRf
+  def needV0Wen:  Boolean = writeV0Rf
+  def needVlWen:  Boolean = writeVlRf
   var vconfigIdx = -1
   var maskSrcIdx = -1
   if (vconfigWakeUp) {
@@ -92,6 +94,8 @@ case class FuConfig (
   def numFpSrc  : Int = srcData.map(_.count(x => FpRegSrcDataSet.contains(x))).fold(0)(_ max _)
   def numVecSrc : Int = srcData.map(_.count(x => VecRegSrcDataSet.contains(x))).fold(0)(_ max _)
   def numVfSrc  : Int = srcData.map(_.count(x => VfRegSrcDataSet.contains(x))).fold(0)(_ max _)
+  def numV0Src  : Int = srcData.map(_.count(x => V0RegSrcDataSet.contains(x))).fold(0)(_ max _)
+  def numVlSrc  : Int = srcData.map(_.count(x => VlRegSrcDataSet.contains(x))).fold(0)(_ max _)
   def numRegSrc : Int = srcData.map(_.count(x => RegSrcDataSet.contains(x))).fold(0)(_ max _)
   def numSrc    : Int = srcData.map(_.length).fold(0)(_ max _)
 
