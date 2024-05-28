@@ -1,6 +1,8 @@
 package xiangshan.backend.fu.NewCSR
 
 import chisel3._
+import chisel3.util._
+import freechips.rocketchip.rocket.CSRs
 import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRROField => RO, CSRRWField => RW, CSRWARLField => WARL}
 import xiangshan.backend.fu.NewCSR.CSRFunc._
 import xiangshan.backend.fu.vector.Bundles._
@@ -101,6 +103,15 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
   }))
     .setAddr(0xC22)
 
+  val time = Module(new CSRModule("time", new CSRBundle {
+    val time = RO(63, 0)
+  }) with HasZicntrSink {
+    when (cntr.time.valid) {
+      reg.time := cntr.time.bits
+    }
+  })
+    .setAddr(CSRs.time)
+
   val unprivilegedCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], Data)] = SeqMap(
     0x001 -> (fcsr.wAliasFflags -> fcsr.fflags),
     0x002 -> (fcsr.wAliasFfm    -> fcsr.frm),
@@ -112,6 +123,7 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     0xC20 -> (vl.w              -> vl.rdata),
     0xC21 -> (vtype.w           -> vtype.rdata),
     0xC22 -> (vlenb.w           -> vlenb.rdata),
+    CSRs.time -> (time.w        -> time.rdata),
   )
 
   val unprivilegedCSRMods: Seq[CSRModule[_]] = Seq(
@@ -121,6 +133,7 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     vl,
     vtype,
     vlenb,
+    time,
   )
 
   val unprivilegedCSROutMap: SeqMap[Int, UInt] = SeqMap(
@@ -134,6 +147,7 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     0xC20 -> vl.rdata.asUInt,
     0xC21 -> vtype.rdata.asUInt,
     0xC22 -> vlenb.rdata.asUInt,
+    CSRs.time -> time.rdata,
   )
 }
 
@@ -159,4 +173,10 @@ class CSRFFlagsBundle extends CSRBundle {
 
 object VlenbField extends CSREnum with ROApply {
   val init = Value((VLEN / 8).U)
+}
+
+trait HasZicntrSink { self: CSRModule[_] =>
+  val cntr = IO(Input(new Bundle {
+    val time    = ValidIO(UInt(64.W))
+  }))
 }

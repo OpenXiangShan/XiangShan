@@ -488,6 +488,11 @@ class NewCSR(implicit val p: Parameters) extends Module
         m.addrRData := pmpEntryMod.io.out.pmpAddrRData
       case _ =>
     }
+    mod match {
+      case m: HasZicntrSink =>
+        m.cntr.time := io.fromTop.clintTime
+      case _ =>
+    }
   }
 
   csrMods.foreach { mod =>
