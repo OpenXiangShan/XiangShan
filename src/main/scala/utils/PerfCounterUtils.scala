@@ -23,7 +23,7 @@ import utility.{ChiselDB, LogPerfHelper, LogPerfIO}
 import xiangshan.DebugOptionsKey
 import xiangshan._
 import utility.LogPerfIO
-
+import utility.GatedRegNext
 trait HasRegularPerfName {
   def judgeName(perfName: String) = {
     val regular = """(\w+)""".r
@@ -322,7 +322,7 @@ trait HasPerfEvents { this: RawModule =>
   def generatePerfEvent(noRegNext: Option[Seq[Int]] = None): Unit = {
     for (((out, (name, counter)), i) <- io_perf.zip(perfEvents).zipWithIndex) {
       require(!name.contains("/"))
-      out.value := RegNext(RegNext(counter))
+      out.value := GatedRegNext(GatedRegNext(counter))
       if (noRegNext.isDefined && noRegNext.get.contains(i)) {
         out.value := counter
       }
