@@ -668,7 +668,7 @@ trait HasXSParameter {
   def V0PhyRegs = coreParams.v0Preg.numEntries
   def VlPhyRegs = coreParams.vlPreg.numEntries
   def MaxPhyPregs = IntPhyRegs max VfPhyRegs
-  def PhyRegIdxWidth = log2Up(IntPhyRegs) max log2Up(VfPhyRegs)
+  def PhyRegIdxWidth = log2Up(IntPhyRegs) max log2Up(FpPhyRegs) max log2Up(VfPhyRegs)
   def RobSize = coreParams.RobSize
   def RabSize = coreParams.RabSize
   def VTypeBufferSize = coreParams.VTypeBufferSize

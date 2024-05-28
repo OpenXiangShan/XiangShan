@@ -308,6 +308,8 @@ class CtrlBlockImp(
   decode.io.intRat <> rat.io.intReadPorts
   decode.io.fpRat <> rat.io.fpReadPorts
   decode.io.vecRat <> rat.io.vecReadPorts
+  decode.io.v0Rat <> rat.io.v0ReadPorts
+  decode.io.vlRat <> rat.io.vlReadPorts
   decode.io.fusion := 0.U.asTypeOf(decode.io.fusion) // Todo
   decode.io.stallReason.in <> io.frontend.stallReason
 
@@ -428,6 +430,8 @@ class CtrlBlockImp(
   rat.io.intRenamePorts := rename.io.intRenamePorts
   rat.io.fpRenamePorts := rename.io.fpRenamePorts
   rat.io.vecRenamePorts := rename.io.vecRenamePorts
+  rat.io.v0RenamePorts := rename.io.v0RenamePorts
+  rat.io.vlRenamePorts := rename.io.vlRenamePorts
 
   rename.io.redirect := s1_s3_redirect
   rename.io.rabCommits := rob.io.rabCommits
@@ -438,14 +442,19 @@ class CtrlBlockImp(
   rename.io.intReadPorts := VecInit(rat.io.intReadPorts.map(x => VecInit(x.map(_.data))))
   rename.io.fpReadPorts := VecInit(rat.io.fpReadPorts.map(x => VecInit(x.map(_.data))))
   rename.io.vecReadPorts := VecInit(rat.io.vecReadPorts.map(x => VecInit(x.map(_.data))))
+  rename.io.v0ReadPorts := VecInit(rat.io.v0ReadPorts.map(x => VecInit(x.data)))
+  rename.io.vlReadPorts := VecInit(rat.io.vlReadPorts.map(x => VecInit(x.data)))
   rename.io.int_need_free := rat.io.int_need_free
   rename.io.int_old_pdest := rat.io.int_old_pdest
   rename.io.fp_old_pdest := rat.io.fp_old_pdest
   rename.io.vec_old_pdest := rat.io.vec_old_pdest
+  rename.io.v0_old_pdest := rat.io.v0_old_pdest
+  rename.io.vl_old_pdest := rat.io.vl_old_pdest
   rename.io.debug_int_rat.foreach(_ := rat.io.debug_int_rat.get)
   rename.io.debug_fp_rat.foreach(_ := rat.io.debug_fp_rat.get)
   rename.io.debug_vec_rat.foreach(_ := rat.io.debug_vec_rat.get)
-  rename.io.debug_vconfig_rat.foreach(_ := rat.io.debug_vconfig_rat.get)
+  rename.io.debug_v0_rat.foreach(_ := rat.io.debug_v0_rat.get)
+  rename.io.debug_vl_rat.foreach(_ := rat.io.debug_vl_rat.get)
   rename.io.stallReason.in <> decode.io.stallReason.out
   rename.io.snpt.snptEnq := DontCare
   rename.io.snpt.snptDeq := snpt.io.deq
@@ -540,7 +549,8 @@ class CtrlBlockImp(
   io.debug_int_rat    .foreach(_ := rat.io.diff_int_rat.get)
   io.debug_fp_rat     .foreach(_ := rat.io.diff_fp_rat.get)
   io.debug_vec_rat    .foreach(_ := rat.io.diff_vec_rat.get)
-  io.debug_vconfig_rat.foreach(_ := rat.io.diff_vconfig_rat.get)
+  io.debug_v0_rat.foreach(_ := rat.io.diff_v0_rat.get)
+  io.debug_vl_rat.foreach(_ := rat.io.diff_vl_rat.get)
 
   rob.io.debug_ls := io.robio.debug_ls
   rob.io.debugHeadLsIssue := io.robio.robHeadLsIssue
@@ -656,7 +666,8 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   val debug_int_rat     = if (params.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
   val debug_fp_rat      = if (params.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
   val debug_vec_rat     = if (params.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
-  val debug_vconfig_rat = if (params.debugEn) Some(Output(UInt(PhyRegIdxWidth.W))) else None // TODO: use me
+  val debug_v0_rat      = if (params.debugEn) Some(Output(UInt(PhyRegIdxWidth.W))) else None
+  val debug_vl_rat      = if (params.debugEn) Some(Output(UInt(PhyRegIdxWidth.W))) else None
 
   val sqCanAccept = Input(Bool())
   val lqCanAccept = Input(Bool())

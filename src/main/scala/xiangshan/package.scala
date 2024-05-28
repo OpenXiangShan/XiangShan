@@ -859,6 +859,9 @@ package object xiangshan {
     val IntFlStall = Value("IntFlStall")
     val FpFlStall = Value("FpFlStall")
     val VecFlStall = Value("VecFlStall")
+    val V0FlStall = Value("V0FlStall")
+    val VlFlStall = Value("VlFlStall")
+    val MultiFlStall = Value("MultiFlStall")
     // dispatch queue full
     val IntDqStall = Value("IntDqStall")
     val FpDqStall = Value("FpDqStall")
