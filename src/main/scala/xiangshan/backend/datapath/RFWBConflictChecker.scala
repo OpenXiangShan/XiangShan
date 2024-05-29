@@ -6,7 +6,7 @@ import chisel3.util._
 import utils.OptionWrapper
 import utils.SeqUtils.MixedVec2
 import xiangshan.backend.BackendParams
-import xiangshan.backend.datapath.DataConfig.{IntData, VecData, FpData}
+import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.WbConfig.{NoWB, PregWB}
 import xiangshan.backend.regfile.PregParams
 
@@ -203,4 +203,20 @@ class VfRFWBCollideChecker(
   p:Parameters
 ) extends RFWBCollideCheckerBase(RFWBCollideCheckerParams(backendParams.getAllWbCfgs, backendParams.vfPregParams)) {
   override protected def portRange: Range = 0 to backendParams.getWbPortIndices(VecData()).max
+}
+
+class V0RFWBCollideChecker(
+  backendParams: BackendParams
+)(implicit
+  p:Parameters
+) extends RFWBCollideCheckerBase(RFWBCollideCheckerParams(backendParams.getAllWbCfgs, backendParams.v0PregParams)) {
+  override protected def portRange: Range = 0 to backendParams.getWbPortIndices(V0Data()).max
+}
+
+class VlRFWBCollideChecker(
+  backendParams: BackendParams
+)(implicit
+  p:Parameters
+) extends RFWBCollideCheckerBase(RFWBCollideCheckerParams(backendParams.getAllWbCfgs, backendParams.vlPregParams)) {
+  override protected def portRange: Range = 0 to backendParams.getWbPortIndices(VlData()).max
 }

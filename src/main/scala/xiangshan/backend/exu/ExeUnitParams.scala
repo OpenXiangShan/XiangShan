@@ -351,10 +351,10 @@ case class ExeUnitParams(
     *
     * @example
     * {{{
-    *   fuCfg.srcData = Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData())
+    *   fuCfg.srcData = Seq(VecData(), VecData(), VecData(), V0Data(), VlData())
     *   getRfReadSrcIdx(VecData()) = Seq(0, 1, 2)
-    *   getRfReadSrcIdx(MaskSrcData()) = Seq(3)
-    *   getRfReadSrcIdx(VConfigData()) = Seq(4)
+    *   getRfReadSrcIdx(V0Data()) = Seq(3)
+    *   getRfReadSrcIdx(VlData()) = Seq(4)
     * }}}
     * @return Map[DataConfig -> Seq[indices]]
     */

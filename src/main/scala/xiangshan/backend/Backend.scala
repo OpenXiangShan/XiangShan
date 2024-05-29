@@ -333,8 +333,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   dataPath.io.debugIntRat    .foreach(_ := ctrlBlock.io.debug_int_rat.get)
   dataPath.io.debugFpRat     .foreach(_ := ctrlBlock.io.debug_fp_rat.get)
   dataPath.io.debugVecRat    .foreach(_ := ctrlBlock.io.debug_vec_rat.get)
-  dataPath.io.debugVconfigRat.foreach(_ := ctrlBlock.io.debug_v0_rat.get)
-  dataPath.io.debugVconfigRat.foreach(_ := ctrlBlock.io.debug_vl_rat.get)
+  dataPath.io.debugV0Rat     .foreach(_ := ctrlBlock.io.debug_v0_rat.get)
+  dataPath.io.debugVlRat     .foreach(_ := ctrlBlock.io.debug_vl_rat.get)
 
   og2ForVector.io.flush := ctrlBlock.io.toDataPath.flush
   og2ForVector.io.ldCancel := io.mem.ldCancel
@@ -392,14 +392,10 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   val vsetvlVType = RegEnable(fromVsetVType, 0.U.asTypeOf(new VType), fromIntExuVsetVType.valid || fromVfExuVsetVType.valid)
   ctrlBlock.io.robio.vsetvlVType := vsetvlVType
 
-  val debugVconfig = dataPath.io.debugVconfig match {
-    case Some(x) => dataPath.io.debugVconfig.get.asTypeOf(new VConfig)
-    case None => 0.U.asTypeOf(new VConfig)
-  }
   val commitVType = ctrlBlock.io.robio.commitVType.vtype
   val hasVsetvl = ctrlBlock.io.robio.commitVType.hasVsetvl
   val vtype = VType.toVtypeStruct(Mux(hasVsetvl, vsetvlVType, commitVType.bits)).asUInt
-  val debugVl = debugVconfig.vl
+  val debugVl = dataPath.io.debugVl.getOrElse(0.U)
   csrio.vpu.set_vxsat := ctrlBlock.io.robio.csr.vxsat
   csrio.vpu.set_vstart.valid := ctrlBlock.io.robio.csr.vstart.valid
   csrio.vpu.set_vstart.bits := ctrlBlock.io.robio.csr.vstart.bits
