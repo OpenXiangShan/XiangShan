@@ -1,6 +1,6 @@
 package xiangshan.backend.datapath
 
-import xiangshan.backend.datapath.DataConfig.{DataConfig, IntData, NoData, VecData, FpData}
+import xiangshan.backend.datapath.DataConfig._
 
 object RdConfig {
   sealed abstract class RdConfig() {
@@ -20,6 +20,14 @@ object RdConfig {
 
   case class VfRD(port: Int = -1, priority: Int = Int.MaxValue) extends RdConfig() {
     override def getDataConfig = VecData()
+  }
+
+  case class V0RD(port: Int = -1, priority: Int = Int.MaxValue) extends RdConfig() {
+    override def getDataConfig = V0Data()
+  }
+
+  case class VlRD(port: Int = -1, priority: Int = Int.MaxValue) extends RdConfig() {
+    override def getDataConfig = VlData()
   }
 
   case class NoRD() extends RdConfig() {
