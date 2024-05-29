@@ -2,6 +2,7 @@ package xiangshan.backend.fu.NewCSR
 
 import freechips.rocketchip.devices.debug.DebugModuleKey
 import org.chipsalliance.cde.config.Parameters
+import freechips.rocketchip.rocket.CSRs
 
 import chisel3._
 import chisel3.util._
@@ -20,19 +21,19 @@ import scala.collection.immutable.SeqMap
 
 trait DebugLevel { self: NewCSR =>
   val tselect = Module(new CSRModule("Tselect", new TselectBundle(TriggerNum)))
-    .setAddr(0x7A0)
+    .setAddr(CSRs.tselect)
 
   val tdata1 = Module(new CSRModule("Tdata1") with HasTdataSink {
     rdata := tdataRead.tdata1
     regOut := 0.U
   })
-    .setAddr(0x7A1)
+    .setAddr(CSRs.tdata1)
 
   val tdata2 = Module(new CSRModule("Tdata2") with HasTdataSink {
     rdata := tdataRead.tdata2
     regOut := 0.U
   })
-    .setAddr(0x7A2)
+    .setAddr(CSRs.tdata2)
 
   val tdata1RegVec: Seq[CSRModule[_]] = Range(0, TriggerNum).map(i =>
     Module(new CSRModule(s"Trigger$i" + s"_Tdata1", new Tdata1Bundle) with HasdebugModeBundle{
@@ -46,25 +47,29 @@ trait DebugLevel { self: NewCSR =>
   )
 
   val tinfo = Module(new CSRModule("Tinfo", new TinfoBundle))
-    .setAddr(0x7A4)
+    .setAddr(CSRs.tinfo)
+
+  val tcontrol = Module(new CSRModule("Tcontrol", new TcontrolBundle) with TrapEntryMEventSinkBundle with MretEventSinkBundle)
+    .setAddr(CSRs.tcontrol)
 
   val dcsr = Module(new CSRModule("Dcsr", new DcsrBundle) with TrapEntryDEventSinkBundle with DretEventSinkBundle)
-    .setAddr(0x7B0)
+    .setAddr(CSRs.dcsr)
 
   val dpc = Module(new CSRModule("Dpc", new Dpc) with TrapEntryDEventSinkBundle)
-    .setAddr(0x7B1)
+    .setAddr(CSRs.dpc)
 
   val dscratch0 = Module(new CSRModule("Dscratch0", new DscratchBundle))
-    .setAddr(0x7B2)
+    .setAddr(CSRs.dscratch0)
 
   val dscratch1 = Module(new CSRModule("Dscratch1", new DscratchBundle))
-    .setAddr(0x7B3)
+    .setAddr(CSRs.dscratch1)
 
   val debugCSRMods = Seq(
     tdata1,
     tdata2,
     tselect,
     tinfo,
+    tcontrol,
     dcsr,
     dpc,
     dscratch0,
@@ -252,6 +257,13 @@ class TinfoBundle extends CSRBundle{
   val VERSION     = RO(31, 24).withReset(0.U)
   // only support mcontrol
   val MCONTROLEN  = RO(2).withReset(1.U)
+}
+
+class TcontrolBundle extends CSRBundle{
+  // M-mode previous trigger enable field
+  val MPTE = RW(7).withReset(0.U)
+  // M-mode trigger enable field
+  val MTE  = RW(3).withReset(0.U)
 }
 
 // Dscratch

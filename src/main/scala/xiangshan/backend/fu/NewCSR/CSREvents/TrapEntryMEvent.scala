@@ -12,22 +12,24 @@ import xiangshan.backend.fu.NewCSR._
 
 class TrapEntryMEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase  {
 
-  val mstatus = ValidIO((new MstatusBundle ).addInEvent(_.MPV, _.MPP, _.GVA, _.MPIE, _.MIE))
-  val mepc    = ValidIO((new Epc           ).addInEvent(_.epc))
-  val mcause  = ValidIO((new CauseBundle   ).addInEvent(_.Interrupt, _.ExceptionCode))
-  val mtval   = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
-  val mtval2  = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
-  val mtinst  = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
-  val targetPc = ValidIO(UInt(VaddrMaxWidth.W))
+  val mstatus   = ValidIO((new MstatusBundle ).addInEvent(_.MPV, _.MPP, _.GVA, _.MPIE, _.MIE))
+  val mepc      = ValidIO((new Epc           ).addInEvent(_.epc))
+  val mcause    = ValidIO((new CauseBundle   ).addInEvent(_.Interrupt, _.ExceptionCode))
+  val mtval     = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
+  val mtval2    = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
+  val mtinst    = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
+  val tcontrol  = ValidIO((new TcontrolBundle).addInEvent(_.MPTE, _.MTE))
+  val targetPc  = ValidIO(UInt(VaddrMaxWidth.W))
 
   def getBundleByName(name: String): Valid[CSRBundle] = {
     name match {
-      case "mstatus" => this.mstatus
-      case "mepc"    => this.mepc
-      case "mcause"  => this.mcause
-      case "mtval"   => this.mtval
-      case "mtval2"  => this.mtval2
-      case "mtinst"  => this.mtinst
+      case "mstatus"  => this.mstatus
+      case "mepc"     => this.mepc
+      case "mcause"   => this.mcause
+      case "mtval"    => this.mtval
+      case "mtval2"   => this.mtval2
+      case "mtinst"   => this.mtinst
+      case "tcontrol" => this.tcontrol
     }
   }
 }
@@ -101,6 +103,7 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
   out.mcause   .valid := valid
   out.mtval    .valid := valid
   out.mtval2   .valid := valid
+  out.tcontrol .valid := valid
   out.targetPc .valid := valid
 
   out.privState.bits            := PrivState.ModeM
@@ -115,6 +118,8 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
   out.mtval.bits.ALL            := tval
   out.mtval2.bits.ALL           := tval2
   out.mtinst.bits.ALL           := 0.U
+  out.tcontrol.bits.MPTE        := in.tcontrol.MTE
+  out.tcontrol.bits.MTE         := 0.U
   out.targetPc.bits             := in.pcFromXtvec
 
   dontTouch(isGuestExcp)

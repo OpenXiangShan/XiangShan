@@ -549,6 +549,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         in.sstatus := mstatus.sstatus
         in.vsstatus := vsstatus.regOut
         in.pcFromXtvec := trapHandleMod.io.out.pcFromXtvec
+        in.tcontrol := tcontrol.regOut
 
         in.satp  := satp.regOut
         in.vsatp := vsatp.regOut
@@ -564,6 +565,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     case in =>
       in.mstatus := mstatus.regOut
       in.mepc := mepc.regOut
+      in.tcontrol := tcontrol.regOut
   }
 
   sretEvent.valid := legalSret
@@ -705,6 +707,12 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   /**
    * debug_begin
+   *
+   * ways to entry Dmode：
+   *    1. debug intr(from external debug module)
+   *    2. ebreak inst in nonDmode
+   *    3. trigger fire in nonDmode
+   *    4. single step(debug module set dcsr.step before hart resume)
    */
   // debug_intr
   val hasIntr = hasTrap && trapIsInterrupt
@@ -749,6 +757,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   val triggerFireAction = PriorityMux(triggerFireOH, tdata1WireVec.map(_.getTriggerAction)).asUInt
   val hasTriggerFire = hasExp && triggerCf.canFire
   val hasDebugTriggerException = hasTriggerFire && (triggerFireAction === TrigAction.DebugMode.asUInt)
+  val triggerCanFire = hasTriggerFire && (triggerFireAction === TrigAction.BreakpointExp.asUInt) &&
+                          Mux(privState.isModeM && !debugMode, tcontrol.regOut.MTE.asBool, true.B) // todo: Should trigger be fire in dmode?
 
   // debug_exception_single
   val hasSingleStep = hasExp && io.fromRob.trap.bits.singleStep
@@ -766,7 +776,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   trapEntryDEvent.in.breakPoint               := breakPoint
 
   trapHandleMod.io.in.trapInfo.bits.singleStep  := hasSingleStep
-  trapHandleMod.io.in.trapInfo.bits.triggerFire := hasTriggerFire
+  trapHandleMod.io.in.trapInfo.bits.triggerFire := triggerCanFire
 
   intrMod.io.in.debugMode := debugMode
   intrMod.io.in.debugIntr := debugIntr
@@ -820,8 +830,8 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   val triggerEnableVec = tdata1WireVec.zip(mcontrolWireVec).map { case(tdata1, mcontrol) =>
     tdata1.TYPE.isLegal && (
-      mcontrol.M && privState.isModeM ||
-        mcontrol.S && (privState.isModeHS) ||
+      mcontrol.M && privState.isModeM  ||
+        mcontrol.S && privState.isModeHS ||
         mcontrol.U && privState.isModeHU)
   }
 
