@@ -286,8 +286,8 @@ case class BackendParams(
       case IntData() => this.getPregParams(dataCfg).numRead.getOrElse(this.getRdPortIndices(dataCfg).size)
       case FpData()  => this.getPregParams(dataCfg).numRead.getOrElse(this.getRdPortIndices(dataCfg).size)
       case VecData() => this.getPregParams(dataCfg).numRead.getOrElse(this.getRdPortIndices(dataCfg).size)
-      case MaskSrcData() => this.getPregParams(dataCfg).numRead.getOrElse(this.getRdPortIndices(dataCfg).size)
-      case VConfigData() => this.getPregParams(dataCfg).numRead.getOrElse(this.getRdPortIndices(dataCfg).size)
+      case V0Data() => this.getPregParams(dataCfg).numRead.getOrElse(this.getRdPortIndices(dataCfg).size)
+      case VlData() => this.getPregParams(dataCfg).numRead.getOrElse(this.getRdPortIndices(dataCfg).size)
       case _ => throw new IllegalArgumentException(s"DataConfig ${dataCfg} can not get RfReadSize")
     }
   }

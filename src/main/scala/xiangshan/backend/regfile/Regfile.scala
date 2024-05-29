@@ -56,8 +56,8 @@ class RfWritePortWithConfig(val rfWriteDataCfg: DataConfig, addrWidth: Int) exte
   def writeInt: Boolean = rfWriteDataCfg.isInstanceOf[IntData]
   def writeFp : Boolean = rfWriteDataCfg.isInstanceOf[FpData]
   def writeVec: Boolean = rfWriteDataCfg.isInstanceOf[VecData]
-  def writeV0 : Boolean = rfWriteDataCfg.isInstanceOf[MaskSrcData]
-  def writeVl : Boolean = rfWriteDataCfg.isInstanceOf[VConfigData]
+  def writeV0 : Boolean = rfWriteDataCfg.isInstanceOf[V0Data]
+  def writeVl : Boolean = rfWriteDataCfg.isInstanceOf[VlData]
 }
 
 class Regfile

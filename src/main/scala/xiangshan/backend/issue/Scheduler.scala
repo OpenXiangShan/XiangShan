@@ -30,8 +30,8 @@ class Scheduler(val params: SchdBlockParams)(implicit p: Parameters) extends Laz
   val numIntStateWrite = backendParams.numPregWb(IntData())
   val numFpStateWrite = backendParams.numPregWb(FpData())
   val numVfStateWrite = backendParams.numPregWb(VecData())
-  val numV0StateWrite = backendParams.numPregWb(MaskSrcData())
-  val numVlStateWrite = backendParams.numPregWb(VConfigData())
+  val numV0StateWrite = backendParams.numPregWb(V0Data())
+  val numVlStateWrite = backendParams.numPregWb(VlData())
 
   val dispatch2Iq = LazyModule(new Dispatch2Iq(params))
   val issueQueue = params.issueBlockParams.map(x => LazyModule(new IssueQueue(x).suggestName(x.getIQName)))
@@ -72,9 +72,9 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
     new RfWritePortWithConfig(backendParams.fpPregParams.dataCfg, backendParams.fpPregParams.addrWidth)))
   val vfWriteBack = MixedVec(Vec(backendParams.numPregWb(VecData()),
     new RfWritePortWithConfig(backendParams.vfPregParams.dataCfg, backendParams.vfPregParams.addrWidth)))
-  val v0WriteBack = MixedVec(Vec(backendParams.numPregWb(MaskSrcData()),
+  val v0WriteBack = MixedVec(Vec(backendParams.numPregWb(V0Data()),
     new RfWritePortWithConfig(backendParams.v0PregParams.dataCfg, backendParams.v0PregParams.addrWidth)))
-  val vlWriteBack = MixedVec(Vec(backendParams.numPregWb(VConfigData()),
+  val vlWriteBack = MixedVec(Vec(backendParams.numPregWb(VlData()),
     new RfWritePortWithConfig(backendParams.vlPregParams.dataCfg, backendParams.vlPregParams.addrWidth)))
   val toDataPathAfterDelay: MixedVec[MixedVec[DecoupledIO[IssueQueueIssueBundle]]] = MixedVec(params.issueBlockParams.map(_.genIssueDecoupledBundle))
 
