@@ -205,7 +205,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     }
     vecLdCancel(i) := vecLdCanceltmp(i).reduce(_ || _)
 
-    when (allocated(i) && (deqNotBlock || needCancel || vecLdCancel(i))) {
+    when (allocatedReg(i) && (deqNotBlock || needCancel || vecLdCancel(i))) {
       allocatedEnable(i) := true.B
       allocatedNext(i) := false.B
       freeMaskVec(i) := true.B

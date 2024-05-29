@@ -192,7 +192,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     }
     vecLdCancel(i) := vecLdCanceltmp(i).reduce(_ || _)
 
-    when (allocated(i) && (deqNotBlock || needFlush || vecLdCancel(i))) {
+    when (allocatedReg(i) && (deqNotBlock || needFlush || vecLdCancel(i))) {
       allocatedEnable(i) := true.B
       allocatedNext(i) := false.B
       freeMaskVec(i) := true.B

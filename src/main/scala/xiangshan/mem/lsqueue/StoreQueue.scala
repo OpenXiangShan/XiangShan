@@ -602,11 +602,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val vpmaskNotEqual = (
       (RegEnable(paddrModule.io.forwardMmask(i).asUInt, io.forward(i).valid) ^ RegEnable(vaddrModule.io.forwardMmask(i).asUInt, io.forward(i).valid)) &
       RegNext(needForward) &
-<<<<<<< HEAD
-      RegNext(addrRealValidVec.asUInt)
-=======
-      GatedRegNext(addrValidVec.asUInt)
->>>>>>> 3bc70a3ee (LSQWrapper & LoadExceptionBuffer & LoadQueueRAR & LoadQueueRAW & StoreQueue & StoreQueueData & VirtualLoadQueue : RegNext --> GatedValidRegNext/GatedRegNext)
+      GatedRegNext(addrRealValidVec.asUInt)
     ) =/= 0.U
     val vaddrMatchFailed = vpmaskNotEqual && RegNext(io.forward(i).valid)
     when (vaddrMatchFailed) {
@@ -1004,20 +1000,15 @@ class StoreQueue(implicit p: Parameters) extends XSModule
  /**
 * update pointers
 **/
-<<<<<<< HEAD
   val enqCancelValid = canEnqueue.zip(io.enq.req).map{case (v , x) =>
     v && x.bits.robIdx.needFlush(io.brqRedirect)
   }
   val enqCancelNum = enqCancelValid.zip(io.enq.req).map{case (v, req) =>
     Mux(v, req.bits.numLsElem, 0.U)
   }
-  val lastEnqCancel = RegNext(enqCancelNum.reduce(_ + _)) // 1 cycle after redirect
+  val lastEnqCancel = RegEnable(enqCancelNum.reduce(_ + _), io.brqRedirect.valid) // 1 cycle after redirect
 
-  val lastCycleCancelCount = PopCount(RegNext(needCancel)) // 1 cycle after redirect
-=======
-  val lastEnqCancel = PopCount(RegEnable(VecInit(canEnqueue.zip(enqCancel).map(x => x._1 && x._2)), io.brqRedirect.valid)) // 1 cycle after redirect
   val lastCycleCancelCount = PopCount(RegEnable(needCancel, io.brqRedirect.valid)) // 1 cycle after redirect
->>>>>>> 3bc70a3ee (LSQWrapper & LoadExceptionBuffer & LoadQueueRAR & LoadQueueRAW & StoreQueue & StoreQueueData & VirtualLoadQueue : RegNext --> GatedValidRegNext/GatedRegNext)
   val lastCycleRedirect = RegNext(io.brqRedirect.valid) // 1 cycle after redirect
   val enqNumber = validVStoreFlow.reduce(_ + _)
 
