@@ -140,15 +140,15 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
   if (io.readVfState.isDefined) {
     require(io.readVfState.get.size + io.readV0State.get.size + io.readVlState.get.size >= reqPsrcVec.size,
       s"[Dispatch2IqImp] readVfState size: ${io.readVfState.get.size}, readV0State size: ${io.readV0State.get.size}, readVlState size: ${io.readVlState.get.size}, psrc size: ${reqPsrcVec.size}")
-    io.readVfState.get.map(_.req).zip(reqPsrcVec.take(numRegSrcVf)).foreach(x => x._1 := x._2)
+    io.readVfState.get.map(_.req).zip(io.in.flatMap(in => in.bits.psrc.take(numRegSrcVf))).foreach(x => x._1 := x._2)
     io.readVfState.get.map(_.resp).zip(vfSrcStateVec.get).foreach(x => x._2 := x._1)
     io.readVfState.get.map(_.loadDependency).zip(vfSrcLoadDependency.get).foreach(x => x._2 := x._1)
 
-    io.readV0State.get.map(_.req).zip(Seq(reqPsrcVec(numRegSrc - 2))).foreach(x => x._1 := x._2)
+    io.readV0State.get.map(_.req).zip(io.in.map(in => in.bits.psrc(numRegSrc - 2))).foreach(x => x._1 := x._2)
     io.readV0State.get.map(_.resp).zip(v0SrcStateVec.get).foreach(x => x._2 := x._1)
     io.readV0State.get.map(_.loadDependency).zip(v0SrcLoadDependency.get).foreach(x => x._2 := x._1)
 
-    io.readVlState.get.map(_.req).zip(Seq(reqPsrcVec(numRegSrc - 1))).foreach(x => x._1 := x._2)
+    io.readVlState.get.map(_.req).zip(io.in.map(in => in.bits.psrc(numRegSrc - 1))).foreach(x => x._1 := x._2)
     io.readVlState.get.map(_.resp).zip(vlSrcStateVec.get).foreach(x => x._2 := x._1)
     io.readVlState.get.map(_.loadDependency).zip(vlSrcLoadDependency.get).foreach(x => x._2 := x._1)
   }
