@@ -551,6 +551,8 @@ object Bundles {
     val rfWenCopy  = OptionWrapper(copyWakeupOut && params.needIntWen, Vec(copyNum, Bool()))
     val fpWenCopy  = OptionWrapper(copyWakeupOut && params.needFpWen, Vec(copyNum, Bool()))
     val vecWenCopy = OptionWrapper(copyWakeupOut && params.needVecWen, Vec(copyNum, Bool()))
+    val v0WenCopy  = OptionWrapper(copyWakeupOut && params.needV0Wen, Vec(copyNum, Bool()))
+    val vlWenCopy  = OptionWrapper(copyWakeupOut && params.needVlWen, Vec(copyNum, Bool()))
     val loadDependencyCopy = OptionWrapper(copyWakeupOut && params.isIQWakeUpSink, Vec(copyNum, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
     val pdest         = UInt(params.wbPregIdxWidth.W)
     val rfWen         = if (params.needIntWen)    Some(Bool())                        else None

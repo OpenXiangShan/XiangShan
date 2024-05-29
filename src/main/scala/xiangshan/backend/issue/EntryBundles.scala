@@ -164,7 +164,16 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     common.flushed            := status.robIdx.needFlush(commonIn.flush)
     common.deqSuccess         := commonIn.issueResp.valid && RespType.succeed(commonIn.issueResp.bits.resp) && !common.srcLoadCancelVec.asUInt.orR
     common.srcWakeup          := common.srcWakeupByWB.zip(hasIQWakeupGet.srcWakeupByIQ).map { case (x, y) => x || y.asUInt.orR }
-    common.srcWakeupByWB      := commonIn.wakeUpFromWB.map(bundle => bundle.bits.wakeUp(status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType), bundle.valid)).transpose.map(x => VecInit(x.toSeq).asUInt.orR).toSeq
+    common.srcWakeupByWB      := commonIn.wakeUpFromWB.map{ bundle => 
+                                    val psrcSrcTypeVec = status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType)
+                                    if (params.numRegSrc == 5) {
+                                      bundle.bits.wakeUp(psrcSrcTypeVec.take(3), bundle.valid) :+ 
+                                      bundle.bits.wakeUpV0(psrcSrcTypeVec(3), bundle.valid) :+ 
+                                      bundle.bits.wakeUpVl(psrcSrcTypeVec(4), bundle.valid)
+                                    }
+                                    else
+                                      bundle.bits.wakeUp(psrcSrcTypeVec, bundle.valid)
+                                 }.transpose.map(x => VecInit(x.toSeq).asUInt.orR).toSeq
     common.canIssue           := validReg && status.canIssue
     common.enqReady           := !validReg || common.clear
     common.clear              := common.flushed || common.deqSuccess || commonIn.transSel
@@ -200,9 +209,16 @@ object EntryBundles extends HasCircularQueuePtrHelper {
   }
 
   def CommonIQWakeupConnect(common: CommonWireBundle, hasIQWakeupGet: CommonIQWakeupBundle, validReg: Bool, status: Status, commonIn: CommonInBundle, isEnq: Boolean)(implicit p: Parameters, params: IssueBlockParams) = {
-    val wakeupVec: Seq[Seq[Bool]] = commonIn.wakeUpFromIQ.map((bundle: ValidIO[IssueQueueIQWakeUpBundle]) =>
-      bundle.bits.wakeUpFromIQ(status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType))
-    ).toSeq.transpose
+    val wakeupVec: Seq[Seq[Bool]] = commonIn.wakeUpFromIQ.map{(bundle: ValidIO[IssueQueueIQWakeUpBundle]) =>
+      val psrcSrcTypeVec = status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType)
+      if (params.numRegSrc == 5) {
+        bundle.bits.wakeUpFromIQ(psrcSrcTypeVec.take(3)) :+ 
+        bundle.bits.wakeUpV0FromIQ(psrcSrcTypeVec(3)) :+ 
+        bundle.bits.wakeUpVlFromIQ(psrcSrcTypeVec(4))
+      }
+      else
+        bundle.bits.wakeUpFromIQ(psrcSrcTypeVec)
+    }.toSeq.transpose
     val cancelSel = params.wakeUpSourceExuIdx.zip(commonIn.wakeUpFromIQ).map { case (x, y) => commonIn.og0Cancel(x) && y.bits.is0Lat }
 
     hasIQWakeupGet.srcWakeupByIQ                    := wakeupVec.map(x => VecInit(x.zip(cancelSel).map { case (wakeup, cancel) => wakeup && !cancel }))
@@ -472,14 +488,27 @@ object EntryBundles extends HasCircularQueuePtrHelper {
 
   def EnqDelayWakeupConnect(enqDelayIn: EnqDelayInBundle, enqDelayOut: EnqDelayOutBundle, status: Status, delay: Int)(implicit p: Parameters, params: IssueBlockParams) = {
     enqDelayOut.srcWakeUpByWB.zipWithIndex.foreach { case (wakeup, i) =>
-      wakeup := enqDelayIn.wakeUpFromWB.map(x => x.bits.wakeUp(Seq((status.srcStatus(i).psrc, status.srcStatus(i).srcType)), x.valid).head
-      ).reduce(_ || _)
+      wakeup := enqDelayIn.wakeUpFromWB.map{ x => 
+        if (i == 3)
+          x.bits.wakeUpV0((status.srcStatus(i).psrc, status.srcStatus(i).srcType), x.valid)
+        else if (i == 4)
+          x.bits.wakeUpVl((status.srcStatus(i).psrc, status.srcStatus(i).srcType), x.valid)
+        else
+          x.bits.wakeUp(Seq((status.srcStatus(i).psrc, status.srcStatus(i).srcType)), x.valid).head
+      }.reduce(_ || _)
     }
 
     if (params.hasIQWakeUp) {
-      val wakeupVec: IndexedSeq[IndexedSeq[Bool]] = enqDelayIn.wakeUpFromIQ.map( x =>
-        x.bits.wakeUpFromIQ(status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType))
-      ).toIndexedSeq.transpose
+      val wakeupVec: IndexedSeq[IndexedSeq[Bool]] = enqDelayIn.wakeUpFromIQ.map{ x =>
+        val psrcSrcTypeVec = status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType)
+        if (params.numRegSrc == 5) {
+          x.bits.wakeUpFromIQ(psrcSrcTypeVec.take(3)) :+ 
+          x.bits.wakeUpV0FromIQ(psrcSrcTypeVec(3)) :+ 
+          x.bits.wakeUpVlFromIQ(psrcSrcTypeVec(4))
+        }
+        else
+          x.bits.wakeUpFromIQ(psrcSrcTypeVec)
+      }.toIndexedSeq.transpose
       val cancelSel = params.wakeUpSourceExuIdx.zip(enqDelayIn.wakeUpFromIQ).map{ case (x, y) => enqDelayIn.og0Cancel(x) && y.bits.is0Lat}
       enqDelayOut.srcWakeUpByIQVec := wakeupVec.map(x => VecInit(x.zip(cancelSel).map { case (wakeup, cancel) => wakeup && !cancel }))
     } else {
