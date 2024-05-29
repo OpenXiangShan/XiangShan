@@ -103,6 +103,11 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
     val sqFreeCount = if (wrapper.isMem) Some(Input(UInt(log2Up(StoreQueueSize + 1).W))) else None
   })
 
+  val uopsIn = Wire(Vec(wrapper.numIn, DecoupledIO(new DynInst)))
+  val numEnq = io.in.size
+  val numInPorts = io.in.size
+  val outs = io.out.flatten
+  uopsIn <> io.in
 
   private val reqPsrcVec: IndexedSeq[UInt] = io.in.flatMap(in => in.bits.psrc.take(numRegSrc))
   private val intSrcStateVec = if (io.readIntState.isDefined) Some(Wire(Vec(numIntStateRead, SrcState()))) else None
@@ -148,7 +153,7 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
     io.readVlState.get.map(_.loadDependency).zip(vlSrcLoadDependency.get).foreach(x => x._2 := x._1)
   }
 
-  io.in
+  uopsIn
     .flatMap(x => x.bits.srcState.take(numRegSrc) zip x.bits.srcType.take(numRegSrc))
     .zip(
       intSrcStateVec.getOrElse(VecInit(Seq.fill(numIn * numRegSrcInt)(SrcState.busy).toSeq))
@@ -167,7 +172,7 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
           SrcType.isNotReg(srcType) -> true.B,
         ))
   }
-  io.in
+  uopsIn
     .flatMap(x => x.bits.srcLoadDependency.take(numRegSrc) zip x.bits.srcType.take(numRegSrc))
     .zip(
       intSrcLoadDependency.getOrElse(VecInit(Seq.fill(numIn * numRegSrcInt)(0.U.asTypeOf(Vec(LoadPipelineWidth, UInt(LoadPipelineWidth.W)))).toSeq))
@@ -265,15 +270,10 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
 class Dispatch2IqIntImp(override val wrapper: Dispatch2Iq)(implicit p: Parameters, params: SchdBlockParams)
   extends Dispatch2IqImp(wrapper)
     with HasXSParameter {
-  val intIQValidNumVec = io.intIQValidNumVec.get
-  // numEnq = 4 + 4 + 2
-  private val numEnq = io.in.size
 
-  val uopsIn = Wire(Vec(wrapper.numIn, DecoupledIO(new DynInst)))
-  val numInPorts = io.in.size
-  val outs = io.out.flatten
   require(outs.size == uopsIn.size, "Dispatch2IqInt outs.size =/= uopsIn.size")
-  uopsIn <> io.in
+
+  val intIQValidNumVec = io.intIQValidNumVec.get
   val uopsInDq0Num = uopsIn.size / 2
   val uopsInDq1Num = uopsIn.size / 2
   val uopsInDq0 = uopsIn.take(uopsInDq0Num)
@@ -572,8 +572,6 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
   extends Dispatch2IqImp(wrapper)
     with HasXSParameter {
 
-  private val numEnq = io.in.size
-
   val portFuSets = params.issueBlockParams.map(_.exuBlockParams.flatMap(_.fuConfigs).map(_.fuType).toSet)
   println(s"[Dispatch2IqArithImp] portFuSets: $portFuSets")
   val fuDeqMap = getFuDeqMap(portFuSets)
@@ -587,9 +585,6 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
   val finalFuDeqMap = expendedFuDeqMap.toSeq.sortBy(_._2.length)
   println(s"[Dispatch2IqArithImp] finalFuDeqMap: $finalFuDeqMap")
 
-  val uopsIn = Wire(Vec(wrapper.numIn, DecoupledIO(new DynInst)))
-  val numInPorts = io.in.size
-  val outs = io.out.flatten
   val outReadyMatrix = Wire(Vec(outs.size, Vec(numInPorts, Bool())))
   outReadyMatrix.foreach(_.foreach(_ := false.B))
   val selIdxOH = Wire(MixedVec(finalFuDeqMap.map(x => Vec(x._2.size, ValidIO(UInt(uopsIn.size.W))))))
@@ -642,7 +637,6 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
     }
   }
 
-  uopsIn <> io.in
   uopsIn.foreach(_.ready := false.B)
   uopsIn.zipWithIndex.foreach{ case (uopIn, idx) => uopIn.ready := outReadyMatrix.map(_(idx)).reduce(_ | _) }
 
@@ -717,7 +711,6 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   private val numStoreAMODeq = LSQStEnqWidth
   private val numVLoadDeq = LoadPipelineWidth
   private val numDeq = enqLsqIO.req.size
-  private val numEnq = io.in.size
   private val iqAllReady = Cat(io.out.map(_.map(_.ready)).flatten.toSeq).andR
   private val lsqCanAccept = enqLsqIO.canAccept
 
@@ -860,9 +853,6 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   val finalFuDeqMap = expendedFuDeqMap.toSeq.sortBy(_._2.length)
   println(s"[Dispatch2IqMemImp] finalFuDeqMap: $finalFuDeqMap")
 
-  val uopsIn = Wire(Vec(wrapper.numIn, DecoupledIO(new DynInst)))
-  val numInPorts = io.in.size
-  val outs = io.out.flatten
   val selIdxOH = Wire(MixedVec(finalFuDeqMap.map(x => Vec(x._2.size, ValidIO(UInt(uopsIn.size.W))))))
   selIdxOH.foreach(_.foreach(_ := 0.U.asTypeOf(ValidIO(UInt(uopsIn.size.W)))))
 
@@ -1088,7 +1078,6 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     outs(deqIdx).bits := Mux1H(deqOH, uopsIn.map(_.bits))
   }
 
-  uopsIn <> io.in
   uopsIn.foreach(_.ready := false.B)
   uopsIn.zipWithIndex.foreach { case (uopIn, idx) =>
     uopIn.ready := enqMapDeqMatrix(idx).asUInt.orR && allowDispatch(idx) && lsqCanAccept
