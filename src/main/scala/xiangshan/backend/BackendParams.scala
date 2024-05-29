@@ -147,6 +147,14 @@ case class BackendParams(
     Seq.fill(this.getVfRfWriteSize)(new RfWritePortWithConfig(VecData(), vfPregParams.addrWidth))
   }
 
+  def genV0WriteBackBundle(implicit p: Parameters) = {
+    Seq.fill(this.getV0RfWriteSize)(new RfWritePortWithConfig(V0Data(), v0PregParams.addrWidth))
+  }
+
+  def genVlWriteBackBundle(implicit p: Parameters) = {
+    Seq.fill(this.getVlRfWriteSize)(new RfWritePortWithConfig(VlData(), vlPregParams.addrWidth))
+  }
+
   def genWriteBackBundles(implicit p: Parameters): Seq[RfWritePortWithConfig] = {
     genIntWriteBackBundle ++ genVfWriteBackBundle
   }
@@ -246,7 +254,7 @@ case class BackendParams(
   }
 
   /**
-    * Get size of write ports of vf regfile
+    * Get size of write ports of int regfile
     *
     * @return if [[IntPregParams.numWrite]] is [[None]], get size of ports in [[IntWB]]
     */
@@ -264,7 +272,7 @@ case class BackendParams(
   }
 
   /**
-    * Get size of read ports of int regfile
+    * Get size of read ports of vec regfile
     *
     * @return if [[VfPregParams.numRead]] is [[None]], get size of ports in [[VfRD]]
     */
@@ -273,12 +281,20 @@ case class BackendParams(
   }
 
   /**
-    * Get size of write ports of vf regfile
+    * Get size of write ports of vec regfile
     *
     * @return if [[VfPregParams.numWrite]] is [[None]], get size of ports in [[VfWB]]
     */
   def getVfRfWriteSize = {
     this.vfPregParams.numWrite.getOrElse(this.getWbPortIndices(VecData()).size)
+  }
+
+  def getV0RfWriteSize = {
+    this.v0PregParams.numWrite.getOrElse(this.getWbPortIndices(V0Data()).size)
+  }
+
+  def getVlRfWriteSize = {
+    this.vlPregParams.numWrite.getOrElse(this.getWbPortIndices(VlData()).size)
   }
 
   def getRfReadSize(dataCfg: DataConfig) = {

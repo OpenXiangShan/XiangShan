@@ -80,10 +80,10 @@ case class FuConfig (
   var vconfigIdx = -1
   var maskSrcIdx = -1
   if (vconfigWakeUp) {
-    vconfigIdx = getSpecialSrcIdx(VlData(), "when vconfigWakeUp is true, srcData must always contains VConfigData()")
+    vconfigIdx = getSpecialSrcIdx(VlData(), "when vconfigWakeUp is true, srcData must always contains VlData()")
   }
   if (maskWakeUp) {
-    maskSrcIdx = getSpecialSrcIdx(V0Data(), "when maskWakeUp is true, srcData must always contains MaskSrcData()")
+    maskSrcIdx = getSpecialSrcIdx(V0Data(), "when maskWakeUp is true, srcData must always contains V0Data()")
   }
 
   require(!piped || piped && latency.latencyVal.isDefined, "The latency value must be set when piped is enable")
