@@ -41,7 +41,7 @@ class RfReadPortWithConfig(val rfReadDataCfg: DataConfig, addrWidth: Int) extend
   def readInt: Boolean = IntRegSrcDataSet.contains(rfReadDataCfg)
   def readFp : Boolean = FpRegSrcDataSet .contains(rfReadDataCfg)
   def readVec: Boolean = VecRegSrcDataSet.contains(rfReadDataCfg)
-  def readVf : Boolean = VfRegSrcDataSet .contains(rfReadDataCfg)
+  def readVf : Boolean = VecRegSrcDataSet .contains(rfReadDataCfg)
 }
 
 class RfWritePortWithConfig(val rfWriteDataCfg: DataConfig, addrWidth: Int) extends Bundle {
