@@ -677,10 +677,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     val valid                      = s2_parity_error(i) && s1_fire_delay2
     io.errors(i).valid            := RegNext(valid)
     io.errors(i).report_to_beu    := RegNext(valid)
-    io.errors(i).paddr            := RegEnable(RegEnable(s2_req_paddr(i), s1_fire_delay1), valid)
+    io.errors(i).paddr            := RegEnable(RegEnable(s2_req_paddr(i), s1_fire_delay1), 0.U(PAddrBits.W), valid)
     io.errors(i).source           := DontCare
-    io.errors(i).source.tag       := RegEnable(RegEnable(s2_parity_meta_error(i), s1_fire_delay1), valid)
-    io.errors(i).source.data      := RegEnable(s2_parity_data_error(i), valid)
+    io.errors(i).source.tag       := RegEnable(RegEnable(s2_parity_meta_error(i), s1_fire_delay1), false.B, valid)
+    io.errors(i).source.data      := RegEnable(s2_parity_data_error(i), false.B, valid)
     io.errors(i).source.l2        := false.B
     io.errors(i).opType           := DontCare
     io.errors(i).opType.fetch     := true.B
@@ -691,7 +691,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     when(RegNext(s2_fire && s2_corrupt(i))){
       io.errors(i).valid            := true.B
       io.errors(i).report_to_beu    := false.B // l2 should have report that to bus error unit, no need to do it again
-      io.errors(i).paddr            := RegEnable(s2_req_paddr(i),s1_fire_delay1)
+      io.errors(i).paddr            := RegEnable(s2_req_paddr(i), 0.U(PAddrBits.W), s1_fire_delay1)
       io.errors(i).source.tag       := false.B
       io.errors(i).source.data      := false.B
       io.errors(i).source.l2        := true.B
