@@ -23,8 +23,7 @@ object DataConfig {
   def RegSrcDataSet   : Set[DataConfig] = Set(IntData(), FpData(), VecData(), V0Data(), VlData())
   def IntRegSrcDataSet: Set[DataConfig] = Set(IntData())
   def FpRegSrcDataSet : Set[DataConfig] = Set(FpData())
-  def VecRegSrcDataSet: Set[DataConfig] = Set(VecData())
-  def VfRegSrcDataSet : Set[DataConfig] = Set(VecData())
+  def VecRegSrcDataSet : Set[DataConfig] = Set(VecData())
   def V0RegSrcDataSet : Set[DataConfig] = Set(V0Data())
   def VlRegSrcDataSet : Set[DataConfig] = Set(VlData())
 
