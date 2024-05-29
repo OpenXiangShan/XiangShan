@@ -309,8 +309,18 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   // NOTE: only handle load/store exception here, if other exception happens, don't send here
   val pmp = WireInit(io.pmpResp)
   when(state === s_pm) {
+    val addr_aligned = LookupTree(Mux(isIndexed(issueInstType), issueSew(1, 0), issueEew(1, 0)), List(
+      "b00".U   -> true.B,                   //b
+      "b01".U   -> (vaddr(0)    === 0.U), //h
+      "b10".U   -> (vaddr(1, 0) === 0.U), //w
+      "b11".U   -> (vaddr(2, 0) === 0.U)  //d
+    ))
+    val missAligned = !addr_aligned
+    exceptionVec(loadAddrMisaligned)  := !addr_aligned && FuType.isVLoad(fuType)
+    exceptionVec(storeAddrMisaligned) := !addr_aligned && !FuType.isVLoad(fuType)
+
     exception_va := exceptionVec(storePageFault) || exceptionVec(loadPageFault) ||
-      exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault)
+      exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault) || missAligned
     exception_pa := pmp.st || pmp.ld
 
     instMicroOp.exception_pa := exception_pa
