@@ -543,12 +543,12 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   val s2_multi_hit_meta = FTBMeta(s2_multi_hit_way.asUInt, s2_multi_hit, GTimer()).asUInt
 
   //Consistent count of entries for fauftb and ftb
-  val fauftb_ftb_entry_consistent_counter = RegInit(0.U(64.W))
+  val fauftb_ftb_entry_consistent_counter = RegInit(0.U(FTBCLOSE_THRESHOLD_SZ.W))
   val fauftb_ftb_entry_consistent = s2_fauftb_ftb_entry_dup(0).entryConsistent(s2_ftbBank_dup(0))
 
   //if close ftb_req, the counter need keep
   when(io.s2_fire(0) && s2_fauftb_ftb_entry_hit_dup(0) && s2_ftb_hit_dup(0) ){
-    fauftb_ftb_entry_consistent_counter := Mux(fauftb_ftb_entry_consistent,fauftb_ftb_entry_consistent_counter + 1.U,0.U)
+    fauftb_ftb_entry_consistent_counter := Mux(fauftb_ftb_entry_consistent, fauftb_ftb_entry_consistent_counter + 1.U, 0.U)
   } .elsewhen(io.s2_fire(0) && !s2_fauftb_ftb_entry_hit_dup(0) && s2_ftb_hit_dup(0) ){
     fauftb_ftb_entry_consistent_counter := 0.U
   }
@@ -586,7 +586,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   // io.out.bits.resp := RegEnable(io.in.bits.resp_in(0), 0.U.asTypeOf(new BranchPredictionResp), io.s1_fire)
   io.out := io.in.bits.resp_in(0)
 
-  io.out.s2.full_pred.map {case fp => fp.multiHit := DontCare}
+  io.out.s2.full_pred.map {case fp => fp.multiHit := false.B}
 
   io.out.s2.full_pred.zip(s2_hit_dup).map {case (fp, h) => fp.hit := h}
   io.out.s2.pc                  := s2_pc_dup
@@ -602,7 +602,6 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
 
   io.out.s3.full_pred.zip(s3_hit_dup).map {case (fp, h) => fp.hit := h}
   io.out.s3.full_pred.zip(s3_mult_hit_dup).map {case (fp, m) => fp.multiHit := m}
-  io.out.s3.full_pred.map {case fp => fp.multiHit := s2_multi_hit_enable}
   io.out.s3.pc                  := s3_pc_dup
   for (full_pred & s3_ftb_entry & s3_pc & s2_pc & s2_fire <-
     io.out.s3.full_pred zip s3_ftb_entry_dup zip s3_pc_dup zip s2_pc_dup zip io.s2_fire)
