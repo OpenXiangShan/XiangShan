@@ -645,8 +645,14 @@ class NewCSR(implicit val p: Parameters) extends Module
   val wVxrmChangeRM = addr === CSRs.vxrm.U && wenLegal && wdata(1, 0) =/= vcsr.vxrm
   val vxrmChange = wVcsrChangeRM || wVxrmChangeRM
 
+  val wMstatusChangeVS = addr === CSRs.mstatus.U && wenLegal && ((mstatus.regOut.VS === ContextStatus.Off && wdata(10, 9) =/= ContextStatus.Off.asUInt) ||
+                                                                 (mstatus.regOut.VS =/= ContextStatus.Off && wdata(10, 9) === ContextStatus.Off.asUInt))
+  val wMstatusChangeFS = addr === CSRs.mstatus.U && wenLegal && ((mstatus.regOut.FS === ContextStatus.Off && wdata(14, 13) =/= ContextStatus.Off.asUInt) ||
+                                                                 (mstatus.regOut.FS =/= ContextStatus.Off && wdata(14, 13) === ContextStatus.Off.asUInt))
+  val mstatusChange = wMstatusChangeVS || wMstatusChangeFS
+
   val triggerFrontendChange = Wire(Bool())
-  val flushPipe = resetSatp || frmChange || vxrmChange || triggerFrontendChange
+  val flushPipe = resetSatp || frmChange || vxrmChange || triggerFrontendChange || mstatusChange
 
   // fence
   val tvm = mstatus.regOut.TVM.asBool
