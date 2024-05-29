@@ -59,14 +59,7 @@ trait HypervisorLevel { self: NewCSR =>
   val hvictl = Module(new CSRModule("Hvictl", new HvictlBundle))
     .setAddr(0x609)
 
-  val henvcfg = Module(new CSRModule("Henvcfg", new CSRBundle {
-    val FIOM  = RW(0)     // Fence of I/O implies Memory
-    val CBIE  = RW(5, 4)  // Zicbom Enable
-    val CBCFE = RW(6)     // Zicbom Enable
-    val CBZE  = RW(7)     // Zicboz Enable
-    val PBMTE = RW(62)    // Svpbmt Enable
-    val STCE  = RW(63)    // Sstc Enable
-  }))
+  val henvcfg = Module(new CSRModule("Henvcfg", new HEnvCfg))
     .setAddr(0x60A)
 
   val htval = Module(new CSRModule("Htval", new CSRBundle {
@@ -297,6 +290,12 @@ class HgatpBundle extends CSRBundle {
   // RW, since we support max width of VMID
   val VMID = RW(44 - 1 + VMIDLEN, 44)
   val PPN = RW(PAddrWidth, 0)
+}
+
+class HEnvCfg extends EnvCfg {
+  if (CSRConfig.EXT_SSTC) {
+    this.STCE.setRW().withReset(1.U)
+  }
 }
 
 trait HypervisorBundle { self: CSRModule[_] =>

@@ -34,15 +34,18 @@ object CSRBundles {
     val ALL = RW(63, 0)
   }
 
-  class Envcfg extends CSRBundle {
-    val STCE  = RO(    63).withReset(0.U)
-    val PBMTE = RO(    62).withReset(0.U)
-    val ADUE  = RO(    61).withReset(0.U)
-    val PMM   = RO(33, 32).withReset(0.U)
-    val CBZE  = RO(     7).withReset(0.U)
-    val CBCFE = RO(     6).withReset(0.U)
-    val CBIE  = RO( 5,  4).withReset(0.U)
-    val FIOM  = RO(     0).withReset(0.U)
+  abstract class EnvCfg extends CSRBundle {
+    // Set all fields as RO in base class
+    val STCE  = RO(    63).withReset(0.U) // Sstc Enable
+    val PBMTE = RO(    62).withReset(0.U) // Svpbmt Enable
+    val ADUE  = RO(    61).withReset(0.U) // Svadu extension Enable
+    val PMM   = RO(33, 32).withReset(0.U) // Smnpm extension
+    val CBZE  = RO(     7).withReset(0.U) // Zicboz extension
+    val CBCFE = RO(     6).withReset(0.U) // Zicbom extension
+    val CBIE  = RO( 5,  4).withReset(0.U) // Zicbom extension
+    val SSE   = RO(     3).withReset(0.U) // Zicfiss extension Enable in S mode
+    val LPE   = RO(     2).withReset(0.U) // Zicfilp extension
+    val FIOM  = RO(     0).withReset(0.U) // Fence of I/O implies Memory
   }
 
   class PrivState extends Bundle { self =>

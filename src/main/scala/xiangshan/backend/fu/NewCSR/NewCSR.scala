@@ -6,7 +6,7 @@ import freechips.rocketchip.rocket.CSRs
 import difftest._
 import org.chipsalliance.cde.config.Parameters
 import top.{ArgParser, Generator}
-import utility.{DataHoldBypass, SignExt, ZeroExt}
+import utility.{DataHoldBypass, GatedValidRegNext, SignExt, ZeroExt}
 import utils.OptionWrapper
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CSRCustomState, PrivState, RobCommitCSR}
 import xiangshan.backend.fu.NewCSR.CSRDefines.{ContextStatus, PrivMode, SatpMode, VirtMode}
@@ -61,6 +61,8 @@ object CSRConfig {
   // trigger
   final val triggerNum    = 4     // Todo: use XSParams
   final val tselectWidth  = 2     // log2Up(triggerNum)
+
+  final val EXT_SSTC = true
 }
 
 class NewCSR(implicit val p: Parameters) extends Module
@@ -212,6 +214,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   private val (isModeVS, isModeVU) = (privState.isModeVS, privState.isModeVU)
 
   val permitMod = Module(new CSRPermitModule)
+  val sstcIRGen = Module(new SstcInterruptGen)
 
   private val wenLegal = permitMod.io.out.hasLegalWen
 
@@ -352,6 +355,14 @@ class NewCSR(implicit val p: Parameters) extends Module
   permitMod.io.in.status.hcounteren := mcounteren.rdata
   permitMod.io.in.status.scounteren := mcounteren.rdata
 
+  sstcIRGen.i.time.valid := time.updated
+  sstcIRGen.i.time.bits  := time.rdata
+  sstcIRGen.i.htimedelta := htimedelta.rdata
+  sstcIRGen.i.stimecmp := stimecmp.rdata
+  sstcIRGen.i.vstimecmp := vstimecmp.rdata
+  sstcIRGen.i.menvcfgSTCE := menvcfg.regOut.STCE.asBool
+  sstcIRGen.i.henvcfgSTCE := henvcfg.regOut.STCE.asBool
+
   miregiprios.foreach { mod =>
     mod.w.wen := (addr === mireg.addr.U) && (miselect.regOut.ALL.asUInt === mod.addr.U)
     mod.w.wdata := wdata
@@ -414,6 +425,8 @@ class NewCSR(implicit val p: Parameters) extends Module
     mod match {
       case m: HasExternalInterruptBundle =>
         m.platformIRP := this.platformIRP
+        m.platformIRP.STIP  := sstcIRGen.o.STIP
+        m.platformIRP.VSTIP := sstcIRGen.o.VSTIP
       case _ =>
     }
     mod match {
@@ -500,6 +513,11 @@ class NewCSR(implicit val p: Parameters) extends Module
         m.mHPM.time  := io.fromTop.clintTime
         // instret from minstret
         m.mHPM.instret := minstret.rdata
+      case _ =>
+    }
+    mod match {
+      case m: HasMachineEnvBundle =>
+        m.menvcfg := menvcfg.regOut
       case _ =>
     }
   }
