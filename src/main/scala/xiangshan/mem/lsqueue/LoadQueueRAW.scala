@@ -68,16 +68,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   //  Datavalid   : data valid
   //
 
-  //val allocated = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B))) // The control signals need to explicitly indicate the initial value
-  val allocatedReg = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))
-  val allocatedEnable = WireInit(VecInit(Seq.fill(LoadQueueRAWSize)(false.B)))
-  val allocatedNext = WireInit(allocatedReg)
+  val allocated = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B))) // The control signals need to explicitly indicate the initial value
 
-  for(i <- 0 until LoadQueueRAWSize){
-    when(allocatedEnable(i)){
-      allocatedReg(i) := allocatedNext(i)
-    }
-  }
 
   val uop = Reg(Vec(LoadQueueRAWSize, new DynInst))
   val paddrModule = Module(new LqPAddrModule(
@@ -100,15 +92,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     numCamPort = StorePipelineWidth
   ))
   maskModule.io := DontCare
-  //val datavalid = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))
-  val datavalidReg = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))
-  val datavalidEnable = WireInit(VecInit(Seq.fill(LoadQueueRAWSize)(false.B)))
-  val datavalidNext = WireInit(datavalidReg)
-  for(i <- 0 until LoadQueueRAWSize){
-    when(datavalidEnable(i)){
-      datavalidReg(i) := datavalidNext(i)
-    }
-  }
+  val datavalid = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B)))
 
   // freeliset: store valid entries index.
   // +---+---+--------------+-----+-----+
@@ -156,13 +140,12 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
       acceptedVec(w) := true.B
 
       val debug_robIdx = enq.bits.uop.robIdx.asUInt
-      XSError(allocatedReg(enqIndex), p"LoadQueueRAW: You can not write an valid entry! check: ldu $w, robIdx $debug_robIdx")
+      XSError(allocated(enqIndex), p"LoadQueueRAW: You can not write an valid entry! check: ldu $w, robIdx $debug_robIdx")
 
       freeList.io.doAllocate(w) := true.B
 
       //  Allocate new entry
-      allocatedEnable(enqIndex) := true.B
-      allocatedNext(enqIndex) := true.B
+      allocated(enqIndex) := true.B
 
       //  Write paddr
       paddrModule.io.wen(w) := true.B
@@ -176,8 +159,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
       //  Fill info
       uop(enqIndex) := enq.bits.uop
-      datavalidEnable(enqIndex) := true.B
-      datavalidNext(enqIndex) := enq.bits.data_valid
+      datavalid(enqIndex) := enq.bits.data_valid
     }
   }
 
@@ -205,9 +187,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     }
     vecLdCancel(i) := vecLdCanceltmp(i).reduce(_ || _)
 
-    when (allocatedReg(i) && (deqNotBlock || needCancel || vecLdCancel(i))) {
-      allocatedEnable(i) := true.B
-      allocatedNext(i) := false.B
+    when (allocated(i) && (deqNotBlock || needCancel || vecLdCancel(i))) {
+      allocated(i) := false.B
       freeMaskVec(i) := true.B
     }
   }
@@ -220,9 +201,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     val revokeValid = revoke && lastCanAccept(w)
     val revokeIndex = lastAllocIndex(w)
 
-    when (allocatedReg(revokeIndex) && revokeValid) {
-      allocatedEnable(revokeIndex) := true.B
-      allocatedNext(revokeIndex) := false.B
+    when (allocated(revokeIndex) && revokeValid) {
+      allocated(revokeIndex) := false.B
       freeMaskVec(revokeIndex) := true.B
     }
   }
@@ -340,7 +320,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
     val addrMaskMatch = paddrModule.io.violationMmask(i).asUInt & maskModule.io.violationMmask(i).asUInt
     val entryNeedCheck = GatedValidRegNext(VecInit((0 until LoadQueueRAWSize).map(j => {
-      allocatedReg(j) && isAfter(uop(j).robIdx, storeIn(i).bits.uop.robIdx) && datavalidReg(j) && !uop(j).robIdx.needFlush(io.redirect)
+      allocated(j) && isAfter(uop(j).robIdx, storeIn(i).bits.uop.robIdx) && datavalid(j) && !uop(j).robIdx.needFlush(io.redirect)
     })))
     val lqViolationSelVec = VecInit((0 until LoadQueueRAWSize).map(j => {
       addrMaskMatch(j) && entryNeedCheck(j)
