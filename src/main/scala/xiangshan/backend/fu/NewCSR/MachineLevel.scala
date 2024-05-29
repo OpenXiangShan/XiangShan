@@ -341,6 +341,7 @@ class MisaBundle extends CSRBundle {
 class MedelegBundle extends ExceptionBundle {
   this.getALL.foreach(_.setRW().withReset(0.U))
   this.EX_MCALL.setRO().withReset(0.U) // never delegate machine level ecall
+  this.EX_BP.setRO().withReset(0.U)    // Parter 5.4 in debug spec. tcontrol is implemented. medeleg [3] is hard-wired to 0.
 }
 
 class MidelegBundle extends InterruptBundle {

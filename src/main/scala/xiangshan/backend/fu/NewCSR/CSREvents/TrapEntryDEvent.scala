@@ -68,6 +68,8 @@ class TrapEntryDEventModule(implicit val p: Parameters) extends Module with CSRE
   // ebreak jump debugEntry not debugException in dmode
   // debug rom make hart write 0 to DebugMMIO.EXCEPTION when exception happened in debugMode.
   // let debug module known hart got an exception.
+  // note: Need't know exception number in debugMode.
+  //       exception(EX_BP) must be ebreak here!
   val debugPc = Mux(hasExceptionInDmode && !breakPoint, DebugException.U, DebugEntry.U)
 
   out := DontCare

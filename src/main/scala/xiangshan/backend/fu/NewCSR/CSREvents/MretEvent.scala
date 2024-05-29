@@ -12,19 +12,22 @@ import xiangshan.backend.fu.NewCSR._
 
 
 class MretEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase {
-  val mstatus = ValidIO((new MstatusBundle).addInEvent(_.MPP, _.MPV, _.MIE, _.MPIE, _.MPRV))
+  val mstatus  = ValidIO((new MstatusBundle).addInEvent(_.MPP, _.MPV, _.MIE, _.MPIE, _.MPRV))
+  val tcontrol = ValidIO((new TcontrolBundle).addInEvent(_.MTE))
   val targetPc = ValidIO(UInt(VaddrMaxWidth.W))
 
   override def getBundleByName(name: String): ValidIO[CSRBundle] = {
     name match {
-      case "mstatus" => this.mstatus
+      case "mstatus"  => this.mstatus
+      case "tcontrol" => this.tcontrol
     }
   }
 }
 
 class MretEventInput extends Bundle {
-  val mstatus = Input(new MstatusBundle)
-  val mepc = Input(new Epc())
+  val mstatus  = Input(new MstatusBundle)
+  val mepc     = Input(new Epc())
+  val tcontrol = Input(new TcontrolBundle)
 }
 
 class MretEventModule extends Module with CSREventBase {
@@ -35,6 +38,7 @@ class MretEventModule extends Module with CSREventBase {
 
   out.privState.valid := valid
   out.mstatus  .valid := valid
+  out.tcontrol .valid := valid
   out.targetPc .valid := valid
 
   out.privState.bits.PRVM := in.mstatus.MPP
@@ -43,6 +47,7 @@ class MretEventModule extends Module with CSREventBase {
   out.mstatus.bits.MIE    := in.mstatus.MPIE
   out.mstatus.bits.MPIE   := 1.U
   out.mstatus.bits.MPRV   := Mux(in.mstatus.MPP =/= PrivMode.M, 0.U, in.mstatus.MPRV.asUInt)
+  out.tcontrol.bits.MTE   := in.tcontrol.MPTE
   out.targetPc.bits       := in.mepc.asUInt
 }
 
