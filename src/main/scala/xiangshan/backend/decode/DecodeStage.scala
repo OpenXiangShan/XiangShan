@@ -192,8 +192,6 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     io.vecRat(i)(0).addr := io.out(i).bits.lsrc(0) // vs1
     io.vecRat(i)(1).addr := io.out(i).bits.lsrc(1) // vs2
     io.vecRat(i)(2).addr := io.out(i).bits.lsrc(2) // old_vd
-    io.vecRat(i)(3).addr := io.out(i).bits.lsrc(3) // no use
-    io.vecRat(i)(4).addr := io.out(i).bits.lsrc(4) // no use
     io.vecRat(i).foreach(_.hold := !io.out(i).ready)
 
     io.v0Rat(i).addr := Mux(FuType.isVppu(io.out(i).bits.fuType) && (io.out(i).bits.fuOpType === VpermType.vcompress), io.out(i).bits.lsrc(3), v0Idx.U) // v0
