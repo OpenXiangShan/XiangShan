@@ -396,7 +396,7 @@ object Bundles {
     val vuopIdx   = UopIdx()
     val lastUop   = Bool()
     // maybe used if data dependancy
-    val vmask     = UInt(MaskSrcData().dataWidth.W)
+    val vmask     = UInt(V0Data().dataWidth.W)
     val vl        = Vl()
 
     // vector load/store
@@ -765,7 +765,7 @@ object Bundles {
     }
 
     def asV0RfWriteBundle(fire: Bool): RfWritePortWithConfig = {
-      val rfWrite = Wire(Output(new RfWritePortWithConfig(this.params.dataCfg, backendParams.getPregParams(MaskSrcData()).addrWidth)))
+      val rfWrite = Wire(Output(new RfWritePortWithConfig(this.params.dataCfg, backendParams.getPregParams(V0Data()).addrWidth)))
       rfWrite.wen := this.v0Wen && fire
       rfWrite.addr := this.pdest
       rfWrite.data := this.data
@@ -778,7 +778,7 @@ object Bundles {
     }
 
     def asVlRfWriteBundle(fire: Bool): RfWritePortWithConfig = {
-      val rfWrite = Wire(Output(new RfWritePortWithConfig(this.params.dataCfg, backendParams.getPregParams(VConfigData()).addrWidth)))
+      val rfWrite = Wire(Output(new RfWritePortWithConfig(this.params.dataCfg, backendParams.getPregParams(VlData()).addrWidth)))
       rfWrite.wen := this.vlWen && fire
       rfWrite.addr := this.pdest
       rfWrite.data := this.data

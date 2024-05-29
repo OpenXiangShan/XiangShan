@@ -49,7 +49,7 @@ case class V0PregParams(
   numWrite  : Option[Int],
 ) extends PregParams {
 
-  val dataCfg: DataConfig = MaskSrcData()
+  val dataCfg: DataConfig = V0Data()
   val isFake: Boolean = false
 }
 
@@ -59,7 +59,7 @@ case class VlPregParams(
   numWrite  : Option[Int],
 ) extends PregParams {
 
-  val dataCfg: DataConfig = VConfigData()
+  val dataCfg: DataConfig = VlData()
   val isFake: Boolean = false
 }
 

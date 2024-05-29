@@ -80,10 +80,10 @@ case class FuConfig (
   var vconfigIdx = -1
   var maskSrcIdx = -1
   if (vconfigWakeUp) {
-    vconfigIdx = getSpecialSrcIdx(VConfigData(), "when vconfigWakeUp is true, srcData must always contains VConfigData()")
+    vconfigIdx = getSpecialSrcIdx(VlData(), "when vconfigWakeUp is true, srcData must always contains VConfigData()")
   }
   if (maskWakeUp) {
-    maskSrcIdx = getSpecialSrcIdx(MaskSrcData(), "when maskWakeUp is true, srcData must always contains MaskSrcData()")
+    maskSrcIdx = getSpecialSrcIdx(V0Data(), "when maskWakeUp is true, srcData must always contains MaskSrcData()")
   }
 
   require(!piped || piped && latency.latencyVal.isDefined, "The latency value must be set when piped is enable")
@@ -184,7 +184,8 @@ case class FuConfig (
                             fuType == FuType.vfdiv || fuType == FuType.vidiv
 
   /**
-    * Get index of special src data, like [[VConfigData]], [[MaskSrcData]]
+    * Get index of special src data, like [[VlData]], [[V0Data]]
+   *
     * @param data [[DataConfig]]
     * @param tips tips if get failed
     * @return the index of special src data
@@ -511,7 +512,7 @@ object FuConfig {
     fuType = FuType.vialuF,
     fuGen = (p: Parameters, cfg: FuConfig) => Module(new VIAluFix(cfg)(p).suggestName("VialuFix")),
     srcData = Seq(
-      Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()),  // vs1, vs2, vd_old, v0, vtype&vl
+      Seq(VecData(), VecData(), VecData(), V0Data(), VlData()),  // vs1, vs2, vd_old, v0, vtype&vl
     ),
     piped = true,
     writeVecRf = true,
@@ -530,7 +531,7 @@ object FuConfig {
     fuType = FuType.vimac,
     fuGen = (p: Parameters, cfg: FuConfig) => Module(new VIMacU(cfg)(p).suggestName("Vimac")),
     srcData = Seq(
-      Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()), // vs1, vs2, vd_old, v0, vtype&vl
+      Seq(VecData(), VecData(), VecData(), V0Data(), VlData()), // vs1, vs2, vd_old, v0, vtype&vl
     ),
     piped = true,
     writeVecRf = true,
@@ -548,7 +549,7 @@ object FuConfig {
     fuType = FuType.vidiv,
     fuGen = (p: Parameters, cfg: FuConfig) => Module(new VIDiv(cfg)(p).suggestName("Vidiv")),
     srcData = Seq(
-      Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()), // vs1, vs2, vd_old, v0, vtype&vl
+      Seq(VecData(), VecData(), VecData(), V0Data(), VlData()), // vs1, vs2, vd_old, v0, vtype&vl
     ),
     piped = false,
     writeVecRf = true,
@@ -564,7 +565,7 @@ object FuConfig {
     fuType = FuType.vppu,
     fuGen = (p: Parameters, cfg: FuConfig) => Module(new VPPU(cfg)(p).suggestName("Vppu")),
     srcData = Seq(
-      Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()),  // vs1, vs2, vd_old, v0, vtype&vl
+      Seq(VecData(), VecData(), VecData(), V0Data(), VlData()),  // vs1, vs2, vd_old, v0, vtype&vl
     ),
     piped = true,
     writeVecRf = true,
@@ -581,7 +582,7 @@ object FuConfig {
     fuType = FuType.vipu,
     fuGen = (p: Parameters, cfg: FuConfig) => Module(new VIPU(cfg)(p).suggestName("Vipu")),
     srcData = Seq(
-      Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()),  // vs1, vs2, vd_old, v0
+      Seq(VecData(), VecData(), VecData(), V0Data(), VlData()),  // vs1, vs2, vd_old, v0
     ),
     piped = true,
     writeIntRf = true,
@@ -598,7 +599,7 @@ object FuConfig {
     fuType = FuType.vfalu,
     fuGen = (p: Parameters, cfg: FuConfig) => Module(new VFAlu(cfg)(p).suggestName("Vfalu")),
     srcData = Seq(
-      Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()), // vs1, vs2, vd_old, v0, vtype&vl
+      Seq(VecData(), VecData(), VecData(), V0Data(), VlData()), // vs1, vs2, vd_old, v0, vtype&vl
     ),
     piped = true,
     writeVecRf = true,
@@ -617,7 +618,7 @@ object FuConfig {
     fuType = FuType.vfma,
     fuGen = (p: Parameters, cfg: FuConfig) => Module(new VFMA(cfg)(p).suggestName("Vfma")),
     srcData = Seq(
-      Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()), // vs1, vs2, vd_old, v0, vtype&vl
+      Seq(VecData(), VecData(), VecData(), V0Data(), VlData()), // vs1, vs2, vd_old, v0, vtype&vl
     ),
     piped = true,
     writeVecRf = true,
@@ -635,7 +636,7 @@ object FuConfig {
     fuType = FuType.vfdiv,
     fuGen = (p: Parameters, cfg: FuConfig) => Module(new VFDivSqrt(cfg)(p).suggestName("Vfdiv")),
     srcData = Seq(
-      Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()), // vs1, vs2, vd_old, v0, vtype&vl
+      Seq(VecData(), VecData(), VecData(), V0Data(), VlData()), // vs1, vs2, vd_old, v0, vtype&vl
     ),
     piped = false,
     writeVecRf = true,
@@ -653,7 +654,7 @@ object FuConfig {
     fuType = FuType.vfcvt,
     fuGen = (p: Parameters, cfg: FuConfig) => Module(new VCVT(cfg)(p).suggestName("Vfcvt")),
     srcData = Seq(
-      Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()), // vs1, vs2, vd_old, v0, vtype&vl
+      Seq(VecData(), VecData(), VecData(), V0Data(), VlData()), // vs1, vs2, vd_old, v0, vtype&vl
     ),
     piped = true,
     writeVecRf = true,
@@ -733,7 +734,7 @@ object FuConfig {
     fuType = FuType.vldu,
     fuGen = null,
     srcData = Seq(
-      Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()),  //vs1, vs2, vd_old, v0, vconfig
+      Seq(VecData(), VecData(), VecData(), V0Data(), VlData()),  //vs1, vs2, vd_old, v0, vconfig
     ),
     piped = false, // Todo: check it
     writeVecRf = true,
@@ -752,7 +753,7 @@ object FuConfig {
     fuType = FuType.vstu,
     fuGen = null,
     srcData = Seq(
-      Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()),  //vs1, vs2, vd_old, v0, vconfig
+      Seq(VecData(), VecData(), VecData(), V0Data(), VlData()),  //vs1, vs2, vd_old, v0, vconfig
     ),
     piped = false,
     writeVecRf = false,
@@ -771,7 +772,7 @@ object FuConfig {
     fuType = FuType.vsegldu,
     fuGen = null,
     srcData = Seq(
-      Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()), //vs1, vs2, vd_old, v0, vconfig
+      Seq(VecData(), VecData(), VecData(), V0Data(), VlData()), //vs1, vs2, vd_old, v0, vconfig
     ),
     piped = false, // Todo: check it
     writeVecRf = true,
@@ -790,7 +791,7 @@ object FuConfig {
     fuType = FuType.vsegstu,
     fuGen = null,
     srcData = Seq(
-      Seq(VecData(), VecData(), VecData(), MaskSrcData(), VConfigData()), //vs1, vs2, vd_old, v0, vconfig
+      Seq(VecData(), VecData(), VecData(), V0Data(), VlData()), //vs1, vs2, vd_old, v0, vconfig
     ),
     piped = false,
     writeVecRf = false,

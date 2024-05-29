@@ -72,9 +72,9 @@ object WbConfig {
     priority: Int = Int.MaxValue,
   ) extends PregWB {
 
-    def dataCfg: DataConfig = MaskSrcData()
+    def dataCfg: DataConfig = V0Data()
 
-    def numPreg(backendParams: BackendParams): Int = backendParams.getPregParams(MaskSrcData()).numEntries
+    def numPreg(backendParams: BackendParams): Int = backendParams.getPregParams(V0Data()).numEntries
   }
 
   case class VlWB(
@@ -82,9 +82,9 @@ object WbConfig {
     priority: Int = Int.MaxValue,
   ) extends PregWB {
 
-    def dataCfg: DataConfig = VConfigData()
+    def dataCfg: DataConfig = VlData()
 
-    def numPreg(backendParams: BackendParams): Int = backendParams.getPregParams(VConfigData()).numEntries
+    def numPreg(backendParams: BackendParams): Int = backendParams.getPregParams(VlData()).numEntries
   }
 
   case class NoWB(
