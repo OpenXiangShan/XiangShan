@@ -158,9 +158,9 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
     .zip(
       intSrcStateVec.getOrElse(VecInit(Seq.fill(numIn * numRegSrcInt)(SrcState.busy).toSeq))
         zip fpSrcStateVec.getOrElse(VecInit(Seq.fill(numIn * numRegSrcFp)(SrcState.busy).toSeq))
-        zip (vfSrcStateVec.getOrElse(VecInit(Seq.fill(numIn * numRegSrcVf)(SrcState.busy).toSeq)) ++ 
-             v0SrcStateVec.getOrElse(VecInit(Seq.fill(numIn * numRegSrcV0)(SrcState.busy).toSeq)) ++
-             vlSrcStateVec.getOrElse(VecInit(Seq.fill(numIn * numRegSrcVl)(SrcState.busy).toSeq)))
+        zip VecInit(vfSrcStateVec.getOrElse(Seq.fill(numIn * numRegSrcVf)(SrcState.busy).toSeq) ++ 
+                    v0SrcStateVec.getOrElse(Seq.fill(numIn * numRegSrcV0)(SrcState.busy).toSeq) ++
+                    vlSrcStateVec.getOrElse(Seq.fill(numIn * numRegSrcVl)(SrcState.busy).toSeq))
     )
     .foreach {
       case ((state: UInt, srcType), ((intState, fpState), vfState)) =>
@@ -177,9 +177,9 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
     .zip(
       intSrcLoadDependency.getOrElse(VecInit(Seq.fill(numIn * numRegSrcInt)(0.U.asTypeOf(Vec(LoadPipelineWidth, UInt(LoadPipelineWidth.W)))).toSeq))
         zip fpSrcLoadDependency.getOrElse(VecInit(Seq.fill(numIn * numRegSrcFp)(0.U.asTypeOf(Vec(LoadPipelineWidth, UInt(LoadPipelineWidth.W)))).toSeq))
-        zip (vfSrcLoadDependency.getOrElse(VecInit(Seq.fill(numIn * numRegSrcVf)(0.U.asTypeOf(Vec(LoadPipelineWidth, UInt(LoadPipelineWidth.W)))).toSeq)) ++
-             v0SrcLoadDependency.getOrElse(VecInit(Seq.fill(numIn * numRegSrcV0)(0.U.asTypeOf(Vec(LoadPipelineWidth, UInt(LoadPipelineWidth.W)))).toSeq)) ++
-             vlSrcLoadDependency.getOrElse(VecInit(Seq.fill(numIn * numRegSrcVl)(0.U.asTypeOf(Vec(LoadPipelineWidth, UInt(LoadPipelineWidth.W)))).toSeq)))
+        zip VecInit(vfSrcLoadDependency.getOrElse(Seq.fill(numIn * numRegSrcVf)(0.U.asTypeOf(Vec(LoadPipelineWidth, UInt(LoadPipelineWidth.W)))).toSeq) ++
+                    v0SrcLoadDependency.getOrElse(Seq.fill(numIn * numRegSrcV0)(0.U.asTypeOf(Vec(LoadPipelineWidth, UInt(LoadPipelineWidth.W)))).toSeq) ++
+                    vlSrcLoadDependency.getOrElse(Seq.fill(numIn * numRegSrcVl)(0.U.asTypeOf(Vec(LoadPipelineWidth, UInt(LoadPipelineWidth.W)))).toSeq))
     )
     .foreach {
       case ((ldp, srcType), ((intLdp, fpLdq), vfLdp)) =>
