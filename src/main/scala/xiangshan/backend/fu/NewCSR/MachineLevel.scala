@@ -12,6 +12,7 @@ import xiangshan.backend.fu.NewCSR.CSRDefines.{
   _
 }
 import xiangshan.backend.fu.NewCSR.CSREvents._
+import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast._
 
 import scala.collection.immutable.SeqMap
 
@@ -64,7 +65,10 @@ trait MachineLevel { self: NewCSR =>
   val mvien = Module(new CSRModule("Mvien", new MvienBundle))
     .setAddr(0x308)
 
-  val mvip = Module(new CSRModule("Mvip", new MvipBundle) with HasMachineInterruptBundle {
+  val mvip = Module(new CSRModule("Mvip", new MvipBundle)
+    with HasMachineInterruptBundle
+    with HasMachineEnvBundle
+  {
     val toMip = IO(new MvipToMip)
 
     // When bit 1 of mvien is zero, bit 1(SSIP) of mvip is an alias of the same bit (SSIP) of mip.
@@ -79,8 +83,9 @@ trait MachineLevel { self: NewCSR =>
     // Bit 5 of mvip is an alias of the same bit (STIP) in mip when that bit is writable in mip.
     // When STIP is not writable in mip (such as when menvcfg.STCE = 1), bit 5 of mvip is read-only zero.
     // Todo: check mip writable when menvcfg.STCE = 1
-    regOut.STIP := mip.STIP
-    toMip.STIP.valid := wen
+    regOut.STIP := Mux(this.menvcfg.STCE.asBool, 0.U, mip.STIP.asBool)
+    // Don't update mip.STIP when menvcfg.STCE is 1
+    toMip.STIP.valid := wen && !this.menvcfg.STCE.asBool
     toMip.STIP.bits := wdata.STIP
 
     // When bit 9 of mvien is zero, bit 9 of mvip is an alias of the software-writable bit 9 of mip (SEIP).
@@ -92,7 +97,7 @@ trait MachineLevel { self: NewCSR =>
     reg.SEIP := Mux(wen && mvien.SEIE.asUInt.asBool, wdata.SEIP, reg.SEIP)
   }).setAddr(0x309)
 
-  val menvcfg = Module(new CSRModule("Menvcfg", new Envcfg))
+  val menvcfg = Module(new CSRModule("Menvcfg", new MEnvCfg))
     .setAddr(0x30A)
 
   val mcountinhibit = Module(new CSRModule("Mcountinhibit", new McountinhibitBundle))
@@ -117,7 +122,11 @@ trait MachineLevel { self: NewCSR =>
   val mtval = Module(new CSRModule("Mtval") with TrapEntryMEventSinkBundle)
     .setAddr(0x343)
 
-  val mip = Module(new CSRModule("Mip", new MipBundle) with HasMachineInterruptBundle with HasExternalInterruptBundle {
+  val mip = Module(new CSRModule("Mip", new MipBundle)
+    with HasMachineInterruptBundle
+    with HasExternalInterruptBundle
+    with HasMachineEnvBundle
+  {
     val fromMvip = IO(Flipped(new MvipToMip))
     val fromSip = IO(Flipped(new SipToMip))
 
@@ -126,10 +135,13 @@ trait MachineLevel { self: NewCSR =>
     rdataFields.SEIP := Mux(!mvien.SEIE.asUInt.asBool, reg.SEIP.asUInt.asBool | mvip.SEIP.asUInt.asBool | platformIRP.SEIP, platformIRP.SEIP)
     when (wen && !mvien.SEIE.asUInt.asBool) { reg.SEIP := reg.SEIP }
     when (fromMvip.SSIP.valid) { reg.SSIP := fromMvip.SSIP.bits }
+    // Producer `mvip` controls not writting STIP when menvcfg.STCE = 1
     when (fromMvip.STIP.valid) { reg.STIP := fromMvip.STIP.bits }
     when (fromMvip.SEIP.valid) { reg.SEIP := fromMvip.SEIP.bits }
     when (fromSip.SSIP.valid) { reg.SSIP := fromSip.SSIP.bits }
 
+    // If the stimecmp (supervisor-mode timer compare) register is implemented(menvcfg.STCE=1), STIP is read-only in mip.
+    regOut.STIP := Mux(this.menvcfg.STCE.asBool, platformIRP.STIP, reg.STIP.asBool)
     // MEIP is read-only in mip, and is set and cleared by a platform-specific interrupt controller.
     rdataFields.MEIP := platformIRP.MEIP
     // MTIP is read-only in mip, and is cleared by writing to the memory-mapped machine-mode timer compare register
@@ -355,7 +367,10 @@ class MieBundle extends InterruptEnableBundle {
 class MipBundle extends InterruptPendingBundle {
   this.getALL.foreach(_.setRW().withReset(0.U))
   this.getM.foreach(_.setRO().withReset(0.U))
-  // Todo: remove this after more enable bits supported in NEMU
+  // Sstc extension needs set STIP as RO
+  if (CSRConfig.EXT_SSTC)
+    this.STIP.setRO()
+  // Todo: remove setRO after more enable bits supported in NEMU
   this.getSOC.foreach(_.setRO().withReset(0.U))
 }
 
@@ -395,6 +410,12 @@ class McountinhibitBundle extends CSRBundle {
   val HPM3 = RW(31, 3)
 }
 
+class MEnvCfg extends EnvCfg {
+  if (CSRConfig.EXT_SSTC) {
+    this.STCE.setRW().withReset(1.U)
+  }
+}
+
 object MarchidField extends CSREnum with ROApply {
   val XSArchid = Value(25.U)
 }
@@ -430,6 +451,7 @@ trait HasExternalInterruptBundle {
     val MTIP  = Input(Bool())
     val MSIP  = Input(Bool())
     val SEIP  = Input(Bool())
+    val STIP  = Input(Bool())
     val VSEIP = Input(Bool())
     val VSTIP = Input(Bool())
     // debug interrupt from debug module
@@ -444,3 +466,8 @@ trait HasMachineCounterControlBundle { self: CSRModule[_] =>
 trait HasRobCommitBundle { self: CSRModule[_] =>
   val robCommit = IO(Input(new RobCommitCSR))
 }
+
+trait HasMachineEnvBundle { self: CSRModule[_] =>
+  val menvcfg = IO(Input(new MEnvCfg))
+}
+

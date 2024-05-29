@@ -1,6 +1,7 @@
 package xiangshan.backend.fu.NewCSR
 
 import chisel3._
+import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util._
 import utility.SignExt
 import xiangshan.backend.fu.NewCSR.CSRBundles._
@@ -91,7 +92,9 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
 
   hip.fromVSip := vsip.toHip
 
-  val vstimecmp = Module(new CSRModule("VStimecmp"))
+  val vstimecmp = Module(new CSRModule("VStimecmp", new CSRBundle {
+    val vstimecmp = RW(63, 0).withReset(bitPatToUInt(BitPat.Y(64)))
+  }))
     .setAddr(0x24D)
 
   val vsatp = Module(new CSRModule("VSatp", new SatpBundle) with VirtualSupervisorBundle {

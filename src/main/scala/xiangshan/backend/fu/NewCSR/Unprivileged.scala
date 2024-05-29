@@ -3,6 +3,7 @@ package xiangshan.backend.fu.NewCSR
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.rocket.CSRs
+import utility.GatedValidRegNext
 import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRROField => RO, CSRRWField => RW, CSRWARLField => WARL}
 import xiangshan.backend.fu.NewCSR.CSRFunc._
 import xiangshan.backend.fu.vector.Bundles._
@@ -113,9 +114,13 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
   val time = Module(new CSRModule("time", new CSRBundle {
     val time = RO(63, 0)
   }) with HasMHPMSink {
+    val updated = IO(Output(Bool()))
+
     when (mHPM.time.valid) {
       reg.time := mHPM.time.bits
     }
+
+    updated := GatedValidRegNext(mHPM.time.valid)
   })
     .setAddr(CSRs.time)
 

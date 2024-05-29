@@ -1,7 +1,8 @@
 package xiangshan.backend.fu.NewCSR
 
 import chisel3._
-import chisel3.util.{Cat, ValidIO}
+import chisel3.util.BitPat.bitPatToUInt
+import chisel3.util.{BitPat, Cat, ValidIO}
 import utility.SignExt
 import xiangshan.backend.fu.NewCSR.CSRBundles._
 import xiangshan.backend.fu.NewCSR.CSRDefines._
@@ -46,7 +47,7 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
   val scounteren = Module(new CSRModule("Scounteren", new Counteren))
     .setAddr(0x106)
 
-  val senvcfg = Module(new CSRModule("Senvcfg", new Envcfg))
+  val senvcfg = Module(new CSRModule("Senvcfg", new SEnvCfg))
     .setAddr(0x10A)
 
   val sscratch = Module(new CSRModule("Sscratch"))
@@ -70,22 +71,23 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
     // The sip and sie registers are subsets of the mip and mie registers. Reading any
     // implemented field, or writing any writable field, of sip/sie effects a read or write of the
     // homonymous field of mip/mie.
+
     // Ref: 3.1.9. Machine Interrupt Registers (mip and mie)
     // Restricted views of the mip and mie registers appear as the sip and sie registers for supervisor level. If
     // an interrupt is delegated to S-mode by setting a bit in the mideleg register, it becomes visible in the
     // sip register and is maskable using the sie register. Otherwise, the corresponding bits in sip and sie
     // are **read-only zero**.
 
-    regOut.SSIP := Mux(mideleg.SSI.asUInt.asBool, mip.SSIP.asUInt, 0.U)
-    regOut.STIP := Mux(mideleg.STI.asUInt.asBool, mip.STIP.asUInt, 0.U)
-    regOut.SEIP := Mux(mideleg.SEI.asUInt.asBool, mip.SEIP.asUInt, 0.U)
+    regOut := mideleg.asUInt & mip.asUInt
 
     toMip.SSIP.valid := wen && mideleg.SSI.asBool
     toMip.SSIP.bits := wdata.SSIP
   })
     .setAddr(0x144)
 
-  val stimecmp = Module(new CSRModule("Stimecmp"))
+  val stimecmp = Module(new CSRModule("Stimecmp", new CSRBundle {
+    val stimecmp = RW(63, 0).withReset(bitPatToUInt(BitPat.Y(64)))
+  }))
     .setAddr(0x14D)
 
   val satp = Module(new CSRModule("Satp", new SatpBundle) {
@@ -165,6 +167,8 @@ class SatpBundle extends CSRBundle {
   val ASID = RW(44 - 1 + ASIDLEN, 44)
   val PPN  = RW(PPN_msb, 0)
 }
+
+class SEnvCfg extends EnvCfg
 
 class SieToMie extends Bundle {
   val SSIE = ValidIO(RW(0))

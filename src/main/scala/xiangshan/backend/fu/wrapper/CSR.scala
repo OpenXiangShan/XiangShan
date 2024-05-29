@@ -119,6 +119,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.platformIRP.MTIP := csrIn.externalInterrupt.mtip
   csrMod.platformIRP.MSIP := csrIn.externalInterrupt.msip
   csrMod.platformIRP.SEIP := csrIn.externalInterrupt.seip
+  csrMod.platformIRP.STIP := false.B
   csrMod.platformIRP.VSEIP := false.B // Todo
   csrMod.platformIRP.VSTIP := false.B // Todo
   csrMod.platformIRP.debugIP := csrIn.externalInterrupt.debug
