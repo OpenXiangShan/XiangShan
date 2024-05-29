@@ -149,6 +149,8 @@ case class XSCoreParameters
   IntLogicRegs: Int = 32,
   FpLogicRegs: Int = 32 + 1 + 1, // 1: I2F, 1: stride
   VecLogicRegs: Int = 32 + 1 + 15, // 15: tmp, 1: vconfig
+  V0LogicRegs: Int = 1, // V0
+  VlLogicRegs: Int = 1 + 1, // Vl, VCompress
   VCONFIG_IDX: Int = 32,
   NRPhyRegs: Int = 192,
   VirtualLoadQueueSize: Int = 72,
@@ -661,6 +663,8 @@ trait HasXSParameter {
   def IntLogicRegs = coreParams.IntLogicRegs
   def FpLogicRegs = coreParams.FpLogicRegs
   def VecLogicRegs = coreParams.VecLogicRegs
+  def V0LogicRegs = coreParams.V0LogicRegs
+  def VlLogicRegs = coreParams.VlLogicRegs
   def VCONFIG_IDX = coreParams.VCONFIG_IDX
   def IntPhyRegs = coreParams.intPreg.numEntries
   def FpPhyRegs = coreParams.fpPreg.numEntries

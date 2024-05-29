@@ -98,10 +98,8 @@ class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule with 
     case Reg_I => VecInit.fill    (IntLogicRegs)(0.U(PhyRegIdxWidth.W))
     case Reg_F => VecInit.tabulate(FpLogicRegs)(_.U(PhyRegIdxWidth.W))
     case Reg_V => VecInit.tabulate(VecLogicRegs)(_.U(PhyRegIdxWidth.W))
-//    case Reg_V0 => VecInit.tabulate(V0LogicRegs)(_.U(PhyRegIdxWidth.W))
-//    case Reg_Vl => VecInit.tabulate(VlLogicRegs)(_.U(PhyRegIdxWidth.W))
-    case Reg_V0 => VecInit.tabulate(2)(_.U(PhyRegIdxWidth.W))
-    case Reg_Vl => VecInit.tabulate(1)(_.U(PhyRegIdxWidth.W))
+    case Reg_V0 => VecInit.tabulate(V0LogicRegs)(_.U(PhyRegIdxWidth.W))
+    case Reg_Vl => VecInit.tabulate(VlLogicRegs)(_.U(PhyRegIdxWidth.W))
   }
   val spec_table = RegInit(rename_table_init)
   val spec_table_next = WireInit(spec_table)
