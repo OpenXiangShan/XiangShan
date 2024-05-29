@@ -194,8 +194,8 @@ case class XSCoreParameters
   prefetcher: Option[PrefetcherParams] = Some(SMSParams()),
   LoadPipelineWidth: Int = 3,
   StorePipelineWidth: Int = 2,
-  VecLoadPipelineWidth: Int = 2,
-  VecStorePipelineWidth: Int = 2,
+  VecLoadPipelineWidth: Int = 1,
+  VecStorePipelineWidth: Int = 1,
   VecMemSrcInWidth: Int = 2,
   VecMemInstWbWidth: Int = 1,
   VecMemDispatchWidth: Int = 1,
@@ -207,8 +207,8 @@ case class XSCoreParameters
   // ============ VLSU ============
   VlMergeBufferSize: Int = 16,
   VsMergeBufferSize: Int = 16,
-  UopWritebackWidth: Int = 2,
-  VLUopWritebackWidth: Int = 2,
+  UopWritebackWidth: Int = 1,
+  VLUopWritebackWidth: Int = 1,
   VSUopWritebackWidth: Int = 1,
   SplitBufferSize: Int = 8,
   VSegmentBufferSize: Int = 8,
@@ -447,9 +447,6 @@ case class XSCoreParameters
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
         ExeUnitParams("VLSU0", Seq(VlduCfg, VstuCfg, VseglduSeg, VsegstuCfg), Seq(VfWB(0, 0)), Seq(Seq(VfRD(10, 0)), Seq(VfRD(11, 0)), Seq(VfRD(12, 0)), Seq(VfRD(13, 0)), Seq(VfRD(14, 0)))),
-      ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
-      IssueBlockParams(Seq(
-        ExeUnitParams("VLSU1", Seq(VlduCfg, VstuCfg), Seq(VfWB(8, 0)), Seq(Seq(VfRD(15, 0)), Seq(VfRD(16, 0)), Seq(VfRD(17, 0)), Seq(VfRD(18, 0)), Seq(VfRD(19, 0)))),
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
         ExeUnitParams("STD0", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(10, 1), FpRD(12, 0)))),
