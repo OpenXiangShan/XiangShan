@@ -130,12 +130,13 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
       val immLoadSrc0 = SignExt(ImmUnion.U.toImm32(immInfo(exuIdx).imm(immInfo(exuIdx).imm.getWidth - 1, ImmUnion.I.len)), XLEN)
       val exuParm = exuInput.bits.params
       val isIntScheduler = exuParm.isIntExeUnit
+      val isReadVfRf= exuParm.readVfRf
       val dataSource = exuInput.bits.dataSources(srcIdx)
       val isWakeUpSink = params.allIssueParams.filter(_.exuBlockParams.contains(exuParm)).head.exuBlockParams.map(_.isIQWakeUpSink).reduce(_ || _)
       val readForward = if (isWakeUpSink) dataSource.readForward else false.B
       val readBypass = if (isWakeUpSink) dataSource.readBypass else false.B
       val readZero = if (isIntScheduler) dataSource.readZero else false.B
-      val readAnotherReg = if (isIntScheduler && exuParm.numRegSrc == 2 && srcIdx==1) dataSource.readAnotherReg else false.B
+      val readV0 = if (srcIdx < 3 && isReadVfRf) dataSource.readV0 else false.B
       val readRegOH = exuInput.bits.dataSources(srcIdx).readRegOH
       val readImm = if (exuParm.immType.nonEmpty || exuParm.hasLoadExu) exuInput.bits.dataSources(srcIdx).readImm else false.B
       val bypass2ExuIdx = fromDPsHasBypass2Sink.indexOf(exuIdx)
@@ -147,7 +148,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
           readBypass     -> Mux1H(forwardOrBypassValidVec3(exuIdx)(srcIdx), bypassDataVec),
           readBypass2    -> (if (bypass2ExuIdx >= 0) Mux1H(bypass2ValidVec3(bypass2ExuIdx)(srcIdx), bypass2DataVec) else 0.U),
           readZero       -> 0.U,
-//          readAnotherReg -> fromDPs(exuIdx).bits.src(0),
+          readV0         -> exuInput.bits.src(3),
           readRegOH      -> fromDPs(exuIdx).bits.src(srcIdx),
           readImm        -> (if (exuParm.hasLoadExu && srcIdx == 0) immLoadSrc0 else imm)
         )
