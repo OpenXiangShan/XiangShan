@@ -527,6 +527,13 @@ class NewCSR(implicit val p: Parameters) extends Module
         m.menvcfg := menvcfg.regOut
       case _ =>
     }
+    mod match {
+      case m: HasHypervisorEnvBundle =>
+        m.menvcfg := menvcfg.regOut
+        m.privState := privState
+        m.accessStimecmp := (ren || wen) && (addr === CSRs.stimecmp.U || addr === CSRs.vstimecmp.U)
+      case _ =>
+    }
   }
 
   csrMods.foreach { mod =>
