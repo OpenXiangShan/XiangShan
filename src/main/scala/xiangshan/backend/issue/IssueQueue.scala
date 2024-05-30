@@ -281,12 +281,24 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
       for(j <- 0 until numLsrc) {
         enq.bits.status.srcStatus(j).psrc                       := s0_enqBits(enqIdx).psrc(j)
         enq.bits.status.srcStatus(j).srcType                    := s0_enqBits(enqIdx).srcType(j)
-        enq.bits.status.srcStatus(j).srcState                   := s0_enqBits(enqIdx).srcState(j) & !LoadShouldCancel(Some(s0_enqBits(enqIdx).srcLoadDependency(j)), io.ldCancel)
-        enq.bits.status.srcStatus(j).dataSources.value          := Mux(
-          SrcType.isXp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U),
-          DataSource.zero,
-          Mux(SrcType.isNotReg(s0_enqBits(enqIdx).srcType(j)), DataSource.imm, DataSource.reg)
-        )
+        enq.bits.status.srcStatus(j).srcState                   := (if (j < 3) {
+                                                                      Mux(SrcType.isV0(s0_enqBits(enqIdx).srcType(j)), 
+                                                                          SrcState.rdy, 
+                                                                          s0_enqBits(enqIdx).srcState(j) & !LoadShouldCancel(Some(s0_enqBits(enqIdx).srcLoadDependency(j)), io.ldCancel))
+                                                                    } else {
+                                                                      s0_enqBits(enqIdx).srcState(j) & !LoadShouldCancel(Some(s0_enqBits(enqIdx).srcLoadDependency(j)), io.ldCancel)
+                                                                    })
+        enq.bits.status.srcStatus(j).dataSources.value          := (if (j < 3) {
+                                                                      MuxCase(DataSource.reg, Seq(
+                                                                        (SrcType.isXp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U)) -> DataSource.zero,
+                                                                        SrcType.isNotReg(s0_enqBits(enqIdx).srcType(j))  -> DataSource.imm,
+                                                                        SrcType.isV0(s0_enqBits(enqIdx).srcType(j))      -> DataSource.v0,
+                                                                      ))
+                                                                    } else {
+                                                                      MuxCase(DataSource.reg, Seq(
+                                                                        SrcType.isNotReg(s0_enqBits(enqIdx).srcType(j))  -> DataSource.imm,
+                                                                      ))
+                                                                    })
         enq.bits.status.srcStatus(j).srcLoadDependency          := VecInit(s0_enqBits(enqIdx).srcLoadDependency(j).map(x => x << 1))
         if(params.hasIQWakeUp) {
           enq.bits.status.srcStatus(j).srcWakeUpL1ExuOH.get     := 0.U.asTypeOf(ExuVec())
