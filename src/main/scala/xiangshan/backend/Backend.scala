@@ -488,6 +488,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     sink.bits.intWen.foreach(_ := source.bits.uop.rfWen)
     sink.bits.fpWen.foreach(_ := source.bits.uop.fpWen)
     sink.bits.vecWen.foreach(_ := source.bits.uop.vecWen)
+    sink.bits.v0Wen.foreach(_ := source.bits.uop.v0Wen)
+    sink.bits.vlWen.foreach(_ := source.bits.uop.vlWen)
     sink.bits.exceptionVec.foreach(_ := source.bits.uop.exceptionVec)
     sink.bits.flushPipe.foreach(_ := source.bits.uop.flushPipe)
     sink.bits.replay.foreach(_ := source.bits.uop.replayInst)

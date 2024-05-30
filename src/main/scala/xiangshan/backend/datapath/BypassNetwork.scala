@@ -148,7 +148,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
           readBypass     -> Mux1H(forwardOrBypassValidVec3(exuIdx)(srcIdx), bypassDataVec),
           readBypass2    -> (if (bypass2ExuIdx >= 0) Mux1H(bypass2ValidVec3(bypass2ExuIdx)(srcIdx), bypass2DataVec) else 0.U),
           readZero       -> 0.U,
-          readV0         -> exuInput.bits.src(3),
+          readV0         -> (if (srcIdx < 3 && isReadVfRf) exuInput.bits.src(3) else 0.U),
           readRegOH      -> fromDPs(exuIdx).bits.src(srcIdx),
           readImm        -> (if (exuParm.hasLoadExu && srcIdx == 0) immLoadSrc0 else imm)
         )

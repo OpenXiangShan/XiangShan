@@ -237,6 +237,8 @@ class ExeUnitImp(
       sink.bits.ctrl.rfWen       .foreach(x => x := source.bits.rfWen.get)
       sink.bits.ctrl.fpWen       .foreach(x => x := source.bits.fpWen.get)
       sink.bits.ctrl.vecWen      .foreach(x => x := source.bits.vecWen.get)
+      sink.bits.ctrl.v0Wen       .foreach(x => x := source.bits.v0Wen.get)
+      sink.bits.ctrl.vlWen       .foreach(x => x := source.bits.vlWen.get)
       sink.bits.ctrl.flushPipe   .foreach(x => x := source.bits.flushPipe.get)
       sink.bits.ctrl.preDecode   .foreach(x => x := source.bits.preDecode.get)
       sink.bits.ctrl.ftqIdx      .foreach(x => x := source.bits.ftqIdx.get)
@@ -268,6 +270,8 @@ class ExeUnitImp(
   private val fuIntWenVec = funcUnits.map(x => x.cfg.needIntWen.B && x.io.out.bits.ctrl.rfWen.getOrElse(false.B))
   private val fuFpWenVec  = funcUnits.map(x => x.cfg.needFpWen.B  && x.io.out.bits.ctrl.fpWen.getOrElse(false.B))
   private val fuVecWenVec = funcUnits.map(x => x.cfg.needVecWen.B && x.io.out.bits.ctrl.vecWen.getOrElse(false.B))
+  private val fuV0WenVec = funcUnits.map(x => x.cfg.needV0Wen.B && x.io.out.bits.ctrl.v0Wen.getOrElse(false.B))
+  private val fuVlWenVec = funcUnits.map(x => x.cfg.needVlWen.B && x.io.out.bits.ctrl.vlWen.getOrElse(false.B))
   // FunctionUnits <---> ExeUnit.out
   io.out.valid := Cat(fuOutValidOH).orR
   funcUnits.foreach(fu => fu.io.out.ready := io.out.ready)
@@ -279,6 +283,8 @@ class ExeUnitImp(
   io.out.bits.intWen.foreach(x => x := Mux1H(fuOutValidOH, fuIntWenVec))
   io.out.bits.fpWen.foreach(x => x := Mux1H(fuOutValidOH, fuFpWenVec))
   io.out.bits.vecWen.foreach(x => x := Mux1H(fuOutValidOH, fuVecWenVec))
+  io.out.bits.v0Wen.foreach(x => x := Mux1H(fuOutValidOH, fuV0WenVec))
+  io.out.bits.vlWen.foreach(x => x := Mux1H(fuOutValidOH, fuVlWenVec))
   io.out.bits.redirect.foreach(x => x := Mux1H((fuOutValidOH zip fuRedirectVec).filter(_._2.isDefined).map(x => (x._1, x._2.get))))
   io.out.bits.fflags.foreach(x => x := Mux1H(fuOutValidOH, fuOutresVec.map(_.fflags.getOrElse(0.U.asTypeOf(io.out.bits.fflags.get)))))
   io.out.bits.wflags.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.fpu.getOrElse(0.U.asTypeOf(new FPUCtrlSignals)).wflags)))
