@@ -108,20 +108,6 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
         if (srcIndices.contains(srcIdx) && inRFReadReqSeq.isDefinedAt(srcIdx)) {
           arbInSeq(srcIdx).valid := inRFReadReqSeq(srcIdx).valid && allDataSources(iqIdx)(exuIdx)(srcIdx).readReg
           arbInSeq(srcIdx).bits.addr := inRFReadReqSeq(srcIdx).bits.addr
-//          if (allNumRegSrcs(iqIdx)(exuIdx) == 2) {
-//            val src0Req = inRFReadReqSeq(0).valid && allDataSources(iqIdx)(exuIdx)(0).readReg
-//            val src1Req = inRFReadReqSeq(1).valid && allDataSources(iqIdx)(exuIdx)(1).readReg
-//            if (srcIdx == 0) {
-//              arbInSeq(srcIdx).valid := src0Req || src1Req
-//              arbInSeq(srcIdx).bits.addr := Mux(src1Req && !src0Req, inRFReadReqSeq(1).bits.addr,inRFReadReqSeq(0).bits.addr)
-//            } else {
-//              arbInSeq(srcIdx).valid := src0Req && src1Req
-//              arbInSeq(srcIdx).bits.addr := inRFReadReqSeq(srcIdx).bits.addr
-//            }
-//          } else {
-//            arbInSeq(srcIdx).valid := inRFReadReqSeq(srcIdx).valid && allDataSources(iqIdx)(exuIdx)(srcIdx).readReg
-//            arbInSeq(srcIdx).bits.addr := inRFReadReqSeq(srcIdx).bits.addr
-//          }
         } else {
           arbInSeq(srcIdx).valid := false.B
           arbInSeq(srcIdx).bits.addr := 0.U
