@@ -59,7 +59,11 @@ trait HypervisorLevel { self: NewCSR =>
   val hvictl = Module(new CSRModule("Hvictl", new HvictlBundle))
     .setAddr(0x609)
 
-  val henvcfg = Module(new CSRModule("Henvcfg", new HEnvCfg))
+  val henvcfg = Module(new CSRModule("Henvcfg", new HEnvCfg) with HasHypervisorEnvBundle {
+    when (!menvcfg.STCE.asBool && !privState.isModeM && accessStimecmp) {
+      regOut.STCE := 0.U
+    }
+  })
     .setAddr(0x60A)
 
   val htval = Module(new CSRModule("Htval", new CSRBundle {
@@ -307,4 +311,10 @@ trait HypervisorBundle { self: CSRModule[_] =>
   val hgeie   = IO(Input(new HgeieBundle))
   val hip     = IO(Input(new HipBundle))
   val hie     = IO(Input(new HieBundle))
+}
+
+trait HasHypervisorEnvBundle { self: CSRModule[_] =>
+  val menvcfg = IO(Input(new MEnvCfg))
+  val privState = IO(Input(new PrivState))
+  val accessStimecmp = IO(Input(Bool()))
 }
