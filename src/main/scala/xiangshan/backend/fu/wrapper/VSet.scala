@@ -76,10 +76,10 @@ class VSetRiWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
 
   out.res.data := vsetModule.io.out.vconfig.vl
 
-  if (cfg.writeVConfig) io.vtype.get.bits := vsetModule.io.out.vconfig.vtype
-  if (cfg.writeVConfig) io.vtype.get.valid := io.out.valid
-  if (cfg.writeVConfig) io.vlIsZero.get := vl === 0.U
-  if (cfg.writeVConfig) io.vlIsVlmax.get := vl === vlmax
+  if (cfg.writeVlRf) io.vtype.get.bits := vsetModule.io.out.vconfig.vtype
+  if (cfg.writeVlRf) io.vtype.get.valid := io.out.valid
+  if (cfg.writeVlRf) io.vlIsZero.get := vl === 0.U
+  if (cfg.writeVlRf) io.vlIsVlmax.get := vl === vlmax
 
   debugIO.vconfig := vsetModule.io.out.vconfig
 }
@@ -107,10 +107,10 @@ class VSetRvfWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
   out.res.data := Mux(vsetModule.io.out.vconfig.vtype.illegal, 0.U,
                       Mux(VSETOpType.isKeepVl(in.ctrl.fuOpType), oldVL, vsetModule.io.out.vconfig.vl))
 
-  if (cfg.writeVConfig) io.vtype.get.bits := vsetModule.io.out.vconfig.vtype
-  if (cfg.writeVConfig) io.vtype.get.valid := io.out.valid
-  if (cfg.writeVConfig) io.vlIsZero.get := res.vl === 0.U
-  if (cfg.writeVConfig) io.vlIsVlmax.get := res.vl === vlmax
+  if (cfg.writeVlRf) io.vtype.get.bits := vsetModule.io.out.vconfig.vtype
+  if (cfg.writeVlRf) io.vtype.get.valid := io.out.valid
+  if (cfg.writeVlRf) io.vlIsZero.get := res.vl === 0.U
+  if (cfg.writeVlRf) io.vlIsVlmax.get := res.vl === vlmax
 
   debugIO.vconfig := res
 }

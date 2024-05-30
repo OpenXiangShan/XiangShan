@@ -22,6 +22,8 @@ import xiangshan.backend.datapath.DataConfig._
   * @param writeIntRf the $fu write int regfiles
   * @param writeFpRf the $fu write float regfiles
   * @param writeVecRf the $fu write vector regfiles
+  * @param writeV0Rf the $fu write v0 regfiles
+  * @param writeVlRf the $fu write vl regfiles
   * @param writeFflags the $fu write fflags csr
   * @param writeVxsat the $fu write vxsat csr
   * @param dataBits the width of data in the $fu
@@ -65,7 +67,6 @@ case class FuConfig (
   trigger       : Boolean = false,
   needSrcFrm    : Boolean = false,
   needSrcVxrm   : Boolean = false,
-  writeVConfig  : Boolean = false,
   writeVType    : Boolean = false,
   immType       : Set[UInt] = Set(),
   // vector
@@ -127,7 +128,7 @@ case class FuConfig (
   }
 
   def hasNoDataWB: Boolean = {
-    !(writeIntRf || writeFpRf || writeVecRf)
+    !(writeIntRf || writeFpRf || writeVecRf || writeV0Rf || writeVlRf)
   }
 
   def getSrcMaxWidthVec = {
@@ -257,6 +258,7 @@ object FuConfig {
     piped = true,
     writeFpRf = true,
     writeVecRf = true,
+    writeV0Rf = true,
     latency = CertainLatency(0),
     dataBits = 128,
     immType = Set(SelImm.IMM_OPIVIU, SelImm.IMM_OPIVIS),
@@ -272,6 +274,7 @@ object FuConfig {
     ),
     piped = true,
     writeVecRf = true,
+    writeV0Rf = true,
     latency = CertainLatency(0),
     dataBits = 128,
   )
@@ -360,8 +363,7 @@ object FuConfig {
       Seq(VecData(), VecData()),
     ),
     piped = true,
-    writeVecRf = true,
-    writeVConfig = true,
+    writeVlRf = true,
     writeVType = true,
     latency = CertainLatency(0),
     immType = Set(SelImm.IMM_VSETVLI, SelImm.IMM_VSETIVLI),
@@ -375,8 +377,7 @@ object FuConfig {
       Seq(IntData(), IntData()),
     ),
     piped = true,
-    writeVecRf = true,
-    writeVConfig = true,
+    writeVlRf = true,
     writeVType = true,
     latency = CertainLatency(0),
     immType = Set(SelImm.IMM_VSETVLI, SelImm.IMM_VSETIVLI),
@@ -516,6 +517,7 @@ object FuConfig {
     ),
     piped = true,
     writeVecRf = true,
+    writeV0Rf = true,
     writeVxsat = true,
     needSrcVxrm = true,
     latency = CertainLatency(1),
@@ -535,6 +537,7 @@ object FuConfig {
     ),
     piped = true,
     writeVecRf = true,
+    writeV0Rf = true,
     writeVxsat = true,
     needSrcVxrm = true,
     latency = CertainLatency(2),
@@ -553,6 +556,7 @@ object FuConfig {
     ),
     piped = false,
     writeVecRf = true,
+    writeV0Rf = true,
     latency = UncertainLatency(),
     vconfigWakeUp = true,
     maskWakeUp = true,
@@ -569,6 +573,7 @@ object FuConfig {
     ),
     piped = true,
     writeVecRf = true,
+    writeV0Rf = true,
     latency = CertainLatency(2),
     vconfigWakeUp = true,
     maskWakeUp = true,
@@ -587,6 +592,7 @@ object FuConfig {
     piped = true,
     writeIntRf = true,
     writeVecRf = true,
+    writeV0Rf = true,
     latency = CertainLatency(2),
     vconfigWakeUp = true,
     maskWakeUp = true,
@@ -603,6 +609,7 @@ object FuConfig {
     ),
     piped = true,
     writeVecRf = true,
+    writeV0Rf = true,
     writeFpRf = true,
     writeFflags = true,
     latency = CertainLatency(1),
@@ -622,6 +629,7 @@ object FuConfig {
     ),
     piped = true,
     writeVecRf = true,
+    writeV0Rf = true,
     writeFflags = true,
     latency = CertainLatency(3),
     vconfigWakeUp = true,
@@ -640,6 +648,7 @@ object FuConfig {
     ),
     piped = false,
     writeVecRf = true,
+    writeV0Rf = true,
     writeFflags = true,
     latency = UncertainLatency(),
     vconfigWakeUp = true,
@@ -658,6 +667,7 @@ object FuConfig {
     ),
     piped = true,
     writeVecRf = true,
+    writeV0Rf = true,
     writeFflags = true,
     latency = CertainLatency(2),
     vconfigWakeUp = true,
@@ -738,6 +748,7 @@ object FuConfig {
     ),
     piped = false, // Todo: check it
     writeVecRf = true,
+    writeV0Rf = true,
     latency = UncertainLatency(),
     exceptionOut = Seq(loadAddrMisaligned, loadAccessFault, loadPageFault, loadGuestPageFault),
     flushPipe = true,
@@ -756,7 +767,6 @@ object FuConfig {
       Seq(VecData(), VecData(), VecData(), V0Data(), VlData()),  //vs1, vs2, vd_old, v0, vconfig
     ),
     piped = false,
-    writeVecRf = false,
     latency = UncertainLatency(),
     exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault, storeGuestPageFault),
     flushPipe = true,
@@ -776,6 +786,7 @@ object FuConfig {
     ),
     piped = false, // Todo: check it
     writeVecRf = true,
+    writeV0Rf = true,
     latency = UncertainLatency(),
     exceptionOut = Seq(loadAddrMisaligned, loadAccessFault, loadPageFault),
     flushPipe = true,
@@ -794,7 +805,6 @@ object FuConfig {
       Seq(VecData(), VecData(), VecData(), V0Data(), VlData()), //vs1, vs2, vd_old, v0, vconfig
     ),
     piped = false,
-    writeVecRf = false,
     latency = UncertainLatency(),
     exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault),
     flushPipe = true,
