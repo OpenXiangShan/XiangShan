@@ -48,6 +48,21 @@ class CSRPermitModule extends Module {
     io.in.status.scounteren,
   )
 
+  private val (mcounterenTM, hcounterenTM) = (
+    mcounteren(1),
+    hcounteren(1),
+  )
+
+  private val (menvcfg, henvcfg) = (
+    io.in.status.menvcfg,
+    io.in.status.henvcfg,
+  )
+
+  private val (menvcfgSTCE, henvcfgSTCE) = (
+    menvcfg(63),
+    henvcfg(63),
+  )
+
   private val csrIsRO = addr(11, 10) === "b11".U
   private val csrIsUnpriv = addr(9, 8) === "b00".U
   private val csrIsHPM = addr >= CSRs.cycle.U && addr <= CSRs.hpmcounter31.U
@@ -102,7 +117,7 @@ class CSRPermitModule extends Module {
 
   private val accessHPM = ren && csrIsHPM
   private val accessHPM_EX_II = accessHPM && (
-    !mcounteren(counterAddr) ||
+    !privState.isModeM && !mcounteren(counterAddr) ||
     privState.isModeHU && scounteren(counterAddr)
   )
   private val accessHPM_EX_VI = accessHPM && mcounteren(counterAddr) && (
@@ -110,11 +125,15 @@ class CSRPermitModule extends Module {
     privState.isModeVU && (!hcounteren(counterAddr) || !scounteren(counterAddr))
   )
 
+  private val rwStimecmp_EX_II = csrAccess && ((privState.isModeHS && !mcounterenTM || !privState.isModeM && !menvcfgSTCE) && addr === CSRs.vstimecmp.U ||
+    ((privState.isModeHS || privState.isModeVS) && !mcounterenTM || !privState.isModeM && !menvcfgSTCE) && addr === CSRs.stimecmp.U)
+  private val rwStimecmp_EX_VI = csrAccess && privState.isModeVS && (mcounterenTM && !hcounterenTM || menvcfgSTCE && !henvcfgSTCE) && addr === CSRs.stimecmp.U
+
   io.out.illegal := csrAccess && csrAccessIllegal || mret && mretIllegal || sret && sretIllegal
 
   // Todo: check correct
-  io.out.EX_II := io.out.illegal && !privState.isVirtual || wfi_EX_II || rwSatp_EX_II || accessHPM_EX_II || rwCustom_EX_II
-  io.out.EX_VI := io.out.illegal &&  privState.isVirtual || wfi_EX_VI || rwSatp_EX_VI || accessHPM_EX_VI
+  io.out.EX_II := io.out.illegal && !privState.isVirtual || wfi_EX_II || rwSatp_EX_II || accessHPM_EX_II || rwStimecmp_EX_II || rwCustom_EX_II
+  io.out.EX_VI := io.out.illegal &&  privState.isVirtual || wfi_EX_VI || rwSatp_EX_VI || accessHPM_EX_VI || rwStimecmp_EX_VI
 
   io.out.hasLegalWen := io.in.csrAccess.wen && !csrAccessIllegal
   io.out.hasLegalMret := mret && !mretIllegal
@@ -157,6 +176,12 @@ class CSRPermitIO extends Bundle {
       // Accessing PMC from **HU level** will trap EX_II, if s[x]=0
       // Accessing PMC from **VU level** will trap EX_VI, if m[x]=1 && h[x]=1 && s[x]=0
       val scounteren = UInt(32.W)
+      // Machine environment configuration register.
+      // Accessing stimecmp or vstimecmp from **Non-M level** will trap EX_II, if menvcfg.STCE=0
+      val menvcfg = UInt(64.W)
+      // Hypervisor environment configuration register.
+      // Accessing vstimecmp from ** V level** will trap EX_VI, if menvcfg.STCE=1 && henvcfg.STCE=0
+      val henvcfg = UInt(64.W)
     }
   })
 
