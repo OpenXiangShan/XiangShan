@@ -528,13 +528,6 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
         case (source, ((((win_int, win_fp), win_vf), win_v0), win_vl)) =>
         !source.readReg || win_int && win_fp && win_vf && win_v0 && win_vl
       }.fold(true.B)(_ && _)
-//      if (fromIQ(i)(j).bits.exuParams.schdType.isInstanceOf[IntScheduler] && (fromIQ(i)(j).bits.exuParams.numRegSrc == 2)) {
-//        val src0VfBlock = s0.bits.common.dataSources(0).readReg && !vfRdArbWinner(i)(j)(0)
-//        val src1VfBlock = s0.bits.common.dataSources(1).readReg && !vfRdArbWinner(i)(j)(1)
-//        val src1IntBlock = s0.bits.common.dataSources(0).readReg && s0.bits.common.dataSources(1).readReg && !intRdArbWinner(i)(j)(1)
-//        val src0IntBlock = (s0.bits.common.dataSources(0).readReg || s0.bits.common.dataSources(1).readReg) && !intRdArbWinner(i)(j)(0)
-//        srcNotBlock := !src0VfBlock && !src1VfBlock && !src1IntBlock && !src0IntBlock
-//      }
       val notBlock = srcNotBlock && intWbNotBlock(i)(j) && fpWbNotBlock(i)(j) && vfWbNotBlock(i)(j) && v0WbNotBlock(i)(j) && vlWbNotBlock(i)(j)
       val s1_flush = s0.bits.common.robIdx.needFlush(Seq(io.flush, RegNextWithEnable(io.flush)))
       val s1_cancel = og1FailedVec2(i)(j)
@@ -550,9 +543,6 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       when (s0.fire && !s1_flush && notBlock && !s1_cancel && !s0_ldCancel && !s0_cancel) {
         s1_valid := s0.valid
         s1_data.fromIssueBundle(s0.bits) // no src data here
-//        if (fromIQ(i)(j).bits.exuParams.schdType.isInstanceOf[IntScheduler] && (fromIQ(i)(j).bits.exuParams.numRegSrc == 2)) {
-//          s1_data.dataSources(1).value := Mux(!s0.bits.common.dataSources(0).readReg && s0.bits.common.dataSources(1).readReg, DataSource.anotherReg, s0.bits.common.dataSources(1).value)
-//        }
         s1_addrOH := s0.bits.addrOH
       }.otherwise {
         s1_valid := false.B
