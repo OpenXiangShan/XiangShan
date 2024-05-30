@@ -150,7 +150,7 @@ case class XSCoreParameters
   FpLogicRegs: Int = 32 + 1 + 1, // 1: I2F, 1: stride
   VecLogicRegs: Int = 32 + 1 + 15, // 15: tmp, 1: vconfig
   V0LogicRegs: Int = 1, // V0
-  VlLogicRegs: Int = 1 + 1, // Vl, VCompress
+  VlLogicRegs: Int = 1, // Vl
   VCONFIG_IDX: Int = 32,
   NRPhyRegs: Int = 192,
   VirtualLoadQueueSize: Int = 72,
