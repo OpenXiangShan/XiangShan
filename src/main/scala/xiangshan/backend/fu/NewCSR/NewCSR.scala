@@ -355,6 +355,9 @@ class NewCSR(implicit val p: Parameters) extends Module
   permitMod.io.in.status.hcounteren := mcounteren.rdata
   permitMod.io.in.status.scounteren := mcounteren.rdata
 
+  permitMod.io.in.status.menvcfg := menvcfg.rdata
+  permitMod.io.in.status.henvcfg := henvcfg.rdata
+
   sstcIRGen.i.time.valid := time.updated
   sstcIRGen.i.time.bits  := time.rdata
   sstcIRGen.i.htimedelta := htimedelta.rdata
@@ -942,8 +945,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.toDecode.virtualInst.hfence     := isModeVS || isModeVU
   io.toDecode.illegalInst.hlsv       := isModeHU && hstatus.regOut.HU
   io.toDecode.virtualInst.hlsv       := isModeVS || isModeVU
-  io.toDecode.illegalInst.fsIsOff    := mstatus.regOut.FS === ContextStatus.Off
-  io.toDecode.illegalInst.vsIsOff    := mstatus.regOut.VS === ContextStatus.Off
+  io.toDecode.illegalInst.fsIsOff    := mstatus.regOut.FS === ContextStatus.Off || (isModeVS || isModeVU) && vsstatus.regOut.FS === ContextStatus.Off
+  io.toDecode.illegalInst.vsIsOff    := mstatus.regOut.VS === ContextStatus.Off || (isModeVS || isModeVU) && vsstatus.regOut.VS === ContextStatus.Off
 
   // Always instantiate basic difftest modules.
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
