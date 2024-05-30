@@ -665,9 +665,9 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   })
   val debug_int_rat     = if (params.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
   val debug_fp_rat      = if (params.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
-  val debug_vec_rat     = if (params.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
-  val debug_v0_rat      = if (params.debugEn) Some(Output(UInt(PhyRegIdxWidth.W))) else None
-  val debug_vl_rat      = if (params.debugEn) Some(Output(UInt(PhyRegIdxWidth.W))) else None
+  val debug_vec_rat     = if (params.debugEn) Some(Vec(31, Output(UInt(PhyRegIdxWidth.W)))) else None
+  val debug_v0_rat      = if (params.debugEn) Some(Vec(1, Output(UInt(PhyRegIdxWidth.W)))) else None
+  val debug_vl_rat      = if (params.debugEn) Some(Vec(1, Output(UInt(PhyRegIdxWidth.W)))) else None
 
   val sqCanAccept = Input(Bool())
   val lqCanAccept = Input(Bool())
