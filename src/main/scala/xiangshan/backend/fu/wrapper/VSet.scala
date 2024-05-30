@@ -29,7 +29,7 @@ class VSetBase(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   protected val vtype: VType = Mux(VSETOpType.isVsetvl(in.ctrl.fuOpType), VType.fromVtypeStruct(in.data.src(1).asTypeOf(new VtypeStruct())), vtypeImm)
 
   vsetModule.io.in.func := in.ctrl.fuOpType
-
+  connect0LatencyCtrlSingal
   io.out.valid := io.in.valid
   io.in.ready := io.out.ready
 }

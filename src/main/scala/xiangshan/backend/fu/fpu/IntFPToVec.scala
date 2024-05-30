@@ -73,7 +73,7 @@ class IntFPToVec(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cf
   vecE16Data  := VecInit(Seq.fill(dataWidth / 16)(Mux(isFpCanonicalNAN(1) & isFp, outNAN(1), scalaData(15, 0))))
   vecE32Data  := VecInit(Seq.fill(dataWidth / 32)(Mux(isFpCanonicalNAN(2) & isFp, outNAN(2), scalaData(31, 0))))
   vecE64Data  := VecInit(Seq.fill(dataWidth / 64)(scalaData(63, 0)))
-
+  connect0LatencyCtrlSingal
   out.res.data := Mux(needDup, Mux1H(Seq(
     (vsew === VSew.e8)  -> vecE8Data.asUInt,
     (vsew === VSew.e16) -> vecE16Data.asUInt,
