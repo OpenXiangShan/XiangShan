@@ -235,7 +235,7 @@ class InterruptFilter extends Module {
     CandidateNoValid -> 0.U,
     (iprioCandidate > 255.U) -> 255.U,
     (Candidate123LowCandidate45 && Candidate5 && !hvictl.IPRIOM.asBool) -> 1.U,
-    (Candidate123HighCandidate45 || (Candidate123LowCandidate45 && Candidate4) || (Candidate123LowCandidate45 && Candidate5 && hvictl.IPRIOM.asBool)) -> iprioCandidate(7, 0),
+    ((Candidate123HighCandidate45 && iprioCandidate <= 255.U) || (Candidate123LowCandidate45 && Candidate4) || (Candidate123LowCandidate45 && Candidate5 && hvictl.IPRIOM.asBool)) -> iprioCandidate(7, 0),
   ))
 
   val mIRVec = Mux(
