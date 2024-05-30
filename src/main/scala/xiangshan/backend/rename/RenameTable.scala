@@ -53,7 +53,7 @@ class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule with 
   val readPortsNum = reg_t match {
     case Reg_I => 2
     case Reg_F => 3
-    case Reg_V => numVecRatPorts // +1 ldest
+    case Reg_V => 3
     case Reg_V0 => 1
     case Reg_Vl => 1
   }
