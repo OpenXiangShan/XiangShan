@@ -396,10 +396,10 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     addr := io.debugVecRat.get
   }
   v0DebugRead.foreach { case (addr, _) =>
-    addr := VecInit(io.debugV0Rat.get)
+    addr := io.debugV0Rat.get
   }
   vlDebugRead.foreach { case (addr, _) =>
-    addr := VecInit(io.debugVlRat.get)
+    addr := io.debugVlRat.get
   }
 
   println(s"[DataPath] " +
@@ -801,7 +801,7 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
   val debugIntRat  = if (params.debugEn) Some(Input(Vec(32, UInt(intSchdParams.pregIdxWidth.W)))) else None
   val debugFpRat   = if (params.debugEn) Some(Input(Vec(32, UInt(fpSchdParams.pregIdxWidth.W)))) else None
   val debugVecRat  = if (params.debugEn) Some(Input(Vec(31, UInt(vfSchdParams.pregIdxWidth.W)))) else None
-  val debugV0Rat   = if (params.debugEn) Some(Input(UInt(log2Up(V0PhyRegs).W))) else None
-  val debugVlRat   = if (params.debugEn) Some(Input(UInt(log2Up(VlPhyRegs).W))) else None
+  val debugV0Rat   = if (params.debugEn) Some(Input(Vec(1, UInt(log2Up(V0PhyRegs).W)))) else None
+  val debugVlRat   = if (params.debugEn) Some(Input(Vec(1, UInt(log2Up(VlPhyRegs).W)))) else None
   val debugVl      = if (params.debugEn) Some(Output(UInt(VlData().dataWidth.W))) else None
 }

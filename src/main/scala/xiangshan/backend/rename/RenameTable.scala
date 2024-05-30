@@ -223,14 +223,14 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     val debug_int_rat     = if (backendParams.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
     val debug_fp_rat      = if (backendParams.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
     val debug_vec_rat     = if (backendParams.debugEn) Some(Vec(31, Output(UInt(PhyRegIdxWidth.W)))) else None
-    val debug_v0_rat      = if (backendParams.debugEn) Some(Output(UInt(PhyRegIdxWidth.W))) else None
-    val debug_vl_rat      = if (backendParams.debugEn) Some(Output(UInt(PhyRegIdxWidth.W))) else None
+    val debug_v0_rat      = if (backendParams.debugEn) Some(Vec(1,Output(UInt(PhyRegIdxWidth.W)))) else None
+    val debug_vl_rat      = if (backendParams.debugEn) Some(Vec(1,Output(UInt(PhyRegIdxWidth.W)))) else None
 
     val diff_int_rat     = if (backendParams.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
     val diff_fp_rat      = if (backendParams.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
     val diff_vec_rat     = if (backendParams.debugEn) Some(Vec(31, Output(UInt(PhyRegIdxWidth.W)))) else None
-    val diff_v0_rat      = if (backendParams.debugEn) Some(Output(UInt(PhyRegIdxWidth.W))) else None
-    val diff_vl_rat      = if (backendParams.debugEn) Some(Output(UInt(PhyRegIdxWidth.W))) else None
+    val diff_v0_rat      = if (backendParams.debugEn) Some(Vec(1,Output(UInt(PhyRegIdxWidth.W)))) else None
+    val diff_vl_rat      = if (backendParams.debugEn) Some(Vec(1,Output(UInt(PhyRegIdxWidth.W)))) else None
   })
 
   val intRat = Module(new RenameTable(Reg_I))

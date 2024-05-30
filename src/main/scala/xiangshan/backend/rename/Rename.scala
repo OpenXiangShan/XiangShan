@@ -77,8 +77,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val debug_int_rat = if (backendParams.debugEn) Some(Vec(32, Input(UInt(PhyRegIdxWidth.W)))) else None
     val debug_fp_rat = if (backendParams.debugEn) Some(Vec(32, Input(UInt(PhyRegIdxWidth.W)))) else None
     val debug_vec_rat = if (backendParams.debugEn) Some(Vec(31, Input(UInt(PhyRegIdxWidth.W)))) else None
-    val debug_v0_rat = if (backendParams.debugEn) Some(Input(UInt(PhyRegIdxWidth.W))) else None
-    val debug_vl_rat = if (backendParams.debugEn) Some(Input(UInt(PhyRegIdxWidth.W))) else None
+    val debug_v0_rat = if (backendParams.debugEn) Some(Vec(1, Input(UInt(PhyRegIdxWidth.W)))) else None
+    val debug_vl_rat = if (backendParams.debugEn) Some(Vec(1, Input(UInt(PhyRegIdxWidth.W)))) else None
     // perf only
     val stallReason = new Bundle {
       val in = Flipped(new StallReasonIO(RenameWidth))
@@ -93,9 +93,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   // create free list and rat
   val intFreeList = Module(new MEFreeList(IntPhyRegs))
   val fpFreeList = Module(new StdFreeList(FpPhyRegs - FpLogicRegs, FpLogicRegs, Reg_F))
-  val vecFreeList = Module(new StdFreeList(VfPhyRegs - VecLogicRegs, VecLogicRegs, Reg_V))
-  val v0FreeList = Module(new StdFreeList(V0PhyRegs - V0LogicRegs, V0LogicRegs, Reg_V0))
-  val vlFreeList = Module(new StdFreeList(VlPhyRegs - VlLogicRegs, VlLogicRegs, Reg_Vl))
+  val vecFreeList = Module(new StdFreeList(VfPhyRegs - VecLogicRegs, VecLogicRegs, Reg_V, 31))
+  val v0FreeList = Module(new StdFreeList(V0PhyRegs - V0LogicRegs, V0LogicRegs, Reg_V0, 1))
+  val vlFreeList = Module(new StdFreeList(VlPhyRegs - VlLogicRegs, VlLogicRegs, Reg_Vl, 1))
 
 
   intFreeList.io.commit    <> io.rabCommits

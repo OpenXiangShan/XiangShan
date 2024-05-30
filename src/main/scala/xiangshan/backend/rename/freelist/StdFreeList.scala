@@ -25,7 +25,7 @@ import utils._
 import utility._
 
 
-class StdFreeList(freeListSize: Int, numLogicRegs: Int, regType: RegType)(implicit p: Parameters) extends BaseFreeList(freeListSize) with HasPerfEvents {
+class StdFreeList(freeListSize: Int, numLogicRegs: Int, regType: RegType, realNumLogicRegs: Int = 32)(implicit p: Parameters) extends BaseFreeList(freeListSize, realNumLogicRegs) with HasPerfEvents {
 
   val freeList = RegInit(VecInit(Seq.tabulate(freeListSize)( i => (i + numLogicRegs).U(PhyRegIdxWidth.W) )))
   val lastTailPtr = RegInit(FreeListPtr(true, 0)) // tailPtr in the last cycle (need to add freeReqReg)

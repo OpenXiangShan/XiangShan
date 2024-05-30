@@ -652,7 +652,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // sync v csr to csr
   // for difftest
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
-    val isDiffWriteVconfigVec = io.diffCommits.get.commitValid.zip(io.diffCommits.get.info).map { case (valid, info) => valid && info.ldest === Vl_IDX.U && info.vecWen }.reverse
+    val isDiffWriteVconfigVec = io.diffCommits.get.commitValid.zip(io.diffCommits.get.info).map { case (valid, info) => valid && info.ldest === Vl_IDX.U && info.vlWen }.reverse
     io.csr.vcsrFlag := RegNext(io.diffCommits.get.isCommit && Cat(isDiffWriteVconfigVec).orR)
   }
   else {
