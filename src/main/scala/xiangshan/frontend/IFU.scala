@@ -337,12 +337,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f1_cut_ptr            = if(HasCExtension)  VecInit((0 until PredictWidth + 1).map(i =>  Cat(0.U(2.W), f1_ftq_req.startAddr(blockOffBits-1, 1)) + i.U ))
                                   else           VecInit((0 until PredictWidth).map(i =>     Cat(0.U(2.W), f1_ftq_req.startAddr(blockOffBits-1, 2)) + i.U ))
 
-  /* Fake ICache only for simulation */
-  val fakeICache = Module(new FakeICache)
-  dontTouch(fakeICache.io)
-  fakeICache.io.req.valid := f1_fire
-  fakeICache.io.req.bits.addr := f1_ftq_req.startAddr
-
   /**
     ******************************************************************************
     * IFU Stage 2
@@ -428,6 +422,10 @@ class NewIFU(implicit p: Parameters) extends XSModule
   ))))
   val f2_perf_info    = io.icachePerfInfo
 
+  dontTouch(f2_jump_range)
+  dontTouch(f2_ftr_range)
+  dontTouch(f2_instr_range)
+
   def cut(cacheline: UInt, cutPtr: Vec[UInt]) : Vec[UInt] ={
     require(HasCExtension)
     // if(HasCExtension){
@@ -449,18 +447,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   val f2_cache_response_data = fromICache.map(_.bits.data)
   val f2_data_2_cacheline = Cat(f2_cache_response_data(0), f2_cache_response_data(0))
-
-  val f2_fakeICache_data = fakeICache.io.resp
-  val f2_fakeICache_cacheline = DataHoldBypass(Cat(f2_fakeICache_data.bits.data1, f2_fakeICache_data.bits.data0), RegNext(f1_fire))
-  val f2_fakeICache_cacheline_valid = DataHoldBypass(f2_fakeICache_data.valid, RegNext(f1_fire))
-  val f2_fakeICache_addr = DataHoldBypass(f2_fakeICache_data.bits.addr, RegNext(f1_fire))
-  dontTouch(f2_fakeICache_cacheline)
-  dontTouch(f2_fakeICache_cacheline_valid)
-  dontTouch(f2_fakeICache_addr)
-
-  when (f2_fakeICache_cacheline_valid && fromICache(0).valid && f2_valid && f2_icache_all_resp_wire) {
-    XSError(f2_data_2_cacheline =/= f2_fakeICache_cacheline, "Fake ICache data not match")
-  }
 
   val f2_cut_data   = cut(f2_data_2_cacheline, f2_cut_ptr)
 
@@ -491,7 +477,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
     ExceptionType.none
   )})
   XSPerfAccumulate("fetch_bubble_icache_not_resp",   f2_valid && !icacheRespAllValid )
-
 
   /**
     ******************************************************************************
@@ -590,6 +575,12 @@ class NewIFU(implicit p: Parameters) extends XSModule
   when(f3_valid && !f3_ftq_req.ftqOffset.valid){
     assert(f3_ftq_req_startAddr + (2*PredictWidth).U >= f3_ftq_req_nextStartAddr, s"More tha ${2*PredictWidth} Bytes fetch is not allowed!")
   }
+
+  /*** TraceReader ***/
+  val traceReader = Module(new TraceReader)
+  dontTouch(traceReader.io)
+  traceReader.io <> DontCare
+  traceReader.io.recv.valid := false.B
 
   /*** MMIO State Machine***/
   val f3_mmio_data          = Reg(Vec(2, UInt(16.W)))
