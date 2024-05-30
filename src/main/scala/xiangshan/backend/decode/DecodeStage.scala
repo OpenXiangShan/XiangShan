@@ -35,9 +35,6 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   // params alias
   private val numVecRegSrc = backendParams.numVecRegSrc
   private val numVecRatPorts = numVecRegSrc
-  private val v0Idx = 0
-  private val vlIdx = 0
-  private val vconfigIdx = VCONFIG_IDX
 
   val io = IO(new Bundle() {
     val redirect = Input(Bool())
@@ -194,10 +191,10 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     io.vecRat(i)(2).addr := io.out(i).bits.lsrc(2) // old_vd
     io.vecRat(i).foreach(_.hold := !io.out(i).ready)
 
-    io.v0Rat(i).addr := Mux(FuType.isVppu(io.out(i).bits.fuType) && (io.out(i).bits.fuOpType === VpermType.vcompress), io.out(i).bits.lsrc(3), v0Idx.U) // v0
+    io.v0Rat(i).addr := V0_IDX.U // v0
     io.v0Rat(i).hold := !io.out(i).ready
 
-    io.vlRat(i).addr := vlIdx.U // vl
+    io.vlRat(i).addr := Vl_IDX.U // vl
     io.vlRat(i).hold := !io.out(i).ready
   }
 
