@@ -741,16 +741,13 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   private val isVppu = FuType.isVppu(decodedInst.fuType)
   private val isVecOPF = FuType.isVecOPF(decodedInst.fuType)
 
-  private val v0Idx = 0
-  private val vconfigIdx = VCONFIG_IDX
-
   // read src1~3 location
   decodedInst.lsrc(0) := inst.RS1
   decodedInst.lsrc(1) := inst.RS2
   // src(2) of fma is fs3, src(2) of vector inst is old vd
   decodedInst.lsrc(2) := Mux(isFMA, inst.FS3, inst.VD)
-  decodedInst.lsrc(3) := v0Idx.U
-  decodedInst.lsrc(4) := vconfigIdx.U
+  decodedInst.lsrc(3) := V0_IDX.U
+  decodedInst.lsrc(4) := Vl_IDX.U
 
   // read dest location
   decodedInst.ldest := inst.RD
