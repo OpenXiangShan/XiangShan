@@ -198,7 +198,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(0).flushPipe := false.B
         csBundle(0).rfWen := true.B
         // uop1 set vl, vsetvl will flushPipe
-        csBundle(1).ldest := VCONFIG_IDX.U
+        csBundle(1).ldest := Vl_IDX.U
         csBundle(1).vecWen := false.B
         csBundle(1).vlWen := true.B
         when(VSETOpType.isVsetvli(latchedInst.fuOpType) && dest === 0.U && src1 === 0.U) {
@@ -209,7 +209,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           csBundle(0).vlWen := false.B
           csBundle(1).fuType := FuType.vsetfwf.U
           csBundle(1).srcType(0) := SrcType.vp
-          csBundle(1).lsrc(0) := VCONFIG_IDX.U
+          csBundle(1).lsrc(0) := Vl_IDX.U
         }.elsewhen(VSETOpType.isVsetvl(latchedInst.fuOpType) && dest === 0.U && src1 === 0.U) {
           // uop0: mv vtype gpr to vector region
           csBundle(0).srcType(0) := SrcType.xp
@@ -228,13 +228,13 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           csBundle(1).fuType := FuType.vsetfwf.U
           // vl
           csBundle(1).srcType(0) := SrcType.vp
-          csBundle(1).lsrc(0) := VCONFIG_IDX.U
+          csBundle(1).lsrc(0) := Vl_IDX.U
           // vtype
           csBundle(1).srcType(1) := SrcType.vp
           csBundle(1).lsrc(1) := VECTOR_TMP_REG_LMUL.U
           csBundle(1).vecWen := false.B
           csBundle(1).vlWen := true.B
-          csBundle(1).ldest := VCONFIG_IDX.U
+          csBundle(1).ldest := Vl_IDX.U
         }.elsewhen(dest === 0.U) {
           // write nothing, uop0 is a nop instruction
           csBundle(0).rfWen := false.B
