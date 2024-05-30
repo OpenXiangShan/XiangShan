@@ -95,50 +95,37 @@ class L2Top()(implicit p: Parameters) extends LazyModule
   val plic_int_node = IntIdentityNode()
 
   println(s"enableCHI: ${enableCHI}")
-  val tl2tl_l2cache = if (enableL2 && !enableCHI) {
-    Some(LazyModule(new TL2TLCoupledL2()(new Config((_, _, _) => {
+  val l2cache = if (enableL2) {
+    val config = new Config((_, _, _) => {
       case L2ParamKey => coreParams.L2CacheParamsOpt.get.copy(
         hartId = p(XSCoreParamsKey).HartId,
         FPGAPlatform = debugOpts.FPGAPlatform
       )
-      case EnableCHI => false
+      case EnableCHI => p(EnableCHI)
       case BankBitsKey => log2Ceil(coreParams.L2NBanks)
       case MaxHartIdBits => p(MaxHartIdBits)
-    }))))
-  } else None
-  val tl2chi_l2cache = if (enableL2 && enableCHI) {
-    Some(LazyModule(new TL2CHICoupledL2()(new Config((_, _, _) => {
-      case L2ParamKey => coreParams.L2CacheParamsOpt.get.copy(
-        hartId = p(XSCoreParamsKey).HartId,
-        FPGAPlatform = debugOpts.FPGAPlatform
-      )
-      case EnableCHI => true
-      // case XSCoreParamsKey => p(XSCoreParamsKey)
-      case BankBitsKey => log2Ceil(coreParams.L2NBanks)
-      case MaxHartIdBits => p(MaxHartIdBits)
-    }))))
+    })
+    if (enableCHI) Some(LazyModule(new TL2CHICoupledL2()(new Config(config))))
+    else Some(LazyModule(new TL2TLCoupledL2()(new Config(config))))
   } else None
   val l2_binder = coreParams.L2CacheParamsOpt.map(_ => BankBinder(coreParams.L2NBanks, 64))
 
   // =========== Connection ============
   // l2 to l2_binder, then to memory_port
-  l2_binder match {
-    case Some(binder) =>
-      if (!enableCHI) {
-        memory_port.get := l2_l3_pmu := TLClientsMerger() := TLXbar() :=* binder :*= tl2tl_l2cache.get.node
+  l2cache match {
+    case Some(l2) =>
+      l2_binder.get :*= l2.node :*= xbar_l2_buffer :*= l1_xbar :=* misc_l2_pmu
+      l2 match {
+        case l2: TL2TLCoupledL2 =>
+          memory_port.get := l2_l3_pmu := TLClientsMerger() := TLXbar() :=* l2_binder.get
+        case l2: TL2CHICoupledL2 =>
+          l2.managerNode := TLXbar() :=* l2_binder.get
+          l2.mmioNode := mmio_port
       }
     case None =>
       memory_port.get := l1_xbar
   }
-
-  tl2chi_l2cache match {
-    case Some(l2) =>
-      l2.managerNode := TLXbar() :=* l2_binder.get :*= l2.node :*= xbar_l2_buffer :*= l1_xbar
-      l2.mmioNode := mmio_port
-    case None =>
-  }
   
-
   mmio_xbar := TLBuffer.chainNode(2) := i_mmio_port
   mmio_xbar := TLBuffer.chainNode(2) := d_mmio_port
   beu.node := TLBuffer.chainNode(1) := mmio_xbar
@@ -166,6 +153,7 @@ class L2Top()(implicit p: Parameters) extends LazyModule
     val chi = if (enableCHI) Some(IO(new PortIO)) else None
     val nodeID = if (enableCHI) Some(IO(Input(UInt(NodeIDWidth.W)))) else None
     val l2_tlb_req = IO(new TlbRequestIO(nRespDups = 2))
+    val l2_hint = IO(ValidIO(new L2ToL1Hint()))
 
     val resetDelayN = Module(new DelayN(UInt(PAddrBits.W), 5))
 
@@ -177,57 +165,38 @@ class L2Top()(implicit p: Parameters) extends LazyModule
     dontTouch(hartId)
     dontTouch(cpu_halt)
 
-    val l2_hint = IO(ValidIO(new L2ToL1Hint())) // TODO: parameterize this
-    if (tl2tl_l2cache.isDefined) {
-      l2_hint := tl2tl_l2cache.get.module.io.l2_hint
-      // debugTopDown <> tl2tl_l2cache.get.module.io.debugTopDown
-      tl2tl_l2cache.get.module.io.debugTopDown.robHeadPaddr := DontCare
-      tl2tl_l2cache.get.module.io.hartId := hartId.fromTile
-      tl2tl_l2cache.get.module.io.debugTopDown.robHeadPaddr := debugTopDown.robHeadPaddr
-      tl2tl_l2cache.get.module.io.debugTopDown.robTrueCommit := debugTopDown.robTrueCommit
-      debugTopDown.l2MissMatch := tl2tl_l2cache.get.module.io.debugTopDown.l2MissMatch
+    if (l2cache.isDefined) {
+      val l2 = l2cache.get.module
+      l2_hint := l2.io.l2_hint
+      l2.io.debugTopDown.robHeadPaddr := DontCare
+      l2.io.hartId := hartId.fromTile
+      l2.io.debugTopDown.robHeadPaddr := debugTopDown.robHeadPaddr
+      l2.io.debugTopDown.robTrueCommit := debugTopDown.robTrueCommit
+      debugTopDown.l2MissMatch := l2.io.debugTopDown.l2MissMatch
 
       /* l2 tlb */
       l2_tlb_req.req.bits := DontCare
-      l2_tlb_req.req.valid := tl2tl_l2cache.get.module.io.l2_tlb_req.req.valid
-      l2_tlb_req.resp.ready := tl2tl_l2cache.get.module.io.l2_tlb_req.resp.ready
-      l2_tlb_req.req.bits.vaddr := tl2tl_l2cache.get.module.io.l2_tlb_req.req.bits.vaddr
-      l2_tlb_req.req.bits.cmd := tl2tl_l2cache.get.module.io.l2_tlb_req.req.bits.cmd
-      l2_tlb_req.req.bits.size := tl2tl_l2cache.get.module.io.l2_tlb_req.req.bits.size
-      l2_tlb_req.req.bits.kill := tl2tl_l2cache.get.module.io.l2_tlb_req.req.bits.kill
-      l2_tlb_req.req.bits.no_translate := tl2tl_l2cache.get.module.io.l2_tlb_req.req.bits.no_translate
-      l2_tlb_req.req_kill := tl2tl_l2cache.get.module.io.l2_tlb_req.req_kill
-      tl2tl_l2cache.get.module.io.l2_tlb_req.resp.valid := l2_tlb_req.resp.valid
-      tl2tl_l2cache.get.module.io.l2_tlb_req.req.ready := l2_tlb_req.req.ready
-      tl2tl_l2cache.get.module.io.l2_tlb_req.resp.bits.paddr.head := l2_tlb_req.resp.bits.paddr.head
-      tl2tl_l2cache.get.module.io.l2_tlb_req.resp.bits.miss := l2_tlb_req.resp.bits.miss
-      tl2tl_l2cache.get.module.io.l2_tlb_req.resp.bits.excp.head <> l2_tlb_req.resp.bits.excp.head
+      l2_tlb_req.req.valid := l2.io.l2_tlb_req.req.valid
+      l2_tlb_req.resp.ready := l2.io.l2_tlb_req.resp.ready
+      l2_tlb_req.req.bits.vaddr := l2.io.l2_tlb_req.req.bits.vaddr
+      l2_tlb_req.req.bits.cmd := l2.io.l2_tlb_req.req.bits.cmd
+      l2_tlb_req.req.bits.size := l2.io.l2_tlb_req.req.bits.size
+      l2_tlb_req.req.bits.kill := l2.io.l2_tlb_req.req.bits.kill
+      l2_tlb_req.req.bits.no_translate := l2.io.l2_tlb_req.req.bits.no_translate
+      l2_tlb_req.req_kill := l2.io.l2_tlb_req.req_kill
+      l2.io.l2_tlb_req.resp.valid := l2_tlb_req.resp.valid
+      l2.io.l2_tlb_req.req.ready := l2_tlb_req.req.ready
+      l2.io.l2_tlb_req.resp.bits.paddr.head := l2_tlb_req.resp.bits.paddr.head
+      l2.io.l2_tlb_req.resp.bits.miss := l2_tlb_req.resp.bits.miss
+      l2.io.l2_tlb_req.resp.bits.excp.head <> l2_tlb_req.resp.bits.excp.head
 
-    } else if (tl2chi_l2cache.isDefined) {
-      l2_hint := tl2chi_l2cache.get.module.io.l2_hint
-      // debugTopDown <> tl2chi_l2cache.get.module.io.debugTopDown
-      tl2chi_l2cache.get.module.io.debugTopDown.robHeadPaddr := DontCare
-      tl2chi_l2cache.get.module.io.hartId := hartId.fromTile
-      tl2chi_l2cache.get.module.io.debugTopDown.robHeadPaddr := debugTopDown.robHeadPaddr
-      tl2chi_l2cache.get.module.io.debugTopDown.robTrueCommit := debugTopDown.robTrueCommit
-      tl2chi_l2cache.get.module.io.nodeID := nodeID.get
-      debugTopDown.l2MissMatch := tl2chi_l2cache.get.module.io.debugTopDown.l2MissMatch
-
-      /* l2 tlb */
-      l2_tlb_req.req.bits := DontCare
-      l2_tlb_req.req.valid := tl2chi_l2cache.get.module.io.l2_tlb_req.req.valid
-      l2_tlb_req.resp.ready := tl2chi_l2cache.get.module.io.l2_tlb_req.resp.ready
-      l2_tlb_req.req.bits.vaddr := tl2chi_l2cache.get.module.io.l2_tlb_req.req.bits.vaddr
-      l2_tlb_req.req.bits.cmd := tl2chi_l2cache.get.module.io.l2_tlb_req.req.bits.cmd
-      l2_tlb_req.req.bits.size := tl2chi_l2cache.get.module.io.l2_tlb_req.req.bits.size
-      l2_tlb_req.req.bits.kill := tl2chi_l2cache.get.module.io.l2_tlb_req.req.bits.kill
-      l2_tlb_req.req.bits.no_translate := tl2chi_l2cache.get.module.io.l2_tlb_req.req.bits.no_translate
-      l2_tlb_req.req_kill := tl2chi_l2cache.get.module.io.l2_tlb_req.req_kill
-      tl2chi_l2cache.get.module.io.l2_tlb_req.resp.valid := l2_tlb_req.resp.valid
-      tl2chi_l2cache.get.module.io.l2_tlb_req.req.ready := l2_tlb_req.req.ready
-      tl2chi_l2cache.get.module.io.l2_tlb_req.resp.bits.paddr.head := l2_tlb_req.resp.bits.paddr.head
-      tl2chi_l2cache.get.module.io.l2_tlb_req.resp.bits.miss := l2_tlb_req.resp.bits.miss
-      tl2chi_l2cache.get.module.io.l2_tlb_req.resp.bits.excp.head <> l2_tlb_req.resp.bits.excp.head
+      l2cache.get match {
+        case l2cache: TL2CHICoupledL2 =>
+          val l2 = l2cache.module
+          l2.io_nodeID := nodeID.get
+          chi.get <> l2.io_chi
+        case l2cache: TL2TLCoupledL2 =>
+      }
     } else {
       l2_hint := 0.U.asTypeOf(l2_hint)
       debugTopDown <> DontCare
@@ -237,8 +206,6 @@ class L2Top()(implicit p: Parameters) extends LazyModule
       l2_tlb_req.req_kill := DontCare
       l2_tlb_req.resp.ready := true.B
     }
-
-    chi.foreach(_ <> tl2chi_l2cache.get.module.io.chi)
   }
 
   lazy val module = new L2TopImp(this)
