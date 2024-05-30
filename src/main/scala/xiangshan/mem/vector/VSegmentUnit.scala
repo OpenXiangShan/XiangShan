@@ -104,6 +104,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
 
   val maxSegIdx         = instMicroOp.vl - 1.U
   val maxNfields        = instMicroOp.uop.vpu.nf
+  val latchVaddr        = RegInit(0.U(VAddrBits.W))
 
   XSError((segmentIdx > maxSegIdx) && instMicroOpValid, s"segmentIdx > vl, something error!\n")
   XSError((fieldIdx > maxNfields) &&  instMicroOpValid, s"fieldIdx > nfields, something error!\n")
@@ -170,7 +171,11 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     stateNext := Mux(segmentActive, s_wait_tlb_resp, Mux(FuType.isVLoad(instMicroOp.uop.fuType), s_latch_and_merge_data, s_send_data))
 
   }.elsewhen(state === s_wait_tlb_resp){
-    stateNext := Mux(!io.dtlb.resp.bits.miss && io.dtlb.resp.fire, s_pm, s_tlb_req)
+    stateNext := Mux(io.dtlb.resp.fire,
+                      Mux(!io.dtlb.resp.bits.miss,
+                          s_pm,
+                          s_tlb_req),
+                      s_wait_tlb_resp)
 
   }.elsewhen(state === s_pm){
     /* if is vStore, send data to sbuffer, so don't need query dcache */
@@ -276,6 +281,11 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
                                             indexStride,
                                             segmentOffset)
   val vaddr                           = baseVaddr + (fieldIdx << alignedType).asUInt + realSegmentOffset
+
+  //latch vaddr
+  when(state === s_tlb_req){
+    latchVaddr := vaddr
+  }
   /**
    * tlb req and tlb resq
    */
@@ -349,7 +359,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   /**
    * merge data for load
    */
-  val cacheData = LookupTree(vaddr(3,0), List(
+  val cacheData = LookupTree(latchVaddr(3,0), List(
     "b0000".U -> io.rdcache.resp.bits.data_delayed(63,    0),
     "b0001".U -> io.rdcache.resp.bits.data_delayed(63,    8),
     "b0010".U -> io.rdcache.resp.bits.data_delayed(63,   16),
@@ -387,7 +397,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     alignedType = alignedType
   )
   val flowData  = genVWdata(splitData, alignedType) // TODO: connect vstd, pass vector data
-  val wmask     = genVWmask(vaddr, alignedType(1, 0)) & Fill(VLENB, segmentActive)
+  val wmask     = genVWmask(latchVaddr, alignedType(1, 0)) & Fill(VLENB, segmentActive)
 
   /**
    * rdcache req, write request don't need to query dcache, because we write element to sbuffer
@@ -395,7 +405,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.rdcache.req                    := DontCare
   io.rdcache.req.valid              := state === s_cache_req && FuType.isVLoad(fuType)
   io.rdcache.req.bits.cmd           := MemoryOpConstants.M_XRD
-  io.rdcache.req.bits.vaddr         := vaddr
+  io.rdcache.req.bits.vaddr         := latchVaddr
   io.rdcache.req.bits.mask          := mask
   io.rdcache.req.bits.data          := flowData
   io.rdcache.pf_source              := LOAD_SOURCE.U
@@ -427,7 +437,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.sbuffer.bits.vecValid         := state === s_send_data && segmentActive
   io.sbuffer.bits.mask             := wmask
   io.sbuffer.bits.data             := flowData
-  io.sbuffer.bits.vaddr            := vaddr
+  io.sbuffer.bits.vaddr            := latchVaddr
   io.sbuffer.bits.cmd              := MemoryOpConstants.M_XWR
   io.sbuffer.bits.id               := DontCare
   io.sbuffer.bits.addr             := instMicroOp.paddr

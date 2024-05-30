@@ -739,11 +739,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // dtlb
     loadUnits(i).io.tlb <> dtlb_reqs.take(LduCnt)(i)
     if(i == 0 ){ // port 0 assign to vsegmentUnit
-      dtlb_reqs.take(LduCnt)(i).req.valid := loadUnits(i).io.tlb.req.valid || vSegmentUnit.io.dtlb.req.valid
+      val vsegmentDtlbReqValid = vSegmentUnit.io.dtlb.req.valid // segment tlb resquest need to delay 1 cycle
+      dtlb_reqs.take(LduCnt)(i).req.valid := loadUnits(i).io.tlb.req.valid || RegNext(vsegmentDtlbReqValid)
       vSegmentUnit.io.dtlb.req.ready      := dtlb_reqs.take(LduCnt)(i).req.ready
       dtlb_reqs.take(LduCnt)(i).req.bits  := Mux1H(Seq(
-        vSegmentUnit.io.dtlb.req.valid -> vSegmentUnit.io.dtlb.req.bits,
-        loadUnits(i).io.tlb.req.valid -> loadUnits(i).io.tlb.req.bits
+        RegNext(vsegmentDtlbReqValid)     -> RegEnable(vSegmentUnit.io.dtlb.req.bits, vsegmentDtlbReqValid),
+        loadUnits(i).io.tlb.req.valid     -> loadUnits(i).io.tlb.req.bits
       ))
     }
     // pmp
