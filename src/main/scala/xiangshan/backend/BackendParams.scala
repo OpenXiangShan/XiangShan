@@ -178,6 +178,16 @@ case class BackendParams(
     datapath.WbArbiterParams(fpWbCfgs, vfPregParams, this)
   }
 
+  def getV0WbArbiterParams: WbArbiterParams = {
+    val v0WbCfgs: Seq[V0WB] = allSchdParams.flatMap(_.getWbCfgs.flatten.flatten.filter(x => x.writeV0)).map(_.asInstanceOf[V0WB])
+    datapath.WbArbiterParams(v0WbCfgs, v0PregParams, this)
+  }
+
+  def getVlWbArbiterParams: WbArbiterParams = {
+    val vlWbCfgs: Seq[VlWB] = allSchdParams.flatMap(_.getWbCfgs.flatten.flatten.filter(x => x.writeVl)).map(_.asInstanceOf[VlWB])
+    datapath.WbArbiterParams(vlWbCfgs, vlPregParams, this)
+  }
+
   /**
     * Get regfile read port params
     *

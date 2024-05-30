@@ -13,12 +13,16 @@ object WbConfig {
     def writeInt = dataCfg == IntData()
     def writeFp = dataCfg == FpData()
     def writeVec = dataCfg == VecData()
+    def writeV0 = dataCfg == V0Data()
+    def writeVl = dataCfg == VlData()
 
     override def toString: String = {
       var res = this match {
         case _: IntWB => "INT"
         case _: FpWB => "FP"
         case _: VfWB => "VF"
+        case _: V0WB => "V0"
+        case _: VlWB => "VL"
         case _: NoWB => "NO"
         case _ => "??"
       }
