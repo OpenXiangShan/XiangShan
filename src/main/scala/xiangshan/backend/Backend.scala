@@ -238,6 +238,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   intScheduler.io.intWriteBack := wbDataPath.io.toIntPreg
   intScheduler.io.fpWriteBack := 0.U.asTypeOf(intScheduler.io.fpWriteBack)
   intScheduler.io.vfWriteBack := 0.U.asTypeOf(intScheduler.io.vfWriteBack)
+  intScheduler.io.v0WriteBack := 0.U.asTypeOf(intScheduler.io.v0WriteBack)
+  intScheduler.io.vlWriteBack := 0.U.asTypeOf(intScheduler.io.vlWriteBack)
   intScheduler.io.fromDataPath.resp := dataPath.io.toIntIQ
   intScheduler.io.fromSchedulers.wakeupVec.foreach { wakeup => wakeup := iqWakeUpMappedBundle(wakeup.bits.exuIdx) }
   intScheduler.io.fromDataPath.og0Cancel := og0CancelOH
@@ -254,6 +256,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   fpScheduler.io.intWriteBack := 0.U.asTypeOf(fpScheduler.io.intWriteBack)
   fpScheduler.io.fpWriteBack := wbDataPath.io.toFpPreg
   fpScheduler.io.vfWriteBack := 0.U.asTypeOf(fpScheduler.io.vfWriteBack)
+  fpScheduler.io.v0WriteBack := 0.U.asTypeOf(fpScheduler.io.v0WriteBack)
+  fpScheduler.io.vlWriteBack := 0.U.asTypeOf(fpScheduler.io.vlWriteBack)
   fpScheduler.io.fromDataPath.resp := dataPath.io.toFpIQ
   fpScheduler.io.fromSchedulers.wakeupVec.foreach { wakeup => wakeup := iqWakeUpMappedBundle(wakeup.bits.exuIdx) }
   fpScheduler.io.fromDataPath.og0Cancel := og0CancelOH
@@ -270,6 +274,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   memScheduler.io.intWriteBack := wbDataPath.io.toIntPreg
   memScheduler.io.fpWriteBack := wbDataPath.io.toFpPreg
   memScheduler.io.vfWriteBack := wbDataPath.io.toVfPreg
+  memScheduler.io.v0WriteBack := wbDataPath.io.toV0Preg
+  memScheduler.io.vlWriteBack := wbDataPath.io.toVlPreg
   memScheduler.io.fromMem.get.scommit := io.mem.sqDeq
   memScheduler.io.fromMem.get.lcommit := io.mem.lqDeq
   memScheduler.io.fromMem.get.wakeup := io.mem.wakeup
@@ -305,6 +311,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   vfScheduler.io.intWriteBack := 0.U.asTypeOf(vfScheduler.io.intWriteBack)
   vfScheduler.io.fpWriteBack := 0.U.asTypeOf(vfScheduler.io.fpWriteBack)
   vfScheduler.io.vfWriteBack := wbDataPath.io.toVfPreg
+  vfScheduler.io.v0WriteBack := wbDataPath.io.toV0Preg
+  vfScheduler.io.vlWriteBack := wbDataPath.io.toVlPreg
   vfScheduler.io.fromDataPath.resp := dataPath.io.toVfIQ
   vfScheduler.io.fromSchedulers.wakeupVec.foreach { wakeup => wakeup := iqWakeUpMappedBundle(wakeup.bits.exuIdx) }
   vfScheduler.io.fromDataPath.og0Cancel := og0CancelOH
@@ -330,6 +338,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   dataPath.io.fromIntWb := wbDataPath.io.toIntPreg
   dataPath.io.fromFpWb := wbDataPath.io.toFpPreg
   dataPath.io.fromVfWb := wbDataPath.io.toVfPreg
+  dataPath.io.fromV0Wb := wbDataPath.io.toV0Preg
+  dataPath.io.fromVlWb := wbDataPath.io.toVlPreg
   dataPath.io.debugIntRat    .foreach(_ := ctrlBlock.io.debug_int_rat.get)
   dataPath.io.debugFpRat     .foreach(_ := ctrlBlock.io.debug_fp_rat.get)
   dataPath.io.debugVecRat    .foreach(_ := ctrlBlock.io.debug_vec_rat.get)
