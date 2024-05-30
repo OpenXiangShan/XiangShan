@@ -358,9 +358,10 @@ class NewCSR(implicit val p: Parameters) extends Module
   permitMod.io.in.status.menvcfg := menvcfg.rdata
   permitMod.io.in.status.henvcfg := henvcfg.rdata
 
-  sstcIRGen.i.time.valid := time.updated
-  sstcIRGen.i.time.bits  := time.rdata
-  sstcIRGen.i.htimedelta := htimedelta.rdata
+  sstcIRGen.i.stime.valid := time.updated
+  sstcIRGen.i.stime.bits  := time.stime
+  sstcIRGen.i.vstime.valid := time.updated
+  sstcIRGen.i.vstime.bits  := time.vstime
   sstcIRGen.i.stimecmp := stimecmp.rdata
   sstcIRGen.i.vstimecmp := vstimecmp.rdata
   sstcIRGen.i.menvcfgSTCE := menvcfg.regOut.STCE.asBool
@@ -516,6 +517,9 @@ class NewCSR(implicit val p: Parameters) extends Module
         m.mHPM.time  := io.fromTop.clintTime
         // instret from minstret
         m.mHPM.instret := minstret.rdata
+        // VS-Mode or VU-Mode
+        m.v := privState.isVirtual
+        m.htimedelta := htimedelta.rdata
       case _ =>
     }
     mod match {

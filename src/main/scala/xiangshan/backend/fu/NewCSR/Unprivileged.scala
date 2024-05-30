@@ -115,12 +115,19 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     val time = RO(63, 0)
   }) with HasMHPMSink {
     val updated = IO(Output(Bool()))
+    val stime  = IO(Output(UInt(64.W)))
+    val vstime = IO(Output(UInt(64.W)))
+
+    val stimeTmp  = mHPM.time.bits
+    val vstimeTmp = mHPM.time.bits + htimedelta
 
     when (mHPM.time.valid) {
-      reg.time := mHPM.time.bits
+      reg.time := Mux(v, vstimeTmp, stimeTmp)
     }
 
     updated := GatedValidRegNext(mHPM.time.valid)
+    stime  := stimeTmp
+    vstime := vstimeTmp
   })
     .setAddr(CSRs.time)
 
@@ -207,4 +214,6 @@ trait HasMHPMSink { self: CSRModule[_] =>
     val time    = ValidIO(UInt(64.W))
     val instret = UInt(64.W)
   }))
+  val v = IO(Input(Bool()))
+  val htimedelta = IO(Input(UInt(64.W)))
 }
