@@ -397,11 +397,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   val stDataReadyVecReg = Wire(Vec(StoreQueueSize, Bool()))
   (0 until StoreQueueSize).map(i => {
-<<<<<<< HEAD
-    io.stDataReadyVec(i) := RegNext(allocated(i) && (mmio(i) || datavalid(i) || (isVec(i) && vecMbCommit(i))))
-=======
-    stDataReadyVecReg(i) := (allocated(i) && (mmio(i) || datavalid(i)))
->>>>>>> 835dd7a56 (LoadQueueData & RAW: modify 'DelayN' to 'DelayNWithValid')
+    stDataReadyVecReg(i) := allocated(i) && (mmio(i) || datavalid(i) || (isVec(i) && vecMbCommit(i)))
   })
   io.stDataReadyVec := GatedValidRegNext(stDataReadyVecReg)
 
