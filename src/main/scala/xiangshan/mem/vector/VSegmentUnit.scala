@@ -41,7 +41,6 @@ class VSegmentBundle(implicit p: Parameters) extends VLSUBundle
   val uop              = new DynInst
   val paddr            = UInt(PAddrBits.W)
   val mask             = UInt(VLEN.W)
-  val valid            = Bool()
   val alignedType      = UInt(alignTypeBits.W)
   val vl               = UInt(elemIdxBits.W)
   val vlmaxInVd        = UInt(elemIdxBits.W)
@@ -84,6 +83,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
 
   // buffer uop
   val instMicroOp       = Reg(new VSegmentBundle)
+  val instMicroOpValid  = RegInit(false.B)
   val data              = Reg(Vec(maxSize, UInt(VLEN.W)))
   val uopq              = Reg(Vec(maxSize, new VSegmentUop))
   val stride            = Reg(Vec(maxSize, UInt(VLEN.W)))
@@ -104,8 +104,8 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   val maxSegIdx         = instMicroOp.vl - 1.U
   val maxNfields        = instMicroOp.uop.vpu.nf
 
-  XSError(segmentIdx > maxSegIdx, s"segmentIdx > vl, something error!\n")
-  XSError(fieldIdx > maxNfields, s"fieldIdx > nfields, something error!\n")
+  XSError((segmentIdx > maxSegIdx) && instMicroOpValid, s"segmentIdx > vl, something error!\n")
+  XSError((fieldIdx > maxNfields) &&  instMicroOpValid, s"fieldIdx > nfields, something error!\n")
 
   // MicroOp
   val baseVaddr                       = instMicroOp.vaddr
@@ -234,10 +234,10 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   val vstart                           = instMicroOp.uop.vpu.vstart
   val srcMask                          = GenFlowMask(Mux(vm, Fill(VLEN, 1.U(1.W)), io.in.bits.src_mask), vstart, vl, true)
   // first uop enqueue, we need to latch microOp of segment instruction
-  when(io.in.fire && !instMicroOp.valid){
+  when(io.in.fire && !instMicroOpValid){
     val vlmaxInVd                      = GenVLMAX(Mux(lmul.asSInt > 0.S, 0.U, lmul), Mux(isIndexed(instType), sew(1, 0), eew(1, 0))) // element number in a vd
     instMicroOp.vaddr                 := io.in.bits.src_rs1(VAddrBits - 1, 0)
-    instMicroOp.valid                 := true.B // if is first uop
+    instMicroOpValid                  := true.B // if is first uop
     instMicroOp.alignedType           := Mux(isIndexed(instType), sew(1, 0), eew(1, 0))
     instMicroOp.uop                   := io.in.bits.uop
     instMicroOp.mask                  := srcMask
@@ -436,7 +436,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   // update splitPtr
   when(state === s_latch_and_merge_data || (state === s_send_data && (fieldActiveWirteFinish || !segmentActive))){
     splitPtr := splitPtrNext
-  }.elsewhen(io.in.fire && !instMicroOp.valid){
+  }.elsewhen(io.in.fire && !instMicroOpValid){
     splitPtr := deqPtr // initial splitPtr
   }
 
@@ -445,7 +445,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   stridePtr       := deqPtr + strideOffset
 
   // update fieldIdx
-  when(io.in.fire && !instMicroOp.valid){ // init
+  when(io.in.fire && !instMicroOpValid){ // init
     fieldIdx := 0.U
   }.elsewhen(state === s_latch_and_merge_data && segmentActive ||
             (state === s_send_data && fieldActiveWirteFinish)){ // only if segment is active
@@ -456,7 +456,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     fieldIdx := 0.U
   }
   //update segmentIdx
-  when(io.in.fire && !instMicroOp.valid){
+  when(io.in.fire && !instMicroOpValid){
     segmentIdx := 0.U
   }.elsewhen(fieldIdx === maxNfields && (state === s_latch_and_merge_data || (state === s_send_data && fieldActiveWirteFinish)) &&
              segmentIdx =/= maxSegIdx){ // next segment, only if segment is active
@@ -489,7 +489,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   val maskUsed      = maskDataVec(vdIdxInField)
 
   when(stateNext === s_idle){
-    instMicroOp.valid := false.B
+    instMicroOpValid := false.B
   }
   io.uopwriteback.valid               := (state === s_finish) && distanceBetween(enqPtr, deqPtr) =/= 0.U
   io.uopwriteback.bits.uop            := instMicroOp.uop
