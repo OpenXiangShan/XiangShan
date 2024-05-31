@@ -67,7 +67,10 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   //  Mask        : data mask
   //  Datavalid   : data valid
   //
+
   val allocated = RegInit(VecInit(List.fill(LoadQueueRAWSize)(false.B))) // The control signals need to explicitly indicate the initial value
+
+
   val uop = Reg(Vec(LoadQueueRAWSize, new DynInst))
   val paddrModule = Module(new LqPAddrModule(
     gen = UInt(PAddrBits.W),
@@ -191,8 +194,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   }
 
   // if need replay deallocate entry
-  val lastCanAccept = RegNext(acceptedVec)
-  val lastAllocIndex = RegNext(enqIndexVec)
+  val lastCanAccept = GatedValidRegNext(acceptedVec)
+  val lastAllocIndex = GatedRegNext(enqIndexVec)
 
   for ((revoke, w) <- io.query.map(_.revoke).zipWithIndex) {
     val revokeValid = revoke && lastCanAccept(w)
@@ -295,14 +298,14 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     // select logic
     if (valid.length <= SelectGroupSize) {
       val (selValid, selBits) = selectPartialOldest(valid, bits)
-      val selValidNext = RegNext(selValid(0))
-      val selBitsNext = RegNext(selBits(0))
+      val selValidNext = GatedValidRegNext(selValid(0))
+      val selBitsNext = RegEnable(selBits(0), selValid(0))
       (Seq(selValidNext && !selBitsNext.uop.robIdx.needFlush(io.redirect) && !selBitsNext.uop.robIdx.needFlush(RegNext(io.redirect))), Seq(selBitsNext))
     } else {
       val select = (0 until numSelectGroups).map(g => {
         val (selValid, selBits) = selectPartialOldest(selectValidGroups(g), selectBitsGroups(g))
         val selValidNext = RegNext(selValid(0))
-        val selBitsNext = RegNext(selBits(0))
+        val selBitsNext = RegEnable(selBits(0), selValid(0))
         (selValidNext && !selBitsNext.uop.robIdx.needFlush(io.redirect) && !selBitsNext.uop.robIdx.needFlush(RegNext(io.redirect)), selBitsNext)
       })
       selectOldest(select.map(_._1), select.map(_._2))
@@ -316,7 +319,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     maskModule.io.violationMdata(i) := RegNext(storeIn(i).bits.mask)
 
     val addrMaskMatch = paddrModule.io.violationMmask(i).asUInt & maskModule.io.violationMmask(i).asUInt
-    val entryNeedCheck = RegNext(VecInit((0 until LoadQueueRAWSize).map(j => {
+    val entryNeedCheck = GatedValidRegNext(VecInit((0 until LoadQueueRAWSize).map(j => {
       allocated(j) && isAfter(uop(j).robIdx, storeIn(i).bits.uop.robIdx) && datavalid(j) && !uop(j).robIdx.needFlush(io.redirect)
     })))
     val lqViolationSelVec = VecInit((0 until LoadQueueRAWSize).map(j => {
@@ -355,8 +358,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     val detectedRollback = detectRollback(w)
     rollbackLqWb(w).valid := detectedRollback._1 && DelayN(storeIn(w).valid && !storeIn(w).bits.miss, TotalSelectCycles)
     rollbackLqWb(w).bits  := detectedRollback._2
-    stFtqIdx(w) := DelayN(storeIn(w).bits.uop.ftqPtr, TotalSelectCycles)
-    stFtqOffset(w) := DelayN(storeIn(w).bits.uop.ftqOffset, TotalSelectCycles)
+    stFtqIdx(w) := DelayNWithValid(storeIn(w).bits.uop.ftqPtr, storeIn(w).valid, TotalSelectCycles)._2
+    stFtqOffset(w) := DelayNWithValid(storeIn(w).bits.uop.ftqOffset, storeIn(w).valid, TotalSelectCycles)._2
   }
 
   // select rollback (part2), generate rollback request, then fire rollback request
