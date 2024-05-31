@@ -441,32 +441,29 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   s1_intPregRData.foreach(_.foreach(_.foreach(_ := 0.U)))
   s1_intPregRData.zip(rfrPortConfigs).foreach { case (iqRdata, iqCfg) =>
       iqRdata.zip(iqCfg).foreach { case (iuRdata, iuCfg) =>
-        val realIuCfg = iuCfg.map(x => x.filter(_.isInstanceOf[IntRD])).flatten
-        iuRdata.zip(realIuCfg)
-          .filter { case (_, rfrPortConfig) => rfrPortConfig.isInstanceOf[IntRD] }
-          .foreach { case (sink, cfg) => sink := intRfRdata(cfg.port) }
+        iuRdata.zip(iuCfg)
+          .filter { case (_, cfg) => cfg.count(_.isInstanceOf[IntRD]) > 0 }
+          .foreach { case (sink, cfg) => sink := intRfRdata(cfg.find(_.isInstanceOf[IntRD]).get.port) }
       }
   }
 
   println(s"[DataPath] s1_fpPregRData.flatten.flatten.size: ${s1_fpPregRData.flatten.flatten.size}, fpRfRdata.size: ${fpRfRdata.size}")
   s1_fpPregRData.foreach(_.foreach(_.foreach(_ := 0.U)))
   s1_fpPregRData.zip(rfrPortConfigs).foreach { case (iqRdata, iqCfg) =>
-    iqRdata.zip(iqCfg).foreach { case (iuRdata, iuCfg) =>
-      val realIuCfg = iuCfg.map(x => x.filter(_.isInstanceOf[FpRD])).flatten
-      iuRdata.zip(realIuCfg)
-        .filter { case (_, rfrPortConfig) => rfrPortConfig.isInstanceOf[FpRD] }
-        .foreach { case (sink, cfg) => sink := fpRfRdata(cfg.port) }
-    }
+      iqRdata.zip(iqCfg).foreach { case (iuRdata, iuCfg) =>
+        iuRdata.zip(iuCfg)
+          .filter { case (_, cfg) => cfg.count(_.isInstanceOf[FpRD]) > 0 }
+          .foreach { case (sink, cfg) => sink := fpRfRdata(cfg.find(_.isInstanceOf[FpRD]).get.port) }
+      }
   }
 
   println(s"[DataPath] s1_vfPregRData.flatten.flatten.size: ${s1_vfPregRData.flatten.flatten.size}, vfRfRdata.size: ${vfRfRdata.size}")
   s1_vfPregRData.foreach(_.foreach(_.foreach(_ := 0.U)))
   s1_vfPregRData.zip(rfrPortConfigs).foreach{ case(iqRdata, iqCfg) =>
       iqRdata.zip(iqCfg).foreach{ case(iuRdata, iuCfg) =>
-        val realIuCfg = iuCfg.map(x => x.filter(_.isInstanceOf[VfRD])).flatten
-        iuRdata.zip(realIuCfg)
-          .filter { case (_, rfrPortConfig) => rfrPortConfig.isInstanceOf[VfRD] }
-          .foreach { case (sink, cfg) => sink := vfRfRdata(cfg.port) }
+        iuRdata.zip(iuCfg)
+          .filter { case (_, cfg) => cfg.count(_.isInstanceOf[VfRD]) > 0 }
+          .foreach { case (sink, cfg) => sink := vfRfRdata(cfg.find(_.isInstanceOf[VfRD]).get.port) }
       }
   }
 
@@ -474,10 +471,9 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   s1_v0PregRData.foreach(_.foreach(_.foreach(_ := 0.U)))
   s1_v0PregRData.zip(rfrPortConfigs).foreach{ case(iqRdata, iqCfg) =>
       iqRdata.zip(iqCfg).foreach{ case(iuRdata, iuCfg) =>
-        val realIuCfg = iuCfg.map(x => x.filter(_.isInstanceOf[V0RD])).flatten
-        iuRdata.zip(realIuCfg)
-          .filter { case (_, rfrPortConfig) => rfrPortConfig.isInstanceOf[V0RD] }
-          .foreach { case (sink, cfg) => sink := v0RfRdata(cfg.port) }
+        iuRdata.zip(iuCfg)
+          .filter { case (_, cfg) => cfg.count(_.isInstanceOf[V0RD]) > 0 }
+          .foreach { case (sink, cfg) => sink := v0RfRdata(cfg.find(_.isInstanceOf[V0RD]).get.port) }
       }
   }
 
@@ -485,10 +481,9 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   s1_vlPregRData.foreach(_.foreach(_.foreach(_ := 0.U)))
   s1_vlPregRData.zip(rfrPortConfigs).foreach{ case(iqRdata, iqCfg) =>
       iqRdata.zip(iqCfg).foreach{ case(iuRdata, iuCfg) =>
-        val realIuCfg = iuCfg.map(x => x.filter(_.isInstanceOf[VlRD])).flatten
-        iuRdata.zip(realIuCfg)
-          .filter { case (_, rfrPortConfig) => rfrPortConfig.isInstanceOf[VlRD] }
-          .foreach { case (sink, cfg) => sink := vlRfRdata(cfg.port) }
+        iuRdata.zip(iuCfg)
+          .filter { case (_, cfg) => cfg.count(_.isInstanceOf[VlRD]) > 0 }
+          .foreach { case (sink, cfg) => sink := vlRfRdata(cfg.find(_.isInstanceOf[VlRD]).get.port) }
       }
   }
 
