@@ -165,7 +165,11 @@ class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule with 
 
   io.old_pdest := old_pdest
   io.need_free := need_free
-  io.debug_rdata.foreach(_ := arch_table.take(rdataNums))
+  io.debug_rdata.foreach{ x => reg_t match {
+      case Reg_V => x := arch_table.drop(1).take(rdataNums)
+      case _ => x := arch_table.take(rdataNums)
+    }
+  }
   io.debug_v0.foreach(_ := arch_table(0))
   io.debug_vl.foreach(_ := arch_table(0))
   if (env.EnableDifftest || env.AlwaysBasicDiff) {
@@ -179,7 +183,11 @@ class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule with 
     }
     difftest_table := difftest_table_next
 
-    io.diff_rdata.foreach(_ := difftest_table.take(rdataNums))
+    io.diff_rdata.foreach{ x => reg_t match {
+        case Reg_V => x := difftest_table.drop(1).take(rdataNums)
+        case _ => x := difftest_table.take(rdataNums)
+      }
+    }
     io.diff_v0.foreach(_ := difftest_table(0))
     io.diff_vl.foreach(_ := difftest_table(0))
   }
