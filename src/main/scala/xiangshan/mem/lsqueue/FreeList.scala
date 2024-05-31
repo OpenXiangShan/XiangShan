@@ -86,8 +86,8 @@ class FreeList(size: Int, allocWidth: Int, freeWidth: Int, enablePreAlloc: Boole
     freeIndexOHVec.asUInt
   }))
 
-  val freeReq = RegNext(VecInit(remFreeSelMaskVec.map(_.asUInt.orR)))
-  val freeSlotOH = RegNext(remFreeSelIndexOHVec)
+  val freeReq = GatedRegNext(VecInit(remFreeSelMaskVec.map(_.asUInt.orR)))
+  val freeSlotOH = GatedRegNext(remFreeSelIndexOHVec)
   val doFree = freeReq.asUInt.orR
 
   for (i <- 0 until freeWidth) {

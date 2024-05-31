@@ -93,8 +93,10 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   // PAddr write needs 2 cycles, release signal should delay 1 cycle so that
   // load enqueue can catch release.
   val release1Cycle = io.release
-  val release2Cycle = RegNext(io.release)
-  val release2Cycle_dup_lsu = RegNext(io.release)
+  // val release2Cycle = RegNext(io.release)
+  // val release2Cycle_dup_lsu = RegNext(io.release)
+  val release2Cycle = RegEnable(io.release, io.release.valid)
+  val release2Cycle_dup_lsu = RegEnable(io.release, io.release.valid)
 
   // LoadQueueRAR enqueue condition:
   // There are still not completed load instructions before the current load instruction.
@@ -129,7 +131,6 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
       XSError(allocated(enqIndex), p"LoadQueueRAR: You can not write an valid entry! check: ldu $w, robIdx $debug_robIdx")
 
       freeList.io.doAllocate(w) := true.B
-
       //  Allocate new entry
       allocated(enqIndex) := true.B
 
@@ -176,8 +177,8 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   }
 
   // if need replay revoke entry
-  val lastCanAccept = RegNext(acceptedVec)
-  val lastAllocIndex = RegNext(enqIndexVec)
+  val lastCanAccept = GatedRegNext(acceptedVec)
+  val lastAllocIndex = GatedRegNext(enqIndexVec)
 
   for ((revoke, w) <- io.query.map(_.revoke).zipWithIndex) {
     val revokeValid = revoke && lastCanAccept(w)
@@ -197,7 +198,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   // 2. release is set.
   // 3. Younger than current load instruction.
   val ldLdViolation = Wire(Vec(LoadPipelineWidth, Bool()))
-  val allocatedUInt = RegNext(allocated.asUInt)
+  //val allocatedUInt = RegNext(allocated.asUInt)
   for ((query, w) <- io.query.zipWithIndex) {
     ldLdViolation(w) := false.B
     paddrModule.io.releaseViolationMdata(w) := query.req.bits.paddr
@@ -205,12 +206,14 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     query.resp.valid := RegNext(query.req.valid)
     // Generate real violation mask
     val robIdxMask = VecInit(uop.map(_.robIdx).map(isAfter(_, query.req.bits.uop.robIdx)))
-    val matchMask = (0 until LoadQueueRARSize).map(i => {
-                      RegNext(allocated(i) &
-                      paddrModule.io.releaseViolationMmask(w)(i) &
-                      robIdxMask(i) &&
-                      released(i))
-                    })
+    val matchMaskReg = Wire(Vec(LoadQueueRARSize, Bool()))
+    for(i <- 0 until LoadQueueRARSize) {
+      matchMaskReg(i) := (allocated(i) &
+                         paddrModule.io.releaseViolationMmask(w)(i) &
+                         robIdxMask(i) &&
+                         released(i))
+      }
+    val matchMask = GatedValidRegNext(matchMaskReg)
     //  Load-to-Load violation check result
     val ldLdViolationMask = VecInit(matchMask)
     ldLdViolationMask.suggestName("ldLdViolationMask_" + w)

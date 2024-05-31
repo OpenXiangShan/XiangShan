@@ -58,8 +58,8 @@ class SQAddrModule(dataWidth: Int, numEntries: Int, numRead: Int, numWrite: Int,
 
   // read ports
   for (i <- 0 until numRead) {
-    io.rdata(i) := data(RegNext(io.raddr(i)))
-    io.rlineflag(i) := lineflag(RegNext(io.raddr(i)))
+    io.rdata(i) := data(GatedRegNext(io.raddr(i)))
+    io.rlineflag(i) := lineflag(GatedRegNext(io.raddr(i)))
   }
 
   // below is the write ports (with priorities)
@@ -145,9 +145,14 @@ class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
   //   }
   // })
   (0 until numWrite).map(i => {
+     val s0_wenVec = Wire(Vec(StoreQueueNWriteBanks, Bool())) 
+    for(bank <- 0 until StoreQueueNWriteBanks) {
+      s0_wenVec(bank) := io.data.wen(i) && get_bank(io.data.waddr(i)) === bank.U
+    }
+   val s1_wenVec = GatedValidRegNext(s0_wenVec)
     (0 until StoreQueueNWriteBanks).map(bank => {
-      val s0_wen = io.data.wen(i) && get_bank(io.data.waddr(i)) === bank.U
-      val s1_wen = RegNext(s0_wen)
+      val s0_wen = s0_wenVec(bank)
+      val s1_wen = s1_wenVec(bank)
       val s1_wdata = RegEnable(io.data.wdata(i), s0_wen)
       val s1_waddr = RegEnable(get_bank_index(io.data.waddr(i)), s0_wen)
       val numRegsPerBank = StoreQueueSize / StoreQueueNWriteBanks
@@ -169,9 +174,17 @@ class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
   //   }
   // })
   (0 until numWrite).map(i => {
+    val s0_wenVec = Wire(Vec(StoreQueueNWriteBanks, Bool())) 
+    for(bank <- 0 until StoreQueueNWriteBanks) {
+      s0_wenVec(bank) := io.mask.wen(i) && get_bank(io.mask.waddr(i)) === bank.U
+    }
+    val s1_wenVec = GatedValidRegNext(s0_wenVec)
+
     (0 until StoreQueueNWriteBanks).map(bank => {
-      val s0_wen = io.mask.wen(i) && get_bank(io.mask.waddr(i)) === bank.U
-      val s1_wen = RegNext(s0_wen)
+      // val s0_wen = io.mask.wen(i) && get_bank(io.mask.waddr(i)) === bank.U
+      // val s1_wen = RegNext(s0_wen)
+      val s0_wen = s0_wenVec(bank)
+      val s1_wen = s1_wenVec(bank)
       val s1_wdata = RegEnable(io.mask.wdata(i), s0_wen)
       val s1_waddr = RegEnable(get_bank_index(io.mask.waddr(i)), s0_wen)
       val numRegsPerBank = StoreQueueSize / StoreQueueNWriteBanks
@@ -189,7 +202,7 @@ class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
 
   // destorequeue read data
   (0 until numRead).map(i => {
-      io.rdata(i) := data(RegNext(io.raddr(i)))
+      io.rdata(i) := data(GatedRegNext(io.raddr(i)))
   })
 
   // DataModuleTemplate should not be used when there're any write conflicts
@@ -230,12 +243,13 @@ class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
         res
       })
     }
-
+    val needCheck0Vec = GatedRegNext(io.needForward(i)(0))
+    val needCheck1Vec = GatedRegNext(io.needForward(i)(1))
     for (j <- 0 until numEntries) {
       val needCheck0 = io.needForward(i)(0)(j)
       val needCheck1 = io.needForward(i)(1)(j)
-      val needCheck0Reg = RegNext(needCheck0)
-      val needCheck1Reg = RegNext(needCheck1)
+      val needCheck0Reg = needCheck0Vec(j)
+      val needCheck1Reg = needCheck1Vec(j)
 
       matchResultVec(j).validFast := needCheck0 && data(j).valid
       matchResultVec(j).valid := needCheck0Reg && data(j).valid
