@@ -608,7 +608,7 @@ class L1CacheErrorInfo(implicit p: Parameters) extends XSBundle {
 
   def toL1BusErrorUnitInfo(): L1BusErrorUnitInfo = {
     val beu_info = Wire(new L1BusErrorUnitInfo)
-    beu_info.ecc_error.valid := report_to_beu
+    beu_info.ecc_error.valid := valid && report_to_beu
     beu_info.ecc_error.bits := paddr
     beu_info
   }
