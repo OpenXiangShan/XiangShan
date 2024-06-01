@@ -22,7 +22,7 @@ import $file.`rocket-chip`.hardfloat.build
 import $file.huancun.common
 import $file.coupledL2.common
 
-val defaultScalaVersion = "2.13.14"
+val defaultScalaVersion = "2.13.10"
 
 def defaultVersions(chiselVersion: String) = chiselVersion match {
   case "chisel" => Map(
