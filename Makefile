@@ -138,7 +138,7 @@ help:
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
 	$(TIME_CMD) mill -i xiangshan[$(CHISEL_VERSION)].runMain $(FPGATOP)   \
-		-td $(@D) --config $(CONFIG) $(FPGA_MEM_ARGS)                    \
+		--target-dir $(@D) --config $(CONFIG) $(FPGA_MEM_ARGS)        \
 		--num-cores $(NUM_CORES) $(RELEASE_ARGS)
 ifeq ($(MFC),1)
 	$(SPLIT_VERILOG) $(RTL_DIR) $(TOP).v
@@ -160,7 +160,7 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	@echo -e "\n[mill] Generating Verilog files..." > $(TIMELOG)
 	@date -R | tee -a $(TIMELOG)
 	$(TIME_CMD) mill -i xiangshan[$(CHISEL_VERSION)].test.runMain $(SIMTOP)    \
-		-td $(@D) --config $(CONFIG) $(SIM_MEM_ARGS)                          \
+		--target-dir $(@D) --config $(CONFIG) $(SIM_MEM_ARGS)              \
 		--num-cores $(NUM_CORES) $(SIM_ARGS) --full-stacktrace
 ifeq ($(MFC),1)
 	$(SPLIT_VERILOG) $(RTL_DIR) $(SIM_TOP).v
