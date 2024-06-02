@@ -74,11 +74,11 @@ class NewCSR(implicit val p: Parameters) extends Module
   with Unprivileged
   with CSRAIA
   with HasExternalInterruptBundle
-  with SupervisorMachineAliasConnect
   with CSREvents
   with DebugLevel
   with CSRCustom
   with CSRPMP
+  with IpIeAliasConnect
 {
 
   import CSRConfig._
@@ -393,26 +393,11 @@ class NewCSR(implicit val p: Parameters) extends Module
     mod match {
       case m: HypervisorBundle =>
         m.hstatus := hstatus.regOut
-        m.hvip := hvip.regOut
-        m.hideleg := hideleg.regOut
-        m.hedeleg := hedeleg.regOut
-        m.hgeip := hgeip.regOut
-        m.hgeie := hgeie.regOut
-        m.hip := hip.regOut
-        m.hie := hie.regOut
       case _ =>
     }
     mod match {
       case m: VirtualSupervisorBundle =>
         m.v := V.asUInt.asBool
-      case _ =>
-    }
-    mod match {
-      case m: HasMachineInterruptBundle =>
-        m.mvien := mvien.regOut
-        m.mvip := mvip.regOut
-        m.mip := mip.regOut
-        m.mie := mie.regOut
       case _ =>
     }
     mod match {
@@ -532,6 +517,27 @@ class NewCSR(implicit val p: Parameters) extends Module
         m.menvcfg := menvcfg.regOut
         m.privState := privState
         m.accessStimecmp := (ren || wen) && (addr === CSRs.stimecmp.U || addr === CSRs.vstimecmp.U)
+      case _ =>
+    }
+    mod match {
+      case m: HasIpIeBundle =>
+        m.mideleg := mideleg.regOut
+        m.mip := mip.regOut
+        m.mie := mie.regOut
+        m.mvip := mvip.regOut
+        m.mvien := mvien.regOut
+        m.hideleg := hideleg.regOut
+        m.hip := hip.regOut
+        m.hie := hie.regOut
+        m.hvien := hvien.regOut
+        m.hvip := hvip.regOut
+        m.sip := sip.regOut
+        m.sie := sie.regOut
+        m.vsip := vsip.regOut
+        m.vsie := vsie.regOut
+        m.hgeip := hgeip.regOut
+        m.hgeie := hgeie.regOut
+        m.hstatusVGEIN := hstatus.regOut.VGEIN
       case _ =>
     }
   }
@@ -1044,10 +1050,23 @@ class NewCSR(implicit val p: Parameters) extends Module
   }
 }
 
-trait SupervisorMachineAliasConnect { self: NewCSR with MachineLevel with SupervisorLevel =>
-  mip.fromMvip := mvip.toMip
-  mip.fromSip := sip.toMip
-  mie.fromSie := sie.toMie
+trait IpIeAliasConnect {
+  self: NewCSR with MachineLevel with SupervisorLevel with VirtualSupervisorLevel with HypervisorLevel =>
+
+  mip.fromMvip  := mvip.toMip
+  mip.fromSip   := sip.toMip
+  mip.fromVSip  := vsip.toMip
+  mvip.fromMip  := mip.toMvip
+  mvip.fromSip  := sip.toMvip
+  mvip.fromVSip := vsip.toMvip
+  hvip.fromMip  := mip.toHvip
+  hvip.fromHip  := hip.toHvip
+  hvip.fromVSip := vsip.toHvip
+
+  mie.fromHie  := hie.toMie
+  mie.fromSie  := sie.toMie
+  mie.fromVSie := vsie.toMie
+  sie.fromVSie := vsie.toSie
 }
 
 object NewCSRMain extends App {

@@ -2,7 +2,7 @@ package xiangshan.backend.fu.NewCSR
 
 import chisel3._
 import chisel3.experimental.SourceInfo
-import chisel3.util.Cat
+import chisel3.util.{Cat, Fill}
 import chisel3.experimental.BundleLiterals._
 
 import scala.language.experimental.macros
@@ -90,5 +90,68 @@ abstract class CSRBundle extends Bundle {
       }
     }
     ret
+  }
+
+  def & (that: CSRBundle): UInt = {
+    this.asUInt & that.asUInt
+  }
+
+  def & (that: UInt): UInt = {
+    require(this.asUInt.getWidth == that.getWidth,
+      s"The width between left $this(${this.getWidth}) and right $that(${that.getWidth}) should be equal.")
+    this.asUInt & that
+  }
+
+  def | (that: CSRBundle): UInt = {
+    this.asUInt | that.asUInt
+  }
+
+  def | (that: UInt): UInt = {
+    require(this.getWidth == that.getWidth)
+    this.asUInt | that
+  }
+
+  def unary_~ : UInt = {
+    (~this.asUInt).asUInt
+  }
+
+  def apply(num: Int) : CSREnumType = {
+    this.getFields.find(x => x.lsb == num && x.msb == num).get
+  }
+
+  def apply(str: String) : CSREnumType = {
+    elements(str).asInstanceOf[CSREnumType]
+  }
+}
+
+object CSRBundleImplicitCast {
+  class UIntField(val value: UInt) {
+    def &[T <: CSRBundle] (field: T): UInt = {
+      this.value & field.asUInt
+    }
+
+    def |[T <: CSRBundle] (field: T): UInt = {
+      this.value | field.asUInt
+    }
+
+    def &>(that: Bool): UInt = {
+      require(value.widthKnown, "The width of the left operand should be known when using >& operator")
+      this.value & Fill(value.getWidth, that)
+    }
+
+    def |>(that: Bool): UInt = {
+      require(value.widthKnown, "The width of the left operand should be known when using >| operator")
+      this.value | Fill(value.getWidth, that)
+    }
+  }
+
+  implicit def UIntToUIntField(uint: UInt): UIntField = new UIntField(uint)
+}
+
+object ChiselRecordForField {
+  implicit class AddRecordSpecifyFields[T <: Record](val x: T) {
+    def specifyField(elemFns: (T => Unit)*): Unit = {
+      elemFns.foreach(_.apply(x))
+    }
   }
 }
