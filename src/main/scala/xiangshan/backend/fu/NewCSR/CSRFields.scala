@@ -226,7 +226,9 @@ class CSREnumType(
   }
 
   def := (that: UInt): Unit = {
-    this := this.factory(that)
+    suppressEnumCastWarning {
+      this := this.factory(that)
+    }
   }
 
   def dumpName = {
