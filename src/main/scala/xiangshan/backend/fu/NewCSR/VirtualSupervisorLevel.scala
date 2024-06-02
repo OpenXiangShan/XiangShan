@@ -13,8 +13,10 @@ import xiangshan.backend.fu.NewCSR.CSRDefines.{
   VirtMode,
   _
 }
-import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast.CSREnumTypeToUInt
 import xiangshan.backend.fu.NewCSR.CSREvents.{SretEventSinkBundle, TrapEntryVSEventSinkBundle}
+import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast._
+import xiangshan.backend.fu.NewCSR.CSRBundleImplicitCast._
+import xiangshan.backend.fu.NewCSR.ChiselRecordForField._
 
 import scala.collection.immutable.SeqMap
 
@@ -27,22 +29,44 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
   )
     .setAddr(0x200)
 
-  val vsie = Module(new CSRModule("VSie", new VSie) with HypervisorBundle {
-    val toHie = IO(new VSieToHie)
-    // read alias of hie is here, write alias will be in hie
-    regOut.SEIE := Mux(hideleg.VSEI.asUInt === 0.U, 0.U, hie.VSEIE.asUInt)
-    regOut.STIE := Mux(hideleg.VSTI.asUInt === 0.U, 0.U, hie.VSTIE.asUInt)
-    regOut.SSIE := Mux(hideleg.VSSI.asUInt === 0.U, 0.U, hie.VSSIE.asUInt)
+  val vsie = Module(new CSRModule("VSie", new VSieBundle)
+    with HypervisorBundle
+    with HasIpIeBundle
+  {
+    val toMie = IO(new VSieToMie)
+    val toSie = IO(new VSieToSie)
 
-    toHie.SEIE.valid := wen && hideleg.VSEI.asUInt.asBool
-    toHie.STIE.valid := wen && hideleg.VSTI.asUInt.asBool
-    toHie.SSIE.valid := wen && hideleg.VSSI.asUInt.asBool
-    toHie.SEIE.bits := wdata.SEIE
-    toHie.STIE.bits := wdata.STIE
-    toHie.SSIE.bits := wdata.SSIE
+    val mieIsAlias =  hideleg &  mideleg
+    val sieIsAlias =  hideleg & ~mideleg & mvien
+    val usingReg   = ~hideleg &            hvien
+
+    regOut :=
+      (mieIsAlias & mie) |
+      (sieIsAlias & sie) |
+      (usingReg   & reg)
+
+    bundle.getFields.map(_.lsb).foreach { num =>
+      val wtMie = toMie.getByNum(num)
+      val wtSie = toSie.getByNum(num)
+      val r = reg(num)
+
+      wtMie.specifyField(
+        _.valid := mieIsAlias(num) && wtMie.bits.isRW.B && wen,
+        _.bits  := mieIsAlias(num) && wtMie.bits.isRW.B && wen &< wdata(num),
+      )
+
+      wtSie.specifyField(
+        _.valid := sieIsAlias(num) && wtSie.bits.isRW.B && wen,
+        _.bits  := sieIsAlias(num) && wtSie.bits.isRW.B && wen &< wdata(num),
+      )
+
+      when (wen && usingReg(num) && r.isRW.B) {
+        r := wdata(num)
+      }.otherwise {
+        r := r
+      }
+    }
   }).setAddr(0x204)
-
-  hie.fromVSie := vsie.toHie
 
   val vstvec = Module(new CSRModule("VStvec", new XtvecBundle))
     .setAddr(0x205)
@@ -72,25 +96,37 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
   )
     .setAddr(0x243)
 
-  val vsip = Module(new CSRModule("VSip", new VSip) with HypervisorBundle {
-    val toHip = IO(new VSipToHip)
-    // read alias of hip is here, write alias will be in hvip
-    // hip.VSEIP is read-only zero when hideleg.VSEI=0, alias if hip.VSEIP when hideleg.VSEI=1
-    regOut.SEIP := Mux(hideleg.VSEI.asUInt === 0.U, 0.U, hip.VSEIP.asUInt)
-    // hip.VSTIP is read-only zero when hideleg.VSTI=0, alias if hip.VSTIP when hideleg.VSTI=1
-    regOut.STIP := Mux(hideleg.VSTI.asUInt === 0.U, 0.U, hip.VSTIP.asUInt)
-    // hip.VSSIP is read-only zero when hideleg.VSSI=0, alias (writable) of the same bit in hvip, when hideleg.VSSI=1
-    regOut.SSIP := Mux(hideleg.VSSI.asUInt === 0.U, 0.U, hip.VSSIP.asUInt)
+  val vsip = Module(new CSRModule("VSip", new VSipBundle)
+    with HypervisorBundle
+    with HasIpIeBundle
+  {
+    val toMip  = IO(new VSipToMip).connectZeroNonRW
+    val toMvip = IO(new VSipToMvip).connectZeroNonRW
+    val toHvip = IO(new VSipToHvip).connectZeroNonRW
 
-    toHip.SEIP.valid := wen && hideleg.VSEI.asUInt.asBool
-    toHip.STIP.valid := wen && hideleg.VSTI.asUInt.asBool
-    toHip.SSIP.valid := wen && hideleg.VSSI.asUInt.asBool
-    toHip.SEIP.bits := wdata.SEIP
-    toHip.STIP.bits := wdata.STIP
-    toHip.SSIP.bits := wdata.SSIP
+    val originIP = mideleg & hideleg & mip | (~mideleg & hideleg & mvien & mvip) | (~hideleg & hvien & hvip)
+    val shiftedIP = Cat(originIP(63, InterruptNO.COI), 0.U(1.W), originIP(InterruptNO.SGEI, InterruptNO.SSI))
+
+    regOut := shiftedIP
+    regOut.getM.foreach(_ := 0.U)
+    regOut.getHS.foreach(_ := 0.U)
+    regOut.SGEIP := 0.U
+
+    toHvip.VSSIP.valid := wen && hideleg.VSSI
+    toHvip.VSSIP.bits  := wdata.SSIP
+
+    wdata.getLocal lazyZip
+      (toMip.getLocal lazyZip toMvip.getLocal lazyZip toHvip.getLocal) lazyZip
+      (mideleg.getLocal lazyZip hideleg.getLocal lazyZip mvien.getLocal) foreach {
+        case (wLCIP, (toMipLCIP, toMvipLCIP, toHvipLCIP), (midelegBit, hidelegBit, mvienBit)) =>
+          toMipLCIP .valid := wen &&  midelegBit &&  hidelegBit
+          toMvipLCIP.valid := wen && !midelegBit &&  hidelegBit &&  mvienBit
+          toHvipLCIP.valid := wen &&                !hidelegBit &&  mvienBit
+          toMipLCIP .bits := wLCIP
+          toMvipLCIP.bits := wLCIP
+          toHvipLCIP.bits := wLCIP
+    }
   }).setAddr(0x244)
-
-  hip.fromVSip := vsip.toHip
 
   val vstimecmp = Module(new CSRModule("VStimecmp", new CSRBundle {
     val vstimecmp = RW(63, 0).withReset(bitPatToUInt(BitPat.Y(64)))
@@ -162,44 +198,31 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
   val vsMapS: SeqMap[Int, Int] = SeqMap.from(sMapVS.map(x => (x._2 -> x._1)))
 }
 
-class VSip extends InterruptPendingBundle {
-  this.getM.foreach(_.setRO())
-  this.getVS.foreach(_.setRO())
-  this.getSOC.foreach(_.setRO())
-  this.SGEIP.setRO()
-  // 13.2.12. Virtual Supervisor Interrupt Registers (vsip and vsie)
-  // When bit 10 of hideleg is zero, vsip.SEIP is read-only zeros.
-  // Else, vsip.SEIP is alias of hip.VSEIP
-  this.SEIP
-  // When bit 6 of hideleg is zero, vsip.STIP is read-only zeros.
-  // Else, vsip.STIP is alias of hip.VSTIP
-  this.STIP
-  // When bit 2 of hideleg is zero, vsip.SSIP is read-only zeros.
-  // Else, vsip.SSIP is alias of hip.VSSIP
-  this.SEIP
+class VSipBundle extends InterruptPendingBundle {
+  // All pending bits in vsip are aliases of mip/mvip/hvip or read-only 0
 }
 
-class VSie extends InterruptEnableBundle {
-  this.getM.foreach(_.setRO())
-  this.getVS.foreach(_.setRO())
-  this.getSOC.foreach(_.setRO())
-  this.SGEIE.setRO()
-  // 13.2.12. Virtual Supervisor Interrupt Registers (vsip and vsie)
-  // When bit 10 of hideleg is zero, vsip.SEIE is read-only zeros.
-  // Else, vsip.SEIE is alias of hip.VSEIE
-  this.SSIE
-  // When bit 6 of hideleg is zero, vsip.STIE is read-only zeros.
-  // Else, vsip.STIE is alias of hip.VSTIE
-  this.STIE
-  // When bit 2 of hideleg is zero, vsip.SSIE is read-only zeros.
-  // Else, vsip.SSIE is alias of hip.VSSIE
-  this.SEIE
+class VSieBundle extends InterruptEnableBundle {
+  this.getLocal.foreach(_.setRW())
 }
 
-class VSieToHie extends Bundle {
-  val SSIE: ValidIO[CSREnumType] = ValidIO(RW(0))
-  val STIE: ValidIO[CSREnumType] = ValidIO(RW(0))
-  val SEIE: ValidIO[CSREnumType] = ValidIO(RW(0))
+class VSipToMvip extends IpValidBundle {
+  this.getLocal.foreach(_.bits.setRW())
+}
+
+class VSipToHvip extends IpValidBundle {
+  this.VSSIP.bits.setRW()
+  this.getLocal.foreach(_.bits.setRW())
+}
+
+class VSieToMie extends IeValidBundle {
+  this.getVS.foreach(_.bits.setRW())
+  this.getLocal.foreach(_.bits.setRW())
+}
+
+class VSieToSie extends IeValidBundle {
+  this.getVS.foreach(_.bits.setRW())
+  this.getLocal.foreach(_.bits.setRW())
 }
 
 class VSipToHip extends Bundle {

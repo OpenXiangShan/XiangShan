@@ -2,7 +2,7 @@ package xiangshan.backend.fu.NewCSR
 
 import chisel3._
 import chisel3.util.BitPat.bitPatToUInt
-import chisel3.util.{BitPat, Cat, ValidIO}
+import chisel3.util.{BitPat, Cat, Mux1H, MuxCase, ValidIO}
 import utility.SignExt
 import xiangshan.backend.fu.NewCSR.CSRBundles._
 import xiangshan.backend.fu.NewCSR.CSRDefines._
@@ -10,34 +10,47 @@ import xiangshan.backend.fu.NewCSR.CSRFunc._
 import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRROField => RO, CSRRWField => RW, CSRWARLField => WARL, CSRWLRLField => WLRL, _}
 import xiangshan.backend.fu.NewCSR.CSRConfig._
 import xiangshan.backend.fu.NewCSR.CSREvents.TrapEntryHSEventSinkBundle
+import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast._
+import xiangshan.backend.fu.NewCSR.CSRBundleImplicitCast._
+import xiangshan.backend.fu.NewCSR.ChiselRecordForField._
 
 import scala.collection.immutable.SeqMap
 
 trait SupervisorLevel { self: NewCSR with MachineLevel =>
-  val sie = Module(new CSRModule("Sie", new SieBundle) with HasMachineInterruptBundle with HasMachineDelegBundle{
-    val toMie = IO(new SieToMie)
-    // Sie is alias of mie.
-    // There are no regs in CSR sie.
-    regOut := mie.asUInt
-    // Ref: 7.1.3. Supervisor Interrupt Registers (sip and sie)
-    // The sip and sie registers are subsets of the mip and mie registers. Reading any
-    // implemented field, or writing any writable field, of sip/sie effects a read or write of the
-    // homonymous field of mip/mie.
-    // Ref: 3.1.9. Machine Interrupt Registers (mip and mie)
-    // Restricted views of the mip and mie registers appear as the sip and sie registers for supervisor level. If
-    // an interrupt is delegated to S-mode by setting a bit in the mideleg register, it becomes visible in the
-    // sip register and is maskable using the sie register. Otherwise, the corresponding bits in sip and sie
-    // are **read-only zero**.
-    regOut.SSIE := Mux(mideleg.SSI.asBool, mie.SSIE.asUInt, 0.U)
-    regOut.STIE := Mux(mideleg.STI.asBool, mie.STIE.asUInt, 0.U)
-    regOut.SEIE := Mux(mideleg.SEI.asBool, mie.SEIE.asUInt, 0.U)
+  val sie = Module(new CSRModule("Sie", new SieBundle)
+    with HasIpIeBundle
+  {
+    val toMie    = IO(new SieToMie)
+    val fromVSie = IO(Flipped(new VSieToSie))
 
-    toMie.SSIE.valid := wen && mideleg.SSI.asBool
-    toMie.STIE.valid := wen && mideleg.STI.asBool
-    toMie.SEIE.valid := wen && mideleg.SEI.asBool
-    toMie.SSIE.bits := wdata.SSIE
-    toMie.STIE.bits := wdata.STIE
-    toMie.SEIE.bits := wdata.SEIE
+    // Sie is alias of mie when mideleg=1.
+    // Otherwise, sie has seperate writable registers
+    // There are no regs in CSR sie.
+    val mieIsAlias = mideleg
+    val usingReg   = ~mideleg & mvien
+    regOut := (mieIsAlias & mie) | (usingReg & reg)
+
+    bundle.getFields.map(_.lsb).foreach { num =>
+      val wtMie  = toMie.getByNum(num)
+      val vsieWt = fromVSie.getByNum(num)
+
+      wtMie.specifyField(
+        _.valid := wen && mieIsAlias(num) && wtMie.bits.isRW.B,
+        _.bits  := wen && mieIsAlias(num) && wtMie.bits.isRW.B &< wdata(num),
+      )
+
+      when (
+        wen && usingReg(num) && reg(num).isRW.B ||
+        vsieWt.valid && usingReg(num) && vsieWt.bits.isRW.B
+      ) {
+        reg(num) := Mux1H(Seq(
+          wen          -> wdata(num),
+          vsieWt.valid -> vsieWt.bits,
+        ))
+      }.otherwise {
+        reg(num) := reg(num)
+      }
+    }
   })
     .setAddr(0x104)
 
@@ -64,8 +77,11 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
   val stval = Module(new CSRModule("Stval") with TrapEntryHSEventSinkBundle)
     .setAddr(0x143)
 
-  val sip = Module(new CSRModule("Sip", new SipBundle) with HasMachineInterruptBundle with HasMachineDelegBundle {
-    val toMip = IO(new SipToMip)
+  val sip = Module(new CSRModule("Sip", new SipBundle)
+    with HasIpIeBundle
+  {
+    val toMip  = IO(new SipToMip)
+    val toMvip = IO(new SipToMvip)
 
     // Ref: 7.1.3. Supervisor Interrupt Registers (sip and sie)
     // The sip and sie registers are subsets of the mip and mie registers. Reading any
@@ -77,11 +93,27 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
     // an interrupt is delegated to S-mode by setting a bit in the mideleg register, it becomes visible in the
     // sip register and is maskable using the sie register. Otherwise, the corresponding bits in sip and sie
     // are **read-only zero**.
+    val mipIsAlias  = mideleg
+    val mvipIsAlias = ~mideleg & mvien
 
-    regOut := mideleg.asUInt & mip.asUInt
+    dontTouch(mvipIsAlias)
 
-    toMip.SSIP.valid := wen && mideleg.SSI.asBool
-    toMip.SSIP.bits := wdata.SSIP
+    regOut := mipIsAlias & mip | (mvipIsAlias & mvip)
+
+    bundle.getFields.map(_.lsb).foreach { num =>
+      val wtMip  = toMip.getByNum(num)
+      val wtMvip = toMvip.getByNum(num)
+
+      wtMip.specifyField(
+        _.valid := wen && mipIsAlias(num) && wtMip.bits.isRW.B,
+        _.bits  := wen && mipIsAlias(num) && wtMip.bits.isRW.B &< wdata(num),
+      )
+
+      wtMvip.specifyField(
+        _.valid := wen && mvipIsAlias(num) && wtMvip.bits.isRW.B,
+        _.bits  := wen && mvipIsAlias(num) && wtMvip.bits.isRW.B &< wdata(num),
+      )
+    }
   })
     .setAddr(0x144)
 
@@ -143,20 +175,13 @@ class SstatusBundle extends CSRBundle {
 }
 
 class SieBundle extends InterruptEnableBundle {
-  this.getALL.foreach(_.setRO().withReset(0.U))
-  this.SSIE.setRW().withReset(0.U)
-  this.STIE.setRW().withReset(0.U)
-  this.SEIE.setRW().withReset(0.U)
-  // Todo: LCOFIE
+  this.getHS.foreach(_.setRW().withReset(0.U))
+  this.STIE.setRO()
+  this.getLocal.foreach(_.setRW().withReset(0.U))
 }
 
 class SipBundle extends InterruptPendingBundle {
-  this.getALL.foreach(_.setRO().withReset(0.U))
-  // If implemented, SEIP is read-only in sip, and is set and cleared by the execution environment, typically through a platform-specific interrupt controller
-  // If implemented, STIP is read-only in sip, and is set and cleared by the execution environment.
-  // If implemented, SSIP is writable in sip and may also be set to 1 by a platform-specific interrupt controller.
-  this.SSIP.setRW().withReset(0.U)
-  // Todo: LCOFIE
+  // All pending bits in sip are aliases of mip or read-only 0
 }
 
 class SatpBundle extends CSRBundle {
@@ -170,12 +195,17 @@ class SatpBundle extends CSRBundle {
 
 class SEnvCfg extends EnvCfg
 
-class SieToMie extends Bundle {
-  val SSIE = ValidIO(RW(0))
-  val STIE = ValidIO(RW(0))
-  val SEIE = ValidIO(RW(0))
+class SipToMip extends IpValidBundle {
+  this.SSIP.bits.setRW()
+  this.LCOFIP.bits.setRW()
 }
 
-class SipToMip extends Bundle {
-  val SSIP = ValidIO(RW(0))
+class SipToMvip extends IpValidBundle {
+  this.SSIP.bits.setRW()
+  this.getLocal.foreach(_.bits.setRW())
+}
+
+class SieToMie extends IeValidBundle {
+  this.getHS.foreach(_.bits.setRW())
+  this.getLocal.foreach(_.bits.setRW())
 }

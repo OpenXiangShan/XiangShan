@@ -1,8 +1,10 @@
 package xiangshan.backend.fu.NewCSR
 
 import chisel3._
-
+import chisel3.util.Fill
 import xiangshan.backend.fu.NewCSR.CSRFunc._
+
+import scala.language.implicitConversions
 
 abstract class CSRRWType {
   val wfn: CSRWfnType
@@ -141,6 +143,8 @@ class CSREnumType(
 
   def isRO = this.rwType.isRO
 
+  def isRW = this.rwType.isRW
+
   def isWARL = this.rwType.isWARL
 
   // Check if the write data is legal that can update the regfield.
@@ -272,8 +276,26 @@ class CSREnumType(
     this.asBool && that.asBool
   }
 
+  def unary_! : Bool = {
+    require(this.getWidth == 1, s"Only 1 bit field can use operator &&. The width of left operand is ${this.getWidth}")
+    !this.asBool
+  }
+
+  def & (that: UInt): UInt = {
+    require(this.getWidth == that.getWidth || !that.widthKnown)
+    this.asUInt & that
+  }
+
+  def &> (that: Bool): UInt = {
+    this.asUInt & Fill(this.getWidth, that)
+  }
+
+  def |> (that: Bool): UInt = {
+    this.asUInt | Fill(this.getWidth, that)
+  }
+
   // override cloneType to make ValidIO etc function return CSREnumType not EnumType
-  override def cloneType: this.type = factory.asInstanceOf[CSREnum].makeType.asInstanceOf[this.type]
+  override def cloneType: this.type = factory.asInstanceOf[CSREnum].makeType.asInstanceOf[this.type].setRwType(this.rwType)
 }
 
 class CSREnum extends ChiselEnum {
@@ -384,10 +406,6 @@ trait CSRMacroApply { self: CSREnum =>
 }
 
 object CSREnumTypeImplicitCast {
-  implicit def CSREnumTypeToUInt(field: CSREnumType): UInt = {
-    field.asUInt
-  }
-
   class BoolField(val value: Bool) {
     def && (field: CSREnumType): Bool = {
       this.value && field.asBool
@@ -395,6 +413,24 @@ object CSREnumTypeImplicitCast {
 
     def || (field: CSREnumType): Bool = {
       this.value || field.asBool
+    }
+
+    def &<(that: UInt): UInt = {
+      require(that.widthKnown, "The width of the right operand should be known when using &< operator")
+      Fill(that.getWidth, this.value) & that
+    }
+
+    def &<(that: CSREnumType): UInt = {
+      this &< that.asUInt
+    }
+
+    def |<(that: UInt): UInt = {
+      require(that.widthKnown, "The width of the right operand should be known when using |< operator")
+      Fill(that.getWidth, this.value) | that
+    }
+
+    def |<(that: CSREnumType): UInt = {
+      this |< that.asUInt
     }
   }
 
