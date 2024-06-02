@@ -540,6 +540,11 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val validEntries = distanceBetween(bpuPtr, commPtr)
   val canCommit = Wire(Bool())
 
+  // Instruction page fault and instruction access fault are sent from backend with redirect requests.
+  // When IPF and IAF are sent, backendPcFaultIfuPtr points to the FTQ entry whose first instruction
+  // raises IPF or IAF, which is ifuWbPtr_write or IfuPtr_write.
+  // Only when IFU has written back that FTQ entry can backendIpf and backendIaf be false because this
+  // makes sure that IAF and IPF are correctly raised instead of being flushed by redirect requests.
   val backendIpf = RegInit(false.B)
   val backendIaf = RegInit(false.B)
   val backendPcFaultIfuPtr = RegInit(FtqPtr(false.B, 0.U))
