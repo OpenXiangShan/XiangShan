@@ -37,16 +37,20 @@ abstract class CSRBundle extends Bundle {
   def := (that: UInt): Unit = {
     val fields = this.getFields
 
-    for (field <- fields) {
-      field := field.factory.apply(that(field.lsb + field.getWidth - 1, field.lsb))
+    suppressEnumCastWarning {
+      for (field <- fields) {
+        field := field.factory.apply(that(field.lsb + field.getWidth - 1, field.lsb))
+      }
     }
   }
 
   @inline
   def init: this.type = {
     val init = Wire(this)
-    init.elements.foreach { case (str, field: CSREnumType) =>
-      field := (if (field.init != null) field.factory(field.init.asUInt) else field.factory(0.U))
+    suppressEnumCastWarning {
+      init.elements.foreach { case (str, field: CSREnumType) =>
+        field := (if (field.init != null) field.factory(field.init.asUInt) else field.factory(0.U))
+      }
     }
     init.asInstanceOf[this.type]
   }
