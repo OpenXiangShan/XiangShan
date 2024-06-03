@@ -244,6 +244,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   //val vec_lastuop = Reg(Vec(StoreQueueSize, Bool())) // last uop of vector store instruction
   val vecMbCommit = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // vector store committed from merge buffer to rob
   val vecDataValid = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // vector store need write to sbuffer
+  val hasException = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // store has exception, should deq but not write sbuffer
+  val waitStoreS2 = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // wait for mmio and exception result until store_s2
   // val vec_robCommit = Reg(Vec(StoreQueueSize, Bool())) // vector store committed by rob
   // val vec_secondInv = RegInit(VecInit(List.fill(StoreQueueSize)(false.B))) // Vector unit-stride, second entry is invalid
 
@@ -265,14 +267,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val deqMask = UIntToMask(deqPtr, StoreQueueSize)
   val enqMask = UIntToMask(enqPtr, StoreQueueSize)
 
-  // TODO: count commit numbers for scalar / vector store separately
-  val scalarCommitCount = RegInit(0.U(log2Ceil(StoreQueueSize + 1).W))
-  val scalarCommitted = WireInit(0.U(log2Ceil(CommitWidth + 1).W))
-  val vecCommitted = WireInit(0.U(log2Ceil(CommitWidth + 1).W))
   val commitCount = WireInit(0.U(log2Ceil(CommitWidth + 1).W))
   val scommit = GatedRegNext(io.rob.scommit)
-
-  scalarCommitCount := scalarCommitCount + scommit - scalarCommitted
 
   // store can be committed by ROB
   io.rob.mmio := DontCare
@@ -348,6 +344,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
           isVec((index + j.U).value) := enqInstr.isVecStore // check vector store by the encoding of inst
           vecMbCommit((index + j.U).value) := false.B
           vecDataValid((index + j.U).value) := false.B
+          hasException((index + j.U).value) := false.B
+          waitStoreS2((index + j.U).value) := true.B
           XSError(!io.enq.canAccept || !io.enq.lqCanAccept, s"must accept $i\n")
           XSError(index.value =/= sqIdx.value, s"must be the same entry $i\n")
         }
@@ -484,6 +482,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       pending(stWbIndexReg) := io.storeAddrInRe(i).mmio
       mmio(stWbIndexReg) := io.storeAddrInRe(i).mmio
       atomic(stWbIndexReg) := io.storeAddrInRe(i).atomic
+      hasException(stWbIndexReg) := ExceptionNO.selectByFu(uop(stWbIndexReg).exceptionVec, StaCfg).asUInt.orR || io.storeAddrInRe(i).af
+      waitStoreS2(stWbIndexReg) := false.B
     }
     // dcache miss info (one cycle later than storeIn)
     // if dcache report a miss in sta pipeline, this store will trigger a prefetch when committing to sbuffer (if EnableAtCommitMissTrigger)
@@ -851,39 +851,30 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   XSError(uncacheState =/= s_idle && uncacheState =/= s_wait && commitCount > 0.U,
    "should not commit instruction when MMIO has not been finished\n")
 
-  val scalarcommitVec = WireInit(VecInit(Seq.fill(CommitWidth)(false.B)))
-  val veccommitVec = WireInit(VecInit(Seq.fill(CommitWidth)(false.B)))
+  val commitVec = WireInit(VecInit(Seq.fill(CommitWidth)(false.B)))
+  val needCancel = Wire(Vec(StoreQueueSize, Bool())) // Will be assigned later
+  dontTouch(commitVec)
   // TODO: Deal with vector store mmio
   for (i <- 0 until CommitWidth) {
-    val veccount = PopCount(veccommitVec.take(i))
-    when (allocated(cmtPtrExt(i).value) && isVec(cmtPtrExt(i).value) && isNotAfter(uop(cmtPtrExt(i).value).robIdx, RegNext(io.rob.pendingPtr)) && vecMbCommit(cmtPtrExt(i).value)) {
+    when (allocated(cmtPtrExt(i).value) && isNotAfter(uop(cmtPtrExt(i).value).robIdx, RegNext(io.rob.pendingPtr)) && !needCancel(cmtPtrExt(i).value) && !waitStoreS2(cmtPtrExt(i).value)) {
       if (i == 0){
         // TODO: fixme for vector mmio
         when ((uncacheState === s_idle) || (uncacheState === s_wait && scommit > 0.U)){
-          committed(cmtPtrExt(0).value) := true.B
-          veccommitVec(i) := true.B
+          when ((isVec(cmtPtrExt(i).value) && vecMbCommit(cmtPtrExt(i).value)) || !isVec(cmtPtrExt(i).value)) {
+            committed(cmtPtrExt(0).value) := true.B
+            commitVec(0) := true.B
+          }
         }
       } else {
-        committed(cmtPtrExt(i).value) := true.B
-        veccommitVec(i) := veccommitVec(i - 1) || scalarcommitVec(i - 1)
-      }
-    } .elsewhen (scalarCommitCount > i.U - veccount) {
-      if (i == 0){
-        when ((uncacheState === s_idle) || (uncacheState === s_wait && scommit > 0.U)){
-          committed(cmtPtrExt(0).value) := true.B
-          scalarcommitVec(i) := true.B
+        when ((isVec(cmtPtrExt(i).value) && vecMbCommit(cmtPtrExt(i).value)) || !isVec(cmtPtrExt(i).value)) {
+          committed(cmtPtrExt(i).value) := true.B
+          commitVec(i) := commitVec(i - 1)
         }
-      } else {
-        committed(cmtPtrExt(i).value) := true.B
-        scalarcommitVec(i) := veccommitVec(i - 1) || scalarcommitVec(i - 1)
       }
     }
   }
 
-  scalarCommitted := PopCount(scalarcommitVec)
-  vecCommitted := PopCount(veccommitVec)
-  commitCount := scalarCommitted + vecCommitted
-
+  commitCount := PopCount(commitVec)
   cmtPtrExt := cmtPtrExt.map(_ + commitCount)
 
   // committed stores will not be cancelled and can be sent to lower level.
@@ -892,10 +883,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // Read data from data module
   // As store queue grows larger and larger, time needed to read data from data
   // module keeps growing higher. Now we give data read a whole cycle.
-  val mmioStall = mmio(rdataPtrExt(0).value)
   for (i <- 0 until EnsbufferWidth) {
     val ptr = rdataPtrExt(i).value
-    dataBuffer.io.enq(i).valid := allocated(ptr) && committed(ptr) && (!isVec(ptr) || vecMbCommit(ptr)) && !mmioStall
+    val mmioStall = if(i == 0) mmio(rdataPtrExt(0).value) else (mmio(rdataPtrExt(i).value) || mmio(rdataPtrExt(i-1).value))
+    dataBuffer.io.enq(i).valid := allocated(ptr) && committed(ptr) && ((!isVec(ptr) && allvalid(ptr)) || vecMbCommit(ptr)) && !mmioStall
     // Note that store data/addr should both be valid after store's commit
     assert(!dataBuffer.io.enq(i).valid || allvalid(ptr) || (allocated(ptr) && vecMbCommit(ptr)))
     dataBuffer.io.enq(i).bits.addr     := paddrModule.io.rdata(i)
@@ -905,7 +896,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     dataBuffer.io.enq(i).bits.wline    := paddrModule.io.rlineflag(i)
     dataBuffer.io.enq(i).bits.sqPtr    := rdataPtrExt(i)
     dataBuffer.io.enq(i).bits.prefetch := prefetch(ptr)
-    dataBuffer.io.enq(i).bits.vecValid := !isVec(ptr) || vecDataValid(ptr) // scalar is always valid
+    // when scalar has exception, will also not write into sbuffer
+    dataBuffer.io.enq(i).bits.vecValid := (!isVec(ptr) || vecDataValid(ptr)) && !hasException(ptr)
   }
 
   // Send data stored in sbufferReqBitsReg to sbuffer
@@ -944,6 +936,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   if (env.EnableDifftest) {
     for (i <- 0 until EnsbufferWidth) {
       val ptr = rdataPtrExt(i).value
+      val mmioStall = if(i == 0) mmio(rdataPtrExt(0).value) else (mmio(rdataPtrExt(i).value) || mmio(rdataPtrExt(i-1).value))
       difftestBuffer.get.io.enq(i).valid := allocated(ptr) && committed(ptr) && (!isVec(ptr) || vecMbCommit(ptr)) && !mmioStall
       difftestBuffer.get.io.enq(i).bits := uop(ptr)
     }
@@ -993,7 +986,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   // misprediction recovery / exception redirect
   // invalidate sq term using robIdx
-  val needCancel = Wire(Vec(StoreQueueSize, Bool()))
   for (i <- 0 until StoreQueueSize) {
     needCancel(i) := uop(i).robIdx.needFlush(io.brqRedirect) && allocated(i) && !committed(i)
     when (needCancel(i)) {
