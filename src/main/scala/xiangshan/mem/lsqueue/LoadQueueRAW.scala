@@ -118,7 +118,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
   // Allocate logic
   val acceptedVec = Wire(Vec(LoadPipelineWidth, Bool()))
-  val enqIndexVec = Wire(Vec(LoadPipelineWidth, UInt()))
+  val enqIndexVec = Wire(Vec(LoadPipelineWidth, UInt(log2Up(LoadQueueRAWSize).W)))
 
   // Enqueue
   for ((enq, w) <- io.query.map(_.req).zipWithIndex) {
