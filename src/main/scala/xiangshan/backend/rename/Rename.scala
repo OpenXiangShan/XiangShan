@@ -503,9 +503,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     vecFreeList.io.freeReq(i)  := GatedValidRegNext(commitValid && needDestRegCommit(Reg_V, io.rabCommits.info(i)))
     vecFreeList.io.freePhyReg(i) := io.vec_old_pdest(i)
     v0FreeList.io.freeReq(i) := GatedValidRegNext(commitValid && needDestRegCommit(Reg_V0, io.rabCommits.info(i)))
-    v0FreeList.io.freePhyReg(i) := io.vec_old_pdest(i)
+    v0FreeList.io.freePhyReg(i) := io.v0_old_pdest(i)
     vlFreeList.io.freeReq(i) := GatedValidRegNext(commitValid && needDestRegCommit(Reg_Vl, io.rabCommits.info(i)))
-    vlFreeList.io.freePhyReg(i) := io.vec_old_pdest(i)
+    vlFreeList.io.freePhyReg(i) := io.vl_old_pdest(i)
   }
 
   /*
