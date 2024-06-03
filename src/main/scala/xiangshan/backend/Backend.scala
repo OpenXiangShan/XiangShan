@@ -581,6 +581,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     sink.bits.uop.rfWen          := source.bits.rfWen.getOrElse(false.B)
     sink.bits.uop.fpWen          := source.bits.fpWen.getOrElse(false.B)
     sink.bits.uop.vecWen         := source.bits.vecWen.getOrElse(false.B)
+    sink.bits.uop.v0Wen          := source.bits.v0Wen.getOrElse(false.B)
+    sink.bits.uop.vlWen          := source.bits.vlWen.getOrElse(false.B)
     sink.bits.uop.flushPipe      := source.bits.flushPipe.getOrElse(false.B)
     sink.bits.uop.pc             := source.bits.pc.getOrElse(0.U)
     sink.bits.uop.loadWaitBit    := Mux(enableMdp, source.bits.loadWaitBit.getOrElse(false.B), false.B)
