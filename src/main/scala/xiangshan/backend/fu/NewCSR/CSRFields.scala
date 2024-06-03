@@ -301,10 +301,10 @@ class CSREnumType(
 }
 
 class CSREnum extends ChiselEnum {
-  protected def apply(rwType: CSRRWType, init: Data = null)(msb: Int, lsb: Int)(factory: ChiselEnum): CSREnumType = {
+  protected def apply(rwType: CSRRWType)(msb: Int, lsb: Int)(factory: ChiselEnum): CSREnumType = {
     this.msb = msb
     this.lsb = lsb
-    new CSREnumType(msb, lsb)(rwType, init)(factory)
+    new CSREnumType(msb, lsb)(rwType, null)(factory)
   }
 
   var msb, lsb: Int = 0
@@ -376,20 +376,14 @@ trait WLRLApply { self: CSREnum =>
 }
 
 trait CSRMacroApply { self: CSREnum =>
-  def RO(msb: Int, lsb: Int, rfn: CSRRfnType, resetVal: Data = null): CSREnumType = self
-    .apply(ROType(rfn), resetVal)(msb, lsb)(this)
+  def RO(msb: Int, lsb: Int, rfn: CSRRfnType): CSREnumType = self
+    .apply(ROType(rfn))(msb, lsb)(this)
 
-  def RO(msb: Int, lsb: Int): CSREnumType = self
-    .apply(ROType())(msb, lsb)(this)
-
-  def RW(msb: Int, lsb: Int, resetVal: Data = null): CSREnumType = self
-    .apply(RWType(), resetVal)(msb, lsb)(this)
+  def RW(msb: Int, lsb: Int): CSREnumType = self
+    .apply(RWType())(msb, lsb)(this)
 
   def WARL(msb: Int, lsb: Int, wfn: CSRWfnType, rfn: CSRRfnType): CSREnumType = self
     .apply(WARLType(wfn, rfn))(msb, lsb)(this)
-
-  def WARL(msb: Int, lsb: Int, wfn: CSRWfnType): CSREnumType = self
-    .apply(WARLType(wfn))(msb, lsb)(this)
 
   def WLRL(msb: Int, lsb: Int, wfn: CSRWfnType, rfn: CSRRfnType): CSREnumType = self
     .apply(WLRLType(wfn, rfn))(msb, lsb)(this)

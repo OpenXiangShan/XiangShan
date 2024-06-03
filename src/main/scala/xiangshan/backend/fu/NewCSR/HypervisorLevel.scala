@@ -3,15 +3,15 @@ package xiangshan.backend.fu.NewCSR
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRROField => RO, CSRRWField => RW, CSRWARLField => WARL, CSRWLRLField => WLRL, _}
-import xiangshan.backend.fu.NewCSR.CSRFunc._
-import xiangshan.backend.fu.NewCSR.CSRConfig._
 import xiangshan.backend.fu.NewCSR.CSRBundles._
+import xiangshan.backend.fu.NewCSR.CSRConfig._
+import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRROField => RO, CSRRWField => RW, _}
+import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast._
 import xiangshan.backend.fu.NewCSR.CSREvents.{SretEventSinkBundle, TrapEntryHSEventSinkBundle}
+import xiangshan.backend.fu.NewCSR.CSRFunc._
+import xiangshan.backend.fu.NewCSR.ChiselRecordForField._
 
 import scala.collection.immutable.SeqMap
-import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast._
-import xiangshan.backend.fu.NewCSR.ChiselRecordForField._
 
 trait HypervisorLevel { self: NewCSR =>
 
@@ -298,7 +298,7 @@ class HvictlBundle extends CSRBundle {
 }
 
 class Hviprio1Bundle extends CSRBundle {
-  val PrioSSI = RW(15, 8)
+  val PrioSSI = RW(15,  8)
   val PrioSTI = RW(31, 24)
   val PrioCOI = RW(47, 40)
   val Prio14  = RW(55, 48)

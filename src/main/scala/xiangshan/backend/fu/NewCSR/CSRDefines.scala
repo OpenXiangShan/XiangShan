@@ -2,9 +2,9 @@ package xiangshan.backend.fu.NewCSR
 
 import chisel3._
 import xiangshan.backend.fu.NewCSR.CSRFunc._
-import xiangshan.macros.CSRMacros.CSRFieldsImpl
 
 import scala.language.experimental.macros
+import scala.reflect.runtime.{universe => ru}
 
 object CSRDefines {
   object CSRField1Bits extends CSREnum with CSRMacroApply
@@ -178,46 +178,71 @@ object CSRDefines {
     override def isLegal(enum: CSREnumType): Bool = enum.isOneOf(Bare, Sv39x4)
   }
 
+  object ReflectHelper {
+    val mirror: ru.Mirror = ru.runtimeMirror(getClass.getClassLoader)
+
+    def getCSRFieldMethodMirror(typeString: String, msb: Int, lsb: Int): ru.MethodMirror = {
+      val moduleSymbol = mirror.typeOf[CSRDefines.type].termSymbol
+        .info.decl(ru.TermName(s"CSRField${msb - lsb + 1}Bits")).asModule
+
+      val methodSymbol = moduleSymbol
+        .info.member(ru.TermName(typeString)).asMethod
+
+      val instanceMirror: ru.InstanceMirror = mirror.reflect(mirror.reflectModule(moduleSymbol).instance)
+      val methodMirror: ru.MethodMirror = instanceMirror.reflectMethod(methodSymbol)
+
+      methodMirror
+    }
+  }
+
   object CSRWARLField {
-    def apply(msb: Int, lsb: Int, fn: CSRRfnType): CSREnumType = macro CSRFieldsImpl.CSRWARLFieldRange
+    private def helper(msb: Int, lsb: Int, wfn: CSRWfnType, rfn: CSRRfnType): CSREnumType = {
+      val methodMirror = ReflectHelper.getCSRFieldMethodMirror("WARL", msb, lsb)
+      methodMirror.apply(msb, lsb, wfn, rfn).asInstanceOf[CSREnumType]
+    }
 
-    def apply(bit: Int, fn: CSRRfnType): CSREnumType = macro CSRFieldsImpl.CSRWARLFieldBit
+    def apply(msb: Int, lsb: Int, fn: CSRRfnType): CSREnumType = this.helper(msb, lsb, null, fn)
 
-    def apply(msb: Int, lsb: Int, fn: CSRWfnType): CSREnumType = macro CSRFieldsImpl.CSRWARLFieldRange
+    def apply(bit: Int, fn: CSRRfnType): CSREnumType = this.helper(bit, bit, null, fn)
 
-    def apply(bit: Int, fn: CSRWfnType): CSREnumType = macro CSRFieldsImpl.CSRWARLFieldBit
+    def apply(msb: Int, lsb: Int, fn: CSRWfnType): CSREnumType = this.helper(msb, lsb, fn, null)
+
+    def apply(bit: Int, fn: CSRWfnType): CSREnumType = this.helper(bit, bit, fn, null)
   }
 
   object CSRROField {
-    def apply(msb: Int, lsb: Int, rfn: CSRRfnType): CSREnumType = macro CSRFieldsImpl.CSRROFieldRange
+    private def helper(msb: Int, lsb: Int, rfn: CSRRfnType): CSREnumType = {
+      val methodMirror = ReflectHelper.getCSRFieldMethodMirror("RO", msb, lsb)
+      methodMirror.apply(msb, lsb, rfn).asInstanceOf[CSREnumType]
+    }
 
-    def apply(bit: Int, rfn: CSRRfnType): CSREnumType = macro CSRFieldsImpl.CSRROFieldBit
+    def apply(msb: Int, lsb: Int, rfn: CSRRfnType): CSREnumType = this.helper(msb, lsb, rfn)
 
-    def apply(msb: Int, lsb: Int): CSREnumType = macro CSRFieldsImpl.CSRROFieldRangeNoFn
+    def apply(bit: Int, rfn: CSRRfnType): CSREnumType = this.helper(bit, bit, rfn)
 
-    def apply(msb: Int, lsb: Int, resetVal: Data): CSREnumType = macro CSRFieldsImpl.CSRROFieldRangeNoFnWithReset
+    def apply(msb: Int, lsb: Int): CSREnumType = this.helper(msb, lsb, null)
 
-    def apply(bit: Int): CSREnumType = macro CSRFieldsImpl.CSRROFieldBitNoFn
+    def apply(bit: Int): CSREnumType = this.helper(bit, bit, null)
   }
 
   object CSRRWField {
-    def apply(msb: Int, lsb: Int): CSREnumType = macro CSRFieldsImpl.CSRRWFieldRange
+    private def helper(msb: Int, lsb: Int) : CSREnumType = {
+      val methodMirror: ru.MethodMirror = ReflectHelper.getCSRFieldMethodMirror("RW", msb, lsb)
+      methodMirror.apply(msb, lsb).asInstanceOf[CSREnumType]
+    }
 
-    def apply(bit: Int): CSREnumType = macro CSRFieldsImpl.CSRRWFieldBit
+    def apply(msb: Int, lsb: Int) : CSREnumType = this.helper(msb, lsb)
 
-    def apply(msb: Int, lsb: Int, resetVal: Data): CSREnumType = macro CSRFieldsImpl.CSRRWFieldRangeWithReset
-
-    def apply(bit: Int, resetVal: Data): CSREnumType = macro CSRFieldsImpl.CSRRWFieldBitWithReset
-  }
-
-  object CSRWARLRefField {
-    def apply(ref: CSREnumType, msb: Int, lsb: Int, wfn: CSRWfnType): CSREnumType = macro CSRFieldsImpl.CSRRefWARLFieldRange
-
-    def apply(ref: CSREnumType, bit: Int, wfn: CSRWfnType): CSREnumType = macro CSRFieldsImpl.CSRRefWARLFieldBit
+    def apply(bit: Int): CSREnumType = this.helper(bit, bit)
   }
 
   object CSRWLRLField {
-    def apply(msb: Int, lsb: Int, fn: CSRWfnType): CSREnumType = macro CSRFieldsImpl.CSRWLRLFieldRange
+    private def helper(msb: Int, lsb: Int) : CSREnumType = {
+      val methodMirror: ru.MethodMirror = ReflectHelper.getCSRFieldMethodMirror("WLRL", msb, lsb)
+      methodMirror.apply(msb, lsb).asInstanceOf[CSREnumType]
+    }
+
+    def apply(msb: Int, lsb: Int): CSREnumType = this.helper(msb, lsb)
   }
 
   object PrivMode extends CSREnum with RWApply {
