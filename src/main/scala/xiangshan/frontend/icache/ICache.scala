@@ -115,7 +115,7 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
   }
 
   def ResultHoldBypass[T<:Data](data: T, valid: Bool): T = {
-    Mux(valid, data, RegEnable(data, valid))
+    Mux(valid, data, RegEnable(data, 0.U.asTypeOf(data), valid))
   }
 
   def holdReleaseLatch(valid: Bool, release: Bool, flush: Bool): Bool ={
