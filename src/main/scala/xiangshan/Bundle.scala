@@ -320,6 +320,8 @@ class ResetPregStateReq(implicit p: Parameters) extends XSBundle {
   val isInt = Bool()
   val isFp = Bool()
   val isVec = Bool()
+  val isV0 = Bool()
+  val isVl = Bool()
   val preg = UInt(PhyRegIdxWidth.W)
 }
 

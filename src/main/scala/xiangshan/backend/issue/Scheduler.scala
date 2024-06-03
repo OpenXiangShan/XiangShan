@@ -244,7 +244,7 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
   v0BusyTable match {
     case Some(bt) =>
       bt.io.allocPregs.zip(io.fromDispatch.allocPregs).foreach { case (btAllocPregs, dpAllocPregs) =>
-        btAllocPregs.valid := dpAllocPregs.isVec
+        btAllocPregs.valid := dpAllocPregs.isV0
         btAllocPregs.bits := dpAllocPregs.preg
       }
       bt.io.wbPregs.zipWithIndex.foreach { case (wb, i) =>
@@ -260,7 +260,7 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
   vlBusyTable match {
     case Some(bt) =>
       bt.io.allocPregs.zip(io.fromDispatch.allocPregs).foreach { case (btAllocPregs, dpAllocPregs) =>
-        btAllocPregs.valid := dpAllocPregs.isVec
+        btAllocPregs.valid := dpAllocPregs.isVl
         btAllocPregs.bits := dpAllocPregs.preg
       }
       bt.io.wbPregs.zipWithIndex.foreach { case (wb, i) =>
