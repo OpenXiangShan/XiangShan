@@ -24,14 +24,12 @@ trait DebugLevel { self: NewCSR =>
     .setAddr(CSRs.tselect)
 
   val tdata1 = Module(new CSRModule("Tdata1") with HasTdataSink {
-    rdata := tdataRead.tdata1
-    regOut := 0.U
+    regOut := tdataRead.tdata1
   })
     .setAddr(CSRs.tdata1)
 
   val tdata2 = Module(new CSRModule("Tdata2") with HasTdataSink {
-    rdata := tdataRead.tdata2
-    regOut := 0.U
+    regOut := tdataRead.tdata2
   })
     .setAddr(CSRs.tdata2)
 

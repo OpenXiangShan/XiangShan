@@ -138,6 +138,14 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
   })
     .setAddr(CSRs.instret)
 
+  val hpmcounters: Seq[CSRModule[_]] = (3 to 0x1F).map(num =>
+    Module(new CSRModule(s"Hpmcounter$num", new CSRBundle {
+      val hpmcounter = RO(63, 0)
+    }) with HasMHPMSink {
+      regOut.hpmcounter := mHPM.hpmcounters(num - 3)
+    }).setAddr(CSRs.cycle + num)
+  )
+
   val unprivilegedCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], Data)] = SeqMap(
     0x001 -> (fcsr.wAliasFflags -> fcsr.fflags),
     0x002 -> (fcsr.wAliasFfm    -> fcsr.frm),
@@ -152,7 +160,7 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     CSRs.cycle -> (cycle.w      -> cycle.rdata),
     CSRs.time -> (time.w        -> time.rdata),
     CSRs.instret -> (instret.w  -> instret.rdata),
-  )
+  ) ++ hpmcounters.map(counter => (counter.addr -> (counter.w -> counter.rdata)))
 
   val unprivilegedCSRMods: Seq[CSRModule[_]] = Seq(
     fcsr,
@@ -164,7 +172,7 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     cycle,
     time,
     instret,
-  )
+  ) ++ hpmcounters
 
   val unprivilegedCSROutMap: SeqMap[Int, UInt] = SeqMap(
     0x001 -> fcsr.fflags.asUInt,
@@ -180,7 +188,7 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     CSRs.cycle   -> cycle.rdata,
     CSRs.time    -> time.rdata,
     CSRs.instret -> instret.rdata,
-  )
+  ) ++ hpmcounters.map(counter => (counter.addr -> counter.rdata))
 }
 
 class CSRVTypeBundle extends CSRBundle {
@@ -213,6 +221,7 @@ trait HasMHPMSink { self: CSRModule[_] =>
     // ValidIO is used to update time reg
     val time    = ValidIO(UInt(64.W))
     val instret = UInt(64.W)
+    val hpmcounters = Vec(perfCntNum, UInt(XLEN.W))
   }))
   val v = IO(Input(Bool()))
   val htimedelta = IO(Input(UInt(64.W)))

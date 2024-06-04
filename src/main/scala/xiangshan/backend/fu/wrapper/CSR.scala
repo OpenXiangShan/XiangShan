@@ -115,6 +115,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.io.wfi  := isWfi  && valid
   csrMod.io.ebreak := isEbreak && valid
 
+  csrMod.io.perf  := csrIn.perf
+
   csrMod.platformIRP.MEIP := csrIn.externalInterrupt.meip
   csrMod.platformIRP.MTIP := csrIn.externalInterrupt.mtip
   csrMod.platformIRP.MSIP := csrIn.externalInterrupt.msip

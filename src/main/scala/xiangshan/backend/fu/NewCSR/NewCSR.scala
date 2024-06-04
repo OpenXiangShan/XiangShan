@@ -6,7 +6,8 @@ import difftest._
 import freechips.rocketchip.rocket.CSRs
 import org.chipsalliance.cde.config.Parameters
 import top.{ArgParser, Generator}
-import utility.{DataHoldBypass, SignExt, ZeroExt}
+import utility.{DataHoldBypass, GatedValidRegNext, SignExt, ZeroExt}
+import utils.{HPerfMonitor, OptionWrapper, PerfEvent}
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CSRCustomState, PrivState, RobCommitCSR}
 import xiangshan.backend.fu.NewCSR.CSRDefines.{ContextStatus, PrivMode, SatpMode, VirtMode}
 import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast._
@@ -16,6 +17,7 @@ import xiangshan.backend.fu.util.CSRConst
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart, Vxrm, Vxsat}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan._
+import xiangshan.backend.fu.PerfCounterIO
 
 import scala.collection.immutable.SeqMap
 
@@ -59,6 +61,9 @@ object CSRConfig {
   // trigger
   final val triggerNum    = 4     // Todo: use XSParams
   final val tselectWidth  = 2     // log2Up(triggerNum)
+
+  // perf
+  final val perfCntNum = 29       // in Spec
 
   final val EXT_SSTC = true
 }
@@ -113,6 +118,8 @@ class NewCSR(implicit val p: Parameters) extends Module
     val dret = Input(Bool())
     val wfi  = Input(Bool())
     val ebreak = Input(Bool())
+
+    val perf = Input(new PerfCounterIO)
 
     val out = Output(new Bundle {
       val EX_II = Bool()
@@ -503,6 +510,9 @@ class NewCSR(implicit val p: Parameters) extends Module
         // VS-Mode or VU-Mode
         m.v := privState.isVirtual
         m.htimedelta := htimedelta.rdata
+        m.mHPM.hpmcounters.zip(mhpmcounters).map{
+          case(counter, mcounter) => counter := mcounter.rdata
+        }
       case _ =>
     }
     mod match {
@@ -827,8 +837,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   val newTriggerChainVec = tselect1H.zip(chainVec).map{case(a, b) => a | b}
   val newTriggerChainIsLegal = TriggerUtil.TriggerCheckChainLegal(newTriggerChainVec, TriggerChainMaxLength)
 
-  val tdata1Update  = addr === tdata1.addr.U && wenLegal
-  val tdata2Update  = addr === tdata2.addr.U && wenLegal
+  val tdata1Update  = tdata1.w.wen
+  val tdata2Update  = tdata2.w.wen
   val triggerUpdate = tdata1Update || tdata2Update
 
   tdata1RegVec.foreach { mod =>
@@ -894,6 +904,45 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.out.memTrigger.tEnableVec               := memAccTriggerEnableVec
   /**
    * debug_end
+   */
+
+  /**
+   * perf_begin
+   * perf number: 29 (frontend 8, ctrlblock 8, memblock 8, CSREvent 5)
+   */
+  for (i <-0 until perfCntNum) { //todo: check wenlegal
+    when(mhpmevents(i).w.wen) {
+      perfEvents(i) := wdata
+    }
+  }
+  val csrevents = perfEvents.slice(24, 29)
+
+  val hpmEvents = Wire(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
+  for (i <- 0 until numPCntHc * coreParams.L2NBanks) {
+    hpmEvents(i) := io.perf.perfEventsHc(i)
+  }
+
+  val hpmHc = HPerfMonitor(csrevents, hpmEvents)
+
+  val perfEventscounten = RegInit(0.U.asTypeOf(Vec(perfCntNum, Bool())))
+  for (i <-0 until perfCntNum) {
+    perfEventscounten(i) := (mhpmevents(i).rdata(63,60) & UIntToOH(privState.asUInt)).orR
+  }
+  val allPerfEvents = io.perf.perfEventsFrontend ++
+    io.perf.perfEventsCtrl ++
+    io.perf.perfEventsLsu ++
+    hpmHc.getPerf
+
+  mhpmcounters.foreach { mod =>
+    mod match {
+      case m: HasPerfCounterBundle =>
+        m.perfEventscounten := perfEventscounten
+        m.perf              := allPerfEvents
+      case _ =>
+    }
+  }
+  /**
+   * perf_end
    */
 
   /**
