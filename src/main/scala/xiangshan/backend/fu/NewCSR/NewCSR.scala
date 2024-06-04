@@ -663,14 +663,30 @@ class NewCSR(implicit val p: Parameters) extends Module
   val wVxrmChangeRM = addr === CSRs.vxrm.U && wenLegal && wdata(1, 0) =/= vcsr.vxrm
   val vxrmChange = wVcsrChangeRM || wVxrmChangeRM
 
-  val wMstatusChangeVS = addr === CSRs.mstatus.U && wenLegal && ((mstatus.regOut.VS === ContextStatus.Off && wdata(10, 9) =/= ContextStatus.Off.asUInt) ||
-                                                                 (mstatus.regOut.VS =/= ContextStatus.Off && wdata(10, 9) === ContextStatus.Off.asUInt))
-  val wMstatusChangeFS = addr === CSRs.mstatus.U && wenLegal && ((mstatus.regOut.FS === ContextStatus.Off && wdata(14, 13) =/= ContextStatus.Off.asUInt) ||
-                                                                 (mstatus.regOut.FS =/= ContextStatus.Off && wdata(14, 13) === ContextStatus.Off.asUInt))
-  val mstatusChange = wMstatusChangeVS || wMstatusChangeFS
+  val floatStatusOnOff = mstatus.w.wen && (
+    mstatus.w.wdataFields.FS === ContextStatus.Off && mstatus.regOut.FS =/= ContextStatus.Off ||
+    mstatus.w.wdataFields.FS =/= ContextStatus.Off && mstatus.regOut.FS === ContextStatus.Off
+  ) || mstatus.wAliasSstatus.wen && (
+    mstatus.wAliasSstatus.wdataFields.FS === ContextStatus.Off && mstatus.regOut.FS =/= ContextStatus.Off ||
+    mstatus.wAliasSstatus.wdataFields.FS =/= ContextStatus.Off && mstatus.regOut.FS === ContextStatus.Off
+  ) || vsstatus.w.wen && (
+    vsstatus.w.wdataFields.FS === ContextStatus.Off && vsstatus.regOut.FS =/= ContextStatus.Off ||
+    vsstatus.w.wdataFields.FS =/= ContextStatus.Off && vsstatus.regOut.FS === ContextStatus.Off
+  )
+
+  val vectorStatusOnOff = mstatus.w.wen && (
+    mstatus.w.wdataFields.VS === ContextStatus.Off && mstatus.regOut.VS =/= ContextStatus.Off ||
+    mstatus.w.wdataFields.VS =/= ContextStatus.Off && mstatus.regOut.VS === ContextStatus.Off
+  ) || mstatus.wAliasSstatus.wen && (
+    mstatus.wAliasSstatus.wdataFields.VS === ContextStatus.Off && mstatus.regOut.VS =/= ContextStatus.Off ||
+    mstatus.wAliasSstatus.wdataFields.VS =/= ContextStatus.Off && mstatus.regOut.VS === ContextStatus.Off
+  ) || vsstatus.w.wen && (
+    vsstatus.w.wdataFields.VS === ContextStatus.Off && vsstatus.regOut.VS =/= ContextStatus.Off ||
+    vsstatus.w.wdataFields.VS =/= ContextStatus.Off && vsstatus.regOut.VS === ContextStatus.Off
+  )
 
   val triggerFrontendChange = Wire(Bool())
-  val flushPipe = resetSatp || frmChange || vxrmChange || triggerFrontendChange || mstatusChange
+  val flushPipe = resetSatp || frmChange || vxrmChange || triggerFrontendChange || floatStatusOnOff || vectorStatusOnOff
 
   // fence
   val tvm = mstatus.regOut.TVM.asBool
