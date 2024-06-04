@@ -28,6 +28,7 @@ import xiangshan.backend.fu.FuType
 import xiangshan.backend.rename.freelist._
 import xiangshan.backend.rob.{RobEnqIO, RobPtr}
 import xiangshan.mem.mdp._
+import xiangshan.ExceptionNO._
 
 class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
 
@@ -161,6 +162,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uop.snapshot      := DontCare
     uop.srcLoadDependency := DontCare
     uop.numLsElem       :=  DontCare
+    uop.hasException  :=  DontCare
   })
 
   val needVecDest    = Wire(Vec(RenameWidth, Bool()))
@@ -396,6 +398,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val notInSameSnpt = GatedValidRegNext(distanceBetween(robIdxHeadNext, io.snptLastEnq.bits) >= sameSnptDistance || !io.snptLastEnq.valid)
   val allowSnpt = if (EnableRenameSnapshot) notInSameSnpt && !lastCycleCreateSnpt && io.in.head.bits.firstUop else false.B
   io.out.zip(io.in).foreach{ case (out, in) => out.bits.snapshot := allowSnpt && (!in.bits.preDecodeInfo.notCFI || FuType.isJump(in.bits.fuType)) && in.fire }
+  io.out.map{ x =>
+    x.bits.hasException := Cat(selectFrontend(x.bits.exceptionVec) :+ x.bits.exceptionVec(illegalInstr) :+ x.bits.exceptionVec(virtualInstr)).orR || x.bits.trigger.getFrontendCanFire
+  }
   if(backendParams.debugEn){
     dontTouch(robIdxHeadNext)
     dontTouch(notInSameSnpt)
