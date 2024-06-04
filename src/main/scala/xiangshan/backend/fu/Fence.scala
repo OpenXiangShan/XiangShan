@@ -30,7 +30,6 @@ class FenceIO(implicit p: Parameters) extends XSBundle {
   val disableSfence = Input(Bool())
   val disableHfenceg = Input(Bool())
   val disableHfencev = Input(Bool())
-  val virtMode = Input(Bool())
 }
 
 class FenceToSbuffer extends Bundle {
@@ -46,7 +45,6 @@ class Fence(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   val disableSfence = io.fenceio.get.disableSfence
   val disableHfenceg = io.fenceio.get.disableHfenceg
   val disableHfencev = io.fenceio.get.disableHfencev
-  val virtMode = io.fenceio.get.virtMode
   val (valid, src1) = (
     io.in.valid,
     io.in.bits.data.src(0)
@@ -90,12 +88,6 @@ class Fence(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   when (state === s_wait && func === FenceOpType.nofence  && sbEmpty) { state := s_nofence }
   when (state =/= s_idle && state =/= s_wait) { state := s_idle }
 
-  val illegalsfence = func === FenceOpType.sfence && disableSfence
-  val illegalhfenceg = func === FenceOpType.hfence_g && disableHfenceg
-  val illegalhfencev = func === FenceOpType.hfence_v && disableHfencev
-  val raiseEX_II = (illegalsfence || illegalhfenceg || illegalhfencev) && !virtMode
-  val raiseEX_VI = (illegalsfence || illegalhfenceg || illegalhfencev) && virtMode
-
   io.in.ready := state === s_idle
   io.out.valid := state =/= s_idle && state =/= s_wait
   io.out.bits.res.data := 0.U
@@ -104,8 +96,6 @@ class Fence(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.out.bits.ctrl.pdest := uop.ctrl.pdest
   io.out.bits.ctrl.flushPipe.get := uop.ctrl.flushPipe.get
   io.out.bits.ctrl.exceptionVec.get := 0.U.asTypeOf(io.out.bits.ctrl.exceptionVec.get)
-  io.out.bits.ctrl.exceptionVec.get(illegalInstr) := raiseEX_II
-  io.out.bits.ctrl.exceptionVec.get(virtualInstr) := raiseEX_VI
   io.out.bits.perfDebugInfo := io.in.bits.perfDebugInfo
 
   XSDebug(io.in.valid, p"In(${io.in.valid} ${io.in.ready}) state:${state} Inpc:0x${Hexadecimal(io.in.bits.data.pc.get)} InrobIdx:${io.in.bits.ctrl.robIdx}\n")

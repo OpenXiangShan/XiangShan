@@ -167,7 +167,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.fenceio.disableSfence := DontCare
   backend.io.fenceio.disableHfencev := DontCare
   backend.io.fenceio.disableHfenceg := DontCare
-  backend.io.fenceio.virtMode := DontCare
 
   backend.io.perf.frontendInfo := frontend.io.frontendInfo
   backend.io.perf.memInfo := memBlock.io.memInfo
