@@ -3,6 +3,7 @@ package xiangshan.backend.fu.NewCSR
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import freechips.rocketchip.rocket.CSRs
 import utility.SignExt
 import utils.PerfEvent
 import xiangshan.backend.fu.NewCSR.CSRBundles._
@@ -18,18 +19,18 @@ import scala.collection.immutable.SeqMap
 
 trait MachineLevel { self: NewCSR =>
   val mstatus = Module(new MstatusModule)
-    .setAddr(0x300)
+    .setAddr(CSRs.mstatus)
 
   val misa = Module(new CSRModule("Misa", new MisaBundle))
-    .setAddr(0x301)
+    .setAddr(CSRs.misa)
 
   println(s"[CSR] supported isa ext: ${misa.bundle.getISAString}")
 
   val medeleg = Module(new CSRModule("Medeleg", new MedelegBundle))
-    .setAddr(0x302)
+    .setAddr(CSRs.medeleg)
 
   val mideleg = Module(new CSRModule("Mideleg", new MidelegBundle))
-    .setAddr(0x303)
+    .setAddr(CSRs.mideleg)
 
   val mie = Module(new CSRModule("Mie", new MieBundle) with HasIpIeBundle {
     val fromHie  = IO(Flipped(new HieToMie))
@@ -92,18 +93,18 @@ trait MachineLevel { self: NewCSR =>
 
     // 14~63 read only 0
     regOut.getLocal.filterNot(_.lsb == InterruptNO.COI).foreach(_ := 0.U)
-  }).setAddr(0x304)
+  }).setAddr(CSRs.mie)
 
   val mtvec = Module(new CSRModule("Mtvec", new XtvecBundle))
-    .setAddr(0x305)
+    .setAddr(CSRs.mtvec)
 
   // Todo: support "Stimecmp/Vstimecmp" Extension, Version 1.0.0
   // Todo: support Sscounterenw Extension
   val mcounteren = Module(new CSRModule("Mcounteren", new Counteren))
-    .setAddr(0x306)
+    .setAddr(CSRs.mcounteren)
 
   val mvien = Module(new CSRModule("Mvien", new MvienBundle))
-    .setAddr(0x308)
+    .setAddr(CSRs.mvien)
 
   val mvip = Module(new CSRModule("Mvip", new MvipBundle)
     with HasIpIeBundle
@@ -154,34 +155,34 @@ trait MachineLevel { self: NewCSR =>
         ))
       }
     }
-  }).setAddr(0x309)
+  }).setAddr(CSRs.mvip)
 
   val menvcfg = Module(new CSRModule("Menvcfg", new MEnvCfg))
-    .setAddr(0x30A)
+    .setAddr(CSRs.menvcfg)
 
   val mcountinhibit = Module(new CSRModule("Mcountinhibit", new McountinhibitBundle))
-    .setAddr(0x320)
+    .setAddr(CSRs.mcountinhibit)
 
   val mhpmevents: Seq[CSRModule[_]] = (3 to 0x1F).map(num =>
     Module(new CSRModule(s"Mhpmevent$num") with HasPerfEventBundle {
       regOut := perfEvents(num - 3)
     })
-      .setAddr(0x320 + num)
+      .setAddr(CSRs.mhpmevent3 - 3 + num)
   )
 
   val mscratch = Module(new CSRModule("Mscratch"))
-    .setAddr(0x340)
+    .setAddr(CSRs.mscratch)
 
   val mepc = Module(new CSRModule("Mepc", new Epc) with TrapEntryMEventSinkBundle {
     rdata := SignExt(Cat(reg.epc.asUInt, 0.U(1.W)), XLEN)
   })
-    .setAddr(0x341)
+    .setAddr(CSRs.mepc)
 
   val mcause = Module(new CSRModule("Mcause", new CauseBundle) with TrapEntryMEventSinkBundle)
-    .setAddr(0x342)
+    .setAddr(CSRs.mcause)
 
   val mtval = Module(new CSRModule("Mtval") with TrapEntryMEventSinkBundle)
-    .setAddr(0x343)
+    .setAddr(CSRs.mtval)
 
   val mip = Module(new CSRModule("Mip", new MipBundle)
     with HasIpIeBundle
@@ -265,13 +266,13 @@ trait MachineLevel { self: NewCSR =>
         fromVSip.LCOFIP.valid -> fromVSip.LCOFIP.bits,
       ))
     }
-  }).setAddr(0x344)
+  }).setAddr(CSRs.mip)
 
   val mtinst = Module(new CSRModule("Mtinst") with TrapEntryMEventSinkBundle)
-    .setAddr(0x34A)
+    .setAddr(CSRs.mtinst)
 
   val mtval2 = Module(new CSRModule("Mtval2") with TrapEntryMEventSinkBundle)
-    .setAddr(0x34B)
+    .setAddr(CSRs.mtval2)
 
   val mseccfg = Module(new CSRModule("Mseccfg", new CSRBundle {
     val PMM   = RO(33, 32)
@@ -280,37 +281,37 @@ trait MachineLevel { self: NewCSR =>
     val RLB   = RO(     2)
     val MMWP  = RO(     1)
     val MML   = RO(     0)
-  })).setAddr(0x747)
+  })).setAddr(CSRs.mseccfg)
 
   val mcycle = Module(new CSRModule("Mcycle") with HasMachineCounterControlBundle {
     reg.ALL := Mux(!mcountinhibit.CY.asUInt.asBool, reg.ALL.asUInt + 1.U, reg.ALL.asUInt)
-  }).setAddr(0xB00)
+  }).setAddr(CSRs.mcycle)
 
 
   val minstret = Module(new CSRModule("Minstret") with HasMachineCounterControlBundle with HasRobCommitBundle {
     reg.ALL := Mux(!mcountinhibit.IR.asUInt.asBool && robCommit.instNum.valid, reg.ALL.asUInt + robCommit.instNum.bits, reg.ALL.asUInt)
-  })
+  }).setAddr(CSRs.minstret)
 
   // Todo: guarded by mcountinhibit
   val mhpmcounters: Seq[CSRModule[_]] = (3 to 0x1F).map(num =>
     Module(new CSRModule(s"Mhpmcounter$num") with HasMachineCounterControlBundle with HasPerfCounterBundle {
       reg.ALL := Mux(mcountinhibit.asUInt(num) | perfEventscounten(num - 3), reg.ALL.asUInt, reg.ALL.asUInt + perf(num - 3).value)
-    }).setAddr(0xB00 + num)
+    }).setAddr(CSRs.mhpmcounter3 - 3 + num)
   )
 
   val mvendorid = Module(new CSRModule("Mvendorid") { rdata := 0.U })
-    .setAddr(0xF11)
+    .setAddr(CSRs.mvendorid)
 
   // architecture id for XiangShan is 25
   // see https://github.com/riscv/riscv-isa-manual/blob/master/marchid.md
   val marchid = Module(new CSRModule("Marchid", new CSRBundle {
     val ALL = MarchidField(63, 0).withReset(MarchidField.XSArchid)
-  })).setAddr(0xF12)
+  })).setAddr(CSRs.marchid)
 
   val mimpid = Module(new CSRModule("Mimpid", new CSRBundle {
     val ALL = RO(0).withReset(0.U)
   }))
-    .setAddr(0xF13)
+    .setAddr(CSRs.mimpid)
 
   val mhartid = Module(new CSRModule("Mhartid", new CSRBundle {
     val ALL = RO(7, 0)
@@ -318,10 +319,10 @@ trait MachineLevel { self: NewCSR =>
     val hartid = IO(Input(UInt(hartIdLen.W)))
     this.reg.ALL := RegEnable(hartid, reset.asBool)
   })
-    .setAddr(0xF14)
+    .setAddr(CSRs.mhartid)
 
   val mconfigptr = Module(new CSRModule("Mconfigptr"))
-    .setAddr(0xF15)
+    .setAddr(CSRs.mconfigptr)
 
   val machineLevelCSRMods: Seq[CSRModule[_]] = Seq(
     mstatus,

@@ -2,6 +2,8 @@ package xiangshan.backend.fu.NewCSR
 
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.rocket.CSRs
+import CSRConfig._
 import xiangshan.backend.fu.NewCSR.CSRBundles.PrivState
 import xiangshan.backend.fu.NewCSR.CSRConfig._
 import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRROField => RO, CSRRWField => RW, _}
@@ -10,64 +12,64 @@ import scala.collection.immutable.SeqMap
 
 trait CSRAIA { self: NewCSR with HypervisorLevel =>
   val miselect = Module(new CSRModule("Miselevt", new MISelectBundle))
-    .setAddr(0x350)
+    .setAddr(CSRs.miselect)
 
   val mireg = Module(new CSRModule("Mireg") with HasIregSink {
     rdata := iregRead.mireg
   })
-    .setAddr(0x351)
+    .setAddr(CSRs.mireg)
 
   val mtopei = Module(new CSRModule("Mtopei", new CSRBundle {
     val id   = RW(26, 16)
     val prio = RW(10,  0)
   }))
-    .setAddr(0x35C)
+    .setAddr(CSRs.mtopei)
 
   val mtopi = Module(new CSRModule("Mtopi", new TopIBundle) with HasInterruptFilterSink {
     regOut.IID   := topIR.mtopi.IID
     regOut.IPRIO := topIR.mtopi.IPRIO
   })
-    .setAddr(0xFB0)
+    .setAddr(CSRs.mtopi)
 
   val siselect = Module(new CSRModule("Siselect", new SISelectBundle))
-    .setAddr(0x150)
+    .setAddr(CSRs.siselect)
 
   val sireg = Module(new CSRModule("Sireg") with HasIregSink {
     rdata := iregRead.sireg
   })
-    .setAddr(0x151)
+    .setAddr(CSRs.sireg)
 
   val stopei = Module(new CSRModule("Stopei", new CSRBundle {
     val id   = RW(26, 16)
     val prio = RW(10,  0)
   }))
-    .setAddr(0x15C)
+    .setAddr(CSRs.stopei)
 
   val stopi = Module(new CSRModule("Stopi", new TopIBundle) with HasInterruptFilterSink {
     regOut.IID   := topIR.stopi.IID
     regOut.IPRIO := topIR.stopi.IPRIO
   })
-    .setAddr(0xDB0)
+    .setAddr(CSRs.stopi)
 
   val vsiselect = Module(new CSRModule("VSiselect", new VSISelectBundle))
-    .setAddr(0x250)
+    .setAddr(CSRs.vsiselect)
 
   val vsireg    = Module(new CSRModule("VSireg") with HasIregSink {
     rdata := iregRead.sireg
   })
-    .setAddr(0x251)
+    .setAddr(CSRs.vsireg)
 
   val vstopei   = Module(new CSRModule("VStopei", new CSRBundle {
     val id   = RW(26, 16)
     val prio = RW(10,  0)
   }))
-    .setAddr(0x25C)
+    .setAddr(CSRs.vstopei)
 
   val vstopi = Module(new CSRModule("VStopi", new TopIBundle) with HasInterruptFilterSink {
     regOut.IID   := topIR.vstopi.IID
     regOut.IPRIO := topIR.vstopi.IPRIO
   })
-    .setAddr(0xEB0)
+    .setAddr(CSRs.vstopi)
 
   val miregiprios: Seq[CSRModule[_]] = Range(0, 0xF, 2).map(num =>
     Module(new CSRModule(s"Iprio$num"))

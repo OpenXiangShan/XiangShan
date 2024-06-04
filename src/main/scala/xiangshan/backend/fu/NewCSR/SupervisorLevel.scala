@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util.{BitPat, Cat, Mux1H, MuxCase, ValidIO}
 import utility.SignExt
+import freechips.rocketchip.rocket.CSRs
 import xiangshan.backend.fu.NewCSR.CSRBundles._
 import xiangshan.backend.fu.NewCSR.CSRDefines._
 import xiangshan.backend.fu.NewCSR.CSRFunc._
@@ -52,30 +53,30 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
       }
     }
   })
-    .setAddr(0x104)
+    .setAddr(CSRs.sie)
 
   val stvec = Module(new CSRModule("Stvec", new XtvecBundle))
-    .setAddr(0x105)
+    .setAddr(CSRs.stvec)
 
   val scounteren = Module(new CSRModule("Scounteren", new Counteren))
-    .setAddr(0x106)
+    .setAddr(CSRs.scounteren)
 
   val senvcfg = Module(new CSRModule("Senvcfg", new SEnvCfg))
-    .setAddr(0x10A)
+    .setAddr(CSRs.senvcfg)
 
   val sscratch = Module(new CSRModule("Sscratch"))
-    .setAddr(0x140)
+    .setAddr(CSRs.sscratch)
 
   val sepc = Module(new CSRModule("Sepc", new Epc) with TrapEntryHSEventSinkBundle {
     rdata := SignExt(Cat(reg.epc.asUInt, 0.U(1.W)), XLEN)
   })
-    .setAddr(0x141)
+    .setAddr(CSRs.sepc)
 
   val scause = Module(new CSRModule("Scause", new CauseBundle) with TrapEntryHSEventSinkBundle)
-    .setAddr(0x142)
+    .setAddr(CSRs.scause)
 
   val stval = Module(new CSRModule("Stval") with TrapEntryHSEventSinkBundle)
-    .setAddr(0x143)
+    .setAddr(CSRs.stval)
 
   val sip = Module(new CSRModule("Sip", new SipBundle)
     with HasIpIeBundle
@@ -115,12 +116,12 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
       )
     }
   })
-    .setAddr(0x144)
+    .setAddr(CSRs.sip)
 
   val stimecmp = Module(new CSRModule("Stimecmp", new CSRBundle {
     val stimecmp = RW(63, 0).withReset(bitPatToUInt(BitPat.Y(64)))
   }))
-    .setAddr(0x14D)
+    .setAddr(CSRs.stimecmp)
 
   val satp = Module(new CSRModule("Satp", new SatpBundle) {
     // If satp is written with an unsupported MODE,
@@ -131,7 +132,7 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
       reg := reg
     }
   })
-    .setAddr(0x180)
+    .setAddr(CSRs.satp)
 
   val supervisorLevelCSRMods: Seq[CSRModule[_]] = Seq(
     sie,
@@ -148,13 +149,13 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
   )
 
   val supervisorLevelCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], Data)] = SeqMap(
-    0x100 -> (mstatus.wAliasSstatus, mstatus.sstatus),
+    CSRs.sstatus -> (mstatus.wAliasSstatus, mstatus.sstatus),
   ) ++ SeqMap.from(
     supervisorLevelCSRMods.map(csr => (csr.addr -> (csr.w, csr.rdata))).iterator
   )
 
   val supervisorLevelCSROutMap: SeqMap[Int, UInt] = SeqMap(
-    0x100 -> mstatus.sstatus.asUInt,
+    CSRs.sstatus -> mstatus.sstatus.asUInt,
   ) ++ SeqMap.from(
     supervisorLevelCSRMods.map(csr => (csr.addr -> csr.regOut.asInstanceOf[CSRBundle].asUInt)).iterator
   )
