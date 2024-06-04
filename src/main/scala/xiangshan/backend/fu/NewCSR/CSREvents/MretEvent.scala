@@ -7,7 +7,7 @@ import xiangshan.ExceptionNO
 import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CauseBundle, OneFieldBundle, PrivState}
 import xiangshan.backend.fu.NewCSR.CSRConfig.{VaddrMaxWidth, XLEN}
-import xiangshan.backend.fu.NewCSR.CSRDefines.{PrivMode, SatpMode}
+import xiangshan.backend.fu.NewCSR.CSRDefines.{PrivMode, SatpMode, VirtMode}
 import xiangshan.backend.fu.NewCSR._
 
 
@@ -42,7 +42,7 @@ class MretEventModule extends Module with CSREventBase {
   out.targetPc .valid := valid
 
   out.privState.bits.PRVM := in.mstatus.MPP
-  out.privState.bits.V    := in.mstatus.MPV
+  out.privState.bits.V    := Mux(in.mstatus.MPP === PrivMode.M, VirtMode.Off.asUInt, in.mstatus.MPV.asUInt)
   out.mstatus.bits.MPP    := PrivMode.U
   out.mstatus.bits.MIE    := in.mstatus.MPIE
   out.mstatus.bits.MPIE   := 1.U
