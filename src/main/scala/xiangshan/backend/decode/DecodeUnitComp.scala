@@ -211,6 +211,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           // uop0: mv vtype gpr to vector region
           csBundle(0).srcType(0) := SrcType.xp
           csBundle(0).srcType(1) := SrcType.no
+          csBundle(0).lsrc(0) := src2
           csBundle(0).lsrc(1) := 0.U
           csBundle(0).ldest := VECTOR_TMP_REG_LMUL.U
           csBundle(0).fuType := FuType.i2v.U
