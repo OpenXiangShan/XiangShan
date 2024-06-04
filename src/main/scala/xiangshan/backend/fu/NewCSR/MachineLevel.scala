@@ -4,12 +4,15 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.SignExt
+import utils.PerfEvent
 import xiangshan.backend.fu.NewCSR.CSRBundles._
 import xiangshan.backend.fu.NewCSR.CSRDefines._
 import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRROField => RO, CSRRWField => RW, _}
 import xiangshan.backend.fu.NewCSR.CSREvents._
 import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast._
 import xiangshan.backend.fu.NewCSR.ChiselRecordForField._
+import xiangshan.backend.fu.PerfCounterIO
+import xiangshan.backend.fu.NewCSR.CSRConfig._
 
 import scala.collection.immutable.SeqMap
 
@@ -160,7 +163,9 @@ trait MachineLevel { self: NewCSR =>
     .setAddr(0x320)
 
   val mhpmevents: Seq[CSRModule[_]] = (3 to 0x1F).map(num =>
-    Module(new CSRModule(s"Mhpmevent$num"))
+    Module(new CSRModule(s"Mhpmevent$num") with HasPerfEventBundle {
+      regOut := perfEvents(num - 3)
+    })
       .setAddr(0x320 + num)
   )
 
@@ -288,8 +293,8 @@ trait MachineLevel { self: NewCSR =>
 
   // Todo: guarded by mcountinhibit
   val mhpmcounters: Seq[CSRModule[_]] = (3 to 0x1F).map(num =>
-    Module(new CSRModule(s"Mhpmcounter$num") {
-
+    Module(new CSRModule(s"Mhpmcounter$num") with HasMachineCounterControlBundle with HasPerfCounterBundle {
+      reg.ALL := Mux(mcountinhibit.asUInt(num) | perfEventscounten(num - 3), reg.ALL.asUInt, reg.ALL.asUInt + perf(num - 3).value)
     }).setAddr(0xB00 + num)
   )
 
@@ -354,6 +359,21 @@ trait MachineLevel { self: NewCSR =>
   val machineLevelCSROutMap: SeqMap[Int, UInt] = SeqMap.from(
     machineLevelCSRMods.map(csr => (csr.addr -> csr.regOut.asInstanceOf[CSRBundle].asUInt)).iterator
   )
+
+  // perf tmp
+  val perfEvents = List.fill(8)(RegInit("h0000000000".U(XLEN.W))) ++
+    List.fill(8)(RegInit("h4010040100".U(XLEN.W))) ++
+    List.fill(8)(RegInit("h8020080200".U(XLEN.W))) ++
+    List.fill(5)(RegInit("hc0300c0300".U(XLEN.W)))
+
+  mhpmevents.foreach { mod =>
+    mod match {
+      case m: HasPerfEventBundle =>
+        m.perfEvents := perfEvents
+      case _ =>
+    }
+  }
+
 }
 
 class MstatusBundle extends CSRBundle {
@@ -587,3 +607,11 @@ trait HasMachineEnvBundle { self: CSRModule[_] =>
   val menvcfg = IO(Input(new MEnvCfg))
 }
 
+trait HasPerfCounterBundle { self: CSRModule[_] =>
+  val perfEventscounten = IO(Input(Vec(perfCntNum, Bool())))
+  val perf = IO(Input(Vec(perfCntNum, new PerfEvent)))
+}
+
+trait HasPerfEventBundle { self: CSRModule[_] =>
+  val perfEvents = IO(Input(Vec(perfCntNum, UInt(XLEN.W))))
+}

@@ -119,7 +119,7 @@ class CSRPermitModule extends Module {
   private val accessHPM = ren && csrIsHPM
   private val accessHPM_EX_II = accessHPM && (
     !privState.isModeM && !mcounteren(counterAddr) ||
-    privState.isModeHU && scounteren(counterAddr)
+    privState.isModeHU && !scounteren(counterAddr)
   )
   private val accessHPM_EX_VI = accessHPM && mcounteren(counterAddr) && (
     privState.isModeVS && !hcounteren(counterAddr) ||
