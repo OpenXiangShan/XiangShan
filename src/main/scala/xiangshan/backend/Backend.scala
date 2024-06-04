@@ -446,10 +446,10 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   csrio.perf.perfEventsCtrl <> ctrlBlock.getPerf
   private val fenceio = intExuBlock.io.fenceio.get
   io.fenceio <> fenceio
-  fenceio.disableSfence := csrio.disableSfence
-  fenceio.disableHfenceg := csrio.disableHfenceg
-  fenceio.disableHfencev := csrio.disableHfencev
-  fenceio.virtMode := csrio.customCtrl.virtMode
+  private val CSRtoDecode_EX_II = intExuBlock.io.csrToDecode.get
+  fenceio.disableSfence  := CSRtoDecode_EX_II.illegalInst.sfenceVMA  || CSRtoDecode_EX_II.virtualInst.sfenceVMA
+  fenceio.disableHfenceg := CSRtoDecode_EX_II.illegalInst.hfenceGVMA || CSRtoDecode_EX_II.virtualInst.hfence
+  fenceio.disableHfencev := CSRtoDecode_EX_II.illegalInst.hfenceVVMA || CSRtoDecode_EX_II.virtualInst.hfence
 
   // to fpExuBlock
   fpExuBlock.io.flush := ctrlBlock.io.toExuBlock.flush
