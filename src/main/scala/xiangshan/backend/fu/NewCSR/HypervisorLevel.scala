@@ -2,6 +2,7 @@ package xiangshan.backend.fu.NewCSR
 
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.rocket.CSRs
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.backend.fu.NewCSR.CSRBundles._
 import xiangshan.backend.fu.NewCSR.CSRConfig._
@@ -16,13 +17,13 @@ import scala.collection.immutable.SeqMap
 trait HypervisorLevel { self: NewCSR =>
 
   val hstatus = Module(new HstatusModule)
-    .setAddr(0x600)
+    .setAddr(CSRs.hstatus)
 
   val hedeleg = Module(new CSRModule("Hedeleg", new HedelegBundle))
-    .setAddr(0x602)
+    .setAddr(CSRs.hedeleg)
 
   val hideleg = Module(new CSRModule("Hideleg", new HidelegBundle))
-    .setAddr(0x603)
+    .setAddr(CSRs.hideleg)
 
   val hie = Module(new CSRModule("Hie", new HieBundle)
     with HasIpIeBundle
@@ -42,36 +43,36 @@ trait HypervisorLevel { self: NewCSR =>
       regOut(num) := mieIsAlias(num) && wtMie.bits.isRW.B &< mie(num)
     }
   })
-    .setAddr(0x604)
+    .setAddr(CSRs.hie)
 
   val htimedelta = Module(new CSRModule("Htimedelta", new CSRBundle {
     val VALUE = RW(63, 0)
   }))
-    .setAddr(0x605)
+    .setAddr(CSRs.htimedelta)
 
   val hcounteren = Module(new CSRModule("Hcounteren", new Counteren))
-    .setAddr(0x606)
+    .setAddr(CSRs.hcounteren)
 
   val hgeie = Module(new CSRModule("Hgeie", new HgeieBundle))
-    .setAddr(0x607)
+    .setAddr(CSRs.hgeie)
 
   val hvien = Module(new CSRModule("Hvien", new HvienBundle))
-    .setAddr(0x608)
+    .setAddr(CSRs.hvien)
 
   val hvictl = Module(new CSRModule("Hvictl", new HvictlBundle))
-    .setAddr(0x609)
+    .setAddr(CSRs.hvictl)
 
   val henvcfg = Module(new CSRModule("Henvcfg", new HEnvCfg) with HasHypervisorEnvBundle {
     when (!menvcfg.STCE.asBool && !privState.isModeM && accessStimecmp) {
       regOut.STCE := 0.U
     }
   })
-    .setAddr(0x60A)
+    .setAddr(CSRs.henvcfg)
 
   val htval = Module(new CSRModule("Htval", new CSRBundle {
     val ALL = RW(63, 0)
   }) with TrapEntryHSEventSinkBundle)
-    .setAddr(0x643)
+    .setAddr(CSRs.htval)
 
   val hip = Module(new CSRModule("Hip", new HipBundle)
     with HypervisorBundle
@@ -94,7 +95,7 @@ trait HypervisorLevel { self: NewCSR =>
     // vsip.SSIP is alias of hip.VSSIP, so vsip.SSIP is alias of hvip.VSSIP.
     // vsip.SSIP write throuth to hvip.VSSIP
   })
-    .setAddr(0x644)
+    .setAddr(CSRs.hip)
 
   val hvip = Module(new CSRModule("Hvip", new HvipBundle) {
     val fromMip  = IO(Flipped(new MipToHvip))
@@ -116,18 +117,18 @@ trait HypervisorLevel { self: NewCSR =>
       }
     }
   })
-    .setAddr(0x645)
+    .setAddr(CSRs.hvip)
 
   val hviprio1 = Module(new CSRModule("Hviprio1", new Hviprio1Bundle))
-    .setAddr(0x646)
+    .setAddr(CSRs.hviprio1)
 
   val hviprio2 = Module(new CSRModule("Hviprio2", new Hviprio2Bundle))
-    .setAddr(0x647)
+    .setAddr(CSRs.hviprio2)
 
   val htinst = Module(new CSRModule("Htinst", new CSRBundle {
     val ALL = RO(63, 0)
   }) with TrapEntryHSEventSinkBundle)
-    .setAddr(0x64A)
+    .setAddr(CSRs.htinst)
 
   val hgatp = Module(new CSRModule("Hgatp", new HgatpBundle) {
     // Ref: 13.2.10. Hypervisor Guest Address Translation and Protection Register (hgatp)
@@ -150,10 +151,10 @@ trait HypervisorLevel { self: NewCSR =>
       reg := reg
     }
   })
-    .setAddr(0x680)
+    .setAddr(CSRs.hgatp)
 
   val hgeip = Module(new CSRModule("Hgeip", new HgeipBundle))
-    .setAddr(0xE12)
+    .setAddr(CSRs.hgeip)
 
   val hypervisorCSRMods: Seq[CSRModule[_]] = Seq(
     hstatus,

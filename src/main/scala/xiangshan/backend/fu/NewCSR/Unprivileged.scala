@@ -42,7 +42,7 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     // read connection
     fflags := reg.asUInt(4, 0)
     frm := reg.FRM.asUInt
-  }).setAddr(0x003)
+  }).setAddr(CSRs.fcsr)
 
   // vec
   val vstart = Module(new CSRModule("Vstart", new CSRBundle {
@@ -56,7 +56,7 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
       reg.vstart := robCommit.vstart.bits
     }
   })
-    .setAddr(0x008)
+    .setAddr(CSRs.vstart)
 
   val vcsr = Module(new CSRModule("Vcsr", new CSRBundle {
     val VXSAT = RW(   0)
@@ -81,7 +81,7 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     // read connection
     vxsat := reg.VXSAT.asUInt
     vxrm  := reg.VXRM.asUInt
-  }).setAddr(0x00F)
+  }).setAddr(CSRs.vcsr)
 
   val vl = Module(new CSRModule("Vl", new CSRBundle {
     val VL = RO(VlWidth - 1, 0)
@@ -90,19 +90,19 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
       reg.VL := robCommit.vl.bits
     }
   })
-    .setAddr(0xC20)
+    .setAddr(CSRs.vl)
 
   val vtype = Module(new CSRModule("Vtype", new CSRVTypeBundle) with HasRobCommitBundle {
     when(robCommit.vtype.valid) {
       reg := robCommit.vtype.bits
     }
   })
-    .setAddr(0xC21)
+    .setAddr(CSRs.vtype)
 
   val vlenb = Module(new CSRModule("Vlenb", new CSRBundle {
     val VLENB = VlenbField(63, 0).withReset(VlenbField.init)
   }))
-    .setAddr(0xC22)
+    .setAddr(CSRs.vlenb)
 
   val cycle = Module(new CSRModule("cycle", new CSRBundle {
     val cycle = RO(63, 0)
@@ -147,19 +147,19 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
   )
 
   val unprivilegedCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], Data)] = SeqMap(
-    0x001 -> (fcsr.wAliasFflags -> fcsr.fflags),
-    0x002 -> (fcsr.wAliasFfm    -> fcsr.frm),
-    0x003 -> (fcsr.w            -> fcsr.rdata),
-    0x008 -> (vstart.w          -> vstart.rdata),
-    0x009 -> (vcsr.wAliasVxsat  -> vcsr.vxsat),
-    0x00A -> (vcsr.wAlisaVxrm   -> vcsr.vxrm),
-    0x00F -> (vcsr.w            -> vcsr.rdata),
-    0xC20 -> (vl.w              -> vl.rdata),
-    0xC21 -> (vtype.w           -> vtype.rdata),
-    0xC22 -> (vlenb.w           -> vlenb.rdata),
-    CSRs.cycle -> (cycle.w      -> cycle.rdata),
-    CSRs.time -> (time.w        -> time.rdata),
-    CSRs.instret -> (instret.w  -> instret.rdata),
+    CSRs.fflags -> (fcsr.wAliasFflags -> fcsr.fflags),
+    CSRs.frm    -> (fcsr.wAliasFfm    -> fcsr.frm),
+    CSRs.fcsr   -> (fcsr.w            -> fcsr.rdata),
+    CSRs.vstart -> (vstart.w          -> vstart.rdata),
+    CSRs.vxsat  -> (vcsr.wAliasVxsat  -> vcsr.vxsat),
+    CSRs.vxrm   -> (vcsr.wAlisaVxrm   -> vcsr.vxrm),
+    CSRs.vcsr   -> (vcsr.w            -> vcsr.rdata),
+    CSRs.vl     -> (vl.w              -> vl.rdata),
+    CSRs.vtype  -> (vtype.w           -> vtype.rdata),
+    CSRs.vlenb  -> (vlenb.w           -> vlenb.rdata),
+    CSRs.cycle  -> (cycle.w           -> cycle.rdata),
+    CSRs.time   -> (time.w            -> time.rdata),
+    CSRs.instret -> (instret.w        -> instret.rdata),
   ) ++ hpmcounters.map(counter => (counter.addr -> (counter.w -> counter.rdata)))
 
   val unprivilegedCSRMods: Seq[CSRModule[_]] = Seq(

@@ -2,6 +2,7 @@ package xiangshan.backend.fu.NewCSR
 
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.rocket.CSRs
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRWARLField => WARL}
 import xiangshan.backend.fu.NewCSR.CSRFunc._
@@ -17,7 +18,7 @@ trait CSRPMP { self: NewCSR =>
       // read condition
       regOut := cfgRData(64*(num/2+1)-1, 64*num/2)
     })
-      .setAddr(0x3A0 + num)
+      .setAddr(CSRs.pmpcfg0 + num)
   )
 
   // every pmpcfg has 8 cfgs
@@ -37,7 +38,7 @@ trait CSRPMP { self: NewCSR =>
       // read condition
       rdata := addrRData(num)
     })
-      .setAddr(0x3B0 + num)
+      .setAddr(CSRs.pmpaddr0 + num)
   )
 
   val pmpCSRMods: Seq[CSRModule[_]] = pmpcfg ++ pmpaddr
