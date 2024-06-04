@@ -40,25 +40,16 @@ case class ICacheParameters(
     tagECC: Option[String] = None,
     dataECC: Option[String] = None,
     replacer: Option[String] = Some("random"),
-    nMissEntries: Int = 2,
-    nReleaseEntries: Int = 1,
-    nProbeEntries: Int = 2,
-    // fdip default config
-    enableICachePrefetch: Boolean = true,
-    prefetchToL1: Boolean = false,
-    prefetchPipeNum: Int = 2,
-    nPrefetchEntries: Int = 12,
-    nPrefBufferEntries: Int = 32,
-    maxIPFMoveConf: Int = 1, // temporary use small value to cause more "move" operation
-    minRangeFromIFUptr: Int = 2,
-    maxRangeFromIFUptr: Int = 32,
 
+    PortNumber: Int = 2,
     nFetchMshr: Int = 4,
     nPrefetchMshr: Int = 10,
     nWayLookupSize: Int = 32,
     DataCodeUnit: Int = 64,
     ICacheDataBanks: Int = 8,
     ICacheDataSRAMWidth: Int = 66,
+    // TODO: hard code, need delete
+    partWayNum: Int = 4,
 
     nMMIOs: Int = 1,
     blockBytes: Int = 64
@@ -79,48 +70,27 @@ case class ICacheParameters(
 trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst with HasIFUConst{
   val cacheParams = icacheParameters
 
-  val DataCodeUnit = 64
-  val ICacheDataBanks = 8
-  val ICacheDataSRAMWidth = 66
-  val partWayNum = 4
+  def ICacheSets            = cacheParams.nSets
+  def ICacheWays            = cacheParams.nWays
+  def PortNumber            = cacheParams.PortNumber
+  def nFetchMshr            = cacheParams.nFetchMshr
+  def nPrefetchMshr         = cacheParams.nPrefetchMshr
+  def nWayLookupSize        = cacheParams.nWayLookupSize
+  def DataCodeUnit          = cacheParams.DataCodeUnit
+  def ICacheDataBanks       = cacheParams.ICacheDataBanks
+  def ICacheDataSRAMWidth   = cacheParams.ICacheDataSRAMWidth
+  def partWayNum            = cacheParams.partWayNum
+
+  def ICacheDataBits        = blockBits / ICacheDataBanks
+  def ICacheCodeBits        = math.ceil(ICacheDataBits / DataCodeUnit).toInt
+  def ICacheEntryBits       = ICacheDataBits + ICacheCodeBits
+  def ICacheBankVisitNum    = 32 * 8 / ICacheDataBits + 1
+  def highestIdxBit         = log2Ceil(nSets) - 1
 
   require((ICacheDataBanks >= 2) && isPow2(ICacheDataBanks))
-
-  val ICacheDataBits  = blockBits / ICacheDataBanks
-  val ICacheCodeBits  = math.ceil(ICacheDataBits / DataCodeUnit).toInt
-  val ICacheEntryBits = ICacheDataBits + ICacheCodeBits
-  // TODO: fix 32 hard code (fetch width)
-  val ICacheBankVisitNum    = 32 * 8 / ICacheDataBits + 1
-
   require(ICacheDataSRAMWidth >= ICacheEntryBits)
-
-  def highestIdxBit = log2Ceil(nSets) - 1
-
-  val ICacheSets = cacheParams.nSets
-  val ICacheWays = cacheParams.nWays
-
-  val ICacheSameVPAddrLength = 12
-  val ReplaceIdWid = 5
-
-  val ICacheWordOffset = 0
-  val ICacheSetOffset = ICacheWordOffset + log2Up(blockBytes)
-  val ICacheAboveIndexOffset = ICacheSetOffset + log2Up(ICacheSets)
-  val ICacheTagOffset = ICacheAboveIndexOffset min ICacheSameVPAddrLength
-
-  def PortNumber = 2
-
-  def enableICachePrefetch      = cacheParams.enableICachePrefetch
-  def prefetchToL1        = cacheParams.prefetchToL1
-  def prefetchPipeNum     = cacheParams.prefetchPipeNum
-  def nPrefetchEntries    = cacheParams.nPrefetchEntries
-  def nPrefBufferEntries  = cacheParams.nPrefBufferEntries
-  def maxIPFMoveConf      = cacheParams.maxIPFMoveConf
-  def minRangeFromIFUptr  = cacheParams.minRangeFromIFUptr
-  def maxRangeFromIFUptr  = cacheParams.maxRangeFromIFUptr
-
-  def nFetchMshr          = cacheParams.nFetchMshr
-  def nPrefetchMshr       = cacheParams.nPrefetchMshr
-  def nWayLookupSize      = cacheParams.nWayLookupSize
+  require(isPow2(ICacheSets), s"nSets($ICacheSets) must be pow2")
+  require(isPow2(ICacheWays), s"nWays($ICacheWays) must be pow2")
 
   def getBits(num: Int) = log2Ceil(num).W
 
@@ -179,9 +149,6 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
   def getPhyTagFromBlk(addr: UInt) = addr >> (pgUntagBits - blockOffBits)
   def getIdxFromBlk(addr: UInt) = addr(idxBits - 1, 0)
   def get_paddr_from_ptag(vaddr: UInt, ptag: UInt) = Cat(ptag, vaddr(pgUntagBits - 1, 0))
-
-  require(isPow2(nSets), s"nSets($nSets) must be pow2")
-  require(isPow2(nWays), s"nWays($nWays) must be pow2")
 }
 
 abstract class ICacheBundle(implicit p: Parameters) extends XSBundle
@@ -471,7 +438,7 @@ class ICacheIO(implicit p: Parameters) extends ICacheBundle
   val stop        = Input(Bool())
   val fetch       = new ICacheMainPipeBundle
   val toIFU       = Output(Bool())
-  val pmp         = Vec(PortNumber + prefetchPipeNum, new ICachePMPBundle)
+  val pmp         = Vec(2 * PortNumber, new ICachePMPBundle)
   val itlb        = Vec(PortNumber, new TlbRequestIO)
   val perfInfo    = Output(new ICachePerfInfo)
   val error       = new L1CacheErrorInfo
@@ -503,17 +470,17 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   val io = IO(new ICacheIO)
 
   println("ICache:")
-  println("  ICacheSets: "          + cacheParams.nSets)
-  println("  ICacheWays: "          + cacheParams.nWays)
-  println("  TagECC: "              + cacheParams.tagECC)
-  println("  DataECC: "             + cacheParams.dataECC)
-
-  println("  enableICachePrefetch:     " + cacheParams.enableICachePrefetch)
-  println("  prefetchToL1:       " + cacheParams.prefetchToL1)
-  println("  prefetchPipeNum:    " + cacheParams.prefetchPipeNum)
-  println("  nPrefetchEntries:   " + cacheParams.nPrefetchEntries)
-  println("  nPrefBufferEntries: " + cacheParams.nPrefBufferEntries)
-  println("  maxIPFMoveConf:     " + cacheParams.maxIPFMoveConf)
+  println("  TagECC: "                + cacheParams.tagECC)
+  println("  DataECC: "               + cacheParams.dataECC)
+  println("  ICacheSets: "            + cacheParams.nSets)
+  println("  ICacheWays: "            + cacheParams.nWays)
+  println("  PortNumber: "            + cacheParams.PortNumber)
+  println("  nFetchMshr: "            + cacheParams.nFetchMshr)
+  println("  nPrefetchMshr: "         + cacheParams.nPrefetchMshr)
+  println("  nWayLookupSize: "        + cacheParams.nWayLookupSize)
+  println("  DataCodeUnit: "          + cacheParams.DataCodeUnit)
+  println("  ICacheDataBanks: "       + cacheParams.ICacheDataBanks)
+  println("  ICacheDataSRAMWidth: "   + cacheParams.ICacheDataSRAMWidth)
 
   val (bus, edge) = outer.clientNode.out.head
 

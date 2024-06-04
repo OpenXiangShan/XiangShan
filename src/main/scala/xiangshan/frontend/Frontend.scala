@@ -93,23 +93,23 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   bpu.io.reset_vector := RegNext(io.reset_vector)
 
 // pmp
-  val prefetchPipeNum = ICacheParameters().prefetchPipeNum
+  val PortNumber = ICacheParameters().PortNumber
   val pmp = Module(new PMP())
   val pmp_check = VecInit(Seq.fill(coreParams.ipmpPortNum)(Module(new PMPChecker(3, sameCycle = true)).io))
   pmp.io.distribute_csr := csrCtrl.distribute_csr
   val pmp_req_vec     = Wire(Vec(coreParams.ipmpPortNum, Valid(new PMPReqBundle())))
-  (0 until 2 + prefetchPipeNum).foreach(i => pmp_req_vec(i) <> icache.io.pmp(i).req)
+  (0 until 2 * PortNumber).foreach(i => pmp_req_vec(i) <> icache.io.pmp(i).req)
   pmp_req_vec.last <> ifu.io.pmp.req
 
   for (i <- pmp_check.indices) {
     pmp_check(i).apply(tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, pmp_req_vec(i))
   }
-  (0 until 2 + prefetchPipeNum).foreach(i => icache.io.pmp(i).resp <> pmp_check(i).resp)
+  (0 until 2 * PortNumber).foreach(i => icache.io.pmp(i).resp <> pmp_check(i).resp)
   ifu.io.pmp.resp <> pmp_check.last.resp
 
   val itlb = Module(new TLB(coreParams.itlbPortNum, nRespDups = 1,
-    Seq.fill(prefetchPipeNum)(false) ++ Seq(true), itlbParams))
-  itlb.io.requestor.take(prefetchPipeNum) zip icache.io.itlb foreach {case (a,b) => a <> b}
+    Seq.fill(PortNumber)(false) ++ Seq(true), itlbParams))
+  itlb.io.requestor.take(PortNumber) zip icache.io.itlb foreach {case (a,b) => a <> b}
   itlb.io.requestor.last <> ifu.io.iTLBInter // mmio may need re-tlb, blocked
   itlb.io.hartId := io.hartId
   itlb.io.base_connect(sfence, tlbCsr)
