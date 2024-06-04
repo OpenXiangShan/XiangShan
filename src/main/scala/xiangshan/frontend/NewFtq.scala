@@ -1202,8 +1202,13 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     (isAfter(robCommPtr, commPtr) ||
       PriorityMuxDefault(notInvalidSeq.zip(commitStateQueueReg(commPtr.value).reverse), c_invalid) === c_commited)
 
+  /**
+    *************************************************************************************
+    * MMIO instruction fetch is allowed only if MMIO is the oldest instruction.
+    *************************************************************************************
+    */
   val mmioReadPtr = io.mmioCommitRead.mmioFtqPtr
-  val mmioLastCommit = isBefore(commPtr, mmioReadPtr) && (isAfter(ifuPtr,mmioReadPtr)  ||  mmioReadPtr ===   ifuPtr) &&
+  val mmioLastCommit = (isAfter(commPtr,mmioReadPtr) || (mmioReadPtr === commPtr)) &&
                        Cat(commitStateQueueReg(mmioReadPtr.value).map(s => { s === c_invalid || s === c_commited})).andR
   io.mmioCommitRead.mmioLastCommit := RegNext(mmioLastCommit)
 
