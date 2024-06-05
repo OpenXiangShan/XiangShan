@@ -144,6 +144,7 @@ object Bundles {
     val pc              = UInt(VAddrBits.W)
     val foldpc          = UInt(MemPredPCWidth.W)
     val exceptionVec    = ExceptionVec()
+    val hasException    = Bool()
     val trigger         = new TriggerCf
     val preDecodeInfo   = new PreDecodeInfo
     val pred_taken      = Bool()

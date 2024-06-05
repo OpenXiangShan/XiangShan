@@ -172,8 +172,6 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   }
   val toIntDq0Valid = Wire(Vec(RenameWidth, Bool()))
   val toIntDq1Valid = Wire(Vec(RenameWidth, Bool()))
-  dontTouch(toIntDq0Valid)
-  dontTouch(toIntDq1Valid)
   toIntDq0Valid.indices.map { case i =>
     toIntDq0Valid(i) := Mux(!io.toIntDq0.canAccept, false.B, Mux(!io.toIntDq1.canAccept, isOnlyDq0(i) || isBothDq01(i), isOnlyDq0(i) || aluSelectDq0(i) || brhSelectDq0(i)))
   }
@@ -282,7 +280,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   // notBlockedByPrevious: previous instructions can enqueue
   val hasException = VecInit(io.fromRename.zip(updatedUop).map {
     case (fromRename: DecoupledIO[DynInst], uop: DynInst) =>
-      selectFrontend(fromRename.bits.exceptionVec).asUInt.orR || uop.singleStep || fromRename.bits.trigger.getFrontendCanFire
+      fromRename.bits.hasException || uop.singleStep
   })
 
   private val blockedByWaitForward = Wire(Vec(RenameWidth, Bool()))
@@ -290,7 +288,11 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   for (i <- 1 until RenameWidth) {
     blockedByWaitForward(i) := blockedByWaitForward(i - 1) || (!io.enqRob.isEmpty || Cat(io.fromRename.take(i).map(_.valid)).orR) && isWaitForward(i)
   }
-  dontTouch(blockedByWaitForward)
+  if(backendParams.debugEn){
+    dontTouch(toIntDq0Valid)
+    dontTouch(toIntDq1Valid)
+    dontTouch(blockedByWaitForward)
+  }
 
   // Only the uop with block backward flag will block the next uop
   val nextCanOut = VecInit((0 until RenameWidth).map(i =>
