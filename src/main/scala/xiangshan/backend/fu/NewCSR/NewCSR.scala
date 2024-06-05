@@ -330,8 +330,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   }
 
   // Todo: support set dirty only when fcsr has changed
-  private val writeFpState = wenLegal && Seq(CSRs.fflags, CSRs.frm, CSRs.fcsr).map(_.U === addr).reduce(_ || _)
-  private val writeVecState = wenLegal && Seq(CSRs.vstart, CSRs.vxsat, CSRs.vxrm, CSRs.vcsr).map(_.U === addr).reduce(_ || _)
+  private val writeFpLegal  = permitMod.io.out.hasLegalFp
+  private val writeVecLegal = permitMod.io.out.hasLegalVec
 
   permitMod.io.in.csrAccess.ren := ren
   permitMod.io.in.csrAccess.wen := wen
@@ -359,6 +359,15 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   permitMod.io.in.status.menvcfg := menvcfg.rdata
   permitMod.io.in.status.henvcfg := henvcfg.rdata
+
+  permitMod.io.in.status.sstatusFS  := mstatus.regOut.FS.asUInt
+  permitMod.io.in.status.vsstatusFS := vsstatus.regOut.FS.asUInt
+
+  permitMod.io.in.status.sstatusVS  := mstatus.regOut.VS.asUInt
+  permitMod.io.in.status.vsstatusVS := vsstatus.regOut.VS.asUInt
+
+  permitMod.io.in.status.fsDirty := io.fromRob.commit.fsDirty
+  permitMod.io.in.status.vsDirty := io.fromRob.commit.vsDirty
 
   sstcIRGen.i.stime.valid := time.updated
   sstcIRGen.i.stime.bits  := time.stime
@@ -423,8 +432,10 @@ class NewCSR(implicit val p: Parameters) extends Module
     mod match {
       case m: HasRobCommitBundle =>
         m.robCommit := io.fromRob.commit
-        m.robCommit.fsDirty := io.fromRob.commit.fsDirty || writeFpState
-        m.robCommit.vsDirty := io.fromRob.commit.vsDirty || writeVecState
+        m.robCommit.fsDirty := io.fromRob.commit.fsDirty || writeFpLegal
+        m.robCommit.vsDirty := io.fromRob.commit.vsDirty || writeVecLegal
+        m.fsDirty := privState.isVirtual && io.fromRob.commit.fsDirty || writeFpLegal
+        m.vsDirty := privState.isVirtual && io.fromRob.commit.vsDirty || writeVecLegal
       case _ =>
     }
     mod match {

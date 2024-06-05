@@ -3,8 +3,9 @@ package xiangshan.backend.fu.NewCSR
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.decode.TruthTable
-import xiangshan.backend.fu.NewCSR.CSRBundles.{Counteren, PrivState}
 import freechips.rocketchip.rocket.CSRs
+import xiangshan.backend.fu.NewCSR.CSRBundles.{Counteren, PrivState}
+import xiangshan.backend.fu.NewCSR.CSRDefines._
 
 class CSRPermitModule extends Module {
   val io = IO(new CSRPermitIO)
@@ -62,9 +63,33 @@ class CSRPermitModule extends Module {
     henvcfg(63),
   )
 
+  private val (sFS, vsFS) = (
+    io.in.status.sstatusFS,
+    io.in.status.vsstatusFS,
+  )
+
+  private val (sVS, vsVS) = (
+    io.in.status.sstatusVS,
+    io.in.status.vsstatusVS,
+  )
+
+  private val fsDirty = io.in.status.fsDirty
+  private val vsDirty = io.in.status.vsDirty
+
+  private val (sFSIsOff, sVSIsOff) = (
+    sFS === ContextStatus.Off.asUInt,
+    sVS === ContextStatus.Off.asUInt,
+  )
+  private val (sOrVsFSIsOff, sOrVsVSIsOff) = (
+    sFSIsOff || vsFS === ContextStatus.Off.asUInt,
+    sVSIsOff || vsVS === ContextStatus.Off.asUInt,
+  )
+
   private val csrIsRO = addr(11, 10) === "b11".U
   private val csrIsUnpriv = addr(9, 8) === "b00".U
   private val csrIsHPM = addr >= CSRs.cycle.U && addr <= CSRs.hpmcounter31.U
+  private val wenFpCsr  = wen && Seq(CSRs.fflags, CSRs.frm, CSRs.fcsr).map(_.U === addr).reduce(_ || _)
+  private val wenVecCsr = wen && Seq(CSRs.vstart, CSRs.vxsat, CSRs.vxrm, CSRs.vcsr).map(_.U === addr).reduce(_ || _)
   private val counterAddr = addr(4, 0) // 32 counters
 
   private val accessTable = TruthTable(Seq(
@@ -121,16 +146,28 @@ class CSRPermitModule extends Module {
     ((privState.isModeHS || privState.isModeVS) && !mcounterenTM || !privState.isModeM && !menvcfgSTCE) && addr === CSRs.stimecmp.U)
   private val rwStimecmp_EX_VI = csrAccess && privState.isModeVS && (mcounterenTM && !hcounterenTM || menvcfgSTCE && !henvcfgSTCE) && addr === CSRs.stimecmp.U
 
+  private val FSIsOFF_EX_II = fsDirty && (!privState.isVirtual && sFSIsOff || privState.isVirtual && sOrVsFSIsOff)
+  private val VSIsOFF_EX_II = vsDirty && (!privState.isVirtual && sVSIsOff || privState.isVirtual && sOrVsVSIsOff)
+
+  private val FSOrVS_EX_II = FSIsOFF_EX_II || VSIsOFF_EX_II
+
+  private val wFp_EX_II  = wenFpCsr  && sOrVsFSIsOff
+  private val wVec_EX_II = wenVecCsr && sOrVsVSIsOff
+
+  private val wFpOrVec_EX_II = wFp_EX_II || wVec_EX_II
+
   io.out.illegal := csrAccess && csrAccessIllegal || mretIllegal
 
   // Todo: check correct
-  io.out.EX_II := io.out.illegal && !privState.isVirtual || mret_EX_II || sret_EX_II || rwSatp_EX_II || accessHPM_EX_II || rwStimecmp_EX_II || rwCustom_EX_II
+  io.out.EX_II := io.out.illegal && !privState.isVirtual || mret_EX_II || sret_EX_II || rwSatp_EX_II || accessHPM_EX_II || rwStimecmp_EX_II || rwCustom_EX_II || FSOrVS_EX_II || wFpOrVec_EX_II
   io.out.EX_VI := io.out.illegal &&  privState.isVirtual || mret_EX_VI || sret_EX_VI || rwSatp_EX_VI || accessHPM_EX_VI || rwStimecmp_EX_VI
 
-  io.out.hasLegalWen := io.in.csrAccess.wen && !csrAccessIllegal
+  io.out.hasLegalWen := wen && !csrAccessIllegal
   io.out.hasLegalMret := mret && !mretIllegal
   io.out.hasLegalSret := sret && !sretIllegal
 
+  io.out.hasLegalFp  := wenFpCsr  && !wFp_EX_II
+  io.out.hasLegalVec := wenVecCsr && !wVec_EX_II
   dontTouch(regularPrivilegeLegal)
 }
 
@@ -174,13 +211,27 @@ class CSRPermitIO extends Bundle {
       // Hypervisor environment configuration register.
       // Accessing vstimecmp from ** V level** will trap EX_VI, if menvcfg.STCE=1 && henvcfg.STCE=0
       val henvcfg = UInt(64.W)
+      // sstatus.FS
+      val sstatusFS = UInt(2.W)
+      // vsstatus.FS
+      val vsstatusFS = UInt(2.W)
+      // sstatus.VS
+      val sstatusVS = UInt(2.W)
+      // vsstatus.VS
+      val vsstatusVS = UInt(2.W)
+      // execute fp inst
+      val fsDirty = Bool()
+      // execute vec inst
+      val vsDirty = Bool()
     }
   })
 
   val out = Output(new Bundle {
-    val hasLegalWen = Bool()
+    val hasLegalWen  = Bool()
     val hasLegalMret = Bool()
     val hasLegalSret = Bool()
+    val hasLegalFp   = Bool()
+    val hasLegalVec  = Bool()
     // Todo: split illegal into EX_II and EX_VI
     val illegal = Bool()
     val EX_II = Bool()
