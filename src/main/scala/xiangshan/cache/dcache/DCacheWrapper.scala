@@ -458,6 +458,7 @@ class BankedDCacheWordResp(implicit p: Parameters) extends DCacheWordResp
 class DCacheWordRespWithError(implicit p: Parameters) extends BaseDCacheWordResp
 {
   val error = Bool() // all kinds of errors, include tag error
+  val nderr = Bool()
 }
 
 class DCacheLineResp(implicit p: Parameters) extends DCacheBundle
@@ -531,6 +532,7 @@ class UncacheWordResp(implicit p: Parameters) extends DCacheBundle
   val replay    = Bool()
   val tag_error = Bool()
   val error     = Bool()
+  val nderr     = Bool()
   val replayCarry = new ReplayCarry(nWays)
   val mshr_id = UInt(log2Up(cfg.nMissEntries).W)  // FIXME: why uncacheWordResp is not merged to baseDcacheResp
 
