@@ -1345,7 +1345,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   mainPipe.io.atomic_req <> io.lsu.atomics.req
 
-  mainPipe.io.invalid_resv_set := RegNext(wb.io.req.fire && wb.io.req.bits.addr === mainPipe.io.lrsc_locked_block.bits)
+  mainPipe.io.invalid_resv_set := RegNext(
+    wb.io.req.fire &&
+    wb.io.req.bits.addr === mainPipe.io.lrsc_locked_block.bits &&
+    mainPipe.io.lrsc_locked_block.valid
+  )
 
   //----------------------------------------
   // replace (main pipe)
