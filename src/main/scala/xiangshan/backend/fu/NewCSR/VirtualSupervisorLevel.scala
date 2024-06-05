@@ -3,6 +3,7 @@ package xiangshan.backend.fu.NewCSR
 import chisel3._
 import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util._
+import freechips.rocketchip.rocket.CSRs
 import utility.SignExt
 import xiangshan.backend.fu.NewCSR.CSRBundles._
 import xiangshan.backend.fu.NewCSR.CSRDefines.{
@@ -26,8 +27,20 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
     new CSRModule("VSstatus", new SstatusBundle)
       with SretEventSinkBundle
       with TrapEntryVSEventSinkBundle
+      with HasRobCommitBundle
+    {
+      when (fsDirty) {
+        assert(reg.FS =/= ContextStatus.Off, "The vsstatus.FS should not be Off when set dirty, please check decode")
+        reg.FS := ContextStatus.Dirty
+      }
+
+      when (vsDirty) {
+        assert(reg.VS =/= ContextStatus.Off, "The vsstatus.VS should not be Off when set dirty, please check decode")
+        reg.VS := ContextStatus.Dirty
+      }
+    }
   )
-    .setAddr(0x200)
+    .setAddr(CSRs.vsstatus)
 
   val vsie = Module(new CSRModule("VSie", new VSieBundle)
     with HypervisorBundle
@@ -100,13 +113,13 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
         field := field.getHardWireValue
       }
     }
-  }).setAddr(0x204)
+  }).setAddr(CSRs.vsie)
 
   val vstvec = Module(new CSRModule("VStvec", new XtvecBundle))
-    .setAddr(0x205)
+    .setAddr(CSRs.vstvec)
 
   val vsscratch = Module(new CSRModule("VSscratch"))
-    .setAddr(0x240)
+    .setAddr(CSRs.vsscratch)
 
   val vsepc = Module(
     new CSRModule("VSepc", new Epc)
@@ -115,20 +128,20 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
       rdata := SignExt(Cat(reg.epc.asUInt, 0.U(1.W)), XLEN)
     }
   )
-    .setAddr(0x241)
+    .setAddr(CSRs.vsepc)
 
   val vscause = Module(
     new CSRModule("VScause", new CauseBundle)
       with TrapEntryVSEventSinkBundle
   )
-    .setAddr(0x242)
+    .setAddr(CSRs.vscause)
 
   // Todo: shrink the width of vstval to the maximum width Virtual Address
   val vstval = Module(
     new CSRModule("VStval")
       with TrapEntryVSEventSinkBundle
   )
-    .setAddr(0x243)
+    .setAddr(CSRs.vstval)
 
   val vsip = Module(new CSRModule("VSip", new VSipBundle)
     with HypervisorBundle
@@ -166,12 +179,12 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
         field := field.getHardWireValue
       }
     }
-  }).setAddr(0x244)
+  }).setAddr(CSRs.vsip)
 
   val vstimecmp = Module(new CSRModule("VStimecmp", new CSRBundle {
     val vstimecmp = RW(63, 0).withReset(bitPatToUInt(BitPat.Y(64)))
   }))
-    .setAddr(0x24D)
+    .setAddr(CSRs.vstimecmp)
 
   val vsatp = Module(new CSRModule("VSatp", new SatpBundle) with VirtualSupervisorBundle {
     // Ref: 13.2.18. Virtual Supervisor Address Translation and Protection Register (vsatp)
@@ -190,7 +203,7 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
     }.otherwise {
       reg := reg
     }
-  }).setAddr(0x280)
+  }).setAddr(CSRs.vsatp)
 
   val virtualSupervisorCSRMods = Seq(
     vsstatus,

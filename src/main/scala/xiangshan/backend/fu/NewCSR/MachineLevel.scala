@@ -620,6 +620,8 @@ trait HasMachineCounterControlBundle { self: CSRModule[_] =>
 
 trait HasRobCommitBundle { self: CSRModule[_] =>
   val robCommit = IO(Input(new RobCommitCSR))
+  val fsDirty = IO(Input(Bool()))
+  val vsDirty = IO(Input(Bool()))
 }
 
 trait HasMachineEnvBundle { self: CSRModule[_] =>
