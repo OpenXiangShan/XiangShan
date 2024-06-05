@@ -37,7 +37,7 @@ import xiangshan.backend.fu.vector.Utils.VecDataToMaskDataVec
 
 class VSegmentBundle(implicit p: Parameters) extends VLSUBundle
 {
-  val vaddr            = UInt(VAddrBits.W)
+  val baseVaddr        = UInt(VAddrBits.W)
   val uop              = new DynInst
   val paddr            = UInt(PAddrBits.W)
   val mask             = UInt(VLEN.W)
@@ -50,6 +50,7 @@ class VSegmentBundle(implicit p: Parameters) extends VLSUBundle
   val exceptionvaddr   = UInt(VAddrBits.W)
   val exception_va     = Bool()
   val exception_pa     = Bool()
+  val isFof            = Bool()
 }
 
 class VSegmentUop(implicit p: Parameters) extends VLSUBundle{
@@ -108,7 +109,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   XSError((fieldIdx > maxNfields) &&  instMicroOpValid, s"fieldIdx > nfields, something error!\n")
 
   // MicroOp
-  val baseVaddr                       = instMicroOp.vaddr
+  val baseVaddr                       = instMicroOp.baseVaddr
   val alignedType                     = instMicroOp.alignedType
   val fuType                          = instMicroOp.uop.fuType
   val mask                            = instMicroOp.mask
@@ -236,7 +237,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   // first uop enqueue, we need to latch microOp of segment instruction
   when(io.in.fire && !instMicroOpValid){
     val vlmaxInVd                      = GenVLMAX(Mux(lmul.asSInt > 0.S, 0.U, lmul), Mux(isIndexed(instType), sew(1, 0), eew(1, 0))) // element number in a vd
-    instMicroOp.vaddr                 := io.in.bits.src_rs1(VAddrBits - 1, 0)
+    instMicroOp.baseVaddr             := io.in.bits.src_rs1(VAddrBits - 1, 0)
     instMicroOpValid                  := true.B // if is first uop
     instMicroOp.alignedType           := Mux(isIndexed(instType), sew(1, 0), eew(1, 0))
     instMicroOp.uop                   := io.in.bits.uop
@@ -246,6 +247,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     instMicroOp.vlmaxMaskInVd         := GenVlMaxMask(vlmaxInVd, elemIdxBits) // for merge data
     instMicroOp.vl                    := io.in.bits.src_vl.asTypeOf(VConfig()).vl
     segmentOffset                     := 0.U
+    instMicroOp.isFof                 := (fuOpType === VlduType.vleff) && FuType.isVLoad(fuType)
   }
   // latch data
   when(io.in.fire){
@@ -306,21 +308,35 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   // pmp
   // NOTE: only handle load/store exception here, if other exception happens, don't send here
   val pmp = WireInit(io.pmpResp)
-  when(state === s_pm){
+  when(state === s_pm) {
+    val addr_aligned = LookupTree(Mux(isIndexed(issueInstType), issueSew(1, 0), issueEew(1, 0)), List(
+      "b00".U   -> true.B,                   //b
+      "b01".U   -> (vaddr(0)    === 0.U), //h
+      "b10".U   -> (vaddr(1, 0) === 0.U), //w
+      "b11".U   -> (vaddr(2, 0) === 0.U)  //d
+    ))
+    val missAligned = !addr_aligned
+    exceptionVec(loadAddrMisaligned)  := !addr_aligned && FuType.isVLoad(fuType)
+    exceptionVec(storeAddrMisaligned) := !addr_aligned && !FuType.isVLoad(fuType)
+
     exception_va := exceptionVec(storePageFault) || exceptionVec(loadPageFault) ||
-    exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault)
+      exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault) || missAligned
     exception_pa := pmp.st || pmp.ld
 
-    instMicroOp.exception_pa       := exception_pa
-    instMicroOp.exception_va       := exception_va
+    instMicroOp.exception_pa := exception_pa
+    instMicroOp.exception_va := exception_va
     // update storeAccessFault bit
-    exceptionVec(loadAccessFault)  := exceptionVec(loadAccessFault) || pmp.ld
+    exceptionVec(loadAccessFault) := exceptionVec(loadAccessFault) || pmp.ld
     exceptionVec(storeAccessFault) := exceptionVec(storeAccessFault) || pmp.st
 
-    when(exception_va || exception_pa){
-      instMicroOp.exceptionvaddr     := vaddr
-      instMicroOp.vl                 := segmentIdx // for exception
-      instMicroOp.vstart             := segmentIdx // for exception
+    when(exception_va || exception_pa) {
+      when(segmentIdx === 0.U || !instMicroOp.isFof) {
+        instMicroOp.exceptionvaddr := vaddr
+        instMicroOp.vl := segmentIdx // for exception
+        instMicroOp.vstart := segmentIdx // for exception
+      }.otherwise {
+        instMicroOp.vl := segmentIdx
+      }
     }
   }
 
@@ -493,6 +509,9 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   }
   io.uopwriteback.valid               := (state === s_finish) && distanceBetween(enqPtr, deqPtr) =/= 0.U
   io.uopwriteback.bits.uop            := instMicroOp.uop
+  io.uopwriteback.bits.uop.exceptionVec := Mux((state === s_finish) && (stateNext === s_idle),
+                                                instMicroOp.uop.exceptionVec,
+                                                0.U.asTypeOf(ExceptionVec())) // only last uop will writeback exception
   io.uopwriteback.bits.mask.get       := instMicroOp.mask
   io.uopwriteback.bits.data           := data(deqPtr.value)
   io.uopwriteback.bits.vdIdx.get      := vdIdxInField
@@ -515,6 +534,12 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.feedback.bits.uopIdx.get         := uopq(deqPtr.value).uopIdx
 
   // exception
-  io.exceptionAddr                    := DontCare // TODO: fix it when handle exception
+  io.exceptionInfo                    := DontCare
+  io.exceptionInfo.bits.robidx        := instMicroOp.uop.robIdx
+  io.exceptionInfo.bits.uopidx        := uopq(deqPtr.value).uopIdx
+  io.exceptionInfo.bits.vstart        := instMicroOp.vstart
+  io.exceptionInfo.bits.vaddr         := instMicroOp.exceptionvaddr
+  io.exceptionInfo.bits.vl            := instMicroOp.vl
+  io.exceptionInfo.valid              := (state === s_finish) && (stateNext === s_idle) && instMicroOp.uop.exceptionVec.asUInt.orR
 }
 

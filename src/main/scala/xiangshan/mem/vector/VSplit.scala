@@ -209,12 +209,13 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
 
   val stride     = Mux(isIndexed(s1_instType), s1_stride, s1_notIndexedStride).asUInt // if is index instructions, get index when split
   val uopOffset  = genVUopOffset(s1_instType, s1_fof, s1_uopidx, s1_nf, s1_eew(1, 0), stride, s1_alignedType)
+  val activeNum  = Mux(s1_in.preIsSplit, PopCount(s1_in.flowMask), s1_flowNum)
 
   s1_kill               := s1_in.uop.robIdx.needFlush(io.redirect)
 
   // query mergeBuffer
   io.toMergeBuffer.req.valid             := s1_fire // only can_go will get MergeBuffer entry
-  io.toMergeBuffer.req.bits.flowNum      := Mux(s1_in.preIsSplit, PopCount(s1_in.flowMask), s1_flowNum)
+  io.toMergeBuffer.req.bits.flowNum      := activeNum
   io.toMergeBuffer.req.bits.data         := s1_in.data
   io.toMergeBuffer.req.bits.uop          := s1_in.uop
   io.toMergeBuffer.req.bits.mask         := s1_mask
@@ -232,7 +233,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
 //    XSError(vdIdxReg + 1.U === 0.U, s"Overflow! The number of vd should be less than 8\n")
 //  }
   // out connect
-  io.out.valid          := s1_valid && io.toMergeBuffer.resp.valid
+  io.out.valid          := s1_valid && io.toMergeBuffer.resp.valid && (activeNum =/= 0.U) // if activeNum == 0, this uop do nothing, can be killed.
   io.out.bits           := s1_in
   io.out.bits.uopOffset := uopOffset
   io.out.bits.stride    := stride
@@ -387,7 +388,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
     x.isvec                 := true.B
     x.mask                  := Mux(!issuePreIsSplit, usSplitMask, mask)
     x.reg_offset            := regOffset //for merge unit-stride data
-    x.vecActive             := vecActive
+    x.vecActive             := Mux(!issuePreIsSplit, true.B, vecActive) // currently, unit-stride's flow always send to pipeline
     x.is_first_ele          := DontCare
     x.usSecondInv           := usNoSplit
     x.elemIdx               := elemIdx
@@ -490,7 +491,7 @@ class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = t
 
   // send data to sq
   val vstd = io.vstd.get
-  vstd.valid := issueValid
+  vstd.valid := issueValid && (vecActive || !issuePreIsSplit)
   vstd.bits.uop := issueUop
   vstd.bits.uop.sqIdx := sqIdx
   vstd.bits.data := Mux(!issuePreIsSplit, usSplitData, flowData)
