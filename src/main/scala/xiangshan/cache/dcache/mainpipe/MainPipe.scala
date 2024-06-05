@@ -183,7 +183,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val block_lr = Output(Bool())
 
     // ecc error
-    val error = Output(new L1CacheErrorInfo())
+    val error = Output(ValidIO(new L1CacheErrorInfo))
     // force write
     val force_write = Input(Bool())
 
@@ -1622,20 +1622,20 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.mainpipe_info.s3_refill_resp := RegNext(s2_valid && s2_req.miss && s2_fire_to_s3)
 
   // report error to beu and csr, 1 cycle after read data resp
-  io.error := 0.U.asTypeOf(new L1CacheErrorInfo())
+  io.error := 0.U.asTypeOf(ValidIO(new L1CacheErrorInfo))
   // report error, update error csr
   io.error.valid := s3_error && RegNext(s2_fire)
   // only tag_error and data_error will be reported to beu
   // l2_error should not be reported (l2 will report that)
-  io.error.report_to_beu := (RegEnable(s2_tag_error, s2_fire) || s3_data_error) && RegNext(s2_fire)
-  io.error.paddr := RegEnable(s2_req.addr, s2_fire)
-  io.error.source.tag := RegEnable(s2_tag_error, s2_fire)
-  io.error.source.data := s3_data_error
-  io.error.source.l2 := RegEnable(s2_flag_error || s2_l2_error, s2_fire)
-  io.error.opType.store := RegEnable(s2_req.isStore && !s2_req.probe, s2_fire)
-  io.error.opType.probe := RegEnable(s2_req.probe, s2_fire)
-  io.error.opType.release := RegEnable(s2_req.replace, s2_fire)
-  io.error.opType.atom := RegEnable(s2_req.isAMO && !s2_req.probe, s2_fire)
+  io.error.bits.report_to_beu := (RegEnable(s2_tag_error, s2_fire) || s3_data_error) && RegNext(s2_fire)
+  io.error.bits.paddr := RegEnable(s2_req.addr, s2_fire)
+  io.error.bits.source.tag := RegEnable(s2_tag_error, s2_fire)
+  io.error.bits.source.data := s3_data_error
+  io.error.bits.source.l2 := RegEnable(s2_flag_error || s2_l2_error, s2_fire)
+  io.error.bits.opType.store := RegEnable(s2_req.isStore && !s2_req.probe, s2_fire)
+  io.error.bits.opType.probe := RegEnable(s2_req.probe, s2_fire)
+  io.error.bits.opType.release := RegEnable(s2_req.replace, s2_fire)
+  io.error.bits.opType.atom := RegEnable(s2_req.isAMO && !s2_req.probe, s2_fire)
 
   val perfEvents = Seq(
     ("dcache_mp_req          ", s0_fire                                                      ),

@@ -259,7 +259,7 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     val read_resp_delayed = Output(Vec(LoadPipelineWidth, Vec(VLEN/DCacheSRAMRowBits, new L1BankedDataReadResult())))
     val read_error_delayed = Output(Vec(LoadPipelineWidth,Vec(VLEN/DCacheSRAMRowBits, Bool())))
     // val nacks = Output(Vec(LoadPipelineWidth, Bool()))
-    // val errors = Output(Vec(LoadPipelineWidth + 1, new L1CacheErrorInfo)) // read ports + readline port
+    // val errors = Output(Vec(LoadPipelineWidth + 1, ValidIO(new L1CacheErrorInfo))) // read ports + readline port
     // when bank_conflict, read (1) port should be ignored
     val bank_conflict_slow = Output(Vec(LoadPipelineWidth, Bool()))
     val disable_ld_fast_wakeup = Output(Vec(LoadPipelineWidth, Bool()))

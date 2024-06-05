@@ -176,7 +176,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.hartId := io.hartId
   memBlock.io.outer_reset_vector := io.reset_vector
   // frontend -> memBlock
-  memBlock.io.inner_beu_errors_icache <> frontend.io.error.toL1BusErrorUnitInfo()
+  memBlock.io.inner_beu_errors_icache <> frontend.io.error.bits.toL1BusErrorUnitInfo(frontend.io.error.valid)
   memBlock.io.inner_l2_pf_enable := backend.io.csrCustomCtrl.l2_pf_enable
   memBlock.io.inner_cpu_halt := backend.io.toTop.cpuHalted
   memBlock.io.ooo_to_mem.issueLda <> backend.io.mem.issueLda
@@ -233,7 +233,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   io.cpu_halt := memBlock.io.outer_cpu_halt
   io.beu_errors.icache <> memBlock.io.outer_beu_errors_icache
-  io.beu_errors.dcache <> memBlock.io.error.toL1BusErrorUnitInfo()
+  io.beu_errors.dcache <> memBlock.io.error.bits.toL1BusErrorUnitInfo(memBlock.io.error.valid)
   io.beu_errors.l2 <> DontCare
   io.l2_pf_enable := memBlock.io.outer_l2_pf_enable
   // Modules are reset one by one

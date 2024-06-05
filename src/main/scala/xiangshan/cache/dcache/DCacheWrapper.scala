@@ -765,7 +765,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val l2_pf_store_only = Input(Bool())
   val lsu = new DCacheToLsuIO
   val csr = new L1CacheToCsrIO
-  val error = new L1CacheErrorInfo
+  val error = ValidIO(new L1CacheErrorInfo)
   val mshrFull = Output(Bool())
   val memSetPattenDetected = Output(Bool())
   val lqEmpty = Input(Bool())
@@ -883,7 +883,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   val errors = ldu.map(_.io.error) ++ // load error
     Seq(mainPipe.io.error) // store / misc error
-  io.error <> RegNext(Mux1H(errors.map(e => RegNext(e.valid) -> RegNext(e))))
+  val error_valid = errors.map(e => e.valid).reduce(_|_)
+  io.error.bits <> RegEnable(
+    Mux1H(errors.map(e => RegNext(e.valid) -> RegEnable(e.bits, e.valid))),
+    RegNext(error_valid))
+  io.error.valid := RegNext(RegNext(error_valid), init = false.B)
 
   //----------------------------------------
   // meta array
