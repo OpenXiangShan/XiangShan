@@ -292,7 +292,6 @@ trait MachineLevel { self: NewCSR =>
     reg.ALL := Mux(!mcountinhibit.IR.asUInt.asBool && robCommit.instNum.valid, reg.ALL.asUInt + robCommit.instNum.bits, reg.ALL.asUInt)
   }).setAddr(CSRs.minstret)
 
-  // Todo: guarded by mcountinhibit
   val mhpmcounters: Seq[CSRModule[_]] = (3 to 0x1F).map(num =>
     Module(new CSRModule(s"Mhpmcounter$num") with HasMachineCounterControlBundle with HasPerfCounterBundle {
       reg.ALL := Mux(mcountinhibit.asUInt(num) | perfEventscounten(num - 3), reg.ALL.asUInt, reg.ALL.asUInt + perf(num - 3).value)

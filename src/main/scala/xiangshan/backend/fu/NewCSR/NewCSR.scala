@@ -549,6 +549,11 @@ class NewCSR(implicit val p: Parameters) extends Module
         m.hstatusVGEIN := hstatus.regOut.VGEIN
       case _ =>
     }
+    mod match {
+      case m: HasMhpmeventOfBundle =>
+        m.ofVec := mhpmevents.map(event => event.rdata.head(1).asBool) //todo：fix
+      case _ =>
+    }
   }
 
   csrMods.foreach { mod =>
@@ -922,9 +927,9 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   /**
    * perf_begin
-   * perf number: 29 (frontend 8, ctrlblock 8, memblock 8, CSREvent 5)
+   * perf number: 29 (frontend 8, ctrlblock 8, memblock 8, huncun 5)
    */
-  for (i <-0 until perfCntNum) { //todo: check wenlegal
+  for (i <-0 until perfCntNum) {
     when(mhpmevents(i).w.wen) {
       perfEvents(i) := wdata
     }

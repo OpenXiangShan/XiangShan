@@ -146,6 +146,12 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
   })
     .setAddr(CSRs.satp)
 
+  val scountovf = Module(new CSRModule("Scountovf", new CSRBundle {
+    val OFVEC = RO(31, 3).withReset(0.U)
+  }) with HasMhpmeventOfBundle {
+    reg.OFVEC := ofVec.asUInt
+  }).setAddr(CSRs.scountovf)
+
   val supervisorLevelCSRMods: Seq[CSRModule[_]] = Seq(
     sie,
     stvec,
@@ -158,6 +164,7 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
     sip,
     stimecmp,
     satp,
+    scountovf,
   )
 
   val supervisorLevelCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], UInt)] = SeqMap(
@@ -227,4 +234,8 @@ class SipToMvip extends IpValidBundle {
 class SieToMie extends IeValidBundle {
   this.getHS.foreach(_.bits.setRW())
   this.getLocal.foreach(_.bits.setRW())
+}
+
+trait HasMhpmeventOfBundle { self: CSRModule[_] =>
+  val ofVec = IO(Input(Vec(perfCntNum, Bool())))
 }
