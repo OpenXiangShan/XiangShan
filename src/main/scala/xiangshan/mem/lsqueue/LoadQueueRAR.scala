@@ -97,8 +97,8 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   val release1Cycle = io.release
   // val release2Cycle = RegNext(io.release)
   // val release2Cycle_dup_lsu = RegNext(io.release)
-  val release2Cycle = RegEnable(io.release, io.release.valid)
-  val release2Cycle_dup_lsu = RegEnable(io.release, io.release.valid)
+  val release2Cycle = RegNextWithEnable(io.release)
+  val release2Cycle_dup_lsu = RegNextWithEnable(io.release)
 
   // LoadQueueRAR enqueue condition:
   // There are still not completed load instructions before the current load instruction.
