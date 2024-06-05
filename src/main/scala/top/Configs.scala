@@ -135,8 +135,25 @@ class MinimalConfig(n: Int = 1) extends Config(
           nReleaseEntries = 8,
           nMaxPrefetchEntry = 2,
         )),
-        EnableBPD = false, // disable TAGE
+        // ============ BPU ===============
         EnableLoop = false,
+        EnableGHistDiff = false,
+        FtbSize = 256,
+        FtbWays = 2,
+        RasSize = 8,
+        RasSpecSize = 16,
+        TageTableInfos =
+          Seq((512, 4, 6),
+            (512, 9, 6),
+            (1024, 19, 6)),
+        SCNRows = 128,
+        SCNTables = 2,
+        SCHistLens = Seq(0, 5),
+        ITTageTableInfos =
+          Seq((256, 4, 7),
+            (256, 8, 7),
+            (512, 16, 7)),
+        // ================================
         itlbParameters = TLBParameters(
           name = "itlb",
           fetchi = true,
