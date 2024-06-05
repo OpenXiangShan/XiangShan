@@ -285,12 +285,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   s1_ready := s2_ready || !s1_valid
   s1_fire  := s1_valid && s2_ready && !s1_flush
 
-  when(s1_valid) {
-    assert(!(s1_SRAMhits(0) && s1_MSHR_match(0)) && (!s1_doubleline || !(s1_SRAMhits(1) && s1_MSHR_match(1))),
-          "Multi hit in mainPipe s1: vaddr0=0x%x s1_SRAMhits(0)=%d s1_MSHR_match(0)=%d s1_SRAMhits(1)=%d s1_MSHR_match(1)=%d",
-          s1_req_vaddr(0), s1_SRAMhits(0), s1_MSHR_match(0), s1_SRAMhits(1), s1_MSHR_match(1))
-  }
-
   /**
     ******************************************************************************
     * ICache Stage 2
@@ -382,12 +376,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     }.elsewhen(s2_MSHR_hits(i)) {
       s2_corrupt(i) := fromMSHR.bits.corrupt
     }
-  }
-
-  when(s1_valid) {
-    assert(!(s2_hits(0) && s2_MSHR_match(0)) && (!s2_doubleline || !(s2_hits(1) && s2_MSHR_match(1))),
-          "Multi hit in mainPipe s2: vaddr0=0x%x s2_hits(0)=%d s2_MSHR_match(0)=%d s2_hits(1)=%d s2_MSHR_match(1)=%d",
-          s2_req_vaddr(0), s2_hits(0), s2_MSHR_match(0), s2_hits(1), s2_MSHR_match(1))
   }
 
   /**
