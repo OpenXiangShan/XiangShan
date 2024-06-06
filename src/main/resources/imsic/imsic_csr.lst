@@ -1,0 +1,4 @@
+$rtl_root_path_/imsic/imsic_csr_top.v
+$rtl_root_path_/imsic/imsic_csr_reg.v
+$rtl_root_path_/imsic/imsic_csr_gate.v
+$rtl_root_path_/imsic/common/cmip_dff_sync.sv

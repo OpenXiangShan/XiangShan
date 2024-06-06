@@ -33,11 +33,13 @@ MEM_GEN = ./scripts/vlsi_mem_gen
 MEM_GEN_SEP = ./scripts/gen_sep_mem.sh
 SPLIT_VERILOG = ./scripts/split_verilog.sh
 
-IMAGE  ?= temp
 CONFIG ?= DefaultConfig
 NUM_CORES ?= 1
 MFC ?= 1
 
+ifneq ($(shell echo "$(MAKECMDGOALS)" | grep ' '),)
+$(error At most one target can be specified)
+endif
 
 ifeq ($(MAKECMDGOALS),)
 GOALS = verilog
@@ -141,8 +143,8 @@ $(TOP_V): $(SCALA_FILE)
 		--target-dir $(@D) --config $(CONFIG) $(FPGA_MEM_ARGS)        \
 		--num-cores $(NUM_CORES) $(RELEASE_ARGS)
 ifeq ($(MFC),1)
-	$(SPLIT_VERILOG) $(RTL_DIR) $(TOP).v
-	$(MEM_GEN_SEP) "$(MEM_GEN)" "$(TOP_V).conf" "$(RTL_DIR)"
+	$(SPLIT_VERILOG) $(@D) $(@F)
+	$(MEM_GEN_SEP) "$(MEM_GEN)" "$@.conf" "$(@D)"
 endif
 	$(SED_CMD) $@
 	@git log -n 1 >> .__head__
@@ -163,8 +165,8 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 		--target-dir $(@D) --config $(CONFIG) $(SIM_MEM_ARGS)              \
 		--num-cores $(NUM_CORES) $(SIM_ARGS) --full-stacktrace
 ifeq ($(MFC),1)
-	$(SPLIT_VERILOG) $(RTL_DIR) $(SIM_TOP).v
-	$(MEM_GEN_SEP) "$(MEM_GEN)" "$(SIM_TOP_V).conf" "$(RTL_DIR)"
+	$(SPLIT_VERILOG) $(@D) $(@F)
+	$(MEM_GEN_SEP) "$(MEM_GEN)" "$@.conf" "$(@D)"
 endif
 	$(SED_CMD) $@
 	@git log -n 1 >> .__head__
@@ -175,17 +177,17 @@ endif
 	@mv .__out__ $@
 	@rm .__head__ .__diff__
 ifeq ($(PLDM),1)
-	sed -i -e 's/$$fatal/$$finish/g' $(SIM_TOP_V)
-	sed -i -e '/sed/! { \|$(SED_IFNDEF)|, \|$(SED_ENDIF)| { \|$(SED_IFNDEF)|d; \|$(SED_ENDIF)|d; } }' $(SIM_TOP_V)
+	sed -i -e 's/$$fatal/$$finish/g' $@
+	sed -i -e '/sed/! { \|$(SED_IFNDEF)|, \|$(SED_ENDIF)| { \|$(SED_IFNDEF)|d; \|$(SED_ENDIF)|d; } }' $@
 else
 ifeq ($(ENABLE_XPROP),1)
-	sed -i -e "s/\$$fatal/assert(1\'b0)/g" $(SIM_TOP_V)
+	sed -i -e "s/\$$fatal/assert(1\'b0)/g" $@
 else
-	sed -i -e 's/$$fatal/xs_assert(`__LINE__)/g' $(SIM_TOP_V)
+	sed -i -e 's/$$fatal/xs_assert(`__LINE__)/g' $@
 endif
 endif
 ifeq ($(MFC),1)
-	sed -i -e "s/\$$error(/\$$fwrite(32\'h80000002, /g" $(SIM_TOP_V)
+	sed -i -e "s/\$$error(/\$$fwrite(32\'h80000002, /g" $@
 endif
 
 sim-verilog: $(SIM_TOP_V)
@@ -232,5 +234,7 @@ pldm-debug:
 	$(MAKE) -C ./difftest pldm-debug SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
 
 include Makefile.test
+
+include src/main/scala/device/standalone/standalone_device.mk
 
 .PHONY: verilog sim-verilog emu clean help init bump bsp $(REF_SO)

@@ -1,0 +1,5 @@
+$rtl_root_path_/imsic/imsic_axi_top.v
+$rtl_root_path_/imsic/imsic_axi2reg.v
+$rtl_root_path_/imsic/imsic_regmap.v
+$rtl_root_path_/imsic/common/generic_fifo_dc_gray.v
+$rtl_root_path_/imsic/common/generic_dpram.v
