@@ -205,7 +205,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   for (i <- 0 until VirtualLoadQueueSize) {
     val cmt = io.vecCommit
     for (j <- 0 until VecLoadPipelineWidth) {
-      vecLdCommittmp(i)(j) := cmt(j).valid && cmt(j).bits.isCommit && uop(i).robIdx === cmt(j).bits.robidx && uop(i).uopIdx === cmt(j).bits.uopidx
+      vecLdCommittmp(i)(j) := allocated(i) && cmt(j).valid && cmt(j).bits.isCommit && uop(i).robIdx === cmt(j).bits.robidx && uop(i).uopIdx === cmt(j).bits.uopidx
     }
     vecLdCommit(i) := vecLdCommittmp(i).reduce(_ || _)
 
