@@ -759,6 +759,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     is(s_resp) {
       when(io.uncache.resp.fire) {
         uncacheState := s_wb
+
+        when (io.uncache.resp.bits.nderr) {
+          uop(deqPtr).exceptionVec(storeAccessFault) := true.B
+        }
       }
     }
     is(s_wb) {
