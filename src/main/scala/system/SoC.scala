@@ -49,7 +49,8 @@ case class SoCParameters
   )),
   XSTopPrefix: Option[String] = None,
   NodeIDWidth: Int = 7,
-  UseXSNoCTop: Boolean = false
+  UseXSNoCTop: Boolean = false,
+  IMSICUseTL: Boolean = false
 ){
   // L3 configurations
   val L3InnerBusWidth = 256

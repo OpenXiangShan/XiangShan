@@ -70,6 +70,12 @@ DEBUG_ARGS += --xstop-prefix $(XSTOP_PREFIX)
 PLDM_ARGS += --xstop-prefix $(XSTOP_PREFIX)
 endif
 
+ifeq ($(IMSIC_USE_TL),1)
+RELEASE_ARGS += --imsic-use-tl
+DEBUG_ARGS += --imsic-use-tl
+PLDM_ARGS += --imsic-use-tl
+endif
+
 # co-simulation with DRAMsim3
 ifeq ($(WITH_DRAMSIM3),1)
 ifndef DRAMSIM3_HOME

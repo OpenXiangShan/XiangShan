@@ -314,7 +314,7 @@ object TopMain extends App {
   ChiselDB.init(enableChiselDB && !envInFPGA)
 
   val soc = if (config(SoCParamsKey).UseXSNoCTop)
-    DisableMonitors(p => LazyModule(new XSNoCTop(true)(p)))(config)
+    DisableMonitors(p => LazyModule(new XSNoCTop()(p)))(config)
   else
     DisableMonitors(p => LazyModule(new XSTop()(p)))(config)
 

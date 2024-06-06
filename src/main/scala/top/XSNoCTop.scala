@@ -31,7 +31,7 @@ import freechips.rocketchip.tilelink._
 import coupledL2.tl2chi.PortIO
 import freechips.rocketchip.tile.MaxHartIdBits
 
-class XSNoCTop(useTL: Boolean = false)(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
+class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
 {
   override lazy val desiredName: String = "XSTop"
 
@@ -57,7 +57,7 @@ class XSNoCTop(useTL: Boolean = false)(implicit p: Parameters) extends BaseXSSoc
   })))
 
   // imsic bus top
-  val u_imsic_bus_top = LazyModule(new imsic_bus_top(useTL))
+  val u_imsic_bus_top = LazyModule(new imsic_bus_top(soc.IMSICUseTL))
 
   // interrupts
   val clintIntNode = IntSourceNode(IntSourcePortSimple(1, 1, 2))
