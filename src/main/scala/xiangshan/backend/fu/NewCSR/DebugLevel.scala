@@ -104,7 +104,7 @@ trait DebugLevel { self: NewCSR =>
 // tselect
 class TselectBundle(triggerNum: Int) extends CSRBundle{
   override val len: Int = log2Up(triggerNum)
-  val ALL = WARL(tselectWidth - 1, 0, wNoEffectWhen(WriteTselect)) // todo: paramterize
+  val ALL = WARL(len - 1, 0, wNoEffectWhen(WriteTselect))
   def WriteTselect(wdata: UInt) = {
     wdata >= triggerNum.U
   }
