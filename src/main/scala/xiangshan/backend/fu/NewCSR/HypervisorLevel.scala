@@ -126,7 +126,7 @@ trait HypervisorLevel { self: NewCSR =>
     .setAddr(CSRs.hviprio2)
 
   val htinst = Module(new CSRModule("Htinst", new CSRBundle {
-    val ALL = RO(63, 0)
+    val ALL = RW(63, 0)
   }) with TrapEntryHSEventSinkBundle)
     .setAddr(CSRs.htinst)
 

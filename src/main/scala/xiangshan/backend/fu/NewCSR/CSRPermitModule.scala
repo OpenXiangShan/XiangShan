@@ -140,6 +140,8 @@ class CSRPermitModule extends Module {
   io.out.hasLegalMret := mret && !mretIllegal
   io.out.hasLegalSret := sret && !sretIllegal
   io.out.hasLegalWfi := wfi && !wfi_EX_II && !wfi_EX_VI
+
+  dontTouch(regularPrivilegeLegal)
 }
 
 class CSRPermitIO extends Bundle {
