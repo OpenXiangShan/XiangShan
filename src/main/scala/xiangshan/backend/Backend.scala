@@ -385,8 +385,10 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   csrio.fpu.dirty_fs := ctrlBlock.io.robio.csr.dirty_fs
   csrio.vpu <> 0.U.asTypeOf(csrio.vpu) // Todo
 
-  val fromVsetVType = intExuBlock.io.vtype.getOrElse(0.U.asTypeOf((Valid(new VType))))
-  val vsetvlVType = RegEnable(fromVsetVType.bits, 0.U.asTypeOf(new VType), fromVsetVType.valid)
+  val fromIntExuVsetVType = intExuBlock.io.vtype.getOrElse(0.U.asTypeOf((Valid(new VType))))
+  val fromVfExuVsetVType = vfExuBlock.io.vtype.getOrElse(0.U.asTypeOf((Valid(new VType))))
+  val fromVsetVType = Mux(fromIntExuVsetVType.valid, fromIntExuVsetVType.bits, fromVfExuVsetVType.bits)
+  val vsetvlVType = RegEnable(fromVsetVType, 0.U.asTypeOf(new VType), fromIntExuVsetVType.valid || fromVfExuVsetVType.valid)
   ctrlBlock.io.robio.vsetvlVType := vsetvlVType
 
   val debugVconfig = dataPath.io.debugVconfig match {
