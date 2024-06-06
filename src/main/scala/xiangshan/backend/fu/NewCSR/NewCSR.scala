@@ -58,10 +58,6 @@ object CSRConfig {
 
   final val PMPAddrBits = PMPAddrWidth - PMPOffBits
 
-  // trigger
-  final val triggerNum    = 4     // Todo: use XSParams
-  final val tselectWidth  = 2     // log2Up(triggerNum)
-
   // perf
   final val perfCntNum = 29       // in Spec
 
