@@ -73,6 +73,7 @@ class CSRPermitModule extends Module {
     BitPat("b1__00___00") -> BitPat.Y(), // VU access U
     BitPat("b0__01___00") -> BitPat.Y(), // HS access U
     BitPat("b0__01___01") -> BitPat.Y(), // HS access S
+    BitPat("b0__01___10") -> BitPat.Y(), // HS access H
     BitPat("b1__01___00") -> BitPat.Y(), // VS access U
     BitPat("b1__01___01") -> BitPat.Y(), // VS access S
     BitPat("b0__11___00") -> BitPat.Y(), // M  access HU
