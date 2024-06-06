@@ -48,6 +48,7 @@ case class SoCParameters
     sets = 2048 // 1MB per bank
   )),
   XSTopPrefix: Option[String] = None,
+  imsicUseTL: Boolean = false,
   NodeIDWidth: Int = 7
 ){
   // L3 configurations
