@@ -106,6 +106,7 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
   out.scause   .valid := valid
   out.stval    .valid := valid
   out.htval    .valid := valid
+  out.htinst   .valid := valid
   out.targetPc .valid := valid
 
   out.privState.bits            := PrivState.ModeHS
