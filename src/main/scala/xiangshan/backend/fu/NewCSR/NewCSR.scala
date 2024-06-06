@@ -226,7 +226,6 @@ class NewCSR(implicit val p: Parameters) extends Module
   val legalSret = permitMod.io.out.hasLegalSret
   val legalMret = permitMod.io.out.hasLegalMret
   val isDret = io.dret // Todo: check permission
-  val isWfi  = permitMod.io.out.hasLegalWfi
 
   var csrRwMap: SeqMap[Int, (CSRAddrWriteBundle[_], Data)] =
     machineLevelCSRMap ++
@@ -344,7 +343,6 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   permitMod.io.in.mret := io.mret
   permitMod.io.in.sret := io.sret
-  permitMod.io.in.wfi  := io.wfi
   permitMod.io.in.csrIsCustom := customCSRMods.map(_.addr.U === addr).reduce(_ || _).orR
 
   permitMod.io.in.status.tsr := mstatus.regOut.TSR.asBool
@@ -1027,6 +1025,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.toDecode.virtualInst.hlsv       := isModeVS || isModeVU
   io.toDecode.illegalInst.fsIsOff    := mstatus.regOut.FS === ContextStatus.Off || (isModeVS || isModeVU) && vsstatus.regOut.FS === ContextStatus.Off
   io.toDecode.illegalInst.vsIsOff    := mstatus.regOut.VS === ContextStatus.Off || (isModeVS || isModeVU) && vsstatus.regOut.VS === ContextStatus.Off
+  io.toDecode.illegalInst.wfi        := isModeHU || !isModeM && mstatus.regOut.TW
+  io.toDecode.virtualInst.wfi        := isModeVS && !mstatus.regOut.TW && hstatus.regOut.VTW || isModeVU && !mstatus.regOut.TW
 
   // Always instantiate basic difftest modules.
   if (env.AlwaysBasicDiff || env.EnableDifftest) {

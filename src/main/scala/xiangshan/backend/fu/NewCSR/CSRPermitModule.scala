@@ -19,10 +19,9 @@ class CSRPermitModule extends Module {
 
   private val csrAccess = WireInit(ren || wen)
 
-  private val (mret, sret, wfi) = (
+  private val (mret, sret) = (
     io.in.mret,
     io.in.sret,
-    io.in.wfi,
   )
 
   private val (tsr, vtsr) = (
@@ -108,9 +107,6 @@ class CSRPermitModule extends Module {
     privState.isModeHS && tsr || privState.isModeVS && vtsr || privState.isModeHUorVU
   )
 
-  private val wfi_EX_II = wfi && (!privState.isModeM && tw)
-  private val wfi_EX_VI = wfi && (privState.isModeVS && vtw && !tw || privState.isModeVU && !tw)
-
   private val rwSatp_EX_II = csrAccess && privState.isModeHS &&  tvm && (addr === CSRs.satp.U || addr === CSRs.hgatp.U)
   private val rwSatp_EX_VI = csrAccess && privState.isModeVS && vtvm && (addr === CSRs.satp.U)
 
@@ -133,13 +129,12 @@ class CSRPermitModule extends Module {
   io.out.illegal := csrAccess && csrAccessIllegal || mret && mretIllegal || sret && sretIllegal
 
   // Todo: check correct
-  io.out.EX_II := io.out.illegal && !privState.isVirtual || wfi_EX_II || rwSatp_EX_II || accessHPM_EX_II || rwStimecmp_EX_II || rwCustom_EX_II
-  io.out.EX_VI := io.out.illegal &&  privState.isVirtual || wfi_EX_VI || rwSatp_EX_VI || accessHPM_EX_VI || rwStimecmp_EX_VI
+  io.out.EX_II := io.out.illegal && !privState.isVirtual || rwSatp_EX_II || accessHPM_EX_II || rwStimecmp_EX_II || rwCustom_EX_II
+  io.out.EX_VI := io.out.illegal &&  privState.isVirtual || rwSatp_EX_VI || accessHPM_EX_VI || rwStimecmp_EX_VI
 
   io.out.hasLegalWen := io.in.csrAccess.wen && !csrAccessIllegal
   io.out.hasLegalMret := mret && !mretIllegal
   io.out.hasLegalSret := sret && !sretIllegal
-  io.out.hasLegalWfi := wfi && !wfi_EX_II && !wfi_EX_VI
 
   dontTouch(regularPrivilegeLegal)
 }
@@ -155,7 +150,6 @@ class CSRPermitIO extends Bundle {
     val debugMode = Bool()
     val mret = Bool()
     val sret = Bool()
-    val wfi = Bool()
     val csrIsCustom = Bool()
     val status = new Bundle {
       // Trap SRET
@@ -192,7 +186,6 @@ class CSRPermitIO extends Bundle {
     val hasLegalWen = Bool()
     val hasLegalMret = Bool()
     val hasLegalSret = Bool()
-    val hasLegalWfi = Bool()
     // Todo: split illegal into EX_II and EX_VI
     val illegal = Bool()
     val EX_II = Bool()

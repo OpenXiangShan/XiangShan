@@ -360,6 +360,12 @@ class CSRToDecode(implicit p: Parameters) extends XSBundle {
      * raise EX_II when VS=Off
      */
     val vsIsOff = Bool()
+
+    /**
+     * illegal wfi
+     * raise EX_II when isModeHU || !isModeM && mstatus.TW=1
+     */
+    val wfi = Bool()
   }
   val virtualInst = new Bundle {
     /**
@@ -385,5 +391,11 @@ class CSRToDecode(implicit p: Parameters) extends XSBundle {
      * raise EX_VI when isModeVS || isModeVU
      */
     val hlsv = Bool()
+
+    /**
+     * illegal wfi
+     * raise EX_VI when isModeVU && mstatus.TW=0 || isModeVS && mstatus.TW=0 && hstatus.VTW=1
+     */
+    val wfi = Bool()
   }
 }
