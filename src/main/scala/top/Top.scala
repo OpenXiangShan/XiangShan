@@ -313,7 +313,11 @@ object TopMain extends App {
   Constantin.init(enableConstantin && !envInFPGA)
   ChiselDB.init(enableChiselDB && !envInFPGA)
 
-  val soc = DisableMonitors(p => LazyModule(new XSTop()(p)))(config)
+  val soc = if (config(SoCParamsKey).UseXSNoCTop)
+    DisableMonitors(p => LazyModule(new XSNoCTop(true)(p)))(config)
+  else
+    DisableMonitors(p => LazyModule(new XSTop()(p)))(config)
+
   Generator.execute(firrtlOpts, soc.module, firtoolOpts)
 
   // generate difftest bundles (w/o DifftestTopIO)

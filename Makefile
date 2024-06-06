@@ -34,11 +34,13 @@ TEST_FILE = $(shell find ./src/test/scala -name '*.scala')
 MEM_GEN = ./scripts/vlsi_mem_gen
 MEM_GEN_SEP = ./scripts/gen_sep_mem.sh
 
-IMAGE  ?= temp
 CONFIG ?= DefaultConfig
 NUM_CORES ?= 1
 MFC ?= 1
 
+ifneq ($(shell echo "$(MAKECMDGOALS)" | grep ' '),)
+$(error At most one target can be specified)
+endif
 
 ifeq ($(MAKECMDGOALS),)
 GOALS = verilog
@@ -140,7 +142,7 @@ $(TOP_V): $(SCALA_FILE)
 		--target-dir $(@D) --config $(CONFIG) $(FPGA_MEM_ARGS)        \
 		--num-cores $(NUM_CORES) $(RELEASE_ARGS)
 ifeq ($(MFC),1)
-	$(MEM_GEN_SEP) "$(MEM_GEN)" "$(TOP_V).conf" "$(RTL_DIR)"
+	$(MEM_GEN_SEP) "$(MEM_GEN)" "$@.conf" "$(@D)"
 endif
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
@@ -160,7 +162,7 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 		--target-dir $(@D) --config $(CONFIG) $(SIM_MEM_ARGS)              \
 		--num-cores $(NUM_CORES) $(SIM_ARGS) --full-stacktrace
 ifeq ($(MFC),1)
-	$(MEM_GEN_SEP) "$(MEM_GEN)" "$(SIM_TOP_V).conf" "$(RTL_DIR)"
+	$(MEM_GEN_SEP) "$(MEM_GEN)" "$@.conf" "$(@D)"
 endif
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
@@ -227,5 +229,7 @@ pldm-debug:
 	$(MAKE) -C ./difftest pldm-debug SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
 
 include Makefile.test
+
+include src/main/scala/device/standalone/standalone_device.mk
 
 .PHONY: verilog sim-verilog emu clean help init bump bsp $(REF_SO)
