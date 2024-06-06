@@ -551,7 +551,10 @@ class NewCSR(implicit val p: Parameters) extends Module
     }
     mod match {
       case m: HasMhpmeventOfBundle =>
-        m.ofVec := mhpmevents.map(event => event.rdata.head(1).asBool) //todo：fix
+        m.ofVec := VecInit(mhpmevents.map(event => event.rdata.head(1).asBool)).asUInt //todo：fix
+        m.privState := privState
+        m.mcounteren := mcounteren.rdata
+        m.hcounteren := hcounteren.rdata
       case _ =>
     }
   }
@@ -929,6 +932,7 @@ class NewCSR(implicit val p: Parameters) extends Module
    * perf_begin
    * perf number: 29 (frontend 8, ctrlblock 8, memblock 8, huncun 5)
    */
+  // tmp: mhpmevents is wrapper of perfEvents, read/write/update mhpmevents -> read/write/update perfEvents
   for (i <-0 until perfCntNum) {
     when(mhpmevents(i).w.wen) {
       perfEvents(i) := wdata
@@ -943,22 +947,35 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   val hpmHc = HPerfMonitor(csrevents, hpmEvents)
 
-  val perfEventscounten = RegInit(0.U.asTypeOf(Vec(perfCntNum, Bool())))
+  val privState1H = Cat(privState.isModeM, privState.isModeHS, privState.isModeHU, privState.isModeVS, privState.isModeVU)
+  val countingEn = RegInit(0.U.asTypeOf(Vec(perfCntNum, Bool())))
   for (i <-0 until perfCntNum) {
-    perfEventscounten(i) := (mhpmevents(i).rdata(63,60) & UIntToOH(privState.asUInt)).orR
+    countingEn(i) := ((~mhpmevents(i).rdata(62, 58)).asUInt & privState1H).orR
   }
   val allPerfEvents = io.perf.perfEventsFrontend ++
     io.perf.perfEventsCtrl ++
     io.perf.perfEventsLsu ++
     hpmHc.getPerf
 
-  mhpmcounters.foreach { mod =>
-    mod match {
+  val ofFromPerfCntVec  = Wire(Vec(perfCntNum, Bool()))
+  val lcofiReqVec       = Wire(Vec(perfCntNum, Bool()))
+  for(i <- 0 until perfCntNum) {
+    mhpmcounters(i) match {
       case m: HasPerfCounterBundle =>
-        m.perfEventscounten := perfEventscounten
-        m.perf              := allPerfEvents
+        m.countingEn        := countingEn(i)
+        m.perf              := allPerfEvents(i)
+        ofFromPerfCntVec(i) := m.toMhpmeventOF
       case _ =>
     }
+    perfEvents(i)   := ofFromPerfCntVec(i) ## perfEvents(i).tail(1)
+    lcofiReqVec(i)  := ofFromPerfCntVec(i) && !mhpmevents(i).rdata.head(1)
+  }
+
+  val lcofiReq = lcofiReqVec.asUInt.orR
+  mip match {
+    case m: HasLocalInterruptReqBundle =>
+      m.lcofiReq := lcofiReq
+    case _ =>
   }
   /**
    * perf_end

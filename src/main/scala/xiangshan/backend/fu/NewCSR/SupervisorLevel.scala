@@ -146,10 +146,19 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
   })
     .setAddr(CSRs.satp)
 
+  // scountovf: This register enables supervisor-level overflow interrupt handler software to quickly and easily
+  // determine which counter(s) have overflowed (without needing to make an execution environment call
+  // or series of calls ultimately up to M-mode).
   val scountovf = Module(new CSRModule("Scountovf", new CSRBundle {
+    override val len: Int = 32
     val OFVEC = RO(31, 3).withReset(0.U)
   }) with HasMhpmeventOfBundle {
-    reg.OFVEC := ofVec.asUInt
+    reg.OFVEC := ofVec
+    regOut.OFVEC := Mux1H(Seq(
+        privState.isModeHS -> (mcounteren.HPM.asUInt & reg.OFVEC.asUInt),
+        privState.isModeVS -> (mcounteren.HPM.asUInt & hcounteren.HPM.asUInt & reg.OFVEC.asUInt),
+      )
+    )
   }).setAddr(CSRs.scountovf)
 
   val supervisorLevelCSRMods: Seq[CSRModule[_]] = Seq(
@@ -237,5 +246,8 @@ class SieToMie extends IeValidBundle {
 }
 
 trait HasMhpmeventOfBundle { self: CSRModule[_] =>
-  val ofVec = IO(Input(Vec(perfCntNum, Bool())))
+  val ofVec = IO(Input(UInt(perfCntNum.W)))
+  val privState = IO(Input(new PrivState))
+  val mcounteren = IO(Input(new Counteren))
+  val hcounteren = IO(Input(new Counteren))
 }

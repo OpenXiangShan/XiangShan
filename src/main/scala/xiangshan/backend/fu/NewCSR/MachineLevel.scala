@@ -188,6 +188,7 @@ trait MachineLevel { self: NewCSR =>
     with HasIpIeBundle
     with HasExternalInterruptBundle
     with HasMachineEnvBundle
+    with HasLocalInterruptReqBundle
   {
     // Alias write in
     val fromMvip = IO(Flipped(new MvipToMip))
@@ -260,9 +261,10 @@ trait MachineLevel { self: NewCSR =>
     regOut.SGEIP := Cat(hgeip.asUInt & hgeie.asUInt).orR
 
     // bit 13 LCOFIP
+    reg.LCOFIP := lcofiReq
     when (fromSip.LCOFIP.valid || fromVSip.LCOFIP.valid) {
       reg.LCOFIP := Mux1H(Seq(
-        fromSip.LCOFIP.valid -> fromSip.LCOFIP.bits,
+        fromSip.LCOFIP.valid  -> fromSip.LCOFIP.bits,
         fromVSip.LCOFIP.valid -> fromVSip.LCOFIP.bits,
       ))
     }
@@ -294,7 +296,12 @@ trait MachineLevel { self: NewCSR =>
 
   val mhpmcounters: Seq[CSRModule[_]] = (3 to 0x1F).map(num =>
     Module(new CSRModule(s"Mhpmcounter$num") with HasMachineCounterControlBundle with HasPerfCounterBundle {
-      reg.ALL := Mux(mcountinhibit.asUInt(num) | perfEventscounten(num - 3), reg.ALL.asUInt, reg.ALL.asUInt + perf(num - 3).value)
+      val countingInhibit = mcountinhibit.asUInt(num) | !countingEn
+      val counterAdd = reg.ALL.asUInt +& perf.value
+      reg.ALL := Mux(countingInhibit, reg.ALL.asUInt, counterAdd.tail(1))
+      // Count overflow never results from writes to the mhpmcountern or mhpmeventn registers, only from
+      // hardware increments of counter registers.
+      toMhpmeventOF := !countingInhibit & counterAdd.head(1)
     }).setAddr(CSRs.mhpmcounter3 - 3 + num)
   )
 
@@ -360,7 +367,7 @@ trait MachineLevel { self: NewCSR =>
     machineLevelCSRMods.map(csr => (csr.addr -> csr.regOut.asInstanceOf[CSRBundle].asUInt)).iterator
   )
 
-  // perf tmp
+  // read/write/update mhpmevents -> read/write/update perfEvents
   val perfEvents = List.fill(8)(RegInit("h0000000000".U(XLEN.W))) ++
     List.fill(8)(RegInit("h4010040100".U(XLEN.W))) ++
     List.fill(8)(RegInit("h8020080200".U(XLEN.W))) ++
@@ -536,6 +543,16 @@ class McountinhibitBundle extends CSRBundle {
   val HPM3 = RW(31, 3)
 }
 
+// todo: for the future, delete bypass between mhpmevents and perfEvents
+class MhpmeventBundle extends CSRBundle {
+  val OF    = RW(63).withReset(0.U)
+  val MINH  = RW(62).withReset(0.U)
+  val SINH  = RW(61).withReset(0.U)
+  val UINH  = RW(60).withReset(0.U)
+  val VSINH = RW(59).withReset(0.U)
+  val VUINH = RW(58).withReset(0.U)
+}
+
 class MEnvCfg extends EnvCfg {
   if (CSRConfig.EXT_SSTC) {
     this.STCE.setRW().withReset(1.U)
@@ -610,10 +627,15 @@ trait HasMachineEnvBundle { self: CSRModule[_] =>
 }
 
 trait HasPerfCounterBundle { self: CSRModule[_] =>
-  val perfEventscounten = IO(Input(Vec(perfCntNum, Bool())))
-  val perf = IO(Input(Vec(perfCntNum, new PerfEvent)))
+  val countingEn    = IO(Input(Bool()))
+  val perf          = IO(Input(new PerfEvent))
+  val toMhpmeventOF = IO(Output(Bool()))
 }
 
 trait HasPerfEventBundle { self: CSRModule[_] =>
   val perfEvents = IO(Input(Vec(perfCntNum, UInt(XLEN.W))))
+}
+
+trait HasLocalInterruptReqBundle { self: CSRModule[_] =>
+  val lcofiReq = IO(Input(Bool()))
 }
