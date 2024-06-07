@@ -94,7 +94,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   val satp = Mux(enableS2xlate, io.csr.vsatp, io.csr.satp)
   val hgatp = io.csr.hgatp
-  val flush = io.sfence.valid || satp.changed
+  val flush = io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed
   val s2xlate = enableS2xlate && !onlyS1xlate
   val level = RegInit(0.U(log2Up(Level).W))
   val af_level = RegInit(0.U(log2Up(Level).W)) // access fault return this level
@@ -423,7 +423,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val enableS2xlate = io.in.bits.req_info.s2xlate =/= noS2xlate
   val satp = Mux(enableS2xlate, io.csr.vsatp, io.csr.satp)
 
-  val flush = io.sfence.valid || satp.changed
+  val flush = io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed
   val entries = Reg(Vec(l2tlbParams.llptwsize, new LLPTWEntry()))
   val state_idle :: state_hptw_req :: state_hptw_resp :: state_addr_check :: state_mem_req :: state_mem_waiting :: state_mem_out :: state_last_hptw_req :: state_last_hptw_resp :: state_cache :: Nil = Enum(10)
   val state = RegInit(VecInit(Seq.fill(l2tlbParams.llptwsize)(state_idle)))
