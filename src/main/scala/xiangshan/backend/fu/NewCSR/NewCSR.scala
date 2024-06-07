@@ -227,7 +227,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   val legalMret = permitMod.io.out.hasLegalMret
   val isDret = io.dret // Todo: check permission
 
-  var csrRwMap: SeqMap[Int, (CSRAddrWriteBundle[_], Data)] =
+  var csrRwMap: SeqMap[Int, (CSRAddrWriteBundle[_], UInt)] =
     machineLevelCSRMap ++
     supervisorLevelCSRMap ++
     hypervisorCSRMap ++
@@ -700,12 +700,24 @@ class NewCSR(implicit val p: Parameters) extends Module
   val tvm = mstatus.regOut.TVM.asBool
   val vtvm = hstatus.regOut.VTVM.asBool
 
-  private val rdata = Mux1H(csrRwMap.map { case (id, (_, rBundle)) =>
-    (raddr === id.U) -> rBundle.asUInt
+  private val rdata = Mux1H(csrRwMap.map { case (id, (_, rdata)) =>
+    if (vsMapS.contains(id)) {
+      ((isModeVS && addr === vsMapS(id).U) || !isModeVS && addr === id.U) -> rdata
+    } else if (sMapVS.contains(id)) {
+      (!isModeVS && addr === id.U) -> rdata
+    } else {
+      (raddr === id.U) -> rdata
+    }
   })
 
   private val regOut = Mux1H(csrOutMap.map { case (id, regOut) =>
-    (raddr === id.U) -> regOut
+    if (vsMapS.contains(id)) {
+      ((isModeVS && addr === vsMapS(id).U) || !isModeVS && addr === id.U) -> regOut
+    } else if (sMapVS.contains(id)) {
+      (!isModeVS && addr === id.U) -> regOut
+    } else {
+      (raddr === id.U) -> regOut
+    }
   })
 
   private val needTargetUpdate = mretEvent.out.targetPc.valid || sretEvent.out.targetPc.valid || dretEvent.out.targetPc.valid ||
