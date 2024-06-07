@@ -123,7 +123,7 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
   out.scause.bits.Interrupt     := isInterrupt
   out.scause.bits.ExceptionCode := highPrioTrapNO
   out.stval.bits.ALL            := tval
-  out.htval.bits.ALL            := tval2
+  out.htval.bits.ALL            := tval2 >> 2
   out.htinst.bits.ALL           := 0.U
   out.targetPc.bits             := in.pcFromXtvec
 
