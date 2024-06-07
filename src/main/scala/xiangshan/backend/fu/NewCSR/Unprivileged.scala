@@ -27,6 +27,8 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     val wAliasFfm = IO(Input(new CSRAddrWriteBundle(new CSRFrmBundle)))
     val fflags = IO(Output(Fflags()))
     val frm = IO(Output(Frm()))
+    val fflagsRdata = IO(Output(Fflags()))
+    val frmRdata = IO(Output(Frm()))
 
     // write connection
     this.wfn(reg)(Seq(wAliasFflags, wAliasFfm))
@@ -42,6 +44,9 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     // read connection
     fflags := reg.asUInt(4, 0)
     frm := reg.FRM.asUInt
+
+    fflagsRdata := fflags.asUInt
+    frmRdata := frm.asUInt
   }).setAddr(CSRs.fcsr)
 
   // vec
@@ -146,9 +151,9 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     }).setAddr(CSRs.cycle + num)
   )
 
-  val unprivilegedCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], Data)] = SeqMap(
-    CSRs.fflags -> (fcsr.wAliasFflags -> fcsr.fflags),
-    CSRs.frm    -> (fcsr.wAliasFfm    -> fcsr.frm),
+  val unprivilegedCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], UInt)] = SeqMap(
+    CSRs.fflags -> (fcsr.wAliasFflags -> fcsr.fflagsRdata),
+    CSRs.frm    -> (fcsr.wAliasFfm    -> fcsr.frmRdata),
     CSRs.fcsr   -> (fcsr.w            -> fcsr.rdata),
     CSRs.vstart -> (vstart.w          -> vstart.rdata),
     CSRs.vxsat  -> (vcsr.wAliasVxsat  -> vcsr.vxsat),

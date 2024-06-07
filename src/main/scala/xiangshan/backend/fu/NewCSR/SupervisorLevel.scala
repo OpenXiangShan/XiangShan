@@ -148,8 +148,8 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
     satp,
   )
 
-  val supervisorLevelCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], Data)] = SeqMap(
-    CSRs.sstatus -> (mstatus.wAliasSstatus, mstatus.sstatus),
+  val supervisorLevelCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], UInt)] = SeqMap(
+    CSRs.sstatus -> (mstatus.wAliasSstatus, mstatus.sstatusRdata),
   ) ++ SeqMap.from(
     supervisorLevelCSRMods.map(csr => (csr.addr -> (csr.w, csr.rdata))).iterator
   )

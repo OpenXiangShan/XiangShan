@@ -177,7 +177,7 @@ trait HypervisorLevel { self: NewCSR =>
     hgeip,
   )
 
-  val hypervisorCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], Data)] = SeqMap.from(
+  val hypervisorCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], UInt)] = SeqMap.from(
     hypervisorCSRMods.map(csr => (csr.addr -> (csr.w -> csr.rdata))).iterator
   )
 

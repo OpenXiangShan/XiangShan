@@ -102,11 +102,13 @@ class CSRPermitModule extends Module {
 
   private val csrAccessIllegal = (!privilegeLegal || rwIllegal)
 
-  private val mretIllegal = !privState.isModeM
+  private val mret_EX_II = mret && !privState.isModeM
+  private val mret_EX_VI = false.B
+  private val mretIllegal = mret_EX_II || mret_EX_VI
 
-  private val sretIllegal = sret && (
-    privState.isModeHS && tsr || privState.isModeVS && vtsr || privState.isModeHUorVU
-  )
+  private val sret_EX_II = sret && (privState.isModeHU || privState.isModeHS && tsr)
+  private val sret_EX_VI = sret && (privState.isModeVU || privState.isModeVS && vtsr)
+  private val sretIllegal = sret_EX_II || sret_EX_VI
 
   private val rwSatp_EX_II = csrAccess && privState.isModeHS &&  tvm && (addr === CSRs.satp.U || addr === CSRs.hgatp.U)
   private val rwSatp_EX_VI = csrAccess && privState.isModeVS && vtvm && (addr === CSRs.satp.U)
@@ -127,11 +129,11 @@ class CSRPermitModule extends Module {
     ((privState.isModeHS || privState.isModeVS) && !mcounterenTM || !privState.isModeM && !menvcfgSTCE) && addr === CSRs.stimecmp.U)
   private val rwStimecmp_EX_VI = csrAccess && privState.isModeVS && (mcounterenTM && !hcounterenTM || menvcfgSTCE && !henvcfgSTCE) && addr === CSRs.stimecmp.U
 
-  io.out.illegal := csrAccess && csrAccessIllegal || mret && mretIllegal || sret && sretIllegal
+  io.out.illegal := csrAccess && csrAccessIllegal || mretIllegal
 
   // Todo: check correct
-  io.out.EX_II := io.out.illegal && !privState.isVirtual || rwSatp_EX_II || accessHPM_EX_II || rwStimecmp_EX_II || rwCustom_EX_II
-  io.out.EX_VI := io.out.illegal &&  privState.isVirtual || rwSatp_EX_VI || accessHPM_EX_VI || rwStimecmp_EX_VI
+  io.out.EX_II := io.out.illegal && !privState.isVirtual || mret_EX_II || sret_EX_II || rwSatp_EX_II || accessHPM_EX_II || rwStimecmp_EX_II || rwCustom_EX_II
+  io.out.EX_VI := io.out.illegal &&  privState.isVirtual || mret_EX_VI || sret_EX_VI || rwSatp_EX_VI || accessHPM_EX_VI || rwStimecmp_EX_VI
 
   io.out.hasLegalWen := io.in.csrAccess.wen && !csrAccessIllegal
   io.out.hasLegalMret := mret && !mretIllegal

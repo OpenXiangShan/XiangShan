@@ -43,7 +43,7 @@ trait CSRCustom { self: NewCSR =>
     sfetchctl,
   )
 
-  val customCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_ <: CSRBundle], Data)] = SeqMap.from(
+  val customCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_ <: CSRBundle], UInt)] = SeqMap.from(
     customCSRMods.map(csr => (csr.addr -> (csr.w -> csr.rdata))).iterator
   )
 

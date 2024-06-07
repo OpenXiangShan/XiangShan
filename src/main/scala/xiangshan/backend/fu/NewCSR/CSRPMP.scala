@@ -43,7 +43,7 @@ trait CSRPMP { self: NewCSR =>
 
   val pmpCSRMods: Seq[CSRModule[_]] = pmpcfg ++ pmpaddr
 
-  val pmpCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], Data)] = SeqMap.from(
+  val pmpCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], UInt)] = SeqMap.from(
     pmpCSRMods.map(csr => csr.addr -> (csr.w -> csr.rdata)).iterator
   )
 

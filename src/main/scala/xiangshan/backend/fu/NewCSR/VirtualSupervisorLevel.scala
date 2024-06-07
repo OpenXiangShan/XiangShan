@@ -168,7 +168,7 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
   virtualSupervisorCSRMods.foreach(mod =>
     require(mod.addr > 0, s"The address of ${mod.modName} has not been set, you can use setAddr(CSRAddr) to set it."))
 
-  val virtualSupervisorCSRMap = SeqMap.from(
+  val virtualSupervisorCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], UInt)] = SeqMap.from(
     virtualSupervisorCSRMods.map(csr => (csr.addr -> (csr.w -> csr.rdata)))
   )
 

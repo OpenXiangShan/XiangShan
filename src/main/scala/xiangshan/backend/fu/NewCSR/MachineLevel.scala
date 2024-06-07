@@ -353,7 +353,7 @@ trait MachineLevel { self: NewCSR =>
     mconfigptr,
   ) ++ mhpmevents ++ mhpmcounters
 
-  val machineLevelCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], Data)] = SeqMap.from(
+  val machineLevelCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], UInt)] = SeqMap.from(
     machineLevelCSRMods.map(csr => (csr.addr -> (csr.w -> csr.rdata))).iterator
   )
 
@@ -416,6 +416,7 @@ class MstatusModule(implicit override val p: Parameters) extends CSRModule("MSta
 {
   val mstatus = IO(Output(bundle))
   val sstatus = IO(Output(new SstatusBundle))
+  val sstatusRdata = IO(Output(UInt(64.W)))
 
   val wAliasSstatus = IO(Input(new CSRAddrWriteBundle(new SstatusBundle)))
 
@@ -436,6 +437,7 @@ class MstatusModule(implicit override val p: Parameters) extends CSRModule("MSta
   mstatus :|= reg
   sstatus := mstatus
   rdata := mstatus.asUInt
+  sstatusRdata := sstatus.asUInt
 }
 
 class MisaBundle extends CSRBundle {
