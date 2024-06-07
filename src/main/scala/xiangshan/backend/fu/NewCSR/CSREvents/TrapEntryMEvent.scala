@@ -116,7 +116,7 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
   out.mcause.bits.Interrupt     := isInterrupt
   out.mcause.bits.ExceptionCode := highPrioTrapNO
   out.mtval.bits.ALL            := tval
-  out.mtval2.bits.ALL           := tval2
+  out.mtval2.bits.ALL           := tval2 >> 2
   out.mtinst.bits.ALL           := 0.U
   out.tcontrol.bits.MPTE        := in.tcontrol.MTE
   out.tcontrol.bits.MTE         := 0.U
