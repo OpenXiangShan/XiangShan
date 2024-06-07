@@ -363,6 +363,8 @@ class XiangShan(object):
             "linux-hello-smp": "bbl.bin",
             "linux-hello-opensbi": "fw_payload.bin",
             "linux-hello-smp-opensbi": "fw_payload.bin",
+            "linux-hello-new": "bbl.bin",
+            "linux-hello-smp-new": "bbl.bin",
             "povray": "_700480000000_.gz",
             "mcf": "_17520000000_.gz",
             "xalancbmk": "_266100000000_.gz",
