@@ -101,6 +101,7 @@ class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSP
   val causeNO = Input(new CauseBundle)
   val trapPc = Input(UInt(VaddrMaxWidth.W))
   val isCrossPageIPF = Input(Bool())
+  val isHls = Input(Bool())
 
   // always current privilege
   val iMode = Input(new PrivState())

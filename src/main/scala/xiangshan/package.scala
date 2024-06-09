@@ -819,6 +819,20 @@ package object xiangshan {
     def EX_VI     = virtualInstr
     def EX_SGPF   = storeGuestPageFault
 
+    def getAddressMisaligned = Seq(EX_IAM, EX_LAM, EX_SAM)
+
+    def getAccessFault = Seq(EX_IAF, EX_LAF, EX_SAF)
+
+    def getPageFault = Seq(EX_IPF, EX_LPF, EX_SPF)
+
+    def getGuestPageFault = Seq(EX_IGPF, EX_LGPF, EX_SGPF)
+
+    def getFetchFault = Seq(EX_IAM, EX_IAF, EX_IPF)
+
+    def getLoadFault = Seq(EX_LAM, EX_LAF, EX_LPF)
+
+    def getStoreFault = Seq(EX_SAM, EX_SAF, EX_SPF)
+
     def priorities = Seq(
       breakPoint, // TODO: different BP has different priority
       instrPageFault,

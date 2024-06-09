@@ -110,6 +110,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         val triggerCf = new TriggerCf
         val crossPageIPFFix = Bool()
         val isInterrupt = Bool()
+        val isHls = Bool()
       })
       val commit = Input(new RobCommitCSR)
     })
@@ -200,13 +201,14 @@ class NewCSR(implicit val p: Parameters) extends Module
   val trapIsInterrupt = io.fromRob.trap.bits.isInterrupt
   val trapIsCrossPageIPF = io.fromRob.trap.bits.crossPageIPFFix
   val triggerCf = io.fromRob.trap.bits.triggerCf
+  val trapIsHls = io.fromRob.trap.bits.isHls
 
   // debug_intrrupt
   val debugIntrEnable = RegInit(true.B) // debug interrupt will be handle only when debugIntrEnable
   val debugIntr = platformIRP.debugIP && debugIntrEnable
 
   // CSR Privilege State
-  val PRVM = RegInit(PrivMode(0), PrivMode.M)
+  val PRVM = RegInit(PrivMode(1, 0), PrivMode.M)
   val V = RegInit(VirtMode(0), VirtMode.Off)
   val debugMode = RegInit(false.B)
 
@@ -563,11 +565,12 @@ class NewCSR(implicit val p: Parameters) extends Module
         in.causeNO := trapHandleMod.io.out.causeNO
         in.trapPc := trapPC
         in.isCrossPageIPF := trapIsCrossPageIPF
+        in.isHls := trapIsHls
 
         in.iMode.PRVM := PRVM
         in.iMode.V := V
         in.dMode.PRVM := Mux(mstatus.regOut.MPRV.asBool, mstatus.regOut.MPP, PRVM)
-        in.dMode.V := Mux(mstatus.regOut.MPRV.asBool, mstatus.regOut.MPV, V)
+        in.dMode.V := V.asUInt.asBool || mstatus.regOut.MPRV && (mstatus.regOut.MPP =/= PrivMode.M) && mstatus.regOut.MPV
 
         in.privState := privState
         in.mstatus := mstatus.regOut
