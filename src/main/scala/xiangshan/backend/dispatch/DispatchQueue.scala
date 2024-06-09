@@ -38,7 +38,6 @@ class DispatchQueueIO(enqnum: Int, deqnum: Int, size: Int)(implicit p: Parameter
   val deq = Vec(deqnum, DecoupledIO(new DynInst))
   val redirect = Flipped(ValidIO(new Redirect))
   val dqFull = Output(Bool())
-  val deqNext = Vec(deqnum, Output(new DynInst))  // deqNext >> deq
   val validDeq0Num = Output(UInt(size.U.getWidth.W))
   val validDeq1Num = Output(UInt(size.U.getWidth.W))
 }
@@ -193,6 +192,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dqIndex: Int = 0)(impli
 
   // enqueue
   val numEnq = Mux(io.enq.canAccept, PopCount(io.enq.req.map(_.valid)), 0.U)
+  val numNeedAlloc = Mux(io.enq.canAccept, PopCount(io.enq.needAlloc), 0.U)
   tailPtr(0) := Mux(io.redirect.valid,
     tailPtr(0),
     Mux(lastCycleMisprediction,
@@ -219,7 +219,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dqIndex: Int = 0)(impli
       currentValidCounter,
       validCounter + numEnq - numDeq)
   )
-  allowEnqueue := Mux(currentValidCounter > (size - enqnum).U +& numDeq, false.B, numEnq +& currentValidCounter <= (size - enqnum).U +& numDeq)
+  allowEnqueue := (numNeedAlloc +& currentValidCounter <= (size - enqnum).U) || (numNeedAlloc +& currentValidCounter - (size - enqnum).U <= numDeq)
 
   /**
    * Part 3: set output valid and data bits
@@ -249,12 +249,10 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dqIndex: Int = 0)(impli
     nextStepData(i) := Mux(enqBypassEn, enqBypassData, readData)
   }
   for (i <- 0 until deqnum) {
-    io.deqNext(i) := deqData(i)
     when (!io.redirect.valid) {
-      io.deqNext(i) := ParallelPriorityMux(deqEnable_n, nextStepData.drop(i).take(deqnum + 1))
+      deqData(i) := ParallelPriorityMux(deqEnable_n, nextStepData.drop(i).take(deqnum + 1))
     }
   }
-  deqData := io.deqNext
   // T-2: read data from storage: next
   for (i <- 0 until 2 * deqnum) {
     dataModule.io.ren.get(i) := io.redirect.valid || io.deq.map(_.valid).reduce(_|_)
