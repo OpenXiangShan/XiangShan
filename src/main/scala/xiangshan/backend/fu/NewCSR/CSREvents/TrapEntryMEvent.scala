@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.SignExt
-import xiangshan.ExceptionNO._
+import xiangshan.ExceptionNO
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CauseBundle, OneFieldBundle, PrivState}
 import xiangshan.backend.fu.NewCSR.CSRConfig.{VaddrMaxWidth, XLEN}
 import xiangshan.backend.fu.NewCSR._
@@ -70,18 +70,21 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
   private val fetchIsVirt = iMode.isVirtual
   private val memIsVirt   = dMode.isVirtual
 
-  private val isFetchExcp    = isException && Seq(/*EX_IAM, */ EX_IAF, EX_IPF).map(_.U === highPrioTrapNO).reduce(_ || _)
-  private val isMemExcp      = isException && Seq(EX_LAM, EX_LAF, EX_SAM, EX_SAF, EX_LPF, EX_SPF).map(_.U === highPrioTrapNO).reduce(_ || _)
-  private val isBpExcp       = isException && EX_BP.U === highPrioTrapNO
+  private val isFetchExcp    = isException && ExceptionNO.getFetchFault.map(_.U === highPrioTrapNO).reduce(_ || _)
+  private val isMemExcp      = isException && (ExceptionNO.getLoadFault ++ ExceptionNO.getStoreFault).map(_.U === highPrioTrapNO).reduce(_ || _)
+  private val isBpExcp       = isException && ExceptionNO.EX_BP.U === highPrioTrapNO
+  private val isHlsExcp      = isException && in.isHls
   private val fetchCrossPage = in.isCrossPageIPF
 
-  private val isGuestExcp    = isException && Seq(EX_IGPF, EX_LGPF, EX_SGPF).map(_.U === highPrioTrapNO).reduce(_ || _)
+  private val isGuestExcp    = isException && ExceptionNO.getGuestPageFault.map(_.U === highPrioTrapNO).reduce(_ || _)
   // Software breakpoint exceptions are permitted to write either 0 or the pc to xtval
   // We fill pc here
   private val tvalFillPc       = isFetchExcp && !fetchCrossPage || isBpExcp
   private val tvalFillPcPlus2  = isFetchExcp && fetchCrossPage
   private val tvalFillMemVaddr = isMemExcp
-  private val tvalFillGVA      = isGuestExcp ||
+  private val tvalFillGVA      =
+    isHlsExcp && isMemExcp ||
+    isGuestExcp ||
     (isFetchExcp || isBpExcp) && fetchIsVirt ||
     isMemExcp && memIsVirt
 
