@@ -53,7 +53,7 @@ class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle
 
 class FuncUnitDataInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val src       = MixedVec(cfg.genSrcDataVec)
-  val imm       = UInt(cfg.dataBits.W)
+  val imm       = UInt(cfg.destDataBits.W)
   val pc        = OptionWrapper(cfg.needPc, UInt(VAddrData().dataWidth.W))
 
   def getSrcVConfig : UInt = src(cfg.vconfigIdx)
@@ -61,7 +61,7 @@ class FuncUnitDataInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
 }
 
 class FuncUnitDataOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
-  val data      = UInt(cfg.dataBits.W)
+  val data      = UInt(cfg.destDataBits.W)
   val fflags    = OptionWrapper(cfg.writeFflags, UInt(5.W))
   val vxsat     = OptionWrapper(cfg.writeVxsat, Vxsat())
   val pc        = OptionWrapper(cfg.isFence, UInt(VAddrData().dataWidth.W))

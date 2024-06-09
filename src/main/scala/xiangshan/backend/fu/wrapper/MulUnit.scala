@@ -12,7 +12,7 @@ class MulUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 {
   override def latency: Int = 2
 
-  private val xlen = cfg.dataBits
+  private val xlen = cfg.destDataBits
 
   val func = io.in.bits.ctrl.fuOpType
   val src = io.in.bits.data.src
@@ -35,7 +35,7 @@ class MulUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   )
 
   // len should be xlen + 1
-  private val len = cfg.dataBits + 1
+  private val len = cfg.destDataBits + 1
   private val mulDataModule = Module(new ArrayMulDataModule(len))
 
   mulDataModule.io.a := LookupTree(

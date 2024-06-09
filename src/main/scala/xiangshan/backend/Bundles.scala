@@ -542,7 +542,7 @@ object Bundles {
   class ExuInput(val params: ExeUnitParams, copyWakeupOut:Boolean = false, copyNum:Int = 0)(implicit p: Parameters) extends XSBundle {
     val fuType        = FuType()
     val fuOpType      = FuOpType()
-    val src           = Vec(params.numRegSrc, UInt(params.dataBitsMax.W))
+    val src           = Vec(params.numRegSrc, UInt(params.srcDataBitsMax.W))
     val imm           = UInt(32.W)
     val robIdx        = new RobPtr
     val iqIdx         = UInt(log2Up(MemIQSizeMax).W)// Only used by store yet
@@ -651,7 +651,7 @@ object Bundles {
   )(implicit
     val p: Parameters
   ) extends Bundle with BundleSource with HasXSParameter {
-    val data         = UInt(params.dataBitsMax.W)
+    val data         = UInt(params.destDataBitsMax.W)
     val pdest        = UInt(params.wbPregIdxWidth.W)
     val robIdx       = new RobPtr
     val intWen       = if (params.needIntWen)   Some(Bool())                  else None
@@ -799,7 +799,7 @@ object Bundles {
   )(implicit
     val p: Parameters
   ) extends Bundle {
-    val data  = UInt(params.dataBitsMax.W)
+    val data  = UInt(params.destDataBitsMax.W)
     val pdest = UInt(params.wbPregIdxWidth.W)
   }
 

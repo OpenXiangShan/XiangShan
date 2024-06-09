@@ -26,7 +26,8 @@ import xiangshan.backend.datapath.DataConfig._
   * @param writeVlRf the $fu write vl regfiles
   * @param writeFflags the $fu write fflags csr
   * @param writeVxsat the $fu write vxsat csr
-  * @param dataBits the width of data in the $fu
+  * @param destDataBits the width of output data in the $fu
+  * @param srcDataBits the width of input data in the $fu, the default value is destDataBits
   * @param latency the latency of instuction executed in the $fu
   * @param hasInputBuffer if the $fu has input buffer
   * @param exceptionOut the $fu can produce these exception
@@ -57,7 +58,8 @@ case class FuConfig (
   writeFakeIntRf: Boolean = false,
   writeFflags   : Boolean = false,
   writeVxsat    : Boolean = false,
-  dataBits      : Int = 64,
+  destDataBits  : Int = 64,
+  srcDataBits   : Option[Int] = None,
   latency       : HasFuLatency = CertainLatency(0),// two field (base latency, extra latency(option))
   hasInputBuffer: (Boolean, Int, Boolean) = (false, 0, false),
   exceptionOut  : Seq[Int] = Seq(),
@@ -260,7 +262,8 @@ object FuConfig {
     writeVecRf = true,
     writeV0Rf = true,
     latency = CertainLatency(0),
-    dataBits = 128,
+    destDataBits = 128,
+    srcDataBits = Some(64),
     immType = Set(SelImm.IMM_OPIVIU, SelImm.IMM_OPIVIS),
   )
 
@@ -276,7 +279,8 @@ object FuConfig {
     writeVecRf = true,
     writeV0Rf = true,
     latency = CertainLatency(0),
-    dataBits = 128,
+    destDataBits = 128,
+    srcDataBits = Some(64),
   )
 
   val CsrCfg: FuConfig = FuConfig (
@@ -523,7 +527,7 @@ object FuConfig {
     latency = CertainLatency(1),
     vconfigWakeUp = true,
     maskWakeUp = true,
-    dataBits = 128,
+    destDataBits = 128,
     exceptionOut = Seq(illegalInstr),
     immType = Set(SelImm.IMM_OPIVIU, SelImm.IMM_OPIVIS, SelImm.IMM_VRORVI),
   )
@@ -543,7 +547,7 @@ object FuConfig {
     latency = CertainLatency(2),
     vconfigWakeUp = true,
     maskWakeUp = true,
-    dataBits = 128,
+    destDataBits = 128,
     exceptionOut = Seq(illegalInstr),
   )
 
@@ -560,7 +564,7 @@ object FuConfig {
     latency = UncertainLatency(),
     vconfigWakeUp = true,
     maskWakeUp = true,
-    dataBits = 128,
+    destDataBits = 128,
     exceptionOut = Seq(illegalInstr),
   )
 
@@ -577,7 +581,7 @@ object FuConfig {
     latency = CertainLatency(2),
     vconfigWakeUp = true,
     maskWakeUp = true,
-    dataBits = 128,
+    destDataBits = 128,
     exceptionOut = Seq(illegalInstr),
     immType = Set(SelImm.IMM_OPIVIU, SelImm.IMM_OPIVIS),
   )
@@ -596,7 +600,7 @@ object FuConfig {
     latency = CertainLatency(2),
     vconfigWakeUp = true,
     maskWakeUp = true,
-    dataBits = 128,
+    destDataBits = 128,
     exceptionOut = Seq(illegalInstr),
   )
 
@@ -615,7 +619,7 @@ object FuConfig {
     latency = CertainLatency(1),
     vconfigWakeUp = true,
     maskWakeUp = true,
-    dataBits = 128,
+    destDataBits = 128,
     exceptionOut = Seq(illegalInstr),
     needSrcFrm = true,
   )
@@ -634,7 +638,7 @@ object FuConfig {
     latency = CertainLatency(3),
     vconfigWakeUp = true,
     maskWakeUp = true,
-    dataBits = 128,
+    destDataBits = 128,
     exceptionOut = Seq(illegalInstr),
     needSrcFrm = true,
   )
@@ -653,7 +657,7 @@ object FuConfig {
     latency = UncertainLatency(),
     vconfigWakeUp = true,
     maskWakeUp = true,
-    dataBits = 128,
+    destDataBits = 128,
     exceptionOut = Seq(illegalInstr),
     needSrcFrm = true,
   )
@@ -672,7 +676,7 @@ object FuConfig {
     latency = CertainLatency(2),
     vconfigWakeUp = true,
     maskWakeUp = true,
-    dataBits = 128,
+    destDataBits = 128,
     exceptionOut = Seq(illegalInstr),
     needSrcFrm = true,
   )
@@ -689,7 +693,7 @@ object FuConfig {
     writeIntRf = true,
     writeFflags = true,
     latency = CertainLatency(1),
-    dataBits = 64,
+    destDataBits = 64,
     needSrcFrm = true,
   )
 
@@ -704,7 +708,7 @@ object FuConfig {
     writeFpRf = true,
     writeFflags = true,
     latency = CertainLatency(3),
-    dataBits = 64,
+    destDataBits = 64,
     needSrcFrm = true,
   )
 
@@ -719,7 +723,7 @@ object FuConfig {
     writeFpRf = true,
     writeFflags = true,
     latency = UncertainLatency(),
-    dataBits = 64,
+    destDataBits = 64,
     needSrcFrm = true,
   )
 
@@ -735,7 +739,7 @@ object FuConfig {
     writeIntRf = true,
     writeFflags = true,
     latency = CertainLatency(2),
-    dataBits = 64,
+    destDataBits = 64,
     needSrcFrm = true,
   )
 
@@ -756,7 +760,7 @@ object FuConfig {
     hasLoadError = true,
     vconfigWakeUp = true,
     maskWakeUp = true,
-    dataBits = 128,
+    destDataBits = 128,
   )
 
   val VstuCfg: FuConfig = FuConfig (
@@ -774,7 +778,7 @@ object FuConfig {
     hasLoadError = true,
     vconfigWakeUp = true,
     maskWakeUp = true,
-    dataBits = 128,
+    destDataBits = 128,
   )
 
   val VseglduSeg: FuConfig = FuConfig (
@@ -794,7 +798,7 @@ object FuConfig {
     hasLoadError = true,
     vconfigWakeUp = true,
     maskWakeUp = true,
-    dataBits = 128,
+    destDataBits = 128,
   )
 
   val VsegstuCfg: FuConfig = FuConfig(
@@ -812,7 +816,7 @@ object FuConfig {
     hasLoadError = true,
     vconfigWakeUp = true,
     maskWakeUp = true,
-    dataBits = 128,
+    destDataBits = 128,
   )
 
   def allConfigs = Seq(
