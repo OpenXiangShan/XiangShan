@@ -651,17 +651,17 @@ class NewCSR(implicit val p: Parameters) extends Module
   )
 
   // perf
-  val addrInPerfCnt = (addr >= CSRs.mcycle.U) && (addr <= CSRs.mhpmcounter31.U) ||
+  val addrInPerfCnt = (wen || ren) && (
+    (addr >= CSRs.mcycle.U) && (addr <= CSRs.mhpmcounter31.U) ||
     (addr >= mcountinhibit.addr.U) && (addr <= mhpmevents.last.addr.U) ||
     (addr >= CSRs.cycle.U) && (addr <= CSRs.hpmcounter31.U) ||
     (addr === CSRs.mip.U) ||
-    (addr === CSRs.hip.U) ||
     Cat(aiaCSRMap.keys.toSeq.sorted.map(_.U === addr)).orR ||
     (addr === CSRs.stimecmp.U) ||
     (addr === CSRs.mcounteren.U) ||
     (addr === CSRs.scounteren.U) ||
     (addr === CSRs.menvcfg.U)
-  // Todo: may be vsip and sip
+  )
 
   // flush
   val resetSatp = Cat(Seq(satp, vsatp, hgatp).map(_.addr.U === addr)).orR && wenLegal // write to satp will cause the pipeline be flushed
