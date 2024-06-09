@@ -17,7 +17,7 @@ class VFDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends VecNonPipedFuncUn
   XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VfpuType.dummy, "Vfdiv OpType not supported")
 
   // params alias
-  private val dataWidth = cfg.dataBits
+  private val dataWidth = cfg.destDataBits
   private val dataWidthOfDataModule = 64
   private val numVecModule = dataWidth / dataWidthOfDataModule
 

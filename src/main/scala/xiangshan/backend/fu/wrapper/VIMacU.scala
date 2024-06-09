@@ -46,7 +46,7 @@ class VIMacU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg
   XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VimacType.dummy, "VialuF OpType not supported")
 
   // params alias
-  private val dataWidth = cfg.dataBits
+  private val dataWidth = cfg.destDataBits
   private val dataWidthOfDataModule = 64
   private val numVecModule = dataWidth / dataWidthOfDataModule
 

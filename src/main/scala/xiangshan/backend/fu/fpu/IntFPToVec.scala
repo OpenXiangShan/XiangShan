@@ -44,7 +44,7 @@ class IntFPToVec(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cf
   private val scalaData = Mux(isImm, in.data.src(1), in.data.src(0))
   // vsew is the lowest 2 bits of fuOpType
   private val vsew = in.ctrl.fuOpType(1, 0)
-  private val dataWidth = cfg.dataBits
+  private val dataWidth = cfg.destDataBits
 
   private val outNAN = Seq(
     Cat(0.U, Fill(3, 1.U), 1.U, 0.U(3.W)),
