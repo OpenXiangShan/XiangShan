@@ -40,10 +40,13 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
     val sieIsAlias =  hideleg & ~mideleg & mvien
     val usingReg   = ~hideleg &            hvien
 
+    val originAliasIE = (mieIsAlias & mie) | (sieIsAlias & sie)
+    val shiftedIE = Cat(originAliasIE(63, InterruptNO.COI), 0.U(1.W), originAliasIE(InterruptNO.SGEI, InterruptNO.SSI))
+    val shiftedUsingReg = Cat(usingReg(63, InterruptNO.COI), 0.U(1.W), usingReg(InterruptNO.SGEI, InterruptNO.SSI))
+
     regOut :=
-      (mieIsAlias & mie) |
-      (sieIsAlias & sie) |
-      (usingReg   & reg)
+      shiftedIE |
+      (shiftedUsingReg & reg)
 
     bundle.getFields.map(_.lsb).foreach { num =>
       val wtMie = toMie.getByNum(num)
@@ -109,7 +112,7 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
 
     regOut := shiftedIP
     regOut.getM.foreach(_ := 0.U)
-    regOut.getHS.foreach(_ := 0.U)
+    regOut.getVS.foreach(_ := 0.U)
     regOut.SGEIP := 0.U
 
     toHvip.VSSIP.valid := wen && hideleg.VSSI
