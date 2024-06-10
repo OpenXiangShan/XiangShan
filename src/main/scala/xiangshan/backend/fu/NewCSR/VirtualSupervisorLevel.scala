@@ -48,9 +48,34 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
       shiftedIE |
       (shiftedUsingReg & reg)
 
-    bundle.getFields.map(_.lsb).foreach { num =>
+    bundle.getVS.map(_.lsb).foreach { vsNum =>
+      // vsie.SSIE(1) map mie.VSSIE(1)
+      val sNum = vsNum - 1
+      val wtMie = toMie.getByNum(vsNum)
+      val wtSie = toSie.getByNum(vsNum)
+      val r = reg(sNum)
+
+      wtMie.specifyField(
+        _.valid := mieIsAlias(vsNum) && wtMie.bits.isRW.B && wen,
+        _.bits  := mieIsAlias(vsNum) && wtMie.bits.isRW.B && wen &< wdata(sNum),
+      )
+
+      wtSie.specifyField(
+        _.valid := sieIsAlias(vsNum) && wtSie.bits.isRW.B && wen,
+        _.bits  := sieIsAlias(vsNum) && wtSie.bits.isRW.B && wen &< wdata(sNum),
+      )
+
+      when (wen && usingReg(vsNum) && r.isRW.B) {
+        r := wdata(sNum)
+      }.otherwise {
+        r := r
+      }
+    }
+
+    bundle.getNonVS.map(_.lsb).foreach { num =>
       val wtMie = toMie.getByNum(num)
       val wtSie = toSie.getByNum(num)
+
       val r = reg(num)
 
       wtMie.specifyField(
@@ -63,7 +88,7 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
         _.bits  := sieIsAlias(num) && wtSie.bits.isRW.B && wen &< wdata(num),
       )
 
-      when (wen && usingReg(num) && r.isRW.B) {
+      when(wen && usingReg(num) && r.isRW.B) {
         r := wdata(num)
       }.otherwise {
         r := r
