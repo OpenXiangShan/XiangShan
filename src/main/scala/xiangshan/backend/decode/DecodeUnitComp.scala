@@ -1593,22 +1593,21 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           for (j <- 0 until jlen) {
             val vd_old = if(i==j) (dest + i.U) else (VECTOR_TMP_REG_LMUL + j + 1).U
             val vd = if(i==len-1) (dest + j.U) else {
-              if (j == i+1) VECTOR_COMPRESS.U else (VECTOR_TMP_REG_LMUL + j + 1).U
+              if (j == i+1) VECTOR_TMP_REG_LMUL.U  else (VECTOR_TMP_REG_LMUL + j + 1).U
             }
-            val vecWen = if ((i == len - 1) || !(j == i+1)) true.B else false.B
-            val v0Wen = if (!(i == len - 1) && (j == i+1)) true.B else false.B
-            csBundle(i*(i+3)/2 + j).vecWen := vecWen
-            csBundle(i*(i+3)/2 + j).v0Wen := v0Wen
+            csBundle(i*(i+3)/2 + j).vecWen := true.B
+            csBundle(i*(i+3)/2 + j).v0Wen := false.B
             val src13Type = if (j == i+1) DontCare else SrcType.vp
             csBundle(i*(i+3)/2 + j).srcType(0) := src13Type
             csBundle(i*(i+3)/2 + j).srcType(1) := SrcType.vp
             csBundle(i*(i+3)/2 + j).srcType(2) := src13Type
-            csBundle(i*(i+3)/2 + j).srcType(3) := SrcType.vp
-            csBundle(i*(i+3)/2 + j).lsrc(0) := src1
+            if (i == 0) {
+              csBundle(i*(i+3)/2 + j).lsrc(0) := src1
+            } else {
+              csBundle(i*(i+3)/2 + j).lsrc(0) := VECTOR_TMP_REG_LMUL.U
+            }
             csBundle(i*(i+3)/2 + j).lsrc(1) := src2 + i.U
             csBundle(i*(i+3)/2 + j).lsrc(2) := vd_old
-            csBundle(i*(i+3)/2 + j).lsrc(3) := VECTOR_COMPRESS.U
-            csBundle(i*(i+3)/2 + j).srcType(3) := SrcType.v0
             csBundle(i*(i+3)/2 + j).ldest := vd
             csBundle(i*(i+3)/2 + j).uopIdx := (i*(i+3)/2 + j).U
           }

@@ -176,7 +176,7 @@ case class FuConfig (
                             fuType == FuType.vfdiv || fuType == FuType.vfcvt ||
                             fuType == FuType.vidiv
 
-  def needOg2: Boolean = isVecArith || fuType == FuType.vsetfwf || fuType == FuType.f2v
+  def needOg2: Boolean = isVecArith || fuType == FuType.vsetfwf
 
   def isSta: Boolean = name.contains("sta")
 
