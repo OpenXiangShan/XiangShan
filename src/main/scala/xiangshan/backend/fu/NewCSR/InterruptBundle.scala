@@ -264,6 +264,8 @@ class InterruptEnableBundle extends CSRBundle {
 
   def getM = Seq(MSIE, MTIE, MEIE)
 
+  def getNonVS = this.getHS ++ this.getM ++ this.getLocal :+ this.SGEIE
+
   def getNonLocal = Seq(
     SSIE, VSSIE, MSIE,
     STIE, VSTIE, MTIE,
