@@ -24,6 +24,7 @@ import xiangshan.{XSModule, XSBundle}
 import utility.{CircularQueuePtr, HasCircularQueuePtrHelper, ParallelPriorityEncoder, ParallelPosteriorityEncoder}
 import utils.{XSError}
 import xiangshan.frontend.ChiselRecordForField._
+import freechips.rocketchip.rocket.ExpandedInstruction
 
 // From HX's NewCSR utility
 object ChiselRecordForField {
@@ -300,6 +301,7 @@ class TracePreDecodeAndCheckerIO(implicit p: Parameters) extends TraceBundle {
   val traceChecker = Output(new TraceCheckerResp())
   // trace Inst: one-to-one with preDecoder but contains the traceInfo
   val traceAlignInsts = Output(Vec(PredictWidth, Valid(new TraceInstrBundle())))
+  val traceExpandInsts = Output(Vec(PredictWidth, UInt(32.W)))
 }
 class TracePreDecodeAndChecker(implicit p: Parameters) extends TraceModule
   with TraceParams
@@ -347,7 +349,17 @@ class TracePreDecodeAndChecker(implicit p: Parameters) extends TraceModule
     _.checker := predChecker.io.out,
     _.traceChecker := traceChecker.io.out,
     _.traceAlignInsts := traceAligner.io.cutInsts,
+    _.traceExpandInsts.zip(traceAligner.io.cutInsts).foreach{ 
+      case (expand, cut) => expand := expandInst(cut.bits.inst)
+    }
   )
+
+  def expandInst(inst: UInt): UInt = {
+    require(inst.getWidth == 32)
+    val expander = Module(new RVCExpander)
+    expander.io.in := inst
+    expander.io.out.bits
+  }
 }
 
 /**
