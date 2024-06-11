@@ -5,13 +5,18 @@ import chisel3.util._
 import xiangshan.ExceptionNO
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CauseBundle, PrivState, XtvecBundle}
 import xiangshan.backend.fu.NewCSR.CSRDefines.XtvecMode
-import xiangshan.backend.fu.util.CSRConst
+import xiangshan.backend.fu.NewCSR.CSRBundleImplicitCast._
+
 
 class TrapHandleModule extends Module {
   val io = IO(new TrapHandleIO)
 
   private val trapInfo = io.in.trapInfo
   private val privState = io.in.privState
+  private val mideleg = io.in.mideleg.asUInt
+  private val hideleg = io.in.hideleg.asUInt
+  private val medeleg = io.in.medeleg.asUInt
+  private val hedeleg = io.in.hedeleg.asUInt
 
   private val hasTrap = trapInfo.valid
   private val hasIR = hasTrap && trapInfo.bits.isInterrupt
@@ -22,17 +27,54 @@ class TrapHandleModule extends Module {
   private val hasEXVec = Mux(hasEX, exceptionVec, 0.U)
   private val hasIRVec = Mux(hasIR, intrVec, 0.U)
 
+  private val highestPrioIRVec = Wire(Vec(64, Bool()))
+  highestPrioIRVec.zipWithIndex.foreach { case (irq, i) =>
+    if (InterruptNO.interruptDefaultPrio.contains(i))
+      irq := Cat(InterruptNO.getIRQHigherThan(i).map(num => !hasIRVec(num))).andR && hasIRVec(i)
+    else
+      irq := false.B
+  }
+
+  private val highestPrioEXVec = Wire(Vec(64, Bool()))
+  highestPrioEXVec.zipWithIndex.foreach { case (excp, i) =>
+    if (ExceptionNO.priorities.contains(i)) {
+      excp := Cat(ExceptionNO.getHigherExcpThan(i).map(num => !hasEXVec(num))).andR && hasEXVec(i)
+    } else
+      excp := false.B
+  }
+
+  private val highestPrioIR = highestPrioIRVec.asUInt
+  private val highestPrioEX = highestPrioEXVec.asUInt
+
+  private val mIRVec  = highestPrioIR
+  private val hsIRVec = highestPrioIR & mideleg
+  private val vsIRVec = highestPrioIR & mideleg & hideleg
+
+  private val mEXVec  = highestPrioEX
+  private val hsEXVec = highestPrioEX & medeleg
+  private val vsEXVec = highestPrioEX & medeleg & hedeleg
+
+  private val  mHasIR =  mIRVec.orR
+  private val hsHasIR = hsIRVec.orR
+  private val vsHasIR = vsIRVec.orR
+
+  private val  mHasEX =  mEXVec.orR
+  private val hsHasEX = hsEXVec.orR
+  private val vsHasEX = vsEXVec.orR
+
+  private val  mHasTrap =  mHasEX ||  mHasIR
+  private val hsHasTrap = hsHasEX || hsHasIR
+  private val vsHasTrap = vsHasEX || vsHasIR
+
+  private val handleTrapUnderHS = !privState.isModeM && hsHasTrap
+  private val handleTrapUnderVS = privState.isVirtual && vsHasTrap
+
   // Todo: support more interrupt and exception
-  private val exceptionRegular = ExceptionNO.priorities.foldRight(0.U(6.W))((i: Int, sum: UInt) => Mux(hasEXVec(i), i.U, sum))
-  private val interruptNO = CSRConst.IntPriority.foldRight(0.U(6.W))((i: Int, sum: UInt) => Mux(hasIRVec(i), i.U, sum))
+  private val exceptionRegular = OHToUInt(highestPrioEX)
+  private val interruptNO = OHToUInt(highestPrioIR)
   private val exceptionNO = Mux(trapInfo.bits.singleStep || trapInfo.bits.triggerFire, ExceptionNO.breakPoint.U, exceptionRegular)
+
   private val causeNO = Mux(hasIR, interruptNO, exceptionNO)
-
-  private val mdeleg = Mux(hasIR, io.in.mideleg.asUInt, io.in.medeleg.asUInt)
-  private val hdeleg = Mux(hasIR, io.in.hideleg.asUInt, io.in.hedeleg.asUInt)
-
-  private val handleTrapUnderHS = mdeleg(causeNO) && privState < PrivState.ModeM
-  private val handleTrapUnderVS = mdeleg(causeNO) && hdeleg(causeNO) && privState.isVirtual
 
   private val xtvec = MuxCase(io.in.mtvec, Seq(
     handleTrapUnderVS -> io.in.vstvec,

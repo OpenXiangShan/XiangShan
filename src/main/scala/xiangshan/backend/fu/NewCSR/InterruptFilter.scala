@@ -256,11 +256,29 @@ class InterruptFilter extends Module {
     0.U
   )
 
+  val vsMapHostIRVec = Cat((0 until vsIRVec.getWidth).map { num =>
+    // 2,6,10
+    if (InterruptNO.getVS.contains(num)) {
+      // 1,5,9
+      val sNum = num - 1
+      vsIRVec(sNum)
+    }
+    // 1,5,9
+    else if(InterruptNO.getHS.contains(num)) {
+      0.U(1.W)
+    }
+    else {
+      vsIRVec(num)
+    }
+  }.reverse)
+
+  dontTouch(vsMapHostIRVec)
+
   // support debug interrupt
   val disableInterrupt = io.in.debugMode || (io.in.dcsr.STEP.asBool && !io.in.dcsr.STEPIE.asBool)
   val debugInterupt = ((io.in.debugIntr && !io.in.debugMode) << CSRConst.IRQ_DEBUG).asUInt
 
-  val intrVec = VecInit((mIRVec | hsIRVec | vsIRVec | debugInterupt).asBools.map(IR => IR && !disableInterrupt)).asUInt
+  val intrVec = VecInit((mIRVec | hsIRVec | vsMapHostIRVec | debugInterupt).asBools.map(IR => IR && !disableInterrupt)).asUInt
   // delay at least 6 cycles to maintain the atomic of sret/mret
   val delayedIntrVec = DelayN(intrVec, 6)
 
