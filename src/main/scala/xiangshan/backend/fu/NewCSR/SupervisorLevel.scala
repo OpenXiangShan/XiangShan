@@ -52,6 +52,12 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
         reg(num) := reg(num)
       }
     }
+
+    regOut.getFields.foreach { field =>
+      if (field.isHardWired) {
+        field := field.getHardWireValue
+      }
+    }
   })
     .setAddr(CSRs.sie)
 
@@ -114,6 +120,12 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
         _.valid := wen && mvipIsAlias(num) && wtMvip.bits.isRW.B,
         _.bits  := wen && mvipIsAlias(num) && wtMvip.bits.isRW.B &< wdata(num),
       )
+    }
+
+    regOut.getFields.foreach { field =>
+      if (field.isHardWired) {
+        field := field.getHardWireValue
+      }
     }
   })
     .setAddr(CSRs.sip)
@@ -179,10 +191,16 @@ class SieBundle extends InterruptEnableBundle {
   this.getHS.foreach(_.setRW().withReset(0.U))
   this.STIE.setRO()
   this.getLocal.foreach(_.setRW().withReset(0.U))
+  this.getM .foreach(_.setHardWired(0.U))
+  this.getVS.foreach(_.setHardWired(0.U))
+  this.SGEIE.setHardWired(0.U)
 }
 
 class SipBundle extends InterruptPendingBundle {
   // All pending bits in sip are aliases of mip or read-only 0
+  this.getM .foreach(_.setHardWired(0.U))
+  this.getVS.foreach(_.setHardWired(0.U))
+  this.SGEIP.setHardWired(0.U)
 }
 
 class SatpBundle extends CSRBundle {

@@ -8,7 +8,7 @@ import scala.language.implicitConversions
 
 abstract class CSRRWType {
   val wfn: CSRWfnType
-  val rfn: CSRRfnType
+  var rfn: CSRRfnType
   val ref: Option[CSREnumType] = None
 
   def isRO: Boolean = this.isInstanceOf[ROType] || this.isInstanceOf[RefROType]
@@ -35,23 +35,30 @@ abstract class CSRRWType {
 
 case class WARLType(
   override val wfn: CSRWfnType,
-  override val rfn: CSRRfnType = null,
+  override var rfn: CSRRfnType = null,
 ) extends CSRRWType
 
 case class ROType(
-  override val rfn: CSRRfnType = null,
+  override var rfn: CSRRfnType = null,
 ) extends CSRRWType {
   override final val wfn: CSRWfnType = wNoEffect
+  var isHardWired = false
+  var hardWiredValue = 0.U
+
+  def setHardWired(value: UInt): Unit = {
+    this.isHardWired = true
+    this.hardWiredValue = value
+  }
 }
 
 case class WLRLType(
   override val wfn: CSRWfnType,
-  override val rfn: CSRRfnType,
+  override var rfn: CSRRfnType,
 ) extends CSRRWType
 
 case class RWType() extends CSRRWType {
   override final val wfn: CSRWfnType = wNoFilter
-  override final val rfn: CSRRfnType = null
+  override final var rfn: CSRRfnType = null
 }
 
 trait CheckRef { self: CSRRWType =>
@@ -61,12 +68,12 @@ trait CheckRef { self: CSRRWType =>
 case class RefWARLType(
   override val ref: Option[CSREnumType],
   override val wfn: CSRWfnType,
-  override val rfn: CSRRfnType = null,
+  override var rfn: CSRRfnType = null,
 ) extends CSRRWType with CheckRef
 
 case class RefROType(
   override val ref: Option[CSREnumType],
-  override val rfn: CSRRfnType = null,
+  override var rfn: CSRRfnType = null,
 ) extends CSRRWType with CheckRef {
   override final val wfn: CSRWfnType = wNoEffect
 }
@@ -74,14 +81,14 @@ case class RefROType(
 case class RefWLRLType(
   override val ref: Option[CSREnumType],
   override val wfn: CSRWfnType,
-  override val rfn: CSRRfnType,
+  override var rfn: CSRRfnType,
 ) extends CSRRWType with CheckRef
 
 case class RefRWType(
   override val ref: Option[CSREnumType],
 ) extends CSRRWType with CheckRef {
   override final val wfn: CSRWfnType = wNoFilter
-  override final val rfn: CSRRfnType = null
+  override final var rfn: CSRRfnType = null
 }
 
 object CSRFunc {
@@ -146,6 +153,10 @@ class CSREnumType(
   def isRW = this.rwType.isRW
 
   def isWARL = this.rwType.isWARL
+
+  def isHardWired = this.isRO && this.rwType.asInstanceOf[ROType].isHardWired
+
+  def getHardWireValue: UInt = this.rwType.asInstanceOf[ROType].hardWiredValue
 
   // Check if the write data is legal that can update the regfield.
   // Also check if the write field is not Read Only.
@@ -246,6 +257,12 @@ class CSREnumType(
 
   def setRO(rfn: CSRRfnType = null): this.type = {
     this.setRwType(ROType(rfn))
+  }
+
+  def setHardWired(value: UInt): this.type = {
+    require(this.isRO)
+    this.rwType.asInstanceOf[ROType].setHardWired(value)
+    this
   }
 
   def setRW(): this.type = {
