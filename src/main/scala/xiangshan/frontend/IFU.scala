@@ -24,10 +24,10 @@ import freechips.rocketchip.rocket.RVCDecoder
 import xiangshan._
 import xiangshan.cache.mmu._
 import xiangshan.frontend.icache._
+import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
+import xiangshan.frontend.ChiselRecordForField._
 import utils._
 import utility._
-import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
-import utility.ChiselDB
 
 trait HasInstrMMIOConst extends HasXSParameter with HasIFUConst{
   def mmioBusWidth = 64
@@ -578,9 +578,42 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   /*** TraceReader ***/
   val traceReader = Module(new TraceReader)
+  val tracePDaC = Module(new TracePreDecodeAndChecker)
+  val traceDriver = Module(new TraceDriver)
   dontTouch(traceReader.io)
-  traceReader.io <> DontCare
-  traceReader.io.recv.valid := false.B
+  dontTouch(tracePDaC.io)
+  dontTouch(traceDriver.io)
+
+  if (env.TraceRTLMode) {
+    val traceDebugValid = traceReader.io.recv.valid
+    val traceValid = f3_fire
+    traceReader.io.specifyField(
+      _.recv := traceDriver.io.recv,
+    )
+    tracePDaC.io.specifyField(
+      _.debug_valid := traceDebugValid,
+      _.traceInsts := traceReader.io.traceInsts,
+      _.fromIFU.specifyField(
+        _.redirect := f3_flush,
+        _.fire := traceValid,
+      ),
+      _.predInfo.specifyField(
+        _.startAddr := f3_ftq_req.startAddr,
+        _.nextStartAddr := f3_ftq_req.nextStartAddr,
+        _.instRange := f3_instr_range,
+        _.ftqOffset := f3_ftq_req.ftqOffset,
+      ),
+    )
+    traceDriver.io.specifyField(
+      _.valid := traceValid,
+      _.traceInsts := tracePDaC.io.traceAlignInsts,
+      _.traceRange := tracePDaC.io.traceChecker.traceRange,
+    )
+  } else {
+    traceReader.io <> DontCare
+    tracePDaC.io <> DontCare
+    traceDriver.io <> DontCare
+  }
 
   /*** MMIO State Machine***/
   val f3_mmio_data          = Reg(Vec(2, UInt(16.W)))
