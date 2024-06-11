@@ -176,6 +176,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       val spvp = Bool()
       val imode = UInt(2.W)
       val dmode = UInt(2.W)
+      val dvirt = Bool()
     })
 
     val toDecode = new CSRToDecode
@@ -1027,7 +1028,16 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.tlb.spvp :=  hstatus.regOut.SPVP.asBool
 
   io.tlb.imode := PRVM.asUInt
-  io.tlb.dmode := Mux((debugMode && dcsr.regOut.MPRVEN.asBool || !debugMode) && mstatus.regOut.MPRV.asBool, mstatus.regOut.MPP.asUInt, PRVM.asUInt)
+  io.tlb.dmode := Mux(
+    (debugMode && dcsr.regOut.MPRVEN || !debugMode) && mstatus.regOut.MPRV,
+    mstatus.regOut.MPP.asUInt,
+    PRVM.asUInt
+  )
+  io.tlb.dvirt := Mux(
+    (debugMode && dcsr.regOut.MPRVEN || !debugMode) && mstatus.regOut.MPRV && mstatus.regOut.MPP =/= PrivMode.M,
+    mstatus.regOut.MPV.asUInt,
+    V.asUInt
+  )
 
   io.toDecode.illegalInst.sfenceVMA  := isModeHS && mstatus.regOut.TVM  || isModeHU
   io.toDecode.virtualInst.sfenceVMA  := isModeVS && hstatus.regOut.VTVM || isModeVU
