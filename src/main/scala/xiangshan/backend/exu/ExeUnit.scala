@@ -273,11 +273,39 @@ class ExeUnitImp(
   private val fuV0WenVec = funcUnits.map(x => x.cfg.needV0Wen.B && x.io.out.bits.ctrl.v0Wen.getOrElse(false.B))
   private val fuVlWenVec = funcUnits.map(x => x.cfg.needVlWen.B && x.io.out.bits.ctrl.vlWen.getOrElse(false.B))
   // FunctionUnits <---> ExeUnit.out
+
+  private val outDataVec = Seq(
+    Some(fuOutresVec.map(_.data)),
+    OptionWrapper(funcUnits.exists(_.cfg.writeIntRf),
+      funcUnits.zip(fuOutresVec).filter{ case (fu, _) => fu.cfg.writeIntRf}.map{ case(_, fuout) => fuout.data}),
+    OptionWrapper(funcUnits.exists(_.cfg.writeFpRf),
+      funcUnits.zip(fuOutresVec).filter{ case (fu, _) => fu.cfg.writeFpRf}.map{ case(_, fuout) => fuout.data}),
+    OptionWrapper(funcUnits.exists(_.cfg.writeVecRf),
+      funcUnits.zip(fuOutresVec).filter{ case (fu, _) => fu.cfg.writeVecRf}.map{ case(_, fuout) => fuout.data}),
+    OptionWrapper(funcUnits.exists(_.cfg.writeV0Rf),
+      funcUnits.zip(fuOutresVec).filter{ case (fu, _) => fu.cfg.writeV0Rf}.map{ case(_, fuout) => fuout.data}),
+    OptionWrapper(funcUnits.exists(_.cfg.writeVlRf),
+      funcUnits.zip(fuOutresVec).filter{ case (fu, _) => fu.cfg.writeVlRf}.map{ case(_, fuout) => fuout.data}),
+  ).flatten
+  private val outDataValidOH = Seq(
+    Some(fuOutValidOH),
+    OptionWrapper(funcUnits.exists(_.cfg.writeIntRf),
+      funcUnits.zip(fuOutValidOH).filter{ case (fu, _) => fu.cfg.writeIntRf}.map{ case(_, fuoutOH) => fuoutOH}),
+    OptionWrapper(funcUnits.exists(_.cfg.writeFpRf),
+      funcUnits.zip(fuOutValidOH).filter{ case (fu, _) => fu.cfg.writeFpRf}.map{ case(_, fuoutOH) => fuoutOH}),
+    OptionWrapper(funcUnits.exists(_.cfg.writeVecRf),
+      funcUnits.zip(fuOutValidOH).filter{ case (fu, _) => fu.cfg.writeVecRf}.map{ case(_, fuoutOH) => fuoutOH}),
+    OptionWrapper(funcUnits.exists(_.cfg.writeV0Rf),
+      funcUnits.zip(fuOutValidOH).filter{ case (fu, _) => fu.cfg.writeV0Rf}.map{ case(_, fuoutOH) => fuoutOH}),
+    OptionWrapper(funcUnits.exists(_.cfg.writeVlRf),
+      funcUnits.zip(fuOutValidOH).filter{ case (fu, _) => fu.cfg.writeVlRf}.map{ case(_, fuoutOH) => fuoutOH}),
+  ).flatten
+
   io.out.valid := Cat(fuOutValidOH).orR
   funcUnits.foreach(fu => fu.io.out.ready := io.out.ready)
 
   // select one fu's result
-  io.out.bits.data := Mux1H(fuOutValidOH, fuOutresVec.map(_.data))
+  io.out.bits.data := VecInit(outDataVec.zip(outDataValidOH).map{ case(data, validOH) => Mux1H(validOH, data)})
   io.out.bits.robIdx := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.robIdx))
   io.out.bits.pdest := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.pdest))
   io.out.bits.intWen.foreach(x => x := Mux1H(fuOutValidOH, fuIntWenVec))

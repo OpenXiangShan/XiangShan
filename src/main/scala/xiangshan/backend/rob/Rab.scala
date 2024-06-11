@@ -106,9 +106,17 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
 
   val realNeedAlloc = io.req.map(req => req.valid && req.bits.needWriteRf)
   val enqCount    = PopCount(realNeedAlloc)
-  val commitCount = Mux(io.commits.isCommit && !io.commits.isWalk, PopCount(io.commits.commitValid), 0.U)
-  val walkCount   = Mux(io.commits.isWalk && !io.commits.isCommit, PopCount(io.commits.walkValid), 0.U)
-  val specialWalkCount = Mux(io.commits.isCommit && io.commits.isWalk, PopCount(io.commits.walkValid), 0.U)
+  val commitNum = Wire(UInt(3.W))
+  val walkNum = Wire(UInt(3.W))
+  commitNum := Mux(io.commits.commitValid(0), PriorityMux((0 until 6).map(
+    i => io.commits.commitValid(5-i) -> (6-i).U
+  )), 0.U)
+  walkNum := Mux(io.commits.walkValid(0), PriorityMux((0 until 6).map(
+    i => io.commits.walkValid(5-i) -> (6-i).U
+  )), 0.U)
+  val commitCount = Mux(io.commits.isCommit && !io.commits.isWalk, commitNum, 0.U)
+  val walkCount   = Mux(io.commits.isWalk && !io.commits.isCommit, walkNum, 0.U)
+  val specialWalkCount = Mux(io.commits.isCommit && io.commits.isWalk, walkNum, 0.U)
 
   // number of pair(ldest, pdest) ready to commit to arch_rat
   val commitSize = RegInit(0.U(log2Up(size).W))

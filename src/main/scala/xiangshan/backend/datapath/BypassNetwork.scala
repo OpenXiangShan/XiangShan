@@ -52,7 +52,7 @@ class BypassNetworkIO()(implicit p: Parameters, params: BackendParams) extends X
         sinkVec.zip(sourcesVec).foreach { case (sink, source) =>
           sink.valid := source.valid
           sink.bits.pdest := source.bits.pdest
-          sink.bits.data := source.bits.data
+          sink.bits.data := source.bits.data(0)
         }
       }
     }

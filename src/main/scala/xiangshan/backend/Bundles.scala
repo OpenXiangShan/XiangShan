@@ -651,7 +651,7 @@ object Bundles {
   )(implicit
     val p: Parameters
   ) extends Bundle with BundleSource with HasXSParameter {
-    val data         = UInt(params.destDataBitsMax.W)
+    val data         = Vec(params.wbPathNum, UInt(params.destDataBitsMax.W))
     val pdest        = UInt(params.wbPregIdxWidth.W)
     val robIdx       = new RobPtr
     val intWen       = if (params.needIntWen)   Some(Bool())                  else None
@@ -706,14 +706,15 @@ object Bundles {
 
     this.wakeupSource = s"WB(${params.toString})"
 
-    def fromExuOutput(source: ExuOutput) = {
+    def fromExuOutput(source: ExuOutput, wbType: String) = {
+      val typeMap = Map("int" -> 0, "fp" -> 1, "vf" -> 2, "v0" -> 3, "vl" -> 4)
       this.rfWen  := source.intWen.getOrElse(false.B)
       this.fpWen  := source.fpWen.getOrElse(false.B)
       this.vecWen := source.vecWen.getOrElse(false.B)
       this.v0Wen  := source.v0Wen.getOrElse(false.B)
       this.vlWen  := source.vlWen.getOrElse(false.B)
       this.pdest  := source.pdest
-      this.data   := source.data
+      this.data   := source.data(source.params.wbIndex(typeMap(wbType)))
       this.robIdx := source.robIdx
       this.flushPipe := source.flushPipe.getOrElse(false.B)
       this.replayInst := source.replay.getOrElse(false.B)

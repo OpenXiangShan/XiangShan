@@ -84,6 +84,32 @@ case class ExeUnitParams(
   val isVfExeUnit: Boolean = schdType.isInstanceOf[VfScheduler]
   val isMemExeUnit: Boolean = schdType.isInstanceOf[MemScheduler]
 
+  // exu writeback: 0 normalout; 1 intout; 2 fpout; 3 vecout
+  val wbNeedIntWen : Boolean = writeIntRf && !isMemExeUnit
+  val wbNeedFpWen  : Boolean = writeFpRf  && !isMemExeUnit
+  val wbNeedVecWen : Boolean = writeVecRf && !isMemExeUnit
+  val wbNeedV0Wen  : Boolean = writeV0Rf  && !isMemExeUnit
+  val wbNeedVlWen  : Boolean = writeVlRf  && !isMemExeUnit
+  val wbPathNum: Int = Seq(wbNeedIntWen, wbNeedFpWen, wbNeedVecWen, wbNeedV0Wen, wbNeedVlWen).count(_ == true) + 1
+  val wbNeeds = Seq(
+    ("int", wbNeedIntWen),
+    ("fp", wbNeedFpWen),
+    ("vec", wbNeedVecWen),
+    ("v0", wbNeedV0Wen),
+    ("vl", wbNeedVlWen)
+  )
+  val wbIndexeds = wbNeeds.filter(_._2).zipWithIndex.map {
+    case ((label, _), index) => (label, index + 1)
+  }.toMap
+  val wbIntIndex: Int = wbIndexeds.getOrElse("int", 0)
+  val wbFpIndex : Int = wbIndexeds.getOrElse("fp",  0)
+  val wbVecIndex: Int = wbIndexeds.getOrElse("vec", 0)
+  val wbV0Index : Int = wbIndexeds.getOrElse("v0" , 0)
+  val wbVlIndex : Int = wbIndexeds.getOrElse("vl" , 0)
+  val wbIndex: Seq[Int] = Seq(wbIntIndex, wbFpIndex, wbVecIndex, wbV0Index, wbVlIndex)
+
+
+
   require(needPc && needTarget || !needPc && !needTarget, "The ExeUnit must need both PC and Target PC")
 
   def copyNum: Int = {
@@ -226,6 +252,8 @@ case class ExeUnitParams(
 
   def hasBrhFu = fuConfigs.map(_.fuType == FuType.brh).reduce(_ || _)
 
+  def hasi2vFu = fuConfigs.map(_.fuType == FuType.i2v).reduce(_ || _)
+
   def hasJmpFu = fuConfigs.map(_.fuType == FuType.jmp).reduce(_ || _)
 
   def hasLoadFu = fuConfigs.map(_.name == "ldu").reduce(_ || _)
@@ -251,6 +279,8 @@ case class ExeUnitParams(
   def hasStoreAddrExu = hasStoreAddrFu || hasHystaFu
 
   def hasVecFu = fuConfigs.map(x => FuConfig.VecArithFuConfigs.contains(x)).reduce(_ || _)
+
+  def CanCompress = !hasBrhFu || (hasBrhFu && hasi2vFu)
 
   def getSrcDataType(srcIdx: Int): Set[DataConfig] = {
     fuConfigs.map(_.getSrcDataType(srcIdx)).reduce(_ ++ _)

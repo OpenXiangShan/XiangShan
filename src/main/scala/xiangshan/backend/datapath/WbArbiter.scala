@@ -294,7 +294,7 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
   intWbArbiter.io.in.zip(intArbiterInputsWireY).foreach { case (arbiterIn, in) =>
     arbiterIn.valid := in.valid && in.bits.intWen.get
     in.ready := arbiterIn.ready
-    arbiterIn.bits.fromExuOutput(in.bits)
+    arbiterIn.bits.fromExuOutput(in.bits, "int")
   }
   private val intWbArbiterOut = intWbArbiter.io.out
 
@@ -303,7 +303,7 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
   fpWbArbiter.io.in.zip(fpArbiterInputsWireY).foreach { case (arbiterIn, in) =>
     arbiterIn.valid := in.valid && (in.bits.fpWen.getOrElse(false.B))
     in.ready := arbiterIn.ready
-    arbiterIn.bits.fromExuOutput(in.bits)
+    arbiterIn.bits.fromExuOutput(in.bits, "fp")
   }
   private val fpWbArbiterOut = fpWbArbiter.io.out
 
@@ -312,7 +312,7 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
   vfWbArbiter.io.in.zip(vfArbiterInputsWireY).foreach { case (arbiterIn, in) =>
     arbiterIn.valid := in.valid && (in.bits.vecWen.getOrElse(false.B))
     in.ready := arbiterIn.ready
-    arbiterIn.bits.fromExuOutput(in.bits)
+    arbiterIn.bits.fromExuOutput(in.bits, "vf")
   }
   private val vfWbArbiterOut = vfWbArbiter.io.out
 
@@ -321,7 +321,7 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
   v0WbArbiter.io.in.zip(v0ArbiterInputsWireY).foreach { case (arbiterIn, in) =>
     arbiterIn.valid := in.valid && (in.bits.v0Wen.getOrElse(false.B))
     in.ready := arbiterIn.ready
-    arbiterIn.bits.fromExuOutput(in.bits)
+    arbiterIn.bits.fromExuOutput(in.bits, "v0")
   }
   private val v0WbArbiterOut = v0WbArbiter.io.out
 
@@ -330,7 +330,7 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
   vlWbArbiter.io.in.zip(vlArbiterInputsWireY).foreach { case (arbiterIn, in) =>
     arbiterIn.valid := in.valid && (in.bits.vlWen.getOrElse(false.B))
     in.ready := arbiterIn.ready
-    arbiterIn.bits.fromExuOutput(in.bits)
+    arbiterIn.bits.fromExuOutput(in.bits, "vl")
   }
   private val vlWbArbiterOut = vlWbArbiter.io.out
 
