@@ -69,6 +69,9 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   )
   val vlMaskForReduction = (~(Fill(VLEN, 1.U) << vl)).asUInt
   srcMaskRShiftForReduction := ((srcMask & vlMaskForReduction) >> maskRshiftWidthForReduction)(8 * numVecModule - 1, 0)
+  val existMask = (srcMask & vlMaskForReduction).orR
+  val existMaskReg = RegEnable(existMask, io.in.fire)
+
 
   def genMaskForReduction(inmask: UInt, sew: UInt, i: Int): UInt = {
     val f64MaskNum = dataWidth / 64 * 2
@@ -229,7 +232,14 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
       mod.io.fp_aIsFpCanonicalNAN := fp_aIsFpCanonicalNAN(i)
       mod.io.fp_bIsFpCanonicalNAN := fp_bIsFpCanonicalNAN(i)
   }
-  val resultDataUInt = resultData.asUInt
+  val numOfUopVFRED = Wire(UInt(4.W))
+  val numofUopVFREDReg = RegEnable(numOfUopVFRED, io.in.fire)
+  val vs1Reg = RegEnable(vs1, io.in.fire)
+  val isVfRed = outCtrl.fuOpType === VfaluType.vfredusum ||
+    outCtrl.fuOpType === VfaluType.vfredmax ||
+    outCtrl.fuOpType === VfaluType.vfredmin
+  val isLastUop = isVfRed && (outCtrl.vpu.get.vuopIdx === numofUopVFREDReg - 1.U)
+  val resultDataUInt = Mux(isLastUop && !existMaskReg, vs1Reg, resultData.asUInt)
   val cmpResultWidth = dataWidth / 16
   val cmpResult = Wire(Vec(cmpResultWidth, Bool()))
   for (i <- 0 until cmpResultWidth) {
@@ -267,7 +277,7 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   val vlMax = ((VLEN/8).U >> outEew).asUInt
   val lmulAbs = Mux(outVecCtrl.vlmul(2), (~outVecCtrl.vlmul(1,0)).asUInt + 1.U, outVecCtrl.vlmul(1,0))
   //  vfmv_f_s need vl=1, reduction last uop need vl=1, other uop need vl=vlmax
-  val numOfUopVFRED = {
+  numOfUopVFRED := {
     // addTime include add frs1
     val addTime = MuxLookup(outVecCtrl_s0.vlmul, 1.U(4.W))(Array(
       VLmul.m2 -> 2.U,
