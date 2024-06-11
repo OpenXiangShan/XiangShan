@@ -851,6 +851,13 @@ package object xiangshan {
       storeAccessFault,
       loadAccessFault
     )
+
+    def getHigherExcpThan(excp: Int): Seq[Int] = {
+      val idx = this.priorities.indexOf(excp, 0)
+      require(idx != -1, s"The irq($excp) does not exists in IntPriority Seq")
+      this.priorities.slice(0, idx)
+    }
+
     def all = priorities.distinct.sorted
     def frontendSet = Seq(
       instrAddrMisaligned,

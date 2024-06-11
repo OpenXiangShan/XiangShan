@@ -44,9 +44,22 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
   private val vsatp = current.vsatp
   private val hgatp = current.hgatp
 
-  private val highPrioTrapNO = in.causeNO.ExceptionCode.asUInt
+  private val trapCode = in.causeNO.ExceptionCode.asUInt
   private val isException = !in.causeNO.Interrupt.asBool
   private val isInterrupt = in.causeNO.Interrupt.asBool
+
+  when(valid && isInterrupt) {
+    assert(
+      (InterruptNO.getVS ++ InterruptNO.getHS).map(_.U === trapCode).reduce(_ || _),
+      "The VS mode can only handle VSEI, VSTI, VSSI and local interrupts"
+    )
+  }
+
+  private val highPrioTrapNO = Mux(
+    InterruptNO.getVS.map(_.U === trapCode).reduce(_ || _),
+    trapCode - 1.U, // map VSSIP, VSTIP, VSEIP to SSIP, STIP, SEIP
+    trapCode,
+  )
 
   private val trapPC = genTrapVA(
     iMode,
@@ -67,11 +80,6 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
 
   private val fetchIsVirt = current.iMode.isVirtual
   private val memIsVirt   = current.dMode.isVirtual
-
-  when (valid && isInterrupt) {
-    import InterruptNO._
-    assert(Seq(SEI, STI, SSI).map(_.U === highPrioTrapNO).reduce(_ || _), "The VS mode can only handle SEI, STI, SSI")
-  }
 
   private val isFetchExcp    = isException && Seq(/*EX_IAM, */ EX_IAF, EX_IPF).map(_.U === highPrioTrapNO).reduce(_ || _)
   private val isMemExcp      = isException && Seq(EX_LAM, EX_LAF, EX_SAM, EX_SAF, EX_LPF, EX_SPF).map(_.U === highPrioTrapNO).reduce(_ || _)

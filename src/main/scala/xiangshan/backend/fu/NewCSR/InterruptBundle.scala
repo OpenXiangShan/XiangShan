@@ -324,6 +324,25 @@ object InterruptNO {
     assert(idx != -1)
     idx
   }
+
+  def getIRQHigherThan(irq: Int): Seq[Int] = {
+    val idx = this.interruptDefaultPrio.indexOf(irq, 0)
+    require(idx != -1, s"The irq($irq) does not exists in IntPriority Seq")
+    this.interruptDefaultPrio.slice(0, idx)
+  }
+
+  def getVS = Seq(VSSI, VSTI, VSEI)
+
+  def getHS = Seq(SSI, STI, SEI)
+
+  def getM = Seq(MSI, MTI, MEI)
+
+  def getNonLocal = Seq(
+    SSI, VSSI, MSI,
+    STI, VSTI, MTI,
+    SEI, VSEI, MEI,
+    SGEI
+  )
 }
 
 trait HasIpIeBundle { self: CSRModule[_] =>
