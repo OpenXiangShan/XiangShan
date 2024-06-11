@@ -82,21 +82,13 @@ class CSRPermitModule extends Module {
     BitPat("b0__11___11") -> BitPat.Y(), // M  access M
   ), BitPat.N())
 
-  private val isDebugReg   = addr(11, 4) === "h7b".U
-  private val isTriggerReg = addr(11, 4) === "h7a".U
-
   private val regularPrivilegeLegal = chisel3.util.experimental.decode.decoder(
     privState.V.asUInt ## privState.PRVM.asUInt ## addr(9, 8),
     accessTable
   ).asBool
 
-  private val privilegeLegal = MuxCase(
-    regularPrivilegeLegal,
-    Seq(
-      isDebugReg   -> debugMode,
-      isTriggerReg -> (debugMode || privState.isModeM),
-    )
-  )
+  private val isDebugReg   = addr(11, 4) === "h7b".U
+  private val privilegeLegal = Mux(isDebugReg, debugMode, regularPrivilegeLegal || debugMode)
 
   private val rwIllegal = csrIsRO && wen
 

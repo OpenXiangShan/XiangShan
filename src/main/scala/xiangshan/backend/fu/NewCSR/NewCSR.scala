@@ -793,7 +793,9 @@ class NewCSR(implicit val p: Parameters) extends Module
   val ebreakEnterDebugMode =
     (privState.isModeM && dcsr.regOut.EBREAKM.asBool) ||
       (privState.isModeHS && dcsr.regOut.EBREAKS.asBool) ||
-      (privState.isModeHU && dcsr.regOut.EBREAKU.asBool)
+      (privState.isModeHU && dcsr.regOut.EBREAKU.asBool) ||
+      (privState.isModeVS && dcsr.regOut.EBREAKVS.asBool) ||
+      (privState.isModeVU && dcsr.regOut.EBREAKVU.asBool)
   val hasDebugEbreakException = hasBreakPoint && ebreakEnterDebugMode
 
   // debug_exception_trigger
