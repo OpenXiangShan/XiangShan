@@ -544,7 +544,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       ptw_resp.level.map(_ := 2.U)
       ptw_resp.perm.map(_ := pte_in.getPerm())
       ptw_resp.tag := vpn(vpnLen - 1, sectortlbwidth)
-      ptw_resp.pf := (if (af_first) !af else true.B) && pte_in.isPf(2.U)
+      ptw_resp.pf := (if (af_first) !af else true.B) && (pte_in.isPf(2.U) || !pte_in.isLeaf())
       ptw_resp.af := (if (!af_first) pte_in.isPf(2.U) else true.B) && (af || pte_in.isAf())
       ptw_resp.v := !ptw_resp.pf
       ptw_resp.prefetch := DontCare
