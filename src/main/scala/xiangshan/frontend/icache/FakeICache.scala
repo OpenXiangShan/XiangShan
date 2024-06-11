@@ -23,6 +23,16 @@ import org.chipsalliance.cde.config.Parameters
 import xiangshan.{XSModule, XSBundle}
 import utility.{CircularQueuePtr, HasCircularQueuePtrHelper, ParallelPriorityEncoder, ParallelPosteriorityEncoder}
 import utils.{XSError}
+import xiangshan.frontend.ChiselRecordForField._
+
+// From HX's NewCSR utility
+object ChiselRecordForField {
+  implicit class AddRecordSpecifyFields[T <: Record](val x: T) {
+    def specifyField(elemFns: (T => Unit)*): Unit = {
+      elemFns.foreach(_.apply(x))
+    }
+  }
+}
 
 class TraceICacheHelper extends ExtModule
   with HasExtModuleInline
@@ -91,13 +101,13 @@ object TraceInstrBundle {
 }
 
 class TraceRecvInfo(implicit p: Parameters) extends TraceBundle {
-  val instrNum = UInt(log2Ceil(PredictWidth).W)
+  val instNum = UInt(log2Ceil(PredictWidth).W)
 }
 
 class TraceReaderIO(implicit p: Parameters) extends TraceBundle {
   // traceInst should always be valid
-  val traceInst = Output(Vec(PredictWidth, new TraceInstrBundle()))
-  // recv.valid from f3_fire, bits.instrNum from range
+  val traceInsts = Output(Vec(PredictWidth, new TraceInstrBundle()))
+  // recv.valid from f3_fire, bits.instNum from range
   val recv = Flipped(Valid(new TraceRecvInfo()))
 }
 
@@ -116,11 +126,11 @@ class TraceReader(implicit p: Parameters) extends TraceModule
   val enqPtr = RegInit(0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize)))
 
   XSError(!isFull(enqPtr, deqPtr) && (enqPtr < deqPtr), "enqPtr should always be larger than deqPtr")
-  XSError(io.recv.valid && ((deqPtr.value + io.recv.bits.instrNum) >= enqPtr.value),
+  XSError(io.recv.valid && ((deqPtr.value + io.recv.bits.instNum) >= enqPtr.value),
     "Reader should not read more than what is in the buffer. Error in ReaderHelper or Ptr logic.")
 
   when (io.recv.valid) {
-    deqPtr := deqPtr + io.recv.bits.instrNum
+    deqPtr := deqPtr + io.recv.bits.instNum
   }
 
   val readTraceEnable = !isFull(enqPtr, deqPtr) && (hasFreeEntries(enqPtr, deqPtr) >= TraceFetchWidth.U)
@@ -139,7 +149,7 @@ class TraceReader(implicit p: Parameters) extends TraceModule
   traceReaderHelper.clock := clock
   traceReaderHelper.reset := reset
   traceReaderHelper.enable := readTraceEnable
-  io.traceInst.zipWithIndex.foreach{ case (inst, i) =>
+  io.traceInsts.zipWithIndex.foreach{ case (inst, i) =>
     inst := traceBuffer(deqPtr.value + i.U)
   }
 }
@@ -179,6 +189,8 @@ class TraceReaderHelper extends ExtModule with TraceParams {
   * Output: same with cut result in IFU
   */
 class  TraceAlignToIFUCutIO(implicit p: Parameters) extends TraceBundle {
+  val debug_valid = Input(Bool())
+
   val traceInsts = Input(Vec(PredictWidth, new TraceInstrBundle()))
     // preDInfo's startAddr
   val predStartAddr = Input(UInt(VAddrBits.W))
@@ -189,65 +201,73 @@ class  TraceAlignToIFUCutIO(implicit p: Parameters) extends TraceBundle {
   val lastHalfValid = Input(Bool())
 
   val cutInsts = Output(Vec(PredictWidth, Valid(new TraceInstrBundle)))
-  // val traceSameWithPredRange = Output(Bool())
+  val traceRange = Output(UInt(PredictWidth.W))
+  val traceRangeTaken2B = Output(Bool())
+  val instRangeTaken2B = Output(Bool())
 }
 class TraceAlignToIFUCut(implicit p: Parameters) extends TraceModule {
-  val io = new TraceAlignToIFUCutIO()
+  val io = IO(new TraceAlignToIFUCutIO())
 
-  val width = io.traceInsts.getWidth
-  require(width == io.instRange.getWidth, "Width of traceInsts and instRange should be the same")
+  val width = io.traceInsts.size
+  require(width == io.instRange.getWidth, f"Width of traceInsts ${width} and instRange ${io.instRange.getWidth} should be the same")
+  def isTaken2B(range: UInt): Bool = {
+    val lastIdx = ParallelPosteriorityEncoder(range)
+    !isRVC(io.cutInsts(lastIdx).bits.inst) && io.cutInsts(lastIdx).valid
+  }
+  def isRVC(inst: UInt):Bool = (inst(1,0) =/= 3.U)
 
-  def isRVC(inst: UInt) = (inst(1,0) =/= 3.U)
+  val traceRangeVec = Wire(Vec(width, Bool()))
+  io.traceRange := traceRangeVec.asUInt
+  io.traceRangeTaken2B := isTaken2B(io.traceRange)
+  io.instRangeTaken2B := isTaken2B(io.instRange)
+
+  val lastInstEndVec = Wire(Vec(PredictWidth+1, Bool()))
+  val curInstIdxVec = Wire(Vec(PredictWidth+1, UInt(log2Ceil(width).W)))
   val startPC = io.predStartAddr
-  var lastInstEnd = !io.lastHalfValid
-  var stillConsecutive = true.B
-  var currentInstIdx = 0.U
 
+  traceRangeVec.foreach(_ := false.B)
+  lastInstEndVec.map(_ := false.B)
+  curInstIdxVec.map(_ := 0.U)
   (0 until width).foreach { i =>
-    val currentPC = startPC + (i*2).U
-    val currentTrace = io.traceInsts(currentInstIdx)
+    val curPC = startPC + (i*2).U
+    val curTrace = io.traceInsts(curInstIdxVec(i))
+    val stillConsecutive = traceRangeVec.take(i).foldRight(true.B)(_ && _)
 
-    val inst = Valid(new TraceInstrBundle())
-    when (lastInstEnd) {
-      stillConsecutive := currentPC === currentTrace.pc
-      inst.valid := stillConsecutive && io.instRange(i)
-      inst.bits := currentTrace
+    val inst = io.cutInsts(i)
+    when (!io.instRange(i) || !stillConsecutive) {
+      inst.valid := false.B
+      inst.bits := (-1.S).asTypeOf(new TraceInstrBundle)
+    }.elsewhen (lastInstEndVec(i)) {
+      traceRangeVec(i) := curPC === curTrace.pc
+      inst.valid := traceRangeVec(i)
+      inst.bits := curTrace
 
-      lastInstEnd := stillConsecutive && !isRVC(inst.bits.inst)
-      currentInstIdx := currentInstIdx + 1.U
+      when (inst.valid) {
+        lastInstEndVec(i+1) := isRVC(inst.bits.inst)
+        curInstIdxVec(i+1) := curInstIdxVec(i) + 1.U
+      }
     }.elsewhen(stillConsecutive) {
       inst.valid := false.B
       inst.bits := (-1.S).asTypeOf(new TraceInstrBundle)
-      inst.bits.pc := currentPC
+      inst.bits.pc := curPC
 
-      lastInstEnd := true.B
+      if (i==0)
+        traceRangeVec(i) := (curPC + 2.U) === curTrace.pc
+      else {
+        traceRangeVec(i) := true.B
+        XSError(io.debug_valid && (curPC =/= (io.traceInsts(curInstIdxVec(i)-1.U).pc + 2.U)),
+        "traceRange should not be true.B at stillConsecutive path?")
+      }
+
+      lastInstEndVec(i+1) := true.B
+      curInstIdxVec(i+1) := curInstIdxVec(i)
+    }.otherwise {
+      inst.valid := false.B
+      inst.bits := (-1.S).asTypeOf(new TraceInstrBundle)
+
+      XSError(true.B, "Should not reach here")
     }
-
-    io.cutInsts(i) := inst
   }
-}
-object TraceAlignToIFUCut {
-  def apply(
-    traceInsts: Vec[TraceInstrBundle],
-    // preDInfo's startAddr
-    predStartAddr: UInt,
-    // instRange come from BPU's prediction: 'startAddr to nextStartAddr' & 'ftqOffset'
-    instRange: UInt,
-    // When lastHalfValid is true, then the first 2bytes is used by last fetch
-    // So set the first TraceInstrBundle to invalid
-    lastHalfValid: Bool
-  )(implicit p: Parameters) : (Vec[Valid[TraceInstrBundle]]) = {
-    val cut = Module(new TraceAlignToIFUCut)
-    cut.io.traceInsts := traceInsts
-    cut.io.predStartAddr := predStartAddr
-    cut.io.instRange := instRange
-    cut.io.lastHalfValid := lastHalfValid
-    cut.io.cutInsts
-  }
-}
-
-class TraceInstrsBundle(implicit p: Parameters) extends TraceBundle {
-  val insts = Vec(PredictWidth, new TraceInstrBundle())
 }
 
 class TracePredictInfo(implicit p: Parameters) extends TraceBundle {
@@ -259,8 +279,8 @@ class TracePredictInfo(implicit p: Parameters) extends TraceBundle {
 }
 
 class TraceFromIFU(implicit p: Parameters) extends TraceBundle {
-  val f3_redirect = Bool()
-  val f3_fire = Bool()
+  val redirect = Bool()
+  val fire = Bool()
 }
 class TracePreDecodeAndCheckerIO(implicit p: Parameters) extends TraceBundle {
   // debug
@@ -268,16 +288,18 @@ class TracePreDecodeAndCheckerIO(implicit p: Parameters) extends TraceBundle {
   // IFU info
   val fromIFU = Input(new TraceFromIFU())
   // From TraceReader
-  val traceInst = Input(new TraceInstrsBundle())
+  val traceInsts = Input(Vec(PredictWidth, new TraceInstrBundle()))
   // From BPU and IFU
   val predInfo = Input(new TracePredictInfo())
 
-  // Pre-decoder
+  // Pre-decoder: normal predecoder
   val predecoder = Output(new PreDecodeResp())
   // Predict checker
   val checker = Output(new PredCheckerResp())
   // trace checker
   val traceChecker = Output(new TraceCheckerResp())
+  // trace Inst: one-to-one with preDecoder but contains the traceInfo
+  val traceAlignInsts = Output(Vec(PredictWidth, Valid(new TraceInstrBundle())))
 }
 class TracePreDecodeAndChecker(implicit p: Parameters) extends TraceModule
   with TraceParams
@@ -287,39 +309,45 @@ class TracePreDecodeAndChecker(implicit p: Parameters) extends TraceModule
   val preDecoder = Module(new TracePreDecoder)
   val predChecker = Module(new TracePredictChecker)
   val traceChecker = Module(new TraceChecker)
+  val traceAligner = Module(new TraceAlignToIFUCut)
 
-  val concede2Bytes = Wire(Bool())
-  val traceInstIFUCut: Vec[Valid[TraceInstrBundle]] =
-    TraceAlignToIFUCut(
-      io.traceInst.insts,
-      io.predInfo.startAddr,
-      io.predInfo.instRange, // Reuse IFU's instRange
-      concede2Bytes
-    )
+  val lastFetchRedirect = RegEnable(io.fromIFU.redirect, false.B, io.fromIFU.fire || io.fromIFU.redirect)
+  val lastFetchTakenMore2B = RegEnable((traceAligner.io.instRangeTaken2B || traceAligner.io.traceRangeTaken2B), false.B, io.fromIFU.fire)
 
-  val lastFetchRedirect = RegEnable(!io.fromIFU.f3_redirect, io.fromIFU.f3_fire, false.B)
-  // val traceEndIndex = ParallelPosteriorityEncoder(traceInstIFUCut.map(_.valid))
-  // val traceEndPC = traceInstIFUCut(traceEndIndex).bits.pc
-  // val lastFetchTakeMore2B = RegEnable(io.traceInst.insts(0).valid, io.fromIFU.f3_fire, false.B)
-  concede2Bytes := !lastFetchRedirect && // lastFetchTakeMore2B &&
-    ((io.predInfo.startAddr + 2.U) === io.traceInst.insts(0).pc)// &&
-    // io.traceInst.insts(0).valid// This may still not right
+  val concede2Bytes = !lastFetchRedirect && lastFetchTakenMore2B
+  val traceInstIFUCut = traceAligner.io.cutInsts
 
-  preDecoder.io.traceInst := traceInstIFUCut
+  traceAligner.io.specifyField(
+    _.debug_valid := io.debug_valid,
+    _.traceInsts := io.traceInsts,
+    _.predStartAddr := io.predInfo.startAddr,
+    _.instRange := io.predInfo.instRange,
+    _.lastHalfValid := concede2Bytes
+  )
 
-  predChecker.io.traceInst := traceInstIFUCut
-  predChecker.io.predictInfo := io.predInfo
-  predChecker.io.preDecode := preDecoder.io.out
-
-  traceChecker.io.debug_valid := io.debug_valid
-  traceChecker.io.traceInst := traceInstIFUCut
-  traceChecker.io.predictInfo := io.predInfo
-  traceChecker.io.preDecode := preDecoder.io.out
-  traceChecker.io.predChecker := predChecker.io.out
-
-  io.predecoder := preDecoder.io.out
-  io.checker := predChecker.io.out
-  io.traceChecker := traceChecker.io.out
+  preDecoder.io.specifyField(
+    _.traceInsts := traceInstIFUCut,
+  )
+  predChecker.io.specifyField(
+    _.debug_valid := io.debug_valid,
+    _.traceInsts := traceInstIFUCut,
+    _.predictInfo := io.predInfo,
+    _.preDecode := preDecoder.io.out,
+  )
+  traceChecker.io.specifyField(
+    _.debug_valid := io.debug_valid,
+    _.traceInsts := traceInstIFUCut,
+    _.predictInfo := io.predInfo,
+    _.preDecode := preDecoder.io.out,
+    _.predChecker := predChecker.io.out,
+    _.traceRange := traceAligner.io.traceRange,
+  )
+  io.specifyField(
+    _.predecoder := preDecoder.io.out,
+    _.checker := predChecker.io.out,
+    _.traceChecker := traceChecker.io.out,
+    _.traceAlignInsts := traceAligner.io.cutInsts,
+  )
 }
 
 /**
@@ -337,25 +365,25 @@ class TracePreDecoder(implicit p: Parameters) extends TraceModule
   with HasPdConst
 {
   val io = IO(new Bundle {
-    val traceInst = Input(Vec(TraceFetchWidth, Valid(new TraceInstrBundle())))
+    val traceInsts = Input(Vec(PredictWidth, Valid(new TraceInstrBundle())))
     val out = Output(new PreDecodeResp)
   })
 
   // Set it to false to ignore
   io.out.hasHalfValid.map(_ := false.B)
-  io.out.triggered.map(_ := 0.U.asTypeOf(io.out.triggered))
+  io.out.triggered := 0.U.asTypeOf(io.out.triggered)
 
-  for (i <- 0 until TraceFetchWidth) {
+  for (i <- 0 until PredictWidth) {
     val pd = io.out.pd(i)
-    val trace = io.traceInst(i).bits
+    val trace = io.traceInsts(i).bits
 
-    val currentIsRVC = isRVC(trace.inst)
+    val curIsRVC = isRVC(trace.inst)
     val brType::isCall::isRet::Nil = brInfo(trace.inst)
-    val jalOffset = jal_offset(trace.inst, currentIsRVC)
-    val brOffset  = br_offset(trace.inst, currentIsRVC)
+    val jalOffset = jal_offset(trace.inst, curIsRVC)
+    val brOffset  = br_offset(trace.inst, curIsRVC)
 
-    pd.valid  := io.traceInst(i).valid
-    pd.isRVC  := currentIsRVC
+    pd.valid  := io.traceInsts(i).valid
+    pd.isRVC  := curIsRVC
     pd.brType := brType
     pd.isCall := isCall
     pd.isRet  := isRet
@@ -372,14 +400,14 @@ class TracePredictChecker(implicit p: Parameters) extends TraceModule
 {
   val io = IO(new Bundle {
     val debug_valid = Input(Bool()) // for debug, the signal is true, same with F3_fire
-    val traceInst = Input(Vec(TraceFetchWidth, Valid(new TraceInstrBundle())))
+    val traceInsts = Input(Vec(PredictWidth, Valid(new TraceInstrBundle())))
     val predictInfo = Input(new TracePredictInfo)
     val preDecode = Input(new PreDecodeResp)
     val out = Output(new PredCheckerResp)
   })
 
   val pds = io.preDecode.pd
-  val pcs = io.traceInst.map(_.bits.pc)
+  val pcs = io.traceInsts.map(_.bits.pc)
 
   val predRange = io.predictInfo.instRange
   val takenIdx = io.predictInfo.ftqOffset.bits
@@ -412,7 +440,7 @@ class TracePredictChecker(implicit p: Parameters) extends TraceModule
     pds(i).valid && predRange(i) &&
     (pds(i).isRet || pds(i).isJal ||
      (takenIdx === i.U && predTaken && !pds(i).notCFI))
-  })).asUInt
+  }))
 
   val notCFITaken = (0 until PredictWidth).map(i => {
     fixedRange(i) && pds(i).valid &&
@@ -439,7 +467,7 @@ class TracePredictChecker(implicit p: Parameters) extends TraceModule
 
   (0 until PredictWidth).foreach(i => {
     val out = io.out.stage2Out
-    out.faultType(i) := Mux(jalFaultVec(i) , FaultType.jalFault ,
+    out.faultType(i).value := Mux(jalFaultVec(i) , FaultType.jalFault ,
       Mux(retFaultVec(i), FaultType.retFault ,
       Mux(targetFault(i), FaultType.targetFault ,
       Mux(notCFITaken(i) , FaultType.notCFIFault,
@@ -452,12 +480,10 @@ class TracePredictChecker(implicit p: Parameters) extends TraceModule
 
 
   // debug
-  instValid.zip(io.traceInst).foreach{ case (valid, trace) =>
+  instValid.zip(io.traceInsts).foreach{ case (valid, trace) =>
     XSError(valid =/= trace.valid, "instValid should be the same with trace.valid")
   }
 }
-
-
   /**
     * Normal Prediction Checker
     * Input: instRange, jumpRange, predInfo
@@ -518,17 +544,17 @@ class TracePredictChecker(implicit p: Parameters) extends TraceModule
     */
 
 class TraceCheckerResp(implicit p: Parameters) extends TraceBundle {
-  // val traceRange = UInt(PredictWidth.W)
-  // val traceRecvInst = UInt(log2Ceil(PredictWidth+1).W)
-  val traceRecvValid = UInt(PredictWidth.W)
+  val traceRange = UInt(PredictWidth.W)
 }
 
 class TraceCheckerIO(implicit p: Parameters) extends TraceBundle {
   val debug_valid = Input(Bool())
-  val traceInst = Input(Vec(TraceFetchWidth, Valid(new TraceInstrBundle())))
+  val traceInsts = Input(Vec(PredictWidth, Valid(new TraceInstrBundle())))
   val predictInfo = Input(new TracePredictInfo)
   val preDecode = Input(new PreDecodeResp)
   val predChecker = Input(new PredCheckerResp)
+  // TODO: this traceRange is alone, make it better
+  val traceRange = Input(UInt(PredictWidth.W))
 
   val out = Output(new TraceCheckerResp)
 }
@@ -537,32 +563,8 @@ class TraceChecker(implicit p: Parameters) extends TraceModule {
   val io = IO(new TraceCheckerIO)
 
   val predRange = io.predictInfo.instRange
-  val checkRange = io.predChecker.stage1Out.fixedRange
-  val traceValid = io.traceInst.map(_.valid)
-
-  // val lastTraceIdx = ParallelPosteriorityEncoder(traceValid)
-  // val lastTrace = io.traceInst(lastTraceIdx).bits
-  // val lastTraceisRVC = io.preDecode.pd(traceLastIdx).isRVC
-  // val lastTracePC = lastTrace.pc
-  // val lastTraceEndAddr = lastTracePC + (Mux(lastTraceisRVC, 2.U, 4.U))
-  // // ==
-  // val lastCheckIdx = ParallelPosteriorityEncoder(io.predChecker.stage1Out.fixedRange)
-  // val lastCheckEndAddr = io.predictInfo.startAddr + (lastPredIdx << 1.U) + 2.U
-
-  // val checkEqualTrace = (lastCheckEndAddr === lastTraceEndAddr) || (lastCheckEndAddr === (lastTraceEndAddr - 2.U))
-
-  val traceRecvValid = (0 until PredictWidth).map(i => {
-    traceValid(i) && checkRange(i)
-  })
-  io.out.traceRecvValid := VecInit(traceRecvValid).asUInt
-
-
-  // val predCheckNoRemask = predRange === checkRange
-  // val originTarget = io.predictInfo.nextStartAddr
-  // val fixedTarget = ParallelPriorityMux(io.prd)
-  // val predCheckFault = io.predChecker.stage2Out
-  // val nextTarget = ??? //
-
+  val checkRange = io.predChecker.stage1Out.fixedRange.asUInt
+  io.out.traceRange := io.traceRange & checkRange
   /**
     * TraceRange
     * - 1. checkRange < traceRange && traceRange <= predRange
@@ -590,7 +592,7 @@ class TraceChecker(implicit p: Parameters) extends TraceModule {
 
 
   // debug
-  io.traceInst.zip(io.preDecode.pd).foreach{ case (trace, pd) =>
+  io.traceInsts.zip(io.preDecode.pd).foreach{ case (trace, pd) =>
     XSError(trace.valid =/= pd.valid,
       "traceInst should be the same with preDecode.valid")
   }
@@ -598,4 +600,20 @@ class TraceChecker(implicit p: Parameters) extends TraceModule {
     XSError((checkRange.asUInt & predRange.asUInt) === checkRange.asUInt,
       "checkRange should be shorter than predRange")
   }
+}
+
+class TraceDriverIO(implicit p: Parameters) extends TraceBundle {
+  val valid = Input(Bool())
+  val traceInsts = Input(Vec(PredictWidth, Valid(new TraceInstrBundle())))
+  val traceRange = Input(UInt(PredictWidth.W))
+
+  val recv = ValidIO(new TraceRecvInfo())
+}
+
+class TraceDriver(implicit p: Parameters) extends TraceModule {
+  val io = IO(new TraceDriverIO())
+
+  val traceValid = VecInit(io.traceInsts.map(_.valid)).asUInt
+  io.recv.bits.instNum := PopCount(io.traceRange & traceValid)
+  io.recv.valid := io.valid
 }
