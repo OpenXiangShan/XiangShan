@@ -200,7 +200,7 @@ jobs:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so --ci mc-tests 2> /dev/zero
       - name: SMP Linux
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so --ci linux-hello-smp-opensbi 2> /dev/zero
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so --ci linux-hello-smp-new 2> /dev/zero
   # simv-basics:
   #   runs-on: bosc
   #   continue-on-error: false
