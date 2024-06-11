@@ -329,8 +329,8 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule
   val t2_redirect = RegNext(t1_redirect)
   val t2_update = t2_redirect && !VecInit(io.enq.needAlloc.map(_.orR)).asUInt.orR
   val t3_update = RegNext(t2_update)
-  val t3_lqCancelCnt = GatedRegNext(io.lqCancelCnt)
-  val t3_sqCancelCnt = GatedRegNext(io.sqCancelCnt)
+  val t3_lqCancelCnt = RegNext(io.lqCancelCnt)
+  val t3_sqCancelCnt = RegNext(io.sqCancelCnt)
   when (t3_update) {
     lqPtr := lqPtr - t3_lqCancelCnt
     lqCounter := lqCounter + io.lcommit + t3_lqCancelCnt
