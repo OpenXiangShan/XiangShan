@@ -887,7 +887,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   io.error.bits <> RegEnable(
     Mux1H(errors.map(e => RegNext(e.valid) -> RegEnable(e.bits, e.valid))),
     RegNext(error_valid))
-  io.error.valid := RegNext(RegNext(error_valid), init = false.B)
+  io.error.valid := RegNext(RegNext(error_valid, init = false.B), init = false.B)
 
   //----------------------------------------
   // meta array
