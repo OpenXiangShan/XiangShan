@@ -94,6 +94,12 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
         r := r
       }
     }
+
+    regOut.getFields.foreach { field =>
+      if (field.isHardWired) {
+        field := field.getHardWireValue
+      }
+    }
   }).setAddr(0x204)
 
   val vstvec = Module(new CSRModule("VStvec", new XtvecBundle))
@@ -153,6 +159,12 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
           toMipLCIP .bits := wLCIP
           toMvipLCIP.bits := wLCIP
           toHvipLCIP.bits := wLCIP
+    }
+
+    regOut.getFields.foreach { field =>
+      if (field.isHardWired) {
+        field := field.getHardWireValue
+      }
     }
   }).setAddr(0x244)
 
@@ -228,10 +240,16 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
 
 class VSipBundle extends InterruptPendingBundle {
   // All pending bits in vsip are aliases of mip/mvip/hvip or read-only 0
+  this.getM.foreach(_.setHardWired(0.U))
+  this.getVS.foreach(_.setHardWired(0.U))
+  this.SGEIP.setHardWired(0.U)
 }
 
 class VSieBundle extends InterruptEnableBundle {
   this.getLocal.foreach(_.setRW())
+  this.getM .foreach(_.setHardWired(0.U))
+  this.getVS.foreach(_.setHardWired(0.U))
+  this.SGEIE.setHardWired(0.U)
 }
 
 class VSipToMvip extends IpValidBundle {
