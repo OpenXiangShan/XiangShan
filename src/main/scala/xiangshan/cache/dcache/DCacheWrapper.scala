@@ -877,7 +877,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   missQueue.io.lqEmpty := io.lqEmpty
   missQueue.io.hartId := io.hartId
-  missQueue.io.l2_pf_store_only := RegEnable(io.l2_pf_store_only, false.B, missQueue.io.l2_pf_store_only | io.l2_pf_store_only) //RegNext(io.l2_pf_store_only, false.B)
+  missQueue.io.l2_pf_store_only := RegEnable(io.l2_pf_store_only, false.B, missQueue.io.l2_pf_store_only | io.l2_pf_store_only)
   missQueue.io.debugTopDown <> io.debugTopDown
   missQueue.io.l2_hint <> RegNext(io.l2_hint)
   missQueue.io.mainpipe_info := mainPipe.io.mainpipe_info
@@ -1327,7 +1327,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   bus.e <> missQueue.io.mem_finish
   missQueue.io.probe_addr := bus.b.bits.address
 
-  // missQueue.io.main_pipe_resp := RegNext(mainPipe.io.atomic_resp)
   missQueue.io.main_pipe_resp.valid := RegNext(mainPipe.io.atomic_resp.valid)
   missQueue.io.main_pipe_resp.bits := RegEnable(mainPipe.io.atomic_resp.bits, mainPipe.io.atomic_resp.valid)
 
@@ -1348,7 +1347,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // block_decoupled(io.lsu.store.req, mainPipe.io.store_req, refillPipe.io.req.valid)
   block_decoupled(io.lsu.store.req, mainPipe.io.store_req, refill_req)
 
-  // io.lsu.store.replay_resp := RegNext(mainPipe.io.store_replay_resp)
   io.lsu.store.replay_resp.valid := RegNext(mainPipe.io.store_replay_resp.valid)
   io.lsu.store.replay_resp.bits := RegEnable(mainPipe.io.store_replay_resp.bits, mainPipe.io.store_replay_resp.valid)
   io.lsu.store.main_pipe_hit_resp := mainPipe.io.store_hit_resp
@@ -1381,8 +1379,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //wb.io.probe_ttob_check_req <> mainPipe.io.probe_ttob_check_req
   //wb.io.probe_ttob_check_resp <> mainPipe.io.probe_ttob_check_resp
 
-  io.lsu.release.valid := RegEnable(wb.io.req.fire, io.lsu.release.valid | wb.io.req.fire)  // RegNext(wb.io.req.fire)
-  io.lsu.release.bits.paddr := RegEnable(wb.io.req.bits.addr, wb.io.req.fire)  // RegNext(wb.io.req.bits.addr)
+  io.lsu.release.valid := RegEnable(wb.io.req.fire, io.lsu.release.valid | wb.io.req.fire)
+  io.lsu.release.bits.paddr := RegEnable(wb.io.req.bits.addr, wb.io.req.fire)
   // Note: RegNext() is required by:
   // * load queue released flag update logic
   // * load / load violation check logic
@@ -1538,12 +1536,12 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // ld_access.zip(ldu).foreach {
   //   case (a, u) =>
   //     a.valid := RegNext(u.io.lsu.req.fire) && !u.io.lsu.s1_kill
-  //     a.bits.idx := RegEnable(get_idx(u.io.lsu.req.bits.vaddr), u.io.lsu.req.fire)  // RegNext(get_idx(u.io.lsu.req.bits.vaddr))
+  //     a.bits.idx := RegEnable(get_idx(u.io.lsu.req.bits.vaddr), u.io.lsu.req.fire)
   //     a.bits.tag := get_tag(u.io.lsu.s1_paddr_dup_dcache)
   // }
   // st_access.valid := RegNext(mainPipe.io.store_req.fire)
-  // st_access.bits.idx := RegEnable(get_idx(mainPipe.io.store_req.bits.vaddr), mainPipe.io.store_req.fire)  // RegNext(get_idx(mainPipe.io.store_req.bits.vaddr))
-  // st_access.bits.tag := RegEnable(get_tag(mainPipe.io.store_req.bits.addr), mainPipe.io.store_req.fire)  // RegNext(get_tag(mainPipe.io.store_req.bits.addr))
+  // st_access.bits.idx := RegEnable(get_idx(mainPipe.io.store_req.bits.vaddr), mainPipe.io.store_req.fire)
+  // st_access.bits.tag := RegEnable(get_tag(mainPipe.io.store_req.bits.addr), mainPipe.io.store_req.fire)
   // val access_info = ld_access.toSeq ++ Seq(st_access)
   // val early_replace = RegNext(missQueue.io.debug_early_replace) // TODO: clock gate
   // val access_early_replace = access_info.map {
