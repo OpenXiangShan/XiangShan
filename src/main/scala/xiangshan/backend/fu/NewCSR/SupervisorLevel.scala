@@ -155,6 +155,7 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
   }) with HasMhpmeventOfBundle {
     reg.OFVEC := ofVec
     regOut.OFVEC := Mux1H(Seq(
+        privState.isModeM  -> reg.OFVEC.asUInt,
         privState.isModeHS -> (mcounteren.HPM.asUInt & reg.OFVEC.asUInt),
         privState.isModeVS -> (mcounteren.HPM.asUInt & hcounteren.HPM.asUInt & reg.OFVEC.asUInt),
       )
