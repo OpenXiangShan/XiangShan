@@ -136,24 +136,32 @@ class CtrlBlockImp(
   val intScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[IntScheduler])
   val fpScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[FpScheduler])
   val vfScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[VfScheduler])
+  val intCanCompress = intScheWbData.filter(_.bits.params.CanCompress)
+  val i2vWbData = intScheWbData.filter(_.bits.params.writeVecRf)
+  val f2vWbData = fpScheWbData.filter(_.bits.params.writeVecRf)
   val memVloadWbData = io.fromWB.wbData.filter(x => x.bits.params.schdType.isInstanceOf[MemScheduler] && x.bits.params.hasVLoadFu)
   private val delayedNotFlushedWriteBackNums = wbDataNoStd.map(x => {
     val valid = x.valid
     val killedByOlder = x.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect, s3_s5_redirect))
     val delayed = Wire(Valid(UInt(io.fromWB.wbData.size.U.getWidth.W)))
     delayed.valid := GatedValidRegNext(valid && !killedByOlder)
-    val isIntSche = intScheWbData.contains(x)
+    val isIntSche = intCanCompress.contains(x)
     val isFpSche = fpScheWbData.contains(x)
     val isVfSche = vfScheWbData.contains(x)
     val isMemVload = memVloadWbData.contains(x)
-    val canSameRobidxWbData = if (isIntSche) {
-      intScheWbData ++ fpScheWbData ++ vfScheWbData
+    val isi2v = i2vWbData.contains(x)
+    val isf2v = f2vWbData.contains(x)
+    val canSameRobidxWbData = if(isVfSche) {
+      i2vWbData ++ f2vWbData ++ vfScheWbData
+    } else if(isi2v) {
+      intCanCompress ++ fpScheWbData ++ vfScheWbData
+    } else if (isf2v) {
+      intCanCompress ++ fpScheWbData ++ vfScheWbData
+    } else if (isIntSche) {
+      intCanCompress ++ fpScheWbData
     } else if (isFpSche) {
-      intScheWbData ++ fpScheWbData
-    }
-    else if(isVfSche) {
-      intScheWbData ++ vfScheWbData
-    } else if (isMemVload) {
+      intCanCompress ++ fpScheWbData
+    }  else if (isMemVload) {
       memVloadWbData
     } else {
       Seq(x)

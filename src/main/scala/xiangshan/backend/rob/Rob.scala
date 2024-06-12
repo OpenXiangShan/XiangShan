@@ -438,7 +438,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   for (wb <- exuWBs) {
     when(wb.valid) {
       val wbIdx = wb.bits.robIdx.value
-      debug_exuData(wbIdx) := wb.bits.data
+      debug_exuData(wbIdx) := wb.bits.data(0)
       debug_exuDebug(wbIdx) := wb.bits.debug
       debug_microOp(wbIdx).debugInfo.enqRsTime := wb.bits.debugInfo.enqRsTime
       debug_microOp(wbIdx).debugInfo.selectTime := wb.bits.debugInfo.selectTime
@@ -452,7 +452,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val debug_Uop = debug_microOp(wbIdx)
       XSInfo(true.B,
         p"writebacked pc 0x${Hexadecimal(debug_Uop.pc)} wen ${debug_Uop.rfWen} " +
-          p"data 0x${Hexadecimal(wb.bits.data)} ldst ${debug_Uop.ldest} pdst ${debug_Uop.pdest} " +
+          p"data 0x${Hexadecimal(wb.bits.data(0))} ldst ${debug_Uop.ldest} pdst ${debug_Uop.pdest} " +
           p"skip ${wb.bits.debug.isMMIO} robIdx: ${wb.bits.robIdx}\n"
       )
     }

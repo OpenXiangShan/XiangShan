@@ -482,7 +482,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   wbDataPath.io.fromMemExu.flatten.zip(io.mem.writeBack).foreach { case (sink, source) =>
     sink.valid := source.valid
     source.ready := sink.ready
-    sink.bits.data   := source.bits.data
+    sink.bits.data   := VecInit(Seq.fill(sink.bits.params.wbPathNum)(source.bits.data))
     sink.bits.pdest  := source.bits.uop.pdest
     sink.bits.robIdx := source.bits.uop.robIdx
     sink.bits.intWen.foreach(_ := source.bits.uop.rfWen)
