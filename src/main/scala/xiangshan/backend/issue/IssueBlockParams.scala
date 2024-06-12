@@ -97,6 +97,10 @@ case class IssueBlockParams(
 
   def writeVecRf: Boolean = exuBlockParams.map(_.writeVecRf).reduce(_ || _)
 
+  def writeV0Rf: Boolean = exuBlockParams.map(_.writeV0Rf).reduce(_ || _)
+
+  def writeVlRf: Boolean = exuBlockParams.map(_.writeVlRf).reduce(_ || _)
+
   def exceptionOut: Seq[Int] = exuBlockParams.map(_.exceptionOut).reduce(_ ++ _).distinct.sorted
 
   def hasLoadError: Boolean = exuBlockParams.map(_.hasLoadError).reduce(_ || _)

@@ -1067,19 +1067,19 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
       val uop = loadWakeUpIter.next()
 
       wakeup.valid := GatedValidRegNext(uop.fire)
-      wakeup.bits.rfWen  := GatedValidRegNext(uop.bits.rfWen  && uop.fire)
-      wakeup.bits.fpWen  := GatedValidRegNext(uop.bits.fpWen  && uop.fire)
-      wakeup.bits.vecWen := GatedValidRegNext(uop.bits.vecWen && uop.fire)
-      wakeup.bits.v0Wen  := GatedValidRegNext(uop.bits.v0Wen  && uop.fire)
-      wakeup.bits.vlWen  := GatedValidRegNext(uop.bits.vlWen  && uop.fire)
+      wakeup.bits.rfWen  := (if (params.writeIntRf) GatedValidRegNext(uop.bits.rfWen  && uop.fire) else false.B)
+      wakeup.bits.fpWen  := (if (params.writeFpRf)  GatedValidRegNext(uop.bits.fpWen  && uop.fire) else false.B)
+      wakeup.bits.vecWen := (if (params.writeVecRf) GatedValidRegNext(uop.bits.vecWen && uop.fire) else false.B)
+      wakeup.bits.v0Wen  := (if (params.writeV0Rf)  GatedValidRegNext(uop.bits.v0Wen  && uop.fire) else false.B)
+      wakeup.bits.vlWen  := (if (params.writeVlRf)  GatedValidRegNext(uop.bits.vlWen  && uop.fire) else false.B)
       wakeup.bits.pdest  := RegEnable(uop.bits.pdest, uop.fire)
       wakeup.bits.loadDependency.foreach(_ := 0.U) // this is correct for load only
 
-      wakeup.bits.rfWenCopy .foreach(_.foreach(_ := GatedValidRegNext(uop.bits.rfWen  && uop.fire)))
-      wakeup.bits.fpWenCopy .foreach(_.foreach(_ := GatedValidRegNext(uop.bits.fpWen  && uop.fire)))
-      wakeup.bits.vecWenCopy.foreach(_.foreach(_ := GatedValidRegNext(uop.bits.vecWen && uop.fire)))
-      wakeup.bits.v0WenCopy .foreach(_.foreach(_ := GatedValidRegNext(uop.bits.v0Wen  && uop.fire)))
-      wakeup.bits.vlWenCopy .foreach(_.foreach(_ := GatedValidRegNext(uop.bits.vlWen  && uop.fire)))
+      wakeup.bits.rfWenCopy .foreach(_.foreach(_ := (if (params.writeIntRf) GatedValidRegNext(uop.bits.rfWen  && uop.fire) else false.B)))
+      wakeup.bits.fpWenCopy .foreach(_.foreach(_ := (if (params.writeFpRf)  GatedValidRegNext(uop.bits.fpWen  && uop.fire) else false.B)))
+      wakeup.bits.vecWenCopy.foreach(_.foreach(_ := (if (params.writeVecRf) GatedValidRegNext(uop.bits.vecWen && uop.fire) else false.B)))
+      wakeup.bits.v0WenCopy .foreach(_.foreach(_ := (if (params.writeV0Rf)  GatedValidRegNext(uop.bits.v0Wen  && uop.fire) else false.B)))
+      wakeup.bits.vlWenCopy .foreach(_.foreach(_ := (if (params.writeVlRf)  GatedValidRegNext(uop.bits.vlWen  && uop.fire) else false.B)))
       wakeup.bits.pdestCopy .foreach(_.foreach(_ := RegEnable(uop.bits.pdest, uop.fire)))
       wakeup.bits.loadDependencyCopy.foreach(x => x := 0.U.asTypeOf(x)) // this is correct for load only
 
