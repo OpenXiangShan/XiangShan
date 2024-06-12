@@ -368,12 +368,13 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val tickCtr = RegInit(0.U(TickWidth.W))
 
   // uftb miss or hasIndirect
-  val s0_isIndirect = !io.in.bits.resp_in(0).s0_uftbHit || io.in.bits.resp_in(0).s0_uftbHasIndirect
+  val s1_uftbHit =  RegEnable(io.in.bits.resp_in(0).s0_uftbHit, false.B, io.s0_fire(0))
+  val s1_uftbHasIndirect = RegEnable(io.in.bits.resp_in(0).s0_uftbHasIndirect, false.B, io.s0_fire(0))
+  val s1_isIndirect = (!s1_uftbHit && !io.in.bits.resp_in(0).s1_ftbCloseReq) || s1_uftbHasIndirect
 
   // Keep the table responses to process in s2
 
-  val s1_resps = VecInit(tables.map(t => t.io.resp))
-  val s2_resps = RegEnable(s1_resps, io.s1_fire(3))
+  val s2_resps = VecInit(tables.map(t => t.io.resp))
 
   val debug_pc_s1 = RegEnable(s0_pc_dup(3), io.s0_fire(3))
   val debug_pc_s2 = RegEnable(debug_pc_s1, io.s1_fire(3))
@@ -438,9 +439,9 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
   // Predict
   tables.map { t => {
-      t.io.req.valid := io.s0_fire(3) && s0_isIndirect
-      t.io.req.bits.pc := s0_pc_dup(3)
-      t.io.req.bits.folded_hist := io.in.bits.folded_hist(3)
+      t.io.req.valid := io.s1_fire(3) && s1_isIndirect
+      t.io.req.bits.pc := s1_pc_dup(3)
+      t.io.req.bits.folded_hist := io.in.bits.s1_folded_hist(3)
     }
   }
 
@@ -589,8 +590,8 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   // Debug and perf info
   XSPerfAccumulate("ittage_reset_u", updateResetU)
   XSPerfAccumulate("ittage_write_blocks_read", !io.s1_ready)
-  XSPerfAccumulate("ittage_used", io.s0_fire(0) && s0_isIndirect)
-  XSPerfAccumulate("ittage_closed_due_to_uftb_info", io.s0_fire(0) && !s0_isIndirect)
+  XSPerfAccumulate("ittage_used", io.s1_fire(0) && s1_isIndirect)
+  XSPerfAccumulate("ittage_closed_due_to_uftb_info", io.s1_fire(0) && !s1_isIndirect)
 
   def pred_perf(name: String, cond: Bool)   = XSPerfAccumulate(s"${name}_at_pred", cond && io.s2_fire(3))
   def commit_perf(name: String, cond: Bool) = XSPerfAccumulate(s"${name}_at_commit", cond && updateValid)
@@ -643,15 +644,15 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   XSPerfAccumulate("updated", updateValid)
 
   if (debug) {
-    val s2_resps = RegEnable(s1_resps, io.s1_fire(3))
+    val s2_resps_regs = RegEnable(s2_resps, io.s2_fire(3))
     XSDebug("req: v=%d, pc=0x%x\n", io.s0_fire(3), s0_pc_dup(3))
     XSDebug("s1_fire:%d, resp: pc=%x\n", io.s1_fire(3), debug_pc_s1)
     XSDebug("s2_fireOnLastCycle: resp: pc=%x, target=%x, hit=%b\n",
       debug_pc_s2, io.out.s2.getTarget(3), s2_provided)
     for (i <- 0 until ITTageNTables) {
       XSDebug("TageTable(%d): valids:%b, resp_ctrs:%b, resp_us:%b, target:%x\n",
-        i.U, VecInit(s2_resps(i).valid).asUInt, s2_resps(i).bits.ctr,
-        s2_resps(i).bits.u, s2_resps(i).bits.target)
+        i.U, VecInit(s2_resps_regs(i).valid).asUInt, s2_resps_regs(i).bits.ctr,
+        s2_resps_regs(i).bits.u, s2_resps_regs(i).bits.target)
     }
   }
   XSDebug(updateValid, p"pc: ${Hexadecimal(update.pc)}, target: ${Hexadecimal(update.full_target)}\n")

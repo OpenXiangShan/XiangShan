@@ -736,6 +736,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
 
   io.out.last_stage_ftb_entry := s3_ftb_entry_dup(0)
   io.out.last_stage_meta := RegEnable(Mux(s2_multi_hit_enable, s2_multi_hit_meta, s2_ftb_meta), io.s2_fire(0))
+  io.out.s1_ftbCloseReq := s1_close_ftb_req
 
   // always taken logic
   for (i <- 0 until numBr) {
