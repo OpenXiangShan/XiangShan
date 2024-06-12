@@ -8,8 +8,26 @@ on:
     branches: [ master ]
 
 jobs:
+  changes: # Changes Detection
+    name: Changes Detection
+    runs-on: ubuntu-latest
+    # Required permissions
+    permissions:
+      pull-requests: read
+    # Set job outputs to values from filter step
+    outputs:
+      core: ${{ steps.filter.outputs.core }}
+    steps:
+    - uses: actions/checkout@v2
+    - uses: dorny/paths-filter@v3
+      id: filter
+      with:
+        predicate-quantifier: 'every'
+        filters: .github/filters.yaml
   generate-verilog:
     runs-on: bosc
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' }}
     continue-on-error: false
     timeout-minutes: 900
     name: Generate Verilog
@@ -49,6 +67,8 @@ jobs:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate --config KunminghuV2Config --release --mfc
   emu-basics:
     runs-on: bosc
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' }}
     continue-on-error: false
     timeout-minutes: 900
     name: EMU - Basics
@@ -106,6 +126,8 @@ jobs:
           cat perf.log | sort | tee $PERF_HOME/copy_and_run.log
   emu-performance:
     runs-on: bosc
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' }}
     continue-on-error: false
     timeout-minutes: 900
     name: EMU - Performance
@@ -169,6 +191,8 @@ jobs:
           cat perf.log | sort | tee $PERF_HOME/astar.log
   emu-mc:
     runs-on: bosc
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' }}
     continue-on-error: false
     timeout-minutes: 900
     name: EMU - MC
@@ -203,6 +227,8 @@ jobs:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so --ci linux-hello-smp-new 2> /dev/zero
   # simv-basics:
   #   runs-on: bosc
+  #   needs: changes
+  #   if: ${{ needs.changes.outputs.core == 'true' }}
   #   continue-on-error: false
   #   timeout-minutes: 900
   #   name: SIMV - Basics
