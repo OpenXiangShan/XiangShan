@@ -20,17 +20,38 @@ import chisel3._
 import chisel3.util._
 import chisel3.experimental.ExtModule
 import org.chipsalliance.cde.config.Parameters
-import xiangshan.{XSModule, XSBundle}
+import xiangshan.{XSModule, XSBundle, DebugOptionsKey}
 import utility.{CircularQueuePtr, HasCircularQueuePtrHelper, ParallelPriorityEncoder, ParallelPosteriorityEncoder}
 import utils.{XSError}
 import xiangshan.frontend.ChiselRecordForField._
-import freechips.rocketchip.rocket.ExpandedInstruction
 
 // From HX's NewCSR utility
 object ChiselRecordForField {
   implicit class AddRecordSpecifyFields[T <: Record](val x: T) {
     def specifyField(elemFns: (T => Unit)*): Unit = {
       elemFns.foreach(_.apply(x))
+    }
+  }
+}
+
+object TraceRTLChoose {
+  def apply[T <: Data](f: T, t: T)(implicit p: Parameters): T = {
+    val env = p(DebugOptionsKey)
+    if (env.TraceRTLMode) {
+      t
+    } else {
+      f
+    }
+  }
+}
+
+object TraceRTLDontCare {
+  def apply[T <: Data](f: T)(implicit p: Parameters): T = {
+    val env = p(DebugOptionsKey)
+    if (env.TraceRTLMode) {
+      f
+    } else {
+      0.U.asInstanceOf[T]
     }
   }
 }
@@ -282,10 +303,9 @@ class TracePredictInfo(implicit p: Parameters) extends TraceBundle {
 class TraceFromIFU(implicit p: Parameters) extends TraceBundle {
   val redirect = Bool()
   val fire = Bool()
+  val valid = Bool()
 }
 class TracePreDecodeAndCheckerIO(implicit p: Parameters) extends TraceBundle {
-  // debug
-  val debug_valid = Input(Bool())
   // IFU info
   val fromIFU = Input(new TraceFromIFU())
   // From TraceReader
@@ -320,7 +340,7 @@ class TracePreDecodeAndChecker(implicit p: Parameters) extends TraceModule
   val traceInstIFUCut = traceAligner.io.cutInsts
 
   traceAligner.io.specifyField(
-    _.debug_valid := io.debug_valid,
+    _.debug_valid := io.fromIFU.valid,
     _.traceInsts := io.traceInsts,
     _.predStartAddr := io.predInfo.startAddr,
     _.instRange := io.predInfo.instRange,
@@ -331,13 +351,13 @@ class TracePreDecodeAndChecker(implicit p: Parameters) extends TraceModule
     _.traceInsts := traceInstIFUCut,
   )
   predChecker.io.specifyField(
-    _.debug_valid := io.debug_valid,
+    _.fire_in := io.fromIFU.fire,
     _.traceInsts := traceInstIFUCut,
     _.predictInfo := io.predInfo,
     _.preDecode := preDecoder.io.out,
   )
   traceChecker.io.specifyField(
-    _.debug_valid := io.debug_valid,
+    _.debug_valid := io.fromIFU.valid,
     _.traceInsts := traceInstIFUCut,
     _.predictInfo := io.predInfo,
     _.preDecode := preDecoder.io.out,
@@ -349,7 +369,7 @@ class TracePreDecodeAndChecker(implicit p: Parameters) extends TraceModule
     _.checker := predChecker.io.out,
     _.traceChecker := traceChecker.io.out,
     _.traceAlignInsts := traceAligner.io.cutInsts,
-    _.traceExpandInsts.zip(traceAligner.io.cutInsts).foreach{ 
+    _.traceExpandInsts.zip(traceAligner.io.cutInsts).foreach{
       case (expand, cut) => expand := expandInst(cut.bits.inst)
     }
   )
@@ -411,7 +431,7 @@ class TracePredictChecker(implicit p: Parameters) extends TraceModule
   with TraceParams
 {
   val io = IO(new Bundle {
-    val debug_valid = Input(Bool()) // for debug, the signal is true, same with F3_fire
+    val fire_in = Input(Bool())
     val traceInsts = Input(Vec(PredictWidth, Valid(new TraceInstrBundle())))
     val predictInfo = Input(new TracePredictInfo)
     val preDecode = Input(new PreDecodeResp)
@@ -446,7 +466,6 @@ class TracePredictChecker(implicit p: Parameters) extends TraceModule
   val AllTrueMask = -1.S(PredictWidth.W).asUInt
   val fixedRange = Mux(needRemask, AllTrueMask >> (PredictWidth.U - (remaskIdx + 1.U)), predRange)
 
-
   io.out.stage1Out.fixedRange := fixedRange.asTypeOf(Vec(PredictWidth, Bool()))
   io.out.stage1Out.fixedTaken := VecInit((0 until PredictWidth).map(i => {
     pds(i).valid && predRange(i) &&
@@ -477,19 +496,19 @@ class TracePredictChecker(implicit p: Parameters) extends TraceModule
     (jumpTargets(i) =/= predTarget)
   })
 
+  val stage2Out = Wire(chiselTypeOf(io.out.stage2Out))
   (0 until PredictWidth).foreach(i => {
-    val out = io.out.stage2Out
-    out.faultType(i).value := Mux(jalFaultVec(i) , FaultType.jalFault ,
+    stage2Out.faultType(i).value := Mux(jalFaultVec(i) , FaultType.jalFault ,
       Mux(retFaultVec(i), FaultType.retFault ,
       Mux(targetFault(i), FaultType.targetFault ,
       Mux(notCFITaken(i) , FaultType.notCFIFault,
       Mux(invalidTaken(i), FaultType.invalidTaken,  FaultType.noFault)))))
-    out.fixedMissPred(i) := jalFaultVec(i) || retFaultVec(i) ||
+    stage2Out.fixedMissPred(i) := jalFaultVec(i) || retFaultVec(i) ||
       targetFault(i) || notCFITaken(i) || invalidTaken(i)
-    out.fixedTarget(i) := Mux(jalFaultVec(i) || targetFault(i), jumpTargets(i), seqTargets(i))
-    out.jalTarget(i) := jumpTargets(i)
+    stage2Out.fixedTarget(i) := Mux(jalFaultVec(i) || targetFault(i), jumpTargets(i), seqTargets(i))
+    stage2Out.jalTarget(i) := jumpTargets(i)
   })
-
+  io.out.stage2Out := RegEnable(stage2Out, io.fire_in)
 
   // debug
   instValid.zip(io.traceInsts).foreach{ case (valid, trace) =>
@@ -557,6 +576,7 @@ class TracePredictChecker(implicit p: Parameters) extends TraceModule
 
 class TraceCheckerResp(implicit p: Parameters) extends TraceBundle {
   val traceRange = UInt(PredictWidth.W)
+  val traceValid = UInt(PredictWidth.W)
 }
 
 class TraceCheckerIO(implicit p: Parameters) extends TraceBundle {
@@ -577,6 +597,7 @@ class TraceChecker(implicit p: Parameters) extends TraceModule {
   val predRange = io.predictInfo.instRange
   val checkRange = io.predChecker.stage1Out.fixedRange.asUInt
   io.out.traceRange := io.traceRange & checkRange
+  io.out.traceValid := VecInit(io.traceInsts.map(_.valid)).asUInt
   /**
     * TraceRange
     * - 1. checkRange < traceRange && traceRange <= predRange
@@ -615,7 +636,7 @@ class TraceChecker(implicit p: Parameters) extends TraceModule {
 }
 
 class TraceDriverIO(implicit p: Parameters) extends TraceBundle {
-  val valid = Input(Bool())
+  val fire = Input(Bool())
   val traceInsts = Input(Vec(PredictWidth, Valid(new TraceInstrBundle())))
   val traceRange = Input(UInt(PredictWidth.W))
 
@@ -627,5 +648,5 @@ class TraceDriver(implicit p: Parameters) extends TraceModule {
 
   val traceValid = VecInit(io.traceInsts.map(_.valid)).asUInt
   io.recv.bits.instNum := PopCount(io.traceRange & traceValid)
-  io.recv.valid := io.valid
+  io.recv.valid := io.fire
 }
