@@ -29,16 +29,25 @@ class TrapHandleModule extends Module {
 
   private val highestPrioIRVec = Wire(Vec(64, Bool()))
   highestPrioIRVec.zipWithIndex.foreach { case (irq, i) =>
-    if (InterruptNO.interruptDefaultPrio.contains(i))
-      irq := Cat(InterruptNO.getIRQHigherThan(i).map(num => !hasIRVec(num))).andR && hasIRVec(i)
-    else
+    if (InterruptNO.interruptDefaultPrio.contains(i)) {
+      val higherIRSeq = InterruptNO.getIRQHigherThan(i)
+      irq := (
+        higherIRSeq.nonEmpty.B && Cat(higherIRSeq.map(num => !hasIRVec(num))).andR ||
+        higherIRSeq.isEmpty.B
+      ) && hasIRVec(i)
+      dontTouch(irq)
+    } else
       irq := false.B
   }
 
   private val highestPrioEXVec = Wire(Vec(64, Bool()))
   highestPrioEXVec.zipWithIndex.foreach { case (excp, i) =>
     if (ExceptionNO.priorities.contains(i)) {
-      excp := Cat(ExceptionNO.getHigherExcpThan(i).map(num => !hasEXVec(num))).andR && hasEXVec(i)
+      val higherEXSeq = ExceptionNO.getHigherExcpThan(i)
+      excp := (
+        higherEXSeq.nonEmpty.B && Cat(higherEXSeq.map(num => !hasEXVec(num))).andR ||
+        higherEXSeq.isEmpty.B
+      ) && hasEXVec(i)
     } else
       excp := false.B
   }
