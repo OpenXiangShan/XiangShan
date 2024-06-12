@@ -203,11 +203,6 @@ class XiangShan(object):
         return_code = self.__exec_cmd(f'make -C $NOOP_HOME clean')
         return return_code
 
-    def check_format(self):
-        print("Checking XiangShan source files format with .scalafmt.conf")
-        return_code = self.__exec_cmd(f'make check-format')
-        return return_code
-
     def generate_verilog(self):
         print("Generating XiangShan verilog with the following configurations:")
         self.show()
@@ -273,7 +268,6 @@ class XiangShan(object):
         if args.ci_vcs is not None:
             return self.run_ci_vcs(args.ci_vcs)
         actions = [
-            (args.check_format, lambda _: self.check_format()),
             (args.generate, lambda _ : self.generate_verilog()),
             (args.vcs_gen, lambda _ : self.generate_sim_verilog()),
             (args.build, lambda _ : self.build_emu()),
@@ -472,7 +466,6 @@ if __name__ == "__main__":
     parser.add_argument('workload', nargs='?', type=str, default="",
                         help='input workload file in binary format')
     # actions
-    parser.add_argument('--check-format', action='store_true', help='check XS format')
     parser.add_argument('--build', action='store_true', help='build XS emu')
     parser.add_argument('--generate', action='store_true', help='generate XS verilog')
     parser.add_argument('--vcs-gen', action='store_true', help='generate XS sim verilog for vcs')

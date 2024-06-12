@@ -8,18 +8,6 @@ on:
     branches: [ master ]
 
 jobs:
-  scalafmt:
-    runs-on: bosc
-    continue-on-error: true
-    timeout-minutes: 900
-    name: Check Format
-    steps:
-      - uses: actions/checkout@v2
-        with:
-          submodules: 'recursive'
-      - name: check format
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --check-format
   generate-verilog:
     runs-on: bosc
     continue-on-error: false
