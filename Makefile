@@ -203,6 +203,12 @@ bsp:
 idea:
 	mill -i mill.scalalib.GenIdea/idea
 
+check-format:
+	mill xiangshan[$(CHISEL_VERSION)].checkFormat
+
+reformat:
+	mill xiangshan[$(CHISEL_VERSION)].reformat
+
 # verilator simulation
 emu: sim-verilog
 	$(MAKE) -C ./difftest emu SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
