@@ -269,13 +269,8 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
         debug_mmio(loadWbIndex) := io.ldin(i).bits.mmio
         debug_paddr(loadWbIndex) := io.ldin(i).bits.paddr
 
-        when (io.ldin(i).bits.usSecondInv) {
-          uop(loadWbIndex + 1.U).robIdx := uop(loadWbIndex).robIdx
-          uop(loadWbIndex + 1.U).uopIdx := uop(loadWbIndex).uopIdx
-        }
-
         XSInfo(io.ldin(i).valid,
-          "load hit write to lq idx %d pc 0x%x vaddr %x paddr %x mask %x forwardData %x forwardMask: %x mmio %x isvec %x vec_secondInv %x\n",
+          "load hit write to lq idx %d pc 0x%x vaddr %x paddr %x mask %x forwardData %x forwardMask: %x mmio %x isvec %x\n",
           io.ldin(i).bits.uop.lqIdx.asUInt,
           io.ldin(i).bits.uop.pc,
           io.ldin(i).bits.vaddr,
@@ -284,8 +279,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
           io.ldin(i).bits.forwardData.asUInt,
           io.ldin(i).bits.forwardMask.asUInt,
           io.ldin(i).bits.mmio,
-          io.ldin(i).bits.isvec,
-          io.ldin(i).bits.usSecondInv
+          io.ldin(i).bits.isvec
         )
       }
     }
