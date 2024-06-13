@@ -329,9 +329,8 @@ class NewCSR(implicit val p: Parameters) extends Module
     }
   }
 
-  // Todo: support set dirty only when fcsr has changed
-  private val writeFpLegal  = permitMod.io.out.hasLegalFp
-  private val writeVecLegal = permitMod.io.out.hasLegalVec
+  private val writeFpLegal  = permitMod.io.out.hasLegalWriteFcsr
+  private val writeVecLegal = permitMod.io.out.hasLegalWriteVcsr
 
   permitMod.io.in.csrAccess.ren := ren
   permitMod.io.in.csrAccess.wen := wen
@@ -360,14 +359,10 @@ class NewCSR(implicit val p: Parameters) extends Module
   permitMod.io.in.status.menvcfg := menvcfg.rdata
   permitMod.io.in.status.henvcfg := henvcfg.rdata
 
-  permitMod.io.in.status.sstatusFS  := mstatus.regOut.FS.asUInt
-  permitMod.io.in.status.vsstatusFS := vsstatus.regOut.FS.asUInt
-
-  permitMod.io.in.status.sstatusVS  := mstatus.regOut.VS.asUInt
-  permitMod.io.in.status.vsstatusVS := vsstatus.regOut.VS.asUInt
-
-  permitMod.io.in.status.fsDirty := io.fromRob.commit.fsDirty
-  permitMod.io.in.status.vsDirty := io.fromRob.commit.vsDirty
+  permitMod.io.in.status.mstatusFSOff  :=  mstatus.regOut.FS === ContextStatus.Off
+  permitMod.io.in.status.mstatusVSOff  :=  mstatus.regOut.VS === ContextStatus.Off
+  permitMod.io.in.status.vsstatusFSOff := vsstatus.regOut.FS === ContextStatus.Off
+  permitMod.io.in.status.vsstatusVSOff := vsstatus.regOut.VS === ContextStatus.Off
 
   sstcIRGen.i.stime.valid := time.updated
   sstcIRGen.i.stime.bits  := time.stime
