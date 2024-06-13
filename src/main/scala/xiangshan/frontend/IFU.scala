@@ -25,7 +25,9 @@ import xiangshan._
 import xiangshan.cache.mmu._
 import xiangshan.frontend.icache._
 import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
-import xiangshan.frontend.ChiselRecordForField._
+import xiangshan.frontend.tracertl.ChiselRecordForField._
+import xiangshan.frontend.tracertl.{TraceReader, TraceDriver, TracePreDecodeAndChecker}
+import xiangshan.frontend.tracertl.{TraceRTLChoose, TraceRTLDontCare}
 import utils._
 import utility._
 

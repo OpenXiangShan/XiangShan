@@ -850,6 +850,14 @@ trait HasXSParameter {
   def StoreSetEnable = true // LWT will be disabled if SS is enabled
   def LFSTEnable = true
 
+  // TraceRTLMode
+  def TracePCWidth = XLEN
+  def TraceFetchWidth = PredictWidth
+  def TraceBufferSize = TraceFetchWidth * 3 //
+  def TraceCollectorWidth = CommitWidth
+  def TraceRoBMergeNum = RenameWidth
+  def TraceRoBMergeWidth = log2Ceil(TraceRoBMergeNum)
+
   def PCntIncrStep: Int = 6
   def numPCntHc: Int = 25
   def numPCntPtw: Int = 19
