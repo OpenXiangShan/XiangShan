@@ -246,6 +246,9 @@ class ExeUnitImp(
       sink.bits.ctrl.predictInfo .foreach(x => x := source.bits.predictInfo.get)
       sink.bits.ctrl.fpu         .foreach(x => x := source.bits.fpu.get)
       sink.bits.ctrl.vpu         .foreach(x => x := source.bits.vpu.get)
+      sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFpToVecInst := 0.U)
+      sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFP32Instr   := 0.U)
+      sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFP64Instr   := 0.U)
       sink.bits.perfDebugInfo    := source.bits.perfDebugInfo
   }
 
