@@ -429,8 +429,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         m.robCommit := io.fromRob.commit
         m.robCommit.fsDirty := io.fromRob.commit.fsDirty || writeFpLegal
         m.robCommit.vsDirty := io.fromRob.commit.vsDirty || writeVecLegal
-        m.fsDirty := privState.isVirtual && io.fromRob.commit.fsDirty || writeFpLegal
-        m.vsDirty := privState.isVirtual && io.fromRob.commit.vsDirty || writeVecLegal
+        m.isVirtMode := V.asUInt.asBool
       case _ =>
     }
     mod match {

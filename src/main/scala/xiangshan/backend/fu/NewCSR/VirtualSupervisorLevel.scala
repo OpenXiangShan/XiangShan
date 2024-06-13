@@ -29,12 +29,12 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
       with TrapEntryVSEventSinkBundle
       with HasRobCommitBundle
     {
-      when (fsDirty) {
+      when (robCommit.fsDirty && isVirtMode) {
         assert(reg.FS =/= ContextStatus.Off, "The vsstatus.FS should not be Off when set dirty, please check decode")
         reg.FS := ContextStatus.Dirty
       }
 
-      when (vsDirty) {
+      when (robCommit.fsDirty && isVirtMode) {
         assert(reg.VS =/= ContextStatus.Off, "The vsstatus.VS should not be Off when set dirty, please check decode")
         reg.VS := ContextStatus.Dirty
       }
