@@ -72,6 +72,7 @@ class CSRPermitModule extends Module {
 
   private val csrIsRO = addr(11, 10) === "b11".U
   private val csrIsUnpriv = addr(9, 8) === "b00".U
+  private val csrIsM = addr(9, 8) === "b11".U
   private val csrIsHPM = addr >= CSRs.cycle.U && addr <= CSRs.hpmcounter31.U
   private val csrIsFp = Seq(CSRs.fflags, CSRs.frm, CSRs.fcsr).map(_.U === addr).reduce(_ || _)
   private val csrIsVec = Seq(CSRs.vstart, CSRs.vxsat, CSRs.vxrm, CSRs.vcsr, CSRs.vl, CSRs.vtype, CSRs.vlenb).map(_.U === addr).reduce(_ || _)
@@ -140,11 +141,12 @@ class CSRPermitModule extends Module {
 
   private val csrAccessIllegal = (!privilegeLegal || rwIllegal)
 
-  io.out.illegal := csrAccess && csrAccessIllegal
-
   // Todo: check correct
-  io.out.EX_II := io.out.illegal && !privState.isVirtual || mret_EX_II || sret_EX_II || rwSatp_EX_II || accessHPM_EX_II || rwStimecmp_EX_II || rwCustom_EX_II || fpVec_EX_II
-  io.out.EX_VI := io.out.illegal &&  privState.isVirtual || mret_EX_VI || sret_EX_VI || rwSatp_EX_VI || accessHPM_EX_VI || rwStimecmp_EX_VI
+  io.out.EX_II :=  csrAccess && !privilegeLegal && (!privState.isVirtual || privState.isVirtual && csrIsM) ||
+    rwIllegal || mret_EX_II || sret_EX_II || rwSatp_EX_II || accessHPM_EX_II ||
+    rwStimecmp_EX_II || rwCustom_EX_II || fpVec_EX_II
+  io.out.EX_VI := (csrAccess && !privilegeLegal && privState.isVirtual && !csrIsM ||
+    mret_EX_VI || sret_EX_VI || rwSatp_EX_VI || accessHPM_EX_VI || rwStimecmp_EX_VI) && !rwIllegal
 
   io.out.hasLegalWen  := wen  && !csrAccessIllegal
   io.out.hasLegalMret := mret && !mretIllegal
@@ -210,8 +212,6 @@ class CSRPermitIO extends Bundle {
     val hasLegalSret = Bool()
     val hasLegalWriteFcsr   = Bool()
     val hasLegalWriteVcsr  = Bool()
-    // Todo: split illegal into EX_II and EX_VI
-    val illegal = Bool()
     val EX_II = Bool()
     val EX_VI = Bool()
   })
