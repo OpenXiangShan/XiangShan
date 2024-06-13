@@ -421,7 +421,8 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
     val vlMax = Mux(outVecCtrl.vlmul(2), uvlMax >> (-outVecCtrl.vlmul)(1, 0), uvlMax << outVecCtrl.vlmul(1, 0)).asUInt
     vlMax
   }
-  val isOutOldVdForREDO = (outCtrl.fuOpType === VfaluType.vfredosum && outIsFold) || outCtrl.fuOpType === VfaluType.vfwredosum
+  val isLastUopForREDO = outVecCtrl.lastUop
+  val isOutOldVdForREDO = ((outCtrl.fuOpType === VfaluType.vfredosum && outIsFold) || outCtrl.fuOpType === VfaluType.vfwredosum) && !isLastUopForREDO
   val taIsFalseForVFREDO = ((outCtrl.fuOpType === VfaluType.vfredosum) || (outCtrl.fuOpType === VfaluType.vfwredosum)) && (outVecCtrl.vuopIdx =/= numOfUopVFREDOSUM - 1.U)
   // outVecCtrl.fpu.isFpToVecInst means the instruction is float instruction, not vector float instruction
   val notUseVl = outVecCtrl.fpu.isFpToVecInst || (outCtrl.fuOpType === VfaluType.vfmv_f_s)
