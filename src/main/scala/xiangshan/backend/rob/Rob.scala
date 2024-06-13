@@ -649,16 +649,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.csr.dirty_vs := RegNext(dirty_vs)
   io.csr.vxsat := RegNext(vxsat)
 
-  // sync v csr to csr
-  // for difftest
-  if (env.AlwaysBasicDiff || env.EnableDifftest) {
-    val isDiffWriteVconfigVec = io.diffCommits.get.commitValid.zip(io.diffCommits.get.info).map { case (valid, info) => valid && info.ldest === Vl_IDX.U && info.vlWen }.reverse
-    io.csr.vcsrFlag := RegNext(io.diffCommits.get.isCommit && Cat(isDiffWriteVconfigVec).orR)
-  }
-  else {
-    io.csr.vcsrFlag := false.B
-  }
-
   // commit load/store to lsq
   val ldCommitVec = VecInit((0 until CommitWidth).map(i => io.commits.commitValid(i) && io.commits.info(i).commitType === CommitType.LOAD))
   // TODO: Check if meet the require that only set scommit when commit scala store uop
