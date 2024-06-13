@@ -1,0 +1,81 @@
+name: Bug report
+description: Report a bug (incorrect behaviors) of XiangShan Processor Cores.
+labels: 'bug report'
+body:
+  - type: markdown
+    attributes:
+      value: |
+        You could use English or Chineses to open an issue.
+        您可以使用中文或英文提问，我们推荐使用英文。
+
+        This template is only used for reporting a bug (incorrect behaviors) of XiangShan Processor Cores. If this doesn't look right, please back and choose another template.
+        这个 issue 模板仅用于提报香山不正确的行为。如果您遇到的不是此类问题，请回退并选择其他模板。
+
+        Please fill in the following information so we can better understand and address your issue. Thank you!
+        请填写以下内容，以便我们更好地理解和处理您的问题。谢谢！
+  - type: checkboxes
+    id: before-start
+    attributes:
+      label: Before start
+      description: |
+        Before start, PLEASE MAKE SURE you have done these:
+        开始之前，请确保您已经做过以下事情：
+      options:
+        - label: I have read the [RISC-V ISA Manual](https://github.com/riscv/riscv-isa-manual) and this is not a RISC-V ISA question. 我已经阅读过 RISC-V 指令集手册，这不是一个指令集本身的问题。
+          required: true
+        - label: I have read the [XiangShan Documents](https://xiangshan-doc.readthedocs.io/zh_CN/latest). 我已经阅读过香山文档。
+          required: true
+        - label: I have searched the previous issues and did not find anything relevant. 我已经搜索过之前的 issue，并没有找到相关的。
+          required: true
+        - label: I have reviewed the commit messages from the relevant commit history. 我已经浏览过相关的提交历史和提交信息。
+          required: true
+  - type: textarea
+    id: describe
+    attributes:
+      label: Describe the bug
+      description: |
+        A clear and concise description of what the bug is. 请清晰、准确地描述这一缺陷。
+        If applicable, add screenshots to help explain your problem. 如果可能，请提供有助于您描述问题的屏幕截图。
+      placeholder: 
+    validations:
+      required: true
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected behavior
+      description: |
+        A clear and concise description of what you expected to happen. 请清晰、准确地描述期望的行为。
+      placeholder: 
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: To Reproduce
+      description: |
+        Steps to reproduce the bug. Also a corresponding minimal workload (source code and bin) along with a description. 复现这一缺陷的步骤，以及相关的最小测试用例（包含源码、二进制文件和说明）。
+      placeholder: 
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: |
+        Please provide your environment information. 请提供您的环境信息。
+      placeholder: 
+      value: |
+       - XiangShan branch: 
+       - XiangShan commit id: 
+       - NEMU commit id: 
+       - SPIKE commit id:
+    validations:
+      required: true
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Add any other context about the problem here. 可在此处附上其他相关信息。
+      placeholder: 
+    validations:
+      required: false
