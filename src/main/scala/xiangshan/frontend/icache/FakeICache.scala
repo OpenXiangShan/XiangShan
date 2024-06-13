@@ -638,18 +638,25 @@ class TraceChecker(implicit p: Parameters) extends TraceModule {
   }
 }
 
+class TraceDriverOutput(implicit p: Parameters) extends TraceBundle {
+  // when block true, the fetch is at the wrong path, should block ifu-go, ibuffer-recv
+  val block = Output(Bool())
+  val recv = ValidIO(new TraceRecvInfo())
+}
+
 class TraceDriverIO(implicit p: Parameters) extends TraceBundle {
   val fire = Input(Bool())
   val traceInsts = Input(Vec(PredictWidth, Valid(new TraceInstrBundle())))
   val traceRange = Input(UInt(PredictWidth.W))
 
-  val recv = ValidIO(new TraceRecvInfo())
+  val out = new TraceDriverOutput()
 }
 
 class TraceDriver(implicit p: Parameters) extends TraceModule {
   val io = IO(new TraceDriverIO())
 
   val traceValid = VecInit(io.traceInsts.map(_.valid)).asUInt
-  io.recv.bits.instNum := PopCount(io.traceRange & traceValid)
-  io.recv.valid := io.fire
+  io.out.block := io.out.recv.bits.instNum === 0.U // may be we need more precise control signal
+  io.out.recv.bits.instNum := PopCount(io.traceRange & traceValid)
+  io.out.recv.valid := io.fire
 }

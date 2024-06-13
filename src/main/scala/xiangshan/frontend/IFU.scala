@@ -234,6 +234,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val tracePreDecoder = tracePDaC.io.predecoder
   val tracePredChecker = tracePDaC.io.checker
   val traceChecker = tracePDaC.io.traceChecker
+  val traceBlock = traceDriver.io.out.block
   dontTouch(traceReader.io)
   dontTouch(tracePDaC.io)
   dontTouch(traceDriver.io)
@@ -521,7 +522,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_ftq_req        = RegEnable(f2_ftq_req,    f2_fire)
   // val f3_situation      = RegEnable(f2_situation,  f2_fire)
   val f3_doubleLine     = TraceRTLDontCare(RegEnable(f2_doubleLine, f2_fire))
-  val f3_fire           = io.toIbuffer.fire
+  val f3_fire           = io.toIbuffer.fire && TraceRTLChoose(true.B, !traceBlock)
 
   val f3_cut_data       = RegEnable(f2_cut_data,   f2_fire)
 
@@ -608,7 +609,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   if (env.TraceRTLMode) {
     traceReader.io.specifyField(
-      _.recv := traceDriver.io.recv,
+      _.recv := traceDriver.io.out.recv,
     )
     tracePDaC.io.specifyField(
       _.traceInsts := traceReader.io.traceInsts,
@@ -878,7 +879,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_toIbuffer_valid = f3_valid && (!f3_req_is_mmio || f3_mmio_can_go) && !f3_flush
 
   /*** send to Ibuffer  ***/
-  io.toIbuffer.valid            := f3_valid && (!f3_req_is_mmio || f3_mmio_can_go) && !f3_flush
+  io.toIbuffer.valid            := f3_valid && (!f3_req_is_mmio || f3_mmio_can_go) &&
+    !f3_flush && TraceRTLChoose(true.B, !traceBlock)
   io.toIbuffer.bits.specifyField(
     _.instrs      := f3_expd_instr,
     _.valid       := f3_instr_valid.asUInt,
@@ -1019,6 +1021,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val lastIsRVI = wb_instr_range.asTypeOf(Vec(PredictWidth,Bool()))(PredictWidth - 2) && !wb_pd(PredictWidth - 2).isRVC
   val lastTaken = wb_check_result_stage1.fixedTaken.last
 
+  // why not flush? the same ftqIdx means what?
   f3_wb_not_flush := wb_ftq_req.ftqIdx === f3_ftq_req.ftqIdx && f3_valid && wb_valid
 
   /** if a req with a last half but miss predicted enters in wb stage, and this cycle f3 stalls,
