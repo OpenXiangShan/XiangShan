@@ -18,26 +18,16 @@ package xiangshan.frontend.tracertl
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import xiangshan.{XSBundle, XSModule}
 
-class TraceDriverOutput(implicit p: Parameters) extends TraceBundle {
-  // when block true, the fetch is at the wrong path, should block ifu-go, ibuffer-recv
-  val block = Output(Bool())
-  val recv = ValidIO(new TraceRecvInfo())
+trait TraceParams {
+  val TraceInstrWidth = 32
 }
 
-class TraceDriverIO(implicit p: Parameters) extends TraceBundle {
-  val fire = Input(Bool())
-  val traceInsts = Input(Vec(PredictWidth, Valid(new TraceInstrBundle())))
-  val traceRange = Input(UInt(PredictWidth.W))
+class TraceBundle(implicit p: Parameters) extends XSBundle with TraceParams
+class TraceModule(implicit p: Parameters) extends XSModule with TraceParams
 
-  val out = new TraceDriverOutput()
-}
 
-class TraceDriver(implicit p: Parameters) extends TraceModule {
-  val io = IO(new TraceDriverIO())
-
-  val traceValid = VecInit(io.traceInsts.map(_.valid)).asUInt
-  io.out.block := io.out.recv.bits.instNum === 0.U // may be we need more precise control signal
-  io.out.recv.bits.instNum := PopCount(io.traceRange & traceValid)
-  io.out.recv.valid := io.fire
+class TraceRecvInfo(implicit p: Parameters) extends TraceBundle {
+  val instNum = UInt(log2Ceil(PredictWidth).W)
 }

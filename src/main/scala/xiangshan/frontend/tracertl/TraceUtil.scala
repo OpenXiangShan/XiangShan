@@ -16,28 +16,36 @@
 package xiangshan.frontend.tracertl
 
 import chisel3._
-import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import xiangshan.{DebugOptionsKey}
 
-class TraceDriverOutput(implicit p: Parameters) extends TraceBundle {
-  // when block true, the fetch is at the wrong path, should block ifu-go, ibuffer-recv
-  val block = Output(Bool())
-  val recv = ValidIO(new TraceRecvInfo())
+// From HX's NewCSR utility
+object ChiselRecordForField {
+  implicit class AddRecordSpecifyFields[T <: Record](val x: T) {
+    def specifyField(elemFns: (T => Unit)*): Unit = {
+      elemFns.foreach(_.apply(x))
+    }
+  }
 }
 
-class TraceDriverIO(implicit p: Parameters) extends TraceBundle {
-  val fire = Input(Bool())
-  val traceInsts = Input(Vec(PredictWidth, Valid(new TraceInstrBundle())))
-  val traceRange = Input(UInt(PredictWidth.W))
-
-  val out = new TraceDriverOutput()
+object TraceRTLChoose {
+  def apply[T <: Data](f: T, t: T)(implicit p: Parameters): T = {
+    val env = p(DebugOptionsKey)
+    if (env.TraceRTLMode) {
+      t
+    } else {
+      f
+    }
+  }
 }
 
-class TraceDriver(implicit p: Parameters) extends TraceModule {
-  val io = IO(new TraceDriverIO())
-
-  val traceValid = VecInit(io.traceInsts.map(_.valid)).asUInt
-  io.out.block := io.out.recv.bits.instNum === 0.U // may be we need more precise control signal
-  io.out.recv.bits.instNum := PopCount(io.traceRange & traceValid)
-  io.out.recv.valid := io.fire
+object TraceRTLDontCare {
+  def apply[T <: Data](f: T)(implicit p: Parameters): T = {
+    val env = p(DebugOptionsKey)
+    if (env.TraceRTLMode) {
+      f
+    } else {
+      0.U.asInstanceOf[T]
+    }
+  }
 }
