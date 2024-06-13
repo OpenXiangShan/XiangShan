@@ -359,8 +359,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   permitMod.io.in.status.vtvm := hstatus.regOut.VTVM.asBool
 
   permitMod.io.in.status.mcounteren := mcounteren.rdata
-  permitMod.io.in.status.hcounteren := mcounteren.rdata
-  permitMod.io.in.status.scounteren := mcounteren.rdata
+  permitMod.io.in.status.hcounteren := hcounteren.rdata
+  permitMod.io.in.status.scounteren := scounteren.rdata
 
   permitMod.io.in.status.menvcfg := menvcfg.rdata
   permitMod.io.in.status.henvcfg := henvcfg.rdata
