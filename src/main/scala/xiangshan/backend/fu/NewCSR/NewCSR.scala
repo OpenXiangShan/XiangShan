@@ -1040,9 +1040,9 @@ class NewCSR(implicit val p: Parameters) extends Module
   toAIA.vsClaim := wenLegal && vstopei.addr.U === addr
 
   // tlb
-  io.tlb.satpASIDChanged  := wenLegal && addr === CSRs. satp.U && satp .regOut.ASID =/=  satp.w.wdataFields.ASID
-  io.tlb.vsatpASIDChanged := wenLegal && addr === CSRs.vsatp.U && vsatp.regOut.ASID =/= vsatp.w.wdataFields.ASID
-  io.tlb.hgatpVMIDChanged := wenLegal && addr === CSRs.hgatp.U && hgatp.regOut.VMID =/= hgatp.w.wdataFields.VMID
+  io.tlb.satpASIDChanged  := GatedValidRegNext(wenLegal && addr === CSRs. satp.U && satp .regOut.ASID =/=  satp.w.wdataFields.ASID)
+  io.tlb.vsatpASIDChanged := GatedValidRegNext(wenLegal && addr === CSRs.vsatp.U && vsatp.regOut.ASID =/= vsatp.w.wdataFields.ASID)
+  io.tlb.hgatpVMIDChanged := GatedValidRegNext(wenLegal && addr === CSRs.hgatp.U && hgatp.regOut.VMID =/= hgatp.w.wdataFields.VMID)
   io.tlb.satp := satp.rdata
   io.tlb.vsatp := vsatp.rdata
   io.tlb.hgatp := hgatp.rdata
