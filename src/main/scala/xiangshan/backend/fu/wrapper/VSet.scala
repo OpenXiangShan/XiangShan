@@ -97,7 +97,7 @@ class VSetRvfWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
   vsetModule.io.in.avl := 0.U
   vsetModule.io.in.vtype := vtype
 
-  val oldVL = in.data.src(0).asTypeOf(VConfig()).vl
+  val oldVL = in.data.src(4).asTypeOf(VConfig()).vl
   val res = WireInit(0.U.asTypeOf(VConfig()))
   val vlmax = vsetModule.io.out.vlmax
   res.vl := Mux(vsetModule.io.out.vconfig.vtype.illegal, 0.U,
