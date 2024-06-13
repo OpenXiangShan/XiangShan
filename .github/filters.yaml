@@ -4,3 +4,4 @@ core:
   - "!.github/filters.yaml"
   - "!**/*.md"
   - "!LICENSE"
+  - "!images/**"
