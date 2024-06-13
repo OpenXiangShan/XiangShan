@@ -216,8 +216,6 @@ class RobCSRIO(implicit p: Parameters) extends XSBundle {
   val perfinfo   = new Bundle {
     val retiredInstr = Output(UInt(3.W))
   }
-
-  val vcsrFlag   = Output(Bool())
 }
 
 class RobLsqIO(implicit p: Parameters) extends XSBundle {
