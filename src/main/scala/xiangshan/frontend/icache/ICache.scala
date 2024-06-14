@@ -115,7 +115,7 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
   }
 
   def ResultHoldBypass[T<:Data](data: T, valid: Bool): T = {
-    Mux(valid, data, RegEnable(data, valid))
+    Mux(valid, data, RegEnable(data, 0.U.asTypeOf(data), valid))
   }
 
   def holdReleaseLatch(valid: Bool, release: Bool, flush: Bool): Bool ={
@@ -630,8 +630,9 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   //Parity error port
   val errors = mainPipe.io.errors
-  io.error <> RegEnable(Mux1H(errors.map(e => e.valid -> e)),errors.map(e => e.valid).reduce(_|_))
-  io.error.valid := RegNext(errors.map(e => e.valid).reduce(_|_),init = false.B)
+  val errors_valid = errors.map(e => e.valid).reduce(_|_)
+  io.error <> RegEnable(Mux1H(errors.map(e => e.valid -> e)), 0.U.asTypeOf(io.error), errors_valid)
+  io.error.valid := RegNext(errors_valid, false.B)
 
 
   mainPipe.io.fetch.req <> io.fetch.req
