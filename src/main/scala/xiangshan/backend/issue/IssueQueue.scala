@@ -282,7 +282,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         enq.bits.status.srcStatus(j).psrc                       := s0_enqBits(enqIdx).psrc(j)
         enq.bits.status.srcStatus(j).srcType                    := s0_enqBits(enqIdx).srcType(j)
         enq.bits.status.srcStatus(j).srcState                   := (if (j < 3) {
-                                                                      Mux(SrcType.isV0(s0_enqBits(enqIdx).srcType(j)), 
+                                                                      Mux(SrcType.isVp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U), 
                                                                           SrcState.rdy, 
                                                                           s0_enqBits(enqIdx).srcState(j) & !LoadShouldCancel(Some(s0_enqBits(enqIdx).srcLoadDependency(j)), io.ldCancel))
                                                                     } else {
@@ -291,8 +291,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         enq.bits.status.srcStatus(j).dataSources.value          := (if (j < 3) {
                                                                       MuxCase(DataSource.reg, Seq(
                                                                         (SrcType.isXp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U)) -> DataSource.zero,
-                                                                        SrcType.isNotReg(s0_enqBits(enqIdx).srcType(j))  -> DataSource.imm,
-                                                                        SrcType.isV0(s0_enqBits(enqIdx).srcType(j))      -> DataSource.v0,
+                                                                        SrcType.isNotReg(s0_enqBits(enqIdx).srcType(j))                                       -> DataSource.imm,
+                                                                        (SrcType.isVp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U)) -> DataSource.v0,
                                                                       ))
                                                                     } else {
                                                                       MuxCase(DataSource.reg, Seq(
