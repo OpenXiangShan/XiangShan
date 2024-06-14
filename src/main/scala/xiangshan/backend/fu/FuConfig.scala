@@ -369,6 +369,7 @@ object FuConfig {
     piped = true,
     writeVlRf = true,
     writeVType = true,
+    writeIntRf = true,
     latency = CertainLatency(0),
     immType = Set(SelImm.IMM_VSETVLI, SelImm.IMM_VSETIVLI),
   )
