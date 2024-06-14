@@ -24,7 +24,7 @@ class DretEventOutput extends Bundle with EventUpdatePrivStateOutput with EventO
 
 class DretEventInput extends Bundle {
   val dcsr = Input(new DcsrBundle)
-  val dpc = Input(new Dpc)
+  val dpc = Input(new Epc)
   val mstatus = Input(new MstatusBundle)
 }
 
