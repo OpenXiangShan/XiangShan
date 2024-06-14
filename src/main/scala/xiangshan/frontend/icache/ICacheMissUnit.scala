@@ -100,7 +100,8 @@ class ICacheMissEntry(edge: TLEdgeOut, id: Int)(implicit p: Parameters) extends 
 
   val needflush_r = RegInit(false.B)
   when (state === s_idle) { needflush_r := false.B }
-  when (state =/= s_idle && io.fencei) { needflush_r := true.B }
+  // if a miss request is fired or is about to fire in next cycle, store needflush to cancel response to data/meta SRAM
+  when ((state =/= s_idle || io.req.fire) && io.fencei) { needflush_r := true.B }
   val needflush = needflush_r | io.fencei
 
   //cacheline register

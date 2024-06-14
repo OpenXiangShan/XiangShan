@@ -95,6 +95,7 @@ class ICachePerfInfo(implicit p: Parameters) extends ICacheBundle{
 
 class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
   val hartId = Input(UInt(hartIdLen.W))
+  val fencei = Input(Bool())
   /*** internal interface ***/
   val metaArray   = new ICacheMetaReqBundle
   val dataArray   = new ICacheDataReqBundle
@@ -215,7 +216,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val itlb_can_go    = toITLB(0).ready && toITLB(1).ready
   val icache_can_go  = toData.ready && toMeta.ready
   val pipe_can_go    = s1_ready
-  val s0_can_go      = itlb_can_go && icache_can_go && pipe_can_go
+  val s0_can_go      = itlb_can_go && icache_can_go && pipe_can_go && !io.fencei
   s0_fire  := s0_valid && s0_can_go
 
   //TODO: fix GTimer() condition
@@ -232,7 +233,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     */
 
   /** s1 control */
-  val s1_valid = generatePipeControl(lastFire = s0_fire, thisFire = s1_fire, thisFlush = false.B, lastFlush = false.B)
+  val s1_valid = generatePipeControl(lastFire = s0_fire, thisFire = s1_fire, thisFlush = io.fencei, lastFlush = false.B)
 
   val s1_req_vaddr   = RegEnable(s0_final_vaddr, s0_fire)
   val s1_req_vsetIdx = RegEnable(s0_final_vsetIdx, s0_fire)
@@ -243,15 +244,17 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_wait_itlb  = RegInit(VecInit(Seq.fill(PortNumber)(false.B)))
 
   (0 until PortNumber).foreach { i =>
-    when(RegNext(s0_fire) && fromITLB(i).bits.miss) {
+    when(io.fencei) {
+      s1_wait_itlb(i) := false.B
+    }.elsewhen(RegNext(s0_fire) && fromITLB(i).bits.miss) {
       s1_wait_itlb(i) := true.B
     }.elsewhen(s1_wait_itlb(i) && !fromITLB(i).bits.miss) {
       s1_wait_itlb(i) := false.B
     }
   }
 
-  val s1_need_itlb = Seq((RegNext(s0_fire) || s1_wait_itlb(0)) && fromITLB(0).bits.miss,
-                         (RegNext(s0_fire) || s1_wait_itlb(1)) && fromITLB(1).bits.miss && s1_double_line)
+  val s1_need_itlb = Seq((RegNext(s0_fire) || s1_wait_itlb(0)) && fromITLB(0).bits.miss && s1_valid,
+                         (RegNext(s0_fire) || s1_wait_itlb(1)) && fromITLB(1).bits.miss && s1_valid && s1_double_line)
   val toITLB_s1_valid    = s1_need_itlb
   val toITLB_s1_size     = VecInit(Seq(3.U, 3.U)) // TODO: fix the size
   val toITLB_s1_vaddr    = s1_req_vaddr
@@ -293,7 +296,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
                         ResultHoldBypass(valid = tlb_valid_tmp(i), data = fromITLB(i).bits.excp(0).af.instr)))
   val tlbExcp       = VecInit((0 until PortNumber).map(i => tlbExcpAF(i) || tlbExcpPF(i) || tlbExcpGPF(i)))
 
-  val s1_tlb_valid = VecInit((0 until PortNumber).map(i => ValidHoldBypass(tlb_valid_tmp(i), s1_fire)))
+  val s1_tlb_valid = VecInit((0 until PortNumber).map(i => ValidHoldBypass(tlb_valid_tmp(i), s1_fire, io.fencei)))
   val tlbRespAllValid = s1_tlb_valid(0) && (!s1_double_line || s1_double_line && s1_tlb_valid(1))
 
 
@@ -361,7 +364,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_prefetch_hit_data = VecInit((0 until PortNumber).map(i => Mux(s1_ipf_hit_latch(i), s1_ipf_data(i), s1_piq_data(i))))
 
   s1_ready := s2_ready && tlbRespAllValid && !s1_wait || !s1_valid
-  s1_fire  := s1_valid && tlbRespAllValid && s2_ready && !s1_wait
+  s1_fire  := s1_valid && tlbRespAllValid && s2_ready && !s1_wait && !io.fencei
 
   // record cacheline log
   val isWriteICacheTable = Constantin.createRecord(s"isWriteICacheTable${p(XSCoreParamsKey).HartId}")
@@ -425,6 +428,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   s2_ready      := (s2_valid && s2_fetch_finish && !io.respStall) || !s2_valid
   s2_fire       := s2_valid && s2_fetch_finish && !io.respStall
+
+  val s2_fencei_latch = holdReleaseLatch(valid = io.fencei && s2_valid, release = s2_fire, flush = false.B)
 
   /** s2 data */
   // val mmio = fromPMP.map(port => port.mmio) // TODO: handle it
@@ -534,7 +539,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
                      !s2_except_pmp_af(0) && !s2_except_pmp_af(1) && !s2_mmio
 
   (0 until PortNumber).map{ i =>
-    when(s2_port_miss(i) && RegNext(s1_fire)) {
+    when(io.fencei) {
+      missSlot(i).valid  := false.B
+    }.elsewhen(s2_port_miss(i) && RegNext(s1_fire)) {
       when(s2_curr_slot_id(i)) {
         missSlot(1).vSetIdx := s2_req_vsetIdx(i)
         missSlot(1).paddr   := s2_req_paddr(i)
@@ -563,7 +570,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   (0 until PortNumber).map{ i =>
     switch(missStateQueue(i)){
       is(m_idle) {
-        missStateQueue(i) := Mux(RegNext(s1_fire) && s2_missSlot_issue(i), m_send_req, m_idle)
+        missStateQueue(i) := Mux(RegNext(s1_fire) && s2_missSlot_issue(i) && !io.fencei, m_send_req, m_idle)
       }
       is(m_send_req) {
         missStateQueue(i) := Mux(toMSHR(i).fire, m_wait_resp, m_send_req)
@@ -624,8 +631,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     ******************************************************************************
     */
   (0 until PortNumber).map{ i =>
-    if(i ==0) toIFU(i).valid          := s2_fire
-      else   toIFU(i).valid           := s2_fire && s2_double_line
+    if(i == 0) toIFU(i).valid         := s2_fire && !s2_fencei_latch
+      else     toIFU(i).valid         := s2_fire && !s2_fencei_latch && s2_double_line
     toIFU(i).bits.paddr               := s2_req_paddr(i)
     toIFU(i).bits.gpaddr              := s2_req_gpaddr(i)
     toIFU(i).bits.vaddr               := s2_req_vaddr(i)
