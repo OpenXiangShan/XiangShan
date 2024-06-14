@@ -877,7 +877,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   missQueue.io.lqEmpty := io.lqEmpty
   missQueue.io.hartId := io.hartId
-  missQueue.io.l2_pf_store_only := RegEnable(io.l2_pf_store_only, false.B, missQueue.io.l2_pf_store_only | io.l2_pf_store_only)
+  missQueue.io.l2_pf_store_only := RegNext(io.l2_pf_store_only, false.B)
   missQueue.io.debugTopDown <> io.debugTopDown
   missQueue.io.l2_hint <> RegNext(io.l2_hint)
   missQueue.io.mainpipe_info := mainPipe.io.mainpipe_info
@@ -1379,7 +1379,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //wb.io.probe_ttob_check_req <> mainPipe.io.probe_ttob_check_req
   //wb.io.probe_ttob_check_resp <> mainPipe.io.probe_ttob_check_resp
 
-  io.lsu.release.valid := RegEnable(wb.io.req.fire, io.lsu.release.valid | wb.io.req.fire)
+  io.lsu.release.valid := RegNext(wb.io.req.fire)
   io.lsu.release.bits.paddr := RegEnable(wb.io.req.bits.addr, wb.io.req.fire)
   // Note: RegNext() is required by:
   // * load queue released flag update logic

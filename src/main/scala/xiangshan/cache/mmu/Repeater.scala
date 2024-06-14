@@ -411,7 +411,8 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
   for (i <- 0 until LdExuCnt) {
     hintIO.req(i) := RegNext(load_hintIO.req(i))
   }
-  hintIO.resp := RegEnable(load_hintIO.resp, load_hintIO.resp.valid)
+  hintIO.resp.valid := RegNext(load_hintIO.resp.valid)
+  hintIO.resp.bits := RegEnable(load_hintIO.resp.bits, load_hintIO.resp.valid)
 
   when (load_filter(0).refill) {
     io.tlb.resp.bits.vector(0) := true.B
