@@ -3,7 +3,7 @@ package xiangshan.backend.fu.wrapper
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import utility.ZeroExt
-import xiangshan.VSETOpType
+import xiangshan.{VSETOpType, CSROpType}
 import xiangshan.backend.decode.Imm_VSETIVLI
 import xiangshan.backend.decode.isa.bitfield.InstVType
 import xiangshan.backend.fu.vector.Bundles.VType
@@ -100,17 +100,19 @@ class VSetRvfWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
   val oldVL = in.data.src(4).asTypeOf(VConfig()).vl
   val res = WireInit(0.U.asTypeOf(VConfig()))
   val vlmax = vsetModule.io.out.vlmax
+  val isReadVl = in.ctrl.fuOpType === CSROpType.set
   res.vl := Mux(vsetModule.io.out.vconfig.vtype.illegal, 0.U,
               Mux(VSETOpType.isKeepVl(in.ctrl.fuOpType), oldVL, vsetModule.io.out.vconfig.vl))
   res.vtype := vsetModule.io.out.vconfig.vtype
 
-  out.res.data := Mux(vsetModule.io.out.vconfig.vtype.illegal, 0.U,
-                      Mux(VSETOpType.isKeepVl(in.ctrl.fuOpType), oldVL, vsetModule.io.out.vconfig.vl))
+  out.res.data := Mux(isReadVl, oldVL,
+                    Mux(vsetModule.io.out.vconfig.vtype.illegal, 0.U,
+                      Mux(VSETOpType.isKeepVl(in.ctrl.fuOpType), oldVL, vsetModule.io.out.vconfig.vl)))
 
   if (cfg.writeVlRf) io.vtype.get.bits := vsetModule.io.out.vconfig.vtype
-  if (cfg.writeVlRf) io.vtype.get.valid := io.out.valid
-  if (cfg.writeVlRf) io.vlIsZero.get := res.vl === 0.U
-  if (cfg.writeVlRf) io.vlIsVlmax.get := res.vl === vlmax
+  if (cfg.writeVlRf) io.vtype.get.valid := !isReadVl && io.out.valid
+  if (cfg.writeVlRf) io.vlIsZero.get := !isReadVl && res.vl === 0.U
+  if (cfg.writeVlRf) io.vlIsVlmax.get := !isReadVl && res.vl === vlmax
 
   debugIO.vconfig := res
 }
