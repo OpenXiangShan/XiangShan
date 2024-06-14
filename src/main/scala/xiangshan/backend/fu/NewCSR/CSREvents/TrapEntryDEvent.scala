@@ -15,7 +15,7 @@ import xiangshan.backend.fu.NewCSR._
 
 class TrapEntryDEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase {
   val dcsr            = ValidIO((new DcsrBundle).addInEvent(_.CAUSE, _.V, _.PRV))
-  val dpc             = ValidIO((new Dpc       ).addInEvent(_.ALL))
+  val dpc             = ValidIO((new Epc       ).addInEvent(_.epc))
   val targetPc        = ValidIO(UInt(VaddrMaxWidth.W))
   val debugMode       = ValidIO(Bool())
   val debugIntrEnable = ValidIO(Bool())
@@ -42,7 +42,12 @@ class TrapEntryDEventModule(implicit val p: Parameters) extends Module with CSRE
   val in = IO(new TrapEntryDEventInput)
   val out = IO(new TrapEntryDEventOutput)
 
-  private val current                 = in
+  private val current = in
+  private val iMode   = current.iMode
+  private val satp    = current.satp
+  private val vsatp   = current.vsatp
+  private val hgatp   = current.hgatp
+
   private val hasTrap                 = in.hasTrap
   private val debugMode               = in.debugMode
   private val hasDebugIntr            = in.hasDebugIntr
@@ -59,11 +64,13 @@ class TrapEntryDEventModule(implicit val p: Parameters) extends Module with CSRE
     hasSingleStep           -> DcsrCause.Step.asUInt
   ))
 
-  private val trapPC = Wire(UInt(XLEN.W))
-  private val ivmHS = !current.iMode.isModeHS && current.satp.MODE =/= SatpMode.Bare
-  private val ivmVS = !current.iMode.isModeVS && current.vsatp.MODE =/= SatpMode.Bare
-  // When enable virtual memory, the higher bit should fill with the msb of address of Sv39/Sv48/Sv57
-  trapPC := Mux(ivmHS || ivmVS, SignExt(in.trapPc, XLEN), ZeroExt(in.trapPc, XLEN))
+  private val trapPC = genTrapVA(
+    iMode,
+    satp,
+    vsatp,
+    hgatp,
+    in.trapPc,
+  )
 
   // ebreak jump debugEntry not debugException in dmode
   // debug rom make hart write 0 to DebugMMIO.EXCEPTION when exception happened in debugMode.
@@ -85,7 +92,7 @@ class TrapEntryDEventModule(implicit val p: Parameters) extends Module with CSRE
   out.dcsr.bits.V           := current.privState.V.asUInt
   out.dcsr.bits.PRV         := current.privState.PRVM.asUInt
   out.dcsr.bits.CAUSE       := Mux(hasDebugIntr, causeIntr, causeExp)
-  out.dpc.bits              := trapPC
+  out.dpc.bits.epc          := trapPC(VaddrMaxWidth - 1, 1)
 
   out.targetPc.bits         := debugPc
   out.debugMode.bits        := true.B

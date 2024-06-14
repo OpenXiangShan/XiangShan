@@ -16,6 +16,7 @@ import xiangshan.backend.fu.NewCSR.CSRDefines.{
 import xiangshan.backend.fu.NewCSR.CSRFunc._
 import xiangshan.backend.fu.NewCSR.CSREvents._
 import CSRConfig._
+import utility.SignExt
 import scala.collection.immutable.SeqMap
 
 
@@ -34,7 +35,7 @@ trait DebugLevel { self: NewCSR =>
     .setAddr(CSRs.tdata2)
 
   val tdata1RegVec: Seq[CSRModule[_]] = Range(0, TriggerNum).map(i =>
-    Module(new CSRModule(s"Trigger$i" + s"_Tdata1", new Tdata1Bundle) with HasdebugModeBundle{
+    Module(new CSRModule(s"Trigger$i" + s"_Tdata1", new Tdata1Bundle) with HasdebugModeBundle {
       when(wen){
         reg := wdata.writeTdata1(debugMode, chainable).asUInt
       }
@@ -53,7 +54,9 @@ trait DebugLevel { self: NewCSR =>
   val dcsr = Module(new CSRModule("Dcsr", new DcsrBundle) with TrapEntryDEventSinkBundle with DretEventSinkBundle)
     .setAddr(CSRs.dcsr)
 
-  val dpc = Module(new CSRModule("Dpc", new Dpc) with TrapEntryDEventSinkBundle)
+  val dpc = Module(new CSRModule("Dpc", new Epc) with TrapEntryDEventSinkBundle {
+    rdata := SignExt(Cat(reg.epc.asUInt, 0.U(1.W)), XLEN)
+  })
     .setAddr(CSRs.dpc)
 
   val dscratch0 = Module(new CSRModule("Dscratch0", new DscratchBundle))
@@ -294,11 +297,6 @@ class DcsrBundle extends CSRBundle {
   val STEP      =           RW(     2).withReset(0.U)
   val PRV       =     PrivMode( 1,  0).withReset(PrivMode.M)
 }
-
-class Dpc extends CSRBundle {
-  val ALL = RW(63, 1)
-}
-
 
 object DcsrDebugVer extends CSREnum with ROApply {
   val None    = Value(0.U)
