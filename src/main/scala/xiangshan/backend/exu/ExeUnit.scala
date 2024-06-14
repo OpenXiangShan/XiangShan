@@ -23,6 +23,7 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility.{ClockGate, DelayN}
 import utils._
+import utility._
 import xiangshan.backend.fu.{CSRFileIO, FenceIO, FuncUnitInput}
 import xiangshan.backend.Bundles.{ExuInput, ExuOutput, MemExuInput, MemExuOutput}
 import xiangshan.{FPUCtrlSignals, HasXSParameter, Redirect, XSBundle, XSModule}
@@ -375,29 +376,28 @@ class MemExeUnitIO (implicit p: Parameters) extends XSBundle {
 
 class MemExeUnit(exuParams: ExeUnitParams)(implicit p: Parameters) extends XSModule {
   val io = IO(new MemExeUnitIO)
-  val fu = exuParams.fuConfigs.head.fuGen(p, exuParams.fuConfigs.head)
-  fu.io.flush             := io.flush
-  fu.io.in.valid          := io.in.valid
-  io.in.ready             := fu.io.in.ready
 
-  fu.io.in.bits.ctrl.robIdx    := io.in.bits.uop.robIdx
-  fu.io.in.bits.ctrl.pdest     := io.in.bits.uop.pdest
-  fu.io.in.bits.ctrl.fuOpType  := io.in.bits.uop.fuOpType
-  fu.io.in.bits.data.imm       := io.in.bits.uop.imm
-  fu.io.in.bits.data.src.zip(io.in.bits.src).foreach(x => x._1 := x._2)
-  fu.io.in.bits.perfDebugInfo := io.in.bits.uop.debugInfo
+  val s1_ready = WireInit(false.B)
 
-  io.out.valid            := fu.io.out.valid
-  fu.io.out.ready         := io.out.ready
+  val s0_valid = io.in.valid
+  val s0_out = io.in.bits
+  val s0_can_go = s1_ready
+  val s0_fire = s0_valid && s0_can_go
+  io.in.ready := s0_can_go
 
-  io.out.bits             := 0.U.asTypeOf(io.out.bits) // dontCare other fields
-  io.out.bits.data        := fu.io.out.bits.res.data
-  io.out.bits.uop.robIdx  := fu.io.out.bits.ctrl.robIdx
-  io.out.bits.uop.pdest   := fu.io.out.bits.ctrl.pdest
-  io.out.bits.uop.fuType  := io.in.bits.uop.fuType
-  io.out.bits.uop.fuOpType:= io.in.bits.uop.fuOpType
-  io.out.bits.uop.sqIdx   := io.in.bits.uop.sqIdx
-  io.out.bits.uop.debugInfo := fu.io.out.bits.perfDebugInfo
+  val s1_valid = RegInit(false.B)
+  val s1_can_go = io.out.ready
+  val s1_fire = s1_valid && s1_can_go
+  val s1_in = RegEnable(s0_out, s0_fire)
+  val s1_out = WireInit(0.U.asTypeOf(io.out.bits))
 
-  io.out.bits.debug       := 0.U.asTypeOf(io.out.bits.debug)
+  when (s0_fire) { s1_valid := true.B }
+  .elsewhen (s1_fire) { s1_valid := false.B }
+
+  s1_ready := io.out.ready || !s1_valid
+
+  s1_out.uop := s1_in.uop
+  s1_out.data := s1_in.src(0)
+  io.out.valid := s1_valid
+  io.out.bits := s1_out
 }
