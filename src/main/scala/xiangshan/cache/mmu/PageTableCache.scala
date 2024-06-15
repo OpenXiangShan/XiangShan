@@ -709,7 +709,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   // sfence for l3
   val sfence_valid_l3 = sfence_dup(3).valid && !sfence_dup(3).bits.hg && !sfence_dup(3).bits.hv
   when (sfence_valid_l3) {
-    val l3hhit = VecInit(l3h.flatMap(_.map(_ === onlyStage1 && io.csr_dup(0).priv.virt || !io.csr_dup(0).priv.virt))).asUInt
+    val l3hhit = VecInit(l3h.flatMap(_.map{a => io.csr_dup(0).priv.virt && a === onlyStage1 || !io.csr_dup(0).priv.virt && a === noS2xlate})).asUInt
     val sfence_vpn = sfence_dup(3).bits.addr(sfence_dup(3).bits.addr.getWidth-1, offLen)
     when (sfence_dup(3).bits.rs1/*va*/) {
       when (sfence_dup(3).bits.rs2) {
@@ -717,7 +717,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
         l3v := l3v & ~l3hhit
       } .otherwise {
         // all va && specific asid except global
-        l3v := l3v & l3g & ~l3hhit
+        l3v := l3v & (l3g | ~l3hhit)
       }
     } .otherwise {
       // val flushMask = UIntToOH(genTlbL2Idx(sfence.bits.addr(sfence.bits.addr.getWidth-1, offLen)))
@@ -834,9 +834,9 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
       }
     }.otherwise {
       when(sfence_dup(0).bits.rs2) {
-        spv := spv & ~(sphhit & VecInit(sp.map(_.hit(hfenceg_gvpn, 0.U, 0.U, sfence_dup(0).bits.id, ignoreAsid = true, s2xlate = true.B))).asUInt)
+        spv := spv & ~(sphhit & VecInit(sp.map(_.hit(hfenceg_gvpn, 0.U, 0.U, sfence_dup(0).bits.id, ignoreAsid = true, s2xlate = false.B))).asUInt)
       }.otherwise {
-        spv := spv & ~(~spg & sphhit & VecInit(sp.map(_.hit(hfenceg_gvpn, 0.U, 0.U, sfence_dup(0).bits.id, ignoreAsid = true, s2xlate = false.B))).asUInt)
+        spv := spv & ~(~spg & sphhit & VecInit(sp.map(_.hit(hfenceg_gvpn, 0.U, 0.U, sfence_dup(0).bits.id, ignoreAsid = true, s2xlate = true.B))).asUInt)
       }
     }
   }
