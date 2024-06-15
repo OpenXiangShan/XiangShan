@@ -25,7 +25,7 @@ import signal
 import subprocess
 import sys
 import time
-
+import shlex
 import psutil
 
 
@@ -94,6 +94,10 @@ class XSArgs(object):
         self.fork = not args.disable_fork
         self.disable_diff = args.no_diff
         self.disable_db = args.no_db
+        self.pgo = args.pgo
+        self.pgo_max_cycle = args.pgo_max_cycle
+        self.pgo_emu_args = args.pgo_emu_args
+        self.llvm_profdata = args.llvm_profdata
         # wave dump path
         if args.wave_dump is not None:
             self.set_wave_home(args.wave_dump)
@@ -133,9 +137,14 @@ class XSArgs(object):
             (self.is_mfc,        "MFC"),
             (self.emu_optimize,  "EMU_OPTIMIZE"),
             (self.xprop,         "ENABLE_XPROP"),
-            (self.with_chiseldb, "WITH_CHISELDB")
+            (self.with_chiseldb, "WITH_CHISELDB"),
+            (self.pgo,           "PGO_WORKLOAD"),
+            (self.pgo_max_cycle, "PGO_MAX_CYCLE"),
+            (self.pgo_emu_args,  "PGO_EMU_ARGS"),
+            (self.llvm_profdata, "LLVM_PROFDATA"),
         ]
         args = filter(lambda arg: arg[0] is not None, makefile_args)
+        args = [(shlex.quote(str(arg[0])), arg[1]) for arg in args] # shell escape
         return args
 
     def get_emu_args(self):
@@ -511,6 +520,10 @@ if __name__ == "__main__":
     parser.add_argument('--ram-size', nargs='?', type=str, help='manually set simulation memory size (8GB by default)')
     # both makefile and emu arguments
     parser.add_argument('--no-db', action='store_true', help='disable chiseldb dump')
+    parser.add_argument('--pgo', nargs='?', type=str, help='workload for pgo (null to disable pgo)')
+    parser.add_argument('--pgo-max-cycle', nargs='?', default=400000, type=int, help='maximun cycle to train pgo')
+    parser.add_argument('--pgo-emu-args', nargs='?', default='--no-diff', type=str, help='emu arguments for pgo')
+    parser.add_argument('--llvm-profdata', nargs='?', type=str, help='corresponding llvm-profdata command of clang to compile emu, do not set with GCC')
 
     args = parser.parse_args()
 
