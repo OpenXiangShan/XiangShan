@@ -214,14 +214,13 @@ trait HasBackendRedirectInfo extends HasXSParameter {
 class FtqToCtrlIO(implicit p: Parameters) extends XSBundle with HasBackendRedirectInfo {
   // write to backend pc mem
   val pc_mem_wen = Output(Bool())
-  val pc_mem_waddr = Output(UInt(log2Ceil(FtqSize).W))
+  val pc_mem_waddr = Output(new FtqPtr)
   val pc_mem_wdata = Output(new Ftq_RF_Components)
   // newest target
   val newest_entry_en = Output(Bool())
   val newest_entry_target = Output(UInt(VAddrBits.W))
   val newest_entry_ptr = Output(new FtqPtr)
 }
-
 
 class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedirectInfo with HasBPUParameter {
   val io = IO(new Bundle {
@@ -1014,7 +1013,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // **********************************************************************
   // to backend pc mem / target
   io.toBackend.pc_mem_wen := RegNext(last_cycle_bpu_in)
-  io.toBackend.pc_mem_waddr := RegEnable(last_cycle_bpu_in_idx, last_cycle_bpu_in)
+  io.toBackend.pc_mem_waddr := RegEnable(last_cycle_bpu_in_ptr, last_cycle_bpu_in)
   io.toBackend.pc_mem_wdata := RegEnable(bpu_in_bypass_buf_for_ifu, last_cycle_bpu_in)
 
   // num cycle is fixed
