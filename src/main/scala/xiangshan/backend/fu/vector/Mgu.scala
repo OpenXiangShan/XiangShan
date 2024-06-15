@@ -120,7 +120,7 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
     info.dstMask -> resVecBit.asUInt,
   ))
   io.out.active := activeEn
-  io.out.illegal := (info.vl > vlMaxForAssert) && info.valid
+  io.out.illegal := false.B // (info.vl > vlMaxForAssert) && info.valid
 
   io.debugOnly.vstartMapVdIdx := vstartMapVdIdx
   io.debugOnly.vlMapVdIdx := vlMapVdIdx

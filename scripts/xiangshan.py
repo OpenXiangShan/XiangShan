@@ -1,5 +1,6 @@
 #***************************************************************************************
-# Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+# Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+# Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 # Copyright (c) 2020-2021 Peng Cheng Laboratory
 #
 # XiangShan is licensed under Mulan PSL v2.
@@ -80,6 +81,8 @@ class XSArgs(object):
         self.config = args.config
         self.is_mfc = 1 if args.mfc else None
         self.emu_optimize = args.emu_optimize
+        self.xprop = 1 if args.xprop else None
+        self.with_chiseldb = 0 if args.no_db else None
         # emu arguments
         self.max_instr = args.max_instr
         self.ram_size = args.ram_size
@@ -128,7 +131,9 @@ class XSArgs(object):
             (self.config,        "CONFIG"),
             (self.num_cores,     "NUM_CORES"),
             (self.is_mfc,        "MFC"),
-            (self.emu_optimize,  "EMU_OPTIMIZE")
+            (self.emu_optimize,  "EMU_OPTIMIZE"),
+            (self.xprop,         "ENABLE_XPROP"),
+            (self.with_chiseldb, "WITH_CHISELDB")
         ]
         args = filter(lambda arg: arg[0] is not None, makefile_args)
         return args
@@ -259,7 +264,8 @@ class XiangShan(object):
         print("Running XiangShan simv with the following configurations:")
         self.show()
         diff_args = "$NOOP_HOME/"+ args.diff
-        return_code = self.__exec_cmd(f'$NOOP_HOME/difftest/simv +workload={workload} +diff={diff_args}')
+        assert_args = "-assert finish_maxfail=30 -assert global_finish_maxfail=10000"
+        return_code = self.__exec_cmd(f'cd $NOOP_HOME/build && ./simv +workload={workload} +diff={diff_args} +dump-wave=fsdb {assert_args}')
         return return_code
 
     def run(self, args):
@@ -444,8 +450,8 @@ class XiangShan(object):
             if ret:
                 if self.args.default_wave_home != self.args.wave_home:
                     print("copy wave file to " + self.args.wave_home)
-                    self.__exec_cmd(f"cp $NOOP_HOME/build/*.vcd $WAVE_HOME")
-                    self.__exec_cmd(f"cp $NOOP_HOME/build/emu $WAVE_HOME")
+                    self.__exec_cmd(f"cp $NOOP_HOME/build/*.fsdb $WAVE_HOME")
+                    self.__exec_cmd(f"cp $NOOP_HOME/build/simv $WAVE_HOME")
                     self.__exec_cmd(f"cp $NOOP_HOME/build/rtl/SimTop.v $WAVE_HOME")
                     self.__exec_cmd(f"cp $NOOP_HOME/build/*.db $WAVE_HOME")
                 return ret
@@ -495,6 +501,7 @@ if __name__ == "__main__":
     parser.add_argument('--config', nargs='?', type=str, help='config')
     parser.add_argument('--mfc', action='store_true', help='use mfc')
     parser.add_argument('--emu-optimize', nargs='?', type=str, help='verilator optimization letter')
+    parser.add_argument('--xprop', action='store_true', help='enable xprop for vcs')
     # emu arguments
     parser.add_argument('--numa', action='store_true', help='use numactl')
     parser.add_argument('--diff', nargs='?', default="./ready-to-run/riscv64-nemu-interpreter-so", type=str, help='nemu so')
@@ -502,6 +509,7 @@ if __name__ == "__main__":
     parser.add_argument('--disable-fork', action='store_true', help='disable lightSSS')
     parser.add_argument('--no-diff', action='store_true', help='disable difftest')
     parser.add_argument('--ram-size', nargs='?', type=str, help='manually set simulation memory size (8GB by default)')
+    # both makefile and emu arguments
     parser.add_argument('--no-db', action='store_true', help='disable chiseldb dump')
 
     args = parser.parse_args()
