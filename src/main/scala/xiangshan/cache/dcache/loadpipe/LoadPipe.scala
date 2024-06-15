@@ -75,7 +75,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     val disable_ld_fast_wakeup = Input(Bool())
 
     // ecc error
-    val error = Output(new L1CacheErrorInfo())
+    val error = Output(ValidIO(new L1CacheErrorInfo))
 
     val prefetch_info = new Bundle {
       val naive = new Bundle {
@@ -489,13 +489,13 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   resp.bits.replacementUpdated := io.replace_access.valid
 
   // report tag / data / l2 error (with paddr) to bus error unit
-  io.error := 0.U.asTypeOf(new L1CacheErrorInfo())
-  io.error.report_to_beu := (s3_tag_error || s3_data_error) && s3_valid
-  io.error.paddr := s3_paddr
-  io.error.source.tag := s3_tag_error
-  io.error.source.data := s3_data_error
-  io.error.source.l2 := s3_flag_error
-  io.error.opType.load := true.B
+  io.error := 0.U.asTypeOf(ValidIO(new L1CacheErrorInfo))
+  io.error.bits.report_to_beu := (s3_tag_error || s3_data_error) && s3_valid
+  io.error.bits.paddr := s3_paddr
+  io.error.bits.source.tag := s3_tag_error
+  io.error.bits.source.data := s3_data_error
+  io.error.bits.source.l2 := s3_flag_error
+  io.error.bits.opType.load := true.B
   // report tag error / l2 corrupted to CACHE_ERROR csr
   io.error.valid := s3_error && s3_valid
 

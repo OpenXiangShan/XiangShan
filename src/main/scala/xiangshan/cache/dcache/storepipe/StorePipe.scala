@@ -79,11 +79,11 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
     val replace_way = new ReplacementWayReqIO
 
     // ecc error
-    val error = Output(new L1CacheErrorInfo())
+    val error = Output(ValidIO(new L1CacheErrorInfo))
   })
 
   // TODO: error
-  io.error := DontCare
+  io.error := 0.U.asTypeOf(ValidIO(new L1CacheErrorInfo))
 
 /** S0:
   *   send tag and meta read req

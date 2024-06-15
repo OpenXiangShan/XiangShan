@@ -106,7 +106,7 @@ class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
   val ICacheMainPipeInfo  = new ICacheMainPipeInfo
 
   val mshr        = Vec(PortNumber, new ICacheMSHRBundle)
-  val errors      = Output(Vec(PortNumber, new L1CacheErrorInfo))
+  val errors      = Output(Vec(PortNumber, ValidIO(new L1CacheErrorInfo)))
   /*** outside interface ***/
   //val fetch       = Vec(PortNumber, new ICacheMainPipeBundle)
   /* when ftq.valid is high in T + 1 cycle
@@ -676,25 +676,25 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   for(i <- 0 until PortNumber){
     val valid                      = s2_parity_error(i) && s1_fire_delay2
     io.errors(i).valid            := RegNext(valid)
-    io.errors(i).report_to_beu    := RegNext(valid)
-    io.errors(i).paddr            := RegEnable(RegEnable(s2_req_paddr(i), s1_fire_delay1), valid)
-    io.errors(i).source           := DontCare
-    io.errors(i).source.tag       := RegEnable(RegEnable(s2_parity_meta_error(i), s1_fire_delay1), valid)
-    io.errors(i).source.data      := RegEnable(s2_parity_data_error(i), valid)
-    io.errors(i).source.l2        := false.B
-    io.errors(i).opType           := DontCare
-    io.errors(i).opType.fetch     := true.B
+    io.errors(i).bits.report_to_beu    := RegNext(valid)
+    io.errors(i).bits.paddr            := RegEnable(RegEnable(s2_req_paddr(i), s1_fire_delay1), valid)
+    io.errors(i).bits.source           := DontCare
+    io.errors(i).bits.source.tag       := RegEnable(RegEnable(s2_parity_meta_error(i), s1_fire_delay1), valid)
+    io.errors(i).bits.source.data      := RegEnable(s2_parity_data_error(i), valid)
+    io.errors(i).bits.source.l2        := false.B
+    io.errors(i).bits.opType           := DontCare
+    io.errors(i).bits.opType.fetch     := true.B
   }
 
   // MSHR error
   (0 until PortNumber).map{ i =>
     when(RegNext(s2_fire && s2_corrupt(i))){
       io.errors(i).valid            := true.B
-      io.errors(i).report_to_beu    := false.B // l2 should have report that to bus error unit, no need to do it again
-      io.errors(i).paddr            := RegEnable(s2_req_paddr(i),s1_fire_delay1)
-      io.errors(i).source.tag       := false.B
-      io.errors(i).source.data      := false.B
-      io.errors(i).source.l2        := true.B
+      io.errors(i).bits.report_to_beu    := false.B // l2 should have report that to bus error unit, no need to do it again
+      io.errors(i).bits.paddr            := RegEnable(s2_req_paddr(i),s1_fire_delay1)
+      io.errors(i).bits.source.tag       := false.B
+      io.errors(i).bits.source.data      := false.B
+      io.errors(i).bits.source.l2        := true.B
     }
   }
 

@@ -260,7 +260,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val fetch_to_mem = new fetch_to_mem
 
     // misc
-    val error = new L1CacheErrorInfo
+    val error = ValidIO(new L1CacheErrorInfo)
     val memInfo = new Bundle {
       val sqFull = Output(Bool())
       val lqFull = Output(Bool())
@@ -320,9 +320,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   dcache.io.csr.distribute_csr <> csrCtrl.distribute_csr
   dcache.io.l2_pf_store_only := RegNext(io.ooo_to_mem.csrCtrl.l2_pf_store_only, false.B)
   io.mem_to_ooo.csrUpdate := RegNext(dcache.io.csr.update)
-  io.error <> RegNext(RegNext(dcache.io.error))
+  io.error <> DelayNWithValid(dcache.io.error, 2)
   when(!csrCtrl.cache_error_enable){
-    io.error.report_to_beu := false.B
+    io.error.bits.report_to_beu := false.B
     io.error.valid := false.B
   }
 

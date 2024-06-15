@@ -492,7 +492,7 @@ class ICacheIO(implicit p: Parameters) extends ICacheBundle
   val pmp         = Vec(PortNumber + prefetchPipeNum, new ICachePMPBundle)
   val itlb        = Vec(PortNumber + prefetchPipeNum, new TlbRequestIO)
   val perfInfo    = Output(new ICachePerfInfo)
-  val error       = new L1CacheErrorInfo
+  val error       = ValidIO(new L1CacheErrorInfo)
   /* Cache Instruction */
   val csr         = new L1CacheToCsrIO
   /* CSR control signal */
@@ -629,7 +629,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   //Parity error port
   val errors = mainPipe.io.errors
-  io.error <> RegEnable(Mux1H(errors.map(e => e.valid -> e)),errors.map(e => e.valid).reduce(_|_))
+  io.error.bits <> RegEnable(Mux1H(errors.map(e => e.valid -> e.bits)),errors.map(e => e.valid).reduce(_|_))
   io.error.valid := RegNext(errors.map(e => e.valid).reduce(_|_),init = false.B)
 
 
