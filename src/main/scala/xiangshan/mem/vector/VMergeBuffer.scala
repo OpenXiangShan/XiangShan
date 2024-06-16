@@ -279,21 +279,22 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     val (selValid, selOHVec) = selPolicy.getNthOH(i + 1)
     val entryIdx = OHToUInt(selOHVec)
     val selEntry = entries(entryIdx)
+    val selAllocated = allocated(entryIdx)
     val selFire  = selValid && canGo
     when(selFire){
-      freeMaskVec(entryIdx) := true.B
+      freeMaskVec(entryIdx) := selAllocated
       allocated(entryIdx)   := false.B
       uopFinish(entryIdx)   := false.B
       needRSReplay(entryIdx):= false.B
     }
     //writeback connect
-    port.valid   := selFire && allocated(entryIdx) && !needRSReplay(entryIdx) && !selEntry.uop.robIdx.needFlush(io.redirect)
+    port.valid   := selFire && selAllocated && !needRSReplay(entryIdx) && !selEntry.uop.robIdx.needFlush(io.redirect)
     port.bits    := DeqConnect(selEntry)
     //to lsq
     lsqport.bits := ToLsqConnect(selEntry) // when uopwriteback, free MBuffer entry, write to lsq
-    lsqport.valid:= selFire && allocated(entryIdx) && !needRSReplay(entryIdx)
+    lsqport.valid:= selFire && selAllocated && !needRSReplay(entryIdx)
     //to RS
-    io.feedback(i).valid                 := selFire && allocated(entryIdx)
+    io.feedback(i).valid                 := selFire && selAllocated
     io.feedback(i).bits.hit              := !needRSReplay(entryIdx)
     io.feedback(i).bits.robIdx           := selEntry.uop.robIdx
     io.feedback(i).bits.sourceType       := selEntry.sourceType
