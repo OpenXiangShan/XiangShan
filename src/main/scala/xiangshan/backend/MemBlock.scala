@@ -727,6 +727,42 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       ))
       vSegmentUnit.io.rdcache.req.ready := dcache.io.lsu.load(i).req.ready
     }
+
+
+    // The segment instruction is executed atomically.
+    // After the segment instruction directive starts executing, no other instructions should be executed.
+    val vSegmentFlag = RegInit(false.B)
+
+    when(vSegmentUnit.io.in.fire){
+      vSegmentFlag := true.B
+    }.elsewhen(vSegmentUnit.io.uopwriteback.valid){
+      vSegmentFlag := false.B
+    }
+    // Dcache requests must also be preempted by the segment.
+    when(vSegmentFlag){
+      loadUnits(i).io.dcache.req.ready             := false.B // Dcache is preempted.
+
+      dcache.io.lsu.load(0).pf_source              := vSegmentUnit.io.rdcache.pf_source
+      dcache.io.lsu.load(0).s1_paddr_dup_lsu       := vSegmentUnit.io.rdcache.s1_paddr_dup_lsu
+      dcache.io.lsu.load(0).s1_paddr_dup_dcache    := vSegmentUnit.io.rdcache.s1_paddr_dup_dcache
+      dcache.io.lsu.load(0).s1_kill                := vSegmentUnit.io.rdcache.s1_kill
+      dcache.io.lsu.load(0).s2_kill                := vSegmentUnit.io.rdcache.s2_kill
+      dcache.io.lsu.load(0).s0_pc                  := vSegmentUnit.io.rdcache.s0_pc
+      dcache.io.lsu.load(0).s1_pc                  := vSegmentUnit.io.rdcache.s1_pc
+      dcache.io.lsu.load(0).s2_pc                  := vSegmentUnit.io.rdcache.s2_pc
+    }.otherwise {
+      loadUnits(i).io.dcache.req.ready             := dcache.io.lsu.load(i).req.ready
+
+      dcache.io.lsu.load(0).pf_source              := loadUnits(0).io.dcache.pf_source
+      dcache.io.lsu.load(0).s1_paddr_dup_lsu       := loadUnits(0).io.dcache.s1_paddr_dup_lsu
+      dcache.io.lsu.load(0).s1_paddr_dup_dcache    := loadUnits(0).io.dcache.s1_paddr_dup_dcache
+      dcache.io.lsu.load(0).s1_kill                := loadUnits(0).io.dcache.s1_kill
+      dcache.io.lsu.load(0).s2_kill                := loadUnits(0).io.dcache.s2_kill
+      dcache.io.lsu.load(0).s0_pc                  := loadUnits(0).io.dcache.s0_pc
+      dcache.io.lsu.load(0).s1_pc                  := loadUnits(0).io.dcache.s1_pc
+      dcache.io.lsu.load(0).s2_pc                  := loadUnits(0).io.dcache.s2_pc
+    }
+
     // forward
     loadUnits(i).io.lsq.forward <> lsq.io.forward(i)
     loadUnits(i).io.sbuffer <> sbuffer.io.forward(i)
@@ -1621,6 +1657,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   vSegmentUnit.io.redirect <> io.redirect
   vSegmentUnit.io.rdcache.resp.bits := dcache.io.lsu.load(0).resp.bits
   vSegmentUnit.io.rdcache.resp.valid := dcache.io.lsu.load(0).resp.valid
+  vSegmentUnit.io.rdcache.s2_bank_conflict := dcache.io.lsu.load(0).s2_bank_conflict
 
   // top-down info
   dcache.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr
