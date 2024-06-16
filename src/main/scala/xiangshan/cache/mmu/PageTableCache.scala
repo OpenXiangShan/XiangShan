@@ -124,10 +124,10 @@ class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCo
       val l2 = Bool()
       val l1 = Bool()
       def apply(levelUInt: UInt, valid: Bool) = {
-        sp := RegNext((levelUInt === 0.U || levelUInt === 1.U) && valid, false.B)
-        l3 := RegNext((levelUInt === 2.U) & valid, false.B)
-        l2 := RegNext((levelUInt === 1.U) & valid, false.B)
-        l1 := RegNext((levelUInt === 0.U) & valid, false.B)
+        sp := GatedValidRegNext((levelUInt === 0.U || levelUInt === 1.U) && valid, false.B)
+        l3 := GatedValidRegNext((levelUInt === 2.U) & valid, false.B)
+        l2 := GatedValidRegNext((levelUInt === 1.U) & valid, false.B)
+        l1 := GatedValidRegNext((levelUInt === 0.U) & valid, false.B)
       }
     }
     // duplicate level and sel_pte for each page caches, for better fanout

@@ -327,8 +327,10 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.dcache.resp.ready := true.B
 
   // feedback tlb miss to RS in store_s2
-  io.feedback_slow.valid := RegNext(s1_feedback.valid && !s1_out.uop.robIdx.needFlush(io.redirect)) && !RegNext(s1_out.isvec)
-  io.feedback_slow.bits  := RegNext(s1_feedback.bits)
+  val feedback_slow_valid = WireInit(false.B)
+  feedback_slow_valid := s1_feedback.valid && !s1_out.uop.robIdx.needFlush(io.redirect) && !s1_out.isvec
+  io.feedback_slow.valid := GatedValidRegNext(feedback_slow_valid)
+  io.feedback_slow.bits  := RegEnable(s1_feedback.bits, feedback_slow_valid)
 
   val s2_vecFeedback = RegNext(!s1_out.uop.robIdx.needFlush(io.redirect) && s1_feedback.bits.hit) && s2_in.isvec
 
@@ -340,22 +342,24 @@ class StoreUnit(implicit p: Parameters) extends XSModule
 
   // RegNext prefetch train for better timing
   // ** Now, prefetch train is valid at store s3 **
-  io.prefetch_train.bits.fromLsPipelineBundle(s2_in, latch = true)
-  // override miss bit
-  io.prefetch_train.bits.miss := RegNext(io.dcache.resp.bits.miss)
-  // TODO: add prefetch and access bit
-  io.prefetch_train.bits.meta_prefetch := false.B
-  io.prefetch_train.bits.meta_access := false.B
+  val s2_prefetch_train_valid = WireInit(false.B)
+  s2_prefetch_train_valid := s2_valid && io.dcache.resp.fire && !s2_out.mmio && !s2_in.tlbMiss && !s2_in.isHWPrefetch
   if(EnableStorePrefetchSMS) {
-    val s2_prefetch_train_valid = s2_valid && io.dcache.resp.fire && !s2_out.mmio && !s2_in.tlbMiss && !s2_in.isHWPrefetch
     io.s1_prefetch_spec := s1_fire
     io.s2_prefetch_spec := s2_prefetch_train_valid
     io.prefetch_train.valid := RegNext(s2_prefetch_train_valid)
+    io.prefetch_train.bits.fromLsPipelineBundle(s2_in, latch = true, enable = s2_prefetch_train_valid)
   }else {
     io.s1_prefetch_spec := false.B
     io.s2_prefetch_spec := false.B
     io.prefetch_train.valid := false.B
+    io.prefetch_train.bits.fromLsPipelineBundle(s2_in, latch = true, enable = false.B)
   }
+  // override miss bit
+  io.prefetch_train.bits.miss := RegEnable(io.dcache.resp.bits.miss, s2_prefetch_train_valid)
+  // TODO: add prefetch and access bit
+  io.prefetch_train.bits.meta_prefetch := false.B
+  io.prefetch_train.bits.meta_access := false.B
 
   // Pipeline
   // --------------------------------------------------------------------------------
