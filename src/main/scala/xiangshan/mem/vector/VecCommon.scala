@@ -77,6 +77,14 @@ trait HasVLSUParameters extends HasXSParameter with VLSUConstants {
   override val VLEN = coreParams.VLEN
   override lazy val vlmBindexBits = log2Up(coreParams.VlMergeBufferSize)
   override lazy val vsmBindexBits = log2Up(coreParams.VsMergeBufferSize)
+  lazy val maxMemByteNum = 16 // Maximum bytes for a single memory access
+  /**
+   * get addr aligned low bits
+   * @param addr Address to be check
+   * @param width Width for checking alignment
+   */
+  def getCheckAddrLowBits(addr: UInt, width: Int): UInt = addr(log2Up(width) - 1, 0)
+  def getOverflowBit(in: UInt, width: Int): UInt = in(log2Up(width))
   def isUnitStride(instType: UInt) = instType(1, 0) === "b00".U
   def isStrided(instType: UInt) = instType(1, 0) === "b10".U
   def isIndexed(instType: UInt) = instType(0) === "b1".U

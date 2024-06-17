@@ -328,12 +328,14 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
    * Unit-Stride split to one flow or two flow.
    * for Unit-Stride, if uop's addr is aligned with 128-bits, split it to one flow, otherwise split two
    */
-  val usLowBitsAddr    = issueBaseAddr(3, 0) + issueUopOffset(3, 0)
-  val usAligned128     = (usLowBitsAddr(3, 0) === 0.U)// addr 128-bit aligned
-  val usSplitMask      = genUSSplitMask(issueByteMask, splitIdx, usLowBitsAddr(3, 0))
-  val usNoSplit        = (usAligned128 || !(usLowBitsAddr(3, 0) +& PopCount(usSplitMask))(4)) && !issuePreIsSplit && (splitIdx === 0.U)// unit-stride uop don't need to split into two flow
+  val usLowBitsAddr    = getCheckAddrLowBits(issueBaseAddr, maxMemByteNum) + getCheckAddrLowBits(issueUopOffset, maxMemByteNum)
+  val usAligned128     = (getCheckAddrLowBits(usLowBitsAddr, maxMemByteNum) === 0.U)// addr 128-bit aligned
+  val usSplitMask      = genUSSplitMask(issueByteMask, splitIdx, getCheckAddrLowBits(usLowBitsAddr, maxMemByteNum))
+  val usNoSplit        = (usAligned128 || !getOverflowBit(getCheckAddrLowBits(usLowBitsAddr, maxMemByteNum) +& PopCount(usSplitMask), maxMemByteNum)) &&
+                          !issuePreIsSplit &&
+                          (splitIdx === 0.U)// unit-stride uop don't need to split into two flow
   val usSplitVaddr     = genUSSplitAddr(vaddr, splitIdx)
-  val regOffset        = usLowBitsAddr(3, 0) // offset in 256-bits vd
+  val regOffset        = getCheckAddrLowBits(usLowBitsAddr, maxMemByteNum) // offset in 256-bits vd
   XSError((splitIdx > 1.U && usNoSplit) || (splitIdx > 1.U && !issuePreIsSplit) , "Unit-Stride addr split error!\n")
 
   // data
@@ -399,7 +401,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   XSPerfAccumulate("out_valid",             io.out.valid)
   XSPerfAccumulate("out_fire",              io.out.fire)
   XSPerfAccumulate("out_fire_unitstride",   io.out.fire && !issuePreIsSplit)
-  XSPerfAccumulate("unitstride_vlenAlign",  io.out.fire && !issuePreIsSplit && io.out.bits.vaddr(3, 0) === 0.U)
+  XSPerfAccumulate("unitstride_vlenAlign",  io.out.fire && !issuePreIsSplit && getCheckAddrLowBits(io.out.bits.vaddr, maxMemByteNum) === 0.U)
   XSPerfAccumulate("unitstride_invalid",    io.out.ready && issueValid && !issuePreIsSplit && PopCount(io.out.bits.mask).orR)
 }
 
