@@ -167,6 +167,14 @@ class FTBEntry(implicit p: Parameters) extends XSBundle with FTBParams with BPUU
   }
 
   def getTargetVec(pc: UInt, last_stage: Option[Tuple2[UInt, Bool]] = None) = {
+    /*
+    Previous design: Use the getTarget function of FTBSlot to calculate three sets of targets separately;
+    During this process, nine sets of registers will be generated to register the values of the higher plus one minus one
+    Current design: Reuse the duplicate parts of the original nine sets of registers,
+    calculate the common high bits lastmulti-stage_pc_high of brtarget and jmptarget,
+    and the high bits lastmulti-stage_pc_middle that need to be added and subtracted from each other,
+    and then concatenate them according to the carry situation to obtain brtarget and jmptarget
+    */
     val h_br                = pc(VAddrBits - 1,  BR_OFFSET_LEN + 1)
     val higher_br           = Wire(UInt((VAddrBits - BR_OFFSET_LEN - 1).W))
     val higher_plus_one_br  = Wire(UInt((VAddrBits - BR_OFFSET_LEN - 1).W))
