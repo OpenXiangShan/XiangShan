@@ -20,9 +20,10 @@ class CSRPermitModule extends Module {
 
   private val csrAccess = WireInit(ren || wen)
 
-  private val (mret, sret) = (
+  private val (mret, sret, dret) = (
     io.in.mret,
     io.in.sret,
+    io.in.dret,
   )
 
   private val (tsr, vtsr) = (
@@ -112,6 +113,9 @@ class CSRPermitModule extends Module {
   private val sret_EX_VI = sret && (privState.isModeVU || privState.isModeVS && vtsr)
   private val sretIllegal = sret_EX_II || sret_EX_VI
 
+  private val dret_EX_II = dret && !debugMode
+  private val dretIllegal = dret_EX_II
+
   private val rwSatp_EX_II = csrAccess && privState.isModeHS &&  tvm && (addr === CSRs.satp.U || addr === CSRs.hgatp.U)
   private val rwSatp_EX_VI = csrAccess && privState.isModeVS && vtvm && (addr === CSRs.satp.U)
 
@@ -144,13 +148,14 @@ class CSRPermitModule extends Module {
   // Todo: check correct
   io.out.EX_II :=  csrAccess && !privilegeLegal && (!privState.isVirtual || privState.isVirtual && csrIsM) ||
     rwIllegal || mret_EX_II || sret_EX_II || rwSatp_EX_II || accessHPM_EX_II ||
-    rwStimecmp_EX_II || rwCustom_EX_II || fpVec_EX_II
+    rwStimecmp_EX_II || rwCustom_EX_II || fpVec_EX_II || dret_EX_II
   io.out.EX_VI := (csrAccess && !privilegeLegal && privState.isVirtual && !csrIsM ||
     mret_EX_VI || sret_EX_VI || rwSatp_EX_VI || accessHPM_EX_VI || rwStimecmp_EX_VI) && !rwIllegal
 
   io.out.hasLegalWen  := wen  && !csrAccessIllegal
   io.out.hasLegalMret := mret && !mretIllegal
   io.out.hasLegalSret := sret && !sretIllegal
+  io.out.hasLegalDret := dret && !dretIllegal
 
   io.out.hasLegalWriteFcsr := wen && csrIsFp && !fsEffectiveOff
   io.out.hasLegalWriteVcsr := wen && csrIsWritableVec && !vsEffectiveOff
@@ -169,6 +174,7 @@ class CSRPermitIO extends Bundle {
     val debugMode = Bool()
     val mret = Bool()
     val sret = Bool()
+    val dret = Bool()
     val csrIsCustom = Bool()
     val status = new Bundle {
       // Trap SRET
@@ -210,8 +216,9 @@ class CSRPermitIO extends Bundle {
     val hasLegalWen  = Bool()
     val hasLegalMret = Bool()
     val hasLegalSret = Bool()
-    val hasLegalWriteFcsr   = Bool()
-    val hasLegalWriteVcsr  = Bool()
+    val hasLegalDret = Bool()
+    val hasLegalWriteFcsr = Bool()
+    val hasLegalWriteVcsr = Bool()
     val EX_II = Bool()
     val EX_VI = Bool()
   })
