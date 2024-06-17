@@ -290,8 +290,6 @@ class NewCSR(implicit val p: Parameters) extends Module
   intrMod.io.in.hviprio2 := hviprio2.rdata.asUInt
   intrMod.io.in.miprios := Cat(miregiprios.map(_.rdata).reverse)
   intrMod.io.in.hsiprios := Cat(siregiprios.map(_.rdata).reverse)
-  // val disableInterrupt = debugMode || (dcsr.rdata.STEP.asBool && !dcsr.rdata.STEPIE.asBool)
-  // val intrVec = Cat(debugIntr && !debugMode, mie.rdata.asUInt(11, 0) & mip.rdata.asUInt & intrVecEnable.asUInt) // Todo: asUInt(11,0) is ok?
 
   val intrVec = RegEnable(intrMod.io.out.interruptVec.bits, 0.U, intrMod.io.out.interruptVec.valid)
 
