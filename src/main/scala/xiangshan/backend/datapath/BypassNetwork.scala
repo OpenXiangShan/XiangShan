@@ -6,8 +6,8 @@ import chisel3.util._
 import utility.{GatedValidRegNext, SignExt, ZeroExt}
 import xiangshan.{XSBundle, XSModule}
 import xiangshan.backend.BackendParams
-import xiangshan.backend.Bundles.{ExuBypassBundle, ExuInput, ExuOH, ExuOutput, ImmInfo}
-import xiangshan.backend.issue.{ImmExtractor, IntScheduler, MemScheduler, VfScheduler, FpScheduler}
+import xiangshan.backend.Bundles.{ExuBypassBundle, ExuInput, ExuOH, ExuOutput, ExuVec, ImmInfo}
+import xiangshan.backend.issue.{FpScheduler, ImmExtractor, IntScheduler, MemScheduler, VfScheduler}
 import xiangshan.backend.datapath.DataConfig.RegDataMaxWidth
 import xiangshan.backend.decode.ImmUnion
 
@@ -68,13 +68,24 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
   private val immInfo = io.fromDataPath.immInfo
 
   // (exuIdx, srcIdx, bypassExuIdx)
-  private val forwardOrBypassValidVec3: MixedVec[Vec[UInt]] = MixedVecInit(
+  private val forwardOrBypassValidVec3: MixedVec[Vec[Vec[Bool]]] = MixedVecInit(
     fromDPs.map { (x: DecoupledIO[ExuInput]) =>
+      val wakeUpSourceIdx = x.bits.params.iqWakeUpSinkPairs.map(x => x.source.getExuParam(params.allExuParams).exuIdx)
+      val mask = Wire(chiselTypeOf(x.bits.l1ExuOH.getOrElse(VecInit(Seq.fill(x.bits.params.numRegSrc max 1)(VecInit(0.U(ExuVec.width.W).asBools))))))
+      mask.map{ case m =>
+        val vecMask = Wire(Vec(m.getWidth, Bool()))
+        vecMask.zipWithIndex.map{ case(v, i) =>
+          if (wakeUpSourceIdx.contains(i)) v := true.B else v := false.B
+        }
+        m := vecMask
+      }
       println(s"[BypassNetwork] ${x.bits.params.name} numRegSrc: ${x.bits.params.numRegSrc}")
-      x.bits.l1ExuOH.getOrElse(
+      VecInit(x.bits.l1ExuOH.getOrElse(
         // TODO: remove tmp max 1 for fake HYU1
-        VecInit(Seq.fill(x.bits.params.numRegSrc max 1)(0.U(ExuOH.width.W)))
-      )
+        VecInit(Seq.fill(x.bits.params.numRegSrc max 1)(VecInit(0.U(ExuVec.width.W).asBools)))
+      ).zip(mask).map{ case (l,m) =>
+        VecInit(l.zip(m).map(x => x._1 && x._2))
+      })
     }
   )
 
