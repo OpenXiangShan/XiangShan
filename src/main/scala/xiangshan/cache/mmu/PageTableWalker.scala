@@ -303,7 +303,11 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       }
       finish := true.B
     }.elsewhen(s2xlate && last_s2xlate === true.B) {
-      s_last_hptw_req := false.B
+      when(accessFault || pageFault || ppn_af){
+        last_s2xlate := false.B
+      }.otherwise{
+        s_last_hptw_req := false.B
+      }
       mem_addr_update := false.B
     }.elsewhen(io.resp.valid){
       when(io.resp.fire) {
