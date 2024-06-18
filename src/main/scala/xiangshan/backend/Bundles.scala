@@ -232,6 +232,10 @@ object Bundles {
       fuType === FuType.ldu.U && LSUOpType.isHlv(fuOpType) || fuType === FuType.stu.U && LSUOpType.isHsv(fuOpType)
     }
 
+    def isVecOPF: Bool = {
+      FuType.isVecOPF(fuType)
+    }
+
     def srcIsReady: Vec[Bool] = {
       VecInit(this.srcType.zip(this.srcState).map {
         case (t, s) => SrcType.isNotReg(t) || SrcState.isReady(s)
