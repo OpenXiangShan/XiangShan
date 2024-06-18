@@ -62,6 +62,8 @@ object CSRConfig {
   final val perfCntNum = 29       // in Spec
 
   final val EXT_SSTC = true
+
+  final val PPNLength = 44
 }
 
 class NewCSR(implicit val p: Parameters) extends Module
@@ -404,6 +406,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     mod match {
       case m: VirtualSupervisorBundle =>
         m.v := V.asUInt.asBool
+        m.hgatp := hgatp.regOut
       case _ =>
     }
     mod match {
