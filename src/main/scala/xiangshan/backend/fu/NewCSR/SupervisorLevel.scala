@@ -2,8 +2,8 @@ package xiangshan.backend.fu.NewCSR
 
 import chisel3._
 import chisel3.util.BitPat.bitPatToUInt
-import chisel3.util.{BitPat, Cat, Mux1H, MuxCase, ValidIO}
-import utility.SignExt
+import chisel3.util.{BitPat, Cat, Fill, Mux1H, MuxCase, ValidIO}
+import utility.{SignExt, ZeroExt}
 import freechips.rocketchip.rocket.CSRs
 import xiangshan.backend.fu.NewCSR.CSRBundles._
 import xiangshan.backend.fu.NewCSR.CSRDefines._
@@ -136,10 +136,13 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
     .setAddr(CSRs.stimecmp)
 
   val satp = Module(new CSRModule("Satp", new SatpBundle) {
+    val ppnMask = ZeroExt(Fill(PPNLength, 1.U(1.W)).take(PAddrBits - PageOffsetWidth), PPNLength)
     // If satp is written with an unsupported MODE,
     // the entire write has no effect; no fields in satp are modified.
     when (wen && wdata.MODE.isLegal) {
-      reg := wdata
+      reg.MODE := wdata.MODE
+      reg.ASID := wdata.ASID
+      reg.PPN := wdata.PPN & ppnMask
     }.otherwise {
       reg := reg
     }
@@ -221,12 +224,12 @@ class SipBundle extends InterruptPendingBundle {
 }
 
 class SatpBundle extends CSRBundle {
-  final val PPN_msb = PAddrWidth - AddrWidthInPage - 1
   val MODE = SatpMode(63, 60, null).withReset(SatpMode.Bare)
   // WARL in privileged spec.
   // RW, since we support max width of ASID
   val ASID = RW(44 - 1 + ASIDLEN, 44)
-  val PPN  = RW(PPN_msb, 0)
+  // Do WARL in SatpModule/VSatpModule
+  val PPN  = RW(43, 0)
 }
 
 class SEnvCfg extends EnvCfg
