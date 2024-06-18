@@ -339,7 +339,7 @@ class CSRToDecode(implicit p: Parameters) extends XSBundle {
     val hlsv = Bool()
 
     /**
-     * decode all fp inst
+     * decode all fp inst or all vecfp inst
      * raise EX_II when FS=Off
      */
     val fsIsOff = Bool()
