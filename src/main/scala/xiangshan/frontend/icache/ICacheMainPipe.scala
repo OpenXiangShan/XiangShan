@@ -321,7 +321,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     * report data parity error
     ******************************************************************************
     */
-  val s2_bankSel        = getBankSel(s2_req_offset)
+  val s2_bankSel        = getBankSel(s2_req_offset, s2_valid)
   val s2_bank_errors    = (0 until ICacheDataBanks).map(i => (encode(s2_datas(i)) =/= s2_codes(i)))
   val s2_parity_errors  = (0 until PortNumber).map(port => (0 until ICacheDataBanks).map(bank =>
                             s2_bank_errors(bank) && s2_bankSel(port)(bank).asBool).reduce(_||_) && s2_SRAMhits(port))
@@ -522,7 +522,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
       diffMainPipeOut.coreid := io.hartId
       diffMainPipeOut.index := (3 + i).U
 
-      val bankSel = getBankSel(s2_req_offset).reduce(_|_)
+      val bankSel = getBankSel(s2_req_offset, s2_valid).reduce(_|_)
       val lineSel = getLineSel(s2_req_offset)
 
       diffMainPipeOut.valid := s2_fire && bankSel(i).asBool && Mux(lineSel(i), !discards(1), !discards(0))

@@ -135,15 +135,11 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
     codes.asTypeOf(UInt(ICacheCodeBits.W))
   }
 
-  def getBankSel(blkOffset: UInt):Vec[UInt] = {
+  def getBankSel(blkOffset: UInt, valid: Bool = true.B): Vec[UInt] = {
     val bankIdxLow  = Cat(0.U(1.W), blkOffset) >> log2Ceil(blockBytes/ICacheDataBanks)
     val bankIdxHigh = (Cat(0.U(1.W), blkOffset) + 32.U) >> log2Ceil(blockBytes/ICacheDataBanks)
     val bankSel = VecInit((0 until ICacheDataBanks * 2).map(i => (i.U >= bankIdxLow) && (i.U <= bankIdxHigh)))
-    /* FIXME: when blkOffset is invalid, it can be anything and causing fake assertion-fails
-     *        maybe it's better to do this assert outside getBankSel(), or pass a valid signal here
-     *        the current solution is ensuring blkOffset is valid by defaulting it to 0.U
-     */
-    assert(PopCount(bankSel) === ICacheBankVisitNum.U, "The number of bank visits must be %d, but bankSel=0x%x", ICacheBankVisitNum.U, bankSel.asUInt)
+    assert(!valid || PopCount(bankSel) === ICacheBankVisitNum.U, "The number of bank visits must be %d, but bankSel=0x%x", ICacheBankVisitNum.U, bankSel.asUInt)
     bankSel.asTypeOf(UInt((ICacheDataBanks * 2).W)).asTypeOf(Vec(2, UInt(ICacheDataBanks.W)))
   }
 
@@ -337,7 +333,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
   val writeDatas   = io.write.bits.data.asTypeOf(Vec(ICacheDataBanks, UInt(ICacheDataBits.W)))
   val writeEntries = writeDatas.map(ICacheDataEntry(_).asUInt)
 
-  val bankSel = getBankSel(io.read(0).bits.blkOffset)
+  val bankSel = getBankSel(io.read(0).bits.blkOffset, io.read(0).valid)
   val lineSel = getLineSel(io.read(0).bits.blkOffset)
   val waymasks = io.read(0).bits.wayMask
   val masks = Wire(Vec(nWays, Vec(ICacheDataBanks, Bool())))
