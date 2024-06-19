@@ -120,7 +120,7 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
   XSPerfAccumulate("s0_miss", s0_valid && !s0_hit)
 
   // s1: alloc or update
-  val s1_valid = RegNext(s0_valid)
+  val s1_valid = GatedValidRegNext(s0_valid)
   val s1_index = RegEnable(s0_index, s0_valid)
   val s1_pc_hash = RegEnable(s0_pc_hash, s0_valid)
   val s1_vaddr = RegEnable(s0_vaddr, s0_valid)
@@ -150,7 +150,7 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
   val l2_stride_ratio_const = Constantin.createRecord(s"l2_stride_ratio${p(XSCoreParamsKey).HartId}", initValue = 5)
   val l2_stride_ratio = l2_stride_ratio_const(3, 0)
   // s2: calculate L1 & L2 pf addr
-  val s2_valid = RegNext(s1_valid && s1_can_send_pf)
+  val s2_valid = GatedValidRegNext(s1_valid && s1_can_send_pf)
   val s2_vaddr = RegEnable(s1_vaddr, s1_valid && s1_can_send_pf)
   val s2_stride = RegEnable(s1_stride, s1_valid && s1_can_send_pf)
   val s2_l1_depth = s2_stride << l1_stride_ratio
@@ -181,12 +181,12 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     )
 
   // s3: send l1 pf out
-  val s3_valid = if (LOOK_UP_STREAM) RegNext(s2_valid) && !io.stream_lookup_resp else RegNext(s2_valid)
+  val s3_valid = if (LOOK_UP_STREAM) GatedValidRegNext(s2_valid) && !io.stream_lookup_resp else GatedValidRegNext(s2_valid)
   val s3_l1_pf_req_bits = RegEnable(s2_l1_pf_req_bits, s2_valid)
   val s3_l2_pf_req_bits = RegEnable(s2_l2_pf_req_bits, s2_valid)
 
   // s4: send l2 pf out
-  val s4_valid = RegNext(s3_valid)
+  val s4_valid = GatedValidRegNext(s3_valid)
   val s4_l2_pf_req_bits = RegEnable(s3_l2_pf_req_bits, s3_valid)
 
   io.l1_prefetch_req.valid := s3_valid
@@ -211,7 +211,7 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
   }
 
   for(i <- 0 until STRIDE_ENTRY_NUM) {
-    when(reset.asBool || RegNext(io.flush)) {
+    when(reset.asBool || GatedValidRegNext(io.flush)) {
       array(i).reset(i)
     }
   }

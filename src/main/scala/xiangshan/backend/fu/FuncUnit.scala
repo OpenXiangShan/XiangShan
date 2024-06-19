@@ -21,6 +21,8 @@ class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
   val rfWen       = OptionWrapper(cfg.needIntWen, Bool())
   val fpWen       = OptionWrapper(cfg.needFpWen,  Bool())
   val vecWen      = OptionWrapper(cfg.needVecWen, Bool())
+  val v0Wen       = OptionWrapper(cfg.needV0Wen, Bool())
+  val vlWen       = OptionWrapper(cfg.needVlWen, Bool())
   val flushPipe   = OptionWrapper(cfg.flushPipe,  Bool())
   val preDecode   = OptionWrapper(cfg.hasPredecode, new PreDecodeInfo)
   val ftqIdx      = OptionWrapper(cfg.needPc || cfg.replayInst || cfg.isSta, new FtqPtr)
@@ -39,6 +41,8 @@ class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle
   val rfWen         = OptionWrapper(cfg.needIntWen, Bool())
   val fpWen         = OptionWrapper(cfg.needFpWen,  Bool())
   val vecWen        = OptionWrapper(cfg.needVecWen, Bool())
+  val v0Wen         = OptionWrapper(cfg.needV0Wen, Bool())
+  val vlWen         = OptionWrapper(cfg.needVlWen, Bool())
   val exceptionVec  = OptionWrapper(cfg.exceptionOut.nonEmpty, ExceptionVec())
   val flushPipe     = OptionWrapper(cfg.flushPipe,  Bool())
   val replay        = OptionWrapper(cfg.replayInst, Bool())
@@ -49,7 +53,7 @@ class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle
 
 class FuncUnitDataInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val src       = MixedVec(cfg.genSrcDataVec)
-  val imm       = UInt(cfg.dataBits.W)
+  val imm       = UInt(cfg.destDataBits.W)
   val pc        = OptionWrapper(cfg.needPc, UInt(VAddrData().dataWidth.W))
 
   def getSrcVConfig : UInt = src(cfg.vconfigIdx)
@@ -57,7 +61,7 @@ class FuncUnitDataInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
 }
 
 class FuncUnitDataOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
-  val data      = UInt(cfg.dataBits.W)
+  val data      = UInt(cfg.destDataBits.W)
   val fflags    = OptionWrapper(cfg.writeFflags, UInt(5.W))
   val vxsat     = OptionWrapper(cfg.writeVxsat, Vxsat())
   val pc        = OptionWrapper(cfg.isFence, UInt(VAddrData().dataWidth.W))
@@ -84,9 +88,9 @@ class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val fenceio = OptionWrapper(cfg.isFence, new FenceIO)
   val frm = OptionWrapper(cfg.needSrcFrm, Input(UInt(3.W)))
   val vxrm = OptionWrapper(cfg.needSrcVxrm, Input(UInt(2.W)))
-  val vtype = OptionWrapper(cfg.writeVConfig, (Valid(new VType)))
-  val vlIsZero = OptionWrapper(cfg.writeVConfig, Output(Bool()))
-  val vlIsVlmax = OptionWrapper(cfg.writeVConfig, Output(Bool()))
+  val vtype = OptionWrapper(cfg.writeVlRf, (Valid(new VType)))
+  val vlIsZero = OptionWrapper(cfg.writeVlRf, Output(Bool()))
+  val vlIsVlmax = OptionWrapper(cfg.writeVlRf, Output(Bool()))
 }
 
 abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSModule {
@@ -99,6 +103,8 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
     io.out.bits.ctrl.rfWen  .foreach(_ := RegEnable(io.in.bits.ctrl.rfWen.get, io.in.fire))
     io.out.bits.ctrl.fpWen  .foreach(_ := RegEnable(io.in.bits.ctrl.fpWen.get, io.in.fire))
     io.out.bits.ctrl.vecWen .foreach(_ := RegEnable(io.in.bits.ctrl.vecWen.get, io.in.fire))
+    io.out.bits.ctrl.v0Wen .foreach(_ := RegEnable(io.in.bits.ctrl.v0Wen.get, io.in.fire))
+    io.out.bits.ctrl.vlWen .foreach(_ := RegEnable(io.in.bits.ctrl.vlWen.get, io.in.fire))
     // io.out.bits.ctrl.flushPipe should be connected in fu
     io.out.bits.ctrl.preDecode.foreach(_ := RegEnable(io.in.bits.ctrl.preDecode.get, io.in.fire))
     io.out.bits.ctrl.fpu      .foreach(_ := RegEnable(io.in.bits.ctrl.fpu.get, io.in.fire))
@@ -112,6 +118,8 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
     io.out.bits.ctrl.rfWen.foreach(_ := io.in.bits.ctrl.rfWen.get)
     io.out.bits.ctrl.fpWen.foreach(_ := io.in.bits.ctrl.fpWen.get)
     io.out.bits.ctrl.vecWen.foreach(_ := io.in.bits.ctrl.vecWen.get)
+    io.out.bits.ctrl.v0Wen.foreach(_ := io.in.bits.ctrl.v0Wen.get)
+    io.out.bits.ctrl.vlWen.foreach(_ := io.in.bits.ctrl.vlWen.get)
     // io.out.bits.ctrl.flushPipe should be connected in fu
     io.out.bits.ctrl.preDecode.foreach(_ := io.in.bits.ctrl.preDecode.get)
     io.out.bits.ctrl.fpu.foreach(_ := io.in.bits.ctrl.fpu.get)
@@ -200,6 +208,8 @@ trait HasPipelineReg { this: FuncUnit =>
   io.out.bits.ctrl.rfWen.foreach(_ := fixCtrlVec.last.rfWen.get)
   io.out.bits.ctrl.fpWen.foreach(_ := fixCtrlVec.last.fpWen.get)
   io.out.bits.ctrl.vecWen.foreach(_ := fixCtrlVec.last.vecWen.get)
+  io.out.bits.ctrl.v0Wen.foreach(_ := fixCtrlVec.last.v0Wen.get)
+  io.out.bits.ctrl.vlWen.foreach(_ := fixCtrlVec.last.vlWen.get)
   io.out.bits.ctrl.fpu.foreach(_ := fixCtrlVec.last.fpu.get)
   io.out.bits.ctrl.vpu.foreach(_ := fixCtrlVec.last.vpu.get)
   io.out.bits.perfDebugInfo := fixPerfVec.last

@@ -79,6 +79,7 @@ class indexedLSUopTable(uopIdx:Int) extends Module {
 trait VectorConstants {
   val MAX_VLMUL = 8
   val VECTOR_TMP_REG_LMUL = 33 // 33~47  ->  15
+  val VECTOR_COMPRESS = 1 // in v0 regfile
   val MAX_INDEXED_LS_UOPNUM = 64
 }
 
@@ -197,20 +198,26 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(0).flushPipe := false.B
         csBundle(0).rfWen := true.B
         // uop1 set vl, vsetvl will flushPipe
-        csBundle(1).ldest := VCONFIG_IDX.U
-        csBundle(1).vecWen := true.B
+        csBundle(1).ldest := Vl_IDX.U
+        csBundle(1).vecWen := false.B
+        csBundle(1).vlWen := true.B
         when(VSETOpType.isVsetvli(latchedInst.fuOpType) && dest === 0.U && src1 === 0.U) {
           // write nothing, uop0 is a nop instruction
           csBundle(0).rfWen := false.B
           csBundle(0).fpWen := false.B
           csBundle(0).vecWen := false.B
+          csBundle(0).vlWen := false.B
           csBundle(1).fuType := FuType.vsetfwf.U
-          csBundle(1).srcType(0) := SrcType.vp
-          csBundle(1).lsrc(0) := VCONFIG_IDX.U
+          csBundle(1).srcType(0) := SrcType.no
+          csBundle(1).srcType(2) := SrcType.no
+          csBundle(1).srcType(3) := SrcType.no
+          csBundle(1).srcType(4) := SrcType.vp
+          csBundle(1).lsrc(4) := Vl_IDX.U
         }.elsewhen(VSETOpType.isVsetvl(latchedInst.fuOpType) && dest === 0.U && src1 === 0.U) {
           // uop0: mv vtype gpr to vector region
           csBundle(0).srcType(0) := SrcType.xp
           csBundle(0).srcType(1) := SrcType.no
+          csBundle(0).lsrc(0) := src2
           csBundle(0).lsrc(1) := 0.U
           csBundle(0).ldest := VECTOR_TMP_REG_LMUL.U
           csBundle(0).fuType := FuType.i2v.U
@@ -218,22 +225,28 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           csBundle(0).rfWen := false.B
           csBundle(0).fpWen := false.B
           csBundle(0).vecWen := true.B
+          csBundle(0).vlWen := false.B
           csBundle(0).flushPipe := false.B
           // uop1: uvsetvcfg_vv
           csBundle(1).fuType := FuType.vsetfwf.U
           // vl
-          csBundle(1).srcType(0) := SrcType.vp
-          csBundle(1).lsrc(0) := VCONFIG_IDX.U
+          csBundle(1).srcType(0) := SrcType.no
+          csBundle(1).srcType(2) := SrcType.no
+          csBundle(1).srcType(3) := SrcType.no
+          csBundle(1).srcType(4) := SrcType.vp
+          csBundle(1).lsrc(4) := Vl_IDX.U
           // vtype
           csBundle(1).srcType(1) := SrcType.vp
           csBundle(1).lsrc(1) := VECTOR_TMP_REG_LMUL.U
-          csBundle(1).vecWen := true.B
-          csBundle(1).ldest := VCONFIG_IDX.U
+          csBundle(1).vecWen := false.B
+          csBundle(1).vlWen := true.B
+          csBundle(1).ldest := Vl_IDX.U
         }.elsewhen(dest === 0.U) {
           // write nothing, uop0 is a nop instruction
           csBundle(0).rfWen := false.B
           csBundle(0).fpWen := false.B
           csBundle(0).vecWen := false.B
+          csBundle(0).vlWen := false.B
         }
         // use bypass vtype from vtypeGen
         csBundle(0).vpu.connectVType(io.vtypeBypass)
@@ -1586,17 +1599,21 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           for (j <- 0 until jlen) {
             val vd_old = if(i==j) (dest + i.U) else (VECTOR_TMP_REG_LMUL + j + 1).U
             val vd = if(i==len-1) (dest + j.U) else {
-              if (j == i+1) VECTOR_TMP_REG_LMUL.U else (VECTOR_TMP_REG_LMUL + j + 1).U
+              if (j == i+1) VECTOR_TMP_REG_LMUL.U  else (VECTOR_TMP_REG_LMUL + j + 1).U
             }
+            csBundle(i*(i+3)/2 + j).vecWen := true.B
+            csBundle(i*(i+3)/2 + j).v0Wen := false.B
             val src13Type = if (j == i+1) DontCare else SrcType.vp
             csBundle(i*(i+3)/2 + j).srcType(0) := src13Type
             csBundle(i*(i+3)/2 + j).srcType(1) := SrcType.vp
             csBundle(i*(i+3)/2 + j).srcType(2) := src13Type
-            csBundle(i*(i+3)/2 + j).srcType(3) := SrcType.vp
-            csBundle(i*(i+3)/2 + j).lsrc(0) := src1
+            if (i == 0) {
+              csBundle(i*(i+3)/2 + j).lsrc(0) := src1
+            } else {
+              csBundle(i*(i+3)/2 + j).lsrc(0) := VECTOR_TMP_REG_LMUL.U
+            }
             csBundle(i*(i+3)/2 + j).lsrc(1) := src2 + i.U
             csBundle(i*(i+3)/2 + j).lsrc(2) := vd_old
-            csBundle(i*(i+3)/2 + j).lsrc(3) := VECTOR_TMP_REG_LMUL.U
             csBundle(i*(i+3)/2 + j).ldest := vd
             csBundle(i*(i+3)/2 + j).uopIdx := (i*(i+3)/2 + j).U
           }

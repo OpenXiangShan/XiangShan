@@ -10,7 +10,7 @@ import xiangshan.backend.fu.FuConfig
 
 class DivUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
 
-  val xlen = cfg.dataBits
+  val xlen = cfg.destDataBits
 
   val func = io.in.bits.ctrl.fuOpType
   val ctrl = Wire(new MulDivCtrl)
@@ -30,7 +30,7 @@ class DivUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   val robIdxReg = RegEnable(io.in.bits.ctrl.robIdx, io.in.fire)
   val ctrlReg = RegEnable(ctrl, io.in.fire)
 
-  val divDataModule = Module(new SRT16DividerDataModule(cfg.dataBits))
+  val divDataModule = Module(new SRT16DividerDataModule(cfg.destDataBits))
 
   val kill_w = io.in.bits.ctrl.robIdx.needFlush(io.flush)
   val kill_r = !divDataModule.io.in_ready && robIdxReg.needFlush(io.flush)

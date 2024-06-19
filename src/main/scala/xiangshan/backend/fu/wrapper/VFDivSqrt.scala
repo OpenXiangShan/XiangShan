@@ -17,7 +17,7 @@ class VFDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends VecNonPipedFuncUn
   XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VfpuType.dummy, "Vfdiv OpType not supported")
 
   // params alias
-  private val dataWidth = cfg.dataBits
+  private val dataWidth = cfg.destDataBits
   private val dataWidthOfDataModule = 64
   private val numVecModule = dataWidth / dataWidthOfDataModule
 
@@ -106,12 +106,15 @@ class VFDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends VecNonPipedFuncUn
   outSrcMaskRShift := (maskToMgu >> (outVecCtrl.vuopIdx(2, 0) * vlMax))(4 * numVecModule - 1, 0)
   val f16FFlagsEn = outSrcMaskRShift
   val f32FFlagsEn = Wire(Vec(numVecModule, UInt(4.W)))
-  for (i <- 0 until numVecModule) {
-    f32FFlagsEn(i) := Cat(Fill(2, 1.U), outSrcMaskRShift(2 * i + 1, 2 * i))
-  }
   val f64FFlagsEn = Wire(Vec(numVecModule, UInt(4.W)))
+  val f16VlMaskEn = vlMaskRShift
+  val f32VlMaskEn = Wire(Vec(numVecModule, UInt(4.W)))
+  val f64VlMaskEn = Wire(Vec(numVecModule, UInt(4.W)))
   for (i <- 0 until numVecModule) {
-    f64FFlagsEn(i) := Cat(Fill(3, 1.U), outSrcMaskRShift(i))
+    f32FFlagsEn(i) := Cat(Fill(2, 0.U), outSrcMaskRShift(2 * i + 1, 2 * i))
+    f64FFlagsEn(i) := Cat(Fill(3, 0.U), outSrcMaskRShift(i))
+    f32VlMaskEn(i) := Cat(Fill(2, 0.U), vlMaskRShift(2 * i + 1, 2 * i))
+    f64VlMaskEn(i) := Cat(Fill(3, 0.U), vlMaskRShift(i))
   }
   val fflagsEn = Mux1H(
     Seq(
@@ -120,7 +123,14 @@ class VFDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends VecNonPipedFuncUn
       (outEew === 3.U) -> f64FFlagsEn.asUInt
     )
   )
-  allFFlagsEn := (fflagsEn & vlMaskRShift).asTypeOf(allFFlagsEn)
+  val vlMaskEn = Mux1H(
+    Seq(
+      (outEew === 1.U) -> f16VlMaskEn.asUInt,
+      (outEew === 2.U) -> f32VlMaskEn.asUInt,
+      (outEew === 3.U) -> f64VlMaskEn.asUInt
+    )
+  )
+  allFFlagsEn := (fflagsEn & vlMaskEn).asTypeOf(allFFlagsEn)
 
   val allFFlags = fflagsData.asTypeOf(Vec(4 * numVecModule, UInt(5.W)))
   val outFFlags = allFFlagsEn.zip(allFFlags).map {

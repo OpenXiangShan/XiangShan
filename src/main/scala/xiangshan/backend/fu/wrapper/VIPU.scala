@@ -91,7 +91,7 @@ class VIPU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VipuType.dummy, "VIPU OpType not supported")
 
   // params alias
-  private val dataWidth = cfg.dataBits
+  private val dataWidth = cfg.destDataBits
   private val dataWidthOfDataModule = 64
   private val numVecModule = dataWidth / dataWidthOfDataModule
   private val needClearVs1 = (VipuType.vcpop_m === io.in.bits.ctrl.fuOpType && vuopIdx === 0.U) ||

@@ -7,7 +7,7 @@ import utils.SeqUtils
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.DataConfig.DataConfig
-import xiangshan.backend.datapath.WbConfig.{IntWB, PregWB, VfWB, FpWB}
+import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.datapath.{WakeUpConfig, WakeUpSource}
 import xiangshan.backend.exu.{ExeUnit, ExeUnitParams}
 import xiangshan.backend.fu.{FuConfig, FuType}
@@ -71,6 +71,10 @@ case class IssueBlockParams(
 
   def numVfSrc: Int = exuBlockParams.map(_.numVfSrc).max
 
+  def numV0Src: Int = exuBlockParams.map(_.numV0Src).max
+
+  def numVlSrc: Int = exuBlockParams.map(_.numVlSrc).max
+
   def numRegSrc: Int = exuBlockParams.map(_.numRegSrc).max
 
   def numSrc: Int = exuBlockParams.map(_.numSrc).max
@@ -83,11 +87,19 @@ case class IssueBlockParams(
 
   def readVfRf: Boolean = numVfSrc > 0
 
+  def readV0Rf: Boolean = numV0Src > 0
+
+  def readVlRf: Boolean = numVlSrc > 0
+
   def writeIntRf: Boolean = exuBlockParams.map(_.writeIntRf).reduce(_ || _)
 
   def writeFpRf: Boolean = exuBlockParams.map(_.writeFpRf).reduce(_ || _)
 
   def writeVecRf: Boolean = exuBlockParams.map(_.writeVecRf).reduce(_ || _)
+
+  def writeV0Rf: Boolean = exuBlockParams.map(_.writeV0Rf).reduce(_ || _)
+
+  def writeVlRf: Boolean = exuBlockParams.map(_.writeVlRf).reduce(_ || _)
 
   def exceptionOut: Seq[Int] = exuBlockParams.map(_.exceptionOut).reduce(_ ++ _).distinct.sorted
 
@@ -248,11 +260,15 @@ case class IssueBlockParams(
 
   def hasIQWakeUp: Boolean = numWakeupFromIQ > 0 && numRegSrc > 0
 
-  def needWakeupFromIntWBPort = backendParam.allExuParams.filter(x => !wakeUpInExuSources.map(_.name).contains(x.name)).groupBy(x => x.getIntWBPort.getOrElse(IntWB(port = -1)).port).filter(_._1 != -1)
+  def needWakeupFromIntWBPort = backendParam.allExuParams.filter(x => !wakeUpInExuSources.map(_.name).contains(x.name) && this.readIntRf).groupBy(x => x.getIntWBPort.getOrElse(IntWB(port = -1)).port).filter(_._1 != -1)
 
-  def needWakeupFromFpWBPort = backendParam.allExuParams.filter(x => !wakeUpInExuSources.map(_.name).contains(x.name)).groupBy(x => x.getFpWBPort.getOrElse(FpWB(port = -1)).port).filter(_._1 != -1)
+  def needWakeupFromFpWBPort = backendParam.allExuParams.filter(x => !wakeUpInExuSources.map(_.name).contains(x.name) && this.readFpRf).groupBy(x => x.getFpWBPort.getOrElse(FpWB(port = -1)).port).filter(_._1 != -1)
 
-  def needWakeupFromVfWBPort = backendParam.allExuParams.filter(x => !wakeUpInExuSources.map(_.name).contains(x.name)).groupBy(x => x.getVfWBPort.getOrElse(VfWB(port = -1)).port).filter(_._1 != -1)
+  def needWakeupFromVfWBPort = backendParam.allExuParams.filter(x => !wakeUpInExuSources.map(_.name).contains(x.name) && this.readVecRf).groupBy(x => x.getVfWBPort.getOrElse(VfWB(port = -1)).port).filter(_._1 != -1)
+
+  def needWakeupFromV0WBPort = backendParam.allExuParams.filter(x => !wakeUpInExuSources.map(_.name).contains(x.name) && this.readV0Rf).groupBy(x => x.getV0WBPort.getOrElse(V0WB(port = -1)).port).filter(_._1 != -1)
+
+  def needWakeupFromVlWBPort = backendParam.allExuParams.filter(x => !wakeUpInExuSources.map(_.name).contains(x.name) && this.readVlRf).groupBy(x => x.getVlWBPort.getOrElse(VlWB(port = -1)).port).filter(_._1 != -1)
 
   def hasWakeupFromMem: Boolean = backendParam.allExuParams.filter(x => wakeUpInExuSources.map(_.name).contains(x.name)).map(_.isMemExeUnit).fold(false)(_ | _)
 
@@ -330,7 +346,15 @@ case class IssueBlockParams(
       case VfScheduler() | MemScheduler() => needWakeupFromVfWBPort.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
       case _ => Seq()
     }
-    MixedVec(intBundle ++ fpBundle ++ vfBundle)
+    val v0Bundle = schdType match {
+      case VfScheduler() | MemScheduler() => needWakeupFromV0WBPort.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
+      case _ => Seq()
+    }
+    val vlBundle = schdType match {
+      case VfScheduler() | MemScheduler() => needWakeupFromVlWBPort.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
+      case _ => Seq()
+    }
+    MixedVec(intBundle ++ fpBundle ++ vfBundle ++ v0Bundle ++ vlBundle)
   }
 
   def genIQWakeUpSourceValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = {

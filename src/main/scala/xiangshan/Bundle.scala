@@ -320,6 +320,8 @@ class ResetPregStateReq(implicit p: Parameters) extends XSBundle {
   val isInt = Bool()
   val isFp = Bool()
   val isVec = Bool()
+  val isV0 = Bool()
+  val isVl = Bool()
   val preg = UInt(PhyRegIdxWidth.W)
 }
 
@@ -380,6 +382,8 @@ class RabCommitInfo(implicit p: Parameters) extends XSBundle {
   val rfWen = Bool()
   val fpWen = Bool()
   val vecWen = Bool()
+  val v0Wen = Bool()
+  val vlWen = Bool()
   val isMove = Bool()
 }
 
@@ -602,13 +606,9 @@ class L1CacheErrorInfo(implicit p: Parameters) extends XSBundle {
   // bus error unit will receive error info iff ecc_error.valid
   val report_to_beu = Output(Bool())
 
-  // there is an valid error
-  // l1 cache error will always be report to CACHE_ERROR csr
-  val valid = Output(Bool())
-
-  def toL1BusErrorUnitInfo(): L1BusErrorUnitInfo = {
+  def toL1BusErrorUnitInfo(valid: Bool): L1BusErrorUnitInfo = {
     val beu_info = Wire(new L1BusErrorUnitInfo)
-    beu_info.ecc_error.valid := report_to_beu
+    beu_info.ecc_error.valid := valid && report_to_beu
     beu_info.ecc_error.bits := paddr
     beu_info
   }

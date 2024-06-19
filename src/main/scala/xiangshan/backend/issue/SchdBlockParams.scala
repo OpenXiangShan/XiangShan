@@ -113,7 +113,11 @@ case class SchdBlockParams(
 
   def numFpRfReadByExu: Int = issueBlockParams.map(_.exuBlockParams.map(_.numFpSrc).sum).sum
 
-  def numVfRfReadByExu: Int = issueBlockParams.map(_.exuBlockParams.map(x => x.numFpSrc + x.numVecSrc).sum).sum
+  def numVfRfReadByExu: Int = issueBlockParams.map(_.exuBlockParams.map(_.numVecSrc).sum).sum
+
+  def numV0RfReadByExu: Int = issueBlockParams.map(_.exuBlockParams.map(_.numV0Src).sum).sum
+
+  def numVlRfReadByExu: Int = issueBlockParams.map(_.exuBlockParams.map(_.numVlSrc).sum).sum
 
   def bindBackendParam(param: BackendParams): Unit = {
     backendParam = param
@@ -182,7 +186,15 @@ case class SchdBlockParams(
       case VfScheduler() | MemScheduler() => backendParam.getVfWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
       case _ => Seq()
     }
-    MixedVec(intBundle ++ fpBundle ++ vfBundle)
+    val v0Bundle = schdType match {
+      case VfScheduler() | MemScheduler() => backendParam.getV0WBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
+      case _ => Seq()
+    }
+    val vlBundle = schdType match {
+      case VfScheduler() | MemScheduler() => backendParam.getVlWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
+      case _ => Seq()
+    }
+    MixedVec(intBundle ++ fpBundle ++ vfBundle ++ v0Bundle ++ vlBundle)
   }
 
   def genIntWBWakeUpSinkValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = {
@@ -195,6 +207,14 @@ case class SchdBlockParams(
 
   def genVfWBWakeUpSinkValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = {
     MixedVec(backendParam.getVfWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq)
+  }
+
+  def genV0WBWakeUpSinkValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = {
+    MixedVec(backendParam.getV0WBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq)
+  }
+
+  def genVlWBWakeUpSinkValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = {
+    MixedVec(backendParam.getVlWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq)
   }
 
   // cfgs(issueIdx)(exuIdx)(set of exu's wb)

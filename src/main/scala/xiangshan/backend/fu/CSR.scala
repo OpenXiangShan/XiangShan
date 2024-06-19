@@ -41,21 +41,11 @@ class FpuCsrIO extends Bundle {
 
 class VpuCsrIO(implicit p: Parameters) extends XSBundle {
   val vstart = Input(UInt(XLEN.W))
-  val vxsat = Input(UInt(1.W))
   val vxrm = Input(UInt(2.W))
-  val vcsr = Input(UInt(XLEN.W))
-  val vl = Input(UInt(XLEN.W))
-  val vtype = Input(UInt(XLEN.W))
-  val vlenb = Input(UInt(XLEN.W))
 
-  val vill = Input(UInt(1.W))
-  val vma = Input(UInt(1.W))
-  val vta = Input(UInt(1.W))
-  val vsew = Input(UInt(3.W))
-  val vlmul = Input(UInt(3.W))
+  val vl = Output(UInt(XLEN.W))
 
   val set_vstart = Output(Valid(UInt(XLEN.W)))
-  val set_vl = Output(Valid(UInt(XLEN.W)))
   val set_vtype = Output(Valid(UInt(XLEN.W)))
   val set_vxsat = Output(Valid(UInt(1.W)))
 
@@ -1055,9 +1045,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   when (RegNext(csrio.vpu.set_vtype.valid)) {
     vtype := RegEnable(csrio.vpu.set_vtype.bits, csrio.vpu.set_vtype.valid)
   }
-  when (RegNext(csrio.vpu.set_vl.valid)) {
-    vl := RegEnable(csrio.vpu.set_vl.bits, csrio.vpu.set_vl.valid)
-  }
+  vl := csrio.vpu.vl
   // set vs and sd in mstatus
   when(csrw_dirty_vs_state || RegNext(csrio.vpu.dirty_vs)) {
     val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
@@ -1068,16 +1056,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   csrio.vpu.vstart := vstart
   csrio.vpu.vxrm := vcsr.asTypeOf(new VcsrStruct).vxrm
-  csrio.vpu.vxsat := vcsr.asTypeOf(new VcsrStruct).vxsat
-  csrio.vpu.vcsr := vcsr
-  csrio.vpu.vtype := vtype
-  csrio.vpu.vl := vl
-  csrio.vpu.vlenb := vlenb
-  csrio.vpu.vill := vtype.asTypeOf(new VtypeStruct).vill
-  csrio.vpu.vma := vtype.asTypeOf(new VtypeStruct).vma
-  csrio.vpu.vta := vtype.asTypeOf(new VtypeStruct).vta
-  csrio.vpu.vsew := vtype.asTypeOf(new VtypeStruct).vsew
-  csrio.vpu.vlmul := vtype.asTypeOf(new VtypeStruct).vlmul
 
   // Trigger Ctrl
   val triggerEnableVec = tdata1RegVec.map { tdata1 =>

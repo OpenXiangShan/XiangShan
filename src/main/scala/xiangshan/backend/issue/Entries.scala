@@ -387,7 +387,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   io.canIssue                       := canIssueVec.asUInt
   io.fuType                         := fuTypeVec
   io.dataSources                    := dataSourceVec
-  io.srcWakeUpL1ExuOH.foreach(_     := srcWakeUpL1ExuOHVec.get.map(x => VecInit(x.map(_.asUInt))))
+  io.srcWakeUpL1ExuOH.foreach(_     := srcWakeUpL1ExuOHVec.get)
   io.loadDependency                 := loadDependencyVec
   io.isFirstIssue.zipWithIndex.foreach{ case (isFirstIssue, deqIdx) =>
     isFirstIssue                    := io.deqSelOH(deqIdx).valid && Mux1H(io.deqSelOH(deqIdx).bits, isFirstIssueVec)
@@ -541,7 +541,7 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val fuType              = Vec(params.numEntries, Output(FuType()))
   val dataSources         = Vec(params.numEntries, Vec(params.numRegSrc, Output(DataSource())))
   val loadDependency      = Vec(params.numEntries, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
-  val srcWakeUpL1ExuOH    = OptionWrapper(params.hasIQWakeUp, Vec(params.numEntries, Vec(params.numRegSrc, Output(ExuOH()))))
+  val srcWakeUpL1ExuOH    = OptionWrapper(params.hasIQWakeUp, Vec(params.numEntries, Vec(params.numRegSrc, Output(ExuVec()))))
   //deq status
   val isFirstIssue        = Vec(params.numDeq, Output(Bool()))
   val deqEntry            = Vec(params.numDeq, ValidIO(new EntryBundle))

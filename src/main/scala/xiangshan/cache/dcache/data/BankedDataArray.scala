@@ -162,7 +162,7 @@ class DataSRAMBank(index: Int)(implicit p: Parameters) extends DCacheModule {
   assert(RegNext(!io.w.en || PopCount(io.w.way_en) <= 1.U))
   assert(RegNext(!io.r.en || PopCount(io.r.way_en) <= 1.U))
 
-  val r_way_en_reg = RegNext(io.r.way_en)
+  val r_way_en_reg = RegEnable(io.r.way_en, io.r.en)
 
   // external controls do not read and write at the same time
   val w_info = io.w
@@ -241,7 +241,6 @@ case object HasDataEccParam
 // -----------------------------------------------------------------
 abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheModule
 {
-  val EnableDataEcc = false
   val DataEccParam = if(EnableDataEcc) Some(HasDataEccParam) else None
   val ReadlinePortErrorIndex = LoadPipelineWidth
   val io = IO(new DCacheBundle {
@@ -259,7 +258,7 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     val read_resp_delayed = Output(Vec(LoadPipelineWidth, Vec(VLEN/DCacheSRAMRowBits, new L1BankedDataReadResult())))
     val read_error_delayed = Output(Vec(LoadPipelineWidth,Vec(VLEN/DCacheSRAMRowBits, Bool())))
     // val nacks = Output(Vec(LoadPipelineWidth, Bool()))
-    // val errors = Output(Vec(LoadPipelineWidth + 1, new L1CacheErrorInfo)) // read ports + readline port
+    // val errors = Output(Vec(LoadPipelineWidth + 1, ValidIO(new L1CacheErrorInfo))) // read ports + readline port
     // when bank_conflict, read (1) port should be ignored
     val bank_conflict_slow = Output(Vec(LoadPipelineWidth, Bool()))
     val disable_ld_fast_wakeup = Output(Vec(LoadPipelineWidth, Bool()))
@@ -355,15 +354,15 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val line_div_addr = addr_to_dcache_div(io.readline.bits.addr)
   // when WPU is enabled, line_way_en is all enabled when read data
   val line_way_en = Fill(DCacheWays, 1.U) // val line_way_en = io.readline.bits.way_en
-  val line_way_en_reg = RegNext(io.readline.bits.way_en)
+  val line_way_en_reg = RegEnable(io.readline.bits.way_en, io.readline.valid)
 
-  val write_bank_mask_reg = RegNext(io.write.bits.wmask)
-  val write_data_reg = RegNext(io.write.bits.data)
+  val write_bank_mask_reg = RegEnable(io.write.bits.wmask, io.write.valid)
+  val write_data_reg = RegEnable(io.write.bits.data, io.write.valid)
   val write_valid_reg = RegNext(io.write.valid)
   val write_valid_dup_reg = io.write_dup.map(x => RegNext(x.valid))
-  val write_wayen_dup_reg = io.write_dup.map(x => RegNext(x.bits.way_en))
-  val write_set_addr_dup_reg = io.write_dup.map(x => RegNext(addr_to_dcache_div_set(x.bits.addr)))
-  val write_div_addr_dup_reg = io.write_dup.map(x => RegNext(addr_to_dcache_div(x.bits.addr)))
+  val write_wayen_dup_reg = io.write_dup.map(x => RegEnable(x.bits.way_en, x.valid))
+  val write_set_addr_dup_reg = io.write_dup.map(x => RegEnable(addr_to_dcache_div_set(x.bits.addr), x.valid))
+  val write_div_addr_dup_reg = io.write_dup.map(x => RegEnable(addr_to_dcache_div(x.bits.addr), x.valid))
 
   // read data_banks and ecc_banks
   // for single port SRAM, do not allow read and write in the same cycle
@@ -504,6 +503,7 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   XSPerfAccumulate("data_read_counter", PopCount(Cat(data_read_oh)))
 
   // read result: expose banked read result
+  // TODO: clock gate
   val read_result_delayed = RegNext(read_result)
   (0 until LoadPipelineWidth).map(i => {
     // io.read_resp(i) := read_result(RegNext(bank_addrs(i)))(RegNext(OHToUInt(way_en(i))))
@@ -728,12 +728,12 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val line_way_en = io.readline.bits.way_en
 
   val write_bank_mask_reg = RegNext(io.write.bits.wmask)
-  val write_data_reg = RegNext(io.write.bits.data)
+  val write_data_reg = RegEnable(io.write.bits.data, io.write.valid)
   val write_valid_reg = RegNext(io.write.valid)
   val write_valid_dup_reg = io.write_dup.map(x => RegNext(x.valid))
   val write_wayen_dup_reg = io.write_dup.map(x => RegNext(x.bits.way_en))
-  val write_set_addr_dup_reg = io.write_dup.map(x => RegNext(addr_to_dcache_div_set(x.bits.addr)))
-  val write_div_addr_dup_reg = io.write_dup.map(x => RegNext(addr_to_dcache_div(x.bits.addr)))
+  val write_set_addr_dup_reg = io.write_dup.map(x => RegEnable(addr_to_dcache_div_set(x.bits.addr), x.valid))
+  val write_div_addr_dup_reg = io.write_dup.map(x => RegEnable(addr_to_dcache_div(x.bits.addr), x.valid))
 
   // read data_banks and ecc_banks
   // for single port SRAM, do not allow read and write in the same cycle
@@ -744,12 +744,12 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     bank_addrs(rport_index)(0) := addr_to_dcache_bank(io.read(rport_index).bits.addr)
     bank_addrs(rport_index)(1) := Mux(io.is128Req(rport_index), bank_addrs(rport_index)(0) + 1.U, DCacheBanks.asUInt)
     set_addrs(rport_index) := addr_to_dcache_div_set(io.read(rport_index).bits.addr)
-    set_addrs_reg(rport_index) := RegNext(addr_to_dcache_div_set(io.read(rport_index).bits.addr))
+    set_addrs_reg(rport_index) := RegEnable(addr_to_dcache_div_set(io.read(rport_index).bits.addr), io.read(rport_index).valid)
 
     // use way_en to select a way after data read out
     assert(!(RegNext(io.read(rport_index).fire && PopCount(io.read(rport_index).bits.way_en) > 1.U)))
     way_en(rport_index) := io.read(rport_index).bits.way_en
-    way_en_reg(rport_index) := RegNext(io.read(rport_index).bits.way_en)
+    way_en_reg(rport_index) := RegEnable(io.read(rport_index).bits.way_en, io.read(rport_index).valid)
   })
 
   // read each bank, get bank result
@@ -895,10 +895,11 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
   val bank_result_delayed = RegNext(bank_result)
   (0 until LoadPipelineWidth).map(i => {
-    val rr_read_fire = RegNext(RegNext(io.read(i).fire))
-    val rr_div_addr = RegNext(RegNext(div_addrs(i)))
-    val rr_bank_addr = RegNext(RegNext(bank_addrs(i)))
-    val rr_way_addr = RegNext(RegNext(OHToUInt(way_en(i))))
+    val r_read_fire = RegNext(io.read(i).fire)
+    val rr_read_fire = RegNext(r_read_fire)
+    val rr_div_addr = RegEnable(RegEnable(div_addrs(i), io.read(i).fire), r_read_fire)
+    val rr_bank_addr = RegEnable(RegEnable(bank_addrs(i), io.read(i).fire), r_read_fire)
+    val rr_way_addr = RegEnable(RegEnable(OHToUInt(way_en(i)), io.read(i).fire), r_read_fire)
     (0 until VLEN/DCacheSRAMRowBits).map( j =>{
       io.read_resp_delayed(i)(j) := bank_result_delayed(rr_div_addr)(rr_bank_addr(j))
       // error detection
@@ -907,7 +908,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   })
 
   // read result: expose banked read result
-  io.readline_resp := bank_result(RegNext(line_div_addr))
+  io.readline_resp := bank_result(RegEnable(line_div_addr, io.readline.valid))
   io.readline_error_delayed := RegNext(RegNext(io.readline.fire)) &&
     VecInit((0 until DCacheBanks).map(i => io.readline_resp(i).error_delayed)).asUInt.orR
 
@@ -931,7 +932,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
           ecc_bank.io.w.req.valid := wen_reg
           ecc_bank.io.w.req.bits.apply(
             setIdx = write_set_addr_dup_reg(bank_index),
-            data = RegNext(getECCFromEncWord(cacheParams.dataCode.encode((io.write.bits.data(bank_index))))),
+            data = RegEnable(getECCFromEncWord(cacheParams.dataCode.encode((io.write.bits.data(bank_index)))), wen_reg),
             waymask = write_wayen_dup_reg(bank_index)
           )
           when(ecc_bank.io.w.req.valid) {

@@ -106,7 +106,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
 
   // Allocate logic
   val acceptedVec = Wire(Vec(LoadPipelineWidth, Bool()))
-  val enqIndexVec = Wire(Vec(LoadPipelineWidth, UInt()))
+  val enqIndexVec = Wire(Vec(LoadPipelineWidth, UInt(log2Up(LoadQueueRARSize).W)))
 
   for ((enq, w) <- io.query.map(_.req).zipWithIndex) {
     acceptedVec(w) := false.B
@@ -165,7 +165,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     val needFlush = uop(i).robIdx.needFlush(io.redirect)
     val fbk = io.vecFeedback
     for (j <- 0 until VecLoadPipelineWidth) {
-      vecLdCanceltmp(i)(j) := fbk(j).valid && fbk(j).bits.isFlush && uop(i).robIdx === fbk(j).bits.robidx && uop(i).uopIdx === fbk(j).bits.uopidx
+      vecLdCanceltmp(i)(j) := allocated(i) && fbk(j).valid && fbk(j).bits.isFlush && uop(i).robIdx === fbk(j).bits.robidx && uop(i).uopIdx === fbk(j).bits.uopidx
     }
     vecLdCancel(i) := vecLdCanceltmp(i).reduce(_ || _)
 

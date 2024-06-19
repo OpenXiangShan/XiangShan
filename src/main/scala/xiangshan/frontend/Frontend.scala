@@ -51,7 +51,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     val tlbCsr = Input(new TlbCsrBundle)
     val csrCtrl = Input(new CustomCSRCtrlIO)
     val csrUpdate = new DistributedCSRUpdateReq
-    val error  = new L1CacheErrorInfo
+    val error  = ValidIO(new L1CacheErrorInfo)
     val frontendInfo = new Bundle {
       val ibufFull  = Output(Bool())
       val bpuInfo = new Bundle {

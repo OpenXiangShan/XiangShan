@@ -115,7 +115,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
   // Allocate logic
   val acceptedVec = Wire(Vec(LoadPipelineWidth, Bool()))
-  val enqIndexVec = Wire(Vec(LoadPipelineWidth, UInt()))
+  val enqIndexVec = Wire(Vec(LoadPipelineWidth, UInt(log2Up(LoadQueueRAWSize).W)))
 
   // Enqueue
   for ((enq, w) <- io.query.map(_.req).zipWithIndex) {
@@ -180,7 +180,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     val needCancel = uop(i).robIdx.needFlush(io.redirect)
     val fbk = io.vecFeedback
     for (j <- 0 until VecLoadPipelineWidth) {
-      vecLdCanceltmp(i)(j) := fbk(j).valid && fbk(j).bits.isFlush && uop(i).robIdx === fbk(j).bits.robidx && uop(i).uopIdx === fbk(j).bits.uopidx
+      vecLdCanceltmp(i)(j) := allocated(i) && fbk(j).valid && fbk(j).bits.isFlush && uop(i).robIdx === fbk(j).bits.robidx && uop(i).uopIdx === fbk(j).bits.uopidx
     }
     vecLdCancel(i) := vecLdCanceltmp(i).reduce(_ || _)
 
@@ -267,31 +267,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     val numSelectGroups = scala.math.ceil(valid.length.toFloat / SelectGroupSize).toInt
 
     // group info
-    val selectValidGroups =
-      if (valid.length <= SelectGroupSize) {
-        Seq(valid)
-      } else {
-        (0 until numSelectGroups).map(g => {
-          if (valid.length < (g + 1) * SelectGroupSize) {
-            valid.takeRight(valid.length - g * SelectGroupSize)
-          } else {
-            (0 until SelectGroupSize).map(j => valid(g * SelectGroupSize + j))
-          }
-        })
-      }
-    val selectBitsGroups =
-      if (bits.length <= SelectGroupSize) {
-        Seq(bits)
-      } else {
-        (0 until numSelectGroups).map(g => {
-          if (bits.length < (g + 1) * SelectGroupSize) {
-            bits.takeRight(bits.length - g * SelectGroupSize)
-          } else {
-            (0 until SelectGroupSize).map(j => bits(g * SelectGroupSize + j))
-          }
-        })
-      }
-
+    val selectValidGroups = valid.grouped(SelectGroupSize).toList
+    val selectBitsGroups = bits.grouped(SelectGroupSize).toList
     // select logic
     if (valid.length <= SelectGroupSize) {
       val (selValid, selBits) = selectPartialOldest(valid, bits)

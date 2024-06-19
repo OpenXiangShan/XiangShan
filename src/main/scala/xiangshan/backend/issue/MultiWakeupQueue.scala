@@ -61,6 +61,8 @@ class MultiWakeupQueue[T <: Bundle, TFlush <: Data](
   pipesOut.bits.rfWen .foreach(_ := pipesValidVec.zip(pipesBitsVec.map(_.rfWen .get)).map{case(valid,wen) => valid && wen}.reduce(_||_))
   pipesOut.bits.fpWen .foreach(_ := pipesValidVec.zip(pipesBitsVec.map(_.fpWen .get)).map{case(valid,wen) => valid && wen}.reduce(_||_))
   pipesOut.bits.vecWen.foreach(_ := pipesValidVec.zip(pipesBitsVec.map(_.vecWen.get)).map{case(valid,wen) => valid && wen}.reduce(_||_))
+  pipesOut.bits.v0Wen .foreach(_ := pipesValidVec.zip(pipesBitsVec.map(_.v0Wen .get)).map{case(valid,wen) => valid && wen}.reduce(_||_))
+  pipesOut.bits.vlWen .foreach(_ := pipesValidVec.zip(pipesBitsVec.map(_.vlWen .get)).map{case(valid,wen) => valid && wen}.reduce(_||_))
 
   lastConnect.valid := pipesOut.valid
   lastConnect.bits := lastConnectFunc(pipesOut.bits, lastConnect.bits)

@@ -28,17 +28,18 @@ import xiangshan.backend.decode.{Imm, ImmUnion}
 
 package object xiangshan {
   object SrcType {
-    def imm = "b000".U
-    def pc  = "b000".U
-    def xp  = "b001".U
-    def fp  = "b010".U
-    def vp  = "b100".U
-    def no  = "b000".U // this src read no reg but cannot be Any value
+    def imm = "b0000".U
+    def pc  = "b0000".U
+    def xp  = "b0001".U
+    def fp  = "b0010".U
+    def vp  = "b0100".U
+    def v0  = "b1000".U
+    def no  = "b0000".U // this src read no reg but cannot be Any value
 
     // alias
     def reg = this.xp
     def DC  = imm // Don't Care
-    def X   = BitPat("b000")
+    def X   = BitPat("b0000")
 
     def isPc(srcType: UInt) = srcType===pc
     def isImm(srcType: UInt) = srcType===imm
@@ -46,10 +47,11 @@ package object xiangshan {
     def isXp(srcType: UInt) = srcType(0)
     def isFp(srcType: UInt) = srcType(1)
     def isVp(srcType: UInt) = srcType(2)
+    def isV0(srcType: UInt) = srcType(3)
     def isPcOrImm(srcType: UInt) = isPc(srcType) || isImm(srcType)
     def isNotReg(srcType: UInt): Bool = !srcType.orR
     def isVfp(srcType: UInt) = isVp(srcType) || isFp(srcType)
-    def apply() = UInt(3.W)
+    def apply() = UInt(4.W)
   }
 
   object SrcState {
@@ -126,14 +128,15 @@ package object xiangshan {
   object IF2VectorType {
     // use last 2 bits for vsew
     def iDup2Vec   = "b1_00".U
-    def fDup2Vec   = "b1_00".U
+    def fDup2Vec   = "b1_01".U
     def immDup2Vec = "b1_10".U
     def i2Vec      = "b0_00".U
     def f2Vec      = "b0_01".U
     def imm2Vec    = "b0_10".U
     def needDup(bits: UInt): Bool = bits(2)
     def isImm(bits: UInt): Bool = bits(1)
-    def isFmv(bits: UInt): Bool = bits(0)
+    def isFp(bits: UInt): Bool = bits(0)
+    def isFmv(bits: UInt): Bool = bits(0) & !bits(2)
     def FMX_D_X    = "b0_01_11".U
     def FMX_W_X    = "b0_01_10".U
   }
@@ -856,6 +859,9 @@ package object xiangshan {
     val IntFlStall = Value("IntFlStall")
     val FpFlStall = Value("FpFlStall")
     val VecFlStall = Value("VecFlStall")
+    val V0FlStall = Value("V0FlStall")
+    val VlFlStall = Value("VlFlStall")
+    val MultiFlStall = Value("MultiFlStall")
     // dispatch queue full
     val IntDqStall = Value("IntDqStall")
     val FpDqStall = Value("FpDqStall")

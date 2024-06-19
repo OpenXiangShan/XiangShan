@@ -117,6 +117,8 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     canEnqueue(i) && !cancelEnq(i)
   }
 
+  val freeCount    = uopSize.U - freeList.io.validCount
+
   for ((enq, i) <- io.fromSplit.zipWithIndex){
     freeList.io.doAllocate(i) := false.B
 
@@ -125,7 +127,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     val offset    = PopCount(needEnqueue.take(i))
     val canAccept = freeList.io.canAllocate(offset)
     val enqIndex  = freeList.io.allocateSlot(offset)
-    enq.req.ready := canAccept
+    enq.req.ready := freeCount >= (i + 1).U // for better timing
 
     when(needEnqueue(i) && enq.req.ready){
       freeList.io.doAllocate(i) := true.B
@@ -139,7 +141,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
 
     enq.resp.bits.mBIndex := enqIndex
     enq.resp.bits.fail    := false.B
-    enq.resp.valid        := canAccept //resp in 1 cycle
+    enq.resp.valid        := freeCount >= (i + 1).U // for better timing
   }
 
   //redirect
@@ -279,21 +281,22 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     val (selValid, selOHVec) = selPolicy.getNthOH(i + 1)
     val entryIdx = OHToUInt(selOHVec)
     val selEntry = entries(entryIdx)
+    val selAllocated = allocated(entryIdx)
     val selFire  = selValid && canGo
     when(selFire){
-      freeMaskVec(entryIdx) := true.B
+      freeMaskVec(entryIdx) := selAllocated
       allocated(entryIdx)   := false.B
       uopFinish(entryIdx)   := false.B
       needRSReplay(entryIdx):= false.B
     }
     //writeback connect
-    port.valid   := selFire && allocated(entryIdx) && !needRSReplay(entryIdx) && !selEntry.uop.robIdx.needFlush(io.redirect)
+    port.valid   := selFire && selAllocated && !needRSReplay(entryIdx) && !selEntry.uop.robIdx.needFlush(io.redirect)
     port.bits    := DeqConnect(selEntry)
     //to lsq
     lsqport.bits := ToLsqConnect(selEntry) // when uopwriteback, free MBuffer entry, write to lsq
-    lsqport.valid:= selFire && allocated(entryIdx) && !needRSReplay(entryIdx)
+    lsqport.valid:= selFire && selAllocated && !needRSReplay(entryIdx)
     //to RS
-    io.feedback(i).valid                 := selFire && allocated(entryIdx)
+    io.feedback(i).valid                 := selFire && selAllocated
     io.feedback(i).bits.hit              := !needRSReplay(entryIdx)
     io.feedback(i).bits.robIdx           := selEntry.uop.robIdx
     io.feedback(i).bits.sourceType       := selEntry.sourceType

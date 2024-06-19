@@ -181,6 +181,7 @@ class FtqToBpuIO(implicit p: Parameters) extends XSBundle {
   val redirect = Valid(new BranchPredictionRedirect)
   val update = Valid(new BranchPredictionUpdate)
   val enq_ptr = Output(new FtqPtr)
+  val redirctFromIFU = Output(Bool())
 }
 
 class FtqToIfuIO(implicit p: Parameters) extends XSBundle with HasCircularQueuePtrHelper {
@@ -1248,6 +1249,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // **************************** to bpu ****************************
   // ****************************************************************
 
+  io.toBpu.redirctFromIFU := ifuRedirectToBpu.valid
   io.toBpu.redirect := Mux(fromBackendRedirect.valid, fromBackendRedirect, ifuRedirectToBpu)
   val dummy_s1_pred_cycle_vec = VecInit(List.tabulate(FtqSize)(_=>0.U(64.W)))
   val redirect_latency = GTimer() - pred_s1_cycle.getOrElse(dummy_s1_pred_cycle_vec)(io.toBpu.redirect.bits.ftqIdx.value) + 1.U
@@ -1269,8 +1271,13 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     (isAfter(robCommPtr, commPtr) ||
       PriorityMuxDefault(notInvalidSeq.zip(commitStateQueueReg(commPtr.value).reverse), c_invalid) === c_commited)
 
+  /**
+    *************************************************************************************
+    * MMIO instruction fetch is allowed only if MMIO is the oldest instruction.
+    *************************************************************************************
+    */
   val mmioReadPtr = io.mmioCommitRead.mmioFtqPtr
-  val mmioLastCommit = isBefore(commPtr, mmioReadPtr) && (isAfter(ifuPtr,mmioReadPtr)  ||  mmioReadPtr ===   ifuPtr) &&
+  val mmioLastCommit = (isAfter(commPtr,mmioReadPtr) || (mmioReadPtr === commPtr)) &&
                        Cat(commitStateQueueReg(mmioReadPtr.value).map(s => { s === c_invalid || s === c_commited})).andR
   io.mmioCommitRead.mmioLastCommit := RegNext(mmioLastCommit)
 

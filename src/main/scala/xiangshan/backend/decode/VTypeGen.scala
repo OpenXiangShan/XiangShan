@@ -75,7 +75,11 @@ class VTypeGen(implicit p: Parameters) extends XSModule{
   }.elsewhen(io.walkVType.valid) {
     lastSpecVTypeNext.valid := false.B
     vtypeSpecNext := io.walkVType.bits
-  }.elsewhen(io.redirect) {
+  }.elsewhen(io.redirect && io.commitVType.vtype.valid) {
+    // when redirect and commit both coming, we should use commit vtype
+    lastSpecVTypeNext.valid := false.B
+    vtypeSpecNext := io.commitVType.vtype.bits
+  }.elsewhen(io.redirect && !io.commitVType.vtype.valid) {
     lastSpecVTypeNext.valid := false.B
     vtypeSpecNext := vtypeArch
   }.elsewhen(inHasVset && io.canUpdateVType) {

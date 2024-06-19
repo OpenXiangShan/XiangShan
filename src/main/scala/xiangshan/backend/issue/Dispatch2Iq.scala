@@ -28,19 +28,46 @@ class Dispatch2Iq(val schdBlockParams : SchdBlockParams)(implicit p: Parameters)
 
   // Deq for std's IQ is not assigned in Dispatch2Iq, so add one more src for it.
   val numRegSrc: Int = issueBlockParams.map(_.exuBlockParams.map(
-    x => if (x.hasStoreAddrFu) x.numRegSrc + 1 else x.numRegSrc
+    x => if (x.hasStdFu) x.numRegSrc + 1 else x.numRegSrc
   ).max).max
 
+  val numRegSrcInt: Int = issueBlockParams.map(_.exuBlockParams.map(
+    x => if (x.hasStdFu) x.numIntSrc + 1 else x.numIntSrc
+  ).max).max
+  val numRegSrcFp: Int = issueBlockParams.map(_.exuBlockParams.map(
+    x => if (x.hasStdFu) x.numFpSrc + 1 else x.numFpSrc
+  ).max).max
+  val numRegSrcVf: Int = issueBlockParams.map(_.exuBlockParams.map(
+    x => x.numVecSrc
+  ).max).max
+  val numRegSrcV0: Int = issueBlockParams.map(_.exuBlockParams.map(
+    x => x.numV0Src
+  ).max).max
+  val numRegSrcVl: Int = issueBlockParams.map(_.exuBlockParams.map(
+    x => x.numVlSrc
+  ).max).max
+
+  println(s"[Dispatch2Iq] numRegSrc: ${numRegSrc}, numRegSrcInt: ${numRegSrcInt}, numRegSrcFp: ${numRegSrcFp}, " +
+          s"numRegSrcVf: ${numRegSrcVf}, numRegSrcV0: ${numRegSrcV0}, numRegSrcVl: ${numRegSrcVl}")
+
   val numIntStateRead = schdBlockParams.schdType match {
-    case IntScheduler() | MemScheduler() => numRegSrc * numIn
+    case IntScheduler() | MemScheduler() => numRegSrcInt * numIn
     case _ => 0
   }
   val numFpStateRead = schdBlockParams.schdType match {
-    case FpScheduler() | MemScheduler() => numRegSrc * numIn
+    case FpScheduler() | MemScheduler() => numRegSrcFp * numIn
     case _ => 0
   }
   val numVfStateRead = schdBlockParams.schdType match {
-    case VfScheduler() | MemScheduler() => numRegSrc * numIn
+    case VfScheduler() | MemScheduler() => numRegSrcVf * numIn
+    case _ => 0
+  }
+  val numV0StateRead = schdBlockParams.schdType match {
+    case VfScheduler() | MemScheduler() => numRegSrcV0 * numIn
+    case _ => 0
+  }
+  val numVlStateRead = schdBlockParams.schdType match {
+    case VfScheduler() | MemScheduler() => numRegSrcVl * numIn
     case _ => 0
   }
 
@@ -58,10 +85,18 @@ class Dispatch2Iq(val schdBlockParams : SchdBlockParams)(implicit p: Parameters)
 abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Parameters, params: SchdBlockParams)
   extends LazyModuleImp(wrapper) with HasXSParameter {
 
+  val numIn = wrapper.numIn
   val numRegSrc = wrapper.numRegSrc
+  val numRegSrcInt = wrapper.numRegSrcInt
+  val numRegSrcFp = wrapper.numRegSrcFp
+  val numRegSrcVf = wrapper.numRegSrcVf
+  val numRegSrcV0 = wrapper.numRegSrcV0
+  val numRegSrcVl = wrapper.numRegSrcVl
   val numIntStateRead = wrapper.numIntStateRead
   val numFpStateRead = wrapper.numFpStateRead
   val numVfStateRead = wrapper.numVfStateRead
+  val numV0StateRead = wrapper.numV0StateRead
+  val numVlStateRead = wrapper.numVlStateRead
   val numIssueBlock = wrapper.issueBlockParams.size
 
   val io = IO(new Bundle() {
@@ -70,6 +105,8 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
     val readIntState = if (numIntStateRead > 0) Some(Vec(numIntStateRead, Flipped(new BusyTableReadIO))) else None
     val readFpState = if (numFpStateRead > 0) Some(Vec(numFpStateRead, Flipped(new BusyTableReadIO))) else None
     val readVfState = if (numVfStateRead > 0) Some(Vec(numVfStateRead, Flipped(new BusyTableReadIO))) else None
+    val readV0State = if (numV0StateRead > 0) Some(Vec(numV0StateRead, Flipped(new BusyTableReadIO))) else None
+    val readVlState = if (numVlStateRead > 0) Some(Vec(numVlStateRead, Flipped(new BusyTableReadIO))) else None
     val out = MixedVec(params.issueBlockParams.filter(iq => iq.StdCnt == 0).map(x => Vec(x.numEnq, DecoupledIO(new DynInst))))
     val enqLsqIO = if (wrapper.isMem) Some(Flipped(new LsqEnqIO)) else None
     val iqValidCnt = MixedVec(params.issueBlockParams.filter(_.StdCnt == 0).map(x => Input(UInt(log2Ceil(x.numEntries).W))))
@@ -79,6 +116,135 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
     val sqFreeCount = if (wrapper.isMem) Some(Input(UInt(log2Up(StoreQueueSize + 1).W))) else None
   })
 
+  val uopsIn = Wire(Vec(wrapper.numIn, DecoupledIO(new DynInst)))
+  val numEnq = io.in.size
+  val numInPorts = io.in.size
+  val outs = io.out.flatten
+  uopsIn <> io.in
+
+  private val intReqPsrcVec: IndexedSeq[UInt] = io.in.flatMap(in => in.bits.psrc.take(numRegSrcInt))
+  private val fpReqPsrcVec:  IndexedSeq[UInt] = io.in.flatMap(in => in.bits.psrc.take(numRegSrcFp))
+  private val vfReqPsrcVec:  IndexedSeq[UInt] = io.in.flatMap(in => in.bits.psrc.take(numRegSrcVf))
+  private val v0ReqPsrcVec:  IndexedSeq[UInt] = io.in.map(in => in.bits.psrc(numRegSrc - 2))
+  private val vlReqPsrcVec:  IndexedSeq[UInt] = io.in.map(in => in.bits.psrc(numRegSrc - 1))
+  private val intSrcStateVec = OptionWrapper(io.readIntState.isDefined, Wire(Vec(numIntStateRead, SrcState())))
+  private val fpSrcStateVec  = OptionWrapper(io.readFpState.isDefined,  Wire(Vec(numFpStateRead, SrcState()))) 
+  private val vfSrcStateVec  = OptionWrapper(io.readVfState.isDefined,  Wire(Vec(numVfStateRead, SrcState()))) 
+  private val v0SrcStateVec  = OptionWrapper(io.readV0State.isDefined,  Wire(Vec(numV0StateRead, SrcState())))
+  private val vlSrcStateVec  = OptionWrapper(io.readVlState.isDefined,  Wire(Vec(numVlStateRead, SrcState())))
+  private val intAllSrcStateVec = OptionWrapper(io.readIntState.isDefined, Wire(Vec(numIn * numRegSrc, SrcState())))
+  private val fpAllSrcStateVec  = OptionWrapper(io.readFpState.isDefined,  Wire(Vec(numIn * numRegSrc, SrcState())))
+  private val vecAllSrcStateVec = OptionWrapper(io.readVfState.isDefined,  Wire(Vec(numIn * numRegSrc, SrcState())))
+  private val intSrcLoadDependency = OptionWrapper(io.readIntState.isDefined, Wire(Vec(numIntStateRead, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
+  private val fpSrcLoadDependency  = OptionWrapper(io.readFpState.isDefined,  Wire(Vec(numFpStateRead, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
+  private val vfSrcLoadDependency  = OptionWrapper(io.readVfState.isDefined,  Wire(Vec(numVfStateRead, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
+  private val v0SrcLoadDependency  = OptionWrapper(io.readV0State.isDefined,  Wire(Vec(numV0StateRead, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
+  private val vlSrcLoadDependency  = OptionWrapper(io.readVlState.isDefined,  Wire(Vec(numVlStateRead, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
+  private val intAllSrcLoadDependency = OptionWrapper(io.readIntState.isDefined, Wire(Vec(numIn * numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
+  private val fpAllSrcLoadDependency  = OptionWrapper(io.readFpState.isDefined,  Wire(Vec(numIn * numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
+  private val vecAllSrcLoadDependency = OptionWrapper(io.readVfState.isDefined,  Wire(Vec(numIn * numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
+
+  // We always read physical register states when in gives the instructions.
+  // This usually brings better timing.
+  if (io.readIntState.isDefined) {
+    require(io.readIntState.get.size == intReqPsrcVec.size,
+      s"[Dispatch2IqImp] readIntState size: ${io.readIntState.get.size}, int psrc size: ${intReqPsrcVec.size}")
+    io.readIntState.get.map(_.req).zip(intReqPsrcVec).foreach(x => x._1 := x._2)
+    io.readIntState.get.map(_.resp).zip(intSrcStateVec.get).foreach(x => x._2 := x._1)
+    io.readIntState.get.map(_.loadDependency).zip(intSrcLoadDependency.get).foreach(x => x._2 := x._1)
+
+    for (i <- 0 until numIn) {
+      for (j <- 0 until numRegSrcInt) {
+        intAllSrcStateVec.get(i * numRegSrc + j)       := intSrcStateVec.get(i * numRegSrcInt + j)
+        intAllSrcLoadDependency.get(i * numRegSrc + j) := intSrcLoadDependency.get(i * numRegSrcInt + j);
+      }
+      for (j <- numRegSrcInt until numRegSrc) {
+        intAllSrcStateVec.get(i * numRegSrc + j)       := SrcState.busy
+        intAllSrcLoadDependency.get(i * numRegSrc + j) := 0.U.asTypeOf(intAllSrcLoadDependency.get(i * numRegSrc + j))
+      }
+    }
+  }
+  if (io.readFpState.isDefined) {
+    require(io.readFpState.get.size == fpReqPsrcVec.size,
+      s"[Dispatch2IqImp] readFpState size: ${io.readFpState.get.size}, fp psrc size: ${fpReqPsrcVec.size}")
+    io.readFpState.get.map(_.req).zip(fpReqPsrcVec).foreach(x => x._1 := x._2)
+    io.readFpState.get.map(_.resp).zip(fpSrcStateVec.get).foreach(x => x._2 := x._1)
+    io.readFpState.get.map(_.loadDependency).zip(fpSrcLoadDependency.get).foreach(x => x._2 := x._1)
+
+    for (i <- 0 until numIn) {
+      for (j <- 0 until numRegSrcFp) {
+        fpAllSrcStateVec.get(i * numRegSrc + j)       := fpSrcStateVec.get(i * numRegSrcFp + j)
+        fpAllSrcLoadDependency.get(i * numRegSrc + j) := fpSrcLoadDependency.get(i * numRegSrcFp + j);
+      }
+      for (j <- numRegSrcFp until numRegSrc) {
+        fpAllSrcStateVec.get(i * numRegSrc + j)       := SrcState.busy
+        fpAllSrcLoadDependency.get(i * numRegSrc + j) := 0.U.asTypeOf(fpAllSrcLoadDependency.get(i * numRegSrc + j))
+      }
+    }
+  }
+  if (io.readVfState.isDefined) {
+    require(io.readVfState.get.size + io.readV0State.get.size + io.readVlState.get.size == vfReqPsrcVec.size + v0ReqPsrcVec.size + vlReqPsrcVec.size,
+      s"[Dispatch2IqImp] readVfState size: ${io.readVfState.get.size}, readV0State size: ${io.readV0State.get.size}, readVlState size: ${io.readVlState.get.size}, psrc size: ${vfReqPsrcVec.size + v0ReqPsrcVec.size + vlReqPsrcVec.size}")
+    io.readVfState.get.map(_.req).zip(vfReqPsrcVec).foreach(x => x._1 := x._2)
+    io.readVfState.get.map(_.resp).zip(vfSrcStateVec.get).foreach(x => x._2 := x._1)
+    io.readVfState.get.map(_.loadDependency).zip(vfSrcLoadDependency.get).foreach(x => x._2 := x._1)
+
+    io.readV0State.get.map(_.req).zip(v0ReqPsrcVec).foreach(x => x._1 := x._2)
+    io.readV0State.get.map(_.resp).zip(v0SrcStateVec.get).foreach(x => x._2 := x._1)
+    io.readV0State.get.map(_.loadDependency).zip(v0SrcLoadDependency.get).foreach(x => x._2 := x._1)
+
+    io.readVlState.get.map(_.req).zip(vlReqPsrcVec).foreach(x => x._1 := x._2)
+    io.readVlState.get.map(_.resp).zip(vlSrcStateVec.get).foreach(x => x._2 := x._1)
+    io.readVlState.get.map(_.loadDependency).zip(vlSrcLoadDependency.get).foreach(x => x._2 := x._1)
+
+    for (i <- 0 until numIn) {
+      for (j <- 0 until numRegSrcVf) {
+        vecAllSrcStateVec.get(i * numRegSrc + j)       := vfSrcStateVec.get(i * numRegSrcVf + j);
+        vecAllSrcLoadDependency.get(i * numRegSrc + j) := vfSrcLoadDependency.get(i * numRegSrcVf + j);
+      }
+      vecAllSrcStateVec.get(i * numRegSrc + numRegSrc - 2)       := v0SrcStateVec.get(i);
+      vecAllSrcStateVec.get(i * numRegSrc + numRegSrc - 1)       := vlSrcStateVec.get(i);
+      vecAllSrcLoadDependency.get(i * numRegSrc + numRegSrc - 2) := v0SrcLoadDependency.get(i);
+      vecAllSrcLoadDependency.get(i * numRegSrc + numRegSrc - 1) := vlSrcLoadDependency.get(i);
+    }
+  }
+
+  uopsIn
+    .flatMap(x => x.bits.srcState.take(numRegSrc) zip x.bits.srcType.take(numRegSrc))
+    .zip(
+      intAllSrcStateVec.getOrElse(VecInit(Seq.fill(numIn * numRegSrc)(SrcState.busy).toSeq)) zip 
+      fpAllSrcStateVec .getOrElse(VecInit(Seq.fill(numIn * numRegSrc)(SrcState.busy).toSeq)) zip 
+      vecAllSrcStateVec.getOrElse(VecInit(Seq.fill(numIn * numRegSrc)(SrcState.busy).toSeq))
+    )
+    .foreach {
+      case ((state: UInt, srcType), ((intState, fpState), vfState)) =>
+        state := Mux1H(Seq(
+          SrcType.isXp(srcType) -> intState,
+          SrcType.isFp(srcType) -> fpState,
+          SrcType.isVp(srcType) -> vfState,
+          SrcType.isV0(srcType) -> vfState,
+          SrcType.isNotReg(srcType) -> true.B,
+        ))
+    }
+  uopsIn
+    .flatMap(x => x.bits.srcLoadDependency.take(numRegSrc) zip x.bits.srcType.take(numRegSrc))
+    .zip(
+      intAllSrcLoadDependency.getOrElse(VecInit(Seq.fill(numIn * numRegSrc)(0.U.asTypeOf(Vec(LoadPipelineWidth, UInt(LoadPipelineWidth.W)))).toSeq)) zip 
+      fpAllSrcLoadDependency .getOrElse(VecInit(Seq.fill(numIn * numRegSrc)(0.U.asTypeOf(Vec(LoadPipelineWidth, UInt(LoadPipelineWidth.W)))).toSeq)) zip 
+      vecAllSrcLoadDependency.getOrElse(VecInit(Seq.fill(numIn * numRegSrc)(0.U.asTypeOf(Vec(LoadPipelineWidth, UInt(LoadPipelineWidth.W)))).toSeq))
+    )
+    .foreach {
+      case ((ldp, srcType), ((intLdp, fpLdq), vfLdp)) =>
+        when(SrcType.isXp(srcType)) {
+          ldp := intLdp
+        }.elsewhen(SrcType.isFp(srcType)) {
+          ldp := fpLdq
+        }.elsewhen(SrcType.isVp(srcType) || SrcType.isV0(srcType)) {
+          ldp := vfLdp
+        }.otherwise {
+          ldp := 0.U.asTypeOf(ldp)
+        }
+    }
 
   /**
     *
@@ -156,15 +322,10 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
 class Dispatch2IqIntImp(override val wrapper: Dispatch2Iq)(implicit p: Parameters, params: SchdBlockParams)
   extends Dispatch2IqImp(wrapper)
     with HasXSParameter {
-  val intIQValidNumVec = io.intIQValidNumVec.get
-  // numEnq = 4 + 4 + 2
-  private val numEnq = io.in.size
 
-  val uopsIn = Wire(Vec(wrapper.numIn, DecoupledIO(new DynInst)))
-  val numInPorts = io.in.size
-  val outs = io.out.flatten
   require(outs.size == uopsIn.size, "Dispatch2IqInt outs.size =/= uopsIn.size")
-  uopsIn <> io.in
+
+  val intIQValidNumVec = io.intIQValidNumVec.get
   val uopsInDq0Num = uopsIn.size / 2
   val uopsInDq1Num = uopsIn.size / 2
   val uopsInDq0 = uopsIn.take(uopsInDq0Num)
@@ -447,60 +608,6 @@ class Dispatch2IqIntImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   uopsOutDq1(3).valid := Mux1H(IQ3Enq1Select.zip(dq1Block).map(x => x._1 && !x._2), uopsInDq1.map(_.valid))
 
 
-  private val reqPsrcVec: IndexedSeq[UInt] = uopsIn.flatMap(in => in.bits.psrc.take(numRegSrc))
-  private val intSrcStateVec = if (io.readIntState.isDefined) Some(Wire(Vec(numEnq * numRegSrc, SrcState()))) else None
-  private val fpSrcStateVec = if (io.readFpState.isDefined) Some(Wire(Vec(numEnq * numRegSrc, SrcState()))) else None
-  private val vfSrcStateVec  = if (io.readVfState.isDefined)  Some(Wire(Vec(numEnq * numRegSrc, SrcState()))) else None
-  private val intSrcLoadDependency = OptionWrapper(io.readIntState.isDefined, Wire(Vec(numEnq * numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
-  private val fpSrcLoadDependency = OptionWrapper(io.readFpState.isDefined, Wire(Vec(numEnq * numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
-  private val vfSrcLoadDependency = OptionWrapper(io.readVfState.isDefined, Wire(Vec(numEnq * numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
-
-  // We always read physical register states when in gives the instructions.
-  // This usually brings better timing.
-  if (io.readIntState.isDefined) {
-    require(io.readIntState.get.size >= reqPsrcVec.size,
-      s"[Dispatch2IqArithImp] io.readIntState.get.size: ${io.readIntState.get.size}, psrc size: ${reqPsrcVec.size}")
-    io.readIntState.get.map(_.req).zip(reqPsrcVec).foreach(x => x._1 := x._2)
-    io.readIntState.get.map(_.resp).zip(intSrcStateVec.get).foreach(x => x._2 := x._1)
-    io.readIntState.get.map(_.loadDependency).zip(intSrcLoadDependency.get).foreach(x => x._2 := x._1)
-  }
-
-  uopsIn
-    .flatMap(x => x.bits.srcState.take(numRegSrc) zip x.bits.srcType.take(numRegSrc))
-    .zip(
-      intSrcStateVec.getOrElse(VecInit(Seq.fill(numEnq * numRegSrc)(SrcState.busy).toSeq))
-        zip fpSrcStateVec.getOrElse(VecInit(Seq.fill(numEnq * numRegSrc)(SrcState.busy).toSeq))
-        zip vfSrcStateVec.getOrElse(VecInit(Seq.fill(numEnq * numRegSrc)(SrcState.busy).toSeq))
-    )
-    .foreach {
-      case ((state: UInt, srcType), ((intState, fpState), vfState)) =>
-        state := Mux1H(Seq(
-          SrcType.isXp(srcType) -> intState,
-          SrcType.isFp(srcType) -> fpState,
-          SrcType.isVp(srcType) -> vfState,
-          SrcType.isNotReg(srcType) -> true.B,
-        ))
-    }
-  uopsIn
-    .flatMap(x => x.bits.srcLoadDependency.take(numRegSrc) zip x.bits.srcType.take(numRegSrc))
-    .zip(
-      intSrcLoadDependency.getOrElse(VecInit(Seq.fill(numEnq * numRegSrc)(0.U.asTypeOf(Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))).toSeq))
-        zip fpSrcLoadDependency.getOrElse(VecInit(Seq.fill(numEnq * numRegSrc)(0.U.asTypeOf(Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))).toSeq))
-        zip vfSrcLoadDependency.getOrElse(VecInit(Seq.fill(numEnq * numRegSrc)(0.U.asTypeOf(Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))).toSeq))
-    )
-    .foreach {
-      case ((ldp, srcType), ((intLdp, fpLdq), vfLdp)) =>
-        when(SrcType.isXp(srcType)) {
-          ldp := intLdp
-        }.elsewhen(SrcType.isFp(srcType)) {
-          ldp := fpLdq
-        }.elsewhen(SrcType.isVp(srcType)) {
-          ldp := vfLdp
-        }.otherwise {
-          ldp := 0.U.asTypeOf(ldp)
-        }
-    }
-
   XSPerfAccumulate("not_ready_iq0", PopCount(!uopsOutDq0(0).ready))
   XSPerfAccumulate("not_ready_iq1", PopCount(!uopsOutDq0(2).ready))
   XSPerfAccumulate("not_ready_iq2", PopCount(!uopsOutDq1(0).ready))
@@ -517,8 +624,6 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
   extends Dispatch2IqImp(wrapper)
     with HasXSParameter {
 
-  private val numEnq = io.in.size
-
   val portFuSets = params.issueBlockParams.map(_.exuBlockParams.flatMap(_.fuConfigs).map(_.fuType).toSet)
   println(s"[Dispatch2IqArithImp] portFuSets: $portFuSets")
   val fuDeqMap = getFuDeqMap(portFuSets)
@@ -532,9 +637,6 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
   val finalFuDeqMap = expendedFuDeqMap.toSeq.sortBy(_._2.length)
   println(s"[Dispatch2IqArithImp] finalFuDeqMap: $finalFuDeqMap")
 
-  val uopsIn = Wire(Vec(wrapper.numIn, DecoupledIO(new DynInst)))
-  val numInPorts = io.in.size
-  val outs = io.out.flatten
   val outReadyMatrix = Wire(Vec(outs.size, Vec(numInPorts, Bool())))
   outReadyMatrix.foreach(_.foreach(_ := false.B))
   val selIdxOH = Wire(MixedVec(finalFuDeqMap.map(x => Vec(x._2.size, ValidIO(UInt(uopsIn.size.W))))))
@@ -587,78 +689,8 @@ class Dispatch2IqArithImp(override val wrapper: Dispatch2Iq)(implicit p: Paramet
     }
   }
 
-  uopsIn <> io.in
   uopsIn.foreach(_.ready := false.B)
   uopsIn.zipWithIndex.foreach{ case (uopIn, idx) => uopIn.ready := outReadyMatrix.map(_(idx)).reduce(_ | _) }
-
-  private val reqPsrcVec: IndexedSeq[UInt] = uopsIn.flatMap(in => in.bits.psrc.take(numRegSrc))
-
-  private val intSrcStateVec = if (io.readIntState.isDefined) Some(Wire(Vec(numEnq * numRegSrc, SrcState()))) else None
-  private val fpSrcStateVec  = if (io.readFpState.isDefined)  Some(Wire(Vec(numEnq * numRegSrc, SrcState()))) else None
-  private val vfSrcStateVec  = if (io.readVfState.isDefined)  Some(Wire(Vec(numEnq * numRegSrc, SrcState()))) else None
-  private val intSrcLoadDependency = OptionWrapper(io.readIntState.isDefined, Wire(Vec(numEnq * numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
-  private val fpSrcLoadDependency = OptionWrapper(io.readFpState.isDefined, Wire(Vec(numEnq * numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
-  private val vfSrcLoadDependency = OptionWrapper(io.readVfState.isDefined, Wire(Vec(numEnq * numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
-
-  // We always read physical register states when in gives the instructions.
-  // This usually brings better timing.
-  if (io.readIntState.isDefined) {
-    require(io.readIntState.get.size >= reqPsrcVec.size,
-      s"[Dispatch2IqArithImp] io.readIntState.get.size: ${io.readIntState.get.size}, psrc size: ${reqPsrcVec.size}")
-    io.readIntState.get.map(_.req).zip(reqPsrcVec).foreach(x => x._1 := x._2)
-    io.readIntState.get.map(_.resp).zip(intSrcStateVec.get).foreach(x => x._2 := x._1)
-    io.readIntState.get.map(_.loadDependency).zip(intSrcLoadDependency.get).foreach(x => x._2 := x._1)
-  }
-  if (io.readFpState.isDefined) {
-    require(io.readFpState.get.size >= reqPsrcVec.size,
-      s"[Dispatch2IqArithImp] io.readFpState.get.size: ${io.readFpState.get.size}, psrc size: ${reqPsrcVec.size}")
-    io.readFpState.get.map(_.req).zip(reqPsrcVec).foreach(x => x._1 := x._2)
-    io.readFpState.get.map(_.resp).zip(fpSrcStateVec.get).foreach(x => x._2 := x._1)
-    io.readFpState.get.map(_.loadDependency).zip(fpSrcLoadDependency.get).foreach(x => x._2 := x._1)
-  }
-  if (io.readVfState.isDefined) {
-    require(io.readVfState.get.size >= reqPsrcVec.size,
-      s"[Dispatch2IqArithImp] io.readVfState.get.size: ${io.readVfState.get.size}, psrc size: ${reqPsrcVec.size}")
-    io.readVfState.get.map(_.req).zip(reqPsrcVec).foreach(x => x._1 := x._2)
-    io.readVfState.get.map(_.resp).zip(vfSrcStateVec.get).foreach(x => x._2 := x._1)
-    io.readVfState.get.map(_.loadDependency).zip(vfSrcLoadDependency.get).foreach(x => x._2 := x._1)
-  }
-
-  uopsIn
-    .flatMap(x => x.bits.srcState.take(numRegSrc) zip x.bits.srcType.take(numRegSrc))
-    .zip(
-      intSrcStateVec.getOrElse(VecInit(Seq.fill(numEnq * numRegSrc)(SrcState.busy).toSeq))
-        zip fpSrcStateVec.getOrElse(VecInit(Seq.fill(numEnq * numRegSrc)(SrcState.busy).toSeq))
-        zip vfSrcStateVec.getOrElse(VecInit(Seq.fill(numEnq * numRegSrc)(SrcState.busy).toSeq))
-    )
-    .foreach {
-      case ((state: UInt, srcType), ((intState, fpState), vfState)) =>
-        state := Mux1H(Seq(
-          SrcType.isXp(srcType) -> intState,
-          SrcType.isFp(srcType) -> fpState,
-          SrcType.isVp(srcType) -> vfState,
-          SrcType.isNotReg(srcType) -> true.B,
-        ))
-  }
-  uopsIn
-    .flatMap(x => x.bits.srcLoadDependency.take(numRegSrc) zip x.bits.srcType.take(numRegSrc))
-    .zip(
-      intSrcLoadDependency.getOrElse(VecInit(Seq.fill(numEnq * numRegSrc)(0.U.asTypeOf(Vec(LoadPipelineWidth, UInt(LoadPipelineWidth.W)))).toSeq))
-        zip fpSrcLoadDependency.getOrElse(VecInit(Seq.fill(numEnq * numRegSrc)(0.U.asTypeOf(Vec(LoadPipelineWidth, UInt(LoadPipelineWidth.W)))).toSeq))
-        zip vfSrcLoadDependency.getOrElse(VecInit(Seq.fill(numEnq * numRegSrc)(0.U.asTypeOf(Vec(LoadPipelineWidth, UInt(LoadPipelineWidth.W)))).toSeq))
-    )
-    .foreach {
-      case ((ldp, srcType), ((intLdp, fpLdq), vfLdp)) =>
-        when(SrcType.isXp(srcType)) {
-          ldp := intLdp
-        }.elsewhen(SrcType.isFp(srcType)) {
-          ldp := fpLdq
-        }.elsewhen(SrcType.isVp(srcType)) {
-          ldp := vfLdp
-        }.otherwise {
-          ldp := 0.U.asTypeOf(ldp)
-        }
-    }
 
 
   XSPerfAccumulate("in_valid", PopCount(io.in.map(_.valid)))
@@ -731,7 +763,6 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   private val numStoreAMODeq = LSQStEnqWidth
   private val numVLoadDeq = LoadPipelineWidth
   private val numDeq = enqLsqIO.req.size
-  private val numEnq = io.in.size
   private val iqAllReady = Cat(io.out.map(_.map(_.ready)).flatten.toSeq).andR
   private val lsqCanAccept = enqLsqIO.canAccept
 
@@ -874,9 +905,6 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   val finalFuDeqMap = expendedFuDeqMap.toSeq.sortBy(_._2.length)
   println(s"[Dispatch2IqMemImp] finalFuDeqMap: $finalFuDeqMap")
 
-  val uopsIn = Wire(Vec(wrapper.numIn, DecoupledIO(new DynInst)))
-  val numInPorts = io.in.size
-  val outs = io.out.flatten
   val selIdxOH = Wire(MixedVec(finalFuDeqMap.map(x => Vec(x._2.size, ValidIO(UInt(uopsIn.size.W))))))
   selIdxOH.foreach(_.foreach(_ := 0.U.asTypeOf(ValidIO(UInt(uopsIn.size.W)))))
 
@@ -1102,7 +1130,6 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     outs(deqIdx).bits := Mux1H(deqOH, uopsIn.map(_.bits))
   }
 
-  uopsIn <> io.in
   uopsIn.foreach(_.ready := false.B)
   uopsIn.zipWithIndex.foreach { case (uopIn, idx) =>
     uopIn.ready := enqMapDeqMatrix(idx).asUInt.orR && allowDispatch(idx) && lsqCanAccept
@@ -1112,57 +1139,4 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     dontTouch(isVlsType(idx))
     dontTouch(numLsElem(idx))
   }
-
-  // We always read physical register states when in gives the instructions.
-  // This usually brings better timing.
-  val reqPsrc = io.in.flatMap(in => in.bits.psrc.take(numRegSrc))
-  require(io.readIntState.get.size >= reqPsrc.size, s"io.readIntState.get.size: ${io.readIntState.get.size}, psrc size: ${reqPsrc}")
-  require(io.readFpState.get.size >= reqPsrc.size, s"io.readFpState.get.size: ${io.readFpState.get.size}, psrc size: ${reqPsrc}")
-  require(io.readVfState.get.size >= reqPsrc.size, s"io.readFpState.get.size: ${io.readVfState.get.size}, psrc size: ${reqPsrc}")
-  io.readIntState.get.map(_.req).zip(reqPsrc).foreach(x => x._1 := x._2)
-  io.readFpState.get.map(_.req).zip(reqPsrc).foreach(x => x._1 := x._2)
-  io.readVfState.get.map(_.req).zip(reqPsrc).foreach(x => x._1 := x._2)
-
-  val intSrcStateVec = Wire(Vec(numEnq, Vec(numRegSrc, SrcState())))
-  val fpSrcStateVec = Wire(Vec(numEnq, Vec(numRegSrc, SrcState())))
-  val vfSrcStateVec = Wire(Vec(numEnq, Vec(numRegSrc, SrcState())))
-  val intSrcLoadDependency = Wire(Vec(numEnq, Vec(numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
-  val fpSrcLoadDependency = Wire(Vec(numEnq, Vec(numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
-  val vfSrcLoadDependency = Wire(Vec(numEnq, Vec(numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
-
-  // srcState is read from outside and connected directly
-  io.readIntState.get.map(_.resp).zip(intSrcStateVec.flatten).foreach(x => x._2 := x._1)
-  io.readFpState.get.map(_.resp).zip(fpSrcStateVec.flatten).foreach(x => x._2 := x._1)
-  io.readVfState.get.map(_.resp).zip(vfSrcStateVec.flatten).foreach(x => x._2 := x._1)
-  io.readIntState.get.map(_.loadDependency).zip(intSrcLoadDependency.flatten).foreach(x => x._2 := x._1)
-  io.readFpState.get.map(_.loadDependency).zip(fpSrcLoadDependency.flatten).foreach(x => x._2 := x._1)
-  io.readVfState.get.map(_.loadDependency).zip(vfSrcLoadDependency.flatten).foreach(x => x._2 := x._1)
-
-  uopsIn.flatMap(x => x.bits.srcState.take(numRegSrc) zip x.bits.srcType.take(numRegSrc)).zip(intSrcStateVec.flatten zip fpSrcStateVec.flatten zip vfSrcStateVec.flatten).foreach {
-    case ((state: UInt, srcType), ((intState, fpState), vfState)) =>
-      state := Mux1H(Seq(
-        SrcType.isXp(srcType) -> intState,
-        SrcType.isFp(srcType) -> fpState,
-        SrcType.isVp(srcType) -> vfState,
-        SrcType.isNotReg(srcType) -> true.B,
-      ))
-  }
-
-  uopsIn
-    .flatMap(x => x.bits.srcLoadDependency.take(numRegSrc) zip x.bits.srcType.take(numRegSrc))
-    .zip(
-      intSrcLoadDependency.flatten zip fpSrcLoadDependency.flatten zip vfSrcLoadDependency.flatten
-    )
-    .foreach {
-      case ((ldp, srcType), ((intLdp, fpLdq), vfLdp)) =>
-        when(SrcType.isXp(srcType)) {
-          ldp := intLdp
-        }.elsewhen(SrcType.isFp(srcType)) {
-          ldp := fpLdq
-        }.elsewhen(SrcType.isVp(srcType)) {
-          ldp := vfLdp
-        }.otherwise {
-          ldp := 0.U.asTypeOf(ldp)
-        }
-    }
 }

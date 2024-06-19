@@ -8,8 +8,26 @@ on:
     branches: [ master ]
 
 jobs:
+  changes: # Changes Detection
+    name: Changes Detection
+    runs-on: ubuntu-latest
+    # Required permissions
+    permissions:
+      pull-requests: read
+    # Set job outputs to values from filter step
+    outputs:
+      core: ${{ steps.filter.outputs.core }}
+    steps:
+    - uses: actions/checkout@v2
+    - uses: dorny/paths-filter@v3
+      id: filter
+      with:
+        predicate-quantifier: 'every'
+        filters: .github/filters.yaml
   generate-verilog:
     runs-on: bosc
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' }}
     continue-on-error: false
     timeout-minutes: 900
     name: Generate Verilog
@@ -49,6 +67,8 @@ jobs:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate --config KunminghuV2Config --release --mfc
   emu-basics:
     runs-on: bosc
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' }}
     continue-on-error: false
     timeout-minutes: 900
     name: EMU - Basics
@@ -71,34 +91,35 @@ jobs:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
       - name: Build EMU
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --build --threads 8 --mfc
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --build --threads 16 --mfc \
+            --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin --llvm-profdata llvm-profdata
       - name: Basic Test - cputest
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --ci cputest 2> /dev/zero
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --ci cputest 2> /dev/zero
       - name: Basic Test - riscv-tests
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --rvtest /nfs/home/share/ci-workloads/riscv-tests --ci riscv-tests 2> /dev/zero
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --rvtest /nfs/home/share/ci-workloads/riscv-tests --ci riscv-tests 2> /dev/zero
       - name: Basic Test - misc-tests
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci misc-tests 2> /dev/zero
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --ci misc-tests 2> /dev/zero
       - name: Basic Test - nodiff-tests
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --no-diff --ci nodiff-tests 2> /dev/zero
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --no-diff --ci nodiff-tests 2> /dev/zero
       - name: Simple Test - microbench
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --ci microbench 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --ci microbench 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/microbench.log
       - name: Simple Test - CoreMark
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci coremark 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --ci coremark 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/coremark.log
       - name: System Test - Linux
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci linux-hello-opensbi 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --ci linux-hello-opensbi 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/linux.log
       - name: Floating-point Test - povray
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --max-instr 5000000 --ci povray 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --max-instr 5000000 --ci povray 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/povray.log
       - name: Uncache Fetch Test - copy and run
         run: |
@@ -106,6 +127,8 @@ jobs:
           cat perf.log | sort | tee $PERF_HOME/copy_and_run.log
   emu-performance:
     runs-on: bosc
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' }}
     continue-on-error: false
     timeout-minutes: 900
     name: EMU - Performance
@@ -130,7 +153,8 @@ jobs:
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
             --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3            \
-            --with-dramsim3 --threads 16 --mfc
+            --with-dramsim3 --threads 16 --mfc \
+            --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin --llvm-profdata llvm-profdata
       - name: SPEC06 Test - mcf
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci mcf 2> perf.log
@@ -169,6 +193,8 @@ jobs:
           cat perf.log | sort | tee $PERF_HOME/astar.log
   emu-mc:
     runs-on: bosc
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' }}
     continue-on-error: false
     timeout-minutes: 900
     name: EMU - MC
@@ -194,50 +220,56 @@ jobs:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
             --num-cores 2 --emu-optimize "" \
             --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 \
-            --with-dramsim3 --threads 16 --mfc
+            --with-dramsim3 --threads 16 --mfc \
+            --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin --llvm-profdata llvm-profdata
       - name: MC Test
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so --ci mc-tests 2> /dev/zero
       - name: SMP Linux
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so --ci linux-hello-smp-opensbi 2> /dev/zero
-  # simv-basics:
-  #   runs-on: bosc
-  #   continue-on-error: false
-  #   timeout-minutes: 900
-  #   name: SIMV - Basics
-  #   steps:
-  #     - uses: actions/checkout@v2
-  #       with:
-  #         submodules: 'recursive'
-  #     - name: set env
-  #       run: |
-  #         export HEAD_SHA=${{ github.run_number }}
-  #         echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
-  #         echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
-  #         echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
-  #         echo "PERF_HOME=/nfs/home/ci-runner/xs-perf/${HEAD_SHA}" >> $GITHUB_ENV
-  #         echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
-  #         mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
-  #         mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
-  #     - name: clean up
-  #       run: |
-  #         python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
-  #     - name: Remote Connection Test
-  #       run: |
-  #         ssh -tt 172.28.10.101 "echo test-ok"
-  #     - name: Generate Verilog for VCS
-  #       run: |
-  #         python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --vcs-gen --release
-  #     - name: Build SIMV on Remote
-  #       run: |
-  #         ssh -tt 172.28.10.101 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --vcs-build --release"
-  #     - name: Basic Test - cputest
-  #       run: |
-  #         ssh -tt 172.28.10.101 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs cputest --am=/nfs/home/share/ci-workloads/nexus-am/" 2> /dev/zero
-  #     - name: Simple Test - CoreMark
-  #       run: |
-  #         ssh -tt 172.28.10.101 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs coremark --am=/nfs/home/share/ci-workloads/nexus-am/ --timeout 1800" 2> /dev/zero
-  #     - name: System Test - Linux
-  #       run: |
-  #         ssh -tt 172.28.10.101 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs linux-hello-opensbi --timeout 7200" 2> /dev/zero
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so --ci linux-hello-smp-new 2> /dev/zero
+  simv-basics:
+    runs-on: eda
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' }}
+    continue-on-error: false
+    timeout-minutes: 900
+    name: SIMV - Basics
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+      - name: set env
+        run: |
+          export HEAD_SHA=${{ github.run_number }}
+          echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
+          echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
+          echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
+          echo "PERF_HOME=/nfs/home/ci-runner/xs-perf/${HEAD_SHA}" >> $GITHUB_ENV
+          echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
+          mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
+          mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
+      - name: clean up
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
+      - name: Remote Connection Test
+        run: |
+          ssh -tt eda01 "echo test-ok"
+      - name: Generate Verilog for VCS
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --vcs-gen --no-db --xprop --mfc
+      - name: Build SIMV on Remote
+        run: |
+          ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --vcs-build --no-db --xprop"
+      - name: Simple Test - MicroBench
+        run: |
+          ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs microbench --am=/nfs/home/share/ci-workloads/nexus-am/"
+      # - name: Basic Test - cputest
+      #   run: |
+      #     ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs cputest --am=/nfs/home/share/ci-workloads/nexus-am/" 2> /dev/zero
+      # - name: Simple Test - CoreMark
+      #   run: |
+      #     ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs coremark --am=/nfs/home/share/ci-workloads/nexus-am/ --timeout 1800" 2> /dev/zero
+      # - name: System Test - Linux
+      #   run: |
+      #     ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs linux-hello-opensbi --timeout 7200" 2> /dev/zero

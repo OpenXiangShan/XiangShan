@@ -65,39 +65,24 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   if (!coreParams.softPTW) {
     l2top.misc_l2_pmu := l2top.ptw_logger := l2top.ptw_to_l2_buffer.node := core.memBlock.ptw_to_l2_buffer.node
   }
-  l2top.l1_xbar :=* l2top.misc_l2_pmu
 
-  // TL2TL L2 Cache
-  val tl2tl_l2cache = l2top.tl2tl_l2cache
-  // l1_xbar to l2
-  tl2tl_l2cache match {
+  // L2 Prefetch
+  l2top.l2cache match {
     case Some(l2) =>
-      l2.node :*= l2top.xbar_l2_buffer :*= l2top.l1_xbar
-      l2.pf_recv_node.map(recv => {
+      l2.pf_recv_node.foreach(recv => {
         println("Connecting L1 prefetcher to L2!")
         recv := core.memBlock.l2_pf_sender_opt.get
       })
     case None =>
   }
   
-  val core_l3_tpmeta_source_port = tl2tl_l2cache match {
+  val core_l3_tpmeta_source_port = l2top.l2cache match {
     case Some(l2) => l2.tpmeta_source_node
     case None => None
   }
-  val core_l3_tpmeta_sink_port = tl2tl_l2cache match {
+  val core_l3_tpmeta_sink_port = l2top.l2cache match {
     case Some(l2) => l2.tpmeta_sink_node
     case None => None
-  }
-
-  // TL2CHI L2 Cache
-  val tl2chi_l2cache = l2top.tl2chi_l2cache
-  tl2chi_l2cache match {
-    case Some(l2) =>
-      l2.pf_recv_node.map(recv => {
-        println("Connecting L1 prefetcher to L2!")
-        recv := core.memBlock.l2_pf_sender_opt.get
-      })
-    case None =>
   }
 
   // mmio

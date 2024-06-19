@@ -102,7 +102,7 @@ class ICacheMainPipeInterface(implicit p: Parameters) extends ICacheBundle {
   val wayLookupRead = Flipped(DecoupledIO(new WayLookupInfo))
 
   val mshr          = new ICacheMSHRBundle
-  val errors        = Output(Vec(PortNumber, new L1CacheErrorInfo))
+  val errors        = Output(Vec(PortNumber, ValidIO(new L1CacheErrorInfo)))
   /*** outside interface ***/
   //val fetch       = Vec(PortNumber, new ICacheMainPipeBundle)
   /* when ftq.valid is high in T + 1 cycle
@@ -327,14 +327,14 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
                             s2_bank_errors(bank) && s2_bankSel(port)(bank).asBool).reduce(_||_) && s2_SRAMhits(port))
   (0 until PortNumber).map{ i =>
     io.errors(i).valid            := io.csr_parity_enable && RegNext(s1_fire) && s2_parity_errors(i)
-    io.errors(i).report_to_beu    := io.csr_parity_enable && RegNext(s1_fire) && s2_parity_errors(i)
-    io.errors(i).paddr            := s2_req_paddr(i)
-    io.errors(i).source           := DontCare
-    io.errors(i).source.tag       := false.B
-    io.errors(i).source.data      := s2_parity_errors(i)
-    io.errors(i).source.l2        := false.B
-    io.errors(i).opType           := DontCare
-    io.errors(i).opType.fetch     := true.B
+    io.errors(i).bits.report_to_beu    := io.csr_parity_enable && RegNext(s1_fire) && s2_parity_errors(i)
+    io.errors(i).bits.paddr            := s2_req_paddr(i)
+    io.errors(i).bits.source           := DontCare
+    io.errors(i).bits.source.tag       := false.B
+    io.errors(i).bits.source.data      := s2_parity_errors(i)
+    io.errors(i).bits.source.l2        := false.B
+    io.errors(i).bits.opType           := DontCare
+    io.errors(i).bits.opType.fetch     := true.B
   }
 
   /**
@@ -449,12 +449,12 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     */
   (0 until PortNumber).map{ i =>
     when(RegNext(s2_fire && s2_corrupt(i))){
-      io.errors(i).valid            := true.B
-      io.errors(i).report_to_beu    := false.B // l2 should have report that to bus error unit, no need to do it again
-      io.errors(i).paddr            := RegNext(s2_req_paddr(i))
-      io.errors(i).source.tag       := false.B
-      io.errors(i).source.data      := false.B
-      io.errors(i).source.l2        := true.B
+      io.errors(i).valid                 := true.B
+      io.errors(i).bits.report_to_beu    := false.B // l2 should have report that to bus error unit, no need to do it again
+      io.errors(i).bits.paddr            := RegNext(s2_req_paddr(i))
+      io.errors(i).bits.source.tag       := false.B
+      io.errors(i).bits.source.data      := false.B
+      io.errors(i).bits.source.l2        := true.B
     }
   }
 

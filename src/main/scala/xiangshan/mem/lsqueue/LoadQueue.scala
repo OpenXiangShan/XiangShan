@@ -230,6 +230,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     exceptionBuffer.io.req(LoadPipelineWidth + i).bits.uop.vpu.vstart := io.vecFeedback(i).bits.vstart
     exceptionBuffer.io.req(LoadPipelineWidth + i).bits.uop.vpu.vl     := io.vecFeedback(i).bits.vl
   }
+  // mmio non-data error exception
+  exceptionBuffer.io.req.last := uncacheBuffer.io.exception
 
   io.exceptionAddr <> exceptionBuffer.io.exceptionAddr
 

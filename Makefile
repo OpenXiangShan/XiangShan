@@ -138,7 +138,7 @@ help:
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
 	$(TIME_CMD) mill -i xiangshan[$(CHISEL_VERSION)].runMain $(FPGATOP)   \
-		-td $(@D) --config $(CONFIG) $(FPGA_MEM_ARGS)                    \
+		--target-dir $(@D) --config $(CONFIG) $(FPGA_MEM_ARGS)        \
 		--num-cores $(NUM_CORES) $(RELEASE_ARGS)
 ifeq ($(MFC),1)
 	$(SPLIT_VERILOG) $(RTL_DIR) $(TOP).v
@@ -160,7 +160,7 @@ $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	@echo -e "\n[mill] Generating Verilog files..." > $(TIMELOG)
 	@date -R | tee -a $(TIMELOG)
 	$(TIME_CMD) mill -i xiangshan[$(CHISEL_VERSION)].test.runMain $(SIMTOP)    \
-		-td $(@D) --config $(CONFIG) $(SIM_MEM_ARGS)                          \
+		--target-dir $(@D) --config $(CONFIG) $(SIM_MEM_ARGS)              \
 		--num-cores $(NUM_CORES) $(SIM_ARGS) --full-stacktrace
 ifeq ($(MFC),1)
 	$(SPLIT_VERILOG) $(RTL_DIR) $(SIM_TOP).v
@@ -178,7 +178,11 @@ ifeq ($(PLDM),1)
 	sed -i -e 's/$$fatal/$$finish/g' $(SIM_TOP_V)
 	sed -i -e '/sed/! { \|$(SED_IFNDEF)|, \|$(SED_ENDIF)| { \|$(SED_IFNDEF)|d; \|$(SED_ENDIF)|d; } }' $(SIM_TOP_V)
 else
+ifeq ($(ENABLE_XPROP),1)
+	sed -i -e "s/\$$fatal/assert(1\'b0)/g" $(SIM_TOP_V)
+else
 	sed -i -e 's/$$fatal/xs_assert(`__LINE__)/g' $(SIM_TOP_V)
+endif
 endif
 ifeq ($(MFC),1)
 	sed -i -e "s/\$$error(/\$$fwrite(32\'h80000002, /g" $(SIM_TOP_V)
@@ -213,6 +217,9 @@ emu-run: emu
 # vcs simulation
 simv: sim-verilog
 	$(MAKE) -C ./difftest simv SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
+
+simv-run:
+	$(MAKE) -C ./difftest simv-run SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
 
 # palladium simulation
 pldm-build: sim-verilog

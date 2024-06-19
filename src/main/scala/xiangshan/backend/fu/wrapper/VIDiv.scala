@@ -16,7 +16,7 @@ class VIDiv(cfg: FuConfig)(implicit p: Parameters) extends VecNonPipedFuncUnit(c
   XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VidivType.dummy, "Vfdiv OpType not supported")
 
   // params alias
-  private val dataWidth = cfg.dataBits
+  private val dataWidth = cfg.destDataBits
 
   // modules
   private val vidiv = Module(new VectorIdiv)

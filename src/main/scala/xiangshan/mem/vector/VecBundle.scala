@@ -238,5 +238,5 @@ class VSegmentUnitIO(implicit p: Parameters) extends VLSUBundle{
   val flush_sbuffer       = new SbufferFlushBundle
   val feedback            = ValidIO(new RSFeedback(isVector = true))
   val redirect            = Flipped(ValidIO(new Redirect))
-  val exceptionAddr       = ValidIO(new FeedbackToLsqIO)
+  val exceptionInfo       = ValidIO(new FeedbackToLsqIO)
 }

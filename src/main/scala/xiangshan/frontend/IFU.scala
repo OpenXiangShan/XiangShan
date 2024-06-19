@@ -535,7 +535,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   //last instuction finish
   val is_first_instr = RegInit(true.B)
-  io.mmioCommitRead.mmioFtqPtr := RegNext(f3_ftq_req.ftqIdx + 1.U)
+  /*** Determine whether the MMIO instruction is executable based on the previous prediction block ***/
+  io.mmioCommitRead.mmioFtqPtr := RegNext(f3_ftq_req.ftqIdx - 1.U)
 
   val m_idle :: m_waitLastCmt:: m_sendReq :: m_waitResp :: m_sendTLB :: m_tlbResp :: m_sendPMP :: m_resendReq :: m_waitResendResp :: m_waitCommit :: m_commited :: Nil = Enum(11)
   val mmio_state = RegInit(m_idle)
@@ -557,8 +558,14 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   val f3_need_not_flush = f3_req_is_mmio && fromFtqRedirectReg.valid && !f3_ftq_flush_self && !f3_ftq_flush_by_older
 
-  when(is_first_instr && mmio_commit){
-    is_first_instr := false.B
+  /**
+    **********************************************************************************
+    * We want to defer instruction fetching when encountering MMIO instructions to ensure that the MMIO region is not negatively impacted.
+    * This is the exception when the first instruction is an MMIO instruction.
+    **********************************************************************************
+    */
+  when(is_first_instr && f3_fire){
+    is_first_instr  := false.B
   }
 
   when(f3_flush && !f3_req_is_mmio)                                                 {f3_valid := false.B}

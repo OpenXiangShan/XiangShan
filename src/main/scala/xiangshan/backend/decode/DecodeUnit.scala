@@ -741,19 +741,20 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   private val isVppu = FuType.isVppu(decodedInst.fuType)
   private val isVecOPF = FuType.isVecOPF(decodedInst.fuType)
 
-  private val v0Idx = 0
-  private val vconfigIdx = VCONFIG_IDX
-
   // read src1~3 location
   decodedInst.lsrc(0) := inst.RS1
   decodedInst.lsrc(1) := inst.RS2
   // src(2) of fma is fs3, src(2) of vector inst is old vd
   decodedInst.lsrc(2) := Mux(isFMA, inst.FS3, inst.VD)
-  decodedInst.lsrc(3) := v0Idx.U
-  decodedInst.lsrc(4) := vconfigIdx.U
+  decodedInst.lsrc(3) := V0_IDX.U
+  decodedInst.lsrc(4) := Vl_IDX.U
 
   // read dest location
   decodedInst.ldest := inst.RD
+
+  // init v0Wen vlWen
+  decodedInst.v0Wen := false.B
+  decodedInst.vlWen := false.B
 
   // fill in exception vector
   val vecException = Module(new VecExceptionGen)
@@ -918,11 +919,25 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   io.deq.uopInfo.numOfWB := uopInfoGen.io.out.uopInfo.numOfWB
   io.deq.uopInfo.lmul := uopInfoGen.io.out.uopInfo.lmul
 
+  // for csrr vl instruction, convert to vsetvl
+  val Vl = 0xC20.U
+  val isCsrrVl = FuType.FuTypeOrR(decodedInst.fuType, FuType.csr) && decodedInst.fuOpType === CSROpType.set && inst.CSRIDX === Vl
+  when (isCsrrVl) {
+    decodedInst.srcType(0) := SrcType.no
+    decodedInst.srcType(1) := SrcType.no
+    decodedInst.srcType(2) := SrcType.no
+    decodedInst.srcType(3) := SrcType.no
+    decodedInst.srcType(4) := SrcType.vp
+    decodedInst.lsrc(4) := Vl_IDX.U
+    decodedInst.blockBackward := false.B
+  }
+
   io.deq.decodedInst := decodedInst
   io.deq.decodedInst.rfWen := (decodedInst.ldest =/= 0.U) && decodedInst.rfWen
   // change vlsu to vseglsu when NF =/= 0.U
   io.deq.decodedInst.fuType := Mux1H(Seq(
-    (!FuType.FuTypeOrR(decodedInst.fuType, FuType.vldu, FuType.vstu)                   ) -> decodedInst.fuType,
+    ( isCsrrVl) -> FuType.vsetfwf.U,
+    (!FuType.FuTypeOrR(decodedInst.fuType, FuType.vldu, FuType.vstu) && !isCsrrVl      ) -> decodedInst.fuType,
     ( FuType.FuTypeOrR(decodedInst.fuType, FuType.vldu, FuType.vstu) && inst.NF === 0.U || (inst.NF =/= 0.U && (inst.MOP === "b00".U && inst.SUMOP === "b01000".U))) -> decodedInst.fuType,
     // MOP === b00 && SUMOP === b01000: unit-stride whole register store
     // MOP =/= b00                    : strided and indexed store

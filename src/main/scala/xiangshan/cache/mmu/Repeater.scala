@@ -378,7 +378,7 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
   val ptwResp = RegEnable(io.ptw.resp.bits, io.ptw.resp.fire)
   val ptwResp_valid = Cat(filter.map(_.refill)).orR
   filter.map(_.tlb.resp.ready := true.B)
-  filter.map(_.ptw.resp.valid := RegNext(io.ptw.resp.fire, init = false.B))
+  filter.map(_.ptw.resp.valid := GatedValidRegNext(io.ptw.resp.fire, init = false.B))
   filter.map(_.ptw.resp.bits := ptwResp)
   filter.map(_.flush := flush)
   filter.map(_.sfence := io.sfence)
@@ -411,7 +411,8 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
   for (i <- 0 until LdExuCnt) {
     hintIO.req(i) := RegNext(load_hintIO.req(i))
   }
-  hintIO.resp := RegNext(load_hintIO.resp)
+  hintIO.resp.valid := RegNext(load_hintIO.resp.valid)
+  hintIO.resp.bits := RegEnable(load_hintIO.resp.bits, load_hintIO.resp.valid)
 
   when (load_filter(0).refill) {
     io.tlb.resp.bits.vector(0) := true.B
@@ -484,28 +485,29 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
     v && ptwResp_hit(vpn, s2xlate, io.ptw.resp.bits)
   }
   }
-  val ptwResp_valid = RegNext(io.ptw.resp.fire && Cat(ptwResp_OldMatchVec).orR, init = false.B)
+  val ptwResp_valid = GatedValidRegNext(io.ptw.resp.fire && Cat(ptwResp_OldMatchVec).orR, init = false.B)
   // May send repeated requests to L2 tlb with same vpn(26, 3) when sector tlb
   val oldMatchVec_early = io.tlb.req.map(a => vpn.zip(v).zip(s2xlate).map{ case ((pi, vi), s2xlate) => vi && pi === a.bits.vpn && s2xlate === a.bits.s2xlate })
   val lastReqMatchVec_early = io.tlb.req.map(a => tlb_req.map{ b => b.valid && b.bits.vpn === a.bits.vpn && canEnqueue && b.bits.s2xlate === a.bits.s2xlate})
   val newMatchVec_early = io.tlb.req.map(a => io.tlb.req.map(b => a.bits.vpn === b.bits.vpn && a.bits.s2xlate === b.bits.s2xlate))
 
   (0 until Width) foreach { i =>
-    tlb_req(i).valid := RegNext(io.tlb.req(i).valid &&
+    tlb_req(i).valid := GatedValidRegNext(io.tlb.req(i).valid &&
       !(ptwResp_valid && ptwResp_hit(io.tlb.req(i).bits.vpn, io.tlb.req(i).bits.s2xlate, ptwResp)) &&
       !Cat(lastReqMatchVec_early(i)).orR,
       init = false.B)
     tlb_req(i).bits := RegEnable(io.tlb.req(i).bits, io.tlb.req(i).valid)
   }
 
-  val oldMatchVec = oldMatchVec_early.map(a => RegNext(Cat(a).orR))
+
+  val oldMatchVec = oldMatchVec_early.map(a => GatedValidRegNext(Cat(a).orR))
   val newMatchVec = (0 until Width).map(i => (0 until Width).map(j =>
-    RegNext(newMatchVec_early(i)(j)) && tlb_req(j).valid
+    GatedValidRegNext(newMatchVec_early(i)(j)) && tlb_req(j).valid
   ))
   val ptwResp_newMatchVec = tlb_req.map(a =>
     ptwResp_valid && ptwResp_hit(a.bits.vpn, a.bits.s2xlate, ptwResp))
 
-  val oldMatchVec2 = (0 until Width).map(i => oldMatchVec_early(i).map(RegNext(_)).map(_ & tlb_req(i).valid))
+  val oldMatchVec2 = (0 until Width).map(i => oldMatchVec_early(i).map(GatedValidRegNext(_)).map(_ & tlb_req(i).valid))
   val update_ports = v.indices.map(i => oldMatchVec2.map(j => j(i)))
   val ports_init = (0 until Width).map(i => (1 << i).U(Width.W))
   val filter_ports = (0 until Width).map(i => ParallelMux(newMatchVec(i).zip(ports_init).drop(i)))

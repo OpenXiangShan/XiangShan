@@ -27,6 +27,7 @@ import xiangshan.backend.ctrlblock.{DebugLSIO, LsTopdownInfo}
 import xiangshan.backend.datapath.DataConfig.{IntData, VecData, FpData}
 import xiangshan.backend.datapath.RdConfig.{IntRD, VfRD}
 import xiangshan.backend.datapath.WbConfig._
+import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath._
 import xiangshan.backend.dispatch.CoreDispatchTopDownIO
 import xiangshan.backend.exu.ExuBlock
@@ -238,14 +239,16 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   intScheduler.io.intWriteBack := wbDataPath.io.toIntPreg
   intScheduler.io.fpWriteBack := 0.U.asTypeOf(intScheduler.io.fpWriteBack)
   intScheduler.io.vfWriteBack := 0.U.asTypeOf(intScheduler.io.vfWriteBack)
+  intScheduler.io.v0WriteBack := 0.U.asTypeOf(intScheduler.io.v0WriteBack)
+  intScheduler.io.vlWriteBack := 0.U.asTypeOf(intScheduler.io.vlWriteBack)
   intScheduler.io.fromDataPath.resp := dataPath.io.toIntIQ
   intScheduler.io.fromSchedulers.wakeupVec.foreach { wakeup => wakeup := iqWakeUpMappedBundle(wakeup.bits.exuIdx) }
   intScheduler.io.fromDataPath.og0Cancel := og0CancelOH
   intScheduler.io.fromDataPath.og1Cancel := og1CancelOH
   intScheduler.io.ldCancel := io.mem.ldCancel
   intScheduler.io.fromDataPath.cancelToBusyTable := cancelToBusyTable
-  intScheduler.io.vlWriteBack.vlIsZero := false.B
-  intScheduler.io.vlWriteBack.vlIsVlmax := false.B
+  intScheduler.io.vlWriteBackInfo.vlIsZero := false.B
+  intScheduler.io.vlWriteBackInfo.vlIsVlmax := false.B
 
   fpScheduler.io.fromTop.hartId := io.fromTop.hartId
   fpScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
@@ -254,14 +257,16 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   fpScheduler.io.intWriteBack := 0.U.asTypeOf(fpScheduler.io.intWriteBack)
   fpScheduler.io.fpWriteBack := wbDataPath.io.toFpPreg
   fpScheduler.io.vfWriteBack := 0.U.asTypeOf(fpScheduler.io.vfWriteBack)
+  fpScheduler.io.v0WriteBack := 0.U.asTypeOf(fpScheduler.io.v0WriteBack)
+  fpScheduler.io.vlWriteBack := 0.U.asTypeOf(fpScheduler.io.vlWriteBack)
   fpScheduler.io.fromDataPath.resp := dataPath.io.toFpIQ
   fpScheduler.io.fromSchedulers.wakeupVec.foreach { wakeup => wakeup := iqWakeUpMappedBundle(wakeup.bits.exuIdx) }
   fpScheduler.io.fromDataPath.og0Cancel := og0CancelOH
   fpScheduler.io.fromDataPath.og1Cancel := og1CancelOH
   fpScheduler.io.ldCancel := io.mem.ldCancel
   fpScheduler.io.fromDataPath.cancelToBusyTable := cancelToBusyTable
-  fpScheduler.io.vlWriteBack.vlIsZero := false.B
-  fpScheduler.io.vlWriteBack.vlIsVlmax := false.B
+  fpScheduler.io.vlWriteBackInfo.vlIsZero := false.B
+  fpScheduler.io.vlWriteBackInfo.vlIsVlmax := false.B
 
   memScheduler.io.fromTop.hartId := io.fromTop.hartId
   memScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
@@ -270,6 +275,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   memScheduler.io.intWriteBack := wbDataPath.io.toIntPreg
   memScheduler.io.fpWriteBack := wbDataPath.io.toFpPreg
   memScheduler.io.vfWriteBack := wbDataPath.io.toVfPreg
+  memScheduler.io.v0WriteBack := wbDataPath.io.toV0Preg
+  memScheduler.io.vlWriteBack := wbDataPath.io.toVlPreg
   memScheduler.io.fromMem.get.scommit := io.mem.sqDeq
   memScheduler.io.fromMem.get.lcommit := io.mem.lqDeq
   memScheduler.io.fromMem.get.wakeup := io.mem.wakeup
@@ -295,8 +302,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   memScheduler.io.fromDataPath.og1Cancel := og1CancelOH
   memScheduler.io.ldCancel := io.mem.ldCancel
   memScheduler.io.fromDataPath.cancelToBusyTable := cancelToBusyTable
-  memScheduler.io.vlWriteBack.vlIsZero := vlIsZero
-  memScheduler.io.vlWriteBack.vlIsVlmax := vlIsVlmax
+  memScheduler.io.vlWriteBackInfo.vlIsZero := vlIsZero
+  memScheduler.io.vlWriteBackInfo.vlIsVlmax := vlIsVlmax
 
   vfScheduler.io.fromTop.hartId := io.fromTop.hartId
   vfScheduler.io.fromCtrlBlock.flush := ctrlBlock.io.toIssueBlock.flush
@@ -305,14 +312,16 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   vfScheduler.io.intWriteBack := 0.U.asTypeOf(vfScheduler.io.intWriteBack)
   vfScheduler.io.fpWriteBack := 0.U.asTypeOf(vfScheduler.io.fpWriteBack)
   vfScheduler.io.vfWriteBack := wbDataPath.io.toVfPreg
+  vfScheduler.io.v0WriteBack := wbDataPath.io.toV0Preg
+  vfScheduler.io.vlWriteBack := wbDataPath.io.toVlPreg
   vfScheduler.io.fromDataPath.resp := dataPath.io.toVfIQ
   vfScheduler.io.fromSchedulers.wakeupVec.foreach { wakeup => wakeup := iqWakeUpMappedBundle(wakeup.bits.exuIdx) }
   vfScheduler.io.fromDataPath.og0Cancel := og0CancelOH
   vfScheduler.io.fromDataPath.og1Cancel := og1CancelOH
   vfScheduler.io.ldCancel := io.mem.ldCancel
   vfScheduler.io.fromDataPath.cancelToBusyTable := cancelToBusyTable
-  vfScheduler.io.vlWriteBack.vlIsZero := vlIsZero
-  vfScheduler.io.vlWriteBack.vlIsVlmax := vlIsVlmax
+  vfScheduler.io.vlWriteBackInfo.vlIsZero := vlIsZero
+  vfScheduler.io.vlWriteBackInfo.vlIsVlmax := vlIsVlmax
   vfScheduler.io.fromOg2.get := og2ForVector.io.toVfIQ
 
   dataPath.io.hartId := io.fromTop.hartId
@@ -330,10 +339,13 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   dataPath.io.fromIntWb := wbDataPath.io.toIntPreg
   dataPath.io.fromFpWb := wbDataPath.io.toFpPreg
   dataPath.io.fromVfWb := wbDataPath.io.toVfPreg
+  dataPath.io.fromV0Wb := wbDataPath.io.toV0Preg
+  dataPath.io.fromVlWb := wbDataPath.io.toVlPreg
   dataPath.io.debugIntRat    .foreach(_ := ctrlBlock.io.debug_int_rat.get)
   dataPath.io.debugFpRat     .foreach(_ := ctrlBlock.io.debug_fp_rat.get)
   dataPath.io.debugVecRat    .foreach(_ := ctrlBlock.io.debug_vec_rat.get)
-  dataPath.io.debugVconfigRat.foreach(_ := ctrlBlock.io.debug_vconfig_rat.get)
+  dataPath.io.debugV0Rat     .foreach(_ := ctrlBlock.io.debug_v0_rat.get)
+  dataPath.io.debugVlRat     .foreach(_ := ctrlBlock.io.debug_vl_rat.get)
 
   og2ForVector.io.flush := ctrlBlock.io.toDataPath.flush
   og2ForVector.io.ldCancel := io.mem.ldCancel
@@ -385,27 +397,28 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   csrio.fpu.dirty_fs := ctrlBlock.io.robio.csr.dirty_fs
   csrio.vpu <> 0.U.asTypeOf(csrio.vpu) // Todo
 
-  val fromVsetVType = intExuBlock.io.vtype.getOrElse(0.U.asTypeOf((Valid(new VType))))
-  val vsetvlVType = RegEnable(fromVsetVType.bits, 0.U.asTypeOf(new VType), fromVsetVType.valid)
-  ctrlBlock.io.robio.vsetvlVType := vsetvlVType
+  val fromIntExuVsetVType = intExuBlock.io.vtype.getOrElse(0.U.asTypeOf((Valid(new VType))))
+  val fromVfExuVsetVType = vfExuBlock.io.vtype.getOrElse(0.U.asTypeOf((Valid(new VType))))
+  val fromVsetVType = Mux(fromIntExuVsetVType.valid, fromIntExuVsetVType.bits, fromVfExuVsetVType.bits)
+  val vsetvlVType = RegEnable(fromVsetVType, 0.U.asTypeOf(new VType), fromIntExuVsetVType.valid || fromVfExuVsetVType.valid)
+  ctrlBlock.io.toDecode.vsetvlVType := vsetvlVType
 
-  val debugVconfig = dataPath.io.debugVconfig match {
-    case Some(x) => dataPath.io.debugVconfig.get.asTypeOf(new VConfig)
-    case None => 0.U.asTypeOf(new VConfig)
-  }
   val commitVType = ctrlBlock.io.robio.commitVType.vtype
   val hasVsetvl = ctrlBlock.io.robio.commitVType.hasVsetvl
   val vtype = VType.toVtypeStruct(Mux(hasVsetvl, vsetvlVType, commitVType.bits)).asUInt
-  val debugVl = debugVconfig.vl
+
+  // csr not store the value of vl, so when using difftest we assign the value of vl to debugVl
+  val debugVl_s0 = WireInit(UInt(VlData().dataWidth.W), 0.U)
+  val debugVl_s1 = WireInit(UInt(VlData().dataWidth.W), 0.U)
+  debugVl_s0 := dataPath.io.debugVl.getOrElse(0.U.asTypeOf(UInt(VlData().dataWidth.W)))
+  debugVl_s1 := RegNext(debugVl_s0)
   csrio.vpu.set_vxsat := ctrlBlock.io.robio.csr.vxsat
   csrio.vpu.set_vstart.valid := ctrlBlock.io.robio.csr.vstart.valid
   csrio.vpu.set_vstart.bits := ctrlBlock.io.robio.csr.vstart.bits
-  csrio.vpu.set_vtype.valid := ctrlBlock.io.robio.csr.vcsrFlag
   //Todo here need change design
   csrio.vpu.set_vtype.valid := commitVType.valid
   csrio.vpu.set_vtype.bits := ZeroExt(vtype, XLEN)
-  csrio.vpu.set_vl.valid := ctrlBlock.io.robio.csr.vcsrFlag
-  csrio.vpu.set_vl.bits := ZeroExt(debugVl, XLEN)
+  csrio.vpu.vl := ZeroExt(debugVl_s1, XLEN)
   csrio.vpu.dirty_vs := ctrlBlock.io.robio.csr.dirty_vs
   csrio.exception := ctrlBlock.io.robio.exception
   csrio.memExceptionVAddr := io.mem.exceptionAddr.vaddr
@@ -473,12 +486,14 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   wbDataPath.io.fromMemExu.flatten.zip(io.mem.writeBack).foreach { case (sink, source) =>
     sink.valid := source.valid
     source.ready := sink.ready
-    sink.bits.data   := source.bits.data
+    sink.bits.data   := VecInit(Seq.fill(sink.bits.params.wbPathNum)(source.bits.data))
     sink.bits.pdest  := source.bits.uop.pdest
     sink.bits.robIdx := source.bits.uop.robIdx
     sink.bits.intWen.foreach(_ := source.bits.uop.rfWen)
     sink.bits.fpWen.foreach(_ := source.bits.uop.fpWen)
     sink.bits.vecWen.foreach(_ := source.bits.uop.vecWen)
+    sink.bits.v0Wen.foreach(_ := source.bits.uop.v0Wen)
+    sink.bits.vlWen.foreach(_ := source.bits.uop.vlWen)
     sink.bits.exceptionVec.foreach(_ := source.bits.uop.exceptionVec)
     sink.bits.flushPipe.foreach(_ := source.bits.uop.flushPipe)
     sink.bits.replay.foreach(_ := source.bits.uop.replayInst)
@@ -572,6 +587,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     sink.bits.uop.rfWen          := source.bits.rfWen.getOrElse(false.B)
     sink.bits.uop.fpWen          := source.bits.fpWen.getOrElse(false.B)
     sink.bits.uop.vecWen         := source.bits.vecWen.getOrElse(false.B)
+    sink.bits.uop.v0Wen          := source.bits.v0Wen.getOrElse(false.B)
+    sink.bits.uop.vlWen          := source.bits.vlWen.getOrElse(false.B)
     sink.bits.uop.flushPipe      := source.bits.flushPipe.getOrElse(false.B)
     sink.bits.uop.pc             := source.bits.pc.getOrElse(0.U)
     sink.bits.uop.loadWaitBit    := Mux(enableMdp, source.bits.loadWaitBit.getOrElse(false.B), false.B)

@@ -438,7 +438,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   for (wb <- exuWBs) {
     when(wb.valid) {
       val wbIdx = wb.bits.robIdx.value
-      debug_exuData(wbIdx) := wb.bits.data
+      debug_exuData(wbIdx) := wb.bits.data(0)
       debug_exuDebug(wbIdx) := wb.bits.debug
       debug_microOp(wbIdx).debugInfo.enqRsTime := wb.bits.debugInfo.enqRsTime
       debug_microOp(wbIdx).debugInfo.selectTime := wb.bits.debugInfo.selectTime
@@ -452,7 +452,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val debug_Uop = debug_microOp(wbIdx)
       XSInfo(true.B,
         p"writebacked pc 0x${Hexadecimal(debug_Uop.pc)} wen ${debug_Uop.rfWen} " +
-          p"data 0x${Hexadecimal(wb.bits.data)} ldst ${debug_Uop.ldest} pdst ${debug_Uop.pdest} " +
+          p"data 0x${Hexadecimal(wb.bits.data(0))} ldst ${debug_Uop.ldest} pdst ${debug_Uop.pdest} " +
           p"skip ${wb.bits.debug.isMMIO} robIdx: ${wb.bits.robIdx}\n"
       )
     }
@@ -648,16 +648,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.csr.dirty_fs := RegNext(dirty_fs)
   io.csr.dirty_vs := RegNext(dirty_vs)
   io.csr.vxsat := RegNext(vxsat)
-
-  // sync v csr to csr
-  // for difftest
-  if (env.AlwaysBasicDiff || env.EnableDifftest) {
-    val isDiffWriteVconfigVec = io.diffCommits.get.commitValid.zip(io.diffCommits.get.info).map { case (valid, info) => valid && info.ldest === VCONFIG_IDX.U && info.vecWen }.reverse
-    io.csr.vcsrFlag := RegNext(io.diffCommits.get.isCommit && Cat(isDiffWriteVconfigVec).orR)
-  }
-  else {
-    io.csr.vcsrFlag := false.B
-  }
 
   // commit load/store to lsq
   val ldCommitVec = VecInit((0 until CommitWidth).map(i => io.commits.commitValid(i) && io.commits.info(i).commitType === CommitType.LOAD))
@@ -1263,10 +1253,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val isRVC = dt_isRVC(ptr)
 
       val difftest = DifftestModule(new DiffInstrCommit(MaxPhyPregs), delay = 3, dontCare = true)
+      val dt_skip = Mux(eliminatedMove, false.B, exuOut.isMMIO || exuOut.isPerfCnt)
       difftest.coreid := io.hartId
       difftest.index := i.U
       difftest.valid := io.commits.commitValid(i) && io.commits.isCommit
-      difftest.skip := Mux(eliminatedMove, false.B, exuOut.isMMIO || exuOut.isPerfCnt)
+      difftest.skip := dt_skip
       difftest.isRVC := isRVC
       difftest.rfwen := io.commits.commitValid(i) && commitInfo.rfWen && commitInfo.debug_ldest.get =/= 0.U
       difftest.fpwen := io.commits.commitValid(i) && uop.fpWen
@@ -1285,24 +1276,17 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         difftest.sqIdx := ZeroExt(uop.sqIdx.value, 7)
         difftest.isLoad := io.commits.info(i).commitType === CommitType.LOAD
         difftest.isStore := io.commits.info(i).commitType === CommitType.STORE
+        // Check LoadEvent only when isAmo or isLoad and skip MMIO
+        val difftestLoadEvent = DifftestModule(new DiffLoadEvent, delay = 3)
+        difftestLoadEvent.coreid := io.hartId
+        difftestLoadEvent.index := i.U
+        val loadCheck = (FuType.isAMO(uop.fuType) || FuType.isLoad(uop.fuType)) && !dt_skip
+        difftestLoadEvent.valid    := io.commits.commitValid(i) && io.commits.isCommit && loadCheck
+        difftestLoadEvent.paddr    := exuOut.paddr
+        difftestLoadEvent.opType   := uop.fuOpType
+        difftestLoadEvent.isAtomic := FuType.isAMO(uop.fuType)
+        difftestLoadEvent.isLoad   := FuType.isLoad(uop.fuType)
       }
-    }
-  }
-
-  if (env.EnableDifftest) {
-    for (i <- 0 until CommitWidth) {
-      val difftest = DifftestModule(new DiffLoadEvent, delay = 3)
-      difftest.coreid := io.hartId
-      difftest.index := i.U
-
-      val ptr = deqPtrVec(i).value
-      val uop = commitDebugUop(i)
-      val exuOut = debug_exuDebug(ptr)
-      difftest.valid    := io.commits.commitValid(i) && io.commits.isCommit
-      difftest.paddr    := exuOut.paddr
-      difftest.opType   := uop.fuOpType
-      difftest.isAtomic := FuType.isAMO(uop.fuType)
-      difftest.isLoad   := FuType.isLoad(uop.fuType)
     }
   }
 

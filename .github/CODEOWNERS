@@ -1,17 +1,36 @@
-src/main/scala/xiangshan/frontend/ @chenguokai
-src/main/scala/xiangshan/frontend/icache @chenguokai @ssszwic
-src/main/scala/xiangshan/frontend/IFU.scala @chenguokai @ssszwic
-src/main/scala/xiangshan/frontend/BPU.scala @chenguokai @eastonman
-src/main/scala/xiangshan/frontend/Composer.scala @chenguokai @eastonman
-src/main/scala/xiangshan/frontend/FauFTB.scala @chenguokai @eastonman
-src/main/scala/xiangshan/frontend/Frontend.scala @chenguokai @eastonman
-src/main/scala/xiangshan/frontend/FrontendBundle.scala @chenguokai @eastonman
-src/main/scala/xiangshan/frontend/FTB.scala @chenguokai @eastonman
-src/main/scala/xiangshan/frontend/IBuffer.scala @chenguokai @eastonman
-src/main/scala/xiangshan/frontend/ITTAGE.scala @chenguokai @eastonman
-src/main/scala/xiangshan/frontend/newRAS.scala @chenguokai @eastonman
-src/main/scala/xiangshan/frontend/SC.scala @chenguokai @eastonman
-src/main/scala/xiangshan/frontend/Tage.scala @chenguokai @eastonman
-src/main/scala/xiangshan/frontend/WrBypass.scala @chenguokai @eastonman
-src/main/scala/xiangshan/frontend/NewFtq.scala @chenguokai @Gao-Zeyu
-src/main/scala/xiangshan/frontend/PreDecode.scala @chenguokai @ssszwic
+src/main/scala/xiangshan/frontend/ @Gao-Zeyu
+src/main/scala/xiangshan/frontend/icache @ngc7331
+src/main/scala/xiangshan/frontend/IFU.scala @ngc7331
+src/main/scala/xiangshan/frontend/BPU.scala @eastonman
+src/main/scala/xiangshan/frontend/Composer.scala @eastonman
+src/main/scala/xiangshan/frontend/FauFTB.scala @eastonman
+src/main/scala/xiangshan/frontend/Frontend.scala @eastonman
+src/main/scala/xiangshan/frontend/FrontendBundle.scala @eastonman
+src/main/scala/xiangshan/frontend/FTB.scala @eastonman
+src/main/scala/xiangshan/frontend/IBuffer.scala @eastonman
+src/main/scala/xiangshan/frontend/ITTAGE.scala @eastonman
+src/main/scala/xiangshan/frontend/newRAS.scala @eastonman
+src/main/scala/xiangshan/frontend/SC.scala @eastonman
+src/main/scala/xiangshan/frontend/Tage.scala @eastonman
+src/main/scala/xiangshan/frontend/WrBypass.scala @eastonman
+src/main/scala/xiangshan/frontend/NewFtq.scala @Gao-Zeyu
+src/main/scala/xiangshan/frontend/PreDecode.scala @ngc7331
+
+src/main/scala/xiangshan/cache/ @linjuanZ
+src/main/scala/xiangshan/cache/dcache/ @happy-lx @bosscharlie @linjuanZ
+src/main/scala/xiangshan/cache/mmu/ @good-circle @cebarobot @Lemover
+src/main/scala/xiangshan/cache/wpu/ @Maxpicca-Li @bosscharlie @linjuanZ
+
+src/main/scala/xiangshan/mem/ @linjuanZ
+src/main/scala/xiangshan/mem/lsqueue/ @cz4e @good-circle @linjuanZ
+src/main/scala/xiangshan/mem/mdp/ @cz4e @linjuanZ
+src/main/scala/xiangshan/mem/pipeline/ @cz4e @good-circle @linjuanZ
+src/main/scala/xiangshan/mem/prefetch/ @happy-lx @Maxpicca-Li @linjuanZ
+src/main/scala/xiangshan/mem/sbuffer/ @cz4e @happy-lx @linjuanZ
+src/main/scala/xiangshan/mem/vector/ @weidingliu @good-circle @linjuanZ
+
+src/main/scala/xiangshan/L2Top.scala @linjuanZ @Ivyfeather
+src/main/scala/xiangshan/XSTile.scala @linjuanZ @Ivyfeather
+
+coupledL2/ @linjuanZ @Ivyfeather
+huancun/ @linjuanZ @Ivyfeather

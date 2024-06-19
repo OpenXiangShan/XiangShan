@@ -22,9 +22,9 @@ class VldMergeUnit(val params: ExeUnitParams)(implicit p: Parameters) extends XS
   val wbFire = !io.writeback.bits.robIdx.needFlush(io.flush) && io.writeback.fire
   wbReg.bits := Mux(wbFire, io.writeback.bits, wbReg.bits)
   wbReg.valid := wbFire
-  mgu.io.in.vd := wbReg.bits.data
+  mgu.io.in.vd := wbReg.bits.data(0)
   // oldVd is contained in data and is already masked with new data
-  mgu.io.in.oldVd := wbReg.bits.data
+  mgu.io.in.oldVd := wbReg.bits.data(0)
   mgu.io.in.mask := wbReg.bits.vls.get.vpu.vmask
   mgu.io.in.info.valid := wbReg.valid
   mgu.io.in.info.ta := wbReg.bits.vls.get.isMasked || wbReg.bits.vls.get.vpu.vta
@@ -44,7 +44,8 @@ class VldMergeUnit(val params: ExeUnitParams)(implicit p: Parameters) extends XS
   io.writebackAfterMerge.valid := wbReg.valid
   io.writebackAfterMerge.bits := wbReg.bits
   io.writebackAfterMerge.bits.vecWen.foreach(_ := wbReg.bits.vecWen.get)
-  io.writebackAfterMerge.bits.data := vdAfterMerge
+  io.writebackAfterMerge.bits.v0Wen.foreach(_ := wbReg.bits.v0Wen.get)
+  io.writebackAfterMerge.bits.data := VecInit(Seq.fill(params.wbPathNum)(vdAfterMerge))
 }
 
 class VldMergeUnitIO(param: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
