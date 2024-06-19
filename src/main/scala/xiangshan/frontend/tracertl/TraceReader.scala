@@ -37,7 +37,7 @@ class TraceReader(implicit p: Parameters) extends TraceModule
   dontTouch(io)
 
   val traceBuffer = Reg(Vec(TraceBufferSize, new TraceInstrBundle()))
-  val traceReaderHelper = Module(new TraceReaderHelper(PredictWidth, XLEN, TraceInstrWidth))
+  val traceReaderHelper = Module(new TraceReaderHelper(PredictWidth))
   val deqPtr = RegInit(0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize)))
   val enqPtr = RegInit(0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize)))
 
@@ -52,9 +52,8 @@ class TraceReader(implicit p: Parameters) extends TraceModule
   val readTraceEnable = !isFull(enqPtr, deqPtr) && (hasFreeEntries(enqPtr, deqPtr) >= TraceFetchWidth.U)
   when(readTraceEnable) {
     enqPtr := enqPtr + TraceFetchWidth.U
-    (0 until TraceFetchWidth).foreach { i => {
-      bufferInsert(enqPtr + i.U, TraceInstrBundle(traceReaderHelper.pc(i), traceReaderHelper.instr(i)))
-    }
+    (0 until TraceFetchWidth).foreach {
+      i => bufferInsert(enqPtr + i.U, traceReaderHelper.insts(i))
     }
   }
 

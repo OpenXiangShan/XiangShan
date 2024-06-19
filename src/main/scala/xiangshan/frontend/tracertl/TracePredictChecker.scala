@@ -35,7 +35,7 @@ class TracePredictChecker(implicit p: Parameters) extends TraceModule
   })
 
   val pds = io.preDecode.pd
-  val pcs = io.traceInsts.map(_.bits.pc)
+  val pcs = io.traceInsts.map(_.bits.pcVA)
 
   val predRange = io.predictInfo.instRange
   val takenIdx = io.predictInfo.ftqOffset.bits

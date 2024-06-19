@@ -72,7 +72,7 @@ class TraceAlignToIFUCut(implicit p: Parameters) extends TraceModule {
       inst.valid := false.B
       inst.bits := (-1.S).asTypeOf(new TraceInstrBundle)
     }.elsewhen(lastInstEndVec(i)) {
-      traceRangeVec(i) := curPC === curTrace.pc
+      traceRangeVec(i) := curPC === curTrace.pcVA
       inst.valid := traceRangeVec(i)
       inst.bits := curTrace
 
@@ -83,13 +83,13 @@ class TraceAlignToIFUCut(implicit p: Parameters) extends TraceModule {
     }.elsewhen(stillConsecutive) {
       inst.valid := false.B
       inst.bits := (-1.S).asTypeOf(new TraceInstrBundle)
-      inst.bits.pc := curPC
+      inst.bits.pcVA := curPC
 
       if (i == 0)
-        traceRangeVec(i) := (curPC + 2.U) === curTrace.pc
+        traceRangeVec(i) := (curPC + 2.U) === curTrace.pcVA
       else {
         traceRangeVec(i) := true.B
-        XSError(io.debug_valid && (curPC =/= (io.traceInsts(curInstIdxVec(i) - 1.U).pc + 2.U)),
+        XSError(io.debug_valid && (curPC =/= (io.traceInsts(curInstIdxVec(i) - 1.U).pcVA + 2.U)),
           "traceRange should not be true.B at stillConsecutive path?")
       }
 
