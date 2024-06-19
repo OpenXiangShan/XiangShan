@@ -29,22 +29,22 @@ class Og2ForVector(params: BackendParams)(implicit p: Parameters) extends XSModu
     s1_dataVec2.map(x => MixedVec(x.map(_.cloneType).toSeq)).toSeq
   ))
 
-    for(i <- 0 until vfIQNum) {
-      for (j <- 0 until vfIQPerExuNum(i)) {
-        val s2_flush = s1_dataVec2(i)(j).robIdx.needFlush(Seq(io.flush, RegNextWithEnable(io.flush)))
-        val og2Failed = s2_toVfExuValid(i)(j) && !toVfExuFire(i)(j)
-        val s1_ldCancel = LoadShouldCancel(s1_dataVec2(i)(j).loadDependency, io.ldCancel)
-        when(s1_validVec2(i)(j) && s1_readyVec2(i)(j) && !s2_flush && !og2Failed && !s1_ldCancel) {
-          s2_toVfExuValid(i)(j) := s1_validVec2(i)(j)
-          s2_toVfExuData(i)(j) := s1_dataVec2(i)(j)
-          s2_toVfExuData(i)(j).loadDependency.foreach(_ := s1_dataVec2(i)(j).loadDependency.get.map(_ << 1))
-        }.otherwise {
-          s2_toVfExuValid(i)(j) := false.B
-        }
-        s1_readyVec2(i)(j) := (toVfExuReady(i)(j) || !s1_validVec2(i)(j)) && !og2Failed && !s1_ldCancel
-        io.toVfExu(i)(j).valid := s2_toVfExuValid(i)(j)
-        io.toVfExu(i)(j).bits := s2_toVfExuData(i)(j)
+  for(i <- 0 until vfIQNum) {
+    for (j <- 0 until vfIQPerExuNum(i)) {
+      val s2_flush = s1_dataVec2(i)(j).robIdx.needFlush(Seq(io.flush, RegNextWithEnable(io.flush)))
+      val og2Failed = s2_toVfExuValid(i)(j) && !toVfExuFire(i)(j)
+      val s1_ldCancel = LoadShouldCancel(s1_dataVec2(i)(j).loadDependency, io.ldCancel)
+      when(s1_validVec2(i)(j) && s1_readyVec2(i)(j) && !s2_flush && !og2Failed && !s1_ldCancel) {
+        s2_toVfExuValid(i)(j) := s1_validVec2(i)(j)
+        s2_toVfExuData(i)(j) := s1_dataVec2(i)(j)
+        s2_toVfExuData(i)(j).loadDependency.foreach(_ := s1_dataVec2(i)(j).loadDependency.get.map(_ << 1))
+      }.otherwise {
+        s2_toVfExuValid(i)(j) := false.B
       }
+      s1_readyVec2(i)(j) := (toVfExuReady(i)(j) || !s1_validVec2(i)(j)) && !og2Failed && !s1_ldCancel
+      io.toVfExu(i)(j).valid := s2_toVfExuValid(i)(j)
+      io.toVfExu(i)(j).bits := s2_toVfExuData(i)(j)
+    }
   }
   io.toVfIQ.zipWithIndex.foreach {
     case (toVfExu, iqId) =>
@@ -58,6 +58,9 @@ class Og2ForVector(params: BackendParams)(implicit p: Parameters) extends XSModu
           og2Resp.bits.fuType := s2_toVfExuData(iqId)(exuId).fuType
       }
   }
+  io.toVfImmInfo := io.fromOg1ImmInfo.zip(s1_validVec2.flatten).map{
+    case (imm, valid) => RegEnable(imm, valid)
+  }
 }
 
 class Og2ForVectorIO(params: BackendParams)(implicit p: Parameters) extends XSBundle {
@@ -66,7 +69,8 @@ class Og2ForVectorIO(params: BackendParams)(implicit p: Parameters) extends XSBu
   val flush: ValidIO[Redirect]                                    = Flipped(ValidIO(new Redirect))
   val ldCancel                                                    = Vec(backendParams.LduCnt + backendParams.HyuCnt, Flipped(new LoadCancelIO))
   val fromOg1NoReg: MixedVec[MixedVec[DecoupledIO[ExuInput]]]     = Flipped(vfSchdParams.genExuInputBundle)
+  val fromOg1ImmInfo: Vec[ImmInfo]                                = Input(Vec(params.allExuParams.filter(_.isVfExeUnit).size, new ImmInfo))
   val toVfExu                                                     = MixedVec(vfSchdParams.genExuInputBundle)
   val toVfIQ                                                      = MixedVec(vfSchdParams.issueBlockParams.map(_.genOG2RespBundle))
-
+  val toVfImmInfo: Vec[ImmInfo]                                   = Output(Vec(params.allExuParams.filter(_.isVfExeUnit).size, new ImmInfo))
 }
