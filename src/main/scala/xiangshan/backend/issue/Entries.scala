@@ -31,17 +31,17 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val memEtyResps: Seq[ValidIO[EntryDeqRespBundle]] = {
     val resps =
       if (params.isLdAddrIQ && !params.isStAddrIQ)                                                    //LDU
-        Seq(io.og0Resp, io.og1Resp, io.fromLoad.get.finalIssueResp, io.fromLoad.get.memAddrIssueResp)
+        Seq(io.fromLoad.get.finalIssueResp, io.fromLoad.get.memAddrIssueResp)
       else if (params.isLdAddrIQ && params.isStAddrIQ || params.isHyAddrIQ)                           //HYU
-        Seq(io.og0Resp, io.og1Resp, io.fromLoad.get.finalIssueResp, io.fromLoad.get.memAddrIssueResp, io.fromMem.get.fastResp, io.fromMem.get.slowResp)
+        Seq(io.fromLoad.get.finalIssueResp, io.fromLoad.get.memAddrIssueResp, io.fromMem.get.fastResp, io.fromMem.get.slowResp)
       else if (params.isStAddrIQ)                                                                     //STU
-        Seq(io.og0Resp, io.og1Resp, io.fromMem.get.slowResp)
+        Seq(io.fromMem.get.slowResp)
       else if (params.isVecLduIQ && params.isVecStuIQ) // Vector store IQ need no vecLdIn.resp, but for now vector store share the vector load IQ
-        Seq(io.og0Resp, io.og1Resp, io.vecLdIn.get.resp, io.fromMem.get.slowResp)
+        Seq(io.vecLdIn.get.resp, io.fromMem.get.slowResp)
       else if (params.isVecLduIQ)
-        Seq(io.og0Resp, io.og1Resp, io.vecLdIn.get.resp)
+        Seq(io.vecLdIn.get.resp)
       else if (params.isVecStuIQ)
-        Seq(io.og0Resp, io.og1Resp, io.fromMem.get.slowResp)
+        Seq(io.fromMem.get.slowResp)
       else Seq()
     if (params.isMemAddrIQ) {
       println(s"[${this.desiredName}] resp: {" +
@@ -268,23 +268,31 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   //issueRespVec
   if (params.isVecMemIQ) {
     // vector memory IQ
-    issueRespVec.zip(robIdxVec).zip(uopIdxVec.get).foreach { case ((issueResp, robIdx), uopIdx) =>
+    issueRespVec.lazyZip(robIdxVec.lazyZip(uopIdxVec.get)).lazyZip(issueTimerVec.lazyZip(deqPortIdxReadVec)).foreach { case (issueResp, (robIdx, uopIdx), (issueTimer, deqPortIdx)) =>
+      val respInDatapath = resps(issueTimer(0))(deqPortIdx)
+      val respAfterDatapath = Wire(chiselTypeOf(respInDatapath))
       val hitRespsVec = VecInit(memEtyResps.map(x =>
         x.valid && x.bits.robIdx === robIdx && x.bits.uopIdx.get === uopIdx
       ).toSeq)
-      issueResp.valid := hitRespsVec.reduce(_ | _)
-      issueResp.bits := Mux1H(hitRespsVec, memEtyResps.map(_.bits).toSeq)
+      respAfterDatapath.valid := hitRespsVec.reduce(_ | _)
+      respAfterDatapath.bits  := (if (memEtyResps.size == 1) memEtyResps.head.bits
+                                  else Mux1H(hitRespsVec, memEtyResps.map(_.bits).toSeq))
+      issueResp := Mux(issueTimer(1), respAfterDatapath, respInDatapath)
     }
   } else if (params.isMemAddrIQ) {
     // scalar memory IQ
-    issueRespVec.zip(robIdxVec).foreach { case (issueResp, robIdx) =>
+    issueRespVec.lazyZip(robIdxVec).lazyZip(issueTimerVec.lazyZip(deqPortIdxReadVec)).foreach { case (issueResp, robIdx, (issueTimer, deqPortIdx)) =>
+      val respInDatapath = resps(issueTimer(0))(deqPortIdx)
+      val respAfterDatapath = Wire(chiselTypeOf(respInDatapath))
       val hitRespsVec = VecInit(memEtyResps.map(x => x.valid && (x.bits.robIdx === robIdx)).toSeq)
-      issueResp.valid := hitRespsVec.reduce(_ | _)
-      issueResp.bits := Mux1H(hitRespsVec, memEtyResps.map(_.bits).toSeq)
+      respAfterDatapath.valid := hitRespsVec.reduce(_ | _)
+      respAfterDatapath.bits  := (if (memEtyResps.size == 1) memEtyResps.head.bits
+                                  else Mux1H(hitRespsVec, memEtyResps.map(_.bits).toSeq))
+      issueResp := Mux(issueTimer(1), respAfterDatapath, respInDatapath)
     }
   }
   else {
-    issueRespVec.zip(issueTimerVec).zip(deqPortIdxReadVec).foreach { case ((issueResp, issueTimer), deqPortIdx) =>
+    issueRespVec.lazyZip(issueTimerVec.lazyZip(deqPortIdxReadVec)).foreach { case (issueResp, (issueTimer, deqPortIdx)) =>
       val Resp = resps(issueTimer)(deqPortIdx)
       issueResp := Resp
     }
