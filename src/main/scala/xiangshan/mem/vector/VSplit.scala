@@ -104,6 +104,9 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   val flowsPrevThisVd = (vdIdxInField << numFlowsSameVdLog2).asUInt // # of flows before this vd in a field
   val flowsIncludeThisUop = ((uopIdxInField +& 1.U) << flowsLog2).asUInt // # of flows before this uop besides this uop
   val flowNum = io.in.bits.flowNum.get
+  // max index in vd, only use in index instructions for calculate index
+  val maxIdxInVdIndex = GenVLMAX(Mux(s0_emul.asSInt > 0.S, 0.U, s0_emul), s0_eew(1, 0))
+  val indexVlMaxInVd = GenVlMaxMask(maxIdxInVdIndex, elemIdxBits)
 
   // For vectore indexed  instructions:
   //  When emul is greater than lmul, multiple uop correspond to a Vd, e.g:
@@ -163,6 +166,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
     x.vdIdxInField := vdIdxInField
     x.preIsSplit  := s0_preIsSplit
     x.alignedType := broadenAligendType
+    x.indexVlMaxInVd := indexVlMaxInVd
   }
   s0_valid := io.in.valid && !s0_kill
   /**-------------------------------------
@@ -297,6 +301,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   val issueVLMAXMask   = issueEntry.vlmax - 1.U
   val issueIsWholeReg  = issueEntry.usWholeReg
   val issueVLMAXLog2   = GenVLMAXLog2(issueEntry.lmul, issueSew)
+  val issueVlMaxInVd   = issueEntry.indexVlMaxInVd
   val elemIdx = GenElemIdx(
     instType = issueInstType,
     emul = issueEmul,
@@ -309,8 +314,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
 
   val splitIdxOffset = issueEntry.indexedSplitOffset + splitIdx
 
-  val elemIdxInsideField = elemIdx & issueVLMAXMask
-  val indexFlowInnerIdx = ((elemIdxInsideField << issueEew(1, 0))(vOffsetBits - 1, 0) >> issueEew(1, 0)).asUInt
+  val indexFlowInnerIdx = elemIdx & issueVlMaxInVd
   val nfIdx = Mux(issueIsWholeReg, 0.U, elemIdx >> issueVLMAXLog2)
   val fieldOffset = nfIdx << issueAlignedType // field offset inside a segment
 
