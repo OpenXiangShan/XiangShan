@@ -1274,19 +1274,19 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         difftest.robIdx := ZeroExt(ptr, 10)
         difftest.lqIdx := ZeroExt(uop.lqIdx.value, 7)
         difftest.sqIdx := ZeroExt(uop.sqIdx.value, 7)
-        difftest.isLoad := io.commits.info(i).commitType === CommitType.LOAD
         difftest.isStore := io.commits.info(i).commitType === CommitType.STORE
-        // Check LoadEvent only when isAmo or isLoad and skip MMIO
-        val difftestLoadEvent = DifftestModule(new DiffLoadEvent, delay = 3)
-        difftestLoadEvent.coreid := io.hartId
-        difftestLoadEvent.index := i.U
-        val loadCheck = (FuType.isAMO(uop.fuType) || FuType.isLoad(uop.fuType)) && !dt_skip
-        difftestLoadEvent.valid    := io.commits.commitValid(i) && io.commits.isCommit && loadCheck
-        difftestLoadEvent.paddr    := exuOut.paddr
-        difftestLoadEvent.opType   := uop.fuOpType
-        difftestLoadEvent.isAtomic := FuType.isAMO(uop.fuType)
-        difftestLoadEvent.isLoad   := FuType.isLoad(uop.fuType)
       }
+      difftest.isLoad := io.commits.info(i).commitType === CommitType.LOAD
+      // Check LoadEvent only when isAmo or isLoad and skip MMIO
+      val difftestLoadEvent = DifftestModule(new DiffLoadEvent, delay = 3)
+      difftestLoadEvent.coreid := io.hartId
+      difftestLoadEvent.index := i.U
+      val loadCheck = (FuType.isAMO(uop.fuType) || FuType.isLoad(uop.fuType)) && !dt_skip
+      difftestLoadEvent.valid    := io.commits.commitValid(i) && io.commits.isCommit && loadCheck
+      difftestLoadEvent.paddr    := exuOut.paddr
+      difftestLoadEvent.opType   := uop.fuOpType
+      difftestLoadEvent.isAtomic := FuType.isAMO(uop.fuType)
+      difftestLoadEvent.isLoad   := FuType.isLoad(uop.fuType)
     }
   }
 
