@@ -21,53 +21,78 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 
 class TraceInstrBundle(implicit p: Parameters) extends TraceBundle {
-  val pc = UInt(TracePCWidth.W)
+  val pcVA = UInt(TracePCWidth.W)
+  val pcPA = UInt(TracePCWidth.W)
+  val memoryAddrVA = UInt(64.W)
+  val memoryAddrPA = UInt(64.W)
+  val target = UInt(64.W)
   val inst = UInt(TraceInstrWidth.W)
+  val memoryType = UInt(8.W)
+  val memorySize = UInt(8.W)
+  val branchType = UInt(8.W)
+  val branchTaken = UInt(8.W)
 }
 
 object TraceInstrBundle {
-  def apply(pc: UInt, inst: UInt)(implicit p: Parameters): TraceInstrBundle = {
-    val bundle = Wire(new TraceInstrBundle())
-    bundle.pc := pc
+  def apply(pcVA: UInt, pcPA: UInt, memoryAddrVA: UInt, memoryAddrPA: UInt,
+    target: UInt, inst: UInt, memoryType: UInt, memorySize: UInt,
+    branchType: UInt, branchTaken: UInt)(implicit p: Parameters): TraceInstrBundle = {
+    val bundle = Wire(new TraceInstrBundle)
+    bundle.pcVA := pcVA
+    bundle.pcPA := pcPA
+    bundle.memoryAddrVA := memoryAddrVA
+    bundle.memoryAddrPA := memoryAddrPA
+    bundle.target := target
     bundle.inst := inst
+    bundle.memoryType := memoryType
+    bundle.memorySize := memorySize
+    bundle.branchType := branchType
+    bundle.branchTaken := branchTaken
     bundle
   }
 }
 
-class TraceReaderHelper(width: Int, pcWidth: Int, instWidth: Int)
+class TraceReaderHelper(width: Int)(implicit p: Parameters)
   extends ExtModule
   with HasExtModuleInline {
   val clock = IO(Input(Clock()))
   val reset = IO(Input(Reset()))
   val enable = IO(Input(Bool()))
 
-  val pc = IO(Output(Vec(width, UInt(pcWidth.W))))
-  val instr = IO(Output(Vec(width, UInt(instWidth.W))))
+  val insts = IO(Output(Vec(width, new TraceInstrBundle())))
 
   def getVerilog: String = {
+    val portNameList = new TraceInstrBundle().elements.map(_._1)
+    val portSizeList = new TraceInstrBundle().elements.map(_._2.getWidth)
     def genPort(size: Int, baseName: String): String = {
       (0 until width)
-        .map(i => s"output [${size - 1}:0] ${baseName}_$i,")
+        .map(i => s"output [${size - 1}:0] insts_${i}_${baseName},")
         .mkString("  ", "\n  ", "\n")
     }
 
     def callDPIC: String = {
       (0 until width)
-        .map(i => s"trace_read_one_instr(enable, pc_${i}, instr_${i});")
+        .map(i => s"trace_read_one_instr(insts_${i}_pcVA, insts_${i}_pcPA, insts_${i}_memoryAddrVA, insts_${i}_memoryAddrPA, insts_${i}_target, insts_${i}_inst, insts_${i}_memoryType, insts_${i}_memorySize, insts_${i}_branchType, insts_${i}_branchTaken);")
         .mkString("      ", "\n      ", "\n")
     }
     s"""
        |import "DPI-C" function void trace_read_one_instr(
-       |  input byte enable,
-       |  output longint pc,
-       |  output int instr
+       |  output longint pc_va,
+       |  output longint pc_pa,
+       |  output longint memory_addr_va,
+       |  output longint memory_addr_pa,
+       |  output longint target,
+       |  output int instr,
+       |  output byte memory_type,
+       |  output byte memory_size,
+       |  output byte branch_type,
+       |  output byte branch_taken,
        |);
        |
        |module TraceReaderHelper(
        |  input  clock,
        |  input  reset,
-       |${genPort(pcWidth, "pc")}
-       |${genPort(instWidth, "instr")}
+       |${portNameList.zip(portSizeList).map{case (name, size) => genPort(size, name)}.mkString}
        |  input  enable
        |);
        |
