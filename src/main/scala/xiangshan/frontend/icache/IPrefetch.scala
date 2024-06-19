@@ -164,13 +164,13 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val s1_req_paddr        = VecInit((0 until PortNumber).map(i => 
                                 Mux(tlb_valid_pulse(i), s1_req_paddr_wire(i), s1_req_paddr_reg(i))))
   val s1_req_gpaddr       = VecInit((0 until PortNumber).map(i =>
-                                ResultHoldBypass(valid = tlb_valid_pulse(i), data = fromITLB(i).bits.gpaddr(0))))
+                                ResultHoldBypass(valid = tlb_valid_pulse(i), init = 0.U.asTypeOf(fromITLB(i).bits.gpaddr(0)), data = fromITLB(i).bits.gpaddr(0))))
   val itlbExcpPF          = VecInit((0 until PortNumber).map(i =>
-                                ResultHoldBypass(valid = tlb_valid_pulse(i), data = fromITLB(i).bits.excp(0).pf.instr)))
+                                ResultHoldBypass(valid = tlb_valid_pulse(i), init = 0.U.asTypeOf(fromITLB(i).bits.excp(0).pf.instr), data = fromITLB(i).bits.excp(0).pf.instr)))
   val itlbExcpGPF         = VecInit((0 until PortNumber).map(i =>
-                                ResultHoldBypass(valid = tlb_valid_pulse(i), data = fromITLB(i).bits.excp(0).gpf.instr)))
+                                ResultHoldBypass(valid = tlb_valid_pulse(i), init = 0.U.asTypeOf(fromITLB(i).bits.excp(0).gpf.instr), data = fromITLB(i).bits.excp(0).gpf.instr)))
   val itlbExcpAF          = VecInit((0 until PortNumber).map(i =>
-                                ResultHoldBypass(valid = tlb_valid_pulse(i), data = fromITLB(i).bits.excp(0).af.instr)))
+                                ResultHoldBypass(valid = tlb_valid_pulse(i), init = 0.U.asTypeOf(fromITLB(i).bits.excp(0).af.instr), data = fromITLB(i).bits.excp(0).af.instr)))
   val itlbExcp            = VecInit((0 until PortNumber).map(i => itlbExcpAF(i) || itlbExcpPF(i) || itlbExcpGPF(i)))
 
   /**
@@ -335,13 +335,13 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     */
   val s2_valid  = generatePipeControl(lastFire = s1_fire, thisFire = s2_fire, thisFlush = s2_flush, lastFlush = false.B)
 
-  val s2_req_vaddr    = RegEnable(s1_req_vaddr, s1_fire)
-  val s2_doubleline   = RegEnable(s1_doubleline, s1_fire)
-  val s2_req_paddr    = RegEnable(s1_req_paddr, s1_fire)
+  val s2_req_vaddr    = RegEnable(s1_req_vaddr, 0.U.asTypeOf(s1_req_vaddr), s1_fire)
+  val s2_doubleline   = RegEnable(s1_doubleline, 0.U.asTypeOf(s1_doubleline), s1_fire)
+  val s2_req_paddr    = RegEnable(s1_req_paddr, 0.U.asTypeOf(s1_req_paddr), s1_fire)
 
-  val s2_pmpExcp      = RegEnable(pmpExcp, s1_fire)
-  val s2_itlbExcp     = RegEnable(itlbExcp, s1_fire)
-  val s2_waymasks     = RegEnable(s1_waymasks, s1_fire)
+  val s2_pmpExcp      = RegEnable(pmpExcp, 0.U.asTypeOf(pmpExcp), s1_fire)
+  val s2_itlbExcp     = RegEnable(itlbExcp, 0.U.asTypeOf(itlbExcp), s1_fire)
+  val s2_waymasks     = RegEnable(s1_waymasks, 0.U.asTypeOf(s1_waymasks), s1_fire)
 
   val s2_req_vSetIdx  = s2_req_vaddr.map(get_idx(_))
   val s2_req_ptags    = s2_req_paddr.map(get_phy_tag(_))

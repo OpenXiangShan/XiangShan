@@ -106,6 +106,10 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
     Mux(valid, data, RegEnable(data, valid))
   }
 
+  def ResultHoldBypass[T <: Data](data: T, init: T, valid: Bool): T = {
+    Mux(valid, data, RegEnable(data, init, valid))
+  }
+
   def holdReleaseLatch(valid: Bool, release: Bool, flush: Bool): Bool ={
     val bit = RegInit(false.B)
     when(flush)                   { bit := false.B  }
@@ -135,6 +139,10 @@ trait HasICacheParameters extends HasL1CacheParameters with HasInstrMMIOConst wi
     val bankIdxLow  = Cat(0.U(1.W), blkOffset) >> log2Ceil(blockBytes/ICacheDataBanks)
     val bankIdxHigh = (Cat(0.U(1.W), blkOffset) + 32.U) >> log2Ceil(blockBytes/ICacheDataBanks)
     val bankSel = VecInit((0 until ICacheDataBanks * 2).map(i => (i.U >= bankIdxLow) && (i.U <= bankIdxHigh)))
+    /* FIXME: when blkOffset is invalid, it can be anything and causing fake assertion-fails
+     *        maybe it's better to do this assert outside getBankSel(), or pass a valid signal here
+     *        the current solution is ensuring blkOffset is valid by defaulting it to 0.U
+     */
     assert(PopCount(bankSel) === ICacheBankVisitNum.U, "The number of bank visits must be %d, but bankSel=0x%x", ICacheBankVisitNum.U, bankSel.asUInt)
     bankSel.asTypeOf(UInt((ICacheDataBanks * 2).W)).asTypeOf(Vec(2, UInt(ICacheDataBanks.W)))
   }
@@ -193,10 +201,10 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
   val port_1_read_1  = io.read.valid &&  io.read.bits.vSetIdx(1)(0) && io.read.bits.isDoubleLine
   val port_1_read_0  = io.read.valid && !io.read.bits.vSetIdx(1)(0) && io.read.bits.isDoubleLine
 
-  val port_0_read_0_reg = RegEnable(port_0_read_0, io.read.fire)
-  val port_0_read_1_reg = RegEnable(port_0_read_1, io.read.fire)
-  val port_1_read_1_reg = RegEnable(port_1_read_1, io.read.fire)
-  val port_1_read_0_reg = RegEnable(port_1_read_0, io.read.fire)
+  val port_0_read_0_reg = RegEnable(port_0_read_0, 0.U.asTypeOf(port_0_read_0), io.read.fire)
+  val port_0_read_1_reg = RegEnable(port_0_read_1, 0.U.asTypeOf(port_0_read_1), io.read.fire)
+  val port_1_read_1_reg = RegEnable(port_1_read_1, 0.U.asTypeOf(port_1_read_1), io.read.fire)
+  val port_1_read_0_reg = RegEnable(port_1_read_0, 0.U.asTypeOf(port_1_read_0), io.read.fire)
 
   val bank_0_idx = Mux(port_0_read_0, io.read.bits.vSetIdx(0), io.read.bits.vSetIdx(1))
   val bank_1_idx = Mux(port_0_read_1, io.read.bits.vSetIdx(0), io.read.bits.vSetIdx(1))
@@ -234,7 +242,7 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
     tagArray
   }
 
-  val read_set_idx_next = RegEnable(io.read.bits.vSetIdx, io.read.fire)
+  val read_set_idx_next = RegEnable(io.read.bits.vSetIdx, 0.U.asTypeOf(io.read.bits.vSetIdx), io.read.fire)
   val valid_array = RegInit(VecInit(Seq.fill(nWays)(0.U(nSets.W))))
   val valid_metas = Wire(Vec(PortNumber, Vec(nWays, Bool())))
   // valid read
@@ -256,7 +264,7 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
     val read_meta_wrong = read_meta_decoded.map{ way_bits_decoded => way_bits_decoded.error}
     val read_meta_corrected = VecInit(read_meta_decoded.map{ way_bits_decoded => way_bits_decoded.corrected})
     read_metas(i) := read_meta_corrected.asTypeOf(Vec(nWays,new ICacheMetadata()))
-    (0 until nWays).foreach{ w => io.readResp.errors(i)(w) := RegEnable(read_meta_wrong(w), read_fire_delay1) && read_fire_delay2}
+    (0 until nWays).foreach{ w => io.readResp.errors(i)(w) := RegEnable(read_meta_wrong(w), 0.U.asTypeOf(read_meta_wrong(w)), read_fire_delay1) && read_fire_delay2}
   }
 
   //Parity Encode
@@ -373,7 +381,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
     * read logic
     ******************************************************************************
     */
-  val masksReg          = RegEnable(masks, io.read(0).valid)
+  val masksReg          = RegEnable(masks, 0.U.asTypeOf(masks), io.read(0).valid)
   val readDataWithCode  = (0 until ICacheDataBanks).map(bank =>
                             Mux1H(VecInit(masksReg.map(_(bank))).asTypeOf(UInt(nWays.W)),
                                   dataArrays.map(_(bank).io.r.resp.asUInt)))
@@ -420,8 +428,8 @@ class ICacheReplacer(implicit p: Parameters) extends ICacheModule {
                        replacers(0).way(io.victim.vSetIdx.bits(highestIdxBit, 1)))
 
   // touch the victim in next cycle
-  val victim_vSetIdx_reg  = RegEnable(io.victim.vSetIdx.bits, io.victim.vSetIdx.valid)
-  val victim_way_reg      = RegEnable(io.victim.way,          io.victim.vSetIdx.valid)
+  val victim_vSetIdx_reg = RegEnable(io.victim.vSetIdx.bits, 0.U.asTypeOf(io.victim.vSetIdx.bits), io.victim.vSetIdx.valid)
+  val victim_way_reg     = RegEnable(io.victim.way,          0.U.asTypeOf(io.victim.way),          io.victim.vSetIdx.valid)
   (0 until PortNumber).foreach {i =>
     touch_sets(i)(1)        := victim_vSetIdx_reg(highestIdxBit, 1)
     touch_ways(i)(1).bits   := victim_way_reg

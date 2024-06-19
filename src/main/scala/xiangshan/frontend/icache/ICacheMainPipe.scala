@@ -219,15 +219,15 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     */
   val s1_valid = generatePipeControl(lastFire = s0_fire, thisFire = s1_fire, thisFlush = s1_flush, lastFlush = false.B)
 
-  val s1_req_vaddr    = RegEnable(s0_req_vaddr, s0_fire)
-  val s1_req_ptags    = RegEnable(s0_req_ptags, s0_fire)
-  val s1_req_gpaddr   = RegEnable(s0_req_gpaddr, s0_fire)
-  val s1_doubleline   = RegEnable(s0_doubleline, s0_fire)
-  val s1_SRAMhits     = RegEnable(s0_hits, s0_fire)
-  val s1_excp_tlb_af  = RegEnable(s0_excp_tlb_af, s0_fire)
-  val s1_excp_tlb_pf  = RegEnable(s0_excp_tlb_pf, s0_fire)
-  val s1_excp_tlb_gpf = RegEnable(s0_excp_tlb_gpf, s0_fire)
-  val s1_waymasks     = RegEnable(s0_waymasks, s0_fire)
+  val s1_req_vaddr    = RegEnable(s0_req_vaddr, 0.U.asTypeOf(s0_req_vaddr), s0_fire)
+  val s1_req_ptags    = RegEnable(s0_req_ptags, 0.U.asTypeOf(s0_req_ptags), s0_fire)
+  val s1_req_gpaddr   = RegEnable(s0_req_gpaddr, 0.U.asTypeOf(s0_req_gpaddr), s0_fire)
+  val s1_doubleline   = RegEnable(s0_doubleline, 0.U.asTypeOf(s0_doubleline), s0_fire)
+  val s1_SRAMhits     = RegEnable(s0_hits, 0.U.asTypeOf(s0_hits), s0_fire)
+  val s1_excp_tlb_af  = RegEnable(s0_excp_tlb_af, 0.U.asTypeOf(s0_excp_tlb_af), s0_fire)
+  val s1_excp_tlb_pf  = RegEnable(s0_excp_tlb_pf, 0.U.asTypeOf(s0_excp_tlb_pf), s0_fire)
+  val s1_excp_tlb_gpf = RegEnable(s0_excp_tlb_gpf, 0.U.asTypeOf(s0_excp_tlb_gpf), s0_fire)
+  val s1_waymasks     = RegEnable(s0_waymasks, 0.U.asTypeOf(s0_waymasks), s0_fire)
 
   val s1_req_vSetIdx  = s1_req_vaddr.map(get_idx(_))
   val s1_req_paddr    = s1_req_vaddr.zip(s1_req_ptags).map{case(vaddr, ptag) => get_paddr_from_ptag(vaddr, ptag)}
@@ -296,23 +296,23 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   val s2_valid = generatePipeControl(lastFire = s1_fire, thisFire = s2_fire, thisFlush = s2_flush, lastFlush = false.B)
 
-  val s2_req_vaddr      = RegEnable(s1_req_vaddr, s1_fire)
-  val s2_req_ptags      = RegEnable(s1_req_ptags, s1_fire)
-  val s2_req_gpaddr     = RegEnable(s1_req_gpaddr, s0_fire)
-  val s2_doubleline     = RegEnable(s1_doubleline, s1_fire)
-  val s2_excp_tlb_af    = RegEnable(s1_excp_tlb_af, s1_fire)
-  val s2_excp_tlb_pf    = RegEnable(s1_excp_tlb_pf, s1_fire)
-  val s2_excp_tlb_gpf   = RegEnable(s1_excp_tlb_gpf, s1_fire)
-  val s2_excp_pmp_af    = RegEnable(VecInit(fromPMP.map(_.instr)), s1_fire)
-  val s2_excp_pmp_mmio  = RegEnable(VecInit(fromPMP.map(_.mmio)), s1_fire)
-  // val s2_data_errors    = RegEnable(s1_data_errors, s1_fire)
+  val s2_req_vaddr      = RegEnable(s1_req_vaddr, 0.U.asTypeOf(s1_req_vaddr), s1_fire)
+  val s2_req_ptags      = RegEnable(s1_req_ptags, 0.U.asTypeOf(s1_req_ptags), s1_fire)
+  val s2_req_gpaddr     = RegEnable(s1_req_gpaddr, 0.U.asTypeOf(s1_req_gpaddr), s0_fire)
+  val s2_doubleline     = RegEnable(s1_doubleline, 0.U.asTypeOf(s1_doubleline), s1_fire)
+  val s2_excp_tlb_af    = RegEnable(s1_excp_tlb_af, 0.U.asTypeOf(s1_excp_tlb_af), s1_fire)
+  val s2_excp_tlb_pf    = RegEnable(s1_excp_tlb_pf, 0.U.asTypeOf(s1_excp_tlb_pf), s1_fire)
+  val s2_excp_tlb_gpf   = RegEnable(s1_excp_tlb_gpf, 0.U.asTypeOf(s1_excp_tlb_gpf), s1_fire)
+  val s2_excp_pmp_af    = RegEnable(VecInit(fromPMP.map(_.instr)), 0.U.asTypeOf(VecInit(fromPMP.map(_.instr))), s1_fire)
+  val s2_excp_pmp_mmio  = RegEnable(VecInit(fromPMP.map(_.mmio)), 0.U.asTypeOf(VecInit(fromPMP.map(_.mmio))), s1_fire)
+  // val s2_data_errors    = RegEnable(s1_data_errors, 0.U.asTypeOf(s1_data_errors), s1_fire)
 
   val s2_req_vSetIdx  = s2_req_vaddr.map(get_idx(_))
   val s2_req_offset   = s2_req_vaddr(0)(log2Ceil(blockBytes)-1, 0)
   val s2_req_paddr    = s2_req_vaddr.zip(s2_req_ptags).map{case(vaddr, ptag) => get_paddr_from_ptag(vaddr, ptag)}
 
-  val s2_SRAMhits     = RegEnable(s1_SRAMhits, s1_fire)
-  val s2_codes        = RegEnable(s1_codes, s1_fire)
+  val s2_SRAMhits     = RegEnable(s1_SRAMhits, 0.U.asTypeOf(s1_SRAMhits), s1_fire)
+  val s2_codes        = RegEnable(s1_codes, 0.U.asTypeOf(s1_codes), s1_fire)
   val s2_hits         = RegInit(VecInit(Seq.fill(PortNumber)(false.B)))
   val s2_datas        = RegInit(VecInit(Seq.fill(ICacheDataBanks)(0.U((blockBits/ICacheDataBanks).W))))
 
