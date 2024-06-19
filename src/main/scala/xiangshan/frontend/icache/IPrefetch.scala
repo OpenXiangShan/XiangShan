@@ -106,9 +106,9 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     */
   val s1_valid = generatePipeControl(lastFire = s0_fire, thisFire = s1_fire, thisFlush = s1_flush, lastFlush = false.B)
 
-  val s1_req_vaddr    = RegEnable(s0_req_vaddr, s0_fire)
-  val s1_doubleline   = RegEnable(s0_doubleline, s0_fire)
-  val s1_req_ftqIdx   = RegEnable(s0_req_ftqIdx, s0_fire)
+  val s1_req_vaddr    = RegEnable(s0_req_vaddr, 0.U.asTypeOf(s0_req_vaddr), s0_fire)
+  val s1_doubleline   = RegEnable(s0_doubleline, 0.U.asTypeOf(s0_doubleline), s0_fire)
+  val s1_req_ftqIdx   = RegEnable(s0_req_ftqIdx, 0.U.asTypeOf(s0_req_ftqIdx), s0_fire)
   val s1_req_vSetIdx  = VecInit(s1_req_vaddr.map(get_idx(_)))
 
   val m_idle :: m_itlbResend :: m_metaResend :: m_enqWay :: m_enterS2 :: Nil = Enum(5)
@@ -160,7 +160,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     */
   val s1_req_paddr_wire   = VecInit(fromITLB.map(_.bits.paddr(0)))
   val s1_req_paddr_reg    = VecInit((0 until PortNumber).map(i =>
-                                RegEnable(s1_req_paddr_wire(i), tlb_valid_pulse(i))))
+                                RegEnable(s1_req_paddr_wire(i), 0.U(PAddrBits.W), tlb_valid_pulse(i))))
   val s1_req_paddr        = VecInit((0 until PortNumber).map(i => 
                                 Mux(tlb_valid_pulse(i), s1_req_paddr_wire(i), s1_req_paddr_reg(i))))
   val s1_req_gpaddr       = VecInit((0 until PortNumber).map(i =>
