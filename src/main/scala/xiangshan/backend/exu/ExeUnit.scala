@@ -75,11 +75,9 @@ class ExeUnitImp(
       def latReal: Int = cfg.latency.latencyVal.getOrElse(0)
       def extralat: Int = cfg.latency.extraLatencyVal.getOrElse(0)
 
-      val uncerLat = cfg.latency.uncertainLatencyVal.nonEmpty
+      val uncerLat = cfg.latency.uncertainEnable.nonEmpty
       val lat0 = (latReal == 0 && !uncerLat).asBool
-      val latN = (latReal > 0&& !uncerLat).asBool
-
-
+      val latN = (latReal >  0 && !uncerLat).asBool
 
       val fuVldVec = (io.in.valid && latN) +: Seq.fill(latReal)(RegInit(false.B))
       val fuRdyVec = Seq.fill(latReal)(Wire(Bool())) :+ io.out.ready
