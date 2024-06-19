@@ -217,7 +217,98 @@ class FTBEntry(implicit p: Parameters) extends FTBEntry_part with FTBParams with
   }
 
   def getTargetVec(pc: UInt, last_stage: Option[Tuple2[UInt, Bool]] = None) = {
-    VecInit((brSlots :+ tailSlot).map(_.getTarget(pc, last_stage)))
+    /*
+    Previous design: Use the getTarget function of FTBSlot to calculate three sets of targets separately;
+    During this process, nine sets of registers will be generated to register the values of the higher plus one minus one
+    Current design: Reuse the duplicate parts of the original nine sets of registers,
+    calculate the common high bits lastmulti-stage_pc_high of brtarget and jmptarget,
+    and the high bits lastmulti-stage_pc_middle that need to be added and subtracted from each other,
+    and then concatenate them according to the carry situation to obtain brtarget and jmptarget
+    */
+    val h_br                = pc(VAddrBits - 1,  BR_OFFSET_LEN + 1)
+    val higher_br           = Wire(UInt((VAddrBits - BR_OFFSET_LEN - 1).W))
+    val higher_plus_one_br  = Wire(UInt((VAddrBits - BR_OFFSET_LEN - 1).W))
+    val higher_minus_one_br = Wire(UInt((VAddrBits - BR_OFFSET_LEN - 1).W))
+    val h_tail                = pc(VAddrBits - 1,  JMP_OFFSET_LEN + 1)
+    val higher_tail           = Wire(UInt((VAddrBits - JMP_OFFSET_LEN - 1).W))
+    val higher_plus_one_tail  = Wire(UInt((VAddrBits - JMP_OFFSET_LEN - 1).W))
+    val higher_minus_one_tail = Wire(UInt((VAddrBits - JMP_OFFSET_LEN - 1).W))
+    if (last_stage.isDefined) {
+      val last_stage_pc = last_stage.get._1
+      val stage_en = last_stage.get._2
+      val last_stage_pc_higher = RegEnable(last_stage_pc(VAddrBits - 1, JMP_OFFSET_LEN + 1), stage_en)
+      val last_stage_pc_middle = RegEnable(last_stage_pc(JMP_OFFSET_LEN, BR_OFFSET_LEN + 1), stage_en)
+      val last_stage_pc_higher_plus_one  = RegEnable(last_stage_pc(VAddrBits - 1, JMP_OFFSET_LEN + 1) + 1.U, stage_en)
+      val last_stage_pc_higher_minus_one = RegEnable(last_stage_pc(VAddrBits - 1, JMP_OFFSET_LEN + 1) - 1.U, stage_en)
+      val last_stage_pc_middle_plus_one  = RegEnable(Cat(0.U(1.W), last_stage_pc(JMP_OFFSET_LEN, BR_OFFSET_LEN + 1)) + 1.U, stage_en)
+      val last_stage_pc_middle_minus_one = RegEnable(Cat(0.U(1.W), last_stage_pc(JMP_OFFSET_LEN, BR_OFFSET_LEN + 1)) - 1.U, stage_en)
+
+      higher_br := Cat(last_stage_pc_higher, last_stage_pc_middle)
+      higher_plus_one_br := Mux(
+          last_stage_pc_middle_plus_one(JMP_OFFSET_LEN - BR_OFFSET_LEN),
+          Cat(last_stage_pc_higher_plus_one, last_stage_pc_middle_plus_one(JMP_OFFSET_LEN - BR_OFFSET_LEN-1, 0)),
+          Cat(last_stage_pc_higher, last_stage_pc_middle_plus_one(JMP_OFFSET_LEN - BR_OFFSET_LEN-1, 0)))
+      higher_minus_one_br := Mux(
+          last_stage_pc_middle_minus_one(JMP_OFFSET_LEN - BR_OFFSET_LEN),
+          Cat(last_stage_pc_higher_minus_one, last_stage_pc_middle_minus_one(JMP_OFFSET_LEN - BR_OFFSET_LEN-1, 0)),
+          Cat(last_stage_pc_higher, last_stage_pc_middle_minus_one(JMP_OFFSET_LEN - BR_OFFSET_LEN-1, 0)))
+
+      higher_tail := last_stage_pc_higher
+      higher_plus_one_tail := last_stage_pc_higher_plus_one
+      higher_minus_one_tail := last_stage_pc_higher_minus_one
+    }else{
+      higher_br := h_br
+      higher_plus_one_br := h_br + 1.U
+      higher_minus_one_br := h_br - 1.U
+      higher_tail := h_tail
+      higher_plus_one_tail := h_tail + 1.U
+      higher_minus_one_tail := h_tail - 1.U
+    }
+    val br_slots_targets = VecInit(brSlots.map(s =>
+      Cat(
+          Mux1H(Seq(
+            (s.tarStat === TAR_OVF, higher_plus_one_br),
+            (s.tarStat === TAR_UDF, higher_minus_one_br),
+            (s.tarStat === TAR_FIT, higher_br),
+          )),
+          s.lower(s.offsetLen-1, 0), 0.U(1.W)
+        )
+    ))
+    val tail_target = Wire(UInt(VAddrBits.W))
+    if(tailSlot.subOffsetLen.isDefined){
+      tail_target := Mux(tailSlot.sharing,
+        Cat(
+          Mux1H(Seq(
+            (tailSlot.tarStat === TAR_OVF, higher_plus_one_br),
+            (tailSlot.tarStat === TAR_UDF, higher_minus_one_br),
+            (tailSlot.tarStat === TAR_FIT, higher_br),
+          )),
+          tailSlot.lower(tailSlot.subOffsetLen.get-1, 0), 0.U(1.W)
+        ),
+        Cat(
+          Mux1H(Seq(
+            (tailSlot.tarStat === TAR_OVF, higher_plus_one_tail),
+            (tailSlot.tarStat === TAR_UDF, higher_minus_one_tail),
+            (tailSlot.tarStat === TAR_FIT, higher_tail),
+          )),
+          tailSlot.lower(tailSlot.offsetLen-1, 0), 0.U(1.W)
+        )
+      )
+    }else{
+      tail_target := Cat(
+          Mux1H(Seq(
+            (tailSlot.tarStat === TAR_OVF, higher_plus_one_tail),
+            (tailSlot.tarStat === TAR_UDF, higher_minus_one_tail),
+            (tailSlot.tarStat === TAR_FIT, higher_tail),
+          )),
+          tailSlot.lower(tailSlot.offsetLen-1, 0), 0.U(1.W)
+        )
+    }
+
+    br_slots_targets.map(t => require(t.getWidth == VAddrBits))
+    require(tail_target.getWidth == VAddrBits)
+    val targets = VecInit(br_slots_targets :+ tail_target)
+    targets
   }
 
   def getOffsetVec = VecInit(brSlots.map(_.offset) :+ tailSlot.offset)
