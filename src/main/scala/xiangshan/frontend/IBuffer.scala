@@ -23,6 +23,7 @@ import xiangshan._
 import utils._
 import utility._
 import xiangshan.ExceptionNO._
+import xiangshan.frontend.tracertl.TraceInstrBundle
 
 class IBufPtr(implicit p: Parameters) extends CircularQueuePtr[IBufPtr](
   p => p(XSCoreParamsKey).IBufSize
@@ -66,6 +67,7 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
   val exceptionType = IBufferExceptionType()
   val exceptionFromBackend = Bool()
   val triggered = TriggerAction()
+  val traceInfo = new TraceInstrBundle()
 
   def fromFetch(fetch: FetchToIBuffer, i: Int): IBufEntry = {
     inst   := fetch.instrs(i)
@@ -82,6 +84,7 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
     )
     exceptionFromBackend := fetch.exceptionFromBackend(i)
     triggered := fetch.triggered(i)
+    traceInfo := fetch.traceInfo(i)
     this
   }
 
@@ -107,6 +110,7 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
     cf.ssid := DontCare
     cf.ftqPtr := ftqPtr
     cf.ftqOffset := ftqOffset
+    cf.traceInfo := traceInfo
     cf
   }
 

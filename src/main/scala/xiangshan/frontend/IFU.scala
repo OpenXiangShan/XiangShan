@@ -896,6 +896,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   /*** send to Ibuffer  ***/
   io.toIbuffer.valid            := f3_toIbuffer_valid && TraceRTLChoose(true.B, !traceBlock)
   io.toIbuffer.bits.specifyField(
+    _.traceInfo   := tracePDaC.io.traceAlignInsts.map(_.bits),
     _.instrs      := f3_expd_instr,
     _.valid       := f3_instr_valid.asUInt,
     _.enqEnable   := checkerOutStage1.fixedRange.asUInt & f3_instr_valid.asUInt,
