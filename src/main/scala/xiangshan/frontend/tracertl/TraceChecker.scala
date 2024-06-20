@@ -78,7 +78,7 @@ class TraceChecker(implicit p: Parameters) extends TraceModule {
       "traceInst should be the same with preDecode.valid")
   }
   when(io.debug_valid) {
-    XSError((checkRange.asUInt & predRange.asUInt) === checkRange.asUInt,
-      "checkRange should be shorter than predRange")
+    XSError((checkRange.asUInt & predRange.asUInt) =/= checkRange.asUInt,
+      "checkRange should be no longer than predRange")
   }
 }
