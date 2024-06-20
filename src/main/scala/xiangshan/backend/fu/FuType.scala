@@ -133,12 +133,6 @@ object FuType extends OHEnumeration {
   val vecArithOrMem = vecArith ++ vecMem
   val vecAll = vecVSET ++ vecMem
 
-  val lat0 = Seq(jmp, brh)
-  val lat1 = Seq(vialuF, vppu, vipu)
-  val lat2 = Seq(i2f, mul, bku, vimac, vfcvt)
-  val lat3 = Seq(vfma)
-  val uncerLat = Seq(fmac, fDivSqrt, vidiv) ++ scalaMemAll ++ vecMem
-
   def X = BitPat.N(num) // Todo: Don't Care
 
   def num = this.values.size
@@ -206,12 +200,6 @@ object FuType extends OHEnumeration {
   def isDivSqrt(fuType: UInt): Bool = FuTypeOrR(fuType, div, fDivSqrt)
 
   def storeIsAMO(fuType: UInt): Bool = FuTypeOrR(fuType, mou)
-
-  def isLat0(fuType: UInt): Bool = FuTypeOrR(fuType, lat0)
-
-  def isLatN(fuType: UInt): Bool = FuTypeOrR(fuType, lat1) || FuTypeOrR(fuType, lat2) || FuTypeOrR(fuType, lat3)
-
-  def isUncerLat(fuType: UInt): Bool = FuTypeOrR(fuType, uncerLat)
 
   def isVppu(fuType: UInt): Bool = FuTypeOrR(fuType, vppu)
 

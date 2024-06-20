@@ -182,9 +182,7 @@ case class FuConfig (
 
   def isSta: Boolean = name.contains("sta")
 
-  def ckAlwaysEn: Boolean = isCsr || isFence || fuType == FuType.vfalu ||
-                            fuType == FuType.div || fuType == FuType.fDivSqrt ||
-                            fuType == FuType.vfdiv || fuType == FuType.vidiv
+  def ckAlwaysEn: Boolean = isCsr || isFence
 
   /**
     * Get index of special src data, like [[VlData]], [[V0Data]]
