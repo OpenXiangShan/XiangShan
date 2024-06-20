@@ -226,7 +226,6 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           csBundle(0).fpWen := false.B
           csBundle(0).vecWen := true.B
           csBundle(0).vlWen := false.B
-          csBundle(0).flushPipe := false.B
           // uop1: uvsetvcfg_vv
           csBundle(1).fuType := FuType.vsetfwf.U
           // vl
@@ -247,6 +246,19 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           csBundle(0).fpWen := false.B
           csBundle(0).vecWen := false.B
           csBundle(0).vlWen := false.B
+        }.elsewhen(VSETOpType.isVsetvl(latchedInst.fuOpType)) {
+          // because vsetvl may modified src2 when src2 == rd,
+          // we need to modify vd in second uop to avoid dependency
+          // uop0 set vl
+          csBundle(0).fuType := FuType.vsetiwf.U
+          csBundle(0).ldest := Vl_IDX.U
+          csBundle(0).rfWen := false.B
+          csBundle(0).vlWen := true.B
+          // uop1 set rd
+          csBundle(1).fuType := FuType.vsetiwi.U
+          csBundle(1).ldest := dest
+          csBundle(1).rfWen := true.B
+          csBundle(1).vlWen := false.B
         }
         // use bypass vtype from vtypeGen
         csBundle(0).vpu.connectVType(io.vtypeBypass)
@@ -360,7 +372,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       /*
       i to vector move
        */
-      csBundle(0).srcType(0) := SrcType.reg
+      csBundle(0).srcType(0) := Mux(src1IsImm, SrcType.imm, SrcType.reg)
       csBundle(0).srcType(1) := SrcType.imm
       csBundle(0).srcType(2) := SrcType.imm
       csBundle(0).lsrc(1) := 0.U
@@ -544,7 +556,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       /*
       i to vector move
        */
-      csBundle(0).srcType(0) := SrcType.reg
+      csBundle(0).srcType(0) := Mux(src1IsImm, SrcType.imm, SrcType.reg)
       csBundle(0).srcType(1) := SrcType.imm
       csBundle(0).srcType(2) := SrcType.imm
       csBundle(0).lsrc(1) := 0.U
@@ -614,7 +626,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       /*
       i to vector move
        */
-      csBundle(0).srcType(0) := SrcType.reg
+      csBundle(0).srcType(0) := Mux(src1IsImm, SrcType.imm, SrcType.reg)
       csBundle(0).srcType(1) := SrcType.imm
       csBundle(0).srcType(2) := SrcType.imm
       csBundle(0).lsrc(1) := 0.U
@@ -1295,7 +1307,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
 
     is(UopSplitType.VEC_SLIDEUP) {
       // i to vector move
-      csBundle(0).srcType(0) := SrcType.reg
+      csBundle(0).srcType(0) := Mux(src1IsImm, SrcType.imm, SrcType.reg)
       csBundle(0).srcType(1) := SrcType.imm
       csBundle(0).srcType(2) := SrcType.imm
       csBundle(0).lsrc(1) := 0.U
@@ -1323,7 +1335,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
 
     is(UopSplitType.VEC_SLIDEDOWN) {
       // i to vector move
-      csBundle(0).srcType(0) := SrcType.reg
+      csBundle(0).srcType(0) := Mux(src1IsImm, SrcType.imm, SrcType.reg)
       csBundle(0).srcType(1) := SrcType.imm
       csBundle(0).srcType(2) := SrcType.imm
       csBundle(0).lsrc(1) := 0.U
@@ -1470,7 +1482,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           }
       }
       // i to vector move
-      csBundle(0).srcType(0) := SrcType.reg
+      csBundle(0).srcType(0) := Mux(src1IsImm, SrcType.imm, SrcType.reg)
       csBundle(0).srcType(1) := SrcType.imm
       csBundle(0).srcType(2) := SrcType.imm
       csBundle(0).lsrc(1) := 0.U
