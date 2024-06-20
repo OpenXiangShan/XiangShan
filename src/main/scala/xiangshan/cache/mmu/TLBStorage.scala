@@ -128,16 +128,17 @@ class TLBFA(
 
     resp.valid := GatedValidRegNext(req.valid)
     resp.bits.hit := Cat(hitVecReg).orR
+    val TranslateMode = WireInit(0.U(1.W)) // 1 for sv48, 0 for sv39
     if (nWays == 1) {
       for (d <- 0 until nDups) {
-        resp.bits.ppn(d) := RegEnable(entries(0).genPPN(saveLevel, req.valid)(vpn), req.fire)
+        resp.bits.ppn(d) := RegEnable(entries(0).genPPN(saveLevel, req.valid, mode = TranslateMode)(vpn), req.fire)
         resp.bits.perm(d) := RegEnable(entries(0).perm, req.fire)
         resp.bits.g_perm(d) := RegEnable(entries(0).g_perm, req.fire)
         resp.bits.s2xlate(d) := RegEnable(entries(0).s2xlate, req.fire)
       }
     } else {
       for (d <- 0 until nDups) {
-        resp.bits.ppn(d) := RegEnable(ParallelMux(hitVec zip entries.map(_.genPPN(saveLevel, req.valid)(vpn))), req.fire)
+        resp.bits.ppn(d) := RegEnable(ParallelMux(hitVec zip entries.map(_.genPPN(saveLevel, req.valid, mode = TranslateMode)(vpn))), req.fire)
         resp.bits.perm(d) := RegEnable(ParallelMux(hitVec zip entries.map(_.perm)), req.fire)
         resp.bits.g_perm(d) := RegEnable(ParallelMux(hitVec zip entries.map(_.g_perm)), req.fire)
         resp.bits.s2xlate(d) := RegEnable(ParallelMux(hitVec zip entries.map(_.s2xlate)), req.fire)
