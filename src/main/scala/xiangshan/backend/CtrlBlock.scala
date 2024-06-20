@@ -119,6 +119,8 @@ class CtrlBlockImp(
     s2_s4_pendingRedirectValid := false.B
   }
 
+  dontTouch(rename.io.out)
+
   // Redirect will be RegNext at ExuBlocks and IssueBlocks
   val s2_s4_redirect = RegNextWithEnable(s1_s3_redirect)
   val s3_s5_redirect = RegNextWithEnable(s2_s4_redirect)

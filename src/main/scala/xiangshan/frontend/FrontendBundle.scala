@@ -25,6 +25,7 @@ import utils._
 import utility._
 import xiangshan.cache.mmu.TlbResp
 import xiangshan.backend.fu.PMPRespBundle
+import xiangshan.frontend.tracertl.TraceInstrBundle
 
 import scala.math._
 import java.util.ResourceBundle.Control
@@ -237,6 +238,8 @@ class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val illegalInstr = Vec(PredictWidth, Bool())
   val triggered    = Vec(PredictWidth, TriggerAction())
   val topdown_info = new FrontendTopDownBundle
+
+  val traceInfo = Vec(PredictWidth, new TraceInstrBundle())
 }
 
 // class BitWiseUInt(val width: Int, val init: UInt) extends Module {

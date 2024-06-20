@@ -33,7 +33,6 @@ import xiangshan.frontend.{AllAheadFoldedHistoryOldestBits, AllFoldedHistories, 
 import xiangshan.frontend.{Ftq_Redirect_SRAMEntry, HasBPUParameter, IfuToBackendIO, PreDecodeInfo, RASPtr}
 import xiangshan.cache.HasDCacheParameters
 import utility._
-
 import org.chipsalliance.cde.config.Parameters
 import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util.experimental.decode.EspressoMinimizer
@@ -45,6 +44,7 @@ import xiangshan.frontend.AllFoldedHistories
 import xiangshan.frontend.AllAheadFoldedHistoryOldestBits
 import xiangshan.frontend.RASPtr
 import xiangshan.backend.rob.RobBundles.RobCommitEntryBundle
+import xiangshan.frontend.tracertl.TraceInstrBundle
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
   val valid = Bool()
@@ -153,6 +153,8 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val ssid = UInt(SSIDWidth.W)
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
+
+  val traceInfo = new TraceInstrBundle()
 }
 
 

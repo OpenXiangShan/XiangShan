@@ -20,6 +20,7 @@ import xiangshan.backend.issue.EntryBundles._
 import xiangshan.backend.regfile.{RfReadPortWithConfig, RfWritePortWithConfig}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend._
+import xiangshan.frontend.tracertl.TraceInstrBundle
 import xiangshan.mem.{LqPtr, SqPtr}
 import yunsuan.vector.VIFuParam
 import xiangshan.backend.trace._
@@ -51,6 +52,8 @@ object Bundles {
     val ftqPtr          = new FtqPtr
     val ftqOffset       = UInt(log2Up(PredictWidth).W)
 
+    val traceInfo       = new TraceInstrBundle()
+
     def connectCtrlFlow(source: CtrlFlow): Unit = {
       this.instr            := source.instr
       this.pc               := source.pc
@@ -62,6 +65,8 @@ object Bundles {
       this.crossPageIPFFix  := source.crossPageIPFFix
       this.ftqPtr           := source.ftqPtr
       this.ftqOffset        := source.ftqOffset
+
+      this.traceInfo        := source.traceInfo
     }
   }
 
@@ -113,6 +118,8 @@ object Bundles {
     val needFrm         = new NeedFrmBundle
 
     val debug_fuType    = OptionWrapper(backendParams.debugEn, FuType())
+//    val traceInfo       = OptionWrapper(env.TraceRTLMode, new TraceInstrBundle())
+    val traceInfo       = new TraceInstrBundle()
 
     private def allSignals = srcType.take(3) ++ Seq(fuType, fuOpType, rfWen, fpWen, vecWen,
       isXSTrap, waitForward, blockBackward, flushPipe, canRobCompress, uopSplitType, selImm)
@@ -240,6 +247,8 @@ object Bundles {
     val debug_fuType    = OptionWrapper(backendParams.debugEn, FuType())
 
     val numLsElem       = NumLsElem()
+
+    val traceInfo       = new TraceInstrBundle()
 
     def getDebugFuType: UInt = debug_fuType.getOrElse(fuType)
 
