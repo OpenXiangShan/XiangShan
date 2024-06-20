@@ -887,7 +887,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   for (i <- 0 until EnsbufferWidth) {
     val ptr = rdataPtrExt(i).value
     val mmioStall = if(i == 0) mmio(rdataPtrExt(0).value) else (mmio(rdataPtrExt(i).value) || mmio(rdataPtrExt(i-1).value))
-    dataBuffer.io.enq(i).valid := allocated(ptr) && committed(ptr) && ((!isVec(ptr) && allvalid(ptr)) || vecMbCommit(ptr)) && !mmioStall
+    dataBuffer.io.enq(i).valid := allocated(ptr) && committed(ptr) && ((!isVec(ptr) && (allvalid(ptr) || hasException(ptr))) || vecMbCommit(ptr)) && !mmioStall
     // Note that store data/addr should both be valid after store's commit
     assert(!dataBuffer.io.enq(i).valid || allvalid(ptr) || (allocated(ptr) && vecMbCommit(ptr)))
     dataBuffer.io.enq(i).bits.addr     := paddrModule.io.rdata(i)
