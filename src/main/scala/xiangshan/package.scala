@@ -507,7 +507,7 @@ package object xiangshan {
     def lhu      = "b0101".U
     def lwu      = "b0110".U
     // hypervior load
-    // bit encoding: | hlvx 1 | hlv 1 | load 0 | is unsigned(1bit) | size(2bit) |
+    // bit encoding: | hlv 1 | hlvx 1 | is unsigned(1bit) | size(2bit) |
     def hlvb = "b10000".U
     def hlvh = "b10001".U
     def hlvw = "b10010".U
@@ -515,10 +515,10 @@ package object xiangshan {
     def hlvbu = "b10100".U
     def hlvhu = "b10101".U
     def hlvwu = "b10110".U
-    def hlvxhu = "b110101".U
-    def hlvxwu = "b110110".U
-    def isHlv(op: UInt): Bool = op(4)
-    def isHlvx(op: UInt): Bool = op(5)
+    def hlvxhu = "b011101".U
+    def hlvxwu = "b011110".U
+    def isHlv(op: UInt): Bool = op(4) && (op(8, 5) === "b0000".U)
+    def isHlvx(op: UInt): Bool = op(4) && op(3) && (op(8, 5) === "b0000".U)
 
     // Zicbop software prefetch
     // bit encoding: | prefetch 1 | 0 | prefetch type (2bit) |
