@@ -196,6 +196,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         // uop0 set rd, never flushPipe
         csBundle(0).fuType := FuType.vsetiwi.U
         csBundle(0).flushPipe := false.B
+        csBundle(0).blockBackward := false.B
         csBundle(0).rfWen := true.B
         // uop1 set vl, vsetvl will flushPipe
         csBundle(1).ldest := Vl_IDX.U
