@@ -136,7 +136,8 @@ case class XSCoreParameters
 
     (preds, ras.io.out)
   },
-  ICacheECCForceError: Boolean = false,
+  ICacheForceMetaECCError: Boolean = false,
+  ICacheForceDataECCError: Boolean = false,
   IBufSize: Int = 48,
   IBufNBank: Int = 6, // IBuffer bank amount, should divide IBufSize
   DecodeWidth: Int = 6,
@@ -648,7 +649,8 @@ trait HasXSParameter {
   def CacheLineSize = coreParams.CacheLineSize
   def CacheLineHalfWord = CacheLineSize / 16
   def ExtHistoryLength = HistoryLength + 64
-  def ICacheECCForceError = coreParams.ICacheECCForceError
+  def ICacheForceMetaECCError = coreParams.ICacheForceMetaECCError
+  def ICacheForceDataECCError = coreParams.ICacheForceDataECCError
   def IBufSize = coreParams.IBufSize
   def IBufNBank = coreParams.IBufNBank
   def backendParams: BackendParams = coreParams.backendParams

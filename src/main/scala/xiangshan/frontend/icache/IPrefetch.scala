@@ -196,6 +196,10 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   val s1_meta_ptags   = fromMeta.tags
   val s1_meta_valids  = fromMeta.entryValid
+  val s1_meta_errors = VecInit((0 until PortNumber).map( p =>
+    // If error is found in either way, the tag_eq_vec is unreliable, so we do not use waymask, but directly .orR
+    fromMeta.errors(p).asUInt.orR
+  ))
 
   def get_waymask(paddrs: Vec[UInt]): Vec[UInt] = {
     val ptags         = paddrs.map(get_phy_tag(_))
@@ -250,6 +254,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   toWayLookup.bits.excp_tlb_af  := itlbExcpAF
   toWayLookup.bits.excp_tlb_pf  := itlbExcpPF
   toWayLookup.bits.excp_tlb_gpf := itlbExcpGPF
+  toWayLookup.bits.meta_errors  := s1_meta_errors
 
   val s1_waymasks_vec = s1_waymasks.map(_.asTypeOf(Vec(nWays, Bool())))
   when(toWayLookup.fire) {

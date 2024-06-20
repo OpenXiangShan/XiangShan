@@ -37,6 +37,7 @@ class WayLookupInfo(implicit p: Parameters) extends ICacheBundle {
   val excp_tlb_af   = Vec(PortNumber, Bool())
   val excp_tlb_pf   = Vec(PortNumber, Bool())
   val excp_tlb_gpf  = Vec(PortNumber, Bool())
+  val meta_errors   = Vec(PortNumber, Bool())
 }
 
 
@@ -113,9 +114,12 @@ class WayLookup(implicit p: Parameters) extends ICacheModule {
         when(ptag_same) {
           // miss -> hit
           entry.waymask(i) := io.update.bits.waymask
+          // also clear previously found errors since data/metaArray is refilled
+          entry.meta_errors(i) := false.B
         }.elsewhen(way_same) {
           // data is overwritten: hit -> miss
           entry.waymask(i) := 0.U
+          // do not clear previously found errors since way_same might be unreliable when error occurs
         }
       }
       hit_vec(i) := vset_same && (ptag_same || way_same)

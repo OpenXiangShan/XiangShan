@@ -182,6 +182,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s0_excp_tlb_af  = fromWayLookup.bits.excp_tlb_af
   val s0_excp_tlb_pf  = fromWayLookup.bits.excp_tlb_pf
   val s0_excp_tlb_gpf = fromWayLookup.bits.excp_tlb_gpf
+  val s0_meta_errors  = fromWayLookup.bits.meta_errors
   val s0_hits         = VecInit((0 until PortNumber).map(i=> s0_waymasks(i).reduce(_||_)))
 
   when(s0_fire){
@@ -228,6 +229,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_excp_tlb_pf  = RegEnable(s0_excp_tlb_pf, 0.U.asTypeOf(s0_excp_tlb_pf), s0_fire)
   val s1_excp_tlb_gpf = RegEnable(s0_excp_tlb_gpf, 0.U.asTypeOf(s0_excp_tlb_gpf), s0_fire)
   val s1_waymasks     = RegEnable(s0_waymasks, 0.U.asTypeOf(s0_waymasks), s0_fire)
+  val s1_meta_errors  = RegEnable(s0_meta_errors, 0.U.asTypeOf(s0_meta_errors), s0_fire)
 
   val s1_req_vSetIdx  = s1_req_vaddr.map(get_idx(_))
   val s1_req_paddr    = s1_req_vaddr.zip(s1_req_ptags).map{case(vaddr, ptag) => get_paddr_from_ptag(vaddr, ptag)}
@@ -305,7 +307,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_excp_tlb_gpf   = RegEnable(s1_excp_tlb_gpf, 0.U.asTypeOf(s1_excp_tlb_gpf), s1_fire)
   val s2_excp_pmp_af    = RegEnable(VecInit(fromPMP.map(_.instr)), 0.U.asTypeOf(VecInit(fromPMP.map(_.instr))), s1_fire)
   val s2_excp_pmp_mmio  = RegEnable(VecInit(fromPMP.map(_.mmio)), 0.U.asTypeOf(VecInit(fromPMP.map(_.mmio))), s1_fire)
-  // val s2_data_errors    = RegEnable(s1_data_errors, 0.U.asTypeOf(s1_data_errors), s1_fire)
 
   val s2_req_vSetIdx  = s2_req_vaddr.map(get_idx(_))
   val s2_req_offset   = s2_req_vaddr(0)(log2Ceil(blockBytes)-1, 0)
@@ -321,20 +322,24 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     * report data parity error
     ******************************************************************************
     */
-  val s2_bankSel        = getBankSel(s2_req_offset, s2_valid)
-  val s2_bank_errors    = (0 until ICacheDataBanks).map(i => (encode(s2_datas(i)) =/= s2_codes(i)))
-  val s2_parity_errors  = (0 until PortNumber).map(port => (0 until ICacheDataBanks).map(bank =>
-                            s2_bank_errors(bank) && s2_bankSel(port)(bank).asBool).reduce(_||_) && s2_SRAMhits(port))
+  // check data error
+  val s2_bankSel     = getBankSel(s2_req_offset, s2_valid)
+  val s2_bank_errors = (0 until ICacheDataBanks).map(i => (encode(s2_datas(i)) =/= s2_codes(i)))
+  val s2_data_errors = (0 until PortNumber).map(port => (0 until ICacheDataBanks).map(bank =>
+                         s2_bank_errors(bank) && s2_bankSel(port)(bank).asBool).reduce(_||_) && s2_SRAMhits(port))
+  // meta error is checked in prefetch pipeline
+  val s2_meta_errors = RegEnable(s1_meta_errors, 0.U.asTypeOf(s1_meta_errors), s1_fire)
+  // send errors to top
   (0 until PortNumber).map{ i =>
-    io.errors(i).valid            := io.csr_parity_enable && RegNext(s1_fire) && s2_parity_errors(i)
-    io.errors(i).bits.report_to_beu    := io.csr_parity_enable && RegNext(s1_fire) && s2_parity_errors(i)
-    io.errors(i).bits.paddr            := s2_req_paddr(i)
-    io.errors(i).bits.source           := DontCare
-    io.errors(i).bits.source.tag       := false.B
-    io.errors(i).bits.source.data      := s2_parity_errors(i)
-    io.errors(i).bits.source.l2        := false.B
-    io.errors(i).bits.opType           := DontCare
-    io.errors(i).bits.opType.fetch     := true.B
+    io.errors(i).valid              := io.csr_parity_enable && RegNext(s1_fire) && (s2_meta_errors(i) || s2_data_errors(i))
+    io.errors(i).bits.report_to_beu := io.csr_parity_enable && RegNext(s1_fire) && (s2_meta_errors(i) || s2_data_errors(i))
+    io.errors(i).bits.paddr         := s2_req_paddr(i)
+    io.errors(i).bits.source        := DontCare
+    io.errors(i).bits.source.tag    := s2_meta_errors(i)
+    io.errors(i).bits.source.data   := s2_data_errors(i)
+    io.errors(i).bits.source.l2     := false.B
+    io.errors(i).bits.opType        := DontCare
+    io.errors(i).bits.opType.fetch  := true.B
   }
 
   /**

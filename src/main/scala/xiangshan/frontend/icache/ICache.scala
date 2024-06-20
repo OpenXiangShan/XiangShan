@@ -263,6 +263,15 @@ class ICacheMetaArray()(implicit p: Parameters) extends ICacheArray
     (0 until nWays).foreach{ w => io.readResp.errors(i)(w) := RegEnable(read_meta_wrong(w), 0.U.asTypeOf(read_meta_wrong(w)), read_fire_delay1) && read_fire_delay2}
   }
 
+  // TEST: force ECC to fail by setting errors to true.B
+  if (ICacheForceMetaECCError) {
+    (0 until PortNumber).foreach( p =>
+      (0 until nWays).foreach( w =>
+        io.readResp.errors(p)(w) := true.B
+      )
+    )
+  }
+
   //Parity Encode
   val write = io.write.bits
   write_meta_bits := cacheParams.tagCode.encode(ICacheMetadata(tag = write.phyTag).asUInt)
@@ -385,8 +394,9 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheArray
   val readDatas         = VecInit(readEntries.map(_.data))
   val readCodes         = VecInit(readEntries.map(_.code))
 
-  if (ICacheECCForceError) {
-    readCodes.foreach(_ := 0.U) // force ecc to fail
+  // TEST: force ECC to fail by setting readCodes to 0
+  if (ICacheForceDataECCError) {
+    readCodes.foreach(_ := 0.U)
   }
 
   /**
