@@ -163,7 +163,7 @@ class VecExceptionGen(implicit p: Parameters) extends XSModule{
   private val intExt4 = Seq(VSEXT_VF4, VZEXT_VF4).map(_ === inst.ALL).reduce(_ || _)
   private val intExt8 = Seq(VSEXT_VF8, VZEXT_VF8).map(_ === inst.ALL).reduce(_ || _)
 
-  private val notDependVtypeInst = Seq(VSETVLI, VSETIVLI, VSETVL).map(_ === inst.ALL).reduce(_ || _) || lsWholeInst || vmvWholeInst
+  private val notDependVtypeInst = Seq(VSETVLI, VSETIVLI, VSETVL).map(_ === inst.ALL).reduce(_ || _) || lsWholeInst
 
 
   // 1. inst Illegal
@@ -209,13 +209,13 @@ class VecExceptionGen(implicit p: Parameters) extends XSModule{
 
   // 5. Reg Number Align
   private val vs1IsMask = maskArithmeticInst || vcompress
-  private val vs1IsSingleElem = redInst
+  private val vs1IsSingleElem = redInst || redWideningInst
   private val vs1Eew = Mux(vrgather16, "b01".U, SEW)
   private val vs1Emul = Mux(vs1IsMask || vs1IsSingleElem, "b100".U, Mux(vrgather16, LMUL +& 1.U - SEW, LMUL))
   private val vs1NotAlign = SrcType.isVp(io.decodedInst.srcType(0)) && RegNumNotAlign(inst.VS1, vs1Emul)
 
   private val vs2IsMask = maskArithmeticInst || maskIndexInst
-  private val vs2IsSingleElem = redWideningInst || vmvSingleInst
+  private val vs2IsSingleElem = vmvSingleInst
   private val vs2EewSel = Cat(lsIndexInst, (vs2WideningInst || narrowingInst || redWideningInst), intExt2, intExt4, intExt8)
   private val vs2Eew = LookupTreeDefault(vs2EewSel, SEW, List(
     "b10000".U  -> inst.WIDTH(1, 0),
