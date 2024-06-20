@@ -815,6 +815,10 @@ class PteBundle(implicit p: Parameters) extends PtwBundle{
     !(ppn_high === 0.U)
   }
 
+  def isStage1Af() = {
+    !((Cat(ppn_high, ppn) >> gvpnLen) === 0.U)
+  }
+
   def isLeaf() = {
     perm.r || perm.x || perm.w
   }
