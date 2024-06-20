@@ -350,12 +350,16 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   og2ForVector.io.flush := ctrlBlock.io.toDataPath.flush
   og2ForVector.io.ldCancel := io.mem.ldCancel
   og2ForVector.io.fromOg1NoReg <> dataPath.io.toVecExu
+  og2ForVector.io.fromOg1ImmInfo := dataPath.io.og1ImmInfo.zip(params.allExuParams).filter(_._2.isVfExeUnit).map(_._1)
 
   bypassNetwork.io.fromDataPath.int <> dataPath.io.toIntExu
   bypassNetwork.io.fromDataPath.fp <> dataPath.io.toFpExu
   bypassNetwork.io.fromDataPath.vf <> og2ForVector.io.toVfExu
   bypassNetwork.io.fromDataPath.mem <> dataPath.io.toMemExu
   bypassNetwork.io.fromDataPath.immInfo := dataPath.io.og1ImmInfo
+  bypassNetwork.io.fromDataPath.immInfo.zip(params.allExuParams).filter(_._2.isVfExeUnit).map(_._1).zip(og2ForVector.io.toVfImmInfo).map{
+    case (vfImmInfo, og2ImmInfo) => vfImmInfo := og2ImmInfo
+  }
   bypassNetwork.io.fromExus.connectExuOutput(_.int)(intExuBlock.io.out)
   bypassNetwork.io.fromExus.connectExuOutput(_.fp)(fpExuBlock.io.out)
   bypassNetwork.io.fromExus.connectExuOutput(_.vf)(vfExuBlock.io.out)
