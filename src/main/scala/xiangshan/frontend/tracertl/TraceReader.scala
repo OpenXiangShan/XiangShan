@@ -59,7 +59,6 @@ class TraceReader(implicit p: Parameters) extends TraceModule
 
   def bufferInsert(ptr: TraceBufferPtr, data: TraceInstrBundle) = {
     traceBuffer(ptr.value) := data
-    // traceBuffer(ptr.value) := 0.U
   }
 
   traceReaderHelper.clock := clock

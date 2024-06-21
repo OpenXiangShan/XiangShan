@@ -39,6 +39,7 @@ import yunsuan.VfaluType
 import xiangshan.backend.rob.RobBundles._
 import xiangshan.backend.trace._
 import chisel3.experimental.BundleLiterals._
+import xiangshan.frontend.tracertl.ChiselRecordForField._
 
 class Rob(params: BackendParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
@@ -224,8 +225,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       connectCommitEntry(robDeqGroup(i), robBanksRdataNextLineUpdate(i))
     }
   }
-  
-  // In each robentry, the ftqIdx and ftqOffset belong to the first instruction that was compressed, 
+
+  // In each robentry, the ftqIdx and ftqOffset belong to the first instruction that was compressed,
   // that is Necessary when exceptions happen.
   // Update the ftqIdx and ftqOffset to correctly notify the frontend which instructions have been committed.
   for (i <- 0 until CommitWidth) {
@@ -1408,6 +1409,25 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }
   }
 
+
+  // TraceRTL Collect Commit Trace to check the correctness of the pipeline
+  if (env.TraceRTLMode) {
+    import xiangshan.frontend.tracertl.TraceCollector
+    val traceCollector = Module(new TraceCollector)
+    traceCollector.io.enable := io.commits.commitValid(0) && io.commits.isCommit
+    (0 until CommitWidth).foreach { case i =>
+      val uop = commitDebugUop(i)
+      val commitInfo = io.commits.info(i)
+      traceCollector.io.in(i).valid := io.commits.commitValid(i)
+      traceCollector.io.in(i).bits.pc := SignExt(uop.pc, XLEN)
+      traceCollector.io.in(i).bits.inst := uop.instr
+      traceCollector.io.in(i).bits.instNum := CommitType.isFused(commitInfo.commitType).asUInt + commitInfo.instrSize - 1.U
+    }
+    (0 until CommitWidth).foreach{ case i =>
+      XSError(!io.commits.commitValid(0) && io.commits.isCommit && io.commits.commitValid(i),
+        "When CommitValid is true, CommitValid(0) should be true")
+    }
+  }
 
   //difftest signals
   val firstValidCommit = (deqPtr + PriorityMux(io.commits.commitValid, VecInit(List.tabulate(CommitWidth)(_.U(log2Up(CommitWidth).W))))).value
