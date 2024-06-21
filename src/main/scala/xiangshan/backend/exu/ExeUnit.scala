@@ -250,6 +250,9 @@ class ExeUnitImp(
       sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFP32Instr   := 0.U)
       sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFP64Instr   := 0.U)
       sink.bits.perfDebugInfo    := source.bits.perfDebugInfo
+
+      // TraceRTL Mode
+      sink.bits.ctrl.traceInfo        := source.bits.traceInfo
   }
 
   private val OutresVecs = funcUnits.map { fu =>
@@ -390,6 +393,8 @@ class MemExeUnit(exuParams: ExeUnitParams)(implicit p: Parameters) extends XSMod
   fu.io.in.bits.data.imm       := io.in.bits.uop.imm
   fu.io.in.bits.data.src.zip(io.in.bits.src).foreach(x => x._1 := x._2)
   fu.io.in.bits.perfDebugInfo := io.in.bits.uop.debugInfo
+
+  fu.io.in.bits.ctrl.traceInfo := io.in.bits.uop.traceInfo
 
   io.out.valid            := fu.io.out.valid
   fu.io.out.ready         := io.out.ready

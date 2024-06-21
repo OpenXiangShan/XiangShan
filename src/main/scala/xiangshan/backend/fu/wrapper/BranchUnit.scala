@@ -6,7 +6,9 @@ import utility.SignExt
 import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.fu.{BranchModule, FuConfig, FuncUnit}
 import xiangshan.backend.datapath.DataConfig.VAddrData
+import xiangshan.frontend.tracertl.TraceRTLChoose
 import xiangshan.{RedirectLevel, XSModule}
+import utils.XSError
 
 class AddrAddModule(len: Int)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
@@ -47,11 +49,17 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
       redirect.bits.robIdx := io.in.bits.ctrl.robIdx
       redirect.bits.ftqIdx := io.in.bits.ctrl.ftqIdx.get
       redirect.bits.ftqOffset := io.in.bits.ctrl.ftqOffset.get
-      redirect.bits.cfiUpdate.isMisPred := dataModule.io.mispredict
-      redirect.bits.cfiUpdate.taken := dataModule.io.taken
+      redirect.bits.cfiUpdate.isMisPred := TraceRTLChoose(dataModule.io.mispredict,
+        io.in.bits.ctrl.traceInfo.branchTaken(0) =/= dataModule.io.taken,
+      )
+      redirect.bits.cfiUpdate.taken := TraceRTLChoose(dataModule.io.taken, io.in.bits.ctrl.traceInfo.branchTaken(0))
       redirect.bits.cfiUpdate.predTaken := dataModule.io.pred_taken
-      redirect.bits.cfiUpdate.target := addModule.io.target
+      redirect.bits.cfiUpdate.target := TraceRTLChoose(addModule.io.target, io.in.bits.ctrl.traceInfo.target)
       redirect.bits.cfiUpdate.pc := io.in.bits.data.pc.get
   }
+  if (env.TraceRTLMode) {
+    XSError(io.in.valid && (io.in.bits.ctrl.traceInfo.branchType === 0.U), "Trace \n")
+  }
+
   connect0LatencyCtrlSingal
 }

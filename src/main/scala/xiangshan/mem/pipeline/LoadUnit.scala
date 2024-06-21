@@ -34,6 +34,7 @@ import xiangshan.backend.fu.util.SdtrigExt
 import xiangshan.cache._
 import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.cache.mmu._
+import xiangshan.frontend.tracertl.{TraceInstrBundle, TraceRTLChoose}
 import xiangshan.mem.mdp._
 
 class LoadToLsqReplayIO(implicit p: Parameters) extends XSBundle
@@ -217,6 +218,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s0_tlb_vaddr     = Wire(UInt(VAddrBits.W))
   val s0_dcache_vaddr  = Wire(UInt(VAddrBits.W))
 
+  if (env.TraceRTLMode) {
+    XSError(io.ldin.valid && !io.ldin.bits.uop.traceInfo.memoryType =/= 1.U, "Trace: Load Unit but not load inst")
+  }
+
   // flow source bundle
   class FlowSource extends Bundle {
     val vaddr         = UInt(VAddrBits.W)
@@ -251,6 +256,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val elemIdx       = UInt(elemIdxBits.W)
     val elemIdxInsideVd = UInt(elemIdxBits.W)
     val alignedType   = UInt(alignTypeBits.W)
+
+    // TraceRTL Mode
+    val traceInfo = new TraceInstrBundle()
   }
   val s0_sel_src = Wire(new FlowSource)
 
@@ -273,7 +281,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s0_rep_stall           = io.ldin.valid && isAfter(io.replay.bits.uop.robIdx, io.ldin.bits.uop.robIdx)
   private val SRC_NUM = 10
   private val Seq(
-    mab_idx, super_rep_idx, fast_rep_idx, mmio_idx, lsq_rep_idx, 
+    mab_idx, super_rep_idx, fast_rep_idx, mmio_idx, lsq_rep_idx,
     high_pf_idx, vec_iss_idx, int_iss_idx, l2l_fwd_idx, low_pf_idx
   ) = (0 until SRC_NUM).toSeq
   // load flow source valid
@@ -348,6 +356,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.tlb.req.bits.hyperinst          := s0_tlb_hlv
   io.tlb.req.bits.hlvx               := s0_tlb_hlvx
   io.tlb.req.bits.size               := Mux(s0_sel_src.isvec, s0_sel_src.alignedType(2,0), LSUOpType.size(s0_sel_src.uop.fuOpType))
+  if (env.TraceRTLMode) {
+    XSError(s0_valid && io.tlb.req.bits.size =/= s0_sel_src.uop.traceInfo.memorySize(1,0),
+    "Trace Memory Size Error")
+  }
   io.tlb.req.bits.kill               := s0_kill || s0_tlb_no_query // if does not need to be translated, kill it
   io.tlb.req.bits.memidx.is_ld       := true.B
   io.tlb.req.bits.memidx.is_st       := false.B
@@ -557,7 +569,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   def fromIntIssueSource(src: MemExuInput): FlowSource = {
     val out = WireInit(0.U.asTypeOf(new FlowSource))
-    val addr           = io.ldin.bits.src(0) + SignExt(io.ldin.bits.uop.imm(11, 0), VAddrBits)
+    val addr           = TraceRTLChoose(
+      io.ldin.bits.src(0) + SignExt(io.ldin.bits.uop.imm(11, 0), VAddrBits),
+      src.uop.traceInfo.memoryAddrVA
+    )
     out.mask          := genVWmask(addr, src.uop.fuOpType(1,0))
     out.uop           := src.uop
     out.try_l2l       := false.B
@@ -578,6 +593,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out
   }
 
+  //TODO: TraceRTL should concern memory conflict(vaddr/paddr src, not only when tlb/dcache's req)
   // TODO: implement vector l2l
   def fromLoadToLoadSource(src: LoadToLoadIO): FlowSource = {
     val out = WireInit(0.U.asTypeOf(new FlowSource))
@@ -820,8 +836,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s1_vaddr_hi         := s1_in.vaddr(VAddrBits - 1, 6)
   s1_vaddr_lo         := s1_in.vaddr(5, 0)
   s1_vaddr            := Cat(s1_vaddr_hi, s1_vaddr_lo)
-  s1_paddr_dup_lsu    := Mux(s1_in.tlbNoQuery, s1_in.paddr, io.tlb.resp.bits.paddr(0))
-  s1_paddr_dup_dcache := Mux(s1_in.tlbNoQuery, s1_in.paddr, io.tlb.resp.bits.paddr(1))
+  s1_paddr_dup_lsu    := TraceRTLChoose(Mux(s1_in.tlbNoQuery, s1_in.paddr, io.tlb.resp.bits.paddr(0)), s1_in.uop.traceInfo.memoryAddrPA)
+  s1_paddr_dup_dcache := TraceRTLChoose(Mux(s1_in.tlbNoQuery, s1_in.paddr, io.tlb.resp.bits.paddr(1)), s1_in.uop.traceInfo.memoryAddrPA)
   s1_gpaddr_dup_lsu   := Mux(s1_in.isFastReplay, s1_in.paddr, io.tlb.resp.bits.gpaddr(0))
 
   when (s1_tlb_memidx.is_ld && io.tlb.resp.valid && !s1_tlb_miss && s1_tlb_memidx.idx === s1_in.uop.lqIdx.value) {

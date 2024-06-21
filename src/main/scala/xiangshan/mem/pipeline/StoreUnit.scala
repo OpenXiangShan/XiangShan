@@ -31,6 +31,7 @@ import xiangshan.backend.ctrlblock.DebugLsInfoBundle
 import xiangshan.backend.fu.NewCSR._
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp, Pbmt}
 import xiangshan.cache.{DcacheStoreRequestIO, DCacheStoreIO, MemoryOpConstants, HasDCacheParameters, StorePrefetchReq}
+import xiangshan.frontend.tracertl.TraceRTLChoose
 
 class StoreUnit(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
@@ -124,8 +125,12 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s0_alignedType  = s0_vecstin.alignedType
   val s0_mBIndex      = s0_vecstin.mBIndex
 
+  if (env.TraceRTLMode) {
+    XSError(io.stin.valid && (io.stin.bits.uop.traceInfo.memoryType =/= 2.U), "Trace: StoreUnit but not store!\n")
+  }
+
   // generate addr
-  val s0_saddr = s0_stin.src(0) + SignExt(s0_uop.imm(11,0), VAddrBits)
+  val s0_saddr = TraceRTLChoose(s0_stin.src(0) + SignExt(s0_uop.imm(11,0), VAddrBits), s0_stin.uop.traceInfo.memoryAddrVA)
   val s0_vaddr = Mux(
     s0_use_flow_ma,
     io.misalign_stin.bits.vaddr,
@@ -219,7 +224,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.st_mask_out.valid       := s0_use_flow_rs || s0_use_flow_vec
   io.st_mask_out.bits.mask   := s0_out.mask
   io.st_mask_out.bits.sqIdx  := s0_out.uop.sqIdx
-  
+
   io.stin.ready := s1_ready && s0_use_flow_rs
   io.vecstin.ready := s1_ready && s0_use_flow_vec
   io.prefetch_req.ready := s1_ready && io.dcache.req.ready && !s0_iss_valid && !s0_vec_valid && !s0_ma_st_valid
@@ -243,7 +248,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s1_mmio_cbo  = s1_in.uop.fuOpType === LSUOpType.cbo_clean ||
                      s1_in.uop.fuOpType === LSUOpType.cbo_flush ||
                      s1_in.uop.fuOpType === LSUOpType.cbo_inval
-  val s1_paddr     = io.tlb.resp.bits.paddr(0)
+  val s1_paddr     = TraceRTLChoose(io.tlb.resp.bits.paddr(0), s1_in.uop.traceInfo.memoryAddrPA)
   val s1_gpaddr    = io.tlb.resp.bits.gpaddr(0)
   val s1_tlb_miss  = io.tlb.resp.bits.miss
   val s1_mmio      = s1_mmio_cbo

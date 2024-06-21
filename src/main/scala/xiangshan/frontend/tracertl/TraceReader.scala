@@ -59,6 +59,12 @@ class TraceReader(implicit p: Parameters) extends TraceModule
 
   def bufferInsert(ptr: TraceBufferPtr, data: TraceInstrBundle) = {
     traceBuffer(ptr.value) := data
+    when (data.memoryAddrPA === 0.U) {
+      traceBuffer(ptr.value).memoryAddrPA := traceBuffer(ptr.value).memoryAddrVA
+    }
+    when (data.pcPA === 0.U) {
+      traceBuffer(ptr.value).pcPA := traceBuffer(ptr.value).pcVA
+    }
   }
 
   traceReaderHelper.clock := clock

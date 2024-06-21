@@ -284,8 +284,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         enq.bits.status.srcStatus(j).psrc                       := s0_enqBits(enqIdx).psrc(j)
         enq.bits.status.srcStatus(j).srcType                    := s0_enqBits(enqIdx).srcType(j)
         enq.bits.status.srcStatus(j).srcState                   := (if (j < 3) {
-                                                                      Mux(SrcType.isVp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U), 
-                                                                          SrcState.rdy, 
+                                                                      Mux(SrcType.isVp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U),
+                                                                          SrcState.rdy,
                                                                           s0_enqBits(enqIdx).srcState(j))
                                                                     } else {
                                                                       s0_enqBits(enqIdx).srcState(j)
@@ -763,6 +763,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     deq.bits.common.perfDebugInfo := deqEntryVec(i).bits.payload.debugInfo
     deq.bits.common.perfDebugInfo.selectTime := GTimer()
     deq.bits.common.perfDebugInfo.issueTime := GTimer() + 1.U
+
+    deq.bits.common.traceInfo := deqEntryVec(i).bits.payload.traceInfo
   }
 
   io.deqDelay.zip(deqBeforeDly).foreach { case (deqDly, deq) =>

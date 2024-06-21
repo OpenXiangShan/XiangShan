@@ -14,6 +14,7 @@ import xiangshan.backend.fu.vector.Bundles.Vxsat
 import xiangshan.ExceptionNO.illegalInstr
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
+import xiangshan.frontend.tracertl.TraceInstrBundle
 
 class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val fuOpType    = FuOpType()
@@ -34,6 +35,8 @@ class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
   })
   val fpu         = OptionWrapper(cfg.writeFflags, new FPUCtrlSignals)
   val vpu         = OptionWrapper(cfg.needVecCtrl, new VPUCtrlSignals)
+
+  val traceInfo   = new TraceInstrBundle()
 }
 
 class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
@@ -72,6 +75,7 @@ class FuncUnitDataOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle
 class FuncUnitInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val ctrl = new FuncUnitCtrlInput(cfg)
   val data = new FuncUnitDataInput(cfg)
+
   val perfDebugInfo = new PerfDebugInfo()
 }
 
@@ -141,7 +145,8 @@ trait HasPipelineReg { this: FuncUnit =>
   val preLat :Int = latency - latdiff
   require(latency >= 0 && latdiff >=0)
 
-  def pipelineReg(init: FuncUnitInput , valid:Bool, ready: Bool,latency: Int, flush:ValidIO[Redirect]): (Seq[FuncUnitInput],Seq[Bool],Seq[Bool])={
+  def pipelineReg(init: FuncUnitInput , valid:Bool, ready: Bool,latency: Int, flush:ValidIO[Redirect])
+    : (Seq[FuncUnitInput],Seq[Bool],Seq[Bool]) = {
     val rdyVec = Seq.fill(latency)(Wire(Bool())) :+ ready
     val validVec = valid +: Seq.fill(latency)(RegInit(false.B))
     val ctrlVec = init.ctrl +: Seq.fill(latency)(Reg(chiselTypeOf(io.in.bits.ctrl)))

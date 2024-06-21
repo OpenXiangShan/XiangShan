@@ -41,6 +41,7 @@ import xiangshan.cache.mmu._
 import xiangshan.mem._
 import xiangshan.mem.mdp._
 import xiangshan.frontend.HasInstrMMIOConst
+import xiangshan.frontend.tracertl.{TraceRTLChoose, TraceRTLDontCare}
 import xiangshan.mem.prefetch.{BasePrefecher, L1Prefetcher, SMSParams, SMSPrefetcher}
 import xiangshan.backend.datapath.NewPipelineConnect
 import system.SoCParamsKey
@@ -847,9 +848,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val fastDataVec = fastPriority.map(j => l2l_fwd_out(j).data)
     val fastErrorVec = fastPriority.map(j => l2l_fwd_out(j).dly_ld_err)
     val fastMatchVec = fastPriority.map(j => io.ooo_to_mem.loadFastMatch(i)(j))
-    loadUnits(i).io.l2l_fwd_in.valid := VecInit(fastValidVec).asUInt.orR
+    // TraceRTL Mode: dont know how to get uop, just disable load2load
+    loadUnits(i).io.l2l_fwd_in.valid := TraceRTLDontCare(VecInit(fastValidVec).asUInt.orR)
     loadUnits(i).io.l2l_fwd_in.data := ParallelPriorityMux(fastValidVec, fastDataVec)
     loadUnits(i).io.l2l_fwd_in.dly_ld_err := ParallelPriorityMux(fastValidVec, fastErrorVec)
+//    loadUnits(i).io.l2l_fwd_in.uop := ???
+
     val fastMatch = ParallelPriorityMux(fastValidVec, fastMatchVec)
     loadUnits(i).io.ld_fast_match := fastMatch
     loadUnits(i).io.ld_fast_imm := io.ooo_to_mem.loadFastImm(i)
@@ -984,9 +988,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val fastDataVec = fastPriority.map(j => l2l_fwd_out(j).data)
     val fastErrorVec = fastPriority.map(j => l2l_fwd_out(j).dly_ld_err)
     val fastMatchVec = fastPriority.map(j => io.ooo_to_mem.loadFastMatch(LduCnt + i)(j))
-    hybridUnits(i).io.ldu_io.l2l_fwd_in.valid := VecInit(fastValidVec).asUInt.orR
+    // TraceRTL Mode: dont know how to get uop, just disable load2load
+    hybridUnits(i).io.ldu_io.l2l_fwd_in.valid := TraceRTLDontCare(VecInit(fastValidVec).asUInt.orR)
     hybridUnits(i).io.ldu_io.l2l_fwd_in.data := ParallelPriorityMux(fastValidVec, fastDataVec)
     hybridUnits(i).io.ldu_io.l2l_fwd_in.dly_ld_err := ParallelPriorityMux(fastValidVec, fastErrorVec)
+//    hybridUnits(i).io.ldu_io.l2l_fwd_in.uop := ???
+
     val fastMatch = ParallelPriorityMux(fastValidVec, fastMatchVec)
     hybridUnits(i).io.ldu_io.ld_fast_match := fastMatch
     hybridUnits(i).io.ldu_io.ld_fast_imm := io.ooo_to_mem.loadFastImm(LduCnt + i)
