@@ -77,7 +77,6 @@ class ITTageUpdate(implicit p: Parameters) extends ITTageBundle {
   val pc    = UInt(VAddrBits.W)
   val ghist = UInt(HistoryLength.W)
   // update tag and ctr
-  val valid   = Bool()
   val correct = Bool()
   val alloc   = Bool()
   val oldCtr  = UInt(ITTageCtrBits.W)
@@ -132,7 +131,7 @@ class ITTageTable(
   val io = IO(new Bundle() {
     val req    = Flipped(DecoupledIO(new ITTageReq))
     val resp   = Output(Valid(new ITTageResp))
-    val update = Input(new ITTageUpdate)
+    val update = Flipped(DecoupledIO(new ITTageUpdate))
   })
 
   val SRAM_SIZE = 128
@@ -222,40 +221,49 @@ class ITTageTable(
   // Use fetchpc to compute hash
   val update_folded_hist = WireInit(0.U.asTypeOf(new AllFoldedHistories(foldedGHistInfos)))
 
-  update_folded_hist.getHistWithInfo(idxFhInfo).folded_hist    := compute_folded_ghist(io.update.ghist, log2Ceil(nRows))
-  update_folded_hist.getHistWithInfo(tagFhInfo).folded_hist    := compute_folded_ghist(io.update.ghist, tagLen)
-  update_folded_hist.getHistWithInfo(altTagFhInfo).folded_hist := compute_folded_ghist(io.update.ghist, tagLen - 1)
+  update_folded_hist.getHistWithInfo(idxFhInfo).folded_hist := compute_folded_ghist(io.update.bits.ghist, log2Ceil(nRows))
+  update_folded_hist.getHistWithInfo(tagFhInfo).folded_hist := compute_folded_ghist(io.update.bits.ghist, tagLen)
+  update_folded_hist.getHistWithInfo(altTagFhInfo).folded_hist := compute_folded_ghist(io.update.bits.ghist, tagLen-1)
   dontTouch(update_folded_hist)
-  val (update_idx, update_tag) = compute_tag_and_hash(getUnhashedIdx(io.update.pc), update_folded_hist)
-  val update_target            = io.update.target
-  val update_wdata             = Wire(new ITTageEntry)
+  val (update_idx, update_tag) = compute_tag_and_hash(getUnhashedIdx(io.update.bits.pc), update_folded_hist)
+  val update_target = io.update.bits.target
+  val update_wdata = Wire(new ITTageEntry)
 
-  val updateAllBitmask = VecInit.fill(ittageEntrySz)(1.U).asUInt // update all entry
-  val updateNoBitmask  = VecInit.fill(ittageEntrySz)(0.U).asUInt // update no
-  val updateNoUsBitmask =
-    VecInit.tabulate(ittageEntrySz)(_.U >= ITTageUsBits.U).asUInt // update others besides useful bit
-  val updateUsBitmask = VecInit.tabulate(ittageEntrySz)(_.U < ITTageUsBits.U).asUInt // update useful bit
 
-  val needReset               = RegInit(false.B)
-  val useful_can_reset        = !(io.req.fire || io.update.valid) && needReset
+  val updateAllBitmask = VecInit.fill(ittageEntrySz)(1.U).asUInt                        //update all entry
+  val updateNoBitmask = VecInit.fill(ittageEntrySz)(0.U).asUInt                         //update no
+  val updateNoUsBitmask = VecInit.tabulate(ittageEntrySz)(_.U >= ITTageUsBits.U).asUInt //update others besides useful bit
+  val updateUsBitmask = VecInit.tabulate(ittageEntrySz)(_.U < ITTageUsBits.U).asUInt    //update useful bit
+  val update_buff_valid = RegInit(false.B)
+  val needReset = RegInit(false.B)
+  val useful_can_reset = !(io.req.fire || io.update.valid || update_buff_valid) && needReset
   val (resetSet, resetFinish) = Counter(useful_can_reset, nRows)
-  when(io.update.reset_u) {
+  when (io.update.bits.reset_u) {
     needReset := true.B
   }.elsewhen(resetFinish) {
     needReset := false.B
   }
-  val update_bitmask = Mux(
-    io.update.uValid && io.update.valid,
-    updateAllBitmask,
-    Mux(io.update.valid, updateNoUsBitmask, Mux(useful_can_reset, updateUsBitmask, updateNoBitmask))
-  )
+  val update_bitmask =  Mux(io.update.bits.uValid && io.update.valid,
+                          updateAllBitmask,
+                          Mux(io.update.valid, updateNoUsBitmask,
+                            Mux(useful_can_reset, updateUsBitmask, updateNoBitmask)
+                          ))
+
+  val update_buff_data    = RegEnable(update_wdata, read_write_conflict)
+  val update_buff_idx     = RegEnable(update_idx, read_write_conflict)
+  val update_buff_bitmask = RegEnable(update_bitmask(ITTageUsBits - 1, 0), read_write_conflict) //for update bitmask only need store bitmask(0)
+  when(read_write_conflict){
+    update_buff_valid := true.B
+  }.elsewhen(!io.req.fire){
+    update_buff_valid := false.B
+  }
 
   table.io.w.apply(
-    valid = io.update.valid || useful_can_reset,
-    data = update_wdata,
-    setIdx = Mux(useful_can_reset, resetSet, update_idx),
+    valid   = (io.update.valid || update_buff_valid) && !io.req.fire || useful_can_reset, //read first
+    data    = Mux(update_buff_valid, update_buff_data, update_wdata),
+    setIdx  = Mux(useful_can_reset, resetSet, Mux(update_buff_valid, update_buff_idx, update_idx)),
     waymask = true.B,
-    bitmask = update_bitmask
+    bitmask = Mux(update_buff_valid, Cat(Fill(ittageEntrySz - ITTageUsBits, 1.U), update_buff_bitmask), update_bitmask)
   )
 
   // Power-on reset
@@ -270,27 +278,30 @@ class ITTageTable(
   // Once read priority is higher than write, table_banks(*).io.r.req.ready can be used
   io.req.ready := !powerOnResetState
 
+  io.update.ready := !update_buff_valid
+  XSPerfAccumulate("ittage_table_read_write_conflict", read_write_conflict)
+  XSPerfAccumulate("ittage_table_update_buff_valid", update_buff_valid)
+
   val wrbypass = Module(new WrBypass(UInt(ITTageCtrBits.W), wrBypassEntries, log2Ceil(nRows)))
 
   wrbypass.io.wen       := io.update.valid
   wrbypass.io.write_idx := update_idx
   wrbypass.io.write_data.map(_ := update_wdata.ctr)
 
-  val old_ctr = Mux(wrbypass.io.hit, wrbypass.io.hit_data(0).bits, io.update.oldCtr)
-  update_wdata.valid  := true.B
-  update_wdata.ctr    := Mux(io.update.alloc, 2.U, inc_ctr(old_ctr, io.update.correct))
-  update_wdata.tag    := update_tag
-  update_wdata.useful := Mux(useful_can_reset, false.B, io.update.u)
+  val old_ctr = Mux(wrbypass.io.hit, wrbypass.io.hit_data(0).bits, io.update.bits.oldCtr)
+  update_wdata.valid := true.B
+  update_wdata.ctr   := Mux(io.update.bits.alloc, 2.U, inc_ctr(old_ctr, io.update.bits.correct))
+  update_wdata.tag   := update_tag
+  update_wdata.useful:= Mux(useful_can_reset, false.B, io.update.bits.u)
   // only when ctr is null
-  update_wdata.target := Mux(io.update.alloc || ctr_null(old_ctr), update_target, io.update.old_target)
+  update_wdata.target := Mux(io.update.bits.alloc || ctr_null(old_ctr), update_target, io.update.bits.old_target)
 
   XSPerfAccumulate("ittage_table_updates", io.update.valid)
   XSPerfAccumulate("ittage_table_hits", io.resp.valid)
-  XSPerfAccumulate("ittage_us_tick_reset", io.update.reset_u)
-  XSPerfAccumulate("ittage_table_read_write_conflict", read_write_conflict)
+  XSPerfAccumulate("ittage_us_tick_reset", io.update.bits.reset_u)
 
   if (BPUDebug && debug) {
-    val u   = io.update
+    val u = io.update.bits
     val idx = s0_idx
     val tag = s0_tag
     XSDebug(
@@ -576,23 +587,26 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   }
 
   for (i <- 0 until ITTageNTables) {
-    tables(i).io.update.valid      := RegNext(updateMask(i), init = false.B)
-    tables(i).io.update.reset_u    := RegNext(updateResetU, init = false.B)
-    tables(i).io.update.correct    := RegEnable(updateCorrect(i), updateMask(i))
-    tables(i).io.update.target     := RegEnable(updateTarget(i), updateMask(i))
-    tables(i).io.update.old_target := RegEnable(updateOldTarget(i), updateMask(i))
-    tables(i).io.update.alloc      := RegEnable(updateAlloc(i), updateMask(i))
-    tables(i).io.update.oldCtr     := RegEnable(updateOldCtr(i), updateMask(i))
+    tables(i).io.update.valid := RegNext(updateMask(i), init = false.B)
+    tables(i).io.update.bits.reset_u := RegNext(updateResetU, init = false.B)
+    tables(i).io.update.bits.correct := RegEnable(updateCorrect(i), updateMask(i))
+    tables(i).io.update.bits.target := RegEnable(updateTarget(i), updateMask(i))
+    tables(i).io.update.bits.old_target := RegEnable(updateOldTarget(i), updateMask(i))
+    tables(i).io.update.bits.alloc := RegEnable(updateAlloc(i), updateMask(i))
+    tables(i).io.update.bits.oldCtr := RegEnable(updateOldCtr(i), updateMask(i))
 
-    tables(i).io.update.uValid := RegEnable(updateUMask(i), false.B, updateMask(i))
-    tables(i).io.update.u      := RegEnable(updateU(i), updateMask(i))
-    tables(i).io.update.pc     := RegEnable(update.pc, updateMask(i))
+    tables(i).io.update.bits.uValid := RegEnable(updateUMask(i), false.B, updateMask(i))
+    tables(i).io.update.bits.u := RegEnable(updateU(i), updateMask(i))
+    tables(i).io.update.bits.pc := RegEnable(update.pc, updateMask(i))
     // use fetch pc instead of instruction pc
-    tables(i).io.update.ghist := RegEnable(update.ghist, updateMask(i))
+    tables(i).io.update.bits.ghist := RegEnable(update.ghist, updateMask(i))
   }
 
   // all should be ready for req
-  io.s1_ready := tables.map(_.io.req.ready).reduce(_ && _)
+  io.s1_ready := tables.map(_.io.req.ready).reduce(_&&_)
+  //if ittage table has conflict need block ftq update req
+  io.update.ready := tables.map(_.io.update.ready).reduce(_&&_)
+  XSPerfAccumulate("ittage_update_not_ready", io.update.ready)
 
   // Debug and perf info
   XSPerfAccumulate("ittage_reset_u", updateResetU)
