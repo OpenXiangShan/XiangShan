@@ -30,6 +30,7 @@ import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.Bundles.{MemExuInput, MemExuOutput}
 import xiangshan.backend.fu.NewCSR.TriggerUtil
 import xiangshan.backend.fu.util.SdtrigExt
+import xiangshan.frontend.tracertl.TraceRTLChoose
 
 class AtomicsUnit(implicit p: Parameters) extends XSModule
   with MemoryOpConstants
@@ -143,8 +144,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     // send req to dtlb
     // keep firing until tlb hit
     io.dtlb.req.valid       := true.B
-    io.dtlb.req.bits.vaddr  := in.src(0)
-    io.dtlb.req.bits.fullva := in.src(0)
+    io.dtlb.req.bits.vaddr  := TraceRTLChoose(in.src(0), in.uop.traceInfo.memoryAddrVA)
+    io.dtlb.req.bits.fullva := TraceRTLChoose(in.src(0), in.uop.traceInfo.memoryAddrVA)
     io.dtlb.req.bits.checkfullva := true.B
     io.dtlb.resp.ready      := true.B
     io.dtlb.req.bits.cmd    := Mux(isLr, TlbCmd.atom_read, TlbCmd.atom_write)
@@ -162,8 +163,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
     have_sent_first_tlb_req := true.B
 
     when(io.dtlb.resp.fire && have_sent_first_tlb_req){
-      paddr   := io.dtlb.resp.bits.paddr(0)
-      gpaddr  := io.dtlb.resp.bits.gpaddr(0)
+      paddr := TraceRTLChoose(io.dtlb.resp.bits.paddr(0), in.uop.traceInfo.memoryAddrPA)
+      gpaddr := io.dtlb.resp.bits.gpaddr(0)
       isForVSnonLeafPTE := io.dtlb.resp.bits.isForVSnonLeafPTE
       // exception handling
       val addrAligned = LookupTree(in.uop.fuOpType(1,0), List(
@@ -432,7 +433,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   io.out.bits.uop.exceptionVec(breakPoint) := TriggerAction.isExp(triggerAction)
   io.out.bits.uop.trigger                  := triggerAction
 
-  
+
   if (env.EnableDifftest) {
     val difftest = DifftestModule(new DiffAtomicEvent)
     difftest.coreid := io.hartId

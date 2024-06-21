@@ -646,6 +646,7 @@ object Bundles {
     val loadDependency = OptionWrapper(params.needLoadDependency, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
 
     val perfDebugInfo = new PerfDebugInfo()
+    val traceInfo = new TraceInstrBundle()
 
     def exuIdx = this.params.exuIdx
 
@@ -699,6 +700,8 @@ object Bundles {
       this.numLsElem     .foreach(_ := source.common.numLsElem.get)
       this.srcTimer      .foreach(_ := source.common.srcTimer.get)
       this.loadDependency.foreach(_ := source.common.loadDependency.get.map(_ << 1))
+
+      this.traceInfo     := source.common.traceInfo
     }
   }
 
