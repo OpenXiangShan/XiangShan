@@ -169,7 +169,7 @@ class BasePredictorIO (implicit p: Parameters) extends XSBundle with HasBPUConst
   val s2_ready = Output(Bool())
   val s3_ready = Output(Bool())
 
-  val update = Flipped(Valid(new BranchPredictionUpdate))
+  val update = Flipped(DecoupledIO(new BranchPredictionUpdate))
   val redirect = Flipped(Valid(new BranchPredictionRedirect))
   val redirectFromIFU = Input(Bool())
 }
@@ -193,6 +193,8 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule
   io.s1_ready := true.B
   io.s2_ready := true.B
   io.s3_ready := true.B
+
+  io.update.ready := true.B
 
   val (_, reset_vector) = DelayNWithValid(io.reset_vector, reset.asBool, 5, hasInit = false)
 
@@ -447,6 +449,8 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     s3_fire_dup(2) && s3_redirect_dup(2)
   io.bpu_to_ftq.resp.bits  := predictors.io.out
   io.bpu_to_ftq.resp.bits.last_stage_spec_info.histPtr     := s3_ghist_ptr_dup(2)
+
+  io.ftq_to_bpu.update.ready := predictors.io.update.ready
 
   val full_pred_diff = WireInit(false.B)
   val full_pred_diff_stage = WireInit(0.U)
