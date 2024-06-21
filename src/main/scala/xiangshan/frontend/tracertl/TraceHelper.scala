@@ -109,19 +109,56 @@ class TraceReaderHelper(width: Int)(implicit p: Parameters)
   setInline(s"$desiredName.v", getVerilog)
 }
 
-/*
-class TraceCollectorHelper(width: Int, pcWidth: Int, instWidth: Int, robMergeWidth: Int)
-  extends ExtModule{
+class TraceCollectorHelper(width: Int)
+  extends ExtModule
+  with HasExtModuleInline{
   val clock = IO(Input(Clock()))
   val reset = IO(Input(Reset()))
   val enable = IO(Input(Bool()))
 
-  val pc = IO(Input(Vec(width, UInt(pcWidth.W))))
-  val inst = IO(Input(Vec(width, UInt(instWidth.W))))
+  val pc = IO(Input(Vec(width, UInt(64.W))))
+  val inst = IO(Input(Vec(width, UInt(32.W))))
   // InstNum is used to deal with RoB Merge
-  val instNum = IO(Input(Vec(width, UInt(robMergeWidth.W))))
+  val instNum = IO(Input(Vec(width, UInt(8.W))))
+
+  def getVerilog: String = {
+    def genPort(size: Int, baseName: String): String = {
+      (0 until width)
+        .map(i => s"input [${size - 1}:0] ${baseName}_${i},")
+        .mkString("  ", "\n  ", "\n")
+    }
+    def callDPIC: String = {
+      (0 until width)
+        .map(i => s"trace_collect_one_instr(pc_${i}, inst_${i}, instNum_${i});")
+        .mkString("      ", "\n      ", "\n")
+    }
+    s"""
+       |module TraceCollectorHelper(
+       |  input  clock,
+       |  input  reset,
+       |${genPort(64, "pc")}
+       |${genPort(32, "inst")}
+       |${genPort(8, "instNum")}
+       |  input  enable
+       |);
+       |
+       |  always @(posedge clock) begin
+       |    if (enable && !reset) begin
+       |$callDPIC
+       |    end
+       |  end
+       |endmodule
+       |
+       |import "DPI-C" function void trace_collect_one_instr(
+       |  input longint pc,
+       |  input int inst,
+       |  input byte instNum
+       |);
+       |
+       |""".stripMargin
+  }
+  setInline(s"$desiredName.v", getVerilog)
 }
-*/
 
 
 
