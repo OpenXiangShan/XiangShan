@@ -55,7 +55,7 @@ class IMSIC(
   ))
 
   imsicTop.io.csr_clk         := clock
-  imsicTop.io.csr_rstn        := reset
+  imsicTop.io.csr_rst         := reset
   imsicTop.io.hart_id         := i.hartId
   imsicTop.io.i.msi_info_vld  := i.msiInfo.valid
   imsicTop.io.i.msi_info      := i.msiInfo.bits.info
@@ -92,7 +92,7 @@ class imsic_csr_top(
   "XLEN"           -> XLEN,
   "NR_SRC"         -> NumIRSrc,
   "EID_VLD_DLY_NUM"-> EidVldDlyNum,
-)) with HasBlackBoxResource {
+)) with HasBlackBoxResource with HasBlackBoxPath {
   private val NR_SRC_WIDTH = log2Up(NumIRSrc)
   private val NR_HARTS_WIDTH = log2Up(NumHart)
   private val INTP_FILE_WIDTH = log2Up(NumIRFiles)
@@ -100,7 +100,7 @@ class imsic_csr_top(
 
   val io = IO(new Bundle {
     val csr_clk = Input(Clock())
-    val csr_rstn = Input(Reset())
+    val csr_rst = Input(Reset())
     val hart_id = Input(UInt(NR_HARTS_WIDTH.W))
 
     val i = Input(new Bundle {
@@ -131,11 +131,10 @@ class imsic_csr_top(
       val vstopei = UInt(32.W)
     })
   })
-
-  addResource("/vsrc/imsic/imsic_csr_top.v")
-  addResource("/vsrc/imsic/imsic_csr_gate.v")
-  addResource("/vsrc/imsic/imsic_csr_reg.v")
-  addResource("/vsrc/cmip_dff_sync.sv")
+  addResource("/aia/src/rtl/imsic/imsic_csr_top.v")
+  addResource("/aia/src/rtl/imsic/imsic_csr_gate.v")
+  addResource("/aia/src/rtl/imsic/imsic_csr_reg.v")
+  addResource("/aia/src/rtl/imsic/common/cmip_dff_sync.sv")
 }
 
 class MsiInfoBundle(
