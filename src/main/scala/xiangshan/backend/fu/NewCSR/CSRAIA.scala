@@ -11,7 +11,15 @@ import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRROField => RO, CSRRWField => R
 import scala.collection.immutable.SeqMap
 
 trait CSRAIA { self: NewCSR with HypervisorLevel =>
-  val miselect = Module(new CSRModule("Miselevt", new MISelectBundle))
+  val miselect = Module(new CSRModule("Miselevt", new MISelectBundle) with HasISelectBundle {
+    private val value = reg.ALL.asUInt
+    inIMSICRange := value >= 0x70.U && value < 0x100.U && value(0) =/= 1.U
+    isIllegal :=
+      value < 0x30.U ||
+      value >= 0x40.U && value < 0x70.U ||
+      value >= 0x100.U ||
+      value(0) === 1.U
+  })
     .setAddr(CSRs.miselect)
 
   val mireg = Module(new CSRModule("Mireg") with HasIregSink {
@@ -31,7 +39,15 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
   })
     .setAddr(CSRs.mtopi)
 
-  val siselect = Module(new CSRModule("Siselect", new SISelectBundle))
+  val siselect = Module(new CSRModule("Siselect", new SISelectBundle) with HasISelectBundle {
+    private val value = reg.ALL.asUInt
+    inIMSICRange := value >= 0x70.U && value < 0x100.U && value(0) =/= 1.U
+    isIllegal :=
+      value < 0x30.U ||
+      value >= 0x40.U && value < 0x70.U ||
+      value >= 0x100.U ||
+      value(0) === 1.U
+  })
     .setAddr(CSRs.siselect)
 
   val sireg = Module(new CSRModule("Sireg") with HasIregSink {
@@ -51,7 +67,14 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
   })
     .setAddr(CSRs.stopi)
 
-  val vsiselect = Module(new CSRModule("VSiselect", new VSISelectBundle))
+  val vsiselect = Module(new CSRModule("VSiselect", new VSISelectBundle) with HasISelectBundle {
+    private val value = reg.ALL.asUInt
+    inIMSICRange := value >= 0x70.U && value < 0x100.U && value(0) =/= 1.U
+    isIllegal :=
+      value < 0x70.U ||
+      value >= 0x100.U ||
+      value(0) === 1.U
+  })
     .setAddr(CSRs.vsiselect)
 
   val vsireg    = Module(new CSRModule("VSireg") with HasIregSink {
@@ -192,6 +215,7 @@ class CSRToAIABundle extends Bundle {
   val vgein = UInt(VGEINWidth.W)
 
   val wdata = ValidIO(new Bundle {
+    val op = UInt(2.W)
     val data = UInt(XLEN.W)
   })
 
@@ -223,11 +247,8 @@ trait HasInterruptFilterSink { self: CSRModule[_] =>
 }
 
 trait HasISelectBundle { self: CSRModule[_] =>
-  val privState = IO(Input(new PrivState))
-  val miselect = IO(Input(new MISelectBundle))
-  val siselect = IO(Input(new SISelectBundle))
-  val mireg = IO(Input(UInt(XLEN.W)))
-  val sireg = IO(Input(UInt(XLEN.W)))
+  val inIMSICRange = IO(Output(Bool()))
+  val isIllegal = IO(Output(Bool()))
 }
 
 trait HasIregSink { self: CSRModule[_] =>

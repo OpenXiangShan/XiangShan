@@ -30,6 +30,7 @@ class IMSIC(
       val sClaim  = Bool()
       val vsClaim = Bool()
       val wdata = ValidIO(new Bundle{
+        val op    = UInt(2.W)
         val data  = UInt(XLEN.W)
       })
     }
@@ -66,6 +67,7 @@ class IMSIC(
   imsicTop.io.i.csr.claim     := Cat(i.csr.vsClaim, i.csr.sClaim, i.csr.mClaim)
   imsicTop.io.i.csr.wdata_vld := i.csr.wdata.valid
   imsicTop.io.i.csr.wdata     := i.csr.wdata.bits.data
+  imsicTop.io.i.csr.wdata_op  := i.csr.wdata.bits.op
 
   o.csr.rdata.valid        := imsicTop.io.o.csr.rdata_vld
   o.csr.rdata.bits.rdata   := imsicTop.io.o.csr.rdata
@@ -112,6 +114,7 @@ class imsic_csr_top(
         val vgein = UInt(6.W)
         val claim = UInt(3.W)
         val wdata_vld = Bool()
+        val wdata_op = UInt(2.W)
         val wdata = UInt(XLEN.W)
       }
     })

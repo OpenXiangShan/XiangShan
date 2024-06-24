@@ -89,12 +89,17 @@ class NewCSR(implicit val p: Parameters) extends Module
       val hartId = UInt(hartIdLen.W)
       val clintTime = Input(ValidIO(UInt(64.W)))
     })
-    val in = Input(new Bundle {
+    val in = Input(ValidIO(new Bundle {
       val wen = Bool()
       val ren = Bool()
+      val op = UInt(2.W)
       val addr = UInt(12.W)
+      val src = UInt(64.W)
       val wdata = UInt(64.W)
-    })
+      val mret = Input(Bool())
+      val sret = Input(Bool())
+      val dret = Input(Bool())
+    }))
     val fromMem = Input(new Bundle {
       val excpVA  = UInt(VaddrMaxWidth.W)
       val excpGPA = UInt(VaddrMaxWidth.W) // Todo: use guest physical address width
@@ -112,21 +117,20 @@ class NewCSR(implicit val p: Parameters) extends Module
       })
       val commit = Input(new RobCommitCSR)
     })
-    val mret = Input(Bool())
-    val sret = Input(Bool())
-    val dret = Input(Bool())
-    val wfi  = Input(Bool())
-    val ebreak = Input(Bool())
 
     val perf = Input(new PerfCounterIO)
 
-    val out = Output(new Bundle {
+    val out = Output(ValidIO(new Bundle {
       val EX_II = Bool()
       val EX_VI = Bool()
       val flushPipe = Bool()
       val rData = UInt(64.W)
       val targetPc = UInt(VaddrMaxWidth.W)
       val regOut = UInt(64.W)
+      // perf
+      val isPerfCnt = Bool()
+    }))
+    val status = Output(new Bundle {
       val privState = new PrivState
       val interrupt = Bool()
       val wfiEvent = Bool()
@@ -148,8 +152,6 @@ class NewCSR(implicit val p: Parameters) extends Module
         val vlenb = UInt(XLEN.W)
         val off = Bool()
       }
-      // perf
-      val isPerfCnt = Bool()
       // debug
       val debugMode = Bool()
       val singleStepFlag = Bool()
@@ -187,12 +189,14 @@ class NewCSR(implicit val p: Parameters) extends Module
   dontTouch(fromAIA)
   dontTouch(io.fromTop.clintTime)
 
-  val wen   = io.in.wen
-  val addr  = io.in.addr
-  val wdata = io.in.wdata
+  val valid = io.in.valid
 
-  val ren   = io.in.ren
-  val raddr = io.in.addr
+  val wen   = io.in.bits.wen && valid
+  val addr  = io.in.bits.addr
+  val wdata = io.in.bits.wdata
+
+  val ren   = io.in.bits.ren && valid
+  val raddr = io.in.bits.addr
 
   val hasTrap = io.fromRob.trap.valid
   val trapVec = io.fromRob.trap.bits.trapVec
@@ -226,7 +230,7 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   val legalSret = permitMod.io.out.hasLegalSret
   val legalMret = permitMod.io.out.hasLegalMret
-  val isDret = io.dret // Todo: check permission
+  val isDret = io.in.bits.dret && valid // Todo: check permission
 
   var csrRwMap: SeqMap[Int, (CSRAddrWriteBundle[_], UInt)] =
     machineLevelCSRMap ++
@@ -334,15 +338,15 @@ class NewCSR(implicit val p: Parameters) extends Module
   private val writeFpLegal  = permitMod.io.out.hasLegalWriteFcsr
   private val writeVecLegal = permitMod.io.out.hasLegalWriteVcsr
 
-  permitMod.io.in.csrAccess.ren := ren
+  permitMod.io.in.csrAccess.ren := ren && valid
   permitMod.io.in.csrAccess.wen := wen
   permitMod.io.in.csrAccess.addr := addr
 
   permitMod.io.in.privState := privState
   permitMod.io.in.debugMode := debugMode
 
-  permitMod.io.in.mret := io.mret
-  permitMod.io.in.sret := io.sret
+  permitMod.io.in.mret := io.in.bits.mret && valid
+  permitMod.io.in.sret := io.in.bits.sret && valid
   permitMod.io.in.csrIsCustom := customCSRMods.map(_.addr.U === addr).reduce(_ || _).orR
 
   permitMod.io.in.status.tsr := mstatus.regOut.TSR.asBool
@@ -488,15 +492,6 @@ class NewCSR(implicit val p: Parameters) extends Module
         m.topIR.mtopi  := intrMod.io.out.mtopi
         m.topIR.stopi  := intrMod.io.out.stopi
         m.topIR.vstopi := intrMod.io.out.vstopi
-      case _ =>
-    }
-    mod match {
-      case m: HasISelectBundle =>
-        m.privState := privState
-        m.miselect := miselect.regOut
-        m.siselect := siselect.regOut
-        m.mireg := mireg.regOut.asUInt
-        m.sireg := sireg.regOut.asUInt
       case _ =>
     }
     mod match {
@@ -741,13 +736,46 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   private val noCSRIllegal = (ren || wen) && Cat(csrRwMap.keys.toSeq.sorted.map(csrAddr => !(addr === csrAddr.U))).andR
 
-  io.out.EX_II := permitMod.io.out.EX_II || noCSRIllegal
-  io.out.EX_VI := permitMod.io.out.EX_VI
-  io.out.flushPipe := flushPipe
+  private val s_idle :: s_waitIMSIC :: Nil = Enum(2)
 
-  io.out.rData := Mux(ren, rdata, 0.U)
-  io.out.regOut := regOut
-  io.out.targetPc := DataHoldBypass(
+  private val state = RegInit(s_idle)
+  private val stateNext = WireInit(state)
+  state := stateNext
+
+  private val asyncRead = ren && (
+    mireg.addr.U === addr && miselect.inIMSICRange ||
+      sireg.addr.U === addr && siselect.inIMSICRange ||
+      vsireg.addr.U === addr && vsiselect.inIMSICRange
+    )
+
+  switch(state) {
+    is(s_idle) {
+      when(asyncRead) {
+        stateNext := s_waitIMSIC
+      }
+    }
+    is(s_waitIMSIC) {
+      when(fromAIA.rdata.valid) {
+        stateNext := s_idle
+      }
+    }
+  }
+
+  // Todo: check IMSIC EX_II and EX_VI
+  private val imsicIllegal = fromAIA.rdata.valid && fromAIA.rdata.bits.illegal
+  private val imsic_EX_II = imsicIllegal && !V.asUInt.asBool
+  private val imsic_EX_VI = imsicIllegal && V.asUInt.asBool
+
+  io.out.valid :=
+    io.in.valid && stateNext === s_idle ||
+    state === s_waitIMSIC && stateNext === s_idle
+  io.out.bits.EX_II := permitMod.io.out.EX_II || imsic_EX_II || noCSRIllegal
+  io.out.bits.EX_VI := permitMod.io.out.EX_VI || imsic_EX_VI
+  io.out.bits.flushPipe := flushPipe
+
+  io.out.bits.rData := Mux(ren, rdata, 0.U)
+  io.out.bits.regOut := regOut
+  io.out.bits.targetPc := DataHoldBypass(
     Mux(trapEntryDEvent.out.targetPc.valid,
       trapEntryDEvent.out.targetPc.bits,
       Mux1H(Seq(
@@ -760,26 +788,25 @@ class NewCSR(implicit val p: Parameters) extends Module
       )
     ),
   needTargetUpdate)
+  io.out.bits.isPerfCnt := addrInPerfCnt
 
-  io.out.privState := privState
-
-  io.out.fpState.frm := fcsr.frm
-  io.out.fpState.off := mstatus.regOut.FS === ContextStatus.Off
-  io.out.vecState.vstart := vstart.rdata.asUInt
-  io.out.vecState.vxsat := vcsr.vxsat
-  io.out.vecState.vxrm := vcsr.vxrm
-  io.out.vecState.vcsr := vcsr.rdata.asUInt
-  io.out.vecState.vl := vl.rdata.asUInt
-  io.out.vecState.vtype := vtype.rdata.asUInt // Todo: check correct
-  io.out.vecState.vlenb := vlenb.rdata.asUInt
-  io.out.vecState.off := mstatus.regOut.VS === ContextStatus.Off
-  io.out.isPerfCnt := addrInPerfCnt
-  io.out.interrupt := intrMod.io.out.interruptVec.valid
-  io.out.wfiEvent := debugIntr || (mie.rdata.asUInt & mip.rdata.asUInt).orR
-  io.out.debugMode := debugMode
-  io.out.singleStepFlag := !debugMode && dcsr.regOut.STEP
-  io.out.tvm := tvm
-  io.out.vtvm := vtvm
+  io.status.privState := privState
+  io.status.fpState.frm := fcsr.frm
+  io.status.fpState.off := mstatus.regOut.FS === ContextStatus.Off
+  io.status.vecState.vstart := vstart.rdata.asUInt
+  io.status.vecState.vxsat := vcsr.vxsat
+  io.status.vecState.vxrm := vcsr.vxrm
+  io.status.vecState.vcsr := vcsr.rdata.asUInt
+  io.status.vecState.vl := vl.rdata.asUInt
+  io.status.vecState.vtype := vtype.rdata.asUInt // Todo: check correct
+  io.status.vecState.vlenb := vlenb.rdata.asUInt
+  io.status.vecState.off := mstatus.regOut.VS === ContextStatus.Off
+  io.status.interrupt := intrMod.io.out.interruptVec.valid
+  io.status.wfiEvent := debugIntr || (mie.rdata.asUInt & mip.rdata.asUInt).orR
+  io.status.debugMode := debugMode
+  io.status.singleStepFlag := !debugMode && dcsr.regOut.STEP
+  io.status.tvm := tvm
+  io.status.vtvm := vtvm
 
   /**
    * debug_begin
@@ -922,14 +949,14 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   triggerFrontendChange := frontendTriggerUpdate
 
-  io.out.frontendTrigger.tUpdate.valid       := RegNext(RegNext(frontendTriggerUpdate))
-  io.out.frontendTrigger.tUpdate.bits.addr   := tselect.rdata.asUInt
-  io.out.frontendTrigger.tUpdate.bits.tdata.GenTdataDistribute(tdata1Selected, tdata2Selected)
-  io.out.frontendTrigger.tEnableVec          := fetchTriggerEnableVec
-  io.out.memTrigger.tUpdate.valid            := RegNext(RegNext(memTriggerUpdate))
-  io.out.memTrigger.tUpdate.bits.addr        := tselect.rdata.asUInt
-  io.out.memTrigger.tUpdate.bits.tdata.GenTdataDistribute(tdata1Selected, tdata2Selected)
-  io.out.memTrigger.tEnableVec               := memAccTriggerEnableVec
+  io.status.frontendTrigger.tUpdate.valid       := RegNext(RegNext(frontendTriggerUpdate))
+  io.status.frontendTrigger.tUpdate.bits.addr   := tselect.rdata.asUInt
+  io.status.frontendTrigger.tUpdate.bits.tdata.GenTdataDistribute(tdata1Selected, tdata2Selected)
+  io.status.frontendTrigger.tEnableVec          := fetchTriggerEnableVec
+  io.status.memTrigger.tUpdate.valid            := RegNext(RegNext(memTriggerUpdate))
+  io.status.memTrigger.tUpdate.bits.addr        := tselect.rdata.asUInt
+  io.status.memTrigger.tUpdate.bits.tdata.GenTdataDistribute(tdata1Selected, tdata2Selected)
+  io.status.memTrigger.tEnableVec               := memAccTriggerEnableVec
   /**
    * debug_end
    */
@@ -988,59 +1015,80 @@ class NewCSR(implicit val p: Parameters) extends Module
    */
 
   /**
-   * [[io.out.custom]] connection
+   * [[io.status.custom]] connection
    */
-  io.out.custom.l1I_pf_enable           := spfctl.regOut.L1I_PF_ENABLE.asBool
-  io.out.custom.l2_pf_enable            := spfctl.regOut.L2_PF_ENABLE.asBool
-  io.out.custom.l1D_pf_enable           := spfctl.regOut.L1D_PF_ENABLE.asBool
-  io.out.custom.l1D_pf_train_on_hit     := spfctl.regOut.L1D_PF_TRAIN_ON_HIT.asBool
-  io.out.custom.l1D_pf_enable_agt       := spfctl.regOut.L1D_PF_ENABLE_AGT.asBool
-  io.out.custom.l1D_pf_enable_pht       := spfctl.regOut.L1D_PF_ENABLE_PHT.asBool
-  io.out.custom.l1D_pf_active_threshold := spfctl.regOut.L1D_PF_ACTIVE_THRESHOLD.asUInt
-  io.out.custom.l1D_pf_active_stride    := spfctl.regOut.L1D_PF_ACTIVE_STRIDE.asUInt
-  io.out.custom.l1D_pf_enable_stride    := spfctl.regOut.L1D_PF_ENABLE_STRIDE.asBool
-  io.out.custom.l2_pf_store_only        := spfctl.regOut.L2_PF_STORE_ONLY.asBool
+  io.status.custom.l1I_pf_enable           := spfctl.regOut.L1I_PF_ENABLE.asBool
+  io.status.custom.l2_pf_enable            := spfctl.regOut.L2_PF_ENABLE.asBool
+  io.status.custom.l1D_pf_enable           := spfctl.regOut.L1D_PF_ENABLE.asBool
+  io.status.custom.l1D_pf_train_on_hit     := spfctl.regOut.L1D_PF_TRAIN_ON_HIT.asBool
+  io.status.custom.l1D_pf_enable_agt       := spfctl.regOut.L1D_PF_ENABLE_AGT.asBool
+  io.status.custom.l1D_pf_enable_pht       := spfctl.regOut.L1D_PF_ENABLE_PHT.asBool
+  io.status.custom.l1D_pf_active_threshold := spfctl.regOut.L1D_PF_ACTIVE_THRESHOLD.asUInt
+  io.status.custom.l1D_pf_active_stride    := spfctl.regOut.L1D_PF_ACTIVE_STRIDE.asUInt
+  io.status.custom.l1D_pf_enable_stride    := spfctl.regOut.L1D_PF_ENABLE_STRIDE.asBool
+  io.status.custom.l2_pf_store_only        := spfctl.regOut.L2_PF_STORE_ONLY.asBool
 
-  io.out.custom.icache_parity_enable    := sfetchctl.regOut.ICACHE_PARITY_ENABLE.asBool
+  io.status.custom.icache_parity_enable    := sfetchctl.regOut.ICACHE_PARITY_ENABLE.asBool
 
-  io.out.custom.lvpred_disable          := slvpredctl.regOut.LVPRED_DISABLE.asBool
-  io.out.custom.no_spec_load            := slvpredctl.regOut.NO_SPEC_LOAD.asBool
-  io.out.custom.storeset_wait_store     := slvpredctl.regOut.STORESET_WAIT_STORE.asBool
-  io.out.custom.storeset_no_fast_wakeup := slvpredctl.regOut.STORESET_NO_FAST_WAKEUP.asBool
-  io.out.custom.lvpred_timeout          := slvpredctl.regOut.LVPRED_TIMEOUT.asUInt
+  io.status.custom.lvpred_disable          := slvpredctl.regOut.LVPRED_DISABLE.asBool
+  io.status.custom.no_spec_load            := slvpredctl.regOut.NO_SPEC_LOAD.asBool
+  io.status.custom.storeset_wait_store     := slvpredctl.regOut.STORESET_WAIT_STORE.asBool
+  io.status.custom.storeset_no_fast_wakeup := slvpredctl.regOut.STORESET_NO_FAST_WAKEUP.asBool
+  io.status.custom.lvpred_timeout          := slvpredctl.regOut.LVPRED_TIMEOUT.asUInt
 
-  io.out.custom.bp_ctrl.ubtb_enable     := sbpctl.regOut.UBTB_ENABLE .asBool
-  io.out.custom.bp_ctrl.btb_enable      := sbpctl.regOut.BTB_ENABLE  .asBool
-  io.out.custom.bp_ctrl.bim_enable      := sbpctl.regOut.BIM_ENABLE  .asBool
-  io.out.custom.bp_ctrl.tage_enable     := sbpctl.regOut.TAGE_ENABLE .asBool
-  io.out.custom.bp_ctrl.sc_enable       := sbpctl.regOut.SC_ENABLE   .asBool
-  io.out.custom.bp_ctrl.ras_enable      := sbpctl.regOut.RAS_ENABLE  .asBool
-  io.out.custom.bp_ctrl.loop_enable     := sbpctl.regOut.LOOP_ENABLE .asBool
+  io.status.custom.bp_ctrl.ubtb_enable     := sbpctl.regOut.UBTB_ENABLE .asBool
+  io.status.custom.bp_ctrl.btb_enable      := sbpctl.regOut.BTB_ENABLE  .asBool
+  io.status.custom.bp_ctrl.bim_enable      := sbpctl.regOut.BIM_ENABLE  .asBool
+  io.status.custom.bp_ctrl.tage_enable     := sbpctl.regOut.TAGE_ENABLE .asBool
+  io.status.custom.bp_ctrl.sc_enable       := sbpctl.regOut.SC_ENABLE   .asBool
+  io.status.custom.bp_ctrl.ras_enable      := sbpctl.regOut.RAS_ENABLE  .asBool
+  io.status.custom.bp_ctrl.loop_enable     := sbpctl.regOut.LOOP_ENABLE .asBool
 
-  io.out.custom.sbuffer_threshold                := smblockctl.regOut.SBUFFER_THRESHOLD.asUInt
-  io.out.custom.ldld_vio_check_enable            := smblockctl.regOut.LDLD_VIO_CHECK_ENABLE.asBool
-  io.out.custom.soft_prefetch_enable             := smblockctl.regOut.SOFT_PREFETCH_ENABLE.asBool
-  io.out.custom.cache_error_enable               := smblockctl.regOut.CACHE_ERROR_ENABLE.asBool
-  io.out.custom.uncache_write_outstanding_enable := smblockctl.regOut.UNCACHE_WRITE_OUTSTANDING_ENABLE.asBool
+  io.status.custom.sbuffer_threshold                := smblockctl.regOut.SBUFFER_THRESHOLD.asUInt
+  io.status.custom.ldld_vio_check_enable            := smblockctl.regOut.LDLD_VIO_CHECK_ENABLE.asBool
+  io.status.custom.soft_prefetch_enable             := smblockctl.regOut.SOFT_PREFETCH_ENABLE.asBool
+  io.status.custom.cache_error_enable               := smblockctl.regOut.CACHE_ERROR_ENABLE.asBool
+  io.status.custom.uncache_write_outstanding_enable := smblockctl.regOut.UNCACHE_WRITE_OUTSTANDING_ENABLE.asBool
 
-  io.out.custom.fusion_enable           := srnctl.regOut.FUSION_ENABLE.asBool
-  io.out.custom.wfi_enable              := srnctl.regOut.WFI_ENABLE.asBool
+  io.status.custom.fusion_enable           := srnctl.regOut.FUSION_ENABLE.asBool
+  io.status.custom.wfi_enable              := srnctl.regOut.WFI_ENABLE.asBool
 
-  // Todo: record the last address to avoid xireg is different with xiselect
-  toAIA.addr.valid := wenLegal && Seq(miselect, siselect, vsiselect).map(
-    _.addr.U === addr
-  ).reduce(_ || _)
-  toAIA.addr.bits.addr := addr
-  toAIA.addr.bits.prvm := PRVM
-  toAIA.addr.bits.v := V
+  private val csrAccess = wen || ren
+
+  private val imsicAddrValid =
+    csrAccess && addr ===  mireg.addr.U &&  miselect.inIMSICRange ||
+    csrAccess && addr ===  sireg.addr.U &&  siselect.inIMSICRange ||
+    csrAccess && addr === vsireg.addr.U && vsiselect.inIMSICRange
+
+  private val imsicAddr = Mux1H(Seq(
+    (csrAccess && addr ===  mireg.addr.U) -> miselect.regOut.asUInt,
+    (csrAccess && addr ===  sireg.addr.U) -> siselect.regOut.asUInt,
+    (csrAccess && addr === vsireg.addr.U) -> vsiselect.regOut.asUInt,
+  ))
+
+  private val imsicAddrPrivState = Mux1H(Seq(
+    ( mireg.w.wen) -> PrivState.ModeM,
+    ( sireg.w.wen) -> PrivState.ModeHS,
+    (vsireg.w.wen) -> PrivState.ModeVS,
+  ))
+
+  private val imsicWdataValid =
+    wen && addr === mireg.addr.U && miselect.inIMSICRange ||
+    wen && addr === sireg.addr.U && siselect.inIMSICRange ||
+    wen && addr === vsireg.addr.U && vsiselect.inIMSICRange
+
+  toAIA.addr.valid     := imsicAddrValid
+  toAIA.addr.bits.addr := imsicAddr
+  toAIA.addr.bits.prvm := imsicAddrPrivState.PRVM
+  toAIA.addr.bits.v    := imsicAddrPrivState.V
+
+  toAIA.wdata.valid := imsicWdataValid
+  toAIA.wdata.bits.op := io.in.bits.op
+  toAIA.wdata.bits.data := io.in.bits.src
   toAIA.vgein := hstatus.regOut.VGEIN.asUInt
-  toAIA.wdata.valid := wenLegal && Seq(mireg, sireg, vsireg).map(
-    _.addr.U === addr
-  ).reduce(_ || _)
-  toAIA.wdata.bits.data := wdata
-  toAIA.mClaim := wenLegal && mtopei.addr.U === addr
-  toAIA.sClaim := wenLegal && stopei.addr.U === addr
-  toAIA.vsClaim := wenLegal && vstopei.addr.U === addr
+  toAIA.mClaim  := mtopei.w.wen
+  toAIA.sClaim  := stopei.w.wen
+  toAIA.vsClaim := vstopei.w.wen
 
   // tlb
   io.tlb.satpASIDChanged  := GatedValidRegNext(wenLegal && addr === CSRs. satp.U && satp .regOut.ASID =/=  satp.w.wdataFields.ASID)
