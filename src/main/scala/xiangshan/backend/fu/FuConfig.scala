@@ -262,7 +262,7 @@ object FuConfig {
     latency = CertainLatency(0),
     destDataBits = 128,
     srcDataBits = Some(64),
-    immType = Set(SelImm.IMM_OPIVIU, SelImm.IMM_OPIVIS),
+    immType = Set(SelImm.IMM_OPIVIU, SelImm.IMM_OPIVIS, SelImm.IMM_VRORVI),
   )
 
   val F2vCfg: FuConfig = FuConfig (
@@ -528,7 +528,6 @@ object FuConfig {
     maskWakeUp = true,
     destDataBits = 128,
     exceptionOut = Seq(illegalInstr),
-    immType = Set(SelImm.IMM_OPIVIU, SelImm.IMM_OPIVIS, SelImm.IMM_VRORVI),
   )
 
   val VimacCfg = FuConfig (
@@ -582,7 +581,6 @@ object FuConfig {
     maskWakeUp = true,
     destDataBits = 128,
     exceptionOut = Seq(illegalInstr),
-    immType = Set(SelImm.IMM_OPIVIU, SelImm.IMM_OPIVIS),
   )
 
   val VipuCfg: FuConfig = FuConfig (
