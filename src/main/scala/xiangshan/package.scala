@@ -223,6 +223,9 @@ package object xiangshan {
     def isCsrAccess(op: UInt): Bool = op(3)
     def isReadOnly (op: UInt): Bool = op(3) && op(2, 0) === 0.U
     def notReadOnly(op: UInt): Bool = op(3) && op(2, 0) =/= 0.U
+
+    def getCSROp(op: UInt) = op(1, 0)
+    def needImm(op: UInt) = op(2)
   }
 
   // jump
