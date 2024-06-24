@@ -593,6 +593,7 @@ package object xiangshan {
     def isVecSt(fuOpType: UInt): Bool = fuOpType(8, 7) === "b10".U
     def isVecLS(fuOpType: UInt): Bool = fuOpType(8, 7).orR
 
+    def isAllUS  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && !fuOpType(4) // Unit-Stride Whole Masked
     def isUStride(fuOpType: UInt): Bool = fuOpType(6, 0) === "b00_00000".U
     def isWhole  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01000".U
     def isMasked (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01011".U
