@@ -192,7 +192,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   val issueEmul                       = EewLog2(issueEew) - issueSew + issueLmul
   val elemIdxInVd                     = segmentIdx & instMicroOp.uopFlowNumMask
   val issueInstType                   = Cat(true.B, instMicroOp.uop.fuOpType(6, 5)) // always segment instruction
-  val issueUopFlowNumLog2             = GenRealFlowLog2(issueInstType, issueEmul, issueLmul, issueEew, issueSew) // max element number log2 in vd
+  val issueUopFlowNumLog2             = GenRealFlowLog2(issueInstType, issueEmul, issueLmul, issueEew, issueSew, true) // max element number log2 in vd
   val issueVlMax                      = instMicroOp.uopFlowNum // max elementIdx in vd
   val issueMaxIdxInIndex              = GenVLMAX(Mux(issueEmul.asSInt > 0.S, 0.U, issueEmul), issueEew(1, 0)) // index element index in index register
   val issueMaxIdxInIndexMask          = GenVlMaxMask(issueMaxIdxInIndex, elemIdxBits)
@@ -312,7 +312,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   when(io.in.fire && !instMicroOpValid){
     // element number in a vd
     // TODO Rewrite it in a more elegant way.
-    val uopFlowNum                    = ZeroExt(GenRealFlowNum(instType, emul, lmul, eew, sew), elemIdxBits)
+    val uopFlowNum                    = ZeroExt(GenRealFlowNum(instType, emul, lmul, eew, sew, true), elemIdxBits)
     instMicroOp.baseVaddr             := io.in.bits.src_rs1(VAddrBits - 1, 0)
     instMicroOpValid                  := true.B // if is first uop
     instMicroOp.alignedType           := Mux(isIndexed(instType), sew(1, 0), eew(1, 0))
@@ -521,7 +521,11 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
 
   private val segmentInactiveFinish = ((state === s_latch_and_merge_data) || (state === s_send_data)) && !segmentActive
 
-  val splitPtrOffset = Mux(emul.asSInt < 0.S, 1.U, (1.U << emul).asUInt)
+  val splitPtrOffset = Mux(
+    isIndexed(instType),
+    Mux(lmul.asSInt < 0.S, 1.U, (1.U << lmul).asUInt),
+    Mux(emul.asSInt < 0.S, 1.U, (1.U << emul).asUInt)
+  )
   splitPtrNext :=
     Mux(fieldIdx === maxNfields || !segmentActive, // if segment is active, need to complete this segment, otherwise jump to next segment
       // segment finish, By shifting 'issueUopFlowNumLog2' to the right to ensure that emul != 1 can correctly generate lateral offset.
