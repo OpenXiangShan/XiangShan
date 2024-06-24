@@ -216,6 +216,8 @@ case class XSCoreParameters
   VecMemInstWbWidth: Int = 1,
   VecMemDispatchWidth: Int = 1,
   VecMemDispatchMaxNumber: Int = 16,
+  VecMemUnitStrideMaxFlowNum: Int = 2,
+  VecMemLSQEnqIteratorNumberSeq: Seq[Int] = Seq(16, 2, 2, 2, 2, 2),
   StoreBufferSize: Int = 16,
   StoreBufferThreshold: Int = 7,
   EnsbufferWidth: Int = 2,
@@ -724,6 +726,8 @@ trait HasXSParameter {
   def VecMemInstWbWidth = coreParams.VecMemInstWbWidth
   def VecMemDispatchWidth = coreParams.VecMemDispatchWidth
   def VecMemDispatchMaxNumber = coreParams.VecMemDispatchMaxNumber
+  def VecMemUnitStrideMaxFlowNum = coreParams.VecMemUnitStrideMaxFlowNum
+  def VecMemLSQEnqIteratorNumberSeq = coreParams.VecMemLSQEnqIteratorNumberSeq
   def StoreBufferSize = coreParams.StoreBufferSize
   def StoreBufferThreshold = coreParams.StoreBufferThreshold
   def EnsbufferWidth = coreParams.EnsbufferWidth
