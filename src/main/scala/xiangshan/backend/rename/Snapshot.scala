@@ -69,7 +69,7 @@ class SnapshotGenerator[T <: Data](dataType: T)(implicit p: Parameters) extends 
     val newEnqPtrQualified = Wire(Vec(RenameSnapshotNum, Bool()))
     newEnqPtrQualified.head := !snptValids(newEnqPtrCandidate.head.value) || io.flushVec(newEnqPtrCandidate.head.value)
     newEnqPtrQualified.tail zip newEnqPtrCandidate.tail.zip(newEnqPtrCandidate.drop(1)).map {
-      case (thiz, last) => snptValids(last.value) && (!snptValids(thiz.value) || io.flushVec(thiz.value))
+      case (thiz, last) => snptValids(last.value) && io.flushVec(thiz.value)
     } foreach (x => x._1 := x._2)
     snptEnqPtr := MuxCase(newEnqPtrCandidate.last, newEnqPtrQualified.zip(newEnqPtrCandidate).dropRight(1))
   }
