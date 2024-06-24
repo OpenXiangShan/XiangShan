@@ -47,10 +47,17 @@ class TraceAlignToIFUCut(implicit p: Parameters) extends TraceModule {
   val traceRangeVec = Wire(Vec(width, Bool()))
   val lastInstEndVec = Wire(Vec(PredictWidth + 1, Bool()))
   val curInstIdxVec = Wire(Vec(PredictWidth + 1, UInt(log2Ceil(width).W)))
+  val stillConsecutiveVec = Wire(Vec(width, Bool()))
   io.traceRange := traceRangeVec.asUInt
   io.traceRangeTaken2B := isTaken2B(io.traceRange)
   io.instRangeTaken2B := isTaken2B(io.instRange)
   val startPC = io.predStartAddr
+
+  dontTouch(traceRangeVec)
+  dontTouch(lastInstEndVec)
+  dontTouch(curInstIdxVec)
+  dontTouch(stillConsecutiveVec)
+  dontTouch(io)
 
   def isTaken2B(range: UInt): Bool = {
     val lastIdx = ParallelPosteriorityEncoder(range)
@@ -62,13 +69,15 @@ class TraceAlignToIFUCut(implicit p: Parameters) extends TraceModule {
   traceRangeVec.foreach(_ := false.B)
   lastInstEndVec.map(_ := false.B)
   curInstIdxVec.map(_ := 0.U)
+  lastInstEndVec(0) := !io.lastHalfValid
+
   (0 until width).foreach { i =>
     val curPC = startPC + (i * 2).U
     val curTrace = io.traceInsts(curInstIdxVec(i))
-    val stillConsecutive = traceRangeVec.take(i).foldRight(true.B)(_ && _)
+    stillConsecutiveVec(i) := traceRangeVec.take(i).foldRight(true.B)(_ && _)
 
     val inst = io.cutInsts(i)
-    when(!io.instRange(i) || !stillConsecutive) {
+    when(!io.instRange(i) || !stillConsecutiveVec(i)) {
       inst.valid := false.B
       inst.bits := (-1.S).asTypeOf(new TraceInstrBundle)
     }.elsewhen(lastInstEndVec(i)) {
@@ -80,7 +89,7 @@ class TraceAlignToIFUCut(implicit p: Parameters) extends TraceModule {
         lastInstEndVec(i + 1) := isRVC(inst.bits.inst)
         curInstIdxVec(i + 1) := curInstIdxVec(i) + 1.U
       }
-    }.elsewhen(stillConsecutive) {
+    }.elsewhen(stillConsecutiveVec(i)) {
       inst.valid := false.B
       inst.bits := (-1.S).asTypeOf(new TraceInstrBundle)
       inst.bits.pcVA := curPC
