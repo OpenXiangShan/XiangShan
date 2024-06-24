@@ -526,14 +526,27 @@ object EewLog2 extends VLSUConstants {
   def apply(eew: UInt): UInt = ZeroExt(eew(1, 0), ewBits)
 }
 
-/**
-  * unit-stride instructions don't use this method;
-  * other instructions generate realFlowNum by EmulDataSize >> eew(1,0),
-  * EmulDataSize means the number of bytes that need to be written to the register,
-  * eew(1,0) means the number of bytes written at once*/
 object GenRealFlowNum {
-  def apply (instType: UInt, emul: UInt, lmul: UInt, eew: UInt, sew: UInt): UInt = {
+  /**
+   * unit-stride instructions don't use this method;
+   * other instructions generate realFlowNum by EmulDataSize >> eew(1,0),
+   * EmulDataSize means the number of bytes that need to be written to the register,
+   * eew(1,0) means the number of bytes written at once.
+   *
+   * @param instType As the name implies.
+   * @param emul As the name implies.
+   * @param lmul As the name implies.
+   * @param eew As the name implies.
+   * @param sew As the name implies.
+   * @param isSegment Only modules related to segment need to be set to true.
+   * @return FlowNum of instruction.
+   *
+   */
+  def apply (instType: UInt, emul: UInt, lmul: UInt, eew: UInt, sew: UInt, isSegment: Boolean = false): UInt = {
     require(instType.getWidth == 3, "The instType width must be 3, (isSegment, mop)")
+    // Because the new segmentunit is needed. But the previous implementation is retained for the time being in case of emergency.
+    val segmentIndexFlowNum =  if (isSegment) (MulDataSize(lmul) >> sew(1,0)).asUInt
+                                else Mux(emul.asSInt > lmul.asSInt, (MulDataSize(emul) >> eew(1,0)).asUInt, (MulDataSize(lmul) >> sew(1,0)).asUInt)
     (LookupTree(instType,List(
       "b000".U ->  (MulDataSize(emul) >> eew(1,0)).asUInt, // store use, load do not use
       "b010".U ->  (MulDataSize(emul) >> eew(1,0)).asUInt, // strided
@@ -541,21 +554,31 @@ object GenRealFlowNum {
       "b011".U ->  Mux(emul.asSInt > lmul.asSInt, (MulDataSize(emul) >> eew(1,0)).asUInt, (MulDataSize(lmul) >> sew(1,0)).asUInt), // indexed-ordered
       "b100".U ->  (MulDataSize(emul) >> eew(1,0)).asUInt, // segment unit-stride
       "b110".U ->  (MulDataSize(emul) >> eew(1,0)).asUInt, // segment strided
-      "b101".U ->  Mux(emul.asSInt > lmul.asSInt, (MulDataSize(emul) >> eew(1,0)).asUInt, (MulDataSize(lmul) >> sew(1,0)).asUInt), // segment indexed-unordered
-      "b111".U ->  Mux(emul.asSInt > lmul.asSInt, (MulDataSize(emul) >> eew(1,0)).asUInt, (MulDataSize(lmul) >> sew(1,0)).asUInt)  // segment indexed-ordered
+      "b101".U ->  segmentIndexFlowNum, // segment indexed-unordered
+      "b111".U ->  segmentIndexFlowNum  // segment indexed-ordered
     )))}
 }
 
-/**
-  * GenRealFlowLog2 = Log2(GenRealFlowNum)
-  */
 object GenRealFlowLog2 extends VLSUConstants {
-  def apply(instType: UInt, emul: UInt, lmul: UInt, eew: UInt, sew: UInt): UInt = {
+  /**
+   * GenRealFlowLog2 = Log2(GenRealFlowNum)
+   *
+   * @param instType As the name implies.
+   * @param emul As the name implies.
+   * @param lmul As the name implies.
+   * @param eew As the name implies.
+   * @param sew As the name implies.
+   * @param isSegment Only modules related to segment need to be set to true.
+   * @return FlowNumLog2 of instruction.
+   */
+  def apply(instType: UInt, emul: UInt, lmul: UInt, eew: UInt, sew: UInt, isSegment: Boolean = false): UInt = {
     require(instType.getWidth == 3, "The instType width must be 3, (isSegment, mop)")
     val emulLog2 = Mux(emul.asSInt >= 0.S, 0.U, emul)
     val lmulLog2 = Mux(lmul.asSInt >= 0.S, 0.U, lmul)
     val eewRealFlowLog2 = emulLog2 + log2Up(VLENB).U - eew(1, 0)
     val sewRealFlowLog2 = lmulLog2 + log2Up(VLENB).U - sew(1, 0)
+    // Because the new segmentunit is needed. But the previous implementation is retained for the time being in case of emergency.
+    val segmentIndexFlowLog2 = if (isSegment) sewRealFlowLog2 else Mux(emul.asSInt > lmul.asSInt, eewRealFlowLog2, sewRealFlowLog2)
     (LookupTree(instType, List(
       "b000".U -> eewRealFlowLog2, // unit-stride
       "b010".U -> eewRealFlowLog2, // strided
@@ -563,8 +586,8 @@ object GenRealFlowLog2 extends VLSUConstants {
       "b011".U -> Mux(emul.asSInt > lmul.asSInt, eewRealFlowLog2, sewRealFlowLog2), // indexed-ordered
       "b100".U -> eewRealFlowLog2, // segment unit-stride
       "b110".U -> eewRealFlowLog2, // segment strided
-      "b101".U -> Mux(emul.asSInt > lmul.asSInt, eewRealFlowLog2, sewRealFlowLog2), // segment indexed-unordered
-      "b111".U -> Mux(emul.asSInt > lmul.asSInt, eewRealFlowLog2, sewRealFlowLog2), // segment indexed-ordered
+      "b101".U -> segmentIndexFlowLog2, // segment indexed-unordered
+      "b111".U -> segmentIndexFlowLog2, // segment indexed-ordered
     )))
   }
 }
