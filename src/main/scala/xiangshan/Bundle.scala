@@ -140,6 +140,7 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val pc = UInt(VAddrBits.W)
   val foldpc = UInt(MemPredPCWidth.W)
   val exceptionVec = ExceptionVec()
+  val exceptionFromBackend = Bool()
   val trigger = new TriggerCf
   val pd = new PreDecodeInfo
   val pred_taken = Bool()

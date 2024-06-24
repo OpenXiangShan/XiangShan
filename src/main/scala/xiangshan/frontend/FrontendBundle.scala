@@ -127,6 +127,7 @@ class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val foldpc    = Vec(PredictWidth, UInt(MemPredPCWidth.W))
   val ftqPtr       = new FtqPtr
   val ftqOffset    = Vec(PredictWidth, ValidUndirectioned(UInt(log2Ceil(PredictWidth).W)))
+  val exceptionFromBackend = Vec(PredictWidth, Bool())
   val ipf          = Vec(PredictWidth, Bool())
   val igpf          = Vec(PredictWidth, Bool())
   val acf          = Vec(PredictWidth, Bool())

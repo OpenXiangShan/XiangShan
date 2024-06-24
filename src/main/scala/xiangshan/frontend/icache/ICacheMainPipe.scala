@@ -49,6 +49,7 @@ class ICacheMainPipeResp(implicit p: Parameters) extends ICacheBundle
     val accessFault = Bool()
     val mmio = Bool()
   }
+  val exceptionFromBackend = Bool()
 }
 
 class ICacheMainPipeBundle(implicit p: Parameters) extends ICacheBundle
@@ -296,6 +297,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val tlbExcpAF     = VecInit((0 until PortNumber).map(i =>
                         ResultHoldBypass(valid = tlb_valid_tmp(i), data = fromITLB(i).bits.excp(0).af.instr || s1_backendIaf)))
   val tlbExcp       = VecInit((0 until PortNumber).map(i => tlbExcpAF(i) || tlbExcpPF(i) || tlbExcpGPF(i)))
+  val tlbExcpFromBackend = s1_backendIpf || s1_backendIaf
 
   val s1_tlb_valid = VecInit((0 until PortNumber).map(i => ValidHoldBypass(tlb_valid_tmp(i), s1_fire)))
   val tlbRespAllValid = s1_tlb_valid(0) && (!s1_double_line || s1_double_line && s1_tlb_valid(1))
@@ -467,6 +469,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_except_tlb_gpf = RegEnable(tlbExcpGPF, s1_fire)
   val s2_except_tlb_af  = RegEnable(tlbExcpAF, s1_fire)
   val s2_except_tlb     = VecInit(Seq(s2_except_tlb_pf(0) || s2_except_tlb_af(0) || s2_except_tlb_gpf(0), s2_double_line && (s2_except_tlb_pf(1) || s2_except_tlb_af(1) || s2_except_tlb_gpf(1))))
+  val s2_except_fromBackend = RegEnable(tlbExcpFromBackend, s1_fire)
   val s2_has_except_tlb = s2_valid && s2_except_tlb.reduce(_||_)
   // long delay exception signal
   // exception information and mmio
@@ -634,6 +637,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     toIFU(i).bits.gpaddr              := s2_req_gpaddr(i)
     toIFU(i).bits.vaddr               := s2_req_vaddr(i)
     toIFU(i).bits.data                := s2_fetch_data(i)
+    toIFU(i).bits.exceptionFromBackend:= s2_except_fromBackend
     toIFU(i).bits.tlbExcp.pageFault   := s2_except_tlb_pf(i)
     toIFU(i).bits.tlbExcp.guestPageFault:= s2_except_tlb_gpf(i)
     toIFU(i).bits.tlbExcp.accessFault := s2_except_tlb_af(i) || s2_corrupt(i) || s2_except_pmp_af(i)
