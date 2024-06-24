@@ -11,7 +11,7 @@ import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRROField => RO, CSRRWField => R
 import scala.collection.immutable.SeqMap
 
 trait CSRAIA { self: NewCSR with HypervisorLevel =>
-  val miselect = Module(new CSRModule("Miselevt", new MISelectBundle) with HasISelectBundle {
+  val miselect = Module(new CSRModule("Miselect", new MISelectBundle) with HasISelectBundle {
     private val value = reg.ALL.asUInt
     inIMSICRange := value >= 0x70.U && value < 0x100.U && value(0) =/= 1.U
     isIllegal :=
