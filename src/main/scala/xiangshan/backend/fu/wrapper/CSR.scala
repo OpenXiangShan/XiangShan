@@ -21,11 +21,12 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   val setFsDirty = csrIn.fpu.dirty_fs
   val setFflags = csrIn.fpu.fflags
+
   val setVsDirty = csrIn.vpu.dirty_vs
-  val setVxsat = csrIn.vpu.vxsat
   val setVstart = csrIn.vpu.set_vstart
-  val setVl = csrIn.vpu.set_vl
-  val setVtype = 0.U.asTypeOf(csrIn.vpu.set_vtype)
+  val setVtype = csrIn.vpu.set_vtype
+  val setVxsat = csrIn.vpu.set_vxsat
+  val vlFromPreg = csrIn.vpu.vl
 
   val flushPipe = Wire(Bool())
   val flush = io.flush.valid
@@ -94,11 +95,11 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   csrMod.io.fromRob.commit.fflags := setFflags
   csrMod.io.fromRob.commit.fsDirty := setFsDirty
-  csrMod.io.fromRob.commit.vxsat.valid := setVxsat
-  csrMod.io.fromRob.commit.vxsat.bits := setVxsat
+  csrMod.io.fromRob.commit.vxsat.valid := setVxsat.valid
+  csrMod.io.fromRob.commit.vxsat.bits := setVxsat.bits
   csrMod.io.fromRob.commit.vsDirty := setVsDirty
   csrMod.io.fromRob.commit.vstart := setVstart
-  csrMod.io.fromRob.commit.vl := setVl
+  csrMod.io.fromRob.commit.vl := vlFromPreg
   // Todo: correct vtype
   csrMod.io.fromRob.commit.vtype.valid := setVtype.valid
   csrMod.io.fromRob.commit.vtype.bits.VILL := setVtype.bits(XLEN - 1)
@@ -222,20 +223,10 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   connect0LatencyCtrlSingal
 
   // Todo: summerize all difftest skip condition
-  csrOut.isPerfCnt  := csrMod.io.out.isPerfCnt && valid && func =/= CSROpType.jmp
-  csrOut.fpu.frm    := csrMod.io.out.fpState.frm.asUInt
-  csrOut.vpu.vstart := csrMod.io.out.vecState.vstart.asUInt
-  csrOut.vpu.vxsat  := csrMod.io.out.vecState.vxsat.asUInt
-  csrOut.vpu.vxrm   := csrMod.io.out.vecState.vxrm.asUInt
-  csrOut.vpu.vcsr   := csrMod.io.out.vecState.vcsr.asUInt
-  csrOut.vpu.vl     := csrMod.io.out.vecState.vl.asUInt
-  csrOut.vpu.vtype  := csrMod.io.out.vecState.vtype.asUInt
-  csrOut.vpu.vlenb  := csrMod.io.out.vecState.vlenb.asUInt
-  csrOut.vpu.vill   := csrMod.io.out.vecState.vtype.asTypeOf(new CSRVTypeBundle).VILL.asUInt
-  csrOut.vpu.vma    := csrMod.io.out.vecState.vtype.asTypeOf(new CSRVTypeBundle).VMA.asUInt
-  csrOut.vpu.vta    := csrMod.io.out.vecState.vtype.asTypeOf(new CSRVTypeBundle).VTA.asUInt
-  csrOut.vpu.vsew   := csrMod.io.out.vecState.vtype.asTypeOf(new CSRVTypeBundle).VSEW.asUInt
-  csrOut.vpu.vlmul  := csrMod.io.out.vecState.vtype.asTypeOf(new CSRVTypeBundle).VLMUL.asUInt
+  csrOut.isPerfCnt  := csrMod.io.out.bits.isPerfCnt && csrModOutValid && func =/= CSROpType.jmp
+  csrOut.fpu.frm    := csrMod.io.state.fpState.frm.asUInt
+  csrOut.vpu.vstart := csrMod.io.state.vecState.vstart.asUInt
+  csrOut.vpu.vxrm   := csrMod.io.state.vecState.vxrm.asUInt
 
   csrOut.isXRet := isXRetFlag
 

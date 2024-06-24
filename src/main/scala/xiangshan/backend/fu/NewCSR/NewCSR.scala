@@ -1139,7 +1139,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     diffVecCSRState.vxsat := vcsr.vxsat.asUInt
     diffVecCSRState.vxrm := vcsr.vxrm.asUInt
     diffVecCSRState.vcsr := vcsr.rdata.asUInt
-    diffVecCSRState.vl := vl.rdata.asUInt
+    diffVecCSRState.vl := io.fromRob.commit.vl
     diffVecCSRState.vtype := vtype.rdata.asUInt
     diffVecCSRState.vlenb := vlenb.rdata.asUInt
 

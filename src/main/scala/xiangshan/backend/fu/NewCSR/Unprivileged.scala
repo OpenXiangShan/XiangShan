@@ -90,11 +90,7 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
 
   val vl = Module(new CSRModule("Vl", new CSRBundle {
     val VL = RO(VlWidth - 1, 0)
-  }) with HasRobCommitBundle {
-    when (robCommit.vl.valid) {
-      reg.VL := robCommit.vl.bits
-    }
-  })
+  }))
     .setAddr(CSRs.vl)
 
   val vtype = Module(new CSRModule("Vtype", new CSRVTypeBundle) with HasRobCommitBundle {
