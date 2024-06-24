@@ -119,6 +119,15 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
     vstopei,
   )
 
+  val aiaSkipCSRs = Seq(
+    mtopei,
+    mtopi,
+    stopei,
+    stopi,
+    vstopi,
+    vstopei,
+  )
+
   val aiaCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], UInt)] = SeqMap.from(
     aiaCSRMods.map(csr => (csr.addr -> (csr.w -> csr.rdata))).iterator
   )
