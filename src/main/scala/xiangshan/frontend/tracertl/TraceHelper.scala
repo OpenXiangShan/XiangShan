@@ -160,6 +160,52 @@ class TraceCollectorHelper(width: Int)
   setInline(s"$desiredName.v", getVerilog)
 }
 
+class TraceDriveCollectorHelper(width: Int)
+  extends ExtModule
+    with HasExtModuleInline{
+  val clock = IO(Input(Clock()))
+  val reset = IO(Input(Reset()))
+  val enable = IO(Input(Bool()))
+
+  val pc = IO(Input(Vec(width, UInt(64.W))))
+  val inst = IO(Input(Vec(width, UInt(32.W))))
+
+  def getVerilog: String = {
+    def genPort(size: Int, baseName: String): String = {
+      (0 until width)
+        .map(i => s"input [${size - 1}:0] ${baseName}_${i},")
+        .mkString("  ", "\n  ", "\n")
+    }
+    def callDPIC: String = {
+      (0 until width)
+        .map(i => s"trace_drive_collect_one_instr(pc_${i}, inst_${i});")
+        .mkString("      ", "\n      ", "\n")
+    }
+    s"""
+       |module TraceDriveCollectorHelper(
+       |  input  clock,
+       |  input  reset,
+       |${genPort(64, "pc")}
+       |${genPort(32, "inst")}
+       |  input  enable
+       |);
+       |
+       |  always @(posedge clock) begin
+       |    if (enable && !reset) begin
+       |$callDPIC
+       |    end
+       |  end
+       |endmodule
+       |
+       |import "DPI-C" function void trace_drive_collect_one_instr(
+       |  input longint pc,
+       |  input int inst
+       |);
+       |
+       |""".stripMargin
+  }
+  setInline(s"$desiredName.v", getVerilog)
+}
 
 
 
