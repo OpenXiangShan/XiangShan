@@ -130,7 +130,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val stage1 = RegEnable(io.req.bits.stage1, io.req.fire)
   val hptw_resp_stage2 = Reg(Bool()) 
 
-  val ppn_af = pte.isAf()
+  val ppn_af = Mux(s2xlate, false.B, pte.isAf())
   val find_pte = pte.isLeaf() || ppn_af || pageFault
   val to_find_pte = level === 1.U && find_pte === false.B
   val source = RegEnable(io.req.bits.req_info.source, io.req.fire)
@@ -303,8 +303,12 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       }
       finish := true.B
     }.elsewhen(s2xlate && last_s2xlate === true.B) {
-      s_last_hptw_req := false.B
-      mem_addr_update := false.B
+      when(accessFault || pageFault || ppn_af){
+        last_s2xlate := false.B
+      }.otherwise{
+        s_last_hptw_req := false.B
+        mem_addr_update := false.B
+      }
     }.elsewhen(io.resp.valid){
       when(io.resp.fire) {
         idle := true.B

@@ -333,7 +333,7 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   val outIsFisrtGroup = outVuopidx === 0.U ||
     (outVuopidx === 1.U && (outVlmul === VLmul.m4 || outVlmul === VLmul.m8)) ||
     ((outVuopidx === 2.U || outVuopidx === 3.U) && outVlmul === VLmul.m8)
-  val needFFlags = outIsFisrtGroup && outIsVfRedUnordered
+  val needFFlags = (outIsFisrtGroup || outVecCtrl.lastUop) && outIsVfRedUnordered
   private val needNoMask = outCtrl.fuOpType === VfaluType.vfmerge ||
     outCtrl.fuOpType === VfaluType.vfmv_s_f ||
     outIsResuction ||
