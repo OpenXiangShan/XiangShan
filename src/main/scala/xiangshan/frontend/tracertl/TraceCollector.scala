@@ -54,9 +54,10 @@ class TraceCollector(implicit p: Parameters) extends TraceModule
   traceCollectorHelper.reset := reset
   traceCollectorHelper.enable := deqReady
   for (i <- 0 until CommitWidth) {
-    traceCollectorHelper.pc(i) := commitBuffer(deqPtr.value + i.U).pc
-    traceCollectorHelper.inst(i) := commitBuffer(deqPtr.value + i.U).inst
-    traceCollectorHelper.instNum(i) := commitBuffer(deqPtr.value + i.U).instNum
+    val ptr = (deqPtr + i.U).value
+    traceCollectorHelper.pc(i) := commitBuffer(ptr).pc
+    traceCollectorHelper.inst(i) := commitBuffer(ptr).inst
+    traceCollectorHelper.instNum(i) := commitBuffer(ptr).instNum
   }
   when (deqReady) {
     deqPtr := deqPtr + CommitWidth.U
@@ -64,7 +65,8 @@ class TraceCollector(implicit p: Parameters) extends TraceModule
 
   for (i <- 0 until CommitWidth) {
     when (io.in(i).valid && io.enable) {
-      commitBuffer(enqPtr.value + i.U) := io.in(i).bits
+      val ptr = (enqPtr + i.U).value
+      commitBuffer(ptr) := io.in(i).bits
     }
   }
   when (io.enable) {

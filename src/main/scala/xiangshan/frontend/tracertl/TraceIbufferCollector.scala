@@ -52,8 +52,9 @@ class TraceDriveCollector(implicit p: Parameters) extends TraceModule
   traceDriveHelper.reset := reset
   traceDriveHelper.enable := deqReady
   for (i <- 0 until DecodeWidth) {
-    traceDriveHelper.pc(i) := traceDrive(deqPtr.value + i.U).pc
-    traceDriveHelper.inst(i) := traceDrive(deqPtr.value + i.U).inst
+    val ptr = (deqPtr + i.U).value
+    traceDriveHelper.pc(i) := traceDrive(ptr).pc
+    traceDriveHelper.inst(i) := traceDrive(ptr).inst
   }
   when (deqReady) {
     deqPtr := deqPtr + DecodeWidth.U
@@ -62,7 +63,8 @@ class TraceDriveCollector(implicit p: Parameters) extends TraceModule
   for (i <- 0 until DecodeWidth) {
     when (io.in(i).valid) {
       val sum = PopCount(io.in.map(_.valid).take(i))
-      traceDrive(enqPtr.value + sum) := io.in(i).bits
+      val ptr = (enqPtr + sum).value
+      traceDrive(ptr) := io.in(i).bits
     }
   }
   enqPtr := enqPtr + PopCount(io.in.map(_.valid))

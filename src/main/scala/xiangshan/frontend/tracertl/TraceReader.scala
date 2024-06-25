@@ -73,6 +73,7 @@ class TraceReader(implicit p: Parameters) extends TraceModule
   traceReaderHelper.reset := reset
   traceReaderHelper.enable := readTraceEnable
   io.traceInsts.zipWithIndex.foreach { case (inst, i) =>
-    inst := traceBuffer(deqPtr.value + i.U)
+    val ptr = (deqPtr + i.U).value
+    inst := traceBuffer(ptr)
   }
 }
