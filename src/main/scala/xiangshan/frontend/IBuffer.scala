@@ -23,7 +23,8 @@ import xiangshan._
 import utils._
 import utility._
 import xiangshan.ExceptionNO._
-import xiangshan.frontend.tracertl.TraceInstrBundle
+import xiangshan.frontend.tracertl.{TraceInstrBundle, TraceDriveCollector}
+import xiangshan.frontend.tracertl.ChiselRecordForField._
 
 class IBufPtr(implicit p: Parameters) extends CircularQueuePtr[IBufPtr](
   p => p(XSCoreParamsKey).IBufSize
@@ -153,6 +154,18 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
 
 class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
   val io = IO(new IBufferIO)
+
+  val traceDriveCollector = Module(new TraceDriveCollector())
+  (traceDriveCollector.io.in zip io.out).foreach{ case (t, o) =>
+    t.specifyField(
+      _.valid := o.fire,
+      _.bits.inst := o.bits.traceInfo.inst,
+      _.bits.pc := o.bits.pc
+    )
+    when (o.fire) {
+      XSError(o.bits.pc =/= o.bits.traceInfo.pcVA, "TraceIBuffer: pc mismatch")
+    }
+  }
 
   // io alias
   private val decodeCanAccept = io.decodeCanAccept
