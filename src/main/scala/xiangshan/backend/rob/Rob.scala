@@ -1287,6 +1287,15 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   // TraceRTL Collect Commit Trace to check the correctness of the pipeline
   if (env.TraceRTLMode) {
+    when (io.enq.canAccept) {
+      io.enq.req.map{ r =>
+        dontTouch(r.bits.traceInfo)
+        when (r.valid) {
+          XSError(r.bits.pc =/= r.bits.traceInfo.pcVA, "ROB Enq: pc should be equal to traceInfo.pcVA")
+        }
+      }
+    }
+
     import xiangshan.frontend.tracertl.TraceCollector
     val traceCollector = Module(new TraceCollector)
     traceCollector.io.enable := io.commits.commitValid(0) && io.commits.isCommit
@@ -1296,7 +1305,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       traceCollector.io.in(i).valid := io.commits.commitValid(i)
       traceCollector.io.in(i).bits.pc := SignExt(uop.pc, XLEN)
       traceCollector.io.in(i).bits.inst := uop.instr
-      traceCollector.io.in(i).bits.instNum := CommitType.isFused(commitInfo.commitType).asUInt + commitInfo.instrSize - 1.U
+      traceCollector.io.in(i).bits.instNum := CommitType.isFused(commitInfo.commitType).asUInt + commitInfo.instrSize
+      traceCollector.io.traceInfo(i) := uop.traceInfo
+
+      when (traceCollector.io.enable && traceCollector.io.in(i).valid) {
+        XSError(traceCollector.io.in(i).bits.pc =/= uop.traceInfo.pcVA, "Trace ROB commit pc mismatch")
+      }
     }
     (0 until CommitWidth).foreach{ case i =>
       XSError(!io.commits.commitValid(0) && io.commits.isCommit && io.commits.commitValid(i),
