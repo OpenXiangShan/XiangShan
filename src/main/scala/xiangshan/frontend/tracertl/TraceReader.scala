@@ -42,14 +42,16 @@ class TraceReader(implicit p: Parameters) extends TraceModule
   val enqPtr = RegInit(0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize)))
 
   XSError(!isFull(enqPtr, deqPtr) && (enqPtr < deqPtr), "enqPtr should always be larger than deqPtr")
-  XSError(io.recv.valid && ((deqPtr.value + io.recv.bits.instNum) >= enqPtr.value),
+  XSError(io.recv.valid && ((deqPtr + io.recv.bits.instNum) >= enqPtr),
     "Reader should not read more than what is in the buffer. Error in ReaderHelper or Ptr logic.")
 
   when(io.recv.valid) {
     deqPtr := deqPtr + io.recv.bits.instNum
   }
 
-  val readTraceEnable = !isFull(enqPtr, deqPtr) && (hasFreeEntries(enqPtr, deqPtr) >= TraceFetchWidth.U)
+  val isfull = isFull(enqPtr, deqPtr)
+  val freeEntryNum = hasFreeEntries(enqPtr, deqPtr)
+  val readTraceEnable = !isfull && (freeEntryNum >= TraceFetchWidth.U)
   when(readTraceEnable) {
     enqPtr := enqPtr + TraceFetchWidth.U
     (0 until TraceFetchWidth).foreach {
