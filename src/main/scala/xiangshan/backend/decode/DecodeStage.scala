@@ -106,7 +106,8 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     inst.valid := io.in(i).valid
     inst.bits := io.in(i).bits.instr
   }
-  vtypeGen.io.canUpdateVType := decoderComp.io.in.fire && decoderComp.io.in.bits.simpleDecodedInst.isVset
+  // when io.redirect is True, never update vtype
+  vtypeGen.io.canUpdateVType := decoderComp.io.in.fire && decoderComp.io.in.bits.simpleDecodedInst.isVset && !io.redirect
   vtypeGen.io.redirect := io.vtypeRedirect
   vtypeGen.io.commitVType := io.commitVType
   vtypeGen.io.walkVType := io.walkVType
