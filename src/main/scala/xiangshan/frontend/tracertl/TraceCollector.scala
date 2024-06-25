@@ -31,6 +31,7 @@ class TraceCollectBundle(implicit p: Parameters) extends TraceBundle {
 class TraceCollectorIO(implicit p: Parameters) extends TraceBundle {
   val enable = Input(Bool())
   val in = Input(Vec(CommitWidth, Valid(new TraceCollectBundle())))
+  val traceInfo = Input(Vec(CommitWidth, new TraceInstrBundle()))
 }
 
 class CommitBufferPtr(Size: Int)(implicit p: Parameters) extends CircularQueuePtr[CommitBufferPtr](Size)
@@ -39,6 +40,7 @@ class TraceCollector(implicit p: Parameters) extends TraceModule
   with TraceParams
   with HasCircularQueuePtrHelper {
   val io = IO(new TraceCollectorIO)
+  dontTouch(io)
 
   val CommitBufferSize = CommitWidth * 3
   val commitBuffer = Reg(Vec(CommitBufferSize, new TraceCollectBundle()))

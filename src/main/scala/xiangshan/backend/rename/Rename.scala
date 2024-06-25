@@ -618,6 +618,15 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       assert(x.bits.ldest =/= 0.U, "rfWen cannot be 1 when Int regfile ldest is 0")
     }
   }
+
+  if (env.TraceRTLMode) {
+    io.out.foreach { case x =>
+      when (x.fire) {
+        XSError(x.bits.pc =/= x.bits.traceInfo.pcVA, "Rename pc mismatch with TraceInfo\n")
+      }
+    }
+  }
+
   val debugRedirect = RegEnable(io.redirect.bits, io.redirect.valid)
   // bad speculation
   val recStall = io.redirect.valid || io.rabCommits.isWalk
