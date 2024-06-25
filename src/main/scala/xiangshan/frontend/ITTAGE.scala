@@ -368,8 +368,8 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val tickCtr = RegInit(0.U(TickWidth.W))
 
   // uftb miss or hasIndirect
-  val s1_uftbHit =  RegEnable(io.in.bits.resp_in(0).s0_uftbHit, false.B, io.s0_fire(0))
-  val s1_uftbHasIndirect = RegEnable(io.in.bits.resp_in(0).s0_uftbHasIndirect, false.B, io.s0_fire(0))
+  val s1_uftbHit = io.in.bits.resp_in(0).s1_uftbHit
+  val s1_uftbHasIndirect = io.in.bits.resp_in(0).s1_uftbHasIndirect
   val s1_isIndirect = (!s1_uftbHit && !io.in.bits.resp_in(0).s1_ftbCloseReq) || s1_uftbHasIndirect
 
   // Keep the table responses to process in s2
