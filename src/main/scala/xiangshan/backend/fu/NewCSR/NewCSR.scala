@@ -6,7 +6,7 @@ import difftest._
 import freechips.rocketchip.rocket.CSRs
 import org.chipsalliance.cde.config.Parameters
 import top.{ArgParser, Generator}
-import utility.{DataHoldBypass, GatedValidRegNext, SignExt, ZeroExt}
+import utility.{DataHoldBypass, DelayN, GatedValidRegNext, RegNextWithEnable, SignExt, ZeroExt}
 import utils.{HPerfMonitor, OptionWrapper, PerfEvent}
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CSRCustomState, PrivState, RobCommitCSR}
 import xiangshan.backend.fu.NewCSR.CSRDefines.{ContextStatus, PrivMode, SatpMode, VirtMode}
@@ -433,10 +433,16 @@ class NewCSR(implicit val p: Parameters) extends Module
     }
     mod match {
       case m: HasRobCommitBundle =>
-        m.robCommit := io.fromRob.commit
-        m.robCommit.fsDirty := io.fromRob.commit.fsDirty || writeFpLegal
-        m.robCommit.vsDirty := io.fromRob.commit.vsDirty || writeVecLegal
-        m.isVirtMode := V.asUInt.asBool
+        // Todo: move RegNext from ROB to CSR
+        m.robCommit.instNum := io.fromRob.commit.instNum
+        m.robCommit.fflags  := RegNextWithEnable(io.fromRob.commit.fflags)
+        m.robCommit.fsDirty := GatedValidRegNext(io.fromRob.commit.fsDirty) || writeFpLegal
+        m.robCommit.vsDirty := GatedValidRegNext(io.fromRob.commit.vsDirty) || writeVecLegal
+        m.robCommit.vxsat   := RegNextWithEnable(io.fromRob.commit.vxsat)
+        m.robCommit.vtype   := RegNextWithEnable(io.fromRob.commit.vtype)
+        m.robCommit.vl      := RegNext          (io.fromRob.commit.vl)
+        m.robCommit.vstart  := RegNextWithEnable(io.fromRob.commit.vstart)
+        m.isVirtMode        := V.asUInt.asBool
       case _ =>
     }
     mod match {
@@ -1187,7 +1193,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     diffVecCSRState.vxsat := vcsr.vxsat.asUInt
     diffVecCSRState.vxrm := vcsr.vxrm.asUInt
     diffVecCSRState.vcsr := vcsr.rdata.asUInt
-    diffVecCSRState.vl := io.fromRob.commit.vl
+    diffVecCSRState.vl := RegNext(io.fromRob.commit.vl)
     diffVecCSRState.vtype := vtype.rdata.asUInt
     diffVecCSRState.vlenb := vlenb.rdata.asUInt
 
