@@ -63,9 +63,7 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
   val pred_taken = Bool()
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Ceil(PredictWidth).W)
-  val ipf = Bool()
-  val igpf = Bool()
-  val acf = Bool()
+  val exceptionType = UInt(2.W)
   val crossPageIPFFix = Bool()
   val triggered = new TriggerCf
 
@@ -77,9 +75,7 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
     pred_taken := fetch.ftqOffset(i).valid
     ftqPtr := fetch.ftqPtr
     ftqOffset := fetch.ftqOffset(i).bits
-    ipf := fetch.ipf(i)
-    igpf:= fetch.igpf(i)
-    acf := fetch.acf(i)
+    exceptionType := fetch.exceptionType(i)
     crossPageIPFFix := fetch.crossPageIPFFix(i)
     triggered := fetch.triggered(i)
     this
@@ -91,9 +87,9 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
     cf.pc := pc
     cf.foldpc := foldpc
     cf.exceptionVec := 0.U.asTypeOf(ExceptionVec())
-    cf.exceptionVec(instrPageFault) := ipf
-    cf.exceptionVec(instrGuestPageFault) := igpf
-    cf.exceptionVec(instrAccessFault) := acf
+    cf.exceptionVec(instrPageFault) := exceptionType === ExceptionType.ipf
+    cf.exceptionVec(instrGuestPageFault) := exceptionType === ExceptionType.igpf
+    cf.exceptionVec(instrAccessFault) := exceptionType === ExceptionType.acf
     cf.trigger := triggered
     cf.pd := pd
     cf.pred_taken := pred_taken

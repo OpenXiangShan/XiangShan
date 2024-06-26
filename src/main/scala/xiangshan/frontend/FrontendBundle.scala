@@ -116,6 +116,13 @@ class mmioCommitRead(implicit p: Parameters) extends XSBundle {
   val mmioLastCommit = Input(Bool())
 }
 
+object ExceptionType {
+  def none = "b00".U
+  def ipf = "b01".U
+  def igpf = "b10".U
+  def acf = "b11".U
+}
+
 class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val instrs    = Vec(PredictWidth, UInt(32.W))
   val valid     = UInt(PredictWidth.W)
@@ -125,9 +132,7 @@ class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val foldpc    = Vec(PredictWidth, UInt(MemPredPCWidth.W))
   val ftqPtr       = new FtqPtr
   val ftqOffset    = Vec(PredictWidth, ValidUndirectioned(UInt(log2Ceil(PredictWidth).W)))
-  val ipf          = Vec(PredictWidth, Bool())
-  val igpf          = Vec(PredictWidth, Bool())
-  val acf          = Vec(PredictWidth, Bool())
+  val exceptionType = Vec(PredictWidth, UInt(2.W))
   val crossPageIPFFix = Vec(PredictWidth, Bool())
   val triggered    = Vec(PredictWidth, new TriggerCf)
   val topdown_info = new FrontendTopDownBundle
