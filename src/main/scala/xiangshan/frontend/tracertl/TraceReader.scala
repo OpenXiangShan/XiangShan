@@ -36,6 +36,7 @@ class TraceReader(implicit p: Parameters) extends TraceModule
   val io = IO(new TraceReaderIO())
   dontTouch(io)
 
+  val instID = RegInit(0.U(64.W))
   val traceBuffer = Reg(Vec(TraceBufferSize, new TraceInstrBundle()))
   val traceReaderHelper = Module(new TraceReaderHelper(PredictWidth))
   val deqPtr = RegInit(0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize)))
@@ -54,18 +55,22 @@ class TraceReader(implicit p: Parameters) extends TraceModule
   val readTraceEnable = !isfull && (freeEntryNum >= TraceFetchWidth.U)
   when(readTraceEnable) {
     enqPtr := enqPtr + TraceFetchWidth.U
+    instID := instID + TraceFetchWidth.U
+
     (0 until TraceFetchWidth).foreach {
-      i => bufferInsert(enqPtr + i.U, traceReaderHelper.insts(i))
+      i => bufferInsert(enqPtr + i.U, traceReaderHelper.insts(i), instID + i.U)
     }
   }
 
-  def bufferInsert(ptr: TraceBufferPtr, data: TraceInstrBundle) = {
-    traceBuffer(ptr.value) := data
+  def bufferInsert(ptr: TraceBufferPtr, data: TraceInstrInnerBundle, id: UInt) = {
+//    traceBuffer(ptr.value).fromInnerBundle(data)
+    (traceBuffer(ptr.value): Data).waiveAll :<= (data: Data).waiveAll
+    traceBuffer(ptr.value).InstID := id
     when (data.memoryAddrPA === 0.U) {
-      traceBuffer(ptr.value).memoryAddrPA := traceBuffer(ptr.value).memoryAddrVA
+      traceBuffer(ptr.value).memoryAddrPA := data.memoryAddrVA
     }
     when (data.pcPA === 0.U) {
-      traceBuffer(ptr.value).pcPA := traceBuffer(ptr.value).pcVA
+      traceBuffer(ptr.value).pcPA := data.pcVA
     }
   }
 
