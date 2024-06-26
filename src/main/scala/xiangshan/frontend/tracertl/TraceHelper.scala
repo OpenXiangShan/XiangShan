@@ -45,20 +45,6 @@ class TraceInstrBundle(implicit p: Parameters) extends TraceBundle {
   val memorySize = UInt(8.W)
   val branchType = UInt(8.W)
   val branchTaken = UInt(8.W)
-
-// def fromInnerBundle(inner: TraceInstrInnerBundle) = {
-//    InstID := 0.U
-//    pcVA := inner.pcVA
-//    pcPA := inner.pcPA
-//    memoryAddrVA := inner.memoryAddrVA
-//    memoryAddrPA := inner.memoryAddrPA
-//    target := inner.target
-//    inst := inner.inst
-//    memoryType := inner.memoryType
-//    memorySize := inner.memorySize
-//    branchType := inner.branchType
-//    branchTaken := inner.branchTaken
-//  }
 }
 
 object TraceInstrInnerBundle {
