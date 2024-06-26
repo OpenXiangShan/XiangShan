@@ -24,6 +24,7 @@ import utility._
 import xiangshan._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
 import freechips.rocketchip.tilelink.{TLArbiter, TLBundleA, TLBundleD, TLClientNode, TLEdgeOut, TLMasterParameters, TLMasterPortParameters}
+import xiangshan.frontend.tracertl.TraceRTLChoose
 
 class UncachePtr(implicit p: Parameters) extends CircularQueuePtr[UncachePtr](
   p => p(XSCoreParamsKey).UncacheBufferSize
@@ -101,7 +102,7 @@ class MMIOEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
       req := io.req.bits
       req.addr := io.req.bits.addr
       resp_nderr := false.B
-      state := s_refill_req
+      state := TraceRTLChoose(s_refill_req, s_send_resp)
     }
   }
 
