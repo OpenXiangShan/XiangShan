@@ -823,7 +823,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     io.toIbuffer.bits.pd(0).isCall  := isCall
     io.toIbuffer.bits.pd(0).isRet   := isRet
 
-    when (mmio_resend_pf) {
+    when (mmio_resend_af) {
       io.toIbuffer.bits.exceptionType(0) := ExceptionType.acf
     } .elsewhen (mmio_resend_pf) {
       io.toIbuffer.bits.exceptionType(0) := ExceptionType.ipf
