@@ -20,7 +20,7 @@ import chisel3.experimental.ExtModule
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 
-class TraceInstrBundle(implicit p: Parameters) extends TraceBundle {
+class TraceInstrInnerBundle(implicit p: Parameters) extends TraceBundle {
   val pcVA = UInt(TracePCWidth.W)
   val pcPA = UInt(TracePCWidth.W)
   val memoryAddrVA = UInt(64.W)
@@ -33,11 +33,39 @@ class TraceInstrBundle(implicit p: Parameters) extends TraceBundle {
   val branchTaken = UInt(8.W)
 }
 
-object TraceInstrBundle {
+class TraceInstrBundle(implicit p: Parameters) extends TraceBundle {
+  val InstID = UInt(64.W)
+  val pcVA = UInt(TracePCWidth.W)
+  val pcPA = UInt(TracePCWidth.W)
+  val memoryAddrVA = UInt(64.W)
+  val memoryAddrPA = UInt(64.W)
+  val target = UInt(64.W)
+  val inst = UInt(TraceInstrWidth.W)
+  val memoryType = UInt(8.W)
+  val memorySize = UInt(8.W)
+  val branchType = UInt(8.W)
+  val branchTaken = UInt(8.W)
+
+// def fromInnerBundle(inner: TraceInstrInnerBundle) = {
+//    InstID := 0.U
+//    pcVA := inner.pcVA
+//    pcPA := inner.pcPA
+//    memoryAddrVA := inner.memoryAddrVA
+//    memoryAddrPA := inner.memoryAddrPA
+//    target := inner.target
+//    inst := inner.inst
+//    memoryType := inner.memoryType
+//    memorySize := inner.memorySize
+//    branchType := inner.branchType
+//    branchTaken := inner.branchTaken
+//  }
+}
+
+object TraceInstrInnerBundle {
   def apply(pcVA: UInt, pcPA: UInt, memoryAddrVA: UInt, memoryAddrPA: UInt,
     target: UInt, inst: UInt, memoryType: UInt, memorySize: UInt,
-    branchType: UInt, branchTaken: UInt)(implicit p: Parameters): TraceInstrBundle = {
-    val bundle = Wire(new TraceInstrBundle)
+    branchType: UInt, branchTaken: UInt)(implicit p: Parameters): TraceInstrInnerBundle = {
+    val bundle = Wire(new TraceInstrInnerBundle)
     bundle.pcVA := pcVA
     bundle.pcPA := pcPA
     bundle.memoryAddrVA := memoryAddrVA
@@ -59,11 +87,11 @@ class TraceReaderHelper(width: Int)(implicit p: Parameters)
   val reset = IO(Input(Reset()))
   val enable = IO(Input(Bool()))
 
-  val insts = IO(Output(Vec(width, new TraceInstrBundle())))
+  val insts = IO(Output(Vec(width, new TraceInstrInnerBundle())))
 
   def getVerilog: String = {
-    val portNameList = new TraceInstrBundle().elements.map(_._1)
-    val portSizeList = new TraceInstrBundle().elements.map(_._2.getWidth)
+    val portNameList = new TraceInstrInnerBundle().elements.map(_._1)
+    val portSizeList = new TraceInstrInnerBundle().elements.map(_._2.getWidth)
     def genPort(size: Int, baseName: String): String = {
       (0 until width)
         .map(i => s"output [${size - 1}:0] insts_${i}_${baseName},")
