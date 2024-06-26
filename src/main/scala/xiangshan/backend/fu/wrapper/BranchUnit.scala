@@ -63,6 +63,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
       redirect.bits.cfiUpdate.backendIGPF := io.instrAddrTransType.get.checkGuestPageFault(addModule.io.target)
   }
   if (env.TraceRTLMode) {
+    dontTouch(io.in.bits.ctrl.traceInfo)
     XSError(io.in.valid && (io.in.bits.ctrl.traceInfo.branchType === 0.U), "Trace \n")
   }
 
