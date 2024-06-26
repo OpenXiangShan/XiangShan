@@ -376,7 +376,7 @@ object VecDecoder extends DecodeConstants {
     VCPOP_M      -> OPMVV(T, FuType.vipu, VipuType.vcpop_m, T, F, F, UopSplitType.VEC_M0X, src1 = SrcType.no), // vcpop.m rd, vs2, vm
     VDIV_VV      -> OPMVV(T, FuType.vidiv, VidivType.vdiv, F, T, F, UopSplitType.VEC_VVV),
     VDIVU_VV     -> OPMVV(T, FuType.vidiv, VidivType.vdivu, F, T, F, UopSplitType.VEC_VVV),
-    VFIRST_M     -> OPMVV(T, FuType.vipu, VipuType.vfirst_m, T, F, F, UopSplitType.VEC_M0X_VFIRST, src1 = SrcType.no), // vfirst.m rd, vs2, vm
+    VFIRST_M     -> OPMVV(T, FuType.vipu, VipuType.vfirst_m, T, F, F, src1 = SrcType.no), // vfirst.m rd, vs2, vm
     VID_V        -> OPMVV(T, FuType.vipu, VipuType.vid_v, F, T, F, UopSplitType.VEC_MVV, src1 = SrcType.no, src2 = SrcType.no), // vid.v vd, vm
     VIOTA_M      -> OPMVV(T, FuType.vipu, VipuType.viota_m, F, T, F, UopSplitType.VEC_MVV, src1 = SrcType.no), // viota.m vd, vs2, vm
 
