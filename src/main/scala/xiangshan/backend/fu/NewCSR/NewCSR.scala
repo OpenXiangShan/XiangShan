@@ -361,6 +361,10 @@ class NewCSR(implicit val p: Parameters) extends Module
   permitMod.io.in.status.hcounteren := hcounteren.rdata
   permitMod.io.in.status.scounteren := scounteren.rdata
 
+  permitMod.io.in.status.mstateen0 := mstateen0.rdata
+  permitMod.io.in.status.hstateen0 := hstateen0.rdata
+  permitMod.io.in.status.sstateen0 := sstateen0.rdata
+
   permitMod.io.in.status.menvcfg := menvcfg.rdata
   permitMod.io.in.status.henvcfg := henvcfg.rdata
 
@@ -559,6 +563,13 @@ class NewCSR(implicit val p: Parameters) extends Module
         m.privState := privState
         m.mcounteren := mcounteren.rdata
         m.hcounteren := hcounteren.rdata
+      case _ =>
+    }
+    mod match {
+      case m: HasStateen0Bundle =>
+        m.fromMstateen0 := mstateen0.regOut
+        m.fromHstateen0 := hstateen0.regOut
+        m.privState     := privState
       case _ =>
     }
   }

@@ -165,6 +165,14 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
     )
   }).setAddr(CSRs.scountovf)
 
+  val sstateen0 = Module(new CSRModule("Sstateen", new SstateenBundle0) with HasStateen0Bundle {
+    // For every bit in an mstateen CSR that is zero (whether read-only zero or set to zero), the same bit
+    // appears as read-only zero in the matching hstateen and sstateen CSRs. For every bit in an hstateen
+    // CSR that is zero (whether read-only zero or set to zero), the same bit appears as read-only zero in
+    // sstateen when accessed in VS-mode.
+    regOut := Mux(privState.isVirtual, fromHstateen0.asUInt, fromMstateen0.asUInt) & reg.asUInt
+  }).setAddr(CSRs.sstateen0)
+
   val supervisorLevelCSRMods: Seq[CSRModule[_]] = Seq(
     sie,
     stvec,
@@ -178,6 +186,7 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
     stimecmp,
     satp,
     scountovf,
+    sstateen0,
   )
 
   val supervisorLevelCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], UInt)] = SeqMap(
