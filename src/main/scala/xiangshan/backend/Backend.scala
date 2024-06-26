@@ -639,6 +639,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     sink.bits.uop.preDecodeInfo  := source.bits.preDecode.getOrElse(0.U.asTypeOf(new PreDecodeInfo))
     sink.bits.uop.numLsElem      := source.bits.numLsElem.getOrElse(0.U) // Todo: remove this bundle, keep only the one below
     sink.bits.flowNum.foreach(_  := source.bits.numLsElem.get)
+
+    sink.bits.uop.traceInfo      := source.bits.traceInfo
   }
   io.mem.loadFastMatch := memScheduler.io.toMem.get.loadFastMatch.map(_.fastMatch)
   io.mem.loadFastImm := memScheduler.io.toMem.get.loadFastMatch.map(_.fastImm)

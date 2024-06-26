@@ -166,7 +166,7 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
       when (o.fire) {
         XSError(o.bits.pc =/= o.bits.traceInfo.pcVA, "TraceIBuffer: pc mismatch")
       }
-      XSError(io.flush, "TraceRTL Mode doesn't allow misprediction now. Forbid exception also. All the DRIVE under control.")
+      // XSError(io.flush, "TraceRTL Mode doesn't allow misprediction now. Forbid exception also. All the DRIVE under control.")
       dontTouch(o.bits.traceInfo)
     }
   }

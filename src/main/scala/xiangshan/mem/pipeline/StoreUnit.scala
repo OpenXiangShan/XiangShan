@@ -127,6 +127,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
 
   if (env.TraceRTLMode) {
     XSError(io.stin.valid && (io.stin.bits.uop.traceInfo.memoryType =/= 2.U), "Trace: StoreUnit but not store!\n")
+    dontTouch(io.stin.bits.uop.traceInfo)
   }
 
   // generate addr
