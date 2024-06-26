@@ -63,7 +63,7 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
   val pred_taken = Bool()
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Ceil(PredictWidth).W)
-  val exceptionType = UInt(2.W)
+  val exceptionType = UInt(ExceptionType.width.W)
   val crossPageIPFFix = Bool()
   val triggered = new TriggerCf
 
