@@ -833,13 +833,7 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   // There is no way to calculate the 'flow' for 'unit-stride' exactly:
   //  Whether 'unit-stride' needs to be split can only be known after obtaining the address.
   // For scalar instructions, this is not handled here, and different assignments are done later according to the situation.
-  private val numLsElem       = instType.zipWithIndex.map{ case (instTypeItem, index) =>
-    Mux(
-      isVecUnitType(index),
-      VecMemUnitStrideMaxFlowNum.U,
-      GenRealFlowNum(instTypeItem, emul(index), lmul(index), eew(index), sew(index))
-    )
-  }
+  private val numLsElem       = VecInit(uop.map(_.numLsElem))
 
   // The maximum 'numLsElem' number that can be emitted per port is:
   //    16 2 2 2 2 2.
@@ -1152,7 +1146,6 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     uopIn.ready := enqMapDeqMatrix(idx).asUInt.orR && allowDispatch(idx) && lsqCanAccept
     uopIn.bits.lqIdx := s0_enqLsq_resp(idx).lqIdx
     uopIn.bits.sqIdx := s0_enqLsq_resp(idx).sqIdx
-    uopIn.bits.numLsElem := Mux(isVlsType(idx), numLsElem(idx), 0.U)
     dontTouch(isVlsType(idx))
     dontTouch(numLsElem(idx))
   }
