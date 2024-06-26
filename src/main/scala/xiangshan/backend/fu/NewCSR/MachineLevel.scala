@@ -330,6 +330,8 @@ trait MachineLevel { self: NewCSR =>
   val mconfigptr = Module(new CSRModule("Mconfigptr"))
     .setAddr(CSRs.mconfigptr)
 
+  val mstateen0 = Module(new CSRModule("Mstateen", new MstateenBundle0)).setAddr(CSRs.mstateen0)
+
   val machineLevelCSRMods: Seq[CSRModule[_]] = Seq(
     mstatus,
     misa,
@@ -357,6 +359,7 @@ trait MachineLevel { self: NewCSR =>
     mimpid,
     mhartid,
     mconfigptr,
+    mstateen0,
   ) ++ mhpmevents ++ mhpmcounters
 
   val machineLevelCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], UInt)] = SeqMap.from(
