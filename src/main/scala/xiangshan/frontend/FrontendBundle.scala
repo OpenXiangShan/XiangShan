@@ -524,9 +524,6 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
 
   def taken = br_taken_mask.reduce(_||_) || slot_valids.last // || (is_jal || is_jalr)
 
-  // Last slot contains an indirect branch
-  def hasIndirect = slot_valids.last && !is_br_sharing
-
   def fromFtbEntry(
                     entry: FTBEntry,
                     pc: UInt,
