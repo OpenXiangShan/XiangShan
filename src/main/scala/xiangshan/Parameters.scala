@@ -803,6 +803,8 @@ trait HasXSParameter {
   def EnableCacheErrorAfterReset = coreParams.EnableCacheErrorAfterReset
   def EnableAccurateLoadError = coreParams.EnableAccurateLoadError
   def EnableUncacheWriteOutstanding = coreParams.EnableUncacheWriteOutstanding
+  if(EnableUncacheWriteOutstanding)
+    require(!env.TraceRTLMode, "EnableUncacheWriteOutstanding must be used with TraceRTLMode disabled")
   def EnableHardwareStoreMisalign = coreParams.EnableHardwareStoreMisalign
   def EnableHardwareLoadMisalign = coreParams.EnableHardwareLoadMisalign
   def EnableStorePrefetchAtIssue = coreParams.EnableStorePrefetchAtIssue
