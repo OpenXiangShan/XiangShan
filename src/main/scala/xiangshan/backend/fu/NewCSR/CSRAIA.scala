@@ -153,9 +153,7 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
 }
 
 class ISelectField(final val maxValue: Int, reserved: Seq[Range]) extends CSREnum with WARLApply {
-  override def isLegal(enum: CSREnumType): Bool = {
-    !reserved.map(range => enum.asUInt >= range.start.U && enum.asUInt <= range.end.U).reduce(_ || _)
-  }
+  override def isLegal(enum: CSREnumType): Bool = enum.asUInt <= maxValue.U
 }
 
 object VSISelectField extends ISelectField(
