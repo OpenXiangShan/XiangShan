@@ -439,12 +439,14 @@ class NewCSR(implicit val p: Parameters) extends Module
         // Todo: move RegNext from ROB to CSR
         m.robCommit.instNum := io.fromRob.commit.instNum
         m.robCommit.fflags  := RegNextWithEnable(io.fromRob.commit.fflags)
-        m.robCommit.fsDirty := GatedValidRegNext(io.fromRob.commit.fsDirty) || writeFpLegal
-        m.robCommit.vsDirty := GatedValidRegNext(io.fromRob.commit.vsDirty) || writeVecLegal
+        m.robCommit.fsDirty := GatedValidRegNext(io.fromRob.commit.fsDirty)
+        m.robCommit.vsDirty := GatedValidRegNext(io.fromRob.commit.vsDirty)
         m.robCommit.vxsat   := RegNextWithEnable(io.fromRob.commit.vxsat)
         m.robCommit.vtype   := RegNextWithEnable(io.fromRob.commit.vtype)
         m.robCommit.vl      := RegNext          (io.fromRob.commit.vl)
         m.robCommit.vstart  := RegNextWithEnable(io.fromRob.commit.vstart)
+        m.writeFCSR         := writeFpLegal
+        m.writeVCSR         := writeVecLegal
         m.isVirtMode        := V.asUInt.asBool
       case _ =>
     }
