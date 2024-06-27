@@ -595,10 +595,13 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
 }
 
 class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUConst {
-  // val valids = Vec(3, Bool())
   val s1 = new BranchPredictionBundle
   val s2 = new BranchPredictionBundle
   val s3 = new BranchPredictionBundle
+
+  val s1_uftbHit = Bool()
+  val s1_uftbHasIndirect = Bool()
+  val s1_ftbCloseReq = Bool()
 
   val last_stage_meta = UInt(MaxMetaLength.W)
   val last_stage_spec_info = new Ftq_Redirect_SRAMEntry

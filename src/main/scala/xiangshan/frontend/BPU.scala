@@ -127,6 +127,7 @@ class BasePredictorInput (implicit p: Parameters) extends XSBundle with HasBPUCo
   val s0_pc = Vec(numDup, UInt(VAddrBits.W))
 
   val folded_hist = Vec(numDup, new AllFoldedHistories(foldedGHistInfos))
+  val s1_folded_hist = Vec(numDup, new AllFoldedHistories(foldedGHistInfos))
   val ghist = UInt(HistoryLength.W)
 
   val resp_in = Vec(nInputs, new BranchPredictionResp)
@@ -350,6 +351,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   predictors.io.in.bits.s0_pc := s0_pc_dup
   predictors.io.in.bits.ghist := s0_ghist
   predictors.io.in.bits.folded_hist := s0_folded_gh_dup
+  predictors.io.in.bits.s1_folded_hist := s1_folded_gh_dup
   predictors.io.in.bits.resp_in(0) := (0.U).asTypeOf(new BranchPredictionResp)
   predictors.io.fauftb_entry_in := (0.U).asTypeOf(new FTBEntry)
   predictors.io.fauftb_entry_hit_in := false.B
