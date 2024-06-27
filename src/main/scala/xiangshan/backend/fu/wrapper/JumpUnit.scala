@@ -27,6 +27,7 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   jumpDataModule.io.immMin := immMin
   jumpDataModule.io.func := func
   jumpDataModule.io.isRVC := isRVC
+  jumpDataModule.io.traceInfo := io.in.bits.ctrl.traceInfo
 
   val jmpTarget = io.in.bits.ctrl.predictInfo.get.target
   val predTaken = io.in.bits.ctrl.predictInfo.get.taken
