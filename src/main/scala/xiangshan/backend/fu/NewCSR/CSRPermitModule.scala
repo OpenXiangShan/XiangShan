@@ -31,11 +31,6 @@ class CSRPermitModule extends Module {
     io.in.status.vtsr,
   )
 
-  private val (tw, vtw) = (
-    io.in.status.tw,
-    io.in.status.vtw
-  )
-
   private val (tvm, vtvm) = (
     io.in.status.tvm,
     io.in.status.vtvm,
@@ -303,10 +298,6 @@ class CSRPermitIO extends Bundle {
       val tsr = Bool()
       // Virtual Trap SRET
       val vtsr = Bool()
-      // Timeout Wait
-      val tw = Bool()
-      // Virtual Timeout Wait
-      val vtw = Bool()
       // Trap Virtual Memory
       val tvm = Bool()
       // Virtual Trap Virtual Memory
