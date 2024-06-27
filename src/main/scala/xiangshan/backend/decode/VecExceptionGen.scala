@@ -228,7 +228,7 @@ class VecExceptionGen(implicit p: Parameters) extends XSModule{
   private val vs2Emul = LookupTreeDefault(vs2EmulSel, LMUL, List(
     "b1000".U  -> "b100".U,
     "b0100".U  -> (LMUL + 1.U),
-    "b0010".U  -> NFtoLmul(inst.NF),
+    "b0010".U  -> NFtoLmul(inst.IMM5_OPIVI(2, 0)),
     "b0001".U  -> (LMUL +& vs2Eew - SEW)
   ))
   private val vs2NotAlign = SrcType.isVp(io.decodedInst.srcType(1)) && RegNumNotAlign(inst.VS2, vs2Emul)
@@ -236,12 +236,13 @@ class VecExceptionGen(implicit p: Parameters) extends XSModule{
   private val vdIsMask = lsMaskInst || acsbInst || cmpInst || maskArithmeticInst
   private val vdIsSingleElem = redInst || redWideningInst || vmvSingleInst
   private val vdEew = Mux(lsStrideInst, inst.WIDTH(1, 0), Mux(vdWideningInst || redWideningInst, SEW + 1.U, SEW))
-  private val vdEmulSel = Cat((vdIsMask || vdIsSingleElem), vdWideningInst, (lsWholeInst || vmvWholeInst), lsStrideInst)
+  private val vdEmulSel = Cat((vdIsMask || vdIsSingleElem), vdWideningInst, vmvWholeInst, lsWholeInst, lsStrideInst)
   private val vdEmul = LookupTreeDefault(vdEmulSel, LMUL, List(
-    "b1000".U  -> "b100".U,
-    "b0100".U  -> (LMUL + 1.U),
-    "b0010".U  -> NFtoLmul(inst.NF),
-    "b0001".U  -> (LMUL +& vdEew - SEW)
+    "b10000".U  -> "b100".U,
+    "b01000".U  -> (LMUL + 1.U),
+    "b00100".U  -> NFtoLmul(inst.IMM5_OPIVI(2, 0)),
+    "b00010".U  -> NFtoLmul(inst.NF),
+    "b00001".U  -> (LMUL +& vdEew - SEW)
   ))
   private val vdNotAlign = (SrcType.isVp(io.decodedInst.srcType(2)) || io.decodedInst.vecWen) && RegNumNotAlign(inst.VD, vdEmul)
 
