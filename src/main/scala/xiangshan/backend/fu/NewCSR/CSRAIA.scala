@@ -28,9 +28,16 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
     .setAddr(CSRs.mireg)
 
   val mtopei = Module(new CSRModule("Mtopei", new CSRBundle {
-    val id   = RW(26, 16)
-    val prio = RW(10,  0)
-  }))
+    val id   = RO(26, 16)
+    val prio = RO(10,  0)
+  }) with HasAIABundle {
+    when (aiaToCSR.mtopei.valid) {
+      reg.id   := aiaToCSR.mtopei.bits.IID
+      reg.prio := aiaToCSR.mtopei.bits.IPRIO
+    }.otherwise{
+      reg := reg
+    }
+  })
     .setAddr(CSRs.mtopei)
 
   val mtopi = Module(new CSRModule("Mtopi", new TopIBundle) with HasInterruptFilterSink {
@@ -58,7 +65,14 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
   val stopei = Module(new CSRModule("Stopei", new CSRBundle {
     val id   = RW(26, 16)
     val prio = RW(10,  0)
-  }))
+  }) with HasAIABundle {
+    when(aiaToCSR.stopei.valid) {
+      reg.id   := aiaToCSR.stopei.bits.IID
+      reg.prio := aiaToCSR.stopei.bits.IPRIO
+    }.otherwise {
+      reg := reg
+    }
+  })
     .setAddr(CSRs.stopei)
 
   val stopi = Module(new CSRModule("Stopi", new TopIBundle) with HasInterruptFilterSink {
@@ -85,7 +99,14 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
   val vstopei   = Module(new CSRModule("VStopei", new CSRBundle {
     val id   = RW(26, 16)
     val prio = RW(10,  0)
-  }))
+  }) with HasAIABundle {
+    when(aiaToCSR.vstopei.valid) {
+      reg.id   := aiaToCSR.vstopei.bits.IID
+      reg.prio := aiaToCSR.vstopei.bits.IPRIO
+    }.otherwise {
+      reg := reg
+    }
+  })
     .setAddr(CSRs.vstopei)
 
   val vstopi = Module(new CSRModule("VStopi", new TopIBundle) with HasInterruptFilterSink {
