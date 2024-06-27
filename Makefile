@@ -176,7 +176,7 @@ else
 ifeq ($(ENABLE_XPROP),1)
 	sed -i -e "s/\$$fatal/assert(1\'b0)/g" $(RTL_DIR)/*.$(RTL_SUFFIX)
 else
-	sed -i -e 's/$$fatal/xs_assert(`__LINE__)/g' $(RTL_DIR)/*.$(RTL_SUFFIX)
+	sed -i -e 's/$$fatal/xs_assert_v2(`__FILE__, `__LINE__)/g' $(RTL_DIR)/*.$(RTL_SUFFIX)
 endif
 endif
 ifeq ($(MFC),1)
