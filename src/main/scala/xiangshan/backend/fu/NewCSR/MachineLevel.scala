@@ -432,12 +432,12 @@ class MstatusModule(implicit override val p: Parameters) extends CSRModule("MSta
   // write connection
   this.wfn(reg)(Seq(wAliasSstatus))
 
-  when (robCommit.fsDirty) {
+  when (robCommit.fsDirty || writeFCSR) {
     assert(reg.FS =/= ContextStatus.Off, "The [m|s]status.FS should not be Off when set dirty, please check decode")
     reg.FS := ContextStatus.Dirty
   }
 
-  when (robCommit.vsDirty) {
+  when (robCommit.vsDirty || writeVCSR) {
     assert(reg.VS =/= ContextStatus.Off, "The [m|s]status.VS should not be Off when set dirty, please check decode")
     reg.VS := ContextStatus.Dirty
   }
@@ -623,6 +623,8 @@ trait HasMachineCounterControlBundle { self: CSRModule[_] =>
 
 trait HasRobCommitBundle { self: CSRModule[_] =>
   val robCommit = IO(Input(new RobCommitCSR))
+  val writeFCSR = IO(Input(Bool()))
+  val writeVCSR = IO(Input(Bool()))
   val isVirtMode = IO(Input(Bool()))
 }
 
