@@ -750,9 +750,10 @@ class NewIFU(implicit p: Parameters) extends XSModule
   frontendTrigger.io.frontendTrigger  := io.frontendTrigger
 
   val f3_triggered = frontendTrigger.io.triggered
+  val f3_toIbuffer_valid = f3_valid && (!f3_req_is_mmio || f3_mmio_can_go) && !f3_flush
 
   /*** send to Ibuffer  ***/
-  io.toIbuffer.valid            := f3_valid && (!f3_req_is_mmio || f3_mmio_can_go) && !f3_flush
+  io.toIbuffer.valid            := f3_toIbuffer_valid
   io.toIbuffer.bits.instrs      := f3_expd_instr
   io.toIbuffer.bits.valid       := f3_instr_valid.asUInt
   io.toIbuffer.bits.enqEnable   := checkerOutStage1.fixedRange.asUInt & f3_instr_valid.asUInt
@@ -775,7 +776,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   }
 
   /** to backend */
-  io.toBackend.gpaddrMem_wen   := f3_valid && (!f3_req_is_mmio || f3_mmio_can_go) && !f3_flush // same as toIbuffer
+  // f3_gpaddrs is valid iff gpf is detected
+  io.toBackend.gpaddrMem_wen   := f3_toIbuffer_valid && (f3_gpf_vec.asUInt.orR || f3_crossGuestPageFault.asUInt.orR)
   io.toBackend.gpaddrMem_waddr := f3_ftq_req.ftqIdx.value
   io.toBackend.gpaddrMem_wdata := f3_gpaddrs(0)
 
