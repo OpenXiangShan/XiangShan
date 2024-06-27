@@ -53,11 +53,9 @@ class VSegmentBundle(implicit p: Parameters) extends VLSUBundle
   val isFof            = Bool()
 }
 
+// latch each uop's VecWen, pdest, v0Wen, uopIdx
 class VSegmentUop(implicit p: Parameters) extends VLSUBundle{
-  val pdest            = UInt(VLEN.W)
-  val vecWen           = Bool()
-  val uopIdx           = UopIdx()
-
+  val uop              = new DynInst
 }
 
 class VSegmentUnit (implicit p: Parameters) extends VLSUModule
@@ -329,9 +327,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   when(io.in.fire){
     data(enqPtr.value)                := io.in.bits.src_vs3
     stride(enqPtr.value)              := io.in.bits.src_stride
-    uopq(enqPtr.value).uopIdx         := io.in.bits.uop.vpu.vuopIdx
-    uopq(enqPtr.value).pdest          := io.in.bits.uop.pdest
-    uopq(enqPtr.value).vecWen         := io.in.bits.uop.vecWen
+    uopq(enqPtr.value).uop            := io.in.bits.uop
   }
 
   // update enqptr, only 1 port
@@ -589,7 +585,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   /*************************************************************************
    *                            dequeue logic
    *************************************************************************/
-  val vdIdxInField = GenUopIdxInField(Mux(isIndexed(instType), issueLmul, issueEmul), uopq(deqPtr.value).uopIdx)
+  val vdIdxInField = GenUopIdxInField(Mux(isIndexed(instType), issueLmul, issueEmul), uopq(deqPtr.value).uop.vpu.vuopIdx)
   /*select mask of vd, maybe remove in feature*/
   val realEw        = Mux(isIndexed(issueInstType), issueSew(1, 0), issueEew(1, 0))
   val maskDataVec: Vec[UInt] = VecDataToMaskDataVec(instMicroOp.mask, realEw)
@@ -599,7 +595,8 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     instMicroOpValid := false.B
   }
   io.uopwriteback.valid               := (state === s_finish) && distanceBetween(enqPtr, deqPtr) =/= 0.U
-  io.uopwriteback.bits.uop            := instMicroOp.uop
+  io.uopwriteback.bits.uop            := uopq(deqPtr.value).uop
+  io.uopwriteback.bits.uop.vpu        := instMicroOp.uop.vpu
   io.uopwriteback.bits.uop.exceptionVec := Mux((state === s_finish) && (stateNext === s_idle),
                                                 instMicroOp.uop.exceptionVec,
                                                 0.U.asTypeOf(ExceptionVec())) // only last uop will writeback exception
@@ -609,11 +606,11 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.uopwriteback.bits.uop.vpu.vl     := instMicroOp.vl
   io.uopwriteback.bits.uop.vpu.vstart := instMicroOp.vstart
   io.uopwriteback.bits.uop.vpu.vmask  := maskUsed
-  io.uopwriteback.bits.uop.pdest      := uopq(deqPtr.value).pdest
+  io.uopwriteback.bits.uop.vpu.vuopIdx  := uopq(deqPtr.value).uop.vpu.vuopIdx
   io.uopwriteback.bits.debug          := DontCare
   io.uopwriteback.bits.vdIdxInField.get := vdIdxInField
-  io.uopwriteback.bits.uop.vpu.vuopIdx  := uopq(deqPtr.value).uopIdx
-  io.uopwriteback.bits.uop.vecWen     := uopq(deqPtr.value).vecWen
+  io.uopwriteback.bits.uop.robIdx     := instMicroOp.uop.robIdx
+  io.uopwriteback.bits.uop.fuOpType   := instMicroOp.uop.fuOpType
 
   //to RS
   io.feedback.valid                   := state === s_finish && distanceBetween(enqPtr, deqPtr) =/= 0.U
@@ -622,12 +619,12 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.feedback.bits.sourceType         := DontCare
   io.feedback.bits.flushState         := DontCare
   io.feedback.bits.dataInvalidSqIdx   := DontCare
-  io.feedback.bits.uopIdx.get         := uopq(deqPtr.value).uopIdx
+  io.feedback.bits.uopIdx.get         := uopq(deqPtr.value).uop.vpu.vuopIdx
 
   // exception
   io.exceptionInfo                    := DontCare
   io.exceptionInfo.bits.robidx        := instMicroOp.uop.robIdx
-  io.exceptionInfo.bits.uopidx        := uopq(deqPtr.value).uopIdx
+  io.exceptionInfo.bits.uopidx        := uopq(deqPtr.value).uop.vpu.vuopIdx
   io.exceptionInfo.bits.vstart        := instMicroOp.vstart
   io.exceptionInfo.bits.vaddr         := instMicroOp.exceptionvaddr
   io.exceptionInfo.bits.vl            := instMicroOp.vl
