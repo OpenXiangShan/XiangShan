@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -18,6 +19,7 @@ package top
 
 import chisel3._
 import chisel3.util._
+import chisel3.experimental.dataview._
 import difftest.DifftestModule
 import xiangshan._
 import utils._
@@ -174,20 +176,20 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     FileRegisters.add("json", json)
     FileRegisters.add("plusArgs", freechips.rocketchip.util.PlusArgArtefacts.serialize_cHeader())
 
-    val dma = socMisc.map(m => IO(Flipped(m.dma.cloneType)))
-    val peripheral = socMisc.map(m => IO(m.peripheral.cloneType))
-    val memory = IO(misc.memory.cloneType)
+    val dma = socMisc.map(m => IO(Flipped(new VerilogAXI4Record(m.dma.elts.head.params))))
+    val peripheral = socMisc.map(m => IO(new VerilogAXI4Record(m.peripheral.elts.head.params)))
+    val memory = IO(new VerilogAXI4Record(misc.memory.elts.head.params))
 
     socMisc match {
       case Some(m) =>
-        m.dma <> dma.get
-        peripheral.get <> m.peripheral
+        m.dma.elements.head._2 <> dma.get.viewAs[AXI4Bundle]
+        peripheral.get.viewAs[AXI4Bundle] <> m.peripheral.elements.head._2
         dontTouch(dma.get)
         dontTouch(peripheral.get)
       case None =>
     }
-    
-    memory <> misc.memory
+
+    memory.viewAs[AXI4Bundle] <> misc.memory.elements.head._2
 
     val io = IO(new Bundle {
       val clock = Input(Bool())

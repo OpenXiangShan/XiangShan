@@ -1,5 +1,6 @@
 #***************************************************************************************
-# Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+# Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+# Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 # Copyright (c) 2020-2021 Peng Cheng Laboratory
 #
 # XiangShan is licensed under Mulan PSL v2.
@@ -123,8 +124,6 @@ endif
 TIMELOG = $(BUILD_DIR)/time.log
 TIME_CMD = time -avp -o $(TIMELOG)
 
-SED_CMD = sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g'
-
 ifeq ($(PLDM),1)
 SED_IFNDEF = `ifndef SYNTHESIS	// src/main/scala/device/RocketDebugWrapper.scala
 SED_ENDIF  = `endif // not def SYNTHESIS
@@ -144,7 +143,6 @@ ifeq ($(MFC),1)
 	$(SPLIT_VERILOG) $(RTL_DIR) $(TOP).v
 	$(MEM_GEN_SEP) "$(MEM_GEN)" "$(TOP_V).conf" "$(RTL_DIR)"
 endif
-	$(SED_CMD) $@
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
 	@sed -i 's/^/\/\// ' .__head__
@@ -166,7 +164,6 @@ ifeq ($(MFC),1)
 	$(SPLIT_VERILOG) $(RTL_DIR) $(SIM_TOP).v
 	$(MEM_GEN_SEP) "$(MEM_GEN)" "$(SIM_TOP_V).conf" "$(RTL_DIR)"
 endif
-	$(SED_CMD) $@
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
 	@sed -i 's/^/\/\// ' .__head__
