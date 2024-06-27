@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -19,8 +20,10 @@ package top
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import chisel3.experimental.dataview._
 import device.{AXI4MemorySlave, SimJTAG}
 import difftest._
+import freechips.rocketchip.amba.axi4.AXI4Bundle
 import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule}
 import utility.{ChiselDB, Constantin, FileRegisters, GTimer}
 import xiangshan.DebugOptionsKey
@@ -38,7 +41,7 @@ class SimTop(implicit p: Parameters) extends Module {
 
   val l_simMMIO = LazyModule(new SimMMIO(l_soc.socMisc.get.peripheralNode.in.head._2))
   val simMMIO = Module(l_simMMIO.module)
-  l_simMMIO.io_axi4 <> soc.peripheral.get
+  l_simMMIO.io_axi4.elements.head._2 <> soc.peripheral.get.viewAs[AXI4Bundle]
 
   val l_simAXIMem = AXI4MemorySlave(
     l_soc.misc.memAXI4SlaveNode,
@@ -47,7 +50,7 @@ class SimTop(implicit p: Parameters) extends Module {
     dynamicLatency = debugOpts.UseDRAMSim
   )
   val simAXIMem = Module(l_simAXIMem.module)
-  l_simAXIMem.io_axi4.getWrappedValue :<>= soc.memory.waiveAll
+  l_simAXIMem.io_axi4.elements.head._2 :<>= soc.memory.viewAs[AXI4Bundle].waiveAll
 
   soc.io.clock := clock.asBool
   soc.io.reset := (reset.asBool || soc.io.debug_reset).asAsyncReset
