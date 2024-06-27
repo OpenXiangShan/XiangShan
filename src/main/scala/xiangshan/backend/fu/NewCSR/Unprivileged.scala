@@ -57,8 +57,12 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     // Not trap
     when (wen && this.w.wdata < VLEN.U) {
       reg.vstart := this.w.wdata(VlWidth - 2, 0)
+    }.elsewhen (robCommit.vsDirty && !robCommit.vstart.valid) {
+      reg.vstart := 0.U
     }.elsewhen (robCommit.vstart.valid) {
       reg.vstart := robCommit.vstart.bits
+    }.otherwise {
+      reg := reg
     }
   })
     .setAddr(CSRs.vstart)
