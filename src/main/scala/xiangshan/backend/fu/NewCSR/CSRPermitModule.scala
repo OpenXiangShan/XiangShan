@@ -77,6 +77,22 @@ class CSRPermitModule extends Module {
     io.in.status.mstatusVSOff || io.in.status.vsstatusVSOff,
   )
 
+  private val (miselectIsIllegal, siselectIsIllegal, vsiselectIsIllegal) = (
+    io.in.aia.miselectIsIllegal,
+    io.in.aia.siselectIsIllegal,
+    io.in.aia.vsiselectIsIllegal,
+  )
+
+  private val (siselect, vsiselect) = (
+    io.in.aia.siselect,
+    io.in.aia.vsiselect,
+  )
+
+  private val (mvienSEIE, hvictlVTI) = (
+    io.in.aia.mvienSEIE,
+    io.in.aia.hvictlVTI,
+  )
+
   private val csrIsRO = addr(11, 10) === "b11".U
   private val csrIsUnpriv = addr(9, 8) === "b00".U
   private val csrIsM = addr(9, 8) === "b11".U
@@ -217,7 +233,8 @@ class CSRPermitModule extends Module {
 
   private val rwStimecmp_EX_II = csrAccess && ((privState.isModeHS && !mcounterenTM || !privState.isModeM && !menvcfgSTCE) && addr === CSRs.vstimecmp.U ||
     ((privState.isModeHS || privState.isModeVS) && !mcounterenTM || !privState.isModeM && !menvcfgSTCE) && addr === CSRs.stimecmp.U)
-  private val rwStimecmp_EX_VI = csrAccess && privState.isModeVS && (mcounterenTM && !hcounterenTM || menvcfgSTCE && !henvcfgSTCE) && addr === CSRs.stimecmp.U
+  private val rwStimecmp_EX_VI = (csrAccess && privState.isModeVS && (mcounterenTM && !hcounterenTM || menvcfgSTCE && !henvcfgSTCE) ||
+    wen && privState.isModeVS && hvictlVTI) && addr === CSRs.stimecmp.U
 
   private val fsEffectiveOff = sFSIsOff && !privState.isVirtual || sOrVsFSIsOff && privState.isVirtual
   private val vsEffectiveOff = sVSIsOff && !privState.isVirtual || sOrVsVSIsOff && privState.isVirtual
@@ -227,14 +244,35 @@ class CSRPermitModule extends Module {
 
   private val fpVec_EX_II = fpOff_EX_II || vecOff_EX_II
 
+  /**
+   * AIA begin
+   */
+  private val rwStopei_EX_II = csrAccess && privState.isModeHS && mvienSEIE && addr === CSRs.stopei.U
+
+  private val rwMireg_EX_II = csrAccess && privState.isModeM && miselectIsIllegal && addr === CSRs.mireg.U
+
+  private val rwSireg_EX_II = csrAccess && ((privState.isModeHS && mvienSEIE && siselect >= 0x70.U && siselect <= 0xFF.U) ||
+    ((privState.isModeM || privState.isModeHS) && siselectIsIllegal) ||
+    (privState.isModeVS && vsiselect > 0x1FF.U)) && addr === CSRs.sireg.U
+  private val rwSireg_EX_VI = csrAccess && (privState.isModeVS && (vsiselect >= 0x30.U && vsiselect <= 0x3F.U ||
+    vsiselect >= 0x80.U && vsiselect <= 0xFF.U && vsiselect(0).asBool) || privState.isModeVU) && addr === CSRs.sireg.U
+
+  private val rwVSireg_EX_II = csrAccess && (privState.isModeM || privState.isModeHS) && vsiselectIsIllegal && addr === CSRs.vsireg.U
+
+  private val rwSip_Sie_EX_VI = csrAccess && privState.isModeVS && hvictlVTI && (addr === CSRs.sip.U || addr === CSRs.sie.U)
+
+  /**
+   * AIA end
+   */
   private val csrAccessIllegal = (!privilegeLegal || rwIllegal)
 
   // Todo: check correct
   io.out.EX_II :=  csrAccess && !privilegeLegal && (!privState.isVirtual || privState.isVirtual && csrIsM) ||
     rwIllegal || mret_EX_II || sret_EX_II || rwSatp_EX_II || accessHPM_EX_II ||
-    rwStimecmp_EX_II || rwCustom_EX_II || fpVec_EX_II || dret_EX_II || xstateControlAccess_EX_II
+    rwStimecmp_EX_II || rwCustom_EX_II || fpVec_EX_II || dret_EX_II || xstateControlAccess_EX_II || rwStopei_EX_II ||
+    rwMireg_EX_II || rwSireg_EX_II || rwVSireg_EX_II
   io.out.EX_VI := (csrAccess && !privilegeLegal && privState.isVirtual && !csrIsM ||
-    mret_EX_VI || sret_EX_VI || rwSatp_EX_VI || accessHPM_EX_VI || rwStimecmp_EX_VI) && !rwIllegal || xstateControlAccess_EX_VI
+    mret_EX_VI || sret_EX_VI || rwSatp_EX_VI || accessHPM_EX_VI || rwStimecmp_EX_VI || rwSireg_EX_VI || rwSip_Sie_EX_VI) && !rwIllegal || xstateControlAccess_EX_VI
 
   io.out.hasLegalWen  := wen  && !csrAccessIllegal
   io.out.hasLegalMret := mret && !mretIllegal
@@ -297,6 +335,15 @@ class CSRPermitIO extends Bundle {
       val mstateen0 = new MstateenBundle0
       val hstateen0 = new HstateenBundle0
       val sstateen0 = new SstateenBundle0
+    }
+    val aia = new Bundle {
+      val miselectIsIllegal = Bool()
+      val siselectIsIllegal = Bool()
+      val vsiselectIsIllegal = Bool()
+      val siselect = UInt(64.W)
+      val vsiselect = UInt(64.W)
+      val mvienSEIE = Bool()
+      val hvictlVTI = Bool()
     }
   })
 

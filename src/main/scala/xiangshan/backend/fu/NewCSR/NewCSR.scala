@@ -373,6 +373,14 @@ class NewCSR(implicit val p: Parameters) extends Module
   permitMod.io.in.status.vsstatusFSOff := vsstatus.regOut.FS === ContextStatus.Off
   permitMod.io.in.status.vsstatusVSOff := vsstatus.regOut.VS === ContextStatus.Off
 
+  permitMod.io.in.aia.miselectIsIllegal  := miselect.isIllegal
+  permitMod.io.in.aia.siselectIsIllegal  := siselect.isIllegal
+  permitMod.io.in.aia.vsiselectIsIllegal := vsiselect.isIllegal
+  permitMod.io.in.aia.siselect := siselect.rdata
+  permitMod.io.in.aia.vsiselect := vsiselect.rdata
+  permitMod.io.in.aia.mvienSEIE := mvien.regOut.SEIE.asBool
+  permitMod.io.in.aia.hvictlVTI := hvictl.regOut.VTI.asBool
+
   sstcIRGen.i.stime.valid := time.updated
   sstcIRGen.i.stime.bits  := time.stime
   sstcIRGen.i.vstime.valid := time.updated
