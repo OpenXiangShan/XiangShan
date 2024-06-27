@@ -661,10 +661,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
 
   // sync fflags/dirty_fs/vxsat to csr
-  io.csr.fflags := fflags
-  io.csr.dirty_fs := dirty_fs
-  io.csr.dirty_vs := dirty_vs
-  io.csr.vxsat := vxsat
+  io.csr.fflags   := RegNextWithEnable(fflags)
+  io.csr.dirty_fs := GatedValidRegNext(dirty_fs)
+  io.csr.dirty_vs := GatedValidRegNext(dirty_vs)
+  io.csr.vxsat    := RegNextWithEnable(vxsat)
 
   // commit load/store to lsq
   val ldCommitVec = VecInit((0 until CommitWidth).map(i => io.commits.commitValid(i) && io.commits.info(i).commitType === CommitType.LOAD))
