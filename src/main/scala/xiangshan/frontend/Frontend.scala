@@ -72,6 +72,9 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val ibuffer =  Module(new IBuffer)
   val ftq = Module(new Ftq)
 
+  if (env.TraceRTLMode) {
+    dontTouch(io.backend.toFtq.redirect)
+  }
   val needFlush = RegNext(io.backend.toFtq.redirect.valid)
   val FlushControlRedirect = RegNext(io.backend.toFtq.redirect.bits.debugIsCtrl)
   val FlushMemVioRedirect = RegNext(io.backend.toFtq.redirect.bits.debugIsMemVio)

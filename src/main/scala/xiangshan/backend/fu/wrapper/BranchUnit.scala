@@ -9,6 +9,7 @@ import xiangshan.backend.datapath.DataConfig.VAddrData
 import xiangshan.frontend.tracertl.TraceRTLChoose
 import xiangshan.{RedirectLevel, XSModule}
 import utils.XSError
+import xiangshan.frontend.tracertl.ChiselRecordForField._
 
 class AddrAddModule(len: Int)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
@@ -45,17 +46,20 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
     case redirect =>
       redirect.valid := io.out.valid && dataModule.io.mispredict
       redirect.bits := 0.U.asTypeOf(io.out.bits.res.redirect.get.bits)
-      redirect.bits.level := RedirectLevel.flushAfter
-      redirect.bits.robIdx := io.in.bits.ctrl.robIdx
-      redirect.bits.ftqIdx := io.in.bits.ctrl.ftqIdx.get
-      redirect.bits.ftqOffset := io.in.bits.ctrl.ftqOffset.get
-      redirect.bits.cfiUpdate.isMisPred := TraceRTLChoose(dataModule.io.mispredict,
-        io.in.bits.ctrl.traceInfo.branchTaken(0) =/= dataModule.io.taken,
+      redirect.bits.specifyField(
+        _.level := RedirectLevel.flushAfter,
+        _.robIdx := io.in.bits.ctrl.robIdx,
+        _.ftqIdx := io.in.bits.ctrl.ftqIdx.get,
+        _.ftqOffset := io.in.bits.ctrl.ftqOffset.get,
+        _.cfiUpdate.isMisPred := TraceRTLChoose(dataModule.io.mispredict,
+          io.in.bits.ctrl.traceInfo.branchTaken(0) =/= dataModule.io.taken,
+        ),
+        _.cfiUpdate.taken := TraceRTLChoose(dataModule.io.taken, io.in.bits.ctrl.traceInfo.branchTaken(0)),
+        _.cfiUpdate.predTaken := dataModule.io.pred_taken,
+        _.cfiUpdate.target := TraceRTLChoose(addModule.io.target, io.in.bits.ctrl.traceInfo.target),
+        _.debugInstID := io.in.bits.ctrl.traceInfo.InstID,
+        _.cfiUpdate.pc := io.in.bits.data.pc.get,
       )
-      redirect.bits.cfiUpdate.taken := TraceRTLChoose(dataModule.io.taken, io.in.bits.ctrl.traceInfo.branchTaken(0))
-      redirect.bits.cfiUpdate.predTaken := dataModule.io.pred_taken
-      redirect.bits.cfiUpdate.target := TraceRTLChoose(addModule.io.target, io.in.bits.ctrl.traceInfo.target)
-      redirect.bits.cfiUpdate.pc := io.in.bits.data.pc.get
   }
   if (env.TraceRTLMode) {
     dontTouch(io.in.bits.ctrl.traceInfo)

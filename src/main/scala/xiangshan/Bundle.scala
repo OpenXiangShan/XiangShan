@@ -314,6 +314,7 @@ class Redirect(implicit p: Parameters) extends XSBundle {
   val debug_runahead_checkpoint_id = UInt(64.W)
   val debugIsCtrl = Bool()
   val debugIsMemVio = Bool()
+  val debugInstID = UInt(64.W) // TODO: add OptionWrapper
 
   def flushItself() = RedirectLevel.flushItself(level)
 }

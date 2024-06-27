@@ -7,6 +7,7 @@ import xiangshan.RedirectLevel
 import xiangshan.backend.fu.{FuConfig, FuncUnit, JumpDataModule, PipedFuncUnit}
 import xiangshan.backend.datapath.DataConfig.VAddrData
 import xiangshan.frontend.tracertl.TraceRTLChoose
+import xiangshan.frontend.tracertl.ChiselRecordForField._
 
 
 class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg) {
@@ -34,14 +35,17 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   val redirectValid = io.out.bits.res.redirect.get.valid
   redirectValid := io.in.valid && !jumpDataModule.io.isAuipc
   redirect := 0.U.asTypeOf(redirect)
-  redirect.level := RedirectLevel.flushAfter
-  redirect.robIdx := io.in.bits.ctrl.robIdx
-  redirect.ftqIdx := io.in.bits.ctrl.ftqIdx.get
-  redirect.ftqOffset := io.in.bits.ctrl.ftqOffset.get
-  redirect.cfiUpdate.predTaken := true.B
-  redirect.cfiUpdate.taken := true.B
-  redirect.cfiUpdate.target := TraceRTLChoose(jumpDataModule.io.target, io.in.bits.ctrl.traceInfo.target)
-  redirect.cfiUpdate.pc := io.in.bits.data.pc.get
+  redirect.specifyField(
+    _.level := RedirectLevel.flushAfter,
+    _.robIdx := io.in.bits.ctrl.robIdx,
+    _.ftqIdx := io.in.bits.ctrl.ftqIdx.get,
+    _.ftqOffset := io.in.bits.ctrl.ftqOffset.get,
+    _.cfiUpdate.predTaken := true.B,
+    _.cfiUpdate.taken := true.B,
+    _.cfiUpdate.target := TraceRTLChoose(jumpDataModule.io.target, io.in.bits.ctrl.traceInfo.target),
+    _.cfiUpdate.pc := io.in.bits.data.pc.get,
+    _.debugInstID := io.in.bits.ctrl.traceInfo.InstID,
+  )
   val targetPredWrong =  jumpDataModule.io.target(VAddrData().dataWidth - 1, 0) =/= jmpTarget
   val predTakenFixed = WireInit(predTaken)
   val targetPredWrongFixed = WireInit(targetPredWrong)
