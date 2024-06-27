@@ -26,6 +26,7 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.Bundles._
 import xiangshan.mem._
 import xiangshan.backend.fu.vector.Bundles._
+import xiangshan.backend.fu.FuConfig._
 
 
 class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends VLSUModule{
@@ -252,6 +253,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
 
 abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) extends VLSUModule{
   val io = IO(new VSplitBufferIO(isVStore))
+  lazy val fuCfg    = if(isVStore) VstuCfg else VlduCfg
 
   val uopq          = Reg(new VLSBundle(isVStore))
   val allocated     = RegInit(false.B)
@@ -345,6 +347,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   // data
   io.out.bits match { case x =>
     x.uop                   := issueUop
+    x.uop.exceptionVec      := ExceptionNO.selectByFu(issueUop.exceptionVec, fuCfg)
     x.vaddr                 := Mux(!issuePreIsSplit, usSplitVaddr, vaddr)
     x.alignedType           := issueAlignedType
     x.isvec                 := true.B

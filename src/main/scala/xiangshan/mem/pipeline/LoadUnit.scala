@@ -1388,6 +1388,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.ldout.bits        := s3_ld_wb_meta
   io.ldout.bits.data   := Mux(s3_valid, Mux(!s3_outexception, s3_ld_data_frm_cache, 0.U), s3_ld_data_frm_uncache)
   io.ldout.valid       := (s3_out.valid || (s3_mmio.valid && !s3_valid)) && !s3_vecout.isvec
+  io.ldout.bits.uop.exceptionVec := ExceptionNO.selectByFu(s3_ld_wb_meta.uop.exceptionVec, LduCfg)
 
   // TODO: check this --hx
   // io.ldout.valid       := s3_out.valid && !s3_out.bits.uop.robIdx.needFlush(io.redirect) && !s3_vecout.isvec ||
@@ -1420,7 +1421,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.vecldout.bits.hit := !s3_rep_info.need_rep || io.lsq.ldin.ready
   io.vecldout.bits.sourceType := RSFeedbackType.lrqFull
   io.vecldout.bits.flushState := DontCare
-  io.vecldout.bits.exceptionVec := s3_out.bits.uop.exceptionVec
+  io.vecldout.bits.exceptionVec := ExceptionNO.selectByFu(s3_out.bits.uop.exceptionVec, VlduCfg)
   io.vecldout.bits.vaddr := s3_in.vaddr
   io.vecldout.bits.mmio := DontCare
 

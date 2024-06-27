@@ -436,6 +436,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
 
   io.stout.valid := sx_last_valid && !sx_last_in.output.uop.robIdx.needFlush(io.redirect) && isStore(sx_last_in.output.uop.fuType)
   io.stout.bits := sx_last_in.output
+  io.stout.bits.uop.exceptionVec := ExceptionNO.selectByFu(sx_last_in.output.uop.exceptionVec, StaCfg)
 
   io.vecstout.valid := sx_last_valid && !sx_last_in.output.uop.robIdx.needFlush(io.redirect) && isVStore(sx_last_in.output.uop.fuType)
   // TODO: implement it!
@@ -445,7 +446,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.vecstout.bits.sourceType := RSFeedbackType.tlbMiss
   io.vecstout.bits.flushState := DontCare
   io.vecstout.bits.mmio := sx_last_in.mmio
-  io.vecstout.bits.exceptionVec := sx_last_in.output.uop.exceptionVec
+  io.vecstout.bits.exceptionVec := ExceptionNO.selectByFu(sx_last_in.output.uop.exceptionVec, VstuCfg)
   io.vecstout.bits.usSecondInv := sx_last_in.usSecondInv
   io.vecstout.bits.vecFeedback := sx_last_in.vecFeedback
   io.vecstout.bits.elemIdx     := sx_last_in.elemIdx
