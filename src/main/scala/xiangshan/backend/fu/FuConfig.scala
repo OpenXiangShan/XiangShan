@@ -170,6 +170,10 @@ case class FuConfig (
 
   def isCsr: Boolean = fuType == FuType.csr
 
+  def isBrh: Boolean = fuType == FuType.brh
+
+  def isJmp: Boolean = fuType == FuType.jmp
+
   def isFence: Boolean = fuType == FuType.fence
 
   def isVecArith: Boolean = fuType == FuType.vialuF || fuType == FuType.vimac ||

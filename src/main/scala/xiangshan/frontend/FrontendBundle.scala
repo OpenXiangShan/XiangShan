@@ -87,6 +87,8 @@ class IFUICacheIO(implicit p: Parameters)extends XSBundle with HasICacheParamete
 class FtqToICacheRequestBundle(implicit p: Parameters)extends XSBundle with HasICacheParameters{
   val pcMemRead           = Vec(5, new FtqICacheInfo)
   val readValid           = Vec(5, Bool())
+  val backendIpf          = Bool()
+  val backendIaf          = Bool()
 }
 
 
@@ -125,6 +127,7 @@ class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val foldpc    = Vec(PredictWidth, UInt(MemPredPCWidth.W))
   val ftqPtr       = new FtqPtr
   val ftqOffset    = Vec(PredictWidth, ValidUndirectioned(UInt(log2Ceil(PredictWidth).W)))
+  val exceptionFromBackend = Vec(PredictWidth, Bool())
   val ipf          = Vec(PredictWidth, Bool())
   val igpf          = Vec(PredictWidth, Bool())
   val acf          = Vec(PredictWidth, Bool())

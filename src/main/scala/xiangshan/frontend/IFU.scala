@@ -368,6 +368,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f2_except_pf    = VecInit((0 until PortNumber).map(i => fromICache(i).bits.tlbExcp.pageFault))
   val f2_except_gpf   = VecInit((0 until PortNumber).map(i => fromICache(i).bits.tlbExcp.guestPageFault))
   val f2_except_af    = VecInit((0 until PortNumber).map(i => fromICache(i).bits.tlbExcp.accessFault))
+  val f2_except_fromBackend = fromICache.map(_.bits.exceptionFromBackend).reduce(_||_)
   // paddr and gpaddr of [startAddr, nextLineAddr]
   val f2_paddrs       = VecInit((0 until PortNumber).map(i => fromICache(i).bits.paddr))
   // for crossGuestPageFault
@@ -476,6 +477,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_except_af      = RegEnable(f2_except_af,  f2_fire)
   val f3_except_gpf     = RegEnable(f2_except_gpf,  f2_fire)
   val f3_mmio           = RegEnable(f2_mmio   ,  f2_fire)
+  val f3_except_fromBackend = RegEnable(f2_except_fromBackend, f2_fire)
 
   //val f3_expd_instr     = RegEnable(f2_expd_instr,  f2_fire)
   val f3_instr          = RegEnable(f2_instr, f2_fire)
@@ -764,6 +766,10 @@ class NewIFU(implicit p: Parameters) extends XSModule
   io.toIbuffer.bits.ipf         := VecInit(f3_pf_vec.zip(f3_crossPageFault).map{case (pf, crossPF) => pf || crossPF})
   io.toIbuffer.bits.igpf        := VecInit(f3_gpf_vec.zip(f3_crossGuestPageFault).map{case (gpf, crossGPF) => gpf || crossGPF})
   io.toIbuffer.bits.acf         := f3_af_vec
+  io.toIbuffer.bits.exceptionFromBackend := (0 until PredictWidth).map {
+    case 0 => f3_except_fromBackend
+    case _ => false.B
+  }
   io.toIbuffer.bits.crossPageIPFFix := (0 until PredictWidth).map(i => f3_crossPageFault(i) || f3_crossGuestPageFault(i))
   io.toIbuffer.bits.triggered   := f3_triggered
 
