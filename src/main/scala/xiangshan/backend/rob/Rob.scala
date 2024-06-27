@@ -87,6 +87,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val ftqOffset = UInt(log2Up(PredictWidth).W)
     })
     val readGPAMemData = Input(UInt(GPAddrBits.W))
+    val vstartIsZero = Input(Bool())
 
     val debug_ls = Flipped(new DebugLSIO)
     val debugRobHead = Output(new DynInst)
@@ -523,8 +524,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.exception.bits.isHls := RegEnable(deqDispatchData.isHls, exceptionHappen)
   io.exception.bits.vls := RegEnable(robEntries(deqPtr.value).vls, exceptionHappen)
   io.exception.bits.trigger := RegEnable(exceptionDataRead.bits.trigger, exceptionHappen)
-  io.csr.vstart.valid := RegEnable(exceptionDataRead.bits.vstartEn, false.B, exceptionHappen)
-  io.csr.vstart.bits := RegEnable(exceptionDataRead.bits.vstart, exceptionHappen)
 
   // data will be one cycle after valid
   io.readGPAMemAddr.valid := exceptionHappen
@@ -577,6 +576,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   })
   val dirty_fs = io.commits.isCommit && VecInit(dirtyFs).asUInt.orR
   val dirty_vs = io.commits.isCommit && VecInit(dirtyVs).asUInt.orR
+
+  val resetVstart = dirty_vs && !io.vstartIsZero
+
+  io.csr.vstart.valid := RegNext(Mux(exceptionHappen, exceptionDataRead.bits.vstartEn, resetVstart))
+  io.csr.vstart.bits := RegNext(Mux(exceptionHappen, exceptionDataRead.bits.vstart, 0.U))
 
   val vxsat = Wire(Valid(Bool()))
   vxsat.valid := io.commits.isCommit && vxsat.bits

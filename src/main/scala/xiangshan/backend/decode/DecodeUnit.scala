@@ -28,7 +28,7 @@ import xiangshan._
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.Bundles.{DecodedInst, DynInst, StaticInst}
 import xiangshan.backend.decode.isa.bitfield.{InstVType, XSInstBitFields}
-import xiangshan.backend.fu.vector.Bundles.VType
+import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 
 /**
  * Abstract trait giving defaults and other relevant values to different Decode constants/
@@ -681,6 +681,7 @@ class DecodeUnitIO(implicit p: Parameters) extends XSBundle {
   val enq = new Bundle {
     val ctrlFlow = Input(new StaticInst)
     val vtype = Input(new VType)
+    val vstart = Input(Vl())
   }
 //  val vconfig = Input(UInt(XLEN.W))
   val deq = new DecodeUnitDeqIO
@@ -761,6 +762,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   vecException.io.inst := io.enq.ctrlFlow.instr
   vecException.io.decodedInst := decodedInst
   vecException.io.vtype := decodedInst.vpu.vtype
+  vecException.io.vstart := decodedInst.vpu.vstart
   decodedInst.exceptionVec(illegalInstr) := decodedInst.selImm === SelImm.INVALID_INSTR || vecException.io.illegalInst
 
   when (!io.csrCtrl.svinval_enable) {
@@ -898,6 +900,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     decodedInst.vpu.isOpMask := isOpMask
     decodedInst.vpu.isDependOldvd := isVppu || isVecOPF || isVStore || (isDstMask && !isOpMask) || isNarrow || isVlx || isVma
     decodedInst.vpu.isWritePartVd := isWritePartVd
+    decodedInst.vpu.vstart := io.enq.vstart
   }
 
   decodedInst.vlsInstr := isVls
