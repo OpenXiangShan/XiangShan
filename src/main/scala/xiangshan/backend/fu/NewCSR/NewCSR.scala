@@ -351,9 +351,6 @@ class NewCSR(implicit val p: Parameters) extends Module
   permitMod.io.in.status.tsr := mstatus.regOut.TSR.asBool
   permitMod.io.in.status.vtsr := hstatus.regOut.VTSR.asBool
 
-  permitMod.io.in.status.tw := mstatus.regOut.TW.asBool
-  permitMod.io.in.status.vtw := hstatus.regOut.VTW.asBool
-
   permitMod.io.in.status.tvm  := mstatus.regOut.TVM.asBool
   permitMod.io.in.status.vtvm := hstatus.regOut.VTVM.asBool
 
