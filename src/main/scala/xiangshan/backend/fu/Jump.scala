@@ -25,6 +25,7 @@ import xiangshan._
 import xiangshan.backend._
 import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.decode.isa._
+import xiangshan.frontend.tracertl.{TraceInstrBundle, TraceRTLChoose}
 
 trait HasRedirectOut { this: XSModule =>
   val redirectOutValid = IO(Output(Bool()))
@@ -38,6 +39,8 @@ class JumpDataModule(implicit p: Parameters) extends XSModule {
     val immMin = Input(UInt(ImmUnion.maxLen.W))
     val func = Input(FuOpType())
     val isRVC = Input(Bool())
+    val traceInfo = Input(new TraceInstrBundle())
+
     val result, target = Output(UInt(XLEN.W))
     val isAuipc = Output(Bool())
   })
@@ -52,7 +55,10 @@ class JumpDataModule(implicit p: Parameters) extends XSModule {
   )), XLEN)
 
   val snpc = pc + Mux(isRVC, 2.U, 4.U)
-  val target = Mux(JumpOpType.jumpOpisJalr(func), src1, pc) + offset // NOTE: src1 is (pc/rf(rs1)), src2 is (offset)
+  val target = TraceRTLChoose(Mux(JumpOpType.jumpOpisJalr(func), src1, pc) + offset, // NOTE: src1 is (pc/rf(rs1)), src2 is (offset)
+//    Mux(JumpOpType.jumpOpisJalr(func), io.traceInfo.target, pc + offset) // use pc + offset for debug
+    io.traceInfo.target
+  )
 
   // RISC-V spec for JALR:
   // The target address is obtained by adding the sign-extended 12-bit I-immediate to the register rs1,
