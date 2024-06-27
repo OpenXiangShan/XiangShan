@@ -43,28 +43,10 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
     _.cfiUpdate.predTaken := true.B,
     _.cfiUpdate.taken := true.B,
     _.cfiUpdate.target := TraceRTLChoose(jumpDataModule.io.target, io.in.bits.ctrl.traceInfo.target),
+    _.cfiUpdate.isMisPred := jumpDataModule.io.target(VAddrData().dataWidth - 1, 0) =/= jmpTarget || !predTaken,
     _.cfiUpdate.pc := io.in.bits.data.pc.get,
     _.debugInstID := io.in.bits.ctrl.traceInfo.InstID,
   )
-  val targetPredWrong =  jumpDataModule.io.target(VAddrData().dataWidth - 1, 0) =/= jmpTarget
-  val predTakenFixed = WireInit(predTaken)
-  val targetPredWrongFixed = WireInit(targetPredWrong)
-  if (env.TraceRTLMode) {
-    dontTouch(io.in.bits.ctrl.traceInfo)
-    val inst = io.in.bits.ctrl.traceInfo.inst
-    val isJal = Mux(isRVC(inst),
-      (inst(1,0) === "b01".U) && (inst(15,13) === "b001".U),
-      (inst(4,2) === "b011".U) && (inst(6,5) === "b11".U)
-    )
-    // NOTE:
-    // 1. jal's target already redirected. should not be redirected again.
-    // 2. jump should always be predicted to be true(when false, preCheck by IFU's predChecker)
-    predTakenFixed := true.B
-    when (isJal)  {
-      targetPredWrongFixed := false.B
-    }
-  }
-  redirect.cfiUpdate.isMisPred := targetPredWrongFixed || !predTakenFixed
 //  redirect.debug_runahead_checkpoint_id := uop.debugInfo.runahead_checkpoint_id // Todo: assign it
 
   io.in.ready := io.out.ready
