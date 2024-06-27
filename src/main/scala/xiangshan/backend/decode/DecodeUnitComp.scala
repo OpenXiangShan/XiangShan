@@ -1380,10 +1380,10 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(i).ldest := ldest
         csBundle(i).uopIdx := i.U
       }
-      csBundle(lmul - 1.U).rfWen := true.B
-      csBundle(lmul - 1.U).fpWen := false.B
-      csBundle(lmul - 1.U).vecWen := false.B
-      csBundle(lmul - 1.U).ldest := dest
+      csBundle(numOfUop - 1.U).rfWen := Mux(dest === 0.U, false.B, true.B)
+      csBundle(numOfUop - 1.U).fpWen := false.B
+      csBundle(numOfUop - 1.U).vecWen := false.B
+      csBundle(numOfUop - 1.U).ldest := dest
     }
 
     is(UopSplitType.VEC_MVV) {
@@ -1406,14 +1406,6 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(i * 2 + 1).ldest := (VECTOR_TMP_REG_LMUL + i).U
         csBundle(i * 2 + 1).uopIdx := (i * 2 + 1).U
       }
-    }
-
-    is(UopSplitType.VEC_M0X_VFIRST) {
-      // LMUL
-      csBundle(0).rfWen := true.B
-      csBundle(0).fpWen := false.B
-      csBundle(0).vecWen := false.B
-      csBundle(0).ldest := dest
     }
     is(UopSplitType.VEC_VWW) {
       for (i <- 0 until MAX_VLMUL*2) {
