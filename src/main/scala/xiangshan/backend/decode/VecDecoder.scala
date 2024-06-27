@@ -702,7 +702,7 @@ object VecDecoder extends DecodeConstants {
     VFMV_V_F           -> OPFVF(SrcType.fp, SrcType.vp , FuType.vfalu, VfaluType.vfmv, F, T, F, UopSplitType.VEC_VFV, src2 = SrcType.X), // vfmv.v.f vd, rs1 # vd[i] = f[rs1]
 
     // 16.2. Floating-Point Scalar Move Instructions
-    VFMV_F_S           -> OPFVF(SrcType.X, SrcType.X, FuType.vfalu, VfaluType.vfmv_f_s, T, F, F, UopSplitType.SCA_SIM), // f[rd] = vs2[0] (rs1=0)
+    VFMV_F_S           -> OPFVF(SrcType.X, SrcType.X, FuType.vfalu, VfaluType.vfmv_f_s, T, F, F, UopSplitType.dummy), // f[rd] = vs2[0] (rs1=0)
     VFMV_S_F           -> OPFVF(SrcType.fp, SrcType.X, FuType.vfalu, VfaluType.vfmv_s_f, F, T, F, UopSplitType.VEC_0XV, src2 = SrcType.X), // vd[0] = f[rs1] (vs2=0)
     // 16.3.3. Vector Slide1up
     VFSLIDE1UP_VF      -> OPFVF(SrcType.fp, SrcType.vp , FuType.vppu, VpermType.vfslide1up, F, T, F, UopSplitType.VEC_FSLIDE1UP),// vd[0]=f[rs1], vd[i+1] = vs2[i]

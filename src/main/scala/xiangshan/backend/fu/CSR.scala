@@ -1134,12 +1134,14 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   // Branch control
   val retTarget = WireInit(0.U)
   val resetSatp = (addr === Satp.U || addr === Hgatp.U || addr === Vsatp.U) && wen // write to satp will cause the pipeline be flushed
+  val writeVstart = addr === Vstart.U && wen // write to vstart will cause the pipeline be flushed
+  dontTouch(writeVstart)
 
   val w_fcsr_change_rm = wen && addr === Fcsr.U && wdata(7, 5) =/= fcsr(7, 5)
   val w_frm_change_rm = wen && addr === Frm.U && wdata(2, 0) =/= fcsr(7, 5)
   val frm_change = w_fcsr_change_rm || w_frm_change_rm
   val isXRet = valid && func === CSROpType.jmp && !isEcall && !isEbreak
-  flushPipe := resetSatp || frm_change || isXRet || frontendTriggerUpdate
+  flushPipe := resetSatp || frm_change || isXRet || frontendTriggerUpdate || writeVstart
 
   private val illegalRetTarget = WireInit(false.B)
   when(valid) {

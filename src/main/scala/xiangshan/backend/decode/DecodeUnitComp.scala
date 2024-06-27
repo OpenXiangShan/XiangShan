@@ -150,6 +150,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   isVsetSimple := latchedInst.isVset
   val vlmulReg = latchedInst.vpu.vlmul
   val vsewReg = latchedInst.vpu.vsew
+  val vstartReg = latchedInst.vpu.vstart
 
   //Type of uop Div
   val typeOfSplit = latchedInst.uopSplitType
@@ -187,6 +188,11 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
 
   csBundle(0).firstUop := true.B
   csBundle(numOfUop - 1.U).lastUop := true.B
+
+  // when vstart is not zero, the last uop will modify vstart to zero
+  // therefore, blockback and flush pipe
+  csBundle(numOfUop - 1.U).blockBackward := vstartReg =/= 0.U
+  csBundle(numOfUop - 1.U).flushPipe := vstartReg =/= 0.U
 
   switch(typeOfSplit) {
     is(UopSplitType.VSET) {
