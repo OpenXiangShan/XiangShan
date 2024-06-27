@@ -56,7 +56,7 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
   }
 
   private val highPrioTrapNO = Mux(
-    InterruptNO.getVS.map(_.U === trapCode).reduce(_ || _),
+    InterruptNO.getVS.map(_.U === trapCode).reduce(_ || _) && isInterrupt,
     trapCode - 1.U, // map VSSIP, VSTIP, VSEIP to SSIP, STIP, SEIP
     trapCode,
   )
