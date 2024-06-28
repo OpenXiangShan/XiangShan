@@ -407,6 +407,10 @@ package object xiangshan {
     def uvsetvcfg_ii        = "b0010_0000".U
     def uvsetrd_ii          = "b0000_0000".U
 
+    // read vec, write int
+    // keep vl
+    def csrrvl              = "b0001_0110".U
+
     def isVsetvl  (func: UInt)  = func(6)
     def isVsetvli (func: UInt)  = func(7)
     def isVsetivli(func: UInt)  = func(7, 6) === 0.U

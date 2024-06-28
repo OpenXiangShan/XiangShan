@@ -7,13 +7,14 @@ abstract class RiscvInst(bitWidth: Int) extends Bundle {
 }
 
 class Riscv32BitInst extends RiscvInst(32) {
-  def ALL     : UInt  = inst
-  def OPCODE  : UInt  = inst( 6,  0)
-  def RD      : UInt  = inst(11,  7)
-  def FUNCT3  : UInt  = inst(14, 12)
-  def RS1     : UInt  = inst(19, 15)
-  def RS2     : UInt  = inst(24, 20)
-  def FUNCT7  : UInt  = inst(31, 25)
+  def ALL       : UInt  = inst
+  def OPCODE    : UInt  = inst( 6,  0)
+  def RD        : UInt  = inst(11,  7)
+  def FUNCT3    : UInt  = inst(14, 12)
+  def RS1       : UInt  = inst(19, 15)
+  def RS2       : UInt  = inst(24, 20)
+  def FUNCT7    : UInt  = inst(31, 25)
+  def OPCODE5Bit: UInt  = inst( 6,  2)
 }
 
 trait BitFieldsI { this: Riscv32BitInst =>
@@ -95,3 +96,40 @@ class InstVType extends Bundle {
   val vlmul = UInt(3.W)
 }
 
+object OPCODE5Bit {
+  val LOAD      = "b00_000".U
+  val LOAD_FP   = "b00_001".U
+  val CUSTOM_0  = "b00_010".U
+  val MSIC_MEM  = "b00_011".U
+  val OP_IMM    = "b00_100".U
+  val AUIPC     = "b00_101".U
+  val OP_IMM_32 = "b00_110".U
+  val INST48b_0 = "b00_111".U
+
+  val STORE     = "b01_000".U
+  val STORE_FP  = "b01_001".U
+  val CUSTOM_1  = "b01_010".U
+  val AMO       = "b01_011".U
+  val OP        = "b01_100".U
+  val LUI       = "b01_101".U
+  val OP_32     = "b01_110".U
+  val INST64b   = "b01_111".U
+
+  val MADD      = "b10_000".U
+  val MSUB      = "b10_001".U
+  val NMSUB     = "b10_010".U
+  val NMADD     = "b10_011".U
+  val OP_FP     = "b10_100".U
+  val OP_V      = "b10_101".U
+  val CUSTOM_2  = "b10_110".U
+  val INST48b_1 = "b10_111".U
+
+  val BRANCH     = "b11_000".U
+  val JALR       = "b11_001".U
+  val RESERVED_0 = "b11_010".U
+  val JAL        = "b11_011".U
+  val SYSTEM     = "b11_100".U
+  val RESERVED_1 = "b11_101".U
+  val CUSTOM_3   = "b11_110".U
+  val INSTge80b  = "b11_111".U
+}
