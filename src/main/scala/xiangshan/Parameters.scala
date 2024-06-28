@@ -86,6 +86,7 @@ case class XSCoreParameters
   EnableClockGate: Boolean = true,
   EnableJal: Boolean = false,
   EnableFauFTB: Boolean = true,
+  EnableSv48: Boolean = false,
   UbtbGHRLength: Int = 4,
   // HistoryLength: Int = 512,
   EnableGHistDiff: Boolean = true,
@@ -272,7 +273,7 @@ case class XSCoreParameters
     outReplace = false,
     partialStaticPMP = true,
     outsideRecvFlush = true,
-    saveLevel = true,
+    saveLevel = false,
     lgMaxSize = 4
   ),
   sttlbParameters: TLBParameters = TLBParameters(
@@ -281,7 +282,7 @@ case class XSCoreParameters
     outReplace = false,
     partialStaticPMP = true,
     outsideRecvFlush = true,
-    saveLevel = true,
+    saveLevel = false,
     lgMaxSize = 4
   ),
   hytlbParameters: TLBParameters = TLBParameters(
@@ -290,7 +291,7 @@ case class XSCoreParameters
     outReplace = false,
     partialStaticPMP = true,
     outsideRecvFlush = true,
-    saveLevel = true,
+    saveLevel = false,
     lgMaxSize = 4
   ),
   pftlbParameters: TLBParameters = TLBParameters(
@@ -299,7 +300,7 @@ case class XSCoreParameters
     outReplace = false,
     partialStaticPMP = true,
     outsideRecvFlush = true,
-    saveLevel = true,
+    saveLevel = false,
     lgMaxSize = 4
   ),
   l2ToL1tlbParameters: TLBParameters = TLBParameters(
@@ -308,7 +309,7 @@ case class XSCoreParameters
     outReplace = false,
     partialStaticPMP = true,
     outsideRecvFlush = true,
-    saveLevel = true
+    saveLevel = false
   ),
   refillBothTlb: Boolean = false,
   btlbParameters: TLBParameters = TLBParameters(
@@ -563,18 +564,28 @@ trait HasXSParameter {
   def HasMExtension = coreParams.HasMExtension
   def HasCExtension = coreParams.HasCExtension
   def HasHExtension = coreParams.HasHExtension
+  def EnableSv48 = coreParams.EnableSv48
   def HasDiv = coreParams.HasDiv
   def HasIcache = coreParams.HasICache
   def HasDcache = coreParams.HasDCache
   def AddrBits = coreParams.AddrBits // AddrBits is used in some cases
   def GPAddrBits = coreParams.GPAddrBits
   def VAddrBits = {
-    if(HasHExtension){
-      coreParams.GPAddrBits
-    }else{
-      coreParams.VAddrBits
+    if (EnableSv48) {
+      if (HasHExtension) {
+        50
+      } else {
+        48
+      }
+    } else {
+      if (HasHExtension) {
+        coreParams.GPAddrBits
+      } else {
+        coreParams.VAddrBits
+      }
     }
   } // VAddrBits is Virtual Memory addr bits
+  require(PAddrBits >= 40 || !EnableSv48) // Paddr bits should greater than 40 when Sv48 enable
 
   def AsidLength = coreParams.AsidLength
   def VmidLength = coreParams.VmidLength
