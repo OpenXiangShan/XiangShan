@@ -42,36 +42,14 @@ class TraceCollector(implicit p: Parameters) extends TraceModule
   val io = IO(new TraceCollectorIO)
   dontTouch(io)
 
-  val CommitBufferSize = CommitWidth * 3
-  val commitBuffer = Reg(Vec(CommitBufferSize, new TraceCollectBundle()))
   val traceCollectorHelper = Module(new TraceCollectorHelper(CommitWidth))
-  val deqPtr = RegInit(0.U.asTypeOf(new CommitBufferPtr(CommitBufferSize)))
-  val enqPtr = RegInit(0.U.asTypeOf(new CommitBufferPtr(CommitBufferSize)))
-
-  XSError(isFull(enqPtr, deqPtr), "Should not be full")
-
-  val deqReady = distanceBetween(enqPtr, deqPtr) >= CommitWidth.U
 
   traceCollectorHelper.clock := clock
   traceCollectorHelper.reset := reset
-  traceCollectorHelper.enable := deqReady
   for (i <- 0 until CommitWidth) {
-    val ptr = (deqPtr + i.U).value
-    traceCollectorHelper.pc(i) := commitBuffer(ptr).pc
-    traceCollectorHelper.inst(i) := commitBuffer(ptr).inst
-    traceCollectorHelper.instNum(i) := commitBuffer(ptr).instNum
-  }
-  when (deqReady) {
-    deqPtr := deqPtr + CommitWidth.U
-  }
-
-  for (i <- 0 until CommitWidth) {
-    when (io.in(i).valid && io.enable) {
-      val ptr = (enqPtr + i.U).value
-      commitBuffer(ptr) := io.in(i).bits
-    }
-  }
-  when (io.enable) {
-    enqPtr := enqPtr + PopCount(io.in.map(_.valid))
+    traceCollectorHelper.enable(i) := io.enable && io.in(i).valid
+    traceCollectorHelper.pc(i) := io.in(i).bits.pc
+    traceCollectorHelper.inst(i) := io.in(i).bits.inst
+    traceCollectorHelper.instNum(i) := io.in(i).bits.instNum
   }
 }
