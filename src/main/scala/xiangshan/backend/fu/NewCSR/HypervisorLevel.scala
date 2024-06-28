@@ -154,7 +154,9 @@ trait HypervisorLevel { self: NewCSR =>
   })
     .setAddr(CSRs.hgatp)
 
-  val hgeip = Module(new CSRModule("Hgeip", new HgeipBundle))
+  val hgeip = Module(new CSRModule("Hgeip", new HgeipBundle) with HasAIABundle {
+    regOut.ip := aiaToCSR.vseip
+  })
     .setAddr(CSRs.hgeip)
 
   val hstateen0 = Module(new CSRModule("Hstateen", new HstateenBundle0) with HasStateen0Bundle {

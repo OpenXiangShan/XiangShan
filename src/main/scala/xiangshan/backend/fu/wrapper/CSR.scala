@@ -132,7 +132,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   private val csrModOutValid = csrMod.io.out.valid
   private val csrModOut      = csrMod.io.out.bits
 
-  private val imsic = Module(new IMSIC)
+  private val imsic = Module(new IMSIC(NumVSIRFiles = 5, NumHart = 1, XLEN = 64, NumIRSrc = 256))
   imsic.i.hartId := io.csrin.get.hartId
   imsic.i.msiInfo := io.csrin.get.msiInfo
   imsic.i.csr.addr.valid := csrMod.toAIA.addr.valid
@@ -147,15 +147,15 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   imsic.i.csr.wdata.bits.op := csrMod.toAIA.wdata.bits.op
   imsic.i.csr.wdata.bits.data := csrMod.toAIA.wdata.bits.data
 
-  csrMod.fromAIA.rdata.valid := imsic.o.csr.rdata.valid
-  csrMod.fromAIA.rdata.bits.data := imsic.o.csr.rdata.bits.rdata
+  csrMod.fromAIA.rdata.valid        := imsic.o.csr.rdata.valid
+  csrMod.fromAIA.rdata.bits.data    := imsic.o.csr.rdata.bits.rdata
   csrMod.fromAIA.rdata.bits.illegal := imsic.o.csr.rdata.bits.illegal
-  csrMod.fromAIA.mtopei.valid := imsic.o.mtopei.valid
-  csrMod.fromAIA.stopei.valid := imsic.o.stopei.valid
-  csrMod.fromAIA.vstopei.valid := imsic.o.vstopei.valid
-  csrMod.fromAIA.mtopei.bits := imsic.o.mtopei.bits
-  csrMod.fromAIA.stopei.bits := imsic.o.stopei.bits
-  csrMod.fromAIA.vstopei.bits := imsic.o.vstopei.bits
+  csrMod.fromAIA.meip    := imsic.o.meip
+  csrMod.fromAIA.seip    := imsic.o.seip
+  csrMod.fromAIA.vseip   := imsic.o.vseip
+  csrMod.fromAIA.mtopei  := imsic.o.mtopei
+  csrMod.fromAIA.stopei  := imsic.o.stopei
+  csrMod.fromAIA.vstopei := imsic.o.vstopei
 
   private val exceptionVec = WireInit(0.U.asTypeOf(ExceptionVec())) // Todo:
   import ExceptionNO._
