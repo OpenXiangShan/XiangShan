@@ -467,7 +467,7 @@ object Bundles {
     val exuParams: ExeUnitParams,
   )(implicit
     p: Parameters
-  ) extends Bundle {
+  ) extends XSBundle {
     private val rfReadDataCfgSet: Seq[Set[DataConfig]] = exuParams.getRfReadDataCfgSet
 
     val rf: MixedVec[MixedVec[RfReadPortWithConfig]] = Flipped(MixedVec(
@@ -477,6 +477,7 @@ object Bundles {
     ))
 
     val srcType = Vec(exuParams.numRegSrc, SrcType()) // used to select imm or reg data
+    val rcIdx = OptionWrapper(exuParams.needReadRegCache, Vec(exuParams.numRegSrc, UInt(RegCacheIdxWidth.W))) // used to select regcache data
     val immType = SelImm()                         // used to select imm extractor
     val common = new ExuInput(exuParams)
     val addrOH = UInt(iqParams.numEntries.W)
