@@ -27,16 +27,8 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
   })
     .setAddr(CSRs.mireg)
 
-  val mtopei = Module(new CSRModule("Mtopei", new CSRBundle {
-    val id   = RO(26, 16)
-    val prio = RO(10,  0)
-  }) with HasAIABundle {
-    when (aiaToCSR.mtopei.valid) {
-      reg.id   := aiaToCSR.mtopei.bits.IID
-      reg.prio := aiaToCSR.mtopei.bits.IPRIO
-    }.otherwise{
-      reg := reg
-    }
+  val mtopei = Module(new CSRModule("Mtopei", new TopEIBundle) with HasAIABundle {
+    regOut := aiaToCSR.mtopei
   })
     .setAddr(CSRs.mtopei)
 
@@ -62,16 +54,8 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
   })
     .setAddr(CSRs.sireg)
 
-  val stopei = Module(new CSRModule("Stopei", new CSRBundle {
-    val id   = RW(26, 16)
-    val prio = RW(10,  0)
-  }) with HasAIABundle {
-    when(aiaToCSR.stopei.valid) {
-      reg.id   := aiaToCSR.stopei.bits.IID
-      reg.prio := aiaToCSR.stopei.bits.IPRIO
-    }.otherwise {
-      reg := reg
-    }
+  val stopei = Module(new CSRModule("Stopei", new TopEIBundle) with HasAIABundle {
+    regOut := aiaToCSR.stopei
   })
     .setAddr(CSRs.stopei)
 
@@ -96,16 +80,8 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
   })
     .setAddr(CSRs.vsireg)
 
-  val vstopei   = Module(new CSRModule("VStopei", new CSRBundle {
-    val id   = RW(26, 16)
-    val prio = RW(10,  0)
-  }) with HasAIABundle {
-    when(aiaToCSR.vstopei.valid) {
-      reg.id   := aiaToCSR.vstopei.bits.IID
-      reg.prio := aiaToCSR.vstopei.bits.IPRIO
-    }.otherwise {
-      reg := reg
-    }
+  val vstopei   = Module(new CSRModule("VStopei", new TopEIBundle) with HasAIABundle {
+    regOut := aiaToCSR.vstopei
   })
     .setAddr(CSRs.vstopei)
 
@@ -255,13 +231,17 @@ class CSRToAIABundle extends Bundle {
 }
 
 class AIAToCSRBundle extends Bundle {
+  private val NumVSIRFiles = 63
   val rdata = ValidIO(new Bundle {
     val data = UInt(XLEN.W)
     val illegal = Bool()
   })
-  val mtopei = ValidIO(new TopEIBundle)
-  val stopei = ValidIO(new TopEIBundle)
-  val vstopei = ValidIO(new TopEIBundle)
+  val meip    = Bool()
+  val seip    = Bool()
+  val vseip   = UInt(NumVSIRFiles.W)
+  val mtopei  = new TopEIBundle
+  val stopei  = new TopEIBundle
+  val vstopei = new TopEIBundle
 }
 
 trait HasAIABundle { self: CSRModule[_] =>

@@ -490,12 +490,12 @@ class NewCSR(implicit val p: Parameters) extends Module
         m.aiaToCSR.rdata.valid := fromAIA.rdata.valid
         m.aiaToCSR.rdata.bits.data := fromAIA.rdata.bits.data
         m.aiaToCSR.rdata.bits.illegal := fromAIA.rdata.bits.illegal
-        m.aiaToCSR.mtopei.valid := fromAIA.mtopei.valid
-        m.aiaToCSR.stopei.valid := fromAIA.stopei.valid
-        m.aiaToCSR.vstopei.valid := fromAIA.vstopei.valid
-        m.aiaToCSR.mtopei.bits := fromAIA.mtopei.bits
-        m.aiaToCSR.stopei.bits := fromAIA.stopei.bits
-        m.aiaToCSR.vstopei.bits := fromAIA.vstopei.bits
+        m.aiaToCSR.meip    := fromAIA.meip
+        m.aiaToCSR.seip    := fromAIA.seip
+        m.aiaToCSR.vseip   := fromAIA.vseip
+        m.aiaToCSR.mtopei  := fromAIA.mtopei
+        m.aiaToCSR.stopei  := fromAIA.stopei
+        m.aiaToCSR.vstopei := fromAIA.vstopei
       case _ =>
     }
     mod match {

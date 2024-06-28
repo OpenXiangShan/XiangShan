@@ -5,11 +5,12 @@ import chisel3.util._
 import chisel3.experimental._
 
 class IMSIC(
-  NumIRFiles: Int = 7,
-  NumHart: Int = 64,
+  NumVSIRFiles: Int = 5,
+  NumHart: Int = 1,
   XLEN: Int = 64,
   NumIRSrc: Int = 256,
 ) extends Module {
+  private val NumIRFiles: Int = /*M*/ 1 + /*S*/ 1 + NumVSIRFiles
   private val NR_SRC_WIDTH = log2Up(NumIRSrc)
   private val NR_HARTS_WIDTH = log2Up(NumHart)
   private val INTP_FILE_WIDTH = log2Up(NumIRFiles)
@@ -42,9 +43,12 @@ class IMSIC(
         val illegal = Bool()
       })
     }
-    val mtopei  = ValidIO(UInt(32.W))
-    val stopei  = ValidIO(UInt(32.W))
-    val vstopei = ValidIO(UInt(32.W))
+    val meip  = Bool()
+    val seip  = Bool()
+    val vseip = UInt(NumVSIRFiles.W)
+    val mtopei  = UInt(32.W)
+    val stopei  = UInt(32.W)
+    val vstopei = UInt(32.W)
   }))
 
   val imsicTop = Module(new imsic_csr_top(
@@ -72,12 +76,12 @@ class IMSIC(
   o.csr.rdata.valid        := imsicTop.io.o.csr.rdata_vld
   o.csr.rdata.bits.rdata   := imsicTop.io.o.csr.rdata
   o.csr.rdata.bits.illegal := imsicTop.io.o.csr.illegal
-  o.mtopei.valid           := imsicTop.io.o.irq(0)
-  o.stopei.valid           := imsicTop.io.o.irq(1)
-  o.vstopei.valid          := imsicTop.io.o.irq(2)
-  o.mtopei.bits            := imsicTop.io.o.mtopei
-  o.stopei.bits            := imsicTop.io.o.stopei
-  o.vstopei.bits           := imsicTop.io.o.vstopei
+  o.meip                   := imsicTop.io.o.irq(0)
+  o.seip                   := imsicTop.io.o.irq(1)
+  o.vseip                  := imsicTop.io.o.irq(NumIRFiles - 1, 2)
+  o.mtopei                 := imsicTop.io.o.mtopei
+  o.stopei                 := imsicTop.io.o.stopei
+  o.vstopei                := imsicTop.io.o.vstopei
 }
 
 class imsic_csr_top(
@@ -125,7 +129,7 @@ class imsic_csr_top(
         val rdata = UInt(XLEN.W)
         val illegal = Bool()
       }
-      val irq = UInt(3.W)
+      val irq = UInt(NumIRFiles.W)
       val mtopei = UInt(32.W)
       val stopei = UInt(32.W)
       val vstopei = UInt(32.W)

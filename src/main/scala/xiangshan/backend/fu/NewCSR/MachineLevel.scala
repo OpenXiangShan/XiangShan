@@ -189,6 +189,7 @@ trait MachineLevel { self: NewCSR =>
     with HasExternalInterruptBundle
     with HasMachineEnvBundle
     with HasLocalInterruptReqBundle
+    with HasAIABundle
   {
     // Alias write in
     val fromMvip = IO(Flipped(new MvipToMip))
@@ -249,13 +250,14 @@ trait MachineLevel { self: NewCSR =>
     // When mvien.SEIE = 0, mip.SEIP is alias of mvip.SEIP.
     // Otherwise, mip.SEIP is read only 0
     regOut.SEIP := Mux(!mvien.SEIE, mvip.SEIP.asUInt, 0.U)
-    rdataFields.SEIP := regOut.SEIP || platformIRP.SEIP
+    rdataFields.SEIP := regOut.SEIP || platformIRP.SEIP || aiaToCSR.seip
 
     // bit 10 VSEIP
     regOut.VSEIP := hvip.VSEIP || platformIRP.VSEIP || hgeip.ip.asUInt(hstatusVGEIN.asUInt)
 
     // bit 11 MEIP is read-only in mip, and is set and cleared by a platform-specific interrupt controller.
-    regOut.MEIP := platformIRP.MEIP
+    // MEIP can from PLIC and IMSIC
+    regOut.MEIP := platformIRP.MEIP || aiaToCSR.meip
 
     // bit 12 SGEIP
     regOut.SGEIP := Cat(hgeip.asUInt & hgeie.asUInt).orR
