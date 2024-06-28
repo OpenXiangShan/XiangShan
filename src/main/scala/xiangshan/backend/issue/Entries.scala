@@ -172,10 +172,10 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
 
   if (params.isAllComp || params.isAllSimp) {
     //transPolicy
-    othersTransPolicy.get.io.canEnq := othersEntryEnqReadyVec.asUInt
+    othersTransPolicy.get.io.canEnq := VecInit(validVec.takeRight(OthersEntryNum).map(!_)).asUInt
 
     // we only allow all or none of the enq entries transfering to others entries.
-    enqCanTrans2Others.get := PopCount(validVec.take(EnqEntryNum)) <= PopCount(othersEntryEnqReadyVec)
+    enqCanTrans2Others.get := PopCount(validVec.take(EnqEntryNum)) <= PopCount(validVec.takeRight(OthersEntryNum).map(!_))
     // othersTransSelVec(i) is the target others entry for enq entry [i].
     // note that dispatch does not guarantee the validity of enq entries with low index.
     // that means in some cases enq entry [0] is invalid while enq entry [1] is valid.
