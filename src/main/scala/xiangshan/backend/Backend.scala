@@ -346,6 +346,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   dataPath.io.debugVecRat    .foreach(_ := ctrlBlock.io.debug_vec_rat.get)
   dataPath.io.debugV0Rat     .foreach(_ := ctrlBlock.io.debug_v0_rat.get)
   dataPath.io.debugVlRat     .foreach(_ := ctrlBlock.io.debug_vl_rat.get)
+  dataPath.io.fromBypassNetwork := DontCare
 
   og2ForVector.io.flush := ctrlBlock.io.toDataPath.flush
   og2ForVector.io.ldCancel := io.mem.ldCancel
