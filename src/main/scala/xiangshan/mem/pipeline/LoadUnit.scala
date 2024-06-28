@@ -219,7 +219,12 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s0_dcache_vaddr  = Wire(UInt(VAddrBits.W))
 
   if (env.TraceRTLMode) {
-    XSError(io.ldin.valid && !io.ldin.bits.uop.traceInfo.memoryType =/= 1.U, "Trace: Load Unit but not load inst")
+    when (io.ldin.valid) {
+      XSError(io.ldin.bits.uop.traceInfo.memoryType =/= 1.U,
+        "Trace: Load Unit but not load inst")
+      XSError(LSUOpType.size(io.ldin.bits.uop.fuOpType) =/= io.ldin.bits.uop.traceInfo.memorySize(1,0),
+        "Trace Memory Size Error")
+    }
   }
 
   // flow source bundle
@@ -357,8 +362,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.tlb.req.bits.hlvx               := s0_tlb_hlvx
   io.tlb.req.bits.size               := Mux(s0_sel_src.isvec, s0_sel_src.alignedType(2,0), LSUOpType.size(s0_sel_src.uop.fuOpType))
   if (env.TraceRTLMode) {
-    XSError(s0_valid && io.tlb.req.bits.size =/= s0_sel_src.uop.traceInfo.memorySize(1,0),
-    "Trace Memory Size Error")
   }
   io.tlb.req.bits.kill               := s0_kill || s0_tlb_no_query // if does not need to be translated, kill it
   io.tlb.req.bits.memidx.is_ld       := true.B
