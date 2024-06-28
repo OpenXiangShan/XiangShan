@@ -136,7 +136,8 @@ case class XSCoreParameters
 
     (preds, ras.io.out)
   },
-  ICacheECCForceError: Boolean = false,
+  ICacheForceMetaECCError: Boolean = false,
+  ICacheForceDataECCError: Boolean = false,
   IBufSize: Int = 48,
   IBufNBank: Int = 6, // IBuffer bank amount, should divide IBufSize
   DecodeWidth: Int = 6,
@@ -263,8 +264,8 @@ case class XSCoreParameters
     useDmode = false,
     NWays = 48,
   ),
-  itlbPortNum: Int = 2 + ICacheParameters().prefetchPipeNum + 1,
-  ipmpPortNum: Int = 2 + ICacheParameters().prefetchPipeNum + 1,
+  itlbPortNum: Int = ICacheParameters().PortNumber + 1,
+  ipmpPortNum: Int = 2 * ICacheParameters().PortNumber + 1,
   ldtlbParameters: TLBParameters = TLBParameters(
     name = "ldtlb",
     NWays = 48,
@@ -320,10 +321,6 @@ case class XSCoreParameters
     tagECC = Some("parity"),
     dataECC = Some("parity"),
     replacer = Some("setplru"),
-    nMissEntries = 2,
-    nProbeEntries = 2,
-    nPrefetchEntries = 12,
-    nPrefBufferEntries = 32,
   ),
   dcacheParametersOpt: Option[DCacheParameters] = Some(DCacheParameters(
     tagECC = Some("secded"),
@@ -654,7 +651,8 @@ trait HasXSParameter {
   def CacheLineSize = coreParams.CacheLineSize
   def CacheLineHalfWord = CacheLineSize / 16
   def ExtHistoryLength = HistoryLength + 64
-  def ICacheECCForceError = coreParams.ICacheECCForceError
+  def ICacheForceMetaECCError = coreParams.ICacheForceMetaECCError
+  def ICacheForceDataECCError = coreParams.ICacheForceDataECCError
   def IBufSize = coreParams.IBufSize
   def IBufNBank = coreParams.IBufNBank
   def backendParams: BackendParams = coreParams.backendParams

@@ -322,8 +322,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
     XSError(f1_half_snpc.zip(f1_half_snpc_diff).map{ case (a,b) => a.asUInt =/= b.asUInt }.reduce(_||_),  "f1_half_snpc adder cut fail")
   }
 
-  val f1_cut_ptr            = if(HasCExtension)  VecInit((0 until PredictWidth + 1).map(i =>  Cat(0.U(2.W), f1_ftq_req.startAddr(blockOffBits-2, 1)) + i.U ))
-                                  else           VecInit((0 until PredictWidth).map(i =>     Cat(0.U(2.W), f1_ftq_req.startAddr(blockOffBits-2, 2)) + i.U ))
+  val f1_cut_ptr            = if(HasCExtension)  VecInit((0 until PredictWidth + 1).map(i =>  Cat(0.U(2.W), f1_ftq_req.startAddr(blockOffBits-1, 1)) + i.U ))
+                                  else           VecInit((0 until PredictWidth).map(i =>     Cat(0.U(2.W), f1_ftq_req.startAddr(blockOffBits-1, 2)) + i.U ))
 
   /**
     ******************************************************************************
@@ -405,7 +405,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     require(HasCExtension)
     // if(HasCExtension){
       val result   = Wire(Vec(PredictWidth + 1, UInt(16.W)))
-      val dataVec  = cacheline.asTypeOf(Vec(blockBytes/2, UInt(16.W))) //32 16-bit data vector
+      val dataVec  = cacheline.asTypeOf(Vec(blockBytes, UInt(16.W))) //32 16-bit data vector
       (0 until PredictWidth + 1).foreach( i =>
         result(i) := dataVec(cutPtr(i)) //the max ptr is 3*blockBytes/4-1
       )
@@ -421,7 +421,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   }
 
   val f2_cache_response_data = fromICache.map(_.bits.data)
-  val f2_data_2_cacheline = Cat(f2_cache_response_data(1), f2_cache_response_data(0))
+  val f2_data_2_cacheline = Cat(f2_cache_response_data(0), f2_cache_response_data(0))
 
   val f2_cut_data   = cut(f2_data_2_cacheline, f2_cut_ptr)
 
