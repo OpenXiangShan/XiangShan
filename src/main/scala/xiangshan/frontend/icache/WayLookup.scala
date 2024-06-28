@@ -38,7 +38,7 @@ class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
 
 class WayLookupGPFEntry(implicit p: Parameters) extends ICacheBundle {
   val excp_tlb_gpf : Vec[Bool] = Vec(PortNumber, Bool())
-  val gpaddr       : Vec[UInt] = Vec(PortNumber, UInt(GPAddrBits.W))
+  val gpaddr       : UInt      = UInt(GPAddrBits.W)
 
   def hasGPF: Bool = excp_tlb_gpf.asUInt.orR
 }
@@ -55,7 +55,7 @@ class WayLookupInfo(implicit p: Parameters) extends ICacheBundle {
   def excp_tlb_pf  : Vec[Bool] = entry.excp_tlb_pf
   def meta_errors  : Vec[Bool] = entry.meta_errors
   def excp_tlb_gpf : Vec[Bool] = gpf.excp_tlb_gpf
-  def gpaddr       : Vec[UInt] = gpf.gpaddr
+  def gpaddr       : UInt      = gpf.gpaddr
 }
 
 

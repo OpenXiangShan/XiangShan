@@ -440,7 +440,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     }
     toIFU(i).bits.vaddr                     := s2_req_vaddr(i)
     toIFU(i).bits.paddr                     := s2_req_paddr(i)
-    toIFU(i).bits.gpaddr                    := s2_req_gpaddr(i)
+    toIFU(i).bits.gpaddr                    := s2_req_gpaddr
   }
 
   s2_flush := io.flush
