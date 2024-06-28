@@ -29,5 +29,5 @@ class TraceModule(implicit p: Parameters) extends XSModule with TraceParams
 
 
 class TraceRecvInfo(implicit p: Parameters) extends TraceBundle {
-  val instNum = UInt(log2Ceil(PredictWidth).W)
+  val instNum = UInt(log2Ceil(PredictWidth + 1).W)
 }
