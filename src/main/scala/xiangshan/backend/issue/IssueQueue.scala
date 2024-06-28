@@ -21,7 +21,7 @@ import xiangshan.backend.fu.vector.Bundles.VSew
 class IssueQueue(params: IssueBlockParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
 
-  implicit val iqParams = params
+  implicit val iqParams: IssueBlockParams = params
   lazy val module: IssueQueueImp = iqParams.schdType match {
     case IntScheduler() => new IssueQueueIntImp(this)
     case FpScheduler() => new IssueQueueFpImp(this)

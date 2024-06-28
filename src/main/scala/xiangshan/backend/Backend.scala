@@ -165,7 +165,7 @@ class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyMod
 
 class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends LazyModuleImp(wrapper)
   with HasXSParameter {
-  implicit private val params = wrapper.params
+  implicit private val params: BackendParams = wrapper.params
 
   val io = IO(new BackendIO()(p, wrapper.params))
 

@@ -275,9 +275,9 @@ class RVCExpander(implicit p: Parameters) extends XSModule {
   })
 
   if (HasCExtension) {
-    io.out := new RVCDecoder(io.in, XLEN, useAddiForMv = true).decode
+    io.out := new RVCDecoder(io.in, XLEN, fLen, useAddiForMv = true).decode
   } else {
-    io.out := new RVCDecoder(io.in, XLEN, useAddiForMv = true).passthrough
+    io.out := new RVCDecoder(io.in, XLEN, fLen, useAddiForMv = true).passthrough
   }
 }
 
