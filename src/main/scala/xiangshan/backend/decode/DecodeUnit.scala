@@ -19,6 +19,7 @@ package xiangshan.backend.decode
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.rocket.CSRs
 import freechips.rocketchip.rocket.Instructions._
 import freechips.rocketchip.util.uintToBitPat
 import utility._
@@ -28,7 +29,7 @@ import xiangshan._
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.Bundles.{DecodedInst, DynInst, StaticInst}
 import xiangshan.backend.decode.isa.PseudoInstructions
-import xiangshan.backend.decode.isa.bitfield.{InstVType, XSInstBitFields}
+import xiangshan.backend.decode.isa.bitfield.{InstVType, OPCODE5Bit, XSInstBitFields}
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 
@@ -945,14 +946,16 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   io.deq.uopInfo.numOfWB := uopInfoGen.io.out.uopInfo.numOfWB
   io.deq.uopInfo.lmul := uopInfoGen.io.out.uopInfo.lmul
 
+  val isCSR = inst.OPCODE5Bit === OPCODE5Bit.SYSTEM && inst.FUNCT3(1, 0) =/= 0.U
+  val isCSRR = isCSR && inst.FUNCT3 === BitPat("b?1?") && inst.RS1 === 0.U
+  val isCSRW = isCSR && inst.FUNCT3 === BitPat("b?10") && inst.RD  === 0.U
+  dontTouch(isCSRR)
+  dontTouch(isCSRW)
+
   // for csrr vl instruction, convert to vsetvl
-  val Vl = 0xC20.U
-  val Vlenb = 0xC22.U
-  val isCsrInst = FuType.FuTypeOrR(decodedInst.fuType, FuType.csr)
-  //  rs1 is x0 or uimm == 0
-  val isCsrRead = (decodedInst.fuOpType === CSROpType.set || decodedInst.fuOpType === CSROpType.clr) && inst.RS1 === 0.U
-  val isCsrrVl = isCsrInst && isCsrRead && inst.CSRIDX === Vl
-  val isCsrrVlenb = isCsrInst && isCsrRead && inst.CSRIDX === Vlenb
+  val isCsrrVlenb = isCSRR && inst.CSRIDX === CSRs.vlenb.U
+  val isCsrrVl    = isCSRR && inst.CSRIDX === CSRs.vl.U
+
   when (isCsrrVl) {
     // convert to vsetvl instruction
     decodedInst.srcType(0) := SrcType.no
@@ -960,8 +963,8 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     decodedInst.srcType(2) := SrcType.no
     decodedInst.srcType(3) := SrcType.no
     decodedInst.srcType(4) := SrcType.vp
-    decodedInst.lsrc(4) := Vl_IDX.U
-    decodedInst.waitForward := false.B
+    decodedInst.lsrc(4)    := Vl_IDX.U
+    decodedInst.waitForward   := false.B
     decodedInst.blockBackward := false.B
   }.elsewhen(isCsrrVlenb){
     // convert to addi instruction
@@ -978,11 +981,13 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   io.deq.decodedInst := decodedInst
   io.deq.decodedInst.rfWen := (decodedInst.ldest =/= 0.U) && decodedInst.rfWen
-  // change vlsu to vseglsu when NF =/= 0.U
   io.deq.decodedInst.fuType := Mux1H(Seq(
-    ( isCsrrVl) -> FuType.vsetfwf.U,
-    ( isCsrrVlenb) -> FuType.alu.U,
+    // keep condition
     (!FuType.FuTypeOrR(decodedInst.fuType, FuType.vldu, FuType.vstu) && !isCsrrVl && !isCsrrVlenb) -> decodedInst.fuType,
+    (isCsrrVl) -> FuType.vsetfwf.U,
+    (isCsrrVlenb) -> FuType.alu.U,
+
+    // change vlsu to vseglsu when NF =/= 0.U
     ( FuType.FuTypeOrR(decodedInst.fuType, FuType.vldu, FuType.vstu) && inst.NF === 0.U || (inst.NF =/= 0.U && (inst.MOP === "b00".U && inst.SUMOP === "b01000".U))) -> decodedInst.fuType,
     // MOP === b00 && SUMOP === b01000: unit-stride whole register store
     // MOP =/= b00                    : strided and indexed store
@@ -991,8 +996,14 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     // MOP =/= b00                    : strided and indexed load
     ( FuType.FuTypeOrR(decodedInst.fuType, FuType.vldu)              && inst.NF =/= 0.U && ((inst.MOP === "b00".U && inst.LUMOP =/= "b01000".U) || inst.MOP =/= "b00".U)) -> FuType.vsegldu.U,
   ))
-  io.deq.decodedInst.fuOpType := Mux(isCsrrVlenb, ALUOpType.add, decodedInst.fuOpType)
   io.deq.decodedInst.imm := Mux(isCsrrVlenb, (VLEN / 8).U, decodedInst.imm)
+
+  io.deq.decodedInst.fuOpType := Mux1H(Seq(
+    // keep condition
+    !isCsrrVl && !isCsrrVlenb -> decodedInst.fuOpType,
+    isCsrrVl    -> VSETOpType.csrrvl,
+    isCsrrVlenb -> ALUOpType.add,
+  ))
   //-------------------------------------------------------------
   // Debug Info
 //  XSDebug("in:  instr=%x pc=%x excepVec=%b crossPageIPFFix=%d\n",
