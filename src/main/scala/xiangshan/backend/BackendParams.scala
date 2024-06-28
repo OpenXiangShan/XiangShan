@@ -322,6 +322,29 @@ case class BackendParams(
     this.getPregParams(dataCfg).numWrite.getOrElse(this.getWbPortIndices(dataCfg).size)
   }
 
+
+  /**
+    * Get size of read ports of int regcache
+    */
+  def getIntExuRCReadSize = {
+    this.allExuParams.filter(x => x.isIntExeUnit).map(_.numIntSrc).reduce(_ + _)
+  }
+
+  def getMemExuRCReadSize = {
+    this.allExuParams.filter(x => x.isMemExeUnit && x.readIntRf).map(_.numIntSrc).reduce(_ + _)
+  }
+
+  /**
+    * Get size of write ports of int regcache
+    */
+  def getIntExuRCWriteSize = {
+    this.allExuParams.filter(x => x.isIntExeUnit && x.isIQWakeUpSource).size
+  }
+
+  def getMemExuRCWriteSize = {
+    this.allExuParams.filter(x => x.isMemExeUnit && x.isIQWakeUpSource && x.readIntRf).size
+  }
+
   def getExuIdx(name: String): Int = {
     val exuParams = allRealExuParams
     if (name != "WB") {
