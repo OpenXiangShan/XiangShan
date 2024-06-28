@@ -38,34 +38,13 @@ class TraceDriveCollector(implicit p: Parameters) extends TraceModule
   with HasCircularQueuePtrHelper {
   val io = IO(new TraceDriveCollectorIO)
 
-  val TraceDriveSize = DecodeWidth * 3
-  val traceDrive = Reg(Vec(TraceDriveSize, new TraceDriveCollectBundle()))
   val traceDriveHelper = Module(new TraceDriveCollectorHelper(DecodeWidth))
-  val deqPtr = RegInit(0.U.asTypeOf(new TraceDrivePtr(TraceDriveSize)))
-  val enqPtr = RegInit(0.U.asTypeOf(new TraceDrivePtr(TraceDriveSize)))
-
-  XSError(isFull(enqPtr, deqPtr), "TraceDriveCollector Should not be full")
-
-  val deqReady = distanceBetween(enqPtr, deqPtr) >= DecodeWidth.U
 
   traceDriveHelper.clock := clock
   traceDriveHelper.reset := reset
-  traceDriveHelper.enable := deqReady
   for (i <- 0 until DecodeWidth) {
-    val ptr = (deqPtr + i.U).value
-    traceDriveHelper.pc(i) := traceDrive(ptr).pc
-    traceDriveHelper.inst(i) := traceDrive(ptr).inst
+    traceDriveHelper.enable(i) := io.in(i).valid
+    traceDriveHelper.pc(i) := io.in(i).bits.pc
+    traceDriveHelper.inst(i) := io.in(i).bits.inst
   }
-  when (deqReady) {
-    deqPtr := deqPtr + DecodeWidth.U
-  }
-
-  for (i <- 0 until DecodeWidth) {
-    when (io.in(i).valid) {
-      val sum = PopCount(io.in.map(_.valid).take(i))
-      val ptr = (enqPtr + sum).value
-      traceDrive(ptr) := io.in(i).bits
-    }
-  }
-  enqPtr := enqPtr + PopCount(io.in.map(_.valid))
 }

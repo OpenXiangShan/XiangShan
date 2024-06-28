@@ -128,8 +128,8 @@ class TraceCollectorHelper(width: Int)
   with HasExtModuleInline{
   val clock = IO(Input(Clock()))
   val reset = IO(Input(Reset()))
-  val enable = IO(Input(Bool()))
 
+  val enable = IO(Input(Vec(width, Bool())))
   val pc = IO(Input(Vec(width, UInt(64.W))))
   val inst = IO(Input(Vec(width, UInt(32.W))))
   // InstNum is used to deal with RoB Merge
@@ -141,23 +141,32 @@ class TraceCollectorHelper(width: Int)
         .map(i => s"input [${size - 1}:0] ${baseName}_${i},")
         .mkString("  ", "\n  ", "\n")
     }
+    def genBoolPort(baseName: String): String = {
+      (0 until width)
+        .map(i => s"input ${baseName}_${i},")
+        .mkString("  ", "\n  ", "\n")
+    }
     def callDPIC: String = {
       (0 until width)
-        .map(i => s"trace_collect_one_instr(pc_${i}, inst_${i}, instNum_${i});")
+        .map(i => s"""
+                      | if (enable_${i}) begin
+                      |   trace_collect_one_instr(pc_${i}, inst_${i}, instNum_${i});
+                      | end
+                      """.stripMargin)
         .mkString("      ", "\n      ", "\n")
     }
     s"""
        |module TraceCollectorHelper(
        |  input  clock,
-       |  input  reset,
+       |${genBoolPort("enable")}
        |${genPort(64, "pc")}
        |${genPort(32, "inst")}
        |${genPort(8, "instNum")}
-       |  input  enable
+       |  input  reset
        |);
        |
        |  always @(posedge clock) begin
-       |    if (enable && !reset) begin
+       |    if (!reset) begin
        |$callDPIC
        |    end
        |  end
@@ -179,8 +188,9 @@ class TraceDriveCollectorHelper(width: Int)
     with HasExtModuleInline{
   val clock = IO(Input(Clock()))
   val reset = IO(Input(Reset()))
-  val enable = IO(Input(Bool()))
+//  val enable = IO(Input(Bool()))
 
+  val enable = IO(Input(Vec(width, Bool())))
   val pc = IO(Input(Vec(width, UInt(64.W))))
   val inst = IO(Input(Vec(width, UInt(32.W))))
 
@@ -190,22 +200,31 @@ class TraceDriveCollectorHelper(width: Int)
         .map(i => s"input [${size - 1}:0] ${baseName}_${i},")
         .mkString("  ", "\n  ", "\n")
     }
+    def genBoolPort(baseName: String): String = {
+      (0 until width)
+        .map(i => s"input ${baseName}_${i},")
+        .mkString("  ", "\n  ", "\n")
+    }
     def callDPIC: String = {
       (0 until width)
-        .map(i => s"trace_drive_collect_one_instr(pc_${i}, inst_${i});")
+        .map(i => s"""
+                     | if (enable_${i}) begin
+                     |   trace_drive_collect_one_instr(pc_${i}, inst_${i});
+                     | end
+                      """.stripMargin)
         .mkString("      ", "\n      ", "\n")
     }
     s"""
        |module TraceDriveCollectorHelper(
        |  input  clock,
-       |  input  reset,
+       |${genBoolPort("enable")}
        |${genPort(64, "pc")}
        |${genPort(32, "inst")}
-       |  input  enable
+       |  input  reset
        |);
        |
        |  always @(posedge clock) begin
-       |    if (enable && !reset) begin
+       |    if (!reset) begin
        |$callDPIC
        |    end
        |  end
