@@ -279,14 +279,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       // rename single step
       custom.singlestep := csrMod.io.status.singleStepFlag
       // trigger
-      custom.frontend_trigger.tUpdate.valid       := csrMod.io.status.frontendTrigger.tUpdate.valid
-      custom.frontend_trigger.tUpdate.bits.addr   := csrMod.io.status.frontendTrigger.tUpdate.bits.addr
-      custom.frontend_trigger.tUpdate.bits.tdata  := csrMod.io.status.frontendTrigger.tUpdate.bits.tdata
-      custom.frontend_trigger.tEnableVec          := csrMod.io.status.frontendTrigger.tEnableVec
-      custom.mem_trigger.tUpdate.valid            := csrMod.io.status.memTrigger.tUpdate.valid
-      custom.mem_trigger.tUpdate.bits.addr        := csrMod.io.status.memTrigger.tUpdate.bits.addr
-      custom.mem_trigger.tUpdate.bits.tdata       := csrMod.io.status.memTrigger.tUpdate.bits.tdata
-      custom.mem_trigger.tEnableVec               := csrMod.io.status.memTrigger.tEnableVec
+      custom.frontend_trigger := csrMod.io.status.frontendTrigger
+      custom.mem_trigger      := csrMod.io.status.memTrigger
       // virtual mode
       custom.virtMode := csrMod.io.status.privState.V.asBool
   }

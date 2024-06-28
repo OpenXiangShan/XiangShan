@@ -202,6 +202,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   val trapIsInterrupt = io.fromRob.trap.bits.isInterrupt
   val trapIsCrossPageIPF = io.fromRob.trap.bits.crossPageIPFFix
   val triggerCf = io.fromRob.trap.bits.triggerCf
+  val singleStep = io.fromRob.trap.bits.singleStep
   val trapIsHls = io.fromRob.trap.bits.isHls
 
   // debug_intrrupt
@@ -825,153 +826,70 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   /**
    * debug_begin
-   *
-   * ways to entry Dmode：
-   *    1. debug intr(from external debug module)
-   *    2. ebreak inst in nonDmode
-   *    3. trigger fire in nonDmode
-   *    4. single step(debug module set dcsr.step before hart resume)
    */
-  // debug_intr
-  val hasIntr = hasTrap && trapIsInterrupt
-  val hasDebugIntr = hasIntr && intrVec(CSRConst.IRQ_DEBUG)
-
-  // debug_exception_ebreak
-  val hasExp = hasTrap && !trapIsInterrupt
-  val breakPoint = trapVec(ExceptionNO.breakPoint).asBool
-  val hasBreakPoint = hasExp && breakPoint
-  val ebreakEnterDebugMode =
-    (privState.isModeM && dcsr.regOut.EBREAKM.asBool) ||
-      (privState.isModeHS && dcsr.regOut.EBREAKS.asBool) ||
-      (privState.isModeHU && dcsr.regOut.EBREAKU.asBool) ||
-      (privState.isModeVS && dcsr.regOut.EBREAKVS.asBool) ||
-      (privState.isModeVU && dcsr.regOut.EBREAKVU.asBool)
-  val hasDebugEbreakException = hasBreakPoint && ebreakEnterDebugMode
-
-  // debug_exception_trigger
-  val triggerFrontendHitVec = triggerCf.frontendHit
-  val triggerMemHitVec = triggerCf.backendHit
-  val triggerHitVec = triggerFrontendHitVec.asUInt | triggerMemHitVec.asUInt // Todo: update mcontrol.hit
-  val triggerFrontendCanFireVec = triggerCf.frontendCanFire.asUInt
-  val triggerMemCanFireVec = triggerCf.backendCanFire.asUInt
-  val triggerCanFireVec = triggerFrontendCanFireVec | triggerMemCanFireVec
-  val tdata1WireVec = tdata1RegVec.map{ mod => {
-      val tdata1Wire = Wire(new Tdata1Bundle)
-      tdata1Wire := mod.rdata
-      tdata1Wire
-  }}
-  val tdata2WireVec = tdata2RegVec.map{ mod => {
-      val tdata2Wire = Wire(new Tdata2Bundle)
-      tdata2Wire := mod.rdata
-      tdata2Wire
-  }}
-  val mcontrolWireVec = tdata1WireVec.map{ mod => {
-    val mcontrolWire = Wire(new Mcontrol)
-    mcontrolWire := mod.DATA.asUInt
-    mcontrolWire
-  }}
-
-  // More than one triggers can hit at the same time, but only fire one
-  // We select the first hit trigger to fire
-  val triggerFireOH = PriorityEncoderOH(triggerCanFireVec)
-  val triggerFireAction = PriorityMux(triggerFireOH, tdata1WireVec.map(_.getTriggerAction)).asUInt
-  val hasTriggerFire = hasExp && triggerCf.canFire
-  val hasDebugTriggerException = hasTriggerFire && (triggerFireAction === TrigAction.DebugMode.asUInt)
-  val triggerCanFire = hasTriggerFire && (triggerFireAction === TrigAction.BreakpointExp.asUInt) &&
-                          Mux(privState.isModeM && !debugMode, tcontrol.regOut.MTE.asBool, true.B) // todo: Should trigger be fire in dmode?
-
-  // debug_exception_single
-  val hasSingleStep = hasExp && io.fromRob.trap.bits.singleStep
-
-  val hasDebugException = hasDebugEbreakException || hasDebugTriggerException || hasSingleStep
-  val hasDebugTrap = hasDebugException || hasDebugIntr
-
-  trapEntryDEvent.valid                       := hasDebugTrap && !debugMode
-  trapEntryDEvent.in.hasDebugIntr             := hasDebugIntr
-  trapEntryDEvent.in.debugMode                := debugMode
-  trapEntryDEvent.in.hasTrap                  := hasTrap
-  trapEntryDEvent.in.hasSingleStep            := hasSingleStep
-  trapEntryDEvent.in.hasTriggerFire           := hasTriggerFire
-  trapEntryDEvent.in.hasDebugEbreakException  := hasDebugEbreakException
-  trapEntryDEvent.in.breakPoint               := breakPoint
-
-  trapHandleMod.io.in.trapInfo.bits.singleStep  := hasSingleStep
-  trapHandleMod.io.in.trapInfo.bits.triggerFire := triggerCanFire
-
-  intrMod.io.in.debugMode := debugMode
-  intrMod.io.in.debugIntr := debugIntr
-  intrMod.io.in.dcsr      := dcsr.rdata.asUInt
-
-  val tselect1H = UIntToOH(tselect.rdata.asUInt, TriggerNum).asBools
-  val chainVec = mcontrolWireVec.map(_.CHAIN.asBool)
-  val newTriggerChainVec = tselect1H.zip(chainVec).map{case(a, b) => a | b}
-  val newTriggerChainIsLegal = TriggerUtil.TriggerCheckChainLegal(newTriggerChainVec, TriggerChainMaxLength)
 
   val tdata1Update  = tdata1.w.wen
   val tdata2Update  = tdata2.w.wen
-  val triggerUpdate = tdata1Update || tdata2Update
+  val tdata1Vec = tdata1RegVec.map{ mod => {
+    val tdata1Wire = Wire(new Tdata1Bundle)
+    tdata1Wire := mod.rdata
+    tdata1Wire
+  }}
+
+  val debugMod = Module(new Debug)
+  debugMod.io.in.trapInfo.valid            := hasTrap
+  debugMod.io.in.trapInfo.bits.trapVec     := trapVec.asUInt
+  debugMod.io.in.trapInfo.bits.intrVec     := intrVec
+  debugMod.io.in.trapInfo.bits.isInterrupt := trapIsInterrupt
+  debugMod.io.in.trapInfo.bits.triggerCf   := triggerCf
+  debugMod.io.in.trapInfo.bits.singleStep  := singleStep
+  debugMod.io.in.privState                 := privState
+  debugMod.io.in.debugMode                 := debugMode
+  debugMod.io.in.dcsr                      := dcsr.regOut
+  debugMod.io.in.tcontrol                  := tcontrol.regOut
+  debugMod.io.in.tselect                   := tselect.regOut
+  debugMod.io.in.tdata1Vec                 := tdata1Vec
+  debugMod.io.in.tdata1Selected            := tdata1.rdata
+  debugMod.io.in.tdata2Selected            := tdata2.rdata
+  debugMod.io.in.tdata1Update              := tdata1Update
+  debugMod.io.in.tdata2Update              := tdata2Update
+  debugMod.io.in.tdata1Wdata               := wdata
+
+  trapEntryDEvent.valid                       := debugMod.io.out.hasDebugTrap && !debugMode
+  trapEntryDEvent.in.hasDebugIntr             := debugMod.io.out.hasDebugIntr
+  trapEntryDEvent.in.debugMode                := debugMode
+  trapEntryDEvent.in.hasTrap                  := hasTrap
+  trapEntryDEvent.in.hasSingleStep            := debugMod.io.out.hasSingleStep
+  trapEntryDEvent.in.hasTriggerFire           := debugMod.io.out.hasTriggerFire
+  trapEntryDEvent.in.hasDebugEbreakException  := debugMod.io.out.hasDebugEbreakException
+  trapEntryDEvent.in.breakPoint               := debugMod.io.out.breakPoint
+
+  trapHandleMod.io.in.trapInfo.bits.singleStep  := debugMod.io.out.hasSingleStep
+  trapHandleMod.io.in.trapInfo.bits.triggerFire := debugMod.io.out.triggerCanFire
+
+  intrMod.io.in.debugMode := debugMode
+  intrMod.io.in.debugIntr := debugIntr
+  intrMod.io.in.dcsr      := dcsr.regOut
 
   tdata1RegVec.foreach { mod =>
     mod match {
       case m: HasdebugModeBundle =>
         m.debugMode := debugMode
-        m.chainable := newTriggerChainIsLegal
+        m.chainable := debugMod.io.out.newTriggerChainIsLegal
       case _ =>
     }
   }
   tdata1RegVec.zip(tdata2RegVec).zipWithIndex.map { case ((mod1, mod2), idx) => {
-      mod1.w.wen    := tdata1Update && (tselect.rdata === idx.U)
-      mod1.w.wdata  := wdata
-      mod2.w.wen    := tdata2Update && (tselect.rdata === idx.U)
-      mod2.w.wdata  := wdata
-    }
-  }
+    mod1.w.wen    := tdata1Update && (tselect.rdata === idx.U)
+    mod1.w.wdata  := wdata
+    mod2.w.wen    := tdata2Update && (tselect.rdata === idx.U)
+    mod2.w.wdata  := wdata
+  }}
 
-  val tdata1Wdata = Wire(new Tdata1Bundle)
-  tdata1Wdata := wdata
-  val mcontrolWdata = Wire(new Mcontrol)
-  mcontrolWdata := tdata1Wdata.DATA.asUInt
-  val tdata1TypeWdata = tdata1Wdata.TYPE
+  triggerFrontendChange := debugMod.io.out.triggerFrontendChange
 
-  val tdata1Selected = Wire(new Tdata1Bundle)
-  tdata1Selected := tdata1.rdata.asUInt
-  val mcontrolSelected = Wire(new Mcontrol)
-  mcontrolSelected := tdata1Selected.DATA.asUInt
-  val tdata2Selected = Wire(new Tdata2Bundle)
-  tdata2Selected := tdata2.rdata.asUInt
-
-  val frontendTriggerUpdate =
-    tdata1Update && tdata1TypeWdata.isLegal && mcontrolWdata.isFetchTrigger ||
-      mcontrolSelected.isFetchTrigger && triggerUpdate
-
-  val memTriggerUpdate =
-    tdata1Update && tdata1TypeWdata.isLegal && mcontrolWdata.isMemAccTrigger ||
-      mcontrolSelected.isMemAccTrigger && triggerUpdate
-
-  val triggerEnableVec = tdata1WireVec.zip(mcontrolWireVec).map { case(tdata1, mcontrol) =>
-    tdata1.TYPE.isLegal && (
-      mcontrol.M && privState.isModeM  ||
-        mcontrol.S && privState.isModeHS ||
-        mcontrol.U && privState.isModeHU)
-  }
-
-  val fetchTriggerEnableVec = triggerEnableVec.zip(mcontrolWireVec).map {
-    case (tEnable, mod) => tEnable && mod.isFetchTrigger
-  }
-  val memAccTriggerEnableVec = triggerEnableVec.zip(mcontrolWireVec).map {
-    case (tEnable, mod) => tEnable && mod.isMemAccTrigger
-  }
-
-  triggerFrontendChange := frontendTriggerUpdate
-
-  io.status.frontendTrigger.tUpdate.valid       := RegNext(RegNext(frontendTriggerUpdate))
-  io.status.frontendTrigger.tUpdate.bits.addr   := tselect.rdata.asUInt
-  io.status.frontendTrigger.tUpdate.bits.tdata.GenTdataDistribute(tdata1Selected, tdata2Selected)
-  io.status.frontendTrigger.tEnableVec          := fetchTriggerEnableVec
-  io.status.memTrigger.tUpdate.valid            := RegNext(RegNext(memTriggerUpdate))
-  io.status.memTrigger.tUpdate.bits.addr        := tselect.rdata.asUInt
-  io.status.memTrigger.tUpdate.bits.tdata.GenTdataDistribute(tdata1Selected, tdata2Selected)
-  io.status.memTrigger.tEnableVec               := memAccTriggerEnableVec
+  io.status.frontendTrigger := debugMod.io.out.frontendTrigger
+  io.status.memTrigger      := debugMod.io.out.memTrigger
   /**
    * debug_end
    */
