@@ -599,8 +599,8 @@ object Bundles {
           s"cancelVecSize: {og0: ${og0CancelOH.getWidth}, og1: ${og1CancelOH.getWidth}}"
         )
         val l1Cancel: Bool = l1ExuOH.get.zip(srcTimer.get).map {
-          case(exuOH: UInt, srcTimer: UInt) =>
-            (exuOH & og0CancelOH).orR && srcTimer === 1.U
+          case(exuOH: Vec[Bool], srcTimer: UInt) =>
+            (exuOH.asUInt & og0CancelOH).orR && srcTimer === 1.U
         }.reduce(_ | _)
         l1Cancel
       } else {
