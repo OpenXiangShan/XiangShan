@@ -600,9 +600,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.uopwriteback.valid               := (state === s_finish) && distanceBetween(enqPtr, deqPtr) =/= 0.U
   io.uopwriteback.bits.uop            := uopq(deqPtr.value).uop
   io.uopwriteback.bits.uop.vpu        := instMicroOp.uop.vpu
-  io.uopwriteback.bits.uop.exceptionVec := Mux((state === s_finish) && (stateNext === s_idle),
-                                                instMicroOp.uop.exceptionVec,
-                                                0.U.asTypeOf(ExceptionVec())) // only last uop will writeback exception
+  io.uopwriteback.bits.uop.exceptionVec := instMicroOp.uop.exceptionVec
   io.uopwriteback.bits.mask.get       := instMicroOp.mask
   io.uopwriteback.bits.data           := data(deqPtr.value)
   io.uopwriteback.bits.vdIdx.get      := vdIdxInField
@@ -631,6 +629,6 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.exceptionInfo.bits.vstart        := instMicroOp.vstart
   io.exceptionInfo.bits.vaddr         := instMicroOp.exceptionvaddr
   io.exceptionInfo.bits.vl            := instMicroOp.vl
-  io.exceptionInfo.valid              := (state === s_finish) && (stateNext === s_idle) && instMicroOp.uop.exceptionVec.asUInt.orR
+  io.exceptionInfo.valid              := (state === s_finish) && instMicroOp.uop.exceptionVec.asUInt.orR && distanceBetween(enqPtr, deqPtr) =/= 0.U
 }
 
