@@ -59,8 +59,7 @@ class TracePredictChecker(implicit p: Parameters) extends TraceModule
   }
   val remaskIdx = ParallelPriorityEncoder(remaskFault)
   val needRemask = Cat(remaskFault).orR
-  val AllTrueMask = -1.S(PredictWidth.W).asUInt
-  val fixedRange = Mux(needRemask, AllTrueMask >> (PredictWidth.U - (remaskIdx + 1.U)), predRange)
+  val fixedRange = predRange.asUInt & (Fill(PredictWidth, !needRemask) | Fill(PredictWidth, 1.U(1.W)) >> ~remaskIdx)
 
   io.out.stage1Out.fixedRange := fixedRange.asTypeOf(Vec(PredictWidth, Bool()))
   io.out.stage1Out.fixedTaken := VecInit((0 until PredictWidth).map(i => {
