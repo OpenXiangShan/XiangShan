@@ -235,8 +235,9 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   }
 
   val s1_SRAM_valid = s0_fire_r || RegNext(s1_need_meta && toMeta.ready)
+  val s1_MSHR_valid = fromMSHR.valid && !fromMSHR.bits.corrupt
   val s1_waymasks   = WireInit(VecInit(Seq.fill(PortNumber)(0.U(nWays.W))))
-  val s1_waymasks_r = RegNext(s1_waymasks)
+  val s1_waymasks_r = RegEnable(s1_waymasks, 0.U.asTypeOf(s1_waymasks), s1_SRAM_valid || s1_MSHR_valid)
   (0 until PortNumber).foreach{i =>
     val old_waymask = Mux(s1_SRAM_valid, s1_SRAM_waymasks(i), s1_waymasks_r(i))
     s1_waymasks(i) := update_waymask(old_waymask, s1_req_vSetIdx(i), s1_req_ptags(i))
