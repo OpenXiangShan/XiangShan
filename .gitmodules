@@ -22,3 +22,6 @@
 [submodule "coupledL2"]
 	path = coupledL2
 	url = https://github.com/OpenXiangShan/coupledL2
+[submodule "openLLC"]
+	path = openLLC
+	url = https://github.com/OpenXiangShan/OpenLLC.git

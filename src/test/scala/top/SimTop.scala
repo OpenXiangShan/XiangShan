@@ -37,9 +37,11 @@ class SimTop(implicit p: Parameters) extends Module {
   // so that we can re-use this SimTop for any generated Verilog RTL.
   dontTouch(soc.io)
 
-  l_soc.module.dma.get <> 0.U.asTypeOf(l_soc.module.dma.get)
+  if (!l_soc.module.dma.isEmpty) {
+    l_soc.module.dma.get <> 0.U.asTypeOf(l_soc.module.dma.get)
+  }
 
-  val l_simMMIO = LazyModule(new SimMMIO(l_soc.socMisc.get.peripheralNode.in.head._2))
+  val l_simMMIO = LazyModule(new SimMMIO(l_soc.nocMisc.get.peripheralNode.in.head._2))
   val simMMIO = Module(l_simMMIO.module)
   l_simMMIO.io_axi4.elements.head._2 <> soc.peripheral.get.viewAs[AXI4Bundle]
 
