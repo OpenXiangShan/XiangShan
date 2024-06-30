@@ -102,6 +102,9 @@ class BusPerfMonitorImp(outer: BusPerfMonitor, name: String, stat_latency: Boole
 
   if (stat_latency) {
     val nrEdge = outer.node.in.length.toInt
+    if (outer.node.in.isEmpty) {
+      println(s"name = $name")
+    }
     val edgeIn = outer.node.in.head._2
 
     class RecordEntry()(implicit p: Parameters) extends Bundle {
