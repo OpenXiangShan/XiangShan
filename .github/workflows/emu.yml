@@ -62,9 +62,14 @@ jobs:
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci linux-hello-opensbi 2> perf.log
           cat perf.log | sort
-      - name: check CHI version verilog
+      - name: build KunminghuV2Config Release emu
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate --config KunminghuV2Config --release --mfc
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
+            --threads 8 --config KunminghuV2Config --release --mfc
+      - name: run KunminghuV2Config - Linux
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci linux-hello-opensbi 2> perf.log
+          cat perf.log | sort
   emu-basics:
     runs-on: bosc
     needs: changes
