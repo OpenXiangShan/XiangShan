@@ -214,16 +214,17 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   /**
     ******************************************************************************
-    * update waymask
+    * update waymask according to MSHR update data
     ******************************************************************************
     */
   def update_waymask(mask: UInt, vSetIdx: UInt, ptag: UInt): UInt = {
     require(mask.getWidth == nWays)
     val new_mask  = WireInit(mask)
-    val vset_same = (fromMSHR.bits.vSetIdx === vSetIdx) && !fromMSHR.bits.corrupt && fromMSHR.valid
+    val valid = fromMSHR.valid && !fromMSHR.bits.corrupt
+    val vset_same = fromMSHR.bits.vSetIdx === vSetIdx
     val ptag_same = getPhyTagFromBlk(fromMSHR.bits.blkPaddr) === ptag
     val way_same  = fromMSHR.bits.waymask === mask
-    when(vset_same) {
+    when(valid && vset_same) {
       when(ptag_same) { 
         new_mask := fromMSHR.bits.waymask
       }.elsewhen(way_same) {
@@ -233,11 +234,13 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
     new_mask
   }
 
-  val s1_waymasks_r = RegInit(VecInit(Seq.fill(PortNumber)(0.U(nWays.W))))
   val s1_SRAM_valid = s0_fire_r || RegNext(s1_need_meta && toMeta.ready)
-  val s1_waymasks   = Mux(s1_SRAM_valid, s1_SRAM_waymasks, s1_waymasks_r)
+  val s1_MSHR_valid = fromMSHR.valid && !fromMSHR.bits.corrupt
+  val s1_waymasks   = WireInit(VecInit(Seq.fill(PortNumber)(0.U(nWays.W))))
+  val s1_waymasks_r = RegEnable(s1_waymasks, 0.U.asTypeOf(s1_waymasks), s1_SRAM_valid || s1_MSHR_valid)
   (0 until PortNumber).foreach{i =>
-    s1_waymasks_r(i) := update_waymask(s1_waymasks(i), s1_req_vSetIdx(i), s1_req_ptags(i))
+    val old_waymask = Mux(s1_SRAM_valid, s1_SRAM_waymasks(i), s1_waymasks_r(i))
+    s1_waymasks(i) := update_waymask(old_waymask, s1_req_vSetIdx(i), s1_req_ptags(i))
   }
 
   /**
