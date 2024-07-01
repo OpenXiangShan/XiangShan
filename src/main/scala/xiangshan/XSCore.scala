@@ -163,10 +163,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.lqCanAccept := memBlock.io.mem_to_ooo.lsqio.lqCanAccept
   backend.io.mem.sqCanAccept := memBlock.io.mem_to_ooo.lsqio.sqCanAccept
   backend.io.fenceio.sbuffer.sbIsEmpty := memBlock.io.mem_to_ooo.sbIsEmpty
-  // Todo: remove it
-  backend.io.fenceio.disableSfence := DontCare
-  backend.io.fenceio.disableHfencev := DontCare
-  backend.io.fenceio.disableHfenceg := DontCare
 
   backend.io.perf.frontendInfo := frontend.io.frontendInfo
   backend.io.perf.memInfo := memBlock.io.memInfo

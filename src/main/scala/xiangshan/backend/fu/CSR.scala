@@ -105,12 +105,6 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   // Debug Mode
   // val singleStep = Output(Bool())
   val debugMode = Output(Bool())
-  // to Fence to disable sfence
-  val disableSfence = Output(Bool())
-  // to Fence to disable hfence.gvma
-  val disableHfenceg = Output(Bool())
-  // to Fence to disable hfence.vvma
-  val disableHfencev = Output(Bool())
   // Custom microarchiture ctrl signal
   val customCtrl = Output(new CustomCSRCtrlIO)
   // distributed csr write
@@ -992,9 +986,9 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val accessPermitted = !(addr === Satp.U && tvmNotPermit)
   val vtvmNotPermit = (privilegeMode === ModeS && virtMode && hstatusStruct.vtvm.asBool)
   val vaccessPermitted = !(addr === Vsatp.U && vtvmNotPermit)
-  csrio.disableSfence := (tvmNotPermit || !virtMode && privilegeMode < ModeS) || (vtvmNotPermit || virtMode && privilegeMode < ModeS)
-  csrio.disableHfenceg := !((!virtMode && privilegeMode === ModeS && !mstatusStruct.tvm.asBool) || (privilegeMode === ModeM)) // only valid in HS and mstatus.tvm == 0 or in M
-  csrio.disableHfencev :=  !(privilegeMode === ModeM || (!virtMode && privilegeMode === ModeS))
+//  csrio.disableSfence := (tvmNotPermit || !virtMode && privilegeMode < ModeS) || (vtvmNotPermit || virtMode && privilegeMode < ModeS)
+//  csrio.disableHfenceg := !((!virtMode && privilegeMode === ModeS && !mstatusStruct.tvm.asBool) || (privilegeMode === ModeM)) // only valid in HS and mstatus.tvm == 0 or in M
+//  csrio.disableHfencev :=  !(privilegeMode === ModeM || (!virtMode && privilegeMode === ModeS))
 
   // general CSR wen check
   val wen = valid && CSROpType.isCsrAccess(func) && ((addr=/=Satp.U && addr =/= Vsatp.U) || satpLegalMode)

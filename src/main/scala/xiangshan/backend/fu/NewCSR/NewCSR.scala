@@ -134,8 +134,6 @@ class NewCSR(implicit val p: Parameters) extends Module
       val privState = new PrivState
       val interrupt = Bool()
       val wfiEvent = Bool()
-      val tvm = Bool()
-      val vtvm = Bool()
       // fp
       val fpState = new Bundle {
         val off = Bool()
@@ -730,10 +728,6 @@ class NewCSR(implicit val p: Parameters) extends Module
   val triggerFrontendChange = Wire(Bool())
   val flushPipe = resetSatp || frmChange || vxrmChange || triggerFrontendChange || floatStatusOnOff || vectorStatusOnOff
 
-  // fence
-  val tvm = mstatus.regOut.TVM.asBool
-  val vtvm = hstatus.regOut.VTVM.asBool
-
   private val rdata = Mux1H(csrRwMap.map { case (id, (_, rdata)) =>
     if (vsMapS.contains(id)) {
       ((isModeVS && addr === vsMapS(id).U) || !isModeVS && addr === id.U) -> rdata
@@ -828,8 +822,6 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.status.wfiEvent := debugIntr || (mie.rdata.asUInt & mip.rdata.asUInt).orR
   io.status.debugMode := debugMode
   io.status.singleStepFlag := !debugMode && dcsr.regOut.STEP
-  io.status.tvm := tvm
-  io.status.vtvm := vtvm
 
   /**
    * debug_begin

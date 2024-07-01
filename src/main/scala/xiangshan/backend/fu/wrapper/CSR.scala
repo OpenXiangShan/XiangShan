@@ -240,11 +240,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   csrOut.debugMode := csrMod.io.status.debugMode
 
-  // Todo: remove disableXXfence bundle, since all fence checks have been done in decode
-  csrOut.disableSfence  := false.B
-  csrOut.disableHfencev := false.B
-  csrOut.disableHfenceg := false.B
-
   csrOut.customCtrl match {
     case custom =>
       custom.l1I_pf_enable            := csrMod.io.status.custom.l1I_pf_enable
