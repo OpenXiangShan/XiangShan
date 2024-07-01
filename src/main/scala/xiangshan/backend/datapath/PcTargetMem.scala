@@ -34,7 +34,6 @@ class PcTargetMemImp(override val wrapper: PcTargetMem)(implicit p: Parameters, 
 
   private val newestEn: Bool = io.fromFrontendFtq.newest_entry_en
   private val newestTarget: UInt = io.fromFrontendFtq.newest_entry_target
-
   for (i <- 0 until params.numTargetReadPort) {
     val targetPtr = io.toDataPath.fromDataPathFtqPtr(i)
     // target pc stored in next entry
