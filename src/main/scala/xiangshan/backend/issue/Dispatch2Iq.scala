@@ -856,9 +856,11 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
   //  1) The lsq has enough entris.
   //  2) The number of flows accumulated does not exceed VecMemDispatchMaxNumber.
   //  3) Vector instructions other than 'unit-stride' can only be issued on the first port.
-  private val allowDispatch = Wire(Vec(numLsElem.length, Bool()))
+  private val allowDispatch = Wire(Vec(enqLsqIO.req.length, Bool()))
+
   for (index <- allowDispatch.indices) {
-    val flowTotal = conserveFlows.take(index + 1).reduce(_ +& _)
+    val flowTotal = Wire(UInt(log2Up(VirtualLoadQueueMaxStoreQueueSize + 1).W))
+    flowTotal := conserveFlows.take(index + 1).reduce(_ +& _)
     if(index == 0){
       when(isStoreVec(index) || isVStoreVec(index)) {
         allowDispatch(index) := sqFreeCount > flowTotal
