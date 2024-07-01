@@ -178,7 +178,7 @@ trait MachineLevel { self: NewCSR =>
   })
     .setAddr(CSRs.mepc)
 
-  val mcause = Module(new CSRModule("Mcause", new CauseBundle) with TrapEntryMEventSinkBundle)
+  val mcause = Module(new CSRModule("Mcause", new McauseBundle) with TrapEntryMEventSinkBundle)
     .setAddr(CSRs.mcause)
 
   val mtval = Module(new CSRModule("Mtval") with TrapEntryMEventSinkBundle)
@@ -534,6 +534,11 @@ class MvienBundle extends InterruptEnableBundle {
 class MvipBundle extends InterruptPendingBundle {
   this.getHS.foreach(_.setRW().withReset(0.U))
   this.getLocal.foreach(_.setRW().withReset(0.U))
+}
+
+class McauseBundle extends CauseBundle {
+  this.Interrupt.withReset(0.U)
+  this.ExceptionCode.withReset(0.U)
 }
 
 class Epc extends CSRBundle {
