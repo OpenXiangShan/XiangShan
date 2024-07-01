@@ -593,7 +593,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val henvcfg = RegInit(UInt(XLEN.W), 0.U)
   val hgatp = RegInit(UInt(XLEN.W), 0.U)
   val hgatpMask = Cat("h8".U(Hgatp_Mode_len.W), satp_part_wmask(Hgatp_Vmid_len, VmidLength), satp_part_wmask(Hgatp_Addr_len, PAddrBits-12))
-  val htimedelta = RegInit(UInt(XLEN.W), 0.U)
+  // val htimedelta = RegInit(UInt(XLEN.W), 0.U)
   val hcounteren = RegInit(UInt(XLEN.W), 0.U)
   // Currently, XiangShan don't support Unprivileged Counter/Timers CSRs ("Zicntr" and "Zihpm")
   val hcounterenMask = 0.U(XLEN.W)
@@ -877,7 +877,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     MaskedRegMap(Hgatp, hgatp, hgatpMask, MaskedRegMap.NoSideEffect, hgatpMask),
 
     //--- Hypervisor Counter/Timer Virtualization Registers ---
-    MaskedRegMap(Htimedelta, htimedelta),
+    // MaskedRegMap(Htimedelta, htimedelta),
 
     //--- Virtual Supervisor Registers ---
     MaskedRegMap(Vsstatus, vsstatus, rmask = sstatusRmask, wmask = sstatusWmask, wfn = vsstatusUpdateSideEffect),
