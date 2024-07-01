@@ -21,6 +21,29 @@ import org.chipsalliance.cde.config.Parameters
 import utility.{CircularQueuePtr, HasCircularQueuePtrHelper}
 import utils.XSError
 
+class TracePredInfoBundle extends Bundle {
+  val fixTarget = UInt(64.W)
+  val taken = Bool()
+}
+
+class TraceInstrBundle(implicit p: Parameters) extends TraceBundle {
+  val InstID = UInt(64.W)
+  val pcVA = UInt(TracePCWidth.W)
+  val pcPA = UInt(TracePCWidth.W)
+  val memoryAddrVA = UInt(64.W)
+  val memoryAddrPA = UInt(64.W)
+  val target = UInt(64.W)
+  val inst = UInt(TraceInstrWidth.W)
+  val memoryType = UInt(8.W)
+  val memorySize = UInt(8.W)
+  val branchType = UInt(8.W)
+  val branchTaken = UInt(8.W)
+
+  // use for cfi fix
+  // we need to know the bpu result to know if the branch should redirect or not
+//  val bpuPredInfo = new TracePredInfoBundle
+}
+
 class TraceReaderIO(implicit p: Parameters) extends TraceBundle {
   // traceInst should always be valid
   val traceInsts = Output(Vec(PredictWidth, new TraceInstrBundle()))
@@ -72,6 +95,7 @@ class TraceReader(implicit p: Parameters) extends TraceModule
     when (data.pcPA === 0.U) {
       traceBuffer(ptr.value).pcPA := data.pcVA
     }
+//    traceBuffer(ptr.value).bpuPredInfo := 0.U.asTypeOf(new TraceInstrBundle().bpuPredInfo)
   }
 
   traceReaderHelper.clock := clock
