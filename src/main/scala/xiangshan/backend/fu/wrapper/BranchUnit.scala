@@ -52,7 +52,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
         _.ftqIdx := io.in.bits.ctrl.ftqIdx.get,
         _.ftqOffset := io.in.bits.ctrl.ftqOffset.get,
         _.cfiUpdate.isMisPred := TraceRTLChoose(dataModule.io.mispredict,
-          io.in.bits.ctrl.traceInfo.branchTaken(0) =/= dataModule.io.taken,
+          io.in.bits.ctrl.traceInfo.branchTaken(0) =/= io.in.bits.ctrl.predictInfo.get.taken,
         ),
         _.cfiUpdate.taken := TraceRTLChoose(dataModule.io.taken, io.in.bits.ctrl.traceInfo.branchTaken(0)),
         _.cfiUpdate.predTaken := dataModule.io.pred_taken,
