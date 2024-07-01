@@ -626,6 +626,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
         _.instRange := f3_instr_range,
         _.ftqOffset := f3_ftq_req.ftqOffset,
       ),
+      _.fromTraceDriver.specifyField(
+        _.endWithCFI := traceDriver.io.out.endWithCFI,
+      )
     )
     traceDriver.io.specifyField(
       _.fire := f3_fire,
