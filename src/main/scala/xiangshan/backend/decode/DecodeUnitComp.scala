@@ -208,6 +208,9 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(1).ldest := Vl_IDX.U
         csBundle(1).vecWen := false.B
         csBundle(1).vlWen := true.B
+        // vsetvl flush pipe and block backward
+        csBundle(1).flushPipe := Mux(VSETOpType.isVsetvl(latchedInst.fuOpType), true.B, false.B)
+        csBundle(1).blockBackward := Mux(VSETOpType.isVsetvl(latchedInst.fuOpType), true.B, false.B)
         when(VSETOpType.isVsetvli(latchedInst.fuOpType) && dest === 0.U && src1 === 0.U) {
           // write nothing, uop0 is a nop instruction
           csBundle(0).rfWen := false.B
