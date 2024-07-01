@@ -229,6 +229,7 @@ class FtqToCtrlIO(implicit p: Parameters) extends XSBundle with HasBackendRedire
   val newest_entry_ptr = Output(new FtqPtr)
 }
 
+
 class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedirectInfo with HasBPUParameter {
   val io = IO(new Bundle {
     val start_addr = Input(UInt(VAddrBits.W))
