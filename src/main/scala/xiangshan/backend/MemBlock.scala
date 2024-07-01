@@ -1458,7 +1458,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   (0 until VlduCnt).foreach{i=>
     if (i == 0){ // for segmentUnit, segmentUnit use port0 writeback
       io.mem_to_ooo.writebackVldu(i).valid := vlMergeBuffer.io.uopWriteback(i).valid || vsMergeBuffer(i).io.uopWriteback.head.valid || vSegmentUnit.io.uopwriteback.valid
-      io.mem_to_ooo.writebackVldu(i).bits := Mux1H(Seq(
+      io.mem_to_ooo.writebackVldu(i).bits := PriorityMux(Seq(
         vSegmentUnit.io.uopwriteback.valid          -> vSegmentUnit.io.uopwriteback.bits,
         vlMergeBuffer.io.uopWriteback(i).valid      -> vlMergeBuffer.io.uopWriteback(i).bits,
         vsMergeBuffer(i).io.uopWriteback.head.valid -> vsMergeBuffer(i).io.uopWriteback.head.bits,
@@ -1468,7 +1468,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       vSegmentUnit.io.uopwriteback.ready := io.mem_to_ooo.writebackVldu(i).ready
     } else {
       io.mem_to_ooo.writebackVldu(i).valid := vlMergeBuffer.io.uopWriteback(i).valid || vsMergeBuffer(i).io.uopWriteback.head.valid
-      io.mem_to_ooo.writebackVldu(i).bits := Mux1H(Seq(
+      io.mem_to_ooo.writebackVldu(i).bits := PriorityMux(Seq(
         vlMergeBuffer.io.uopWriteback(i).valid -> vlMergeBuffer.io.uopWriteback(i).bits,
         vsMergeBuffer(i).io.uopWriteback.head.valid -> vsMergeBuffer(i).io.uopWriteback.head.bits,
       ))
