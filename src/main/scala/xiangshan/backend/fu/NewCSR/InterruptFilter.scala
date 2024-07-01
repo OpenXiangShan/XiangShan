@@ -280,7 +280,9 @@ class InterruptFilter extends Module {
 
   val intrVec = VecInit((mIRVec | hsIRVec | vsMapHostIRVec | debugInterupt).asBools.map(IR => IR && !disableInterrupt)).asUInt
   // delay at least 6 cycles to maintain the atomic of sret/mret
-  val delayedIntrVec = DelayN(intrVec, 6)
+  val intrVecReg = RegInit(0.U(64.W))
+  intrVecReg := intrVec
+  val delayedIntrVec = DelayN(intrVecReg, 5)
 
   io.out.interruptVec.valid := delayedIntrVec.orR
   io.out.interruptVec.bits := delayedIntrVec
