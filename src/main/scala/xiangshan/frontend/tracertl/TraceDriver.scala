@@ -29,12 +29,14 @@ class TraceDriverIO(implicit p: Parameters) extends TraceBundle {
   val fire = Input(Bool())
   val traceInsts = Input(Vec(PredictWidth, Valid(new TraceInstrBundle())))
   val traceRange = Input(UInt(PredictWidth.W))
+  val predInfo = Input(new TracePredictInfo())
 
   val out = new TraceDriverOutput()
 }
 
 class TraceDriver(implicit p: Parameters) extends TraceModule {
   val io = IO(new TraceDriverIO())
+  dontTouch(io)
 
   val traceValid = VecInit(io.traceInsts.map(_.valid)).asUInt
   io.out.block := io.out.recv.bits.instNum === 0.U // may be we need more precise control signal

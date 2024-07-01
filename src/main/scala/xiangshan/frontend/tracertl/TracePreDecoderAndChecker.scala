@@ -57,6 +57,7 @@ class TracePreDecodeAndCheckerIO(implicit p: Parameters) extends TraceBundle {
 class TracePreDecodeAndChecker(implicit p: Parameters) extends TraceModule
   with TraceParams {
   val io = IO(new TracePreDecodeAndCheckerIO)
+  dontTouch(io)
 
   val preDecoder = Module(new TracePreDecoder)
   val predChecker = Module(new TracePredictChecker)
@@ -99,15 +100,5 @@ class TracePreDecodeAndChecker(implicit p: Parameters) extends TraceModule
     _.checker := predChecker.io.out,
     _.traceChecker := traceChecker.io.out,
     _.traceAlignInsts := traceAligner.io.cutInsts,
-//    _.traceExpandInsts.zip(traceAligner.io.cutInsts).foreach {
-//      case (expand, cut) => expand := expandInst(cut.bits.inst)
-//    }
   )
-
-//  def expandInst(inst: UInt): UInt = {
-//    require(inst.getWidth == 32)
-//    val expander = Module(new RVCExpander)
-//    expander.io.in := inst
-//    expander.io.out.bits
-//  }
 }

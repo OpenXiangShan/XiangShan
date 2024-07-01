@@ -31,8 +31,11 @@ class TracePredictChecker(implicit p: Parameters) extends TraceModule
     val traceInsts = Input(Vec(PredictWidth, Valid(new TraceInstrBundle())))
     val predictInfo = Input(new TracePredictInfo)
     val preDecode = Input(new PreDecodeResp)
+
+//    val bpuPredInfo = Output(Vec(PredictWidth, new TracePredInfoBundle))
     val out = Output(new PredCheckerResp)
   })
+  dontTouch(io)
 
   val pds = io.preDecode.pd
   val pcs = io.traceInsts.map(_.bits.pcVA)

@@ -40,6 +40,7 @@ class TraceCheckerIO(implicit p: Parameters) extends TraceBundle {
 
 class TraceChecker(implicit p: Parameters) extends TraceModule {
   val io = IO(new TraceCheckerIO)
+  dontTouch(io)
 
   val predRange = io.predictInfo.instRange
   val checkRange = io.predChecker.stage1Out.fixedRange.asUInt
