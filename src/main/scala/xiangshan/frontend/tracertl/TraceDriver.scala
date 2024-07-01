@@ -18,11 +18,15 @@ package xiangshan.frontend.tracertl
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.ParallelPosteriorityMux
 
 class TraceDriverOutput(implicit p: Parameters) extends TraceBundle {
   // when block true, the fetch is at the wrong path, should block ifu-go, ibuffer-recv
   val block = Output(Bool())
   val recv = ValidIO(new TraceRecvInfo())
+
+  // to reset lastHalfValid(concedate2B)
+  val endWithCFI = Output(Bool())
 }
 
 class TraceDriverIO(implicit p: Parameters) extends TraceBundle {
@@ -42,4 +46,8 @@ class TraceDriver(implicit p: Parameters) extends TraceModule {
   io.out.block := io.out.recv.bits.instNum === 0.U // may be we need more precise control signal
   io.out.recv.bits.instNum := PopCount(io.traceRange & traceValid)
   io.out.recv.valid := io.fire
+
+  io.out.endWithCFI := ParallelPosteriorityMux(io.traceRange & traceValid, io.traceInsts.map(x =>
+    (x.bits.branchType =/= 0.U) && x.bits.branchTaken(0)
+  ))
 }

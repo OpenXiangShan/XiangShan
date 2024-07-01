@@ -18,6 +18,7 @@ package xiangshan.frontend.tracertl
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.ParallelPosteriorityMux
 import xiangshan.frontend.tracertl.ChiselRecordForField._
 import xiangshan.frontend.{PreDecodeResp, PredCheckerResp}
 
@@ -35,6 +36,10 @@ class TraceFromIFU(implicit p: Parameters) extends TraceBundle {
   val valid = Bool()
 }
 
+class TraceFromDriver(implicit p: Parameters) extends TraceBundle {
+  val endWithCFI = Bool()
+}
+
 class TracePreDecodeAndCheckerIO(implicit p: Parameters) extends TraceBundle {
   // IFU info
   val fromIFU = Input(new TraceFromIFU())
@@ -42,6 +47,8 @@ class TracePreDecodeAndCheckerIO(implicit p: Parameters) extends TraceBundle {
   val traceInsts = Input(Vec(PredictWidth, new TraceInstrBundle()))
   // From BPU and IFU
   val predInfo = Input(new TracePredictInfo())
+
+  val fromTraceDriver = Input(new TraceFromDriver())
 
   // Pre-decoder: normal predecoder
   val predecoder = Output(new PreDecodeResp())
@@ -64,10 +71,13 @@ class TracePreDecodeAndChecker(implicit p: Parameters) extends TraceModule
   val traceChecker = Module(new TraceChecker)
   val traceAligner = Module(new TraceAlignToIFUCut)
 
-  val lastFetchRedirect = RegEnable(io.fromIFU.redirect, false.B, io.fromIFU.fire || io.fromIFU.redirect)
-  val lastFetchTakenMore2B = RegEnable((traceAligner.io.instRangeTaken2B || traceAligner.io.traceRangeTaken2B), false.B, io.fromIFU.fire)
-
-  val concede2Bytes = !lastFetchRedirect && lastFetchTakenMore2B
+  val concede2Bytes = RegEnable(
+    !io.fromIFU.redirect &&
+    !io.fromTraceDriver.endWithCFI &&
+    (traceAligner.io.instRangeTaken2B || traceAligner.io.traceRangeTaken2B),
+    io.fromIFU.fire || io.fromIFU.redirect
+  )
+  // !lastFetchRedirect && lastFetchTakenMore2B && !lastEndWithCFI
   val traceInstIFUCut = traceAligner.io.cutInsts
 
   traceAligner.io.specifyField(
