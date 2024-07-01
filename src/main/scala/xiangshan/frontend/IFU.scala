@@ -631,6 +631,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
       _.fire := f3_fire,
       _.traceInsts := tracePDaC.io.traceAlignInsts,
       _.traceRange := traceChecker.traceRange,
+      _.predInfo := tracePDaC.io.predInfo, // duplicate signal, just to speed up waveform debug
     )
   } else {
     traceReader.io <> DontCare

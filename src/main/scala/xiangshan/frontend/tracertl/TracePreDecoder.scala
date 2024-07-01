@@ -36,6 +36,7 @@ class TracePreDecoder(implicit p: Parameters) extends TraceModule
     val traceInsts = Input(Vec(PredictWidth, Valid(new TraceInstrBundle())))
     val out = Output(new PreDecodeResp)
   })
+  dontTouch(io)
 
   // Set it to false to ignore
   io.out.hasHalfValid.map(_ := false.B)
