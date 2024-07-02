@@ -32,15 +32,15 @@ case object Reg_V extends RegType
 case object Reg_V0 extends RegType
 case object Reg_Vl extends RegType
 
-class RatReadPort(implicit p: Parameters) extends XSBundle {
+class RatReadPort(ratAddrWidth: Int)(implicit p: Parameters) extends XSBundle {
   val hold = Input(Bool())
-  val addr = Input(UInt(6.W))
+  val addr = Input(UInt(ratAddrWidth.W))
   val data = Output(UInt(PhyRegIdxWidth.W))
 }
 
-class RatWritePort(implicit p: Parameters) extends XSBundle {
+class RatWritePort(ratAddrWidth: Int)(implicit p: Parameters) extends XSBundle {
   val wen = Bool()
-  val addr = UInt(6.W)
+  val addr = UInt(ratAddrWidth.W)
   val data = UInt(PhyRegIdxWidth.W)
 }
 
@@ -64,15 +64,23 @@ class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule with 
     case Reg_V0 => 1 // v0
     case Reg_Vl => 1 // vl
   }
+  val renameTableWidth = reg_t match {
+    case Reg_I => log2Ceil(IntLogicRegs)
+    case Reg_F => log2Ceil(FpLogicRegs)
+    case Reg_V => log2Ceil(VecLogicRegs)
+    case Reg_V0 => log2Ceil(V0LogicRegs)
+    case Reg_Vl => log2Ceil(VlLogicRegs)
+  }
+
   val io = IO(new Bundle {
     val redirect = Input(Bool())
-    val readPorts = Vec(readPortsNum * RenameWidth, new RatReadPort)
-    val specWritePorts = Vec(RabCommitWidth, Input(new RatWritePort))
-    val archWritePorts = Vec(RabCommitWidth, Input(new RatWritePort))
+    val readPorts = Vec(readPortsNum * RenameWidth, new RatReadPort(renameTableWidth))
+    val specWritePorts = Vec(RabCommitWidth, Input(new RatWritePort(renameTableWidth)))
+    val archWritePorts = Vec(RabCommitWidth, Input(new RatWritePort(renameTableWidth)))
     val old_pdest = Vec(RabCommitWidth, Output(UInt(PhyRegIdxWidth.W)))
     val need_free = Vec(RabCommitWidth, Output(Bool()))
     val snpt = Input(new SnapshotPort)
-    val diffWritePorts = if (backendParams.debugEn) Some(Vec(RabCommitWidth * MaxUopSize, Input(new RatWritePort))) else None
+    val diffWritePorts = if (backendParams.debugEn) Some(Vec(RabCommitWidth * MaxUopSize, Input(new RatWritePort(renameTableWidth)))) else None
     val debug_rdata = if (backendParams.debugEn) Some(Vec(rdataNums, Output(UInt(PhyRegIdxWidth.W)))) else None
     val diff_rdata = if (backendParams.debugEn) Some(Vec(rdataNums, Output(UInt(PhyRegIdxWidth.W)))) else None
     val debug_v0 = if (backendParams.debugEn) reg_t match {
@@ -208,16 +216,16 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     val redirect = Input(Bool())
     val rabCommits = Input(new RabCommitIO)
     val diffCommits = if (backendParams.debugEn) Some(Input(new DiffCommitIO)) else None
-    val intReadPorts = Vec(RenameWidth, Vec(2, new RatReadPort))
-    val intRenamePorts = Vec(RenameWidth, Input(new RatWritePort))
-    val fpReadPorts = Vec(RenameWidth, Vec(3, new RatReadPort))
-    val fpRenamePorts = Vec(RenameWidth, Input(new RatWritePort))
-    val vecReadPorts = Vec(RenameWidth, Vec(numVecRatPorts, new RatReadPort))
-    val vecRenamePorts = Vec(RenameWidth, Input(new RatWritePort))
-    val v0ReadPorts = Vec(RenameWidth, new RatReadPort)
-    val v0RenamePorts = Vec(RenameWidth, Input(new RatWritePort))
-    val vlReadPorts = Vec(RenameWidth, new RatReadPort)
-    val vlRenamePorts = Vec(RenameWidth, Input(new RatWritePort))
+    val intReadPorts = Vec(RenameWidth, Vec(2, new RatReadPort(IntLogicRegs)))
+    val intRenamePorts = Vec(RenameWidth, Input(new RatWritePort(IntLogicRegs)))
+    val fpReadPorts = Vec(RenameWidth, Vec(3, new RatReadPort(FpLogicRegs)))
+    val fpRenamePorts = Vec(RenameWidth, Input(new RatWritePort(FpLogicRegs)))
+    val vecReadPorts = Vec(RenameWidth, Vec(numVecRatPorts, new RatReadPort(VecLogicRegs)))
+    val vecRenamePorts = Vec(RenameWidth, Input(new RatWritePort(VecLogicRegs)))
+    val v0ReadPorts = Vec(RenameWidth, new RatReadPort(V0LogicRegs))
+    val v0RenamePorts = Vec(RenameWidth, Input(new RatWritePort(V0LogicRegs)))
+    val vlReadPorts = Vec(RenameWidth, new RatReadPort(VlLogicRegs))
+    val vlRenamePorts = Vec(RenameWidth, Input(new RatWritePort(VlLogicRegs)))
 
     val int_old_pdest = Vec(RabCommitWidth, Output(UInt(PhyRegIdxWidth.W)))
     val fp_old_pdest = Vec(RabCommitWidth, Output(UInt(PhyRegIdxWidth.W)))

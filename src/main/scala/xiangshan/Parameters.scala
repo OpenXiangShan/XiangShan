@@ -36,7 +36,6 @@ import xiangshan.frontend.icache.ICacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import xiangshan.frontend._
 import xiangshan.frontend.icache.ICacheParameters
-
 import freechips.rocketchip.diplomacy.AddressSet
 import freechips.rocketchip.tile.MaxHartIdBits
 import system.SoCParamsKey
@@ -47,7 +46,7 @@ import coupledL2._
 import xiangshan.backend.datapath.WakeUpConfig
 import xiangshan.mem.prefetch.{PrefetcherParams, SMSParams}
 
-import scala.math.min
+import scala.math.{max, min}
 
 case object XSTileKey extends Field[Seq[XSCoreParameters]]
 
@@ -671,6 +670,8 @@ trait HasXSParameter {
   def VecLogicRegs = coreParams.VecLogicRegs
   def V0LogicRegs = coreParams.V0LogicRegs
   def VlLogicRegs = coreParams.VlLogicRegs
+  def MaxLogicRegs = Set(IntLogicRegs, FpLogicRegs, VecLogicRegs, V0LogicRegs, VlLogicRegs).max
+  def LogicRegsWidth = log2Ceil(MaxLogicRegs)
   def V0_IDX = coreParams.V0_IDX
   def Vl_IDX = coreParams.Vl_IDX
   def IntPhyRegs = coreParams.intPreg.numEntries

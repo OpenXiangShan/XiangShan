@@ -509,10 +509,10 @@ class FusionDecodeInfo extends Bundle {
   val rs2FromZero = Output(Bool())
 }
 
-class FusionDecodeReplace extends Bundle {
+class FusionDecodeReplace(implicit p: Parameters) extends XSBundle {
   val fuType = Valid(FuType())
   val fuOpType = Valid(FuOpType())
-  val lsrc2 = Valid(UInt(6.W))
+  val lsrc2 = Valid(UInt(LogicRegsWidth.W))
   val src2Type = Valid(SrcType())
   val selImm = Valid(SelImm())
 

@@ -176,8 +176,8 @@ class FPUCtrlSignals(implicit p: Parameters) extends XSBundle {
 class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val debug_globalID = UInt(XLEN.W)
   val srcType = Vec(4, SrcType())
-  val lsrc = Vec(4, UInt(6.W))
-  val ldest = UInt(6.W)
+  val lsrc = Vec(4, UInt(LogicRegsWidth.W))
+  val ldest = UInt(LogicRegsWidth.W)
   val fuType = FuType()
   val fuOpType = FuOpType()
   val rfWen = Bool()
@@ -377,7 +377,7 @@ class RobCommitIO(implicit p: Parameters) extends XSBundle {
 }
 
 class RabCommitInfo(implicit p: Parameters) extends XSBundle {
-  val ldest = UInt(6.W)
+  val ldest = UInt(LogicRegsWidth.W)
   val pdest = UInt(PhyRegIdxWidth.W)
   val rfWen = Bool()
   val fpWen = Bool()
