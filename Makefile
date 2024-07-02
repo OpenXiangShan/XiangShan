@@ -18,7 +18,7 @@
 BUILD_DIR = ./build
 RTL_DIR = $(BUILD_DIR)/rtl
 
-TOP = XSTop
+TOP = $(XSTOP_PREFIX)XSTop
 SIM_TOP = SimTop
 
 FPGATOP = top.TopMain
