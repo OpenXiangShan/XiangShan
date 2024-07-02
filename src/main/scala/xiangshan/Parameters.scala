@@ -26,12 +26,12 @@ import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.dispatch.DispatchParameters
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuConfig._
-import xiangshan.backend.issue.{FpScheduler, IntScheduler, IssueBlockParams, MemScheduler, SchdBlockParams, SchedulerType, VfScheduler}
+import xiangshan.backend.issue.{IntScheduler, IssueBlockParams, MemScheduler, SchdBlockParams, SchedulerType, VfScheduler, FpScheduler}
 import xiangshan.backend.regfile._
 import xiangshan.backend.BackendParams
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.prefetch._
-import xiangshan.frontend.{BasePredictor, BranchPredictionResp, FTB, FakePredictor, FauFTB, ITTage, RAS, Tage, Tage_SC}
+import xiangshan.frontend.{BasePredictor, BranchPredictionResp, FTB, FakePredictor, ITTage, RAS, Tage, Tage_SC, FauFTB}
 import xiangshan.frontend.icache.ICacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import xiangshan.frontend._
