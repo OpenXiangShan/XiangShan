@@ -37,7 +37,7 @@ object CSRConfig {
   // the width of VGEIN
   final val VGEINWidth = 6
 
-  final val VaddrMaxWidth = 41 // only Sv39 and Sv39x4
+  final val VaddrMaxWidth = 48 + 2 // support Sv39/Sv48/Sv39x4/Sv48x4
 
   final val XLEN = 64 // Todo: use XSParams
 
@@ -1097,10 +1097,22 @@ class NewCSR(implicit val p: Parameters) extends Module
     val interrupt = trapHandleMod.io.out.causeNO.Interrupt.asBool
     val interruptNO = Mux(interrupt, trapNO, 0.U)
     val exceptionNO = Mux(!interrupt, trapNO, 0.U)
-    val ivmHS = isModeHS &&  satp.regOut.MODE =/= SatpMode.Bare
-    val ivmVS = isModeVS && vsatp.regOut.MODE =/= SatpMode.Bare
+    val isSv39: Bool =
+      (isModeHS || isModeHU) &&  satp.regOut.MODE === SatpMode.Sv39 ||
+      (isModeVS || isModeVU) && vsatp.regOut.MODE === SatpMode.Sv39
+    val isSv48: Bool =
+      (isModeHS || isModeHU) &&  satp.regOut.MODE === SatpMode.Sv48 ||
+      (isModeVS || isModeVU) && vsatp.regOut.MODE === SatpMode.Sv48
+    val isBare = !isSv39 && !isSv48
+    val sv39PC = SignExt(trapPC.take(39), XLEN)
+    val sv48PC = SignExt(trapPC.take(48), XLEN)
+    val barePC = ZeroExt(trapPC.take(PAddrBits), XLEN)
     // When enable virtual memory, the higher bit should fill with the msb of address of Sv39/Sv48/Sv57
-    val exceptionPC = Mux(ivmHS || ivmVS, SignExt(trapPC, XLEN), ZeroExt(trapPC, XLEN))
+    val exceptionPC = Mux1H(Seq(
+      isSv39 -> sv39PC,
+      isSv48 -> sv48PC,
+      isBare -> barePC,
+    ))
 
     val diffArchEvent = DifftestModule(new DiffArchEvent, delay = 3, dontCare = true)
     diffArchEvent.coreid := hartId

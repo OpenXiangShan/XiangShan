@@ -164,8 +164,8 @@ object CSRDefines {
     val Sv57 = Value(10.U)
     val Sv64 = Value(11.U) // Reserved for page-based 64-bit virtual addressing
 
-    // XiangShan only support Sv39 Page
-    override def isLegal(enumeration: CSREnumType): Bool = enumeration.isOneOf(Bare, Sv39)
+    // XiangShan only support Sv39 & Sv48 Page
+    override def isLegal(enumeration: CSREnumType): Bool = enumeration.isOneOf(Bare, Sv39, Sv48)
   }
 
   object HgatpMode extends CSREnum with WARLApply {
@@ -174,8 +174,8 @@ object CSRDefines {
     val Sv48x4 = Value(9.U)
     val Sv57x4 = Value(10.U)
 
-    // XiangShan only support Sv39 Page
-    override def isLegal(enumeration: CSREnumType): Bool = enumeration.isOneOf(Bare, Sv39x4)
+    // XiangShan only support Sv39 & Sv48 Page
+    override def isLegal(enumeration: CSREnumType): Bool = enumeration.isOneOf(Bare, Sv39x4, Sv48x4)
   }
 
   object ReflectHelper {
