@@ -253,7 +253,7 @@ trait MachineLevel { self: NewCSR =>
     rdataFields.SEIP := regOut.SEIP || platformIRP.SEIP || aiaToCSR.seip
 
     // bit 10 VSEIP
-    regOut.VSEIP := hvip.VSEIP || platformIRP.VSEIP || hgeip.ip.asUInt(hstatusVGEIN.asUInt)
+    regOut.VSEIP := hvip.VSEIP || platformIRP.VSEIP || hgeip.asUInt(hstatusVGEIN.asUInt)
 
     // bit 11 MEIP is read-only in mip, and is set and cleared by a platform-specific interrupt controller.
     // MEIP can from PLIC and IMSIC
