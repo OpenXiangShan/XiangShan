@@ -53,6 +53,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     val hartId = Input(UInt(hartIdLen.W))
     // from rename
     val fromRename = Vec(RenameWidth, Flipped(DecoupledIO(new DynInst)))
+    val toRenameAllFire = Output(Bool())
     // enq Rob
     val enqRob = Flipped(new RobEnqIO)
     // enq Lsq
@@ -192,7 +193,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val isStore  = VecInit(io.fromRename.map(req => FuType.isStore(req.bits.fuType)))
   val isVStore = VecInit(io.fromRename.map(req => FuType.isVStore(req.bits.fuType)))
   val isAMO    = VecInit(io.fromRename.map(req => FuType.isAMO(req.bits.fuType)))
-  val isBlockBackward = VecInit(io.fromRename.map(_.bits.blockBackward))
+  val isBlockBackward  = VecInit(io.fromRename.map(x => x.valid && x.bits.blockBackward))
   val isWaitForward    = VecInit(io.fromRename.map(x => x.valid && x.bits.waitForward))
 
   val singleStepStatus = RegInit(false.B)
@@ -296,7 +297,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
   // Only the uop with block backward flag will block the next uop
   val nextCanOut = VecInit((0 until RenameWidth).map(i =>
-    !(isBlockBackward(i) && io.fromRename(i).valid)
+    !isBlockBackward(i)
   ))
   val notBlockedByPrevious = VecInit((0 until RenameWidth).map(i =>
     if (i == 0) true.B
@@ -391,10 +392,12 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     * Part 4: send response to rename when dispatch queue accepts the uop
     */
   val hasValidInstr = VecInit(io.fromRename.map(_.valid)).asUInt.orR
-  val hasSpecialInstr = Cat((0 until RenameWidth).map(i => io.fromRename(i).valid && isBlockBackward(i))).orR
+  val hasSpecialInstr = Cat((0 until RenameWidth).map(i => isBlockBackward(i))).orR
 
   private val canAccept = !hasValidInstr || !hasSpecialInstr && io.enqRob.canAccept && dqCanAccept
 
+  val isWaitForwardOrBlockBackward = isWaitForward.asUInt.orR || isBlockBackward.asUInt.orR
+  io.toRenameAllFire := !isWaitForwardOrBlockBackward && io.enqRob.canAccept && dqCanAccept
   for (i <- 0 until RenameWidth) {
     io.fromRename(i).ready := thisCanActualOut(i) && io.enqRob.canAccept && dqCanAccept
 
