@@ -48,11 +48,11 @@ object CSRConfig {
   // log2Up(128 + 1), hold 0~128
   final val VlWidth = 8
 
-  final val PAddrWidth = 36
+  final val PAddrWidth = 48
 
   final val AddrWidthInPage = 12
 
-  final val PMPAddrWidth = 36
+  final val PMPAddrWidth = 48
 
   final val PMPOffBits = 2
 
