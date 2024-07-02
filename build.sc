@@ -16,6 +16,7 @@
 
 import mill._
 import scalalib._
+import scalafmt._
 import $file.`rocket-chip`.common
 import $file.`rocket-chip`.cde.common
 import $file.`rocket-chip`.hardfloat.build
@@ -197,7 +198,7 @@ trait XiangShanModule extends ScalaModule {
 }
 
 object xiangshan extends Cross[XiangShan]("chisel", "chisel3")
-trait XiangShan extends XiangShanModule with HasChisel {
+trait XiangShan extends XiangShanModule with HasChisel with ScalafmtModule {
 
   override def millSourcePath = os.pwd
 
