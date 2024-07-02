@@ -120,14 +120,14 @@ trait MachineLevel { self: NewCSR =>
     // When the value of bit 1 of mvien is changed from zero to one, the value of bit 1 of mvip becomes UNSPECIFIED.
     // XiangShan will keep the value in mvip.SSIP when mvien.SSIE is changed from zero to one
     reg.SSIP := Mux(wen && mvien.SSIE.asBool, wdata.SSIP, reg.SSIP)
-    regOut.SSIP := Mux(mvien.SSIE.asBool, reg.SSIP, mip.SSIP)
+    regOut.SSIP := Mux(mvien.SSIE.asBool, reg.SSIP, this.mip.SSIP)
     toMip.SSIP.valid := wen && !mvien.SSIE.asBool
     toMip.SSIP.bits := wdata.SSIP
 
     // Bit 5 of mvip is an alias of the same bit (STIP) in mip when that bit is writable in mip.
     // When STIP is not writable in mip (such as when menvcfg.STCE = 1), bit 5 of mvip is read-only zero.
     // Todo: check mip writable when menvcfg.STCE = 1
-    regOut.STIP := Mux(this.menvcfg.STCE.asBool, 0.U, mip.STIP.asBool)
+    regOut.STIP := Mux(this.menvcfg.STCE.asBool, 0.U, this.mip.STIP.asBool)
     // Don't update mip.STIP when menvcfg.STCE is 1
     toMip.STIP.valid := wen && !this.menvcfg.STCE.asBool
     toMip.STIP.bits := wdata.STIP
