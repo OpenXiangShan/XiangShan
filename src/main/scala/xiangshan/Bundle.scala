@@ -653,6 +653,7 @@ class MemTdataDistributeIO(implicit p: Parameters) extends XSBundle {
     val tdata = new MatchTriggerIO
   })
   val tEnableVec: Vec[Bool] = Output(Vec(TriggerNum, Bool()))
+  val triggerCanRaiseBpExp  = Output(Bool())
 }
 
 class MatchTriggerIO(implicit p: Parameters) extends XSBundle {
