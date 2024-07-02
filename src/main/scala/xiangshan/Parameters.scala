@@ -859,6 +859,7 @@ trait HasXSParameter {
   def TraceCollectorWidth = CommitWidth
   def TraceRoBMergeNum = RenameWidth
   def TraceRoBMergeWidth = log2Ceil(TraceRoBMergeNum)
+  def TraceEnableDuplicateFlush = true
 
   def PCntIncrStep: Int = 6
   def numPCntHc: Int = 25

@@ -46,7 +46,7 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
     _.cfiUpdate.target := TraceRTLChoose(jumpDataModule.io.target, io.in.bits.ctrl.traceInfo.target),
     _.cfiUpdate.isMisPred := jumpDataModule.io.target(VAddrData().dataWidth - 1, 0) =/= jmpTarget || !predTaken,
     _.cfiUpdate.pc := io.in.bits.data.pc.get,
-    _.debugInstID := io.in.bits.ctrl.traceInfo.InstID,
+    _.traceInfo := io.in.bits.ctrl.traceInfo,
   )
 //  redirect.debug_runahead_checkpoint_id := uop.debugInfo.runahead_checkpoint_id // Todo: assign it
 

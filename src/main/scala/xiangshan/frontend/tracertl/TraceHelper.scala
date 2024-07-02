@@ -31,13 +31,17 @@ class TraceInstrInnerBundle(implicit p: Parameters) extends TraceBundle {
   val memorySize = UInt(8.W)
   val branchType = UInt(8.W)
   val branchTaken = UInt(8.W)
+
+  val InstID = UInt(64.W)
 }
 
 
 object TraceInstrInnerBundle {
   def apply(pcVA: UInt, pcPA: UInt, memoryAddrVA: UInt, memoryAddrPA: UInt,
     target: UInt, inst: UInt, memoryType: UInt, memorySize: UInt,
-    branchType: UInt, branchTaken: UInt)(implicit p: Parameters): TraceInstrInnerBundle = {
+    branchType: UInt, branchTaken: UInt,
+    InstID: UInt)(implicit p: Parameters): TraceInstrInnerBundle = {
+
     val bundle = Wire(new TraceInstrInnerBundle)
     bundle.pcVA := pcVA
     bundle.pcPA := pcPA
@@ -49,6 +53,7 @@ object TraceInstrInnerBundle {
     bundle.memorySize := memorySize
     bundle.branchType := branchType
     bundle.branchTaken := branchTaken
+    bundle.InstID := InstID
     bundle
   }
 }
@@ -73,7 +78,12 @@ class TraceReaderHelper(width: Int)(implicit p: Parameters)
 
     def callDPIC: String = {
       (0 until width)
-        .map(i => s"trace_read_one_instr(insts_${i}_pcVA, insts_${i}_pcPA, insts_${i}_memoryAddrVA, insts_${i}_memoryAddrPA, insts_${i}_target, insts_${i}_inst, insts_${i}_memoryType, insts_${i}_memorySize, insts_${i}_branchType, insts_${i}_branchTaken);")
+        .map(i => s"""
+                     |trace_read_one_instr(insts_${i}_pcVA, insts_${i}_pcPA,
+                     |  insts_${i}_memoryAddrVA, insts_${i}_memoryAddrPA, insts_${i}_target, insts_${i}_inst,
+                     |  insts_${i}_memoryType, insts_${i}_memorySize,
+                     |  insts_${i}_branchType, insts_${i}_branchTaken, insts_${i}_InstID);
+                     """.stripMargin)
         .mkString("      ", "\n      ", "\n")
     }
     s"""
@@ -88,6 +98,7 @@ class TraceReaderHelper(width: Int)(implicit p: Parameters)
        |  output byte memory_size,
        |  output byte branch_type,
        |  output byte branch_taken,
+       |  output longint InstID
        |);
        |
        |module TraceReaderHelper(
@@ -107,6 +118,36 @@ class TraceReaderHelper(width: Int)(implicit p: Parameters)
        |""".stripMargin
   }
 
+  setInline(s"$desiredName.v", getVerilog)
+}
+
+class TraceRedirectHelper
+  extends ExtModule
+  with HasExtModuleInline {
+  val clock = IO(Input(Clock()))
+  val reset = IO(Input(Reset()))
+  val enable = IO(Input(Bool()))
+  val InstID = IO(Input(UInt(64.W)))
+
+  def getVerilog: String = {
+    s"""
+       |import "DPI-C" function void trace_redirect(input longint InstID);
+       |
+       |module TraceRedirectHelper(
+       |  input clock,
+       |  input reset,
+       |  input enable,
+       |  input [63:0] InstID
+       |);
+       |
+       |  always @(posedge clock) begin
+       |    if (enable && !reset) begin
+       |      trace_redirect(InstID);
+       |    end
+       |  end
+       |endmodule
+       |""".stripMargin
+  }
   setInline(s"$desiredName.v", getVerilog)
 }
 

@@ -20,6 +20,8 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.{CircularQueuePtr, HasCircularQueuePtrHelper}
 import utils.XSError
+import xiangshan.frontend.BranchPredictionRedirect
+import xiangshan.RedirectLevel
 
 class TracePredInfoBundle extends Bundle {
   val fixTarget = UInt(64.W)
@@ -45,10 +47,13 @@ class TraceInstrBundle(implicit p: Parameters) extends TraceBundle {
 }
 
 class TraceReaderIO(implicit p: Parameters) extends TraceBundle {
-  // traceInst should always be valid
-  val traceInsts = Output(Vec(PredictWidth, new TraceInstrBundle()))
   // recv.valid from f3_fire, bits.instNum from range
   val recv = Flipped(Valid(new TraceRecvInfo()))
+  // BranchPredictionRedirect === Redirect with some traits
+  val redirect = Flipped(Valid(new BranchPredictionRedirect()))
+
+  // traceInst should always be valid
+  val traceInsts = Output(Vec(PredictWidth, new TraceInstrBundle()))
 }
 
 class TraceBufferPtr(Size: Int)(implicit p: Parameters) extends CircularQueuePtr[TraceBufferPtr](Size)
@@ -59,11 +64,19 @@ class TraceReader(implicit p: Parameters) extends TraceModule
   val io = IO(new TraceReaderIO())
   dontTouch(io)
 
-  val instID = RegInit(0.U(64.W))
   val traceBuffer = Reg(Vec(TraceBufferSize, new TraceInstrBundle()))
   val traceReaderHelper = Module(new TraceReaderHelper(PredictWidth))
+  val traceRedirecter = Module(new TraceRedirectHelper)
   val deqPtr = RegInit(0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize)))
   val enqPtr = RegInit(0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize)))
+
+  if (!TraceEnableDuplicateFlush) {
+    when (io.redirect.valid) {
+      XSError(io.redirect.bits.traceInfo.InstID + 1.U =/= traceBuffer(deqPtr.value).InstID,
+        "TraceEnableDuplicateFlush is false. Please check wrong path redirect")
+    }
+  }
+
 
   XSError(!isFull(enqPtr, deqPtr) && (enqPtr < deqPtr), "enqPtr should always be larger than deqPtr")
   XSError(io.recv.valid && ((deqPtr + io.recv.bits.instNum) >= enqPtr),
@@ -78,31 +91,40 @@ class TraceReader(implicit p: Parameters) extends TraceModule
   val readTraceEnable = !isfull && (freeEntryNum >= TraceFetchWidth.U)
   when(readTraceEnable) {
     enqPtr := enqPtr + TraceFetchWidth.U
-    instID := instID + TraceFetchWidth.U
 
     (0 until TraceFetchWidth).foreach {
-      i => bufferInsert(enqPtr + i.U, traceReaderHelper.insts(i), instID + i.U)
+      i => bufferInsert(enqPtr + i.U, traceReaderHelper.insts(i))
     }
   }
 
-  def bufferInsert(ptr: TraceBufferPtr, data: TraceInstrInnerBundle, id: UInt) = {
-//    traceBuffer(ptr.value).fromInnerBundle(data)
+  def bufferInsert(ptr: TraceBufferPtr, data: TraceInstrInnerBundle) = {
     (traceBuffer(ptr.value): Data).waiveAll :<= (data: Data).waiveAll
-    traceBuffer(ptr.value).InstID := id
     when (data.memoryAddrPA === 0.U) {
       traceBuffer(ptr.value).memoryAddrPA := data.memoryAddrVA
     }
     when (data.pcPA === 0.U) {
       traceBuffer(ptr.value).pcPA := data.pcVA
     }
-//    traceBuffer(ptr.value).bpuPredInfo := 0.U.asTypeOf(new TraceInstrBundle().bpuPredInfo)
   }
+
+  traceRedirecter.clock := clock
+  traceRedirecter.reset := reset
+  traceRedirecter.enable := io.redirect.valid
+  traceRedirecter.InstID := io.redirect.bits.traceInfo.InstID +
+    Mux(RedirectLevel.flushItself(io.redirect.bits.level), 0.U, 1.U)
 
   traceReaderHelper.clock := clock
   traceReaderHelper.reset := reset
-  traceReaderHelper.enable := readTraceEnable
+  traceReaderHelper.enable := readTraceEnable && !io.redirect.valid
+
   io.traceInsts.zipWithIndex.foreach { case (inst, i) =>
     val ptr = (deqPtr + i.U).value
     inst := traceBuffer(ptr)
   }
+
+  when (io.redirect.valid) {
+    enqPtr := 0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize))
+    deqPtr := 0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize))
+  }
+
 }

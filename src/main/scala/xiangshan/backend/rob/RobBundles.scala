@@ -37,6 +37,7 @@ import xiangshan.backend.rename.SnapshotGenerator
 import xiangshan.backend.trace._
 
 import scala.collection.immutable.Nil
+import xiangshan.frontend.tracertl.TraceInstrBundle
 
 
 
@@ -86,6 +87,8 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val debug_pdest = OptionWrapper(backendParams.debugEn, UInt(PhyRegIdxWidth.W))
     val debug_fuType = OptionWrapper(backendParams.debugEn, FuType())
     // debug_end
+    // trace_begin
+    val traceInfo = new TraceInstrBundle()
 
     def isWritebacked: Bool = !uopNum.orR && stdWritebacked
     def isUopWritebacked: Bool = !uopNum.orR
@@ -149,6 +152,8 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.debug_ldest.foreach(_ := robEnq.ldest)
     robEntry.debug_pdest.foreach(_ := robEnq.pdest)
     robEntry.debug_fuType.foreach(_ := robEnq.fuType)
+
+    robEntry.traceInfo := robEnq.traceInfo
   }
 
   def connectCommitEntry(robCommitEntry: RobCommitEntryBundle, robEntry: RobEntryBundle): Unit = {

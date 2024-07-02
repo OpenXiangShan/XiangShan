@@ -159,7 +159,7 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
     val traceDriveCollector = Module(new TraceDriveCollector())
     (traceDriveCollector.io.in zip io.out).foreach{ case (t, o) =>
       t.specifyField(
-        _.valid := o.fire,
+        _.valid := o.fire && !io.flush,
         _.bits.inst := o.bits.traceInfo.inst,
         _.bits.pc := o.bits.pc
       )
