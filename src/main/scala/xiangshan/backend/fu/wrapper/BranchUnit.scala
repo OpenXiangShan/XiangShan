@@ -59,11 +59,11 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
         _.cfiUpdate.taken := TraceRTLChoose(dataModule.io.taken, io.in.bits.ctrl.traceInfo.branchTaken(0)),
         _.cfiUpdate.predTaken := dataModule.io.pred_taken,
         _.cfiUpdate.target := TraceRTLChoose(addModule.io.target, io.in.bits.ctrl.traceInfo.target),
-        _.debugInstID := io.in.bits.ctrl.traceInfo.InstID,
         _.cfiUpdate.pc := io.in.bits.data.pc.get,
         _.cfiUpdate.backendIAF := io.instrAddrTransType.get.checkAccessFault(addModule.io.target),
         _.cfiUpdate.backendIPF := io.instrAddrTransType.get.checkPageFault(addModule.io.target),
         _.cfiUpdate.backendIGPF := io.instrAddrTransType.get.checkGuestPageFault(addModule.io.target),
+        _.traceInfo := io.in.bits.ctrl.traceInfo,
       )
   }
   if (env.TraceRTLMode) {
