@@ -68,7 +68,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       }
     }
     if (!enableCHI) {
-      bindManagers(misc.l3_xbar.asInstanceOf[TLNexusNode])
+      bindManagers(misc.l3_xbar.get.asInstanceOf[TLNexusNode])
       bindManagers(misc.peripheralXbar.get.asInstanceOf[TLNexusNode])
     }
   }
@@ -135,7 +135,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
   l3cacheOpt match {
     case Some(l3) =>
-      misc.l3_out :*= l3.node :*= misc.l3_banked_xbar
+      misc.l3_out :*= l3.node :*= misc.l3_banked_xbar.get
       l3.pf_recv_node.map(recv => {
         println("Connecting L1 prefetcher to L3!")
         recv := l3_pf_sender_opt.get
@@ -159,7 +159,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
   chi_dummyllc_opt match {
     case Some(llc) =>
-      misc.soc_xbar := llc.axi4node
+      misc.soc_xbar.get := llc.axi4node
     case None =>
   }
 
@@ -177,7 +177,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     FileRegisters.add("plusArgs", freechips.rocketchip.util.PlusArgArtefacts.serialize_cHeader())
 
     val dma = socMisc.map(m => IO(Flipped(new VerilogAXI4Record(m.dma.elts.head.params))))
-    val peripheral = IO(new VerilogAXI4Record(m.peripheral.elts.head.params))
+    val peripheral = IO(new VerilogAXI4Record(misc.peripheral.elts.head.params))
     val memory = IO(new VerilogAXI4Record(misc.memory.elts.head.params))
 
     socMisc match {
