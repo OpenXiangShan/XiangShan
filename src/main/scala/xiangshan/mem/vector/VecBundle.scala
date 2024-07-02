@@ -68,6 +68,9 @@ class VLSBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBun
 
   val alignedType         = UInt(alignTypeBits.W)
   val indexVlMaxInVd      = UInt(elemIdxBits.W)
+
+  val usLowBitsAddr       = UInt((log2Up(maxMemByteNum)).W)
+  val usAligned128        = Bool()
 }
 
 object VSFQFeedbackType {
