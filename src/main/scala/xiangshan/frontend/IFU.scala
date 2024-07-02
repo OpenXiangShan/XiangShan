@@ -142,6 +142,16 @@ class NewIFU(implicit p: Parameters) extends XSModule
   def isCrossLineReq(start: UInt, end: UInt): Bool = start(blockOffBits) ^ end(blockOffBits)
 
   def numOfStage = 3
+  // equal lower_result overflow bit
+  def PcCutPoint = (VAddrBits/4) - 1
+  def CatPC(low: UInt, high: UInt, high1: UInt): UInt = {
+    Mux(
+      low(PcCutPoint),
+      Cat(high1, low(PcCutPoint-1, 0)),
+      Cat(high, low(PcCutPoint-1, 0))
+    )
+  }
+  def CatPC(lowVec: Vec[UInt], high: UInt, high1: UInt): Vec[UInt] = VecInit(lowVec.map(CatPC(_, high, high1)))
   require(numOfStage > 1, "BPU numOfStage must be greater than 1")
   val topdown_stages = RegInit(VecInit(Seq.fill(numOfStage)(0.U.asTypeOf(new FrontendTopDownBundle))))
   // bubble events in IFU, only happen in stage 1
@@ -300,10 +310,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   .elsewhen(f0_fire && !f0_flush) {f1_valid  := true.B}
   .elsewhen(f1_fire)              {f1_valid  := false.B}
 
-  // val f1_pc_adder_cut_point = (VAddrBits/2) - 1 // equal lower_result overflow bit
-  // This is the point calculated for splicing PC,(VAddrBits/2) - 1 is too large,pc+32.U only need 6 bits
-  val pc_adder_cut_point = (VAddrBits/4) - 1 // equal lower_result overflow bit
-  val f1_pc_high            = f1_ftq_req.startAddr(VAddrBits-1,pc_adder_cut_point)
+  val f1_pc_high            = f1_ftq_req.startAddr(VAddrBits-1, PcCutPoint)
   val f1_pc_high_plus1      = f1_pc_high + 1.U
 
   /**
@@ -313,14 +320,12 @@ class NewIFU(implicit p: Parameters) extends XSModule
    *  Mux(i(f1_pc_adder_cut_point), Cat(f1_pc_high_plus1,i(f1_pc_adder_cut_point-1,0)), Cat(f1_pc_high,i(f1_pc_adder_cut_point-1,0)))})
    * 
    */
-  val f1_pc_lower_result    = VecInit((0 until PredictWidth).map(i => Cat(0.U(1.W), f1_ftq_req.startAddr(pc_adder_cut_point-1, 0)) + (i * 2).U)) // cat with overflow bit
+  val f1_pc_lower_result    = VecInit((0 until PredictWidth).map(i => Cat(0.U(1.W), f1_ftq_req.startAddr(PcCutPoint-1, 0)) + (i * 2).U)) // cat with overflow bit
   
-  val f1_pc                 = VecInit(f1_pc_lower_result.map{ i =>  
-    Mux(i(pc_adder_cut_point), Cat(f1_pc_high_plus1,i(pc_adder_cut_point-1,0)), Cat(f1_pc_high,i(pc_adder_cut_point-1,0)))})
+  val f1_pc                 = CatPC(f1_pc_lower_result, f1_pc_high, f1_pc_high_plus1)
 
-  val f1_half_snpc_lower_result = VecInit((0 until PredictWidth).map(i => Cat(0.U(1.W), f1_ftq_req.startAddr(pc_adder_cut_point-1, 0)) + ((i+2) * 2).U)) // cat with overflow bit
-  val f1_half_snpc          = VecInit(f1_half_snpc_lower_result.map{i => 
-    Mux(i(pc_adder_cut_point), Cat(f1_pc_high_plus1,i(pc_adder_cut_point-1,0)), Cat(f1_pc_high,i(pc_adder_cut_point-1,0)))})
+  val f1_half_snpc_lower_result = VecInit((0 until PredictWidth).map(i => Cat(0.U(1.W), f1_ftq_req.startAddr(PcCutPoint-1, 0)) + ((i+2) * 2).U)) // cat with overflow bit
+  val f1_half_snpc            = CatPC(f1_half_snpc_lower_result, f1_pc_high, f1_pc_high_plus1)
 
   if (env.FPGAPlatform){
     val f1_pc_diff          = VecInit((0 until PredictWidth).map(i => f1_ftq_req.startAddr + (i * 2).U))
@@ -393,8 +398,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f2_pc_lower_result        = RegEnable(f1_pc_lower_result, f1_fire)
   val f2_pc_high                = RegEnable(f1_pc_high, f1_fire)
   val f2_pc_high_plus1          = RegEnable(f1_pc_high_plus1, f1_fire)
-  val f2_pc             = VecInit(f2_pc_lower_result.map{ i =>
-    Mux(i(pc_adder_cut_point), Cat(f2_pc_high_plus1,i(pc_adder_cut_point-1,0)), Cat(f2_pc_high,i(pc_adder_cut_point-1,0)))})
+  val f2_pc                     = CatPC(f2_pc_lower_result, f2_pc_high, f2_pc_high_plus1)
 
   val f2_cut_ptr                = RegEnable(f1_cut_ptr, f1_fire)
   val f2_resend_vaddr           = RegEnable(f1_ftq_req.startAddr + 2.U, f1_fire)
@@ -510,9 +514,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_pc_lower_result        = RegEnable(f2_pc_lower_result, f2_fire)
   val f3_pc_high                = RegEnable(f2_pc_high, f2_fire)
   val f3_pc_high_plus1          = RegEnable(f2_pc_high_plus1, f2_fire)
-  //val f3_pc             = RegEnable(f2_pc,          f2_fire)
-  val f3_pc             = VecInit(f3_pc_lower_result.map{ i =>
-    Mux(i(pc_adder_cut_point), Cat(f3_pc_high_plus1,i(pc_adder_cut_point-1,0)), Cat(f3_pc_high,i(pc_adder_cut_point-1,0)))})
+  val f3_pc             = CatPC(f3_pc_lower_result, f3_pc_high, f3_pc_high_plus1)
 
   val f3_pc_last_lower_result_plus2 = RegEnable(f2_pc_lower_result(PredictWidth - 1) + 2.U, f2_fire)
   val f3_pc_last_lower_result_plus4 = RegEnable(f2_pc_lower_result(PredictWidth - 1) + 4.U, f2_fire)
@@ -525,12 +527,10 @@ class NewIFU(implicit p: Parameters) extends XSModule
     */
   val f3_half_snpc      = Wire(Vec(PredictWidth,UInt(VAddrBits.W)))
   for(i <- 0 until PredictWidth){
-    val j  = f3_pc_last_lower_result_plus2
-    val k  = f3_pc_last_lower_result_plus4
     if(i == (PredictWidth - 2)){
-      f3_half_snpc(i)   := Mux(j(pc_adder_cut_point), Cat(f3_pc_high_plus1,j(pc_adder_cut_point-1,0)), Cat(f3_pc_high,j(pc_adder_cut_point-1,0)))
-    } else if (i == (PredictWidth - 1)) {
-      f3_half_snpc(i)   := Mux(k(pc_adder_cut_point), Cat(f3_pc_high_plus1,k(pc_adder_cut_point-1,0)), Cat(f3_pc_high,k(pc_adder_cut_point-1,0)))
+      f3_half_snpc(i)   := CatPC(f3_pc_last_lower_result_plus2, f3_pc_high, f3_pc_high_plus1)
+    } else if (i == (PredictWidth - 1)){
+      f3_half_snpc(i)   := CatPC(f3_pc_last_lower_result_plus4, f3_pc_high, f3_pc_high_plus1)
     } else {
       f3_half_snpc(i)   := f3_pc(i+2)
     }
@@ -906,8 +906,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val wb_pc_lower_result        = RegEnable(f3_pc_lower_result, wb_enable)
   val wb_pc_high                = RegEnable(f3_pc_high, wb_enable)
   val wb_pc_high_plus1          = RegEnable(f3_pc_high_plus1, wb_enable)
-  val wb_pc             = VecInit(wb_pc_lower_result.map{ i =>
-    Mux(i(pc_adder_cut_point), Cat(wb_pc_high_plus1,i(pc_adder_cut_point-1,0)), Cat(wb_pc_high,i(pc_adder_cut_point-1,0)))})
+  val wb_pc                     = CatPC(wb_pc_lower_result, wb_pc_high, wb_pc_high_plus1)
 
   //val wb_pc             = RegEnable(f3_pc, wb_enable)
   val wb_pd             = RegEnable(f3_pd, wb_enable)
