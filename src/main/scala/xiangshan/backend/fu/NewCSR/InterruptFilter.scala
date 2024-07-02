@@ -57,7 +57,7 @@ class InterruptFilter extends Module {
   val hsIpriosIsZero: Bool = hsiprios === 0.U
 
   def findIndex(input: UInt): UInt = {
-    val select = WireInit(0.U(log2Up(InterruptNO.interruptDefaultPrio.length).W))
+    val select = WireInit(15.U(log2Up(InterruptNO.interruptDefaultPrio.length).W))
     for (i <- 0 until InterruptNO.interruptDefaultPrio.length) {
       when(input === InterruptNO.interruptDefaultPrio(i).U) {
         select := i.U
@@ -124,11 +124,8 @@ class InterruptFilter extends Module {
   private val hsIidDefaultPrioHighSEI: Bool = hsIidIdx < InterruptNO.getPrioIdx(_.SEI).U
   private val hsIidDefaultPrioLowSEI : Bool = hsIidIdx > InterruptNO.getPrioIdx(_.SEI).U
 
-  private val mIrIsEI  = ( mIidNum === InterruptNO.SEI.U) || ( mIidNum === InterruptNO.MEI.U)
-  private val hsIrIsEI = (hsIidNum === InterruptNO.SEI.U) || (hsIidNum === InterruptNO.MEI.U)
-
-  val mtopiPrioNumReal = Mux( mIrIsEI, mtopei.IPRIO.asUInt,  mPrioNum)
-  val stopiPrioNumReal = Mux(hsIrIsEI, stopei.IPRIO.asUInt, hsPrioNum)
+  val mtopiPrioNumReal = mPrioNum
+  val stopiPrioNumReal = hsPrioNum
 
   // update mtopi
   io.out.mtopi.IID := Mux(mtopiIsNotZero, mIidNum, 0.U)
