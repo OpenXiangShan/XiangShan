@@ -21,6 +21,7 @@ import $file.`rocket-chip`.cde.common
 import $file.`rocket-chip`.hardfloat.build
 import $file.huancun.common
 import $file.coupledL2.common
+import $file.openLLC.common
 
 val defaultScalaVersion = "2.13.14"
 
@@ -149,6 +150,18 @@ trait CoupledL2 extends millbuild.coupledL2.common.CoupledL2Module with HasChise
 
 }
 
+object openLLC extends Cross[OpenLLC]("chisel", "chisel3")
+trait OpenLLC extends millbuild.openLLC.common.OpenLLCModule with HasChisel {
+
+  override def millSourcePath = os.pwd / "openLLC"
+
+  def coupledL2Module: ScalaModule = coupledL2(crossValue)
+
+  def rocketModule: ScalaModule = rocketchip(crossValue)
+
+  def utilityModule: ScalaModule = utility(crossValue)
+}
+
 object difftest extends Cross[Difftest]("chisel", "chisel3")
 trait Difftest extends HasChisel {
 
@@ -174,6 +187,8 @@ trait XiangShanModule extends ScalaModule {
 
   def coupledL2Module: ScalaModule
 
+  def openLLCModule: ScalaModule
+
   def fudianModule: ScalaModule
 
   def utilityModule: ScalaModule
@@ -185,6 +200,7 @@ trait XiangShanModule extends ScalaModule {
     difftestModule,
     huancunModule,
     coupledL2Module,
+    openLLCModule,
     yunsuanModule,
     fudianModule,
     utilityModule,
@@ -208,6 +224,8 @@ trait XiangShan extends XiangShanModule with HasChisel {
   def huancunModule = huancun(crossValue)
 
   def coupledL2Module = coupledL2(crossValue)
+
+  def openLLCModule = openLLC(crossValue)
 
   def fudianModule = fudian(crossValue)
 
