@@ -17,7 +17,7 @@ object Bundles {
     val illegal = Bool()
     val vma     = Bool()
     val vta     = Bool()
-    val vsew    = VSew()
+    val vsew    = VtypeVSew()
     val vlmul   = VLmul()
   }
 
@@ -30,7 +30,7 @@ object Bundles {
       val res = Wire(VType())
       res.vma   := instVType.vma
       res.vta   := instVType.vta
-      res.vsew  := instVType.vsew(VSew.width - 1, 0)
+      res.vsew  := instVType.vsew
       res.vlmul := instVType.vlmul
       res.illegal := false.B // Todo: add illegal check function
       res
@@ -41,7 +41,7 @@ object Bundles {
       res.illegal := vtypeStruct.vill
       res.vma := vtypeStruct.vma
       res.vta := vtypeStruct.vta
-      res.vsew := vtypeStruct.vsew(VSew.width - 1, 0)
+      res.vsew := vtypeStruct.vsew
       res.vlmul := vtypeStruct.vlmul
       res
     }
@@ -51,7 +51,7 @@ object Bundles {
       res.vill := vtype.illegal
       res.vma := vtype.vma
       res.vta := vtype.vta
-      res.vsew := Cat(0.U(1.W), vtype.vsew)
+      res.vsew := vtype.vsew
       res.vlmul := vtype.vlmul
       res
     }
@@ -91,6 +91,15 @@ object Bundles {
       }
     }
   }
+
+  /**
+    *
+    * vtype's vsew is 3 bits, and the highest bit is reserved
+    * we need to get 3 bits vsew in Vtype struct, then vset module can check if it is reserved.
+    * and we use 2 bits to store vsew in other places to save space
+    *
+    */
+  object VtypeVSew extends NamedUInt(3)
 
   object VLmul extends NamedUInt(3) {
     def m1  : UInt = "b000".U(width.W)
