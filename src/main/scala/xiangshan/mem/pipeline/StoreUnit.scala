@@ -28,6 +28,7 @@ import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.FuType._
 import xiangshan.backend.ctrlblock.DebugLsInfoBundle
+import xiangshan.backend.fu.NewCSR._
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
 import xiangshan.cache.{DcacheStoreRequestIO, DCacheStoreIO, MemoryOpConstants, HasDCacheParameters, StorePrefetchReq}
 
@@ -60,6 +61,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     // vector
     val vecstin           = Flipped(Decoupled(new VecPipeBundle(isVStore = true)))
     val vec_isFirstIssue  = Input(Bool())
+    // trigger
+    val fromCsrTrigger = Input(new CsrTriggerBundle)
   })
 
   val s1_ready, s2_ready, s3_ready = WireInit(false.B)
@@ -273,6 +276,17 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s1_out.uop.exceptionVec(storePageFault)      := io.tlb.resp.bits.excp(0).pf.st && s1_vecActive
   s1_out.uop.exceptionVec(storeAccessFault)    := io.tlb.resp.bits.excp(0).af.st && s1_vecActive
   s1_out.uop.exceptionVec(storeGuestPageFault) := io.tlb.resp.bits.excp(0).gpf.st && s1_vecActive
+
+  // trigger
+  val storeTrigger = Module(new StoreTrigger)
+  storeTrigger.io.fromCsrTrigger.tdataVec             := io.fromCsrTrigger.tdataVec
+  storeTrigger.io.fromCsrTrigger.tEnableVec           := io.fromCsrTrigger.tEnableVec
+  storeTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.fromCsrTrigger.triggerCanRaiseBpExp
+  storeTrigger.io.fromStore.vaddr                     := s1_in.vaddr
+
+  s1_out.uop.trigger.backendHit       := storeTrigger.io.toStore.triggerHitVec
+  s1_out.uop.trigger.backendCanFire   := storeTrigger.io.toStore.triggerCanFireVec
+  s1_out.uop.exceptionVec(breakPoint) := storeTrigger.io.toStore.breakPointExp
 
   // scalar store and scalar load nuke check, and also other purposes
   io.lsq.valid     := s1_valid && !s1_in.isHWPrefetch

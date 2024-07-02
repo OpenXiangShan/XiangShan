@@ -427,7 +427,7 @@ object FuConfig {
     ),
     piped = false,
     latency = UncertainLatency(),
-    exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault, storeGuestPageFault),
+    exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault, storeGuestPageFault, breakPoint),
     trigger = true,
     immType = Set(SelImm.IMM_S),
   )

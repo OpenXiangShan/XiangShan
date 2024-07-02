@@ -6,6 +6,7 @@ import org.chipsalliance.cde.config.Parameters
 
 import xiangshan.backend.fu.NewCSR.CSRBundles.PrivState
 import xiangshan.backend.fu.util.CSRConst
+import xiangshan.backend.fu.util.SdtrigExt
 import xiangshan._
 
 class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
@@ -72,12 +73,12 @@ class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
 
   // More than one triggers can hit at the same time, but only fire one
   // We select the first hit trigger to fire
+  val triggerCanRaiseBpExp = Mux(privState.isModeM && !debugMode, tcontrol.MTE.asBool, true.B)
   val triggerFireOH = PriorityEncoderOH(triggerCanFireVec)
   val triggerFireAction = PriorityMux(triggerFireOH, tdata1Vec.map(_.getTriggerAction)).asUInt
   val hasTriggerFire = hasExp && triggerCf.canFire
   val hasDebugTriggerException = hasTriggerFire && (triggerFireAction === TrigAction.DebugMode.asUInt)
-  val triggerCanFire = hasTriggerFire && (triggerFireAction === TrigAction.BreakpointExp.asUInt) &&
-    Mux(privState.isModeM && !debugMode, tcontrol.MTE.asBool, true.B) // todo: Should trigger be fire in dmode?
+  val triggerCanFire = hasTriggerFire && (triggerFireAction === TrigAction.BreakpointExp.asUInt) && triggerCanRaiseBpExp // todo: Should trigger be fire in dmode?
 
   // debug_exception_single
   val hasSingleStep = hasExp && singleStep
@@ -125,10 +126,12 @@ class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
   io.out.frontendTrigger.tUpdate.bits.addr   := tselect.asUInt
   io.out.frontendTrigger.tUpdate.bits.tdata.GenTdataDistribute(tdata1Selected, tdata2Selected)
   io.out.frontendTrigger.tEnableVec          := fetchTriggerEnableVec
+
   io.out.memTrigger.tUpdate.valid            := RegNext(RegNext(memTriggerUpdate))
   io.out.memTrigger.tUpdate.bits.addr        := tselect.asUInt
   io.out.memTrigger.tUpdate.bits.tdata.GenTdataDistribute(tdata1Selected, tdata2Selected)
   io.out.memTrigger.tEnableVec               := memAccTriggerEnableVec
+  io.out.memTrigger.triggerCanRaiseBpExp     := triggerCanRaiseBpExp
 
   io.out.triggerFrontendChange  := frontendTriggerUpdate
   io.out.newTriggerChainIsLegal := newTriggerChainIsLegal
@@ -182,4 +185,54 @@ class DebugIO(implicit val p: Parameters) extends Bundle with HasXSParameter {
     val hasDebugEbreakException = Bool()
     val breakPoint = Bool()
   })
+}
+
+class CsrTriggerBundle(implicit val p: Parameters) extends Bundle with HasXSParameter {
+  val tdataVec = Vec(TriggerNum, new MatchTriggerIO)
+  val tEnableVec = Vec(TriggerNum, Bool())
+  val triggerCanRaiseBpExp = Bool()
+}
+class StoreTrigger(implicit val p: Parameters)extends Module with HasXSParameter with SdtrigExt {
+  val io = IO(new Bundle(){
+    val fromCsrTrigger = Input(new CsrTriggerBundle)
+
+    val fromStore = Input(new Bundle {
+      val vaddr = UInt(VAddrBits.W)
+    })
+
+    val toStore = Output(new Bundle{
+      val triggerHitVec = Vec(TriggerNum,  Bool())
+      val triggerCanFireVec = Vec(TriggerNum, Bool())
+      val breakPointExp = Bool()
+    })
+  })
+  val tdataVec      = io.fromCsrTrigger.tdataVec
+  val tEnableVec    = io.fromCsrTrigger.tEnableVec
+  val triggerCanRaiseBpExp = io.fromCsrTrigger.triggerCanRaiseBpExp
+  val vaddr = io.fromStore.vaddr
+
+  val triggerTimingVec = VecInit(tdataVec.map(_.timing))
+  val triggerChainVec = VecInit(tdataVec.map(_.chain))
+
+  val triggerHitVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
+  val triggerCanFireVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
+
+  for (i <- 0 until TriggerNum) {
+    triggerHitVec(i) := !tdataVec(i).select && TriggerCmp(
+      vaddr,
+      tdataVec(i).tdata2,
+      tdataVec(i).matchType,
+      tEnableVec(i) && tdataVec(i).store
+    )
+  }
+  TriggerCheckCanFire(TriggerNum, triggerCanFireVec, triggerHitVec, triggerTimingVec, triggerChainVec)
+
+  val triggerFireOH = PriorityEncoderOH(triggerCanFireVec)
+  val triggerFireAction = PriorityMux(triggerFireOH, tdataVec.map(_.action)).asUInt
+  val breakPointExp = ((triggerFireAction === TrigAction.BreakpointExp.asUInt) && triggerCanRaiseBpExp ||
+    (triggerFireAction === TrigAction.DebugMode.asUInt)) && triggerCanFireVec.asUInt.orR
+
+  io.toStore.triggerHitVec     := triggerHitVec
+  io.toStore.triggerCanFireVec := triggerCanFireVec
+  io.toStore.breakPointExp     := breakPointExp
 }

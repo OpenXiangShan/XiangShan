@@ -27,6 +27,7 @@ import xiangshan.backend.Bundles.{DynInst, MemExuInput, MemExuOutput}
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.ctrlblock.{DebugLsInfoBundle, LsTopdownInfo}
+import xiangshan.backend.fu.NewCSR._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu._
 import xiangshan.backend.fu.util.SdtrigExt
@@ -151,6 +152,9 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     // rs feedback
     val feedback_fast = ValidIO(new RSFeedback) // stage 2
     val feedback_slow = ValidIO(new RSFeedback) // stage 3
+
+    // for store trigger
+    val fromCsrTrigger = Input(new CsrTriggerBundle)
   })
 
   val StorePrefetchL1Enabled = EnableStorePrefetchAtCommit || EnableStorePrefetchAtIssue || EnableStorePrefetchSPB
@@ -690,6 +694,13 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   s1_out.rep_info.nuke     := s1_nuke && !s1_sw_prf
   s1_out.lateKill          := s1_late_kill
 
+  // trigger
+  val storeTrigger = Module(new StoreTrigger)
+  storeTrigger.io.fromCsrTrigger.tdataVec             := io.fromCsrTrigger.tdataVec
+  storeTrigger.io.fromCsrTrigger.tEnableVec           := io.fromCsrTrigger.tEnableVec
+  storeTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.fromCsrTrigger.triggerCanRaiseBpExp
+  storeTrigger.io.fromStore.vaddr                     := s1_in.vaddr
+
   when (s1_ld_flow) {
     when (!s1_late_kill) {
       // current ori test will cause the case of ldest == 0, below will be modifeid in the future.
@@ -705,6 +716,9 @@ class HybridUnit(implicit p: Parameters) extends XSModule
     s1_out.uop.exceptionVec(storePageFault)        := io.tlb.resp.bits.excp(0).pf.st
     s1_out.uop.exceptionVec(storeGuestPageFault)   := io.tlb.resp.bits.excp(0).gpf.st
     s1_out.uop.exceptionVec(storeAccessFault)      := io.tlb.resp.bits.excp(0).af.st
+    s1_out.uop.trigger.backendHit                  := storeTrigger.io.toStore.triggerHitVec
+    s1_out.uop.trigger.backendCanFire              := storeTrigger.io.toStore.triggerCanFireVec
+    s1_out.uop.exceptionVec(breakPoint)            := storeTrigger.io.toStore.breakPointExp
   }
 
   // pointer chasing
