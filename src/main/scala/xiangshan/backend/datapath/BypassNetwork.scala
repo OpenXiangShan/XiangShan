@@ -118,7 +118,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
   private val bypass2DateEn = VecInit(
     fromExus.map(x => GatedValidRegNext(x.valid))
   ).asUInt
-  private val bypass2DataVec = VecInit(
+  private val bypass2DataVec = if (fromDPsHasBypass2Source.length == 0) VecInit(Seq(0.U)) else VecInit(
     fromDPsHasBypass2Source.map(x => RegEnable(bypassDataVec(x), bypass2DateEn(x).asBool))
   )
 

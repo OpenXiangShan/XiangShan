@@ -593,6 +593,7 @@ package object xiangshan {
     def isVecSt(fuOpType: UInt): Bool = fuOpType(8, 7) === "b10".U
     def isVecLS(fuOpType: UInt): Bool = fuOpType(8, 7).orR
 
+    def isAllUS  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && !fuOpType(4) // Unit-Stride Whole Masked
     def isUStride(fuOpType: UInt): Bool = fuOpType(6, 0) === "b00_00000".U
     def isWhole  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01000".U
     def isMasked (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01011".U
@@ -744,7 +745,6 @@ package object xiangshan {
     def VEC_SLIDEDOWN    = "b100111".U // VEC_SLIDEDOWN
     def VEC_M0X          = "b101001".U // VEC_M0X  0MV
     def VEC_MVV          = "b101010".U // VEC_MVV  VMV
-    def VEC_M0X_VFIRST   = "b101011".U //
     def VEC_VWW          = "b101100".U //
     def VEC_RGATHER      = "b101101".U // vrgather.vv, vrgather.vi
     def VEC_RGATHER_VX   = "b101110".U // vrgather.vx

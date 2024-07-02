@@ -24,7 +24,7 @@ import utils._
 import xiangshan._
 import xiangshan.backend.rename.RatReadPort
 import xiangshan.backend.Bundles._
-import xiangshan.backend.fu.vector.Bundles.VType
+import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.FuType
 import yunsuan.VpermType
 
@@ -65,6 +65,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
       val out = new StallReasonIO(DecodeWidth)
     }
     val vsetvlVType = Input(VType())
+    val vstart = Input(Vl())
     val lastSpecVType = (Valid(new VType))
     val specVtype = Output(new VType)
   })
@@ -90,6 +91,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   decoders.zip(io.in).foreach { case (dst, src) => dst.io.enq.ctrlFlow := src.bits }
   decoders.foreach { case dst => dst.io.csrCtrl := io.csrCtrl }
   decoders.foreach { case dst => dst.io.enq.vtype := vtypeGen.io.vtype }
+  decoders.foreach { case dst => dst.io.enq.vstart := io.vstart }
   val isComplexVec = VecInit(inValids.zip(decoders.map(_.io.deq.isComplex)).map { case (valid, isComplex) => valid && isComplex })
   val isSimpleVec = VecInit(inValids.zip(decoders.map(_.io.deq.isComplex)).map { case (valid, isComplex) => valid && !isComplex })
   val simpleDecodedInst = VecInit(decoders.map(_.io.deq.decodedInst))

@@ -150,6 +150,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   isVsetSimple := latchedInst.isVset
   val vlmulReg = latchedInst.vpu.vlmul
   val vsewReg = latchedInst.vpu.vsew
+  val vstartReg = latchedInst.vpu.vstart
 
   //Type of uop Div
   val typeOfSplit = latchedInst.uopSplitType
@@ -188,6 +189,11 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   csBundle(0).firstUop := true.B
   csBundle(numOfUop - 1.U).lastUop := true.B
 
+  // when vstart is not zero, the last uop will modify vstart to zero
+  // therefore, blockback and flush pipe
+  csBundle(numOfUop - 1.U).blockBackward := vstartReg =/= 0.U
+  csBundle(numOfUop - 1.U).flushPipe := vstartReg =/= 0.U
+
   switch(typeOfSplit) {
     is(UopSplitType.VSET) {
       // In simple decoder, rfWen and vecWen are not set
@@ -202,6 +208,9 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(1).ldest := Vl_IDX.U
         csBundle(1).vecWen := false.B
         csBundle(1).vlWen := true.B
+        // vsetvl flush pipe and block backward
+        csBundle(1).flushPipe := Mux(VSETOpType.isVsetvl(latchedInst.fuOpType), true.B, false.B)
+        csBundle(1).blockBackward := Mux(VSETOpType.isVsetvl(latchedInst.fuOpType), true.B, false.B)
         when(VSETOpType.isVsetvli(latchedInst.fuOpType) && dest === 0.U && src1 === 0.U) {
           // write nothing, uop0 is a nop instruction
           csBundle(0).rfWen := false.B
@@ -1380,10 +1389,10 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(i).ldest := ldest
         csBundle(i).uopIdx := i.U
       }
-      csBundle(lmul - 1.U).rfWen := true.B
-      csBundle(lmul - 1.U).fpWen := false.B
-      csBundle(lmul - 1.U).vecWen := false.B
-      csBundle(lmul - 1.U).ldest := dest
+      csBundle(numOfUop - 1.U).rfWen := Mux(dest === 0.U, false.B, true.B)
+      csBundle(numOfUop - 1.U).fpWen := false.B
+      csBundle(numOfUop - 1.U).vecWen := false.B
+      csBundle(numOfUop - 1.U).ldest := dest
     }
 
     is(UopSplitType.VEC_MVV) {
@@ -1406,14 +1415,6 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(i * 2 + 1).ldest := (VECTOR_TMP_REG_LMUL + i).U
         csBundle(i * 2 + 1).uopIdx := (i * 2 + 1).U
       }
-    }
-
-    is(UopSplitType.VEC_M0X_VFIRST) {
-      // LMUL
-      csBundle(0).rfWen := true.B
-      csBundle(0).fpWen := false.B
-      csBundle(0).vecWen := false.B
-      csBundle(0).ldest := dest
     }
     is(UopSplitType.VEC_VWW) {
       for (i <- 0 until MAX_VLMUL*2) {

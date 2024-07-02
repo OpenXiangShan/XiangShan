@@ -825,34 +825,45 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
 
   private val isVlsType       = fuType.map(fuTypeItem => isVls(fuTypeItem))
   private val isSegment       = fuType.map(fuTypeItem => isVsegls(fuTypeItem))
-  private val isUnitStride    = fuOpType.map(fuOpTypeItem => LSUOpType.isUStride(fuOpTypeItem))
+  private val isUnitStride    = fuOpType.map(fuOpTypeItem => LSUOpType.isAllUS(fuOpTypeItem))
+  private val isVecUnitType   = isVlsType.zip(isUnitStride).map{ case (isVlsTypeItme, isUnitStrideItem) =>
+    isVlsTypeItme && isUnitStrideItem
+  }
   private val instType        = isSegment.zip(mop).map{ case (isSegementItem, mopItem) => Cat(isSegementItem, mopItem) }
-  // There is no way to calculate the 'flow' for 'unit-stride' and 'whole' exactly
-  private val numLsElem       = instType.zipWithIndex.map{ case (instTypeItem, index) =>
+  // There is no way to calculate the 'flow' for 'unit-stride' exactly:
+  //  Whether 'unit-stride' needs to be split can only be known after obtaining the address.
+  // For scalar instructions, this is not handled here, and different assignments are done later according to the situation.
+  private val numLsElem       = VecInit(uop.map(_.numLsElem))
+
+  // The maximum 'numLsElem' number that can be emitted per port is:
+  //    16 2 2 2 2 2.
+  // The 'allowDispatch' calculations are done conservatively for timing purposes:
+  //   The Flow of scalar instructions is considered 1,
+  //   The flow of vector 'unit-stride' instructions is considered 2, and the flow of other vector instructions is considered 16.
+  private val conserveFlows = isVlsType.zipWithIndex.map{ case (isVlsTyepItem, index) =>
     Mux(
-      (LSUOpType.isWhole(fuOpType(index)) || LSUOpType.isMasked(fuOpType(index)) || isUnitStride(index)) && isVlsType(index),
-      2.U,
-      GenRealFlowNum(instTypeItem, emul(index), lmul(index), eew(index), sew(index))
+      isVlsTyepItem,
+      if (index == 0) Mux(isUnitStride(index), VecMemUnitStrideMaxFlowNum.U, 16.U) else VecMemUnitStrideMaxFlowNum.U,
+      1.U
     )
   }
 
-  private val conserveFlows = isVlsType.zip(isUnitStride).map{
-    case (isVlsTyepItem, isUnitStrideItem) => Mux(isUnitStrideItem && isVlsTyepItem, 2.U, Mux(isVlsTyepItem, 16.U, 1.U))
-  }
-
   // A conservative allocation strategy is adopted here.
+  // Vector 'unit-stride' instructions and scalar instructions can be issued from all six ports,
+  // while other vector instructions can only be issued from the first port
   // if is segment instruction, need disptch it to Vldst_RS0, so, except port 0, stall other.
-  // Both of the following conditions are required for allocation:
+  // The allocation needs to meet a few conditions:
   //  1) The lsq has enough entris.
   //  2) The number of flows accumulated does not exceed VecMemDispatchMaxNumber.
+  //  3) Vector instructions other than 'unit-stride' can only be issued on the first port.
   private val allowDispatch = Wire(Vec(numLsElem.length, Bool()))
   for (index <- allowDispatch.indices) {
     val flowTotal = conserveFlows.take(index + 1).reduce(_ +& _)
     if(index == 0){
       when(isStoreVec(index) || isVStoreVec(index)) {
-        allowDispatch(index) := Mux((sqFreeCount > flowTotal) && (flowTotal <= VecMemDispatchMaxNumber.U), true.B, false.B)
+        allowDispatch(index) := sqFreeCount > flowTotal
       } .elsewhen(isLoadVec(index) || isVLoadVec(index)) {
-        allowDispatch(index) := Mux((lqFreeCount > flowTotal) && (flowTotal <= VecMemDispatchMaxNumber.U), true.B, false.B)
+        allowDispatch(index) := lqFreeCount > flowTotal
       } .elsewhen (isAMOVec(index)) {
         allowDispatch(index) := true.B
       } .otherwise {
@@ -861,9 +872,9 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     }
     else{
       when(isStoreVec(index) || isVStoreVec(index)) {
-        allowDispatch(index) := Mux((sqFreeCount > flowTotal) && (flowTotal <= VecMemDispatchMaxNumber.U), true.B, false.B) && allowDispatch(index - 1)
+        allowDispatch(index) := (sqFreeCount > flowTotal) && (isVecUnitType(index) || !isVlsType(index)) && allowDispatch(index - 1)
       } .elsewhen(isLoadVec(index) || isVLoadVec(index)) {
-        allowDispatch(index) := Mux((lqFreeCount > flowTotal) && (flowTotal <= VecMemDispatchMaxNumber.U), true.B, false.B) && allowDispatch(index - 1)
+        allowDispatch(index) := (lqFreeCount > flowTotal) && (isVecUnitType(index) || !isVlsType(index)) && allowDispatch(index - 1)
       } .elsewhen (isAMOVec(index)) {
         allowDispatch(index) := allowDispatch(index - 1)
       } .otherwise {
@@ -1135,7 +1146,6 @@ class Dispatch2IqMemImp(override val wrapper: Dispatch2Iq)(implicit p: Parameter
     uopIn.ready := enqMapDeqMatrix(idx).asUInt.orR && allowDispatch(idx) && lsqCanAccept
     uopIn.bits.lqIdx := s0_enqLsq_resp(idx).lqIdx
     uopIn.bits.sqIdx := s0_enqLsq_resp(idx).sqIdx
-    uopIn.bits.numLsElem := Mux(isVlsType(idx), numLsElem(idx), 0.U)
     dontTouch(isVlsType(idx))
     dontTouch(numLsElem(idx))
   }

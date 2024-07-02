@@ -138,11 +138,13 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     EntriesConnect(enqEntry.io.commonIn, enqEntry.io.commonOut, entryIdx)
     enqEntry.io.enqDelayIn1.wakeUpFromWB      := RegEnable(io.wakeUpFromWB, io.enq(entryIdx).valid)
     enqEntry.io.enqDelayIn1.wakeUpFromIQ      := RegEnable(io.wakeUpFromIQ, io.enq(entryIdx).valid)
+    enqEntry.io.enqDelayIn1.srcLoadDependency := RegEnable(VecInit(io.enq(entryIdx).bits.payload.srcLoadDependency.take(params.numRegSrc)), io.enq(entryIdx).valid)
     enqEntry.io.enqDelayIn1.og0Cancel         := RegNext(io.og0Cancel.asUInt)
     enqEntry.io.enqDelayIn1.ldCancel          := RegNext(io.ldCancel)
     // note: these signals with 2 cycle delay should not be enabled by io.enq.valid
     enqEntry.io.enqDelayIn2.wakeUpFromWB      := DelayN(io.wakeUpFromWB, 2)
     enqEntry.io.enqDelayIn2.wakeUpFromIQ      := DelayN(io.wakeUpFromIQ, 2)
+    enqEntry.io.enqDelayIn2.srcLoadDependency := DelayN(VecInit(io.enq(entryIdx).bits.payload.srcLoadDependency.take(params.numRegSrc)), 2)
     enqEntry.io.enqDelayIn2.og0Cancel         := DelayN(io.og0Cancel.asUInt, 2)
     enqEntry.io.enqDelayIn2.ldCancel          := DelayN(io.ldCancel, 2)
     enqEntryTransVec(entryIdx)                := enqEntry.io.commonOut.transEntry
@@ -170,10 +172,10 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
 
   if (params.isAllComp || params.isAllSimp) {
     //transPolicy
-    othersTransPolicy.get.io.canEnq := othersEntryEnqReadyVec.asUInt
+    othersTransPolicy.get.io.canEnq := VecInit(validVec.takeRight(OthersEntryNum).map(!_)).asUInt
 
     // we only allow all or none of the enq entries transfering to others entries.
-    enqCanTrans2Others.get := PopCount(validVec.take(EnqEntryNum)) <= PopCount(othersEntryEnqReadyVec)
+    enqCanTrans2Others.get := PopCount(validVec.take(EnqEntryNum)) <= PopCount(validVec.takeRight(OthersEntryNum).map(!_))
     // othersTransSelVec(i) is the target others entry for enq entry [i].
     // note that dispatch does not guarantee the validity of enq entries with low index.
     // that means in some cases enq entry [0] is invalid while enq entry [1] is valid.

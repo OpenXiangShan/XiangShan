@@ -164,7 +164,10 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     val index = io.enq.req(i).bits.lqIdx
     val enqInstr = io.enq.req(i).bits.instr.asTypeOf(new XSInstBitFields)
     when (canEnqueue(i) && !enqCancel(i)) {
-      for (j <- 0 until VecMemDispatchMaxNumber) {
+      // The maximum 'numLsElem' number that can be emitted per dispatch port is:
+      //    16 2 2 2 2 2.
+      // Therefore, VecMemLSQEnqIteratorNumberSeq = Seq(16, 2, 2, 2, 2, 2)
+      for (j <- 0 until VecMemLSQEnqIteratorNumberSeq(i)) {
         when (j.U < validVLoadOffset(i)) {
           allocated((index + j.U).value) := true.B
           uop((index + j.U).value) := io.enq.req(i).bits

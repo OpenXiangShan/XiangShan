@@ -43,12 +43,14 @@ class VecExceptionGen(implicit p: Parameters) extends XSModule{
     val inst = Input(UInt(32.W))
     val decodedInst = Input(new DecodedInst)
     val vtype = Input(new VType)
+    val vstart = Input(Vl())
 
     val illegalInst = Output(Bool())
   })
 
   private val inst: XSInstBitFields = io.inst.asTypeOf(new XSInstBitFields)
   private val isVArithMem = FuType.isVArithMem(io.decodedInst.fuType)
+  private val isVArith = FuType.isVArith(io.decodedInst.fuType)
   private val isVset = FuType.isVset(io.decodedInst.fuType)
 
   private val SEW = io.vtype.vsew(1, 0)
@@ -228,7 +230,7 @@ class VecExceptionGen(implicit p: Parameters) extends XSModule{
   private val vs2Emul = LookupTreeDefault(vs2EmulSel, LMUL, List(
     "b1000".U  -> "b100".U,
     "b0100".U  -> (LMUL + 1.U),
-    "b0010".U  -> NFtoLmul(inst.NF),
+    "b0010".U  -> NFtoLmul(inst.IMM5_OPIVI(2, 0)),
     "b0001".U  -> (LMUL +& vs2Eew - SEW)
   ))
   private val vs2NotAlign = SrcType.isVp(io.decodedInst.srcType(1)) && RegNumNotAlign(inst.VS2, vs2Emul)
@@ -236,12 +238,13 @@ class VecExceptionGen(implicit p: Parameters) extends XSModule{
   private val vdIsMask = lsMaskInst || acsbInst || cmpInst || maskArithmeticInst
   private val vdIsSingleElem = redInst || redWideningInst || vmvSingleInst
   private val vdEew = Mux(lsStrideInst, inst.WIDTH(1, 0), Mux(vdWideningInst || redWideningInst, SEW + 1.U, SEW))
-  private val vdEmulSel = Cat((vdIsMask || vdIsSingleElem), vdWideningInst, (lsWholeInst || vmvWholeInst), lsStrideInst)
+  private val vdEmulSel = Cat((vdIsMask || vdIsSingleElem), vdWideningInst, vmvWholeInst, lsWholeInst, lsStrideInst)
   private val vdEmul = LookupTreeDefault(vdEmulSel, LMUL, List(
-    "b1000".U  -> "b100".U,
-    "b0100".U  -> (LMUL + 1.U),
-    "b0010".U  -> NFtoLmul(inst.NF),
-    "b0001".U  -> (LMUL +& vdEew - SEW)
+    "b10000".U  -> "b100".U,
+    "b01000".U  -> (LMUL + 1.U),
+    "b00100".U  -> NFtoLmul(inst.IMM5_OPIVI(2, 0)),
+    "b00010".U  -> NFtoLmul(inst.NF),
+    "b00001".U  -> (LMUL +& vdEew - SEW)
   ))
   private val vdNotAlign = (SrcType.isVp(io.decodedInst.srcType(2)) || io.decodedInst.vecWen) && RegNumNotAlign(inst.VD, vdEmul)
 
@@ -262,6 +265,9 @@ class VecExceptionGen(implicit p: Parameters) extends XSModule{
   private val notAllowOverlapInst = lsIndexInst && inst.NF =/= 0.U || Seq(VMSBF_M, VMSIF_M, VMSOF_M, VIOTA_M, 
                                     VSLIDEUP_VX, VSLIDEUP_VI, VSLIDE1UP_VX, VFSLIDE1UP_VF, VRGATHER_VV, VRGATHEREI16_VV, VRGATHER_VX, VRGATHER_VI, VCOMPRESS_VM).map(_ === inst.ALL).reduce(_ || _)
 
+  // 8. vstart Illegal
+  private val vstartIllegal = isVArith && (io.vstart =/= 0.U)
+
   //vs1
   private val vs1vdRegNotOverlap = vs1RegHi < vdRegLo || vdRegHi < vs1RegLo
   private val vs1Constraint1 = vs1IsMask && vdIsMask || !vs1IsMask && !vdIsMask && vs1Eew === vdEew
@@ -279,7 +285,7 @@ class VecExceptionGen(implicit p: Parameters) extends XSModule{
 
   private val regOverlapIllegal = v0Overlap || vs1vdOverlap || vs2vdOverlap
 
-  io.illegalInst := instIllegal || villIllegal || eewIllegal || emulIllegal || regNumIllegal || regOverlapIllegal
+  io.illegalInst := instIllegal || villIllegal || eewIllegal || emulIllegal || regNumIllegal || regOverlapIllegal || vstartIllegal
   dontTouch(instIllegal)
   dontTouch(villIllegal)
   dontTouch(eewIllegal)
@@ -287,4 +293,5 @@ class VecExceptionGen(implicit p: Parameters) extends XSModule{
   dontTouch(regNumIllegal)
   dontTouch(regOverlapIllegal)
   dontTouch(notDependVtypeInst)
+  dontTouch(vstartIllegal)
 }

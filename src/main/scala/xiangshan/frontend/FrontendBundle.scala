@@ -69,6 +69,7 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICache
 class FtqICacheInfo(implicit p: Parameters)extends XSBundle with HasICacheParameters{
   val startAddr           = UInt(VAddrBits.W)
   val nextlineStart       = UInt(VAddrBits.W)
+  val ftqIdx              = new FtqPtr
   def crossCacheline =  startAddr(blockOffBits - 1) === 1.U
   def fromFtqPcBundle(b: Ftq_RF_Components) = {
     this.startAddr := b.startAddr
@@ -102,18 +103,17 @@ class PredecodeWritebackBundle(implicit p:Parameters) extends XSBundle {
   val instrRange   = Vec(PredictWidth, Bool())
 }
 
-// Ftq send req to Prefetch
-class PrefetchRequest(implicit p:Parameters) extends XSBundle {
-  val target          = UInt(VAddrBits.W)
-}
-
-class FtqPrefechBundle(implicit p:Parameters) extends XSBundle {
-  val req = DecoupledIO(new PrefetchRequest)
-}
-
 class mmioCommitRead(implicit p: Parameters) extends XSBundle {
   val mmioFtqPtr = Output(new FtqPtr)
   val mmioLastCommit = Input(Bool())
+}
+
+object ExceptionType {
+  def none = "b00".U
+  def ipf = "b01".U
+  def igpf = "b10".U
+  def acf = "b11".U
+  def width = 2
 }
 
 class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
@@ -125,9 +125,7 @@ class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val foldpc    = Vec(PredictWidth, UInt(MemPredPCWidth.W))
   val ftqPtr       = new FtqPtr
   val ftqOffset    = Vec(PredictWidth, ValidUndirectioned(UInt(log2Ceil(PredictWidth).W)))
-  val ipf          = Vec(PredictWidth, Bool())
-  val igpf          = Vec(PredictWidth, Bool())
-  val acf          = Vec(PredictWidth, Bool())
+  val exceptionType = Vec(PredictWidth, UInt(ExceptionType.width.W))
   val crossPageIPFFix = Vec(PredictWidth, Bool())
   val triggered    = Vec(PredictWidth, new TriggerCf)
   val topdown_info = new FrontendTopDownBundle
@@ -595,10 +593,13 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
 }
 
 class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUConst {
-  // val valids = Vec(3, Bool())
   val s1 = new BranchPredictionBundle
   val s2 = new BranchPredictionBundle
   val s3 = new BranchPredictionBundle
+
+  val s1_uftbHit = Bool()
+  val s1_uftbHasIndirect = Bool()
+  val s1_ftbCloseReq = Bool()
 
   val last_stage_meta = UInt(MaxMetaLength.W)
   val last_stage_spec_info = new Ftq_Redirect_SRAMEntry

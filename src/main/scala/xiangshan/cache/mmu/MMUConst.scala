@@ -91,10 +91,12 @@ trait HasTlbConst extends HasXSParameter {
   val flagLen = 8
   val pteResLen = XLEN - 44 - 2 - flagLen
   val ppnHignLen = 44 - ppnLen
+  val gvpnLen = GPAddrBits - offLen
 
   val tlbcontiguous = 8
   val sectortlbwidth = log2Up(tlbcontiguous)
   val sectorppnLen = ppnLen - sectortlbwidth
+  val sectorgvpnLen = gvpnLen - sectortlbwidth
   val sectorvpnLen = vpnLen - sectortlbwidth
 
   val loadfiltersize = 16 // 4*3(LduCnt:2 + HyuCnt:1) + 4(prefetch:1)
