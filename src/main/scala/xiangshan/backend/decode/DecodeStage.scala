@@ -45,11 +45,11 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     // to Rename
     val out = Vec(DecodeWidth, DecoupledIO(new DecodedInst))
     // RAT read
-    val intRat = Vec(RenameWidth, Vec(2, Flipped(new RatReadPort))) // Todo: make it configurable
-    val fpRat = Vec(RenameWidth, Vec(3, Flipped(new RatReadPort)))
-    val vecRat = Vec(RenameWidth, Vec(numVecRatPorts, Flipped(new RatReadPort)))
-    val v0Rat = Vec(RenameWidth, Flipped(new RatReadPort))
-    val vlRat = Vec(RenameWidth, Flipped(new RatReadPort))
+    val intRat = Vec(RenameWidth, Vec(2, Flipped(new RatReadPort(IntLogicRegs)))) // Todo: make it configurable
+    val fpRat = Vec(RenameWidth, Vec(3, Flipped(new RatReadPort(FpLogicRegs))))
+    val vecRat = Vec(RenameWidth, Vec(numVecRatPorts, Flipped(new RatReadPort(VecLogicRegs))))
+    val v0Rat = Vec(RenameWidth, Flipped(new RatReadPort(V0LogicRegs)))
+    val vlRat = Vec(RenameWidth, Flipped(new RatReadPort(VlLogicRegs)))
     // csr control
     val csrCtrl = Input(new CustomCSRCtrlIO)
     val fusion = Vec(DecodeWidth - 1, Input(Bool()))

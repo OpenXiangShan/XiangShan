@@ -55,11 +55,11 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val vecReadPorts = Vec(RenameWidth, Vec(numVecRatPorts, Input(UInt(PhyRegIdxWidth.W))))
     val v0ReadPorts = Vec(RenameWidth, Vec(1, Input(UInt(PhyRegIdxWidth.W))))
     val vlReadPorts = Vec(RenameWidth, Vec(1, Input(UInt(PhyRegIdxWidth.W))))
-    val intRenamePorts = Vec(RenameWidth, Output(new RatWritePort))
-    val fpRenamePorts = Vec(RenameWidth, Output(new RatWritePort))
-    val vecRenamePorts = Vec(RenameWidth, Output(new RatWritePort))
-    val v0RenamePorts = Vec(RenameWidth, Output(new RatWritePort))
-    val vlRenamePorts = Vec(RenameWidth, Output(new RatWritePort))
+    val intRenamePorts = Vec(RenameWidth, Output(new RatWritePort(log2Ceil(IntLogicRegs))))
+    val fpRenamePorts = Vec(RenameWidth, Output(new RatWritePort(log2Ceil(FpLogicRegs))))
+    val vecRenamePorts = Vec(RenameWidth, Output(new RatWritePort(log2Ceil(VecLogicRegs))))
+    val v0RenamePorts = Vec(RenameWidth, Output(new RatWritePort(log2Ceil(V0LogicRegs))))
+    val vlRenamePorts = Vec(RenameWidth, Output(new RatWritePort(log2Ceil(VlLogicRegs))))
     // from rename table
     val int_old_pdest = Vec(RabCommitWidth, Input(UInt(PhyRegIdxWidth.W)))
     val fp_old_pdest = Vec(RabCommitWidth, Input(UInt(PhyRegIdxWidth.W)))
@@ -476,23 +476,23 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // I. RAT Update
     // When redirect happens (mis-prediction), don't update the rename table
     io.intRenamePorts(i).wen  := intSpecWen(i)
-    io.intRenamePorts(i).addr := uops(i).ldest
+    io.intRenamePorts(i).addr := uops(i).ldest(log2Ceil(IntLogicRegs) - 1, 0)
     io.intRenamePorts(i).data := io.out(i).bits.pdest
 
     io.fpRenamePorts(i).wen  := fpSpecWen(i)
-    io.fpRenamePorts(i).addr := uops(i).ldest
+    io.fpRenamePorts(i).addr := uops(i).ldest(log2Ceil(FpLogicRegs) - 1, 0)
     io.fpRenamePorts(i).data := fpFreeList.io.allocatePhyReg(i)
 
     io.vecRenamePorts(i).wen := vecSpecWen(i)
-    io.vecRenamePorts(i).addr := uops(i).ldest
+    io.vecRenamePorts(i).addr := uops(i).ldest(log2Ceil(VecLogicRegs) - 1, 0)
     io.vecRenamePorts(i).data := vecFreeList.io.allocatePhyReg(i)
 
     io.v0RenamePorts(i).wen := v0SpecWen(i)
-    io.v0RenamePorts(i).addr := uops(i).ldest
+    io.v0RenamePorts(i).addr := uops(i).ldest(log2Ceil(V0LogicRegs) - 1, 0)
     io.v0RenamePorts(i).data := v0FreeList.io.allocatePhyReg(i)
 
     io.vlRenamePorts(i).wen := vlSpecWen(i)
-    io.vlRenamePorts(i).addr := uops(i).ldest
+    io.vlRenamePorts(i).addr := uops(i).ldest(log2Ceil(VlLogicRegs) - 1, 0)
     io.vlRenamePorts(i).data := vlFreeList.io.allocatePhyReg(i)
 
     // II. Free List Update
