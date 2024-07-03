@@ -468,8 +468,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_doubleLine     = RegEnable(f2_doubleLine, f2_fire)
   val f3_fire           = io.toIbuffer.fire
 
-  f3_ready := f3_fire || !f3_valid
-
   val f3_cut_data       = RegEnable(f2_cut_data, f2_fire)
 
   val f3_except_pf      = RegEnable(f2_except_pf,  f2_fire)
