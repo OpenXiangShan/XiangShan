@@ -21,6 +21,20 @@ object Bundles {
     val vlmul   = VLmul()
   }
 
+  /**
+    * vset module's vtype bundle, use 3 bits vsew to check if it is illegal
+    *
+    * we need to get 3 bits vsew in Vtype struct, then vset module can check if it is reserved.
+    * and we use 2 bits to store vsew in other places to save space
+    */
+  class VsetVType(implicit p: Parameters) extends Bundle {
+    val illegal = Bool()
+    val vma     = Bool()
+    val vta     = Bool()
+    val vsew    = VtypeVSew()
+    val vlmul   = VLmul()
+  }
+
   object VType {
     def apply()(implicit p: Parameters) : VType = {
       new VType
@@ -53,6 +67,32 @@ object Bundles {
       res.vta := vtype.vta
       res.vsew := Cat(0.U(1.W), vtype.vsew)
       res.vlmul := vtype.vlmul
+      res
+    }
+  }
+
+  object VsetVType {
+    def apply()(implicit p: Parameters) : VsetVType = {
+      new VsetVType
+    }
+
+    def fromInstVType(instVType: InstVType)(implicit p: Parameters) : VsetVType = {
+      val res = Wire(VsetVType())
+      res.vma   := instVType.vma
+      res.vta   := instVType.vta
+      res.vsew  := instVType.vsew
+      res.vlmul := instVType.vlmul
+      res.illegal := false.B
+      res
+    }
+
+    def fromVtypeStruct(vtypeStruct: VtypeStruct)(implicit p: Parameters): VsetVType = {
+      val res = Wire(VsetVType())
+      res.illegal := vtypeStruct.vill
+      res.vma := vtypeStruct.vma
+      res.vta := vtypeStruct.vta
+      res.vsew := vtypeStruct.vsew
+      res.vlmul := vtypeStruct.vlmul
       res
     }
   }
@@ -91,6 +131,8 @@ object Bundles {
       }
     }
   }
+
+  object VtypeVSew extends NamedUInt(3)
 
   object VLmul extends NamedUInt(3) {
     def m1  : UInt = "b000".U(width.W)
