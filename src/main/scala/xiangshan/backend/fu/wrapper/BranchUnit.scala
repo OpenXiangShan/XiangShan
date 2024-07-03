@@ -44,7 +44,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.out.bits.res.data := 0.U
   io.out.bits.res.redirect.get match {
     case redirect =>
-      redirect.valid := io.out.valid && dataModule.io.mispredict
+      redirect.valid := io.out.valid && redirect.bits.cfiUpdate.isMisPred
       redirect.bits := 0.U.asTypeOf(io.out.bits.res.redirect.get.bits)
       redirect.bits.specifyField(
         _.level := RedirectLevel.flushAfter,
