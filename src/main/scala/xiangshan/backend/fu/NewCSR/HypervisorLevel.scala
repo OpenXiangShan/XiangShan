@@ -294,37 +294,37 @@ class HieToMie extends IeValidBundle {
 
 class HvictlBundle extends CSRBundle {
   // Virtual Trap Interrupt control
-  val VTI = RW(30)
+  val VTI = RW(30).withReset(0.U)
   // WARL in AIA spec.
   // RW, since we support max width of IID
-  val IID = RW(15 + HIIDWidth, 16)
+  val IID = RW(15 + HIIDWidth, 16).withReset(0.U)
   // determines the interrupt’s presumed default priority order relative to a (virtual) supervisor external interrupt (SEI), major identity 9
   // 0 = interrupt has higher default priority than an SEI
   // 1 = interrupt has lower default priority than an SEI
   // When hvictl.IID = 9, DPR is ignored.
   // Todo: sort the interrupt specified by hvictl with DPR
-  val DPR = RW(9)
-  val IPRIOM = RW(8)
-  val IPRIO = RW(7, 0)
+  val DPR = RW(9).withReset(0.U)
+  val IPRIOM = RW(8).withReset(0.U)
+  val IPRIO = RW(7, 0).withReset(0.U)
 }
 
 class Hviprio1Bundle extends CSRBundle {
-  val PrioSSI = RW(15,  8)
-  val PrioSTI = RW(31, 24)
-  val PrioCOI = RW(47, 40)
-  val Prio14  = RW(55, 48)
-  val Prio15  = RW(63, 56)
+  val PrioSSI = RW(15,  8).withReset(0.U)
+  val PrioSTI = RW(31, 24).withReset(0.U)
+  val PrioCOI = RW(47, 40).withReset(0.U)
+  val Prio14  = RO(55, 48).withReset(0.U)
+  val Prio15  = RO(63, 56).withReset(0.U)
 }
 
 class Hviprio2Bundle extends CSRBundle {
-  val Prio16 = RW(7, 0)
-  val Prio17 = RW(15, 8)
-  val Prio18 = RW(23, 16)
-  val Prio19 = RW(31, 24)
-  val Prio20 = RW(39, 32)
-  val Prio21 = RW(47, 40)
-  val Prio22 = RW(55, 48)
-  val Prio23 = RW(63, 56)
+  val Prio16 = RO(7, 0).withReset(0.U)
+  val Prio17 = RO(15, 8).withReset(0.U)
+  val Prio18 = RO(23, 16).withReset(0.U)
+  val Prio19 = RO(31, 24).withReset(0.U)
+  val Prio20 = RO(39, 32).withReset(0.U)
+  val Prio21 = RO(47, 40).withReset(0.U)
+  val Prio22 = RO(55, 48).withReset(0.U)
+  val Prio23 = RO(63, 56).withReset(0.U)
 }
 
 class HgatpBundle extends CSRBundle {
