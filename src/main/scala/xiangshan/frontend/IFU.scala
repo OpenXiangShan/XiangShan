@@ -580,7 +580,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   when(RegNext(f2_fire && !f2_flush) && f3_req_is_mmio)        { f3_mmio_use_seq_pc := true.B  }
   .elsewhen(redirect_mmio_req)                                 { f3_mmio_use_seq_pc := false.B }
 
-  f3_ready := Mux(f3_req_is_mmio, io.toIbuffer.ready && f3_mmio_req_commit || !f3_valid , io.toIbuffer.ready || !f3_valid)
+  f3_ready := (io.toIbuffer.ready && (f3_mmio_req_commit || !f3_req_is_mmio)) || !f3_valid
 
   // mmio state machine
   switch(mmio_state){
