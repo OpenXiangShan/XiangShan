@@ -690,6 +690,16 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   for (j <- 0 until TriggerNum)
     PrintTriggerInfo(tEnable(j), tdata(j))
 
+  // The segment instruction is executed atomically.
+  // After the segment instruction directive starts executing, no other instructions should be executed.
+  val vSegmentFlag = RegInit(false.B)
+
+  when(vSegmentUnit.io.in.fire){
+    vSegmentFlag := true.B
+  }.elsewhen(vSegmentUnit.io.uopwriteback.valid){
+    vSegmentFlag := false.B
+  }
+
   // LoadUnit
   val correctMissTrain = Constantin.createRecord(s"CorrectMissTrain$hartId", initValue = false)
 
@@ -728,16 +738,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       vSegmentUnit.io.rdcache.req.ready := dcache.io.lsu.load(i).req.ready
     }
 
-
-    // The segment instruction is executed atomically.
-    // After the segment instruction directive starts executing, no other instructions should be executed.
-    val vSegmentFlag = RegInit(false.B)
-
-    when(vSegmentUnit.io.in.fire){
-      vSegmentFlag := true.B
-    }.elsewhen(vSegmentUnit.io.uopwriteback.valid){
-      vSegmentFlag := false.B
-    }
     // Dcache requests must also be preempted by the segment.
     when(vSegmentFlag){
       loadUnits(i).io.dcache.req.ready             := false.B // Dcache is preempted.
@@ -1334,10 +1334,21 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   dcache.io.force_write := lsq.io.force_write
 
   // Initialize when unenabled difftest.
-  sbuffer.io.vecDifftestInfo    := DontCare
-  lsq.io.sbufferVecDifftestInfo := DontCare
+  sbuffer.io.vecDifftestInfo      := DontCare
+  lsq.io.sbufferVecDifftestInfo   := DontCare
+  vSegmentUnit.io.vecDifftestInfo := DontCare
   if (env.EnableDifftest) {
-    lsq.io.sbufferVecDifftestInfo <> sbuffer.io.vecDifftestInfo
+    sbuffer.io.vecDifftestInfo .zipWithIndex.map{ case (sbufferPort, index) =>
+      if( index == 0) {
+        sbufferPort.valid := Mux(vSegmentFlag, vSegmentUnit.io.vecDifftestInfo.valid, lsq.io.sbufferVecDifftestInfo(0).valid)
+        sbufferPort.bits  := Mux(vSegmentFlag, vSegmentUnit.io.vecDifftestInfo.bits, lsq.io.sbufferVecDifftestInfo(0).bits)
+
+        vSegmentUnit.io.vecDifftestInfo.ready  := sbufferPort.ready
+        lsq.io.sbufferVecDifftestInfo(0).ready := sbufferPort.ready
+      }else{
+         sbufferPort <> lsq.io.sbufferVecDifftestInfo(index)
+      }
+    }
   }
 
   // lsq.io.vecStoreRetire <> vsFlowQueue.io.sqRelease
