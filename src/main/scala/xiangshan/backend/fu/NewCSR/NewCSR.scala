@@ -545,7 +545,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     mod match {
       case m: HasIpIeBundle =>
         m.mideleg := mideleg.regOut
-        m.mip := mip.regOut
+        m.mip := mip.rdata
         m.mie := mie.regOut
         m.mvip := mvip.regOut
         m.mvien := mvien.regOut
