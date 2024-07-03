@@ -91,15 +91,57 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
   })
     .setAddr(CSRs.vstopi)
 
-  val miregiprios: Seq[CSRModule[_]] = Range(0, 0xF, 2).map(num =>
-    Module(new CSRModule(s"Iprio$num"))
-      .setAddr(0x30 + num)
-  )
+  val miprio0 = Module(new CSRModule(s"Iprio0", new Iprio0Bundle))
+    .setAddr(0x30)
 
-  val siregiprios: Seq[CSRModule[_]] = Range(0, 0xF, 2).map(num =>
-    Module(new CSRModule(s"Iprio$num"))
-      .setAddr(0x30 + num)
-  )
+  val miprio2 = Module(new CSRModule(s"Iprio2", new Iprio2Bundle))
+    .setAddr(0x32)
+
+  val miprio4 = Module(new CSRModule(s"Iprio4", new IprioBundle))
+    .setAddr(0x34)
+
+  val miprio6 = Module(new CSRModule(s"Iprio6", new IprioBundle))
+    .setAddr(0x36)
+
+  val miprio8 = Module(new CSRModule(s"Iprio8", new Iprio8Bundle))
+    .setAddr(0x38)
+
+  val miprio10 = Module(new CSRModule(s"Iprio10", new Iprio10Bundle))
+    .setAddr(0x3A)
+
+  val miprio12 = Module(new CSRModule(s"Iprio12", new IprioBundle))
+    .setAddr(0x3C)
+
+  val miprio14 = Module(new CSRModule(s"Iprio14", new IprioBundle))
+    .setAddr(0x3E)
+
+  val siprio0 = Module(new CSRModule(s"Iprio0", new Iprio0Bundle))
+    .setAddr(0x30)
+
+  val siprio2 = Module(new CSRModule(s"Iprio2", new Iprio2Bundle))
+    .setAddr(0x32)
+
+  val siprio4 = Module(new CSRModule(s"Iprio4", new IprioBundle))
+    .setAddr(0x34)
+
+  val siprio6 = Module(new CSRModule(s"Iprio6", new IprioBundle))
+    .setAddr(0x36)
+
+  val siprio8 = Module(new CSRModule(s"Iprio8", new Iprio8Bundle))
+    .setAddr(0x38)
+
+  val siprio10 = Module(new CSRModule(s"Iprio10", new Iprio10Bundle))
+    .setAddr(0x3A)
+
+  val siprio12 = Module(new CSRModule(s"Iprio12", new IprioBundle))
+    .setAddr(0x3C)
+
+  val siprio14 = Module(new CSRModule(s"Iprio14", new IprioBundle))
+    .setAddr(0x3E)
+
+  val miregiprios: Seq[CSRModule[_]] = Seq(miprio0, miprio2, miprio4, miprio6, miprio8, miprio10, miprio12, miprio14)
+
+  val siregiprios: Seq[CSRModule[_]] = Seq(siprio0, siprio2, siprio4, siprio6, siprio8, siprio10, siprio12, siprio14)
 
   val aiaCSRMods = Seq(
     miselect,
@@ -204,7 +246,32 @@ class TopEIBundle extends CSRBundle {
 }
 
 class IprioBundle extends CSRBundle {
-  val ALL = RW(63, 0).withReset(0.U)
+  val ALL = RO(63, 0).withReset(0.U)
+}
+
+class Iprio0Bundle extends CSRBundle {
+  val PrioSSI  = RW(15,  8).withReset(0.U)
+  val PrioVSSI = RW(23, 16).withReset(0.U)
+  val PrioMSI  = RW(31, 24).withReset(0.U)
+  val PrioSTI  = RW(47, 40).withReset(0.U)
+  val PrioVSTI = RW(55, 48).withReset(0.U)
+  val PrioMTI  = RW(63, 56).withReset(0.U)
+}
+
+class Iprio2Bundle extends CSRBundle {
+  val PrioSEI  = RW(15,  8).withReset(0.U)
+  val PrioVSEI = RW(23, 16).withReset(0.U)
+  val PrioMEI  = RW(31, 24).withReset(0.U)
+  val PrioSGEI = RW(39, 32).withReset(0.U)
+  val PrioCOI  = RW(47, 40).withReset(0.U)
+}
+
+class Iprio8Bundle extends CSRBundle {
+  val PrioLPRASEI = RW(31, 24).withReset(0.U)
+}
+
+class Iprio10Bundle extends CSRBundle {
+  val PrioHPRASEI = RW(31, 24).withReset(0.U)
 }
 
 class CSRToAIABundle extends Bundle {
