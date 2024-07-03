@@ -38,6 +38,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   val core = LazyModule(new XSCore())
   val l2top = LazyModule(new L2Top())
 
+  val enableCHI = p(EnableCHI)
   val enableL2 = coreParams.L2CacheParamsOpt.isDefined
   // =========== Public Ports ============
   val core_l3_pf_port = core.memBlock.l3_pf_sender_opt
@@ -103,7 +104,6 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     })
 
     dontTouch(io.hartId)
-    if (!io.chi.isEmpty) { dontTouch(io.chi.get) }
 
     val core_soft_rst = core_reset_sink.in.head._1 // unused
 

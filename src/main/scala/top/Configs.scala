@@ -291,9 +291,7 @@ class WithNKBL2
         )),
         reqField = Seq(utility.ReqSourceField()),
         echoField = Seq(huancun.DirtyField()),
-        prefetch = Seq(BOPParameters()) ++
-          (if (tp) Seq(TPParameters()) else Nil) ++
-          (if (p.prefetcher.nonEmpty) Seq(PrefetchReceiverParams()) else Nil),
+        prefetch = Seq(PrefetchReceiverParams(), BOPParameters()) ++ (if (tp) Seq(TPParameters()) else Nil),
         enablePerf = !site(DebugOptionsKey).FPGAPlatform && site(DebugOptionsKey).EnablePerfDebug,
         enableRollingDB = site(DebugOptionsKey).EnableRollingDB,
         enableMonitor = site(DebugOptionsKey).AlwaysBasicDB,
@@ -406,5 +404,5 @@ class KunminghuV2Config(n: Int = 1) extends Config(
     })
     ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4, tp = false)
     ++ new WithNKBL1D(64, ways = 8)
-    ++ new MinimalConfig(n)
+    ++ new BaseConfig(n)
 )

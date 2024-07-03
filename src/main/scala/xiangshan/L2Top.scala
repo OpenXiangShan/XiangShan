@@ -65,6 +65,7 @@ class L2Top()(implicit p: Parameters) extends LazyModule
     val node = buffers.map(_.node.asInstanceOf[TLNode]).reduce(_ :*=* _)
     (buffers, node)
   }
+  val enableCHI = p(EnableCHI)
   val enableL2 = coreParams.L2CacheParamsOpt.isDefined
   // =========== Components ============
   val l1_xbar = TLXbar()
@@ -79,7 +80,7 @@ class L2Top()(implicit p: Parameters) extends LazyModule
   val d_mmio_port = TLTempNode()
 
   val misc_l2_pmu = BusPerfMonitor(name = "Misc_L2", enable = !debugOpts.FPGAPlatform) // l1D & l1I & PTW
-  val l2_l3_pmu = BusPerfMonitor(name = "L2_L3", enable = !debugOpts.FPGAPlatform && !enableCHI, stat_latency = true)
+  val l2_l3_pmu = BusPerfMonitor(name = "L2_L3", enable = !debugOpts.FPGAPlatform, stat_latency = true)
   val xbar_l2_buffer = TLBuffer()
 
   val enbale_tllog = !debugOpts.FPGAPlatform && debugOpts.AlwaysBasicDB
@@ -163,7 +164,6 @@ class L2Top()(implicit p: Parameters) extends LazyModule
     cpu_halt.toTile := cpu_halt.fromCore
     dontTouch(hartId)
     dontTouch(cpu_halt)
-    if (!chi.isEmpty) { dontTouch(chi.get) }
 
     if (l2cache.isDefined) {
       val l2 = l2cache.get.module

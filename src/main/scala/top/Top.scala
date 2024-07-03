@@ -25,7 +25,6 @@ import xiangshan._
 import utils._
 import huancun.{HCCacheParameters, HCCacheParamsKey, HuanCun, PrefetchRecv, TPmetaResp}
 import coupledL2.EnableCHI
-import openLLC.DummyLLC
 import utility._
 import system._
 import device._
@@ -49,6 +48,8 @@ abstract class BaseXSSoc()(implicit p: Parameters) extends LazyModule
 
 class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 {
+  val enableCHI = p(EnableCHI)
+
   val nocMisc = if (enableCHI) Some(LazyModule(new MemMisc())) else None
   val socMisc = if (!enableCHI) Some(LazyModule(new SoCMisc())) else None
   val misc: MemMisc = if (enableCHI) nocMisc.get else socMisc.get
@@ -67,10 +68,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
         manager.resources.foreach(r => r.bind(manager.toResource))
       }
     }
-    if (!enableCHI) {
-      bindManagers(misc.l3_xbar.asInstanceOf[TLNexusNode])
-      bindManagers(misc.peripheralXbar.get.asInstanceOf[TLNexusNode])
-    }
+    bindManagers(misc.l3_xbar.asInstanceOf[TLNexusNode])
+    bindManagers(misc.peripheralXbar.asInstanceOf[TLNexusNode])
   }
 
   println(s"FPGASoC cores: $NumCores banks: $L3NBanks block size: $L3BlockSize bus size: $L3OuterBusWidth")
@@ -91,9 +90,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     })))
   )
 
-  val chi_dummyllc_opt = Option.when(enableCHI)(LazyModule(new DummyLLC(numRNs = NumCores)(p)))
-
-  // receive all prefetch req from cores
+  // recieve all prefetch req from cores
   val memblock_pf_recv_nodes: Seq[Option[BundleBridgeSink[PrefetchRecv]]] = core_with_l2.map(_.core_l3_pf_port).map{
     x => x.map(_ => BundleBridgeSink(Some(() => new PrefetchRecv)))
   }
@@ -109,16 +106,25 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     core_with_l2(i).debug_int_node := misc.debugModule.debug.dmOuter.dmOuter.intnode
     misc.plic.intnode := IntBuffer() := core_with_l2(i).beu_int_source
     if (!enableCHI) {
-      misc.peripheral_ports.get(i) := core_with_l2(i).tl_uncache
+      misc.peripheral_ports(i) := core_with_l2(i).tl_uncache 
+    } else {
+      // Make diplomacy happy
+      val clientParameters = TLMasterPortParameters.v1(
+        clients = Seq(TLMasterParameters.v1(
+          "uncache"
+        ))
+      )
+      val clientNode = TLClientNode(Seq(clientParameters))
+      misc.peripheral_ports(i) := clientNode
     }
-    core_with_l2(i).memory_port.foreach(port => (misc.core_to_l3_ports.get)(i) :=* port)
+    misc.core_to_l3_ports.foreach(port => port(i) :=* core_with_l2(i).memory_port.get)
     memblock_pf_recv_nodes(i).map(recv => {
       println(s"Connecting Core_${i}'s L1 pf source to L3!")
       recv := core_with_l2(i).core_l3_pf_port.get
     })
   }
 
-  l3cacheOpt.map(_.ctlnode.map(_ := misc.peripheralXbar.get))
+  l3cacheOpt.map(_.ctlnode.map(_ := misc.peripheralXbar))
   l3cacheOpt.map(_.intnode.map(int => {
     misc.plic.intnode := IntBuffer() := int
   }))
@@ -157,12 +163,6 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     case None =>
   }
 
-  chi_dummyllc_opt match {
-    case Some(llc) =>
-      misc.soc_xbar := llc.axi4node
-    case None =>
-  }
-
   class XSTopImp(wrapper: LazyModule) extends LazyRawModuleImp(wrapper) {
     soc.XSTopPrefix.foreach { prefix =>
       val mod = this.toNamed
@@ -177,18 +177,19 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     FileRegisters.add("plusArgs", freechips.rocketchip.util.PlusArgArtefacts.serialize_cHeader())
 
     val dma = socMisc.map(m => IO(Flipped(new VerilogAXI4Record(m.dma.elts.head.params))))
-    val peripheral = IO(new VerilogAXI4Record(m.peripheral.elts.head.params))
+    val peripheral = socMisc.map(m => IO(new VerilogAXI4Record(m.peripheral.elts.head.params)))
     val memory = IO(new VerilogAXI4Record(misc.memory.elts.head.params))
 
     socMisc match {
       case Some(m) =>
         m.dma.elements.head._2 <> dma.get.viewAs[AXI4Bundle]
+        peripheral.get.viewAs[AXI4Bundle] <> m.peripheral.elements.head._2
         dontTouch(dma.get)
+        dontTouch(peripheral.get)
       case None =>
     }
 
     memory.viewAs[AXI4Bundle] <> misc.memory.elements.head._2
-    peripheral.viewAs[AXI4Bundle] <> misc.peripheral.elements.head._2
 
     val io = IO(new Bundle {
       val clock = Input(Bool())
@@ -235,10 +236,6 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
       core.module.io.hartId := i.U
       io.riscv_halt(i) := core.module.io.cpu_halt
       core.module.io.reset_vector := io.riscv_rst_vec(i)
-      chi_dummyllc_opt.foreach { case llc =>
-        llc.module.io.rn(i) <> core.module.io.chi.get
-        core.module.io.nodeID.get := i.U // TODO
-      }
     }
 
     if(l3cacheOpt.isEmpty || l3cacheOpt.get.rst_nodes.isEmpty){
@@ -267,6 +264,10 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     }
 
     core_with_l2.foreach { case tile =>
+      tile.module.io.chi.foreach { case chi_port =>
+        chi_port <> DontCare
+        dontTouch(chi_port)
+      }
       tile.module.io.nodeID.foreach { case nodeID =>
         nodeID := DontCare
         dontTouch(nodeID)
