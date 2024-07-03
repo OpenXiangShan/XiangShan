@@ -6,7 +6,7 @@ import utility.ZeroExt
 import xiangshan.{VSETOpType, CSROpType}
 import xiangshan.backend.decode.Imm_VSETIVLI
 import xiangshan.backend.decode.isa.bitfield.InstVType
-import xiangshan.backend.fu.vector.Bundles.VType
+import xiangshan.backend.fu.vector.Bundles.VsetVType
 import xiangshan.backend.fu.{FuConfig, FuncUnit, PipedFuncUnit, VsetModule, VtypeStruct}
 import xiangshan.backend.fu.vector.Bundles.VConfig
 
@@ -25,8 +25,8 @@ class VSetBase(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   protected val avl = Mux(VSETOpType.isVsetivli(in.ctrl.fuOpType), avlImm, in.data.src(0))
 
   protected val instVType: InstVType = Imm_VSETIVLI().getVType(in.data.src(1))
-  protected val vtypeImm: VType = VType.fromInstVType(instVType)
-  protected val vtype: VType = Mux(VSETOpType.isVsetvl(in.ctrl.fuOpType), VType.fromVtypeStruct(in.data.src(1).asTypeOf(new VtypeStruct())), vtypeImm)
+  protected val vtypeImm: VsetVType = VsetVType.fromInstVType(instVType)
+  protected val vtype: VsetVType = Mux(VSETOpType.isVsetvl(in.ctrl.fuOpType), VsetVType.fromVtypeStruct(in.data.src(1).asTypeOf(new VtypeStruct())), vtypeImm)
 
   vsetModule.io.in.func := in.ctrl.fuOpType
   connect0LatencyCtrlSingal

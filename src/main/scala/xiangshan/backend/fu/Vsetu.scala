@@ -20,14 +20,14 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.backend.fu.vector.Bundles.{VConfig, VType, Vl}
+import xiangshan.backend.fu.vector.Bundles.{VConfig, VType, Vl, VSew, VLmul, VsetVType}
 
 class VsetModuleIO(implicit p: Parameters) extends XSBundle {
   private val vlWidth = p(XSCoreParamsKey).vlWidth
 
   val in = Input(new Bundle {
     val avl   : UInt = UInt(XLEN.W)
-    val vtype : VType = VType()
+    val vtype : VsetVType = VsetVType()
     val func  : UInt = FuOpType()
   })
 
@@ -76,7 +76,8 @@ class VsetModule(implicit p: Parameters) extends XSModule {
   println(s"[VsetModule] vlWidth: $vlWidth")
 
   private val log2Vlmul = vlmul
-  private val log2Vsew = vsew +& "b011".U
+  // use 2 bits vsew to store vsew
+  private val log2Vsew = vsew(VSew.width - 1, 0) +& "b011".U
 
   // vlen = 128, lmul = 8, sew = 8, log2Vlen = 7,
   // vlmul = b011, vsew = 0, 7 + 3 - (0 + 3) = 7
@@ -92,8 +93,8 @@ class VsetModule(implicit p: Parameters) extends XSModule {
   private val log2Elen = log2Up(ELEN)
   private val log2VsewMax = Mux(log2Vlmul(2), log2Elen.U + log2Vlmul, log2Elen.U)
 
-  private val sewIllegal = log2Vsew > log2VsewMax
-  private val lmulIllegal = vlmul === "b100".U
+  private val sewIllegal = VSew.isReserved(vsew) || (log2Vsew > log2VsewMax)
+  private val lmulIllegal = VLmul.isReserved(vlmul)
 
   private val illegal = lmulIllegal | sewIllegal | vtype.illegal
 
