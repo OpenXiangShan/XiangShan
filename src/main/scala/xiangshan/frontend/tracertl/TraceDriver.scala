@@ -19,6 +19,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.ParallelPosteriorityMux
+import xiangshan.frontend.BranchPredictionRedirect
 
 class TraceDriverOutput(implicit p: Parameters) extends TraceBundle {
   // when block true, the fetch is at the wrong path, should block ifu-go, ibuffer-recv
@@ -34,6 +35,12 @@ class TraceDriverIO(implicit p: Parameters) extends TraceBundle {
   val traceInsts = Input(Vec(PredictWidth, Valid(new TraceInstrBundle())))
   val traceRange = Input(UInt(PredictWidth.W))
   val predInfo = Input(new TracePredictInfo())
+  val ifuRange = Input(UInt(PredictWidth.W)) // fixed Range
+
+  val redirect = Input(new Bundle {
+   val fromBackend = Valid(new BranchPredictionRedirect()) // backend -> ftq -> ifu
+   val fromIFUBPU = Bool()
+  })
 
   val out = new TraceDriverOutput()
 }
@@ -42,8 +49,28 @@ class TraceDriver(implicit p: Parameters) extends TraceModule {
   val io = IO(new TraceDriverIO())
   dontTouch(io)
 
+  // Corner Case: wrong path, but correct pc.
+  //   The path check at the TraceAligner just use pc-match.
+  //   But when wrong path, the pc is correct, so we need to check the path again.
+  //   For example, fetch bundle: startAddr 0xc9e, next start 0xcae. FtqOffset.valid is false
+  //     At 0xca6, there is a branch to 0xcae(but predicted to not taken).
+  //     correct path: fetch0: 0xc9e-0xca6 -> fetch1: 0xcae-
+  //     wrong-path: fetch0: 0xc9e-0xcae -> fetch1: 0xcae-
+  //     The wrong path's next fecth req's startAddr is the same with correct path.
+  //   So we need to explicitly check/record the path is wrong or correct.
+  // when wrong path, block ifu-go, ibuffer-recv
+  val wrongPathState = RegInit(false.B)
+  when (io.fire) {
+    wrongPathState := (io.traceRange =/= io.ifuRange)
+  }
+  when (io.redirect.fromBackend.valid || io.redirect.fromIFUBPU) {
+    wrongPathState := false.B
+  }
+
+  val pcMismatch = io.out.recv.bits.instNum === 0.U
+  io.out.block := pcMismatch || wrongPathState
+
   val traceValid = VecInit(io.traceInsts.map(_.valid)).asUInt
-  io.out.block := io.out.recv.bits.instNum === 0.U // may be we need more precise control signal
   io.out.recv.bits.instNum := PopCount(io.traceRange & traceValid)
   io.out.recv.valid := io.fire
 
