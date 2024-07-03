@@ -48,12 +48,32 @@ jobs:
       - name: check top wiring
         run:
           bash .github/workflows/check-usage.sh "BoringUtils" $GITHUB_WORKSPACE
+      - name: generate standalone clint
+        run: |
+          make StandAloneCLINT DEVICE_BASE_ADDR=0x38000000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0
+          make clean
+          make StandAloneCLINT DEVICE_BASE_ADDR=0x38000000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=1
+          make clean
+      - name: generate standalone debug module
+        run: |
+          make StandAloneDebugModule DEVICE_BASE_ADDR=0x38020000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0
+          make clean
+          make StandAloneDebugModule DEVICE_BASE_ADDR=0x38020000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=1
+          make clean
+      - name: generate XSNoCTop verilog file
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate --config XSNoCTopConfig --mfc
+      - name: check XSNoCTop verilog
+        run: |
+          python3 $GITHUB_WORKSPACE/.github/workflows/check_verilog.py build/rtl
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
       - name: generate verilog file
         run:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate --num-cores 2 --mfc
       - name: check verilog
-        run:
+        run: |
           python3 $GITHUB_WORKSPACE/.github/workflows/check_verilog.py build/rtl
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
       - name: build MinimalConfig Release emu
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
