@@ -509,6 +509,9 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.sbuffer.bits.id               := DontCare
   io.sbuffer.bits.addr             := instMicroOp.paddr
 
+  io.vecDifftestInfo.valid         := state === s_send_data && segmentActive
+  io.vecDifftestInfo.bits          := uopq(deqPtr.value).uop
+
   /**
    * update ptr
    * */
