@@ -636,6 +636,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
       _.traceInsts := tracePDaC.io.traceAlignInsts,
       _.traceRange := traceChecker.traceRange,
       _.predInfo := tracePDaC.io.predInfo, // duplicate signal, just to speed up waveform debug
+      _.ifuRange := checkerOutStage1.fixedRange.asUInt,
+      _.redirect.fromBackend := fromFtq.redirect,
+      _.redirect.fromIFUBPU := (wb_redirect && !f3_wb_not_flush),
     )
   } else {
     traceReader.io <> DontCare
