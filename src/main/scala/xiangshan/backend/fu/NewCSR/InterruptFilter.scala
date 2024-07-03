@@ -39,22 +39,11 @@ class InterruptFilter extends Module {
   val hsiprios = io.in.hsiprios
   val hviprios = Cat(hviprio2.asUInt, hviprio1.asUInt)
 
+
   /**
    * Sort by implemented interrupt default priority
    * index low, priority high
    */
-  val mipriosSort: Vec[UInt] = VecInit(Seq.fill(InterruptNO.interruptDefaultPrio.size)(255.U.asTypeOf(UInt(8.W))))
-  val hsipriosSort: Vec[UInt] = VecInit(Seq.fill(InterruptNO.interruptDefaultPrio.size)(255.U.asTypeOf(UInt(8.W))))
-  val hvipriosSort: Vec[UInt] = VecInit(Seq.fill(3)(255.U.asTypeOf(UInt(8.W))))
-  InterruptNO.interruptDefaultPrio.zipWithIndex.foreach { case(value, index) =>
-    mipriosSort(index)  := miprios(7 + 8 * value, 8 * value)
-    hsipriosSort(index) := hsiprios(7 + 8 * value, 8 * value)
-  }
-  hvipriosSort(0) := hviprios(15, 8)
-  hvipriosSort(1) := hviprios(31, 24)
-  hvipriosSort(2) := hviprios(47, 40)
-
-
   val mipFields = mip.asTypeOf(new MipBundle)
   val mieFields = mie.asTypeOf(new MieBundle)
   val sipFields = sip.asTypeOf(new SipBundle)
@@ -72,6 +61,20 @@ class InterruptFilter extends Module {
   val mIpriosIsZero : Bool = miprios  === 0.U
   val hsIpriosIsZero: Bool = hsiprios === 0.U
 
+  val mtopigather = mip & mie
+  val hstopigather = hsip & hsie
+  val vstopigather = vsip & vsie
+  val mipriosSort: Vec[UInt] = VecInit(Seq.fill(InterruptNO.interruptDefaultPrio.size)(0.U(9.W)))
+  val hsipriosSort: Vec[UInt] = VecInit(Seq.fill(InterruptNO.interruptDefaultPrio.size)(0.U(9.W)))
+  val hvipriosSort: Vec[UInt] = VecInit(Seq.fill(3)(0.U(9.W)))
+  InterruptNO.interruptDefaultPrio.zipWithIndex.foreach { case (value, index) =>
+    mipriosSort(index) := Mux(mtopigather(value), Cat(1.U, miprios(7 + 8 * value, 8 * value)), 0.U)
+    hsipriosSort(index) := Mux(hstopigather(value), Cat(1.U, hsiprios(7 + 8 * value, 8 * value)), 0.U)
+  }
+  hvipriosSort(0) := Mux(vstopigather(1).asBool, Cat(1.U, hviprios(15, 8)), 0.U)
+  hvipriosSort(1) := Mux(vstopigather(5).asBool, Cat(1.U, hviprios(31, 24)), 0.U)
+  hvipriosSort(2) := Mux(vstopigather(13).asBool, Cat(1.U, hviprios(47, 40)), 0.U)
+
   def findNum(input: UInt): UInt = {
     val select = Mux1H(UIntToOH(input), InterruptNO.interruptDefaultPrio.map(_.U))
     select
@@ -79,7 +82,7 @@ class InterruptFilter extends Module {
 
   def findIndex(input: UInt): UInt = {
     val select = WireInit(0.U(log2Up(InterruptNO.interruptDefaultPrio.length).W))
-    InterruptNO.interruptDefaultPrio.zipWithIndex.foreach { case(value ,i) =>
+    InterruptNO.interruptDefaultPrio.zipWithIndex.foreach { case (value, i) =>
       when (input === value.U) {
         select := i.U
       }
@@ -94,18 +97,17 @@ class InterruptFilter extends Module {
         (index, value)
       case 2 =>
         val minIndex = Mux1H(Seq(
-          (value(0)  <  value(1)) -> index(0),
-          (value(0) === value(1)) -> Mux(index(0) < index(1), index(0), index(1)),
-          (value(0)  >  value(1)) -> index(1),
+          (value(0)(8).asBool && (value(1)(8).asBool && (value(0)(7, 0) < value(1)(7 ,0)) || !value(1)(8).asBool)) -> index(0),
+          (value(1)(8).asBool && (value(0)(8).asBool && (value(0)(7, 0) > value(1)(7, 0)) || !value(0)(8).asBool)) -> index(1),
+          (value(0)(8).asBool && value(1)(8).asBool && (value(0)(7, 0) === value(1)(7, 0))) -> Mux(index(0) < index(1), index(0), index(1)),
         ))
         val minValue = Mux1H(Seq(
-          (value(0)  <  value(1)) -> value(0),
-          (value(0) === value(1)) -> Mux(index(0) < index(1), value(0), value(1)),
-          (value(0)  >  value(1)) -> value(1),
+          (value(0)(8).asBool && (value(1)(8).asBool && (value(0)(7, 0) < value(1)(7, 0)) || !value(1)(8).asBool)) -> value(0),
+          (value(1)(8).asBool && (value(0)(8).asBool && (value(0)(7, 0) > value(1)(7, 0)) || !value(0)(8).asBool)) -> value(1),
+          (value(0)(8).asBool && value(1)(8).asBool && (value(0)(7, 0) === value(1)(7, 0))) -> Mux(index(0) < index(1), value(0), value(1)),
         ))
         (VecInit(minIndex), VecInit(minValue))
       case _ =>
-
         val (leftIndex,  leftValue)  = minSelect(VecInit(index.take((value.size + 1)/2)), VecInit(value.take((value.size + 1)/2)))
         val (rightIndex, rightValue) = minSelect(VecInit(index.drop((value.size + 1)/2)), VecInit(value.drop((value.size + 1)/2)))
         minSelect(VecInit(leftIndex ++ rightIndex), VecInit(leftValue ++ rightValue))
@@ -119,14 +121,14 @@ class InterruptFilter extends Module {
         index(i) := i.U
       }
       val result = minSelect(index, iprios)
-      (result._1(0), result._2(0))
+      (result._1(0), result._2(0)(7, 0))
     } else {
       val index = WireInit(VecInit(Seq.fill(InterruptNO.interruptDefaultPrio.size)(0.U(6.W))))
-      InterruptNO.interruptDefaultPrio.zipWithIndex.foreach { case(prio, i) =>
+      InterruptNO.interruptDefaultPrio.zipWithIndex.foreach { case (prio, i) =>
         index(i) := i.U
       }
       val result = minSelect(index, iprios)
-      (result._1(0), result._2(0))
+      (result._1(0), result._2(0)(7, 0))
     }
   }
 
