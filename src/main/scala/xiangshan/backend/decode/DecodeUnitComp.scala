@@ -177,6 +177,8 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
 
   //uop div up to maxUopSize
   val csBundle = Wire(Vec(maxUopSize, new DecodedInst))
+  val fixedDecodedInst = Wire(Vec(maxUopSize, new DecodedInst))
+
   csBundle.foreach { case dst =>
     dst := latchedInst
     dst.numUops := latchedUopInfo.numOfUop
@@ -208,7 +210,6 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(1).ldest := Vl_IDX.U
         csBundle(1).vecWen := false.B
         csBundle(1).vlWen := true.B
-        // vsetvl flush pipe and block backward
         csBundle(1).flushPipe := false.B
         csBundle(1).blockBackward := Mux(VSETOpType.isVsetvl(latchedInst.fuOpType), true.B, vstartReg =/= 0.U)
         when(VSETOpType.isVsetvli(latchedInst.fuOpType) && dest === 0.U && src1 === 0.U) {
@@ -1901,6 +1902,12 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   uopRes := Mux(io.redirect, 0.U, uopResNext)
 
   val complexNum = Mux(uopRes > readyCounter, readyCounter, uopRes)
+
+  fixedDecodedInst := csBundle
+
+  // when vstart is not zero, the last uop will modify vstart to zero
+  // therefore, blockback and flush pipe
+  fixedDecodedInst(numOfUop - 1.U).flushPipe := (vstartReg =/= 0.U) || latchedInst.flushPipe
 
   for(i <- 0 until RenameWidth) {
     outValids(i) := complexNum > i.U
