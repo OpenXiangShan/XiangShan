@@ -235,7 +235,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
       io.probe_req,
       io.refill_req,
       store_req, // Note: store_req.ready is now manually assigned for better timing
-      io.atomic_req,
+      io.atomic_req
     ),
     out = req,
     name = Some("main_pipe_req")

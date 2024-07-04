@@ -31,7 +31,7 @@ import utility._
 import utils._
 import xiangshan._
 import xiangshan.backend.Bundles.DynInst
-import xiangshan.backend.rob.RobDebugRollingIO
+import xiangshan.backend.rob.{RobDebugRollingIO, RobPtr}
 import xiangshan.cache.wpu._
 import xiangshan.mem.{AddPipelineReg, HasL1PrefetchSourceParameter}
 import xiangshan.mem.prefetch._
@@ -48,6 +48,7 @@ case class DCacheParameters
   replacer: Option[String] = Some("setplru"),
   updateReplaceOn2ndmiss: Boolean = true,
   nMissEntries: Int = 1,
+  nMSHRPorts: Int = 4,
   nProbeEntries: Int = 1,
   nReleaseEntries: Int = 1,
   nMMIOEntries: Int = 1,
@@ -418,6 +419,11 @@ class DCacheWordReqWithVaddrAndPfFlag(implicit p: Parameters) extends DCacheWord
   }
 }
 
+class DCacheWordReqWithRobIdx(implicit p: Parameters) extends DCacheWordReq
+{
+  val robIdx = new RobPtr
+}
+
 class BaseDCacheWordResp(implicit p: Parameters) extends DCacheBundle
 {
   // read in s2
@@ -504,7 +510,7 @@ class Release(implicit p: Parameters) extends DCacheBundle
 
 class DCacheWordIO(implicit p: Parameters) extends DCacheBundle
 {
-  val req  = DecoupledIO(new DCacheWordReq)
+  val req  = DecoupledIO(new DCacheWordReqWithRobIdx)
   val resp = Flipped(DecoupledIO(new DCacheWordResp))
 }
 
@@ -1267,59 +1273,75 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val HybridMissReqBase = MissReqPortCount - backendParams.HyuCnt
 
   // Request
-  val missReqArb = Module(new ArbiterFilterByCacheLineAddr(new MissReq, MissReqPortCount, blockOffBits, PAddrBits))
+  // val missReqArb = Module(new ArbiterFilterByCacheLisneAddr(new MissReq, MissReqPortCount, blockOffBits, PAddrBits))
 
-  missReqArb.io.in(MainPipeMissReqPort) <> mainPipe.io.miss_req
-  for (w <- 0 until backendParams.LduCnt)  { missReqArb.io.in(w + 1) <> ldu(w).io.miss_req }
-
-  for (w <- 0 until LoadPipelineWidth) { ldu(w).io.miss_resp := missQueue.io.resp }
-  mainPipe.io.miss_resp := missQueue.io.resp
-
-  if(StorePrefetchL1Enabled) {
-    for (w <- 0 until backendParams.StaCnt) { missReqArb.io.in(1 + backendParams.LduCnt + w) <> stu(w).io.miss_req }
-  }else {
-    for (w <- 0 until backendParams.StaCnt) { stu(w).io.miss_req.ready := false.B }
+  // missReqArb.io.in(MainPipeMissReqPort) <> mainPipe.io.miss_req
+  missQueue.io.req(MainPipeMissReqPort) <> mainPipe.io.miss_req
+  mainPipe.io.miss_resp := missQueue.io.resp(MainPipeMissReqPort)
+  // for (w <- 0 until backendParams.LduCnt)  { missReqArb.io.in(w + 1) <> ldu(w).io.miss_req }
+  for (w <- 0 until backendParams.LduCnt) { 
+    missQueue.io.req(w+1) <> ldu(w).io.miss_req
+    ldu(w).io.miss_resp := missQueue.io.resp(w+1)
   }
 
-  for (i <- 0 until backendParams.HyuCnt) {
-    val HybridLoadReqPort = HybridLoadReadBase + i
-    val HybridStoreReqPort = HybridStoreReadBase + i
-    val HybridMissReqPort = HybridMissReqBase + i
+  // for (w <- 0 until LoadPipelineWidth) { ldu(w).io.miss_resp := missQueue.io.resp }
+  // mainPipe.io.miss_resp := missQueue.io.resp
 
-    ldu(HybridLoadReqPort).io.miss_req.ready := false.B
-    stu(HybridStoreReqPort).io.miss_req.ready := false.B
+  // if(StorePrefetchL1Enabled) {
+  //   for (w <- 0 until backendParams.StaCnt) { missReqArb.io.in(1 + backendParams.LduCnt + w) <> stu(w).io.miss_req }
+  // }else {
+  //   for (w <- 0 until backendParams.StaCnt) { stu(w).io.miss_req.ready := false.B }
+  // }
+  // Disable StorePrefetch for now
+  for(w <- 0 until backendParams.StaCnt) { stu(w).io.miss_req.ready := false.B}
 
-    if (StorePrefetchL1Enabled) {
-      when (ldu(HybridLoadReqPort).io.miss_req.valid) {
-        missReqArb.io.in(HybridMissReqPort) <> ldu(HybridLoadReqPort).io.miss_req
-      } .otherwise {
-        missReqArb.io.in(HybridMissReqPort) <> stu(HybridStoreReqPort).io.miss_req
-      }
-    } else {
-      missReqArb.io.in(HybridMissReqPort) <> ldu(HybridLoadReqPort).io.miss_req
-    }
+  // for (i <- 0 until backendParams.HyuCnt) {
+  //   val HybridLoadReqPort = HybridLoadReadBase + i
+  //   val HybridStoreReqPort = HybridStoreReadBase + i
+  //   val HybridMissReqPort = HybridMissReqBase + i
+
+  //   ldu(HybridLoadReqPort).io.miss_req.ready := false.B
+  //   stu(HybridStoreReqPort).io.miss_req.ready := false.B
+
+  //   if (StorePrefetchL1Enabled) {
+  //     when (ldu(HybridLoadReqPort).io.miss_req.valid) {
+  //       missReqArb.io.in(HybridMissReqPort) <> ldu(HybridLoadReqPort).io.miss_req
+  //     } .otherwise {
+  //       missReqArb.io.in(HybridMissReqPort) <> stu(HybridStoreReqPort).io.miss_req
+  //     }
+  //   } else {
+  //     missReqArb.io.in(HybridMissReqPort) <> ldu(HybridLoadReqPort).io.miss_req
+  //   }
+  // }
+
+
+  // wb.io.miss_req.valid := missReqArb.io.out.valid
+  // wb.io.miss_req.bits  := missReqArb.io.out.bits.addr
+  wb.io.miss_req.zipWithIndex.foreach{ case(r, i) => 
+    r.valid := missQueue.io.req(i).valid
+    r.bits  := missQueue.io.req(i).bits.addr
   }
-
-
-  wb.io.miss_req.valid := missReqArb.io.out.valid
-  wb.io.miss_req.bits  := missReqArb.io.out.bits.addr
-  wb.io.mshr_block := missQueue.io.release_block
 
   // block_decoupled(missReqArb.io.out, missQueue.io.req, wb.io.block_miss_req)
-  missReqArb.io.out <> missQueue.io.req
-  when(wb.io.block_miss_req) {
-    missQueue.io.req.bits.cancel := true.B
-    missReqArb.io.out.ready := false.B
+  // missReqArb.io.out <> missQueue.io.req
+  for(i <- 0 until cfg.nMSHRPorts) {
+    when(wb.io.block_miss_req(i)) {
+      missQueue.io.req(i).bits.cancel := true.B
+    }
   }
+  // when(wb.io.block_miss_req) {
+  //   missQueue.io.req.bits.cancel := true.B
+  //   missReqArb.io.out.ready := false.B
+  // }
 
-  for (w <- 0 until LoadPipelineWidth) { ldu(w).io.mq_enq_cancel := missQueue.io.mq_enq_cancel }
+  for (w <- 0 until LoadPipelineWidth) { ldu(w).io.mq_enq_cancel := missQueue.io.mq_enq_cancel(w+1) }
 
-  XSPerfAccumulate("miss_queue_fire", PopCount(VecInit(missReqArb.io.in.map(_.fire))) >= 1.U)
-  XSPerfAccumulate("miss_queue_muti_fire", PopCount(VecInit(missReqArb.io.in.map(_.fire))) > 1.U)
+  // XSPerfAccumulate("miss_queue_fire", PopCount(VecInit(missReqArb.io.in.map(_.fire))) >= 1.U)
+  // XSPerfAccumulate("miss_queue_muti_fire", PopCount(VecInit(missReqArb.io.in.map(_.fire))) > 1.U)
 
-  XSPerfAccumulate("miss_queue_has_enq_req", PopCount(VecInit(missReqArb.io.in.map(_.valid))) >= 1.U)
-  XSPerfAccumulate("miss_queue_has_muti_enq_req", PopCount(VecInit(missReqArb.io.in.map(_.valid))) > 1.U)
-  XSPerfAccumulate("miss_queue_has_muti_enq_but_not_fire", PopCount(VecInit(missReqArb.io.in.map(_.valid))) > 1.U && PopCount(VecInit(missReqArb.io.in.map(_.fire))) === 0.U)
+  // XSPerfAccumulate("miss_queue_has_enq_req", PopCount(VecInit(missReqArb.io.in.map(_.valid))) >= 1.U)
+  // XSPerfAccumulate("miss_queue_has_muti_enq_req", PopCount(VecInit(missReqArb.io.in.map(_.valid))) > 1.U)
+  // XSPerfAccumulate("miss_queue_has_muti_enq_but_not_fire", PopCount(VecInit(missReqArb.io.in.map(_.valid))) > 1.U && PopCount(VecInit(missReqArb.io.in.map(_.fire))) === 0.U)
 
   // forward missqueue
   (0 until LoadPipelineWidth).map(i => io.lsu.forward_mshr(i).connect(missQueue.io.forward(i)))

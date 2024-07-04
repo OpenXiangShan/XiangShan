@@ -30,6 +30,7 @@ import org.chipsalliance.cde.config.Parameters
 import utility._
 import utils._
 import xiangshan._
+import xiangshan.backend.rob.RobPtr
 import xiangshan.mem.AddPipelineReg
 import xiangshan.mem.prefetch._
 import xiangshan.mem.trace._
@@ -44,6 +45,7 @@ class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   val pc = UInt(VAddrBits.W)
 
   val lqIdx = new LqPtr
+  val robIdx = new RobPtr
   // store
   val full_overwrite = Bool()
 
@@ -120,6 +122,7 @@ class MissReq(implicit p: Parameters) extends MissReqWoStoreData {
     out.cancel := cancel
     out.pc := pc
     out.lqIdx := lqIdx
+    out.robIdx := robIdx
     out
   }
 }
@@ -138,11 +141,11 @@ class MissResp(implicit p: Parameters) extends DCacheBundle {
   * miss queue enq logic: enq is now splited into 2 cycles
   *  +---------------------------------------------------------------------+    pipeline reg  +-------------------------+
   *  +         s0: enq source arbiter, judge mshr alloc or merge           +     +-------+    + s1: real alloc or merge +
-  *  +                      +-----+          primary_fire?       ->        +     | alloc |    +                         +
-  *  + mainpipe  -> req0 -> |     |          secondary_fire?     ->        +     | merge |    +                         +
-  *  + loadpipe0 -> req1 -> | arb | -> req                       ->        +  -> | req   | -> +                         +
-  *  + loadpipe1 -> req2 -> |     |          mshr id             ->        +     | id    |    +                         +
-  *  +                      +-----+                                        +     +-------+    +                         +
+  *  +                                       primary_fire?       ->        +     | alloc |    +                         +
+  *  + mainpipe  -> req0 ->                  secondary_fire?     ->        +     | merge |    +                         +
+  *  + loadpipe0 -> req1 ->   ---> req x 4                       ->        +  -> | req   | -> +                         +
+  *  + loadpipe1 -> req2 ->                  mshr id             ->        +     | id    |    +                         +
+  *  + loadpipe2 -> req3 ->                                                +     +-------+    +                         +
   *  +---------------------------------------------------------------------+                  +-------------------------+
   */
 
@@ -156,6 +159,7 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
   // this request is about to allocate a new mshr
   val alloc         = Bool()
   val mshr_id       = UInt(log2Up(cfg.nMissEntries).W)
+  // val req_age_cmp_statue = UInt(cfg.nMSHRPorts.W)
 
   def reg_valid(): Bool = {
     (merge || alloc)
@@ -228,8 +232,9 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
   }
   // send out acquire as soon as possible
   // if a new store miss req is about to merge into this pipe reg, don't send acquire now
-  def can_send_acquire(valid: Bool, new_req: MissReq): Bool = {
-    alloc && !(valid && merge_req(new_req) && new_req.isFromStore)
+  def can_send_acquire(valid: Seq[Bool], new_req: Seq[MissReq]): Bool = {
+    // alloc && !(valid && merge_req(new_req) && new_req.isFromStore)
+    alloc && !(Cat((0 until cfg.nMSHRPorts).map(i => valid(i) && merge_req(new_req(i)) && new_req(i).isFromStore)).asUInt.orR)
   }
 
   def get_acquire(l2_pf_store_only: Bool): TLBundleA = {
@@ -286,17 +291,20 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     val id = Input(UInt(log2Up(cfg.nMissEntries).W))
     // client requests
     // MSHR update request, MSHR state and addr will be updated when req.fire
-    val req = Flipped(ValidIO(new MissReqWoStoreData))
+    val req = Vec(cfg.nMSHRPorts, Flipped(ValidIO(new MissReqWoStoreData)))
     // pipeline reg
-    val miss_req_pipe_reg = Input(new MissReqPipeRegBundle(edge))
+    // val miss_req_pipe_regs = Vec(cfg.nMSHRPorts, Input(new MissReqPipeRegBundle(edge)))
+    val miss_req_pipe_reg = Input(new MissReqPipeRegBundle(edge)) // Only one req can merge/alloc to an mshr in 1 cyle, same cycle merge will be done when enq 
     // allocate this entry for new req
+    // val primary_valid = Vec(cfg.nMSHRPorts, Input(Bool()))
     val primary_valid = Input(Bool())
     // this entry is free and can be allocated to new reqs
     val primary_ready = Output(Bool())
+    // val primary_ready = Vec(cfg.nMSHRPorts, Output(Bool()))
     // this entry is busy, but it can merge the new req
-    val secondary_ready = Output(Bool())
+    val secondary_ready = Vec(cfg.nMSHRPorts, Output(Bool()))
     // this entry is busy and it can not merge the new req
-    val secondary_reject = Output(Bool())
+    val secondary_reject = Vec(cfg.nMSHRPorts, Output(Bool()))
     // way selected for replacing, used to support plru update
     // bus
     val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
@@ -322,14 +330,14 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
     val req_addr = ValidIO(UInt(PAddrBits.W))
 
-    val req_handled_by_this_entry = Output(Bool())
+    val req_handled_by_this_entry = Vec(cfg.nMSHRPorts, Output(Bool()))
 
     val forwardInfo = Output(new MissEntryForwardIO)
     val l2_pf_store_only = Input(Bool())
 
     // whether the pipeline reg has send out an acquire
     val acquire_fired_by_pipe_reg = Input(Bool())
-    val memSetPattenDetected = Input(Bool())
+    // val memSetPattenDetected = Input(Bool())
 
     val perf_pending_prefetch = Output(Bool())
     val perf_pending_normal   = Output(Bool())
@@ -413,11 +421,18 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   val refill_data_raw = Reg(Vec(blockBytes/beatBytes, UInt(beatBits.W)))
 
   // allocate current miss queue entry for a miss req
-  val primary_fire = WireInit(io.req.valid && io.primary_ready && io.primary_valid && !io.req.bits.cancel)
+  // val primary_fire = WireInit(io.req.valid && io.primary_ready && io.primary_valid && !io.req.bits.cancel)'
+  val primary_fire = VecInit((0 until cfg.nMSHRPorts).map(i =>
+    io.req(i).valid && io.primary_ready && io.primary_valid && !io.req(i).bits.cancel
+  ))
   // merge miss req to current miss queue entry
-  val secondary_fire = WireInit(io.req.valid && io.secondary_ready && !io.req.bits.cancel)
+  // val secondary_fire = WireInit(io.req.valid && io.secondary_ready && !io.req.bits.cancel)
+  val secondary_fire = VecInit((0 until cfg.nMSHRPorts).map(i => 
+    io.req(i).valid && io.secondary_ready(i) && !io.req(i).bits.cancel
+  ))
 
-  val req_handled_by_this_entry = primary_fire || secondary_fire
+  // val req_handled_by_this_entry = primary_fire || secondary_fire
+  val req_handled_by_this_entry = (0 until cfg.nMSHRPorts).map(i => primary_fire(i) || secondary_fire(i))
 
   // for perf use
   val secondary_fired = RegInit(false.B)
@@ -434,7 +449,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   }
 
   when (io.miss_req_pipe_reg.alloc) {
-    assert(RegNext(primary_fire), "after 1 cycle of primary_fire, entry will be allocated")
+    // Recover later
+    // assert(RegNext(primary_fire), "after 1 cycle of primary_fire, entry will be allocated")
     req_valid := true.B
 
     req := miss_req_pipe_reg_bits.toMissReqWoStoreData()
@@ -470,13 +486,15 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
     should_refill_data_reg := miss_req_pipe_reg_bits.isFromLoad
     error := false.B
-    prefetch := input_req_is_prefetch && !io.miss_req_pipe_reg.prefetch_late_en(io.req.bits, io.req.valid)
+    // prefetch := input_req_is_prefetch && !io.miss_req_pipe_reg.prefetch_late_en(io.req.bits, io.req.valid)
+    prefetch := input_req_is_prefetch && Cat(io.req.map(r => !io.miss_req_pipe_reg.prefetch_late_en(r.bits, r.valid))).asUInt.orR
     access := false.B
     secondary_fired := false.B
   }
 
   when (io.miss_req_pipe_reg.merge) {
-    assert(RegNext(secondary_fire) || RegNext(RegNext(primary_fire)), "after 1 cycle of secondary_fire or 2 cycle of primary_fire, entry will be merged")
+    // Recover later
+    // assert(RegNext(secondary_fire) || RegNext(RegNext(primary_fire)), "after 1 cycle of secondary_fire or 2 cycle of primary_fire, entry will be merged")
     assert(miss_req_pipe_reg_bits.req_coh.state <= req.req_coh.state || (prefetch && !access))
     assert(!(miss_req_pipe_reg_bits.isFromAMO || req.isFromAMO))
     // use the most uptodate meta
@@ -642,19 +660,24 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
       )
   }
 
-  // req_valid will be updated 1 cycle after primary_fire, so next cycle, this entry cannot accept a new req
-  when(GatedValidRegNext(io.id >= ((cfg.nMissEntries).U - io.nMaxPrefetchEntry))) {
-    // can accept prefetch req
-    io.primary_ready := !req_valid && !GatedValidRegNext(primary_fire)
-  }.otherwise {
-    // cannot accept prefetch req except when a memset patten is detected
-    io.primary_ready := !req_valid && (!io.req.bits.isFromPrefetch || io.memSetPattenDetected) && !GatedValidRegNext(primary_fire)
-  }
-  io.secondary_ready := should_merge(io.req.bits)
-  io.secondary_reject := should_reject(io.req.bits)
-  
+  // // req_valid will be updated 1 cycle after primary_fire, so next cycle, this entry cannot accept a new req
+  // when(RegNext(io.id >= ((cfg.nMissEntries).U - io.nMaxPrefetchEntry))) {
+  //   // can accept prefetch req
+  //   io.primary_ready := !req_valid && !RegNext(primary_fire)
+  // }.otherwise {
+  //   // cannot accept prefetch req except when a memset patten is detected
+  //   io.primary_ready := !req_valid && (!io.req.bits.isFromPrefetch || io.memSetPattenDetected) && !RegNext(primary_fire)
+  // }
+  // io.primary_ready := !req_valid && !RegNext(primary_fire)
+  io.primary_ready := !req_valid && !RegNext(Cat(primary_fire).orR)
+  // io.secondary_ready := should_merge(io.req.bits)
+  io.secondary_ready := io.req.map(r => should_merge(r.bits))
+  // io.secondary_reject := should_reject(io.req.bits)
+  io.secondary_reject := io.req.map(r => should_reject(r.bits))
+
   // should not allocate, merge or reject at the same time
-  assert(RegNext(PopCount(Seq(io.primary_ready, io.secondary_ready, io.secondary_reject)) <= 1.U || !io.req.valid))
+  // Recover later
+  // assert(RegNext(PopCount(Seq(io.primary_ready, io.secondary_ready, io.secondary_reject)) <= 1.U || !io.req.valid))
 
   val refill_data_splited = WireInit(VecInit(Seq.tabulate(cfg.blockBytes * 8 / l1BusDataWidth)(i => {
     val data = refill_and_store_data.asUInt
@@ -759,59 +782,67 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   val w_grantlast_forward_info = Mux(isKeyword, w_grantfirst, w_grantlast)
   io.forwardInfo.apply(req_valid, req.addr, refill_and_store_data, w_grantfirst_forward_info, w_grantlast_forward_info)
 
-  io.matched := req_valid && (get_block(req.addr) === get_block(io.req.bits.addr)) && !prefetch
-  io.prefetch_info.late_prefetch := io.req.valid && !(io.req.bits.isFromPrefetch) && req_valid && (get_block(req.addr) === get_block(io.req.bits.addr)) && prefetch
-
+  // Remove temporarily
+  // io.matched := req_valid && (get_block(req.addr) === get_block(io.req.bits.addr)) && !prefetch
+  io.matched := DontCare
+  // io.prefetch_info.late_prefetch := io.req.valid && !(io.req.bits.isFromPrefetch) && req_valid && (get_block(req.addr) === get_block(io.req.bits.addr)) && prefetch
+  io.prefetch_info.late_prefetch := DontCare
   when(io.prefetch_info.late_prefetch) {
     prefetch := false.B
   }
 
   // refill latency monitor
-  val start_counting = GatedValidRegNext(io.mem_acquire.fire) || (GatedValidRegNextN(primary_fire, 2) && s_acquire)
-  io.latency_monitor.load_miss_refilling  := req_valid && req_primary_fire.isFromLoad     && BoolStopWatch(start_counting, io.mem_grant.fire && !refill_done, true, true)
-  io.latency_monitor.store_miss_refilling := req_valid && req_primary_fire.isFromStore    && BoolStopWatch(start_counting, io.mem_grant.fire && !refill_done, true, true)
-  io.latency_monitor.amo_miss_refilling   := req_valid && req_primary_fire.isFromAMO      && BoolStopWatch(start_counting, io.mem_grant.fire && !refill_done, true, true)
-  io.latency_monitor.pf_miss_refilling    := req_valid && req_primary_fire.isFromPrefetch && BoolStopWatch(start_counting, io.mem_grant.fire && !refill_done, true, true)
+  // val start_counting = RegNext(io.mem_acquire.fire) || (RegNextN(primary_fire, 2) && s_acquire)
+  // io.latency_monitor.load_miss_refilling  := req_valid && req_primary_fire.isFromLoad     && BoolStopWatch(start_counting, io.mem_grant.fire && !refill_done, true, true)
+  // io.latency_monitor.store_miss_refilling := req_valid && req_primary_fire.isFromStore    && BoolStopWatch(start_counting, io.mem_grant.fire && !refill_done, true, true)
+  // io.latency_monitor.amo_miss_refilling   := req_valid && req_primary_fire.isFromAMO      && BoolStopWatch(start_counting, io.mem_grant.fire && !refill_done, true, true)
+  // io.latency_monitor.pf_miss_refilling    := req_valid && req_primary_fire.isFromPrefetch && BoolStopWatch(start_counting, io.mem_grant.fire && !refill_done, true, true)
+  io.latency_monitor.load_miss_refilling  := DontCare
+  io.latency_monitor.store_miss_refilling := DontCare
+  io.latency_monitor.amo_miss_refilling   := DontCare
+  io.latency_monitor.pf_miss_refilling    := DontCare
 
-  XSPerfAccumulate("miss_req_primary", primary_fire)
-  XSPerfAccumulate("miss_req_merged", secondary_fire)
-  XSPerfAccumulate("load_miss_penalty_to_use",
-    should_refill_data &&
-      BoolStopWatch(primary_fire, io.refill_to_ldq.valid, true)
-  )
-  XSPerfAccumulate("penalty_between_grantlast_and_release",
-    BoolStopWatch(!RegNext(w_grantlast) && w_grantlast, release_entry, true)
-  )
-  XSPerfAccumulate("main_pipe_penalty", BoolStopWatch(io.main_pipe_req.fire, io.main_pipe_resp))
-  XSPerfAccumulate("penalty_blocked_by_channel_A", io.mem_acquire.valid && !io.mem_acquire.ready)
-  XSPerfAccumulate("penalty_waiting_for_channel_D", s_acquire && !w_grantlast && !io.mem_grant.valid)
-  XSPerfAccumulate("penalty_waiting_for_channel_E", io.mem_finish.valid && !io.mem_finish.ready)
-  XSPerfAccumulate("prefetch_req_primary", primary_fire && io.req.bits.source === DCACHE_PREFETCH_SOURCE.U)
-  XSPerfAccumulate("prefetch_req_merged", secondary_fire && io.req.bits.source === DCACHE_PREFETCH_SOURCE.U)
-  XSPerfAccumulate("can_not_send_acquire_because_of_merging_store", !s_acquire && io.miss_req_pipe_reg.merge && miss_req_pipe_reg_bits.isFromStore)
+  // XSPerfAccumulate("miss_req_primary", primary_fire)
+  // XSPerfAccumulate("miss_req_merged", secondary_fire)
+  // XSPerfAccumulate("load_miss_penalty_to_use",
+  //   should_refill_data &&
+  //     BoolStopWatch(primary_fire, io.refill_to_ldq.valid, true)
+  // )
+  // XSPerfAccumulate("penalty_between_grantlast_and_release",
+  //   BoolStopWatch(!RegNext(w_grantlast) && w_grantlast, release_entry, true)
+  // )
+  // XSPerfAccumulate("main_pipe_penalty", BoolStopWatch(io.main_pipe_req.fire, io.main_pipe_resp))
+  // XSPerfAccumulate("penalty_blocked_by_channel_A", io.mem_acquire.valid && !io.mem_acquire.ready)
+  // XSPerfAccumulate("penalty_waiting_for_channel_D", s_acquire && !w_grantlast && !io.mem_grant.valid)
+  // XSPerfAccumulate("penalty_waiting_for_channel_E", io.mem_finish.valid && !io.mem_finish.ready)
+  // XSPerfAccumulate("prefetch_req_primary", primary_fire && io.req.bits.source === DCACHE_PREFETCH_SOURCE.U)
+  // XSPerfAccumulate("prefetch_req_merged", secondary_fire && io.req.bits.source === DCACHE_PREFETCH_SOURCE.U)
+  // XSPerfAccumulate("can_not_send_acquire_because_of_merging_store", !s_acquire && io.miss_req_pipe_reg.merge && miss_req_pipe_reg_bits.isFromStore)
 
-  val (mshr_penalty_sample, mshr_penalty) = TransactionLatencyCounter(GatedValidRegNextN(primary_fire, 2), release_entry)
-  XSPerfHistogram("miss_penalty", mshr_penalty, mshr_penalty_sample, 0, 20, 1, true, true)
-  XSPerfHistogram("miss_penalty", mshr_penalty, mshr_penalty_sample, 20, 100, 10, true, false)
+  // val (mshr_penalty_sample, mshr_penalty) = TransactionLatencyCounter(RegNext(RegNext(primary_fire)), release_entry)
+  // XSPerfHistogram("miss_penalty", mshr_penalty, mshr_penalty_sample, 0, 20, 1, true, true)
+  // XSPerfHistogram("miss_penalty", mshr_penalty, mshr_penalty_sample, 20, 100, 10, true, false)
 
-  val load_miss_begin = primary_fire && io.req.bits.isFromLoad
-  val refill_finished = GatedValidRegNext(!w_grantlast && refill_done) && should_refill_data
-  val (load_miss_penalty_sample, load_miss_penalty) = TransactionLatencyCounter(load_miss_begin, refill_finished) // not real refill finish time
-  XSPerfHistogram("load_miss_penalty_to_use", load_miss_penalty, load_miss_penalty_sample, 0, 20, 1, true, true)
-  XSPerfHistogram("load_miss_penalty_to_use", load_miss_penalty, load_miss_penalty_sample, 20, 100, 10, true, false)
+  // val load_miss_begin = primary_fire && io.req.bits.isFromLoad
+  // val refill_finished = RegNext(!w_grantlast && refill_done) && should_refill_data
+  // val (load_miss_penalty_sample, load_miss_penalty) = TransactionLatencyCounter(load_miss_begin, refill_finished) // not real refill finish time
+  // XSPerfHistogram("load_miss_penalty_to_use", load_miss_penalty, load_miss_penalty_sample, 0, 20, 1, true, true)
+  // XSPerfHistogram("load_miss_penalty_to_use", load_miss_penalty, load_miss_penalty_sample, 20, 100, 10, true, false)
 
-  val (a_to_d_penalty_sample, a_to_d_penalty) = TransactionLatencyCounter(start_counting, GatedValidRegNext(io.mem_grant.fire && refill_done))
-  XSPerfHistogram("a_to_d_penalty", a_to_d_penalty, a_to_d_penalty_sample, 0, 20, 1, true, true)
-  XSPerfHistogram("a_to_d_penalty", a_to_d_penalty, a_to_d_penalty_sample, 20, 100, 10, true, false)
+  // val (a_to_d_penalty_sample, a_to_d_penalty) = TransactionLatencyCounter(start_counting, RegNext(io.mem_grant.fire && refill_done))
+  // XSPerfHistogram("a_to_d_penalty", a_to_d_penalty, a_to_d_penalty_sample, 0, 20, 1, true, true)
+  // XSPerfHistogram("a_to_d_penalty", a_to_d_penalty, a_to_d_penalty_sample, 20, 100, 10, true, false)
 }
 
-class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule 
+class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule with HasCircularQueuePtrHelper
   with HasPerfEvents 
   {
   val io = IO(new Bundle {
     val hartId = Input(UInt(hartIdLen.W))
-    val req = Flipped(DecoupledIO(new MissReq))
-    val resp = Output(new MissResp)
+    // val req = Flipped(DecoupledIO(new MissReq))
+    // val resp = Output(new MissResp)
+    val req = Vec(cfg.nMSHRPorts, Flipped(DecoupledIO(new MissReq)))
+    val resp = Vec(cfg.nMSHRPorts, Output(new MissResp))
     val refill_to_ldq = ValidIO(new Refill)
 
     val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
@@ -855,7 +886,8 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
       }
     }
 
-    val mq_enq_cancel = Output(Bool())
+    // val mq_enq_cancel = Output(Bool())
+    val mq_enq_cancel = Vec(cfg.nMSHRPorts, Output(Bool()))
 
     val debugTopDown = new DCacheTopDownIO
   })
@@ -864,52 +896,141 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
   val entries = Seq.fill(cfg.nMissEntries)(Module(new MissEntry(edge)))
 
-  val miss_req_pipe_reg = RegInit(0.U.asTypeOf(new MissReqPipeRegBundle(edge)))
-  val acquire_from_pipereg = Wire(chiselTypeOf(io.mem_acquire))
+  // map only one req to an mshr miss_req_pipe_reg
+  // val miss_req_pipe_reg = RegInit(0.U.asTypeOf(new MissReqPipeRegBundle(edge)))
+  val miss_req_pipe_reg = RegInit(VecInit(Seq.fill(cfg.nMSHRPorts)(0.U.asTypeOf(new MissReqPipeRegBundle(edge)))))
+  // val acquire_from_pipereg = Wire(chiselTypeOf(io.mem_acquire))
+  val acquire_from_pipereg = Wire(Vec(cfg.nMSHRPorts, chiselTypeOf(io.mem_acquire)))
+  val available_entries_for_enq = VecInit(Seq.fill(cfg.nMSHRPorts)(0.U(log2Up(cfg.nMissEntries).W)))
+  dontTouch(available_entries_for_enq)
 
+  // val primary_ready_vec = entries.map(_.io.primary_ready)
+  // val secondary_ready_vec = entries.map(_.io.secondary_ready)
+  // val secondary_reject_vec = entries.map(_.io.secondary_reject)
+  // val primary_ready_vec = (0 until cfg.nMSHRPorts).map(i => entries.map(_.io.primary_ready(i)))
   val primary_ready_vec = entries.map(_.io.primary_ready)
-  val secondary_ready_vec = entries.map(_.io.secondary_ready)
-  val secondary_reject_vec = entries.map(_.io.secondary_reject)
-  val probe_block_vec = entries.map { case e => e.io.block_addr.valid && e.io.block_addr.bits === io.probe_addr }
+  val primary_ready_cnt = PopCount(Cat(primary_ready_vec).asUInt)
+  dontTouch(primary_ready_cnt)
+  val secondary_ready_vec = (0 until cfg.nMSHRPorts).map(i => entries.map(_.io.secondary_ready(i)))
+  val secondary_reject_vec = (0 until cfg.nMSHRPorts).map(i => entries.map(_.io.secondary_reject(i)))
+  val probe_block_vec = entries.map { case e => e.io.block_addr.valid && e.io.block_addr.bits === io.probe_addr } // TODO
 
-  val merge = ParallelORR(Cat(secondary_ready_vec ++ Seq(miss_req_pipe_reg.merge_req(io.req.bits))))
-  val reject = ParallelORR(Cat(secondary_reject_vec ++ Seq(miss_req_pipe_reg.reject_req(io.req.bits))))
-  val alloc = !reject && !merge && ParallelORR(Cat(primary_ready_vec))
-  val accept = alloc || merge
+  // TODO: merge all code with (0 until cfg.nMSHRPorts)
+  val req_age_compare = VecInit(Seq.fill(cfg.nMSHRPorts)(0.U(cfg.nMSHRPorts.W))) // Calculate the order of the req
+  dontTouch(req_age_compare)
 
-  val req_mshr_handled_vec = entries.map(_.io.req_handled_by_this_entry)
+  for(i <- 0 until cfg.nMSHRPorts) {
+    // TODO: Consider prefetch type into compare conditions
+    req_age_compare(i) := Cat((0 until cfg.nMSHRPorts).map(j => 
+      io.req(i).valid && Mux(io.req(j).valid, 
+                              isBefore(io.req(i).bits.robIdx, io.req(j).bits.robIdx),
+                              true.B)
+    )).asUInt
+  }
+
+  // TODO: Complete the enq logic: req_valid + entry_valid
+  val req_alloc_valid = (0 until cfg.nMSHRPorts).map(i => 
+    (PopCount(req_age_compare(i)) === 3.U && primary_ready_cnt >= 1.U) ||
+    (PopCount(req_age_compare(i)) === 2.U && primary_ready_cnt >= 2.U) ||
+    (PopCount(req_age_compare(i)) === 1.U && primary_ready_cnt >= 3.U) ||
+    (PopCount(req_age_compare(i)) === 0.U && primary_ready_cnt === 4.U)
+  )
+  dontTouch(req_alloc_valid(0))
+  dontTouch(req_alloc_valid(1))
+  dontTouch(req_alloc_valid(2))
+  dontTouch(req_alloc_valid(3))
+  val req_alloc_mshr_id = (0 until cfg.nMSHRPorts).map(i=> 
+    Mux1H(Seq(
+      (PopCount(req_age_compare(i)) === 3.U) -> available_entries_for_enq(0),
+      (PopCount(req_age_compare(i)) === 2.U) -> available_entries_for_enq(1),
+      (PopCount(req_age_compare(i)) === 1.U) -> available_entries_for_enq(2),
+      (PopCount(req_age_compare(i)) === 0.U) -> available_entries_for_enq(3)
+    ))
+  )
+  val merge_with_pipe_req = (0 until cfg.nMSHRPorts).map(i => miss_req_pipe_reg.map(_.merge_req(io.req(i).bits)))
+  val reject_with_pipe_req = (0 until cfg.nMSHRPorts).map(i => miss_req_pipe_reg.map(_.reject_req(io.req(i).bits)))
+  val merge = (0 until cfg.nMSHRPorts).map(i => ParallelORR(Cat(secondary_ready_vec(i) ++ merge_with_pipe_req(i))))
+  val reject = (0 until cfg.nMSHRPorts).map(i => ParallelORR(Cat(secondary_reject_vec(i) ++ reject_with_pipe_req(i))))
+  // val merge = ParallelORR(Cat(secondary_ready_vec ++ Seq(miss_req_pipe_reg.merge_req(io.req.bits))))
+  // val reject = ParallelORR(Cat(secondary_reject_vec ++ Seq(miss_req_pipe_reg.reject_req(io.req.bits))))
+  // val alloc = !reject && !merge && ParallelORR(Cat(primary_ready_vec))
+  val alloc = (0 until cfg.nMSHRPorts).map(i => !reject(i) && !merge(i) && req_alloc_valid(i))
+  // val accept = alloc || merge
+  val accept = (0 until cfg.nMSHRPorts).map(i => alloc(i) || merge(i))
+
+  // val req_mshr_handled_vec = entries.map(_.io.req_handled_by_this_entry) // TODO
+  val req_mshr_handled_vec = (0 until cfg.nMSHRPorts).map(i => entries.map(_.io.req_handled_by_this_entry(i)))
   // merged to pipeline reg
-  val req_pipeline_reg_handled = miss_req_pipe_reg.merge_req(io.req.bits) && io.req.valid
-  assert(PopCount(Seq(req_pipeline_reg_handled, VecInit(req_mshr_handled_vec).asUInt.orR)) <= 1.U, "miss req will either go to mshr or pipeline reg")
-  assert(PopCount(req_mshr_handled_vec) <= 1.U, "Only one mshr can handle a req")
-  io.resp.id := Mux(!req_pipeline_reg_handled, OHToUInt(req_mshr_handled_vec), miss_req_pipe_reg.mshr_id)
-  io.resp.handled := Cat(req_mshr_handled_vec).orR || req_pipeline_reg_handled
-  io.resp.merged := merge
+  // val req_pipeline_reg_handled = miss_req_pipe_reg.merge_req(io.req.bits) && io.req.valid //TODO
+  val req_pipeline_reg_handled = (0 until cfg.nMSHRPorts).map(i => Cat(miss_req_pipe_reg.map(_.merge_req(io.req(i).bits))).orR && io.req(i).valid)
+  // assert(PopCount(Seq(req_pipeline_reg_handled, VecInit(req_mshr_handled_vec).asUInt.orR)) <= 1.U, "miss req will either go to mshr or pipeline reg")
+  // assert(PopCount(req_mshr_handled_vec) <= 1.U, "Only one mshr can handle a req")
+  io.resp.zipWithIndex.foreach{ case(resp, i) =>
+    resp.id := Mux(!req_pipeline_reg_handled(i), OHToUInt(req_mshr_handled_vec(i)), miss_req_pipe_reg(i).mshr_id)
+    resp.handled := Cat(req_mshr_handled_vec(i)).orR || req_pipeline_reg_handled(i)
+    resp.merged := merge(i)
+  }
+  // io.resp.id := Mux(!req_pipeline_reg_handled, OHToUInt(req_mshr_handled_vec), miss_req_pipe_reg.mshr_id)
+  // io.resp.handled := Cat(req_mshr_handled_vec).orR || req_pipeline_reg_handled
+  // io.resp.merged := merge
 
   /*  MissQueue enq logic is now splitted into 2 cycles
    *
    */
-  miss_req_pipe_reg.req     := io.req.bits
-  miss_req_pipe_reg.alloc   := alloc && io.req.valid && !io.req.bits.cancel
-  miss_req_pipe_reg.merge   := merge && io.req.valid && !io.req.bits.cancel
-  miss_req_pipe_reg.mshr_id := io.resp.id
 
-  assert(PopCount(Seq(alloc && io.req.valid, merge && io.req.valid)) <= 1.U, "allocate and merge a mshr in same cycle!")
+  // miss_req_pipe_reg.req     := io.req.bits
+  // miss_req_pipe_reg.alloc   := alloc && io.req.valid && !io.req.bits.cancel
+  // miss_req_pipe_reg.merge   := merge && io.req.valid && !io.req.bits.cancel
+  // miss_req_pipe_reg.mshr_id := io.resp.id
+  for (i <- 0 until cfg.nMSHRPorts) {
+      miss_req_pipe_reg(i).req     := io.req(i).bits
+      miss_req_pipe_reg(i).alloc   := alloc(i) && io.req(i).valid && !io.req(i).bits.cancel
+      miss_req_pipe_reg(i).merge   := merge(i) && io.req(i).valid && !io.req(i).bits.cancel
+      miss_req_pipe_reg(i).mshr_id := io.resp(i).id
+      // miss_req_pipe_reg(i).req_age_cmp_statue := req_age_compare(i);
+  }
 
-  val source_except_load_cnt = RegInit(0.U(10.W))
-  when(VecInit(req_mshr_handled_vec).asUInt.orR || req_pipeline_reg_handled) {
-    when(io.req.bits.isFromLoad) {
-      source_except_load_cnt := 0.U
-    }.otherwise {
-      when(io.req.bits.isFromStore) {
-        source_except_load_cnt := source_except_load_cnt + 1.U
+  // Find LSB bit of entry_allocation_vec
+  def select_top_valid_entry(available_entry_vec: UInt): UInt = {
+    val top_valid_entry = WireInit(0.U(log2Up(cfg.nMissEntries).W))
+    for(i <- 1 until cfg.nMissEntries) {
+      val former_valid = Cat((0 until i).map(j => available_entry_vec(j))).asUInt.orR
+      when(available_entry_vec(i) && !former_valid) {
+        top_valid_entry := i.U
       }
     }
+    top_valid_entry
   }
-  val Threshold = 8
-  val memSetPattenDetected = GatedValidRegNext((source_except_load_cnt >= Threshold.U) && io.lqEmpty)
 
-  io.memSetPattenDetected := memSetPattenDetected
+  val available_entry_vec = Cat(primary_ready_vec).asUInt
+  // val available_entry_vec = primary_ready_vec
+  val reverse_available_entry_vec = Reverse(available_entry_vec)
+  available_entries_for_enq(0) := select_top_valid_entry(reverse_available_entry_vec) // 1st valid entry from left to right
+  available_entries_for_enq(1) := (cfg.nMissEntries - 1).U - select_top_valid_entry(available_entry_vec) // 1st valid entry from right to left
+  available_entries_for_enq(2) := select_top_valid_entry(reverse_available_entry_vec & ~(1.U << available_entries_for_enq(0)))
+  available_entries_for_enq(3) := (cfg.nMissEntries - 1).U - select_top_valid_entry(available_entry_vec & Reverse(~(1.U << available_entries_for_enq(1))))
+
+  // assert("四个请求可以merge但是未merge")
+  // assert("每个请求只能alloc/reject/merge其中之一")
+  // assert(PopCount(Cat(enq0, enq1, enq2, enq3)) > primary_ready_cnt, "allocate more than empty entries")
+  // assert(PopCount(Seq(alloc && io.req.valid, merge && io.req.valid)) <= 1.U, "allocate and merge a mshr in same cycle!")
+
+  // To Recover
+  // val source_except_load_cnt = RegInit(0.U(10.W))
+  // when(VecInit(req_mshr_handled_vec).asUInt.orR || req_pipeline_reg_handled) {
+  //   when(io.req.bits.isFromLoad) {
+  //     source_except_load_cnt := 0.U
+  //   }.otherwise {
+  //     when(io.req.bits.isFromStore) {
+  //       source_except_load_cnt := source_except_load_cnt + 1.U
+  //     }
+  //   }
+  // }
+  // val Threshold = 8
+  // val memSetPattenDetected = RegNext((source_except_load_cnt >= Threshold.U) && io.lqEmpty)
+
+  // io.memSetPattenDetected := memSetPattenDetected
+  io.memSetPattenDetected := DontCare
 
   val forwardInfo_vec = VecInit(entries.map(_.io.forwardInfo))
   (0 until LoadPipelineWidth).map(i => {
@@ -923,7 +1044,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     io.forward(i).forwardData := forwardData
   })
 
-  assert(RegNext(PopCount(secondary_ready_vec) <= 1.U || !io.req.valid))
+  // assert(RegNext(PopCount(secondary_ready_vec) <= 1.U || !io.req.valid))
 //  assert(RegNext(PopCount(secondary_reject_vec) <= 1.U))
   // It is possible that one mshr wants to merge a req, while another mshr wants to reject it.
   // That is, a coming req has the same paddr as that of mshr_0 (merge),
@@ -948,21 +1069,25 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   val nMaxPrefetchEntry = Constantin.createRecord(s"nMaxPrefetchEntry${p(XSCoreParamsKey).HartId}", initValue = 14)
   entries.zipWithIndex.foreach {
     case (e, i) =>
-      val former_primary_ready = if(i == 0)
-        false.B
-      else
-        Cat((0 until i).map(j => entries(j).io.primary_ready)).orR
-
       e.io.hartId := io.hartId
       e.io.id := i.U
       e.io.l2_pf_store_only := io.l2_pf_store_only
-      e.io.req.valid := io.req.valid
-      e.io.primary_valid := io.req.valid &&
-        !merge &&
-        !reject &&
-        !former_primary_ready &&
-        e.io.primary_ready
-      e.io.req.bits := io.req.bits.toMissReqWoStoreData()
+      for(j <- 0 until cfg.nMSHRPorts) {
+        e.io.req(j).valid := io.req(j).valid
+        e.io.req(j).bits  := io.req(j).bits.toMissReqWoStoreData()
+      }
+      // e.io.req.valid := io.req.map(_.valid)
+      // e.io.req.valid := io.req.valid
+      e.io.primary_valid := Cat((0 until cfg.nMSHRPorts).map(j => {
+        io.req(j).valid && !merge(j) && !reject(j) && req_alloc_mshr_id(j) === i.U
+      })).asUInt.orR && e.io.primary_ready
+      // e.io.primary_valid := io.req.valid &&
+      //   !merge &&
+      //   !reject &&
+      //   !former_primary_ready &&
+      //   e.io.primary_ready
+      // e.io.req.bits := io.req.map(_.bits.toMissReqWoStoreData())
+      // e.io.req.bits := io.req.bits.toMissReqWoStoreData()
 
       e.io.mem_grant.valid := false.B
       e.io.mem_grant.bits := DontCare
@@ -970,21 +1095,30 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
         e.io.mem_grant <> io.mem_grant
       }
 
-      when(miss_req_pipe_reg.reg_valid() && miss_req_pipe_reg.mshr_id === i.U) {
-        e.io.miss_req_pipe_reg := miss_req_pipe_reg
-      }.otherwise {
-        e.io.miss_req_pipe_reg       := DontCare
-        e.io.miss_req_pipe_reg.merge := false.B
-        e.io.miss_req_pipe_reg.alloc := false.B
+      e.io.miss_req_pipe_reg := DontCare
+      e.io.miss_req_pipe_reg.merge := false.B
+      e.io.miss_req_pipe_reg.alloc := false.B
+      for (j <- 0 until cfg.nMSHRPorts) {
+        when (miss_req_pipe_reg(j).reg_valid() && miss_req_pipe_reg(j).mshr_id === i.U) {
+          e.io.miss_req_pipe_reg := miss_req_pipe_reg(j)
+        }
       }
+      // when(miss_req_pipe_reg.reg_valid() && miss_req_pipe_reg.mshr_id === i.U) {
+      //   e.io.miss_req_pipe_reg := miss_req_pipe_reg
+      // }.otherwise {
+      //   e.io.miss_req_pipe_reg       := DontCare
+      //   e.io.miss_req_pipe_reg.merge := false.B
+      //   e.io.miss_req_pipe_reg.alloc := false.B
+      // }
 
-      e.io.acquire_fired_by_pipe_reg := acquire_from_pipereg.fire
+      // e.io.acquire_fired_by_pipe_reg := acquire_from_pipereg.fire
+      e.io.acquire_fired_by_pipe_reg := Mux1H(miss_req_pipe_reg.zipWithIndex.map{case(r, j) => (r.mshr_id === i.U) -> acquire_from_pipereg(j).fire})
 
       e.io.main_pipe_resp := io.main_pipe_resp.valid && io.main_pipe_resp.bits.ack_miss_queue && io.main_pipe_resp.bits.miss_id === i.U
       e.io.main_pipe_replay := io.mainpipe_info.s2_valid && io.mainpipe_info.s2_replay_to_mq && io.mainpipe_info.s2_miss_id === i.U
       e.io.main_pipe_refill_resp := io.mainpipe_info.s3_valid && io.mainpipe_info.s3_refill_resp && io.mainpipe_info.s3_miss_id === i.U
 
-      e.io.memSetPattenDetected := memSetPattenDetected
+      // e.io.memSetPattenDetected := memSetPattenDetected
       e.io.nMaxPrefetchEntry := nMaxPrefetchEntry
 
       e.io.main_pipe_req.ready := io.main_pipe_req.ready
@@ -997,21 +1131,28 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
       }
   }
 
-  io.req.ready := accept
-  io.mq_enq_cancel := io.req.bits.cancel
+  // io.req.ready := accept
+  (0 until cfg.nMSHRPorts).foreach(i => io.req(i).ready := accept(i))
+  // io.mq_enq_cancel := io.req.bits.cancel
+  io.mq_enq_cancel := io.req.map(r => r.bits.cancel)
   io.refill_to_ldq.valid := Cat(entries.map(_.io.refill_to_ldq.valid)).orR
   io.refill_to_ldq.bits := ParallelMux(entries.map(_.io.refill_to_ldq.valid) zip entries.map(_.io.refill_to_ldq.bits))
 
   io.refill_info.valid := VecInit(entries.zipWithIndex.map{ case(e,i) => e.io.refill_info.valid && io.mainpipe_info.s2_valid && io.mainpipe_info.s2_miss_id === i.U}).asUInt.orR
   io.refill_info.bits := Mux1H(entries.zipWithIndex.map{ case(e,i) => (io.mainpipe_info.s2_miss_id === i.U) -> e.io.refill_info.bits })
 
-  acquire_from_pipereg.valid := miss_req_pipe_reg.can_send_acquire(io.req.valid, io.req.bits)
-  acquire_from_pipereg.bits := miss_req_pipe_reg.get_acquire(io.l2_pf_store_only)
+  // acquire_from_pipereg.valid := miss_req_pipe_reg.can_send_acquire(io.req.valid, io.req.bits)
+  // acquire_from_pipereg.bits := miss_req_pipe_reg.get_acquire(io.l2_pf_store_only)
+  for(i <- 0 until cfg.nMSHRPorts) {
+    acquire_from_pipereg(i).valid := miss_req_pipe_reg(i).can_send_acquire(io.req.map(_.valid), io.req.map(_.bits))
+    acquire_from_pipereg(i).bits  := miss_req_pipe_reg(i).get_acquire(io.l2_pf_store_only)
+  }
 
-  XSPerfAccumulate("acquire_fire_from_pipereg", acquire_from_pipereg.fire)
-  XSPerfAccumulate("pipereg_valid", miss_req_pipe_reg.reg_valid())
+  // XSPerfAccumulate("acquire_fire_from_pipereg", acquire_from_pipereg.fire)
+  // XSPerfAccumulate("pipereg_valid", miss_req_pipe_reg.reg_valid())
 
-  val acquire_sources = Seq(acquire_from_pipereg) ++ entries.map(_.io.mem_acquire)
+  // val acquire_sources = Seq(acquire_from_pipereg) ++ entries.map(_.io.mem_acquire)
+  val acquire_sources = acquire_from_pipereg ++ entries.map(_.io.mem_acquire)
   TLArbiter.lowest(edge, io.mem_acquire, acquire_sources:_*)
   TLArbiter.lowest(edge, io.mem_finish, entries.map(_.io.mem_finish):_*)
 
@@ -1024,23 +1165,29 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
   io.full := ~Cat(entries.map(_.io.primary_ready)).andR
 
+  // Remove temporarily
   // prefetch related
-  io.prefetch_info.naive.late_miss_prefetch := io.req.valid && io.req.bits.isPrefetchRead && (miss_req_pipe_reg.matched(io.req.bits) || Cat(entries.map(_.io.matched)).orR)
+  // io.prefetch_info.naive.late_miss_prefetch := io.req.valid && io.req.bits.isPrefetchRead && (miss_req_pipe_reg.matched(io.req.bits) || Cat(entries.map(_.io.matched)).orR)
 
-  io.prefetch_info.fdp.late_miss_prefetch := (miss_req_pipe_reg.prefetch_late_en(io.req.bits.toMissReqWoStoreData(), io.req.valid) || Cat(entries.map(_.io.prefetch_info.late_prefetch)).orR)
-  io.prefetch_info.fdp.prefetch_monitor_cnt := io.main_pipe_req.fire
-  io.prefetch_info.fdp.total_prefetch := alloc && io.req.valid && !io.req.bits.cancel && isFromL1Prefetch(io.req.bits.pf_source)
+  // io.prefetch_info.fdp.late_miss_prefetch := (miss_req_pipe_reg.prefetch_late_en(io.req.bits.toMissReqWoStoreData(), io.req.valid) || Cat(entries.map(_.io.prefetch_info.late_prefetch)).orR)
+  // io.prefetch_info.fdp.prefetch_monitor_cnt := io.main_pipe_req.fire
+  // io.prefetch_info.fdp.total_prefetch := alloc && io.req.valid && !io.req.bits.cancel && isFromL1Prefetch(io.req.bits.pf_source)
+  io.prefetch_info.naive.late_miss_prefetch := DontCare
+  io.prefetch_info.fdp.late_miss_prefetch := DontCare
+  io.prefetch_info.fdp.prefetch_monitor_cnt := DontCare
+  io.prefetch_info.fdp.total_prefetch := DontCare
 
+  // Remove temporarily
   // L1MissTrace Chisel DB
-  val debug_miss_trace = Wire(new L1MissTrace)
-  debug_miss_trace.vaddr := io.req.bits.vaddr
-  debug_miss_trace.paddr := io.req.bits.addr
-  debug_miss_trace.source := io.req.bits.source
-  debug_miss_trace.pc := io.req.bits.pc
+  // val debug_miss_trace = Wire(new L1MissTrace)
+  // debug_miss_trace.vaddr := io.req.bits.vaddr
+  // debug_miss_trace.paddr := io.req.bits.addr
+  // debug_miss_trace.source := io.req.bits.source
+  // debug_miss_trace.pc := io.req.bits.pc
 
-  val isWriteL1MissQMissTable = Constantin.createRecord(s"isWriteL1MissQMissTable${p(XSCoreParamsKey).HartId}")
-  val table = ChiselDB.createTable(s"L1MissQMissTrace_hart${p(XSCoreParamsKey).HartId}", new L1MissTrace)
-  table.log(debug_miss_trace, isWriteL1MissQMissTable.orR && io.req.valid && !io.req.bits.cancel && alloc, "MissQueue", clock, reset)
+  // val isWriteL1MissQMissTable = WireInit(Constantin.createRecord("isWriteL1MissQMissTable" + p(XSCoreParamsKey).HartId.toString))
+  // val table = ChiselDB.createTable("L1MissQMissTrace_hart"+ p(XSCoreParamsKey).HartId.toString, new L1MissTrace)
+  // table.log(debug_miss_trace, isWriteL1MissQMissTable.orR && io.req.valid && !io.req.bits.cancel && alloc, "MissQueue", clock, reset)
 
   // Difftest
   if (env.EnableDifftest) {
@@ -1053,38 +1200,39 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     difftest.idtfr := DontCare
   }
 
-  // Perf count
-  XSPerfAccumulate("miss_req", io.req.fire && !io.req.bits.cancel)
-  XSPerfAccumulate("miss_req_allocate", io.req.fire && !io.req.bits.cancel && alloc)
-  XSPerfAccumulate("miss_req_load_allocate", io.req.fire && !io.req.bits.cancel && alloc && io.req.bits.isFromLoad)
-  XSPerfAccumulate("miss_req_store_allocate", io.req.fire && !io.req.bits.cancel && alloc && io.req.bits.isFromStore)
-  XSPerfAccumulate("miss_req_amo_allocate", io.req.fire && !io.req.bits.cancel && alloc && io.req.bits.isFromAMO)
-  XSPerfAccumulate("miss_req_prefetch_allocate", io.req.fire && !io.req.bits.cancel && alloc && io.req.bits.isFromPrefetch)
-  XSPerfAccumulate("miss_req_merge_load", io.req.fire && !io.req.bits.cancel && merge && io.req.bits.isFromLoad)
-  XSPerfAccumulate("miss_req_reject_load", io.req.valid && !io.req.bits.cancel && reject && io.req.bits.isFromLoad)
-  XSPerfAccumulate("probe_blocked_by_miss", io.probe_block)
-  XSPerfAccumulate("prefetch_primary_fire", io.req.fire && !io.req.bits.cancel && alloc && io.req.bits.isFromPrefetch)
-  XSPerfAccumulate("prefetch_secondary_fire", io.req.fire && !io.req.bits.cancel && merge && io.req.bits.isFromPrefetch)
-  XSPerfAccumulate("memSetPattenDetected", memSetPattenDetected)
-  val max_inflight = RegInit(0.U((log2Up(cfg.nMissEntries) + 1).W))
-  val num_valids = PopCount(~Cat(primary_ready_vec).asUInt)
-  when (num_valids > max_inflight) {
-    max_inflight := num_valids
-  }
-  // max inflight (average) = max_inflight_total / cycle cnt
-  XSPerfAccumulate("max_inflight", max_inflight)
-  QueuePerf(cfg.nMissEntries, num_valids, num_valids === cfg.nMissEntries.U)
-  io.full := num_valids === cfg.nMissEntries.U
-  XSPerfHistogram("num_valids", num_valids, true.B, 0, cfg.nMissEntries, 1)
+  // Remove Temporarily
+  // // Perf count
+  // XSPerfAccumulate("miss_req", io.req.fire && !io.req.bits.cancel)
+  // XSPerfAccumulate("miss_req_allocate", io.req.fire && !io.req.bits.cancel && alloc)
+  // XSPerfAccumulate("miss_req_load_allocate", io.req.fire && !io.req.bits.cancel && alloc && io.req.bits.isFromLoad)
+  // XSPerfAccumulate("miss_req_store_allocate", io.req.fire && !io.req.bits.cancel && alloc && io.req.bits.isFromStore)
+  // XSPerfAccumulate("miss_req_amo_allocate", io.req.fire && !io.req.bits.cancel && alloc && io.req.bits.isFromAMO)
+  // XSPerfAccumulate("miss_req_prefetch_allocate", io.req.fire && !io.req.bits.cancel && alloc && io.req.bits.isFromPrefetch)
+  // XSPerfAccumulate("miss_req_merge_load", io.req.fire && !io.req.bits.cancel && merge && io.req.bits.isFromLoad)
+  // XSPerfAccumulate("miss_req_reject_load", io.req.valid && !io.req.bits.cancel && reject && io.req.bits.isFromLoad)
+  // XSPerfAccumulate("probe_blocked_by_miss", io.probe_block)
+  // XSPerfAccumulate("prefetch_primary_fire", io.req.fire && !io.req.bits.cancel && alloc && io.req.bits.isFromPrefetch)
+  // XSPerfAccumulate("prefetch_secondary_fire", io.req.fire && !io.req.bits.cancel && merge && io.req.bits.isFromPrefetch)
+  // XSPerfAccumulate("memSetPattenDetected", memSetPattenDetected)
+  // val max_inflight = RegInit(0.U((log2Up(cfg.nMissEntries) + 1).W))
+  // val num_valids = PopCount(~Cat(primary_ready_vec).asUInt)
+  // when (num_valids > max_inflight) {
+  //   max_inflight := num_valids
+  // }
+  // // max inflight (average) = max_inflight_total / cycle cnt
+  // XSPerfAccumulate("max_inflight", max_inflight)
+  // QueuePerf(cfg.nMissEntries, num_valids, num_valids === cfg.nMissEntries.U)
+  // io.full := num_valids === cfg.nMissEntries.U
+  // XSPerfHistogram("num_valids", num_valids, true.B, 0, cfg.nMissEntries, 1)
 
-  XSPerfHistogram("L1DMLP_CPUData", PopCount(VecInit(entries.map(_.io.perf_pending_normal)).asUInt), true.B, 0, cfg.nMissEntries, 1)
-  XSPerfHistogram("L1DMLP_Prefetch", PopCount(VecInit(entries.map(_.io.perf_pending_prefetch)).asUInt), true.B, 0, cfg.nMissEntries, 1)
-  XSPerfHistogram("L1DMLP_Total", num_valids, true.B, 0, cfg.nMissEntries, 1)
+  // XSPerfHistogram("L1DMLP_CPUData", PopCount(VecInit(entries.map(_.io.perf_pending_normal)).asUInt), true.B, 0, cfg.nMissEntries, 1)
+  // XSPerfHistogram("L1DMLP_Prefetch", PopCount(VecInit(entries.map(_.io.perf_pending_prefetch)).asUInt), true.B, 0, cfg.nMissEntries, 1)
+  // XSPerfHistogram("L1DMLP_Total", num_valids, true.B, 0, cfg.nMissEntries, 1)
 
-  XSPerfAccumulate("miss_load_refill_latency", PopCount(entries.map(_.io.latency_monitor.load_miss_refilling)))
-  XSPerfAccumulate("miss_store_refill_latency", PopCount(entries.map(_.io.latency_monitor.store_miss_refilling)))
-  XSPerfAccumulate("miss_amo_refill_latency", PopCount(entries.map(_.io.latency_monitor.amo_miss_refilling)))
-  XSPerfAccumulate("miss_pf_refill_latency", PopCount(entries.map(_.io.latency_monitor.pf_miss_refilling)))
+  // XSPerfAccumulate("miss_load_refill_latency", PopCount(entries.map(_.io.latency_monitor.load_miss_refilling)))
+  // XSPerfAccumulate("miss_store_refill_latency", PopCount(entries.map(_.io.latency_monitor.store_miss_refilling)))
+  // XSPerfAccumulate("miss_amo_refill_latency", PopCount(entries.map(_.io.latency_monitor.amo_miss_refilling)))
+  // XSPerfAccumulate("miss_pf_refill_latency", PopCount(entries.map(_.io.latency_monitor.pf_miss_refilling)))
 
   val rob_head_miss_in_dcache = VecInit(entries.map(_.io.rob_head_query.resp)).asUInt.orR
 
@@ -1097,13 +1245,14 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
   io.debugTopDown.robHeadMissInDCache := rob_head_miss_in_dcache
 
-  val perfValidCount = RegNext(PopCount(entries.map(entry => (!entry.io.primary_ready))))
-  val perfEvents = Seq(
-    ("dcache_missq_req      ", io.req.fire),
-    ("dcache_missq_1_4_valid", (perfValidCount < (cfg.nMissEntries.U/4.U))),
-    ("dcache_missq_2_4_valid", (perfValidCount > (cfg.nMissEntries.U/4.U)) & (perfValidCount <= (cfg.nMissEntries.U/2.U))),
-    ("dcache_missq_3_4_valid", (perfValidCount > (cfg.nMissEntries.U/2.U)) & (perfValidCount <= (cfg.nMissEntries.U*3.U/4.U))),
-    ("dcache_missq_4_4_valid", (perfValidCount > (cfg.nMissEntries.U*3.U/4.U))),
-  )
-  generatePerfEvent()
+  // val perfValidCount = RegNext(PopCount(entries.map(entry => (!entry.io.primary_ready))))
+  // val perfEvents = Seq(
+  //   ("dcache_missq_req      ", io.req.fire),
+  //   ("dcache_missq_1_4_valid", (perfValidCount < (cfg.nMissEntries.U/4.U))),
+  //   ("dcache_missq_2_4_valid", (perfValidCount > (cfg.nMissEntries.U/4.U)) & (perfValidCount <= (cfg.nMissEntries.U/2.U))),
+  //   ("dcache_missq_3_4_valid", (perfValidCount > (cfg.nMissEntries.U/2.U)) & (perfValidCount <= (cfg.nMissEntries.U*3.U/4.U))),
+  //   ("dcache_missq_4_4_valid", (perfValidCount > (cfg.nMissEntries.U*3.U/4.U))),
+  // )
+  val perfEvents = Seq()
+  // generatePerfEvent()
 }
