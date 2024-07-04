@@ -1911,7 +1911,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
 
   for(i <- 0 until RenameWidth) {
     outValids(i) := complexNum > i.U
-    outDecodedInsts(i) := Mux((i.U + numOfUop - uopRes) < maxUopSize.U, csBundle(i.U + numOfUop - uopRes), csBundle(maxUopSize - 1))
+    outDecodedInsts(i) := fixedDecodedInst(i.U + numOfUop - uopRes)
   }
 
   outComplexNum := Mux(state === s_active, complexNum, 0.U)
