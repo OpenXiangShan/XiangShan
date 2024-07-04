@@ -48,7 +48,9 @@ case class SoCParameters
     sets = 2048 // 1MB per bank
   )),
   XSTopPrefix: Option[String] = None,
-  NodeIDWidth: Int = 7
+  NodeIDWidth: Int = 7,
+  UseXSNoCTop: Boolean = false,
+  IMSICUseTL: Boolean = false
 ){
   // L3 configurations
   val L3InnerBusWidth = 256

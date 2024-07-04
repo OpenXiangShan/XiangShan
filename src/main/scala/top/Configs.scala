@@ -408,3 +408,9 @@ class KunminghuV2Config(n: Int = 1) extends Config(
     ++ new WithNKBL1D(64, ways = 8)
     ++ new DefaultConfig(n)
 )
+
+class XSNoCTopConfig(n: Int = 1) extends Config(
+  (new KunminghuV2Config(n)).alter((site, here, up) => {
+    case SoCParamsKey => up(SoCParamsKey).copy(UseXSNoCTop = true)
+  })
+)
