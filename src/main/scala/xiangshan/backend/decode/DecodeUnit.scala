@@ -130,8 +130,6 @@ case class FDecode(
  * Overall Decode constants
  */
 object XDecode extends DecodeConstants {
-  import PseudoInstructions.{CSRRC_RO, CSRRS_RO}
-
   val decodeArray: Array[(BitPat, XSDecodeBase)] = Array(
     // RV32I
     LW      -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.ldu, LSUOpType.lw  , SelImm.IMM_I, xWen = T),
@@ -207,10 +205,6 @@ object XDecode extends DecodeConstants {
     BLTU    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.brh, BRUOpType.bltu  , SelImm.IMM_SB          ),
 
     // System, the immediate12 holds the CSR register.
-
-    // CSR RO should be ahead of CSRRS and CSRRC, since decoder don't handle the inclusive relation-ship among the patterns.
-    CSRRS_RO -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.ro, SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
-    CSRRC_RO -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.ro, SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
 
     CSRRW   -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrt , SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
     CSRRS   -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.set , SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
@@ -998,11 +992,14 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   ))
   io.deq.decodedInst.imm := Mux(isCsrrVlenb, (VLEN / 8).U, decodedInst.imm)
 
-  io.deq.decodedInst.fuOpType := Mux1H(Seq(
-    // keep condition
-    !isCsrrVl && !isCsrrVlenb -> decodedInst.fuOpType,
+  io.deq.decodedInst.fuOpType := MuxCase(decodedInst.fuOpType, Seq(
     isCsrrVl    -> VSETOpType.csrrvl,
     isCsrrVlenb -> ALUOpType.add,
+    isCSRR      -> CSROpType.ro,
+  ))
+
+  io.deq.decodedInst.blockBackward := MuxCase(decodedInst.blockBackward, Seq(
+    isCSRR -> false.B,
   ))
   //-------------------------------------------------------------
   // Debug Info
