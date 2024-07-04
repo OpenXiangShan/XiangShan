@@ -727,7 +727,15 @@ class NewCSR(implicit val p: Parameters) extends Module
   )
 
   val triggerFrontendChange = Wire(Bool())
-  val flushPipe = resetSatp || frmChange || vxrmChange || triggerFrontendChange || floatStatusOnOff || vectorStatusOnOff
+
+  val vstartChange = vstart.w.wen && (
+    vstart.w.wdata === 0.U && vstart.regOut.vstart.asUInt =/= 0.U ||
+    vstart.w.wdata =/= 0.U && vstart.regOut.vstart.asUInt === 0.U
+  )
+
+  val flushPipe = resetSatp || frmChange || vxrmChange ||
+    triggerFrontendChange || floatStatusOnOff || vectorStatusOnOff ||
+    vstartChange
 
   private val rdata = Mux1H(csrRwMap.map { case (id, (_, rdata)) =>
     if (vsMapS.contains(id)) {
