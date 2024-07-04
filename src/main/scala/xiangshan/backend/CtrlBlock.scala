@@ -483,7 +483,7 @@ class CtrlBlockImp(
   )
 
   // pipeline between rename and dispatch
-  PipeGroupConnect(renameOut, dispatch.io.fromRename, s1_s3_redirect.valid, "renamePipeDispatch")
+  PipeGroupConnect(renameOut, dispatch.io.fromRename, s1_s3_redirect.valid, dispatch.io.toRenameAllFire, "renamePipeDispatch")
   dispatch.io.intIQValidNumVec := io.intIQValidNumVec
   dispatch.io.fpIQValidNumVec := io.fpIQValidNumVec
   dispatch.io.fromIntDQ.intDQ0ValidDeq0Num := intDq0.io.validDeq0Num
