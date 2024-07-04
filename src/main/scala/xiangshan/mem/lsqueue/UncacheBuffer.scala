@@ -436,6 +436,8 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
     redirect.bits.level       := RedirectLevel.flush
     redirect.bits.cfiUpdate.target := reqSelUops(i).pc // TODO: check if need pc
     redirect.bits.debug_runahead_checkpoint_id := reqSelUops(i).debugInfo.runahead_checkpoint_id
+
+    redirect.bits.traceInfo   := reqSelUops(i).traceInfo
     redirect
   })
   val oldestOneHot = selectOldestRedirect(allRedirect)
