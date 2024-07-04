@@ -511,7 +511,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   def fromPrefetchSource(src: L1PrefetchReq): FlowSource = {
     val out = WireInit(0.U.asTypeOf(new FlowSource))
     out.mask          := 0.U
-    out.uop           := DontCare
+    out.uop           := 0.U.asTypeOf(out.uop)
     out.try_l2l       := false.B
     out.has_rob_entry := false.B
     out.rep_carry     := 0.U.asTypeOf(out.rep_carry)
@@ -1419,6 +1419,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.rollback.bits.level       := Mux(s3_rep_frm_fetch, RedirectLevel.flush, RedirectLevel.flushAfter)
   io.rollback.bits.cfiUpdate.target := s3_out.bits.uop.pc
   io.rollback.bits.debug_runahead_checkpoint_id := s3_out.bits.uop.debugInfo.runahead_checkpoint_id
+
+  io.rollback.bits.traceInfo   := s3_out.bits.uop.traceInfo
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
 
   io.lsq.ldin.bits.uop := s3_out.bits.uop

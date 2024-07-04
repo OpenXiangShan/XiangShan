@@ -351,7 +351,7 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   def fromPrefetchSource(src: L1PrefetchReq) = {
     s0_vaddr         := src.getVaddr()
     s0_mask          := 0.U
-    s0_uop           := DontCare
+    s0_uop           := 0.U.asTypeOf(s0_uop)
     s0_try_l2l       := false.B
     s0_has_rob_entry := false.B
     s0_rep_carry     := 0.U.asTypeOf(s0_rep_carry.cloneType)
@@ -1201,6 +1201,8 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.ldu_io.rollback.bits.level       := Mux(s3_rep_frm_fetch, RedirectLevel.flush, RedirectLevel.flushAfter)
   io.ldu_io.rollback.bits.cfiUpdate.target := s3_out.bits.uop.pc
   io.ldu_io.rollback.bits.debug_runahead_checkpoint_id := s3_out.bits.uop.debugInfo.runahead_checkpoint_id
+
+  io.ldu_io.rollback.bits.traceInfo   := s3_out.bits.uop.traceInfo
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
   io.ldu_io.lsq.ldin.bits.uop := s3_out.bits.uop
 
