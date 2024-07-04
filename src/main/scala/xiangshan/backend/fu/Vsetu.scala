@@ -105,7 +105,9 @@ class VsetModule(implicit p: Parameters) extends XSModule {
   outVConfig.vtype.vlmul := Mux(illegal, 0.U, vtype.vlmul)
   outVConfig.vtype.vsew := Mux(illegal, 0.U, vtype.vsew)
 
-  io.out.vlmax := vlmax
+  private val log2VlenDivVsew = log2Vlen.U(3.W) - log2Vsew
+  private val vlenDivVsew = 1.U(vlWidth.W) << log2VlenDivVsew
+  io.out.vlmax := Mux(vlmax >= vlenDivVsew, vlmax, vlenDivVsew)
 
   io.testOut.vlmax := vlmax
   io.testOut.log2Vlmax := log2Vlmax
