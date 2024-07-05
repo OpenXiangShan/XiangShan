@@ -55,7 +55,7 @@ class VpuCsrIO(implicit p: Parameters) extends XSBundle {
 
 class PerfCounterIO(implicit p: Parameters) extends XSBundle {
   val perfEventsFrontend  = Vec(numCSRPCntFrontend, new PerfEvent)
-  val perfEventsCtrl      = Vec(numCSRPCntCtrl, new PerfEvent)
+  val perfEventsBackend   = Vec(numCSRPCntCtrl, new PerfEvent)
   val perfEventsLsu       = Vec(numCSRPCntLsu, new PerfEvent)
   val perfEventsHc        = Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent)
   val retiredInstr = UInt(7.W)
@@ -749,7 +749,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   mcycle := mcycle + 1.U
   val minstret = RegInit(0.U(XLEN.W))
   val perf_events = csrio.perf.perfEventsFrontend ++
-                    csrio.perf.perfEventsCtrl ++
+                    csrio.perf.perfEventsBackend ++
                     csrio.perf.perfEventsLsu ++
                     hpm_hc.getPerf
   minstret := minstret + RegNext(csrio.perf.retiredInstr)

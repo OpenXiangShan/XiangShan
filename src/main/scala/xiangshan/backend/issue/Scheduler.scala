@@ -4,7 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import utils.OptionWrapper
+import utils.{HasPerfEvents, OptionWrapper}
 import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.DataConfig._
@@ -412,6 +412,17 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
     io.wbFuBusyTable(i) := iq.io.wbBusyTableWrite
   }
 
+  // perfEvent
+  val lastCycleDp2IqOutFireVec = RegNext(VecInit(dispatch2Iq.io.out.flatten.map(_.fire)))
+  val lastCycleIqEnqFireVec    = RegNext(VecInit(issueQueues.map(_.io.enq.map(_.fire)).flatten))
+  val lastCycleIqFullVec       = RegNext(VecInit(issueQueues.map(_.io.enq.head.ready)))
+
+  val issueQueueFullVecPerf = issueQueues.zip(lastCycleIqFullVec)map{ case (iq, full) => (iq.params.getIQName + s"_full", full) }
+  val basePerfEvents = Seq(
+    ("dispatch2Iq_out_fire_cnt", PopCount(lastCycleDp2IqOutFireVec)                 ),
+    ("issueQueue_enq_fire_cnt",  PopCount(lastCycleIqEnqFireVec)                    )
+  )  ++ issueQueueFullVecPerf
+
   println(s"[Scheduler] io.fromSchedulers.wakeupVec: ${io.fromSchedulers.wakeupVec.map(x => backendParams.getExuName(x.bits.exuIdx))}")
   println(s"[Scheduler] iqWakeUpInKeys: ${iqWakeUpInMap.keys}")
 
@@ -422,6 +433,7 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
 class SchedulerArithImp(override val wrapper: Scheduler)(implicit params: SchdBlockParams, p: Parameters)
   extends SchedulerImpBase(wrapper)
     with HasXSParameter
+    with HasPerfEvents
 {
 //  dontTouch(io.vfWbFuBusyTable)
   println(s"[SchedulerArithImp] " +
@@ -441,12 +453,16 @@ class SchedulerArithImp(override val wrapper: Scheduler)(implicit params: SchdBl
     }
     iq.io.wakeupFromWB.zip(intWBIQ).foreach{ case (sink, source) => sink := source}
   }
+
+  val perfEvents = basePerfEvents
+  generatePerfEvent()
 }
 
 // FIXME: Vector mem instructions may not be handled properly!
 class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBlockParams, p: Parameters)
   extends SchedulerImpBase(wrapper)
     with HasXSParameter
+    with HasPerfEvents
 {
   println(s"[SchedulerMemImp] " +
     s"has intBusyTable: ${intBusyTable.nonEmpty}, " +
@@ -615,4 +631,13 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
   io.memIO.get.lsqEnqIO <> lsqEnqCtrl.io.enqLsq
 
   dontTouch(io.vecLoadIssueResp)
+
+  val intBusyTablePerf = intBusyTable.get
+  val fpBusyTablePerf  = fpBusyTable.get
+  val vecBusyTablePerf = vfBusyTable.get
+  val v0BusyTablePerf  = v0BusyTable.get
+  val vlBusyTablePerf  = vlBusyTable.get
+
+  val perfEvents = basePerfEvents ++ Seq(intBusyTablePerf, fpBusyTablePerf, vecBusyTablePerf, v0BusyTablePerf, vlBusyTablePerf).flatten(_.getPerfEvents)
+  generatePerfEvent()
 }

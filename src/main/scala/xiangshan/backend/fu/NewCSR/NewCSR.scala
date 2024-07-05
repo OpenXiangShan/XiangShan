@@ -896,7 +896,7 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   /**
    * perf_begin
-   * perf number: 29 (frontend 8, ctrlblock 8, memblock 8, huncun 5)
+   * perf number: 29 (frontend 8, ctrlblock 8, memblock 8, huancun 5)
    */
   // tmp: mhpmevents is wrapper of perfEvents, read/write/update mhpmevents -> read/write/update perfEvents
   for (i <-0 until perfCntNum) {
@@ -906,12 +906,19 @@ class NewCSR(implicit val p: Parameters) extends Module
   }
   val csrevents = perfEvents.slice(24, 29)
 
-  val hpmEvents = Wire(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
+  val hcEvents = Wire(Vec(numPCntHc * coreParams.L2NBanks, new PerfEvent))
   for (i <- 0 until numPCntHc * coreParams.L2NBanks) {
-    hpmEvents(i) := io.perf.perfEventsHc(i)
+    hcEvents(i) := io.perf.perfEventsHc(i)
   }
 
-  val hpmHc = HPerfMonitor(csrevents, hpmEvents)
+  val allHcPerfEvents = hcEvents.map(x => (s"Hc", x.value))
+  if (printEventCoding) {
+    for (((name, inc), i) <- allHcPerfEvents.zipWithIndex) {
+      println("HuanCun perfEvents Set", name, inc, i)
+    }
+  }
+
+  val hpmHc = HPerfMonitor(csrevents, hcEvents)
 
   val privState1H = Cat(privState.isModeM, privState.isModeHS, privState.isModeHU, privState.isModeVS, privState.isModeVU)
   val countingEn = RegInit(0.U.asTypeOf(Vec(perfCntNum, Bool())))
@@ -919,7 +926,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     countingEn(i) := ((~mhpmevents(i).rdata(62, 58)).asUInt & privState1H).orR
   }
   val allPerfEvents = io.perf.perfEventsFrontend ++
-    io.perf.perfEventsCtrl ++
+    io.perf.perfEventsBackend ++
     io.perf.perfEventsLsu ++
     hpmHc.getPerf
 
