@@ -595,32 +595,7 @@ class CtrlBlockImp(
   io.perfInfo.ctrlInfo.fpdqFull := GatedValidRegNext(vecDq.io.dqFull)
   io.perfInfo.ctrlInfo.lsdqFull := GatedValidRegNext(lsDq.io.dqFull)
 
-  val pfevent = Module(new PFEvent)
-  pfevent.io.distribute_csr := RegNext(io.csrCtrl.distribute_csr)
-  val csrevents = pfevent.io.hpmevent.slice(8,16)
-
-  val perfinfo = IO(new Bundle(){
-    val perfEventsRs      = Input(Vec(params.IqCnt, new PerfEvent))
-    val perfEventsEu0     = Input(Vec(6, new PerfEvent))
-    val perfEventsEu1     = Input(Vec(6, new PerfEvent))
-  })
-
-  val perfFromUnits = Seq(decode, rename, dispatch, intDq0, intDq1, vecDq, lsDq, rob).flatMap(_.getPerfEvents)
-  val perfFromIO    = perfinfo.perfEventsEu0.map(x => ("perfEventsEu0", x.value)) ++
-                        perfinfo.perfEventsEu1.map(x => ("perfEventsEu1", x.value)) ++
-                        perfinfo.perfEventsRs.map(x => ("perfEventsRs", x.value))
-  val perfBlock     = Seq()
-  // let index = 0 be no event
-  val allPerfEvents = Seq(("noEvent", 0.U)) ++ perfFromUnits ++ perfFromIO ++ perfBlock
-
-  if (printEventCoding) {
-    for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
-      println("CtrlBlock perfEvents Set", name, inc, i)
-    }
-  }
-
-  val allPerfInc = allPerfEvents.map(_._2.asTypeOf(new PerfEvent))
-  val perfEvents = HPerfMonitor(csrevents, allPerfInc).getPerfEvents
+  val perfEvents = Seq(decode, rename, dispatch, intDq0, intDq1, vecDq, lsDq, rob).flatMap(_.getPerfEvents)
   generatePerfEvent()
 }
 

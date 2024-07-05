@@ -23,6 +23,7 @@ import device.MsiInfoBundle
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import system.HasSoCParameter
 import utility.{Constantin, ZeroExt}
+import utils.{HPerfMonitor, HasPerfEvents, PerfEvent}
 import xiangshan._
 import xiangshan.backend.Bundles.{DynInst, IssueQueueIQWakeUpBundle, LoadShouldCancel, MemExuInput, MemExuOutput, VPUCtrlSignals}
 import xiangshan.backend.ctrlblock.{DebugLSIO, LsTopdownInfo}
@@ -34,9 +35,9 @@ import xiangshan.backend.datapath._
 import xiangshan.backend.dispatch.CoreDispatchTopDownIO
 import xiangshan.backend.exu.ExuBlock
 import xiangshan.backend.fu.vector.Bundles.{VConfig, VType}
-import xiangshan.backend.fu.{FenceIO, FenceToSbuffer, FuConfig, FuType, PerfCounterIO}
+import xiangshan.backend.fu.{FenceIO, FenceToSbuffer, FuConfig, FuType, PFEvent, PerfCounterIO}
 import xiangshan.backend.issue.EntryBundles._
-import xiangshan.backend.issue.{CancelNetwork, Scheduler, SchedulerImpBase}
+import xiangshan.backend.issue.{CancelNetwork, Scheduler, SchedulerArithImp, SchedulerImpBase, SchedulerMemImp}
 import xiangshan.backend.rob.{RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.frontend.{FtqPtr, FtqRead, PreDecodeInfo}
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
@@ -167,7 +168,8 @@ class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyMod
 }
 
 class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends LazyModuleImp(wrapper)
-  with HasXSParameter {
+  with HasXSParameter
+  with HasPerfEvents {
   implicit private val params: BackendParams = wrapper.params
 
   val io = IO(new BackendIO()(p, wrapper.params))
@@ -230,7 +232,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   ctrlBlock.io.robio.lsq <> io.mem.robLsqIO
   ctrlBlock.io.robio.lsTopdownInfo <> io.mem.lsTopdownInfo
   ctrlBlock.io.robio.debug_ls <> io.mem.debugLS
-  ctrlBlock.perfinfo := DontCare // TODO: Implement backend hpm
   ctrlBlock.io.debugEnqLsq.canAccept := io.mem.lsqEnqIO.canAccept
   ctrlBlock.io.debugEnqLsq.resp := io.mem.lsqEnqIO.resp
   ctrlBlock.io.debugEnqLsq.req := memScheduler.io.memIO.get.lsqEnqIO.req
@@ -443,7 +444,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   csrio.perf <> io.perf
   csrio.perf.retiredInstr <> ctrlBlock.io.robio.csr.perfinfo.retiredInstr
   csrio.perf.ctrlInfo <> ctrlBlock.io.perfInfo.ctrlInfo
-  csrio.perf.perfEventsCtrl <> ctrlBlock.getPerf
   private val fenceio = intExuBlock.io.fenceio.get
   io.fenceio <> fenceio
 
@@ -678,6 +678,32 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     dontTouch(dataPath.io.toMemExu)
     dontTouch(wbDataPath.io.fromMemExu)
   }
+
+  val pfevent = Module(new PFEvent)
+  pfevent.io.distribute_csr := RegNext(csrio.customCtrl.distribute_csr)
+  val csrevents = pfevent.io.hpmevent.slice(8,16)
+
+  val ctrlBlockPerf    = ctrlBlock.getPerfEvents
+  val intSchedulerPerf = intScheduler.asInstanceOf[SchedulerArithImp].getPerfEvents
+  val fpSchedulerPerf  = fpScheduler.asInstanceOf[SchedulerArithImp].getPerfEvents
+  val vecSchedulerPerf = vfScheduler.asInstanceOf[SchedulerArithImp].getPerfEvents
+  val memSchedulerPerf = memScheduler.asInstanceOf[SchedulerMemImp].getPerfEvents
+
+  val perfBackend  = Seq()
+  // let index = 0 be no event
+  val allPerfEvents = Seq(("noEvent", 0.U)) ++ ctrlBlockPerf ++ intSchedulerPerf ++ fpSchedulerPerf ++ vecSchedulerPerf ++ memSchedulerPerf ++ perfBackend
+
+
+  if (printEventCoding) {
+    for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
+      println("backend perfEvents Set", name, inc, i)
+    }
+  }
+
+  val allPerfInc = allPerfEvents.map(_._2.asTypeOf(new PerfEvent))
+  val perfEvents = HPerfMonitor(csrevents, allPerfInc).getPerfEvents
+  csrio.perf.perfEventsBackend := VecInit(perfEvents.map(_._2.asTypeOf(new PerfEvent)))
+  generatePerfEvent()
 }
 
 class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBundle {

@@ -169,7 +169,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.perf.perfEventsFrontend := frontend.getPerf
   backend.io.perf.perfEventsLsu := memBlock.getPerf
   backend.io.perf.perfEventsHc := io.perfEvents
-  backend.io.perf.perfEventsCtrl := DontCare
+  backend.io.perf.perfEventsBackend := DontCare
   backend.io.perf.retiredInstr := DontCare
   backend.io.perf.ctrlInfo := DontCare
 
