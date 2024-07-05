@@ -288,19 +288,37 @@ trait MachineLevel { self: NewCSR =>
   })).setAddr(CSRs.mseccfg)
 
   val mcycle = Module(new CSRModule("Mcycle") with HasMachineCounterControlBundle {
-    reg.ALL := Mux(!mcountinhibit.CY.asUInt.asBool, reg.ALL.asUInt + 1.U, reg.ALL.asUInt)
+    when(w.wen) {
+      reg := w.wdata
+    }.elsewhen(!mcountinhibit.CY.asUInt.asBool) {
+      reg := reg.ALL.asUInt + 1.U
+    }.otherwise {
+      reg := reg
+    }
   }).setAddr(CSRs.mcycle)
 
 
   val minstret = Module(new CSRModule("Minstret") with HasMachineCounterControlBundle with HasRobCommitBundle {
-    reg.ALL := Mux(!mcountinhibit.IR.asUInt.asBool && robCommit.instNum.valid, reg.ALL.asUInt + robCommit.instNum.bits, reg.ALL.asUInt)
+    when(w.wen) {
+      reg := w.wdata
+    }.elsewhen(!mcountinhibit.IR && robCommit.instNum.valid) {
+      reg := reg.ALL.asUInt + robCommit.instNum.bits
+    }.otherwise {
+      reg := reg
+    }
   }).setAddr(CSRs.minstret)
 
   val mhpmcounters: Seq[CSRModule[_]] = (3 to 0x1F).map(num =>
     Module(new CSRModule(s"Mhpmcounter$num") with HasMachineCounterControlBundle with HasPerfCounterBundle {
       val countingInhibit = mcountinhibit.asUInt(num) | !countingEn
       val counterAdd = reg.ALL.asUInt +& perf.value
-      reg.ALL := Mux(countingInhibit, reg.ALL.asUInt, counterAdd.tail(1))
+      when (w.wen) {
+        reg := w.wdata
+      }.elsewhen (perf.value =/= 0.U && !countingInhibit) {
+        reg := counterAdd.tail(1)
+      }.otherwise {
+        reg := reg
+      }
       // Count overflow never results from writes to the mhpmcountern or mhpmeventn registers, only from
       // hardware increments of counter registers.
       toMhpmeventOF := !countingInhibit & counterAdd.head(1)
