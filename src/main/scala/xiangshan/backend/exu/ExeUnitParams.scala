@@ -84,7 +84,8 @@ case class ExeUnitParams(
   val isVfExeUnit: Boolean = schdType.isInstanceOf[VfScheduler]
   val isMemExeUnit: Boolean = schdType.isInstanceOf[MemScheduler]
 
-  val needReadRegCache: Boolean = isIntExeUnit || isMemExeUnit && readIntRf
+  def needReadRegCache: Boolean = isIntExeUnit || isMemExeUnit && readIntRf
+  def needWriteRegCache: Boolean = isIntExeUnit && isIQWakeUpSource || isMemExeUnit && isIQWakeUpSource && readIntRf
 
   // exu writeback: 0 normalout; 1 intout; 2 fpout; 3 vecout
   val wbNeedIntWen : Boolean = writeIntRf && !isMemExeUnit

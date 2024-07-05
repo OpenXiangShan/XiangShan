@@ -354,6 +354,7 @@ object Bundles {
     val loadDependency = Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))
     val is0Lat = Bool()
     val params = backendParams.allExuParams.filter(_.exuIdx == exuIdx).head
+    val rcDest = OptionWrapper(params.needWriteRegCache, UInt(RegCacheIdxWidth.W))
     val pdestCopy  = OptionWrapper(copyWakeupOut, Vec(copyNum, UInt(params.wbPregIdxWidth.W)))
     val rfWenCopy  = OptionWrapper(copyWakeupOut && params.needIntWen, Vec(copyNum, Bool()))
     val fpWenCopy  = OptionWrapper(copyWakeupOut && params.needFpWen, Vec(copyNum, Bool()))
@@ -361,14 +362,6 @@ object Bundles {
     val v0WenCopy = OptionWrapper(copyWakeupOut && params.needV0Wen, Vec(copyNum, Bool()))
     val vlWenCopy = OptionWrapper(copyWakeupOut && params.needVlWen, Vec(copyNum, Bool()))
     val loadDependencyCopy = OptionWrapper(copyWakeupOut && params.isIQWakeUpSink, Vec(copyNum, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
-    def fromExuInput(exuInput: ExuInput, l2ExuVecs: Vec[Vec[Bool]]): Unit = {
-      this.rfWen := exuInput.rfWen.getOrElse(false.B)
-      this.fpWen := exuInput.fpWen.getOrElse(false.B)
-      this.vecWen := exuInput.vecWen.getOrElse(false.B)
-      this.v0Wen := exuInput.v0Wen.getOrElse(false.B)
-      this.vlWen := exuInput.vlWen.getOrElse(false.B)
-      this.pdest := exuInput.pdest
-    }
 
     def fromExuInput(exuInput: ExuInput): Unit = {
       this.rfWen := exuInput.rfWen.getOrElse(false.B)
@@ -820,11 +813,10 @@ object Bundles {
   //     [IssueQueue]--> ExuInput --
   class ExuBypassBundle(
     val params: ExeUnitParams,
-  )(implicit
-    val p: Parameters
-  ) extends Bundle {
-    val data  = UInt(params.destDataBitsMax.W)
-    val pdest = UInt(params.wbPregIdxWidth.W)
+  )(implicit p: Parameters) extends XSBundle {
+    val intWen = Bool()
+    val data   = UInt(params.destDataBitsMax.W)
+    val pdest  = UInt(params.wbPregIdxWidth.W)
   }
 
   class ExceptionInfo(implicit p: Parameters) extends XSBundle {

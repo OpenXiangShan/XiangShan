@@ -62,6 +62,7 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val og0Cancel = Input(ExuVec())
   val og1Cancel = Input(ExuVec())
   val ldCancel = Vec(backendParams.LduCnt + backendParams.HyuCnt, Flipped(new LoadCancelIO))
+  val replaceRCIdx = OptionWrapper(params.needWriteRegCache, Vec(params.numDeq, Input(UInt(RegCacheIdxWidth.W))))
 
   // Outputs
   val wakeupToIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = params.genIQWakeUpSourceValidBundle
@@ -771,20 +772,15 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     dontTouch(io.deqDelay)
   }
   io.wakeupToIQ.zipWithIndex.foreach { case (wakeup, i) =>
-    if (wakeUpQueues(i).nonEmpty && finalWakeUpL1ExuOH.nonEmpty) {
-      wakeup.valid := wakeUpQueues(i).get.io.deq.valid
-      wakeup.bits.fromExuInput(wakeUpQueues(i).get.io.deq.bits, finalWakeUpL1ExuOH.get(i))
-      wakeup.bits.loadDependency := wakeUpQueues(i).get.io.deq.bits.loadDependency.getOrElse(0.U.asTypeOf(wakeup.bits.loadDependency))
-      wakeup.bits.is0Lat := getDeqLat(i, wakeUpQueues(i).get.io.deq.bits.fuType) === 0.U
-    } else if (wakeUpQueues(i).nonEmpty) {
+    if (wakeUpQueues(i).nonEmpty) {
       wakeup.valid := wakeUpQueues(i).get.io.deq.valid
       wakeup.bits.fromExuInput(wakeUpQueues(i).get.io.deq.bits)
       wakeup.bits.loadDependency := wakeUpQueues(i).get.io.deq.bits.loadDependency.getOrElse(0.U.asTypeOf(wakeup.bits.loadDependency))
       wakeup.bits.is0Lat := getDeqLat(i, wakeUpQueues(i).get.io.deq.bits.fuType) === 0.U
+      wakeup.bits.rcDest.foreach(_ := io.replaceRCIdx.get(i))
     } else {
       wakeup.valid := false.B
       wakeup.bits := 0.U.asTypeOf(wakeup.bits)
-      wakeup.bits.is0Lat :=  0.U
     }
     if (wakeUpQueues(i).nonEmpty) {
       wakeup.bits.rfWen  := (if (wakeUpQueues(i).get.io.deq.bits.rfWen .nonEmpty) wakeUpQueues(i).get.io.deq.valid && wakeUpQueues(i).get.io.deq.bits.rfWen .get else false.B)
@@ -1079,6 +1075,7 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
       wakeup.bits.v0Wen  := (if (params.writeV0Rf)  GatedValidRegNext(uop.bits.v0Wen  && uop.fire) else false.B)
       wakeup.bits.vlWen  := (if (params.writeVlRf)  GatedValidRegNext(uop.bits.vlWen  && uop.fire) else false.B)
       wakeup.bits.pdest  := RegNext(uop.bits.pdest)
+      wakeup.bits.rcDest.foreach(_ := io.replaceRCIdx.get(i))
       wakeup.bits.loadDependency.foreach(_ := 0.U) // this is correct for load only
 
       wakeup.bits.rfWenCopy .foreach(_.foreach(_ := (if (params.writeIntRf) GatedValidRegNext(uop.bits.rfWen  && uop.fire) else false.B)))

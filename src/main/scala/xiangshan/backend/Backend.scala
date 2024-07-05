@@ -250,6 +250,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   intScheduler.io.fromDataPath.og0Cancel := og0Cancel
   intScheduler.io.fromDataPath.og1Cancel := og1Cancel
   intScheduler.io.ldCancel := io.mem.ldCancel
+  intScheduler.io.fromDataPath.replaceRCIdx.get := dataPath.io.toWakeupQueueRCIdx.take(params.getIntExuRCWriteSize)
   intScheduler.io.vlWriteBackInfo.vlIsZero := false.B
   intScheduler.io.vlWriteBackInfo.vlIsVlmax := false.B
 
@@ -303,6 +304,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   memScheduler.io.fromDataPath.og0Cancel := og0Cancel
   memScheduler.io.fromDataPath.og1Cancel := og1Cancel
   memScheduler.io.ldCancel := io.mem.ldCancel
+  memScheduler.io.fromDataPath.replaceRCIdx.get := dataPath.io.toWakeupQueueRCIdx.takeRight(params.getMemExuRCWriteSize)
   memScheduler.io.vlWriteBackInfo.vlIsZero := vlIsZero
   memScheduler.io.vlWriteBackInfo.vlIsVlmax := vlIsVlmax
 
@@ -346,7 +348,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   dataPath.io.debugVecRat    .foreach(_ := ctrlBlock.io.debug_vec_rat.get)
   dataPath.io.debugV0Rat     .foreach(_ := ctrlBlock.io.debug_v0_rat.get)
   dataPath.io.debugVlRat     .foreach(_ := ctrlBlock.io.debug_vl_rat.get)
-  dataPath.io.fromBypassNetwork := DontCare
+  dataPath.io.fromBypassNetwork := bypassNetwork.io.toDataPath
 
   og2ForVector.io.flush := ctrlBlock.io.toDataPath.flush
   og2ForVector.io.ldCancel := io.mem.ldCancel
@@ -371,6 +373,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   )
   bypassNetwork.io.fromExus.mem.flatten.zip(io.mem.writeBack).foreach { case (sink, source) =>
     sink.valid := source.valid
+    sink.bits.intWen := source.bits.uop.rfWen
     sink.bits.pdest := source.bits.uop.pdest
     sink.bits.data := source.bits.data
   }
