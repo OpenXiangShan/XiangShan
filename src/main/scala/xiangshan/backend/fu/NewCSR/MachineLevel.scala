@@ -568,9 +568,9 @@ class Epc extends CSRBundle {
 }
 
 class McountinhibitBundle extends CSRBundle {
-  val CY = RW(0)
-  val IR = RW(2)
-  val HPM3 = RW(31, 3)
+  val CY = RW(0).withReset(0.U)
+  val IR = RW(2).withReset(0.U)
+  val HPM3 = RW(31, 3).withReset(0.U)
 }
 
 // todo: for the future, delete bypass between mhpmevents and perfEvents
