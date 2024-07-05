@@ -75,6 +75,7 @@ class TracePreDecodeAndChecker(implicit p: Parameters) extends TraceModule
     !io.fromIFU.redirect &&
     !io.fromTraceDriver.endWithCFI &&
     (traceAligner.io.instRangeTaken2B || traceAligner.io.traceRangeTaken2B),
+    false.B,
     io.fromIFU.fire || io.fromIFU.redirect
   )
   // !lastFetchRedirect && lastFetchTakenMore2B && !lastEndWithCFI
