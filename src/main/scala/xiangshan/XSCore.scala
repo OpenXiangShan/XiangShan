@@ -31,6 +31,7 @@ import xiangshan.backend._
 import xiangshan.backend.exu.{ExuConfig, Wb2Ctrl, WbArbiterWrapper}
 import xiangshan.cache.mmu._
 import xiangshan.frontend._
+import xiangshan.backend.fu.matu._
 
 import scala.collection.mutable.ListBuffer
 
@@ -163,6 +164,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
       (AluExeUnitCfg, exuParameters.AluCnt, Seq(AluExeUnitCfg, LdExeUnitCfg, StaExeUnitCfg), Seq()),
       (MulDivExeUnitCfg, exuParameters.MduCnt, Seq(AluExeUnitCfg, MulDivExeUnitCfg), Seq()),
       (JumpCSRExeUnitCfg, 1, Seq(), Seq()),
+      (MatuExeUnitCfg, exuParameters.MatuCnt, Seq(), Seq()),
       (LdExeUnitCfg, exuParameters.LduCnt, Seq(AluExeUnitCfg, LdExeUnitCfg), Seq()),
       (StaExeUnitCfg, exuParameters.StuCnt, Seq(), Seq()),
       (StdExeUnitCfg, exuParameters.StuCnt, Seq(), Seq())
@@ -194,16 +196,16 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
 
   // allow mdu and fmisc to have 2*numDeq enqueue ports
   val intDpPorts = (0 until exuParameters.AluCnt).map(i => {
-    if (i < exuParameters.JmpCnt) Seq((0, i), (1, i), (2, i))
+    if (i < exuParameters.JmpCnt) Seq((0, i), (1, i), (2, i), (3, i))
     else if (i < 2 * exuParameters.MduCnt) Seq((0, i), (1, i))
     else Seq((0, i))
   })
   val lsDpPorts = Seq(
-    Seq((3, 0)),
-    Seq((3, 1)),
     Seq((4, 0)),
-    Seq((4, 1))
-  ) ++ (0 until exuParameters.StuCnt).map(i => Seq((5, i)))
+    Seq((4, 1)),
+    Seq((5, 0)),
+    Seq((5, 1))
+  ) ++ (0 until exuParameters.StuCnt).map(i => Seq((6, i)))
   val fpDpPorts = (0 until exuParameters.FmacCnt).map(i => {
     if (i < 2 * exuParameters.FmiscCnt) Seq((0, i), (1, i))
     else Seq((0, i))
@@ -267,6 +269,16 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.hartId := io.hartId
   outer.wbArbiter.module.io.hartId := io.hartId
 
+  exuBlocks.head.io.ldIn(0) <> memBlock.io.ldout_dup(0)
+  exuBlocks.head.io.ldIn(1) <> memBlock.io.ldout_dup(1)
+  exuBlocks.head.io.dpUopIn <> ctrlBlock.io.dpOut
+
+  memBlock.io.mpuValid <> exuBlocks.head.io.stOut.valid
+  memBlock.io.mpuData <> exuBlocks.head.io.stOut.bits
+  memBlock.io.mpuUop <> exuBlocks.head.io.suop
+  memBlock.io.mpuPc <> exuBlocks.head.io.spc
+  memBlock.io.mpuRobIdx <> exuBlocks.head.io.srobIdx
+
   io.cpu_halt := ctrlBlock.io.cpu_halt
 
   outer.wbArbiter.module.io.redirect <> ctrlBlock.io.redirect
@@ -320,6 +332,10 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   ctrlBlock.io.dispatch <> exuBlocks.flatMap(_.io.in)
   ctrlBlock.io.rsReady := exuBlocks.flatMap(_.io.scheExtra.rsReady)
+  ctrlBlock.io.commits_pc <> exuBlocks(0).io.commitsIn_pc
+  ctrlBlock.io.commits_valid <> exuBlocks(0).io.commitsIn_valid
+  ctrlBlock.io.commits_robIdx <> exuBlocks(0).io.commitsIn_robIdx
+  ctrlBlock.io.mpu_canAccept <> exuBlocks.head.io.scanAccept
   ctrlBlock.io.enqLsq <> memBlock.io.enqLsq
   ctrlBlock.io.sqDeq := memBlock.io.sqDeq
   ctrlBlock.io.lqCancelCnt := memBlock.io.lqCancelCnt

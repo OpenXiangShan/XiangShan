@@ -87,6 +87,7 @@ class SQAddrModule(dataWidth: Int, numEntries: Int, numRead: Int, numWrite: Int,
 class SQData8Entry(implicit p: Parameters) extends XSBundle {
   val valid = Bool() // this byte is valid
   val data = UInt((XLEN/8).W)
+  val isMSD = Bool()
 }
 
 class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: Int)(implicit p: Parameters) extends XSModule 
@@ -102,6 +103,7 @@ class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
       val wen   = Vec(numWrite, Input(Bool()))
       val waddr = Vec(numWrite, Input(UInt(log2Up(numEntries).W)))
       val wdata = Vec(numWrite, Input(UInt((XLEN/8).W)))
+      val isMSD = Vec(numWrite, Input(Bool()))
     }
     // mask (data valid) write port
     val mask = new Bundle() {
@@ -122,6 +124,8 @@ class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
   io := DontCare
 
   val data = Reg(Vec(numEntries, new SQData8Entry))
+  val isMSD_w = dontTouch(Wire(Vec(numWrite, Bool())))
+  isMSD_w <> io.data.isMSD
 
   require(isPow2(StoreQueueNWriteBanks))
   require(StoreQueueNWriteBanks > 1)
@@ -144,16 +148,19 @@ class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
       val s1_wen = RegNext(s0_wen)
       val s1_wdata = RegEnable(io.data.wdata(i), s0_wen)
       val s1_waddr = RegEnable(get_bank_index(io.data.waddr(i)), s0_wen)
+      val s1_isMSD = RegEnable(isMSD_w(i), s0_wen)
       val numRegsPerBank = StoreQueueSize / StoreQueueNWriteBanks
       (0 until numRegsPerBank).map(index => {
         when(s1_wen && s1_waddr === index.U){
           data(get_vec_index(index, bank)).data := s1_wdata
+          data(get_vec_index(index, bank)).isMSD := s1_isMSD
         }
       })
       s0_wen.suggestName("data_s0_wen_" + i +"_bank_" + bank)
       s1_wen.suggestName("data_s1_wen_" + i +"_bank_" + bank)
       s1_wdata.suggestName("data_s1_wdata_" + i +"_bank_" + bank)
       s1_waddr.suggestName("data_s1_waddr_" + i +"_bank_" + bank)
+      s1_isMSD.suggestName("data_s1_isMSD" + i +"_bank_" + bank)
     })
   })
 
@@ -184,6 +191,7 @@ class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
   // destorequeue read data
   (0 until numRead).map(i => {
       io.rdata(i) := data(RegNext(io.raddr(i)))
+      io.rdata(i).isMSD := data(RegNext(io.raddr(i))).isMSD
   })
 
   // DataModuleTemplate should not be used when there're any write conflicts
@@ -255,6 +263,7 @@ class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
 class SQDataEntry(implicit p: Parameters) extends XSBundle {
   val mask = UInt(8.W)
   val data = UInt(XLEN.W)
+  val isMSD = Bool()
 }
 
 // SQDataModule is a wrapper of SQData8Modules
@@ -268,6 +277,7 @@ class SQDataModule(numEntries: Int, numRead: Int, numWrite: Int, numForward: Int
       val wen   = Vec(numWrite, Input(Bool()))
       val waddr = Vec(numWrite, Input(UInt(log2Up(numEntries).W)))
       val wdata = Vec(numWrite, Input(UInt(XLEN.W)))
+      val isMSD = Vec(numWrite, Input(Bool()))
     }
     // mask (data valid) write port
     val mask = new Bundle() {
@@ -286,8 +296,10 @@ class SQDataModule(numEntries: Int, numRead: Int, numWrite: Int, numForward: Int
   })
 
   val data8 = Seq.fill(8)(Module(new SQData8Module(numEntries, numRead, numWrite, numForward)))
+  val isMSD_w = dontTouch(Wire(Vec(numWrite, Bool())))
+  isMSD_w <> io.data.isMSD
 
-  // writeback to lq/sq
+  // writeback to lq/s
   for (i <- 0 until numWrite) {
     // write to data8
     for (j <- 0 until 8) {
@@ -297,6 +309,7 @@ class SQDataModule(numEntries: Int, numRead: Int, numWrite: Int, numForward: Int
       data8(j).io.data.waddr(i) := io.data.waddr(i)
       data8(j).io.data.wdata(i) := io.data.wdata(i)(8*(j+1)-1, 8*j)
       data8(j).io.data.wen(i)   := io.data.wen(i)
+      data8(j).io.data.isMSD(i) := isMSD_w(i)
     }
   }
 
@@ -307,6 +320,7 @@ class SQDataModule(numEntries: Int, numRead: Int, numWrite: Int, numForward: Int
     }
     io.rdata(i).mask := VecInit((0 until 8).map(j => data8(j).io.rdata(i).valid)).asUInt
     io.rdata(i).data := VecInit((0 until 8).map(j => data8(j).io.rdata(i).data)).asUInt
+    io.rdata(i).isMSD := VecInit((0 until 8).map(j => data8(j).io.rdata(i).isMSD)).asUInt
   }
 
   // DataModuleTemplate should not be used when there're any write conflicts

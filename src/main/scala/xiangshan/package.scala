@@ -23,6 +23,7 @@ import xiangshan.backend.fu._
 import xiangshan.backend.fu.fpu._
 import xiangshan.backend.exu._
 import xiangshan.backend.Std
+import xiangshan.backend.fu.matu._
 
 package object xiangshan {
   object SrcType {
@@ -71,14 +72,15 @@ package object xiangshan {
     def mou          = "b1111".U // for amo, lr, sc, fence
 
     def X            = BitPat("b????")
+    def matu         = "b1001".U
 
-    def num = 14
+    def num = 15
 
     def apply() = UInt(log2Up(num).W)
-
-    def isIntExu(fuType: UInt) = !fuType(3)
+    def isMatu(fuType: UInt) = fuType === matu
+    def isIntExu(fuType: UInt) = !fuType(3) || isMatu(fuType)
     def isJumpExu(fuType: UInt) = fuType === jmp
-    def isFpExu(fuType: UInt) = fuType(3, 2) === "b10".U
+    def isFpExu(fuType: UInt) = fuType(3, 2) === "b10".U && !isMatu(fuType)
     def isMemExu(fuType: UInt) = fuType(3, 2) === "b11".U
     def isLoadStore(fuType: UInt) = isMemExu(fuType) && !fuType(1)
     def isStoreExu(fuType: UInt) = isMemExu(fuType) && fuType(0)
@@ -115,7 +117,8 @@ package object xiangshan {
       fDivSqrt.litValue() -> "fdiv/fsqrt",
       ldu.litValue() -> "load",
       stu.litValue() -> "store",
-      mou.litValue() -> "mou"
+      mou.litValue() -> "mou",
+      matu.litValue() -> "matu"
     )
   }
 
@@ -375,6 +378,7 @@ package object xiangshan {
     def lbu      = "b0100".U
     def lhu      = "b0101".U
     def lwu      = "b0110".U
+    def mld      = "b0111".U
 
     // Zicbop software prefetch
     // bit encoding: | prefetch 1 | 0 | prefetch type (2bit) |
@@ -508,6 +512,14 @@ package object xiangshan {
     def apply() = UInt(4.W)
   }
 
+  object MATUOpType {
+    def mmul = "b0000".U
+    def mtest      = "b0001".U
+    def mvmul = "b0010".U
+    def msd = "b0011".U
+    def size(op: UInt) = op(1,0)
+
+  }
   object ExceptionNO {
     def instrAddrMisaligned = 0
     def instrAccessFault    = 1
@@ -575,7 +587,7 @@ package object xiangshan {
   def fdivSqrtGen(p: Parameters) = new FDivSqrt()(p)
   def stdGen(p: Parameters) = new Std()(p)
   def mouDataGen(p: Parameters) = new Std()(p)
-
+  def matuGen(p:Parameters) = new Matu()(p)
   def f2iSel(uop: MicroOp): Bool = {
     uop.ctrl.rfWen
   }
@@ -604,6 +616,18 @@ package object xiangshan {
     writeIntRf = true,
     writeFpRf = false,
     hasRedirect = true,
+  )
+
+  val matuCfg = FuConfig(
+    name = "matu",
+    fuGen = matuGen,
+    fuSel = (uop: MicroOp) => uop.ctrl.fuType === FuType.matu,
+    fuType = FuType.matu,
+    numIntSrc = 2,
+    numFpSrc = 0,
+    writeIntRf = true,
+    writeFpRf = false,
+    //latency = UncertainLatency()
   )
 
   val jmpCfg = FuConfig(
@@ -789,4 +813,5 @@ package object xiangshan {
   val LdExeUnitCfg = ExuConfig("LoadExu", "Mem", Seq(lduCfg), wbIntPriority = 0, wbFpPriority = 0, extendsExu = false)
   val StaExeUnitCfg = ExuConfig("StaExu", "Mem", Seq(staCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue, extendsExu = false)
   val StdExeUnitCfg = ExuConfig("StdExu", "Mem", Seq(stdCfg, mouDataCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue, extendsExu = false)
+  val MatuExeUnitCfg = ExuConfig("MatuExeUnit", "Int", Seq(matuCfg), 0, Int.MaxValue)
 }

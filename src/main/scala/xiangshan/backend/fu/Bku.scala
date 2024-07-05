@@ -320,7 +320,7 @@ class CryptoModule(implicit p: Parameters) extends XSModule {
   io.out := Mux(funcReg(4), hashModule.io.out, blockCipherModule.io.out)
 }
 
-class Bku(implicit p: Parameters) extends FunctionUnit with HasPipelineReg {
+class Bku(implicit p: Parameters) extends FunctionUnit(64, MulDivExeUnitCfg) with HasPipelineReg {
 
   override def latency = 2
 

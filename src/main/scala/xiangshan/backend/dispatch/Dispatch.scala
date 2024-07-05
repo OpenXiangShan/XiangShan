@@ -43,6 +43,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     // from rename
     val fromRename = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
     val recv = Output(Vec(RenameWidth, Bool()))
+    // from mpu
+    val mpu_canAccept = Input(Bool())
     // enq Rob
     val enqRob = Flipped(new RobEnqIO)
     // enq Lsq
@@ -68,6 +70,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     val singleStep = Input(Bool())
     // lfst
     val lfst = new DispatchLFSTIO
+    val dpOut = Vec(RenameWidth, ValidIO(new MicroOp))
   })
 
   /**
@@ -103,6 +106,11 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
   val updatedUop = Wire(Vec(RenameWidth, new MicroOp))
   val updatedCommitType = Wire(Vec(RenameWidth, CommitType()))
+
+  for (i <- 0 until RenameWidth) {
+    io.dpOut(i).bits := updatedUop(i)
+    io.dpOut(i).valid := io.fromRename(i).valid
+  }
 
   for (i <- 0 until RenameWidth) {
     updatedCommitType(i) := Cat(isLs(i), (isStore(i) && !isAMO(i)) | isBranch(i))
@@ -160,7 +168,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     *   acquire ROB (all), LSQ (load/store only) and dispatch queue slots
     *   only set valid when all of them provides enough entries
     */
-  val allResourceReady = io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
+  val allResourceReady = io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept && io.mpu_canAccept
 
   // Instructions should enter dispatch queues in order.
   // thisIsBlocked: this instruction is blocked by itself (based on noSpecExec)
@@ -194,13 +202,13 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   // input for ROB, LSQ, Dispatch Queue
   for (i <- 0 until RenameWidth) {
     io.enqRob.needAlloc(i) := io.fromRename(i).valid
-    io.enqRob.req(i).valid := io.fromRename(i).valid && thisCanActualOut(i) && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
+    io.enqRob.req(i).valid := io.fromRename(i).valid && thisCanActualOut(i) && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept && io.mpu_canAccept
     io.enqRob.req(i).bits := updatedUop(i)
     XSDebug(io.enqRob.req(i).valid, p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives nrob ${io.enqRob.resp(i)}\n")
 
     // When previous instructions have exceptions, following instructions should not enter dispatch queues.
     val previousHasException = if (i == 0) false.B else VecInit(hasValidException.take(i)).asUInt.orR
-    val canEnterDpq = !hasException(i) && thisCanActualOut(i) && !previousHasException && io.enqRob.canAccept
+    val canEnterDpq = !hasException(i) && thisCanActualOut(i) && !previousHasException && io.enqRob.canAccept && io.mpu_canAccept
 
     // send uops to dispatch queues
     // Note that if one of their previous instructions cannot enqueue, they should not enter dispatch queue.
@@ -231,8 +239,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val hasValidInstr = VecInit(io.fromRename.map(_.valid)).asUInt.orR
   val hasSpecialInstr = Cat((0 until RenameWidth).map(i => io.fromRename(i).valid && (isBlockBackward(i) || isNoSpecExec(i)))).orR
   for (i <- 0 until RenameWidth) {
-    io.recv(i) := thisCanActualOut(i) && io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
-    io.fromRename(i).ready := !hasValidInstr || !hasSpecialInstr && io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
+    io.recv(i) := thisCanActualOut(i) && io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept && io.mpu_canAccept
+    io.fromRename(i).ready := !hasValidInstr || !hasSpecialInstr && io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept && io.mpu_canAccept
 
     XSInfo(io.recv(i) && io.fromRename(i).valid,
       p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)}, type(${isInt(i)}, ${isFp(i)}, ${isLs(i)}), " +

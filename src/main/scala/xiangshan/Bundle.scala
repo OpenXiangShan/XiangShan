@@ -252,6 +252,9 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
   // Assume only the LUI instruction is decoded with IMM_U in ALU.
   def isLUI: Bool = ctrl.selImm === SelImm.IMM_U && ctrl.fuType === FuType.alu
   // This MicroOp is used to wakeup another uop (the successor: (psrc, srcType).
+  def isMTEST: Bool = ctrl.fuOpType === MATUOpType.mtest && ctrl.fuOpType === FuType.matu
+  def isMMUL: Bool = ctrl.fuOpType === MATUOpType.mmul && ctrl.fuOpType === FuType.matu
+  def isMSD:  Bool = ctrl.fuOpType === LSUOpType.sd && cf.instr(6, 0) === "b0101011".U
   def wakeup(successor: Seq[(UInt, UInt)], exuCfg: ExuConfig): Seq[(Bool, Bool)] = {
     successor.map{ case (src, srcType) =>
       val pdestMatch = pdest === src
@@ -366,6 +369,7 @@ class RobDispatchData(implicit p: Parameters) extends XSBundle {
 class RobCommitInfo(implicit p: Parameters) extends RobDispatchData {
   // these should be optimized for synthesis verilog
   val pc = UInt(VAddrBits.W)
+  val robIdx = new RobPtr
 
   def connectDispatchData(data: RobDispatchData) {
     ldest := data.ldest

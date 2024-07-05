@@ -25,6 +25,7 @@ import utils._
 import xiangshan._
 import xiangshan.backend.fu.fpu.{FMA, FPUSubModule}
 import xiangshan.backend.fu.{CSR, FUWithRedirect, Fence, FenceToSbuffer}
+import xiangshan.backend.fu.matu.Matu
 
 class FenceIO(implicit p: Parameters) extends XSBundle {
   val sfence = Output(new SfenceBundle)
@@ -97,6 +98,21 @@ class ExeUnit(config: ExuConfig)(implicit p: Parameters) extends Exu(config) {
     fmaModules.head.midResult <> fmaMid.get
   }
 
+  val matuModules =  functionUnits.filter(_.isInstanceOf[Matu]).map(_.asInstanceOf[Matu])
+  if (matuModules.nonEmpty) {
+    matuModules.head.io.ldIn.get <> ldio.get
+    mpuout_data.get := matuModules.head.io.mpuOut_data.get
+    mpuout_uop.get <> matuModules.head.io.mpuOut_uop.get
+    mpuout_valid.get := matuModules.head.io.mpuOut_valid.get
+    mpuout_pc.get := matuModules.head.io.mpuOut_pc.get
+    mpuout_robidx.get := matuModules.head.io.mpuOut_robIdx.get
+    mpuout_canaccept.get := matuModules.head.io.mpuOut_canAccept.get
+    matuModules.head.io.dpUopIn.get <> dp_uop_in.get
+    matuModules.head.io.commitIn_pc.get <> commitio_pc.get
+    matuModules.head.io.commitIn_valid.get <> commitio_valid.get
+    matuModules.head.io.commitIn_robIdx.get <> commitio_robidx.get
+  }
+
   if (config.readIntRf) {
     val in = io.fromInt
     val out = io.out
@@ -115,6 +131,7 @@ class JumpExeUnit(implicit p: Parameters) extends ExeUnit(JumpExeUnitCfg)
 class StdExeUnit(implicit p: Parameters) extends ExeUnit(StdExeUnitCfg)
 class FmacExeUnit(implicit p: Parameters) extends ExeUnit(FmacExeUnitCfg)
 class FmiscExeUnit(implicit p: Parameters) extends ExeUnit(FmiscExeUnitCfg)
+class MatuExeUnit(implicit p: Parameters) extends ExeUnit(MatuExeUnitCfg)
 
 object ExeUnitDef {
   def apply(cfg: ExuConfig)(implicit p: Parameters): Definition[ExeUnit] = {
@@ -126,6 +143,7 @@ object ExeUnitDef {
       case FmacExeUnitCfg => Definition(new FmacExeUnit)
       case FmiscExeUnitCfg => Definition(new FmiscExeUnit)
       case StdExeUnitCfg => Definition(new StdExeUnit)
+      case MatuExeUnitCfg => Definition(new MatuExeUnit)
       case _ => {
         println(s"cannot generate exeUnit from $cfg")
         null

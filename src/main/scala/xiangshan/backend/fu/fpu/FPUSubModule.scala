@@ -19,7 +19,7 @@ package xiangshan.backend.fu.fpu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import xiangshan.{FPUCtrlSignals, XSModule}
+import xiangshan.{FPUCtrlSignals, FmacExeUnitCfg, XSModule}
 import xiangshan.backend.fu.{FunctionUnit, HasPipelineReg}
 
 trait HasUIntToSIntHelper {
@@ -45,7 +45,7 @@ abstract class FPUDataModule(implicit p: Parameters) extends XSModule {
   val fflags = io.out.fflags
 }
 
-abstract class FPUSubModule(implicit p: Parameters) extends FunctionUnit
+abstract class FPUSubModule(implicit p: Parameters) extends FunctionUnit(64, FmacExeUnitCfg)
   with HasUIntToSIntHelper
 {
   val rm = IO(Input(UInt(3.W)))

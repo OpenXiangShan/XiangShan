@@ -93,6 +93,12 @@ trait HasCircularQueuePtrHelper {
     val compare = left.value < right.value
     differentFlag ^ compare
   }
+
+  def isItself[T <: CircularQueuePtr[T]](left: T, right: T): Bool = {
+    val sameFlag = left.flag === right.flag
+    val compare = left.value === right.value
+    sameFlag && compare
+  }
 }
 
 // Should only be used when left and right are continuous pointers.

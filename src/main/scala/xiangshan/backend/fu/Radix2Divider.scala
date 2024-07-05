@@ -22,7 +22,7 @@ import chisel3.util._
 import xiangshan._
 import utils._
 
-abstract class AbstractDivider(len: Int)(implicit p: Parameters) extends FunctionUnit(len){
+abstract class AbstractDivider(len: Int)(implicit p: Parameters) extends FunctionUnit(len, MulDivExeUnitCfg){
   val ctrl = IO(Input(new MulDivCtrl))
   val sign = ctrl.sign
 }

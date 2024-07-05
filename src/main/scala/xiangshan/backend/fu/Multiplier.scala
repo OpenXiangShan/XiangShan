@@ -30,7 +30,7 @@ class MulDivCtrl extends Bundle{
 }
 
 class AbstractMultiplier(len: Int)(implicit p: Parameters) extends FunctionUnit(
-  len
+  len, MulDivExeUnitCfg
 ){
   val ctrl = IO(Input(new MulDivCtrl))
 }

@@ -28,7 +28,7 @@ class FenceToSbuffer extends Bundle {
   val sbIsEmpty = Input(Bool())
 }
 
-class Fence(implicit p: Parameters) extends FunctionUnit {
+class Fence(implicit p: Parameters) extends FunctionUnit(64, JumpCSRExeUnitCfg) {
 
   val sfence = IO(Output(new SfenceBundle))
   val fencei = IO(Output(Bool()))

@@ -32,6 +32,7 @@ import xiangshan.mem.mdp.{LFST, SSIT, WaitTable}
 import xiangshan.ExceptionNO._
 import xiangshan.backend.exu.ExuConfig
 import xiangshan.mem.{LsqEnqCtrl, LsqEnqIO}
+import xiangshan.backend.rob._
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   def numRedirect = exuParameters.JmpCnt + exuParameters.AluCnt
@@ -195,12 +196,18 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
     // to exu blocks
     val allocPregs = Vec(RenameWidth, Output(new ResetPregStateReq))
     val dispatch = Vec(3*dpParams.IntDqDeqWidth, DecoupledIO(new MicroOp))
+    val dpOut = Vec(RenameWidth, ValidIO(new MicroOp))
     val rsReady = Vec(outer.dispatch2.map(_.module.io.out.length).sum, Input(Bool()))
     val enqLsq = Flipped(new LsqEnqIO)
     val lqCancelCnt = Input(UInt(log2Up(LoadQueueSize + 1).W))
     val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))
     val sqDeq = Input(UInt(2.W))
     val ld_pc_read = Vec(exuParameters.LduCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
+    val commits_pc = Vec(CommitWidth, Output(UInt(VAddrBits.W)))
+    val commits_valid = Vec(CommitWidth, Output(Bool()))
+    val commits_robIdx = Vec(CommitWidth, Output(new RobPtr))
+    // to rename
+    val mpu_canAccept = Input(Bool())
     // from int block
     val exuRedirect = Vec(exuParameters.AluCnt + exuParameters.JmpCnt, Flipped(ValidIO(new ExuOutput)))
     val stIn = Vec(exuParameters.StuCnt, Flipped(ValidIO(new ExuInput)))
@@ -261,10 +268,17 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   )
   val rob = outer.rob.module
 
+  for (i <- 0 until CommitWidth) {
+    io.commits_pc(i) := rob.io.commits.info(i).pc
+    io.commits_valid(i) := rob.io.commits.commitValid(i)
+    io.commits_robIdx(i) := rob.io.commits.info(i).robIdx
+  }
+
   pcMem.io.wen.head   := RegNext(io.frontend.fromFtq.pc_mem_wen)
   pcMem.io.waddr.head := RegNext(io.frontend.fromFtq.pc_mem_waddr)
   pcMem.io.wdata.head := RegNext(io.frontend.fromFtq.pc_mem_wdata)
 
+  io.dpOut <> dispatch.io.dpOut
 
   pcMem.io.raddr.last := rob.io.flushOut.bits.ftqIdx.value
   val flushPC = pcMem.io.rdata.last.getPc(RegNext(rob.io.flushOut.bits.ftqOffset))
@@ -441,6 +455,7 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   dispatch.io.toLsDq <> lsDq.io.enq
   dispatch.io.allocPregs <> io.allocPregs
   dispatch.io.singleStep := RegNext(io.csrCtrl.singlestep)
+  dispatch.io.mpu_canAccept := io.mpu_canAccept
 
   intDq.io.redirect <> redirectForExu
   fpDq.io.redirect <> redirectForExu

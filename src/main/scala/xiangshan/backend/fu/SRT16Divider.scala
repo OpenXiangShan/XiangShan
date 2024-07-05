@@ -468,7 +468,7 @@ class SRT16Divider(len: Int)(implicit p: Parameters) extends AbstractDivider(len
   io.out.bits.uop := uopReg
 }
 
-class DividerWrapper(len: Int)(implicit p: Parameters) extends FunctionUnit(len) {
+class DividerWrapper(len: Int)(implicit p: Parameters) extends FunctionUnit(len, MulDivExeUnitCfg) {
   val div = Module(new SRT16Divider(len))
 
   div.io <> io

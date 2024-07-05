@@ -57,6 +57,7 @@ trait HasLoadHelper { this: XSModule =>
       LSUOpType.lbu  -> ZeroExt(rdata(7, 0) , XLEN),
       LSUOpType.lhu  -> ZeroExt(rdata(15, 0), XLEN),
       LSUOpType.lwu  -> ZeroExt(rdata(31, 0), XLEN),
+      LSUOpType.mld  -> SignExt(rdata(63, 0), XLEN)
     ))
   }
 }

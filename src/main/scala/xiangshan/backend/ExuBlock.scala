@@ -23,6 +23,8 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utils._
 import xiangshan._
 import xiangshan.backend.exu._
+import xiangshan.backend.fu._
+import xiangshan.backend.rob._
 
 class ExuBlock(
   val configs: Seq[(ExuConfig, Int, Seq[ExuConfig], Seq[ExuConfig])],
@@ -54,7 +56,7 @@ class ExuBlock(
 }
 
 class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp(outer)
-  with HasWritebackSourceImp with HasPerfEvents {
+  with HasWritebackSourceImp with HasPerfEvents with HasXSParameter {
   val scheduler = outer.scheduler.module
 
   val fuConfigs = outer.fuConfigs
@@ -69,12 +71,26 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
     // dispatch ports
     val allocPregs = scheduler.io.allocPregs.cloneType
     val in = scheduler.io.in.cloneType
+    val dpUopIn = Vec(RenameWidth, Flipped(ValidIO(new MicroOp)))
     // issue and wakeup ports
     val issue = if (numOutFu > 0) Some(Vec(numOutFu, DecoupledIO(new ExuInput))) else None
     val fastUopOut = scheduler.io.fastUopOut.cloneType
     val rfWriteback = scheduler.io.writeback.cloneType
     val fastUopIn = scheduler.io.fastUopIn.cloneType
     val fuWriteback = fuBlock.io.writeback.cloneType
+    // from mem
+    val ldIn = Vec(2, Flipped(DecoupledIO(new ExuOutput)))
+    // to dispatch
+    val scanAccept = Output(Bool())
+    // to mem
+    val stOut = ValidIO(UInt(XLEN.W))
+    val suop = Output(new MicroOp)
+    val spc = Output(UInt(VAddrBits.W))
+    val srobIdx = Output(UInt(5.W))
+    // from rob
+    val commitsIn_pc = Vec(CommitWidth, Input(UInt(VAddrBits.W)))
+    val commitsIn_valid = Vec(CommitWidth, Input(Bool()))
+    val commitsIn_robIdx = Vec(CommitWidth, Input(new RobPtr))
     // extra
     val scheExtra = scheduler.io.extra.cloneType
     val fuExtra = fuBlock.io.extra.cloneType
@@ -104,6 +120,53 @@ class ExuBlockImp(outer: ExuBlock)(implicit p: Parameters) extends LazyModuleImp
   fuBlock.io.redirect <> io.redirect
   fuBlock.io.writeback <> io.fuWriteback
   fuBlock.io.extra <> io.fuExtra
+
+  if (fuBlock.io.ldIn.isDefined) {
+    fuBlock.io.ldIn.get <> io.ldIn
+  }
+
+
+  if (fuBlock.io.commitsIn_pc.isDefined) {
+    fuBlock.io.commitsIn_pc.get <> io.commitsIn_pc
+  }
+
+  if (fuBlock.io.commitsIn_valid.isDefined) {
+    fuBlock.io.commitsIn_valid.get <> io.commitsIn_valid
+  }
+
+  if (fuBlock.io.commitsIn_robIdx.isDefined) {
+    fuBlock.io.commitsIn_robIdx.get <> io.commitsIn_robIdx
+  }
+
+  if (fuBlock.io.mpuOut_data.isDefined) {
+    io.stOut.bits := fuBlock.io.mpuOut_data.get
+  }
+
+  if (fuBlock.io.mpuOut_valid.isDefined) {
+    io.stOut.valid := fuBlock.io.mpuOut_valid.get
+  }
+
+
+  if (fuBlock.io.mpuOut_uop.isDefined) {
+    io.suop <> fuBlock.io.mpuOut_uop.get
+  }
+
+  if (fuBlock.io.mpuOut_pc.isDefined) {
+    io.spc := fuBlock.io.mpuOut_pc.get
+  }
+
+  if (fuBlock.io.mpuOut_robIdx.isDefined) {
+    io.srobIdx := fuBlock.io.mpuOut_robIdx.get
+  }
+
+  if (fuBlock.io.mpuOut_canAccept.isDefined) {
+    io.scanAccept := fuBlock.io.mpuOut_canAccept.get
+  }
+
+  if (fuBlock.io.dpUopIn.isDefined) {
+    fuBlock.io.dpUopIn.get <> io.dpUopIn
+  }
+
 
   // To reduce fanout, we add registers here for redirect.
   val redirect = RegNextWithEnable(io.redirect)
