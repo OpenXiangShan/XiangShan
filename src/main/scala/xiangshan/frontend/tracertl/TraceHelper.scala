@@ -82,7 +82,8 @@ class TraceReaderHelper(width: Int)(implicit p: Parameters)
                      |trace_read_one_instr(insts_${i}_pcVA, insts_${i}_pcPA,
                      |  insts_${i}_memoryAddrVA, insts_${i}_memoryAddrPA, insts_${i}_target, insts_${i}_inst,
                      |  insts_${i}_memoryType, insts_${i}_memorySize,
-                     |  insts_${i}_branchType, insts_${i}_branchTaken, insts_${i}_InstID);
+                     |  insts_${i}_branchType, insts_${i}_branchTaken, insts_${i}_InstID,
+                     |  $i);
                      """.stripMargin)
         .mkString("      ", "\n      ", "\n")
     }
@@ -98,7 +99,8 @@ class TraceReaderHelper(width: Int)(implicit p: Parameters)
        |  output byte memory_size,
        |  output byte branch_type,
        |  output byte branch_taken,
-       |  output longint InstID
+       |  output longint InstID,
+       |  input  byte idx
        |);
        |
        |module TraceReaderHelper(
@@ -178,7 +180,7 @@ class TraceCollectorHelper(width: Int)
       (0 until width)
         .map(i => s"""
                       | if (enable_${i}) begin
-                      |   trace_collect_one_instr(pc_${i}, inst_${i}, instNum_${i});
+                      |   trace_collect_commit(pc_${i}, inst_${i}, instNum_${i}, $i);
                       | end
                       """.stripMargin)
         .mkString("      ", "\n      ", "\n")
@@ -200,10 +202,11 @@ class TraceCollectorHelper(width: Int)
        |  end
        |endmodule
        |
-       |import "DPI-C" function void trace_collect_one_instr(
+       |import "DPI-C" function void trace_collect_commit(
        |  input longint pc,
        |  input int inst,
-       |  input byte instNum
+       |  input byte instNum,
+       |  input byte idx
        |);
        |
        |""".stripMargin
@@ -237,7 +240,7 @@ class TraceDriveCollectorHelper(width: Int)
       (0 until width)
         .map(i => s"""
                      | if (enable_${i}) begin
-                     |   trace_drive_collect_one_instr(pc_${i}, inst_${i});
+                     |   trace_collect_drive(pc_${i}, inst_${i}, $i);
                      | end
                       """.stripMargin)
         .mkString("      ", "\n      ", "\n")
@@ -258,9 +261,10 @@ class TraceDriveCollectorHelper(width: Int)
        |  end
        |endmodule
        |
-       |import "DPI-C" function void trace_drive_collect_one_instr(
+       |import "DPI-C" function void trace_collect_drive(
        |  input longint pc,
-       |  input int inst
+       |  input int inst,
+       |  input byte idx
        |);
        |
        |""".stripMargin
