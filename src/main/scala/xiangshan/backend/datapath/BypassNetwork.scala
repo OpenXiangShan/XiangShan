@@ -10,6 +10,7 @@ import xiangshan.backend.Bundles.{ExuBypassBundle, ExuInput, ExuOH, ExuOutput, E
 import xiangshan.backend.issue.{FpScheduler, ImmExtractor, IntScheduler, MemScheduler, VfScheduler}
 import xiangshan.backend.datapath.DataConfig.RegDataMaxWidth
 import xiangshan.backend.decode.ImmUnion
+import xiangshan.backend.regcache._
 
 class BypassNetworkIO()(implicit p: Parameters, params: BackendParams) extends XSBundle {
   // params
@@ -51,12 +52,16 @@ class BypassNetworkIO()(implicit p: Parameters, params: BackendParams) extends X
       getSinkVecN(this).zip(sourceVecN).foreach { case (sinkVec, sourcesVec) =>
         sinkVec.zip(sourcesVec).foreach { case (sink, source) =>
           sink.valid := source.valid
+          sink.bits.intWen := source.bits.intWen.getOrElse(false.B)
           sink.bits.pdest := source.bits.pdest
           sink.bits.data := source.bits.data(0)
         }
       }
     }
   }
+
+  val toDataPath: Vec[RCWritePort] = Vec(params.getIntExuRCWriteSize + params.getMemExuRCWriteSize, 
+    Flipped(new RCWritePort(params.intSchdParams.get.rfDataWidth, RegCacheIdxWidth, params.intSchdParams.get.pregIdxWidth, params.debugEn)))
 }
 
 class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSModule {
@@ -165,5 +170,32 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
         )
       )
     }
+  }
+
+  // to reg cache
+  private val forwardIntWenVec = VecInit(
+    fromExus.filter(_.bits.params.needWriteRegCache).map(x => x.valid && x.bits.intWen)
+  )
+  private val forwardTagVec = VecInit(
+    fromExus.filter(_.bits.params.needWriteRegCache).map(x => x.bits.pdest)
+  )
+
+  private val bypassIntWenVec = VecInit(
+    forwardIntWenVec.map(x => GatedValidRegNext(x))
+  )
+  private val bypassTagVec = VecInit(
+    forwardTagVec.zip(forwardIntWenVec).map(x => RegEnable(x._1, x._2))
+  )
+  private val bypassRCDataVec = VecInit(
+    fromExus.zip(bypassDataVec).filter(_._1.bits.params.needWriteRegCache).map(_._2)
+  )
+
+  println(s"[BypassNetwork] WriteRegCacheExuNum: ${forwardIntWenVec.size}")
+
+  io.toDataPath.zipWithIndex.foreach{ case (x, i) => 
+    x.wen := bypassIntWenVec(i)
+    x.addr := DontCare
+    x.data := bypassRCDataVec(i)
+    x.tag.foreach(_ := bypassTagVec(i))
   }
 }

@@ -197,6 +197,10 @@ case class IssueBlockParams(
 
   def numRedirect: Int = exuBlockParams.count(_.hasRedirect)
 
+  def numWriteRegCache: Int = exuBlockParams.map(x => if (x.needWriteRegCache) 1 else 0).sum
+
+  def needWriteRegCache: Boolean = numWriteRegCache > 0
+
   /**
     * Get the regfile type that this issue queue need to read
     */

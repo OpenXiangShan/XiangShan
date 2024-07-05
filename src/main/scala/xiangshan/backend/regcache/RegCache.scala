@@ -75,26 +75,28 @@ class RegCache()(implicit p: Parameters, params: BackendParams) extends XSModule
     r_mem_at.addr := in_addr(RegCacheIdxWidth - 2, 0)
   }
 
-  IntRegCache.io.writePorts.zip(io.writePorts.take(IntRegCacheWriteSize)).foreach{ case (w_int, w_in) => 
+  val writePorts = Wire(chiselTypeOf(io.writePorts))
+
+  IntRegCache.io.writePorts.zip(writePorts.take(IntRegCacheWriteSize)).foreach{ case (w_int, w_in) => 
     w_int.wen  := w_in.wen
     w_int.addr := w_in.addr(RegCacheIdxWidth - 2, 0)
     w_int.data := w_in.data
     w_int.tag.foreach(_ := w_in.tag.get)
   }
 
-  MemRegCache.io.writePorts.zip(io.writePorts.takeRight(MemRegCacheWriteSize)).foreach{ case (w_mem, w_in) => 
+  MemRegCache.io.writePorts.zip(writePorts.takeRight(MemRegCacheWriteSize)).foreach{ case (w_mem, w_in) => 
     w_mem.wen  := w_in.wen
     w_mem.addr := w_in.addr(RegCacheIdxWidth - 2, 0)
     w_mem.data := w_in.data
     w_mem.tag.foreach(_ := w_in.tag.get)
   }
 
-  IntRegCacheAgeTimer.io.writePorts.zip(io.writePorts.take(IntRegCacheWriteSize)).foreach{ case (w_int, w_in) => 
+  IntRegCacheAgeTimer.io.writePorts.zip(writePorts.take(IntRegCacheWriteSize)).foreach{ case (w_int, w_in) => 
     w_int.wen  := w_in.wen
     w_int.addr := w_in.addr(RegCacheIdxWidth - 2, 0)
   }
 
-  MemRegCacheAgeTimer.io.writePorts.zip(io.writePorts.takeRight(MemRegCacheWriteSize)).foreach{ case (w_mem, w_in) => 
+  MemRegCacheAgeTimer.io.writePorts.zip(writePorts.takeRight(MemRegCacheWriteSize)).foreach{ case (w_mem, w_in) => 
     w_mem.wen  := w_in.wen
     w_mem.addr := w_in.addr(RegCacheIdxWidth - 2, 0)
   }
@@ -106,6 +108,12 @@ class RegCache()(implicit p: Parameters, params: BackendParams) extends XSModule
     else {
       rcIdx := Cat("b1".U, MemRegCacheRepRCIdx(i - IntRegCacheWriteSize))
     }
+  }
+
+  val delayToWakeupQueueRCIdx = RegNextN(io.toWakeupQueueRCIdx, 3)
+  writePorts := io.writePorts
+  writePorts.zip(delayToWakeupQueueRCIdx).foreach{ case (w, rcIdx) => 
+    w.addr := rcIdx
   }
 }
 
