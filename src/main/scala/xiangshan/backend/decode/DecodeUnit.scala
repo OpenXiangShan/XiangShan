@@ -437,6 +437,18 @@ object CBODecode extends DecodeConstants {
 /**
  * XiangShan Trap Decode constants
  */
+object MatrixDecode extends DecodeConstants{
+  def MMUL = BitPat("b0000000_?????_?????_000_?????_0101011")
+  def MTEST = BitPat("b0000000_?????_?????_001_?????_0101011")
+  def MLD  = BitPat("b????????????_?????_111_?????_0101011")
+  def MSD  = BitPat("b???????_?????_?????_011_?????_0101011")
+  val table: Array[(BitPat, List[BitPat])] = Array(
+    MMUL -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.matu, MATUOpType.mmul, N, N, N, N, N, N, SelImm.X),
+    MTEST-> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.matu, MATUOpType.mtest, N, N, N, N, N, N, SelImm.X),
+    MLD -> List(SrcType.reg, SrcType.imm, SrcType.X, FuType.ldu, LSUOpType.mld, N, N, N, N, N, N, SelImm.IMM_I),
+    MSD -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.stu, LSUOpType.sd, N, N, N, N, N, N, SelImm.IMM_S)
+  )
+}
 object XSTrapDecode extends DecodeConstants {
   def TRAP = BitPat("b000000000000?????000000001101011")
   val table: Array[(BitPat, List[BitPat])] = Array(
@@ -584,7 +596,8 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     XSTrapDecode.table ++
     BDecode.table ++
     CBODecode.table ++
-    SvinvalDecode.table
+    SvinvalDecode.table ++
+    MatrixDecode.table
   // assertion for LUI: only LUI should be assigned `selImm === SelImm.IMM_U && fuType === FuType.alu`
   val luiMatch = (t: Seq[BitPat]) => t(3).value == FuType.alu.litValue && t.reverse.head.value == SelImm.IMM_U.litValue
   val luiTable = decode_table.filter(t => luiMatch(t._2)).map(_._1).distinct
