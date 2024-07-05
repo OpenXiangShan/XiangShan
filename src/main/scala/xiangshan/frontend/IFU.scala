@@ -619,7 +619,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     traceReader.io.specifyField(
       _.recv := traceDriver.io.out.recv,
       _.redirect := fromFtq.redirect,
-      _.startSignal := fromFtq.req.valid,
+      _.startSignal := fromFtq.req.ready,
     )
     tracePDaC.io.specifyField(
       _.traceInsts := traceReader.io.traceInsts,
