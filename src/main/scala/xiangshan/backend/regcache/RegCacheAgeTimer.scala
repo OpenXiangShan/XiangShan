@@ -46,7 +46,9 @@ class RegCacheAgeTimer
     val ageInfo = Vec(numEntries, Vec(numEntries, Output(Bool())))
   })
 
-  val ageTimer = RegInit(VecInit(Seq.fill(numEntries)(3.U(2.W))))
+  require(numEntries % 4 == 0, "numEntries must be a multiple of 4")
+
+  val ageTimer = RegInit(VecInit((0 until numEntries).map(i => (i / (numEntries / 4)).U(2.W))))
   val ageTimerNext = Seq.fill(numEntries)(Wire(UInt(2.W)))
 
   val hasReadReq = (0 until numEntries).map{ i => 
@@ -61,7 +63,7 @@ class RegCacheAgeTimer
       atNext := 0.U
     }.elsewhen(hasReadReq(i)) {
       atNext := ageTimer(i)
-    }.elsewhen(ageTimer(i) === 3.U) {
+    }.elsewhen(ageTimer(i) === 3.U && io.validInfo(i)) {
       atNext := 3.U
     }.otherwise {
       atNext := ageTimer(i) + 1.U
