@@ -18,7 +18,7 @@ package xiangshan.frontend.tracertl
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility.{CircularQueuePtr, HasCircularQueuePtrHelper}
+import utility.{CircularQueuePtr, HasCircularQueuePtrHelper, GTimer}
 import utils.XSError
 import xiangshan.frontend.BranchPredictionRedirect
 import xiangshan.RedirectLevel
@@ -51,6 +51,7 @@ class TraceReaderIO(implicit p: Parameters) extends TraceBundle {
   val recv = Flipped(Valid(new TraceRecvInfo()))
   // BranchPredictionRedirect === Redirect with some traits
   val redirect = Flipped(Valid(new BranchPredictionRedirect()))
+  val startSignal = Input(Bool())
 
   // traceInst should always be valid
   val traceInsts = Output(Vec(PredictWidth, new TraceInstrBundle()))
@@ -64,7 +65,7 @@ class TraceReader(implicit p: Parameters) extends TraceModule
   val io = IO(new TraceReaderIO())
   dontTouch(io)
 
-  val traceBuffer = Reg(Vec(TraceBufferSize, new TraceInstrBundle()))
+  val traceBuffer = RegInit(0.U.asTypeOf(Vec(TraceBufferSize, new TraceInstrBundle())))
   val traceReaderHelper = Module(new TraceReaderHelper(PredictWidth))
   val traceRedirecter = Module(new TraceRedirectHelper)
   val deqPtr = RegInit(0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize)))
@@ -77,7 +78,6 @@ class TraceReader(implicit p: Parameters) extends TraceModule
     }
   }
 
-
   XSError(!isFull(enqPtr, deqPtr) && (enqPtr < deqPtr), "enqPtr should always be larger than deqPtr")
   XSError(io.recv.valid && ((deqPtr + io.recv.bits.instNum) >= enqPtr),
     "Reader should not read more than what is in the buffer. Error in ReaderHelper or Ptr logic.")
@@ -88,12 +88,20 @@ class TraceReader(implicit p: Parameters) extends TraceModule
 
   val isfull = isFull(enqPtr, deqPtr)
   val freeEntryNum = hasFreeEntries(enqPtr, deqPtr)
-  val readTraceEnable = !isfull && (freeEntryNum >= TraceFetchWidth.U)
-  when(readTraceEnable) {
+  val workingState = RegInit(false.B)
+  when (io.startSignal) { workingState := true.B }
+  val readTraceEnableForHelper = !isfull && (freeEntryNum >= TraceFetchWidth.U) && (workingState || io.startSignal)
+  val readTraceEnableForBuffer = RegNext(readTraceEnableForHelper, init = false.B)
+  val readTraceEnableForPtr = readTraceEnableForHelper
+  val enqPtrVecForBuffer = (0 until TraceFetchWidth).map(i =>
+    RegNext(enqPtr + i.U, init = 0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize))))
+  when (readTraceEnableForPtr) {
     enqPtr := enqPtr + TraceFetchWidth.U
+  }
 
-    (0 until TraceFetchWidth).foreach {
-      i => bufferInsert(enqPtr + i.U, traceReaderHelper.insts(i))
+  when(readTraceEnableForBuffer) {
+    (0 until TraceFetchWidth).foreach { i =>
+        bufferInsert(enqPtrVecForBuffer(i), traceReaderHelper.insts(i))
     }
   }
 
@@ -115,7 +123,7 @@ class TraceReader(implicit p: Parameters) extends TraceModule
 
   traceReaderHelper.clock := clock
   traceReaderHelper.reset := reset
-  traceReaderHelper.enable := readTraceEnable && !io.redirect.valid
+  traceReaderHelper.enable := readTraceEnableForHelper && !io.redirect.valid
 
   io.traceInsts.zipWithIndex.foreach { case (inst, i) =>
     val ptr = (deqPtr + i.U).value

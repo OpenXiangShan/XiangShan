@@ -855,7 +855,7 @@ trait HasXSParameter {
   // TraceRTLMode
   def TracePCWidth = XLEN
   def TraceFetchWidth = PredictWidth
-  def TraceBufferSize = TraceFetchWidth * 3 //
+  def TraceBufferSize = TraceFetchWidth * 4 //
   def TraceCollectorWidth = CommitWidth
   def TraceRoBMergeNum = RenameWidth
   def TraceRoBMergeWidth = log2Ceil(TraceRoBMergeNum)
