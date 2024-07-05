@@ -942,8 +942,8 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     decodedInst.blockBackward := false.B
   }.elsewhen(isCsrrVlenb){
     // convert to addi instruction
-    decodedInst.srcType(0) := SrcType.imm
-    decodedInst.srcType(1) := SrcType.reg
+    decodedInst.srcType(0) := SrcType.reg
+    decodedInst.srcType(1) := SrcType.imm
     decodedInst.srcType(2) := SrcType.no
     decodedInst.srcType(3) := SrcType.no
     decodedInst.srcType(4) := SrcType.no
