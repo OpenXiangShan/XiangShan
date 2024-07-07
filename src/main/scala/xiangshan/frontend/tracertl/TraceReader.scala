@@ -28,22 +28,27 @@ class TracePredInfoBundle extends Bundle {
   val taken = Bool()
 }
 
-class TraceInstrBundle(implicit p: Parameters) extends TraceBundle {
-  val InstID = UInt(64.W)
-  val pcVA = UInt(TracePCWidth.W)
-  val pcPA = UInt(TracePCWidth.W)
-  val memoryAddrVA = UInt(64.W)
-  val memoryAddrPA = UInt(64.W)
-  val target = UInt(64.W)
-  val inst = UInt(TraceInstrWidth.W)
-  val memoryType = UInt(8.W)
-  val memorySize = UInt(8.W)
-  val branchType = UInt(8.W)
-  val branchTaken = UInt(8.W)
-
+class TraceInstrBundle(implicit p: Parameters) extends TraceInstrInnerBundle {
   // use for cfi fix
   // we need to know the bpu result to know if the branch should redirect or not
 //  val bpuPredInfo = new TracePredInfoBundle
+}
+
+object TraceInstrBundle {
+  def apply(rawInst: TraceInstrInnerBundle)
+           (implicit p: Parameters): TraceInstrBundle = {
+    val bundle = Wire(new TraceInstrBundle)
+    rawInst.elements.foreach { case (name, elt) =>
+      bundle.elements(name) := elt
+    }
+    when (rawInst.memoryAddrPA === 0.U) {
+      bundle.memoryAddrPA := rawInst.memoryAddrVA
+    }
+    when (rawInst.pcPA === 0.U) {
+      bundle.pcPA := rawInst.pcVA
+    }
+    bundle
+  }
 }
 
 class TraceReaderIO(implicit p: Parameters) extends TraceBundle {
@@ -86,32 +91,33 @@ class TraceReader(implicit p: Parameters) extends TraceModule
     deqPtr := deqPtr + io.recv.bits.instNum
   }
 
+  // may verilator bug? the buffer write is wrong. verilog is different from waveform.
+  val BufferWriteRegNext = false
+
   val isfull = isFull(enqPtr, deqPtr)
   val freeEntryNum = hasFreeEntries(enqPtr, deqPtr)
   val workingState = RegInit(false.B)
   when (io.startSignal) { workingState := true.B }
   val readTraceEnableForHelper = !isfull && (freeEntryNum >= TraceFetchWidth.U) && (workingState || io.startSignal)
-  val readTraceEnableForBuffer = RegNext(readTraceEnableForHelper, init = false.B)
   val readTraceEnableForPtr = readTraceEnableForHelper
+
+  val readTraceEnableForBuffer =
+    if (BufferWriteRegNext) RegNext(readTraceEnableForHelper, init = false.B)
+    else readTraceEnableForHelper
   val enqPtrVecForBuffer = (0 until TraceFetchWidth).map(i =>
-    RegNext(enqPtr + i.U, init = 0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize))))
+    if (BufferWriteRegNext) RegNext(enqPtr + i.U, init = 0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize)))
+    else (enqPtr + i.U)
+  )
   when (readTraceEnableForPtr) {
     enqPtr := enqPtr + TraceFetchWidth.U
   }
 
   when(readTraceEnableForBuffer) {
     (0 until TraceFetchWidth).foreach { i =>
-        bufferInsert(enqPtrVecForBuffer(i), traceReaderHelper.insts(i))
-    }
-  }
+      val ptr = enqPtrVecForBuffer(i).value
+      val data = traceReaderHelper.insts(i)
 
-  def bufferInsert(ptr: TraceBufferPtr, data: TraceInstrInnerBundle) = {
-    (traceBuffer(ptr.value): Data).waiveAll :<= (data: Data).waiveAll
-    when (data.memoryAddrPA === 0.U) {
-      traceBuffer(ptr.value).memoryAddrPA := data.memoryAddrVA
-    }
-    when (data.pcPA === 0.U) {
-      traceBuffer(ptr.value).pcPA := data.pcVA
+      traceBuffer(ptr) := TraceInstrBundle(data)
     }
   }
 
