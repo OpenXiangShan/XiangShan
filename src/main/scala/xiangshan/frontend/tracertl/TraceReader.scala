@@ -41,12 +41,6 @@ object TraceInstrBundle {
     rawInst.elements.foreach { case (name, elt) =>
       bundle.elements(name) := elt
     }
-    when (rawInst.memoryAddrPA === 0.U) {
-      bundle.memoryAddrPA := rawInst.memoryAddrVA
-    }
-    when (rawInst.pcPA === 0.U) {
-      bundle.pcPA := rawInst.pcVA
-    }
     bundle
   }
 }
