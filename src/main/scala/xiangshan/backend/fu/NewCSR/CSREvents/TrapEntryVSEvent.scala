@@ -85,7 +85,7 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
   private val isMemExcp      = isException && Seq(EX_LAM, EX_LAF, EX_SAM, EX_SAF, EX_LPF, EX_SPF).map(_.U === highPrioTrapNO).reduce(_ || _)
   private val isBpExcp       = isException && EX_BP.U === highPrioTrapNO
   private val fetchCrossPage = in.isCrossPageIPF
-  private val isIllegalInst  = isException && EX_II.U === highPrioTrapNO
+  private val isIllegalInst  = isException && (EX_II.U === highPrioTrapNO || EX_VI.U === highPrioTrapNO)
 
   // Software breakpoint exceptions are permitted to write either 0 or the pc to xtval
   // We fill pc here
