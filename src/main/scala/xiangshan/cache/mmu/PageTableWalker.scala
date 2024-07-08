@@ -585,13 +585,17 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   when (io.hptw.resp.fire) {
     for (i <- state.indices) {
       when (state(i) === state_hptw_resp && io.hptw.resp.bits.id === entries(i).wait_id && io.hptw.resp.bits.h_resp.entry.tag === entries(i).ppn) {
-        // change the entry that is waiting hptw resp
-        val need_to_waiting_vec = state.indices.map(i => state(i) === state_mem_waiting && dup(entries(i).req_info.vpn, entries(io.hptw.resp.bits.id).req_info.vpn))
-        val waiting_index = ParallelMux(need_to_waiting_vec zip entries.map(_.wait_id))
-        state(i) := Mux(Cat(need_to_waiting_vec).orR, state_mem_waiting, state_addr_check)
-        entries(i).hptw_resp := io.hptw.resp.bits.h_resp
-        entries(i).wait_id := Mux(Cat(need_to_waiting_vec).orR, waiting_index, entries(i).wait_id)
-        //To do: change the entry that is having the same hptw req
+        when (io.hptw.resp.bits.h_resp.gaf || io.hptw.resp.bits.h_resp.gpf) {
+          state(i) := state_mem_out
+          entries(i).hptw_resp := io.hptw.resp.bits.h_resp
+        }.otherwise{ // change the entry that is waiting hptw resp
+          val need_to_waiting_vec = state.indices.map(i => state(i) === state_mem_waiting && dup(entries(i).req_info.vpn, entries(io.hptw.resp.bits.id).req_info.vpn))
+          val waiting_index = ParallelMux(need_to_waiting_vec zip entries.map(_.wait_id))
+          state(i) := Mux(Cat(need_to_waiting_vec).orR, state_mem_waiting, state_addr_check)
+          entries(i).hptw_resp := io.hptw.resp.bits.h_resp
+          entries(i).wait_id := Mux(Cat(need_to_waiting_vec).orR, waiting_index, entries(i).wait_id)
+          //To do: change the entry that is having the same hptw req
+        }
       }
       when (state(i) === state_last_hptw_resp && io.hptw.resp.bits.id === entries(i).wait_id && io.hptw.resp.bits.h_resp.entry.tag === entries(i).ppn) {
         state(i) := state_mem_out
