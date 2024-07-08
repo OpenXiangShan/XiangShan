@@ -106,6 +106,7 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
   out.mcause   .valid := valid
   out.mtval    .valid := valid
   out.mtval2   .valid := valid
+  out.mtinst   .valid := valid
   out.tcontrol .valid := valid
   out.targetPc .valid := valid
 
