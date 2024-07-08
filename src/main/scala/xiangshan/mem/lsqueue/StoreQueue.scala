@@ -1066,7 +1066,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val enqNumber = validVStoreFlow.reduce(_ + _)
 
   val lastlastCycleRedirect=RegNext(lastCycleRedirect)// 2 cycle after redirect
-  val redirectCancelCount = RegEnable(lastCycleCancelCount + lastEnqCancel, lastCycleRedirect) // 2 cycle after redirect
+  val redirectCancelCount = RegEnable(lastCycleCancelCount + lastEnqCancel, 0.U, lastCycleRedirect) // 2 cycle after redirect
 
   when (lastlastCycleRedirect) {
     // we recover the pointers in 2 cycle after redirect for better timing
