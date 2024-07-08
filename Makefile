@@ -83,6 +83,7 @@ override SIM_ARGS += --with-dramsim3
 endif
 
 # trace xiangshan mode: accept trace instead of gcpt
+TRACERTL_MODE ?= 1
 ifeq ($(TRACERTL_MODE),1)
 override SIM_ARGS += --trace-rtl
 endif
