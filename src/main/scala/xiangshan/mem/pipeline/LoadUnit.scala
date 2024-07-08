@@ -512,6 +512,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val out = WireInit(0.U.asTypeOf(new FlowSource))
     out.mask          := 0.U
     out.uop           := 0.U.asTypeOf(out.uop)
+    out.uop.traceInfo.memoryAddrPA := src.paddr // assign here to keep same with other req types
+    out.uop.traceInfo.memoryAddrVA := src.paddr // prefetch's addr is paddr
     out.try_l2l       := false.B
     out.has_rob_entry := false.B
     out.rep_carry     := 0.U.asTypeOf(out.rep_carry)
