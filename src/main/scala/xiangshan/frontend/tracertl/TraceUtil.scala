@@ -40,12 +40,12 @@ object TraceRTLChoose {
 }
 
 object TraceRTLDontCare {
-  def apply[T <: Data](f: T)(implicit p: Parameters): T = {
+  def apply[T <: Data](origin: T)(implicit p: Parameters): T = {
     val env = p(DebugOptionsKey)
     if (env.TraceRTLMode) {
-      f
-    } else {
       0.U.asInstanceOf[T]
+    } else {
+      origin
     }
   }
 }
