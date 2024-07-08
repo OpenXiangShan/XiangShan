@@ -131,6 +131,11 @@ class CtrlBlockImp(
     delayed.bits.debugInfo.writebackTime := GTimer()
     delayed
   }).toSeq
+  val delayedNotFlushedWriteBackNeedFlush = Wire(Vec(params.allExuParams.filter(_.needExceptionGen).length, Bool()))
+  delayedNotFlushedWriteBackNeedFlush := delayedNotFlushedWriteBack.filter(_.bits.params.needExceptionGen).map{ x =>
+    x.bits.exceptionVec.get.asUInt.orR || x.bits.flushPipe.getOrElse(false.B) || x.bits.replay.getOrElse(false.B) ||
+      (if (x.bits.trigger.nonEmpty) x.bits.trigger.get.getBackendCanFire else false.B)
+  }
 
   val wbDataNoStd = io.fromWB.wbData.filter(!_.bits.params.hasStdFu)
   val intScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[IntScheduler])
@@ -535,6 +540,7 @@ class CtrlBlockImp(
   rob.io.redirect := s1_s3_redirect
   rob.io.writeback := delayedNotFlushedWriteBack
   rob.io.writebackNums := VecInit(delayedNotFlushedWriteBackNums)
+  rob.io.writebackNeedFlush := delayedNotFlushedWriteBackNeedFlush
   rob.io.readGPAMemData := gpaMem.io.exceptionReadData
 
   io.redirect := s1_s3_redirect

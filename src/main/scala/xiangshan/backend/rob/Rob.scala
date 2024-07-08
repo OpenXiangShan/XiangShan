@@ -58,6 +58,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     // exu + brq
     val writeback: MixedVec[ValidIO[ExuOutput]] = Flipped(params.genWrite2CtrlBundles)
     val writebackNums = Flipped(Vec(writeback.size - params.StdCnt, ValidIO(UInt(writeback.size.U.getWidth.W))))
+    val writebackNeedFlush = Input(Vec(params.allExuParams.filter(_.needExceptionGen).length, Bool()))
     val commits = Output(new RobCommitIO)
     val rabCommits = Output(new RabCommitIO)
     val diffCommits = if (backendParams.debugEn) Some(Output(new DiffCommitIO)) else None
@@ -475,22 +476,25 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val deqDispatchData = robEntries(deqPtr.value)
   val debug_deqUop = debug_microOp(deqPtr.value)
 
+  val deqPtrEntry = robDeqGroup(deqPtr.value(bankAddrWidth-1,0))
+  val deqPtrEntryValid = deqPtrEntry.commit_v
   val intrBitSetReg = RegNext(io.csr.intrBitSet)
-  val intrEnable = intrBitSetReg && !hasWaitForward && robDeqGroup(deqPtr.value(bankAddrWidth-1,0)).interrupt_safe
-  val deqHasExceptionOrFlush = exceptionDataRead.valid && exceptionDataRead.bits.robIdx === deqPtr
-  val deqHasException = deqHasExceptionOrFlush && (exceptionDataRead.bits.exceptionVec.asUInt.orR ||
-    exceptionDataRead.bits.singleStep || exceptionDataRead.bits.trigger.canFire)
-  val deqHasFlushPipe = deqHasExceptionOrFlush && exceptionDataRead.bits.flushPipe
-  val deqHasReplayInst = deqHasExceptionOrFlush && exceptionDataRead.bits.replayInst
-  val exceptionEnable = robEntries(deqPtr.value).isWritebacked && deqHasException
+  val intrEnable = intrBitSetReg && !hasWaitForward && deqPtrEntry.interrupt_safe
+  val deqNeedFlush = deqPtrEntry.needFlush && deqPtrEntry.commit_v && deqPtrEntry.commit_w
+  val deqHitExceptionGenState = exceptionDataRead.valid && exceptionDataRead.bits.robIdx === deqPtr
+  val deqNeedFlushAndHitExceptionGenState = deqNeedFlush && deqHitExceptionGenState
+  val exceptionGenStateIsException = exceptionDataRead.bits.exceptionVec.asUInt.orR || exceptionDataRead.bits.singleStep || exceptionDataRead.bits.trigger.canFire
+  val deqHasException = deqNeedFlushAndHitExceptionGenState && exceptionGenStateIsException
+  val deqHasFlushPipe = deqNeedFlushAndHitExceptionGenState && exceptionDataRead.bits.flushPipe
+  val deqHasReplayInst = deqNeedFlushAndHitExceptionGenState && exceptionDataRead.bits.replayInst
 
   XSDebug(deqHasException && exceptionDataRead.bits.singleStep, "Debug Mode: Deq has singlestep exception\n")
   XSDebug(deqHasException && exceptionDataRead.bits.trigger.getFrontendCanFire, "Debug Mode: Deq has frontend trigger exception\n")
   XSDebug(deqHasException && exceptionDataRead.bits.trigger.getBackendCanFire, "Debug Mode: Deq has backend trigger exception\n")
 
-  val isFlushPipe = robEntries(deqPtr.value).isWritebacked && (deqHasFlushPipe || deqHasReplayInst)
+  val isFlushPipe = deqPtrEntry.commit_w && (deqHasFlushPipe || deqHasReplayInst)
 
-  val isVsetFlushPipe = robEntries(deqPtr.value).isWritebacked && deqHasFlushPipe && exceptionDataRead.bits.isVset
+  val isVsetFlushPipe = deqPtrEntry.commit_w && deqHasFlushPipe && exceptionDataRead.bits.isVset
   //  val needModifyFtqIdxOffset = isVsetFlushPipe && (vsetvlState === vs_waitFlush)
   val needModifyFtqIdxOffset = false.B
   io.isVsetFlushPipe := isVsetFlushPipe
@@ -498,20 +502,20 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // Block any redirect or commit at the next cycle.
   val lastCycleFlush = RegNext(io.flushOut.valid)
 
-  io.flushOut.valid := (state === s_idle) && robEntries(deqPtr.value).valid && (intrEnable || exceptionEnable || isFlushPipe) && !lastCycleFlush
+  io.flushOut.valid := (state === s_idle) && deqPtrEntryValid && (intrEnable || deqHasException || isFlushPipe) && !lastCycleFlush
   io.flushOut.bits := DontCare
   io.flushOut.bits.isRVC := deqDispatchData.isRVC
   io.flushOut.bits.robIdx := Mux(needModifyFtqIdxOffset, firstVInstrRobIdx, deqPtr)
   io.flushOut.bits.ftqIdx := Mux(needModifyFtqIdxOffset, firstVInstrFtqPtr, deqDispatchData.ftqIdx)
   io.flushOut.bits.ftqOffset := Mux(needModifyFtqIdxOffset, firstVInstrFtqOffset, deqDispatchData.ftqOffset)
-  io.flushOut.bits.level := Mux(deqHasReplayInst || intrEnable || exceptionEnable || needModifyFtqIdxOffset, RedirectLevel.flush, RedirectLevel.flushAfter) // TODO use this to implement "exception next"
+  io.flushOut.bits.level := Mux(deqHasReplayInst || intrEnable || deqHasException || needModifyFtqIdxOffset, RedirectLevel.flush, RedirectLevel.flushAfter) // TODO use this to implement "exception next"
   io.flushOut.bits.interrupt := true.B
   XSPerfAccumulate("interrupt_num", io.flushOut.valid && intrEnable)
-  XSPerfAccumulate("exception_num", io.flushOut.valid && exceptionEnable)
+  XSPerfAccumulate("exception_num", io.flushOut.valid && deqHasException)
   XSPerfAccumulate("flush_pipe_num", io.flushOut.valid && isFlushPipe)
   XSPerfAccumulate("replay_inst_num", io.flushOut.valid && isFlushPipe && deqHasReplayInst)
 
-  val exceptionHappen = (state === s_idle) && robEntries(deqPtr.value).valid && (intrEnable || exceptionEnable) && !lastCycleFlush
+  val exceptionHappen = (state === s_idle) && deqPtrEntryValid && (intrEnable || deqHasException) && !lastCycleFlush
   io.exception.valid := RegNext(exceptionHappen)
   io.exception.bits.pc := RegEnable(debug_deqUop.pc, exceptionHappen)
   io.exception.bits.gpaddr := io.readGPAMemData
@@ -532,7 +536,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   XSDebug(io.flushOut.valid,
     p"generate redirect: pc 0x${Hexadecimal(io.exception.bits.pc)} intr $intrEnable " +
-      p"excp $exceptionEnable flushPipe $isFlushPipe " +
+      p"excp $deqHasException flushPipe $isFlushPipe " +
       p"Trap_target 0x${Hexadecimal(io.csr.trapTarget)} exceptionVec ${Binary(exceptionDataRead.bits.exceptionVec.asUInt)}\n")
 
 
@@ -599,7 +603,21 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     misPredBlockCounter >> 1.U
   )
   val misPredBlock = misPredBlockCounter(0)
-  val blockCommit = misPredBlock || lastCycleFlush || hasWFI || io.redirect.valid
+  val deqFlushBlockCounter = Reg(UInt(3.W))
+  val deqFlushBlock = deqFlushBlockCounter(0)
+  val deqHasFlushed = Reg(Bool())
+  val deqHitRedirectReg = RegNext(io.redirect.valid && io.redirect.bits.robIdx === deqPtr)
+  when(deqNeedFlush && deqHitRedirectReg){
+    deqFlushBlockCounter := "b111".U
+  }.otherwise{
+    deqFlushBlockCounter := deqFlushBlockCounter >> 1.U
+  }
+  when(deqNeedFlush && io.flushOut.valid){
+    deqHasFlushed := true.B
+  }.elsewhen(!deqNeedFlush){
+    deqHasFlushed := false.B
+  }
+  val blockCommit = misPredBlock || lastCycleFlush || hasWFI || io.redirect.valid || (deqNeedFlush && !deqHasFlushed && !deqHasFlushPipe) || deqFlushBlock
 
   io.commits.isWalk := state === s_walk
   io.commits.isCommit := state === s_idle && !blockCommit
@@ -608,15 +626,15 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val commit_vDeqGroup = VecInit(robDeqGroup.map(_.commit_v))
   val commit_wDeqGroup = VecInit(robDeqGroup.map(_.commit_w))
   val realCommitLast = deqPtrVec(0).lineHeadPtr + Fill(bankAddrWidth, 1.U)
-  val commit_exception = exceptionDataRead.valid && !isAfter(exceptionDataRead.bits.robIdx, realCommitLast)
   val commit_block = VecInit((0 until CommitWidth).map(i => !commit_wDeqGroup(i) && !hasCommitted(i)))
-  val allowOnlyOneCommit = commit_exception || intrBitSetReg
+  val allowOnlyOneCommit = VecInit(robDeqGroup.map(x => x.commit_v && x.needFlush)).asUInt.orR || intrBitSetReg
   // for instructions that may block others, we don't allow them to commit
   io.commits.commitValid := PriorityMux(commitValidThisLine, (0 until CommitWidth).map(i => (commitValidThisLine.asUInt >> i).asUInt.asTypeOf(io.commits.commitValid)))
+
   for (i <- 0 until CommitWidth) {
     // defaults: state === s_idle and instructions commit
     // when intrBitSetReg, allow only one instruction to commit at each clock cycle
-    val isBlocked = intrEnable || deqHasException || deqHasReplayInst
+    val isBlocked = intrEnable || (deqNeedFlush && !deqHasFlushed && !deqHasFlushPipe)
     val isBlockedByOlder = if (i != 0) commit_block.asUInt(i, 0).orR || allowOnlyOneCommit && !hasCommitted.asUInt(i - 1, 0).andR else false.B
     commitValidThisLine(i) := commit_vDeqGroup(i) && commit_wDeqGroup(i) && !isBlocked && !isBlockedByOlder && !hasCommitted(i)
     io.commits.info(i) := commitInfo(i)
@@ -698,6 +716,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   deqPtrGenModule.io.exception_state := exceptionDataRead
   deqPtrGenModule.io.intrBitSetReg := intrBitSetReg
   deqPtrGenModule.io.hasNoSpecExec := hasWaitForward
+  deqPtrGenModule.io.allowOnlyOneCommit := allowOnlyOneCommit
   deqPtrGenModule.io.interrupt_safe := robDeqGroup(deqPtr.value(bankAddrWidth-1,0)).interrupt_safe
   deqPtrGenModule.io.blockCommit := blockCommit
   deqPtrGenModule.io.hasCommitted := hasCommitted
@@ -873,19 +892,19 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val canWbSeq = exuWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U)
     val canWbNoBlockSeq = canWbSeq.zip(blockWbSeq).map { case (canWb, blockWb) => canWb && !blockWb }
     val canStdWbSeq = VecInit(stdWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U))
-    val wbCnt = Mux1H(canWbNoBlockSeq, io.writebackNums.map(_.bits))
+    val wbCnt = Mux1H(canWbSeq, io.writebackNums.map(_.bits))
 
-    val exceptionHas = RegInit(false.B)
-    val exceptionHasWire = Wire(Bool())
-    exceptionHasWire := MuxCase(exceptionHas, Seq(
-      (robEntries(i).valid && exceptionGen.io.out.valid && exceptionGen.io.out.bits.robIdx.value === i.U) -> true.B,
-      !robEntries(i).valid -> false.B
-    ))
-    exceptionHas := exceptionHasWire
+    val canWbExceptionSeq = exceptionWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U)
+    val needFlush = robEntries(i).needFlush
+    val needFlushWriteBack = Wire(Bool())
+    needFlushWriteBack := Mux1H(canWbExceptionSeq, io.writebackNeedFlush)
+    when(robEntries(i).valid){
+      needFlush := needFlush || needFlushWriteBack
+    }
 
-    when(exceptionHas || exceptionHasWire) {
+    when(robEntries(i).valid && (needFlush || needFlushWriteBack)) {
       // exception flush
-      robEntries(i).uopNum := 0.U
+      robEntries(i).uopNum := robEntries(i).uopNum - wbCnt
       robEntries(i).stdWritebacked := true.B
     }.elsewhen(!robEntries(i).valid && instCanEnqFlag) {
       // enq set num of uops
@@ -933,20 +952,19 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val canWbSeq = exuWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i))
     val canWbNoBlockSeq = canWbSeq.zip(blockWbSeq).map { case (canWb, blockWb) => canWb && !blockWb }
     val canStdWbSeq = VecInit(stdWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i)))
-    val wbCnt = Mux1H(canWbNoBlockSeq, io.writebackNums.map(_.bits))
+    val wbCnt = Mux1H(canWbSeq, io.writebackNums.map(_.bits))
 
-    val exceptionHas = RegInit(false.B)
-    val exceptionHasWire = Wire(Bool())
-    exceptionHasWire := MuxCase(exceptionHas, Seq(
-      // allCommitted has high priority, because the robidx in exceptionHas before maybe different from the current one
-      (!needUpdate(i).valid || allCommitted) -> false.B,
-      (needUpdate(i).valid && exceptionGen.io.out.valid && exceptionGen.io.out.bits.robIdx.value === needUpdateRobIdx(i)) -> true.B
-    ))
-    exceptionHas := exceptionHasWire
+    val canWbExceptionSeq = exceptionWBs.map(writeback => writeback.valid && (writeback.bits.robIdx.value === needUpdateRobIdx(i)))
+    val needFlush = robBanksRdata(i).needFlush
+    val needFlushWriteBack = Wire(Bool())
+    needFlushWriteBack := Mux1H(canWbExceptionSeq, io.writebackNeedFlush)
+    when(needUpdate(i).valid) {
+      needUpdate(i).needFlush := needFlush || needFlushWriteBack
+    }
 
-    when(exceptionHas || exceptionHasWire) {
+    when(needUpdate(i).valid && (needFlush || needFlushWriteBack)) {
       // exception flush
-      needUpdate(i).uopNum := 0.U
+      needUpdate(i).uopNum := robBanksRdata(i).uopNum - wbCnt
       needUpdate(i).stdWritebacked := true.B
     }.elsewhen(!needUpdate(i).valid && instCanEnqFlag) {
       // enq set num of uops
@@ -1329,7 +1347,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val commitStoreVec = VecInit(io.commits.commitValid.zip(commitIsStore).map { case (v, t) => v && t })
   val perfEvents = Seq(
     ("rob_interrupt_num      ", io.flushOut.valid && intrEnable),
-    ("rob_exception_num      ", io.flushOut.valid && exceptionEnable),
+    ("rob_exception_num      ", io.flushOut.valid && deqHasException),
     ("rob_flush_pipe_num     ", io.flushOut.valid && isFlushPipe),
     ("rob_replay_inst_num    ", io.flushOut.valid && isFlushPipe && deqHasReplayInst),
     ("rob_commitUop          ", ifCommit(commitCnt)),
@@ -1362,6 +1380,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     dontTouch(robBanksRdataNextLine)
     dontTouch(robBanksRdataThisLineUpdate)
     dontTouch(robBanksRdataNextLineUpdate)
+    dontTouch(needUpdate)
+    val exceptionWBsVec = MixedVecInit(exceptionWBs)
+    dontTouch(exceptionWBsVec)
     dontTouch(commit_wDeqGroup)
     dontTouch(commit_vDeqGroup)
     dontTouch(commitSizeSumSeq)
