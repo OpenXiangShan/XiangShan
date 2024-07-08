@@ -43,8 +43,6 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     // from rename
     val fromRename = Vec(RenameWidth, Flipped(DecoupledIO(new MicroOp)))
     val recv = Output(Vec(RenameWidth, Bool()))
-    // from mpu
-    val mpu_canAccept = Input(Bool())
     // enq Rob
     val enqRob = Flipped(new RobEnqIO)
     // enq Lsq
@@ -65,12 +63,13 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
       val needAlloc = Vec(RenameWidth, Output(Bool()))
       val req = Vec(RenameWidth, ValidIO(new MicroOp))
     }
+    val mpu_canAccept = Input(Bool())
+    val toMpuDq = Vec(RenameWidth, ValidIO(new MicroOp))
     val redirect = Flipped(ValidIO(new Redirect))
     // singleStep
     val singleStep = Input(Bool())
     // lfst
     val lfst = new DispatchLFSTIO
-    val dpOut = Vec(RenameWidth, ValidIO(new MicroOp))
   })
 
   /**
@@ -106,11 +105,6 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
   val updatedUop = Wire(Vec(RenameWidth, new MicroOp))
   val updatedCommitType = Wire(Vec(RenameWidth, CommitType()))
-
-  for (i <- 0 until RenameWidth) {
-    io.dpOut(i).bits := updatedUop(i)
-    io.dpOut(i).valid := io.fromRename(i).valid
-  }
 
   for (i <- 0 until RenameWidth) {
     updatedCommitType(i) := Cat(isLs(i), (isStore(i) && !isAMO(i)) | isBranch(i))
@@ -227,6 +221,10 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     io.toLsDq.req(i).valid  := io.fromRename(i).valid && isMem(i) &&
                                canEnterDpq && io.toIntDq.canAccept && io.toFpDq.canAccept
     io.toLsDq.req(i).bits   := updatedUop(i)
+
+    io.toMpuDq(i).bits      := updatedUop(i)
+    io.toMpuDq(i).valid     := io.fromRename(i).valid && canEnterDpq && io.toIntDq.canAccept &&
+                               io.toFpDq.canAccept && io.toLsDq.canAccept
 
     XSDebug(io.toIntDq.req(i).valid, p"pc 0x${Hexadecimal(io.toIntDq.req(i).bits.cf.pc)} int index $i\n")
     XSDebug(io.toFpDq.req(i).valid , p"pc 0x${Hexadecimal(io.toFpDq.req(i).bits.cf.pc )} fp  index $i\n")

@@ -432,13 +432,23 @@ class Scoreboard (implicit  p: Parameters) extends XSModule with HasXSParameter 
 
   // load write back
   val ld_wr_en_vec = Wire(Vec(32, Bool()))
+  val first_ld_wr_en = Wire(Vec(32, Bool()))
   for (i <- 0 until 32) {
     ld_wr_en_vec(i) := !ld_waw_vec(i) && !ld_war_vec(i) && (state_array(i) === s_commit) && (OpType_array(i) === LSUOpType.mld)
   }
-  io.ldOut.wen := ld_wr_en_vec.asUInt.orR
-  io.ldOut.data_out := rd_value_array(PriorityEncoder(ld_wr_en_vec))
-  io.ldOut.addr_out := rd_array(PriorityEncoder(ld_wr_en_vec))
-  io.ldOut.offset_out := rd_offset_array(PriorityEncoder(ld_wr_en_vec))
+
+  for (i <- 0 until 32) {
+    val u_ld_wr_en= dontTouch(Wire(Vec(32, Bool())))
+    for (j <- 0 until 32) {
+      u_ld_wr_en(j) := ld_wr_en_vec(i) && ((isAfter(robIdx_array(j), robIdx_array(i)) || !ld_wr_en_vec(j)) || (i.U === j.U))
+    }
+    first_ld_wr_en(i) := u_ld_wr_en.asUInt.andR
+  }
+
+  io.ldOut.wen := first_ld_wr_en.asUInt.orR
+  io.ldOut.data_out := rd_value_array(PriorityEncoder(first_ld_wr_en))
+  io.ldOut.addr_out := rd_array(PriorityEncoder(first_ld_wr_en))
+  io.ldOut.offset_out := rd_offset_array(PriorityEncoder(first_ld_wr_en))
 
 
 
