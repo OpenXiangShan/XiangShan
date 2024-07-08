@@ -86,7 +86,7 @@ class TraceReader(implicit p: Parameters) extends TraceModule
   }
 
   // may verilator bug? the buffer write is wrong. verilog is different from waveform.
-  val BufferWriteRegNext = false
+  val BufferWriteRegNext = true
 
   val isfull = isFull(enqPtr, deqPtr)
   val freeEntryNum = hasFreeEntries(enqPtr, deqPtr)
