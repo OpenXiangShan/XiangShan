@@ -28,7 +28,7 @@ import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import yunsuan.VpermType
-import xiangshan.ExceptionNO.illegalInstr
+import xiangshan.ExceptionNO.{illegalInstr, virtualInstr}
 import xiangshan.frontend.FtqPtr
 
 class DecodeStage(implicit p: Parameters) extends XSModule
@@ -101,8 +101,8 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   val isSimpleVec = VecInit(inValids.zip(decoders.map(_.io.deq.isComplex)).map { case (valid, isComplex) => valid && !isComplex })
   val simpleDecodedInst = VecInit(decoders.map(_.io.deq.decodedInst))
 
-  val isIllegalInstVec = VecInit(inValids.zip(decoders.map(_.io.deq.decodedInst.exceptionVec(illegalInstr))).map{
-    case (valid, isIllegalInst) => valid && isIllegalInst })
+  val isIllegalInstVec = VecInit(inValids.zip(decoders.map(_.io.deq.decodedInst.exceptionVec)).map{
+    case (valid, exceptionVec) => valid && (exceptionVec(illegalInstr) || exceptionVec(virtualInstr)) })
   val illegalInst = PriorityMuxDefault(isIllegalInstVec.zip(decoders.map(_.io.deq.decodedInst)),0.U.asTypeOf(new DecodedInst))
   io.trapInst.valid := isIllegalInstVec.reduce(_ || _)
   io.trapInst.bits.instr := Mux(illegalInst.preDecodeInfo.isRVC, io.illBuf, illegalInst.instr)

@@ -700,10 +700,9 @@ class NewCSR(implicit val p: Parameters) extends Module
     (addr === CSRs.mip.U) || (addr === CSRs.sip.U) || (addr === CSRs.vsip.U) ||
     (addr === CSRs.hip.U) || (addr === CSRs.mvip.U) || (addr === CSRs.hvip.U) ||
     Cat(aiaSkipCSRs.map(_.addr.U === addr)).orR ||
-    (addr === CSRs.stimecmp.U) ||
-    (addr === CSRs.mcounteren.U) ||
-    (addr === CSRs.scounteren.U) ||
-    (addr === CSRs.menvcfg.U)
+    (addr === CSRs.menvcfg.U) ||
+    (addr === CSRs.henvcfg.U) ||
+    (addr === CSRs.stimecmp.U)
   )
 
   // flush
@@ -809,7 +808,9 @@ class NewCSR(implicit val p: Parameters) extends Module
     state === s_waitIMSIC && stateNext === s_idle
   io.out.bits.EX_II := permitMod.io.out.EX_II || imsic_EX_II || noCSRIllegal
   io.out.bits.EX_VI := permitMod.io.out.EX_VI || imsic_EX_VI
-  io.out.bits.trapInstRen := trapHandleMod.io.out.causeNO.ExceptionCode.asUInt === EX_II.U && !trapHandleMod.io.out.causeNO.Interrupt.asBool
+  io.out.bits.trapInstRen := (trapHandleMod.io.out.causeNO.ExceptionCode.asUInt === EX_II.U ||
+    trapHandleMod.io.out.causeNO.ExceptionCode.asUInt === EX_VI.U) && !trapHandleMod.io.out.causeNO.Interrupt.asBool
+
   io.out.bits.flushPipe := flushPipe
 
   io.out.bits.rData := MuxCase(0.U, Seq(

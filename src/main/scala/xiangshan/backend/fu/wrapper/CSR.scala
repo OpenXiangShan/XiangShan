@@ -76,7 +76,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   private val csrWen = valid && CSROpType.notReadOnly(func)
   //trap inst
   private val hasWrittenReg = RegInit(false.B)
-  private val isCSRIllegalInst = csrMod.io.out.bits.EX_II
+  private val isCSRIllegalInst = csrMod.io.out.bits.EX_II || csrMod.io.out.bits.EX_VI
   // restore CSR inst
   private val func3 = LookupTree(func, Seq(
     CSROpType.wrt   -> "b001".U,
