@@ -96,7 +96,8 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   // val release2Cycle = RegNext(io.release)
   // val release2Cycle_dup_lsu = RegNext(io.release)
   val release2Cycle = RegEnable(io.release, io.release.valid)
-  val release2Cycle_dup_lsu = RegEnable(io.release, io.release.valid)
+  release2Cycle.valid := RegNext(io.release.valid)
+  //val release2Cycle_dup_lsu = RegEnable(io.release, io.release.valid)
 
   // LoadQueueRAR enqueue condition:
   // There are still not completed load instructions before the current load instruction.
@@ -215,7 +216,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
       }
     val matchMask = GatedValidRegNext(matchMaskReg)
     //  Load-to-Load violation check result
-    val ldLdViolationMask = VecInit(matchMask)
+    val ldLdViolationMask = matchMask
     ldLdViolationMask.suggestName("ldLdViolationMask_" + w)
     query.resp.bits.rep_frm_fetch := ParallelORR(ldLdViolationMask)
   }
