@@ -523,10 +523,12 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       val s0_ldCancel = LoadShouldCancel(s0.bits.common.loadDependency, io.ldCancel)
       when (s0.fire && !s1_flush && notBlock && !s1_cancel && !s0_ldCancel && !s0_cancel) {
         s1_valid := s0.valid
-        s1_data.fromIssueBundle(s0.bits) // no src data here
-        s1_addrOH := s0.bits.addrOH
       }.otherwise {
         s1_valid := false.B
+      }
+      when (s0.valid) {
+        s1_data.fromIssueBundle(s0.bits) // no src data here
+        s1_addrOH := s0.bits.addrOH
       }
       s0.ready := (s1_ready || !s1_valid) && notBlock && !s1_cancel && !s0_ldCancel && !s0_cancel
       // IQ(s0) --[Ctrl]--> s1Reg ---------- end
