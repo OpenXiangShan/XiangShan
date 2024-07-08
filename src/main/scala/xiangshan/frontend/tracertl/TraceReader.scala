@@ -86,21 +86,49 @@ class TraceReader(implicit p: Parameters) extends TraceModule
   }
 
   // may verilator bug? the buffer write is wrong. verilog is different from waveform.
-  val BufferWriteRegNext = false
+  val bufferWriteRegNext = RegInit(false.B)
+  val bufferWriteModeStable = RegInit(false.B)
+  val bufferWriteModeChecking = WireInit(false.B)
 
-  val isfull = isFull(enqPtr, deqPtr)
-  val freeEntryNum = hasFreeEntries(enqPtr, deqPtr)
+  when (!bufferWriteModeStable) {
+    val pointerChanged = enqPtr.value =/= 0.U
+
+    // check Mode
+    val rightMode = traceBuffer(1).InstID === 1.U
+    val wrongMode = traceBuffer(TraceFetchWidth+1).InstID === 1.U
+    when (rightMode || wrongMode) { bufferWriteModeStable := true.B }
+    when (wrongMode) {
+      bufferWriteRegNext := ~bufferWriteRegNext
+    }
+
+    // when check, disable read more
+    bufferWriteModeChecking := pointerChanged && !bufferWriteModeStable
+
+    // wrong mode redirect
+    when (wrongMode) {
+      (0 until TraceFetchWidth).foreach { i =>
+        traceBuffer(i) := traceBuffer(i + TraceFetchWidth)
+      }
+    }
+  }
+
   val workingState = RegInit(false.B)
   when (io.startSignal) { workingState := true.B }
-  val readTraceEnableForHelper = !isfull && (freeEntryNum >= TraceFetchWidth.U) && (workingState || io.startSignal) && !io.redirect.valid
+  val readTraceEnableForHelper = !isFull(enqPtr, deqPtr) &&
+    (hasFreeEntries(enqPtr, deqPtr) >= TraceFetchWidth.U) &&
+    workingState &&
+    !bufferWriteModeChecking &&
+    !io.redirect.valid
   val readTraceEnableForPtr = readTraceEnableForHelper
 
-  val readTraceEnableForBuffer =
-    if (BufferWriteRegNext) RegNext(readTraceEnableForHelper, init = false.B) && !io.redirect.valid
-    else readTraceEnableForHelper
+  val readTraceEnableForBuffer = Mux(bufferWriteRegNext,
+    RegNext(readTraceEnableForHelper, init = false.B),
+    readTraceEnableForHelper
+  )
   val enqPtrVecForBuffer = (0 until TraceFetchWidth).map(i =>
-    if (BufferWriteRegNext) RegNext(enqPtr + i.U, init = 0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize)))
-    else (enqPtr + i.U)
+    Mux(bufferWriteRegNext,
+      RegNext(enqPtr + i.U, init = 0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize))),
+      enqPtr + i.U)
   )
   when (readTraceEnableForPtr) {
     enqPtr := enqPtr + TraceFetchWidth.U
