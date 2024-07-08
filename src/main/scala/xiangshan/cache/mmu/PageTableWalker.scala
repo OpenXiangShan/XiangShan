@@ -730,7 +730,7 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val io = IO(new HPTWIO)
   val hgatp = io.csr.hgatp
   val sfence = io.sfence
-  val flush = sfence.valid || hgatp.changed
+  val flush = sfence.valid || hgatp.changed || io.csr.satp.changed || io.csr.vsatp.changed
 
   val level = RegInit(0.U(log2Up(Level).W))
   val gpaddr = Reg(UInt(GPAddrBits.W))
