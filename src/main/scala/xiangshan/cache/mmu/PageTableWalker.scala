@@ -384,6 +384,7 @@ class LLPTWIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
     val req_info = Output(new L2TlbInnerBundle())
     val id = Output(UInt(bMemID.W))
     val h_resp = Output(new HptwResp)
+    val first_s2xlate_fault = Output(Bool()) // Whether the first stage 2 translation occurs pf/af 
     val af = Output(Bool())
   })
   val mem = new Bundle {
@@ -421,6 +422,7 @@ class LLPTWEntry(implicit p: Parameters) extends XSBundle with HasPtwConst {
   val wait_id = UInt(log2Up(l2tlbParams.llptwsize).W)
   val af = Bool()
   val hptw_resp = new HptwResp()
+  val first_s2xlate_fault = Output(Bool())
 }
 
 
@@ -475,7 +477,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     dup(io.in.bits.req_info.vpn, entries(i).req_info.vpn) && io.in.bits.req_info.s2xlate === entries(i).req_info.s2xlate
   )
   val dup_req_fire = mem_arb.io.out.fire && dup(io.in.bits.req_info.vpn, mem_arb.io.out.bits.req_info.vpn) && io.in.bits.req_info.s2xlate === mem_arb.io.out.bits.req_info.s2xlate // dup with the req fire entry
-  val dup_vec_wait = dup_vec.zip(is_waiting).map{case (d, w) => d && w} // dup with "mem_waiting" entres, sending mem req already
+  val dup_vec_wait = dup_vec.zip(is_waiting).map{case (d, w) => d && w} // dup with "mem_waiting" entries, sending mem req already
   val dup_vec_having = dup_vec.zipWithIndex.map{case (d, i) => d && is_having(i)} // dup with the "mem_out" entry recv the data just now
   val dup_vec_last_hptw = dup_vec.zipWithIndex.map{case (d, i) => d && (is_last_hptw_req(i) || is_last_hptw_resp(i))}
   val wait_id = Mux(dup_req_fire, mem_arb.io.chosen, ParallelMux(dup_vec_wait zip entries.map(_.wait_id)))
@@ -590,12 +592,14 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
         when (io.hptw.resp.bits.h_resp.gaf || io.hptw.resp.bits.h_resp.gpf) {
           state(i) := state_mem_out
           entries(i).hptw_resp := io.hptw.resp.bits.h_resp
+          entries(i).first_s2xlate_fault := io.hptw.resp.bits.h_resp.gaf || io.hptw.resp.bits.h_resp.gpf
         }.otherwise{ // change the entry that is waiting hptw resp
           val need_to_waiting_vec = state.indices.map(i => state(i) === state_mem_waiting && dup(entries(i).req_info.vpn, entries(io.hptw.resp.bits.id).req_info.vpn))
           val waiting_index = ParallelMux(need_to_waiting_vec zip entries.map(_.wait_id))
           state(i) := Mux(Cat(need_to_waiting_vec).orR, state_mem_waiting, state_addr_check)
           entries(i).hptw_resp := io.hptw.resp.bits.h_resp
           entries(i).wait_id := Mux(Cat(need_to_waiting_vec).orR, waiting_index, entries(i).wait_id)
+          entries(i).first_s2xlate_fault := false.B
           //To do: change the entry that is having the same hptw req
         }
       }
@@ -628,6 +632,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.out.bits.id := mem_ptr
   io.out.bits.af := entries(mem_ptr).af
   io.out.bits.h_resp := entries(mem_ptr).hptw_resp
+  io.out.bits.first_s2xlate_fault := entries(mem_ptr).first_s2xlate_fault
 
   val hptw_req_arb = Module(new Arbiter(new Bundle{
       val source = UInt(bSourceWidth.W)

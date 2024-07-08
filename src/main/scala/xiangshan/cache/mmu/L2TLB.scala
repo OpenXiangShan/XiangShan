@@ -228,6 +228,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   llptw.io.in.bits.ppn := cache.io.resp.bits.toFsm.ppn
   llptw.io.sfence := sfence_dup(1)
   llptw.io.csr := csr_dup(1)
+  val llptw_stage1 = RegEnable(cache.io.resp.bits.toTlb, llptw.io.in.fire)
 
   cache.io.req.valid := arb2.io.out.valid
   cache.io.req.bits.req_info := arb2.io.out.bits.req_info
@@ -487,7 +488,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     mergeArb(i).in(outArbFsmPort).bits.s2 := ptw.io.resp.bits.h_resp
     mergeArb(i).in(outArbMqPort).valid := llptw_out.valid && llptw_out.bits.req_info.source===i.U
     mergeArb(i).in(outArbMqPort).bits.s2xlate := llptw_out.bits.req_info.s2xlate
-    mergeArb(i).in(outArbMqPort).bits.s1 := contiguous_pte_to_merge_ptwResp(resp_pte_sector(llptw_out.bits.id).asUInt, llptw_out.bits.req_info.vpn, llptw_out.bits.af, true, s2xlate = llptw_out.bits.req_info.s2xlate)
+    mergeArb(i).in(outArbMqPort).bits.s1 := Mux(llptw_out.bits.first_s2xlate_fault, llptw_stage1, contiguous_pte_to_merge_ptwResp(resp_pte_sector(llptw_out.bits.id).asUInt, llptw_out.bits.req_info.vpn, llptw_out.bits.af, true, s2xlate = llptw_out.bits.req_info.s2xlate))
     mergeArb(i).in(outArbMqPort).bits.s2 := llptw_out.bits.h_resp
     mergeArb(i).out.ready := outArb(i).in(0).ready
   }
