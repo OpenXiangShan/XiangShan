@@ -37,6 +37,10 @@ class VTypeGen(implicit p: Parameters) extends XSModule{
   private val firstVsetOH: Vec[Bool] = VecInit(PriorityEncoderOH(isVsetVec))
   private val firstVsetInstField: XSInstBitFields = PriorityMux(firstVsetOH, instFieldVec)
 
+  private val isVsetvli= (firstVsetInstField.OPCODE === "b1010111".U) && 
+    (firstVsetInstField.WIDTH === "b111".U) && 
+    (firstVsetInstField.ALL(31) === "b0".U)
+
   private val vtypeArch = RegInit(0.U.asTypeOf(new VType))
   private val vtypeSpec = RegInit(0.U.asTypeOf(new VType))
   private val lastSpecVType = RegInit(0.U.asTypeOf(new ValidIO(VType())))
@@ -49,7 +53,8 @@ class VTypeGen(implicit p: Parameters) extends XSModule{
   vtypeSpec := vtypeSpecNext
   lastSpecVType := lastSpecVTypeNext
 
-  private val instVType: InstVType = firstVsetInstField.ZIMM_VTYPE.asTypeOf(new InstVType)
+  private val instVType: InstVType = Mux(isVsetvli, firstVsetInstField.ZIMM_VSETVLI.asTypeOf(new InstVType), 
+    firstVsetInstField.ZIMM_VSETIVLI.asTypeOf(new InstVType))
   private val vtypei: VsetVType = VsetVType.fromInstVType(instVType)
 
   private val vsetModule = Module(new VsetModule)
