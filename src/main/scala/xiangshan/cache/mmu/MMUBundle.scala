@@ -934,6 +934,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
   val vmid = Some(UInt(vmidLen.W))
   val ppns = Vec(num, UInt(gvpnLen.W))
   val vs   = Vec(num, Bool())
+  val af   = Vec(num, Bool())
   val perms = if (hasPerm) Some(Vec(num, new PtePermBundle)) else None
   val prefetch = Bool()
   // println(s"PtwEntries: tag:1*${tagLen} ppns:${num}*${ppnLen} vs:${num}*1")
@@ -958,7 +959,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
     val asid_value = Mux(s2xlate, vasid, asid)
     val asid_hit = if (ignoreAsid) true.B else (this.asid === asid_value)
     val vmid_hit = Mux(s2xlate, this.vmid.getOrElse(0.U) === vmid, true.B)
-    asid_hit && vmid_hit && tag === tagClip(vpn) && (if (hasPerm) true.B else vs(sectorIdxClip(vpn, level)))
+    asid_hit && vmid_hit && tag === tagClip(vpn) && !af(sectorIdxClip(vpn, level)) && (if (hasPerm) true.B else vs(sectorIdxClip(vpn, level)))
   }
 
   def genEntries(vpn: UInt, asid: UInt, vmid: UInt, data: UInt, levelUInt: UInt, prefetch: Bool) = {
@@ -974,6 +975,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean)(implicit p
       val pte = data((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle)
       ps.ppns(i) := pte.ppn
       ps.vs(i)   := !pte.isPf(levelUInt) && (if (hasPerm) pte.isLeaf() else !pte.isLeaf())
+      ps.af(i)   := pte.isAf()
       ps.perms.map(_(i) := pte.perm)
     }
     ps
