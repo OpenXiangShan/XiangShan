@@ -481,7 +481,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val wait_id = Mux(dup_req_fire, mem_arb.io.chosen, ParallelMux(dup_vec_wait zip entries.map(_.wait_id)))
   val dup_wait_resp = io.mem.resp.fire && VecInit(dup_vec_wait)(io.mem.resp.bits.id) // dup with the entry that data coming next cycle
   val to_wait = Cat(dup_vec_wait).orR || dup_req_fire
-  val to_mem_out = dup_wait_resp && entries(io.mem.resp.bits.id).req_info.s2xlate === noS2xlate
+  val to_mem_out = dup_wait_resp && ((entries(io.mem.resp.bits.id).req_info.s2xlate === noS2xlate) || (entries(io.mem.resp.bits.id).req_info.s2xlate === onlyStage1))
   val to_cache = Cat(dup_vec_having).orR || Cat(dup_vec_last_hptw).orR
   val to_hptw_req = io.in.bits.req_info.s2xlate === allStage
   val to_last_hptw_req = dup_wait_resp && entries(io.mem.resp.bits.id).req_info.s2xlate === allStage
