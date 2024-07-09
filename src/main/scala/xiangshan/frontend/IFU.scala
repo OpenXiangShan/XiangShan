@@ -383,9 +383,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f2_except_af    = VecInit((0 until PortNumber).map(i => fromICache(i).bits.tlbExcp.accessFault))
   // paddr and gpaddr of [startAddr, nextLineAddr]
   val f2_paddrs       = VecInit((0 until PortNumber).map(i => fromICache(i).bits.paddr))
-  // for crossGuestPageFault
-  val f2_gpaddrs_tmp  = VecInit((0 until PortNumber).map(i => fromICache(i).bits.gpaddr))
-  val f2_gpaddrs      = VecInit((0 until PortNumber).map(i => if(i == 0) Mux(fromICache(i).bits.tlbExcp.guestPageFault, f2_gpaddrs_tmp(i), (f2_gpaddrs_tmp(i + 1) - (1 << (blockOffBits)).U)) else f2_gpaddrs_tmp(i)))
+  val f2_gpaddr       = fromICache(0).bits.gpaddr
   val f2_mmio         = fromICache(0).bits.tlbExcp.mmio &&
     !fromICache(0).bits.tlbExcp.accessFault &&
     !fromICache(0).bits.tlbExcp.pageFault   &&
@@ -544,7 +542,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_except         = VecInit((0 until 2).map{i => f3_except_pf(i) || f3_except_af(i) || f3_except_gpf(i)})
   val f3_has_except     = f3_valid && (f3_except_af.reduce(_||_) || f3_except_pf.reduce(_||_) || f3_except_gpf.reduce(_||_))
   val f3_paddrs         = RegEnable(f2_paddrs,  f2_fire)
-  val f3_gpaddrs        = RegEnable(f2_gpaddrs,  f2_fire)
+  val f3_gpaddr         = RegEnable(f2_gpaddr,  f2_fire)
   val f3_resend_vaddr   = RegEnable(f2_resend_vaddr,             f2_fire)
 
   // Expand 1 bit to prevent overflow when assert
@@ -793,9 +791,10 @@ class NewIFU(implicit p: Parameters) extends XSModule
   frontendTrigger.io.frontendTrigger  := io.frontendTrigger
 
   val f3_triggered = frontendTrigger.io.triggered
+  val f3_toIbuffer_valid = f3_valid && (!f3_req_is_mmio || f3_mmio_can_go) && !f3_flush
 
   /*** send to Ibuffer  ***/
-  io.toIbuffer.valid            := f3_valid && (!f3_req_is_mmio || f3_mmio_can_go) && !f3_flush
+  io.toIbuffer.valid            := f3_toIbuffer_valid
   io.toIbuffer.bits.instrs      := f3_expd_instr
   io.toIbuffer.bits.valid       := f3_instr_valid.asUInt
   io.toIbuffer.bits.enqEnable   := checkerOutStage1.fixedRange.asUInt & f3_instr_valid.asUInt
@@ -818,9 +817,10 @@ class NewIFU(implicit p: Parameters) extends XSModule
   }
 
   /** to backend */
-  io.toBackend.gpaddrMem_wen   := f3_valid && (!f3_req_is_mmio || f3_mmio_can_go) && !f3_flush // same as toIbuffer
+  // f3_gpaddr is valid iff gpf is detected
+  io.toBackend.gpaddrMem_wen   := f3_toIbuffer_valid && (f3_gpf_vec.asUInt.orR || f3_crossGuestPageFault.asUInt.orR)
   io.toBackend.gpaddrMem_waddr := f3_ftq_req.ftqIdx.value
-  io.toBackend.gpaddrMem_wdata := f3_gpaddrs(0)
+  io.toBackend.gpaddrMem_wdata := f3_gpaddr
 
 
   //Write back to Ftq
