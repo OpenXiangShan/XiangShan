@@ -402,7 +402,7 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
     dontTouch(fflagsRedMask)
   }
   allFFlagsEn := Mux(outIsResuction, Cat(Fill(4*numVecModule - 1, firstNeedFFlags) & fflagsRedMask(4*numVecModule - 1, 1),
-    lastNeedFFlags && fflagsRedMask(0) || outIsVfRedOrdered), fflagsEn & vlMaskEn).asTypeOf(allFFlagsEn)
+    lastNeedFFlags || firstNeedFFlags || outIsVfRedOrdered), fflagsEn & vlMaskEn).asTypeOf(allFFlagsEn)
 
   val allFFlags = fflagsData.asTypeOf(Vec( 4*numVecModule,UInt(5.W)))
   val outFFlags = allFFlagsEn.zip(allFFlags).map{
