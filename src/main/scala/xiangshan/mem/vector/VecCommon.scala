@@ -919,7 +919,15 @@ object genVUopOffset extends VLSUConstants {
 
 
 
-object searchVFirstUnMask extends VLSUConstants {
+object genVFirstUnmask extends VLSUConstants {
+  /**
+   * Find the lowest unmasked number of bits.
+   * example:
+   *   mask = 16'b1111_1111_1110_0000
+   *   return 5
+   * @param mask 16bits of mask.
+   * @return lowest unmasked number of bits.
+   */
   def apply(mask: UInt): UInt = {
     require(mask.getWidth == 16, "The mask width must be 16")
     val select = (0 until 16).zip(mask.asBools).map{case (i, v) =>
