@@ -93,23 +93,23 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   bpu.io.reset_vector := RegNext(io.reset_vector)
 
 // pmp
-  val prefetchPipeNum = ICacheParameters().prefetchPipeNum
+  val PortNumber = ICacheParameters().PortNumber
   val pmp = Module(new PMP())
   val pmp_check = VecInit(Seq.fill(coreParams.ipmpPortNum)(Module(new PMPChecker(3, sameCycle = true)).io))
   pmp.io.distribute_csr := csrCtrl.distribute_csr
   val pmp_req_vec     = Wire(Vec(coreParams.ipmpPortNum, Valid(new PMPReqBundle())))
-  (0 until 2 + prefetchPipeNum).foreach(i => pmp_req_vec(i) <> icache.io.pmp(i).req)
+  (0 until 2 * PortNumber).foreach(i => pmp_req_vec(i) <> icache.io.pmp(i).req)
   pmp_req_vec.last <> ifu.io.pmp.req
 
   for (i <- pmp_check.indices) {
     pmp_check(i).apply(tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, pmp_req_vec(i))
   }
-  (0 until 2 + prefetchPipeNum).foreach(i => icache.io.pmp(i).resp <> pmp_check(i).resp)
+  (0 until 2 * PortNumber).foreach(i => icache.io.pmp(i).resp <> pmp_check(i).resp)
   ifu.io.pmp.resp <> pmp_check.last.resp
 
   val itlb = Module(new TLB(coreParams.itlbPortNum, nRespDups = 1,
-    Seq(false, false) ++ Seq.fill(prefetchPipeNum)(false) ++ Seq(true), itlbParams))
-  itlb.io.requestor.take(2 + prefetchPipeNum) zip icache.io.itlb foreach {case (a,b) => a <> b}
+    Seq.fill(PortNumber)(false) ++ Seq(true), itlbParams))
+  itlb.io.requestor.take(PortNumber) zip icache.io.itlb foreach {case (a,b) => a <> b}
   itlb.io.requestor.last <> ifu.io.iTLBInter // mmio may need re-tlb, blocked
   itlb.io.hartId := io.hartId
   itlb.io.base_connect(sfence, tlbCsr)
@@ -143,10 +143,10 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   ifu.io.icacheInter.topdownIcacheMiss := icache.io.fetch.topdownIcacheMiss
   ifu.io.icacheInter.topdownItlbMiss := icache.io.fetch.topdownItlbMiss
   icache.io.stop := ifu.io.icacheStop
+  icache.io.flush := ftq.io.icacheFlush
 
   ifu.io.icachePerfInfo := icache.io.perfInfo
 
-  icache.io.csr.distribute_csr <> DontCare
   io.csrUpdate := DontCare
 
   icache.io.csr_pf_enable     := RegNext(csrCtrl.l1I_pf_enable)

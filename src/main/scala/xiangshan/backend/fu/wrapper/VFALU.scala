@@ -183,6 +183,32 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
     )
     outMask
   }
+  def genMaskForRedFFlag(sew:UInt): UInt = {
+    val default = "b11111111".U
+    val f64FoldMask = Mux(vecCtrl.fpu.isFoldTo1_2, "b00000001".U, default)
+    val f32Fold = vecCtrl.fpu.isFoldTo1_2 || vecCtrl.fpu.isFoldTo1_4
+    val f32FoldMask = Mux1H(
+      Seq(
+        vecCtrl.fpu.isFoldTo1_2 -> "b00000011".U,
+        vecCtrl.fpu.isFoldTo1_4 -> "b00000001".U,
+      )
+    )
+    val f16Fold = vecCtrl.fpu.isFoldTo1_2 || vecCtrl.fpu.isFoldTo1_4 || vecCtrl.fpu.isFoldTo1_8
+    val f16FoldMask = Mux1H(
+      Seq(
+        vecCtrl.fpu.isFoldTo1_2 -> "b00001111".U,
+        vecCtrl.fpu.isFoldTo1_4 -> "b00000011".U,
+        vecCtrl.fpu.isFoldTo1_8 -> "b00000001".U,
+      )
+    )
+    Mux1H(
+      Seq(
+        (sew === 3.U) -> f64FoldMask,
+        (sew === 2.U) -> Mux(f32Fold, f32FoldMask, default),
+        (sew === 1.U) -> Mux(f16Fold, f16FoldMask, default),
+      )
+    )
+  }
   val isScalarMove = (fuOpType === VfaluType.vfmv_f_s) || (fuOpType === VfaluType.vfmv_s_f)
   val srcMaskRShift = Wire(UInt((4 * numVecModule).W))
   val maskRshiftWidth = Wire(UInt(6.W))
@@ -333,7 +359,8 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   val outIsFisrtGroup = outVuopidx === 0.U ||
     (outVuopidx === 1.U && (outVlmul === VLmul.m4 || outVlmul === VLmul.m8)) ||
     ((outVuopidx === 2.U || outVuopidx === 3.U) && outVlmul === VLmul.m8)
-  val needFFlags = outIsFisrtGroup && outIsVfRedUnordered
+  val firstNeedFFlags = outIsFisrtGroup  && outIsVfRedUnordered
+  val lastNeedFFlags = outVecCtrl.lastUop && outIsVfRedUnordered
   private val needNoMask = outCtrl.fuOpType === VfaluType.vfmerge ||
     outCtrl.fuOpType === VfaluType.vfmv_s_f ||
     outIsResuction ||
@@ -368,8 +395,14 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
       (outEew === 3.U) -> f64VlMaskEn.asUInt
     )
   )
-  allFFlagsEn := Mux(outIsResuction, Cat(Fill(4*numVecModule - 1, needFFlags), needFFlags || outIsVfRedOrdered),
-    fflagsEn & vlMaskEn).asTypeOf(allFFlagsEn)
+  val fflagsRedMask = genMaskForRedFFlag(outVecCtrl.vsew)
+
+  if (backendParams.debugEn){
+    dontTouch(allFFlagsEn)
+    dontTouch(fflagsRedMask)
+  }
+  allFFlagsEn := Mux(outIsResuction, Cat(Fill(4*numVecModule - 1, firstNeedFFlags) & fflagsRedMask(4*numVecModule - 1, 1),
+    lastNeedFFlags || firstNeedFFlags || outIsVfRedOrdered), fflagsEn & vlMaskEn).asTypeOf(allFFlagsEn)
 
   val allFFlags = fflagsData.asTypeOf(Vec( 4*numVecModule,UInt(5.W)))
   val outFFlags = allFFlagsEn.zip(allFFlags).map{

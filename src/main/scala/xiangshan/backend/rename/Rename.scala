@@ -29,6 +29,9 @@ import xiangshan.backend.rename.freelist._
 import xiangshan.backend.rob.{RobEnqIO, RobPtr}
 import xiangshan.mem.mdp._
 import xiangshan.ExceptionNO._
+import xiangshan.backend.fu.FuType._
+import xiangshan.mem.{EewLog2, GenUSWholeEmul}
+import xiangshan.mem.GenRealFlowNum
 
 class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
 
@@ -55,11 +58,11 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val vecReadPorts = Vec(RenameWidth, Vec(numVecRatPorts, Input(UInt(PhyRegIdxWidth.W))))
     val v0ReadPorts = Vec(RenameWidth, Vec(1, Input(UInt(PhyRegIdxWidth.W))))
     val vlReadPorts = Vec(RenameWidth, Vec(1, Input(UInt(PhyRegIdxWidth.W))))
-    val intRenamePorts = Vec(RenameWidth, Output(new RatWritePort))
-    val fpRenamePorts = Vec(RenameWidth, Output(new RatWritePort))
-    val vecRenamePorts = Vec(RenameWidth, Output(new RatWritePort))
-    val v0RenamePorts = Vec(RenameWidth, Output(new RatWritePort))
-    val vlRenamePorts = Vec(RenameWidth, Output(new RatWritePort))
+    val intRenamePorts = Vec(RenameWidth, Output(new RatWritePort(log2Ceil(IntLogicRegs))))
+    val fpRenamePorts = Vec(RenameWidth, Output(new RatWritePort(log2Ceil(FpLogicRegs))))
+    val vecRenamePorts = Vec(RenameWidth, Output(new RatWritePort(log2Ceil(VecLogicRegs))))
+    val v0RenamePorts = Vec(RenameWidth, Output(new RatWritePort(log2Ceil(V0LogicRegs))))
+    val vlRenamePorts = Vec(RenameWidth, Output(new RatWritePort(log2Ceil(VlLogicRegs))))
     // from rename table
     val int_old_pdest = Vec(RabCommitWidth, Input(UInt(PhyRegIdxWidth.W)))
     val fp_old_pdest = Vec(RabCommitWidth, Input(UInt(PhyRegIdxWidth.W)))
@@ -186,6 +189,46 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uop.numLsElem       :=  DontCare
     uop.hasException  :=  DontCare
   })
+  private val fuType       = uops.map(_.fuType)
+  private val fuOpType     = uops.map(_.fuOpType)
+  private val vtype        = uops.map(_.vpu.vtype)
+  private val sew          = vtype.map(_.vsew)
+  private val lmul         = vtype.map(_.vlmul)
+  private val eew          = uops.map(_.vpu.veew)
+  private val mop          = fuOpType.map(fuOpTypeItem => LSUOpType.getVecLSMop(fuOpTypeItem))
+  private val isVlsType    = fuType.map(fuTypeItem => isVls(fuTypeItem))
+  private val isSegment    = fuType.map(fuTypeItem => isVsegls(fuTypeItem))
+  private val isUnitStride = fuOpType.map(fuOpTypeItem => LSUOpType.isAllUS(fuOpTypeItem))
+  private val nf           = fuOpType.zip(uops.map(_.vpu.nf)).map { case (fuOpTypeItem, nfItem) => Mux(LSUOpType.isWhole(fuOpTypeItem), 0.U, nfItem) }
+  private val mulBits      = 3 // dirty code
+  private val emul         = fuOpType.zipWithIndex.map { case (fuOpTypeItem, index) =>
+    Mux(
+      LSUOpType.isWhole(fuOpTypeItem),
+      GenUSWholeEmul(nf(index)),
+      Mux(
+        LSUOpType.isMasked(fuOpTypeItem),
+        0.U(mulBits.W),
+        EewLog2(eew(index)) - sew(index) + lmul(index)
+      )
+    )
+  }
+  private val isVecUnitType = isVlsType.zip(isUnitStride).map { case (isVlsTypeItme, isUnitStrideItem) =>
+    isVlsTypeItme && isUnitStrideItem
+  }
+  private val instType = isSegment.zip(mop).map { case (isSegementItem, mopItem) => Cat(isSegementItem, mopItem) }
+  // There is no way to calculate the 'flow' for 'unit-stride' exactly:
+  //  Whether 'unit-stride' needs to be split can only be known after obtaining the address.
+  // For scalar instructions, this is not handled here, and different assignments are done later according to the situation.
+  private val numLsElem = instType.zipWithIndex.map { case (instTypeItem, index) =>
+    Mux(
+      isVecUnitType(index),
+      VecMemUnitStrideMaxFlowNum.U,
+      GenRealFlowNum(instTypeItem, emul(index), lmul(index), eew(index), sew(index))
+    )
+  }
+  uops.zipWithIndex.map { case(u, i) =>
+    u.numLsElem := Mux(io.in(i).valid & isVlsType(i), numLsElem(i), 0.U)
+  }
 
   val needVecDest    = Wire(Vec(RenameWidth, Bool()))
   val needFpDest     = Wire(Vec(RenameWidth, Bool()))
@@ -256,11 +299,12 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     intFreeList.io.walkReq(i) := walkNeedIntDest(i) && !walkIsMove(i)
 
     // no valid instruction from decode stage || all resources (dispatch1 + both free lists) ready
-    io.in(i).ready := !hasValid || canOut
+    io.in(i).ready := canOut
 
     uops(i).robIdx := robIdxHead + PopCount(io.in.zip(needRobFlags).take(i).map{ case(in, needRobFlag) => in.valid && in.bits.lastUop && needRobFlag})
     uops(i).instrSize := instrSizesVec(i)
-    when(isMove(i)) {
+    val hasExceptionExceptFlushPipe = Cat(selectFrontend(uops(i).exceptionVec) :+ uops(i).exceptionVec(illegalInstr) :+ uops(i).exceptionVec(virtualInstr)).orR || uops(i).trigger.getFrontendCanFire
+    when(isMove(i) || hasExceptionExceptFlushPipe) {
       uops(i).numUops := 0.U
       uops(i).numWB := 0.U
     }
@@ -476,23 +520,23 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // I. RAT Update
     // When redirect happens (mis-prediction), don't update the rename table
     io.intRenamePorts(i).wen  := intSpecWen(i)
-    io.intRenamePorts(i).addr := uops(i).ldest
+    io.intRenamePorts(i).addr := uops(i).ldest(log2Ceil(IntLogicRegs) - 1, 0)
     io.intRenamePorts(i).data := io.out(i).bits.pdest
 
     io.fpRenamePorts(i).wen  := fpSpecWen(i)
-    io.fpRenamePorts(i).addr := uops(i).ldest
+    io.fpRenamePorts(i).addr := uops(i).ldest(log2Ceil(FpLogicRegs) - 1, 0)
     io.fpRenamePorts(i).data := fpFreeList.io.allocatePhyReg(i)
 
     io.vecRenamePorts(i).wen := vecSpecWen(i)
-    io.vecRenamePorts(i).addr := uops(i).ldest
+    io.vecRenamePorts(i).addr := uops(i).ldest(log2Ceil(VecLogicRegs) - 1, 0)
     io.vecRenamePorts(i).data := vecFreeList.io.allocatePhyReg(i)
 
     io.v0RenamePorts(i).wen := v0SpecWen(i)
-    io.v0RenamePorts(i).addr := uops(i).ldest
+    io.v0RenamePorts(i).addr := uops(i).ldest(log2Ceil(V0LogicRegs) - 1, 0)
     io.v0RenamePorts(i).data := v0FreeList.io.allocatePhyReg(i)
 
     io.vlRenamePorts(i).wen := vlSpecWen(i)
-    io.vlRenamePorts(i).addr := uops(i).ldest
+    io.vlRenamePorts(i).addr := uops(i).ldest(log2Ceil(VlLogicRegs) - 1, 0)
     io.vlRenamePorts(i).data := vlFreeList.io.allocatePhyReg(i)
 
     // II. Free List Update

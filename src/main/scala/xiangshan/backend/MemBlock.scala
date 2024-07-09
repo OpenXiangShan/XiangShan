@@ -42,6 +42,7 @@ import xiangshan.mem.mdp._
 import xiangshan.frontend.HasInstrMMIOConst
 import xiangshan.mem.prefetch.{BasePrefecher, L1Prefetcher, SMSParams, SMSPrefetcher}
 import xiangshan.backend.datapath.NewPipelineConnect
+import system.SoCParamsKey
 
 trait HasMemBlockParameters extends HasXSParameter {
   // number of memory units
@@ -226,9 +227,9 @@ class MemBlock()(implicit p: Parameters) extends LazyModule
   val l2_pf_sender_opt = coreParams.prefetcher.map(_ =>
     BundleBridgeSource(() => new PrefetchRecv)
   )
-  val l3_pf_sender_opt = coreParams.prefetcher.map(_ =>
+  val l3_pf_sender_opt = if (p(SoCParamsKey).L3CacheParamsOpt.nonEmpty) coreParams.prefetcher.map(_ =>
     BundleBridgeSource(() => new huancun.PrefetchRecv)
-  )
+  ) else None
   val frontendBridge = LazyModule(new FrontendBridge)
   // interrupt sinks
   val clint_int_sink = IntSinkNode(IntSinkPortSimple(1, 2))
@@ -518,17 +519,17 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       table.log(l2_trace, !l1_pf_to_l2.valid && sms_pf_to_l2.valid, "L2PrefetchTrace", clock, reset)
 
       val l1_pf_to_l3 = ValidIODelay(l1_pf.io.l3_req, 4)
-      outer.l3_pf_sender_opt.get.out.head._1.addr_valid := l1_pf_to_l3.valid
-      outer.l3_pf_sender_opt.get.out.head._1.addr := l1_pf_to_l3.bits
-      outer.l3_pf_sender_opt.get.out.head._1.l2_pf_en := RegNextN(io.ooo_to_mem.csrCtrl.l2_pf_enable, 4, Some(true.B))
+      outer.l3_pf_sender_opt.foreach(_.out.head._1.addr_valid := l1_pf_to_l3.valid)
+      outer.l3_pf_sender_opt.foreach(_.out.head._1.addr := l1_pf_to_l3.bits)
+      outer.l3_pf_sender_opt.foreach(_.out.head._1.l2_pf_en := RegNextN(io.ooo_to_mem.csrCtrl.l2_pf_enable, 4, Some(true.B)))
 
       val l3_trace = Wire(new LoadPfDbBundle)
-      l3_trace.paddr := outer.l3_pf_sender_opt.get.out.head._1.addr
+      l3_trace.paddr := outer.l3_pf_sender_opt.map(_.out.head._1.addr).getOrElse(0.U)
       val l3_table = ChiselDB.createTable(s"L3PrefetchTrace$hartId", new LoadPfDbBundle, basicDB = false)
       l3_table.log(l3_trace, l1_pf_to_l3.valid, "StreamPrefetchTrace", clock, reset)
 
       XSPerfAccumulate("prefetch_fire_l2", outer.l2_pf_sender_opt.get.out.head._1.addr_valid)
-      XSPerfAccumulate("prefetch_fire_l3", outer.l3_pf_sender_opt.get.out.head._1.addr_valid)
+      XSPerfAccumulate("prefetch_fire_l3", outer.l3_pf_sender_opt.map(_.out.head._1.addr_valid).getOrElse(false.B))
       XSPerfAccumulate("l1pf_fire_l2", l1_pf_to_l2.valid)
       XSPerfAccumulate("sms_fire_l2", !l1_pf_to_l2.valid && sms_pf_to_l2.valid)
       XSPerfAccumulate("sms_block_by_l1pf", l1_pf_to_l2.valid && sms_pf_to_l2.valid)
@@ -690,6 +691,16 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   for (j <- 0 until TriggerNum)
     PrintTriggerInfo(tEnable(j), tdata(j))
 
+  // The segment instruction is executed atomically.
+  // After the segment instruction directive starts executing, no other instructions should be executed.
+  val vSegmentFlag = RegInit(false.B)
+
+  when(vSegmentUnit.io.in.fire){
+    vSegmentFlag := true.B
+  }.elsewhen(vSegmentUnit.io.uopwriteback.valid){
+    vSegmentFlag := false.B
+  }
+
   // LoadUnit
   val correctMissTrain = Constantin.createRecord(s"CorrectMissTrain$hartId", initValue = false)
 
@@ -728,16 +739,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       vSegmentUnit.io.rdcache.req.ready := dcache.io.lsu.load(i).req.ready
     }
 
-
-    // The segment instruction is executed atomically.
-    // After the segment instruction directive starts executing, no other instructions should be executed.
-    val vSegmentFlag = RegInit(false.B)
-
-    when(vSegmentUnit.io.in.fire){
-      vSegmentFlag := true.B
-    }.elsewhen(vSegmentUnit.io.uopwriteback.valid){
-      vSegmentFlag := false.B
-    }
     // Dcache requests must also be preempted by the segment.
     when(vSegmentFlag){
       loadUnits(i).io.dcache.req.ready             := false.B // Dcache is preempted.
@@ -1337,10 +1338,21 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   dcache.io.force_write := lsq.io.force_write
 
   // Initialize when unenabled difftest.
-  sbuffer.io.vecDifftestInfo    := DontCare
-  lsq.io.sbufferVecDifftestInfo := DontCare
+  sbuffer.io.vecDifftestInfo      := DontCare
+  lsq.io.sbufferVecDifftestInfo   := DontCare
+  vSegmentUnit.io.vecDifftestInfo := DontCare
   if (env.EnableDifftest) {
-    lsq.io.sbufferVecDifftestInfo <> sbuffer.io.vecDifftestInfo
+    sbuffer.io.vecDifftestInfo .zipWithIndex.map{ case (sbufferPort, index) =>
+      if( index == 0) {
+        sbufferPort.valid := Mux(vSegmentFlag, vSegmentUnit.io.vecDifftestInfo.valid, lsq.io.sbufferVecDifftestInfo(0).valid)
+        sbufferPort.bits  := Mux(vSegmentFlag, vSegmentUnit.io.vecDifftestInfo.bits, lsq.io.sbufferVecDifftestInfo(0).bits)
+
+        vSegmentUnit.io.vecDifftestInfo.ready  := sbufferPort.ready
+        lsq.io.sbufferVecDifftestInfo(0).ready := sbufferPort.ready
+      }else{
+         sbufferPort <> lsq.io.sbufferVecDifftestInfo(index)
+      }
+    }
   }
 
   // lsq.io.vecStoreRetire <> vsFlowQueue.io.sqRelease

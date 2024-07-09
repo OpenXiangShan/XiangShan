@@ -28,7 +28,7 @@ import xiangshan._
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.Bundles.{DecodedInst, DynInst, StaticInst}
 import xiangshan.backend.decode.isa.bitfield.{InstVType, XSInstBitFields}
-import xiangshan.backend.fu.vector.Bundles.VType
+import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 
 /**
  * Abstract trait giving defaults and other relevant values to different Decode constants/
@@ -193,7 +193,7 @@ object XDecode extends DecodeConstants {
 
     AUIPC   -> XSDecode(SrcType.pc , SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.auipc, SelImm.IMM_U , xWen = T),
     JAL     -> XSDecode(SrcType.pc , SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.jal  , SelImm.IMM_UJ, xWen = T),
-    JALR    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.jalr , SelImm.IMM_I , uopSplitType = UopSplitType.SCA_SIM, xWen = T),
+    JALR    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.jalr , SelImm.IMM_I , xWen = T),
     BEQ     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.brh, BRUOpType.beq   , SelImm.IMM_SB          ),
     BNE     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.brh, BRUOpType.bne   , SelImm.IMM_SB          ),
     BGE     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.brh, BRUOpType.bge   , SelImm.IMM_SB          ),
@@ -681,6 +681,7 @@ class DecodeUnitIO(implicit p: Parameters) extends XSBundle {
   val enq = new Bundle {
     val ctrlFlow = Input(new StaticInst)
     val vtype = Input(new VType)
+    val vstart = Input(Vl())
   }
 //  val vconfig = Input(UInt(XLEN.W))
   val deq = new DecodeUnitDeqIO
@@ -761,6 +762,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   vecException.io.inst := io.enq.ctrlFlow.instr
   vecException.io.decodedInst := decodedInst
   vecException.io.vtype := decodedInst.vpu.vtype
+  vecException.io.vstart := decodedInst.vpu.vstart
   decodedInst.exceptionVec(illegalInstr) := decodedInst.selImm === SelImm.INVALID_INSTR || vecException.io.illegalInst
 
   when (!io.csrCtrl.svinval_enable) {
@@ -898,6 +900,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     decodedInst.vpu.isOpMask := isOpMask
     decodedInst.vpu.isDependOldvd := isVppu || isVecOPF || isVStore || (isDstMask && !isOpMask) || isNarrow || isVlx || isVma
     decodedInst.vpu.isWritePartVd := isWritePartVd
+    decodedInst.vpu.vstart := io.enq.vstart
   }
 
   decodedInst.vlsInstr := isVls
@@ -921,15 +924,33 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   // for csrr vl instruction, convert to vsetvl
   val Vl = 0xC20.U
-  val isCsrrVl = FuType.FuTypeOrR(decodedInst.fuType, FuType.csr) && decodedInst.fuOpType === CSROpType.set && inst.CSRIDX === Vl
+  val Vlenb = 0xC22.U
+  val isCsrInst = FuType.FuTypeOrR(decodedInst.fuType, FuType.csr)
+  //  rs1 is x0 or uimm == 0
+  val isCsrRead = (decodedInst.fuOpType === CSROpType.set || decodedInst.fuOpType === CSROpType.clr) && inst.RS1 === 0.U
+  val isCsrrVl = isCsrInst && isCsrRead && inst.CSRIDX === Vl
+  val isCsrrVlenb = isCsrInst && isCsrRead && inst.CSRIDX === Vlenb
   when (isCsrrVl) {
+    // convert to vsetvl instruction
     decodedInst.srcType(0) := SrcType.no
     decodedInst.srcType(1) := SrcType.no
     decodedInst.srcType(2) := SrcType.no
     decodedInst.srcType(3) := SrcType.no
     decodedInst.srcType(4) := SrcType.vp
     decodedInst.lsrc(4) := Vl_IDX.U
+    decodedInst.waitForward := false.B
     decodedInst.blockBackward := false.B
+  }.elsewhen(isCsrrVlenb){
+    // convert to addi instruction
+    decodedInst.srcType(0) := SrcType.reg
+    decodedInst.srcType(1) := SrcType.imm
+    decodedInst.srcType(2) := SrcType.no
+    decodedInst.srcType(3) := SrcType.no
+    decodedInst.srcType(4) := SrcType.no
+    decodedInst.selImm := SelImm.IMM_I
+    decodedInst.waitForward := false.B
+    decodedInst.blockBackward := false.B
+    decodedInst.canRobCompress := true.B
   }
 
   io.deq.decodedInst := decodedInst
@@ -937,7 +958,8 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   // change vlsu to vseglsu when NF =/= 0.U
   io.deq.decodedInst.fuType := Mux1H(Seq(
     ( isCsrrVl) -> FuType.vsetfwf.U,
-    (!FuType.FuTypeOrR(decodedInst.fuType, FuType.vldu, FuType.vstu) && !isCsrrVl      ) -> decodedInst.fuType,
+    ( isCsrrVlenb) -> FuType.alu.U,
+    (!FuType.FuTypeOrR(decodedInst.fuType, FuType.vldu, FuType.vstu) && !isCsrrVl && !isCsrrVlenb) -> decodedInst.fuType,
     ( FuType.FuTypeOrR(decodedInst.fuType, FuType.vldu, FuType.vstu) && inst.NF === 0.U || (inst.NF =/= 0.U && (inst.MOP === "b00".U && inst.SUMOP === "b01000".U))) -> decodedInst.fuType,
     // MOP === b00 && SUMOP === b01000: unit-stride whole register store
     // MOP =/= b00                    : strided and indexed store
@@ -946,6 +968,8 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     // MOP =/= b00                    : strided and indexed load
     ( FuType.FuTypeOrR(decodedInst.fuType, FuType.vldu)              && inst.NF =/= 0.U && ((inst.MOP === "b00".U && inst.LUMOP =/= "b01000".U) || inst.MOP =/= "b00".U)) -> FuType.vsegldu.U,
   ))
+  io.deq.decodedInst.fuOpType := Mux(isCsrrVlenb, ALUOpType.add, decodedInst.fuOpType)
+  io.deq.decodedInst.imm := Mux(isCsrrVlenb, (VLEN / 8).U, decodedInst.imm)
   //-------------------------------------------------------------
   // Debug Info
 //  XSDebug("in:  instr=%x pc=%x excepVec=%b crossPageIPFFix=%d\n",

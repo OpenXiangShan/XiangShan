@@ -128,6 +128,10 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case SoCParamsKey => up(SoCParamsKey).copy(XSTopPrefix = Some(value))
           }), tail)
+        case "--imsic-use-tl" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case SoCParamsKey => up(SoCParamsKey).copy(IMSICUseTL = true)
+          }), tail)
         case "--firtool-opt" :: option :: tail =>
           firtoolOpts ++= option.split(" ").filter(_.nonEmpty)
           nextOption(config, tail)

@@ -203,11 +203,13 @@ class ITTageTable
   // def getUnhashedIdx(pc: UInt) = pc >> (instOffsetBits+log2Ceil(TageBanks))
   def getUnhashedIdx(pc: UInt): UInt = pc >> instOffsetBits
 
+  val s0_valid = io.req.valid
   val s0_pc = io.req.bits.pc
   val s0_unhashed_idx = getUnhashedIdx(io.req.bits.pc)
 
   val (s0_idx, s0_tag) = compute_tag_and_hash(s0_unhashed_idx, io.req.bits.folded_hist)
   val (s1_idx, s1_tag) = (RegEnable(s0_idx, io.req.fire), RegEnable(s0_tag, io.req.fire))
+  val s1_valid = RegNext(s0_valid)
   val s0_bank_req_1h = get_bank_mask(s0_idx)
   val s1_bank_req_1h = RegEnable(s0_bank_req_1h, io.req.fire)
 
@@ -230,7 +232,7 @@ class ITTageTable
   val s1_req_rhit = resp_selected.valid && resp_selected.tag === s1_tag
   val resp_invalid_by_write = Wire(Bool())
 
-  io.resp.valid := (if (tagLen != 0) s1_req_rhit && !resp_invalid_by_write else true.B) // && s1_mask(b)
+  io.resp.valid := (if (tagLen != 0) s1_req_rhit && !resp_invalid_by_write else true.B) && s1_valid
   io.resp.bits.ctr := resp_selected.ctr
   io.resp.bits.u := us.io.rdata(0)
   io.resp.bits.target := resp_selected.target
@@ -357,9 +359,6 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     case ((nRows, histLen, tagLen), i) =>
       // val t = if(EnableBPD) Module(new TageTable(nRows, histLen, tagLen, UBitPeriod)) else Module(new FakeTageTable)
       val t = Module(new ITTageTable(nRows, histLen, tagLen, UBitPeriod, i))
-      t.io.req.valid := io.s0_fire(3)
-      t.io.req.bits.pc := s0_pc_dup(3)
-      t.io.req.bits.folded_hist := io.in.bits.folded_hist(3)
       t
   }
   override def getFoldedHistoryInfo = Some(tables.map(_.getFoldedHistoryInfo).reduce(_++_))
@@ -368,10 +367,14 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val useAltOnNa = RegInit((1 << (UAONA_bits-1)).U(UAONA_bits.W))
   val tickCtr = RegInit(0.U(TickWidth.W))
 
+  // uftb miss or hasIndirect
+  val s1_uftbHit = io.in.bits.resp_in(0).s1_uftbHit
+  val s1_uftbHasIndirect = io.in.bits.resp_in(0).s1_uftbHasIndirect
+  val s1_isIndirect = (!s1_uftbHit && !io.in.bits.resp_in(0).s1_ftbCloseReq) || s1_uftbHasIndirect
+
   // Keep the table responses to process in s2
 
-  val s1_resps = VecInit(tables.map(t => t.io.resp))
-  val s2_resps = RegEnable(s1_resps, io.s1_fire(3))
+  val s2_resps = VecInit(tables.map(t => t.io.resp))
 
   val debug_pc_s1 = RegEnable(s0_pc_dup(3), io.s0_fire(3))
   val debug_pc_s2 = RegEnable(debug_pc_s1, io.s1_fire(3))
@@ -432,6 +435,16 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
   // val updateTageMisPreds = VecInit((0 until numBr).map(i => updateMetas(i).taken =/= u.takens(i)))
   val updateMisPred = update.mispred_mask(numBr) // the last one indicates jmp results
+
+
+  // Predict
+  tables.map { t => {
+      t.io.req.valid := io.s1_fire(3) && s1_isIndirect
+      t.io.req.bits.pc := s1_pc_dup(3)
+      t.io.req.bits.folded_hist := io.in.bits.s1_folded_hist(3)
+    }
+  }
+
   // access tag tables and output meta info
   class ITTageTableInfo(implicit p: Parameters) extends ITTageResp {
     val tableIdx = UInt(log2Ceil(ITTageNTables).W)
@@ -555,10 +568,6 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     updateResetU := true.B
   }
 
-  XSPerfAccumulate(s"ittage_reset_u", updateResetU)
-
-
-
   for (i <- 0 until ITTageNTables) {
     tables(i).io.update.valid := RegNext(updateMask(i), init = false.B)
     tables(i).io.update.reset_u := RegNext(updateResetU, init = false.B)
@@ -577,8 +586,12 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
   // all should be ready for req
   io.s1_ready := tables.map(_.io.req.ready).reduce(_&&_)
-  XSPerfAccumulate(f"ittage_write_blocks_read", !io.s1_ready)
+
   // Debug and perf info
+  XSPerfAccumulate("ittage_reset_u", updateResetU)
+  XSPerfAccumulate("ittage_write_blocks_read", !io.s1_ready)
+  XSPerfAccumulate("ittage_used", io.s1_fire(0) && s1_isIndirect)
+  XSPerfAccumulate("ittage_closed_due_to_uftb_info", io.s1_fire(0) && !s1_isIndirect)
 
   def pred_perf(name: String, cond: Bool)   = XSPerfAccumulate(s"${name}_at_pred", cond && io.s2_fire(3))
   def commit_perf(name: String, cond: Bool) = XSPerfAccumulate(s"${name}_at_commit", cond && updateValid)
@@ -631,23 +644,15 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   XSPerfAccumulate("updated", updateValid)
 
   if (debug) {
-    // for (b <- 0 until ITTageBanks) {
-    //   val m = updateMetas(b)
-    //   // val bri = u.metas(b)
-    //   XSDebug(updateValids(b), "update(%d): pc=%x, cycle=%d, hist=%x, taken:%b, misPred:%d, bimctr:%d, pvdr(%d):%d, altDiff:%d, pvdrU:%d, pvdrCtr:%d, alloc(%d):%d\n",
-    //     b.U, update.pc, 0.U, updateHist.predHist, update.full_pred.taken_mask(b), update.mispred_mask(b),
-    //     0.U, m.provider.valid, m.provider.bits, m.altDiffers, m.providerU, m.providerCtr, m.allocate.valid, m.allocate.bits
-    //   )
-    // }
-    val s2_resps = RegEnable(s1_resps, io.s1_fire(3))
+    val s2_resps_regs = RegEnable(s2_resps, io.s2_fire(3))
     XSDebug("req: v=%d, pc=0x%x\n", io.s0_fire(3), s0_pc_dup(3))
     XSDebug("s1_fire:%d, resp: pc=%x\n", io.s1_fire(3), debug_pc_s1)
     XSDebug("s2_fireOnLastCycle: resp: pc=%x, target=%x, hit=%b\n",
       debug_pc_s2, io.out.s2.getTarget(3), s2_provided)
     for (i <- 0 until ITTageNTables) {
       XSDebug("TageTable(%d): valids:%b, resp_ctrs:%b, resp_us:%b, target:%x\n",
-        i.U, VecInit(s2_resps(i).valid).asUInt, s2_resps(i).bits.ctr,
-        s2_resps(i).bits.u, s2_resps(i).bits.target)
+        i.U, VecInit(s2_resps_regs(i).valid).asUInt, s2_resps_regs(i).bits.ctr,
+        s2_resps_regs(i).bits.u, s2_resps_regs(i).bits.target)
     }
   }
   XSDebug(updateValid, p"pc: ${Hexadecimal(update.pc)}, target: ${Hexadecimal(update.full_target)}\n")
@@ -656,6 +661,3 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
   generatePerfEvent()
 }
-
-
-// class Tage_SC(implicit p: Parameters) extends Tage with HasSC {}

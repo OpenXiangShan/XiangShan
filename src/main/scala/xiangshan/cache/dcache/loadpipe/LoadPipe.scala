@@ -463,7 +463,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.lsu.s1_disable_fast_wakeup := io.disable_ld_fast_wakeup
   io.lsu.s2_bank_conflict := io.bank_conflict_slow
   io.lsu.s2_wpu_pred_fail := s2_wpu_pred_fail_and_real_hit
-  io.lsu.s2_mq_nack       := (resp.bits.miss && (!io.miss_req.fire || s2_nack || io.mq_enq_cancel))
+  io.lsu.s2_mq_nack       := (resp.bits.miss && (!io.miss_req.fire || s2_nack_no_mshr || io.mq_enq_cancel))
   assert(RegNext(s1_ready && s2_ready), "load pipeline should never be blocked")
 
   // --------------------------------------------------------------------------------

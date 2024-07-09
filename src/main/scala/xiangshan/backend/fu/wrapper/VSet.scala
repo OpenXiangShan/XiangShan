@@ -6,7 +6,7 @@ import utility.ZeroExt
 import xiangshan.{VSETOpType, CSROpType}
 import xiangshan.backend.decode.Imm_VSETIVLI
 import xiangshan.backend.decode.isa.bitfield.InstVType
-import xiangshan.backend.fu.vector.Bundles.VType
+import xiangshan.backend.fu.vector.Bundles.VsetVType
 import xiangshan.backend.fu.{FuConfig, FuncUnit, PipedFuncUnit, VsetModule, VtypeStruct}
 import xiangshan.backend.fu.vector.Bundles.VConfig
 
@@ -25,8 +25,8 @@ class VSetBase(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   protected val avl = Mux(VSETOpType.isVsetivli(in.ctrl.fuOpType), avlImm, in.data.src(0))
 
   protected val instVType: InstVType = Imm_VSETIVLI().getVType(in.data.src(1))
-  protected val vtypeImm: VType = VType.fromInstVType(instVType)
-  protected val vtype: VType = Mux(VSETOpType.isVsetvl(in.ctrl.fuOpType), VType.fromVtypeStruct(in.data.src(1).asTypeOf(new VtypeStruct())), vtypeImm)
+  protected val vtypeImm: VsetVType = VsetVType.fromInstVType(instVType)
+  protected val vtype: VsetVType = Mux(VSETOpType.isVsetvl(in.ctrl.fuOpType), VsetVType.fromVtypeStruct(in.data.src(1).asTypeOf(new VtypeStruct())), vtypeImm)
 
   vsetModule.io.in.func := in.ctrl.fuOpType
   connect0LatencyCtrlSingal
@@ -73,11 +73,12 @@ class VSetRiWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
   vsetModule.io.in.vtype := vtype
   val vl = vsetModule.io.out.vconfig.vl
   val vlmax = vsetModule.io.out.vlmax
+  val isVsetvl = VSETOpType.isVsetvl(in.ctrl.fuOpType)
 
   out.res.data := vsetModule.io.out.vconfig.vl
 
   if (cfg.writeVlRf) io.vtype.get.bits := vsetModule.io.out.vconfig.vtype
-  if (cfg.writeVlRf) io.vtype.get.valid := io.out.valid
+  if (cfg.writeVlRf) io.vtype.get.valid := io.out.valid && isVsetvl
   if (cfg.writeVlRf) io.vlIsZero.get := vl === 0.U
   if (cfg.writeVlRf) io.vlIsVlmax.get := vl === vlmax
 
@@ -100,6 +101,7 @@ class VSetRvfWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
   val oldVL = in.data.src(4).asTypeOf(VConfig()).vl
   val res = WireInit(0.U.asTypeOf(VConfig()))
   val vlmax = vsetModule.io.out.vlmax
+  val isVsetvl = VSETOpType.isVsetvl(in.ctrl.fuOpType)
   val isReadVl = in.ctrl.fuOpType === CSROpType.set
   res.vl := Mux(vsetModule.io.out.vconfig.vtype.illegal, 0.U,
               Mux(VSETOpType.isKeepVl(in.ctrl.fuOpType), oldVL, vsetModule.io.out.vconfig.vl))
@@ -110,7 +112,7 @@ class VSetRvfWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
                       Mux(VSETOpType.isKeepVl(in.ctrl.fuOpType), oldVL, vsetModule.io.out.vconfig.vl)))
 
   if (cfg.writeVlRf) io.vtype.get.bits := vsetModule.io.out.vconfig.vtype
-  if (cfg.writeVlRf) io.vtype.get.valid := !isReadVl && io.out.valid
+  if (cfg.writeVlRf) io.vtype.get.valid := isVsetvl && io.out.valid
   if (cfg.writeVlRf) io.vlIsZero.get := !isReadVl && res.vl === 0.U
   if (cfg.writeVlRf) io.vlIsVlmax.get := !isReadVl && res.vl === vlmax
 

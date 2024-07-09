@@ -141,9 +141,17 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   def isCrossLineReq(start: UInt, end: UInt): Bool = start(blockOffBits) ^ end(blockOffBits)
 
-  def isLastInCacheline(addr: UInt): Bool = addr(blockOffBits - 1, 1) === 0.U
-
   def numOfStage = 3
+  // equal lower_result overflow bit
+  def PcCutPoint = (VAddrBits/4) - 1
+  def CatPC(low: UInt, high: UInt, high1: UInt): UInt = {
+    Mux(
+      low(PcCutPoint),
+      Cat(high1, low(PcCutPoint-1, 0)),
+      Cat(high, low(PcCutPoint-1, 0))
+    )
+  }
+  def CatPC(lowVec: Vec[UInt], high: UInt, high1: UInt): Vec[UInt] = VecInit(lowVec.map(CatPC(_, high, high1)))
   require(numOfStage > 1, "BPU numOfStage must be greater than 1")
   val topdown_stages = RegInit(VecInit(Seq.fill(numOfStage)(0.U.asTypeOf(new FrontendTopDownBundle))))
   // bubble events in IFU, only happen in stage 1
@@ -302,18 +310,23 @@ class NewIFU(implicit p: Parameters) extends XSModule
   .elsewhen(f0_fire && !f0_flush) {f1_valid  := true.B}
   .elsewhen(f1_fire)              {f1_valid  := false.B}
 
-  val f1_pc_adder_cut_point = (VAddrBits/2) - 1 // equal lower_result overflow bit
-  val f1_pc_high            = f1_ftq_req.startAddr(VAddrBits-1,f1_pc_adder_cut_point)
+  val f1_pc_high            = f1_ftq_req.startAddr(VAddrBits-1, PcCutPoint)
   val f1_pc_high_plus1      = f1_pc_high + 1.U
 
-  val f1_pc_lower_result    = VecInit((0 until PredictWidth).map(i => Cat(0.U(1.W), f1_ftq_req.startAddr(f1_pc_adder_cut_point-1, 0)) + (i * 2).U)) // cat with overflow bit
-  val f1_pc                 = VecInit(f1_pc_lower_result.map{ i =>  
-    Mux(i(f1_pc_adder_cut_point), Cat(f1_pc_high_plus1,i(f1_pc_adder_cut_point-1,0)), Cat(f1_pc_high,i(f1_pc_adder_cut_point-1,0)))})
+  /**
+   * In order to reduce power consumption, avoid calculating the full PC value in the first level.
+   * code of original logic, this code has been deprecated
+   * val f1_pc                 = VecInit(f1_pc_lower_result.map{ i =>
+   *  Mux(i(f1_pc_adder_cut_point), Cat(f1_pc_high_plus1,i(f1_pc_adder_cut_point-1,0)), Cat(f1_pc_high,i(f1_pc_adder_cut_point-1,0)))})
+   *
+   */
+  val f1_pc_lower_result    = VecInit((0 until PredictWidth).map(i => Cat(0.U(1.W), f1_ftq_req.startAddr(PcCutPoint-1, 0)) + (i * 2).U)) // cat with overflow bit
 
-  val f1_half_snpc_lower_result = VecInit((0 until PredictWidth).map(i => Cat(0.U(1.W), f1_ftq_req.startAddr(f1_pc_adder_cut_point-1, 0)) + ((i+2) * 2).U)) // cat with overflow bit
-  val f1_half_snpc          = VecInit(f1_half_snpc_lower_result.map{i => 
-    Mux(i(f1_pc_adder_cut_point), Cat(f1_pc_high_plus1,i(f1_pc_adder_cut_point-1,0)), Cat(f1_pc_high,i(f1_pc_adder_cut_point-1,0)))})
-  
+  val f1_pc                 = CatPC(f1_pc_lower_result, f1_pc_high, f1_pc_high_plus1)
+
+  val f1_half_snpc_lower_result = VecInit((0 until PredictWidth).map(i => Cat(0.U(1.W), f1_ftq_req.startAddr(PcCutPoint-1, 0)) + ((i+2) * 2).U)) // cat with overflow bit
+  val f1_half_snpc            = CatPC(f1_half_snpc_lower_result, f1_pc_high, f1_pc_high_plus1)
+
   if (env.FPGAPlatform){
     val f1_pc_diff          = VecInit((0 until PredictWidth).map(i => f1_ftq_req.startAddr + (i * 2).U))
     val f1_half_snpc_diff   = VecInit((0 until PredictWidth).map(i => f1_ftq_req.startAddr + ((i+2) * 2).U))
@@ -322,8 +335,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
     XSError(f1_half_snpc.zip(f1_half_snpc_diff).map{ case (a,b) => a.asUInt =/= b.asUInt }.reduce(_||_),  "f1_half_snpc adder cut fail")
   }
 
-  val f1_cut_ptr            = if(HasCExtension)  VecInit((0 until PredictWidth + 1).map(i =>  Cat(0.U(2.W), f1_ftq_req.startAddr(blockOffBits-2, 1)) + i.U ))
-                                  else           VecInit((0 until PredictWidth).map(i =>     Cat(0.U(2.W), f1_ftq_req.startAddr(blockOffBits-2, 2)) + i.U ))
+  val f1_cut_ptr            = if(HasCExtension)  VecInit((0 until PredictWidth + 1).map(i =>  Cat(0.U(2.W), f1_ftq_req.startAddr(blockOffBits-1, 1)) + i.U ))
+                                  else           VecInit((0 until PredictWidth).map(i =>     Cat(0.U(2.W), f1_ftq_req.startAddr(blockOffBits-1, 2)) + i.U ))
 
   /**
     ******************************************************************************
@@ -371,19 +384,23 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f2_except_fromBackend = fromICache.map(_.bits.exceptionFromBackend).reduce(_||_)
   // paddr and gpaddr of [startAddr, nextLineAddr]
   val f2_paddrs       = VecInit((0 until PortNumber).map(i => fromICache(i).bits.paddr))
-  // for crossGuestPageFault
-  val f2_gpaddrs_tmp  = VecInit((0 until PortNumber).map(i => fromICache(i).bits.gpaddr))
-  val f2_gpaddrs      = VecInit((0 until PortNumber).map(i => if(i == 0) Mux(fromICache(i).bits.tlbExcp.guestPageFault, f2_gpaddrs_tmp(i), (f2_gpaddrs_tmp(i + 1) - (1 << (blockOffBits)).U)) else f2_gpaddrs_tmp(i)))
+  val f2_gpaddr       = fromICache(0).bits.gpaddr
   val f2_mmio         = fromICache(0).bits.tlbExcp.mmio &&
     !fromICache(0).bits.tlbExcp.accessFault &&
     !fromICache(0).bits.tlbExcp.pageFault   &&
     !fromICache(0).bits.tlbExcp.guestPageFault
 
-  val f2_pc               = RegEnable(f1_pc,  f1_fire)
-  val f2_half_snpc        = RegEnable(f1_half_snpc,  f1_fire)
-  val f2_cut_ptr          = RegEnable(f1_cut_ptr,  f1_fire)
+  /**
+    * reduce the number of registers, origin code
+    * f2_pc = RegEnable(f1_pc, f1_fire)
+    */
+  val f2_pc_lower_result        = RegEnable(f1_pc_lower_result, f1_fire)
+  val f2_pc_high                = RegEnable(f1_pc_high, f1_fire)
+  val f2_pc_high_plus1          = RegEnable(f1_pc_high_plus1, f1_fire)
+  val f2_pc                     = CatPC(f2_pc_lower_result, f2_pc_high, f2_pc_high_plus1)
 
-  val f2_resend_vaddr     = RegEnable(f1_ftq_req.startAddr + 2.U,  f1_fire)
+  val f2_cut_ptr                = RegEnable(f1_cut_ptr, f1_fire)
+  val f2_resend_vaddr           = RegEnable(f1_ftq_req.startAddr + 2.U, f1_fire)
 
   def isNextLine(pc: UInt, startAddr: UInt) = {
     startAddr(blockOffBits) ^ pc(blockOffBits)
@@ -406,7 +423,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     require(HasCExtension)
     // if(HasCExtension){
       val result   = Wire(Vec(PredictWidth + 1, UInt(16.W)))
-      val dataVec  = cacheline.asTypeOf(Vec(blockBytes/2, UInt(16.W))) //32 16-bit data vector
+      val dataVec  = cacheline.asTypeOf(Vec(blockBytes, UInt(16.W))) //32 16-bit data vector
       (0 until PredictWidth + 1).foreach( i =>
         result(i) := dataVec(cutPtr(i)) //the max ptr is 3*blockBytes/4-1
       )
@@ -422,7 +439,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   }
 
   val f2_cache_response_data = fromICache.map(_.bits.data)
-  val f2_data_2_cacheline = Cat(f2_cache_response_data(1), f2_cache_response_data(0))
+  val f2_data_2_cacheline = Cat(f2_cache_response_data(0), f2_cache_response_data(0))
 
   val f2_cut_data   = cut(f2_data_2_cacheline, f2_cut_ptr)
 
@@ -493,8 +510,32 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_af_vec         = RegEnable(f2_af_vec,      f2_fire)
   val f3_pf_vec         = RegEnable(f2_pf_vec ,     f2_fire)
   val f3_gpf_vec        = RegEnable(f2_gpf_vec,     f2_fire)
-  val f3_pc             = RegEnable(f2_pc,          f2_fire)
-  val f3_half_snpc      = RegEnable(f2_half_snpc,   f2_fire)
+
+  val f3_pc_lower_result        = RegEnable(f2_pc_lower_result, f2_fire)
+  val f3_pc_high                = RegEnable(f2_pc_high, f2_fire)
+  val f3_pc_high_plus1          = RegEnable(f2_pc_high_plus1, f2_fire)
+  val f3_pc             = CatPC(f3_pc_lower_result, f3_pc_high, f3_pc_high_plus1)
+
+  val f3_pc_last_lower_result_plus2 = RegEnable(f2_pc_lower_result(PredictWidth - 1) + 2.U, f2_fire)
+  val f3_pc_last_lower_result_plus4 = RegEnable(f2_pc_lower_result(PredictWidth - 1) + 4.U, f2_fire)
+  //val f3_half_snpc      = RegEnable(f2_half_snpc,   f2_fire)
+
+  /**
+    ***********************************************************************
+    * Half snpc(i) is larger than pc(i) by 4. Using pc to calculate half snpc may be a good choice.
+    ***********************************************************************
+    */
+  val f3_half_snpc      = Wire(Vec(PredictWidth,UInt(VAddrBits.W)))
+  for(i <- 0 until PredictWidth){
+    if(i == (PredictWidth - 2)){
+      f3_half_snpc(i)   := CatPC(f3_pc_last_lower_result_plus2, f3_pc_high, f3_pc_high_plus1)
+    } else if (i == (PredictWidth - 1)){
+      f3_half_snpc(i)   := CatPC(f3_pc_last_lower_result_plus4, f3_pc_high, f3_pc_high_plus1)
+    } else {
+      f3_half_snpc(i)   := f3_pc(i+2)
+    }
+  }
+
   val f3_instr_range    = RegEnable(f2_instr_range, f2_fire)
   val f3_foldpc         = RegEnable(f2_foldpc,      f2_fire)
   val f3_crossPageFault = RegEnable(f2_crossPageFault,           f2_fire)
@@ -503,7 +544,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_except         = VecInit((0 until 2).map{i => f3_except_pf(i) || f3_except_af(i) || f3_except_gpf(i)})
   val f3_has_except     = f3_valid && (f3_except_af.reduce(_||_) || f3_except_pf.reduce(_||_) || f3_except_gpf.reduce(_||_))
   val f3_paddrs         = RegEnable(f2_paddrs,  f2_fire)
-  val f3_gpaddrs        = RegEnable(f2_gpaddrs,  f2_fire)
+  val f3_gpaddr         = RegEnable(f2_gpaddr,  f2_fire)
   val f3_resend_vaddr   = RegEnable(f2_resend_vaddr,             f2_fire)
 
   // Expand 1 bit to prevent overflow when assert
@@ -752,9 +793,10 @@ class NewIFU(implicit p: Parameters) extends XSModule
   frontendTrigger.io.frontendTrigger  := io.frontendTrigger
 
   val f3_triggered = frontendTrigger.io.triggered
+  val f3_toIbuffer_valid = f3_valid && (!f3_req_is_mmio || f3_mmio_can_go) && !f3_flush
 
   /*** send to Ibuffer  ***/
-  io.toIbuffer.valid            := f3_valid && (!f3_req_is_mmio || f3_mmio_can_go) && !f3_flush
+  io.toIbuffer.valid            := f3_toIbuffer_valid
   io.toIbuffer.bits.instrs      := f3_expd_instr
   io.toIbuffer.bits.valid       := f3_instr_valid.asUInt
   io.toIbuffer.bits.enqEnable   := checkerOutStage1.fixedRange.asUInt & f3_instr_valid.asUInt
@@ -763,9 +805,11 @@ class NewIFU(implicit p: Parameters) extends XSModule
   io.toIbuffer.bits.pc          := f3_pc
   io.toIbuffer.bits.ftqOffset.zipWithIndex.map{case(a, i) => a.bits := i.U; a.valid := checkerOutStage1.fixedTaken(i) && !f3_req_is_mmio}
   io.toIbuffer.bits.foldpc      := f3_foldpc
-  io.toIbuffer.bits.ipf         := VecInit(f3_pf_vec.zip(f3_crossPageFault).map{case (pf, crossPF) => pf || crossPF})
-  io.toIbuffer.bits.igpf        := VecInit(f3_gpf_vec.zip(f3_crossGuestPageFault).map{case (gpf, crossGPF) => gpf || crossGPF})
-  io.toIbuffer.bits.acf         := f3_af_vec
+  io.toIbuffer.bits.exceptionType := (0 until PredictWidth).map(i => MuxCase(ExceptionType.none, Array(
+    (f3_pf_vec(i) || f3_crossPageFault(i)) -> ExceptionType.ipf,
+    (f3_gpf_vec(i) || f3_crossGuestPageFault(i)) -> ExceptionType.igpf,
+    f3_af_vec(i) -> ExceptionType.acf
+  )))
   io.toIbuffer.bits.exceptionFromBackend := (0 until PredictWidth).map {
     case 0 => f3_except_fromBackend
     case _ => false.B
@@ -779,9 +823,10 @@ class NewIFU(implicit p: Parameters) extends XSModule
   }
 
   /** to backend */
-  io.toBackend.gpaddrMem_wen   := f3_valid && (!f3_req_is_mmio || f3_mmio_can_go) && !f3_flush // same as toIbuffer
+  // f3_gpaddr is valid iff gpf is detected
+  io.toBackend.gpaddrMem_wen   := f3_toIbuffer_valid && (f3_gpf_vec.asUInt.orR || f3_crossGuestPageFault.asUInt.orR)
   io.toBackend.gpaddrMem_waddr := f3_ftq_req.ftqIdx.value
-  io.toBackend.gpaddrMem_wdata := f3_gpaddrs(0)
+  io.toBackend.gpaddrMem_wdata := f3_gpaddr
 
 
   //Write back to Ftq
@@ -818,7 +863,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     val jalOffset = jal_offset(inst, currentIsRVC)
     val brOffset  = br_offset(inst, currentIsRVC)
 
-    io.toIbuffer.bits.instrs(0) := new RVCDecoder(inst, XLEN, useAddiForMv = true).decode.bits
+    io.toIbuffer.bits.instrs(0) := new RVCDecoder(inst, XLEN, fLen, useAddiForMv = true).decode.bits
 
 
     io.toIbuffer.bits.pd(0).valid   := true.B
@@ -827,8 +872,11 @@ class NewIFU(implicit p: Parameters) extends XSModule
     io.toIbuffer.bits.pd(0).isCall  := isCall
     io.toIbuffer.bits.pd(0).isRet   := isRet
 
-    io.toIbuffer.bits.acf(0) := mmio_resend_af
-    io.toIbuffer.bits.ipf(0) := mmio_resend_pf
+    when (mmio_resend_af) {
+      io.toIbuffer.bits.exceptionType(0) := ExceptionType.acf
+    } .elsewhen (mmio_resend_pf) {
+      io.toIbuffer.bits.exceptionType(0) := ExceptionType.ipf
+    }
     io.toIbuffer.bits.crossPageIPFFix(0) := mmio_resend_pf
 
     io.toIbuffer.bits.enqEnable   := f3_mmio_range.asUInt
@@ -860,7 +908,13 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val wb_check_result_stage1   = RegEnable(checkerOutStage1, wb_enable)
   val wb_check_result_stage2   = checkerOutStage2
   val wb_instr_range    = RegEnable(io.toIbuffer.bits.enqEnable, wb_enable)
-  val wb_pc             = RegEnable(f3_pc, wb_enable)
+
+  val wb_pc_lower_result        = RegEnable(f3_pc_lower_result, wb_enable)
+  val wb_pc_high                = RegEnable(f3_pc_high, wb_enable)
+  val wb_pc_high_plus1          = RegEnable(f3_pc_high_plus1, wb_enable)
+  val wb_pc                     = CatPC(wb_pc_lower_result, wb_pc_high, wb_pc_high_plus1)
+
+  //val wb_pc             = RegEnable(f3_pc, wb_enable)
   val wb_pd             = RegEnable(f3_pd, wb_enable)
   val wb_instr_valid    = RegEnable(f3_instr_valid, wb_enable)
 

@@ -274,8 +274,11 @@ class XiangShan(object):
         self.show()
         diff_args = "$NOOP_HOME/"+ args.diff
         assert_args = "-assert finish_maxfail=30 -assert global_finish_maxfail=10000"
-        return_code = self.__exec_cmd(f'cd $NOOP_HOME/build && ./simv +workload={workload} +diff={diff_args} +dump-wave=fsdb {assert_args}')
-        return return_code
+        self.__exec_cmd(f'cd $NOOP_HOME/build && ./simv +workload={workload} +diff={diff_args} +dump-wave=fsdb {assert_args} | tee simv.log')
+        with open(f"{self.args.noop_home}/build/simv.log") as f:
+            if "HIT GOOD TRAP" in f.read():
+                return 0
+        return 1
 
     def run(self, args):
         if args.ci is not None:

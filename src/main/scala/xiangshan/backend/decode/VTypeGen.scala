@@ -4,7 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
-import xiangshan.backend.fu.vector.Bundles.VType
+import xiangshan.backend.fu.vector.Bundles.{VType, VsetVType}
 import xiangshan.backend.decode.isa.bitfield.{InstVType, Riscv32BitInst, XSInstBitFields}
 import xiangshan.backend.fu.VsetModule
 
@@ -50,7 +50,7 @@ class VTypeGen(implicit p: Parameters) extends XSModule{
   lastSpecVType := lastSpecVTypeNext
 
   private val instVType: InstVType = firstVsetInstField.ZIMM_VTYPE.asTypeOf(new InstVType)
-  private val vtypei: VType = VType.fromInstVType(instVType)
+  private val vtypei: VsetVType = VsetVType.fromInstVType(instVType)
 
   private val vsetModule = Module(new VsetModule)
   vsetModule.io.in.avl := 0.U

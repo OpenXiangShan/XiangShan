@@ -36,7 +36,6 @@ import xiangshan.frontend.icache.ICacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import xiangshan.frontend._
 import xiangshan.frontend.icache.ICacheParameters
-
 import freechips.rocketchip.diplomacy.AddressSet
 import freechips.rocketchip.tile.MaxHartIdBits
 import system.SoCParamsKey
@@ -47,7 +46,7 @@ import coupledL2._
 import xiangshan.backend.datapath.WakeUpConfig
 import xiangshan.mem.prefetch.{PrefetcherParams, SMSParams}
 
-import scala.math.min
+import scala.math.{max, min}
 
 case object XSTileKey extends Field[Seq[XSCoreParameters]]
 
@@ -136,7 +135,8 @@ case class XSCoreParameters
 
     (preds, ras.io.out)
   },
-  ICacheECCForceError: Boolean = false,
+  ICacheForceMetaECCError: Boolean = false,
+  ICacheForceDataECCError: Boolean = false,
   IBufSize: Int = 48,
   IBufNBank: Int = 6, // IBuffer bank amount, should divide IBufSize
   DecodeWidth: Int = 6,
@@ -216,6 +216,8 @@ case class XSCoreParameters
   VecMemInstWbWidth: Int = 1,
   VecMemDispatchWidth: Int = 1,
   VecMemDispatchMaxNumber: Int = 16,
+  VecMemUnitStrideMaxFlowNum: Int = 2,
+  VecMemLSQEnqIteratorNumberSeq: Seq[Int] = Seq(16, 2, 2, 2, 2, 2),
   StoreBufferSize: Int = 16,
   StoreBufferThreshold: Int = 7,
   EnsbufferWidth: Int = 2,
@@ -261,8 +263,8 @@ case class XSCoreParameters
     useDmode = false,
     NWays = 48,
   ),
-  itlbPortNum: Int = 2 + ICacheParameters().prefetchPipeNum + 1,
-  ipmpPortNum: Int = 2 + ICacheParameters().prefetchPipeNum + 1,
+  itlbPortNum: Int = ICacheParameters().PortNumber + 1,
+  ipmpPortNum: Int = 2 * ICacheParameters().PortNumber + 1,
   ldtlbParameters: TLBParameters = TLBParameters(
     name = "ldtlb",
     NWays = 48,
@@ -318,10 +320,6 @@ case class XSCoreParameters
     tagECC = Some("parity"),
     dataECC = Some("parity"),
     replacer = Some("setplru"),
-    nMissEntries = 2,
-    nProbeEntries = 2,
-    nPrefetchEntries = 12,
-    nPrefBufferEntries = 32,
   ),
   dcacheParametersOpt: Option[DCacheParameters] = Some(DCacheParameters(
     tagECC = Some("secded"),
@@ -496,10 +494,10 @@ case class XSCoreParameters
         Seq("FEX0", "FEX1", "FEX2", "FEX3") ->
         Seq("STD0", "STD1")
       ),
-      WakeUpConfig(
-        Seq("VFEX0", "VFEX1", "VFEX2", "VFEX3") ->
-        Seq("VFEX0", "VFEX1", "VFEX2", "VFEX3", "VFEX4")
-      ),
+//      WakeUpConfig(
+//        Seq("VFEX0", "VFEX1", "VFEX2", "VFEX3") ->
+//        Seq("VFEX0", "VFEX1", "VFEX2", "VFEX3")
+//      ),
     ).flatten
   }
 
@@ -652,7 +650,8 @@ trait HasXSParameter {
   def CacheLineSize = coreParams.CacheLineSize
   def CacheLineHalfWord = CacheLineSize / 16
   def ExtHistoryLength = HistoryLength + 64
-  def ICacheECCForceError = coreParams.ICacheECCForceError
+  def ICacheForceMetaECCError = coreParams.ICacheForceMetaECCError
+  def ICacheForceDataECCError = coreParams.ICacheForceDataECCError
   def IBufSize = coreParams.IBufSize
   def IBufNBank = coreParams.IBufNBank
   def backendParams: BackendParams = coreParams.backendParams
@@ -671,6 +670,8 @@ trait HasXSParameter {
   def VecLogicRegs = coreParams.VecLogicRegs
   def V0LogicRegs = coreParams.V0LogicRegs
   def VlLogicRegs = coreParams.VlLogicRegs
+  def MaxLogicRegs = Set(IntLogicRegs, FpLogicRegs, VecLogicRegs, V0LogicRegs, VlLogicRegs).max
+  def LogicRegsWidth = log2Ceil(MaxLogicRegs)
   def V0_IDX = coreParams.V0_IDX
   def Vl_IDX = coreParams.Vl_IDX
   def IntPhyRegs = coreParams.intPreg.numEntries
@@ -705,6 +706,7 @@ trait HasXSParameter {
   def LoadUncacheBufferSize = coreParams.LoadUncacheBufferSize
   def LoadQueueNWriteBanks = coreParams.LoadQueueNWriteBanks
   def StoreQueueSize = coreParams.StoreQueueSize
+  def VirtualLoadQueueMaxStoreQueueSize = VirtualLoadQueueSize max StoreQueueSize
   def StoreQueueNWriteBanks = coreParams.StoreQueueNWriteBanks
   def StoreQueueForwardWithMask = coreParams.StoreQueueForwardWithMask
   def VlsQueueSize = coreParams.VlsQueueSize
@@ -724,6 +726,8 @@ trait HasXSParameter {
   def VecMemInstWbWidth = coreParams.VecMemInstWbWidth
   def VecMemDispatchWidth = coreParams.VecMemDispatchWidth
   def VecMemDispatchMaxNumber = coreParams.VecMemDispatchMaxNumber
+  def VecMemUnitStrideMaxFlowNum = coreParams.VecMemUnitStrideMaxFlowNum
+  def VecMemLSQEnqIteratorNumberSeq = coreParams.VecMemLSQEnqIteratorNumberSeq
   def StoreBufferSize = coreParams.StoreBufferSize
   def StoreBufferThreshold = coreParams.StoreBufferThreshold
   def EnsbufferWidth = coreParams.EnsbufferWidth

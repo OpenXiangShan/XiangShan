@@ -30,7 +30,7 @@ import xiangshan.backend.datapath.DataConfig.VAddrData
 import xiangshan.backend.decode.{DecodeStage, FusionDecoder}
 import xiangshan.backend.dispatch.{CoreDispatchTopDownIO, Dispatch, DispatchQueue}
 import xiangshan.backend.fu.PFEvent
-import xiangshan.backend.fu.vector.Bundles.VType
+import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.rename.{Rename, RenameTableWrapper, SnapshotGenerator}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.frontend.{FtqPtr, FtqRead, Ftq_RF_Components}
@@ -131,6 +131,11 @@ class CtrlBlockImp(
     delayed.bits.debugInfo.writebackTime := GTimer()
     delayed
   }).toSeq
+  val delayedNotFlushedWriteBackNeedFlush = Wire(Vec(params.allExuParams.filter(_.needExceptionGen).length, Bool()))
+  delayedNotFlushedWriteBackNeedFlush := delayedNotFlushedWriteBack.filter(_.bits.params.needExceptionGen).map{ x =>
+    x.bits.exceptionVec.get.asUInt.orR || x.bits.flushPipe.getOrElse(false.B) || x.bits.replay.getOrElse(false.B) ||
+      (if (x.bits.trigger.nonEmpty) x.bits.trigger.get.getBackendCanFire else false.B)
+  }
 
   val wbDataNoStd = io.fromWB.wbData.filter(!_.bits.params.hasStdFu)
   val intScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[IntScheduler])
@@ -486,7 +491,7 @@ class CtrlBlockImp(
   )
 
   // pipeline between rename and dispatch
-  PipeGroupConnect(renameOut, dispatch.io.fromRename, s1_s3_redirect.valid, "renamePipeDispatch")
+  PipeGroupConnect(renameOut, dispatch.io.fromRename, s1_s3_redirect.valid, dispatch.io.toRenameAllFire, "renamePipeDispatch")
   dispatch.io.intIQValidNumVec := io.intIQValidNumVec
   dispatch.io.fpIQValidNumVec := io.fpIQValidNumVec
   dispatch.io.fromIntDQ.intDQ0ValidDeq0Num := intDq0.io.validDeq0Num
@@ -538,6 +543,7 @@ class CtrlBlockImp(
   rob.io.redirect := s1_s3_redirect
   rob.io.writeback := delayedNotFlushedWriteBack
   rob.io.writebackNums := VecInit(delayedNotFlushedWriteBackNums)
+  rob.io.writebackNeedFlush := delayedNotFlushedWriteBackNeedFlush
   rob.io.readGPAMemData := gpaMem.io.exceptionReadData
 
   io.redirect := s1_s3_redirect
@@ -574,6 +580,10 @@ class CtrlBlockImp(
   io.robio.commitVType := rob.io.toDecode.commitVType
   // exu block to decode
   decode.io.vsetvlVType := io.toDecode.vsetvlVType
+  // backend to decode
+  decode.io.vstart := io.toDecode.vstart
+  // backend to rob
+  rob.io.vstartIsZero := io.toDecode.vstart === 0.U
 
   io.debugTopDown.fromRob := rob.io.debugTopDown.toCore
   dispatch.io.debugTopDown.fromRob := rob.io.debugTopDown.toDispatch
@@ -667,6 +677,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
 
   val toDecode = new Bundle {
     val vsetvlVType = Input(VType())
+    val vstart = Input(Vl())
   }
 
   val perfInfo = Output(new Bundle{

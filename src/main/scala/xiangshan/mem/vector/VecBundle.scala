@@ -233,6 +233,7 @@ class VSegmentUnitIO(implicit p: Parameters) extends VLSUBundle{
   val uopwriteback        = DecoupledIO(new MemExuOutput(isVector = true)) // writeback data
   val rdcache             = new DCacheLoadIO // read dcache port
   val sbuffer             = Decoupled(new DCacheWordReqWithVaddrAndPfFlag)
+  val vecDifftestInfo     = Decoupled(new DynInst) // to sbuffer
   val dtlb                = new TlbRequestIO(2)
   val pmpResp             = Flipped(new PMPRespBundle())
   val flush_sbuffer       = new SbufferFlushBundle

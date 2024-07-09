@@ -48,12 +48,32 @@ jobs:
       - name: check top wiring
         run:
           bash .github/workflows/check-usage.sh "BoringUtils" $GITHUB_WORKSPACE
+      - name: generate standalone clint
+        run: |
+          make StandAloneCLINT DEVICE_BASE_ADDR=0x38000000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0
+          make clean
+          make StandAloneCLINT DEVICE_BASE_ADDR=0x38000000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=1
+          make clean
+      - name: generate standalone debug module
+        run: |
+          make StandAloneDebugModule DEVICE_BASE_ADDR=0x38020000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0
+          make clean
+          make StandAloneDebugModule DEVICE_BASE_ADDR=0x38020000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=1
+          make clean
+      - name: generate XSNoCTop verilog file
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate --config XSNoCTopConfig --mfc
+      - name: check XSNoCTop verilog
+        run: |
+          python3 $GITHUB_WORKSPACE/.github/workflows/check_verilog.py build/rtl
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
       - name: generate verilog file
         run:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate --num-cores 2 --mfc
       - name: check verilog
-        run:
-          python3 $GITHUB_WORKSPACE/.github/workflows/check_verilog.py build/rtl/XSTop.v
+        run: |
+          python3 $GITHUB_WORKSPACE/.github/workflows/check_verilog.py build/rtl
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
       - name: build MinimalConfig Release emu
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
@@ -62,9 +82,6 @@ jobs:
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci linux-hello-opensbi 2> perf.log
           cat perf.log | sort
-      - name: check CHI version verilog
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate --config KunminghuV2Config --release --mfc
   emu-basics:
     runs-on: bosc
     needs: changes
@@ -125,6 +142,35 @@ jobs:
         run: |
           $GITHUB_WORKSPACE/build/emu  -F $GITHUB_WORKSPACE/ready-to-run/copy_and_run.bin -i $GITHUB_WORKSPACE/ready-to-run/microbench.bin --diff $GITHUB_WORKSPACE/ready-to-run/riscv64-nemu-interpreter-so --enable-fork 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/copy_and_run.log
+  emu-chi:
+    runs-on: bosc
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' }}
+    continue-on-error: false
+    timeout-minutes: 900
+    name: EMU - CHI
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+      - name: set env
+        run: |
+          export HEAD_SHA=${{ github.run_number }}
+          echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
+          echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
+          echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
+          mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
+      - name: clean up
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
+      - name: build KunminghuV2Config Release emu
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
+            --threads 8 --config KunminghuV2Config --release --mfc
+      - name: run KunminghuV2Config - Linux
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci linux-hello-opensbi 2> perf.log
+          cat perf.log | sort
   emu-performance:
     runs-on: bosc
     needs: changes

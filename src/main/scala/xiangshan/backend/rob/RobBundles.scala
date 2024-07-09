@@ -72,12 +72,13 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
     val uopNum = UInt(log2Up(MaxUopSize + 1).W)
     val commitTrigger = Bool()
+    val needFlush = Bool()
     // status end
 
     // debug_begin
     val debug_pc = OptionWrapper(backendParams.debugEn, UInt(VAddrBits.W))
     val debug_instr = OptionWrapper(backendParams.debugEn, UInt(32.W))
-    val debug_ldest = OptionWrapper(backendParams.debugEn, UInt(6.W))
+    val debug_ldest = OptionWrapper(backendParams.debugEn, UInt(LogicRegsWidth.W))
     val debug_pdest = OptionWrapper(backendParams.debugEn, UInt(PhyRegIdxWidth.W))
     val debug_fuType = OptionWrapper(backendParams.debugEn, FuType())
     // debug_end
@@ -107,10 +108,11 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val rfWen = Bool()
     val loadWaitBit = Bool() // for perfEvents
     val isMove = Bool()      // for perfEvents
+    val needFlush = Bool()
     // debug_begin
     val debug_pc = OptionWrapper(backendParams.debugEn, UInt(VAddrBits.W))
     val debug_instr = OptionWrapper(backendParams.debugEn, UInt(32.W))
-    val debug_ldest = OptionWrapper(backendParams.debugEn, UInt(6.W))
+    val debug_ldest = OptionWrapper(backendParams.debugEn, UInt(LogicRegsWidth.W))
     val debug_pdest = OptionWrapper(backendParams.debugEn, UInt(PhyRegIdxWidth.W))
     val debug_fuType = OptionWrapper(backendParams.debugEn, FuType())
     // debug_end
@@ -132,6 +134,8 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.dirtyVs := robEnq.dirtyVs
     robEntry.loadWaitBit := robEnq.loadWaitBit
     robEntry.eliminatedMove := robEnq.eliminatedMove
+    // flushPipe needFlush but not exception
+    robEntry.needFlush := robEnq.hasException || robEnq.flushPipe
     robEntry.debug_pc.foreach(_ := robEnq.pc)
     robEntry.debug_instr.foreach(_ := robEnq.instr)
     robEntry.debug_ldest.foreach(_ := robEnq.ldest)
@@ -160,6 +164,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.loadWaitBit := robEntry.loadWaitBit
     robCommitEntry.isMove := robEntry.eliminatedMove
     robCommitEntry.dirtyVs := robEntry.dirtyVs
+    robCommitEntry.needFlush := robEntry.needFlush
     robCommitEntry.debug_pc.foreach(_ := robEntry.debug_pc.get)
     robCommitEntry.debug_instr.foreach(_ := robEntry.debug_instr.get)
     robCommitEntry.debug_ldest.foreach(_ := robEntry.debug_ldest.get)

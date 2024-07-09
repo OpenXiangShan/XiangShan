@@ -475,6 +475,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val wakeUpFromWB: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
     val wakeUpFromIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
     //cancel
+    val srcLoadDependency     = Input(Vec(params.numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
     val og0Cancel             = Input(ExuOH(backendParams.numExu))
     val ldCancel              = Vec(backendParams.LdExuCnt, Flipped(new LoadCancelIO))
   }
@@ -483,6 +484,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val srcWakeUpByWB: Vec[UInt]                            = Vec(params.numRegSrc, SrcState())
     val srcWakeUpByIQ: Vec[UInt]                            = Vec(params.numRegSrc, SrcState())
     val srcWakeUpByIQVec: Vec[Vec[Bool]]                    = Vec(params.numRegSrc, Vec(params.numWakeupFromIQ, Bool()))
+    val srcCancelByLoad: Vec[Bool]                          = Vec(params.numRegSrc, Bool())
     val shiftedWakeupLoadDependencyByIQVec: Vec[Vec[UInt]]  = Vec(params.numWakeupFromIQ, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
   }
 
@@ -520,8 +522,12 @@ object EntryBundles extends HasCircularQueuePtrHelper {
         val ldTransCancel = Mux1H(enqDelayOut.srcWakeUpByIQVec(i), enqDelayIn.wakeUpFromIQ.map(_.bits.loadDependency).map(dp => LoadShouldCancel(Some(dp), enqDelayIn.ldCancel)).toSeq)
         wakeup := enqDelayOut.srcWakeUpByIQVec(i).asUInt.orR && !ldTransCancel
       }
+      enqDelayOut.srcCancelByLoad.zipWithIndex.foreach { case (ldCancel, i) =>
+        ldCancel := LoadShouldCancel(Some(enqDelayIn.srcLoadDependency(i)), enqDelayIn.ldCancel)
+      }
     } else {
       enqDelayOut.srcWakeUpByIQ := 0.U.asTypeOf(enqDelayOut.srcWakeUpByIQ)
+      enqDelayOut.srcCancelByLoad := 0.U.asTypeOf(enqDelayOut.srcCancelByLoad)
     }
 
     enqDelayOut.shiftedWakeupLoadDependencyByIQVec.zip(enqDelayIn.wakeUpFromIQ.map(_.bits.loadDependency))

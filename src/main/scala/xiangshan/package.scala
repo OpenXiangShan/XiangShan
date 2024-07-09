@@ -507,7 +507,7 @@ package object xiangshan {
     def lhu      = "b0101".U
     def lwu      = "b0110".U
     // hypervior load
-    // bit encoding: | hlvx 1 | hlv 1 | load 0 | is unsigned(1bit) | size(2bit) |
+    // bit encoding: | hlv 1 | hlvx 1 | is unsigned(1bit) | size(2bit) |
     def hlvb = "b10000".U
     def hlvh = "b10001".U
     def hlvw = "b10010".U
@@ -515,10 +515,10 @@ package object xiangshan {
     def hlvbu = "b10100".U
     def hlvhu = "b10101".U
     def hlvwu = "b10110".U
-    def hlvxhu = "b110101".U
-    def hlvxwu = "b110110".U
-    def isHlv(op: UInt): Bool = op(4)
-    def isHlvx(op: UInt): Bool = op(5)
+    def hlvxhu = "b011101".U
+    def hlvxwu = "b011110".U
+    def isHlv(op: UInt): Bool = op(4) && (op(8, 5) === "b0000".U)
+    def isHlvx(op: UInt): Bool = op(4) && op(3) && (op(8, 5) === "b0000".U)
 
     // Zicbop software prefetch
     // bit encoding: | prefetch 1 | 0 | prefetch type (2bit) |
@@ -593,6 +593,7 @@ package object xiangshan {
     def isVecSt(fuOpType: UInt): Bool = fuOpType(8, 7) === "b10".U
     def isVecLS(fuOpType: UInt): Bool = fuOpType(8, 7).orR
 
+    def isAllUS  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && !fuOpType(4) // Unit-Stride Whole Masked
     def isUStride(fuOpType: UInt): Bool = fuOpType(6, 0) === "b00_00000".U
     def isWhole  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01000".U
     def isMasked (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01011".U
@@ -744,7 +745,6 @@ package object xiangshan {
     def VEC_SLIDEDOWN    = "b100111".U // VEC_SLIDEDOWN
     def VEC_M0X          = "b101001".U // VEC_M0X  0MV
     def VEC_MVV          = "b101010".U // VEC_MVV  VMV
-    def VEC_M0X_VFIRST   = "b101011".U //
     def VEC_VWW          = "b101100".U //
     def VEC_RGATHER      = "b101101".U // vrgather.vv, vrgather.vi
     def VEC_RGATHER_VX   = "b101110".U // vrgather.vx

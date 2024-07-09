@@ -136,7 +136,7 @@ class VFMA(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
       (outEew === 3.U) -> f64VlMaskEn.asUInt
     )
   )
-  allFFlagsEn := (fflagsEn & fflagsEn).asTypeOf(allFFlagsEn)
+  allFFlagsEn := (fflagsEn & vlMaskEn).asTypeOf(allFFlagsEn)
 
   val allFFlags = fflagsData.asTypeOf(Vec(4 * numVecModule, UInt(5.W)))
   val outFFlags = allFFlagsEn.zip(allFFlags).map {

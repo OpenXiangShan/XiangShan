@@ -21,7 +21,7 @@ import xiangshan.backend.fu.vector.Bundles.VSew
 class IssueQueue(params: IssueBlockParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
 
-  implicit val iqParams = params
+  implicit val iqParams: IssueBlockParams = params
   lazy val module: IssueQueueImp = iqParams.schdType match {
     case IntScheduler() => new IssueQueueIntImp(this)
     case FpScheduler() => new IssueQueueFpImp(this)
@@ -284,9 +284,9 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         enq.bits.status.srcStatus(j).srcState                   := (if (j < 3) {
                                                                       Mux(SrcType.isVp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U), 
                                                                           SrcState.rdy, 
-                                                                          s0_enqBits(enqIdx).srcState(j) & !LoadShouldCancel(Some(s0_enqBits(enqIdx).srcLoadDependency(j)), io.ldCancel))
+                                                                          s0_enqBits(enqIdx).srcState(j))
                                                                     } else {
-                                                                      s0_enqBits(enqIdx).srcState(j) & !LoadShouldCancel(Some(s0_enqBits(enqIdx).srcLoadDependency(j)), io.ldCancel)
+                                                                      s0_enqBits(enqIdx).srcState(j)
                                                                     })
         enq.bits.status.srcStatus(j).dataSources.value          := (if (j < 3) {
                                                                       MuxCase(DataSource.reg, Seq(

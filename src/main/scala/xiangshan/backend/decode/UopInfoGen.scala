@@ -225,7 +225,6 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     UopSplitType.VEC_SLIDEDOWN -> (numOfUopVslide + 1.U),
     UopSplitType.VEC_M0X -> lmul,
     UopSplitType.VEC_MVV -> (Cat(lmul, 0.U(1.W)) - 1.U),
-    UopSplitType.VEC_M0X_VFIRST -> 1.U,
     UopSplitType.VEC_VWW -> Cat(lmul, 0.U(1.W)), // lmul <= 4
     UopSplitType.VEC_RGATHER -> numOfUopVrgather,
     UopSplitType.VEC_RGATHER_VX -> (numOfUopVrgather +& 1.U),

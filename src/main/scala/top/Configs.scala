@@ -116,12 +116,6 @@ class MinimalConfig(n: Int = 1) extends Config(
           tagECC = Some("parity"),
           dataECC = Some("parity"),
           replacer = Some("setplru"),
-          nMissEntries = 2,
-          nReleaseEntries = 1,
-          nProbeEntries = 2,
-          // fdip
-          enableICachePrefetch = true,
-          prefetchToL1 = false,
         ),
         dcacheParametersOpt = Some(DCacheParameters(
           nSets = 64, // 32KB DCache
@@ -297,7 +291,9 @@ class WithNKBL2
         )),
         reqField = Seq(utility.ReqSourceField()),
         echoField = Seq(huancun.DirtyField()),
-        prefetch = Seq(PrefetchReceiverParams(), BOPParameters()) ++ (if (tp) Seq(TPParameters()) else Nil),
+        prefetch = Seq(BOPParameters()) ++
+          (if (tp) Seq(TPParameters()) else Nil) ++
+          (if (p.prefetcher.nonEmpty) Seq(PrefetchReceiverParams()) else Nil),
         enablePerf = !site(DebugOptionsKey).FPGAPlatform && site(DebugOptionsKey).EnablePerfDebug,
         enableRollingDB = site(DebugOptionsKey).EnableRollingDB,
         enableMonitor = site(DebugOptionsKey).AlwaysBasicDB,
@@ -410,5 +406,11 @@ class KunminghuV2Config(n: Int = 1) extends Config(
     })
     ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4, tp = false)
     ++ new WithNKBL1D(64, ways = 8)
-    ++ new BaseConfig(n)
+    ++ new DefaultConfig(n)
+)
+
+class XSNoCTopConfig(n: Int = 1) extends Config(
+  (new KunminghuV2Config(n)).alter((site, here, up) => {
+    case SoCParamsKey => up(SoCParamsKey).copy(UseXSNoCTop = true)
+  })
 )
