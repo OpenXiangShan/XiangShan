@@ -243,13 +243,12 @@ class SQData8Module(numEntries: Int, numRead: Int, numWrite: Int, numForward: In
         res
       })
     }
-    val needCheck0Vec = GatedRegNext(io.needForward(i)(0))
-    val needCheck1Vec = GatedRegNext(io.needForward(i)(1))
+    
     for (j <- 0 until numEntries) {
       val needCheck0 = io.needForward(i)(0)(j)
       val needCheck1 = io.needForward(i)(1)(j)
-      val needCheck0Reg = needCheck0Vec(j)
-      val needCheck1Reg = needCheck1Vec(j)
+      val needCheck0Reg = RegNext(needCheck0)
+      val needCheck1Reg = RegNext(needCheck1)
 
       matchResultVec(j).validFast := needCheck0 && data(j).valid
       matchResultVec(j).valid := needCheck0Reg && data(j).valid
