@@ -739,6 +739,104 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   predictors.io.update.valid := RegNext(io.ftq_to_bpu.update.valid, init = false.B)
   predictors.io.update.bits := RegEnable(io.ftq_to_bpu.update.bits, io.ftq_to_bpu.update.valid)
+  
+  // ------- Predictors Update to improve Clock Gating Efficiency -------
+  // Update pc
+  val pcSegments = Seq(VAddrBits - 24, 12, 12)
+  predictors.io.update.bits.pc := SegmentedAddrNext(io.ftq_to_bpu.update.bits.pc, pcSegments, io.ftq_to_bpu.update.valid, Some("predictors.io.update.pc")).getAddr()
+
+  // Update ftb_entry 
+  val FTBEntryUpdateValid = io.ftq_to_bpu.update.bits.ftb_entry.valid && io.ftq_to_bpu.update.valid
+  predictors.io.update.bits.ftb_entry := RegEnable(io.ftq_to_bpu.update.bits.ftb_entry, FTBEntryUpdateValid)
+  predictors.io.update.bits.ftb_entry.valid := RegEnable(FTBEntryUpdateValid, io.ftq_to_bpu.update.valid) // Update FtbEntry.valid is essential when FtbEntry.valid === false
+  
+  // ---------------- To improve CGE but can also improve IPC (coremark 1 itera, 0.980246->0.981045) ??? ----------------
+  // predictors.io.update.bits.ftb_entry.brSlots.zip(io.ftq_to_bpu.update.bits.ftb_entry.brSlots)
+  // .foreach { case (predictorsFtbSlot, updateFtbSlot) =>
+  //   predictorsFtbSlot := RegEnable(updateFtbSlot, FTBEntryUpdateValid && updateFtbSlot.valid)
+  //   predictorsFtbSlot.valid := RegEnable(updateFtbSlot.valid, FTBEntryUpdateValid) // Update FtbSlot.valid is essential when FtbSlot.valid === false
+  // }
+  // predictors.io.update.bits.ftb_entry.tailSlot := RegEnable(io.ftq_to_bpu.update.bits.ftb_entry.tailSlot, 
+  //                                                           FTBEntryUpdateValid && io.ftq_to_bpu.update.bits.ftb_entry.tailSlot.valid)
+  // predictors.io.update.bits.ftb_entry.tailSlot.valid := RegEnable(io.ftq_to_bpu.update.bits.ftb_entry.tailSlot.valid, FTBEntryUpdateValid) // Update FtbSlot.valid is essential when FtbSlot.valid === false
+
+  // Get UpdateMeta of each Predictor
+  // | <------------- io.update.bits.meta ------------> |
+  // |---- x -----| uftb | tage-sc | ftb | ittage | ras |
+  val metaSizeSeq = predictors.asInstanceOf[Composer].getEachMetaSize()
+  val metaStartIdxWithSize = metaSizeSeq.foldLeft(Seq[(Int, Int)]()) { (acc, len) =>
+    val start = if (acc.isEmpty) 0 else acc.last._1 + acc.last._2
+    acc :+ (start, len)
+  }
+  val Seq((   ras_meta_sta,    ras_meta_sz),
+          (ittage_meta_sta, ittage_meta_sz), 
+          (   ftb_meta_sta,    ftb_meta_sz), 
+          (  tage_meta_sta,   tage_meta_sz), 
+          (  uftb_meta_sta,   uftb_meta_sz)) = metaStartIdxWithSize.take(5)
+  
+  println(p"uftb_meta_sta   = $uftb_meta_sta  , uftb_meta_sz   = $uftb_meta_sz  ")
+  println(p"tage_meta_sta   = $tage_meta_sta  , tage_meta_sz   = $tage_meta_sz  ")
+  println(p"ftb_meta_sta    = $ftb_meta_sta   , ftb_meta_sz    = $ftb_meta_sz   ")
+  println(p"ittage_meta_sta = $ittage_meta_sta, ittage_meta_sz = $ittage_meta_sz")
+  println(p"ras_meta_sta    = $ras_meta_sta   , ras_meta_sz    = $ras_meta_sz   ")
+
+  val UpdateTageMeta   = io.ftq_to_bpu.update.bits.meta(  tage_meta_sta +   tage_meta_sz - 1,   tage_meta_sta).asTypeOf(new TageMeta)
+  val UpdateFTBMeta    = io.ftq_to_bpu.update.bits.meta(   ftb_meta_sta +    ftb_meta_sz - 1,    ftb_meta_sta).asTypeOf(new FTBMeta)
+  val UpdateITTageMeta = io.ftq_to_bpu.update.bits.meta(ittage_meta_sta + ittage_meta_sz - 1, ittage_meta_sta).asTypeOf(new ITTageMeta)
+  val UpdateRASMeta    = io.ftq_to_bpu.update.bits.meta(   ras_meta_sta +    ras_meta_sz - 1,    ras_meta_sta).asTypeOf(new RASMeta)
+
+  // Update Meta of each Predictor
+  val new_uftb_meta = RegEnable(io.ftq_to_bpu.update.bits.meta(uftb_meta_sta + uftb_meta_sz - 1, uftb_meta_sta), io.ftq_to_bpu.update.valid)
+  val new_ftb_meta  = RegEnable(UpdateFTBMeta, io.ftq_to_bpu.update.valid && !io.ftq_to_bpu.update.bits.old_entry)
+  val new_ras_meta  = RegEnable(UpdateRASMeta, io.ftq_to_bpu.update.valid && (io.ftq_to_bpu.update.bits.is_call_taken || io.ftq_to_bpu.update.bits.is_ret_taken))
+
+  val new_ittage_meta = WireInit(0.U.asTypeOf(new ITTageMeta))
+  new_ittage_meta := RegEnable(UpdateITTageMeta, io.ftq_to_bpu.update.valid)
+  new_ittage_meta.provider.bits     := RegEnable(UpdateITTageMeta.provider.bits    , io.ftq_to_bpu.update.valid && UpdateITTageMeta.provider.valid   )
+  new_ittage_meta.providerTarget    := RegEnable(UpdateITTageMeta.providerTarget   , io.ftq_to_bpu.update.valid && UpdateITTageMeta.provider.valid   )
+  new_ittage_meta.allocate.bits     := RegEnable(UpdateITTageMeta.allocate.bits    , io.ftq_to_bpu.update.valid && UpdateITTageMeta.allocate.valid   )
+  new_ittage_meta.altProvider.bits  := RegEnable(UpdateITTageMeta.altProvider.bits , io.ftq_to_bpu.update.valid && UpdateITTageMeta.altProvider.valid)
+  new_ittage_meta.altProviderTarget := RegEnable(UpdateITTageMeta.altProviderTarget, io.ftq_to_bpu.update.valid && UpdateITTageMeta.provider.valid && 
+                                                                                            UpdateITTageMeta.altProvider.valid && 
+                                                                                            UpdateITTageMeta.providerCtr === 0.U &&
+                                                                                            io.ftq_to_bpu.update.bits.mispred_mask(numBr) )
+  
+  val new_tage_meta = WireInit(0.U.asTypeOf(new TageMeta))
+  new_tage_meta := RegEnable(UpdateTageMeta, io.ftq_to_bpu.update.valid)
+  val TageUpdateValids = VecInit((0 until TageBanks).map(w =>
+      io.ftq_to_bpu.update.bits.ftb_entry.brValids(w) && io.ftq_to_bpu.update.valid && !io.ftq_to_bpu.update.bits.ftb_entry.always_taken(w) &&
+      !(PriorityEncoder(io.ftq_to_bpu.update.bits.br_taken_mask) < w.U)))
+  for(i <- 0 until numBr){
+    val TageHasUpdate = TageUpdateValids(i)
+    val TageUpdateProvided = UpdateTageMeta.providers(i).valid
+    new_tage_meta.providers(i).bits := RegEnable(UpdateTageMeta.providers(i).bits, TageUpdateProvided && TageHasUpdate)
+    new_tage_meta.providerResps(i) := RegEnable(UpdateTageMeta.providerResps(i), TageHasUpdate) // `TageUpdateProvided` 只影响perfAccumulate
+    new_tage_meta.altUsed(i) := RegEnable(UpdateTageMeta.altUsed(i), TageHasUpdate)
+    new_tage_meta.allocates(i) := RegEnable(UpdateTageMeta.allocates(i), TageHasUpdate && io.ftq_to_bpu.update.bits.mispred_mask(i))
+  }
+  if(EnableSC){
+    for(w <- 0 until TageBanks){
+      new_tage_meta.scMeta.get.scPreds(w) := RegEnable(UpdateTageMeta.scMeta.get.scPreds(w), TageUpdateValids(w) && UpdateTageMeta.providers(w).valid)
+      new_tage_meta.scMeta.get.ctrs(w) := RegEnable(UpdateTageMeta.scMeta.get.ctrs(w), TageUpdateValids(w) && UpdateTageMeta.providers(w).valid)
+    }
+  }
+  
+  predictors.io.update.bits.meta := Cat(0.U((MaxMetaLength - metaSizeSeq.foldLeft(0)(_ + _)).W), 
+                                        new_uftb_meta.asUInt, 
+                                        new_tage_meta.asUInt, 
+                                        new_ftb_meta.asUInt, 
+                                        new_ittage_meta.asUInt, 
+                                        new_ras_meta.asUInt)
+
+  // Update full_target
+  val gatedCond1 = UpdateITTageMeta.provider.valid
+  val gatedCond2 = io.ftq_to_bpu.update.bits.mispred_mask(numBr) && !(UpdateITTageMeta.provider.valid && UpdateITTageMeta.providerCtr === 0.U)
+  predictors.io.update.bits.full_target := RegEnable(io.ftq_to_bpu.update.bits.full_target, io.ftq_to_bpu.update.valid && ( gatedCond1 || gatedCond2 ))
+
+  // Update cfi_idx
+  predictors.io.update.bits.cfi_idx.bits := RegEnable(io.ftq_to_bpu.update.bits.cfi_idx.bits, io.ftq_to_bpu.update.valid && io.ftq_to_bpu.update.bits.cfi_idx.valid)
+  
+  // Update ghist
   predictors.io.update.bits.ghist := RegEnable(
     getHist(io.ftq_to_bpu.update.bits.spec_info.histPtr), io.ftq_to_bpu.update.valid)
 
