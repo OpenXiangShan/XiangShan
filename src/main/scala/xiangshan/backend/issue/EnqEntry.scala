@@ -40,6 +40,8 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
   val enqDelayDataSources         = Wire(Vec(params.numRegSrc, DataSource()))
   val enqDelaySrcWakeUpL1ExuOH    = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numRegSrc, ExuVec())))
   val enqDelaySrcLoadDependency   = Wire(Vec(params.numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
+  val enqDelayUseRegCache         = OptionWrapper(params.needReadRegCache, Wire(Vec(params.numRegSrc, Bool())))
+  val enqDelayRegCacheIdx         = OptionWrapper(params.needReadRegCache, Wire(Vec(params.numRegSrc, UInt(RegCacheIdxWidth.W))))
 
   //Reg
   val validReg = GatedValidRegNext(common.validRegNext, false.B)
@@ -116,6 +118,20 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
     } else {
       enqDelaySrcLoadDependency(i)          := entryReg.status.srcStatus(i).srcLoadDependency
     }
+
+    if (params.needReadRegCache) {
+      val enqDelay1WakeupSrcExuWriteRC = enqDelay1WakeUpOH.zip(io.enqDelayIn1.wakeUpFromIQ).filter(_._2.bits.params.needWriteRegCache)
+      val enqDelay1WakeupRC    = enqDelay1WakeupSrcExuWriteRC.map(_._1).fold(false.B)(_ || _)
+      val enqDelay1WakeupRCIdx = Mux1H(enqDelay1WakeupSrcExuWriteRC.map(_._1), enqDelay1WakeupSrcExuWriteRC.map(_._2.bits.rcDest.get))
+      val enqDelay1ReplaceRC   = enqDelay1WakeupSrcExuWriteRC.map(x => x._2.bits.rfWen && x._2.bits.rcDest.get === entryReg.status.srcStatus(i).regCacheIdx.get).fold(false.B)(_ || _)
+
+      enqDelayUseRegCache.get(i)            := MuxCase(entryReg.status.srcStatus(i).useRegCache.get, Seq(
+                                                  enqDelayOut1.srcCancelByLoad(i)  -> false.B,
+                                                  enqDelay1WakeupRC                -> true.B,
+                                                  enqDelay1ReplaceRC               -> false.B,
+                                               ))
+      enqDelayRegCacheIdx.get(i)            := Mux(enqDelay1WakeupRC, enqDelay1WakeupRCIdx, entryReg.status.srcStatus(i).regCacheIdx.get)
+    }
   }
 
   // current status
@@ -125,6 +141,8 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
       srcStatus.srcState                    := enqDelaySrcState(srcIdx)
       srcStatus.dataSources                 := enqDelayDataSources(srcIdx)
       srcStatus.srcLoadDependency           := enqDelaySrcLoadDependency(srcIdx)
+      srcStatus.useRegCache.foreach(_       := enqDelayUseRegCache.get(srcIdx))
+      srcStatus.regCacheIdx.foreach(_       := enqDelayRegCacheIdx.get(srcIdx))
     }
   }
 

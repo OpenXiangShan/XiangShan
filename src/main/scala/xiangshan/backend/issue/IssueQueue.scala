@@ -303,6 +303,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         if(params.hasIQWakeUp) {
           enq.bits.status.srcStatus(j).srcWakeUpL1ExuOH.get     := 0.U.asTypeOf(ExuVec())
         }
+        enq.bits.status.srcStatus(j).useRegCache.foreach(_      := false.B)
+        enq.bits.status.srcStatus(j).regCacheIdx.foreach(_      := DontCare)
       }
       enq.bits.status.blocked                                   := false.B
       enq.bits.status.issued                                    := false.B
@@ -754,7 +756,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     }
     deq.bits.immType := deqEntryVec(i).bits.payload.selImm
     deq.bits.common.imm := deqEntryVec(i).bits.imm.getOrElse(0.U)
-    deq.bits.rcIdx.foreach(_ := DontCare)
+    deq.bits.rcIdx.foreach(_ := deqEntryVec(i).bits.status.srcStatus.map(_.regCacheIdx.get))
 
     deq.bits.common.perfDebugInfo := deqEntryVec(i).bits.payload.debugInfo
     deq.bits.common.perfDebugInfo.selectTime := GTimer()
