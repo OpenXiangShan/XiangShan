@@ -29,6 +29,11 @@ class BypassNetworkIO()(implicit p: Parameters, params: BackendParams) extends X
     val vf : MixedVec[MixedVec[DecoupledIO[ExuInput]]] = Flipped(vfSchdParams.genExuInputBundle)
     val mem: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = Flipped(memSchdParams.genExuInputBundle)
     val immInfo: Vec[ImmInfo] = Input(Vec(params.allExuParams.size, new ImmInfo))
+    val rcData: MixedVec[MixedVec[Vec[UInt]]] = MixedVec(
+      Seq(intSchdParams, fpSchdParams, vfSchdParams, memSchdParams).map(schd => schd.issueBlockParams.map(iq => 
+        MixedVec(iq.exuBlockParams.map(exu => Input(Vec(exu.numRegSrc, UInt(exu.srcDataBitsMax.W)))))
+      )).flatten
+    )
   }
 
   class ToExus extends Bundle {
@@ -70,7 +75,10 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
   private val fromDPs: Seq[DecoupledIO[ExuInput]] = (io.fromDataPath.int ++ io.fromDataPath.fp ++ io.fromDataPath.vf ++ io.fromDataPath.mem).flatten.toSeq
   private val fromExus: Seq[ValidIO[ExuBypassBundle]] = (io.fromExus.int ++ io.fromExus.fp ++ io.fromExus.vf ++ io.fromExus.mem).flatten.toSeq
   private val toExus: Seq[DecoupledIO[ExuInput]] = (io.toExus.int ++ io.toExus.fp ++ io.toExus.vf ++ io.toExus.mem).flatten.toSeq
+  private val fromDPsRCData: Seq[Vec[UInt]] = io.fromDataPath.rcData.flatten.toSeq
   private val immInfo = io.fromDataPath.immInfo
+
+  println(s"[BypassNetwork] RCData num: ${fromDPsRCData.size}")
 
   // (exuIdx, srcIdx, bypassExuIdx)
   private val forwardOrBypassValidVec3: MixedVec[Vec[Vec[Bool]]] = MixedVecInit(
@@ -154,6 +162,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
       val readZero = if (isIntScheduler) dataSource.readZero else false.B
       val readV0 = if (srcIdx < 3 && isReadVfRf) dataSource.readV0 else false.B
       val readRegOH = exuInput.bits.dataSources(srcIdx).readRegOH
+      val readRegCache = if (exuParm.needReadRegCache) exuInput.bits.dataSources(srcIdx).readRegCache else false.B
       val readImm = if (exuParm.immType.nonEmpty || exuParm.hasLoadExu) exuInput.bits.dataSources(srcIdx).readImm else false.B
       val bypass2ExuIdx = fromDPsHasBypass2Sink.indexOf(exuIdx)
       println(s"${exuParm.name}: bypass2ExuIdx is ${bypass2ExuIdx}")
@@ -166,6 +175,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
           readZero       -> 0.U,
           readV0         -> (if (srcIdx < 3 && isReadVfRf) exuInput.bits.src(3) else 0.U),
           readRegOH      -> fromDPs(exuIdx).bits.src(srcIdx),
+          readRegCache   -> fromDPsRCData(exuIdx)(srcIdx),
           readImm        -> (if (exuParm.hasLoadExu && srcIdx == 0) immLoadSrc0 else imm)
         )
       )
