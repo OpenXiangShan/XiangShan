@@ -201,6 +201,8 @@ case class IssueBlockParams(
 
   def needWriteRegCache: Boolean = numWriteRegCache > 0
 
+  def needReadRegCache: Boolean = exuBlockParams.map(_.needReadRegCache).reduce(_ || _)
+
   /**
     * Get the regfile type that this issue queue need to read
     */
