@@ -28,9 +28,9 @@ class PcTargetMemImp(override val wrapper: PcTargetMem)(implicit p: Parameters, 
   private val targetPCVec : Vec[UInt] = Wire(Vec(params.numTargetReadPort, UInt(VAddrData().dataWidth.W)))
   private val pcVec       : Vec[UInt] = Wire(Vec(params.numPcMemReadPort, UInt(VAddrData().dataWidth.W)))
 
-  targetMem.io.wen.head := GatedValidRegNext(io.fromFrontendFtq.pc_mem_wen)
-  targetMem.io.waddr.head := RegEnable(io.fromFrontendFtq.pc_mem_waddr, io.fromFrontendFtq.pc_mem_wen)
-  targetMem.io.wdata.head := RegEnable(io.fromFrontendFtq.pc_mem_wdata, io.fromFrontendFtq.pc_mem_wen)
+  targetMem.io.wen.head := io.fromFrontendFtq.pc_mem_wen
+  targetMem.io.waddr.head := io.fromFrontendFtq.pc_mem_waddr
+  targetMem.io.wdata.head := io.fromFrontendFtq.pc_mem_wdata
 
   private val newestEn: Bool = io.fromFrontendFtq.newest_entry_en
   private val newestTarget: UInt = io.fromFrontendFtq.newest_entry_target
