@@ -220,9 +220,12 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     val selElemInfield         = selPort(0).elemIdx & (entries(wbMbIndex(i)).vlmax - 1.U)
     val selExceptionVec        = selPort(0).exceptionVec
 
-    val USFirstUopOffset       = (searchVFirstUnMask(selPort(0).mask) << entryVeew).asUInt
     val isUSFirstUop           = !selPort(0).elemIdx.orR
-    val vaddr                  = selPort(0).vaddr + Mux(entryIsUS && isUSFirstUop, USFirstUopOffset, 0.U)
+    // Only the first unaligned uop of unit-stride needs to be offset.
+    // When unaligned, the lowest bit of mask is 0.
+    //  example: 16'b1111_1111_1111_0000
+    val vaddrOffset            = Mux(entryIsUS && isUSFirstUop, genVFirstUnmask(selPort(0).mask).asUInt, 0.U)
+    val vaddr                  = selPort(0).vaddr +  vaddrOffset
 
     // select oldest port to raise exception
     when((((entries(wbMbIndex(i)).vstart >= selElemInfield) && entryExcp && portHasExcp(i)) || (!entryExcp && portHasExcp(i))) && pipewb.valid && !mergedByPrevPortVec(i)){
