@@ -60,11 +60,12 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val numLsElem             = NumLsElem()
   }
 
-  class EntryDeqRespBundle(implicit p: Parameters, params: IssueBlockParams) extends Bundle {
+  class EntryDeqRespBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
     val robIdx                = new RobPtr
     val resp                  = RespType()
     val fuType                = FuType()
     val uopIdx                = OptionWrapper(params.isVecMemIQ, Output(UopIdx()))
+    val sqIdx                 = OptionWrapper(params.needFeedBackSqIdx, new SqPtr())
   }
 
   object RespType {

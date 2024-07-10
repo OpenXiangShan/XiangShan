@@ -302,7 +302,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     io.feedback(i).bits.sourceType       := selEntry.sourceType
     io.feedback(i).bits.flushState       := selEntry.flushState
     io.feedback(i).bits.dataInvalidSqIdx := DontCare
-    io.feedback(i).bits.uopIdx.get       := selEntry.uop.uopIdx
+    io.feedback(i).bits.sqIdx            := selEntry.uop.sqIdx
    }
 
   QueuePerf(uopSize, freeList.io.validCount, freeList.io.validCount === 0.U)
