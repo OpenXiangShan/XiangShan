@@ -127,6 +127,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   io.feedbackSlow.valid       := GatedValidRegNext(GatedValidRegNext(io.in.valid))
   io.feedbackSlow.bits.hit    := true.B
   io.feedbackSlow.bits.robIdx  := RegEnable(io.in.bits.uop.robIdx, io.in.valid)
+  io.feedbackSlow.bits.sqIdx   := RegEnable(io.in.bits.uop.sqIdx, io.in.valid)
   io.feedbackSlow.bits.flushState := DontCare
   io.feedbackSlow.bits.sourceType := DontCare
   io.feedbackSlow.bits.dataInvalidSqIdx := DontCare

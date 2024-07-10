@@ -61,6 +61,8 @@ case class IssueBlockParams(
 
   def isVecMemIQ: Boolean = isVecLduIQ || isVecStuIQ
 
+  def needFeedBackSqIdx: Boolean = isVecMemIQ || isStAddrIQ
+
   def numExu: Int = exuBlockParams.count(!_.fakeUnit)
 
   def numIntSrc: Int = exuBlockParams.map(_.numIntSrc).max

@@ -14,11 +14,12 @@ import xiangshan.backend.Bundles._
 import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.RdConfig._
-import xiangshan.backend.issue.{ImmExtractor, IntScheduler, MemScheduler, VfScheduler, FpScheduler}
+import xiangshan.backend.issue.{FpScheduler, ImmExtractor, IntScheduler, MemScheduler, VfScheduler}
 import xiangshan.backend.issue.EntryBundles._
 import xiangshan.backend.regfile._
 import xiangshan.backend.PcToDataPathIO
 import xiangshan.backend.fu.FuType.is0latency
+import xiangshan.mem.SqPtr
 
 class DataPath(params: BackendParams)(implicit p: Parameters) extends LazyModule {
   override def shouldBeInlined: Boolean = false
@@ -547,6 +548,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
           og0resp.valid                 := og0FailedVec2(iqIdx)(iuIdx)
           og0resp.bits.robIdx           := fromIQ(iqIdx)(iuIdx).bits.common.robIdx
           og0resp.bits.uopIdx.foreach(_ := fromIQ(iqIdx)(iuIdx).bits.common.vpu.get.vuopIdx)
+          og0resp.bits.sqIdx.foreach(_ := 0.U.asTypeOf(new SqPtr))
           og0resp.bits.resp             := RespType.block
           og0resp.bits.fuType           := fromIQ(iqIdx)(iuIdx).bits.common.fuType
 
@@ -555,6 +557,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
           og1resp.valid                 := s1_toExuValid(iqIdx)(iuIdx)
           og1resp.bits.robIdx           := s1_toExuData(iqIdx)(iuIdx).robIdx
           og1resp.bits.uopIdx.foreach(_ := s1_toExuData(iqIdx)(iuIdx).vpu.get.vuopIdx)
+          og1resp.bits.sqIdx.foreach(_ :=  0.U.asTypeOf(new SqPtr))
           // respType:  fuIdle      ->IQ entry clear
           //            fuUncertain ->IQ entry no action
           //            fuBusy      ->IQ entry issued set false, then re-issue

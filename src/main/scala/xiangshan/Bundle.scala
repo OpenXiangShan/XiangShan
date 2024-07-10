@@ -416,7 +416,7 @@ class RSFeedback(isVector: Boolean = false)(implicit p: Parameters) extends XSBu
   val flushState = Bool()
   val sourceType = RSFeedbackType()
   val dataInvalidSqIdx = new SqPtr
-  val uopIdx     = OptionWrapper(isVector, UopIdx())
+  val sqIdx = new SqPtr
 }
 
 class MemRSFeedbackIO(isVector: Boolean = false)(implicit p: Parameters) extends XSBundle {
