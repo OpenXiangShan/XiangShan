@@ -810,6 +810,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
     (f3_gpf_vec(i) || f3_crossGuestPageFault(i)) -> ExceptionType.igpf,
     f3_af_vec(i) -> ExceptionType.acf
   )))
+  // exceptionFromBackend only needs to be set for the first instruction.
+  // Other instructions in the same block may have pf or af set,
+  // which is a side effect of the first instruction and actually not necessary.
   io.toIbuffer.bits.exceptionFromBackend := (0 until PredictWidth).map {
     case 0 => f3_except_fromBackend
     case _ => false.B
