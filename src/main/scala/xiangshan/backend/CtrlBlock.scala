@@ -305,10 +305,6 @@ class CtrlBlockImp(
   decode.io.commitVType := rob.io.toDecode.commitVType
   decode.io.walkVType := rob.io.toDecode.walkVType
 
-  // spec vtype, from vtypegen to vtpebuffer
-  rob.io.fromDecode.lastSpecVType := decode.io.lastSpecVType
-  rob.io.fromDecode.specVtype := decode.io.specVtype
-
   decode.io.redirect := s1_s3_redirect.valid || s2_s4_pendingRedirectValid
   decode.io.vtypeRedirect := s1_s3_redirect.valid
 
