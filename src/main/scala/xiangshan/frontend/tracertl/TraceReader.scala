@@ -86,17 +86,17 @@ class TraceReader(implicit p: Parameters) extends TraceModule
   }
 
   // may verilator bug? the buffer write is wrong. verilog is different from waveform.
-  val BufferWriteRegNext = true
+  val BufferWriteRegNext = false
 
   val isfull = isFull(enqPtr, deqPtr)
   val freeEntryNum = hasFreeEntries(enqPtr, deqPtr)
   val workingState = RegInit(false.B)
   when (io.startSignal) { workingState := true.B }
-  val readTraceEnableForHelper = !isfull && (freeEntryNum >= TraceFetchWidth.U) && (workingState || io.startSignal)
+  val readTraceEnableForHelper = !isfull && (freeEntryNum >= TraceFetchWidth.U) && (workingState || io.startSignal) && !io.redirect.valid
   val readTraceEnableForPtr = readTraceEnableForHelper
 
   val readTraceEnableForBuffer =
-    if (BufferWriteRegNext) RegNext(readTraceEnableForHelper, init = false.B)
+    if (BufferWriteRegNext) RegNext(readTraceEnableForHelper, init = false.B) && !io.redirect.valid
     else readTraceEnableForHelper
   val enqPtrVecForBuffer = (0 until TraceFetchWidth).map(i =>
     if (BufferWriteRegNext) RegNext(enqPtr + i.U, init = 0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize)))
@@ -123,7 +123,7 @@ class TraceReader(implicit p: Parameters) extends TraceModule
 
   traceReaderHelper.clock := clock
   traceReaderHelper.reset := reset
-  traceReaderHelper.enable := readTraceEnableForHelper && !io.redirect.valid
+  traceReaderHelper.enable := readTraceEnableForHelper
 
   io.traceInsts.zipWithIndex.foreach { case (inst, i) =>
     val ptr = (deqPtr + i.U).value
@@ -133,6 +133,7 @@ class TraceReader(implicit p: Parameters) extends TraceModule
   when (io.redirect.valid) {
     enqPtr := 0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize))
     deqPtr := 0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize))
+    traceBuffer.map(_ := 0.U.asTypeOf(new TraceInstrBundle))
   }
 
 }
