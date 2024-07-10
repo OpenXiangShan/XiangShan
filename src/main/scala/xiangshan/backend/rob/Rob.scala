@@ -105,10 +105,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   val exuWBs: Seq[ValidIO[ExuOutput]] = io.writeback.filter(!_.bits.params.hasStdFu).toSeq
   val stdWBs: Seq[ValidIO[ExuOutput]] = io.writeback.filter(_.bits.params.hasStdFu).toSeq
-  val fflagsWBs = io.writeback.filter(x => x.bits.fflags.nonEmpty)
-  val exceptionWBs = io.writeback.filter(x => x.bits.exceptionVec.nonEmpty)
-  val redirectWBs = io.writeback.filter(x => x.bits.redirect.nonEmpty)
-  val vxsatWBs = io.writeback.filter(x => x.bits.vxsat.nonEmpty)
+  val fflagsWBs = io.writeback.filter(x => x.bits.fflags.nonEmpty).toSeq
+  val exceptionWBs = io.writeback.filter(x => x.bits.exceptionVec.nonEmpty).toSeq
+  val redirectWBs = io.writeback.filter(x => x.bits.redirect.nonEmpty).toSeq
+  val vxsatWBs = io.writeback.filter(x => x.bits.vxsat.nonEmpty).toSeq
 
   val numExuWbPorts = exuWBs.length
   val numStdWbPorts = stdWBs.length
