@@ -451,6 +451,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   println(s"[DataPath] s1_RCReadData.mem.size: ${s1_RCReadData.zip(toExu).filter(_._2.map(x => x.bits.params.isMemExeUnit && x.bits.params.readIntRf).reduce(_ || _)).flatMap(_._1).flatten.size}, RCRdata.mem.size: ${params.getMemExuRCReadSize}")
 
   io.toWakeupQueueRCIdx := regCache.io.toWakeupQueueRCIdx
+  io.toBypassNetworkRCData := s1_RCReadData
   regCache.io.writePorts := io.fromBypassNetwork
 
   val s1_addrOHs = Reg(MixedVec(
@@ -856,10 +857,18 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
   val fromPcTargetMem = Flipped(new PcToDataPathIO(params))
 
   val fromBypassNetwork: Vec[RCWritePort] = Vec(params.getIntExuRCWriteSize + params.getMemExuRCWriteSize, 
-    new RCWritePort(params.intSchdParams.get.rfDataWidth, RegCacheIdxWidth, params.intSchdParams.get.pregIdxWidth, params.debugEn))
+    new RCWritePort(params.intSchdParams.get.rfDataWidth, RegCacheIdxWidth, params.intSchdParams.get.pregIdxWidth, params.debugEn)
+  )
+
+  val toBypassNetworkRCData: MixedVec[MixedVec[Vec[UInt]]] = MixedVec(
+    Seq(intSchdParams, fpSchdParams, vfSchdParams, memSchdParams).map(schd => schd.issueBlockParams.map(iq => 
+      MixedVec(iq.exuBlockParams.map(exu => Output(Vec(exu.numRegSrc, UInt(exu.srcDataBitsMax.W)))))
+    )).flatten
+  )
 
   val toWakeupQueueRCIdx: Vec[UInt] = Vec(params.getIntExuRCWriteSize + params.getMemExuRCWriteSize, 
-     Output(UInt(RegCacheIdxWidth.W)))
+    Output(UInt(RegCacheIdxWidth.W))
+  )
 
   val debugIntRat  = if (params.debugEn) Some(Input(Vec(32, UInt(intSchdParams.pregIdxWidth.W)))) else None
   val debugFpRat   = if (params.debugEn) Some(Input(Vec(32, UInt(fpSchdParams.pregIdxWidth.W)))) else None
