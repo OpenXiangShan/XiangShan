@@ -229,10 +229,6 @@ class FtqToCtrlIO(implicit p: Parameters) extends XSBundle with HasBackendRedire
   val pc_mem_wen = Output(Bool())
   val pc_mem_waddr = Output(UInt(log2Ceil(FtqSize).W))
   val pc_mem_wdata = Output(new Ftq_RF_Components)
-  // newest target
-  val newest_entry_en = Output(Bool())
-  val newest_entry_target = Output(UInt(VAddrBits.W))
-  val newest_entry_ptr = Output(new FtqPtr)
 }
 
 
@@ -1079,12 +1075,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   io.toBackend.pc_mem_wen := RegNext(last_cycle_bpu_in)
   io.toBackend.pc_mem_waddr := RegEnable(last_cycle_bpu_in_idx, last_cycle_bpu_in)
   io.toBackend.pc_mem_wdata := RegEnable(bpu_in_bypass_buf_for_ifu, last_cycle_bpu_in)
-
-  // num cycle is fixed
-  val newest_entry_en: Bool = RegNext(last_cycle_bpu_in || backendRedirect.valid || ifuRedirectToBpu.valid)
-  io.toBackend.newest_entry_en := RegNext(newest_entry_en)
-  io.toBackend.newest_entry_ptr := RegEnable(newest_entry_ptr, newest_entry_en)
-  io.toBackend.newest_entry_target := RegEnable(newest_entry_target, newest_entry_en)
 
   // *********************************************************************
   // **************************** wb from exu ****************************

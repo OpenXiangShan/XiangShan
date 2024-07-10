@@ -172,9 +172,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   for (i <- 0 until DecodeWidth) {
     checkTargetIdx(i) := ibuffer.io.out(i).bits.ftqPtr.value
-    checkTarget(i) := Mux(ftq.io.toBackend.newest_entry_ptr.value === checkTargetIdx(i),
-                        ftq.io.toBackend.newest_entry_target,
-                        checkPcMem(checkTargetIdx(i) + 1.U).startAddr)
+    checkTarget(i) := checkPcMem(checkTargetIdx(i) + 1.U).startAddr
   }
 
   // commented out for this br could be the last instruction in the fetch block
