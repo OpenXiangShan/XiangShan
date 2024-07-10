@@ -60,7 +60,6 @@ trait BitFieldsVec { this: Riscv32BitInst =>
   def ZIMM_VSETVLI  : UInt  = inst(30, 20)
   def ZIMM_VSETIVLI : UInt  = inst(29, 20)
   def UIMM_VSETIVLI : UInt  = inst(19, 15)
-  def ZIMM_VTYPE    : UInt  = ZIMM_VSETIVLI(7, 0)
   def IMM5_OPIVI    : UInt  = inst(19, 15)
 
   def getInstVType : InstVType = {
@@ -89,6 +88,7 @@ class XSInstBitFields extends Riscv32BitInst
   with BitFieldsVec
 
 class InstVType extends Bundle {
+  val reserved = UInt(3.W)
   val vma = Bool()
   val vta = Bool()
   val vsew = UInt(3.W)

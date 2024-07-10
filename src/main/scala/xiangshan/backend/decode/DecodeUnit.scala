@@ -579,15 +579,25 @@ case class Imm_VSETVLI() extends Imm(11){
   override def minBitsFromInstr(instr: UInt): UInt = {
     instr(30, 20)
   }
+  /**
+    * get VType from extended imm
+    * @param extedImm
+    * @return VType
+    */
+  def getVType(extedImm: UInt): InstVType = {
+    val vtype = Wire(new InstVType)
+    vtype := extedImm(10, 0).asTypeOf(new InstVType)
+    vtype
+  }
 }
 
-case class Imm_VSETIVLI() extends Imm(13){
+case class Imm_VSETIVLI() extends Imm(15){
   override def do_toImm32(minBits: UInt): UInt = SignExt(minBits, 32)
 
   override def minBitsFromInstr(instr: UInt): UInt = {
     val rvInst: XSInstBitFields = instr.asTypeOf(new XSInstBitFields)
     val uimm5 = rvInst.UIMM_VSETIVLI
-    val vtype8 = rvInst.ZIMM_VTYPE
+    val vtype8 = rvInst.ZIMM_VSETIVLI
     Cat(uimm5, vtype8)
   }
   /**
@@ -597,12 +607,12 @@ case class Imm_VSETIVLI() extends Imm(13){
     */
   def getVType(extedImm: UInt): InstVType = {
     val vtype = Wire(new InstVType)
-    vtype := extedImm(7, 0).asTypeOf(new InstVType)
+    vtype := extedImm(9, 0).asTypeOf(new InstVType)
     vtype
   }
 
   def getAvl(extedImm: UInt): UInt = {
-    extedImm(12, 8)
+    extedImm(14, 10)
   }
 }
 
