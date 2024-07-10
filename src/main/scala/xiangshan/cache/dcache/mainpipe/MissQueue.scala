@@ -271,6 +271,10 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
 
     acquire
   }
+
+  def block_match(release_addr: UInt): Bool = {
+    reg_valid() && get_block(req.addr) === get_block(release_addr)
+  }
 }
 
 class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule 
@@ -315,6 +319,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     val refill_info = ValidIO(new MissQueueRefillInfo)
 
     val block_addr = ValidIO(UInt(PAddrBits.W))
+
+    val req_addr = ValidIO(UInt(PAddrBits.W))
 
     val req_handled_by_this_entry = Output(Bool())
 
@@ -735,6 +741,9 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   io.block_addr.valid := req_valid && w_grantlast 
   io.block_addr.bits := req.addr
 
+  io.req_addr.valid := req_valid
+  io.req_addr.bits := req.addr
+
   io.refill_info.valid := w_grantlast
   io.refill_info.bits.store_data := refill_and_store_data.asUInt
   io.refill_info.bits.store_mask := ~0.U(blockBytes.W)
@@ -820,6 +829,10 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     // block probe
     val probe_addr = Input(UInt(PAddrBits.W))
     val probe_block = Output(Bool())
+
+    // block release
+    val release_addr = Input(UInt(PAddrBits.W))
+    val release_block = Output(Bool())
 
     val full = Output(Bool())
 
@@ -1006,6 +1019,8 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   fastArbiter(entries.map(_.io.main_pipe_req), io.main_pipe_req, Some("main_pipe_req"))
 
   io.probe_block := Cat(probe_block_vec).orR
+
+  io.release_block := Cat(entries.map(e => e.io.req_addr.valid && e.io.req_addr.bits === io.release_addr) ++ Seq(miss_req_pipe_reg.block_match(io.release_addr))).orR
 
   io.full := ~Cat(entries.map(_.io.primary_ready)).andR
 

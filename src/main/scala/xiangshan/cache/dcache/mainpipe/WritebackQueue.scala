@@ -315,6 +315,8 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
     val miss_req = Flipped(Valid(UInt()))
     val block_miss_req = Output(Bool()) 
+
+    val mshr_block = Input(Bool())
   })
 
   require(cfg.nReleaseEntries > cfg.nMissEntries)
@@ -325,7 +327,7 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   val req = io.req
   val block_conflict = Wire(Bool())
 
-  req.ready := alloc && !block_conflict
+  req.ready := alloc && !block_conflict && !io.mshr_block
 
   // assign default values to output signals
   io.mem_release.valid := false.B
