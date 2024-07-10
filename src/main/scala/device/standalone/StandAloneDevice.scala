@@ -18,7 +18,7 @@ package device.standalone
 
 import chisel3._
 import chisel3.util._
-import chisel3.experimental._
+import chisel3.experimental.{annotate, ChiselAnnotation}
 import chisel3.experimental.dataview._
 import freechips.rocketchip.diplomacy._
 import org.chipsalliance.cde.config.Parameters
