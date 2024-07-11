@@ -1263,6 +1263,36 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
   XSPerfAccumulate(s"redirect_use_snapshot", io.redirect.valid && io.snpt.useSnpt)
 
+  // dynamic control flow graph
+  val dcfgKey = Wire(Vec(CommitWidth, new DCFGKeyOuterBundle))
+  val dcfgValue = Wire(Vec(CommitWidth, new DCFGValueOuterBundle))
+  val dcfgValid = Wire(Vec(CommitWidth, Bool()))
+  val dcfg = Module(new XSPerfDCFG(width = CommitWidth))
+  dcfg.io.key := dcfgKey
+  dcfg.io.value := dcfgValue
+  dcfg.io.commit_valid := dcfgValid
+  // XSPerfDCFG("dcfg", dcfgKey, dcfgValue, dcfgValid, clock, reset)
+
+  (0 until CommitWidth).foreach { i =>
+    dcfgKey(i).branchPC := io.commits.info(i).pc
+    // FIXME: when merge new backend, the nFused should be updated
+    dcfgValue(i).nFused := 1.U + Mux(CommitType.isFused(io.commits.info(i).commitType), 1.U, 0.U)
+    dcfgValue(i).isBranch := io.commits.info(i).commitType === CommitType.BRANCH
+    dcfgValid(i) := io.commits.commitValid(i) && io.commits.isCommit
+  }
+
+  // PC-ChiselMap
+  class PCChiselMapBundle extends Bundle {
+    val pc = UInt(VAddrBits.W)
+  }
+  val pcMap = ChiselMap.createTable("PC", Vec(CommitWidth, new PCChiselMapBundle), basicDB = true)
+  val pcVec = Wire(Vec(CommitWidth, Valid(new PCChiselMapBundle)))
+  pcVec.zipWithIndex.map{ case (x, i) =>
+    x.valid := io.commits.commitValid(i) && io.commits.isCommit
+    x.bits.pc := io.commits.info(i).pc
+  }
+  pcMap.log(pcVec, 1.U, "PC", clock, reset)
+
   // top-down info
   io.debugTopDown.toCore.robHeadVaddr.valid := debug_lsTopdownInfo(deqPtr.value).s1.vaddr_valid
   io.debugTopDown.toCore.robHeadVaddr.bits := debug_lsTopdownInfo(deqPtr.value).s1.vaddr_bits

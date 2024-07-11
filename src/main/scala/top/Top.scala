@@ -319,8 +319,10 @@ object TopMain extends App {
   val enableDifftest = config(DebugOptionsKey).EnableDifftest
   val enableChiselDB = config(DebugOptionsKey).EnableChiselDB
   val enableConstantin = config(DebugOptionsKey).EnableConstantin
+  val enableChiselMap = true
   Constantin.init(enableConstantin && !envInFPGA)
   ChiselDB.init(enableChiselDB && !envInFPGA)
+  ChiselMap.init(enable = enableChiselMap && !envInFPGA)
 
   val soc = if (config(SoCParamsKey).UseXSNoCTop)
     DisableMonitors(p => LazyModule(new XSNoCTop()(p)))(config)

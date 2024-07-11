@@ -25,7 +25,7 @@ import device.{AXI4MemorySlave, SimJTAG}
 import difftest._
 import freechips.rocketchip.amba.axi4.AXI4Bundle
 import freechips.rocketchip.diplomacy.{DisableMonitors, LazyModule}
-import utility.{ChiselDB, Constantin, FileRegisters, GTimer}
+import utility.{ChiselDB, ChiselMap, Constantin, FileRegisters, GTimer}
 import xiangshan.DebugOptionsKey
 
 class SimTop(implicit p: Parameters) extends Module {
@@ -107,8 +107,10 @@ object SimTop extends App {
   val envInFPGA = config(DebugOptionsKey).FPGAPlatform
   val enableChiselDB = config(DebugOptionsKey).EnableChiselDB
   val enableConstantin = config(DebugOptionsKey).EnableConstantin
+  val enableChiselMap = true // config(DebugOptionsKey).EnableChiselMap
   Constantin.init(enableConstantin && !envInFPGA)
   ChiselDB.init(enableChiselDB && !envInFPGA)
+  ChiselMap.init(enableChiselMap && !envInFPGA)
 
   Generator.execute(
     firrtlOpts,
@@ -118,6 +120,7 @@ object SimTop extends App {
 
   // tools: write cpp files
   ChiselDB.addToFileRegisters
+  ChiselMap.addToFileRegisters
   Constantin.addToFileRegisters
   FileRegisters.write(fileDir = "./build")
 }
