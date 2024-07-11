@@ -26,6 +26,8 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.Bundles._
 import xiangshan.mem._
 import xiangshan.backend.fu.FuType
+import xiangshan.backend.fu.FuConfig._
+import xiangshan.backend.datapath.NewPipelineConnect
 import freechips.rocketchip.diplomacy.BufferParams
 
 class MBufferBundle(implicit p: Parameters) extends VLSUBundle{
@@ -279,7 +281,9 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     }
   }
    val selPolicy = SelectOne("circ", uopFinish, deqWidth) // select one entry to deq
-   for(((port, lsqport), i) <- (io.uopWriteback zip io.toLsq).zipWithIndex){
+   private val pipelineOut  = Wire(Vec(deqWidth, DecoupledIO(new MemExuOutput(isVector = true))))
+   private val writeBackOut = Wire(Vec(deqWidth, DecoupledIO(new MemExuOutput(isVector = true))))
+   for(((port, lsqport), i) <- (pipelineOut zip io.toLsq).zipWithIndex){
     val canGo    = port.ready
     val (selValid, selOHVec) = selPolicy.getNthOH(i + 1)
     val entryIdx = OHToUInt(selOHVec)
@@ -306,6 +310,15 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     io.feedback(i).bits.flushState       := selEntry.flushState
     io.feedback(i).bits.dataInvalidSqIdx := DontCare
     io.feedback(i).bits.sqIdx            := selEntry.uop.sqIdx
+    // pipeline connect
+    NewPipelineConnect(
+      port, writeBackOut(i), writeBackOut(i).fire,
+      Mux(port.fire,
+        selEntry.uop.robIdx.needFlush(io.redirect),
+        writeBackOut(i).bits.uop.robIdx.needFlush(io.redirect)),
+      Option(s"VMergebufferPipelineConnect${i}")
+    )
+     io.uopWriteback(i)                  <> writeBackOut(i)
    }
 
   QueuePerf(uopSize, freeList.io.validCount, freeList.io.validCount === 0.U)
