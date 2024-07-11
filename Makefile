@@ -1,5 +1,6 @@
 #***************************************************************************************
-# Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+# Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+# Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 # Copyright (c) 2020-2021 Peng Cheng Laboratory
 #
 # XiangShan is licensed under Mulan PSL v2.
@@ -15,51 +16,45 @@
 #***************************************************************************************
 
 BUILD_DIR = ./build
+RTL_DIR = $(BUILD_DIR)/rtl
 
-TOP = XSTop
+TOP = $(XSTOP_PREFIX)XSTop
 SIM_TOP = SimTop
 
 FPGATOP = top.TopMain
 SIMTOP  = top.SimTop
 
-TOP_V = $(BUILD_DIR)/$(TOP).v
-SIM_TOP_V = $(BUILD_DIR)/$(SIM_TOP).v
+RTL_SUFFIX ?= sv
+TOP_V = $(RTL_DIR)/$(TOP).$(RTL_SUFFIX)
+SIM_TOP_V = $(RTL_DIR)/$(SIM_TOP).$(RTL_SUFFIX)
 
 SCALA_FILE = $(shell find ./src/main/scala -name '*.scala')
 TEST_FILE = $(shell find ./src/test/scala -name '*.scala')
 
 MEM_GEN = ./scripts/vlsi_mem_gen
 MEM_GEN_SEP = ./scripts/gen_sep_mem.sh
-SPLIT_VERILOG = ./scripts/split_verilog.sh
 
-IMAGE  ?= temp
 CONFIG ?= DefaultConfig
 NUM_CORES ?= 1
-MFC ?= 0
+MFC ?= 1
 
-# firtool check and download
-FIRTOOL_VERSION = 1.61.0
-FIRTOOL_URL = https://github.com/llvm/circt/releases/download/firtool-$(FIRTOOL_VERSION)/firrtl-bin-linux-x64.tar.gz
-FIRTOOL_PATH = $(shell which firtool 2>/dev/null)
-CACHE_FIRTOOL_PATH = $(HOME)/.cache/xiangshan/firtool-$(FIRTOOL_VERSION)/bin/firtool
-ifeq ($(MFC),1)
-ifeq ($(FIRTOOL_PATH),)
-ifeq ($(wildcard $(CACHE_FIRTOOL_PATH)),)
-$(info [INFO] Firtool not found in your PATH.)
-$(info [INFO] Downloading from $(FIRTOOL_URL))
-$(shell mkdir -p $(HOME)/.cache/xiangshan && curl -L $(FIRTOOL_URL) | tar -xzC $(HOME)/.cache/xiangshan)
+ifneq ($(shell echo "$(MAKECMDGOALS)" | grep ' '),)
+$(error At most one target can be specified)
 endif
-FIRTOOL_ARGS = --firtool-binary-path $(CACHE_FIRTOOL_PATH)
-endif
+
+ifeq ($(MAKECMDGOALS),)
+GOALS = verilog
+else
+GOALS = $(MAKECMDGOALS)
 endif
 
 # common chisel args
 ifeq ($(MFC),1)
 CHISEL_VERSION = chisel
-FPGA_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(TOP).v.conf"
-SIM_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(SIM_TOP).v.conf"
-MFC_ARGS = --dump-fir $(FIRTOOL_ARGS) \
-           --firtool-opt "-O=release --disable-annotation-unknown --lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing"
+FPGA_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(TOP).$(RTL_SUFFIX).conf"
+SIM_MEM_ARGS = --firtool-opt "--repl-seq-mem --repl-seq-mem-file=$(SIM_TOP).$(RTL_SUFFIX).conf"
+MFC_ARGS = --dump-fir --target systemverilog --split-verilog \
+           --firtool-opt "-O=release --disable-annotation-unknown --lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing,locationInfoStyle=none"
 RELEASE_ARGS += $(MFC_ARGS)
 DEBUG_ARGS += $(MFC_ARGS)
 PLDM_ARGS += $(MFC_ARGS)
@@ -67,6 +62,18 @@ else
 CHISEL_VERSION = chisel3
 FPGA_MEM_ARGS = --infer-rw --repl-seq-mem -c:$(FPGATOP):-o:$(@D)/$(@F).conf --gen-mem-verilog full
 SIM_MEM_ARGS = --infer-rw --repl-seq-mem -c:$(SIMTOP):-o:$(@D)/$(@F).conf --gen-mem-verilog full
+endif
+
+ifneq ($(XSTOP_PREFIX),)
+RELEASE_ARGS += --xstop-prefix $(XSTOP_PREFIX)
+DEBUG_ARGS += --xstop-prefix $(XSTOP_PREFIX)
+PLDM_ARGS += --xstop-prefix $(XSTOP_PREFIX)
+endif
+
+ifeq ($(IMSIC_USE_TL),1)
+RELEASE_ARGS += --imsic-use-tl
+DEBUG_ARGS += --imsic-use-tl
+PLDM_ARGS += --imsic-use-tl
 endif
 
 # co-simulation with DRAMsim3
@@ -87,17 +94,33 @@ ifeq ($(WITH_ROLLINGDB),1)
 override SIM_ARGS += --with-rollingdb
 endif
 
+# enable ResetGen
+ifeq ($(WITH_RESETGEN),1)
+override SIM_ARGS += --reset-gen
+endif
+
+# run with disable all perf
+ifeq ($(DISABLE_PERF),1)
+override SIM_ARGS += --disable-perf
+endif
+
+# run with disable all db
+ifeq ($(DISABLE_ALWAYSDB),1)
+override SIM_ARGS += --disable-alwaysdb
+endif
+
 # dynamic switch CONSTANTIN
-ifeq ($(WITH_CONSTANTIN),0)
-$(info disable WITH_CONSTANTIN)
-else
+ifeq ($(WITH_CONSTANTIN),1)
 override SIM_ARGS += --with-constantin
 endif
 
 # emu for the release version
-RELEASE_ARGS += --disable-all --remove-assert --fpga-platform
+RELEASE_ARGS += --fpga-platform --disable-all --remove-assert --reset-gen
 DEBUG_ARGS   += --enable-difftest
-PLDM_ARGS += --disable-all --fpga-platform
+PLDM_ARGS    += --fpga-platform --enable-difftest
+ifeq ($(GOALS),verilog)
+RELEASE_ARGS += --disable-always-basic-diff
+endif
 ifeq ($(RELEASE),1)
 override SIM_ARGS += $(RELEASE_ARGS)
 else ifeq ($(PLDM),1)
@@ -107,9 +130,12 @@ override SIM_ARGS += $(DEBUG_ARGS)
 endif
 
 TIMELOG = $(BUILD_DIR)/time.log
-TIME_CMD = time -a -o $(TIMELOG)
+TIME_CMD = time -avp -o $(TIMELOG)
 
-SED_CMD = sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g'
+ifeq ($(PLDM),1)
+SED_IFNDEF = `ifndef SYNTHESIS	// src/main/scala/device/RocketDebugWrapper.scala
+SED_ENDIF  = `endif // not def SYNTHESIS
+endif
 
 .DEFAULT_GOAL = verilog
 
@@ -119,13 +145,11 @@ help:
 $(TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
 	$(TIME_CMD) mill -i xiangshan[$(CHISEL_VERSION)].runMain $(FPGATOP)   \
-		-td $(@D) --config $(CONFIG) $(FPGA_MEM_ARGS)                    \
+		--target-dir $(@D) --config $(CONFIG) $(FPGA_MEM_ARGS)        \
 		--num-cores $(NUM_CORES) $(RELEASE_ARGS)
 ifeq ($(MFC),1)
-	$(SPLIT_VERILOG) $(BUILD_DIR) $(TOP).v
-	$(MEM_GEN_SEP) "$(MEM_GEN)" "$(TOP_V).conf" "$(BUILD_DIR)"
+	$(MEM_GEN_SEP) "$(MEM_GEN)" "$@.conf" "$(@D)"
 endif
-	$(SED_CMD) $@
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
 	@sed -i 's/^/\/\// ' .__head__
@@ -138,16 +162,14 @@ verilog: $(TOP_V)
 
 $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
-	@echo "\n[mill] Generating Verilog files..." > $(TIMELOG)
+	@echo -e "\n[mill] Generating Verilog files..." > $(TIMELOG)
 	@date -R | tee -a $(TIMELOG)
 	$(TIME_CMD) mill -i xiangshan[$(CHISEL_VERSION)].test.runMain $(SIMTOP)    \
-		-td $(@D) --config $(CONFIG) $(SIM_MEM_ARGS)                          \
-		--num-cores $(NUM_CORES) $(SIM_ARGS)
+		--target-dir $(@D) --config $(CONFIG) $(SIM_MEM_ARGS)              \
+		--num-cores $(NUM_CORES) $(SIM_ARGS) --full-stacktrace
 ifeq ($(MFC),1)
-	$(SPLIT_VERILOG) $(BUILD_DIR) $(SIM_TOP).v
-	$(MEM_GEN_SEP) "$(MEM_GEN)" "$(SIM_TOP_V).conf" "$(BUILD_DIR)"
+	$(MEM_GEN_SEP) "$(MEM_GEN)" "$@.conf" "$(@D)"
 endif
-	$(SED_CMD) $@
 	@git log -n 1 >> .__head__
 	@git diff >> .__diff__
 	@sed -i 's/^/\/\// ' .__head__
@@ -156,13 +178,17 @@ endif
 	@mv .__out__ $@
 	@rm .__head__ .__diff__
 ifeq ($(PLDM),1)
-	sed -i -e 's/$$fatal/$$finish/g' $(SIM_TOP_V)
-	sed -i -e 's|`ifndef SYNTHESIS	// src/main/scala/device/RocketDebugWrapper.scala:141:11|`ifdef SYNTHESIS	// src/main/scala/device/RocketDebugWrapper.scala:141:11|g' $(SIM_TOP_V)
+	sed -i -e 's/$$fatal/$$finish/g' $(RTL_DIR)/*.$(RTL_SUFFIX)
+	sed -i -e '/sed/! { \|$(SED_IFNDEF)|, \|$(SED_ENDIF)| { \|$(SED_IFNDEF)|d; \|$(SED_ENDIF)|d; } }' $(RTL_DIR)/*.$(RTL_SUFFIX)
 else
-	sed -i -e 's/$$fatal/xs_assert(`__LINE__)/g' $(SIM_TOP_V)
+ifeq ($(ENABLE_XPROP),1)
+	sed -i -e "s/\$$fatal/assert(1\'b0)/g" $(RTL_DIR)/*.$(RTL_SUFFIX)
+else
+	sed -i -e 's/$$fatal/xs_assert_v2(`__FILE__, `__LINE__)/g' $(RTL_DIR)/*.$(RTL_SUFFIX)
+endif
 endif
 ifeq ($(MFC),1)
-	sed -i -e "s/\$$error(/\$$fwrite(32\'h80000002, /g" $(SIM_TOP_V)
+	sed -i -e "s/\$$error(/\$$fwrite(32\'h80000002, /g" $(RTL_DIR)/*.$(RTL_SUFFIX)
 endif
 
 sim-verilog: $(SIM_TOP_V)
@@ -186,15 +212,30 @@ idea:
 
 # verilator simulation
 emu: sim-verilog
-	$(MAKE) -C ./difftest emu SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
+	$(MAKE) -C ./difftest emu SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
 
 emu-run: emu
-	$(MAKE) -C ./difftest emu-run SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
+	$(MAKE) -C ./difftest emu-run SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
 
 # vcs simulation
-simv:
-	$(MAKE) -C ./difftest simv SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES)
+simv: sim-verilog
+	$(MAKE) -C ./difftest simv SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
+
+simv-run:
+	$(MAKE) -C ./difftest simv-run SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
+
+# palladium simulation
+pldm-build: sim-verilog
+	$(MAKE) -C ./difftest pldm-build SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
+
+pldm-run:
+	$(MAKE) -C ./difftest pldm-run SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
+
+pldm-debug:
+	$(MAKE) -C ./difftest pldm-debug SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
 
 include Makefile.test
+
+include src/main/scala/device/standalone/standalone_device.mk
 
 .PHONY: verilog sim-verilog emu clean help init bump bsp $(REF_SO)

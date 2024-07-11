@@ -8,15 +8,20 @@ import test.types.AnnotationSeq
 import org.scalatest.flatspec._
 import org.scalatest.matchers.should._
 import top.{ArgParser, DefaultConfig}
+import xiangshan.backend.regfile.IntPregParams
 
 abstract class XSTester extends AnyFlatSpec with ChiselScalatestTester with Matchers with HasTestAnnos {
   behavior of "XiangShan Module"
   val defaultConfig = (new DefaultConfig)
-  implicit val config = defaultConfig.alterPartial({
+  implicit val config: org.chipsalliance.cde.config.Parameters = defaultConfig.alterPartial({
     // Get XSCoreParams and pass it to the "small module"
     case XSCoreParamsKey => defaultConfig(XSTileKey).head.copy(
       // Example of how to change params
-      IssQueSize = 12
+      intPreg = IntPregParams(
+        numEntries = 64,
+        numRead = Some(14),
+        numWrite = Some(8),
+      ),
     )
   })
 }

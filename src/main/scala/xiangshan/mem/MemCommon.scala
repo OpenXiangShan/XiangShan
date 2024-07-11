@@ -20,14 +20,16 @@ package xiangshan.mem
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import xiangshan._
-import utils._
 import utility._
+import utils._
+import xiangshan._
+import xiangshan.backend.Bundles.{DynInst, MemExuInput}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.cache._
 import xiangshan.backend.fu.FenceToSbuffer
 import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.mem.prefetch.PrefetchReqBundle
+import math._
 
 object genWmask {
   def apply(addr: UInt, sizeEncode: UInt): UInt = {
@@ -73,9 +75,13 @@ object shiftMaskToLow {
   }
 }
 
-class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with HasDCacheParameters{
+class LsPipelineBundle(implicit p: Parameters) extends XSBundle
+  with HasDCacheParameters
+  with HasVLSUParameters {
+  val uop = new DynInst
   val vaddr = UInt(VAddrBits.W)
   val paddr = UInt(PAddrBits.W)
+  val gpaddr = UInt(GPAddrBits.W)
   // val func = UInt(6.W)
   val mask = UInt((VLEN/8).W)
   val data = UInt((VLEN+1).W)
@@ -84,9 +90,9 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
   val miss = Bool()
   val tlbMiss = Bool()
   val ptwBack = Bool()
+  val af = Bool()
   val mmio = Bool()
   val atomic = Bool()
-  val rsIdx = UInt(log2Up(IssQueSize).W)
 
   val forwardMask = Vec(VLEN/8, Bool())
   val forwardData = Vec(VLEN/8, UInt(8.W))
@@ -95,6 +101,26 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
   val isPrefetch = Bool()
   val isHWPrefetch = Bool()
   def isSWPrefetch = isPrefetch && !isHWPrefetch
+
+  // vector
+  val isvec = Bool()
+  val isLastElem = Bool()
+  val is128bit = Bool()
+  val uop_unit_stride_fof = Bool()
+  val usSecondInv = Bool()
+  val elemIdx = UInt(elemIdxBits.W)
+  val alignedType = UInt(alignTypeBits.W)
+  val mbIndex = UInt(max(vlmBindexBits, vsmBindexBits).W)
+  // val rob_idx_valid = Vec(2,Bool())
+  // val inner_idx = Vec(2,UInt(3.W))
+  // val rob_idx = Vec(2,new RobPtr)
+  val reg_offset = UInt(vOffsetBits.W)
+  val elemIdxInsideVd = UInt(elemIdxBits.W)
+  // val offset = Vec(2,UInt(4.W))
+  val vecActive = Bool() // 1: vector active element or scala mem operation, 0: vector not active element
+  val is_first_ele = Bool()
+  // val flowPtr = new VlflowPtr() // VLFlowQueue ptr
+  // val sflowPtr = new VsFlowPtr() // VSFlowQueue ptr
 
   // For debug usage
   val isFirstIssue = Bool()
@@ -117,7 +143,7 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundleWithMicroOp with 
   val delayedLoadError = Bool()
   val lateKill = Bool()
   val feedbacked = Bool()
-
+  val ldCancel = ValidUndirectioned(UInt(log2Ceil(LoadPipelineWidth).W))
   // loadQueueReplay index.
   val schedIndex = UInt(log2Up(LoadQueueReplaySize).W)
 }
@@ -126,26 +152,41 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
   val meta_prefetch = UInt(L1PfSourceBits.W)
   val meta_access = Bool()
 
-  def fromLsPipelineBundle(input: LsPipelineBundle, latch: Boolean = false) = {
-    if (latch) vaddr := RegNext(input.vaddr) else vaddr := input.vaddr
-    if (latch) paddr := RegNext(input.paddr) else paddr := input.paddr
-    if (latch) mask := RegNext(input.mask) else mask := input.mask
-    if (latch) data := RegNext(input.data) else data := input.data
-    if (latch) uop := RegNext(input.uop) else uop := input.uop
-    if (latch) wlineflag := RegNext(input.wlineflag) else wlineflag := input.wlineflag
-    if (latch) miss := RegNext(input.miss) else miss := input.miss
-    if (latch) tlbMiss := RegNext(input.tlbMiss) else tlbMiss := input.tlbMiss
-    if (latch) ptwBack := RegNext(input.ptwBack) else ptwBack := input.ptwBack
-    if (latch) mmio := RegNext(input.mmio) else mmio := input.mmio
-    if (latch) rsIdx := RegNext(input.rsIdx) else rsIdx := input.rsIdx
-    if (latch) forwardMask := RegNext(input.forwardMask) else forwardMask := input.forwardMask
-    if (latch) forwardData := RegNext(input.forwardData) else forwardData := input.forwardData
-    if (latch) isPrefetch := RegNext(input.isPrefetch) else isPrefetch := input.isPrefetch
-    if (latch) isHWPrefetch := RegNext(input.isHWPrefetch) else isHWPrefetch := input.isHWPrefetch
-    if (latch) isFirstIssue := RegNext(input.isFirstIssue) else isFirstIssue := input.isFirstIssue
-    if (latch) hasROBEntry := RegNext(input.hasROBEntry) else hasROBEntry := input.hasROBEntry
-    if (latch) dcacheRequireReplay := RegNext(input.dcacheRequireReplay) else dcacheRequireReplay := input.dcacheRequireReplay
-    if (latch) schedIndex := RegNext(input.schedIndex) else schedIndex := input.schedIndex
+  def fromLsPipelineBundle(input: LsPipelineBundle, latch: Boolean = false, enable: Bool = true.B) = {
+    if (latch) vaddr := RegEnable(input.vaddr, enable) else vaddr := input.vaddr
+    if (latch) paddr := RegEnable(input.paddr, enable) else paddr := input.paddr
+    if (latch) gpaddr := RegEnable(input.gpaddr, enable) else gpaddr := input.gpaddr
+    if (latch) mask := RegEnable(input.mask, enable) else mask := input.mask
+    if (latch) data := RegEnable(input.data, enable) else data := input.data
+    if (latch) uop := RegEnable(input.uop, enable) else uop := input.uop
+    if (latch) wlineflag := RegEnable(input.wlineflag, enable) else wlineflag := input.wlineflag
+    if (latch) miss := RegEnable(input.miss, enable) else miss := input.miss
+    if (latch) tlbMiss := RegEnable(input.tlbMiss, enable) else tlbMiss := input.tlbMiss
+    if (latch) ptwBack := RegEnable(input.ptwBack, enable) else ptwBack := input.ptwBack
+    if (latch) af := RegEnable(input.af, enable) else af := input.af
+    if (latch) mmio := RegEnable(input.mmio, enable) else mmio := input.mmio
+    if (latch) forwardMask := RegEnable(input.forwardMask, enable) else forwardMask := input.forwardMask
+    if (latch) forwardData := RegEnable(input.forwardData, enable) else forwardData := input.forwardData
+    if (latch) isPrefetch := RegEnable(input.isPrefetch, enable) else isPrefetch := input.isPrefetch
+    if (latch) isHWPrefetch := RegEnable(input.isHWPrefetch, enable) else isHWPrefetch := input.isHWPrefetch
+    if (latch) isFirstIssue := RegEnable(input.isFirstIssue, enable) else isFirstIssue := input.isFirstIssue
+    if (latch) hasROBEntry := RegEnable(input.hasROBEntry, enable) else hasROBEntry := input.hasROBEntry
+    if (latch) dcacheRequireReplay := RegEnable(input.dcacheRequireReplay, enable) else dcacheRequireReplay := input.dcacheRequireReplay
+    if (latch) schedIndex := RegEnable(input.schedIndex, enable) else schedIndex := input.schedIndex
+    if (latch) isvec               := RegEnable(input.isvec, enable)               else isvec               := input.isvec
+    if (latch) isLastElem          := RegEnable(input.isLastElem, enable)          else isLastElem          := input.isLastElem
+    if (latch) is128bit            := RegEnable(input.is128bit, enable)            else is128bit            := input.is128bit
+    if (latch) vecActive           := RegEnable(input.vecActive, enable)           else vecActive           := input.vecActive
+    if (latch) is_first_ele        := RegEnable(input.is_first_ele, enable)        else is_first_ele        := input.is_first_ele
+    if (latch) uop_unit_stride_fof := RegEnable(input.uop_unit_stride_fof, enable) else uop_unit_stride_fof := input.uop_unit_stride_fof
+    if (latch) usSecondInv         := RegEnable(input.usSecondInv, enable)         else usSecondInv         := input.usSecondInv
+    if (latch) reg_offset          := RegEnable(input.reg_offset, enable)          else reg_offset          := input.reg_offset
+    if (latch) elemIdx             := RegEnable(input.elemIdx, enable)             else elemIdx             := input.elemIdx
+    if (latch) alignedType         := RegEnable(input.alignedType, enable)         else alignedType         := input.alignedType
+    if (latch) mbIndex             := RegEnable(input.mbIndex, enable)             else mbIndex             := input.mbIndex
+    if (latch) elemIdxInsideVd     := RegEnable(input.elemIdxInsideVd, enable)     else elemIdxInsideVd     := input.elemIdxInsideVd
+    // if (latch) flowPtr             := RegEnable(input.flowPtr, enable)             else flowPtr             := input.flowPtr
+    // if (latch) sflowPtr            := RegEnable(input.sflowPtr, enable)            else sflowPtr            := input.sflowPtr
 
     meta_prefetch := DontCare
     meta_access := DontCare
@@ -162,13 +203,15 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     delayedLoadError := DontCare
     lateKill := DontCare
     feedbacked := DontCare
+    ldCancel := DontCare
   }
 
   def asPrefetchReqBundle(): PrefetchReqBundle = {
     val res = Wire(new PrefetchReqBundle)
     res.vaddr := this.vaddr
     res.paddr := this.paddr
-    res.pc    := this.uop.cf.pc
+    res.pc    := this.uop.pc
+    res.miss  := this.miss
 
     res
   }
@@ -184,50 +227,57 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
   val data_wen_dup = Vec(6, Bool()) // dirty reg dup
 
 
-  def fromLsPipelineBundle(input: LsPipelineBundle, latch: Boolean = false) = {
-    if(latch) vaddr := RegNext(input.vaddr) else vaddr := input.vaddr
-    if(latch) paddr := RegNext(input.paddr) else paddr := input.paddr
-    if(latch) mask := RegNext(input.mask) else mask := input.mask
-    if(latch) data := RegNext(input.data) else data := input.data
-    if(latch) uop := RegNext(input.uop) else uop := input.uop
-    if(latch) wlineflag := RegNext(input.wlineflag) else wlineflag := input.wlineflag
-    if(latch) miss := RegNext(input.miss) else miss := input.miss
-    if(latch) tlbMiss := RegNext(input.tlbMiss) else tlbMiss := input.tlbMiss
-    if(latch) ptwBack := RegNext(input.ptwBack) else ptwBack := input.ptwBack
-    if(latch) mmio := RegNext(input.mmio) else mmio := input.mmio
-    if(latch) atomic := RegNext(input.atomic) else atomic := input.atomic
-    if(latch) rsIdx := RegNext(input.rsIdx) else rsIdx := input.rsIdx
-    if(latch) forwardMask := RegNext(input.forwardMask) else forwardMask := input.forwardMask
-    if(latch) forwardData := RegNext(input.forwardData) else forwardData := input.forwardData
-    if(latch) isPrefetch := RegNext(input.isPrefetch) else isPrefetch := input.isPrefetch
-    if(latch) isHWPrefetch := RegNext(input.isHWPrefetch) else isHWPrefetch := input.isHWPrefetch
-    if(latch) isFirstIssue := RegNext(input.isFirstIssue) else isFirstIssue := input.isFirstIssue
-    if(latch) hasROBEntry := RegNext(input.hasROBEntry) else hasROBEntry := input.hasROBEntry
-    if(latch) isLoadReplay := RegNext(input.isLoadReplay) else isLoadReplay := input.isLoadReplay
-    if(latch) isFastPath := RegNext(input.isFastPath) else isFastPath := input.isFastPath
-    if(latch) isFastReplay := RegNext(input.isFastReplay) else isFastReplay := input.isFastReplay
-    if(latch) mshrid := RegNext(input.mshrid) else mshrid := input.mshrid
-    if(latch) forward_tlDchannel := RegNext(input.forward_tlDchannel) else forward_tlDchannel := input.forward_tlDchannel
-    if(latch) replayCarry := RegNext(input.replayCarry) else replayCarry := input.replayCarry
-    if(latch) dcacheRequireReplay := RegNext(input.dcacheRequireReplay) else dcacheRequireReplay := input.dcacheRequireReplay
-    if(latch) schedIndex := RegNext(input.schedIndex) else schedIndex := input.schedIndex
-    if(latch) handledByMSHR := RegNext(input.handledByMSHR) else handledByMSHR := input.handledByMSHR
-    if(latch) replacementUpdated := RegNext(input.replacementUpdated) else replacementUpdated := input.replacementUpdated
-    if(latch) missDbUpdated := RegNext(input.missDbUpdated) else missDbUpdated := input.missDbUpdated
-    if(latch) delayedLoadError := RegNext(input.delayedLoadError) else delayedLoadError := input.delayedLoadError
-    if(latch) lateKill := RegNext(input.lateKill) else lateKill := input.lateKill
-    if(latch) feedbacked := RegNext(input.feedbacked) else feedbacked := input.feedbacked
+  def fromLsPipelineBundle(input: LsPipelineBundle, latch: Boolean = false, enable: Bool = true.B) = {
+    if(latch) vaddr := RegEnable(input.vaddr, enable) else vaddr := input.vaddr
+    if(latch) paddr := RegEnable(input.paddr, enable) else paddr := input.paddr
+    if(latch) gpaddr := RegEnable(input.gpaddr, enable) else gpaddr := input.gpaddr
+    if(latch) mask := RegEnable(input.mask, enable) else mask := input.mask
+    if(latch) data := RegEnable(input.data, enable) else data := input.data
+    if(latch) uop := RegEnable(input.uop, enable) else uop := input.uop
+    if(latch) wlineflag := RegEnable(input.wlineflag, enable) else wlineflag := input.wlineflag
+    if(latch) miss := RegEnable(input.miss, enable) else miss := input.miss
+    if(latch) tlbMiss := RegEnable(input.tlbMiss, enable) else tlbMiss := input.tlbMiss
+    if(latch) ptwBack := RegEnable(input.ptwBack, enable) else ptwBack := input.ptwBack
+    if(latch) mmio := RegEnable(input.mmio, enable) else mmio := input.mmio
+    if(latch) atomic := RegEnable(input.atomic, enable) else atomic := input.atomic
+    if(latch) forwardMask := RegEnable(input.forwardMask, enable) else forwardMask := input.forwardMask
+    if(latch) forwardData := RegEnable(input.forwardData, enable) else forwardData := input.forwardData
+    if(latch) isPrefetch := RegEnable(input.isPrefetch, enable) else isPrefetch := input.isPrefetch
+    if(latch) isHWPrefetch := RegEnable(input.isHWPrefetch, enable) else isHWPrefetch := input.isHWPrefetch
+    if(latch) isFirstIssue := RegEnable(input.isFirstIssue, enable) else isFirstIssue := input.isFirstIssue
+    if(latch) hasROBEntry := RegEnable(input.hasROBEntry, enable) else hasROBEntry := input.hasROBEntry
+    if(latch) isLoadReplay := RegEnable(input.isLoadReplay, enable) else isLoadReplay := input.isLoadReplay
+    if(latch) isFastPath := RegEnable(input.isFastPath, enable) else isFastPath := input.isFastPath
+    if(latch) isFastReplay := RegEnable(input.isFastReplay, enable) else isFastReplay := input.isFastReplay
+    if(latch) mshrid := RegEnable(input.mshrid, enable) else mshrid := input.mshrid
+    if(latch) forward_tlDchannel := RegEnable(input.forward_tlDchannel, enable) else forward_tlDchannel := input.forward_tlDchannel
+    if(latch) replayCarry := RegEnable(input.replayCarry, enable) else replayCarry := input.replayCarry
+    if(latch) dcacheRequireReplay := RegEnable(input.dcacheRequireReplay, enable) else dcacheRequireReplay := input.dcacheRequireReplay
+    if(latch) schedIndex := RegEnable(input.schedIndex, enable) else schedIndex := input.schedIndex
+    if(latch) handledByMSHR := RegEnable(input.handledByMSHR, enable) else handledByMSHR := input.handledByMSHR
+    if(latch) replacementUpdated := RegEnable(input.replacementUpdated, enable) else replacementUpdated := input.replacementUpdated
+    if(latch) missDbUpdated := RegEnable(input.missDbUpdated, enable) else missDbUpdated := input.missDbUpdated
+    if(latch) delayedLoadError := RegEnable(input.delayedLoadError, enable) else delayedLoadError := input.delayedLoadError
+    if(latch) lateKill := RegEnable(input.lateKill, enable) else lateKill := input.lateKill
+    if(latch) feedbacked := RegEnable(input.feedbacked, enable) else feedbacked := input.feedbacked
+    if(latch) isvec               := RegEnable(input.isvec, enable)               else isvec               := input.isvec
+    if(latch) is128bit            := RegEnable(input.is128bit, enable)            else is128bit            := input.is128bit
+    if(latch) vecActive           := RegEnable(input.vecActive, enable)           else vecActive           := input.vecActive
+    if(latch) uop_unit_stride_fof := RegEnable(input.uop_unit_stride_fof, enable) else uop_unit_stride_fof := input.uop_unit_stride_fof
+    if(latch) reg_offset          := RegEnable(input.reg_offset, enable)          else reg_offset          := input.reg_offset
+    if(latch) mbIndex             := RegEnable(input.mbIndex, enable)             else mbIndex             := input.mbIndex
+    if(latch) elemIdxInsideVd     := RegEnable(input.elemIdxInsideVd, enable)     else elemIdxInsideVd     := input.elemIdxInsideVd
 
     rep_info := DontCare
     data_wen_dup := DontCare
   }
 }
 
-class LoadForwardQueryIO(implicit p: Parameters) extends XSBundleWithMicroOp {
+class LoadForwardQueryIO(implicit p: Parameters) extends XSBundle {
   val vaddr = Output(UInt(VAddrBits.W))
   val paddr = Output(UInt(PAddrBits.W))
   val mask = Output(UInt((VLEN/8).W))
-  override val uop = Output(new MicroOp) // for replay
+  val uop = Output(new DynInst) // for replay
   val pc = Output(UInt(VAddrBits.W)) //for debug
   val valid = Output(Bool())
 
@@ -277,7 +327,8 @@ class PipeLoadForwardQueryIO(implicit p: Parameters) extends LoadForwardQueryIO 
 //
 // Note that query req may be !ready, as dcache is releasing a block
 // If it happens, a replay from rs is needed.
-class LoadNukeQueryReq(implicit p: Parameters) extends XSBundleWithMicroOp { // provide lqIdx
+class LoadNukeQueryReq(implicit p: Parameters) extends XSBundle { // provide lqIdx
+  val uop = new DynInst
   // mask: load's data mask.
   val mask = UInt((VLEN/8).W)
 
@@ -307,6 +358,9 @@ class StoreNukeQueryIO(implicit p: Parameters) extends XSBundle {
 
   //  mask: requestor's (a store instruction) data width mask for match logic.
   val mask = UInt((VLEN/8).W)
+
+  // matchLine: if store is vector 128-bits, load unit need to compare 128-bits vaddr.
+  val matchLine = Bool()
 }
 
 // Store byte valid mask write bundle
@@ -326,7 +380,7 @@ class LoadDataFromDcacheBundle(implicit p: Parameters) extends DCacheBundle {
   val respDcacheData = UInt(VLEN.W)
   val forwardMask = Vec(VLEN/8, Bool())
   val forwardData = Vec(VLEN/8, UInt(8.W))
-  val uop = new MicroOp // for data selection, only fwen and fuOpType are used
+  val uop = new DynInst // for data selection, only fwen and fuOpType are used
   val addrOffset = UInt(4.W) // for data selection
 
   // forward tilelink D channel
@@ -360,7 +414,7 @@ class LoadDataFromDcacheBundle(implicit p: Parameters) extends DCacheBundle {
 // Load writeback data from load queue (refill)
 class LoadDataFromLQBundle(implicit p: Parameters) extends XSBundle {
   val lqData = UInt(64.W) // load queue has merged data
-  val uop = new MicroOp // for data selection, only fwen and fuOpType are used
+  val uop = new DynInst // for data selection, only fwen and fuOpType are used
   val addrOffset = UInt(3.W) // for data selection
 
   def mergedData(): UInt = {
@@ -370,8 +424,8 @@ class LoadDataFromLQBundle(implicit p: Parameters) extends XSBundle {
 
 // Bundle for load / store wait waking up
 class MemWaitUpdateReq(implicit p: Parameters) extends XSBundle {
-  val staIssue = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
-  val stdIssue = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
+  val robIdx = Vec(backendParams.StaExuCnt, ValidIO(new RobPtr))
+  val sqIdx = Vec(backendParams.StdCnt, ValidIO(new SqPtr))
 }
 
 object AddPipelineReg {

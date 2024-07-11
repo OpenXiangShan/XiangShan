@@ -48,7 +48,7 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICache
     this.startAddr := b.startAddr
     this.nextlineStart := b.nextLineAddr
     when (b.fallThruError) {
-      val nextBlockHigherTemp = Mux(startAddr(log2Ceil(PredictWidth)+instOffsetBits), b.startAddr, b.nextLineAddr)
+      val nextBlockHigherTemp = Mux(startAddr(log2Ceil(PredictWidth)+instOffsetBits), b.nextLineAddr, b.startAddr)
       val nextBlockHigher = nextBlockHigherTemp(VAddrBits-1, log2Ceil(PredictWidth)+instOffsetBits+1)
       this.nextStartAddr :=
         Cat(nextBlockHigher,
@@ -69,6 +69,7 @@ class FetchRequestBundle(implicit p: Parameters) extends XSBundle with HasICache
 class FtqICacheInfo(implicit p: Parameters)extends XSBundle with HasICacheParameters{
   val startAddr           = UInt(VAddrBits.W)
   val nextlineStart       = UInt(VAddrBits.W)
+  val ftqIdx              = new FtqPtr
   def crossCacheline =  startAddr(blockOffBits - 1) === 1.U
   def fromFtqPcBundle(b: Ftq_RF_Components) = {
     this.startAddr := b.startAddr
@@ -102,18 +103,17 @@ class PredecodeWritebackBundle(implicit p:Parameters) extends XSBundle {
   val instrRange   = Vec(PredictWidth, Bool())
 }
 
-// Ftq send req to Prefetch
-class PrefetchRequest(implicit p:Parameters) extends XSBundle {
-  val target          = UInt(VAddrBits.W)
-}
-
-class FtqPrefechBundle(implicit p:Parameters) extends XSBundle {
-  val req = DecoupledIO(new PrefetchRequest)
-}
-
 class mmioCommitRead(implicit p: Parameters) extends XSBundle {
   val mmioFtqPtr = Output(new FtqPtr)
   val mmioLastCommit = Input(Bool())
+}
+
+object ExceptionType {
+  def none = "b00".U
+  def ipf = "b01".U
+  def igpf = "b10".U
+  def acf = "b11".U
+  def width = 2
 }
 
 class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
@@ -125,11 +125,9 @@ class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val foldpc    = Vec(PredictWidth, UInt(MemPredPCWidth.W))
   val ftqPtr       = new FtqPtr
   val ftqOffset    = Vec(PredictWidth, ValidUndirectioned(UInt(log2Ceil(PredictWidth).W)))
-  val ipf          = Vec(PredictWidth, Bool())
-  val acf          = Vec(PredictWidth, Bool())
+  val exceptionType = Vec(PredictWidth, UInt(ExceptionType.width.W))
   val crossPageIPFFix = Vec(PredictWidth, Bool())
   val triggered    = Vec(PredictWidth, new TriggerCf)
-
   val topdown_info = new FrontendTopDownBundle
 }
 
@@ -256,10 +254,6 @@ class FoldedHistory(val len: Int, val compLen: Int, val max_update_num: Int)(imp
       // println(f"histLen: ${this.len}, foldedLen: $folded_len")
       for (i <- 0 until len) {
         // println(f"bit[$i], ${resArr(i).mkString}")
-        if (resArr(i).length > 2) {
-          println(f"[warning] update logic of foldest history has two or more levels of xor gates! " +
-            f"histlen:${this.len}, compLen:$compLen, at bit $i")
-        }
         if (resArr(i).length == 0) {
           println(f"[error] bits $i is not assigned in folded hist update logic! histlen:${this.len}, compLen:$compLen")
         }
@@ -433,6 +427,7 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
   val offsets = Vec(totalSlot, UInt(log2Ceil(PredictWidth).W))
   val fallThroughAddr = UInt(VAddrBits.W)
   val fallThroughErr = Bool()
+  val multiHit = Bool()
 
   val is_jal = Bool()
   val is_jalr = Bool()
@@ -506,6 +501,7 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
   }
 
   def fallThruError: Bool = hit && fallThroughErr
+  def ftbMultiHit: Bool = hit && multiHit
 
   def hit_taken_on_jmp =
     !real_slot_taken_mask().init.reduce(_||_) &&
@@ -546,7 +542,7 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
 
     val startLower        = Cat(0.U(1.W),    pc(instOffsetBits+log2Ceil(PredictWidth)-1, instOffsetBits))
     val endLowerwithCarry = Cat(entry.carry, entry.pftAddr)
-    fallThroughErr := startLower >= endLowerwithCarry
+    fallThroughErr := startLower >= endLowerwithCarry || endLowerwithCarry > (startLower + (PredictWidth).U)
     fallThroughAddr := Mux(fallThroughErr, pc + (FetchWidth * 4).U, entry.getFallThrough(pc, last_stage_entry))
   }
 
@@ -557,12 +553,9 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
 
 class SpeculativeInfo(implicit p: Parameters) extends XSBundle
   with HasBPUConst with BPUUtils {
-  val folded_hist = new AllFoldedHistories(foldedGHistInfos)
-  val afhob = new AllAheadFoldedHistoryOldestBits(foldedGHistInfos)
-  val lastBrNumOH = UInt((numBr+1).W)
   val histPtr = new CGHPtr
   val ssp = UInt(log2Up(RasSize).W)
-  val sctr = UInt(log2Up(RasCtrSize).W)
+  val sctr = UInt(RasCtrSize.W)
   val TOSW = new RASPtr
   val TOSR = new RASPtr
   val NOS = new RASPtr
@@ -586,6 +579,7 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
   def brTaken          = VecInit(full_pred.map(_.brTaken))
   def shouldShiftVec   = VecInit(full_pred.map(_.shouldShiftVec))
   def fallThruError    = VecInit(full_pred.map(_.fallThruError))
+  def ftbMultiHit      = VecInit(full_pred.map(_.ftbMultiHit))
 
   def taken = VecInit(cfiIndex.map(_.valid))
 
@@ -599,10 +593,13 @@ class BranchPredictionBundle(implicit p: Parameters) extends XSBundle
 }
 
 class BranchPredictionResp(implicit p: Parameters) extends XSBundle with HasBPUConst {
-  // val valids = Vec(3, Bool())
   val s1 = new BranchPredictionBundle
   val s2 = new BranchPredictionBundle
   val s3 = new BranchPredictionBundle
+
+  val s1_uftbHit = Bool()
+  val s1_uftbHasIndirect = Bool()
+  val s1_ftbCloseReq = Bool()
 
   val last_stage_meta = UInt(MaxMetaLength.W)
   val last_stage_spec_info = new Ftq_Redirect_SRAMEntry

@@ -23,6 +23,7 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.cache._
 import utils._
 import utility._
+import xiangshan.backend.Bundles.DynInst
 
 class LoadQueueRAR(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
@@ -33,6 +34,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   val io = IO(new Bundle() {
     // control
     val redirect = Flipped(Valid(new Redirect))
+    val vecFeedback = Vec(VecLoadPipelineWidth, Flipped(ValidIO(new FeedbackToLsqIO)))
 
     // violation query
     val query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO))
@@ -60,7 +62,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   //  Released    : DCache released.
   //
   val allocated = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B))) // The control signals need to explicitly indicate the initial value
-  val uop = Reg(Vec(LoadQueueRARSize, new MicroOp))
+  val uop = Reg(Vec(LoadQueueRARSize, new DynInst))
   val paddrModule = Module(new LqPAddrModule(
     gen = UInt(PAddrBits.W),
     numEntries = LoadQueueRARSize,
@@ -104,7 +106,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
 
   // Allocate logic
   val acceptedVec = Wire(Vec(LoadPipelineWidth, Bool()))
-  val enqIndexVec = Wire(Vec(LoadPipelineWidth, UInt()))
+  val enqIndexVec = Wire(Vec(LoadPipelineWidth, UInt(log2Up(LoadQueueRARSize).W)))
 
   for ((enq, w) <- io.query.map(_.req).zipWithIndex) {
     acceptedVec(w) := false.B
@@ -156,11 +158,18 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
 
   // when the loads that "older than" current load were writebacked,
   // current load will be released.
+  val vecLdCanceltmp = Wire(Vec(LoadQueueRARSize, Vec(VecLoadPipelineWidth, Bool())))
+  val vecLdCancel = Wire(Vec(LoadQueueRARSize, Bool()))
   for (i <- 0 until LoadQueueRARSize) {
     val deqNotBlock = !isBefore(io.ldWbPtr, uop(i).lqIdx)
     val needFlush = uop(i).robIdx.needFlush(io.redirect)
+    val fbk = io.vecFeedback
+    for (j <- 0 until VecLoadPipelineWidth) {
+      vecLdCanceltmp(i)(j) := allocated(i) && fbk(j).valid && fbk(j).bits.isFlush && uop(i).robIdx === fbk(j).bits.robidx && uop(i).uopIdx === fbk(j).bits.uopidx
+    }
+    vecLdCancel(i) := vecLdCanceltmp(i).reduce(_ || _)
 
-    when (allocated(i) && (deqNotBlock || needFlush)) {
+    when (allocated(i) && (deqNotBlock || needFlush || vecLdCancel(i))) {
       allocated(i) := false.B
       freeMaskVec(i) := true.B
     }

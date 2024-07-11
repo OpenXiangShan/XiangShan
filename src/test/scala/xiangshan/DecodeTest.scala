@@ -7,6 +7,7 @@ import chiseltest.VerilatorBackendAnnotation
 import chiseltest.simulator.VerilatorFlags
 import top.ArgParser
 import xiangshan.backend.decode.DecodeUnit
+import xiangshan.backend.regfile.IntPregParams
 import types.ChiselStage
 import xiangshan.test.types._
 import xiangshan.transforms.PrintModuleName
@@ -20,7 +21,11 @@ object DecodeMain extends App {
     // Get XSCoreParams and pass it to the "small module"
     case XSCoreParamsKey => config(XSTileKey).head.copy(
       // Example of how to change params
-      IssQueSize = 12
+      intPreg = IntPregParams(
+          numEntries = 64,
+          numRead = Some(14),
+          numWrite = Some(8),
+        ),
     )
   })
   (new ChiselStage).execute(args, Seq(

@@ -1,0 +1,42 @@
+name: Other Question
+description: Any other question about XiangShan.
+labels: 'question'
+body:
+  - type: markdown
+    attributes:
+      value: |
+        You could use English or Chineses to open an issue.
+        您可以使用中文或英文提问，我们推荐使用英文。
+
+        This template is only used for the questions that do not fit other templates. Please check other templates before using this.
+        这个 issue 此模板仅适用于其他模板无法覆盖的问题，请先确认其他模板是否适用。
+
+        Please fill in the following information so we can better understand and address your issue. Thank you!
+        请填写以下内容，以便我们更好地理解和处理您的问题。谢谢！
+  - type: checkboxes
+    id: before-start
+    attributes:
+      label: Before start
+      description: |
+        Before start, PLEASE MAKE SURE you have done these:
+        开始之前，请确保您已经做过以下事情：
+      options:
+        - label: I have read the [RISC-V ISA Manual](https://github.com/riscv/riscv-isa-manual) and this is not a RISC-V ISA question. 我已经阅读过 RISC-V 指令集手册，这不是一个指令集相关的问题。
+          required: true
+        - label: I have read the [XiangShan Documents](https://xiangshan-doc.readthedocs.io/zh_CN/latest). 我已经阅读过香山文档。
+          required: true
+        - label: I have searched the previous issues and did not find anything relevant. 我已经搜索过之前的 issue，并没有找到相关的。
+          required: true
+        - label: I have searched the previous discussions and did not find anything relevant. 我已经搜索过之前的 discussions，并没有找到相关的。
+          required: true
+        - label: I have reviewed the commit messages from the relevant commit history. 我已经浏览过相关的提交历史和提交信息。
+          required: true
+  - type: textarea
+    id: describe
+    attributes:
+      label: Describe the question
+      description: |
+        A clear and concise description of your question. 请清晰、准确地描述您的问题。
+      placeholder: 
+    validations:
+      required: true

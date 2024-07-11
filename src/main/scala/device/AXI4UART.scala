@@ -33,11 +33,13 @@ class AXI4UART
   override lazy val module = new AXI4SlaveModuleImp[UARTIO](this){
     val rxfifo = RegInit(0.U(32.W))
     val txfifo = Reg(UInt(32.W))
-    val stat = RegInit(1.U(32.W))
+    val stat = RegInit(0.U(32.W))
     val ctrl = RegInit(0.U(32.W))
 
+    val txDataPos = (4 % node.portParams.head.beatBytes) * 8;
+
     io.extra.get.out.valid := (waddr(3,0) === 4.U && in.w.fire)
-    io.extra.get.out.ch := in.w.bits.data(7,0)
+    io.extra.get.out.ch := in.w.bits.data(7 + txDataPos, txDataPos)
     io.extra.get.in.valid := (raddr(3,0) === 0.U && in.r.fire)
 
     val mapping = Map(

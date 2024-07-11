@@ -21,18 +21,19 @@ import $file.`rocket-chip`.cde.common
 import $file.`rocket-chip`.hardfloat.build
 import $file.huancun.common
 import $file.coupledL2.common
+import $file.openLLC.common
 
-val defaultScalaVersion = "2.13.10"
+val defaultScalaVersion = "2.13.14"
 
 def defaultVersions(chiselVersion: String) = chiselVersion match {
   case "chisel" => Map(
-    "chisel"        -> ivy"org.chipsalliance::chisel:6.0.0-RC1",
-    "chisel-plugin" -> ivy"org.chipsalliance:::chisel-plugin:6.0.0-RC1",
-    "chiseltest"    -> ivy"edu.berkeley.cs::chiseltest:5.0.2"
+    "chisel"        -> ivy"org.chipsalliance::chisel:6.4.0",
+    "chisel-plugin" -> ivy"org.chipsalliance:::chisel-plugin:6.4.0",
+    "chiseltest"    -> ivy"edu.berkeley.cs::chiseltest:6.0.0"
   )
   case "chisel3" => Map(
-    "chisel"        -> ivy"edu.berkeley.cs::chisel3:3.6.0",
-    "chisel-plugin" -> ivy"edu.berkeley.cs:::chisel3-plugin:3.6.0",
+    "chisel"        -> ivy"edu.berkeley.cs::chisel3:3.6.1",
+    "chisel-plugin" -> ivy"edu.berkeley.cs:::chisel3-plugin:3.6.1",
     "chiseltest"    -> ivy"edu.berkeley.cs::chiseltest:0.6.2"
   )
 }
@@ -71,9 +72,9 @@ trait RocketChip
 
   def cdeModule = cde
 
-  def mainargsIvy = ivy"com.lihaoyi::mainargs:0.5.4"
+  def mainargsIvy = ivy"com.lihaoyi::mainargs:0.7.0"
 
-  def json4sJacksonIvy = ivy"org.json4s::json4s-jackson:4.0.6"
+  def json4sJacksonIvy = ivy"org.json4s::json4s-jackson:4.0.7"
 
   object macros extends Macros
 
@@ -118,6 +119,13 @@ trait Utility extends HasChisel {
 
 }
 
+object yunsuan extends Cross[YunSuan]("chisel", "chisel3")
+trait YunSuan extends HasChisel {
+
+  override def millSourcePath = os.pwd / "yunsuan"
+
+}
+
 object huancun extends Cross[HuanCun]("chisel", "chisel3")
 trait HuanCun extends millbuild.huancun.common.HuanCunModule with HasChisel {
 
@@ -140,6 +148,18 @@ trait CoupledL2 extends millbuild.coupledL2.common.CoupledL2Module with HasChise
 
   def huancunModule: ScalaModule = huancun(crossValue)
 
+}
+
+object openLLC extends Cross[OpenLLC]("chisel", "chisel3")
+trait OpenLLC extends millbuild.openLLC.common.OpenLLCModule with HasChisel {
+
+  override def millSourcePath = os.pwd / "openLLC"
+
+  def coupledL2Module: ScalaModule = coupledL2(crossValue)
+
+  def rocketModule: ScalaModule = rocketchip(crossValue)
+
+  def utilityModule: ScalaModule = utility(crossValue)
 }
 
 object difftest extends Cross[Difftest]("chisel", "chisel3")
@@ -167,19 +187,29 @@ trait XiangShanModule extends ScalaModule {
 
   def coupledL2Module: ScalaModule
 
+  def openLLCModule: ScalaModule
+
   def fudianModule: ScalaModule
 
   def utilityModule: ScalaModule
+
+  def yunsuanModule: ScalaModule
 
   override def moduleDeps = super.moduleDeps ++ Seq(
     rocketModule,
     difftestModule,
     huancunModule,
     coupledL2Module,
+    openLLCModule,
+    yunsuanModule,
     fudianModule,
     utilityModule,
   )
 
+  val resourcesPATH = os.pwd.toString() + "/src/main/resources"
+  val envPATH = sys.env("PATH") + ":" + resourcesPATH
+
+  override def forkEnv = Map("PATH" -> envPATH)
 }
 
 object xiangshan extends Cross[XiangShan]("chisel", "chisel3")
@@ -195,25 +225,38 @@ trait XiangShan extends XiangShanModule with HasChisel {
 
   def coupledL2Module = coupledL2(crossValue)
 
+  def openLLCModule = openLLC(crossValue)
+
   def fudianModule = fudian(crossValue)
 
   def utilityModule = utility(crossValue)
 
-  override def forkArgs = Seq("-Xmx20G", "-Xss256m")
+  def yunsuanModule = yunsuan(crossValue)
+
+  override def forkArgs = Seq("-Xmx40G", "-Xss256m")
 
   override def sources = T.sources {
     super.sources() ++ Seq(PathRef(millSourcePath / "src" / crossValue / "main" / "scala"))
   }
 
+  override def ivyDeps = super.ivyDeps() ++ Agg(
+    defaultVersions(crossValue)("chiseltest"),
+  )
+
   object test extends SbtModuleTests with TestModule.ScalaTest {
-    override def forkArgs = Seq("-Xmx20G", "-Xss256m")
+    override def forkArgs = Seq("-Xmx40G", "-Xss256m")
 
     override def sources = T.sources {
-      super.sources() ++ Seq(PathRef(millSourcePath / "src" / crossValue / "test" / "scala"))
+      super.sources() ++ Seq(PathRef(this.millSourcePath / "src" / crossValue / "test" / "scala"))
     }
 
     override def ivyDeps = super.ivyDeps() ++ Agg(
       defaultVersions(crossValue)("chiseltest")
     )
+
+    val resourcesPATH = os.pwd.toString() + "/src/main/resources"
+    val envPATH = sys.env("PATH") + ":" + resourcesPATH
+
+    override def forkEnv = Map("PATH" -> envPATH)
   }
 }

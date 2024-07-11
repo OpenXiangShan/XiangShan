@@ -17,7 +17,8 @@
 package xiangshan.mem
 
 import org.chipsalliance.cde.config.Parameters
-import chisel3.experimental.{DataMirror, requireIsChiselType}
+import chisel3.experimental.requireIsChiselType
+import chisel3.reflect.DataMirror
 import chisel3._
 import chisel3.util._
 import xiangshan._

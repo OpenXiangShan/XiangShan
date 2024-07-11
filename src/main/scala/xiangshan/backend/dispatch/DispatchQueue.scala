@@ -23,33 +23,44 @@ import utils._
 import utility._
 import xiangshan._
 import xiangshan.backend.rob.RobPtr
+import xiangshan.backend.Bundles.DynInst
+import xiangshan.backend.fu.FuType
 
-class DispatchQueueIO(enqnum: Int, deqnum: Int)(implicit p: Parameters) extends XSBundle {
+class DispatchQueueIO(enqnum: Int, deqnum: Int, size: Int)(implicit p: Parameters) extends XSBundle {
   val enq = new Bundle {
     // output: dispatch queue can accept new requests
     val canAccept = Output(Bool())
     // input: need to allocate new entries (for address computing)
     val needAlloc = Vec(enqnum, Input(Bool()))
     // input: actually do the allocation (for write enable)
-    val req = Vec(enqnum, Flipped(ValidIO(new MicroOp)))
+    val req = Vec(enqnum, Flipped(ValidIO(new DynInst)))
   }
-  val deq = Vec(deqnum, DecoupledIO(new MicroOp))
+  val deq = Vec(deqnum, DecoupledIO(new DynInst))
   val redirect = Flipped(ValidIO(new Redirect))
   val dqFull = Output(Bool())
-  val deqNext = Vec(deqnum, Output(new MicroOp))
+  val validDeq0Num = Output(UInt(size.U.getWidth.W))
+  val validDeq1Num = Output(UInt(size.U.getWidth.W))
 }
 
 // dispatch queue: accepts at most enqnum uops from dispatch1 and dispatches deqnum uops at every clock cycle
-class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
+class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dqIndex: Int = 0)(implicit p: Parameters)
   extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {
-  val io = IO(new DispatchQueueIO(enqnum, deqnum))
+  val io = IO(new DispatchQueueIO(enqnum, deqnum, size))
+  require(dpParams.IntDqDeqWidth == 8, "dpParams.IntDqDeqWidth must be 8")
+  require(backendParams.intSchdParams.get.issueBlockParams.size == 4, "int issueBlockParams must be 4")
+  backendParams.intSchdParams.get.issueBlockParams.map(x => require(x.exuBlockParams.size == 2, "int issueBlockParam's must be 2"))
 
   val s_invalid :: s_valid :: Nil = Enum(2)
 
   // queue data array
-  val dataModule = Module(new SyncDataModuleTemplate(new MicroOp, size, 2 * deqnum, enqnum))
+  private def hasRen: Boolean = true
+  val dataModule = Module(new SyncDataModuleTemplate(new DynInst, size, 2 * deqnum, enqnum, hasRen = hasRen))
   val robIdxEntries = Reg(Vec(size, new RobPtr))
   val stateEntries = RegInit(VecInit(Seq.fill(size)(s_invalid)))
+  val validDeq0 = RegInit(VecInit(Seq.fill(size)(false.B)))
+  val validDeq1 = RegInit(VecInit(Seq.fill(size)(false.B)))
+  io.validDeq0Num := PopCount(validDeq0.zip(stateEntries).map{case (v, s) => v && (s===s_valid)})
+  io.validDeq1Num := PopCount(validDeq1.zip(stateEntries).map{case (v, s) => v && (s===s_valid)})
 
   class DispatchQueuePtr extends CircularQueuePtr[DispatchQueuePtr](size)
 
@@ -94,6 +105,14 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
     when (VecInit(validVec).asUInt.orR && canEnqueue) {
       robIdxEntries(i) := Mux1H(validVec, io.enq.req.map(_.bits.robIdx))
       stateEntries(i) := s_valid
+      if (dqIndex == 0) {
+        validDeq0(i) := FuType.isIntDq0Deq0(Mux1H(validVec, io.enq.req.map(_.bits.fuType)))
+        validDeq1(i) := FuType.isIntDq0Deq1(Mux1H(validVec, io.enq.req.map(_.bits.fuType)))
+      }
+      else {
+        validDeq0(i) := FuType.isIntDq1Deq0(Mux1H(validVec, io.enq.req.map(_.bits.fuType)))
+        validDeq1(i) := FuType.isIntDq1Deq1(Mux1H(validVec, io.enq.req.map(_.bits.fuType)))
+      }
     }
   }
   for (i <- 0 until enqnum) {
@@ -159,7 +178,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
   // For branch mis-prediction or memory violation replay,
   // we delay updating the indices for one clock cycle.
   // For now, we simply use PopCount to count #instr cancelled.
-  val lastCycleMisprediction = RegNext(io.redirect.valid)
+  val lastCycleMisprediction = GatedValidRegNext(io.redirect.valid)
   // find the last one's position, starting from headPtr and searching backwards
   val validBitVec = VecInit((0 until size).map(i => stateEntries(i) === s_valid))
   val loValidBitVec = Cat((0 until size).map(i => validBitVec(i) && headPtrMask(i)))
@@ -173,13 +192,14 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
 
   // enqueue
   val numEnq = Mux(io.enq.canAccept, PopCount(io.enq.req.map(_.valid)), 0.U)
+  val numNeedAlloc = Mux(io.enq.canAccept, PopCount(io.enq.needAlloc), 0.U)
   tailPtr(0) := Mux(io.redirect.valid,
     tailPtr(0),
     Mux(lastCycleMisprediction,
       Mux(isTrueEmpty, headPtr(0), walkedTailPtr),
       tailPtr(0) + numEnq)
   )
-  val lastLastCycleMisprediction = RegNext(lastCycleMisprediction)
+  val lastLastCycleMisprediction = GatedValidRegNext(lastCycleMisprediction)
   for (i <- 1 until enqnum) {
     tailPtr(i) := Mux(io.redirect.valid,
       tailPtr(i),
@@ -199,27 +219,26 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
       currentValidCounter,
       validCounter + numEnq - numDeq)
   )
-  allowEnqueue := Mux(currentValidCounter > (size - enqnum).U, false.B, numEnq <= (size - enqnum).U - currentValidCounter)
+  allowEnqueue := (numNeedAlloc +& currentValidCounter <= (size - enqnum).U) || (numNeedAlloc +& currentValidCounter - (size - enqnum).U <= numDeq)
 
   /**
    * Part 3: set output valid and data bits
    */
-  val deqData = Reg(Vec(deqnum, new MicroOp))
+  val deqData = Reg(Vec(deqnum, new DynInst))
   // How to pipeline the data read:
   // T: get the required read data
   for (i <- 0 until deqnum) {
     io.deq(i).bits := deqData(i)
     // Some bits have bad timing in Dispatch but will not be used at Dispatch2
     // They will use the slow path from data module
-    io.deq(i).bits.cf := dataModule.io.rdata(i).cf
-    io.deq(i).bits.ctrl.fpu := dataModule.io.rdata(i).ctrl.fpu
+    io.deq(i).bits.fpu := dataModule.io.rdata(i).fpu
     // do not dequeue when io.redirect valid because it may cause dispatchPtr work improperly
     io.deq(i).valid := Mux1H(headPtrOHVec(i), stateEntries) === s_valid && !lastCycleMisprediction
   }
   // T-1: select data from the following (deqnum + 1 + numEnq) sources with priority
   // For data(i): (1) current output (deqnum - i); (2) next-step data (i + 1)
   // For the next-step data(i): (1) enqueue data (enqnum); (2) data from storage (1)
-  val nextStepData = Wire(Vec(2 * deqnum, new MicroOp))
+  val nextStepData = Wire(Vec(2 * deqnum, new DynInst))
   val ptrMatch = new QPtrMatchMatrix(headPtr, tailPtr)
   for (i <- 0 until 2 * deqnum) {
     val enqMatchVec = VecInit(ptrMatch(i))
@@ -230,13 +249,14 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int)(implicit p: Parameters)
     nextStepData(i) := Mux(enqBypassEn, enqBypassData, readData)
   }
   for (i <- 0 until deqnum) {
-    io.deqNext(i) := deqData(i)
     when (!io.redirect.valid) {
-      io.deqNext(i) := ParallelPriorityMux(deqEnable_n, nextStepData.drop(i).take(deqnum + 1))
+      deqData(i) := ParallelPriorityMux(deqEnable_n, nextStepData.drop(i).take(deqnum + 1))
     }
   }
-  deqData := io.deqNext
   // T-2: read data from storage: next
+  for (i <- 0 until 2 * deqnum) {
+    dataModule.io.ren.get(i) := io.redirect.valid || io.deq.map(_.valid).reduce(_|_)
+  }
   dataModule.io.raddr := headPtrNext.map(_.value)
 
   // debug: dump dispatch queue states

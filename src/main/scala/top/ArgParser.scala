@@ -19,9 +19,12 @@ package top
 import org.chipsalliance.cde.config.{Config, Parameters}
 import system.SoCParamsKey
 import xiangshan.{DebugOptionsKey, XSTileKey}
+import freechips.rocketchip.tile.MaxHartIdBits
+import difftest.DifftestModule
 
 import scala.annotation.tailrec
 import scala.sys.exit
+import chisel3.util.log2Up
 
 object ArgParser {
   // TODO: add more explainations
@@ -31,13 +34,16 @@ object ArgParser {
       |--xs-help                  print this help message
       |--config <ConfigClassName>
       |--num-cores <Int>
+      |--hartidbits <Int>
       |--with-dramsim3
       |--fpga-platform
+      |--reset-gen
       |--enable-difftest
       |--enable-log
       |--with-chiseldb
       |--with-rollingdb
       |--disable-perf
+      |--disable-alwaysdb
       |""".stripMargin
 
   def getConfigByName(confString: String): Parameters = {
@@ -64,9 +70,15 @@ object ArgParser {
           nextOption(getConfigByName(confString), tail)
         case "--num-cores" :: value :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case XSTileKey => (0 until value.toInt) map{ i =>
+            case XSTileKey => (0 until value.toInt) map { i =>
               up(XSTileKey).head.copy(HartId = i)
             }
+            case MaxHartIdBits =>
+              log2Up(value.toInt) max up(MaxHartIdBits)
+          }), tail)
+        case "--hartidbits" :: hartidbits :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case MaxHartIdBits => hartidbits
           }), tail)
         case "--with-dramsim3" :: tail =>
           nextOption(config.alter((site, here, up) => {
@@ -88,9 +100,17 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(FPGAPlatform = true)
           }), tail)
+        case "--reset-gen" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case DebugOptionsKey => up(DebugOptionsKey).copy(ResetGen = true)
+          }), tail)
         case "--enable-difftest" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(EnableDifftest = true)
+          }), tail)
+        case "--disable-always-basic-diff" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case DebugOptionsKey => up(DebugOptionsKey).copy(AlwaysBasicDiff = false)
           }), tail)
         case "--enable-log" :: tail =>
           nextOption(config.alter((site, here, up) => {
@@ -99,6 +119,18 @@ object ArgParser {
         case "--disable-perf" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(EnablePerfDebug = false)
+          }), tail)
+        case "--disable-alwaysdb" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case DebugOptionsKey => up(DebugOptionsKey).copy(AlwaysBasicDB = false)
+          }), tail)
+        case "--xstop-prefix" :: value :: tail if chisel3.BuildInfo.version != "3.6.0" =>
+          nextOption(config.alter((site, here, up) => {
+            case SoCParamsKey => up(SoCParamsKey).copy(XSTopPrefix = Some(value))
+          }), tail)
+        case "--imsic-use-tl" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case SoCParamsKey => up(SoCParamsKey).copy(IMSICUseTL = true)
           }), tail)
         case "--firtool-opt" :: option :: tail =>
           firtoolOpts ++= option.split(" ").filter(_.nonEmpty)
@@ -109,7 +141,8 @@ object ArgParser {
           nextOption(config, tail)
       }
     }
-    var config = nextOption(default, args.toList)
+    val newArgs = DifftestModule.parseArgs(args)
+    var config = nextOption(default, newArgs.toList)
     (config, firrtlOpts, firtoolOpts)
   }
 }

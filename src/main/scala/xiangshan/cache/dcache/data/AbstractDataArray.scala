@@ -46,7 +46,7 @@ abstract class AbstractDataArray(implicit p: Parameters) extends DCacheModule {
     val write = Flipped(DecoupledIO(new L1DataWriteReq))
     val resp = Output(Vec(3, Vec(blockRows, Bits(encRowBits.W))))
     val nacks = Output(Vec(3, Bool()))
-    val errors = Output(Vec(3, new L1CacheErrorInfo))
+    val errors = Output(Vec(3, ValidIO(new L1CacheErrorInfo)))
   })
 
   def pipeMap[T <: Data](f: Int => T) = VecInit((0 until 3).map(f))

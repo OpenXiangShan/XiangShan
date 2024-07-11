@@ -22,6 +22,7 @@ import chisel3.util._
 import utils._
 import utility._
 import xiangshan._
+import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
@@ -31,9 +32,11 @@ import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.backend.rob.RobPtr
 
 class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
+  val enqPortNum = LoadPipelineWidth + VecLoadPipelineWidth + 1 // 1 for mmio bus non-data error
+
   val io = IO(new Bundle() {
     val redirect      = Flipped(Valid(new Redirect))
-    val req           = Vec(LoadPipelineWidth, Flipped(Valid(new LqWriteBundle)))
+    val req           = Vec(enqPortNum, Flipped(Valid(new LqWriteBundle)))
     val exceptionAddr = new ExceptionAddrIO
   })
 
@@ -47,15 +50,15 @@ class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircula
 
   // s2: delay 1 cycle
   val s2_req = RegNext(s1_req)
-  val s2_valid = (0 until LoadPipelineWidth).map(i =>
+  val s2_valid = (0 until enqPortNum).map(i =>
     RegNext(s1_valid(i)) &&
     !s2_req(i).uop.robIdx.needFlush(RegNext(io.redirect)) &&
     !s2_req(i).uop.robIdx.needFlush(io.redirect)
   )
-  val s2_has_exception = s2_req.map(x => ExceptionNO.selectByFu(x.uop.cf.exceptionVec, lduCfg).asUInt.orR)
+  val s2_has_exception = s2_req.map(x => ExceptionNO.selectByFu(x.uop.exceptionVec, LduCfg).asUInt.orR)
 
-  val s2_enqueue = Wire(Vec(LoadPipelineWidth, Bool()))
-  for (w <- 0 until LoadPipelineWidth) {
+  val s2_enqueue = Wire(Vec(enqPortNum, Bool()))
+  for (w <- 0 until enqPortNum) {
     s2_enqueue(w) := s2_valid(w) && s2_has_exception(w)
   }
 
@@ -75,7 +78,10 @@ class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircula
         res(i).valid := valid(i)
         res(i).bits := bits(i)
       }
-      val oldest = Mux(valid(0) && valid(1), Mux(isAfter(bits(0).uop.robIdx, bits(1).uop.robIdx), res(1), res(0)), Mux(valid(0) && !valid(1), res(0), res(1)))
+      val oldest = Mux(valid(0) && valid(1),
+        Mux(isAfter(bits(0).uop.robIdx, bits(1).uop.robIdx) ||
+          (isNotBefore(bits(0).uop.robIdx, bits(1).uop.robIdx) && bits(0).uop.uopIdx > bits(1).uop.uopIdx), res(1), res(0)),
+        Mux(valid(0) && !valid(1), res(0), res(1)))
       (Seq(oldest.valid), Seq(oldest.bits))
     } else {
       val left = selectOldest(valid.take(valid.length / 2), bits.take(bits.length / 2))
@@ -87,12 +93,18 @@ class LqExceptionBuffer(implicit p: Parameters) extends XSModule with HasCircula
   val reqSel = selectOldest(s2_enqueue, s2_req)
 
   when (req_valid) {
-    req := Mux(reqSel._1(0) && isAfter(req.uop.robIdx, reqSel._2(0).uop.robIdx), reqSel._2(0), req)
+    req := Mux(
+      reqSel._1(0) && (isAfter(req.uop.robIdx, reqSel._2(0).uop.robIdx) || (isNotBefore(req.uop.robIdx, reqSel._2(0).uop.robIdx) && req.uop.uopIdx > reqSel._2(0).uop.uopIdx)),
+      reqSel._2(0),
+      req)
   } .elsewhen (s2_enqueue.asUInt.orR) {
     req := reqSel._2(0)
   }
 
   io.exceptionAddr.vaddr := req.vaddr
+  io.exceptionAddr.vstart := req.uop.vpu.vstart
+  io.exceptionAddr.vl     := req.uop.vpu.vl
+  io.exceptionAddr.gpaddr := req.gpaddr
   XSPerfAccumulate("exception", !RegNext(req_valid) && req_valid)
 
   // end

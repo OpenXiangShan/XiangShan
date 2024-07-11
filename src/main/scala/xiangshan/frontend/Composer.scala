@@ -42,6 +42,7 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst wi
     c.io.in.valid            := io.in.valid
     c.io.in.bits.s0_pc       := io.in.bits.s0_pc
     c.io.in.bits.folded_hist := io.in.bits.folded_hist
+    c.io.in.bits.s1_folded_hist := io.in.bits.s1_folded_hist
     c.io.in.bits.ghist       := io.in.bits.ghist
 
     c.io.s0_fire := io.s0_fire
@@ -54,6 +55,7 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst wi
 
     c.io.redirect := io.redirect
     c.io.ctrl := DelayN(io.ctrl, 1)
+    c.io.redirectFromIFU := io.redirectFromIFU
 
     if (c.meta_size > 0) {
       metas = (metas << c.meta_size) | c.io.out.last_stage_meta(c.meta_size-1,0)

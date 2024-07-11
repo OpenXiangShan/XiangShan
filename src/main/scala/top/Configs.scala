@@ -26,14 +26,21 @@ import org.chipsalliance.cde.config._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, XLen}
 import xiangshan.frontend.icache.ICacheParameters
 import freechips.rocketchip.devices.debug._
-import freechips.rocketchip.tile.MaxHartIdBits
+import freechips.rocketchip.tile.{MaxHartIdBits, XLen}
+import system._
+import utility._
+import utils._
+import huancun._
+import xiangshan._
 import xiangshan.backend.dispatch.DispatchParameters
-import xiangshan.backend.exu.ExuParameters
+import xiangshan.backend.regfile.{IntPregParams, VfPregParams}
 import xiangshan.cache.DCacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import device.{EnableJtag, XSDebugModuleParams}
 import huancun._
 import coupledL2._
+import coupledL2.prefetch._
+import xiangshan.frontend.icache.ICacheParameters
 
 class BaseConfig(n: Int) extends Config((site, here, up) => {
   case XLen => 64
@@ -44,7 +51,7 @@ class BaseConfig(n: Int) extends Config((site, here, up) => {
   case ExportDebug => DebugAttachParams(protocols = Set(JTAG))
   case DebugModuleKey => Some(XSDebugModuleParams(site(XLen)))
   case JtagDTMKey => JtagDTMKey
-  case MaxHartIdBits => 2
+  case MaxHartIdBits => log2Up(n) max 6
   case EnableJtag => true.B
 })
 
@@ -57,60 +64,58 @@ class MinimalConfig(n: Int = 1) extends Config(
   new BaseConfig(n).alter((site, here, up) => {
     case XSTileKey => up(XSTileKey).map(
       p => p.copy(
-        DecodeWidth = 2,
-        RenameWidth = 2,
-        CommitWidth = 2,
+        DecodeWidth = 6,
+        RenameWidth = 6,
+        RobCommitWidth = 8,
         FetchWidth = 4,
-        IssQueSize = 8,
-        NRPhyRegs = 64,
-        VirtualLoadQueueSize = 16,
-        LoadQueueRARSize = 16,
+        VirtualLoadQueueSize = 24,
+        LoadQueueRARSize = 24,
         LoadQueueRAWSize = 12,
-        LoadQueueReplaySize = 12,
+        LoadQueueReplaySize = 24,
         LoadUncacheBufferSize = 8,
         LoadQueueNWriteBanks = 4, // NOTE: make sure that LoadQueue{RAR, RAW, Replay}Size is divided by LoadQueueNWriteBanks.
         RollbackGroupSize = 8,
-        StoreQueueSize = 12,
+        StoreQueueSize = 20,
         StoreQueueNWriteBanks = 4, // NOTE: make sure that StoreQueueSize is divided by StoreQueueNWriteBanks
         StoreQueueForwardWithMask = true,
-        RobSize = 32,
+        // ============ VLSU ============
+        VlMergeBufferSize = 8,
+        VsMergeBufferSize = 8,
+        UopWritebackWidth = 2,
+        // ==============================
+        RobSize = 48,
+        RabSize = 96,
         FtqSize = 8,
-        IBufSize = 16,
-        IBufNBank = 2,
+        IBufSize = 24,
+        IBufNBank = 6,
         StoreBufferSize = 4,
         StoreBufferThreshold = 3,
-        LoadPipelineWidth = 2,
-        StorePipelineWidth = 2,
+        IssueQueueSize = 10,
+        IssueQueueCompEntrySize = 4,
         dpParams = DispatchParameters(
           IntDqSize = 12,
           FpDqSize = 12,
           LsDqSize = 12,
-          IntDqDeqWidth = 4,
-          FpDqDeqWidth = 4,
-          LsDqDeqWidth = 4
+          IntDqDeqWidth = 8,
+          FpDqDeqWidth = 6,
+          VecDqDeqWidth = 6,
+          LsDqDeqWidth = 6
         ),
-        exuParameters = ExuParameters(
-          JmpCnt = 1,
-          AluCnt = 2,
-          MulCnt = 0,
-          MduCnt = 1,
-          FmacCnt = 1,
-          FmiscCnt = 1,
-          FmiscDivSqrtCnt = 0,
-          LduCnt = 2,
-          StuCnt = 2
+        intPreg = IntPregParams(
+          numEntries = 64,
+          numRead = None,
+          numWrite = None,
+        ),
+        vfPreg = VfPregParams(
+          numEntries = 160,
+          numRead = None,
+          numWrite = None,
         ),
         icacheParameters = ICacheParameters(
           nSets = 64, // 16KB ICache
           tagECC = Some("parity"),
           dataECC = Some("parity"),
           replacer = Some("setplru"),
-          nMissEntries = 2,
-          nReleaseEntries = 1,
-          nProbeEntries = 2,
-          // fdip
-          enableICachePrefetch = true,
-          prefetchToL1 = false,
         ),
         dcacheParametersOpt = Some(DCacheParameters(
           nSets = 64, // 32KB DCache
@@ -123,8 +128,25 @@ class MinimalConfig(n: Int = 1) extends Config(
           nReleaseEntries = 8,
           nMaxPrefetchEntry = 2,
         )),
-        EnableBPD = false, // disable TAGE
+        // ============ BPU ===============
         EnableLoop = false,
+        EnableGHistDiff = false,
+        FtbSize = 256,
+        FtbWays = 2,
+        RasSize = 8,
+        RasSpecSize = 16,
+        TageTableInfos =
+          Seq((512, 4, 6),
+            (512, 9, 6),
+            (1024, 19, 6)),
+        SCNRows = 128,
+        SCNTables = 2,
+        SCHistLens = Seq(0, 5),
+        ITTageTableInfos =
+          Seq((256, 4, 7),
+            (256, 8, 7),
+            (512, 16, 7)),
+        // ================================
         itlbParameters = TLBParameters(
           name = "itlb",
           fetchi = true,
@@ -136,21 +158,32 @@ class MinimalConfig(n: Int = 1) extends Config(
           NWays = 4,
           partialStaticPMP = true,
           outsideRecvFlush = true,
-          outReplace = false
+          outReplace = false,
+          lgMaxSize = 4
         ),
         sttlbParameters = TLBParameters(
           name = "sttlb",
           NWays = 4,
           partialStaticPMP = true,
           outsideRecvFlush = true,
-          outReplace = false
+          outReplace = false,
+          lgMaxSize = 4
+        ),
+        hytlbParameters = TLBParameters(
+          name = "hytlb",
+          NWays = 4,
+          partialStaticPMP = true,
+          outsideRecvFlush = true,
+          outReplace = false,
+          lgMaxSize = 4
         ),
         pftlbParameters = TLBParameters(
           name = "pftlb",
           NWays = 4,
           partialStaticPMP = true,
           outsideRecvFlush = true,
-          outReplace = false
+          outReplace = false,
+          lgMaxSize = 4
         ),
         btlbParameters = TLBParameters(
           name = "btlb",
@@ -169,13 +202,12 @@ class MinimalConfig(n: Int = 1) extends Config(
           ways = 8,
           sets = 128,
           echoField = Seq(huancun.DirtyField()),
-          prefetch = None,
+          prefetch = Nil,
           clientCaches = Seq(L1Param(
             "dcache",
             isKeywordBitsOpt = p.dcacheParametersOpt.get.isKeywordBitsOpt
           )),
-          )
-        ),
+        )),
         L2NBanks = 2,
         prefetcher = None // if L2 pf_recv_node does not exist, disable SMS prefetcher
       )
@@ -237,7 +269,8 @@ class WithNKBL2
   n: Int,
   ways: Int = 8,
   inclusive: Boolean = true,
-  banks: Int = 1
+  banks: Int = 1,
+  tp: Boolean = true
 ) extends Config((site, here, up) => {
   case XSTileKey =>
     require(inclusive, "L2 must be inclusive")
@@ -258,8 +291,12 @@ class WithNKBL2
         )),
         reqField = Seq(utility.ReqSourceField()),
         echoField = Seq(huancun.DirtyField()),
-        prefetch = Some(coupledL2.prefetch.PrefetchReceiverParams()),
-        enablePerf = !site(DebugOptionsKey).FPGAPlatform,
+        prefetch = Seq(BOPParameters()) ++
+          (if (tp) Seq(TPParameters()) else Nil) ++
+          (if (p.prefetcher.nonEmpty) Seq(PrefetchReceiverParams()) else Nil),
+        enablePerf = !site(DebugOptionsKey).FPGAPlatform && site(DebugOptionsKey).EnablePerfDebug,
+        enableRollingDB = site(DebugOptionsKey).EnableRollingDB,
+        enableMonitor = site(DebugOptionsKey).AlwaysBasicDB,
         elaboratedTopDown = !site(DebugOptionsKey).FPGAPlatform
       )),
       L2NBanks = banks
@@ -285,7 +322,7 @@ class WithNKBL3(n: Int, ways: Int = 8, inclusive: Boolean = true, banks: Int = 1
           val l2params = core.L2CacheParamsOpt.get.toCacheParams
           l2params.copy(sets = 2 * clientDirBytes / core.L2NBanks / l2params.ways / 64, ways = l2params.ways + 2)
         },
-        enablePerf = true,
+        enablePerf = !site(DebugOptionsKey).FPGAPlatform && site(DebugOptionsKey).EnablePerfDebug,
         ctrl = Some(CacheCtrl(
           address = 0x39000000,
           numCores = tiles.size
@@ -354,6 +391,26 @@ class FuzzConfig(dummy: Int = 0) extends Config(
 class DefaultConfig(n: Int = 1) extends Config(
   new WithNKBL3(16 * 1024, inclusive = false, banks = 4, ways = 16)
     ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4)
-    ++ new WithNKBL1D(64, ways = 4)
+    ++ new WithNKBL1D(64, ways = 8)
     ++ new BaseConfig(n)
+)
+
+class WithCHI extends Config((_, _, _) => {
+  case EnableCHI => true
+})
+
+class KunminghuV2Config(n: Int = 1) extends Config(
+  new WithCHI
+    ++ new Config((site, here, up) => {
+      case SoCParamsKey => up(SoCParamsKey).copy(L3CacheParamsOpt = None) // There will be no L3
+    })
+    ++ new WithNKBL2(2 * 512, inclusive = true, banks = 4, tp = false)
+    ++ new WithNKBL1D(64, ways = 8)
+    ++ new DefaultConfig(n)
+)
+
+class XSNoCTopConfig(n: Int = 1) extends Config(
+  (new KunminghuV2Config(n)).alter((site, here, up) => {
+    case SoCParamsKey => up(SoCParamsKey).copy(UseXSNoCTop = true)
+  })
 )

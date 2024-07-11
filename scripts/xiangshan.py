@@ -1,5 +1,6 @@
 #***************************************************************************************
-# Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+# Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+# Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 # Copyright (c) 2020-2021 Peng Cheng Laboratory
 #
 # XiangShan is licensed under Mulan PSL v2.
@@ -24,7 +25,7 @@ import signal
 import subprocess
 import sys
 import time
-
+import shlex
 import psutil
 
 
@@ -79,6 +80,9 @@ class XSArgs(object):
         self.trace_fst = "fst" if args.trace_fst else None
         self.config = args.config
         self.is_mfc = 1 if args.mfc else None
+        self.emu_optimize = args.emu_optimize
+        self.xprop = 1 if args.xprop else None
+        self.with_chiseldb = 0 if args.no_db else None
         # emu arguments
         self.max_instr = args.max_instr
         self.ram_size = args.ram_size
@@ -90,6 +94,10 @@ class XSArgs(object):
         self.fork = not args.disable_fork
         self.disable_diff = args.no_diff
         self.disable_db = args.no_db
+        self.pgo = args.pgo
+        self.pgo_max_cycle = args.pgo_max_cycle
+        self.pgo_emu_args = args.pgo_emu_args
+        self.llvm_profdata = args.llvm_profdata
         # wave dump path
         if args.wave_dump is not None:
             self.set_wave_home(args.wave_dump)
@@ -126,9 +134,17 @@ class XSArgs(object):
             (self.trace_fst,     "EMU_TRACE"),
             (self.config,        "CONFIG"),
             (self.num_cores,     "NUM_CORES"),
-            (self.is_mfc,        "MFC")
+            (self.is_mfc,        "MFC"),
+            (self.emu_optimize,  "EMU_OPTIMIZE"),
+            (self.xprop,         "ENABLE_XPROP"),
+            (self.with_chiseldb, "WITH_CHISELDB"),
+            (self.pgo,           "PGO_WORKLOAD"),
+            (self.pgo_max_cycle, "PGO_MAX_CYCLE"),
+            (self.pgo_emu_args,  "PGO_EMU_ARGS"),
+            (self.llvm_profdata, "LLVM_PROFDATA"),
         ]
         args = filter(lambda arg: arg[0] is not None, makefile_args)
+        args = [(shlex.quote(str(arg[0])), arg[1]) for arg in args] # shell escape
         return args
 
     def get_emu_args(self):
@@ -257,8 +273,12 @@ class XiangShan(object):
         print("Running XiangShan simv with the following configurations:")
         self.show()
         diff_args = "$NOOP_HOME/"+ args.diff
-        return_code = self.__exec_cmd(f'$NOOP_HOME/difftest/simv +workload={workload} +diff={diff_args}')
-        return return_code
+        assert_args = "-assert finish_maxfail=30 -assert global_finish_maxfail=10000"
+        self.__exec_cmd(f'cd $NOOP_HOME/build && ./simv +workload={workload} +diff={diff_args} +dump-wave=fsdb {assert_args} | tee simv.log')
+        with open(f"{self.args.noop_home}/build/simv.log") as f:
+            if "HIT GOOD TRAP" in f.read():
+                return 0
+        return 1
 
     def run(self, args):
         if args.ci is not None:
@@ -359,6 +379,10 @@ class XiangShan(object):
         workloads = {
             "linux-hello": "bbl.bin",
             "linux-hello-smp": "bbl.bin",
+            "linux-hello-opensbi": "fw_payload.bin",
+            "linux-hello-smp-opensbi": "fw_payload.bin",
+            "linux-hello-new": "bbl.bin",
+            "linux-hello-smp-new": "bbl.bin",
             "povray": "_700480000000_.gz",
             "mcf": "_17520000000_.gz",
             "xalancbmk": "_266100000000_.gz",
@@ -417,7 +441,7 @@ class XiangShan(object):
                     print("copy wave file to " + self.args.wave_home)
                     self.__exec_cmd(f"cp $NOOP_HOME/build/*.vcd $WAVE_HOME")
                     self.__exec_cmd(f"cp $NOOP_HOME/build/emu $WAVE_HOME")
-                    self.__exec_cmd(f"cp $NOOP_HOME/build/SimTop.v $WAVE_HOME")
+                    self.__exec_cmd(f"cp $NOOP_HOME/build/rtl/SimTop.v $WAVE_HOME")
                     self.__exec_cmd(f"cp $NOOP_HOME/build/*.db $WAVE_HOME")
                 return ret
         return 0
@@ -438,9 +462,9 @@ class XiangShan(object):
             if ret:
                 if self.args.default_wave_home != self.args.wave_home:
                     print("copy wave file to " + self.args.wave_home)
-                    self.__exec_cmd(f"cp $NOOP_HOME/build/*.vcd $WAVE_HOME")
-                    self.__exec_cmd(f"cp $NOOP_HOME/build/emu $WAVE_HOME")
-                    self.__exec_cmd(f"cp $NOOP_HOME/build/SimTop.v $WAVE_HOME")
+                    self.__exec_cmd(f"cp $NOOP_HOME/build/*.fsdb $WAVE_HOME")
+                    self.__exec_cmd(f"cp $NOOP_HOME/build/simv $WAVE_HOME")
+                    self.__exec_cmd(f"cp $NOOP_HOME/build/rtl/SimTop.v $WAVE_HOME")
                     self.__exec_cmd(f"cp $NOOP_HOME/build/*.db $WAVE_HOME")
                 return ret
         return 0
@@ -488,6 +512,8 @@ if __name__ == "__main__":
     parser.add_argument('--trace-fst', action='store_true', help='enable fst waveform')
     parser.add_argument('--config', nargs='?', type=str, help='config')
     parser.add_argument('--mfc', action='store_true', help='use mfc')
+    parser.add_argument('--emu-optimize', nargs='?', type=str, help='verilator optimization letter')
+    parser.add_argument('--xprop', action='store_true', help='enable xprop for vcs')
     # emu arguments
     parser.add_argument('--numa', action='store_true', help='use numactl')
     parser.add_argument('--diff', nargs='?', default="./ready-to-run/riscv64-nemu-interpreter-so", type=str, help='nemu so')
@@ -495,7 +521,12 @@ if __name__ == "__main__":
     parser.add_argument('--disable-fork', action='store_true', help='disable lightSSS')
     parser.add_argument('--no-diff', action='store_true', help='disable difftest')
     parser.add_argument('--ram-size', nargs='?', type=str, help='manually set simulation memory size (8GB by default)')
+    # both makefile and emu arguments
     parser.add_argument('--no-db', action='store_true', help='disable chiseldb dump')
+    parser.add_argument('--pgo', nargs='?', type=str, help='workload for pgo (null to disable pgo)')
+    parser.add_argument('--pgo-max-cycle', nargs='?', default=400000, type=int, help='maximun cycle to train pgo')
+    parser.add_argument('--pgo-emu-args', nargs='?', default='--no-diff', type=str, help='emu arguments for pgo')
+    parser.add_argument('--llvm-profdata', nargs='?', type=str, help='corresponding llvm-profdata command of clang to compile emu, do not set with GCC')
 
     args = parser.parse_args()
 
