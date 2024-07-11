@@ -20,8 +20,6 @@ class VTypeGen(implicit p: Parameters) extends XSModule{
       val vtype = Flipped(Valid(new VType))
       val hasVsetvl = Input(Bool())
     }
-    val lastSpecVType = (Valid(new VType))
-    val specVtype = Output(new VType)
   })
   private val instValidVec = io.insts.map(_.valid)
   private val instFieldVec = io.insts.map(_.bits.asTypeOf(new XSInstBitFields))
@@ -43,15 +41,12 @@ class VTypeGen(implicit p: Parameters) extends XSModule{
 
   private val vtypeArch = RegInit(0.U.asTypeOf(new VType))
   private val vtypeSpec = RegInit(0.U.asTypeOf(new VType))
-  private val lastSpecVType = RegInit(0.U.asTypeOf(new ValidIO(VType())))
 
   private val vtypeArchNext = WireInit(vtypeArch)
   private val vtypeSpecNext = WireInit(vtypeSpec)
-  private val lastSpecVTypeNext = WireInit(lastSpecVType)
 
   vtypeArch := vtypeArchNext
   vtypeSpec := vtypeSpecNext
-  lastSpecVType := lastSpecVTypeNext
 
   private val instVType: InstVType = Mux(isVsetvli, firstVsetInstField.ZIMM_VSETVLI.asTypeOf(new InstVType), 
     firstVsetInstField.ZIMM_VSETIVLI.asTypeOf(new InstVType))
@@ -74,30 +69,19 @@ class VTypeGen(implicit p: Parameters) extends XSModule{
 
   when(io.commitVType.hasVsetvl) {
     // when vsetvl instruction commit, also update vtypeSpec, because vsetvl flush pipe
-    lastSpecVTypeNext.valid := true.B
-    lastSpecVTypeNext.bits := vtypeSpec
     vtypeSpecNext := io.vsetvlVType
   }.elsewhen(io.walkVType.valid) {
-    lastSpecVTypeNext.valid := false.B
     vtypeSpecNext := io.walkVType.bits
   }.elsewhen(io.redirect && io.commitVType.vtype.valid) {
     // when redirect and commit both coming, we should use commit vtype
-    lastSpecVTypeNext.valid := false.B
     vtypeSpecNext := io.commitVType.vtype.bits
   }.elsewhen(io.redirect && !io.commitVType.vtype.valid) {
-    lastSpecVTypeNext.valid := false.B
     vtypeSpecNext := vtypeArch
   }.elsewhen(inHasVset && io.canUpdateVType) {
-    lastSpecVTypeNext.valid := true.B
-    lastSpecVTypeNext.bits := vtypeSpec
     vtypeSpecNext := vtypeNew
-  }.otherwise {
-    lastSpecVTypeNext.valid := false.B
   }
 
   io.vtype := vtypeSpec
-  io.specVtype := vtypeSpec
-  io.lastSpecVType := lastSpecVType
 
   // just make verilog more readable
   dontTouch(isVsetVec)
