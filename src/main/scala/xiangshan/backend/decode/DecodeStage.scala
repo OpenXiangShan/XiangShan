@@ -79,9 +79,10 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   //readyFromRename Counter
   val readyCounter = PriorityMuxDefault(outReadys.map(x => !x).zip((0 until RenameWidth).map(_.U)), RenameWidth.U)
 
-  val decoderComp = Module(new DecodeUnitComp)
-  val decoders = Seq.fill(DecodeWidth)(Module(new DecodeUnit))
-  val vtypeGen = Module(new VTypeGen)
+  // create instances of modules
+  val decoderComp = Module(new DecodeUnitComp) // complex decoder
+  val decoders = Seq.fill(DecodeWidth)(Module(new DecodeUnit)) // simple decoders
+  val vtypeGen = Module(new VTypeGen) // vector type generator
 
   val debug_globalCounter = RegInit(0.U(XLEN.W))
 

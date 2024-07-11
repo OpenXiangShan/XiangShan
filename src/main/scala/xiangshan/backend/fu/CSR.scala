@@ -126,6 +126,12 @@ class VtypeStruct(implicit p: Parameters) extends XSBundle {
   val vlmul = UInt(3.W)
 }
 
+/**
+ * CSR is a function unit that handles Control and Status Registers and related operations.
+ *
+ * @param cfg: the configuration object of function unit
+ * @param p: the parameters of the chip
+ */
 class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   with HasCSRConst
   with PMPMethod
@@ -134,7 +140,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   with SdtrigExt
   with DebugCSR
 {
-  val csrio = io.csrio.get
+  val csrio = io.csrio.get // get CSR IO from IO ports declared in super class
 
   val flushPipe = Wire(Bool())
 
@@ -278,7 +284,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   // Machine-Level CSRs
   // mtvec: {BASE (WARL), MODE (WARL)} where mode is 0 or 1
-  val mtvecMask = ~(0x2.U(XLEN.W))
+  val mtvecMask = (~(0x2.U(XLEN.W))).asUInt
   val mtvec = RegInit(UInt(XLEN.W), 0.U)
   val mcounteren = RegInit(UInt(XLEN.W), 0.U)
   // Currently, XiangShan don't support Unprivileged Counter/Timers CSRs ("Zicntr" and "Zihpm")
@@ -289,7 +295,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val mtinst = RegInit(UInt(XLEN.W), 0.U)
   val mepc = RegInit(UInt(XLEN.W), 0.U)
   // Page 36 in riscv-priv: The low bit of mepc (mepc[0]) is always zero.
-  val mepcMask = ~(0x1.U(XLEN.W))
+  val mepcMask = (~(0x1.U(XLEN.W))).asUInt
 
   val mie = RegInit(0.U(XLEN.W))
   val mipWire = WireInit(0.U.asTypeOf(new Interrupt))
@@ -439,7 +445,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   println(s"sstatusRmask: 0x${sstatusRmask.litValue.toString(16)}")
 
   // stvec: {BASE (WARL), MODE (WARL)} where mode is 0 or 1
-  val stvecMask = ~(0x2.U(XLEN.W))
+  val stvecMask = (~(0x2.U(XLEN.W))).asUInt // asUInt: casting from Bits to UInt
   val stvec = RegInit(UInt(XLEN.W), 0.U)
   // val sie = RegInit(0.U(XLEN.W))
   val sieMask = "h222".U & mideleg
@@ -453,7 +459,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val satpMask = Cat("h8".U(Satp_Mode_len.W), satp_part_wmask(Satp_Asid_len, AsidLength), satp_part_wmask(Satp_Addr_len, PAddrBits-12))
   val sepc = RegInit(UInt(XLEN.W), 0.U)
   // Page 60 in riscv-priv: The low bit of sepc (sepc[0]) is always zero.
-  val sepcMask = ~(0x1.U(XLEN.W))
+  val sepcMask = (~(0x1.U(XLEN.W))).asUInt
   val scause = RegInit(UInt(XLEN.W), 0.U)
   val stval = RegInit(UInt(XLEN.W), 0.U)
   val sscratch = RegInit(UInt(XLEN.W), 0.U)
@@ -929,6 +935,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     println(f"$addr%#03x ${mapping(addr)._1}")
   }
 
+  // calculate csr address
   val vs_s_csr_map = List(
     Sstatus.U  -> Vsstatus.U,
     Sie.U      -> Vsie.U,
@@ -947,7 +954,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   }.otherwise{
     addr := src2(11, 0)
   }
-  val csri = ZeroExt(src2(16, 12), XLEN)
+  val csri = ZeroExt(src2(16, 12), XLEN) // csr immediate to be written (or as a mask)
   val rdata = Wire(UInt(XLEN.W))
   val rdata_tmp = Wire(UInt(XLEN.W))
   val wdata_tmp = LookupTree(func, List(
@@ -965,7 +972,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val is_hgatp = addr === Hgatp.U
   val check_apt_mode = wdata_tmp(wdata_tmp.getWidth-1, 64-Satp_Mode_len) === 8.U || wdata_tmp(wdata_tmp.getWidth-1, 64-Satp_Mode_len) === 0.U
   val wdata = MuxCase(wdata_tmp, Seq(
-    is_vsip_ie -> ZeroExt(wdata_tmp << 1, XLEN),
+    is_vsip_ie -> ZeroExt((wdata_tmp << 1).asUInt, XLEN),
     (is_satp && !check_apt_mode) -> satp,
     (is_vsatp && !check_apt_mode) -> vsatp,
     (is_hgatp && !check_apt_mode) -> hgatp
@@ -989,16 +996,21 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrio.disableHfencev :=  !(privilegeMode === ModeM || (!virtMode && privilegeMode === ModeS))
 
   // general CSR wen check
-  val wen = valid && CSROpType.needAccess(func) && ((addr=/=Satp.U && addr =/= Vsatp.U) || satpLegalMode)
+  /** wen: input is valid, instruction needs to access CSR, satp access is legal if the csr is (v)satp */
+  val wen = valid && CSROpType.needAccess(func) && ((addr =/= Satp.U && addr =/= Vsatp.U) || satpLegalMode)
   val dcsrPermitted = dcsrPermissionCheck(addr, false.B, debugMode)
   val triggerPermitted = triggerPermissionCheck(addr, true.B, debugMode) // todo dmode
-  val HasH = (HasHExtension == true).asBool
-  val csrAccess = csrAccessPermissionCheck(addr, false.B, privilegeMode, virtMode, HasH)
+  val csrAccess = csrAccessPermissionCheck(addr, false.B, privilegeMode, virtMode, HasHExtension.asBool)
+  /** modePermitted: set when csrAccess (false), dcsrPermitted (true) and triggerPermitted (true) */
   val modePermitted = csrAccess === 0.U && dcsrPermitted && triggerPermitted
+  /** perfcntPermitted: set when r/w performance counter is permitted */
   val perfcntPermitted = perfcntPermissionCheck(addr, privilegeMode, mcounteren, scounteren)
-  val permitted = Mux(addrInPerfCnt, perfcntPermitted, modePermitted) && Mux(virtMode, vaccessPermitted, accessPermitted)
+  /** permitted: address is legal, access under virtual mode is legal */
+  val permitted = Mux(addrInPerfCnt, perfcntPermitted, modePermitted) &&
+                  Mux(virtMode, vaccessPermitted, accessPermitted)
+  /** Use addr to control CSRs in a mapping. Write when (wen && permitted) is set */
   MaskedRegMap.generate(mapping, addr, rdata_tmp, wen && permitted, wdata)
-  rdata := Mux(is_vsip_ie, ZeroExt(rdata_tmp >> 1, XLEN), rdata_tmp)
+  rdata := Mux(is_vsip_ie, ZeroExt((rdata_tmp >> 1).asUInt, XLEN), rdata_tmp)
   io.out.bits.res.data := rdata
   io.out.bits.ctrl.flushPipe.get := flushPipe
   connect0LatencyCtrlSingal
@@ -1008,6 +1020,10 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrio.customCtrl.distribute_csr.w.bits.data := wdata
   csrio.customCtrl.distribute_csr.w.bits.addr := addr
 
+  /**
+   * refresh f[v]csr when f[v]pu send certain signal from csrio.
+   * csrio.f[v]pu are from ROB
+   */
   when (RegNext(csrio.fpu.fflags.valid)) {
     fcsr := fflags_wfn(update = true)(RegEnable(csrio.fpu.fflags.bits, csrio.fpu.fflags.valid))
   }
@@ -1015,7 +1031,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     vcsr := vxsat_wfn(update = true)(RegEnable(csrio.vpu.set_vxsat.bits, csrio.vpu.set_vxsat.valid))
   }
 
-  // set fs and sd in mstatus
+  /** set fs and sd in mstatus. at the same time of write */
   when (csrw_dirty_fp_state || RegNext(csrio.fpu.dirty_fs)) {
     val mstatusNew = WireInit(mstatus.asTypeOf(new MstatusStruct))
     mstatusNew.fs := "b11".U

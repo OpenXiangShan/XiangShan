@@ -16,6 +16,7 @@ import xiangshan.backend.fu.fpu.Bundles.Frm
 class ExuBlock(params: SchdBlockParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
 
+  // where execution units are created by genExuModule()
   val exus: Seq[ExeUnit] = params.issueBlockParams.flatMap(_.exuBlockParams.map(x => LazyModule(x.genExuModule)))
 
   lazy val module = new ExuBlockImp(this)(p, params)

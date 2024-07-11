@@ -19,6 +19,12 @@ class ImmExtractorIO(dataBits: Int) extends Bundle {
   })
 }
 
+/**
+ * Extract immediate value from a compressed instruction.
+ *
+ * @param dataBits data width of the immediate value
+ * @param immTypeSet a set of immediate types that will be used
+ */
 class ImmExtractor(dataBits: Int, immTypeSet: Set[BigInt]) extends Module {
   val io = IO(new ImmExtractorIO(dataBits))
 
@@ -38,13 +44,27 @@ class ImmExtractor(dataBits: Int, immTypeSet: Set[BigInt]) extends Module {
     SelImm.IMM_VRORVI   .litValue -> SignExt(ImmUnion.VRORVI  .toImm32(io.in.imm), IntData().dataWidth),
   )
 
+  // Extract the immediate value from the compressed instruction
   val usedMap: Seq[(BigInt, UInt)] = extractMap.view.filterKeys(x => immTypeSet.contains(x)).toSeq.sortWith(_._1 < _._1)
-  println(usedMap)
+  println(s"usedMap: ${usedMap}")
 
   io.out.imm := MuxLookup(io.in.immType, 0.U)(usedMap.map { case (k, v) => (k.U, v) }.toSeq)
 }
 
+/**
+  * Companion object to create ImmExtractor.
+  * When called by others, the immediate extractor returns the extracted immediate value.
+  */
 object ImmExtractor {
+  /**
+   * Create an ImmExtractor instance.
+   *
+   * @param imm compressed immediate value
+   * @param immType immediate type
+   * @param dataBits data width of the immediate value
+   * @param immTypeSet a set of immediate types that will be used
+   * @return extracted immediate value
+   */
   def apply(imm: UInt, immType: UInt, dataBits: Int, immTypeSet: Set[BigInt]): UInt = {
     val mod = Module(new ImmExtractor(dataBits, immTypeSet))
     mod.io.in.imm := imm

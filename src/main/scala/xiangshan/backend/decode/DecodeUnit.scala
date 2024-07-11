@@ -86,6 +86,22 @@ abstract class XSDecodeBase {
   def generate() : List[BitPat]
 }
 
+/**
+ * private def allSignals =
+ *   srcType.take(3) (src1, src2, src3) ++ Seq (
+ *     fuType,    (fu.U(FuType.num.W))
+ *     fuOpType,  (fuOp)
+ *     rfWen,     (xWen)
+ *     fpWen,     (fWen)
+ *     vecWen,    (vWen || mWen)
+ *     isXSTrap,  (xsTrap)
+ *     waitForward,     (noSpec)
+ *     blockBackward,   (blockBack)
+ *     flushPipe,       (flushPipe)
+ *     canRobCompress,  (canRobCompress)
+ *     uopSplitType,    (uopSplitType)
+ *     selImm)          (selImm)
+ */
 case class XSDecode(
   src1: BitPat, src2: BitPat, src3: BitPat,
   fu: FuType.OHType, fuOp: BitPat, selImm: BitPat,
