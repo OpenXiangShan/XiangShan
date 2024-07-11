@@ -15,7 +15,7 @@
 	url = https://github.com/OpenXiangShan/fudian.git
 [submodule "utility"]
 	path = utility
-	url = https://github.com/OpenXiangShan/utility
+	url = https://github.com/Lemover/utility-Internal.git
 [submodule "yunsuan"]
 	path = yunsuan
 	url = https://github.com/OpenXiangShan/YunSuan.git
