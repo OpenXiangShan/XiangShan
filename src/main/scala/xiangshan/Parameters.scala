@@ -540,13 +540,13 @@ case class DebugOptions
   FPGAPlatform: Boolean = false,
   ResetGen: Boolean = false,
   EnableDifftest: Boolean = false,
-  AlwaysBasicDiff: Boolean = true,
+  AlwaysBasicDiff: Boolean = false,
   EnableDebug: Boolean = false,
   EnablePerfDebug: Boolean = true,
   UseDRAMSim: Boolean = false,
   EnableConstantin: Boolean = false,
   EnableChiselDB: Boolean = false,
-  AlwaysBasicDB: Boolean = true,
+  AlwaysBasicDB: Boolean = false,
   EnableRollingDB: Boolean = false
 )
 
