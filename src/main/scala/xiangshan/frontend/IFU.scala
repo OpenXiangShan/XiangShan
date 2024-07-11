@@ -700,9 +700,13 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
     //normal mmio instruction
     is(m_commited){
-      mmio_state       := m_idle
-      mmio_is_RVC      := false.B
-      mmio_resend_addr := 0.U
+      mmio_state         := m_idle
+      mmio_is_RVC        := false.B
+      mmio_resend_addr   := 0.U
+      mmio_resend_af     := false.B
+      mmio_resend_pf     := false.B
+      mmio_resend_gpf    := false.B
+      mmio_resend_gpaddr := 0.U
     }
   }
 
@@ -713,6 +717,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
     mmio_is_RVC        := false.B
     mmio_resend_addr   := 0.U
     mmio_resend_af     := false.B
+    mmio_resend_pf     := false.B
+    mmio_resend_gpf    := false.B
+    mmio_resend_gpaddr := 0.U
     f3_mmio_data.map(_ := 0.U)
   }
 
