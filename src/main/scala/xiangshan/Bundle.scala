@@ -417,6 +417,7 @@ class RSFeedback(isVector: Boolean = false)(implicit p: Parameters) extends XSBu
   val sourceType = RSFeedbackType()
   val dataInvalidSqIdx = new SqPtr
   val sqIdx = new SqPtr
+  val lqIdx = new LqPtr
 }
 
 class MemRSFeedbackIO(isVector: Boolean = false)(implicit p: Parameters) extends XSBundle {

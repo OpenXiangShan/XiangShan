@@ -66,6 +66,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val fuType                = FuType()
     val uopIdx                = OptionWrapper(params.isVecMemIQ, Output(UopIdx()))
     val sqIdx                 = OptionWrapper(params.needFeedBackSqIdx, new SqPtr())
+    val lqIdx                 = OptionWrapper(params.needFeedBackLqIdx, new LqPtr())
   }
 
   object RespType {

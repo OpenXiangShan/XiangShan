@@ -316,6 +316,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     io.feedback(i).bits.flushState       := selEntry.flushState
     io.feedback(i).bits.dataInvalidSqIdx := DontCare
     io.feedback(i).bits.sqIdx            := selEntry.uop.sqIdx
+    io.feedback(i).bits.lqIdx            := selEntry.uop.lqIdx
     // pipeline connect
     NewPipelineConnect(
       port, writeBackOut(i), writeBackOut(i).fire,
