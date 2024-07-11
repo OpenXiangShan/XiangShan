@@ -499,35 +499,53 @@ object XSTrapDecode extends DecodeConstants {
   )
 }
 
+/** Abstract class Imm(val len) is the super class of different case class. For different type of immediate, there is
+ * one sub class recording the method of generating it.
+ * @param len the length of immediate, passed to this class when sub class extends it
+ */
 abstract class Imm(val len: Int) {
-  def toImm32(minBits: UInt): UInt = do_toImm32(minBits(len - 1, 0))
-  def do_toImm32(minBits: UInt): UInt
+  /** get 32-bit immediate from a compressed immmediate
+   * @param compImm a compressed immediate, which is a little bit different from minBits
+   * @return 32-bit immediate
+   */
+  def toImm32(compImm: UInt): UInt = minBitsToImm32(compImm(len - 1, 0))
+
+  /** get 32-bit immediate from minBits
+   * @param minBits the minimum compression of immediate, which is of length len
+   * @return 32-bit immediate
+   */
+  def minBitsToImm32(minBits: UInt): UInt
+
+  /** get the minimum bits of immediate from instruction
+   * @param instr the instruction
+   * @return the minimum bits of immediate
+   */
   def minBitsFromInstr(instr: UInt): UInt
 }
 
 case class Imm_I() extends Imm(12) {
-  override def do_toImm32(minBits: UInt): UInt = SignExt(minBits(len - 1, 0), 32)
+  override def minBitsToImm32(minBits: UInt): UInt = SignExt(minBits, 32)
 
   override def minBitsFromInstr(instr: UInt): UInt =
     Cat(instr(31, 20))
 }
 
 case class Imm_S() extends Imm(12) {
-  override def do_toImm32(minBits: UInt): UInt = SignExt(minBits, 32)
+  override def minBitsToImm32(minBits: UInt): UInt = SignExt(minBits, 32)
 
   override def minBitsFromInstr(instr: UInt): UInt =
     Cat(instr(31, 25), instr(11, 7))
 }
 
 case class Imm_B() extends Imm(12) {
-  override def do_toImm32(minBits: UInt): UInt = SignExt(Cat(minBits, 0.U(1.W)), 32)
+  override def minBitsToImm32(minBits: UInt): UInt = SignExt(Cat(minBits, 0.U(1.W)), 32)
 
   override def minBitsFromInstr(instr: UInt): UInt =
     Cat(instr(31), instr(7), instr(30, 25), instr(11, 8))
 }
 
 case class Imm_U() extends Imm(20){
-  override def do_toImm32(minBits: UInt): UInt = Cat(minBits(len - 1, 0), 0.U(12.W))
+  override def minBitsToImm32(minBits: UInt): UInt = Cat(minBits, 0.U(12.W))
 
   override def minBitsFromInstr(instr: UInt): UInt = {
     instr(31, 12)
@@ -535,7 +553,7 @@ case class Imm_U() extends Imm(20){
 }
 
 case class Imm_J() extends Imm(20){
-  override def do_toImm32(minBits: UInt): UInt = SignExt(Cat(minBits, 0.U(1.W)), 32)
+  override def minBitsToImm32(minBits: UInt): UInt = SignExt(Cat(minBits, 0.U(1.W)), 32)
 
   override def minBitsFromInstr(instr: UInt): UInt = {
     Cat(instr(31), instr(19, 12), instr(20), instr(30, 25), instr(24, 21))
@@ -543,7 +561,7 @@ case class Imm_J() extends Imm(20){
 }
 
 case class Imm_Z() extends Imm(12 + 5){
-  override def do_toImm32(minBits: UInt): UInt = minBits
+  override def minBitsToImm32(minBits: UInt): UInt = ZeroExt(minBits, 32)
 
   override def minBitsFromInstr(instr: UInt): UInt = {
     Cat(instr(19, 15), instr(31, 20))
@@ -551,7 +569,7 @@ case class Imm_Z() extends Imm(12 + 5){
 }
 
 case class Imm_B6() extends Imm(6){
-  override def do_toImm32(minBits: UInt): UInt = ZeroExt(minBits, 32)
+  override def minBitsToImm32(minBits: UInt): UInt = ZeroExt(minBits, 32)
 
   override def minBitsFromInstr(instr: UInt): UInt = {
     instr(25, 20)
@@ -559,7 +577,7 @@ case class Imm_B6() extends Imm(6){
 }
 
 case class Imm_OPIVIS() extends Imm(5){
-  override def do_toImm32(minBits: UInt): UInt = SignExt(minBits, 32)
+  override def minBitsToImm32(minBits: UInt): UInt = SignExt(minBits, 32)
 
   override def minBitsFromInstr(instr: UInt): UInt = {
     instr(19, 15)
@@ -567,7 +585,7 @@ case class Imm_OPIVIS() extends Imm(5){
 }
 
 case class Imm_OPIVIU() extends Imm(5){
-  override def do_toImm32(minBits: UInt): UInt = ZeroExt(minBits, 32)
+  override def minBitsToImm32(minBits: UInt): UInt = ZeroExt(minBits, 32)
 
   override def minBitsFromInstr(instr: UInt): UInt = {
     instr(19, 15)
@@ -575,7 +593,7 @@ case class Imm_OPIVIU() extends Imm(5){
 }
 
 case class Imm_VSETVLI() extends Imm(11){
-  override def do_toImm32(minBits: UInt): UInt = SignExt(minBits, 32)
+  override def minBitsToImm32(minBits: UInt): UInt = SignExt(minBits, 32)
 
   override def minBitsFromInstr(instr: UInt): UInt = {
     instr(30, 20)
@@ -583,7 +601,7 @@ case class Imm_VSETVLI() extends Imm(11){
 }
 
 case class Imm_VSETIVLI() extends Imm(13){
-  override def do_toImm32(minBits: UInt): UInt = SignExt(minBits, 32)
+  override def minBitsToImm32(minBits: UInt): UInt = SignExt(minBits, 32)
 
   override def minBitsFromInstr(instr: UInt): UInt = {
     val rvInst: XSInstBitFields = instr.asTypeOf(new XSInstBitFields)
@@ -608,7 +626,7 @@ case class Imm_VSETIVLI() extends Imm(13){
 }
 
 case class Imm_LUI32() extends Imm(32){
-  override def do_toImm32(minBits: UInt): UInt = minBits(31, 0)
+  override def minBitsToImm32(minBits: UInt): UInt = minBits
 
   override def minBitsFromInstr(instr: UInt): UInt = {
     instr(31, 0)
@@ -616,7 +634,7 @@ case class Imm_LUI32() extends Imm(32){
 }
 
 case class Imm_VRORVI() extends Imm(6){
-  override def do_toImm32(minBits: UInt): UInt = ZeroExt(minBits, 32)
+  override def minBitsToImm32(minBits: UInt): UInt = ZeroExt(minBits, 32)
 
   override def minBitsFromInstr(instr: UInt): UInt = {
     Cat(instr(26), instr(19, 15))

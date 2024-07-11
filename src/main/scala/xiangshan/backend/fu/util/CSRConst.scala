@@ -370,23 +370,34 @@ trait HasCSRConst {
     IRQ_VSEIP, IRQ_VSSIP, IRQ_VSTIP, IRQ_SGEIP
   )
 
+  /**
+   * Check if the access to the CSR is legal
+   * @param addr CSR address
+   * @param wen write enable
+   * @param mode current privilege mode
+   * @param virt virtual mode
+   * @param hasH has hypervisor extension
+   * @return 0: normal, 1: illegl instruction, 2: virtual instruction
+   */
   def csrAccessPermissionCheck(addr: UInt, wen: Bool, mode: UInt, virt: Bool, hasH: Bool): UInt = {
+    val normal :: illegalInstr :: virtInstr :: Nil = Enum(3) // normal check result encode
     val readOnly = addr(11, 10) === "b11".U
     val lowestAccessPrivilegeLevel = addr(9,8)
     val priv = Mux(mode === ModeS, ModeH, mode)
-    val ret = Wire(Bool()) //0.U: normal, 1.U: illegal_instruction, 2.U: virtual instruction
+    val ret = Wire(Bool())
+
     when (lowestAccessPrivilegeLevel === ModeH && !hasH){
-      ret := 1.U
+      ret := illegalInstr
     }.elsewhen (readOnly && wen) {
-      ret := 1.U
+      ret := illegalInstr
     }.elsewhen (priv < lowestAccessPrivilegeLevel) {
       when(virt && lowestAccessPrivilegeLevel <= ModeH){
-        ret := 2.U
+        ret := virtInstr
       }.otherwise{
-        ret := 1.U
+        ret := illegalInstr
       }
     }.otherwise{
-      ret := 0.U
+      ret := normal
     }
     ret
   }

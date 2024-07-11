@@ -229,7 +229,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   val dcsrData = Wire(new DcsrStruct)
   dcsrData := dcsr.asTypeOf(new DcsrStruct)
-  val dcsrMask = ZeroExt(GenMask(15) | GenMask(13, 11) | GenMask(4) | GenMask(2, 0), XLEN)// Dcsr write mask
+  val dcsrMask = BigIntGenMask(Seq((15), (13, 11), (4), (2, 0))).U(XLEN.W) // Dcsr write mask
   def dcsrUpdateSideEffect(dcsr: UInt): UInt = {
     val dcsrOld = WireInit(dcsr.asTypeOf(new DcsrStruct))
     val dcsrNew = dcsr | (dcsrOld.prv(0) | dcsrOld.prv(1)).asUInt // turn 10 priv into 11
@@ -294,18 +294,11 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val mie = RegInit(0.U(XLEN.W))
   val mipWire = WireInit(0.U.asTypeOf(new Interrupt))
   val mipReg  = RegInit(0.U(XLEN.W))
-  val mipMask = ZeroExt(Array(
-    1,  // SSIP
-    2,  // VSSIP
-    3,  // MSIP
-    5,  // STIP
-    6,  // VSTIP
-    7,  // MTIP
-    9,  // SEIP
-    10, // VSEIP
-    11, // MEIP
-    12, // SGEIP
-  ).map(GenMask(_)).reduce(_ | _), XLEN)
+  val mipMask = BigIntGenMask(Seq(
+      (12, 9),  // SGEIP, MEIP, VSEIP, SEIP
+      (7, 5),   // MTIP, VSTIP, STIP
+      (3, 1)    // MSIP, VSSIP, SSIP
+  )).U(XLEN.W)
   val mip = (mipWire.asUInt | mipReg).asTypeOf(new Interrupt)
 
   val mip_mie_WMask_H = if(HasHExtension){((1 << 2) | (1 << 6) | (1 << 10) | (1 << 12)).U(XLEN.W)}else{0.U(XLEN.W)}
@@ -377,20 +370,19 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     val vsstatusNew = Cat(vsstatusOld.xs === "b11".U || vsstatusOld.fs === "b11".U, vsstatus(XLEN-2, 0))
     vsstatusNew
   }
-  val mstatusWMask = (~ZeroExt((
-    GenMask(63)           | // SD is read-only
-    (if(HasHExtension)
-        GenMask(62, 40)    // WPRI
-      else
-        GenMask(62, 38)  )| // WPRI
-    GenMask(35, 32)       | // SXL and UXL cannot be changed
-    GenMask(31, 23)       | // WPRI
-    GenMask(16, 15)       | // XS is read-only
-    GenMask(6)            | // UBE, always little-endian (0)
-    GenMask(4)            | // WPRI
-    GenMask(2)            | // WPRI
-    GenMask(0)              // WPRI
-  ), 64)).asUInt
+  val mstatusWMask = BigIntGenMask(Seq(
+      (63)           , // SD is read-only
+      {if(HasHExtension)
+          (62, 40)     // WPRI
+        else
+          (62, 38)}  , // WPRI
+      (35, 32)       , // SXL and UXL cannot be changed
+      (31, 23)       , // WPRI
+      (16, 15)       , // XS is read-only
+      (6)            , // UBE, always little-endian (0)
+      (4), (2), (0)    // WPRI
+    ), true, XLEN
+  ).U(XLEN.W)
 
   val medeleg = RegInit(UInt(XLEN.W), 0.U)
   val midelegInit = if(HasHExtension){((1 << 12) | (1 << 10) | (1 << 6) | (1 << 2)).U}else{0.U}
@@ -414,36 +406,35 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   // Supervisor-Level CSRs
 
-  val sstatusWNmask: BigInt = (
-    BigIntGenMask(63)     | // SD is read-only
-    BigIntGenMask(62, 34) | // WPRI
-    BigIntGenMask(33, 32) | // UXL is hard-wired to 64(b10)
-    BigIntGenMask(31, 20) | // WPRI
-    BigIntGenMask(17)     | // WPRI
-    BigIntGenMask(16, 15) | // XS is read-only to zero
-    BigIntGenMask(12, 11) | // WPRI
-    BigIntGenMask(7)      | // WPRI
-    BigIntGenMask(6)      | // UBE is always little-endian (0)
-    BigIntGenMask(4, 2)   | // WPRI
-    BigIntGenMask(0)        // WPRI
-  )
-
-  val sstatusWmask = BigIntNot(sstatusWNmask).U(XLEN.W)
-  val sstatusRmask = (
-    BigIntGenMask(63)     | // SD
-    BigIntGenMask(33, 32) | // UXL
-    BigIntGenMask(19)     | // MXR
-    BigIntGenMask(18)     | // SUM
-    BigIntGenMask(16, 15) | // XS
-    BigIntGenMask(14, 13) | // FS
-    BigIntGenMask(10, 9 ) | // VS
-    BigIntGenMask(8)      | // SPP
-    BigIntGenMask(6)      | // UBE: hard wired to 0
-    BigIntGenMask(5)      | // SPIE
-    BigIntGenMask(1)
+  val sstatusWmask = BigIntGenMask(Seq(
+      (63)     , // SD is read-only
+      (62, 34) , // WPRI
+      (33, 32) , // UXL is hard-wired to 64(b10)
+      (31, 20) , // WPRI
+      (17)     , // WPRI
+      (16, 15) , // XS is read-only to zero
+      (12, 11) , // WPRI
+      (7)      , // WPRI
+      (6)      , // UBE is always little-endian (0)
+      (4, 2)   , // WPRI
+      (0)        // WPRI
+    ), true, XLEN
   ).U(XLEN.W)
 
-  println(s"sstatusWNmask: 0x${sstatusWNmask.toString(16)}")
+  val sstatusRmask = BigIntGenMask(Seq(
+      (63)     , // SD
+      (33, 32) , // UXL
+      (19)     , // MXR
+      (18)     , // SUM
+      (16, 15) , // XS
+      (14, 13) , // FS
+      (10, 9 ) , // VS
+      (8)      , // SPP
+      (6)      , // UBE: hard wired to 0
+      (5)      , // SPIE
+      (1)
+  )).U(XLEN.W)
+
   println(s"sstatusWmask: 0x${sstatusWmask.litValue.toString(16)}")
   println(s"sstatusRmask: 0x${sstatusRmask.litValue.toString(16)}")
 
