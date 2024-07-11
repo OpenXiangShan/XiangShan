@@ -412,7 +412,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
         sctr := 0.U
       }
       // if we are draining the capacity of spec queue, force move BOS forward
-      when (specPtrInc(currentTOSW) === BOS) {
+      when (specPtrInc(currentTOSW).value === BOS.value) {
         BOS := specPtrInc(BOS)
         spec_overflowed := true.B;
       }
@@ -516,8 +516,8 @@ class RAS(implicit p: Parameters) extends BasePredictor {
         commit_stack(ptrInc(nsp_update)).ctr := 0.U
       }
       // when overflow, BOS may be forced move forward, do not revert those changes
-      when (!spec_overflowed || isAfter(specPtrInc(io.commit_meta_TOSW), BOS)) {
-        BOS := specPtrInc(io.commit_meta_TOSW)
+      when (!spec_overflowed || isAfter(io.commit_meta_TOSW, BOS)) {
+        BOS := io.commit_meta_TOSW
         spec_overflowed := false.B
       }
 
