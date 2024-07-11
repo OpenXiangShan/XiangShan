@@ -145,7 +145,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   //  val refill = Flipped(ValidIO(new Refill))
     val tl_d_channel  = Input(new DcacheToLduForwardIO)
     val release = Flipped(Valid(new Release))
-    val nuke_rollback = Output(Valid(new Redirect))
+    val nuke_rollback = Vec(StorePipelineWidth, Output(Valid(new Redirect)))
     val nack_rollback = Output(Valid(new Redirect))
     val rob = Flipped(new RobLsqIO)
     val uncache = new UncacheWordIO
@@ -292,7 +292,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("full_mask_101", full_mask === 5.U)
   XSPerfAccumulate("full_mask_110", full_mask === 6.U)
   XSPerfAccumulate("full_mask_111", full_mask === 7.U)
-  XSPerfAccumulate("nuke_rollback", io.nuke_rollback.valid)
+  XSPerfAccumulate("nuke_rollback", io.nuke_rollback.map(_.valid).reduce(_ || _).asUInt)
   XSPerfAccumulate("nack_rollabck", io.nack_rollback.valid)
 
   // perf cnt
@@ -306,7 +306,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     ("full_mask_101", full_mask === 5.U),
     ("full_mask_110", full_mask === 6.U),
     ("full_mask_111", full_mask === 7.U),
-    ("nuke_rollback", io.nuke_rollback.valid),
+    ("nuke_rollback", io.nuke_rollback.map(_.valid).reduce(_ || _).asUInt),
     ("nack_rollback", io.nack_rollback.valid)
   )
   generatePerfEvent()
