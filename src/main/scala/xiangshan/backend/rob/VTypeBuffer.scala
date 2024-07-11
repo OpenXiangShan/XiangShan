@@ -53,11 +53,6 @@ class VTypeBufferIO(size: Int)(implicit p: Parameters) extends XSBundle {
     }
   })
 
-  val fromDecode = new Bundle {
-    val lastSpecVType = Flipped(Valid(new VType))
-    val specVtype = Input(new VType)
-  }
-
   val status = Output(new Bundle {
     val walkEnd = Bool()
   })
@@ -108,15 +103,13 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   private val walkPtrNext = Wire(new VTypeBufferPtr)
   private val walkPtrVecNext = VecInit((0 until CommitWidth).map(x => walkPtrNext + x.U))
 
-  private val enqVType = WireInit(0.U.asTypeOf(new (VType)))
-  when(io.fromDecode.lastSpecVType.valid) {
-    enqVType := io.fromDecode.lastSpecVType.bits
-  }.otherwise {
-    enqVType := io.fromDecode.specVtype
-  }
+  // get enque vtypes in io.req
+  private val enqVTypes = VecInit(io.req.map(req => req.bits.vpu.vtype))
+  private val enqValids = VecInit(io.req.map(_.valid))
+  private val enqVType = PriorityMux(enqValids.zip(enqVTypes).map { case (valid, vtype) => valid -> vtype })
 
   private val walkPtrSnapshots = SnapshotGenerator(enqPtr, io.snpt.snptEnq, io.snpt.snptDeq, io.redirect.valid, io.snpt.flushVec)
-  private val walkVtypeSnapshots = SnapshotGenerator(enqVType, io.snpt.snptEnq, io.snpt.snptDeq, io.redirect.valid, io.snpt.flushVec)
+  private val walkVTypeSnapshots = SnapshotGenerator(enqVType, io.snpt.snptEnq, io.snpt.snptDeq, io.redirect.valid, io.snpt.flushVec)
 
   private val robWalkEndReg = RegInit(false.B)
   private val robWalkEnd = io.fromRob.walkEnd || robWalkEndReg
@@ -165,7 +158,11 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
 
   walkPtr := walkPtrNext
 
-  private val useSnapshot = (state === s_idle && stateNext === s_walk) || (state === s_walk && io.snpt.useSnpt && io.redirect.valid)
+  private val useSnapshotNext = WireInit(false.B)
+
+  useSnapshotNext := (state === s_idle && stateNext === s_walk) || (state === s_walk && io.snpt.useSnpt && io.redirect.valid)
+  private val useSnapshot = RegNext(useSnapshotNext)
+  private val snapshotVType = RegEnable(walkVTypeSnapshots(snptSelect), useSnapshotNext)
 
   // update enq ptr
   private val enqPtrNext = Mux(
@@ -280,7 +277,7 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   }.elsewhen (useSnapshot) {
     // use snapshot vtype
     decodeResumeVType.valid := true.B
-    decodeResumeVType.bits := walkVtypeSnapshots(snptSelect)
+    decodeResumeVType.bits := snapshotVType
   }.elsewhen (state === s_walk && walkCount =/= 0.U) {
     decodeResumeVType.valid := true.B
     decodeResumeVType.bits := newestVType
