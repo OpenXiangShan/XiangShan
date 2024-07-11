@@ -258,7 +258,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       Mux(topEntry.retAddr === io.spec_push_addr && topEntry.ctr < ctrMax, sctr + 1.U, 0.U))
 
     writeNos := Mux(io.redirect_valid && io.redirect_isCall,
-      io.redirect_meta_NOS, TOSR)
+      io.redirect_meta_TOSR, TOSR)
 
     when (io.spec_push_valid || (io.redirect_valid && io.redirect_isCall)) {
       writeBypassEntry := writeEntry
