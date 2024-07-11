@@ -831,7 +831,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     val probe_block = Output(Bool())
 
     // block release
-    val release_addr = Input(UInt(PAddrBits.W))
+    val release_addr = Flipped(ValidIO(UInt(PAddrBits.W)))
     val release_block = Output(Bool())
 
     val full = Output(Bool())
@@ -1020,7 +1020,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
 
   io.probe_block := Cat(probe_block_vec).orR
 
-  io.release_block := Cat(entries.map(e => e.io.req_addr.valid && e.io.req_addr.bits === io.release_addr) ++ Seq(miss_req_pipe_reg.block_match(io.release_addr))).orR
+  io.release_block := io.release_addr.valid && Cat(entries.map(e => e.io.req_addr.valid && e.io.req_addr.bits === io.release_addr.bits) ++ Seq(miss_req_pipe_reg.block_match(io.release_addr.bits))).orR
 
   io.full := ~Cat(entries.map(_.io.primary_ready)).andR
 

@@ -327,7 +327,7 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   val req = io.req
   val block_conflict = Wire(Bool())
 
-  req.ready := alloc && !block_conflict && !io.mshr_block
+  req.ready := alloc && !block_conflict
 
   // assign default values to output signals
   io.mem_release.valid := false.B
@@ -351,7 +351,7 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
       entry.io.id := entry_id
 
       // entry req
-      entry.io.req.valid := req.valid && !block_conflict
+      entry.io.req.valid := req.valid && !block_conflict && !io.mshr_block
       primary_ready_vec(i)   := entry.io.primary_ready
       entry.io.req.bits  := req.bits
       entry.io.req_data  := req_data
