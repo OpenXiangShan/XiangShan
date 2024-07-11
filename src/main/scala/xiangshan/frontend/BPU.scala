@@ -278,13 +278,14 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   val reset_vector = DelayN(io.reset_vector, 5)
 
+  val s0_stall_dup = dup_wire(Bool()) // For some reason s0 stalled, usually FTQ Full
   val s0_fire_dup, s1_fire_dup, s2_fire_dup, s3_fire_dup = dup_wire(Bool())
   val s1_valid_dup, s2_valid_dup, s3_valid_dup = dup_seq(RegInit(false.B))
   val s1_ready_dup, s2_ready_dup, s3_ready_dup = dup_wire(Bool())
   val s1_components_ready_dup, s2_components_ready_dup, s3_components_ready_dup = dup_wire(Bool())
 
   val s0_pc_dup = dup(WireInit(0.U.asTypeOf(UInt(VAddrBits.W))))
-  val s0_pc_reg_dup = s0_pc_dup.map(x => RegNext(x))
+  val s0_pc_reg_dup = s0_pc_dup.zip(s0_stall_dup).map{ case (s0_pc, s0_stall) => RegEnable(s0_pc, !s0_stall) }
   when (RegNext(RegNext(reset.asBool) && !reset.asBool)) {
     s0_pc_reg_dup.map{case s0_pc => s0_pc := reset_vector}
   }
@@ -293,19 +294,25 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   val s3_pc = RegEnable(s2_pc, s2_fire_dup(0))
 
   val s0_folded_gh_dup = dup_wire(new AllFoldedHistories(foldedGHistInfos))
-  val s0_folded_gh_reg_dup = s0_folded_gh_dup.map(x => RegNext(x, init=0.U.asTypeOf(s0_folded_gh_dup(0))))
+  val s0_folded_gh_reg_dup = s0_folded_gh_dup.zip(s0_stall_dup).map{
+    case (x, s0_stall) => RegEnable(x, 0.U.asTypeOf(s0_folded_gh_dup(0)), !s0_stall)
+  }
   val s1_folded_gh_dup = RegEnable(s0_folded_gh_dup, 0.U.asTypeOf(s0_folded_gh_dup), s0_fire_dup(1))
   val s2_folded_gh_dup = RegEnable(s1_folded_gh_dup, 0.U.asTypeOf(s0_folded_gh_dup), s1_fire_dup(1))
   val s3_folded_gh_dup = RegEnable(s2_folded_gh_dup, 0.U.asTypeOf(s0_folded_gh_dup), s2_fire_dup(1))
 
   val s0_last_br_num_oh_dup = dup_wire(UInt((numBr+1).W))
-  val s0_last_br_num_oh_reg_dup = s0_last_br_num_oh_dup.map(x => RegNext(x, init=0.U))
+  val s0_last_br_num_oh_reg_dup = s0_last_br_num_oh_dup.zip(s0_stall_dup).map{
+    case (x, s0_stall) => RegEnable(x, 0.U, !s0_stall)
+  }
   val s1_last_br_num_oh_dup = RegEnable(s0_last_br_num_oh_dup, 0.U.asTypeOf(s0_last_br_num_oh_dup), s0_fire_dup(1))
   val s2_last_br_num_oh_dup = RegEnable(s1_last_br_num_oh_dup, 0.U.asTypeOf(s0_last_br_num_oh_dup), s1_fire_dup(1))
   val s3_last_br_num_oh_dup = RegEnable(s2_last_br_num_oh_dup, 0.U.asTypeOf(s0_last_br_num_oh_dup), s2_fire_dup(1))
 
   val s0_ahead_fh_oldest_bits_dup = dup_wire(new AllAheadFoldedHistoryOldestBits(foldedGHistInfos))
-  val s0_ahead_fh_oldest_bits_reg_dup = s0_ahead_fh_oldest_bits_dup.map(x => RegNext(x, init=0.U.asTypeOf(s0_ahead_fh_oldest_bits_dup(0))))
+  val s0_ahead_fh_oldest_bits_reg_dup = s0_ahead_fh_oldest_bits_dup.zip(s0_stall_dup).map{
+    case (x, s0_stall) => RegEnable(x, 0.U.asTypeOf(s0_ahead_fh_oldest_bits_dup(0)), !s0_stall)
+  }
   val s1_ahead_fh_oldest_bits_dup = RegEnable(s0_ahead_fh_oldest_bits_dup, 0.U.asTypeOf(s0_ahead_fh_oldest_bits_dup), s0_fire_dup(1))
   val s2_ahead_fh_oldest_bits_dup = RegEnable(s1_ahead_fh_oldest_bits_dup, 0.U.asTypeOf(s0_ahead_fh_oldest_bits_dup), s1_fire_dup(1))
   val s3_ahead_fh_oldest_bits_dup = RegEnable(s2_ahead_fh_oldest_bits_dup, 0.U.asTypeOf(s0_ahead_fh_oldest_bits_dup), s2_fire_dup(1))
@@ -330,7 +337,9 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   val ghv_wens = Wire(Vec(HistoryLength, Bool()))
 
   val s0_ghist_ptr_dup = dup_wire(new CGHPtr)
-  val s0_ghist_ptr_reg_dup = s0_ghist_ptr_dup.map(x => RegNext(x, init=0.U.asTypeOf(new CGHPtr)))
+  val s0_ghist_ptr_reg_dup = s0_ghist_ptr_dup.zip(s0_stall_dup).map{
+    case (x, s0_stall) => RegEnable(x, 0.U.asTypeOf(new CGHPtr), !s0_stall)
+  }
   val s1_ghist_ptr_dup = RegEnable(s0_ghist_ptr_dup, 0.U.asTypeOf(s0_ghist_ptr_dup), s0_fire_dup(1))
   val s2_ghist_ptr_dup = RegEnable(s1_ghist_ptr_dup, 0.U.asTypeOf(s0_ghist_ptr_dup), s1_fire_dup(1))
   val s3_ghist_ptr_dup = RegEnable(s2_ghist_ptr_dup, 0.U.asTypeOf(s0_ghist_ptr_dup), s2_fire_dup(1))
@@ -456,6 +465,14 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     }
   }
   XSError(full_pred_diff, "Full prediction difference detected!")
+
+  // s0_stall should be exclusive with any other PC source
+  s0_stall_dup.zip(s1_valid_dup).zip(s2_redirect_dup).zip(s3_redirect_dup).zip(do_redirect_dup).foreach {
+    case ((((s0_stall, s1_valid), s2_redirect), s3_redirect), do_redirect) => {
+      s0_stall := !(s1_valid || s2_redirect || s3_redirect || do_redirect.valid)
+    }
+  }
+  XSError(s0_stall_dup(0) && s0_pc_dup(0) =/= s0_pc_reg_dup(0), "s0_stall but s0_pc is differenct from s0_pc_reg")
 
   npcGen_dup.zip(s0_pc_reg_dup).map{ case (gen, reg) =>
     gen.register(true.B, reg, Some("stallPC"), 0)}
