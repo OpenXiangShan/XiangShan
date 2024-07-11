@@ -191,7 +191,7 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule
   io.s2_ready := true.B
   io.s3_ready := true.B
 
-  val reset_vector = DelayN(io.reset_vector, 5)
+  val (_, reset_vector) = DelayNWithValid(io.reset_vector, reset.asBool, 5, hasInit = false)
 
   val s0_pc_dup   = WireInit(io.in.bits.s0_pc) // fetchIdx(io.f0_pc)
   val s1_pc_dup   = s0_pc_dup.zip(io.s0_fire).map {case (s0_pc, s0_fire) => RegEnable(s0_pc, s0_fire)}
@@ -276,7 +276,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   predictors.io.reset_vector := io.reset_vector
 
 
-  val reset_vector = DelayN(io.reset_vector, 5)
+  val (_, reset_vector) = DelayNWithValid(io.reset_vector, reset.asBool, 5, hasInit = false)
 
   val s0_stall_dup = dup_wire(Bool()) // For some reason s0 stalled, usually FTQ Full
   val s0_fire_dup, s1_fire_dup, s2_fire_dup, s3_fire_dup = dup_wire(Bool())
