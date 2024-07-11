@@ -177,10 +177,10 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   val s1_valid         = RegInit(false.B)
   val s1_kill          = Wire(Bool())
   val s1_in            = Wire(new VLSBundle(isVStore))
-  val s1_can_go        = io.out.ready && io.toMergeBuffer.resp.valid
+  val s1_can_go        = io.out.ready && io.toMergeBuffer.req.ready
   val s1_fire          = s1_valid && !s1_kill && s1_can_go
 
-  s1_ready         := s1_kill || !s1_valid || io.out.ready && io.toMergeBuffer.resp.valid
+  s1_ready         := s1_kill || !s1_valid || s1_can_go
 
   when(s0_fire){
     s1_valid := true.B
@@ -220,7 +220,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   s1_kill               := s1_in.uop.robIdx.needFlush(io.redirect)
 
   // query mergeBuffer
-  io.toMergeBuffer.req.valid             := s1_fire // only can_go will get MergeBuffer entry
+  io.toMergeBuffer.req.valid             := io.out.ready && s1_valid// only can_go will get MergeBuffer entry
   io.toMergeBuffer.req.bits.flowNum      := activeNum
   io.toMergeBuffer.req.bits.data         := s1_in.data
   io.toMergeBuffer.req.bits.uop          := s1_in.uop
