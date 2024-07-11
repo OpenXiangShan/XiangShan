@@ -29,6 +29,7 @@ import xiangshan.backend.fu.FuType
 import xiangshan.backend.Bundles.{DecodedInst, DynInst, StaticInst}
 import xiangshan.backend.decode.isa.bitfield.{InstVType, XSInstBitFields}
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
+import xiangshan.backend.fu.util.CSRConst
 
 /**
  * Abstract trait giving defaults and other relevant values to different Decode constants/
