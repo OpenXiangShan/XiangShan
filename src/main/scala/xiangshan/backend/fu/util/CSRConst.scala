@@ -271,6 +271,55 @@ trait HasCSRConst {
   val Dscratch0     = 0x7B2
   val Dscratch1     = 0x7B3
 
+  /**
+   * CSRs that can make instruction CSRR executed out of order
+   */
+  val quickCsrrAddr = List(
+    Frm,
+    Vxrm,
+    Stvec,
+    Scounteren,
+    Senvcfg,
+    Sscratch,
+    Sepc,
+    Scause,
+    Stval,
+    Satp,
+    Vstvec,
+    Vsscratch,
+    Vsepc,
+    Vscause,
+    Vstval,
+    Vsatp,
+    Medeleg,
+    Mideleg,
+    Mtvec,
+    Mcounteren,
+    Menvcfg,
+    Mcountinhibit,
+    Mscratch,
+    Mepc,
+    Mcause,
+    Mtval,
+    Mtinst,
+    Mtval2,
+    Sbpctl,     // customized csr: sbpctl      S-mode Branch Prediction ConTroL
+    Spfctl,     // customized csr: spfctl      S-mode PreFetch ConTroL
+    Slvpredctl, // customized csr: slvpredctl  S-mode Load Violation PREDict ConTroL
+    Smblockctl, // customized csr: smblockctl  S-mode Memory BlockConTroL
+    Srnctl,     // customized csr: srnctl      S-mode ?
+    Hedeleg,
+    Hideleg,
+    Hcounteren,
+    Htval,
+    Hgatp,
+    Mvendorid,
+    Marchid,
+    Mimpid,
+    Mhartid,
+    Mconfigptr
+  )
+
   def privEcall  = 0x000.U
   def privEbreak = 0x001.U
   def privMret   = 0x302.U

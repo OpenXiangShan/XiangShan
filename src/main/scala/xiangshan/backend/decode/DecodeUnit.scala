@@ -925,11 +925,19 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   // for csrr vl instruction, convert to vsetvl
   val Vl = 0xC20.U
   val Vlenb = 0xC22.U
-  val isCsrInst = FuType.FuTypeOrR(decodedInst.fuType, FuType.csr)
+  // Since there is only FuType.csr (reducr a single element), this val represent whether this is FuType.csr
+  val isCsrInst = FuType.isCsr(decodedInst.fuType)
   //  rs1 is x0 or uimm == 0
   val isCsrRead = (decodedInst.fuOpType === CSROpType.set || decodedInst.fuOpType === CSROpType.clr) && inst.RS1 === 0.U
   val isCsrrVl = isCsrInst && isCsrRead && inst.CSRIDX === Vl
   val isCsrrVlenb = isCsrInst && isCsrRead && inst.CSRIDX === Vlenb
+  /**
+   * CSRR instruction with certain csr address can be executed out-of-order.
+   * Some CSR can only be modified by Zicsr isntructions, atomic instructions or when a trap detected.
+   * These CSR can be read at any time.
+   */
+  private val quickCsrrInstr: Bool = isCsrInst && isCsrRead && (inst.RS1 === 0.U) &&
+    LookupTreeDefault(inst.CSRIDX, false.B, CSRConst.quickCsrrAddr.map(_.U -> true.B))
   when (isCsrrVl) {
     // convert to vsetvl instruction
     decodedInst.srcType(0) := SrcType.no
@@ -940,7 +948,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     decodedInst.lsrc(4) := Vl_IDX.U
     decodedInst.waitForward := false.B
     decodedInst.blockBackward := false.B
-  }.elsewhen(isCsrrVlenb){
+  }.elsewhen (isCsrrVlenb) {
     // convert to addi instruction
     decodedInst.srcType(0) := SrcType.reg
     decodedInst.srcType(1) := SrcType.imm
@@ -951,6 +959,9 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     decodedInst.waitForward := false.B
     decodedInst.blockBackward := false.B
     decodedInst.canRobCompress := true.B
+  }.elsewhen (quickCsrrInstr) {
+    decodedInst.waitForward   := false.B
+    decodedInst.blockBackward := false.B
   }
 
   io.deq.decodedInst := decodedInst

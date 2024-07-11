@@ -150,8 +150,12 @@ object FuType extends OHEnumeration {
   def isIntDq1Deq1(fuType: UInt)(implicit p: Parameters): Bool = FuTypeOrR(fuType, intDq1Deq1)
   def isBothDeq0(fuType: UInt)(implicit p: Parameters): Bool = FuTypeOrR(fuType, intBothDeq0)
   def isBothDeq1(fuType: UInt)(implicit p: Parameters): Bool = FuTypeOrR(fuType, intBothDeq1)
-  def isAlu(fuType: UInt): Bool = FuTypeOrR(fuType, Seq(alu))
-  def isBrh(fuType: UInt): Bool = FuTypeOrR(fuType, Seq(brh))
+
+  def isAlu(fuType: UInt): Bool = FuTypeOrR(fuType, alu)
+
+  def isBrh(fuType: UInt): Bool = FuTypeOrR(fuType, brh)
+
+  def isCsr(fuType: UInt): Bool = FuTypeOrR(fuType, csr)
 
   def isVset(fuType: UInt): Bool = FuTypeOrR(fuType, vecVSET)
 
