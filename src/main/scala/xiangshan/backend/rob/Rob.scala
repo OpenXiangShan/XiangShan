@@ -1274,7 +1274,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // XSPerfDCFG("dcfg", dcfgKey, dcfgValue, dcfgValid, clock, reset)
 
   (0 until CommitWidth).foreach { i =>
-    dcfgKey(i).branchPC := io.commits.info(i).pc
+    dcfgKey(i).branchPC := io.commits.info(i).debug_pc.get
     // FIXME: when merge new backend, the nFused should be updated
     dcfgValue(i).nFused := 1.U + Mux(CommitType.isFused(io.commits.info(i).commitType), 1.U, 0.U)
     dcfgValue(i).isBranch := io.commits.info(i).commitType === CommitType.BRANCH
@@ -1289,7 +1289,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val pcVec = Wire(Vec(CommitWidth, Valid(new PCChiselMapBundle)))
   pcVec.zipWithIndex.map{ case (x, i) =>
     x.valid := io.commits.commitValid(i) && io.commits.isCommit
-    x.bits.pc := io.commits.info(i).pc
+    x.bits.pc := io.commits.info(i).debug_pc.get
   }
   pcMap.log(pcVec, 1.U, "PC", clock, reset)
 
