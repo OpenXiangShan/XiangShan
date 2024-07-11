@@ -22,7 +22,7 @@ import chisel3.util._
 import utility.HasCircularQueuePtrHelper
 import utility.ParallelPriorityMux
 import utility.GatedValidRegNext
-import utils.XSError
+import utility.XSError
 import xiangshan._
 
 abstract class RegType

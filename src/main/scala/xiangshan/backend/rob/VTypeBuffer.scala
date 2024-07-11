@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.{CircularQueuePtr, CircularShift, HasCircularQueuePtrHelper, OneHot, SyncDataModuleTemplate, GatedValidRegNext}
-import utils.{QueuePerf, XSError, XSPerfAccumulate}
+import utility.{QueuePerf, XSError, XSPerfAccumulate}
 import xiangshan.backend.Bundles.DynInst
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.rename.SnapshotGenerator

@@ -84,7 +84,7 @@ trait HasMasterInterface { this: StandAloneDevice =>
       masternode
   )
   val axi4masternode = axi4master.map(axi4master => InModuleBody {
-    val axi4masternode = IO(new VerilogAXI4Record(axi4master.in.head._1.params))
+    val axi4masternode = chisel3.IO(new VerilogAXI4Record(axi4master.in.head._1.params))
     axi4masternode.viewAs[AXI4Bundle] <> axi4master.in.head._1
     axi4masternode
   })
@@ -134,7 +134,7 @@ abstract class StandAloneDevice (
       _
   )
   val axi4node = axi4.map(axi4 => InModuleBody {
-    val axi4node = IO(Flipped(new VerilogAXI4Record(axi4.out.head._1.params)))
+    val axi4node = chisel3.IO(Flipped(new VerilogAXI4Record(axi4.out.head._1.params)))
     axi4node.viewAs[AXI4Bundle] <> axi4.out.head._1
     axi4node
   })

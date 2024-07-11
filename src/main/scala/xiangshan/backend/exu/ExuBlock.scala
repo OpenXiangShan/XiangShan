@@ -8,7 +8,7 @@ import xiangshan.backend.fu.{CSRFileIO, FenceIO}
 import xiangshan.backend.Bundles._
 import xiangshan.backend.issue.SchdBlockParams
 import xiangshan.{HasXSParameter, Redirect, XSBundle}
-import utils._
+import utility._
 import xiangshan.backend.fu.FuConfig.{AluCfg, BrhCfg}
 import xiangshan.backend.fu.vector.Bundles.{VType, Vxrm}
 import xiangshan.backend.fu.fpu.Bundles.Frm
@@ -67,11 +67,11 @@ class ExuBlockIO(implicit p: Parameters, params: SchdBlockParams) extends XSBund
   // out(i)(j): issueblock(i), exu(j).
   val out: MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = params.genExuOutputDecoupledBundle
 
-  val csrio = OptionWrapper(params.hasCSR, new CSRFileIO)
-  val fenceio = OptionWrapper(params.hasFence, new FenceIO)
-  val frm = OptionWrapper(params.needSrcFrm, Input(Frm()))
-  val vxrm = OptionWrapper(params.needSrcVxrm, Input(Vxrm()))
-  val vtype = OptionWrapper(params.writeVConfig, (Valid(new VType)))
-  val vlIsZero = OptionWrapper(params.writeVConfig, Output(Bool()))
-  val vlIsVlmax = OptionWrapper(params.writeVConfig, Output(Bool()))
+  val csrio = Option.when(params.hasCSR)(new CSRFileIO)
+  val fenceio = Option.when(params.hasFence)(new FenceIO)
+  val frm = Option.when(params.needSrcFrm)(Input(Frm()))
+  val vxrm = Option.when(params.needSrcVxrm)(Input(Vxrm()))
+  val vtype = Option.when(params.writeVConfig)((Valid(new VType)))
+  val vlIsZero = Option.when(params.writeVConfig)(Output(Bool()))
+  val vlIsVlmax = Option.when(params.writeVConfig)(Output(Bool()))
 }

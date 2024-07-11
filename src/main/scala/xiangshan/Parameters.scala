@@ -536,7 +536,6 @@ case class DebugOptions
   EnableConstantin: Boolean = false,
   EnableChiselDB: Boolean = false,
   AlwaysBasicDB: Boolean = true,
-  EnableTopDown: Boolean = false,
   EnableRollingDB: Boolean = false
 )
 
