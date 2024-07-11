@@ -696,14 +696,6 @@ class NewCSR(implicit val p: Parameters) extends Module
   // flush
   val resetSatp = Cat(Seq(satp, vsatp, hgatp).map(_.addr.U === addr)).orR && wenLegal // write to satp will cause the pipeline be flushed
 
-  val wFcsrChangeRM = addr === fcsr.addr.U && wenLegal && wdata(7, 5) =/= fcsr.frm
-  val wFrmChangeRM  = addr === CSRs.frm.U  && wenLegal && wdata(2, 0) =/= fcsr.frm
-  val frmChange = wFcsrChangeRM || wFrmChangeRM
-
-  val wVcsrChangeRM = addr === CSRs.vcsr.U && wenLegal && wdata(2, 1) =/= vcsr.vxrm
-  val wVxrmChangeRM = addr === CSRs.vxrm.U && wenLegal && wdata(1, 0) =/= vcsr.vxrm
-  val vxrmChange = wVcsrChangeRM || wVxrmChangeRM
-
   val floatStatusOnOff = mstatus.w.wen && (
     mstatus.w.wdataFields.FS === ContextStatus.Off && mstatus.regOut.FS =/= ContextStatus.Off ||
     mstatus.w.wdataFields.FS =/= ContextStatus.Off && mstatus.regOut.FS === ContextStatus.Off
@@ -733,7 +725,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     vstart.w.wdata =/= 0.U && vstart.regOut.vstart.asUInt === 0.U
   )
 
-  val flushPipe = resetSatp || frmChange || vxrmChange ||
+  val flushPipe = resetSatp ||
     triggerFrontendChange || floatStatusOnOff || vectorStatusOnOff ||
     vstartChange
 
