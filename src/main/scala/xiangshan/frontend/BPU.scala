@@ -39,6 +39,9 @@ trait HasBPUConst extends HasXSParameter {
 
   val numDup = 4
 
+  // Used to gate PC higher parts
+  val pcSegments = Seq(VAddrBits - 24, 12, 12)
+
   def BP_STAGES = (0 until 3).map(_.U(2.W))
   def BP_S1 = BP_STAGES(0)
   def BP_S2 = BP_STAGES(1)
@@ -195,16 +198,16 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule
 
   val s0_pc_dup   = WireInit(io.in.bits.s0_pc) // fetchIdx(io.f0_pc)
   val s1_pc_dup   = s0_pc_dup.zip(io.s0_fire).map {case (s0_pc, s0_fire) => RegEnable(s0_pc, s0_fire)}
-  val s2_pc_dup   = s1_pc_dup.zip(io.s1_fire).map {case (s1_pc, s1_fire) => RegEnable(s1_pc, s1_fire)}
-  val s3_pc_dup   = s2_pc_dup.zip(io.s2_fire).map {case (s2_pc, s2_fire) => RegEnable(s2_pc, s2_fire)}
+  val s2_pc_dup   = s1_pc_dup.zip(io.s1_fire).map {case (s1_pc, s1_fire) => SegmentedAddrNext(s1_pc, pcSegments, s1_fire, Some("s2_pc"))}
+  val s3_pc_dup   = s2_pc_dup.zip(io.s2_fire).map {case (s2_pc, s2_fire) => SegmentedAddrNext(s2_pc, s2_fire, Some("s3_pc"))}
 
   when (RegNext(RegNext(reset.asBool) && !reset.asBool)) {
     s1_pc_dup.map{case s1_pc => s1_pc := reset_vector}
   }
 
   io.out.s1.pc := s1_pc_dup
-  io.out.s2.pc := s2_pc_dup
-  io.out.s3.pc := s3_pc_dup
+  io.out.s2.pc := s2_pc_dup.map(_.getAddr())
+  io.out.s3.pc := s3_pc_dup.map(_.getAddr())
 
   val perfEvents: Seq[(String, UInt)] = Seq()
 

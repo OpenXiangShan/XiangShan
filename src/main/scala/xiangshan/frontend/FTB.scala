@@ -716,11 +716,10 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   io.out.s2.full_pred.map {case fp => fp.multiHit := false.B}
 
   io.out.s2.full_pred.zip(s2_hit_dup).map {case (fp, h) => fp.hit := h}
-  io.out.s2.pc                  := s2_pc_dup
   for (full_pred & s2_ftb_entry & s2_pc & s1_pc & s1_fire <-
     io.out.s2.full_pred zip s2_ftb_entry_dup zip s2_pc_dup zip s1_pc_dup zip io.s1_fire) {
       full_pred.fromFtbEntry(s2_ftb_entry,
-        s2_pc,
+        s2_pc.getAddr(),
         // Previous stage meta for better timing
         Some(s1_pc, s1_fire),
         Some(s1_read_resp, s1_fire)
@@ -729,10 +728,9 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
 
   io.out.s3.full_pred.zip(s3_hit_dup).map {case (fp, h) => fp.hit := h}
   io.out.s3.full_pred.zip(s3_mult_hit_dup).map {case (fp, m) => fp.multiHit := m}
-  io.out.s3.pc                  := s3_pc_dup
   for (full_pred & s3_ftb_entry & s3_pc & s2_pc & s2_fire <-
     io.out.s3.full_pred zip s3_ftb_entry_dup zip s3_pc_dup zip s2_pc_dup zip io.s2_fire)
-      full_pred.fromFtbEntry(s3_ftb_entry, s3_pc, Some((s2_pc, s2_fire)))
+      full_pred.fromFtbEntry(s3_ftb_entry, s3_pc.getAddr(), Some((s2_pc.getAddr(), s2_fire)))
 
   io.out.last_stage_ftb_entry := s3_ftb_entry_dup(0)
   io.out.last_stage_meta := RegEnable(Mux(s2_multi_hit_enable, s2_multi_hit_meta, s2_ftb_meta), io.s2_fire(0))
