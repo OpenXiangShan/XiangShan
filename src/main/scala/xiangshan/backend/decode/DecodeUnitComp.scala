@@ -192,7 +192,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   // when vstart is not zero, the last uop will modify vstart to zero
   // therefore, blockback and flush pipe
   csBundle(numOfUop - 1.U).blockBackward := vstartReg =/= 0.U
-  csBundle(numOfUop - 1.U).flushPipe := vstartReg =/= 0.U
+  csBundle(0.U).flushPipe := vstartReg =/= 0.U
 
   switch(typeOfSplit) {
     is(UopSplitType.VSET) {
@@ -201,7 +201,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         // Default
         // uop0 set rd, never flushPipe
         csBundle(0).fuType := FuType.vsetiwi.U
-        csBundle(0).flushPipe := false.B
+        csBundle(0).flushPipe := Mux(VSETOpType.isVsetvl(latchedInst.fuOpType), true.B, vstartReg =/= 0.U)
         csBundle(0).blockBackward := false.B
         csBundle(0).rfWen := true.B
         // uop1 set vl, vsetvl will flushPipe
@@ -209,8 +209,8 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(1).vecWen := false.B
         csBundle(1).vlWen := true.B
         // vsetvl flush pipe and block backward
-        csBundle(1).flushPipe := Mux(VSETOpType.isVsetvl(latchedInst.fuOpType), true.B, false.B)
-        csBundle(1).blockBackward := Mux(VSETOpType.isVsetvl(latchedInst.fuOpType), true.B, false.B)
+        csBundle(1).flushPipe := false.B
+        csBundle(1).blockBackward := Mux(VSETOpType.isVsetvl(latchedInst.fuOpType), true.B, vstartReg =/= 0.U)
         when(VSETOpType.isVsetvli(latchedInst.fuOpType) && dest === 0.U && src1 === 0.U) {
           // write nothing, uop0 is a nop instruction
           csBundle(0).rfWen := false.B

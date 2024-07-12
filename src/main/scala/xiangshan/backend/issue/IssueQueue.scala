@@ -554,6 +554,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     deqResp.bits.resp   := RespType.success
     deqResp.bits.robIdx := DontCare
     deqResp.bits.sqIdx.foreach(_ := DontCare)
+    deqResp.bits.lqIdx.foreach(_ := DontCare)
     deqResp.bits.fuType := deqBeforeDly(i).bits.common.fuType
     deqResp.bits.uopIdx.foreach(_ := DontCare)
   }
@@ -1050,6 +1051,7 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
     slowResp.valid       := memIO.feedbackIO(i).feedbackSlow.valid
     slowResp.bits.robIdx := memIO.feedbackIO(i).feedbackSlow.bits.robIdx
     slowResp.bits.sqIdx.foreach( _ := memIO.feedbackIO(i).feedbackSlow.bits.sqIdx)
+    slowResp.bits.lqIdx.foreach( _ := memIO.feedbackIO(i).feedbackSlow.bits.lqIdx)
     slowResp.bits.resp   := Mux(memIO.feedbackIO(i).feedbackSlow.bits.hit, RespType.success, RespType.block)
     slowResp.bits.fuType := DontCare
   }
@@ -1058,6 +1060,7 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
     fastResp.valid       := memIO.feedbackIO(i).feedbackFast.valid
     fastResp.bits.robIdx := memIO.feedbackIO(i).feedbackFast.bits.robIdx
     fastResp.bits.sqIdx.foreach( _ := memIO.feedbackIO(i).feedbackFast.bits.sqIdx)
+    fastResp.bits.lqIdx.foreach( _ := memIO.feedbackIO(i).feedbackFast.bits.lqIdx)
     fastResp.bits.resp   := Mux(memIO.feedbackIO(i).feedbackFast.bits.hit, RespType.success, RespType.block)
     fastResp.bits.fuType := DontCare
   }
@@ -1130,6 +1133,7 @@ class IssueQueueVecMemImp(override val wrapper: IssueQueue)(implicit p: Paramete
     slowResp.valid                 := memIO.feedbackIO(i).feedbackSlow.valid
     slowResp.bits.robIdx           := memIO.feedbackIO(i).feedbackSlow.bits.robIdx
     slowResp.bits.sqIdx.get        := memIO.feedbackIO(i).feedbackSlow.bits.sqIdx
+    slowResp.bits.lqIdx.get        := memIO.feedbackIO(i).feedbackSlow.bits.lqIdx
     slowResp.bits.resp             := Mux(memIO.feedbackIO(i).feedbackSlow.bits.hit, RespType.success, RespType.block)
     slowResp.bits.fuType           := DontCare
     slowResp.bits.uopIdx.get       := DontCare
@@ -1139,6 +1143,7 @@ class IssueQueueVecMemImp(override val wrapper: IssueQueue)(implicit p: Paramete
     fastResp.valid                 := memIO.feedbackIO(i).feedbackFast.valid
     fastResp.bits.robIdx           := memIO.feedbackIO(i).feedbackFast.bits.robIdx
     fastResp.bits.sqIdx.get        := memIO.feedbackIO(i).feedbackFast.bits.sqIdx
+    fastResp.bits.lqIdx.get        := memIO.feedbackIO(i).feedbackFast.bits.lqIdx
     fastResp.bits.resp             := Mux(memIO.feedbackIO(i).feedbackFast.bits.hit, RespType.success, RespType.block)
     fastResp.bits.fuType           := DontCare
     fastResp.bits.uopIdx.get       := DontCare
