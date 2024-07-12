@@ -25,7 +25,7 @@ import xiangshan.frontend._
 
 class RASEntry()(implicit p: Parameters) extends XSBundle {
     val retAddr = UInt(VAddrBits.W)
-    val ctr = UInt(8.W) // layer of nested call functions
+    val ctr = UInt(RasCtrSize.W) // layer of nested call functions
     def =/=(that: RASEntry) = this.retAddr =/= that.retAddr || this.ctr =/= that.ctr
 }
 
