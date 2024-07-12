@@ -541,6 +541,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
         memScheduler.io.loadFinalIssueResp(i)(j).bits.robIdx := toMem(i)(j).bits.robIdx
         memScheduler.io.loadFinalIssueResp(i)(j).bits.uopIdx.foreach(_ := toMem(i)(j).bits.vpu.get.vuopIdx)
         memScheduler.io.loadFinalIssueResp(i)(j).bits.sqIdx.foreach(_ := toMem(i)(j).bits.sqIdx.get)
+        memScheduler.io.loadFinalIssueResp(i)(j).bits.lqIdx.foreach(_ := toMem(i)(j).bits.lqIdx.get)
       }
 
       NewPipelineConnect(
@@ -558,6 +559,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
         memScheduler.io.memAddrIssueResp(i)(j).bits.fuType := toMem(i)(j).bits.fuType
         memScheduler.io.memAddrIssueResp(i)(j).bits.robIdx := toMem(i)(j).bits.robIdx
         memScheduler.io.memAddrIssueResp(i)(j).bits.sqIdx.foreach(_ := toMem(i)(j).bits.sqIdx.get)
+        memScheduler.io.memAddrIssueResp(i)(j).bits.lqIdx.foreach(_ := toMem(i)(j).bits.lqIdx.get)
         memScheduler.io.memAddrIssueResp(i)(j).bits.resp := RespType.success // for load inst, firing at toMem means issuing successfully
       }
 
@@ -569,6 +571,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
             resp.bits.robIdx := toMem(i)(j).bits.robIdx
             resp.bits.uopIdx.get := toMem(i)(j).bits.vpu.get.vuopIdx
             resp.bits.sqIdx.get := toMem(i)(j).bits.sqIdx.get
+            resp.bits.lqIdx.get := toMem(i)(j).bits.lqIdx.get
             resp.bits.resp := RespType.success
         }
         if (backendParams.debugEn){
