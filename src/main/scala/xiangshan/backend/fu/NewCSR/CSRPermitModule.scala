@@ -259,7 +259,6 @@ class CSRPermitModule extends Module {
   /**
    * AIA end
    */
-  private val csrAccessIllegal = (!privilegeLegal || rwIllegal)
 
   // Todo: check correct
   io.out.EX_II :=  csrAccess && !privilegeLegal && (!privState.isVirtual || privState.isVirtual && csrIsM) ||
@@ -269,7 +268,7 @@ class CSRPermitModule extends Module {
   io.out.EX_VI := (csrAccess && !privilegeLegal && privState.isVirtual && !csrIsM ||
     mret_EX_VI || sret_EX_VI || rwSatp_EX_VI || accessHPM_EX_VI || rwStimecmp_EX_VI || rwSireg_EX_VI || rwSip_Sie_EX_VI) && !rwIllegal || xstateControlAccess_EX_VI
 
-  io.out.hasLegalWen  := wen  && !csrAccessIllegal
+  io.out.hasLegalWen  := wen  && !(io.out.EX_II || io.out.EX_VI)
   io.out.hasLegalMret := mret && !mretIllegal
   io.out.hasLegalSret := sret && !sretIllegal
   io.out.hasLegalDret := dret && !dretIllegal
