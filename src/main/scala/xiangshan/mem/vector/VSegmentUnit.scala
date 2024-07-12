@@ -398,13 +398,13 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
 
     exception_va := exceptionVec(storePageFault) || exceptionVec(loadPageFault) ||
       exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault) || missAligned
-    exception_pa := pmp.st || pmp.ld
+    exception_pa := pmp.st || pmp.ld || pmp.mmio
 
     instMicroOp.exception_pa := exception_pa
     instMicroOp.exception_va := exception_va
-    // update storeAccessFault bit
-    exceptionVec(loadAccessFault) := exceptionVec(loadAccessFault) || pmp.ld
-    exceptionVec(storeAccessFault) := exceptionVec(storeAccessFault) || pmp.st
+    // update storeAccessFault bit. Currently, we don't support vector MMIO
+    exceptionVec(loadAccessFault)  := exceptionVec(loadAccessFault) || pmp.ld || pmp.mmio
+    exceptionVec(storeAccessFault) := exceptionVec(storeAccessFault) || pmp.st || pmp.mmio
 
     when(exception_va || exception_pa) {
       when(segmentIdx === 0.U || !instMicroOp.isFof) {
