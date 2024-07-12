@@ -996,26 +996,26 @@ class NewCSR(implicit val p: Parameters) extends Module
   private val csrAccess = wen || ren
 
   private val imsicAddrValid =
-    csrAccess && addr ===  mireg.addr.U &&  miselect.inIMSICRange ||
-    csrAccess && addr ===  sireg.addr.U &&  siselect.inIMSICRange ||
-    csrAccess && addr === vsireg.addr.U && vsiselect.inIMSICRange
+    csrAccess &&  addr === CSRs.mireg.U &&  miselect.inIMSICRange ||
+    csrAccess &&  addr === CSRs.sireg.U && !isModeVS && siselect.inIMSICRange ||
+    csrAccess && (addr === CSRs.sireg.U &&  isModeVS || addr === CSRs.vsireg.U) && vsiselect.inIMSICRange
 
   private val imsicAddr = Mux1H(Seq(
-    (csrAccess && addr ===  mireg.addr.U) -> miselect.regOut.asUInt,
-    (csrAccess && addr ===  sireg.addr.U) -> siselect.regOut.asUInt,
-    (csrAccess && addr === vsireg.addr.U) -> vsiselect.regOut.asUInt,
+    (csrAccess &&  addr === CSRs.mireg.U) -> miselect.rdata,
+    (csrAccess &&  addr === CSRs.sireg.U && !isModeVS) -> siselect.rdata,
+    (csrAccess && (addr === CSRs.sireg.U &&  isModeVS || addr === CSRs.vsireg.U)) -> vsiselect.rdata,
   ))
 
   private val imsicAddrPrivState = Mux1H(Seq(
-    ( mireg.w.wen) -> PrivState.ModeM,
-    ( sireg.w.wen) -> PrivState.ModeHS,
-    (vsireg.w.wen) -> PrivState.ModeVS,
+    (csrAccess &&  addr === CSRs.mireg.U) -> PrivState.ModeM,
+    (csrAccess &&  addr === CSRs.sireg.U && !isModeVS) -> PrivState.ModeHS,
+    (csrAccess && (addr === CSRs.sireg.U &&  isModeVS || addr === CSRs.vsireg.U)) -> PrivState.ModeVS,
   ))
 
   private val imsicWdataValid =
-    wen && addr === mireg.addr.U && miselect.inIMSICRange ||
-    wen && addr === sireg.addr.U && siselect.inIMSICRange ||
-    wen && addr === vsireg.addr.U && vsiselect.inIMSICRange
+    mireg.w.wen  && miselect.inIMSICRange ||
+    sireg.w.wen  && siselect.inIMSICRange ||
+    vsireg.w.wen && vsiselect.inIMSICRange
 
   toAIA.addr.valid     := imsicAddrValid
   toAIA.addr.bits.addr := imsicAddr
