@@ -621,6 +621,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.feedback.bits.flushState         := DontCare
   io.feedback.bits.dataInvalidSqIdx   := DontCare
   io.feedback.bits.sqIdx              := uopq(deqPtr.value).uop.sqIdx
+  io.feedback.bits.lqIdx              := uopq(deqPtr.value).uop.lqIdx
 
   // exception
   io.exceptionInfo                    := DontCare
