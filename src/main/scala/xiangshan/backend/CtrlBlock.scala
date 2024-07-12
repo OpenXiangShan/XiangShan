@@ -124,7 +124,7 @@ class CtrlBlockImp(
 
   private val delayedNotFlushedWriteBack = io.fromWB.wbData.map(x => {
     val valid = x.valid
-    val killedByOlder = x.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect, s3_s5_redirect))
+    val killedByOlder = x.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect))
     val delayed = Wire(Valid(new ExuOutput(x.bits.params)))
     delayed.valid := GatedValidRegNext(valid && !killedByOlder)
     delayed.bits := RegEnable(x.bits, x.valid)
