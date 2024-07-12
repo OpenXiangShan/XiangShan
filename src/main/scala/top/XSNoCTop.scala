@@ -34,6 +34,9 @@ import freechips.rocketchip.util.{AsyncQueueSource, AsyncQueueParams}
 import chisel3.experimental.{annotate, ChiselAnnotation}
 import sifive.enterprise.firrtl.NestedPrefixModulesAnnotation
 
+import difftest.common.DifftestWiring
+import difftest.util.Profile
+
 class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
 {
   override lazy val desiredName: String = "XSTop"
@@ -209,3 +212,38 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
 
   lazy val module = new XSNoCTopImp(this)
 }
+
+class XSNoCDiffTop(implicit p: Parameters) extends Module {
+  override val desiredName: String = "XSDiffTop"
+  val l_soc = LazyModule(new XSNoCTop())
+  val soc = Module(l_soc.module)
+
+  // Expose XSTop IOs outside, i.e. io
+  def exposeIO(data: Data, name: String): Unit = {
+    val dummy = IO(chiselTypeOf(data)).suggestName(name)
+    dummy <> data
+  }
+  def exposeOptionIO(data: Option[Data], name: String): Unit = {
+    if (data.isDefined) {
+      val dummy = IO(chiselTypeOf(data.get)).suggestName(name)
+      dummy <> data.get
+    }
+  }
+  exposeIO(l_soc.clint, "clint")
+  exposeIO(l_soc.debug, "debug")
+  exposeIO(l_soc.plic, "plic")
+  exposeIO(l_soc.beu, "beu")
+  exposeIO(l_soc.nmi, "nmi")
+  soc.clock := clock
+  soc.reset := reset.asAsyncReset
+  exposeIO(soc.soc_clock, "soc_clock")
+  exposeIO(soc.soc_reset, "soc_reset")
+  exposeIO(soc.io, "io")
+  exposeOptionIO(soc.noc_clock, "noc_clock")
+  exposeOptionIO(soc.noc_reset, "noc_reset")
+  exposeOptionIO(soc.imsic_axi4lite, "imsic_axi4lite")
+
+  DifftestWiring.createAndConnectExtraIOs()
+  Profile.generateJson("XiangShan")
+}
+
