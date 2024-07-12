@@ -374,12 +374,13 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.dtlb.req.bits.debug.isFirstIssue := DontCare
   io.dtlb.req_kill                    := false.B
 
+  val canTriggerException              = segmentIdx === 0.U || !instMicroOp.isFof // only elementIdx = 0 or is not fof can trigger
   // tlb resp
   when(io.dtlb.resp.fire && state === s_wait_tlb_resp){
-      exceptionVec(storePageFault)    := io.dtlb.resp.bits.excp(0).pf.st
-      exceptionVec(loadPageFault)     := io.dtlb.resp.bits.excp(0).pf.ld
-      exceptionVec(storeAccessFault)  := io.dtlb.resp.bits.excp(0).af.st
-      exceptionVec(loadAccessFault)   := io.dtlb.resp.bits.excp(0).af.ld
+      exceptionVec(storePageFault)    := io.dtlb.resp.bits.excp(0).pf.st && canTriggerException
+      exceptionVec(loadPageFault)     := io.dtlb.resp.bits.excp(0).pf.ld && canTriggerException
+      exceptionVec(storeAccessFault)  := io.dtlb.resp.bits.excp(0).af.st && canTriggerException
+      exceptionVec(loadAccessFault)   := io.dtlb.resp.bits.excp(0).af.ld && canTriggerException
       when(!io.dtlb.resp.bits.miss){
         instMicroOp.paddr             := io.dtlb.resp.bits.paddr(0)
       }
@@ -395,21 +396,21 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
       "b11".U   -> (vaddr(2, 0) === 0.U)  //d
     ))
     val missAligned = !addr_aligned
-    exceptionVec(loadAddrMisaligned)  := !addr_aligned && FuType.isVLoad(fuType)
-    exceptionVec(storeAddrMisaligned) := !addr_aligned && !FuType.isVLoad(fuType)
+    exceptionVec(loadAddrMisaligned)  := !addr_aligned && FuType.isVLoad(fuType) && canTriggerException
+    exceptionVec(storeAddrMisaligned) := !addr_aligned && !FuType.isVLoad(fuType) && canTriggerException
 
     exception_va := exceptionVec(storePageFault) || exceptionVec(loadPageFault) ||
-      exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault) || missAligned
-    exception_pa := pmp.st || pmp.ld || pmp.mmio
+      exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault) || (missAligned && canTriggerException)
+    exception_pa := (pmp.st || pmp.ld || pmp.mmio) && canTriggerException
 
     instMicroOp.exception_pa := exception_pa
     instMicroOp.exception_va := exception_va
     // update storeAccessFault bit. Currently, we don't support vector MMIO
-    exceptionVec(loadAccessFault)  := exceptionVec(loadAccessFault) || pmp.ld || pmp.mmio
-    exceptionVec(storeAccessFault) := exceptionVec(storeAccessFault) || pmp.st || pmp.mmio
+    exceptionVec(loadAccessFault)  := (exceptionVec(loadAccessFault) || pmp.ld || pmp.mmio) && canTriggerException
+    exceptionVec(storeAccessFault) := (exceptionVec(storeAccessFault) || pmp.st || pmp.mmio) && canTriggerException
 
     when(exception_va || exception_pa) {
-      when(segmentIdx === 0.U || !instMicroOp.isFof) {
+      when(canTriggerException) {
         instMicroOp.exceptionVaddr  := vaddr
         instMicroOp.exceptionVl     := segmentIdx // for exception
         instMicroOp.exceptionVstart := segmentIdx // for exception
