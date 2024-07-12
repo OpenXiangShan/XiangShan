@@ -19,7 +19,7 @@ package xiangshan.mem
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.{XSDebug, XSInfo}
+import utility.{XSDebug, XSInfo}
 import xiangshan._
 import xiangshan.cache.{DCacheLineIO, DCacheWordReq, MemoryOpConstants, DCacheWordReqWithVaddr}
 

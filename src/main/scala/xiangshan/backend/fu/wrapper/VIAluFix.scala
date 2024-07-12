@@ -4,8 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3.{VecInit, _}
 import chisel3.util._
 import chisel3.util.experimental.decode.{QMCMinimizer, TruthTable, decoder}
-import utility.DelayN
-import utils.XSError
+import utility.{DelayN, XSError}
 import xiangshan.XSCoreParamsKey
 import xiangshan.backend.fu.vector.Bundles.{VConfig, VSew, ma}
 import xiangshan.backend.fu.vector.{Mgu, Mgtu, VecPipedFuncUnit}

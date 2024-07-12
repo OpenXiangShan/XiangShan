@@ -5,8 +5,7 @@ import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.decode._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import utility.{Constantin, SelectOne}
-import utils._
+import utility._
 import xiangshan._
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.rename.BusyTableReadIO
@@ -127,22 +126,22 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
   private val vfReqPsrcVec:  IndexedSeq[UInt] = io.in.flatMap(in => in.bits.psrc.take(numRegSrcVf))
   private val v0ReqPsrcVec:  IndexedSeq[UInt] = io.in.map(in => in.bits.psrc(numRegSrc - 2))
   private val vlReqPsrcVec:  IndexedSeq[UInt] = io.in.map(in => in.bits.psrc(numRegSrc - 1))
-  private val intSrcStateVec = OptionWrapper(io.readIntState.isDefined, Wire(Vec(numIntStateRead, SrcState())))
-  private val fpSrcStateVec  = OptionWrapper(io.readFpState.isDefined,  Wire(Vec(numFpStateRead, SrcState()))) 
-  private val vfSrcStateVec  = OptionWrapper(io.readVfState.isDefined,  Wire(Vec(numVfStateRead, SrcState()))) 
-  private val v0SrcStateVec  = OptionWrapper(io.readV0State.isDefined,  Wire(Vec(numV0StateRead, SrcState())))
-  private val vlSrcStateVec  = OptionWrapper(io.readVlState.isDefined,  Wire(Vec(numVlStateRead, SrcState())))
-  private val intAllSrcStateVec = OptionWrapper(io.readIntState.isDefined, Wire(Vec(numIn * numRegSrc, SrcState())))
-  private val fpAllSrcStateVec  = OptionWrapper(io.readFpState.isDefined,  Wire(Vec(numIn * numRegSrc, SrcState())))
-  private val vecAllSrcStateVec = OptionWrapper(io.readVfState.isDefined,  Wire(Vec(numIn * numRegSrc, SrcState())))
-  private val intSrcLoadDependency = OptionWrapper(io.readIntState.isDefined, Wire(Vec(numIntStateRead, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
-  private val fpSrcLoadDependency  = OptionWrapper(io.readFpState.isDefined,  Wire(Vec(numFpStateRead, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
-  private val vfSrcLoadDependency  = OptionWrapper(io.readVfState.isDefined,  Wire(Vec(numVfStateRead, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
-  private val v0SrcLoadDependency  = OptionWrapper(io.readV0State.isDefined,  Wire(Vec(numV0StateRead, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
-  private val vlSrcLoadDependency  = OptionWrapper(io.readVlState.isDefined,  Wire(Vec(numVlStateRead, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
-  private val intAllSrcLoadDependency = OptionWrapper(io.readIntState.isDefined, Wire(Vec(numIn * numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
-  private val fpAllSrcLoadDependency  = OptionWrapper(io.readFpState.isDefined,  Wire(Vec(numIn * numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
-  private val vecAllSrcLoadDependency = OptionWrapper(io.readVfState.isDefined,  Wire(Vec(numIn * numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
+  private val intSrcStateVec = Option.when(io.readIntState.isDefined)(Wire(Vec(numIntStateRead, SrcState())))
+  private val fpSrcStateVec  = Option.when(io.readFpState.isDefined )(Wire(Vec(numFpStateRead, SrcState()))) 
+  private val vfSrcStateVec  = Option.when(io.readVfState.isDefined )(Wire(Vec(numVfStateRead, SrcState()))) 
+  private val v0SrcStateVec  = Option.when(io.readV0State.isDefined )(Wire(Vec(numV0StateRead, SrcState())))
+  private val vlSrcStateVec  = Option.when(io.readVlState.isDefined )(Wire(Vec(numVlStateRead, SrcState())))
+  private val intAllSrcStateVec = Option.when(io.readIntState.isDefined)(Wire(Vec(numIn * numRegSrc, SrcState())))
+  private val fpAllSrcStateVec  = Option.when(io.readFpState.isDefined )(Wire(Vec(numIn * numRegSrc, SrcState())))
+  private val vecAllSrcStateVec = Option.when(io.readVfState.isDefined )(Wire(Vec(numIn * numRegSrc, SrcState())))
+  private val intSrcLoadDependency = Option.when(io.readIntState.isDefined)(Wire(Vec(numIntStateRead, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
+  private val fpSrcLoadDependency  = Option.when(io.readFpState.isDefined )(Wire(Vec(numFpStateRead, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
+  private val vfSrcLoadDependency  = Option.when(io.readVfState.isDefined )(Wire(Vec(numVfStateRead, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
+  private val v0SrcLoadDependency  = Option.when(io.readV0State.isDefined )(Wire(Vec(numV0StateRead, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
+  private val vlSrcLoadDependency  = Option.when(io.readVlState.isDefined )(Wire(Vec(numVlStateRead, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
+  private val intAllSrcLoadDependency = Option.when(io.readIntState.isDefined)(Wire(Vec(numIn * numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
+  private val fpAllSrcLoadDependency  = Option.when(io.readFpState.isDefined )(Wire(Vec(numIn * numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
+  private val vecAllSrcLoadDependency = Option.when(io.readVfState.isDefined )(Wire(Vec(numIn * numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))))
 
   // We always read physical register states when in gives the instructions.
   // This usually brings better timing.

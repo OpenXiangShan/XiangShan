@@ -52,8 +52,9 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
   }
 
   // xstile
-  val core_with_l2 = LazyModule(new XSTile()(p.alterPartial({
+  val core_with_l2 = LazyModule(new XSTile()(p.alter((site, here, up) => {
     case XSCoreParamsKey => tiles.head
+    case PerfCounterOptionsKey => up(PerfCounterOptionsKey).copy(perfDBHartID = tiles.head.HartId)
   })))
 
   // imsic bus top
