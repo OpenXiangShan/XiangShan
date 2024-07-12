@@ -960,6 +960,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     decodedInst.lsrc(4)    := Vl_IDX.U
     decodedInst.waitForward   := false.B
     decodedInst.blockBackward := false.B
+    decodedInst.exceptionVec(illegalInstr) := io.fromCSR.illegalInst.vsIsOff
   }.elsewhen(isCsrrVlenb){
     // convert to addi instruction
     decodedInst.srcType(0) := SrcType.reg
@@ -971,6 +972,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     decodedInst.waitForward := false.B
     decodedInst.blockBackward := false.B
     decodedInst.canRobCompress := true.B
+    decodedInst.exceptionVec(illegalInstr) := io.fromCSR.illegalInst.vsIsOff
   }
 
   io.deq.decodedInst := decodedInst
