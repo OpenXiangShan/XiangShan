@@ -47,9 +47,11 @@ class VSegmentBundle(implicit p: Parameters) extends VLSUBundle
   val uopFlowNumMask   = UInt(elemIdxBits.W)
   // for exception
   val vstart           = UInt(elemIdxBits.W)
-  val exceptionvaddr   = UInt(VAddrBits.W)
+  val exceptionVaddr   = UInt(VAddrBits.W)
   val exception_va     = Bool()
   val exception_pa     = Bool()
+  val exceptionVstart  = UInt(elemIdxBits.W)
+  val exceptionVl      = UInt(elemIdxBits.W)
   val isFof            = Bool()
 }
 
@@ -408,11 +410,11 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
 
     when(exception_va || exception_pa) {
       when(segmentIdx === 0.U || !instMicroOp.isFof) {
-        instMicroOp.exceptionvaddr := vaddr
-        instMicroOp.vl := segmentIdx // for exception
-        instMicroOp.vstart := segmentIdx // for exception
+        instMicroOp.exceptionVaddr  := vaddr
+        instMicroOp.exceptionVl     := segmentIdx // for exception
+        instMicroOp.exceptionVstart := segmentIdx // for exception
       }.otherwise {
-        instMicroOp.vl := segmentIdx
+        instMicroOp.exceptionVl     := segmentIdx
       }
     }
   }
@@ -627,9 +629,9 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.exceptionInfo                    := DontCare
   io.exceptionInfo.bits.robidx        := instMicroOp.uop.robIdx
   io.exceptionInfo.bits.uopidx        := uopq(deqPtr.value).uop.vpu.vuopIdx
-  io.exceptionInfo.bits.vstart        := instMicroOp.vstart
-  io.exceptionInfo.bits.vaddr         := instMicroOp.exceptionvaddr
-  io.exceptionInfo.bits.vl            := instMicroOp.vl
+  io.exceptionInfo.bits.vstart        := instMicroOp.exceptionVstart
+  io.exceptionInfo.bits.vaddr         := instMicroOp.exceptionVaddr
+  io.exceptionInfo.bits.vl            := instMicroOp.exceptionVl
   io.exceptionInfo.valid              := (state === s_finish) && instMicroOp.uop.exceptionVec.asUInt.orR && distanceBetween(enqPtr, deqPtr) =/= 0.U
 }
 
