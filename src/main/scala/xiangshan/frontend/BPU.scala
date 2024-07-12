@@ -27,7 +27,7 @@ import scala.math.min
 import xiangshan.backend.decode.ImmUnion
 
 trait HasBPUConst extends HasXSParameter {
-  val MaxMetaBaseLength =  if (!env.FPGAPlatform) 512 else 247 // TODO: Reduce meta length
+  val MaxMetaBaseLength =  if (!env.FPGAPlatform) 512 else 256 // TODO: Reduce meta length
   val MaxMetaLength = if (HasHExtension) MaxMetaBaseLength + 4 else MaxMetaBaseLength
   val MaxBasicBlockSize = 32
   val LHistoryLength = 32
