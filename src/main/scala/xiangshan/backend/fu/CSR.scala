@@ -282,7 +282,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val mtvec = RegInit(UInt(XLEN.W), 0.U)
   val mcounteren = RegInit(UInt(XLEN.W), 0.U)
   // Currently, XiangShan don't support Unprivileged Counter/Timers CSRs ("Zicntr" and "Zihpm")
-  val mcounterenMask = 0.U(XLEN.W)
+  val mcounterenMask = 7.U(XLEN.W)
   val mcause = RegInit(UInt(XLEN.W), 0.U)
   val mtval = RegInit(UInt(XLEN.W), 0.U)
   val mtval2 = RegInit(UInt(XLEN.W), 0.U)
@@ -469,7 +469,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val scounteren = RegInit(UInt(XLEN.W), 0.U)
   val senvcfg = RegInit(UInt(XLEN.W), 0.U)  // !WARNING: there is no logic about this CSR.
   // Currently, XiangShan don't support Unprivileged Counter/Timers CSRs ("Zicntr" and "Zihpm")
-  val scounterenMask = 0.U(XLEN.W)
+  val scounterenMask = 7.U(XLEN.W)
 
   // sbpctl
   // Bits 0-7: {LOOP, RAS, SC, TAGE, BIM, BTB, uBTB}
@@ -596,7 +596,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   // val htimedelta = RegInit(UInt(XLEN.W), 0.U)
   val hcounteren = RegInit(UInt(XLEN.W), 0.U)
   // Currently, XiangShan don't support Unprivileged Counter/Timers CSRs ("Zicntr" and "Zihpm")
-  val hcounterenMask = 0.U(XLEN.W)
+  val hcounterenMask = 7.U(XLEN.W)
 
   val vsstatus = RegInit("h200002000".U(XLEN.W))
   val vsstatusStruct = vsstatus.asTypeOf(new MstatusStruct)
