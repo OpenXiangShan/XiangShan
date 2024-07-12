@@ -288,8 +288,9 @@ object FuConfig {
     srcData = Seq(
       Seq(IntData()),
     ),
-    piped = true,
+    piped = false,
     writeIntRf = true,
+    latency = UncertainLatency(),
     exceptionOut = Seq(illegalInstr, virtualInstr, breakPoint, ecallU, ecallS, ecallVS, ecallM),
     flushPipe = true,
   )
@@ -338,8 +339,8 @@ object FuConfig {
     srcData = Seq(
       Seq(IntData(), IntData()),
     ),
-    piped = true,
-    latency = CertainLatency(0),
+    piped = false,
+    latency = UncertainLatency(),
     exceptionOut = Seq(illegalInstr, virtualInstr),
     flushPipe = true
   )
