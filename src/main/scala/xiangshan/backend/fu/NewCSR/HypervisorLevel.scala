@@ -277,6 +277,8 @@ class HidelegBundle extends InterruptBundle {
   this.SEI .setRO().withReset(0.U)
   this.MEI .setRO().withReset(0.U)
   this.SGEI.setRO().withReset(0.U)
+  this.getLocal.foreach(_.setRO().withReset(0.U))
+  this.LCOFI.setRW().withReset(0.U)
 }
 
 class HipToHvip extends Bundle {
