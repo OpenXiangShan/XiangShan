@@ -146,15 +146,8 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     val spec_queue = RegInit(VecInit(Seq.fill(rasSpecSize)(RASEntry(0.U, 0.U))))
     val spec_nos = RegInit(VecInit(Seq.fill(rasSpecSize)(RASPtr(false.B, 0.U))))
 
-    /**
-      ***********************************************************************************************************
-      * When the retired call instruction is pushed, commit_stack(nsp) = callAddr, nsp = nsp + 1. 
-      * If we want to get the top value of the stack one cycle later, we need to use nsp - 1.
-      * ssp - 1 is not good, which is why we set the initial value of ssp to differ from the initial value of nsp by 1.
-      ***********************************************************************************************************
-      */    
     val nsp = RegInit(0.U(log2Up(rasSize).W))
-    val ssp = RegInit((rasSize - 1).U(log2Up(rasSize).W))
+    val ssp = RegInit(0.U(log2Up(rasSize).W))
 
     val sctr = RegInit(0.U(RasCtrSize.W))
     val TOSR = RegInit(RASPtr(true.B, (RasSpecSize - 1).U))
@@ -484,23 +477,24 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       }
     }
 
-    val commitTop = commit_stack(nsp - 1.U)
-    val commit_meta_nsp = io.commit_meta_ssp + 1.U
+    val commitTop = commit_stack(nsp)
+
     when (io.commit_pop_valid) {
+
       val nsp_update = Wire(UInt(log2Up(rasSize).W))
-      when (commit_meta_nsp =/= nsp) {
+      when (io.commit_meta_ssp =/= nsp) {
         // force set nsp to commit ssp to avoid permanent errors
-        nsp_update := commit_meta_nsp
+        nsp_update := io.commit_meta_ssp
       } .otherwise {
         nsp_update := nsp
       }
 
       // if ctr > 0, --ctr in stack, otherwise --nsp
       when (commitTop.ctr > 0.U) {
-        commit_stack(nsp_update - 1.U).ctr := commitTop.ctr - 1.U
+        commit_stack(nsp_update).ctr := commitTop.ctr - 1.U
         nsp := nsp_update
       } .otherwise {
-        nsp := ptrDec(nsp_update)
+        nsp := ptrDec(nsp_update);
       }
       // XSError(io.commit_meta_ssp =/= nsp, "nsp mismatch with expected ssp")
     }
@@ -511,20 +505,20 @@ class RAS(implicit p: Parameters) extends BasePredictor {
 
     when (io.commit_push_valid) {
       val nsp_update = Wire(UInt(log2Up(rasSize).W))
-      when (commit_meta_nsp =/= nsp) {
+      when (io.commit_meta_ssp =/= nsp) {
         // force set nsp to commit ssp to avoid permanent errors
-        nsp_update := commit_meta_nsp
+        nsp_update := io.commit_meta_ssp
       } .otherwise {
         nsp_update := nsp
       }
       // if ctr < max && topAddr == push addr, ++ctr, otherwise ++nsp
       when (commitTop.ctr < ctrMax && commitTop.retAddr === commit_push_addr) {
-        commit_stack(nsp_update - 1.U).ctr := commitTop.ctr + 1.U
+        commit_stack(nsp_update).ctr := commitTop.ctr + 1.U
         nsp := nsp_update
       } .otherwise {
         nsp := ptrInc(nsp_update)
-        commit_stack(nsp_update).retAddr := commit_push_addr
-        commit_stack(nsp_update).ctr := 0.U
+        commit_stack(ptrInc(nsp_update)).retAddr := commit_push_addr
+        commit_stack(ptrInc(nsp_update)).ctr := 0.U
       }
       // when overflow, BOS may be forced move forward, do not revert those changes
       when (!spec_overflowed || isAfter(io.commit_meta_TOSW, BOS)) {
@@ -535,7 +529,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       // XSError(io.commit_meta_ssp =/= nsp, "nsp mismatch with expected ssp")
       // XSError(io.commit_push_addr =/= commit_push_addr, "addr from commit mismatch with addr from spec")
     }
-    XSPerfAccumulate("ssp_mismatch", (commit_meta_nsp =/= nsp) && (io.commit_push_valid || io.commit_pop_valid))
+    XSPerfAccumulate("ssp_mismatch", (io.commit_meta_ssp =/= nsp) && (io.commit_push_valid || io.commit_pop_valid))
     XSPerfAccumulate("spec_overflow", spec_overflowed)
 
     when (io.redirect_valid) {
