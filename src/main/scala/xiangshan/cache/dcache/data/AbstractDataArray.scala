@@ -20,8 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, TLClientParameters, TLEdgeOut}
-import utility.{Code, ParallelOR, ReplacementPolicy, SRAMTemplate}
-import utils.XSDebug
+import utility.{Code, ParallelOR, ReplacementPolicy, SRAMTemplate, XSDebug}
 import xiangshan.L1CacheErrorInfo
 
 import scala.math.max

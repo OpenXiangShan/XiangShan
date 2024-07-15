@@ -3,7 +3,7 @@ package xiangshan.backend.fu.wrapper
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.XSError
+import utility.XSError
 import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.vector.Bundles.{VLmul, VSew, ma}
 import xiangshan.backend.fu.vector.utils.VecDataSplitModule
@@ -402,7 +402,7 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
     dontTouch(fflagsRedMask)
   }
   allFFlagsEn := Mux(outIsResuction, Cat(Fill(4*numVecModule - 1, firstNeedFFlags) & fflagsRedMask(4*numVecModule - 1, 1),
-    lastNeedFFlags && fflagsRedMask(0) || outIsVfRedOrdered), fflagsEn & vlMaskEn).asTypeOf(allFFlagsEn)
+    lastNeedFFlags || firstNeedFFlags || outIsVfRedOrdered), fflagsEn & vlMaskEn).asTypeOf(allFFlagsEn)
 
   val allFFlags = fflagsData.asTypeOf(Vec( 4*numVecModule,UInt(5.W)))
   val outFFlags = allFFlagsEn.zip(allFFlags).map{

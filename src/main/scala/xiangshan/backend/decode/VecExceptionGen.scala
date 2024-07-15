@@ -178,7 +178,7 @@ class VecExceptionGen(implicit p: Parameters) extends XSModule{
   private val doubleFpInst = Seq(
     VFWCVT_F_X_V, VFWCVT_F_XU_V, VFNCVT_RTZ_X_F_W, VFNCVT_RTZ_XU_F_W, VFNCVT_X_F_W, VFNCVT_XU_F_W
   ).map(_ === inst.ALL).reduce(_ || _)
-  private val fpEewIllegal = FuType.isVecOPF(io.decodedInst.fuType) && !doubleFpInst && SEW === 0.U
+  private val fpEewIllegal = FuType.isVecOPF(io.decodedInst.fuType) && !doubleFpInst && (SEW <= 1.U)
 
   private val intExtEewIllegal = intExt2 && SEW === 0.U ||
                                  intExt4 && SEW <= 1.U ||

@@ -95,8 +95,9 @@ class VsetModule(implicit p: Parameters) extends XSModule {
 
   private val sewIllegal = VSew.isReserved(vsew) || (log2Vsew > log2VsewMax)
   private val lmulIllegal = VLmul.isReserved(vlmul)
+  private val vtypeIllegal = vtype.reserved.orR
 
-  private val illegal = lmulIllegal | sewIllegal | vtype.illegal
+  private val illegal = lmulIllegal | sewIllegal | vtypeIllegal | vtype.illegal
 
   outVConfig.vl := Mux(illegal, 0.U, vl)
   outVConfig.vtype.illegal := illegal

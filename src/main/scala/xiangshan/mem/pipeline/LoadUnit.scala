@@ -210,7 +210,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     val uop           = new DynInst
     val try_l2l       = Bool()
     val has_rob_entry = Bool()
-    val rsIdx         = UInt(log2Up(MemIQSizeMax).W)
     val rep_carry     = new ReplayCarry(nWays)
     val mshrid        = UInt(log2Up(cfg.nMissEntries).W)
     val isFirstIssue  = Bool()
@@ -421,7 +420,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.has_rob_entry := src.hasROBEntry
     out.rep_carry     := src.rep_info.rep_carry
     out.mshrid        := src.rep_info.mshr_id
-    out.rsIdx         := src.rsIdx
     out.isFirstIssue  := false.B
     out.fast_rep      := true.B
     out.ld_rep        := src.isLoadReplay
@@ -454,7 +452,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.uop           := src.uop
     out.try_l2l       := false.B
     out.has_rob_entry := false.B
-    out.rsIdx         := 0.U
     out.rep_carry     := 0.U.asTypeOf(out.rep_carry)
     out.mshrid        := 0.U
     out.isFirstIssue  := false.B
@@ -478,7 +475,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.uop           := src.uop
     out.try_l2l       := false.B
     out.has_rob_entry := true.B
-    out.rsIdx         := src.rsIdx
     out.rep_carry     := src.replayCarry
     out.mshrid        := src.mshrid
     out.isFirstIssue  := false.B
@@ -513,7 +509,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.uop           := DontCare
     out.try_l2l       := false.B
     out.has_rob_entry := false.B
-    out.rsIdx         := 0.U
     out.rep_carry     := 0.U.asTypeOf(out.rep_carry)
     out.mshrid        := 0.U
     out.isFirstIssue  := false.B
@@ -534,8 +529,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.uop           := src.uop
     out.try_l2l       := false.B
     out.has_rob_entry := true.B
-    // TODO: VLSU, implement vector feedback
-    out.rsIdx         := 0.U
     // TODO: VLSU, implement replay carry
     out.rep_carry     := 0.U.asTypeOf(out.rep_carry)
     out.mshrid        := 0.U
@@ -578,7 +571,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.uop           := src.uop
     out.try_l2l       := false.B
     out.has_rob_entry := true.B
-    out.rsIdx         := src.iqIdx
     out.rep_carry     := 0.U.asTypeOf(out.rep_carry)
     out.mshrid        := 0.U
     out.isFirstIssue  := true.B
@@ -607,7 +599,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // we dont care out.isFirstIssue and out.rsIdx and s0_sqIdx in S0 when trying pointchasing
     // because these signals will be updated in S1
     out.has_rob_entry      := false.B
-    out.rsIdx              := 0.U
     out.mshrid             := 0.U
     out.rep_carry          := 0.U.asTypeOf(out.rep_carry)
     out.isFirstIssue       := true.B
@@ -658,7 +649,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // accept load flow if dcache ready (tlb is always ready)
   // TODO: prefetch need writeback to loadQueueFlag
   s0_out               := DontCare
-  s0_out.rsIdx         := s0_sel_src.rsIdx
   s0_out.vaddr         := s0_sel_src.vaddr
   s0_out.mask          := s0_sel_src.mask
   s0_out.uop           := s0_sel_src.uop
@@ -824,7 +814,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s1_out.gpaddr            := s1_gpaddr_dup_lsu
   s1_out.tlbMiss           := s1_tlb_miss
   s1_out.ptwBack           := io.tlb.resp.bits.ptwBack
-  s1_out.rsIdx             := s1_in.rsIdx
   s1_out.rep_info.debug    := s1_in.uop.debugInfo
   s1_out.rep_info.nuke     := s1_nuke && !s1_sw_prf
   s1_out.delayedLoadError  := s1_dly_err
@@ -885,7 +874,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
                                s1_fast_mismatch
 
       s1_in.uop           := io.ldin.bits.uop
-      s1_in.rsIdx         := io.ldin.bits.iqIdx
       s1_in.isFirstIssue  := io.ldin.bits.isFirstIssue
       s1_vaddr_lo         := s1_ptr_chasing_vaddr(5, 0)
       s1_paddr_dup_lsu    := Cat(io.tlb.resp.bits.paddr(0)(PAddrBits - 1, 6), s1_vaddr_lo)
@@ -954,8 +942,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // will be force writebacked to rob
   val s2_exception_vec = WireInit(s2_in.uop.exceptionVec)
   when (!s2_in.delayedLoadError) {
-    s2_exception_vec(loadAccessFault) := (s2_in.uop.exceptionVec(loadAccessFault) || s2_pmp.ld ||
-                                       (io.dcache.resp.bits.tag_error && GatedValidRegNext(io.csrCtrl.cache_error_enable))) && s2_vecActive
+    s2_exception_vec(loadAccessFault) := (s2_in.uop.exceptionVec(loadAccessFault) ||
+                                         s2_pmp.ld ||
+                                         s2_isvec && s2_pmp.mmio && !s2_prf && !s2_in.tlbMiss ||
+                                         (io.dcache.resp.bits.tag_error && GatedValidRegNext(io.csrCtrl.cache_error_enable))
+                                         ) && s2_vecActive
   }
 
   // soft prefetch will not trigger any exception (but ecc error interrupt may
@@ -1139,6 +1130,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.feedback_fast.bits.hit              := false.B
   io.feedback_fast.bits.flushState       := s2_in.ptwBack
   io.feedback_fast.bits.robIdx           := s2_in.uop.robIdx
+  io.feedback_fast.bits.sqIdx            := s2_in.uop.sqIdx
+  io.feedback_fast.bits.lqIdx            := s2_in.uop.lqIdx
   io.feedback_fast.bits.sourceType       := RSFeedbackType.lrqFull
   io.feedback_fast.bits.dataInvalidSqIdx := DontCare
 
@@ -1333,6 +1326,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.feedback_slow.bits.hit              := !s3_rep_info.need_rep || io.lsq.ldin.ready
   io.feedback_slow.bits.flushState       := s3_in.ptwBack
   io.feedback_slow.bits.robIdx           := s3_in.uop.robIdx
+  io.feedback_slow.bits.sqIdx            := s3_in.uop.sqIdx
+  io.feedback_slow.bits.lqIdx            := s3_in.uop.lqIdx
   io.feedback_slow.bits.sourceType       := RSFeedbackType.lrqFull
   io.feedback_slow.bits.dataInvalidSqIdx := DontCare
 
@@ -1397,7 +1392,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_outexception = ExceptionNO.selectByFu(s3_out.bits.uop.exceptionVec, LduCfg).asUInt.orR && s3_vecActive
   io.ldout.bits        := s3_ld_wb_meta
   io.ldout.bits.data   := Mux(s3_valid, Mux(!s3_outexception, s3_ld_data_frm_cache, 0.U), s3_ld_data_frm_uncache)
-  io.ldout.valid       := (s3_out.valid || (s3_mmio.valid && !s3_valid)) && !s3_vecout.isvec
+  io.ldout.valid       := (s3_out.valid && !s3_vecout.isvec || (s3_mmio.valid && !s3_valid))
+  io.ldout.bits.uop.exceptionVec := ExceptionNO.selectByFu(s3_ld_wb_meta.uop.exceptionVec, LduCfg)
 
   // TODO: check this --hx
   // io.ldout.valid       := s3_out.valid && !s3_out.bits.uop.robIdx.needFlush(io.redirect) && !s3_vecout.isvec ||
@@ -1430,7 +1426,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.vecldout.bits.hit := !s3_rep_info.need_rep || io.lsq.ldin.ready
   io.vecldout.bits.sourceType := RSFeedbackType.lrqFull
   io.vecldout.bits.flushState := DontCare
-  io.vecldout.bits.exceptionVec := s3_out.bits.uop.exceptionVec
+  io.vecldout.bits.exceptionVec := ExceptionNO.selectByFu(s3_out.bits.uop.exceptionVec, VlduCfg)
   io.vecldout.bits.vaddr := s3_in.vaddr
   io.vecldout.bits.mmio := DontCare
 

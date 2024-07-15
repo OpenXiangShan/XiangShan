@@ -30,7 +30,7 @@ import coupledL2.tl2chi.{TL2CHICoupledL2, PortIO}
 import huancun.BankBitsKey
 import system.HasSoCParameter
 import top.BusPerfMonitor
-import utility.{DelayN, ResetGen, TLClientsMerger, TLEdgeBuffer, TLLogger}
+import utility._
 import xiangshan.cache.mmu.TlbRequestIO
 
 class L1BusErrorUnitInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
@@ -103,6 +103,8 @@ class L2Top()(implicit p: Parameters) extends LazyModule
       case EnableCHI => p(EnableCHI)
       case BankBitsKey => log2Ceil(coreParams.L2NBanks)
       case MaxHartIdBits => p(MaxHartIdBits)
+      case LogUtilsOptionsKey => p(LogUtilsOptionsKey)
+      case PerfCounterOptionsKey => p(PerfCounterOptionsKey)
     })
     if (enableCHI) Some(LazyModule(new TL2CHICoupledL2()(new Config(config))))
     else Some(LazyModule(new TL2TLCoupledL2()(new Config(config))))

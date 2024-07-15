@@ -616,7 +616,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     rfvOH.suggestName(s"l2_rfvOH")
   }
 
-  when (!flush_dup(2) && refill.levelOH.l3 && !memPte(2).isAf()) {
+  when (!flush_dup(2) && refill.levelOH.l3) {
     val refillIdx = genPtwL3SetIdx(refill.req_info_dup(2).vpn)
     val victimWay = replaceWrapper(getl3vSet(refill.req_info_dup(2).vpn), ptwl3replace.way(refillIdx))
     val victimWayOH = UIntToOH(victimWay)

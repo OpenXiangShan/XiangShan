@@ -90,7 +90,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   // bpu ctrl
   bpu.io.ctrl := csrCtrl.bp_ctrl
-  bpu.io.reset_vector := RegNext(io.reset_vector)
+  bpu.io.reset_vector := RegEnable(io.reset_vector, reset.asBool)
 
 // pmp
   val PortNumber = ICacheParameters().PortNumber
@@ -164,7 +164,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   val checkPcMem = Reg(Vec(FtqSize, new Ftq_RF_Components))
   when (ftq.io.toBackend.pc_mem_wen) {
-    checkPcMem(ftq.io.toBackend.pc_mem_waddr) := ftq.io.toBackend.pc_mem_wdata
+    checkPcMem(ftq.io.toBackend.pc_mem_waddr.value) := ftq.io.toBackend.pc_mem_wdata
   }
 
   val checkTargetIdx = Wire(Vec(DecodeWidth, UInt(log2Up(FtqSize).W)))

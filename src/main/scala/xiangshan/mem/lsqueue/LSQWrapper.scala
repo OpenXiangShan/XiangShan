@@ -85,7 +85,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val sbufferVecDifftestInfo = Vec(EnsbufferWidth, Decoupled(new DynInst)) // The vector store difftest needs is
     val forward = Vec(LoadPipelineWidth, Flipped(new PipeLoadForwardQueryIO))
     val rob = Flipped(new RobLsqIO)
-    val nuke_rollback = Output(Valid(new Redirect))
+    val nuke_rollback = Vec(StorePipelineWidth, Output(Valid(new Redirect)))
     val nack_rollback = Output(Valid(new Redirect))
     val release = Flipped(Valid(new Release))
    // val refill = Flipped(Valid(new Refill))

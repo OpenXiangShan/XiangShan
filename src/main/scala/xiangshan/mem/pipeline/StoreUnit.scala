@@ -80,7 +80,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s0_vecstin      = Mux(s0_use_flow_vec, io.vecstin.bits, 0.U.asTypeOf(io.vecstin.bits))
   val s0_uop          = Mux(s0_use_flow_rs, s0_stin.uop, s0_vecstin.uop)
   val s0_isFirstIssue = s0_use_flow_rs && io.stin.bits.isFirstIssue || s0_use_flow_vec && io.vec_isFirstIssue
-  val s0_rsIdx        = Mux(s0_use_flow_rs, io.stin.bits.iqIdx, 0.U)
   val s0_size         = Mux(s0_use_flow_rs || s0_use_flow_vec, s0_uop.fuOpType(2,0), 0.U)// may broken if use it in feature
   val s0_mem_idx      = Mux(s0_use_flow_rs || s0_use_flow_vec, s0_uop.sqIdx.value, 0.U)
   val s0_rob_idx      = Mux(s0_use_flow_rs || s0_use_flow_vec, s0_uop.robIdx, 0.U.asTypeOf(s0_uop.robIdx))
@@ -164,7 +163,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s0_out.data         := s0_stin.src(1)
   s0_out.uop          := s0_uop
   s0_out.miss         := false.B
-  s0_out.rsIdx        := s0_rsIdx
   s0_out.mask         := s0_mask
   s0_out.isFirstIssue := s0_isFirstIssue
   s0_out.isHWPrefetch := s0_use_flow_prf
@@ -252,6 +250,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s1_feedback.bits.robIdx           := s1_out.uop.robIdx
   s1_feedback.bits.sourceType       := RSFeedbackType.tlbMiss
   s1_feedback.bits.dataInvalidSqIdx := DontCare
+  s1_feedback.bits.sqIdx            := s1_out.uop.sqIdx
+  s1_feedback.bits.lqIdx            := s1_out.uop.lqIdx
 
   XSDebug(s1_feedback.valid,
     "S1 Store: tlbHit: %d robIdx: %d\n",
@@ -318,7 +318,10 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s2_out.af     := s2_pmp.st && !s2_in.isvec
   s2_out.mmio   := s2_mmio && !s2_exception
   s2_out.atomic := s2_in.atomic || s2_pmp.atomic
-  s2_out.uop.exceptionVec(storeAccessFault) := (s2_in.uop.exceptionVec(storeAccessFault) || s2_pmp.st) && s2_vecActive
+  s2_out.uop.exceptionVec(storeAccessFault) := (s2_in.uop.exceptionVec(storeAccessFault) ||
+                                                s2_pmp.st ||
+                                                (s2_in.isvec && s2_pmp.mmio && RegNext(s1_feedback.bits.hit))
+                                                ) && s2_vecActive
 
   // kill dcache write intent request when mmio or exception
   io.dcache.s2_kill := (s2_mmio || s2_exception || s2_in.uop.robIdx.needFlush(io.redirect))
@@ -436,6 +439,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
 
   io.stout.valid := sx_last_valid && !sx_last_in.output.uop.robIdx.needFlush(io.redirect) && isStore(sx_last_in.output.uop.fuType)
   io.stout.bits := sx_last_in.output
+  io.stout.bits.uop.exceptionVec := ExceptionNO.selectByFu(sx_last_in.output.uop.exceptionVec, StaCfg)
 
   io.vecstout.valid := sx_last_valid && !sx_last_in.output.uop.robIdx.needFlush(io.redirect) && isVStore(sx_last_in.output.uop.fuType)
   // TODO: implement it!
@@ -445,7 +449,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.vecstout.bits.sourceType := RSFeedbackType.tlbMiss
   io.vecstout.bits.flushState := DontCare
   io.vecstout.bits.mmio := sx_last_in.mmio
-  io.vecstout.bits.exceptionVec := sx_last_in.output.uop.exceptionVec
+  io.vecstout.bits.exceptionVec := ExceptionNO.selectByFu(sx_last_in.output.uop.exceptionVec, VstuCfg)
   io.vecstout.bits.usSecondInv := sx_last_in.usSecondInv
   io.vecstout.bits.vecFeedback := sx_last_in.vecFeedback
   io.vecstout.bits.elemIdx     := sx_last_in.elemIdx

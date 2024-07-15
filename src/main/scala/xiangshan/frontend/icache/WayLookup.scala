@@ -19,25 +19,43 @@ package xiangshan.frontend.icache
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import difftest._
-import freechips.rocketchip.tilelink._
-import utils._
-import xiangshan.cache.mmu._
-import xiangshan.frontend._
-import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
-import huancun.PreferCacheKey
-import xiangshan.XSCoreParamsKey
 import utility._
 
+/* WayLookupEntry is for internal storage, while WayLookupInfo is for interface
+ * Notes:
+ *   1. there must be a flush (caused by guest page fault) after excp_tlb_gpf === true.B,
+ *      so, we need only the first excp_tlb_gpf and the corresponding gpaddr.
+ *      to save area, we separate those signals from WayLookupEntry and store only once.
+ */
+class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
+  val vSetIdx      : Vec[UInt] = Vec(PortNumber, UInt(idxBits.W))
+  val waymask      : Vec[UInt] = Vec(PortNumber, UInt(nWays.W))
+  val ptag         : Vec[UInt] = Vec(PortNumber, UInt(tagBits.W))
+  val excp_tlb_af  : Vec[Bool] = Vec(PortNumber, Bool())
+  val excp_tlb_pf  : Vec[Bool] = Vec(PortNumber, Bool())
+  val meta_errors  : Vec[Bool] = Vec(PortNumber, Bool())
+}
+
+class WayLookupGPFEntry(implicit p: Parameters) extends ICacheBundle {
+  val excp_tlb_gpf : Vec[Bool] = Vec(PortNumber, Bool())
+  val gpaddr       : UInt      = UInt(GPAddrBits.W)
+
+  def hasGPF: Bool = excp_tlb_gpf.asUInt.orR
+}
+
 class WayLookupInfo(implicit p: Parameters) extends ICacheBundle {
-  val vSetIdx       = Vec(PortNumber, UInt(idxBits.W))
-  val waymask       = Vec(PortNumber, UInt(nWays.W))
-  val ptag          = Vec(PortNumber, UInt(tagBits.W))
-  val gpaddr        = Vec(PortNumber, UInt(GPAddrBits.W))
-  val excp_tlb_af   = Vec(PortNumber, Bool())
-  val excp_tlb_pf   = Vec(PortNumber, Bool())
-  val excp_tlb_gpf  = Vec(PortNumber, Bool())
-  val meta_errors   = Vec(PortNumber, Bool())
+  val entry = new WayLookupEntry
+  val gpf   = new WayLookupGPFEntry
+
+  // for compatibility
+  def vSetIdx      : Vec[UInt] = entry.vSetIdx
+  def waymask      : Vec[UInt] = entry.waymask
+  def ptag         : Vec[UInt] = entry.ptag
+  def excp_tlb_af  : Vec[Bool] = entry.excp_tlb_af
+  def excp_tlb_pf  : Vec[Bool] = entry.excp_tlb_pf
+  def meta_errors  : Vec[Bool] = entry.meta_errors
+  def excp_tlb_gpf : Vec[Bool] = gpf.excp_tlb_gpf
+  def gpaddr       : UInt      = gpf.gpaddr
 }
 
 
@@ -65,10 +83,10 @@ class WayLookupInterface(implicit p: Parameters) extends ICacheBundle {
 }
 
 class WayLookup(implicit p: Parameters) extends ICacheModule {
-  val io = IO(new WayLookupInterface)
+  val io: WayLookupInterface = IO(new WayLookupInterface)
 
   class WayLookupPtr(implicit p: Parameters) extends CircularQueuePtr[WayLookupPtr](nWayLookupSize)
-  object WayLookupPtr {
+  private object WayLookupPtr {
     def apply(f: Bool, v: UInt)(implicit p: Parameters): WayLookupPtr = {
       val ptr = Wire(new WayLookupPtr)
       ptr.flag := f
@@ -77,25 +95,33 @@ class WayLookup(implicit p: Parameters) extends ICacheModule {
     }
   }
 
-  val entries         = RegInit(VecInit(Seq.fill(nWayLookupSize)(0.U.asTypeOf((new WayLookupInfo).cloneType))))
-  val readPtr         = RegInit(WayLookupPtr(false.B, 0.U))
-  val writePtr        = RegInit(WayLookupPtr(false.B, 0.U))
+  private val entries  = RegInit(VecInit(Seq.fill(nWayLookupSize)(0.U.asTypeOf(new WayLookupEntry))))
+  private val readPtr  = RegInit(WayLookupPtr(false.B, 0.U))
+  private val writePtr = RegInit(WayLookupPtr(false.B, 0.U))
 
-  val empty = readPtr === writePtr
-  val full  = (readPtr.value === writePtr.value) && (readPtr.flag ^ writePtr.flag)
+  private val empty = readPtr === writePtr
+  private val full  = (readPtr.value === writePtr.value) && (readPtr.flag ^ writePtr.flag)
 
   when(io.flush) {
-    writePtr.value  := 0.U
-    writePtr.flag   := false.B
+    writePtr.value := 0.U
+    writePtr.flag  := false.B
   }.elsewhen(io.write.fire) {
     writePtr := writePtr + 1.U
   }
 
   when(io.flush) {
-    readPtr.value  := 0.U
-    readPtr.flag   := false.B
+    readPtr.value := 0.U
+    readPtr.flag  := false.B
   }.elsewhen(io.read.fire) {
     readPtr := readPtr + 1.U
+  }
+
+  private val gpf_entry = RegInit(0.U.asTypeOf(new WayLookupGPFEntry))
+  private val gpfPtr    = RegInit(WayLookupPtr(false.B, 0.U))
+
+  when(io.flush) {
+    // we don't need to reset gpfPtr, since the valid is actually gpf_entries.excp_tlb_gpf
+    gpf_entry := 0.U.asTypeOf(new WayLookupGPFEntry)
   }
 
   /**
@@ -103,8 +129,8 @@ class WayLookup(implicit p: Parameters) extends ICacheModule {
     * update
     ******************************************************************************
     */
-  val hits = Wire(Vec(nWayLookupSize, Bool()))
-  entries.zip(hits).foreach{case(entry, hit) =>
+  private val hits = Wire(Vec(nWayLookupSize, Bool()))
+  entries.zip(hits).foreach{ case(entry, hit) =>
     val hit_vec = Wire(Vec(PortNumber, Bool()))
     (0 until PortNumber).foreach { i =>
       val vset_same = (io.update.bits.vSetIdx === entry.vSetIdx(i)) && !io.update.bits.corrupt && io.update.valid
@@ -132,9 +158,13 @@ class WayLookup(implicit p: Parameters) extends ICacheModule {
     * read
     ******************************************************************************
     */
-  val bypass = empty && io.write.valid
-  io.read.valid             := !empty || io.write.valid
-  io.read.bits              := Mux(bypass, io.write.bits, entries(readPtr.value))
+  io.read.valid := !empty || io.write.valid
+  when (empty && io.write.valid) {  // bypass
+    io.read.bits := io.write.bits
+  }.otherwise {
+    io.read.bits.entry := entries(readPtr.value)
+    io.read.bits.gpf   := Mux(readPtr === gpfPtr, gpf_entry, 0.U.asTypeOf(new WayLookupGPFEntry))
+  }
 
   /**
     ******************************************************************************
@@ -143,6 +173,11 @@ class WayLookup(implicit p: Parameters) extends ICacheModule {
     */
   io.write.ready := !full
   when(io.write.fire) {
-    entries(writePtr.value) := io.write.bits
+    entries(writePtr.value) := io.write.bits.entry
+    // save gpf iff no gpf is already saved
+    when(!gpf_entry.hasGPF && io.write.bits.gpf.hasGPF) {
+      gpf_entry := io.write.bits.gpf
+      gpfPtr := writePtr
+    }
   }
 }

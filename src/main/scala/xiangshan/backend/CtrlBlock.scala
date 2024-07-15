@@ -131,6 +131,16 @@ class CtrlBlockImp(
     delayed.bits.debugInfo.writebackTime := GTimer()
     delayed
   }).toSeq
+  private val delayedWriteBack = Wire(chiselTypeOf(io.fromWB.wbData))
+  delayedWriteBack.zipWithIndex.map{ case (x,i) =>
+    x.valid := GatedValidRegNext(io.fromWB.wbData(i).valid)
+    x.bits := delayedNotFlushedWriteBack(i).bits
+  }
+  val delayedNotFlushedWriteBackNeedFlush = Wire(Vec(params.allExuParams.filter(_.needExceptionGen).length, Bool()))
+  delayedNotFlushedWriteBackNeedFlush := delayedNotFlushedWriteBack.filter(_.bits.params.needExceptionGen).map{ x =>
+    x.bits.exceptionVec.get.asUInt.orR || x.bits.flushPipe.getOrElse(false.B) || x.bits.replay.getOrElse(false.B) ||
+      (if (x.bits.trigger.nonEmpty) x.bits.trigger.get.getBackendCanFire else false.B)
+  }
 
   val wbDataNoStd = io.fromWB.wbData.filter(!_.bits.params.hasStdFu)
   val intScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[IntScheduler])
@@ -299,10 +309,6 @@ class CtrlBlockImp(
   decode.io.isResumeVType := rob.io.toDecode.isResumeVType
   decode.io.commitVType := rob.io.toDecode.commitVType
   decode.io.walkVType := rob.io.toDecode.walkVType
-
-  // spec vtype, from vtypegen to vtpebuffer
-  rob.io.fromDecode.lastSpecVType := decode.io.lastSpecVType
-  rob.io.fromDecode.specVtype := decode.io.specVtype
 
   decode.io.redirect := s1_s3_redirect.valid || s2_s4_pendingRedirectValid
   decode.io.vtypeRedirect := s1_s3_redirect.valid
@@ -524,7 +530,7 @@ class CtrlBlockImp(
   io.toIssueBlock.flush   <> s2_s4_redirect
 
   pcMem.io.wen.head   := GatedValidRegNext(io.frontend.fromFtq.pc_mem_wen)
-  pcMem.io.waddr.head := RegEnable(io.frontend.fromFtq.pc_mem_waddr, io.frontend.fromFtq.pc_mem_wen)
+  pcMem.io.waddr.head := RegEnable(io.frontend.fromFtq.pc_mem_waddr.value, io.frontend.fromFtq.pc_mem_wen)
   pcMem.io.wdata.head := RegEnable(io.frontend.fromFtq.pc_mem_wdata, io.frontend.fromFtq.pc_mem_wen)
 
   io.toDataPath.flush := s2_s4_redirect
@@ -534,7 +540,9 @@ class CtrlBlockImp(
   rob.io.hartId := io.fromTop.hartId
   rob.io.redirect := s1_s3_redirect
   rob.io.writeback := delayedNotFlushedWriteBack
+  rob.io.exuWriteback := delayedWriteBack
   rob.io.writebackNums := VecInit(delayedNotFlushedWriteBackNums)
+  rob.io.writebackNeedFlush := delayedNotFlushedWriteBackNeedFlush
   rob.io.readGPAMemData := gpaMem.io.exceptionReadData
 
   io.redirect := s1_s3_redirect

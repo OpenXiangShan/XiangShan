@@ -1,11 +1,11 @@
-STANDALONE_DEVICES = StandAloneCLINT StandAlonePLIC StandAloneDebugModule
-STANDALONE_DEVICES_PATH = $(shell for module in $(STANDALONE_DEVICES); do echo $(RTL_DIR)/$$module/$$module.$(RTL_SUFFIX); done)
-
 ifneq ($(DEVICE_PREFIX),)
 RELEASE_ARGS += --xstop-prefix $(DEVICE_PREFIX)
 DEBUG_ARGS += --xstop-prefix $(DEVICE_PREFIX)
 PLDM_ARGS += --xstop-prefix $(DEVICE_PREFIX)
 endif
+
+STANDALONE_DEVICES = StandAloneCLINT StandAlonePLIC StandAloneDebugModule
+STANDALONE_DEVICES_PATH = $(shell for module in $(STANDALONE_DEVICES); do echo $(RTL_DIR)/$$module/$(DEVICE_PREFIX)$$module.$(RTL_SUFFIX); done)
 
 ifeq ($(DEVICE_TL),1)
 DEVICE_ARGS += --use-tl
@@ -22,7 +22,7 @@ DEVICE_BASE_ADDR ?= -1
 DEVICE_ADDR_WIDTH ?= -1
 DEVICE_DATA_WIDTH ?= 64
 
-$(STANDALONE_DEVICES): $(RTL_DIR)/$(GOALS)/$(GOALS).$(RTL_SUFFIX)
+$(STANDALONE_DEVICES): $(RTL_DIR)/$(GOALS)/$(DEVICE_PREFIX)$(GOALS).$(RTL_SUFFIX)
 
 $(STANDALONE_DEVICES_PATH): $(SCALA_FILE)
 	echo $@

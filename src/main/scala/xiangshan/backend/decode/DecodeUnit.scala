@@ -579,15 +579,25 @@ case class Imm_VSETVLI() extends Imm(11){
   override def minBitsFromInstr(instr: UInt): UInt = {
     instr(30, 20)
   }
+  /**
+    * get VType from extended imm
+    * @param extedImm
+    * @return VType
+    */
+  def getVType(extedImm: UInt): InstVType = {
+    val vtype = Wire(new InstVType)
+    vtype := extedImm(10, 0).asTypeOf(new InstVType)
+    vtype
+  }
 }
 
-case class Imm_VSETIVLI() extends Imm(13){
+case class Imm_VSETIVLI() extends Imm(15){
   override def do_toImm32(minBits: UInt): UInt = SignExt(minBits, 32)
 
   override def minBitsFromInstr(instr: UInt): UInt = {
     val rvInst: XSInstBitFields = instr.asTypeOf(new XSInstBitFields)
     val uimm5 = rvInst.UIMM_VSETIVLI
-    val vtype8 = rvInst.ZIMM_VTYPE
+    val vtype8 = rvInst.ZIMM_VSETIVLI
     Cat(uimm5, vtype8)
   }
   /**
@@ -597,12 +607,12 @@ case class Imm_VSETIVLI() extends Imm(13){
     */
   def getVType(extedImm: UInt): InstVType = {
     val vtype = Wire(new InstVType)
-    vtype := extedImm(7, 0).asTypeOf(new InstVType)
+    vtype := extedImm(9, 0).asTypeOf(new InstVType)
     vtype
   }
 
   def getAvl(extedImm: UInt): UInt = {
-    extedImm(12, 8)
+    extedImm(14, 10)
   }
 }
 
@@ -893,13 +903,16 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     val isDstMask = maskDstInsts.map(_ === inst.ALL).reduce(_ || _)
     val isOpMask = maskOpInsts.map(_ === inst.ALL).reduce(_ || _)
     val isVlx = decodedInst.fuOpType === VlduType.vloxe || decodedInst.fuOpType === VlduType.vluxe
+    val isVle = decodedInst.fuOpType === VlduType.vle || decodedInst.fuOpType === VlduType.vleff || decodedInst.fuOpType === VlduType.vlse
+    val isVlm = decodedInst.fuOpType === VlduType.vlm
     val isWritePartVd = decodedInst.uopSplitType === UopSplitType.VEC_VRED || decodedInst.uopSplitType === UopSplitType.VEC_0XV
     val isVma = vmaInsts.map(_ === inst.ALL).reduce(_ || _)
+    val emulIsFrac = Cat(~decodedInst.vpu.vlmul(2), decodedInst.vpu.vlmul(1, 0)) +& decodedInst.vpu.veew < 4.U +& decodedInst.vpu.vsew
     decodedInst.vpu.isNarrow := isNarrow
     decodedInst.vpu.isDstMask := isDstMask
     decodedInst.vpu.isOpMask := isOpMask
     decodedInst.vpu.isDependOldvd := isVppu || isVecOPF || isVStore || (isDstMask && !isOpMask) || isNarrow || isVlx || isVma
-    decodedInst.vpu.isWritePartVd := isWritePartVd
+    decodedInst.vpu.isWritePartVd := isWritePartVd || isVlm || isVle && emulIsFrac
     decodedInst.vpu.vstart := io.enq.vstart
   }
 
@@ -942,8 +955,8 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     decodedInst.blockBackward := false.B
   }.elsewhen(isCsrrVlenb){
     // convert to addi instruction
-    decodedInst.srcType(0) := SrcType.imm
-    decodedInst.srcType(1) := SrcType.reg
+    decodedInst.srcType(0) := SrcType.reg
+    decodedInst.srcType(1) := SrcType.imm
     decodedInst.srcType(2) := SrcType.no
     decodedInst.srcType(3) := SrcType.no
     decodedInst.srcType(4) := SrcType.no

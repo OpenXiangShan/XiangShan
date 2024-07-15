@@ -163,7 +163,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
                                 RegEnable(s1_req_paddr_wire(i), 0.U(PAddrBits.W), tlb_valid_pulse(i))))
   val s1_req_paddr        = VecInit((0 until PortNumber).map(i => 
                                 Mux(tlb_valid_pulse(i), s1_req_paddr_wire(i), s1_req_paddr_reg(i))))
-  val s1_req_gpaddr       = VecInit((0 until PortNumber).map(i =>
+  val s1_req_gpaddr_tmp   = VecInit((0 until PortNumber).map(i =>
                                 ResultHoldBypass(valid = tlb_valid_pulse(i), init = 0.U.asTypeOf(fromITLB(i).bits.gpaddr(0)), data = fromITLB(i).bits.gpaddr(0))))
   val itlbExcpPF          = VecInit((0 until PortNumber).map(i =>
                                 ResultHoldBypass(valid = tlb_valid_pulse(i), init = 0.U.asTypeOf(fromITLB(i).bits.excp(0).pf.instr), data = fromITLB(i).bits.excp(0).pf.instr)))
@@ -172,6 +172,17 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val itlbExcpAF          = VecInit((0 until PortNumber).map(i =>
                                 ResultHoldBypass(valid = tlb_valid_pulse(i), init = 0.U.asTypeOf(fromITLB(i).bits.excp(0).af.instr), data = fromITLB(i).bits.excp(0).af.instr)))
   val itlbExcp            = VecInit((0 until PortNumber).map(i => itlbExcpAF(i) || itlbExcpPF(i) || itlbExcpGPF(i)))
+
+  /* Select gpaddr with the first gpf
+   * Note: the backend wants the base guest physical address of a fetch block
+   *       for port(i), its base gpaddr is actually (gpaddr - i * blocksize)
+   *       see GPAMem: https://github.com/OpenXiangShan/XiangShan/blob/344cf5d55568dd40cd658a9ee66047a505eeb504/src/main/scala/xiangshan/backend/GPAMem.scala#L33-L34
+   *       see also: https://github.com/OpenXiangShan/XiangShan/blob/344cf5d55568dd40cd658a9ee66047a505eeb504/src/main/scala/xiangshan/frontend/IFU.scala#L374-L375
+   */
+  val s1_req_gpaddr = PriorityMuxDefault(
+    itlbExcpGPF zip (0 until PortNumber).map(i => s1_req_gpaddr_tmp(i) - (i << blockOffBits).U),
+    0.U.asTypeOf(s1_req_gpaddr_tmp(0))
+  )
 
   /**
     ******************************************************************************

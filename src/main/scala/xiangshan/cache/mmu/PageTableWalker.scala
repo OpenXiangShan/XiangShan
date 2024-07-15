@@ -194,6 +194,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     req_s2xlate := io.req.bits.req_info.s2xlate
     s_hptw_req := false.B
     hptw_resp_stage2 := false.B
+    last_s2xlate := false.B
   }
 
   when (io.hptw.resp.fire && w_hptw_resp === false.B && stage1Hit){
@@ -220,6 +221,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       last_s2xlate := true.B
       s_hptw_req := false.B
     }.otherwise {
+      last_s2xlate := false.B
       s_pmp_check := false.B
     }
   }
@@ -479,7 +481,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val wait_id = Mux(dup_req_fire, mem_arb.io.chosen, ParallelMux(dup_vec_wait zip entries.map(_.wait_id)))
   val dup_wait_resp = io.mem.resp.fire && VecInit(dup_vec_wait)(io.mem.resp.bits.id) // dup with the entry that data coming next cycle
   val to_wait = Cat(dup_vec_wait).orR || dup_req_fire
-  val to_mem_out = dup_wait_resp && entries(io.mem.resp.bits.id).req_info.s2xlate === noS2xlate
+  val to_mem_out = dup_wait_resp && ((entries(io.mem.resp.bits.id).req_info.s2xlate === noS2xlate) || (entries(io.mem.resp.bits.id).req_info.s2xlate === onlyStage1))
   val to_cache = Cat(dup_vec_having).orR || Cat(dup_vec_last_hptw).orR
   val to_hptw_req = io.in.bits.req_info.s2xlate === allStage
   val to_last_hptw_req = dup_wait_resp && entries(io.mem.resp.bits.id).req_info.s2xlate === allStage
@@ -521,7 +523,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val hptw_need_addr_check = RegNext(hasHptwResp && io.hptw.resp.fire && !flush) && state(hptw_resp_ptr_reg) === state_addr_check
 
   val ptes = io.mem.resp.bits.value.asTypeOf(Vec(blockBits / XLEN, new PteBundle()))
-  val gpaddr = MakeGPAddr(io.in.bits.ppn, getVpnn(io.in.bits.req_info.vpn, 0))
+  val gpaddr = MakeGPAddr(entries(hptw_resp_ptr_reg).ppn, getVpnn(entries(hptw_resp_ptr_reg).req_info.vpn, 0))
   val hptw_resp = entries(hptw_resp_ptr_reg).hptw_resp
   val hpaddr = Cat(hptw_resp.genPPNS2(get_pn(gpaddr)), get_off(gpaddr))
   val addr = RegEnable(MakeAddr(io.in.bits.ppn(ppnLen - 1, 0), getVpnn(io.in.bits.req_info.vpn, 0)), io.in.fire)
@@ -585,13 +587,17 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   when (io.hptw.resp.fire) {
     for (i <- state.indices) {
       when (state(i) === state_hptw_resp && io.hptw.resp.bits.id === entries(i).wait_id && io.hptw.resp.bits.h_resp.entry.tag === entries(i).ppn) {
-        // change the entry that is waiting hptw resp
-        val need_to_waiting_vec = state.indices.map(i => state(i) === state_mem_waiting && dup(entries(i).req_info.vpn, entries(io.hptw.resp.bits.id).req_info.vpn))
-        val waiting_index = ParallelMux(need_to_waiting_vec zip entries.map(_.wait_id))
-        state(i) := Mux(Cat(need_to_waiting_vec).orR, state_mem_waiting, state_addr_check)
-        entries(i).hptw_resp := io.hptw.resp.bits.h_resp
-        entries(i).wait_id := Mux(Cat(need_to_waiting_vec).orR, waiting_index, entries(i).wait_id)
-        //To do: change the entry that is having the same hptw req
+        when (io.hptw.resp.bits.h_resp.gaf || io.hptw.resp.bits.h_resp.gpf) {
+          state(i) := state_mem_out
+          entries(i).hptw_resp := io.hptw.resp.bits.h_resp
+        }.otherwise{ // change the entry that is waiting hptw resp
+          val need_to_waiting_vec = state.indices.map(i => state(i) === state_mem_waiting && dup(entries(i).req_info.vpn, entries(io.hptw.resp.bits.id).req_info.vpn))
+          val waiting_index = ParallelMux(need_to_waiting_vec zip entries.map(_.wait_id))
+          state(i) := Mux(Cat(need_to_waiting_vec).orR, state_mem_waiting, state_addr_check)
+          entries(i).hptw_resp := io.hptw.resp.bits.h_resp
+          entries(i).wait_id := Mux(Cat(need_to_waiting_vec).orR, waiting_index, entries(i).wait_id)
+          //To do: change the entry that is having the same hptw req
+        }
       }
       when (state(i) === state_last_hptw_resp && io.hptw.resp.bits.id === entries(i).wait_id && io.hptw.resp.bits.h_resp.entry.tag === entries(i).ppn) {
         state(i) := state_mem_out
@@ -730,7 +736,7 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val io = IO(new HPTWIO)
   val hgatp = io.csr.hgatp
   val sfence = io.sfence
-  val flush = sfence.valid || hgatp.changed
+  val flush = sfence.valid || hgatp.changed || io.csr.satp.changed || io.csr.vsatp.changed
 
   val level = RegInit(0.U(log2Up(Level).W))
   val gpaddr = Reg(UInt(GPAddrBits.W))

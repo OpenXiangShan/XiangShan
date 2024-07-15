@@ -46,7 +46,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     val storeIn = Vec(StorePipelineWidth, Flipped(Valid(new LsPipelineBundle)))
 
     // global rollback flush
-    val rollback = Output(Valid(new Redirect))
+    val rollback = Vec(StorePipelineWidth,Output(Valid(new Redirect)))
 
     // to LoadQueueReplay
     val stAddrReadySqPtr = Input(new SqPtr)
@@ -274,7 +274,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
       val (selValid, selBits) = selectPartialOldest(valid, bits)
       val selValidNext = GatedValidRegNext(selValid(0))
       val selBitsNext = RegEnable(selBits(0), selValid(0))
-      (Seq(selValidNext && !selBitsNext.uop.robIdx.needFlush(io.redirect) && !selBitsNext.uop.robIdx.needFlush(RegNext(io.redirect))), Seq(selBitsNext))
+      (Seq(selValidNext && !selBitsNext.uop.robIdx.needFlush(RegNext(io.redirect))), Seq(selBitsNext))
     } else {
       val select = (0 until numSelectGroups).map(g => {
         val (selValid, selBits) = selectPartialOldest(selectValidGroups(g), selectBitsGroups(g))
@@ -341,15 +341,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   // Thus, here if last cycle's robIdx equals to this cycle's robIdx, it still triggers the redirect.
 
   // select uop in parallel
-  def selectOldestRedirect(xs: Seq[Valid[Redirect]]): Vec[Bool] = {
-    val compareVec = (0 until xs.length).map(i => (0 until i).map(j => isAfter(xs(j).bits.robIdx, xs(i).bits.robIdx)))
-    val resultOnehot = VecInit((0 until xs.length).map(i => Cat((0 until xs.length).map(j =>
-      (if (j < i) !xs(j).valid || compareVec(i)(j)
-      else if (j == i) xs(i).valid
-      else !xs(j).valid || !compareVec(j)(i))
-    )).andR))
-    resultOnehot
-  }
+
   val allRedirect = (0 until StorePipelineWidth).map(i => {
     val redirect = Wire(Valid(new Redirect))
     redirect.valid := rollbackLqWb(i).valid
@@ -365,21 +357,20 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     redirect.bits.debug_runahead_checkpoint_id := rollbackLqWb(i).bits.debugInfo.runahead_checkpoint_id
     redirect
   })
-  val oldestOneHot = selectOldestRedirect(allRedirect)
-  val oldestRedirect = Mux1H(oldestOneHot, allRedirect)
-  io.rollback := oldestRedirect
+  io.rollback := allRedirect
 
   // perf cnt
   val canEnqCount = PopCount(io.query.map(_.req.fire))
   val validCount = freeList.io.validCount
   val allowEnqueue = validCount <= (LoadQueueRAWSize - LoadPipelineWidth).U
+  val rollbaclValid = io.rollback.map(_.valid).reduce(_ || _).asUInt
 
   QueuePerf(LoadQueueRAWSize, validCount, !allowEnqueue)
   XSPerfAccumulate("enqs", canEnqCount)
-  XSPerfAccumulate("stld_rollback", io.rollback.valid)
+  XSPerfAccumulate("stld_rollback", rollbaclValid)
   val perfEvents: Seq[(String, UInt)] = Seq(
     ("enq ", canEnqCount),
-    ("stld_rollback", io.rollback.valid),
+    ("stld_rollback", rollbaclValid),
   )
   generatePerfEvent()
   // end

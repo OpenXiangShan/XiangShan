@@ -3,8 +3,8 @@ package xiangshan.backend.issue
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.{MathUtils, OptionWrapper, XSError}
-import utility.HasCircularQueuePtrHelper
+import utils.MathUtils
+import utility.{HasCircularQueuePtrHelper, XSError}
 import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.DataSource
@@ -28,7 +28,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val issueTimer            = UInt(2.W)
     val deqPortIdx            = UInt(1.W)
     //vector mem status
-    val vecMem                = OptionWrapper(params.isVecMemIQ, new StatusVecMemPart)
+    val vecMem                = Option.when(params.isVecMemIQ)(new StatusVecMemPart)
 
     def srcReady: Bool        = {
       VecInit(srcStatus.map(_.srcState).map(SrcState.isReady)).asUInt.andR
@@ -51,7 +51,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val srcState              = SrcState()
     val dataSources           = DataSource()
     val srcLoadDependency     = Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))
-    val srcWakeUpL1ExuOH      = OptionWrapper(params.hasIQWakeUp, ExuVec())
+    val srcWakeUpL1ExuOH      = Option.when(params.hasIQWakeUp)(ExuVec())
   }
 
   class StatusVecMemPart(implicit p:Parameters, params: IssueBlockParams) extends Bundle {
@@ -60,11 +60,13 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val numLsElem             = NumLsElem()
   }
 
-  class EntryDeqRespBundle(implicit p: Parameters, params: IssueBlockParams) extends Bundle {
+  class EntryDeqRespBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
     val robIdx                = new RobPtr
     val resp                  = RespType()
     val fuType                = FuType()
-    val uopIdx                = OptionWrapper(params.isVecMemIQ, Output(UopIdx()))
+    val uopIdx                = Option.when(params.isVecMemIQ)(Output(UopIdx()))
+    val sqIdx                 = Option.when(params.needFeedBackSqIdx)(new SqPtr())
+    val lqIdx                 = Option.when(params.needFeedBackLqIdx)(new LqPtr())
   }
 
   object RespType {
@@ -85,7 +87,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
 
   class EntryBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
     val status                = new Status()
-    val imm                   = OptionWrapper(params.needImm, UInt((params.deqImmTypesMaxLen).W))
+    val imm                   = Option.when(params.needImm)(UInt((params.deqImmTypesMaxLen).W))
     val payload               = new DynInst()
   }
 
@@ -109,7 +111,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     //trans sel
     val transSel              = Input(Bool())
     // vector mem only
-    val fromLsq = OptionWrapper(params.isVecMemIQ, new Bundle {
+    val fromLsq = Option.when(params.isVecMemIQ)(new Bundle {
       val sqDeqPtr            = Input(new SqPtr)
       val lqDeqPtr            = Input(new LqPtr)
     })
@@ -121,10 +123,10 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val canIssue              = Output(Bool())
     val fuType                = Output(FuType())
     val robIdx                = Output(new RobPtr)
-    val uopIdx                = OptionWrapper(params.isVecMemIQ, Output(UopIdx()))
+    val uopIdx                = Option.when(params.isVecMemIQ)(Output(UopIdx()))
     //src
     val dataSource            = Vec(params.numRegSrc, Output(DataSource()))
-    val srcWakeUpL1ExuOH      = OptionWrapper(params.hasIQWakeUp, Vec(params.numRegSrc, Output(ExuVec())))
+    val srcWakeUpL1ExuOH      = Option.when(params.hasIQWakeUp)(Vec(params.numRegSrc, Output(ExuVec())))
     //deq
     val isFirstIssue          = Output(Bool())
     val entry                 = ValidIO(new EntryBundle)
@@ -138,10 +140,10 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val entryInValid          = Output(Bool())
     val entryOutDeqValid      = Output(Bool())
     val entryOutTransValid    = Output(Bool())
-    val perfLdCancel          = OptionWrapper(params.hasIQWakeUp, Output(Vec(params.numRegSrc, Bool())))
-    val perfOg0Cancel         = OptionWrapper(params.hasIQWakeUp, Output(Vec(params.numRegSrc, Bool())))
+    val perfLdCancel          = Option.when(params.hasIQWakeUp)(Output(Vec(params.numRegSrc, Bool())))
+    val perfOg0Cancel         = Option.when(params.hasIQWakeUp)(Output(Vec(params.numRegSrc, Bool())))
     val perfWakeupByWB        = Output(Vec(params.numRegSrc, Bool()))
-    val perfWakeupByIQ        = OptionWrapper(params.hasIQWakeUp, Output(Vec(params.numRegSrc, Vec(params.numWakeupFromIQ, Bool()))))
+    val perfWakeupByIQ        = Option.when(params.hasIQWakeUp)(Output(Vec(params.numRegSrc, Vec(params.numWakeupFromIQ, Bool()))))
   }
 
   class CommonWireBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {

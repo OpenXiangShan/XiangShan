@@ -4,7 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import utility.ZeroExt
 import xiangshan.{VSETOpType, CSROpType}
-import xiangshan.backend.decode.Imm_VSETIVLI
+import xiangshan.backend.decode.{Imm_VSETIVLI, Imm_VSETVLI}
 import xiangshan.backend.decode.isa.bitfield.InstVType
 import xiangshan.backend.fu.vector.Bundles.VsetVType
 import xiangshan.backend.fu.{FuConfig, FuncUnit, PipedFuncUnit, VsetModule, VtypeStruct}
@@ -24,7 +24,7 @@ class VSetBase(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   protected val avlImm = Imm_VSETIVLI().getAvl(in.data.src(1))
   protected val avl = Mux(VSETOpType.isVsetivli(in.ctrl.fuOpType), avlImm, in.data.src(0))
 
-  protected val instVType: InstVType = Imm_VSETIVLI().getVType(in.data.src(1))
+  protected val instVType: InstVType = Mux(VSETOpType.isVsetivli(in.ctrl.fuOpType), Imm_VSETIVLI().getVType(in.data.src(1)), Imm_VSETVLI().getVType(in.data.src(1)))
   protected val vtypeImm: VsetVType = VsetVType.fromInstVType(instVType)
   protected val vtype: VsetVType = Mux(VSETOpType.isVsetvl(in.ctrl.fuOpType), VsetVType.fromVtypeStruct(in.data.src(1).asTypeOf(new VtypeStruct())), vtypeImm)
 

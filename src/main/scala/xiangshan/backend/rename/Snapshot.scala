@@ -3,8 +3,7 @@ package xiangshan.backend.rename
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utility.{CircularQueuePtr, HasCircularQueuePtrHelper}
-import utils.XSError
+import utility.{CircularQueuePtr, HasCircularQueuePtrHelper, XSError}
 import xiangshan.{XSCoreParamsKey, XSModule}
 
 

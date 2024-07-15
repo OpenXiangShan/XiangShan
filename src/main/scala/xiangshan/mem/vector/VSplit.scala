@@ -26,6 +26,7 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.Bundles._
 import xiangshan.mem._
 import xiangshan.backend.fu.vector.Bundles._
+import xiangshan.backend.fu.FuConfig._
 
 
 class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends VLSUModule{
@@ -104,6 +105,9 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   val flowsPrevThisVd = (vdIdxInField << numFlowsSameVdLog2).asUInt // # of flows before this vd in a field
   val flowsIncludeThisUop = ((uopIdxInField +& 1.U) << flowsLog2).asUInt // # of flows before this uop besides this uop
   val flowNum = io.in.bits.flowNum.get
+  // max index in vd, only use in index instructions for calculate index
+  val maxIdxInVdIndex = GenVLMAX(Mux(s0_emul.asSInt > 0.S, 0.U, s0_emul), s0_eew(1, 0))
+  val indexVlMaxInVd = GenVlMaxMask(maxIdxInVdIndex, elemIdxBits)
 
   // For vectore indexed  instructions:
   //  When emul is greater than lmul, multiple uop correspond to a Vd, e.g:
@@ -163,6 +167,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
     x.vdIdxInField := vdIdxInField
     x.preIsSplit  := s0_preIsSplit
     x.alignedType := broadenAligendType
+    x.indexVlMaxInVd := indexVlMaxInVd
   }
   s0_valid := io.in.valid && !s0_kill
   /**-------------------------------------
@@ -173,10 +178,10 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   val s1_valid         = RegInit(false.B)
   val s1_kill          = Wire(Bool())
   val s1_in            = Wire(new VLSBundle(isVStore))
-  val s1_can_go        = io.out.ready && io.toMergeBuffer.resp.valid
+  val s1_can_go        = io.out.ready && io.toMergeBuffer.req.ready
   val s1_fire          = s1_valid && !s1_kill && s1_can_go
 
-  s1_ready         := s1_kill || !s1_valid || io.out.ready && io.toMergeBuffer.resp.valid
+  s1_ready         := s1_kill || !s1_valid || s1_can_go
 
   when(s0_fire){
     s1_valid := true.B
@@ -212,11 +217,14 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   val stride     = Mux(isIndexed(s1_instType), s1_stride, s1_notIndexedStride).asUInt // if is index instructions, get index when split
   val uopOffset  = genVUopOffset(s1_instType, s1_fof, s1_uopidx, s1_nf, s1_eew(1, 0), stride, s1_alignedType)
   val activeNum  = Mux(s1_in.preIsSplit, PopCount(s1_in.flowMask), s1_flowNum)
+  // for Unit-Stride, if uop's addr is aligned with 128-bits, split it to one flow, otherwise split two
+  val usLowBitsAddr    = getCheckAddrLowBits(s1_in.baseAddr, maxMemByteNum) + getCheckAddrLowBits(uopOffset, maxMemByteNum)
+  val usAligned128     = (getCheckAddrLowBits(usLowBitsAddr, maxMemByteNum) === 0.U)// addr 128-bit aligned
 
   s1_kill               := s1_in.uop.robIdx.needFlush(io.redirect)
 
   // query mergeBuffer
-  io.toMergeBuffer.req.valid             := s1_fire // only can_go will get MergeBuffer entry
+  io.toMergeBuffer.req.valid             := io.out.ready && s1_valid// only can_go will get MergeBuffer entry
   io.toMergeBuffer.req.bits.flowNum      := activeNum
   io.toMergeBuffer.req.bits.data         := s1_in.data
   io.toMergeBuffer.req.bits.uop          := s1_in.uop
@@ -240,6 +248,8 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   io.out.bits.uopOffset := uopOffset
   io.out.bits.stride    := stride
   io.out.bits.mBIndex   := io.toMergeBuffer.resp.bits.mBIndex
+  io.out.bits.usLowBitsAddr := usLowBitsAddr
+  io.out.bits.usAligned128  := usAligned128
 
   XSPerfAccumulate("split_out",     io.out.fire)
   XSPerfAccumulate("pipe_block",    io.out.valid && !io.out.ready)
@@ -248,6 +258,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
 
 abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) extends VLSUModule{
   val io = IO(new VSplitBufferIO(isVStore))
+  lazy val fuCfg    = if(isVStore) VstuCfg else VlduCfg
 
   val uopq          = Reg(new VLSBundle(isVStore))
   val allocated     = RegInit(false.B)
@@ -297,6 +308,9 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   val issueVLMAXMask   = issueEntry.vlmax - 1.U
   val issueIsWholeReg  = issueEntry.usWholeReg
   val issueVLMAXLog2   = GenVLMAXLog2(issueEntry.lmul, issueSew)
+  val issueVlMaxInVd   = issueEntry.indexVlMaxInVd
+  val issueUsLowBitsAddr = issueEntry.usLowBitsAddr
+  val issueUsAligned128  = issueEntry.usAligned128
   val elemIdx = GenElemIdx(
     instType = issueInstType,
     emul = issueEmul,
@@ -309,8 +323,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
 
   val splitIdxOffset = issueEntry.indexedSplitOffset + splitIdx
 
-  val elemIdxInsideField = elemIdx & issueVLMAXMask
-  val indexFlowInnerIdx = ((elemIdxInsideField << issueEew(1, 0))(vOffsetBits - 1, 0) >> issueEew(1, 0)).asUInt
+  val indexFlowInnerIdx = elemIdx & issueVlMaxInVd
   val nfIdx = Mux(issueIsWholeReg, 0.U, elemIdx >> issueVLMAXLog2)
   val fieldOffset = nfIdx << issueAlignedType // field offset inside a segment
 
@@ -328,19 +341,18 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
    * Unit-Stride split to one flow or two flow.
    * for Unit-Stride, if uop's addr is aligned with 128-bits, split it to one flow, otherwise split two
    */
-  val usLowBitsAddr    = getCheckAddrLowBits(issueBaseAddr, maxMemByteNum) + getCheckAddrLowBits(issueUopOffset, maxMemByteNum)
-  val usAligned128     = (getCheckAddrLowBits(usLowBitsAddr, maxMemByteNum) === 0.U)// addr 128-bit aligned
-  val usSplitMask      = genUSSplitMask(issueByteMask, splitIdx, getCheckAddrLowBits(usLowBitsAddr, maxMemByteNum))
-  val usNoSplit        = (usAligned128 || !getOverflowBit(getCheckAddrLowBits(usLowBitsAddr, maxMemByteNum) +& PopCount(usSplitMask), maxMemByteNum)) &&
+  val usSplitMask      = genUSSplitMask(issueByteMask, splitIdx, getCheckAddrLowBits(issueUsLowBitsAddr, maxMemByteNum))
+  val usNoSplit        = (issueUsAligned128 || !getOverflowBit(getCheckAddrLowBits(issueUsLowBitsAddr, maxMemByteNum) +& PopCount(usSplitMask), maxMemByteNum)) &&
                           !issuePreIsSplit &&
                           (splitIdx === 0.U)// unit-stride uop don't need to split into two flow
   val usSplitVaddr     = genUSSplitAddr(vaddr, splitIdx)
-  val regOffset        = getCheckAddrLowBits(usLowBitsAddr, maxMemByteNum) // offset in 256-bits vd
+  val regOffset        = getCheckAddrLowBits(issueUsLowBitsAddr, maxMemByteNum) // offset in 256-bits vd
   XSError((splitIdx > 1.U && usNoSplit) || (splitIdx > 1.U && !issuePreIsSplit) , "Unit-Stride addr split error!\n")
 
   // data
   io.out.bits match { case x =>
     x.uop                   := issueUop
+    x.uop.exceptionVec      := ExceptionNO.selectByFu(issueUop.exceptionVec, fuCfg)
     x.vaddr                 := Mux(!issuePreIsSplit, usSplitVaddr, vaddr)
     x.alignedType           := issueAlignedType
     x.isvec                 := true.B

@@ -93,7 +93,6 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   val af = Bool()
   val mmio = Bool()
   val atomic = Bool()
-  val rsIdx = UInt(log2Up(MemIQSizeMax).W)
 
   val forwardMask = Vec(VLEN/8, Bool())
   val forwardData = Vec(VLEN/8, UInt(8.W))
@@ -166,7 +165,6 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     if (latch) ptwBack := RegEnable(input.ptwBack, enable) else ptwBack := input.ptwBack
     if (latch) af := RegEnable(input.af, enable) else af := input.af
     if (latch) mmio := RegEnable(input.mmio, enable) else mmio := input.mmio
-    if (latch) rsIdx := RegEnable(input.rsIdx, enable) else rsIdx := input.rsIdx
     if (latch) forwardMask := RegEnable(input.forwardMask, enable) else forwardMask := input.forwardMask
     if (latch) forwardData := RegEnable(input.forwardData, enable) else forwardData := input.forwardData
     if (latch) isPrefetch := RegEnable(input.isPrefetch, enable) else isPrefetch := input.isPrefetch
@@ -242,7 +240,6 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     if(latch) ptwBack := RegEnable(input.ptwBack, enable) else ptwBack := input.ptwBack
     if(latch) mmio := RegEnable(input.mmio, enable) else mmio := input.mmio
     if(latch) atomic := RegEnable(input.atomic, enable) else atomic := input.atomic
-    if(latch) rsIdx := RegEnable(input.rsIdx, enable) else rsIdx := input.rsIdx
     if(latch) forwardMask := RegEnable(input.forwardMask, enable) else forwardMask := input.forwardMask
     if(latch) forwardData := RegEnable(input.forwardData, enable) else forwardData := input.forwardData
     if(latch) isPrefetch := RegEnable(input.isPrefetch, enable) else isPrefetch := input.isPrefetch

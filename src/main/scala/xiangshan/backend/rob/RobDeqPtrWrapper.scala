@@ -45,6 +45,7 @@ class NewRobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircu
     val exception_state = Flipped(ValidIO(new RobExceptionInfo))
     // for flush: when exception occurs, reset deqPtrs to range(0, CommitWidth)
     val intrBitSetReg = Input(Bool())
+    val allowOnlyOneCommit = Input(Bool())
     val hasNoSpecExec = Input(Bool())
     val interrupt_safe = Input(Bool())
     val blockCommit = Input(Bool())
@@ -74,7 +75,7 @@ class NewRobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircu
   val normalCommitCnt = PriorityEncoder(canCommit.map(c => !c) :+ true.B) - PopCount(io.hasCommitted)
   // when io.intrBitSetReg or there're possible exceptions in these instructions,
   // only one instruction is allowed to commit
-  val allowOnlyOne = commit_exception || io.intrBitSetReg
+  val allowOnlyOne = io.allowOnlyOneCommit
   val commitCnt = Mux(allowOnlyOne, canCommit(realCommitLast.value), normalCommitCnt)
   val allowOnlyOneCond = Wire(chiselTypeOf(io.canCommitPriorityCond))
   allowOnlyOneCond.zipWithIndex.map{ case (value,i) => {

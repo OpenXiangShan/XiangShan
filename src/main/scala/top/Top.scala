@@ -76,8 +76,9 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
   println(s"FPGASoC cores: $NumCores banks: $L3NBanks block size: $L3BlockSize bus size: $L3OuterBusWidth")
 
   val core_with_l2 = tiles.map(coreParams =>
-    LazyModule(new XSTile()(p.alterPartial({
+    LazyModule(new XSTile()(p.alter((site, here, up) => {
       case XSCoreParamsKey => coreParams
+      case PerfCounterOptionsKey => up(PerfCounterOptionsKey).copy(perfDBHartID = coreParams.HartId)
     })))
   )
 
@@ -88,6 +89,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
         FPGAPlatform = debugOpts.FPGAPlatform
       )
       case MaxHartIdBits => p(MaxHartIdBits)
+      case LogUtilsOptionsKey => p(LogUtilsOptionsKey)
+      case PerfCounterOptionsKey => p(PerfCounterOptionsKey)
     })))
   )
 
