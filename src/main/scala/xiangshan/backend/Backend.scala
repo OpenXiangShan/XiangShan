@@ -566,7 +566,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
       if (memScheduler.io.vecLoadIssueResp(i).nonEmpty && memExuBlocksHasVecLoad(i)(j)) {
         memScheduler.io.vecLoadIssueResp(i)(j) match {
           case resp =>
-            resp.valid := toMem(i)(j).fire && LSUOpType.isVecLd(toMem(i)(j).bits.fuOpType)
+            resp.valid := toMem(i)(j).fire && VlduType.isVecLd(toMem(i)(j).bits.fuOpType)
             resp.bits.fuType := toMem(i)(j).bits.fuType
             resp.bits.robIdx := toMem(i)(j).bits.robIdx
             resp.bits.uopIdx.get := toMem(i)(j).bits.vpu.get.vuopIdx

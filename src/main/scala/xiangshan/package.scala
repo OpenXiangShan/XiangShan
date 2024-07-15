@@ -494,6 +494,7 @@ package object xiangshan {
   }
 
   object LSUOpType {
+    // The max length is 6 bits
     // load pipeline
 
     // normal load
@@ -508,17 +509,17 @@ package object xiangshan {
     def lwu      = "b0110".U
     // hypervior load
     // bit encoding: | hlv 1 | hlvx 1 | is unsigned(1bit) | size(2bit) |
-    def hlvb = "b10000".U
-    def hlvh = "b10001".U
-    def hlvw = "b10010".U
-    def hlvd = "b10011".U
-    def hlvbu = "b10100".U
-    def hlvhu = "b10101".U
-    def hlvwu = "b10110".U
-    def hlvxhu = "b011101".U
-    def hlvxwu = "b011110".U
-    def isHlv(op: UInt): Bool = op(4) && (op(8, 5) === "b0000".U)
-    def isHlvx(op: UInt): Bool = op(4) && op(3) && (op(8, 5) === "b0000".U)
+    def hlvb   = "b10000".U
+    def hlvh   = "b10001".U
+    def hlvw   = "b10010".U
+    def hlvd   = "b10011".U
+    def hlvbu  = "b10100".U
+    def hlvhu  = "b10101".U
+    def hlvwu  = "b10110".U
+    def hlvxhu = "b11101".U
+    def hlvxwu = "b11110".U
+    def isHlv(op: UInt): Bool = op(4) && (op(5) === "b0".U)
+    def isHlvx(op: UInt): Bool = op(4) && op(3) && (op(5) === "b0".U)
 
     // Zicbop software prefetch
     // bit encoding: | prefetch 1 | 0 | prefetch type (2bit) |
@@ -526,7 +527,7 @@ package object xiangshan {
     def prefetch_r = "b1001".U
     def prefetch_w = "b1010".U
 
-    def isPrefetch(op: UInt): Bool = op(3)
+    def isPrefetch(op: UInt): Bool = op(3) && (op(5, 4) === "b000".U)
 
     // store pipeline
     // normal store
@@ -542,8 +543,7 @@ package object xiangshan {
     def hsvh = "b10001".U
     def hsvw = "b10010".U
     def hsvd = "b10011".U
-    def isHsv(op: UInt): Bool = op(4)
-
+    def isHsv(op: UInt): Bool = op(4) && (op(5) === "b0".U)
     // l1 cache op
     // bit encoding: | cbo_zero 01 | size(2bit) 11 |
     def cbo_zero  = "b0111".U
@@ -554,7 +554,7 @@ package object xiangshan {
     def cbo_flush = "b1101".U
     def cbo_inval = "b1110".U
 
-    def isCbo(op: UInt): Bool = op(3, 2) === "b11".U
+    def isCbo(op: UInt): Bool = op(3, 2) === "b11".U && (op(6, 4) === "b000".U)
 
     // atomics
     // bit(1, 0) are size
@@ -588,10 +588,6 @@ package object xiangshan {
     def size(op: UInt) = op(1,0)
 
     def getVecLSMop(fuOpType: UInt): UInt = fuOpType(6, 5)
-
-    def isVecLd(fuOpType: UInt): Bool = fuOpType(8, 7) === "b01".U
-    def isVecSt(fuOpType: UInt): Bool = fuOpType(8, 7) === "b10".U
-    def isVecLS(fuOpType: UInt): Bool = fuOpType(8, 7).orR
 
     def isAllUS  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && !fuOpType(4) // Unit-Stride Whole Masked
     def isUStride(fuOpType: UInt): Bool = fuOpType(6, 0) === "b00_00000".U
