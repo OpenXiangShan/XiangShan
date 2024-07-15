@@ -48,6 +48,12 @@ class PcTargetMemImp(override val wrapper: PcTargetMem)(implicit p: Parameters, 
     RegEnable(io.toDataPath.fromDataPathFtqPtr(i), io.toDataPath.fromDataPathValid(i))
   }
 
+  private val canUpdate = WireInit(false.B)
+  private val isJalTarget = io.fromFrontendFtq.newest_entry_is_jal_target
+  private val jalTargetFtqPtr = RegEnable(io.fromFrontendFtq.newest_entry_ptr, canUpdate)
+  private val jalTargetReg = RegEnable(io.fromFrontendFtq.newest_entry_target, canUpdate)
+  canUpdate :=  isJalTarget || (io.fromFrontendFtq.newest_entry_ptr === jalTargetFtqPtr && newestEn)
+
   for (i <- 0 until params.numTargetReadPort) {
     val targetPtr = io.toDataPath.fromDataPathFtqPtr(i)
     // target pc stored in next entry
@@ -55,9 +61,11 @@ class PcTargetMemImp(override val wrapper: PcTargetMem)(implicit p: Parameters, 
     targetMem.io.raddr(i) := (targetPtr + 1.U).value
 
     val hitNewestFtqPtr = RegEnable(targetPtr === currentNewestFtqPtr, false.B, readValid(i))
+    val useJalTarget = RegEnable(targetPtr === jalTargetFtqPtr, false.B, readValid(i))
     targetPCVec(i) := MuxCase(
       default = Fill(VAddrBits, 1.U(1.W)), // use all 1s as invalid predict jump target
       mapping = Seq(
+        useJalTarget -> jalTargetReg,
         hitNewestFtqPtr -> currentNewestTarget,
         (rdataVec(i).flag === targetReadPtrVec(i).flag) -> rdataVec(i).addr.startAddr,
       )

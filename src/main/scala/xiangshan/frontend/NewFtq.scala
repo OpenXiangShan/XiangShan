@@ -233,6 +233,7 @@ class FtqToCtrlIO(implicit p: Parameters) extends XSBundle with HasBackendRedire
   val newest_entry_en = Output(Bool())
   val newest_entry_target = Output(UInt(VAddrBits.W))
   val newest_entry_ptr = Output(new FtqPtr)
+  val newest_entry_is_jal_target = Output(Bool())
 }
 
 class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedirectInfo with HasBPUParameter {
@@ -1079,11 +1080,18 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   io.toBackend.pc_mem_waddr := RegEnable(last_cycle_bpu_in_ptr, last_cycle_bpu_in)
   io.toBackend.pc_mem_wdata := RegEnable(bpu_in_bypass_buf_for_ifu, last_cycle_bpu_in)
 
+  // corrected jal target
+  val isJalFault = RegNext(pdWb.bits.isJalFault && pdWb.valid)
+  val jalTarget = RegNext(pdWb.bits.jalTarget)
+  val jalTargetFtqPtr = RegNext(pdWb.bits.ftqIdx)
+
   // num cycle is fixed
+  // The corrected jal target has the highest priority
   val newest_entry_en: Bool = RegNext(last_cycle_bpu_in || backendRedirect.valid || ifuRedirectToBpu.valid)
-  io.toBackend.newest_entry_en := RegNext(newest_entry_en)
-  io.toBackend.newest_entry_ptr := RegEnable(newest_entry_ptr, newest_entry_en)
-  io.toBackend.newest_entry_target := RegEnable(newest_entry_target, newest_entry_en)
+  io.toBackend.newest_entry_en := RegNext(newest_entry_en) || isJalFault
+  io.toBackend.newest_entry_ptr := Mux(isJalFault, jalTargetFtqPtr, RegEnable(newest_entry_ptr, newest_entry_en))
+  io.toBackend.newest_entry_target := Mux(isJalFault, jalTarget, RegEnable(newest_entry_target, newest_entry_en))
+  io.toBackend.newest_entry_is_jal_target := isJalFault
 
   // *********************************************************************
   // **************************** wb from exu ****************************
