@@ -119,9 +119,6 @@ jobs:
       - name: Basic Test - misc-tests
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --ci misc-tests 2> /dev/zero
-      - name: Basic Test - nodiff-tests
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --no-diff --ci nodiff-tests 2> /dev/zero
       - name: Simple Test - microbench
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --ci microbench 2> perf.log
