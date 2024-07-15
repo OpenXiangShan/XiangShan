@@ -315,6 +315,19 @@ class Redirect(implicit p: Parameters) extends XSBundle {
   def flushItself() = RedirectLevel.flushItself(level)
 }
 
+object Redirect extends HasCircularQueuePtrHelper {
+
+  def selectOldestRedirect(xs: Seq[Valid[Redirect]]): Vec[Bool] = {
+    val compareVec = (0 until xs.length).map(i => (0 until i).map(j => isAfter(xs(j).bits.robIdx, xs(i).bits.robIdx)))
+    val resultOnehot = VecInit((0 until xs.length).map(i => Cat((0 until xs.length).map(j =>
+      (if (j < i) !xs(j).valid || compareVec(i)(j)
+      else if (j == i) xs(i).valid
+      else !xs(j).valid || !compareVec(j)(i))
+    )).andR))
+    resultOnehot
+  }
+}
+
 class ResetPregStateReq(implicit p: Parameters) extends XSBundle {
   // NOTE: set isInt and isFp both to 'false' when invalid
   val isInt = Bool()

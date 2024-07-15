@@ -185,10 +185,10 @@ class CtrlBlockImp(
   }).toSeq
 
   private val exuPredecode = VecInit(
-    delayedNotFlushedWriteBack.filter(_.bits.redirect.nonEmpty).map(x => x.bits.predecodeInfo.get).toSeq
+    delayedWriteBack.filter(_.bits.redirect.nonEmpty).map(x => x.bits.predecodeInfo.get).toSeq
   )
 
-  private val exuRedirects: Seq[ValidIO[Redirect]] = delayedNotFlushedWriteBack.filter(_.bits.redirect.nonEmpty).map(x => {
+  private val exuRedirects: Seq[ValidIO[Redirect]] = io.fromWB.wbData.filter(_.bits.redirect.nonEmpty).map(x => {
     val out = Wire(Valid(new Redirect()))
     out.valid := x.valid && x.bits.redirect.get.valid && x.bits.redirect.get.bits.cfiUpdate.isMisPred
     out.bits := x.bits.redirect.get.bits
@@ -196,12 +196,13 @@ class CtrlBlockImp(
     out.bits.debugIsMemVio := false.B
     out
   }).toSeq
+  private val oldestOneHot = Redirect.selectOldestRedirect(exuRedirects)
+  private val oldestExuRedirect = Mux1H(oldestOneHot, exuRedirects)
+  private val oldestExuPredecode = Mux1H(oldestOneHot, exuPredecode)
 
   private val memViolation = io.fromMem.violation
   val loadReplay = Wire(ValidIO(new Redirect))
-  loadReplay.valid := GatedValidRegNext(memViolation.valid &&
-    !memViolation.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect))
-  )
+  loadReplay.valid := GatedValidRegNext(memViolation.valid)
   loadReplay.bits := RegEnable(memViolation.bits, memViolation.valid)
   loadReplay.bits.debugIsCtrl := false.B
   loadReplay.bits.debugIsMemVio := true.B
@@ -238,11 +239,13 @@ class CtrlBlockImp(
   }
 
   redirectGen.io.hartId := io.fromTop.hartId
-  redirectGen.io.exuRedirect := exuRedirects.toSeq
-  redirectGen.io.exuOutPredecode := exuPredecode // guarded by exuRedirect.valid
+  redirectGen.io.oldestExuRedirect.valid := GatedValidRegNext(oldestExuRedirect.valid)
+  redirectGen.io.oldestExuRedirect.bits := RegEnable(oldestExuRedirect.bits, oldestExuRedirect.valid)
+  redirectGen.io.oldestExuOutPredecode.valid := GatedValidRegNext(oldestExuPredecode.valid)
+  redirectGen.io.oldestExuOutPredecode := RegEnable(oldestExuPredecode, oldestExuPredecode.valid)
   redirectGen.io.loadReplay <> loadReplay
 
-  redirectGen.io.robFlush := s1_robFlushRedirect.valid
+  redirectGen.io.robFlush := s1_robFlushRedirect
 
   val s5_flushFromRobValidAhead = DelayN(s1_robFlushRedirect.valid, 4)
   val s6_flushFromRobValid = GatedValidRegNext(s5_flushFromRobValidAhead)
@@ -264,8 +267,8 @@ class CtrlBlockImp(
 
   //jmp/brh
   for (i <- 0 until NumRedirect) {
-    io.frontend.toFtq.ftqIdxAhead(i).valid := exuRedirects(i).valid && exuRedirects(i).bits.cfiUpdate.isMisPred && !s1_robFlushRedirect.valid && !s5_flushFromRobValidAhead
-    io.frontend.toFtq.ftqIdxAhead(i).bits := exuRedirects(i).bits.ftqIdx
+    io.frontend.toFtq.ftqIdxAhead(i).valid := RegNext(oldestExuRedirect.valid)
+    io.frontend.toFtq.ftqIdxAhead(i).bits := RegEnable(oldestExuRedirect.bits.ftqIdx, oldestExuRedirect.valid)
   }
   //loadreplay
   io.frontend.toFtq.ftqIdxAhead(NumRedirect).valid := loadReplay.valid && !s1_robFlushRedirect.valid && !s5_flushFromRobValidAhead

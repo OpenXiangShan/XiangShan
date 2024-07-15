@@ -14,72 +14,58 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
     def numRedirect = backendParams.numRedirect
 
     val hartId = Input(UInt(8.W))
-    val exuRedirect = Vec(numRedirect, Flipped(ValidIO(new Redirect)))
-    val exuOutPredecode = Input(Vec(numRedirect, new PreDecodeInfo)) // guarded by exuRedirect.valid
+    val oldestExuRedirect = Flipped(ValidIO(new Redirect))
+    val oldestExuOutPredecode = Input(new PreDecodeInfo) // guarded by exuRedirect.valid
     val loadReplay = Flipped(ValidIO(new Redirect))
-    val robFlush = Input(Bool())
+    val robFlush = Flipped(ValidIO(new Redirect))
     val redirectPcRead = new FtqRead(UInt(VAddrBits.W))
-
     val stage2Redirect = ValidIO(new Redirect)
-    val stage3Redirect = ValidIO(new Redirect)
+
     val memPredUpdate = Output(new MemPredUpdateReq)
     val memPredPcRead = new FtqRead(UInt(VAddrBits.W)) // read req send form stage 2
-    val isMisspreRedirect = Output(Bool())
     val stage2oldestOH = Output(UInt((NumRedirect + 1).W))
   }
 
   val io = IO(new RedirectGeneratorIO)
 
   val robFlush = io.robFlush
-
-  /*
-        LoadQueue  Jump  ALU0  ALU1  ALU2  ALU3   exception    Stage1
-          |         |      |    |     |     |         |
-          |============= reg & compare =====|         |       ========
-                            |                         |
-                            |                         |
-                            |                         |        Stage2
-                            |                         |
-                    redirect (flush backend)          |
-                    |                                 |
-               === reg ===                            |       ========
-                    |                                 |
-                    |----- mux (exception first) -----|        Stage3
-                            |
-                redirect (send to frontend)
-   */
-  def selectOldestRedirect(xs: Seq[Valid[Redirect]]): Vec[Bool] = {
-    val compareVec = (0 until xs.length).map(i => (0 until i).map(j => isAfter(xs(j).bits.robIdx, xs(i).bits.robIdx)))
-    val resultOnehot = VecInit((0 until xs.length).map(i => Cat((0 until xs.length).map(j =>
-      (if (j < i) !xs(j).valid || compareVec(i)(j)
-      else if (j == i) xs(i).valid
-      else !xs(j).valid || !compareVec(j)(i))
-    )).andR))
-    resultOnehot
-  }
-
-  val jumpOut = io.exuRedirect.head // Todo: more jump
-  val allRedirect: Vec[ValidIO[Redirect]] = VecInit(io.exuRedirect :+ io.loadReplay)
-  val oldestOneHot = selectOldestRedirect(allRedirect)
-  val needFlushVec = VecInit(allRedirect.map(_.bits.robIdx.needFlush(io.stage2Redirect) || robFlush))
+  val allRedirect: Vec[ValidIO[Redirect]] = VecInit(io.oldestExuRedirect, io.loadReplay)
+  val oldestOneHot = Redirect.selectOldestRedirect(allRedirect)
+  val flushAfter = Reg(ValidIO(new Redirect))
+  val needFlushVec = VecInit(allRedirect.map(_.bits.robIdx.needFlush(flushAfter) || robFlush.valid))
   val oldestValid = VecInit(oldestOneHot.zip(needFlushVec).map { case (v, f) => v && !f }).asUInt.orR
-  val oldestExuRedirect = Mux1H(io.exuRedirect.indices.map(oldestOneHot), io.exuRedirect)
-  val oldestExuPredecode = Mux1H(io.exuOutPredecode.indices.map(oldestOneHot), io.exuOutPredecode)
+  val oldestExuRedirect = io.oldestExuRedirect
+  val oldestExuPredecode = io.oldestExuOutPredecode
   val oldestRedirect = Mux1H(oldestOneHot, allRedirect)
-  io.isMisspreRedirect := VecInit(io.exuRedirect.map(x => x.valid)).asUInt.orR
-  io.redirectPcRead.vld := oldestRedirect.valid
-  io.redirectPcRead.ptr := oldestRedirect.bits.ftqIdx
-  io.redirectPcRead.offset := oldestRedirect.bits.ftqOffset
+  io.redirectPcRead.vld := io.loadReplay.valid
+  io.redirectPcRead.ptr := io.loadReplay.bits.ftqIdx
+  io.redirectPcRead.offset := io.loadReplay.bits.ftqOffset
 
-  val s1_jumpTarget = RegEnable(jumpOut.bits.cfiUpdate.target, jumpOut.valid)
-  val s1_brhTarget = RegEnable(oldestExuRedirect.bits.cfiUpdate.target, oldestExuRedirect.valid)
+  val s1_exuTarget = RegEnable(oldestExuRedirect.bits.cfiUpdate.target, oldestExuRedirect.valid)
   val s1_pd = RegNext(oldestExuPredecode)
   val s1_redirect_bits_reg = RegEnable(oldestRedirect.bits, oldestValid)
   val s1_redirect_valid_reg = GatedValidRegNext(oldestValid)
   val s1_redirect_onehot = VecInit(oldestOneHot.map(x => GatedValidRegNext(x)))
 
+  if (backendParams.debugEn){
+    dontTouch(oldestValid)
+    dontTouch(needFlushVec)
+  }
+  val flushAfterCounter = Reg(UInt(3.W))
+  val robFlushOrExuFlushValid = oldestValid || robFlush.valid
+  when(robFlushOrExuFlushValid) {
+    flushAfter.valid := true.B
+    flushAfter.bits := Mux(robFlush.valid, robFlush.bits, oldestRedirect.bits)
+  }.elsewhen(!flushAfterCounter(0)) {
+    flushAfter.valid := false.B
+  }
+  when(robFlushOrExuFlushValid) {
+    flushAfterCounter := "b111".U
+  }.elsewhen(flushAfterCounter(0)){
+    flushAfterCounter := flushAfterCounter >> 1
+  }
   // stage1 -> stage2
-  io.stage2Redirect.valid := s1_redirect_valid_reg && !robFlush
+  io.stage2Redirect.valid := s1_redirect_valid_reg && !robFlush.valid
   io.stage2Redirect.bits := s1_redirect_bits_reg
   io.stage2oldestOH := s1_redirect_onehot.asUInt
 
@@ -89,12 +75,8 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   val snpc = real_pc + Mux(s1_pd.isRVC, 2.U, 4.U)
   val target = Mux(
     s1_isReplay,
-    Mux(s1_redirect_bits_reg.flushItself(), real_pc, real_pc + Mux(s1_redirect_bits_reg.isRVC, 2.U, 4.U)),
-    Mux(
-      s1_redirect_bits_reg.cfiUpdate.taken,
-      Mux(s1_isJump, s1_jumpTarget, s1_brhTarget),
-      snpc
-    )
+    real_pc + Mux(s1_redirect_bits_reg.flushItself(), 0.U, Mux(s1_redirect_bits_reg.isRVC, 2.U, 4.U)),
+    s1_exuTarget
   )
 
   val stage2CfiUpdate = io.stage2Redirect.bits.cfiUpdate
@@ -108,10 +90,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   val s2_target = RegEnable(target, s1_redirect_valid_reg)
   val s2_pc = RegEnable(real_pc, s1_redirect_valid_reg)
   val s2_redirect_bits_reg = RegEnable(s1_redirect_bits_reg, s1_redirect_valid_reg)
-  val s2_redirect_valid_reg = GatedValidRegNext(s1_redirect_valid_reg && !robFlush, init = false.B)
-
-  io.stage3Redirect.valid := s2_redirect_valid_reg
-  io.stage3Redirect.bits := s2_redirect_bits_reg
+  val s2_redirect_valid_reg = GatedValidRegNext(s1_redirect_valid_reg && !robFlush.valid, init = false.B)
 
   // get pc from ftq
   // valid only if redirect is caused by load violation
