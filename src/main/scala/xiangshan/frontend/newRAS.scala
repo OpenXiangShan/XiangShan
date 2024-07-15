@@ -175,16 +175,6 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       commit_stack(currentSsp)
     }
 
-    def NOSinRange(currentTOSR: RASPtr, currentTOSW: RASPtr, currentNOS: RASPtr):Bool = {
-      val inflightValid = WireInit(false.B)
-      //This judgment logic has a problem: !isBefore(currentNOS, BOS) && isBefore(currentNOS, currentTOSR) && isBefore(currentTOSR, currentTOSW)
-      // example:NOS.flag = 1, NOS.value = 1D; BOS.flag = 1, BOS.value = 1C; TOSR.flag = 0, TOSR.value = 1D; TOSW.flag = 1, TOSW.value = 1D
-      when (!isBefore(currentNOS, BOS) && isBefore(currentNOS, currentTOSR) && !isBefore(currentTOSR, BOS) && isBefore(currentTOSR, currentTOSW) ) {
-        inflightValid := true.B
-      }
-      inflightValid
-    }
-
     def getTopNos(currentTOSR: RASPtr, allowBypass: Boolean):RASPtr = {
       val ret = Wire(new RASPtr)
       if (allowBypass){
@@ -291,7 +281,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       val popRedTOSW = io.redirect_meta_TOSW
       val popRedNOS  = io.redirect_meta_NOS
 
-        when(NOSinRange(popRedTOSR, popRedTOSW, popRedNOS)) {
+      when(TOSRinRange(popRedNOS, popRedTOSW)) {
         timingTop := spec_queue(popRedNOS.value)
       } .otherwise {
         timingTop := getCommitTop(popRedSsp) 
@@ -312,7 +302,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       val popTOSW = TOSW
       val popNOS  = topNos
 
-      when(NOSinRange(popTOSR, popTOSW, popNOS)){
+      when(TOSRinRange(popNOS, popTOSW)){
         timingTop := spec_queue(popNOS.value)
       } .otherwise {
         timingTop := getCommitTop(popSsp)
@@ -335,7 +325,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
         val popRedTOSW_s3 = io.s3_meta.TOSW
         val popRedNOS_s3  = io.s3_meta.NOS
 
-        when(NOSinRange(popRedTOSR_s3, popRedTOSW_s3, popRedNOS_s3)) {
+        when(TOSRinRange(popRedNOS_s3, popRedTOSW_s3)) {
           timingTop := spec_queue(popRedNOS_s3.value)
         } .otherwise {
           timingTop := getCommitTop(popRedSsp_s3)
@@ -354,42 +344,36 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     XSPerfAccumulate("ras_top_mismatch", diffTop =/= timingTop.retAddr);
     // could diff when more pop than push and a commit stack is updated with inflight info
 
-    val redirect_isCall_valid   = (io.redirect_isCall && io.redirect_valid)
-    val s2_push_valid_next          = RegEnable(io.spec_push_valid, io.s2_fire)
-    val redirect_isCall_valid_next  = RegNext(io.redirect_valid && io.redirect_isCall)
-
-    realPush := (io.s3_fire && (!io.s3_cancel && s2_push_valid_next || io.s3_missed_push)) || redirect_isCall_valid_next
-
-    val realWriteEntry_next     = RegEnable(writeEntry, io.s2_fire || redirect_isCall_valid)
-    val realWrite_TOSW_next     = RegEnable(Mux(redirect_isCall_valid,io.redirect_meta_TOSW,TOSW), io.s2_fire || redirect_isCall_valid)
-    val realWrite_TOSR_next     = RegEnable(Mux(redirect_isCall_valid,io.redirect_meta_TOSR,TOSR), io.s2_fire || redirect_isCall_valid)
+    val realWriteEntry_next = RegEnable(writeEntry, io.s2_fire || io.redirect_isCall)
     val s3_missPushEntry = Wire(new RASEntry)
+    val s3_missPushAddr = Wire(new RASPtr)
+    val s3_missPushNos = Wire(new RASPtr)
+
     s3_missPushEntry.retAddr := io.s3_pushAddr
     s3_missPushEntry.ctr := Mux(s3TopEntry.retAddr === io.s3_pushAddr && s3TopEntry.ctr < ctrMax, io.s3_meta.sctr + 1.U, 0.U)
+    s3_missPushAddr := io.s3_meta.TOSW
+    s3_missPushNos := io.s3_meta.TOSR
+
+
 
     realWriteEntry := Mux(io.redirect_isCall, realWriteEntry_next,
       Mux(io.s3_missed_push, s3_missPushEntry,
       realWriteEntry_next))
 
-    val real_TOSR_inverse = Wire(new RASPtr)
-    real_TOSR_inverse.flag := !realWrite_TOSR_next.flag
-    real_TOSR_inverse.value := realWrite_TOSR_next.value
+    val realWriteAddr_next = RegEnable(Mux(io.redirect_valid && io.redirect_isCall, io.redirect_meta_TOSW, TOSW), io.s2_fire || (io.redirect_valid && io.redirect_isCall))
+    val realWriteAddr = Mux(io.redirect_isCall, realWriteAddr_next,
+      Mux(io.s3_missed_push, s3_missPushAddr,
+      realWriteAddr_next))
+    val realNos_next = RegEnable(Mux(io.redirect_valid && io.redirect_isCall, io.redirect_meta_TOSR, TOSR), io.s2_fire || (io.redirect_valid && io.redirect_isCall))
+    val realNos = Mux(io.redirect_isCall, realNos_next,
+      Mux(io.s3_missed_push, s3_missPushNos,
+      realNos_next))
 
-    val s3_TOSR_inverse = Wire(new RASPtr)
-    s3_TOSR_inverse.flag   := !io.s3_meta.TOSR.flag
-    s3_TOSR_inverse.value  := io.s3_meta.TOSR.value
+    realPush := (io.s3_fire && (!io.s3_cancel && RegEnable(io.spec_push_valid, io.s2_fire) || io.s3_missed_push)) || RegNext(io.redirect_valid && io.redirect_isCall)
 
     when (realPush) {
-        when(redirect_isCall_valid_next) {
-          spec_queue(realWrite_TOSW_next.value)   := realWriteEntry_next
-            spec_nos(realWrite_TOSW_next.value)     := Mux(realWrite_TOSW_next === realWrite_TOSR_next, real_TOSR_inverse, realWrite_TOSR_next)
-        }.elsewhen(io.s3_fire && io.s3_missed_push){
-          spec_queue(io.s3_meta.TOSW.value) := s3_missPushEntry
-          spec_nos(io.s3_meta.TOSW.value)   := Mux(io.s3_meta.TOSW === io.s3_meta.TOSR, s3_TOSR_inverse, io.s3_meta.TOSR)            
-        }.otherwise{
-          spec_queue(realWrite_TOSW_next.value) := realWriteEntry_next
-          spec_nos(realWrite_TOSW_next.value)   := Mux(realWrite_TOSW_next === realWrite_TOSR_next, real_TOSR_inverse, realWrite_TOSR_next)
-        }
+      spec_queue(realWriteAddr.value) := realWriteEntry
+      spec_nos(realWriteAddr.value) := realNos
     }
 
     def specPush(retAddr: UInt, currentSsp: UInt, currentSctr: UInt, currentTOSR: RASPtr, currentTOSW: RASPtr, topEntry: RASEntry) = {
@@ -412,29 +396,15 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     when (io.spec_push_valid) {
       specPush(io.spec_push_addr, ssp, sctr, TOSR, TOSW, topEntry)
     }
-    val new_tosw_inverse = Wire(new RASPtr)
-    new_tosw_inverse.flag   := !TOSW.flag
-    new_tosw_inverse.value  := TOSW.value
-    /**
-      * When the stack pop detects that the previous position of TOSR (NOS) is not in the speculation queue, 
-      * we set TOSR to an extreme value to avoid the subsequent stack pop logic from misjudging the top of the stack 
-      * (the top of the stack may be in the speculation queue or the submission stack). 
-      * Of course, the current design is not perfect.
-      *
-      */
     def specPop(currentSsp: UInt, currentSctr: UInt, currentTOSR: RASPtr, currentTOSW: RASPtr, currentTopNos: RASPtr) = {
       // TOSR is only maintained when spec queue is not empty
       when (TOSRinRange(currentTOSR, currentTOSW)) {
-        when(NOSinRange(currentTOSR, currentTOSW, currentTopNos)){
         TOSR := currentTopNos
-        }.otherwise{
-            TOSR := new_tosw_inverse
-        }
       }
       // spec sp and ctr should always be maintained
       when (currentSctr > 0.U) {
         sctr := currentSctr - 1.U
-      } .elsewhen (NOSinRange(currentTOSR, currentTOSW, currentTopNos)) {
+      } .elsewhen (TOSRinRange(currentTopNos, currentTOSW)) {
         // in range, use inflight data
         ssp := ptrDec(currentSsp)
         sctr := spec_queue(currentTopNos.value).ctr
