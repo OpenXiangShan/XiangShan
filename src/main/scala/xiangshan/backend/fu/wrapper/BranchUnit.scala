@@ -11,10 +11,15 @@ import xiangshan.{RedirectLevel, XSModule}
 class AddrAddModule(len: Int)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
     val pc = Input(UInt(len.W))
+    val taken = Input(Bool())
+    val isRVC = Input(Bool())
     val offset = Input(UInt(12.W)) // branch inst only support 12 bits immediate num
     val target = Output(UInt(len.W))
   })
-  io.target := io.pc + SignExt(ImmUnion.B.toImm32(io.offset), len)
+  io.target := Mux(io.taken,
+    io.pc + SignExt(ImmUnion.B.toImm32(io.offset), len),
+    Mux(io.isRVC, io.pc + 2.U, io.pc + 4.U)
+  )
 }
 
 class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
@@ -27,6 +32,8 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
 
   addModule.io.pc := io.in.bits.data.pc.get // pc
   addModule.io.offset := io.in.bits.data.imm // imm
+  addModule.io.taken := dataModule.io.taken
+  addModule.io.isRVC := io.in.bits.ctrl.preDecode.get.isRVC
 
   io.out.valid := io.in.valid
   io.in.ready := io.out.ready
