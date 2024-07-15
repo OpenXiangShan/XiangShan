@@ -101,6 +101,7 @@ jobs:
           echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
           echo "PERF_HOME=/nfs/home/ci-runner/xs-perf/${HEAD_SHA}" >> $GITHUB_ENV
           echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
+          echo "GCPT_RESTORE_BIN=/nfs/home/share/ci-workloads/fix-gcpt/gcpt.bin" >> $GITHUB_ENV
           mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
       - name: clean up
@@ -133,7 +134,7 @@ jobs:
           cat perf.log | sort | tee $PERF_HOME/linux.log
       - name: Floating-point Test - povray
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --max-instr 5000000 --ci povray 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --max-instr 5000000 --ci povray --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/povray.log
       - name: Uncache Fetch Test - copy and run
         run: |
@@ -187,6 +188,7 @@ jobs:
           echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
           echo "PERF_HOME=/nfs/home/ci-runner/xs-perf/${HEAD_SHA}" >> $GITHUB_ENV
           echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
+          echo "GCPT_RESTORE_BIN=/nfs/home/share/ci-workloads/fix-gcpt/gcpt.bin" >> $GITHUB_ENV
           mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
       - name: clean up
@@ -200,39 +202,39 @@ jobs:
             --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin --llvm-profdata llvm-profdata
       - name: SPEC06 Test - mcf
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci mcf 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci mcf --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/mcf.log
       - name: SPEC06 Test - xalancbmk
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci xalancbmk 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci xalancbmk --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/xalancbmk.log
       - name: SPEC06 Test - gcc
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci gcc 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci gcc --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/gcc.log
       - name: SPEC06 Test - namd
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci namd 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci namd --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/namd.log
       - name: SPEC06 Test - milc
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci milc 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci milc --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/milc.log
       - name: SPEC06 Test - lbm
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci lbm 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci lbm --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/lbm.log
       - name: SPEC06 Test - gromacs
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci gromacs 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci gromacs --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/gromacs.log
       - name: SPEC06 Test - wrf
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci wrf 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci wrf --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/wrf.log
       - name: SPEC06 Test - astar
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci astar 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci astar --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/astar.log
   emu-mc:
     runs-on: bosc
@@ -270,7 +272,7 @@ jobs:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so --ci mc-tests 2> /dev/zero
       - name: SMP Linux
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so --ci linux-hello-smp-newcsr 2> /dev/zero
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so --ci linux-hello-smp-newcsr 2> /dev/null
   simv-basics:
     runs-on: eda
     needs: changes
