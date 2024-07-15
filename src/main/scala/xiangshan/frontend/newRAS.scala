@@ -249,8 +249,8 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     val writeNos = Wire(new RASPtr)
     writeEntry.retAddr := Mux(io.redirect_valid && io.redirect_isCall,  io.redirect_callAddr, io.spec_push_addr)
     writeEntry.ctr := Mux(io.redirect_valid && io.redirect_isCall,
-      Mux(redirectTopEntry.retAddr === io.redirect_callAddr && redirectTopEntry.ctr < ctrMax, io.redirect_meta_sctr + 1.U, 0.U),
-      Mux(topEntry.retAddr === io.spec_push_addr && topEntry.ctr < ctrMax, sctr + 1.U, 0.U))
+      Mux(redirectTopEntry.retAddr === io.redirect_callAddr && io.redirect_meta_sctr < ctrMax, io.redirect_meta_sctr + 1.U, 0.U),
+      Mux(topEntry.retAddr === io.spec_push_addr && sctr < ctrMax, sctr + 1.U, 0.U))
 
     writeNos := Mux(io.redirect_valid && io.redirect_isCall,
       io.redirect_meta_TOSR, TOSR)
@@ -350,7 +350,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     val s3_missPushNos = Wire(new RASPtr)
 
     s3_missPushEntry.retAddr := io.s3_pushAddr
-    s3_missPushEntry.ctr := Mux(s3TopEntry.retAddr === io.s3_pushAddr && s3TopEntry.ctr < ctrMax, io.s3_meta.sctr + 1.U, 0.U)
+    s3_missPushEntry.ctr := Mux(s3TopEntry.retAddr === io.s3_pushAddr && io.s3_meta.sctr < ctrMax, io.s3_meta.sctr + 1.U, 0.U)
     s3_missPushAddr := io.s3_meta.TOSW
     s3_missPushNos := io.s3_meta.TOSR
 
