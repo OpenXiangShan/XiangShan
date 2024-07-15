@@ -638,10 +638,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
     // make chisel happy
     val dataInvalidMask1Reg = Wire(UInt(StoreQueueSize.W))
-    dataInvalidMask1Reg := GatedRegNext(dataInvalidMask1)
+    dataInvalidMask1Reg := RegNext(dataInvalidMask1)
     // make chisel happy
     val dataInvalidMask2Reg = Wire(UInt(StoreQueueSize.W))
-    dataInvalidMask2Reg := GatedRegNext(dataInvalidMask2)
+    dataInvalidMask2Reg := RegNext(dataInvalidMask2)
     val dataInvalidMaskReg = dataInvalidMask1Reg | dataInvalidMask2Reg
 
     // If SSID match, address not ready, mark it as addrInvalid
@@ -650,10 +650,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val addrInvalidMask2 = (~addrValidVec.asUInt & storeSetHitVec.asUInt & forwardMask2.asUInt)
     // make chisel happy
     val addrInvalidMask1Reg = Wire(UInt(StoreQueueSize.W))
-    addrInvalidMask1Reg := GatedRegNext(addrInvalidMask1)
+    addrInvalidMask1Reg := RegNext(addrInvalidMask1)
     // make chisel happy
     val addrInvalidMask2Reg = Wire(UInt(StoreQueueSize.W))
-    addrInvalidMask2Reg := GatedRegNext(addrInvalidMask2)
+    addrInvalidMask2Reg := RegNext(addrInvalidMask2)
     val addrInvalidMaskReg = addrInvalidMask1Reg | addrInvalidMask2Reg
 
     // load_s2
