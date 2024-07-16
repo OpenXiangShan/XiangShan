@@ -27,6 +27,7 @@ import system.HasSoCParameter
 import utils._
 import utility._
 import xiangshan.backend._
+import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache.mmu._
 import xiangshan.frontend._
 import xiangshan.mem.L1PrefetchFuzzer
@@ -86,6 +87,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val beu_errors = Output(new XSL1BusErrors())
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val l2_tlb_req = Flipped(new TlbRequestIO(nRespDups = 2))
+    val l2_pmp_resp = new PMPRespBundle
     val l2PfqBusy = Input(Bool())
     val debugTopDown = new Bundle {
       val robTrueCommit = Output(UInt(64.W))
@@ -214,6 +216,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.l2_hint.valid := io.l2_hint.valid
   memBlock.io.l2_hint.bits.sourceId := io.l2_hint.bits.sourceId
   memBlock.io.l2_tlb_req <> io.l2_tlb_req
+  memBlock.io.l2_pmp_resp <> io.l2_pmp_resp
   memBlock.io.l2_hint.bits.isKeyword := io.l2_hint.bits.isKeyword
   memBlock.io.l2PfqBusy := io.l2PfqBusy
 
