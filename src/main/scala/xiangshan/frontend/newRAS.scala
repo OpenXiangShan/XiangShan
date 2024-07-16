@@ -152,7 +152,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     val sctr = RegInit(0.U(RasCtrSize.W))
     val TOSR = RegInit(RASPtr(true.B, (RasSpecSize - 1).U))
     val TOSW = RegInit(RASPtr(false.B, 0.U))
-    val BOS  = RegInit(RASPtr(false.B, 0.U))
+    val BOS = RegInit(RASPtr(false.B, 0.U))
 
     val spec_overflowed = RegInit(false.B)
 
@@ -219,6 +219,11 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     def specPtrInc(ptr: RASPtr) = ptr + 1.U
     def specPtrDec(ptr: RASPtr) = ptr - 1.U
 
+
+
+
+
+
     when (io.redirect_valid && io.redirect_isCall) {
       writeBypassValidWire := true.B
       writeBypassValid := true.B
@@ -249,11 +254,11 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     val writeNos = Wire(new RASPtr)
     writeEntry.retAddr := Mux(io.redirect_valid && io.redirect_isCall,  io.redirect_callAddr, io.spec_push_addr)
     writeEntry.ctr := Mux(io.redirect_valid && io.redirect_isCall,
-      Mux(redirectTopEntry.retAddr === io.redirect_callAddr && io.redirect_meta_sctr < ctrMax, io.redirect_meta_sctr + 1.U, 0.U),
-      Mux(topEntry.retAddr === io.spec_push_addr && sctr < ctrMax, sctr + 1.U, 0.U))
+      Mux(redirectTopEntry.retAddr === io.redirect_callAddr && redirectTopEntry.ctr < ctrMax, io.redirect_meta_sctr + 1.U, 0.U),
+      Mux(topEntry.retAddr === io.spec_push_addr && topEntry.ctr < ctrMax, sctr + 1.U, 0.U))
 
     writeNos := Mux(io.redirect_valid && io.redirect_isCall,
-      io.redirect_meta_TOSR, TOSR)
+      io.redirect_meta_NOS, TOSR)
 
     when (io.spec_push_valid || (io.redirect_valid && io.redirect_isCall)) {
       writeBypassEntry := writeEntry
@@ -275,17 +280,24 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       }
 
     } .elsewhen (io.redirect_valid && io.redirect_isRet) {
-      val popRedSsp = Mux(io.redirect_meta_sctr > 0.U, io.redirect_meta_ssp, ptrDec(io.redirect_meta_ssp))
-      val popRedSctr = io.redirect_meta_sctr
-      val popRedTOSR = io.redirect_meta_TOSR
+      // getTop using redirect Nos as TOSR
+      val popRedSsp = Wire(UInt(log2Up(rasSize).W))
+      val popRedSctr = Wire(UInt(RasCtrSize.W))
+      val popRedTOSR = io.redirect_meta_NOS
       val popRedTOSW = io.redirect_meta_TOSW
-      val popRedNOS  = io.redirect_meta_NOS
 
-      when(TOSRinRange(popRedNOS, popRedTOSW)) {
-        timingTop := spec_queue(popRedNOS.value)
+      when (io.redirect_meta_sctr > 0.U) {
+        popRedSctr := io.redirect_meta_sctr - 1.U
+        popRedSsp := io.redirect_meta_ssp
+      } .elsewhen (TOSRinRange(popRedTOSR, TOSW)) {
+        popRedSsp := ptrDec(io.redirect_meta_ssp)
+        popRedSctr := spec_queue(popRedTOSR.value).ctr
       } .otherwise {
-        timingTop := getCommitTop(popRedSsp) 
+        popRedSsp := ptrDec(io.redirect_meta_ssp)
+        popRedSctr := getCommitTop(ptrDec(io.redirect_meta_ssp)).ctr
       }
+      // We are deciding top for the next cycle, no need to use bypass here
+      timingTop := getTop(popRedSsp, popRedSctr, popRedTOSR, popRedTOSW, false)
     } .elsewhen (io.redirect_valid) {
       // Neither call nor ret
       val popSsp = io.redirect_meta_ssp
@@ -296,17 +308,24 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       timingTop := getTop(popSsp, popSctr, popTOSR, popTOSW, false)
 
     } .elsewhen (io.spec_pop_valid) {
-      val popSsp = Mux(sctr > 0.U,ssp,ptrDec(ssp))
-      val popSctr = sctr
-      val popTOSR = TOSR
+      // getTop using current Nos as TOSR
+      val popSsp = Wire(UInt(log2Up(rasSize).W))
+      val popSctr = Wire(UInt(RasCtrSize.W))
+      val popTOSR = topNos
       val popTOSW = TOSW
-      val popNOS  = topNos
 
-      when(TOSRinRange(popNOS, popTOSW)){
-        timingTop := spec_queue(popNOS.value)
+      when (sctr > 0.U) {
+        popSctr := sctr - 1.U
+        popSsp := ssp
+      } .elsewhen (TOSRinRange(popTOSR, TOSW)) {
+        popSsp := ptrDec(ssp)
+        popSctr := spec_queue(popTOSR.value).ctr
       } .otherwise {
-        timingTop := getCommitTop(popSsp)
+        popSsp := ptrDec(ssp)
+        popSctr := getCommitTop(ptrDec(ssp)).ctr
       }
+      // We are deciding top for the next cycle, no need to use bypass here
+      timingTop := getTop(popSsp, popSctr, popTOSR, popTOSW, false)
     } .elsewhen (realPush) {
       // just updating spec queue, cannot read from there
       timingTop := realWriteEntry
@@ -319,17 +338,23 @@ class RAS(implicit p: Parameters) extends BasePredictor {
         writeEntry_s3.retAddr := io.s3_pushAddr
         writeEntry_s3.ctr := Mux(timingTop.retAddr === io.s3_pushAddr && io.s3_meta.sctr < ctrMax, io.s3_meta.sctr + 1.U, 0.U)
       } .elsewhen (io.s3_missed_pop) {
-        val popRedSsp_s3  = Mux(io.s3_meta.sctr > 0.U, io.s3_meta.ssp, ptrDec(io.s3_meta.ssp))
-        val popRedSctr_s3 = io.s3_meta.sctr
-        val popRedTOSR_s3 = io.s3_meta.TOSR
+        val popRedSsp_s3 = Wire(UInt(log2Up(rasSize).W))
+        val popRedSctr_s3 = Wire(UInt(RasCtrSize.W))
+        val popRedTOSR_s3 = io.s3_meta.NOS
         val popRedTOSW_s3 = io.s3_meta.TOSW
-        val popRedNOS_s3  = io.s3_meta.NOS
 
-        when(TOSRinRange(popRedNOS_s3, popRedTOSW_s3)) {
-          timingTop := spec_queue(popRedNOS_s3.value)
+        when (io.s3_meta.sctr > 0.U) {
+          popRedSctr_s3 := io.s3_meta.sctr - 1.U
+          popRedSsp_s3 := io.s3_meta.ssp
+        } .elsewhen (TOSRinRange(popRedTOSR_s3, popRedTOSW_s3)) {
+          popRedSsp_s3 := ptrDec(io.s3_meta.ssp)
+          popRedSctr_s3 := spec_queue(popRedTOSR_s3.value).ctr
         } .otherwise {
-          timingTop := getCommitTop(popRedSsp_s3)
+          popRedSsp_s3 := ptrDec(io.s3_meta.ssp)
+          popRedSctr_s3 := getCommitTop(ptrDec(io.s3_meta.ssp)).ctr
         }
+        // We are deciding top for the next cycle, no need to use bypass here
+        timingTop := getTop(popRedSsp_s3, popRedSctr_s3, popRedTOSR_s3, popRedTOSW_s3, false)
       }
     } .otherwise {
       // easy case
@@ -350,7 +375,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     val s3_missPushNos = Wire(new RASPtr)
 
     s3_missPushEntry.retAddr := io.s3_pushAddr
-    s3_missPushEntry.ctr := Mux(s3TopEntry.retAddr === io.s3_pushAddr && io.s3_meta.sctr < ctrMax, io.s3_meta.sctr + 1.U, 0.U)
+    s3_missPushEntry.ctr := Mux(s3TopEntry.retAddr === io.s3_pushAddr && s3TopEntry.ctr < ctrMax, io.s3_meta.sctr + 1.U, 0.U)
     s3_missPushAddr := io.s3_meta.TOSW
     s3_missPushNos := io.s3_meta.TOSR
 
@@ -643,6 +668,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
   XSPerfAccumulate("ras_s3_cancel", s3_cancel)
   XSPerfAccumulate("ras_redirect_recover", redirect.valid)
   XSPerfAccumulate("ras_s3_and_redirect_recover_at_the_same_time", s3_cancel && redirect.valid)
+
 
   val spec_debug = stack.debug
   XSDebug(io.s2_fire(2), "----------------RAS----------------\n")

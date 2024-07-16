@@ -1479,6 +1479,9 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   XSPerfAccumulate("fromBackendRedirect_ValidNum", io.fromBackend.redirect.valid)
   XSPerfAccumulate("toBpuRedirect_ValidNum", io.toBpu.redirect.valid)
 
+  XSPerfAccumulate("ras_ret_mispred", io.fromBackend.redirect.valid && io.fromBackend.redirect.bits.cfiUpdate.pd.isRet)
+  XSPerfAccumulate("ras_call_mispred", io.fromBackend.redirect.valid && io.fromBackend.redirect.bits.cfiUpdate.pd.isCall)
+
   val from_bpu = io.fromBpu.resp.bits
   val to_ifu = io.toIfu.req.bits
 
