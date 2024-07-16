@@ -45,7 +45,7 @@ class PcTargetMemImp(override val wrapper: PcTargetMem)(implicit p: Parameters, 
   // The newest target will be used at T+1, so there is no need to bypass it.
   private val currentNewestTarget = RegEnable(io.fromFrontendFtq.newest_entry_target, newestEn)
   private val targetReadPtrVec = 0 until params.numTargetReadPort map { i =>
-    RegEnable(io.toDataPath.fromDataPathFtqPtr(i), io.toDataPath.fromDataPathValid(i))
+    RegEnable(io.toDataPath.fromDataPathFtqPtr(i) + 1.U, io.toDataPath.fromDataPathValid(i))
   }
 
   for (i <- 0 until params.numTargetReadPort) {
