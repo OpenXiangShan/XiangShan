@@ -58,12 +58,12 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     resps.flatten
   }
 
-  val resps: Vec[Vec[ValidIO[EntryDeqRespBundle]]] = {
-    if (params.inVfSchd)
-      VecInit(io.og0Resp, io.og1Resp, io.og2Resp.get, 0.U.asTypeOf(io.og0Resp))
-    else
-      VecInit(io.og0Resp, io.og1Resp, 0.U.asTypeOf(io.og0Resp), 0.U.asTypeOf(io.og0Resp))
-  }
+  val resps: Vec[Vec[ValidIO[EntryDeqRespBundle]]] = Wire(Vec(4, chiselTypeOf(io.og0Resp)))
+
+  if (params.inVfSchd)
+    resps := Seq(io.og0Resp, io.og1Resp, io.og2Resp.get, WireDefault(0.U.asTypeOf(io.og0Resp)))
+  else
+    resps := Seq(io.og0Resp, io.og1Resp, WireDefault(0.U.asTypeOf(io.og0Resp)), WireDefault(0.U.asTypeOf(io.og0Resp)))
 
 
 
