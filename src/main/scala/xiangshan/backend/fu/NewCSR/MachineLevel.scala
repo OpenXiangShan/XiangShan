@@ -164,7 +164,7 @@ trait MachineLevel { self: NewCSR =>
     .setAddr(CSRs.mcountinhibit)
 
   val mhpmevents: Seq[CSRModule[_]] = (3 to 0x1F).map(num =>
-    Module(new CSRModule(s"Mhpmevent$num") with HasPerfEventBundle {
+    Module(new CSRModule(s"Mhpmevent$num", new MhpmeventBundle) with HasPerfEventBundle {
       regOut := perfEvents(num - 3)
     })
       .setAddr(CSRs.mhpmevent3 - 3 + num)
@@ -178,10 +178,10 @@ trait MachineLevel { self: NewCSR =>
   })
     .setAddr(CSRs.mepc)
 
-  val mcause = Module(new CSRModule("Mcause", new McauseBundle) with TrapEntryMEventSinkBundle)
+  val mcause = Module(new CSRModule("Mcause", new CauseBundle) with TrapEntryMEventSinkBundle)
     .setAddr(CSRs.mcause)
 
-  val mtval = Module(new CSRModule("Mtval") with TrapEntryMEventSinkBundle)
+  val mtval = Module(new CSRModule("Mtval", new XtvalBundle) with TrapEntryMEventSinkBundle)
     .setAddr(CSRs.mtval)
 
   val mip = Module(new CSRModule("Mip", new MipBundle)
@@ -272,10 +272,10 @@ trait MachineLevel { self: NewCSR =>
     }
   }).setAddr(CSRs.mip)
 
-  val mtinst = Module(new CSRModule("Mtinst") with TrapEntryMEventSinkBundle)
+  val mtinst = Module(new CSRModule("Mtinst", new XtinstBundle) with TrapEntryMEventSinkBundle)
     .setAddr(CSRs.mtinst)
 
-  val mtval2 = Module(new CSRModule("Mtval2") with TrapEntryMEventSinkBundle)
+  val mtval2 = Module(new CSRModule("Mtval2", new Mtval2Bundle) with TrapEntryMEventSinkBundle)
     .setAddr(CSRs.mtval2)
 
   val mseccfg = Module(new CSRModule("Mseccfg", new CSRBundle {
@@ -309,7 +309,7 @@ trait MachineLevel { self: NewCSR =>
   }).setAddr(CSRs.minstret)
 
   val mhpmcounters: Seq[CSRModule[_]] = (3 to 0x1F).map(num =>
-    Module(new CSRModule(s"Mhpmcounter$num") with HasMachineCounterControlBundle with HasPerfCounterBundle {
+    Module(new CSRModule(s"Mhpmcounter$num", new MhpmcounterBundle) with HasMachineCounterControlBundle with HasPerfCounterBundle {
       val countingInhibit = mcountinhibit.asUInt(num) | !countingEn
       val counterAdd = reg.ALL.asUInt +& perf.value
       when (w.wen) {
@@ -347,7 +347,9 @@ trait MachineLevel { self: NewCSR =>
   })
     .setAddr(CSRs.mhartid)
 
-  val mconfigptr = Module(new CSRModule("Mconfigptr"))
+  val mconfigptr = Module(new CSRModule("Mconfigptr", new CSRBundle {
+    val ALL = RO(63, 0)
+  }))
     .setAddr(CSRs.mconfigptr)
 
   val mstateen0 = Module(new CSRModule("Mstateen", new MstateenBundle0)).setAddr(CSRs.mstateen0)
@@ -556,15 +558,10 @@ class MvipBundle extends InterruptPendingBundle {
   this.getLocal.foreach(_.setRW().withReset(0.U))
 }
 
-class McauseBundle extends CauseBundle {
-  this.Interrupt.withReset(0.U)
-  this.ExceptionCode.withReset(0.U)
-}
-
 class Epc extends CSRBundle {
   import CSRConfig._
 
-  val epc = RW(VaddrMaxWidth - 1, 1)
+  val epc = RW(VaddrMaxWidth - 1, 1).withReset(0.U)
 }
 
 class McountinhibitBundle extends CSRBundle {
@@ -572,6 +569,10 @@ class McountinhibitBundle extends CSRBundle {
   val IR = RW(2).withReset(0.U)
   val HPM3 = RW(31, 3).withReset(0.U)
 }
+
+class Mtval2Bundle extends FieldInitBundle
+
+class MhpmcounterBundle extends FieldInitBundle
 
 // todo: for the future, delete bypass between mhpmevents and perfEvents
 class MhpmeventBundle extends CSRBundle {

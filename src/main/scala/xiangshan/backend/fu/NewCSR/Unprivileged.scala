@@ -145,7 +145,7 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
 
   val hpmcounters: Seq[CSRModule[_]] = (3 to 0x1F).map(num =>
     Module(new CSRModule(s"Hpmcounter$num", new CSRBundle {
-      val hpmcounter = RO(63, 0)
+      val hpmcounter = RO(63, 0).withReset(0.U)
     }) with HasMHPMSink {
       regOut.hpmcounter := mHPM.hpmcounters(num - 3)
     }).setAddr(CSRs.cycle + num)
