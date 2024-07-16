@@ -600,7 +600,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   when(stateNext === s_idle){
     instMicroOpValid := false.B
   }
-  io.uopwriteback.valid               := (state === s_finish) && distanceBetween(enqPtr, deqPtr) =/= 0.U
+  io.uopwriteback.valid               := (state === s_finish) && !isEmpty(enqPtr, deqPtr)
   io.uopwriteback.bits.uop            := uopq(deqPtr.value).uop
   io.uopwriteback.bits.uop.vpu        := instMicroOp.uop.vpu
   io.uopwriteback.bits.uop.exceptionVec := instMicroOp.uop.exceptionVec
@@ -617,7 +617,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.uopwriteback.bits.uop.fuOpType   := instMicroOp.uop.fuOpType
 
   //to RS
-  io.feedback.valid                   := state === s_finish && distanceBetween(enqPtr, deqPtr) =/= 0.U
+  io.feedback.valid                   := state === s_finish && !isEmpty(enqPtr, deqPtr)
   io.feedback.bits.hit                := true.B
   io.feedback.bits.robIdx             := instMicroOp.uop.robIdx
   io.feedback.bits.sourceType         := DontCare
@@ -633,6 +633,6 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.exceptionInfo.bits.vstart        := instMicroOp.exceptionVstart
   io.exceptionInfo.bits.vaddr         := instMicroOp.exceptionVaddr
   io.exceptionInfo.bits.vl            := instMicroOp.exceptionVl
-  io.exceptionInfo.valid              := (state === s_finish) && instMicroOp.uop.exceptionVec.asUInt.orR && distanceBetween(enqPtr, deqPtr) =/= 0.U
+  io.exceptionInfo.valid              := (state === s_finish) && instMicroOp.uop.exceptionVec.asUInt.orR && !isEmpty(enqPtr, deqPtr)
 }
 
