@@ -81,7 +81,7 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
   val scause = Module(new CSRModule("Scause", new CauseBundle) with TrapEntryHSEventSinkBundle)
     .setAddr(CSRs.scause)
 
-  val stval = Module(new CSRModule("Stval") with TrapEntryHSEventSinkBundle)
+  val stval = Module(new CSRModule("Stval", new XtvalBundle) with TrapEntryHSEventSinkBundle)
     .setAddr(CSRs.stval)
 
   val sip = Module(new CSRModule("Sip", new SipBundle)
@@ -205,20 +205,20 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
 class SstatusBundle extends CSRBundle {
   val SIE  = CSRWARLField   (1, wNoFilter)
   val SPIE = CSRWARLField   (5, wNoFilter)
-  val UBE  = CSRROField     (6)
-  val SPP  = CSRWARLField   (8, wNoFilter)
-  val VS   = ContextStatus  (10, 9)
-  val FS   = ContextStatus  (14, 13)
+  val UBE  = CSRROField     (6).withReset(0.U)
+  val SPP  = CSRWARLField   (8, wNoFilter).withReset(0.U)
+  val VS   = ContextStatus  (10, 9).withReset(ContextStatus.Off)
+  val FS   = ContextStatus  (14, 13).withReset(ContextStatus.Off)
   val XS   = ContextStatusRO(16, 15).withReset(0.U)
-  val SUM  = CSRWARLField   (18, wNoFilter)
-  val MXR  = CSRWARLField   (19, wNoFilter)
+  val SUM  = CSRWARLField   (18, wNoFilter).withReset(0.U)
+  val MXR  = CSRWARLField   (19, wNoFilter).withReset(0.U)
   val UXL  = XLENField      (33, 32).withReset(XLENField.XLEN64)
   val SD   = CSRROField     (63, (_, _) => FS === ContextStatus.Dirty || VS === ContextStatus.Dirty)
 }
 
 class SieBundle extends InterruptEnableBundle {
   this.getHS.foreach(_.setRW().withReset(0.U))
-  this.STIE.setRO()
+  this.STIE.setRO().withReset(0.U)
   this.getLocal.foreach(_.setRW().withReset(0.U))
   this.getM .foreach(_.setHardWired(0.U))
   this.getVS.foreach(_.setHardWired(0.U))
@@ -236,9 +236,9 @@ class SatpBundle extends CSRBundle {
   val MODE = SatpMode(63, 60, null).withReset(SatpMode.Bare)
   // WARL in privileged spec.
   // RW, since we support max width of ASID
-  val ASID = RW(44 - 1 + ASIDLEN, 44)
+  val ASID = RW(44 - 1 + ASIDLEN, 44).withReset(0.U)
   // Do WARL in SatpModule/VSatpModule
-  val PPN  = RW(43, 0)
+  val PPN  = RW(43, 0).withReset(0.U)
 }
 
 class SEnvCfg extends EnvCfg

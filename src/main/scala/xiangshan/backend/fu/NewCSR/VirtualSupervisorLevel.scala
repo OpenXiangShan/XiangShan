@@ -132,7 +132,7 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
 
   // Todo: shrink the width of vstval to the maximum width Virtual Address
   val vstval = Module(
-    new CSRModule("VStval")
+    new CSRModule("VStval", new XtvalBundle)
       with TrapEntryVSEventSinkBundle
   )
     .setAddr(CSRs.vstval)
@@ -264,7 +264,7 @@ class VSipBundle extends InterruptPendingBundle {
 }
 
 class VSieBundle extends InterruptEnableBundle {
-  this.getLocal.foreach(_.setRW())
+  this.getLocal.foreach(_.setRW().withReset(0.U))
   this.getM .foreach(_.setHardWired(0.U))
   this.getVS.foreach(_.setHardWired(0.U))
   this.SGEIE.setHardWired(0.U)

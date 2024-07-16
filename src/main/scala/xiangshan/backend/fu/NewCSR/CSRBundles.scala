@@ -13,26 +13,34 @@ import chisel3.experimental.noPrefix
 
 object CSRBundles {
   class XtvecBundle extends CSRBundle {
-    val mode = XtvecMode(1, 0, wNoFilter)
-    val addr = WARL(63, 2, wNoFilter)
+    val mode = XtvecMode(1, 0, wNoFilter).withReset(0.U)
+    val addr = WARL(63, 2, wNoFilter).withReset(0.U)
   }
 
   class CauseBundle extends CSRBundle {
-    val Interrupt = RW(63)
-    val ExceptionCode = RW(62, 0)
+    val Interrupt = RW(63).withReset(0.U)
+    val ExceptionCode = RW(62, 0).withReset(0.U)
   }
 
   class Counteren extends CSRBundle {
     // Todo: remove reset after adding mcounteren in difftest
     val CY = RW(0).withReset(0.U)
-    val TM = RW(1)
-    val IR = RW(2)
-    val HPM = RW(31, 3)
+    val TM = RW(1).withReset(0.U)
+    val IR = RW(2).withReset(0.U)
+    val HPM = RW(31, 3).withReset(0.U)
   }
 
   class OneFieldBundle extends CSRBundle {
     val ALL = RW(63, 0)
   }
+
+  class FieldInitBundle extends OneFieldBundle {
+    this.ALL.setRW().withReset(0.U)
+  }
+
+  class XtvalBundle extends FieldInitBundle
+
+  class XtinstBundle extends FieldInitBundle
 
   abstract class EnvCfg extends CSRBundle {
     // Set all fields as RO in base class
