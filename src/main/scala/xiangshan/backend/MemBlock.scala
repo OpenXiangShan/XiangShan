@@ -271,6 +271,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val l2PfqBusy = Input(Bool())
     val l2_tlb_req = Flipped(new TlbRequestIO(nRespDups = 2))
+    val l2_pmp_resp = new PMPRespBundle
 
     val debugTopDown = new Bundle {
       val robHeadVaddr = Flipped(Valid(UInt(VAddrBits.W)))
@@ -1053,6 +1054,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
   dtlb_reqs(L2toL1DLBPortIndex) <> io.l2_tlb_req
   dtlb_reqs(L2toL1DLBPortIndex).resp.ready := true.B
+  io.l2_pmp_resp := pmp_check(L2toL1DLBPortIndex).resp
 
   // StoreUnit
   for (i <- 0 until StdCnt) {
