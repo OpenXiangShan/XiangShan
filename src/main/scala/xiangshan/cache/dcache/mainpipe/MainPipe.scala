@@ -165,6 +165,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     // find the way to be replaced
     val replace_way = new ReplacementWayReqIO
 
+    // writeback addr to be replaced
+    val evict_addr = ValidIO(UInt(PAddrBits.W))
+
     // sms prefetch
     val sms_agt_evict_req = DecoupledIO(new AGTEvictReq)
 
@@ -1542,6 +1545,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.tag_write_intend := s3_req_miss_dup(7) && s3_valid_dup(11)
   XSPerfAccumulate("fake_tag_write_intend", io.tag_write_intend && !io.tag_write.valid)
   XSPerfAccumulate("mainpipe_tag_write", io.tag_write.valid)
+
+  io.evict_addr.valid := io.wb.valid && s3_need_replacement
+  io.evict_addr.bits  := io.wb.bits.addr
 
   assert(!RegNext(io.tag_write.valid && !io.tag_write_intend))
 

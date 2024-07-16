@@ -25,6 +25,7 @@ import difftest.DifftestModule
 import scala.annotation.tailrec
 import scala.sys.exit
 import chisel3.util.log2Up
+import utility._
 
 object ArgParser {
   // TODO: add more explainations
@@ -142,7 +143,18 @@ object ArgParser {
       }
     }
     val newArgs = DifftestModule.parseArgs(args)
-    var config = nextOption(default, newArgs.toList)
+    val config = nextOption(default, newArgs.toList).alter((site, here, up) => {
+      case LogUtilsOptionsKey => LogUtilsOptions(
+        here(DebugOptionsKey).EnableDebug,
+        here(DebugOptionsKey).EnablePerfDebug,
+        here(DebugOptionsKey).FPGAPlatform
+      )
+      case PerfCounterOptionsKey => PerfCounterOptions(
+        here(DebugOptionsKey).EnablePerfDebug && !here(DebugOptionsKey).FPGAPlatform,
+        here(DebugOptionsKey).EnableRollingDB && !here(DebugOptionsKey).FPGAPlatform,
+        0
+      )
+    })
     (config, firrtlOpts, firtoolOpts)
   }
 }

@@ -18,7 +18,7 @@ package xiangshan.transforms
 
 import firrtl._
 import firrtl.ir._
-import utils.XSLog
+import utility.XSLog
 import firrtl.options.Phase
 import firrtl.stage.FirrtlCircuitAnnotation
 

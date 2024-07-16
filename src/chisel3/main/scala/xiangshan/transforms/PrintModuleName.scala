@@ -19,7 +19,7 @@ package xiangshan.transforms
 import firrtl._
 import firrtl.ir._
 import firrtl.stage.TransformManager.TransformDependency
-import utils.XSLog
+import utility.XSLog
 
 class PrintModuleName extends Transform with DependencyAPIMigration {
 
