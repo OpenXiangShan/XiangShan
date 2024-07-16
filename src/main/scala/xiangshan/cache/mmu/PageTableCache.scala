@@ -104,7 +104,7 @@ class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCo
       val ppn = UInt(gvpnLen.W)
       val stage1Hit = Bool() // find stage 1 pte in cache, but need to search stage 2 pte in cache at PTW
     }
-    val toTlb = new PtwMergeResp()
+    val stage1 = new PtwMergeResp()
     val isHptwReq = Bool()
     val toHptw = new Bundle {
       val l1Hit = Bool()
@@ -506,21 +506,21 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   io.resp.bits.toHptw.resp.gpf := !io.resp.bits.toHptw.resp.entry.v
   io.resp.bits.toHptw.resp.gaf := false.B
 
-  io.resp.bits.toTlb.entry.map(_.tag := stageResp.bits.req_info.vpn(vpnLen - 1, 3))
-  io.resp.bits.toTlb.entry.map(_.asid := Mux(stageResp.bits.req_info.hasS2xlate(), io.csr_dup(0).vsatp.asid, io.csr_dup(0).satp.asid)) // DontCare
-  io.resp.bits.toTlb.entry.map(_.vmid.map(_ := io.csr_dup(0).hgatp.asid))
-  io.resp.bits.toTlb.entry.map(_.level.map(_ := Mux(resp_res.l3.hit, 2.U, Mux(resp_res.l2.hit, 1.U, Mux(resp_res.l1.hit, 0.U, resp_res.sp.level)))))
-  io.resp.bits.toTlb.entry.map(_.prefetch := from_pre(stageResp.bits.req_info.source))
+  io.resp.bits.stage1.entry.map(_.tag := stageResp.bits.req_info.vpn(vpnLen - 1, 3))
+  io.resp.bits.stage1.entry.map(_.asid := Mux(stageResp.bits.req_info.hasS2xlate(), io.csr_dup(0).vsatp.asid, io.csr_dup(0).satp.asid)) // DontCare
+  io.resp.bits.stage1.entry.map(_.vmid.map(_ := io.csr_dup(0).hgatp.asid))
+  io.resp.bits.stage1.entry.map(_.level.map(_ := Mux(resp_res.l3.hit, 2.U, Mux(resp_res.sp.hit, resp_res.sp.level, Mux(resp_res.l2.hit, 1.U, 0.U))))) // leaf page is first
+  io.resp.bits.stage1.entry.map(_.prefetch := from_pre(stageResp.bits.req_info.source))
   for (i <- 0 until tlbcontiguous) {
-    io.resp.bits.toTlb.entry(i).ppn := Mux(resp_res.l3.hit, resp_res.l3.ppn(i)(gvpnLen - 1, sectortlbwidth), resp_res.sp.ppn(gvpnLen - 1, sectortlbwidth))
-    io.resp.bits.toTlb.entry(i).ppn_low := Mux(resp_res.l3.hit, resp_res.l3.ppn(i)(sectortlbwidth - 1, 0), resp_res.sp.ppn(sectortlbwidth - 1, 0))
-    io.resp.bits.toTlb.entry(i).perm.map(_ := Mux(resp_res.l3.hit, resp_res.l3.perm(i), resp_res.sp.perm))
-    io.resp.bits.toTlb.entry(i).v := Mux(resp_res.l3.hit, resp_res.l3.v(i), resp_res.sp.v)
-    io.resp.bits.toTlb.entry(i).pf := !io.resp.bits.toTlb.entry(i).v
-    io.resp.bits.toTlb.entry(i).af := false.B
+    io.resp.bits.stage1.entry(i).ppn := Mux(resp_res.l3.hit, resp_res.l3.ppn(i)(gvpnLen - 1, sectortlbwidth), Mux(resp_res.sp.hit, resp_res.sp.ppn(gvpnLen - 1, sectortlbwidth), Mux(resp_res.l2.hit, resp_res.l2.ppn(gvpnLen - 1, sectortlbwidth), resp_res.l1.ppn(gvpnLen - 1, sectortlbwidth))))
+    io.resp.bits.stage1.entry(i).ppn_low := Mux(resp_res.l3.hit, resp_res.l3.ppn(i)(sectortlbwidth - 1, 0), Mux(resp_res.sp.hit, resp_res.sp.ppn(sectortlbwidth - 1, 0), Mux(resp_res.l2.hit, resp_res.l2.ppn(sectortlbwidth - 1, 0), resp_res.l1.ppn(sectortlbwidth - 1, 0))))
+    io.resp.bits.stage1.entry(i).perm.map(_ := Mux(resp_res.l3.hit, resp_res.l3.perm(i), resp_res.sp.perm))
+    io.resp.bits.stage1.entry(i).v := Mux(resp_res.l3.hit, resp_res.l3.v(i), Mux(resp_res.sp.hit, resp_res.sp.v, Mux(resp_res.l2.hit, resp_res.l2.v, resp_res.l1.v)))
+    io.resp.bits.stage1.entry(i).pf := !io.resp.bits.stage1.entry(i).v
+    io.resp.bits.stage1.entry(i).af := false.B
   }
-  io.resp.bits.toTlb.pteidx := UIntToOH(stageResp.bits.req_info.vpn(2, 0)).asBools
-  io.resp.bits.toTlb.not_super := Mux(resp_res.l3.hit, true.B, false.B)
+  io.resp.bits.stage1.pteidx := UIntToOH(stageResp.bits.req_info.vpn(2, 0)).asBools
+  io.resp.bits.stage1.not_super := Mux(resp_res.l3.hit, true.B, false.B)
   io.resp.valid := stageResp.valid
   XSError(stageResp.valid && resp_res.l3.hit && resp_res.sp.hit, "normal page and super page both hit")
   XSError(stageResp.valid && io.resp.bits.hit && bypassed(2), "page cache, bypassed but hit")
