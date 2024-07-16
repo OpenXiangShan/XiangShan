@@ -25,7 +25,7 @@ import xiangshan.frontend._
 
 class RASEntry()(implicit p: Parameters) extends XSBundle {
     val retAddr = UInt(VAddrBits.W)
-    val ctr = UInt(8.W) // layer of nested call functions
+    val ctr = UInt(RasCtrSize.W) // layer of nested call functions
     def =/=(that: RASEntry) = this.retAddr =/= that.retAddr || this.ctr =/= that.ctr
 }
 
@@ -412,7 +412,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
         sctr := 0.U
       }
       // if we are draining the capacity of spec queue, force move BOS forward
-      when (specPtrInc(currentTOSW) === BOS) {
+      when (specPtrInc(currentTOSW).value === BOS.value) {
         BOS := specPtrInc(BOS)
         spec_overflowed := true.B;
       }
@@ -516,14 +516,16 @@ class RAS(implicit p: Parameters) extends BasePredictor {
         commit_stack(ptrInc(nsp_update)).ctr := 0.U
       }
       // when overflow, BOS may be forced move forward, do not revert those changes
-      when (!spec_overflowed || isAfter(specPtrInc(io.commit_meta_TOSW), BOS)) {
-        BOS := specPtrInc(io.commit_meta_TOSW)
+      when (!spec_overflowed || isAfter(io.commit_meta_TOSW, BOS)) {
+        BOS := io.commit_meta_TOSW
         spec_overflowed := false.B
       }
 
       // XSError(io.commit_meta_ssp =/= nsp, "nsp mismatch with expected ssp")
       // XSError(io.commit_push_addr =/= commit_push_addr, "addr from commit mismatch with addr from spec")
     }
+    XSPerfAccumulate("ssp_mismatch", (io.commit_meta_ssp =/= nsp) && (io.commit_push_valid || io.commit_pop_valid))
+    XSPerfAccumulate("spec_overflow", spec_overflowed)
 
     when (io.redirect_valid) {
       TOSR := io.redirect_meta_TOSR
