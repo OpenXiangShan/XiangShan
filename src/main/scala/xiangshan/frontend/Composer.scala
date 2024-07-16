@@ -89,6 +89,14 @@ class Composer(implicit p: Parameters) extends BasePredictor with HasBPUConst wi
     }
     metas(idx)
   }
+  
+  def getEachMetaSize(): Seq[Int] = {
+    var meta_sz: Seq[Int] = Nil
+    for (c <- components.reverse) {
+      meta_sz = meta_sz :+ c.meta_size
+    }
+    meta_sz
+  }
 
   override def getFoldedHistoryInfo = Some(components.map(_.getFoldedHistoryInfo.getOrElse(Set())).reduce(_++_))
 
