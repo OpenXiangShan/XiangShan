@@ -64,90 +64,47 @@ class TraceReader(implicit p: Parameters) extends TraceModule
   val io = IO(new TraceReaderIO())
   dontTouch(io)
 
+  val redirect = WireInit(io.redirect)
   val traceBuffer = RegInit(0.U.asTypeOf(Vec(TraceBufferSize, new TraceInstrBundle())))
-  val traceReaderHelper = Module(new TraceReaderHelper(PredictWidth))
+  val traceReaderHelper = Module(new TraceReaderHelper(TraceFetchWidth))
   val traceRedirecter = Module(new TraceRedirectHelper)
   val deqPtr = RegInit(0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize)))
   val enqPtr = RegInit(0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize)))
-
-  if (!TraceEnableDuplicateFlush) {
-    when (io.redirect.valid) {
-      XSError(io.redirect.bits.traceInfo.InstID + 1.U =/= traceBuffer(deqPtr.value).InstID,
-        "TraceEnableDuplicateFlush is false. Please check wrong path redirect")
-    }
-  }
-
-  XSError(!isFull(enqPtr, deqPtr) && (enqPtr < deqPtr), "enqPtr should always be larger than deqPtr")
-  XSError(io.recv.valid && ((deqPtr + io.recv.bits.instNum) >= enqPtr),
-    "Reader should not read more than what is in the buffer. Error in ReaderHelper or Ptr logic.")
-
-  when(io.recv.valid) {
-    deqPtr := deqPtr + io.recv.bits.instNum
-  }
-
-  // may verilator bug? the buffer write is wrong. verilog is different from waveform.
-  val bufferWriteRegNext = RegInit(false.B)
-  val bufferWriteModeStable = RegInit(false.B)
-  val bufferWriteModeChecking = WireInit(false.B)
-
-  when (!bufferWriteModeStable) {
-    val pointerChanged = enqPtr.value =/= 0.U
-
-    // check Mode
-    val rightMode = traceBuffer(1).InstID === 1.U
-    val wrongMode = traceBuffer(TraceFetchWidth+1).InstID === 1.U
-    when (rightMode || wrongMode) { bufferWriteModeStable := true.B }
-    when (wrongMode) {
-      bufferWriteRegNext := ~bufferWriteRegNext
-    }
-
-    // when check, disable read more
-    bufferWriteModeChecking := pointerChanged && !bufferWriteModeStable
-
-    // wrong mode redirect
-    when (wrongMode) {
-      (0 until TraceFetchWidth).foreach { i =>
-        traceBuffer(i) := traceBuffer(i + TraceFetchWidth)
-      }
-    }
-  }
+  val enqPtrVec = Wire(Vec(TraceFetchWidth, new TraceBufferPtr(TraceBufferSize)))
 
   val workingState = RegInit(false.B)
-  when (io.startSignal) { workingState := true.B }
-  val readTraceEnableForHelper = !isFull(enqPtr, deqPtr) &&
-    (hasFreeEntries(enqPtr, deqPtr) >= TraceFetchWidth.U) &&
-    workingState &&
-    !bufferWriteModeChecking &&
-    !io.redirect.valid
-  val readTraceEnableForPtr = readTraceEnableForHelper
-
-  val readTraceEnableForBuffer = Mux(bufferWriteRegNext,
-    RegNext(readTraceEnableForHelper, init = false.B),
-    readTraceEnableForHelper
-  )
-  val enqPtrVecForBuffer = (0 until TraceFetchWidth).map(i =>
-    Mux(bufferWriteRegNext,
-      RegNext(enqPtr + i.U, init = 0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize))),
-      enqPtr + i.U)
-  )
-  when (readTraceEnableForPtr) {
-    enqPtr := enqPtr + TraceFetchWidth.U
+  val startCount = RegInit(0.U(4.W))
+  when (!workingState && (startCount < 10.U)) {
+    startCount := startCount + 1.U
+  }
+  when (startCount === 5.U) {
+    workingState := true.B
   }
 
-  when(readTraceEnableForBuffer) {
-    (0 until TraceFetchWidth).foreach { i =>
-      val ptr = enqPtrVecForBuffer(i).value
-      val data = traceReaderHelper.insts(i)
 
-      traceBuffer(ptr) := TraceInstrBundle(data)
+  val readTraceEnable = !isFull(enqPtr, deqPtr) &&
+    (hasFreeEntries(enqPtr, deqPtr) >= TraceFetchWidth.U) &&
+    workingState &&
+    !redirect.valid
+  val readTraceEnableForHelper = readTraceEnable
+  val readTraceEnableForPtr = readTraceEnable
+  val readTraceEnableForBuffer = readTraceEnable
+  enqPtrVec.zipWithIndex.foreach { case (e, i) =>
+    e := enqPtr + i.U
+    // e := RegNext(enqPtr + i.U, init = 0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize)))
+  }
+
+  when (readTraceEnableForBuffer) {
+    (0 until TraceFetchWidth).foreach { case i =>
+      traceBuffer(enqPtrVec(i).value) := TraceInstrBundle(traceReaderHelper.insts(i))
     }
   }
 
   traceRedirecter.clock := clock
   traceRedirecter.reset := reset
-  traceRedirecter.enable := io.redirect.valid
-  traceRedirecter.InstID := io.redirect.bits.traceInfo.InstID +
-    Mux(RedirectLevel.flushItself(io.redirect.bits.level), 0.U, 1.U)
+  traceRedirecter.enable := redirect.valid
+  traceRedirecter.InstID := redirect.bits.traceInfo.InstID +
+    Mux(RedirectLevel.flushItself(redirect.bits.level), 0.U, 1.U)
 
   traceReaderHelper.clock := clock
   traceReaderHelper.reset := reset
@@ -158,10 +115,28 @@ class TraceReader(implicit p: Parameters) extends TraceModule
     inst := traceBuffer(ptr)
   }
 
-  when (io.redirect.valid) {
+  when(io.recv.valid) {
+    deqPtr := deqPtr + io.recv.bits.instNum
+  }
+  when (readTraceEnableForPtr) {
+    enqPtr := enqPtr + TraceFetchWidth.U
+  }
+
+  when (redirect.valid) {
     enqPtr := 0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize))
     deqPtr := 0.U.asTypeOf(new TraceBufferPtr(TraceBufferSize))
     traceBuffer.map(_ := 0.U.asTypeOf(new TraceInstrBundle))
   }
 
+  // debug check
+  if (!TraceEnableDuplicateFlush) {
+    when (redirect.valid) {
+      XSError(redirect.bits.traceInfo.InstID + 1.U =/= traceBuffer(deqPtr.value).InstID,
+        "TraceEnableDuplicateFlush is false. Please check wrong path redirect")
+    }
+  }
+
+  XSError(!isFull(enqPtr, deqPtr) && (enqPtr < deqPtr), "enqPtr should always be larger than deqPtr")
+  XSError(io.recv.valid && ((deqPtr + io.recv.bits.instNum) >= enqPtr),
+    "Reader should not read more than what is in the buffer. Error in ReaderHelper or Ptr logic.")
 }
