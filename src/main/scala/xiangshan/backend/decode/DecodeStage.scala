@@ -75,7 +75,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   private val outValids = io.out.map(_.valid)
   private val outValid = VecInit(outValids).asUInt.orR
   //readyFromRename Counter
-  val readyCounter = PriorityMuxDefault(outReadys.map(x => !x).zip((0 until RenameWidth).map(_.U)), RenameWidth.U)
+  val readyCounter = Mux(outReadys.head, RenameWidth.U, 0.U)
 
   val decoderComp = Module(new DecodeUnitComp)
   val decoders = Seq.fill(DecodeWidth)(Module(new DecodeUnit))
