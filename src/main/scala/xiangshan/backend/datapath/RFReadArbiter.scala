@@ -9,7 +9,7 @@ import xiangshan.backend.BackendParams
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.regfile.PregParams
-import utils._
+import utility._
 
 case class RFRdArbParams(
   inRdCfgs: Seq3[RdConfig],
@@ -53,8 +53,8 @@ abstract class RFReadArbiterBase(val params: RFRdArbParams)(implicit p: Paramete
     .groupBy(_.bits.rdCfg.get.port)
     .map(x => (x._1, x._2.sortBy(_.bits.rdCfg.get.priority).toSeq))
   protected val arbiters: Seq[Option[WBArbiter[RFArbiterBundle]]] = portRange.map { portIdx =>
-    OptionWrapper(
-      inGroup.isDefinedAt(portIdx),
+    Option.when(
+      inGroup.isDefinedAt(portIdx))(
       Module(new WBArbiter(
         new RFArbiterBundle(pregWidth),
         inGroup(portIdx).size

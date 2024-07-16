@@ -4,7 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import difftest.{DiffFpWriteback, DiffIntWriteback, DifftestModule, DiffVecWriteback}
-import utils.XSError
+import utility.XSError
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles.{ExuOutput, WriteBackBundle}
 import xiangshan.backend.datapath.DataConfig._

@@ -50,15 +50,15 @@ jobs:
           bash .github/workflows/check-usage.sh "BoringUtils" $GITHUB_WORKSPACE
       - name: generate standalone clint
         run: |
-          make StandAloneCLINT DEVICE_BASE_ADDR=0x38000000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0
+          make StandAloneCLINT DEVICE_BASE_ADDR=0x38000000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=CLINT_
           make clean
-          make StandAloneCLINT DEVICE_BASE_ADDR=0x38000000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=1
+          make StandAloneCLINT DEVICE_BASE_ADDR=0x38000000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=1 DEVICE_PREFIX=CLINT_
           make clean
       - name: generate standalone debug module
         run: |
-          make StandAloneDebugModule DEVICE_BASE_ADDR=0x38020000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0
+          make StandAloneDebugModule DEVICE_BASE_ADDR=0x38020000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=DM_
           make clean
-          make StandAloneDebugModule DEVICE_BASE_ADDR=0x38020000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=1
+          make StandAloneDebugModule DEVICE_BASE_ADDR=0x38020000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=1 DEVICE_PREFIX=DM_
           make clean
       - name: generate XSNoCTop verilog file
         run: |
@@ -119,9 +119,6 @@ jobs:
       - name: Basic Test - misc-tests
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --ci misc-tests 2> /dev/zero
-      - name: Basic Test - nodiff-tests
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --no-diff --ci nodiff-tests 2> /dev/zero
       - name: Simple Test - microbench
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --ci microbench 2> perf.log

@@ -19,7 +19,7 @@ package xiangshan.backend.fu
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils.XSPerfAccumulate
+import utility.XSPerfAccumulate
 import xiangshan._
 import xiangshan.backend.fu.fpu._
 

@@ -27,7 +27,7 @@ import scala.math.min
 import xiangshan.backend.decode.ImmUnion
 
 trait HasBPUConst extends HasXSParameter {
-  val MaxMetaBaseLength =  if (!env.FPGAPlatform) 512 else 247 // TODO: Reduce meta length
+  val MaxMetaBaseLength =  if (!env.FPGAPlatform) 512 else 256 // TODO: Reduce meta length
   val MaxMetaLength = if (HasHExtension) MaxMetaBaseLength + 4 else MaxMetaBaseLength
   val MaxBasicBlockSize = 32
   val LHistoryLength = 32
@@ -475,7 +475,13 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
       s0_stall := !(s1_valid || s2_redirect || s3_redirect || do_redirect.valid)
     }
   }
-  XSError(s0_stall_dup(0) && s0_pc_dup(0) =/= s0_pc_reg_dup(0), "s0_stall but s0_pc is differenct from s0_pc_reg")
+  // Power-on reset
+  val powerOnResetState = RegInit(true.B)
+  when(s0_fire_dup(0)) {
+    // When BPU pipeline first time fire, we consider power-on reset is done
+    powerOnResetState := false.B
+  }
+  XSError(!powerOnResetState && s0_stall_dup(0) && s0_pc_dup(0) =/= s0_pc_reg_dup(0), "s0_stall but s0_pc is differenct from s0_pc_reg")
 
   npcGen_dup.zip(s0_pc_reg_dup).map{ case (gen, reg) =>
     gen.register(true.B, reg, Some("stallPC"), 0)}
