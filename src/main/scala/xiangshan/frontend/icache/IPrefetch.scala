@@ -265,10 +265,13 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   toWayLookup.bits.waymask      := s1_waymasks
   toWayLookup.bits.ptag         := s1_req_ptags
   toWayLookup.bits.gpaddr       := s1_req_gpaddr
-  toWayLookup.bits.excp_tlb_af  := itlbExcpAF
-  toWayLookup.bits.excp_tlb_pf  := itlbExcpPF
-  toWayLookup.bits.excp_tlb_gpf := itlbExcpGPF
-  toWayLookup.bits.meta_errors  := s1_meta_errors
+  (0 until PortNumber).foreach { i =>
+    val excpValid = (if (i == 0) true.B else s1_doubleline)  // exception in first line is always valid, in second line is valid iff is doubleline request
+    toWayLookup.bits.excp_tlb_af(i)  := excpValid && itlbExcpAF(i)
+    toWayLookup.bits.excp_tlb_pf(i)  := excpValid && itlbExcpPF(i)
+    toWayLookup.bits.excp_tlb_gpf(i) := excpValid && itlbExcpGPF(i)
+    toWayLookup.bits.meta_errors(i)  := excpValid && s1_meta_errors(i)
+  }
 
   val s1_waymasks_vec = s1_waymasks.map(_.asTypeOf(Vec(nWays, Bool())))
   when(toWayLookup.fire) {
