@@ -27,8 +27,8 @@ val defaultScalaVersion = "2.13.14"
 
 def defaultVersions(chiselVersion: String) = chiselVersion match {
   case "chisel" => Map(
-    "chisel"        -> ivy"org.chipsalliance::chisel:6.4.0",
-    "chisel-plugin" -> ivy"org.chipsalliance:::chisel-plugin:6.4.0",
+    "chisel"        -> ivy"org.chipsalliance::chisel:6.5.0",
+    "chisel-plugin" -> ivy"org.chipsalliance:::chisel-plugin:6.5.0",
     "chiseltest"    -> ivy"edu.berkeley.cs::chiseltest:6.0.0"
   )
   case "chisel3" => Map(

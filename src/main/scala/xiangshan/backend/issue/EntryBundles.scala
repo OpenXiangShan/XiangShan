@@ -450,7 +450,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
   }
 
   def ExuOHGen(exuOH: Vec[Bool], wakeupByIQOH: Vec[Bool], regSrcExuOH: Vec[Bool])(implicit p: Parameters, params: IssueBlockParams) = {
-    val origExuOH = 0.U.asTypeOf(exuOH)
+    val origExuOH = Wire(chiselTypeOf(exuOH))
     when(wakeupByIQOH.asUInt.orR) {
       origExuOH := Mux1H(wakeupByIQOH, params.wakeUpSourceExuIdx.map(x => MathUtils.IntToOH(x).U(p(XSCoreParamsKey).backendParams.numExu.W)).toSeq).asBools
     }.otherwise {
@@ -466,7 +466,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     def apply() = Vec(num, Bool())
 
     def readFuType(fuType: Vec[Bool], fus: Seq[FuType.OHType]): Vec[Bool] = {
-      val res = 0.U.asTypeOf(fuType)
+      val res = WireDefault(0.U.asTypeOf(fuType))
       fus.foreach(x => res(x.id) := fuType(x.id))
       res
     }

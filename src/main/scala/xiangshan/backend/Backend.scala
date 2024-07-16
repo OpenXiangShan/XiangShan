@@ -399,7 +399,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   csrio.fpu.fflags := ctrlBlock.io.robio.csr.fflags
   csrio.fpu.isIllegal := false.B // Todo: remove it
   csrio.fpu.dirty_fs := ctrlBlock.io.robio.csr.dirty_fs
-  csrio.vpu <> 0.U.asTypeOf(csrio.vpu) // Todo
+  csrio.vpu <> WireDefault(0.U.asTypeOf(csrio.vpu)) // Todo
 
   val fromIntExuVsetVType = intExuBlock.io.vtype.getOrElse(0.U.asTypeOf((Valid(new VType))))
   val fromVfExuVsetVType = vfExuBlock.io.vtype.getOrElse(0.U.asTypeOf((Valid(new VType))))
