@@ -51,6 +51,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
       redirect.bits.cfiUpdate.taken := dataModule.io.taken
       redirect.bits.cfiUpdate.predTaken := dataModule.io.pred_taken
       redirect.bits.cfiUpdate.target := addModule.io.target
+      redirect.bits.cfiUpdate.pc := io.in.bits.data.pc.get
   }
   connect0LatencyCtrlSingal
 }

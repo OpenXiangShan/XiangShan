@@ -207,32 +207,31 @@ class CtrlBlockImp(
   loadReplay.bits.debugIsCtrl := false.B
   loadReplay.bits.debugIsMemVio := true.B
 
-  pcMem.io.ren.get(pcMemRdIndexes("redirect").head) := redirectGen.io.redirectPcRead.vld
-  pcMem.io.raddr(pcMemRdIndexes("redirect").head) := redirectGen.io.redirectPcRead.ptr.value
-  redirectGen.io.redirectPcRead.data := pcMem.io.rdata(pcMemRdIndexes("redirect").head).getPc(RegEnable(redirectGen.io.redirectPcRead.offset, redirectGen.io.redirectPcRead.vld))
-  pcMem.io.ren.get(pcMemRdIndexes("memPred").head) := redirectGen.io.memPredPcRead.vld
-  pcMem.io.raddr(pcMemRdIndexes("memPred").head) := redirectGen.io.memPredPcRead.ptr.value
-  redirectGen.io.memPredPcRead.data := pcMem.io.rdata(pcMemRdIndexes("memPred").head).getPc(RegEnable(redirectGen.io.memPredPcRead.offset, redirectGen.io.memPredPcRead.vld))
+  pcMem.io.ren.get(pcMemRdIndexes("redirect").head) := memViolation.valid
+  pcMem.io.raddr(pcMemRdIndexes("redirect").head) := memViolation.bits.ftqIdx.value
+  pcMem.io.ren.get(pcMemRdIndexes("memPred").head) := memViolation.valid
+  pcMem.io.raddr(pcMemRdIndexes("memPred").head) := memViolation.bits.stFtqIdx.value
+  redirectGen.io.memPredPcRead.data := pcMem.io.rdata(pcMemRdIndexes("memPred").head).getPc(RegEnable(memViolation.bits.stFtqOffset, memViolation.valid))
 
   for ((pcMemIdx, i) <- pcMemRdIndexes("load").zipWithIndex) {
     // load read pcMem (s0) -> get rdata (s1) -> reg next in Memblock (s2) -> reg next in Memblock (s3) -> consumed by pf (s3)
-    pcMem.io.ren.get(pcMemIdx) := io.memLdPcRead(i).vld
+    pcMem.io.ren.get(pcMemIdx) := io.memLdPcRead(i).valid
     pcMem.io.raddr(pcMemIdx) := io.memLdPcRead(i).ptr.value
-    io.memLdPcRead(i).data := pcMem.io.rdata(pcMemIdx).getPc(RegEnable(io.memLdPcRead(i).offset, io.memLdPcRead(i).vld))
+    io.memLdPcRead(i).data := pcMem.io.rdata(pcMemIdx).getPc(RegEnable(io.memLdPcRead(i).offset, io.memLdPcRead(i).valid))
   }
 
   for ((pcMemIdx, i) <- pcMemRdIndexes("hybrid").zipWithIndex) {
     // load read pcMem (s0) -> get rdata (s1) -> reg next in Memblock (s2) -> reg next in Memblock (s3) -> consumed by pf (s3)
-    pcMem.io.ren.get(pcMemIdx) := io.memHyPcRead(i).vld
+    pcMem.io.ren.get(pcMemIdx) := io.memHyPcRead(i).valid
     pcMem.io.raddr(pcMemIdx) := io.memHyPcRead(i).ptr.value
-    io.memHyPcRead(i).data := pcMem.io.rdata(pcMemIdx).getPc(RegEnable(io.memHyPcRead(i).offset, io.memHyPcRead(i).vld))
+    io.memHyPcRead(i).data := pcMem.io.rdata(pcMemIdx).getPc(RegEnable(io.memHyPcRead(i).offset, io.memHyPcRead(i).valid))
   }
 
   if (EnableStorePrefetchSMS) {
     for ((pcMemIdx, i) <- pcMemRdIndexes("store").zipWithIndex) {
-      pcMem.io.ren.get(pcMemIdx) := io.memStPcRead(i).vld
+      pcMem.io.ren.get(pcMemIdx) := io.memStPcRead(i).valid
       pcMem.io.raddr(pcMemIdx) := io.memStPcRead(i).ptr.value
-      io.memStPcRead(i).data := pcMem.io.rdata(pcMemIdx).getPc(RegEnable(io.memStPcRead(i).offset, io.memStPcRead(i).vld))
+      io.memStPcRead(i).data := pcMem.io.rdata(pcMemIdx).getPc(RegEnable(io.memStPcRead(i).offset, io.memStPcRead(i).valid))
     }
   } else {
     io.memStPcRead.foreach(_.data := 0.U)
@@ -244,6 +243,11 @@ class CtrlBlockImp(
   redirectGen.io.oldestExuOutPredecode.valid := GatedValidRegNext(oldestExuPredecode.valid)
   redirectGen.io.oldestExuOutPredecode := RegEnable(oldestExuPredecode, oldestExuPredecode.valid)
   redirectGen.io.loadReplay <> loadReplay
+  val loadRedirectPcRead = pcMem.io.rdata(pcMemRdIndexes("redirect").head).getPc(RegEnable(memViolation.bits.ftqOffset, memViolation.valid))
+  redirectGen.io.loadReplay.bits.cfiUpdate.pc := loadRedirectPcRead
+  val load_pc_offset = Mux(loadReplay.bits.flushItself(), 0.U, Mux(loadReplay.bits.isRVC, 2.U, 4.U))
+  val load_target = loadRedirectPcRead + load_pc_offset
+  redirectGen.io.loadReplay.bits.cfiUpdate.target := load_target
 
   redirectGen.io.robFlush := s1_robFlushRedirect
 
