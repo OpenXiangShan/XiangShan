@@ -68,26 +68,70 @@ class TraceReaderHelper(width: Int)(implicit p: Parameters)
   val insts = IO(Output(Vec(width, new TraceInstrInnerBundle())))
 
   def getVerilog: String = {
-    val portNameList = new TraceInstrInnerBundle().elements.map(_._1)
-    val portSizeList = new TraceInstrInnerBundle().elements.map(_._2.getWidth)
-    def genPort(size: Int, baseName: String): String = {
-      (0 until width)
-        .map(i => s"output [${size - 1}:0] insts_${i}_${baseName},")
-        .mkString("  ", "\n  ", "\n")
+    val nameList = new TraceInstrInnerBundle().elements.map(_._1).toSeq.reverse
+    val sizeList = new TraceInstrInnerBundle().elements.map(_._2.getWidth).toSeq.reverse
+
+    def genModulePort: String = {
+      def genElementPort(size: Int, baseName: String): String = {
+        (0 until width)
+          .map(i => s"output [${size - 1}:0] insts_${i}_${baseName},")
+          .mkString("  ", "\n  ", "\n")
+      }
+      s"""
+         |  input  clock,
+         |  input  reset,
+         |${nameList.zip(sizeList).map{case (name, size) => genElementPort(size, name)}.mkString}
+         |  input  enable
+         |""".stripMargin
     }
 
-    def callDPIC: String = {
-      (0 until width)
-        .map(i => s"""
-                     |trace_read_one_instr(insts_${i}_pcVA, insts_${i}_pcPA,
-                     |  insts_${i}_memoryAddrVA, insts_${i}_memoryAddrPA, insts_${i}_target, insts_${i}_inst,
-                     |  insts_${i}_memoryType, insts_${i}_memorySize,
-                     |  insts_${i}_branchType, insts_${i}_branchTaken, insts_${i}_InstID,
-                     |  $i);
-                     """.stripMargin)
-        .mkString("      ", "\n      ", "\n")
+    def genStructType: String = {
+      def genElement(name: String, size: Int): String = {
+        f"logic [${size-1}:0] $name;"
+      }
+      def genSingle: String = {
+        s"""
+           |typedef struct {
+           |${nameList.zip(sizeList).map{ case (name, size) => genElement(name, size) }.mkString("  ", "\n  ", "\n")}
+           |} SingleInstruction_t;
+           |""".stripMargin
+      }
+      def genMany: String = {
+        s"""
+           |typedef struct {
+           |  SingleInstruction_t insts[$width];
+           |} ManyInstruction_t;
+           |""".stripMargin
+      }
+      s"""
+         |${genSingle}
+         |
+         |${genMany}
+         |""".stripMargin
     }
-    s"""
+
+    def genLogicDeclare: String = {
+      (0 until width).map { case idx =>
+        nameList.zip(sizeList).map{ case (name, size) =>
+          s"""
+             |logic [${size-1}:0] logicInsts_${idx}_${name};
+             |""".stripMargin
+        }.mkString("  ","\n  ","\n")
+      }.mkString
+    }
+
+    def fromLogictoIO: String = {
+      (0 until width).map { case idx =>
+        nameList.zip(sizeList).map{ case (name, size) =>
+          f"assign insts_${idx}_${name} = logicInsts_${idx}_${name};"
+        }.mkString("  ","\n  ","\n")
+      }.mkString
+    }
+
+    def funcDeclare: String = {
+      //  |import "DPI-C" function void trace_read_insts(input byte enable, output ManyInstruction_t insts);
+      //  |  input  byte enable
+     s"""
        |import "DPI-C" function void trace_read_one_instr(
        |  output longint pc_va,
        |  output longint pc_pa,
@@ -100,27 +144,61 @@ class TraceReaderHelper(width: Int)(implicit p: Parameters)
        |  output byte branch_type,
        |  output byte branch_taken,
        |  output longint InstID,
-       |  input  byte idx
+       |  input  byte idx,
        |);
+       |""".stripMargin
+    }
+
+    def callDPIC(destName: String): String = {
+      (0 until width).map{ case i =>
+        def assignTrace: String = {
+          s"""
+             |    trace_read_one_instr(
+             |      ${destName}_${i}_pcVA, ${destName}_${i}_pcPA,
+             |      ${destName}_${i}_memoryAddrVA, ${destName}_${i}_memoryAddrPA,
+             |      ${destName}_${i}_target, ${destName}_${i}_inst,
+             |      ${destName}_${i}_memoryType, ${destName}_${i}_memorySize,
+             |      ${destName}_${i}_branchType, ${destName}_${i}_branchTaken,
+             |      ${destName}_${i}_InstID,
+             |      $i);
+             |""".stripMargin
+        }
+        def assignDummy: String = {
+          nameList.map{ case name =>
+            f"${destName}_${i}_${name} = 0;"
+          }.mkString("    ", "    \n", "\n")
+        }
+        s"""
+           |always @(negedge clock) begin
+           |  if (enable) begin
+           |    ${assignTrace}
+           |  end
+           |  else begin
+           |    ${assignDummy}
+           |  end
+           |end
+           """.stripMargin
+      }.mkString("","\n","\n")
+    }
+
+    s"""
+       |
+       |${funcDeclare}
        |
        |module TraceReaderHelper(
-       |  input  clock,
-       |  input  reset,
-       |${portNameList.zip(portSizeList).map{case (name, size) => genPort(size, name)}.mkString}
-       |  input  enable
+       |${genModulePort}
        |);
        |
-       |  always @(posedge clock) begin
-       |    if (enable && !reset) begin
-       |$callDPIC
-       |    end
-       |  end
+       |${genLogicDeclare}
+       |${callDPIC("logicInsts")}
+       |${fromLogictoIO}
+       |
        |endmodule
        |
-       |""".stripMargin
+       """.stripMargin
   }
 
-  setInline(s"$desiredName.v", getVerilog)
+  setInline(s"$desiredName.sv", getVerilog)
 }
 
 class TraceRedirectHelper
@@ -142,7 +220,7 @@ class TraceRedirectHelper
        |  input [63:0] InstID
        |);
        |
-       |  always @(posedge clock) begin
+       |  always @(negedge clock) begin
        |    if (enable && !reset) begin
        |      trace_redirect(InstID);
        |    end
