@@ -1869,7 +1869,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   }
 
   //readyFromRename Counter
-  val readyCounter = PriorityMuxDefault(outReadys.map(x => !x).zip((0 until RenameWidth).map(_.U)), RenameWidth.U)
+  val readyCounter = Mux(outReadys.head, RenameWidth.U, 0.U)
 
   // The left uops of the complex inst in ComplexDecoder can be send out this cycle
   val thisAllOut = uopRes <= readyCounter
