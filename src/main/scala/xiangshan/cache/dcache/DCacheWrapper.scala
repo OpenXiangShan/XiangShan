@@ -1122,7 +1122,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     bankedDataArray.io.is128Req(i) <> ldu(i).io.is128Req
     bankedDataArray.io.read_error_delayed(i) <> ldu(i).io.read_error_delayed
 
-    ldu(i).io.banked_data_resp := bankedDataArray.io.read_resp_delayed(i)
+    ldu(i).io.banked_data_resp := bankedDataArray.io.read_resp(i)
 
     ldu(i).io.bank_conflict_slow := bankedDataArray.io.bank_conflict_slow(i)
   })

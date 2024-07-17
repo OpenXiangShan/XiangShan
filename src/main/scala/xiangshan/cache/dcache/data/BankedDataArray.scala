@@ -256,7 +256,7 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     // data for readline and loadpipe
     val readline_resp = Output(Vec(DCacheBanks, new L1BankedDataReadResult()))
     val readline_error_delayed = Output(Bool())
-    val read_resp_delayed = Output(Vec(LoadPipelineWidth, Vec(VLEN/DCacheSRAMRowBits, new L1BankedDataReadResult())))
+    val read_resp          = Output(Vec(LoadPipelineWidth, Vec(VLEN/DCacheSRAMRowBits, new L1BankedDataReadResult())))
     val read_error_delayed = Output(Vec(LoadPipelineWidth,Vec(VLEN/DCacheSRAMRowBits, Bool())))
     // val nacks = Output(Vec(LoadPipelineWidth, Bool()))
     // val errors = Output(Vec(LoadPipelineWidth + 1, ValidIO(new L1CacheErrorInfo))) // read ports + readline port
@@ -305,8 +305,8 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     XSDebug(s"DataArray ReadeResp channel:\n")
     (0 until LoadPipelineWidth) map { r =>
       XSDebug(s"cycle: $r data: %x\n", Mux(io.is128Req(r),
-        Cat(io.read_resp_delayed(r)(1).raw_data,io.read_resp_delayed(r)(0).raw_data),
-        io.read_resp_delayed(r)(0).raw_data))
+        Cat(io.read_resp(r)(1).raw_data,io.read_resp(r)(0).raw_data),
+        io.read_resp(r)(0).raw_data))
     }
   }
 
@@ -505,15 +505,17 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
   // read result: expose banked read result
   // TODO: clock gate
-  val read_result_delayed = RegNext(read_result)
   (0 until LoadPipelineWidth).map(i => {
     // io.read_resp(i) := read_result(RegNext(bank_addrs(i)))(RegNext(OHToUInt(way_en(i))))
+    val r_div_addr  = RegEnable(div_addrs(i), io.read(i).fire)
+    val r_bank_addr = RegEnable(bank_addrs(i), io.read(i).fire)
+    val r_way_addr  = RegNext(OHToUInt(way_en(i)))
     val rr_read_fire = RegNext(RegNext(io.read(i).fire))
     val rr_div_addr = RegNext(RegNext(div_addrs(i)))
     val rr_bank_addr = RegNext(RegNext(bank_addrs(i)))
     val rr_way_addr = RegNext(RegNext(OHToUInt(way_en(i))))
     (0 until VLEN/DCacheSRAMRowBits).map( j =>{
-      io.read_resp_delayed(i)(j) := read_result_delayed(rr_div_addr)(rr_bank_addr(j))(rr_way_addr)
+      io.read_resp(i)(j) := read_result(r_div_addr)(r_bank_addr(j))(r_way_addr)
       // error detection
       // normal read ports
       io.read_error_delayed(i)(j) := rr_read_fire && read_error_delayed_result(rr_div_addr)(rr_bank_addr(j))(rr_way_addr) && !RegNext(io.bank_conflict_slow(i))
@@ -894,15 +896,16 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   }
   XSPerfAccumulate("data_read_counter", data_read_oh.foldLeft(0.U)(_ + _))
 
-  val bank_result_delayed = RegNext(bank_result)
   (0 until LoadPipelineWidth).map(i => {
     val r_read_fire = RegNext(io.read(i).fire)
+    val r_div_addr = RegEnable(div_addrs(i), io.read(i).fire)
+    val r_bank_addr = RegEnable(bank_addrs(i), io.read(i).fire)
     val rr_read_fire = RegNext(r_read_fire)
     val rr_div_addr = RegEnable(RegEnable(div_addrs(i), io.read(i).fire), r_read_fire)
     val rr_bank_addr = RegEnable(RegEnable(bank_addrs(i), io.read(i).fire), r_read_fire)
     val rr_way_addr = RegEnable(RegEnable(OHToUInt(way_en(i)), io.read(i).fire), r_read_fire)
     (0 until VLEN/DCacheSRAMRowBits).map( j =>{
-      io.read_resp_delayed(i)(j) := bank_result_delayed(rr_div_addr)(rr_bank_addr(j))
+      io.read_resp(i)(j)          := bank_result(r_div_addr)(r_bank_addr(j))
       // error detection
       io.read_error_delayed(i)(j) := rr_read_fire && read_bank_error_delayed(rr_div_addr)(rr_bank_addr(j)) && !RegNext(io.bank_conflict_slow(i))
     })
