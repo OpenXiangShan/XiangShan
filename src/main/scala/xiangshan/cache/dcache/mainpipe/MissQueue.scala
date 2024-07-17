@@ -889,7 +889,10 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   /*  MissQueue enq logic is now splitted into 2 cycles
    *
    */
-  miss_req_pipe_reg.req     := io.req.bits
+  when(io.req.valid){
+    miss_req_pipe_reg.req     := io.req.bits
+  }
+  // miss_req_pipe_reg.req     := io.req.bits
   miss_req_pipe_reg.alloc   := alloc && io.req.valid && !io.req.bits.cancel
   miss_req_pipe_reg.merge   := merge && io.req.valid && !io.req.bits.cancel
   miss_req_pipe_reg.mshr_id := io.resp.id
