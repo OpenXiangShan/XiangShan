@@ -109,6 +109,14 @@ class StreamBitVectorBundle(implicit p: Parameters) extends XSBundle with HasStr
   }
 }
 
+object StreamBitVectorBundle{
+  def init(index: Int)(implicit p: Parameters): StreamBitVectorBundle = {
+    val r = Wire(new StreamBitVectorBundle)
+    r.reset(index)
+    r
+  }
+}
+
 class StreamPrefetchReqBundle(implicit p: Parameters) extends XSBundle with HasStreamPrefetchHelper {
   val region = UInt(REGION_TAG_BITS.W)
   val bit_vec = UInt(BIT_VEC_WITDH.W)
@@ -174,7 +182,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
     val stream_lookup_resp = Output(Bool())
   })
 
-  val array = Reg(Vec(BIT_VEC_ARRAY_SIZE, new StreamBitVectorBundle))
+  val array = RegInit(VecInit((0 until BIT_VEC_ARRAY_SIZE).map(StreamBitVectorBundle.init(_))))
   val replacement = ReplacementPolicy.fromString("plru", BIT_VEC_ARRAY_SIZE)
 
   // s0: generate region tag, parallel match
@@ -412,7 +420,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
 
   // reset meta to avoid muti-hit problem
   for(i <- 0 until BIT_VEC_ARRAY_SIZE) {
-    when(reset.asBool || GatedValidRegNext(io.flush)) {
+    when(GatedValidRegNext(io.flush)) {
       array(i).reset(i)
     }
   }

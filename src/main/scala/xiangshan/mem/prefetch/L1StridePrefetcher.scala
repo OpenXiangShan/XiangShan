@@ -80,6 +80,14 @@ class StrideMetaBundle(implicit p: Parameters) extends XSBundle with HasStridePr
 
 }
 
+object StrideMetaBundle{
+  def init(index: Int)(implicit p: Parameters): StrideMetaBundle = {
+    val r = Wire(new StrideMetaBundle)
+    r.reset(index)
+    r
+  }
+}
+
 class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePrefetchHelper {
   val io = IO(new XSBundle {
     val enable = Input(Bool())
@@ -94,7 +102,7 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     val stream_lookup_resp = Input(Bool())
   })
 
-  val array = Reg(Vec(STRIDE_ENTRY_NUM, new StrideMetaBundle))
+  val array = RegInit(VecInit((0 until STRIDE_ENTRY_NUM).map(StrideMetaBundle.init(_))))
   val replacement = ReplacementPolicy.fromString("plru", STRIDE_ENTRY_NUM)
 
   // s0: hash pc -> cam all entries
@@ -211,7 +219,7 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
   }
 
   for(i <- 0 until STRIDE_ENTRY_NUM) {
-    when(reset.asBool || GatedValidRegNext(io.flush)) {
+    when(GatedValidRegNext(io.flush)) {
       array(i).reset(i)
     }
   }
