@@ -273,7 +273,7 @@ class TraceCollectorHelper(width: Int)
        |  input  reset
        |);
        |
-       |  always @(posedge clock) begin
+       |  always @(negedge clock) begin
        |    if (!reset) begin
        |$callDPIC
        |    end
@@ -332,7 +332,7 @@ class TraceDriveCollectorHelper(width: Int)
        |  input  reset
        |);
        |
-       |  always @(posedge clock) begin
+       |  always @(negedge clock) begin
        |    if (!reset) begin
        |$callDPIC
        |    end
@@ -392,7 +392,7 @@ class TraceICacheHelper extends ExtModule
        |);
        |
        |  wire [63:0] addr_align = addr & 64'hffffffffffffffe0;
-       |  always @(posedge clock) begin
+       |  always @(negedge clock) begin
        |    if (enable) begin
        |      legal_addr <= trace_icache_legal_addr(addr_align);
        |$callDPIC
