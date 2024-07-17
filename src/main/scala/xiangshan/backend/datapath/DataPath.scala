@@ -576,18 +576,11 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       }
   }
 
-  io.og0CancelOH := VecInit(fromFlattenIQ.map(x => x.valid && !x.fire)).asUInt
+  io.og0CancelOH := VecInit(og0FailedVec2.flatten.zip(params.allExuParams).map{ case (cancel, params) => 
+                              if (params.hasLoadExu || !params.isIQWakeUpSource) false.B else cancel
+                            }).asUInt
   io.og1CancelOH := VecInit(toFlattenExu.map(x => x.valid && !x.fire)).asUInt
 
-  io.cancelToBusyTable.zipWithIndex.foreach { case (cancel, i) =>
-    cancel.valid := fromFlattenIQ(i).valid && !fromFlattenIQ(i).fire
-    cancel.bits.rfWen := fromFlattenIQ(i).bits.common.rfWen.getOrElse(false.B)
-    cancel.bits.fpWen := fromFlattenIQ(i).bits.common.fpWen.getOrElse(false.B)
-    cancel.bits.vecWen := fromFlattenIQ(i).bits.common.vecWen.getOrElse(false.B)
-    cancel.bits.v0Wen := fromFlattenIQ(i).bits.common.v0Wen.getOrElse(false.B)
-    cancel.bits.vlWen := fromFlattenIQ(i).bits.common.vlWen.getOrElse(false.B)
-    cancel.bits.pdest := fromFlattenIQ(i).bits.common.pdest
-  }
 
   if (backendParams.debugEn){
     dontTouch(og0_cancel_no_load)
@@ -775,8 +768,6 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
   val og1CancelOH = Output(ExuOH(backendParams.numExu))
 
   val ldCancel = Vec(backendParams.LduCnt + backendParams.HyuCnt, Flipped(new LoadCancelIO))
-
-  val cancelToBusyTable = Vec(backendParams.numExu, ValidIO(new CancelSignal))
 
   val toIntExu: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = intSchdParams.genExuInputBundle
 

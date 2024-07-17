@@ -205,7 +205,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
 
   private val og1CancelOH: UInt = dataPath.io.og1CancelOH
   private val og0CancelOH: UInt = dataPath.io.og0CancelOH
-  private val cancelToBusyTable = dataPath.io.cancelToBusyTable
   private val vlIsZero = intExuBlock.io.vlIsZero.get
   private val vlIsVlmax = intExuBlock.io.vlIsVlmax.get
 
@@ -246,7 +245,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   intScheduler.io.fromDataPath.og0Cancel := og0CancelOH
   intScheduler.io.fromDataPath.og1Cancel := og1CancelOH
   intScheduler.io.ldCancel := io.mem.ldCancel
-  intScheduler.io.fromDataPath.cancelToBusyTable := cancelToBusyTable
   intScheduler.io.vlWriteBackInfo.vlIsZero := false.B
   intScheduler.io.vlWriteBackInfo.vlIsVlmax := false.B
 
@@ -264,7 +262,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   fpScheduler.io.fromDataPath.og0Cancel := og0CancelOH
   fpScheduler.io.fromDataPath.og1Cancel := og1CancelOH
   fpScheduler.io.ldCancel := io.mem.ldCancel
-  fpScheduler.io.fromDataPath.cancelToBusyTable := cancelToBusyTable
   fpScheduler.io.vlWriteBackInfo.vlIsZero := false.B
   fpScheduler.io.vlWriteBackInfo.vlIsVlmax := false.B
 
@@ -301,7 +298,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   memScheduler.io.fromDataPath.og0Cancel := og0CancelOH
   memScheduler.io.fromDataPath.og1Cancel := og1CancelOH
   memScheduler.io.ldCancel := io.mem.ldCancel
-  memScheduler.io.fromDataPath.cancelToBusyTable := cancelToBusyTable
   memScheduler.io.vlWriteBackInfo.vlIsZero := vlIsZero
   memScheduler.io.vlWriteBackInfo.vlIsVlmax := vlIsVlmax
 
@@ -319,7 +315,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   vfScheduler.io.fromDataPath.og0Cancel := og0CancelOH
   vfScheduler.io.fromDataPath.og1Cancel := og1CancelOH
   vfScheduler.io.ldCancel := io.mem.ldCancel
-  vfScheduler.io.fromDataPath.cancelToBusyTable := cancelToBusyTable
   vfScheduler.io.vlWriteBackInfo.vlIsZero := vlIsZero
   vfScheduler.io.vlWriteBackInfo.vlIsVlmax := vlIsVlmax
   vfScheduler.io.fromOg2.get := og2ForVector.io.toVfIQ

@@ -96,7 +96,6 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
     val og0Cancel = Input(ExuOH(backendParams.numExu))
     // Todo: remove this after no cancel signal from og1
     val og1Cancel = Input(ExuOH(backendParams.numExu))
-    val cancelToBusyTable = Vec(backendParams.numExu, Flipped(ValidIO(new CancelSignal)))
     // just be compatible to old code
     def apply(i: Int)(j: Int) = resp(i)(j)
   }
@@ -204,7 +203,7 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
         wb.bits := io.intWriteBack(i).addr
       }
       bt.io.wakeUp := io.fromSchedulers.wakeupVec
-      bt.io.cancel := io.fromDataPath.cancelToBusyTable
+      bt.io.og0Cancel := io.fromDataPath.og0Cancel
       bt.io.ldCancel := io.ldCancel
     case None =>
   }
@@ -220,7 +219,7 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
         wb.bits := io.fpWriteBack(i).addr
       }
       bt.io.wakeUp := io.fromSchedulers.wakeupVec
-      bt.io.cancel := io.fromDataPath.cancelToBusyTable
+      bt.io.og0Cancel := io.fromDataPath.og0Cancel
       bt.io.ldCancel := io.ldCancel
     case None =>
   }
@@ -236,7 +235,7 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
         wb.bits := io.vfWriteBack(i).addr
       }
       bt.io.wakeUp := io.fromSchedulers.wakeupVec
-      bt.io.cancel := io.fromDataPath.cancelToBusyTable
+      bt.io.og0Cancel := io.fromDataPath.og0Cancel
       bt.io.ldCancel := io.ldCancel
     case None =>
   }
@@ -252,7 +251,7 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
         wb.bits := io.v0WriteBack(i).addr
       }
       bt.io.wakeUp := io.fromSchedulers.wakeupVec
-      bt.io.cancel := io.fromDataPath.cancelToBusyTable
+      bt.io.og0Cancel := io.fromDataPath.og0Cancel
       bt.io.ldCancel := io.ldCancel
     case None =>
   }
@@ -268,7 +267,7 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
         wb.bits := io.vlWriteBack(i).addr
       }
       bt.io.wakeUp := io.fromSchedulers.wakeupVec
-      bt.io.cancel := io.fromDataPath.cancelToBusyTable
+      bt.io.og0Cancel := io.fromDataPath.og0Cancel
       bt.io.ldCancel := io.ldCancel
     case None =>
   }
