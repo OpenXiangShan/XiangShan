@@ -867,7 +867,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   dontTouch(commitVec)
   // TODO: Deal with vector store mmio
   for (i <- 0 until CommitWidth) {
-    when (allocated(cmtPtrExt(i).value) && isNotAfter(uop(cmtPtrExt(i).value).robIdx, RegNext(io.rob.pendingPtr)) && !needCancel(cmtPtrExt(i).value) && (!waitStoreS2(cmtPtrExt(i).value) || isVec(cmtPtrExt(i).value))) {
+    when (allocated(cmtPtrExt(i).value) && isNotAfter(uop(cmtPtrExt(i).value).robIdx, GatedRegNext(io.rob.pendingPtr)) && !needCancel(cmtPtrExt(i).value) && (!waitStoreS2(cmtPtrExt(i).value) || isVec(cmtPtrExt(i).value))) {
       if (i == 0){
         // TODO: fixme for vector mmio
         when ((uncacheState === s_idle) || (uncacheState === s_wait && scommit > 0.U)){
