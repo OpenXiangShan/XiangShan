@@ -161,6 +161,12 @@ object Bundles {
     def width(implicit p: Parameters) = p(XSCoreParamsKey).vlWidth
   }
 
+  object Vstart {
+    def apply()(implicit p: Parameters): UInt = UInt(width.W)
+
+    def width(implicit p: Parameters) = p(XSCoreParamsKey).vlWidth - 1
+  }
+
   object Vxsat extends NamedUInt(1)
 
   object Vxrm extends NamedUInt(2)

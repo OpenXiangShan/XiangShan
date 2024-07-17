@@ -31,11 +31,12 @@ import xiangshan.backend.decode.{DecodeStage, FusionDecoder}
 import xiangshan.backend.dispatch.{CoreDispatchTopDownIO, Dispatch, DispatchQueue}
 import xiangshan.backend.fu.PFEvent
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
+import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.{Rename, RenameTableWrapper, SnapshotGenerator}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.frontend.{FtqPtr, FtqRead, Ftq_RF_Components}
 import xiangshan.mem.{LqPtr, LsqEnqIO}
-import xiangshan.backend.issue.{IntScheduler, FpScheduler, VfScheduler, MemScheduler}
+import xiangshan.backend.issue.{FpScheduler, IntScheduler, MemScheduler, VfScheduler}
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   val rob_commits = Vec(CommitWidth, Valid(new RobCommitInfo))
@@ -288,11 +289,10 @@ class CtrlBlockImp(
     s1_robFlushPc, // replay inst
     s1_robFlushPc + Mux(s1_robFlushRedirect.bits.isRVC, 2.U, 4.U) // flush pipe
   ), s1_robFlushRedirect.valid)
-  private val s2_csrIsXRet = io.robio.csr.isXRet
   private val s5_csrIsTrap = DelayN(rob.io.exception.valid, 4)
-  private val s2_s5_trapTargetFromCsr = io.robio.csr.trapTarget
+  private val s5_trapTargetFromCsr = io.robio.csr.trapTarget
 
-  val flushTarget = Mux(s2_csrIsXRet || s5_csrIsTrap, s2_s5_trapTargetFromCsr, s2_robFlushPc)
+  val flushTarget = Mux(s5_csrIsTrap, s5_trapTargetFromCsr, s2_robFlushPc)
   when (s6_flushFromRobValid) {
     io.frontend.toFtq.redirect.bits.level := RedirectLevel.flush
     io.frontend.toFtq.redirect.bits.cfiUpdate.target := RegEnable(flushTarget, s5_flushFromRobValidAhead)
@@ -306,6 +306,7 @@ class CtrlBlockImp(
   }
 
   // vtype commit
+  decode.io.fromCSR := io.fromCSR.toDecode
   decode.io.isResumeVType := rob.io.toDecode.isResumeVType
   decode.io.commitVType := rob.io.toDecode.commitVType
   decode.io.walkVType := rob.io.toDecode.walkVType
@@ -594,32 +595,7 @@ class CtrlBlockImp(
   io.perfInfo.ctrlInfo.fpdqFull := GatedValidRegNext(vecDq.io.dqFull)
   io.perfInfo.ctrlInfo.lsdqFull := GatedValidRegNext(lsDq.io.dqFull)
 
-  val pfevent = Module(new PFEvent)
-  pfevent.io.distribute_csr := RegNext(io.csrCtrl.distribute_csr)
-  val csrevents = pfevent.io.hpmevent.slice(8,16)
-
-  val perfinfo = IO(new Bundle(){
-    val perfEventsRs      = Input(Vec(params.IqCnt, new PerfEvent))
-    val perfEventsEu0     = Input(Vec(6, new PerfEvent))
-    val perfEventsEu1     = Input(Vec(6, new PerfEvent))
-  })
-
-  val perfFromUnits = Seq(decode, rename, dispatch, intDq0, intDq1, vecDq, lsDq, rob).flatMap(_.getPerfEvents)
-  val perfFromIO    = perfinfo.perfEventsEu0.map(x => ("perfEventsEu0", x.value)) ++
-                        perfinfo.perfEventsEu1.map(x => ("perfEventsEu1", x.value)) ++
-                        perfinfo.perfEventsRs.map(x => ("perfEventsRs", x.value))
-  val perfBlock     = Seq()
-  // let index = 0 be no event
-  val allPerfEvents = Seq(("noEvent", 0.U)) ++ perfFromUnits ++ perfFromIO ++ perfBlock
-
-  if (printEventCoding) {
-    for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
-      println("CtrlBlock perfEvents Set", name, inc, i)
-    }
-  }
-
-  val allPerfInc = allPerfEvents.map(_._2.asTypeOf(new PerfEvent))
-  val perfEvents = HPerfMonitor(csrevents, allPerfInc).getPerfEvents
+  val perfEvents = Seq(decode, rename, dispatch, intDq0, intDq1, vecDq, lsDq, rob).flatMap(_.getPerfEvents)
   generatePerfEvent()
 }
 
@@ -631,6 +607,9 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val cpuHalt = Output(Bool())
   }
   val frontend = Flipped(new FrontendToCtrlIO())
+  val fromCSR = new Bundle{
+    val toDecode = Input(new CSRToDecode)
+  }
   val toIssueBlock = new Bundle {
     val flush = ValidIO(new Redirect)
     val allocPregs = Vec(RenameWidth, Output(new ResetPregStateReq))

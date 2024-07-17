@@ -20,6 +20,7 @@ import org.chipsalliance.cde.config
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import device.MsiInfoBundle
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tile.HasFPUParameters
 import system.HasSoCParameter
@@ -76,6 +77,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   with HasSoCParameter {
   val io = IO(new Bundle {
     val hartId = Input(UInt(hartIdLen.W))
+    val msiInfo = Input(ValidIO(new MsiInfoBundle))
+    val clintTime = Input(ValidIO(UInt(64.W)))
     val reset_vector = Input(UInt(PAddrBits.W))
     val cpu_halt = Output(Bool())
     val l2_pf_enable = Output(Bool())
@@ -107,6 +110,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   frontend.io.fencei <> backend.io.fenceio.fencei
 
   backend.io.fromTop.hartId := memBlock.io.inner_hartId
+  backend.io.fromTop.msiInfo := io.msiInfo
+  backend.io.fromTop.clintTime := io.clintTime
+
   backend.io.fromTop.externalInterrupt := memBlock.io.externalInterrupt
 
   backend.io.frontendCsrDistributedUpdate := frontend.io.csrUpdate
@@ -157,18 +163,13 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.lqCanAccept := memBlock.io.mem_to_ooo.lsqio.lqCanAccept
   backend.io.mem.sqCanAccept := memBlock.io.mem_to_ooo.lsqio.sqCanAccept
   backend.io.fenceio.sbuffer.sbIsEmpty := memBlock.io.mem_to_ooo.sbIsEmpty
-  // Todo: remove it
-  backend.io.fenceio.disableSfence := DontCare
-  backend.io.fenceio.disableHfencev := DontCare
-  backend.io.fenceio.disableHfenceg := DontCare
-  backend.io.fenceio.virtMode := DontCare
 
   backend.io.perf.frontendInfo := frontend.io.frontendInfo
   backend.io.perf.memInfo := memBlock.io.memInfo
   backend.io.perf.perfEventsFrontend := frontend.getPerf
   backend.io.perf.perfEventsLsu := memBlock.getPerf
   backend.io.perf.perfEventsHc := io.perfEvents
-  backend.io.perf.perfEventsCtrl := DontCare
+  backend.io.perf.perfEventsBackend := DontCare
   backend.io.perf.retiredInstr := DontCare
   backend.io.perf.ctrlInfo := DontCare
 

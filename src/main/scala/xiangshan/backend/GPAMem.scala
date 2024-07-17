@@ -17,8 +17,6 @@ class GPAMem(implicit p: Parameters) extends LazyModule {
 class GPAMemImp(override val wrapper: GPAMem)(implicit p: Parameters) extends LazyModuleImp(wrapper) with HasXSParameter {
   val io = IO(new GPAMemIO)
 
-  private val PageOffsetWidth = 12
-
   private val mem = Module (new SyncDataModuleTemplate(UInt(GPAddrBits.W), FtqSize, numRead = 1, numWrite = 1, hasRen = true))
 
   mem.io.wen.head := io.fromIFU.gpaddrMem_wen

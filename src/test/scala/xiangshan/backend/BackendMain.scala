@@ -7,7 +7,7 @@ import xiangshan.{XSCoreParameters, XSCoreParamsKey, XSTileKey}
 
 object BackendMain extends App {
   val (config, firrtlOpts, firtoolOpts) = ArgParser.parse(
-    args :+ "--disable-always-basic-diff" :+ "--disable-all" :+ "--remove-assert" :+ "--fpga-platform")
+    args :+ "--disable-always-basic-diff" :+ "--fpga-platform" :+ "--target" :+ "verilog")
 
   val defaultConfig = config.alterPartial({
     // Get XSCoreParams and pass it to the "small module"

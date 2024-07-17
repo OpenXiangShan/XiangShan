@@ -252,48 +252,63 @@ trait SdtrigExt extends HasXSParameter{
    * author @Guokai Chen
    * compare between Consecutive pc and tdada2
    */
-  def TriggerCmpConsecutive(actual: Vec[UInt], tdata: UInt, matchType: UInt, enable: Bool) : Vec[Bool] = {
+  def TriggerCmpConsecutive(pcVec: Vec[UInt], tdata: UInt, matchType: UInt, enable: Bool) : Vec[Bool] = {
     // opt: only compare two possible high bits: orig and orig+1
-    val len1 = actual.length
-    val highPos = log2Up(len1)
-    val lowPC = Wire(Vec(len1, UInt(highPos.W)))
-    lowPC.zipWithIndex.map{case (h, i) => h := actual(i)(highPos - 1, 0)}
-    val highPC = actual(0)(VAddrBits - 1, highPos)
-    val highPC1 = actual(0)(VAddrBits - 1, highPos) + 1.U
+    val pcVecWidth = pcVec.length
+    // also take care of that triggerMatch is less
+    val highPos = log2Up(pcVecWidth) + 1
+
+    val lowPCVec = Wire(Vec(pcVecWidth, UInt(highPos.W)))
+    lowPCVec.zipWithIndex.map{case (h, i) => h := pcVec(i)(highPos - 1, 0)}
+    val highPC = pcVec(0)(VAddrBits - 1, highPos)
+    val highPC1 = pcVec(0)(VAddrBits - 1, highPos) + 1.U
+
+    val lowTdata = tdata(highPos - 1, 0)
     val highTdata = tdata(VAddrBits - 1, highPos)
 
     val highPCEqual = highPC === highTdata
     val highPC1Equal = highPC1 === highTdata
-    val highPCGreater = highPC >= highTdata
-    val highPC1Greater = highPC1 >= highTdata
-    val highPCLess = highPC <= highTdata
-    val highPC1Less = highPC1 <= highTdata
+    val highPCGreater = highPC > highTdata
+    val highPC1Greater = highPC1 > highTdata
+    val highPCLess = highPC < highTdata
+    val highPC1Less = highPC1 < highTdata
 
-    val carry = Wire(Vec(len1, Bool()))
-    carry.zipWithIndex.map{case (c, i) => c := actual(i)(highPos) =/= actual(0)(highPos)}
+    val carry = Wire(Vec(pcVecWidth, Bool()))
+    carry.zipWithIndex.map{case (c, i) => c := pcVec(i)(highPos) =/= pcVec(0)(highPos)}
 
-    val lowPCEqual = Wire(Vec(len1, Bool()))
-    val lowPCGreater = Wire(Vec(len1, Bool()))
-    val lowPCLess = Wire(Vec(len1, Bool()))
+    val lowPCEqual = Wire(Vec(pcVecWidth, Bool()))
+    val lowPCGreater = Wire(Vec(pcVecWidth, Bool()))
+    val lowPCLess = Wire(Vec(pcVecWidth, Bool()))
 
-    lowPCEqual.zipWithIndex.map{case (l, i) => l := actual(i)(highPos - 1, 0) === tdata(highPos - 1, 0)}
-    lowPCGreater.zipWithIndex.map{case (l, i) => l := actual(i)(highPos - 1, 0) >= tdata(highPos - 1, 0)}
-    lowPCLess.zipWithIndex.map{case (l, i) => l := actual(i)(highPos - 1, 0) <= tdata(highPos - 1, 0)}
+    lowPCEqual.zipWithIndex.map{case (l, i) => l := lowPCVec(i) === lowTdata }
+    lowPCGreater.zipWithIndex.map{case (l, i) => l :=  lowPCVec(i) >= lowTdata }
+    lowPCLess.zipWithIndex.map{case (l, i) => l :=  lowPCVec(i) < lowTdata }
 
-    val overallEqual = Wire(Vec(len1, Bool()))
-    val overallGreater = Wire(Vec(len1, Bool()))
-    val overallLess = Wire(Vec(len1, Bool()))
+    val overallEqual = Wire(Vec(pcVecWidth, Bool()))
+    val overallGreater = Wire(Vec(pcVecWidth, Bool()))
+    val overallLess = Wire(Vec(pcVecWidth, Bool()))
 
-    overallEqual.zipWithIndex.map{case (o, i) => o := lowPCEqual(i) && highPCEqual}
+    overallEqual.zipWithIndex.map{case (o, i) => o :=
+      (!carry(i) && lowPCEqual(i) && highPCEqual) ||
+        carry(i) && highPC1Equal && lowPCEqual(i)
+    }
 
-    // greater: 1. highPC > highTdata; 2. highPC == highTdata && lowPC >= lowTdata
-    overallGreater.zipWithIndex.map{case (o, i) => o := highPCGreater || ((!carry(i) || lowPCGreater(i)) && highPCEqual)}
+    // [left : greater 1. nonCarry 2. carry
+    overallGreater.zipWithIndex.map { case (o, i) => o :=
+      !carry(i) && (highPCGreater || highPCEqual && lowPCGreater(i)) ||
+       carry(i) && (highPCGreater || highPCEqual || highPC1Equal && lowPCGreater(i))
+    }
 
-    // less: 1. highPC < highTdata; 2. highPC == highTdata && lowPC <= lowTdata
-    overallLess.zipWithIndex.map{case (o, i) => o := highPCLess || ((!carry(i) && lowPCLess(i)) && highPCEqual)}
+    // right) : less 1. nonCarryRight 2. carryRight
+    val carryRight = Wire(Vec(pcVecWidth, Bool()))
+    carryRight.zipWithIndex.map{case (c, i) => c := pcVec(i)(highPos) =/= pcVec(pcVecWidth - 1)(highPos)}
 
-    val ret = Wire(Vec(len1, Bool()))
+    overallLess.zipWithIndex.map { case (o, i) => o :=
+      !carryRight(i) && (highPCLess || highPCEqual && lowPCLess(i)) ||
+       carryRight(i) && (highPC1Less || highPC1Equal || highPCEqual && lowPCLess(i))
+    }
 
+    val ret = Wire(Vec(pcVecWidth, Bool()))
     ret.zipWithIndex.map{case (r, i) => r := MuxLookup(matchType, false.B)(
       Array(
         TrigMatchEnum.EQ -> overallEqual(i),

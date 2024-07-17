@@ -100,8 +100,10 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val resp_gpa_refill = RegInit(false.B)
   val hasGpf = Wire(Vec(Width, Bool()))
 
-  val vmEnable = (0 until Width).map(i => !(isHyperInst(i) || virt_out(i)) && (if (EnbaleTlbDebug) (satp.mode === 8.U)
-    else (satp.mode === 8.U) && (mode(i) < ModeM)))
+  val vmEnable = (0 until Width).map(i => !(isHyperInst(i) || virt_out(i)) && (
+    if (EnbaleTlbDebug) (satp.mode === 8.U)
+    else (satp.mode === 8.U) && (mode(i) < ModeM))
+  )
   val s2xlateEnable = (0 until Width).map(i => (isHyperInst(i) || virt_out(i)) && (vsatp.mode === 8.U || hgatp.mode === 8.U) && (mode(i) < ModeM))
   val portTranslateEnable = (0 until Width).map(i => (vmEnable(i) || s2xlateEnable(i)) && RegEnable(!req(i).bits.no_translate, req(i).valid))
 

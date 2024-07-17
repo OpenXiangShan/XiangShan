@@ -18,10 +18,6 @@ package xiangshan.backend.fu.util
 
 import chisel3._
 import chisel3.util._
-import utils._
-import utility._
-import xiangshan._
-import xiangshan.backend._
 
 trait HasCSRConst {
 
@@ -299,7 +295,7 @@ trait HasCSRConst {
   def IRQ_MEIP  = 11
 
   def IRQ_SGEIP = 12
-  def IRQ_DEBUG = 13
+  def IRQ_DEBUG = 17
 
   val Hgatp_Mode_len = 4
   val Hgatp_Vmid_len = 16

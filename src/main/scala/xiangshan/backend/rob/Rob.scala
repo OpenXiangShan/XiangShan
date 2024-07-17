@@ -347,7 +347,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         doingSvinval := false.B
       }
       // when we are in the process of Svinval software code area , only Svinval.vma and end instruction of Svinval can appear
-      assert(!doingSvinval || (enqUop.isSvinval(enqUop.flushPipe) || enqUop.isSvinvalEnd(enqUop.flushPipe)))
+      assert(!doingSvinval || (enqUop.isSvinval(enqUop.flushPipe) || enqUop.isSvinvalEnd(enqUop.flushPipe) || enqUop.isNotSvinval))
       when(enqUop.isWFI && !enqHasException && !enqHasTriggerCanFire) {
         hasWFI := true.B
       }
@@ -661,10 +661,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
 
   // sync fflags/dirty_fs/vxsat to csr
-  io.csr.fflags := RegNext(fflags)
-  io.csr.dirty_fs := RegNext(dirty_fs)
-  io.csr.dirty_vs := RegNext(dirty_vs)
-  io.csr.vxsat := RegNext(vxsat)
+  io.csr.fflags   := RegNextWithEnable(fflags)
+  io.csr.dirty_fs := GatedValidRegNext(dirty_fs)
+  io.csr.dirty_vs := GatedValidRegNext(dirty_vs)
+  io.csr.vxsat    := RegNextWithEnable(vxsat)
 
   // commit load/store to lsq
   val ldCommitVec = VecInit((0 until CommitWidth).map(i => io.commits.commitValid(i) && io.commits.info(i).commitType === CommitType.LOAD))

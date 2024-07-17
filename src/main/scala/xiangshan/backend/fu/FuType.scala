@@ -131,7 +131,8 @@ object FuType extends OHEnumeration {
   val vecArith = vecOPI ++ vecOPF
   val vecMem = Seq(vldu, vstu, vsegldu, vsegstu)
   val vecArithOrMem = vecArith ++ vecMem
-  val vecAll = vecVSET ++ vecMem
+  val vecAll = vecVSET ++ vecArithOrMem
+  val fpOP = fpArithAll ++ Seq(i2f, i2v)
 
   def X = BitPat.N(num) // Todo: Don't Care
 

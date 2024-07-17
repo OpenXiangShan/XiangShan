@@ -208,15 +208,24 @@ package object xiangshan {
 
 
   object CSROpType {
-    def jmp  = "b000".U
-    def wrt  = "b001".U
-    def set  = "b010".U
-    def clr  = "b011".U
-    def wfi  = "b100".U
-    def wrti = "b101".U
-    def seti = "b110".U
-    def clri = "b111".U
-    def needAccess(op: UInt): Bool = op(1, 0) =/= 0.U
+    def jmp  = "b010_000".U
+    def wfi  = "b100_000".U
+    def wrt  = "b001_001".U
+    def set  = "b001_010".U
+    def clr  = "b001_011".U
+    def wrti = "b001_101".U
+    def seti = "b001_110".U
+    def clri = "b001_111".U
+    def ro   = "b001_000".U
+
+    def isSystemOp (op: UInt): Bool = op(4)
+    def isWfi      (op: UInt): Bool = op(5)
+    def isCsrAccess(op: UInt): Bool = op(3)
+    def isReadOnly (op: UInt): Bool = op(3) && op(2, 0) === 0.U
+    def notReadOnly(op: UInt): Bool = op(3) && op(2, 0) =/= 0.U
+
+    def getCSROp(op: UInt) = op(1, 0)
+    def needImm(op: UInt) = op(2)
   }
 
   // jump
@@ -397,6 +406,10 @@ package object xiangshan {
     //     uop1: w(rd)                  | vli, vtypei    -> x[rd]
     def uvsetvcfg_ii        = "b0010_0000".U
     def uvsetrd_ii          = "b0000_0000".U
+
+    // read vec, write int
+    // keep vl
+    def csrrvl              = "b0001_0110".U
 
     def isVsetvl  (func: UInt)  = func(6)
     def isVsetvli (func: UInt)  = func(7)
@@ -787,6 +800,42 @@ package object xiangshan {
     def loadGuestPageFault  = 21
     def virtualInstr        = 22
     def storeGuestPageFault = 23
+
+    // Just alias
+    def EX_IAM    = instrAddrMisaligned
+    def EX_IAF    = instrAccessFault
+    def EX_II     = illegalInstr
+    def EX_BP     = breakPoint
+    def EX_LAM    = loadAddrMisaligned
+    def EX_LAF    = loadAccessFault
+    def EX_SAM    = storeAddrMisaligned
+    def EX_SAF    = storeAccessFault
+    def EX_UCALL  = ecallU
+    def EX_HSCALL = ecallS
+    def EX_VSCALL = ecallVS
+    def EX_MCALL  = ecallM
+    def EX_IPF    = instrPageFault
+    def EX_LPF    = loadPageFault
+    def EX_SPF    = storePageFault
+    def EX_IGPF   = instrGuestPageFault
+    def EX_LGPF   = loadGuestPageFault
+    def EX_VI     = virtualInstr
+    def EX_SGPF   = storeGuestPageFault
+
+    def getAddressMisaligned = Seq(EX_IAM, EX_LAM, EX_SAM)
+
+    def getAccessFault = Seq(EX_IAF, EX_LAF, EX_SAF)
+
+    def getPageFault = Seq(EX_IPF, EX_LPF, EX_SPF)
+
+    def getGuestPageFault = Seq(EX_IGPF, EX_LGPF, EX_SGPF)
+
+    def getFetchFault = Seq(EX_IAM, EX_IAF, EX_IPF)
+
+    def getLoadFault = Seq(EX_LAM, EX_LAF, EX_LPF)
+
+    def getStoreFault = Seq(EX_SAM, EX_SAF, EX_SPF)
+
     def priorities = Seq(
       breakPoint, // TODO: different BP has different priority
       instrPageFault,
@@ -805,6 +854,13 @@ package object xiangshan {
       storeAccessFault,
       loadAccessFault
     )
+
+    def getHigherExcpThan(excp: Int): Seq[Int] = {
+      val idx = this.priorities.indexOf(excp, 0)
+      require(idx != -1, s"The irq($excp) does not exists in IntPriority Seq")
+      this.priorities.slice(0, idx)
+    }
+
     def all = priorities.distinct.sorted
     def frontendSet = Seq(
       instrAddrMisaligned,

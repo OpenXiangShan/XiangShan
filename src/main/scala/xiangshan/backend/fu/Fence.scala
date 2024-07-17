@@ -16,11 +16,10 @@
 
 package xiangshan.backend.fu
 
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import utils._
-import utility._
+import org.chipsalliance.cde.config.Parameters
+import utility.XSDebug
 import xiangshan.ExceptionNO.{illegalInstr, virtualInstr}
 import xiangshan._
 
@@ -28,10 +27,6 @@ class FenceIO(implicit p: Parameters) extends XSBundle {
   val sfence = Output(new SfenceBundle)
   val fencei = Output(Bool())
   val sbuffer = new FenceToSbuffer
-  val disableSfence = Input(Bool())
-  val disableHfenceg = Input(Bool())
-  val disableHfencev = Input(Bool())
-  val virtMode = Input(Bool())
 }
 
 class FenceToSbuffer extends Bundle {
@@ -44,10 +39,6 @@ class Fence(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   val sfence = io.fenceio.get.sfence
   val fencei = io.fenceio.get.fencei
   val toSbuffer = io.fenceio.get.sbuffer
-  val disableSfence = io.fenceio.get.disableSfence
-  val disableHfenceg = io.fenceio.get.disableHfenceg
-  val disableHfencev = io.fenceio.get.disableHfencev
-  val virtMode = io.fenceio.get.virtMode
   val (valid, src1) = (
     io.in.valid,
     io.in.bits.data.src(0)
@@ -71,31 +62,23 @@ class Fence(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   val func = uop.ctrl.fuOpType
 
   // NOTE: icache & tlb & sbuffer must receive flush signal at any time
-  sbuffer      := state === s_wait && !(func === FenceOpType.sfence && disableSfence)
+  sbuffer      := state === s_wait
   fencei       := state === s_icache
-  sfence.valid := state === s_tlb && ((!disableSfence && func === FenceOpType.sfence) || (!disableHfencev && func === FenceOpType.hfence_v) || (!disableHfenceg && func === FenceOpType.hfence_g))
+  sfence.valid := state === s_tlb && (func === FenceOpType.sfence || func === FenceOpType.hfence_v || func === FenceOpType.hfence_g)
   sfence.bits.rs1  := uop.data.imm(4, 0) === 0.U
   sfence.bits.rs2  := uop.data.imm(9, 5) === 0.U
   sfence.bits.flushPipe := uop.ctrl.flushPipe.get
-  sfence.bits.hv := !disableHfencev && func === FenceOpType.hfence_v
-  sfence.bits.hg := !disableHfenceg && func === FenceOpType.hfence_g
+  sfence.bits.hv := func === FenceOpType.hfence_v
+  sfence.bits.hg := func === FenceOpType.hfence_g
   sfence.bits.addr := RegEnable(io.in.bits.data.src(0), io.in.fire)
   sfence.bits.id   := RegEnable(io.in.bits.data.src(1), io.in.fire)
 
   when (state === s_idle && io.in.valid) { state := s_wait }
   when (state === s_wait && func === FenceOpType.fencei && sbEmpty) { state := s_icache }
-  when (state === s_wait && ((func === FenceOpType.sfence && (sbEmpty || disableSfence))
-    || (func === FenceOpType.hfence_g && (sbEmpty || disableHfenceg))
-    || (func === FenceOpType.hfence_v && (sbEmpty || disableHfencev)))) { state := s_tlb }
+  when (state === s_wait && ((func === FenceOpType.sfence || func === FenceOpType.hfence_g || func === FenceOpType.hfence_v) && sbEmpty)) { state := s_tlb }
   when (state === s_wait && func === FenceOpType.fence  && sbEmpty) { state := s_fence }
   when (state === s_wait && func === FenceOpType.nofence  && sbEmpty) { state := s_nofence }
   when (state =/= s_idle && state =/= s_wait) { state := s_idle }
-
-  val illegalsfence = func === FenceOpType.sfence && disableSfence
-  val illegalhfenceg = func === FenceOpType.hfence_g && disableHfenceg
-  val illegalhfencev = func === FenceOpType.hfence_v && disableHfencev
-  val raiseEX_II = (illegalsfence || illegalhfenceg || illegalhfencev) && !virtMode
-  val raiseEX_VI = (illegalsfence || illegalhfenceg || illegalhfencev) && virtMode
 
   io.in.ready := state === s_idle
   io.out.valid := state =/= s_idle && state =/= s_wait
@@ -105,8 +88,6 @@ class Fence(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.out.bits.ctrl.pdest := uop.ctrl.pdest
   io.out.bits.ctrl.flushPipe.get := uop.ctrl.flushPipe.get
   io.out.bits.ctrl.exceptionVec.get := 0.U.asTypeOf(io.out.bits.ctrl.exceptionVec.get)
-  io.out.bits.ctrl.exceptionVec.get(illegalInstr) := raiseEX_II
-  io.out.bits.ctrl.exceptionVec.get(virtualInstr) := raiseEX_VI
   io.out.bits.perfDebugInfo := io.in.bits.perfDebugInfo
 
   XSDebug(io.in.valid, p"In(${io.in.valid} ${io.in.ready}) state:${state} Inpc:0x${Hexadecimal(io.in.bits.data.pc.get)} InrobIdx:${io.in.bits.ctrl.robIdx}\n")

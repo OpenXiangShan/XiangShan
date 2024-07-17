@@ -52,7 +52,7 @@ trait HasChisel extends SbtModule with Cross.Module[String] {
   override def scalacOptions = super.scalacOptions() ++
     Agg("-language:reflectiveCalls", "-Ymacro-annotations", "-Ytasty-reader")
 
-  override def ivyDeps = super.ivyDeps() ++ Agg(chiselIvy.get)
+  override def ivyDeps = super.ivyDeps() ++ Agg(chiselIvy.get) ++ Agg(ivy"scala-lang:scala-compiler:2.13.10")
 
   override def scalacPluginIvyDeps = super.scalacPluginIvyDeps() ++ Agg(chiselPluginIvy.get)
 }
@@ -176,6 +176,18 @@ trait FuDian extends HasChisel {
 
 }
 
+object macros extends Macros
+trait Macros extends ScalaModule {
+
+  override def millSourcePath = os.pwd / "macros"
+
+  override def scalaVersion: T[String] = T(defaultScalaVersion)
+
+  override def ivyDeps = super.ivyDeps() ++ Agg(ivy"org.scala-lang:scala-reflect:${defaultScalaVersion}")
+
+  def scalaReflectIvy = ivy"org.scala-lang:scala-reflect:${defaultScalaVersion}"
+}
+
 // extends this trait to use XiangShan in other projects
 trait XiangShanModule extends ScalaModule {
 
@@ -195,6 +207,8 @@ trait XiangShanModule extends ScalaModule {
 
   def yunsuanModule: ScalaModule
 
+  def macrosModule: ScalaModule
+
   override def moduleDeps = super.moduleDeps ++ Seq(
     rocketModule,
     difftestModule,
@@ -204,6 +218,7 @@ trait XiangShanModule extends ScalaModule {
     yunsuanModule,
     fudianModule,
     utilityModule,
+    macrosModule,
   )
 
   val resourcesPATH = os.pwd.toString() + "/src/main/resources"
@@ -232,6 +247,8 @@ trait XiangShan extends XiangShanModule with HasChisel {
   def utilityModule = utility(crossValue)
 
   def yunsuanModule = yunsuan(crossValue)
+
+  def macrosModule = macros
 
   override def forkArgs = Seq("-Xmx40G", "-Xss256m")
 
