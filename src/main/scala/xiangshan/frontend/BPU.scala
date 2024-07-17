@@ -609,7 +609,15 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   s1_pred_info.takenMask := resp.s1.full_pred.map(_.taken_mask_on_slot)
   s1_pred_info.cfiIndex := resp.s1.cfiIndex.map { case x => x.bits }
 
-  val previous_s1_pred_info = RegEnable(s1_pred_info, 0.U.asTypeOf(new PreviousPredInfo), s1_fire_dup(0))
+  // val previous_s1_pred_info = RegEnable(s1_pred_info, 0.U.asTypeOf(new PreviousPredInfo), s1_fire_dup(0))
+
+  val previous_s1_pred_info = Wire(new PreviousPredInfo)
+  previous_s1_pred_info.hit := GatedRegEnable(s1_pred_info.hit, Some(0.U.asTypeOf(s1_pred_info.hit)), s1_fire_dup(0))
+  previous_s1_pred_info.taken := GatedRegEnable(s1_pred_info.taken, Some(0.U.asTypeOf(s1_pred_info.taken)), s1_fire_dup(0))
+  previous_s1_pred_info.target := GatedDupRegEnable(s1_pred_info.target, Some(0.U.asTypeOf(s1_pred_info.target)), s1_fire_dup(0))
+  previous_s1_pred_info.lastBrPosOH := GatedDupRegEnable(s1_pred_info.lastBrPosOH, Some(0.U.asTypeOf(s1_pred_info.lastBrPosOH)), s1_fire_dup(0))
+  previous_s1_pred_info.takenMask := GatedDupRegEnable(s1_pred_info.takenMask, Some(0.U.asTypeOf(s1_pred_info.takenMask)), s1_fire_dup(0))
+  previous_s1_pred_info.cfiIndex := GatedDupRegEnable(s1_pred_info.cfiIndex, Some(0.U.asTypeOf(s1_pred_info.cfiIndex)), s1_fire_dup(0))
 
   val s2_redirect_s1_last_pred_vec_dup = preds_needs_redirect_vec_dup(previous_s1_pred_info, resp.s2)
 
@@ -682,7 +690,27 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
     )
   )
 
-  val previous_s2_pred = RegEnable(resp.s2, 0.U.asTypeOf(resp.s2), s2_fire_dup(0))
+  // val previous_s2_pred = RegEnable(resp.s2, 0.U.asTypeOf(resp.s2), s2_fire_dup(0))
+
+  val pcSegments = Seq(VAddrBits - 24, 12, 12)
+  val previous_s2_pred = Wire(new BranchPredictionBundle)
+  previous_s2_pred.pc := SegmentedAddrNext.dupAddrs(resp.s2.pc, pcSegments, s2_fire_dup(0), Some("previous_s2_pred_pc")).map(segAddr => segAddr.getAddr())
+  previous_s2_pred.valid := RegEnable(resp.s2.valid, 0.U.asTypeOf(resp.s2.valid), s2_fire_dup(0))
+  previous_s2_pred.hasRedirect := RegEnable(resp.s2.hasRedirect, 0.U.asTypeOf(resp.s2.hasRedirect), s2_fire_dup(0))
+  previous_s2_pred.ftq_idx := RegEnable(resp.s2.ftq_idx, 0.U.asTypeOf(resp.s2.ftq_idx), s2_fire_dup(0))
+  previous_s2_pred.full_pred := RegEnable(resp.s2.full_pred, 0.U.asTypeOf(resp.s2.full_pred), s2_fire_dup(0))
+  previous_s2_pred.full_pred.zip(resp.s2.full_pred.zipWithIndex).map {case (prev_fp, (new_fp, dupIdx)) => 
+    prev_fp.targets.zip(new_fp.taken_mask_on_slot.zipWithIndex).map{ case(target, (taken_mask, slotIdx)) =>
+      target := RegEnable(new_fp.targets(slotIdx), 0.U.asTypeOf(new_fp.targets(slotIdx)), s2_fire_dup(0) && taken_mask)
+    }
+    prev_fp.fallThroughAddr := RegEnable(new_fp.fallThroughAddr, 0.U.asTypeOf(new_fp.fallThroughAddr), s2_fire_dup(0) && new_fp.hit)
+  }
+
+  XSPerfAccumulate("previous_s2_pred_full_pred_old", s2_fire_dup(0))
+  XSPerfAccumulate("previous_s2_pred_full_pred_fallThroughAddr_new", s2_fire_dup(0) && resp.s2.full_pred(0).hit)
+  XSPerfAccumulate("previous_s2_pred_full_pred_targets_new", s2_fire_dup(0) && resp.s2.full_pred(0).taken_mask_on_slot.reduce(_||_))
+  XSPerfAccumulate("previous_s2_pred_full_pred_target0_new", s2_fire_dup(0) && resp.s2.full_pred(0).taken_mask_on_slot(0))
+  XSPerfAccumulate("previous_s2_pred_full_pred_target1_new", s2_fire_dup(0) && resp.s2.full_pred(0).taken_mask_on_slot(1))
 
   val s3_redirect_on_br_taken_dup = resp.s3.full_pred.zip(previous_s2_pred.full_pred).map {case (fp1, fp2) => fp1.real_br_taken_mask().asUInt =/= fp2.real_br_taken_mask().asUInt}
   val s3_both_first_taken_dup = resp.s3.full_pred.zip(previous_s2_pred.full_pred).map {case (fp1, fp2) => fp1.real_br_taken_mask()(0) && fp2.real_br_taken_mask()(0)}
@@ -742,7 +770,6 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   
   // ------- Predictors Update to improve Clock Gating Efficiency -------
   // Update pc
-  val pcSegments = Seq(VAddrBits - 24, 12, 12)
   predictors.io.update.bits.pc := SegmentedAddrNext(io.ftq_to_bpu.update.bits.pc, pcSegments, io.ftq_to_bpu.update.valid, Some("predictors.io.update.pc")).getAddr()
 
   // Update ftb_entry 
