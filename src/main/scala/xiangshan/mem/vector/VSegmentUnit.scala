@@ -315,7 +315,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     val uopFlowNum                    = ZeroExt(GenRealFlowNum(instType, emul, lmul, eew, sew, true), elemIdxBits)
     instMicroOp.baseVaddr             := io.in.bits.src_rs1(VAddrBits - 1, 0)
     instMicroOpValid                  := true.B // if is first uop
-    instMicroOp.alignedType           := Mux(isIndexed(instType), sew(1, 0), eew(1, 0))
+    instMicroOp.alignedType           := Mux(isIndexed(instType), sew(1, 0), eew)
     instMicroOp.uop                   := io.in.bits.uop
     instMicroOp.mask                  := srcMask
     instMicroOp.vstart                := 0.U
