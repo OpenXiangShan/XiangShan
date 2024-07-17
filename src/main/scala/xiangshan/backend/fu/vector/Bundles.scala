@@ -167,7 +167,7 @@ object Bundles {
 
   object Nf extends NamedUInt(3)
 
-  object VEew extends NamedUInt(3)
+  object VEew extends NamedUInt(2)
 
   object NumLsElem {
     def apply()(implicit p: Parameters): UInt = UInt(width.W)
