@@ -85,8 +85,8 @@ class MinimalConfig(n: Int = 1) extends Config(
           FmacCnt = 1,
           FmiscCnt = 1,
           FmiscDivSqrtCnt = 0,
-          LduCnt = 2,
-          StuCnt = 2
+          StuCnt = 2,
+          VduCnt = 1
         ),
         prefetcher = None,
         icacheParameters = ICacheParameters(
@@ -358,7 +358,8 @@ class NanHuGCoreConfig(n: Int = 1) extends Config(
           FmiscCnt = 1,
           FmiscDivSqrtCnt = 0,
           LduCnt = 2,
-          StuCnt = 2
+          StuCnt = 2,
+          VduCnt = 1
         ),
         //prefetcher = None,
         EnableSC = false,

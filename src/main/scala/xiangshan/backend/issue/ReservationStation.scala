@@ -49,6 +49,7 @@ case class RSParams
   var isStoreData: Boolean = false,
   var isMul: Boolean = false,
   var isLoad: Boolean = false,
+  var isVdu: Boolean = false,
   var exuCfg: Option[ExuConfig] = None
 ){
   def allWakeup: Int = numFastWakeup + numWakeup
@@ -87,6 +88,7 @@ class ReservationStationWrapper(implicit p: Parameters) extends LazyModule with 
       case StdExeUnitCfg => params.isStoreData = true
       case MulDivExeUnitCfg => params.isMul = true
       case LdExeUnitCfg => params.isLoad = true
+      case VduExeUnitCfg => params.isVdu = true
       case _ =>
     }
     // TODO: why jump needs two sources?

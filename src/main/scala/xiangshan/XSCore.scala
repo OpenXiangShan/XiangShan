@@ -163,6 +163,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
       (AluExeUnitCfg, exuParameters.AluCnt, Seq(AluExeUnitCfg, LdExeUnitCfg, StaExeUnitCfg), Seq()),
       (MulDivExeUnitCfg, exuParameters.MduCnt, Seq(AluExeUnitCfg, MulDivExeUnitCfg), Seq()),
       (JumpCSRExeUnitCfg, 1, Seq(), Seq()),
+      (VduExeUnitCfg, exuParameters.VduCnt, Seq(), Seq()),
       (LdExeUnitCfg, exuParameters.LduCnt, Seq(AluExeUnitCfg, LdExeUnitCfg), Seq()),
       (StaExeUnitCfg, exuParameters.StuCnt, Seq(), Seq()),
       (StdExeUnitCfg, exuParameters.StuCnt, Seq(), Seq())
@@ -194,7 +195,7 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
 
   // allow mdu and fmisc to have 2*numDeq enqueue ports
   val intDpPorts = (0 until exuParameters.AluCnt).map(i => {
-    if (i < exuParameters.JmpCnt) Seq((0, i), (1, i), (2, i))
+    if (i < exuParameters.JmpCnt) Seq((0, i), (1, i), (2, i), (3, i))
     else if (i < 2 * exuParameters.MduCnt) Seq((0, i), (1, i))
     else Seq((0, i))
   })
@@ -202,8 +203,10 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
     Seq((3, 0)),
     Seq((3, 1)),
     Seq((4, 0)),
-    Seq((4, 1))
-  ) ++ (0 until exuParameters.StuCnt).map(i => Seq((5, i)))
+    Seq((4, 1)),
+    Seq((5, 0)),
+    Seq((5, 1))
+  ) ++ (0 until exuParameters.StuCnt).map(i => Seq((6, i)))
   val fpDpPorts = (0 until exuParameters.FmacCnt).map(i => {
     if (i < 2 * exuParameters.FmiscCnt) Seq((0, i), (1, i))
     else Seq((0, i))

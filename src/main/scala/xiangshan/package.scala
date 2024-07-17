@@ -23,6 +23,7 @@ import xiangshan.backend.fu._
 import xiangshan.backend.fu.fpu._
 import xiangshan.backend.exu._
 import xiangshan.backend.Std
+import xiangshan.backend.fu.vdu._
 
 package object xiangshan {
   object SrcType {
@@ -70,15 +71,17 @@ package object xiangshan {
     def stu          = "b1101".U
     def mou          = "b1111".U // for amo, lr, sc, fence
 
+    def vdu          = "b1001".U
+
     def X            = BitPat("b????")
 
-    def num = 14
+    def num = 15
 
     def apply() = UInt(log2Up(num).W)
-
-    def isIntExu(fuType: UInt) = !fuType(3)
+    def isVdu(fuType: UInt) = fuType === vdu
+    def isIntExu(fuType: UInt) = !fuType(3) || isVdu(fuType)
     def isJumpExu(fuType: UInt) = fuType === jmp
-    def isFpExu(fuType: UInt) = fuType(3, 2) === "b10".U
+    def isFpExu(fuType: UInt) = fuType(3, 2) === "b10".U && !isVdu(fuType)
     def isMemExu(fuType: UInt) = fuType(3, 2) === "b11".U
     def isLoadStore(fuType: UInt) = isMemExu(fuType) && !fuType(1)
     def isStoreExu(fuType: UInt) = isMemExu(fuType) && fuType(0)
@@ -115,7 +118,8 @@ package object xiangshan {
       fDivSqrt.litValue() -> "fdiv/fsqrt",
       ldu.litValue() -> "load",
       stu.litValue() -> "store",
-      mou.litValue() -> "mou"
+      mou.litValue() -> "mou",
+      vdu.litValue() -> "vdu"
     )
   }
 
@@ -508,6 +512,10 @@ package object xiangshan {
     def apply() = UInt(4.W)
   }
 
+  object VduOpType {
+    def vdot_int8 = "b0000".U
+  }
+
   object ExceptionNO {
     def instrAddrMisaligned = 0
     def instrAccessFault    = 1
@@ -575,7 +583,7 @@ package object xiangshan {
   def fdivSqrtGen(p: Parameters) = new FDivSqrt()(p)
   def stdGen(p: Parameters) = new Std()(p)
   def mouDataGen(p: Parameters) = new Std()(p)
-
+  def vduGen(p: Parameters) = new Vdu()(p)
   def f2iSel(uop: MicroOp): Bool = {
     uop.ctrl.rfWen
   }
@@ -778,6 +786,16 @@ package object xiangshan {
   val JumpExeUnitCfg = ExuConfig("JmpExeUnit", "Int", Seq(jmpCfg, i2fCfg), 2, Int.MaxValue)
   val AluExeUnitCfg = ExuConfig("AluExeUnit", "Int", Seq(aluCfg), 0, Int.MaxValue)
   val JumpCSRExeUnitCfg = ExuConfig("JmpCSRExeUnit", "Int", Seq(jmpCfg, csrCfg, fenceCfg, i2fCfg), 2, Int.MaxValue)
+  val vduCfg = FuConfig(
+    name = "vdu",
+    fuGen = vduGen,
+    fuSel = (uop: MicroOp) => uop.ctrl.fuType === FuType.vdu,
+    fuType = FuType.vdu,
+    numIntSrc = 2,
+    numFpSrc = 0,
+    writeIntRf = true,
+    writeFpRf = false,
+  )
   val MulDivExeUnitCfg = ExuConfig("MulDivExeUnit", "Int", Seq(mulCfg, divCfg, bkuCfg), 1, Int.MaxValue)
   val FmacExeUnitCfg = ExuConfig("FmacExeUnit", "Fp", Seq(fmacCfg), Int.MaxValue, 0)
   val FmiscExeUnitCfg = ExuConfig(
@@ -786,6 +804,7 @@ package object xiangshan {
     Seq(f2iCfg, f2fCfg, fdivSqrtCfg),
     Int.MaxValue, 1
   )
+  val VduExeUnitCfg = ExuConfig("VduExeUnit", "Int", Seq(vduCfg), 0, Int.MaxValue)
   val LdExeUnitCfg = ExuConfig("LoadExu", "Mem", Seq(lduCfg), wbIntPriority = 0, wbFpPriority = 0, extendsExu = false)
   val StaExeUnitCfg = ExuConfig("StaExu", "Mem", Seq(staCfg, mouCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue, extendsExu = false)
   val StdExeUnitCfg = ExuConfig("StdExu", "Mem", Seq(stdCfg, mouDataCfg), wbIntPriority = Int.MaxValue, wbFpPriority = Int.MaxValue, extendsExu = false)

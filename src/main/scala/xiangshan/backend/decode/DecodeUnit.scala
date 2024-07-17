@@ -444,6 +444,14 @@ object XSTrapDecode extends DecodeConstants {
   )
 }
 
+object VduDecode extends DecodeConstants {
+  def VDOT_INT8 = BitPat("b0000000_?????_?????_000_?????_0001011")
+  //                                rs2   rs1       rd   custom-0
+  val table: Array[(BitPat, List[BitPat])] = Array(
+    VDOT_INT8 -> List(SrcType.reg, SrcType.reg, SrcType.X, FuType.vdu, VduOpType.vdot_int8, Y, N, N, N, N, N, SelImm.X)
+  )
+}
+
 //object Imm32Gen {
 //  def apply(sel: UInt, inst: UInt) = {
 //    val sign = Mux(sel === SelImm.IMM_Z, 0.S, inst(31).asSInt)
@@ -584,7 +592,8 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     XSTrapDecode.table ++
     BDecode.table ++
     CBODecode.table ++
-    SvinvalDecode.table
+    SvinvalDecode.table ++
+    VduDecode.table
   // assertion for LUI: only LUI should be assigned `selImm === SelImm.IMM_U && fuType === FuType.alu`
   val luiMatch = (t: Seq[BitPat]) => t(3).value == FuType.alu.litValue && t.reverse.head.value == SelImm.IMM_U.litValue
   val luiTable = decode_table.filter(t => luiMatch(t._2)).map(_._1).distinct
