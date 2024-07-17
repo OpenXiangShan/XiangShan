@@ -514,6 +514,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     entries(enq_ptr).wait_id := Mux(to_wait, wait_id, enq_ptr)
     entries(enq_ptr).af := false.B
     entries(enq_ptr).hptw_resp := Mux(to_last_hptw_req, entries(last_hptw_req_id).hptw_resp, Mux(to_wait, entries(wait_id).hptw_resp, entries(enq_ptr).hptw_resp))
+    entries(enq_ptr).first_s2xlate_fault := false.B
     mem_resp_hit(enq_ptr) := to_mem_out || to_last_hptw_req
   }
 
@@ -599,7 +600,6 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
           state(i) := Mux(Cat(need_to_waiting_vec).orR, state_mem_waiting, state_addr_check)
           entries(i).hptw_resp := io.hptw.resp.bits.h_resp
           entries(i).wait_id := Mux(Cat(need_to_waiting_vec).orR, waiting_index, entries(i).wait_id)
-          entries(i).first_s2xlate_fault := false.B
           //To do: change the entry that is having the same hptw req
         }
       }
