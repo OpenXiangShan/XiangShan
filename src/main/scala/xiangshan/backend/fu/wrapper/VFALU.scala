@@ -265,6 +265,9 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   val outIsVfRedUnordered = outCtrl.fuOpType === VfaluType.vfredusum ||
     outCtrl.fuOpType === VfaluType.vfredmax ||
     outCtrl.fuOpType === VfaluType.vfredmin
+  val outIsVfRedUnComp = outCtrl.fuOpType === VfaluType.vfredmax ||
+    outCtrl.fuOpType === VfaluType.vfredmin
+  val outIsVfRedUnSum = outCtrl.fuOpType === VfaluType.vfredusum
   val outIsVfRedOrdered = outCtrl.fuOpType === VfaluType.vfredosum ||
     outCtrl.fuOpType === VfaluType.vfwredosum
 
@@ -359,8 +362,8 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   val outIsFisrtGroup = outVuopidx === 0.U ||
     (outVuopidx === 1.U && (outVlmul === VLmul.m4 || outVlmul === VLmul.m8)) ||
     ((outVuopidx === 2.U || outVuopidx === 3.U) && outVlmul === VLmul.m8)
-  val firstNeedFFlags = outIsFisrtGroup  && outIsVfRedUnordered
-  val lastNeedFFlags = outVecCtrl.lastUop && outIsVfRedUnordered
+  val firstNeedFFlags = outIsFisrtGroup  && outIsVfRedUnComp
+  val lastNeedFFlags = outVecCtrl.lastUop && outIsVfRedUnComp
   private val needNoMask = outCtrl.fuOpType === VfaluType.vfmerge ||
     outCtrl.fuOpType === VfaluType.vfmv_s_f ||
     outIsResuction ||
@@ -401,8 +404,8 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
     dontTouch(allFFlagsEn)
     dontTouch(fflagsRedMask)
   }
-  allFFlagsEn := Mux(outIsResuction, Cat(Fill(4*numVecModule - 1, firstNeedFFlags) & fflagsRedMask(4*numVecModule - 1, 1),
-    lastNeedFFlags || firstNeedFFlags || outIsVfRedOrdered), fflagsEn & vlMaskEn).asTypeOf(allFFlagsEn)
+  allFFlagsEn := Mux(outIsResuction, Cat(Fill(4*numVecModule - 1, firstNeedFFlags || outIsVfRedUnSum) & fflagsRedMask(4*numVecModule - 1, 1),
+    lastNeedFFlags || firstNeedFFlags || outIsVfRedOrdered || outIsVfRedUnSum), fflagsEn & vlMaskEn).asTypeOf(allFFlagsEn)
 
   val allFFlags = fflagsData.asTypeOf(Vec( 4*numVecModule,UInt(5.W)))
   val outFFlags = allFFlagsEn.zip(allFFlags).map{
