@@ -104,14 +104,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s0_mBIndex      = s0_vecstin.mBIndex
 
   // generate addr
-  // val saddr = s0_in.bits.src(0) + SignExt(s0_in.bits.uop.imm(11,0), VAddrBits)
-  val imm12 = WireInit(s0_uop.imm(11,0))
-  val saddr_lo = s0_stin.src(0)(11,0) + Cat(0.U(1.W), imm12)
-  val saddr_hi = Mux(saddr_lo(12),
-    Mux(imm12(11), s0_stin.src(0)(VAddrBits-1, 12), s0_stin.src(0)(VAddrBits-1, 12)+1.U),
-    Mux(imm12(11), s0_stin.src(0)(VAddrBits-1, 12)+SignExt(1.U, VAddrBits-12), s0_stin.src(0)(VAddrBits-1, 12)),
-  )
-  val s0_saddr = Cat(saddr_hi, saddr_lo(11,0))
+  val s0_saddr = s0_stin.src(0) + SignExt(s0_uop.imm(11,0), VAddrBits)
   val s0_vaddr = Mux(
     s0_use_flow_rs,
     s0_saddr,
