@@ -25,7 +25,7 @@ import xiangshan.frontend._
 
 class RASEntry()(implicit p: Parameters) extends XSBundle {
     val retAddr = UInt(VAddrBits.W)
-    val ctr = UInt(8.W) // layer of nested call functions
+    val ctr = UInt(RasCtrSize.W) // layer of nested call functions
     def =/=(that: RASEntry) = this.retAddr =/= that.retAddr || this.ctr =/= that.ctr
 }
 
@@ -258,7 +258,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
       Mux(topEntry.retAddr === io.spec_push_addr && topEntry.ctr < ctrMax, sctr + 1.U, 0.U))
 
     writeNos := Mux(io.redirect_valid && io.redirect_isCall,
-      io.redirect_meta_NOS, TOSR)
+      io.redirect_meta_TOSR, TOSR)
 
     when (io.spec_push_valid || (io.redirect_valid && io.redirect_isCall)) {
       writeBypassEntry := writeEntry
