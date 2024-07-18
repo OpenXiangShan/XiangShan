@@ -387,7 +387,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val s0_remEnqSelVec = Seq.tabulate(LoadPipelineWidth)(w => VecInit(s0_remLoadEnqFireVec.map(x => x(w))))
 
   // generate free mask
-  val s0_loadFreeSelMask = GatedRegNext(freeMaskVec.asUInt)
+  val s0_loadFreeSelMask = RegEnable(freeMaskVec.asUInt, 0.U, needCancel.reduce(_ || _) || ((!needReplay.reduce(_ || _) || hasExceptions.reduce(_ || _)) && io.enq.map(_.valid).reduce(_ || _) && io.enq.map(_.bits.isLoadReplay).reduce(_ || _)))
   val s0_remFreeSelVec = VecInit(Seq.tabulate(LoadPipelineWidth)(rem => getRemBits(s0_loadFreeSelMask)(rem)))
 
   // l2 hint wakes up cache missed load

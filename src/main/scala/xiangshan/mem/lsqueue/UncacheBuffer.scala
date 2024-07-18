@@ -111,7 +111,7 @@ class UncacheBufferEntry(entryIndex: Int)(implicit p: Parameters) extends XSModu
 
   io.rob.mmio := DontCare
   io.rob.uop := DontCare
-  val pendingld = GatedValidRegNext(io.rob.pendingld)
+  val pendingld = RegNext(io.rob.pendingld)
   val pendingPtr = GatedRegNext(io.rob.pendingPtr)
 
   switch (uncacheState) {
@@ -477,7 +477,7 @@ class UncacheBuffer(implicit p: Parameters) extends XSModule with HasCircularQue
   val oldestRedirect = Mux1H(oldestOneHot, allRedirect)
   val lastCycleRedirect = RegEnable(io.redirect, io.redirect.valid)
   val lastLastCycleRedirect = RegEnable(lastCycleRedirect, lastCycleRedirect.valid)
-  io.rollback.valid := GatedValidRegNext(oldestRedirect.valid &&
+  io.rollback.valid := RegNext(oldestRedirect.valid &&
                       !oldestRedirect.bits.robIdx.needFlush(io.redirect) &&
                       !oldestRedirect.bits.robIdx.needFlush(lastCycleRedirect) &&
                       !oldestRedirect.bits.robIdx.needFlush(lastLastCycleRedirect))

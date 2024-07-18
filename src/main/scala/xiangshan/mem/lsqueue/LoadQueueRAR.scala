@@ -178,8 +178,8 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   }
 
   // if need replay revoke entry
-  val lastCanAccept = GatedRegNext(acceptedVec)
-  val lastAllocIndex = GatedRegNext(enqIndexVec)
+  val lastCanAccept = RegEnable(acceptedVec, 0.U, io.query.map(_.req.ready).reduce(_ || _))
+  val lastAllocIndex = RegEnable(enqIndexVec, 0.U, canAccept.reduce(_ || _))
 
   for ((revoke, w) <- io.query.map(_.revoke).zipWithIndex) {
     val revokeValid = revoke && lastCanAccept(w)

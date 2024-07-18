@@ -99,7 +99,8 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   val enqCancelNum = enqCancel.zip(io.enq.req).map{case (v, req) =>
     Mux(v, req.bits.numLsElem, 0.U)
   }
-  val lastEnqCancel = GatedRegNext(enqCancelNum.reduce(_ + _))
+
+  val lastEnqCancel = RegEnable(enqCancelNum.reduce(_ + _), 0.U, io.enq.req.map(_.valid).reduce(_ || _))
   val lastCycleCancelCount = PopCount(lastNeedCancel)
   val redirectCancelCount = RegEnable(lastCycleCancelCount + lastEnqCancel, 0.U, lastCycleRedirect.valid)
 

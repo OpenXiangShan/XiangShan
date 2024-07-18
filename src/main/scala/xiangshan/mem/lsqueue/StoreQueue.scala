@@ -803,7 +803,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     io.uncache.req.bits.mask := DontCare // TODO
   }
 
-  io.uncache.req.bits.atomic := atomic(GatedRegNext(rdataPtrExtNext(0)).value)
+  io.uncache.req.bits.atomic := atomic(RegEnable(rdataPtrExtNext(0).value, 0.U, dataBuffer.io.enq(1).fire || dataBuffer.io.enq(0).fire || io.mmioStout.fire || io.vecmmioStout.fire))
 
   when(io.uncache.req.fire){
     // mmio store should not be committed until uncache req is sent
