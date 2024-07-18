@@ -185,12 +185,12 @@ class CtrlBlockImp(
   }).toSeq
 
   private val exuPredecode = VecInit(
-    delayedWriteBack.filter(_.bits.redirect.nonEmpty).map(x => x.bits.predecodeInfo.get).toSeq
+    io.fromWB.wbData.filter(_.bits.redirect.nonEmpty).map(x => x.bits.predecodeInfo.get).toSeq
   )
 
   private val exuRedirects: Seq[ValidIO[Redirect]] = io.fromWB.wbData.filter(_.bits.redirect.nonEmpty).map(x => {
     val out = Wire(Valid(new Redirect()))
-    out.valid := x.valid && x.bits.redirect.get.valid && x.bits.redirect.get.bits.cfiUpdate.isMisPred
+    out.valid := x.valid && x.bits.redirect.get.valid && x.bits.redirect.get.bits.cfiUpdate.isMisPred && !x.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect))
     out.bits := x.bits.redirect.get.bits
     out.bits.debugIsCtrl := true.B
     out.bits.debugIsMemVio := false.B
@@ -269,11 +269,9 @@ class CtrlBlockImp(
   io.frontend.toFtq.ftqIdxSelOH.valid := s6_flushFromRobValid || redirectGen.io.stage2Redirect.valid
   io.frontend.toFtq.ftqIdxSelOH.bits := Cat(s6_flushFromRobValid, redirectGen.io.stage2oldestOH & Fill(NumRedirect + 1, !s6_flushFromRobValid))
 
-  //jmp/brh
-  for (i <- 0 until NumRedirect) {
-    io.frontend.toFtq.ftqIdxAhead(i).valid := RegNext(oldestExuRedirect.valid)
-    io.frontend.toFtq.ftqIdxAhead(i).bits := RegEnable(oldestExuRedirect.bits.ftqIdx, oldestExuRedirect.valid)
-  }
+  //jmp/brh, sel oldest first, only use one read port
+  io.frontend.toFtq.ftqIdxAhead(0).valid := RegNext(oldestExuRedirect.valid) && !s1_robFlushRedirect.valid && !s5_flushFromRobValidAhead
+  io.frontend.toFtq.ftqIdxAhead(0).bits := RegEnable(oldestExuRedirect.bits.ftqIdx, oldestExuRedirect.valid)
   //loadreplay
   io.frontend.toFtq.ftqIdxAhead(NumRedirect).valid := loadReplay.valid && !s1_robFlushRedirect.valid && !s5_flushFromRobValidAhead
   io.frontend.toFtq.ftqIdxAhead(NumRedirect).bits := loadReplay.bits.ftqIdx

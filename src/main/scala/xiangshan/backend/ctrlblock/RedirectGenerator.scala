@@ -22,7 +22,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
 
     val memPredUpdate = Output(new MemPredUpdateReq)
     val memPredPcRead = new FtqRead(UInt(VAddrBits.W)) // read req send form stage 2
-    val stage2oldestOH = Output(UInt((NumRedirect + 1).W))
+    val stage2oldestOH = Output(UInt((1 + 1).W))
   }
 
   val io = IO(new RedirectGeneratorIO)
@@ -61,6 +61,7 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   // stage1 -> stage2
   io.stage2Redirect.valid := s1_redirect_valid_reg && !robFlush.valid
   io.stage2Redirect.bits := s1_redirect_bits_reg
+  io.stage2Redirect.bits.cfiUpdate.pd := RegEnable(oldestExuPredecode, oldestValid)
   io.stage2oldestOH := s1_redirect_onehot.asUInt
 
   val s1_isReplay = s1_redirect_onehot.last
@@ -79,6 +80,6 @@ class RedirectGenerator(implicit p: Parameters) extends XSModule
   // update store set
   io.memPredUpdate.ldpc := RegEnable(XORFold(real_pc(VAddrBits - 1, 1), MemPredPCWidth), s1_isReplay && s1_redirect_valid_reg)
   // store pc is ready 1 cycle after s1_isReplay is judged
-  io.memPredUpdate.stpc := XORFold(store_pc(VAddrBits - 1, 1), MemPredPCWidth)
+  io.memPredUpdate.stpc := RegEnable(XORFold(store_pc(VAddrBits - 1, 1), MemPredPCWidth), s1_isReplay && s1_redirect_valid_reg)
 
 }
