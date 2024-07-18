@@ -1121,6 +1121,13 @@ class NewCSR(implicit val p: Parameters) extends Module
     diffDebugMode.dscratch0 := dscratch0.rdata.asUInt
     diffDebugMode.dscratch1 := dscratch1.rdata.asUInt
 
+    val diffTriggerCSRState = DifftestModule(new DiffTriggerCSRState)
+    diffTriggerCSRState.coreid    := hartId
+    diffTriggerCSRState.tselect   := tselect.rdata
+    diffTriggerCSRState.tdata1    := tdata1.rdata
+    diffTriggerCSRState.tinfo     := tinfo.rdata
+    diffTriggerCSRState.tcontrol  := tcontrol.rdata
+
     val diffVecCSRState = DifftestModule(new DiffVecCSRState)
     diffVecCSRState.coreid := hartId
     diffVecCSRState.vstart := vstart.rdata.asUInt
