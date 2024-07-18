@@ -634,6 +634,7 @@ class TlbReq(implicit p: Parameters) extends TlbBundle {
   val memidx = Output(new MemBlockidxBundle)
   // do not translate, but still do pmp/pma check
   val no_translate = Output(Bool())
+  val pmp_addr = Output(UInt(PAddrBits.W)) // load s1 send prefetch paddr
   val debug = new Bundle {
     val pc = Output(UInt(XLEN.W))
     val robIdx = Output(new RobPtr)

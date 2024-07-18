@@ -131,7 +131,11 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   // check pmp use paddr (for timing optization, use pmp_addr here)
   // check permisson
   (0 until Width).foreach{i =>
-    pmp_check(pmp_addr(i), req_out(i).size, req_out(i).cmd, i)
+    when (RegNext(req(i).bits.no_translate)) {
+      pmp_check(req(i).bits.pmp_addr, req_out(i).size, req_out(i).cmd, i)
+    } .otherwise {
+      pmp_check(pmp_addr(i), req_out(i).size, req_out(i).cmd, i)
+    }
     for (d <- 0 until nRespDups) {
       perm_check(perm(i)(d), req_out(i).cmd, i, d, g_perm(i)(d), req_out(i).hlvx, req_out_s2xlate(i))
     }
