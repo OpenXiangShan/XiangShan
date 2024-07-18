@@ -422,7 +422,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     * response to IFU
     ******************************************************************************
     */
-  (0 until PortNumber).map{ i =>
+  (0 until PortNumber).foreach{ i =>
     if(i == 0) {
       toIFU(i).valid                        := s2_fire
       toIFU(i).bits.tlbExcp.pageFault       := s2_excp_tlb_pf(i)
@@ -431,6 +431,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
       toIFU(i).bits.tlbExcp.mmio            := s2_excp_pmp_mmio(0) && !s2_excp_tlb(0) && !s2_excp_pmp_af(0)
       toIFU(i).bits.data                    := s2_datas.asTypeOf(UInt(blockBits.W))
     } else {
+      /* Note: toIFU(1).bits.tlbExcp.xxx is already "&&ed" with doubleline before it goes into WayLookup (see IPrefetch.scala)
+       * so we actually don't need do "&&" again here,
+       * but as excp_pmp_xxx and corrupt does not, we keep all the "&&" logic here for clarity
+       */
       toIFU(i).valid                        := s2_fire && s2_doubleline
       toIFU(i).bits.tlbExcp.pageFault       := s2_excp_tlb_pf(i) && s2_doubleline
       toIFU(i).bits.tlbExcp.guestPageFault  := s2_excp_tlb_gpf(i) && s2_doubleline
@@ -440,7 +444,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     }
     toIFU(i).bits.vaddr                     := s2_req_vaddr(i)
     toIFU(i).bits.paddr                     := s2_req_paddr(i)
-    toIFU(i).bits.gpaddr                    := s2_req_gpaddr
+    toIFU(i).bits.gpaddr                    := s2_req_gpaddr  // Note: toIFU(1).bits.gpaddr is actually DontCare in current design
   }
 
   s2_flush := io.flush
