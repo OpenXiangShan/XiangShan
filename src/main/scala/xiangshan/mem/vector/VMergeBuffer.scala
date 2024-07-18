@@ -218,7 +218,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
   for((pipewb, i) <- io.fromPipeline.zipWithIndex){
     val entry               = entries(wbMbIndex(i))
     val entryVeew           = entry.uop.vpu.veew
-    val entryIsUS           = LSUOpType.isUStride(entry.uop.fuOpType)
+    val entryIsUS           = LSUOpType.isAllUS(entry.uop.fuOpType)
     val entryHasException   = ExceptionNO.selectByFu(entry.exceptionVec, fuCfg).asUInt.orR
     val entryExcp           = entryHasException && entry.mask.orR
 
