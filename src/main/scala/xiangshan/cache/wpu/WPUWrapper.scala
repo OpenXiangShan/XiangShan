@@ -129,7 +129,7 @@ class DCacheWpuWrapper (nPorts: Int = 1) (implicit p:Parameters) extends DCacheM
     s0_replay_upd.en := io.req(i).valid && io.req(i).bits.replayCarry.valid
     s0_replay_upd.vaddr := io.req(i).bits.vaddr
     s0_replay_upd.way_en := io.req(i).bits.replayCarry.real_way_en
-    val s1_replay_upd = RegNext(s0_replay_upd)
+    val s1_replay_upd = RegEnable(s0_replay_upd, io.req(i).valid)
 
     wayConflictPredictor.io.update(i).en := io.lookup_upd(i).valid
     wayConflictPredictor.io.update(i).vaddr := io.cfpred(i).s1_vaddr
