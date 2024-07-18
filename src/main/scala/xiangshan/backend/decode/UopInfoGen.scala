@@ -161,7 +161,7 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     addTime + foldTime
   }
   val numOfUopVFREDOSUM = {
-    val uvlMax = MuxLookup(vsew, 0.U)(Array(
+    val uvlMax = MuxLookup(vsew, 1.U)(Array(
       VSew.e16 -> 8.U,
       VSew.e32 -> 4.U,
       VSew.e64 -> 2.U,
@@ -244,6 +244,9 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
   io.out.uopInfo.numOfUop := numOfUop
   io.out.uopInfo.numOfWB := numOfWB
   io.out.uopInfo.lmul := lmul
+
+  XSError(typeOfSplit =/= UopSplitType.SCA_SIM && numOfUop === 0.U,
+    s"uop number $numOfUop is illegal, cannot be zero when typeOfSplit is $typeOfSplit")
 
 }
 
