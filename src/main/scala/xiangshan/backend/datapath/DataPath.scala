@@ -576,10 +576,10 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       }
   }
 
-  io.og0CancelOH := VecInit(og0FailedVec2.flatten.zip(params.allExuParams).map{ case (cancel, params) => 
-                              if (params.hasLoadExu || !params.isIQWakeUpSource) false.B else cancel
-                            }).asUInt
-  io.og1CancelOH := VecInit(toFlattenExu.map(x => x.valid && !x.fire)).asUInt
+  io.og0Cancel := og0FailedVec2.flatten.zip(params.allExuParams).map{ case (cancel, params) => 
+                    if (params.isIQWakeUpSource && params.latencyCertain && params.wakeUpFuLatancySet.contains(0)) cancel else false.B
+                  }.toSeq
+  io.og1Cancel := toFlattenExu.map(x => x.valid && !x.fire)
 
 
   if (backendParams.debugEn){
@@ -763,9 +763,9 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
 
   val toVfIQ = MixedVec(vfSchdParams.issueBlockParams.map(_.genOGRespBundle))
 
-  val og0CancelOH = Output(ExuOH(backendParams.numExu))
+  val og0Cancel = Output(ExuVec())
 
-  val og1CancelOH = Output(ExuOH(backendParams.numExu))
+  val og1Cancel = Output(ExuVec())
 
   val ldCancel = Vec(backendParams.LduCnt + backendParams.HyuCnt, Flipped(new LoadCancelIO))
 
