@@ -140,6 +140,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.tlb.req_kill                    := false.B
   io.tlb.req.bits.hyperinst          := LSUOpType.isHsv(s0_uop.fuOpType)
   io.tlb.req.bits.hlvx               := false.B
+  io.tlb.req.bits.pmp_addr           := DontCare
 
   // Dcache access here: not **real** dcache write
   // just read meta and tag in dcache, to find out the store will hit or miss
