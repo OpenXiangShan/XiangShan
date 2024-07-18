@@ -263,7 +263,7 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
     true.B
   )
 
-  private val decodeResumeVType = WireInit(0.U.asTypeOf(new ValidIO(VType())))
+  private val decodeResumeVType = RegInit(0.U.asTypeOf(new ValidIO(VType())))
   private val newestVType = PriorityMux(walkValidVec.zip(infoVec).map { case(walkValid, info) => walkValid -> info }.reverse)
   private val newestArchVType = PriorityMux(commitValidVec.zip(infoVec).map { case(commitValid, info) => commitValid -> info }.reverse)
   private val commitVTypeValid = commitValidVec.asUInt.orR
