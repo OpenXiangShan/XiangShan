@@ -77,6 +77,44 @@ trait HasLoadHelper { this: XSModule =>
     ))
   }
 
+  def genRdataOH(uop: DynInst): UInt = {
+    val fuOpType = uop.fuOpType
+    val fpWen    = uop.fpWen
+    val result = Cat(
+      (fuOpType === LSUOpType.lw && fpWen),
+      (fuOpType === LSUOpType.lw && !fpWen) || (fuOpType === LSUOpType.hlvw),
+      (fuOpType === LSUOpType.lh)           || (fuOpType === LSUOpType.hlvh),
+      (fuOpType === LSUOpType.lb)           || (fuOpType === LSUOpType.hlvb),
+      (fuOpType === LSUOpType.ld)           || (fuOpType === LSUOpType.hlvd),
+      (fuOpType === LSUOpType.lwu)          || (fuOpType === LSUOpType.hlvwu) || (fuOpType === LSUOpType.hlvxwu),
+      (fuOpType === LSUOpType.lhu)          || (fuOpType === LSUOpType.hlvhu) || (fuOpType === LSUOpType.hlvxhu),
+      (fuOpType === LSUOpType.lbu)          || (fuOpType === LSUOpType.hlvbu),
+    )
+    result
+  }
+
+  def newRdataHelper(select: UInt, rdata: UInt): UInt = {
+    XSError(PopCount(select) > 1.U, "data selector must be One-Hot!\n")
+    val selData = Seq(
+      ZeroExt(rdata(7, 0), XLEN),
+      ZeroExt(rdata(15, 0), XLEN),
+      ZeroExt(rdata(31, 0), XLEN),
+      rdata(63, 0),
+      SignExt(rdata(7, 0) , XLEN),
+      SignExt(rdata(15, 0) , XLEN),
+      SignExt(rdata(31, 0) , XLEN),
+      FPU.box(rdata, FPU.S)
+    )
+    Mux1H(select, selData)
+  }
+
+  def genDataSelectByOffset(addrOffset: UInt): Vec[Bool] = {
+    require(addrOffset.getWidth == 4)
+    VecInit((0 until 16).map{ case i =>
+      addrOffset === i.U
+    })
+  }
+
   def rdataVecHelper(alignedType: UInt, rdata: UInt): UInt = {
     LookupTree(alignedType, List(
       "b00".U -> ZeroExt(rdata(7, 0), VLEN),
