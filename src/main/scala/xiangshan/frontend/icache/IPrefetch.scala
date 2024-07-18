@@ -283,20 +283,6 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   /**
     ******************************************************************************
-    * PMP check
-    ******************************************************************************
-    */
-  toPMP.zipWithIndex.map { case (p, i) =>
-    p.valid     := s1_valid
-    p.bits.addr := s1_req_paddr(i)
-    p.bits.size := 3.U // TODO
-    p.bits.cmd  := TlbCmd.exec
-  }
-  val pmpExcp = VecInit(Seq(fromPMP(0).instr || fromPMP(0).mmio,
-                             fromPMP(0).instr || fromPMP(1).instr || fromPMP(0).mmio))
-
-  /**
-    ******************************************************************************
     * state machine
     ******** **********************************************************************
     */
@@ -351,8 +337,9 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   /**
     ******************************************************************************
     * IPrefetch Stage 2
-    * - 1. Monitor the requests from missUnit to write to SRAM.
-    * - 2. send req to missUnit
+    * - 1. Check PMP
+    * - 2. Monitor the requests from missUnit to write to SRAM.
+    * - 3. send req to missUnit
     ******************************************************************************
     */
   val s2_valid  = generatePipeControl(lastFire = s1_fire, thisFire = s2_fire, thisFlush = s2_flush, lastFlush = false.B)
@@ -361,12 +348,27 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val s2_doubleline   = RegEnable(s1_doubleline, 0.U.asTypeOf(s1_doubleline), s1_fire)
   val s2_req_paddr    = RegEnable(s1_req_paddr, 0.U.asTypeOf(s1_req_paddr), s1_fire)
 
-  val s2_pmpExcp      = RegEnable(pmpExcp, 0.U.asTypeOf(pmpExcp), s1_fire)
   val s2_itlbExcp     = RegEnable(itlbExcp, 0.U.asTypeOf(itlbExcp), s1_fire)
   val s2_waymasks     = RegEnable(s1_waymasks, 0.U.asTypeOf(s1_waymasks), s1_fire)
 
   val s2_req_vSetIdx  = s2_req_vaddr.map(get_idx(_))
   val s2_req_ptags    = s2_req_paddr.map(get_phy_tag(_))
+
+  /**
+   ******************************************************************************
+   * PMP check
+   ******************************************************************************
+   */
+  toPMP.zipWithIndex.foreach { case (p, i) =>
+    p.valid     := s2_valid
+    p.bits.addr := s2_req_paddr(i)
+    p.bits.size := 3.U // TODO
+    p.bits.cmd  := TlbCmd.exec
+  }
+  val s2_pmpExcp = VecInit(Seq(
+    fromPMP(0).instr || fromPMP(0).mmio,
+    fromPMP(0).instr || fromPMP(1).instr || fromPMP(0).mmio)
+  )
 
   /**
     ******************************************************************************
