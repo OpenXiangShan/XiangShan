@@ -360,14 +360,6 @@ class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1Pref
   }
 }
 
-object MLPReqFilterBundle{
-  def init(index: Int)(implicit p: Parameters): MLPReqFilterBundle = {
-    val r = Wire(new MLPReqFilterBundle)
-    r.reset(index)
-    r
-  }
-}
-
 // there are 5 independent pipelines inside
 // 1. prefetch enqueue
 // 2. tlb request
@@ -388,8 +380,8 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     val l2PfqBusy = Input(Bool())
   })
 
-  val l1_array = RegInit(VecInit((0 until MLP_L1_SIZE).map(MLPReqFilterBundle.init(_))))
-  val l2_array = RegInit(VecInit((0 until MLP_L2L3_SIZE).map(MLPReqFilterBundle.init(_))))
+  val l1_array = RegInit(VecInit(Seq.fill(MLP_L1_SIZE){0.U.asTypeOf(new MLPReqFilterBundle)}))
+  val l2_array = RegInit(VecInit(Seq.fill(MLP_L2L3_SIZE){0.U.asTypeOf(new MLPReqFilterBundle)}))
   val l1_replacement = new ValidPseudoLRU(MLP_L1_SIZE)
   val l2_replacement = new ValidPseudoLRU(MLP_L2L3_SIZE)
   val tlb_req_arb = Module(new RRArbiterInit(new TlbReq, MLP_SIZE))

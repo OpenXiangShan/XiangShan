@@ -70,6 +70,12 @@ class StreamBitVectorBundle(implicit p: Parameters) extends XSBundle with HasStr
     trigger_full_va := 0xdeadbeefL.U
   }
 
+  def init(index: Int): StreamBitVectorBundle = {
+    val r = Wire(new StreamBitVectorBundle)
+    r.reset(index)
+    r
+  }
+
   def tag_match(new_tag: UInt): Bool = {
     region_hash_tag(tag) === region_hash_tag(new_tag)
   }
@@ -106,14 +112,6 @@ class StreamBitVectorBundle(implicit p: Parameters) extends XSBundle with HasStr
 
     assert(PopCount(update_bit_vec) === 1.U, "update vector should be one hot")
     assert(cnt <= BIT_VEC_WITDH.U, "cnt should always less than bit vector size")
-  }
-}
-
-object StreamBitVectorBundle{
-  def init(index: Int)(implicit p: Parameters): StreamBitVectorBundle = {
-    val r = Wire(new StreamBitVectorBundle)
-    r.reset(index)
-    r
   }
 }
 
@@ -182,7 +180,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
     val stream_lookup_resp = Output(Bool())
   })
 
-  val array = RegInit(VecInit((0 until BIT_VEC_ARRAY_SIZE).map(StreamBitVectorBundle.init(_))))
+  val array = RegInit(VecInit((0 until BIT_VEC_ARRAY_SIZE).map((new StreamBitVectorBundle).init(_))))
   val replacement = ReplacementPolicy.fromString("plru", BIT_VEC_ARRAY_SIZE)
 
   // s0: generate region tag, parallel match
