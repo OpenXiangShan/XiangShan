@@ -380,7 +380,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
 
   val s2_hits = s2_waymasks.map(_.orR)
   val s2_miss = VecInit(Seq(!s2_itlbExcp(0) && !s2_pmpExcp(0) && !s2_hits(0) && !s2_MSHR_hits(0),
-                            !s2_itlbExcp(0) && !s2_pmpExcp(0) && !s2_itlbExcp(1) && s2_pmpExcp(1) && !s2_hits(1) && !s2_MSHR_hits(1) && s2_doubleline))
+                            !s2_itlbExcp(0) && !s2_pmpExcp(0) && !s2_itlbExcp(1) && !s2_pmpExcp(1) && !s2_hits(1) && !s2_MSHR_hits(1) && s2_doubleline))
 
   /**
     ******************************************************************************
