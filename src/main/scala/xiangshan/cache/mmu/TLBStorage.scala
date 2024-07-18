@@ -128,19 +128,23 @@ class TLBFA(
 
     resp.valid := GatedValidRegNext(req.valid)
     resp.bits.hit := Cat(hitVecReg).orR
+    val ppnReg   = RegEnable(VecInit(entries.map(_.genPPN(saveLevel, req.valid)(vpn))), req.fire)
+    val permReg  = RegEnable(VecInit(entries.map(_.perm)), req.fire)
+    val gPermReg = RegEnable(VecInit(entries.map(_.g_perm)), req.fire)
+    val s2xLate  = RegEnable(VecInit(entries.map(_.s2xlate)), req.fire)
     if (nWays == 1) {
       for (d <- 0 until nDups) {
-        resp.bits.ppn(d) := RegEnable(entries(0).genPPN(saveLevel, req.valid)(vpn), req.fire)
-        resp.bits.perm(d) := RegEnable(entries(0).perm, req.fire)
-        resp.bits.g_perm(d) := RegEnable(entries(0).g_perm, req.fire)
-        resp.bits.s2xlate(d) := RegEnable(entries(0).s2xlate, req.fire)
+        resp.bits.ppn(d) := ppnReg(0)
+        resp.bits.perm(d) := permReg(0)
+        resp.bits.g_perm(d) := gPermReg(0)
+        resp.bits.s2xlate(d) := s2xLate(0)
       }
     } else {
       for (d <- 0 until nDups) {
-        resp.bits.ppn(d) := RegEnable(ParallelMux(hitVec zip entries.map(_.genPPN(saveLevel, req.valid)(vpn))), req.fire)
-        resp.bits.perm(d) := RegEnable(ParallelMux(hitVec zip entries.map(_.perm)), req.fire)
-        resp.bits.g_perm(d) := RegEnable(ParallelMux(hitVec zip entries.map(_.g_perm)), req.fire)
-        resp.bits.s2xlate(d) := RegEnable(ParallelMux(hitVec zip entries.map(_.s2xlate)), req.fire)
+        resp.bits.ppn(d) := Mux1H(hitVecReg zip ppnReg)
+        resp.bits.perm(d) := Mux1H(hitVecReg zip permReg)
+        resp.bits.g_perm(d) := Mux1H(hitVecReg zip gPermReg)
+        resp.bits.s2xlate(d) := Mux1H(hitVecReg zip s2xLate)
       }
     }
 
