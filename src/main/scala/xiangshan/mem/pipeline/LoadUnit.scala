@@ -924,6 +924,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_fire   = s2_valid && !s2_kill && s2_can_go
   val s2_vecActive = RegEnable(s1_out.vecActive, true.B, s1_fire)
   val s2_isvec  = RegEnable(s1_out.isvec, false.B, s1_fire)
+  val s2_data_select  = genRdataOH(s2_out.uop)
+  val s2_data_select_by_offset = genDataSelectByOffset(s2_out.paddr(3, 0))
 
   s2_kill := s2_in.uop.robIdx.needFlush(io.redirect)
   s2_ready := !s2_valid || s2_kill || s3_ready
@@ -1207,6 +1209,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_vec_alignedType = RegEnable(s2_out.alignedType, s2_fire)
   val s3_vec_mBIndex     = RegEnable(s2_out.mbIndex, s2_fire)
   val s3_mmio         = Wire(Valid(new MemExuOutput))
+  val s3_data_select  = RegEnable(s2_data_select, 0.U(s2_data_select.getWidth.W), s2_fire)
+  val s3_data_select_by_offset = RegEnable(s2_data_select_by_offset, 0.U.asTypeOf(s2_data_select_by_offset), s2_fire)
   // TODO: Fix vector load merge buffer nack
   val s3_vec_mb_nack  = Wire(Bool())
   s3_vec_mb_nack     := false.B
@@ -1367,25 +1371,26 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_ld_raw_data_frm_cache.forward_result_valid := RegEnable(s2_fwd_data_valid, false.B, s2_valid)
 
   val s3_merged_data_frm_cache = s3_ld_raw_data_frm_cache.mergedData()
-  val s3_picked_data_frm_cache = LookupTree(s3_ld_raw_data_frm_cache.addrOffset, List(
-    "b0000".U -> s3_merged_data_frm_cache(63,    0),
-    "b0001".U -> s3_merged_data_frm_cache(63,    8),
-    "b0010".U -> s3_merged_data_frm_cache(63,   16),
-    "b0011".U -> s3_merged_data_frm_cache(63,   24),
-    "b0100".U -> s3_merged_data_frm_cache(63,   32),
-    "b0101".U -> s3_merged_data_frm_cache(63,   40),
-    "b0110".U -> s3_merged_data_frm_cache(63,   48),
-    "b0111".U -> s3_merged_data_frm_cache(63,   56),
-    "b1000".U -> s3_merged_data_frm_cache(127,  64),
-    "b1001".U -> s3_merged_data_frm_cache(127,  72),
-    "b1010".U -> s3_merged_data_frm_cache(127,  80),
-    "b1011".U -> s3_merged_data_frm_cache(127,  88),
-    "b1100".U -> s3_merged_data_frm_cache(127,  96),
-    "b1101".U -> s3_merged_data_frm_cache(127, 104),
-    "b1110".U -> s3_merged_data_frm_cache(127, 112),
-    "b1111".U -> s3_merged_data_frm_cache(127, 120)
-  ))
-  val s3_ld_data_frm_cache = rdataHelper(s3_ld_raw_data_frm_cache.uop, s3_picked_data_frm_cache)
+  val s3_data_frm_cache = Seq(
+    s3_merged_data_frm_cache(63,    0),
+    s3_merged_data_frm_cache(63,    8),
+    s3_merged_data_frm_cache(63,   16),
+    s3_merged_data_frm_cache(63,   24),
+    s3_merged_data_frm_cache(63,   32),
+    s3_merged_data_frm_cache(63,   40),
+    s3_merged_data_frm_cache(63,   48),
+    s3_merged_data_frm_cache(63,   56),
+    s3_merged_data_frm_cache(127,  64),
+    s3_merged_data_frm_cache(127,  72),
+    s3_merged_data_frm_cache(127,  80),
+    s3_merged_data_frm_cache(127,  88),
+    s3_merged_data_frm_cache(127,  96),
+    s3_merged_data_frm_cache(127, 104),
+    s3_merged_data_frm_cache(127, 112),
+    s3_merged_data_frm_cache(127, 120)
+  )
+  val s3_picked_data_frm_cache = Mux1H(s3_data_select_by_offset, s3_data_frm_cache)
+  val s3_ld_data_frm_cache = newRdataHelper(s3_data_select, s3_picked_data_frm_cache)
 
   // FIXME: add 1 cycle delay ?
   // io.lsq.uncache.ready := !s3_valid
