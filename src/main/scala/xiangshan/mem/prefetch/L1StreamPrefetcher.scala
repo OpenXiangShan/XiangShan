@@ -70,8 +70,8 @@ class StreamBitVectorBundle(implicit p: Parameters) extends XSBundle with HasStr
     trigger_full_va := 0xdeadbeefL.U
   }
 
-  def tag_match(valid: Bool, new_tag: UInt): Bool = {
-    valid && region_hash_tag(tag) === region_hash_tag(new_tag)
+  def tag_match(valid1: Bool, valid2: Bool, new_tag: UInt): Bool = {
+    valid1 && valid2 && region_hash_tag(tag) === region_hash_tag(new_tag)
   }
 
   def alloc(alloc_tag: UInt, alloc_bit_vec: UInt, alloc_active: Bool, alloc_decr_mode: Bool, alloc_full_vaddr: UInt) = {
@@ -194,9 +194,9 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   val s0_region_tag = get_region_tag(s0_vaddr)
   val s0_region_tag_plus_one = get_region_tag(s0_vaddr) + 1.U
   val s0_region_tag_minus_one = get_region_tag(s0_vaddr) - 1.U
-  val s0_region_tag_match_vec = array zip valids map { case (e, v) => e.tag_match(v, s0_region_tag) }
-  val s0_region_tag_plus_one_match_vec = array zip valids map { case (e, v) => e.tag_match(v, s0_region_tag_plus_one) }
-  val s0_region_tag_minus_one_match_vec = array zip valids map { case (e, v) => e.tag_match(v, s0_region_tag_minus_one) }
+  val s0_region_tag_match_vec = array zip valids map { case (e, v) => e.tag_match(v, s0_valid, s0_region_tag) }
+  val s0_region_tag_plus_one_match_vec = array zip valids map { case (e, v) => e.tag_match(v, s0_valid, s0_region_tag_plus_one) }
+  val s0_region_tag_minus_one_match_vec = array zip valids map { case (e, v) => e.tag_match(v, s0_valid, s0_region_tag_minus_one) }
   val s0_hit = Cat(s0_region_tag_match_vec).orR
   val s0_plus_one_hit = Cat(s0_region_tag_plus_one_match_vec).orR
   val s0_minus_one_hit = Cat(s0_region_tag_minus_one_match_vec).orR
@@ -405,7 +405,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   // S1: match
   val s1_lookup_valid = GatedValidRegNext(s0_lookup_valid)
   val s1_lookup_tag = RegEnable(s0_lookup_tag, s0_lookup_valid)
-  val s1_lookup_tag_match_vec = array zip valids map { case (e, v) => e.tag_match(v, s1_lookup_tag) }
+  val s1_lookup_tag_match_vec = array zip valids map { case (e, v) => e.tag_match(v, s1_lookup_valid, s1_lookup_tag) }
   val s1_lookup_hit = VecInit(s1_lookup_tag_match_vec).asUInt.orR
   val s1_lookup_index = OHToUInt(VecInit(s1_lookup_tag_match_vec))
   // S2: read active out

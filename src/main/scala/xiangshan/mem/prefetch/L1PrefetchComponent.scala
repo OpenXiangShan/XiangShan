@@ -273,9 +273,9 @@ class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1Pref
     debug_va_region := 0.U
   }
 
-  def tag_match(valid: Bool, new_tag: UInt): Bool = {
+  def tag_match(valid1: Bool, valid2: Bool, new_tag: UInt): Bool = {
     require(new_tag.getWidth == HASH_TAG_WIDTH)
-    (tag === new_tag) && valid
+    (tag === new_tag) && valid1 && valid2
   }
 
   def update(update_bit_vec: UInt, update_sink: UInt) = {
@@ -434,7 +434,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   val s0_l1_valid = io.l1_prefetch_req.valid && s0_l1_can_accept
   val s0_l1_region = io.l1_prefetch_req.bits.region
   val s0_l1_region_hash = region_hash_tag(s0_l1_region)
-  val s0_l1_match_vec = l1_array.zip(l1_valids).map{ case (e, v) => e.tag_match(v, s0_l1_region_hash)}
+  val s0_l1_match_vec = l1_array.zip(l1_valids).map{ case (e, v) => e.tag_match(v, s0_l1_valid, s0_l1_region_hash)}
   val s0_l1_hit = VecInit(s0_l1_match_vec).asUInt.orR
   val s0_l1_index = Wire(UInt(log2Up(MLP_L1_SIZE).W))
   val s0_l1_prefetch_req = (new MLPReqFilterBundle).fromStreamPrefetchReqBundle(io.l1_prefetch_req.bits)
@@ -484,7 +484,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   val s0_l2_valid = io.l2_l3_prefetch_req.valid && s0_l2_can_accept
   val s0_l2_region = io.l2_l3_prefetch_req.bits.region
   val s0_l2_region_hash = region_hash_tag(s0_l2_region)
-  val s0_l2_match_vec = l2_array.zip(l2_valids).map{ case (e, v) => e.tag_match(v, s0_l2_region_hash) }
+  val s0_l2_match_vec = l2_array.zip(l2_valids).map{ case (e, v) => e.tag_match(v, s0_l2_valid, s0_l2_region_hash) }
   val s0_l2_hit = VecInit(s0_l2_match_vec).asUInt.orR
   val s0_l2_index = Wire(UInt(log2Up(MLP_L2L3_SIZE).W))
   val s0_l2_prefetch_req = (new MLPReqFilterBundle).fromStreamPrefetchReqBundle(io.l2_l3_prefetch_req.bits)
@@ -594,10 +594,10 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     val l1_evict = s1_l1_alloc && (s1_l1_index === i.U)
     val l2_evict = s1_l2_alloc && ((s1_l2_index + MLP_L1_SIZE.U) === i.U)
     if(i < MLP_L1_SIZE) {
-      tlb_req_arb.io.in(i).valid := l1_array(i).is_vaddr && !s1_tlb_fire_vec(i) && !s2_tlb_fire_vec(i) && !l1_evict
+      tlb_req_arb.io.in(i).valid := l1_valids(i) && l1_array(i).is_vaddr && !s1_tlb_fire_vec(i) && !s2_tlb_fire_vec(i) && !l1_evict
       tlb_req_arb.io.in(i).bits.vaddr := l1_array(i).get_tlb_va()
     }else {
-      tlb_req_arb.io.in(i).valid := l2_array(i - MLP_L1_SIZE).is_vaddr && !s1_tlb_fire_vec(i) && !s2_tlb_fire_vec(i) && !l2_evict
+      tlb_req_arb.io.in(i).valid := l2_valids(i - MLP_L1_SIZE) && l2_array(i - MLP_L1_SIZE).is_vaddr && !s1_tlb_fire_vec(i) && !s2_tlb_fire_vec(i) && !l2_evict
       tlb_req_arb.io.in(i).bits.vaddr := l2_array(i - MLP_L1_SIZE).get_tlb_va()
     }
     tlb_req_arb.io.in(i).bits.cmd := TlbCmd.read
