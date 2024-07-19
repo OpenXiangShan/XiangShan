@@ -200,7 +200,7 @@ class VecExceptionGen(implicit p: Parameters) extends XSModule{
                                   intExt4 && LMUL <= 2.U ||
                                   intExt8 && LMUL <= 3.U
 
-  private val wnEmulIllegal = (vdWideningInst || narrowingInst || redWideningInst) && LMUL === 7.U
+  private val wnEmulIllegal = (vdWideningInst || narrowingInst) && LMUL === 7.U
 
   private val gather16EmulIllegal = vrgather16 && (LMUL < SEW || LMUL > SEW +& 6.U)
 
