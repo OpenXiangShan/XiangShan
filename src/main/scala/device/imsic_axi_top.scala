@@ -57,11 +57,11 @@ class imsic_axi_top(
     val o_msi_info = Output(UInt(MSI_INFO_WIDTH.W))
     val o_msi_info_vld = Output(Bool())
   })
-  addResource("/aia/src/rtl/imsic/imsic_axi_top.v")
-  addResource("/aia/src/rtl/imsic/imsic_axi2reg.v")
-  addResource("/aia/src/rtl/imsic/imsic_regmap.v")
-  addResource("/aia/src/rtl/imsic/common/generic_fifo_dc_gray.v")
-  addResource("/aia/src/rtl/imsic/common/generic_dpram.v")
+  addResource("/aia/src/rtl/imsic/imsic_axi_top.sv")
+  addResource("/aia/src/rtl/imsic/imsic_axi2reg.sv")
+  addResource("/aia/src/rtl/imsic/imsic_regmap.sv")
+  addResource("/aia/src/rtl/imsic/common/generic_fifo_dc_gray.sv")
+  addResource("/aia/src/rtl/imsic/common/generic_dpram.sv")
 }
 
 class imsic_bus_top(
