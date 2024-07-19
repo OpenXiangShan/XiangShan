@@ -59,6 +59,8 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
     in.trapPc,
   )
 
+  private val trapPCGPA = SignExt(in.trapPcGPA, XLEN)
+
   private val trapMemVA = genTrapVA(
     dMode,
     satp,
@@ -78,15 +80,16 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
   private val isHlsExcp      = isException && in.isHls
   private val fetchCrossPage = in.isCrossPageIPF
 
-  private val isGuestExcp    = isException && ExceptionNO.getGuestPageFault.map(_.U === highPrioTrapNO).reduce(_ || _)
+  private val isLSGuestExcp    = isException && ExceptionNO.getLSGuestPageFault.map(_.U === highPrioTrapNO).reduce(_ || _)
+  private val isFetchGuestExcp = isException && ExceptionNO.EX_IGPF.U === highPrioTrapNO
   // Software breakpoint exceptions are permitted to write either 0 or the pc to xtval
   // We fill pc here
-  private val tvalFillPc       = isFetchExcp && !fetchCrossPage || isBpExcp
-  private val tvalFillPcPlus2  = isFetchExcp && fetchCrossPage
+  private val tvalFillPc       = (isFetchExcp || isFetchGuestExcp) && !fetchCrossPage || isBpExcp 
+  private val tvalFillPcPlus2  = (isFetchExcp || isFetchGuestExcp) && fetchCrossPage
   private val tvalFillMemVaddr = isMemExcp
   private val tvalFillGVA      =
     isHlsExcp && isMemExcp ||
-    isGuestExcp ||
+    isLSGuestExcp|| isFetchGuestExcp ||
     (isFetchExcp || isBpExcp) && fetchIsVirt ||
     isMemExcp && memIsVirt
 
@@ -95,10 +98,14 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
     (tvalFillPcPlus2                ) -> (trapPC + 2.U),
     (tvalFillMemVaddr && !memIsVirt ) -> trapMemVA,
     (tvalFillMemVaddr &&  memIsVirt ) -> trapMemVA,
-    (isGuestExcp                    ) -> trapMemVA,
+    (isLSGuestExcp                  ) -> trapMemVA,
   ))
 
-  private val tval2 = Mux(isGuestExcp, trapMemGPA, 0.U)
+  private val tval2 = Mux1H(Seq(
+    (isFetchGuestExcp                  ) -> trapPC,
+    (isFetchGuestExcp && fetchCrossPage) -> (trapPCGPA + 2.U),
+    (isLSGuestExcp                     ) -> trapMemGPA,
+  ))
 
   out := DontCare
 
@@ -130,7 +137,7 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
   out.htinst.bits.ALL           := 0.U
   out.targetPc.bits             := in.pcFromXtvec
 
-  dontTouch(isGuestExcp)
+  dontTouch(isLSGuestExcp)
   dontTouch(tvalFillGVA)
 }
 

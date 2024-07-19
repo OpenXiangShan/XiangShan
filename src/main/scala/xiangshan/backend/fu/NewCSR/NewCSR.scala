@@ -107,6 +107,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     val fromRob = Input(new Bundle {
       val trap = ValidIO(new Bundle {
         val pc = UInt(VaddrMaxWidth.W)
+        val pcGPA = UInt(VaddrMaxWidth.W)
         val instr = UInt(32.W)
         val trapVec = UInt(64.W)
         val singleStep = Bool()
@@ -199,6 +200,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   val hasTrap = io.fromRob.trap.valid
   val trapVec = io.fromRob.trap.bits.trapVec
   val trapPC = io.fromRob.trap.bits.pc
+  val trapPCGPA = io.fromRob.trap.bits.pcGPA
   val trapIsInterrupt = io.fromRob.trap.bits.isInterrupt
   val trapIsCrossPageIPF = io.fromRob.trap.bits.crossPageIPFFix
   val triggerCf = io.fromRob.trap.bits.triggerCf
@@ -594,6 +596,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       case in: TrapEntryEventInput =>
         in.causeNO := trapHandleMod.io.out.causeNO
         in.trapPc := trapPC
+        in.trapPcGPA := trapPCGPA // only used by trapEntryMEvent & trapEntryHSEvent
         in.isCrossPageIPF := trapIsCrossPageIPF
         in.isHls := trapIsHls
 
