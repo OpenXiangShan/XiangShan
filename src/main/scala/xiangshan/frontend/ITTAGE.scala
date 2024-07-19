@@ -149,16 +149,12 @@ class ITTageTable
   })
 
   val SRAM_SIZE=128
-  val nBanks = 1
-  val bankSize = nRows / nBanks
-  val bankFoldWidth = if (bankSize >= SRAM_SIZE) bankSize / SRAM_SIZE else 1
 
-  if (bankSize < SRAM_SIZE) {
-    println(f"warning: ittage table $tableIdx has small sram depth of $bankSize")
+  val foldedWidth = if (nRows >= SRAM_SIZE) nRows / SRAM_SIZE else 1
+
+  if (nRows < SRAM_SIZE) {
+    println(f"warning: ittage table $tableIdx has small sram depth of $nRows")
   }
-  val bankIdxWidth = log2Ceil(nBanks)
-  def get_bank_mask(idx: UInt) = VecInit((0 until nBanks).map(idx(bankIdxWidth-1, 0) === _.U))
-  def get_bank_idx(idx: UInt) = idx >> bankIdxWidth
 
   // override val debug = true
   // bypass entries for tage update
@@ -213,23 +209,23 @@ class ITTageTable
   val (s1_idx, s1_tag) = (RegEnable(s0_idx, io.req.fire), RegEnable(s0_tag, io.req.fire))
   val s1_valid = RegNext(s0_valid)
 
-  val table_bank = Module(new FoldedSRAMTemplate(
-    new ITTageEntry, set=nRows, width=bankFoldWidth, shouldReset=true, holdRead=true, singlePort=true, useBitmask=true))
+  val table = Module(new FoldedSRAMTemplate(
+    new ITTageEntry, set=nRows, width=foldedWidth, shouldReset=true, holdRead=true, singlePort=true, useBitmask=true))
 
-  table_bank.io.r.req.valid := io.req.fire
-  table_bank.io.r.req.bits.setIdx := s0_idx
+  table.io.r.req.valid := io.req.fire
+  table.io.r.req.bits.setIdx := s0_idx
 
-  val table_bank_r = table_bank.io.r.resp.data(0)
+  val table_read_data = table.io.r.resp.data(0)
 
-  val s1_req_rhit = table_bank_r.valid && table_bank_r.tag === s1_tag
+  val s1_req_rhit = table_read_data.valid && table_read_data.tag === s1_tag
 
   val read_write_conflict = io.update.valid && io.req.valid
   val s1_read_write_conflict = RegEnable(read_write_conflict, io.req.valid)
 
   io.resp.valid := (if (tagLen != 0) s1_req_rhit && !s1_read_write_conflict else true.B) && s1_valid // && s1_mask(b)
-  io.resp.bits.ctr := table_bank_r.ctr
-  io.resp.bits.u := table_bank_r.useful
-  io.resp.bits.target := table_bank_r.target
+  io.resp.bits.ctr := table_read_data.ctr
+  io.resp.bits.u := table_read_data.useful
+  io.resp.bits.target := table_read_data.target
 
   // Use fetchpc to compute hash
   val update_folded_hist = WireInit(0.U.asTypeOf(new AllFoldedHistories(foldedGHistInfos)))
@@ -239,8 +235,6 @@ class ITTageTable
   update_folded_hist.getHistWithInfo(altTagFhInfo).folded_hist := compute_folded_ghist(io.update.ghist, tagLen-1)
   dontTouch(update_folded_hist)
   val (update_idx, update_tag) = compute_tag_and_hash(getUnhashedIdx(io.update.pc), update_folded_hist)
-  val update_req_bank_1h = get_bank_mask(update_idx)
-  val update_idx_in_bank = get_bank_idx(update_idx)
   val update_target = io.update.target
   val update_wdata = Wire(new ITTageEntry)
 
@@ -250,17 +244,21 @@ class ITTageTable
   val updateNoUsBitmask = VecInit.tabulate(ittageEntrySz)(_.U >= ITTageUsBits.U).asUInt //update others besides useful bit
   val updateUsBitmask = VecInit.tabulate(ittageEntrySz)(_.U < ITTageUsBits.U).asUInt    //update useful bit
 
-  val needReset = RegEnable(true.B, false.B, io.update.reset_u)
+  val needReset = RegInit(false.B)
   val useful_can_reset = !(io.req.fire || io.update.valid) && needReset
   val (resetSet, resetFinish) = Counter(useful_can_reset, nRows)
-  when (resetFinish) { needReset := false.B }
+  when (io.update.reset_u) {
+    needReset := true.B
+  }.elsewhen (resetFinish) {
+    needReset := false.B
+  }
   val update_bitmask =  Mux(io.update.uValid && io.update.valid,
                           updateAllBitmask,
                           Mux(io.update.valid, updateNoUsBitmask,
                             Mux(useful_can_reset, updateUsBitmask, updateNoBitmask)
                           ))
 
-  table_bank.io.w.apply(
+  table.io.w.apply(
     valid   = io.update.valid || useful_can_reset,
     data    = update_wdata,
     setIdx  = Mux(useful_can_reset, resetSet, update_idx),
@@ -289,8 +287,8 @@ class ITTageTable
 
   XSPerfAccumulate("ittage_table_updates", io.update.valid)
   XSPerfAccumulate("ittage_table_hits", io.resp.valid)
-  XSPerfAccumulate(f"ittage_us_tick_reset", io.update.reset_u)
-  XSPerfAccumulate(f"ittage_table_read_write_conflict", read_write_conflict)
+  XSPerfAccumulate("ittage_us_tick_reset", io.update.reset_u)
+  XSPerfAccumulate("ittage_table_read_write_conflict", read_write_conflict)
 
   if (BPUDebug && debug) {
     val u = io.update
