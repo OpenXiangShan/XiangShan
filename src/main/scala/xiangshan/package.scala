@@ -830,6 +830,8 @@ package object xiangshan {
 
     def getGuestPageFault = Seq(EX_IGPF, EX_LGPF, EX_SGPF)
 
+    def getLSGuestPageFault = Seq(EX_LGPF, EX_SGPF)
+
     def getFetchFault = Seq(EX_IAM, EX_IAF, EX_IPF)
 
     def getLoadFault = Seq(EX_LAM, EX_LAF, EX_LPF)
