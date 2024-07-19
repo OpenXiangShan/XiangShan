@@ -840,7 +840,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // (4) or vector store:
   // TODO: implement it!
   io.vecmmioStout := DontCare
-  io.vecmmioStout.valid := uncacheState === s_wb && isVec(deqPtr)
+  io.vecmmioStout.valid := false.B //uncacheState === s_wb && isVec(deqPtr)
   io.vecmmioStout.bits.uop := uop(deqPtr)
   io.vecmmioStout.bits.uop.sqIdx := deqPtrExt(0)
   io.vecmmioStout.bits.data := shiftDataToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).data) // dataModule.io.rdata.read(deqPtr)
