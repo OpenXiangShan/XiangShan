@@ -148,12 +148,15 @@ class SRAM(object):
     depth = 0
     ports = ''
     mask_gran = 0
+    read_mcp2 = 0  # or generalize as read-latency
     tokens = line.split()
     i = 0
     for i in range(0, len(tokens), 2):
       s = tokens[i]
       if s == 'name':
         name = tokens[i+1]
+        if 'mcp2' in name:
+          read_mcp2 = 1
       elif s == 'width':
         width = int(tokens[i+1])
         mask_gran = width # default setting
@@ -165,11 +168,11 @@ class SRAM(object):
         mask_gran = int(tokens[i+1])
       else:
         sys.exit('%s: unknown argument %s' % (sys.argv[0], i))
-    self.conf = (name, width, depth, mask_gran, width//mask_gran, ports)
+    self.conf = (name, width, depth, mask_gran, width//mask_gran, ports, read_mcp2)
   # return (name, width, depth, mask_gran, width//mask_gran, ports)
 
   def prepare_module(self):
-    (name, width, depth, mask_gran, mask_seg, ports) = self.conf
+    (name, width, depth, mask_gran, mask_seg, ports, _) = self.conf
     addr_width = max(math.ceil(math.log(depth)/math.log(2)),1)
 
     mem = VerilogModuleGenerator(name)
@@ -220,7 +223,7 @@ class SRAM(object):
     self.ports_conf = (readports, writeports, latchports, rwports, maskedports)
 
   def generate(self, blackbox):
-    (name, width, depth, mask_gran, mask_seg, ports) = self.conf
+    (name, width, depth, mask_gran, mask_seg, ports, read_mcp2) = self.conf
     addr_width = max(math.ceil(math.log(depth)/math.log(2)),1)
     mem, (readports, writeports, latchports, rwports, maskedports) = self.mem, self.ports_conf
 
@@ -234,10 +237,19 @@ class SRAM(object):
       en = ('%sen && !%swmode' % (prefix, prefix)) if rw else ('%sen' % prefix)
       mem.add_decl_reg(1, f"reg_{prefix}ren")
       mem.add_decl_reg(addr_width, f"reg_{prefix}addr")
+      if read_mcp2:
+        mem.add_decl_wire(1, f"{prefix}addr_diff")
+        mem.add_decl_wire(1, f"{prefix}rdata_valid")
+        mem.add_decl_reg(addr_width, f"reg_{prefix}addr_2")
+        mem.add_combinational(f"assign {prefix}addr_diff = ({prefix}addr != reg_{prefix}addr);")
+        mem.add_combinational(f"assign {prefix}rdata_valid = reg_{prefix}ren && ({prefix}addr_diff || !({en}));")
       mem.add_sequential(f"always @(posedge {prefix}clk)")
       mem.add_sequential(f"  reg_{prefix}ren <= {en};")
       mem.add_sequential(f"always @(posedge {prefix}clk)")
       mem.add_sequential(f"  if ({en}) reg_{prefix}addr <= {prefix}addr;")
+      if read_mcp2:
+        mem.add_sequential(f"always @(posedge {prefix}rdata_valid)")
+        mem.add_sequential(f"  reg_{prefix}addr_2 <= reg_{prefix}addr;")
       mem.add_combinational("`ifdef RANDOMIZE_GARBAGE_ASSIGN")
       mem.add_combinational(f"reg [{((width-1)//32+1)*32-1}:0] {prefix}random;")
       mem.add_combinational(f"`ifdef RANDOMIZE_MEM_INIT")
@@ -248,9 +260,16 @@ class SRAM(object):
       mem.add_combinational('  end')
       mem.add_combinational('`endif')
       mem.add_combinational('always @(posedge %sclk) %srandom <= {%s};' % (prefix, prefix, ', '.join(['$random'] * ((width-1)//32+1))))
-      mem.add_combinational('assign %s = reg_%sren ? ram[reg_%saddr] : %srandom[%d:0];' % (data, prefix, prefix, prefix, width-1))
+      if not read_mcp2:
+        mem.add_combinational('assign %s = reg_%sren ? ram[reg_%saddr] : %srandom[%d:0];' % (data, prefix, prefix, prefix, width-1))
+      else:
+        mem.add_combinational('assign %s = %srdata_valid ? ram[reg_%saddr_2] : %srandom[%d:0];' % (data, prefix, prefix, prefix, width-1))
       mem.add_combinational('`else')
-      mem.add_combinational('assign %s = ram[reg_%saddr];' % (data, prefix))
+      if not read_mcp2:
+        mem.add_combinational('assign %s = ram[reg_%saddr];' % (data, prefix))
+      else:
+        mem.add_combinational('assign %s = ram[reg_%saddr_2];' % (data, prefix))
+
       mem.add_combinational('`endif')
 
     for idx in range(nr):
@@ -280,12 +299,11 @@ class SRAM(object):
     mem.add_decl_line('    #`RANDOMIZE_DELAY begin end')
     mem.add_decl_line('    for (initvar = 0; initvar < %d; initvar = initvar+1)' % depth)
     mem.add_decl_line('      ram[initvar] = {%d {$random}};' % ((width-1)//32+1))
-    for idx in range(nr):
-      prefix = 'R%d_' % idx
+    prefixes = ['R%d_' % idx for idx in range(nr)] + ['RW%d_' % idx for idx in range(nrw)]
+    for prefix in prefixes:
       mem.add_decl_line('    reg_%saddr = {%d {$random}};' % (prefix, ((addr_width-1)//32+1)))
-    for idx in range(nrw):
-      prefix = 'RW%d_' % idx
-      mem.add_decl_line('    reg_%saddr = {%d {$random}};' % (prefix, ((addr_width-1)//32+1)))
+      if read_mcp2:
+        mem.add_decl_line('    reg_%saddr_2 = {%d {$random}};' % (prefix, ((addr_width-1)//32+1)))
     mem.add_decl_line('  end')
     mem.add_decl_line('`endif')
 
@@ -429,3 +447,35 @@ if __name__ == '__main__':
   args = parser.parse_args()
   #use_latches = args.use_latches
   main(args)
+
+# when SRAM rdata path is set multicycle 2, rdata is unstable at the first cycle after read fire,
+# and we should sample rdata at the second cycle after read fire.
+# To simulate this behavior, we modify the SRAM model for MCP2.
+#
+# SRAMs with MCP2 in RTL will use suggestName 'array_mcp2'
+# This script captures 'mcp2' in module name and specialize these SRAMs.
+#
+# SRAMs with MCP2 must also satisfy other requirements:
+# 1. no continuous SRAM reqs (need a gap cycle between two reqs)
+# 2. input signals should hold for at least 2 cycles
+# 3. **use enable to clock gate SRAM**, make sure each req is only sampled once
+# According to these, we implement MCP2 SRAM model as follows
+#
+# === paste the code to WaveDrom Editor to visualize MCP2 behavior ===
+# {signal: [ 
+#   {name:'clk', wave:'p.........'}, 
+#   {name:'clk_mask', wave:'0.plpl.pl.'},
+#   {name:'ren', wave:'01...01.0.'},
+#   {name:'addr', wave:'x3.4.x5.x.'},
+#   {name:'spec_rdata',wave:'x..3x4x.5x'},
+#   {name:''},
+#   {name:'How We Output RDATA two cycles after rfire'},
+#   {name:'ren_reg', wave:'0.1.......'},
+#   {name:'addr_reg', wave:'x.3.4..5..'},
+#   {name:'1.reg_ren && !ren', wave:'0....10.1.'},  // capture negedge of ren
+#   {name:'2.addr_diff', wave:'0x010x10xx'}, // additional when continuous ren
+#   {name:'rdata_valid ='},
+#   {name:'reg_ren && (addr_diff || !ren)', wave:'0..101.01.'},
+#   {name:'rdata',wave:'x..3x4.x5.'},
+# ]
+# }
