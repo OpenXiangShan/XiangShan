@@ -59,8 +59,8 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val wakeupFromIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
   val vlIsZero = Input(Bool())
   val vlIsVlmax = Input(Bool())
-  val og0Cancel = Input(ExuOH(backendParams.numExu))
-  val og1Cancel = Input(ExuOH(backendParams.numExu))
+  val og0Cancel = Input(ExuVec())
+  val og1Cancel = Input(ExuVec())
   val ldCancel = Vec(backendParams.LduCnt + backendParams.HyuCnt, Flipped(new LoadCancelIO))
 
   // Outputs

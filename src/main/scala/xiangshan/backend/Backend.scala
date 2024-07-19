@@ -208,8 +208,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   memScheduler.io.fromWbFuBusyTable.fuBusyTableRead := wbFuBusyTable.io.out.memRespRead
   dataPath.io.wbConfictRead := wbFuBusyTable.io.out.wbConflictRead
 
-  private val og1CancelOH: UInt = dataPath.io.og1CancelOH
-  private val og0CancelOH: UInt = dataPath.io.og0CancelOH
+  private val og1Cancel = dataPath.io.og1Cancel
+  private val og0Cancel = dataPath.io.og0Cancel
   private val vlIsZero = intExuBlock.io.vlIsZero.get
   private val vlIsVlmax = intExuBlock.io.vlIsVlmax.get
 
@@ -247,8 +247,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   intScheduler.io.vlWriteBack := 0.U.asTypeOf(intScheduler.io.vlWriteBack)
   intScheduler.io.fromDataPath.resp := dataPath.io.toIntIQ
   intScheduler.io.fromSchedulers.wakeupVec.foreach { wakeup => wakeup := iqWakeUpMappedBundle(wakeup.bits.exuIdx) }
-  intScheduler.io.fromDataPath.og0Cancel := og0CancelOH
-  intScheduler.io.fromDataPath.og1Cancel := og1CancelOH
+  intScheduler.io.fromDataPath.og0Cancel := og0Cancel
+  intScheduler.io.fromDataPath.og1Cancel := og1Cancel
   intScheduler.io.ldCancel := io.mem.ldCancel
   intScheduler.io.vlWriteBackInfo.vlIsZero := false.B
   intScheduler.io.vlWriteBackInfo.vlIsVlmax := false.B
@@ -264,8 +264,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   fpScheduler.io.vlWriteBack := 0.U.asTypeOf(fpScheduler.io.vlWriteBack)
   fpScheduler.io.fromDataPath.resp := dataPath.io.toFpIQ
   fpScheduler.io.fromSchedulers.wakeupVec.foreach { wakeup => wakeup := iqWakeUpMappedBundle(wakeup.bits.exuIdx) }
-  fpScheduler.io.fromDataPath.og0Cancel := og0CancelOH
-  fpScheduler.io.fromDataPath.og1Cancel := og1CancelOH
+  fpScheduler.io.fromDataPath.og0Cancel := og0Cancel
+  fpScheduler.io.fromDataPath.og1Cancel := og1Cancel
   fpScheduler.io.ldCancel := io.mem.ldCancel
   fpScheduler.io.vlWriteBackInfo.vlIsZero := false.B
   fpScheduler.io.vlWriteBackInfo.vlIsVlmax := false.B
@@ -300,8 +300,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   memScheduler.io.fromMem.get.vstuFeedback := io.mem.vstuIqFeedback
   memScheduler.io.fromMem.get.vlduFeedback := io.mem.vlduIqFeedback
   memScheduler.io.fromSchedulers.wakeupVec.foreach { wakeup => wakeup := iqWakeUpMappedBundle(wakeup.bits.exuIdx) }
-  memScheduler.io.fromDataPath.og0Cancel := og0CancelOH
-  memScheduler.io.fromDataPath.og1Cancel := og1CancelOH
+  memScheduler.io.fromDataPath.og0Cancel := og0Cancel
+  memScheduler.io.fromDataPath.og1Cancel := og1Cancel
   memScheduler.io.ldCancel := io.mem.ldCancel
   memScheduler.io.vlWriteBackInfo.vlIsZero := vlIsZero
   memScheduler.io.vlWriteBackInfo.vlIsVlmax := vlIsVlmax
@@ -317,8 +317,8 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   vfScheduler.io.vlWriteBack := wbDataPath.io.toVlPreg
   vfScheduler.io.fromDataPath.resp := dataPath.io.toVfIQ
   vfScheduler.io.fromSchedulers.wakeupVec.foreach { wakeup => wakeup := iqWakeUpMappedBundle(wakeup.bits.exuIdx) }
-  vfScheduler.io.fromDataPath.og0Cancel := og0CancelOH
-  vfScheduler.io.fromDataPath.og1Cancel := og1CancelOH
+  vfScheduler.io.fromDataPath.og0Cancel := og0Cancel
+  vfScheduler.io.fromDataPath.og1Cancel := og1Cancel
   vfScheduler.io.ldCancel := io.mem.ldCancel
   vfScheduler.io.vlWriteBackInfo.vlIsZero := vlIsZero
   vfScheduler.io.vlWriteBackInfo.vlIsVlmax := vlIsVlmax

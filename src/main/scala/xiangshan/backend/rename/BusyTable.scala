@@ -42,7 +42,7 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
     // fast wakeup
     val wakeUp: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpInValidBundle)
     // cancelFromDatapath
-    val og0Cancel = Input(ExuOH(backendParams.numExu))
+    val og0Cancel = Input(ExuVec())
     // cancelFromMem
     val ldCancel = Vec(backendParams.LdExuCnt, Flipped(new LoadCancelIO))
     // read preg state

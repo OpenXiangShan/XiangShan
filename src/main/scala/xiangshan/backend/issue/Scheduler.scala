@@ -93,9 +93,9 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
 
   val fromDataPath = new Bundle {
     val resp: MixedVec[MixedVec[OGRespBundle]] = MixedVec(params.issueBlockParams.map(x => Flipped(x.genOGRespBundle)))
-    val og0Cancel = Input(ExuOH(backendParams.numExu))
+    val og0Cancel = Input(ExuVec())
     // Todo: remove this after no cancel signal from og1
-    val og1Cancel = Input(ExuOH(backendParams.numExu))
+    val og1Cancel = Input(ExuVec())
     // just be compatible to old code
     def apply(i: Int)(j: Int) = resp(i)(j)
   }
