@@ -55,7 +55,7 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
   }) with HasRobCommitBundle {
     // Todo make The use of vstart values greater than the largest element index for the current SEW setting is reserved.
     // Not trap
-    when (wen && this.w.wdata < VLEN.U) {
+    when (wen) {
       reg.vstart := this.w.wdata(VlWidth - 2, 0)
     }.elsewhen (robCommit.vsDirty && !robCommit.vstart.valid) {
       reg.vstart := 0.U
