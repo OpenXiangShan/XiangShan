@@ -17,6 +17,7 @@
 package device.standalone
 
 import chisel3._
+import chisel3.util._
 import freechips.rocketchip.diplomacy._
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.devices.tilelink._
@@ -46,8 +47,10 @@ class StandAloneCLINT (
   class StandAloneCLINTImp(outer: StandAloneCLINT)(implicit p: Parameters) extends StandAloneDeviceImp(outer) {
     val io = IO(new Bundle {
       val rtcTick = Input(Bool())
+      val time = Output(ValidIO(UInt(64.W)))
     })
     outer.clint.module.io.rtcTick := io.rtcTick
+    io.time := outer.clint.module.io.time
   }
 
   override lazy val module = new StandAloneCLINTImp(this)
