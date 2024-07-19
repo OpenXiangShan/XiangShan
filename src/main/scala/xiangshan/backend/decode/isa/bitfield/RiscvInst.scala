@@ -15,6 +15,7 @@ class Riscv32BitInst extends RiscvInst(32) {
   def RS2       : UInt  = inst(24, 20)
   def FUNCT7    : UInt  = inst(31, 25)
   def OPCODE5Bit: UInt  = inst( 6,  2)
+  def OPCODE7Bit: UInt  = inst( 6,  0)
 }
 
 trait BitFieldsI { this: Riscv32BitInst =>
@@ -132,4 +133,8 @@ object OPCODE5Bit {
   val RESERVED_1 = "b11_101".U
   val CUSTOM_3   = "b11_110".U
   val INSTge80b  = "b11_111".U
+}
+
+object OPCODE7Bit {
+  val VECTOR_ARITH = "b1010111".U
 }
