@@ -168,7 +168,7 @@ class TrainFilter(size: Int, name: String)(implicit p: Parameters) extends XSMod
     }
   }
 
-  val entries = RegInit(VecInit(Seq.fill(size){ (0.U.asTypeOf(new PrefetchReqBundle())) }))
+  val entries = Reg(Vec(size, new PrefetchReqBundle))
   val valids = RegInit(VecInit(Seq.fill(size){ (false.B) }))
 
   // enq
