@@ -379,12 +379,12 @@ case class IssueBlockParams(
     MixedVec(exuBlockParams.map(_ => new Valid(new EntryDeqRespBundle)))
   }
 
-  def genWbFuBusyTableWriteBundle()(implicit p: Parameters) = {
+  def genWbFuBusyTableWriteBundle(implicit p: Parameters) = {
     implicit val issueBlockParams = this
     MixedVec(exuBlockParams.map(x => new WbFuBusyTableWriteBundle(x)))
   }
 
-  def genWbFuBusyTableReadBundle()(implicit p: Parameters) = {
+  def genWbFuBusyTableReadBundle(implicit p: Parameters) = {
     implicit val issueBlockParams = this
     MixedVec(exuBlockParams.map{ x =>
       new WbFuBusyTableReadBundle(x)

@@ -310,7 +310,7 @@ trait SdtrigExt extends HasXSParameter{
 
     val ret = Wire(Vec(pcVecWidth, Bool()))
     ret.zipWithIndex.map{case (r, i) => r := MuxLookup(matchType, false.B)(
-      Array(
+      Seq(
         TrigMatchEnum.EQ -> overallEqual(i),
         TrigMatchEnum.GE -> overallGreater(i),
         TrigMatchEnum.LT -> overallLess(i))) && enable}

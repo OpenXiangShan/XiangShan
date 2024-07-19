@@ -192,11 +192,11 @@ object Tdata1Type extends CSREnum with WARLApply {
   val Tmexttrigger = Value(7.U)
   val Disabled     = Value(15.U)
 
-  override def isLegal(enum: CSREnumType): Bool = enum.isOneOf(Mcontrol)
+  override def isLegal(enumeration: CSREnumType): Bool = enumeration.isOneOf(Mcontrol)
 
-  override def legalize(enum: CSREnumType): CSREnumType = {
-    val res = WireInit(enum)
-    when(!enum.isLegal){
+  override def legalize(enumeration: CSREnumType): CSREnumType = {
+    val res = WireInit(enumeration)
+    when(!enumeration.isLegal){
       res := Disabled.asUInt
     }
     res
@@ -210,11 +210,11 @@ object TrigAction extends CSREnum with WARLApply {
   val TraceOff      = Value(3.U)
   val TraceNotify   = Value(4.U)
 
-  override def isLegal(enum: CSREnumType, dmode: Bool): Bool = enum.isOneOf(BreakpointExp) || enum.isOneOf(DebugMode) && dmode
+  override def isLegal(enumeration: CSREnumType, dmode: Bool): Bool = enumeration.isOneOf(BreakpointExp) || enumeration.isOneOf(DebugMode) && dmode
 
-  override def legalize(enum: CSREnumType, dmode: Bool): CSREnumType = {
-    val res = WireInit(enum)
-    when(!enum.isLegal(dmode)){
+  override def legalize(enumeration: CSREnumType, dmode: Bool): CSREnumType = {
+    val res = WireInit(enumeration)
+    when(!enumeration.isLegal(dmode)){
       res := BreakpointExp
     }
     res.asInstanceOf[CSREnumType]
@@ -232,15 +232,15 @@ object TrigMatch extends CSREnum with WARLApply {
   val NNAPOT    = Value(9.U)  // not napot
   val NMASK_LO  = Value(12.U) // not mask low
   val NMASK_HI  = Value(13.U) // not mask high
-  def isRVSpecLegal(enum: CSREnumType) : Bool = enum.isOneOf(
+  def isRVSpecLegal(enumeration: CSREnumType) : Bool = enumeration.isOneOf(
     EQ, NAPOT, GE, LT, MASK_LO, MASK_HI,
     NE, NNAPOT, NMASK_LO, NMASK_HI,
   )
-  override def isLegal(enum: CSREnumType): Bool = enum.isOneOf(EQ, GE, LT)
+  override def isLegal(enumeration: CSREnumType): Bool = enumeration.isOneOf(EQ, GE, LT)
 
-  override def legalize(enum: CSREnumType): CSREnumType = {
-    val res = WireInit(enum)
-    when(!enum.isLegal){
+  override def legalize(enumeration: CSREnumType): CSREnumType = {
+    val res = WireInit(enumeration)
+    when(!enumeration.isLegal){
       res := EQ
     }
     res.asInstanceOf[CSREnumType]

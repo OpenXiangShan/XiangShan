@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -308,7 +309,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   }
 
   for (i <- 0 until VirtualLoadQueueSize) {
-    XSDebug(i + " pc %x pa %x ", uop(i).pc, debug_paddr(i))
+    XSDebug(s"$i pc %x pa %x ", uop(i).pc, debug_paddr(i))
     PrintFlag(allocated(i), "v")
     PrintFlag(allocated(i) && datavalid(i), "d")
     PrintFlag(allocated(i) && addrvalid(i), "a")

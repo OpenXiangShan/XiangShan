@@ -119,9 +119,9 @@ trait MachineLevel { self: NewCSR =>
     // But when bit 1 of mvien is one, bit 1(SSIP) of mvip is a separate writable bit independent of mip.SSIP.
     // When the value of bit 1 of mvien is changed from zero to one, the value of bit 1 of mvip becomes UNSPECIFIED.
     // XiangShan will keep the value in mvip.SSIP when mvien.SSIE is changed from zero to one
-    reg.SSIP := Mux(wen && mvien.SSIE.asBool, wdata.SSIP, reg.SSIP)
-    regOut.SSIP := Mux(mvien.SSIE.asBool, reg.SSIP, this.mip.SSIP)
-    toMip.SSIP.valid := wen && !mvien.SSIE.asBool
+    reg.SSIP := Mux(wen && this.mvien.SSIE.asBool, wdata.SSIP, reg.SSIP)
+    regOut.SSIP := Mux(this.mvien.SSIE.asBool, reg.SSIP, this.mip.SSIP)
+    toMip.SSIP.valid := wen && !this.mvien.SSIE.asBool
     toMip.SSIP.bits := wdata.SSIP
 
     // Bit 5 of mvip is an alias of the same bit (STIP) in mip when that bit is writable in mip.
@@ -135,7 +135,7 @@ trait MachineLevel { self: NewCSR =>
     // When bit 9 of mvien is zero, bit 9 of mvip is an alias of the software-writable bit 9 of mip (SEIP).
     // But when bit 9 of mvien is one, bit 9 of mvip is a writable bit independent of mip.SEIP.
     // Unlike for bit 1, changing the value of bit 9 of mvien does not affect the value of bit 9 of mvip.
-    toMip.SEIP.valid := wen && !mvien.SEIE.asUInt.asBool
+    toMip.SEIP.valid := wen && !this.mvien.SEIE.asUInt.asBool
     toMip.SEIP.bits := wdata.SEIP
     when (fromMip.SEIP.valid) {
       reg.SEIP := fromMip.SEIP.bits
@@ -165,7 +165,7 @@ trait MachineLevel { self: NewCSR =>
 
   val mhpmevents: Seq[CSRModule[_]] = (3 to 0x1F).map(num =>
     Module(new CSRModule(s"Mhpmevent$num", new MhpmeventBundle) with HasPerfEventBundle {
-      regOut := perfEvents(num - 3)
+      regOut := this.perfEvents(num - 3)
     })
       .setAddr(CSRs.mhpmevent3 - 3 + num)
   )
@@ -245,11 +245,11 @@ trait MachineLevel { self: NewCSR =>
     // mip.SEIP is implemented as the alias of mvip.SEIP when mvien=0
     // the read valid of SEIP is ORed by mvip.SEIP and the other source from the interrupt controller.
 
-    toMvip.SEIP.valid := wen && !mvien.SSIE
+    toMvip.SEIP.valid := wen && !this.mvien.SSIE
     toMvip.SEIP.bits := wdata.SEIP
     // When mvien.SEIE = 0, mip.SEIP is alias of mvip.SEIP.
     // Otherwise, mip.SEIP is read only 0
-    regOut.SEIP := Mux(!mvien.SEIE, mvip.SEIP.asUInt, 0.U)
+    regOut.SEIP := Mux(!this.mvien.SEIE, this.mvip.SEIP.asUInt, 0.U)
     rdataFields.SEIP := regOut.SEIP || platformIRP.SEIP || aiaToCSR.seip
 
     // bit 10 VSEIP
@@ -290,7 +290,7 @@ trait MachineLevel { self: NewCSR =>
   val mcycle = Module(new CSRModule("Mcycle") with HasMachineCounterControlBundle {
     when(w.wen) {
       reg := w.wdata
-    }.elsewhen(!mcountinhibit.CY.asUInt.asBool) {
+    }.elsewhen(!this.mcountinhibit.CY.asUInt.asBool) {
       reg := reg.ALL.asUInt + 1.U
     }.otherwise {
       reg := reg
@@ -301,7 +301,7 @@ trait MachineLevel { self: NewCSR =>
   val minstret = Module(new CSRModule("Minstret") with HasMachineCounterControlBundle with HasRobCommitBundle {
     when(w.wen) {
       reg := w.wdata
-    }.elsewhen(!mcountinhibit.IR && robCommit.instNum.valid) {
+    }.elsewhen(!this.mcountinhibit.IR && robCommit.instNum.valid) {
       reg := reg.ALL.asUInt + robCommit.instNum.bits
     }.otherwise {
       reg := reg
@@ -310,7 +310,7 @@ trait MachineLevel { self: NewCSR =>
 
   val mhpmcounters: Seq[CSRModule[_]] = (3 to 0x1F).map(num =>
     Module(new CSRModule(s"Mhpmcounter$num", new MhpmcounterBundle) with HasMachineCounterControlBundle with HasPerfCounterBundle {
-      val countingInhibit = mcountinhibit.asUInt(num) | !countingEn
+      val countingInhibit = this.mcountinhibit.asUInt(num) | !countingEn
       val counterAdd = reg.ALL.asUInt +& perf.value
       when (w.wen) {
         reg := w.wdata

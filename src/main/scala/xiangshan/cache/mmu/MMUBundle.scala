@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -883,7 +884,7 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
     }
   }
 
-  def refill(vpn: UInt, asid: UInt, vmid: UInt, pte: UInt, level: UInt = 0.U, prefetch: Bool, valid: Bool = false.B) {
+  def refill(vpn: UInt, asid: UInt, vmid: UInt, pte: UInt, level: UInt = 0.U, prefetch: Bool, valid: Bool = false.B): Unit = {
     require(this.asid.getWidth <= asid.getWidth) // maybe equal is better, but ugly outside
 
     tag := vpn(vpnLen - 1, vpnLen - tagLen)
@@ -1050,7 +1051,7 @@ class PtwReq(implicit p: Parameters) extends PtwBundle {
   def hasS2xlate(): Bool = {
     this.s2xlate =/= noS2xlate
   }
-  def isOnlyStage2(): Bool = {
+  def isOnlyStage2: Bool = {
     this.s2xlate === onlyStage2
   }
   override def toPrintable: Printable = {
@@ -1236,11 +1237,11 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
   val s1 = new PtwSectorResp()
   val s2 = new HptwResp()
 
-  def hasS2xlate(): Bool = {
+  def hasS2xlate: Bool = {
     this.s2xlate =/= noS2xlate
   }
 
-  def isOnlyStage2(): Bool = {
+  def isOnlyStage2: Bool = {
     this.s2xlate === onlyStage2
   }
 
@@ -1261,7 +1262,7 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
   }
 
   def hit(vpn: UInt, asid: UInt, vasid: UInt, vmid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false): Bool = {
-    val noS2_hit = s1.hit(vpn, Mux(this.hasS2xlate(), vasid, asid), vmid, allType, ignoreAsid, this.hasS2xlate)
+    val noS2_hit = s1.hit(vpn, Mux(this.hasS2xlate, vasid, asid), vmid, allType, ignoreAsid, this.hasS2xlate)
     val onlyS2_hit = s2.hit(vpn, vmid)
     // allstage and onlys1 hit
     val s1vpn = Cat(s1.entry.tag, s1.addr_low)

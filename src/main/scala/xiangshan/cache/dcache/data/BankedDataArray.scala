@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -169,7 +170,7 @@ class DataSRAMBank(index: Int)(implicit p: Parameters) extends DCacheModule {
   // val rw_bypass = RegNext(io.w.addr === io.r.addr && io.w.way_en === io.r.way_en && io.w.en)
 
   // multiway data bank
-  val data_bank = Array.fill(DCacheWays) {
+  val data_bank = Seq.fill(DCacheWays) {
     Module(new SRAMTemplate(
       Bits(DCacheSRAMRowBits.W),
       set = DCacheSets / DCacheSetDiv,
@@ -275,7 +276,7 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     encWord(encWordBits - 1, wordBits)
   }
 
-  def dumpRead() = {
+  def dumpRead = {
     (0 until LoadPipelineWidth) map { w =>
       when(io.read(w).valid) {
         XSDebug(s"DataArray Read channel: $w valid way_en: %x addr: %x\n",
@@ -288,7 +289,7 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     }
   }
 
-  def dumpWrite() = {
+  def dumpWrite = {
     when(io.write.valid) {
       XSDebug(s"DataArray Write valid way_en: %x addr: %x\n",
         io.write.bits.way_en, io.write.bits.addr)
@@ -300,7 +301,7 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     }
   }
 
-  def dumpResp() = {
+  def dumpResp = {
     XSDebug(s"DataArray ReadeResp channel:\n")
     (0 until LoadPipelineWidth) map { r =>
       XSDebug(s"cycle: $r data: %x\n", Mux(io.is128Req(r),

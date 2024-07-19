@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -64,7 +65,7 @@ class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray {
     })
 
     val r_way_en_reg = RegEnable(io.r_way_en, io.ren)
-    val data_array = Array.fill(nWays) {
+    val data_array = Seq.fill(nWays) {
       Module(new SRAMTemplate(
         Bits(rowBits.W),
         set = nSets,
@@ -154,13 +155,13 @@ class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray {
       for (k <- 0 until rowWords) {
         ecc_resp_chosen(k) := Mux1H(way_en, ecc_resp(k))
       }
-      io.resp(j)(r) := Cat((0 until rowWords) reverseMap {
+      io.resp(j)(r) := Cat((0 until rowWords).reverseIterator.map {
         k => {
           val data = Cat(ecc_resp_chosen(k), data_resp_chosen(k))
           row_error(r)(k) := dcacheParameters.dataCode.decode(data).error && RegNext(rmask(r))
           data
         }
-      })
+      }.toSeq)
       io.errors(j).bits.report_to_beu := RegNext(io.read(j).fire) && Cat(row_error.flatten).orR
       io.errors(j).bits.paddr := RegEnable(io.read(j).bits.addr, io.read(j).fire)
     }

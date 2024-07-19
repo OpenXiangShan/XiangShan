@@ -1,7 +1,6 @@
 package xiangshan.backend.fu
 
 import chisel3._
-import chisel3.internal.firrtl.Width
 import chisel3.util.BitPat
 import utils.EnumUtils.OHEnumeration
 import org.chipsalliance.cde.config.Parameters

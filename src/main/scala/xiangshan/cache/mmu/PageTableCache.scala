@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -42,7 +43,7 @@ class PageCachePerPespBundle(implicit p: Parameters) extends PtwBundle {
   val v = Bool()
 
   def apply(hit: Bool, pre: Bool, ppn: UInt, perm: PtePermBundle = 0.U.asTypeOf(new PtePermBundle()),
-            ecc: Bool = false.B, level: UInt = 0.U, valid: Bool = true.B) {
+            ecc: Bool = false.B, level: UInt = 0.U, valid: Bool = true.B): Unit = {
     this.hit := hit && !ecc
     this.pre := pre
     this.ppn := ppn
@@ -64,7 +65,7 @@ class PageCacheMergePespBundle(implicit p: Parameters) extends PtwBundle {
   val v = Vec(tlbcontiguous, Bool())
 
   def apply(hit: Bool, pre: Bool, ppn: Vec[UInt], perm: Vec[PtePermBundle] = Vec(tlbcontiguous, 0.U.asTypeOf(new PtePermBundle())),
-            ecc: Bool = false.B, level: UInt = 0.U, valid: Vec[Bool] = Vec(tlbcontiguous, true.B)) {
+            ecc: Bool = false.B, level: UInt = 0.U, valid: Vec[Bool] = Vec(tlbcontiguous, true.B)): Unit = {
     this.hit := hit && !ecc
     this.pre := pre
     this.ppn := ppn

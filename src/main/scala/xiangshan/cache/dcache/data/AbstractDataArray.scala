@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -50,7 +51,7 @@ abstract class AbstractDataArray(implicit p: Parameters) extends DCacheModule {
 
   def pipeMap[T <: Data](f: Int => T) = VecInit((0 until 3).map(f))
 
-  def dumpRead() = {
+  def dumpRead = {
     (0 until 3) map { w =>
       when(io.read(w).valid) {
         XSDebug(s"DataArray Read channel: $w valid way_en: %x addr: %x\n",
@@ -59,7 +60,7 @@ abstract class AbstractDataArray(implicit p: Parameters) extends DCacheModule {
     }
   }
 
-  def dumpWrite() = {
+  def dumpWrite = {
     when(io.write.valid) {
       XSDebug(s"DataArray Write valid way_en: %x addr: %x\n",
         io.write.bits.way_en, io.write.bits.addr)
@@ -71,7 +72,7 @@ abstract class AbstractDataArray(implicit p: Parameters) extends DCacheModule {
     }
   }
 
-  def dumpResp() = {
+  def dumpResp = {
     (0 until 3) map { w =>
       XSDebug(s"DataArray ReadResp channel: $w\n")
       (0 until blockRows) map { r =>
@@ -80,7 +81,7 @@ abstract class AbstractDataArray(implicit p: Parameters) extends DCacheModule {
     }
   }
 
-  def dumpNack() = {
+  def dumpNack = {
     (0 until 3) map { w =>
       when(io.nacks(w)) {
         XSDebug(s"DataArray NACK channel: $w\n")
