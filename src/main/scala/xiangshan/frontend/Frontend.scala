@@ -152,7 +152,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   icache.io.csr_pf_enable     := RegNext(csrCtrl.l1I_pf_enable)
   icache.io.csr_parity_enable := RegNext(csrCtrl.icache_parity_enable)
 
-  icache.io.fencei := io.fencei
+  icache.io.fencei := RegNext(io.fencei)
 
   //IFU-Ibuffer
   ifu.io.toIbuffer    <> ibuffer.io.in
