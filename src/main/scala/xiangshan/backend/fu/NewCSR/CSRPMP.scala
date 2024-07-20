@@ -4,7 +4,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.rocket.CSRs
 import org.chipsalliance.cde.config.Parameters
-import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRWARLField => WARL}
+import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRROField => RO, CSRWARLField => WARL}
 import xiangshan.backend.fu.NewCSR.CSRFunc._
 import xiangshan.PMParameKey
 import freechips.rocketchip.tile.XLen
@@ -68,8 +68,8 @@ class PMPCfgBundle extends CSRBundle {
   val W      = WARL(           1, wNoFilter).withReset(false.B)
   val X      = WARL(           2, wNoFilter).withReset(false.B)
   val A      = PMPCfgAField(4, 3, wNoFilter).withReset(PMPCfgAField.OFF)
-  val ATOMIC = WARL(           5, wNoFilter).withReset(false.B)           // res(0), unuse in pmp
-  val C      = WARL(           6, wNoFilter).withReset(false.B)           // res(1), unuse in pmp
+  val ATOMIC = RO(5).withReset(false.B)           // res(0), unuse in pmp
+  val C      = RO(6).withReset(false.B)           // res(1), unuse in pmp
   val L      = PMPCfgLField(   7, wNoFilter).withReset(PMPCfgLField.UNLOCKED)
 }
 
