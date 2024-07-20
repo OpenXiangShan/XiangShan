@@ -372,7 +372,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheMiss
   val mshr_resp = allMSHRs_resp(id_r)
 
   // get waymask from replacer when acquire fire
-  io.victim.vSetIdx.valid := acquireArb.io.out.valid
+  io.victim.vSetIdx.valid := acquireArb.io.out.fire
   io.victim.vSetIdx.bits  := acquireArb.io.out.bits.vSetIdx
   val waymask = UIntToOH(mshr_resp.bits.waymask)
   val fetch_resp_valid = mshr_resp.valid && last_fire_r && !io.flush && !io.fencei
