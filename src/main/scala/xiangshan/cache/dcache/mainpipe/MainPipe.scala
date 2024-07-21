@@ -402,7 +402,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s2_banked_store_wmask = RegEnable(s1_banked_store_wmask, s1_fire)
   val s2_flag_error = RegEnable(s1_flag_error, s1_fire)
   val s2_tag_error = WireInit(false.B)
-  val s2_l2_error = io.refill_info.bits.error
+  val s2_l2_error = Mux(io.refill_info.valid, io.refill_info.bits.error, s2_req.error)
   val s2_error = s2_flag_error || s2_tag_error || s2_l2_error // data_error not included
 
   val s2_may_report_data_error = s2_need_data && s2_coh.state =/= ClientStates.Nothing
@@ -1503,7 +1503,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.meta_write.bits.way_en := s3_way_en_dup(0)
   io.meta_write.bits.meta.coh := new_coh
 
-  io.error_flag_write.valid := s3_fire_dup_for_err_w_valid && update_meta_dup_for_err_w_valid && s3_l2_error
+  io.error_flag_write.valid := s3_fire_dup_for_err_w_valid && update_meta_dup_for_err_w_valid && (s3_l2_error || s3_req.miss)
   io.error_flag_write.bits.idx := s3_idx_dup(3)
   io.error_flag_write.bits.way_en := s3_way_en_dup(1)
   io.error_flag_write.bits.flag := s3_l2_error
@@ -1629,7 +1629,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   }
   dontTouch(io.status_dup)
 
-  io.mainpipe_info.s2_valid := s2_valid
+  io.mainpipe_info.s2_valid := s2_valid && s2_req.miss
   io.mainpipe_info.s2_miss_id := s2_req.miss_id
   io.mainpipe_info.s2_replay_to_mq := s2_valid && s2_can_go_to_mq_replay
   io.mainpipe_info.s3_valid := s3_valid
