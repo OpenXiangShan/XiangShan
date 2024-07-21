@@ -744,7 +744,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   io.req_addr.valid := req_valid
   io.req_addr.bits := req.addr
 
-  io.refill_info.valid := w_grantlast
+  io.refill_info.valid := req_valid && w_grantlast
   io.refill_info.bits.store_data := refill_and_store_data.asUInt
   io.refill_info.bits.store_mask := ~0.U(blockBytes.W)
   io.refill_info.bits.miss_param := grant_param
