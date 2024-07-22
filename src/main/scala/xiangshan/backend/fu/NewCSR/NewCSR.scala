@@ -725,9 +725,17 @@ class NewCSR(implicit val p: Parameters) extends Module
     vstart.w.wdata =/= 0.U && vstart.regOut.vstart.asUInt === 0.U
   )
 
+  val statusTvmChanged =
+    mstatus.w.wen && (mstatus.w.wdataFields.TVM =/= mstatus.regOut.TVM) ||
+    hstatus.w.wen && (hstatus.w.wdataFields.VTVM =/= hstatus.regOut.VTVM)
+
+  val statusTwChanged =
+    mstatus.w.wen && (mstatus.w.wdataFields.TW =/= mstatus.regOut.TW) ||
+    hstatus.w.wen && (hstatus.w.wdataFields.VTW =/= hstatus.regOut.VTW)
+
   val flushPipe = resetSatp ||
     triggerFrontendChange || floatStatusOnOff || vectorStatusOnOff ||
-    vstartChange
+    vstartChange || statusTvmChanged || statusTwChanged
 
   private val rdata = Mux1H(csrRwMap.map { case (id, (_, rdata)) =>
     if (vsMapS.contains(id)) {
