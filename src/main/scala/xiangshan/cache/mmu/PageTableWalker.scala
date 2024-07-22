@@ -131,7 +131,8 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val hptw_resp_stage2 = Reg(Bool()) 
 
   val ppn_af = Mux(s2xlate, pte.isStage1Af(), pte.isAf()) // In two-stage address translation, stage 1 ppn is a vpn for host, so don't need to check ppn_high
-  val find_pte = pte.isLeaf() || ppn_af || pageFault || hptw_pageFault || hptw_accessFault
+  val guest_fault = hptw_pageFault || hptw_accessFault
+  val find_pte = pte.isLeaf() || ppn_af || pageFault
   val to_find_pte = level === 1.U && find_pte === false.B
   val source = RegEnable(io.req.bits.req_info.source, io.req.fire)
 
@@ -153,9 +154,9 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   io.req.ready := idle
   val ptw_resp = Wire(new PtwMergeResp)
-  ptw_resp.apply(pageFault && !accessFault && !ppn_af, accessFault || ppn_af, Mux(accessFault, af_level,level), pte, vpn, satp.asid, hgatp.asid, vpn(sectortlbwidth - 1, 0), not_super = false)
+  ptw_resp.apply(pageFault && !accessFault && !ppn_af, accessFault || ppn_af, Mux(accessFault, af_level,level), Mux(guest_fault || accessFault, 0.U.asTypeOf(pte), pte), vpn, satp.asid, hgatp.asid, vpn(sectortlbwidth - 1, 0), not_super = false)
 
-  val normal_resp = idle === false.B && mem_addr_update && !last_s2xlate && ((w_mem_resp && find_pte) || (s_pmp_check && accessFault) || onlyS2xlate)
+  val normal_resp = idle === false.B && mem_addr_update && !last_s2xlate && ((w_mem_resp && find_pte) || (s_pmp_check && accessFault) || onlyS2xlate || guest_fault)
   val stageHit_resp = idle === false.B && hptw_resp_stage2 
   io.resp.valid := Mux(stage1Hit, stageHit_resp, normal_resp)
   io.resp.bits.source := source
@@ -216,6 +217,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     accessFault := false.B
     idle := false.B
     hptw_pageFault := false.B
+    hptw_accessFault := false.B
     req_s2xlate := io.req.bits.req_info.s2xlate
     when(io.req.bits.req_info.s2xlate =/= noS2xlate && io.req.bits.req_info.s2xlate =/= onlyStage1){
       last_s2xlate := true.B
@@ -287,15 +289,17 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   }
 
   when(mem_addr_update){
-    when(level === 0.U && !onlyS2xlate && !(find_pte || accessFault)){
-      level := levelNext
-      when(s2xlate){
-        s_hptw_req := false.B
-      }.otherwise{
-        s_mem_req := false.B
+    when(level === 0.U && !onlyS2xlate && !guest_fault){
+      when(!(find_pte || accessFault)){  
+        level := levelNext
+        when(s2xlate){
+          s_hptw_req := false.B
+        }.otherwise{
+          s_mem_req := false.B
+        }
+        s_llptw_req := true.B
+        mem_addr_update := false.B
       }
-      s_llptw_req := true.B
-      mem_addr_update := false.B
     }.elsewhen(io.llptw.valid){
       when(io.llptw.fire) {
         idle := true.B
