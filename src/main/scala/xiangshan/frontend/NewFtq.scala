@@ -204,6 +204,7 @@ class FtqToICacheIO(implicit p: Parameters) extends XSBundle with HasCircularQue
   //NOTE: req.bits must be prepare in T cycle
   // while req.valid is set true in T + 1 cycle
   val req = Decoupled(new FtqToICacheRequestBundle)
+  val flush = Output(Bool())
 }
 
 trait HasBackendRedirectInfo extends HasXSParameter {
@@ -1117,6 +1118,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // ***********************************************************************************
 
   val redirectVec = VecInit(backendRedirect, fromIfuRedirect)
+
+  io.toICache.flush := redirectVec.map(r => r.valid).reduce(_||_)
 
   // when redirect, we should reset ptrs and status queues
   when(redirectVec.map(r => r.valid).reduce(_||_)){

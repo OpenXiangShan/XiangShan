@@ -499,6 +499,7 @@ class ICacheIO(implicit p: Parameters) extends ICacheBundle
   val csr_pf_enable = Input(Bool())
   val csr_parity_enable = Input(Bool())
   val fencei      = Input(Bool())
+  val flush       = Input(Bool())
 }
 
 class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParameters {
@@ -589,6 +590,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   mainPipe.io.csr_parity_enable     := io.csr_parity_enable
   mainPipe.io.hartId                := io.hartId
   mainPipe.io.fencei                := io.fencei
+  mainPipe.io.flush                 := io.flush
 
   io.pmp(0) <> mainPipe.io.pmp(0)
   io.pmp(1) <> mainPipe.io.pmp(1)
