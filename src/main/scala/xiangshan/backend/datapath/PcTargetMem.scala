@@ -40,12 +40,8 @@ class PcTargetMemImp(override val wrapper: PcTargetMem)(implicit p: Parameters, 
   private val newestEn: Bool = io.fromFrontendFtq.newest_entry_en
   private val newestTarget: UInt = io.fromFrontendFtq.newest_entry_target
 
-  // The FtqPtr is used to compare with read ptr since its arrival(T), so it needs to be holded and bypassed.
-  private val currentNewestFtqPtr = DataHoldBypass(io.fromFrontendFtq.newest_entry_ptr, newestEn)
-  // The newest target will be used at T+1, so there is no need to bypass it.
-  private val currentNewestTarget = RegEnable(io.fromFrontendFtq.newest_entry_target, newestEn)
   private val targetReadPtrVec = 0 until params.numTargetReadPort map { i =>
-    RegEnable(io.toDataPath.fromDataPathFtqPtr(i), io.toDataPath.fromDataPathValid(i))
+    RegEnable(io.toDataPath.fromDataPathFtqPtr(i) + 1.U, io.toDataPath.fromDataPathValid(i))
   }
 
   for (i <- 0 until params.numTargetReadPort) {
@@ -54,11 +50,11 @@ class PcTargetMemImp(override val wrapper: PcTargetMem)(implicit p: Parameters, 
     targetMem.io.ren.get(i) := readValid(i)
     targetMem.io.raddr(i) := (targetPtr + 1.U).value
 
-    val hitNewestFtqPtr = RegEnable(targetPtr === currentNewestFtqPtr, false.B, readValid(i))
+    val hitNewestFtqPtr = RegEnable(targetPtr === io.fromFrontendFtq.newest_entry_ptr, false.B, readValid(i))
     targetPCVec(i) := MuxCase(
       default = Fill(VAddrBits, 1.U(1.W)), // use all 1s as invalid predict jump target
       mapping = Seq(
-        hitNewestFtqPtr -> currentNewestTarget,
+        hitNewestFtqPtr -> RegEnable(newestTarget, newestEn),
         (rdataVec(i).flag === targetReadPtrVec(i).flag) -> rdataVec(i).addr.startAddr,
       )
     )
