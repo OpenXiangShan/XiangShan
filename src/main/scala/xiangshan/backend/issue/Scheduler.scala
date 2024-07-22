@@ -15,6 +15,7 @@ import xiangshan.backend.rename.BusyTable
 import xiangshan.mem.{LsqEnqCtrl, LsqEnqIO, MemWaitUpdateReq, SqPtr, LqPtr}
 import xiangshan.backend.datapath.WbConfig.V0WB
 import xiangshan.backend.regfile.VlPregParams
+import xiangshan.backend.regcache.RegCacheTagTable
 
 sealed trait SchedulerType
 
@@ -184,6 +185,12 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
     case _ => None
   }
 
+  // RegCacheTagTable Module
+  val rcTagTable = schdType match {
+    case IntScheduler() | MemScheduler() => Some(Module(new RegCacheTagTable(dispatch2Iq.numRCTagTableStateRead)))
+    case _ => None
+  }
+
   dispatch2Iq.io match { case dp2iq =>
     dp2iq.redirect <> io.fromCtrlBlock.flush
     dp2iq.in <> io.fromDispatch.uops
@@ -192,6 +199,7 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
     dp2iq.readVfState.foreach(_ <> vfBusyTable.get.io.read)
     dp2iq.readV0State.foreach(_ <> v0BusyTable.get.io.read)
     dp2iq.readVlState.foreach(_ <> vlBusyTable.get.io.read)
+    dp2iq.readRCTagTableState.foreach(_ <> rcTagTable.get.io.readPorts)
   }
 
   intBusyTable match {
@@ -271,6 +279,18 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
       bt.io.wakeUp := io.fromSchedulers.wakeupVec
       bt.io.og0Cancel := io.fromDataPath.og0Cancel
       bt.io.ldCancel := io.ldCancel
+    case None =>
+  }
+
+  rcTagTable match {
+    case Some(rct) =>
+      rct.io.allocPregs.zip(io.fromDispatch.allocPregs).foreach { case (btAllocPregs, dpAllocPregs) =>
+        btAllocPregs.valid := dpAllocPregs.isInt
+        btAllocPregs.bits := dpAllocPregs.preg
+      }
+      rct.io.wakeupFromIQ := io.fromSchedulers.wakeupVec
+      rct.io.og0Cancel := io.fromDataPath.og0Cancel
+      rct.io.ldCancel := io.ldCancel
     case None =>
   }
 
@@ -598,10 +618,12 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
     // instead of dispatch2Iq.io.out(x).bits.src*(1)
     val stdIdx = 1
     stdIQEnq.bits.srcState(0) := staIQEnq.bits.srcState(stdIdx)
-    stdIQEnq.bits.srcLoadDependency(0) := staIQEnq.bits.srcLoadDependency(1)
-      stdIQEnq.bits.srcType(0) := staIQEnq.bits.srcType(stdIdx)
+    stdIQEnq.bits.srcLoadDependency(0) := staIQEnq.bits.srcLoadDependency(stdIdx)
+    stdIQEnq.bits.srcType(0) := staIQEnq.bits.srcType(stdIdx)
     stdIQEnq.bits.psrc(0) := staIQEnq.bits.psrc(stdIdx)
     stdIQEnq.bits.sqIdx := staIQEnq.bits.sqIdx
+    stdIQEnq.bits.useRegCache(0) := staIQEnq.bits.useRegCache(stdIdx)
+    stdIQEnq.bits.regCacheIdx(0) := staIQEnq.bits.regCacheIdx(stdIdx)
   }
 
   vecMemIQs.foreach {

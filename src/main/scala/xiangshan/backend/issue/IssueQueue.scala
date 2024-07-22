@@ -303,8 +303,8 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
         if(params.hasIQWakeUp) {
           enq.bits.status.srcStatus(j).srcWakeUpL1ExuOH.get     := 0.U.asTypeOf(ExuVec())
         }
-        enq.bits.status.srcStatus(j).useRegCache.foreach(_      := false.B)
-        enq.bits.status.srcStatus(j).regCacheIdx.foreach(_      := DontCare)
+        enq.bits.status.srcStatus(j).useRegCache.foreach(_      := s0_enqBits(enqIdx).useRegCache(j))
+        enq.bits.status.srcStatus(j).regCacheIdx.foreach(_      := s0_enqBits(enqIdx).regCacheIdx(j))
       }
       enq.bits.status.blocked                                   := false.B
       enq.bits.status.issued                                    := false.B
