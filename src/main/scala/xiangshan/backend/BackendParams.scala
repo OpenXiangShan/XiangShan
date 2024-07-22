@@ -91,6 +91,7 @@ case class BackendParams(
 
   def numSrc      : Int = allSchdParams.map(_.issueBlockParams.map(_.numSrc).max).max
   def numRegSrc   : Int = allSchdParams.map(_.issueBlockParams.map(_.numRegSrc).max).max
+  def numIntRegSrc: Int = allSchdParams.map(_.issueBlockParams.map(_.numIntSrc).max).max
   def numVecRegSrc: Int = allSchdParams.map(_.issueBlockParams.map(_.numVecSrc).max).max
 
 

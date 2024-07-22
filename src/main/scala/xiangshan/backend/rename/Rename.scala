@@ -188,6 +188,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uop.srcLoadDependency := DontCare
     uop.numLsElem       :=  DontCare
     uop.hasException  :=  DontCare
+    uop.useRegCache   := DontCare
+    uop.regCacheIdx   := DontCare
   })
   private val fuType       = uops.map(_.fuType)
   private val fuOpType     = uops.map(_.fuOpType)
