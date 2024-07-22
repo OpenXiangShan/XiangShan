@@ -235,7 +235,13 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     }
 
     // update singleStep
-    updatedUop(i).singleStep := io.singleStep && (if (i == 0) singleStepStatus else true.B)
+    // Singlestep should only commit one instruction after dret, and then hart enter debugMode according to singlestep exception.
+    // singleStep exception only enable in uop[1](from cache), or enable in uop[0](from flash).
+    if(i < 2) {
+      updatedUop(i).singleStep := io.singleStep && (if (i == 0) singleStepStatus else true.B)
+    } else {
+      updatedUop(i).singleStep := false.B
+    }
     when (io.fromRename(i).fire) {
       XSDebug(updatedUop(i).trigger.getFrontendCanFire, s"Debug Mode: inst ${i} has frontend trigger exception\n")
       XSDebug(updatedUop(i).singleStep, s"Debug Mode: inst ${i} has single step exception\n")
@@ -330,7 +336,10 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     io.enqRob.needAlloc(i) := io.fromRename(i).valid
     io.enqRob.req(i).valid := io.fromRename(i).valid && thisCanActualOut(i) && dqCanAccept
     io.enqRob.req(i).bits := updatedUop(i)
-    if (i == 0) io.enqRob.req(i).bits.numWB := Mux(io.singleStep, 0.U, updatedUop(i).numWB)
+    if(i < 2){
+      io.enqRob.req(i).bits.hasException := updatedUop(i).hasException || updatedUop(i).singleStep
+      io.enqRob.req(i).bits.numWB := Mux(updatedUop(i).singleStep, 0.U, updatedUop(i).numWB)
+    }
     XSDebug(io.enqRob.req(i).valid, p"pc 0x${Hexadecimal(io.fromRename(i).bits.pc)} receives nrob ${io.enqRob.resp(i)}\n")
 
     // When previous instructions have exceptions, following instructions should not enter dispatch queues.
