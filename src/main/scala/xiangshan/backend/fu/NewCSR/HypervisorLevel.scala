@@ -88,7 +88,7 @@ trait HypervisorLevel { self: NewCSR =>
     // hip.VSSIP is alias of hvip.VSSIP, writable
     toHvip.VSSIP.valid := wen
     toHvip.VSSIP.bits  := wdata.VSSIP
-    regOut.VSSIP := hvip.VSSIP
+    regOut.VSSIP := this.hvip.VSSIP
     // vsip.SSIP is alias of hip.VSSIP, so vsip.SSIP is alias of hvip.VSSIP.
     // vsip.SSIP write throuth to hvip.VSSIP
   })
@@ -206,7 +206,7 @@ class HstatusBundle extends CSRBundle {
 }
 
 object HstatusVgeinField extends CSREnum with WLRLApply {
-  override def isLegal(enum: CSREnumType): Bool = enum.asUInt <= GEILEN.U
+  override def isLegal(enumeration: CSREnumType): Bool = enumeration.asUInt <= GEILEN.U
 }
 
 class HstatusModule(implicit p: Parameters) extends CSRModule("Hstatus", new HstatusBundle)

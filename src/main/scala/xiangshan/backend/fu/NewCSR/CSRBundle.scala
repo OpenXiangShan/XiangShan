@@ -149,6 +149,7 @@ object CSRBundleImplicitCast {
     }
   }
 
+  import scala.language.implicitConversions
   implicit def UIntToUIntField(uint: UInt): UIntField = new UIntField(uint)
 }
 

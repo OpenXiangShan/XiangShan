@@ -354,13 +354,13 @@ class CSREnum extends ChiselEnum {
     this
   }
 
-  def isLegal(enum: CSREnumType): Bool = true.B
+  def isLegal(enumeration: CSREnumType): Bool = true.B
 
-  def isLegal(enum: CSREnumType, dmode: Bool): Bool = true.B
+  def isLegal(enumeration: CSREnumType, dmode: Bool): Bool = true.B
 
-  def legalize(enum: CSREnumType): CSREnumType = makeType
+  def legalize(enumeration: CSREnumType): CSREnumType = makeType
 
-  def legalize(enum: CSREnumType, dmode: Bool): CSREnumType = makeType
+  def legalize(enumeration: CSREnumType, dmode: Bool): CSREnumType = makeType
 
   println(s"A new CSREnum is created, factory: $this")
 }

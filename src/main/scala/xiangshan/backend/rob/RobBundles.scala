@@ -1,5 +1,6 @@
 /***************************************************************************************
- * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+ * Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+ * Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
  * Copyright (c) 2020-2021 Peng Cheng Laboratory
  *
  * XiangShan is licensed under Mulan PSL v2.
@@ -192,7 +193,7 @@ class RobPtr(entries: Int) extends CircularQueuePtr[RobPtr](
 
   def needFlush(redirect: Seq[Valid[Redirect]]): Bool = VecInit(redirect.map(needFlush)).asUInt.orR
 
-  def lineHeadPtr()(implicit p: Parameters): RobPtr = {
+  def lineHeadPtr(implicit p: Parameters): RobPtr = {
     val CommitWidth = p(XSCoreParamsKey).CommitWidth
     val out = Wire(new RobPtr)
     out.flag := this.flag

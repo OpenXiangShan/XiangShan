@@ -8,8 +8,8 @@ import chiseltest.simulator.VerilatorFlags
 import top.ArgParser
 import xiangshan.backend.decode.DecodeUnit
 import xiangshan.backend.regfile.IntPregParams
-import types.ChiselStage
-import xiangshan.test.types._
+import circt.stage.ChiselStage
+import firrtl2.options.TargetDirAnnotation
 import xiangshan.transforms.PrintModuleName
 
 object DecodeMain extends App {
@@ -38,17 +38,12 @@ object DecodeMain extends App {
 class DecodeUnitTest extends XSTester {
   behavior of "DecodeUnit"
   it should "pass" in {
-    val printModuleNameAnno = chisel3.BuildInfo.version match {
-      case "3.6.0" => Seq(RunFirrtlTransformAnnotation(new PrintModuleName))
-      case _ => Seq()
-    }
-
     test(new DecodeUnit()(config)).withAnnotations(Seq(
       VerilatorBackendAnnotation,
       VerilatorFlags(Seq()),
       WriteVcdAnnotation,
       TargetDirAnnotation("./build")
-    ) ++ printModuleNameAnno){ dut =>
+    )){ dut =>
       dut.clock.step(10)
     }
   }

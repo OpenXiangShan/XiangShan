@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -809,7 +810,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   io.toIbuffer.bits.pc          := f3_pc
   io.toIbuffer.bits.ftqOffset.zipWithIndex.map{case(a, i) => a.bits := i.U; a.valid := checkerOutStage1.fixedTaken(i) && !f3_req_is_mmio}
   io.toIbuffer.bits.foldpc      := f3_foldpc
-  io.toIbuffer.bits.exceptionType := (0 until PredictWidth).map(i => MuxCase(ExceptionType.none, Array(
+  io.toIbuffer.bits.exceptionType := (0 until PredictWidth).map(i => MuxCase(ExceptionType.none, Seq(
     (f3_pf_vec(i) || f3_crossPageFault(i)) -> ExceptionType.ipf,
     (f3_gpf_vec(i) || f3_crossGuestPageFault(i)) -> ExceptionType.igpf,
     f3_af_vec(i) -> ExceptionType.acf

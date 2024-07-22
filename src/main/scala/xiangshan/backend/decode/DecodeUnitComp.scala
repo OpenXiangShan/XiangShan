@@ -1,5 +1,6 @@
 /***************************************************************************************
-  * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+  * Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+  * Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
   * Copyright (c) 2020-2021 Peng Cheng Laboratory
   *
   * XiangShan is licensed under Mulan PSL v2.
@@ -32,7 +33,6 @@ import xiangshan.backend.Bundles.{DecodedInst, StaticInst}
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 import xiangshan.backend.fu.vector.Bundles.{VSew, VType, VLmul}
 import yunsuan.VpermType
-import scala.collection.Seq
 import chisel3.util.experimental.decode.{QMCMinimizer, TruthTable, decoder}
 
 class indexedLSUopTable(uopIdx:Int) extends Module {
@@ -1753,12 +1753,12 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       val vsew = Cat(0.U(1.W), vsewReg)
       val veew = Cat(0.U(1.W), width)
       val vemul: UInt = veew.asUInt + 1.U + vlmul.asUInt + ~vsew.asUInt
-      val simple_lmul = MuxLookup(vlmul, 0.U(2.W))(Array(
+      val simple_lmul = MuxLookup(vlmul, 0.U(2.W))(Seq(
         "b001".U -> 1.U,
         "b010".U -> 2.U,
         "b011".U -> 3.U
       ))
-      val simple_emul = MuxLookup(vemul, 0.U(2.W))(Array(
+      val simple_emul = MuxLookup(vemul, 0.U(2.W))(Seq(
         "b001".U -> 1.U,
         "b010".U -> 2.U,
         "b011".U -> 3.U

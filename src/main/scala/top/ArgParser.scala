@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -125,7 +126,7 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(AlwaysBasicDB = false)
           }), tail)
-        case "--xstop-prefix" :: value :: tail if chisel3.BuildInfo.version != "3.6.0" =>
+        case "--xstop-prefix" :: value :: tail =>
           nextOption(config.alter((site, here, up) => {
             case SoCParamsKey => up(SoCParamsKey).copy(XSTopPrefix = Some(value))
           }), tail)

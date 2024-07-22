@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -212,7 +213,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
 
     // it would be unsafe for specPtr manipulation if specSize is not power of 2
     assert(log2Up(RasSpecSize) == log2Floor(RasSpecSize))
-    def ctrMax = ((1l << RasCtrSize) - 1).U
+    def ctrMax = ((1L << RasCtrSize) - 1).U
     def ptrInc(ptr: UInt) = ptr + 1.U
     def ptrDec(ptr: UInt) = ptr - 1.U
 
