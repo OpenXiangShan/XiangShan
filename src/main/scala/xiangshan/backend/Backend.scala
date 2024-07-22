@@ -396,8 +396,10 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
 
   private val csrin = intExuBlock.io.csrin.get
   csrin.hartId := io.fromTop.hartId
-  csrin.msiInfo := io.fromTop.msiInfo
-  csrin.clintTime := io.fromTop.clintTime
+  csrin.msiInfo.valid := RegNext(io.fromTop.msiInfo.valid)
+  csrin.msiInfo.bits := RegEnable(io.fromTop.msiInfo.bits, io.fromTop.msiInfo.valid)
+  csrin.clintTime.valid := RegNext(io.fromTop.clintTime.valid)
+  csrin.clintTime.bits := RegEnable(io.fromTop.clintTime.bits, io.fromTop.clintTime.valid)
 
   private val csrio = intExuBlock.io.csrio.get
   csrio.hartId := io.fromTop.hartId
