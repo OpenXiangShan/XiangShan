@@ -51,6 +51,9 @@ class RegCacheAgeTimer
   val ageTimer = RegInit(VecInit((0 until numEntries).map(i => (i / (numEntries / 4)).U(2.W))))
   val ageTimerNext = Seq.fill(numEntries)(Wire(UInt(2.W)))
 
+  val ageTimerExtra = RegInit(VecInit((0 until 4).map(_.U(2.W))))
+  ageTimerExtra.foreach(i => i := i + 1.U)
+
   val hasReadReq = (0 until numEntries).map{ i => 
     io.readPorts.map(r => r.ren && r.addr === i.U).reduce(_ || _)
   }
@@ -81,7 +84,7 @@ class RegCacheAgeTimer
       }.elsewhen (!io.validInfo(row) && io.validInfo(col)) {
         res := true.B
       }.otherwise {
-        res := ageTimerNext(row) >= ageTimerNext(col)
+        res := Cat(ageTimerNext(row), ageTimerExtra(row / (numEntries / 4))) >= Cat(ageTimerNext(col), ageTimerExtra(col / (numEntries / 4)))
       }
       res
     }
