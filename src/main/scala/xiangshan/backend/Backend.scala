@@ -435,7 +435,7 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   csrio.exception := ctrlBlock.io.robio.exception
   csrio.memExceptionVAddr := io.mem.exceptionAddr.vaddr
   csrio.memExceptionGPAddr := io.mem.exceptionAddr.gpaddr
-  csrio.externalInterrupt := io.fromTop.externalInterrupt
+  csrio.externalInterrupt := RegNext(io.fromTop.externalInterrupt)
   csrio.distributedUpdate(0) := io.mem.csrDistributedUpdate
   csrio.distributedUpdate(1) := io.frontendCsrDistributedUpdate
   csrio.perf <> io.perf
@@ -795,7 +795,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
 class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle with HasSoCParameter {
   val fromTop = new Bundle {
     val hartId = Input(UInt(hartIdLen.W))
-    val externalInterrupt = new ExternalInterruptIO
+    val externalInterrupt = Input(new ExternalInterruptIO)
     val msiInfo = Input(ValidIO(new MsiInfoBundle))
     val clintTime = Input(ValidIO(UInt(64.W)))
   }
