@@ -259,6 +259,7 @@ trait HaveAXI4PeripheralPort { this: BaseSoC =>
       AXI4Deinterleaver(8) :=
       TLToAXI4() :=
       error_xbar.get :=
+      TLBuffer.chainNode(2, Some("llc_to_peripheral_buffer")) :=
       TLFIFOFixer() :=
       TLWidthWidget(L3OuterBusWidth / 8) :=
       AXI4ToTL() :=
