@@ -330,6 +330,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     io.enqRob.needAlloc(i) := io.fromRename(i).valid
     io.enqRob.req(i).valid := io.fromRename(i).valid && thisCanActualOut(i) && dqCanAccept
     io.enqRob.req(i).bits := updatedUop(i)
+    if (i == 0) io.enqRob.req(i).bits.numWB := Mux(io.singleStep, 0.U, updatedUop(i).numWB)
     XSDebug(io.enqRob.req(i).valid, p"pc 0x${Hexadecimal(io.fromRename(i).bits.pc)} receives nrob ${io.enqRob.resp(i)}\n")
 
     // When previous instructions have exceptions, following instructions should not enter dispatch queues.
