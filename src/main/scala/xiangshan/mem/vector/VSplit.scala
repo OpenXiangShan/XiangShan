@@ -80,7 +80,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   val numFlowsSameVdLog2 = Mux(
     isIndexed(instType),
     log2Up(VLENB).U - s0_sew(1,0),
-    log2Up(VLENB).U - s0_eew(1,0)
+    log2Up(VLENB).U - s0_eew
   )
   // numUops = nf * max(lmul, emul)
   val lmulLog2Pos = Mux(s0_lmul.asSInt < 0.S, 0.U, s0_lmul)
@@ -98,7 +98,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
                     GenUSMaskRegVL(vvl),
                     vvl))
   val vvstart = io.in.bits.uop.vpu.vstart
-  val alignedType = Mux(isIndexed(instType), s0_sew(1, 0), s0_eew(1, 0))
+  val alignedType = Mux(isIndexed(instType), s0_sew(1, 0), s0_eew)
   val broadenAligendType = Mux(s0_preIsSplit, Cat("b0".U, alignedType), "b100".U) // if is unit-stride, use 128-bits memory access
   val flowsLog2 = GenRealFlowLog2(instType, s0_emul, s0_lmul, s0_eew, s0_sew)
   val flowsPrevThisUop = (uopIdxInField << flowsLog2).asUInt // # of flows before this uop in a field
@@ -106,7 +106,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   val flowsIncludeThisUop = ((uopIdxInField +& 1.U) << flowsLog2).asUInt // # of flows before this uop besides this uop
   val flowNum = io.in.bits.flowNum.get
   // max index in vd, only use in index instructions for calculate index
-  val maxIdxInVdIndex = GenVLMAX(Mux(s0_emul.asSInt > 0.S, 0.U, s0_emul), s0_eew(1, 0))
+  val maxIdxInVdIndex = GenVLMAX(Mux(s0_emul.asSInt > 0.S, 0.U, s0_emul), s0_eew)
   val indexVlMaxInVd = GenVlMaxMask(maxIdxInVdIndex, elemIdxBits)
 
   // For vectore indexed  instructions:
@@ -211,11 +211,11 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   val s1_notIndexedStride = Mux( // stride for strided/unit-stride instruction
     isStrided(s1_instType),
     s1_stride(XLEN - 1, 0), // for strided load, stride = x[rs2]
-    s1_nfields << s1_eew(1, 0) // for unit-stride load, stride = eew * NFIELDS
+    s1_nfields << s1_eew // for unit-stride load, stride = eew * NFIELDS
   )
 
   val stride     = Mux(isIndexed(s1_instType), s1_stride, s1_notIndexedStride).asUInt // if is index instructions, get index when split
-  val uopOffset  = genVUopOffset(s1_instType, s1_fof, s1_uopidx, s1_nf, s1_eew(1, 0), stride, s1_alignedType)
+  val uopOffset  = genVUopOffset(s1_instType, s1_fof, s1_uopidx, s1_nf, s1_eew, stride, s1_alignedType)
   val activeNum  = Mux(s1_in.preIsSplit, PopCount(s1_in.flowMask), s1_flowNum)
   // for Unit-Stride, if uop's addr is aligned with 128-bits, split it to one flow, otherwise split two
   val usLowBitsAddr    = getCheckAddrLowBits(s1_in.baseAddr, maxMemByteNum) + getCheckAddrLowBits(uopOffset, maxMemByteNum)
