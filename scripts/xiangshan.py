@@ -356,6 +356,38 @@ class XiangShan(object):
         misc_tests = map(lambda x: os.path.join(base_dir, x), workloads)
         return misc_tests
 
+    def __get_ci_rvvbench(self, name=None):
+        base_dir = "/nfs/home/share/ci-workloads"
+        workloads = [
+            "rvv-bench/poly1305.bin",
+            "rvv-bench/mergelines.bin"
+        ]
+        rvvbench = map(lambda x: os.path.join(base_dir, x), workloads)
+        return rvvbench
+
+    def __get_ci_rvvtest(self, name=None):
+        base_dir = "/nfs/home/share/ci-workloads/V-extension-tests"
+        workloads = [
+            "rvv-test/vluxei32.v-0.bin",
+            "rvv-test/vlsseg4e32.v-0.bin",
+            "rvv-test/vlseg4e32.v-0.bin",
+            "rvv-test/vsetvl-0.bin",
+            "rvv-test/vsetivli-0.bin",
+            "rvv-test/vsuxei32.v-0.bin",
+            "rvv-test/vse16.v-0.bin",
+            "rvv-test/vsse16.v-1.bin",
+            "rvv-test/vlse32.v-0.bin",
+            "rvv-test/vsetvli-0.bin",
+            "rvv-test/vle16.v-0.bin",
+            "rvv-test/vle32.v-0.bin",
+            "rvv-test/vfsgnj.vv-0.bin",
+            "rvv-test/vfadd.vf-0.bin",
+            "rvv-test/vfsub.vf-0.bin",
+            "rvv-test/vslide1down.vx-0.bin"
+        ]
+        rvv_test = map(lambda x: os.path.join(base_dir, x), workloads)
+        return rvv_test
+
     def __get_ci_mc(self, name=None):
         base_dir = "/nfs/home/share/ci-workloads"
         workloads = [
@@ -433,7 +465,9 @@ class XiangShan(object):
             "mc-tests": self.__get_ci_mc,
             "nodiff-tests": self.__get_ci_nodiff,
             "microbench": self.__am_apps_path,
-            "coremark": self.__am_apps_path
+            "coremark": self.__am_apps_path,
+            "rvv-bench": self.__get_ci_rvvbench,
+            "rvv-test": self.__get_ci_rvvtest
         }
         for target in all_tests.get(test, self.__get_ci_workloads)(test):
             print(target)
@@ -456,7 +490,9 @@ class XiangShan(object):
             "mc-tests": self.__get_ci_mc,
             "nodiff-tests": self.__get_ci_nodiff,
             "microbench": self.__am_apps_path,
-            "coremark": self.__am_apps_path
+            "coremark": self.__am_apps_path,
+            "rvv-bench": self.__get_ci_rvvbench,
+            "rvv-test": self.__get_ci_rvvtest
         }
         for target in all_tests.get(test, self.__get_ci_workloads)(test):
             print(target)
