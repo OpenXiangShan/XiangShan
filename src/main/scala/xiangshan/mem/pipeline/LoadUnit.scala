@@ -1453,11 +1453,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val hit_ld_addr_trig_hit_vec = Wire(Vec(TriggerNum, Bool()))
   val lq_ld_addr_trig_hit_vec = io.lsq.trigger.lqLoadAddrTriggerHitVec
   (0 until TriggerNum).map{i => {
-    val tdata2    = RegNext(io.trigger(i).tdata2)
+    val tdata2    = GatedRegNext(io.trigger(i).tdata2)
     val matchType = RegNext(io.trigger(i).matchType)
     val tEnable   = RegNext(io.trigger(i).tEnable)
 
-    hit_ld_addr_trig_hit_vec(i) := TriggerCmp(RegNext(s2_out.vaddr), tdata2, matchType, tEnable)
+    hit_ld_addr_trig_hit_vec(i) := TriggerCmp(RegEnable(s2_out.vaddr, 0.U, s2_valid), tdata2, matchType, tEnable)
     io.trigger(i).addrHit       := Mux(s3_out.valid, hit_ld_addr_trig_hit_vec(i), lq_ld_addr_trig_hit_vec(i))
   }}
   io.lsq.trigger.hitLoadAddrTriggerHitVec := hit_ld_addr_trig_hit_vec
