@@ -272,6 +272,8 @@ class RobExceptionInfo(implicit p: Parameters) extends XSBundle {
   val robIdx = new RobPtr
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
+  // set 1 if there is 1 exists in exceptionVec
+  val hasException = Bool()
   val exceptionVec = ExceptionVec()
   val flushPipe = Bool()
   val isVset = Bool()
@@ -282,10 +284,10 @@ class RobExceptionInfo(implicit p: Parameters) extends XSBundle {
   val vstartEn = Bool()
   val vstart = UInt(XLEN.W)
 
-  def has_exception = exceptionVec.asUInt.orR || flushPipe || singleStep || replayInst || trigger.canFire
-  def not_commit = exceptionVec.asUInt.orR || singleStep || replayInst || trigger.canFire
+  def has_exception = hasException || flushPipe || singleStep || replayInst || trigger.canFire
+  def not_commit = hasException || singleStep || replayInst || trigger.canFire
   // only exceptions are allowed to writeback when enqueue
-  def can_writeback = exceptionVec.asUInt.orR || singleStep || trigger.canFire
+  def can_writeback = hasException || singleStep || trigger.canFire
 }
 
 class RobFlushInfo(implicit p: Parameters) extends XSBundle {
