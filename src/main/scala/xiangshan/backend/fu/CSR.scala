@@ -99,7 +99,7 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val memExceptionVAddr = Input(UInt(VAddrBits.W))
   val memExceptionGPAddr = Input(UInt(GPAddrBits.W))
   // from outside cpu,externalInterrupt
-  val externalInterrupt = new ExternalInterruptIO
+  val externalInterrupt = Input(new ExternalInterruptIO)
   // TLB
   val tlb = Output(new TlbCsrBundle)
   // Debug Mode
