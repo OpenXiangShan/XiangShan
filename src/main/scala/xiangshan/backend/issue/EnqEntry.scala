@@ -121,7 +121,7 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
 
     if (params.needReadRegCache) {
       val enqDelay1WakeupSrcExuWriteRC = enqDelay1WakeUpOH.zip(io.enqDelayIn1.wakeUpFromIQ).filter(_._2.bits.params.needWriteRegCache)
-      val enqDelay1WakeupRC    = enqDelay1WakeupSrcExuWriteRC.map(_._1).fold(false.B)(_ || _)
+      val enqDelay1WakeupRC    = enqDelay1WakeupSrcExuWriteRC.map(_._1).fold(false.B)(_ || _) && SrcType.isXp(entryReg.status.srcStatus(i).srcType)
       val enqDelay1WakeupRCIdx = Mux1H(enqDelay1WakeupSrcExuWriteRC.map(_._1), enqDelay1WakeupSrcExuWriteRC.map(_._2.bits.rcDest.get))
       val enqDelay1ReplaceRC   = enqDelay1WakeupSrcExuWriteRC.map(x => x._2.bits.rfWen && x._2.bits.rcDest.get === entryReg.status.srcStatus(i).regCacheIdx.get).fold(false.B)(_ || _)
 

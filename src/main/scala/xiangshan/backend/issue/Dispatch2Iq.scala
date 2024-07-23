@@ -262,14 +262,14 @@ abstract class Dispatch2IqImp(override val wrapper: Dispatch2Iq)(implicit p: Par
     }
 
   uopsIn
-    .flatMap(x => x.bits.useRegCache.take(numRegSrc) zip x.bits.regCacheIdx.take(numRegSrc))
+    .flatMap(x => x.bits.useRegCache.take(numRegSrc) lazyZip x.bits.regCacheIdx.take(numRegSrc) lazyZip x.bits.srcType.take(numRegSrc))
     .zip(
       rcTagTableStateVec.getOrElse(VecInit(Seq.fill(numIn * numRegSrc)(false.B).toSeq)) zip 
       rcTagTableAddrVec.getOrElse(VecInit(Seq.fill(numIn * numRegSrc)(0.U).toSeq))
     )
     .foreach {
-      case ((useRC, rcIdx), (state, addr)) =>
-        useRC := state
+      case ((useRC, rcIdx, srcType), (state, addr)) =>
+        useRC := state && SrcType.isXp(srcType)
         rcIdx := addr
     }
 

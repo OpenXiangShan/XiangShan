@@ -341,7 +341,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
 
       if (params.needReadRegCache) {
         val wakeupSrcExuWriteRC = wakeupByIQOH.zip(commonIn.wakeUpFromIQ).filter(_._2.bits.params.needWriteRegCache)
-        val wakeupRC    = wakeupSrcExuWriteRC.map(_._1).fold(false.B)(_ || _)
+        val wakeupRC    = wakeupSrcExuWriteRC.map(_._1).fold(false.B)(_ || _) && SrcType.isXp(srcStatus.srcType)
         val wakeupRCIdx = Mux1H(wakeupSrcExuWriteRC.map(_._1), wakeupSrcExuWriteRC.map(_._2.bits.rcDest.get))
         val replaceRC   = wakeupSrcExuWriteRC.map(x => x._2.bits.rfWen && x._2.bits.rcDest.get === srcStatus.regCacheIdx.get).fold(false.B)(_ || _)
 
