@@ -33,7 +33,7 @@ class OthersEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockPar
 
   //Reg
   val validReg = GatedValidRegNext(common.validRegNext, false.B)
-  val entryReg = RegEnable(entryRegNext, validReg || common.validRegNext)
+  val entryReg = RegNext(entryRegNext)
 
   //Wire
   CommonWireConnect(common, hasWakeupIQ, validReg, entryReg.status, io.commonIn, false)
