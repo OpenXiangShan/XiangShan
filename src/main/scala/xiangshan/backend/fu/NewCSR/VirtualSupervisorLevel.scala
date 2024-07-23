@@ -118,9 +118,6 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
   val vsepc = Module(
     new CSRModule("VSepc", new Epc)
       with TrapEntryVSEventSinkBundle
-    {
-      rdata := SignExt(Cat(reg.epc.asUInt, 0.U(1.W)), XLEN)
-    }
   )
     .setAddr(CSRs.vsepc)
 

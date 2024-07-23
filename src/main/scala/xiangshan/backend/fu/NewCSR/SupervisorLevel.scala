@@ -73,9 +73,7 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
   val sscratch = Module(new CSRModule("Sscratch"))
     .setAddr(CSRs.sscratch)
 
-  val sepc = Module(new CSRModule("Sepc", new Epc) with TrapEntryHSEventSinkBundle {
-    rdata := SignExt(Cat(reg.epc.asUInt, 0.U(1.W)), XLEN)
-  })
+  val sepc = Module(new CSRModule("Sepc", new Epc) with TrapEntryHSEventSinkBundle)
     .setAddr(CSRs.sepc)
 
   val scause = Module(new CSRModule("Scause", new CauseBundle) with TrapEntryHSEventSinkBundle)

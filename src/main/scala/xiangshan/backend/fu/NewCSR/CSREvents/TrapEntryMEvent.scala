@@ -123,7 +123,7 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
   out.mstatus.bits.GVA          := tvalFillGVA
   out.mstatus.bits.MPIE         := current.mstatus.MIE
   out.mstatus.bits.MIE          := 0.U
-  out.mepc.bits.epc             := trapPC(VaddrMaxWidth - 1, 1)
+  out.mepc.bits.epc             := trapPC(63, 1)
   out.mcause.bits.Interrupt     := isInterrupt
   out.mcause.bits.ExceptionCode := highPrioTrapNO
   out.mtval.bits.ALL            := tval

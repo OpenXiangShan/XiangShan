@@ -173,9 +173,7 @@ trait MachineLevel { self: NewCSR =>
   val mscratch = Module(new CSRModule("Mscratch"))
     .setAddr(CSRs.mscratch)
 
-  val mepc = Module(new CSRModule("Mepc", new Epc) with TrapEntryMEventSinkBundle {
-    rdata := SignExt(Cat(reg.epc.asUInt, 0.U(1.W)), XLEN)
-  })
+  val mepc = Module(new CSRModule("Mepc", new Epc) with TrapEntryMEventSinkBundle)
     .setAddr(CSRs.mepc)
 
   val mcause = Module(new CSRModule("Mcause", new CauseBundle) with TrapEntryMEventSinkBundle)
@@ -559,9 +557,7 @@ class MvipBundle extends InterruptPendingBundle {
 }
 
 class Epc extends CSRBundle {
-  import CSRConfig._
-
-  val epc = RW(VaddrMaxWidth - 1, 1).withReset(0.U)
+  val epc = RW(63, 1).withReset(0.U)
 }
 
 class McountinhibitBundle extends CSRBundle {
