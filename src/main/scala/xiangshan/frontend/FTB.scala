@@ -148,6 +148,7 @@ class FTBEntry_part(implicit p: Parameters) extends XSBundle with FTBParams with
   val isCall      = Bool()
   val isRet       = Bool()
   val isJalr      = Bool()
+  val isRetCall   = Bool()
 
   def isJal = !isJalr
 }

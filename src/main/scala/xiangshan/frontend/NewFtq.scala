@@ -29,13 +29,14 @@ import utility.ChiselDB
 
 class FtqDebugBundle extends Bundle {
   val pc = UInt(39.W)
-  val target = UInt(39.W)
-  val isBr = Bool()
-  val isJmp = Bool()
-  val isCall = Bool()
-  val isRet = Bool()
-  val misPred = Bool()
-  val isTaken = Bool()
+  val target    = UInt(39.W)
+  val isBr      = Bool()
+  val isJmp     = Bool()
+  val isCall    = Bool()
+  val isRet     = Bool()
+  val isRetCall = Bool()
+  val misPred   = Bool()
+  val isTaken   = Bool()
   val predStage = UInt(2.W)
 }
 
@@ -109,7 +110,8 @@ class Ftq_RF_Components(implicit p: Parameters) extends XSBundle with BPUUtils {
 
 class Ftq_pd_Entry(implicit p: Parameters) extends XSBundle {
   val brMask = Vec(PredictWidth, Bool())
-  val jmpInfo = ValidUndirectioned(Vec(3, Bool()))
+  // jmpInfo includes isJalr, isCall, isRet, isRetCall signals
+  val jmpInfo = ValidUndirectioned(Vec(4, Bool()))
   val jmpOffset = UInt(log2Ceil(PredictWidth).W)
   val jalTarget = UInt(VAddrBits.W)
   val rvcMask = Vec(PredictWidth, Bool())
@@ -117,13 +119,14 @@ class Ftq_pd_Entry(implicit p: Parameters) extends XSBundle {
   def hasJalr = jmpInfo.valid && jmpInfo.bits(0)
   def hasCall = jmpInfo.valid && jmpInfo.bits(1)
   def hasRet  = jmpInfo.valid && jmpInfo.bits(2)
+  def hasRetCall  = jmpInfo.valid && jmpInfo.bits(3)
 
   def fromPdWb(pdWb: PredecodeWritebackBundle) = {
     val pds = pdWb.pd
     this.brMask := VecInit(pds.map(pd => pd.isBr && pd.valid))
     this.jmpInfo.valid := VecInit(pds.map(pd => (pd.isJal || pd.isJalr) && pd.valid)).asUInt.orR
     this.jmpInfo.bits := ParallelPriorityMux(pds.map(pd => (pd.isJal || pd.isJalr) && pd.valid),
-                                             pds.map(pd => VecInit(pd.isJalr, pd.isCall, pd.isRet)))
+                                             pds.map(pd => VecInit(pd.isJalr, pd.isCall, pd.isRet, pd.isRetCall)))
     this.jmpOffset := ParallelPriorityEncoder(pds.map(pd => (pd.isJal || pd.isJalr) && pd.valid))
     this.rvcMask := VecInit(pds.map(pd => pd.isRVC))
     this.jalTarget := pdWb.jalTarget
@@ -139,6 +142,7 @@ class Ftq_pd_Entry(implicit p: Parameters) extends XSBundle {
     pd.brType := Cat(offset === jmpOffset && jmpInfo.valid, isJalr || isBr)
     pd.isCall := offset === jmpOffset && jmpInfo.valid && jmpInfo.bits(1)
     pd.isRet  := offset === jmpOffset && jmpInfo.valid && jmpInfo.bits(2)
+    pd.isRetCall  := offset === jmpOffset && jmpInfo.valid && jmpInfo.bits(3)
     pd
   }
 }
@@ -273,6 +277,7 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   val new_jmp_is_jalr = entry_has_jmp &&  pd.jmpInfo.bits(0) && io.cfiIndex.valid
   val new_jmp_is_call = entry_has_jmp &&  pd.jmpInfo.bits(1) && io.cfiIndex.valid
   val new_jmp_is_ret  = entry_has_jmp &&  pd.jmpInfo.bits(2) && io.cfiIndex.valid
+  val new_jmp_is_ret_call = entry_has_jmp && pd.jmpInfo.bits(3) && io.cfiIndex.valid
   val last_jmp_rvi = entry_has_jmp && pd.jmpOffset === (PredictWidth-1).U && !pd.rvcMask.last
   // val last_br_rvi = cfi_is_br && io.cfiIndex.bits === (PredictWidth-1).U && !pd.rvcMask.last
 
@@ -302,11 +307,12 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
   }
 
   val jmpPft = getLower(io.start_addr) +& pd.jmpOffset +& Mux(pd.rvcMask(pd.jmpOffset), 1.U, 2.U)
-  init_entry.pftAddr := Mux(entry_has_jmp && !last_jmp_rvi, jmpPft, getLower(io.start_addr))
-  init_entry.carry   := Mux(entry_has_jmp && !last_jmp_rvi, jmpPft(carryPos-instOffsetBits), true.B)
-  init_entry.isJalr := new_jmp_is_jalr
-  init_entry.isCall := new_jmp_is_call
-  init_entry.isRet  := new_jmp_is_ret
+  init_entry.pftAddr  := Mux(entry_has_jmp && !last_jmp_rvi, jmpPft, getLower(io.start_addr))
+  init_entry.carry    := Mux(entry_has_jmp && !last_jmp_rvi, jmpPft(carryPos-instOffsetBits), true.B)
+  init_entry.isJalr   := new_jmp_is_jalr
+  init_entry.isCall   := new_jmp_is_call
+  init_entry.isRet    := new_jmp_is_ret
+  init_entry.isRetCall  := new_jmp_is_ret_call
   // that means fall thru points to the middle of an inst
   init_entry.last_may_be_rvi_call := pd.jmpOffset === (PredictWidth-1).U && !pd.rvcMask(pd.jmpOffset)
 
@@ -369,6 +375,7 @@ class FTBEntryGen(implicit p: Parameters) extends XSModule with HasBackendRedire
     old_entry_modified.last_may_be_rvi_call := false.B
     old_entry_modified.isCall := false.B
     old_entry_modified.isRet := false.B
+    old_entry_modified.isRetCall := false.B
     old_entry_modified.isJalr := false.B
   }
 
@@ -967,7 +974,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
       ((pred_ftb_entry.isJal  && !(jmp_pd.valid && jmp_pd.isJal)) ||
        (pred_ftb_entry.isJalr && !(jmp_pd.valid && jmp_pd.isJalr)) ||
        (pred_ftb_entry.isCall && !(jmp_pd.valid && jmp_pd.isCall)) ||
-       (pred_ftb_entry.isRet  && !(jmp_pd.valid && jmp_pd.isRet))
+       (pred_ftb_entry.isRet  && !(jmp_pd.valid && jmp_pd.isRet)) ||
+       (pred_ftb_entry.isRetCall && !(jmp_pd.valid && jmp_pd.isRetCall))
       )
 
     has_false_hit := br_false_hit || jal_false_hit || hit_pd_mispred_reg
@@ -1364,6 +1372,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   update.spec_info   := commit_spec_meta
   XSError(commit_valid && do_commit && debug_cfi, "\ncommit cfi can be non c_commited\n")
 
+
   val commit_real_hit = commit_hit === h_hit
   val update_ftb_entry = update.ftb_entry
 
@@ -1440,14 +1449,15 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     p"brInEntry(${inFtbEntry}) brIdx(${brIdx}) target(${Hexadecimal(target)})\n")
 
     val logbundle = Wire(new FtqDebugBundle)
-    logbundle.pc := pc
-    logbundle.target := target
-    logbundle.isBr := isBr
-    logbundle.isJmp := isJmp
-    logbundle.isCall := isJmp && commit_pd.hasCall
-    logbundle.isRet := isJmp && commit_pd.hasRet
-    logbundle.misPred := misPred
-    logbundle.isTaken := isTaken
+    logbundle.pc      := pc
+    logbundle.target  := target
+    logbundle.isBr    := isBr
+    logbundle.isJmp   := isJmp
+    logbundle.isCall    := isJmp && commit_pd.hasCall
+    logbundle.isRet     := isJmp && commit_pd.hasRet
+    logbundle.isRetCall := isJmp && commit_pd.hasRetCall
+    logbundle.misPred   := misPred
+    logbundle.isTaken   := isTaken
     logbundle.predStage := commit_stage
 
     ftqBranchTraceDB.log(
@@ -1478,6 +1488,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   XSPerfAccumulate("redirectAhead_ValidNum", ftqIdxAhead.map(_.valid).reduce(_|_))
   XSPerfAccumulate("fromBackendRedirect_ValidNum", io.fromBackend.redirect.valid)
   XSPerfAccumulate("toBpuRedirect_ValidNum", io.toBpu.redirect.valid)
+
+  XSPerfAccumulate("ret_call_Num", io.toBpu.update.valid && io.toBpu.update.bits.ftb_entry.isRetCall && io.toBpu.update.bits.ftb_entry.valid && io.toBpu.update.bits.ftb_entry.tailSlot.valid)
 
   val from_bpu = io.fromBpu.resp.bits
   val to_ifu = io.toIfu.req.bits
