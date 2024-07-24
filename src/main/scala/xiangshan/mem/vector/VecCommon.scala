@@ -741,11 +741,11 @@ object genUSSplitAddr{
 }
 
 object genUSSplitMask{
-  def apply(mask: UInt, index: UInt, addrOffset: UInt): UInt = {
-    val tmpMask = Cat(0.U(16.W),mask) << addrOffset // 32-bits
+  def apply(mask: UInt, index: UInt): UInt = {
+    require(mask.getWidth == 32) // need to be 32-bits
     LookupTree(index, List(
-      0.U -> tmpMask(15, 0),
-      1.U -> tmpMask(31, 16),
+      0.U -> mask(15, 0),
+      1.U -> mask(31, 16),
     ))
   }
 }
