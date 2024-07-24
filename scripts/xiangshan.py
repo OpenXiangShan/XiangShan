@@ -355,6 +355,15 @@ class XiangShan(object):
         ]
         misc_tests = map(lambda x: os.path.join(base_dir, x), workloads)
         return misc_tests
+    
+    def __get_ci_rvhtest(self, name=None):
+        base_dir = "/nfs/home/share/ci-workloads/H-extension-tests"
+        workloads = [
+            # "riscv-hyp-tests/rvh_test.bin",
+            "xvisor_wboxtest/checkpoint.gz",
+        ]
+        rvh_tests = map(lambda x: os.path.join(base_dir, x), workloads)
+        return rvh_tests
 
     def __get_ci_rvvbench(self, name=None):
         base_dir = "/nfs/home/share/ci-workloads"
@@ -464,6 +473,7 @@ class XiangShan(object):
             "misc-tests": self.__get_ci_misc,
             "mc-tests": self.__get_ci_mc,
             "nodiff-tests": self.__get_ci_nodiff,
+            "rvh-tests": self.__get_ci_rvhtest,
             "microbench": self.__am_apps_path,
             "coremark": self.__am_apps_path,
             "rvv-bench": self.__get_ci_rvvbench,
@@ -489,6 +499,7 @@ class XiangShan(object):
             "misc-tests": self.__get_ci_misc,
             "mc-tests": self.__get_ci_mc,
             "nodiff-tests": self.__get_ci_nodiff,
+            "rvh-tests": self.__get_ci_rvhtest,
             "microbench": self.__am_apps_path,
             "coremark": self.__am_apps_path,
             "rvv-bench": self.__get_ci_rvvbench,
