@@ -72,6 +72,7 @@ class VLSBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBun
 
   val usLowBitsAddr       = UInt((log2Up(maxMemByteNum)).W)
   val usAligned128        = Bool()
+  val usMask              = UInt((VLENB*2).W) // for unit-stride split
 }
 
 object VSFQFeedbackType {
