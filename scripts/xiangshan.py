@@ -476,10 +476,13 @@ def get_free_cores(n):
     while True:
         disable_cores = []
         for proc in psutil.process_iter():
-            joint = ' '.join(proc.cmdline())
-            numa_match = numa_re.match(joint)
-            if numa_match:
-                disable_cores.extend(range(int(numa_match.group(1)), int(numa_match.group(2)) + 1))
+            try:
+                joint = ' '.join(proc.cmdline())
+                numa_match = numa_re.match(joint)
+                if numa_match:
+                    disable_cores.extend(range(int(numa_match.group(1)), int(numa_match.group(2)) + 1))
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                pass
         num_logical_core = psutil.cpu_count(logical=False)
         core_usage = psutil.cpu_percent(interval=1, percpu=True)
         num_window = num_logical_core // n
