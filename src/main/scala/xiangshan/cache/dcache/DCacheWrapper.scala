@@ -1321,6 +1321,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     r.valid := missQueue.io.req(i).valid
     r.bits  := missQueue.io.req(i).bits.addr
   }
+  wb.io.mshr_block := missQueue.io.release_block
 
   // block_decoupled(missReqArb.io.out, missQueue.io.req, wb.io.block_miss_req)
   // missReqArb.io.out <> missQueue.io.req

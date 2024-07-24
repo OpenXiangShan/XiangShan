@@ -296,8 +296,8 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     // val miss_req_pipe_regs = Vec(cfg.nMSHRPorts, Input(new MissReqPipeRegBundle(edge)))
     val miss_req_pipe_reg = Input(new MissReqPipeRegBundle(edge)) // Only one req can merge/alloc to an mshr in 1 cyle, same cycle merge will be done when enq 
     // allocate this entry for new req
-    // val primary_valid = Vec(cfg.nMSHRPorts, Input(Bool()))
-    val primary_valid = Input(Bool())
+    val primary_valid = Vec(cfg.nMSHRPorts, Input(Bool()))
+    // val primary_valid = Input(Bool())
     // this entry is free and can be allocated to new reqs
     val primary_ready = Output(Bool())
     // val primary_ready = Vec(cfg.nMSHRPorts, Output(Bool()))
@@ -368,7 +368,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
     val matched = Output(Bool())
   })
 
-  assert(!RegNext(io.primary_valid && !io.primary_ready))
+  assert(!RegNext(Cat(io.primary_valid.map(v => v)).orR && !io.primary_ready))
 
   val req = Reg(new MissReqWoStoreData)
   val req_primary_fire = Reg(new MissReqWoStoreData) // for perf use
@@ -423,7 +423,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   // allocate current miss queue entry for a miss req
   // val primary_fire = WireInit(io.req.valid && io.primary_ready && io.primary_valid && !io.req.bits.cancel)'
   val primary_fire = VecInit((0 until cfg.nMSHRPorts).map(i =>
-    io.req(i).valid && io.primary_ready && io.primary_valid && !io.req(i).bits.cancel
+    io.req(i).valid && io.primary_ready && io.primary_valid(i) && !io.req(i).bits.cancel
   ))
   // merge miss req to current miss queue entry
   // val secondary_fire = WireInit(io.req.valid && io.secondary_ready && !io.req.bits.cancel)
@@ -915,25 +915,62 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   val secondary_reject_vec = (0 until cfg.nMSHRPorts).map(i => entries.map(_.io.secondary_reject(i)))
   val probe_block_vec = entries.map { case e => e.io.block_addr.valid && e.io.block_addr.bits === io.probe_addr } // TODO
 
+  val merge_with_pipe_req = (0 until cfg.nMSHRPorts).map(i => miss_req_pipe_reg.map(_.merge_req(io.req(i).bits)))
+  val reject_with_pipe_req = (0 until cfg.nMSHRPorts).map(i => miss_req_pipe_reg.map(_.reject_req(io.req(i).bits)))
+
+  val merge = (0 until cfg.nMSHRPorts).map(i => ParallelORR(Cat(secondary_ready_vec(i) ++ merge_with_pipe_req(i))))
+  val reject = (0 until cfg.nMSHRPorts).map(i => ParallelORR(Cat(secondary_reject_vec(i) ++ reject_with_pipe_req(i))))
+  val match_with_port_req = (0 until cfg.nMSHRPorts).map {i => 
+    (0 until cfg.nMSHRPorts).map(j => 
+        if (j < i) io.req(j).valid && !merge(i) && !reject(j) && io.req(j).bits.addr === io.req(i).bits.addr
+        else false.B
+  )}
+  val merge_with_port_req = (0 until cfg.nMSHRPorts).map(i => Cat(match_with_port_req(i)).orR && !merge(i) && !reject(i)) //Remove laste two cond
+  dontTouch(merge_with_port_req(0))
+  dontTouch(merge_with_port_req(1))
+  dontTouch(merge_with_port_req(2))
+  dontTouch(merge_with_port_req(3))
+  // val merge = ParallelORR(Cat(secondary_ready_vec ++ Seq(miss_req_pipe_reg.merge_req(io.req.bits))))
+  // val reject = ParallelORR(Cat(secondary_reject_vec ++ Seq(miss_req_pipe_reg.reject_req(io.req.bits))))
+  // val alloc = !reject && !merge && ParallelORR(Cat(primary_ready_vec))
+
   // TODO: merge all code with (0 until cfg.nMSHRPorts)
-  val req_age_compare = VecInit(Seq.fill(cfg.nMSHRPorts)(0.U(cfg.nMSHRPorts.W))) // Calculate the order of the req
-  dontTouch(req_age_compare)
+  val req_alloc_priority = VecInit(Seq.fill(cfg.nMSHRPorts)(0.U(cfg.nMSHRPorts.W))) // Calculate the order of the req
+  dontTouch(req_alloc_priority)
 
   for(i <- 0 until cfg.nMSHRPorts) {
     // TODO: Consider prefetch type into compare conditions
-    req_age_compare(i) := Cat((0 until cfg.nMSHRPorts).map(j => 
-      io.req(i).valid && Mux(io.req(j).valid, 
-                              isBefore(io.req(i).bits.robIdx, io.req(j).bits.robIdx),
-                              true.B)
+    req_alloc_priority(i) := Cat((0 until cfg.nMSHRPorts).map(j => 
+      if(i == j) false.B
+      else
+      io.req(i).valid && 
+        Mux(io.req(j).valid,
+            merge_with_port_req(j) || merge(j) || Mux(
+                io.req(i).bits.source =/= io.req(j).bits.source,
+                io.req(i).bits.source < io.req(j).bits.source,
+                Mux(
+                    io.req(i).bits.isFromPrefetch,
+                    (i < j).B,
+                    isBefore(io.req(i).bits.robIdx, io.req(j).bits.robIdx)
+                )
+            ),
+            true.B
+        )
+    //   io.req(i).valid && 
+    //     Mux(io.req(j).valid, 
+    //         io.req(i).bits.isFromStore || io.req(j).bits.isFromPrefetch || // Highest priority for store req, and lowest for prefetch
+    //         (merge_with_port_req(j) || merge(j)) || isBefore(io.req(i).bits.robIdx, io.req(j).bits.robIdx),
+    //         true.B
+    //     )
     )).asUInt
   }
 
   // TODO: Complete the enq logic: req_valid + entry_valid
   val req_alloc_valid = (0 until cfg.nMSHRPorts).map(i => 
-    (PopCount(req_age_compare(i)) === 3.U && primary_ready_cnt >= 1.U) ||
-    (PopCount(req_age_compare(i)) === 2.U && primary_ready_cnt >= 2.U) ||
-    (PopCount(req_age_compare(i)) === 1.U && primary_ready_cnt >= 3.U) ||
-    (PopCount(req_age_compare(i)) === 0.U && primary_ready_cnt === 4.U)
+    (PopCount(req_alloc_priority(i)) === 3.U && primary_ready_cnt >= 1.U) ||
+    (PopCount(req_alloc_priority(i)) === 2.U && primary_ready_cnt >= 2.U) ||
+    (PopCount(req_alloc_priority(i)) === 1.U && primary_ready_cnt >= 3.U) ||
+    (PopCount(req_alloc_priority(i)) === 0.U && primary_ready_cnt === 4.U)
   )
   dontTouch(req_alloc_valid(0))
   dontTouch(req_alloc_valid(1))
@@ -941,34 +978,38 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   dontTouch(req_alloc_valid(3))
   val req_alloc_mshr_id = (0 until cfg.nMSHRPorts).map(i=> 
     Mux1H(Seq(
-      (PopCount(req_age_compare(i)) === 3.U) -> available_entries_for_enq(0),
-      (PopCount(req_age_compare(i)) === 2.U) -> available_entries_for_enq(1),
-      (PopCount(req_age_compare(i)) === 1.U) -> available_entries_for_enq(2),
-      (PopCount(req_age_compare(i)) === 0.U) -> available_entries_for_enq(3)
+      (PopCount(req_alloc_priority(i)) === 3.U) -> available_entries_for_enq(0),
+      (PopCount(req_alloc_priority(i)) === 2.U) -> available_entries_for_enq(1),
+      (PopCount(req_alloc_priority(i)) === 1.U) -> available_entries_for_enq(2),
+      (PopCount(req_alloc_priority(i)) === 0.U) -> available_entries_for_enq(3)
     ))
   )
-  val merge_with_pipe_req = (0 until cfg.nMSHRPorts).map(i => miss_req_pipe_reg.map(_.merge_req(io.req(i).bits)))
-  val reject_with_pipe_req = (0 until cfg.nMSHRPorts).map(i => miss_req_pipe_reg.map(_.reject_req(io.req(i).bits)))
-  val merge = (0 until cfg.nMSHRPorts).map(i => ParallelORR(Cat(secondary_ready_vec(i) ++ merge_with_pipe_req(i))))
-  val reject = (0 until cfg.nMSHRPorts).map(i => ParallelORR(Cat(secondary_reject_vec(i) ++ reject_with_pipe_req(i))))
-  // val merge = ParallelORR(Cat(secondary_ready_vec ++ Seq(miss_req_pipe_reg.merge_req(io.req.bits))))
-  // val reject = ParallelORR(Cat(secondary_reject_vec ++ Seq(miss_req_pipe_reg.reject_req(io.req.bits))))
-  // val alloc = !reject && !merge && ParallelORR(Cat(primary_ready_vec))
-  val alloc = (0 until cfg.nMSHRPorts).map(i => !reject(i) && !merge(i) && req_alloc_valid(i))
+  
+  val alloc = (0 until cfg.nMSHRPorts).map(i => !reject(i) && !merge(i) && !merge_with_port_req(i) && req_alloc_valid(i))
   // val accept = alloc || merge
-  val accept = (0 until cfg.nMSHRPorts).map(i => alloc(i) || merge(i))
+  val accept = (0 until cfg.nMSHRPorts).map(i => (alloc(i) || merge(i) || merge_with_port_req(i)) && !io.req(i).bits.cancel)
 
   // val req_mshr_handled_vec = entries.map(_.io.req_handled_by_this_entry) // TODO
   val req_mshr_handled_vec = (0 until cfg.nMSHRPorts).map(i => entries.map(_.io.req_handled_by_this_entry(i)))
   // merged to pipeline reg
   // val req_pipeline_reg_handled = miss_req_pipe_reg.merge_req(io.req.bits) && io.req.valid //TODO
   val req_pipeline_reg_handled = (0 until cfg.nMSHRPorts).map(i => Cat(miss_req_pipe_reg.map(_.merge_req(io.req(i).bits))).orR && io.req(i).valid)
+  (0 until cfg.nMSHRPorts).foreach{i =>
+    assert(PopCount(Seq(req_pipeline_reg_handled(i), VecInit(req_mshr_handled_vec(i)).asUInt.orR, merge_with_port_req(i))) <= 1.U)
+  }
   // assert(PopCount(Seq(req_pipeline_reg_handled, VecInit(req_mshr_handled_vec).asUInt.orR)) <= 1.U, "miss req will either go to mshr or pipeline reg")
   // assert(PopCount(req_mshr_handled_vec) <= 1.U, "Only one mshr can handle a req")
   io.resp.zipWithIndex.foreach{ case(resp, i) =>
-    resp.id := Mux(!req_pipeline_reg_handled(i), OHToUInt(req_mshr_handled_vec(i)), miss_req_pipe_reg(i).mshr_id)
-    resp.handled := Cat(req_mshr_handled_vec(i)).orR || req_pipeline_reg_handled(i)
-    resp.merged := merge(i)
+    // resp.id := Mux(!req_pipeline_reg_handled(i), OHToUInt(req_mshr_handled_vec(i)), miss_req_pipe_reg(i).mshr_id)
+    resp.id := Mux(req_pipeline_reg_handled(i),
+                    PriorityMux(merge_with_pipe_req(i), miss_req_pipe_reg.map(_.mshr_id)),
+                    Mux(merge_with_port_req(i),
+                        PriorityMux(match_with_port_req(i), req_mshr_handled_vec.map(OHToUInt(_))),
+                        OHToUInt(req_mshr_handled_vec(i))
+                    )
+                )
+    resp.handled := Cat(req_mshr_handled_vec(i)).orR || req_pipeline_reg_handled(i) || merge_with_port_req(i)
+    resp.merged := merge(i) || merge_with_port_req(i)
   }
   // io.resp.id := Mux(!req_pipeline_reg_handled, OHToUInt(req_mshr_handled_vec), miss_req_pipe_reg.mshr_id)
   // io.resp.handled := Cat(req_mshr_handled_vec).orR || req_pipeline_reg_handled
@@ -1078,9 +1119,10 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
       }
       // e.io.req.valid := io.req.map(_.valid)
       // e.io.req.valid := io.req.valid
-      e.io.primary_valid := Cat((0 until cfg.nMSHRPorts).map(j => {
-        io.req(j).valid && !merge(j) && !reject(j) && req_alloc_mshr_id(j) === i.U
-      })).asUInt.orR && e.io.primary_ready
+      e.io.primary_valid := (0 until cfg.nMSHRPorts).map(j => {
+        io.req(j).valid && !merge(j) && !merge_with_port_req(j) && !reject(j) && req_alloc_mshr_id(j) === i.U && e.io.primary_ready
+      })
+    //   })).asUInt.orR && e.io.primary_ready
       // e.io.primary_valid := io.req.valid &&
       //   !merge &&
       //   !reject &&
@@ -1161,7 +1203,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
 
   io.probe_block := Cat(probe_block_vec).orR
 
-  io.release_block := io.release_addr.valid && Cat(entries.map(e => e.io.req_addr.valid && e.io.req_addr.bits === io.release_addr.bits) ++ Seq(miss_req_pipe_reg.block_match(io.release_addr.bits))).orR
+  io.release_block := io.release_addr.valid && Cat(entries.map(e => e.io.req_addr.valid && e.io.req_addr.bits === io.release_addr.bits) ++ miss_req_pipe_reg.map(r => r.block_match(io.release_addr.bits))).orR
 
   io.full := ~Cat(entries.map(_.io.primary_ready)).andR
 
