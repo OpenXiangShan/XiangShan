@@ -436,8 +436,6 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
   csrio.memExceptionVAddr := io.mem.exceptionAddr.vaddr
   csrio.memExceptionGPAddr := io.mem.exceptionAddr.gpaddr
   csrio.externalInterrupt := RegNext(io.fromTop.externalInterrupt)
-  csrio.distributedUpdate(0) := io.mem.csrDistributedUpdate
-  csrio.distributedUpdate(1) := io.frontendCsrDistributedUpdate
   csrio.perf <> io.perf
   csrio.perf.retiredInstr <> ctrlBlock.io.robio.csr.perfinfo.retiredInstr
   csrio.perf.ctrlInfo <> ctrlBlock.io.perfInfo.ctrlInfo
@@ -750,8 +748,6 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val otherFastWakeup = Flipped(Vec(params.LduCnt + params.HyuCnt, ValidIO(new DynInst)))
   val stIssuePtr = Input(new SqPtr())
 
-  val csrDistributedUpdate = Flipped(new DistributedCSRUpdateReq)
-
   val debugLS = Flipped(Output(new DebugLSIO))
 
   val lsTopdownInfo = Vec(params.LduCnt + params.HyuCnt, Flipped(Output(new LsTopdownInfo)))
@@ -810,8 +806,6 @@ class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle 
   val frontendSfence = Output(new SfenceBundle)
   val frontendCsrCtrl = Output(new CustomCSRCtrlIO)
   val frontendTlbCsr = Output(new TlbCsrBundle)
-  // distributed csr write
-  val frontendCsrDistributedUpdate = Flipped(new DistributedCSRUpdateReq)
 
   val mem = new BackendMemIO
 
