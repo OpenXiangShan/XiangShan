@@ -220,6 +220,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   // for Unit-Stride, if uop's addr is aligned with 128-bits, split it to one flow, otherwise split two
   val usLowBitsAddr    = getCheckAddrLowBits(s1_in.baseAddr, maxMemByteNum) + getCheckAddrLowBits(uopOffset, maxMemByteNum)
   val usAligned128     = (getCheckAddrLowBits(usLowBitsAddr, maxMemByteNum) === 0.U)// addr 128-bit aligned
+  val usMask           = Cat(0.U(VLENB.W), s1_in.byteMask) << getCheckAddrLowBits(usLowBitsAddr, maxMemByteNum)
 
   s1_kill               := s1_in.uop.robIdx.needFlush(io.redirect)
 
@@ -250,6 +251,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   io.out.bits.mBIndex   := io.toMergeBuffer.resp.bits.mBIndex
   io.out.bits.usLowBitsAddr := usLowBitsAddr
   io.out.bits.usAligned128  := usAligned128
+  io.out.bits.usMask        := usMask
 
   XSPerfAccumulate("split_out",     io.out.fire)
   XSPerfAccumulate("pipe_block",    io.out.valid && !io.out.ready)
@@ -305,6 +307,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   val issueAlignedType = issueEntry.alignedType
   val issuePreIsSplit  = issueEntry.preIsSplit
   val issueByteMask    = issueEntry.byteMask
+  val issueUsMask      = issueEntry.usMask
   val issueVLMAXMask   = issueEntry.vlmax - 1.U
   val issueIsWholeReg  = issueEntry.usWholeReg
   val issueVLMAXLog2   = GenVLMAXLog2(issueEntry.lmul, issueSew)
@@ -341,7 +344,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
    * Unit-Stride split to one flow or two flow.
    * for Unit-Stride, if uop's addr is aligned with 128-bits, split it to one flow, otherwise split two
    */
-  val usSplitMask      = genUSSplitMask(issueByteMask, splitIdx, getCheckAddrLowBits(issueUsLowBitsAddr, maxMemByteNum))
+  val usSplitMask      = genUSSplitMask(issueUsMask, splitIdx)
   val usNoSplit        = (issueUsAligned128 || !getOverflowBit(getCheckAddrLowBits(issueUsLowBitsAddr, maxMemByteNum) +& PopCount(usSplitMask), maxMemByteNum)) &&
                           !issuePreIsSplit &&
                           (splitIdx === 0.U)// unit-stride uop don't need to split into two flow
