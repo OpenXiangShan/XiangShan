@@ -145,12 +145,13 @@ class FtbSlot(val offsetLen: Int, val subOffsetLen: Option[Int] = None)(implicit
 
 
 class FTBEntry_part(implicit p: Parameters) extends XSBundle with FTBParams with BPUUtils {
-  val isCall      = Bool()
-  val isRet       = Bool()
-  val isJalr      = Bool()
-  val isRetCall   = Bool()
+  val isCall     = Bool()
+  val hasRet     = Bool() // maybe ret or ret-call
+  val isJalr     = Bool()
 
   def isJal = !isJalr
+  def isRet = !isCall && hasRet
+  def isRetCall = isCall && hasRet
 }
 
 class FTBEntry_FtqMem(implicit p: Parameters) extends FTBEntry_part with FTBParams with BPUUtils {
@@ -372,7 +373,7 @@ class FTBEntry(implicit p: Parameters) extends FTBEntry_part with FTBParams with
     val pftAddrDiff   = this.pftAddr === that.pftAddr
     val carryDiff     = this.carry   === that.carry
     val isCallDiff    = this.isCall  === that.isCall
-    val isRetDiff     = this.isRet   === that.isRet
+    val hasRetDiff     = this.hasRet   === that.hasRet
     val isJalrDiff    = this.isJalr  === that.isJalr
     val lastMayBeRviCallDiff = this.last_may_be_rvi_call === that.last_may_be_rvi_call
     val alwaysTakenDiff : IndexedSeq[Bool] =
@@ -386,7 +387,7 @@ class FTBEntry(implicit p: Parameters) extends FTBEntry_part with FTBParams with
       pftAddrDiff,
       carryDiff,
       isCallDiff,
-      isRetDiff,
+      hasRetDiff,
       isJalrDiff,
       lastMayBeRviCallDiff,
       alwaysTakenDiff.reduce(_&&_)
@@ -403,7 +404,7 @@ class FTBEntry(implicit p: Parameters) extends FTBEntry_part with FTBParams with
     XSDebug(cond, p"[tailSlot]: v=${tailSlot.valid}, offset=${tailSlot.offset}," +
       p"lower=${Hexadecimal(tailSlot.lower)}, sharing=${tailSlot.sharing}}\n")
     XSDebug(cond, p"pftAddr=${Hexadecimal(pftAddr)}, carry=$carry\n")
-    XSDebug(cond, p"isCall=$isCall, isRet=$isRet, isjalr=$isJalr\n")
+    XSDebug(cond, p"isCall=$isCall, hasRet=$hasRet, isjalr=$isJalr\n")
     XSDebug(cond, p"last_may_be_rvi_call=$last_may_be_rvi_call\n")
     XSDebug(cond, p"------------------------------- \n")
   }

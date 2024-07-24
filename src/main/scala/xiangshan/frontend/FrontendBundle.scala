@@ -434,7 +434,7 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
   val is_jalr = Bool()
   val is_call = Bool()
   val is_ret  = Bool()
-  val is_ret_call = Bool()
+  val has_ret = Bool()  // only used for the ret-call behavior in RAS
   val last_may_be_rvi_call = Bool()
   val is_br_sharing = Bool()
 
@@ -537,8 +537,8 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
     is_jal := entry.tailSlot.valid && entry.isJal
     is_jalr := entry.tailSlot.valid && entry.isJalr
     is_call := entry.tailSlot.valid && entry.isCall
-    is_ret := entry.tailSlot.valid && entry.isRet
-    is_ret_call := entry.isRetCall // The is_ret_call signal depends on the is_call signal and will not be pulled high alone
+    is_ret := entry.tailSlot.valid && entry.hasRet && !entry.isCall
+    has_ret := entry.hasRet
     last_may_be_rvi_call := entry.last_may_be_rvi_call
     is_br_sharing := entry.tailSlot.valid && entry.tailSlot.sharing
     predCycle.map(_ := GTimer())
@@ -649,11 +649,11 @@ class BranchPredictionUpdate(implicit p: Parameters) extends XSBundle with HasBP
   val from_stage = UInt(2.W)
   val ghist = UInt(HistoryLength.W)
 
-  def is_jal = ftb_entry.tailSlot.valid && ftb_entry.isJal
+  def is_jal  = ftb_entry.tailSlot.valid && ftb_entry.isJal
   def is_jalr = ftb_entry.tailSlot.valid && ftb_entry.isJalr
   def is_call = ftb_entry.tailSlot.valid && ftb_entry.isCall
-  def is_ret = ftb_entry.tailSlot.valid && ftb_entry.isRet
-  def is_ret_call = ftb_entry.isRetCall // The is_ret_call signal depends on the is_call signal and will not be pulled high alone
+  def is_ret  = ftb_entry.tailSlot.valid && ftb_entry.hasRet && !ftb_entry.isCall
+  def has_ret = ftb_entry.hasRet
 
   def is_call_taken = is_call && jmp_taken && cfi_idx.valid && cfi_idx.bits === ftb_entry.tailSlot.offset
   def is_ret_taken = is_ret && jmp_taken && cfi_idx.valid && cfi_idx.bits === ftb_entry.tailSlot.offset

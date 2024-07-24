@@ -547,16 +547,15 @@ class NewIFU(implicit p: Parameters) extends XSModule
   // Expand 1 bit to prevent overflow when assert
   val f3_ftq_req_startAddr      = Cat(0.U(1.W), f3_ftq_req.startAddr)
   val f3_ftq_req_nextStartAddr  = Cat(0.U(1.W), f3_ftq_req.nextStartAddr)
-  // brType, isCall and isRet generation is delayed to f3 stage
+  // brType, isCall and hasRet generation is delayed to f3 stage
   val f3Predecoder = Module(new F3Predecoder)
 
   f3Predecoder.io.in.instr := f3_instr
 
   f3_pd.zipWithIndex.map{ case (pd,i) =>
-    pd.brType := f3Predecoder.io.out.pd(i).brType
-    pd.isCall := f3Predecoder.io.out.pd(i).isCall
-    pd.isRet  := f3Predecoder.io.out.pd(i).isRet
-    pd.isRetCall  := f3Predecoder.io.out.pd(i).isRetCall
+    pd.brType   := f3Predecoder.io.out.pd(i).brType
+    pd.isCall   := f3Predecoder.io.out.pd(i).isCall
+    pd.hasRet   := f3Predecoder.io.out.pd(i).hasRet
   }
 
   val f3PdDiff = f3_pd_wire.zip(f3_pd).map{ case (a,b) => a.asUInt =/= b.asUInt }.reduce(_||_)
@@ -864,7 +863,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     val inst  = Cat(f3_mmio_data(1), f3_mmio_data(0))
     val currentIsRVC   = isRVC(inst)
 
-    val brType::isCall::isRet::isRetCall::Nil = brInfo(inst)
+    val brType::isCall::hasRet::Nil = brInfo(inst)
     val jalOffset = jal_offset(inst, currentIsRVC)
     val brOffset  = br_offset(inst, currentIsRVC)
 
@@ -875,8 +874,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     io.toIbuffer.bits.pd(0).isRVC   := currentIsRVC
     io.toIbuffer.bits.pd(0).brType  := brType
     io.toIbuffer.bits.pd(0).isCall  := isCall
-    io.toIbuffer.bits.pd(0).isRet   := isRet
-    io.toIbuffer.bits.pd(0).isRetCall := isRetCall
+    io.toIbuffer.bits.pd(0).hasRet  := hasRet
 
     when (mmio_resend_af) {
       io.toIbuffer.bits.exceptionType(0) := ExceptionType.acf
@@ -889,12 +887,11 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
     io.toIbuffer.bits.enqEnable   := f3_mmio_range.asUInt
 
-    mmioFlushWb.bits.pd(0).valid   := true.B
-    mmioFlushWb.bits.pd(0).isRVC   := currentIsRVC
-    mmioFlushWb.bits.pd(0).brType  := brType
-    mmioFlushWb.bits.pd(0).isCall  := isCall
-    mmioFlushWb.bits.pd(0).isRet   := isRet
-    mmioFlushWb.bits.pd(0).isRetCall  := isRetCall
+    mmioFlushWb.bits.pd(0).valid    := true.B
+    mmioFlushWb.bits.pd(0).isRVC    := currentIsRVC
+    mmioFlushWb.bits.pd(0).brType   := brType
+    mmioFlushWb.bits.pd(0).isCall   := isCall
+    mmioFlushWb.bits.pd(0).hasRet   := hasRet
   }
 
   mmio_redirect := (f3_req_is_mmio && mmio_state === m_waitCommit && RegNext(fromUncache.fire)  && f3_mmio_use_seq_pc)

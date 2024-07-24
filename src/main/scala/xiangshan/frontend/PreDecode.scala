@@ -37,8 +37,9 @@ trait HasPdConst extends HasXSParameter with HasICacheParameters with HasIFUCons
     val rs = Mux(isRVC(instr), Mux(brType === BrType.jal, 0.U, instr(11, 7)), instr(19, 15))
     val isCall = (brType === BrType.jal && !isRVC(instr) || brType === BrType.jalr) && isLink(rd) // Only for RV64
     val isRet = brType === BrType.jalr && isLink(rs) && !isCall
-    val isRetCall = (brType === BrType.jalr && isLink(rs) && isLink(rd) && (rs =/= rd))
-    List(brType, isCall, isRet, isRetCall)
+    val isRetCall = brType === BrType.jalr && isLink(rs) && isLink(rd) && (rs =/= rd)
+    val hasRet = isRet || isRetCall
+    List(brType, isCall, hasRet)
   }
   def jal_offset(inst: UInt, rvc: Bool): UInt = {
     val rvc_offset = Cat(inst(12), inst(8), inst(10, 9), inst(6), inst(7), inst(2), inst(11), inst(5, 3), 0.U(1.W))
@@ -70,17 +71,20 @@ object ExcType {  //TODO:add exctype
 }
 
 class PreDecodeInfo extends Bundle {  // 8 bit
-  val valid     = Bool()
-  val isRVC     = Bool()
-  val brType    = UInt(2.W)
-  val isCall    = Bool()
-  val isRet     = Bool()
-  val isRetCall = Bool()
+  val valid   = Bool()
+  val isRVC   = Bool()
+  val brType  = UInt(2.W)
+  val isCall  = Bool()
+  val hasRet  = Bool()  // maybe ret or ret-call
+  // val isCall  = Bool()
+  // val isRet   = Bool()
   //val excType = UInt(3.W)
   def isBr    = brType === BrType.branch
   def isJal   = brType === BrType.jal
   def isJalr  = brType === BrType.jalr
   def notCFI  = brType === BrType.notCFI
+  def isRet     = hasRet && !isCall
+  def isRetCall = isCall && hasRet
 }
 
 class PreDecodeResp(implicit p: Parameters) extends XSBundle with HasPdConst {
@@ -135,27 +139,26 @@ class PreDecode(implicit p: Parameters) extends XSModule with HasPdConst{
     val currentPC      = io.in.bits.pc(i)
     //expander.io.in             := inst
 
-    val brType::isCall::isRet::isRetCall::Nil = brInfo(inst)
+    val brType::isCall::hasRet::Nil = brInfo(inst)
     val jalOffset = jal_offset(inst, currentIsRVC(i))
     val brOffset  = br_offset(inst, currentIsRVC(i))
 
-    io.out.hasHalfValid(i)        := h_validStart(i)
+    io.out.hasHalfValid(i)    := h_validStart(i)
 
-    io.out.triggered(i)   := DontCare//VecInit(Seq.fill(10)(false.B))
+    io.out.triggered(i)       := DontCare//VecInit(Seq.fill(10)(false.B))
 
 
-    io.out.pd(i).valid         := validStart(i)
-    io.out.pd(i).isRVC         := currentIsRVC(i)
+    io.out.pd(i).valid        := validStart(i)
+    io.out.pd(i).isRVC        := currentIsRVC(i)
 
     // for diff purpose only
-    io.out.pd(i).brType        := brType
-    io.out.pd(i).isCall        := isCall
-    io.out.pd(i).isRet         := isRet
-    io.out.pd(i).isRetCall     := isRetCall
+    io.out.pd(i).brType       := brType
+    io.out.pd(i).isCall       := isCall
+    io.out.pd(i).hasRet       := hasRet
 
     //io.out.expInstr(i)         := expander.io.out.bits
-    io.out.instr(i)             :=inst
-    io.out.jumpOffset(i)        := Mux(io.out.pd(i).isBr, brOffset, jalOffset)
+    io.out.instr(i)           :=inst
+    io.out.jumpOffset(i)      := Mux(io.out.pd(i).isBr, brOffset, jalOffset)
   }
 
   // the first half is always reliable
@@ -262,12 +265,11 @@ class F3Predecoder(implicit p: Parameters) extends XSModule with HasPdConst {
     val out = Output(new F3PreDecodeResp)
   })
   io.out.pd.zipWithIndex.map{ case (pd,i) =>
-    pd.valid  := DontCare
-    pd.isRVC  := DontCare
-    pd.brType := brInfo(io.in.instr(i))(0)
-    pd.isCall := brInfo(io.in.instr(i))(1)
-    pd.isRet  := brInfo(io.in.instr(i))(2)
-    pd.isRetCall := brInfo(io.in.instr(i))(3)
+    pd.valid := DontCare
+    pd.isRVC := DontCare
+    pd.brType   := brInfo(io.in.instr(i))(0)
+    pd.isCall   := brInfo(io.in.instr(i))(1)
+    pd.hasRet   := brInfo(io.in.instr(i))(2)
   }
 
 }
