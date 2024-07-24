@@ -107,8 +107,6 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val debugMode = Output(Bool())
   // Custom microarchiture ctrl signal
   val customCtrl = Output(new CustomCSRCtrlIO)
-  // distributed csr write
-  val distributedUpdate = Vec(2, Flipped(new DistributedCSRUpdateReq))
 }
 
 class VtypeStruct(implicit p: Parameters) extends XSBundle {
@@ -1526,34 +1524,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     vsstatus := vsstatusNew.asUInt
     hstatus := hstatusNew.asUInt
     debugMode := debugModeNew
-  }
-
-  // Distributed CSR update req
-  //
-  // For now we use it to implement customized cache op
-  // It can be delayed if necessary
-
-  val delayedUpdate0 = DelayN(csrio.distributedUpdate(0), 2)
-  val delayedUpdate1 = DelayN(csrio.distributedUpdate(1), 2)
-  val distributedUpdateValid = delayedUpdate0.w.valid || delayedUpdate1.w.valid
-  val distributedUpdateAddr = Mux(delayedUpdate0.w.valid,
-    delayedUpdate0.w.bits.addr,
-    delayedUpdate1.w.bits.addr
-  )
-  val distributedUpdateData = Mux(delayedUpdate0.w.valid,
-    delayedUpdate0.w.bits.data,
-    delayedUpdate1.w.bits.data
-  )
-
-  assert(!(delayedUpdate0.w.valid && delayedUpdate1.w.valid))
-
-  when(distributedUpdateValid){
-    // cacheopRegs can be distributed updated
-    CacheInstrucion.CacheInsRegisterList.map{case (name, attribute) => {
-      when((Scachebase + attribute("offset").toInt).U === distributedUpdateAddr){
-        cacheopRegs(name) := distributedUpdateData
-      }
-    }}
   }
 
   // Cache error debug support
