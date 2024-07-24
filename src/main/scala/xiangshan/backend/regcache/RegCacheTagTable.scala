@@ -116,7 +116,7 @@ class RegCacheTagTableIO(numReadPorts: Int)(implicit p: Parameters, schdParams: 
   val allocPregs = Vec(RenameWidth, Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
 
   // cancelFromDatapath
-  val og0Cancel = Input(ExuOH(backendParams.numExu))
+  val og0Cancel = Input(ExuVec())
 
   // cancelFromMem
   val ldCancel = Vec(backendParams.LdExuCnt, Flipped(new LoadCancelIO))

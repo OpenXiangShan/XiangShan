@@ -62,7 +62,7 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val og0Cancel = Input(ExuVec())
   val og1Cancel = Input(ExuVec())
   val ldCancel = Vec(backendParams.LduCnt + backendParams.HyuCnt, Flipped(new LoadCancelIO))
-  val replaceRCIdx = OptionWrapper(params.needWriteRegCache, Vec(params.numDeq, Input(UInt(RegCacheIdxWidth.W))))
+  val replaceRCIdx = Option.when(params.needWriteRegCache)(Vec(params.numDeq, Input(UInt(RegCacheIdxWidth.W))))
 
   // Outputs
   val wakeupToIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = params.genIQWakeUpSourceValidBundle
