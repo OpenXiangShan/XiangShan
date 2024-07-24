@@ -43,7 +43,7 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
 
   //Reg
   val validReg = GatedValidRegNext(common.validRegNext, false.B)
-  val entryReg = RegEnable(entryRegNext, validReg || common.validRegNext)
+  val entryReg = RegNext(entryRegNext)
   val enqDelayValidReg = GatedValidRegNext(enqDelayValidRegNext, false.B)
 
   //Wire

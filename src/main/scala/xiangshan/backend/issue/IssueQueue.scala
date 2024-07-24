@@ -761,7 +761,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
 
   io.deqDelay.zip(deqBeforeDly).foreach { case (deqDly, deq) =>
     NewPipelineConnect(
-      deq, deqDly, deqDly.valid,
+      deq, deqDly, true.B,
       false.B,
       Option("Scheduler2DataPathPipe")
     )
@@ -1077,7 +1077,7 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
       wakeup.bits.vecWen := (if (params.writeVecRf) GatedValidRegNext(uop.bits.vecWen && uop.fire) else false.B)
       wakeup.bits.v0Wen  := (if (params.writeV0Rf)  GatedValidRegNext(uop.bits.v0Wen  && uop.fire) else false.B)
       wakeup.bits.vlWen  := (if (params.writeVlRf)  GatedValidRegNext(uop.bits.vlWen  && uop.fire) else false.B)
-      wakeup.bits.pdest  := RegEnable(uop.bits.pdest, uop.fire)
+      wakeup.bits.pdest  := RegNext(uop.bits.pdest)
       wakeup.bits.loadDependency.foreach(_ := 0.U) // this is correct for load only
 
       wakeup.bits.rfWenCopy .foreach(_.foreach(_ := (if (params.writeIntRf) GatedValidRegNext(uop.bits.rfWen  && uop.fire) else false.B)))
@@ -1085,7 +1085,7 @@ class IssueQueueMemAddrImp(override val wrapper: IssueQueue)(implicit p: Paramet
       wakeup.bits.vecWenCopy.foreach(_.foreach(_ := (if (params.writeVecRf) GatedValidRegNext(uop.bits.vecWen && uop.fire) else false.B)))
       wakeup.bits.v0WenCopy .foreach(_.foreach(_ := (if (params.writeV0Rf)  GatedValidRegNext(uop.bits.v0Wen  && uop.fire) else false.B)))
       wakeup.bits.vlWenCopy .foreach(_.foreach(_ := (if (params.writeVlRf)  GatedValidRegNext(uop.bits.vlWen  && uop.fire) else false.B)))
-      wakeup.bits.pdestCopy .foreach(_.foreach(_ := RegEnable(uop.bits.pdest, uop.fire)))
+      wakeup.bits.pdestCopy .foreach(_.foreach(_ := RegNext(uop.bits.pdest)))
       wakeup.bits.loadDependencyCopy.foreach(x => x := 0.U.asTypeOf(x)) // this is correct for load only
 
       wakeup.bits.is0Lat := 0.U
