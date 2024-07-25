@@ -21,6 +21,7 @@ class TrapHandleModule extends Module {
   private val hvien = io.in.hvien.asUInt
 
   private val hasTrap = trapInfo.valid
+  private val hasNMI = hasTrap && trapInfo.bits.nmi
   private val hasIR = hasTrap && trapInfo.bits.isInterrupt
   private val hasEX = hasTrap && !trapInfo.bits.isInterrupt
 
@@ -42,7 +43,6 @@ class TrapHandleModule extends Module {
   private val filteredIRQs: Seq[UInt] = interruptGroups.map {
     case (irqGroup, name) => (getMaskFromIRQGroup(irqGroup) & hasIRVec).suggestName(s"filteredIRQs_$name")
   }
-
   private val hasIRQinGroup: Seq[Bool] = interruptGroups.map {
     case (irqGroup, name) => dontTouch(Cat(filterIRQs(irqGroup, hasIRVec)).orR.suggestName(s"hasIRQinGroup_$name"))
   }
@@ -56,6 +56,18 @@ class TrapHandleModule extends Module {
     0.U.asTypeOf(Vec(64, Bool())),
     hasIRQinGroup zip highestIRQinGroup map{ case (hasIRQ: Bool, highestIRQ: Vec[Bool]) => hasIRQ -> highestIRQ }
   )
+  private val highestPrioNMIVec = Wire(Vec(64, Bool()))
+  highestPrioNMIVec.zipWithIndex.foreach { case (irq, i) =>
+    if (NonMaskableIRNO.interruptDefaultPrio.contains(i)) {
+      val higherIRSeq = NonMaskableIRNO.getIRQHigherThan(i)
+      irq := (
+        higherIRSeq.nonEmpty.B && Cat(higherIRSeq.map(num => !hasIRVec(num))).andR ||
+          higherIRSeq.isEmpty.B
+        ) && hasIRVec(i)
+      dontTouch(irq)
+    } else
+      irq := false.B
+  }
 
   private val highestPrioEXVec = Wire(Vec(64, Bool()))
   highestPrioEXVec.zipWithIndex.foreach { case (excp, i) =>
@@ -69,8 +81,10 @@ class TrapHandleModule extends Module {
       excp := false.B
   }
 
-  private val highestPrioIR = highestPrioIRVec.asUInt
-  private val highestPrioEX = highestPrioEXVec.asUInt
+  private val highestPrioIR  = highestPrioIRVec.asUInt
+  private val highestPrioNMI = highestPrioNMIVec.asUInt
+  private val highestPrioEX  = highestPrioEXVec.asUInt
+
 
   private val mIRVec  = dontTouch(WireInit(highestPrioIR))
   private val hsIRVec = (mIRVec  & mideleg) | (mIRVec  & mvien & ~mideleg)
@@ -80,9 +94,10 @@ class TrapHandleModule extends Module {
   private val hsEXVec = highestPrioEX & medeleg
   private val vsEXVec = highestPrioEX & medeleg & hedeleg
 
+  // nmi handle in MMode only and default handler is mtvec
   private val  mHasIR =  mIRVec.orR
-  private val hsHasIR = hsIRVec.orR
-  private val vsHasIR = vsIRVec.orR
+  private val hsHasIR = hsIRVec.orR & !hasNMI
+  private val vsHasIR = vsIRVec.orR & !hasNMI
 
   private val  mHasEX =  mEXVec.orR
   private val hsHasEX = hsEXVec.orR
@@ -97,7 +112,7 @@ class TrapHandleModule extends Module {
 
   // Todo: support more interrupt and exception
   private val exceptionRegular = OHToUInt(highestPrioEX)
-  private val interruptNO = OHToUInt(highestPrioIR)
+  private val interruptNO = OHToUInt(Mux(hasNMI, highestPrioNMI, highestPrioIR))
   private val exceptionNO = Mux(trapInfo.bits.singleStep, ExceptionNO.breakPoint.U, exceptionRegular)
 
   private val causeNO = Mux(hasIR, interruptNO, exceptionNO)
@@ -151,6 +166,7 @@ class TrapHandleIO extends Bundle {
   val in = Input(new Bundle {
     val trapInfo = ValidIO(new Bundle {
       val trapVec = UInt(64.W)
+      val nmi = Bool()
       val intrVec = UInt(64.W)
       val isInterrupt = Bool()
       val singleStep = Bool()

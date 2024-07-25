@@ -54,6 +54,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   private val isEcall  = CSROpType.isSystemOp(func) && addr === privEcall
   private val isEbreak = CSROpType.isSystemOp(func) && addr === privEbreak
+  private val isMNret  = CSROpType.isSystemOp(func) && addr === privMNret
   private val isMret   = CSROpType.isSystemOp(func) && addr === privMret
   private val isSret   = CSROpType.isSystemOp(func) && addr === privSret
   private val isDret   = CSROpType.isSystemOp(func) && addr === privDret
@@ -96,6 +97,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       in.bits.src := src
       in.bits.wdata := wdata
       in.bits.mret := isMret
+      in.bits.mnret := isMNret
       in.bits.sret := isSret
       in.bits.dret := isDret
   }
@@ -144,6 +146,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.platformIRP.VSEIP := false.B // Todo
   csrMod.platformIRP.VSTIP := false.B // Todo
   csrMod.platformIRP.debugIP := csrIn.externalInterrupt.debug
+  csrMod.nonMaskableIRP.NMI := csrIn.externalInterrupt.nmi.nmi
 
   csrMod.io.fromTop.hartId := io.csrin.get.hartId
   csrMod.io.fromTop.clintTime := io.csrin.get.clintTime

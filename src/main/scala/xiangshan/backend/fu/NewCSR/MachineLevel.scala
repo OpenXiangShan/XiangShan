@@ -1,6 +1,7 @@
 package xiangshan.backend.fu.NewCSR
 
 import chisel3._
+import chisel3.experimental.SourceInfo
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.rocket.CSRs
@@ -14,6 +15,7 @@ import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast._
 import xiangshan.backend.fu.NewCSR.ChiselRecordForField._
 import xiangshan.backend.fu.PerfCounterIO
 import xiangshan.backend.fu.NewCSR.CSRConfig._
+import xiangshan.backend.fu.NewCSR.CSRFunc.wNoEffectWhen
 
 import scala.collection.immutable.SeqMap
 
@@ -353,6 +355,27 @@ trait MachineLevel { self: NewCSR =>
 
   val mstateen0 = Module(new CSRModule("Mstateen", new MstateenBundle0)).setAddr(CSRs.mstateen0)
 
+  // smrnmi extension
+  val mnepc = Module(new CSRModule("Mnepc", new Epc) with TrapEntryMNEventSinkBundle {
+    rdata := SignExt(Cat(reg.epc.asUInt, 0.U(1.W)), XLEN)
+  })
+    .setAddr(CSRs.mnepc)
+
+  val mncause = Module(new CSRModule("Mncause", new CauseBundle) with TrapEntryMNEventSinkBundle)
+    .setAddr(CSRs.mncause)
+  val mnstatus = Module(new CSRModule("Mnstatus", new MnstatusBundle)
+    with TrapEntryMNEventSinkBundle
+    with MNretEventSinkBundle{
+    // NMIE write 0 with no effect
+    // as opensbi not support smrnmi, we init nmie with 1,and allow software to set nmie close for testing
+    // Attension, when set nmie to zero ,do not cause double trap when nmi interrupt has triggered
+//    when(!wdata.NMIE.asBool) {
+//      reg.NMIE := reg.NMIE
+//    }
+  }).setAddr(CSRs.mnstatus)
+  val mnscratch = Module(new CSRModule("Mnscratch"))
+    .setAddr(CSRs.mnscratch)
+
   val machineLevelCSRMods: Seq[CSRModule[_]] = Seq(
     mstatus,
     misa,
@@ -381,6 +404,10 @@ trait MachineLevel { self: NewCSR =>
     mhartid,
     mconfigptr,
     mstateen0,
+    mnepc,
+    mncause,
+    mnstatus,
+    mnscratch,
   ) ++ mhpmevents ++ mhpmcounters
 
   val machineLevelCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], UInt)] = SeqMap.from(
@@ -441,6 +468,7 @@ class MstatusModule(implicit override val p: Parameters) extends CSRModule("MSta
   with TrapEntryHSEventSinkBundle
   with DretEventSinkBundle
   with MretEventSinkBundle
+  with MNretEventSinkBundle
   with SretEventSinkBundle
   with HasRobCommitBundle
 {
@@ -469,7 +497,13 @@ class MstatusModule(implicit override val p: Parameters) extends CSRModule("MSta
   rdata := mstatus.asUInt
   sstatusRdata := sstatus.asUInt
 }
+class MnstatusBundle extends CSRBundle {
 
+  val NMIE   = CSRRWField  (3).withReset(1.U) // as opensbi not support smrnmi, we init nmie open
+  val MNPV   = VirtMode    (7).withReset(0.U)
+  val MNPELP = CSRRWField  (9).withReset(0.U)
+  val MNPP   = PrivMode    (12, 11).withReset(PrivMode.U)
+}
 class MisaBundle extends CSRBundle {
   // Todo: reset with ISA string
   val A = RO( 0).withReset(1.U) // Atomic extension
@@ -640,6 +674,11 @@ trait HasExternalInterruptBundle {
     val VSTIP = Input(Bool())
     // debug interrupt from debug module
     val debugIP = Input(Bool())
+  })
+}
+trait HasNonMaskableIRPBundle {
+  val nonMaskableIRP = IO(new Bundle {
+    val NMI = Input(Bool())
   })
 }
 

@@ -44,6 +44,7 @@ class MretEventModule extends Module with CSREventBase {
   out.privState.bits.PRVM := in.mstatus.MPP
   out.privState.bits.V    := Mux(in.mstatus.MPP === PrivMode.M, VirtMode.Off.asUInt, in.mstatus.MPV.asUInt)
   out.mstatus.bits.MPP    := PrivMode.U
+  out.mstatus.bits.MPV    := VirtMode.Off.asUInt
   out.mstatus.bits.MIE    := in.mstatus.MPIE
   out.mstatus.bits.MPIE   := 1.U
   out.mstatus.bits.MPRV   := Mux(in.mstatus.MPP =/= PrivMode.M, 0.U, in.mstatus.MPRV.asUInt)

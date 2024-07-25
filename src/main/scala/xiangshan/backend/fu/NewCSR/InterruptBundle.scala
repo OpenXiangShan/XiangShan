@@ -288,6 +288,25 @@ class InterruptEnableBundle extends CSRBundle {
   def getRW = getALL.filter(_.isRW)
 }
 
+class NonMaskableIRPendingBundle extends CSRBundle {
+  val NMI = RW(1).withReset(0.U)
+  // reserve for more NMI type
+}
+object NonMaskableIRNO{
+  final val NMI = 1
+  // reserve for more NMI type
+
+  val interruptDefaultPrio = Seq(
+    NMI
+  )
+  def getIRQHigherThan(irq: Int): Seq[Int] = {
+    val idx = this.interruptDefaultPrio.indexOf(irq, 0)
+    require(idx != -1, s"The irq($irq) does not exists in IntPriority Seq")
+    this.interruptDefaultPrio.slice(0, idx)
+  }
+
+}
+
 object InterruptNO {
   // Software Interrupt
   final val SSI  = 1
