@@ -300,7 +300,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   val s2_req_vaddr      = RegEnable(s1_req_vaddr, 0.U.asTypeOf(s1_req_vaddr), s1_fire)
   val s2_req_ptags      = RegEnable(s1_req_ptags, 0.U.asTypeOf(s1_req_ptags), s1_fire)
-  val s2_req_gpaddr     = RegEnable(s1_req_gpaddr, 0.U.asTypeOf(s1_req_gpaddr), s0_fire)
+  val s2_req_gpaddr     = RegEnable(s1_req_gpaddr, 0.U.asTypeOf(s1_req_gpaddr), s1_fire)
   val s2_doubleline     = RegEnable(s1_doubleline, 0.U.asTypeOf(s1_doubleline), s1_fire)
   val s2_excp_tlb_af    = RegEnable(s1_excp_tlb_af, 0.U.asTypeOf(s1_excp_tlb_af), s1_fire)
   val s2_excp_tlb_pf    = RegEnable(s1_excp_tlb_pf, 0.U.asTypeOf(s1_excp_tlb_pf), s1_fire)
