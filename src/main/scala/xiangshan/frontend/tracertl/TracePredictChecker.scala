@@ -31,6 +31,7 @@ class TracePredictChecker(implicit p: Parameters) extends TraceModule
     val traceInsts = Input(Vec(PredictWidth, Valid(new TraceInstrBundle())))
     val predictInfo = Input(new TracePredictInfo)
     val preDecode = Input(new PreDecodeResp)
+    val traceRange = Input(UInt(PredictWidth.W))
 
 //    val bpuPredInfo = Output(Vec(PredictWidth, new TracePredInfoBundle))
     val out = Output(new PredCheckerResp)
@@ -64,6 +65,8 @@ class TracePredictChecker(implicit p: Parameters) extends TraceModule
   val needRemask = Cat(remaskFault).orR
   val fixedRange = predRange.asUInt & (Fill(PredictWidth, !needRemask) | Fill(PredictWidth, 1.U(1.W)) >> ~remaskIdx)
 
+  // FIXME: the fixedRange doesn't concern traceInst's valid. So it may be larger than the real range
+  // but, the usage of the fixedRange may not affect the performance. so wo keep it for now.
   io.out.stage1Out.fixedRange := fixedRange.asTypeOf(Vec(PredictWidth, Bool()))
   io.out.stage1Out.fixedTaken := VecInit((0 until PredictWidth).map(i => {
     pds(i).valid && predRange(i) &&
@@ -76,7 +79,8 @@ class TracePredictChecker(implicit p: Parameters) extends TraceModule
       (i.U === takenIdx) && predTaken && pds(i).notCFI
   })
   val invalidTaken = (0 until PredictWidth).map(i => {
-    fixedRange(i) && !pds(i).valid &&
+    // if out of trace range, the trace is invalid, we don't know if it is invalid
+    fixedRange(i) && (!pds(i).valid && io.traceRange(i)) &&
       (i.U === takenIdx) && predTaken
   })
 
