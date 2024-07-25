@@ -20,6 +20,8 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.ParallelPosteriorityMux
 import xiangshan.frontend.BranchPredictionRedirect
+import utility.ChiselMap
+import utils.XSPerfAccumulate
 
 class TraceDriverOutput(implicit p: Parameters) extends TraceBundle {
   // when block true, the fetch is at the wrong path, should block ifu-go, ibuffer-recv
@@ -59,9 +61,17 @@ class TraceDriver(implicit p: Parameters) extends TraceModule {
   //     The wrong path's next fecth req's startAddr is the same with correct path.
   //   So we need to explicitly check/record the path is wrong or correct.
   // when wrong path, block ifu-go, ibuffer-recv
+  val wrongPathPC = Reg(UInt(64.W))
+//  val wrongPathNextPC = Reg(UInt(64.W))
+  val wrongPathPCWire = Wire(UInt(64.W))
+//  val wrongPathPCNextWire = Wire(UInt(64.W))
   val wrongPathState = RegInit(false.B)
   when (io.fire) {
     wrongPathState := (io.traceRange =/= io.ifuRange)
+    when ((io.traceRange =/= io.ifuRange)) {
+      wrongPathPC := wrongPathPCWire
+//      wrongPathNextPC := wrongPathPCNextWire
+    }
   }
   when (io.redirect.fromBackend.valid || io.redirect.fromIFUBPU) {
     wrongPathState := false.B
@@ -74,7 +84,24 @@ class TraceDriver(implicit p: Parameters) extends TraceModule {
   io.out.recv.bits.instNum := PopCount(io.traceRange & traceValid)
   io.out.recv.valid := io.fire
 
+  wrongPathPCWire := ParallelPosteriorityMux(io.traceRange & traceValid, io.traceInsts.map(_.bits.pcVA))
+
   io.out.endWithCFI := ParallelPosteriorityMux(io.traceRange & traceValid, io.traceInsts.map(x =>
     (x.bits.branchType =/= 0.U) && x.bits.branchTaken(0)
   ))
+
+  class TraceWrongPathCycle extends Bundle {
+    val pcVA = UInt(64.W)
+//    val nextPCVA = UInt(64.W)
+  }
+  val traceWrongPathCycle = ChiselMap.createTable("wrongPathCycle", Vec(1, new TraceWrongPathCycle()), basicDB =true)
+  val perf_traceWPC = Wire(Vec(1, Valid(new TraceWrongPathCycle())))
+  perf_traceWPC(0).valid := wrongPathState
+  perf_traceWPC(0).bits.pcVA := wrongPathPC
+//  perf_traceWPC(0).bits.nextPCVA := wrongPathNextPC
+  traceWrongPathCycle.log(perf_traceWPC, 1.U, "wrongpathCycle", clock, reset)
+  XSPerfAccumulate("pcMisMatch", pcMismatch)
+  XSPerfAccumulate("wrongPathState", wrongPathState)
+  XSPerfAccumulate("pcAndwrongPath", pcMismatch && wrongPathState)
+  XSPerfAccumulate("pcOrwrongPath", pcMismatch || wrongPathState)
 }
