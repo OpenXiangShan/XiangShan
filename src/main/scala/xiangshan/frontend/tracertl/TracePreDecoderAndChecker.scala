@@ -97,6 +97,7 @@ class TracePreDecodeAndChecker(implicit p: Parameters) extends TraceModule
     _.traceInsts := traceInstIFUCut,
     _.predictInfo := io.predInfo,
     _.preDecode := preDecoder.io.out,
+    _.traceRange := traceAligner.io.traceRange,
   )
   traceChecker.io.specifyField(
     _.debug_valid := io.fromIFU.valid,
