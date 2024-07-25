@@ -80,6 +80,7 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
   val lsqio = new Bundle {
     val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
     val scommit = Input(UInt(log2Up(CommitWidth + 1).W))
+    val pendingUncacheld = Input(Bool())
     val pendingld = Input(Bool())
     val pendingst = Input(Bool())
     val pendingVst = Input(Bool())
@@ -344,6 +345,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val vsMergeBuffer = Seq.fill(VstuCnt)(Module(new VSMergeBufferImp))
   val vSegmentUnit  = Module(new VSegmentUnit)
 
+  // misalign Buffer
+  val loadMisalignBuffer = Module(new LoadMisalignBuffer)
+
   val l1_pf_req = Wire(Decoupled(new L1PrefetchReq()))
   dcache.io.sms_agt_evict_req.ready := false.B
   val prefetcherOpt: Option[BasePrefecher] = coreParams.prefetcher.map {
@@ -407,12 +411,21 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   hybridUnits.zipWithIndex.map(x => x._1.suggestName("HybridUnit_"+x._2))
   val atomicsUnit = Module(new AtomicsUnit)
 
-  val ldaWritebackOverride  = Mux(atomicsUnit.io.out.valid, atomicsUnit.io.out.bits, loadUnits.head.io.ldout.bits)
+  val ldaWritebackOverride  = Mux(
+    loadMisalignBuffer.io.writeBack.valid,
+    loadMisalignBuffer.io.writeBack.bits,
+    Mux(
+      atomicsUnit.io.out.valid,
+      atomicsUnit.io.out.bits,
+      loadUnits.head.io.ldout.bits
+    ))
   val ldaOut = Wire(Decoupled(new MemExuOutput))
-  ldaOut.valid := atomicsUnit.io.out.valid || loadUnits.head.io.ldout.valid
+  // misalignBuffer will overwrite the source from ldu if it is about to writeback
+  ldaOut.valid := atomicsUnit.io.out.valid || loadUnits.head.io.ldout.valid || loadMisalignBuffer.io.writeBack.valid
   ldaOut.bits  := ldaWritebackOverride
   atomicsUnit.io.out.ready := ldaOut.ready
   loadUnits.head.io.ldout.ready := ldaOut.ready
+  loadMisalignBuffer.io.writeBack.ready := ldaOut.ready
 
   val ldaExeWbReqs = ldaOut +: loadUnits.tail.map(_.io.ldout)
   io.mem_to_ooo.writebackLda <> ldaExeWbReqs
@@ -852,6 +865,17 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     lsq.io.tlb_hint <> dtlbRepeater.io.hint.get
 
+    // connect misalignBuffer
+    loadMisalignBuffer.io.req(i) <> loadUnits(i).io.misalign_buf
+
+    if (i == 0) {
+      loadUnits(i).io.misalign_ldin  <> loadMisalignBuffer.io.splitLoadReq
+      loadUnits(i).io.misalign_ldout <> loadMisalignBuffer.io.splitLoadResp
+    } else {
+      loadUnits(i).io.misalign_ldin.valid := false.B
+      loadUnits(i).io.misalign_ldin.bits := DontCare
+    }
+
     // alter writeback exception info
     io.mem_to_ooo.s3_delayed_load_error(i) := loadUnits(i).io.s3_dly_ld_err
 
@@ -1034,6 +1058,20 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   }
 
+  // misalignBuffer
+  loadMisalignBuffer.io.redirect                <> redirect  
+  loadMisalignBuffer.io.rob.lcommit             := io.ooo_to_mem.lsqio.lcommit
+  loadMisalignBuffer.io.rob.scommit             := io.ooo_to_mem.lsqio.scommit
+  loadMisalignBuffer.io.rob.pendingUncacheld    := io.ooo_to_mem.lsqio.pendingUncacheld
+  loadMisalignBuffer.io.rob.pendingld           := io.ooo_to_mem.lsqio.pendingld
+  loadMisalignBuffer.io.rob.pendingst           := io.ooo_to_mem.lsqio.pendingst
+  loadMisalignBuffer.io.rob.pendingVst          := io.ooo_to_mem.lsqio.pendingVst
+  loadMisalignBuffer.io.rob.commit              := io.ooo_to_mem.lsqio.commit
+  loadMisalignBuffer.io.rob.pendingPtr          := io.ooo_to_mem.lsqio.pendingPtr
+  loadMisalignBuffer.io.rob.pendingPtrNext      := io.ooo_to_mem.lsqio.pendingPtrNext
+
+  lsq.io.flushFrmMaBuf                          := loadMisalignBuffer.io.flushLdExpBuff
+
   // Prefetcher
   val StreamDTLBPortIndex = TlbStartVec(dtlb_ld_idx) + LduCnt + HyuCnt
   val PrefetcherDTLBPortIndex = TlbStartVec(dtlb_pf_idx)
@@ -1195,6 +1233,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.mem_to_ooo.lsqio.uop        := lsq.io.rob.uop
   lsq.io.rob.lcommit             := io.ooo_to_mem.lsqio.lcommit
   lsq.io.rob.scommit             := io.ooo_to_mem.lsqio.scommit
+  lsq.io.rob.pendingUncacheld    := io.ooo_to_mem.lsqio.pendingUncacheld
   lsq.io.rob.pendingld           := io.ooo_to_mem.lsqio.pendingld
   lsq.io.rob.pendingst           := io.ooo_to_mem.lsqio.pendingst
   lsq.io.rob.pendingVst          := io.ooo_to_mem.lsqio.pendingVst

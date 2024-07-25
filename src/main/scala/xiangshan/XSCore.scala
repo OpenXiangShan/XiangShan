@@ -201,16 +201,17 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.redirect <> backend.io.mem.redirect
   memBlock.io.ooo_to_mem.csrCtrl <> backend.io.mem.csrCtrl
   memBlock.io.ooo_to_mem.tlbCsr <> backend.io.mem.tlbCsr
-  memBlock.io.ooo_to_mem.lsqio.lcommit        := backend.io.mem.robLsqIO.lcommit
-  memBlock.io.ooo_to_mem.lsqio.scommit        := backend.io.mem.robLsqIO.scommit
-  memBlock.io.ooo_to_mem.lsqio.pendingld      := backend.io.mem.robLsqIO.pendingld
-  memBlock.io.ooo_to_mem.lsqio.pendingst      := backend.io.mem.robLsqIO.pendingst
-  memBlock.io.ooo_to_mem.lsqio.pendingVst     := backend.io.mem.robLsqIO.pendingVst
-  memBlock.io.ooo_to_mem.lsqio.commit         := backend.io.mem.robLsqIO.commit
-  memBlock.io.ooo_to_mem.lsqio.pendingPtr     := backend.io.mem.robLsqIO.pendingPtr
-  memBlock.io.ooo_to_mem.lsqio.pendingPtrNext := backend.io.mem.robLsqIO.pendingPtrNext
-  memBlock.io.ooo_to_mem.isStoreException     := backend.io.mem.isStoreException
-  memBlock.io.ooo_to_mem.isVlsException       := backend.io.mem.isVlsException
+  memBlock.io.ooo_to_mem.lsqio.lcommit          := backend.io.mem.robLsqIO.lcommit
+  memBlock.io.ooo_to_mem.lsqio.scommit          := backend.io.mem.robLsqIO.scommit
+  memBlock.io.ooo_to_mem.lsqio.pendingUncacheld := backend.io.mem.robLsqIO.pendingUncacheld
+  memBlock.io.ooo_to_mem.lsqio.pendingld        := backend.io.mem.robLsqIO.pendingld
+  memBlock.io.ooo_to_mem.lsqio.pendingst        := backend.io.mem.robLsqIO.pendingst
+  memBlock.io.ooo_to_mem.lsqio.pendingVst       := backend.io.mem.robLsqIO.pendingVst
+  memBlock.io.ooo_to_mem.lsqio.commit           := backend.io.mem.robLsqIO.commit
+  memBlock.io.ooo_to_mem.lsqio.pendingPtr       := backend.io.mem.robLsqIO.pendingPtr
+  memBlock.io.ooo_to_mem.lsqio.pendingPtrNext   := backend.io.mem.robLsqIO.pendingPtrNext
+  memBlock.io.ooo_to_mem.isStoreException       := backend.io.mem.isStoreException
+  memBlock.io.ooo_to_mem.isVlsException         := backend.io.mem.isVlsException
 
   memBlock.io.fetch_to_mem.itlb <> frontend.io.ptw
   memBlock.io.l2_hint.valid := io.l2_hint.valid
