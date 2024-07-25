@@ -347,35 +347,40 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     * monitor missUint response port
     ******************************************************************************
     */
-  val s2_MSHR_match = VecInit((0 until PortNumber).map(i => (s2_req_vSetIdx(i) === fromMSHR.bits.vSetIdx) &&
-                                                            (s2_req_ptags(i) === getPhyTagFromBlk(fromMSHR.bits.blkPaddr)) &&
-                                                            fromMSHR.valid && !fromMSHR.bits.corrupt))
+  val s2_MSHR_match = VecInit((0 until PortNumber).map( i =>
+    (s2_req_vSetIdx(i) === fromMSHR.bits.vSetIdx) &&
+    (s2_req_ptags(i) === getPhyTagFromBlk(fromMSHR.bits.blkPaddr)) &&
+    fromMSHR.valid  // we don't care about whether it's corrupt here
+  ))
   val s2_MSHR_hits  = Seq(s2_valid && s2_MSHR_match(0),
-                          s2_valid && (s2_MSHR_match(1) && s2_doubleline))
+                          s2_valid && s2_MSHR_match(1) && s2_doubleline)
   val s2_MSHR_datas = fromMSHR.bits.data.asTypeOf(Vec(ICacheDataBanks, UInt((blockBits/ICacheDataBanks).W)))
 
   val s2_bankIdxLow  = s2_req_offset >> log2Ceil(blockBytes/ICacheDataBanks)
-  val s2_bankMSHRHit = VecInit((0 until ICacheDataBanks).map(i => (i.U >= s2_bankIdxLow) && s2_MSHR_hits(0) ||
-                                                      (i.U < s2_bankIdxLow) && s2_MSHR_hits(1)))
+  val s2_bankMSHRHit = VecInit((0 until ICacheDataBanks).map( i =>
+    ((i.U >= s2_bankIdxLow) && s2_MSHR_hits(0)) || ((i.U < s2_bankIdxLow) && s2_MSHR_hits(1))
+  ))
 
-  (0 until ICacheDataBanks).foreach{i =>
+  (0 until ICacheDataBanks).foreach{ i =>
     when(s1_fire) {
       s2_datas := s1_datas
-    }.elsewhen(s2_bankMSHRHit(i)) {
+    }.elsewhen(s2_bankMSHRHit(i) && !fromMSHR.bits.corrupt) {
+      // if corrupt, no need to update s2_datas (it's wrong anyway), to save power
       s2_datas(i) := s2_MSHR_datas(i)
     }
   }
 
-  (0 until PortNumber).foreach{i =>
+  (0 until PortNumber).foreach{ i =>
     when(s1_fire) {
       s2_hits := s1_hits
     }.elsewhen(s2_MSHR_hits(i)) {
+      // update s2_hits even if it's corrupt, to let s2_fire
       s2_hits(i) := true.B
     }
   }
 
   val s2_corrupt = RegInit(VecInit(Seq.fill(PortNumber)(false.B)))
-  (0 until PortNumber).foreach{i =>
+  (0 until PortNumber).foreach{ i =>
     when(s1_fire) {
       s2_corrupt(i) := false.B
     }.elsewhen(s2_MSHR_hits(i)) {
