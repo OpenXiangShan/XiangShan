@@ -104,7 +104,7 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   private val walkPtrVecNext = VecInit((0 until CommitWidth).map(x => walkPtrNext + x.U))
 
   // get enque vtypes in io.req
-  private val enqVTypes = VecInit(io.req.map(req => req.bits.vpu.vtype))
+  private val enqVTypes = VecInit(io.req.map(req => req.bits.vpu.specVType))
   private val enqValids = VecInit(io.req.map(_.valid))
   private val enqVType = PriorityMux(enqValids.zip(enqVTypes).map { case (valid, vtype) => valid -> vtype })
 

@@ -388,6 +388,13 @@ object Bundles {
     val vsew      = VSew()
     val vlmul     = VLmul()   // 1/8~8      --> -3~3
 
+    // spec vtype
+    val specVill  = Bool()
+    val specVma   = Bool()    // 1: agnostic, 0: undisturbed
+    val specVta   = Bool()    // 1: agnostic, 0: undisturbed
+    val specVsew  = VSew()
+    val specVlmul = VLmul()   // 1/8~8      --> -3~3
+
     val vm        = Bool()    // 0: need v0.t
     val vstart    = Vl()
 
@@ -425,6 +432,16 @@ object Bundles {
       res.vta     := this.vta
       res.vsew    := this.vsew
       res.vlmul   := this.vlmul
+      res
+    }
+
+    def specVType: VType = {
+      val res = Wire(VType())
+      res.illegal := this.specVill
+      res.vma     := this.specVma
+      res.vta     := this.specVta
+      res.vsew    := this.specVsew
+      res.vlmul   := this.specVlmul
       res
     }
 
