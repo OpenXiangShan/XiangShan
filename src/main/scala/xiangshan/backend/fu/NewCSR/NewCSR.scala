@@ -1145,6 +1145,10 @@ class NewCSR(implicit val p: Parameters) extends Module
     diffVecCSRState.vtype := vtype.rdata.asUInt
     diffVecCSRState.vlenb := vlenb.rdata.asUInt
 
+    val diffFpCSRState = DifftestModule(new DiffFpCSRState)
+    diffFpCSRState.coreid := hartId
+    diffFpCSRState.fcsr := fcsr.rdata.asUInt
+
     val diffHCSRState = DifftestModule(new DiffHCSRState)
     diffHCSRState.coreid      := hartId
     diffHCSRState.virtMode    := privState.V.asBool
