@@ -730,8 +730,23 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // load wakeup
   // TODO: vector load wakeup?
-  io.wakeup.valid := !s0_sel_src.isvec && s0_fire && (s0_super_ld_rep_select || s0_ld_fast_rep_select || s0_ld_rep_select || s0_int_iss_select) || s0_mmio_fire
-  io.wakeup.bits := s0_out.uop
+  val s0_wakeup_selector = Seq(
+    s0_super_ld_rep_valid,
+    s0_ld_fast_rep_valid,
+    s0_mmio_fire,
+    s0_ld_rep_valid,
+    s0_int_iss_valid
+  )
+  val s0_wakeup_format = Seq(
+    io.replay.bits.uop,
+    io.fast_rep_in.bits.uop,
+    io.lsq.uncache.bits.uop,
+    io.replay.bits.uop,
+    io.ldin.bits.uop,
+  )
+  val s0_wakeup_uop = ParallelPriorityMux(s0_wakeup_selector, s0_wakeup_format)
+  io.wakeup.valid := !s0_sel_src.isvec && s0_fire && (s0_super_ld_rep_valid || s0_ld_fast_rep_valid || s0_ld_rep_valid || s0_int_iss_valid && !s0_vec_iss_valid && !s0_high_conf_prf_valid) || s0_mmio_fire
+  io.wakeup.bits := s0_wakeup_uop
 
   XSDebug(io.dcache.req.fire,
     p"[DCACHE LOAD REQ] pc ${Hexadecimal(s0_sel_src.uop.pc)}, vaddr ${Hexadecimal(s0_dcache_vaddr)}\n"
