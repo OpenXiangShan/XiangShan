@@ -430,11 +430,10 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
   val fallThroughErr = Bool()
   val multiHit = Bool()
 
-  val is_jal  = Bool()
+  val is_jal = Bool()
   val is_jalr = Bool()
   val is_call = Bool()
-  val is_ret  = Bool()
-  val has_ret = Bool()  // only used for the ret-call behavior in RAS
+  val is_ret = Bool()
   val last_may_be_rvi_call = Bool()
   val is_br_sharing = Bool()
 
@@ -509,7 +508,7 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
     !real_slot_taken_mask().init.reduce(_||_) &&
     real_slot_taken_mask().last && !is_br_sharing
   def hit_taken_on_call = hit_taken_on_jmp && is_call
-  def hit_taken_on_ret  = hit_taken_on_jmp && is_ret
+  def hit_taken_on_only_ret  = hit_taken_on_jmp && is_ret && !is_call
   def hit_taken_on_jalr = hit_taken_on_jmp && is_jalr
 
   def cfiIndex = {
@@ -537,8 +536,7 @@ class FullBranchPrediction(implicit p: Parameters) extends XSBundle with HasBPUC
     is_jal := entry.tailSlot.valid && entry.isJal
     is_jalr := entry.tailSlot.valid && entry.isJalr
     is_call := entry.tailSlot.valid && entry.isCall
-    is_ret := entry.tailSlot.valid && entry.hasRet && !entry.isCall
-    has_ret := entry.hasRet
+    is_ret := entry.tailSlot.valid && entry.isRet
     last_may_be_rvi_call := entry.last_may_be_rvi_call
     is_br_sharing := entry.tailSlot.valid && entry.tailSlot.sharing
     predCycle.map(_ := GTimer())
@@ -649,14 +647,13 @@ class BranchPredictionUpdate(implicit p: Parameters) extends XSBundle with HasBP
   val from_stage = UInt(2.W)
   val ghist = UInt(HistoryLength.W)
 
-  def is_jal  = ftb_entry.tailSlot.valid && ftb_entry.isJal
+  def is_jal = ftb_entry.tailSlot.valid && ftb_entry.isJal
   def is_jalr = ftb_entry.tailSlot.valid && ftb_entry.isJalr
   def is_call = ftb_entry.tailSlot.valid && ftb_entry.isCall
-  def is_ret  = ftb_entry.tailSlot.valid && ftb_entry.hasRet && !ftb_entry.isCall
-  def has_ret = ftb_entry.hasRet
+  def is_ret = ftb_entry.tailSlot.valid && ftb_entry.isRet
 
   def is_call_taken = is_call && jmp_taken && cfi_idx.valid && cfi_idx.bits === ftb_entry.tailSlot.offset
-  def is_ret_taken = is_ret && jmp_taken && cfi_idx.valid && cfi_idx.bits === ftb_entry.tailSlot.offset
+  def is_only_ret_taken = !is_call && is_ret && jmp_taken && cfi_idx.valid && cfi_idx.bits === ftb_entry.tailSlot.offset
 
   def display(cond: Bool) = {
     XSDebug(cond, p"-----------BranchPredictionUpdate-----------\n")
@@ -693,8 +690,9 @@ class BranchPredictionRedirect(implicit p: Parameters) extends Redirect with Has
   def ControlBTBMissBubble = ControlRedirectBubble && !cfiUpdate.br_hit && !cfiUpdate.jr_hit
   def TAGEMissBubble = ControlRedirectBubble && cfiUpdate.br_hit && !cfiUpdate.sc_hit
   def SCMissBubble = ControlRedirectBubble && cfiUpdate.br_hit && cfiUpdate.sc_hit
-  def ITTAGEMissBubble = ControlRedirectBubble && cfiUpdate.jr_hit && !cfiUpdate.pd.isRet
-  def RASMissBubble = ControlRedirectBubble && cfiUpdate.jr_hit && cfiUpdate.pd.isRet
+  // ret-call instruction will jump in the same way as the call instruction
+  def ITTAGEMissBubble = ControlRedirectBubble && cfiUpdate.jr_hit && (!cfiUpdate.pd.isRet || cfiUpdate.pd.isCall)
+  def RASMissBubble = ControlRedirectBubble && cfiUpdate.jr_hit && (cfiUpdate.pd.isRet && !cfiUpdate.pd.isCall)
   def MemVioRedirectBubble = debugIsMemVio
   def OtherRedirectBubble = !debugIsCtrl && !debugIsMemVio
 

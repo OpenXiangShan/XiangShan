@@ -145,13 +145,12 @@ class FtbSlot(val offsetLen: Int, val subOffsetLen: Option[Int] = None)(implicit
 
 
 class FTBEntry_part(implicit p: Parameters) extends XSBundle with FTBParams with BPUUtils {
-  val isCall     = Bool()
-  val hasRet     = Bool() // maybe ret or ret-call
-  val isJalr     = Bool()
+  val isCall      = Bool()
+  val isRet       = Bool()
+  val isJalr      = Bool()
 
-  def isJal = !isJalr
-  def isRet = !isCall && hasRet
-  def isRetCall = isCall && hasRet
+  def isJal   = !isJalr
+  def onlyRet = isRet && !isCall
 }
 
 class FTBEntry_FtqMem(implicit p: Parameters) extends FTBEntry_part with FTBParams with BPUUtils {
@@ -373,7 +372,7 @@ class FTBEntry(implicit p: Parameters) extends FTBEntry_part with FTBParams with
     val pftAddrDiff   = this.pftAddr === that.pftAddr
     val carryDiff     = this.carry   === that.carry
     val isCallDiff    = this.isCall  === that.isCall
-    val hasRetDiff     = this.hasRet   === that.hasRet
+    val isRetDiff     = this.isRet   === that.isRet
     val isJalrDiff    = this.isJalr  === that.isJalr
     val lastMayBeRviCallDiff = this.last_may_be_rvi_call === that.last_may_be_rvi_call
     val alwaysTakenDiff : IndexedSeq[Bool] =
@@ -387,7 +386,7 @@ class FTBEntry(implicit p: Parameters) extends FTBEntry_part with FTBParams with
       pftAddrDiff,
       carryDiff,
       isCallDiff,
-      hasRetDiff,
+      isRetDiff,
       isJalrDiff,
       lastMayBeRviCallDiff,
       alwaysTakenDiff.reduce(_&&_)
@@ -404,7 +403,7 @@ class FTBEntry(implicit p: Parameters) extends FTBEntry_part with FTBParams with
     XSDebug(cond, p"[tailSlot]: v=${tailSlot.valid}, offset=${tailSlot.offset}," +
       p"lower=${Hexadecimal(tailSlot.lower)}, sharing=${tailSlot.sharing}}\n")
     XSDebug(cond, p"pftAddr=${Hexadecimal(pftAddr)}, carry=$carry\n")
-    XSDebug(cond, p"isCall=$isCall, hasRet=$hasRet, isjalr=$isJalr\n")
+    XSDebug(cond, p"isCall=$isCall, isRet=$isRet, isjalr=$isJalr\n")
     XSDebug(cond, p"last_may_be_rvi_call=$last_may_be_rvi_call\n")
     XSDebug(cond, p"------------------------------- \n")
   }
@@ -739,7 +738,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   io.out.s1_ftbCloseReq := s1_close_ftb_req
   io.out.s1_uftbHit := io.fauftb_entry_hit_in
   val s1_uftbHasIndirect = io.fauftb_entry_in.jmpValid &&
-    io.fauftb_entry_in.isJalr && !io.fauftb_entry_in.isRet // uFTB determines that it's real JALR, RET and JAL are excluded
+    io.fauftb_entry_in.isJalr && !io.fauftb_entry_in.onlyRet // uFTB determines that it's real JALR, only RET and JAL are excluded
   io.out.s1_uftbHasIndirect := s1_uftbHasIndirect
 
   // always taken logic
