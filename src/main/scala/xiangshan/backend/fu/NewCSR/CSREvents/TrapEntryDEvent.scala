@@ -92,7 +92,7 @@ class TrapEntryDEventModule(implicit val p: Parameters) extends Module with CSRE
   out.dcsr.bits.V           := current.privState.V.asUInt
   out.dcsr.bits.PRV         := current.privState.PRVM.asUInt
   out.dcsr.bits.CAUSE       := Mux(hasDebugIntr, causeIntr, causeExp)
-  out.dpc.bits.epc          := trapPC(VaddrMaxWidth - 1, 1)
+  out.dpc.bits.epc          := trapPC(63, 1)
 
   out.targetPc.bits         := debugPc
   out.debugMode.bits        := true.B

@@ -118,7 +118,7 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
   out.vsstatus.bits.SPIE         := current.vsstatus.SIE
   out.vsstatus.bits.SIE          := 0.U
   // SPVP is not PrivMode enum type, so asUInt and shrink the width
-  out.vsepc.bits.epc             := trapPC(VaddrMaxWidth - 1, 1)
+  out.vsepc.bits.epc             := trapPC(63, 1)
   out.vscause.bits.Interrupt     := isInterrupt
   out.vscause.bits.ExceptionCode := highPrioTrapNO
   out.vstval.bits.ALL            := tval

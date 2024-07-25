@@ -55,9 +55,7 @@ trait DebugLevel { self: NewCSR =>
   val dcsr = Module(new CSRModule("Dcsr", new DcsrBundle) with TrapEntryDEventSinkBundle with DretEventSinkBundle)
     .setAddr(CSRs.dcsr)
 
-  val dpc = Module(new CSRModule("Dpc", new Epc) with TrapEntryDEventSinkBundle {
-    rdata := SignExt(Cat(reg.epc.asUInt, 0.U(1.W)), XLEN)
-  })
+  val dpc = Module(new CSRModule("Dpc", new Epc) with TrapEntryDEventSinkBundle)
     .setAddr(CSRs.dpc)
 
   val dscratch0 = Module(new CSRModule("Dscratch0", new DscratchBundle))
