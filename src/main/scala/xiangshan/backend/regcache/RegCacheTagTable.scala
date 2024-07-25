@@ -51,6 +51,8 @@ class RegCacheTagTable(numReadPorts: Int)(implicit p: Parameters, schdParams: Sc
   io.readPorts
   .lazyZip(IntRCTagTable.io.readPorts.lazyZip(MemRCTagTable.io.readPorts))
   .foreach{ case (r_in, (r_int, r_mem)) => 
+    r_int.ren  := r_in.ren
+    r_mem.ren  := r_in.ren
     r_int.tag  := r_in.tag
     r_mem.tag  := r_in.tag
     r_in.valid := r_int.valid || r_mem.valid
