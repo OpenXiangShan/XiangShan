@@ -473,7 +473,7 @@ class MstatusModule(implicit override val p: Parameters) extends CSRModule("MSta
 class MisaBundle extends CSRBundle {
   // Todo: reset with ISA string
   val A = RO( 0).withReset(1.U) // Atomic extension
-  val B = RO( 1).withReset(0.U) // Reserved
+  val B = RO( 1).withReset(1.U) // B extension
   val C = RO( 2).withReset(1.U) // Compressed extension
   val D = RO( 3).withReset(1.U) // Double-precision floating-point extension
   val E = RO( 4).withReset(0.U) // RV32E/64E base ISA
