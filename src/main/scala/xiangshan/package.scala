@@ -92,10 +92,10 @@ package object xiangshan {
     def vlse      = "b01_10_00000".U // strided
     def vloxe     = "b01_11_00000".U // index
 
-    def isWhole  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01000".U
-    def isMasked (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01011".U
-    def isStrided(fuOpType: UInt): Bool = fuOpType(6, 5) === "b10".U
-    def isIndexed(fuOpType: UInt): Bool = fuOpType(5)
+    def isWhole  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01000".U && (fuOpType(8) ^ fuOpType(7))
+    def isMasked (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01011".U && (fuOpType(8) ^ fuOpType(7))
+    def isStrided(fuOpType: UInt): Bool = fuOpType(6, 5) === "b10".U && (fuOpType(8) ^ fuOpType(7))
+    def isIndexed(fuOpType: UInt): Bool = fuOpType(5) && (fuOpType(8) ^ fuOpType(7))
     def isVecLd  (fuOpType: UInt): Bool = fuOpType(8, 7) === "b01".U
   }
 
@@ -118,10 +118,10 @@ package object xiangshan {
     def vsse      = "b10_10_00000".U // strided
     def vsoxe     = "b10_11_00000".U // index
 
-    def isWhole  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01000".U
-    def isMasked (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01011".U
-    def isStrided(fuOpType: UInt): Bool = fuOpType(6, 5) === "b10".U
-    def isIndexed(fuOpType: UInt): Bool = fuOpType(5)
+    def isWhole  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01000".U && (fuOpType(8) ^ fuOpType(7))
+    def isMasked (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01011".U && (fuOpType(8) ^ fuOpType(7))
+    def isStrided(fuOpType: UInt): Bool = fuOpType(6, 5) === "b10".U && (fuOpType(8) ^ fuOpType(7))
+    def isIndexed(fuOpType: UInt): Bool = fuOpType(5) && (fuOpType(8) ^ fuOpType(7))
     def isVecSt  (fuOpType: UInt): Bool = fuOpType(8, 7) === "b10".U
   }
 
@@ -531,8 +531,8 @@ package object xiangshan {
     def hlvwu  = "b10110".U
     def hlvxhu = "b11101".U
     def hlvxwu = "b11110".U
-    def isHlv(op: UInt): Bool = op(4) && (op(5) === "b0".U)
-    def isHlvx(op: UInt): Bool = op(4) && op(3) && (op(5) === "b0".U)
+    def isHlv(op: UInt): Bool = op(4) && (op(5) === "b0".U) && (op(8, 7) === "b00".U)
+    def isHlvx(op: UInt): Bool = op(4) && op(3) && (op(5) === "b0".U) && (op(8, 7) === "b00".U)
 
     // Zicbop software prefetch
     // bit encoding: | prefetch 1 | 0 | prefetch type (2bit) |
@@ -540,7 +540,7 @@ package object xiangshan {
     def prefetch_r = "b1001".U
     def prefetch_w = "b1010".U
 
-    def isPrefetch(op: UInt): Bool = op(3) && (op(5, 4) === "b000".U)
+    def isPrefetch(op: UInt): Bool = op(3) && (op(5, 4) === "b000".U) && (op(8, 7) === "b00".U)
 
     // store pipeline
     // normal store
@@ -556,7 +556,7 @@ package object xiangshan {
     def hsvh = "b10001".U
     def hsvw = "b10010".U
     def hsvd = "b10011".U
-    def isHsv(op: UInt): Bool = op(4) && (op(5) === "b0".U)
+    def isHsv(op: UInt): Bool = op(4) && (op(5) === "b0".U) && (op(8, 7) === "b00".U)
     // l1 cache op
     // bit encoding: | cbo_zero 01 | size(2bit) 11 |
     def cbo_zero  = "b0111".U
@@ -602,12 +602,12 @@ package object xiangshan {
 
     def getVecLSMop(fuOpType: UInt): UInt = fuOpType(6, 5)
 
-    def isAllUS  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && !fuOpType(4) // Unit-Stride Whole Masked
-    def isUStride(fuOpType: UInt): Bool = fuOpType(6, 0) === "b00_00000".U
-    def isWhole  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01000".U
-    def isMasked (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01011".U
-    def isStrided(fuOpType: UInt): Bool = fuOpType(6, 5) === "b10".U
-    def isIndexed(fuOpType: UInt): Bool = fuOpType(5)
+    def isAllUS  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && !fuOpType(4) && (fuOpType(8) ^ fuOpType(7))// Unit-Stride Whole Masked
+    def isUStride(fuOpType: UInt): Bool = fuOpType(6, 0) === "b00_00000".U && (fuOpType(8) ^ fuOpType(7))
+    def isWhole  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01000".U && (fuOpType(8) ^ fuOpType(7))
+    def isMasked (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01011".U && (fuOpType(8) ^ fuOpType(7))
+    def isStrided(fuOpType: UInt): Bool = fuOpType(6, 5) === "b10".U && (fuOpType(8) ^ fuOpType(7))
+    def isIndexed(fuOpType: UInt): Bool = fuOpType(5) && (fuOpType(8) ^ fuOpType(7))
   }
 
   object BKUOpType {
