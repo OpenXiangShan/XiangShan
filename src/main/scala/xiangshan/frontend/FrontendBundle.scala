@@ -106,6 +106,8 @@ class PredecodeWritebackBundle(implicit p:Parameters) extends XSBundle {
   val target       = UInt(VAddrBits.W)
   val jalTarget    = UInt(VAddrBits.W)
   val instrRange   = Vec(PredictWidth, Bool())
+  // the traceInfo of instruction
+  val traceInfo    = new TraceInstrBundle()
 }
 
 class mmioCommitRead(implicit p: Parameters) extends XSBundle {

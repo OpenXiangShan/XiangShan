@@ -956,6 +956,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   mmioFlushWb.bits.target     := Mux(mmio_is_RVC, f3_ftq_req.startAddr + 2.U , f3_ftq_req.startAddr + 4.U)
   mmioFlushWb.bits.jalTarget  := DontCare
   mmioFlushWb.bits.instrRange := f3_mmio_range
+  mmioFlushWb.bits.traceInfo  := 0.U.asTypeOf(mmioFlushWb.bits.traceInfo)
 
   val mmioRVCExpander = Module(new RVCExpander)
   mmioRVCExpander.io.in := Mux(f3_req_is_mmio, Cat(f3_mmio_data(1), f3_mmio_data(0)), 0.U)
@@ -1072,6 +1073,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
     _.target            := Mux(wb_half_flush, wb_half_target, wb_check_result_stage2.fixedTarget(checkFlushWbTargetIdx)),
     _.jalTarget         := wb_check_result_stage2.jalTarget(checkFlushWbjalTargetIdx),
     _.instrRange        := wb_instr_range.asTypeOf(Vec(PredictWidth, Bool())),
+    _.traceInfo         := ParallelPosteriorityMux(
+      io.toIbuffer.bits.enqEnable & io.toIbuffer.bits.valid,
+      io.toIbuffer.bits.traceInfo)
   )
 
 

@@ -496,7 +496,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   val ifuRedirected = RegInit(VecInit(Seq.fill(FtqSize)(false.B)))
 
-  
+
   // io.fromBackend.ftqIdxAhead: bju(BjuCnt) + ldReplay + exception
   val ftqIdxAhead = VecInit(Seq.tabulate(FtqRedirectAheadNum)(i => io.fromBackend.ftqIdxAhead(i))) // only bju
   val ftqIdxSelOH = io.fromBackend.ftqIdxSelOH.bits(FtqRedirectAheadNum - 1, 0)
@@ -780,7 +780,6 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftq_pc_mem.io.commPtr_w      := commPtr_write
   ftq_pc_mem.io.commPtrPlus1_w := commPtrPlus1_write
 
-
   io.toIfu.req.bits.ftqIdx := ifuPtr
 
   val toICachePcBundle = Wire(Vec(copyNum,new Ftq_RF_Components))
@@ -967,10 +966,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
     has_false_hit := br_false_hit || jal_false_hit || hit_pd_mispred_reg
     XSDebug(has_false_hit, "FTB false hit by br or jal or hit_pd, startAddr: %x\n", pdWb.bits.pc(0))
-
     // assert(!has_false_hit)
   }
-
   when (has_false_hit) {
     entry_hit_status(wb_idx_reg) := h_false_hit
   }
@@ -1037,6 +1034,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   fromIfuRedirect.bits.BTBMissBubble := true.B
   fromIfuRedirect.bits.debugIsMemVio := false.B
   fromIfuRedirect.bits.debugIsCtrl := false.B
+  fromIfuRedirect.bits.traceInfo := pdWb.bits.traceInfo
 
   val ifuRedirectCfiUpdate = fromIfuRedirect.bits.cfiUpdate
   ifuRedirectCfiUpdate.pc := pdWb.bits.pc(pdWb.bits.misOffset.bits)

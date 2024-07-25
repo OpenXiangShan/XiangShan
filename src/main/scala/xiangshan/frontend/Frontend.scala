@@ -25,6 +25,7 @@ import xiangshan._
 import xiangshan.backend.fu.{PFEvent, PMP, PMPChecker, PMPReqBundle}
 import xiangshan.cache.mmu._
 import xiangshan.frontend.icache._
+import xiangshan.frontend.tracertl.ChiselRecordForField._
 
 
 class Frontend()(implicit p: Parameters) extends LazyModule with HasXSParameter {
@@ -74,6 +75,43 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   if (env.TraceRTLMode) {
     dontTouch(io.backend.toFtq.redirect)
+
+    // add chiselMap for backend redirect
+    class BackendRedirectCMBundle extends Bundle {
+      val pcVA = UInt(64.W)
+      val inst = UInt(32.W)
+      val isCtrl = Bool()
+      val isMemVio = Bool()
+      val taken = Bool()
+    }
+    val backRedMap = ChiselMap.createTable("backendRedirect", Vec(1, new BackendRedirectCMBundle), basicDB = true)
+    val perf_backRedMap = Wire(Vec(1, Valid(new BackendRedirectCMBundle())))
+    perf_backRedMap(0).valid := io.backend.toFtq.redirect.valid
+    perf_backRedMap(0).bits.specifyField(
+      _.pcVA := io.backend.toFtq.redirect.bits.traceInfo.pcVA,
+      _.inst := io.backend.toFtq.redirect.bits.traceInfo.inst,
+      _.taken := io.backend.toFtq.redirect.bits.traceInfo.branchTaken(0),
+      _.isCtrl := io.backend.toFtq.redirect.bits.debugIsCtrl,
+      _.isMemVio := io.backend.toFtq.redirect.bits.debugIsMemVio,
+    )
+    backRedMap.log(perf_backRedMap, 1.U, "RedirectNum", clock, reset)
+    XSPerfAccumulate("backendFlush", io.backend.toFtq.redirect.valid)
+
+    class BackendRedirectDBBundle extends BackendRedirectCMBundle {
+      val InstID = UInt(64.W)
+    }
+    val perf_backRedDB = Wire(new BackendRedirectDBBundle())
+    perf_backRedDB.specifyField(
+      _.InstID := io.backend.toFtq.redirect.bits.traceInfo.InstID,
+      _.pcVA := io.backend.toFtq.redirect.bits.traceInfo.pcVA,
+      _.inst := io.backend.toFtq.redirect.bits.traceInfo.inst,
+      _.taken := io.backend.toFtq.redirect.bits.traceInfo.branchTaken(0),
+      _.isCtrl := io.backend.toFtq.redirect.bits.debugIsCtrl,
+      _.isMemVio := io.backend.toFtq.redirect.bits.debugIsMemVio,
+    )
+    // add ChiselDB for backend redirect
+    val backRedTable = ChiselDB.createTable(s"BackendRedirect", new BackendRedirectDBBundle, basicDB = true)
+    backRedTable.log(perf_backRedDB, io.backend.toFtq.redirect.valid, "backendRedirect", clock, reset)
   }
   val needFlush = RegNext(io.backend.toFtq.redirect.valid)
   val FlushControlRedirect = RegNext(io.backend.toFtq.redirect.bits.debugIsCtrl)
