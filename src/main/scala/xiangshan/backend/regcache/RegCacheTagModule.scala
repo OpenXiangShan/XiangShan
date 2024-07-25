@@ -25,6 +25,7 @@ import xiangshan.backend.BackendParams
 import freechips.rocketchip.util.SeqBoolBitwiseOps
 
 class RCTagTableReadPort(addrWidth: Int, tagWidth: Int)(implicit p: Parameters) extends XSBundle {
+  val ren   = Input(Bool())
   val tag   = Input(UInt(tagWidth.W))
   val valid = Output(Bool())
   val addr  = Output(UInt(addrWidth.W))
@@ -65,9 +66,11 @@ class RegCacheTagModule
 
   for ((r, i) <- io.readPorts.zipWithIndex) {
     val matchOH = v.zip(tag).map(x => x._1 && x._2 === r.tag)
-    r.valid := matchOH.orR
+    r.valid := Mux(r.ren, matchOH.orR, false.B)
     r.addr  := OHToUInt(matchOH)
-    assert(PopCount(matchOH) <= 1.U, s"$name readPorts $i has more than 1 matched entry")
+    when (r.ren) {
+      assert(PopCount(matchOH) <= 1.U, s"$name readPorts $i has more than 1 matched entry")
+    }
   }
 
   val writePorts = io.writePorts
