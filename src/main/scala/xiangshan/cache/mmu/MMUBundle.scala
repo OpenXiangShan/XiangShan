@@ -1199,7 +1199,7 @@ class PtwMergeResp(implicit p: Parameters) extends PtwBundle {
 
   def apply(pf: Bool, af: Bool, level: UInt, pte: PteBundle, vpn: UInt, asid: UInt, vmid:UInt, addr_low : UInt, not_super : Boolean = true) = {
     assert(tlbcontiguous == 8, "Only support tlbcontiguous = 8!")
-    val resp_pte = Mux(af, 0.U.asTypeOf(pte), pte)
+    val resp_pte = pte
     val ptw_resp = Wire(new PtwMergeEntry(tagLen = sectorvpnLen, hasPerm = true, hasLevel = true))
     ptw_resp.ppn := resp_pte.getPPN()(gvpnLen - 1, sectortlbwidth)
     ptw_resp.ppn_low := resp_pte.getPPN()(sectortlbwidth - 1, 0)
