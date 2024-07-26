@@ -345,7 +345,8 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
    * for Unit-Stride, if uop's addr is aligned with 128-bits, split it to one flow, otherwise split two
    */
   val usSplitMask      = genUSSplitMask(issueUsMask, splitIdx)
-  val usNoSplit        = (issueUsAligned128 || !getOverflowBit(getCheckAddrLowBits(issueUsLowBitsAddr, maxMemByteNum) +& PopCount(usSplitMask), maxMemByteNum)) &&
+  val usMaskInSingleUop = (genUSSplitMask(issueUsMask, 1.U) === 0.U) // if second splited Mask is zero, means this uop is unnecessary to split
+  val usNoSplit        = (issueUsAligned128 || usMaskInSingleUop) &&
                           !issuePreIsSplit &&
                           (splitIdx === 0.U)// unit-stride uop don't need to split into two flow
   val usSplitVaddr     = genUSSplitAddr(vaddr, splitIdx)
