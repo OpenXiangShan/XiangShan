@@ -918,18 +918,18 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   val merge_with_pipe_req = (0 until cfg.nMSHRPorts).map(i => miss_req_pipe_reg.map(_.merge_req(io.req(i).bits)))
   val reject_with_pipe_req = (0 until cfg.nMSHRPorts).map(i => miss_req_pipe_reg.map(_.reject_req(io.req(i).bits)))
 
-  val merge = (0 until cfg.nMSHRPorts).map(i => ParallelORR(Cat(secondary_ready_vec(i) ++ merge_with_pipe_req(i))))
   val reject = (0 until cfg.nMSHRPorts).map(i => ParallelORR(Cat(secondary_reject_vec(i) ++ reject_with_pipe_req(i))))
   val match_with_port_req = (0 until cfg.nMSHRPorts).map {i => 
     (0 until cfg.nMSHRPorts).map(j => 
-        if (j < i) io.req(j).valid && !merge(i) && !reject(j) && io.req(j).bits.addr === io.req(i).bits.addr
+        if (j < i) io.req(j).valid && !reject(j) && io.req(j).bits.addr === io.req(i).bits.addr
         else false.B
   )}
-  val merge_with_port_req = (0 until cfg.nMSHRPorts).map(i => Cat(match_with_port_req(i)).orR && !merge(i) && !reject(i)) //Remove laste two cond
+  val merge_with_port_req = (0 until cfg.nMSHRPorts).map(i => Cat(match_with_port_req(i)).orR && !reject(i)) //Remove laste two cond
   dontTouch(merge_with_port_req(0))
   dontTouch(merge_with_port_req(1))
   dontTouch(merge_with_port_req(2))
   dontTouch(merge_with_port_req(3))
+  val merge = (0 until cfg.nMSHRPorts).map(i => ParallelORR(Cat(secondary_ready_vec(i) ++ merge_with_pipe_req(i))) && !merge_with_port_req(i))
   // val merge = ParallelORR(Cat(secondary_ready_vec ++ Seq(miss_req_pipe_reg.merge_req(io.req.bits))))
   // val reject = ParallelORR(Cat(secondary_reject_vec ++ Seq(miss_req_pipe_reg.reject_req(io.req.bits))))
   // val alloc = !reject && !merge && ParallelORR(Cat(primary_ready_vec))
@@ -970,7 +970,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
     (PopCount(req_alloc_priority(i)) === 3.U && primary_ready_cnt >= 1.U) ||
     (PopCount(req_alloc_priority(i)) === 2.U && primary_ready_cnt >= 2.U) ||
     (PopCount(req_alloc_priority(i)) === 1.U && primary_ready_cnt >= 3.U) ||
-    (PopCount(req_alloc_priority(i)) === 0.U && primary_ready_cnt === 4.U)
+    (PopCount(req_alloc_priority(i)) === 0.U && primary_ready_cnt >= 4.U)
   )
   dontTouch(req_alloc_valid(0))
   dontTouch(req_alloc_valid(1))
@@ -990,11 +990,14 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   val accept = (0 until cfg.nMSHRPorts).map(i => (alloc(i) || merge(i) || merge_with_port_req(i)) && !io.req(i).bits.cancel)
 
   // val req_mshr_handled_vec = entries.map(_.io.req_handled_by_this_entry) // TODO
-  val req_mshr_handled_vec = (0 until cfg.nMSHRPorts).map(i => entries.map(_.io.req_handled_by_this_entry(i)))
+  val req_mshr_handled_vec = (0 until cfg.nMSHRPorts).map(i => entries.map(_.io.req_handled_by_this_entry(i) && !merge_with_port_req(i)))
   // merged to pipeline reg
   // val req_pipeline_reg_handled = miss_req_pipe_reg.merge_req(io.req.bits) && io.req.valid //TODO
-  val req_pipeline_reg_handled = (0 until cfg.nMSHRPorts).map(i => Cat(miss_req_pipe_reg.map(_.merge_req(io.req(i).bits))).orR && io.req(i).valid)
+  val req_pipeline_reg_handled = (0 until cfg.nMSHRPorts).map(i => Cat(merge_with_pipe_req(i)).orR && io.req(i).valid && !merge_with_port_req(i))
   (0 until cfg.nMSHRPorts).foreach{i =>
+    when (io.req(i).valid && !io.req(i).bits.cancel) {
+        assert(PopCount(Seq(alloc(i), merge(i), merge_with_port_req(i), reject(i))) <= 1.U)
+    }
     assert(PopCount(Seq(req_pipeline_reg_handled(i), VecInit(req_mshr_handled_vec(i)).asUInt.orR, merge_with_port_req(i))) <= 1.U)
   }
   // assert(PopCount(Seq(req_pipeline_reg_handled, VecInit(req_mshr_handled_vec).asUInt.orR)) <= 1.U, "miss req will either go to mshr or pipeline reg")
@@ -1244,6 +1247,11 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
 
   // Remove Temporarily
   // // Perf count
+  XSPerfAccumulate("miss_req_fire_4", PopCount(io.req.map(r => r.fire && !r.bits.cancel)) === 4.U)
+  XSPerfAccumulate("miss_req_fire_3", PopCount(io.req.map(r => r.fire && !r.bits.cancel)) === 3.U)
+  XSPerfAccumulate("miss_req_fire_2", PopCount(io.req.map(r => r.fire && !r.bits.cancel)) === 2.U)
+  XSPerfAccumulate("miss_req_fire_1", PopCount(io.req.map(r => r.fire && !r.bits.cancel)) === 1.U)
+  XSPerfAccumulate("req_enq_failed", primary_ready_cnt > 0.U && Cat(io.req.zipWithIndex.map{case(r, i) => r.valid && !r.bits.cancel && !reject(i)}).orR)
   // XSPerfAccumulate("miss_req", io.req.fire && !io.req.bits.cancel)
   // XSPerfAccumulate("miss_req_allocate", io.req.fire && !io.req.bits.cancel && alloc)
   // XSPerfAccumulate("miss_req_load_allocate", io.req.fire && !io.req.bits.cancel && alloc && io.req.bits.isFromLoad)
