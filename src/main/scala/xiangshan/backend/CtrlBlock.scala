@@ -24,7 +24,7 @@ import utility._
 import utils._
 import xiangshan.ExceptionNO._
 import xiangshan._
-import xiangshan.backend.Bundles.{DecodedInst, DynInst, ExceptionInfo, ExuOutput}
+import xiangshan.backend.Bundles.{DecodedInst, DynInst, ExceptionInfo, ExuOutput, StaticInst}
 import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfoBundle, LsTopdownInfo, MemCtrl, RedirectGenerator}
 import xiangshan.backend.datapath.DataConfig.VAddrData
 import xiangshan.backend.decode.{DecodeStage, FusionDecoder}
@@ -319,10 +319,43 @@ class CtrlBlockImp(
   decode.io.redirect := s1_s3_redirect.valid || s2_s4_pendingRedirectValid
   decode.io.vtypeRedirect := s1_s3_redirect.valid
 
-  decode.io.in.zip(io.frontend.cfVec).foreach { case (decodeIn, frontendCf) =>
-    decodeIn.valid := frontendCf.valid
-    frontendCf.ready := decodeIn.ready
-    decodeIn.bits.connectCtrlFlow(frontendCf.bits)
+  // add decode Buf for in.ready better timing
+  val decodeBufBits = Reg(Vec(DecodeWidth, new StaticInst))
+  val decodeBufValid = RegInit(VecInit(Seq.fill(DecodeWidth)(false.B)))
+  val decodeFromFrontend = io.frontend.cfVec
+  val decodeBufNotAccept = VecInit(decodeBufValid.zip(decode.io.in).map(x => x._1 && !x._2.ready))
+  val decodeBufAcceptNum = PriorityMuxDefault(decodeBufNotAccept.zip(Seq.tabulate(DecodeWidth)(i => i.U)), DecodeWidth.U)
+  val decodeFromFrontendNotAccept = VecInit(decodeFromFrontend.zip(decode.io.in).map(x => decodeBufValid(0) || x._1.valid && !x._2.ready))
+  val decodeFromFrontendAcceptNum = PriorityMuxDefault(decodeFromFrontendNotAccept.zip(Seq.tabulate(DecodeWidth)(i => i.U)), DecodeWidth.U)
+  if (backendParams.debugEn) {
+    dontTouch(decodeBufNotAccept)
+    dontTouch(decodeBufAcceptNum)
+    dontTouch(decodeFromFrontendNotAccept)
+    dontTouch(decodeFromFrontendAcceptNum)
+  }
+  val a = decodeBufNotAccept.drop(2)
+  for (i <- 0 until DecodeWidth) {
+    // decodeBufValid update
+    when(decode.io.redirect || decodeBufValid(0) && decodeBufValid(i) && decode.io.in(i).ready && !VecInit(decodeBufNotAccept.drop(i)).asUInt.orR) {
+      decodeBufValid(i) := false.B
+    }.elsewhen(decodeBufValid(i) && VecInit(decodeBufNotAccept.drop(i)).asUInt.orR) {
+      decodeBufValid(i) := Mux(decodeBufAcceptNum > DecodeWidth.U - 1.U - i.U, false.B, decodeBufValid(i.U + decodeBufAcceptNum))
+    }.elsewhen(!decodeBufValid(0) && VecInit(decodeFromFrontendNotAccept.drop(i)).asUInt.orR) {
+      decodeBufValid(i) := Mux(decodeFromFrontendAcceptNum > DecodeWidth.U - 1.U - i.U, false.B, decodeFromFrontend(i.U + decodeFromFrontendAcceptNum).valid)
+    }
+    // decodeBufBits update
+    when(decodeBufValid(i) && VecInit(decodeBufNotAccept.drop(i)).asUInt.orR) {
+      decodeBufBits(i) := decodeBufBits(i.U + decodeBufAcceptNum)
+    }.elsewhen(!decodeBufValid(0) && VecInit(decodeFromFrontendNotAccept.drop(i)).asUInt.orR) {
+      decodeBufBits(i).connectCtrlFlow(decodeFromFrontend(i.U + decodeFromFrontendAcceptNum).bits)
+    }
+  }
+  val decodeConnectFromFrontend = Wire(Vec(DecodeWidth, new StaticInst))
+  decodeConnectFromFrontend.zip(decodeFromFrontend).map(x => x._1.connectCtrlFlow(x._2.bits))
+  decode.io.in.zipWithIndex.foreach { case (decodeIn, i) =>
+    decodeIn.valid := Mux(decodeBufValid(0), decodeBufValid(i), decodeFromFrontend(i).valid)
+    decodeFromFrontend(i).ready := decodeFromFrontend(0).valid && !decodeBufValid(0) && decodeFromFrontend(i).valid && !decode.io.redirect
+    decodeIn.bits := Mux(decodeBufValid(i), decodeBufBits(i), decodeConnectFromFrontend(i))
   }
   decode.io.csrCtrl := RegNext(io.csrCtrl)
   decode.io.intRat <> rat.io.intReadPorts
