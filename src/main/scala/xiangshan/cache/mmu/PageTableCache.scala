@@ -481,7 +481,8 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val stage1Hit = (resp_res.l3.hit || resp_res.sp.hit) && isAllStage
   io.resp.bits.req_info   := stageResp.bits.req_info
   io.resp.bits.isFirst  := stageResp.bits.isFirst
-  io.resp.bits.hit      := (resp_res.l3.hit || resp_res.sp.hit) && !isAllStage
+  // noS2xlate: sp hit or l3 hit; AllStage: hit but stage1 has pf
+  io.resp.bits.hit      := (resp_res.l3.hit || resp_res.sp.hit) && (!isAllStage || isAllStage && !Mux(resp_res.l3.hit, resp_res.l3.v(stageResp.bits.req_info.vpn(2, 0)), resp_res.sp.v))
   io.resp.bits.bypassed := (bypassed(2) || (bypassed(1) && !resp_res.l2.hit) || (bypassed(0) && !resp_res.l1.hit)) && !isAllStage
   io.resp.bits.prefetch := resp_res.l3.pre && resp_res.l3.hit || resp_res.sp.pre && resp_res.sp.hit
   io.resp.bits.toFsm.l1Hit := resp_res.l1.hit && !stage1Hit && !isOnlyStage2 && !stageResp.bits.isHptwReq 
