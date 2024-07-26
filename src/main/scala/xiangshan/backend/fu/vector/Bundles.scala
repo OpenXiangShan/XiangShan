@@ -71,6 +71,16 @@ object Bundles {
       res.vlmul := vtype.vlmul
       res
     }
+
+    def initVtype()(implicit p: Parameters) : VType = {
+      val res = Wire(VType())
+      res.illegal := true.B
+      res.vma := false.B
+      res.vta := false.B
+      res.vsew := 0.U
+      res.vlmul := 0.U
+      res
+    }
   }
 
   object VsetVType {

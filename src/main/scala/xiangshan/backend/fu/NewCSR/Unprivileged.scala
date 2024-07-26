@@ -93,7 +93,7 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
   }).setAddr(CSRs.vcsr)
 
   val vl = Module(new CSRModule("Vl", new CSRBundle {
-    val VL = RO(VlWidth - 1, 0)
+    val VL = RO(VlWidth - 1, 0).withReset(0.U)
   }))
     .setAddr(CSRs.vl)
 
@@ -197,11 +197,13 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
 }
 
 class CSRVTypeBundle extends CSRBundle {
-  val VILL  = RO(  63)
-  val VMA   = RO(   7)
-  val VTA   = RO(   6)
-  val VSEW  = RO(5, 3)
-  val VLMUL = RO(2, 0)
+  // vtype's vill is initialized to 1, when executing vector instructions
+  // which depend on vtype, will raise illegal instruction exception
+  val VILL  = RO(  63).withReset(1.U)
+  val VMA   = RO(   7).withReset(0.U)
+  val VTA   = RO(   6).withReset(0.U)
+  val VSEW  = RO(5, 3).withReset(0.U)
+  val VLMUL = RO(2, 0).withReset(0.U)
 }
 
 class CSRFrmBundle extends CSRBundle {

@@ -39,8 +39,8 @@ class VTypeGen(implicit p: Parameters) extends XSModule{
     (firstVsetInstField.WIDTH === "b111".U) && 
     (firstVsetInstField.ALL(31) === "b0".U)
 
-  private val vtypeArch = RegInit(0.U.asTypeOf(new VType))
-  private val vtypeSpec = RegInit(0.U.asTypeOf(new VType))
+  private val vtypeArch = RegInit(VType.initVtype())
+  private val vtypeSpec = RegInit(VType.initVtype())
 
   private val vtypeArchNext = WireInit(vtypeArch)
   private val vtypeSpecNext = WireInit(vtypeSpec)
