@@ -792,46 +792,46 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   }
 
   // refill latency monitor
-  // val start_counting = RegNext(io.mem_acquire.fire) || (RegNextN(primary_fire, 2) && s_acquire)
-  // io.latency_monitor.load_miss_refilling  := req_valid && req_primary_fire.isFromLoad     && BoolStopWatch(start_counting, io.mem_grant.fire && !refill_done, true, true)
-  // io.latency_monitor.store_miss_refilling := req_valid && req_primary_fire.isFromStore    && BoolStopWatch(start_counting, io.mem_grant.fire && !refill_done, true, true)
-  // io.latency_monitor.amo_miss_refilling   := req_valid && req_primary_fire.isFromAMO      && BoolStopWatch(start_counting, io.mem_grant.fire && !refill_done, true, true)
-  // io.latency_monitor.pf_miss_refilling    := req_valid && req_primary_fire.isFromPrefetch && BoolStopWatch(start_counting, io.mem_grant.fire && !refill_done, true, true)
-  io.latency_monitor.load_miss_refilling  := DontCare
-  io.latency_monitor.store_miss_refilling := DontCare
-  io.latency_monitor.amo_miss_refilling   := DontCare
-  io.latency_monitor.pf_miss_refilling    := DontCare
+  val start_counting = RegNext(io.mem_acquire.fire) || (RegNextN(primary_fire.asUInt.orR, 2) && s_acquire)
+  io.latency_monitor.load_miss_refilling  := req_valid && req_primary_fire.isFromLoad     && BoolStopWatch(start_counting, io.mem_grant.fire && !refill_done, true, true)
+  io.latency_monitor.store_miss_refilling := req_valid && req_primary_fire.isFromStore    && BoolStopWatch(start_counting, io.mem_grant.fire && !refill_done, true, true)
+  io.latency_monitor.amo_miss_refilling   := req_valid && req_primary_fire.isFromAMO      && BoolStopWatch(start_counting, io.mem_grant.fire && !refill_done, true, true)
+  io.latency_monitor.pf_miss_refilling    := req_valid && req_primary_fire.isFromPrefetch && BoolStopWatch(start_counting, io.mem_grant.fire && !refill_done, true, true)
+//   io.latency_monitor.load_miss_refilling  := DontCare
+//   io.latency_monitor.store_miss_refilling := DontCare
+//   io.latency_monitor.amo_miss_refilling   := DontCare
+//   io.latency_monitor.pf_miss_refilling    := DontCare
 
-  // XSPerfAccumulate("miss_req_primary", primary_fire)
-  // XSPerfAccumulate("miss_req_merged", secondary_fire)
-  // XSPerfAccumulate("load_miss_penalty_to_use",
-  //   should_refill_data &&
-  //     BoolStopWatch(primary_fire, io.refill_to_ldq.valid, true)
-  // )
-  // XSPerfAccumulate("penalty_between_grantlast_and_release",
-  //   BoolStopWatch(!RegNext(w_grantlast) && w_grantlast, release_entry, true)
-  // )
-  // XSPerfAccumulate("main_pipe_penalty", BoolStopWatch(io.main_pipe_req.fire, io.main_pipe_resp))
-  // XSPerfAccumulate("penalty_blocked_by_channel_A", io.mem_acquire.valid && !io.mem_acquire.ready)
-  // XSPerfAccumulate("penalty_waiting_for_channel_D", s_acquire && !w_grantlast && !io.mem_grant.valid)
-  // XSPerfAccumulate("penalty_waiting_for_channel_E", io.mem_finish.valid && !io.mem_finish.ready)
-  // XSPerfAccumulate("prefetch_req_primary", primary_fire && io.req.bits.source === DCACHE_PREFETCH_SOURCE.U)
-  // XSPerfAccumulate("prefetch_req_merged", secondary_fire && io.req.bits.source === DCACHE_PREFETCH_SOURCE.U)
-  // XSPerfAccumulate("can_not_send_acquire_because_of_merging_store", !s_acquire && io.miss_req_pipe_reg.merge && miss_req_pipe_reg_bits.isFromStore)
+  XSPerfAccumulate("miss_req_primary", Cat(primary_fire).orR)
+  XSPerfAccumulate("miss_req_merged", Cat(secondary_fire).orR)
+  XSPerfAccumulate("load_miss_penalty_to_use",
+    should_refill_data &&
+      BoolStopWatch(Cat(primary_fire).orR, io.refill_to_ldq.valid, true)
+  )
+  XSPerfAccumulate("penalty_between_grantlast_and_release",
+    BoolStopWatch(!RegNext(w_grantlast) && w_grantlast, release_entry, true)
+  )
+  XSPerfAccumulate("main_pipe_penalty", BoolStopWatch(io.main_pipe_req.fire, io.main_pipe_resp))
+  XSPerfAccumulate("penalty_blocked_by_channel_A", io.mem_acquire.valid && !io.mem_acquire.ready)
+  XSPerfAccumulate("penalty_waiting_for_channel_D", s_acquire && !w_grantlast && !io.mem_grant.valid)
+  XSPerfAccumulate("penalty_waiting_for_channel_E", io.mem_finish.valid && !io.mem_finish.ready)
+  XSPerfAccumulate("prefetch_req_primary", PopCount((0 until cfg.nMSHRPorts).map(i => primary_fire(i) && io.req(i).bits.source === DCACHE_PREFETCH_SOURCE.U)))
+  XSPerfAccumulate("prefetch_req_merged", PopCount((0 until cfg.nMSHRPorts).map(i => secondary_fire(i) && io.req(i).bits.source === DCACHE_PREFETCH_SOURCE.U)))
+  XSPerfAccumulate("can_not_send_acquire_because_of_merging_store", !s_acquire && io.miss_req_pipe_reg.merge && miss_req_pipe_reg_bits.isFromStore)
 
-  // val (mshr_penalty_sample, mshr_penalty) = TransactionLatencyCounter(RegNext(RegNext(primary_fire)), release_entry)
-  // XSPerfHistogram("miss_penalty", mshr_penalty, mshr_penalty_sample, 0, 20, 1, true, true)
-  // XSPerfHistogram("miss_penalty", mshr_penalty, mshr_penalty_sample, 20, 100, 10, true, false)
+  val (mshr_penalty_sample, mshr_penalty) = TransactionLatencyCounter(RegNext(RegNext(primary_fire.asUInt.orR)), release_entry)
+  XSPerfHistogram("miss_penalty", mshr_penalty, mshr_penalty_sample, 0, 20, 1, true, true)
+  XSPerfHistogram("miss_penalty", mshr_penalty, mshr_penalty_sample, 20, 100, 10, true, false)
 
-  // val load_miss_begin = primary_fire && io.req.bits.isFromLoad
-  // val refill_finished = RegNext(!w_grantlast && refill_done) && should_refill_data
-  // val (load_miss_penalty_sample, load_miss_penalty) = TransactionLatencyCounter(load_miss_begin, refill_finished) // not real refill finish time
-  // XSPerfHistogram("load_miss_penalty_to_use", load_miss_penalty, load_miss_penalty_sample, 0, 20, 1, true, true)
-  // XSPerfHistogram("load_miss_penalty_to_use", load_miss_penalty, load_miss_penalty_sample, 20, 100, 10, true, false)
+  val load_miss_begin = primary_fire.asUInt.orR && Cat(io.req.map(_.bits.isFromLoad)).orR
+  val refill_finished = RegNext(!w_grantlast && refill_done) && should_refill_data
+  val (load_miss_penalty_sample, load_miss_penalty) = TransactionLatencyCounter(load_miss_begin, refill_finished) // not real refill finish time
+  XSPerfHistogram("load_miss_penalty_to_use", load_miss_penalty, load_miss_penalty_sample, 0, 20, 1, true, true)
+  XSPerfHistogram("load_miss_penalty_to_use", load_miss_penalty, load_miss_penalty_sample, 20, 100, 10, true, false)
 
-  // val (a_to_d_penalty_sample, a_to_d_penalty) = TransactionLatencyCounter(start_counting, RegNext(io.mem_grant.fire && refill_done))
-  // XSPerfHistogram("a_to_d_penalty", a_to_d_penalty, a_to_d_penalty_sample, 0, 20, 1, true, true)
-  // XSPerfHistogram("a_to_d_penalty", a_to_d_penalty, a_to_d_penalty_sample, 20, 100, 10, true, false)
+  val (a_to_d_penalty_sample, a_to_d_penalty) = TransactionLatencyCounter(start_counting, RegNext(io.mem_grant.fire && refill_done))
+  XSPerfHistogram("a_to_d_penalty", a_to_d_penalty, a_to_d_penalty_sample, 0, 20, 1, true, true)
+  XSPerfHistogram("a_to_d_penalty", a_to_d_penalty, a_to_d_penalty_sample, 20, 100, 10, true, false)
 }
 
 class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule with HasCircularQueuePtrHelper
@@ -1193,8 +1193,8 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
     acquire_from_pipereg(i).bits  := miss_req_pipe_reg(i).get_acquire(io.l2_pf_store_only)
   }
 
-  // XSPerfAccumulate("acquire_fire_from_pipereg", acquire_from_pipereg.fire)
-  // XSPerfAccumulate("pipereg_valid", miss_req_pipe_reg.reg_valid())
+  XSPerfAccumulate("acquire_fire_from_pipereg", Cat(acquire_from_pipereg.map(_.fire)).orR)
+  XSPerfAccumulate("pipereg_valid", PopCount(miss_req_pipe_reg.map(_.reg_valid)))
 
   // val acquire_sources = Seq(acquire_from_pipereg) ++ entries.map(_.io.mem_acquire)
   val acquire_sources = acquire_from_pipereg ++ entries.map(_.io.mem_acquire)
@@ -1245,7 +1245,6 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
     difftest.idtfr := DontCare
   }
 
-  // Remove Temporarily
   // // Perf count
   XSPerfAccumulate("miss_req_fire_4", PopCount(io.req.map(r => r.fire && !r.bits.cancel)) === 4.U)
   XSPerfAccumulate("miss_req_fire_3", PopCount(io.req.map(r => r.fire && !r.bits.cancel)) === 3.U)
@@ -1253,19 +1252,19 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   XSPerfAccumulate("miss_req_fire_1", PopCount(io.req.map(r => r.fire && !r.bits.cancel)) === 1.U)
   XSPerfAccumulate("req_enq_failed", primary_ready_cnt > 0.U && Cat(io.req.zipWithIndex.map{case(r, i) => r.valid && !r.bits.cancel && !reject(i)}).orR)
   // XSPerfAccumulate("miss_req", io.req.fire && !io.req.bits.cancel)
-  // XSPerfAccumulate("miss_req_allocate", io.req.fire && !io.req.bits.cancel && alloc)
-  // XSPerfAccumulate("miss_req_load_allocate", io.req.fire && !io.req.bits.cancel && alloc && io.req.bits.isFromLoad)
-  // XSPerfAccumulate("miss_req_store_allocate", io.req.fire && !io.req.bits.cancel && alloc && io.req.bits.isFromStore)
-  // XSPerfAccumulate("miss_req_amo_allocate", io.req.fire && !io.req.bits.cancel && alloc && io.req.bits.isFromAMO)
-  // XSPerfAccumulate("miss_req_prefetch_allocate", io.req.fire && !io.req.bits.cancel && alloc && io.req.bits.isFromPrefetch)
-  // XSPerfAccumulate("miss_req_merge_load", io.req.fire && !io.req.bits.cancel && merge && io.req.bits.isFromLoad)
-  // XSPerfAccumulate("miss_req_reject_load", io.req.valid && !io.req.bits.cancel && reject && io.req.bits.isFromLoad)
-  // XSPerfAccumulate("probe_blocked_by_miss", io.probe_block)
-  // XSPerfAccumulate("prefetch_primary_fire", io.req.fire && !io.req.bits.cancel && alloc && io.req.bits.isFromPrefetch)
-  // XSPerfAccumulate("prefetch_secondary_fire", io.req.fire && !io.req.bits.cancel && merge && io.req.bits.isFromPrefetch)
+  XSPerfAccumulate("miss_req_allocate", PopCount(io.req.zipWithIndex.map{case(r, i) => r.fire && !r.bits.cancel && alloc(i)}))
+  XSPerfAccumulate("miss_req_load_allocate", PopCount(io.req.zipWithIndex.map{case(r, i) => r.fire && !r.bits.cancel && alloc(i) && r.bits.isFromLoad}))
+  XSPerfAccumulate("miss_req_store_allocate", PopCount(io.req.zipWithIndex.map{case(r, i) => r.fire && !r.bits.cancel && alloc(i) && r.bits.isFromStore}))
+  XSPerfAccumulate("miss_req_amo_allocate", PopCount(io.req.zipWithIndex.map{case(r, i) => r.fire && !r.bits.cancel && alloc(i) && r.bits.isFromAMO}))
+  XSPerfAccumulate("miss_req_prefetch_allocate", PopCount(io.req.zipWithIndex.map{case(r, i) => r.fire && !r.bits.cancel && alloc(i) && r.bits.isFromPrefetch}))
+  XSPerfAccumulate("miss_req_merge_load", PopCount(io.req.zipWithIndex.map{case(r, i) => r.fire && !r.bits.cancel && merge(i) && r.bits.isFromLoad}))
+  XSPerfAccumulate("miss_req_reject_load", PopCount(io.req.zipWithIndex.map{case(r, i) => r.valid && !r.bits.cancel && reject(i) && r.bits.isFromLoad}))
+  XSPerfAccumulate("probe_blocked_by_miss", io.probe_block)
+  XSPerfAccumulate("prefetch_primary_fire", PopCount(io.req.zipWithIndex.map{case(r, i) => r.fire && !r.bits.cancel && alloc(i) && r.bits.isFromPrefetch}))
+  XSPerfAccumulate("prefetch_secondary_fire", PopCount(io.req.zipWithIndex.map{case(r, i) => r.fire && !r.bits.cancel && merge(i) && r.bits.isFromPrefetch}))
   // XSPerfAccumulate("memSetPattenDetected", memSetPattenDetected)
   // val max_inflight = RegInit(0.U((log2Up(cfg.nMissEntries) + 1).W))
-  // val num_valids = PopCount(~Cat(primary_ready_vec).asUInt)
+  val num_valids = PopCount(~Cat(primary_ready_vec).asUInt)
   // when (num_valids > max_inflight) {
   //   max_inflight := num_valids
   // }
@@ -1275,14 +1274,14 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   // io.full := num_valids === cfg.nMissEntries.U
   // XSPerfHistogram("num_valids", num_valids, true.B, 0, cfg.nMissEntries, 1)
 
-  // XSPerfHistogram("L1DMLP_CPUData", PopCount(VecInit(entries.map(_.io.perf_pending_normal)).asUInt), true.B, 0, cfg.nMissEntries, 1)
-  // XSPerfHistogram("L1DMLP_Prefetch", PopCount(VecInit(entries.map(_.io.perf_pending_prefetch)).asUInt), true.B, 0, cfg.nMissEntries, 1)
-  // XSPerfHistogram("L1DMLP_Total", num_valids, true.B, 0, cfg.nMissEntries, 1)
+  XSPerfHistogram("L1DMLP_CPUData", PopCount(VecInit(entries.map(_.io.perf_pending_normal)).asUInt), true.B, 0, cfg.nMissEntries, 1)
+  XSPerfHistogram("L1DMLP_Prefetch", PopCount(VecInit(entries.map(_.io.perf_pending_prefetch)).asUInt), true.B, 0, cfg.nMissEntries, 1)
+  XSPerfHistogram("L1DMLP_Total", num_valids, true.B, 0, cfg.nMissEntries, 1)
 
-  // XSPerfAccumulate("miss_load_refill_latency", PopCount(entries.map(_.io.latency_monitor.load_miss_refilling)))
-  // XSPerfAccumulate("miss_store_refill_latency", PopCount(entries.map(_.io.latency_monitor.store_miss_refilling)))
-  // XSPerfAccumulate("miss_amo_refill_latency", PopCount(entries.map(_.io.latency_monitor.amo_miss_refilling)))
-  // XSPerfAccumulate("miss_pf_refill_latency", PopCount(entries.map(_.io.latency_monitor.pf_miss_refilling)))
+  XSPerfAccumulate("miss_load_refill_latency", PopCount(entries.map(_.io.latency_monitor.load_miss_refilling)))
+  XSPerfAccumulate("miss_store_refill_latency", PopCount(entries.map(_.io.latency_monitor.store_miss_refilling)))
+  XSPerfAccumulate("miss_amo_refill_latency", PopCount(entries.map(_.io.latency_monitor.amo_miss_refilling)))
+  XSPerfAccumulate("miss_pf_refill_latency", PopCount(entries.map(_.io.latency_monitor.pf_miss_refilling)))
 
   val rob_head_miss_in_dcache = VecInit(entries.map(_.io.rob_head_query.resp)).asUInt.orR
 
