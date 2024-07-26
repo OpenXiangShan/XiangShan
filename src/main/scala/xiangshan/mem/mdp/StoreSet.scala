@@ -199,6 +199,7 @@ class SSIT(implicit p: Parameters) extends XSModule {
   // for now we just use lowest bits of ldpc as store set id
   val s2_ldSsidAllocate = XORFold(s2_mempred_update_req.ldpc, SSIDWidth)
   val s2_stSsidAllocate = XORFold(s2_mempred_update_req.stpc, SSIDWidth)
+  val s2_allocSsid = Mux(s2_ldSsidAllocate < s2_stSsidAllocate, s2_ldSsidAllocate, s2_stSsidAllocate)
   // both the load and the store have already been assigned store sets
   // but load's store set ID is smaller
   val s2_winnerSSID = Mux(s2_loadOldSSID < s2_storeOldSSID, s2_loadOldSSID, s2_storeOldSSID)
@@ -237,13 +238,13 @@ class SSIT(implicit p: Parameters) extends XSModule {
         update_ld_ssit_entry(
           pc = s2_mempred_update_req.ldpc,
           valid = true.B,
-          ssid = s2_ldSsidAllocate,
+          ssid = s2_allocSsid,
           strict = false.B
         )
         update_st_ssit_entry(
           pc = s2_mempred_update_req.stpc,
           valid = true.B,
-          ssid = s2_stSsidAllocate,
+          ssid = s2_allocSsid,
           strict = false.B
         )
       }
@@ -253,7 +254,7 @@ class SSIT(implicit p: Parameters) extends XSModule {
         update_st_ssit_entry(
           pc = s2_mempred_update_req.stpc,
           valid = true.B,
-          ssid = s2_stSsidAllocate,
+          ssid = s2_loadOldSSID,
           strict = false.B
         )
       }
@@ -263,7 +264,7 @@ class SSIT(implicit p: Parameters) extends XSModule {
         update_ld_ssit_entry(
           pc = s2_mempred_update_req.ldpc,
           valid = true.B,
-          ssid = s2_ldSsidAllocate,
+          ssid = s2_storeOldSSID,
           strict = false.B
         )
       }
