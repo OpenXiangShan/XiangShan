@@ -943,7 +943,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         ofFromPerfCntVec(i) := m.toMhpmeventOF
       case _ =>
     }
-    perfEvents(i)   := ofFromPerfCntVec(i) ## perfEvents(i).tail(1)
+    perfEvents(i)   := (perfEvents(i).head(1).asBool || ofFromPerfCntVec(i)) ## perfEvents(i).tail(1)
     lcofiReqVec(i)  := ofFromPerfCntVec(i) && !mhpmevents(i).rdata.head(1)
   }
 

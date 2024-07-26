@@ -262,10 +262,11 @@ trait MachineLevel { self: NewCSR =>
 
     // bit 13 LCOFIP
     reg.LCOFIP := lcofiReq
-    when (fromSip.LCOFIP.valid || fromVSip.LCOFIP.valid) {
+    when (fromSip.LCOFIP.valid || fromVSip.LCOFIP.valid || wen) {
       reg.LCOFIP := Mux1H(Seq(
         fromSip.LCOFIP.valid  -> fromSip.LCOFIP.bits,
         fromVSip.LCOFIP.valid -> fromVSip.LCOFIP.bits,
+        wen -> wdata.LCOFIP,
       ))
     }
   }).setAddr(CSRs.mip)
