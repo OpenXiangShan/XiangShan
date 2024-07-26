@@ -525,6 +525,7 @@ class MidelegBundle extends InterruptBundle {
 
 class MieBundle extends InterruptEnableBundle {
   this.getNonLocal.foreach(_.setRW().withReset(0.U))
+  this.LCOFIE.setRW().withReset(0.U)
 }
 
 class MipBundle extends InterruptPendingBundle {
