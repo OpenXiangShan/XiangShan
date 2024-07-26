@@ -574,11 +574,11 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   when (io.mem.resp.fire) {
     state.indices.map{i =>
       when (state(i) === state_mem_waiting && io.mem.resp.bits.id === entries(i).wait_id) {
-        state(i) := Mux(entries(i).req_info.s2xlate === allStage, state_last_hptw_req, state_mem_out)
-        mem_resp_hit(i) := true.B
         val req_paddr = MakeAddr(entries(i).ppn, getVpnn(entries(i).req_info.vpn, 0))
         val req_hpaddr = MakeAddr(entries(i).hptw_resp.genPPNS2(get_pn(req_paddr)), getVpnn(entries(i).req_info.vpn, 0))
         val index =  Mux(entries(i).req_info.s2xlate === allStage, req_hpaddr, req_paddr)(log2Up(l2tlbParams.blockBytes)-1, log2Up(XLEN/8))
+        state(i) := Mux(entries(i).req_info.s2xlate === allStage && !(ptes(index).isPf(2.U) || !ptes(index).isLeaf() || ptes(index).isAf()), state_last_hptw_req, state_mem_out)
+        mem_resp_hit(i) := true.B
         entries(i).ppn := ptes(index).getPPN() // for last stage 2 translation
       }
     }
