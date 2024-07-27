@@ -944,7 +944,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
       if(i == j) false.B
       else
       io.req(i).valid && 
-        Mux(io.req(j).valid,
+        Mux(io.req(j).valid && !reject(j) && !io.req(j).bits.cancel,
             merge_with_port_req(j) || merge(j) || Mux(
                 io.req(i).bits.source =/= io.req(j).bits.source,
                 io.req(i).bits.source < io.req(j).bits.source,
@@ -1002,14 +1002,16 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   }
   // assert(PopCount(Seq(req_pipeline_reg_handled, VecInit(req_mshr_handled_vec).asUInt.orR)) <= 1.U, "miss req will either go to mshr or pipeline reg")
   // assert(PopCount(req_mshr_handled_vec) <= 1.U, "Only one mshr can handle a req")
+  val resp_init_id = (0 until cfg.nMSHRPorts).map(i =>
+    Mux(req_pipeline_reg_handled(i),
+      PriorityMux(merge_with_pipe_req(i), miss_req_pipe_reg.map(_.mshr_id)),
+      OHToUInt(req_mshr_handled_vec(i))
+    )
+  )
   io.resp.zipWithIndex.foreach{ case(resp, i) =>
-    // resp.id := Mux(!req_pipeline_reg_handled(i), OHToUInt(req_mshr_handled_vec(i)), miss_req_pipe_reg(i).mshr_id)
-    resp.id := Mux(req_pipeline_reg_handled(i),
-                    PriorityMux(merge_with_pipe_req(i), miss_req_pipe_reg.map(_.mshr_id)),
-                    Mux(merge_with_port_req(i),
-                        PriorityMux(match_with_port_req(i), req_mshr_handled_vec.map(OHToUInt(_))),
-                        OHToUInt(req_mshr_handled_vec(i))
-                    )
+    resp.id := Mux(merge_with_port_req(i),
+                  PriorityMux(match_with_port_req(i), resp_init_id),
+                  resp_init_id(i)
                 )
     resp.handled := Cat(req_mshr_handled_vec(i)).orR || req_pipeline_reg_handled(i) || merge_with_port_req(i)
     resp.merged := merge(i) || merge_with_port_req(i)
