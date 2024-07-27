@@ -1261,13 +1261,17 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val may_have_stall_from_bpu = Wire(Bool())
   val bpu_ftb_update_stall = RegInit(0.U(2.W)) // 2-cycle stall, so we need 3 states
   may_have_stall_from_bpu := bpu_ftb_update_stall =/= 0.U
-  val noToCommit = commitStateQueueReg(commPtr.value).map(s => s =/= c_toCommit).reduce(_ && _)
-  val allEmpty = commitStateQueueReg(commPtr.value).map(s => s === c_empty).reduce(_ && _)
-  canCommit := commPtr =/= ifuWbPtr && !may_have_stall_from_bpu && (isAfter(robCommPtr, commPtr) || noToCommit && !allEmpty)
+  val nothingToCommit = commitStateQueueReg(commPtr.value).map(s => s =/= c_toCommit).reduce(_ && _)
+  val firstInstructionCommitted = commitStateQueueReg(commPtr.value)(0) === c_committed
+  val firstInstructionFlushed = commitStateQueueReg(commPtr.value)(0) === c_flushed
+  canCommit := commPtr =/= ifuWbPtr && !may_have_stall_from_bpu &&
+    (isAfter(robCommPtr, commPtr) || firstInstructionCommitted && nothingToCommit)
+  val canMoveCommPtr = commPtr =/= ifuWbPtr && !may_have_stall_from_bpu &&
+    (isAfter(robCommPtr, commPtr) || firstInstructionCommitted && nothingToCommit || firstInstructionFlushed)
 
   when (io.fromBackend.rob_commits.map(_.valid).reduce(_ | _)) {
     robCommPtr_write := ParallelPriorityMux(io.fromBackend.rob_commits.map(_.valid).reverse, io.fromBackend.rob_commits.map(_.bits.ftqIdx).reverse)
-  } .elsewhen (commPtr =/= ifuWbPtr && !may_have_stall_from_bpu && noToCommit && !allEmpty) {
+  } .elsewhen (isAfter(commPtr, robCommPtr)) {
     robCommPtr_write := commPtr
   } .otherwise {
     robCommPtr_write := robCommPtr
@@ -1303,7 +1307,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // need one cycle to read mem and srams
   val do_commit_ptr = RegEnable(commPtr, canCommit)
   val do_commit = RegNext(canCommit, init=false.B)
-  when (canCommit) {
+  when (canMoveCommPtr) {
     commPtr_write := commPtrPlus1
     commPtrPlus1_write := commPtrPlus1 + 1.U
   }
