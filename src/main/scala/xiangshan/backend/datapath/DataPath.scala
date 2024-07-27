@@ -326,6 +326,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   )
   FpRegFile("VlRegFile", VlPhyRegs, vlRfRaddr, vlRfRdata, vlRfWen, vlRfWaddr, vlRfWdata,
     bankNum = 1,
+    isVlRegfile = true,
     debugReadAddr = vlDebugRead.map(_._1),
     debugReadData = vlDebugRead.map(_._2)
   )
