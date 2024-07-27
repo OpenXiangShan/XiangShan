@@ -309,14 +309,6 @@ package object xiangshan {
     def max        = "b011_0110".U
     def min        = "b011_0111".U
 
-    // branch
-    def beq        = "b111_0000".U
-    def bne        = "b111_0010".U
-    def blt        = "b111_1000".U
-    def bge        = "b111_1010".U
-    def bltu       = "b111_1100".U
-    def bgeu       = "b111_1110".U
-
     // Zicond
     def czero_eqz  = "b111_0100".U
     def czero_nez  = "b111_0110".U
