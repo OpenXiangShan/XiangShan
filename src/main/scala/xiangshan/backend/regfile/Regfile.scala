@@ -70,24 +70,31 @@ class Regfile
   len: Int,
   width: Int,
   bankNum: Int = 1,
+  isVlRegfile: Boolean = false,
 ) extends Module {
   val io = IO(new Bundle() {
     val readPorts = Vec(numReadPorts, new RfReadPort(len, width))
     val writePorts = Vec(numWritePorts, new RfWritePort(len, width))
     val debug_rports = Vec(65, new RfReadPort(len, width))
   })
-
+  override def desiredName = name
   println(name + ": size:" + numPregs + " read: " + numReadPorts + " write: " + numWritePorts)
 
+  val mem_0 = if (isVlRegfile) RegInit(0.U(len.W)) else Reg(UInt(len.W))
   val mem = Reg(Vec(numPregs, UInt(len.W)))
+  val memForRead = Wire(Vec(numPregs, UInt(len.W)))
+  memForRead.zipWithIndex.map{ case(m, i) =>
+    if (i == 0) m := mem_0
+    else m := mem(i)
+  }
   require(Seq(1, 2, 4).contains(bankNum), "bankNum must be 1 or 2 or 4")
   for (r <- io.readPorts) {
     if (bankNum == 1) {
-      r.data := mem(RegNext(r.addr))
+      r.data := memForRead(RegNext(r.addr))
     }
     else {
       val banks = (0 until bankNum).map { case i =>
-        mem.zipWithIndex.filter{ case (m, index) => (index % bankNum) == i }.map(_._1)
+        memForRead.zipWithIndex.filter{ case (m, index) => (index % bankNum) == i }.map(_._1)
       }
       val bankWidth = bankNum.U.getWidth - 1
       val hitBankWire = VecInit((0 until bankNum).map { case i => r.addr(bankWidth - 1, 0) === i.U })
@@ -109,20 +116,20 @@ class Regfile
   }
   for (i <- mem.indices) {
     if (hasZero && i == 0) {
-      mem(i) := 0.U
+      mem_0 := 0.U
     }
     else {
       val wenOH = VecInit(io.writePorts.map(w => w.wen && w.addr === i.U))
       val wData = Mux1H(wenOH, io.writePorts.map(_.data))
       when(wenOH.asUInt.orR) {
-        mem(i) := wData
+        if (i == 0) mem_0 := wData
+        else mem(i) := wData
       }
     }
   }
 
   for (rport <- io.debug_rports) {
-    val zero_rdata = Mux(rport.addr === 0.U, 0.U, mem(rport.addr))
-    rport.data := (if (hasZero) zero_rdata else mem(rport.addr))
+    rport.data := memForRead(rport.addr)
   }
 }
 
@@ -141,6 +148,7 @@ object Regfile {
     bankNum      : Int = 1,
     debugReadAddr: Option[Seq[UInt]],
     debugReadData: Option[Vec[UInt]],
+    isVlRegfile  : Boolean = false,
   )(implicit p: Parameters): Unit = {
     val numReadPorts = raddr.length
     val numWritePorts = wen.length
@@ -151,7 +159,9 @@ object Regfile {
     val addrBits = waddr.map(_.getWidth).min
     require(waddr.map(_.getWidth).min == waddr.map(_.getWidth).max, s"addrBits != $addrBits")
 
-    val regfile = Module(new Regfile(name, numEntries, numReadPorts, numWritePorts, hasZero, dataBits, addrBits, bankNum))
+    val instanceName = name(0).toLower + name.drop(1)
+    require(instanceName != name, "Regfile Instance Name can't be same as Module name")
+    val regfile = Module(new Regfile(name, numEntries, numReadPorts, numWritePorts, hasZero, dataBits, addrBits, bankNum, isVlRegfile)).suggestName(instanceName)
     rdata := regfile.io.readPorts.zip(raddr).map { case (rport, addr) =>
       rport.addr := addr
       rport.data
@@ -227,10 +237,11 @@ object FpRegFile {
              debugReadData: Option[Vec[UInt]],
              withReset    : Boolean = false,
              bankNum      : Int,
+             isVlRegfile  : Boolean = false,
            )(implicit p: Parameters): Unit = {
     Regfile(
       name, numEntries, raddr, rdata, wen, waddr, wdata,
-      hasZero = false, withReset, bankNum, debugReadAddr, debugReadData)
+      hasZero = false, withReset, bankNum, debugReadAddr, debugReadData, isVlRegfile)
   }
 }
 
