@@ -794,7 +794,10 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.out.bits.EX_VI := permitMod.io.out.EX_VI || imsic_EX_VI
   io.out.bits.flushPipe := flushPipe
 
-  io.out.bits.rData := Mux(ren, rdata, 0.U)
+  io.out.bits.rData := MuxCase(0.U, Seq(
+    (state === s_waitIMSIC && stateNext === s_idle) -> fromAIA.rdata.bits.data,
+    ren -> rdata,
+  ))
   io.out.bits.regOut := regOut
   io.out.bits.targetPc := DataHoldBypass(
     Mux(trapEntryDEvent.out.targetPc.valid,
