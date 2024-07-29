@@ -310,6 +310,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   trapHandleMod.io.in.vstvec := vstvec.regOut
 
   val entryPrivState = trapHandleMod.io.out.entryPrivState
+  val entryDebugMode = Wire(Bool())
 
   // PMP
   val pmpEntryMod = Module(new PMPEntryHandleModule)
@@ -587,9 +588,9 @@ class NewCSR(implicit val p: Parameters) extends Module
     println(mod.dumpFields)
   }
 
-  trapEntryMEvent .valid := hasTrap && entryPrivState.isModeM
-  trapEntryHSEvent.valid := hasTrap && entryPrivState.isModeHS
-  trapEntryVSEvent.valid := hasTrap && entryPrivState.isModeVS
+  trapEntryMEvent .valid := hasTrap && entryPrivState.isModeM && !entryDebugMode
+  trapEntryHSEvent.valid := hasTrap && entryPrivState.isModeHS && !entryDebugMode
+  trapEntryVSEvent.valid := hasTrap && entryPrivState.isModeVS && !entryDebugMode
 
   Seq(trapEntryMEvent, trapEntryHSEvent, trapEntryVSEvent, trapEntryDEvent).foreach { eMod =>
     eMod.in match {
@@ -862,7 +863,9 @@ class NewCSR(implicit val p: Parameters) extends Module
   debugMod.io.in.tdata2Update              := tdata2Update
   debugMod.io.in.tdata1Wdata               := wdata
 
-  trapEntryDEvent.valid                       := debugMod.io.out.hasDebugTrap && !debugMode
+  entryDebugMode := debugMod.io.out.hasDebugTrap && !debugMode
+
+  trapEntryDEvent.valid                       := entryDebugMode
   trapEntryDEvent.in.hasDebugIntr             := debugMod.io.out.hasDebugIntr
   trapEntryDEvent.in.debugMode                := debugMode
   trapEntryDEvent.in.hasTrap                  := hasTrap
