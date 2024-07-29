@@ -24,29 +24,16 @@ class PcTargetMemImp(override val wrapper: PcTargetMem)(implicit p: Parameters, 
   private val readValid = io.toDataPath.fromDataPathValid
 
   private def hasRen: Boolean = true
-  private val targetMem = Module(new SyncDataModuleTemplate(new PcTargetMemEntry, FtqSize, numTargetMemRead, 1, hasRen = hasRen))
+  private val targetMem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize, numTargetMemRead, 1, hasRen = hasRen))
   private val targetPCVec : Vec[UInt] = Wire(Vec(params.numTargetReadPort, UInt(VAddrData().dataWidth.W)))
   private val pcVec       : Vec[UInt] = Wire(Vec(params.numPcMemReadPort, UInt(VAddrData().dataWidth.W)))
 
-  private val wdata = Wire(new PcTargetMemEntry)
-  wdata.addr := io.fromFrontendFtq.pc_mem_wdata
-  wdata.flag := io.fromFrontendFtq.pc_mem_waddr.flag
-
   targetMem.io.wen.head := GatedValidRegNext(io.fromFrontendFtq.pc_mem_wen)
-  targetMem.io.waddr.head := RegEnable(io.fromFrontendFtq.pc_mem_waddr.value, io.fromFrontendFtq.pc_mem_wen)
-  targetMem.io.wdata.head := RegEnable(wdata, io.fromFrontendFtq.pc_mem_wen)
-  private val rdataVec = targetMem.io.rdata
+  targetMem.io.waddr.head := RegEnable(io.fromFrontendFtq.pc_mem_waddr, io.fromFrontendFtq.pc_mem_wen)
+  targetMem.io.wdata.head := RegEnable(io.fromFrontendFtq.pc_mem_wdata, io.fromFrontendFtq.pc_mem_wen)
 
   private val newestEn: Bool = io.fromFrontendFtq.newest_entry_en
   private val newestTarget: UInt = io.fromFrontendFtq.newest_entry_target
-
-  // The FtqPtr is used to compare with read ptr since its arrival(T), so it needs to be holded and bypassed.
-  private val currentNewestFtqPtr = DataHoldBypass(io.fromFrontendFtq.newest_entry_ptr, newestEn)
-  // The newest target will be used at T+1, so there is no need to bypass it.
-  private val currentNewestTarget = RegEnable(io.fromFrontendFtq.newest_entry_target, newestEn)
-  private val targetReadPtrVec = 0 until params.numTargetReadPort map { i =>
-    RegEnable(io.toDataPath.fromDataPathFtqPtr(i), io.toDataPath.fromDataPathValid(i))
-  }
 
   for (i <- 0 until params.numTargetReadPort) {
     val targetPtr = io.toDataPath.fromDataPathFtqPtr(i)
@@ -54,13 +41,11 @@ class PcTargetMemImp(override val wrapper: PcTargetMem)(implicit p: Parameters, 
     targetMem.io.ren.get(i) := readValid(i)
     targetMem.io.raddr(i) := (targetPtr + 1.U).value
 
-    val hitNewestFtqPtr = RegEnable(targetPtr === currentNewestFtqPtr, false.B, readValid(i))
-    targetPCVec(i) := MuxCase(
-      default = Fill(VAddrBits, 1.U(1.W)), // use all 1s as invalid predict jump target
-      mapping = Seq(
-        hitNewestFtqPtr -> currentNewestTarget,
-        (rdataVec(i).flag === targetReadPtrVec(i).flag) -> rdataVec(i).addr.startAddr,
-      )
+    val needNewestTarget = RegEnable(targetPtr === io.fromFrontendFtq.newest_entry_ptr, false.B, readValid(i))
+    targetPCVec(i) := Mux(
+      needNewestTarget,
+      RegEnable(newestTarget, newestEn),
+      targetMem.io.rdata(i).startAddr
     )
   }
 
@@ -70,7 +55,7 @@ class PcTargetMemImp(override val wrapper: PcTargetMem)(implicit p: Parameters, 
     // pc stored in this entry
     targetMem.io.ren.get(i + params.numTargetReadPort) := readValid(i)
     targetMem.io.raddr(i + params.numTargetReadPort) := pcAddr.value
-    pcVec(i) := targetMem.io.rdata(i + params.numTargetReadPort).addr.getPc(RegEnable(offset, readValid(i)))
+    pcVec(i) := targetMem.io.rdata(i + params.numTargetReadPort).getPc(RegEnable(offset, readValid(i)))
   }
 
   io.toDataPath.toDataPathTargetPC := targetPCVec
@@ -93,9 +78,4 @@ class PcTargetMemIO()(implicit p: Parameters, params: BackendParams) extends XSB
   val fromFrontendFtq = Flipped(new FtqToCtrlIO)
   //to backend
   val toDataPath = new PcToDataPathIO(params)
-}
-
-class PcTargetMemEntry(implicit p: Parameters) extends XSBundle {
-  val addr = new Ftq_RF_Components
-  val flag = Bool()
 }
