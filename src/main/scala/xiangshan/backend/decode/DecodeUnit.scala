@@ -941,7 +941,8 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   uopInfoGen.io.in.preInfo.isVlsr := decodedInst.fuOpType === VlduType.vlr || decodedInst.fuOpType === VstuType.vsr
   uopInfoGen.io.in.preInfo.isVlsm := decodedInst.fuOpType === VlduType.vlm || decodedInst.fuOpType === VstuType.vsm
   io.deq.isComplex := uopInfoGen.io.out.isComplex
-  io.deq.uopInfo.numOfUop := uopInfoGen.io.out.uopInfo.numOfUop
+  // numOfUop should be 1 when vector instruction is illegalInst
+  io.deq.uopInfo.numOfUop := Mux(vecException.io.illegalInst, 1.U, uopInfoGen.io.out.uopInfo.numOfUop)
   io.deq.uopInfo.numOfWB := uopInfoGen.io.out.uopInfo.numOfWB
   io.deq.uopInfo.lmul := uopInfoGen.io.out.uopInfo.lmul
 
