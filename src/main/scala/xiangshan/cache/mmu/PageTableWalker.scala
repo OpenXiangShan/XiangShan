@@ -153,10 +153,15 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val hpaddr = Cat(hptw_resp.genPPNS2(get_pn(gpaddr)), get_off(gpaddr))
 
   io.req.ready := idle
+  val fake_pte = 0.U.asTypeOf(pte)
+  fake_pte.perm.v := true.B
+  fake_pte.perm.r := true.B
+  fake_pte.perm.w := true.B
+  fake_pte.perm.x := true.B
   val ptw_resp = Wire(new PtwMergeResp)
-  ptw_resp.apply(pageFault && !accessFault && !ppn_af, accessFault || ppn_af, Mux(accessFault, af_level,level), Mux(guest_fault || accessFault, 0.U.asTypeOf(pte), pte), vpn, satp.asid, hgatp.asid, vpn(sectortlbwidth - 1, 0), not_super = false)
+  ptw_resp.apply(pageFault && !accessFault && !ppn_af, accessFault || ppn_af, Mux(accessFault, af_level,level), Mux(guest_fault && level === 0.U, fake_pte, pte), vpn, satp.asid, hgatp.asid, vpn(sectortlbwidth - 1, 0), not_super = false)
 
-  val normal_resp = idle === false.B && mem_addr_update && !last_s2xlate && ((w_mem_resp && find_pte) || (s_pmp_check && accessFault) || onlyS2xlate || guest_fault)
+  val normal_resp = idle === false.B && mem_addr_update && !last_s2xlate && (guest_fault || (w_mem_resp && find_pte) || (s_pmp_check && accessFault) || onlyS2xlate )
   val stageHit_resp = idle === false.B && hptw_resp_stage2 
   io.resp.valid := Mux(stage1Hit, stageHit_resp, normal_resp)
   io.resp.bits.source := source
@@ -196,6 +201,8 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     s_hptw_req := false.B
     hptw_resp_stage2 := false.B
     last_s2xlate := false.B
+    hptw_pageFault := false.B
+    hptw_accessFault := false.B
   }
 
   when (io.hptw.resp.fire && w_hptw_resp === false.B && stage1Hit){
@@ -302,7 +309,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   }
 
   when(mem_addr_update){
-    when(level === 0.U && !onlyS2xlate && !(find_pte || accessFault)){
+    when(level === 0.U && !onlyS2xlate && !(guest_fault || find_pte || accessFault)){
       level := levelNext
       when(s2xlate){
         s_hptw_req := false.B
