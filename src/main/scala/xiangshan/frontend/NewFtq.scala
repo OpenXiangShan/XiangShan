@@ -1287,8 +1287,8 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     *************************************************************************************
     */
   val mmioReadPtr = io.mmioCommitRead.mmioFtqPtr
-  val mmioLastCommit = (isAfter(commPtr,mmioReadPtr) || (mmioReadPtr === commPtr)) &&
-                       Cat(commitStateQueueReg(mmioReadPtr.value).map(s => { s === c_empty || s === c_committed})).andR
+  val mmioLastCommit = isAfter(commPtr, mmioReadPtr) ||
+    commPtr === mmioReadPtr && validInstructions.reduce(_ && _) && lastInstructionStatus === c_committed
   io.mmioCommitRead.mmioLastCommit := RegNext(mmioLastCommit)
 
   // commit reads
