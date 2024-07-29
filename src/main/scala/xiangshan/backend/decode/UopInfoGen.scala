@@ -246,9 +246,6 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
   io.out.uopInfo.numOfWB := numOfWB
   io.out.uopInfo.lmul := lmul
 
-  XSError(typeOfSplit =/= UopSplitType.SCA_SIM && numOfUop === 0.U,
-    s"uop number $numOfUop is illegal, cannot be zero when typeOfSplit is $typeOfSplit")
-
 }
 
 class UopInfoGenIO(implicit p: Parameters) extends XSBundle {

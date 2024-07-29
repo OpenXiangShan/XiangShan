@@ -1917,6 +1917,9 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   outComplexNum := Mux(state === s_active, complexNum, 0.U)
   inReady := state === s_idle || state === s_active && thisAllOut
 
+
+  XSError(io.in.valid && numOfUop === 0.U,
+    p"uop number $numOfUop is illegal, cannot be zero")
 //  val validSimple = Wire(Vec(DecodeWidth, Bool()))
 //  validSimple.zip(io.validFromIBuf.zip(io.isComplex)).map{ case (dst, (src1, src2)) => dst := src1 && !src2 }
 //  val notInf = Wire(Vec(DecodeWidth, Bool()))
