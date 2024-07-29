@@ -737,6 +737,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   val fpDecoder = Module(new FPDecoder)
   fpDecoder.io.instr := ctrl_flow.instr
   decodedInst.fpu := fpDecoder.io.fpCtrl
+  decodedInst.fpu.wflags := fpDecoder.io.fpCtrl.wflags || decodedInst.wfflags
 
   decodedInst.connectStaticInst(io.enq.ctrlFlow)
 
