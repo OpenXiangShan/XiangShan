@@ -1267,10 +1267,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val firstInstructionFlushed = commitStateQueueReg(commPtr.value)(0) === c_flushed
   canCommit := commPtr =/= ifuWbPtr && !may_have_stall_from_bpu &&
     (isAfter(robCommPtr, commPtr) ||
-      validInstructions.reduce(_ && _) && lastInstructionStatus === c_committed)
+      validInstructions.reduce(_ || _) && lastInstructionStatus === c_committed)
   val canMoveCommPtr = commPtr =/= ifuWbPtr && !may_have_stall_from_bpu &&
     (isAfter(robCommPtr, commPtr) ||
-      validInstructions.reduce(_ && _) && lastInstructionStatus === c_committed ||
+      validInstructions.reduce(_ || _) && lastInstructionStatus === c_committed ||
       firstInstructionFlushed)
 
   when (io.fromBackend.rob_commits.map(_.valid).reduce(_ | _)) {
@@ -1288,7 +1288,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     */
   val mmioReadPtr = io.mmioCommitRead.mmioFtqPtr
   val mmioLastCommit = isAfter(commPtr, mmioReadPtr) ||
-    commPtr === mmioReadPtr && validInstructions.reduce(_ && _) && lastInstructionStatus === c_committed
+    commPtr === mmioReadPtr && validInstructions.reduce(_ || _) && lastInstructionStatus === c_committed
   io.mmioCommitRead.mmioLastCommit := RegNext(mmioLastCommit)
 
   // commit reads
