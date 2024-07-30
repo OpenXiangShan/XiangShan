@@ -886,6 +886,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   missQueue.io.l2_hint <> RegNext(io.l2_hint)
   missQueue.io.mainpipe_info := mainPipe.io.mainpipe_info
   mainPipe.io.refill_info := missQueue.io.refill_info
+  mainPipe.io.replace_block := missQueue.io.replace_block
   mainPipe.io.sms_agt_evict_req <> io.sms_agt_evict_req
   io.memSetPattenDetected := missQueue.io.memSetPattenDetected
 
@@ -1303,7 +1304,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   wb.io.miss_req.valid := missReqArb.io.out.valid
   wb.io.miss_req.bits  := missReqArb.io.out.bits.addr
-  wb.io.mshr_block := missQueue.io.release_block
 
   // block_decoupled(missReqArb.io.out, missQueue.io.req, wb.io.block_miss_req)
   missReqArb.io.out <> missQueue.io.req
@@ -1331,7 +1331,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   bus.a <> missQueue.io.mem_acquire
   bus.e <> missQueue.io.mem_finish
   missQueue.io.probe_addr := bus.b.bits.address
-  missQueue.io.release_addr := mainPipe.io.evict_addr
+  missQueue.io.replace_addr := mainPipe.io.replace_addr
 
   missQueue.io.main_pipe_resp.valid := RegNext(mainPipe.io.atomic_resp.valid)
   missQueue.io.main_pipe_resp.bits := RegEnable(mainPipe.io.atomic_resp.bits, mainPipe.io.atomic_resp.valid)
