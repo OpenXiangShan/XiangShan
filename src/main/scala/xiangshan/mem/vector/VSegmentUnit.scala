@@ -593,7 +593,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   }
 
   //update deqPtr
-  when(io.uopwriteback.fire){
+  when((state === s_finish) && !isEmpty(enqPtr, deqPtr)){
     deqPtr := deqPtr + 1.U
   }
 
@@ -609,31 +609,44 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   when(stateNext === s_idle){
     instMicroOpValid := false.B
   }
-  io.uopwriteback.valid               := (state === s_finish) && !isEmpty(enqPtr, deqPtr)
-  io.uopwriteback.bits.uop            := uopq(deqPtr.value).uop
-  io.uopwriteback.bits.uop.vpu        := instMicroOp.uop.vpu
-  io.uopwriteback.bits.uop.exceptionVec := instMicroOp.uop.exceptionVec
-  io.uopwriteback.bits.mask.get       := instMicroOp.mask
-  io.uopwriteback.bits.data           := data(deqPtr.value)
-  io.uopwriteback.bits.vdIdx.get      := vdIdxInField
-  io.uopwriteback.bits.uop.vpu.vl     := instMicroOp.vl
-  io.uopwriteback.bits.uop.vpu.vstart := instMicroOp.vstart
-  io.uopwriteback.bits.uop.vpu.vmask  := maskUsed
-  io.uopwriteback.bits.uop.vpu.vuopIdx  := uopq(deqPtr.value).uop.vpu.vuopIdx
-  io.uopwriteback.bits.debug          := DontCare
-  io.uopwriteback.bits.vdIdxInField.get := vdIdxInField
-  io.uopwriteback.bits.uop.robIdx     := instMicroOp.uop.robIdx
-  io.uopwriteback.bits.uop.fuOpType   := instMicroOp.uop.fuOpType
+  // writeback to backend
+  val writebackOut                     = WireInit(io.uopwriteback.bits)
+  val writebackValid                   = (state === s_finish) && !isEmpty(enqPtr, deqPtr)
+  writebackOut.uop                    := uopq(deqPtr.value).uop
+  writebackOut.uop.vpu                := instMicroOp.uop.vpu
+  writebackOut.uop.exceptionVec       := instMicroOp.uop.exceptionVec
+  writebackOut.mask.get               := instMicroOp.mask
+  writebackOut.data                   := data(deqPtr.value)
+  writebackOut.vdIdx.get              := vdIdxInField
+  writebackOut.uop.vpu.vl             := instMicroOp.vl
+  writebackOut.uop.vpu.vstart         := instMicroOp.vstart
+  writebackOut.uop.vpu.vmask          := maskUsed
+  writebackOut.uop.vpu.vuopIdx        := uopq(deqPtr.value).uop.vpu.vuopIdx
+  writebackOut.debug                  := DontCare
+  writebackOut.vdIdxInField.get       := vdIdxInField
+  writebackOut.uop.robIdx             := instMicroOp.uop.robIdx
+  writebackOut.uop.fuOpType           := instMicroOp.uop.fuOpType
+
+  io.uopwriteback.valid               := RegNext(writebackValid)
+  io.uopwriteback.bits                := RegEnable(writebackOut, writebackValid)
+
+  dontTouch(writebackValid)
 
   //to RS
-  io.feedback.valid                   := state === s_finish && !isEmpty(enqPtr, deqPtr)
-  io.feedback.bits.hit                := true.B
-  io.feedback.bits.robIdx             := instMicroOp.uop.robIdx
-  io.feedback.bits.sourceType         := DontCare
-  io.feedback.bits.flushState         := DontCare
-  io.feedback.bits.dataInvalidSqIdx   := DontCare
-  io.feedback.bits.sqIdx              := uopq(deqPtr.value).uop.sqIdx
-  io.feedback.bits.lqIdx              := uopq(deqPtr.value).uop.lqIdx
+  val feedbackOut                      = WireInit(0.U.asTypeOf(io.feedback.bits))
+  val feedbackValid                    = state === s_finish && !isEmpty(enqPtr, deqPtr)
+  feedbackOut.hit                     := true.B
+  feedbackOut.robIdx                  := instMicroOp.uop.robIdx
+  feedbackOut.sourceType              := DontCare
+  feedbackOut.flushState              := DontCare
+  feedbackOut.dataInvalidSqIdx        := DontCare
+  feedbackOut.sqIdx                   := uopq(deqPtr.value).uop.sqIdx
+  feedbackOut.lqIdx                   := uopq(deqPtr.value).uop.lqIdx
+
+  io.feedback.valid                   := RegNext(feedbackValid)
+  io.feedback.bits                    := RegEnable(feedbackOut, feedbackValid)
+
+  dontTouch(feedbackValid)
 
   // exception
   io.exceptionInfo                    := DontCare
