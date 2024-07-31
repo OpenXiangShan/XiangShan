@@ -90,6 +90,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val release = Flipped(Valid(new Release))
    // val refill = Flipped(Valid(new Refill))
     val tl_d_channel  = Input(new DcacheToLduForwardIO)
+    val maControl     = Flipped(new StoreMaBufToSqControlIO)
     val uncacheOutstanding = Input(Bool())
     val uncache = new UncacheWordIO
     val mmioStout = DecoupledIO(new MemExuOutput) // writeback uncached store
@@ -176,6 +177,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   storeQueue.io.sqFull      <> io.sqFull
   storeQueue.io.forward     <> io.forward // overlap forwardMask & forwardData, DO NOT CHANGE SEQUENCE
   storeQueue.io.force_write <> io.force_write
+  storeQueue.io.maControl   <> io.maControl
 
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
 

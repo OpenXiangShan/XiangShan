@@ -347,6 +347,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   // misalign Buffer
   val loadMisalignBuffer = Module(new LoadMisalignBuffer)
+  val storeMisalignBuffer = Module(new StoreMisalignBuffer)
 
   val l1_pf_req = Wire(Decoupled(new L1PrefetchReq()))
   dcache.io.sms_agt_evict_req.ready := false.B
@@ -1072,6 +1073,19 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   lsq.io.flushFrmMaBuf                          := loadMisalignBuffer.io.flushLdExpBuff
 
+  storeMisalignBuffer.io.redirect               <> redirect
+  storeMisalignBuffer.io.rob.lcommit            := io.ooo_to_mem.lsqio.lcommit
+  storeMisalignBuffer.io.rob.scommit            := io.ooo_to_mem.lsqio.scommit
+  storeMisalignBuffer.io.rob.pendingUncacheld   := io.ooo_to_mem.lsqio.pendingUncacheld
+  storeMisalignBuffer.io.rob.pendingld          := io.ooo_to_mem.lsqio.pendingld
+  storeMisalignBuffer.io.rob.pendingst          := io.ooo_to_mem.lsqio.pendingst
+  storeMisalignBuffer.io.rob.pendingVst         := io.ooo_to_mem.lsqio.pendingVst
+  storeMisalignBuffer.io.rob.commit             := io.ooo_to_mem.lsqio.commit
+  storeMisalignBuffer.io.rob.pendingPtr         := io.ooo_to_mem.lsqio.pendingPtr
+  storeMisalignBuffer.io.rob.pendingPtrNext     := io.ooo_to_mem.lsqio.pendingPtrNext
+
+  lsq.io.maControl                              <> storeMisalignBuffer.io.sqControl
+
   // Prefetcher
   val StreamDTLBPortIndex = TlbStartVec(dtlb_ld_idx) + LduCnt + HyuCnt
   val PrefetcherDTLBPortIndex = TlbStartVec(dtlb_pf_idx)
@@ -1130,6 +1144,17 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     // Lsq to sta unit
     lsq.io.sta.storeMaskIn(i) <> stu.io.st_mask_out
+
+    // connect misalignBuffer
+    storeMisalignBuffer.io.req(i) <> stu.io.misalign_buf
+
+    if (i == 0) {
+      stu.io.misalign_stin  <> storeMisalignBuffer.io.splitStoreReq
+      stu.io.misalign_stout <> storeMisalignBuffer.io.splitStoreResp
+    } else {
+      stu.io.misalign_stin.valid := false.B
+      stu.io.misalign_stin.bits := DontCare
+    }
 
     // Lsq to std unit's rs
     if (i < VstuCnt){
@@ -1211,6 +1236,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stOut(0).valid := true.B
     stOut(0).bits  := lsq.io.vecmmioStout.bits
     lsq.io.vecmmioStout.ready := true.B
+  }
+  // miss align buffer will overwrite stOut(0)
+  storeMisalignBuffer.io.writeBack.ready := true.B
+  when (storeMisalignBuffer.io.writeBack.valid) {
+    stOut(0).valid := true.B
+    stOut(0).bits  := storeMisalignBuffer.io.writeBack.bits
   }
 
   when (atomicsUnit.io.out.valid) {

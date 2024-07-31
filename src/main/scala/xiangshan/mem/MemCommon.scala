@@ -279,6 +279,10 @@ class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
   }
 }
 
+class SqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
+  val need_rep = Bool()
+}
+
 class LoadForwardQueryIO(implicit p: Parameters) extends XSBundle {
   val vaddr = Output(UInt(VAddrBits.W))
   val paddr = Output(UInt(PAddrBits.W))
@@ -367,6 +371,30 @@ class StoreNukeQueryIO(implicit p: Parameters) extends XSBundle {
 
   // matchLine: if store is vector 128-bits, load unit need to compare 128-bits vaddr.
   val matchLine = Bool()
+}
+
+class StoreMaBufToSqControlIO(implicit p: Parameters) extends XSBundle {
+  // from storeMisalignBuffer to storeQueue, control it's sbuffer write
+  val control = Output(new XSBundle {
+    // control sq to write-into sb
+    val writeSb = Bool()
+    val wdata = UInt(VLEN.W)
+    val wmask = UInt((VLEN / 8).W)
+    val paddr = UInt(PAddrBits.W)
+    val vaddr = UInt(VAddrBits.W)
+    val last  = Bool()
+    val hasException = Bool()
+    // remove this entry in sq
+    val removeSq = Bool()
+  })
+  // from storeQueue to storeMisalignBuffer, provide detail info of this store
+  val storeInfo = Input(new XSBundle {
+    val data = UInt(VLEN.W)
+    // is the data of the unaligned store ready at sq?
+    val dataReady = Bool()
+    // complete a data transfer from sq to sb
+    val completeSbTrans = Bool()
+  })
 }
 
 // Store byte valid mask write bundle
