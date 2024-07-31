@@ -309,15 +309,19 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     lsqport.bits := ToLsqConnect(selEntry) // when uopwriteback, free MBuffer entry, write to lsq
     lsqport.valid:= selFire && selAllocated && !needRSReplay(entryIdx)
     //to RS
-    io.feedback(i).valid                 := selFire && selAllocated
-    io.feedback(i).bits.hit              := !needRSReplay(entryIdx)
-    io.feedback(i).bits.robIdx           := selEntry.uop.robIdx
-    io.feedback(i).bits.sourceType       := selEntry.sourceType
-    io.feedback(i).bits.flushState       := selEntry.flushState
-    io.feedback(i).bits.dataInvalidSqIdx := DontCare
-    io.feedback(i).bits.sqIdx            := selEntry.uop.sqIdx
-    io.feedback(i).bits.lqIdx            := selEntry.uop.lqIdx
-    // pipeline connect
+    val feedbackOut                       = WireInit(0.U.asTypeOf(io.feedback(i).bits)).suggestName(s"feedbackOut_${i}")
+    val feedbackValid                     = selFire && selAllocated
+    feedbackOut.hit                      := !needRSReplay(entryIdx)
+    feedbackOut.robIdx                   := selEntry.uop.robIdx
+    feedbackOut.sourceType               := selEntry.sourceType
+    feedbackOut.flushState               := selEntry.flushState
+    feedbackOut.dataInvalidSqIdx         := DontCare
+    feedbackOut.sqIdx                    := selEntry.uop.sqIdx
+    feedbackOut.lqIdx                    := selEntry.uop.lqIdx
+
+    io.feedback(i).valid                 := RegNext(feedbackValid)
+    io.feedback(i).bits                  := RegEnable(feedbackOut, feedbackValid)
+
     NewPipelineConnect(
       port, writeBackOut(i), writeBackOut(i).fire,
       Mux(port.fire,
