@@ -552,7 +552,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val toBusyTableDeqResp = Wire(Vec(params.numDeq, ValidIO(new IssueQueueDeqRespBundle)))
 
   toBusyTableDeqResp.zipWithIndex.foreach { case (deqResp, i) =>
-    deqResp.valid := finalDeqSelValidVec(i)
+    deqResp.valid := deqBeforeDly(i).valid
     deqResp.bits.resp   := RespType.success
     deqResp.bits.robIdx := DontCare
     deqResp.bits.sqIdx.foreach(_ := DontCare)
