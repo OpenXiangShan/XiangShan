@@ -30,6 +30,7 @@ import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tilelink._
 import coupledL2.tl2chi.PortIO
 import freechips.rocketchip.tile.MaxHartIdBits
+import freechips.rocketchip.util.{AsyncQueue, AsyncQueueParams}
 
 class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
 {
@@ -65,10 +66,10 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
   val debugIntNode = IntSourceNode(IntSourcePortSimple(1, 1, 1))
   val plicIntNode = IntSourceNode(IntSourcePortSimple(1, 2, 1))
   val beuIntNode = IntSinkNode(IntSinkPortSimple(1, 1))
-  core_with_l2.clint_int_node := IntBuffer() := clintIntNode
-  core_with_l2.debug_int_node := IntBuffer() := debugIntNode
-  core_with_l2.plic_int_node :*= IntBuffer() :*= plicIntNode
-  beuIntNode := IntBuffer() := core_with_l2.beu_int_source
+  core_with_l2.clint_int_node := IntBuffer(2) := clintIntNode
+  core_with_l2.debug_int_node := IntBuffer(2) := debugIntNode
+  core_with_l2.plic_int_node :*= IntBuffer(2) :*= plicIntNode
+  beuIntNode := IntBuffer(2) := core_with_l2.beu_int_source
   val clint = InModuleBody(clintIntNode.makeIOs())
   val debug = InModuleBody(debugIntNode.makeIOs())
   val plic = InModuleBody(plicIntNode.makeIOs())
@@ -130,7 +131,17 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     core_with_l2.module.io.chi.get <> io.chi
     io.riscv_halt := core_with_l2.module.io.cpu_halt
     core_with_l2.module.io.reset_vector := io.riscv_rst_vec
-    core_with_l2.module.io.clintTime := io.clintTime
+
+    val clintTimeAsyncQueue = Module(new AsyncQueue(UInt(64.W), AsyncQueueParams(1)))
+    clintTimeAsyncQueue.io.enq_clock := bus_clock
+    clintTimeAsyncQueue.io.enq_reset := bus_reset_sync.asBool
+    clintTimeAsyncQueue.io.deq_clock := clock
+    clintTimeAsyncQueue.io.deq_reset := reset_sync.asBool
+    clintTimeAsyncQueue.io.enq.valid := io.clintTime.valid
+    clintTimeAsyncQueue.io.enq.bits := io.clintTime.bits
+    clintTimeAsyncQueue.io.deq.ready := true.B
+    core_with_l2.module.io.clintTime.valid := clintTimeAsyncQueue.io.deq.valid
+    core_with_l2.module.io.clintTime.bits := clintTimeAsyncQueue.io.deq.bits
 
     core_with_l2.module.io.msiInfo.valid := wrapper.u_imsic_bus_top.module.o_msi_info_vld
     core_with_l2.module.io.msiInfo.bits.info := wrapper.u_imsic_bus_top.module.o_msi_info
