@@ -1360,9 +1360,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     vsSplit(i).io.toMergeBuffer <> vsMergeBuffer(i).io.fromSplit.head
     NewPipelineConnect(
       vsSplit(i).io.out, storeUnits(i).io.vecstin, storeUnits(i).io.vecstin.fire,
-      Mux(vsSplit(i).io.out.fire,
-          vsSplit(i).io.out.bits.uop.robIdx.needFlush(io.redirect),
-          storeUnits(i).io.vecstin.bits.uop.robIdx.needFlush(io.redirect)),
+      vsSplit(i).io.out.bits.uop.robIdx.needFlush(io.redirect),
       Option("VsSplitConnectStu")
     )
     vsSplit(i).io.vstd.get := DontCare // Todo: Discuss how to pass vector store data
@@ -1376,9 +1374,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     vlSplit(i).io.toMergeBuffer <> vlMergeBuffer.io.fromSplit(i)
     NewPipelineConnect(
       vlSplit(i).io.out, loadUnits(i).io.vecldin, loadUnits(i).io.vecldin.fire,
-      Mux(vlSplit(i).io.out.fire,
-          vlSplit(i).io.out.bits.uop.robIdx.needFlush(io.redirect),
-          loadUnits(i).io.vecldin.bits.uop.robIdx.needFlush(io.redirect)),
+      vlSplit(i).io.out.bits.uop.robIdx.needFlush(io.redirect),
       Option("VlSplitConnectLdu")
     )
 
