@@ -42,16 +42,31 @@ class VIO(object):
 class VModule(object):
     module_re = re.compile(r'^\s*module\s*(\w+)\s*(#\(?|)\s*(\(.*|)\s*$')
     io_re = re.compile(r'^\s*(input|output)\s*(\[\s*\d+\s*:\s*\d+\s*\]|)\s*(\w+),?\s*$')
-    submodule_re = re.compile(r'^\s*(\w+)\s*(#\(.*\)|)\s*(\w+)\s*\(\s*(|//.*)\s*$')
+    submodule_has_instance_re = re.compile(r'^\s*(\w+)\s*(#\(.*\)|)\s*(\w+)\s*\(\s*(|//.*)\s*$')
+    submodule_first_line_re = re.compile(r'^\s*(\w+)\s*#\(\s*(|\..*,\s*)(|//.*)$')  # '^\s*(\w+)\s*#\(\s*(\.\s*\w+\s*\(\w+\)\s*,\s*)*(|//.*)$'
+    submodule_last_line_re = re.compile(r'^.*\);\s*(|//.*)$')
+    submodule_in_one_line_re = re.compile(r'\s*(\w+)\s*(#\(.*\))\s*(\w+)\s*(\(.*\))\s*(|//.*)\;\s*(|//.*)\s*$')
     difftest_module_re = re.compile(r'^  \w*Difftest\w+\s+\w+ \( //.*$')
 
     def __init__(self, name):
         self.name = name
         self.lines = []
+        self.submodule_lines = []
         self.io = []
         self.submodule = dict()
         self.instance = set()
         self.in_difftest = False
+        self.in_submodule = False
+
+    def parentheses_balanced(self, line):
+        left_count = 0
+        right_count = 0
+        for char in line:
+            if char == '(':
+                left_count += 1
+            elif char == ')':
+                right_count += 1
+        return left_count == right_count
 
     def add_line(self, line):
         debug_dontCare = False
@@ -89,12 +104,31 @@ class VModule(object):
             if io_match:
                 this_io = VIO(tuple(map(lambda i: io_match.group(i), range(1, 4))))
                 self.io.append(this_io)
-            submodule_match = self.submodule_re.match(line)
-            if submodule_match:
-                this_submodule = submodule_match.group(1)
+            submodule_has_instance_match = self.submodule_has_instance_re.match(line)
+            if submodule_has_instance_match:
+                this_submodule = submodule_has_instance_match.group(1)
                 if this_submodule != "module":
                     self.add_submodule(this_submodule)
-                    self.add_instance(this_submodule, submodule_match.group(3))
+                    self.add_instance(this_submodule, submodule_has_instance_match.group(3))
+                return
+
+            # submodule and it's instance not in the same line
+            submodule_first_line_match = self.submodule_first_line_re.match(line)
+            if submodule_first_line_match:
+                if not self.parentheses_balanced(line):
+                    self.in_submodule = True
+            if self.in_submodule:
+                self.submodule_lines.append(line)
+                if self.submodule_last_line_re.match(line):
+                    submodule_in_one_line = ''.join(line.rstrip('\n') for line in self.submodule_lines)
+                    submodule_in_one_line_match = self.submodule_in_one_line_re.match(submodule_in_one_line)
+                    if submodule_in_one_line_match:
+                        this_submodule = submodule_in_one_line_match.group(1)
+                        if this_submodule != "module":
+                            self.add_submodule(this_submodule)
+                            self.add_instance(this_submodule, submodule_in_one_line_match.group(3))
+                    self.submodule_lines = []
+                    self.in_submodule = False
 
     def add_lines(self, lines):
         for line in lines:
