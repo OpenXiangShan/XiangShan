@@ -1161,11 +1161,17 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
 
   // mmio store writeback will use store writeback port 0
-  lsq.io.mmioStout.ready := false.B
-  when (lsq.io.mmioStout.valid && !storeUnits(0).io.stout.valid) {
+  val mmioStout = WireInit(0.U.asTypeOf(lsq.io.mmioStout))
+  NewPipelineConnect(
+    lsq.io.mmioStout, mmioStout, mmioStout.fire,
+    false.B,
+    Option("mmioStOutConnect")
+  )
+  mmioStout.ready := false.B
+  when (mmioStout.valid && !storeUnits(0).io.stout.valid) {
     stOut(0).valid := true.B
-    stOut(0).bits  := lsq.io.mmioStout.bits
-    lsq.io.mmioStout.ready := true.B
+    stOut(0).bits  := mmioStout.bits
+    mmioStout.ready := true.B
   }
   // vec mmio writeback
   lsq.io.vecmmioStout.ready := false.B
