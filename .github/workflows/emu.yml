@@ -18,7 +18,7 @@ jobs:
     outputs:
       core: ${{ steps.filter.outputs.core }}
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
     - uses: dorny/paths-filter@v3
       id: filter
       with:
@@ -327,3 +327,36 @@ jobs:
       # - name: System Test - Linux
       #   run: |
       #     ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs linux-hello-opensbi --timeout 7200" 2> /dev/zero
+  check-submodules:
+    runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' }}
+    continue-on-error: false
+    timeout-minutes: 5
+    name: Check Submodules
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+          fetch-depth: '0'
+      - name: check rocket-chip
+        run: cd rocket-chip && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
+      - name: check difftest
+        run: cd difftest && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
+      - name: check ready-to-run
+        run: cd ready-to-run && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
+      - name: check huancun
+        run: cd huancun && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
+      - name: check fudian
+        run: cd fudian && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/pipeline
+      - name: check utility
+        run: cd utility && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
+      - name: check yunsuan
+        run: cd yunsuan && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
+      - name: check coupledL2
+        run: cd coupledL2 && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
+      - name: check openLLC
+        run: cd openLLC && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
+      - name: check src/main/resources/aia
+        run: cd src/main/resources/aia && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/main
+
