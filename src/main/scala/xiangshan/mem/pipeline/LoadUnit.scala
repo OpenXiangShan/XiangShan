@@ -1443,7 +1443,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   io.ldCancel.ld2Cancel := s3_valid && (
     io.lsq.ldin.bits.rep_info.need_rep ||                       // exe fail or
-    s3_in.mmio                                                  // is mmio
+    s3_in.mmio                         ||                       // is mmio
+    s3_mis_align                                                // misalign
   ) && !s3_isvec && !s3_frm_mabuf
 
   val s3_ld_wb_meta = Mux(s3_valid, s3_out.bits, s3_mmio.bits)
