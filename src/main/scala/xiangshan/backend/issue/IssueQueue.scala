@@ -481,7 +481,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     deqSelOHVec(1) := subDeqSelOHVec.get(0) & canIssueMergeAllBusy(1)
 
     finalDeqSelValidVec.zip(finalDeqSelOHVec).zip(deqSelValidVec).zip(deqSelOHVec).zipWithIndex.foreach { case ((((selValid, selOH), deqValid), deqOH), i) =>
-      selValid := deqValid && deqOH.orR && deqBeforeDly(i).ready
+      selValid := deqValid && deqOH.orR
       selOH := deqOH
     }
   }
@@ -544,7 +544,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
     }
 
     finalDeqSelValidVec.zip(finalDeqSelOHVec).zip(deqSelValidVec).zip(deqSelOHVec).zipWithIndex.foreach { case ((((selValid, selOH), deqValid), deqOH), i) =>
-      selValid := deqValid && deqBeforeDly(i).ready
+      selValid := deqValid
       selOH := deqOH
     }
   }
@@ -552,7 +552,7 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   val toBusyTableDeqResp = Wire(Vec(params.numDeq, ValidIO(new IssueQueueDeqRespBundle)))
 
   toBusyTableDeqResp.zipWithIndex.foreach { case (deqResp, i) =>
-    deqResp.valid := finalDeqSelValidVec(i)
+    deqResp.valid := deqBeforeDly(i).valid
     deqResp.bits.resp   := RespType.success
     deqResp.bits.robIdx := DontCare
     deqResp.bits.sqIdx.foreach(_ := DontCare)
@@ -764,14 +764,13 @@ class IssueQueueImp(override val wrapper: IssueQueue)(implicit p: Parameters, va
   }
 
   io.deqDelay.zip(deqBeforeDly).foreach { case (deqDly, deq) =>
-    NewPipelineConnect(
-      deq, deqDly, true.B,
-      false.B,
-      Option("Scheduler2DataPathPipe")
-    )
+    deqDly.valid := RegNext(deq.valid)
+    deqDly.bits := RegNext(deq.bits)
+    deq.ready := true.B
   }
   if(backendParams.debugEn) {
     dontTouch(io.deqDelay)
+    dontTouch(deqBeforeDly)
   }
   io.wakeupToIQ.zipWithIndex.foreach { case (wakeup, i) =>
     if (wakeUpQueues(i).nonEmpty) {
