@@ -921,10 +921,10 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   val reject = (0 until cfg.nMSHRPorts).map(i => ParallelORR(Cat(secondary_reject_vec(i) ++ reject_with_pipe_req(i))))
   val match_with_port_req = (0 until cfg.nMSHRPorts).map {i => 
     (0 until cfg.nMSHRPorts).map(j => 
-        if (j < i) io.req(j).valid && !reject(j) && io.req(j).bits.addr === io.req(i).bits.addr
+        if (j < i) io.req(j).valid && !reject(j) && !io.req(j).bits.cancel && io.req(j).bits.addr === io.req(i).bits.addr
         else false.B
   )}
-  val merge_with_port_req = (0 until cfg.nMSHRPorts).map(i => Cat(match_with_port_req(i)).orR && !reject(i)) //Remove laste two cond
+  val merge_with_port_req = (0 until cfg.nMSHRPorts).map(i => Cat(match_with_port_req(i)).orR && !reject(i)) //Remove last two cond
   dontTouch(merge_with_port_req(0))
   dontTouch(merge_with_port_req(1))
   dontTouch(merge_with_port_req(2))
