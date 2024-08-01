@@ -352,6 +352,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   dontTouch(s0_int_iss_select)
   dontTouch(s0_l2l_fwd_select)
 
+  val s0_tlb_no_query        = s0_ld_fast_rep_select || s0_hw_prf_select || !s0_sel_src.prf_i
   s0_valid := (s0_super_ld_rep_valid ||
                s0_ld_fast_rep_valid ||
                s0_ld_rep_valid ||
@@ -375,7 +376,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.canAcceptHighConfPrefetch := s0_high_conf_prf_ready && io.dcache.req.ready
 
   // query DTLB
-  io.tlb.req.valid                   := s0_valid && !s0_hw_prf_select && !s0_sel_src.prf_i  // if is hardware prefetch, don't send valid to tlb, but need no_translate
+  io.tlb.req.valid                   := s0_valid && !s0_tlb_no_query // if is hardware prefetch or fast replay, don't send valid to tlb, but need no_translate
   io.tlb.req.bits.cmd                := Mux(s0_sel_src.prf,
                                          Mux(s0_sel_src.prf_wr, TlbCmd.write, TlbCmd.read),
                                          TlbCmd.read
@@ -389,7 +390,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.tlb.req.bits.memidx.is_st       := false.B
   io.tlb.req.bits.memidx.idx         := s0_sel_src.uop.lqIdx.value
   io.tlb.req.bits.debug.robIdx       := s0_sel_src.uop.robIdx
-  io.tlb.req.bits.no_translate       := s0_hw_prf_select  // hw b.reqetch addr does not need to be translated, need this signal for pmp check
+  io.tlb.req.bits.no_translate       := s0_tlb_no_query  // hardware prefetch and fast replay does not need to be translated, need this signal for pmp check
   io.tlb.req.bits.debug.pc           := s0_sel_src.uop.pc
   io.tlb.req.bits.debug.isFirstIssue := s0_sel_src.isFirstIssue
 
@@ -646,24 +647,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   )
   s0_sel_src := ParallelPriorityMux(s0_src_selector, s0_src_format)
 
-  val s0_addr_selector = Seq(
-    s0_super_ld_rep_valid,
-    s0_ld_fast_rep_valid,
-    s0_ld_rep_valid,
-    s0_vec_iss_valid,
-    s0_int_iss_valid,
-    (if (EnableLoadToLoadForward) s0_l2l_fwd_valid else false.B),
-  )
-  val s0_addr_format = Seq(
-    io.replay.bits.vaddr,
-    io.fast_rep_in.bits.vaddr,
-    io.replay.bits.vaddr,
-    io.vecldin.bits.vaddr,
-    io.ldin.bits.src(0) + SignExt(io.ldin.bits.uop.imm(11, 0), VAddrBits),
-    (if (EnableLoadToLoadForward) Cat(io.l2l_fwd_in.data(XLEN-1, 6), s0_ptr_chasing_vaddr(5,0)) else 0.U(VAddrBits.W)),
-  )
-  s0_tlb_vaddr := ParallelPriorityMux(s0_addr_selector, s0_addr_format)
-  s0_dcache_vaddr := Mux(s0_hw_prf_select, io.prefetch_req.bits.getVaddr(), s0_tlb_vaddr)
+  // fast replay and hardware prefetch don't need to query tlb
+  val int_issue_vaddr = io.ldin.bits.src(0) + SignExt(io.ldin.bits.uop.imm(11, 0), VAddrBits)
+  val int_vec_vaddr = Mux(s0_vec_iss_valid, io.vecldin.bits.vaddr, int_issue_vaddr)
+  s0_tlb_vaddr := Mux((s0_super_ld_rep_valid || s0_ld_rep_valid), io.replay.bits.vaddr, int_vec_vaddr)
+  s0_dcache_vaddr := Mux(s0_ld_fast_rep_select, io.fast_rep_in.bits.vaddr, Mux(s0_hw_prf_select, io.prefetch_req.bits.getVaddr(), s0_tlb_vaddr))
 
   // address align check
   val s0_addr_aligned = LookupTree(Mux(s0_sel_src.isvec, s0_sel_src.alignedType(1,0), s0_sel_src.uop.fuOpType(1, 0)), List(
@@ -691,7 +679,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s0_out.isvec           := s0_sel_src.isvec
   s0_out.is128bit        := s0_sel_src.is128bit
   s0_out.uop_unit_stride_fof := s0_sel_src.uop_unit_stride_fof
-  s0_out.paddr         := io.prefetch_req.bits.paddr // only for prefetch
+  s0_out.paddr         := Mux(s0_ld_fast_rep_valid, io.fast_rep_in.bits.paddr, io.prefetch_req.bits.paddr) // only for prefetch and fast_rep
+  s0_out.tlbNoQuery    := s0_tlb_no_query
   // s0_out.rob_idx_valid   := s0_rob_idx_valid
   // s0_out.inner_idx       := s0_inner_idx
   // s0_out.rob_idx         := s0_rob_idx
@@ -809,9 +798,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s1_vaddr_hi         := s1_in.vaddr(VAddrBits - 1, 6)
   s1_vaddr_lo         := s1_in.vaddr(5, 0)
   s1_vaddr            := Cat(s1_vaddr_hi, s1_vaddr_lo)
-  s1_paddr_dup_lsu    := Mux(s1_hw_prf, s1_in.paddr, io.tlb.resp.bits.paddr(0))
-  s1_paddr_dup_dcache := Mux(s1_hw_prf, s1_in.paddr, io.tlb.resp.bits.paddr(1))
-  s1_gpaddr_dup_lsu   := Mux(s1_hw_prf, s1_in.paddr, io.tlb.resp.bits.gpaddr(0))
+  s1_paddr_dup_lsu    := Mux(s1_in.tlbNoQuery, s1_in.paddr, io.tlb.resp.bits.paddr(0))
+  s1_paddr_dup_dcache := Mux(s1_in.tlbNoQuery, s1_in.paddr, io.tlb.resp.bits.paddr(1))
+  s1_gpaddr_dup_lsu   := Mux(s1_in.isFastReplay, s1_in.paddr, io.tlb.resp.bits.gpaddr(0))
 
   when (s1_tlb_memidx.is_ld && io.tlb.resp.valid && !s1_tlb_miss && s1_tlb_memidx.idx === s1_in.uop.lqIdx.value) {
     // printf("load idx = %d\n", s1_tlb_memidx.idx)
