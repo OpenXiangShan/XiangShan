@@ -395,10 +395,11 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     */
   val s2_excp_tlb = VecInit((0 until PortNumber).map(i => s2_excp_tlb_af(i) || s2_excp_tlb_pf(i) || s2_excp_tlb_gpf(i)))
   val s2_excp_pmp = VecInit((0 until PortNumber).map(i => s2_excp_pmp_af(i) || s2_excp_pmp_mmio(i)))
-  val s2_miss = VecInit(Seq(
-    !s2_hits(0) && !s2_excp_tlb(0) && !s2_excp_pmp(0),
-    !s2_hits(1) && !s2_excp_tlb(0) && !s2_excp_pmp(0) && !s2_excp_tlb(1) && !s2_excp_pmp(1) && s2_doubleline
-  ))
+  // miss = this port not hit && need this port && no exception found before and in this port
+  val s2_miss = VecInit((0 until PortNumber).map { i =>
+    !s2_hits(i) && (if (i==0) true.B else s2_doubleline) &&
+      !s2_excp_tlb.take(i+1).reduce(_||_) && !s2_excp_pmp.take(i+1).reduce(_||_)
+  })
 
   val toMSHRArbiter = Module(new Arbiter(new ICacheMissReq, PortNumber))
 
