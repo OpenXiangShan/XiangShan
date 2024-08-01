@@ -601,6 +601,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val deqFlushBlockCounter = Reg(UInt(3.W))
   val deqFlushBlock = deqFlushBlockCounter(0)
   val deqHasFlushed = Reg(Bool())
+  val deqHasCommitted = io.commits.isCommit && io.commits.commitValid(0)
   val deqHitRedirectReg = RegNext(io.redirect.valid && io.redirect.bits.robIdx === deqPtr)
   when(deqNeedFlush && deqHitRedirectReg){
     deqFlushBlockCounter := "b111".U
@@ -609,7 +610,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
   when(deqNeedFlush && io.flushOut.valid){
     deqHasFlushed := true.B
-  }.elsewhen(!deqNeedFlush){
+  }.elsewhen(deqHasCommitted){
     deqHasFlushed := false.B
   }
   val blockCommit = misPredBlock || lastCycleFlush || hasWFI || io.redirect.valid || (deqNeedFlush && !deqHasFlushed && !deqHasFlushPipe) || deqFlushBlock
