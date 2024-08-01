@@ -315,6 +315,9 @@ jobs:
       - name: Build SIMV on Remote
         run: |
           ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --vcs-build --no-db --xprop"
+      - name: V Extension Test - rvv-test
+        run: |
+          ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --wave-dump `echo $WAVE_HOME` --ci-vcs rvv-test"
       - name: Simple Test - MicroBench
         run: |
           ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --wave-dump `echo $WAVE_HOME` --ci-vcs microbench --am=/nfs/home/share/ci-workloads/nexus-am/"
