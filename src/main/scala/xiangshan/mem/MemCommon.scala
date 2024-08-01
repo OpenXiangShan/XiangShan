@@ -150,6 +150,8 @@ class LsPipelineBundle(implicit p: Parameters) extends XSBundle
   val ldCancel = ValidUndirectioned(UInt(log2Ceil(LoadPipelineWidth).W))
   // loadQueueReplay index.
   val schedIndex = UInt(log2Up(LoadQueueReplaySize).W)
+  // hardware prefetch and fast replay no need to query tlb
+  val tlbNoQuery = Bool()
 }
 
 class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
@@ -178,6 +180,7 @@ class LdPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
     if (latch) hasROBEntry := RegEnable(input.hasROBEntry, enable) else hasROBEntry := input.hasROBEntry
     if (latch) dcacheRequireReplay := RegEnable(input.dcacheRequireReplay, enable) else dcacheRequireReplay := input.dcacheRequireReplay
     if (latch) schedIndex := RegEnable(input.schedIndex, enable) else schedIndex := input.schedIndex
+    if (latch) tlbNoQuery := RegEnable(input.tlbNoQuery, enable) else tlbNoQuery := input.tlbNoQuery
     if (latch) isvec               := RegEnable(input.isvec, enable)               else isvec               := input.isvec
     if (latch) isLastElem          := RegEnable(input.isLastElem, enable)          else isLastElem          := input.isLastElem
     if (latch) is128bit            := RegEnable(input.is128bit, enable)            else is128bit            := input.is128bit
