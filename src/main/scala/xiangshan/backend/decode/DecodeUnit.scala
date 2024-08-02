@@ -982,6 +982,26 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     decodedInst.exceptionVec(illegalInstr) := io.fromCSR.illegalInst.vsIsOff
   }
 
+  // val isSoftPrefetch = decodedInst.isSoftPrefetch
+  val isSoftPrefetch = inst.OPCODE === BitPat("b0010011") && inst.FUNCT3 === BitPat("b110") && inst.RD === 0.U
+  val isPreW = isSoftPrefetch && inst.RS2 === 3.U(5.W)
+  val isPreR = isSoftPrefetch && inst.RS2 === 1.U(5.W)
+  val isPreI = isSoftPrefetch && inst.RS2 === 0.U(5.W)
+
+  when(isSoftPrefetch){
+    decodedInst.selImm := SelImm.IMM_S
+    decodedInst.fuType := FuType.ldu.U
+    decodedInst.canRobCompress := false.B
+    // decodedInst.xWen := false.B
+    when(isPreW){
+      decodedInst.fuOpType := LSUOpType.prefetch_w
+    }.elsewhen(isPreR){
+      decodedInst.fuOpType := LSUOpType.prefetch_r
+    }.elsewhen(isPreI){
+      decodedInst.fuOpType := LSUOpType.prefetch_i
+    }
+  }
+
   io.deq.decodedInst := decodedInst
   io.deq.decodedInst.rfWen := (decodedInst.ldest =/= 0.U) && decodedInst.rfWen
   io.deq.decodedInst.fuType := Mux1H(Seq(
