@@ -19,6 +19,7 @@ package xiangshan.backend.decode
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.rocket.CSRs
 import freechips.rocketchip.rocket.Instructions._
 import freechips.rocketchip.util.uintToBitPat
 import utility._
@@ -27,8 +28,10 @@ import xiangshan.ExceptionNO.{illegalInstr, virtualInstr}
 import xiangshan._
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.Bundles.{DecodedInst, DynInst, StaticInst}
-import xiangshan.backend.decode.isa.bitfield.{InstVType, XSInstBitFields}
+import xiangshan.backend.decode.isa.PseudoInstructions
+import xiangshan.backend.decode.isa.bitfield.{InstVType, OPCODE5Bit, XSInstBitFields}
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
+import xiangshan.backend.fu.wrapper.CSRToDecode
 
 /**
  * Abstract trait giving defaults and other relevant values to different Decode constants/
@@ -202,6 +205,7 @@ object XDecode extends DecodeConstants {
     BLTU    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.brh, BRUOpType.bltu  , SelImm.IMM_SB          ),
 
     // System, the immediate12 holds the CSR register.
+
     CSRRW   -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrt , SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
     CSRRS   -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.set , SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
     CSRRC   -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.csr, CSROpType.clr , SelImm.IMM_I, xWen = T, noSpec = T, blockBack = T),
@@ -696,6 +700,7 @@ class DecodeUnitIO(implicit p: Parameters) extends XSBundle {
 //  val vconfig = Input(UInt(XLEN.W))
   val deq = new DecodeUnitDeqIO
   val csrCtrl = Input(new CustomCSRCtrlIO)
+  val fromCSR = Input(new CSRToDecode)
 }
 
 /**
@@ -732,6 +737,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   val fpDecoder = Module(new FPDecoder)
   fpDecoder.io.instr := ctrl_flow.instr
   decodedInst.fpu := fpDecoder.io.fpCtrl
+  decodedInst.fpu.wflags := fpDecoder.io.fpCtrl.wflags || decodedInst.wfflags
 
   decodedInst.connectStaticInst(io.enq.ctrlFlow)
 
@@ -773,33 +779,33 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   vecException.io.decodedInst := decodedInst
   vecException.io.vtype := decodedInst.vpu.vtype
   vecException.io.vstart := decodedInst.vpu.vstart
-  decodedInst.exceptionVec(illegalInstr) := decodedInst.selImm === SelImm.INVALID_INSTR || vecException.io.illegalInst
 
-  when (!io.csrCtrl.svinval_enable) {
-    val base_ii = decodedInst.selImm === SelImm.INVALID_INSTR || vecException.io.illegalInst
-    val sinval = BitPat("b0001011_?????_?????_000_00000_1110011") === ctrl_flow.instr
-    val w_inval = BitPat("b0001100_00000_00000_000_00000_1110011") === ctrl_flow.instr
-    val inval_ir = BitPat("b0001100_00001_00000_000_00000_1110011") === ctrl_flow.instr
-    val hinval_gvma = HINVAL_GVMA === ctrl_flow.instr
-    val hinval_vvma = HINVAL_VVMA === ctrl_flow.instr
-    val svinval_ii = sinval || w_inval || inval_ir || hinval_gvma || hinval_vvma
-    decodedInst.exceptionVec(illegalInstr) := base_ii || svinval_ii
-    decodedInst.flushPipe := false.B
-  }
+  private val exceptionII =
+    decodedInst.selImm === SelImm.INVALID_INSTR ||
+    vecException.io.illegalInst ||
+    io.fromCSR.illegalInst.sfenceVMA  && FuType.FuTypeOrR(decodedInst.fuType, FuType.fence) && decodedInst.fuOpType === FenceOpType.sfence  ||
+    io.fromCSR.illegalInst.sfencePart && FuType.FuTypeOrR(decodedInst.fuType, FuType.fence) && decodedInst.fuOpType === FenceOpType.nofence ||
+    io.fromCSR.illegalInst.hfenceGVMA && FuType.FuTypeOrR(decodedInst.fuType, FuType.fence) && decodedInst.fuOpType === FenceOpType.hfence_g ||
+    io.fromCSR.illegalInst.hfenceVVMA && FuType.FuTypeOrR(decodedInst.fuType, FuType.fence) && decodedInst.fuOpType === FenceOpType.hfence_v ||
+    io.fromCSR.illegalInst.hlsv       && FuType.FuTypeOrR(decodedInst.fuType, FuType.ldu)   && (LSUOpType.isHlv(decodedInst.fuOpType) || LSUOpType.isHlvx(decodedInst.fuOpType)) ||
+    io.fromCSR.illegalInst.hlsv       && FuType.FuTypeOrR(decodedInst.fuType, FuType.stu)   && LSUOpType.isHsv(decodedInst.fuOpType) ||
+    io.fromCSR.illegalInst.fsIsOff    && (FuType.FuTypeOrR(decodedInst.fuType, FuType.fpOP ++ Seq(FuType.f2v)) ||
+                                          (FuType.FuTypeOrR(decodedInst.fuType, FuType.ldu) && (decodedInst.fuOpType === LSUOpType.lw || decodedInst.fuOpType === LSUOpType.ld) ||
+                                           FuType.FuTypeOrR(decodedInst.fuType, FuType.stu) && (decodedInst.fuOpType === LSUOpType.sw || decodedInst.fuOpType === LSUOpType.sd)) && decodedInst.instr(2) ||
+                                           isVecOPF) ||
+    io.fromCSR.illegalInst.vsIsOff    && FuType.FuTypeOrR(decodedInst.fuType, FuType.vecAll) ||
+    io.fromCSR.illegalInst.wfi        && FuType.FuTypeOrR(decodedInst.fuType, FuType.csr)   && CSROpType.isWfi(decodedInst.fuOpType)
 
-  when(io.csrCtrl.virtMode){
-    // Todo: optimize EX_VI decode
-    // vs/vu attempting to exec hyperinst will raise virtual instruction
-    decodedInst.exceptionVec(virtualInstr) := ctrl_flow.instr === HLV_B || ctrl_flow.instr === HLV_BU ||
-      ctrl_flow.instr === HLV_H   || ctrl_flow.instr === HLV_HU ||
-      ctrl_flow.instr === HLVX_HU || ctrl_flow.instr === HLV_W  ||
-      ctrl_flow.instr === HLVX_WU || ctrl_flow.instr === HLV_WU ||
-      ctrl_flow.instr === HLV_D   || ctrl_flow.instr === HSV_B  ||
-      ctrl_flow.instr === HSV_H   || ctrl_flow.instr === HSV_W  ||
-      ctrl_flow.instr === HSV_D   || ctrl_flow.instr === HFENCE_VVMA ||
-      ctrl_flow.instr === HFENCE_GVMA || ctrl_flow.instr === HINVAL_GVMA ||
-      ctrl_flow.instr === HINVAL_VVMA
-  }
+  private val exceptionVI =
+    io.fromCSR.virtualInst.sfenceVMA  && FuType.FuTypeOrR(decodedInst.fuType, FuType.fence) && decodedInst.fuOpType === FenceOpType.sfence ||
+    io.fromCSR.virtualInst.sfencePart && FuType.FuTypeOrR(decodedInst.fuType, FuType.fence) && decodedInst.fuOpType === FenceOpType.nofence ||
+    io.fromCSR.virtualInst.hfence     && FuType.FuTypeOrR(decodedInst.fuType, FuType.fence) && (decodedInst.fuOpType === FenceOpType.hfence_g || decodedInst.fuOpType === FenceOpType.hfence_v) ||
+    io.fromCSR.virtualInst.hlsv       && FuType.FuTypeOrR(decodedInst.fuType, FuType.ldu)   && (LSUOpType.isHlv(decodedInst.fuOpType) || LSUOpType.isHlvx(decodedInst.fuOpType)) ||
+    io.fromCSR.virtualInst.hlsv       && FuType.FuTypeOrR(decodedInst.fuType, FuType.stu)   && LSUOpType.isHsv(decodedInst.fuOpType) ||
+    io.fromCSR.virtualInst.wfi        && FuType.FuTypeOrR(decodedInst.fuType, FuType.csr)   && CSROpType.isWfi(decodedInst.fuOpType)
+
+  decodedInst.exceptionVec(illegalInstr) := exceptionII
+  decodedInst.exceptionVec(virtualInstr) := exceptionVI
 
   decodedInst.imm := LookupTree(decodedInst.selImm, ImmUnion.immSelMap.map(
     x => {
@@ -915,6 +921,11 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     decodedInst.vpu.isWritePartVd := isWritePartVd || isVlm || isVle && emulIsFrac
     decodedInst.vpu.vstart := io.enq.vstart
   }
+  decodedInst.vpu.specVill := io.enq.vtype.illegal
+  decodedInst.vpu.specVma := io.enq.vtype.vma
+  decodedInst.vpu.specVta := io.enq.vtype.vta
+  decodedInst.vpu.specVsew := io.enq.vtype.vsew
+  decodedInst.vpu.specVlmul := io.enq.vtype.vlmul
 
   decodedInst.vlsInstr := isVls
 
@@ -931,18 +942,21 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   uopInfoGen.io.in.preInfo.isVlsr := decodedInst.fuOpType === VlduType.vlr || decodedInst.fuOpType === VstuType.vsr
   uopInfoGen.io.in.preInfo.isVlsm := decodedInst.fuOpType === VlduType.vlm || decodedInst.fuOpType === VstuType.vsm
   io.deq.isComplex := uopInfoGen.io.out.isComplex
-  io.deq.uopInfo.numOfUop := uopInfoGen.io.out.uopInfo.numOfUop
+  // numOfUop should be 1 when vector instruction is illegalInst
+  io.deq.uopInfo.numOfUop := Mux(vecException.io.illegalInst, 1.U, uopInfoGen.io.out.uopInfo.numOfUop)
   io.deq.uopInfo.numOfWB := uopInfoGen.io.out.uopInfo.numOfWB
   io.deq.uopInfo.lmul := uopInfoGen.io.out.uopInfo.lmul
 
+  val isCSR = inst.OPCODE5Bit === OPCODE5Bit.SYSTEM && inst.FUNCT3(1, 0) =/= 0.U
+  val isCSRR = isCSR && inst.FUNCT3 === BitPat("b?1?") && inst.RS1 === 0.U
+  val isCSRW = isCSR && inst.FUNCT3 === BitPat("b?10") && inst.RD  === 0.U
+  dontTouch(isCSRR)
+  dontTouch(isCSRW)
+
   // for csrr vl instruction, convert to vsetvl
-  val Vl = 0xC20.U
-  val Vlenb = 0xC22.U
-  val isCsrInst = FuType.FuTypeOrR(decodedInst.fuType, FuType.csr)
-  //  rs1 is x0 or uimm == 0
-  val isCsrRead = (decodedInst.fuOpType === CSROpType.set || decodedInst.fuOpType === CSROpType.clr) && inst.RS1 === 0.U
-  val isCsrrVl = isCsrInst && isCsrRead && inst.CSRIDX === Vl
-  val isCsrrVlenb = isCsrInst && isCsrRead && inst.CSRIDX === Vlenb
+  val isCsrrVlenb = isCSRR && inst.CSRIDX === CSRs.vlenb.U
+  val isCsrrVl    = isCSRR && inst.CSRIDX === CSRs.vl.U
+
   when (isCsrrVl) {
     // convert to vsetvl instruction
     decodedInst.srcType(0) := SrcType.no
@@ -950,9 +964,10 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     decodedInst.srcType(2) := SrcType.no
     decodedInst.srcType(3) := SrcType.no
     decodedInst.srcType(4) := SrcType.vp
-    decodedInst.lsrc(4) := Vl_IDX.U
-    decodedInst.waitForward := false.B
+    decodedInst.lsrc(4)    := Vl_IDX.U
+    decodedInst.waitForward   := false.B
     decodedInst.blockBackward := false.B
+    decodedInst.exceptionVec(illegalInstr) := io.fromCSR.illegalInst.vsIsOff
   }.elsewhen(isCsrrVlenb){
     // convert to addi instruction
     decodedInst.srcType(0) := SrcType.reg
@@ -964,15 +979,18 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     decodedInst.waitForward := false.B
     decodedInst.blockBackward := false.B
     decodedInst.canRobCompress := true.B
+    decodedInst.exceptionVec(illegalInstr) := io.fromCSR.illegalInst.vsIsOff
   }
 
   io.deq.decodedInst := decodedInst
   io.deq.decodedInst.rfWen := (decodedInst.ldest =/= 0.U) && decodedInst.rfWen
-  // change vlsu to vseglsu when NF =/= 0.U
   io.deq.decodedInst.fuType := Mux1H(Seq(
-    ( isCsrrVl) -> FuType.vsetfwf.U,
-    ( isCsrrVlenb) -> FuType.alu.U,
+    // keep condition
     (!FuType.FuTypeOrR(decodedInst.fuType, FuType.vldu, FuType.vstu) && !isCsrrVl && !isCsrrVlenb) -> decodedInst.fuType,
+    (isCsrrVl) -> FuType.vsetfwf.U,
+    (isCsrrVlenb) -> FuType.alu.U,
+
+    // change vlsu to vseglsu when NF =/= 0.U
     ( FuType.FuTypeOrR(decodedInst.fuType, FuType.vldu, FuType.vstu) && inst.NF === 0.U || (inst.NF =/= 0.U && (inst.MOP === "b00".U && inst.SUMOP === "b01000".U))) -> decodedInst.fuType,
     // MOP === b00 && SUMOP === b01000: unit-stride whole register store
     // MOP =/= b00                    : strided and indexed store
@@ -981,8 +999,17 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     // MOP =/= b00                    : strided and indexed load
     ( FuType.FuTypeOrR(decodedInst.fuType, FuType.vldu)              && inst.NF =/= 0.U && ((inst.MOP === "b00".U && inst.LUMOP =/= "b01000".U) || inst.MOP =/= "b00".U)) -> FuType.vsegldu.U,
   ))
-  io.deq.decodedInst.fuOpType := Mux(isCsrrVlenb, ALUOpType.add, decodedInst.fuOpType)
   io.deq.decodedInst.imm := Mux(isCsrrVlenb, (VLEN / 8).U, decodedInst.imm)
+
+  io.deq.decodedInst.fuOpType := MuxCase(decodedInst.fuOpType, Seq(
+    isCsrrVl    -> VSETOpType.csrrvl,
+    isCsrrVlenb -> ALUOpType.add,
+    isCSRR      -> CSROpType.ro,
+  ))
+
+  io.deq.decodedInst.blockBackward := MuxCase(decodedInst.blockBackward, Seq(
+    isCSRR -> false.B,
+  ))
   //-------------------------------------------------------------
   // Debug Info
 //  XSDebug("in:  instr=%x pc=%x excepVec=%b crossPageIPFFix=%d\n",

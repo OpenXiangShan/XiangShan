@@ -100,8 +100,10 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val resp_gpa_refill = RegInit(false.B)
   val hasGpf = Wire(Vec(Width, Bool()))
 
-  val vmEnable = (0 until Width).map(i => !(isHyperInst(i) || virt_out(i)) && (if (EnbaleTlbDebug) (satp.mode === 8.U)
-    else (satp.mode === 8.U) && (mode(i) < ModeM)))
+  val vmEnable = (0 until Width).map(i => !(isHyperInst(i) || virt_out(i)) && (
+    if (EnbaleTlbDebug) (satp.mode === 8.U)
+    else (satp.mode === 8.U) && (mode(i) < ModeM))
+  )
   val s2xlateEnable = (0 until Width).map(i => (isHyperInst(i) || virt_out(i)) && (vsatp.mode === 8.U || hgatp.mode === 8.U) && (mode(i) < ModeM))
   val portTranslateEnable = (0 until Width).map(i => (vmEnable(i) || s2xlateEnable(i)) && RegEnable(!req(i).bits.no_translate, req(i).valid))
 
@@ -129,7 +131,11 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   // check pmp use paddr (for timing optization, use pmp_addr here)
   // check permisson
   (0 until Width).foreach{i =>
-    pmp_check(pmp_addr(i), req_out(i).size, req_out(i).cmd, i)
+    when (RegNext(req(i).bits.no_translate)) {
+      pmp_check(req(i).bits.pmp_addr, req_out(i).size, req_out(i).cmd, i)
+    } .otherwise {
+      pmp_check(pmp_addr(i), req_out(i).size, req_out(i).cmd, i)
+    }
     for (d <- 0 until nRespDups) {
       perm_check(perm(i)(d), req_out(i).cmd, i, d, g_perm(i)(d), req_out(i).hlvx, req_out_s2xlate(i))
     }

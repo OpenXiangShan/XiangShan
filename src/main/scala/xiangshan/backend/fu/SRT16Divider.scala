@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -176,7 +177,7 @@ class SRT16DividerDataModule(len: Int) extends Module {
 
   val rSumInitTrunc = Cat(0.U(1.W), rSumInit(itn_len - 4, itn_len - 4 - 4 + 1)) // 0.00___
   val mInitPos1 = MuxLookup(dNormReg(len-2, len-4), "b00100".U(5.W))(
-    Array(
+    Seq(
       0.U -> "b00100".U(5.W),
       1.U -> "b00100".U(5.W),
       2.U -> "b00100".U(5.W),
@@ -188,7 +189,7 @@ class SRT16DividerDataModule(len: Int) extends Module {
     )
   )
   val mInitPos2 = MuxLookup(dNormReg(len-2, len-4), "b01100".U(5.W))(
-    Array(
+    Seq(
       0.U -> "b01100".U(5.W),
       1.U -> "b01110".U(5.W),
       2.U -> "b01111".U(5.W),
@@ -398,7 +399,7 @@ object mLookUpTable2 {
   // Usage :
   // result := decoder(QMCMinimizer, index, mLookupTable.xxx)
   val minus_m = Seq(
-    Array( // -m[-1]
+    Seq( // -m[-1]
       0.U -> "b00_11010".U(7.W),
       1.U -> "b00_11110".U(7.W),
       2.U -> "b01_00000".U(7.W),
@@ -408,7 +409,7 @@ object mLookUpTable2 {
       6.U -> "b01_01100".U(7.W),
       7.U -> "b01_10000".U(7.W)
     ),
-    Array( // -m[0]
+    Seq( // -m[0]
       0.U -> "b000_0100".U(7.W),
       1.U -> "b000_0110".U(7.W),
       2.U -> "b000_0110".U(7.W),
@@ -418,7 +419,7 @@ object mLookUpTable2 {
       6.U -> "b000_1000".U(7.W),
       7.U -> "b000_1000".U(7.W)
     ),
-    Array( //-m[1]
+    Seq( //-m[1]
       0.U -> "b111_1101".U(7.W),
       1.U -> "b111_1100".U(7.W),
       2.U -> "b111_1100".U(7.W),
@@ -428,7 +429,7 @@ object mLookUpTable2 {
       6.U -> "b111_1010".U(7.W),
       7.U -> "b111_1010".U(7.W)
     ),
-    Array( //-m[2]
+    Seq( //-m[2]
       0.U -> "b11_01000".U(7.W),
       1.U -> "b11_00100".U(7.W),
       2.U -> "b11_00010".U(7.W),

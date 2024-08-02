@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -485,8 +486,6 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_doubleLine     = RegEnable(f2_doubleLine, f2_fire)
   val f3_fire           = io.toIbuffer.fire
 
-  f3_ready := f3_fire || !f3_valid
-
   val f3_cut_data       = RegEnable(f2_cut_data, f2_fire)
 
   val f3_except_pf      = RegEnable(f2_except_pf,  f2_fire)
@@ -624,7 +623,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   when(RegNext(f2_fire && !f2_flush) && f3_req_is_mmio)        { f3_mmio_use_seq_pc := true.B  }
   .elsewhen(redirect_mmio_req)                                 { f3_mmio_use_seq_pc := false.B }
 
-  f3_ready := Mux(f3_req_is_mmio, io.toIbuffer.ready && f3_mmio_req_commit || !f3_valid , io.toIbuffer.ready || !f3_valid)
+  f3_ready := (io.toIbuffer.ready && (f3_mmio_req_commit || !f3_req_is_mmio)) || !f3_valid
 
   // mmio state machine
   switch(mmio_state){
@@ -740,6 +739,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   io.iTLBInter.req.bits.debug.robIdx        := DontCare
   io.iTLBInter.req.bits.no_translate        := false.B
   io.iTLBInter.req.bits.debug.isFirstIssue  := DontCare
+  io.iTLBInter.req.bits.pmp_addr            := DontCare
 
   io.pmp.req.valid := (mmio_state === m_sendPMP) && f3_req_is_mmio
   io.pmp.req.bits.addr  := mmio_resend_addr
@@ -811,7 +811,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   io.toIbuffer.bits.pc          := f3_pc
   io.toIbuffer.bits.ftqOffset.zipWithIndex.map{case(a, i) => a.bits := i.U; a.valid := checkerOutStage1.fixedTaken(i) && !f3_req_is_mmio}
   io.toIbuffer.bits.foldpc      := f3_foldpc
-  io.toIbuffer.bits.exceptionType := (0 until PredictWidth).map(i => MuxCase(ExceptionType.none, Array(
+  io.toIbuffer.bits.exceptionType := (0 until PredictWidth).map(i => MuxCase(ExceptionType.none, Seq(
     (f3_pf_vec(i) || f3_crossPageFault(i)) -> ExceptionType.ipf,
     (f3_gpf_vec(i) || f3_crossGuestPageFault(i)) -> ExceptionType.igpf,
     f3_af_vec(i) -> ExceptionType.acf

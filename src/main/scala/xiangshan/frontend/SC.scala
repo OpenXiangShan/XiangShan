@@ -331,10 +331,10 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
         val taken = update.br_taken_mask(w)
         val scOldCtrs = updateSCMeta.ctrs(w)
         val pvdrCtr = updateTageMeta.providerResps(w).ctr
-        val sum = ParallelSingedExpandingAdd(scOldCtrs.map(getCentered)) +& getPvdrCentered(pvdrCtr)
-        val sumAbs = sum.abs.asUInt
+        val tableSum = ParallelSingedExpandingAdd(scOldCtrs.map(getCentered))
+        val totalSumAbs = (tableSum +& getPvdrCentered(pvdrCtr)).abs.asUInt
         val updateThres = updateThresholds(w)
-        val sumAboveThreshold = aboveThreshold(sum, getPvdrCentered(pvdrCtr), updateThres)
+        val sumAboveThreshold = aboveThreshold(tableSum, getPvdrCentered(pvdrCtr), updateThres)
         scUpdateTagePreds(w) := tagePred
         scUpdateTakens(w) := taken
         (scUpdateOldCtrs(w) zip scOldCtrs).foreach{case (t, c) => t := c}
@@ -348,7 +348,7 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
         sc_misp_tage_corr(w) := scPred =/= taken && tagePred === taken && update_conf(w)
 
         val thres = useThresholds(w)
-        when (scPred =/= tagePred && sumAbs >= thres - 4.U && sumAbs <= thres - 2.U) {
+        when (scPred =/= tagePred && totalSumAbs >= thres - 4.U && totalSumAbs <= thres - 2.U) {
           val newThres = scThresholds(w).update(scPred =/= taken)
           scThresholds(w) := newThres
           XSDebug(p"scThres $w update: old ${useThresholds(w)} --> new ${newThres.thres}\n")
@@ -356,13 +356,13 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
 
         when (scPred =/= taken || !sumAboveThreshold) {
           scUpdateMask(w).foreach(_ := true.B)
-          XSDebug(sum < 0.S,
+          XSDebug(tableSum < 0.S,
             p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +
-            p"scSum(-$sumAbs), mispred: sc(${scPred =/= taken}), tage(${updateMisPreds(w)})\n"
+            p"scSum(-${tableSum.abs}), mispred: sc(${scPred =/= taken}), tage(${updateMisPreds(w)})\n"
           )
-          XSDebug(sum >= 0.S,
+          XSDebug(tableSum >= 0.S,
             p"scUpdate: bank(${w}), scPred(${scPred}), tagePred(${tagePred}), " +
-            p"scSum(+$sumAbs), mispred: sc(${scPred =/= taken}), tage(${updateMisPreds(w)})\n"
+            p"scSum(+${tableSum.abs}), mispred: sc(${scPred =/= taken}), tage(${updateMisPreds(w)})\n"
           )
           XSDebug(p"bank(${w}), update: sc: ${updateSCMeta}\n")
           update_on_mispred(w) := scPred =/= taken

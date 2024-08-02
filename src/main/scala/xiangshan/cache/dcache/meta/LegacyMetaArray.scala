@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -95,14 +96,14 @@ class L1MetadataArray(onReset: () => L1Metadata)(implicit p: Parameters) extends
   io.write.ready := !rst
   io.read.ready := !wen
 
-  def dumpRead() = {
+  def dumpRead = {
     when(io.read.fire) {
       XSDebug("MetaArray Read: idx: %d way_en: %x tag: %x\n",
         io.read.bits.idx, io.read.bits.way_en, io.read.bits.tag)
     }
   }
 
-  def dumpWrite() = {
+  def dumpWrite = {
     when(io.write.fire) {
       XSDebug("MetaArray Write: idx: %d way_en: %x tag: %x new_tag: %x new_coh: %x\n",
         io.write.bits.idx, io.write.bits.way_en, io.write.bits.tag, io.write.bits.data.tag, io.write.bits.data.coh.state)
@@ -136,7 +137,7 @@ class DuplicatedMetaArray(numReadPorts: Int)(implicit p: Parameters) extends DCa
     val errors = Output(Vec(numReadPorts, ValidIO(new L1CacheErrorInfo)))
   })
   val meta = Seq.fill(numReadPorts) {
-    Module(new L1MetadataArray(onReset _))
+    Module(new L1MetadataArray(() => onReset))
   }
 
   for (w <- 0 until numReadPorts) {
@@ -150,7 +151,7 @@ class DuplicatedMetaArray(numReadPorts: Int)(implicit p: Parameters) extends DCa
   // io.write.ready := VecInit(meta.map(_.io.write.ready)).asUInt.andR
   io.write.ready := true.B
 
-  def dumpRead() = {
+  def dumpRead = {
     (0 until numReadPorts) map { w =>
       when(io.read(w).fire) {
         XSDebug(s"MetaArray Read channel: $w idx: %d way_en: %x tag: %x\n",
@@ -159,7 +160,7 @@ class DuplicatedMetaArray(numReadPorts: Int)(implicit p: Parameters) extends DCa
     }
   }
 
-  def dumpWrite() = {
+  def dumpWrite = {
     when(io.write.fire) {
       XSDebug("MetaArray Write: idx: %d way_en: %x tag: %x new_tag: %x new_coh: %x\n",
         io.write.bits.idx, io.write.bits.way_en, io.write.bits.tag, io.write.bits.data.tag, io.write.bits.data.coh.state)

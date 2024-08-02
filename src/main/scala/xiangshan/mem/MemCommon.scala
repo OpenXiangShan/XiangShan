@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -450,7 +451,7 @@ object AddPipelineReg {
   def apply[T <: Data]
   (left: DecoupledIO[T], right: DecoupledIO[T], isFlush: Bool,
    moduleName: Option[String] = None
-  ){
+  ): Unit = {
     val pipelineReg = Module(new PipelineRegModule[T](left.bits.cloneType))
     if(moduleName.nonEmpty) pipelineReg.suggestName(moduleName.get)
     pipelineReg.io.in <> left

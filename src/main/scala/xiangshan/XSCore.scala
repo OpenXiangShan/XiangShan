@@ -20,12 +20,14 @@ import org.chipsalliance.cde.config
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import device.MsiInfoBundle
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tile.HasFPUParameters
 import system.HasSoCParameter
 import utils._
 import utility._
 import xiangshan.backend._
+import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache.mmu._
 import xiangshan.frontend._
 import xiangshan.mem.L1PrefetchFuzzer
@@ -76,6 +78,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   with HasSoCParameter {
   val io = IO(new Bundle {
     val hartId = Input(UInt(hartIdLen.W))
+    val msiInfo = Input(ValidIO(new MsiInfoBundle))
+    val clintTime = Input(ValidIO(UInt(64.W)))
     val reset_vector = Input(UInt(PAddrBits.W))
     val cpu_halt = Output(Bool())
     val l2_pf_enable = Output(Bool())
@@ -83,6 +87,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val beu_errors = Output(new XSL1BusErrors())
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val l2_tlb_req = Flipped(new TlbRequestIO(nRespDups = 2))
+    val l2_pmp_resp = new PMPRespBundle
     val l2PfqBusy = Input(Bool())
     val debugTopDown = new Bundle {
       val robTrueCommit = Output(UInt(64.W))
@@ -107,9 +112,10 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   frontend.io.fencei <> backend.io.fenceio.fencei
 
   backend.io.fromTop.hartId := memBlock.io.inner_hartId
-  backend.io.fromTop.externalInterrupt := memBlock.io.externalInterrupt
+  backend.io.fromTop.msiInfo := io.msiInfo
+  backend.io.fromTop.clintTime := io.clintTime
 
-  backend.io.frontendCsrDistributedUpdate := frontend.io.csrUpdate
+  backend.io.fromTop.externalInterrupt := memBlock.io.externalInterrupt
 
   require(backend.io.mem.stIn.length == memBlock.io.mem_to_ooo.stIn.length)
   backend.io.mem.stIn.zip(memBlock.io.mem_to_ooo.stIn).foreach { case (sink, source) =>
@@ -151,24 +157,18 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
 
   backend.io.mem.exceptionAddr.vaddr  := memBlock.io.mem_to_ooo.lsqio.vaddr
   backend.io.mem.exceptionAddr.gpaddr := memBlock.io.mem_to_ooo.lsqio.gpaddr
-  backend.io.mem.csrDistributedUpdate := memBlock.io.mem_to_ooo.csrUpdate
   backend.io.mem.debugLS := memBlock.io.debug_ls
   backend.io.mem.lsTopdownInfo := memBlock.io.mem_to_ooo.lsTopdownInfo
   backend.io.mem.lqCanAccept := memBlock.io.mem_to_ooo.lsqio.lqCanAccept
   backend.io.mem.sqCanAccept := memBlock.io.mem_to_ooo.lsqio.sqCanAccept
   backend.io.fenceio.sbuffer.sbIsEmpty := memBlock.io.mem_to_ooo.sbIsEmpty
-  // Todo: remove it
-  backend.io.fenceio.disableSfence := DontCare
-  backend.io.fenceio.disableHfencev := DontCare
-  backend.io.fenceio.disableHfenceg := DontCare
-  backend.io.fenceio.virtMode := DontCare
 
   backend.io.perf.frontendInfo := frontend.io.frontendInfo
   backend.io.perf.memInfo := memBlock.io.memInfo
   backend.io.perf.perfEventsFrontend := frontend.getPerf
   backend.io.perf.perfEventsLsu := memBlock.getPerf
   backend.io.perf.perfEventsHc := io.perfEvents
-  backend.io.perf.perfEventsCtrl := DontCare
+  backend.io.perf.perfEventsBackend := DontCare
   backend.io.perf.retiredInstr := DontCare
   backend.io.perf.ctrlInfo := DontCare
 
@@ -216,6 +216,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.l2_hint.valid := io.l2_hint.valid
   memBlock.io.l2_hint.bits.sourceId := io.l2_hint.bits.sourceId
   memBlock.io.l2_tlb_req <> io.l2_tlb_req
+  memBlock.io.l2_pmp_resp <> io.l2_pmp_resp
   memBlock.io.l2_hint.bits.isKeyword := io.l2_hint.bits.isKeyword
   memBlock.io.l2PfqBusy := io.l2PfqBusy
 

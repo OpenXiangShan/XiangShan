@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -49,7 +50,7 @@ class ICacheMetaWriteBundle(implicit p: Parameters) extends ICacheBundle
   val waymask = UInt(nWays.W)
   val bankIdx = Bool()
 
-  def generate(tag:UInt, idx:UInt, waymask:UInt, bankIdx: Bool){
+  def generate(tag:UInt, idx:UInt, waymask:UInt, bankIdx: Bool): Unit = {
     this.virIdx  := idx
     this.phyTag  := tag
     this.waymask := waymask
@@ -65,7 +66,7 @@ class ICacheDataWriteBundle(implicit p: Parameters) extends ICacheBundle
   val waymask = UInt(nWays.W)
   val bankIdx = Bool()
 
-  def generate(data:UInt, idx:UInt, waymask:UInt, bankIdx: Bool){
+  def generate(data:UInt, idx:UInt, waymask:UInt, bankIdx: Bool): Unit = {
     this.virIdx  := idx
     this.data    := data
     this.waymask := waymask

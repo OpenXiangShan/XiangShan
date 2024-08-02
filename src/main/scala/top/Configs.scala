@@ -79,7 +79,7 @@ class MinimalConfig(n: Int = 1) extends Config(
         StoreQueueNWriteBanks = 4, // NOTE: make sure that StoreQueueSize is divided by StoreQueueNWriteBanks
         StoreQueueForwardWithMask = true,
         // ============ VLSU ============
-        VlMergeBufferSize = 8,
+        VlMergeBufferSize = 16,
         VsMergeBufferSize = 8,
         UopWritebackWidth = 2,
         // ==============================

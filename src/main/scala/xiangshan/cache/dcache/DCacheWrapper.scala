@@ -892,6 +892,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   missQueue.io.l2_hint <> RegNext(io.l2_hint)
   missQueue.io.mainpipe_info := mainPipe.io.mainpipe_info
   mainPipe.io.refill_info := missQueue.io.refill_info
+  mainPipe.io.replace_block := missQueue.io.replace_block
   mainPipe.io.sms_agt_evict_req <> io.sms_agt_evict_req
   io.memSetPattenDetected := missQueue.io.memSetPattenDetected
 
@@ -1128,7 +1129,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     bankedDataArray.io.is128Req(i) <> ldu(i).io.is128Req
     bankedDataArray.io.read_error_delayed(i) <> ldu(i).io.read_error_delayed
 
-    ldu(i).io.banked_data_resp := bankedDataArray.io.read_resp_delayed(i)
+    ldu(i).io.banked_data_resp := bankedDataArray.io.read_resp(i)
 
     ldu(i).io.bank_conflict_slow := bankedDataArray.io.bank_conflict_slow(i)
   })
@@ -1152,16 +1153,24 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   mainPipe.io.force_write <> io.force_write
 
   /** dwpu */
-  val dwpu = Module(new DCacheWpuWrapper(LoadPipelineWidth))
-  for(i <- 0 until LoadPipelineWidth){
-    dwpu.io.req(i) <> ldu(i).io.dwpu.req(0)
-    dwpu.io.resp(i) <> ldu(i).io.dwpu.resp(0)
-    dwpu.io.lookup_upd(i) <> ldu(i).io.dwpu.lookup_upd(0)
-    dwpu.io.cfpred(i) <> ldu(i).io.dwpu.cfpred(0)
+  if (dwpuParam.enWPU) {
+    val dwpu = Module(new DCacheWpuWrapper(LoadPipelineWidth))
+    for(i <- 0 until LoadPipelineWidth){
+      dwpu.io.req(i) <> ldu(i).io.dwpu.req(0)
+      dwpu.io.resp(i) <> ldu(i).io.dwpu.resp(0)
+      dwpu.io.lookup_upd(i) <> ldu(i).io.dwpu.lookup_upd(0)
+      dwpu.io.cfpred(i) <> ldu(i).io.dwpu.cfpred(0)
+    }
+    dwpu.io.tagwrite_upd.valid := tagArray.io.write.valid
+    dwpu.io.tagwrite_upd.bits.vaddr := tagArray.io.write.bits.vaddr
+    dwpu.io.tagwrite_upd.bits.s1_real_way_en := tagArray.io.write.bits.way_en
+  } else {
+    for(i <- 0 until LoadPipelineWidth){
+      ldu(i).io.dwpu.req(0).ready := true.B
+      ldu(i).io.dwpu.resp(0).valid := false.B
+      ldu(i).io.dwpu.resp(0).bits := DontCare
+    }
   }
-  dwpu.io.tagwrite_upd.valid := tagArray.io.write.valid
-  dwpu.io.tagwrite_upd.bits.vaddr := tagArray.io.write.bits.vaddr
-  dwpu.io.tagwrite_upd.bits.s1_real_way_en := tagArray.io.write.bits.way_en
 
   //----------------------------------------
   // load pipe
@@ -1321,7 +1330,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     r.valid := missQueue.io.req(i).valid
     r.bits  := missQueue.io.req(i).bits.addr
   }
-  wb.io.mshr_block := missQueue.io.release_block
 
   // block_decoupled(missReqArb.io.out, missQueue.io.req, wb.io.block_miss_req)
   // missReqArb.io.out <> missQueue.io.req
@@ -1354,7 +1362,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   bus.a <> missQueue.io.mem_acquire
   bus.e <> missQueue.io.mem_finish
   missQueue.io.probe_addr := bus.b.bits.address
-  missQueue.io.release_addr := mainPipe.io.evict_addr
+  missQueue.io.replace_addr := mainPipe.io.replace_addr
 
   missQueue.io.main_pipe_resp.valid := RegNext(mainPipe.io.atomic_resp.valid)
   missQueue.io.main_pipe_resp.bits := RegEnable(mainPipe.io.atomic_resp.bits, mainPipe.io.atomic_resp.valid)
@@ -1467,11 +1475,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val replacer = ReplacementPolicy.fromString(cacheParams.replacer, nWays, nSets)
   val replWayReqs = ldu.map(_.io.replace_way) ++ Seq(mainPipe.io.replace_way) ++ stu.map(_.io.replace_way)
 
-  val victimList = VictimList(nSets)
   if (dwpuParam.enCfPred) {
-    // when(missQueue.io.replace_pipe_req.valid) {
-    //   victimList.replace(get_idx(missQueue.io.replace_pipe_req.bits.vaddr))
-    // }
+    val victimList = VictimList(nSets)
     replWayReqs.foreach {
       case req =>
         req.way := DontCare

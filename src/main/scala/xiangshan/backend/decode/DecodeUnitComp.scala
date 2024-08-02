@@ -1,5 +1,6 @@
 /***************************************************************************************
-  * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+  * Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+  * Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
   * Copyright (c) 2020-2021 Peng Cheng Laboratory
   *
   * XiangShan is licensed under Mulan PSL v2.
@@ -32,7 +33,6 @@ import xiangshan.backend.Bundles.{DecodedInst, StaticInst}
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 import xiangshan.backend.fu.vector.Bundles.{VSew, VType, VLmul}
 import yunsuan.VpermType
-import scala.collection.Seq
 import chisel3.util.experimental.decode.{QMCMinimizer, TruthTable, decoder}
 
 class indexedLSUopTable(uopIdx:Int) extends Module {
@@ -177,6 +177,8 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
 
   //uop div up to maxUopSize
   val csBundle = Wire(Vec(maxUopSize, new DecodedInst))
+  val fixedDecodedInst = Wire(Vec(maxUopSize, new DecodedInst))
+
   csBundle.foreach { case dst =>
     dst := latchedInst
     dst.numUops := latchedUopInfo.numOfUop
@@ -208,7 +210,6 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
         csBundle(1).ldest := Vl_IDX.U
         csBundle(1).vecWen := false.B
         csBundle(1).vlWen := true.B
-        // vsetvl flush pipe and block backward
         csBundle(1).flushPipe := false.B
         csBundle(1).blockBackward := Mux(VSETOpType.isVsetvl(latchedInst.fuOpType), true.B, vstartReg =/= 0.U)
         when(VSETOpType.isVsetvli(latchedInst.fuOpType) && dest === 0.U && src1 === 0.U) {
@@ -1752,12 +1753,12 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       val vsew = Cat(0.U(1.W), vsewReg)
       val veew = Cat(0.U(1.W), width)
       val vemul: UInt = veew.asUInt + 1.U + vlmul.asUInt + ~vsew.asUInt
-      val simple_lmul = MuxLookup(vlmul, 0.U(2.W))(Array(
+      val simple_lmul = MuxLookup(vlmul, 0.U(2.W))(Seq(
         "b001".U -> 1.U,
         "b010".U -> 2.U,
         "b011".U -> 3.U
       ))
-      val simple_emul = MuxLookup(vemul, 0.U(2.W))(Array(
+      val simple_emul = MuxLookup(vemul, 0.U(2.W))(Seq(
         "b001".U -> 1.U,
         "b010".U -> 2.U,
         "b011".U -> 3.U
@@ -1869,7 +1870,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   }
 
   //readyFromRename Counter
-  val readyCounter = PriorityMuxDefault(outReadys.map(x => !x).zip((0 until RenameWidth).map(_.U)), RenameWidth.U)
+  val readyCounter = Mux(outReadys.head, RenameWidth.U, 0.U)
 
   // The left uops of the complex inst in ComplexDecoder can be send out this cycle
   val thisAllOut = uopRes <= readyCounter
@@ -1902,14 +1903,23 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
 
   val complexNum = Mux(uopRes > readyCounter, readyCounter, uopRes)
 
+  fixedDecodedInst := csBundle
+
+  // when vstart is not zero, the last uop will modify vstart to zero
+  // therefore, blockback and flush pipe
+  fixedDecodedInst(numOfUop - 1.U).flushPipe := (vstartReg =/= 0.U) || latchedInst.flushPipe
+
   for(i <- 0 until RenameWidth) {
     outValids(i) := complexNum > i.U
-    outDecodedInsts(i) := Mux((i.U + numOfUop - uopRes) < maxUopSize.U, csBundle(i.U + numOfUop - uopRes), csBundle(maxUopSize - 1))
+    outDecodedInsts(i) := fixedDecodedInst(i.U + numOfUop - uopRes)
   }
 
   outComplexNum := Mux(state === s_active, complexNum, 0.U)
   inReady := state === s_idle || state === s_active && thisAllOut
 
+
+  XSError(io.in.valid && numOfUop === 0.U,
+    p"uop number $numOfUop is illegal, cannot be zero")
 //  val validSimple = Wire(Vec(DecodeWidth, Bool()))
 //  validSimple.zip(io.validFromIBuf.zip(io.isComplex)).map{ case (dst, (src1, src2)) => dst := src1 && !src2 }
 //  val notInf = Wire(Vec(DecodeWidth, Bool()))

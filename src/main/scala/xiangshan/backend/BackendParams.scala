@@ -91,6 +91,7 @@ case class BackendParams(
 
   def numSrc      : Int = allSchdParams.map(_.issueBlockParams.map(_.numSrc).max).max
   def numRegSrc   : Int = allSchdParams.map(_.issueBlockParams.map(_.numRegSrc).max).max
+  def numIntRegSrc: Int = allSchdParams.map(_.issueBlockParams.map(_.numIntSrc).max).max
   def numVecRegSrc: Int = allSchdParams.map(_.issueBlockParams.map(_.numVecSrc).max).max
 
 
@@ -121,7 +122,7 @@ case class BackendParams(
 
   def numException = allRealExuParams.count(_.exceptionOut.nonEmpty)
 
-  def numRedirect = allSchdParams.map(_.numRedirect).sum
+  def numRedirect = 1 // only for ahead info to frontend
 
   def numLoadDp = memSchdParams.get.issueBlockParams.filter(x => x.isLdAddrIQ || x.isHyAddrIQ).map(_.numEnq).sum
 
@@ -320,6 +321,29 @@ case class BackendParams(
 
   def getRfWriteSize(dataCfg: DataConfig) = {
     this.getPregParams(dataCfg).numWrite.getOrElse(this.getWbPortIndices(dataCfg).size)
+  }
+
+
+  /**
+    * Get size of read ports of int regcache
+    */
+  def getIntExuRCReadSize = {
+    this.allExuParams.filter(x => x.isIntExeUnit).map(_.numIntSrc).reduce(_ + _)
+  }
+
+  def getMemExuRCReadSize = {
+    this.allExuParams.filter(x => x.isMemExeUnit && x.readIntRf).map(_.numIntSrc).reduce(_ + _)
+  }
+
+  /**
+    * Get size of write ports of int regcache
+    */
+  def getIntExuRCWriteSize = {
+    this.allExuParams.filter(x => x.isIntExeUnit && x.isIQWakeUpSource).size
+  }
+
+  def getMemExuRCWriteSize = {
+    this.allExuParams.filter(x => x.isMemExeUnit && x.isIQWakeUpSource && x.readIntRf).size
   }
 
   def getExuIdx(name: String): Int = {

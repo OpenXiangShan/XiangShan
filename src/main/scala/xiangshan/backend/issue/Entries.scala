@@ -58,12 +58,12 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     resps.flatten
   }
 
-  val resps: Vec[Vec[ValidIO[EntryDeqRespBundle]]] = {
-    if (params.inVfSchd)
-      VecInit(io.og0Resp, io.og1Resp, io.og2Resp.get, 0.U.asTypeOf(io.og0Resp))
-    else
-      VecInit(io.og0Resp, io.og1Resp, 0.U.asTypeOf(io.og0Resp), 0.U.asTypeOf(io.og0Resp))
-  }
+  val resps: Vec[Vec[ValidIO[EntryDeqRespBundle]]] = Wire(Vec(4, chiselTypeOf(io.og0Resp)))
+
+  if (params.inVfSchd)
+    resps := Seq(io.og0Resp, io.og1Resp, io.og2Resp.get, WireDefault(0.U.asTypeOf(io.og0Resp)))
+  else
+    resps := Seq(io.og0Resp, io.og1Resp, WireDefault(0.U.asTypeOf(io.og0Resp)), WireDefault(0.U.asTypeOf(io.og0Resp)))
 
 
 
@@ -137,16 +137,16 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     enqEntry.io.commonIn.transSel             := (if (params.isAllComp || params.isAllSimp) enqCanTrans2Others.get && othersTransSelVec.get(entryIdx).valid
                                                   else enqCanTrans2Simp.get && simpTransSelVec.get(entryIdx).valid || enqCanTrans2Comp.get && compTransSelVec.get(entryIdx).valid)
     EntriesConnect(enqEntry.io.commonIn, enqEntry.io.commonOut, entryIdx)
-    enqEntry.io.enqDelayIn1.wakeUpFromWB      := RegEnable(io.wakeUpFromWB, io.enq(entryIdx).valid)
-    enqEntry.io.enqDelayIn1.wakeUpFromIQ      := RegEnable(io.wakeUpFromIQ, io.enq(entryIdx).valid)
-    enqEntry.io.enqDelayIn1.srcLoadDependency := RegEnable(VecInit(io.enq(entryIdx).bits.payload.srcLoadDependency.take(params.numRegSrc)), io.enq(entryIdx).valid)
-    enqEntry.io.enqDelayIn1.og0Cancel         := RegNext(io.og0Cancel.asUInt)
+    enqEntry.io.enqDelayIn1.wakeUpFromWB      := RegNext(io.wakeUpFromWB)
+    enqEntry.io.enqDelayIn1.wakeUpFromIQ      := RegNext(io.wakeUpFromIQ)
+    enqEntry.io.enqDelayIn1.srcLoadDependency := RegNext(VecInit(io.enq(entryIdx).bits.payload.srcLoadDependency.take(params.numRegSrc)))
+    enqEntry.io.enqDelayIn1.og0Cancel         := RegNext(io.og0Cancel)
     enqEntry.io.enqDelayIn1.ldCancel          := RegNext(io.ldCancel)
     // note: these signals with 2 cycle delay should not be enabled by io.enq.valid
     enqEntry.io.enqDelayIn2.wakeUpFromWB      := DelayN(io.wakeUpFromWB, 2)
     enqEntry.io.enqDelayIn2.wakeUpFromIQ      := DelayN(io.wakeUpFromIQ, 2)
     enqEntry.io.enqDelayIn2.srcLoadDependency := DelayN(VecInit(io.enq(entryIdx).bits.payload.srcLoadDependency.take(params.numRegSrc)), 2)
-    enqEntry.io.enqDelayIn2.og0Cancel         := DelayN(io.og0Cancel.asUInt, 2)
+    enqEntry.io.enqDelayIn2.og0Cancel         := DelayN(io.og0Cancel, 2)
     enqEntry.io.enqDelayIn2.ldCancel          := DelayN(io.ldCancel, 2)
     enqEntryTransVec(entryIdx)                := enqEntry.io.commonOut.transEntry
   }
@@ -533,8 +533,8 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val wakeUpFromIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
   val vlIsZero            = Input(Bool())
   val vlIsVlmax           = Input(Bool())
-  val og0Cancel           = Input(ExuOH(backendParams.numExu))
-  val og1Cancel           = Input(ExuOH(backendParams.numExu))
+  val og0Cancel           = Input(ExuVec())
+  val og1Cancel           = Input(ExuVec())
   val ldCancel            = Vec(backendParams.LdExuCnt, Flipped(new LoadCancelIO))
   //entries status
   val valid               = Output(UInt(params.numEntries.W))

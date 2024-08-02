@@ -102,7 +102,7 @@ class VSetRvfWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
   val res = WireInit(0.U.asTypeOf(VConfig()))
   val vlmax = vsetModule.io.out.vlmax
   val isVsetvl = VSETOpType.isVsetvl(in.ctrl.fuOpType)
-  val isReadVl = in.ctrl.fuOpType === CSROpType.set
+  val isReadVl = in.ctrl.fuOpType === VSETOpType.csrrvl
   res.vl := Mux(vsetModule.io.out.vconfig.vtype.illegal, 0.U,
               Mux(VSETOpType.isKeepVl(in.ctrl.fuOpType), oldVL, vsetModule.io.out.vconfig.vl))
   res.vtype := vsetModule.io.out.vconfig.vtype

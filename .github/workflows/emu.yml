@@ -18,7 +18,7 @@ jobs:
     outputs:
       core: ${{ steps.filter.outputs.core }}
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
     - uses: dorny/paths-filter@v3
       id: filter
       with:
@@ -62,14 +62,14 @@ jobs:
           make clean
       - name: generate XSNoCTop verilog file
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate --config XSNoCTopConfig --mfc
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate --config XSNoCTopConfig
       - name: check XSNoCTop verilog
         run: |
           python3 $GITHUB_WORKSPACE/.github/workflows/check_verilog.py build/rtl
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
       - name: generate verilog file
         run:
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate --num-cores 2 --mfc
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate --num-cores 2
       - name: check verilog
         run: |
           python3 $GITHUB_WORKSPACE/.github/workflows/check_verilog.py build/rtl
@@ -77,7 +77,7 @@ jobs:
       - name: build MinimalConfig Release emu
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
-            --threads 8 --config MinimalConfig --release --mfc
+            --threads 8 --config MinimalConfig --release
       - name: run MinimalConfig - Linux
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci linux-hello-opensbi 2> perf.log
@@ -101,6 +101,7 @@ jobs:
           echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
           echo "PERF_HOME=/nfs/home/ci-runner/xs-perf/${HEAD_SHA}" >> $GITHUB_ENV
           echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
+          echo "GCPT_RESTORE_BIN=/nfs/home/share/ci-workloads/fix-gcpt/gcpt.bin" >> $GITHUB_ENV
           mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
       - name: clean up
@@ -108,7 +109,7 @@ jobs:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
       - name: Build EMU
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --build --threads 16 --mfc \
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --build --threads 16 \
             --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin --llvm-profdata llvm-profdata
       - name: Basic Test - cputest
         run: |
@@ -119,9 +120,9 @@ jobs:
       - name: Basic Test - misc-tests
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --ci misc-tests 2> /dev/zero
-      - name: Basic Test - nodiff-tests
+      - name: Extension Test - hypervisor
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --no-diff --ci nodiff-tests 2> /dev/zero
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --ci rvh-tests 2> /dev/zero
       - name: Simple Test - microbench
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --ci microbench 2> perf.log
@@ -136,12 +137,18 @@ jobs:
           cat perf.log | sort | tee $PERF_HOME/linux.log
       - name: Floating-point Test - povray
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --max-instr 5000000 --ci povray 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --max-instr 5000000 --ci povray --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/povray.log
       - name: Uncache Fetch Test - copy and run
         run: |
           $GITHUB_WORKSPACE/build/emu  -F $GITHUB_WORKSPACE/ready-to-run/copy_and_run.bin -i $GITHUB_WORKSPACE/ready-to-run/microbench.bin --diff $GITHUB_WORKSPACE/ready-to-run/riscv64-nemu-interpreter-so --enable-fork 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/copy_and_run.log
+      - name: V Extension Test - rvv-test
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --ci rvv-test 2> /dev/zero
+      # - name: V Extension Test - rvv-bench
+      #   run: |
+      #     python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --ci rvv-bench 2> /dev/zero
   emu-chi:
     runs-on: bosc
     needs: changes
@@ -166,7 +173,7 @@ jobs:
       - name: build KunminghuV2Config Release emu
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
-            --threads 8 --config KunminghuV2Config --release --mfc
+            --threads 8 --config KunminghuV2Config --release
       - name: run KunminghuV2Config - Linux
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci linux-hello-opensbi 2> perf.log
@@ -190,6 +197,7 @@ jobs:
           echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
           echo "PERF_HOME=/nfs/home/ci-runner/xs-perf/${HEAD_SHA}" >> $GITHUB_ENV
           echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
+          echo "GCPT_RESTORE_BIN=/nfs/home/share/ci-workloads/fix-gcpt/gcpt.bin" >> $GITHUB_ENV
           mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
       - name: clean up
@@ -199,43 +207,43 @@ jobs:
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
             --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3            \
-            --with-dramsim3 --threads 16 --mfc \
+            --with-dramsim3 --threads 16 \
             --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin --llvm-profdata llvm-profdata
       - name: SPEC06 Test - mcf
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci mcf 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci mcf --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/mcf.log
       - name: SPEC06 Test - xalancbmk
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci xalancbmk 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci xalancbmk --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/xalancbmk.log
       - name: SPEC06 Test - gcc
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci gcc 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci gcc --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/gcc.log
       - name: SPEC06 Test - namd
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci namd 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci namd --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/namd.log
       - name: SPEC06 Test - milc
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci milc 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci milc --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/milc.log
       - name: SPEC06 Test - lbm
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci lbm 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci lbm --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/lbm.log
       - name: SPEC06 Test - gromacs
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci gromacs 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci gromacs --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/gromacs.log
       - name: SPEC06 Test - wrf
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci wrf 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci wrf --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/wrf.log
       - name: SPEC06 Test - astar
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci astar 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci astar --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log
           cat perf.log | sort | tee $PERF_HOME/astar.log
   emu-mc:
     runs-on: bosc
@@ -266,14 +274,14 @@ jobs:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
             --num-cores 2 --emu-optimize "" \
             --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 \
-            --with-dramsim3 --threads 16 --mfc \
+            --with-dramsim3 --threads 16 \
             --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin --llvm-profdata llvm-profdata
       - name: MC Test
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so --ci mc-tests 2> /dev/zero
       - name: SMP Linux
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so --ci linux-hello-smp-new 2> /dev/zero
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so --ci linux-hello-smp-newcsr 2> /dev/null
   simv-basics:
     runs-on: eda
     needs: changes
@@ -303,13 +311,13 @@ jobs:
           ssh -tt eda01 "echo test-ok"
       - name: Generate Verilog for VCS
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --vcs-gen --no-db --xprop --mfc
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --vcs-gen --no-db --xprop
       - name: Build SIMV on Remote
         run: |
           ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --vcs-build --no-db --xprop"
       - name: Simple Test - MicroBench
         run: |
-          ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs microbench --am=/nfs/home/share/ci-workloads/nexus-am/"
+          ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --wave-dump `echo $WAVE_HOME` --ci-vcs microbench --am=/nfs/home/share/ci-workloads/nexus-am/"
       # - name: Basic Test - cputest
       #   run: |
       #     ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs cputest --am=/nfs/home/share/ci-workloads/nexus-am/" 2> /dev/zero
@@ -319,3 +327,36 @@ jobs:
       # - name: System Test - Linux
       #   run: |
       #     ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs linux-hello-opensbi --timeout 7200" 2> /dev/zero
+  check-submodules:
+    runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' }}
+    continue-on-error: false
+    timeout-minutes: 5
+    name: Check Submodules
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+          fetch-depth: '0'
+      - name: check rocket-chip
+        run: cd rocket-chip && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
+      - name: check difftest
+        run: cd difftest && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
+      - name: check ready-to-run
+        run: cd ready-to-run && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
+      - name: check huancun
+        run: cd huancun && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
+      - name: check fudian
+        run: cd fudian && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/pipeline
+      - name: check utility
+        run: cd utility && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
+      - name: check yunsuan
+        run: cd yunsuan && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
+      - name: check coupledL2
+        run: cd coupledL2 && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
+      - name: check openLLC
+        run: cd openLLC && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
+      - name: check src/main/resources/aia
+        run: cd src/main/resources/aia && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/main
+

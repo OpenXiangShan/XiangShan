@@ -25,6 +25,7 @@ import xiangshan._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.Bundles._
 import xiangshan.backend.fu.FuType
+import xiangshan.backend.fu.vector.Bundles.VEew
 
 /**
   * Common used parameters or functions in vlsu
@@ -237,19 +238,6 @@ class VecExuOutput(implicit p: Parameters) extends MemExuOutput with HasVLSUPara
   val vecFeedback       = Bool()
 }
 
-// class VecStoreExuOutput(implicit p: Parameters) extends MemExuOutput with HasVLSUParameters {
-//   val elemIdx = UInt(elemIdxBits.W)
-//   val uopQueuePtr = new VsUopPtr
-//   val fieldIdx = UInt(fieldBits.W)
-//   val segmentIdx = UInt(elemIdxBits.W)
-//   val vaddr = UInt(VAddrBits.W)
-//   // pack
-//   val isPackage         = Bool()
-//   val packageNum        = UInt((log2Up(VLENB) + 1).W)
-//   val originAlignedType = UInt(alignTypeBits.W)
-//   val alignedType       = UInt(alignTypeBits.W)
-// }
-
 class VecUopBundle(implicit p: Parameters) extends VLSUBundleWithMicroOp {
   val flowMask       = UInt(VLENB.W) // each bit for a flow
   val byteMask       = UInt(VLENB.W) // each bit for a byte
@@ -268,7 +256,7 @@ class VecUopBundle(implicit p: Parameters) extends VLSUBundleWithMicroOp {
   val vm = Bool() // whether vector masking is enabled
   val usWholeReg = Bool() // unit-stride, whole register load
   val usMaskReg = Bool() // unit-stride, masked store/load
-  val eew = UInt(ewBits.W) // size of memory elements
+  val eew = VEew() // size of memory elements
   val sew = UInt(ewBits.W)
   val emul = UInt(mulBits.W)
   val lmul = UInt(mulBits.W)
@@ -334,11 +322,12 @@ object MulDataSize {
 
 object OneRegNum {
   def apply (eew: UInt): UInt = { //mul means emul or lmul
-    (LookupTree(eew,List(
-      "b000".U -> 16.U , // 1
-      "b101".U -> 8.U , // 2
-      "b110".U -> 4.U , // 4
-      "b111".U -> 2.U   // 8
+    require(eew.getWidth == 2, "The eew width must be 2.")
+    (LookupTree(eew, List(
+      "b00".U -> 16.U , // 1
+      "b01".U ->  8.U , // 2
+      "b10".U ->  4.U , // 4
+      "b11".U ->  2.U   // 8
     )))}
 }
 
@@ -356,11 +345,12 @@ object SewDataSize {
 // strided inst read data byte
 object EewDataSize {
   def apply (eew: UInt): UInt = {
-    (LookupTree(eew,List(
-      "b000".U -> 1.U , // 1
-      "b101".U -> 2.U , // 2
-      "b110".U -> 4.U , // 4
-      "b111".U -> 8.U   // 8
+    require(eew.getWidth == 2, "The eew width must be 2.")
+    (LookupTree(eew, List(
+      "b00".U -> 1.U , // 1
+      "b01".U -> 2.U , // 2
+      "b10".U -> 4.U , // 4
+      "b11".U -> 8.U   // 8
     )))}
 }
 
@@ -390,14 +380,6 @@ object storeDataSize {
       "b101".U ->  SewDataSize(sew)  , // segment indexed-unordered
       "b111".U ->  SewDataSize(sew)    // segment indexed-ordered
     )))}
-}
-
-object GenVecStoreMask {
-  def apply (instType: UInt, eew: UInt, sew: UInt): UInt = {
-    val mask = Wire(UInt(16.W))
-    mask := UIntToOH(storeDataSize(instType = instType, eew = eew, sew = sew)) - 1.U
-    mask
-  }
 }
 
 /**
@@ -458,11 +440,12 @@ object EewEq64 {
 
 object IndexAddr {
   def apply (index: UInt, flow_inner_idx: UInt, eew: UInt): UInt = {
-    (LookupTree(eew,List(
-      "b000".U -> EewEq8 (index = index, flow_inner_idx = flow_inner_idx ), // Imm is 1 Byte // TODO: index maybe cross register
-      "b101".U -> EewEq16(index = index, flow_inner_idx = flow_inner_idx ), // Imm is 2 Byte
-      "b110".U -> EewEq32(index = index, flow_inner_idx = flow_inner_idx ), // Imm is 4 Byte
-      "b111".U -> EewEq64(index = index, flow_inner_idx = flow_inner_idx )  // Imm is 8 Byte
+    require(eew.getWidth == 2, "The eew width must be 2.")
+    (LookupTree(eew, List(
+      "b00".U -> EewEq8 (index = index, flow_inner_idx = flow_inner_idx ), // Imm is 1 Byte // TODO: index maybe cross register
+      "b01".U -> EewEq16(index = index, flow_inner_idx = flow_inner_idx ), // Imm is 2 Byte
+      "b10".U -> EewEq32(index = index, flow_inner_idx = flow_inner_idx ), // Imm is 4 Byte
+      "b11".U -> EewEq64(index = index, flow_inner_idx = flow_inner_idx )  // Imm is 8 Byte
     )))}
 }
 
@@ -523,15 +506,18 @@ object EewLog2 extends VLSUConstants {
   //     "b110".U -> "b010".U , // 4
   //     "b111".U -> "b011".U   // 8
   //   )))}
-  def apply(eew: UInt): UInt = ZeroExt(eew(1, 0), ewBits)
+  def apply(eew: UInt): UInt = {
+    require(eew.getWidth == 2, "The eew width must be 2.")
+    ZeroExt(eew, ewBits)
+  }
 }
 
 object GenRealFlowNum {
   /**
    * unit-stride instructions don't use this method;
-   * other instructions generate realFlowNum by EmulDataSize >> eew(1,0),
+   * other instructions generate realFlowNum by EmulDataSize >> eew,
    * EmulDataSize means the number of bytes that need to be written to the register,
-   * eew(1,0) means the number of bytes written at once.
+   * eew means the number of bytes written at once.
    *
    * @param instType As the name implies.
    * @param emul As the name implies.
@@ -544,16 +530,17 @@ object GenRealFlowNum {
    */
   def apply (instType: UInt, emul: UInt, lmul: UInt, eew: UInt, sew: UInt, isSegment: Boolean = false): UInt = {
     require(instType.getWidth == 3, "The instType width must be 3, (isSegment, mop)")
+    require(eew.getWidth == 2, "The eew width must be 2.")
     // Because the new segmentunit is needed. But the previous implementation is retained for the time being in case of emergency.
     val segmentIndexFlowNum =  if (isSegment) (MulDataSize(lmul) >> sew(1,0)).asUInt
-                                else Mux(emul.asSInt > lmul.asSInt, (MulDataSize(emul) >> eew(1,0)).asUInt, (MulDataSize(lmul) >> sew(1,0)).asUInt)
+    else Mux(emul.asSInt > lmul.asSInt, (MulDataSize(emul) >> eew).asUInt, (MulDataSize(lmul) >> sew(1,0)).asUInt)
     (LookupTree(instType,List(
-      "b000".U ->  (MulDataSize(emul) >> eew(1,0)).asUInt, // store use, load do not use
-      "b010".U ->  (MulDataSize(emul) >> eew(1,0)).asUInt, // strided
-      "b001".U ->  Mux(emul.asSInt > lmul.asSInt, (MulDataSize(emul) >> eew(1,0)).asUInt, (MulDataSize(lmul) >> sew(1,0)).asUInt), // indexed-unordered
-      "b011".U ->  Mux(emul.asSInt > lmul.asSInt, (MulDataSize(emul) >> eew(1,0)).asUInt, (MulDataSize(lmul) >> sew(1,0)).asUInt), // indexed-ordered
-      "b100".U ->  (MulDataSize(emul) >> eew(1,0)).asUInt, // segment unit-stride
-      "b110".U ->  (MulDataSize(emul) >> eew(1,0)).asUInt, // segment strided
+      "b000".U ->  (MulDataSize(emul) >> eew).asUInt, // store use, load do not use
+      "b010".U ->  (MulDataSize(emul) >> eew).asUInt, // strided
+      "b001".U ->  Mux(emul.asSInt > lmul.asSInt, (MulDataSize(emul) >> eew).asUInt, (MulDataSize(lmul) >> sew(1,0)).asUInt), // indexed-unordered
+      "b011".U ->  Mux(emul.asSInt > lmul.asSInt, (MulDataSize(emul) >> eew).asUInt, (MulDataSize(lmul) >> sew(1,0)).asUInt), // indexed-ordered
+      "b100".U ->  (MulDataSize(emul) >> eew).asUInt, // segment unit-stride
+      "b110".U ->  (MulDataSize(emul) >> eew).asUInt, // segment strided
       "b101".U ->  segmentIndexFlowNum, // segment indexed-unordered
       "b111".U ->  segmentIndexFlowNum  // segment indexed-ordered
     )))}
@@ -573,9 +560,10 @@ object GenRealFlowLog2 extends VLSUConstants {
    */
   def apply(instType: UInt, emul: UInt, lmul: UInt, eew: UInt, sew: UInt, isSegment: Boolean = false): UInt = {
     require(instType.getWidth == 3, "The instType width must be 3, (isSegment, mop)")
+    require(eew.getWidth == 2, "The eew width must be 2.")
     val emulLog2 = Mux(emul.asSInt >= 0.S, 0.U, emul)
     val lmulLog2 = Mux(lmul.asSInt >= 0.S, 0.U, lmul)
-    val eewRealFlowLog2 = emulLog2 + log2Up(VLENB).U - eew(1, 0)
+    val eewRealFlowLog2 = emulLog2 + log2Up(VLENB).U - eew
     val sewRealFlowLog2 = lmulLog2 + log2Up(VLENB).U - sew(1, 0)
     // Because the new segmentunit is needed. But the previous implementation is retained for the time being in case of emergency.
     val segmentIndexFlowLog2 = if (isSegment) sewRealFlowLog2 else Mux(emul.asSInt > lmul.asSInt, eewRealFlowLog2, sewRealFlowLog2)
@@ -598,9 +586,10 @@ object GenRealFlowLog2 extends VLSUConstants {
   */
 object GenElemIdx extends VLSUConstants {
   def apply(instType: UInt, emul: UInt, lmul: UInt, eew: UInt, sew: UInt,
-    uopIdx: UInt, flowIdx: UInt): UInt = {
+            uopIdx: UInt, flowIdx: UInt): UInt = {
+    require(eew.getWidth == 2, "The eew width must be 2.")
     val isIndexed = instType(0).asBool
-    val eewUopFlowsLog2 = Mux(emul.asSInt > 0.S, 0.U, emul) + log2Up(VLENB).U - eew(1, 0)
+    val eewUopFlowsLog2 = Mux(emul.asSInt > 0.S, 0.U, emul) + log2Up(VLENB).U - eew
     val sewUopFlowsLog2 = Mux(lmul.asSInt > 0.S, 0.U, lmul) + log2Up(VLENB).U - sew(1, 0)
     val uopFlowsLog2 = Mux(
       isIndexed,
@@ -636,7 +625,8 @@ object GenVlMaxMask{
 
 object GenUSWholeRegVL extends VLSUConstants {
   def apply(nfields: UInt, eew: UInt): UInt = {
-    LookupTree(eew(1, 0), List(
+    require(eew.getWidth == 2, "The eew width must be 2.")
+    LookupTree(eew, List(
       "b00".U -> (nfields << (log2Up(VLENB) - 0)),
       "b01".U -> (nfields << (log2Up(VLENB) - 1)),
       "b10".U -> (nfields << (log2Up(VLENB) - 2)),
@@ -713,90 +703,6 @@ object GenFlowMask extends VLSUConstants {
   }
 }
 
-object CheckAligned extends VLSUConstants {
-  def apply(addr: UInt): UInt = {
-    val aligned_16 = (addr(0) === 0.U) // 16-bit
-    val aligned_32 = (addr(1,0) === 0.U) // 32-bit
-    val aligned_64 = (addr(2,0) === 0.U) // 64-bit
-    val aligned_128 = (addr(3,0) === 0.U) // 128-bit
-    Cat(true.B, aligned_16, aligned_32, aligned_64, aligned_128)
-  }
-}
-
-/**
-  search if mask have continue 'len' bit '1'
-  mask: source mask
-  len: search length
-*/
-object GenPackMask{
-  def leadX(mask: Seq[Bool], len: Int): Bool = {
-    if(len == 1){
-      mask.head
-    }
-    else{
-      leadX(mask.drop(1),len-1) & mask.head
-    }
-  }
-  def leadOneVec(shiftMask: Seq[Bool]): UInt = {
-    // max is 64-bit, so the max num of flow to pack is 8
-
-    val lead1 = leadX(shiftMask, 1) // continue 1 bit
-    val lead2 = leadX(shiftMask, 2) // continue 2 bit
-    val lead4 = leadX(shiftMask, 4) // continue 4 bit
-    val lead8 = leadX(shiftMask, 8) // continue 8 bit
-    val lead16 = leadX(shiftMask, 16) // continue 16 bit
-    Cat(lead1, lead2, lead4, lead8, lead16)
-  }
-
-  def apply(shiftMask: UInt) = {
-    // pack mask
-    val packMask = leadOneVec(shiftMask.asBools)
-    packMask
-  }
-}
-/**
-PackEnable = (LeadXVec >> eew) & alignedVec, where the 0th bit represents the ability to merge into a 64 bit flow, the second bit represents the ability to merge into a 32 bit flow, and so on.
-
-example:
-  addr = 0x0, activeMask = b00011100101111, flowIdx = 0, eew = 0(8-bit)
-
-  step 0 : addrAlignedVec = (1, 1, 1, 1) elemIdxAligned = (1, 1, 1, 1)
-  step 1 : activePackVec = (1, 1, 1, 0), inactivePackVec = (0, 0, 0, 0)
-  step 2 : activePackEnable = (1, 1, 1, 0), inactivePackVec = (0, 0, 0, 0)
-
-  we can package 4 8-bit activative flows into a 32-bit flow.
-*/
-object GenPackVec extends VLSUConstants{
-  def apply(addr: UInt, shiftMask: UInt, eew: UInt, elemIdx: UInt): UInt = {
-    val addrAlignedVec = CheckAligned(addr)
-    val elemIdxAligned = CheckAligned(elemIdx)
-    val packMask = GenPackMask(shiftMask)
-    // generate packVec
-    val packVec = addrAlignedVec & elemIdxAligned & (packMask.asUInt >> eew)
-
-    packVec
-  }
-}
-
-object GenPackAlignedType extends VLSUConstants{
-  def apply(packVec: UInt): UInt = {
-    val packAlignedType = PriorityMux(Seq(
-      packVec(0) -> "b100".U,
-      packVec(1) -> "b011".U,
-      packVec(2) -> "b010".U,
-      packVec(3) -> "b001".U,
-      packVec(4) -> "b000".U
-    ))
-    packAlignedType
-  }
-}
-
-object GenPackNum extends VLSUConstants{
-  def apply(alignedType: UInt, packAlignedType: UInt): UInt = {
-    (1.U << (packAlignedType - alignedType)).asUInt
-  }
-}
-
 object genVWmask128 {
   def apply(addr: UInt, sizeEncode: UInt): UInt = {
     (LookupTree(sizeEncode, List(
@@ -835,11 +741,11 @@ object genUSSplitAddr{
 }
 
 object genUSSplitMask{
-  def apply(mask: UInt, index: UInt, addrOffset: UInt): UInt = {
-    val tmpMask = Cat(0.U(16.W),mask) << addrOffset // 32-bits
+  def apply(mask: UInt, index: UInt): UInt = {
+    require(mask.getWidth == 32) // need to be 32-bits
     LookupTree(index, List(
-      0.U -> tmpMask(15, 0),
-      1.U -> tmpMask(31, 16),
+      0.U -> mask(15, 0),
+      1.U -> mask(31, 16),
     ))
   }
 }

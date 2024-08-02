@@ -25,7 +25,7 @@ class VldMergeUnit(val params: ExeUnitParams)(implicit p: Parameters) extends XS
   mgu.io.in.vd := wbReg.bits.data(0)
   // oldVd is contained in data and is already masked with new data
   mgu.io.in.oldVd := wbReg.bits.data(0)
-  mgu.io.in.mask := wbReg.bits.vls.get.vpu.vmask
+  mgu.io.in.mask := Mux(wbReg.bits.vls.get.vpu.vm, Fill(VLEN, 1.U(1.W)), wbReg.bits.vls.get.vpu.vmask)
   mgu.io.in.info.valid := wbReg.valid
   mgu.io.in.info.ta := wbReg.bits.vls.get.isMasked || wbReg.bits.vls.get.vpu.vta
   mgu.io.in.info.ma := wbReg.bits.vls.get.vpu.vma

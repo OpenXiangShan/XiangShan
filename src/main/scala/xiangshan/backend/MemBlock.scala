@@ -109,7 +109,6 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
 
 class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
   val otherFastWakeup = Vec(LdExuCnt, ValidIO(new DynInst))
-  val csrUpdate = new DistributedCSRUpdateReq
   val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize + 1).W))
   val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
   val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
@@ -272,6 +271,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val l2PfqBusy = Input(Bool())
     val l2_tlb_req = Flipped(new TlbRequestIO(nRespDups = 2))
+    val l2_pmp_resp = new PMPRespBundle
 
     val debugTopDown = new Bundle {
       val robHeadVaddr = Flipped(Valid(UInt(VAddrBits.W)))
@@ -321,7 +321,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val csrCtrl = DelayN(io.ooo_to_mem.csrCtrl, 2)
   dcache.io.csr.distribute_csr <> csrCtrl.distribute_csr
   dcache.io.l2_pf_store_only := RegNext(io.ooo_to_mem.csrCtrl.l2_pf_store_only, false.B)
-  io.mem_to_ooo.csrUpdate := RegNext(dcache.io.csr.update)
   io.error <> DelayNWithValid(dcache.io.error, 2)
   when(!csrCtrl.cache_error_enable){
     io.error.bits.report_to_beu := false.B
@@ -683,6 +682,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   when(csrCtrl.mem_trigger.tUpdate.valid) {
     tdata(csrCtrl.mem_trigger.tUpdate.bits.addr) := csrCtrl.mem_trigger.tUpdate.bits.tdata
   }
+  val triggerCanRaiseBpExp = csrCtrl.mem_trigger.triggerCanRaiseBpExp
 
   val backendTriggerTimingVec = VecInit(tdata.map(_.timing))
   val backendTriggerChainVec = VecInit(tdata.map(_.chain))
@@ -1028,25 +1028,9 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // -------------------------
     // Store Triggers
     // -------------------------
-    val hyuOut = io.mem_to_ooo.writebackHyuSta(i)
-    val storeTriggerHitVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
-    val storeTriggerCanFireVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
-
-    when(hybridUnits(i).io.stout.fire &&
-      FuType.isStore(hybridUnits(i).io.stout.bits.uop.fuType)) {
-      for (j <- 0 until TriggerNum) {
-        storeTriggerHitVec(j) := !tdata(j).select && TriggerCmp(
-          hyuOut.bits.debug.vaddr,
-          tdata(j).tdata2,
-          tdata(j).matchType,
-          tEnable(j) && tdata(j).store
-        )
-      }
-      TriggerCheckCanFire(TriggerNum, storeTriggerCanFireVec, storeTriggerHitVec, backendTriggerTimingVec, backendTriggerChainVec)
-
-      hyuOut.bits.uop.trigger.backendHit := storeTriggerHitVec
-      hyuOut.bits.uop.trigger.backendCanFire := storeTriggerCanFireVec
-    }
+    hybridUnits(i).io.fromCsrTrigger.tdataVec := tdata
+    hybridUnits(i).io.fromCsrTrigger.tEnableVec := tEnable
+    hybridUnits(i).io.fromCsrTrigger.triggerCanRaiseBpExp := triggerCanRaiseBpExp
 
   }
 
@@ -1070,6 +1054,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
   dtlb_reqs(L2toL1DLBPortIndex) <> io.l2_tlb_req
   dtlb_reqs(L2toL1DLBPortIndex).resp.ready := true.B
+  io.l2_pmp_resp := pmp_check(L2toL1DLBPortIndex).resp
 
   // StoreUnit
   for (i <- 0 until StdCnt) {
@@ -1091,6 +1076,13 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // dtlb
     stu.io.tlb          <> dtlb_st.head.requestor(i)
     stu.io.pmp          <> pmp_check(LduCnt + HyuCnt + 1 + i).resp
+
+    // -------------------------
+    // Store Triggers
+    // -------------------------
+    stu.io.fromCsrTrigger.tdataVec := tdata
+    stu.io.fromCsrTrigger.tEnableVec := tEnable
+    stu.io.fromCsrTrigger.triggerCanRaiseBpExp := triggerCanRaiseBpExp
 
     // prefetch
     stu.io.prefetch_req <> sbuffer.io.store_prefetch(i)
@@ -1166,26 +1158,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       stu.io.vecstout.ready := false.B
     }
     stu.io.vec_isFirstIssue := true.B // TODO
-    // -------------------------
-    // Store Triggers
-    // -------------------------
-    val storeTriggerHitVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
-    val storeTriggerCanFireVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
-
-    when(stOut(i).fire) {
-      for (j <- 0 until TriggerNum) {
-        storeTriggerHitVec(j) := !tdata(j).select && TriggerCmp(
-          stOut(i).bits.debug.vaddr,
-          tdata(j).tdata2,
-          tdata(j).matchType,
-          tEnable(j) && tdata(j).store
-        )
-      }
-      TriggerCheckCanFire(TriggerNum, storeTriggerCanFireVec, storeTriggerHitVec, backendTriggerTimingVec, backendTriggerChainVec)
-
-      stOut(i).bits.uop.trigger.backendHit := storeTriggerHitVec
-      stOut(i).bits.uop.trigger.backendCanFire := storeTriggerCanFireVec
-    }
   }
 
   // mmio store writeback will use store writeback port 0

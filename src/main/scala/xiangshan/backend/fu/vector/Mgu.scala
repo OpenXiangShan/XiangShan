@@ -93,25 +93,33 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
     ))
   }
 
+  // mask vd is at most 16 bits
+  private val maskOldVdBits = splitVdMask(oldVd, SewOH(info.eew))(vdIdx)
+  private val maskBits = splitVdMask(in.mask, SewOH(info.eew))(vdIdx)
+  private val maskVecByte = Wire(Vec(numBytes, UInt(1.W)))
+  maskVecByte.zipWithIndex.foreach { case (mask, i) =>
+    mask := Mux(maskBits(i), vd(i), Mux(info.ma, 1.U, maskOldVdBits(i)))
+  }
+  private val maskVd = maskVecByte.asUInt
+
   // the result of mask-generating inst
   private val maxVdIdx = 8
   private val meaningfulBitsSeq = Seq(16, 8, 4, 2)
   private val allPossibleResBit = Wire(Vec(4, Vec(maxVdIdx, UInt(vlen.W))))
-  private val catData = Mux(info.ta, ~0.U(vlen.W), oldVd)
 
   for (sew <- 0 to 3) {
     if (sew == 0) {
-      allPossibleResBit(sew)(maxVdIdx - 1) := Cat(vd(meaningfulBitsSeq(sew) - 1, 0),
+      allPossibleResBit(sew)(maxVdIdx - 1) := Cat(maskVd(meaningfulBitsSeq(sew) - 1, 0),
         oldVd(meaningfulBitsSeq(sew) * (maxVdIdx - 1) - 1, 0))
     } else {
-      allPossibleResBit(sew)(maxVdIdx - 1) := Cat(catData(vlen - 1, meaningfulBitsSeq(sew) * maxVdIdx),
-        vd(meaningfulBitsSeq(sew) - 1, 0), oldVd(meaningfulBitsSeq(sew) * (maxVdIdx - 1) - 1, 0))
+      allPossibleResBit(sew)(maxVdIdx - 1) := Cat(oldVd(vlen - 1, meaningfulBitsSeq(sew) * maxVdIdx),
+        maskVd(meaningfulBitsSeq(sew) - 1, 0), oldVd(meaningfulBitsSeq(sew) * (maxVdIdx - 1) - 1, 0))
     }
     for (i <- 1 until maxVdIdx - 1) {
-      allPossibleResBit(sew)(i) := Cat(catData(vlen - 1, meaningfulBitsSeq(sew) * (i + 1)),
-        vd(meaningfulBitsSeq(sew) - 1, 0), oldVd(meaningfulBitsSeq(sew) * i - 1, 0))
+      allPossibleResBit(sew)(i) := Cat(oldVd(vlen - 1, meaningfulBitsSeq(sew) * (i + 1)),
+        maskVd(meaningfulBitsSeq(sew) - 1, 0), oldVd(meaningfulBitsSeq(sew) * i - 1, 0))
     }
-    allPossibleResBit(sew)(0) := Cat(catData(vlen - 1, meaningfulBitsSeq(sew)), vd(meaningfulBitsSeq(sew) - 1, 0))
+    allPossibleResBit(sew)(0) := Cat(oldVd(vlen - 1, meaningfulBitsSeq(sew)), maskVd(meaningfulBitsSeq(sew) - 1, 0))
   }
 
   private val resVecBit = allPossibleResBit(info.eew)(vdIdx)
@@ -136,6 +144,20 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
 
   def elemIdxMapUElemIdx(elemIdx: UInt) = {
     Mux1H(eewOH, Seq.tabulate(eewOH.getWidth)(x => elemIdx(byteWidth - x - 1, 0)))
+  }
+
+  def splitVdMask(maskIn: UInt, sew: SewOH): Vec[UInt] = {
+    val maskWidth = maskIn.getWidth
+    val result = Wire(Vec(maskWidth / numBytes, UInt(numBytes.W)))
+    for ((resultData, i) <- result.zipWithIndex) {
+      resultData := Mux1H(Seq(
+        sew.is8 -> maskIn(i * numBytes + (numBytes - 1), i * numBytes),
+        sew.is16 -> Cat(0.U((numBytes - (numBytes / 2)).W), maskIn(i * (numBytes / 2) + (numBytes / 2) - 1, i * (numBytes / 2))),
+        sew.is32 -> Cat(0.U((numBytes - (numBytes / 4)).W), maskIn(i * (numBytes / 4) + (numBytes / 4) - 1, i * (numBytes / 4))),
+        sew.is64 -> Cat(0.U((numBytes - (numBytes / 8)).W), maskIn(i * (numBytes / 8) + (numBytes / 8) - 1, i * (numBytes / 8))),
+      ))
+    }
+    result
   }
 }
 

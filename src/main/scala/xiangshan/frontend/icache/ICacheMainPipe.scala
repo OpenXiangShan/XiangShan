@@ -300,7 +300,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   val s2_req_vaddr      = RegEnable(s1_req_vaddr, 0.U.asTypeOf(s1_req_vaddr), s1_fire)
   val s2_req_ptags      = RegEnable(s1_req_ptags, 0.U.asTypeOf(s1_req_ptags), s1_fire)
-  val s2_req_gpaddr     = RegEnable(s1_req_gpaddr, 0.U.asTypeOf(s1_req_gpaddr), s0_fire)
+  val s2_req_gpaddr     = RegEnable(s1_req_gpaddr, 0.U.asTypeOf(s1_req_gpaddr), s1_fire)
   val s2_doubleline     = RegEnable(s1_doubleline, 0.U.asTypeOf(s1_doubleline), s1_fire)
   val s2_excp_tlb_af    = RegEnable(s1_excp_tlb_af, 0.U.asTypeOf(s1_excp_tlb_af), s1_fire)
   val s2_excp_tlb_pf    = RegEnable(s1_excp_tlb_pf, 0.U.asTypeOf(s1_excp_tlb_pf), s1_fire)
@@ -347,35 +347,40 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     * monitor missUint response port
     ******************************************************************************
     */
-  val s2_MSHR_match = VecInit((0 until PortNumber).map(i => (s2_req_vSetIdx(i) === fromMSHR.bits.vSetIdx) &&
-                                                            (s2_req_ptags(i) === getPhyTagFromBlk(fromMSHR.bits.blkPaddr)) &&
-                                                            fromMSHR.valid && !fromMSHR.bits.corrupt))
+  val s2_MSHR_match = VecInit((0 until PortNumber).map( i =>
+    (s2_req_vSetIdx(i) === fromMSHR.bits.vSetIdx) &&
+    (s2_req_ptags(i) === getPhyTagFromBlk(fromMSHR.bits.blkPaddr)) &&
+    fromMSHR.valid  // we don't care about whether it's corrupt here
+  ))
   val s2_MSHR_hits  = Seq(s2_valid && s2_MSHR_match(0),
-                          s2_valid && (s2_MSHR_match(1) && s2_doubleline))
+                          s2_valid && s2_MSHR_match(1) && s2_doubleline)
   val s2_MSHR_datas = fromMSHR.bits.data.asTypeOf(Vec(ICacheDataBanks, UInt((blockBits/ICacheDataBanks).W)))
 
   val s2_bankIdxLow  = s2_req_offset >> log2Ceil(blockBytes/ICacheDataBanks)
-  val s2_bankMSHRHit = VecInit((0 until ICacheDataBanks).map(i => (i.U >= s2_bankIdxLow) && s2_MSHR_hits(0) ||
-                                                      (i.U < s2_bankIdxLow) && s2_MSHR_hits(1)))
+  val s2_bankMSHRHit = VecInit((0 until ICacheDataBanks).map( i =>
+    ((i.U >= s2_bankIdxLow) && s2_MSHR_hits(0)) || ((i.U < s2_bankIdxLow) && s2_MSHR_hits(1))
+  ))
 
-  (0 until ICacheDataBanks).foreach{i =>
+  (0 until ICacheDataBanks).foreach{ i =>
     when(s1_fire) {
       s2_datas := s1_datas
-    }.elsewhen(s2_bankMSHRHit(i)) {
+    }.elsewhen(s2_bankMSHRHit(i) && !fromMSHR.bits.corrupt) {
+      // if corrupt, no need to update s2_datas (it's wrong anyway), to save power
       s2_datas(i) := s2_MSHR_datas(i)
     }
   }
 
-  (0 until PortNumber).foreach{i =>
+  (0 until PortNumber).foreach{ i =>
     when(s1_fire) {
       s2_hits := s1_hits
     }.elsewhen(s2_MSHR_hits(i)) {
+      // update s2_hits even if it's corrupt, to let s2_fire
       s2_hits(i) := true.B
     }
   }
 
   val s2_corrupt = RegInit(VecInit(Seq.fill(PortNumber)(false.B)))
-  (0 until PortNumber).foreach{i =>
+  (0 until PortNumber).foreach{ i =>
     when(s1_fire) {
       s2_corrupt(i) := false.B
     }.elsewhen(s2_MSHR_hits(i)) {
@@ -422,7 +427,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     * response to IFU
     ******************************************************************************
     */
-  (0 until PortNumber).map{ i =>
+  (0 until PortNumber).foreach{ i =>
     if(i == 0) {
       toIFU(i).valid                        := s2_fire
       toIFU(i).bits.tlbExcp.pageFault       := s2_excp_tlb_pf(i)
@@ -431,6 +436,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
       toIFU(i).bits.tlbExcp.mmio            := s2_excp_pmp_mmio(0) && !s2_excp_tlb(0) && !s2_excp_pmp_af(0)
       toIFU(i).bits.data                    := s2_datas.asTypeOf(UInt(blockBits.W))
     } else {
+      /* Note: toIFU(1).bits.tlbExcp.xxx is already "&&ed" with doubleline before it goes into WayLookup (see IPrefetch.scala)
+       * so we actually don't need do "&&" again here,
+       * but as excp_pmp_xxx and corrupt does not, we keep all the "&&" logic here for clarity
+       */
       toIFU(i).valid                        := s2_fire && s2_doubleline
       toIFU(i).bits.tlbExcp.pageFault       := s2_excp_tlb_pf(i) && s2_doubleline
       toIFU(i).bits.tlbExcp.guestPageFault  := s2_excp_tlb_gpf(i) && s2_doubleline
@@ -440,7 +449,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     }
     toIFU(i).bits.vaddr                     := s2_req_vaddr(i)
     toIFU(i).bits.paddr                     := s2_req_paddr(i)
-    toIFU(i).bits.gpaddr                    := s2_req_gpaddr
+    toIFU(i).bits.gpaddr                    := s2_req_gpaddr  // Note: toIFU(1).bits.gpaddr is actually DontCare in current design
   }
 
   s2_flush := io.flush

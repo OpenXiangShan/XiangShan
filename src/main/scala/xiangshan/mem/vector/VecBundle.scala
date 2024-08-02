@@ -25,6 +25,7 @@ import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.PMPRespBundle
+import xiangshan.backend.fu.vector.Bundles.VEew
 import xiangshan.cache.mmu.{TlbCmd, TlbRequestIO}
 import xiangshan.cache._
 
@@ -46,7 +47,7 @@ class VLSBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBun
   val vm                  = Bool() // whether vector masking is enabled
   val usWholeReg          = Bool() // unit-stride, whole register load
   val usMaskReg           = Bool() // unit-stride, masked store/load
-  val eew                 = UInt(ewBits.W) // size of memory elements
+  val eew                 = VEew() // size of memory elements
   val sew                 = UInt(ewBits.W)
   val emul                = UInt(mulBits.W)
   val lmul                = UInt(mulBits.W)
@@ -71,6 +72,7 @@ class VLSBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBun
 
   val usLowBitsAddr       = UInt((log2Up(maxMemByteNum)).W)
   val usAligned128        = Bool()
+  val usMask              = UInt((VLENB*2).W) // for unit-stride split
 }
 
 object VSFQFeedbackType {

@@ -26,6 +26,7 @@ import xiangshan.backend.rename.RatReadPort
 import xiangshan.backend.Bundles._
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.FuType
+import xiangshan.backend.fu.wrapper.CSRToDecode
 import yunsuan.VpermType
 
 class DecodeStage(implicit p: Parameters) extends XSModule
@@ -52,6 +53,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     val vlRat = Vec(RenameWidth, Flipped(new RatReadPort(VlLogicRegs)))
     // csr control
     val csrCtrl = Input(new CustomCSRCtrlIO)
+    val fromCSR = Input(new CSRToDecode)
     val fusion = Vec(DecodeWidth - 1, Input(Bool()))
     // vtype update
     val isResumeVType = Input(Bool())
@@ -75,7 +77,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   private val outValids = io.out.map(_.valid)
   private val outValid = VecInit(outValids).asUInt.orR
   //readyFromRename Counter
-  val readyCounter = PriorityMuxDefault(outReadys.map(x => !x).zip((0 until RenameWidth).map(_.U)), RenameWidth.U)
+  val readyCounter = Mux(outReadys.head, RenameWidth.U, 0.U)
 
   val decoderComp = Module(new DecodeUnitComp)
   val decoders = Seq.fill(DecodeWidth)(Module(new DecodeUnit))
@@ -88,6 +90,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   //Simple 6
   decoders.zip(io.in).foreach { case (dst, src) => dst.io.enq.ctrlFlow := src.bits }
   decoders.foreach { case dst => dst.io.csrCtrl := io.csrCtrl }
+  decoders.foreach { case dst => dst.io.fromCSR := io.fromCSR }
   decoders.foreach { case dst => dst.io.enq.vtype := vtypeGen.io.vtype }
   decoders.foreach { case dst => dst.io.enq.vstart := io.vstart }
   val isComplexVec = VecInit(inValids.zip(decoders.map(_.io.deq.isComplex)).map { case (valid, isComplex) => valid && isComplex })

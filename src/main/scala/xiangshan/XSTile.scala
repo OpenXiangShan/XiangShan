@@ -18,12 +18,13 @@ package xiangshan
 
 import org.chipsalliance.cde.config.{Config, Parameters}
 import chisel3._
-import chisel3.util.{Valid, ValidIO}
+import chisel3.util.{Valid, ValidIO, log2Up}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.amba.axi4._
+import device.MsiInfoBundle
 import system.HasSoCParameter
 import top.{BusPerfMonitor, ArgParser, Generator}
 import utility.{DelayN, ResetGen, TLClientsMerger, TLEdgeBuffer, TLLogger, Constantin, ChiselDB, FileRegisters}
@@ -74,7 +75,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       })
     case None =>
   }
-  
+
   val core_l3_tpmeta_source_port = l2top.l2cache match {
     case Some(l2) => l2.tpmeta_source_node
     case None => None
@@ -92,6 +93,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   class XSTileImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
     val io = IO(new Bundle {
       val hartId = Input(UInt(hartIdLen.W))
+      val msiInfo = Input(ValidIO(new MsiInfoBundle))
       val reset_vector = Input(UInt(PAddrBits.W))
       val cpu_halt = Output(Bool())
       val debugTopDown = new Bundle {
@@ -100,9 +102,11 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       }
       val chi = if (enableCHI) Some(new PortIO) else None
       val nodeID = if (enableCHI) Some(Input(UInt(NodeIDWidth.W))) else None
+      val clintTime = Input(ValidIO(UInt(64.W)))
     })
 
     dontTouch(io.hartId)
+    dontTouch(io.msiInfo)
     if (!io.chi.isEmpty) { dontTouch(io.chi.get) }
 
     val core_soft_rst = core_reset_sink.in.head._1 // unused
@@ -110,6 +114,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     l2top.module.hartId.fromTile := io.hartId
     core.module.io.hartId := l2top.module.hartId.toCore
     core.module.io.reset_vector := l2top.module.reset_vector.toCore
+    core.module.io.msiInfo := io.msiInfo
+    core.module.io.clintTime := io.clintTime
     l2top.module.reset_vector.fromTile := io.reset_vector
     l2top.module.cpu_halt.fromCore := core.module.io.cpu_halt
     io.cpu_halt := l2top.module.cpu_halt.toTile
@@ -130,9 +136,10 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       core.module.io.debugTopDown.l2MissMatch := l2top.module.debugTopDown.l2MissMatch
       l2top.module.debugTopDown.robHeadPaddr := core.module.io.debugTopDown.robHeadPaddr
       l2top.module.debugTopDown.robTrueCommit := core.module.io.debugTopDown.robTrueCommit
+      l2top.module.l2_pmp_resp := core.module.io.l2_pmp_resp
       core.module.io.l2_tlb_req <> l2top.module.l2_tlb_req
     } else {
-      
+
       l2top.module.beu_errors.l2 <> 0.U.asTypeOf(l2top.module.beu_errors.l2)
       core.module.io.l2_hint.bits.sourceId := l2top.module.l2_hint.bits.sourceId
       core.module.io.l2_hint.bits.isKeyword := l2top.module.l2_hint.bits.isKeyword

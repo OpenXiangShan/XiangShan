@@ -32,6 +32,7 @@ import system.HasSoCParameter
 import top.BusPerfMonitor
 import utility._
 import xiangshan.cache.mmu.TlbRequestIO
+import xiangshan.backend.fu.PMPRespBundle
 
 class L1BusErrorUnitInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
   val ecc_error = Valid(UInt(soc.PAddrBits.W))
@@ -154,6 +155,7 @@ class L2Top()(implicit p: Parameters) extends LazyModule
     val chi = if (enableCHI) Some(IO(new PortIO)) else None
     val nodeID = if (enableCHI) Some(IO(Input(UInt(NodeIDWidth.W)))) else None
     val l2_tlb_req = IO(new TlbRequestIO(nRespDups = 2))
+    val l2_pmp_resp = IO(Flipped(new PMPRespBundle))
     val l2_hint = IO(ValidIO(new L2ToL1Hint()))
 
     val resetDelayN = Module(new DelayN(UInt(PAddrBits.W), 5))
@@ -191,7 +193,11 @@ class L2Top()(implicit p: Parameters) extends LazyModule
       l2.io.l2_tlb_req.resp.bits.paddr.head := l2_tlb_req.resp.bits.paddr.head
       l2.io.l2_tlb_req.resp.bits.miss := l2_tlb_req.resp.bits.miss
       l2.io.l2_tlb_req.resp.bits.excp.head <> l2_tlb_req.resp.bits.excp.head
-
+      l2.io.l2_tlb_req.pmp_resp.ld := l2_pmp_resp.ld
+      l2.io.l2_tlb_req.pmp_resp.st := l2_pmp_resp.st
+      l2.io.l2_tlb_req.pmp_resp.instr := l2_pmp_resp.instr
+      l2.io.l2_tlb_req.pmp_resp.mmio := l2_pmp_resp.mmio
+      l2.io.l2_tlb_req.pmp_resp.atomic := l2_pmp_resp.atomic
       l2cache.get match {
         case l2cache: TL2CHICoupledL2 =>
           val l2 = l2cache.module

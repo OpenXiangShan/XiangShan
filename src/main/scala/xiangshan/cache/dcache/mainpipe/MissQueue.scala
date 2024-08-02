@@ -767,7 +767,7 @@ class MissEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule
   io.req_addr.valid := req_valid
   io.req_addr.bits := req.addr
 
-  io.refill_info.valid := w_grantlast
+  io.refill_info.valid := req_valid && w_grantlast
   io.refill_info.bits.store_data := refill_and_store_data.asUInt
   io.refill_info.bits.store_mask := ~0.U(blockBytes.W)
   io.refill_info.bits.miss_param := grant_param
@@ -861,9 +861,9 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
     val probe_addr = Input(UInt(PAddrBits.W))
     val probe_block = Output(Bool())
 
-    // block release
-    val release_addr = Flipped(ValidIO(UInt(PAddrBits.W)))
-    val release_block = Output(Bool())
+    // block replace when release an addr valid in mshr
+    val replace_addr = Flipped(ValidIO(UInt(PAddrBits.W)))
+    val replace_block = Output(Bool())
 
     val full = Output(Bool())
 
@@ -1215,7 +1215,7 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
 
   io.probe_block := Cat(probe_block_vec).orR
 
-  io.release_block := io.release_addr.valid && Cat(entries.map(e => e.io.req_addr.valid && e.io.req_addr.bits === io.release_addr.bits) ++ miss_req_pipe_reg.map(r => r.block_match(io.release_addr.bits))).orR
+  io.replace_block := io.replace_addr.valid && Cat(entries.map(e => e.io.req_addr.valid && e.io.req_addr.bits === io.replace_addr.bits) ++ miss_req_pipe_reg.map(_.block_match(io.replace_addr.bits))).orR
 
   io.full := ~Cat(entries.map(_.io.primary_ready)).andR
 

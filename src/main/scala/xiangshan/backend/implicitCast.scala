@@ -1,5 +1,7 @@
 package xiangshan.backend
 
+import scala.language.implicitConversions
+
 object implicitCast {
   implicit def IndexedSeqCast[T](seq: scala.collection.IndexedSeq[T]): IndexedSeq[T] = {
     seq.toIndexedSeq

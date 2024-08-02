@@ -71,6 +71,16 @@ object Bundles {
       res.vlmul := vtype.vlmul
       res
     }
+
+    def initVtype()(implicit p: Parameters) : VType = {
+      val res = Wire(VType())
+      res.illegal := true.B
+      res.vma := false.B
+      res.vta := false.B
+      res.vsew := 0.U
+      res.vlmul := 0.U
+      res
+    }
   }
 
   object VsetVType {
@@ -161,13 +171,19 @@ object Bundles {
     def width(implicit p: Parameters) = p(XSCoreParamsKey).vlWidth
   }
 
+  object Vstart {
+    def apply()(implicit p: Parameters): UInt = UInt(width.W)
+
+    def width(implicit p: Parameters) = p(XSCoreParamsKey).vlWidth - 1
+  }
+
   object Vxsat extends NamedUInt(1)
 
   object Vxrm extends NamedUInt(2)
 
   object Nf extends NamedUInt(3)
 
-  object VEew extends NamedUInt(3)
+  object VEew extends NamedUInt(2)
 
   object NumLsElem {
     def apply()(implicit p: Parameters): UInt = UInt(width.W)

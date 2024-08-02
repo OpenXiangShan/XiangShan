@@ -94,6 +94,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
       val riscv_rst_vec = Input(UInt(38.W))
       val chi = new PortIO
       val nodeID = Input(UInt(p(SoCParamsKey).NodeIDWidth.W))
+      val clintTime = Input(ValidIO(UInt(64.W)))
     })
     // imsic axi4lite io
     val imsic_m_s = wrapper.u_imsic_bus_top.module.m_s.map(x => IO(chiselTypeOf(x)))
@@ -129,6 +130,10 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc with HasSoCParameter
     core_with_l2.module.io.chi.get <> io.chi
     io.riscv_halt := core_with_l2.module.io.cpu_halt
     core_with_l2.module.io.reset_vector := io.riscv_rst_vec
+    core_with_l2.module.io.clintTime := io.clintTime
+
+    core_with_l2.module.io.msiInfo.valid := wrapper.u_imsic_bus_top.module.o_msi_info_vld
+    core_with_l2.module.io.msiInfo.bits.info := wrapper.u_imsic_bus_top.module.o_msi_info
     // tie off core soft reset
     core_rst_node.out.head._1 := false.B.asAsyncReset
 

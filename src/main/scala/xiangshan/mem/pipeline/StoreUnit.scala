@@ -28,6 +28,7 @@ import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.FuType._
 import xiangshan.backend.ctrlblock.DebugLsInfoBundle
+import xiangshan.backend.fu.NewCSR._
 import xiangshan.cache.mmu.{TlbCmd, TlbReq, TlbRequestIO, TlbResp}
 import xiangshan.cache.{DcacheStoreRequestIO, DCacheStoreIO, MemoryOpConstants, HasDCacheParameters, StorePrefetchReq}
 
@@ -60,6 +61,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     // vector
     val vecstin           = Flipped(Decoupled(new VecPipeBundle(isVStore = true)))
     val vec_isFirstIssue  = Input(Bool())
+    // trigger
+    val fromCsrTrigger = Input(new CsrTriggerBundle)
   })
 
   val s1_ready, s2_ready, s3_ready = WireInit(false.B)
@@ -101,14 +104,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s0_mBIndex      = s0_vecstin.mBIndex
 
   // generate addr
-  // val saddr = s0_in.bits.src(0) + SignExt(s0_in.bits.uop.imm(11,0), VAddrBits)
-  val imm12 = WireInit(s0_uop.imm(11,0))
-  val saddr_lo = s0_stin.src(0)(11,0) + Cat(0.U(1.W), imm12)
-  val saddr_hi = Mux(saddr_lo(12),
-    Mux(imm12(11), s0_stin.src(0)(VAddrBits-1, 12), s0_stin.src(0)(VAddrBits-1, 12)+1.U),
-    Mux(imm12(11), s0_stin.src(0)(VAddrBits-1, 12)+SignExt(1.U, VAddrBits-12), s0_stin.src(0)(VAddrBits-1, 12)),
-  )
-  val s0_saddr = Cat(saddr_hi, saddr_lo(11,0))
+  val s0_saddr = s0_stin.src(0) + SignExt(s0_uop.imm(11,0), VAddrBits)
   val s0_vaddr = Mux(
     s0_use_flow_rs,
     s0_saddr,
@@ -144,6 +140,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.tlb.req_kill                    := false.B
   io.tlb.req.bits.hyperinst          := LSUOpType.isHsv(s0_uop.fuOpType)
   io.tlb.req.bits.hlvx               := false.B
+  io.tlb.req.bits.pmp_addr           := DontCare
 
   // Dcache access here: not **real** dcache write
   // just read meta and tag in dcache, to find out the store will hit or miss
@@ -273,6 +270,17 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s1_out.uop.exceptionVec(storePageFault)      := io.tlb.resp.bits.excp(0).pf.st && s1_vecActive
   s1_out.uop.exceptionVec(storeAccessFault)    := io.tlb.resp.bits.excp(0).af.st && s1_vecActive
   s1_out.uop.exceptionVec(storeGuestPageFault) := io.tlb.resp.bits.excp(0).gpf.st && s1_vecActive
+
+  // trigger
+  val storeTrigger = Module(new StoreTrigger)
+  storeTrigger.io.fromCsrTrigger.tdataVec             := io.fromCsrTrigger.tdataVec
+  storeTrigger.io.fromCsrTrigger.tEnableVec           := io.fromCsrTrigger.tEnableVec
+  storeTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.fromCsrTrigger.triggerCanRaiseBpExp
+  storeTrigger.io.fromStore.vaddr                     := s1_in.vaddr
+
+  s1_out.uop.trigger.backendHit       := storeTrigger.io.toStore.triggerHitVec
+  s1_out.uop.trigger.backendCanFire   := storeTrigger.io.toStore.triggerCanFireVec
+  s1_out.uop.exceptionVec(breakPoint) := storeTrigger.io.toStore.breakPointExp
 
   // scalar store and scalar load nuke check, and also other purposes
   io.lsq.valid     := s1_valid && !s1_in.isHWPrefetch

@@ -1,7 +1,6 @@
 package xiangshan.backend.fu
 
 import chisel3._
-import chisel3.internal.firrtl.Width
 import chisel3.util.BitPat
 import utils.EnumUtils.OHEnumeration
 import org.chipsalliance.cde.config.Parameters
@@ -131,7 +130,8 @@ object FuType extends OHEnumeration {
   val vecArith = vecOPI ++ vecOPF
   val vecMem = Seq(vldu, vstu, vsegldu, vsegstu)
   val vecArithOrMem = vecArith ++ vecMem
-  val vecAll = vecVSET ++ vecMem
+  val vecAll = vecVSET ++ vecArithOrMem
+  val fpOP = fpArithAll ++ Seq(i2f, i2v)
 
   def X = BitPat.N(num) // Todo: Don't Care
 

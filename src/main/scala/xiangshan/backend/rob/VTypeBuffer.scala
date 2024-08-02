@@ -104,7 +104,7 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   private val walkPtrVecNext = VecInit((0 until CommitWidth).map(x => walkPtrNext + x.U))
 
   // get enque vtypes in io.req
-  private val enqVTypes = VecInit(io.req.map(req => req.bits.vpu.vtype))
+  private val enqVTypes = VecInit(io.req.map(req => req.bits.vpu.specVType))
   private val enqValids = VecInit(io.req.map(_.valid))
   private val enqVType = PriorityMux(enqValids.zip(enqVTypes).map { case (valid, vtype) => valid -> vtype })
 
@@ -263,7 +263,7 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
     true.B
   )
 
-  private val decodeResumeVType = WireInit(0.U.asTypeOf(new ValidIO(VType())))
+  private val decodeResumeVType = RegInit(0.U.asTypeOf(new ValidIO(VType())))
   private val newestVType = PriorityMux(walkValidVec.zip(infoVec).map { case(walkValid, info) => walkValid -> info }.reverse)
   private val newestArchVType = PriorityMux(commitValidVec.zip(infoVec).map { case(commitValid, info) => commitValid -> info }.reverse)
   private val commitVTypeValid = commitValidVec.asUInt.orR

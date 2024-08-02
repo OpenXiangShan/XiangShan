@@ -1,5 +1,6 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+* Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
 * Copyright (c) 2020-2021 Peng Cheng Laboratory
 *
 * XiangShan is licensed under Mulan PSL v2.
@@ -152,6 +153,8 @@ trait HasTlbConst extends HasXSParameter {
   def replaceWrapper(v: Seq[Bool], lruIdx: UInt): UInt = {
     replaceWrapper(VecInit(v).asUInt, lruIdx)
   }
+
+  import scala.language.implicitConversions
 
   implicit def hptwresp_to_tlbperm(hptwResp: HptwResp): TlbPermBundle = {
     val tp = Wire(new TlbPermBundle)
