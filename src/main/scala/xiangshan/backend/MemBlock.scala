@@ -295,8 +295,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   })
 
   // reset signals of frontend & backend are generated in memblock
-  val reset_io_frontend = IO(Output(Reset()))
-  val reset_io_backend = IO(Output(Reset()))
+  val reset_backend = IO(Output(Reset()))
 
   dontTouch(io.externalInterrupt)
   dontTouch(io.inner_hartId)
@@ -540,6 +539,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val tlbcsr = RegNext(RegNext(io.ooo_to_mem.tlbCsr))
   private val ptw = outer.ptw.module
   private val ptw_to_l2_buffer = outer.ptw_to_l2_buffer.module
+  private val l1d_to_l2_buffer = outer.l1d_to_l2_buffer.module
   ptw.io.hartId := io.hartId
   ptw.io.sfence <> sfence
   ptw.io.csr.tlb <> tlbcsr
@@ -553,18 +553,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   }
 
   // dtlb
-  val dtlb_ld = VecInit(Seq.fill(1){
-    val tlb_ld = Module(new TLBNonBlock(LduCnt + HyuCnt + 1, 2, ldtlbParams))
-    tlb_ld.io // let the module have name in waveform
-  })
-  val dtlb_st = VecInit(Seq.fill(1){
-    val tlb_st = Module(new TLBNonBlock(StaCnt, 1, sttlbParams))
-    tlb_st.io // let the module have name in waveform
-  })
-  val dtlb_prefetch = VecInit(Seq.fill(1){
-    val tlb_prefetch = Module(new TLBNonBlock(2, 2, pftlbParams))
-    tlb_prefetch.io // let the module have name in waveform
-  })
+  val dtlb_ld_tlb_ld = Module(new TLBNonBlock(LduCnt + HyuCnt + 1, 2, ldtlbParams))
+  val dtlb_st_tlb_st = Module(new TLBNonBlock(StaCnt, 1, sttlbParams))
+  val dtlb_prefetch_tlb_prefetch = Module(new TLBNonBlock(2, 2, pftlbParams))
+  val dtlb_ld = Seq(dtlb_ld_tlb_ld.io)
+  val dtlb_st = Seq(dtlb_st_tlb_st.io)
+  val dtlb_prefetch = Seq(dtlb_prefetch_tlb_prefetch.io)
   /* tlb vec && constant variable */
   val dtlb = dtlb_ld ++ dtlb_st ++ dtlb_prefetch
   val (dtlb_ld_idx, dtlb_st_idx, dtlb_pf_idx) = (0, 1, 2)
@@ -654,7 +648,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val pmp = Module(new PMP())
   pmp.io.distribute_csr <> csrCtrl.distribute_csr
 
-  val pmp_check = VecInit(Seq.fill(DTlbSize)(Module(new PMPChecker(4, leaveHitMux = true)).io))
+  val pmp_checkers = Seq.fill(DTlbSize)(Module(new PMPChecker(4, leaveHitMux = true)))
+  val pmp_check = pmp_checkers.map(_.io)
   for ((p,d) <- pmp_check zip dtlb_pmps) {
     p.apply(tlbcsr.priv.dmode, pmp.io.pmp, pmp.io.pma, d)
     require(p.req.bits.size.getWidth == d.bits.size.getWidth)
@@ -1612,22 +1607,6 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.outer_l2_pf_enable := io.inner_l2_pf_enable
   // io.inner_hc_perfEvents <> io.outer_hc_perfEvents
 
-  if (p(DebugOptionsKey).ResetGen) {
-    val resetTree = ResetGenNode(
-      Seq(
-        CellNode(reset_io_frontend),
-        CellNode(reset_io_backend),
-        ModuleNode(itlbRepeater3),
-        ModuleNode(dtlbRepeater),
-        ModuleNode(ptw),
-        ModuleNode(ptw_to_l2_buffer)
-      )
-    )
-    ResetGen(resetTree, reset, !p(DebugOptionsKey).ResetGen)
-  } else {
-    reset_io_frontend := DontCare
-    reset_io_backend := DontCare
-  }
   // vector segmentUnit
   vSegmentUnit.io.in.bits <> io.ooo_to_mem.issueVldu.head.bits
   vSegmentUnit.io.in.valid := isSegment && io.ooo_to_mem.issueVldu.head.valid// is segment instruction
@@ -1639,6 +1618,36 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   vSegmentUnit.io.rdcache.resp.bits := dcache.io.lsu.load(0).resp.bits
   vSegmentUnit.io.rdcache.resp.valid := dcache.io.lsu.load(0).resp.valid
   vSegmentUnit.io.rdcache.s2_bank_conflict := dcache.io.lsu.load(0).s2_bank_conflict
+
+  // reset tree of MemBlock
+  if (p(DebugOptionsKey).ResetGen) {
+    val leftResetTree = ResetGenNode(
+      Seq(
+        ModuleNode(ptw),
+        ModuleNode(ptw_to_l2_buffer),
+        ModuleNode(lsq),
+        ModuleNode(dtlb_st_tlb_st),
+        ModuleNode(dtlb_prefetch_tlb_prefetch),
+        ModuleNode(pmp)
+      )
+      ++ pmp_checkers.map(ModuleNode(_))
+      ++ (if (prefetcherOpt.isDefined) Seq(ModuleNode(prefetcherOpt.get)) else Nil)
+      ++ (if (l1PrefetcherOpt.isDefined) Seq(ModuleNode(l1PrefetcherOpt.get)) else Nil)
+    )
+    val rightResetTree = ResetGenNode(
+      Seq(
+        ModuleNode(sbuffer),
+        ModuleNode(dtlb_ld_tlb_ld),
+        ModuleNode(dcache),
+        ModuleNode(l1d_to_l2_buffer),
+        CellNode(reset_backend)
+      )
+    )
+    ResetGen(leftResetTree, reset, sim = false)
+    ResetGen(rightResetTree, reset, sim = false)
+  } else {
+    reset_backend := DontCare
+  }
 
   // top-down info
   dcache.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr
