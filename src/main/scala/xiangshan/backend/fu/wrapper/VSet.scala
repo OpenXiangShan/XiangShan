@@ -109,7 +109,8 @@ class VSetRvfWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
 
   out.res.data := Mux(isReadVl, oldVL,
                     Mux(vsetModule.io.out.vconfig.vtype.illegal, 0.U,
-                      Mux(VSETOpType.isKeepVl(in.ctrl.fuOpType), oldVL, vsetModule.io.out.vconfig.vl)))
+                      Mux(VSETOpType.isKeepVl(in.ctrl.fuOpType),
+                        Mux(oldVL < vlmax, oldVL, vlmax), vsetModule.io.out.vconfig.vl)))
 
   if (cfg.writeVlRf) io.vtype.get.bits := vsetModule.io.out.vconfig.vtype
   if (cfg.writeVlRf) io.vtype.get.valid := isVsetvl && io.out.valid
