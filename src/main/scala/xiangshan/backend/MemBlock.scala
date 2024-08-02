@@ -1332,8 +1332,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   val vlsuCanAccept = (0 until VlduCnt).map(
     i => vsSplit(i).io.in.ready && vlSplit(i).io.in.ready
   )
-  val isSegment     = (io.ooo_to_mem.issueVldu.head.bits.uop.vpu.nf =/= 0.U) &&
-                    !(io.ooo_to_mem.issueVldu.head.bits.uop.fuOpType === VlduType.vlr || io.ooo_to_mem.issueVldu.head.bits.uop.fuOpType === VstuType.vsr)
+  val isSegment     = io.ooo_to_mem.issueVldu.head.valid && isVsegls(io.ooo_to_mem.issueVldu.head.bits.uop.fuType)
 
   // init port
   /**
