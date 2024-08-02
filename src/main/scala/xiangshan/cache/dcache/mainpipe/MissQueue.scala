@@ -925,11 +925,16 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
         else false.B
   )}
   val merge_with_port_req = (0 until cfg.nMSHRPorts).map(i => Cat(match_with_port_req(i)).orR && !reject(i)) //Remove last two cond
+  val merge_with_port_req_id = (0 until cfg.nMSHRPorts)map(i => PriorityEncoder(match_with_port_req(i)))
   dontTouch(merge_with_port_req(0))
   dontTouch(merge_with_port_req(1))
   dontTouch(merge_with_port_req(2))
   dontTouch(merge_with_port_req(3))
-  val merge = (0 until cfg.nMSHRPorts).map(i => ParallelORR(Cat(secondary_ready_vec(i) ++ merge_with_pipe_req(i))) && !merge_with_port_req(i))
+  dontTouch(merge_with_port_req_id(0))
+  dontTouch(merge_with_port_req_id(1))
+  dontTouch(merge_with_port_req_id(2))
+  dontTouch(merge_with_port_req_id(3))
+  val merge = VecInit((0 until cfg.nMSHRPorts).map(i => ParallelORR(Cat(secondary_ready_vec(i) ++ merge_with_pipe_req(i))) && !merge_with_port_req(i)))
   // val merge = ParallelORR(Cat(secondary_ready_vec ++ Seq(miss_req_pipe_reg.merge_req(io.req.bits))))
   // val reject = ParallelORR(Cat(secondary_reject_vec ++ Seq(miss_req_pipe_reg.reject_req(io.req.bits))))
   // val alloc = !reject && !merge && ParallelORR(Cat(primary_ready_vec))
@@ -966,12 +971,13 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
   }
 
   // TODO: Complete the enq logic: req_valid + entry_valid
-  val req_alloc_valid = (0 until cfg.nMSHRPorts).map(i => 
-    (PopCount(req_alloc_priority(i)) === 3.U && primary_ready_cnt >= 1.U) ||
-    (PopCount(req_alloc_priority(i)) === 2.U && primary_ready_cnt >= 2.U) ||
-    (PopCount(req_alloc_priority(i)) === 1.U && primary_ready_cnt >= 3.U) ||
-    (PopCount(req_alloc_priority(i)) === 0.U && primary_ready_cnt >= 4.U)
-  )
+  val req_alloc_valid = VecInit((0 until cfg.nMSHRPorts).map(i =>
+    // (PopCount(req_alloc_priority(i)) === 3.U && primary_ready_cnt >= 1.U) ||
+    // (PopCount(req_alloc_priority(i)) === 2.U && primary_ready_cnt >= 2.U) ||
+    // (PopCount(req_alloc_priority(i)) === 1.U && primary_ready_cnt >= 3.U) ||
+    // (PopCount(req_alloc_priority(i)) === 0.U && primary_ready_cnt >= 4.U)
+    primary_ready_cnt >= cfg.nMSHRPorts.U - PopCount(req_alloc_priority(i))
+  ))
   dontTouch(req_alloc_valid(0))
   dontTouch(req_alloc_valid(1))
   dontTouch(req_alloc_valid(2))
@@ -985,9 +991,10 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
     ))
   )
   
+  val merge_with_port_req_success = (0 until cfg.nMSHRPorts).map(i => merge_with_port_req(i) && (req_alloc_valid(merge_with_port_req_id(i)) || merge(merge_with_port_req_id(i))))
   val alloc = (0 until cfg.nMSHRPorts).map(i => !reject(i) && !merge(i) && !merge_with_port_req(i) && req_alloc_valid(i))
   // val accept = alloc || merge
-  val accept = (0 until cfg.nMSHRPorts).map(i => (alloc(i) || merge(i) || merge_with_port_req(i)) && !io.req(i).bits.cancel)
+  val accept = (0 until cfg.nMSHRPorts).map(i => (alloc(i) || merge(i) || merge_with_port_req_success(i)) && !io.req(i).bits.cancel)
 
   // val req_mshr_handled_vec = entries.map(_.io.req_handled_by_this_entry) // TODO
   val req_mshr_handled_vec = (0 until cfg.nMSHRPorts).map(i => entries.map(_.io.req_handled_by_this_entry(i) && !merge_with_port_req(i)))
@@ -1009,12 +1016,12 @@ class MissQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule wi
     )
   )
   io.resp.zipWithIndex.foreach{ case(resp, i) =>
-    resp.id := Mux(merge_with_port_req(i),
+    resp.id := Mux(merge_with_port_req_success(i),
                   PriorityMux(match_with_port_req(i), resp_init_id),
                   resp_init_id(i)
                 )
-    resp.handled := Cat(req_mshr_handled_vec(i)).orR || req_pipeline_reg_handled(i) || merge_with_port_req(i)
-    resp.merged := merge(i) || merge_with_port_req(i)
+    resp.handled := Cat(req_mshr_handled_vec(i)).orR || req_pipeline_reg_handled(i) || merge_with_port_req_success(i)
+    resp.merged := merge(i) || merge_with_port_req_success(i)
   }
   // io.resp.id := Mux(!req_pipeline_reg_handled, OHToUInt(req_mshr_handled_vec), miss_req_pipe_reg.mshr_id)
   // io.resp.handled := Cat(req_mshr_handled_vec).orR || req_pipeline_reg_handled
