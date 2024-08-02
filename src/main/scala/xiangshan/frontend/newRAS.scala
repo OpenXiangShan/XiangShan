@@ -413,11 +413,12 @@ class RAS(implicit p: Parameters) extends BasePredictor {
         sctr := 0.U
       }
       // if we are draining the capacity of spec queue, force move BOS forward
-      when (specPtrInc(currentTOSW).value === BOS.value) {
+      when (specPtrInc(currentTOSW) === BOS) {
         BOS := specPtrInc(BOS)
         spec_overflowed := true.B;
       }
     }
+    XSPerfAccumulate("spec_overflowed", TOSW.value === BOS.value)
 
     when (io.spec_push_valid) {
       specPush(io.spec_push_addr, ssp, sctr, TOSR, TOSW, topEntry)
