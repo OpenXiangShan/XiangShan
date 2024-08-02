@@ -526,7 +526,7 @@ def get_free_cores(n):
             try:
                 joint = ' '.join(proc.cmdline())
                 numa_match = numa_re.match(joint)
-                if numa_match:
+                if numa_match and 'ssh' not in proc.name():
                     disable_cores.extend(range(int(numa_match.group(1)), int(numa_match.group(2)) + 1))
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 pass
