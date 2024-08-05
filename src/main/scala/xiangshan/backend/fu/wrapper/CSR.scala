@@ -269,6 +269,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       custom.soft_prefetch_enable             := csrMod.io.status.custom.soft_prefetch_enable
       custom.cache_error_enable               := csrMod.io.status.custom.cache_error_enable
       custom.uncache_write_outstanding_enable := csrMod.io.status.custom.uncache_write_outstanding_enable
+      custom.hd_misalign_st_enable            := csrMod.io.status.custom.hd_misalign_st_enable
+      custom.hd_misalign_ld_enable            := csrMod.io.status.custom.hd_misalign_ld_enable
       // Rename
       custom.fusion_enable            := csrMod.io.status.custom.fusion_enable
       custom.wfi_enable               := csrMod.io.status.custom.wfi_enable
