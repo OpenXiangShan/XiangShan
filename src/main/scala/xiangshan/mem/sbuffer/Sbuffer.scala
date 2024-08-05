@@ -317,7 +317,7 @@ class Sbuffer(implicit p: Parameters)
 
   val inptags = io.in.map(in => getPTag(in.bits.addr))
   val invtags = io.in.map(in => getVTag(in.bits.vaddr))
-  val sameTag = inptags(0) === inptags(1)
+  val sameTag = inptags(0) === inptags(1) && io.in(0).valid && io.in(1).valid && io.in(0).bits.vecValid && io.in(1).bits.vecValid
   val firstWord = getVWord(io.in(0).bits.addr)
   val secondWord = getVWord(io.in(1).bits.addr)
   // merge condition
