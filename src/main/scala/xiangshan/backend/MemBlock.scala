@@ -781,7 +781,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
       val vsegmentDtlbReqValid = vSegmentUnit.io.dtlb.req.valid // segment tlb resquest need to delay 1 cycle
       dtlb_reqs.take(LduCnt)(i).req.valid := loadUnits(i).io.tlb.req.valid || RegNext(vsegmentDtlbReqValid)
       vSegmentUnit.io.dtlb.req.ready      := dtlb_reqs.take(LduCnt)(i).req.ready
-      dtlb_reqs.take(LduCnt)(i).req.bits  := Mux1H(Seq(
+      dtlb_reqs.take(LduCnt)(i).req.bits  := ParallelPriorityMux(Seq(
         RegNext(vsegmentDtlbReqValid)     -> RegEnable(vSegmentUnit.io.dtlb.req.bits, vsegmentDtlbReqValid),
         loadUnits(i).io.tlb.req.valid     -> loadUnits(i).io.tlb.req.bits
       ))
