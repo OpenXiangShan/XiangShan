@@ -142,6 +142,7 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   private val deqEntries = WireDefault(VecInit.fill(DecodeWidth)(0.U.asTypeOf(Valid(new IBufEntry))))
   // Output register
   private val outputEntries = RegInit(VecInit.fill(DecodeWidth)(0.U.asTypeOf(Valid(new IBufEntry))))
+  private val outputEntriesValidNum = PriorityMuxDefault(outputEntries.map(_.valid).zip(Seq.range(1, DecodeWidth).map(_.U)).reverse.toSeq, 0.U)
 
   // Between Bank
   private val deqBankPtrVec: Vec[IBufBankPtr] = RegInit(VecInit.tabulate(DecodeWidth)(_.U.asTypeOf(new IBufBankPtr)))
@@ -162,12 +163,11 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
 
   // empty and decode can accept insts
   val useBypass = enqPtr === deqPtr && decodeCanAccept
-  val currentOutUseBypass = RegInit(false.B)
 
   // The number of decode accepted insts.
   // Since decode promises accepting insts in order, use priority encoder to simplify the accumulation.
-  private val numOut: UInt = PriorityMuxDefault(io.out.map(x => !x.ready) zip (0 until DecodeWidth).map(_.U), DecodeWidth.U)
-  private val numDeq = Mux(useBypass || currentOutUseBypass, 0.U, numOut)
+  private val numOut = Wire(UInt(log2Ceil(DecodeWidth).W))
+  private val numDeq = numOut
 
   // counter current number of valid
   val numValid = distanceBetween(enqPtr, deqPtr)
@@ -176,22 +176,33 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   val numValidNext = numValid + numEnq - numDeq
   val allowEnq = RegInit(true.B)
   val numFromFetch = Mux(io.in.valid, PopCount(io.in.bits.enqEnable), 0.U)
-  val numBypass = PopCount(bypassEntries.map(_.valid))
 
   allowEnq := (IBufSize - PredictWidth).U >= numValidNext // Disable when almost full
 
   val enqOffset = VecInit.tabulate(PredictWidth)(i => PopCount(io.in.bits.valid.asBools.take(i)))
   val enqData = VecInit.tabulate(PredictWidth)(i => Wire(new IBufEntry).fromFetch(io.in.bits, i))
 
+  val outputEntriesIsNotFull = !outputEntries(DecodeWidth-1).valid
+  when(decodeCanAccept) {
+    numOut := Mux(numValid >= DecodeWidth.U, DecodeWidth.U, numValid)
+  }.elsewhen(outputEntriesIsNotFull) {
+    numOut := Mux(numValid >= DecodeWidth.U - outputEntriesValidNum, DecodeWidth.U - outputEntriesValidNum, numValid)
+  }.otherwise {
+    numOut := 0.U
+  }
+  val numBypass = Wire(UInt(log2Ceil(DecodeWidth).W))
   // when using bypass, bypassed entries do not enqueue
   when(useBypass) {
     when(numFromFetch >= DecodeWidth.U) {
       numTryEnq := numFromFetch - DecodeWidth.U
+      numBypass := DecodeWidth.U
     } .otherwise {
       numTryEnq := 0.U
+      numBypass := numFromFetch
     }
   } .otherwise {
     numTryEnq := numFromFetch
+    numBypass := 0.U
   }
 
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -220,18 +231,17 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
       io.valid := reg.valid
       io.bits := reg.bits.toCtrlFlow
   }
-  (outputEntries zip bypassEntries zip deqEntries).zipWithIndex.foreach {
-    case (((out, bypass), deq), i) =>
+  (outputEntries zip bypassEntries).zipWithIndex.foreach {
+    case ((out, bypass), i) =>
       when(decodeCanAccept) {
         when(useBypass && io.in.valid) {
           out := bypass
-          currentOutUseBypass := true.B
-        }.elsewhen(currentOutUseBypass && !io.out(0).ready) {
-          currentOutUseBypass := true.B
         }.otherwise {
-          out := deq
-          currentOutUseBypass := false.B
+          out := deqEntries(i)
         }
+      }.elsewhen(outputEntriesIsNotFull){
+        out.valid := deqEntries(i).valid
+        out.bits := Mux(i.U < outputEntriesValidNum, out.bits, VecInit(deqEntries.take(i + 1).map(_.bits))(i.U - outputEntriesValidNum))
       }
   }
 
@@ -271,20 +281,26 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   // Dequeue
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-  val validVec = Mux(numValidAfterDeq >= DecodeWidth.U,
-    ((1 << DecodeWidth) - 1).U,
-    UIntToMask(numValidAfterDeq(log2Ceil(DecodeWidth) - 1, 0), DecodeWidth)
-  )
+  val outputEntriesValidNumNext = Wire(UInt(log2Ceil(DecodeWidth).W))
+  XSError(outputEntriesValidNumNext > DecodeWidth.U, "Ibuffer: outputEntriesValidNumNext > DecodeWidth.U")
+  val validVec = UIntToMask(outputEntriesValidNumNext(log2Ceil(DecodeWidth) - 1, 0), DecodeWidth)
+  when(decodeCanAccept) {
+    outputEntriesValidNumNext := Mux(useBypass, numBypass, numDeq)
+  }.elsewhen(outputEntriesIsNotFull) {
+    outputEntriesValidNumNext := outputEntriesValidNum + numDeq
+  }.otherwise {
+    outputEntriesValidNumNext := outputEntriesValidNum
+  }
   // Data
   // Read port
   // 2-stage, IBufNBank * (bankSize -> 1) + IBufNBank -> 1
   // Should be better than IBufSize -> 1 in area, with no significant latency increase
   private val readStage1: Vec[IBufEntry] = VecInit.tabulate(IBufNBank)(
-    bankID => Mux1H(UIntToOH(deqInBankPtrNext(bankID).value), bankedIBufView(bankID))
+    bankID => Mux1H(UIntToOH(deqInBankPtr(bankID).value), bankedIBufView(bankID))
   )
   for (i <- 0 until DecodeWidth) {
     deqEntries(i).valid := validVec(i)
-    deqEntries(i).bits := Mux1H(UIntToOH(deqBankPtrVecNext(i).value), readStage1)
+    deqEntries(i).bits := Mux1H(UIntToOH(deqBankPtrVec(i).value), readStage1)
   }
   // Pointer maintenance
   deqBankPtrVecNext := VecInit(deqBankPtrVec.map(_ + numDeq))
@@ -297,10 +313,7 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
         idx.asUInt - deqBankPtr.value,
         ((idx + IBufNBank).asUInt - deqBankPtr.value)(log2Ceil(IBufNBank) - 1, 0)
       )(log2Ceil(DecodeWidth) - 1, 0)
-      val bankAdvance = Mux(validIdx >= DecodeWidth.U,
-        false.B,
-        io.out(validIdx).ready // `ready` depends on `valid`, so we need only `ready`, not fire
-      ) && !currentOutUseBypass
+      val bankAdvance = numOut > validIdx
       ptrNext := Mux(bankAdvance , ptr + 1.U, ptr)
     }
   }
