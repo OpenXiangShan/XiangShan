@@ -26,7 +26,7 @@ import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors, M
 import freechips.rocketchip.tilelink._
 import coupledL2.{L2ParamKey, EnableCHI}
 import coupledL2.tl2tl.TL2TLCoupledL2
-import coupledL2.tl2chi.{TL2CHICoupledL2, PortIO}
+import coupledL2.tl2chi.{TL2CHICoupledL2, PortIO, CHIIssue}
 import huancun.BankBitsKey
 import system.HasSoCParameter
 import top.BusPerfMonitor
@@ -102,6 +102,7 @@ class L2Top()(implicit p: Parameters) extends LazyModule
         FPGAPlatform = debugOpts.FPGAPlatform
       )
       case EnableCHI => p(EnableCHI)
+      case CHIIssue => p(CHIIssue)
       case BankBitsKey => log2Ceil(coreParams.L2NBanks)
       case MaxHartIdBits => p(MaxHartIdBits)
       case LogUtilsOptionsKey => p(LogUtilsOptionsKey)

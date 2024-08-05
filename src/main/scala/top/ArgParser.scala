@@ -70,6 +70,10 @@ object ArgParser {
           nextOption(config, tail)
         case "--config" :: confString :: tail =>
           nextOption(getConfigByName(confString), tail)
+        case "--issue" :: issueString :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case coupledL2.tl2chi.CHIIssue => issueString
+          }), tail)
         case "--num-cores" :: value :: tail =>
           nextOption(config.alter((site, here, up) => {
             case XSTileKey => (0 until value.toInt) map { i =>
