@@ -497,7 +497,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // Block any redirect or commit at the next cycle.
   val lastCycleFlush = RegNext(io.flushOut.valid)
 
-  io.flushOut.valid := (state === s_idle) && deqPtrEntryValid && (intrEnable || deqHasException || (isFlushPipe && !io.redirect.valid)) && !lastCycleFlush
+  io.flushOut.valid := (state === s_idle) && deqPtrEntryValid && (intrEnable || deqHasException || isFlushPipe) && !lastCycleFlush
   io.flushOut.bits := DontCare
   io.flushOut.bits.isRVC := deqDispatchData.isRVC
   io.flushOut.bits.robIdx := Mux(needModifyFtqIdxOffset, firstVInstrRobIdx, deqPtr)
