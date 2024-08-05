@@ -1629,6 +1629,12 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     atomicsException := true.B
   }
 
+  val misalignBufExceptionOverwrite = loadMisalignBuffer.io.overwriteExpBuf.valid || storeMisalignBuffer.io.overwriteExpBuf.valid
+  val misalignBufExceptionVaddr = Mux(loadMisalignBuffer.io.overwriteExpBuf.valid,
+    loadMisalignBuffer.io.overwriteExpBuf.vaddr,
+    storeMisalignBuffer.io.overwriteExpBuf.vaddr
+  )
+
   val vSegmentException = RegInit(false.B)
   when (DelayN(redirect.valid, 10) && vSegmentException) {
     vSegmentException := false.B
@@ -1643,9 +1649,13 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   io.mem_to_ooo.lsqio.vaddr := RegNext(Mux(
     atomicsException,
     atomicsExceptionAddress,
-    Mux(vSegmentException,
-      vSegmentExceptionAddress,
-      lsq.io.exceptionAddr.vaddr)
+    Mux(misalignBufExceptionOverwrite,
+      misalignBufExceptionVaddr,
+      Mux(vSegmentException,
+        vSegmentExceptionAddress,
+        lsq.io.exceptionAddr.vaddr
+      )
+    )
   ))
   // vsegment instruction is executed atomic, which mean atomicsException and vSegmentException should not raise at the same time.
   XSError(atomicsException && vSegmentException, "atomicsException and vSegmentException raise at the same time!")

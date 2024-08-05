@@ -85,13 +85,17 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   }
 
   val io = IO(new Bundle() {
-    val redirect       = Flipped(Valid(new Redirect))
-    val req            = Vec(enqPortNum, Flipped(Valid(new LsPipelineBundle)))
-    val rob            = Flipped(new RobLsqIO)
-    val splitStoreReq  = Decoupled(new LsPipelineBundle)
-    val splitStoreResp = Flipped(Valid(new SqWriteBundle))
-    val writeBack      = Decoupled(new MemExuOutput)
-    val sqControl      = new StoreMaBufToSqControlIO
+    val redirect        = Flipped(Valid(new Redirect))
+    val req             = Vec(enqPortNum, Flipped(Valid(new LsPipelineBundle)))
+    val rob             = Flipped(new RobLsqIO)
+    val splitStoreReq   = Decoupled(new LsPipelineBundle)
+    val splitStoreResp  = Flipped(Valid(new SqWriteBundle))
+    val writeBack       = Decoupled(new MemExuOutput)
+    val overwriteExpBuf = Output(new XSBundle {
+      val valid = Bool()
+      val vaddr = UInt(VAddrBits.W)
+    })
+    val sqControl       = new StoreMaBufToSqControlIO
   })
 
   io.rob.mmio := 0.U.asTypeOf(Vec(LoadPipelineWidth, Bool()))
@@ -580,6 +584,14 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     globalException := false.B
     globalMMIO := false.B
   }
+
+  // NOTE: spectial case (unaligned store cross page, page fault happens in next page)
+  // if exception happens in the higher page address part, overwrite the storeExceptionBuffer vaddr
+  val overwriteExpBuf = GatedValidRegNext(req_valid && cross16BytesBoundary && globalException && (curPtr === 1.U))
+  val overwriteAddr = GatedRegNext(splitStoreResp(curPtr).vaddr)
+
+  io.overwriteExpBuf.valid := overwriteExpBuf
+  io.overwriteExpBuf.vaddr := overwriteAddr
 
   XSPerfAccumulate("alloc",                  RegNext(!req_valid) && req_valid)
   XSPerfAccumulate("flush",                  flush)

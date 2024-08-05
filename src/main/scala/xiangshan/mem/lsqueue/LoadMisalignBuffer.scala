@@ -110,13 +110,17 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   }
 
   val io = IO(new Bundle() {
-    val redirect       = Flipped(Valid(new Redirect))
-    val req            = Vec(enqPortNum, Flipped(Valid(new LqWriteBundle)))
-    val rob            = Flipped(new RobLsqIO)
-    val splitLoadReq   = Decoupled(new LsPipelineBundle)
-    val splitLoadResp  = Flipped(Valid(new LqWriteBundle))
-    val writeBack      = Decoupled(new MemExuOutput)
-    val flushLdExpBuff = Output(Bool())
+    val redirect        = Flipped(Valid(new Redirect))
+    val req             = Vec(enqPortNum, Flipped(Valid(new LqWriteBundle)))
+    val rob             = Flipped(new RobLsqIO)
+    val splitLoadReq    = Decoupled(new LsPipelineBundle)
+    val splitLoadResp   = Flipped(Valid(new LqWriteBundle))
+    val writeBack       = Decoupled(new MemExuOutput)
+    val overwriteExpBuf = Output(new XSBundle {
+      val valid = Bool()
+      val vaddr = UInt(VAddrBits.W)
+    })
+    val flushLdExpBuff  = Output(Bool())
   })
 
   io.rob.mmio := 0.U.asTypeOf(Vec(LoadPipelineWidth, Bool()))
@@ -554,6 +558,14 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
     globalException := false.B
     globalMMIO := false.B
   }
+
+  // NOTE: spectial case (unaligned load cross page, page fault happens in next page)
+  // if exception happens in the higher page address part, overwrite the loadExceptionBuffer vaddr
+  val overwriteExpBuf = GatedValidRegNext(req_valid && cross16BytesBoundary && globalException && (curPtr === 1.U))
+  val overwriteAddr = GatedRegNext(splitLoadResp(curPtr).vaddr)
+
+  io.overwriteExpBuf.valid := overwriteExpBuf
+  io.overwriteExpBuf.vaddr := overwriteAddr
 
   // when no exception or mmio, flush loadExceptionBuffer at s_wb
   val flushLdExpBuff = GatedValidRegNext(req_valid && (bufferState === s_wb) && !(globalMMIO || globalException))
