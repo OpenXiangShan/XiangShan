@@ -160,15 +160,9 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     io.chi.foreach(_ <> l2top.module.chi.get)
     l2top.module.nodeID.foreach(_ := io.nodeID.get)
 
-    // Modules are reset one by one
-    // io_reset ----
-    //             |
-    //             v
-    // reset ----> OR_SYNC --> {Misc, L2 Cache, Cores}
-    // val resetChain = Seq(
-    //   Seq(l2top.module, core.module)
-    // )
-    // ResetGen(resetChain, reset, !debugOpts.FPGAPlatform)
+    if (debugOpts.ResetGen && enableL2) {
+      core.module.reset := l2top.module.reset_core
+    }
   }
 
   lazy val module = new XSTileImp(this)

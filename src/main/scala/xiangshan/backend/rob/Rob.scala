@@ -600,19 +600,20 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val misPredBlock = misPredBlockCounter(0)
   val deqFlushBlockCounter = Reg(UInt(3.W))
   val deqFlushBlock = deqFlushBlockCounter(0)
-  val deqHasFlushed = Reg(Bool())
+  val deqHasFlushed = RegInit(false.B)
+  val deqHasCommitted = io.commits.isCommit && io.commits.commitValid(0)
   val deqHitRedirectReg = RegNext(io.redirect.valid && io.redirect.bits.robIdx === deqPtr)
   when(deqNeedFlush && deqHitRedirectReg){
     deqFlushBlockCounter := "b111".U
   }.otherwise{
     deqFlushBlockCounter := deqFlushBlockCounter >> 1.U
   }
-  when(deqNeedFlush && io.flushOut.valid){
-    deqHasFlushed := true.B
-  }.elsewhen(!deqNeedFlush){
+  when(deqHasCommitted){
     deqHasFlushed := false.B
+  }.elsewhen(deqNeedFlush && io.flushOut.valid){
+    deqHasFlushed := true.B
   }
-  val blockCommit = misPredBlock || lastCycleFlush || hasWFI || io.redirect.valid || (deqNeedFlush && !deqHasFlushed && !deqHasFlushPipe) || deqFlushBlock
+  val blockCommit = misPredBlock || lastCycleFlush || hasWFI || io.redirect.valid || (deqNeedFlush && !deqHasFlushed) || deqFlushBlock
 
   io.commits.isWalk := state === s_walk
   io.commits.isCommit := state === s_idle && !blockCommit
@@ -997,7 +998,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       // However, we cannot determine whether a load/store instruction is MMIO.
       // Thus, we don't allow load/store instructions to trigger an interrupt.
       // TODO: support non-MMIO load-store instructions to trigger interrupts
-      val allow_interrupts = !CommitType.isLoadStore(io.enq.req(i).bits.commitType)
+      val allow_interrupts = !CommitType.isLoadStore(io.enq.req(i).bits.commitType) && !FuType.isFence(io.enq.req(i).bits.fuType)
       robEntries(RegEnable(allocatePtrVec(i).value, canEnqueue(i))).interrupt_safe := RegEnable(allow_interrupts, canEnqueue(i))
     }
   }

@@ -304,10 +304,12 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   val outCtrl_s0 = ctrlVec.head
   val outVecCtrl_s0 = ctrlVec.head.vpu.get
   val outEew_s0 = Mux(resWiden, outVecCtrl_s0.vsew + 1.U, outVecCtrl_s0.vsew)
-  val outEew = Mux(RegEnable(resWiden, io.in.fire), outVecCtrl.vsew + 1.U, outVecCtrl.vsew)
+  val outWiden = RegEnable(resWiden, io.in.fire)
+  val outEew = Mux(outWiden, outVecCtrl.vsew + 1.U, outVecCtrl.vsew)
   val vlMax_s0 = ((VLEN/8).U >> outEew_s0).asUInt
   val vlMax = ((VLEN/8).U >> outEew).asUInt
-  val lmulAbs = Mux(outVecCtrl.vlmul(2), (~outVecCtrl.vlmul(1,0)).asUInt + 1.U, outVecCtrl.vlmul(1,0))
+  val outVlmulFix = Mux(outWiden, outVecCtrl.vlmul - 1.U, outVecCtrl.vlmul)
+  val lmulAbs = Mux(outVlmulFix(2), (~outVlmulFix(1,0)).asUInt + 1.U, outVlmulFix(1,0))
   //  vfmv_f_s need vl=1, reduction last uop need vl=1, other uop need vl=vlmax
   numOfUopVFRED := {
     // addTime include add frs1
