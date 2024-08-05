@@ -157,6 +157,7 @@ class L2Top()(implicit p: Parameters) extends LazyModule
     val l2_tlb_req = IO(new TlbRequestIO(nRespDups = 2))
     val l2_pmp_resp = IO(Flipped(new PMPRespBundle))
     val l2_hint = IO(ValidIO(new L2ToL1Hint()))
+    val reset_core = IO(Output(Reset()))
 
     val resetDelayN = Module(new DelayN(UInt(PAddrBits.W), 5))
 
@@ -213,6 +214,13 @@ class L2Top()(implicit p: Parameters) extends LazyModule
       l2_tlb_req.req.bits := DontCare
       l2_tlb_req.req_kill := DontCare
       l2_tlb_req.resp.ready := true.B
+    }
+
+    if (debugOpts.ResetGen) {
+      val resetTree = ResetGenNode(Seq(CellNode(reset_core)))
+      ResetGen(resetTree, reset, sim = false)
+    } else {
+      reset_core := DontCare
     }
   }
 

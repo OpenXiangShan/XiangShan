@@ -237,24 +237,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   io.beu_errors.dcache <> memBlock.io.error.bits.toL1BusErrorUnitInfo(memBlock.io.error.valid)
   io.beu_errors.l2 <> DontCare
   io.l2_pf_enable := memBlock.io.outer_l2_pf_enable
-  // Modules are reset one by one
-  val resetTree = ResetGenNode(
-    Seq(
-      ModuleNode(memBlock),
-      ResetGenNode(Seq(
-        ModuleNode(backend),
-        ResetGenNode(Seq(
-          ResetGenNode(Seq(
-            ModuleNode(frontend)
-          ))
-        ))
-      ))
-    )
-  )
 
-  // ResetGen(resetTree, reset, !debugOpts.FPGAPlatform)
   if (debugOpts.ResetGen) {
-    frontend.reset := memBlock.reset_io_frontend
-    backend.reset := memBlock.reset_io_backend
+    backend.reset := memBlock.reset_backend
+    frontend.reset := backend.io.frontendReset
   }
 }

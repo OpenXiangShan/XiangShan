@@ -22,7 +22,7 @@ import chisel3.util._
 import device.MsiInfoBundle
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import system.HasSoCParameter
-import utility.{Constantin, ZeroExt}
+import utility._
 import utils.{HPerfMonitor, HasPerfEvents, PerfEvent}
 import xiangshan._
 import xiangshan.backend.Bundles.{DynInst, IssueQueueIQWakeUpBundle, LoadShouldCancel, MemExuInput, MemExuOutput, VPUCtrlSignals}
@@ -679,6 +679,38 @@ class BackendImp(override val wrapper: Backend)(implicit p: Parameters) extends 
     dontTouch(wbDataPath.io.fromMemExu)
   }
 
+  // reset tree
+  if (p(DebugOptionsKey).ResetGen) {
+    val rightResetTree = ResetGenNode(Seq(
+      ModuleNode(dataPath),
+      ModuleNode(intExuBlock),
+      ModuleNode(fpExuBlock),
+      ModuleNode(vfExuBlock),
+      ModuleNode(bypassNetwork),
+      ModuleNode(wbDataPath)
+    ))
+    val leftResetTree = ResetGenNode(Seq(
+      ModuleNode(pcTargetMem),
+      ModuleNode(intScheduler),
+      ModuleNode(fpScheduler),
+      ModuleNode(vfScheduler),
+      ModuleNode(memScheduler),
+      ModuleNode(og2ForVector),
+      ModuleNode(wbFuBusyTable),
+      ResetGenNode(Seq(
+        ModuleNode(ctrlBlock),
+        ResetGenNode(Seq(
+          CellNode(io.frontendReset)
+        ))
+      ))
+    ))
+    ResetGen(leftResetTree, reset, sim = false)
+    ResetGen(rightResetTree, reset, sim = false)
+  } else {
+    io.frontendReset := DontCare
+  }
+
+  // perf events
   val pfevent = Module(new PFEvent)
   pfevent.io.distribute_csr := RegNext(csrio.customCtrl.distribute_csr)
   val csrevents = pfevent.io.hpmevent.slice(8,16)
@@ -811,6 +843,7 @@ class BackendIO(implicit p: Parameters, params: BackendParams) extends XSBundle 
   val frontendSfence = Output(new SfenceBundle)
   val frontendCsrCtrl = Output(new CustomCSRCtrlIO)
   val frontendTlbCsr = Output(new TlbCsrBundle)
+  val frontendReset = Output(Reset())
 
   val mem = new BackendMemIO
 
