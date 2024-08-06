@@ -29,7 +29,7 @@ class PipeGroupConnect[T <: Data](n: Int, gen: => T) extends Module {
 
   // Todo: canAccVec for each elem
   // Todo: no outReadys version for better timing and lower performance
-  private[this] val canAcc = io.outAllFire
+  private[this] val canAcc = io.outAllFire || !valids.orR
 
   (validVec zip inValids.asBools zip outReadys.asBools).foreach { case ((valid, inValid), outReady) =>
     valid := MuxCase(
