@@ -102,7 +102,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val hptw_req_arb = Module(new Arbiter(new Bundle {
     val id = UInt(log2Up(l2tlbParams.llptwsize).W)
     val source = UInt(bSourceWidth.W)
-    val gvpn = UInt(vpnLen.W)
+    val gvpn = UInt(gvpnLen.W)
   }, 2))
   val hptw_resp_arb = Module(new Arbiter(new Bundle {
     val resp = new HptwResp()
@@ -447,7 +447,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       difftest.pf := io.tlb(i).resp.bits.s1.pf
       difftest.satp := Cat(io.csr.tlb.satp.mode, io.csr.tlb.satp.asid, io.csr.tlb.satp.ppn)
       difftest.vsatp := Cat(io.csr.tlb.vsatp.mode, io.csr.tlb.vsatp.asid, io.csr.tlb.vsatp.ppn)
-      difftest.hgatp := Cat(io.csr.tlb.hgatp.mode, io.csr.tlb.hgatp.asid, io.csr.tlb.hgatp.ppn)
+      difftest.hgatp := Cat(io.csr.tlb.hgatp.mode, io.csr.tlb.hgatp.vmid, io.csr.tlb.hgatp.ppn)
       difftest.gvpn := io.tlb(i).resp.bits.s2.entry.tag
       difftest.g_perm := io.tlb(i).resp.bits.s2.entry.perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt
       difftest.g_level := io.tlb(i).resp.bits.s2.entry.level.getOrElse(0.U.asUInt)
@@ -549,8 +549,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     for (i <- 0 until tlbcontiguous) {
       val pte_in = pte(64 * i + 63, 64 * i).asTypeOf(new PteBundle())
       val ptw_resp = Wire(new PtwMergeEntry(tagLen = sectorvpnLen, hasPerm = true, hasLevel = true))
-      ptw_resp.ppn := pte_in.ppn(ppnLen - 1, sectortlbwidth)
-      ptw_resp.ppn_low := pte_in.ppn(sectortlbwidth - 1, 0)
+      ptw_resp.ppn := pte_in.getPPN()(ptePPNLen - 1, sectortlbwidth)
+      ptw_resp.ppn_low := pte_in.getPPN()(sectortlbwidth - 1, 0)
       ptw_resp.level.map(_ := 0.U)
       ptw_resp.perm.map(_ := pte_in.getPerm())
       ptw_resp.tag := vpn(vpnLen - 1, sectortlbwidth)
@@ -559,7 +559,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       ptw_resp.v := !ptw_resp.pf
       ptw_resp.prefetch := DontCare
       ptw_resp.asid := Mux(hasS2xlate, vsatp.asid, satp.asid)
-      ptw_resp.vmid.map(_ := hgatp.asid)
+      ptw_resp.vmid.map(_ := hgatp.vmid) 
       ptw_merge_resp.entry(i) := ptw_resp
     }
     ptw_merge_resp.pteidx := UIntToOH(vpn(sectortlbwidth - 1, 0)).asBools

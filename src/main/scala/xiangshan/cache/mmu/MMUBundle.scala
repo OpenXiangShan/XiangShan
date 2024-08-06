@@ -287,7 +287,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     this.perm.apply(item.s1)
 
     val s1tag = item.s1.entry.tag
-    val s2tag = item.s2.entry.tag(vpnLen - 1, sectortlbwidth)
+    val s2tag = item.s2.entry.tag(gvpnLen - 1, sectortlbwidth)
     // if stage1 page is larger than stage2 page, need to merge s1tag and s2tag.
     val s1tagFix = MuxCase(s1tag, Seq(
       (item.s1.entry.level.getOrElse(0.U) === 3.U && item.s2.entry.level.getOrElse(0.U) === 2.U) -> Cat(item.s1.entry.tag(sectorvpnLen - 1, vpnnLen * 3 - sectortlbwidth), item.s2.entry.tag(vpnnLen * 3 - 1, vpnnLen * 2), 0.U((vpnnLen * 2 - sectortlbwidth).W)),
@@ -681,7 +681,7 @@ class PteBundle(implicit p: Parameters) extends PtwBundle{
     af
   }
 
-  def isStage1Af() = {
+  def isStage1Gpf() = {
     !((Cat(ppn_high, ppn) >> gvpnLen) === 0.U)
   }
 
@@ -809,7 +809,7 @@ class PtwEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)
 }
 
 class PtwSectorEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)(implicit p: Parameters) extends PtwEntry(tagLen, hasPerm, hasLevel) {
-  override val ppn = UInt(sectorgvpnLen.W)
+  override val ppn = UInt(sectorptePPNLen.W)
 }
 
 class PtwMergeEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)(implicit p: Parameters) extends PtwSectorEntry(tagLen, hasPerm, hasLevel) {
@@ -818,8 +818,6 @@ class PtwMergeEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = f
   val pf = Bool()
 }
 
-class HptwMergeEntry(tagLen: Int, hasPerm: Boolean = false, hasLevel: Boolean = false)(implicit p: Parameters) extends PtwMergeEntry(tagLen, hasPerm, hasLevel)
-
 class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean, hasReservedBitforMbist: Boolean)(implicit p: Parameters) extends PtwBundle {
   require(log2Up(num)==log2Down(num))
   // NOTE: hasPerm means that is leaf or not.
@@ -827,7 +825,7 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean, hasReserve
   val tag  = UInt(tagLen.W)
   val asid = UInt(asidLen.W)
   val vmid = Some(UInt(vmidLen.W))
-  val ppns = Vec(num, UInt(gvpnLen.W))
+  val ppns = Vec(num, UInt(ptePPNLen.W))
   val vs   = Vec(num, Bool())
   val af   = Vec(num, Bool())
   val perms = if (hasPerm) Some(Vec(num, new PtePermBundle)) else None
@@ -981,7 +979,7 @@ class PtwResp(implicit p: Parameters) extends PtwBundle {
 }
 
 class HptwResp(implicit p: Parameters) extends PtwBundle {
-  val entry = new PtwEntry(tagLen = vpnLen, hasPerm = true, hasLevel = true)
+  val entry = new PtwEntry(tagLen = gvpnLen, hasPerm = true, hasLevel = true)
   val gpf = Bool()
   val gaf = Bool()
 
@@ -1014,7 +1012,7 @@ class HptwResp(implicit p: Parameters) extends PtwBundle {
     for (i <- 0 until 3) {
       tag_match(i) := entry.tag(vpnnLen * (i + 1)  - 1, vpnnLen * i) === gvpn(vpnnLen * (i + 1)  - 1, vpnnLen * i)
     }
-    tag_match(3) := entry.tag(vpnLen - 1, vpnnLen * 3) === gvpn(vpnLen - 1, vpnnLen * 3)
+    tag_match(3) := entry.tag(gvpnLen - 1, vpnnLen * 3) === gvpn(gvpnLen - 1, vpnnLen * 3)
 
     val level_match = MuxLookup(entry.level.getOrElse(0.U), false.B)(Seq(
       3.U -> tag_match(3),
@@ -1095,7 +1093,7 @@ class PtwMergeResp(implicit p: Parameters) extends PtwBundle {
     assert(tlbcontiguous == 8, "Only support tlbcontiguous = 8!")
     val resp_pte = pte
     val ptw_resp = Wire(new PtwMergeEntry(tagLen = sectorvpnLen, hasPerm = true, hasLevel = true))
-    ptw_resp.ppn := resp_pte.getPPN()(gvpnLen - 1, sectortlbwidth)
+    ptw_resp.ppn := resp_pte.getPPN()(ptePPNLen - 1, sectortlbwidth)
     ptw_resp.ppn_low := resp_pte.getPPN()(sectortlbwidth - 1, 0)
     ptw_resp.level.map(_ := level)
     ptw_resp.perm.map(_ := resp_pte.getPerm())

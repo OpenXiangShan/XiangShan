@@ -476,15 +476,35 @@ class TlbSatpBundle(implicit p: Parameters) extends SatpStruct {
     val sa = satp_value.asTypeOf(new SatpStruct)
     mode := sa.mode
     asid := sa.asid
-    ppn := Cat(0.U((44-PAddrBits+12).W), sa.ppn(PAddrBits-12-1, 0)).asUInt
+    ppn := sa.ppn
     changed := DataChanged(sa.asid) // when ppn is changed, software need do the flush
+  }
+}
+
+class HgatpStruct(implicit p: Parameters) extends XSBundle {
+  val mode = UInt(4.W)
+  val vmid = UInt(16.W)
+  val ppn  = UInt(44.W)
+}
+
+class TlbHgatpBundle(implicit p: Parameters) extends HgatpStruct {
+  val changed = Bool()
+
+  // Todo: remove it
+  def apply(hgatp_value: UInt): Unit = {
+    require(hgatp_value.getWidth == XLEN)
+    val sa = hgatp_value.asTypeOf(new HgatpStruct)
+    mode := sa.mode
+    vmid := sa.vmid
+    ppn := sa.ppn
+    changed := DataChanged(sa.vmid) // when ppn is changed, software need do the flush
   }
 }
 
 class TlbCsrBundle(implicit p: Parameters) extends XSBundle {
   val satp = new TlbSatpBundle()
   val vsatp = new TlbSatpBundle()
-  val hgatp = new TlbSatpBundle()
+  val hgatp = new TlbHgatpBundle()
   val priv = new Bundle {
     val mxr = Bool()
     val sum = Bool()
