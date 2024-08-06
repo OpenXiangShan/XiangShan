@@ -308,27 +308,51 @@ object InterruptNO {
   final val HPRASEI = 43
 
   val interruptDefaultPrio = Seq(
-    HPRASEI,
-
     MEI, MSI, MTI,
     SEI, SSI, STI,
     SGEI,
     VSEI, VSSI, VSTI,
     COI,
-
-    LPRASEI
   )
 
-  def getPrioIdx(f: this.type => Int): Int = {
-    val idx = this.interruptDefaultPrio.indexOf(f(this))
+  val localHighGroup = Seq(
+    47, 23, 46,
+    45, 22, 44,
+    HPRASEI, 21, 42,
+    41, 20, 40,
+  )
+
+  val localLowGroup = Seq(
+    39, 19, 38,
+    37, 18, 36,
+    LPRASEI, 17, 34,
+    33, 16, 32,
+  )
+
+  val customHighestGroup = Seq(
+    63, 31, 62,
+    61, 30, 60,
+  )
+
+  val customMiddleHighGroup = Seq(
+    59, 29, 58,
+    57, 28, 56,
+  )
+
+  val customMiddleLowGroup = Seq(
+    55, 27, 54,
+    53, 26, 52,
+  )
+
+  val customLowestGroup = Seq(
+    51, 25, 50,
+    49, 24, 48,
+  )
+
+  def getPrioIdxInGroup(group: this.type => Seq[Int])(f: this.type => Int): Int = {
+    val idx = group(this).indexOf(f(this))
     assert(idx != -1)
     idx
-  }
-
-  def getIRQHigherThan(irq: Int): Seq[Int] = {
-    val idx = this.interruptDefaultPrio.indexOf(irq, 0)
-    require(idx != -1, s"The irq($irq) does not exists in IntPriority Seq")
-    this.interruptDefaultPrio.slice(0, idx)
   }
 
   def getVS = Seq(VSSI, VSTI, VSEI)

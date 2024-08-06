@@ -27,18 +27,33 @@ class TrapHandleModule extends Module {
   private val hasEXVec = Mux(hasEX, exceptionVec, 0.U)
   private val hasIRVec = Mux(hasIR, intrVec, 0.U)
 
-  private val highestPrioIRVec = Wire(Vec(64, Bool()))
-  highestPrioIRVec.zipWithIndex.foreach { case (irq, i) =>
-    if (InterruptNO.interruptDefaultPrio.contains(i)) {
-      val higherIRSeq = InterruptNO.getIRQHigherThan(i)
-      irq := (
-        higherIRSeq.nonEmpty.B && Cat(higherIRSeq.map(num => !hasIRVec(num))).andR ||
-        higherIRSeq.isEmpty.B
-      ) && hasIRVec(i)
-      dontTouch(irq)
-    } else
-      irq := false.B
+  private val interruptGroups: Seq[(Seq[Int], String)] = Seq(
+    InterruptNO.customHighestGroup    -> "customHighest",
+    InterruptNO.localHighGroup        -> "localHigh",
+    InterruptNO.customMiddleHighGroup -> "customMiddleHigh",
+    InterruptNO.interruptDefaultPrio  -> "privArch",
+    InterruptNO.customMiddleLowGroup  -> "customMiddleLow",
+    InterruptNO.localLowGroup         -> "localLow",
+    InterruptNO.customLowestGroup     -> "customLowest",
+  )
+
+  private val filteredIRQs: Seq[UInt] = interruptGroups.map {
+    case (irqGroup, name) => (getMaskFromIRQGroup(irqGroup) & hasIRVec).suggestName(s"filteredIRQs_$name")
   }
+
+  private val hasIRQinGroup: Seq[Bool] = interruptGroups.map {
+    case (irqGroup, name) => dontTouch(Cat(filterIRQs(irqGroup, hasIRVec)).orR.suggestName(s"hasIRQinGroup_$name"))
+  }
+
+  private val highestIRQinGroup: Seq[Vec[Bool]] = interruptGroups zip filteredIRQs map {
+    case ((irqGroup: Seq[Int], name), filteredIRQ: UInt) =>
+      produceHighIRInGroup(irqGroup, filteredIRQ).suggestName(s"highestIRQinGroup_$name")
+  }
+
+  private val highestPrioIRVec: Vec[Bool] = MuxCase(
+    0.U.asTypeOf(Vec(64, Bool())),
+    hasIRQinGroup zip highestIRQinGroup map{ case (hasIRQ: Bool, highestIRQ: Vec[Bool]) => hasIRQ -> highestIRQ }
+  )
 
   private val highestPrioEXVec = Wire(Vec(64, Bool()))
   highestPrioEXVec.zipWithIndex.foreach { case (excp, i) =>
@@ -99,6 +114,35 @@ class TrapHandleModule extends Module {
   io.out.causeNO.Interrupt := hasIR
   io.out.causeNO.ExceptionCode := causeNO
   io.out.pcFromXtvec := pcFromXtvec
+
+  def filterIRQs(group: Seq[Int], originIRQ: UInt): Seq[Bool] = {
+    group.map(irqNum => originIRQ(irqNum))
+  }
+
+  def getIRQHigherThanInGroup(group: Seq[Int])(irq: Int): Seq[Int] = {
+    val idx = group.indexOf(irq, 0)
+    require(idx != -1, s"The irq($irq) does not exists in IntPriority Seq")
+    group.slice(0, idx)
+  }
+
+  def getMaskFromIRQGroup(group: Seq[Int]): UInt = {
+    group.map(irq => BigInt(1) << irq).reduce(_ | _).U
+  }
+
+  def produceHighIRInGroup(irqGroup: Seq[Int], filteredIRVec: UInt): Vec[Bool] = {
+    val irVec = Wire(Vec(64, Bool()))
+    irVec.zipWithIndex.foreach { case (irq, i) =>
+      if (irqGroup.contains(i)) {
+        val higherIRSeq: Seq[Int] = getIRQHigherThanInGroup(irqGroup)(i)
+        irq := (
+          higherIRSeq.nonEmpty.B && Cat(higherIRSeq.map(num => !filteredIRVec(num))).andR ||
+            higherIRSeq.isEmpty.B
+          ) && filteredIRVec(i)
+      } else
+        irq := false.B
+    }
+    irVec
+  }
 }
 
 class TrapHandleIO extends Bundle {
