@@ -794,7 +794,9 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
                                            FuType.FuTypeOrR(decodedInst.fuType, FuType.stu) && (decodedInst.fuOpType === LSUOpType.sw || decodedInst.fuOpType === LSUOpType.sd)) && decodedInst.instr(2) ||
                                            isVecOPF) ||
     io.fromCSR.illegalInst.vsIsOff    && FuType.FuTypeOrR(decodedInst.fuType, FuType.vecAll) ||
-    io.fromCSR.illegalInst.wfi        && FuType.FuTypeOrR(decodedInst.fuType, FuType.csr)   && CSROpType.isWfi(decodedInst.fuOpType)
+    io.fromCSR.illegalInst.wfi        && FuType.FuTypeOrR(decodedInst.fuType, FuType.csr)   && CSROpType.isWfi(decodedInst.fuOpType) ||
+    (decodedInst.needFrm.scalaNeedFrm || FuType.isScalaNeedFrm(decodedInst.fuType)) && (((decodedInst.fpu.rm === 5.U) || (decodedInst.fpu.rm === 6.U)) || ((decodedInst.fpu.rm === 7.U) && io.fromCSR.illegalInst.frm)) ||
+    (decodedInst.needFrm.vectorNeedFrm || FuType.isVectorNeedFrm(decodedInst.fuType)) && io.fromCSR.illegalInst.frm
 
   private val exceptionVI =
     io.fromCSR.virtualInst.sfenceVMA  && FuType.FuTypeOrR(decodedInst.fuType, FuType.fence) && decodedInst.fuOpType === FenceOpType.sfence ||
@@ -887,7 +889,20 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     VFNCVT_XU_F_W, VFNCVT_X_F_W, VFNCVT_RTZ_XU_F_W, VFNCVT_RTZ_X_F_W, VFNCVT_F_XU_W, VFNCVT_F_X_W, VFNCVT_F_F_W,
     VFNCVT_ROD_F_F_W, VFRSQRT7_V, VFREC7_V,
   )
+
+  private val scalaNeedFrmInsts = Seq(
+    FADD_S, FSUB_S, FADD_D, FSUB_D,
+    FCVT_W_S, FCVT_WU_S, FCVT_L_S, FCVT_LU_S,
+    FCVT_W_D, FCVT_WU_D, FCVT_L_D, FCVT_LU_D, FCVT_S_D, FCVT_D_S,
+  )
+
+  private val vectorNeedFrmInsts = Seq (
+    VFSLIDE1UP_VF, VFSLIDE1DOWN_VF,
+  )
+
   decodedInst.wfflags := wfflagsInsts.map(_ === inst.ALL).reduce(_ || _)
+  decodedInst.needFrm.scalaNeedFrm := scalaNeedFrmInsts.map(_ === inst.ALL).reduce(_ || _)
+  decodedInst.needFrm.vectorNeedFrm := vectorNeedFrmInsts.map(_ === inst.ALL).reduce(_ || _)
   val fpToVecDecoder = Module(new FPToVecDecoder())
   fpToVecDecoder.io.instr := inst.asUInt
   val isFpToVecInst = fpToVecDecoder.io.vpuCtrl.fpu.isFpToVecInst
