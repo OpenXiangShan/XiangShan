@@ -173,7 +173,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s0_req_ptags    = fromWayLookup.bits.ptag
   val s0_req_gpaddr   = fromWayLookup.bits.gpaddr
   val s0_exception    = fromWayLookup.bits.exception
-  val s0_meta_errors  = fromWayLookup.bits.meta_errors
+  val s0_meta_corrupt = fromWayLookup.bits.meta_corrupt
   val s0_hits         = VecInit(fromWayLookup.bits.waymask.map(_.orR))
 
   when(s0_fire){
@@ -211,14 +211,14 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     */
   val s1_valid = generatePipeControl(lastFire = s0_fire, thisFire = s1_fire, thisFlush = s1_flush, lastFlush = false.B)
 
-  val s1_req_vaddr    = RegEnable(s0_req_vaddr,   0.U.asTypeOf(s0_req_vaddr),   s0_fire)
-  val s1_req_ptags    = RegEnable(s0_req_ptags,   0.U.asTypeOf(s0_req_ptags),   s0_fire)
-  val s1_req_gpaddr   = RegEnable(s0_req_gpaddr,  0.U.asTypeOf(s0_req_gpaddr),  s0_fire)
-  val s1_doubleline   = RegEnable(s0_doubleline,  0.U.asTypeOf(s0_doubleline),  s0_fire)
-  val s1_SRAMhits     = RegEnable(s0_hits,        0.U.asTypeOf(s0_hits),        s0_fire)
-  val s1_exception    = RegEnable(s0_exception,   0.U.asTypeOf(s0_exception),   s0_fire)
-  val s1_waymasks     = RegEnable(s0_waymasks,    0.U.asTypeOf(s0_waymasks),    s0_fire)
-  val s1_meta_errors  = RegEnable(s0_meta_errors, 0.U.asTypeOf(s0_meta_errors), s0_fire)
+  val s1_req_vaddr    = RegEnable(s0_req_vaddr,    0.U.asTypeOf(s0_req_vaddr),   s0_fire)
+  val s1_req_ptags    = RegEnable(s0_req_ptags,    0.U.asTypeOf(s0_req_ptags),   s0_fire)
+  val s1_req_gpaddr   = RegEnable(s0_req_gpaddr,   0.U.asTypeOf(s0_req_gpaddr),  s0_fire)
+  val s1_doubleline   = RegEnable(s0_doubleline,   0.U.asTypeOf(s0_doubleline),  s0_fire)
+  val s1_SRAMhits     = RegEnable(s0_hits,         0.U.asTypeOf(s0_hits),        s0_fire)
+  val s1_exception    = RegEnable(s0_exception,    0.U.asTypeOf(s0_exception),   s0_fire)
+  val s1_waymasks     = RegEnable(s0_waymasks,     0.U.asTypeOf(s0_waymasks),    s0_fire)
+  val s1_meta_corrupt = RegEnable(s0_meta_corrupt, 0.U.asTypeOf(s0_meta_corrupt), s0_fire)
 
   val s1_req_vSetIdx  = s1_req_vaddr.map(get_idx)
   val s1_req_paddr    = s1_req_vaddr.zip(s1_req_ptags).map{case(vaddr, ptag) => get_paddr_from_ptag(vaddr, ptag)}
@@ -313,19 +313,19 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     */
   // check data error
   val s2_bankSel     = getBankSel(s2_req_offset, s2_valid)
-  val s2_bank_errors = (0 until ICacheDataBanks).map(i => (encode(s2_datas(i)) =/= s2_codes(i)))
-  val s2_data_errors = (0 until PortNumber).map(port => (0 until ICacheDataBanks).map(bank =>
-                         s2_bank_errors(bank) && s2_bankSel(port)(bank).asBool).reduce(_||_) && s2_SRAMhits(port))
+  val s2_bank_corrupt = (0 until ICacheDataBanks).map(i => (encode(s2_datas(i)) =/= s2_codes(i)))
+  val s2_data_corrupt = (0 until PortNumber).map(port => (0 until ICacheDataBanks).map(bank =>
+                         s2_bank_corrupt(bank) && s2_bankSel(port)(bank).asBool).reduce(_||_) && s2_SRAMhits(port))
   // meta error is checked in prefetch pipeline
-  val s2_meta_errors = RegEnable(s1_meta_errors, 0.U.asTypeOf(s1_meta_errors), s1_fire)
+  val s2_meta_corrupt = RegEnable(s1_meta_corrupt, 0.U.asTypeOf(s1_meta_corrupt), s1_fire)
   // send errors to top
   (0 until PortNumber).map{ i =>
-    io.errors(i).valid              := io.csr_parity_enable && RegNext(s1_fire) && (s2_meta_errors(i) || s2_data_errors(i))
-    io.errors(i).bits.report_to_beu := io.csr_parity_enable && RegNext(s1_fire) && (s2_meta_errors(i) || s2_data_errors(i))
+    io.errors(i).valid              := io.csr_parity_enable && RegNext(s1_fire) && (s2_meta_corrupt(i) || s2_data_corrupt(i))
+    io.errors(i).bits.report_to_beu := io.csr_parity_enable && RegNext(s1_fire) && (s2_meta_corrupt(i) || s2_data_corrupt(i))
     io.errors(i).bits.paddr         := s2_req_paddr(i)
     io.errors(i).bits.source        := DontCare
-    io.errors(i).bits.source.tag    := s2_meta_errors(i)
-    io.errors(i).bits.source.data   := s2_data_errors(i)
+    io.errors(i).bits.source.tag    := s2_meta_corrupt(i)
+    io.errors(i).bits.source.data   := s2_data_corrupt(i)
     io.errors(i).bits.source.l2     := false.B
     io.errors(i).bits.opType        := DontCare
     io.errors(i).bits.opType.fetch  := true.B

@@ -209,7 +209,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   val s1_meta_ptags   = fromMeta.tags
   val s1_meta_valids  = fromMeta.entryValid
   // If error is found in either way, the tag_eq_vec is unreliable, so we do not use waymask, but directly .orR
-  val s1_meta_errors = VecInit(fromMeta.errors.map(_.asUInt.orR))
+  val s1_meta_corrupt = VecInit(fromMeta.errors.map(_.asUInt.orR))
 
   def get_waymask(paddrs: Vec[UInt]): Vec[UInt] = {
     val ptags         = paddrs.map(get_phy_tag)
@@ -267,8 +267,8 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
   (0 until PortNumber).foreach { i =>
     val excpValid = (if (i == 0) true.B else s1_doubleline)  // exception in first line is always valid, in second line is valid iff is doubleline request
     // Send s1_itlb_exception to WayLookup (instead of s1_exception_out) for better timing. Will check pmp again in mainPipe
-    toWayLookup.bits.exception(i)   := Mux(excpValid, s1_itlb_exception(i), ExceptionType.none)
-    toWayLookup.bits.meta_errors(i) := excpValid && s1_meta_errors(i)
+    toWayLookup.bits.exception(i)    := Mux(excpValid, s1_itlb_exception(i), ExceptionType.none)
+    toWayLookup.bits.meta_corrupt(i) := excpValid && s1_meta_corrupt(i)
   }
 
   val s1_waymasks_vec = s1_waymasks.map(_.asTypeOf(Vec(nWays, Bool())))

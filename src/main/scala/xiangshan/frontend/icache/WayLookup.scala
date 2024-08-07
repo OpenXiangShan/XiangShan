@@ -33,7 +33,7 @@ class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
   val waymask      : Vec[UInt] = Vec(PortNumber, UInt(nWays.W))
   val ptag         : Vec[UInt] = Vec(PortNumber, UInt(tagBits.W))
   val exception    : Vec[UInt] = Vec(PortNumber, UInt(ExceptionType.width.W))
-  val meta_errors  : Vec[Bool] = Vec(PortNumber, Bool())
+  val meta_corrupt : Vec[Bool] = Vec(PortNumber, Bool())
 }
 
 class WayLookupGPFEntry(implicit p: Parameters) extends ICacheBundle {
@@ -45,12 +45,12 @@ class WayLookupInfo(implicit p: Parameters) extends ICacheBundle {
   val gpf   = new WayLookupGPFEntry
 
   // for compatibility
-  def vSetIdx     : Vec[UInt] = entry.vSetIdx
-  def waymask     : Vec[UInt] = entry.waymask
-  def ptag        : Vec[UInt] = entry.ptag
-  def exception   : Vec[UInt] = entry.exception
-  def meta_errors : Vec[Bool] = entry.meta_errors
-  def gpaddr      : UInt      = gpf.gpaddr
+  def vSetIdx      : Vec[UInt] = entry.vSetIdx
+  def waymask      : Vec[UInt] = entry.waymask
+  def ptag         : Vec[UInt] = entry.ptag
+  def exception    : Vec[UInt] = entry.exception
+  def meta_corrupt : Vec[Bool] = entry.meta_corrupt
+  def gpaddr       : UInt      = gpf.gpaddr
 }
 
 
@@ -137,7 +137,7 @@ class WayLookup(implicit p: Parameters) extends ICacheModule {
           // miss -> hit
           entry.waymask(i) := io.update.bits.waymask
           // also clear previously found errors since data/metaArray is refilled
-          entry.meta_errors(i) := false.B
+          entry.meta_corrupt(i) := false.B
         }.elsewhen(way_same) {
           // data is overwritten: hit -> miss
           entry.waymask(i) := 0.U
