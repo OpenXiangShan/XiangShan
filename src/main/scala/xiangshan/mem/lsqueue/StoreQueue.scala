@@ -901,6 +901,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val exceptionValid = if(i == 0) hasException(rdataPtrExt(0).value) else {
       hasException(rdataPtrExt(i).value) || (hasException(rdataPtrExt(i-1).value) && uop(rdataPtrExt(i).value).robIdx === uop(rdataPtrExt(i-1).value).robIdx)
     }
+    val vecNotAllMask = dataModule.io.rdata(i).mask.orR
     // Vector instructions that prevent triggered exceptions from being written to the 'databuffer'.
     val vecHasExceptionFlagValid = vecExceptionFlag.valid && isVec(ptr) && vecExceptionFlag.bits.robIdx === uop(ptr).robIdx
     dataBuffer.io.enq(i).valid := allocated(ptr) && committed(ptr) && ((!isVec(ptr) && (allvalid(ptr) || hasException(ptr))) || vecMbCommit(ptr)) && !mmioStall
@@ -914,7 +915,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     dataBuffer.io.enq(i).bits.sqPtr    := rdataPtrExt(i)
     dataBuffer.io.enq(i).bits.prefetch := prefetch(ptr)
     // when scalar has exception, will also not write into sbuffer
-    dataBuffer.io.enq(i).bits.vecValid := (!isVec(ptr) || vecDataValid(ptr)) && !exceptionValid && !vecHasExceptionFlagValid
+    dataBuffer.io.enq(i).bits.vecValid := (!isVec(ptr) || (vecDataValid(ptr) && vecNotAllMask)) && !exceptionValid && !vecHasExceptionFlagValid
 //    dataBuffer.io.enq(i).bits.vecValid := (!isVec(ptr) || vecDataValid(ptr)) && !hasException(ptr)
   }
 
