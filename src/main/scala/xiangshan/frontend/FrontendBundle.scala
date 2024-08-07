@@ -23,6 +23,9 @@ import xiangshan._
 import xiangshan.frontend.icache._
 import utils._
 import utility._
+import xiangshan.cache.mmu.TlbResp
+import xiangshan.backend.fu.PMPRespBundle
+
 import scala.math._
 import java.util.ResourceBundle.Control
 
@@ -110,11 +113,45 @@ class mmioCommitRead(implicit p: Parameters) extends XSBundle {
 }
 
 object ExceptionType {
-  def none = "b00".U
-  def ipf = "b01".U
-  def igpf = "b10".U
-  def acf = "b11".U
-  def width = 2
+  def none  : UInt = "b00".U
+  def pf    : UInt = "b01".U
+  def gpf   : UInt = "b10".U
+  def af    : UInt = "b11".U
+  def width : Int  = 2
+
+  def fromTlbResp(resp: TlbResp, useDup: Int = 0): UInt = {
+    require(useDup >= 0 && useDup < resp.excp.length)
+    assert(
+      PopCount(VecInit(resp.excp(useDup).af.instr, resp.excp(useDup).pf.instr, resp.excp(useDup).gpf.instr)) <= 1.U,
+      "tlb resp has more than 1 exception, af=%d, pf=%d, gpf=%d",
+      resp.excp(useDup).af.instr, resp.excp(useDup).pf.instr, resp.excp(useDup).gpf.instr
+    )
+    MuxCase(none, Seq(
+      resp.excp(useDup).pf.instr  -> pf,
+      resp.excp(useDup).gpf.instr -> gpf,
+      resp.excp(useDup).af.instr  -> af
+    ))
+  }
+
+  def fromPMPResp(resp: PMPRespBundle): UInt = {
+    MuxCase(none, Seq(
+      resp.instr -> af
+    ))
+  }
+
+  def fromECC(corrupt: Bool): UInt = {
+    Mux(corrupt, af, none)
+  }
+
+  def merge(high: UInt, low: UInt): UInt = {
+    require(high.getWidth == width)
+    require(low.getWidth == width)
+    Mux(high =/= none, high, low)
+  }
+  def merge(highVec: Vec[UInt], lowVec: Vec[UInt]): Vec[UInt] = {
+    require(highVec.length == lowVec.length)
+    VecInit((highVec zip lowVec).map{ case (high, low) => merge(high, low) })
+  }
 }
 
 class FetchToIBuffer(implicit p: Parameters) extends XSBundle {

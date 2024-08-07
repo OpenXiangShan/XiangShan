@@ -815,9 +815,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
   io.toIbuffer.bits.ftqOffset.zipWithIndex.map{case(a, i) => a.bits := i.U; a.valid := checkerOutStage1.fixedTaken(i) && !f3_req_is_mmio}
   io.toIbuffer.bits.foldpc      := f3_foldpc
   io.toIbuffer.bits.exceptionType := (0 until PredictWidth).map(i => MuxCase(ExceptionType.none, Seq(
-    (f3_pf_vec(i) || f3_crossPageFault(i)) -> ExceptionType.ipf,
-    (f3_gpf_vec(i) || f3_crossGuestPageFault(i)) -> ExceptionType.igpf,
-    f3_af_vec(i) -> ExceptionType.acf
+    (f3_pf_vec(i) || f3_crossPageFault(i)) -> ExceptionType.pf,
+    (f3_gpf_vec(i) || f3_crossGuestPageFault(i)) -> ExceptionType.gpf,
+    f3_af_vec(i) -> ExceptionType.af
   )))
   io.toIbuffer.bits.crossPageIPFFix := (0 until PredictWidth).map(i => f3_crossPageFault(i) || f3_crossGuestPageFault(i))
   io.toIbuffer.bits.triggered   := f3_triggered
@@ -881,11 +881,11 @@ class NewIFU(implicit p: Parameters) extends XSModule
     io.toIbuffer.bits.pd(0).isRet   := isRet
 
     when (mmio_resend_af) {
-      io.toIbuffer.bits.exceptionType(0) := ExceptionType.acf
+      io.toIbuffer.bits.exceptionType(0) := ExceptionType.af
     } .elsewhen (mmio_resend_pf) {
-      io.toIbuffer.bits.exceptionType(0) := ExceptionType.ipf
+      io.toIbuffer.bits.exceptionType(0) := ExceptionType.pf
     } .elsewhen (mmio_resend_gpf) {
-      io.toIbuffer.bits.exceptionType(0) := ExceptionType.igpf
+      io.toIbuffer.bits.exceptionType(0) := ExceptionType.gpf
     }
     io.toIbuffer.bits.crossPageIPFFix(0) := mmio_resend_pf
 
