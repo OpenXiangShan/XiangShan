@@ -22,7 +22,13 @@ import scala.collection.immutable.SeqMap
 
 
 trait DebugLevel { self: NewCSR =>
-  val tselect = Module(new CSRModule("Tselect", new TselectBundle(TriggerNum)))
+  val tselect = Module(new CSRModule("Tselect", new TselectBundle(TriggerNum)) {
+    when (this.w.wen && this.w.wdata < TriggerNum.U) {
+      reg := this.w.wdata
+    }.otherwise {
+      reg := reg
+    }
+  })
     .setAddr(CSRs.tselect)
 
   val tdata1 = Module(new CSRModule("Tdata1") with HasTdataSink {
