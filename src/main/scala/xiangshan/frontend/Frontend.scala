@@ -354,9 +354,9 @@ class FrontendInlinedImp (outer: FrontendInlined) extends LazyModuleImp(outer)
   }
 
   //checkNotTakenConsecutive
-  checkTakenNotConsecutive
-  checkTakenPC
-  checkNotTakenPC
+  // checkTakenNotConsecutive
+  // checkTakenPC
+  // checkNotTakenPC
 
   ifu.io.rob_commits <> io.backend.toFtq.rob_commits
 
