@@ -360,6 +360,7 @@ stack.info*
 *.vpd
 *.vcd
 *.bin
+DVEfiles
 
 !ready-to-run/*
 
