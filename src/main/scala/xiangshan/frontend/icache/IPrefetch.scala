@@ -394,6 +394,7 @@ class IPrefetchPipe(implicit p: Parameters) extends  IPrefetchModule
    * also, if port0 has exception, port1 should not be prefetched
    * miss = this port not hit && need this port && no exception found before and in this port
    */
+  // FIXME: maybe we should cancel fetch when meta error is detected, since hits (waymasks) can be invalid
   val s2_miss = VecInit((0 until PortNumber).map { i =>
     !s2_hits(i) && (if (i==0) true.B else s2_doubleline) &&
       s2_exception.take(i+1).map(_ === ExceptionType.none).reduce(_&&_) &&

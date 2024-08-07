@@ -387,6 +387,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
    * also, if port0 has exception, port1 should not be prefetched
    * miss = this port not hit && need this port && no exception found before and in this port
    */
+  // FIXME: maybe we should cancel fetch when meta error is detected, since hits (waymasks) can be invalid
   val s2_miss = VecInit((0 until PortNumber).map { i =>
     !s2_hits(i) && (if (i==0) true.B else s2_doubleline) &&
       s2_exception.take(i+1).map(_ === ExceptionType.none).reduce(_&&_) &&
@@ -415,7 +416,12 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   XSPerfAccumulate("to_missUnit_stall",  toMSHR.valid && !toMSHR.ready)
 
   val s2_fetch_finish = !s2_miss.reduce(_||_)
-  val s2_exception_out = ExceptionType.merge(s2_exception, VecInit(s2_l2_corrupt.map(ExceptionType.fromECC)))
+  val s2_exception_out = ExceptionType.merge(
+    s2_exception,
+    VecInit(s2_l2_corrupt.map(ExceptionType.fromECC))
+    // FIXME: maybe we should also raise af if meta/data error is detected
+//     VecInit((s2_meta_corrupt zip s2_data_corrupt zip s2_l2_corrupt).map{ case ((m, d), l2) => ExceptionType.fromECC(m || d || l2)}
+  )
 
   /**
     ******************************************************************************
