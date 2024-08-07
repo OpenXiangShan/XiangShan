@@ -24,7 +24,7 @@ import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModul
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
 import freechips.rocketchip.tilelink._
-import coupledL2.PrefetchRecv
+import coupledL2.{PrefetchRecv, RVA23CMOReq, RVA23CMOResp}
 import utils._
 import utility._
 import xiangshan._
@@ -229,6 +229,8 @@ class MemBlock()(implicit p: Parameters) extends LazyModule
   val l3_pf_sender_opt = if (p(SoCParamsKey).L3CacheParamsOpt.nonEmpty) coreParams.prefetcher.map(_ =>
     BundleBridgeSource(() => new huancun.PrefetchRecv)
   ) else None
+  val cmo_sender  = BundleBridgeSource(() => DecoupledIO(new RVA23CMOReq))
+  val cmo_reciver = BundleBridgeSink(Some(() => DecoupledIO(new RVA23CMOResp)))
   val frontendBridge = LazyModule(new FrontendBridge)
   // interrupt sinks
   val clint_int_sink = IntSinkNode(IntSinkPortSimple(1, 2))
@@ -847,6 +849,10 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     lsq.io.tlb_hint <> dtlbRepeater.io.hint.get
 
+    // lsq to l2 CMO
+    outer.cmo_sender.out.head._1  <> lsq.io.cmoOpReq
+    outer.cmo_reciver.in.head._1  <> lsq.io.cmoOpResp
+
     // alter writeback exception info
     io.mem_to_ooo.s3_delayed_load_error(i) := loadUnits(i).io.s3_dly_ld_err
 
@@ -1449,6 +1455,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   sbuffer.io.memSetPattenDetected := dcache.io.memSetPattenDetected
   sbuffer.io.force_write <> lsq.io.force_write
   // flush sbuffer
+  val cmoFlush = lsq.io.flushSbuffer.valid
   val fenceFlush = io.ooo_to_mem.flushSb
   val atomicsFlush = atomicsUnit.io.flush_sbuffer.valid || vSegmentUnit.io.flush_sbuffer.valid
   val stIsEmpty = sbuffer.io.flush.empty && uncache.io.flush.empty
@@ -1456,8 +1463,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
   // if both of them tries to flush sbuffer at the same time
   // something must have gone wrong
-  assert(!(fenceFlush && atomicsFlush))
-  sbuffer.io.flush.valid := RegNext(fenceFlush || atomicsFlush)
+  assert(!(fenceFlush && atomicsFlush && cmoFlush))
+  sbuffer.io.flush.valid := RegNext(fenceFlush || atomicsFlush || cmoFlush)
   uncache.io.flush.valid := sbuffer.io.flush.valid
 
   // AtomicsUnit: AtomicsUnit will override other control signials,
@@ -1529,6 +1536,8 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // make sure there's no in-flight uops in load unit
     assert(!loadUnits(0).io.ldout.valid)
   }
+
+  lsq.io.flushSbuffer.empty := stIsEmpty
 
   for (i <- 0 until StaCnt) {
     when (state === s_atomics(i)) {

@@ -278,6 +278,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   storeTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.fromCsrTrigger.triggerCanRaiseBpExp
   storeTrigger.io.fromStore.vaddr                     := s1_in.vaddr
 
+  s1_out.uop.flushPipe                := false.B
   s1_out.uop.trigger.backendHit       := storeTrigger.io.toStore.triggerHitVec
   s1_out.uop.trigger.backendCanFire   := storeTrigger.io.toStore.triggerCanFireVec
   s1_out.uop.exceptionVec(breakPoint) := storeTrigger.io.toStore.breakPointExp
