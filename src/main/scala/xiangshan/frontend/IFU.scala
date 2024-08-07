@@ -26,7 +26,7 @@ import xiangshan.cache.mmu._
 import xiangshan.frontend.icache._
 import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
 import xiangshan.frontend.tracertl.ChiselRecordForField._
-import xiangshan.frontend.tracertl.{TraceReader, TraceDriver, TracePreDecodeAndChecker}
+import xiangshan.frontend.tracertl.{TraceReader, TraceDriver, TracePreDecodeAndChecker, TraceFakeICache}
 import xiangshan.frontend.tracertl.{TraceRTLChoose, TraceRTLDontCare}
 import utils._
 import utility._
@@ -232,6 +232,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val traceReader = Module(new TraceReader)
   val tracePDaC = Module(new TracePreDecodeAndChecker)
   val traceDriver = Module(new TraceDriver)
+  val traceFakeICache = Module(new TraceFakeICache)
 
   val tracePreDecoder = tracePDaC.io.predecoder
   val tracePredChecker = tracePDaC.io.checker
@@ -630,7 +631,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
       ),
       _.fromTraceDriver.specifyField(
         _.endWithCFI := traceDriver.io.out.endWithCFI,
-      )
+      ),
+      _.icacheData := traceFakeICache.io.resp,
     )
     traceDriver.io.specifyField(
       _.fire := f3_fire,
@@ -640,6 +642,10 @@ class NewIFU(implicit p: Parameters) extends XSModule
       _.ifuRange := checkerOutStage1.fixedRange.asUInt,
       _.redirect.fromBackend := fromFtq.redirect,
       _.redirect.fromIFUBPU := (wb_redirect && !f3_wb_not_flush),
+    )
+    traceFakeICache.io.specifyField(
+      _.req.valid := f2_fire,
+      _.req.bits.addr := f2_ftq_req.startAddr,
     )
   } else {
     traceReader.io <> DontCare
@@ -1063,7 +1069,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   checkFlushWb.bits.specifyField(
     _.pc                := wb_pc,
     _.pd                := wb_pd,
-    _.pd.zipWithIndex.map{case(instr,i) => instr.valid := wb_instr_valid(i)},
+    // _.pd.zipWithIndex.map{case(instr,i) => instr.valid := wb_instr_valid(i)}, // use the pd valid
     _.ftqIdx            := wb_ftq_req.ftqIdx,
     _.ftqOffset         := wb_ftq_req.ftqOffset.bits,
     _.misOffset.valid   := ParallelOR(wb_check_result_stage2.fixedMissPred) || wb_half_flush,

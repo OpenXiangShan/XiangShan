@@ -74,11 +74,13 @@ class TraceChecker(implicit p: Parameters) extends TraceModule {
 
 
   // debug
-  io.traceInsts.zip(io.preDecode.pd).foreach { case (trace, pd) =>
-    XSError(trace.valid =/= pd.valid,
-      "traceInst should be the same with preDecode.valid")
-  }
   when(io.debug_valid) {
+    io.traceInsts.zip(io.preDecode.pd).zipWithIndex.foreach { case ((trace, pd), i) =>
+      when (io.out.traceRange(i)) {
+        XSError(trace.valid =/= pd.valid,
+          "traceInst should be the same with preDecode.valid")
+      }
+    }
     XSError((checkRange.asUInt & predRange.asUInt) =/= checkRange.asUInt,
       "checkRange should be no longer than predRange")
   }

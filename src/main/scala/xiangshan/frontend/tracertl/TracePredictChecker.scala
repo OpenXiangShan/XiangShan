@@ -113,7 +113,11 @@ class TracePredictChecker(implicit p: Parameters) extends TraceModule
   io.out.stage2Out := RegEnable(stage2Out, io.fire_in)
 
   // debug
-  instValid.zip(io.traceInsts).foreach { case (valid, trace) =>
-    XSError(valid =/= trace.valid, "instValid should be the same with trace.valid")
+  when (io.fire_in) {
+    instValid.zip(io.traceInsts).zipWithIndex.foreach { case ((valid, trace), i) =>
+      when (io.traceRange(i)) {
+        XSError(valid =/= trace.valid, "instValid should be the same with trace.valid")
+      }
+    }
   }
 }
