@@ -634,6 +634,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   val h_not_hit :: h_false_hit :: h_hit :: Nil = Enum(3)
   val entry_hit_status = RegInit(VecInit(Seq.fill(FtqSize)(h_not_hit)))
+  val entry_false_hit_src = RegInit(VecInit(Seq.fill(FtqSize)(0.U(3.W))))
 
   // modify registers one cycle later to cut critical path
   val last_cycle_bpu_in = RegNext(bpu_in_fire)
@@ -940,6 +941,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   ftb_entry_mem.io.ren.get.head := ifu_wb_valid
   ftb_entry_mem.io.raddr.head := ifu_wb_idx
   val has_false_hit = WireInit(false.B)
+  val false_hit_src = WireInit(0.U(3.W))
   when (RegNext(hit_pd_valid)) {
     // check for false hit
     val pred_ftb_entry = ftb_entry_mem.io.rdata.head
@@ -967,9 +969,11 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     has_false_hit := br_false_hit || jal_false_hit || hit_pd_mispred_reg
     XSDebug(has_false_hit, "FTB false hit by br or jal or hit_pd, startAddr: %x\n", pdWb.bits.pc(0))
     // assert(!has_false_hit)
+    false_hit_src := Cat(br_false_hit, jal_false_hit, hit_pd_mispred_reg)
   }
   when (has_false_hit) {
     entry_hit_status(wb_idx_reg) := h_false_hit
+    entry_false_hit_src(wb_idx_reg) := false_hit_src.asUInt
   }
 
   // *******************************************************************************
@@ -1327,6 +1331,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val diff_commit_target             = RegEnable(update_target(commPtr.value), canCommit) // TODO: remove this
   val commit_stage                   = RegEnable(pred_stage(commPtr.value), canCommit)
   val commit_valid                   = commit_hit === h_hit || commit_cfi.valid // hit or taken
+  val commit_hit_false_src                 = entry_false_hit_src(commPtr.value)
 
   val to_bpu_hit = can_commit_hit === h_hit || can_commit_hit === h_false_hit
   switch (bpu_ftb_update_stall) {
@@ -1550,6 +1555,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   XSPerfHistogram("s3_ftb_entry_len", s3_ftb_entry_len, from_bpu.s3.valid(0), 0, PredictWidth+1, 1)
 
   XSPerfHistogram("ftq_has_entry", validEntries, true.B, 0, FtqSize+1, 1)
+
+  XSPerfAccumulate("ftb_false_hit_br", ftb_false_hit && commit_hit_false_src(2))
+  XSPerfAccumulate("ftb_false_hit_j", ftb_false_hit && commit_hit_false_src(1))
+  XSPerfAccumulate("ftb_false_hit_mispred", ftb_false_hit && commit_hit_false_src(0))
 
   val perfCountsMap = Map(
     "BpInstr" -> PopCount(mbpInstrs),
